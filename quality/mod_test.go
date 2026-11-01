@@ -16,39 +16,43 @@ const modFixtures = "testdata/mod"
 
 var allowedLicensesPattern = regexp.MustCompile(`ALLOWED_LICENSES:\s*(\S+)`)
 
-// execIn runs a program and returns its combined output and exit code; only a
+// execSplit runs a program and returns stdout, stderr and the exit code; only a
 // failure to start it fails the test.
-func execIn(ctx context.Context, t *testing.T, dir string, env []string, name string, args ...string) (string, int) {
+func execSplit(ctx context.Context, t *testing.T, dir string, env []string, name string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	//nolint:gosec // G204: programs are `go` or tool binaries resolved by `go tool -n`; arguments are literals in this file.
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Dir = dir
 	cmd.Env = append(os.Environ(), env...)
-	var out bytes.Buffer
+	var out, errs bytes.Buffer
 	cmd.Stdout = &out
-	cmd.Stderr = &out
+	cmd.Stderr = &errs
 	var exit *exec.ExitError
 	if err := cmd.Run(); err != nil {
 		if !errors.As(err, &exit) {
 			t.Fatalf("%s %v: %v", name, args, err)
 		}
-		return out.String(), exit.ExitCode()
+		return out.String(), errs.String(), exit.ExitCode()
 	}
-	return out.String(), 0
+	return out.String(), errs.String(), 0
+}
+
+// execIn is execSplit with the two streams combined.
+func execIn(ctx context.Context, t *testing.T, dir string, env []string, name string, args ...string) (string, int) {
+	t.Helper()
+	stdout, stderr, code := execSplit(ctx, t, dir, env, name, args...)
+	return stdout + stderr, code
 }
 
 // toolBinary resolves a `tool` directive to its binary. Only stdout is the path:
 // on a cold module cache the go command reports its downloads on stderr.
 func toolBinary(t *testing.T, name string) string {
 	t.Helper()
-	var stdout, stderr bytes.Buffer
-	cmd := exec.CommandContext(t.Context(), "go", "tool", "-n", name)
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("go tool -n %s: %v\n%s", name, err, stderr.String())
+	stdout, stderr, code := execSplit(t.Context(), t, ".", nil, "go", "tool", "-n", name)
+	if code != 0 {
+		t.Fatalf("go tool -n %s exited %d\n%s", name, code, stderr)
 	}
-	return strings.TrimSpace(stdout.String())
+	return strings.TrimSpace(stdout)
 }
 
 func fixture(name string) string {
