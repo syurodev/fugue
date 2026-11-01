@@ -11,8 +11,17 @@ Changing this file needs a review of what clients can rely on; hiding a code nee
 
 | Code | Meaning |
 | --- | --- |
+| `invalid_argument` | The request is malformed or a value is out of range. |
+| `not_found` | The named thing does not exist. |
+| `already_exists` | The thing to create already exists. |
+| `failed_precondition` | The system is not in a state that allows the operation. |
+| `permission_denied` | The caller is not allowed to do this. |
+| `unavailable` | A dependency is temporarily out of reach; retrying may help. |
+| `canceled` | The operation was canceled by its caller. |
+| `deadline_exceeded` | The operation took longer than its deadline. |
 
 ## Hidden on purpose
 
 | Code | Reason |
 | --- | --- |
+| `internal` | An unexpected failure; its detail stays in the host's logs and clients see only a generic message. |

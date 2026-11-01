@@ -91,6 +91,10 @@ linters:
     staticcheck:
       checks:
         - all
+    wrapcheck:
+      # errcode constructors are the repository's way of wrapping, not a boundary leak.
+      ignore-package-globs:
+        - github.com/syurodev/fugue/internal/platform/errcode
     errcheck:
       check-blank: true
       check-type-assertions: true
@@ -161,6 +165,9 @@ linters:
           list-mode: lax
           files:
             - '$all'
+          # depguard matches by path prefix, so banning `log` would also ban log/slog.
+          allow:
+            - log/slog
           deny:
             - pkg: github.com/stretchr/testify
               desc: tests use stdlib testing and go-cmp

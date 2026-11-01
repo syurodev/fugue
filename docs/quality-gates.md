@@ -148,3 +148,5 @@ Gate-defining files: `.golangci.yml`, `tools/fuguevet/**`, `internal/arch/**`, `
 | Date | Change | Reason | Approver |
 | --- | --- | --- | --- |
 | 2026-11-01 | Initial version | — | user |
+| 2026-11-01 | `depguard`: `log/slog` is allowed explicitly (the ban on `log` matched it by prefix) | Correction: the gate bans `log`, not `log/slog`; `lint:ok depguard` fixture added | user (label on the F0.8 PR) |
+| 2026-11-01 | `wrapcheck`: `internal/platform/errcode` is ignored as a package boundary | Its constructors are how the repository wraps errors; flagging them would force a wrapper around every typed error. Narrow exception, fixture for `wrapcheck` unchanged | user (label on the F0.8 PR) |
