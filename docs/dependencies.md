@@ -17,6 +17,7 @@ checks it against `go.mod`.
 | `google.golang.org/protobuf` | BSD-3-Clause | Runtime of the generated message code; `protoc-gen-go` plugin | user, ADR 0001 | F0.7 |
 | `connectrpc.com/connect` | Apache-2.0 | Connect runtime for the generated handlers; `protoc-gen-connect-go` plugin | user, ADR 0001 | F0.7 |
 | `go.uber.org/goleak` | MIT | `TestMain` goroutine-leak check in every package | user, ADR 0001 | F0.3 |
+| `golang.org/x/crypto` | BSD-3-Clause | Argon2id and XChaCha20-Poly1305 for `internal/crypto` | user, ADR 0001 | F1.1 |
 
 ## Dev tools (`tool` directives, not linked into the binary)
 
