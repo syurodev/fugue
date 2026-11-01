@@ -1,0 +1,5 @@
+syntax = "proto3";
+package fugue.demo.v1;
+message Ping {
+    string name   =   1;
+}

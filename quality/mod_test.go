@@ -164,6 +164,8 @@ func TestTaskfileRunsEveryGate(t *testing.T) {
 		"fuguegate deadcode",
 		"fuguegate fuzz",
 		"fuguegate mutation",
+		"fuguegate proto",
+		"buf generate proto",
 	} {
 		if !strings.Contains(string(task), want) {
 			t.Errorf("Taskfile.yml does not run %q", want)
@@ -171,7 +173,7 @@ func TestTaskfileRunsEveryGate(t *testing.T) {
 	}
 	_, afterCheck, _ := strings.Cut(string(task), "  check:")
 	check, _, _ := strings.Cut(afterCheck, "  fix:")
-	for _, step := range []string{"fmt", "lint", "vet", "test", "coverage", "deadcode", "mod", "fuzz-short", "mutation-changed"} {
+	for _, step := range []string{"fmt", "lint", "vet", "test", "coverage", "deadcode", "mod", "proto", "fuzz-short", "mutation-changed"} {
 		if !strings.Contains(check, "- task: "+step+"\n") {
 			t.Errorf("`task check` does not run %s", step)
 		}
