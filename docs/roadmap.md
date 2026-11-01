@@ -83,7 +83,7 @@ Applies to all code copied from `syurodev/dev-kit`.
 | ID | Item | Design | Depends on | Evidence | Status | PR | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | F0.1 | Repository name, Go module path, LICENSE, README | dev-kit Fugue naming ADR | Q-01 | `go.mod` has the canonical module path; LICENSE present | Needs decision | | |
-| F0.2 | Layout and layering ADR (this repository's G-01): package tree, layer table, owner of every SQL table, initial third-party dependencies | `architecture`, `host-api §4`, `storage-security` | F0.1 | ADR `docs/adr/0001-package-layout.md` approved by the user | In review | | ADR approved by the user 2026-11-01; Done on merge |
+| F0.2 | Layout and layering ADR (this repository's G-01): package tree, layer table, owner of every SQL table, initial third-party dependencies | `architecture`, `host-api §4`, `storage-security` | F0.1 | ADR `docs/adr/0001-package-layout.md` approved by the user | In review | [#2](https://github.com/syurodev/fugue/pull/2) | ADR approved by the user 2026-11-01; Done on merge |
 | F0.3 | Toolchain: `go`/`toolchain`, `tool` directives, `Taskfile.yml` (`check`, `fix`, `test`, `lint`), `.golangci.yml` per gates §2–3 | quality-gates §1–3, §7 | F0.2 | `task check` green; a violating fixture for each linter group is caught | Not started | | |
 | F0.4 | `tools/fuguevet`: `kernelpure`, `nobarego`, `secretlog`, `todoref`, `noprotoleak` | quality-gates §4 | F0.3 | `analysistest` valid and violating cases for each analyzer | Not started | | |
 | F0.5 | `internal/arch`: every test in quality-gates §5, ratchets in §8 | quality-gates §5, §8 | F0.2, F0.3 | Each test has a violating fixture | Not started | | `TestRoadmapEvidence` reads this page |
