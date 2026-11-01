@@ -1,5 +1,6 @@
 {
   "internal/config": 100,
+  "internal/crypto": 100,
   "internal/platform/clock": 100,
   "internal/platform/errcode": 100,
   "internal/platform/ids": 97.5,
