@@ -3,6 +3,6 @@
 // packages and the dead-code check.
 //
 // Owner: quality gates (docs/quality-gates.md sections 6 and 8). It is a
-// development tool: it is invoked by Taskfile.yml and CI, never imported, and
-// never shipped in a release.
+// development tool, never shipped in a release. Allowed callers: Taskfile.yml
+// and CI; nothing imports it.
 package main

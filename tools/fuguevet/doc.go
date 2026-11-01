@@ -2,6 +2,6 @@
 // analyzers of docs/quality-gates.md section 4: kernelpure, nobarego, secretlog,
 // todoref and noprotoleak.
 //
-// Owner: quality gates. It is a development tool run as
-// `go vet -vettool=bin/fuguevet ./...` by Taskfile.yml and CI; nothing imports it.
+// Owner: quality gates. It is a development tool. Allowed callers: Taskfile.yml
+// and CI, as `go vet -vettool=bin/fuguevet ./...`; nothing imports it.
 package main
