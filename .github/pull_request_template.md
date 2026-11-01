@@ -1,32 +1,51 @@
-## Roadmap item
+<!-- PR title: a Conventional Commit, for example `fix(storage): reject a wrong pragma`. Add the roadmap ID in parentheses only when the change belongs to one. -->
 
-<!-- ID and link to its row in docs/roadmap.md, for example [F2.1](../blob/main/docs/roadmap.md) -->
+## Description
 
-## Summary
+<!-- What this PR does and why, in a few sentences. A reviewer should understand the purpose from this section alone. -->
 
-<!-- What changes and why. -->
+## Type of change
 
-## Evidence
+- [ ] Feature
+- [ ] Bug fix (the bug fix template: add `?template=bugfix.md` to the PR URL, or `gh pr create --template bugfix.md`)
+- [ ] Refactor (no behavior change)
+- [ ] Tests only
+- [ ] Documentation
+- [ ] Build, CI or tooling
+- [ ] Port from DevKit (source path and commit recorded in `docs/ports.md`)
 
-<!-- Named tests added or changed. They must match the Evidence column of the roadmap row. -->
+## Changes made
 
-## Gates
+<!-- Specific changes, one per line: "Added X to Y", not "updated files". -->
 
-- [ ] Touches a gate-defining file (`.golangci.yml`, `tools/fuguevet/`, `internal/arch/`, `quality/`, `docs/quality-gates.md`, `docs/dependencies.md`, `.github/workflows/`, `Taskfile.yml`). If so, the `gate-change-approved` label is required.
-- [ ] Changes a threshold or baseline. If so, say which and in which direction:
+-
 
-## Design questions
+## How to test
 
-<!-- Rows added to "Needs decision" in docs/roadmap.md §7, or "none". -->
+<!-- Commands a reviewer runs, and the named tests that prove the change. -->
 
-## Security notes
+1. `task check`
+2.
 
-<!-- Secrets, vault, sandbox, authorization. "None" if the change does not touch them. -->
+## Risk
+
+<!-- Delete the lines that do not apply. -->
+
+- **Security:** touches secrets, the vault, the sandbox or authorization? How is it covered?
+- **Gates:** touches a gate-defining file, a threshold or a baseline? This needs the `gate-change-approved` label.
+- **Data:** changes a migration, a table or a stored format?
+- **Host API:** changes a `.proto` contract? `buf breaking` result?
 
 ## Checklist
 
-- [ ] `task check` is green
-- [ ] The roadmap row (status, PR link, evidence, log line) is updated in this PR
+- [ ] `task check` passes locally
+- [ ] Self-reviewed the diff
+- [ ] New behavior has named tests; a bug fix has a regression test
 - [ ] No new `nolint` or `t.Skip`
 - [ ] No new dependency without a row in `docs/dependencies.md`
-- [ ] No `Co-Authored-By` in commits; the PR title is a Conventional Commit with the item ID
+- [ ] Docs updated: the roadmap row if this belongs to a roadmap item, an ADR if a decision changed
+- [ ] No `Co-Authored-By` or other attribution trailer in commits
+
+## Related
+
+<!-- Issues ("Closes #123"), roadmap item, design pages, ADRs, other PRs. "None" is fine. -->
