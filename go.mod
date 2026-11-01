@@ -243,3 +243,5 @@ require (
 	mvdan.cc/xurls/v2 v2.6.0 // indirect
 	pluginrpc.com/pluginrpc v0.6.0 // indirect
 )
+
+require github.com/google/uuid v1.6.0
