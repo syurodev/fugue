@@ -82,7 +82,7 @@ Applies to all code copied from `syurodev/dev-kit`.
 
 | ID | Item | Design | Depends on | Evidence | Status | PR | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| F0.1 | Repository name, Go module path, LICENSE, README | dev-kit Fugue naming ADR | Q-01 | `go.mod` has the canonical module path; LICENSE present | Needs decision | | |
+| F0.1 | Repository name, Go module path, LICENSE, README | dev-kit Fugue naming ADR | Q-01 | `go.mod` has the canonical module path; LICENSE present | In review | | Q-01 answered 2026-11-01 |
 | F0.2 | Layout and layering ADR (this repository's G-01): package tree, layer table, owner of every SQL table, initial third-party dependencies | `architecture`, `host-api §4`, `storage-security` | F0.1 | ADR `docs/adr/0001-package-layout.md` approved by the user | Not started | | Initial proposal in [§5](#5-proposed-layout) |
 | F0.3 | Toolchain: `go`/`toolchain`, `tool` directives, `Taskfile.yml` (`check`, `fix`, `test`, `lint`), `.golangci.yml` per gates §2–3 | quality-gates §1–3, §7 | F0.2 | `task check` green; a violating fixture for each linter group is caught | Not started | | |
 | F0.4 | `tools/fuguevet`: `kernelpure`, `nobarego`, `secretlog`, `todoref`, `noprotoleak` | quality-gates §4 | F0.3 | `analysistest` valid and violating cases for each analyzer | Not started | | |
@@ -226,7 +226,7 @@ together only in `app`.
 
 | ID | Date | Item | Question | Answer |
 | --- | --- | --- | --- | --- |
-| Q-01 | 2026-11-01 | F0.1 | Repository name and Go module path. Proposal: rename the repository to `fugue` (the target name in the Fugue naming ADR), module `github.com/syurodev/fugue`, unless a SynX GitHub organization exists. Which LICENSE? | |
+| Q-01 | 2026-11-01 | F0.1 | Repository name and Go module path. Proposal: rename the repository to `fugue` (the target name in the Fugue naming ADR), module `github.com/syurodev/fugue`, unless a SynX GitHub organization exists. Which LICENSE? | Repository `fugue`, module `github.com/syurodev/fugue`; LICENSE Apache-2.0 (user, 2026-11-01) |
 | Q-02 | 2026-11-01 | F8.1 | The activation design (H-36, H-37, G-06, G-07) assumes the native harness runs beside vendor sessions inside DevKit. Fugue is a new product: what does a stage A release require? | |
 | Q-03 | 2026-11-01 | F1.3 | DB file name. The old ADR kept `devkit.db` only to avoid a migration; data now starts clean, so the proposal is `fugue.db` | |
 | Q-04 | 2026-11-01 | F5.4 | Peer messages in the design go through the Agent Hub peer outbox, which this repository does not have. Proposal: drop peers from stage A; child sessions are already outside v1 | |
@@ -237,3 +237,4 @@ together only in `app`.
 | Date | Item | Change | Updated by |
 | --- | --- | --- | --- |
 | 2026-11-01 | — | Initial roadmap for the new repository | Designer |
+| 2026-11-01 | F0.1 | Module `github.com/syurodev/fugue`, Apache-2.0 LICENSE, README; Q-01 answered | Agent |
