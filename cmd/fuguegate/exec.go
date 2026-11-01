@@ -28,11 +28,15 @@ func capture(ctx context.Context, dir, name string, args ...string) (string, err
 }
 
 // toolPath resolves a `tool` directive of go.mod to its built binary so it can
-// run in another module's directory.
+// run in another module's directory. Only stdout is the path: on a cold module
+// cache the go command reports its downloads on stderr.
 func toolPath(ctx context.Context, tool string) (string, error) {
-	out, err := capture(ctx, ".", "go", "tool", "-n", tool)
-	if err != nil {
-		return "", err
+	cmd := exec.CommandContext(ctx, "go", "tool", "-n", tool)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("%w: go tool -n %s: %w\n%s", ErrCommand, tool, err, stderr.String())
 	}
-	return strings.TrimSpace(out), nil
+	return strings.TrimSpace(stdout.String()), nil
 }

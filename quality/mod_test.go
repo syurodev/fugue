@@ -37,13 +37,18 @@ func execIn(ctx context.Context, t *testing.T, dir string, env []string, name st
 	return out.String(), 0
 }
 
+// toolBinary resolves a `tool` directive to its binary. Only stdout is the path:
+// on a cold module cache the go command reports its downloads on stderr.
 func toolBinary(t *testing.T, name string) string {
 	t.Helper()
-	out, code := execIn(t.Context(), t, ".", nil, "go", "tool", "-n", name)
-	if code != 0 {
-		t.Fatalf("go tool -n %s: %s", name, out)
+	var stdout, stderr bytes.Buffer
+	cmd := exec.CommandContext(t.Context(), "go", "tool", "-n", name)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("go tool -n %s: %v\n%s", name, err, stderr.String())
 	}
-	return strings.TrimSpace(out)
+	return strings.TrimSpace(stdout.String())
 }
 
 func fixture(name string) string {

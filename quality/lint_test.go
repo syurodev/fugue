@@ -75,6 +75,9 @@ func golangci(ctx context.Context, t *testing.T, dir string, args ...string) (st
 	cmd.Stderr = &stderr
 	var exit *exec.ExitError
 	err := cmd.Run()
+	if stdout.Len() == 0 {
+		t.Logf("golangci-lint %v printed nothing (err %v); stderr:\n%s", args, err, stderr.String())
+	}
 	switch {
 	case err == nil:
 		return stdout.String(), 0
