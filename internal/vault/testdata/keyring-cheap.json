@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "master_kdf": {
+    "algorithm": "argon2id",
+    "memory": 32768,
+    "iterations": 2,
+    "parallelism": 1,
+    "key_length": 32,
+    "salt": "tVpEp1SJuG76TJDI9r2H1Q=="
+  },
+  "master_wrapped": {
+    "version": 2,
+    "algorithm": "xchacha20-poly1305",
+    "key_id": "dek",
+    "nonce": "S3PG4uILC7IXgVxu7E14YWW2yW8ZWxvT",
+    "ciphertext": "tieySptWh8lyenjjCIkuLel5svy5WeHq2w2k7l172/yQP8zRHtdocmDHmzmZvAU4"
+  },
+  "recovery_kdf": {
+    "algorithm": "argon2id",
+    "memory": 32768,
+    "iterations": 2,
+    "parallelism": 1,
+    "key_length": 32,
+    "salt": "f1EOZLClsIpLqjqSXEzBmg=="
+  },
+  "recovery_wrapped": {
+    "version": 2,
+    "algorithm": "xchacha20-poly1305",
+    "key_id": "dek",
+    "nonce": "5alTvaMhrmgH8xAa2Bfp2yt+htLRoltJ",
+    "ciphertext": "uNlkGM5qCYZv+XCNs6J7el0Dg17ffubXFMGjazNVU3mz8SlRx9YCYV+HmfAt2eih"
+  }
+}
