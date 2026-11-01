@@ -134,3 +134,4 @@ tasks:
     desc: Full mutation testing (nightly)
     cmds:
       - go run ./cmd/fuguegate mutation -all
+# trial change without the approval label
