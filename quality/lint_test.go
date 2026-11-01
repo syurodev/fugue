@@ -139,7 +139,7 @@ func directives(t *testing.T, root string) []directive {
 
 func lintSet(ctx context.Context, t *testing.T, dir string) []issue {
 	t.Helper()
-	out, _ := golangci(ctx, t, dir, "run", "--output.json.path=stdout", "--show-stats=false", "./...")
+	out, _ := golangci(ctx, t, dir, "run", "--allow-parallel-runners", "--output.json.path=stdout", "--show-stats=false", "./...")
 	var report struct{ Issues []issue }
 	if err := json.Unmarshal([]byte(out), &report); err != nil {
 		t.Fatalf("decode report: %v\n%s", err, out)
