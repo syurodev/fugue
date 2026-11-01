@@ -71,6 +71,16 @@ tasks:
     cmds:
       - go build ./...
 
+  warm:
+    desc: Build everything the CI builds, to fill the Go build cache
+    cmds:
+      - go build ./...
+      - go test -race -shuffle=on -count=1 -covermode=atomic -coverprofile=/dev/null -run '^$' ./...
+      - go vet ./...
+      - for: [gofumpt, deadcode, govulncheck, go-licenses, gremlins, buf, protoc-gen-go, protoc-gen-connect-go, actionlint, task]
+        cmd: go tool -n {{.ITEM}}
+      - "{{.GOLANGCI_LINT}} --version"
+
   vet:
     desc: Custom analyzers of tools/fuguevet through go vet
     cmds:

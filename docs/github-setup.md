@@ -83,7 +83,16 @@ In Settings, Actions, General: set workflow permissions to read-only, and under 
 permissions" allow only actions created by GitHub. Every `uses:` in the workflows is pinned to a
 full commit SHA; `TestActionsArePinnedToCommits` keeps it so.
 
-## 5. Check that it blocks
+## 5. Caches
+
+`actions/setup-go` caches the Go module and build caches, keyed on `go.sum`. A cache written
+by a pull request is visible only to that pull request, and a key is written only once, so
+without help every new PR starts cold. The `cache` workflow builds everything the CI builds on
+`main` (after each merge and daily, since GitHub drops a cache unused for seven days), and every
+PR restores it. The `coverage` job reuses the profile the ubuntu `test` job produced instead of
+running the suite again. A PR that changes `go.sum` starts cold once.
+
+## 6. Check that it blocks
 
 "A trial PR violating each gate is blocked" is the evidence for F0.6. After steps 1 to 3, an
 agent can open these draft PRs from throwaway branches (ask first; each is closed unmerged):
@@ -103,7 +112,7 @@ agent can open these draft PRs from throwaway branches (ask first; each is close
 | The same edit with the label applied by someone else | `gate-guard` |
 | A commit with a `Co-Authored-By` trailer, or the title `WIP` | `commit-lint` |
 
-## 6. Local hooks
+## 7. Local hooks
 
 Each contributor runs `task hooks` once. It points git at `.githooks/`, whose `commit-msg`
 hook runs the same rules as the `commit-lint` job on every commit message.

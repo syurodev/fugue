@@ -71,9 +71,47 @@ func TestNightlyWorkflowRunsTheLongJobs(t *testing.T) {
 	}
 }
 
+// A cache written by a pull request is invisible to other pull requests, and a key
+// is written once, so only the default branch can hand every PR a warm cache.
+func TestCacheWorkflowWarmsTheDefaultBranch(t *testing.T) {
+	t.Parallel()
+	cache := readWorkflow(t, "cache.yml")
+	for _, want := range []string{"push:", "branches: [main]", "schedule:", "ubuntu-latest", "macos-latest", "go tool task warm"} {
+		if !strings.Contains(cache, want) {
+			t.Errorf("cache.yml lacks %q", want)
+		}
+	}
+	task, err := os.ReadFile("../Taskfile.yml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"  warm:", "-race -shuffle=on -count=1 -covermode=atomic", "golangci-lint"} {
+		if !strings.Contains(string(task), want) {
+			t.Errorf("Taskfile.yml `warm` lacks %q: it must build what the CI builds", want)
+		}
+	}
+}
+
+// The coverage job reuses the profile the ubuntu test job already produced instead
+// of running the whole suite a second time.
+func TestCoverageJobReusesTheTestProfile(t *testing.T) {
+	t.Parallel()
+	pr := readWorkflow(t, "pr.yml")
+	for _, want := range []string{"upload-artifact", "download-artifact", "needs: test", "name: cover-profile"} {
+		if !strings.Contains(pr, want) {
+			t.Errorf("pr.yml lacks %q", want)
+		}
+	}
+	_, coverage, _ := strings.Cut(pr, "\n  coverage:\n")
+	coverage, _, _ = strings.Cut(coverage, "\n  deadcode:\n")
+	if strings.Contains(coverage, "task test") {
+		t.Error("the coverage job runs the test suite again")
+	}
+}
+
 func TestActionsArePinnedToCommits(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"pr.yml", "nightly.yml"} {
+	for _, name := range []string{"pr.yml", "nightly.yml", "cache.yml"} {
 		if got := unpinnedActions(readWorkflow(t, name)); len(got) > 0 {
 			t.Errorf("%s uses actions not pinned to a commit SHA: %v", name, got)
 		}

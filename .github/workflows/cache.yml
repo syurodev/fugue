@@ -1,0 +1,32 @@
+# Gate definition: keeps the Go caches warm. Changes need the gate-change-approved label.
+#
+# A cache saved by a pull request is visible only to that pull request, and a cache
+# key is written once. So every PR would start cold unless the default branch holds
+# a complete cache: this workflow builds everything the CI builds, on main, whenever
+# it changes and daily (GitHub drops a cache that is not used for seven days).
+name: cache
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: "41 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  warm:
+    name: warm (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go tool task warm
