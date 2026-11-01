@@ -181,17 +181,19 @@ this board.
 
 ## 5. Proposed layout
 
-Input to ADR F0.2; only the approved ADR is authoritative.
+Input to ADR F0.2, which is approved with the deviations it lists; where this sketch and
+[ADR 0001](adr/0001-package-layout.md) differ, the ADR is authoritative.
 
 ```text
 cmd/fugue/                 main: fugue serve and subcommands
 internal/
-  platform/                clock, ids, supervise, redact, config, errors (stdlib only)
-  kernel/                  pure decide/evolve, commands, events, invariants (stdlib only)
+  platform/                clock, ids, supervise, redact, errcode (stdlib only)
+  config/                  typed configuration; the only reader of environment variables
+  kernel/                  pure decide/evolve, commands, events, invariants (stdlib only, imports nothing of this module)
   codec/                   canonical codec v1
   crypto/  vault/          ported from DevKit
-  storage/                 DB open, pragmas, migrations (DDL owner), data-directory lock
-  execstore/               SQL for exec_* tables, protected payloads
+  storage/                 DB open, pragmas, migrations (DDL owner), data-directory lock, exec_host
+  execstore/               SQL for the other exec_* tables, protected payloads
   coordinator/             per-session actor, dispatch, timers, scheduler
   contextengine/
   modeladapter/            neutral contract; anthropic/, openai/, faux/
@@ -199,7 +201,7 @@ internal/
   tools/                   registry, descriptors; concrete tools in subpackages
   interaction/  sandbox/  snapshot/  workspacememory/
   app/                     composition root and application services
-  hostapi/                 Connect handlers; the only importer of generated code
+  hostapi/                 Connect handlers; generated code in hostapi/internal/pb, importable only here
   arch/                    architecture tests
 proto/fugue/<module>/v1/
 tools/fuguevet/
@@ -231,10 +233,12 @@ together only in `app`.
 | Q-03 | 2026-11-01 | F1.3 | DB file name. The old ADR kept `devkit.db` only to avoid a migration; data now starts clean, so the proposal is `fugue.db` | |
 | Q-04 | 2026-11-01 | F5.4 | Peer messages in the design go through the Agent Hub peer outbox, which this repository does not have. Proposal: drop peers from stage A; child sessions are already outside v1 | |
 | Q-05 | 2026-11-01 | Design | Drop H-43 (inventory of DevKit frontend logic) and the `AppService` ratchet, since DevKit is frozen | |
+| Q-06 | 2026-11-01 | F2.2 | `pgregory.net/rapid`, the property-test library named in quality-gates §6, is MPL-2.0, outside the allowed license list. Approve it, or name another library? | |
 
 ## 8. Log
 
 | Date | Item | Change | Updated by |
 | --- | --- | --- | --- |
 | 2026-11-01 | — | Initial roadmap for the new repository | Designer |
+| 2026-11-01 | F0.2 | ADR 0001 package layout approved with amendments (kernel imports nothing of this module; §5 sketch aligned); Q-06 added | Agent |
 | 2026-11-01 | F0.1 | Module `github.com/syurodev/fugue`, Apache-2.0 LICENSE, README; Q-01 answered | Agent |
