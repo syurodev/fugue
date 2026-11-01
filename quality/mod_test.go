@@ -159,6 +159,7 @@ func TestTaskfileRunsEveryGate(t *testing.T) {
 		"-race -shuffle=on -count=1",
 		"fmt --diff ./...",
 		"run ./...",
+		"go vet -vettool={{.ROOT_DIR}}/bin/fuguevet ./...",
 		"fuguegate coverage",
 		"fuguegate deadcode",
 		"fuguegate fuzz",
@@ -170,7 +171,7 @@ func TestTaskfileRunsEveryGate(t *testing.T) {
 	}
 	_, afterCheck, _ := strings.Cut(string(task), "  check:")
 	check, _, _ := strings.Cut(afterCheck, "  fix:")
-	for _, step := range []string{"fmt", "lint", "test", "coverage", "deadcode", "mod", "fuzz-short", "mutation-changed"} {
+	for _, step := range []string{"fmt", "lint", "vet", "test", "coverage", "deadcode", "mod", "fuzz-short", "mutation-changed"} {
 		if !strings.Contains(check, "- task: "+step+"\n") {
 			t.Errorf("`task check` does not run %s", step)
 		}

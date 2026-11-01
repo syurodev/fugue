@@ -19,6 +19,7 @@ tasks:
     cmds:
       - task: fmt
       - task: lint
+      - task: vet
       - task: test
       - task: coverage
       - task: deadcode
@@ -40,6 +41,12 @@ tasks:
     desc: golangci-lint with the repository configuration
     cmds:
       - "{{.GOLANGCI_LINT}} run ./..."
+
+  vet:
+    desc: Custom analyzers of tools/fuguevet through go vet
+    cmds:
+      - go build -o bin/fuguevet ./tools/fuguevet
+      - go vet -vettool={{.ROOT_DIR}}/bin/fuguevet ./...
 
   test:
     desc: All tests with the race detector, shuffled, uncached
