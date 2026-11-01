@@ -1,0 +1,2 @@
+CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY);
+CREATE TABLE IF NOT EXISTS exec_events (id TEXT PRIMARY KEY);
