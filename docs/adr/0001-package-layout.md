@@ -1,6 +1,6 @@
 # ADR 0001: Package layout and layering
 
-- **Status:** Proposed (awaiting approval by the user)
+- **Status:** Approved by the user, 2026-11-01 (with the amendments recorded in "Decisions recorded at approval")
 - **Date:** 2026-11-01
 - **Roadmap item:** F0.2 (this repository's gate G-01)
 - **Design:** `architecture` §4 and §8, `host-api` §4 and §8, `storage-security` §2, §3 and §9,
@@ -47,7 +47,7 @@ library and third-party imports are governed separately (section 4 and `depguard
 | `internal/platform/ids` | 0 | ID and randomness port, real and deterministic generators. Owner: ID port. | `internal/platform/clock` | F0.8 |
 | `internal/platform/supervise` | 0 | `supervise.Go(ctx, name, fn)`: the only place a goroutine starts. Owner: concurrency rules. | `internal/platform/errcode` | F0.8 |
 | `internal/config` | 1 | Typed configuration; the only reader of environment variables. Owner: configuration port. | `internal/platform/errcode`, `internal/platform/redact` | F0.8 |
-| `internal/kernel` | 1 | Pure `decide` and `evolve`, commands, events, invariants. Owner: state machine (G-02). | `internal/platform/errcode` | F2.1 |
+| `internal/kernel` | 1 | Pure `decide` and `evolve`, commands, events, invariants, and its own rejection type with stable codes. Owner: state machine (G-02). | | F2.1 |
 | `internal/crypto` | 1 | XChaCha20-Poly1305 AEAD, Argon2id, envelope, keyring. Owner: storage security (G-03). | `internal/platform/errcode`, `internal/platform/redact` | F1.1 |
 | `internal/storage` | 1 | Opens SQLite, checks pragmas, runs migrations (the only `CREATE TABLE`), data-directory lock, host incarnation. Owner: storage (G-03). | `internal/platform/errcode`, `internal/platform/clock`, `internal/platform/ids`, `internal/platform/supervise`, `internal/config` | F1.3 |
 | `internal/interaction` | 1 | In-memory approval and selection requests per incarnation, receipts, answer once. Owner: interaction (G-05). | `internal/platform/errcode`, `internal/platform/clock`, `internal/platform/ids`, `internal/platform/supervise` | F1.5 |
@@ -86,9 +86,9 @@ Directories outside `internal/` and not covered by this table:
    import between two module packages appears in the importer's **May import** column; a listed
    edge never points to a higher layer; no import cycles. `...` at the end of a path matches the
    whole subtree.
-2. `internal/kernel` imports only pure stdlib and `internal/platform/errcode`. `fuguevet`
-   `kernelpure` enforces it (quality gates §4); `errcode` is the single in-module package on its
-   allowlist.
+2. `internal/kernel` imports only pure stdlib and no other package of this module. `fuguevet`
+   `kernelpure` enforces it (quality gates §4). Rejections are a kernel type carrying a stable
+   code; `app` and `hostapi` translate them to `errcode` values at the boundary.
 3. Generated proto code lives in `internal/hostapi/internal/pb`, so Go's `internal` rule already
    stops every other package from importing it; `noprotoleak` is the second line of defence.
 4. Ports are defined by the consumer (`coordinator`) and expressed only in kernel types, so
@@ -188,14 +188,16 @@ in `Taskfile.yml` and CI because its module graph is not meant to be vendored in
   - Generated code lives under `internal/hostapi/internal/pb`; TypeScript output is outside the
     Go tree and its path is set in F0.7.
 
-## Open points for the user
+## Decisions recorded at approval
 
-1. **`errcode` in the kernel allowlist.** The kernel needs coded rejections. This ADR lets it
-   import `internal/platform/errcode` (stdlib only) and nothing else in the module. The
-   alternative is a duplicate error type inside the kernel; I recommend against it.
-2. **Direct requirements only.** `TestDependencyAllowlist` will require a row in
-   `docs/dependencies.md` for each module that `go.mod` requires directly, including modules
-   added by `tool` directives. Their transitive (`// indirect`) modules are covered by
-   `go-licenses check` and `govulncheck`, since `buf` alone pulls in more than a hundred.
-3. **`pgregory.net/rapid` license** (see section 6), to be decided at F2.2.
-4. **DB file name** stays open as Q-03; it does not affect the layout.
+1. `config` lives at `internal/config`. The roadmap §5 sketch is updated to match.
+2. The kernel is stricter than first proposed: it imports **no** package of this module, not even
+   `errcode`. It owns a rejection type with stable codes instead.
+3. `exec_host` belongs to `storage`; the other `exec_*` tables belong to `execstore`.
+4. Generated proto code lives under `internal/hostapi/internal/pb`.
+5. `TestDependencyAllowlist` requires a row for each module that `go.mod` requires directly
+   (including modules added by `tool` directives); `// indirect` modules are covered by
+   `go-licenses check` and `govulncheck`.
+6. `pgregory.net/rapid` (MPL-2.0) is not approved by this ADR; the user decides at F2.2
+   (roadmap Q-06).
+7. The DB file name stays open as Q-03; it does not affect the layout.
