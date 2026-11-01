@@ -29,12 +29,16 @@ only the pages the roadmap item names. Path names there (`internal/...`, `devkit
 ## Workflow
 
 1. Work only on a roadmap item whose design is settled. Read `docs/roadmap.md` §1 first.
-2. One item, one branch (`<type>/<id>-<slug>`), one PR into `main`. Never stack PRs.
+2. Roadmap work: one item, one branch (`<type>/<id>-<slug>`), one PR into `main`. Never stack PRs.
+   A change outside the roadmap (bug, chore, docs) is also a branch and a PR; it needs no item ID.
 3. Do not change design or gates on your own. Record the question in the roadmap's
    "Needs decision" table, mark the item, and move to an unblocked item.
-4. Update the roadmap row (status, PR link, evidence test names, log line) in the same PR.
-5. Commits follow Conventional Commits with the item ID: `feat(kernel): derive wait reasons (F2.1)`.
-6. "Done" means merged with every CI gate green and the named evidence tests present and
+4. For roadmap work, update the roadmap row (status, PR link, evidence test names, log line) in
+   the same PR.
+5. Commits and PR titles are Conventional Commits (squash merges use the title). Add the roadmap
+   ID in parentheses only when the change belongs to an item: `feat(kernel): derive wait reasons (F2.1)`.
+6. Commit messages never contain `Co-Authored-By` or any other attribution trailer.
+7. "Done" means merged with every CI gate green and the named evidence tests present and
    passing. `TestRoadmapEvidence` checks the names.
 
 ## Code rules
