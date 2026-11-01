@@ -1,0 +1,12 @@
+require github.com/stretchr/testify v0.0.0
+replace github.com/stretchr/testify => ./stubs/testify
+require github.com/pkg/errors v0.0.0
+replace github.com/pkg/errors => ./stubs/pkgerrors
+require github.com/sirupsen/logrus v0.0.0
+replace github.com/sirupsen/logrus => ./stubs/logrus
+require go.uber.org/zap v0.0.0
+replace go.uber.org/zap => ./stubs/zap
+require github.com/rs/zerolog v0.0.0
+replace github.com/rs/zerolog => ./stubs/zerolog
+require github.com/golang/glog v0.0.0
+replace github.com/golang/glog => ./stubs/glog

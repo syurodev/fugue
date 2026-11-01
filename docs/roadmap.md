@@ -86,7 +86,7 @@ Applies to all code copied from `syurodev/dev-kit`.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | F0.1 | Repository name, Go module path, LICENSE, README | dev-kit Fugue naming ADR | Q-01 | `go.mod` has the canonical module path; LICENSE present | In review | [#1](https://github.com/syurodev/fugue/pull/1) | Q-01 answered 2026-11-01 |
 | F0.2 | Layout and layering ADR (this repository's G-01): package tree, layer table, owner of every SQL table, initial third-party dependencies | `architecture`, `host-api §4`, `storage-security` | F0.1 | ADR `docs/adr/0001-package-layout.md` approved by the user | Not started | | Initial proposal in [§5](#5-proposed-layout) |
-| F0.3 | Toolchain: `go`/`toolchain`, `tool` directives, `Taskfile.yml` (`check`, `fix`, `test`, `lint`), `.golangci.yml` per gates §2–3 | quality-gates §1–3, §7 | F0.2 | `task check` green; a violating fixture for each linter group is caught | Not started | | |
+| F0.3 | Toolchain: `go`/`toolchain`, `tool` directives, `Taskfile.yml` (`check`, `fix`, `test`, `lint`), `.golangci.yml` per gates §2–3 | quality-gates §1–3, §7 | F0.2 | `task check` green; every enabled linter has a violating fixture that is caught: `TestLintFixtures`, `TestEveryEnabledLinterHasAFixture`, `TestFormattersFlagUnformattedFiles`; module gates: `TestTidyGate`, `TestVerifyGate`, `TestGovulncheckGate`, `TestLicenseGate`, `TestTaskfileRunsEveryGate`; tool gates: `TestDeadcodeGate`, `TestFuzzGate`, `TestMutationGate`, `TestEvaluate` | In review | [#4](https://github.com/syurodev/fugue/pull/4) | `cmd/fuguegate` carries the gates no tool covers (coverage, fuzz, mutation, deadcode). `fuguevet` and `arch` steps join `task check` in F0.4 and F0.5, `proto` in F0.7. PR is above the 600-line guideline because it carries the gate self-tests |
 | F0.4 | `tools/fuguevet`: `kernelpure`, `nobarego`, `secretlog`, `todoref`, `noprotoleak` | quality-gates §4 | F0.3 | `analysistest` valid and violating cases for each analyzer | Not started | | |
 | F0.5 | `internal/arch`: every test in quality-gates §5, ratchets in §8 | quality-gates §5, §8 | F0.2, F0.3 | Each test has a violating fixture | Not started | | `TestRoadmapEvidence` reads this page |
 | F0.6 | PR and nightly CI, `CODEOWNERS`, `gate-guard`; the user enables branch protection | quality-gates §9–10 | F0.3–F0.5 | A trial PR violating each gate is blocked | Not started | | Branch protection is a GitHub setting the user changes. Also: a `commit-lint` job rejects any PR commit or PR title containing `Co-Authored-By` and checks that the PR title is a Conventional Commit (no item ID required); a local `commit-msg` hook, installed by `task hooks`, applies the same rules |
@@ -236,6 +236,7 @@ together only in `app`.
 | Q-04 | 2026-11-01 | F5.4 | Peer messages in the design go through the Agent Hub peer outbox, which this repository does not have. Proposal: drop peers from stage A; child sessions are already outside v1 | |
 | Q-05 | 2026-11-01 | Design | Drop H-43 (inventory of DevKit frontend logic) and the `AppService` ratchet, since DevKit is frozen | |
 | Q-06 | 2026-11-01 | F2.2 | `pgregory.net/rapid`, the property-test library named in quality-gates §6, is MPL-2.0, outside the allowed license list. Approve it, or name another library? | |
+| Q-07 | 2026-11-01 | F0.3 | quality-gates §3 allows `panic` in `must*` helpers in `cmd`. `forbidigo` cannot scope by function name. Proposal: only files named `cmd/<name>/must.go` may call `panic`. Accept, or name another mechanism? | |
 
 ## 8. Log
 
@@ -243,5 +244,6 @@ together only in `app`.
 | --- | --- | --- | --- |
 | 2026-11-01 | — | Initial roadmap for the new repository | Designer |
 | 2026-11-01 | F0.2 | ADR 0001 package layout approved with amendments (kernel imports nothing of this module; §5 sketch aligned); Q-06 added | Agent |
+| 2026-11-01 | F0.3 | Toolchain, `.golangci.yml`, `Taskfile.yml`, `cmd/fuguegate`, gate self-tests and fixtures. golangci-lint pinned at v2.15.0 (v2.13.2 cannot type-check `reflect` on Go 1.27.2); `exhaustruct` is `exhaustruct_v5` (renamed upstream); `uniq-by-line: false` so no linter hides behind another; gremlins' threshold flag exits 0 at 0% so `fuguegate` reads its summary; Q-07 added | Agent |
 | 2026-11-01 | F0.1 | Module `github.com/syurodev/fugue`, Apache-2.0 LICENSE, README; Q-01 answered | Agent |
 | 2026-11-01 | F0.6 | Added `commit-lint` job and `task hooks` to the item (no `Co-Authored-By`, Conventional Commit PR titles; the item ID is optional); AGENTS.md rule and PR templates added | Agent |

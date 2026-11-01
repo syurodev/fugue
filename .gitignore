@@ -1,14 +1,50 @@
-# IDE
+# IDE and editors
 .idea/
 .vscode/
+*.swp
+*~
 
-# Build and test output
+# Claude Code local state
+.claude/settings.local.json
+.claude/worktrees/
+
+# Build output
 /bin/
 /dist/
+/fugue
+/fuguegate
+/fuguevet
+*.exe
+*.dll
+*.so
+*.dylib
 *.test
-*.out
-coverage.*
-cover.out
+
+# Test, coverage and profiling output (quality/coverage.json is a committed baseline)
+/cover.out
+/coverage.out
+/coverage.html
+*.prof
+*.pprof
+*.trace
+
+# Local tooling
+go.work
+go.work.sum
+.task/
+node_modules/
+
+# Secrets and local data: never commit
+.env
+.env.*
+!.env.example
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+*.log
 
 # OS
 .DS_Store

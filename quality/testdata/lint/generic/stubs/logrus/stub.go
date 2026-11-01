@@ -1,0 +1,3 @@
+package logrus
+
+func Use() {}
