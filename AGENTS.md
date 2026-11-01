@@ -34,7 +34,9 @@ only the pages the roadmap item names. Path names there (`internal/...`, `devkit
    "Needs decision" table, mark the item, and move to an unblocked item.
 4. Update the roadmap row (status, PR link, evidence test names, log line) in the same PR.
 5. Commits follow Conventional Commits with the item ID: `feat(kernel): derive wait reasons (F2.1)`.
-6. "Done" means merged with every CI gate green and the named evidence tests present and
+   The PR title follows the same form, because squash merges use it.
+6. Commit messages never contain `Co-Authored-By` or any other attribution trailer.
+7. "Done" means merged with every CI gate green and the named evidence tests present and
    passing. `TestRoadmapEvidence` checks the names.
 
 ## Code rules

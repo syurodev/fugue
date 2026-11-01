@@ -87,7 +87,7 @@ Applies to all code copied from `syurodev/dev-kit`.
 | F0.3 | Toolchain: `go`/`toolchain`, `tool` directives, `Taskfile.yml` (`check`, `fix`, `test`, `lint`), `.golangci.yml` per gates §2–3 | quality-gates §1–3, §7 | F0.2 | `task check` green; a violating fixture for each linter group is caught | Not started | | |
 | F0.4 | `tools/fuguevet`: `kernelpure`, `nobarego`, `secretlog`, `todoref`, `noprotoleak` | quality-gates §4 | F0.3 | `analysistest` valid and violating cases for each analyzer | Not started | | |
 | F0.5 | `internal/arch`: every test in quality-gates §5, ratchets in §8 | quality-gates §5, §8 | F0.2, F0.3 | Each test has a violating fixture | Not started | | `TestRoadmapEvidence` reads this page |
-| F0.6 | PR and nightly CI, `CODEOWNERS`, `gate-guard`; the user enables branch protection | quality-gates §9–10 | F0.3–F0.5 | A trial PR violating each gate is blocked | Not started | | Branch protection is a GitHub setting the user changes |
+| F0.6 | PR and nightly CI, `CODEOWNERS`, `gate-guard`; the user enables branch protection | quality-gates §9–10 | F0.3–F0.5 | A trial PR violating each gate is blocked | Not started | | Branch protection is a GitHub setting the user changes. Also: a `commit-lint` job rejects any PR commit or PR title containing `Co-Authored-By` and checks that the PR title is a Conventional Commit with an item ID; a local `commit-msg` hook, installed by `task hooks`, applies the same rules |
 | F0.7 | `proto/fugue/` skeleton with `buf` (lint, breaking, Go and TS generation for Connect), no services yet | `host-api §4, §8` | F0.2 | `proto` job green; stale generated code fails | Not started | | |
 | F0.8 | Platform primitives: `clock` (real and fake), `ids`, coded errors and registry, `redact.Secret`, `supervise`, `config` | quality-gates §3–4 | F0.3 | Tests for each primitive; the fake clock drives timers | Not started | | |
 
@@ -242,3 +242,4 @@ together only in `app`.
 | 2026-11-01 | — | Initial roadmap for the new repository | Designer |
 | 2026-11-01 | F0.2 | ADR 0001 package layout approved with amendments (kernel imports nothing of this module; §5 sketch aligned); Q-06 added | Agent |
 | 2026-11-01 | F0.1 | Module `github.com/syurodev/fugue`, Apache-2.0 LICENSE, README; Q-01 answered | Agent |
+| 2026-11-01 | F0.6 | Added `commit-lint` job and `task hooks` to the item (no `Co-Authored-By`, Conventional Commit PR titles with item ID); AGENTS.md rule and PR template added | Agent |
