@@ -77,7 +77,8 @@ Every rule below is machine-enforced; the full list and thresholds are in
   packages.
 - `task fix` applies formatters only.
 - `go test ./internal/arch/` after any change to packages, imports, tables or dependencies.
-- After changing a `.proto` file run `task proto` and commit the generated code.
+- After changing a `.proto` file run `task generate` and commit the generated code; `task proto`
+  checks lint, format, breaking changes and that the generated code is current.
 
 ## References
 

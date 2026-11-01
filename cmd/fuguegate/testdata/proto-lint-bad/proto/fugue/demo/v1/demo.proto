@@ -1,0 +1,7 @@
+syntax = "proto3";
+
+package fugue.wrong;
+
+message Ping {
+  string badName = 1;
+}

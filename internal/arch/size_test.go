@@ -17,7 +17,12 @@ const (
 	ratchetFile = "quality/ratchet.json"
 )
 
-var nolintDirective = regexp.MustCompile(`^//\s*nolint\b`)
+var (
+	nolintDirective = regexp.MustCompile(`^//\s*nolint\b`)
+	// generatedHeader is the marker Go tooling uses for generated files, which are
+	// measured by the generator, not by a line limit.
+	generatedHeader = regexp.MustCompile(`(?m)^// Code generated .* DO NOT EDIT\.$`)
+)
 
 type ratchet struct {
 	Nolint             int `json:"nolint"`
@@ -48,6 +53,9 @@ func (r repo) oversize() ([]string, error) {
 		src, err := r.read(file)
 		if err != nil {
 			return nil, err
+		}
+		if generatedHeader.MatchString(src) {
+			continue
 		}
 		lines, limit := strings.Count(src, "\n"), sourceLimit
 		if strings.HasSuffix(file, "_test.go") {

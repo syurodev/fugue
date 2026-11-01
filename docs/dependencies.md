@@ -14,6 +14,8 @@ checks it against `go.mod`.
 | Module | License | Reason | Approver | Enters |
 | --- | --- | --- | --- | --- |
 | `github.com/google/go-cmp` | BSD-3-Clause | Test comparisons (`quality-gates` §6) | user, ADR 0001 | F0.3 |
+| `google.golang.org/protobuf` | BSD-3-Clause | Runtime of the generated message code; `protoc-gen-go` plugin | user, ADR 0001 | F0.7 |
+| `connectrpc.com/connect` | Apache-2.0 | Connect runtime for the generated handlers; `protoc-gen-connect-go` plugin | user, ADR 0001 | F0.7 |
 | `go.uber.org/goleak` | MIT | `TestMain` goroutine-leak check in every package | user, ADR 0001 | F0.3 |
 
 ## Dev tools (`tool` directives, not linked into the binary)
@@ -26,6 +28,9 @@ checks it against `go.mod`.
 | `github.com/google/go-licenses` | Apache-2.0 | License policy check | user, ADR 0001 | F0.3 |
 | `github.com/go-gremlins/gremlins` | Apache-2.0 | Mutation testing | user, ADR 0001 | F0.3 |
 | `github.com/go-task/task/v3` | MIT | `Taskfile.yml` runner, so every machine runs the same version | user, ADR 0001 | F0.3 |
+| `github.com/bufbuild/buf` | Apache-2.0 | Proto lint, format, breaking-change check and code generation | user, ADR 0001 | F0.7 |
+
+TypeScript generation uses the remote plugin `buf.build/bufbuild/es` (Apache-2.0), pinned by version in `proto/buf.gen.yaml`; it needs network access when `task generate` or `task proto` runs.
 
 ## Pinned outside `go.mod`
 

@@ -24,6 +24,7 @@ tasks:
       - task: coverage
       - task: deadcode
       - task: mod
+      - task: proto
       - task: fuzz-short
       - task: mutation-changed
 
@@ -70,6 +71,16 @@ tasks:
       - go mod verify
       - go tool govulncheck ./...
       - go tool go-licenses check ./... --allowed_licenses={{.ALLOWED_LICENSES}}
+
+  proto:
+    desc: buf lint, format, breaking changes against main, generated code up to date
+    cmds:
+      - go run ./cmd/fuguegate proto -base origin/main
+
+  generate:
+    desc: Regenerate Go and TypeScript code from proto/ (run after changing a .proto file)
+    cmds:
+      - go tool buf generate proto --template proto/buf.gen.yaml
 
   fuzz-short:
     desc: 20 seconds per fuzz target
