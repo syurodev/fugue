@@ -1,0 +1,18 @@
+# Everything is reviewed by the owner. The gate-defining files of
+# docs/quality-gates.md section 10 are listed so the intent is explicit, together
+# with the files that implement or enforce the gates.
+* @syurodev
+
+/.golangci.yml @syurodev
+/Taskfile.yml @syurodev
+/tools/fuguevet/ @syurodev
+/internal/arch/ @syurodev
+/quality/ @syurodev
+/docs/quality-gates.md @syurodev
+/docs/dependencies.md @syurodev
+/.github/ @syurodev
+/cmd/fuguegate/ @syurodev
+/.githooks/ @syurodev
+/AGENTS.md @syurodev
+/docs/adr/ @syurodev
+/docs/error-codes.md @syurodev

@@ -1,0 +1,12 @@
+name: broken
+on: pull_request
+jobs:
+  hello:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: echo "${{ steps.missing.outputs.value }}"
+  hello:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo duplicate job id
