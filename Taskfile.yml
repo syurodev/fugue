@@ -19,6 +19,7 @@ tasks:
     cmds:
       - task: fmt
       - task: lint
+      - task: actions
       - task: vet
       - task: test
       - task: coverage
@@ -42,6 +43,43 @@ tasks:
     desc: golangci-lint with the repository configuration
     cmds:
       - "{{.GOLANGCI_LINT}} run ./..."
+
+  actions:
+    desc: Lint the GitHub Actions workflows
+    cmds:
+      - go tool actionlint
+
+  arch:
+    desc: Architecture tests only (also part of test)
+    cmds:
+      - go test -race -shuffle=on -count=1 ./internal/arch/...
+
+  hooks:
+    desc: Install the local git hooks (commit-msg)
+    cmds:
+      - git config core.hooksPath .githooks
+
+  nightly-test:
+    desc: Repeat every test five times to find flaky ones (nightly)
+    cmds:
+      - go test -race -shuffle=on -count=5 ./...
+
+  windows-build:
+    desc: The module must still build for Windows (nightly)
+    env:
+      GOOS: windows
+    cmds:
+      - go build ./...
+
+  warm:
+    desc: Build everything the CI builds, to fill the Go build cache
+    cmds:
+      - go build ./...
+      - go test -race -shuffle=on -count=1 -covermode=atomic -coverprofile=/dev/null -run '^$' ./...
+      - go vet ./...
+      - for: [gofumpt, deadcode, govulncheck, go-licenses, gremlins, buf, protoc-gen-go, protoc-gen-connect-go, actionlint, task]
+        cmd: go tool -n {{.ITEM}}
+      - "{{.GOLANGCI_LINT}} --version"
 
   vet:
     desc: Custom analyzers of tools/fuguevet through go vet

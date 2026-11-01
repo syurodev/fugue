@@ -78,7 +78,8 @@ func (g *protoGate) breaking(ctx context.Context, stdout io.Writer) error {
 		if _, err := capture(ctx, g.root, "git", "cat-file", "-e", g.base+":proto/buf.yaml"); err != nil {
 			return say(stdout, "breaking check skipped: %s has no proto/ yet", g.base)
 		}
-		against = g.root + "/.git#branch=" + strings.TrimPrefix(g.base, "origin/") + ",subdir=proto"
+		// ref=, not branch=: CI checks out a detached merge commit with no local main.
+		against = g.root + "/.git#ref=" + g.base + ",subdir=proto"
 	}
 	if _, err := capture(ctx, ".", g.buf, "breaking", g.protoDir, "--against", against); err != nil {
 		return fmt.Errorf("%w: breaking: %w", ErrProto, err)

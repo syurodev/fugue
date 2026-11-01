@@ -27,6 +27,7 @@ checks it against `go.mod`.
 | `golang.org/x/vuln` | BSD-3-Clause | `govulncheck` | user, ADR 0001 | F0.3 |
 | `github.com/google/go-licenses` | Apache-2.0 | License policy check | user, ADR 0001 | F0.3 |
 | `github.com/go-gremlins/gremlins` | Apache-2.0 | Mutation testing | user, ADR 0001 | F0.3 |
+| `github.com/rhysd/actionlint` | MIT | Lint of the GitHub Actions workflows (`task actions`) | user, ADR 0001 (approved with PR review) | F0.6 |
 | `github.com/go-task/task/v3` | MIT | `Taskfile.yml` runner, so every machine runs the same version | user, ADR 0001 | F0.3 |
 | `github.com/bufbuild/buf` | Apache-2.0 | Proto lint, format, breaking-change check and code generation | user, ADR 0001 | F0.7 |
 

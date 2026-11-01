@@ -11,7 +11,7 @@ import (
 )
 
 // ErrUsage reports a malformed command line.
-var ErrUsage = errors.New("usage: fuguegate coverage|fuzz|mutation|deadcode|proto [flags]")
+var ErrUsage = errors.New("usage: fuguegate coverage|fuzz|mutation|deadcode|proto|commitlint|commitmsg|gateguard [flags]")
 
 func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -59,6 +59,12 @@ func dispatch(ctx context.Context, args []string, stdout io.Writer) error {
 		return runDeadcode(ctx, rest, stdout)
 	case "proto":
 		return runProto(ctx, rest, stdout)
+	case "commitlint":
+		return runCommitLint(ctx, rest, stdout)
+	case "commitmsg":
+		return runCommitMsg(ctx, rest, stdout)
+	case "gateguard":
+		return runGateGuard(ctx, rest, stdout)
 	default:
 		return fmt.Errorf("%w: unknown command %q", ErrUsage, args[0])
 	}
