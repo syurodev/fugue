@@ -137,3 +137,4 @@ func (s *Sequence) NewID() (string, error) {
 	s.n++
 	return fmt.Sprintf("%s-%d", s.prefix, s.n), nil
 }
+// trial
