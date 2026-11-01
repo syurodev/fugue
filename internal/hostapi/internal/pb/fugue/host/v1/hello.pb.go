@@ -193,3 +193,4 @@ func file_fugue_host_v1_hello_proto_init() {
 	file_fugue_host_v1_hello_proto_goTypes = nil
 	file_fugue_host_v1_hello_proto_depIdxs = nil
 }
+// edited by hand
