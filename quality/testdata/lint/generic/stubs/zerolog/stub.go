@@ -1,0 +1,3 @@
+package zerolog
+
+func Use() {}

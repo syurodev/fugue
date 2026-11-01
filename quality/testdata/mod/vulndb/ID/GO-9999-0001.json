@@ -1,0 +1,16 @@
+{
+  "schema_version": "1.3.1",
+  "id": "GO-9999-0001",
+  "modified": "2026-01-01T00:00:00Z",
+  "published": "2026-01-01T00:00:00Z",
+  "summary": "Synthetic vulnerability used only to prove the govulncheck gate fires",
+  "details": "Fixture entry; it does not describe a real flaw in go-cmp.",
+  "affected": [
+    {
+      "package": {"name": "github.com/google/go-cmp", "ecosystem": "Go"},
+      "ranges": [{"type": "SEMVER", "events": [{"introduced": "0"}, {"fixed": "99.0.0"}]}],
+      "ecosystem_specific": {"imports": [{"path": "github.com/google/go-cmp/cmp", "symbols": ["Diff"]}]}
+    }
+  ],
+  "database_specific": {"url": "https://pkg.go.dev/vuln/GO-9999-0001"}
+}
