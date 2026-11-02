@@ -82,12 +82,6 @@ func writeQuietly(w io.Writer, s string) {
 	}
 }
 
-func removeAllQuietly(path string) {
-	if err := os.RemoveAll(path); err != nil {
-		return
-	}
-}
-
 func boolPtr(v bool) *bool {
 	return &v
 }
