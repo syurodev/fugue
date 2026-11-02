@@ -51,6 +51,9 @@ func checkEventMetadata(s *State, e Event, f *DecisionFacts, bad map[InvariantID
 func checkFrontierTransition(s *State, e Event, bad map[InvariantID]bool) {
 	switch ev := e.(type) {
 	case *StepStartedEvent:
+		if ev.StepIndex <= 0 || ev.StepIndex-1 != s.CurrentStepIndex {
+			bad[SM07] = true
+		}
 		if s.StepStarted && (!s.StepCompleted && !s.StepAborted) {
 			bad[SM07] = true
 		}

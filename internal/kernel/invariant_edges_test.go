@@ -301,3 +301,41 @@ func TestCompletionCannotRelabelOldAdmission(t *testing.T) {
 		t.Fatal(ids)
 	}
 }
+
+func TestFinishRequiresStepDisposition(t *testing.T) {
+	t.Parallel()
+	s, _ := traceState(t, 12)
+	s.StepCompleted = false
+	s.StepAborted = false
+	if ids := CheckInvariants(s); !slices.Contains(ids, SM05) {
+		t.Fatal(ids)
+	}
+}
+
+func TestStepIdentityCannotBeReusedOrSkipped(t *testing.T) {
+	t.Parallel()
+	s, cases := traceState(t, 8)
+	c := cases[8]
+	bindDecision(&c, s, "closed-step")
+	batch, err := Decide(s, c.command, &c.facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ids := CheckBatch(s, batch[:2], &c.facts); len(ids) > 0 {
+		t.Fatal(ids)
+	}
+	s = Evolve(Evolve(s, batch[0]), batch[1])
+	bindDecision(&c, s, "next-step")
+	for _, index := range []int{-1, 0, 1, 2, 3} {
+		step := new(StepStartedEvent)
+		step.Envelope = c.facts.Envelope
+		step.StepIndex = index
+		ids := CheckBatch(s, []Event{step}, &c.facts)
+		if index == 2 && len(ids) > 0 {
+			t.Fatal(ids)
+		}
+		if index != 2 && !slices.Contains(ids, SM07) {
+			t.Fatalf("step %d: %v", index, ids)
+		}
+	}
+}

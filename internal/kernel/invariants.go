@@ -128,6 +128,9 @@ func frontierPhaseWrong(s *State) bool {
 }
 
 func finishSafe(s *State) bool {
+	if hasOpenStep(s) {
+		return false
+	}
 	if activeAttemptCount(s) > 0 || len(s.QuiescingAttempts) > 0 || len(s.ActiveTimers) > 0 {
 		return false
 	}
