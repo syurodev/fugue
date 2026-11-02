@@ -165,6 +165,7 @@ func evolveStepLifecycleEvents(s *State, e Event) bool {
 		s.StepContinuation = ev.Continuation
 		return true
 	case *StepAbortedEvent:
+		closeAbortedModel(s)
 		s.StepAborted = true
 		s.StepCompleted = false
 		return true
@@ -187,5 +188,11 @@ func evolveStepContextEvents(_ *State, e Event) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func closeAbortedModel(s *State) {
+	if inv := s.ModelInvocations[s.CurrentModelInvocationID]; inv != nil {
+		inv.Closed = true
 	}
 }

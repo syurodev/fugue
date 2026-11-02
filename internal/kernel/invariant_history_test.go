@@ -184,3 +184,62 @@ func TestToolReconciliationNeedsOwnerEvidence(t *testing.T) {
 		t.Fatal(ids)
 	}
 }
+
+func TestMetadataCloseDisposesInterruptedModel(t *testing.T) {
+	t.Parallel()
+	s, cases := traceState(t, 3)
+	c := cases[4]
+	bindDecision(&c, s, "model-unknown")
+	interrupted := new(ModelRequestInterruptedEvent)
+	interrupted.Envelope = c.facts.Envelope
+	interrupted.InvocationID = "m1"
+	interrupted.AttemptID = "a1"
+	interrupted.PartialRef = "interrupted-partial"
+	interrupted.UsageReservationTokens = 7
+	cause := new(RunInterruptedEvent)
+	cause.Envelope = interrupted.Envelope
+	cause.Envelope.Sequence++
+	cause.CauseID = "model-incident"
+	cause.Cause = "payload_unavailable"
+	first := []Event{interrupted, cause}
+	if ids := CheckBatch(s, first, &c.facts); len(ids) > 0 {
+		t.Fatal(ids)
+	}
+	for _, e := range first {
+		s = Evolve(s, e)
+	}
+	bindDecision(&c, s, "metadata-close")
+	events := metadataCloseFixture(&c, cause.CauseID)
+	if ids := CheckBatch(s, events, &c.facts); len(ids) > 0 {
+		t.Fatal(ids)
+	}
+	for _, e := range events {
+		s = Evolve(s, e)
+	}
+	model := s.ModelInvocations["m1"]
+	if !model.Closed || model.Failed || model.Completed {
+		t.Fatal("unknown closure fabricated known model outcome")
+	}
+	if model.Attempts["a1"].Interrupted.PartialRef != interrupted.PartialRef || model.Attempts["a1"].Interrupted.UsageReservationTokens != 7 {
+		t.Fatal("unknown model evidence erased")
+	}
+}
+
+func metadataCloseFixture(c *decisionCase, causeID string) []Event {
+	closeRun := new(RunClosureConfirmedEvent)
+	closeRun.Envelope = c.facts.Envelope
+	closeRun.ExactAttemptIDs = []string{"a1"}
+	closeRun.CauseIDs = []string{causeID}
+	closeRun.ResultingContextRequirement = ContextRequirementFreshRequired
+	closeRun.AttemptDispositions = map[string]AttemptDisposition{"a1": AttemptDispositionAbandonedUnknown}
+	aborted := new(StepAbortedEvent)
+	aborted.Envelope = closeRun.Envelope
+	aborted.Envelope.Sequence++
+	aborted.StepIndex = 1
+	aborted.Reason = "unavailable_close"
+	finished := new(RunFinishedEvent)
+	finished.Envelope = aborted.Envelope
+	finished.Envelope.Sequence++
+	finished.Outcome = RunOutcomeAbandonedUnknown
+	return []Event{closeRun, aborted, finished}
+}
