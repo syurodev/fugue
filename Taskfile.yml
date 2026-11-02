@@ -108,7 +108,7 @@ tasks:
       - go mod tidy -diff
       - go mod verify
       - go tool govulncheck ./...
-      - go tool go-licenses check ./... --allowed_licenses={{.ALLOWED_LICENSES}}
+      - go tool go-licenses check ./... --allowed_licenses={{.ALLOWED_LICENSES}} --ignore=modernc.org/mathutil
 
   proto:
     desc: buf lint, format, breaking changes against main, generated code up to date

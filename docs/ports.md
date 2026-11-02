@@ -69,6 +69,27 @@ Not carried over:
 - The check on the encoded envelope length after sealing: a 1,000,000-byte record always encodes
   below 1,500,000 bytes, so the branch was unreachable.
 
+## `internal/storage` (F1.3)
+
+| | |
+| --- | --- |
+| Original | `internal/storage` (`sqlite.go`, `migrations.go`, `sqlite_test.go`, `migrations_contiguous_test.go`) and `internal/vault` (`sqlkeyringstore.go`, `sqlkeyringstore_test.go`) |
+| dev-kit commit | `b3c8ff5df42e6fc58c1cd8077dddd278fc7dd84e` |
+| Stored format | Single-connection SQLite database `fugue.db` (`journal_mode=DELETE`, `synchronous=FULL`, `foreign_keys=ON`, file mode `0600`), exclusive lock file `fugue.lock` (`0600`), `schema_migrations`, `exec_host` and `vault_meta` |
+| Vector tests | Behavioral invariants from `sqlite_test.go`, `migrations_contiguous_test.go` and `sqlkeyringstore_test.go`: `TestOpenRestrictsPermissionsAndSetsDurabilityPragmas`, `TestSQLiteDoesNotCreateUnprotectedWALSidecars`, `TestOpenClosesDatabaseWhenRestrictingPermissionsFails`, `TestMigrateIsIdempotentAndContiguous`, `TestSQLKeyringStorePersistsAcrossReopen` |
+
+Changed for `storage-security §2–3, §9` and ADR 0001:
+
+- Database file is `fugue.db` (Q-03). `Open` sets `synchronous=FULL` explicitly and calls `VerifyPragmas` (`TestVerifyPragmasRejectsWrongJournalModeSynchronousAndForeignKeys`).
+- All `CREATE TABLE` DDL lives under `internal/storage/migrations/*.sql` (embedded with `go:embed` and checked by `TestTableOwnership`), starting clean with `schema_migrations`, `exec_host` and `vault_meta`.
+- `AcquireLock` / `DirLock` locks `<dataDir>/fugue.lock` (`flock(LOCK_EX|LOCK_NB)` on Unix, `LockFileEx` on Windows) after canonicalizing symlinks and rejecting network filesystems (`TestTwoProcessesCannotHoldTheDataDirectoryLock`, `TestPathAliasesAndSymlinksContendOnTheSameLock`, `TestCrashReleasesTheLockAndAdvancesHostIncarnation`, `TestNetworkFilesystemIsRejected`).
+- `AcquireHostIncarnation` and `CurrentHostIncarnation` manage the singleton `exec_host` row while the data-directory lock is held (`TestAcquireHostIncarnationRequiresHeldLockAndMonotonicallyAdvances`).
+- `vault.SQLKeyringStore` persists the keyring JSON in `vault_meta` (`TestSQLKeyringStorePersistsAcrossReopen`).
+
+Not carried over:
+
+- DevKit entity tables (`notes`, `vault_items`, `sync_*`, `agent_*`, `task_*`, `workspaces`, etc.) and the generic `KV` wrapper: each table in Fugue is owned by a single package per ADR 0001 §5.
+
 ## `internal/interaction` (F1.5)
 
 | | |
