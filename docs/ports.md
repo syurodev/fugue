@@ -135,4 +135,29 @@ Changed for `tool-system §9`:
 - `CaptureTurn`, `CaptureToolBefore`, `CaptureToolAfter`, `PlanToolRestore` and `RestoreTool` issue random snapshot IDs via `ids.Generator` while keeping git tree hashes inside `Store`, and tool restore narrows `PlanRestore` to the files in that tool's own `before`/`after` diff (`TestRestoreToolTouchesOnlyTheToolsDiff`).
 - `gitparse` is folded into `internal/snapshot` (ADR 0001 §2). Time, random IDs and test goroutines go through `clock.Clock`, `ids.Generator` and `supervise.Go`; `LocateWith` takes `*LocateOptions` instead of package-level globals.
 
+## `internal/sandbox` (F1.6)
+
+| | |
+| --- | --- |
+| Original | `internal/sandbox` (`policy.go`, `proc.go`, `seatbelt_profile.go`, `bwrap_args.go`, `backend_seatbelt.go`, `backend_bwrap.go`, `backend_landlock_linux.go`, `default_other.go` and their tests) |
+| dev-kit commit | `b3c8ff5df42e6fc58c1cd8077dddd278fc7dd84e` |
+| Stored format | Seatbelt SBPL profile text (`testdata/seatbelt-network-none.sbpl`, `testdata/seatbelt-network-host.sbpl`) and `bwrap` argv vector (`testdata/bwrap-args.json`) |
+| Vector tests | Captured from the original `buildSeatbeltProfileForHost` and `buildBwrapArgsWith`: `TestSeatbeltProfileMatchesTheOriginalVectors`, `TestBwrapArgsMatchesTheOriginalVector`; behavioral and smoke tests: `TestSeatbeltProfileRulesAndValidation`, `TestBwrapArgsNestedBindsAndResolvConf`, `TestPolicyValidationAndDenyWriteRules`, `TestRunnerAndProcLifecycle`, `TestBwrapBackendUnitAndSmoke`, `TestRestrictSelfSkippedOrApplies`, `TestSeatbeltBackendUnitAndSmoke` |
+
+The policy invariants, Seatbelt SBPL generator, `bwrap` argument builder, Landlock ruleset/path-beneath restrictions and `Runner`/`Proc` process lifecycle are preserved byte-for-byte on the golden vectors:
+
+- Mandatory sensitive-path deny list (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`, `~/.config/gcloud`, `~/.docker`, `~/.netrc`, `~/.npmrc`, `~/.pypirc`), private-home default (`--tmpfs $HOME` on Linux, `HOME` omitted from Seatbelt RW grants on macOS), and `DenyWritePaths` read-only remounts (`--ro-bind` in `bwrap`, `(deny file-write* ...)` in Seatbelt) with ancestor directory pinning against rename bypass.
+- `AllowUnixSockets` punches single-file holes inside denied or private directories; `SessionTempDir` (`/private/tmp/dk-*`) isolates per-session temp directories and probes Seatbelt `local unix-socket` support once per gate with a retry on timeout.
+
+Changed for `tool-system §6` and ADR 0001:
+
+- Errors use `errcode` (`ErrUnavailable` with `errcode.Unavailable`, `ErrInvalidPolicy` with `errcode.InvalidArgument`, `ErrLandlockSkipped` with `errcode.Unavailable`).
+- `Policy` methods and helpers take `*Policy` to satisfy `gocritic` `hugeParam`, and package-level mutable validation caches are moved onto `SeatbeltBackend` (`unixProfileGate`) so there are no package-level mutable globals (`gochecknoglobals`).
+- Subprocess test helpers dispatch through `TestMain` flags instead of `os.Getenv`, and concurrent wait tests use `supervise.Go`.
+
+Not carried over:
+
+- Per-session jail, process registry and environment snapshot: those belong to F6.4 (`internal/tools/jail`, awaiting H-25).
+
+
 
