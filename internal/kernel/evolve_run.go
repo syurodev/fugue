@@ -4,7 +4,9 @@ func evolveRunLifecycleEvents(s *State, e Event) bool {
 	switch ev := e.(type) {
 	case *RunAcceptedEvent:
 		s.Accepted = true
-		s.RunID = ev.Envelope.RunID
+		if s.RunID == "" {
+			s.RunID = ev.Envelope.RunID
+		}
 		return true
 	case *RunAdmittedEvent:
 		s.Admitted = true
@@ -20,6 +22,7 @@ func evolveRunLifecycleEvents(s *State, e Event) bool {
 		s.Finished = true
 		s.Outcome = ev.Outcome
 		clear(s.ActiveTimers)
+		clear(s.QuiescingAttempts)
 		return true
 	default:
 		return false
@@ -51,7 +54,12 @@ func evolveRunControlEvents(s *State, e Event) bool {
 		delete(s.Blocks, ev.BlockerID)
 		return true
 	case *RunInterruptedEvent:
-		s.InterruptionCauses[ev.Cause] = &InterruptionCause{
+		causeID := ev.CauseID
+		if causeID == "" {
+			causeID = ev.Cause
+		}
+		s.InterruptionCauses[causeID] = &InterruptionCause{
+			CauseID:    causeID,
 			Cause:      ev.Cause,
 			AttemptRef: ev.AttemptRef,
 			PayloadRef: ev.PayloadRef,
@@ -92,6 +100,7 @@ func evolveRunRecoveryEvents(s *State, e Event) bool {
 
 func markAttemptsAbandoned(s *State, attemptIDs []string) {
 	for _, attID := range attemptIDs {
+		delete(s.QuiescingAttempts, attID)
 		for _, inv := range s.ModelInvocations {
 			if att, ok := inv.Attempts[attID]; ok {
 				att.Status = ModelAttemptStatusAbandonedUnknown
@@ -106,6 +115,9 @@ func markAttemptsAbandoned(s *State, attemptIDs []string) {
 }
 
 func markAttemptsWithDispositions(s *State, disps map[string]AttemptDisposition) {
+	for attID := range disps {
+		delete(s.QuiescingAttempts, attID)
+	}
 	markModelAttemptsWithDispositions(s, disps)
 	markToolAttemptsWithDispositions(s, disps)
 }

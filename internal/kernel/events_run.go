@@ -101,6 +101,7 @@ func (e *RunBlockClearedEvent) EventEnvelope() Envelope { return e.Envelope }
 // RunInterruptedEvent records an interruption cause requiring intervention or reconciliation.
 type RunInterruptedEvent struct {
 	Envelope   Envelope
+	CauseID    string
 	Cause      string
 	AttemptRef string
 	PayloadRef string
@@ -117,8 +118,8 @@ type RunRecoveryClearedEvent struct {
 	Envelope      Envelope
 	CauseIDs      []string
 	OwnerEvidence string
-	Disposition   string
-	NextAction    string
+	Disposition   RecoveryDisposition
+	NextAction    NextAction
 }
 
 // EventName returns the canonical event name.
@@ -134,7 +135,7 @@ type UnknownAcceptedEvent struct {
 	Revisions           []uint64
 	Actor               string
 	AcceptedUncertainty string
-	Disposition         string
+	Disposition         NextAction
 }
 
 // EventName returns the canonical event name.

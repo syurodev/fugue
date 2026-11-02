@@ -1,6 +1,9 @@
 package kernel
 
-import "slices"
+import (
+	"fmt"
+	"slices"
+)
 
 // Evolve is the pure total state transition function of the kernel state machine.
 // Given the current state and an event, it returns the next state without mutating
@@ -10,8 +13,11 @@ func Evolve(s *State, e Event) *State {
 		s = NewState()
 	}
 	next := cloneState(s)
-	if e == nil {
+	if isNilEvent(e) {
 		return &next
+	}
+	if env := e.EventEnvelope(); env.Sequence > next.LastSequence {
+		next.LastSequence = env.Sequence
 	}
 	switch {
 	case evolveRunAndStepEvents(&next, e):
@@ -20,6 +26,13 @@ func Evolve(s *State, e Event) *State {
 	case evolveTimerBudgetEvents(&next, e):
 	}
 	return &next
+}
+
+func isNilEvent(e Event) bool {
+	if e == nil {
+		return true
+	}
+	return fmt.Sprint(e) == "<nil>"
 }
 
 func evolveRunAndStepEvents(s *State, e Event) bool {
@@ -60,13 +73,26 @@ func cloneState(s *State) State {
 func cloneModelInvocations(src map[string]*ModelInvocation) map[string]*ModelInvocation {
 	dst := make(map[string]*ModelInvocation, len(src))
 	for k, v := range src {
-		invCopy := *v
-		invCopy.Attempts = make(map[string]*ModelAttempt, len(v.Attempts))
-		for ak, av := range v.Attempts {
-			attCopy := *av
-			invCopy.Attempts[ak] = &attCopy
+		if v == nil {
+			dst[k] = nil
+			continue
 		}
+		invCopy := *v
+		invCopy.Attempts = cloneModelAttempts(v.Attempts)
 		dst[k] = &invCopy
+	}
+	return dst
+}
+
+func cloneModelAttempts(src map[string]*ModelAttempt) map[string]*ModelAttempt {
+	dst := make(map[string]*ModelAttempt, len(src))
+	for ak, av := range src {
+		if av == nil {
+			dst[ak] = nil
+			continue
+		}
+		attCopy := *av
+		dst[ak] = &attCopy
 	}
 	return dst
 }
@@ -74,13 +100,26 @@ func cloneModelInvocations(src map[string]*ModelInvocation) map[string]*ModelInv
 func cloneToolInvocations(src map[string]*ToolInvocation) map[string]*ToolInvocation {
 	dst := make(map[string]*ToolInvocation, len(src))
 	for k, v := range src {
-		toolCopy := *v
-		toolCopy.Attempts = make(map[string]*ToolAttempt, len(v.Attempts))
-		for ak, av := range v.Attempts {
-			attCopy := *av
-			toolCopy.Attempts[ak] = &attCopy
+		if v == nil {
+			dst[k] = nil
+			continue
 		}
+		toolCopy := *v
+		toolCopy.Attempts = cloneToolAttempts(v.Attempts)
 		dst[k] = &toolCopy
+	}
+	return dst
+}
+
+func cloneToolAttempts(src map[string]*ToolAttempt) map[string]*ToolAttempt {
+	dst := make(map[string]*ToolAttempt, len(src))
+	for ak, av := range src {
+		if av == nil {
+			dst[ak] = nil
+			continue
+		}
+		attCopy := *av
+		dst[ak] = &attCopy
 	}
 	return dst
 }
@@ -88,6 +127,10 @@ func cloneToolInvocations(src map[string]*ToolInvocation) map[string]*ToolInvoca
 func cloneBlocks(src map[string]*Block) map[string]*Block {
 	dst := make(map[string]*Block, len(src))
 	for k, v := range src {
+		if v == nil {
+			dst[k] = nil
+			continue
+		}
 		blkCopy := *v
 		dst[k] = &blkCopy
 	}
@@ -97,6 +140,10 @@ func cloneBlocks(src map[string]*Block) map[string]*Block {
 func cloneActiveTimers(src map[string]*ActiveTimer) map[string]*ActiveTimer {
 	dst := make(map[string]*ActiveTimer, len(src))
 	for k, v := range src {
+		if v == nil {
+			dst[k] = nil
+			continue
+		}
 		timerCopy := *v
 		dst[k] = &timerCopy
 	}
@@ -106,6 +153,10 @@ func cloneActiveTimers(src map[string]*ActiveTimer) map[string]*ActiveTimer {
 func cloneInterruptionCauses(src map[string]*InterruptionCause) map[string]*InterruptionCause {
 	dst := make(map[string]*InterruptionCause, len(src))
 	for k, v := range src {
+		if v == nil {
+			dst[k] = nil
+			continue
+		}
 		causeCopy := *v
 		dst[k] = &causeCopy
 	}

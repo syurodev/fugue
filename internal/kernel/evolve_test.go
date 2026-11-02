@@ -26,6 +26,9 @@ const (
 	evCancelled     = "cancelled"
 	evVaultLock     = "vault_locked"
 	evModelCloseAtt = "att-m-close"
+	evDescriptorVer = "1.0"
+	evToolQ         = "tc-q"
+	evAttemptQ      = "ta-q"
 )
 
 func testEvolveRunLifecycleEvents(t *testing.T, env *Envelope, now time.Time) *State {
@@ -78,13 +81,13 @@ func testEvolveRunBlocksAndRecovery(t *testing.T, s *State, env *Envelope) *Stat
 		t.Fatalf("RunBlockCleared failed")
 	}
 
-	s = Evolve(s, &RunInterruptedEvent{Envelope: *env, Cause: evCause, AttemptRef: evAttempt1, PayloadRef: evPay1})
+	s = Evolve(s, &RunInterruptedEvent{Envelope: *env, CauseID: evCause, Cause: evCause, AttemptRef: evAttempt1, PayloadRef: evPay1})
 	if len(s.InterruptionCauses) != 1 {
 		t.Fatalf("RunInterrupted failed")
 	}
 
 	s = Evolve(s, &RunRecoveryClearedEvent{
-		Envelope: *env, CauseIDs: []string{evCause}, OwnerEvidence: "ok", Disposition: "reconciled", NextAction: "continue",
+		Envelope: *env, CauseIDs: []string{evCause}, OwnerEvidence: "ok", Disposition: RecoveryDispositionReconciled, NextAction: NextActionClose,
 	})
 	if len(s.InterruptionCauses) != 0 {
 		t.Fatalf("RunRecoveryCleared failed")
@@ -95,10 +98,10 @@ func testEvolveRunBlocksAndRecovery(t *testing.T, s *State, env *Envelope) *Stat
 func testEvolveRunClosuresAndBoundaries(t *testing.T, s *State, env *Envelope, now time.Time) *State {
 	t.Helper()
 	s = Evolve(s, &UnknownAcceptedEvent{
-		Envelope: *env, TargetAttempts: []string{evAttempt1}, Revisions: []uint64{1}, Actor: evActor, AcceptedUncertainty: "un", Disposition: "close",
+		Envelope: *env, TargetAttempts: []string{evAttempt1}, Revisions: []uint64{1}, Actor: evActor, AcceptedUncertainty: "un", Disposition: NextActionClose,
 	})
 
-	s.InterruptionCauses[evCause1] = &InterruptionCause{Cause: evVaultLock, AttemptRef: "", PayloadRef: ""}
+	s.InterruptionCauses[evCause1] = &InterruptionCause{CauseID: evCause1, Cause: evVaultLock, AttemptRef: "", PayloadRef: ""}
 	s.ModelInvocations["inv-m-close"] = &ModelInvocation{
 		InvocationID: "inv-m-close", Planned: true,
 		Attempts: map[string]*ModelAttempt{
@@ -106,7 +109,7 @@ func testEvolveRunClosuresAndBoundaries(t *testing.T, s *State, env *Envelope, n
 		},
 	}
 	s.ToolInvocations["tc-close"] = &ToolInvocation{
-		ToolCallID: "tc-close", DescriptorVersion: "1.0", EffectClass: EffectClassSideEffecting,
+		ToolCallID: "tc-close", DescriptorVersion: evDescriptorVer, EffectClass: EffectClassSideEffecting,
 		Attempts: map[string]*ToolAttempt{
 			evAttempt1: {AttemptID: evAttempt1, Status: ToolAttemptStatusDispatching},
 		},
@@ -185,7 +188,7 @@ func testEvolveStepEvents(t *testing.T, s *State, env *Envelope, now time.Time) 
 	}
 }
 
-func TestEvolvePurityAndCoverage(t *testing.T) {
+func TestEvolvePurity(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
 	env := testEnvelope(evRunID, 1, now)
@@ -195,6 +198,21 @@ func TestEvolvePurityAndCoverage(t *testing.T) {
 		s := NewState()
 		s.RunID = evRunID
 		got := Evolve(s, nil)
+		if got == s {
+			t.Fatalf("expected different pointer for purity")
+		}
+		if diff := cmp.Diff(s, got); diff != "" {
+			t.Fatalf("state mismatch (-want +got):\n%s", diff)
+		}
+	})
+
+	t.Run("typed nil event returns cloned state with identical content", func(t *testing.T) {
+		t.Parallel()
+		s := NewState()
+		s.RunID = evRunID
+		var ev *RunFinishedEvent
+		var e Event = ev
+		got := Evolve(s, e)
 		if got == s {
 			t.Fatalf("expected different pointer for purity")
 		}
@@ -214,12 +232,189 @@ func TestEvolvePurityAndCoverage(t *testing.T) {
 			t.Fatalf("expected initial.Blocks length 1, next.Blocks length 0")
 		}
 	})
+}
 
-	t.Run("evolve covers all 23 run and step events", func(t *testing.T) {
-		t.Parallel()
-		s := testEvolveRunLifecycleEvents(t, &env, now)
-		s = testEvolveRunBlocksAndRecovery(t, s, &env)
-		s = testEvolveRunClosuresAndBoundaries(t, s, &env, now)
-		testEvolveStepEvents(t, s, &env, now)
+func TestEvolveNilMapValues(t *testing.T) {
+	t.Parallel()
+	s := NewState()
+	s.Blocks["nil_block"] = nil
+	s.ActiveTimers["nil_timer"] = nil
+	s.ModelInvocations["nil_model"] = nil
+	s.ToolInvocations["nil_tool"] = nil
+	s.InterruptionCauses["nil_cause"] = nil
+
+	got := Evolve(s, nil)
+	if got == s {
+		t.Fatalf("expected different pointer")
+	}
+	_ = DeriveLifecycle(s)
+	_ = DeriveWaitReasons(s)
+	_ = DerivePhase(s)
+}
+
+func TestEvolveQuiesceLifecycle(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	env := testEnvelope(evRunID, 1, now)
+	s := NewState()
+	s.RunID = evRunID
+	s.Admitted = true
+
+	s = Evolve(s, &ToolCallPlannedEvent{
+		Envelope: env, ToolCallID: evToolQ, SourcePosition: 0, DescriptorVersion: evDescriptorVer,
+		EffectClass: EffectClassSideEffecting, FirstAttemptID: evAttemptQ, InputRef: "",
 	})
+	s = Evolve(s, &ToolDispatchStartedEvent{
+		Envelope: env, ToolCallID: evToolQ, AttemptID: evAttemptQ, CheckGeneration: 1,
+		ExecutorFence: 1, Token: 7, ReceiptRef: "r", BudgetReservation: "b",
+	})
+	if DeriveLifecycle(s) != LifecycleRunning {
+		t.Fatalf("expected running after dispatch")
+	}
+
+	s = Evolve(s, &InvocationQuiesceRequestedEvent{
+		Envelope: env, InvocationID: "inv-q", AttemptID: evAttemptQ,
+		Reason: QuiesceReasonStop, CommandRef: "cmd-q",
+	})
+	if !s.QuiescingAttempts[evAttemptQ] {
+		t.Fatalf("expected attempt in QuiescingAttempts")
+	}
+	if DeriveLifecycle(s) != LifecycleRunning {
+		t.Fatalf("expected running while attempt is quiescing")
+	}
+
+	s = Evolve(s, &ToolResultRecordedEvent{
+		Envelope: env, ToolCallID: evToolQ, AttemptID: evAttemptQ,
+		Outcome: ToolResultOutcomeCancelled, ResultRef: "res-q", Code: "cancelled",
+		EffectEvidence: "none", SourcePosition: 0,
+	})
+	if s.QuiescingAttempts[evAttemptQ] {
+		t.Fatalf("expected QuiescingAttempts to be cleared after cancellation")
+	}
+
+	s = Evolve(s, &RunBlockAddedEvent{
+		Envelope: env, BlockerID: "b-vault", Kind: WaitReasonVaultLocked,
+		Reference: "ref-v", ResumeCondition: "unlock",
+	})
+	if got := DeriveLifecycle(s); got != LifecycleWaiting {
+		t.Fatalf("expected LifecycleWaiting after quiesced tool cancellation with block, got %s", got)
+	}
+	reasons := DeriveWaitReasons(s)
+	if len(reasons) != 1 || reasons[0] != WaitReasonVaultLocked {
+		t.Fatalf("expected [WaitReasonVaultLocked], got %v", reasons)
+	}
+}
+
+func TestEvolveInterruptionCauses(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	env := testEnvelope(evRunID, 1, now)
+	s := NewState()
+	s.RunID = evRunID
+	s.Admitted = true
+
+	s = Evolve(s, &RunInterruptedEvent{
+		Envelope: env, CauseID: "cause-1", Cause: "effect_unknown", AttemptRef: "att-1", PayloadRef: "pay-1",
+	})
+	s = Evolve(s, &RunInterruptedEvent{
+		Envelope: env, CauseID: "cause-2", Cause: "effect_unknown", AttemptRef: "att-2", PayloadRef: "pay-2",
+	})
+
+	if len(s.InterruptionCauses) != 2 {
+		t.Fatalf("expected 2 distinct interruption causes, got %d", len(s.InterruptionCauses))
+	}
+	if s.InterruptionCauses["cause-1"].AttemptRef != "att-1" || s.InterruptionCauses["cause-2"].AttemptRef != "att-2" {
+		t.Fatalf("attempt refs corrupted across causes")
+	}
+	if DeriveLifecycle(s) != LifecycleInterrupted {
+		t.Fatalf("expected LifecycleInterrupted")
+	}
+
+	s = Evolve(s, &RunRecoveryClearedEvent{
+		Envelope: env, CauseIDs: []string{"cause-1"}, OwnerEvidence: "ev",
+		Disposition: RecoveryDispositionReconciled, NextAction: NextActionClose,
+	})
+	if len(s.InterruptionCauses) != 1 || s.InterruptionCauses["cause-2"] == nil {
+		t.Fatalf("expected cause-2 to remain after clearing cause-1")
+	}
+	if DeriveLifecycle(s) != LifecycleInterrupted {
+		t.Fatalf("expected LifecycleInterrupted still while cause-2 remains")
+	}
+
+	s = Evolve(s, &RunRecoveryClearedEvent{
+		Envelope: env, CauseIDs: []string{"cause-2"}, OwnerEvidence: "ev",
+		Disposition: RecoveryDispositionReconciled, NextAction: NextActionClose,
+	})
+	if len(s.InterruptionCauses) != 0 {
+		t.Fatalf("expected 0 interruption causes after clearing all")
+	}
+	if DeriveLifecycle(s) != LifecycleRunning {
+		t.Fatalf("expected LifecycleRunning after all causes cleared")
+	}
+}
+
+func TestEvolveIdempotenceAndMonotonicity(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+
+	t.Run("tool call planned is idempotent and sequence tracks monotonically", func(t *testing.T) {
+		t.Parallel()
+		s := NewState()
+		s.RunID = evRunID
+
+		env1 := testEnvelope(evRunID, 10, now)
+		s = Evolve(s, &ToolCallPlannedEvent{
+			Envelope: env1, ToolCallID: "tc-idem", SourcePosition: 0, DescriptorVersion: evDescriptorVer,
+			EffectClass: EffectClassPureRead, FirstAttemptID: "att-idem-1", InputRef: "",
+		})
+		if s.LastSequence != 10 {
+			t.Fatalf("expected LastSequence 10, got %d", s.LastSequence)
+		}
+		if len(s.ToolOrder) != 1 {
+			t.Fatalf("expected ToolOrder length 1, got %d", len(s.ToolOrder))
+		}
+
+		env2 := testEnvelope(evRunID, 11, now)
+		s = Evolve(s, &ToolCallPlannedEvent{
+			Envelope: env2, ToolCallID: "tc-idem", SourcePosition: 0, DescriptorVersion: evDescriptorVer,
+			EffectClass: EffectClassPureRead, FirstAttemptID: "att-idem-1", InputRef: "",
+		})
+		if s.LastSequence != 11 {
+			t.Fatalf("expected LastSequence 11, got %d", s.LastSequence)
+		}
+		if len(s.ToolOrder) != 1 {
+			t.Fatalf("expected ToolOrder length still 1 (no duplicate), got %d", len(s.ToolOrder))
+		}
+	})
+
+	t.Run("run accepted does not overwrite existing run ID", func(t *testing.T) {
+		t.Parallel()
+		s := NewState()
+		s = Evolve(s, &RunAcceptedEvent{
+			Envelope: testEnvelope("run-orig", 1, now),
+			InputRef: "", SessionID: "", QueueItemRef: "", ProtocolBinding: "",
+			InitialBudgets: "", PriorityClass: "", PeerOutboxRef: "", GoalID: "", GoalRound: 0,
+		})
+		if s.RunID != "run-orig" {
+			t.Fatalf("expected RunID run-orig, got %s", s.RunID)
+		}
+		s = Evolve(s, &RunAcceptedEvent{
+			Envelope: testEnvelope("run-other", 2, now),
+			InputRef: "", SessionID: "", QueueItemRef: "", ProtocolBinding: "",
+			InitialBudgets: "", PriorityClass: "", PeerOutboxRef: "", GoalID: "", GoalRound: 0,
+		})
+		if s.RunID != "run-orig" {
+			t.Fatalf("expected RunID to remain run-orig, got %s", s.RunID)
+		}
+	})
+}
+
+func TestEvolveRunAndStepCoverage(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	env := testEnvelope(evRunID, 1, now)
+	s := testEvolveRunLifecycleEvents(t, &env, now)
+	s = testEvolveRunBlocksAndRecovery(t, s, &env)
+	s = testEvolveRunClosuresAndBoundaries(t, s, &env, now)
+	testEvolveStepEvents(t, s, &env, now)
 }

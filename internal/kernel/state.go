@@ -64,6 +64,7 @@ type ActiveTimer struct {
 
 // InterruptionCause represents an unresolved cause requiring repair or reconciliation.
 type InterruptionCause struct {
+	CauseID    string
 	Cause      string
 	AttemptRef string
 	PayloadRef string
@@ -72,6 +73,7 @@ type InterruptionCause struct {
 // State represents the complete fact-based projection of the kernel state machine.
 type State struct {
 	RunID                    string
+	LastSequence             uint64
 	Accepted                 bool
 	Admitted                 bool
 	AdmissionToken           uint64
@@ -101,6 +103,7 @@ type State struct {
 func NewState() *State {
 	return &State{
 		RunID:                    "",
+		LastSequence:             0,
 		Accepted:                 false,
 		Admitted:                 false,
 		AdmissionToken:           0,

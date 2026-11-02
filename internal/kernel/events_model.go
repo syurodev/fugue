@@ -155,7 +155,7 @@ type ModelAttemptAbandonedEvent struct {
 	InvocationID string
 	Uncertainty  string
 	Receipt      string
-	NextAction   string
+	NextAction   NextAction
 	UnknownCost  int
 }
 

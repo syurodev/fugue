@@ -16,10 +16,10 @@ const (
 	testTimer1        = "t-1"
 	testTimer2        = "t-2"
 	testWindowID      = "win-1"
-	testActionClose   = "close"
+	testActionClose   = NextActionClose
 	testActionRetry   = "retry"
-	testOutcomeSucc   = "succeeded"
-	testOutcomeFail   = "failed"
+	testOutcomeSucc   = ToolResultOutcomeSucceeded
+	testOutcomeFail   = ToolResultOutcomeFailed
 	testInputRef      = "inp"
 	testModelInvRef   = "inv"
 	testResponseRef   = "resp"
@@ -177,7 +177,7 @@ func testEvolveToolExecutionAndOutcomes(t *testing.T, s *State, env *Envelope) {
 		t.Fatalf("ToolOutcomeUnknown failed")
 	}
 
-	s = Evolve(s, &ToolReconciledEvent{Envelope: *env, ToolCallID: testToolCallID, AttemptID: testToolAtt1, OperationReceipt: "op", ObservedOutcome: testOutcomeSucc})
+	s = Evolve(s, &ToolReconciledEvent{Envelope: *env, ToolCallID: testToolCallID, AttemptID: testToolAtt1, OperationReceipt: "op", ObservedOutcome: ToolOutcomeUnknownObservedDisconnected})
 	if s.ToolInvocations[testToolCallID].Attempts[testToolAtt1].Status != ToolAttemptStatusSucceeded {
 		t.Fatalf("ToolReconciled failed")
 	}
@@ -187,7 +187,7 @@ func testEvolveToolExecutionAndOutcomes(t *testing.T, s *State, env *Envelope) {
 		t.Fatalf("ToolAttemptPlanned failed")
 	}
 	s = Evolve(s, &ToolAttemptAbandonedEvent{Envelope: *env, ToolCallID: testToolCallID, AttemptID: testToolAtt2, DispositionRef: "d", NextAction: testActionRetry})
-	s = Evolve(s, &InvocationQuiesceRequestedEvent{Envelope: *env, InvocationID: testModelInvRef, AttemptID: testToolAtt1, Reason: "q", CommandRef: "c"})
+	s = Evolve(s, &InvocationQuiesceRequestedEvent{Envelope: *env, InvocationID: testModelInvRef, AttemptID: testToolAtt1, Reason: QuiesceReasonStop, CommandRef: "c"})
 	if !s.QuiescingAttempts[testToolAtt1] {
 		t.Fatalf("InvocationQuiesceRequested failed")
 	}
@@ -197,6 +197,9 @@ func testEvolveToolExecutionAndOutcomes(t *testing.T, s *State, env *Envelope) {
 	})
 	if !s.ToolInvocations[testToolCallID].Closed || s.ToolInvocations[testToolCallID].SelectedAttemptID != testToolAtt1 {
 		t.Fatalf("ToolResultRecorded failed")
+	}
+	if s.QuiescingAttempts[testToolAtt1] {
+		t.Fatalf("expected QuiescingAttempts to be cleared after ToolResultRecorded")
 	}
 
 	s.ToolInvocations[testToolCallID].Attempts[testToolAtt3] = &ToolAttempt{AttemptID: testToolAtt3, Status: ToolAttemptStatusAwaitingApproval}
@@ -259,14 +262,14 @@ func testToolResultOutcomes(t *testing.T, env *Envelope) {
 
 	cases := []struct {
 		id      string
-		outcome string
+		outcome ToolResultOutcome
 		want    ToolAttemptStatus
 	}{
 		{testAttFail, testOutcomeFail, ToolAttemptStatusFailed},
-		{testAttDen, "denied", ToolAttemptStatusDenied},
-		{testAttRef, "refused", ToolAttemptStatusRefused},
-		{testAttCan, testCancelled, ToolAttemptStatusCancelled},
-		{testAttAbn, "abandoned_unknown", ToolAttemptStatusAbandonedUnknown},
+		{testAttDen, ToolResultOutcomeDenied, ToolAttemptStatusDenied},
+		{testAttRef, ToolResultOutcomeRefused, ToolAttemptStatusRefused},
+		{testAttCan, ToolResultOutcomeCancelled, ToolAttemptStatusCancelled},
+		{testAttAbn, ToolResultOutcomeAbandonedUnknown, ToolAttemptStatusAbandonedUnknown},
 	}
 
 	for _, tc := range cases {
@@ -289,7 +292,7 @@ func testToolRecoveryDispositions(t *testing.T, env *Envelope) {
 		},
 	}
 
-	s = Evolve(s, &ToolReconciledEvent{Envelope: *env, ToolCallID: testToolCallID, AttemptID: testAttRec, OperationReceipt: "o", ObservedOutcome: testOutcomeFail})
+	s = Evolve(s, &ToolReconciledEvent{Envelope: *env, ToolCallID: testToolCallID, AttemptID: testAttRec, OperationReceipt: "o", ObservedOutcome: ToolOutcomeUnknownObservedProcessLost})
 	if s.ToolInvocations[testToolCallID].Attempts[testAttRec].Status != ToolAttemptStatusFailed {
 		t.Fatalf("expected tool reconciled failed")
 	}

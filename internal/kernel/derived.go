@@ -44,19 +44,30 @@ func DeriveLifecycle(s *State) Lifecycle {
 }
 
 func hasActiveAttempt(s *State) bool {
-	if len(s.QuiescingAttempts) > 0 {
-		return true
-	}
+	return len(s.QuiescingAttempts) > 0 || hasActiveModelAttempt(s) || hasActiveToolAttempt(s)
+}
+
+func hasActiveModelAttempt(s *State) bool {
 	for _, inv := range s.ModelInvocations {
+		if inv == nil {
+			continue
+		}
 		for _, att := range inv.Attempts {
-			if att.Status == ModelAttemptStatusRequesting || att.Status == ModelAttemptStatusStreaming {
+			if att != nil && (att.Status == ModelAttemptStatusRequesting || att.Status == ModelAttemptStatusStreaming) {
 				return true
 			}
 		}
 	}
+	return false
+}
+
+func hasActiveToolAttempt(s *State) bool {
 	for _, tool := range s.ToolInvocations {
+		if tool == nil {
+			continue
+		}
 		for _, att := range tool.Attempts {
-			if att.Status == ToolAttemptStatusDispatching {
+			if att != nil && att.Status == ToolAttemptStatusDispatching {
 				return true
 			}
 		}
@@ -120,7 +131,7 @@ func DeriveWaitReasons(s *State) []WaitReason {
 
 func collectBlockReasons(s *State, present map[WaitReason]bool) {
 	for _, blk := range s.Blocks {
-		if slices.Contains(canonicalWaitOrder(), blk.Kind) {
+		if blk != nil && slices.Contains(canonicalWaitOrder(), blk.Kind) {
 			present[blk.Kind] = true
 		}
 	}
@@ -128,7 +139,7 @@ func collectBlockReasons(s *State, present map[WaitReason]bool) {
 
 func collectTimerReasons(s *State, present map[WaitReason]bool) {
 	for _, t := range s.ActiveTimers {
-		if t.Purpose == TimerPurposeModelRetry || t.Purpose == TimerPurposeToolRetry {
+		if t != nil && (t.Purpose == TimerPurposeModelRetry || t.Purpose == TimerPurposeToolRetry) {
 			present[WaitReasonRetryTimer] = true
 		}
 	}
@@ -136,8 +147,11 @@ func collectTimerReasons(s *State, present map[WaitReason]bool) {
 
 func collectApprovalReasons(s *State, present map[WaitReason]bool) {
 	for _, tool := range s.ToolInvocations {
+		if tool == nil {
+			continue
+		}
 		for _, att := range tool.Attempts {
-			if att.Status == ToolAttemptStatusAwaitingApproval {
+			if att != nil && att.Status == ToolAttemptStatusAwaitingApproval {
 				present[WaitReasonApproval] = true
 				return
 			}

@@ -122,7 +122,7 @@ type ToolResultRecordedEvent struct {
 	Envelope       Envelope
 	ToolCallID     string
 	AttemptID      string
-	Outcome        string
+	Outcome        ToolResultOutcome
 	ResultRef      string
 	Code           string
 	EffectEvidence string
@@ -157,7 +157,7 @@ type ToolReconciledEvent struct {
 	ToolCallID       string
 	AttemptID        string
 	OperationReceipt string
-	ObservedOutcome  string
+	ObservedOutcome  ToolOutcomeUnknownObserved
 }
 
 // EventName returns the canonical event name.
@@ -172,7 +172,7 @@ type ToolAttemptAbandonedEvent struct {
 	ToolCallID     string
 	AttemptID      string
 	DispositionRef string
-	NextAction     string
+	NextAction     NextAction
 }
 
 // EventName returns the canonical event name.
@@ -202,7 +202,7 @@ type InvocationQuiesceRequestedEvent struct {
 	Envelope     Envelope
 	InvocationID string
 	AttemptID    string
-	Reason       string
+	Reason       QuiesceReason
 	CommandRef   string
 }
 

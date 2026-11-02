@@ -26,6 +26,7 @@ func evolveModelDispatchEvents(s *State, e Event) bool {
 		updateModelAttemptStatus(s, ev.InvocationID, ev.AttemptID, ModelAttemptStatusStreaming)
 		return true
 	case *ModelResponseRecordedEvent:
+		delete(s.QuiescingAttempts, ev.AttemptID)
 		if inv := s.ModelInvocations[ev.InvocationID]; inv != nil {
 			inv.Completed = true
 			inv.SelectedAttemptID = ev.AttemptID
@@ -35,9 +36,11 @@ func evolveModelDispatchEvents(s *State, e Event) bool {
 		}
 		return true
 	case *ModelRequestFailedEvent:
+		delete(s.QuiescingAttempts, ev.AttemptID)
 		updateModelAttemptStatus(s, ev.InvocationID, ev.AttemptID, ModelAttemptStatusFailed)
 		return true
 	case *ModelRequestInterruptedEvent:
+		delete(s.QuiescingAttempts, ev.AttemptID)
 		updateModelAttemptStatus(s, ev.InvocationID, ev.AttemptID, ModelAttemptStatusInterrupted)
 		return true
 	default:
@@ -66,11 +69,13 @@ func evolveModelLifecycleEvents(s *State, e Event) bool {
 		}
 		return true
 	case *ModelAttemptCancelledEvent:
+		delete(s.QuiescingAttempts, ev.AttemptID)
 		updateModelAttemptStatus(s, ev.InvocationID, ev.AttemptID, ModelAttemptStatusCancelled)
 		return true
 	case *ModelAttemptAbandonedEvent:
+		delete(s.QuiescingAttempts, ev.AttemptID)
 		updateModelAttemptStatus(s, ev.InvocationID, ev.AttemptID, ModelAttemptStatusAbandonedUnknown)
-		if ev.NextAction == "close" {
+		if ev.NextAction == NextActionClose {
 			if inv := s.ModelInvocations[ev.InvocationID]; inv != nil {
 				inv.Closed = true
 			}
@@ -92,6 +97,9 @@ func evolveModelLifecycleEvents(s *State, e Event) bool {
 func evolveToolCheckEvents(s *State, e Event) bool {
 	switch ev := e.(type) {
 	case *ToolCallPlannedEvent:
+		if _, ok := s.ToolInvocations[ev.ToolCallID]; ok {
+			return true
+		}
 		tool := &ToolInvocation{
 			ToolCallID:        ev.ToolCallID,
 			SourcePosition:    ev.SourcePosition,
@@ -172,6 +180,7 @@ func evolveToolDispatchEvents(s *State, e Event) bool {
 		updateToolAttemptStatus(s, ev.ToolCallID, ev.AttemptID, ToolAttemptStatusDispatching)
 		return true
 	case *ToolResultRecordedEvent:
+		delete(s.QuiescingAttempts, ev.AttemptID)
 		recordToolResult(s, ev)
 		return true
 	case *ToolAttemptPlannedEvent:
@@ -193,19 +202,22 @@ func evolveToolDispatchEvents(s *State, e Event) bool {
 func evolveToolOutcomeEvents(s *State, e Event) bool {
 	switch ev := e.(type) {
 	case *ToolOutcomeUnknownEvent:
+		delete(s.QuiescingAttempts, ev.AttemptID)
 		updateToolAttemptStatus(s, ev.ToolCallID, ev.AttemptID, ToolAttemptStatusOutcomeUnknown)
 		return true
 	case *ToolReconciledEvent:
+		delete(s.QuiescingAttempts, ev.AttemptID)
 		switch ev.ObservedOutcome {
-		case "succeeded":
+		case ToolOutcomeUnknownObservedDisconnected:
 			updateToolAttemptStatus(s, ev.ToolCallID, ev.AttemptID, ToolAttemptStatusSucceeded)
-		case "failed":
+		case ToolOutcomeUnknownObservedProcessLost, ToolOutcomeUnknownObservedTimeout:
 			updateToolAttemptStatus(s, ev.ToolCallID, ev.AttemptID, ToolAttemptStatusFailed)
 		}
 		return true
 	case *ToolAttemptAbandonedEvent:
+		delete(s.QuiescingAttempts, ev.AttemptID)
 		updateToolAttemptStatus(s, ev.ToolCallID, ev.AttemptID, ToolAttemptStatusAbandonedUnknown)
-		if ev.NextAction == "close" {
+		if ev.NextAction == NextActionClose {
 			if tool := s.ToolInvocations[ev.ToolCallID]; tool != nil {
 				tool.Closed = true
 			}
@@ -217,6 +229,7 @@ func evolveToolOutcomeEvents(s *State, e Event) bool {
 }
 
 func recordToolResult(s *State, ev *ToolResultRecordedEvent) {
+	delete(s.QuiescingAttempts, ev.AttemptID)
 	tool := s.ToolInvocations[ev.ToolCallID]
 	if tool == nil {
 		return
@@ -228,17 +241,17 @@ func recordToolResult(s *State, ev *ToolResultRecordedEvent) {
 		return
 	}
 	switch ev.Outcome {
-	case "succeeded":
+	case ToolResultOutcomeSucceeded:
 		att.Status = ToolAttemptStatusSucceeded
-	case "failed":
+	case ToolResultOutcomeFailed:
 		att.Status = ToolAttemptStatusFailed
-	case "denied":
+	case ToolResultOutcomeDenied:
 		att.Status = ToolAttemptStatusDenied
-	case "refused":
+	case ToolResultOutcomeRefused:
 		att.Status = ToolAttemptStatusRefused
-	case "cancelled":
+	case ToolResultOutcomeCancelled:
 		att.Status = ToolAttemptStatusCancelled
-	case "abandoned_unknown":
+	case ToolResultOutcomeAbandonedUnknown:
 		att.Status = ToolAttemptStatusAbandonedUnknown
 	}
 }

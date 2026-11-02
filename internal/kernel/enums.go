@@ -155,3 +155,62 @@ const (
 	TimerPurposeToolRetry   TimerPurpose = "tool_retry"
 	TimerPurposeRunDeadline TimerPurpose = "run_deadline"
 )
+
+// ToolResultOutcome represents the terminal execution outcome of a tool attempt.
+type ToolResultOutcome string
+
+// ToolResultOutcome values.
+const (
+	ToolResultOutcomeSucceeded        ToolResultOutcome = "succeeded"
+	ToolResultOutcomeFailed           ToolResultOutcome = "failed"
+	ToolResultOutcomeDenied           ToolResultOutcome = "denied"
+	ToolResultOutcomeRefused          ToolResultOutcome = "refused"
+	ToolResultOutcomeCancelled        ToolResultOutcome = "cancelled"
+	ToolResultOutcomeAbandonedUnknown ToolResultOutcome = "abandoned_unknown"
+)
+
+// ToolOutcomeUnknownObserved represents the observed reason an outcome could not be determined.
+type ToolOutcomeUnknownObserved string
+
+// ToolOutcomeUnknownObserved values.
+const (
+	ToolOutcomeUnknownObservedDisconnected ToolOutcomeUnknownObserved = "disconnected"
+	ToolOutcomeUnknownObservedProcessLost  ToolOutcomeUnknownObserved = "process_lost"
+	ToolOutcomeUnknownObservedTimeout      ToolOutcomeUnknownObserved = "timeout"
+)
+
+// ToolReconciliationResolution represents how an unknown tool outcome was resolved by reconciliation.
+type ToolReconciliationResolution string
+
+// ToolReconciliationResolution values.
+const (
+	ToolReconciliationResolutionConfirmedApplied    ToolReconciliationResolution = "confirmed_applied"
+	ToolReconciliationResolutionConfirmedNotApplied ToolReconciliationResolution = "confirmed_not_applied"
+)
+
+// QuiesceReason represents the trigger reason for quiescing an active invocation.
+type QuiesceReason string
+
+// QuiesceReason values.
+const (
+	QuiesceReasonInterject QuiesceReason = "interject"
+	QuiesceReasonStop      QuiesceReason = "stop"
+)
+
+// RecoveryDisposition represents the terminal disposition applied when clearing recovery causes.
+type RecoveryDisposition string
+
+// RecoveryDisposition values.
+const (
+	RecoveryDispositionReconciled        RecoveryDisposition = "reconciled"
+	RecoveryDispositionAcceptedUnknown   RecoveryDisposition = "accepted_unknown"
+	RecoveryDispositionClosedUnavailable RecoveryDisposition = "closed_unavailable"
+)
+
+// NextAction represents the authorized next control action following recovery or closure.
+type NextAction string
+
+// NextAction values.
+const (
+	NextActionClose NextAction = "close"
+)
