@@ -13,12 +13,17 @@ type StopIntent struct {
 
 // ModelAttempt tracks the execution lifecycle of a single model dispatch.
 type ModelAttempt struct {
-	AttemptID string
-	Status    ModelAttemptStatus
+	Stream        ModelStreamStartedEvent
+	Dispatch      ModelDispatchStartedEvent
+	Response      ModelResponseRecordedEvent
+	ResponseUsage BudgetObservedEvent
+	AttemptID     string
+	Status        ModelAttemptStatus
 }
 
 // ModelInvocation tracks the logical model operation of a step across retry attempts.
 type ModelInvocation struct {
+	ToolIDs           []string
 	InvocationID      string
 	Planned           bool
 	Completed         bool
@@ -30,12 +35,16 @@ type ModelInvocation struct {
 
 // ToolAttempt tracks the execution lifecycle of a single tool dispatch attempt.
 type ToolAttempt struct {
+	Dispatch  ToolDispatchStartedEvent
+	Result    ToolResultRecordedEvent
 	AttemptID string
 	Status    ToolAttemptStatus
 }
 
 // ToolInvocation tracks a logical tool call proposal across checks and attempts.
 type ToolInvocation struct {
+	Plan              ToolCallPlannedEvent
+	Ready             ToolReadyRecordedEvent
 	ToolCallID        string
 	SourcePosition    int
 	DescriptorVersion string
