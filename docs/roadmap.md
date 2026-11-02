@@ -280,4 +280,4 @@ together only in `app`.
 | 2026-11-02 | F2.1a | Kernel: 54 event types, 27 minimal commands, State, total pure evolve, derived projections, rejection types/codes (Q-12 answered; F2.1 split into F2.1a and F2.1b) | Agent |
 | 2026-11-02 | F2.1a, F2.1b | F2.1a marked Done after PR #33 merged with green CI; F2.1b started | Agent |
 | 2026-11-02 | F2.1b | Added pure Decide for Trace A with ownership/executor fences, serial tool frontier, atomic response/tool/step batches, identical-observation no-ops and conflict rejection; tests cover Trace A, adversarial evidence, input immutability and deterministic replay | Agent |
-| 2026-11-02 | F2.1b | PR #34 opened for review; kernel coverage 98.2%; all-repository race/shuffle tests, Linux lint/deadcode, vet, module, proto and short fuzz gates pass. Native macOS lint/deadcode limitations reproduced on unchanged main 7635107 | Agent |
+| 2026-11-02 | F2.1b | PR #34 opened for review; kernel coverage 98.2%, mutation 96.8%; all-repository race/shuffle tests, Linux lint/deadcode, vet, module, proto and short fuzz gates pass. Native macOS lint/deadcode limitations reproduced on unchanged main 7635107 | Agent |
