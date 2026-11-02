@@ -1,0 +1,14 @@
+rapid v1.3.0
+https://github.com/flyingmutant/rapid/tree/v1.3.0
+
+Copyright notices from upstream Go source files:
+
+Copyright 2013 Lucas Beyer
+Copyright 2019 Gregory Petrosyan <gregory.petrosyan@gmail.com>
+Copyright 2020 Gregory Petrosyan <gregory.petrosyan@gmail.com>
+Copyright 2022 Gregory Petrosyan <gregory.petrosyan@gmail.com>
+Copyright 2023 Gregory Petrosyan <pgregory@pgregory.net>
+
+Licensed under the Mozilla Public License, v. 2.0.
+The complete license text is provided in MPL-2.0.txt.
+Preserve the original per-file notices when redistributing upstream source.
