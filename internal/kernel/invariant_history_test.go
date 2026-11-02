@@ -89,7 +89,7 @@ func TestUnknownControlClosurePreservesExposure(t *testing.T) {
 	interrupted.Envelope = unknown.Envelope
 	interrupted.Envelope.Sequence++
 	interrupted.CauseID = "incident"
-	interrupted.Cause = "effect_unknown"
+	interrupted.Cause = testUnknownCause
 	interrupted.AttemptRef = decToolAttempt
 	first := []Event{unknown, interrupted}
 	if ids := CheckBatch(s, first, &c.facts); len(ids) > 0 {
@@ -139,4 +139,48 @@ func unknownCloseFixture(s *State, c *decisionCase) []Event {
 	finished.Envelope.Sequence++
 	finished.Outcome = RunOutcomeAbandonedUnknown
 	return []Event{accepted, result, cleared, aborted, finished}
+}
+
+func TestToolReconciliationNeedsOwnerEvidence(t *testing.T) {
+	t.Parallel()
+	s, cases := traceState(t, 8)
+	c := cases[8]
+	bindDecision(&c, s, "classified")
+	u := new(ToolOutcomeUnknownEvent)
+	u.Envelope = c.facts.Envelope
+	u.ToolCallID = "t1"
+	u.AttemptID = decToolAttempt
+	cause := new(RunInterruptedEvent)
+	cause.Envelope = u.Envelope
+	cause.Envelope.Sequence++
+	cause.CauseID = "reconciliation"
+	cause.Cause = testUnknownCause
+	s = Evolve(Evolve(s, u), cause)
+	bindDecision(&c, s, "reconciled")
+	r := new(ToolReconciledEvent)
+	r.Envelope = c.facts.Envelope
+	r.ToolCallID = "t1"
+	r.AttemptID = decToolAttempt
+	r.OperationReceipt = "owner-operation-proof"
+	r.ObservedOutcome = ToolOutcomeUnknownObservedDisconnected
+	result := new(ToolResultRecordedEvent)
+	result.Envelope = r.Envelope
+	result.Envelope.Sequence++
+	result.ToolCallID = "t1"
+	result.AttemptID = decToolAttempt
+	result.Outcome = ToolResultOutcomeSucceeded
+	result.ResultRef = "reconciled-result"
+	clearCause := new(RunRecoveryClearedEvent)
+	clearCause.Envelope = result.Envelope
+	clearCause.Envelope.Sequence++
+	clearCause.CauseIDs = []string{cause.CauseID}
+	clearCause.Disposition = RecoveryDispositionReconciled
+	events := []Event{r, result, clearCause}
+	if ids := CheckBatch(s, events, &c.facts); len(ids) > 0 {
+		t.Fatal(ids)
+	}
+	r.OperationReceipt = ""
+	if ids := CheckBatch(s, events, &c.facts); !slices.Contains(ids, SM09) || !slices.Contains(ids, SM11) {
+		t.Fatal(ids)
+	}
 }

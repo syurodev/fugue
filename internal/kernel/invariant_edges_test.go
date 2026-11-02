@@ -273,3 +273,31 @@ func TestSnapshotCheckerHandlesNilEntries(t *testing.T) {
 		t.Fatal("nil window changed")
 	}
 }
+
+func TestBatchRejectsSecondModelInOpenStep(t *testing.T) {
+	t.Parallel()
+	s, cases := traceState(t, 2)
+	c := cases[2]
+	bindDecision(&c, s, "second-model")
+	plan := modelPlan("m2", "a2")
+	plan.Envelope = c.facts.Envelope
+	if ids := CheckBatch(s, []Event{plan}, &c.facts); !slices.Contains(ids, SM07) {
+		t.Fatal(ids)
+	}
+}
+
+func TestCompletionCannotRelabelOldAdmission(t *testing.T) {
+	t.Parallel()
+	s, cases := traceState(t, 4)
+	c := cases[4]
+	bindDecision(&c, s, "stale-admission")
+	events, err := Decide(s, c.command, &c.facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.AdmissionToken++
+	fixtureValue[*ModelResponseRecordedEvent](events[0]).Envelope.Token = s.AdmissionToken
+	if ids := CheckBatch(s, events, &c.facts); !slices.Contains(ids, SM09) {
+		t.Fatal(ids)
+	}
+}
