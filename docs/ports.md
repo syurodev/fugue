@@ -99,3 +99,19 @@ Not carried over:
   `SelectGroupRequestAnswer`, `ConfirmAgent`) and `db.query` multi-use scoped approvals: the full
   per-tool interaction surface is H-24 (F6.3).
 
+## `internal/snapshot` (F1.7)
+
+| | |
+| --- | --- |
+| Original | `internal/checkpoint` (`snapshot.go`, `repo.go`, `restore.go`, `diff.go`, `maintenance.go`, `locate.go`, `activity.go` and their tests) and `internal/gitparse` (`gitparse.go`, `gitparse_test.go`) |
+| dev-kit commit | `b3c8ff5df42e6fc58c1cd8077dddd278fc7dd84e` |
+| Stored format | Shadow Git repository per project (`refs/fugue/cp/<id>/<slot>`, `fugue-project` marker, `info/attributes`); snapshot store maps random snapshot IDs to `BeforeTree`/`AfterTree` git tree hashes |
+| Vector tests | Behavioral and git-output tests from `checkpoint_test.go`, `restore_test.go`, `maintenance_test.go`, `locate_test.go`, `activity_test.go` and `gitparse_test.go`: `TestDenyListBeatsGitignoreNegation`, `TestRestoreKeepsSymlinksAndExecutableBit`, `TestRestoreIsByteExactUnderProjectGitattributes`, `TestRestoreRefusesToWriteThroughASymlinkedDirectory`, `TestRestoreNeverTouchesASkippedPath`, `TestRestoreReportsAndCanOverrideAConflict`, `TestApplyRefusesAStalePlan`, `TestPlanRestoreNarrowsToTheGivenPaths`, `TestMaintainDropsOrphanRefsAndKeepsLiveTrees`, `TestPorcelainAndRawParsers` |
+
+Changed for `tool-system §9`:
+
+- Two separate quotas (`KindTurn`: 200 per session, 30 days; `KindTool`: 500 per session circular, 7 days) so tool snapshots never evict turn snapshots (`TestToolSnapshotQuotaNeverEvictsTurnSnapshots`), and the shared 1 GiB per-project cap prunes tool snapshots before turn snapshots (`TestSoftCapPrunesToolSnapshotsBeforeTurnSnapshots`).
+- `CaptureTurn`, `CaptureToolBefore`, `CaptureToolAfter`, `PlanToolRestore` and `RestoreTool` issue random snapshot IDs via `ids.Generator` while keeping git tree hashes inside `Store`, and tool restore narrows `PlanRestore` to the files in that tool's own `before`/`after` diff (`TestRestoreToolTouchesOnlyTheToolsDiff`).
+- `gitparse` is folded into `internal/snapshot` (ADR 0001 §2). Time, random IDs and test goroutines go through `clock.Clock`, `ids.Generator` and `supervise.Go`; `LocateWith` takes `*LocateOptions` instead of package-level globals.
+
+
