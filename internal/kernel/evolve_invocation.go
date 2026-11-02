@@ -192,11 +192,42 @@ func evolveToolDispatchEvents(s *State, e Event) bool {
 		}
 		return true
 	case *InvocationQuiesceRequestedEvent:
-		s.QuiescingAttempts[ev.AttemptID] = true
+		if attemptExists(s, ev.AttemptID) {
+			s.QuiescingAttempts[ev.AttemptID] = true
+		}
 		return true
 	default:
 		return false
 	}
+}
+
+func attemptExists(s *State, attemptID string) bool {
+	if attemptID == "" {
+		return false
+	}
+	return modelAttemptExists(s, attemptID) || toolAttemptExists(s, attemptID)
+}
+
+func modelAttemptExists(s *State, attemptID string) bool {
+	for _, inv := range s.ModelInvocations {
+		if inv != nil {
+			if _, ok := inv.Attempts[attemptID]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func toolAttemptExists(s *State, attemptID string) bool {
+	for _, tool := range s.ToolInvocations {
+		if tool != nil {
+			if _, ok := tool.Attempts[attemptID]; ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func evolveToolOutcomeEvents(s *State, e Event) bool {

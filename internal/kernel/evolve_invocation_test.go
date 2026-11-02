@@ -17,7 +17,7 @@ const (
 	testTimer2        = "t-2"
 	testWindowID      = "win-1"
 	testActionClose   = NextActionClose
-	testActionRetry   = "retry"
+	testActionRetry   = NextActionRetry
 	testOutcomeSucc   = ToolResultOutcomeSucceeded
 	testOutcomeFail   = ToolResultOutcomeFailed
 	testInputRef      = "inp"
@@ -306,7 +306,7 @@ func testToolRecoveryDispositions(t *testing.T, env *Envelope) {
 		ToolCallID: "tc-2", DescriptorVersion: testDescriptorVer, EffectClass: EffectClassPureRead,
 		Attempts: map[string]*ToolAttempt{testAttT2: {AttemptID: testAttT2, Status: ToolAttemptStatusOutcomeUnknown}},
 	}
-	s = Evolve(s, &UnknownAcceptedEvent{Envelope: *env, TargetAttempts: []string{testAttT2}, Revisions: []uint64{1}, Actor: "u", AcceptedUncertainty: "un", Disposition: testActionClose})
+	s = Evolve(s, &UnknownAcceptedEvent{Envelope: *env, TargetAttempts: []string{testAttT2}, Revisions: []uint64{1}, Actor: "u", AcceptedUncertainty: "un", Disposition: ControlDispositionClose})
 	if s.ToolInvocations["tc-2"].Attempts[testAttT2].Status != ToolAttemptStatusAbandonedUnknown {
 		t.Fatalf("expected tool attempt abandoned unknown")
 	}

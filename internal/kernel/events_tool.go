@@ -17,7 +17,14 @@ type ToolCallPlannedEvent struct {
 func (*ToolCallPlannedEvent) EventName() string { return "ToolCallPlanned" }
 
 // EventEnvelope returns the event envelope.
-func (e *ToolCallPlannedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ToolCallPlannedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ToolCallPlannedEvent) isNil() bool { return e == nil }
 
 // ToolCheckResetEvent records resetting pre-dispatch tool checks following host restart recovery.
 type ToolCheckResetEvent struct {
@@ -33,7 +40,14 @@ type ToolCheckResetEvent struct {
 func (*ToolCheckResetEvent) EventName() string { return "ToolCheckReset" }
 
 // EventEnvelope returns the event envelope.
-func (e *ToolCheckResetEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ToolCheckResetEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ToolCheckResetEvent) isNil() bool { return e == nil }
 
 // ToolCheckStartedEvent records starting authorization and schema checks on a frontier tool call.
 type ToolCheckStartedEvent struct {
@@ -48,7 +62,14 @@ type ToolCheckStartedEvent struct {
 func (*ToolCheckStartedEvent) EventName() string { return "ToolCheckStarted" }
 
 // EventEnvelope returns the event envelope.
-func (e *ToolCheckStartedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ToolCheckStartedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ToolCheckStartedEvent) isNil() bool { return e == nil }
 
 // ToolApprovalRequestedEvent records an owner-issued approval request for a tool call.
 type ToolApprovalRequestedEvent struct {
@@ -66,7 +87,14 @@ type ToolApprovalRequestedEvent struct {
 func (*ToolApprovalRequestedEvent) EventName() string { return "ToolApprovalRequested" }
 
 // EventEnvelope returns the event envelope.
-func (e *ToolApprovalRequestedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ToolApprovalRequestedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ToolApprovalRequestedEvent) isNil() bool { return e == nil }
 
 // ToolApprovalResolvedEvent records owner resolution of a pending tool approval request.
 type ToolApprovalResolvedEvent struct {
@@ -81,7 +109,14 @@ type ToolApprovalResolvedEvent struct {
 func (*ToolApprovalResolvedEvent) EventName() string { return "ToolApprovalResolved" }
 
 // EventEnvelope returns the event envelope.
-func (e *ToolApprovalResolvedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ToolApprovalResolvedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ToolApprovalResolvedEvent) isNil() bool { return e == nil }
 
 // ToolReadyRecordedEvent records readiness of a tool call for execution scheduling.
 type ToolReadyRecordedEvent struct {
@@ -97,7 +132,14 @@ type ToolReadyRecordedEvent struct {
 func (*ToolReadyRecordedEvent) EventName() string { return "ToolReadyRecorded" }
 
 // EventEnvelope returns the event envelope.
-func (e *ToolReadyRecordedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ToolReadyRecordedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ToolReadyRecordedEvent) isNil() bool { return e == nil }
 
 // ToolDispatchStartedEvent records dispatch authorization and handoff of a tool attempt.
 type ToolDispatchStartedEvent struct {
@@ -115,7 +157,14 @@ type ToolDispatchStartedEvent struct {
 func (*ToolDispatchStartedEvent) EventName() string { return "ToolDispatchStarted" }
 
 // EventEnvelope returns the event envelope.
-func (e *ToolDispatchStartedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ToolDispatchStartedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ToolDispatchStartedEvent) isNil() bool { return e == nil }
 
 // ToolResultRecordedEvent records a canonical terminal result for a tool call.
 type ToolResultRecordedEvent struct {
@@ -133,7 +182,14 @@ type ToolResultRecordedEvent struct {
 func (*ToolResultRecordedEvent) EventName() string { return "ToolResultRecorded" }
 
 // EventEnvelope returns the event envelope.
-func (e *ToolResultRecordedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ToolResultRecordedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ToolResultRecordedEvent) isNil() bool { return e == nil }
 
 // ToolOutcomeUnknownEvent records missing completion evidence for an in-flight tool attempt.
 type ToolOutcomeUnknownEvent struct {
@@ -149,7 +205,14 @@ type ToolOutcomeUnknownEvent struct {
 func (*ToolOutcomeUnknownEvent) EventName() string { return "ToolOutcomeUnknown" }
 
 // EventEnvelope returns the event envelope.
-func (e *ToolOutcomeUnknownEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ToolOutcomeUnknownEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ToolOutcomeUnknownEvent) isNil() bool { return e == nil }
 
 // ToolReconciledEvent records external proof or reconciliation of an unknown tool attempt.
 type ToolReconciledEvent struct {
@@ -164,7 +227,14 @@ type ToolReconciledEvent struct {
 func (*ToolReconciledEvent) EventName() string { return "ToolReconciled" }
 
 // EventEnvelope returns the event envelope.
-func (e *ToolReconciledEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ToolReconciledEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ToolReconciledEvent) isNil() bool { return e == nil }
 
 // ToolAttemptAbandonedEvent records abandonment of an unknown tool attempt per effect class contract.
 type ToolAttemptAbandonedEvent struct {
@@ -179,7 +249,14 @@ type ToolAttemptAbandonedEvent struct {
 func (*ToolAttemptAbandonedEvent) EventName() string { return "ToolAttemptAbandoned" }
 
 // EventEnvelope returns the event envelope.
-func (e *ToolAttemptAbandonedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ToolAttemptAbandonedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ToolAttemptAbandonedEvent) isNil() bool { return e == nil }
 
 // ToolAttemptPlannedEvent records planning a new attempt for a tool invocation under allowed policy.
 type ToolAttemptPlannedEvent struct {
@@ -195,7 +272,14 @@ type ToolAttemptPlannedEvent struct {
 func (*ToolAttemptPlannedEvent) EventName() string { return "ToolAttemptPlanned" }
 
 // EventEnvelope returns the event envelope.
-func (e *ToolAttemptPlannedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ToolAttemptPlannedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ToolAttemptPlannedEvent) isNil() bool { return e == nil }
 
 // InvocationQuiesceRequestedEvent records a quiescence request targeting an in-flight attempt.
 type InvocationQuiesceRequestedEvent struct {
@@ -210,4 +294,11 @@ type InvocationQuiesceRequestedEvent struct {
 func (*InvocationQuiesceRequestedEvent) EventName() string { return "InvocationQuiesceRequested" }
 
 // EventEnvelope returns the event envelope.
-func (e *InvocationQuiesceRequestedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *InvocationQuiesceRequestedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *InvocationQuiesceRequestedEvent) isNil() bool { return e == nil }

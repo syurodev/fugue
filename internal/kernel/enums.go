@@ -207,10 +207,19 @@ const (
 	RecoveryDispositionClosedUnavailable RecoveryDisposition = "closed_unavailable"
 )
 
+// ControlDisposition represents the terminal control disposition for an accepted unknown outcome.
+type ControlDisposition string
+
+// ControlDisposition values.
+const (
+	ControlDispositionClose ControlDisposition = "close"
+)
+
 // NextAction represents the authorized next control action following recovery or closure.
 type NextAction string
 
 // NextAction values.
 const (
 	NextActionClose NextAction = "close"
+	NextActionRetry NextAction = "retry"
 )

@@ -101,6 +101,80 @@ func TestEventNamesAndEnvelopes(t *testing.T) {
 		if tc.ev.EventEnvelope().RunID != testRunID {
 			t.Fatalf("EventEnvelope().RunID = %s, want %s", tc.ev.EventEnvelope().RunID, testRunID)
 		}
+		if tc.ev.isNil() {
+			t.Fatalf("isNil() = true for non-nil %s", tc.want)
+		}
+	}
+}
+
+func TestTypedNilEvents(t *testing.T) {
+	t.Parallel()
+	for _, ev := range allTypedNilEvents() {
+		if !ev.isNil() {
+			t.Fatalf("expected isNil() == true for %T", ev)
+		}
+		if env := ev.EventEnvelope(); env != (Envelope{}) {
+			t.Fatalf("expected empty envelope for %T, got %+v", ev, env)
+		}
+	}
+}
+
+func allTypedNilEvents() []Event {
+	return []Event{
+		(*RunAcceptedEvent)(nil),
+		(*RunAdmittedEvent)(nil),
+		(*RunOwnershipAcquiredEvent)(nil),
+		(*RunStopRequestedEvent)(nil),
+		(*RunBlockAddedEvent)(nil),
+		(*RunBlockClearedEvent)(nil),
+		(*RunInterruptedEvent)(nil),
+		(*RunRecoveryClearedEvent)(nil),
+		(*UnknownAcceptedEvent)(nil),
+		(*RunClosureConfirmedEvent)(nil),
+		(*ContextBoundarySelectedEvent)(nil),
+		(*RunFinishedEvent)(nil),
+		(*StepStartedEvent)(nil),
+		(*ToolBindingRevisedEvent)(nil),
+		(*InstructionsLoadedEvent)(nil),
+		(*ContextInjectedEvent)(nil),
+		(*ToolResultsPrunedEvent)(nil),
+		(*ContextCompactedEvent)(nil),
+		(*InputSteeredEvent)(nil),
+		(*InputInterjectedEvent)(nil),
+		(*StepCompletedEvent)(nil),
+		(*BudgetExtendedEvent)(nil),
+		(*StepAbortedEvent)(nil),
+		(*ModelRequestPlannedEvent)(nil),
+		(*ModelDispatchStartedEvent)(nil),
+		(*ModelStreamStartedEvent)(nil),
+		(*ModelResponseRecordedEvent)(nil),
+		(*ModelRequestFailedEvent)(nil),
+		(*ModelRequestInterruptedEvent)(nil),
+		(*ModelRetryScheduledEvent)(nil),
+		(*ModelAttemptPlannedEvent)(nil),
+		(*ModelAttemptCancelledEvent)(nil),
+		(*ModelAttemptAbandonedEvent)(nil),
+		(*ModelInvocationFailedEvent)(nil),
+		(*ModelUsageReconciledEvent)(nil),
+		(*ToolCallPlannedEvent)(nil),
+		(*ToolCheckResetEvent)(nil),
+		(*ToolCheckStartedEvent)(nil),
+		(*ToolApprovalRequestedEvent)(nil),
+		(*ToolApprovalResolvedEvent)(nil),
+		(*ToolReadyRecordedEvent)(nil),
+		(*ToolDispatchStartedEvent)(nil),
+		(*ToolResultRecordedEvent)(nil),
+		(*ToolOutcomeUnknownEvent)(nil),
+		(*ToolReconciledEvent)(nil),
+		(*ToolAttemptAbandonedEvent)(nil),
+		(*ToolAttemptPlannedEvent)(nil),
+		(*InvocationQuiesceRequestedEvent)(nil),
+		(*TimeBudgetWindowOpenedEvent)(nil),
+		(*TimeBudgetWindowClosedEvent)(nil),
+		(*TimerScheduledEvent)(nil),
+		(*TimerElapsedEvent)(nil),
+		(*TimerCancelledEvent)(nil),
+		(*BudgetObservedEvent)(nil),
 	}
 }
 
@@ -127,7 +201,7 @@ func testRunEvents(env *Envelope, now time.Time) []struct {
 		{&RunBlockClearedEvent{Envelope: *env, BlockerID: "", ResolvingEvidence: ""}, "RunBlockCleared"},
 		{&RunInterruptedEvent{Envelope: *env, CauseID: "", Cause: "", AttemptRef: "", PayloadRef: ""}, "RunInterrupted"},
 		{&RunRecoveryClearedEvent{Envelope: *env, CauseIDs: nil, OwnerEvidence: "", Disposition: RecoveryDisposition(""), NextAction: NextAction("")}, "RunRecoveryCleared"},
-		{&UnknownAcceptedEvent{Envelope: *env, TargetAttempts: nil, Revisions: nil, Actor: "", AcceptedUncertainty: "", Disposition: NextAction("")}, "UnknownAccepted"},
+		{&UnknownAcceptedEvent{Envelope: *env, TargetAttempts: nil, Revisions: nil, Actor: "", AcceptedUncertainty: "", Disposition: ControlDisposition("")}, "UnknownAccepted"},
 		{&RunClosureConfirmedEvent{Envelope: *env, MetadataOnlyPreviewVersion: "", RunRevision: 0, ExactAttemptIDs: nil, CauseIDs: nil, Actor: "", UnavailabilityReason: "", PreviousContextRevision: 0, NewContextRevision: 0, ResultingContextRequirement: ContextRequirementNone, CauseEventRef: "", AttemptDispositions: nil}, "RunClosureConfirmed"},
 		{&ContextBoundarySelectedEvent{Envelope: *env, TargetQueuedRunID: "", OldContextRevision: 0, NewContextRevision: 0, Epoch: 0, StartRunID: "", Mode: "", Actor: "", ValidationEvidence: "", PreviousDecidingEventRef: ""}, "ContextBoundarySelected"},
 		{&RunFinishedEvent{Envelope: *env, Outcome: RunOutcomeCompleted, Truncated: false, PrimaryStopRef: "", SecondaryStopRefs: nil, UnresolvedExposureRefs: nil}, "RunFinished"},

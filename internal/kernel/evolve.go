@@ -1,9 +1,6 @@
 package kernel
 
-import (
-	"fmt"
-	"slices"
-)
+import "slices"
 
 // Evolve is the pure total state transition function of the kernel state machine.
 // Given the current state and an event, it returns the next state without mutating
@@ -29,10 +26,7 @@ func Evolve(s *State, e Event) *State {
 }
 
 func isNilEvent(e Event) bool {
-	if e == nil {
-		return true
-	}
-	return fmt.Sprint(e) == "<nil>"
+	return e == nil || e.isNil()
 }
 
 func evolveRunAndStepEvents(s *State, e Event) bool {

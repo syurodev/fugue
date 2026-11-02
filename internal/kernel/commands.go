@@ -278,7 +278,7 @@ type AcceptUnknownCommand struct {
 	Revisions           []uint64
 	Actor               string
 	AcceptedUncertainty string
-	Disposition         string
+	Disposition         ControlDisposition
 }
 
 // CommandName returns the canonical command name.

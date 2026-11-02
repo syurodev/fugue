@@ -16,7 +16,14 @@ type ModelRequestPlannedEvent struct {
 func (*ModelRequestPlannedEvent) EventName() string { return "ModelRequestPlanned" }
 
 // EventEnvelope returns the event envelope.
-func (e *ModelRequestPlannedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ModelRequestPlannedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ModelRequestPlannedEvent) isNil() bool { return e == nil }
 
 // ModelDispatchStartedEvent records dispatch handoff of a model attempt to an executor.
 type ModelDispatchStartedEvent struct {
@@ -35,7 +42,14 @@ type ModelDispatchStartedEvent struct {
 func (*ModelDispatchStartedEvent) EventName() string { return "ModelDispatchStarted" }
 
 // EventEnvelope returns the event envelope.
-func (e *ModelDispatchStartedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ModelDispatchStartedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ModelDispatchStartedEvent) isNil() bool { return e == nil }
 
 // ModelStreamStartedEvent records receipt of the first chunk from a streaming model response.
 type ModelStreamStartedEvent struct {
@@ -49,7 +63,14 @@ type ModelStreamStartedEvent struct {
 func (*ModelStreamStartedEvent) EventName() string { return "ModelStreamStarted" }
 
 // EventEnvelope returns the event envelope.
-func (e *ModelStreamStartedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ModelStreamStartedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ModelStreamStartedEvent) isNil() bool { return e == nil }
 
 // ModelResponseRecordedEvent records a complete and validated assistant response.
 type ModelResponseRecordedEvent struct {
@@ -64,7 +85,14 @@ type ModelResponseRecordedEvent struct {
 func (*ModelResponseRecordedEvent) EventName() string { return "ModelResponseRecorded" }
 
 // EventEnvelope returns the event envelope.
-func (e *ModelResponseRecordedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ModelResponseRecordedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ModelResponseRecordedEvent) isNil() bool { return e == nil }
 
 // ModelRequestFailedEvent records a terminal model attempt failure with error classification.
 type ModelRequestFailedEvent struct {
@@ -83,7 +111,14 @@ type ModelRequestFailedEvent struct {
 func (*ModelRequestFailedEvent) EventName() string { return "ModelRequestFailed" }
 
 // EventEnvelope returns the event envelope.
-func (e *ModelRequestFailedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ModelRequestFailedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ModelRequestFailedEvent) isNil() bool { return e == nil }
 
 // ModelRequestInterruptedEvent records missing completion evidence or transport interruption.
 type ModelRequestInterruptedEvent struct {
@@ -99,7 +134,14 @@ type ModelRequestInterruptedEvent struct {
 func (*ModelRequestInterruptedEvent) EventName() string { return "ModelRequestInterrupted" }
 
 // EventEnvelope returns the event envelope.
-func (e *ModelRequestInterruptedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ModelRequestInterruptedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ModelRequestInterruptedEvent) isNil() bool { return e == nil }
 
 // ModelRetryScheduledEvent records scheduling a retry attempt with a timer before waiting.
 type ModelRetryScheduledEvent struct {
@@ -116,7 +158,14 @@ type ModelRetryScheduledEvent struct {
 func (*ModelRetryScheduledEvent) EventName() string { return "ModelRetryScheduled" }
 
 // EventEnvelope returns the event envelope.
-func (e *ModelRetryScheduledEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ModelRetryScheduledEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ModelRetryScheduledEvent) isNil() bool { return e == nil }
 
 // ModelAttemptPlannedEvent records a subsequent planned attempt under an open invocation.
 type ModelAttemptPlannedEvent struct {
@@ -131,7 +180,14 @@ type ModelAttemptPlannedEvent struct {
 func (*ModelAttemptPlannedEvent) EventName() string { return "ModelAttemptPlanned" }
 
 // EventEnvelope returns the event envelope.
-func (e *ModelAttemptPlannedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ModelAttemptPlannedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ModelAttemptPlannedEvent) isNil() bool { return e == nil }
 
 // ModelAttemptCancelledEvent records cancellation of a planned or quiesced model attempt.
 type ModelAttemptCancelledEvent struct {
@@ -146,7 +202,14 @@ type ModelAttemptCancelledEvent struct {
 func (*ModelAttemptCancelledEvent) EventName() string { return "ModelAttemptCancelled" }
 
 // EventEnvelope returns the event envelope.
-func (e *ModelAttemptCancelledEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ModelAttemptCancelledEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ModelAttemptCancelledEvent) isNil() bool { return e == nil }
 
 // ModelAttemptAbandonedEvent records abandonment of an interrupted model attempt.
 type ModelAttemptAbandonedEvent struct {
@@ -163,7 +226,14 @@ type ModelAttemptAbandonedEvent struct {
 func (*ModelAttemptAbandonedEvent) EventName() string { return "ModelAttemptAbandoned" }
 
 // EventEnvelope returns the event envelope.
-func (e *ModelAttemptAbandonedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ModelAttemptAbandonedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ModelAttemptAbandonedEvent) isNil() bool { return e == nil }
 
 // ModelInvocationFailedEvent records final terminal failure of a logical model invocation.
 type ModelInvocationFailedEvent struct {
@@ -177,7 +247,14 @@ type ModelInvocationFailedEvent struct {
 func (*ModelInvocationFailedEvent) EventName() string { return "ModelInvocationFailed" }
 
 // EventEnvelope returns the event envelope.
-func (e *ModelInvocationFailedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ModelInvocationFailedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ModelInvocationFailedEvent) isNil() bool { return e == nil }
 
 // ModelUsageReconciledEvent records post-execution reconciliation of actual model token usage.
 type ModelUsageReconciledEvent struct {
@@ -193,4 +270,11 @@ type ModelUsageReconciledEvent struct {
 func (*ModelUsageReconciledEvent) EventName() string { return "ModelUsageReconciled" }
 
 // EventEnvelope returns the event envelope.
-func (e *ModelUsageReconciledEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ModelUsageReconciledEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ModelUsageReconciledEvent) isNil() bool { return e == nil }

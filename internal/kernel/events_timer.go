@@ -17,7 +17,14 @@ type TimeBudgetWindowOpenedEvent struct {
 func (*TimeBudgetWindowOpenedEvent) EventName() string { return "TimeBudgetWindowOpened" }
 
 // EventEnvelope returns the event envelope.
-func (e *TimeBudgetWindowOpenedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *TimeBudgetWindowOpenedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *TimeBudgetWindowOpenedEvent) isNil() bool { return e == nil }
 
 // TimeBudgetWindowClosedEvent records reconciliation and closure of an active execution time window.
 type TimeBudgetWindowClosedEvent struct {
@@ -32,7 +39,14 @@ type TimeBudgetWindowClosedEvent struct {
 func (*TimeBudgetWindowClosedEvent) EventName() string { return "TimeBudgetWindowClosed" }
 
 // EventEnvelope returns the event envelope.
-func (e *TimeBudgetWindowClosedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *TimeBudgetWindowClosedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *TimeBudgetWindowClosedEvent) isNil() bool { return e == nil }
 
 // TimerScheduledEvent records durable scheduling of a timer for retries, deadlines, or expirations.
 type TimerScheduledEvent struct {
@@ -51,7 +65,14 @@ type TimerScheduledEvent struct {
 func (*TimerScheduledEvent) EventName() string { return "TimerScheduled" }
 
 // EventEnvelope returns the event envelope.
-func (e *TimerScheduledEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *TimerScheduledEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *TimerScheduledEvent) isNil() bool { return e == nil }
 
 // TimerElapsedEvent records that a scheduled timer has elapsed and resolved its dependency.
 type TimerElapsedEvent struct {
@@ -65,7 +86,14 @@ type TimerElapsedEvent struct {
 func (*TimerElapsedEvent) EventName() string { return "TimerElapsed" }
 
 // EventEnvelope returns the event envelope.
-func (e *TimerElapsedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *TimerElapsedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *TimerElapsedEvent) isNil() bool { return e == nil }
 
 // TimerCancelledEvent records cancellation of a pending timer before it fired.
 type TimerCancelledEvent struct {
@@ -79,7 +107,14 @@ type TimerCancelledEvent struct {
 func (*TimerCancelledEvent) EventName() string { return "TimerCancelled" }
 
 // EventEnvelope returns the event envelope.
-func (e *TimerCancelledEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *TimerCancelledEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *TimerCancelledEvent) isNil() bool { return e == nil }
 
 // BudgetObservedEvent records usage observations and conservative accounting checkpoints.
 type BudgetObservedEvent struct {
@@ -95,4 +130,11 @@ type BudgetObservedEvent struct {
 func (*BudgetObservedEvent) EventName() string { return "BudgetObserved" }
 
 // EventEnvelope returns the event envelope.
-func (e *BudgetObservedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *BudgetObservedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *BudgetObservedEvent) isNil() bool { return e == nil }

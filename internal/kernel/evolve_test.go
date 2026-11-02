@@ -29,6 +29,8 @@ const (
 	evDescriptorVer = "1.0"
 	evToolQ         = "tc-q"
 	evAttemptQ      = "ta-q"
+	evCmdQ          = "cmd-q"
+	evModelQ        = "m-inv"
 )
 
 func testEvolveRunLifecycleEvents(t *testing.T, env *Envelope, now time.Time) *State {
@@ -98,7 +100,7 @@ func testEvolveRunBlocksAndRecovery(t *testing.T, s *State, env *Envelope) *Stat
 func testEvolveRunClosuresAndBoundaries(t *testing.T, s *State, env *Envelope, now time.Time) *State {
 	t.Helper()
 	s = Evolve(s, &UnknownAcceptedEvent{
-		Envelope: *env, TargetAttempts: []string{evAttempt1}, Revisions: []uint64{1}, Actor: evActor, AcceptedUncertainty: "un", Disposition: NextActionClose,
+		Envelope: *env, TargetAttempts: []string{evAttempt1}, Revisions: []uint64{1}, Actor: evActor, AcceptedUncertainty: "un", Disposition: ControlDispositionClose,
 	})
 
 	s.InterruptionCauses[evCause1] = &InterruptionCause{CauseID: evCause1, Cause: evVaultLock, AttemptRef: "", PayloadRef: ""}
@@ -274,7 +276,7 @@ func TestEvolveQuiesceLifecycle(t *testing.T) {
 
 	s = Evolve(s, &InvocationQuiesceRequestedEvent{
 		Envelope: env, InvocationID: "inv-q", AttemptID: evAttemptQ,
-		Reason: QuiesceReasonStop, CommandRef: "cmd-q",
+		Reason: QuiesceReasonStop, CommandRef: evCmdQ,
 	})
 	if !s.QuiescingAttempts[evAttemptQ] {
 		t.Fatalf("expected attempt in QuiescingAttempts")
@@ -305,6 +307,59 @@ func TestEvolveQuiesceLifecycle(t *testing.T) {
 	}
 }
 
+func TestEvolveQuiesceGhostAttemptIgnored(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	env := testEnvelope(evRunID, 1, now)
+	s := NewState()
+	s.RunID = evRunID
+	s.Admitted = true
+	s.Blocks["b-vault"] = &Block{
+		BlockerID: "b-vault", Kind: WaitReasonVaultLocked,
+		Reference: "ref-v", ResumeCondition: "unlock",
+	}
+
+	s = Evolve(s, &InvocationQuiesceRequestedEvent{
+		Envelope: env, InvocationID: "inv-q", AttemptID: "ghost-attempt",
+		Reason: QuiesceReasonStop, CommandRef: "cmd-ghost",
+	})
+	if s.QuiescingAttempts["ghost-attempt"] {
+		t.Fatalf("expected ghost attempt NOT to be added to QuiescingAttempts")
+	}
+	if got := DeriveLifecycle(s); got != LifecycleWaiting {
+		t.Fatalf("expected LifecycleWaiting preserved despite ghost quiesce, got %s", got)
+	}
+}
+
+func TestEvolveQuiesceModelAttempt(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
+	env := testEnvelope(evRunID, 1, now)
+	s := NewState()
+	s.RunID = evRunID
+	s.Admitted = true
+
+	s = Evolve(s, &ModelRequestPlannedEvent{
+		Envelope: env, InvocationID: evModelQ, Purpose: "p",
+		FirstAttemptID: "m-att-1", ModelRef: "gpt-4", ContextRef: "c",
+		ToolDeclarationRefs: nil, EstimatedBudgetTokens: 100,
+	})
+	s = Evolve(s, &InvocationQuiesceRequestedEvent{
+		Envelope: env, InvocationID: evModelQ, AttemptID: "m-att-1",
+		Reason: QuiesceReasonStop, CommandRef: evCmdQ,
+	})
+	if !s.QuiescingAttempts["m-att-1"] {
+		t.Fatalf("expected model attempt in QuiescingAttempts")
+	}
+	s = Evolve(s, &InvocationQuiesceRequestedEvent{
+		Envelope: env, InvocationID: evModelQ, AttemptID: "",
+		Reason: QuiesceReasonStop, CommandRef: evCmdQ,
+	})
+	if s.QuiescingAttempts[""] {
+		t.Fatalf("expected empty attemptID not in QuiescingAttempts")
+	}
+}
+
 func TestEvolveInterruptionCauses(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
@@ -314,10 +369,10 @@ func TestEvolveInterruptionCauses(t *testing.T) {
 	s.Admitted = true
 
 	s = Evolve(s, &RunInterruptedEvent{
-		Envelope: env, CauseID: "cause-1", Cause: "effect_unknown", AttemptRef: "att-1", PayloadRef: "pay-1",
+		Envelope: env, CauseID: "cause-1", Cause: evCause, AttemptRef: "att-1", PayloadRef: "pay-1",
 	})
 	s = Evolve(s, &RunInterruptedEvent{
-		Envelope: env, CauseID: "cause-2", Cause: "effect_unknown", AttemptRef: "att-2", PayloadRef: "pay-2",
+		Envelope: env, CauseID: "cause-2", Cause: evCause, AttemptRef: "att-2", PayloadRef: "pay-2",
 	})
 
 	if len(s.InterruptionCauses) != 2 {
@@ -350,6 +405,13 @@ func TestEvolveInterruptionCauses(t *testing.T) {
 	}
 	if DeriveLifecycle(s) != LifecycleRunning {
 		t.Fatalf("expected LifecycleRunning after all causes cleared")
+	}
+
+	s = Evolve(s, &RunInterruptedEvent{
+		Envelope: env, CauseID: "", Cause: "effect_unknown", AttemptRef: "att-empty", PayloadRef: "pay-empty",
+	})
+	if len(s.InterruptionCauses) != 0 {
+		t.Fatalf("expected empty CauseID to be ignored")
 	}
 }
 

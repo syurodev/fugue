@@ -17,6 +17,7 @@ type Envelope struct {
 type Event interface {
 	EventName() string
 	EventEnvelope() Envelope
+	isNil() bool
 }
 
 // Command is the marker interface implemented by every kernel command struct.

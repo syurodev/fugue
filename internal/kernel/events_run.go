@@ -20,7 +20,14 @@ type RunAcceptedEvent struct {
 func (*RunAcceptedEvent) EventName() string { return "RunAccepted" }
 
 // EventEnvelope returns the event envelope.
-func (e *RunAcceptedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *RunAcceptedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *RunAcceptedEvent) isNil() bool { return e == nil }
 
 // RunAdmittedEvent records that an accepted run was admitted as the active run.
 type RunAdmittedEvent struct {
@@ -37,7 +44,14 @@ type RunAdmittedEvent struct {
 func (*RunAdmittedEvent) EventName() string { return "RunAdmitted" }
 
 // EventEnvelope returns the event envelope.
-func (e *RunAdmittedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *RunAdmittedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *RunAdmittedEvent) isNil() bool { return e == nil }
 
 // RunOwnershipAcquiredEvent records recovery acquisition of the active run under exclusive lock.
 type RunOwnershipAcquiredEvent struct {
@@ -52,7 +66,14 @@ type RunOwnershipAcquiredEvent struct {
 func (*RunOwnershipAcquiredEvent) EventName() string { return "RunOwnershipAcquired" }
 
 // EventEnvelope returns the event envelope.
-func (e *RunOwnershipAcquiredEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *RunOwnershipAcquiredEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *RunOwnershipAcquiredEvent) isNil() bool { return e == nil }
 
 // RunStopRequestedEvent records an explicit request to stop or suspend the run.
 type RunStopRequestedEvent struct {
@@ -68,7 +89,14 @@ type RunStopRequestedEvent struct {
 func (*RunStopRequestedEvent) EventName() string { return "RunStopRequested" }
 
 // EventEnvelope returns the event envelope.
-func (e *RunStopRequestedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *RunStopRequestedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *RunStopRequestedEvent) isNil() bool { return e == nil }
 
 // RunBlockAddedEvent records a new typed wait dependency on the run.
 type RunBlockAddedEvent struct {
@@ -83,7 +111,14 @@ type RunBlockAddedEvent struct {
 func (*RunBlockAddedEvent) EventName() string { return "RunBlockAdded" }
 
 // EventEnvelope returns the event envelope.
-func (e *RunBlockAddedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *RunBlockAddedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *RunBlockAddedEvent) isNil() bool { return e == nil }
 
 // RunBlockClearedEvent records that a typed wait dependency was resolved.
 type RunBlockClearedEvent struct {
@@ -96,7 +131,14 @@ type RunBlockClearedEvent struct {
 func (*RunBlockClearedEvent) EventName() string { return "RunBlockCleared" }
 
 // EventEnvelope returns the event envelope.
-func (e *RunBlockClearedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *RunBlockClearedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *RunBlockClearedEvent) isNil() bool { return e == nil }
 
 // RunInterruptedEvent records an interruption cause requiring intervention or reconciliation.
 type RunInterruptedEvent struct {
@@ -111,7 +153,14 @@ type RunInterruptedEvent struct {
 func (*RunInterruptedEvent) EventName() string { return "RunInterrupted" }
 
 // EventEnvelope returns the event envelope.
-func (e *RunInterruptedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *RunInterruptedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *RunInterruptedEvent) isNil() bool { return e == nil }
 
 // RunRecoveryClearedEvent records that interruption causes were resolved or accepted.
 type RunRecoveryClearedEvent struct {
@@ -126,7 +175,14 @@ type RunRecoveryClearedEvent struct {
 func (*RunRecoveryClearedEvent) EventName() string { return "RunRecoveryCleared" }
 
 // EventEnvelope returns the event envelope.
-func (e *RunRecoveryClearedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *RunRecoveryClearedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *RunRecoveryClearedEvent) isNil() bool { return e == nil }
 
 // UnknownAcceptedEvent records user acceptance of unknown attempt outcome to close control.
 type UnknownAcceptedEvent struct {
@@ -135,14 +191,21 @@ type UnknownAcceptedEvent struct {
 	Revisions           []uint64
 	Actor               string
 	AcceptedUncertainty string
-	Disposition         NextAction
+	Disposition         ControlDisposition
 }
 
 // EventName returns the canonical event name.
 func (*UnknownAcceptedEvent) EventName() string { return "UnknownAccepted" }
 
 // EventEnvelope returns the event envelope.
-func (e *UnknownAcceptedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *UnknownAcceptedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *UnknownAcceptedEvent) isNil() bool { return e == nil }
 
 // RunClosureConfirmedEvent records confirmation of closing control without payload access.
 type RunClosureConfirmedEvent struct {
@@ -164,7 +227,14 @@ type RunClosureConfirmedEvent struct {
 func (*RunClosureConfirmedEvent) EventName() string { return "RunClosureConfirmed" }
 
 // EventEnvelope returns the event envelope.
-func (e *RunClosureConfirmedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *RunClosureConfirmedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *RunClosureConfirmedEvent) isNil() bool { return e == nil }
 
 // ContextBoundarySelectedEvent records selection of context continuity (fresh vs continue).
 type ContextBoundarySelectedEvent struct {
@@ -184,7 +254,14 @@ type ContextBoundarySelectedEvent struct {
 func (*ContextBoundarySelectedEvent) EventName() string { return "ContextBoundarySelected" }
 
 // EventEnvelope returns the event envelope.
-func (e *ContextBoundarySelectedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *ContextBoundarySelectedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
+}
+
+func (e *ContextBoundarySelectedEvent) isNil() bool { return e == nil }
 
 // RunFinishedEvent records that execution has reached a terminal outcome.
 type RunFinishedEvent struct {
@@ -200,168 +277,11 @@ type RunFinishedEvent struct {
 func (*RunFinishedEvent) EventName() string { return "RunFinished" }
 
 // EventEnvelope returns the event envelope.
-func (e *RunFinishedEvent) EventEnvelope() Envelope { return e.Envelope }
-
-// StepStartedEvent records the opening of a new step frontier.
-type StepStartedEvent struct {
-	Envelope    Envelope
-	StepIndex   int
-	ContextRefs []string
+func (e *RunFinishedEvent) EventEnvelope() Envelope {
+	if e == nil {
+		return Envelope{}
+	}
+	return e.Envelope
 }
 
-// EventName returns the canonical event name.
-func (*StepStartedEvent) EventName() string { return "StepStarted" }
-
-// EventEnvelope returns the event envelope.
-func (e *StepStartedEvent) EventEnvelope() Envelope { return e.Envelope }
-
-// ToolBindingRevisedEvent records revision of available tool descriptors at step boundary.
-type ToolBindingRevisedEvent struct {
-	Envelope           Envelope
-	OldRevision        uint64
-	NewRevision        uint64
-	AddedGroups        []string
-	RemovedGroups      []string
-	DescriptorVersions map[string]string
-	Cause              string
-}
-
-// EventName returns the canonical event name.
-func (*ToolBindingRevisedEvent) EventName() string { return "ToolBindingRevised" }
-
-// EventEnvelope returns the event envelope.
-func (e *ToolBindingRevisedEvent) EventEnvelope() Envelope { return e.Envelope }
-
-// InstructionsLoadedEvent records rule layer instructions loaded into context assembly.
-type InstructionsLoadedEvent struct {
-	Envelope           Envelope
-	RuleLayer          string
-	SourcePath         string
-	SnapshotPayloadRef string
-	BudgetTokens       int
-	PrunedTokens       int
-}
-
-// EventName returns the canonical event name.
-func (*InstructionsLoadedEvent) EventName() string { return "InstructionsLoaded" }
-
-// EventEnvelope returns the event envelope.
-func (e *InstructionsLoadedEvent) EventEnvelope() Envelope { return e.Envelope }
-
-// ContextInjectedEvent records an injected contextual message at step boundary.
-type ContextInjectedEvent struct {
-	Envelope   Envelope
-	Tag        string
-	Source     string
-	PayloadRef string
-}
-
-// EventName returns the canonical event name.
-func (*ContextInjectedEvent) EventName() string { return "ContextInjected" }
-
-// EventEnvelope returns the event envelope.
-func (e *ContextInjectedEvent) EventEnvelope() Envelope { return e.Envelope }
-
-// ToolResultsPrunedEvent records compaction of previous tool results to save tokens.
-type ToolResultsPrunedEvent struct {
-	Envelope            Envelope
-	ToolResultPositions []int
-	PruneParams         string
-	TokensSaved         int
-}
-
-// EventName returns the canonical event name.
-func (*ToolResultsPrunedEvent) EventName() string { return "ToolResultsPruned" }
-
-// EventEnvelope returns the event envelope.
-func (e *ToolResultsPrunedEvent) EventEnvelope() Envelope { return e.Envelope }
-
-// ContextCompactedEvent records context summarization across step boundaries.
-type ContextCompactedEvent struct {
-	Envelope              Envelope
-	SummaryPayloadRef     string
-	FirstRetainedPosition int
-	TokensBefore          int
-	TokensAfter           int
-	WorkspaceMemoryRefs   []string
-	ModelInvocationRef    string
-}
-
-// EventName returns the canonical event name.
-func (*ContextCompactedEvent) EventName() string { return "ContextCompacted" }
-
-// EventEnvelope returns the event envelope.
-func (e *ContextCompactedEvent) EventEnvelope() Envelope { return e.Envelope }
-
-// InputSteeredEvent records user steer input queued for next step boundary injection.
-type InputSteeredEvent struct {
-	Envelope  Envelope
-	InputRef  string
-	Origin    string
-	Timestamp time.Time
-}
-
-// EventName returns the canonical event name.
-func (*InputSteeredEvent) EventName() string { return "InputSteered" }
-
-// EventEnvelope returns the event envelope.
-func (e *InputSteeredEvent) EventEnvelope() Envelope { return e.Envelope }
-
-// InputInterjectedEvent records user interjection taking priority over current work.
-type InputInterjectedEvent struct {
-	Envelope           Envelope
-	InputRef           string
-	MergedSteerRefs    []string
-	TargetAttemptID    string
-	TargetInvocationID string
-	QuiesceResult      string
-}
-
-// EventName returns the canonical event name.
-func (*InputInterjectedEvent) EventName() string { return "InputInterjected" }
-
-// EventEnvelope returns the event envelope.
-func (e *InputInterjectedEvent) EventEnvelope() Envelope { return e.Envelope }
-
-// StepCompletedEvent records canonical completion of the current step.
-type StepCompletedEvent struct {
-	Envelope          Envelope
-	StepIndex         int
-	ResponseRef       string
-	OrderedResultRefs []string
-	Continuation      StepContinuation
-}
-
-// EventName returns the canonical event name.
-func (*StepCompletedEvent) EventName() string { return "StepCompleted" }
-
-// EventEnvelope returns the event envelope.
-func (e *StepCompletedEvent) EventEnvelope() Envelope { return e.Envelope }
-
-// BudgetExtendedEvent records user extension of execution budget (e.g. maxSteps).
-type BudgetExtendedEvent struct {
-	Envelope        Envelope
-	Kind            string
-	ExtensionAmount int
-	Actor           string
-}
-
-// EventName returns the canonical event name.
-func (*BudgetExtendedEvent) EventName() string { return "BudgetExtended" }
-
-// EventEnvelope returns the event envelope.
-func (e *BudgetExtendedEvent) EventEnvelope() Envelope { return e.Envelope }
-
-// StepAbortedEvent records early termination of a step before canonical completion.
-type StepAbortedEvent struct {
-	Envelope     Envelope
-	StepIndex    int
-	Reason       string
-	Dispositions map[string]string
-}
-
-// EventName returns the canonical event name.
-func (*StepAbortedEvent) EventName() string { return "StepAborted" }
-
-// EventEnvelope returns the event envelope.
-func (e *StepAbortedEvent) EventEnvelope() Envelope { return e.Envelope }
+func (e *RunFinishedEvent) isNil() bool { return e == nil }

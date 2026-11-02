@@ -54,15 +54,13 @@ func evolveRunControlEvents(s *State, e Event) bool {
 		delete(s.Blocks, ev.BlockerID)
 		return true
 	case *RunInterruptedEvent:
-		causeID := ev.CauseID
-		if causeID == "" {
-			causeID = ev.Cause
-		}
-		s.InterruptionCauses[causeID] = &InterruptionCause{
-			CauseID:    causeID,
-			Cause:      ev.Cause,
-			AttemptRef: ev.AttemptRef,
-			PayloadRef: ev.PayloadRef,
+		if ev.CauseID != "" {
+			s.InterruptionCauses[ev.CauseID] = &InterruptionCause{
+				CauseID:    ev.CauseID,
+				Cause:      ev.Cause,
+				AttemptRef: ev.AttemptRef,
+				PayloadRef: ev.PayloadRef,
+			}
 		}
 		return true
 	case *RunRecoveryClearedEvent:
