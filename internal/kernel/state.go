@@ -58,7 +58,7 @@ type Block struct {
 type ActiveTimer struct {
 	TimerID    string
 	Generation uint64
-	Purpose    string
+	Purpose    TimerPurpose
 	Deadline   time.Time
 }
 

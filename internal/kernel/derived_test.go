@@ -203,6 +203,16 @@ func phaseCasesFinalizing(now time.Time) []phaseTestCase {
 func phaseCasesActive(now time.Time) []phaseTestCase {
 	return []phaseTestCase{
 		{
+			name: "phase preparing: step completed with continue continuation",
+			setup: func(s *State) {
+				s.CurrentModelInvocationID = testInvID
+				s.ModelInvocations[testInvID] = &ModelInvocation{InvocationID: testInvID, Planned: true, Completed: true, SelectedAttemptID: testAttID}
+				s.StepCompleted = true
+				s.StepContinuation = StepContinuationContinue
+			},
+			expected: PhasePreparing,
+		},
+		{
 			name: "phase preparing: suspend stop intent does not finalize",
 			setup: func(s *State) {
 				s.StopIntent = &StopIntent{Reason: StopReasonShutdown, Mode: StopModeSuspend, Actor: testUserActor, Target: testTargetRun, RequestTime: now}
@@ -281,10 +291,10 @@ func setupAllNineReasons(s *State, now time.Time) {
 	}
 	s.Blocks["b_in"] = &Block{BlockerID: "b_in", Kind: WaitReasonUserInput, Reference: "r", ResumeCondition: "c"}
 	s.Blocks["b_dep"] = &Block{BlockerID: "b_dep", Kind: WaitReasonDependency, Reference: "r", ResumeCondition: "c"}
-	s.ActiveTimers["t_ret"] = &ActiveTimer{TimerID: "t_ret", Generation: 1, Purpose: "model_retry", Deadline: now.Add(time.Second)}
+	s.ActiveTimers["t_ret"] = &ActiveTimer{TimerID: "t_ret", Generation: 1, Purpose: TimerPurposeModelRetry, Deadline: now.Add(time.Second)}
 	s.Blocks["b_cap"] = &Block{BlockerID: "b_cap", Kind: WaitReasonWorkerCapacity, Reference: "r", ResumeCondition: "c"}
 	s.Blocks["b_vlt"] = &Block{BlockerID: "b_vlt", Kind: WaitReasonVaultLocked, Reference: "r", ResumeCondition: "c"}
-	s.StopIntent = &StopIntent{Reason: StopReasonShutdown, Mode: StopModeSuspend, Actor: "sys", Target: "host", RequestTime: now}
+	s.Blocks["b_pause"] = &Block{BlockerID: "b_pause", Kind: WaitReasonHostPaused, Reference: "r", ResumeCondition: "c"}
 	s.Blocks["b_rec"] = &Block{BlockerID: "b_rec", Kind: WaitReasonRecoveryAdmission, Reference: "r", ResumeCondition: "c"}
 	s.Blocks["b_bud"] = &Block{BlockerID: "b_bud", Kind: WaitReasonStepBudget, Reference: "r", ResumeCondition: "c"}
 }
@@ -337,7 +347,7 @@ func TestDeriveWaitReasons(t *testing.T) {
 	t.Run("handles tool retry timer", func(t *testing.T) {
 		t.Parallel()
 		s := NewState()
-		s.ActiveTimers["t1"] = &ActiveTimer{TimerID: "t1", Generation: 1, Purpose: "tool_retry", Deadline: now.Add(time.Second)}
+		s.ActiveTimers["t1"] = &ActiveTimer{TimerID: "t1", Generation: 1, Purpose: TimerPurposeToolRetry, Deadline: now.Add(time.Second)}
 		if got := DeriveWaitReasons(s); !slices.Contains(got, WaitReasonRetryTimer) {
 			t.Fatalf("expected retry_timer in wait reasons, got %v", got)
 		}

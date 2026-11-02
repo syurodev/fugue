@@ -39,7 +39,7 @@ type TimerScheduledEvent struct {
 	Envelope           Envelope
 	TimerID            string
 	Generation         uint64
-	Purpose            string
+	Purpose            TimerPurpose
 	TargetID           string
 	ClockDomain        string
 	SchedulingDeadline time.Time

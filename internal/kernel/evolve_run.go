@@ -105,14 +105,34 @@ func markAttemptsAbandoned(s *State, attemptIDs []string) {
 	}
 }
 
-func markAttemptsWithDispositions(s *State, disps map[string]string) {
+func markAttemptsWithDispositions(s *State, disps map[string]AttemptDisposition) {
+	markModelAttemptsWithDispositions(s, disps)
+	markToolAttemptsWithDispositions(s, disps)
+}
+
+func markModelAttemptsWithDispositions(s *State, disps map[string]AttemptDisposition) {
+	for attID, disp := range disps {
+		for _, inv := range s.ModelInvocations {
+			if att, ok := inv.Attempts[attID]; ok {
+				switch disp {
+				case AttemptDispositionAbandonedUnknown:
+					att.Status = ModelAttemptStatusAbandonedUnknown
+				case AttemptDispositionCancelled:
+					att.Status = ModelAttemptStatusCancelled
+				}
+			}
+		}
+	}
+}
+
+func markToolAttemptsWithDispositions(s *State, disps map[string]AttemptDisposition) {
 	for attID, disp := range disps {
 		for _, tool := range s.ToolInvocations {
 			if att, ok := tool.Attempts[attID]; ok {
 				switch disp {
-				case "abandoned_unknown":
+				case AttemptDispositionAbandonedUnknown:
 					att.Status = ToolAttemptStatusAbandonedUnknown
-				case "cancelled":
+				case AttemptDispositionCancelled:
 					att.Status = ToolAttemptStatusCancelled
 				}
 			}

@@ -156,7 +156,7 @@ type RunClosureConfirmedEvent struct {
 	NewContextRevision          uint64
 	ResultingContextRequirement ContextRequirement
 	CauseEventRef               string
-	AttemptDispositions         map[string]string
+	AttemptDispositions         map[string]AttemptDisposition
 }
 
 // EventName returns the canonical event name.

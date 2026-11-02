@@ -136,3 +136,22 @@ const (
 	ContextRequirementRevalidationRequired ContextRequirement = "revalidation_required"
 	ContextRequirementFreshRequired        ContextRequirement = "fresh_required"
 )
+
+// AttemptDisposition represents the terminal disposition applied to an attempt during closure/recovery.
+type AttemptDisposition string
+
+// AttemptDisposition values.
+const (
+	AttemptDispositionAbandonedUnknown AttemptDisposition = "abandoned_unknown"
+	AttemptDispositionCancelled        AttemptDisposition = "cancelled"
+)
+
+// TimerPurpose represents the intended domain purpose of a scheduled timer.
+type TimerPurpose string
+
+// TimerPurpose values.
+const (
+	TimerPurposeModelRetry  TimerPurpose = "model_retry"
+	TimerPurposeToolRetry   TimerPurpose = "tool_retry"
+	TimerPurposeRunDeadline TimerPurpose = "run_deadline"
+)

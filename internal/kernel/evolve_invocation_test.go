@@ -213,7 +213,7 @@ func testEvolveTimersAndBudgets(t *testing.T, s *State, env *Envelope, now time.
 	})
 
 	s = Evolve(s, &TimerScheduledEvent{
-		Envelope: *env, TimerID: testTimer1, Generation: 1, Purpose: "run_deadline", TargetID: testWindowID,
+		Envelope: *env, TimerID: testTimer1, Generation: 1, Purpose: TimerPurposeRunDeadline, TargetID: testWindowID,
 		ClockDomain: "monotonic", SchedulingDeadline: now.Add(time.Minute), Duration: time.Minute, PolicyVersion: "v1",
 	})
 	if s.ActiveTimers[testTimer1] == nil {
@@ -227,7 +227,7 @@ func testEvolveTimersAndBudgets(t *testing.T, s *State, env *Envelope, now time.
 	}
 
 	s = Evolve(s, &TimerScheduledEvent{
-		Envelope: *env, TimerID: testTimer2, Generation: 1, Purpose: "model_retry", TargetID: testModelInvRef,
+		Envelope: *env, TimerID: testTimer2, Generation: 1, Purpose: TimerPurposeModelRetry, TargetID: testModelInvRef,
 		ClockDomain: "utc", SchedulingDeadline: now.Add(time.Second), Duration: time.Second, PolicyVersion: "v1",
 	})
 	s = Evolve(s, &TimerCancelledEvent{Envelope: *env, TimerID: testTimer2, Generation: 1, CauseRef: "cancel"})
@@ -311,7 +311,7 @@ func testToolRecoveryDispositions(t *testing.T, env *Envelope) {
 	s = Evolve(s, &RunClosureConfirmedEvent{
 		Envelope: *env, MetadataOnlyPreviewVersion: "v1", RunRevision: 3, ExactAttemptIDs: []string{testAttT2},
 		CauseIDs: nil, Actor: "u", UnavailabilityReason: "payload_corrupt", PreviousContextRevision: 1, NewContextRevision: 2,
-		ResultingContextRequirement: ContextRequirementFreshRequired, CauseEventRef: "", AttemptDispositions: map[string]string{testAttT2: testCancelled},
+		ResultingContextRequirement: ContextRequirementFreshRequired, CauseEventRef: "", AttemptDispositions: map[string]AttemptDisposition{testAttT2: AttemptDispositionCancelled},
 	})
 	if s.ToolInvocations["tc-2"].Attempts[testAttT2].Status != ToolAttemptStatusCancelled {
 		t.Fatalf("expected cancelled disposition from closure confirmation")

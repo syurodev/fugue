@@ -9,10 +9,10 @@ func Evolve(s *State, e Event) *State {
 	if s == nil {
 		s = NewState()
 	}
-	if e == nil {
-		return s
-	}
 	next := cloneState(s)
+	if e == nil {
+		return &next
+	}
 	switch {
 	case evolveRunAndStepEvents(&next, e):
 	case evolveModelEvents(&next, e):

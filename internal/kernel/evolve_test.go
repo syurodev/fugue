@@ -8,23 +8,24 @@ import (
 )
 
 const (
-	evRunID     = "run-1"
-	evCmdID     = "cmd-1"
-	evCauID     = "cau-1"
-	evOrigin    = "test"
-	evToken     = 7
-	evInput     = "inp-1"
-	evSession   = "sess-1"
-	evBlockID   = "blk-1"
-	evCause     = "effect_unknown"
-	evActor     = "user"
-	evAttempt1  = "att-1"
-	evPay1      = "pay-1"
-	evCause1    = "cause-1"
-	evModelInv  = "inv"
-	evResp      = "resp"
-	evCancelled = "cancelled"
-	evVaultLock = "vault_locked"
+	evRunID         = "run-1"
+	evCmdID         = "cmd-1"
+	evCauID         = "cau-1"
+	evOrigin        = "test"
+	evToken         = 7
+	evInput         = "inp-1"
+	evSession       = "sess-1"
+	evBlockID       = "blk-1"
+	evCause         = "effect_unknown"
+	evActor         = "user"
+	evAttempt1      = "att-1"
+	evPay1          = "pay-1"
+	evCause1        = "cause-1"
+	evModelInv      = "inv"
+	evResp          = "resp"
+	evCancelled     = "cancelled"
+	evVaultLock     = "vault_locked"
+	evModelCloseAtt = "att-m-close"
 )
 
 func testEvolveRunLifecycleEvents(t *testing.T, env *Envelope, now time.Time) *State {
@@ -98,14 +99,35 @@ func testEvolveRunClosuresAndBoundaries(t *testing.T, s *State, env *Envelope, n
 	})
 
 	s.InterruptionCauses[evCause1] = &InterruptionCause{Cause: evVaultLock, AttemptRef: "", PayloadRef: ""}
+	s.ModelInvocations["inv-m-close"] = &ModelInvocation{
+		InvocationID: "inv-m-close", Planned: true,
+		Attempts: map[string]*ModelAttempt{
+			evModelCloseAtt: {AttemptID: evModelCloseAtt, Status: ModelAttemptStatusRequesting},
+		},
+	}
+	s.ToolInvocations["tc-close"] = &ToolInvocation{
+		ToolCallID: "tc-close", DescriptorVersion: "1.0", EffectClass: EffectClassSideEffecting,
+		Attempts: map[string]*ToolAttempt{
+			evAttempt1: {AttemptID: evAttempt1, Status: ToolAttemptStatusDispatching},
+		},
+	}
 	s = Evolve(s, &RunClosureConfirmedEvent{
-		Envelope: *env, MetadataOnlyPreviewVersion: "v1", RunRevision: 2, ExactAttemptIDs: []string{evAttempt1},
+		Envelope: *env, MetadataOnlyPreviewVersion: "v1", RunRevision: 2, ExactAttemptIDs: []string{evAttempt1, evModelCloseAtt},
 		CauseIDs: []string{evCause1}, Actor: evActor, UnavailabilityReason: evVaultLock,
 		PreviousContextRevision: 10, NewContextRevision: 11, ResultingContextRequirement: ContextRequirementRevalidationRequired,
-		CauseEventRef: "ev-1", AttemptDispositions: map[string]string{evAttempt1: "abandoned_unknown"},
+		CauseEventRef: "ev-1", AttemptDispositions: map[string]AttemptDisposition{
+			evAttempt1:      AttemptDispositionAbandonedUnknown,
+			evModelCloseAtt: AttemptDispositionCancelled,
+		},
 	})
 	if s.ContextRequirement != ContextRequirementRevalidationRequired || s.ContextRevision != 11 {
 		t.Fatalf("RunClosureConfirmed failed")
+	}
+	if s.ModelInvocations["inv-m-close"].Attempts[evModelCloseAtt].Status != ModelAttemptStatusCancelled {
+		t.Fatalf("expected model attempt cancelled by closure confirmation")
+	}
+	if s.ToolInvocations["tc-close"].Attempts[evAttempt1].Status != ToolAttemptStatusAbandonedUnknown {
+		t.Fatalf("expected tool attempt abandoned unknown by closure confirmation")
 	}
 
 	s = Evolve(s, &ContextBoundarySelectedEvent{
@@ -116,7 +138,7 @@ func testEvolveRunClosuresAndBoundaries(t *testing.T, s *State, env *Envelope, n
 		t.Fatalf("ContextBoundarySelected failed")
 	}
 
-	s.ActiveTimers["t1"] = &ActiveTimer{TimerID: "t1", Generation: 1, Purpose: "p", Deadline: now}
+	s.ActiveTimers["t1"] = &ActiveTimer{TimerID: "t1", Generation: 1, Purpose: TimerPurposeRunDeadline, Deadline: now}
 	s = Evolve(s, &RunFinishedEvent{
 		Envelope: *env, Outcome: RunOutcomeCompleted, Truncated: false, PrimaryStopRef: "stop",
 		SecondaryStopRefs: nil, UnresolvedExposureRefs: nil,
@@ -168,11 +190,15 @@ func TestEvolvePurityAndCoverage(t *testing.T) {
 	now := time.Date(2026, 11, 2, 12, 0, 0, 0, time.UTC)
 	env := testEnvelope(evRunID, 1, now)
 
-	t.Run("nil event returns unmodified state", func(t *testing.T) {
+	t.Run("nil event returns cloned state with identical content", func(t *testing.T) {
 		t.Parallel()
 		s := NewState()
 		s.RunID = evRunID
-		if diff := cmp.Diff(s, Evolve(s, nil)); diff != "" {
+		got := Evolve(s, nil)
+		if got == s {
+			t.Fatalf("expected different pointer for purity")
+		}
+		if diff := cmp.Diff(s, got); diff != "" {
 			t.Fatalf("state mismatch (-want +got):\n%s", diff)
 		}
 	})

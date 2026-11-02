@@ -73,6 +73,9 @@ func DerivePhase(s *State) Phase {
 	if isFinalizing(s) {
 		return PhaseFinalizing
 	}
+	if s.StepCompleted && s.StepContinuation == StepContinuationContinue {
+		return PhasePreparing
+	}
 	if s.CurrentModelInvocationID == "" {
 		return PhasePreparing
 	}
@@ -121,14 +124,11 @@ func collectBlockReasons(s *State, present map[WaitReason]bool) {
 			present[blk.Kind] = true
 		}
 	}
-	if s.StopIntent != nil && s.StopIntent.Mode == StopModeSuspend {
-		present[WaitReasonHostPaused] = true
-	}
 }
 
 func collectTimerReasons(s *State, present map[WaitReason]bool) {
 	for _, t := range s.ActiveTimers {
-		if t.Purpose == "model_retry" || t.Purpose == "tool_retry" {
+		if t.Purpose == TimerPurposeModelRetry || t.Purpose == TimerPurposeToolRetry {
 			present[WaitReasonRetryTimer] = true
 		}
 	}
