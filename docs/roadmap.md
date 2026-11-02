@@ -4,7 +4,7 @@ The living work board of the repository. It answers: what to do, in what order, 
 design, what counts as done, and where each item stands. This page **does not** change the
 design.
 
-Last updated: 2026-11-01, by the implementing agent (F1.1 in review).
+Last updated: 2026-11-01, by the implementing agent (F1.1 done).
 
 ## 0. Context
 
@@ -97,7 +97,7 @@ Applies to all code copied from `syurodev/dev-kit`.
 
 | ID | Item | Design | Depends on | Evidence | Status | PR | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| F1.1 | `crypto`: XChaCha20-Poly1305 AEAD, Argon2id KDF, envelope, keyring | `storage-security §4` | F0.8 | Vector tests from dev-kit `internal/crypto`: `TestSealMatchesTheOriginalVector`, `TestSealOfEmptyPlaintextMatchesTheOriginalVector`, `TestDeriveKeyMatchesTheOriginalVectors`, `TestNewKeyringMatchesTheOriginalVector`, `TestTheOriginalKeyringStillUnlocks`; envelope fuzzing: `FuzzEnvelopeJSON`, `FuzzSealOpenRoundTrip` | In review | [#24](https://github.com/syurodev/fugue/pull/24) | User approval. Provenance and the few changes are in `docs/ports.md`; `docs/dependencies.md` gains `golang.org/x/crypto`, so the PR needs `gate-change-approved` |
+| F1.1 | `crypto`: XChaCha20-Poly1305 AEAD, Argon2id KDF, envelope, keyring | `storage-security §4` | F0.8 | Vector tests from dev-kit `internal/crypto`: `TestSealMatchesTheOriginalVector`, `TestSealOfEmptyPlaintextMatchesTheOriginalVector`, `TestDeriveKeyMatchesTheOriginalVectors`, `TestNewKeyringMatchesTheOriginalVector`, `TestTheOriginalKeyringStillUnlocks`; envelope fuzzing: `FuzzEnvelopeJSON`, `FuzzSealOpenRoundTrip` | Done | [#24](https://github.com/syurodev/fugue/pull/24) | User approval. Provenance and the few changes are in `docs/ports.md`; `docs/dependencies.md` gains `golang.org/x/crypto`, so the PR needs `gate-change-approved` |
 | F1.2 | `vault`: Master Password, locked on every process start, `SealRecord`; observation API (snapshot, revision, subscription, lock guard) | `storage-security §8` | F1.1 | Unlock before recovery, lock while in use, slow subscriber | Not started | | Observation API written fresh from the design, not copied from PR #413 |
 | F1.3 | `storage`: open SQLite (`modernc.org/sqlite`), pragma checks, migration framework, `Fugue/` data directory, `fugue.lock`, incarnation | `storage-security §2–3, §9` | F0.2, F0.8 | Wrong pragma rejected; two processes, path aliases, crash then reacquire the lock | Not started | | DB file name per Q-03 |
 | F1.4 | `credentials`: model provider accounts (API key in the vault, Sign in with ChatGPT tokens), `PickAccount` | `model-adapter §7, §11` | F1.2, F1.3 | No secret in logs or errors; account choice follows rate limits | Not started | | Only what the model adapter needs |
@@ -261,3 +261,4 @@ together only in `app`.
 | 2026-11-01 | F0.6 | PR #9 merged; the `cache` workflow warmed `main` (1 GB caches on Linux and macOS). Status stays In progress until the owner enables the ruleset and the trial PRs are run | Agent |
 | 2026-11-01 | F0.6 | Owner enabled the `main` ruleset and squash-only merges; 12 trial PRs proved the gates block (see the F0.6 row). F0.6 Done; F0 complete except the open questions in §7 | Agent |
 | 2026-11-01 | F1.1 | `internal/crypto` ported from dev-kit `b3c8ff5d`: same wire format, typed `errcode` errors, injectable random source for vector tests; vectors built from the original code; two fuzz targets; `golang.org/x/crypto` becomes a direct dependency | Agent |
+| 2026-11-01 | F1.1 | Marked Done after the merge of PR #24 | Agent |
