@@ -372,3 +372,9 @@ func assertLandlockChildProcess(t *testing.T) {
 		t.Fatalf("unexpected child output: %s", out)
 	}
 }
+
+func removeAllQuietly(path string) {
+	if err := os.RemoveAll(path); err != nil {
+		return
+	}
+}

@@ -112,3 +112,7 @@ func (b *BwrapBackend) StartPiped(ctx context.Context, p *Policy, c Cmd) (*Proc,
 	}
 	return proc, nil
 }
+
+func buildBwrapArgs(p *Policy, c Cmd) []string {
+	return buildBwrapArgsWith(p, c, defaultBwrapEnv())
+}

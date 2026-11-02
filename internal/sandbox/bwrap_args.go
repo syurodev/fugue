@@ -54,10 +54,6 @@ func (e bwrapEnv) exists(path string) bool {
 	return e.stat(path) != bwrapPathMissing
 }
 
-func buildBwrapArgs(p *Policy, c Cmd) []string {
-	return buildBwrapArgsWith(p, c, defaultBwrapEnv())
-}
-
 func buildBwrapArgsWith(p *Policy, c Cmd, env bwrapEnv) []string {
 	cp := p.withDefaults()
 
