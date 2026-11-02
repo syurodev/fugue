@@ -129,10 +129,7 @@ func checkAdditionalTransition(s *State, e Event, f *DecisionFacts, bad map[Inva
 	case *ModelRequestPlannedEvent:
 		checkModelPlan(s, ev, bad)
 	case *ToolCallPlannedEvent:
-		_, exists := s.ToolInvocations[ev.ToolCallID]
-		if exists || attemptExists(s, ev.FirstAttemptID) {
-			bad[SM08] = true
-		}
+		checkToolPlan(s, ev, bad)
 	case *ToolApprovalRequestedEvent:
 		checkApprovalRequest(s, ev, bad)
 	case *ToolApprovalResolvedEvent:
@@ -215,11 +212,27 @@ func resolvedApprovalMatches(t *ToolInvocation, e *ToolReadyRecordedEvent) bool 
 }
 
 func checkModelPlan(s *State, e *ModelRequestPlannedEvent, bad map[InvariantID]bool) {
-	_, exists := s.ModelInvocations[e.InvocationID]
+	exists := invariantInvocationExists(s, e.InvocationID)
 	if exists || attemptExists(s, e.FirstAttemptID) {
 		bad[SM08] = true
 	}
 	if !hasOpenStep(s) || s.CurrentModelInvocationID != "" {
 		bad[SM07] = true
 	}
+}
+
+func checkToolPlan(s *State, e *ToolCallPlannedEvent, bad map[InvariantID]bool) {
+	if invariantInvocationExists(s, e.ToolCallID) || attemptExists(s, e.FirstAttemptID) {
+		bad[SM08] = true
+	}
+	inv := s.ModelInvocations[s.CurrentModelInvocationID]
+	if inv == nil || !inv.Completed || !hasOpenStep(s) || e.SourcePosition != len(s.ToolOrder) {
+		bad[SM07] = true
+	}
+}
+
+func invariantInvocationExists(s *State, id string) bool {
+	_, model := s.ModelInvocations[id]
+	_, tool := s.ToolInvocations[id]
+	return model || tool
 }

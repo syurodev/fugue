@@ -355,3 +355,18 @@ func TestAdmissionRequiresKnownOwner(t *testing.T) {
 		t.Fatal(ids)
 	}
 }
+
+func TestToolProposalsKeepCanonicalSourceOrder(t *testing.T) {
+	t.Parallel()
+	s, cases := traceState(t, 4)
+	c := cases[4]
+	bindDecision(&c, s, "source-order")
+	events, err := Decide(s, c.command, &c.facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fixtureValue[*ToolCallPlannedEvent](events[2]).SourcePosition = 1
+	if ids := CheckBatch(s, events, &c.facts); !slices.Contains(ids, SM07) {
+		t.Fatal(ids)
+	}
+}
