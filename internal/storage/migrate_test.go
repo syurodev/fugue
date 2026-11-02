@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"slices"
 	"testing"
 	"testing/fstest"
 	"time"
@@ -127,18 +128,16 @@ func TestRunMigrationsRejectsInvalidAndMismatchedMigrations(t *testing.T) {
 		t.Fatalf("RunMigrations(mismatched name) code = %v, want %v", errcode.CodeOf(runErr), errcode.FailedPrecondition)
 	}
 
-	withBadSecond := []Migration{
-		valid[0],
-		{Version: 2, Name: "broken_sql", SQL: "THIS IS NOT VALID SQL;"},
-	}
-	if runErr := RunMigrations(ctx, db, clk, withBadSecond); errcode.CodeOf(runErr) != errcode.Internal {
+	next := len(valid) + 1
+	withBadNext := append(slices.Clone(valid), Migration{Version: next, Name: "broken_sql", SQL: "THIS IS NOT VALID SQL;"})
+	if runErr := RunMigrations(ctx, db, clk, withBadNext); errcode.CodeOf(runErr) != errcode.Internal {
 		t.Fatalf("RunMigrations(broken SQL) code = %v, want %v", errcode.CodeOf(runErr), errcode.Internal)
 	}
 
 	// Simulate a database migrated by a newer binary.
 	if _, execErr := db.ExecContext(
 		ctx,
-		"INSERT INTO schema_migrations (version, name, applied_at) VALUES (2, 'future', '2026-11-02T10:00:00Z')",
+		"INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, 'future', '2026-11-02T10:00:00Z')", next,
 	); execErr != nil {
 		t.Fatalf("insert future migration: %v", execErr)
 	}

@@ -159,5 +159,35 @@ Not carried over:
 
 - Per-session jail, process registry and environment snapshot: those belong to F6.4 (`internal/tools/jail`, awaiting H-25).
 
+## `internal/credentials` (F1.4)
 
+| | |
+| --- | --- |
+| Original | `internal/agenthub` (`accountpick.go`, `accounts.go`: `PickAccount`, the window helpers and `mergeWindowsReport`) and `internal/preferences` (`accountpolicy.go`: the strategies and the default threshold) |
+| dev-kit commit | `b3c8ff5df42e6fc58c1cd8077dddd278fc7dd84e` |
+| Stored format | Table `credential_accounts` (migration `0002_credential_accounts.sql`). The secret column holds a vault record sealed under `credentials.account.<provider>.<kind>` and the account ID; usage is JSON; times are Unix milliseconds |
+| Vector tests | `testdata/pick-vectors.json`: 220 inputs and the decisions the original `PickAccount` returned for them (random but seeded: strategies, thresholds, model windows, flip hold, return margin, signed-out and cooling accounts). `TestPickAccountMatchesTheOriginalVectors` |
+
+`PickAccount` keeps the thresholds, the three strategies, the 5-minute hold, the 10-point return
+margin, the model windows and the `AllLimited` rule unchanged (model-adapter §7).
+
+Changed for `model-adapter §7, §11` and ADR 0001:
+
+- DevKit's `AccountRecord` held no credential and pointed at a vendor CLI's home. An `Account` has a `Provider` and a `Kind`
+  (`api_key` or `chatgpt`), and its secret lives in the vault through `Book`. The built-in account (`HomeDir == ""`, `Current == ""`) does not exist.
+- Failover happens among the API keys of the current account's provider (M-04). An account on a ChatGPT plan is never a target, and when it
+  is the current account `PickAccount` stays (M-09, `TestAChatGPTPlanAccountNeverFailsOver`).
+- `PickAccount` and the helpers take pointers (`gocritic` `hugeParam`). The policy is a local `Policy`; its validation and storage belong to
+  the settings that will own it.
+- `ReplaceUsage`, `UsageSource`, `UsageGeneration`, `Shared`, `NoReading` and the sign-in probes are not carried over: they served
+  vendor-CLI subscriptions, and usage now comes from rate-limit headers.
+
+New, written from `model-adapter §7, §11.2`: `Book` (accounts, sealed credentials, markers that only move later, usage merge), and
+`RefreshChatGPT`, which runs the caller's refresh under a lock held per account so one refresh token is never spent twice, and never
+changes an account's client ID.
+
+Not carried over:
+
+- Turning rate-limit headers into `LimitWindow`s (F4.2), the Sign in with ChatGPT login, validation and revocation (F4.3, F7) and the
+  account policy settings: the adapters and the UI call `Book`.
 
