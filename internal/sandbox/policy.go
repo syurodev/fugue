@@ -405,4 +405,3 @@ func pathIsContainedIn(path, root string) bool {
 	}
 	return rel == "." || (rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)))
 }
-

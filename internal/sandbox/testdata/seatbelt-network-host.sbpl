@@ -76,4 +76,3 @@
 (deny file-write-unlink (require-all (vnode-type DIRECTORY) (literal "/Users")))
 (deny file-write-unlink (require-all (vnode-type DIRECTORY) (literal "/Users/alice")))
 (deny file-write-unlink (require-all (vnode-type DIRECTORY) (literal "/Users/alice/.config")))
-

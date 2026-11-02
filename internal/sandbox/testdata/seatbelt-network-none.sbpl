@@ -58,4 +58,3 @@
 (deny file-write-unlink (require-all (vnode-type DIRECTORY) (literal "/Users/alice/Library")))
 (deny file-write-unlink (require-all (vnode-type DIRECTORY) (literal "/Users/alice/workspace")))
 (deny file-write-unlink (require-all (vnode-type DIRECTORY) (literal "/Users/alice/workspace/app")))
-

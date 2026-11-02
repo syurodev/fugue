@@ -23,4 +23,3 @@ func (unavailableBackend) Start(context.Context, *Policy, Cmd) (*Proc, error) {
 func (unavailableBackend) StartPiped(context.Context, *Policy, Cmd) (*Proc, error) {
 	return nil, ErrUnsupportedPlatform
 }
-
