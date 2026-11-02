@@ -36,7 +36,7 @@ func CheckInvariants(s *State) []InvariantID {
 	failed[SM04] = frontierPhaseWrong(s)
 	failed[SM05] = s.Finished && !finishSafe(s)
 	failed[SM06] = unknownLifecycleWrong(s)
-	failed[SM09] = !modelStructureValid(s) || !toolStructureValid(s)
+	failed[SM09] = !admissionFactsValid(s) || !modelStructureValid(s) || !toolStructureValid(s)
 	failed[SM11] = !unknownExposureRetained(s)
 	failed[SM12] = !s.Admitted && (active > 0 || len(s.ModelInvocations) > 0 || len(s.ToolInvocations) > 0)
 	return invariantIDs(failed)
@@ -208,4 +208,8 @@ func approvalMatches(id string, tool *ToolInvocation, waiting int) bool {
 		return false
 	}
 	return true
+}
+
+func admissionFactsValid(s *State) bool {
+	return !s.Admitted || (s.Accepted && s.RunID != "" && s.AdmissionToken != 0 && s.OwnerIncarnation != 0)
 }

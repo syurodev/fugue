@@ -339,3 +339,19 @@ func TestStepIdentityCannotBeReusedOrSkipped(t *testing.T) {
 		}
 	}
 }
+
+func TestAdmissionRequiresKnownOwner(t *testing.T) {
+	t.Parallel()
+	s, cases := traceState(t, 2)
+	c := cases[2]
+	bindDecision(&c, s, "unknown-owner")
+	events, err := Decide(s, c.command, &c.facts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.OwnerIncarnation = 0
+	c.facts.OwnerIncarnation = 0
+	if ids := CheckBatch(s, events, &c.facts); !slices.Contains(ids, SM09) {
+		t.Fatal(ids)
+	}
+}

@@ -158,7 +158,7 @@ func checkDispatchFacts(s *State, token, fence uint64, f *DecisionFacts, bad map
 		bad[SM10] = true
 		return
 	}
-	if token == 0 || token != s.AdmissionToken || f.OwnerIncarnation != s.OwnerIncarnation || fence == 0 || fence != f.ExecutorFence {
+	if token == 0 || token != s.AdmissionToken || f.OwnerIncarnation == 0 || f.OwnerIncarnation != s.OwnerIncarnation || fence == 0 || fence != f.ExecutorFence {
 		bad[SM09] = true
 	}
 	if f.WorkerReservationRef == "" || f.DispatchAuthorizationRef == "" {
