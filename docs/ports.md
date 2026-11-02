@@ -33,3 +33,38 @@ Changed, without changing what is accepted or produced:
 - `OpenWithAD` and `Envelope.Validate` take a pointer (`gocritic` `hugeParam`: an `Envelope` is 88 bytes); a nil envelope is rejected as `invalid_argument`.
 - `AlgorithmAES256GCM` is not carried over: the original defined it only to reject it.
 - DevKit wording ("sync wire limit") is removed from comments.
+
+## `internal/vault` (F1.2)
+
+| | |
+| --- | --- |
+| Original | `internal/vault` (`service.go`, `record_codec.go`, `keyringstore.go`, `sqlkeyringstore.go` and their tests) |
+| dev-kit commit | `b3c8ff5df42e6fc58c1cd8077dddd278fc7dd84e` |
+| Stored format | Unchanged: the keyring JSON and the record envelope JSON |
+| Vector tests | `testdata/keyring-cheap.json` and `testdata/record-golden.json` were produced by the original crypto code; `TestARecordSealedByTheOriginalCodeStillOpens`, `TestUnlockOpensTheKeyringsDataKey` |
+
+The lock lifecycle (`Setup`, `Unlock`, `UnlockWithRecovery`, `Lock`), the Master Password length rule
+(8 bytes), the record bounds (1,000,000 bytes of plaintext, 1,500,000 of envelope) and the record
+binding follow the original. The observation API is not a copy: it is written from
+`storage-security §8`.
+
+Changed:
+
+- Secrets cross the API as `redact.Secret`, and the store port takes a `context.Context`.
+- The incarnation comes from the injected `ids.Generator`, not `crypto/rand`.
+- Errors are `errcode` errors. `ErrLocked` is `failed_precondition`; a wrong password or recovery key is
+  `permission_denied`; a store failure is `internal`.
+- `Unlock` derives the key under the lifecycle mutex only, so sealing is not blocked during the slow
+  derivation. `Lock` changes the state before it runs the guards and zeroes the key afterwards, so no
+  operation succeeds once the guards run and the old `locking` flag is gone.
+- Subscriptions keep their flags under the vault mutex instead of atomics, and the drain loop of
+  `Resync` cannot block.
+
+Not carried over:
+
+- `FileKeyringStore`: the keyring lives in `vault_meta` (ADR 0001 §5). `SQLKeyringStore` follows in F1.3,
+  when storage can create the table; `MemoryKeyringStore` serves tests and ephemeral runs.
+- `VerifyMasterPassword`, `Status`, `IsLocked` and the exported `SealV2`/`OpenWithAD` methods: no
+  roadmap item needs them. Credentials may need `VerifyMasterPassword` in F1.4.
+- The check on the encoded envelope length after sealing: a 1,000,000-byte record always encodes
+  below 1,500,000 bytes, so the branch was unreachable.

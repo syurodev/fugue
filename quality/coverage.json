@@ -5,5 +5,6 @@
   "internal/platform/errcode": 100,
   "internal/platform/ids": 97.5,
   "internal/platform/redact": 100,
-  "internal/platform/supervise": 100
+  "internal/platform/supervise": 100,
+  "internal/vault": 97.2
 }
