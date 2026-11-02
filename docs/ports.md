@@ -68,3 +68,34 @@ Not carried over:
   roadmap item needs them. Credentials may need `VerifyMasterPassword` in F1.4.
 - The check on the encoded envelope length after sealing: a 1,000,000-byte record always encodes
   below 1,500,000 bytes, so the branch was unreachable.
+
+## `internal/interaction` (F1.5)
+
+| | |
+| --- | --- |
+| Original | `internal/interaction` (`hub.go`, `errors.go` and their tests) |
+| dev-kit commit | `b3c8ff5df42e6fc58c1cd8077dddd278fc7dd84e` |
+| Stored format | None: requests, session grants and receipts are held only in memory per incarnation (`tool-system §5.1`, D-16) |
+| Vector tests | Behavioral invariants from `hub_test.go` and `scoped_approval_test.go`: `TestAnOldRequestCannotBeAnsweredAfterRestart`, `TestADuplicateAnswerIsRejected`, `TestAReceiptCanBeClaimedOnlyOnceAndMatchesItsBinding`, `TestSelectionRequestsAcceptOnlyOfferedOptionsAndNeverAuthorizeExecution`, `TestImportantRequestsAlwaysAskAndRefuseSessionGrants`, `TestVaultLockInvalidatesPendingRequestsGrantsAndReceipts`, `TestNilResponderAndHeadlessFailClosed` |
+
+The fail-closed rules of `Hub` are preserved: a nil responder, headless mode or a locked vault
+never approves a request; environment confirmation and `Important` requests always ask and never
+offer or reuse a session grant; selections accept only an option that was offered; and vault lock
+is checked inside the owner's critical section when claiming a receipt or answering a request.
+
+Changed for `tool-system §5` and D-16:
+
+- Worker goroutines no longer block in `wait`: `Ensure` creates or reads back a request keyed by
+  `OperationID` in the current owner incarnation, and `Answer` resolves it at most once.
+- Approvals issue a one-use `Receipt` bound to the session, workspace, invocation, attempt, check
+  generation, tool, argument digest and target/environment revisions; `ClaimReceipt` and
+  `ClaimSelection` consume it atomically.
+- Time and identifiers come from the injected `clock.Clock` and `ids.Generator` ports, and errors
+  use `errcode` codes.
+
+Not carried over:
+
+- DevKit-specific prompt helpers (`SelectAccount`, `SelectHarnessScope`,
+  `SelectGroupRequestAnswer`, `ConfirmAgent`) and `db.query` multi-use scoped approvals: the full
+  per-tool interaction surface is H-24 (F6.3).
+
