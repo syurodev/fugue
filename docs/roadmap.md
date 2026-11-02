@@ -4,7 +4,7 @@ The living work board of the repository. It answers: what to do, in what order, 
 design, what counts as done, and where each item stands. This page **does not** change the
 design.
 
-Last updated: 2026-11-02, by the implementing agent (F1 is done: F1.1 to F1.7 merged).
+Last updated: 2026-11-02, by the implementing agent (F2.1a in review, Q-12 answered).
 
 ## 0. Context
 
@@ -109,7 +109,9 @@ Applies to all code copied from `syurodev/dev-kit`.
 
 | ID | Item | Design | Depends on | Evidence | Status | PR | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| F2.1 | Kernel: command and event types, `decide` and `evolve` for run, step, model and tool invocation/attempt; derived lifecycle, phase and `waitReasons` | `state-machine §1–7`, `event-catalog §1–5` | F0.4, F0.8 | Tables of valid and rejected transitions | Not started | | `kernelpure` must be green |
+| F2.1 | Kernel: command and event types, `decide` and `evolve` for run, step, model and tool invocation/attempt; derived lifecycle, phase and `waitReasons` | `state-machine §1–7`, `event-catalog §1–5` | F0.4, F0.8 | Tables of valid and rejected transitions | In progress | | Composite row; Done when both F2.1a and F2.1b merge (Q-12) |
+| F2.1a | Kernel: 54 event types, 27 minimal command types, `State`, total pure `evolve`, derived lifecycle, phase and `waitReasons`, rejection types/codes | `state-machine §1–2`, `event-catalog §1–5` | F0.4, F0.8 | `TestEvolvePurityAndCoverage`, `TestDeriveLifecyclePrecedence`, `TestDerivePhaseFrontier`, `TestDeriveWaitReasons`, `TestCommandNames`, `TestEventNamesAndEnvelopes` | In review | [#33](https://github.com/syurodev/fugue/pull/33) | `kernelpure` green; coverage 97.8%; scope per Q-12 |
+| F2.1b | Kernel: `decide` for Trace A commands, rejection, no-op and dedup transitions | `state-machine §4–5`, `event-catalog §6–7` | F2.1a | Tables of valid and rejected transitions for Trace A commands | Not started | | Scope per Q-12 |
 | F2.2 | Invariant checker SM-01 to SM-12; property tests over random command sequences | `state-machine §3` | F2.1 | Each invariant has a violating test; rapid runs invariants after every batch; replaying twice yields the same state | Not started | | |
 | F2.3 | Canonical codec v1, receipt deduplication | `storage-security §5`, `event-storage-recovery §5` | F2.1 | Duplicate keys, unknown fields, wrong `codec_version`; the same `command_id` gets the same receipt; fuzzing | Not started | | |
 | F2.4 | Execution store: `exec_*` tables, append-only triggers, one transaction for event, payload, projection, receipt and admission | `storage-security §2–3, §6`, `event-storage-recovery §5` | F1.3, F2.3 | Atomicity under fault injection; triggers block UPDATE and DELETE | Not started | | G-03 evidence |
@@ -241,6 +243,7 @@ together only in `app`.
 | Q-09 | 2026-11-01 | F0.5 | quality-gates §5 says `TestErrorCodesPublished` checks codes "returned through the Host API" against a public registry, but names neither. Convention used: codes are string constants of type `Code` in `internal/platform/errcode` (F0.8); the registry is `docs/error-codes.md` with a Public table and a Hidden table (each hidden code has a reason); every declared code must be in exactly one table and the page may not name an undeclared code. Accept? | |
 | Q-10 | 2026-11-01 | F0.6 | quality-gates §10 lists eight gate-defining files. `cmd/fuguegate/**` (coverage, fuzz, mutation, deadcode, proto, commit-lint and gate-guard logic), `.github/CODEOWNERS`, `.githooks/**`, `AGENTS.md`, `docs/error-codes.md` and the `tool` and `require` lines of `go.mod` also decide what passes. `CODEOWNERS` already assigns the first five to the owner; `gate-guard` follows §10 exactly. Add them to §10 so the label is required for them too? | |
 | Q-11 | 2026-11-01 | F1.2 | `fuguegate mutation` gives gremlins no `-count=1`, so when the package's tests are cached (a second `task check` run without a test change) gremlins measures a baseline of about 0.1 s, its timeout becomes 50x that, and slow but healthy mutants are counted as timed out and fail the score. Cold runs, such as CI, pass. Proposal: run gremlins with `GOFLAGS=-count=1` in `cmd/fuguegate/mutation.go`. This edits a gate file, so it needs your label | |
+| Q-12 | 2026-11-02 | F2.1 | Roadmap F2.1 references state-machine §1–7, but F3.1–F3.4 already own stop/cancel/quiesce, AcceptUnknown, CloseRunWithoutPayload, SelectRunContext, recovery, retry and time tranches. How should F2.1 scope be bounded and delivered? | F2.1 is split into two PRs: F2.1a delivers all 54 event types, 27 minimal commands, State, total pure evolve, derived projections (lifecycle, phase, waitReasons), and rejection types/codes; F2.1b delivers decide for Trace A commands (with reject/no-op/dedup). decide for stop, recovery, retry, timer, AcceptUnknown, CloseRunWithoutPayload, SelectRunContext, and ResumeRun is deferred to F3.x. F2.1 becomes a composite row marked Done when both F2.1a and F2.1b merge. (user, 2026-11-02) |
 
 ## 8. Log
 
@@ -274,3 +277,4 @@ together only in `app`.
 | 2026-11-02 | F1.6 | `internal/sandbox`: ported policy validation, Seatbelt SBPL profile generator, `bwrap` argument builder, Landlock `RestrictSelf` and `Runner`/`Proc` process lifecycle from dev-kit `b3c8ff5d` with golden vector tests (`tool-system §6`) | Agent |
 | 2026-11-02 | F1.4 | `internal/credentials`: `Book` over `credential_accounts` (secrets sealed by the vault, ChatGPT tokens refreshed under a per-account lock), `PickAccount` ported with the M-09 rule that a ChatGPT plan never fails over. Parsing rate-limit headers into windows is left to the adapters (F4.2, F4.3) | Agent |
 | 2026-11-02 | F1.4, F1.6 | Marked Done after the merge of PRs #30 and #31; F1 is complete | Agent |
+| 2026-11-02 | F2.1a | Kernel: 54 event types, 27 minimal commands, State, total pure evolve, derived projections, rejection types/codes (Q-12 answered; F2.1 split into F2.1a and F2.1b) | Agent |
