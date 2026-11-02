@@ -23,6 +23,7 @@ require (
 	golang.org/x/tools v0.52.0
 	google.golang.org/protobuf v1.36.12
 	modernc.org/sqlite v1.56.0
+	pgregory.net/rapid v1.3.0
 )
 
 require (
