@@ -21,17 +21,22 @@ func evolveModelDispatchEvents(s *State, e Event) bool {
 		return true
 	case *ModelDispatchStartedEvent:
 		updateModelAttemptStatus(s, ev.InvocationID, ev.AttemptID, ModelAttemptStatusRequesting)
+		if inv := s.ModelInvocations[ev.InvocationID]; inv != nil && inv.Attempts[ev.AttemptID] != nil {
+			inv.Attempts[ev.AttemptID].Dispatch = *ev
+		}
 		return true
 	case *ModelStreamStartedEvent:
 		updateModelAttemptStatus(s, ev.InvocationID, ev.AttemptID, ModelAttemptStatusStreaming)
+		recordModelStream(s, ev)
 		return true
 	case *ModelResponseRecordedEvent:
 		delete(s.QuiescingAttempts, ev.AttemptID)
 		if inv := s.ModelInvocations[ev.InvocationID]; inv != nil {
 			inv.Completed = true
 			inv.SelectedAttemptID = ev.AttemptID
-			if att, ok := inv.Attempts[ev.AttemptID]; ok {
+			if att := inv.Attempts[ev.AttemptID]; att != nil {
 				att.Status = ModelAttemptStatusCompleted
+				att.Response = *ev
 			}
 		}
 		return true
@@ -114,7 +119,9 @@ func evolveToolCheckEvents(s *State, e Event) bool {
 			AttemptID: ev.FirstAttemptID,
 			Status:    ToolAttemptStatusPlanned,
 		}
+		tool.Plan = *ev
 		s.ToolInvocations[ev.ToolCallID] = tool
+		recordModelTool(s, ev.ToolCallID)
 		s.ToolOrder = append(s.ToolOrder, ev.ToolCallID)
 		return true
 	case *ToolCheckResetEvent:
@@ -135,6 +142,9 @@ func evolveToolCheckEvents(s *State, e Event) bool {
 		}
 		return true
 	case *ToolReadyRecordedEvent:
+		if tool := s.ToolInvocations[ev.ToolCallID]; tool != nil {
+			tool.Ready = *ev
+		}
 		setToolStatusIf(s, ev.ToolCallID, ToolAttemptStatusChecking, ToolAttemptStatusReady)
 		setToolStatusIf(s, ev.ToolCallID, ToolAttemptStatusAwaitingApproval, ToolAttemptStatusReady)
 		return true
@@ -178,6 +188,9 @@ func evolveToolDispatchEvents(s *State, e Event) bool {
 	switch ev := e.(type) {
 	case *ToolDispatchStartedEvent:
 		updateToolAttemptStatus(s, ev.ToolCallID, ev.AttemptID, ToolAttemptStatusDispatching)
+		if tool := s.ToolInvocations[ev.ToolCallID]; tool != nil && tool.Attempts[ev.AttemptID] != nil {
+			tool.Attempts[ev.AttemptID].Dispatch = *ev
+		}
 		return true
 	case *ToolResultRecordedEvent:
 		delete(s.QuiescingAttempts, ev.AttemptID)
@@ -268,9 +281,10 @@ func recordToolResult(s *State, ev *ToolResultRecordedEvent) {
 	tool.Closed = true
 	tool.SelectedAttemptID = ev.AttemptID
 	att, ok := tool.Attempts[ev.AttemptID]
-	if !ok {
+	if !ok || att == nil {
 		return
 	}
+	att.Result = *ev
 	switch ev.Outcome {
 	case ToolResultOutcomeSucceeded:
 		att.Status = ToolAttemptStatusSucceeded
@@ -289,7 +303,10 @@ func recordToolResult(s *State, ev *ToolResultRecordedEvent) {
 
 func evolveTimerBudgetEvents(s *State, e Event) bool {
 	switch ev := e.(type) {
-	case *TimeBudgetWindowOpenedEvent, *TimeBudgetWindowClosedEvent, *BudgetObservedEvent:
+	case *BudgetObservedEvent:
+		recordResponseUsage(s, ev)
+		return true
+	case *TimeBudgetWindowOpenedEvent, *TimeBudgetWindowClosedEvent:
 		return true
 	case *TimerScheduledEvent:
 		s.ActiveTimers[ev.TimerID] = &ActiveTimer{
@@ -307,5 +324,31 @@ func evolveTimerBudgetEvents(s *State, e Event) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func recordModelTool(s *State, id string) {
+	if inv := s.ModelInvocations[s.CurrentModelInvocationID]; inv != nil {
+		inv.ToolIDs = append(inv.ToolIDs, id)
+	}
+}
+
+func recordModelStream(s *State, ev *ModelStreamStartedEvent) {
+	if inv := s.ModelInvocations[ev.InvocationID]; inv != nil && inv.Attempts[ev.AttemptID] != nil {
+		inv.Attempts[ev.AttemptID].Stream = *ev
+	}
+}
+
+// Preserve the original completion observation for duplicate detection; later
+// accounting events must not change the identity of an already accepted response.
+func recordResponseUsage(s *State, ev *BudgetObservedEvent) {
+	for _, inv := range s.ModelInvocations {
+		if inv == nil {
+			continue
+		}
+		att := inv.Attempts[ev.AttemptID]
+		if att != nil && att.Response.ResponseRef != "" && att.ResponseUsage.AttemptID == "" {
+			att.ResponseUsage = *ev
+		}
 	}
 }

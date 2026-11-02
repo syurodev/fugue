@@ -72,6 +72,7 @@ func cloneModelInvocations(src map[string]*ModelInvocation) map[string]*ModelInv
 			continue
 		}
 		invCopy := *v
+		invCopy.ToolIDs = slices.Clone(v.ToolIDs)
 		invCopy.Attempts = cloneModelAttempts(v.Attempts)
 		dst[k] = &invCopy
 	}
