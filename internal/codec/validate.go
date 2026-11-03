@@ -10,6 +10,11 @@ import (
 	"unicode/utf8"
 )
 
+const (
+	maxTraversalDepth = 1000
+	maxEmbeddingDepth = 32
+)
+
 func isNil(v any) bool {
 	if v == nil {
 		return true
@@ -32,8 +37,8 @@ func validateUTF8(val any) error {
 }
 
 func validateUTF8Value(v reflect.Value, depth int) error {
-	if depth > 64 {
-		return nil
+	if depth > maxTraversalDepth {
+		return ErrMalformedJSON
 	}
 	//exhaustive:ignore
 	switch v.Kind() {
@@ -51,6 +56,8 @@ func validateUTF8Value(v reflect.Value, depth int) error {
 		return validateUTF8Slice(v, depth)
 	case reflect.Map:
 		return validateUTF8Map(v, depth)
+	case reflect.Float32, reflect.Float64:
+		return ErrFloatNotAllowed
 	}
 	return nil
 }
@@ -88,89 +95,190 @@ func validateUTF8Map(v reflect.Value, depth int) error {
 
 func validateStructFields(data []byte, target any) error {
 	t := reflect.TypeOf(target)
-	if t.Kind() != reflect.Pointer {
+	if t == nil {
 		return nil
 	}
-	t = t.Elem()
-	if t.Kind() != reflect.Struct {
-		return nil
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
 	}
 	dec := json.NewDecoder(bytes.NewReader(data))
-	return validateStructContainer(dec, t)
+	return validateValueAgainstType(dec, t, 0)
 }
 
-func validateStructContainer(dec *json.Decoder, t reflect.Type) error {
+func validateValueAgainstType(dec *json.Decoder, t reflect.Type, depth int) error {
+	if depth > maxTraversalDepth {
+		return ErrMalformedJSON
+	}
+
 	tok, err := dec.Token()
 	if err != nil {
 		return ErrMalformedJSON
 	}
-	delim, ok := tok.(json.Delim)
-	if !ok || delim != '{' {
-		return ErrMalformedJSON
+	if tok == nil {
+		return nil
 	}
 
-	fieldMap := structFieldMap(t)
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
 
-	for dec.More() {
-		keyTok, keyErr := dec.Token()
-		if keyErr != nil {
+	switch d := tok.(type) {
+	case json.Delim:
+		switch d {
+		case '{':
+			return validateObjectAgainstType(dec, t, depth)
+		case '[':
+			return validateArrayAgainstType(dec, t, depth)
+		default:
 			return ErrMalformedJSON
 		}
-		key, isStr := keyTok.(string)
-		if !isStr {
+	default:
+		return nil
+	}
+}
+
+func validateObjectAgainstType(dec *json.Decoder, t reflect.Type, depth int) error {
+	if t.Kind() == reflect.Struct && t != reflect.TypeOf(time.Time{}) {
+		return validateStructObject(dec, t, depth)
+	}
+	if t.Kind() == reflect.Map {
+		return validateMapObject(dec, t, depth)
+	}
+	return skipRemainingContainer(dec)
+}
+
+func validateStructObject(dec *json.Decoder, t reflect.Type, depth int) error {
+	fieldMap := structFieldMap(t)
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return ErrMalformedJSON
+		}
+		key, ok := keyTok.(string)
+		if !ok {
 			return ErrMalformedJSON
 		}
 		subType, exists := fieldMap[key]
 		if !exists {
 			return ErrUnknownField
 		}
-		if subErr := skipOrRecurseValue(dec, subType); subErr != nil {
-			return subErr
+		if err := validateValueAgainstType(dec, subType, depth+1); err != nil {
+			return err
 		}
 	}
-
-	tok, err = dec.Token()
-	if err != nil || tok != json.Delim('}') {
+	closingTok, err := dec.Token()
+	if err != nil || closingTok != json.Delim('}') {
 		return ErrMalformedJSON
+	}
+	return nil
+}
+
+func validateMapObject(dec *json.Decoder, t reflect.Type, depth int) error {
+	valType := t.Elem()
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return ErrMalformedJSON
+		}
+		if _, ok := keyTok.(string); !ok {
+			return ErrMalformedJSON
+		}
+		if err := validateValueAgainstType(dec, valType, depth+1); err != nil {
+			return err
+		}
+	}
+	closingTok, err := dec.Token()
+	if err != nil || closingTok != json.Delim('}') {
+		return ErrMalformedJSON
+	}
+	return nil
+}
+
+func validateArrayAgainstType(dec *json.Decoder, t reflect.Type, depth int) error {
+	if t.Kind() == reflect.Slice || t.Kind() == reflect.Array {
+		elemType := t.Elem()
+		for dec.More() {
+			if err := validateValueAgainstType(dec, elemType, depth+1); err != nil {
+				return err
+			}
+		}
+		closingTok, err := dec.Token()
+		if err != nil || closingTok != json.Delim(']') {
+			return ErrMalformedJSON
+		}
+		return nil
+	}
+	return skipRemainingContainer(dec)
+}
+
+func skipRemainingContainer(dec *json.Decoder) error {
+	containerDepth := 1
+	for containerDepth > 0 {
+		tok, err := dec.Token()
+		if err != nil {
+			return ErrMalformedJSON
+		}
+		if d, ok := tok.(json.Delim); ok {
+			switch d {
+			case '{', '[':
+				containerDepth++
+			case '}', ']':
+				containerDepth--
+			}
+		}
 	}
 	return nil
 }
 
 func structFieldMap(t reflect.Type) map[string]reflect.Type {
-	fieldMap := make(map[string]reflect.Type, t.NumField())
-	for i := range t.NumField() {
-		f := t.Field(i)
-		if !f.IsExported() {
-			continue
-		}
-		tag := f.Tag.Get("json")
-		if tag == "-" {
-			continue
-		}
-		name := f.Name
-		if comma := strings.Index(tag, ","); comma != -1 {
-			tag = tag[:comma]
-		}
-		if tag != "" {
-			name = tag
-		}
-		fieldMap[name] = f.Type
-	}
+	fieldMap := make(map[string]reflect.Type)
+	populateStructFields(t, fieldMap, 0)
 	return fieldMap
 }
 
-func skipOrRecurseValue(dec *json.Decoder, t reflect.Type) error {
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
+func populateStructFields(t reflect.Type, fieldMap map[string]reflect.Type, depth int) {
+	if depth > maxEmbeddingDepth {
+		return
 	}
-	if t.Kind() == reflect.Struct && t != reflect.TypeOf(time.Time{}) {
-		return validateStructContainer(dec, t)
+	for i := range t.NumField() {
+		field := t.Field(i)
+		processStructField(&field, fieldMap, depth)
 	}
-	var dummy any
-	if err := dec.Decode(&dummy); err != nil {
-		return ErrMalformedJSON
+}
+
+func processStructField(f *reflect.StructField, fieldMap map[string]reflect.Type, depth int) {
+	tag := f.Tag.Get("json")
+	if tag == "-" {
+		return
 	}
-	return nil
+	name := parseJSONTagName(tag)
+	if f.Anonymous && name == "" {
+		ft := f.Type
+		for ft.Kind() == reflect.Pointer {
+			ft = ft.Elem()
+		}
+		if ft.Kind() == reflect.Struct {
+			populateStructFields(ft, fieldMap, depth+1)
+			return
+		}
+	}
+
+	if !f.IsExported() {
+		return
+	}
+	if name == "" {
+		name = f.Name
+	}
+	if _, exists := fieldMap[name]; !exists {
+		fieldMap[name] = f.Type
+	}
+}
+
+func parseJSONTagName(tag string) string {
+	if comma := strings.Index(tag, ","); comma != -1 {
+		return tag[:comma]
+	}
+	return tag
 }
 
 func normalizeDecodedTarget(v any) error {
@@ -231,4 +339,3 @@ func normalizeSlice(s []any) (any, error) {
 	}
 	return s, nil
 }
-

@@ -119,6 +119,9 @@ func advanceState(tok json.Token, stack []containerState, rootSeen bool) ([]cont
 	if err != nil {
 		return nil, false, err
 	}
+	if len(newStack) > maxTraversalDepth {
+		return nil, false, ErrMalformedJSON
+	}
 	if len(newStack) == 0 {
 		rootSeen = true
 	}
