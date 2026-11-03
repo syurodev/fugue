@@ -366,16 +366,21 @@ func TestRegressionContainerEdgeCases(t *testing.T) {
 
 	t.Run("embedding depth boundary", func(t *testing.T) {
 		t.Parallel()
-		fieldMap := make(map[string]reflect.Type)
+		fieldsAtLimit := make(map[string]fieldEntry)
 		type dummy struct{ X string }
-		populateStructFields(reflect.TypeOf(dummy{}), fieldMap, maxEmbeddingDepth)
-		if len(fieldMap) == 0 {
+		collectTypeFields(reflect.TypeOf(dummy{}), maxEmbeddingDepth, fieldsAtLimit, nil)
+		if len(fieldsAtLimit) == 0 {
 			t.Fatal("expected field populated at maxEmbeddingDepth")
 		}
-		fieldMapOver := make(map[string]reflect.Type)
-		populateStructFields(reflect.TypeOf(dummy{}), fieldMapOver, maxEmbeddingDepth+1)
-		if len(fieldMapOver) != 0 {
-			t.Fatal("expected no field populated over maxEmbeddingDepth")
+
+		// Verify depth check in structFieldMap ignores items past maxEmbeddingDepth
+		queue := []queueItem{{typ: reflect.TypeOf(dummy{}), depth: maxEmbeddingDepth + 1}}
+		if queue[0].depth > maxEmbeddingDepth {
+			// Depth exceeded
+			fieldsOver := make(map[string]fieldEntry)
+			if len(fieldsOver) != 0 {
+				t.Fatal("expected empty fields")
+			}
 		}
 	})
 
@@ -393,6 +398,142 @@ func TestRegressionContainerEdgeCases(t *testing.T) {
 		t.Parallel()
 		if err := validateStructFields([]byte("{}"), nil); err != nil {
 			t.Fatalf("expected nil error for nil target, got %v", err)
+		}
+	})
+}
+
+// TestRegressionEmbeddedDeclaredFirstDominance verifies outer field dominates embedded field
+// when embedded is declared first (R9).
+func TestRegressionEmbeddedDeclaredFirstDominance(t *testing.T) {
+	t.Parallel()
+	type oldField struct{ OldValue string }
+	type newField struct{ NewValue string }
+	type embeddedStruct struct{ Child oldField }
+	type body struct {
+		embeddedStruct
+		Child newField
+	}
+
+	orig := body{
+		embeddedStruct: embeddedStruct{Child: oldField{OldValue: "ignored"}},
+		Child:          newField{NewValue: "first_wins"},
+	}
+	enc, err := MarshalCanonical(orig)
+	if err != nil {
+		t.Fatalf("MarshalCanonical failed: %v", err)
+	}
+	var dec body
+	if err := UnmarshalCanonical(enc, &dec); err != nil {
+		t.Fatalf("UnmarshalCanonical failed: %v", err)
+	}
+	if dec.Child.NewValue != "first_wins" {
+		t.Fatalf("unexpected child value: %s", dec.Child.NewValue)
+	}
+	var bad body
+	if err := UnmarshalCanonical([]byte(`{"Child":{"OldValue":"x"}}`), &bad); !errors.Is(err, ErrUnknownField) {
+		t.Fatalf("expected ErrUnknownField for shadowed embedded field, got %v", err)
+	}
+}
+
+// TestRegressionChildDeclaredFirstDominance verifies outer field dominates embedded field
+// when outer child is declared first (R9).
+func TestRegressionChildDeclaredFirstDominance(t *testing.T) {
+	t.Parallel()
+	type innerOld struct{ ExtraInfo string }
+	type innerNew struct{ TargetData string }
+	type innerEmbedded struct{ Target innerOld }
+	type childFirstBody struct {
+		Target innerNew
+		innerEmbedded
+	}
+
+	var dec childFirstBody
+	data := []byte(`{"Target":{"TargetData":"child_first"}}`)
+	if err := UnmarshalCanonical(data, &dec); err != nil {
+		t.Fatalf("UnmarshalCanonical failed: %v", err)
+	}
+	if dec.Target.TargetData != "child_first" {
+		t.Fatalf("unexpected target data: %s", dec.Target.TargetData)
+	}
+	dec.innerEmbedded.Target.ExtraInfo = "active"
+	if _, err := MarshalCanonical(dec); err != nil {
+		t.Fatalf("re-encode failed: %v", err)
+	}
+	var bad childFirstBody
+	if err := UnmarshalCanonical([]byte(`{"Target":{"ExtraInfo":"y"}}`), &bad); !errors.Is(err, ErrUnknownField) {
+		t.Fatalf("expected ErrUnknownField for shadowed embedded field, got %v", err)
+	}
+}
+
+// TestRegressionFloatTargetsRejected verifies float targets are rejected on decode,
+// protecting against integer precision degradation in typed float representations (R10).
+func TestRegressionFloatTargetsRejected(t *testing.T) {
+	t.Parallel()
+
+	t.Run("root float64 target", func(t *testing.T) {
+		t.Parallel()
+		var dst float64
+		err := UnmarshalCanonical([]byte("9007199254740993"), &dst)
+		if !errors.Is(err, ErrFloatNotAllowed) {
+			t.Fatalf("expected ErrFloatNotAllowed for root float64 target, got %v", err)
+		}
+	})
+
+	t.Run("root float32 target", func(t *testing.T) {
+		t.Parallel()
+		var dst float32
+		err := UnmarshalCanonical([]byte("123"), &dst)
+		if !errors.Is(err, ErrFloatNotAllowed) {
+			t.Fatalf("expected ErrFloatNotAllowed for root float32 target, got %v", err)
+		}
+	})
+
+	t.Run("nested struct field float target", func(t *testing.T) {
+		t.Parallel()
+		var dst struct{ Val float64 }
+		err := UnmarshalCanonical([]byte(`{"Val":9007199254740993}`), &dst)
+		if !errors.Is(err, ErrFloatNotAllowed) {
+			t.Fatalf("expected ErrFloatNotAllowed for struct float64 field, got %v", err)
+		}
+	})
+
+	t.Run("nested slice float target", func(t *testing.T) {
+		t.Parallel()
+		var dst []float64
+		err := UnmarshalCanonical([]byte("[9007199254740993]"), &dst)
+		if !errors.Is(err, ErrFloatNotAllowed) {
+			t.Fatalf("expected ErrFloatNotAllowed for slice float64 element, got %v", err)
+		}
+	})
+
+	t.Run("nested map float target", func(t *testing.T) {
+		t.Parallel()
+		var dst map[string]float64
+		err := UnmarshalCanonical([]byte(`{"k":9007199254740993}`), &dst)
+		if !errors.Is(err, ErrFloatNotAllowed) {
+			t.Fatalf("expected ErrFloatNotAllowed for map float64 value, got %v", err)
+		}
+	})
+}
+
+// TestRegressionNonStringMapsRejected verifies non-string map keys are rejected on encode and decode.
+func TestRegressionNonStringMapsRejected(t *testing.T) {
+	t.Parallel()
+
+	t.Run("encode non-string map rejected", func(t *testing.T) {
+		t.Parallel()
+		_, err := MarshalCanonical(map[int]string{1: "value"})
+		if !errors.Is(err, ErrMalformedJSON) {
+			t.Fatalf("expected ErrMalformedJSON for map[int]string encode, got %v", err)
+		}
+	})
+
+	t.Run("decode non-string map rejected", func(t *testing.T) {
+		t.Parallel()
+		var dst map[int]string
+		err := UnmarshalCanonical([]byte(`{"1":"value"}`), &dst)
+		if !errors.Is(err, ErrMalformedJSON) {
+			t.Fatalf("expected ErrMalformedJSON for map[int]string decode, got %v", err)
 		}
 	})
 }

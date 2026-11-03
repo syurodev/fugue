@@ -55,6 +55,9 @@ func validateUTF8Value(v reflect.Value, depth int) error {
 	case reflect.Slice, reflect.Array:
 		return validateUTF8Slice(v, depth)
 	case reflect.Map:
+		if v.Type().Key().Kind() != reflect.String {
+			return ErrMalformedJSON
+		}
 		return validateUTF8Map(v, depth)
 	case reflect.Float32, reflect.Float64:
 		return ErrFloatNotAllowed
@@ -110,16 +113,20 @@ func validateValueAgainstType(dec *json.Decoder, t reflect.Type, depth int) erro
 		return ErrMalformedJSON
 	}
 
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+
+	if t.Kind() == reflect.Float32 || t.Kind() == reflect.Float64 {
+		return ErrFloatNotAllowed
+	}
+
 	tok, err := dec.Token()
 	if err != nil {
 		return ErrMalformedJSON
 	}
 	if tok == nil {
 		return nil
-	}
-
-	for t.Kind() == reflect.Pointer {
-		t = t.Elem()
 	}
 
 	switch d := tok.(type) {
@@ -142,6 +149,9 @@ func validateObjectAgainstType(dec *json.Decoder, t reflect.Type, depth int) err
 		return validateStructObject(dec, t, depth)
 	}
 	if t.Kind() == reflect.Map {
+		if t.Key().Kind() != reflect.String {
+			return ErrMalformedJSON
+		}
 		return validateMapObject(dec, t, depth)
 	}
 	return skipRemainingContainer(dec)
@@ -230,26 +240,55 @@ func skipRemainingContainer(dec *json.Decoder) error {
 	return nil
 }
 
+type fieldEntry struct {
+	typ       reflect.Type
+	depth     int
+	ambiguous bool
+}
+
+type queueItem struct {
+	typ   reflect.Type
+	depth int
+}
+
 func structFieldMap(t reflect.Type) map[string]reflect.Type {
-	fieldMap := make(map[string]reflect.Type)
-	populateStructFields(t, fieldMap, 0)
-	return fieldMap
+	fields := make(map[string]fieldEntry)
+	queue := []queueItem{{typ: t, depth: 0}}
+	visited := make(map[reflect.Type]bool)
+
+	for len(queue) > 0 {
+		item := queue[0]
+		queue = queue[1:]
+
+		if item.depth > maxEmbeddingDepth || visited[item.typ] {
+			continue
+		}
+		visited[item.typ] = true
+
+		queue = collectTypeFields(item.typ, item.depth, fields, queue)
+	}
+
+	result := make(map[string]reflect.Type, len(fields))
+	for name, entry := range fields {
+		if !entry.ambiguous {
+			result[name] = entry.typ
+		}
+	}
+	return result
 }
 
-func populateStructFields(t reflect.Type, fieldMap map[string]reflect.Type, depth int) {
-	if depth > maxEmbeddingDepth {
-		return
-	}
+func collectTypeFields(t reflect.Type, depth int, fields map[string]fieldEntry, queue []queueItem) []queueItem {
 	for i := range t.NumField() {
-		field := t.Field(i)
-		processStructField(&field, fieldMap, depth)
+		f := t.Field(i)
+		queue = handleStructField(&f, depth, fields, queue)
 	}
+	return queue
 }
 
-func processStructField(f *reflect.StructField, fieldMap map[string]reflect.Type, depth int) {
+func handleStructField(f *reflect.StructField, depth int, fields map[string]fieldEntry, queue []queueItem) []queueItem {
 	tag := f.Tag.Get("json")
 	if tag == "-" {
-		return
+		return queue
 	}
 	name := parseJSONTagName(tag)
 	if f.Anonymous && name == "" {
@@ -258,19 +297,29 @@ func processStructField(f *reflect.StructField, fieldMap map[string]reflect.Type
 			ft = ft.Elem()
 		}
 		if ft.Kind() == reflect.Struct {
-			populateStructFields(ft, fieldMap, depth+1)
-			return
+			return append(queue, queueItem{typ: ft, depth: depth + 1})
 		}
 	}
 
 	if !f.IsExported() {
-		return
+		return queue
 	}
 	if name == "" {
 		name = f.Name
 	}
-	if _, exists := fieldMap[name]; !exists {
-		fieldMap[name] = f.Type
+
+	recordField(name, f.Type, depth, fields)
+	return queue
+}
+
+func recordField(name string, typ reflect.Type, depth int, fields map[string]fieldEntry) {
+	existing, exists := fields[name]
+	if !exists {
+		fields[name] = fieldEntry{typ: typ, depth: depth, ambiguous: false}
+		return
+	}
+	if existing.depth == depth {
+		fields[name] = fieldEntry{typ: existing.typ, depth: depth, ambiguous: true}
 	}
 }
 
