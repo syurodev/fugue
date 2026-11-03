@@ -5,14 +5,12 @@ import (
 	"encoding/json"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 	"unicode/utf8"
 )
 
 const (
 	maxTraversalDepth = 1000
-	maxEmbeddingDepth = 32
 )
 
 func isNil(v any) bool {
@@ -36,7 +34,21 @@ func validateUTF8(val any) error {
 	return validateUTF8Value(reflect.ValueOf(val), 0)
 }
 
+type utf8Pointer struct {
+	typ     reflect.Type
+	address uintptr
+}
+
+type utf8Validation struct {
+	pointers map[utf8Pointer]bool
+}
+
 func validateUTF8Value(v reflect.Value, depth int) error {
+	validation := utf8Validation{pointers: make(map[utf8Pointer]bool)}
+	return validation.value(v, depth)
+}
+
+func (validation *utf8Validation) value(v reflect.Value, depth int) error {
 	if depth > maxTraversalDepth {
 		return ErrMalformedJSON
 	}
@@ -46,50 +58,93 @@ func validateUTF8Value(v reflect.Value, depth int) error {
 		if !utf8.ValidString(v.String()) {
 			return ErrInvalidUTF8
 		}
-	case reflect.Pointer, reflect.Interface:
+	case reflect.Pointer:
+		return validation.pointer(v, depth)
+	case reflect.Interface:
 		if !v.IsNil() {
-			return validateUTF8Value(v.Elem(), depth+1)
+			return validation.value(v.Elem(), depth)
 		}
 	case reflect.Struct:
-		return validateUTF8Struct(v, depth)
+		return validation.structValue(v, depth)
 	case reflect.Slice, reflect.Array:
-		return validateUTF8Slice(v, depth)
+		return validation.sliceValue(v, depth)
 	case reflect.Map:
 		if v.Type().Key().Kind() != reflect.String {
 			return ErrMalformedJSON
 		}
-		return validateUTF8Map(v, depth)
+		return validation.mapValue(v, depth)
 	case reflect.Float32, reflect.Float64:
 		return ErrFloatNotAllowed
 	}
 	return nil
 }
 
-func validateUTF8Struct(v reflect.Value, depth int) error {
-	for i := range v.NumField() {
-		if err := validateUTF8Value(v.Field(i), depth+1); err != nil {
-			return err
+func (validation *utf8Validation) pointer(v reflect.Value, depth int) error {
+	if v.IsNil() {
+		return nil
+	}
+	key := utf8Pointer{typ: v.Type(), address: v.Pointer()}
+	if validation.pointers[key] {
+		return ErrMalformedJSON
+	}
+	validation.pointers[key] = true
+	defer delete(validation.pointers, key)
+	return validation.value(v.Elem(), depth)
+}
+
+func (validation *utf8Validation) structValue(v reflect.Value, depth int) error {
+	if v.Type() == reflect.TypeFor[time.Time]() {
+		return nil
+	}
+	if depth >= maxTraversalDepth {
+		return ErrMalformedJSON
+	}
+	for _, field := range selectedStructFields(v.Type()) {
+		child, ok := indexedField(v, field.index)
+		if ok {
+			if err := validation.value(child, depth+1); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
 }
 
-func validateUTF8Slice(v reflect.Value, depth int) error {
+func indexedField(v reflect.Value, index []int) (reflect.Value, bool) {
+	for _, i := range index {
+		if v.Kind() == reflect.Pointer {
+			if v.IsNil() {
+				return reflect.Value{}, false
+			}
+			v = v.Elem()
+		}
+		v = v.Field(i)
+	}
+	return v, true
+}
+
+func (validation *utf8Validation) sliceValue(v reflect.Value, depth int) error {
+	if depth >= maxTraversalDepth {
+		return ErrMalformedJSON
+	}
 	for i := range v.Len() {
-		if err := validateUTF8Value(v.Index(i), depth+1); err != nil {
+		if err := validation.value(v.Index(i), depth+1); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func validateUTF8Map(v reflect.Value, depth int) error {
+func (validation *utf8Validation) mapValue(v reflect.Value, depth int) error {
+	if depth >= maxTraversalDepth {
+		return ErrMalformedJSON
+	}
 	iter := v.MapRange()
 	for iter.Next() {
-		if err := validateUTF8Value(iter.Key(), depth+1); err != nil {
+		if err := validation.value(iter.Key(), depth+1); err != nil {
 			return err
 		}
-		if err := validateUTF8Value(iter.Value(), depth+1); err != nil {
+		if err := validation.value(iter.Value(), depth+1); err != nil {
 			return err
 		}
 	}
@@ -238,101 +293,6 @@ func skipRemainingContainer(dec *json.Decoder) error {
 		}
 	}
 	return nil
-}
-
-type fieldEntry struct {
-	typ       reflect.Type
-	depth     int
-	tagged    bool
-	ambiguous bool
-}
-
-type queueItem struct {
-	typ   reflect.Type
-	depth int
-}
-
-func structFieldMap(t reflect.Type) map[string]reflect.Type {
-	fields := make(map[string]fieldEntry)
-	queue := []queueItem{{typ: t, depth: 0}}
-	visited := make(map[reflect.Type]bool)
-
-	for len(queue) > 0 {
-		item := queue[0]
-		queue = queue[1:]
-
-		if item.depth > maxEmbeddingDepth || visited[item.typ] {
-			continue
-		}
-		visited[item.typ] = true
-
-		queue = collectTypeFields(item.typ, item.depth, fields, queue)
-	}
-
-	result := make(map[string]reflect.Type, len(fields))
-	for name, entry := range fields {
-		if !entry.ambiguous {
-			result[name] = entry.typ
-		}
-	}
-	return result
-}
-
-func collectTypeFields(t reflect.Type, depth int, fields map[string]fieldEntry, queue []queueItem) []queueItem {
-	for i := range t.NumField() {
-		f := t.Field(i)
-		queue = handleStructField(&f, depth, fields, queue)
-	}
-	return queue
-}
-
-func handleStructField(f *reflect.StructField, depth int, fields map[string]fieldEntry, queue []queueItem) []queueItem {
-	tag := f.Tag.Get("json")
-	if tag == "-" {
-		return queue
-	}
-	name := parseJSONTagName(tag)
-	tagged := name != ""
-	if f.Anonymous && name == "" {
-		ft := f.Type
-		for ft.Kind() == reflect.Pointer {
-			ft = ft.Elem()
-		}
-		if ft.Kind() == reflect.Struct {
-			return append(queue, queueItem{typ: ft, depth: depth + 1})
-		}
-	}
-
-	if !f.IsExported() {
-		return queue
-	}
-	if name == "" {
-		name = f.Name
-	}
-
-	recordField(name, f.Type, depth, tagged, fields)
-	return queue
-}
-
-func recordField(name string, typ reflect.Type, depth int, tagged bool, fields map[string]fieldEntry) {
-	existing, exists := fields[name]
-	// At the shallowest depth, encoding/json considers named tags before
-	// untagged fields. A tagged candidate can resolve untagged ambiguity.
-	if !exists || depth < existing.depth || (depth == existing.depth && tagged && !existing.tagged) {
-		fields[name] = fieldEntry{typ: typ, depth: depth, tagged: tagged, ambiguous: false}
-		return
-	}
-	if existing.depth == depth && existing.tagged == tagged {
-		existing.ambiguous = true
-		fields[name] = existing
-	}
-}
-
-func parseJSONTagName(tag string) string {
-	if comma := strings.Index(tag, ","); comma != -1 {
-		return tag[:comma]
-	}
-	return tag
 }
 
 func normalizeDecodedTarget(v any) error {

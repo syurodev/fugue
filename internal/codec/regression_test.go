@@ -335,8 +335,8 @@ func TestRegressionTraversalDepthLimitsEncoder(t *testing.T) {
 	for range 501 {
 		val = []any{val}
 	}
-	if err := validateUTF8(val); !errors.Is(err, ErrMalformedJSON) {
-		t.Fatalf("expected ErrMalformedJSON for deeply nested container, got %v", err)
+	if err := validateUTF8(val); err != nil {
+		t.Fatalf("expected 501 JSON containers to be within limit, got %v", err)
 	}
 }
 
@@ -363,26 +363,6 @@ func TestRegressionTraversalDepthLimitsDecoder(t *testing.T) {
 // TestRegressionContainerEdgeCases verifies embedding depth and container skip traversal.
 func TestRegressionContainerEdgeCases(t *testing.T) {
 	t.Parallel()
-
-	t.Run("embedding depth boundary", func(t *testing.T) {
-		t.Parallel()
-		fieldsAtLimit := make(map[string]fieldEntry)
-		type dummy struct{ X string }
-		collectTypeFields(reflect.TypeOf(dummy{}), maxEmbeddingDepth, fieldsAtLimit, nil)
-		if len(fieldsAtLimit) == 0 {
-			t.Fatal("expected field populated at maxEmbeddingDepth")
-		}
-
-		// Verify depth check in structFieldMap ignores items past maxEmbeddingDepth
-		queue := []queueItem{{typ: reflect.TypeOf(dummy{}), depth: maxEmbeddingDepth + 1}}
-		if queue[0].depth > maxEmbeddingDepth {
-			// Depth exceeded
-			fieldsOver := make(map[string]fieldEntry)
-			if len(fieldsOver) != 0 {
-				t.Fatal("expected empty fields")
-			}
-		}
-	})
 
 	t.Run("skip container deeply nested", func(t *testing.T) {
 		t.Parallel()
