@@ -168,7 +168,7 @@ Applies to all code copied from `syurodev/dev-kit`.
 | F6.5 | Ask-user, plan and todo tools | H-20 | F6.1–F6.4 | — | Awaiting design | | |
 | F6.6 | `shell`, `shell.output` and `job.*` tools: per-command risk, grant scope for a single command, cwd, compact and full output with built-in filters, timeout to job, daemons | `shell-job` | F6.3, F6.4, F6.7 | `shell-job §8` | Not started | | |
 | F6.7 | Content safety: `internal/secrets` detection (known values, token patterns, key-name assignments), session placeholder table in `exec_secret_tables`, reverse substitution limited to origin files, envelope with nonce, R0 paragraph, compaction summary and unverified memory in envelopes | `content-safety` | F6.1, F2.5 | `content-safety §7` | Not started | | Context engine wiring of the R0 paragraph and envelopes lands with the context engine items |
-| F6.8 | File tools `read`, `grep`, `glob`, `edit`, `write`: read and write scope from the sandbox profile, multi-tier matching, seen versions, syntax check after write, content-loss guard, atomic writes, `fugue bench edit` | `file-tools` | F6.2, F6.3, F6.7 | `file-tools §11` | Not started | | Code reading (H-19) is *Stage B*. The edit format is kept or changed from `fugue bench edit` results |
+| F6.8 | File tools `read`, `grep`, `glob`, `edit`, `write`: read and write scope from the sandbox profile, multi-file `edit` batches applied all or nothing, multi-tier matching, seen versions, syntax check after write, content-loss guard, atomic writes, `fugue bench edit` with a shell-bypass rate | `file-tools` | F6.2, F6.3, F6.7 | `file-tools §11` | Not started | | Code reading (H-19) is *Stage B*. The edit format is kept or changed from `fugue bench edit` results |
 
 ### F7 — Shell and UI
 
