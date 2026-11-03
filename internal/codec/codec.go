@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
+	"reflect"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -28,12 +28,15 @@ type containerState struct {
 // serialized in declaration order, map keys are sorted, and no extra whitespace
 // is emitted. The resulting bytes are validated against canonical rules.
 func MarshalCanonical(v any) ([]byte, error) {
-	if v == nil {
+	if isNil(v) {
 		return nil, ErrNilTarget
+	}
+	if err := validateUTF8(v); err != nil {
+		return nil, err
 	}
 	raw, err := json.Marshal(v)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", ErrMalformedJSON, err)
+		return nil, ErrMalformedJSON
 	}
 	if err := ValidateCanonicalJSON(raw); err != nil {
 		return nil, err
@@ -43,28 +46,36 @@ func MarshalCanonical(v any) ([]byte, error) {
 
 // UnmarshalCanonical deserializes canonical JSON bytes into target pointer v.
 // It enforces UTF-8 validity, absence of duplicate keys at any depth, absence
-// of unknown fields, absence of floating-point numbers, and integer range.
+// of unknown fields (with exact case), absence of floating-point numbers, and integer range.
 func UnmarshalCanonical(data []byte, v any) error {
-	if v == nil {
+	if isNil(v) {
+		return ErrNilTarget
+	}
+	rv := reflect.ValueOf(v)
+	if rv.Kind() != reflect.Pointer {
 		return ErrNilTarget
 	}
 	if err := ValidateCanonicalJSON(data); err != nil {
 		return err
 	}
+	if err := validateStructFields(data, v); err != nil {
+		return err
+	}
 	dec := json.NewDecoder(bytes.NewReader(data))
 	dec.DisallowUnknownFields()
+	dec.UseNumber()
 	if err := dec.Decode(v); err != nil {
 		if strings.Contains(err.Error(), "unknown field") {
-			return fmt.Errorf("%w: %w", ErrUnknownField, err)
+			return ErrUnknownField
 		}
-		return fmt.Errorf("%w: %w", ErrMalformedJSON, err)
+		return ErrMalformedJSON
 	}
-	return nil
+	return normalizeDecodedTarget(v)
 }
 
 // ValidateCanonicalJSON verifies that data conforms to canonical codec v1 rules:
 // valid UTF-8, no duplicate keys in objects, no floats, integers within int64,
-// well-formed structure, and no trailing data.
+// well-formed structure, and no trailing data. Diagnostics never expose input keys or values.
 func ValidateCanonicalJSON(data []byte) error {
 	if !utf8.Valid(data) {
 		return ErrInvalidUTF8
@@ -87,7 +98,7 @@ func ValidateCanonicalJSON(data []byte) error {
 			return ErrTrailingData
 		}
 		if err != nil {
-			return fmt.Errorf("%w: %w", ErrMalformedJSON, err)
+			return ErrMalformedJSON
 		}
 		stack, rootSeen, err = advanceState(tok, stack, rootSeen)
 		if err != nil {
@@ -123,7 +134,7 @@ func handleRootToken(tok json.Token, stack []containerState) ([]containerState, 
 		case '[':
 			return append(stack, containerState{kind: containerArray, expectingKey: false, seenKeys: nil}), false, nil
 		default:
-			return nil, false, fmt.Errorf("%w: unexpected delimiter %q at root", ErrMalformedJSON, t)
+			return nil, false, ErrMalformedJSON
 		}
 	case json.Number:
 		if err := validateNumber(t); err != nil {
@@ -153,10 +164,10 @@ func handleObjectToken(tok json.Token, stack []containerState) ([]containerState
 		}
 		key, ok := tok.(string)
 		if !ok {
-			return nil, fmt.Errorf("%w: object key must be string", ErrMalformedJSON)
+			return nil, ErrMalformedJSON
 		}
 		if _, exists := stack[topIdx].seenKeys[key]; exists {
-			return nil, fmt.Errorf("%w: %q", ErrDuplicateKey, key)
+			return nil, ErrDuplicateKey
 		}
 		stack[topIdx].seenKeys[key] = struct{}{}
 		stack[topIdx].expectingKey = false
@@ -176,7 +187,7 @@ func handleObjectValue(tok json.Token, stack []containerState) ([]containerState
 		case '[':
 			return append(stack, containerState{kind: containerArray, expectingKey: false, seenKeys: nil}), nil
 		default:
-			return nil, fmt.Errorf("%w: unexpected delimiter %q as value", ErrMalformedJSON, t)
+			return nil, ErrMalformedJSON
 		}
 	case json.Number:
 		if err := validateNumber(t); err != nil {
@@ -199,7 +210,7 @@ func handleArrayToken(tok json.Token, stack []containerState) ([]containerState,
 		case '[':
 			return append(stack, containerState{kind: containerArray, expectingKey: false, seenKeys: nil}), nil
 		default:
-			return nil, fmt.Errorf("%w: unexpected delimiter %q in array", ErrMalformedJSON, t)
+			return nil, ErrMalformedJSON
 		}
 	case json.Number:
 		if err := validateNumber(t); err != nil {
@@ -230,10 +241,10 @@ func newObjectState() containerState {
 func validateNumber(num json.Number) error {
 	s := string(num)
 	if strings.ContainsAny(s, ".eE") {
-		return fmt.Errorf("%w: %q", ErrFloatNotAllowed, s)
+		return ErrFloatNotAllowed
 	}
 	if _, err := strconv.ParseInt(s, 10, 64); err != nil {
-		return fmt.Errorf("%w: %q", ErrIntegerRange, s)
+		return ErrIntegerRange
 	}
 	return nil
 }
@@ -241,7 +252,7 @@ func validateNumber(num json.Number) error {
 func checkTrailingBuffer(dec *json.Decoder) error {
 	buf, err := io.ReadAll(dec.Buffered())
 	if err != nil {
-		return fmt.Errorf("%w: read buffer: %w", ErrMalformedJSON, err)
+		return ErrMalformedJSON
 	}
 	if len(bytes.TrimSpace(buf)) > 0 {
 		return ErrTrailingData

@@ -60,6 +60,9 @@ func TestReceiptDeduplicationSameCommandID(t *testing.T) {
 		},
 	}
 
+	newInput := make([]byte, len(input))
+	copy(newInput, input)
+
 	req := DedupRequest{
 		Existing:               existing,
 		ExistingInput:          input,
@@ -68,7 +71,7 @@ func TestReceiptDeduplicationSameCommandID(t *testing.T) {
 		NewPrincipal:           "admin-user",
 		NewTarget:              receiptSessionOne,
 		NewCodecVersion:        CodecV1,
-		NewCanonicalInput:      input,
+		NewCanonicalInput:      newInput,
 	}
 
 	decision, err := CheckDedup(&req)
@@ -269,6 +272,9 @@ func TestReceiptDedupMetadataMatch(t *testing.T) {
 	if decision.Status != DedupStatusMatch {
 		t.Fatalf("expected DedupStatusMatch, got %s", decision.Status)
 	}
+	if diff := cmp.Diff(receipt, decision.Receipt); diff != "" {
+		t.Fatalf("receipt mismatch (-want +got):\n%s", diff)
+	}
 }
 
 func TestReceiptDedupMetadataConflict(t *testing.T) {
@@ -409,7 +415,9 @@ func TestReceiptDiagnosticsNoSecrets(t *testing.T) {
 		t.Fatalf("expected conflict error, got nil")
 	}
 	errMsg := err.Error()
-	if strings.Contains(errMsg, secretPayload) {
-		t.Fatalf("error message leaked secret payload: %s", errMsg)
+	for _, secret := range []string{secretPayload, "DIFFERENT_SECRET"} {
+		if strings.Contains(errMsg, secret) {
+			t.Fatalf("error message leaked secret payload: %s", errMsg)
+		}
 	}
 }

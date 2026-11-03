@@ -2,7 +2,6 @@ package codec
 
 import (
 	"errors"
-	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -69,9 +68,6 @@ func checkDuplicateKeyError(t *testing.T, err error, dupKey string) {
 	}
 	if !errors.Is(err, ErrDuplicateKey) {
 		t.Fatalf("expected ErrDuplicateKey, got %v", err)
-	}
-	if dupKey != "" && !strings.Contains(err.Error(), dupKey) {
-		t.Fatalf("error %q should mention duplicate key %q", err.Error(), dupKey)
 	}
 }
 
@@ -356,5 +352,61 @@ func TestCodecNestedArraysAndContainers(t *testing.T) {
 		if err := ValidateCanonicalJSON([]byte(in)); err == nil {
 			t.Fatalf("ValidateCanonicalJSON(%s) expected error, got nil", in)
 		}
+	}
+}
+
+type taggedInner struct {
+	InnerVal string
+}
+
+type taggedStruct struct {
+	CustomField string `json:"custom_field,omitempty"`
+	Ignored     string `json:"-"`
+	Inner       taggedInner
+}
+
+func TestCodecStructTagsAndNesting(t *testing.T) {
+	t.Parallel()
+
+	data := []byte(`{"custom_field":"val","Inner":{"InnerVal":"ok"}}`)
+	var s taggedStruct
+	if err := UnmarshalCanonical(data, &s); err != nil {
+		t.Fatalf("UnmarshalCanonical failed for tagged struct: %v", err)
+	}
+	if s.CustomField != "val" || s.Inner.InnerVal != "ok" {
+		t.Fatalf("unexpected unmarshaled values: %+v", s)
+	}
+
+	unknownData := []byte(`{"Ignored":"bad"}`)
+	if err := UnmarshalCanonical(unknownData, &s); !errors.Is(err, ErrUnknownField) {
+		t.Fatalf("expected ErrUnknownField for ignored tag, got %v", err)
+	}
+}
+
+func TestCodecNonPointerAndTypeMismatch(t *testing.T) {
+	t.Parallel()
+
+	var s taggedStruct
+	if err := UnmarshalCanonical([]byte(`{}`), s); !errors.Is(err, ErrNilTarget) {
+		t.Fatalf("expected ErrNilTarget for non-pointer, got %v", err)
+	}
+
+	var n int
+	if err := UnmarshalCanonical([]byte(`{}`), &n); !errors.Is(err, ErrMalformedJSON) {
+		t.Fatalf("expected ErrMalformedJSON for struct-to-int mismatch, got %v", err)
+	}
+}
+
+func TestCodecInvalidUTF8Containers(t *testing.T) {
+	t.Parallel()
+
+	invalidSlice := []string{string([]byte{0xff})}
+	if _, err := MarshalCanonical(invalidSlice); !errors.Is(err, ErrInvalidUTF8) {
+		t.Fatalf("expected ErrInvalidUTF8 for invalid slice, got %v", err)
+	}
+
+	invalidMapKey := map[string]string{string([]byte{0xff}): "ok"}
+	if _, err := MarshalCanonical(invalidMapKey); !errors.Is(err, ErrInvalidUTF8) {
+		t.Fatalf("expected ErrInvalidUTF8 for invalid map key, got %v", err)
 	}
 }

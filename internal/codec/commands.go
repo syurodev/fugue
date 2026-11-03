@@ -1,14 +1,14 @@
 package codec
 
 import (
-	"fmt"
+	"bytes"
 
 	"github.com/syurodev/fugue/internal/kernel"
 )
 
 // EncodeCommand encodes a kernel command into canonical JSON bytes.
 func EncodeCommand(cmd kernel.Command) ([]byte, error) {
-	if cmd == nil {
+	if isNil(cmd) {
 		return nil, ErrNilTarget
 	}
 	return MarshalCanonical(cmd)
@@ -17,12 +17,18 @@ func EncodeCommand(cmd kernel.Command) ([]byte, error) {
 // DecodeCommand decodes canonical JSON bytes into a typed kernel.Command
 // corresponding to the given command kind name.
 func DecodeCommand(kind string, data []byte) (kernel.Command, error) {
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		return nil, ErrMalformedJSON
+	}
 	cmd, err := instantiateCommand(kind)
 	if err != nil {
 		return nil, err
 	}
 	if err := UnmarshalCanonical(data, cmd); err != nil {
 		return nil, err
+	}
+	if isNil(cmd) {
+		return nil, ErrMalformedJSON
 	}
 	return cmd, nil
 }
@@ -43,7 +49,7 @@ func instantiateCommand(kind string) (kernel.Command, error) {
 	if cmd := newControlCommand(kind); cmd != nil {
 		return cmd, nil
 	}
-	return nil, fmt.Errorf("%w: %q", ErrUnrecognizedCommand, kind)
+	return nil, ErrUnrecognizedCommand
 }
 
 func newRunCommand(kind string) kernel.Command {

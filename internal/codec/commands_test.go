@@ -2,6 +2,11 @@ package codec
 
 import (
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
+	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -333,12 +338,61 @@ func allSampleCommands() []kernel.Command {
 	return cmds
 }
 
+func extractCommandName(decl ast.Decl) (string, bool) {
+	fn, ok := decl.(*ast.FuncDecl)
+	if !ok || fn.Name == nil || fn.Name.Name != "CommandName" || fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return "", false
+	}
+	if fn.Body == nil || len(fn.Body.List) == 0 {
+		return "", false
+	}
+	ret, ok := fn.Body.List[0].(*ast.ReturnStmt)
+	if !ok || len(ret.Results) == 0 {
+		return "", false
+	}
+	lit, ok := ret.Results[0].(*ast.BasicLit)
+	if !ok || lit.Kind != token.STRING {
+		return "", false
+	}
+	return strings.Trim(lit.Value, `"`), true
+}
+
+func declaredKernelCommands(t *testing.T) []string {
+	t.Helper()
+	fset := token.NewFileSet()
+	node, err := parser.ParseFile(fset, "../kernel/commands.go", nil, 0)
+	if err != nil {
+		t.Fatalf("failed to parse kernel commands: %v", err)
+	}
+	var kinds []string
+	for _, decl := range node.Decls {
+		if kind, ok := extractCommandName(decl); ok {
+			kinds = append(kinds, kind)
+		}
+	}
+	slices.Sort(kinds)
+	return kinds
+}
+
 func TestCommandRoundTripAllTypes(t *testing.T) {
 	t.Parallel()
 
+	declared := declaredKernelCommands(t)
 	commands := allSampleCommands()
-	if len(commands) != 27 {
-		t.Fatalf("expected 27 sample commands, got %d", len(commands))
+	sampleKinds := make([]string, 0, len(commands))
+	for _, cmd := range commands {
+		sampleKinds = append(sampleKinds, cmd.CommandName())
+	}
+	slices.Sort(sampleKinds)
+
+	if diff := cmp.Diff(declared, sampleKinds); diff != "" {
+		t.Fatalf("declared commands and sample commands differ (-declared +sample):\n%s", diff)
+	}
+
+	for _, kind := range declared {
+		if _, err := DecodeCommand(kind, []byte(`{}`)); err != nil {
+			t.Fatalf("DecodeCommand failed to recognize declared kind %s: %v", kind, err)
+		}
 	}
 
 	for _, cmd := range commands {

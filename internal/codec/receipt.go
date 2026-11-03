@@ -64,7 +64,8 @@ type DedupDecision struct {
 }
 
 // CheckDedup evaluates an incoming command against an existing receipt.
-// If the command ID matches and the canonical payload, kind, principal and
+// Callers must query and supply an Existing receipt matching the command ID
+// before invoking CheckDedup. If the canonical payload, kind, principal and
 // target match exactly under the same codec version, DedupStatusMatch is
 // returned along with the existing receipt. If any content or metadata differs,
 // or if the codec version differs, a typed conflict error is returned. If the
