@@ -243,6 +243,7 @@ func skipRemainingContainer(dec *json.Decoder) error {
 type fieldEntry struct {
 	typ       reflect.Type
 	depth     int
+	tagged    bool
 	ambiguous bool
 }
 
@@ -291,6 +292,7 @@ func handleStructField(f *reflect.StructField, depth int, fields map[string]fiel
 		return queue
 	}
 	name := parseJSONTagName(tag)
+	tagged := name != ""
 	if f.Anonymous && name == "" {
 		ft := f.Type
 		for ft.Kind() == reflect.Pointer {
@@ -308,18 +310,21 @@ func handleStructField(f *reflect.StructField, depth int, fields map[string]fiel
 		name = f.Name
 	}
 
-	recordField(name, f.Type, depth, fields)
+	recordField(name, f.Type, depth, tagged, fields)
 	return queue
 }
 
-func recordField(name string, typ reflect.Type, depth int, fields map[string]fieldEntry) {
+func recordField(name string, typ reflect.Type, depth int, tagged bool, fields map[string]fieldEntry) {
 	existing, exists := fields[name]
-	if !exists {
-		fields[name] = fieldEntry{typ: typ, depth: depth, ambiguous: false}
+	// At the shallowest depth, encoding/json considers named tags before
+	// untagged fields. A tagged candidate can resolve untagged ambiguity.
+	if !exists || depth < existing.depth || (depth == existing.depth && tagged && !existing.tagged) {
+		fields[name] = fieldEntry{typ: typ, depth: depth, tagged: tagged, ambiguous: false}
 		return
 	}
-	if existing.depth == depth {
-		fields[name] = fieldEntry{typ: existing.typ, depth: depth, ambiguous: true}
+	if existing.depth == depth && existing.tagged == tagged {
+		existing.ambiguous = true
+		fields[name] = existing
 	}
 }
 
