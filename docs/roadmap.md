@@ -4,7 +4,7 @@ The living work board of the repository. It answers: what to do, in what order, 
 design, what counts as done, and where each item stands. This page **does not** change the
 design.
 
-Last updated: 2026-11-02, by the implementing agent (F2.1 merged; Q-06 approved; F2.2 in review).
+Last updated: 2026-11-03, by the designer (Q-02, Q-04, Q-05 answered; H-24 settled; F2.2 merged).
 
 ## 0. Context
 
@@ -25,6 +25,9 @@ Last updated: 2026-11-02, by the implementing agent (F2.1 merged; Q-06 approved;
   scratch.
 - **Data starts clean:** data directory `os.UserConfigDir()/Fugue/`, new schema. Importing
   DevKit data is a separate, later item.
+- **Stage A** is defined by `activation` v0.13 (Q-02): native only, the owner dogfoods it, Linux
+  and macOS, a CLI/TUI client, Sign in with ChatGPT as the only provider, one release gate.
+  Items marked *Stage B* in their notes are outside stage A and do not start before it.
 
 ## 1. Rules for the implementing agent
 
@@ -55,11 +58,11 @@ blocking ID) · `Needs decision` · `Awaiting design`.
 | F1 | Port dependencies: crypto, vault, storage and data-directory lock, credentials, interaction, sandbox, snapshot | Each package passes the same gates as new code; vector tests prove behavior is preserved |
 | F2 | Headless vertical slice: kernel, codec, execution store, coordinator, faux model, fake read tool, continuation | Trace A reproduced exactly; replay calls neither model nor tool |
 | F3 | Recovery, retry, timers, budgets and fault injection | Traces B and C; every row of the validation criteria has a test |
-| F4 | Context engine and real model adapters | Evidence tables of the context engine and model adapter |
+| F4 | Context engine and the OpenAI adapter with Sign in with ChatGPT | Evidence tables of the context engine and model adapter §11 |
 | F5 | Host API (`fugue serve`) and input coordination | Evidence tables of the Host API and input coordination |
-| F6 | Tools and interaction | Awaiting designs H-17 to H-20, H-24, H-25 |
-| F7 | Electron shell and session UI | Awaiting designs H-33, H-44 |
-| F8 | Stage A release | Awaiting decision Q-02 |
+| F6 | Tools and interaction | Evidence of `interaction §11`, `sandbox-runtime §12`, `shell-job §8`; file and ask-user tools await designs H-17, H-20 |
+| F7 | CLI/TUI client | Awaiting design H-45 |
+| F8 | Stage A release | Evidence of `activation §5` |
 
 ## 3. Porting rules
 
@@ -112,7 +115,7 @@ Applies to all code copied from `syurodev/dev-kit`.
 | F2.1 | Kernel: command and event types, `decide` and `evolve` for run, step, model and tool invocation/attempt; derived lifecycle, phase and `waitReasons` | `state-machine §1–7`, `event-catalog §1–5` | F0.4, F0.8 | Tables of valid and rejected transitions | Done | [#33](https://github.com/syurodev/fugue/pull/33), [#34](https://github.com/syurodev/fugue/pull/34) | Both parts merged with green CI (Q-12) |
 | F2.1a | Kernel: 54 event types, 27 minimal command types, `State`, total pure `evolve`, derived lifecycle, phase and `waitReasons`, rejection types/codes | `state-machine §1–2`, `event-catalog §1–5` | F0.4, F0.8 | `TestEvolvePurity`, `TestEvolveQuiesceLifecycle`, `TestEvolveInterruptionCauses`, `TestEvolveIdempotenceAndMonotonicity`, `TestEvolveRunAndStepCoverage`, `TestDeriveLifecyclePrecedence`, `TestDerivePhaseFrontier`, `TestDeriveWaitReasons`, `TestCommandNames`, `TestEventNamesAndEnvelopes`, `TestTypedNilEvents` | Done | [#33](https://github.com/syurodev/fugue/pull/33) | `kernelpure` green; coverage 98.1%; mutation 98.9%; scope per Q-12. Note: PR exceeded the ~2,000-line budget (agent underestimated exhaustruct fixtures for 54 events/27 commands, linter helper splits, and mutation test assertions, and failed to pause before PR creation; rule acknowledged: agent must stop and consult whenever thresholds are reached). Review fixes: QuiescingAttempts guarded against ghost attempts and cleared on terminal attempt results; CauseID on RunInterruptedEvent prevents collisions without fallback; total pure evolve guards typed-nil events and nil map values; typed enums for outcomes/control dispositions/reasons; nil-safe EventEnvelope; events_step.go split to keep all files <= 500 lines; ToolCallPlanned idempotency |
 | F2.1b | Kernel: `decide` for Trace A commands, rejection, no-op and dedup transitions | `state-machine §4–5`, `event-catalog §6–7` | F2.1a | `TestDecideTraceA`, `TestDecideRejectsInvalidTransitions`, `TestDecideEvidenceGuards`, `TestDecideAdmissionGuards`, `TestDecideDuplicateObservations`, `TestDecideConflictingDuplicates`, `TestDecideConflictingStream`, `TestDecideSequentialToolFrontier`, `TestDecideDeterministic`, `TestDecideDoesNotAliasPlans`, `TestDecideRejectsIdentityAndCursorCorruption`, `TestDecideDuplicateAfterAccountingObservation` | Done | [#34](https://github.com/syurodev/fugue/pull/34) | Scope per Q-12: host-bound facts; pure decision batches for runnable Trace A, no approval/retry/time budget. Durable command-ID receipts remain F2.3/F2.4 |
-| F2.2 | Invariant checker SM-01 to SM-12; property tests over random command sequences | `state-machine §3` | F2.1 | `TestEverySnapshotInvariantRejectsAViolation`, `TestEveryHistoricalInvariantRejectsAViolation`, `TestInvariantsTraceA`, `TestRapidCommandSequences`, `TestHistoryChecksEveryBatch`, `TestApprovalResolutionBindsExactArguments`, `TestWindowAccountingRequiredBeforeFinish`, `TestRetryPreservesAttemptEvidence`, `TestUnknownControlClosurePreservesExposure`, `TestQueuedRebuildHasNoEffects`, `TestMetadataCloseDisposesInterruptedModel` | In review | [#37](https://github.com/syurodev/fugue/pull/37) | Q-06 approved; implementation plan: [F2.2](plans/f2.2-invariants.md) |
+| F2.2 | Invariant checker SM-01 to SM-12; property tests over random command sequences | `state-machine §3` | F2.1 | `TestEverySnapshotInvariantRejectsAViolation`, `TestEveryHistoricalInvariantRejectsAViolation`, `TestInvariantsTraceA`, `TestRapidCommandSequences`, `TestHistoryChecksEveryBatch`, `TestApprovalResolutionBindsExactArguments`, `TestWindowAccountingRequiredBeforeFinish`, `TestRetryPreservesAttemptEvidence`, `TestUnknownControlClosurePreservesExposure`, `TestQueuedRebuildHasNoEffects`, `TestMetadataCloseDisposesInterruptedModel` | Done | [#37](https://github.com/syurodev/fugue/pull/37) | Q-06 approved; implementation plan: [F2.2](plans/f2.2-invariants.md) |
 | F2.3 | Canonical codec v1, receipt deduplication | `storage-security §5`, `event-storage-recovery §5` | F2.1 | Duplicate keys, unknown fields, wrong `codec_version`; the same `command_id` gets the same receipt; fuzzing | Not started | | |
 | F2.4 | Execution store: `exec_*` tables, append-only triggers, one transaction for event, payload, projection, receipt and admission | `storage-security §2–3, §6`, `event-storage-recovery §5` | F1.3, F2.3 | Atomicity under fault injection; triggers block UPDATE and DELETE | Not started | | G-03 evidence |
 | F2.5 | Protected payloads: session key wrapped with `SealRecord`, AEAD, size limits, crypto-shred | `storage-security §4, §7` | F1.2, F2.4 | Crypto-shred; 1 MiB, 64 MiB and 1 GiB limits | Not started | | G-03 evidence |
@@ -137,9 +140,9 @@ Applies to all code copied from `syurodev/dev-kit`.
 | ID | Item | Design | Depends on | Evidence | Status | PR | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | F4.1 | Neutral model contract, error classification | `model-adapter §2–3` | F2.10 | The faux provider covers every error class | Not started | | |
-| F4.2 | Anthropic adapter (API key), converter, catalog, usage | `model-adapter §4–8, §10` | F4.1, F1.4 | Golden streams; signed thinking; SDK control conditions re-verified | Not started | | |
-| F4.3 | OpenAI adapter: API key, then Sign in with ChatGPT | `model-adapter §11` | F4.1, F1.4 | Error table §11.4 has tests; no automatic failover on a ChatGPT plan | Not started | | UI in F7 |
-| F4.4 | Account failover from rate limits | `model-adapter §7` | F4.2 | All accounts limited leads to `Waiting(retry_timer)` | Not started | | |
+| F4.2 | Anthropic adapter (API key), converter, catalog, usage | `model-adapter §4–8, §10` | F4.1, F1.4 | Golden streams; signed thinking; SDK control conditions re-verified | Not started | | *Stage B* (activation A-02, model-adapter M-11) |
+| F4.3 | OpenAI adapter with Sign in with ChatGPT: registration, token refresh, converter for the plan's request rules, per-account model list | `model-adapter §11`, `activation §2` | F4.1, F1.4 | Error table §11.4 has tests; no automatic failover on a ChatGPT plan; spike §11.7 recorded with a real account | Not started | | First and only real adapter of stage A (M-11). The API-key path is *Stage B*. Login and plan text are shown by the CLI (F7.1) |
+| F4.4 | Account failover from rate limits | `model-adapter §7` | F4.2 | All accounts limited leads to `Waiting(retry_timer)` | Not started | | *Stage B*: a ChatGPT plan never fails over (M-09) |
 | F4.5 | Context engine: L0–L5, `ContextInjected`, `InstructionsLoaded`, rules R0–R3, token measurement | `context-engine §2–3, §5` | F2.10 | Deterministic assembly; patches leave the prefix unchanged | Not started | | |
 | F4.6 | Pruning, compaction, language check | `context-engine §6` | F4.5, F4.1 | Context engine evidence table §9 | Not started | | |
 | F4.7 | W tier: port `workspacememory`, pinned blocks, index, hash freshness, suggestions | `context-engine §4` | F4.5, F1.3 | Redaction; CAS on approval; INVALIDATE keeps history | Not started | | Port per §3 |
@@ -150,8 +153,8 @@ Applies to all code copied from `syurodev/dev-kit`.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | F5.1 | `fugue serve`, `host.json`, `fugue.sock`, UID check, `Hello` and versioning | `host-api §3, §7, §8` | F0.7, F1.3 | Single host; socket permissions; versions | Not started | | |
 | F5.2 | Event stream with sequence, snapshot, catch-up, `resync_required` | `host-api §6` | F5.1 | Disconnect and reconnect at the right sequence | Not started | | |
-| F5.3 | Session, queue and interaction services over Connect | `host-api §4–5` | F5.2, F2.10 | `command_id` deduplication; `origin` derived from the principal | Not started | | |
-| F5.4 | Input coordination: durable queue, Steer, Interject, Stop returns items to the composer, `Continue`, `Inject` | `coordination` | F5.3, F3.2 | Coordination evidence table §10, except peers | Not started | | Peers per Q-04 |
+| F5.3 | Session, queue and interaction services over Connect, including `SetSessionPolicy` | `host-api §4–5`, `interaction §8` | F5.2, F2.10, F6.3 | `command_id` deduplication; `origin` derived from the principal; interaction evidence §11 for `ListPending`, `Answer` and two clients | Not started | | |
+| F5.4 | Input coordination: durable queue, Steer, Interject, Stop returns items to the composer, `Continue`, `Inject` | `coordination` | F5.3, F3.2 | Coordination evidence table §10, except peers | Not started | | Peers dropped (Q-04 |
 | F5.5 | Goal mode | `continuation §5` | F5.4, F6.1 | Goal evidence in continuation §8 | Blocked | | Waits for F6.1 |
 
 ### F6 — Tools and interaction
@@ -160,28 +163,31 @@ Applies to all code copied from `syurodev/dev-kit`.
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | F6.1 | Registry, descriptor, factory, result servant, binding revision | `tool-system §2–4, §10–11` | F2.10 | `ToolBindingRevised` only at step boundaries | Not started | | |
 | F6.2 | Turn and tool snapshots wired into the harness | `tool-system §9` | F6.1, F1.7 | Restore touches only the tool's diff | Not started | | |
-| F6.3 | Interaction owner API | H-24 | F6.1, F1.5 | — | Awaiting design | | |
-| F6.4 | Sandbox runtime: per-session jail, process registry, environment snapshot | H-25 | F6.1, F1.6 | — | Awaiting design | | |
-| F6.5 | File, shell and job, code reading, ask-user tools | H-17 to H-20 | F6.1–F6.4 | — | Awaiting design | | |
+| F6.3 | Interaction policy and owner changes: `Decide` with approval modes and hard rules, `grantScope` grants, `question` kind, deny note, `exec_session_policy`, gate observations | `interaction §1–7, §9` | F6.1, F1.5, F2.4 | `interaction §11` except the Host API rows | Not started | | Changes the F1.5 contract (`interaction §4.2`), including `TestNilResponderAndHeadlessFailClosed`. May split into a policy PR and an owner PR. Env tag registry waits for the first tool with a tagged target (*Stage B*) |
+| F6.4 | Sandbox runtime: `fugue jail-init` supervisor, host–supervisor channel, stop proof, lazy start and idle stop, `exec_jail_processes` and reaper, filtered env snapshot, Docker endpoint in `full-access` | `sandbox-runtime` | F6.1, F1.6, F6.3, F2.4 | `sandbox-runtime §12` | Not started | | Linux daemon spike becomes evidence. Egress allowlist, Docker proxy and Keychain are *Stage B* (`sandbox-runtime §13`) |
+| F6.5 | File, ask-user, plan and todo tools | H-17, H-20 | F6.1–F6.4 | — | Awaiting design | | Code reading (H-19) is *Stage B* |
+| F6.6 | `shell`, `shell.output` and `job.*` tools: per-command risk, grant scope for a single command, cwd, compact and full output with built-in filters, timeout to job, daemons | `shell-job` | F6.3, F6.4 | `shell-job §8` | Not started | | |
 
 ### F7 — Shell and UI
 
 | ID | Item | Design | Depends on | Evidence | Status | PR | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| F7.1 | Electron shell: package the Go binary, start and connect to the host, renderer security | H-44 | F5.1 | — | Awaiting design | | May be a separate repository |
-| F7.2 | Native session UI: picker, presets, failure UX, jobs, snapshots | H-33 | F7.1 | — | Awaiting design | | |
+| F7.1 | CLI/TUI client `fugue`: sessions, interaction answers, vault, ChatGPT login, jobs, snapshots, every failure UX row | H-45 | F5.3 | — | Awaiting design | | The only client of stage A (activation A-06) |
+| F7.2 | Electron shell and desktop session UI | H-44, H-33 | F5.1 | — | Awaiting design | | *Stage B*; may be a separate repository |
 
 ### F8 — Stage A release
 
 | ID | Item | Design | Depends on | Evidence | Status | PR | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| F8.1 | Stage A release criteria | `activation` (needs rewriting) | F2–F7 | — | Needs decision | | Q-02 |
+| F8.1 | Stage A release: release evidence, upgrade and downgrade drills, recovery drills on Linux and macOS | `activation §4–6` | F2–F7 | Every item of `activation §5` with a revision | Not started | | Q-02 answered. "A stable" is the owner's recorded decision (activation §6) |
 
 ### After stage A
 
-Import of DevKit data; MCP (`fugue-mcp`); the remaining DevKit modules (git, tasks, codegraph,
-terminal, database, ssh, API client…). Each area needs its own design and plan before it enters
-this board.
+Stage B list (activation §7): Electron and desktop UI, OpenAI API key and Anthropic, account
+failover, code reading, web, MCP and plugins, attachments, observability, Windows, packaging and
+auto-update, other users, remote access. Also: import of DevKit data and the DevKit modules that
+Fugue may rebuild (git, tasks, terminal, database, ssh, API client…). Each area needs its own
+design and plan before it enters this board.
 
 ## 5. Proposed layout
 
@@ -225,18 +231,19 @@ together only in `app`.
 | G-02 Transition | Transition tables, invariants, property tests, fault injection | F2.1, F2.2, F3.5 |
 | G-03 Storage | Atomicity, pragmas, triggers, crypto-shred, size limits, lock | F1.3, F2.4, F2.5 |
 | G-04 Model and tool | Real adapters, real tools | F4.*, F6.* |
-| G-05 Interaction | Owner API | F1.5, F6.3 |
-| G-06, G-07 | Need rewriting for Fugue | Q-02 |
+| G-05 Interaction | Design settled (`interaction`); evidence `interaction §11` | F1.5, F6.3, F5.3 |
+| G-06 Compatibility | Fugue version compatibility: upgrade and downgrade drills (`activation §4`) | F8.1 |
+| G-07 Activation | Stage A release evidence (`activation §5`) | F8.1 |
 
 ## 7. Needs decision
 
 | ID | Date | Item | Question | Answer |
 | --- | --- | --- | --- | --- |
 | Q-01 | 2026-11-01 | F0.1 | Repository name and Go module path. Proposal: rename the repository to `fugue` (the target name in the Fugue naming ADR), module `github.com/syurodev/fugue`, unless a SynX GitHub organization exists. Which LICENSE? | Repository `fugue`, module `github.com/syurodev/fugue`; LICENSE Apache-2.0 (user, 2026-11-01) |
-| Q-02 | 2026-11-01 | F8.1 | The activation design (H-36, H-37, G-06, G-07) assumes the native harness runs beside vendor sessions inside DevKit. Fugue is a new product: what does a stage A release require? | |
+| Q-02 | 2026-11-01 | F8.1 | The activation design (H-36, H-37, G-06, G-07) assumes the native harness runs beside vendor sessions inside DevKit. Fugue is a new product: what does a stage A release require? | `activation` v0.13 (decisions A-01 to A-08): native only, owner dogfood, Linux and macOS, CLI/TUI client, Sign in with ChatGPT only, one release gate, "A stable" by the owner's decision (user, 2026-11-03) |
 | Q-03 | 2026-11-01 | F1.3 | DB file name. The old ADR kept `devkit.db` only to avoid a migration; data now starts clean, so the proposal is `fugue.db` | `fugue.db` (user, 2026-11-02) |
-| Q-04 | 2026-11-01 | F5.4 | Peer messages in the design go through the Agent Hub peer outbox, which this repository does not have. Proposal: drop peers from stage A; child sessions are already outside v1 | |
-| Q-05 | 2026-11-01 | Design | Drop H-43 (inventory of DevKit frontend logic) and the `AppService` ratchet, since DevKit is frozen | |
+| Q-04 | 2026-11-01 | F5.4 | Peer messages in the design go through the Agent Hub peer outbox, which this repository does not have. Proposal: drop peers from stage A; child sessions are already outside v1 | Peers dropped (activation A-03, user, 2026-11-03) |
+| Q-05 | 2026-11-01 | Design | Drop H-43 (inventory of DevKit frontend logic) and the `AppService` ratchet, since DevKit is frozen | Dropped with H-22 and the prompt-site ratchet (activation A-03, user, 2026-11-03) |
 | Q-06 | 2026-11-01 | F2.2 | `pgregory.net/rapid`, the property-test library named in quality-gates §6, is MPL-2.0, outside the allowed license list. Approve it, or name another library? | Approved by the user, 2026-11-02, for tests only; retain upstream notices and the full MPL-2.0 text in the third-party license inventory. Implementation target: rapid v1.3.0. Other MPL dependencies remain subject to separate approval. |
 | Q-07 | 2026-11-01 | F0.3 | quality-gates §3 allows `panic` in `must*` helpers in `cmd`. `forbidigo` cannot scope by function name. Proposal: only files named `cmd/<name>/must.go` may call `panic`. Accept, or name another mechanism? | |
 | Q-08 | 2026-11-01 | F0.4 | `secretlog` wording in quality-gates §4 is loose. Reading used: sinks are `slog`, `fmt`, `errors.New`/`Join` and test output (`t.Log`, `t.Error`, `t.Fatal`, `t.Skip`); a call into `internal/platform/redact` is the safe path; reported are `redact.Secret` values, byte slices or arrays named like key material (`key`, `dek`, `kek`, `nonce`, `salt`, `seed`) and any non-numeric value named like a secret (`token`, `secret`, `password`, `apikey`, `credential`, `privatekey`); numbers and booleans are exempt so token counts can be logged. Accept, or tighten (for example every `[]byte`)? | |
@@ -284,3 +291,8 @@ together only in `app`.
 | 2026-11-02 | F2.1, F2.2 | F2.1/F2.1b marked Done after PR #34 merged with green CI. Q-06 approved for rapid test use; v1.3.0 provenance and full MPL-2.0 text recorded; F2.2 implementation plan added | Agent |
 | 2026-11-02 | F2.2 | Added snapshot, transition-batch and history checkers; retained approval, dispatch owner, accounting-window and unknown-exposure evidence; rapid v1.3.0 test-only registration. User approved delivering the roughly 1,600-line implementation and tests in one F2.2 PR instead of splitting the item | Agent |
 | 2026-11-02 | F2.2 | PR #37 opened; kernel coverage 95.6%, local mutation 94.9%; Linux lint/deadcode, race/shuffle tests, architecture, module, test-import vulnerability scan, proto and short fuzz pass. Owner applied gate-change-approved for the dependency registry; PR #35 merged and integrated; full native macOS task check passes | Agent |
+| 2026-11-03 | F2.2 | Marked Done after PR #37 merged | Designer |
+| 2026-11-03 | Q-02, Q-04, Q-05 | Stage A defined by `activation` v0.13: F4.3 becomes ChatGPT-first and the only real adapter; F4.2, F4.4, F7.2 and code reading move to stage B; F7.1 becomes the CLI/TUI client (H-45); F8.1 unblocked; G-06 and G-07 rewritten | Designer |
+| 2026-11-03 | F6.3, F5.3 | H-24 settled in `interaction`: F6.3 gets its design and evidence; F5.3 adds the interaction service contract and depends on F6.3 | Designer |
+| 2026-11-03 | F6.4, F6.5, F6.6 | H-25 and H-18 settled in `sandbox-runtime` and `shell-job`: F6.4 gets its design; shell and job split from F6.5 into F6.6 | Designer |
+| 2026-11-03 | F6.6 | `shell-job` adds compact/full output, built-in output filters, `shell.output` replacing `job.output`, and per-program grammar for grant scope; evidence moves to `shell-job §8` | Designer |
