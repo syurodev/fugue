@@ -135,11 +135,19 @@ amendment. Column details are fixed by the migration, not here.
 | `exec_queue` | `internal/execstore` | F5.4 |
 | `exec_goals` | `internal/execstore` | F5.5 |
 | `exec_goal_events` | `internal/execstore` | F5.5 |
-| `exec_payloads` | `internal/execstore` | F2.5 |
-| `exec_session_keys` | `internal/execstore` | F2.5 |
-| `exec_purges` | `internal/execstore` | F2.5 |
+| `exec_payloads` | `internal/execstore` | F2.4 |
+| `exec_session_keys` | `internal/execstore` | F2.4 |
+| `exec_purges` | `internal/execstore` | F2.4 |
 | `workspace_memory_entries` | `internal/workspacememory` | F4.7 |
 | `workspace_memory_history` | `internal/workspacememory` | F4.7 |
+
+Q-13 (user, 2026-11-03, option A): the F2.4 phase for `exec_payloads`,
+`exec_session_keys` and `exec_purges` introduces physical schema, constraints, trigger support
+and the transaction boundary for already sealed records. F2.5 retains session-key creation,
+wrapping/unwrapping, payload seal/open, vault-lock guards and key-cache zeroing, size limits,
+purge orchestration and crypto-shred evidence. Until that integration exists, production
+protected commands fail closed; F2.4 atomicity tests do not establish complete key-lifecycle
+security. Table ownership and the single-transaction security contract are unchanged.
 
 `exec_host` belongs to `storage` because the host incarnation is created only while the
 data-directory lock is held and the lock is `storage`'s; `execstore` reads the incarnation
@@ -202,3 +210,6 @@ in `Taskfile.yml` and CI because its module graph is not meant to be vendored in
 6. `pgregory.net/rapid` (MPL-2.0) is not approved by this ADR; the user decides at F2.2
    (roadmap Q-06).
 7. The DB file name stays open as Q-03; it does not affect the layout.
+8. Q-13 option A approved by the user, 2026-11-03: move only the physical payload/key/purge
+   support schema and sealed-record persistence boundary to F2.4; cryptographic lifecycle and
+   purge behavior remain F2.5 as documented in section 5.
