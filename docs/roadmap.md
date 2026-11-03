@@ -60,7 +60,7 @@ blocking ID) · `Needs decision` · `Awaiting design`.
 | F3 | Recovery, retry, timers, budgets and fault injection | Traces B and C; every row of the validation criteria has a test |
 | F4 | Context engine and the OpenAI adapter with Sign in with ChatGPT | Evidence tables of the context engine and model adapter §11 |
 | F5 | Host API (`fugue serve`) and input coordination | Evidence tables of the Host API and input coordination |
-| F6 | Tools and interaction | Evidence of `interaction §11`, `sandbox-runtime §12`, `shell-job §7`; file and ask-user tools await designs H-17, H-20 |
+| F6 | Tools and interaction | Evidence of `interaction §11`, `sandbox-runtime §12`, `shell-job §8`; file and ask-user tools await designs H-17, H-20 |
 | F7 | CLI/TUI client | Awaiting design H-45 |
 | F8 | Stage A release | Evidence of `activation §5` |
 
@@ -166,7 +166,7 @@ Applies to all code copied from `syurodev/dev-kit`.
 | F6.3 | Interaction policy and owner changes: `Decide` with approval modes and hard rules, `grantScope` grants, `question` kind, deny note, `exec_session_policy`, gate observations | `interaction §1–7, §9` | F6.1, F1.5, F2.4 | `interaction §11` except the Host API rows | Not started | | Changes the F1.5 contract (`interaction §4.2`), including `TestNilResponderAndHeadlessFailClosed`. May split into a policy PR and an owner PR. Env tag registry waits for the first tool with a tagged target (*Stage B*) |
 | F6.4 | Sandbox runtime: `fugue jail-init` supervisor, host–supervisor channel, stop proof, lazy start and idle stop, `exec_jail_processes` and reaper, filtered env snapshot, Docker endpoint in `full-access` | `sandbox-runtime` | F6.1, F1.6, F6.3, F2.4 | `sandbox-runtime §12` | Not started | | Linux daemon spike becomes evidence. Egress allowlist, Docker proxy and Keychain are *Stage B* (`sandbox-runtime §13`) |
 | F6.5 | File, ask-user, plan and todo tools | H-17, H-20 | F6.1–F6.4 | — | Awaiting design | | Code reading (H-19) is *Stage B* |
-| F6.6 | `shell` and `job.*` tools: per-command risk, grant scope for a single command, cwd, timeout to job, daemons | `shell-job` | F6.3, F6.4 | `shell-job §7` | Not started | | |
+| F6.6 | `shell`, `shell.output` and `job.*` tools: per-command risk, grant scope for a single command, cwd, compact and full output with built-in filters, timeout to job, daemons | `shell-job` | F6.3, F6.4 | `shell-job §8` | Not started | | |
 
 ### F7 — Shell and UI
 
@@ -295,3 +295,4 @@ together only in `app`.
 | 2026-11-03 | Q-02, Q-04, Q-05 | Stage A defined by `activation` v0.13: F4.3 becomes ChatGPT-first and the only real adapter; F4.2, F4.4, F7.2 and code reading move to stage B; F7.1 becomes the CLI/TUI client (H-45); F8.1 unblocked; G-06 and G-07 rewritten | Designer |
 | 2026-11-03 | F6.3, F5.3 | H-24 settled in `interaction`: F6.3 gets its design and evidence; F5.3 adds the interaction service contract and depends on F6.3 | Designer |
 | 2026-11-03 | F6.4, F6.5, F6.6 | H-25 and H-18 settled in `sandbox-runtime` and `shell-job`: F6.4 gets its design; shell and job split from F6.5 into F6.6 | Designer |
+| 2026-11-03 | F6.6 | `shell-job` adds compact/full output, built-in output filters, `shell.output` replacing `job.output`, and per-program grammar for grant scope; evidence moves to `shell-job §8` | Designer |
