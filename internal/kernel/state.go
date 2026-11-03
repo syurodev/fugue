@@ -13,12 +13,15 @@ type StopIntent struct {
 
 // ModelAttempt tracks the execution lifecycle of a single model dispatch.
 type ModelAttempt struct {
-	Stream        ModelStreamStartedEvent
-	Dispatch      ModelDispatchStartedEvent
-	Response      ModelResponseRecordedEvent
-	ResponseUsage BudgetObservedEvent
-	AttemptID     string
-	Status        ModelAttemptStatus
+	Failure          ModelRequestFailedEvent
+	Interrupted      ModelRequestInterruptedEvent
+	OwnerIncarnation uint64
+	Stream           ModelStreamStartedEvent
+	Dispatch         ModelDispatchStartedEvent
+	Response         ModelResponseRecordedEvent
+	ResponseUsage    BudgetObservedEvent
+	AttemptID        string
+	Status           ModelAttemptStatus
 }
 
 // ModelInvocation tracks the logical model operation of a step across retry attempts.
@@ -35,14 +38,20 @@ type ModelInvocation struct {
 
 // ToolAttempt tracks the execution lifecycle of a single tool dispatch attempt.
 type ToolAttempt struct {
-	Dispatch  ToolDispatchStartedEvent
-	Result    ToolResultRecordedEvent
-	AttemptID string
-	Status    ToolAttemptStatus
+	Reconciliation   ToolReconciledEvent
+	OwnerIncarnation uint64
+	ExposureUnknown  bool
+	Dispatch         ToolDispatchStartedEvent
+	Result           ToolResultRecordedEvent
+	AttemptID        string
+	Status           ToolAttemptStatus
 }
 
 // ToolInvocation tracks a logical tool call proposal across checks and attempts.
 type ToolInvocation struct {
+	LastApproval      ToolApprovalRequestedEvent
+	LastResolution    ToolApprovalResolvedEvent
+	Approval          ToolApprovalRequestedEvent
 	Plan              ToolCallPlannedEvent
 	Ready             ToolReadyRecordedEvent
 	ToolCallID        string
@@ -81,6 +90,7 @@ type InterruptionCause struct {
 
 // State represents the complete fact-based projection of the kernel state machine.
 type State struct {
+	TimeWindows              map[string]*TimeWindow
 	RunID                    string
 	LastSequence             uint64
 	Accepted                 bool
@@ -111,6 +121,7 @@ type State struct {
 // NewState returns an initialized empty State with non-nil maps and slices.
 func NewState() *State {
 	return &State{
+		TimeWindows:              make(map[string]*TimeWindow),
 		RunID:                    "",
 		LastSequence:             0,
 		Accepted:                 false,

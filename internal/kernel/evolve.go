@@ -16,6 +16,7 @@ func Evolve(s *State, e Event) *State {
 	if env := e.EventEnvelope(); env.Sequence > next.LastSequence {
 		next.LastSequence = env.Sequence
 	}
+	evolveInvariantFacts(&next, e)
 	switch {
 	case evolveRunAndStepEvents(&next, e):
 	case evolveModelEvents(&next, e):
@@ -50,6 +51,7 @@ func evolveToolEvents(s *State, e Event) bool {
 
 func cloneState(s *State) State {
 	next := *s
+	next.TimeWindows = cloneTimeWindows(s.TimeWindows)
 	next.ModelInvocations = cloneModelInvocations(s.ModelInvocations)
 	next.ToolInvocations = cloneToolInvocations(s.ToolInvocations)
 	next.ToolOrder = slices.Clone(s.ToolOrder)
