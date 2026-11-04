@@ -39,6 +39,8 @@ func validateQueuedBatch(req *AppendRequest) error {
 		if len(req.MetadataInput) == 0 {
 			return fmt.Errorf("%w: queued closure requires metadata-only input", ErrStaleFence)
 		}
+	// Queued-safe timer purposes and queue metadata commands must be added with
+	// their owning phase; the current retry and active-time timers need admission.
 	default:
 		return fmt.Errorf("%w: command requires admission authority", ErrStaleFence)
 	}

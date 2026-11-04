@@ -149,3 +149,50 @@ func TestRegressionQueueRejectsNonzeroEventToken(t *testing.T) {
 		t.Fatalf("queued accept with admission token: %v", err)
 	}
 }
+
+func TestRegressionQueuedClosureIsMetadataOnly(t *testing.T) {
+	t.Parallel()
+	for _, protected := range []bool{false, true} {
+		t.Run(map[bool]string{false: "metadata", true: "protected"}[protected], func(t *testing.T) {
+			t.Parallel()
+			verifyQueuedClosure(t, protected)
+		})
+	}
+}
+
+func verifyQueuedClosure(t *testing.T, protected bool) {
+	t.Helper()
+	ctx := t.Context()
+	s, db, _ := newTestStore(ctx, t, nil)
+	if _, err := s.Append(ctx, reviewReq("close-accept", 1, 0, 1, reviewAccepted(s))); err != nil {
+		t.Fatal(err)
+	}
+	closure, err := instantiateEvent("RunClosureConfirmed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	setEventEnvelope(closure, makeEnvelope(testRunReg, 2, "queued-close", 0, s.clk.Now()))
+	finished := makeRunFinished(makeEnvelope(testRunReg, 3, "queued-close", 0, s.clk.Now()), kernel.RunOutcomeCancelled)
+	req := reviewReq("queued-close", 2, 1, 1, closure, finished)
+	req.Kind = cmdCloseRunWithoutPayload
+	req.Result.LastSequence = 3
+	if protected {
+		req.MetadataInput = nil
+		req.ProtectedInputID = "unavailable-protected-input"
+	}
+	out, err := s.Append(ctx, req)
+	if protected {
+		if !errors.Is(err, ErrStaleFence) {
+			t.Fatalf("protected queued closure accepted: %v", err)
+		}
+	} else if err != nil || !out.Committed {
+		t.Fatalf("metadata-only queued closure failed: %v", err)
+	}
+	var count int
+	if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM exec_transcript").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatal("queued closure materialized input")
+	}
+}

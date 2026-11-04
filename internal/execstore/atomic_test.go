@@ -28,7 +28,7 @@ func verifyAtomicFaultPoint(ctx context.Context, t *testing.T, fault FaultPoint,
 	s, db, dataDir := newTestStore(ctx, t, equality)
 
 	payload, key := sealedTestPayload(t, "pay-atom", canonicalInput)
-	evt := makeRunAccepted(makeEnvelope("run-atom", 1, "cmd-atom", 1, now), "sess-atom", "pay-atom")
+	evt := makeRunAccepted(makeEnvelope("run-atom", 1, "cmd-atom", 0, now), "sess-atom", "pay-atom")
 
 	req := &AppendRequest{
 		SessionID:                 "sess-atom",
@@ -52,8 +52,8 @@ func verifyAtomicFaultPoint(ctx context.Context, t *testing.T, fault FaultPoint,
 	s.SetFault(fault, errTestInjected)
 
 	outcome, err := s.Append(ctx, req)
-	if err == nil {
-		t.Fatalf("expected error at fault point %s, got outcome: %+v", fault, outcome)
+	if !errors.Is(err, errTestInjected) {
+		t.Fatalf("expected injected error at fault point %s, got outcome: %+v, err: %v", fault, outcome, err)
 	}
 
 	if closeErr := db.Close(); closeErr != nil {
