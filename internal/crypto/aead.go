@@ -13,7 +13,13 @@ import (
 // SealV2 encrypts plaintext under key, authenticating the record identity in
 // associatedData. The record ID must be allocated before sealing.
 func SealV2(associatedData AssociatedData, key, plaintext []byte) (Envelope, error) {
-	return sealV2(rand.Reader, associatedData, key, plaintext)
+	return SealWithRandom(rand.Reader, associatedData, key, plaintext)
+}
+
+// SealWithRandom takes the nonce source as a parameter so tests and injected
+// randomness ports can control it.
+func SealWithRandom(random io.Reader, associatedData AssociatedData, key, plaintext []byte) (Envelope, error) {
+	return sealV2(random, associatedData, key, plaintext)
 }
 
 // sealV2 takes the nonce source as a parameter so vector tests can fix it.

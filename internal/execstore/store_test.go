@@ -23,7 +23,7 @@ func TestStoreConstructorValidations(t *testing.T) {
 
 	t.Run("nil db in New is rejected", func(t *testing.T) {
 		t.Parallel()
-		_, err := New(ctx, nil, host, clk, idGen, nil)
+		_, err := New(ctx, nil, nil, host, clk, idGen, nil, nil)
 		if err == nil {
 			t.Fatal("expected error for nil db")
 		}
@@ -36,7 +36,7 @@ func TestStoreConstructorValidations(t *testing.T) {
 			t.Fatal(err)
 		}
 		closeTestDB(t, db)
-		_, err = New(ctx, db, host, nil, idGen, nil)
+		_, err = New(ctx, db, nil, host, nil, idGen, nil, nil)
 		if err == nil {
 			t.Fatal("expected error for nil clock")
 		}
@@ -49,7 +49,7 @@ func TestStoreConstructorValidations(t *testing.T) {
 			t.Fatal(err)
 		}
 		closeTestDB(t, db)
-		_, err = New(ctx, db, host, clk, nil, nil)
+		_, err = New(ctx, db, nil, host, clk, nil, nil, nil)
 		if err == nil {
 			t.Fatal("expected error for nil idGen")
 		}
@@ -62,7 +62,7 @@ func TestStoreConstructorValidations(t *testing.T) {
 			t.Fatal(err)
 		}
 		closeTestDB(t, db)
-		_, err = New(ctx, db, storage.HostIncarnation{}, clk, idGen, nil)
+		_, err = New(ctx, db, nil, storage.HostIncarnation{}, clk, idGen, nil, nil)
 		if err == nil {
 			t.Fatal("expected error for empty host")
 		}
@@ -279,5 +279,43 @@ func TestTargetedMutantKillersProjections(t *testing.T) {
 	}
 	if tStatus != "ready" {
 		t.Fatalf("expected tool attempt status 'ready', got %q", tStatus)
+	}
+}
+
+func TestStoreNilAndAccessors(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, _, _, _ := newVaultAndStore(t)
+
+	var nilStore *Store
+	if _, _, err := nilStore.SealPayload(ctx, "sess", "pl", testToolResultKind, []byte("x")); !errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("expected ErrStoreUnavailable for nil store seal, got %v", err)
+	}
+	if _, err := nilStore.OpenPayload(ctx, "sess", "pl"); !errors.Is(err, ErrStoreUnavailable) {
+		t.Fatalf("expected ErrStoreUnavailable for nil store open, got %v", err)
+	}
+	if s.Vault() == nil || s.DB() == nil || s.Host().IncarnationID == "" {
+		t.Fatal("expected non-nil Store getters")
+	}
+	if nilStore.Vault() != nil || nilStore.DB() != nil || nilStore.Host().IncarnationID != "" {
+		t.Fatal("expected zero values for nilStore getters")
+	}
+	if err := nilStore.Close(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type failingRandom struct{}
+
+var errEntropy = errors.New("entropy error")
+
+func (failingRandom) Read([]byte) error { return errEntropy }
+
+func TestRandomReaderFailure(t *testing.T) {
+	t.Parallel()
+	rr := randomReader{r: failingRandom{}}
+	buf := make([]byte, 16)
+	if _, err := rr.Read(buf); err == nil {
+		t.Fatal("expected error from failingRandom")
 	}
 }

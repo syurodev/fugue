@@ -37,7 +37,7 @@ func verifyReopenedStoreReceipt(ctx context.Context, t *testing.T, dataDir strin
 	clk := clock.NewFake(time.Date(2026, 11, 2, 11, 0, 0, 0, time.UTC))
 	host := storage.HostIncarnation{LockGeneration: 2, IncarnationID: "host-2", AcquiredAt: clk.Now()}
 	idGen := ids.NewSequence("test-reopened")
-	reopenedStore, err := New(ctx, reopenedDB, host, clk, idGen, equality)
+	reopenedStore, err := New(ctx, reopenedDB, nil, host, clk, idGen, nil, equality)
 	if err != nil {
 		t.Fatalf("New reopened store: %v", err)
 	}

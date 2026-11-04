@@ -12,10 +12,10 @@ const (
 	EnvelopeVersionV2          uint32 = 2
 )
 
-// MaxCiphertextBytes bounds one envelope's ciphertext (1 MiB) so an untrusted
-// envelope cannot force an unbounded allocation during Open. Sealing a
-// plaintext whose ciphertext would exceed it fails.
-const MaxCiphertextBytes = 1 << 20
+// MaxCiphertextBytes bounds one envelope's ciphertext (1 MiB + AEAD overhead)
+// so an untrusted envelope cannot force an unbounded allocation during Open.
+// Sealing a plaintext of up to 1 MiB produces a ciphertext within this bound.
+const MaxCiphertextBytes = (1 << 20) + chacha20poly1305.Overhead
 
 // AssociatedData is the immutable record identity authenticated by SealV2. It
 // is not stored in the envelope: the owning record supplies it when opening.

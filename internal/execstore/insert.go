@@ -1,6 +1,7 @@
 package execstore
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -36,24 +37,37 @@ func (s *Store) recheckRunRevision(ctx context.Context, conn *sql.Conn, req *App
 	return storedRev + 1, storedSeq, nil
 }
 
-func (s *Store) writePayloadRows(ctx context.Context, conn *sql.Conn, req *AppendRequest) error {
+func (s *Store) ensureSessionKeyRow(ctx context.Context, conn *sql.Conn, req *AppendRequest) error {
 	if req.SealedSessionKey != nil {
 		if err := s.checkFault(FaultBeforeSessionKeyInsert); err != nil {
 			return err
 		}
-		if err := insertSessionKey(ctx, conn, req.SessionID, req.SealedSessionKey, s.clk.Now()); err != nil {
-			return err
-		}
+		return insertSessionKey(ctx, conn, req.SessionID, req.SealedSessionKey, s.clk.Now())
 	}
-	if len(req.SealedPayloads) > 0 {
-		if err := s.checkFault(FaultBeforePayloadInsert); err != nil {
-			return err
-		}
-		if err := insertPayloads(ctx, conn, req.SessionID, req.SealedPayloads); err != nil {
-			return err
-		}
+	if len(req.SealedPayloads) == 0 {
+		return nil
+	}
+	var count int
+	if err := conn.QueryRowContext(ctx, "SELECT COUNT(*) FROM exec_session_keys WHERE session_id = ?", req.SessionID).Scan(&count); err != nil {
+		return fmt.Errorf("%w: verify session key: %w", ErrStoreUnavailable, err)
+	}
+	if count == 0 {
+		return fmt.Errorf("%w: session key does not exist for session", ErrInvalidBatch)
 	}
 	return nil
+}
+
+func (s *Store) writePayloadRows(ctx context.Context, conn *sql.Conn, req *AppendRequest) error {
+	if err := s.ensureSessionKeyRow(ctx, conn, req); err != nil {
+		return err
+	}
+	if len(req.SealedPayloads) == 0 {
+		return nil
+	}
+	if err := s.checkFault(FaultBeforePayloadInsert); err != nil {
+		return err
+	}
+	return insertPayloads(ctx, conn, req.SessionID, req.SealedPayloads)
 }
 
 func (s *Store) writeProjectionRows(
@@ -138,7 +152,19 @@ func (s *Store) writeBatchRows(
 }
 
 func insertSessionKey(ctx context.Context, conn *sql.Conn, sessionID string, key *SealedSessionKey, now time.Time) error {
-	_, err := conn.ExecContext(
+	var existingWrapped []byte
+	err := conn.QueryRowContext(ctx, "SELECT wrapped_key FROM exec_session_keys WHERE session_id = ?", sessionID).Scan(&existingWrapped)
+	if err == nil {
+		if !bytes.Equal(existingWrapped, key.WrappedKey) {
+			return fmt.Errorf("%w: proposed session key differs from stored key", ErrSessionKeyConflict)
+		}
+		return nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: query exec_session_keys: %w", ErrStoreUnavailable, err)
+	}
+
+	_, err = conn.ExecContext(
 		ctx,
 		`INSERT INTO exec_session_keys (session_id, key_id, wrapped_key, created_at, shredded_at)
 		 VALUES (?, ?, ?, ?, NULL)`,

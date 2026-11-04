@@ -45,7 +45,7 @@ func TestExecutionStoreRejectsUnsafePragmas(t *testing.T) {
 			if _, execErr := db.ExecContext(ctx, tc.sql); execErr != nil {
 				t.Fatal(execErr)
 			}
-			_, err = New(ctx, db, host, clk, idGen, nil)
+			_, err = New(ctx, db, nil, host, clk, idGen, nil, nil)
 			if err == nil || !strings.Contains(err.Error(), "durability requirements") {
 				t.Fatalf("expected ErrUnsafePragmas, got %v", err)
 			}

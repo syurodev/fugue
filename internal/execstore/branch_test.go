@@ -393,7 +393,7 @@ func TestResolveCommitAndAppendClosedDB(t *testing.T) {
 		t.Fatal(migErr)
 	}
 
-	s, err := New(ctx, db, host, clk, idGen, nil)
+	s, err := New(ctx, db, nil, host, clk, idGen, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

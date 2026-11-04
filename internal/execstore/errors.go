@@ -47,4 +47,16 @@ var (
 
 	// ErrInvalidBatch is returned when a proposed event batch violates identity or sequence rules.
 	ErrInvalidBatch = errcode.New(errcode.InvalidArgument, "invalid transition batch or sequence")
+
+	// ErrPayloadTooLarge is returned when a single plaintext payload exceeds 1 MiB.
+	ErrPayloadTooLarge = errcode.New(errcode.InvalidArgument, "payload exceeds 1 MiB limit")
+
+	// ErrRunPayloadLimitExceeded is returned when the cumulative payload size for a run exceeds 64 MiB.
+	ErrRunPayloadLimitExceeded = errcode.New(errcode.FailedPrecondition, "run payload total exceeds 64 MiB limit")
+
+	// ErrSessionPayloadLimitExceeded is returned when the cumulative payload size for a session exceeds 1 GiB.
+	ErrSessionPayloadLimitExceeded = errcode.New(errcode.FailedPrecondition, "session payload total exceeds 1 GiB limit")
+
+	// ErrSessionKeyConflict is returned when a proposed session key conflicts with an existing key.
+	ErrSessionKeyConflict = errcode.New(errcode.FailedPrecondition, "session key conflict")
 )

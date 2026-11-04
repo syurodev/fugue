@@ -11,6 +11,7 @@ import (
 
 	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/kernel"
+	"github.com/syurodev/fugue/internal/vault"
 )
 
 func discardConn(conn *sql.Conn) {
@@ -372,22 +373,53 @@ func (s *Store) prepareBatchState(ctx context.Context, conn *sql.Conn, req *Appe
 	return state, nil
 }
 
+func (s *Store) checkVaultUnlockedForProtected(req *AppendRequest) error {
+	if s.vault == nil {
+		return nil
+	}
+	if len(req.SealedPayloads) == 0 && req.SealedSessionKey == nil && req.ProtectedInputID == "" {
+		return nil
+	}
+	if s.vault.Snapshot().State != vault.StateUnlocked {
+		return vault.ErrLocked
+	}
+	return nil
+}
+
+func (s *Store) recheckBatchPreconditions(
+	ctx context.Context,
+	conn *sql.Conn,
+	req *AppendRequest,
+) (*storedAdmission, *kernel.State, uint64, error) {
+	admission, _, err := s.recheckFences(ctx, conn, req)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	newRunRevision, currentSeq, err := s.recheckRunRevision(ctx, conn, req)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	state, err := s.prepareBatchState(ctx, conn, req, currentSeq)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	return admission, state, newRunRevision, nil
+}
+
 func (s *Store) executeAppendTx(ctx context.Context, conn *sql.Conn, req *AppendRequest) (AppendOutcome, error) {
 	if err := checkSessionPurging(ctx, conn, req.SessionID); err != nil {
+		return AppendOutcome{}, err
+	}
+	if err := s.checkVaultUnlockedForProtected(req); err != nil {
 		return AppendOutcome{}, err
 	}
 	if outcome, found, err := s.checkTxReceipt(ctx, conn, req); found || err != nil {
 		return outcome, err
 	}
-	admission, _, err := s.recheckFences(ctx, conn, req)
-	if err != nil {
+	if err := s.checkPayloadLimits(ctx, conn, req); err != nil {
 		return AppendOutcome{}, err
 	}
-	newRunRevision, currentSeq, err := s.recheckRunRevision(ctx, conn, req)
-	if err != nil {
-		return AppendOutcome{}, err
-	}
-	state, err := s.prepareBatchState(ctx, conn, req, currentSeq)
+	admission, state, newRunRevision, err := s.recheckBatchPreconditions(ctx, conn, req)
 	if err != nil {
 		return AppendOutcome{}, err
 	}

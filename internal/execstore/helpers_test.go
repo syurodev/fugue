@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/crypto"
 	"github.com/syurodev/fugue/internal/kernel"
 	"github.com/syurodev/fugue/internal/platform/clock"
@@ -83,7 +84,7 @@ func newTestStore(ctx context.Context, t *testing.T, equality ProtectedEquality)
 		AcquiredAt:     clk.Now(),
 	}
 	idGen := ids.NewSequence("test-id")
-	s, err := New(ctx, db, host, clk, idGen, equality)
+	s, err := New(ctx, db, nil, host, clk, idGen, nil, equality)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,5 +285,33 @@ func makeModelAttemptAbandoned(env *kernel.Envelope, invID, attID string, next k
 		Receipt:      "",
 		NextAction:   next,
 		UnknownCost:  0,
+	}
+}
+
+func makeAcceptedReq(
+	s *Store,
+	sessionID, runID, cmdID, payloadID string,
+	canonicalInput []byte,
+	sealed []SealedPayload,
+	sealedKey *SealedSessionKey,
+) *AppendRequest {
+	evt := makeRunAccepted(makeEnvelope(runID, 1, cmdID, 0, s.clk.Now()), sessionID, payloadID)
+	return &AppendRequest{
+		SessionID:                 sessionID,
+		RunID:                     runID,
+		CommandID:                 cmdID,
+		Kind:                      cmdAcceptRun,
+		Principal:                 testOriginUser,
+		Target:                    testTargetSession,
+		CodecVersion:              codec.CodecV1,
+		ProtectedInputID:          payloadID,
+		CanonicalInput:            canonicalInput,
+		QueueFence:                &QueueFence{QueueRevision: 0},
+		ExpectedRunRevision:       0,
+		ExpectedAdmissionRevision: 1,
+		Events:                    []kernel.Event{evt},
+		Result:                    codec.ReceiptResult{FirstSequence: 1, LastSequence: 1},
+		SealedPayloads:            sealed,
+		SealedSessionKey:          sealedKey,
 	}
 }
