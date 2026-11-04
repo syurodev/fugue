@@ -2,6 +2,14 @@
 # `check` runs exactly the PR gates; long jobs (full mutation, long fuzzing, -count=5) are nightly.
 version: "3"
 
+# Keep local Go tools responsive; CI retains its runner defaults. Explicit shell
+# settings win. GOMAXPROCS also sets the default test/fuzz parallelism, while
+# Gremlins needs its own worker limit because it otherwise uses runtime.NumCPU.
+env:
+  GOMAXPROCS: '{{if env "CI"}}{{env "GOMAXPROCS"}}{{else}}{{default "2" (env "GOMAXPROCS")}}{{end}}'
+  GOFLAGS: '{{if env "CI"}}{{env "GOFLAGS"}}{{else}}{{default "-p=1" (env "GOFLAGS")}}{{end}}'
+  GREMLINS_UNLEASH_WORKERS: '{{if env "CI"}}{{env "GREMLINS_UNLEASH_WORKERS"}}{{else}}{{default "1" (env "GREMLINS_UNLEASH_WORKERS")}}{{end}}'
+
 vars:
   # Exact pin. Keep in sync with .github/workflows once CI exists (F0.6); quality/lint_test.go
   # reads this value so the tests run the same linter version as `task lint`.
