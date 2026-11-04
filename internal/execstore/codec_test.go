@@ -5,6 +5,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/kernel"
 )
@@ -307,5 +309,39 @@ func TestExecutionControlColumnsNoSensitiveWords(t *testing.T) {
 	}
 	if strings.Contains(dataStr, "secret-user-prompt-content") {
 		t.Fatal("exec_events.data contains plaintext protected content!")
+	}
+}
+
+func TestExecutionEventCodecKeepsKindFields(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	env := kernel.Envelope{
+		RunID: "run-kind", Sequence: 1, CommandID: "cmd-kind", CausationID: "cause-kind",
+		Origin: testOriginUser, Token: 1, Timestamp: now,
+	}
+	block := &kernel.RunBlockAddedEvent{
+		Envelope: env, BlockerID: "b", Kind: kernel.WaitReasonBudget, BudgetKind: kernel.BudgetKindToolCalls,
+		Reference: "ref", ResumeCondition: "extended",
+	}
+	request := &kernel.ToolApprovalRequestedEvent{
+		Envelope: env, ToolCallID: "t", CheckGeneration: 1, OwnerRequestRef: "req", RequestKind: kernel.RequestKindQuestion,
+		RequestRevision: 1, ExactArgsRef: "args", ApproverRoute: "route", Expiry: now,
+	}
+	for _, evt := range []kernel.Event{block, request} {
+		durable, err := EncodeEvent(evt, &StorageEnvelope{
+			EventID: "evt-" + evt.EventName(), SessionID: "sess-kind", SchemaVersion: CurrentSchemaVersion,
+			ProtocolVersion: CurrentProtocolVersion, CorrelationID: "corr-kind", WriterIncarnation: 1,
+			QueueRevision: 0, RecordedAt: now, PayloadID: "",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		decoded, err := DecodeEvent(durable)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if diff := cmp.Diff(evt, decoded); diff != "" {
+			t.Fatalf("%s round trip mismatch (-want +got):\n%s", evt.EventName(), diff)
+		}
 	}
 }

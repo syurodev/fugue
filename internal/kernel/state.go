@@ -68,6 +68,7 @@ type ToolInvocation struct {
 type Block struct {
 	BlockerID       string
 	Kind            WaitReason
+	BudgetKind      BudgetKind
 	Reference       string
 	ResumeCondition string
 }

@@ -20,6 +20,7 @@ func TestApprovalAndWindowEvidence(t *testing.T) {
 	q.ToolCallID = "t1"
 	q.CheckGeneration = 1
 	q.OwnerRequestRef = "owner-request"
+	q.RequestKind = RequestKindConfirm
 	q.RequestRevision = 1
 	q.ExactArgsRef = "approval-args"
 	if ids := CheckBatch(s, []Event{q}, &c.facts); len(ids) > 0 {
@@ -202,6 +203,7 @@ func TestApprovalResolutionBindsExactArguments(t *testing.T) {
 	q.ToolCallID = "t1"
 	q.CheckGeneration = 1
 	q.OwnerRequestRef = "binding-request"
+	q.RequestKind = RequestKindConfirm
 	q.RequestRevision = 1
 	q.ExactArgsRef = "binding-args"
 	s = Evolve(s, q)

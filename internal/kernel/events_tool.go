@@ -77,6 +77,7 @@ type ToolApprovalRequestedEvent struct {
 	ToolCallID      string
 	CheckGeneration uint64
 	OwnerRequestRef string
+	RequestKind     RequestKind
 	RequestRevision uint64
 	ExactArgsRef    string
 	ApproverRoute   string

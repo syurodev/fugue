@@ -6,13 +6,13 @@ func canonicalWaitOrder() []WaitReason {
 	return []WaitReason{
 		WaitReasonApproval,
 		WaitReasonUserInput,
-		WaitReasonDependency,
 		WaitReasonRetryTimer,
 		WaitReasonWorkerCapacity,
 		WaitReasonVaultLocked,
 		WaitReasonHostPaused,
 		WaitReasonRecoveryAdmission,
-		WaitReasonStepBudget,
+		WaitReasonBudget,
+		WaitReasonQuotaRefresh,
 	}
 }
 
@@ -152,8 +152,8 @@ func collectApprovalReasons(s *State, present map[WaitReason]bool) {
 		}
 		for _, att := range tool.Attempts {
 			if att != nil && att.Status == ToolAttemptStatusAwaitingApproval {
-				present[WaitReasonApproval] = true
-				return
+				present[tool.Approval.RequestKind.waitReason()] = true
+				break
 			}
 		}
 	}

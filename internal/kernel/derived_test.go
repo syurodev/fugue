@@ -284,19 +284,19 @@ func TestDerivePhaseFrontier(t *testing.T) {
 	}
 }
 
-func setupAllNineReasons(s *State, now time.Time) {
+func setupEveryReason(s *State, now time.Time) {
 	s.ToolInvocations["tc1"] = &ToolInvocation{
 		ToolCallID: "tc1", DescriptorVersion: testDescriptorVer, EffectClass: EffectClassSideEffecting,
 		Attempts: map[string]*ToolAttempt{"a1": {AttemptID: "a1", Status: ToolAttemptStatusAwaitingApproval}},
 	}
 	s.Blocks["b_in"] = &Block{BlockerID: "b_in", Kind: WaitReasonUserInput, Reference: "r", ResumeCondition: "c"}
-	s.Blocks["b_dep"] = &Block{BlockerID: "b_dep", Kind: WaitReasonDependency, Reference: "r", ResumeCondition: "c"}
 	s.ActiveTimers["t_ret"] = &ActiveTimer{TimerID: "t_ret", Generation: 1, Purpose: TimerPurposeModelRetry, Deadline: now.Add(time.Second)}
 	s.Blocks["b_cap"] = &Block{BlockerID: "b_cap", Kind: WaitReasonWorkerCapacity, Reference: "r", ResumeCondition: "c"}
 	s.Blocks["b_vlt"] = &Block{BlockerID: "b_vlt", Kind: WaitReasonVaultLocked, Reference: "r", ResumeCondition: "c"}
 	s.Blocks["b_pause"] = &Block{BlockerID: "b_pause", Kind: WaitReasonHostPaused, Reference: "r", ResumeCondition: "c"}
 	s.Blocks["b_rec"] = &Block{BlockerID: "b_rec", Kind: WaitReasonRecoveryAdmission, Reference: "r", ResumeCondition: "c"}
-	s.Blocks["b_bud"] = &Block{BlockerID: "b_bud", Kind: WaitReasonStepBudget, Reference: "r", ResumeCondition: "c"}
+	s.Blocks["b_bud"] = &Block{BlockerID: "b_bud", Kind: WaitReasonBudget, BudgetKind: BudgetKindSteps, Reference: "r", ResumeCondition: "c"}
+	s.Blocks["b_quota"] = &Block{BlockerID: "b_quota", Kind: WaitReasonQuotaRefresh, Reference: "r", ResumeCondition: "c"}
 }
 
 func TestDeriveWaitReasons(t *testing.T) {
@@ -318,15 +318,15 @@ func TestDeriveWaitReasons(t *testing.T) {
 		}
 	})
 
-	t.Run("collects all 9 reasons in canonical order", func(t *testing.T) {
+	t.Run("collects every reason in canonical order", func(t *testing.T) {
 		t.Parallel()
 		s := NewState()
-		setupAllNineReasons(s, now)
+		setupEveryReason(s, now)
 		got := DeriveWaitReasons(s)
 		expected := []WaitReason{
-			WaitReasonApproval, WaitReasonUserInput, WaitReasonDependency,
+			WaitReasonApproval, WaitReasonUserInput,
 			WaitReasonRetryTimer, WaitReasonWorkerCapacity, WaitReasonVaultLocked,
-			WaitReasonHostPaused, WaitReasonRecoveryAdmission, WaitReasonStepBudget,
+			WaitReasonHostPaused, WaitReasonRecoveryAdmission, WaitReasonBudget, WaitReasonQuotaRefresh,
 		}
 		if diff := cmp.Diff(expected, got); diff != "" {
 			t.Fatalf("DeriveWaitReasons mismatch (-want +got):\n%s", diff)

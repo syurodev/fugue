@@ -51,6 +51,7 @@ func snapshotViolations() []invariantCase {
 			q.ToolCallID = "t1"
 			q.CheckGeneration = 1
 			q.OwnerRequestRef = "request"
+			q.RequestKind = RequestKindConfirm
 			q.RequestRevision = 1
 			q.ExactArgsRef = "approval-args"
 			s.ToolInvocations["t1"].Approval = *q
