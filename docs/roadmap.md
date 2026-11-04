@@ -4,7 +4,7 @@ The living work board of the repository. It answers: what to do, in what order, 
 design, what counts as done, and where each item stands. This page **does not** change the
 design.
 
-Last updated: 2026-11-03 (F2.3 merged; Q-13 option A approved; F2.4 ready for implementation planning).
+Last updated: 2026-11-04 (F2.7 PR #44 opened for review).
 
 ## 0. Context
 
@@ -120,7 +120,7 @@ Applies to all code copied from `syurodev/dev-kit`.
 | F2.4 | Execution store: `exec_*` tables, append-only triggers, one transaction for event, payload, projection, receipt and admission | `storage-security §2–3, §6`, `event-storage-recovery §5` | F1.3, F2.3 | Atomicity under fault injection; triggers block UPDATE and DELETE | Not started | | Q-13 A approved: includes physical payload/key/purge support schema and sealed-record persistence; [implementation plan](plans/f2.4-execution-store.md). No implementation started |
 | F2.5 | Protected payloads: session key wrapped with `SealRecord`, AEAD, size limits, crypto-shred | `storage-security §4, §7` | F1.2, F2.4 | Crypto-shred; 1 MiB, 64 MiB and 1 GiB limits | Not started | | Q-13 A: physical support schema lands in F2.4; crypto/key/vault/purge lifecycle, limits and G-03 security evidence remain here |
 | F2.6 | Per-session coordinator: admission row, minimal queue, worker reservation, commit before handoff, read-back on unknown commit, durable timers | `event-storage-recovery §2–3, §7`, `architecture §3, §6` | F2.4 | An unknown commit never dispatches twice; a stale worker is fenced | Not started | | |
-| F2.7 | Faux model provider: text, thinking, tool calls, every error class, cut streams | `model-adapter §9` | F2.1 | Usable by every headless test | Not started | | |
+| F2.7 | Faux model provider: text, thinking, tool calls, every error class, cut streams | `model-adapter §2–3, §9` | F2.1 | `TestErrorClassRetryClassification`, `TestScriptEmitsOrderedContentAndTerminalEvidence`, `TestScriptsRepeatInDeclaredOrderAndClassifyFailures`, `TestCutPointsCloseWithoutInventingTerminalOutcome`, `TestCancellationStopsStreamAndClosesIt`, `TestScriptFailureIsOwned`, `TestReceivedFailureDoesNotChangeNextCall` | In review | [#44](https://github.com/syurodev/fugue/pull/44) | Shared minimal contract types; the coordinator owns its consumer port per ADR 0001 |
 | F2.8 | Fake read tool (`pure_read`) on the `Prepare`/`Execute` contract | `tool-system §2` | F2.1 | Full check, ready, dispatch, result chain | Not started | | |
 | F2.9 | After-step rules, `maxSteps` with `Waiting(step_budget)` and `BudgetExtended`, one automatic continuation on `length`, loop reminders | `continuation §2–4` | F2.1, F2.3 | Evidence in continuation §8 (except goal) | Not started | | Loop reminders need F4.5 |
 | F2.10 | **End-to-end slice**: start, model, tool, model, finish (trace A); durable; replay without side effects | `event-catalog §7` | F2.2–F2.9 | Trace A has exactly 22 events; replay makes 0 model and tool calls | Not started | | Main F2 milestone |
@@ -307,4 +307,7 @@ together only in `app`.
 | 2026-11-03 | F2.3, F2.4 | Marked F2.3 Done after PR #38 merged; drafted the F2.4 implementation/evidence plan and recorded Q-13 as the only confirmed phasing conflict. F2.4 Needs decision; no design/ADR/gate changes applied | Agent |
 | 2026-11-03 | Q-13, F2.4, F2.5 | User selected A. Aligned the three support-table phases in ADR 0001 and the execution-store plan; F2.4 returns to Not started. Cryptographic lifecycle and purge behavior remain F2.5; no implementation or migration added | Agent |
 | 2026-11-04 | F6.5, F6.9, F7.1 | H-20 and H-46 settled in `ask-plan` and `tasks`: F6.5 gets its design, tasks and checklists become F6.9, and F7.1 adds `fugue tasks` | Designer |
+| 2026-11-04 | F2.7 | Added the minimal shared request/stream contract and deterministic faux provider with classified failures, cut points, cancellation and call counters; local `task check` passes (race/shuffle, architecture, coverage, fuzz-short included); mutation-changed selected 0 guarded packages | Agent |
+| 2026-11-04 | F2.7 | Opened [PR #44](https://github.com/syurodev/fugue/pull/44) from `feat/f2.7-faux-provider`; awaiting CI and review, not marked Done | Agent |
+| 2026-11-04 | F2.7 | Addressed PR #44 review finding by cloning `Failure` pointers on script retention and event emission; added ownership regression tests; local `task check` passes | Agent |
 | 2026-11-04 | F5.6, F6.4, F6.8, F7.1 | H-34 settled in `workspace`: workspaces and configuration become F5.6, F6.4 and F6.8 depend on it for roots and mounts, and F7.1 adds `fugue workspace` | Designer |
