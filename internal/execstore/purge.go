@@ -121,14 +121,16 @@ func (s *Store) PurgeSession(ctx context.Context, sessionID string) error {
 	s.keyCache.purge(sessionID)
 
 	conn, err := s.acquireConfiguredConn(ctx)
+	if conn != nil {
+		defer func() {
+			if closeErr := conn.Close(); closeErr != nil {
+				return
+			}
+		}()
+	}
 	if err != nil {
 		return err
 	}
-	defer func() {
-		if closeErr := conn.Close(); closeErr != nil {
-			return
-		}
-	}()
 
 	if err := s.beginPurgeTx(ctx, conn); err != nil {
 		return err
