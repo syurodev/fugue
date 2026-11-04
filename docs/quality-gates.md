@@ -100,6 +100,21 @@ Ordinary Go tests that read the package graph with `go list -deps -json` and the
 | OS-specific tests (sandbox) run on the right OS | CI matrix of macOS and Linux |
 | Only stdlib `testing` and `github.com/google/go-cmp` for comparisons | `depguard` |
 
+### Local resource defaults
+
+`task test`, `task check`, fuzz, mutation and other Task commands automatically use
+`GOMAXPROCS=2`, `GOFLAGS=-p=1` and `GREMLINS_UNLEASH_WORKERS=1` on local machines.
+This limits Go execution to two processors per process, package build/test concurrency to
+one, and mutation workers to one. Test and fuzz parallelism defaults to `GOMAXPROCS`.
+These settings reduce aggregate CPU pressure; they are not a hard CPU quota across all
+child processes. Runs can take longer, especially mutation tests within the existing time box.
+
+A nonempty `CI` environment variable disables these defaults, leaving runner settings
+unchanged. Explicit shell values for each setting are preserved; an existing `GOFLAGS`
+value replaces the default `-p=1`, so include `-p=1` there to retain that limit.
+The same tests, race/shuffle/count flags, fuzz duration, mutation selection and thresholds
+still apply locally and in CI. No per-invocation configuration is required.
+
 ## 7. Dependencies
 
 | Rule | Enforcement |
