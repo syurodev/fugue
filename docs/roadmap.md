@@ -61,7 +61,7 @@ blocking ID) · `Needs decision` · `Awaiting design`.
 | F4 | Context engine and the OpenAI adapter with Sign in with ChatGPT | Evidence tables of the context engine and model adapter §11 |
 | F5 | Host API (`fugue serve`), input coordination and workspaces | Evidence tables of the Host API and input coordination; `workspace §9` |
 | F6 | Tools and interaction | Evidence of `interaction §11`, `sandbox-runtime §12`, `shell-job §8`, `content-safety §7`, `file-tools §11`, `ask-plan §7`, `tasks §12` |
-| F7 | CLI/TUI client | Awaiting design H-45 |
+| F7 | CLI/TUI client | Evidence of `cli §9` |
 | F8 | Stage A release | Evidence of `activation §5` |
 
 ## 3. Porting rules
@@ -151,7 +151,7 @@ Applies to all code copied from `syurodev/dev-kit`.
 
 | ID | Item | Design | Depends on | Evidence | Status | PR | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| F5.1 | `fugue serve`, `host.json`, `fugue.sock`, UID check, `Hello` and versioning | `host-api §3, §7, §8` | F0.7, F1.3 | Single host; socket permissions; versions | Not started | | |
+| F5.1 | `fugue serve`, `host.json`, `fugue.sock`, UID check, `Hello` with `client_kind` and versioning, client leases with a 10 s grace shutdown, `HostStatus`, `Shutdown` | `host-api §3, §7, §8`, `cli §2, §7` | F0.7, F1.3 | Single host; socket permissions; versions; host rows of `cli §9` | Not started | | |
 | F5.2 | Event stream with sequence, snapshot, catch-up, `resync_required` | `host-api §6` | F5.1 | Disconnect and reconnect at the right sequence | Not started | | |
 | F5.3 | Session, queue and interaction services over Connect, including `SetSessionPolicy` | `host-api §4–5`, `interaction §8` | F5.2, F2.10, F6.3 | `command_id` deduplication; `origin` derived from the principal; interaction evidence §11 for `ListPending`, `Answer` and two clients | Not started | | |
 | F5.4 | Input coordination: durable queue, Steer, Interject, Stop returns items to the composer, `Continue`, `Inject` | `coordination` | F5.3, F3.2 | Coordination evidence table §10, except peers | Not started | | Peers dropped (Q-04 |
@@ -176,7 +176,8 @@ Applies to all code copied from `syurodev/dev-kit`.
 
 | ID | Item | Design | Depends on | Evidence | Status | PR | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| F7.1 | CLI/TUI client `fugue`: sessions, interaction answers, vault, ChatGPT login, jobs, snapshots, `fugue tasks`, `fugue workspace`, `fugue quota`, `fugue run extend`, `fugue account resume`, every failure UX row | H-45 | F5.3 | — | Awaiting design | | The only client of stage A (activation A-06) |
+| F7.1 | Client core and subcommands: `internal/client` (auto-start, lease, reconnect, version check), every subcommand with `--json`, `fugue run` with `--on-approval` and `--detach`, exit codes, `fugue log` over `SessionTranscript` | `cli §2–3, §5, §7–8` | F5.1, F5.3 | Host and subcommand rows of `cli §9` | Not started | | The only client of stage A (activation A-06). Subcommands of `fugue tasks`, `workspace`, `quota` land with F6.9, F5.6, F4.4 |
+| F7.3 | Inline TUI: `internal/tui` on Bubble Tea v2, Lip Gloss v2, Bubbles v2 and Glamour; scrollback items, live area, request boxes, key map, `/` overlays, status line, English strings, every failure UX row | `cli §4, §6` | F7.1 | TUI rows of `cli §9` | Not started | | |
 | F7.2 | Electron shell and desktop session UI | H-44, H-33 | F5.1 | — | Awaiting design | | *Stage B*; may be a separate repository |
 
 ### F8 — Stage A release
@@ -320,3 +321,4 @@ together only in `app`.
 | 2026-11-04 | F2.4 | Strengthened fault-injection assertions to require the injected error rather than any rejection; queued test requests use token 0 and transcript tests materialize input on admission. Added queued metadata-only closure evidence | Agent |
 | 2026-11-04 | F2.4, F2.7, F2.8 | Synchronized F2.8 with main after PR #42 merged as `6d553b7` (CI green on `998e9c5`); retained execution-store evidence and workspace/configuration decisions. F2.4 and F2.7 are Done; F2.8 remains In review | Agent |
 | 2026-11-04 | F2.9, F3.4, F4.4, F7.1 | H-06 settled in `budget`: run budgets wait for a user extension instead of stopping (F2.9, F3.4); F4.4 becomes the stage A quota owner with account switching, revising M-09 so ChatGPT accounts switch among themselves but never to an API key; F7.1 adds the quota and budget commands | Designer |
+| 2026-11-04 | F5.1, F7.1, F7.3 | H-45 settled in `cli`: F5.1 adds client kinds, leases and shutdown; F7.1 becomes the client core and subcommands; the inline TUI becomes F7.3 | Designer |
