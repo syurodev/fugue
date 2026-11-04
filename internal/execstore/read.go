@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"time"
 
 	"github.com/syurodev/fugue/internal/codec"
@@ -141,7 +142,39 @@ func (s *Store) LookupReceipt(ctx context.Context, commandID string) (codec.Rece
 	if s == nil || s.db == nil {
 		return codec.Receipt{}, false, ErrStoreUnavailable
 	}
-	return queryReceipt(ctx, s.db, commandID)
+	sr, found, err := queryReceipt(ctx, s.db, commandID)
+	if err != nil {
+		return codec.Receipt{}, false, err
+	}
+	if !found {
+		return codec.Receipt{}, false, nil
+	}
+	return sr.Receipt, true, nil
+}
+
+func verifyRebuiltProjections(state *kernel.State, runRec *RunRecord) error {
+	if state.LastSequence != runRec.LastSequence {
+		return fmt.Errorf("%w: rebuilt sequence %d != stored sequence %d", ErrCorruptHistory, state.LastSequence, runRec.LastSequence)
+	}
+	if kernel.DeriveLifecycle(state) != runRec.Lifecycle {
+		return fmt.Errorf("%w: rebuilt lifecycle %v != stored lifecycle %v", ErrCorruptHistory, kernel.DeriveLifecycle(state), runRec.Lifecycle)
+	}
+	if string(kernel.DerivePhase(state)) != string(runRec.Phase) {
+		return fmt.Errorf("%w: rebuilt phase %v != stored phase %v", ErrCorruptHistory, kernel.DerivePhase(state), runRec.Phase)
+	}
+	if string(state.Outcome) != string(runRec.Outcome) {
+		return fmt.Errorf("%w: rebuilt outcome %v != stored outcome %v", ErrCorruptHistory, state.Outcome, runRec.Outcome)
+	}
+	if !slices.Equal(kernel.DeriveWaitReasons(state), runRec.WaitReasons) {
+		return fmt.Errorf("%w: rebuilt wait reasons %v != stored wait reasons %v", ErrCorruptHistory, kernel.DeriveWaitReasons(state), runRec.WaitReasons)
+	}
+	if state.CurrentStepIndex != runRec.StepIndex {
+		return fmt.Errorf("%w: rebuilt step index %d != stored step index %d", ErrCorruptHistory, state.CurrentStepIndex, runRec.StepIndex)
+	}
+	if state.ContextEpoch != runRec.ContextEpoch {
+		return fmt.Errorf("%w: rebuilt context epoch %d != stored context epoch %d", ErrCorruptHistory, state.ContextEpoch, runRec.ContextEpoch)
+	}
+	return nil
 }
 
 // RebuildRun reconstructs the pure kernel state of runID by replaying its complete event history.
@@ -170,11 +203,8 @@ func (s *Store) RebuildRun(ctx context.Context, runID string) (*kernel.State, er
 		return nil, err
 	}
 
-	if state.LastSequence != runRec.LastSequence {
-		return nil, fmt.Errorf("%w: rebuilt sequence %d != stored sequence %d", ErrCorruptHistory, state.LastSequence, runRec.LastSequence)
-	}
-	if kernel.DeriveLifecycle(state) != runRec.Lifecycle {
-		return nil, fmt.Errorf("%w: rebuilt lifecycle %v != stored lifecycle %v", ErrCorruptHistory, kernel.DeriveLifecycle(state), runRec.Lifecycle)
+	if err := verifyRebuiltProjections(state, &runRec); err != nil {
+		return nil, err
 	}
 
 	return state, nil

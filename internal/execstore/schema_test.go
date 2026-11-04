@@ -76,6 +76,14 @@ func TestExecutionMigrationEventConstraints(t *testing.T) {
 
 	t.Run("event origin must be in allowlist", func(t *testing.T) {
 		t.Parallel()
+		// Insert parent rows first so foreign keys are satisfied
+		if _, err := db.ExecContext(ctx, `INSERT INTO exec_admission (session_id, owner_incarnation, admission_token, revision, queue_revision, context_epoch, context_revision, context_requirement) VALUES ('sess-1', 1, 0, 1, 0, 0, 0, 'none')`); err != nil {
+			t.Fatalf("insert parent admission: %v", err)
+		}
+		if _, err := db.ExecContext(ctx, `INSERT INTO exec_runs (run_id, session_id, last_sequence, revision, protocol_version, lifecycle, phase, wait_reasons, outcome, admission_token, step_index, context_epoch) VALUES ('run-1', 'sess-1', 1, 1, 1, 'queued', 'preparing', '[]', '', 0, 0, 0)`); err != nil {
+			t.Fatalf("insert parent run: %v", err)
+		}
+
 		_, execErr := db.ExecContext(
 			ctx,
 			`INSERT INTO exec_events (
@@ -87,6 +95,9 @@ func TestExecutionMigrationEventConstraints(t *testing.T) {
 		)
 		if execErr == nil {
 			t.Fatal("expected CHECK constraint failure for invalid origin, got nil")
+		}
+		if !strings.Contains(strings.ToLower(execErr.Error()), "check") {
+			t.Fatalf("expected CHECK constraint failure, got %v", execErr)
 		}
 	})
 }

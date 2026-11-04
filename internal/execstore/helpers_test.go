@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"testing"
 	"time"
@@ -43,11 +44,14 @@ func (f *fakeEquality) OpenPayload(_ context.Context, sessionID, payloadID strin
 	if f.err != nil {
 		return nil, f.err
 	}
+	if sessionID == "" || payloadID == "" {
+		return nil, fmt.Errorf("%w: sessionID and payloadID required", ErrProtectedInputUnavailable)
+	}
 	key := sessionID + "/" + payloadID
 	if p, ok := f.payloads[key]; ok {
 		return p, nil
 	}
-	return f.payloads[payloadID], nil
+	return nil, fmt.Errorf("%w: payload not found for session %s, payload %s", ErrProtectedInputUnavailable, sessionID, payloadID)
 }
 
 func closeTestDB(t *testing.T, closer io.Closer) {

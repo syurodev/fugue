@@ -22,7 +22,7 @@ func verifyAtomicFaultPoint(ctx context.Context, t *testing.T, fault FaultPoint,
 	t.Helper()
 	canonicalInput := []byte("payload-atomic")
 	equality := &fakeEquality{
-		payloads: map[string][]byte{"pay-atom": canonicalInput},
+		payloads: map[string][]byte{"sess-atom/pay-atom": canonicalInput},
 		err:      nil,
 	}
 	s, db, dataDir := newTestStore(ctx, t, equality)
@@ -72,7 +72,7 @@ func verifyAtomicFaultPoint(ctx context.Context, t *testing.T, fault FaultPoint,
 func assertTablesEmpty(ctx context.Context, t *testing.T, db *sql.DB, fault FaultPoint) {
 	t.Helper()
 	tables := []string{
-		"exec_session_keys", "exec_payloads", "exec_runs", "exec_events",
+		"exec_admission", "exec_session_keys", "exec_payloads", "exec_runs", "exec_events",
 		"exec_invocations", "exec_attempts", "exec_transcript", "exec_receipts",
 	}
 
@@ -172,7 +172,7 @@ func TestCommitLostAcknowledgementCommitted(t *testing.T) {
 	now := time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC)
 	canonicalInput := []byte("payload-readback")
 	equality := &fakeEquality{
-		payloads: map[string][]byte{"pay-rb": canonicalInput},
+		payloads: map[string][]byte{"sess-rb/pay-rb": canonicalInput},
 		err:      nil,
 	}
 	s, _, _ := newTestStore(ctx, t, equality)

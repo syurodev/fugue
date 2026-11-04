@@ -244,7 +244,7 @@ func TestQueuedFinishKeepsOtherRunAdmission(t *testing.T) {
 		SessionID:                 testSharedSess,
 		RunID:                     testQueuedRun,
 		CommandID:                 "cmd-q-cancel",
-		Kind:                      "RequestStop",
+		Kind:                      cmdRequestStop,
 		Principal:                 testOriginUser,
 		Target:                    testTargetSession,
 		CodecVersion:              codec.CodecV1,

@@ -71,8 +71,7 @@ func TestExecutionReceiptSurvivesRestart(t *testing.T) {
 	canonicalInput := []byte("canonical-input-payload-bytes")
 	equality := &fakeEquality{
 		payloads: map[string][]byte{
-			testCmdRestart + "/" + testPayRestart: canonicalInput,
-			testPayRestart:                        canonicalInput,
+			testSessRestart + "/" + testPayRestart: canonicalInput,
 		},
 		err: nil,
 	}
@@ -180,8 +179,7 @@ func setupReceiptConflictTest(ctx context.Context, t *testing.T) (*Store, *sql.D
 	canonicalInput := []byte("original-input-bytes")
 	equality := &fakeEquality{
 		payloads: map[string][]byte{
-			testCmdConf + "/" + testPayOrig: canonicalInput,
-			testPayOrig:                     canonicalInput,
+			testSessConf + "/" + testPayOrig: canonicalInput,
 		},
 		err: nil,
 	}
@@ -257,7 +255,7 @@ func TestExecutionMetadataOnlyDedupNeedsNoPayloadOpen(t *testing.T) {
 		SessionID:                 "sess-meta-dedup",
 		RunID:                     "run-meta-dedup",
 		CommandID:                 "cmd-meta-dedup",
-		Kind:                      "RequestStop",
+		Kind:                      cmdRequestStop,
 		Principal:                 testUser1,
 		Target:                    "run-meta-dedup",
 		CodecVersion:              codec.CodecV1,
@@ -290,7 +288,7 @@ func TestExecutionProtectedDedupFailsClosed(t *testing.T) {
 	canonicalInput := []byte("protected-bytes")
 	equality := &fakeEquality{
 		payloads: map[string][]byte{
-			"pay-prot": canonicalInput,
+			"sess-prot/pay-prot": canonicalInput,
 		},
 		err: nil,
 	}

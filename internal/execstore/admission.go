@@ -55,6 +55,29 @@ func validateQueueFence(fence *QueueFence, adm *storedAdmission) error {
 	return nil
 }
 
+func (s *Store) verifyAdmissionFences(req *AppendRequest) error {
+	if req.AdmissionFence != nil && req.AdmissionFence.OwnerIncarnation != s.host.LockGeneration {
+		return fmt.Errorf("%w: owner incarnation %d does not match host %d", ErrStaleFence, req.AdmissionFence.OwnerIncarnation, s.host.LockGeneration)
+	}
+
+	for _, evt := range req.Events {
+		admEvt, ok := evt.(*kernel.RunAdmittedEvent)
+		if !ok {
+			continue
+		}
+		if req.AdmissionFence == nil {
+			return fmt.Errorf("%w: RunAdmittedEvent requires AdmissionFence", ErrStaleFence)
+		}
+		if req.AdmissionFence.Token != admEvt.Token {
+			return fmt.Errorf("%w: fence token %d != event token %d", ErrStaleFence, req.AdmissionFence.Token, admEvt.Token)
+		}
+		if req.AdmissionFence.OwnerIncarnation != admEvt.OwnerIncarnation {
+			return fmt.Errorf("%w: fence incarnation %d != event incarnation %d", ErrStaleFence, req.AdmissionFence.OwnerIncarnation, admEvt.OwnerIncarnation)
+		}
+	}
+	return nil
+}
+
 func (s *Store) recheckFences(ctx context.Context, conn *sql.Conn, req *AppendRequest) (*storedAdmission, bool, error) {
 	var adm storedAdmission
 	err := conn.QueryRowContext(
@@ -84,11 +107,14 @@ func (s *Store) recheckFences(ctx context.Context, conn *sql.Conn, req *AppendRe
 		return nil, false, fmt.Errorf("%w: admission revision got %d, expected %d", ErrStaleRevision, adm.revision, req.ExpectedAdmissionRevision)
 	}
 
-	if err := validateAdmissionFence(req.AdmissionFence, &adm, req.RunID); err != nil {
-		return nil, false, err
+	if fenceErr := s.verifyAdmissionFences(req); fenceErr != nil {
+		return nil, false, fenceErr
 	}
-	if err := validateQueueFence(req.QueueFence, &adm); err != nil {
-		return nil, false, err
+	if fenceErr := validateAdmissionFence(req.AdmissionFence, &adm, req.RunID); fenceErr != nil {
+		return nil, false, fenceErr
+	}
+	if fenceErr := validateQueueFence(req.QueueFence, &adm); fenceErr != nil {
+		return nil, false, fenceErr
 	}
 
 	return &adm, true, nil

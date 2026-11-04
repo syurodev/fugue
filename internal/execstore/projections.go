@@ -209,7 +209,7 @@ func writeTranscriptProjections(
 
 	nextPos := maxPos
 	for _, rawEvt := range req.Events {
-		entry := extractTranscriptEntry(rawEvt)
+		entry := extractTranscriptEntry(ctx, conn, req, rawEvt)
 		if entry == nil {
 			continue
 		}
@@ -240,25 +240,61 @@ type transcriptEntry struct {
 	sequence    uint64
 }
 
-func extractTranscriptEntry(rawEvt kernel.Event) *transcriptEntry {
+func extractAcceptedTranscript(req *AppendRequest, e *kernel.RunAcceptedEvent) *transcriptEntry {
+	if req.QueueFence != nil {
+		return nil
+	}
+	var pID *string
+	disp := ""
+	if e.InputRef != "" {
+		p := e.InputRef
+		pID = &p
+	} else {
+		disp = "accepted"
+	}
+	return &transcriptEntry{
+		role:        "input",
+		callID:      "",
+		sourcePos:   0,
+		payloadID:   pID,
+		disposition: disp,
+		sequence:    e.Envelope.Sequence,
+	}
+}
+
+func extractAdmittedTranscript(ctx context.Context, conn *sql.Conn, req *AppendRequest, e *kernel.RunAdmittedEvent) *transcriptEntry {
+	var pID *string
+	if req.ProtectedInputID != "" {
+		p := req.ProtectedInputID
+		pID = &p
+	} else {
+		var prevPayload sql.NullString
+		scanErr := conn.QueryRowContext(ctx, "SELECT payload_id FROM exec_events WHERE run_id = ? AND event_type = 'RunAccepted'", req.RunID).Scan(&prevPayload)
+		if scanErr == nil && prevPayload.Valid && prevPayload.String != "" {
+			p := prevPayload.String
+			pID = &p
+		}
+	}
+	disp := ""
+	if pID == nil {
+		disp = "admitted"
+	}
+	return &transcriptEntry{
+		role:        "input",
+		callID:      "",
+		sourcePos:   0,
+		payloadID:   pID,
+		disposition: disp,
+		sequence:    e.Envelope.Sequence,
+	}
+}
+
+func extractTranscriptEntry(ctx context.Context, conn *sql.Conn, req *AppendRequest, rawEvt kernel.Event) *transcriptEntry {
 	switch e := rawEvt.(type) {
 	case *kernel.RunAcceptedEvent:
-		var pID *string
-		disp := ""
-		if e.InputRef != "" {
-			p := e.InputRef
-			pID = &p
-		} else {
-			disp = "accepted"
-		}
-		return &transcriptEntry{
-			role:        "input",
-			callID:      "",
-			sourcePos:   0,
-			payloadID:   pID,
-			disposition: disp,
-			sequence:    e.Envelope.Sequence,
-		}
+		return extractAcceptedTranscript(req, e)
+	case *kernel.RunAdmittedEvent:
+		return extractAdmittedTranscript(ctx, conn, req, e)
 	case *kernel.ModelResponseRecordedEvent:
 		var pID *string
 		disp := ""

@@ -69,21 +69,19 @@ func (s *Store) writeProjectionRows(
 			return err
 		}
 	}
+	if len(req.Events) == 0 {
+		return nil
+	}
 	if err := s.checkFault(FaultBeforeRunInsert); err != nil {
 		return err
 	}
 	if err := writeRunProjection(ctx, conn, req, state, newRunRevision); err != nil {
 		return err
 	}
-	if len(req.Events) > 0 {
-		if err := s.checkFault(FaultBeforeEventAppend); err != nil {
-			return err
-		}
-		if err := s.insertEvents(ctx, conn, req); err != nil {
-			return err
-		}
+	if err := s.checkFault(FaultBeforeEventAppend); err != nil {
+		return err
 	}
-	return nil
+	return s.insertEvents(ctx, conn, req)
 }
 
 func (s *Store) writeTrailingRows(
@@ -93,11 +91,13 @@ func (s *Store) writeTrailingRows(
 	state *kernel.State,
 	admission *storedAdmission,
 ) error {
-	if err := s.checkFault(FaultBeforeProjections); err != nil {
-		return err
-	}
-	if err := writeInvocationProjections(ctx, conn, req.RunID, state); err != nil {
-		return err
+	if len(req.Events) > 0 {
+		if err := s.checkFault(FaultBeforeProjections); err != nil {
+			return err
+		}
+		if err := writeInvocationProjections(ctx, conn, req.RunID, state); err != nil {
+			return err
+		}
 	}
 	if err := s.checkFault(FaultBeforeTranscript); err != nil {
 		return err
@@ -255,7 +255,13 @@ func insertReceipt(ctx context.Context, conn *sql.Conn, req *AppendRequest, now 
 	return nil
 }
 
-func (s *Store) lookupReceiptForDedup(ctx context.Context, commandID string) (codec.Receipt, bool, error) {
+type storedReceipt struct {
+	Receipt   codec.Receipt
+	SessionID string
+	RunID     string
+}
+
+func (s *Store) lookupReceiptForDedup(ctx context.Context, commandID string) (storedReceipt, bool, error) {
 	return queryReceipt(ctx, s.db, commandID)
 }
 
@@ -263,30 +269,30 @@ type queryer interface {
 	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
 }
 
-func queryReceipt(ctx context.Context, q queryer, commandID string) (codec.Receipt, bool, error) {
+func queryReceipt(ctx context.Context, q queryer, commandID string) (storedReceipt, bool, error) {
 	var (
-		cmdID, kind, principal, target, codecVer, resultStr, code string
-		inputPayloadID                                            sql.NullString
-		metaInput                                                 []byte
-		firstSeq, lastSeq                                         uint64
+		cmdID, sessID, runID, kind, principal, target, codecVer, resultStr, code string
+		inputPayloadID                                                           sql.NullString
+		metaInput                                                                []byte
+		firstSeq, lastSeq                                                        uint64
 	)
 	err := q.QueryRowContext(
 		ctx,
-		`SELECT command_id, kind, principal, target, codec_version,
+		`SELECT command_id, session_id, run_id, kind, principal, target, codec_version,
 				input_payload_id, metadata_input, result, first_sequence,
 				last_sequence, rejection_code
 		 FROM exec_receipts WHERE command_id = ?`,
 		commandID,
 	).Scan(
-		&cmdID, &kind, &principal, &target, &codecVer,
+		&cmdID, &sessID, &runID, &kind, &principal, &target, &codecVer,
 		&inputPayloadID, &metaInput, &resultStr, &firstSeq,
 		&lastSeq, &code,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		return codec.Receipt{}, false, nil
+		return storedReceipt{}, false, nil
 	}
 	if err != nil {
-		return codec.Receipt{}, false, fmt.Errorf("%w: query receipt: %w", ErrStoreUnavailable, err)
+		return storedReceipt{}, false, fmt.Errorf("%w: query receipt: %w", ErrStoreUnavailable, err)
 	}
 
 	payloadID := ""
@@ -311,5 +317,5 @@ func queryReceipt(ctx context.Context, q queryer, commandID string) (codec.Recei
 			Message:       "",
 		},
 	}
-	return receipt, true, nil
+	return storedReceipt{Receipt: receipt, SessionID: sessID, RunID: runID}, true, nil
 }
