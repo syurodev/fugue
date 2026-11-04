@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -456,20 +457,31 @@ func TestProtectedReceiptEqualityDedupAcrossRestart(t *testing.T) {
 
 func verifyRunLimitOverflow(ctx context.Context, t *testing.T, s *Store, sessionID string) {
 	t.Helper()
-	// Exercise the aggregate guard without allocating 65 MiB for every mutant;
-	// the enclosing test already seals and commits a real maximum-size payload.
-	req := makeAcceptedReq(s, sessionID, "run-lim-2", "cmd-lim-over-run", "", nil, nil, nil)
-	conn, err := s.acquireConfiguredConn(ctx)
+	// Seed only quota metadata for prior payloads, avoiding 63 MiB of encrypted
+	// fixtures per mutant. The new payload is genuinely sealed, and Append must
+	// reject it before any write when the existing run is at its limit.
+	for i := range 63 {
+		id := fmt.Sprintf("quota-seed-%d", i)
+		if _, err := s.db.ExecContext(ctx, "INSERT INTO exec_payloads (payload_id, session_id, kind, key_id, size, envelope) VALUES (?, ?, ?, ?, ?, ?)", id, sessionID, testToolResultKind, SessionKeyDefaultKeyID, MaxPayloadPlaintext, []byte("{}")); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.db.ExecContext(ctx, "INSERT INTO exec_transcript (session_id,context_epoch,position,run_id,role,call_id,source_position,payload_id,disposition,event_sequence) VALUES (?,0,?,'run-lim-1','assistant','',0,?,'recorded',1)", sessionID, i+1, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	plain := []byte("{}")
+	payload, key, err := s.SealPayload(ctx, sessionID, "pl-over-run", "command_input", plain)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		if closeErr := conn.Close(); closeErr != nil {
-			t.Error(closeErr)
-		}
-	}()
-	if err := checkRunTotalLimit(ctx, conn, req, MaxRunPayloadTotal+1, nil); !errors.Is(err, ErrRunPayloadLimitExceeded) {
-		t.Fatalf("expected ErrRunPayloadLimitExceeded, got %v", err)
+	req := makeAcceptedReq(s, sessionID, "run-lim-1", "cmd-lim-over-run", payload.PayloadID, plain, []SealedPayload{payload}, key)
+	req.Kind = cmdRequestStop
+	req.Events = nil
+	req.ExpectedRunRevision = 1
+	req.Result.FirstSequence = 0
+	req.Result.LastSequence = 0
+	if _, err := s.Append(ctx, req); !errors.Is(err, ErrRunPayloadLimitExceeded) {
+		t.Fatalf("expected Append to enforce run quota, got %v", err)
 	}
 }
 
