@@ -54,6 +54,20 @@ const (
 	CommitStatusUnavailable CommitStatus = "unavailable"
 )
 
+const (
+	cmdAcceptRun              = "AcceptRun"
+	cmdAdmitRun               = "AdmitRun"
+	cmdAcquireRunOwnership    = "AcquireRunOwnership"
+	cmdAdvanceRun             = "AdvanceRun"
+	cmdCloseRunWithoutPayload = "CloseRunWithoutPayload"
+	cmdCloseWithoutPayload    = cmdCloseRunWithoutPayload
+	cmdSelectRunContext       = "SelectRunContext"
+	cmdResumeRun              = "ResumeRun"
+	cmdRecoverRun             = "RecoverRun"
+	cmdRequestStop            = "RequestStop"
+	fieldRunRevision          = "RunRevision"
+)
+
 // AdmissionFence binds an append operation to an active admitted run.
 type AdmissionFence struct {
 	Token            uint64

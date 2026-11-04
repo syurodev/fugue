@@ -262,21 +262,39 @@ func extractAcceptedTranscript(req *AppendRequest, e *kernel.RunAcceptedEvent) *
 	}
 }
 
-func extractAdmittedTranscript(ctx context.Context, conn *sql.Conn, req *AppendRequest, e *kernel.RunAdmittedEvent) *transcriptEntry {
-	var pID *string
-	if req.ProtectedInputID != "" {
-		p := req.ProtectedInputID
-		pID = &p
-	} else {
-		var prevPayload sql.NullString
-		scanErr := conn.QueryRowContext(ctx, "SELECT payload_id FROM exec_events WHERE run_id = ? AND event_type = 'RunAccepted'", req.RunID).Scan(&prevPayload)
-		if scanErr == nil && prevPayload.Valid && prevPayload.String != "" {
-			p := prevPayload.String
-			pID = &p
+func resolveAcceptedInputRef(ctx context.Context, conn *sql.Conn, req *AppendRequest) (string, error) {
+	for _, evt := range req.Events {
+		if acc, ok := evt.(*kernel.RunAcceptedEvent); ok {
+			return acc.InputRef, nil
 		}
 	}
+	var data []byte
+	scanErr := conn.QueryRowContext(ctx, "SELECT data FROM exec_events WHERE run_id = ? AND event_type = 'RunAccepted'", req.RunID).Scan(&data)
+	if scanErr != nil {
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			return "", nil
+		}
+		return "", fmt.Errorf("%w: query RunAccepted data: %w", ErrStoreUnavailable, scanErr)
+	}
+	var acc struct {
+		InputRef string `json:"InputRef"`
+	}
+	if err := json.Unmarshal(data, &acc); err != nil {
+		return "", fmt.Errorf("%w: unmarshal RunAccepted data: %w", ErrCorruptHistory, err)
+	}
+	return acc.InputRef, nil
+}
+
+func extractAdmittedTranscript(ctx context.Context, conn *sql.Conn, req *AppendRequest, e *kernel.RunAdmittedEvent) *transcriptEntry {
+	inputRef, err := resolveAcceptedInputRef(ctx, conn, req)
+	if err != nil {
+		return nil
+	}
+	var pID *string
 	disp := ""
-	if pID == nil {
+	if inputRef != "" {
+		pID = &inputRef
+	} else {
 		disp = "admitted"
 	}
 	return &transcriptEntry{

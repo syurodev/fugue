@@ -5,76 +5,30 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
-	"encoding/json"
 	"fmt"
 	"io"
-	"strings"
 	"time"
 
 	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/kernel"
 )
 
-const (
-	fieldRunRevision = "RunRevision"
-	cmdAdmitRun      = "AdmitRun"
-	cmdRequestStop   = "RequestStop"
-)
-
-func isSafeAdmitField(field string) bool {
-	return field == "token" || field == "AdmissionToken" || field == "ContextEpoch"
-}
-
-func isSafeStopField(field string) bool {
-	return field == "stop" || field == "Reason" || field == "Mode"
-}
-
-func isSafeCloseField(field string) bool {
-	switch field {
-	case "RunID", fieldRunRevision, "ExactAttemptIDs", "CauseIDs", "Actor", "UnavailabilityReason":
-		return true
-	default:
-		return false
-	}
-}
-
-func isSafeContextField(field string) bool {
-	switch field {
-	case "OldContextRevision", "NewContextRevision", "Epoch", "StartRunID", "Mode", "Actor", "ValidationEvidence":
-		return true
-	default:
-		return false
-	}
-}
-
-func isSafeMetadataField(kind, field string) bool {
-	switch kind {
-	case "AcceptRun":
-		return field == "InputRef"
-	case cmdAdmitRun:
-		return isSafeAdmitField(field)
-	case "AcquireRunOwnership":
-		return field == "OwnerIncarnation"
-	case "AdvanceRun":
-		return field == "StepIndex"
-	case cmdRequestStop:
-		return isSafeStopField(field)
-	case "CloseRunWithoutPayload":
-		return isSafeCloseField(field)
-	case "SelectRunContext":
-		return isSafeContextField(field)
-	case "ResumeRun", "RecoverRun":
-		return field == fieldRunRevision
-	default:
-		return false
-	}
-}
-
-func isMetadataOnlyPermitted(kind string) bool {
-	switch kind {
-	case "AcceptRun", cmdAdmitRun, "AcquireRunOwnership", "AdvanceRun",
-		cmdRequestStop, "CloseRunWithoutPayload", "SelectRunContext",
-		"ResumeRun", "RecoverRun":
+func isDisallowedQueuedEvent(evt kernel.Event) bool {
+	switch evt.(type) {
+	case *kernel.ModelDispatchStartedEvent,
+		*kernel.ModelRequestPlannedEvent, *kernel.ModelStreamStartedEvent,
+		*kernel.ModelResponseRecordedEvent, *kernel.ModelRequestFailedEvent,
+		*kernel.ModelRequestInterruptedEvent, *kernel.ModelRetryScheduledEvent,
+		*kernel.ModelAttemptPlannedEvent, *kernel.ModelAttemptCancelledEvent,
+		*kernel.ModelAttemptAbandonedEvent, *kernel.ModelInvocationFailedEvent,
+		*kernel.ModelUsageReconciledEvent,
+		*kernel.ToolDispatchStartedEvent,
+		*kernel.ToolResultRecordedEvent, *kernel.ToolCallPlannedEvent,
+		*kernel.ToolApprovalRequestedEvent, *kernel.ToolApprovalResolvedEvent,
+		*kernel.ToolReadyRecordedEvent, *kernel.ToolOutcomeUnknownEvent,
+		*kernel.ToolReconciledEvent, *kernel.ToolAttemptAbandonedEvent,
+		*kernel.ToolAttemptPlannedEvent, *kernel.InvocationQuiesceRequestedEvent,
+		*kernel.RunAdmittedEvent:
 		return true
 	default:
 		return false
@@ -191,7 +145,14 @@ func (s *Store) Append(ctx context.Context, req *AppendRequest) (AppendOutcome, 
 		return AppendOutcome{}, fmt.Errorf("%w: session ID, run ID and command ID are required", ErrInvalidBatch)
 	}
 
-	// 1. Dedup preflight outside transaction
+	// 1. Normalize metadata input upfront so that canonical bytes are stable for dedup preflight.
+	if len(req.MetadataInput) > 0 {
+		if err := validateMetadataInput(req); err != nil {
+			return AppendOutcome{}, err
+		}
+	}
+
+	// 2. Dedup preflight outside transaction
 	existing, found, err := s.lookupReceiptForDedup(ctx, req.CommandID)
 	if err != nil {
 		return AppendOutcome{}, err
@@ -200,19 +161,35 @@ func (s *Store) Append(ctx context.Context, req *AppendRequest) (AppendOutcome, 
 		return s.checkPreflightDedup(ctx, req, &existing)
 	}
 
-	// 2. Validate request
+	// 3. Validate request
 	if reqErr := s.validateRequest(req); reqErr != nil {
 		return AppendOutcome{}, reqErr
 	}
 
-	// 3. Begin transaction on dedicated connection
+	// 4. Begin transaction on dedicated connection
 	return s.appendTx(ctx, req)
 }
 
-func (s *Store) appendTx(ctx context.Context, req *AppendRequest) (AppendOutcome, error) {
+func (s *Store) acquireConfiguredConn(ctx context.Context) (*sql.Conn, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
-		return AppendOutcome{}, fmt.Errorf("%w: acquire connection: %w", ErrStoreUnavailable, err)
+		return nil, fmt.Errorf("%w: acquire connection: %w", ErrStoreUnavailable, err)
+	}
+	if _, err := conn.ExecContext(ctx, "PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;"); err != nil {
+		discardConn(conn)
+		return nil, fmt.Errorf("%w: configure connection pragmas: %w", ErrStoreUnavailable, err)
+	}
+	if err := verifyRecoveredConnection(ctx, conn); err != nil {
+		discardConn(conn)
+		return nil, fmt.Errorf("%w: verify connection pragmas: %w", ErrStoreUnavailable, err)
+	}
+	return conn, nil
+}
+
+func (s *Store) appendTx(ctx context.Context, req *AppendRequest) (AppendOutcome, error) {
+	conn, err := s.acquireConfiguredConn(ctx)
+	if err != nil {
+		return AppendOutcome{}, err
 	}
 	committed := false
 	connClean := false
@@ -242,7 +219,7 @@ func (s *Store) appendTx(ctx context.Context, req *AppendRequest) (AppendOutcome
 		return outcome, err
 	}
 	connClean = true
-	if !outcome.Duplicate {
+	if outcome.Duplicate {
 		committed = true
 	}
 	return outcome, nil
@@ -251,20 +228,6 @@ func (s *Store) appendTx(ctx context.Context, req *AppendRequest) (AppendOutcome
 func validateRequestIdentity(req *AppendRequest) error {
 	if req.Kind == "" || req.Principal == "" || req.Target == "" || req.CodecVersion == "" {
 		return fmt.Errorf("%w: command metadata (kind, principal, target, codec version) is required", ErrInvalidBatch)
-	}
-	return nil
-}
-
-func validateRawMetadataFields(kind string, raw map[string]any) error {
-	for key, val := range raw {
-		if !isSafeMetadataField(kind, key) {
-			return fmt.Errorf("%w: field %q is not permitted in metadata-only command %q", ErrInvalidBatch, key, kind)
-		}
-		if key == "Reason" {
-			if str, isStr := val.(string); isStr && (len(str) > 64 || strings.Contains(str, " ")) {
-				return fmt.Errorf("%w: invalid reason enum %q", ErrInvalidBatch, str)
-			}
-		}
 	}
 	return nil
 }
@@ -278,23 +241,10 @@ func validateMetadataInput(req *AppendRequest) error {
 	} else if !bytes.Equal(req.MetadataInput, req.CanonicalInput) {
 		return fmt.Errorf("%w: CanonicalInput must equal MetadataInput for metadata-only commands", ErrInvalidBatch)
 	}
-	if !isMetadataOnlyPermitted(req.Kind) {
-		return fmt.Errorf("%w: command kind %q is not permitted as metadata-only", ErrInvalidBatch, req.Kind)
-	}
 
-	dec := json.NewDecoder(bytes.NewReader(req.MetadataInput))
-	dec.UseNumber()
-	var raw map[string]any
-	if err := dec.Decode(&raw); err != nil {
-		return fmt.Errorf("%w: metadata input must be valid JSON object: %w", ErrInvalidBatch, err)
-	}
-	if err := validateRawMetadataFields(req.Kind, raw); err != nil {
-		return err
-	}
-
-	canonicalBytes, err := codec.MarshalCanonical(raw)
+	canonicalBytes, err := parseAndValidateMetadata(req.Kind, req.MetadataInput)
 	if err != nil {
-		return fmt.Errorf("%w: marshal canonical metadata: %w", ErrInvalidBatch, err)
+		return err
 	}
 	req.MetadataInput = canonicalBytes
 	req.CanonicalInput = canonicalBytes
@@ -321,6 +271,60 @@ func validateRequestFences(req *AppendRequest) error {
 	return nil
 }
 
+func validateQueuedEvents(events []kernel.Event) error {
+	for _, evt := range events {
+		if evt == nil {
+			return fmt.Errorf("%w: event is nil", ErrInvalidBatch)
+		}
+		if isDisallowedQueuedEvent(evt) {
+			return fmt.Errorf("%w: event %T not permitted under QueueFence", ErrStaleFence, evt)
+		}
+	}
+	return nil
+}
+
+func validateQueuedBatch(req *AppendRequest) error {
+	if req.QueueFence == nil {
+		return nil
+	}
+	for _, evt := range req.Events {
+		if evt == nil {
+			return fmt.Errorf("%w: event is nil", ErrInvalidBatch)
+		}
+	}
+	if req.Kind == cmdAdmitRun {
+		return fmt.Errorf("%w: AdmitRun not permitted under QueueFence", ErrStaleFence)
+	}
+	if req.Kind == cmdAcceptRun {
+		for _, evt := range req.Events {
+			if _, isAccepted := evt.(*kernel.RunAcceptedEvent); !isAccepted {
+				return fmt.Errorf("%w: event %T not permitted in AcceptRun", ErrStaleFence, evt)
+			}
+		}
+	}
+	return validateQueuedEvents(req.Events)
+}
+
+func validateEventEnvelopes(req *AppendRequest) error {
+	for _, evt := range req.Events {
+		if evt == nil {
+			return fmt.Errorf("%w: event is nil", ErrInvalidBatch)
+		}
+		env := evt.EventEnvelope()
+		if env.RunID != req.RunID {
+			return fmt.Errorf("%w: event run ID %q does not match request run ID %q", ErrInvalidBatch, env.RunID, req.RunID)
+		}
+	}
+	return nil
+}
+
+func validateBatchAuthorityAndIdentity(req *AppendRequest) error {
+	if err := validateQueuedBatch(req); err != nil {
+		return err
+	}
+	return validateEventEnvelopes(req)
+}
+
 func (s *Store) validateRequest(req *AppendRequest) error {
 	if err := validateRequestIdentity(req); err != nil {
 		return err
@@ -328,15 +332,8 @@ func (s *Store) validateRequest(req *AppendRequest) error {
 	if err := validateRequestFences(req); err != nil {
 		return err
 	}
-	if req.QueueFence != nil {
-		if req.Kind == cmdAdmitRun {
-			return fmt.Errorf("%w: AdmitRun not permitted under QueueFence", ErrStaleFence)
-		}
-		for _, evt := range req.Events {
-			if _, isAdmit := evt.(*kernel.RunAdmittedEvent); isAdmit {
-				return fmt.Errorf("%w: RunAdmittedEvent not permitted under QueueFence", ErrStaleFence)
-			}
-		}
+	if err := validateBatchAuthorityAndIdentity(req); err != nil {
+		return err
 	}
 	return nil
 }
@@ -408,6 +405,9 @@ func (s *Store) checkTxReceipt(ctx context.Context, conn *sql.Conn, req *AppendR
 	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 	defer cancel()
 	if _, rbErr := conn.ExecContext(cleanupCtx, "ROLLBACK"); rbErr != nil {
+		discardConn(conn)
+	}
+	if closeErr := conn.Close(); closeErr != nil {
 		discardConn(conn)
 	}
 	outcome, dedupErr := s.checkPreflightDedup(ctx, req, &existing)

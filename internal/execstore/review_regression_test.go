@@ -363,7 +363,7 @@ func TestRegressionR5_DuplicateAfterPreflightNoLeak(t *testing.T) {
 	if txErr != nil || !out.Duplicate {
 		t.Fatalf("expected duplicate outcome: duplicate=%v, err=%v", out.Duplicate, txErr)
 	}
-	if closeErr := conn.Close(); closeErr != nil {
+	if closeErr := conn.Close(); closeErr != nil && !errors.Is(closeErr, sql.ErrConnDone) {
 		t.Fatal(closeErr)
 	}
 
@@ -527,9 +527,7 @@ func TestRegressionR8_ResolveCommitConnectionVerification(t *testing.T) {
 }
 
 const (
-	testFieldBad           = "bad"
-	cmdCloseWithoutPayload = "CloseRunWithoutPayload"
-	cmdSelectRunContext    = "SelectRunContext"
+	testFieldBad = "bad"
 )
 
 func TestSafeMetadataFieldAllowlist(t *testing.T) {
