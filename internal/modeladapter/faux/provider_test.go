@@ -123,6 +123,30 @@ func TestCancellationStopsStreamAndClosesIt(t *testing.T) {
 	}
 }
 
+func TestScriptFailureIsOwned(t *testing.T) {
+	t.Parallel()
+	failure := &modeladapter.Failure{Class: modeladapter.ErrorAuth, Code: "initial"}
+	provider := New(Script{Events: []modeladapter.Event{{Kind: modeladapter.EventError, Failure: failure}}})
+	failure.Class = modeladapter.ErrorQuota
+	got := receive(t, provider.Stream(t.Context(), nil))
+	if got[0].Failure.Class != modeladapter.ErrorAuth {
+		t.Fatal("mutating constructor input changed the provider's retained script")
+	}
+}
+
+func TestReceivedFailureDoesNotChangeNextCall(t *testing.T) {
+	t.Parallel()
+	failure := &modeladapter.Failure{Class: modeladapter.ErrorAuth, Code: "initial"}
+	script := Script{Events: []modeladapter.Event{{Kind: modeladapter.EventError, Failure: failure}}}
+	provider := New(script, script)
+	got := receive(t, provider.Stream(t.Context(), nil))
+	got[0].Failure.Class = modeladapter.ErrorQuota
+	next := receive(t, provider.Stream(t.Context(), nil))
+	if next[0].Failure.Class != modeladapter.ErrorAuth {
+		t.Fatal("mutating a received failure changed the next call's scripted output")
+	}
+}
+
 func receive(t *testing.T, stream <-chan modeladapter.Event) []modeladapter.Event {
 	t.Helper()
 	var events []modeladapter.Event

@@ -47,7 +47,7 @@ type Provider struct {
 func New(scripts ...Script) *Provider {
 	copyOfScripts := make([]Script, len(scripts))
 	for i, script := range scripts {
-		copyOfScripts[i] = Script{Events: slices.Clone(script.Events), CutAfter: script.CutAfter, Cut: script.Cut}
+		copyOfScripts[i] = Script{Events: cloneEvents(script.Events), CutAfter: script.CutAfter, Cut: script.Cut}
 	}
 	return &Provider{scripts: copyOfScripts}
 }
@@ -85,6 +85,7 @@ func (p *Provider) play(ctx context.Context, result chan<- modeladapter.Event, s
 			return
 		}
 		event := script.Events[i]
+		event.Failure = cloneFailure(event.Failure)
 		select {
 		case result <- event:
 		case <-ctx.Done():
@@ -96,6 +97,22 @@ func (p *Provider) play(ctx context.Context, result chan<- modeladapter.Event, s
 		}
 	}
 	p.cut.Add(1)
+}
+
+func cloneEvents(events []modeladapter.Event) []modeladapter.Event {
+	cloned := slices.Clone(events)
+	for i := range cloned {
+		cloned[i].Failure = cloneFailure(cloned[i].Failure)
+	}
+	return cloned
+}
+
+func cloneFailure(failure *modeladapter.Failure) *modeladapter.Failure {
+	if failure == nil {
+		return nil
+	}
+	cloned := *failure
+	return &cloned
 }
 
 func (p *Provider) finish(kind modeladapter.EventKind) bool {
