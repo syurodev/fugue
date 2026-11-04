@@ -31,14 +31,60 @@ type WaitReason string
 const (
 	WaitReasonApproval          WaitReason = "approval"
 	WaitReasonUserInput         WaitReason = "user_input"
-	WaitReasonDependency        WaitReason = "dependency"
 	WaitReasonRetryTimer        WaitReason = "retry_timer"
 	WaitReasonWorkerCapacity    WaitReason = "worker_capacity"
 	WaitReasonVaultLocked       WaitReason = "vault_locked"
 	WaitReasonHostPaused        WaitReason = "host_paused"
 	WaitReasonRecoveryAdmission WaitReason = "recovery_admission"
-	WaitReasonStepBudget        WaitReason = "step_budget"
+	WaitReasonBudget            WaitReason = "budget"
+	WaitReasonQuotaRefresh      WaitReason = "quota_refresh"
 )
+
+// BudgetKind names the run budget a WaitReasonBudget block is waiting on.
+type BudgetKind string
+
+// BudgetKind values. A block of any other wait reason carries no budget kind.
+const (
+	BudgetKindSteps     BudgetKind = "steps"
+	BudgetKindTokens    BudgetKind = "tokens"
+	BudgetKindTime      BudgetKind = "time"
+	BudgetKindToolCalls BudgetKind = "tool_calls"
+)
+
+func (k BudgetKind) valid() bool {
+	switch k {
+	case BudgetKindSteps, BudgetKindTokens, BudgetKindTime, BudgetKindToolCalls:
+		return true
+	}
+	return false
+}
+
+// RequestKind is the kind of owner interaction a tool attempt is waiting on.
+// A question (ask_user, plan) waits for user input; confirm and select wait for approval.
+type RequestKind string
+
+// RequestKind values.
+const (
+	RequestKindConfirm  RequestKind = "confirm"
+	RequestKindSelect   RequestKind = "select"
+	RequestKindQuestion RequestKind = "question"
+)
+
+func (k RequestKind) valid() bool {
+	switch k {
+	case RequestKindConfirm, RequestKindSelect, RequestKindQuestion:
+		return true
+	}
+	return false
+}
+
+// waitReason is the wait dependency a pending request of this kind creates.
+func (k RequestKind) waitReason() WaitReason {
+	if k == RequestKindQuestion {
+		return WaitReasonUserInput
+	}
+	return WaitReasonApproval
+}
 
 // StopMode indicates whether a stop intent terminates or suspends execution.
 type StopMode string

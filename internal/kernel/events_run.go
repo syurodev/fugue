@@ -103,6 +103,7 @@ type RunBlockAddedEvent struct {
 	Envelope        Envelope
 	BlockerID       string
 	Kind            WaitReason
+	BudgetKind      BudgetKind
 	Reference       string
 	ResumeCondition string
 }

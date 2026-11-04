@@ -132,7 +132,7 @@ func testEvolveToolChecks(t *testing.T, s *State, env *Envelope, now time.Time) 
 	}
 
 	s = Evolve(s, &ToolApprovalRequestedEvent{
-		Envelope: *env, ToolCallID: testToolCallID, CheckGeneration: 1, OwnerRequestRef: "req",
+		Envelope: *env, ToolCallID: testToolCallID, CheckGeneration: 1, OwnerRequestRef: "req", RequestKind: RequestKindConfirm,
 		RequestRevision: 1, ExactArgsRef: "args", ApproverRoute: "user", Expiry: now.Add(time.Hour),
 	})
 	if s.ToolInvocations[testToolCallID].Attempts[testToolAtt1].Status != ToolAttemptStatusAwaitingApproval {

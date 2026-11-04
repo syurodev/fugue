@@ -1,5 +1,7 @@
 package kernel
 
+import "slices"
+
 func modelStructureValid(s *State) bool {
 	for _, inv := range s.ModelInvocations {
 		if inv == nil {
@@ -28,18 +30,46 @@ func toolStructureValid(s *State) bool {
 	return true
 }
 
-func approvalBlocksMatch(s *State) bool {
+// blocksValid rejects a block whose wait reason is unknown (a retired reason
+// such as "dependency" included) or whose budget kind is missing or misplaced.
+func blocksValid(s *State) bool {
+	for _, b := range s.Blocks {
+		if b == nil || !slices.Contains(canonicalWaitOrder(), b.Kind) {
+			return false
+		}
+		if b.Kind == WaitReasonBudget && !b.BudgetKind.valid() {
+			return false
+		}
+		if b.Kind != WaitReasonBudget && b.BudgetKind != "" {
+			return false
+		}
+	}
+	return true
+}
+
+// interactionBlocksMatch requires every approval or user_input block to reference
+// exactly one pending request of the matching kind, and no request twice.
+func interactionBlocksMatch(s *State) bool {
 	seen := make(map[string]bool)
 	for _, b := range s.Blocks {
-		if b == nil || b.Kind != WaitReasonApproval {
+		if b == nil || (b.Kind != WaitReasonApproval && b.Kind != WaitReasonUserInput) {
 			continue
 		}
-		if b.Reference == "" || seen[b.Reference] || !approvalReferenceExists(s, b.Reference) {
+		if b.Reference == "" || seen[b.Reference] || !interactionRequestExists(s, b.Reference, b.Kind) {
 			return false
 		}
 		seen[b.Reference] = true
 	}
 	return true
+}
+
+func interactionRequestExists(s *State, ref string, reason WaitReason) bool {
+	for _, t := range s.ToolInvocations {
+		if t != nil && t.Approval.OwnerRequestRef == ref && t.Approval.RequestKind.waitReason() == reason {
+			return true
+		}
+	}
+	return false
 }
 
 func approvalReferenceExists(s *State, ref string) bool {

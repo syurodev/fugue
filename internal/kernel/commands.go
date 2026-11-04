@@ -220,6 +220,7 @@ type ObserveDependencyCommand struct {
 	Origin          string
 	BlockerID       string
 	Kind            WaitReason
+	BudgetKind      BudgetKind
 	Reference       string
 	ResumeCondition string
 	Resolved        bool

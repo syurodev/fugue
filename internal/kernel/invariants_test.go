@@ -43,11 +43,15 @@ func snapshotViolations() []invariantCase {
 		{SM02, 7, func(s *State) {
 			s.ToolInvocations["t1"].Attempts[decToolAttempt].Status = ToolAttemptStatusAwaitingApproval
 		}},
+		{SM02, 2, func(s *State) {
+			s.Blocks["b1"] = &Block{BlockerID: "b1", Kind: WaitReasonApproval, Reference: "no-such-request", ResumeCondition: "c"}
+		}},
 		{SM03, 7, func(s *State) {
 			q := new(ToolApprovalRequestedEvent)
 			q.ToolCallID = "t1"
 			q.CheckGeneration = 1
 			q.OwnerRequestRef = "request"
+			q.RequestKind = RequestKindConfirm
 			q.RequestRevision = 1
 			q.ExactArgsRef = "approval-args"
 			s.ToolInvocations["t1"].Approval = *q

@@ -31,12 +31,12 @@ func CheckInvariants(s *State) []InvariantID {
 	failed := make(map[InvariantID]bool)
 	active := activeAttemptCount(s)
 	failed[SM01] = active > 1
-	failed[SM02] = !approvalsMatch(s) || !approvalBlocksMatch(s)
+	failed[SM02] = !approvalsMatch(s) || !interactionBlocksMatch(s)
 	failed[SM03] = approvalWaitWrong(s, active)
 	failed[SM04] = frontierPhaseWrong(s)
 	failed[SM05] = s.Finished && !finishSafe(s)
 	failed[SM06] = unknownLifecycleWrong(s)
-	failed[SM09] = !admissionFactsValid(s) || !modelStructureValid(s) || !toolStructureValid(s)
+	failed[SM09] = !admissionFactsValid(s) || !modelStructureValid(s) || !toolStructureValid(s) || !blocksValid(s)
 	failed[SM11] = !unknownExposureRetained(s)
 	failed[SM12] = !s.Admitted && (active > 0 || len(s.ModelInvocations) > 0 || len(s.ToolInvocations) > 0)
 	return invariantIDs(failed)
@@ -105,8 +105,9 @@ func approvalWaitWrong(s *State, active int) bool {
 		return false
 	}
 	for _, tool := range s.ToolInvocations {
-		if tool != nil && tool.Approval.ToolCallID != "" {
-			return DeriveLifecycle(s) != LifecycleWaiting || !slices.Contains(DeriveWaitReasons(s), WaitReasonApproval)
+		if tool != nil && tool.Approval.ToolCallID != "" &&
+			(DeriveLifecycle(s) != LifecycleWaiting || !slices.Contains(DeriveWaitReasons(s), tool.Approval.RequestKind.waitReason())) {
+			return true
 		}
 	}
 	return false
@@ -204,7 +205,7 @@ func approvalMatches(id string, tool *ToolInvocation, waiting int) bool {
 		return true
 	}
 	if waiting != 1 || q.ToolCallID != id || q.CheckGeneration != tool.CheckGeneration ||
-		q.OwnerRequestRef == "" || q.RequestRevision == 0 || q.ExactArgsRef == "" {
+		q.OwnerRequestRef == "" || !q.RequestKind.valid() || q.RequestRevision == 0 || q.ExactArgsRef == "" {
 		return false
 	}
 	return true

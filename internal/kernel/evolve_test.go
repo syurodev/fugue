@@ -72,7 +72,7 @@ func testEvolveRunLifecycleEvents(t *testing.T, env *Envelope, now time.Time) *S
 func testEvolveRunBlocksAndRecovery(t *testing.T, s *State, env *Envelope) *State {
 	t.Helper()
 	s = Evolve(s, &RunBlockAddedEvent{
-		Envelope: *env, BlockerID: evBlockID, Kind: WaitReasonVaultLocked, Reference: "vault", ResumeCondition: "unlocked",
+		Envelope: *env, BlockerID: evBlockID, Kind: WaitReasonVaultLocked, BudgetKind: "", Reference: "vault", ResumeCondition: "unlocked",
 	})
 	if len(s.Blocks) != 1 {
 		t.Fatalf("RunBlockAdded failed")
@@ -295,7 +295,7 @@ func TestEvolveQuiesceLifecycle(t *testing.T) {
 	}
 
 	s = Evolve(s, &RunBlockAddedEvent{
-		Envelope: env, BlockerID: "b-vault", Kind: WaitReasonVaultLocked,
+		Envelope: env, BlockerID: "b-vault", Kind: WaitReasonVaultLocked, BudgetKind: "",
 		Reference: "ref-v", ResumeCondition: "unlock",
 	})
 	if got := DeriveLifecycle(s); got != LifecycleWaiting {

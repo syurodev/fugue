@@ -46,6 +46,7 @@ func evolveRunControlEvents(s *State, e Event) bool {
 		s.Blocks[ev.BlockerID] = &Block{
 			BlockerID:       ev.BlockerID,
 			Kind:            ev.Kind,
+			BudgetKind:      ev.BudgetKind,
 			Reference:       ev.Reference,
 			ResumeCondition: ev.ResumeCondition,
 		}
