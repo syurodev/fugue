@@ -460,15 +460,31 @@ func verifyRunLimitOverflow(ctx context.Context, t *testing.T, s *Store, session
 	// Seed only quota metadata for prior payloads, avoiding 63 MiB of encrypted
 	// fixtures per mutant. The new payload is genuinely sealed, and Append must
 	// reject it before any write when the existing run is at its limit.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seeded := false
+	defer func() {
+		if !seeded {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				t.Error(rollbackErr)
+			}
+		}
+	}()
 	for i := range 63 {
 		id := fmt.Sprintf("quota-seed-%d", i)
-		if _, err := s.db.ExecContext(ctx, "INSERT INTO exec_payloads (payload_id, session_id, kind, key_id, size, envelope) VALUES (?, ?, ?, ?, ?, ?)", id, sessionID, testToolResultKind, SessionKeyDefaultKeyID, MaxPayloadPlaintext, []byte("{}")); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO exec_payloads (payload_id, session_id, kind, key_id, size, envelope) VALUES (?, ?, ?, ?, ?, ?)", id, sessionID, testToolResultKind, SessionKeyDefaultKeyID, MaxPayloadPlaintext, []byte("{}")); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := s.db.ExecContext(ctx, "INSERT INTO exec_transcript (session_id,context_epoch,position,run_id,role,call_id,source_position,payload_id,disposition,event_sequence) VALUES (?,0,?,'run-lim-1','assistant','',0,?,'recorded',1)", sessionID, i+1, id); err != nil {
+		if _, err = tx.ExecContext(ctx, "INSERT INTO exec_transcript (session_id,context_epoch,position,run_id,role,call_id,source_position,payload_id,disposition,event_sequence) VALUES (?,0,?,'run-lim-1','assistant','',0,?,'recorded',1)", sessionID, i+1, id); err != nil {
 			t.Fatal(err)
 		}
 	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	seeded = true
 	plain := []byte("{}")
 	payload, key, err := s.SealPayload(ctx, sessionID, "pl-over-run", "command_input", plain)
 	if err != nil {
