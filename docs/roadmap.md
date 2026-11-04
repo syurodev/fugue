@@ -60,7 +60,7 @@ blocking ID) · `Needs decision` · `Awaiting design`.
 | F3 | Recovery, retry, timers, budgets and fault injection | Traces B and C; every row of the validation criteria has a test |
 | F4 | Context engine and the OpenAI adapter with Sign in with ChatGPT | Evidence tables of the context engine and model adapter §11 |
 | F5 | Host API (`fugue serve`) and input coordination | Evidence tables of the Host API and input coordination |
-| F6 | Tools and interaction | Evidence of `interaction §11`, `sandbox-runtime §12`, `shell-job §8`, `content-safety §7`, `file-tools §11`; ask-user, plan and todo tools await design H-20 |
+| F6 | Tools and interaction | Evidence of `interaction §11`, `sandbox-runtime §12`, `shell-job §8`, `content-safety §7`, `file-tools §11`, `ask-plan §7`, `tasks §12` |
 | F7 | CLI/TUI client | Awaiting design H-45 |
 | F8 | Stage A release | Evidence of `activation §5` |
 
@@ -165,7 +165,8 @@ Applies to all code copied from `syurodev/dev-kit`.
 | F6.2 | Turn and tool snapshots wired into the harness | `tool-system §9` | F6.1, F1.7 | Restore touches only the tool's diff | Not started | | |
 | F6.3 | Interaction policy and owner changes: `Decide` with approval modes and hard rules, `grantScope` grants, `question` kind, deny note, `exec_session_policy`, gate observations | `interaction §1–7, §9` | F6.1, F1.5, F2.4 | `interaction §11` except the Host API rows | Not started | | Changes the F1.5 contract (`interaction §4.2`), including `TestNilResponderAndHeadlessFailClosed`. May split into a policy PR and an owner PR. Env tag registry waits for the first tool with a tagged target (*Stage B*) |
 | F6.4 | Sandbox runtime: `fugue jail-init` supervisor, host–supervisor channel, stop proof, lazy start and idle stop, `exec_jail_processes` and reaper, filtered env snapshot, Docker endpoint in `full-access` | `sandbox-runtime` | F6.1, F1.6, F6.3, F2.4 | `sandbox-runtime §12` | Not started | | Linux daemon spike becomes evidence. Egress allowlist, Docker proxy and Keychain are *Stage B* (`sandbox-runtime §13`) |
-| F6.5 | Ask-user, plan and todo tools | H-20 | F6.1–F6.4 | — | Awaiting design | | |
+| F6.5 | `ask_user` (1–4 questions with options) and `plan` (every mode, Plan mode exit through the user's answer, approved plan in `exec_session_policy`); `question` kind with `Questions[]` and `Answers[]`; `fugue answer` path for every interaction kind | `ask-plan` | F6.1, F6.3 | `ask-plan §7` | Not started | | Changes the F6.3 `question` contract (`ask-plan §4`) |
+| F6.9 | Tasks and checklists: `internal/tasks` store sealed with vault records, `todo` steps, `tasks.*` tools, claim, verify gate in a one-off jail, context re-attach after compaction | `tasks` | F6.1, F6.3, F6.4, F6.7 | `tasks §12` | Not started | | `fugue tasks` commands land with F7.1. Multiple boards, custom workflows and sync are *Stage B* |
 | F6.6 | `shell`, `shell.output` and `job.*` tools: per-command risk, grant scope for a single command, cwd, compact and full output with built-in filters, timeout to job, daemons | `shell-job` | F6.3, F6.4, F6.7 | `shell-job §8` | Not started | | |
 | F6.7 | Content safety: `internal/secrets` detection (known values, token patterns, key-name assignments), session placeholder table in `exec_secret_tables`, reverse substitution limited to origin files, envelope with nonce, R0 paragraph, compaction summary and unverified memory in envelopes | `content-safety` | F6.1, F2.5 | `content-safety §7` | Not started | | Context engine wiring of the R0 paragraph and envelopes lands with the context engine items |
 | F6.8 | File tools `read`, `grep`, `glob`, `edit`, `write`: read and write scope from the sandbox profile, multi-file `edit` batches applied all or nothing, multi-tier matching, seen versions, syntax check after write, content-loss guard, atomic writes, `fugue bench edit` with a shell-bypass rate | `file-tools` | F6.2, F6.3, F6.7 | `file-tools §11` | Not started | | Code reading (H-19) is *Stage B*. The edit format is kept or changed from `fugue bench edit` results |
@@ -174,7 +175,7 @@ Applies to all code copied from `syurodev/dev-kit`.
 
 | ID | Item | Design | Depends on | Evidence | Status | PR | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| F7.1 | CLI/TUI client `fugue`: sessions, interaction answers, vault, ChatGPT login, jobs, snapshots, every failure UX row | H-45 | F5.3 | — | Awaiting design | | The only client of stage A (activation A-06) |
+| F7.1 | CLI/TUI client `fugue`: sessions, interaction answers, vault, ChatGPT login, jobs, snapshots, `fugue tasks`, every failure UX row | H-45 | F5.3 | — | Awaiting design | | The only client of stage A (activation A-06) |
 | F7.2 | Electron shell and desktop session UI | H-44, H-33 | F5.1 | — | Awaiting design | | *Stage B*; may be a separate repository |
 
 ### F8 — Stage A release
@@ -304,5 +305,6 @@ together only in `app`.
 | 2026-11-03 | F2.3 | Integrated main roadmap decisions; aligned UTF-8 traversal with JSON container depth and selected fields; removed the embedding-depth cap with cycle-safe field discovery; added public round-trip and rejection evidence. Local task check passes (codec coverage 92.7%, mutation 88.2%). PR #38 remains In review | Agent |
 | 2026-11-03 | F2.3, F2.4 | Marked F2.3 Done after PR #38 merged; drafted the F2.4 implementation/evidence plan and recorded Q-13 as the only confirmed phasing conflict. F2.4 Needs decision; no design/ADR/gate changes applied | Agent |
 | 2026-11-03 | Q-13, F2.4, F2.5 | User selected A. Aligned the three support-table phases in ADR 0001 and the execution-store plan; F2.4 returns to Not started. Cryptographic lifecycle and purge behavior remain F2.5; no implementation or migration added | Agent |
+| 2026-11-04 | F6.5, F6.9, F7.1 | H-20 and H-46 settled in `ask-plan` and `tasks`: F6.5 gets its design, tasks and checklists become F6.9, and F7.1 adds `fugue tasks` | Designer |
 | 2026-11-04 | F2.4 | `internal/execstore` and migration `0003_execution_store.sql`: execution-store schema, append-only triggers, single-transaction atomic batch commit across events, payloads, projections, receipts and admission fences, crash rollback before commit, uncertain commit read-back, receipt deduplication, and deterministic event replay. PR #42 opened for review; execstore coverage 90.8%, mutation 89.9%; all PR gates green | Agent |
 | 2026-11-04 | F2.4 | Resolved review findings R1–R8: incremental state folding across transactions, context cancellation transaction rollback with clean connection pool verification, queue fence admission boundary enforcement, metadata-only plaintext allowlist, immediate rollback on found receipt to prevent lock leaks, canonical transcript input materialization on RunAdmitted, strict session binding on protected equality deduplication, and full read-back pragma/autocommit recovery verification. Added regression tests TestRegressionR1–TestRegressionR8; PR #42 remains In review | Agent |
