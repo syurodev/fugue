@@ -310,4 +310,4 @@ together only in `app`.
 | 2026-11-04 | F2.7 | Opened [PR #44](https://github.com/syurodev/fugue/pull/44) from `feat/f2.7-faux-provider`; awaiting CI and review, not marked Done | Agent |
 | 2026-11-04 | F2.7 | Addressed PR #44 review finding by cloning `Failure` pointers on script retention and event emission; added ownership regression tests; local `task check` passes | Agent |
 | 2026-11-04 | F2.7 | PR #44 merged as `cd599c7`; all required checks passed on head `6660db3`; marked Done | Agent |
-| 2026-11-04 | F2.8 | Opened [PR #46](https://github.com/syurodev/fugue/pull/46) from `feat/f2.8-fake-read-tool`; local `task check` passes; awaiting CI and review, not marked Done | Agent |
+| 2026-11-04 | F2.8 | Opened [PR #46](https://github.com/syurodev/fugue/pull/46) from `feat/f2.8-fake-read-tool`; local `task check` passes and all PR checks pass on `bad96df`; awaiting review, not marked Done | Agent |
