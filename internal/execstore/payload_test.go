@@ -54,14 +54,22 @@ func newVaultAndStore(t *testing.T) (*Store, *vault.Service, string, redact.Secr
 	}
 
 	vStore := vault.NewSQLKeyringStore(db)
+	var kr crypto.Keyring
+	if unmarshalErr := json.Unmarshal([]byte(cheapKeyringJSON), &kr); unmarshalErr != nil {
+		t.Fatal(unmarshalErr)
+	}
+	if saveErr := vStore.Save(ctx, &kr); saveErr != nil {
+		t.Fatal(saveErr)
+	}
+
 	vService, err := vault.NewService(ctx, vStore, ids.NewSequence("vault-inc-"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	masterPass := redact.NewSecret("test-master-password-123")
-	if _, setupErr := vService.Setup(ctx, masterPass); setupErr != nil {
-		t.Fatal(setupErr)
+	masterPass := redact.NewSecret("master-pw")
+	if unlockErr := vService.Unlock(ctx, masterPass); unlockErr != nil {
+		t.Fatal(unlockErr)
 	}
 
 	idGen := ids.NewSequence("test-payload-id-")

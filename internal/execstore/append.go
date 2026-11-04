@@ -65,14 +65,16 @@ func loadCommittedRunState(ctx context.Context, conn *sql.Conn, runID string, cu
 		 ORDER BY sequence ASC`,
 		runID, currentSeq,
 	)
+	if rows != nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				return
+			}
+		}()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: query committed events: %w", ErrStoreUnavailable, err)
 	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			return
-		}
-	}()
 
 	var expectedSeq uint64 = 1
 	for rows.Next() {
@@ -152,6 +154,9 @@ func (s *Store) Append(ctx context.Context, req *AppendRequest) (AppendOutcome, 
 func (s *Store) acquireConfiguredConn(ctx context.Context) (*sql.Conn, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
+		if conn != nil {
+			discardConn(conn)
+		}
 		return nil, fmt.Errorf("%w: acquire connection: %w", ErrStoreUnavailable, err)
 	}
 	if _, err := conn.ExecContext(ctx, "PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;"); err != nil {

@@ -83,14 +83,16 @@ func (s *Store) ReadEvents(ctx context.Context, runID string, fromSequence, toSe
 		 ORDER BY sequence ASC`,
 		runID, fromSequence, toSequence,
 	)
+	if rows != nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				return
+			}
+		}()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: query exec_events: %w", ErrStoreUnavailable, err)
 	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			return
-		}
-	}()
 
 	var events []kernel.Event
 	expectedSeq := fromSequence
