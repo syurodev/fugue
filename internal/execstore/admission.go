@@ -79,6 +79,9 @@ func (s *Store) verifyAdmissionFences(req *AppendRequest) error {
 }
 
 func (s *Store) recheckFences(ctx context.Context, conn *sql.Conn, req *AppendRequest) (*storedAdmission, bool, error) {
+	if fenceErr := s.verifyAdmissionFences(req); fenceErr != nil {
+		return nil, false, fenceErr
+	}
 	var adm storedAdmission
 	err := conn.QueryRowContext(
 		ctx,
@@ -97,6 +100,12 @@ func (s *Store) recheckFences(ctx context.Context, conn *sql.Conn, req *AppendRe
 		if req.ExpectedAdmissionRevision != 1 {
 			return nil, false, fmt.Errorf("%w: admission row does not exist, expected revision %d", ErrStaleRevision, req.ExpectedAdmissionRevision)
 		}
+		if fenceErr := validateAdmissionFence(req.AdmissionFence, &adm, req.RunID); fenceErr != nil {
+			return nil, false, fenceErr
+		}
+		if fenceErr := validateQueueFence(req.QueueFence, &adm); fenceErr != nil {
+			return nil, false, fenceErr
+		}
 		return nil, false, nil
 	}
 	if err != nil {
@@ -107,9 +116,6 @@ func (s *Store) recheckFences(ctx context.Context, conn *sql.Conn, req *AppendRe
 		return nil, false, fmt.Errorf("%w: admission revision got %d, expected %d", ErrStaleRevision, adm.revision, req.ExpectedAdmissionRevision)
 	}
 
-	if fenceErr := s.verifyAdmissionFences(req); fenceErr != nil {
-		return nil, false, fenceErr
-	}
 	if fenceErr := validateAdmissionFence(req.AdmissionFence, &adm, req.RunID); fenceErr != nil {
 		return nil, false, fenceErr
 	}

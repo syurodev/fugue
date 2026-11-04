@@ -13,28 +13,6 @@ import (
 	"github.com/syurodev/fugue/internal/kernel"
 )
 
-func isDisallowedQueuedEvent(evt kernel.Event) bool {
-	switch evt.(type) {
-	case *kernel.ModelDispatchStartedEvent,
-		*kernel.ModelRequestPlannedEvent, *kernel.ModelStreamStartedEvent,
-		*kernel.ModelResponseRecordedEvent, *kernel.ModelRequestFailedEvent,
-		*kernel.ModelRequestInterruptedEvent, *kernel.ModelRetryScheduledEvent,
-		*kernel.ModelAttemptPlannedEvent, *kernel.ModelAttemptCancelledEvent,
-		*kernel.ModelAttemptAbandonedEvent, *kernel.ModelInvocationFailedEvent,
-		*kernel.ModelUsageReconciledEvent,
-		*kernel.ToolDispatchStartedEvent,
-		*kernel.ToolResultRecordedEvent, *kernel.ToolCallPlannedEvent,
-		*kernel.ToolApprovalRequestedEvent, *kernel.ToolApprovalResolvedEvent,
-		*kernel.ToolReadyRecordedEvent, *kernel.ToolOutcomeUnknownEvent,
-		*kernel.ToolReconciledEvent, *kernel.ToolAttemptAbandonedEvent,
-		*kernel.ToolAttemptPlannedEvent, *kernel.InvocationQuiesceRequestedEvent,
-		*kernel.RunAdmittedEvent:
-		return true
-	default:
-		return false
-	}
-}
-
 func discardConn(conn *sql.Conn) {
 	if rawErr := conn.Raw(func(driverConn any) error {
 		if closer, ok := driverConn.(io.Closer); ok {
@@ -271,40 +249,6 @@ func validateRequestFences(req *AppendRequest) error {
 	return nil
 }
 
-func validateQueuedEvents(events []kernel.Event) error {
-	for _, evt := range events {
-		if evt == nil {
-			return fmt.Errorf("%w: event is nil", ErrInvalidBatch)
-		}
-		if isDisallowedQueuedEvent(evt) {
-			return fmt.Errorf("%w: event %T not permitted under QueueFence", ErrStaleFence, evt)
-		}
-	}
-	return nil
-}
-
-func validateQueuedBatch(req *AppendRequest) error {
-	if req.QueueFence == nil {
-		return nil
-	}
-	for _, evt := range req.Events {
-		if evt == nil {
-			return fmt.Errorf("%w: event is nil", ErrInvalidBatch)
-		}
-	}
-	if req.Kind == cmdAdmitRun {
-		return fmt.Errorf("%w: AdmitRun not permitted under QueueFence", ErrStaleFence)
-	}
-	if req.Kind == cmdAcceptRun {
-		for _, evt := range req.Events {
-			if _, isAccepted := evt.(*kernel.RunAcceptedEvent); !isAccepted {
-				return fmt.Errorf("%w: event %T not permitted in AcceptRun", ErrStaleFence, evt)
-			}
-		}
-	}
-	return validateQueuedEvents(req.Events)
-}
-
 func validateEventEnvelopes(req *AppendRequest) error {
 	for _, evt := range req.Events {
 		if evt == nil {
@@ -418,6 +362,9 @@ func (s *Store) prepareBatchState(ctx context.Context, conn *sql.Conn, req *Appe
 	state, err := loadCommittedRunState(ctx, conn, req.RunID, currentSeq)
 	if err != nil {
 		return nil, err
+	}
+	if req.QueueFence != nil && state.Admitted {
+		return nil, fmt.Errorf("%w: admitted run requires admission authority", ErrStaleFence)
 	}
 	if len(req.Events) > 0 {
 		return foldNewBatchEvents(currentSeq, req.Events, state)

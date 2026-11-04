@@ -240,28 +240,6 @@ type transcriptEntry struct {
 	sequence    uint64
 }
 
-func extractAcceptedTranscript(req *AppendRequest, e *kernel.RunAcceptedEvent) *transcriptEntry {
-	if req.QueueFence != nil {
-		return nil
-	}
-	var pID *string
-	disp := ""
-	if e.InputRef != "" {
-		p := e.InputRef
-		pID = &p
-	} else {
-		disp = "accepted"
-	}
-	return &transcriptEntry{
-		role:        "input",
-		callID:      "",
-		sourcePos:   0,
-		payloadID:   pID,
-		disposition: disp,
-		sequence:    e.Envelope.Sequence,
-	}
-}
-
 func resolveAcceptedInputRef(ctx context.Context, conn *sql.Conn, req *AppendRequest) (string, error) {
 	for _, evt := range req.Events {
 		if acc, ok := evt.(*kernel.RunAcceptedEvent); ok {
@@ -309,8 +287,6 @@ func extractAdmittedTranscript(ctx context.Context, conn *sql.Conn, req *AppendR
 
 func extractTranscriptEntry(ctx context.Context, conn *sql.Conn, req *AppendRequest, rawEvt kernel.Event) *transcriptEntry {
 	switch e := rawEvt.(type) {
-	case *kernel.RunAcceptedEvent:
-		return extractAcceptedTranscript(req, e)
 	case *kernel.RunAdmittedEvent:
 		return extractAdmittedTranscript(ctx, conn, req, e)
 	case *kernel.ModelResponseRecordedEvent:

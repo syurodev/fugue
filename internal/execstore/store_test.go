@@ -149,7 +149,7 @@ func TestTargetedMutantKillersMetadata(t *testing.T) {
 
 func initTestRun(ctx context.Context, t *testing.T, s *Store, runID, sessID string, now time.Time) {
 	t.Helper()
-	env := makeEnvelope(runID, 1, "cmd-"+runID, 1, now)
+	env := makeEnvelope(runID, 1, "cmd-"+runID, 0, now)
 	evt := makeRunAccepted(env, sessID, "")
 	req := &AppendRequest{
 		CommandID:                 "cmd-" + runID,

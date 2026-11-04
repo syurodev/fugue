@@ -140,9 +140,9 @@ func TestAppendRunRevisionMismatch(t *testing.T) {
 		t.Fatalf("append run 1 failed: %v", err)
 	}
 
-	evtRun2 := makeStepStarted(makeEnvelope(testBranchRunRev, 2, "c-rev-2", 0, now), 1)
+	evtRun2 := makeRunFinished(makeEnvelope(testBranchRunRev, 2, "c-rev-2", 0, now), kernel.RunOutcomeCancelled)
 	_, errMismatch := s.Append(ctx, &AppendRequest{
-		SessionID: "sess-rev", RunID: testBranchRunRev, CommandID: "c-rev-2", Kind: testKindAdvanceRun, Principal: "p", Target: "t",
+		SessionID: "sess-rev", RunID: testBranchRunRev, CommandID: "c-rev-2", Kind: cmdRequestStop, Principal: "p", Target: "t",
 		CodecVersion: codec.CodecV1, MetadataInput: []byte("{}"), CanonicalInput: []byte("{}"),
 		QueueFence: &QueueFence{QueueRevision: 1}, ExpectedAdmissionRevision: 2, ExpectedRunRevision: 99,
 		Events: []kernel.Event{evtRun2}, Result: codec.ReceiptResult{FirstSequence: 2, LastSequence: 2, RejectionCode: "", Message: ""},
@@ -451,9 +451,9 @@ func TestAdmissionCASFailurePath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create trigger failed: %v", err)
 	}
-	evt2 := makeStepStarted(makeEnvelope(testBranchRunCAS, 2, "c-cas-2", 0, now), 2)
+	evt2 := makeRunFinished(makeEnvelope(testBranchRunCAS, 2, "c-cas-2", 0, now), kernel.RunOutcomeCancelled)
 	_, errCAS := s.Append(ctx, &AppendRequest{
-		SessionID: "sess-cas", RunID: testBranchRunCAS, CommandID: "c-cas-2", Kind: testKindAdvanceRun, Principal: "p", Target: "t",
+		SessionID: "sess-cas", RunID: testBranchRunCAS, CommandID: "c-cas-2", Kind: cmdRequestStop, Principal: "p", Target: "t",
 		CodecVersion: codec.CodecV1, MetadataInput: []byte("{}"), CanonicalInput: []byte("{}"),
 		QueueFence: &QueueFence{QueueRevision: 1}, ExpectedAdmissionRevision: 2, ExpectedRunRevision: 1,
 		Events: []kernel.Event{evt2}, Result: codec.ReceiptResult{FirstSequence: 2, LastSequence: 2, RejectionCode: "", Message: ""},

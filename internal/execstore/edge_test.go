@@ -406,7 +406,7 @@ func TestTranscriptAndFailedProjections(t *testing.T) {
 	env1 := makeEnvelope("run-proj-fail", 1, "cmd-pf-1", 1, now)
 	accepted := makeRunAccepted(env1, "sess-proj-fail", "p-input-1")
 
-	// Append run accepted with InputRef non-empty
+	// Materialize accepted input on admission, before recording model/tool results.
 	p, k := sealedTestPayload(t, "p-input-1", []byte("user-prompt-1"))
 	req1 := &AppendRequest{
 		SessionID:                 "sess-proj-fail",
@@ -423,8 +423,8 @@ func TestTranscriptAndFailedProjections(t *testing.T) {
 		QueueFence:                nil,
 		ExpectedRunRevision:       0,
 		ExpectedAdmissionRevision: 1,
-		Events:                    []kernel.Event{accepted},
-		Result:                    codec.ReceiptResult{FirstSequence: 1, LastSequence: 1, RejectionCode: "", Message: ""},
+		Events:                    []kernel.Event{accepted, makeRunAdmitted(makeEnvelope("run-proj-fail", 2, "cmd-pf-1", 1, now), 1)},
+		Result:                    codec.ReceiptResult{FirstSequence: 1, LastSequence: 2, RejectionCode: "", Message: ""},
 		SealedPayloads:            []SealedPayload{p},
 		SealedSessionKey:          &k,
 		CorrelationID:             "",
@@ -443,11 +443,11 @@ func testFailedInvocationsAndTranscriptEntries(ctx context.Context, t *testing.T
 	pTool, _ := sealedTestPayload(t, "p-tool-1", []byte("tool result"))
 
 	// Model response event with ResponseRef
-	env2 := makeEnvelope("run-proj-fail", 2, "cmd-pf-2", 1, now)
+	env2 := makeEnvelope("run-proj-fail", 3, "cmd-pf-2", 1, now)
 	modelResp := makeModelResponseRecorded(env2, "model-inv-1", "attempt-1", "p-resp-1")
 
 	// Tool result event with ResultRef
-	env3 := makeEnvelope("run-proj-fail", 3, "cmd-pf-2", 1, now)
+	env3 := makeEnvelope("run-proj-fail", 4, "cmd-pf-2", 1, now)
 	toolRes := makeToolResultRecorded(env3, "call-1", "attempt-1", kernel.ToolResultOutcome("failed"))
 	toolRes.ResultRef = "p-tool-1"
 	toolRes.SourcePosition = 1
@@ -468,7 +468,7 @@ func testFailedInvocationsAndTranscriptEntries(ctx context.Context, t *testing.T
 		ExpectedRunRevision:       1,
 		ExpectedAdmissionRevision: 1,
 		Events:                    []kernel.Event{modelResp, toolRes},
-		Result:                    codec.ReceiptResult{FirstSequence: 2, LastSequence: 3, RejectionCode: "", Message: ""},
+		Result:                    codec.ReceiptResult{FirstSequence: 3, LastSequence: 4, RejectionCode: "", Message: ""},
 		SealedPayloads:            []SealedPayload{pResp, pTool},
 		SealedSessionKey:          nil,
 		CorrelationID:             "",

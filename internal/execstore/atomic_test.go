@@ -178,7 +178,7 @@ func TestCommitLostAcknowledgementCommitted(t *testing.T) {
 	s, _, _ := newTestStore(ctx, t, equality)
 
 	payload, key := sealedTestPayload(t, "pay-rb", canonicalInput)
-	evt := makeRunAccepted(makeEnvelope("run-rb", 1, cmdRBLostAck, 1, now), "sess-rb", "pay-rb")
+	evt := makeRunAccepted(makeEnvelope("run-rb", 1, cmdRBLostAck, 0, now), "sess-rb", "pay-rb")
 
 	req := &AppendRequest{
 		SessionID:                 "sess-rb",
