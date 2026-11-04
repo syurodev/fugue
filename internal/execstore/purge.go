@@ -118,38 +118,56 @@ func (s *Store) PurgeSession(ctx context.Context, sessionID string) error {
 		return err
 	}
 
-	s.keyCache.purge(sessionID)
+	s.keyCache.beginPurge(sessionID)
+	permanent := false
+	defer func() { s.keyCache.endPurge(sessionID, permanent) }()
 
 	conn, err := s.acquireConfiguredConn(ctx)
-	if conn != nil {
-		defer func() {
-			if closeErr := conn.Close(); closeErr != nil {
-				return
-			}
-		}()
-	}
 	if err != nil {
 		return err
 	}
-
+	committed := false
+	writesStarted := false
+	connClean := false
+	defer func() {
+		if !committed {
+			var rolledBack bool
+			rolledBack, connClean = rollbackPurge(ctx, conn)
+			permanent = writesStarted && !rolledBack
+		}
+		if !connClean {
+			discardConn(conn)
+		} else if err := conn.Close(); err != nil {
+			return
+		}
+	}()
 	if err := s.beginPurgeTx(ctx, conn); err != nil {
 		return err
 	}
-	committed := false
-	defer func() {
-		if !committed {
-			if _, rollbackErr := conn.ExecContext(context.WithoutCancel(ctx), "ROLLBACK;"); rollbackErr != nil {
-				return
-			}
-		}
-	}()
-
+	writesStarted = true
 	if err := s.executePurgeOperations(ctx, conn, sessionID); err != nil {
 		return err
 	}
 	if _, err := conn.ExecContext(ctx, "COMMIT;"); err != nil {
+		permanent = true
 		return fmt.Errorf("%w: commit purge transaction: %w", ErrStoreUnavailable, err)
 	}
 	committed = true
+	connClean = true
+	permanent = true
 	return nil
+}
+
+// A verified rollback proves the purge did not commit even if a subsequent
+// cleanliness probe fails. An unavailable rollback keeps access fail-closed.
+func rollbackPurge(ctx context.Context, conn *sql.Conn) (bool, bool) {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer cancel()
+	if _, err := conn.ExecContext(cleanupCtx, "ROLLBACK"); err != nil {
+		return false, false
+	}
+	if _, err := conn.ExecContext(cleanupCtx, "BEGIN IMMEDIATE; ROLLBACK;"); err != nil {
+		return true, false
+	}
+	return true, true
 }

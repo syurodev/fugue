@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"io"
 	"time"
@@ -195,7 +196,11 @@ func (s *Store) appendTx(ctx context.Context, req *AppendRequest) (AppendOutcome
 	}
 
 	outcome, err := s.executeAppendTx(ctx, conn, req)
+	if errors.Is(err, ErrSessionKeyConflict) {
+		s.keyCache.rejectCandidate(req.SessionID, req.SealedSessionKey)
+	}
 	if outcome.Committed {
+		s.keyCache.committed(req.SessionID, req.SealedSessionKey)
 		committed = true
 		connClean = true
 	}
@@ -418,6 +423,10 @@ func (s *Store) executeAppendTx(ctx context.Context, conn *sql.Conn, req *Append
 	if err := s.checkVaultUnlockedForProtected(req); err != nil {
 		return AppendOutcome{}, err
 	}
+	var epoch vault.Snapshot
+	if s.vault != nil {
+		epoch = s.vault.Snapshot()
+	}
 	if outcome, found, err := s.checkTxReceipt(ctx, conn, req); found || err != nil {
 		return outcome, err
 	}
@@ -434,11 +443,29 @@ func (s *Store) executeAppendTx(ctx context.Context, conn *sql.Conn, req *Append
 	if err := s.checkFault(FaultBeforeCommit); err != nil {
 		return AppendOutcome{}, err
 	}
-	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-		return AppendOutcome{}, fmt.Errorf("%w: commit transaction: %w", ErrStoreUnavailable, err)
+	if err := s.commitProtectedBatch(ctx, conn, req, epoch); err != nil {
+		return AppendOutcome{}, err
 	}
 	if err := s.checkFault(FaultAfterCommit); err != nil {
 		return AppendOutcome{Committed: true}, err
 	}
 	return AppendOutcome{Committed: true, Receipt: buildReceipt(req)}, nil
+}
+
+// The vault read lease covers only COMMIT, not row preparation or crypto. Lock
+// waits for an authorized commit, and a revoked epoch rolls back instead.
+func (s *Store) commitProtectedBatch(ctx context.Context, conn *sql.Conn, req *AppendRequest, epoch vault.Snapshot) error {
+	commit := func() error {
+		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+			return fmt.Errorf("%w: commit transaction: %w", ErrStoreUnavailable, err)
+		}
+		return nil
+	}
+	if s.vault == nil || (len(req.SealedPayloads) == 0 && req.SealedSessionKey == nil && req.ProtectedInputID == "") {
+		return commit()
+	}
+	if err := s.vault.WithUnlocked(epoch, commit); err != nil {
+		return fmt.Errorf("protected commit authorization: %w", err)
+	}
+	return nil
 }

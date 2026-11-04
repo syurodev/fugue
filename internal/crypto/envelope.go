@@ -64,3 +64,12 @@ func (e *Envelope) Validate() error {
 	}
 	return nil
 }
+
+// PlaintextSize returns the length encoded by a valid AEAD envelope without
+// decrypting it. It does not authenticate the ciphertext's contents.
+func (e *Envelope) PlaintextSize() (int, error) {
+	if err := e.Validate(); err != nil {
+		return 0, err
+	}
+	return len(e.Ciphertext) - chacha20poly1305.Overhead, nil
+}

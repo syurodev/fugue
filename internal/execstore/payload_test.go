@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -187,12 +186,12 @@ func TestSessionKeyReusedAcrossMultiplePayloads(t *testing.T) {
 	}
 
 	p2, k2, err := s.SealPayload(ctx, sessionID, "pl-2", testToolResultKind, []byte("result 2"))
-	if err != nil || k2 != nil {
+	if err != nil || !samePreparedKey(k1, k2) {
 		t.Fatalf("second payload failed: err=%v, k2=%v", err, k2)
 	}
 
 	p3, k3, err := s.SealPayload(ctx, sessionID, "pl-3", testToolResultKind, []byte("result 3"))
-	if err != nil || k3 != nil {
+	if err != nil || !samePreparedKey(k1, k3) {
 		t.Fatalf("third payload failed: err=%v, k3=%v", err, k3)
 	}
 
@@ -457,21 +456,19 @@ func TestProtectedReceiptEqualityDedupAcrossRestart(t *testing.T) {
 
 func verifyRunLimitOverflow(ctx context.Context, t *testing.T, s *Store, sessionID string) {
 	t.Helper()
-	batchOverRun := make([]SealedPayload, 65)
-	for i := range 65 {
-		batchOverRun[i] = SealedPayload{
-			PayloadID: fmt.Sprintf("pl-over-%d", i),
-			Kind:      testToolResultKind,
-			KeyID:     SessionKeyDefaultKeyID,
-			Size:      MaxPayloadPlaintext,
-			Envelope:  []byte(`{"version":2,"algorithm":"xchacha20-poly1305","key_id":"v1","nonce":"aaaaaaaaaaaaaaaaaaaaaaaa","ciphertext":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}`),
-		}
+	// Exercise the aggregate guard without allocating 65 MiB for every mutant;
+	// the enclosing test already seals and commits a real maximum-size payload.
+	req := makeAcceptedReq(s, sessionID, "run-lim-2", "cmd-lim-over-run", "", nil, nil, nil)
+	conn, err := s.acquireConfiguredConn(ctx)
+	if err != nil {
+		t.Fatal(err)
 	}
-
-	overRunReq := makeAcceptedReq(s, sessionID, "run-lim-2", "cmd-lim-over-run", "pl-over-0", nil, batchOverRun, nil)
-	overRunReq.ExpectedAdmissionRevision = 2
-
-	if _, err := s.Append(ctx, overRunReq); !errors.Is(err, ErrRunPayloadLimitExceeded) {
+	defer func() {
+		if closeErr := conn.Close(); closeErr != nil {
+			t.Error(closeErr)
+		}
+	}()
+	if err := checkRunTotalLimit(ctx, conn, req, MaxRunPayloadTotal+1, nil); !errors.Is(err, ErrRunPayloadLimitExceeded) {
 		t.Fatalf("expected ErrRunPayloadLimitExceeded, got %v", err)
 	}
 }
@@ -487,12 +484,9 @@ func verifySessionLimitOverflow(ctx context.Context, t *testing.T, s *Store, ses
 		t.Fatalf("seed session max payload: %v", seedErr)
 	}
 
-	pSmall := SealedPayload{
-		PayloadID: "pl-small",
-		Kind:      testToolResultKind,
-		KeyID:     SessionKeyDefaultKeyID,
-		Size:      1,
-		Envelope:  []byte(`{"version":2,"algorithm":"xchacha20-poly1305","key_id":"v1","nonce":"aaaaaaaaaaaaaaaaaaaaaaaa","ciphertext":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}`),
+	pSmall, _, sealErr := s.SealPayload(ctx, sessionID, "pl-small", testToolResultKind, []byte("x"))
+	if sealErr != nil {
+		t.Fatal(sealErr)
 	}
 	overSessReq := makeAcceptedReq(s, sessionID, "run-lim-3", "cmd-lim-over-sess", "pl-small", nil, []SealedPayload{pSmall}, nil)
 	overSessReq.ExpectedAdmissionRevision = 2
@@ -761,4 +755,8 @@ func TestOpenPayloadCorruptedEnvelope(t *testing.T) {
 	if _, openErr := s.OpenPayload(ctx, badSessionID, "pl-bad-key"); !errors.Is(openErr, ErrStoreUnavailable) {
 		t.Fatalf("expected ErrStoreUnavailable for corrupted wrapped key, got %v", openErr)
 	}
+}
+
+func samePreparedKey(a, b *SealedSessionKey) bool {
+	return a != nil && b != nil && a.KeyID == b.KeyID && bytes.Equal(a.WrappedKey, b.WrappedKey)
 }

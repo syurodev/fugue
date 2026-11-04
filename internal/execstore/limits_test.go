@@ -88,8 +88,8 @@ func TestValidateBatchPayloadsLimits(t *testing.T) {
 	}
 
 	// Duplicate payload ID in batch is deduplicated
-	dup1 := SealedPayload{PayloadID: "pl-dup", Size: 10}
-	dup2 := SealedPayload{PayloadID: "pl-dup", Size: 10}
+	dup1, _ := sealedTestPayload(t, "pl-dup", []byte("0123456789"))
+	dup2 := dup1
 	total, seen, err := validateBatchPayloads([]SealedPayload{dup1, dup2})
 	if err != nil || total != 10 || len(seen) != 1 {
 		t.Fatalf("expected total 10 and 1 seen, got total %d, seen %d (err: %v)", total, len(seen), err)

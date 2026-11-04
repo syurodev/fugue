@@ -3,10 +3,12 @@ package execstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 
+	"github.com/syurodev/fugue/internal/crypto"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
@@ -28,6 +30,19 @@ func validateBatchPayloads(payloads []SealedPayload) (int64, map[string]struct{}
 	for _, p := range payloads {
 		if p.Size < 0 || p.Size > MaxPayloadPlaintext {
 			return 0, nil, ErrPayloadTooLarge
+		}
+		// Bound JSON decoding as well as plaintext accounting. Canonical base64
+		// envelopes fit comfortably below twice their maximum ciphertext size.
+		if len(p.Envelope) > 2*crypto.MaxCiphertextBytes {
+			return 0, nil, ErrInvalidBatch
+		}
+		var envelope crypto.Envelope
+		if err := json.Unmarshal(p.Envelope, &envelope); err != nil {
+			return 0, nil, ErrInvalidBatch
+		}
+		size, err := envelope.PlaintextSize()
+		if err != nil || int64(size) != p.Size || envelope.KeyID != p.KeyID {
+			return 0, nil, ErrInvalidBatch
 		}
 		if _, ok := seen[p.PayloadID]; ok {
 			continue
