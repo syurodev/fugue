@@ -4,7 +4,7 @@ The living work board of the repository. It answers: what to do, in what order, 
 design, what counts as done, and where each item stands. This page **does not** change the
 design.
 
-Last updated: 2026-11-04 (F2.7 PR #44 merged; F2.8 implementation in progress).
+Last updated: 2026-11-04 (F2.7 PR #44 merged; F2.8 PR #46 opened for review).
 
 ## 0. Context
 
@@ -121,7 +121,7 @@ Applies to all code copied from `syurodev/dev-kit`.
 | F2.5 | Protected payloads: session key wrapped with `SealRecord`, AEAD, size limits, crypto-shred | `storage-security §4, §7` | F1.2, F2.4 | Crypto-shred; 1 MiB, 64 MiB and 1 GiB limits | Not started | | Q-13 A: physical support schema lands in F2.4; crypto/key/vault/purge lifecycle, limits and G-03 security evidence remain here |
 | F2.6 | Per-session coordinator: admission row, minimal queue, worker reservation, commit before handoff, read-back on unknown commit, durable timers | `event-storage-recovery §2–3, §7`, `architecture §3, §6` | F2.4 | An unknown commit never dispatches twice; a stale worker is fenced | Not started | | |
 | F2.7 | Faux model provider: text, thinking, tool calls, every error class, cut streams | `model-adapter §2–3, §9` | F2.1 | `TestErrorClassRetryClassification`, `TestScriptEmitsOrderedContentAndTerminalEvidence`, `TestScriptsRepeatInDeclaredOrderAndClassifyFailures`, `TestCutPointsCloseWithoutInventingTerminalOutcome`, `TestCancellationStopsStreamAndClosesIt`, `TestScriptFailureIsOwned`, `TestReceivedFailureDoesNotChangeNextCall` | Done | [#44](https://github.com/syurodev/fugue/pull/44) | Merged at `cd599c7`; PR head `6660db3` CI green |
-| F2.8 | Fake read tool (`pure_read`) on the `Prepare`/`Execute` contract | `tool-system §2` | F2.1 | `TestPureReadPrepareExecuteFollowsKernelLifecycle`, `TestInvalidArgsNeverReachExecute`, `TestInputOutputAndReceiptMutationsDoNotChangePinnedRead`, `TestExecuteRevalidatesPlanAndDataRevision`, `TestPrepareAndExecuteHonorCancellation`, `TestMissingKeyIsAValidEmptyRead` | In progress | | Deterministic fixture-backed Prepare/Execute; no generic registry or external effects |
+| F2.8 | Fake read tool (`pure_read`) on the `Prepare`/`Execute` contract | `tool-system §2` | F2.1 | `TestPureReadPrepareExecuteFollowsKernelLifecycle`, `TestInvalidArgsNeverReachExecute`, `TestInputOutputAndReceiptMutationsDoNotChangePinnedRead`, `TestExecuteRevalidatesPlanAndDataRevision`, `TestPrepareAndExecuteHonorCancellation`, `TestMissingKeyIsAValidEmptyRead` | In review | [#46](https://github.com/syurodev/fugue/pull/46) | Deterministic fixture-backed Prepare/Execute; no generic registry or external effects |
 | F2.9 | After-step rules, `maxSteps` with `Waiting(step_budget)` and `BudgetExtended`, one automatic continuation on `length`, loop reminders | `continuation §2–4` | F2.1, F2.3 | Evidence in continuation §8 (except goal) | Not started | | Loop reminders need F4.5 |
 | F2.10 | **End-to-end slice**: start, model, tool, model, finish (trace A); durable; replay without side effects | `event-catalog §7` | F2.2–F2.9 | Trace A has exactly 22 events; replay makes 0 model and tool calls | Not started | | Main F2 milestone |
 
@@ -310,3 +310,4 @@ together only in `app`.
 | 2026-11-04 | F2.7 | Opened [PR #44](https://github.com/syurodev/fugue/pull/44) from `feat/f2.7-faux-provider`; awaiting CI and review, not marked Done | Agent |
 | 2026-11-04 | F2.7 | Addressed PR #44 review finding by cloning `Failure` pointers on script retention and event emission; added ownership regression tests; local `task check` passes | Agent |
 | 2026-11-04 | F2.7 | PR #44 merged as `cd599c7`; all required checks passed on head `6660db3`; marked Done | Agent |
+| 2026-11-04 | F2.8 | Opened [PR #46](https://github.com/syurodev/fugue/pull/46) from `feat/f2.8-fake-read-tool`; local `task check` passes; awaiting CI and review, not marked Done | Agent |
