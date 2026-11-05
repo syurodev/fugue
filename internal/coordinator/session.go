@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/kernel"
@@ -64,8 +65,17 @@ type Session struct {
 	mailbox        chan submission
 	cancel         context.CancelFunc
 	task           *supervise.Task
+	workerTasks    []*supervise.Task
 	stopped        chan struct{}
 	stopOnce       sync.Once
+
+	parked       []submission
+	halted       bool
+	attemptSlots map[attemptKey]string
+
+	onPark       func()
+	onResolve    func(time.Time)
+	onTimerArmed func()
 }
 
 // Start loads the admission row, validates ownership, and starts the actor goroutine.
@@ -97,8 +107,31 @@ func Start(ctx context.Context, cfg Config) (*Session, error) {
 		mailbox:        make(chan submission),
 		cancel:         cancel,
 		task:           nil,
+		workerTasks:    make([]*supervise.Task, 0, cfg.WorkerCapacity),
 		stopped:        make(chan struct{}),
 		stopOnce:       sync.Once{},
+		parked:         nil,
+		halted:         false,
+		attemptSlots:   make(map[attemptKey]string),
+		onPark:         nil,
+		onResolve:      nil,
+	}
+
+	for i := 0; i < cfg.WorkerCapacity; i++ {
+		workerTask := supervise.Go(actorCtx, "coordinator.worker", func(wCtx context.Context) error {
+			for {
+				select {
+				case <-wCtx.Done():
+					return nil
+				case w, ok := <-s.slots.handoffCh:
+					if !ok {
+						return nil
+					}
+					s.cfg.Executor.Execute(wCtx, w, s.report)
+				}
+			}
+		})
+		s.workerTasks = append(s.workerTasks, workerTask)
 	}
 
 	s.task = supervise.Go(actorCtx, "coordinator.session", s.loop)
@@ -150,7 +183,31 @@ func (s *Session) Stop() {
 			s.task.Stop()
 			_ = s.task.Wait()
 		}
+		for _, wt := range s.workerTasks {
+			wt.Stop()
+			_ = wt.Wait()
+		}
 	})
+}
+
+func (s *Session) report(obs Observation) {
+	req := Request{
+		Command:        obs.Command,
+		Facts:          obs.Facts,
+		Kind:           "",
+		Principal:      "worker",
+		Target:         obs.Lease.RunID,
+		MetadataInput:  obs.MetadataInput,
+		ProtectedInput: obs.ProtectedInput,
+	}
+	sub := submission{
+		req:     req,
+		replyCh: make(chan submitReply, 1),
+	}
+	select {
+	case s.mailbox <- sub:
+	case <-s.stopped:
+	}
 }
 
 func (s *Session) loop(ctx context.Context) error {
@@ -192,6 +249,12 @@ func (s *Session) handleSubmission(ctx context.Context, sub submission) {
 		s.runRevs[runID] = rev
 	}
 	s.mu.Unlock()
+
+	// Check if this is a dispatch request
+	if prep, ok := sub.req.Command.(*kernel.PrepareDispatchCommand); ok && isDispatch(state, sub.req.Command) {
+		s.handleDispatch(ctx, sub, prep)
+		return
+	}
 
 	var err error
 	if cmdID == "" {
