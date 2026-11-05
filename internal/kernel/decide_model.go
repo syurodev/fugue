@@ -139,7 +139,7 @@ func (d *decision) responseEvents(e *ModelResponseRecordedEvent) []Event {
 	usage.Envelope = d.envelope()
 	events := []Event{e, &usage}
 	if len(d.facts.ToolPlans) == 0 {
-		dec := AfterStep(d.stepOutcome(e.FinishReason, 0))
+		dec := AfterStep(d.stepOutcome(e.FinishReason, nil))
 		return append(events, d.closeStep(&dec, e.ResponseRef, nil)...)
 	}
 	for _, p := range d.facts.ToolPlans {
@@ -160,16 +160,23 @@ func (d *decision) responseEvents(e *ModelResponseRecordedEvent) []Event {
 			Code: string(ContinuationReasonTruncatedArgs), EffectEvidence: effectEvidenceNotDispatched, SourcePosition: i,
 		})
 	}
-	dec := AfterStep(d.stepOutcome(e.FinishReason, len(d.facts.ToolPlans)))
+	dec := AfterStep(d.stepOutcome(e.FinishReason, d.facts.ToolPlans))
 	return append(events, d.closeStep(&dec, e.ResponseRef, slices.Clone(d.facts.SyntheticResultRefs))...)
 }
 
 // effectEvidenceNotDispatched marks a result that was recorded without any attempt to run the tool.
 const effectEvidenceNotDispatched = "not_dispatched"
 
+// validResponseUsage accepts only a token observation of the attempt that
+// answered. Usage comes from the provider, which is untrusted remote data, so the
+// count is bounded (maxResponseTokens) as well as non-negative.
+func validResponseUsage(u *BudgetObservedEvent, attempt string) bool {
+	return u != nil && u.AttemptID == attempt && u.WindowID == "" && u.DurationUsed == 0 && u.Basis != "" &&
+		u.TokensUsed >= 0 && u.TokensUsed <= maxResponseTokens
+}
+
 func (d *decision) validateResponseFacts(attempt string, finish FinishReason) error {
-	u := d.facts.Usage
-	if u == nil || u.AttemptID != attempt || u.WindowID != "" || u.TokensUsed < 0 || u.DurationUsed != 0 || u.Basis == "" {
+	if !validResponseUsage(d.facts.Usage, attempt) {
 		return Reject(RejectionCodeCommandRejected, "invalid usage observation")
 	}
 	if err := d.validateFinish(finish); err != nil {

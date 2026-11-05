@@ -27,10 +27,11 @@ func extendCommand(kind BudgetKind, actor string, amount int64) *ExtendBudgetCom
 	}
 }
 
-func endCommand(target string) *RequestStopCommand {
+// endCommand ends the run's wait on a budget; the target names the budget kind.
+func endCommand(kind BudgetKind) *RequestStopCommand {
 	return &RequestStopCommand{
 		CommandID: "", RunID: "", Origin: "", Token: 7, Reason: StopReasonBudget, Mode: StopModeTerminal,
-		Actor: testUserActor, Target: target, RequestTime: time.Date(2026, 11, 5, 1, 0, 0, 0, time.UTC),
+		Actor: testUserActor, Target: string(kind), RequestTime: time.Date(2026, 11, 5, 1, 0, 0, 0, time.UTC),
 	}
 }
 
@@ -249,14 +250,14 @@ func assertExtendedRunKeepsCounting(t *testing.T, r *runDriver, run string) {
 func TestEndWhileWaitingFinishesBudgetExceeded(t *testing.T) {
 	t.Parallel()
 	r, _ := stepBudgetWait(t, 1)
-	events := r.must(endCommand(blockSteps), nil)
+	events := r.must(endCommand(BudgetKindSteps), nil)
 	want := kinds(new(RunStopRequestedEvent), new(RunBlockClearedEvent), new(RunFinishedEvent))
 	if diff := cmp.Diff(want, eventNames(events)); diff != "" {
 		t.Fatal(diff)
 	}
 	stop, _ := findEvent[*RunStopRequestedEvent](events)
 	finished, _ := findEvent[*RunFinishedEvent](events)
-	if stop.Reason != StopReasonBudget || stop.Mode != StopModeTerminal || stop.Actor != testUserActor || stop.Target != blockSteps {
+	if stop.Reason != StopReasonBudget || stop.Mode != StopModeTerminal || stop.Actor != testUserActor || stop.Target != string(BudgetKindSteps) {
 		t.Fatalf("stop request: %+v", stop)
 	}
 	if finished.Outcome != RunOutcomeBudgetExceeded || finished.PrimaryStopRef != "run#"+strconv.FormatUint(stop.Envelope.Sequence, 10) {
@@ -275,8 +276,10 @@ func TestEndWithoutBudgetWaitIsRejected(t *testing.T) {
 		"suspend":       func(c *RequestStopCommand) { c.Mode = StopModeSuspend },
 		"peer":          func(c *RequestStopCommand) { c.Actor = actorPeer },
 		"model":         func(c *RequestStopCommand) { c.Actor = actorModel },
-		"other block":   func(c *RequestStopCommand) { c.Target = blockTokens },
-		"no block":      func(c *RequestStopCommand) { c.Target = "" },
+		"other kind":    func(c *RequestStopCommand) { c.Target = string(BudgetKindTokens) },
+		"unknown kind":  func(c *RequestStopCommand) { c.Target = "cost" },
+		"blocker id":    func(c *RequestStopCommand) { c.Target = blockSteps },
+		"no target":     func(c *RequestStopCommand) { c.Target = "" },
 		"no time":       func(c *RequestStopCommand) { c.RequestTime = time.Time{} },
 		"foreign token": func(c *RequestStopCommand) { c.Token = 8 },
 	}
@@ -285,7 +288,7 @@ func TestEndWithoutBudgetWaitIsRejected(t *testing.T) {
 			t.Parallel()
 			r, _ := stepBudgetWait(t, 1)
 			before := cloneState(r.s)
-			c := endCommand(blockSteps)
+			c := endCommand(BudgetKindSteps)
 			mutate(c)
 			events, err := r.try(c, nil)
 			assertRejected(t, r, events, err, &before)
@@ -295,7 +298,7 @@ func TestEndWithoutBudgetWaitIsRejected(t *testing.T) {
 		t.Parallel()
 		r := newRunDriver(t, DefaultRunBudgets())
 		before := cloneState(r.s)
-		events, err := r.try(endCommand(blockSteps), nil)
+		events, err := r.try(endCommand(BudgetKindSteps), nil)
 		assertRejected(t, r, events, err, &before)
 		var rejection Rejection
 		if !errors.As(err, &rejection) || rejection.Code != RejectionCodeInvalidTransition {
@@ -307,15 +310,15 @@ func TestEndWithoutBudgetWaitIsRejected(t *testing.T) {
 		r, _ := stepBudgetWait(t, 1)
 		r.s.QuiescingAttempts["attempt"] = true
 		before := cloneState(r.s)
-		events, err := r.try(endCommand(blockSteps), nil)
+		events, err := r.try(endCommand(BudgetKindSteps), nil)
 		assertRejected(t, r, events, err, &before)
 	})
 	t.Run("already finished", func(t *testing.T) {
 		t.Parallel()
 		r, _ := stepBudgetWait(t, 1)
-		r.must(endCommand(blockSteps), nil)
+		r.must(endCommand(BudgetKindSteps), nil)
 		before := cloneState(r.s)
-		events, err := r.try(endCommand(blockSteps), nil)
+		events, err := r.try(endCommand(BudgetKindSteps), nil)
 		assertRejected(t, r, events, err, &before)
 	})
 }
@@ -330,15 +333,57 @@ func TestEndDuringToolCallWaitIsRejected(t *testing.T) {
 	r.toolStep(1, 1)
 	assertWaitingOn(t, r.s, blockToolCalls, BudgetKindToolCalls)
 	before := cloneState(r.s)
-	events, err := r.try(endCommand(blockToolCalls), nil)
+	events, err := r.try(endCommand(BudgetKindToolCalls), nil)
 	assertRejected(t, r, events, err, &before)
 	r.must(extendCommand(BudgetKindToolCalls, testUserActor, 1), nil)
+}
+
+func TestBudgetAuthorityNeedsUserOrigin(t *testing.T) {
+	t.Parallel()
+	commands := map[string]func() Command{
+		"extend": func() Command { return extendCommand(BudgetKindSteps, testUserActor, 50) },
+		"end":    func() Command { return endCommand(BudgetKindSteps) },
+	}
+	for name, command := range commands {
+		for _, origin := range []string{actorModel, "worker", "parent_session", drvOriginSession, drvOriginTimer, "recovery", "system", actorPeer} {
+			t.Run(name+"/"+origin, func(t *testing.T) {
+				t.Parallel()
+				r, _ := stepBudgetWait(t, 1)
+				// Control: the same command from the user's origin is accepted, so the
+				// rejection below can only come from the origin.
+				control := decisionCase{command: command(), facts: driverFacts(), names: nil}
+				bindDecision(&control, r.s, "user-control")
+				if events, err := Decide(r.s, control.command, &control.facts); err != nil || len(events) == 0 {
+					t.Fatalf("control command rejected: %v", err)
+				}
+				// The actor claims to be the user, but the host-set origin says otherwise.
+				c := decisionCase{command: command(), facts: driverFacts(), names: nil}
+				bindDecision(&c, r.s, "forged-user")
+				c.facts.Envelope.Origin = origin
+				switch cmd := c.command.(type) {
+				case *ExtendBudgetCommand:
+					cmd.Origin = origin
+				case *RequestStopCommand:
+					cmd.Origin = origin
+				}
+				assertDecisionRejected(t, r.s, &c)
+			})
+		}
+	}
+}
+
+func TestStopRefFormat(t *testing.T) {
+	t.Parallel()
+	// The stop ref is the run ID and the sequence of the RunStopRequested event.
+	if got := stopRef("run-1", 42); got != "run-1#42" {
+		t.Fatalf("stopRef = %q", got)
+	}
 }
 
 func TestEndAndExtendRejectNilCommands(t *testing.T) {
 	t.Parallel()
 	r, _ := stepBudgetWait(t, 1)
-	c := decisionCase{command: endCommand(blockSteps), facts: driverFacts(), names: nil}
+	c := decisionCase{command: endCommand(BudgetKindSteps), facts: driverFacts(), names: nil}
 	bindDecision(&c, r.s, "nil-command")
 	for _, command := range []Command{(*ExtendBudgetCommand)(nil), (*RequestStopCommand)(nil)} {
 		c.command = command

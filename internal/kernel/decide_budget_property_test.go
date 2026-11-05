@@ -25,13 +25,13 @@ func walkBlocked(rt *rapid.T, r *runDriver) {
 	case 1:
 		if hasOpenStep(r.s) {
 			before := cloneState(r.s)
-			if events, err := r.try(endCommand(block.BlockerID), nil); err == nil || len(events) != 0 {
+			if events, err := r.try(endCommand(block.BudgetKind), nil); err == nil || len(events) != 0 {
 				rt.Fatalf("a run with an open step was ended: %v", err)
 			}
 			assertSameState(rt, &before, r.s)
 			return
 		}
-		r.must(endCommand(block.BlockerID), nil)
+		r.must(endCommand(block.BudgetKind), nil)
 	default:
 		r.must(extendCommand(block.BudgetKind, testUserActor, rapid.Int64Range(1, 30).Draw(rt, "amount")), nil)
 	}

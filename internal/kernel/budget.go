@@ -1,6 +1,9 @@
 package kernel
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // RunBudgets are the four per-run limits pinned at RunAccepted (budget §4).
 // ActiveTime is pinned here but enforced by F3.4, not by this package yet.
@@ -30,6 +33,21 @@ func DefaultExtension(k BudgetKind) int64 {
 		return 200
 	}
 	return 0
+}
+
+// maxResponseTokens bounds the tokens one model response may report. It is 50
+// times the default run budget and far above any real context window plus
+// output, so honest usage never reaches it, while a hostile or broken report
+// cannot push the run's counter toward overflow in a few observations.
+const maxResponseTokens = 100_000_000
+
+// addSaturating adds a non-negative amount without wrapping: a counter fed by
+// remote data must stop at the top, where every limit reads as exhausted.
+func addSaturating(a, b int64) int64 {
+	if a > math.MaxInt64-b {
+		return math.MaxInt64
+	}
+	return a + b
 }
 
 // valid reports whether every pinned limit is positive, so a run can never be
