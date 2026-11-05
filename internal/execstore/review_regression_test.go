@@ -47,9 +47,7 @@ func runR1AcceptAndAdmit(t *testing.T, ctx context.Context, s *Store) {
 	// 1. Accept run in tx 1 (queued)
 	accEvt := makeRunAccepted(makeEnvelope(testRunReg, 1, "c-acc", 0, now), testSessReg, "")
 	req1 := reviewReq("c-acc", 1, 0, 1, accEvt)
-	if _, err := s.Append(ctx, req1); err != nil {
-		t.Fatalf("append accept: %v", err)
-	}
+	appendPersisted(ctx, t, s, req1)
 	r1, err := s.ReadRun(ctx, testRunReg)
 	if err != nil || r1.Lifecycle != kernel.LifecycleQueued {
 		t.Fatalf("expected Queued, got %s, err: %v", r1.Lifecycle, err)
@@ -61,9 +59,7 @@ func runR1AcceptAndAdmit(t *testing.T, ctx context.Context, s *Store) {
 	req2.Kind = testKindAdmitRun
 	req2.QueueFence = nil
 	req2.AdmissionFence = &AdmissionFence{Token: 1, OwnerIncarnation: 1}
-	if _, appendErr := s.Append(ctx, req2); appendErr != nil {
-		t.Fatalf("append admit: %v", appendErr)
-	}
+	appendPersisted(ctx, t, s, req2)
 	r2, err := s.ReadRun(ctx, testRunReg)
 	if err != nil || r2.Lifecycle != kernel.LifecycleRunning {
 		t.Fatalf("expected Running after admit, got %s, err: %v", r2.Lifecycle, err)
@@ -80,9 +76,7 @@ func runR1StepAndModel(t *testing.T, ctx context.Context, s *Store) {
 	req3.Kind = testKindAdvanceRun
 	req3.QueueFence = nil
 	req3.AdmissionFence = &AdmissionFence{Token: 1, OwnerIncarnation: 1}
-	if _, err := s.Append(ctx, req3); err != nil {
-		t.Fatalf("append step: %v", err)
-	}
+	appendPersisted(ctx, t, s, req3)
 	r3, err := s.ReadRun(ctx, testRunReg)
 	if err != nil || r3.StepIndex != 1 || r3.Lifecycle != kernel.LifecycleRunning {
 		t.Fatalf("expected step 1 running, got step %d %s, err: %v", r3.StepIndex, r3.Lifecycle, err)
@@ -96,9 +90,7 @@ func runR1StepAndModel(t *testing.T, ctx context.Context, s *Store) {
 	req4.QueueFence = nil
 	req4.AdmissionFence = &AdmissionFence{Token: 1, OwnerIncarnation: 1}
 	req4.Result = codec.ReceiptResult{FirstSequence: 4, LastSequence: 5, RejectionCode: "", Message: ""}
-	if _, appendErr := s.Append(ctx, req4); appendErr != nil {
-		t.Fatalf("append model: %v", appendErr)
-	}
+	appendPersisted(ctx, t, s, req4)
 
 	// Verify replay matches projections after model progression
 	rebuilt, err := s.RebuildRun(ctx, testRunReg)
@@ -120,9 +112,7 @@ func runR1NoopAndRejection(t *testing.T, ctx context.Context, s *Store) {
 	reqNoop.AdmissionFence = &AdmissionFence{Token: 1, OwnerIncarnation: 1}
 	reqNoop.Events = nil
 	reqNoop.Result = codec.ReceiptResult{FirstSequence: 0, LastSequence: 0, RejectionCode: "", Message: ""}
-	if _, err := s.Append(ctx, reqNoop); err != nil {
-		t.Fatalf("append noop: %v", err)
-	}
+	appendPersisted(ctx, t, s, reqNoop)
 
 	// 6. Append a typed rejection in tx 6 (len(Events) == 0)
 	reqRej := reviewReq("c-rej", 0, 4, 5)
@@ -131,9 +121,7 @@ func runR1NoopAndRejection(t *testing.T, ctx context.Context, s *Store) {
 	reqRej.AdmissionFence = &AdmissionFence{Token: 1, OwnerIncarnation: 1}
 	reqRej.Events = nil
 	reqRej.Result = codec.ReceiptResult{FirstSequence: 0, LastSequence: 0, RejectionCode: "rate_limited", Message: ""}
-	if _, err := s.Append(ctx, reqRej); err != nil {
-		t.Fatalf("append rejection: %v", err)
-	}
+	appendPersisted(ctx, t, s, reqRej)
 
 	// Facts must NOT be reset by no-op or rejection
 	rAfter, err := s.ReadRun(ctx, testRunReg)
@@ -218,9 +206,7 @@ func TestRegressionR2_CanceledAppendRollsBack(t *testing.T) {
 func testR3QueueRejectionAndValidAdmit(t *testing.T, ctx context.Context, s *Store, db *sql.DB) {
 	t.Helper()
 	// Step 1: Accept queued run 1
-	if _, err := s.Append(ctx, reviewReq("c-q1", 1, 0, 1, reviewAccepted(s))); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(ctx, t, s, reviewReq("c-q1", 1, 0, 1, reviewAccepted(s)))
 
 	// Step 2: Attempt to admit run 1 under QueueFence (without AdmissionFence)
 	admitEvt := makeRunAdmitted(makeEnvelope(testRunReg, 2, "c-bad-admit", 999, s.clk.Now()), 999)
@@ -243,9 +229,7 @@ func testR3QueueRejectionAndValidAdmit(t *testing.T, ctx context.Context, s *Sto
 	reqAdmit.Kind = testKindAdmitRun
 	reqAdmit.QueueFence = nil
 	reqAdmit.AdmissionFence = &AdmissionFence{Token: 999, OwnerIncarnation: 1}
-	if _, err := s.Append(ctx, reqAdmit); err != nil {
-		t.Fatalf("valid admission failed: %v", err)
-	}
+	appendPersisted(ctx, t, s, reqAdmit)
 
 	// Verify run 1 is the active run
 	var activeRun string
@@ -265,9 +249,7 @@ func testR3QueuedFinishRetainsActiveRun(t *testing.T, ctx context.Context, s *St
 	reqQ2.RunID = "run-2"
 	reqQ2.ExpectedAdmissionRevision = 2
 	reqQ2.QueueFence = &QueueFence{QueueRevision: 0}
-	if _, err := s.Append(ctx, reqQ2); err != nil {
-		t.Fatalf("append queued run 2: %v", err)
-	}
+	appendPersisted(ctx, t, s, reqQ2)
 
 	// Step 5: Queued run 2 finishes while queued. It must NOT clear run 1's active admission!
 	env2Fin := makeEnvelope("run-2", 2, "c-q2-fin", 0, s.clk.Now())
@@ -279,9 +261,7 @@ func testR3QueuedFinishRetainsActiveRun(t *testing.T, ctx context.Context, s *St
 	reqQ2Fin.CanonicalInput = reqQ2Fin.MetadataInput
 	reqQ2Fin.ExpectedAdmissionRevision = 3
 	reqQ2Fin.QueueFence = &QueueFence{QueueRevision: 1}
-	if _, err := s.Append(ctx, reqQ2Fin); err != nil {
-		t.Fatalf("queued finish: %v", err)
-	}
+	appendPersisted(ctx, t, s, reqQ2Fin)
 
 	// Verify run 1's admission was kept
 	var activeRun string
@@ -346,9 +326,7 @@ func TestRegressionR5_DuplicateAfterPreflightNoLeak(t *testing.T) {
 	s, db, _ := newTestStore(ctx, t, nil)
 
 	req := reviewReq("c-dup-tx", 1, 0, 1, reviewAccepted(s))
-	if _, err := s.Append(ctx, req); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(ctx, t, s, req)
 
 	// Simulate an interleaved duplicate inside an active transaction
 	conn, connErr := db.Conn(ctx)
@@ -382,9 +360,7 @@ func TestRegressionR6_CanonicalTranscriptAdmissionOrder(t *testing.T) {
 	s, db, _ := newTestStore(ctx, t, nil)
 
 	// Step 1: Accept queued run 1
-	if _, err := s.Append(ctx, reviewReq("c-q-order", 1, 0, 1, reviewAccepted(s))); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(ctx, t, s, reviewReq("c-q-order", 1, 0, 1, reviewAccepted(s)))
 
 	// Must NOT be in exec_transcript yet
 	var n int
@@ -402,9 +378,7 @@ func TestRegressionR6_CanonicalTranscriptAdmissionOrder(t *testing.T) {
 	reqAdmit.Kind = testKindAdmitRun
 	reqAdmit.QueueFence = nil
 	reqAdmit.AdmissionFence = &AdmissionFence{Token: 1, OwnerIncarnation: 1}
-	if _, err := s.Append(ctx, reqAdmit); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(ctx, t, s, reqAdmit)
 
 	// Verify input materialized in epoch 2, not epoch 0
 	var countEpoch0, countEpoch2 int
@@ -456,9 +430,7 @@ func TestRegressionR7_ProtectedDedupUsesSessionBinding(t *testing.T) {
 	req.SealedPayloads = []SealedPayload{payload}
 	req.SealedSessionKey = &key
 
-	if _, err := s.Append(ctx, req); err != nil {
-		t.Fatalf("first append failed: %v", err)
-	}
+	appendPersisted(ctx, t, s, req)
 
 	// Duplicate append must pass session to OpenPayload and succeed
 	dupOutcome, err := s.Append(ctx, req)
@@ -518,9 +490,7 @@ func TestRegressionR8_ResolveCommitConnectionVerification(t *testing.T) {
 	s, db, _ := newTestStore(ctx, t, nil)
 
 	req := reviewReq("c-sync-test", 1, 0, 1, reviewAccepted(s))
-	if _, err := s.Append(ctx, req); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(ctx, t, s, req)
 
 	testR8Pragmas(t, ctx, s, db)
 	testR8UncleanConn(t, ctx, db)

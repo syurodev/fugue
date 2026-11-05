@@ -32,9 +32,7 @@ func TestVaultLockedLifecycleAndCacheZeroing(t *testing.T) {
 
 	req := makeAcceptedReq(s, sessionID, "run-vc-1", "cmd-vc-1", payloadID, plaintext, []SealedPayload{sealed}, key)
 
-	if _, appendErr := s.Append(ctx, req); appendErr != nil {
-		t.Fatalf("Append failed: %v", appendErr)
-	}
+	appendPersisted(ctx, t, s, req)
 
 	// Read while unlocked succeeds
 	opened, err := s.OpenPayload(ctx, sessionID, payloadID)
@@ -139,9 +137,7 @@ func TestVaultLockRaceNoDeadlockAndNoFailOpen(t *testing.T) {
 	}
 
 	req := makeAcceptedReq(s, sessionID, "run-race", "cmd-race-init", payloadID, plaintext, []SealedPayload{sealed}, key)
-	if _, appendErr := s.Append(ctx, req); appendErr != nil {
-		t.Fatal(appendErr)
-	}
+	appendPersisted(ctx, t, s, req)
 
 	runConcurrentLockUnlockRace(ctx, t, s, v, masterPass, sessionID, payloadID)
 

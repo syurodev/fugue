@@ -54,9 +54,7 @@ func TestPayloadUsageReporting(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := makeAcceptedReq(s, sessionID, "run-u1", "cmd-u1", "pl-u1", []byte("usage payload"), []SealedPayload{p1}, k1)
-	if _, appendErr := s.Append(ctx, req); appendErr != nil {
-		t.Fatal(appendErr)
-	}
+	appendPersisted(ctx, t, s, req)
 
 	usage, err := s.PayloadUsage(ctx, sessionID)
 	if err != nil || usage != int64(len("usage payload")) {
@@ -137,8 +135,8 @@ func TestProtectedInputAdditionCalculation(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedReq := makeAcceptedReq(s, sessionID, "run-1", "cmd-init", "pl-seeded-1", []byte("12345"), []SealedPayload{sealed}, key)
-	if _, appendErr := s.Append(ctx, seedReq); appendErr != nil {
-		t.Fatal(appendErr)
+	if out, appendErr := s.Append(ctx, seedReq); appendErr != nil || !out.Committed {
+		t.Fatalf("seed append must commit: committed=%v, err=%v", out.Committed, appendErr)
 	}
 
 	conn, err := s.acquireConfiguredConn(ctx)
@@ -177,8 +175,8 @@ func TestProtectedInputAdditionNewRun(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedReq := makeAcceptedReq(s, sessionID, "run-1", "cmd-init", "pl-seeded-1", []byte("12345"), []SealedPayload{sealed}, key)
-	if _, appendErr := s.Append(ctx, seedReq); appendErr != nil {
-		t.Fatal(appendErr)
+	if out, appendErr := s.Append(ctx, seedReq); appendErr != nil || !out.Committed {
+		t.Fatalf("seed append must commit: committed=%v, err=%v", out.Committed, appendErr)
 	}
 
 	conn, err := s.acquireConfiguredConn(ctx)

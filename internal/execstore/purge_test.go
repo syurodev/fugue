@@ -61,14 +61,10 @@ func TestPurgeSessionCryptoShredAndDirectDBByteInspection(t *testing.T) {
 	}
 
 	req1 := makeAcceptedReq(s, s1, "run-p1", "cmd-p1", "pl-1", []byte("s1-payload-secret"), []SealedPayload{p1}, k1)
-	if _, appendErr := s.Append(ctx, req1); appendErr != nil {
-		t.Fatalf("append s1: %v", appendErr)
-	}
+	appendPersisted(ctx, t, s, req1)
 
 	req2 := makeAcceptedReq(s, s2, "run-p2", "cmd-p2", "pl-2", []byte("s2-payload-secret"), []SealedPayload{p2}, k2)
-	if _, appendErr := s.Append(ctx, req2); appendErr != nil {
-		t.Fatalf("append s2: %v", appendErr)
-	}
+	appendPersisted(ctx, t, s, req2)
 
 	rawDBBefore := readDatabaseFile(t, dataDir)
 	verifyKeysPresentInDB(t, rawDBBefore, k1, k2)
@@ -104,9 +100,7 @@ func TestPurgeSessionIsolationAndSafeRetry(t *testing.T) {
 	}
 
 	req := makeAcceptedReq(s, sessionID, "run-1", "cmd-1", "pl-1", []byte("data"), []SealedPayload{p}, k)
-	if _, appendErr := s.Append(ctx, req); appendErr != nil {
-		t.Fatal(appendErr)
-	}
+	appendPersisted(ctx, t, s, req)
 
 	// First purge
 	if purgeErr := s.PurgeSession(ctx, sessionID); purgeErr != nil {
@@ -140,9 +134,7 @@ func TestPurgeSessionPreventsResurrection(t *testing.T) {
 	}
 
 	req := makeAcceptedReq(s, sessionID, "run-1", "cmd-1", "pl-1", []byte("initial"), []SealedPayload{p}, k)
-	if _, appendErr := s.Append(ctx, req); appendErr != nil {
-		t.Fatal(appendErr)
-	}
+	appendPersisted(ctx, t, s, req)
 
 	if purgeErr := s.PurgeSession(ctx, sessionID); purgeErr != nil {
 		t.Fatal(purgeErr)
@@ -190,9 +182,7 @@ func TestPurgeSessionRollbackPreservesSession(t *testing.T) {
 	}
 
 	req := makeAcceptedReq(s, sessionID, "run-1", "cmd-1", "pl-1", []byte("keep-me"), []SealedPayload{p}, k)
-	if _, appendErr := s.Append(ctx, req); appendErr != nil {
-		t.Fatal(appendErr)
-	}
+	appendPersisted(ctx, t, s, req)
 
 	// Inject fault before purge commit
 	s.SetFault(FaultBeforePurgeCommit, errSimulatedPurgeCrash)

@@ -99,9 +99,7 @@ func TestRegressionFirstKeyRollbackCanPrepareAgain(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Append(t.Context(), makeAcceptedReq(s, "review-session", "second-run", "second-command", p.PayloadID, plain, []SealedPayload{p}, k)); err != nil {
-		t.Fatalf("fresh preparation after rollback cannot persist its session key: %v", err)
-	}
+	appendPersisted(t.Context(), t, s, makeAcceptedReq(s, "review-session", "second-run", "second-command", p.PayloadID, plain, []SealedPayload{p}, k))
 }
 
 func TestRegressionFailedPurgeKeepsSessionUsable(t *testing.T) {
@@ -112,9 +110,7 @@ func TestRegressionFailedPurgeKeepsSessionUsable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.Append(t.Context(), makeAcceptedReq(s, "review-session", "review-run", "review-command", p.PayloadID, plain, []SealedPayload{p}, k)); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(t.Context(), t, s, makeAcceptedReq(s, "review-session", "review-run", "review-command", p.PayloadID, plain, []SealedPayload{p}, k))
 	s.SetFault(FaultBeforePurgeCommit, errSimulatedPurgeCrash)
 	if err := s.PurgeSession(t.Context(), "review-session"); !errors.Is(err, errSimulatedPurgeCrash) {
 		t.Fatal(err)
@@ -185,9 +181,7 @@ func TestPurgeDeleteFailureRestoresAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Append(t.Context(), makeAcceptedReq(s, "delete-fail", "r", "c", p.PayloadID, plain, []SealedPayload{p}, k)); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(t.Context(), t, s, makeAcceptedReq(s, "delete-fail", "r", "c", p.PayloadID, plain, []SealedPayload{p}, k))
 	if _, err = s.db.ExecContext(t.Context(), `CREATE TRIGGER fail_purge_delete BEFORE DELETE ON exec_payloads BEGIN SELECT RAISE(ABORT, 'injected delete failure'); END;`); err != nil {
 		t.Fatal(err)
 	}
@@ -237,9 +231,7 @@ func TestCanceledPurgeDoesNotPoisonSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Append(t.Context(), makeAcceptedReq(s, "cancel-purge", "r", "c", p.PayloadID, plain, []SealedPayload{p}, k)); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(t.Context(), t, s, makeAcceptedReq(s, "cancel-purge", "r", "c", p.PayloadID, plain, []SealedPayload{p}, k))
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	if err = s.PurgeSession(ctx, "cancel-purge"); err == nil {
@@ -265,9 +257,7 @@ func TestPreparedKeyFromEarlierEpochWinsSafely(t *testing.T) {
 	if _, _, err = s.SealPayload(t.Context(), "epoch-key", "candidate", "command_input", plain); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Append(t.Context(), makeAcceptedReq(s, "epoch-key", "old-run", "old-command", old.PayloadID, plain, []SealedPayload{old}, key)); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(t.Context(), t, s, makeAcceptedReq(s, "epoch-key", "old-run", "old-command", old.PayloadID, plain, []SealedPayload{old}, key))
 	fresh, pending, err := s.SealPayload(t.Context(), "epoch-key", "fresh", "command_input", plain)
 	if err != nil {
 		t.Fatal(err)
@@ -275,9 +265,7 @@ func TestPreparedKeyFromEarlierEpochWinsSafely(t *testing.T) {
 	if pending != nil {
 		t.Fatal("committed winner did not replace stale candidate")
 	}
-	if _, err = s.Append(t.Context(), makeAcceptedReq(s, "epoch-key", "fresh-run", "fresh-command", fresh.PayloadID, plain, []SealedPayload{fresh}, pending)); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(t.Context(), t, s, makeAcceptedReq(s, "epoch-key", "fresh-run", "fresh-command", fresh.PayloadID, plain, []SealedPayload{fresh}, pending))
 	if _, err = s.OpenPayload(t.Context(), "epoch-key", fresh.PayloadID); err != nil {
 		t.Fatalf("fresh payload sealed with wrong key: %v", err)
 	}
@@ -300,9 +288,7 @@ func TestConflictingKeyCandidateCanReprepare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.Append(t.Context(), makeAcceptedReq(s, "key-race", "a-run", "a-command", a.PayloadID, plain, []SealedPayload{a}, ka)); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(t.Context(), t, s, makeAcceptedReq(s, "key-race", "a-run", "a-command", a.PayloadID, plain, []SealedPayload{a}, ka))
 	if _, err = other.Append(t.Context(), makeAcceptedReq(other, "key-race", "b-run", "b-command", b.PayloadID, plain, []SealedPayload{b}, kb)); !errors.Is(err, ErrSessionKeyConflict) {
 		t.Fatalf("expected candidate conflict: %v", err)
 	}
@@ -310,9 +296,7 @@ func TestConflictingKeyCandidateCanReprepare(t *testing.T) {
 	if err != nil || pending != nil {
 		t.Fatalf("could not reload committed key: %v", err)
 	}
-	if _, err = other.Append(t.Context(), makeAcceptedReq(other, "key-race", "retry-run", "retry-command", fresh.PayloadID, plain, []SealedPayload{fresh}, pending)); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(t.Context(), t, other, makeAcceptedReq(other, "key-race", "retry-run", "retry-command", fresh.PayloadID, plain, []SealedPayload{fresh}, pending))
 	if _, err = s.OpenPayload(t.Context(), "key-race", fresh.PayloadID); err != nil {
 		t.Fatalf("retry did not use the durable key: %v", err)
 	}

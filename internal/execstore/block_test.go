@@ -18,7 +18,7 @@ func appendBlockRun(t *testing.T, s *Store, runID string, kind kernel.WaitReason
 		Envelope: *makeEnvelope(runID, 3, cmd, 1, now), BlockerID: "b", Kind: kind, BudgetKind: budget,
 		Reference: "ref", ResumeCondition: "later",
 	}
-	_, err := s.Append(t.Context(), &AppendRequest{
+	outcome, err := s.Append(t.Context(), &AppendRequest{
 		SessionID: "sess-block", RunID: runID, CommandID: cmd, Kind: testKindAcceptRun, Principal: "p", Target: "t",
 		CodecVersion: codec.CodecV1, MetadataInput: []byte("{}"), CanonicalInput: []byte("{}"),
 		AdmissionFence: &AdmissionFence{Token: 1, OwnerIncarnation: 1}, ExpectedAdmissionRevision: 1,
@@ -29,9 +29,7 @@ func appendBlockRun(t *testing.T, s *Store, runID string, kind kernel.WaitReason
 		},
 		Result: codec.ReceiptResult{FirstSequence: 1, LastSequence: 3, RejectionCode: "", Message: ""},
 	})
-	if err != nil {
-		t.Fatalf("append: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 }
 
 func TestRebuildRunValidatesBlockKinds(t *testing.T) {

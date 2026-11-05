@@ -59,15 +59,13 @@ func TestStoreReadEdgeCases(t *testing.T) {
 
 	// Insert run and sequence 1 event
 	evt1 := makeRunAccepted(makeEnvelope("r-gap", 1, "c-gap-1", 0, now), "sess-gap", "")
-	_, err := s.Append(ctx, &AppendRequest{
+	outcome, err := s.Append(ctx, &AppendRequest{
 		SessionID: "sess-gap", RunID: "r-gap", CommandID: "c-gap-1", Kind: testKindAcceptRun, Principal: "p", Target: "t",
 		CodecVersion: codec.CodecV1, MetadataInput: []byte("{}"), CanonicalInput: []byte("{}"),
 		QueueFence: &QueueFence{QueueRevision: 0}, ExpectedAdmissionRevision: 1,
 		Events: []kernel.Event{evt1}, Result: codec.ReceiptResult{FirstSequence: 1, LastSequence: 1, RejectionCode: "", Message: ""},
 	})
-	if err != nil {
-		t.Fatalf("append seq 1 failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 
 	// ReadEvents gap detection: querying from sequence 0 when events start at 1
 	_, errGap := s.ReadEvents(ctx, "r-gap", 0, 1)
@@ -130,15 +128,13 @@ func TestAppendRunRevisionMismatch(t *testing.T) {
 	s, _, _ := newTestStore(ctx, t, nil)
 
 	evtRun1 := makeRunAccepted(makeEnvelope(testBranchRunRev, 1, "c-rev-1", 0, now), "sess-rev", "")
-	_, err := s.Append(ctx, &AppendRequest{
+	outcome, err := s.Append(ctx, &AppendRequest{
 		SessionID: "sess-rev", RunID: testBranchRunRev, CommandID: "c-rev-1", Kind: testKindAcceptRun, Principal: "p", Target: "t",
 		CodecVersion: codec.CodecV1, MetadataInput: []byte("{}"), CanonicalInput: []byte("{}"),
 		QueueFence: &QueueFence{QueueRevision: 0}, ExpectedAdmissionRevision: 1,
 		Events: []kernel.Event{evtRun1}, Result: codec.ReceiptResult{FirstSequence: 1, LastSequence: 1, RejectionCode: "", Message: ""},
 	})
-	if err != nil {
-		t.Fatalf("append run 1 failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 
 	evtRun2 := makeRunFinished(makeEnvelope(testBranchRunRev, 2, "c-rev-2", 0, now), kernel.RunOutcomeCancelled)
 	_, errMismatch := s.Append(ctx, &AppendRequest{
@@ -162,16 +158,14 @@ func TestAppendRunFinishClearsActiveRun(t *testing.T) {
 	evtFin2 := makeRunAdmitted(makeEnvelope(testBranchRunFin, 2, testBranchCmdFin1, 1, now), 1)
 	evtFin3 := makeRunFinished(makeEnvelope(testBranchRunFin, 3, testBranchCmdFin1, 1, now), kernel.RunOutcomeCompleted)
 
-	_, err := s.Append(ctx, &AppendRequest{
+	outcome, err := s.Append(ctx, &AppendRequest{
 		SessionID: "sess-fin", RunID: testBranchRunFin, CommandID: testBranchCmdFin1, Kind: testKindAcceptRun, Principal: "p", Target: "t",
 		CodecVersion: codec.CodecV1, MetadataInput: []byte("{}"), CanonicalInput: []byte("{}"),
 		AdmissionFence: &AdmissionFence{Token: 1, OwnerIncarnation: 1}, ExpectedAdmissionRevision: 1,
 		Events: []kernel.Event{evtFin1, evtFin2, evtFin3},
 		Result: codec.ReceiptResult{FirstSequence: 1, LastSequence: 3, RejectionCode: "", Message: ""},
 	})
-	if err != nil {
-		t.Fatalf("append run finished failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 
 	var activeRun *string
 	err = db.QueryRowContext(ctx, "SELECT active_run_id FROM exec_admission WHERE session_id = 'sess-fin'").Scan(&activeRun)
@@ -191,26 +185,22 @@ func TestAppendRunFinishOnExistingAdmission(t *testing.T) {
 
 	evtAct1 := makeRunAccepted(makeEnvelope(testBranchRunAct, 1, testBranchCmdAct1, 1, now), "sess-act", "")
 	evtAct2 := makeRunAdmitted(makeEnvelope(testBranchRunAct, 2, testBranchCmdAct1, 1, now), 1)
-	_, err := s.Append(ctx, &AppendRequest{
+	outcome, err := s.Append(ctx, &AppendRequest{
 		SessionID: "sess-act", RunID: testBranchRunAct, CommandID: testBranchCmdAct1, Kind: testKindAcceptRun, Principal: "p", Target: "t",
 		CodecVersion: codec.CodecV1, MetadataInput: []byte("{}"), CanonicalInput: []byte("{}"),
 		AdmissionFence: &AdmissionFence{Token: 1, OwnerIncarnation: 1}, ExpectedAdmissionRevision: 1,
 		Events: []kernel.Event{evtAct1, evtAct2}, Result: codec.ReceiptResult{FirstSequence: 1, LastSequence: 2, RejectionCode: "", Message: ""},
 	})
-	if err != nil {
-		t.Fatalf("initial admit failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 
 	evtActFin := makeRunFinished(makeEnvelope(testBranchRunAct, 3, "c-act-2", 1, now), kernel.RunOutcomeCompleted)
-	_, err = s.Append(ctx, &AppendRequest{
+	outcome, err = s.Append(ctx, &AppendRequest{
 		SessionID: "sess-act", RunID: testBranchRunAct, CommandID: "c-act-2", Kind: testKindAdvanceRun, Principal: "p", Target: "t",
 		CodecVersion: codec.CodecV1, MetadataInput: []byte("{}"), CanonicalInput: []byte("{}"),
 		AdmissionFence: &AdmissionFence{Token: 1, OwnerIncarnation: 1}, ExpectedAdmissionRevision: 1, ExpectedRunRevision: 1,
 		Events: []kernel.Event{evtActFin}, Result: codec.ReceiptResult{FirstSequence: 3, LastSequence: 3, RejectionCode: "", Message: ""},
 	})
-	if err != nil {
-		t.Fatalf("finish on existing admission failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 
 	var activeRunAfterFin *string
 	err = db.QueryRowContext(ctx, "SELECT active_run_id FROM exec_admission WHERE session_id = 'sess-act'").Scan(&activeRunAfterFin)
@@ -235,16 +225,14 @@ func TestModelInvocationCompletedAndClosed(t *testing.T) {
 	evt4 := makeModelRequestPlanned(makeEnvelope(testBranchRunMComp, 4, "c1", 1, now), "m-inv-comp", "att-1")
 	evt5 := makeModelResponseRecorded(makeEnvelope(testBranchRunMComp, 5, "c1", 1, now), "m-inv-comp", "att-1", "")
 
-	_, err := s.Append(ctx, &AppendRequest{
+	outcome, err := s.Append(ctx, &AppendRequest{
 		SessionID: "sess-m-comp", RunID: testBranchRunMComp, CommandID: "c1", Kind: testKindAdvanceRun, Principal: "p", Target: "t",
 		CodecVersion: codec.CodecV1, MetadataInput: []byte("{}"), CanonicalInput: []byte("{}"),
 		AdmissionFence: &AdmissionFence{Token: 1, OwnerIncarnation: 1}, ExpectedAdmissionRevision: 1,
 		Events: []kernel.Event{evt1, evt2, evt3, evt4, evt5},
 		Result: codec.ReceiptResult{FirstSequence: 1, LastSequence: 5, RejectionCode: "", Message: ""},
 	})
-	if err != nil {
-		t.Fatalf("append model completed failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 
 	var state string
 	err = db.QueryRowContext(ctx, "SELECT state FROM exec_invocations WHERE run_id = '"+testBranchRunMComp+"' AND invocation_id = 'm-inv-comp'").Scan(&state)
@@ -262,16 +250,14 @@ func TestModelInvocationCompletedAndClosed(t *testing.T) {
 	evtC4 := makeModelRequestPlanned(makeEnvelope(testBranchRunMClose, 4, testBranchCmdClose1, 1, now), "m-inv-close", "att-1")
 	evtC5 := makeModelAttemptAbandoned(makeEnvelope(testBranchRunMClose, 5, testBranchCmdClose1, 1, now), "m-inv-close", "att-1", kernel.NextActionClose)
 
-	_, err = s.Append(ctx, &AppendRequest{
+	outcome, err = s.Append(ctx, &AppendRequest{
 		SessionID: "sess-m-close", RunID: testBranchRunMClose, CommandID: testBranchCmdClose1, Kind: testKindAdvanceRun, Principal: "p", Target: "t",
 		CodecVersion: codec.CodecV1, MetadataInput: []byte("{}"), CanonicalInput: []byte("{}"),
 		AdmissionFence: &AdmissionFence{Token: 1, OwnerIncarnation: 1}, ExpectedAdmissionRevision: 1,
 		Events: []kernel.Event{evtC1, evtC2, evtC3, evtC4, evtC5},
 		Result: codec.ReceiptResult{FirstSequence: 1, LastSequence: 5, RejectionCode: "", Message: ""},
 	})
-	if err != nil {
-		t.Fatalf("append model closed failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 
 	err = db.QueryRowContext(ctx, "SELECT state FROM exec_invocations WHERE run_id = '"+testBranchRunMClose+"' AND invocation_id = 'm-inv-close'").Scan(&state)
 	if err != nil {
@@ -294,16 +280,14 @@ func TestToolInvocationClosedAndTranscript(t *testing.T) {
 	evt4 := makeToolCallPlanned(makeEnvelope(testBranchRunToolCls, 4, "c1", 1, now), "tool-1", "att-1", kernel.EffectClassPureRead)
 	evt5 := makeToolResultRecorded(makeEnvelope(testBranchRunToolCls, 5, "c1", 1, now), "tool-1", "att-1", kernel.ToolResultOutcomeSucceeded)
 
-	_, err := s.Append(ctx, &AppendRequest{
+	outcome, err := s.Append(ctx, &AppendRequest{
 		SessionID: "sess-tool-cls", RunID: testBranchRunToolCls, CommandID: "c1", Kind: testKindAdvanceRun, Principal: "p", Target: "t",
 		CodecVersion: codec.CodecV1, MetadataInput: []byte("{}"), CanonicalInput: []byte("{}"),
 		AdmissionFence: &AdmissionFence{Token: 1, OwnerIncarnation: 1}, ExpectedAdmissionRevision: 1,
 		Events: []kernel.Event{evt1, evt2, evt3, evt4, evt5},
 		Result: codec.ReceiptResult{FirstSequence: 1, LastSequence: 5, RejectionCode: "", Message: ""},
 	})
-	if err != nil {
-		t.Fatalf("append tool closed failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 
 	var state string
 	err = db.QueryRowContext(ctx, "SELECT state FROM exec_invocations WHERE run_id = '"+testBranchRunToolCls+"' AND invocation_id = 'tool-1'").Scan(&state)
@@ -428,15 +412,13 @@ func TestAdmissionCASFailurePath(t *testing.T) {
 
 	// Create initial admission row
 	evt1 := makeRunAccepted(makeEnvelope(testBranchRunCAS, 1, "c-cas-1", 0, now), "sess-cas", "")
-	_, err := s.Append(ctx, &AppendRequest{
+	outcome, err := s.Append(ctx, &AppendRequest{
 		SessionID: "sess-cas", RunID: testBranchRunCAS, CommandID: "c-cas-1", Kind: testKindAcceptRun, Principal: "p", Target: "t",
 		CodecVersion: codec.CodecV1, MetadataInput: []byte("{}"), CanonicalInput: []byte("{}"),
 		QueueFence: &QueueFence{QueueRevision: 0}, ExpectedAdmissionRevision: 1,
 		Events: []kernel.Event{evt1}, Result: codec.ReceiptResult{FirstSequence: 1, LastSequence: 1, RejectionCode: "", Message: ""},
 	})
-	if err != nil {
-		t.Fatalf("initial append failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 
 	// Trigger admission update CAS failure by modifying admission row revision in trigger before UPDATE
 	_, err = db.ExecContext(ctx, `

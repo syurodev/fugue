@@ -316,3 +316,20 @@ func makeAcceptedReq(
 		SealedSessionKey:          sealedKey,
 	}
 }
+
+// Assert the persistence result before issuing more SQL: a nil error alone can
+// hide a skipped transaction and leave later assertions waiting on a leaked conn.
+func appendPersisted(ctx context.Context, t *testing.T, s *Store, req *AppendRequest) {
+	t.Helper()
+	out, err := s.Append(ctx, req)
+	if err != nil || (!out.Committed && !out.Duplicate) {
+		t.Fatalf("append did not persist a receipt: committed=%v duplicate=%v err=%v", out.Committed, out.Duplicate, err)
+	}
+}
+
+func requireCommitted(t *testing.T, committed bool, err error) {
+	t.Helper()
+	if err != nil || !committed {
+		t.Fatalf("append must commit: committed=%v err=%v", committed, err)
+	}
+}

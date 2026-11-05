@@ -362,9 +362,7 @@ func TestTamperingAndSubstitutionRejections(t *testing.T) {
 
 	req := makeAcceptedReq(s, sessionID, "run-t1", "cmd-t1", payloadID, plaintext, []SealedPayload{sealed}, sealedKey)
 
-	if _, appendErr := s.Append(ctx, req); appendErr != nil {
-		t.Fatalf("initial append failed: %v", appendErr)
-	}
+	appendPersisted(ctx, t, s, req)
 
 	// Substitution: wrong session ID
 	if _, openErr := s.OpenPayload(ctx, "wrong-session", payloadID); openErr == nil {
@@ -632,9 +630,7 @@ func TestSessionKeyConflictAndMatching(t *testing.T) {
 		t.Fatal(err)
 	}
 	req1 := makeAcceptedReq(s, sessionID, "run-1", "cmd-1", "pl-1", []byte("data 1"), []SealedPayload{p1}, k1)
-	if _, appendErr := s.Append(ctx, req1); appendErr != nil {
-		t.Fatal(appendErr)
-	}
+	appendPersisted(ctx, t, s, req1)
 
 	conn, err := s.acquireConfiguredConn(ctx)
 	if err != nil {
@@ -753,9 +749,7 @@ func TestOpenPayloadCorruptedEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	req := makeAcceptedReq(s, sessionID, "run-1", "cmd-1", "pl-1", []byte("valid"), []SealedPayload{p}, k)
-	if _, appendErr := s.Append(ctx, req); appendErr != nil {
-		t.Fatal(appendErr)
-	}
+	appendPersisted(ctx, t, s, req)
 
 	// Insert corrupted envelope JSON in DB
 	if _, execErr := s.db.ExecContext(

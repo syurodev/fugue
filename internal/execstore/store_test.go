@@ -167,9 +167,7 @@ func initTestRun(ctx context.Context, t *testing.T, s *Store, runID, sessID stri
 		MetadataInput:             []byte("{}"),
 		CorrelationID:             "corr-" + runID,
 	}
-	if _, err := s.Append(ctx, req); err != nil {
-		t.Fatalf("append req: %v", err)
-	}
+	appendPersisted(ctx, t, s, req)
 }
 
 func TestTargetedMutantKillersRead(t *testing.T) {

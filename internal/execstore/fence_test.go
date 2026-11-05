@@ -29,7 +29,7 @@ func setupFenceRun(ctx context.Context, t *testing.T, now time.Time) *Store {
 
 	evt1 := makeRunAccepted(makeEnvelope(testFenceRun1, 1, "cmd-1", 0, now), testFenceSess, "pay-1")
 	payload, key := sealedTestPayload(t, "pay-1", []byte("in"))
-	_, err := s.Append(ctx, &AppendRequest{
+	outcome, err := s.Append(ctx, &AppendRequest{
 		SessionID:                 testFenceSess,
 		RunID:                     testFenceRun1,
 		CommandID:                 "cmd-1",
@@ -47,12 +47,10 @@ func setupFenceRun(ctx context.Context, t *testing.T, now time.Time) *Store {
 		SealedPayloads:            []SealedPayload{payload},
 		SealedSessionKey:          &key,
 	})
-	if err != nil {
-		t.Fatalf("setup Append 1 failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 
 	evt2 := makeRunAdmitted(makeEnvelope(testFenceRun1, 2, "cmd-2", 5, now), 5)
-	_, err = s.Append(ctx, &AppendRequest{
+	outcome, err = s.Append(ctx, &AppendRequest{
 		SessionID:                 testFenceSess,
 		RunID:                     testFenceRun1,
 		CommandID:                 "cmd-2",
@@ -68,9 +66,7 @@ func setupFenceRun(ctx context.Context, t *testing.T, now time.Time) *Store {
 		Events:                    []kernel.Event{evt2},
 		Result:                    codec.ReceiptResult{FirstSequence: 2, LastSequence: 2, RejectionCode: "", Message: ""},
 	})
-	if err != nil {
-		t.Fatalf("setup Append 2 (admit) failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 	return s
 }
 
@@ -157,7 +153,7 @@ func admitActiveRun(ctx context.Context, t *testing.T, s *Store, now time.Time) 
 	t.Helper()
 	payload1, key1 := sealedTestPayload(t, "pay-act", []byte("act"))
 	evt1 := makeRunAccepted(makeEnvelope(testActiveRun, 1, "cmd-act-1", 0, now), testSharedSess, "pay-act")
-	_, err := s.Append(ctx, &AppendRequest{
+	outcome, err := s.Append(ctx, &AppendRequest{
 		SessionID:                 testSharedSess,
 		RunID:                     testActiveRun,
 		CommandID:                 "cmd-act-1",
@@ -175,12 +171,10 @@ func admitActiveRun(ctx context.Context, t *testing.T, s *Store, now time.Time) 
 		SealedPayloads:            []SealedPayload{payload1},
 		SealedSessionKey:          &key1,
 	})
-	if err != nil {
-		t.Fatalf("setup run-active failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 
 	evt2 := makeRunAdmitted(makeEnvelope(testActiveRun, 2, "cmd-act-2", 10, now), 10)
-	_, err = s.Append(ctx, &AppendRequest{
+	outcome, err = s.Append(ctx, &AppendRequest{
 		SessionID:                 testSharedSess,
 		RunID:                     testActiveRun,
 		CommandID:                 "cmd-act-2",
@@ -196,9 +190,7 @@ func admitActiveRun(ctx context.Context, t *testing.T, s *Store, now time.Time) 
 		Events:                    []kernel.Event{evt2},
 		Result:                    codec.ReceiptResult{FirstSequence: 2, LastSequence: 2, RejectionCode: "", Message: ""},
 	})
-	if err != nil {
-		t.Fatalf("admit run-active failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 }
 
 func setupActiveAndQueuedRuns(ctx context.Context, t *testing.T, now time.Time) (*Store, *sql.DB) {
@@ -208,7 +200,7 @@ func setupActiveAndQueuedRuns(ctx context.Context, t *testing.T, now time.Time) 
 
 	payload2, _ := sealedTestPayload(t, "pay-queued", []byte("q"))
 	evtQ1 := makeRunAccepted(makeEnvelope(testQueuedRun, 1, "cmd-q-1", 0, now), testSharedSess, "pay-queued")
-	_, err := s.Append(ctx, &AppendRequest{
+	outcome, err := s.Append(ctx, &AppendRequest{
 		SessionID:                 testSharedSess,
 		RunID:                     testQueuedRun,
 		CommandID:                 "cmd-q-1",
@@ -226,9 +218,7 @@ func setupActiveAndQueuedRuns(ctx context.Context, t *testing.T, now time.Time) 
 		SealedPayloads:            []SealedPayload{payload2},
 		SealedSessionKey:          nil,
 	})
-	if err != nil {
-		t.Fatalf("accept run-queued failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 	return s, db
 }
 
@@ -240,7 +230,7 @@ func TestQueuedFinishKeepsOtherRunAdmission(t *testing.T) {
 
 	// Cancel run-queued with a queued command (using QueueFence)
 	evtQ2 := makeRunFinished(makeEnvelope(testQueuedRun, 2, "cmd-q-cancel", 0, now), kernel.RunOutcomeCancelled)
-	_, err := s.Append(ctx, &AppendRequest{
+	outcome, err := s.Append(ctx, &AppendRequest{
 		SessionID:                 testSharedSess,
 		RunID:                     testQueuedRun,
 		CommandID:                 "cmd-q-cancel",
@@ -258,9 +248,7 @@ func TestQueuedFinishKeepsOtherRunAdmission(t *testing.T) {
 		SealedPayloads:            nil,
 		SealedSessionKey:          nil,
 	})
-	if err != nil {
-		t.Fatalf("cancel run-queued failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 
 	var (
 		activeRunID sql.NullString
@@ -285,7 +273,7 @@ func setupReplayRun(ctx context.Context, t *testing.T, now time.Time) *Store {
 
 	payload, key := sealedTestPayload(t, "pay-rep", []byte("replay-input"))
 	evt1 := makeRunAccepted(makeEnvelope(testReplayRun, 1, testRepCmd1, 0, now), testReplaySess, "pay-rep")
-	_, err := s.Append(ctx, &AppendRequest{
+	outcome, err := s.Append(ctx, &AppendRequest{
 		SessionID:                 testReplaySess,
 		RunID:                     testReplayRun,
 		CommandID:                 testRepCmd1,
@@ -303,14 +291,12 @@ func setupReplayRun(ctx context.Context, t *testing.T, now time.Time) *Store {
 		SealedPayloads:            []SealedPayload{payload},
 		SealedSessionKey:          &key,
 	})
-	if err != nil {
-		t.Fatalf("step 1 failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 
 	evt2 := makeRunAdmitted(makeEnvelope(testReplayRun, 2, testRepCmd2, 7, now), 7)
 	evt3 := makeStepStarted(makeEnvelope(testReplayRun, 3, testRepCmd2, 7, now), 1)
 	evt4 := makeModelRequestPlanned(makeEnvelope(testReplayRun, 4, testRepCmd2, 7, now), "m1", "a1")
-	_, err = s.Append(ctx, &AppendRequest{
+	outcome, err = s.Append(ctx, &AppendRequest{
 		SessionID:                 testReplaySess,
 		RunID:                     testReplayRun,
 		CommandID:                 testRepCmd2,
@@ -328,9 +314,7 @@ func setupReplayRun(ctx context.Context, t *testing.T, now time.Time) *Store {
 		SealedPayloads:            nil,
 		SealedSessionKey:          nil,
 	})
-	if err != nil {
-		t.Fatalf("step 2 failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 	return s
 }
 
