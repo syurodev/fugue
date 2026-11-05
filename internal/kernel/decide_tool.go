@@ -142,14 +142,25 @@ func (d *decision) result(c *ObserveToolResultCommand) ([]Event, error) {
 	if err = d.validateToolResult(c, t, att); err != nil {
 		return nil, err
 	}
-	e.Envelope = d.envelope()
-	if t.SourcePosition+1 < len(d.state.ToolOrder) {
-		return []Event{e}, nil
-	}
-	return d.finishToolBatch(c, e)
+	return d.recordResult(c, t, e)
 }
 
-func (d *decision) finishToolBatch(c *ObserveToolResultCommand, e *ToolResultRecordedEvent) ([]Event, error) {
+// recordResult commits a validated result, followed by a loop reminder when one
+// is due, and closes the step when the result is the last of the batch.
+func (d *decision) recordResult(c *ObserveToolResultCommand, t *ToolInvocation, e *ToolResultRecordedEvent) ([]Event, error) {
+	e.Envelope = d.envelope()
+	reminder, err := d.loopReminder(c.ToolCallID)
+	if err != nil {
+		return nil, err
+	}
+	batch := append([]Event{e}, reminder...)
+	if t.SourcePosition+1 < len(d.state.ToolOrder) {
+		return batch, nil
+	}
+	return d.finishToolBatch(c, batch)
+}
+
+func (d *decision) finishToolBatch(c *ObserveToolResultCommand, batch []Event) ([]Event, error) {
 	refs, err := d.completedToolRefs(c.ToolCallID, c.ResultRef)
 	if err != nil {
 		return nil, err
@@ -164,9 +175,9 @@ func (d *decision) finishToolBatch(c *ObserveToolResultCommand, e *ToolResultRec
 		// No AdvanceRun separates this step from the next, so the step boundary is checked here.
 		dec = StepDecision{Reason: ContinuationReasonBudget, BudgetKind: BudgetKindTokens}
 	}
-	events := append([]Event{e}, d.closeStep(&dec, response.Response.ResponseRef, refs)...)
+	batch = append(batch, d.closeStep(&dec, response.Response.ResponseRef, refs)...)
 	if !dec.Continue {
-		return events, nil
+		return batch, nil
 	}
 	index, err := d.nextStepIndex()
 	if err != nil {
@@ -176,7 +187,7 @@ func (d *decision) finishToolBatch(c *ObserveToolResultCommand, e *ToolResultRec
 	if err != nil {
 		return nil, err
 	}
-	return append(events, plan...), nil
+	return append(batch, plan...), nil
 }
 
 func validateToolCheck(c *ObserveToolCheckCommand, t *ToolInvocation) error {

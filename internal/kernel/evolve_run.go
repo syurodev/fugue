@@ -186,15 +186,17 @@ func evolveStepLifecycleEvents(s *State, e Event) bool {
 	}
 }
 
-func evolveStepContextEvents(_ *State, e Event) bool {
+func evolveStepContextEvents(s *State, e Event) bool {
 	switch e.(type) {
+	case *InputSteeredEvent, *InputInterjectedEvent:
+		// New user input ends a run of identical calls (continuation §4).
+		s.LoopRepeat = 0
+		return true
 	case *ToolBindingRevisedEvent,
 		*InstructionsLoadedEvent,
 		*ContextInjectedEvent,
 		*ToolResultsPrunedEvent,
-		*ContextCompactedEvent,
-		*InputSteeredEvent,
-		*InputInterjectedEvent:
+		*ContextCompactedEvent:
 		return true
 	default:
 		return false

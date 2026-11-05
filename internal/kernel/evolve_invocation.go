@@ -105,24 +105,7 @@ func evolveToolCheckEvents(s *State, e Event) bool {
 		if _, ok := s.ToolInvocations[ev.ToolCallID]; ok {
 			return true
 		}
-		tool := &ToolInvocation{
-			ToolCallID:        ev.ToolCallID,
-			SourcePosition:    ev.SourcePosition,
-			DescriptorVersion: ev.DescriptorVersion,
-			EffectClass:       ev.EffectClass,
-			CheckGeneration:   1,
-			Closed:            false,
-			SelectedAttemptID: "",
-			Attempts:          make(map[string]*ToolAttempt),
-		}
-		tool.Attempts[ev.FirstAttemptID] = &ToolAttempt{
-			AttemptID: ev.FirstAttemptID,
-			Status:    ToolAttemptStatusPlanned,
-		}
-		tool.Plan = *ev
-		s.ToolInvocations[ev.ToolCallID] = tool
-		recordModelTool(s, ev.ToolCallID)
-		s.ToolOrder = append(s.ToolOrder, ev.ToolCallID)
+		planTool(s, ev)
 		return true
 	case *ToolCheckResetEvent:
 		resetToolCheck(s, ev.ToolCallID, ev.NewGeneration)
@@ -151,6 +134,33 @@ func evolveToolCheckEvents(s *State, e Event) bool {
 	default:
 		return false
 	}
+}
+
+func planTool(s *State, ev *ToolCallPlannedEvent) {
+	tool := &ToolInvocation{
+		ToolCallID:        ev.ToolCallID,
+		SourcePosition:    ev.SourcePosition,
+		DescriptorVersion: ev.DescriptorVersion,
+		EffectClass:       ev.EffectClass,
+		CheckGeneration:   1,
+		Closed:            false,
+		SelectedAttemptID: "",
+		Attempts:          make(map[string]*ToolAttempt),
+	}
+	tool.Attempts[ev.FirstAttemptID] = &ToolAttempt{
+		AttemptID: ev.FirstAttemptID,
+		Status:    ToolAttemptStatusPlanned,
+	}
+	tool.Plan = *ev
+	if ev.RepeatsPrevious {
+		s.LoopRepeat++
+	} else {
+		s.LoopRepeat = 1
+	}
+	tool.Repeat = s.LoopRepeat
+	s.ToolInvocations[ev.ToolCallID] = tool
+	recordModelTool(s, ev.ToolCallID)
+	s.ToolOrder = append(s.ToolOrder, ev.ToolCallID)
 }
 
 func resetToolCheck(s *State, toolCallID string, newGen uint64) {

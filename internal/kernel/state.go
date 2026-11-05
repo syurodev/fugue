@@ -59,6 +59,7 @@ type ToolInvocation struct {
 	DescriptorVersion string
 	EffectClass       EffectClass
 	CheckGeneration   uint64
+	Repeat            int
 	Closed            bool
 	SelectedAttemptID string
 	Attempts          map[string]*ToolAttempt
@@ -124,6 +125,7 @@ type State struct {
 	ToolCallsDispatched      int64
 	AutoContinued            bool
 	StepReason               ContinuationReason
+	LoopRepeat               int
 }
 
 // NewState returns an initialized empty State with non-nil maps and slices.
@@ -162,5 +164,6 @@ func NewState() *State {
 		ToolCallsDispatched:      0,
 		AutoContinued:            false,
 		StepReason:               "",
+		LoopRepeat:               0,
 	}
 }

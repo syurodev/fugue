@@ -56,8 +56,12 @@ func (d *decision) validateEnvelope() error {
 	// Reserve enough sequence space for any supported batch before adding events.
 	// The longest batch is a cut answer: response, usage, then a plan and a
 	// synthetic result per tool, the step close and a block or finish.
-	if d.state.LastSequence > math.MaxUint64-4 ||
-		2*uint64(len(d.facts.ToolPlans)) > math.MaxUint64-d.state.LastSequence-4 || e.Sequence != d.state.LastSequence+1 {
+	reserve := uint64(4)
+	if d.facts.LoopReminderRef != "" {
+		reserve++ // a tool result may also carry a loop reminder
+	}
+	if d.state.LastSequence > math.MaxUint64-reserve ||
+		2*uint64(len(d.facts.ToolPlans)) > math.MaxUint64-d.state.LastSequence-reserve || e.Sequence != d.state.LastSequence+1 {
 		return Reject(RejectionCodeInvalidState, "invalid batch sequence")
 	}
 	if d.state.RunID != "" && e.RunID != d.state.RunID {

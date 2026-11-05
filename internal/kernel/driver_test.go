@@ -7,14 +7,17 @@ import (
 )
 
 const (
-	drvChunkRef = "chunk-ref"
-	drvKnown    = "known"
-	drvProvider = "provider"
-	drvAllowed  = "allowed"
-	drvPrompt   = "continue-prompt"
-	drvArgsRef  = "validated-args-ref"
-	actorPeer   = "peer"
-	actorModel  = "model"
+	drvChunkRef   = "chunk-ref"
+	drvKnown      = "known"
+	drvProvider   = "provider"
+	drvAllowed    = "allowed"
+	drvPrompt     = "continue-prompt"
+	drvReminder   = "loop-reminder-ref"
+	drvDescriptor = "descriptor-v1"
+	drvInputRef   = "args"
+	drvArgsRef    = "validated-args-ref"
+	actorPeer     = "peer"
+	actorModel    = "model"
 )
 
 // runDriver walks one run through real Decide calls, checking every committed
@@ -31,7 +34,7 @@ func driverFacts() DecisionFacts {
 	return DecisionFacts{
 		OwnerIncarnation: 3, ExecutorFence: 11, WorkerReservationRef: "worker-reservation",
 		DispatchAuthorizationRef: "current-authorization", BudgetReservationRef: "tool-budget-ref",
-		ContextRefs: []string{decContext},
+		ContextRefs: []string{decContext}, LoopReminderRef: drvReminder,
 	}
 }
 
@@ -87,7 +90,7 @@ func (r *runDriver) must(command Command, mutate func(*DecisionFacts)) []Event {
 func driverToolPlan(step, position int) *ToolCallPlannedEvent {
 	return &ToolCallPlannedEvent{
 		Envelope: Envelope{}, ToolCallID: fmt.Sprintf("t%d-%d", step, position), SourcePosition: position,
-		DescriptorVersion: "descriptor-v1", EffectClass: EffectClassPureRead,
+		DescriptorVersion: drvDescriptor, EffectClass: EffectClassPureRead,
 		FirstAttemptID: fmt.Sprintf("ta%d-%d", step, position), InputRef: fmt.Sprintf("args-%d-%d", step, position),
 		Terminates: false, RepeatsPrevious: false,
 	}
@@ -146,11 +149,7 @@ func (r *runDriver) toolStep(step, position int) []Event {
 			ValidatedArgsRef: drvArgsRef, GateObservation: drvAllowed, ApprovalReceiptRef: "",
 		}
 	case ToolAttemptStatusDispatching:
-		command = &ObserveToolResultCommand{
-			CommandID: "", RunID: "", Origin: "", Token: 7, ToolCallID: id, AttemptID: att,
-			Outcome: string(ToolResultOutcomeSucceeded), ResultRef: fmt.Sprintf("result-%d-%d", step, position),
-			Code: "ok", EffectEvidence: "completion-ref", SourcePosition: position,
-		}
+		command = driverResult(step, position)
 	case ToolAttemptStatusAwaitingApproval, ToolAttemptStatusSucceeded, ToolAttemptStatusFailed, ToolAttemptStatusDenied,
 		ToolAttemptStatusRefused, ToolAttemptStatusCancelled, ToolAttemptStatusOutcomeUnknown, ToolAttemptStatusAbandonedUnknown:
 		r.t.Fatalf("tool %s has no next command in its state", id)
@@ -195,4 +194,13 @@ func findEvent[T Event](events []Event) (T, bool) {
 	}
 	var zero T
 	return zero, false
+}
+
+func driverResult(step, position int) *ObserveToolResultCommand {
+	return &ObserveToolResultCommand{
+		CommandID: "", RunID: "", Origin: "", Token: 7,
+		ToolCallID: fmt.Sprintf("t%d-%d", step, position), AttemptID: fmt.Sprintf("ta%d-%d", step, position),
+		Outcome: string(ToolResultOutcomeSucceeded), ResultRef: fmt.Sprintf("result-%d-%d", step, position),
+		Code: "ok", EffectEvidence: "completion-ref", SourcePosition: position,
+	}
 }
