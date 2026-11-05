@@ -256,6 +256,7 @@ func submitAcceptR2WhileParked(t *testing.T, ctx context.Context, sess *Session,
 	}, nil)
 
 	cmdAccept := new(kernel.AcceptRunCommand)
+	cmdAccept.Budgets = kernel.DefaultRunBudgets()
 	cmdAccept.CommandID = testCmdAcceptR2
 	cmdAccept.RunID = testRunID2
 	cmdAccept.Origin = testOriginUser

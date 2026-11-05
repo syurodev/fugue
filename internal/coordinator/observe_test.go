@@ -34,6 +34,7 @@ func makeModelResponseObservation(
 			AttemptID:    attID,
 			ResponseRef:  "resp-" + attID,
 			UsageStatus:  "known",
+			FinishReason: kernel.FinishReasonStop,
 		},
 		Facts: kernel.DecisionFacts{
 			OwnerIncarnation: incarnation,

@@ -113,6 +113,7 @@ func queueFinishR1(t *testing.T, ctx context.Context, sess *Session, store *fake
 	cmdFinish.InvocationID = "m1"
 	cmdFinish.ResponseRef = "resp-r1"
 	cmdFinish.UsageStatus = "known"
+	cmdFinish.FinishReason = kernel.FinishReasonStop
 
 	usageEvt := new(kernel.BudgetObservedEvent)
 	usageEvt.AttemptID = "a1"
@@ -225,6 +226,7 @@ func queueTestAccept(t *testing.T, ctx context.Context, sess *Session, runID, cm
 	modelPlan.ContextRef = ctxRef
 
 	cmdAccept := new(kernel.AcceptRunCommand)
+	cmdAccept.Budgets = kernel.DefaultRunBudgets()
 	cmdAccept.CommandID = cmdID
 	cmdAccept.RunID = runID
 	cmdAccept.Origin = testOriginUser

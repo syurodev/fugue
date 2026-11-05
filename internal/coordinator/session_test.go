@@ -38,6 +38,7 @@ func verifyFirstTxEnvelope(t *testing.T, firstTx *Transition, fakeClk clock.Cloc
 
 func makeEnvelopeTestRequest() Request {
 	cmdAccept := new(kernel.AcceptRunCommand)
+	cmdAccept.Budgets = kernel.DefaultRunBudgets()
 	cmdAccept.CommandID = testCmdAccept1
 	cmdAccept.RunID = testRunID1
 	cmdAccept.Origin = testOriginUser
@@ -378,6 +379,7 @@ func TestCallerCancellationDoesNotAbortAcceptedCommand(t *testing.T) {
 	callerCtx, cancelCaller := context.WithCancel(sessCtx)
 
 	cmdAccept := new(kernel.AcceptRunCommand)
+	cmdAccept.Budgets = kernel.DefaultRunBudgets()
 	cmdAccept.CommandID = "cmd-accept-1"
 	cmdAccept.RunID = "r1"
 	cmdAccept.Origin = testOriginUser
@@ -495,6 +497,7 @@ func testSessionSubmitCases(t *testing.T, fakeClk clock.Clock, idGen ids.Generat
 		return nil, 0, errLoadRunBoom
 	}
 	cmdFail := new(kernel.AcceptRunCommand)
+	cmdFail.Budgets = kernel.DefaultRunBudgets()
 	cmdFail.RunID = "r-fail-load"
 	reqFail := Request{
 		Target:  "r-fail-load",
@@ -507,6 +510,7 @@ func testSessionSubmitCases(t *testing.T, fakeClk clock.Clock, idGen ids.Generat
 
 	store.loadRunFn = nil
 	acceptCmd := new(kernel.AcceptRunCommand)
+	acceptCmd.Budgets = kernel.DefaultRunBudgets()
 	acceptCmd.RunID = "r-defaults"
 	reqDefaults := Request{
 		Command: acceptCmd,
