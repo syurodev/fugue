@@ -33,23 +33,24 @@ func runMutation(ctx context.Context, args []string, stdout io.Writer) error {
 	base := fs.String("base", "origin/main", "ref to diff against; only changed packages are mutated")
 	all := fs.Bool("all", false, "mutate every guarded package (nightly)")
 	explicit := fs.String("packages", "", "comma-separated package directories, overriding -base and -all")
-	budget := fs.Duration("budget", 20*time.Minute, "time box for the whole run")
+	budget := fs.Duration("budget", 20*time.Minute, "time box for discovery and each selected package")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %w", ErrUsage, err)
 	}
-	ctx, cancel := context.WithTimeout(ctx, *budget)
+	preparationCtx, cancel := context.WithTimeout(ctx, *budget)
 	defer cancel()
 
-	targets, err := mutationPackages(ctx, *dir, *base, *all, *explicit)
+	targets, err := mutationPackages(preparationCtx, *dir, *base, *all, *explicit)
 	if err != nil {
 		return err
 	}
-	bin, err := toolPath(ctx, "gremlins")
+	bin, err := toolPath(preparationCtx, "gremlins")
+	cancel()
 	if err != nil {
 		return err
 	}
 	for _, pkg := range targets {
-		out, err := capture(ctx, *dir, bin, "unleash", "--timeout-coefficient", timeoutFactor, "./"+pkg)
+		out, err := mutatePackage(ctx, *dir, bin, pkg, *budget)
 		if err != nil {
 			return fmt.Errorf("%w: %s: %w", ErrMutation, pkg, err)
 		}
@@ -65,6 +66,13 @@ func runMutation(ctx context.Context, args []string, stdout io.Writer) error {
 		}
 	}
 	return say(stdout, "mutation ok: %d packages", len(targets))
+}
+
+// Each package gets the full budget; a slow predecessor must not consume it.
+func mutatePackage(ctx context.Context, dir, bin, pkg string, budget time.Duration) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+	return capture(ctx, dir, bin, "unleash", "--timeout-coefficient", timeoutFactor, "./"+pkg)
 }
 
 func mutationPackages(ctx context.Context, dir, base string, all bool, explicit string) ([]string, error) {
