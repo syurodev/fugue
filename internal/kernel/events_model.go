@@ -79,6 +79,7 @@ type ModelResponseRecordedEvent struct {
 	InvocationID string
 	ResponseRef  string
 	UsageStatus  string
+	FinishReason FinishReason
 }
 
 // EventName returns the canonical event name.

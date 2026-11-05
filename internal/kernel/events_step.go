@@ -186,6 +186,8 @@ type StepCompletedEvent struct {
 	ResponseRef       string
 	OrderedResultRefs []string
 	Continuation      StepContinuation
+	Reason            ContinuationReason
+	BudgetKind        BudgetKind
 }
 
 // EventName returns the canonical event name.
@@ -204,8 +206,8 @@ func (e *StepCompletedEvent) isNil() bool { return e == nil }
 // BudgetExtendedEvent records user extension of execution budget (e.g. maxSteps).
 type BudgetExtendedEvent struct {
 	Envelope        Envelope
-	Kind            string
-	ExtensionAmount int
+	Kind            BudgetKind
+	ExtensionAmount int64
 	Actor           string
 }
 

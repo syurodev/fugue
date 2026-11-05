@@ -4,6 +4,7 @@ func evolveRunLifecycleEvents(s *State, e Event) bool {
 	switch ev := e.(type) {
 	case *RunAcceptedEvent:
 		s.Accepted = true
+		s.Budgets = ev.Budgets
 		if s.RunID == "" {
 			s.RunID = ev.Envelope.RunID
 		}
@@ -158,12 +159,17 @@ func evolveStepLifecycleEvents(s *State, e Event) bool {
 		s.StepCompleted = false
 		s.StepAborted = false
 		s.CurrentStepIndex = ev.StepIndex
+		s.StepsUsed++
 		s.CurrentModelInvocationID = ""
 		s.ToolOrder = nil
 		return true
 	case *StepCompletedEvent:
 		s.StepCompleted = true
 		s.StepContinuation = ev.Continuation
+		s.StepReason = ev.Reason
+		if ev.Reason == ContinuationReasonTruncatedContinue {
+			s.AutoContinued = true
+		}
 		return true
 	case *StepAbortedEvent:
 		closeAbortedModel(s)
@@ -171,21 +177,26 @@ func evolveStepLifecycleEvents(s *State, e Event) bool {
 		s.StepCompleted = false
 		return true
 	case *BudgetExtendedEvent:
+		if ev.ExtensionAmount > 0 {
+			s.Extensions[ev.Kind] += ev.ExtensionAmount
+		}
 		return true
 	default:
 		return false
 	}
 }
 
-func evolveStepContextEvents(_ *State, e Event) bool {
+func evolveStepContextEvents(s *State, e Event) bool {
 	switch e.(type) {
+	case *InputSteeredEvent, *InputInterjectedEvent:
+		// New user input ends a run of identical calls (continuation §4).
+		s.LoopRepeat = 0
+		return true
 	case *ToolBindingRevisedEvent,
 		*InstructionsLoadedEvent,
 		*ContextInjectedEvent,
 		*ToolResultsPrunedEvent,
-		*ContextCompactedEvent,
-		*InputSteeredEvent,
-		*InputInterjectedEvent:
+		*ContextCompactedEvent:
 		return true
 	default:
 		return false

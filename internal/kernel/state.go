@@ -59,6 +59,7 @@ type ToolInvocation struct {
 	DescriptorVersion string
 	EffectClass       EffectClass
 	CheckGeneration   uint64
+	Repeat            int
 	Closed            bool
 	SelectedAttemptID string
 	Attempts          map[string]*ToolAttempt
@@ -117,6 +118,14 @@ type State struct {
 	ActiveTimers             map[string]*ActiveTimer
 	InterruptionCauses       map[string]*InterruptionCause
 	QuiescingAttempts        map[string]bool
+	Budgets                  RunBudgets
+	Extensions               map[BudgetKind]int64
+	StepsUsed                int64
+	TokensUsed               int64
+	ToolCallsDispatched      int64
+	AutoContinued            bool
+	StepReason               ContinuationReason
+	LoopRepeat               int
 }
 
 // NewState returns an initialized empty State with non-nil maps and slices.
@@ -148,5 +157,13 @@ func NewState() *State {
 		ActiveTimers:             make(map[string]*ActiveTimer),
 		InterruptionCauses:       make(map[string]*InterruptionCause),
 		QuiescingAttempts:        make(map[string]bool),
+		Budgets:                  RunBudgets{Steps: 0, Tokens: 0, ToolCalls: 0, ActiveTime: 0},
+		Extensions:               make(map[BudgetKind]int64),
+		StepsUsed:                0,
+		TokensUsed:               0,
+		ToolCallsDispatched:      0,
+		AutoContinued:            false,
+		StepReason:               "",
+		LoopRepeat:               0,
 	}
 }

@@ -1,5 +1,7 @@
 package kernel
 
+import "slices"
+
 func (d *decision) model(invocation, attempt string) (*ModelInvocation, *ModelAttempt, error) {
 	inv := d.state.ModelInvocations[invocation]
 	if invocation == "" || attempt == "" || inv == nil || inv.Attempts[attempt] == nil {
@@ -109,7 +111,7 @@ func (d *decision) response(c *ObserveModelResponseCommand) ([]Event, error) {
 	}
 	e := &ModelResponseRecordedEvent{
 		Envelope: att.Response.Envelope, InvocationID: c.InvocationID,
-		AttemptID: c.AttemptID, ResponseRef: c.ResponseRef, UsageStatus: c.UsageStatus,
+		AttemptID: c.AttemptID, ResponseRef: c.ResponseRef, UsageStatus: c.UsageStatus, FinishReason: c.FinishReason,
 	}
 	if att.Status == ModelAttemptStatusCompleted {
 		return d.duplicateResponse(inv, att, e)
@@ -120,7 +122,7 @@ func (d *decision) response(c *ObserveModelResponseCommand) ([]Event, error) {
 	if c.ResponseRef == "" || c.UsageStatus == "" {
 		return nil, Reject(RejectionCodeCommandRejected, "missing response evidence")
 	}
-	if err = d.validateResponseFacts(c.AttemptID); err != nil {
+	if err = d.validateResponseFacts(c.AttemptID, c.FinishReason); err != nil {
 		return nil, err
 	}
 	// This slice is the runnable, inference-only Trace A path. Stop/recovery
@@ -137,24 +139,41 @@ func (d *decision) responseEvents(e *ModelResponseRecordedEvent) []Event {
 	usage.Envelope = d.envelope()
 	events := []Event{e, &usage}
 	if len(d.facts.ToolPlans) == 0 {
-		return append(events, d.completeStep(e.ResponseRef, nil, StepContinuationEnd),
-			&RunFinishedEvent{
-				Envelope: d.envelope(), Outcome: RunOutcomeCompleted, Truncated: false,
-				PrimaryStopRef: "", SecondaryStopRefs: nil, UnresolvedExposureRefs: nil,
-			})
+		dec := AfterStep(d.stepOutcome(e.FinishReason, 0))
+		return append(events, d.closeStep(&dec, e.ResponseRef, nil)...)
 	}
 	for _, p := range d.facts.ToolPlans {
 		tool := *p
 		tool.Envelope = d.envelope()
 		events = append(events, &tool)
 	}
-	return events
+	if e.FinishReason != FinishReasonLength {
+		return events
+	}
+	// A cut tool call has unreliable arguments: it is never dispatched. Each one
+	// gets a synthetic "not run" result before the step closes, so the model can
+	// retry with whole arguments.
+	for i, p := range d.facts.ToolPlans {
+		events = append(events, &ToolResultRecordedEvent{
+			Envelope: d.envelope(), ToolCallID: p.ToolCallID, AttemptID: p.FirstAttemptID,
+			Outcome: ToolResultOutcomeRefused, ResultRef: d.facts.SyntheticResultRefs[i],
+			Code: string(ContinuationReasonTruncatedArgs), EffectEvidence: effectEvidenceNotDispatched, SourcePosition: i,
+		})
+	}
+	dec := AfterStep(d.stepOutcome(e.FinishReason, len(d.facts.ToolPlans)))
+	return append(events, d.closeStep(&dec, e.ResponseRef, slices.Clone(d.facts.SyntheticResultRefs))...)
 }
 
-func (d *decision) validateResponseFacts(attempt string) error {
+// effectEvidenceNotDispatched marks a result that was recorded without any attempt to run the tool.
+const effectEvidenceNotDispatched = "not_dispatched"
+
+func (d *decision) validateResponseFacts(attempt string, finish FinishReason) error {
 	u := d.facts.Usage
 	if u == nil || u.AttemptID != attempt || u.WindowID != "" || u.TokensUsed < 0 || u.DurationUsed != 0 || u.Basis == "" {
 		return Reject(RejectionCodeCommandRejected, "invalid usage observation")
+	}
+	if err := d.validateFinish(finish); err != nil {
+		return err
 	}
 	seen := make(map[string]bool)
 	for i, p := range d.facts.ToolPlans {
@@ -165,6 +184,24 @@ func (d *decision) validateResponseFacts(attempt string) error {
 			return Reject(RejectionCodeDuplicateAttempt, "reused tool identity")
 		}
 		seen[p.ToolCallID], seen[p.FirstAttemptID] = true, true
+	}
+	return nil
+}
+
+// validateFinish requires the finish reason to agree with the tool plans the
+// host observed: tool calls only come with tool_use or a cut (length) answer,
+// a cut answer's calls each need a synthetic result ref, and a tool_use answer
+// without calls is not a valid response.
+func (d *decision) validateFinish(finish FinishReason) error {
+	plans := len(d.facts.ToolPlans)
+	if !finish.valid() || (plans > 0) != (finish == FinishReasonToolUse || (finish == FinishReasonLength && plans > 0)) {
+		return Reject(RejectionCodeCommandRejected, "finish reason does not match tool calls")
+	}
+	if finish != FinishReasonLength || plans == 0 {
+		return nil
+	}
+	if len(d.facts.SyntheticResultRefs) != plans || slices.Contains(d.facts.SyntheticResultRefs, "") {
+		return Reject(RejectionCodeCommandRejected, "missing synthetic result refs")
 	}
 	return nil
 }

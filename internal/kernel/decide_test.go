@@ -45,6 +45,7 @@ func traceCases() []decisionCase {
 	}
 	accept := new(AcceptRunCommand)
 	accept.InputRef, accept.SessionID, accept.QueueItemRef, accept.ProtocolBinding = "input-ref", "session", "queue-ref", "config-ref"
+	accept.Budgets = DefaultRunBudgets()
 	admit := new(AdmitRunCommand)
 	admit.Token, admit.OwnerIncarnation, admit.QueueDecisionRef = 7, 3, "queue-decision"
 	admit.ContextEpoch, admit.InitialContextRevision, admit.StartRunID = 1, 1, testTargetRun
@@ -58,7 +59,7 @@ func traceCases() []decisionCase {
 	r1.Usage = &BudgetObservedEvent{Envelope: Envelope{}, AttemptID: "a1", WindowID: "", TokensUsed: 8, DurationUsed: 0, Basis: "provider"}
 	r1.ToolPlans = []*ToolCallPlannedEvent{{
 		Envelope: Envelope{}, ToolCallID: "t1", SourcePosition: 0,
-		DescriptorVersion: "descriptor-v1", EffectClass: EffectClassPureRead, FirstAttemptID: decToolAttempt, InputRef: "raw-args-ref",
+		DescriptorVersion: "descriptor-v1", EffectClass: EffectClassPureRead, FirstAttemptID: decToolAttempt, InputRef: "raw-args-ref", Terminates: false, RepeatsPrevious: false,
 	}}
 	r2 := f
 	r2.Usage = &BudgetObservedEvent{Envelope: Envelope{}, AttemptID: "a2", WindowID: "", TokensUsed: 9, DurationUsed: 0, Basis: "provider"}
@@ -69,14 +70,14 @@ func traceCases() []decisionCase {
 		{admit, first, []string{"RunAdmitted", new(StepStartedEvent).EventName(), new(ModelRequestPlannedEvent).EventName()}},
 		{&PrepareDispatchCommand{CommandID: "", RunID: "", Origin: "", Token: 7, InvocationID: "m1", AttemptID: "a1"}, p1, []string{new(ModelDispatchStartedEvent).EventName()}},
 		{&ObserveModelStreamCommand{CommandID: "", RunID: "", Origin: "", Token: 7, AttemptID: "a1", InvocationID: "m1", FirstChunkRef: "chunk-ref"}, f, []string{new(ModelStreamStartedEvent).EventName()}},
-		{&ObserveModelResponseCommand{CommandID: "", RunID: "", Origin: "", Token: 7, AttemptID: "a1", InvocationID: "m1", ResponseRef: "response-ref", UsageStatus: "known"}, r1, []string{new(ModelResponseRecordedEvent).EventName(), new(BudgetObservedEvent).EventName(), "ToolCallPlanned"}},
+		{&ObserveModelResponseCommand{CommandID: "", RunID: "", Origin: "", Token: 7, AttemptID: "a1", InvocationID: "m1", ResponseRef: "response-ref", UsageStatus: "known", FinishReason: FinishReasonToolUse}, r1, []string{new(ModelResponseRecordedEvent).EventName(), new(BudgetObservedEvent).EventName(), "ToolCallPlanned"}},
 		{&PrepareDispatchCommand{CommandID: "", RunID: "", Origin: "", Token: 7, InvocationID: "t1", AttemptID: decToolAttempt}, f, []string{"ToolCheckStarted"}},
 		{&ObserveToolCheckCommand{CommandID: "", RunID: "", Origin: "", Token: 7, ToolCallID: "t1", AttemptID: decToolAttempt, CheckGeneration: 1, ValidatedArgsRef: "validated-args-ref", GateObservation: "allowed", ApprovalReceiptRef: ""}, f, []string{"ToolReadyRecorded"}},
 		{&PrepareDispatchCommand{CommandID: "", RunID: "", Origin: "", Token: 7, InvocationID: "t1", AttemptID: decToolAttempt}, f, []string{"ToolDispatchStarted"}},
 		{&ObserveToolResultCommand{CommandID: "", RunID: "", Origin: "", Token: 7, ToolCallID: "t1", AttemptID: decToolAttempt, Outcome: string(ToolResultOutcomeSucceeded), ResultRef: "result-ref", Code: "ok", EffectEvidence: "completion-ref", SourcePosition: 0}, next, []string{"ToolResultRecorded", new(StepCompletedEvent).EventName(), new(StepStartedEvent).EventName(), new(ModelRequestPlannedEvent).EventName()}},
 		{&PrepareDispatchCommand{CommandID: "", RunID: "", Origin: "", Token: 7, InvocationID: "m2", AttemptID: "a2"}, p2, []string{new(ModelDispatchStartedEvent).EventName()}},
 		{&ObserveModelStreamCommand{CommandID: "", RunID: "", Origin: "", Token: 7, AttemptID: "a2", InvocationID: "m2", FirstChunkRef: "chunk-ref"}, f, []string{new(ModelStreamStartedEvent).EventName()}},
-		{&ObserveModelResponseCommand{CommandID: "", RunID: "", Origin: "", Token: 7, AttemptID: "a2", InvocationID: "m2", ResponseRef: "final-ref", UsageStatus: "known"}, r2, []string{new(ModelResponseRecordedEvent).EventName(), new(BudgetObservedEvent).EventName(), new(StepCompletedEvent).EventName(), "RunFinished"}},
+		{&ObserveModelResponseCommand{CommandID: "", RunID: "", Origin: "", Token: 7, AttemptID: "a2", InvocationID: "m2", ResponseRef: "final-ref", UsageStatus: "known", FinishReason: FinishReasonStop}, r2, []string{new(ModelResponseRecordedEvent).EventName(), new(BudgetObservedEvent).EventName(), new(StepCompletedEvent).EventName(), "RunFinished"}},
 	}
 }
 
@@ -102,6 +103,10 @@ func bindDecision(c *decisionCase, s *State, id string) {
 	case *ObserveToolResultCommand:
 		cmd.CommandID, cmd.RunID, cmd.Origin = id, testTargetRun, decOrigin
 	case *AdvanceRunCommand:
+		cmd.CommandID, cmd.RunID, cmd.Origin = id, testTargetRun, decOrigin
+	case *ExtendBudgetCommand:
+		cmd.CommandID, cmd.RunID, cmd.Origin = id, testTargetRun, decOrigin
+	case *RequestStopCommand:
 		cmd.CommandID, cmd.RunID, cmd.Origin = id, testTargetRun, decOrigin
 	}
 }

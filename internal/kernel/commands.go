@@ -11,7 +11,7 @@ type AcceptRunCommand struct {
 	SessionID       string
 	QueueItemRef    string
 	ProtocolBinding string
-	InitialBudgets  string
+	Budgets         RunBudgets
 	PriorityClass   string
 	PeerOutboxRef   string
 	GoalID          string
@@ -100,6 +100,7 @@ type ObserveModelResponseCommand struct {
 	InvocationID string
 	ResponseRef  string
 	UsageStatus  string
+	FinishReason FinishReason
 }
 
 // CommandName returns the canonical command name.
@@ -179,6 +180,7 @@ type RequestStopCommand struct {
 	CommandID   string
 	RunID       string
 	Origin      string
+	Token       uint64
 	Reason      StopReason
 	Mode        StopMode
 	Actor       string
@@ -351,8 +353,9 @@ type ExtendBudgetCommand struct {
 	CommandID       string
 	RunID           string
 	Origin          string
-	Kind            string
-	ExtensionAmount int
+	Token           uint64
+	Kind            BudgetKind
+	ExtensionAmount int64
 	Actor           string
 }
 

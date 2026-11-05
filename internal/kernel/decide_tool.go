@@ -49,23 +49,31 @@ func (d *decision) prepareTool(c *PrepareDispatchCommand) ([]Event, error) {
 			AttemptID: c.AttemptID, CheckGeneration: t.CheckGeneration, FrontierCursor: t.SourcePosition,
 		}}, nil
 	case ToolAttemptStatusReady:
-		if hasActiveAttempt(d.state) {
-			return nil, Reject(RejectionCodeInvalidTransition, "worker already active")
-		}
-		if err = d.dispatchEvidence(); err != nil {
-			return nil, err
-		}
-		return []Event{&ToolDispatchStartedEvent{
-			Envelope: d.envelope(), ToolCallID: c.InvocationID,
-			AttemptID: c.AttemptID, CheckGeneration: t.CheckGeneration, ExecutorFence: d.facts.ExecutorFence,
-			Token: c.Token, ReceiptRef: d.facts.DispatchAuthorizationRef, BudgetReservation: d.facts.BudgetReservationRef,
-		}}, nil
+		return d.dispatchTool(c, t)
 	case ToolAttemptStatusChecking, ToolAttemptStatusAwaitingApproval, ToolAttemptStatusDispatching,
 		ToolAttemptStatusSucceeded, ToolAttemptStatusFailed, ToolAttemptStatusDenied, ToolAttemptStatusRefused,
 		ToolAttemptStatusCancelled, ToolAttemptStatusOutcomeUnknown, ToolAttemptStatusAbandonedUnknown:
 		return nil, Reject(RejectionCodeInvalidTransition, "tool cannot prepare")
 	}
 	return nil, Reject(RejectionCodeInvalidState, "unknown tool status")
+}
+
+func (d *decision) dispatchTool(c *PrepareDispatchCommand, t *ToolInvocation) ([]Event, error) {
+	if hasActiveAttempt(d.state) {
+		return nil, Reject(RejectionCodeInvalidTransition, "worker already active")
+	}
+	if d.budgetExhausted(BudgetKindToolCalls) {
+		// The tools of the step stay Ready or Planned; an extension resumes them in this step.
+		return []Event{d.budgetBlock(BudgetKindToolCalls)}, nil
+	}
+	if err := d.dispatchEvidence(); err != nil {
+		return nil, err
+	}
+	return []Event{&ToolDispatchStartedEvent{
+		Envelope: d.envelope(), ToolCallID: c.InvocationID,
+		AttemptID: c.AttemptID, CheckGeneration: t.CheckGeneration, ExecutorFence: d.facts.ExecutorFence,
+		Token: c.Token, ReceiptRef: d.facts.DispatchAuthorizationRef, BudgetReservation: d.facts.BudgetReservationRef,
+	}}, nil
 }
 
 func (d *decision) check(c *ObserveToolCheckCommand) ([]Event, error) {
@@ -134,14 +142,25 @@ func (d *decision) result(c *ObserveToolResultCommand) ([]Event, error) {
 	if err = d.validateToolResult(c, t, att); err != nil {
 		return nil, err
 	}
-	e.Envelope = d.envelope()
-	if t.SourcePosition+1 < len(d.state.ToolOrder) {
-		return []Event{e}, nil
-	}
-	return d.finishToolBatch(c, e)
+	return d.recordResult(c, t, e)
 }
 
-func (d *decision) finishToolBatch(c *ObserveToolResultCommand, e *ToolResultRecordedEvent) ([]Event, error) {
+// recordResult commits a validated result, followed by a loop reminder when one
+// is due, and closes the step when the result is the last of the batch.
+func (d *decision) recordResult(c *ObserveToolResultCommand, t *ToolInvocation, e *ToolResultRecordedEvent) ([]Event, error) {
+	e.Envelope = d.envelope()
+	reminder, err := d.loopReminder(c.ToolCallID)
+	if err != nil {
+		return nil, err
+	}
+	batch := append([]Event{e}, reminder...)
+	if t.SourcePosition+1 < len(d.state.ToolOrder) {
+		return batch, nil
+	}
+	return d.finishToolBatch(c, batch)
+}
+
+func (d *decision) finishToolBatch(c *ObserveToolResultCommand, batch []Event) ([]Event, error) {
 	refs, err := d.completedToolRefs(c.ToolCallID, c.ResultRef)
 	if err != nil {
 		return nil, err
@@ -151,16 +170,24 @@ func (d *decision) finishToolBatch(c *ObserveToolResultCommand, e *ToolResultRec
 	if response == nil {
 		return nil, Reject(RejectionCodeInvalidState, "missing selected response")
 	}
-	completion := d.completeStep(response.Response.ResponseRef, refs, StepContinuationContinue)
+	dec := AfterStep(d.stepOutcome(response.Response.FinishReason, len(d.state.ToolOrder)))
+	if dec.Continue && d.budgetExhausted(BudgetKindTokens) {
+		// No AdvanceRun separates this step from the next, so the step boundary is checked here.
+		dec = StepDecision{Reason: ContinuationReasonBudget, BudgetKind: BudgetKindTokens}
+	}
+	batch = append(batch, d.closeStep(&dec, response.Response.ResponseRef, refs)...)
+	if !dec.Continue {
+		return batch, nil
+	}
 	index, err := d.nextStepIndex()
 	if err != nil {
 		return nil, err
 	}
-	plan, err := d.planStep(index)
+	plan, err := d.planStep(index, nil)
 	if err != nil {
 		return nil, err
 	}
-	return append([]Event{e, completion}, plan...), nil
+	return append(batch, plan...), nil
 }
 
 func validateToolCheck(c *ObserveToolCheckCommand, t *ToolInvocation) error {

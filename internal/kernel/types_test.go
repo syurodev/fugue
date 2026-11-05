@@ -34,18 +34,18 @@ func testCommands() []struct {
 		cmd  Command
 		want string
 	}{
-		{&AcceptRunCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, InputRef: "i", SessionID: "s", QueueItemRef: "q", ProtocolBinding: "p", InitialBudgets: "b", PriorityClass: "pc", PeerOutboxRef: "", GoalID: "", GoalRound: 0}, "AcceptRun"},
+		{&AcceptRunCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, InputRef: "i", SessionID: "s", QueueItemRef: "q", ProtocolBinding: "p", Budgets: DefaultRunBudgets(), PriorityClass: "pc", PeerOutboxRef: "", GoalID: "", GoalRound: 0}, "AcceptRun"},
 		{&AdmitRunCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Token: testToken, OwnerIncarnation: 1, QueueDecisionRef: "q", ContextEpoch: 1, StartRunID: testRunID, InitialContextRevision: 1}, "AdmitRun"},
 		{&AcquireRunOwnershipCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, NewToken: 2, PreviousToken: 1, RecoveryReceipt: "rc", DataDirectoryLockGeneration: 1}, "AcquireRunOwnership"},
 		{&AdvanceRunCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Token: testToken, StepIndex: 0}, "AdvanceRun"},
 		{&PrepareDispatchCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Token: testToken, InvocationID: testModelInvRef, AttemptID: testAttempt}, "PrepareDispatch"},
 		{&ObserveModelStreamCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Token: testToken, AttemptID: testAttempt, InvocationID: testModelInvRef, FirstChunkRef: "chunk"}, "ObserveModelStream"},
-		{&ObserveModelResponseCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Token: testToken, AttemptID: testAttempt, InvocationID: testModelInvRef, ResponseRef: "resp", UsageStatus: "ok"}, "ObserveModelResponse"},
+		{&ObserveModelResponseCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Token: testToken, AttemptID: testAttempt, InvocationID: testModelInvRef, ResponseRef: "resp", UsageStatus: "ok", FinishReason: FinishReasonStop}, "ObserveModelResponse"},
 		{&ObserveModelFailureCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Token: testToken, AttemptID: testAttempt, InvocationID: testModelInvRef, Stage: "st", FailureClass: "c", FailureCode: "cd", RetryDisposition: "r", UsageStatus: "u", PartialRef: ""}, "ObserveModelFailure"},
 		{&ObserveToolCheckCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Token: testToken, ToolCallID: "tc", AttemptID: testAttempt, CheckGeneration: 1, ValidatedArgsRef: "args", GateObservation: "go", ApprovalReceiptRef: "ar"}, "ObserveToolCheck"},
 		{&ObserveToolApprovalCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Token: testToken, ToolCallID: "tc", CheckGeneration: 1, Resolution: "approved", ResolutionEvidence: "ev"}, "ObserveToolApproval"},
 		{&ObserveToolResultCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Token: testToken, ToolCallID: "tc", AttemptID: testAttempt, Outcome: "succeeded", ResultRef: "res", Code: "200", EffectEvidence: "ev", SourcePosition: 0}, "ObserveToolResult"},
-		{&RequestStopCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Reason: StopReasonUserCancel, Mode: StopModeTerminal, Actor: "u", Target: "t", RequestTime: now}, "RequestStop"},
+		{&RequestStopCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Token: 9, Reason: StopReasonUserCancel, Mode: StopModeTerminal, Actor: "u", Target: "t", RequestTime: now}, "RequestStop"},
 		{&ObserveVaultCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Locked: true, Evidence: "ev"}, "ObserveVault"},
 		{&ObserveHostPauseCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Paused: true, Evidence: "ev"}, "ObserveHostPause"},
 		{&ObserveDependencyCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, BlockerID: "b", Kind: WaitReasonVaultLocked, BudgetKind: "", Reference: "ref", ResumeCondition: "rc", Resolved: false, Evidence: "ev"}, "ObserveDependency"},
@@ -57,7 +57,7 @@ func testCommands() []struct {
 		{&SelectRunContextCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, OldContextRevision: 1, NewContextRevision: 2, Epoch: 1, StartRunID: testRunID, Mode: "fresh", Actor: "u", ValidationEvidence: "ev"}, "SelectRunContext"},
 		{&ResumeRunCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Token: testToken, Actor: "u", Evidence: "ev"}, "ResumeRun"},
 		{&ObserveAccountingCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, AttemptID: testAttempt, WindowID: "win", TokensUsed: 10, DurationUsed: time.Second, Basis: "measured"}, "ObserveAccounting"},
-		{&ExtendBudgetCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Kind: "steps", ExtensionAmount: 5, Actor: "u"}, "ExtendBudget"},
+		{&ExtendBudgetCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, Token: 9, Kind: "steps", ExtensionAmount: 5, Actor: "u"}, "ExtendBudget"},
 		{&SteerInputCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, InputRef: "inp", Timestamp: now}, "SteerInput"},
 		{&InterjectInputCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, InputRef: "inp", TargetAttemptID: testAttempt, TargetInvocationID: testModelInvRef}, "InterjectInput"},
 		{&ReviseToolBindingCommand{CommandID: testCmdID, RunID: testRunID, Origin: testOrigin, OldRevision: 1, NewRevision: 2, AddedGroups: []string{"g"}, RemovedGroups: []string{}, DescriptorVersions: map[string]string{"t": "v1"}, Cause: "session_start"}, "ReviseToolBinding"},
@@ -193,7 +193,7 @@ func testRunEvents(env *Envelope, now time.Time) []struct {
 		ev   Event
 		want string
 	}{
-		{&RunAcceptedEvent{Envelope: *env, InputRef: "", SessionID: "", QueueItemRef: "", ProtocolBinding: "", InitialBudgets: "", PriorityClass: "", PeerOutboxRef: "", GoalID: "", GoalRound: 0}, "RunAccepted"},
+		{&RunAcceptedEvent{Envelope: *env, InputRef: "", SessionID: "", QueueItemRef: "", ProtocolBinding: "", Budgets: DefaultRunBudgets(), PriorityClass: "", PeerOutboxRef: "", GoalID: "", GoalRound: 0}, "RunAccepted"},
 		{&RunAdmittedEvent{Envelope: *env, Token: 0, OwnerIncarnation: 0, QueueDecisionRef: "", ContextEpoch: 0, StartRunID: "", InitialContextRevision: 0}, "RunAdmitted"},
 		{&RunOwnershipAcquiredEvent{Envelope: *env, NewToken: 0, PreviousToken: 0, RecoveryReceipt: "", DataDirectoryLockGeneration: 0}, "RunOwnershipAcquired"},
 		{&RunStopRequestedEvent{Envelope: *env, Reason: StopReasonUserCancel, Mode: StopModeTerminal, Actor: "", Target: "", RequestTime: now}, "RunStopRequested"},
@@ -204,7 +204,7 @@ func testRunEvents(env *Envelope, now time.Time) []struct {
 		{&UnknownAcceptedEvent{Envelope: *env, TargetAttempts: nil, Revisions: nil, Actor: "", AcceptedUncertainty: "", Disposition: ControlDisposition("")}, "UnknownAccepted"},
 		{&RunClosureConfirmedEvent{Envelope: *env, MetadataOnlyPreviewVersion: "", RunRevision: 0, ExactAttemptIDs: nil, CauseIDs: nil, Actor: "", UnavailabilityReason: "", PreviousContextRevision: 0, NewContextRevision: 0, ResultingContextRequirement: ContextRequirementNone, CauseEventRef: "", AttemptDispositions: nil}, "RunClosureConfirmed"},
 		{&ContextBoundarySelectedEvent{Envelope: *env, TargetQueuedRunID: "", OldContextRevision: 0, NewContextRevision: 0, Epoch: 0, StartRunID: "", Mode: "", Actor: "", ValidationEvidence: "", PreviousDecidingEventRef: ""}, "ContextBoundarySelected"},
-		{&RunFinishedEvent{Envelope: *env, Outcome: RunOutcomeCompleted, Truncated: false, PrimaryStopRef: "", SecondaryStopRefs: nil, UnresolvedExposureRefs: nil}, "RunFinished"},
+		{&RunFinishedEvent{Envelope: *env, Outcome: RunOutcomeCompleted, Truncated: false, FailureCode: "", PrimaryStopRef: "", SecondaryStopRefs: nil, UnresolvedExposureRefs: nil}, "RunFinished"},
 		{&StepStartedEvent{Envelope: *env, StepIndex: 0, ContextRefs: nil}, "StepStarted"},
 		{&ToolBindingRevisedEvent{Envelope: *env, OldRevision: 0, NewRevision: 0, AddedGroups: nil, RemovedGroups: nil, DescriptorVersions: nil, Cause: ""}, "ToolBindingRevised"},
 		{&InstructionsLoadedEvent{Envelope: *env, RuleLayer: "", SourcePath: "", SnapshotPayloadRef: "", BudgetTokens: 0, PrunedTokens: 0}, "InstructionsLoaded"},
@@ -213,7 +213,7 @@ func testRunEvents(env *Envelope, now time.Time) []struct {
 		{&ContextCompactedEvent{Envelope: *env, SummaryPayloadRef: "", FirstRetainedPosition: 0, TokensBefore: 0, TokensAfter: 0, WorkspaceMemoryRefs: nil, ModelInvocationRef: ""}, "ContextCompacted"},
 		{&InputSteeredEvent{Envelope: *env, InputRef: "", Origin: "", Timestamp: now}, "InputSteered"},
 		{&InputInterjectedEvent{Envelope: *env, InputRef: "", MergedSteerRefs: nil, TargetAttemptID: "", TargetInvocationID: "", QuiesceResult: ""}, "InputInterjected"},
-		{&StepCompletedEvent{Envelope: *env, StepIndex: 0, ResponseRef: "", OrderedResultRefs: nil, Continuation: StepContinuationEnd}, "StepCompleted"},
+		{&StepCompletedEvent{Envelope: *env, StepIndex: 0, ResponseRef: "", OrderedResultRefs: nil, Continuation: StepContinuationEnd, Reason: ContinuationReasonToolCalls, BudgetKind: ""}, "StepCompleted"},
 		{&BudgetExtendedEvent{Envelope: *env, Kind: "", ExtensionAmount: 0, Actor: ""}, "BudgetExtended"},
 		{&StepAbortedEvent{Envelope: *env, StepIndex: 0, Reason: "", Dispositions: nil}, "StepAborted"},
 	}
@@ -230,7 +230,7 @@ func testModelEvents(env *Envelope) []struct {
 		{&ModelRequestPlannedEvent{Envelope: *env, InvocationID: "", Purpose: "", FirstAttemptID: "", ModelRef: "", ContextRef: "", ToolDeclarationRefs: nil, EstimatedBudgetTokens: 0}, "ModelRequestPlanned"},
 		{&ModelDispatchStartedEvent{Envelope: *env, AttemptID: "", InvocationID: "", Token: 0, ExecutorFence: 0, ReservationTokens: 0, ProviderSettingsRef: "", AccountID: "", CatalogVersion: ""}, "ModelDispatchStarted"},
 		{&ModelStreamStartedEvent{Envelope: *env, AttemptID: "", InvocationID: "", FirstChunkRef: ""}, "ModelStreamStarted"},
-		{&ModelResponseRecordedEvent{Envelope: *env, AttemptID: "", InvocationID: "", ResponseRef: "", UsageStatus: ""}, "ModelResponseRecorded"},
+		{&ModelResponseRecordedEvent{Envelope: *env, AttemptID: "", InvocationID: "", ResponseRef: "", UsageStatus: "", FinishReason: FinishReasonStop}, "ModelResponseRecorded"},
 		{&ModelRequestFailedEvent{Envelope: *env, AttemptID: "", InvocationID: "", Stage: "", FailureClass: "", FailureCode: "", RetryDisposition: "", UsageStatus: "", PartialRef: ""}, "ModelRequestFailed"},
 		{&ModelRequestInterruptedEvent{Envelope: *env, AttemptID: "", InvocationID: "", UncertaintyClass: "", PartialRef: "", UsageReservationTokens: 0}, "ModelRequestInterrupted"},
 		{&ModelRetryScheduledEvent{Envelope: *env, InvocationID: "", PreviousAttemptID: "", NewAttemptID: "", PolicyVersion: "", RetryNumber: 0, TimerID: ""}, "ModelRetryScheduled"},
@@ -250,7 +250,7 @@ func testToolAndTimerEvents(env *Envelope, now time.Time) []struct {
 		ev   Event
 		want string
 	}{
-		{&ToolCallPlannedEvent{Envelope: *env, ToolCallID: "", SourcePosition: 0, DescriptorVersion: "", EffectClass: EffectClassPureRead, FirstAttemptID: "", InputRef: ""}, "ToolCallPlanned"},
+		{&ToolCallPlannedEvent{Envelope: *env, ToolCallID: "", SourcePosition: 0, DescriptorVersion: "", EffectClass: EffectClassPureRead, FirstAttemptID: "", InputRef: "", Terminates: false, RepeatsPrevious: false}, "ToolCallPlanned"},
 		{&ToolCheckResetEvent{Envelope: *env, ToolCallID: "", OldGeneration: 0, NewGeneration: 0, OwnerInvalidationReceipt: "", ResolvedDependencyRefs: nil}, "ToolCheckReset"},
 		{&ToolCheckStartedEvent{Envelope: *env, ToolCallID: "", AttemptID: "", CheckGeneration: 0, FrontierCursor: 0}, "ToolCheckStarted"},
 		{&ToolApprovalRequestedEvent{Envelope: *env, ToolCallID: "", CheckGeneration: 0, OwnerRequestRef: "", RequestKind: "", RequestRevision: 0, ExactArgsRef: "", ApproverRoute: "", Expiry: now}, "ToolApprovalRequested"},

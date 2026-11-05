@@ -105,24 +105,7 @@ func evolveToolCheckEvents(s *State, e Event) bool {
 		if _, ok := s.ToolInvocations[ev.ToolCallID]; ok {
 			return true
 		}
-		tool := &ToolInvocation{
-			ToolCallID:        ev.ToolCallID,
-			SourcePosition:    ev.SourcePosition,
-			DescriptorVersion: ev.DescriptorVersion,
-			EffectClass:       ev.EffectClass,
-			CheckGeneration:   1,
-			Closed:            false,
-			SelectedAttemptID: "",
-			Attempts:          make(map[string]*ToolAttempt),
-		}
-		tool.Attempts[ev.FirstAttemptID] = &ToolAttempt{
-			AttemptID: ev.FirstAttemptID,
-			Status:    ToolAttemptStatusPlanned,
-		}
-		tool.Plan = *ev
-		s.ToolInvocations[ev.ToolCallID] = tool
-		recordModelTool(s, ev.ToolCallID)
-		s.ToolOrder = append(s.ToolOrder, ev.ToolCallID)
+		planTool(s, ev)
 		return true
 	case *ToolCheckResetEvent:
 		resetToolCheck(s, ev.ToolCallID, ev.NewGeneration)
@@ -151,6 +134,33 @@ func evolveToolCheckEvents(s *State, e Event) bool {
 	default:
 		return false
 	}
+}
+
+func planTool(s *State, ev *ToolCallPlannedEvent) {
+	tool := &ToolInvocation{
+		ToolCallID:        ev.ToolCallID,
+		SourcePosition:    ev.SourcePosition,
+		DescriptorVersion: ev.DescriptorVersion,
+		EffectClass:       ev.EffectClass,
+		CheckGeneration:   1,
+		Closed:            false,
+		SelectedAttemptID: "",
+		Attempts:          make(map[string]*ToolAttempt),
+	}
+	tool.Attempts[ev.FirstAttemptID] = &ToolAttempt{
+		AttemptID: ev.FirstAttemptID,
+		Status:    ToolAttemptStatusPlanned,
+	}
+	tool.Plan = *ev
+	if ev.RepeatsPrevious {
+		s.LoopRepeat++
+	} else {
+		s.LoopRepeat = 1
+	}
+	tool.Repeat = s.LoopRepeat
+	s.ToolInvocations[ev.ToolCallID] = tool
+	recordModelTool(s, ev.ToolCallID)
+	s.ToolOrder = append(s.ToolOrder, ev.ToolCallID)
 }
 
 func resetToolCheck(s *State, toolCallID string, newGen uint64) {
@@ -187,6 +197,7 @@ func setToolStatusIf(s *State, toolID string, current, target ToolAttemptStatus)
 func evolveToolDispatchEvents(s *State, e Event) bool {
 	switch ev := e.(type) {
 	case *ToolDispatchStartedEvent:
+		s.ToolCallsDispatched++
 		updateToolAttemptStatus(s, ev.ToolCallID, ev.AttemptID, ToolAttemptStatusDispatching)
 		if tool := s.ToolInvocations[ev.ToolCallID]; tool != nil && tool.Attempts[ev.AttemptID] != nil {
 			tool.Attempts[ev.AttemptID].Dispatch = *ev
@@ -304,6 +315,9 @@ func recordToolResult(s *State, ev *ToolResultRecordedEvent) {
 func evolveTimerBudgetEvents(s *State, e Event) bool {
 	switch ev := e.(type) {
 	case *BudgetObservedEvent:
+		if ev.TokensUsed > 0 {
+			s.TokensUsed += int64(ev.TokensUsed)
+		}
 		recordResponseUsage(s, ev)
 		return true
 	case *TimeBudgetWindowOpenedEvent, *TimeBudgetWindowClosedEvent:

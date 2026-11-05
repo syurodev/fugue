@@ -57,7 +57,7 @@ func testEvolveModelDispatch(t *testing.T, s *State, env *Envelope) *State {
 		t.Fatalf("ModelStreamStarted failed")
 	}
 
-	s = Evolve(s, &ModelResponseRecordedEvent{Envelope: *env, AttemptID: testModelAtt1, InvocationID: testModelInvID, ResponseRef: testResponseRef, UsageStatus: "ok"})
+	s = Evolve(s, &ModelResponseRecordedEvent{Envelope: *env, AttemptID: testModelAtt1, InvocationID: testModelInvID, ResponseRef: testResponseRef, UsageStatus: "ok", FinishReason: FinishReasonStop})
 	inv := s.ModelInvocations[testModelInvID]
 	if inv.Attempts[testModelAtt1].Status != ModelAttemptStatusCompleted || !inv.Completed || inv.SelectedAttemptID != testModelAtt1 {
 		t.Fatalf("ModelResponseRecorded failed")
@@ -120,7 +120,7 @@ func testEvolveToolChecks(t *testing.T, s *State, env *Envelope, now time.Time) 
 	t.Helper()
 	s = Evolve(s, &ToolCallPlannedEvent{
 		Envelope: *env, ToolCallID: testToolCallID, SourcePosition: 0, DescriptorVersion: testDescriptorVer,
-		EffectClass: EffectClassSideEffecting, FirstAttemptID: testToolAtt1, InputRef: testInputRef,
+		EffectClass: EffectClassSideEffecting, FirstAttemptID: testToolAtt1, InputRef: testInputRef, Terminates: false, RepeatsPrevious: false,
 	})
 	if s.ToolInvocations[testToolCallID] == nil || s.ToolInvocations[testToolCallID].Attempts[testToolAtt1].Status != ToolAttemptStatusPlanned {
 		t.Fatalf("ToolCallPlanned failed")

@@ -79,7 +79,7 @@ func TestRegressionEncoderRejectsInvalidUTF8(t *testing.T) {
 		SessionID:       "sess-1",
 		QueueItemRef:    "qi-1",
 		ProtocolBinding: "pb-1",
-		InitialBudgets:  "{}",
+		Budgets:         kernel.DefaultRunBudgets(),
 		PriorityClass:   "default",
 		PeerOutboxRef:   "po-1",
 		GoalID:          "goal-1",

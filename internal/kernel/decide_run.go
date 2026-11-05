@@ -18,7 +18,7 @@ func (d *decision) accept(c *AcceptRunCommand) ([]Event, error) {
 	return []Event{&RunAcceptedEvent{
 		Envelope: d.envelope(), InputRef: c.InputRef, SessionID: c.SessionID,
 		QueueItemRef: c.QueueItemRef, ProtocolBinding: c.ProtocolBinding,
-		InitialBudgets: c.InitialBudgets, PriorityClass: c.PriorityClass,
+		Budgets: c.Budgets, PriorityClass: c.PriorityClass,
 		PeerOutboxRef: c.PeerOutboxRef, GoalID: c.GoalID, GoalRound: c.GoalRound,
 	}}, nil
 }
@@ -42,7 +42,7 @@ func (d *decision) admit(c *AdmitRunCommand) ([]Event, error) {
 		QueueDecisionRef: c.QueueDecisionRef, ContextEpoch: c.ContextEpoch,
 		StartRunID: c.StartRunID, InitialContextRevision: c.InitialContextRevision,
 	}
-	plan, err := d.planStep(1)
+	plan, err := d.planStep(1, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -67,31 +67,93 @@ func (d *decision) advance(c *AdvanceRunCommand) ([]Event, error) {
 	if err := d.closedStep(); err != nil {
 		return nil, err
 	}
-	return d.planStep(c.StepIndex)
+	if d.budgetExhausted(BudgetKindTokens) {
+		return []Event{d.budgetBlock(BudgetKindTokens)}, nil
+	}
+	return d.planStep(c.StepIndex, d.continuationInjection())
 }
 
-func (d *decision) planStep(index int) ([]Event, error) {
+// continuationInjection returns the labelled "continue where you stopped" message
+// the step after an automatic length continuation must receive, or nil. The
+// host owns the text; the kernel records only that it was injected.
+func (d *decision) continuationInjection() *ContextInjectedEvent {
+	if d.state.StepReason != ContinuationReasonTruncatedContinue {
+		return nil
+	}
+	return &ContextInjectedEvent{
+		Envelope: Envelope{}, Tag: "continue", Source: string(ContinuationReasonTruncatedContinue),
+		PayloadRef: d.facts.ContinuationPromptRef,
+	}
+}
+
+func validTurnPlan(p *ModelRequestPlannedEvent) bool {
+	return p != nil && p.InvocationID != "" && p.FirstAttemptID != "" && p.Purpose == "turn" &&
+		p.ModelRef != "" && p.ContextRef != "" && p.EstimatedBudgetTokens >= 0
+}
+
+func (d *decision) planStep(index int, injected *ContextInjectedEvent) ([]Event, error) {
 	p := d.facts.ModelPlan
-	if index <= 0 || p == nil || p.InvocationID == "" || p.FirstAttemptID == "" || p.Purpose != "turn" ||
-		p.ModelRef == "" || p.ContextRef == "" || p.EstimatedBudgetTokens < 0 {
+	if index <= 0 || !validTurnPlan(p) {
 		return nil, Reject(RejectionCodeCommandRejected, "invalid model plan")
 	}
 	if d.invocationExists(p.InvocationID) || attemptExists(d.state, p.FirstAttemptID) {
 		return nil, Reject(RejectionCodeDuplicateAttempt, "reused model identity")
 	}
+	if injected != nil && injected.PayloadRef == "" {
+		return nil, Reject(RejectionCodeCommandRejected, "missing continuation prompt")
+	}
 	plan := *p
-	plan.Envelope = d.envelope()
-	step := &StepStartedEvent{Envelope: plan.Envelope, StepIndex: index, ContextRefs: slices.Clone(d.facts.ContextRefs)}
+	step := &StepStartedEvent{Envelope: d.envelope(), StepIndex: index, ContextRefs: slices.Clone(d.facts.ContextRefs)}
+	events := []Event{step}
+	if injected != nil {
+		injection := *injected
+		injection.Envelope = d.envelope()
+		events = append(events, &injection)
+	}
 	plan.Envelope = d.envelope()
 	plan.ToolDeclarationRefs = slices.Clone(p.ToolDeclarationRefs)
-	return []Event{step, &plan}, nil
+	return append(events, &plan), nil
 }
 
-func (d *decision) completeStep(responseRef string, resultRefs []string, continuation StepContinuation) Event {
-	return &StepCompletedEvent{
+// stepOutcome gathers the recorded facts AfterStep decides on. The caller passes
+// what only the current response or tool batch knows.
+func (d *decision) stepOutcome(finish FinishReason, toolCalls int) StepOutcome {
+	allTerminate := toolCalls > 0
+	for _, id := range d.state.ToolOrder {
+		if t := d.state.ToolInvocations[id]; t == nil || !t.Plan.Terminates {
+			allTerminate = false
+		}
+	}
+	return StepOutcome{
+		FinishReason: finish, ToolCalls: toolCalls, AllTerminate: allTerminate,
+		SteerPending: d.facts.SteerPending, StopIntent: false, AutoContinued: d.state.AutoContinued,
+		StepsUsed: d.state.StepsUsed, StepsLimit: d.state.BudgetLimit(BudgetKindSteps),
+	}
+}
+
+// closeStep records the step completion and what the decision implies: the
+// run finishing, or the run waiting on the step budget. A continuing step
+// records nothing more; the caller plans the next step.
+func (d *decision) closeStep(dec *StepDecision, responseRef string, resultRefs []string) []Event {
+	continuation := StepContinuationEnd
+	if dec.Continue || dec.Reason == ContinuationReasonBudget {
+		continuation = StepContinuationContinue
+	}
+	events := []Event{&StepCompletedEvent{
 		Envelope: d.envelope(), StepIndex: d.state.CurrentStepIndex,
 		ResponseRef: responseRef, OrderedResultRefs: resultRefs, Continuation: continuation,
+		Reason: dec.Reason, BudgetKind: dec.BudgetKind,
+	}}
+	switch {
+	case dec.Reason == ContinuationReasonBudget:
+		return append(events, d.budgetBlock(dec.BudgetKind))
+	case dec.Outcome != "":
+		return append(events, &RunFinishedEvent{
+			Envelope: d.envelope(), Outcome: dec.Outcome, Truncated: dec.Truncated, FailureCode: dec.FailureCode,
+			PrimaryStopRef: "", SecondaryStopRefs: nil, UnresolvedExposureRefs: nil,
+		})
 	}
+	return events
 }
 
 func (d *decision) validateAdmission(c *AdmitRunCommand) error {
@@ -110,7 +172,7 @@ func (d *decision) validateAdmission(c *AdmitRunCommand) error {
 func (d *decision) validateAcceptance(c *AcceptRunCommand) error {
 	e := d.next
 	if c.CommandID != e.CommandID || c.RunID != e.RunID || c.Origin != e.Origin || e.Token != 0 ||
-		c.InputRef == "" || c.SessionID == "" || c.QueueItemRef == "" || c.ProtocolBinding == "" {
+		c.InputRef == "" || c.SessionID == "" || c.QueueItemRef == "" || c.ProtocolBinding == "" || !c.Budgets.valid() {
 		return Reject(RejectionCodeCommandRejected, "invalid acceptance")
 	}
 	return nil

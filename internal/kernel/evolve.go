@@ -1,6 +1,9 @@
 package kernel
 
-import "slices"
+import (
+	"maps"
+	"slices"
+)
 
 // Evolve is the pure total state transition function of the kernel state machine.
 // Given the current state and an event, it returns the next state without mutating
@@ -59,6 +62,10 @@ func cloneState(s *State) State {
 	next.ActiveTimers = cloneActiveTimers(s.ActiveTimers)
 	next.InterruptionCauses = cloneInterruptionCauses(s.InterruptionCauses)
 	next.QuiescingAttempts = cloneQuiescingAttempts(s.QuiescingAttempts)
+	next.Extensions = maps.Clone(s.Extensions)
+	if next.Extensions == nil {
+		next.Extensions = make(map[BudgetKind]int64)
+	}
 	if s.StopIntent != nil {
 		stopCopy := *s.StopIntent
 		next.StopIntent = &stopCopy

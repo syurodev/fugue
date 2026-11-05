@@ -67,7 +67,9 @@ const (
 	cmdResumeRun              = "ResumeRun"
 	cmdRecoverRun             = "RecoverRun"
 	cmdRequestStop            = "RequestStop"
+	cmdExtendBudget           = "ExtendBudget"
 	fieldRunRevision          = "RunRevision"
+	fieldActor                = "Actor"
 )
 
 // AdmissionFence binds an append operation to an active admitted run.

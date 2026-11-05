@@ -19,6 +19,10 @@ type DecisionFacts struct {
 	ModelDispatch            *ModelDispatchStartedEvent
 	Usage                    *BudgetObservedEvent
 	ContextRefs              []string
+	SteerPending             bool
+	ContinuationPromptRef    string
+	LoopReminderRef          string
+	SyntheticResultRefs      []string
 }
 
 type decision struct {
@@ -50,8 +54,14 @@ func (d *decision) validateEnvelope() error {
 		return Reject(RejectionCodeCommandRejected, "missing command metadata")
 	}
 	// Reserve enough sequence space for any supported batch before adding events.
-	if d.state.LastSequence > math.MaxUint64-4 ||
-		uint64(len(d.facts.ToolPlans)) > math.MaxUint64-d.state.LastSequence-2 || e.Sequence != d.state.LastSequence+1 {
+	// The longest batch is a cut answer: response, usage, then a plan and a
+	// synthetic result per tool, the step close and a block or finish.
+	reserve := uint64(4)
+	if d.facts.LoopReminderRef != "" {
+		reserve++ // a tool result may also carry a loop reminder
+	}
+	if d.state.LastSequence > math.MaxUint64-reserve ||
+		2*uint64(len(d.facts.ToolPlans)) > math.MaxUint64-d.state.LastSequence-reserve || e.Sequence != d.state.LastSequence+1 {
 		return Reject(RejectionCodeInvalidState, "invalid batch sequence")
 	}
 	if d.state.RunID != "" && e.RunID != d.state.RunID {
@@ -84,6 +94,10 @@ func (d *decision) command(command Command) ([]Event, error) {
 		return d.check(c)
 	case *ObserveToolResultCommand:
 		return d.result(c)
+	case *ExtendBudgetCommand:
+		return d.extend(c)
+	case *RequestStopCommand:
+		return d.requestStop(c)
 	}
 	return nil, Reject(RejectionCodeUnrecognizedCommand, "unsupported or nil command")
 }
