@@ -166,6 +166,7 @@ func evolveStepLifecycleEvents(s *State, e Event) bool {
 	case *StepCompletedEvent:
 		s.StepCompleted = true
 		s.StepContinuation = ev.Continuation
+		s.StepReason = ev.Reason
 		if ev.Reason == ContinuationReasonTruncatedContinue {
 			s.AutoContinued = true
 		}

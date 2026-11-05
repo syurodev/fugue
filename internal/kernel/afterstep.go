@@ -1,5 +1,8 @@
 package kernel
 
+// failureCodeRefused is the RunFinished.FailureCode of a run that ended on a refusal (Q-16).
+const failureCodeRefused = "refused"
+
 // StepOutcome holds the recorded facts of a completed step that decide what
 // happens next. It carries no payloads: every field is a count, a flag or a
 // reason the host already wrote into an event.
@@ -49,7 +52,7 @@ func stepRow(o StepOutcome) StepDecision {
 		// The stop path (F3.2) owns the outcome of a stop; this row only records why.
 		return StepDecision{Reason: ContinuationReasonStopIntent}
 	case o.FinishReason == FinishReasonRefusal:
-		return StepDecision{Reason: ContinuationReasonRefused, Outcome: RunOutcomeFailed, FailureCode: "refused"}
+		return StepDecision{Reason: ContinuationReasonRefused, Outcome: RunOutcomeFailed, FailureCode: failureCodeRefused}
 	case o.FinishReason == FinishReasonLength && o.ToolCalls > 0:
 		return StepDecision{Reason: ContinuationReasonTruncatedArgs, Continue: true}
 	case o.ToolCalls > 0 && o.AllTerminate:

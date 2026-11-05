@@ -22,6 +22,7 @@ type DecisionFacts struct {
 	SteerPending             bool
 	ContinuationPromptRef    string
 	LoopReminderRef          string
+	SyntheticResultRefs      []string
 }
 
 type decision struct {
@@ -53,8 +54,10 @@ func (d *decision) validateEnvelope() error {
 		return Reject(RejectionCodeCommandRejected, "missing command metadata")
 	}
 	// Reserve enough sequence space for any supported batch before adding events.
+	// The longest batch is a cut answer: response, usage, then a plan and a
+	// synthetic result per tool, the step close and a block or finish.
 	if d.state.LastSequence > math.MaxUint64-4 ||
-		uint64(len(d.facts.ToolPlans)) > math.MaxUint64-d.state.LastSequence-2 || e.Sequence != d.state.LastSequence+1 {
+		2*uint64(len(d.facts.ToolPlans)) > math.MaxUint64-d.state.LastSequence-4 || e.Sequence != d.state.LastSequence+1 {
 		return Reject(RejectionCodeInvalidState, "invalid batch sequence")
 	}
 	if d.state.RunID != "" && e.RunID != d.state.RunID {

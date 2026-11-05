@@ -151,16 +151,20 @@ func (d *decision) finishToolBatch(c *ObserveToolResultCommand, e *ToolResultRec
 	if response == nil {
 		return nil, Reject(RejectionCodeInvalidState, "missing selected response")
 	}
-	completion := d.completeStep(response.Response.ResponseRef, refs, StepContinuationContinue, ContinuationReasonToolCalls)
+	dec := AfterStep(d.stepOutcome(response.Response.FinishReason, len(d.state.ToolOrder)))
+	events := append([]Event{e}, d.closeStep(&dec, response.Response.ResponseRef, refs)...)
+	if !dec.Continue {
+		return events, nil
+	}
 	index, err := d.nextStepIndex()
 	if err != nil {
 		return nil, err
 	}
-	plan, err := d.planStep(index)
+	plan, err := d.planStep(index, nil)
 	if err != nil {
 		return nil, err
 	}
-	return append([]Event{e, completion}, plan...), nil
+	return append(events, plan...), nil
 }
 
 func validateToolCheck(c *ObserveToolCheckCommand, t *ToolInvocation) error {

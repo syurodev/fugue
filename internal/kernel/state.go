@@ -123,6 +123,7 @@ type State struct {
 	TokensUsed               int64
 	ToolCallsDispatched      int64
 	AutoContinued            bool
+	StepReason               ContinuationReason
 }
 
 // NewState returns an initialized empty State with non-nil maps and slices.
@@ -160,5 +161,6 @@ func NewState() *State {
 		TokensUsed:               0,
 		ToolCallsDispatched:      0,
 		AutoContinued:            false,
+		StepReason:               "",
 	}
 }

@@ -184,6 +184,14 @@ const (
 	FinishReasonRefusal FinishReason = "refusal"
 )
 
+func (r FinishReason) valid() bool {
+	switch r {
+	case FinishReasonStop, FinishReasonToolUse, FinishReasonLength, FinishReasonRefusal:
+		return true
+	}
+	return false
+}
+
 // ContinuationReason is the recorded reason a step continued, ended or made the run wait.
 type ContinuationReason string
 
