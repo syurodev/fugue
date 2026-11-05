@@ -9,7 +9,7 @@ type RunAcceptedEvent struct {
 	SessionID       string
 	QueueItemRef    string
 	ProtocolBinding string
-	InitialBudgets  string
+	Budgets         RunBudgets
 	PriorityClass   string
 	PeerOutboxRef   string
 	GoalID          string
@@ -269,6 +269,7 @@ type RunFinishedEvent struct {
 	Envelope               Envelope
 	Outcome                RunOutcome
 	Truncated              bool
+	FailureCode            string
 	PrimaryStopRef         string
 	SecondaryStopRefs      []string
 	UnresolvedExposureRefs []string

@@ -38,7 +38,7 @@ func testEvolveRunLifecycleEvents(t *testing.T, env *Envelope, now time.Time) *S
 	s := NewState()
 	s = Evolve(s, &RunAcceptedEvent{
 		Envelope: *env, InputRef: evInput, SessionID: evSession, QueueItemRef: "q-1",
-		ProtocolBinding: "proto", InitialBudgets: "b", PriorityClass: "default",
+		ProtocolBinding: "proto", Budgets: DefaultRunBudgets(), PriorityClass: "default",
 		PeerOutboxRef: "", GoalID: "", GoalRound: 0,
 	})
 	if !s.Accepted || s.RunID != evRunID {
@@ -145,7 +145,7 @@ func testEvolveRunClosuresAndBoundaries(t *testing.T, s *State, env *Envelope, n
 
 	s.ActiveTimers["t1"] = &ActiveTimer{TimerID: "t1", Generation: 1, Purpose: TimerPurposeRunDeadline, Deadline: now}
 	s = Evolve(s, &RunFinishedEvent{
-		Envelope: *env, Outcome: RunOutcomeCompleted, Truncated: false, PrimaryStopRef: "stop",
+		Envelope: *env, Outcome: RunOutcomeCompleted, Truncated: false, FailureCode: "", PrimaryStopRef: "stop",
 		SecondaryStopRefs: nil, UnresolvedExposureRefs: nil,
 	})
 	if !s.Finished || s.Outcome != RunOutcomeCompleted || len(s.ActiveTimers) != 0 {
@@ -178,7 +178,7 @@ func testEvolveStepEvents(t *testing.T, s *State, env *Envelope, now time.Time) 
 		TargetInvocationID: "inv-1", QuiesceResult: "quiesced",
 	})
 
-	s = Evolve(s, &StepCompletedEvent{Envelope: *env, StepIndex: 0, ResponseRef: evResp, OrderedResultRefs: []string{"r"}, Continuation: StepContinuationContinue})
+	s = Evolve(s, &StepCompletedEvent{Envelope: *env, StepIndex: 0, ResponseRef: evResp, OrderedResultRefs: []string{"r"}, Continuation: StepContinuationContinue, Reason: ContinuationReasonToolCalls, BudgetKind: ""})
 	if !s.StepCompleted || s.StepContinuation != StepContinuationContinue {
 		t.Fatalf("StepCompleted failed")
 	}
@@ -264,7 +264,7 @@ func TestEvolveQuiesceLifecycle(t *testing.T) {
 
 	s = Evolve(s, &ToolCallPlannedEvent{
 		Envelope: env, ToolCallID: evToolQ, SourcePosition: 0, DescriptorVersion: evDescriptorVer,
-		EffectClass: EffectClassSideEffecting, FirstAttemptID: evAttemptQ, InputRef: "",
+		EffectClass: EffectClassSideEffecting, FirstAttemptID: evAttemptQ, InputRef: "", Terminates: false, RepeatsPrevious: false,
 	})
 	s = Evolve(s, &ToolDispatchStartedEvent{
 		Envelope: env, ToolCallID: evToolQ, AttemptID: evAttemptQ, CheckGeneration: 1,
@@ -427,7 +427,7 @@ func TestEvolveIdempotenceAndMonotonicity(t *testing.T) {
 		env1 := testEnvelope(evRunID, 10, now)
 		s = Evolve(s, &ToolCallPlannedEvent{
 			Envelope: env1, ToolCallID: "tc-idem", SourcePosition: 0, DescriptorVersion: evDescriptorVer,
-			EffectClass: EffectClassPureRead, FirstAttemptID: "att-idem-1", InputRef: "",
+			EffectClass: EffectClassPureRead, FirstAttemptID: "att-idem-1", InputRef: "", Terminates: false, RepeatsPrevious: false,
 		})
 		if s.LastSequence != 10 {
 			t.Fatalf("expected LastSequence 10, got %d", s.LastSequence)
@@ -439,7 +439,7 @@ func TestEvolveIdempotenceAndMonotonicity(t *testing.T) {
 		env2 := testEnvelope(evRunID, 11, now)
 		s = Evolve(s, &ToolCallPlannedEvent{
 			Envelope: env2, ToolCallID: "tc-idem", SourcePosition: 0, DescriptorVersion: evDescriptorVer,
-			EffectClass: EffectClassPureRead, FirstAttemptID: "att-idem-1", InputRef: "",
+			EffectClass: EffectClassPureRead, FirstAttemptID: "att-idem-1", InputRef: "", Terminates: false, RepeatsPrevious: false,
 		})
 		if s.LastSequence != 11 {
 			t.Fatalf("expected LastSequence 11, got %d", s.LastSequence)
@@ -455,7 +455,7 @@ func TestEvolveIdempotenceAndMonotonicity(t *testing.T) {
 		s = Evolve(s, &RunAcceptedEvent{
 			Envelope: testEnvelope("run-orig", 1, now),
 			InputRef: "", SessionID: "", QueueItemRef: "", ProtocolBinding: "",
-			InitialBudgets: "", PriorityClass: "", PeerOutboxRef: "", GoalID: "", GoalRound: 0,
+			Budgets: DefaultRunBudgets(), PriorityClass: "", PeerOutboxRef: "", GoalID: "", GoalRound: 0,
 		})
 		if s.RunID != "run-orig" {
 			t.Fatalf("expected RunID run-orig, got %s", s.RunID)
@@ -463,7 +463,7 @@ func TestEvolveIdempotenceAndMonotonicity(t *testing.T) {
 		s = Evolve(s, &RunAcceptedEvent{
 			Envelope: testEnvelope("run-other", 2, now),
 			InputRef: "", SessionID: "", QueueItemRef: "", ProtocolBinding: "",
-			InitialBudgets: "", PriorityClass: "", PeerOutboxRef: "", GoalID: "", GoalRound: 0,
+			Budgets: DefaultRunBudgets(), PriorityClass: "", PeerOutboxRef: "", GoalID: "", GoalRound: 0,
 		})
 		if s.RunID != "run-orig" {
 			t.Fatalf("expected RunID to remain run-orig, got %s", s.RunID)

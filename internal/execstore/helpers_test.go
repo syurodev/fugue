@@ -143,7 +143,7 @@ func makeRunAccepted(env *kernel.Envelope, sessionID, inputRef string) *kernel.R
 		SessionID:       sessionID,
 		QueueItemRef:    "",
 		ProtocolBinding: "",
-		InitialBudgets:  "",
+		Budgets:         kernel.DefaultRunBudgets(),
 		PriorityClass:   "",
 		PeerOutboxRef:   "",
 		GoalID:          "",
@@ -203,6 +203,7 @@ func makeRunFinished(env *kernel.Envelope, outcome kernel.RunOutcome) *kernel.Ru
 		Envelope:               e,
 		Outcome:                outcome,
 		Truncated:              false,
+		FailureCode:            "",
 		PrimaryStopRef:         "",
 		SecondaryStopRefs:      nil,
 		UnresolvedExposureRefs: nil,
@@ -222,6 +223,8 @@ func makeToolCallPlanned(env *kernel.Envelope, toolCallID, firstAttemptID string
 		EffectClass:       effect,
 		FirstAttemptID:    firstAttemptID,
 		InputRef:          "",
+		Terminates:        false,
+		RepeatsPrevious:   false,
 	}
 }
 
@@ -270,6 +273,7 @@ func makeModelResponseRecorded(env *kernel.Envelope, invID, attID, respRef strin
 		InvocationID: invID,
 		ResponseRef:  respRef,
 		UsageStatus:  "known",
+		FinishReason: kernel.FinishReasonStop,
 	}
 }
 

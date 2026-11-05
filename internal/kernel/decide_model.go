@@ -109,7 +109,7 @@ func (d *decision) response(c *ObserveModelResponseCommand) ([]Event, error) {
 	}
 	e := &ModelResponseRecordedEvent{
 		Envelope: att.Response.Envelope, InvocationID: c.InvocationID,
-		AttemptID: c.AttemptID, ResponseRef: c.ResponseRef, UsageStatus: c.UsageStatus,
+		AttemptID: c.AttemptID, ResponseRef: c.ResponseRef, UsageStatus: c.UsageStatus, FinishReason: c.FinishReason,
 	}
 	if att.Status == ModelAttemptStatusCompleted {
 		return d.duplicateResponse(inv, att, e)
@@ -137,9 +137,9 @@ func (d *decision) responseEvents(e *ModelResponseRecordedEvent) []Event {
 	usage.Envelope = d.envelope()
 	events := []Event{e, &usage}
 	if len(d.facts.ToolPlans) == 0 {
-		return append(events, d.completeStep(e.ResponseRef, nil, StepContinuationEnd),
+		return append(events, d.completeStep(e.ResponseRef, nil, StepContinuationEnd, ContinuationReasonNaturalEnd),
 			&RunFinishedEvent{
-				Envelope: d.envelope(), Outcome: RunOutcomeCompleted, Truncated: false,
+				Envelope: d.envelope(), Outcome: RunOutcomeCompleted, Truncated: false, FailureCode: "",
 				PrimaryStopRef: "", SecondaryStopRefs: nil, UnresolvedExposureRefs: nil,
 			})
 	}

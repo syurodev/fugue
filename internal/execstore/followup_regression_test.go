@@ -252,6 +252,7 @@ func TestQueueFenceEnvelopesAndAuthorityCoverage(t *testing.T) {
 		Envelope:               *makeEnvelope(testRunReg, 1, "c-cov-wrong", 0, s.clk.Now()),
 		Outcome:                "",
 		Truncated:              false,
+		FailureCode:            "",
 		PrimaryStopRef:         "",
 		SecondaryStopRefs:      nil,
 		UnresolvedExposureRefs: nil,

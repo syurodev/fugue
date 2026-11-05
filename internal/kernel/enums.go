@@ -173,6 +173,34 @@ const (
 	StepContinuationEnd      StepContinuation = "end"
 )
 
+// FinishReason is why a model response ended, normalized by the model adapter.
+type FinishReason string
+
+// FinishReason values. Adapters map a provider content filter to refusal.
+const (
+	FinishReasonStop    FinishReason = "stop"
+	FinishReasonToolUse FinishReason = "tool_use"
+	FinishReasonLength  FinishReason = "length"
+	FinishReasonRefusal FinishReason = "refusal"
+)
+
+// ContinuationReason is the recorded reason a step continued, ended or made the run wait.
+type ContinuationReason string
+
+// ContinuationReason values (continuation §2, §6).
+const (
+	ContinuationReasonToolCalls         ContinuationReason = "tool_calls"
+	ContinuationReasonTruncatedArgs     ContinuationReason = "truncated_args"
+	ContinuationReasonSteerPending      ContinuationReason = "steer_pending"
+	ContinuationReasonNaturalEnd        ContinuationReason = "natural_end"
+	ContinuationReasonTruncatedContinue ContinuationReason = "truncated_continue"
+	ContinuationReasonTruncatedEnd      ContinuationReason = "truncated_end"
+	ContinuationReasonToolTerminate     ContinuationReason = "tool_terminate"
+	ContinuationReasonRefused           ContinuationReason = "refused"
+	ContinuationReasonBudget            ContinuationReason = "budget"
+	ContinuationReasonStopIntent        ContinuationReason = "stop_intent"
+)
+
 // ContextRequirement expresses the context requirement on admission after an abnormal close.
 type ContextRequirement string
 

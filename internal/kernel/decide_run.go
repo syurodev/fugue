@@ -18,7 +18,7 @@ func (d *decision) accept(c *AcceptRunCommand) ([]Event, error) {
 	return []Event{&RunAcceptedEvent{
 		Envelope: d.envelope(), InputRef: c.InputRef, SessionID: c.SessionID,
 		QueueItemRef: c.QueueItemRef, ProtocolBinding: c.ProtocolBinding,
-		InitialBudgets: c.InitialBudgets, PriorityClass: c.PriorityClass,
+		Budgets: c.Budgets, PriorityClass: c.PriorityClass,
 		PeerOutboxRef: c.PeerOutboxRef, GoalID: c.GoalID, GoalRound: c.GoalRound,
 	}}, nil
 }
@@ -87,10 +87,11 @@ func (d *decision) planStep(index int) ([]Event, error) {
 	return []Event{step, &plan}, nil
 }
 
-func (d *decision) completeStep(responseRef string, resultRefs []string, continuation StepContinuation) Event {
+func (d *decision) completeStep(responseRef string, resultRefs []string, continuation StepContinuation, reason ContinuationReason) Event {
 	return &StepCompletedEvent{
 		Envelope: d.envelope(), StepIndex: d.state.CurrentStepIndex,
 		ResponseRef: responseRef, OrderedResultRefs: resultRefs, Continuation: continuation,
+		Reason: reason, BudgetKind: "",
 	}
 }
 
@@ -110,7 +111,7 @@ func (d *decision) validateAdmission(c *AdmitRunCommand) error {
 func (d *decision) validateAcceptance(c *AcceptRunCommand) error {
 	e := d.next
 	if c.CommandID != e.CommandID || c.RunID != e.RunID || c.Origin != e.Origin || e.Token != 0 ||
-		c.InputRef == "" || c.SessionID == "" || c.QueueItemRef == "" || c.ProtocolBinding == "" {
+		c.InputRef == "" || c.SessionID == "" || c.QueueItemRef == "" || c.ProtocolBinding == "" || !c.Budgets.valid() {
 		return Reject(RejectionCodeCommandRejected, "invalid acceptance")
 	}
 	return nil

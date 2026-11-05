@@ -19,6 +19,9 @@ type DecisionFacts struct {
 	ModelDispatch            *ModelDispatchStartedEvent
 	Usage                    *BudgetObservedEvent
 	ContextRefs              []string
+	SteerPending             bool
+	ContinuationPromptRef    string
+	LoopReminderRef          string
 }
 
 type decision struct {

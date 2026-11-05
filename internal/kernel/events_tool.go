@@ -11,6 +11,8 @@ type ToolCallPlannedEvent struct {
 	EffectClass       EffectClass
 	FirstAttemptID    string
 	InputRef          string
+	Terminates        bool
+	RepeatsPrevious   bool
 }
 
 // EventName returns the canonical event name.

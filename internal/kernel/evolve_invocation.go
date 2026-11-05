@@ -187,6 +187,7 @@ func setToolStatusIf(s *State, toolID string, current, target ToolAttemptStatus)
 func evolveToolDispatchEvents(s *State, e Event) bool {
 	switch ev := e.(type) {
 	case *ToolDispatchStartedEvent:
+		s.ToolCallsDispatched++
 		updateToolAttemptStatus(s, ev.ToolCallID, ev.AttemptID, ToolAttemptStatusDispatching)
 		if tool := s.ToolInvocations[ev.ToolCallID]; tool != nil && tool.Attempts[ev.AttemptID] != nil {
 			tool.Attempts[ev.AttemptID].Dispatch = *ev
@@ -304,6 +305,9 @@ func recordToolResult(s *State, ev *ToolResultRecordedEvent) {
 func evolveTimerBudgetEvents(s *State, e Event) bool {
 	switch ev := e.(type) {
 	case *BudgetObservedEvent:
+		if ev.TokensUsed > 0 {
+			s.TokensUsed += int64(ev.TokensUsed)
+		}
 		recordResponseUsage(s, ev)
 		return true
 	case *TimeBudgetWindowOpenedEvent, *TimeBudgetWindowClosedEvent:

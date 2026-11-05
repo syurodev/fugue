@@ -151,7 +151,7 @@ func (d *decision) finishToolBatch(c *ObserveToolResultCommand, e *ToolResultRec
 	if response == nil {
 		return nil, Reject(RejectionCodeInvalidState, "missing selected response")
 	}
-	completion := d.completeStep(response.Response.ResponseRef, refs, StepContinuationContinue)
+	completion := d.completeStep(response.Response.ResponseRef, refs, StepContinuationContinue, ContinuationReasonToolCalls)
 	index, err := d.nextStepIndex()
 	if err != nil {
 		return nil, err
