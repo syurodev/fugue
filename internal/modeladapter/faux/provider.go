@@ -80,6 +80,9 @@ func (p *Provider) play(ctx context.Context, result chan<- modeladapter.Event, s
 		return
 	}
 	for i := range script.Events {
+		if p.recordCancellation(ctx) {
+			return
+		}
 		if script.Cut && i == script.CutAfter {
 			p.cut.Add(1)
 			return
@@ -96,7 +99,19 @@ func (p *Provider) play(ctx context.Context, result chan<- modeladapter.Event, s
 			return
 		}
 	}
-	p.cut.Add(1)
+	if !p.recordCancellation(ctx) {
+		p.cut.Add(1)
+	}
+}
+
+// Select may send even when cancellation is ready. Recheck before more content
+// or nonterminal exhaustion; an emitted done/error remains authoritative.
+func (p *Provider) recordCancellation(ctx context.Context) bool {
+	if ctx.Err() == nil {
+		return false
+	}
+	p.cancel.Add(1)
+	return true
 }
 
 func cloneEvents(events []modeladapter.Event) []modeladapter.Event {
