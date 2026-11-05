@@ -73,8 +73,8 @@ Every rule below is machine-enforced; the full list and thresholds are in
 
 - Go version and toolchain are pinned in `go.mod`; dev tools are pinned with `tool` directives.
 - `task check` runs every PR gate locally: format, lint, `fuguevet`, architecture tests, tests
-  with race and coverage, dead code, module hygiene, proto, short fuzz, mutation on changed
-  packages.
+  with race and coverage, dead code, module hygiene, proto, short fuzz. Mutation on changed
+  packages is paused (quality-gates §11); run `task mutation-changed` by hand when needed.
 - `task fix` applies formatters only.
 - `go test ./internal/arch/` after any change to packages, imports, tables or dependencies.
 - After changing a `.proto` file run `task generate` and commit the generated code; `task proto`
