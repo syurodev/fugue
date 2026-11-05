@@ -207,6 +207,7 @@ func stateWithToolFrontier() *kernel.State {
 	state.Admitted = true
 	state.AdmissionToken = 7
 	state.OwnerIncarnation = 3
+	state.Budgets = kernel.DefaultRunBudgets() // an accepted run always pins its budgets
 	state.StepStarted = true
 	state.CurrentModelInvocationID = "model-call"
 	state.ModelInvocations["model-call"] = &kernel.ModelInvocation{
