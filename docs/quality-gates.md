@@ -91,7 +91,7 @@ Ordinary Go tests that read the package graph with `go list -deps -json` and the
 | All tests run with `-race -shuffle=on -count=1` | `test` job |
 | No `time.Sleep` in tests; time goes through the fake clock | `forbidigo` |
 | Statement coverage: `kernel`, `codec`, `execstore`, `coordinator`, `crypto`, `vault` **≥ 90%**; other `internal/*` packages **≥ 80%**; `cmd` and generated code excluded | Per-package `quality/coverage.json`; a drop of more than 0.5 points below baseline fails |
-| Mutation score (`gremlins`) **≥ 85%** for `kernel`, `codec`, `execstore`, `coordinator` guards, `crypto`, `vault` | PR: changed packages; discovery and each package have a separate 20-minute default timebox; nightly: everything with the same per-package timebox |
+| Mutation score (`gremlins`) **≥ 85%** for `kernel`, `codec`, `execstore`, `coordinator` guards, `crypto`, `vault` | PR: changed packages, **paused since 2026-11-05** (§11); discovery and each package have a separate 20-minute default timebox; nightly: everything with the same per-package timebox |
 | Property-based tests (`pgregory.net/rapid`) for the kernel: random command sequences, invariant checker after every batch, replaying twice yields the same state | Required test of F2.2 |
 | Fuzzing for every decoder and parser: codec, payload envelope, provider stream converters, path validation | PR: 20 s per target; nightly: 10 minutes; the `testdata/fuzz` corpus runs as ordinary tests |
 | Golden files for traces and provider streams, updated with `-update`; a golden change needs a reason in the PR | Review; the `generate` job blocks stale golden files |
@@ -143,7 +143,7 @@ still apply locally and in CI. No per-invocation configuration is required.
 **PR (must pass to merge):** `fmt`, `lint`, `vet` (including `fuguevet`), `arch`, `test` (macOS
 and Linux), `coverage`, `deadcode`, `mod` (tidy, verify, govulncheck, licenses), `proto`
 (`buf lint`, `buf breaking` against `main`, generate without diff), `fuzz-short`,
-`mutation-changed`, `gate-guard`.
+`mutation-changed` (paused since 2026-11-05: the job reports success without running, see §11), `gate-guard`.
 
 **Nightly:** long fuzzing, full mutation, tests with `-count=5`, Windows build.
 
@@ -172,3 +172,4 @@ Gate-defining files: `.golangci.yml`, `tools/fuguevet/**`, `internal/arch/**`, `
 | 2026-11-01 | `wrapcheck`: `internal/platform/errcode` is ignored as a package boundary | Its constructors are how the repository wraps errors; flagging them would force a wrapper around every typed error. Narrow exception, fixture for `wrapcheck` unchanged | user (label on the F0.8 PR) |
 | 2026-11-02 | `go-licenses check`: `--ignore=modernc.org/mathutil` | `modernc.org/mathutil@v1.7.1` is BSD-3-Clause (`Copyright (c) 2014 The mathutil Authors`), but its third clause words "the authors" instead of "the copyright holder", scoring ~0.88 in `google/licenseclassifier` below the 0.90 default; `--ignore` still checks its dependencies (`bigfft`) | user (label on the F1.3 PR) |
 | 2026-11-05 | Mutation budget: 20 minutes per package instead of one shared 20-minute deadline | PR #52 completed crypto at 98.1% and execstore at 88.4%, leaving vault only 6.9 seconds. Vault passes separately at 96.1%. Give discovery and each package their own budget; preserve the 85% threshold, selected packages, per-mutant timeout coefficient and CPU limits. Regression: `TestMutationPackageBudgetDoesNotCancelNextPackage` | user (chat approval; owner-applied `gate-change-approved` on PR #52) |
+| 2026-11-05 | Mutation on changed packages **paused**: the PR job `mutation-changed` reports success without running, and `task check` no longer runs it. Threshold (85 %), package selection, budgets and the nightly `mutation-full` job are unchanged; `task mutation-changed` still runs by hand | It made every PR and local check too slow for the current pace of work. Temporary: re-enable by restoring the job step and the `task check` step together, at the latest before F8.1 (`task release-check`). Until then, a nightly `mutation-full` failure is fixed like a broken build. Guard: `TestTaskfileRunsEveryGate` requires the task to exist and the pause to be explicit | user (chat request) |

@@ -35,7 +35,7 @@ tasks:
       - task: mod
       - task: proto
       - task: fuzz-short
-      - task: mutation-changed
+      # mutation-changed is paused (quality-gates §11); run it by hand with `task mutation-changed`.
 
   fix:
     desc: Apply formatters only
