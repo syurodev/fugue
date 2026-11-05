@@ -175,7 +175,10 @@ type ObserveToolResultCommand struct {
 // CommandName returns the canonical command name.
 func (*ObserveToolResultCommand) CommandName() string { return "ObserveToolResult" }
 
-// RequestStopCommand requests stopping or suspending active execution.
+// RequestStopCommand requests stopping or suspending active execution. Today the
+// kernel decides only the user's end of a budget wait (reason budget, terminal
+// mode, user actor, origin and token as for any host-bound command); for that
+// stop Target is the BudgetKind of the wait being ended.
 type RequestStopCommand struct {
 	CommandID   string
 	RunID       string

@@ -5,8 +5,18 @@ import (
 	"strconv"
 )
 
-// actorUser is the only actor that may extend a budget or end a run that waits on one.
-const actorUser = "user"
+// originUser is the origin kind of a request the host received from the
+// authenticated user. Only the user may extend a budget or end a run that waits
+// on one (budget §4.1, state-machine §9).
+const originUser = "user"
+
+// userAuthority reports whether a command speaks for the user. The host sets the
+// envelope origin from the authenticated caller (event-storage-recovery §4), so
+// it is the proof; the command's Actor is only its own claim and counts when it
+// agrees. A model, worker, peer or timer origin never passes, whatever it claims.
+func (d *decision) userAuthority(actor string) bool {
+	return d.next.Origin == originUser && actor == originUser
+}
 
 // budgetBlock is the wait dependency a budget limit creates. Its ID is
 // deterministic so that a replay and a live run agree on which block to clear.
@@ -47,7 +57,7 @@ func (d *decision) extend(c *ExtendBudgetCommand) ([]Event, error) {
 		return nil, err
 	}
 	// Peers, parents, the model and goal mode can never grant themselves more budget.
-	if c.Actor != actorUser || c.ExtensionAmount <= 0 || !c.Kind.valid() ||
+	if !d.userAuthority(c.Actor) || c.ExtensionAmount <= 0 || !c.Kind.valid() ||
 		c.ExtensionAmount > math.MaxInt64-d.state.BudgetLimit(c.Kind) {
 		return nil, Reject(RejectionCodeCommandRejected, "invalid budget extension")
 	}
@@ -73,34 +83,59 @@ func (d *decision) endable() error {
 
 // requestStop is deliberately narrow (Q-17): it ends a run that waits on a
 // budget because the user chose "end". Every other stop belongs to F3.2.
+//
+// For this stop, Target is the BudgetKind of the wait being ended, as the user
+// sees it (the same name ExtendBudget takes as Kind). It is recorded on
+// RunStopRequested so the finished run keeps which budget ended it.
 func (d *decision) requestStop(c *RequestStopCommand) ([]Event, error) {
-	if c == nil || c.Reason != StopReasonBudget || c.Mode != StopModeTerminal || c.Actor != actorUser {
+	if c == nil || c.Reason != StopReasonBudget || c.Mode != StopModeTerminal || c.Actor != originUser {
 		return nil, Reject(RejectionCodeUnrecognizedCommand, "unsupported or nil command")
 	}
 	if err := d.target(c.CommandID, c.RunID, c.Origin, c.Token); err != nil {
 		return nil, err
 	}
+	if !d.userAuthority(c.Actor) {
+		return nil, Reject(RejectionCodeCommandRejected, "only the user ends a budget wait")
+	}
 	if err := d.endable(); err != nil {
 		return nil, err
 	}
-	// The target names the budget block being ended, which keeps the kind in the record.
-	if d.openBudgetBlock(c.Target) == nil || hasActiveAttempt(d.state) || c.RequestTime.IsZero() {
-		return nil, Reject(RejectionCodeInvalidTransition, "run is not waiting on a budget")
-	}
-	// A tool_calls wait leaves the step open with tools that never ran. Finishing
-	// then needs typed dispositions for them (state-machine §9), which belong to F3.2.
-	if hasOpenStep(d.state) {
-		return nil, Reject(RejectionCodeInvalidTransition, "step still has tool calls to dispose")
+	blockerID, err := d.endableBlock(c)
+	if err != nil {
+		return nil, err
 	}
 	stop := &RunStopRequestedEvent{
 		Envelope: d.envelope(), Reason: c.Reason, Mode: c.Mode, Actor: c.Actor, Target: c.Target, RequestTime: c.RequestTime,
 	}
 	// The block is cleared with the finish so a finished run never projects a wait reason.
-	cleared := &RunBlockClearedEvent{Envelope: d.envelope(), BlockerID: c.Target, ResolvingEvidence: "run_ended"}
+	cleared := &RunBlockClearedEvent{Envelope: d.envelope(), BlockerID: blockerID, ResolvingEvidence: "run_ended"}
 	finished := &RunFinishedEvent{
 		Envelope: d.envelope(), Outcome: RunOutcomeBudgetExceeded, Truncated: false, FailureCode: "",
-		PrimaryStopRef:    d.state.RunID + "#" + strconv.FormatUint(stop.Envelope.Sequence, 10),
+		PrimaryStopRef:    stopRef(d.state.RunID, stop.Envelope.Sequence),
 		SecondaryStopRefs: nil, UnresolvedExposureRefs: nil,
 	}
 	return []Event{stop, cleared, finished}, nil
+}
+
+// endableBlock returns the ID of the budget block a stop request targets, or why
+// the run cannot be ended on it.
+func (d *decision) endableBlock(c *RequestStopCommand) (string, error) {
+	kind := BudgetKind(c.Target)
+	blockerID := budgetBlockerID(kind)
+	if !kind.valid() || d.openBudgetBlock(blockerID) == nil || hasActiveAttempt(d.state) || c.RequestTime.IsZero() {
+		return "", Reject(RejectionCodeInvalidTransition, "run is not waiting on a budget")
+	}
+	// A tool_calls wait leaves the step open with tools that never ran. Finishing
+	// then needs typed dispositions for them (state-machine §9), which belong to F3.2.
+	if hasOpenStep(d.state) {
+		return "", Reject(RejectionCodeInvalidTransition, "step still has tool calls to dispose")
+	}
+	return blockerID, nil
+}
+
+// stopRef is the kernel's format for pointing at a RunStopRequested event: the
+// run ID, a '#', and the event's sequence number. RunFinished.PrimaryStopRef
+// carries it, so a reader can find the request that ended the run.
+func stopRef(runID string, sequence uint64) string {
+	return runID + "#" + strconv.FormatUint(sequence, 10)
 }

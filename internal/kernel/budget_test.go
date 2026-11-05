@@ -3,6 +3,7 @@ package kernel
 import (
 	"errors"
 	"fmt"
+	"math"
 	"testing"
 	"time"
 
@@ -132,5 +133,45 @@ func TestAcceptRunRejectsNonPositiveBudgets(t *testing.T) {
 	accepted, ok := events[0].(*RunAcceptedEvent)
 	if !ok || accepted.Budgets != DefaultRunBudgets() {
 		t.Fatalf("budgets were not pinned: %s", fmt.Sprint(events[0]))
+	}
+}
+
+func TestEvolveSaturatesTokenUsage(t *testing.T) {
+	t.Parallel()
+	s := NewState()
+	s = Evolve(s, &RunAcceptedEvent{
+		Envelope: budgetEnvelope(1), InputRef: "", SessionID: "", QueueItemRef: "", ProtocolBinding: "",
+		Budgets: DefaultRunBudgets(), PriorityClass: "", PeerOutboxRef: "", GoalID: "", GoalRound: 0,
+	})
+	// Provider usage is remote data: two huge reports must not wrap the counter negative.
+	s = Evolve(s, budgetObserved(2, "a1", "", math.MaxInt-1, 0))
+	s = Evolve(s, budgetObserved(3, "a2", "", math.MaxInt-1, 0))
+	if s.TokensUsed != math.MaxInt64 {
+		t.Fatalf("TokensUsed = %d, want saturation at MaxInt64", s.TokensUsed)
+	}
+	if s.BudgetUsed(BudgetKindTokens) < s.BudgetLimit(BudgetKindTokens) {
+		t.Fatal("a saturated token counter must exhaust the budget")
+	}
+	if got := addSaturating(5, 7); got != 12 {
+		t.Fatalf("addSaturating(5, 7) = %d", got)
+	}
+}
+
+func TestResponseRejectsImplausibleTokenUsage(t *testing.T) {
+	t.Parallel()
+	for name, tokens := range map[string]int{"just over": maxResponseTokens + 1, "max int": math.MaxInt, "negative": -1} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			r := newRunDriver(t, DefaultRunBudgets())
+			r.startModel(1)
+			before := cloneState(r.s)
+			events, err := r.respond(1, FinishReasonStop, nil, func(f *DecisionFacts) { f.Usage.TokensUsed = tokens })
+			assertRejected(t, r, events, err, &before)
+		})
+	}
+	r := newRunDriver(t, DefaultRunBudgets())
+	r.startModel(1)
+	if _, err := r.respond(1, FinishReasonStop, nil, func(f *DecisionFacts) { f.Usage.TokensUsed = maxResponseTokens }); err != nil {
+		t.Fatalf("the bound itself must be accepted: %v", err)
 	}
 }

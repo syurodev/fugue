@@ -123,16 +123,12 @@ jobs:
           go-version-file: go.mod
       - run: go tool task fuzz-short
 
+  # Paused by the owner on 2026-11-05 (quality-gates §11). The job stays so the
+  # required status check still reports; nightly mutation-full keeps running.
   mutation-changed:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - run: go tool task mutation-changed
+      - run: echo "::notice::mutation-changed is paused (quality-gates §11); nightly mutation-full still runs"
 
   gate-guard:
     runs-on: ubuntu-latest

@@ -115,20 +115,34 @@ func (d *decision) planStep(index int, injected *ContextInjectedEvent) ([]Event,
 	return append(events, &plan), nil
 }
 
-// stepOutcome gathers the recorded facts AfterStep decides on. The caller passes
-// what only the current response or tool batch knows.
-func (d *decision) stepOutcome(finish FinishReason, toolCalls int) StepOutcome {
-	allTerminate := toolCalls > 0
-	for _, id := range d.state.ToolOrder {
-		if t := d.state.ToolInvocations[id]; t == nil || !t.Plan.Terminates {
-			allTerminate = false
-		}
-	}
+// stepOutcome gathers the recorded facts AfterStep decides on. The plans are
+// those of the tool calls the step is deciding on, passed in because a response
+// batch has not been folded into the state yet.
+func (d *decision) stepOutcome(finish FinishReason, plans []*ToolCallPlannedEvent) StepOutcome {
 	return StepOutcome{
-		FinishReason: finish, ToolCalls: toolCalls, AllTerminate: allTerminate,
+		FinishReason: finish, ToolCalls: len(plans), AllTerminate: allTerminate(plans),
 		SteerPending: d.facts.SteerPending, StopIntent: false, AutoContinued: d.state.AutoContinued,
 		StepsUsed: d.state.StepsUsed, StepsLimit: d.state.BudgetLimit(BudgetKindSteps),
 	}
+}
+
+// allTerminate reports whether the batch is non-empty and every call carries the
+// descriptor-declared terminate flag.
+func allTerminate(plans []*ToolCallPlannedEvent) bool {
+	return len(plans) > 0 && !slices.ContainsFunc(plans, func(p *ToolCallPlannedEvent) bool { return p == nil || !p.Terminates })
+}
+
+// recordedPlans returns the plans of the step's tool calls from the folded state.
+func (d *decision) recordedPlans() []*ToolCallPlannedEvent {
+	plans := make([]*ToolCallPlannedEvent, 0, len(d.state.ToolOrder))
+	for _, id := range d.state.ToolOrder {
+		if t := d.state.ToolInvocations[id]; t != nil {
+			plans = append(plans, &t.Plan)
+		} else {
+			plans = append(plans, nil)
+		}
+	}
+	return plans
 }
 
 // closeStep records the step completion and what the decision implies: the

@@ -237,3 +237,27 @@ func TestSteerPendingRunsOneMoreStep(t *testing.T) {
 		t.Fatalf("second step: %+v", got)
 	}
 }
+
+func TestStepOutcomeTerminatesOnlyWhenEveryBatchPlanDoes(t *testing.T) {
+	t.Parallel()
+	plain, stop := driverToolPlan(1, 0), driverToolPlan(1, 1)
+	stop.Terminates = true
+	// The state is empty on purpose: a response batch has not been folded into it yet.
+	d := &decision{state: NewState(), facts: &DecisionFacts{}, next: Envelope{}}
+	cases := map[string]struct {
+		plans []*ToolCallPlannedEvent
+		want  bool
+	}{
+		"no plans":       {nil, false},
+		"none terminate": {[]*ToolCallPlannedEvent{plain, driverToolPlan(1, 2)}, false},
+		"one terminates": {[]*ToolCallPlannedEvent{plain, stop}, false},
+		"all terminate":  {[]*ToolCallPlannedEvent{stop, stop}, true},
+		"nil plan":       {[]*ToolCallPlannedEvent{stop, nil}, false},
+	}
+	for name, tc := range cases {
+		got := d.stepOutcome(FinishReasonLength, tc.plans)
+		if got.AllTerminate != tc.want || got.ToolCalls != len(tc.plans) {
+			t.Errorf("%s: AllTerminate=%v ToolCalls=%d", name, got.AllTerminate, got.ToolCalls)
+		}
+	}
+}
