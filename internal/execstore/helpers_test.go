@@ -333,3 +333,10 @@ func requireCommitted(t *testing.T, committed bool, err error) {
 		t.Fatalf("append must commit: committed=%v err=%v", committed, err)
 	}
 }
+
+func requireIdleDB(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if inUse := db.Stats().InUse; inUse != 0 {
+		t.Fatalf("operation retained %d database connections", inUse)
+	}
+}

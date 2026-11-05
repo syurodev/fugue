@@ -390,6 +390,7 @@ func testRebuildMismatchErrors(ctx context.Context, t *testing.T, s *Store, db *
 	if _, err := s.ReadEvents(ctx, "run-rebuild-corrupt", 1, 10); !errors.Is(err, ErrCorruptHistory) {
 		t.Fatalf("expected ErrCorruptHistory on invalid timestamp, got %v", err)
 	}
+	requireIdleDB(t, db)
 }
 
 func TestTranscriptAndFailedProjections(t *testing.T) {

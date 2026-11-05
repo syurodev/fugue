@@ -72,6 +72,8 @@ func TestStoreReadEdgeCases(t *testing.T) {
 	if !errors.Is(errGap, ErrSequenceGap) {
 		t.Fatalf("expected ErrSequenceGap when seq 0 is missing, got %v", errGap)
 	}
+	// A failed read must release its rows before another operation uses the pool.
+	requireIdleDB(t, db)
 
 	// ReadRun corrupt wait_reasons JSON (valid JSON array of numbers, but unmarshal into struct fails)
 	_, execErr := db.ExecContext(ctx, "UPDATE exec_runs SET revision = revision + 1, wait_reasons = '[123]' WHERE run_id = 'r-gap'")
