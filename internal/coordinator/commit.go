@@ -53,7 +53,8 @@ func (s *Session) resolveSynchronous(
 	if res == CommitResolutionNotCommitted {
 		s.mu.Lock()
 		if err := s.slots.release(ref); err != nil {
-			_ = err
+			s.mu.Unlock()
+			return false
 		}
 		s.mu.Unlock()
 
@@ -168,7 +169,8 @@ func (s *Session) checkResolverCommit(
 		s.mu.Lock()
 		s.halted = false
 		if err := s.slots.release(ref); err != nil {
-			_ = err
+			s.mu.Unlock()
+			return false
 		}
 		s.mu.Unlock()
 

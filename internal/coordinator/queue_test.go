@@ -38,56 +38,60 @@ func TestAdmissionFollowsFIFOForRunsAcceptedThisIncarnation(t *testing.T) {
 		IDs:              idGen,
 	}
 
-	ctx := t.Context()
-	sess, err := Start(ctx, cfg)
+	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
+	t.Cleanup(cancel)
+	sess, err := Start(ctx, &cfg)
 	if err != nil {
 		t.Fatalf("start session failed: %v", err)
 	}
 	defer sess.Stop()
 
 	// 1. Accept r1 (results queued: AcceptRun, then auto AdmitRun)
-	store.queueAppend(AppendResult{
-		Duplicate:         false,
-		Receipt:           codec.Receipt{CommandID: "cmd-accept-r1", Kind: "AcceptRun", Target: "r1"},
-		RunRevision:       1,
-		AdmissionRevision: 1,
-	}, nil)
-	store.queueAppend(AppendResult{
-		Duplicate:         false,
-		Receipt:           codec.Receipt{CommandID: "cmd-admit-r1", Kind: "AdmitRun", Target: "r1"},
-		RunRevision:       2,
-		AdmissionRevision: 2,
-	}, nil)
-
-	queueTestAccept(t, ctx, sess, "r1", "cmd-accept-r1", "m1", "a1", "c1")
+	queueAcceptR1(t, ctx, sess, store)
 
 	// 2. Accept r2 while r1 is active (results queued: AcceptRun only, no auto AdmitRun yet)
-	store.queueAppend(AppendResult{
+	store.queueAppend(&AppendResult{
 		Duplicate:         false,
-		Receipt:           codec.Receipt{CommandID: "cmd-accept-r2", Kind: "AcceptRun", Target: "r2"},
+		Receipt:           codec.Receipt{CommandID: testCmdAcceptR2, Kind: testKindAcceptRun, Target: testRunID2},
 		RunRevision:       1,
 		AdmissionRevision: 2,
 	}, nil)
 
-	queueTestAccept(t, ctx, sess, "r2", "cmd-accept-r2", "m2", "a2", "c2")
+	queueTestAccept(t, ctx, sess, testRunID2, testCmdAcceptR2, "m2", "a2", "c2")
 
 	// 3. Finish r1 -> should trigger auto-admit of r2
-	// For ObserveModelResponseCommand, decide_model produces ModelResponseRecorded + StepCompleted + RunFinished
-	// when no tool calls are planned.
-	store.queueAppend(AppendResult{
+	queueFinishR1(t, ctx, sess, store)
+	verifyFIFOTransitions(t, store)
+
+	sess.mu.Lock()
+	activeRun := sess.admission.ActiveRunID
+	admRev := sess.admission.Revision
+	sess.mu.Unlock()
+
+	if activeRun != testRunID2 {
+		t.Fatalf("expected active run %s, got %s", testRunID2, activeRun)
+	}
+	if admRev != 4 {
+		t.Fatalf("expected admission revision 4, got %d", admRev)
+	}
+}
+
+func queueFinishR1(t *testing.T, ctx context.Context, sess *Session, store *fakeStore) {
+	t.Helper()
+
+	store.queueAppend(&AppendResult{
 		Duplicate:         false,
-		Receipt:           codec.Receipt{CommandID: "cmd-finish-r1", Kind: "ObserveModelResponse", Target: "r1"},
+		Receipt:           codec.Receipt{CommandID: "cmd-finish-r1", Kind: testKindObserve, Target: "r1"},
 		RunRevision:       3,
 		AdmissionRevision: 3,
 	}, nil)
-	store.queueAppend(AppendResult{
+	store.queueAppend(&AppendResult{
 		Duplicate:         false,
-		Receipt:           codec.Receipt{CommandID: "cmd-admit-r2", Kind: "AdmitRun", Target: "r2"},
+		Receipt:           codec.Receipt{CommandID: "cmd-admit-r2", Kind: testKindAdmitRun, Target: testRunID2},
 		RunRevision:       2,
 		AdmissionRevision: 4,
 	}, nil)
 
-	// In r1 state, make attempt a1 requesting so ObserveModelResponse is valid.
 	sess.mu.Lock()
 	r1State := sess.runs["r1"]
 	if r1State != nil {
@@ -100,45 +104,44 @@ func TestAdmissionFollowsFIFOForRunsAcceptedThisIncarnation(t *testing.T) {
 	}
 	sess.mu.Unlock()
 
-	_, err = sess.Submit(ctx, Request{
-		Command: &kernel.ObserveModelResponseCommand{
-			CommandID:    "cmd-finish-r1",
-			RunID:        "r1",
-			Origin:       "system",
-			Token:        1,
-			AttemptID:    "a1",
-			InvocationID: "m1",
-			ResponseRef:  "resp-r1",
-			UsageStatus:  "known",
-		},
+	cmdFinish := new(kernel.ObserveModelResponseCommand)
+	cmdFinish.CommandID = "cmd-finish-r1"
+	cmdFinish.RunID = "r1"
+	cmdFinish.Origin = testOriginSystem
+	cmdFinish.Token = 1
+	cmdFinish.AttemptID = "a1"
+	cmdFinish.InvocationID = "m1"
+	cmdFinish.ResponseRef = "resp-r1"
+	cmdFinish.UsageStatus = "known"
+
+	usageEvt := new(kernel.BudgetObservedEvent)
+	usageEvt.AttemptID = "a1"
+	usageEvt.TokensUsed = 10
+	usageEvt.Basis = "provider"
+
+	reqFinish := Request{
+		Command: cmdFinish,
 		Facts: kernel.DecisionFacts{
 			ExecutorFence: 10,
-			Usage: &kernel.BudgetObservedEvent{
-				Envelope:   kernel.Envelope{},
-				AttemptID:  "a1",
-				TokensUsed: 10,
-				Basis:      "provider",
-			},
+			Usage:         usageEvt,
 		},
-		Kind:      "ObserveModelResponse",
-		Principal: "system",
+		Kind:      testKindObserve,
+		Principal: testOriginSystem,
 		Target:    "r1",
-	})
+	}
+	_, err := sess.Submit(ctx, &reqFinish)
 	if err != nil {
 		t.Fatalf("finish r1 failed: %v", err)
 	}
+}
 
-	// Verify transitions
+func verifyFIFOTransitions(t *testing.T, store *fakeStore) {
+	t.Helper()
+
 	store.mu.Lock()
 	transitions := store.transitions
 	store.mu.Unlock()
 
-	// We expect:
-	// 0: AcceptRun r1
-	// 1: AdmitRun r1 (token 1)
-	// 2: AcceptRun r2
-	// 3: ObserveModelResponse r1 (finishing r1)
-	// 4: AdmitRun r2 (token 2)
 	if len(transitions) < 5 {
 		t.Fatalf("expected at least 5 transitions, got %d", len(transitions))
 	}
@@ -193,8 +196,9 @@ func TestQueuedRunsFromEarlierIncarnationAreNotAutoAdmitted(t *testing.T) {
 		IDs:              idGen,
 	}
 
-	ctx := t.Context()
-	sess, err := Start(ctx, cfg)
+	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
+	t.Cleanup(cancel)
+	sess, err := Start(ctx, &cfg)
 	if err != nil {
 		t.Fatalf("start session failed: %v", err)
 	}
@@ -213,46 +217,34 @@ func TestQueuedRunsFromEarlierIncarnationAreNotAutoAdmitted(t *testing.T) {
 func queueTestAccept(t *testing.T, ctx context.Context, sess *Session, runID, cmdID, invID, attID, ctxRef string) {
 	t.Helper()
 
-	modelPlan := &kernel.ModelRequestPlannedEvent{
-		Envelope:              kernel.Envelope{},
-		InvocationID:          invID,
-		Purpose:               "turn",
-		FirstAttemptID:        attID,
-		ModelRef:              "gpt-4",
-		ContextRef:            ctxRef,
-		ToolDeclarationRefs:   nil,
-		EstimatedBudgetTokens: 0,
-	}
+	modelPlan := new(kernel.ModelRequestPlannedEvent)
+	modelPlan.InvocationID = invID
+	modelPlan.Purpose = testPurposeTurn
+	modelPlan.FirstAttemptID = attID
+	modelPlan.ModelRef = "gpt-4"
+	modelPlan.ContextRef = ctxRef
 
-	_, err := sess.Submit(ctx, Request{
-		Command: &kernel.AcceptRunCommand{
-			CommandID:       cmdID,
-			RunID:           runID,
-			Origin:          "user",
-			SessionID:       "s1",
-			InputRef:        "input-" + runID,
-			QueueItemRef:    "queue-" + runID,
-			ProtocolBinding: "binding-v1",
-		},
+	cmdAccept := new(kernel.AcceptRunCommand)
+	cmdAccept.CommandID = cmdID
+	cmdAccept.RunID = runID
+	cmdAccept.Origin = testOriginUser
+	cmdAccept.SessionID = testSessionID
+	cmdAccept.InputRef = "input-" + runID
+	cmdAccept.QueueItemRef = "queue-" + runID
+	cmdAccept.ProtocolBinding = "binding-v1"
+
+	reqAccept := Request{
+		Command: cmdAccept,
 		Facts: kernel.DecisionFacts{
-			OwnerIncarnation:         0,
-			ExecutorFence:            0,
-			WorkerReservationRef:     "",
-			DispatchAuthorizationRef: "",
-			BudgetReservationRef:     "",
-			ModelPlan:                modelPlan,
-			ModelDispatch:            nil,
-			ContextRefs:              nil,
-			Usage:                    nil,
-			ToolPlans:                nil,
-			Envelope:                 kernel.Envelope{},
+			ModelPlan: modelPlan,
 		},
-		Kind:           "AcceptRun",
-		Principal:      "user",
+		Kind:           testKindAcceptRun,
+		Principal:      testOriginUser,
 		Target:         runID,
 		MetadataInput:  nil,
 		ProtectedInput: nil,
-	})
+	}
+	_, err := sess.Submit(ctx, &reqAccept)
 	if err != nil {
 		t.Fatalf("accept %s failed: %v", runID, err)
 	}
@@ -268,4 +260,22 @@ func TestSessionQueueEmptyPop(t *testing.T) {
 	if ok || item.runID != "" {
 		t.Errorf("expected false, got %v, %v", ok, item)
 	}
+}
+
+func queueAcceptR1(t *testing.T, ctx context.Context, sess *Session, store *fakeStore) {
+	t.Helper()
+	store.queueAppend(&AppendResult{
+		Duplicate:         false,
+		Receipt:           codec.Receipt{CommandID: "cmd-accept-r1", Kind: testKindAcceptRun, Target: "r1"},
+		RunRevision:       1,
+		AdmissionRevision: 1,
+	}, nil)
+	store.queueAppend(&AppendResult{
+		Duplicate:         false,
+		Receipt:           codec.Receipt{CommandID: "cmd-admit-r1", Kind: testKindAdmitRun, Target: "r1"},
+		RunRevision:       2,
+		AdmissionRevision: 2,
+	}, nil)
+
+	queueTestAccept(t, ctx, sess, "r1", "cmd-accept-r1", "m1", "a1", "c1")
 }

@@ -9,6 +9,7 @@ import (
 	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/kernel"
 	"github.com/syurodev/fugue/internal/platform/clock"
+	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 )
@@ -83,25 +84,27 @@ type Session struct {
 }
 
 // Start loads the admission row, validates ownership, and starts the actor goroutine.
-//
-//nolint:gocritic // hugeParam: signature defined by plan
-func Start(ctx context.Context, cfg Config) (*Session, error) {
-	if cfg.WorkerCapacity <= 0 {
-		cfg.WorkerCapacity = 1
+func Start(ctx context.Context, cfg *Config) (*Session, error) {
+	if cfg == nil {
+		return nil, errcode.New(errcode.InvalidArgument, "config is nil")
+	}
+	c := *cfg
+	if c.WorkerCapacity <= 0 {
+		c.WorkerCapacity = 1
 	}
 
-	adm, err := cfg.Store.LoadAdmission(ctx, cfg.SessionID)
+	adm, err := c.Store.LoadAdmission(ctx, c.SessionID)
 	if err != nil {
 		return nil, fmt.Errorf("load admission: %w", err)
 	}
 
 	var inherited string
-	if adm.ActiveRunID != "" && adm.OwnerIncarnation != cfg.OwnerIncarnation {
+	if adm.ActiveRunID != "" && adm.OwnerIncarnation != c.OwnerIncarnation {
 		inherited = adm.ActiveRunID
 	}
 
 	actorCtx, cancel := context.WithCancel(ctx)
-	s := newSessionInstance(&cfg, adm, inherited, cancel)
+	s := newSessionInstance(&c, adm, inherited, cancel)
 	s.startWorkers(actorCtx)
 	s.task = supervise.Go(actorCtx, "coordinator.session", s.loop)
 	return s, nil
@@ -153,11 +156,12 @@ func (s *Session) startWorkers(actorCtx context.Context) {
 }
 
 // Submit serializes a request through the session actor.
-//
-//nolint:gocritic // hugeParam: signature defined by plan
-func (s *Session) Submit(ctx context.Context, r Request) (Reply, error) {
+func (s *Session) Submit(ctx context.Context, r *Request) (Reply, error) {
+	if r == nil {
+		return Reply{}, errcode.New(errcode.InvalidArgument, "request is nil")
+	}
 	return s.enqueue(ctx, &submission{
-		req:     r,
+		req:     *r,
 		obs:     nil,
 		replyCh: make(chan submitReply, 1),
 	})
@@ -200,24 +204,22 @@ func (s *Session) Stop() {
 		s.cancel()
 		if s.task != nil {
 			s.task.Stop()
-			if err := s.task.Wait(); err != nil {
-				_ = err
-			}
+			<-s.task.Done()
 		}
 		for _, wt := range s.workerTasks {
 			wt.Stop()
-			if err := wt.Wait(); err != nil {
-				_ = err
-			}
+			<-wt.Done()
 		}
 	})
 }
 
-//nolint:gocritic // hugeParam: signature defined by plan
-func (s *Session) report(obs Observation) {
+func (s *Session) report(obs *Observation) {
+	if obs == nil {
+		return
+	}
 	sub := submission{
 		req:     Request{},
-		obs:     &obs,
+		obs:     obs,
 		replyCh: nil,
 	}
 	select {
@@ -237,10 +239,13 @@ func (s *Session) loop(ctx context.Context) error {
 	}
 }
 
-//nolint:gocritic // hugeParam: internal reply channel payload
-func (s *Session) respond(sub *submission, reply Reply, err error) {
+func (s *Session) respond(sub *submission, reply *Reply, err error) {
 	if sub.replyCh != nil {
-		sub.replyCh <- submitReply{reply: reply, err: err}
+		r := Reply{}
+		if reply != nil {
+			r = *reply
+		}
+		sub.replyCh <- submitReply{reply: r, err: err}
 	}
 }
 
@@ -281,13 +286,13 @@ func (s *Session) handleSubmission(ctx context.Context, sub *submission) {
 	}
 
 	if runID != "" && runID == s.inheritedRunID {
-		s.respond(sub, Reply{}, ErrRecoveryRequired)
+		s.respond(sub, nil, ErrRecoveryRequired)
 		return
 	}
 
 	state, err := s.ensureRunLoaded(ctx, runID)
 	if err != nil {
-		s.respond(sub, Reply{}, err)
+		s.respond(sub, nil, err)
 		return
 	}
 
@@ -298,18 +303,18 @@ func (s *Session) handleSubmission(ctx context.Context, sub *submission) {
 
 	cmdID, origin, _, prepErr := s.resolveSubmissionFacts(runID, cmdID, origin, cmdToken, state, sub)
 	if prepErr != nil {
-		s.respond(sub, Reply{}, prepErr)
+		s.respond(sub, nil, prepErr)
 		return
 	}
 
 	events, decErr := kernel.Decide(state, sub.req.Command, &sub.req.Facts)
 	if decErr != nil {
-		s.respond(sub, Reply{}, decErr)
+		s.respond(sub, nil, decErr)
 		return
 	}
 
 	if events == nil {
-		s.respond(sub, Reply{
+		s.respond(sub, &Reply{
 			Events:    nil,
 			Duplicate: true,
 			Receipt: codec.Receipt{
@@ -325,7 +330,7 @@ func (s *Session) handleSubmission(ctx context.Context, sub *submission) {
 	t := s.buildTransition(runID, cmdID, origin, state, events, &sub.req)
 	appRes, appErr := s.cfg.Store.Append(ctx, t)
 	if appErr != nil {
-		s.respond(sub, Reply{}, appErr)
+		s.respond(sub, nil, appErr)
 		return
 	}
 
@@ -422,7 +427,7 @@ func (s *Session) applySubmissionSuccess(
 
 	s.maybeAdmitNext(ctx)
 
-	s.respond(sub, Reply{
+	s.respond(sub, &Reply{
 		Events:    events,
 		Duplicate: appRes.Duplicate,
 		Receipt:   appRes.Receipt,

@@ -17,7 +17,7 @@ type slots struct {
 	capacity  int
 	counter   uint64
 	active    map[string]slotStatus
-	handoffCh chan Work
+	handoffCh chan *Work
 }
 
 func newSlots(capacity int) *slots {
@@ -29,7 +29,7 @@ func newSlots(capacity int) *slots {
 		capacity:  capacity,
 		counter:   0,
 		active:    make(map[string]slotStatus, capacity),
-		handoffCh: make(chan Work, capacity),
+		handoffCh: make(chan *Work, capacity),
 	}
 }
 
@@ -58,8 +58,7 @@ func (s *slots) release(ref string) error {
 	return nil
 }
 
-//nolint:gocritic // hugeParam: signature defined by plan
-func (s *slots) handoff(ref string, w Work) error {
+func (s *slots) handoff(ref string, w *Work) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

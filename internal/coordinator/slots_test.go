@@ -21,8 +21,8 @@ func TestReserveNeverExceedsCapacity(t *testing.T) {
 	if !ok2 || ref2 == "" {
 		t.Fatalf("second reserve failed: ref=%q, ok=%v", ref2, ok2)
 	}
-	if ref1 == ref2 {
-		t.Fatalf("expected unique refs, got %q == %q", ref1, ref2)
+	if ref1 != "slot-1" || ref2 != "slot-2" {
+		t.Fatalf("expected slot-1 and slot-2, got %q and %q", ref1, ref2)
 	}
 
 	ref3, ok3 := s.reserve()
@@ -60,14 +60,14 @@ func TestHandoffSucceedsOnceAndNeverBlocks(t *testing.T) {
 			OwnerIncarnation: 1,
 			ExecutorFence:    1,
 		},
-		Dispatch: &kernel.ModelDispatchStartedEvent{},
+		Dispatch: new(kernel.ModelDispatchStartedEvent),
 	}
 
-	if err := s.handoff(ref, dummyWork); err != nil {
+	if err := s.handoff(ref, &dummyWork); err != nil {
 		t.Fatalf("expected first handoff to succeed, got %v", err)
 	}
 
-	err := s.handoff(ref, dummyWork)
+	err := s.handoff(ref, &dummyWork)
 	if !errors.Is(err, ErrHandoffFailed) {
 		t.Fatalf("expected second handoff to fail with ErrHandoffFailed, got %v", err)
 	}
@@ -93,10 +93,10 @@ func TestReleaseOfHandedOffSlotIsRejected(t *testing.T) {
 			OwnerIncarnation: 1,
 			ExecutorFence:    1,
 		},
-		Dispatch: &kernel.ModelDispatchStartedEvent{},
+		Dispatch: new(kernel.ModelDispatchStartedEvent),
 	}
 
-	if err := s.handoff(ref, dummyWork); err != nil {
+	if err := s.handoff(ref, &dummyWork); err != nil {
 		t.Fatalf("handoff failed: %v", err)
 	}
 
@@ -126,7 +126,7 @@ func TestSlotsEdgeCases(t *testing.T) {
 	if err := s.release("non-existent"); !errors.Is(err, ErrHandoffFailed) {
 		t.Errorf("expected ErrHandoffFailed for unknown release, got %v", err)
 	}
-	if err := s.handoff("non-existent", Work{}); !errors.Is(err, ErrHandoffFailed) {
+	if err := s.handoff("non-existent", &Work{}); !errors.Is(err, ErrHandoffFailed) {
 		t.Errorf("expected ErrHandoffFailed for unknown handoff, got %v", err)
 	}
 
@@ -134,8 +134,8 @@ func TestSlotsEdgeCases(t *testing.T) {
 	if !ok {
 		t.Fatal("reserve failed")
 	}
-	s.handoffCh <- Work{} // fill channel
-	if err := s.handoff(ref, Work{}); !errors.Is(err, ErrHandoffFailed) {
+	s.handoffCh <- &Work{} // fill channel
+	if err := s.handoff(ref, &Work{}); !errors.Is(err, ErrHandoffFailed) {
 		t.Errorf("expected ErrHandoffFailed when handoff channel full, got %v", err)
 	}
 	<-s.handoffCh // drain

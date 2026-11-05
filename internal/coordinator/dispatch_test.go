@@ -15,10 +15,10 @@ import (
 	"github.com/syurodev/fugue/internal/platform/supervise"
 )
 
-func setupAdmittedRun(store *fakeStore, runID, invID, attID string) {
+func setupAdmittedRun(store *fakeStore) {
 	store.admission = Admission{
-		SessionID:        "s1",
-		ActiveRunID:      runID,
+		SessionID:        testSessionID,
+		ActiveRunID:      testRunID1,
 		OwnerIncarnation: 1,
 		AdmissionToken:   1,
 		Revision:         1,
@@ -26,71 +26,81 @@ func setupAdmittedRun(store *fakeStore, runID, invID, attID string) {
 	}
 
 	st := kernel.NewState()
-	st.RunID = runID
+	st.RunID = testRunID1
 	st.Admitted = true
 	st.AdmissionToken = 1
 	st.OwnerIncarnation = 1
 	st.LastSequence = 2
 	st.StepStarted = true
 	st.CurrentStepIndex = 1
-	st.CurrentModelInvocationID = invID
+	st.CurrentModelInvocationID = "m1"
 
 	inv := &kernel.ModelInvocation{
-		InvocationID:      invID,
+		InvocationID:      "m1",
 		Planned:           true,
 		Completed:         false,
 		Failed:            false,
 		Closed:            false,
 		SelectedAttemptID: "",
 		Attempts: map[string]*kernel.ModelAttempt{
-			attID: {
-				AttemptID: attID,
+			"a1": {
+				AttemptID: "a1",
 				Status:    kernel.ModelAttemptStatusPlanned,
 			},
 		},
 	}
-	st.ModelInvocations[invID] = inv
+	st.ModelInvocations["m1"] = inv
 
-	store.runs[runID] = st
-	store.runRevs[runID] = 1
+	store.runs[testRunID1] = st
+	store.runRevs[testRunID1] = 1
 }
 
 func makeModelDispatchRequest(runID, invID, attID, cmdID string) Request {
+	cmd := new(kernel.PrepareDispatchCommand)
+	cmd.CommandID = cmdID
+	cmd.RunID = runID
+	cmd.Origin = testOriginSystem
+	cmd.Token = 1
+	cmd.InvocationID = invID
+	cmd.AttemptID = attID
+
+	md := new(kernel.ModelDispatchStartedEvent)
+	md.InvocationID = invID
+	md.AttemptID = attID
+	md.Token = 1
+	md.ProviderSettingsRef = "settings-ref"
+	md.AccountID = "acc-1"
+	md.CatalogVersion = "cat-v1"
+
 	return Request{
-		Command: &kernel.PrepareDispatchCommand{
-			CommandID:    cmdID,
-			RunID:        runID,
-			Origin:       "system",
-			Token:        1,
-			InvocationID: invID,
-			AttemptID:    attID,
-		},
+		Command: cmd,
 		Facts: kernel.DecisionFacts{
-			ModelDispatch: &kernel.ModelDispatchStartedEvent{
-				InvocationID:        invID,
-				AttemptID:           attID,
-				Token:               1,
-				ProviderSettingsRef: "settings-ref",
-				AccountID:           "acc-1",
-				CatalogVersion:      "cat-v1",
-			},
+			ModelDispatch:            md,
 			DispatchAuthorizationRef: "auth-1",
 		},
-		Kind:      "PrepareDispatch",
-		Principal: "system",
+		Kind:      testKindPrepare,
+		Principal: testOriginSystem,
 		Target:    runID,
 	}
 }
 
-func TestHandoffHappensOnlyAfterCommit(t *testing.T) {
-	t.Parallel()
+func verifyDispatchedWorkItem(t *testing.T, exec *fakeExecutor, wantFence uint64) {
+	t.Helper()
+	if count := exec.workCount(); count != 1 {
+		t.Fatalf("expected exactly 1 work item after commit, got %d", count)
+	}
 
-	fakeClk := clock.NewFake(time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC))
-	idGen := ids.NewUUIDv7(fakeClk, ids.NewDeterministic("handoff-test"))
+	exec.mu.Lock()
+	work := exec.recorded[0]
+	exec.mu.Unlock()
 
-	store := newFakeStore()
-	setupAdmittedRun(store, "r1", "m1", "a1")
+	if work.Lease.ExecutorFence != wantFence {
+		t.Fatalf("expected ExecutorFence %d, got %d", wantFence, work.Lease.ExecutorFence)
+	}
+}
 
+func setupHandoffBlockedAppend(t *testing.T, store *fakeStore) (chan struct{}, chan struct{}) {
+	t.Helper()
 	appendBlocked := make(chan struct{})
 	releaseAppend := make(chan struct{})
 	var once sync.Once
@@ -98,47 +108,47 @@ func TestHandoffHappensOnlyAfterCommit(t *testing.T) {
 	store.onAppend = func(_ *Transition) {
 		once.Do(func() {
 			close(appendBlocked)
-			<-releaseAppend
+			select {
+			case <-releaseAppend:
+			case <-t.Context().Done():
+			}
 		})
 	}
-	store.queueAppend(AppendResult{
+	store.queueAppend(&AppendResult{
 		Duplicate:         false,
-		Receipt:           codec.Receipt{CommandID: "cmd-disp-1", Kind: "PrepareDispatch", Target: "r1"},
+		Receipt:           codec.Receipt{CommandID: "cmd-disp-1", Kind: testKindPrepare, Target: "r1"},
 		RunRevision:       2,
 		AdmissionRevision: 1,
 	}, nil)
 
+	return appendBlocked, releaseAppend
+}
+
+func TestHandoffHappensOnlyAfterCommit(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeStore()
+	setupAdmittedRun(store)
+
+	appendBlocked, releaseAppend := setupHandoffBlockedAppend(t, store)
+
 	exec := newFakeExecutor()
 	workReceived := make(chan struct{})
-	exec.onExec = func(_ Work, _ func(Observation)) {
+	exec.onExec = func(_ *Work, _ func(*Observation)) {
 		close(workReceived)
 	}
 
-	cfg := Config{
-		SessionID:        "s1",
-		OwnerIncarnation: 1,
-		WorkerCapacity:   1,
-		Store:            store,
-		Executor:         exec,
-		Clock:            fakeClk,
-		IDs:              idGen,
-	}
-
-	ctx := t.Context()
-	sess, err := Start(ctx, cfg)
-	if err != nil {
-		t.Fatalf("start session failed: %v", err)
-	}
+	ctx, sess := startTestSession(t, store, exec, "handoff-test", 1)
 	defer sess.Stop()
 
 	req := makeModelDispatchRequest("r1", "m1", "a1", "cmd-disp-1")
 
 	task := supervise.Go(ctx, "test.submit", func(_ context.Context) error {
-		_, sErr := sess.Submit(ctx, req)
+		_, sErr := sess.Submit(ctx, &req)
 		return sErr
 	})
 
-	<-appendBlocked
+	waitSignal(t, ctx, appendBlocked, "appendBlocked")
 
 	// Verify executor has received zero work while commit is not confirmed
 	if count := exec.workCount(); count != 0 {
@@ -152,47 +162,54 @@ func TestHandoffHappensOnlyAfterCommit(t *testing.T) {
 		t.Fatalf("submit failed: %v", err)
 	}
 
-	<-workReceived
+	waitSignal(t, ctx, workReceived, "workReceived")
 
-	if count := exec.workCount(); count != 1 {
-		t.Fatalf("expected exactly 1 work item after commit, got %d", count)
+	verifyDispatchedWorkItem(t, exec, 3)
+
+	sess.mu.Lock()
+	dispAdmRev := sess.admission.Revision
+	sess.mu.Unlock()
+	if dispAdmRev != 1 {
+		t.Fatalf("expected admission revision 1, got %d", dispAdmRev)
+	}
+}
+
+func releaseSlotAndResumeParked(t *testing.T, ctx context.Context, sess *Session, store *fakeStore, heldRef string, parkDone chan error) {
+	t.Helper()
+	store.queueAppend(&AppendResult{
+		Duplicate:         false,
+		Receipt:           codec.Receipt{CommandID: "cmd-disp-parked", Kind: testKindPrepare, Target: "r1"},
+		RunRevision:       2,
+		AdmissionRevision: 1,
+	}, nil)
+
+	if err := sess.slots.release(heldRef); err != nil {
+		t.Fatalf("release held slot failed: %v", err)
+	}
+	sess.retryParked(ctx)
+
+	sErr := waitValue(t, ctx, parkDone, "parkDone")
+	if sErr != nil {
+		t.Fatalf("parked submit failed: %v", sErr)
 	}
 
-	exec.mu.Lock()
-	work := exec.recorded[0]
-	exec.mu.Unlock()
+	store.mu.Lock()
+	txCount := len(store.transitions)
+	store.mu.Unlock()
 
-	// Verify ExecutorFence matches dispatch event sequence (sequence 3)
-	if work.Lease.ExecutorFence != 3 {
-		t.Fatalf("expected ExecutorFence 3, got %d", work.Lease.ExecutorFence)
+	if txCount != 1 {
+		t.Fatalf("expected exactly 1 transition after slot release, got %d", txCount)
 	}
 }
 
 func TestNoSlotParksDispatchWithoutEvents(t *testing.T) {
 	t.Parallel()
 
-	fakeClk := clock.NewFake(time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC))
-	idGen := ids.NewUUIDv7(fakeClk, ids.NewDeterministic("park-test"))
-
 	store := newFakeStore()
-	setupAdmittedRun(store, "r1", "m1", "a1")
-
+	setupAdmittedRun(store)
 	exec := newFakeExecutor()
-	cfg := Config{
-		SessionID:        "s1",
-		OwnerIncarnation: 1,
-		WorkerCapacity:   1, // capacity 1
-		Store:            store,
-		Executor:         exec,
-		Clock:            fakeClk,
-		IDs:              idGen,
-	}
 
-	ctx := t.Context()
-	sess, err := Start(ctx, cfg)
-	if err != nil {
-		t.Fatalf("start session failed: %v", err)
-	}
+	ctx, sess := startTestSession(t, store, exec, "park-test", 1)
 	defer sess.Stop()
 
 	// Manually hold the 1 available slot
@@ -211,12 +228,12 @@ func TestNoSlotParksDispatchWithoutEvents(t *testing.T) {
 	// Submit dispatch request while no slot is available
 	parkDone := make(chan error, 1)
 	_ = supervise.Go(ctx, "test.submit", func(_ context.Context) error {
-		_, sErr := sess.Submit(ctx, req)
+		_, sErr := sess.Submit(ctx, &req)
 		parkDone <- sErr
 		return sErr
 	})
 
-	<-parked
+	waitSignal(t, ctx, parked, "parked")
 
 	store.mu.Lock()
 	txCount := len(store.transitions)
@@ -226,57 +243,49 @@ func TestNoSlotParksDispatchWithoutEvents(t *testing.T) {
 		t.Fatalf("expected 0 transitions while parked without slot, got %d", txCount)
 	}
 
-	// Prepare append response for when slot is freed
-	store.queueAppend(AppendResult{
+	releaseSlotAndResumeParked(t, ctx, sess, store, heldRef, parkDone)
+}
+
+func submitAcceptR2WhileParked(t *testing.T, ctx context.Context, sess *Session, store *fakeStore) {
+	t.Helper()
+	store.queueAppend(&AppendResult{
 		Duplicate:         false,
-		Receipt:           codec.Receipt{CommandID: "cmd-disp-parked", Kind: "PrepareDispatch", Target: "r1"},
-		RunRevision:       2,
+		Receipt:           codec.Receipt{CommandID: testCmdAcceptR2, Kind: testKindAcceptRun, Target: testRunID2},
+		RunRevision:       1,
 		AdmissionRevision: 1,
 	}, nil)
 
-	// Release the held slot
-	_ = sess.slots.release(heldRef)
-	sess.retryParked(ctx)
+	cmdAccept := new(kernel.AcceptRunCommand)
+	cmdAccept.CommandID = testCmdAcceptR2
+	cmdAccept.RunID = testRunID2
+	cmdAccept.Origin = testOriginUser
+	cmdAccept.SessionID = testSessionID
 
-	sErr := <-parkDone
-	if sErr != nil {
-		t.Fatalf("parked submit failed: %v", sErr)
+	reqAccept := Request{
+		Command:   cmdAccept,
+		Facts:     kernel.DecisionFacts{},
+		Kind:      testKindAcceptRun,
+		Principal: testOriginUser,
+		Target:    testRunID2,
 	}
 
-	store.mu.Lock()
-	txCount = len(store.transitions)
-	store.mu.Unlock()
-
-	if txCount != 1 {
-		t.Fatalf("expected exactly 1 transition after slot release, got %d", txCount)
+	reply, err := sess.Submit(ctx, &reqAccept)
+	if err != nil {
+		t.Fatalf("AcceptRun failed while dispatch was parked: %v", err)
+	}
+	if reply.Duplicate {
+		t.Fatal("expected non-duplicate reply")
 	}
 }
 
 func TestActorKeepsServingWhileDispatchWaitsForCapacity(t *testing.T) {
 	t.Parallel()
 
-	fakeClk := clock.NewFake(time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC))
-	idGen := ids.NewUUIDv7(fakeClk, ids.NewDeterministic("serving-test"))
-
 	store := newFakeStore()
-	setupAdmittedRun(store, "r1", "m1", "a1")
-
+	setupAdmittedRun(store)
 	exec := newFakeExecutor()
-	cfg := Config{
-		SessionID:        "s1",
-		OwnerIncarnation: 1,
-		WorkerCapacity:   1, // capacity 1 held
-		Store:            store,
-		Executor:         exec,
-		Clock:            fakeClk,
-		IDs:              idGen,
-	}
 
-	ctx := t.Context()
-	sess, err := Start(ctx, cfg)
-	if err != nil {
-		t.Fatalf("start session failed: %v", err)
-	}
+	ctx, sess := startTestSession(t, store, exec, "serving-test", 1)
 	defer sess.Stop()
 
 	// Hold the capacity
@@ -293,40 +302,14 @@ func TestActorKeepsServingWhileDispatchWaitsForCapacity(t *testing.T) {
 	// Dispatch r1 is parked
 	reqDispatch := makeModelDispatchRequest("r1", "m1", "a1", "cmd-disp-parked")
 	_ = supervise.Go(ctx, "test.dispatch", func(_ context.Context) error {
-		_, _ = sess.Submit(ctx, reqDispatch)
-		return nil
+		_, dErr := sess.Submit(ctx, &reqDispatch)
+		return dErr
 	})
 
-	<-parked
+	waitSignal(t, ctx, parked, "parked")
 
 	// Now submit AcceptRun for r2 - should succeed and commit!
-	store.queueAppend(AppendResult{
-		Duplicate:         false,
-		Receipt:           codec.Receipt{CommandID: "cmd-accept-r2", Kind: "AcceptRun", Target: "r2"},
-		RunRevision:       1,
-		AdmissionRevision: 1,
-	}, nil)
-
-	reqAccept := Request{
-		Command: &kernel.AcceptRunCommand{
-			CommandID: "cmd-accept-r2",
-			RunID:     "r2",
-			Origin:    "user",
-			SessionID: "s1",
-		},
-		Facts:     kernel.DecisionFacts{},
-		Kind:      "AcceptRun",
-		Principal: "user",
-		Target:    "r2",
-	}
-
-	reply, err := sess.Submit(ctx, reqAccept)
-	if err != nil {
-		t.Fatalf("AcceptRun failed while dispatch was parked: %v", err)
-	}
-	if reply.Duplicate {
-		t.Fatal("expected non-duplicate reply")
-	}
+	submitAcceptR2WhileParked(t, ctx, sess, store)
 
 	store.mu.Lock()
 	transitions := store.transitions
@@ -351,11 +334,11 @@ func TestFailedCommitReleasesSlot(t *testing.T) {
 	idGen := ids.NewUUIDv7(fakeClk, ids.NewDeterministic("failed-commit-test"))
 
 	store := newFakeStore()
-	setupAdmittedRun(store, "r1", "m1", "a1")
+	setupAdmittedRun(store)
 
 	// Queue a definite rejection from Append
 	fenceErr := errcode.New(errcode.FailedPrecondition, "stale fence")
-	store.queueAppend(AppendResult{}, fenceErr)
+	store.queueAppend(nil, fenceErr)
 
 	exec := newFakeExecutor()
 	cfg := Config{
@@ -368,8 +351,9 @@ func TestFailedCommitReleasesSlot(t *testing.T) {
 		IDs:              idGen,
 	}
 
-	ctx := t.Context()
-	sess, err := Start(ctx, cfg)
+	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
+	t.Cleanup(cancel)
+	sess, err := Start(ctx, &cfg)
 	if err != nil {
 		t.Fatalf("start session failed: %v", err)
 	}
@@ -377,7 +361,7 @@ func TestFailedCommitReleasesSlot(t *testing.T) {
 
 	req := makeModelDispatchRequest("r1", "m1", "a1", "cmd-disp-fail")
 
-	_, err = sess.Submit(ctx, req)
+	_, err = sess.Submit(ctx, &req)
 	if !errors.Is(err, fenceErr) {
 		t.Fatalf("expected fenceErr, got %v", err)
 	}
@@ -393,64 +377,53 @@ func TestFailedCommitReleasesSlot(t *testing.T) {
 	}
 }
 
-func TestDispatchEdgeCases(t *testing.T) {
+func TestIsDispatchHelperEdgeCases(t *testing.T) {
 	t.Parallel()
 
-	fakeClk := clock.NewFake(time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC))
-	idGen := ids.NewUUIDv7(fakeClk, ids.NewDeterministic("dispatch-edge-test"))
-
-	store := newFakeStore()
-	setupAdmittedRun(store, "r1", "m1", "a1")
-
-	exec := newFakeExecutor()
-	cfg := Config{
-		SessionID:        "s1",
-		OwnerIncarnation: 1,
-		WorkerCapacity:   2,
-		Store:            store,
-		Executor:         exec,
-		Clock:            fakeClk,
-		IDs:              idGen,
-	}
-
-	ctx := t.Context()
-	sess, err := Start(ctx, cfg)
-	if err != nil {
-		t.Fatalf("start session failed: %v", err)
-	}
-	defer sess.Stop()
-
-	// 1. isDispatch helper edge cases
 	st := kernel.NewState()
-	if isDispatch(nil, &kernel.PrepareDispatchCommand{}) {
+	if isDispatch(nil, new(kernel.PrepareDispatchCommand)) {
 		t.Error("expected false for nil state")
 	}
-	if isDispatch(st, &kernel.AcceptRunCommand{}) {
+	if isDispatch(st, new(kernel.AcceptRunCommand)) {
 		t.Error("expected false for non-prepare command")
 	}
 	// Tool attempt with Planned status (not Ready)
 	st.ToolInvocations["t1"] = &kernel.ToolInvocation{
 		ToolCallID: "t1",
 		Attempts: map[string]*kernel.ToolAttempt{
-			"att-1": {
-				AttemptID: "att-1",
+			testAtt1: {
+				AttemptID: testAtt1,
 				Status:    kernel.ToolAttemptStatusPlanned,
 			},
 		},
 	}
-	if isDispatch(st, &kernel.PrepareDispatchCommand{InvocationID: "t1", AttemptID: "att-1"}) {
+	prepCmd := new(kernel.PrepareDispatchCommand)
+	prepCmd.InvocationID = "t1"
+	prepCmd.AttemptID = testAtt1
+	if isDispatch(st, prepCmd) {
 		t.Error("expected false for tool attempt in Planned status")
 	}
 	// Tool attempt with Ready status
-	st.ToolInvocations["t1"].Attempts["att-1"].Status = kernel.ToolAttemptStatusReady
-	if !isDispatch(st, &kernel.PrepareDispatchCommand{InvocationID: "t1", AttemptID: "att-1"}) {
+	st.ToolInvocations["t1"].Attempts[testAtt1].Status = kernel.ToolAttemptStatusReady
+	if !isDispatch(st, prepCmd) {
 		t.Error("expected true for tool attempt in Ready status")
 	}
+}
+
+func TestDispatchEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeStore()
+	setupAdmittedRun(store)
+	exec := newFakeExecutor()
+
+	ctx, sess := startTestSession(t, store, exec, "dispatch-edge-test", 2)
+	defer sess.Stop()
 
 	// 2. Dispatch with empty CommandID and Principal (auto-generated ID and default origin)
 	req := makeModelDispatchRequest("r1", "m1", "a1", "")
 	req.Principal = ""
-	_, err = sess.Submit(ctx, req)
+	_, err := sess.Submit(ctx, &req)
 	if err != nil {
 		t.Fatalf("dispatch with empty id/principal failed: %v", err)
 	}
@@ -465,7 +438,7 @@ func TestDispatchEdgeCases(t *testing.T) {
 	sess.mu.Unlock()
 
 	req2 := makeModelDispatchRequest("r1", "m1", "a2", "cmd-halted")
-	_, err = sess.Submit(ctx, req2)
+	_, err = sess.Submit(ctx, &req2)
 	if !errors.Is(err, ErrCommitUnresolved) {
 		t.Fatalf("expected ErrCommitUnresolved when halted, got %v", err)
 	}
@@ -473,6 +446,12 @@ func TestDispatchEdgeCases(t *testing.T) {
 	sess.mu.Lock()
 	sess.halted = false
 	sess.mu.Unlock()
+
+	testDispatchRejectionAndTargetFallback(t, ctx, sess)
+}
+
+func testDispatchRejectionAndTargetFallback(t *testing.T, ctx context.Context, sess *Session) {
+	t.Helper()
 
 	// 4. Dispatch with Decide rejection releases slot
 	sess.mu.Lock()
@@ -483,7 +462,7 @@ func TestDispatchEdgeCases(t *testing.T) {
 	sess.mu.Unlock()
 	rejReq := makeModelDispatchRequest("r1", "m1", "a3", "cmd-rej")
 	rejReq.Facts.ModelDispatch = nil // Causes Decide error
-	_, err = sess.Submit(ctx, rejReq)
+	_, err := sess.Submit(ctx, &rejReq)
 	if err == nil {
 		t.Fatal("expected Decide error on nil ModelDispatch")
 	}
@@ -505,7 +484,7 @@ func TestDispatchEdgeCases(t *testing.T) {
 	sess.mu.Unlock()
 	reqTarget := makeModelDispatchRequest("", "m2", "a4", "cmd-target")
 	reqTarget.Target = "r1"
-	_, err = sess.Submit(ctx, reqTarget)
+	_, err = sess.Submit(ctx, &reqTarget)
 	if err != nil {
 		t.Fatalf("dispatch with target fallback failed: %v", err)
 	}

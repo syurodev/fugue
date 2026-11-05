@@ -96,5 +96,5 @@ type Observation struct {
 
 // Executor executes dispatched work items and reports observations.
 type Executor interface {
-	Execute(ctx context.Context, w Work, report func(Observation))
+	Execute(ctx context.Context, w *Work, report func(*Observation))
 }

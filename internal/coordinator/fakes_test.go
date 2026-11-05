@@ -2,10 +2,40 @@ package coordinator
 
 import (
 	"context"
+	"errors"
 	"sync"
+	"testing"
+	"time"
 
 	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/kernel"
+	"github.com/syurodev/fugue/internal/platform/clock"
+	"github.com/syurodev/fugue/internal/platform/ids"
+)
+
+var (
+	errAdmLoadBoom   = errors.New("admission load boom")
+	errLoadRunBoom   = errors.New("load run boom")
+	errAppendObsBoom = errors.New("append obs failure")
+)
+
+const (
+	testRunID1        = "r1"
+	testRunID2        = "r2"
+	testSessionID     = "s1"
+	testOriginUser    = "user"
+	testOriginSystem  = "system"
+	testKindAcceptRun = "AcceptRun"
+	testKindAdmitRun  = "AdmitRun"
+	testKindPrepare   = "PrepareDispatch"
+	testKindObserve   = "ObserveModelResponse"
+	testPurposeTurn   = "turn"
+	testCmdAccept1    = "cmd-accept-1"
+	testCmdAcceptR2   = "cmd-accept-r2"
+	testOriginWorker  = "worker"
+	testAttTool1      = "att-tool-1"
+	testAtt1          = "att-1"
+	testTimeout       = 100 * time.Millisecond
 )
 
 type appendResultOrError struct {
@@ -49,16 +79,24 @@ func newFakeStore() *fakeStore {
 	}
 }
 
-func (s *fakeStore) queueAppend(res AppendResult, err error) {
+func (s *fakeStore) queueAppend(res *AppendResult, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.appendQueue = append(s.appendQueue, appendResultOrError{result: res, err: err})
+	var r AppendResult
+	if res != nil {
+		r = *res
+	}
+	s.appendQueue = append(s.appendQueue, appendResultOrError{result: r, err: err})
 }
 
-func (s *fakeStore) queueResolve(status CommitResolution, receipt codec.Receipt, err error) {
+func (s *fakeStore) queueResolve(status CommitResolution, receipt *codec.Receipt) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.resolveQueue = append(s.resolveQueue, resolveResultOrError{status: status, receipt: receipt, err: err})
+	var rc codec.Receipt
+	if receipt != nil {
+		rc = *receipt
+	}
+	s.resolveQueue = append(s.resolveQueue, resolveResultOrError{status: status, receipt: rc, err: nil})
 }
 
 func (s *fakeStore) Append(_ context.Context, t *Transition) (AppendResult, error) {
@@ -117,25 +155,29 @@ func (s *fakeStore) LoadAdmission(_ context.Context, _ string) (Admission, error
 type fakeExecutor struct {
 	mu       sync.Mutex
 	recorded []Work
-	reports  map[string]func(Observation)
-	onExec   func(w Work, report func(Observation))
+	reports  map[string]func(*Observation)
+	onExec   func(w *Work, report func(*Observation))
 }
 
 func newFakeExecutor() *fakeExecutor {
 	return &fakeExecutor{
 		mu:       sync.Mutex{},
 		recorded: nil,
-		reports:  make(map[string]func(Observation)),
+		reports:  make(map[string]func(*Observation)),
 		onExec:   nil,
 	}
 }
 
-func (e *fakeExecutor) Execute(_ context.Context, w Work, report func(Observation)) {
+func (e *fakeExecutor) Execute(_ context.Context, w *Work, report func(*Observation)) {
 	e.mu.Lock()
-	e.recorded = append(e.recorded, w)
-	key := w.Lease.AttemptID
+	var item Work
+	if w != nil {
+		item = *w
+	}
+	e.recorded = append(e.recorded, item)
+	key := item.Lease.AttemptID
 	if key == "" {
-		key = w.Lease.RunID
+		key = item.Lease.RunID
 	}
 	e.reports[key] = report
 	onExec := e.onExec
@@ -146,8 +188,51 @@ func (e *fakeExecutor) Execute(_ context.Context, w Work, report func(Observatio
 	}
 }
 
+func startTestSession(t *testing.T, store *fakeStore, exec *fakeExecutor, seed string, cap int) (context.Context, *Session) {
+	t.Helper()
+	fakeClk := clock.NewFake(time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC))
+	idGen := ids.NewUUIDv7(fakeClk, ids.NewDeterministic(seed))
+	cfg := Config{
+		SessionID:        "s1",
+		OwnerIncarnation: 1,
+		WorkerCapacity:   cap,
+		Store:            store,
+		Executor:         exec,
+		Clock:            fakeClk,
+		IDs:              idGen,
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
+	t.Cleanup(cancel)
+	sess, err := Start(ctx, &cfg)
+	if err != nil {
+		t.Fatalf("start session failed: %v", err)
+	}
+	return ctx, sess
+}
+
 func (e *fakeExecutor) workCount() int {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	return len(e.recorded)
+}
+
+func waitSignal(t *testing.T, ctx context.Context, ch <-chan struct{}, desc string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for %s: %v", desc, ctx.Err())
+	}
+}
+
+func waitValue[T any](t *testing.T, ctx context.Context, ch <-chan T, desc string) T {
+	t.Helper()
+	select {
+	case val := <-ch:
+		return val
+	case <-ctx.Done():
+		t.Fatalf("timed out waiting for %s: %v", desc, ctx.Err())
+		var zero T
+		return zero
+	}
 }

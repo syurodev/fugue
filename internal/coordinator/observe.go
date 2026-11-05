@@ -6,15 +6,17 @@ import (
 
 	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/kernel"
+	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
 // SubmitObservation serializes a worker observation through the session actor.
-//
-//nolint:gocritic // hugeParam: signature defined by plan
-func (s *Session) SubmitObservation(ctx context.Context, obs Observation) (Reply, error) {
+func (s *Session) SubmitObservation(ctx context.Context, obs *Observation) (Reply, error) {
+	if obs == nil {
+		return Reply{}, errcode.New(errcode.InvalidArgument, "observation is nil")
+	}
 	return s.enqueue(ctx, &submission{
 		req:     Request{},
-		obs:     &obs,
+		obs:     obs,
 		replyCh: make(chan submitReply, 1),
 	})
 }
@@ -30,8 +32,7 @@ func isTerminalObservation(cmd kernel.Command) bool {
 	}
 }
 
-//nolint:gocritic // hugeParam: lease struct value
-func (s *Session) validateObservationLease(lease Lease, state *kernel.State) error {
+func (s *Session) validateObservationLease(lease *Lease, state *kernel.State) error {
 	if lease.RunID == "" || lease.ExecutorFence == 0 {
 		return ErrStaleLease
 	}
@@ -114,29 +115,29 @@ func (s *Session) prepareObservationCommand(
 func (s *Session) handleObservation(ctx context.Context, sub *submission, obs *Observation) {
 	state, err := s.ensureRunLoaded(ctx, obs.Lease.RunID)
 	if err != nil {
-		s.respond(sub, Reply{}, err)
+		s.respond(sub, nil, err)
 		return
 	}
 
-	if valErr := s.validateObservationLease(obs.Lease, state); valErr != nil {
-		s.respond(sub, Reply{}, valErr)
+	if valErr := s.validateObservationLease(&obs.Lease, state); valErr != nil {
+		s.respond(sub, nil, valErr)
 		return
 	}
 
 	cmdID, runID, origin, _, prepErr := s.prepareObservationCommand(obs, state)
 	if prepErr != nil {
-		s.respond(sub, Reply{}, prepErr)
+		s.respond(sub, nil, prepErr)
 		return
 	}
 
 	events, decErr := kernel.Decide(state, obs.Command, &obs.Facts)
 	if decErr != nil {
-		s.respond(sub, Reply{}, decErr)
+		s.respond(sub, nil, decErr)
 		return
 	}
 
 	if events == nil {
-		s.respond(sub, Reply{
+		s.respond(sub, &Reply{
 			Events:    nil,
 			Duplicate: true,
 			Receipt: codec.Receipt{
@@ -162,17 +163,16 @@ func (s *Session) handleObservation(ctx context.Context, sub *submission, obs *O
 	t := s.buildTransition(runID, cmdID, origin, state, events, &req)
 	appRes, appErr := s.cfg.Store.Append(ctx, t)
 	if appErr != nil {
-		s.respond(sub, Reply{}, appErr)
+		s.respond(sub, nil, appErr)
 		return
 	}
 
-	s.applyObservationSuccess(ctx, obs.Lease, obs.Command, runID, events, &appRes, sub)
+	s.applyObservationSuccess(ctx, &obs.Lease, obs.Command, runID, events, &appRes, sub)
 }
 
-//nolint:gocritic // hugeParam: lease struct value
 func (s *Session) applyObservationSuccess(
 	ctx context.Context,
-	lease Lease,
+	lease *Lease,
 	cmd kernel.Command,
 	runID string,
 	events []kernel.Event,
@@ -198,7 +198,8 @@ func (s *Session) applyObservationSuccess(
 		delete(s.attemptSlots, key)
 		if slotRef != "" {
 			if err := s.slots.complete(slotRef); err != nil {
-				_ = err
+				s.mu.Unlock()
+				return
 			}
 		}
 	}
@@ -215,7 +216,7 @@ func (s *Session) applyObservationSuccess(
 	}
 	s.maybeAdmitNext(ctx)
 
-	s.respond(sub, Reply{
+	s.respond(sub, &Reply{
 		Events:    events,
 		Duplicate: appRes.Duplicate,
 		Receipt:   appRes.Receipt,

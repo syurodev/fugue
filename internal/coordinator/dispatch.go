@@ -210,13 +210,7 @@ func (s *Session) onDispatchCommitted(
 		s.admission.Revision = appRes.AdmissionRevision
 	}
 
-	var dispatchEvt kernel.Event
-	for _, ev := range events {
-		switch ev.(type) {
-		case *kernel.ModelDispatchStartedEvent, *kernel.ToolDispatchStartedEvent:
-			dispatchEvt = ev
-		}
-	}
+	dispatchEvt := findDispatchEvent(events)
 
 	if dispatchEvt != nil {
 		w := Work{
@@ -231,8 +225,10 @@ func (s *Session) onDispatchCommitted(
 			},
 			Dispatch: dispatchEvt,
 		}
-		if err := s.slots.handoff(ref, w); err != nil {
-			_ = err
+		if err := s.slots.handoff(ref, &w); err != nil {
+			s.mu.Unlock()
+			sub.replyCh <- submitReply{reply: Reply{}, err: err}
+			return
 		}
 		s.attemptSlots[attemptKey{
 			runID:        runID,
@@ -256,7 +252,7 @@ func (s *Session) onDispatchCommitted(
 
 func (s *Session) releaseSlotAndRetry(ctx context.Context, ref string) {
 	if err := s.slots.release(ref); err != nil {
-		_ = err
+		return
 	}
 	s.retryParked(ctx)
 }
@@ -282,4 +278,14 @@ func (s *Session) retryParked(ctx context.Context) {
 			s.executeDispatch(ctx, &head, ref, prep)
 		}
 	}
+}
+
+func findDispatchEvent(events []kernel.Event) kernel.Event {
+	for _, ev := range events {
+		switch ev.(type) {
+		case *kernel.ModelDispatchStartedEvent, *kernel.ToolDispatchStartedEvent:
+			return ev
+		}
+	}
+	return nil
 }
