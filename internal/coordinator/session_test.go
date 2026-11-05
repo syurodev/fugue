@@ -37,30 +37,7 @@ func verifyFirstTxEnvelope(t *testing.T, firstTx *Transition, fakeClk clock.Cloc
 }
 
 func makeEnvelopeTestRequest() Request {
-	cmdAccept := new(kernel.AcceptRunCommand)
-	cmdAccept.Budgets = kernel.DefaultRunBudgets()
-	cmdAccept.CommandID = testCmdAccept1
-	cmdAccept.RunID = testRunID1
-	cmdAccept.Origin = testOriginUser
-	cmdAccept.SessionID = testSessionID
-
-	plan := new(kernel.ModelRequestPlannedEvent)
-	plan.InvocationID = "m1"
-	plan.FirstAttemptID = "a1"
-	plan.Purpose = testPurposeTurn
-	plan.ModelRef = "gpt-4"
-	plan.ContextRef = "c1"
-
-	return Request{
-		Command: cmdAccept,
-		Facts: kernel.DecisionFacts{
-			ModelPlan: plan,
-		},
-		Kind:      testKindAcceptRun,
-		Principal: testOriginUser,
-		Origin:    testOriginUser,
-		Target:    testRunID1,
-	}
+	return acceptRunRequest(testRunID1, testCmdAccept1, "m1", "a1")
 }
 
 func TestSubmitAppendsDecidedBatchWithCoordinatorEnvelope(t *testing.T) {
@@ -75,6 +52,8 @@ func TestSubmitAppendsDecidedBatchWithCoordinatorEnvelope(t *testing.T) {
 		AdmissionToken:   0,
 		Revision:         1,
 		QueueRevision:    5,
+		ContextEpoch:     1,
+		ContextRevision:  1,
 	}
 
 	exec := newFakeExecutor()
@@ -105,9 +84,7 @@ func TestSubmitAppendsDecidedBatchWithCoordinatorEnvelope(t *testing.T) {
 		t.Fatal("expected non-duplicate reply")
 	}
 
-	sess.mu.Lock()
 	sessAdmRev := sess.admission.Revision
-	sess.mu.Unlock()
 	if sessAdmRev != 2 {
 		t.Fatalf("expected admission revision 2, got %d", sessAdmRev)
 	}
@@ -280,7 +257,7 @@ func makeInheritedPrepareRequest() Request {
 		Command: &kernel.PrepareDispatchCommand{
 			CommandID:    "cmd-1",
 			RunID:        "r0",
-			Origin:       "system",
+			Origin:       testOriginSystem,
 			Token:        3,
 			InvocationID: "m1",
 			AttemptID:    "a1",
@@ -317,9 +294,7 @@ func verifyCommittedAdvance(t *testing.T, store *fakeStore, sess *Session) {
 		t.Fatalf("expected at least one transition recorded after release, got %d", txCount)
 	}
 
-	sess.mu.Lock()
 	r1State := sess.runs["r1"]
-	sess.mu.Unlock()
 
 	if r1State == nil || !r1State.Accepted {
 		t.Fatalf("expected run r1 cache advanced with Accepted=true, got %+v", r1State)
@@ -372,29 +347,16 @@ func TestCallerCancellationDoesNotAbortAcceptedCommand(t *testing.T) {
 	defer sess.Stop()
 
 	committed := make(chan struct{}, 1)
-	sess.setOnCommitted(func() {
+	sess.onCommitted = func() {
 		select {
 		case committed <- struct{}{}:
 		default:
 		}
-	})
+	}
 
 	callerCtx, cancelCaller := context.WithCancel(sessCtx)
 
-	cmdAccept := new(kernel.AcceptRunCommand)
-	cmdAccept.Budgets = kernel.DefaultRunBudgets()
-	cmdAccept.CommandID = "cmd-accept-1"
-	cmdAccept.RunID = "r1"
-	cmdAccept.Origin = testOriginUser
-	cmdAccept.SessionID = "s1"
-	req := Request{
-		Command:   cmdAccept,
-		Facts:     kernel.DecisionFacts{},
-		Kind:      testKindAcceptRun,
-		Principal: testOriginUser,
-		Origin:    testOriginUser,
-		Target:    "r1",
-	}
+	req := acceptRunRequest("r1", "cmd-accept-1", "m1", "a1")
 
 	task := supervise.Go(sessCtx, "test.submit", func(_ context.Context) error {
 		_, sErr := sess.Submit(callerCtx, &req)
@@ -514,13 +476,10 @@ func testSessionSubmitCases(t *testing.T, fakeClk clock.Clock, idGen ids.Generat
 	}
 
 	store.loadRunFn = nil
-	acceptCmd := new(kernel.AcceptRunCommand)
-	acceptCmd.Budgets = kernel.DefaultRunBudgets()
-	acceptCmd.RunID = "r-defaults"
-	reqDefaults := Request{
-		Command: acceptCmd,
-		Origin:  defaultOriginSession,
-	}
+	reqDefaults := acceptRunRequest("r-defaults", "", "m1", "a1")
+	reqDefaults.Kind, reqDefaults.Principal, reqDefaults.Target = "", "", ""
+	reqDefaults.Origin = defaultOriginSession
+	acceptCommand(&reqDefaults).SessionID = ""
 	_, err = sess.Submit(ctx, &reqDefaults)
 	if err != nil {
 		t.Fatalf("submit with default fields failed: %v", err)

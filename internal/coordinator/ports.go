@@ -58,6 +58,8 @@ type Admission struct {
 	AdmissionToken   uint64
 	Revision         uint64
 	QueueRevision    uint64
+	ContextEpoch     uint64
+	ContextRevision  uint64
 }
 
 // Store defines persistence operations for execution streams, admissions, and receipts.

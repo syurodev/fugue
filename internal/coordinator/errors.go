@@ -30,6 +30,9 @@ var (
 	// ErrOriginRequired is returned when a request carries no host-set origin.
 	ErrOriginRequired = errcode.New(errcode.InvalidArgument, "request origin is required")
 
+	// ErrInvalidAccept is returned when an AcceptRun lacks data that only the caller can supply.
+	ErrInvalidAccept = errcode.New(errcode.InvalidArgument, "AcceptRun request is incomplete or invalid")
+
 	// ErrObservationNotAllowed is returned when a worker observation carries a command that is not an observation.
 	ErrObservationNotAllowed = errcode.New(errcode.InvalidArgument, "command is not an allowed worker observation")
 )

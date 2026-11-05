@@ -35,12 +35,16 @@ const (
 	testOriginWorker  = "worker"
 	testAttTool1      = "att-tool-1"
 	testAtt1          = "att-1"
+	testToolAttempt   = "ta1"
 	testTimeout       = 100 * time.Millisecond
 )
 
 type appendResultOrError struct {
 	result AppendResult
 	err    error
+	// persist makes the fake store keep the transition although the caller sees
+	// an error (a lost acknowledgement of a commit that did happen).
+	persist bool
 }
 
 type resolveResultOrError struct {
@@ -61,6 +65,8 @@ type fakeStore struct {
 	runs         map[string]*kernel.State
 	runRevs      map[string]uint64
 	onAppend     func(t *Transition)
+	inFlight     int
+	maxInFlight  int
 }
 
 func newFakeStore() *fakeStore {
@@ -89,6 +95,33 @@ func (s *fakeStore) queueAppend(res *AppendResult, err error) {
 	s.appendQueue = append(s.appendQueue, appendResultOrError{result: r, err: err})
 }
 
+// queueLostAck scripts an Append whose acknowledgement is lost. When committed
+// is true the store keeps the transition, as a real store would.
+func (s *fakeStore) queueLostAck(committed bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.appendQueue = append(s.appendQueue, appendResultOrError{err: ErrCommitUnknown, persist: committed})
+}
+
+// persistLocked mirrors what a real store keeps after a commit: the evolved run
+// state, the next run revision and the next admission revision.
+func (s *fakeStore) persistLocked(t *Transition) {
+	st := s.runs[t.RunID]
+	for _, ev := range t.Events {
+		st = kernel.Evolve(st, ev)
+	}
+	s.runs[t.RunID] = st
+	s.runRevs[t.RunID]++
+	s.admission.Revision++
+	if st.Admitted && !st.Finished {
+		s.admission.ActiveRunID = t.RunID
+		s.admission.AdmissionToken = st.AdmissionToken
+	}
+	if st.Finished && s.admission.ActiveRunID == t.RunID {
+		s.admission.ActiveRunID = ""
+	}
+}
+
 func (s *fakeStore) queueResolve(status CommitResolution, receipt *codec.Receipt) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -102,9 +135,12 @@ func (s *fakeStore) queueResolve(status CommitResolution, receipt *codec.Receipt
 func (s *fakeStore) Append(_ context.Context, t *Transition) (AppendResult, error) {
 	s.mu.Lock()
 	s.transitions = append(s.transitions, t)
+	s.inFlight++
+	s.maxInFlight = max(s.maxInFlight, s.inFlight)
 	onApp := s.onAppend
+	scripted := len(s.appendQueue) > 0
 	var next appendResultOrError
-	if len(s.appendQueue) > 0 {
+	if scripted {
 		next = s.appendQueue[0]
 		s.appendQueue = s.appendQueue[1:]
 	}
@@ -114,7 +150,23 @@ func (s *fakeStore) Append(_ context.Context, t *Transition) (AppendResult, erro
 		onApp(t)
 	}
 
-	return next.result, next.err
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.inFlight--
+	if next.err != nil {
+		if next.persist {
+			s.persistLocked(t)
+		}
+		return AppendResult{}, next.err
+	}
+	s.persistLocked(t)
+	if scripted {
+		return next.result, nil
+	}
+	return AppendResult{
+		RunRevision:       s.runRevs[t.RunID],
+		AdmissionRevision: s.admission.Revision,
+	}, nil
 }
 
 func (s *fakeStore) ResolveCommit(_ context.Context, commandID string) (CommitResolution, codec.Receipt, error) {
@@ -235,4 +287,18 @@ func waitValue[T any](t *testing.T, ctx context.Context, ch <-chan T, desc strin
 		var zero T
 		return zero
 	}
+}
+
+func testNow() time.Time {
+	return time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+}
+
+func newTestSlots(capacity int) *slots {
+	clk := clock.NewFake(testNow())
+	return newSlots(capacity, ids.NewUUIDv7(clk, ids.NewDeterministic("test-slots")))
+}
+
+func reserveSlot(s *slots) (string, bool) {
+	ref, err := s.reserve()
+	return ref, err == nil
 }

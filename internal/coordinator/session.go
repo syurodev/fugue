@@ -34,15 +34,20 @@ type Config struct {
 // coordinator overwrites the command's own Origin with it and never reads the
 // command's claim; an empty Origin is refused. Principal is audit metadata for
 // the receipt and defaults to Origin.
+//
+// An AcceptRun also needs QueueDecisionRef, the evidence reference of the host's
+// queue decision, and Facts.ModelPlan, the first step of the run: the
+// coordinator records both when it admits the run and invents neither.
 type Request struct {
-	Command        kernel.Command
-	Facts          kernel.DecisionFacts
-	Origin         string
-	Kind           string
-	Principal      string
-	Target         string
-	MetadataInput  []byte
-	ProtectedInput []byte
+	Command          kernel.Command
+	Facts            kernel.DecisionFacts
+	Origin           string
+	QueueDecisionRef string
+	Kind             string
+	Principal        string
+	Target           string
+	MetadataInput    []byte
+	ProtectedInput   []byte
 }
 
 // Reply reports the outcome of a submitted command.
@@ -57,33 +62,41 @@ type submitReply struct {
 	err   error
 }
 
+// submission is one mailbox message: a caller request, a worker observation or
+// the result of a background read-back.
 type submission struct {
-	req     Request
-	obs     *Observation
-	replyCh chan submitReply
+	req      Request
+	obs      *Observation
+	resolved *resolution
+	replyCh  chan submitReply
 }
 
-// Session is the per-session coordinator actor.
+// Session is the per-session coordinator actor. Everything below the channels
+// is owned by the actor goroutine alone and is never locked: other goroutines
+// reach it only by posting to the mailbox.
 type Session struct {
-	mu             sync.Mutex
 	cfg            Config
 	admission      Admission
+	admissionStale bool
 	inheritedRunID string
 	slots          *slots
 	runs           map[string]*kernel.State
 	runRevs        map[string]uint64
 	queue          *sessionQueue
-	mailbox        chan submission
-	cancel         context.CancelFunc
-	task           *supervise.Task
-	workerTasks    []*supervise.Task
-	stopped        chan struct{}
-	stopOnce       sync.Once
+	parked         []submission
+	unresolved     map[string]*step
+	attemptSlots   map[attemptKey]string
 
-	parked       []submission
-	halted       bool
-	attemptSlots map[attemptKey]string
+	mailbox     chan submission
+	cancel      context.CancelFunc
+	task        *supervise.Task
+	workerTasks []*supervise.Task
+	resolvers   sync.WaitGroup
+	stopped     chan struct{}
+	stopOnce    sync.Once
 
+	// Test hooks. They are set before the first command is posted and read by
+	// the actor or a resolver started after that, so the mailbox orders them.
 	onPark       func()
 	onResolve    func(time.Time)
 	onTimerArmed func()
@@ -111,31 +124,32 @@ func Start(ctx context.Context, cfg *Config) (*Session, error) {
 	}
 
 	actorCtx, cancel := context.WithCancel(ctx)
-	s := newSessionInstance(&c, adm, inherited, cancel)
+	s := newSessionInstance(&c, &adm, inherited, cancel)
 	s.startWorkers(actorCtx)
 	s.task = supervise.Go(actorCtx, "coordinator.session", s.loop)
 	return s, nil
 }
 
-func newSessionInstance(cfg *Config, adm Admission, inherited string, cancel context.CancelFunc) *Session {
+func newSessionInstance(cfg *Config, adm *Admission, inherited string, cancel context.CancelFunc) *Session {
 	return &Session{
-		mu:             sync.Mutex{},
 		cfg:            *cfg,
-		admission:      adm,
+		admission:      *adm,
+		admissionStale: false,
 		inheritedRunID: inherited,
-		slots:          newSlots(cfg.WorkerCapacity),
+		slots:          newSlots(cfg.WorkerCapacity, cfg.IDs),
 		runs:           make(map[string]*kernel.State),
 		runRevs:        make(map[string]uint64),
 		queue:          newSessionQueue(),
+		parked:         nil,
+		unresolved:     make(map[string]*step),
+		attemptSlots:   make(map[attemptKey]string),
 		mailbox:        make(chan submission),
 		cancel:         cancel,
 		task:           nil,
 		workerTasks:    make([]*supervise.Task, 0, cfg.WorkerCapacity),
+		resolvers:      sync.WaitGroup{},
 		stopped:        make(chan struct{}),
 		stopOnce:       sync.Once{},
-		parked:         nil,
-		halted:         false,
-		attemptSlots:   make(map[attemptKey]string),
 		onPark:         nil,
 		onResolve:      nil,
 		onTimerArmed:   nil,
@@ -168,9 +182,10 @@ func (s *Session) Submit(ctx context.Context, r *Request) (Reply, error) {
 		return Reply{}, errcode.New(errcode.InvalidArgument, "request is nil")
 	}
 	return s.enqueue(ctx, &submission{
-		req:     *r,
-		obs:     nil,
-		replyCh: make(chan submitReply, 1),
+		req:      *r,
+		obs:      nil,
+		resolved: nil,
+		replyCh:  make(chan submitReply, 1),
 	})
 }
 
@@ -204,7 +219,8 @@ func (s *Session) enqueue(ctx context.Context, sub *submission) (Reply, error) {
 	}
 }
 
-// Stop terminates the session actor and waits for it to finish.
+// Stop terminates the session actor and waits for it, its workers and its
+// resolvers to finish.
 func (s *Session) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.stopped)
@@ -217,6 +233,7 @@ func (s *Session) Stop() {
 			wt.Stop()
 			<-wt.Done()
 		}
+		s.resolvers.Wait()
 	})
 }
 
@@ -225,9 +242,10 @@ func (s *Session) report(obs *Observation) {
 		return
 	}
 	sub := submission{
-		req:     Request{},
-		obs:     obs,
-		replyCh: nil,
+		req:      Request{},
+		obs:      obs,
+		resolved: nil,
+		replyCh:  nil,
 	}
 	select {
 	case s.mailbox <- sub:
@@ -257,52 +275,28 @@ func (s *Session) respond(sub *submission, reply *Reply, err error) {
 }
 
 func (s *Session) ensureRunLoaded(ctx context.Context, runID string) (*kernel.State, error) {
-	s.mu.Lock()
-	state, exists := s.runs[runID]
-	if exists {
-		s.mu.Unlock()
+	if state, exists := s.runs[runID]; exists {
 		return state, nil
 	}
-	s.mu.Unlock()
-
-	st, rev, err := s.cfg.Store.LoadRun(ctx, runID)
-	if err != nil {
-		return nil, fmt.Errorf("load run: %w", err)
+	if err := s.loadRun(ctx, runID); err != nil {
+		return nil, err
 	}
-	if st == nil {
-		st = kernel.NewState()
-	}
-
-	s.mu.Lock()
-	s.runs[runID] = st
-	s.runRevs[runID] = rev
-	s.mu.Unlock()
-
-	return st, nil
+	return s.runs[runID], nil
 }
 
 func (s *Session) handleSubmission(ctx context.Context, sub *submission) {
-	if sub.obs != nil {
+	switch {
+	case sub.resolved != nil:
+		s.handleResolution(ctx, sub.resolved)
+	case sub.obs != nil:
 		s.handleObservation(ctx, sub, sub.obs)
-		return
+	default:
+		s.handleRequest(ctx, sub)
 	}
+}
 
-	if sub.req.Origin == "" {
-		s.respond(sub, nil, ErrOriginRequired)
-		return
-	}
-
-	cmdID, runID, cmdToken := commandIdentity(sub.req.Command)
-	if runID == "" {
-		runID = sub.req.Target
-	}
-
-	if runID != "" && runID == s.inheritedRunID {
-		s.respond(sub, nil, ErrRecoveryRequired)
-		return
-	}
-
-	state, err := s.ensureRunLoaded(ctx, runID)
+func (s *Session) handleRequest(ctx context.Context, sub *submission) {
+	runID, state, err := s.prepareRequest(ctx, sub)
 	if err != nil {
 		s.respond(sub, nil, err)
 		return
@@ -313,10 +307,48 @@ func (s *Session) handleSubmission(ctx context.Context, sub *submission) {
 		return
 	}
 
+	if accept, ok := sub.req.Command.(*kernel.AcceptRunCommand); ok {
+		if acceptErr := s.validateAccept(accept, &sub.req); acceptErr != nil {
+			s.respond(sub, nil, acceptErr)
+			return
+		}
+	}
+	s.decideAndCommit(ctx, sub, runID, state)
+}
+
+// prepareRequest runs the checks that need no decision: a trusted origin, a run
+// this incarnation may touch, no unresolved commit on it, and a fresh view of
+// the admission row and the run.
+func (s *Session) prepareRequest(ctx context.Context, sub *submission) (string, *kernel.State, error) {
+	if sub.req.Origin == "" {
+		return "", nil, ErrOriginRequired
+	}
+	_, runID, _ := commandIdentity(sub.req.Command)
+	if runID == "" {
+		runID = sub.req.Target
+	}
+	if runID != "" && runID == s.inheritedRunID {
+		return "", nil, ErrRecoveryRequired
+	}
+	if s.busy(runID) {
+		return "", nil, ErrCommitUnresolved
+	}
+	if err := s.refreshAdmission(ctx, false); err != nil {
+		return "", nil, err
+	}
+	state, err := s.ensureRunLoaded(ctx, runID)
+	if err != nil {
+		return "", nil, err
+	}
+	return runID, state, nil
+}
+
+func (s *Session) decideAndCommit(ctx context.Context, sub *submission, runID string, state *kernel.State) {
+	cmdID, _, cmdToken := commandIdentity(sub.req.Command)
 	origin := sub.req.Origin
-	cmdID, prepErr := s.resolveSubmissionFacts(runID, cmdID, origin, cmdToken, state, sub)
-	if prepErr != nil {
-		s.respond(sub, nil, prepErr)
+	cmdID, err := s.resolveSubmissionFacts(runID, cmdID, origin, cmdToken, state, sub)
+	if err != nil {
+		s.respond(sub, nil, err)
 		return
 	}
 
@@ -340,14 +372,40 @@ func (s *Session) handleSubmission(ctx context.Context, sub *submission) {
 		return
 	}
 
-	t := s.buildTransition(runID, cmdID, origin, state, events, &sub.req)
-	appRes, appErr := s.cfg.Store.Append(ctx, t)
-	if appErr != nil {
-		s.respond(sub, nil, appErr)
-		return
-	}
+	s.commit(ctx, &step{
+		t:       s.buildTransition(runID, cmdID, origin, state, events, &sub.req),
+		events:  events,
+		attempt: 0,
+		done: func(ctx context.Context, res *AppendResult) {
+			s.requestCommitted(ctx, runID, events, res, sub)
+		},
+		fail: func(_ context.Context, err error) {
+			s.respond(sub, nil, err)
+		},
+	})
+}
 
-	s.applySubmissionSuccess(ctx, runID, events, &appRes, sub)
+// validateAccept refuses an AcceptRun that lacks data only the caller can
+// supply. Nothing is defaulted, because a default would be written into a
+// durable event as if the caller had decided it.
+func (s *Session) validateAccept(accept *kernel.AcceptRunCommand, req *Request) error {
+	switch {
+	case accept == nil:
+		return fmt.Errorf("%w: nil command", ErrInvalidAccept)
+	case accept.InputRef == "":
+		return fmt.Errorf("%w: input ref", ErrInvalidAccept)
+	case accept.QueueItemRef == "":
+		return fmt.Errorf("%w: queue item ref", ErrInvalidAccept)
+	case accept.ProtocolBinding == "":
+		return fmt.Errorf("%w: protocol binding", ErrInvalidAccept)
+	case accept.SessionID != "" && accept.SessionID != s.cfg.SessionID:
+		return fmt.Errorf("%w: session id", ErrInvalidAccept)
+	case req.QueueDecisionRef == "":
+		return fmt.Errorf("%w: queue decision ref", ErrInvalidAccept)
+	case req.Facts.ModelPlan == nil:
+		return fmt.Errorf("%w: model plan", ErrInvalidAccept)
+	}
+	return nil
 }
 
 func (s *Session) resolveSubmissionFacts(
@@ -356,16 +414,12 @@ func (s *Session) resolveSubmissionFacts(
 	state *kernel.State,
 	sub *submission,
 ) (string, error) {
-	var err error
 	if cmdID == "" {
-		cmdID, err = s.cfg.IDs.NewID()
+		newID, err := s.cfg.IDs.NewID()
 		if err != nil {
 			return "", fmt.Errorf("new id: %w", err)
 		}
-	}
-
-	if acceptCmd, ok := sub.req.Command.(*kernel.AcceptRunCommand); ok {
-		s.fillAcceptDefaults(acceptCmd, runID)
+		cmdID = newID
 	}
 
 	var token uint64
@@ -374,7 +428,14 @@ func (s *Session) resolveSubmissionFacts(
 	} else {
 		token = cmdToken
 	}
-	stamped, err := stampCommand(sub.req.Command, cmdID, runID, origin, token)
+
+	cmd := sub.req.Command
+	if accept, ok := cmd.(*kernel.AcceptRunCommand); ok && accept.SessionID == "" {
+		withSession := *accept
+		withSession.SessionID = s.cfg.SessionID
+		cmd = &withSession
+	}
+	stamped, err := stampCommand(cmd, cmdID, runID, origin, token)
 	if err != nil {
 		return "", err
 	}
@@ -394,70 +455,35 @@ func (s *Session) resolveSubmissionFacts(
 	return cmdID, nil
 }
 
-func (s *Session) fillAcceptDefaults(acceptCmd *kernel.AcceptRunCommand, runID string) {
-	if acceptCmd.SessionID == "" {
-		acceptCmd.SessionID = s.cfg.SessionID
-	}
-	if acceptCmd.InputRef == "" {
-		acceptCmd.InputRef = "input-" + runID
-	}
-	if acceptCmd.QueueItemRef == "" {
-		acceptCmd.QueueItemRef = "queue-" + runID
-	}
-	if acceptCmd.ProtocolBinding == "" {
-		acceptCmd.ProtocolBinding = "binding-v1"
-	}
-}
-
-func (s *Session) applySubmissionSuccess(
+func (s *Session) requestCommitted(
 	ctx context.Context,
 	runID string,
 	events []kernel.Event,
-	appRes *AppendResult,
+	res *AppendResult,
 	sub *submission,
 ) {
-	s.mu.Lock()
-	for _, ev := range events {
-		s.runs[runID] = kernel.Evolve(s.runs[runID], ev)
+	state := s.runs[runID]
+	_, isAccept := sub.req.Command.(*kernel.AcceptRunCommand)
+	if isAccept && state != nil && state.Accepted && !state.Admitted {
+		s.queue.push(runID, sub.req.QueueDecisionRef, sub.req.Facts.ModelPlan)
 	}
-	s.runRevs[runID] = appRes.RunRevision
-	if appRes.AdmissionRevision > 0 {
-		s.admission.Revision = appRes.AdmissionRevision
+	if state != nil && state.Finished && s.admission.ActiveRunID == runID {
+		s.admission.ActiveRunID = ""
 	}
-
-	if s.runs[runID] != nil && s.runs[runID].Accepted && !s.runs[runID].Admitted {
-		s.queue.push(runID, &sub.req.Facts)
-	}
-
-	if s.runs[runID] != nil && s.runs[runID].Finished {
-		if s.admission.ActiveRunID == runID {
-			s.admission.ActiveRunID = ""
-		}
-	}
-	s.mu.Unlock()
 
 	s.maybeAdmitNext(ctx)
 
 	s.respond(sub, &Reply{
 		Events:    events,
-		Duplicate: appRes.Duplicate,
-		Receipt:   appRes.Receipt,
+		Duplicate: res.Duplicate,
+		Receipt:   res.Receipt,
 	}, nil)
 
 	s.notifyCommitted()
 }
 
-func (s *Session) setOnCommitted(fn func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.onCommitted = fn
-}
-
 func (s *Session) notifyCommitted() {
-	s.mu.Lock()
-	fn := s.onCommitted
-	s.mu.Unlock()
-	if fn != nil {
-		fn()
+	if s.onCommitted != nil {
+		s.onCommitted()
 	}
 }

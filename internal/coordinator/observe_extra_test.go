@@ -82,9 +82,7 @@ func testObsSubmitFailures(t *testing.T) {
 		return nil, 0, errLoadRunBoom
 	}
 	obsUncached := makeModelResponseObservation(testSessionID, "r-uncached", "m1", "a1", "cmd-uncached", 1, 1, 5)
-	sess.mu.Lock()
 	sess.admission.ActiveRunID = "r-uncached"
-	sess.mu.Unlock()
 	_, err = sess.SubmitObservation(ctx, &obsUncached)
 	if !errors.Is(err, errLoadRunBoom) {
 		t.Errorf("expected load error, got %v", err)
@@ -129,9 +127,7 @@ func TestObservationAdditionalCoverage(t *testing.T) {
 		t.Fatal("expected not duplicate")
 	}
 
-	sess.mu.Lock()
 	obsAdmRev := sess.admission.Revision
-	sess.mu.Unlock()
 	if obsAdmRev != 1 {
 		t.Fatalf("expected admission revision 1, got %d", obsAdmRev)
 	}
@@ -151,8 +147,6 @@ func testNilSubmissions(t *testing.T, ctx context.Context, sess *Session) {
 }
 
 func setupManualSlotAttempt(sess *Session, store *fakeStore) {
-	sess.mu.Lock()
-	defer sess.mu.Unlock()
 	sess.runs[testRunID1] = store.runs[testRunID1]
 	sess.attemptSlots[attemptKey{runID: testRunID1, invocationID: "m1", attemptID: "a1"}] = "slot-manual"
 	sess.slots.active["slot-manual"] = slotHandedOff

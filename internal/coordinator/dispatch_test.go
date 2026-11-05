@@ -167,9 +167,7 @@ func TestHandoffHappensOnlyAfterCommit(t *testing.T) {
 
 	verifyDispatchedWorkItem(t, exec, 3)
 
-	sess.mu.Lock()
 	dispAdmRev := sess.admission.Revision
-	sess.mu.Unlock()
 	if dispAdmRev != 1 {
 		t.Fatalf("expected admission revision 1, got %d", dispAdmRev)
 	}
@@ -214,7 +212,7 @@ func TestNoSlotParksDispatchWithoutEvents(t *testing.T) {
 	defer sess.Stop()
 
 	// Manually hold the 1 available slot
-	heldRef, ok := sess.slots.reserve()
+	heldRef, ok := reserveSlot(sess.slots)
 	if !ok {
 		t.Fatal("expected reserve to succeed")
 	}
@@ -256,21 +254,7 @@ func submitAcceptR2WhileParked(t *testing.T, ctx context.Context, sess *Session,
 		AdmissionRevision: 1,
 	}, nil)
 
-	cmdAccept := new(kernel.AcceptRunCommand)
-	cmdAccept.Budgets = kernel.DefaultRunBudgets()
-	cmdAccept.CommandID = testCmdAcceptR2
-	cmdAccept.RunID = testRunID2
-	cmdAccept.Origin = testOriginUser
-	cmdAccept.SessionID = testSessionID
-
-	reqAccept := Request{
-		Command:   cmdAccept,
-		Facts:     kernel.DecisionFacts{},
-		Kind:      testKindAcceptRun,
-		Principal: testOriginUser,
-		Origin:    testOriginUser,
-		Target:    testRunID2,
-	}
+	reqAccept := acceptRunRequest(testRunID2, testCmdAcceptR2, "m2", "a2")
 
 	reply, err := sess.Submit(ctx, &reqAccept)
 	if err != nil {
@@ -292,7 +276,7 @@ func TestActorKeepsServingWhileDispatchWaitsForCapacity(t *testing.T) {
 	defer sess.Stop()
 
 	// Hold the capacity
-	_, ok := sess.slots.reserve()
+	_, ok := reserveSlot(sess.slots)
 	if !ok {
 		t.Fatal("reserve failed")
 	}
@@ -374,7 +358,7 @@ func TestFailedCommitReleasesSlot(t *testing.T) {
 	}
 
 	// Slot must be returned: reserve() should succeed!
-	ref, canReserve := sess.slots.reserve()
+	ref, canReserve := reserveSlot(sess.slots)
 	if !canReserve || ref == "" {
 		t.Fatal("expected slot to be released after failed commit, reserve failed")
 	}
@@ -432,13 +416,11 @@ func TestDispatchEdgeCases(t *testing.T) {
 	}
 
 	// 3. Dispatch when halted returns ErrCommitUnresolved
-	sess.mu.Lock()
 	sess.runs["r1"].ModelInvocations["m1"].Attempts["a2"] = &kernel.ModelAttempt{
 		AttemptID: "a2",
 		Status:    kernel.ModelAttemptStatusPlanned,
 	}
-	sess.halted = true
-	sess.mu.Unlock()
+	sess.unresolved["pending"] = &step{t: &Transition{RunID: "other-run"}}
 
 	req2 := makeModelDispatchRequest("r1", "m1", "a2", "cmd-halted")
 	_, err = sess.Submit(ctx, &req2)
@@ -446,9 +428,7 @@ func TestDispatchEdgeCases(t *testing.T) {
 		t.Fatalf("expected ErrCommitUnresolved when halted, got %v", err)
 	}
 
-	sess.mu.Lock()
-	sess.halted = false
-	sess.mu.Unlock()
+	delete(sess.unresolved, "pending")
 
 	testDispatchRejectionAndTargetFallback(t, ctx, sess)
 }
@@ -457,12 +437,10 @@ func testDispatchRejectionAndTargetFallback(t *testing.T, ctx context.Context, s
 	t.Helper()
 
 	// 4. Dispatch with Decide rejection releases slot
-	sess.mu.Lock()
 	sess.runs["r1"].ModelInvocations["m1"].Attempts["a3"] = &kernel.ModelAttempt{
 		AttemptID: "a3",
 		Status:    kernel.ModelAttemptStatusPlanned,
 	}
-	sess.mu.Unlock()
 	rejReq := makeModelDispatchRequest("r1", "m1", "a3", "cmd-rej")
 	rejReq.Facts.ModelDispatch = nil // Causes Decide error
 	_, err := sess.Submit(ctx, &rejReq)
@@ -471,7 +449,6 @@ func testDispatchRejectionAndTargetFallback(t *testing.T, ctx context.Context, s
 	}
 
 	// 5. Dispatch with empty RunID on command takes req.Target
-	sess.mu.Lock()
 	sess.runs["r1"].ModelInvocations["m1"].Attempts["a1"].Status = kernel.ModelAttemptStatusCompleted
 	sess.runs["r1"].CurrentModelInvocationID = "m2"
 	sess.runs["r1"].ModelInvocations["m2"] = &kernel.ModelInvocation{
@@ -484,7 +461,6 @@ func testDispatchRejectionAndTargetFallback(t *testing.T, ctx context.Context, s
 			},
 		},
 	}
-	sess.mu.Unlock()
 	reqTarget := makeModelDispatchRequest("", "m2", "a4", "cmd-target")
 	reqTarget.Target = "r1"
 	_, err = sess.Submit(ctx, &reqTarget)

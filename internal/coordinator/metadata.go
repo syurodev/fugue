@@ -1,6 +1,8 @@
 package coordinator
 
 import (
+	"fmt"
+
 	"github.com/syurodev/fugue/internal/kernel"
 )
 
@@ -8,55 +10,54 @@ import (
 // by the coordinator and never read from the observation.
 const originWorker = "worker"
 
+// errUnsupportedCommand is what the kernel itself says about a command it does
+// not decide, so a caller sees one answer whichever layer refuses first.
+var errUnsupportedCommand = fmt.Errorf("coordinator: %w", kernel.Reject(kernel.RejectionCodeUnrecognizedCommand, "unsupported or nil command"))
+
+// identityOf reads the caller-supplied identity of one command type; a nil
+// command has none.
+func identityOf[T any](v *T, get func(*T) (cmdID, runID string, token uint64)) (string, string, uint64) {
+	if v == nil {
+		return "", "", 0
+	}
+	return get(v)
+}
+
 // commandIdentity returns the caller-supplied command ID, run ID and token of a
 // supported command. The origin is deliberately not readable: the coordinator
 // takes it only from the trusted Request.Origin or from the worker path.
 func commandIdentity(c kernel.Command) (cmdID, runID string, token uint64) {
 	switch v := c.(type) {
 	case *kernel.AcceptRunCommand:
-		if v != nil {
-			return v.CommandID, v.RunID, 0
-		}
+		return identityOf(v, func(c *kernel.AcceptRunCommand) (string, string, uint64) { return c.CommandID, c.RunID, 0 })
 	case *kernel.AdmitRunCommand:
-		if v != nil {
-			return v.CommandID, v.RunID, v.Token
-		}
+		return identityOf(v, func(c *kernel.AdmitRunCommand) (string, string, uint64) { return c.CommandID, c.RunID, c.Token })
 	case *kernel.AdvanceRunCommand:
-		if v != nil {
-			return v.CommandID, v.RunID, v.Token
-		}
+		return identityOf(v, func(c *kernel.AdvanceRunCommand) (string, string, uint64) { return c.CommandID, c.RunID, c.Token })
 	case *kernel.PrepareDispatchCommand:
-		if v != nil {
-			return v.CommandID, v.RunID, v.Token
-		}
+		return identityOf(v, func(c *kernel.PrepareDispatchCommand) (string, string, uint64) { return c.CommandID, c.RunID, c.Token })
 	case *kernel.ObserveModelStreamCommand:
-		if v != nil {
-			return v.CommandID, v.RunID, v.Token
-		}
+		return identityOf(v, func(c *kernel.ObserveModelStreamCommand) (string, string, uint64) {
+			return c.CommandID, c.RunID, c.Token
+		})
 	case *kernel.ObserveModelResponseCommand:
-		if v != nil {
-			return v.CommandID, v.RunID, v.Token
-		}
+		return identityOf(v, func(c *kernel.ObserveModelResponseCommand) (string, string, uint64) {
+			return c.CommandID, c.RunID, c.Token
+		})
 	case *kernel.ObserveModelFailureCommand:
-		if v != nil {
-			return v.CommandID, v.RunID, v.Token
-		}
+		return identityOf(v, func(c *kernel.ObserveModelFailureCommand) (string, string, uint64) {
+			return c.CommandID, c.RunID, c.Token
+		})
 	case *kernel.ObserveToolCheckCommand:
-		if v != nil {
-			return v.CommandID, v.RunID, v.Token
-		}
+		return identityOf(v, func(c *kernel.ObserveToolCheckCommand) (string, string, uint64) { return c.CommandID, c.RunID, c.Token })
 	case *kernel.ObserveToolResultCommand:
-		if v != nil {
-			return v.CommandID, v.RunID, v.Token
-		}
+		return identityOf(v, func(c *kernel.ObserveToolResultCommand) (string, string, uint64) {
+			return c.CommandID, c.RunID, c.Token
+		})
 	case *kernel.ExtendBudgetCommand:
-		if v != nil {
-			return v.CommandID, v.RunID, v.Token
-		}
+		return identityOf(v, func(c *kernel.ExtendBudgetCommand) (string, string, uint64) { return c.CommandID, c.RunID, c.Token })
 	case *kernel.RequestStopCommand:
-		if v != nil {
-			return v.CommandID, v.RunID, v.Token
-		}
+		return identityOf(v, func(c *kernel.RequestStopCommand) (string, string, uint64) { return c.CommandID, c.RunID, c.Token })
 	}
 	return "", "", 0
 }
@@ -68,7 +69,7 @@ func stampWith[T any, P interface {
 	kernel.Command
 }](v P, set func(*T)) (kernel.Command, error) {
 	if v == nil {
-		return nil, kernel.Reject(kernel.RejectionCodeUnrecognizedCommand, "unsupported or nil command")
+		return nil, errUnsupportedCommand
 	}
 	cp := *v
 	set(&cp)
@@ -123,7 +124,7 @@ func stampCommand(c kernel.Command, cmdID, runID, origin string, token uint64) (
 			c.CommandID, c.RunID, c.Origin, c.Token = cmdID, runID, origin, token
 		})
 	}
-	return nil, kernel.Reject(kernel.RejectionCodeUnrecognizedCommand, "unsupported or nil command")
+	return nil, errUnsupportedCommand
 }
 
 // isWorkerObservation reports whether a worker may report c. Everything else is

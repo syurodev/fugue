@@ -2,188 +2,254 @@ package coordinator
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"time"
 
+	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/kernel"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 )
 
-func resolveDispatchFence(defaultFence uint64, events []kernel.Event) uint64 {
-	fence := defaultFence
-	for _, ev := range events {
-		switch dev := ev.(type) {
-		case *kernel.ModelDispatchStartedEvent:
-			fence = dev.ExecutorFence
-		case *kernel.ToolDispatchStartedEvent:
-			fence = dev.ExecutorFence
-		}
-	}
-	return fence
+// maxCommitAttempts bounds how often one transition is appended again after a
+// read-back proved that an earlier attempt did not commit.
+const maxCommitAttempts = 3
+
+const (
+	resolveBackoffStart = time.Second
+	resolveBackoffMax   = 30 * time.Second
+)
+
+// step is one decided batch on its way to the store. Every append of the
+// coordinator, whatever command produced it, goes through commit so that a lost
+// acknowledgement and a definite rejection are handled the same way everywhere.
+type step struct {
+	t       *Transition
+	events  []kernel.Event
+	attempt int
+	// done runs on the actor once the batch is known to be committed and the
+	// cached run and admission reflect it.
+	done func(ctx context.Context, res *AppendResult)
+	// fail runs on the actor when the batch is definitely not committed.
+	fail func(ctx context.Context, err error)
 }
 
-func (s *Session) resolveSynchronous(
-	ctx context.Context,
-	sub *submission,
-	t *Transition,
-	ref string,
-	events []kernel.Event,
-	prep *kernel.PrepareDispatchCommand,
-) bool {
-	s.mu.Lock()
-	onR := s.onResolve
-	s.mu.Unlock()
-	if onR != nil {
-		onR(s.cfg.Clock.Now())
-	}
+// resolution is the result of a background read-back, posted to the mailbox.
+type resolution struct {
+	commandID string
+	status    CommitResolution
+	receipt   codec.Receipt
+}
 
-	res, receipt, err := s.cfg.Store.ResolveCommit(ctx, t.CommandID)
-	if err != nil {
-		return false
-	}
-	if res == CommitResolutionCommitted {
-		fence := resolveDispatchFence(t.Fence.AdmissionToken, events)
-		s.onDispatchCommitted(t.RunID, prep, ref, fence, events, &AppendResult{
-			Duplicate:         false,
-			Receipt:           receipt,
-			RunRevision:       t.ExpectedRunRevision + 1,
-			AdmissionRevision: t.ExpectedAdmissionRevision,
-		}, sub)
-		return true
-	}
-	if res == CommitResolutionNotCommitted {
-		s.mu.Lock()
-		if err := s.slots.release(ref); err != nil {
-			s.mu.Unlock()
-			return false
-		}
-		s.mu.Unlock()
+// halted reports whether any commit is still unresolved. Dispatching stops until
+// every one is settled.
+func (s *Session) halted() bool {
+	return len(s.unresolved) > 0
+}
 
-		newRef, ok := s.slots.reserve()
-		if ok {
-			s.executeDispatch(ctx, sub, newRef, prep)
-		} else {
-			s.mu.Lock()
-			s.parked = append(s.parked, *sub)
-			s.mu.Unlock()
+// busy reports whether a commit for the run is unresolved. The cached state of
+// such a run cannot be trusted until the read-back settles.
+func (s *Session) busy(runID string) bool {
+	for _, st := range s.unresolved {
+		if st.t.RunID == runID {
+			return true
 		}
-		return true
 	}
 	return false
 }
 
-func (s *Session) handleUnknownCommit(
-	ctx context.Context,
-	sub *submission,
-	t *Transition,
-	ref string,
-	events []kernel.Event,
-	prep *kernel.PrepareDispatchCommand,
-) {
-	if s.resolveSynchronous(ctx, sub, t, ref, events, prep) {
+// commit appends the step. A confirmed commit updates the cache and calls done;
+// a lost acknowledgement is read back by the same command ID before anything
+// else happens to the run; a definite rejection reloads the run and the
+// admission row so the next append starts from what the store holds.
+func (s *Session) commit(ctx context.Context, st *step) {
+	res, err := s.cfg.Store.Append(ctx, st.t)
+	switch {
+	case err == nil:
+		s.applyAppended(ctx, st, &res)
+		st.done(ctx, &res)
+	case errors.Is(err, ErrCommitUnknown):
+		s.readBack(ctx, st)
+	default:
+		s.reload(ctx, st.t.RunID)
+		st.fail(ctx, err)
+	}
+}
+
+// applyAppended folds a confirmed append into the cache. A duplicate append means
+// an earlier attempt committed these events, so the store is the only truth.
+func (s *Session) applyAppended(ctx context.Context, st *step, res *AppendResult) {
+	runID := st.t.RunID
+	if res.Duplicate {
+		s.reload(ctx, runID)
 		return
 	}
+	for _, ev := range st.events {
+		s.runs[runID] = kernel.Evolve(s.runs[runID], ev)
+	}
+	s.runRevs[runID] = res.RunRevision
+	s.admission.Revision = res.AdmissionRevision
+}
 
-	s.mu.Lock()
-	s.halted = true
-	s.mu.Unlock()
+// readBack asks the store once, inline, what became of the command. When that
+// does not settle it, the step stays unresolved and a background resolver keeps
+// asking on a backoff schedule; dispatching is halted meanwhile.
+func (s *Session) readBack(ctx context.Context, st *step) {
+	if s.onResolve != nil {
+		s.onResolve(s.cfg.Clock.Now())
+	}
+	status, receipt, err := s.cfg.Store.ResolveCommit(ctx, st.t.CommandID)
+	if err == nil && s.settle(ctx, st, status, &receipt) {
+		return
+	}
+	s.unresolved[st.t.CommandID] = st
+	s.startResolver(ctx, st.t.CommandID)
+}
 
+// settle acts on a read-back result and reports whether the outcome was known.
+func (s *Session) settle(ctx context.Context, st *step, status CommitResolution, receipt *codec.Receipt) bool {
+	switch status {
+	case CommitResolutionCommitted:
+		s.reload(ctx, st.t.RunID)
+		res := AppendResult{
+			Duplicate:         false,
+			Receipt:           *receipt,
+			RunRevision:       s.runRevs[st.t.RunID],
+			AdmissionRevision: s.admission.Revision,
+		}
+		st.done(ctx, &res)
+		return true
+	case CommitResolutionNotCommitted:
+		s.appendAgain(ctx, st)
+		return true
+	case CommitResolutionUnavailable:
+		return false
+	}
+	return false
+}
+
+// appendAgain sends the same transition, with the same command ID, after a
+// read-back proved that it did not commit. Other commands may have moved the
+// revisions meanwhile, so the expectations are refreshed from the cache.
+func (s *Session) appendAgain(ctx context.Context, st *step) {
+	if st.attempt+1 >= maxCommitAttempts {
+		s.reload(ctx, st.t.RunID)
+		st.fail(ctx, ErrCommitUnknown)
+		return
+	}
+	st.attempt++
+	st.t.ExpectedRunRevision = s.runRevs[st.t.RunID]
+	st.t.ExpectedAdmissionRevision = s.admission.Revision
+	if st.t.Fence.AdmissionToken == 0 {
+		st.t.Fence.QueueRevision = s.admission.QueueRevision
+	}
+	s.commit(ctx, st)
+}
+
+// handleResolution applies, on the actor, a result the resolver posted.
+func (s *Session) handleResolution(ctx context.Context, r *resolution) {
+	st := s.unresolved[r.commandID]
+	if st == nil {
+		return
+	}
+	delete(s.unresolved, r.commandID)
+	if !s.settle(ctx, st, r.status, &r.receipt) {
+		s.unresolved[r.commandID] = st
+		s.startResolver(ctx, r.commandID)
+		return
+	}
+	s.retryParked(ctx)
+	s.maybeAdmitNext(ctx)
+}
+
+func (s *Session) startResolver(ctx context.Context, commandID string) {
+	s.resolvers.Add(1)
 	supervise.Go(ctx, "coordinator.commit_resolver", func(rCtx context.Context) error {
-		s.runCommitResolver(rCtx, sub, t, ref, events, prep)
+		defer s.resolvers.Done()
+		s.resolveLoop(rCtx, commandID)
 		return nil
 	})
 }
 
-func (s *Session) runCommitResolver(
-	rCtx context.Context,
-	sub *submission,
-	t *Transition,
-	ref string,
-	events []kernel.Event,
-	prep *kernel.PrepareDispatchCommand,
-) {
-	delay := 1 * time.Second
+// resolveLoop only reads the commit back and posts the result to the mailbox. It
+// never decides, appends or touches session state: the actor stays the single
+// writer of the stream.
+func (s *Session) resolveLoop(ctx context.Context, commandID string) {
+	delay := resolveBackoffStart
 	for {
 		timer := s.cfg.Clock.NewTimer(delay)
-		s.mu.Lock()
-		onArm := s.onTimerArmed
-		s.mu.Unlock()
-		if onArm != nil {
-			onArm()
+		if s.onTimerArmed != nil {
+			s.onTimerArmed()
 		}
-
 		select {
-		case <-rCtx.Done():
+		case <-ctx.Done():
 			timer.Stop()
 			return
 		case <-s.stopped:
 			timer.Stop()
 			return
 		case <-timer.C():
-			if s.checkResolverCommit(rCtx, sub, t, ref, events, prep) {
-				return
-			}
-			delay *= 2
-			if delay > 30*time.Second {
-				delay = 30 * time.Second
-			}
 		}
+
+		if s.onResolve != nil {
+			s.onResolve(s.cfg.Clock.Now())
+		}
+		status, receipt, err := s.cfg.Store.ResolveCommit(ctx, commandID)
+		if err == nil && status != CommitResolutionUnavailable {
+			sub := submission{
+				req:      Request{},
+				obs:      nil,
+				resolved: &resolution{commandID: commandID, status: status, receipt: receipt},
+				replyCh:  nil,
+			}
+			select {
+			case s.mailbox <- sub:
+			case <-ctx.Done():
+			case <-s.stopped:
+			}
+			return
+		}
+		delay = min(delay*2, resolveBackoffMax)
 	}
 }
 
-func (s *Session) checkResolverCommit(
-	rCtx context.Context,
-	sub *submission,
-	t *Transition,
-	ref string,
-	events []kernel.Event,
-	prep *kernel.PrepareDispatchCommand,
-) bool {
-	s.mu.Lock()
-	onResolveHook := s.onResolve
-	s.mu.Unlock()
-	if onResolveHook != nil {
-		onResolveHook(s.cfg.Clock.Now())
+// loadRun caches the run as the store holds it.
+func (s *Session) loadRun(ctx context.Context, runID string) error {
+	st, rev, err := s.cfg.Store.LoadRun(ctx, runID)
+	if err != nil {
+		return fmt.Errorf("load run: %w", err)
 	}
-
-	cRes, cReceipt, cErr := s.cfg.Store.ResolveCommit(rCtx, t.CommandID)
-	if cErr != nil {
-		return false
+	if st == nil {
+		st = kernel.NewState()
 	}
+	s.runs[runID] = st
+	s.runRevs[runID] = rev
+	return nil
+}
 
-	if cRes == CommitResolutionCommitted {
-		s.mu.Lock()
-		s.halted = false
-		s.mu.Unlock()
-
-		fence := resolveDispatchFence(t.Fence.AdmissionToken, events)
-		s.onDispatchCommitted(t.RunID, prep, ref, fence, events, &AppendResult{
-			Duplicate:         false,
-			Receipt:           cReceipt,
-			RunRevision:       t.ExpectedRunRevision + 1,
-			AdmissionRevision: t.ExpectedAdmissionRevision,
-		}, sub)
-		return true
+// reload replaces the cached run and the admission row with what the store
+// holds. What cannot be reloaded is dropped from the cache or marked stale, so
+// the next command loads it before it appends.
+func (s *Session) reload(ctx context.Context, runID string) {
+	if err := s.loadRun(ctx, runID); err != nil {
+		delete(s.runs, runID)
+		delete(s.runRevs, runID)
 	}
-
-	if cRes == CommitResolutionNotCommitted {
-		s.mu.Lock()
-		s.halted = false
-		if err := s.slots.release(ref); err != nil {
-			s.mu.Unlock()
-			return false
-		}
-		s.mu.Unlock()
-
-		newRef, ok := s.slots.reserve()
-		if ok {
-			s.executeDispatch(rCtx, sub, newRef, prep)
-		} else {
-			s.mu.Lock()
-			s.parked = append(s.parked, *sub)
-			s.mu.Unlock()
-		}
-		return true
+	if err := s.refreshAdmission(ctx, true); err != nil {
+		s.admissionStale = true
 	}
+}
 
-	return false
+// refreshAdmission loads the admission row when it is stale or force is set.
+func (s *Session) refreshAdmission(ctx context.Context, force bool) error {
+	if !force && !s.admissionStale {
+		return nil
+	}
+	adm, err := s.cfg.Store.LoadAdmission(ctx, s.cfg.SessionID)
+	if err != nil {
+		return fmt.Errorf("load admission: %w", err)
+	}
+	s.admission = adm
+	s.admissionStale = false
+	return nil
 }

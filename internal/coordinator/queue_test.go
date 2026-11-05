@@ -25,6 +25,8 @@ func TestAdmissionFollowsFIFOForRunsAcceptedThisIncarnation(t *testing.T) {
 		AdmissionToken:   0,
 		Revision:         1,
 		QueueRevision:    1,
+		ContextEpoch:     1,
+		ContextRevision:  1,
 	}
 
 	exec := newFakeExecutor()
@@ -63,10 +65,8 @@ func TestAdmissionFollowsFIFOForRunsAcceptedThisIncarnation(t *testing.T) {
 	queueFinishR1(t, ctx, sess, store)
 	verifyFIFOTransitions(t, store)
 
-	sess.mu.Lock()
 	activeRun := sess.admission.ActiveRunID
 	admRev := sess.admission.Revision
-	sess.mu.Unlock()
 
 	if activeRun != testRunID2 {
 		t.Fatalf("expected active run %s, got %s", testRunID2, activeRun)
@@ -92,7 +92,6 @@ func queueFinishR1(t *testing.T, ctx context.Context, sess *Session, store *fake
 		AdmissionRevision: 4,
 	}, nil)
 
-	sess.mu.Lock()
 	r1State := sess.runs["r1"]
 	if r1State != nil {
 		if inv := r1State.ModelInvocations["m1"]; inv != nil {
@@ -102,7 +101,6 @@ func queueFinishR1(t *testing.T, ctx context.Context, sess *Session, store *fake
 			}
 		}
 	}
-	sess.mu.Unlock()
 
 	cmdFinish := new(kernel.ObserveModelResponseCommand)
 	cmdFinish.CommandID = "cmd-finish-r1"
@@ -219,37 +217,9 @@ func TestQueuedRunsFromEarlierIncarnationAreNotAutoAdmitted(t *testing.T) {
 func queueTestAccept(t *testing.T, ctx context.Context, sess *Session, runID, cmdID, invID, attID, ctxRef string) {
 	t.Helper()
 
-	modelPlan := new(kernel.ModelRequestPlannedEvent)
-	modelPlan.InvocationID = invID
-	modelPlan.Purpose = testPurposeTurn
-	modelPlan.FirstAttemptID = attID
-	modelPlan.ModelRef = "gpt-4"
-	modelPlan.ContextRef = ctxRef
-
-	cmdAccept := new(kernel.AcceptRunCommand)
-	cmdAccept.Budgets = kernel.DefaultRunBudgets()
-	cmdAccept.CommandID = cmdID
-	cmdAccept.RunID = runID
-	cmdAccept.Origin = testOriginUser
-	cmdAccept.SessionID = testSessionID
-	cmdAccept.InputRef = "input-" + runID
-	cmdAccept.QueueItemRef = "queue-" + runID
-	cmdAccept.ProtocolBinding = "binding-v1"
-
-	reqAccept := Request{
-		Command: cmdAccept,
-		Facts: kernel.DecisionFacts{
-			ModelPlan: modelPlan,
-		},
-		Kind:           testKindAcceptRun,
-		Principal:      testOriginUser,
-		Origin:         testOriginUser,
-		Target:         runID,
-		MetadataInput:  nil,
-		ProtectedInput: nil,
-	}
-	_, err := sess.Submit(ctx, &reqAccept)
-	if err != nil {
+	req := acceptRunRequest(runID, cmdID, invID, attID)
+	req.Facts.ModelPlan.ContextRef = ctxRef
+	if _, err := sess.Submit(ctx, &req); err != nil {
 		t.Fatalf("accept %s failed: %v", runID, err)
 	}
 }
@@ -260,9 +230,8 @@ func TestSessionQueueEmptyPop(t *testing.T) {
 	if !q.empty() {
 		t.Error("expected empty queue")
 	}
-	item, ok := q.pop()
-	if ok || item.runID != "" {
-		t.Errorf("expected false, got %v, %v", ok, item)
+	if item, ok := q.pop(); ok || item != nil {
+		t.Errorf("expected nothing to pop, got %v, %v", ok, item)
 	}
 }
 

@@ -39,7 +39,7 @@ func TestUnknownCommitReadBackCommittedHandsOffOnce(t *testing.T) {
 	setupAdmittedRun(store)
 
 	// Append fails with ErrCommitUnknown
-	store.queueAppend(nil, ErrCommitUnknown)
+	store.queueLostAck(true)
 	// ResolveCommit confirms it was committed
 	receipt := codec.Receipt{CommandID: "cmd-disp-unknown", Kind: testKindPrepare, Target: "r1"}
 	store.queueResolve(CommitResolutionCommitted, &receipt)
@@ -71,9 +71,7 @@ func TestUnknownCommitReadBackCommittedHandsOffOnce(t *testing.T) {
 
 	verifyTxAndResolveCounts(t, store, 1, 1)
 
-	sess.mu.Lock()
 	rRev := sess.runRevs["r1"]
-	sess.mu.Unlock()
 	if rRev != 2 {
 		t.Fatalf("expected run revision 2, got %d", rRev)
 	}
@@ -248,7 +246,7 @@ func TestUnknownCommitUnresolvedHaltsDispatchAndKeepsSlot(t *testing.T) {
 	}
 
 	// Slot is still held
-	_, canReserve := sess.slots.reserve()
+	_, canReserve := reserveSlot(sess.slots)
 	if canReserve {
 		t.Fatal("expected slot to still be held during unresolved commit")
 	}
@@ -320,7 +318,7 @@ func TestBackgroundResolverCommitted(t *testing.T) {
 	setupAdmittedRun(store)
 
 	// Append fails with unknown
-	store.queueAppend(nil, ErrCommitUnknown)
+	store.queueLostAck(true)
 	// First resolve: unavailable (spawns background loop)
 	store.queueResolve(CommitResolutionUnavailable, nil)
 	// Second resolve (inside background loop): committed
@@ -361,9 +359,7 @@ func TestBackgroundResolverCommitted(t *testing.T) {
 	// Work should now be handed off
 	waitValue(t, ctx, workCh, "workCh")
 
-	sess.mu.Lock()
 	rRev := sess.runRevs["r1"]
-	sess.mu.Unlock()
 	if rRev != 2 {
 		t.Fatalf("expected run revision 2, got %d", rRev)
 	}

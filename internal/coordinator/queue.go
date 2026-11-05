@@ -2,138 +2,77 @@ package coordinator
 
 import (
 	"context"
-	"sync"
+	"errors"
+	"log/slog"
+	"slices"
 
 	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/kernel"
 )
 
+// queuedRun is an accepted run waiting for admission. It carries what the
+// AcceptRun request supplied for the admission step, so admission invents
+// nothing.
 type queuedRun struct {
-	runID string
-	facts kernel.DecisionFacts
+	runID       string
+	plan        kernel.ModelRequestPlannedEvent
+	decisionRef string
+	// admitCmdID is the command ID of an admission attempt whose outcome may be
+	// unknown. It is reused until the attempt is definitely rejected, so a retry
+	// never mints a second command for the same admission.
+	admitCmdID string
 }
 
+// sessionQueue is the in-memory FIFO of runs accepted by this incarnation. Only
+// the session actor touches it.
 type sessionQueue struct {
-	mu    sync.Mutex
-	items []queuedRun
+	items []*queuedRun
 }
 
 func newSessionQueue() *sessionQueue {
-	return &sessionQueue{
-		mu:    sync.Mutex{},
-		items: nil,
-	}
+	return &sessionQueue{items: nil}
 }
 
-func (q *sessionQueue) push(runID string, facts *kernel.DecisionFacts) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	var f kernel.DecisionFacts
-	if facts != nil {
-		f = *facts
-	}
-	q.items = append(q.items, queuedRun{runID: runID, facts: f})
+func (q *sessionQueue) push(runID, decisionRef string, plan *kernel.ModelRequestPlannedEvent) {
+	item := &queuedRun{runID: runID, plan: *plan, decisionRef: decisionRef, admitCmdID: ""}
+	item.plan.ToolDeclarationRefs = slices.Clone(plan.ToolDeclarationRefs)
+	q.items = append(q.items, item)
 }
 
-func (q *sessionQueue) pop() (queuedRun, bool) {
-	q.mu.Lock()
-	defer q.mu.Unlock()
+func (q *sessionQueue) head() (*queuedRun, bool) {
 	if len(q.items) == 0 {
-		return queuedRun{}, false
+		return nil, false
 	}
-	item := q.items[0]
+	return q.items[0], true
+}
+
+func (q *sessionQueue) pop() (*queuedRun, bool) {
+	item, ok := q.head()
+	if !ok {
+		return nil, false
+	}
 	q.items = q.items[1:]
 	return item, true
 }
 
 func (q *sessionQueue) empty() bool {
-	q.mu.Lock()
-	defer q.mu.Unlock()
 	return len(q.items) == 0
 }
 
-func (s *Session) nextQueuedRun() (queuedRun, *kernel.State, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.admission.ActiveRunID != "" || s.queue.empty() {
-		return queuedRun{}, nil, false
-	}
-	item, ok := s.queue.pop()
-	if !ok {
-		return queuedRun{}, nil, false
-	}
-	state := s.runs[item.runID]
-	if state == nil {
-		state = kernel.NewState()
-		s.runs[item.runID] = state
-	}
-	return item, state, true
-}
-
-func buildAdmitCommand(cmdID, runID string, token, incarnation uint64) *kernel.AdmitRunCommand {
-	return &kernel.AdmitRunCommand{
-		CommandID:              cmdID,
-		RunID:                  runID,
-		Origin:                 defaultOriginSession,
-		Token:                  token,
-		OwnerIncarnation:       incarnation,
-		QueueDecisionRef:       "auto-admit",
-		ContextEpoch:           1,
-		StartRunID:             runID,
-		InitialContextRevision: 1,
-	}
-}
-
-func (s *Session) buildAdmitFacts(
-	cmdID, runID string,
-	token, seq uint64,
-	plan *kernel.ModelRequestPlannedEvent,
-) kernel.DecisionFacts {
-	if plan == nil {
-		plan = &kernel.ModelRequestPlannedEvent{
-			Envelope:              kernel.Envelope{},
-			InvocationID:          runID + "-inv-1",
-			FirstAttemptID:        runID + "-att-1",
-			Purpose:               "turn",
-			ModelRef:              "default-model",
-			ContextRef:            "default-context",
-			ToolDeclarationRefs:   nil,
-			EstimatedBudgetTokens: 0,
-		}
-	}
-	return kernel.DecisionFacts{
-		Envelope: kernel.Envelope{
-			RunID:       runID,
-			Sequence:    seq,
-			CommandID:   cmdID,
-			CausationID: cmdID,
-			Origin:      defaultOriginSession,
-			Token:       token,
-			Timestamp:   s.cfg.Clock.Now(),
-		},
-		OwnerIncarnation: s.cfg.OwnerIncarnation,
-		ModelPlan:        plan,
-	}
-}
-
-func (s *Session) buildAdmitTransition(
-	runID, cmdID string,
-	token uint64,
-	events []kernel.Event,
-) *Transition {
+func (s *Session) buildAdmitTransition(item *queuedRun, cmdID string, token uint64, events []kernel.Event) *Transition {
 	return &Transition{
 		SessionID: s.cfg.SessionID,
-		RunID:     runID,
+		RunID:     item.runID,
 		CommandID: cmdID,
 		Kind:      "AdmitRun",
 		Principal: defaultOriginSession,
-		Target:    runID,
+		Target:    item.runID,
 		Fence: Fence{
 			AdmissionToken:   token,
 			OwnerIncarnation: s.cfg.OwnerIncarnation,
 			QueueRevision:    0,
 		},
-		ExpectedRunRevision:       s.runRevs[runID],
+		ExpectedRunRevision:       s.runRevs[item.runID],
 		ExpectedAdmissionRevision: s.admission.Revision,
 		Events:                    events,
 		Result: codec.ReceiptResult{
@@ -146,50 +85,95 @@ func (s *Session) buildAdmitTransition(
 	}
 }
 
-func (s *Session) applyAdmitSuccess(
-	runID string,
-	newToken uint64,
-	events []kernel.Event,
-	appRes *AppendResult,
-) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, ev := range events {
-		s.runs[runID] = kernel.Evolve(s.runs[runID], ev)
+// maybeAdmitNext admits the head of the queue when no run is active. A failure
+// of any kind leaves the run at the head; the next committed command tries again.
+func (s *Session) maybeAdmitNext(ctx context.Context) {
+	item, ok := s.queue.head()
+	if !ok || s.admission.ActiveRunID != "" || s.busy(item.runID) {
+		return
 	}
-	s.runRevs[runID] = appRes.RunRevision
-	s.admission.ActiveRunID = runID
-	s.admission.AdmissionToken = newToken
-	if appRes.AdmissionRevision > 0 {
-		s.admission.Revision = appRes.AdmissionRevision
+	state := s.runs[item.runID]
+	if state == nil {
+		state = kernel.NewState()
 	}
+
+	if item.admitCmdID == "" {
+		cmdID, err := s.cfg.IDs.NewID()
+		if err != nil {
+			return
+		}
+		item.admitCmdID = cmdID
+	}
+
+	token := s.admission.AdmissionToken + 1
+	cmd, facts := s.admitDecision(item, state, token)
+	events, err := kernel.Decide(state, cmd, &facts)
+	if err != nil || len(events) == 0 {
+		s.deferAdmission(ctx, item, err)
+		return
+	}
+
+	s.commit(ctx, &step{
+		t:       s.buildAdmitTransition(item, item.admitCmdID, token, events),
+		events:  events,
+		attempt: 0,
+		done: func(context.Context, *AppendResult) {
+			s.admitted(item, token)
+		},
+		fail: func(ctx context.Context, err error) {
+			s.deferAdmission(ctx, item, err)
+		},
+	})
 }
 
-func (s *Session) maybeAdmitNext(ctx context.Context) {
-	item, state, ok := s.nextQueuedRun()
-	if !ok {
-		return
+// admitDecision builds the admission command and its facts from what the
+// AcceptRun request supplied and what the admission row holds.
+func (s *Session) admitDecision(item *queuedRun, state *kernel.State, token uint64) (*kernel.AdmitRunCommand, kernel.DecisionFacts) {
+	cmd := &kernel.AdmitRunCommand{
+		CommandID:              item.admitCmdID,
+		RunID:                  item.runID,
+		Origin:                 defaultOriginSession,
+		Token:                  token,
+		OwnerIncarnation:       s.cfg.OwnerIncarnation,
+		QueueDecisionRef:       item.decisionRef,
+		ContextEpoch:           s.admission.ContextEpoch,
+		StartRunID:             item.runID,
+		InitialContextRevision: s.admission.ContextRevision,
 	}
-
-	cmdID, err := s.cfg.IDs.NewID()
-	if err != nil {
-		return
+	plan := item.plan
+	plan.ToolDeclarationRefs = slices.Clone(item.plan.ToolDeclarationRefs)
+	facts := kernel.DecisionFacts{
+		Envelope: kernel.Envelope{
+			RunID:       item.runID,
+			Sequence:    state.LastSequence + 1,
+			CommandID:   item.admitCmdID,
+			CausationID: item.admitCmdID,
+			Origin:      defaultOriginSession,
+			Token:       token,
+			Timestamp:   s.cfg.Clock.Now(),
+		},
+		OwnerIncarnation: s.cfg.OwnerIncarnation,
+		ModelPlan:        &plan,
 	}
+	return cmd, facts
+}
 
-	newToken := s.admission.AdmissionToken + 1
-	admitCmd := buildAdmitCommand(cmdID, item.runID, newToken, s.cfg.OwnerIncarnation)
-	facts := s.buildAdmitFacts(cmdID, item.runID, newToken, state.LastSequence+1, item.facts.ModelPlan)
-
-	events, decErr := kernel.Decide(state, admitCmd, &facts)
-	if decErr != nil || len(events) == 0 {
-		return
+// deferAdmission leaves the run at the head of the queue after a failed
+// admission. The command ID is dropped because the attempt is definitely over.
+func (s *Session) deferAdmission(ctx context.Context, item *queuedRun, err error) {
+	item.admitCmdID = ""
+	attrs := []any{"run_id", item.runID}
+	var rej kernel.Rejection
+	if errors.As(err, &rej) {
+		attrs = append(attrs, "code", string(rej.Code))
 	}
+	slog.WarnContext(ctx, "admission deferred", attrs...)
+}
 
-	t := s.buildAdmitTransition(item.runID, cmdID, newToken, events)
-	appRes, appErr := s.cfg.Store.Append(ctx, t)
-	if appErr != nil {
-		return
+func (s *Session) admitted(item *queuedRun, token uint64) {
+	if head, ok := s.queue.head(); ok && head == item {
+		s.queue.pop()
 	}
-
-	s.applyAdmitSuccess(item.runID, newToken, events, &appRes)
+	s.admission.ActiveRunID = item.runID
+	s.admission.AdmissionToken = token
 }

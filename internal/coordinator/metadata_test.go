@@ -10,19 +10,23 @@ import (
 func TestCommandIdentityReadsSupportedCommands(t *testing.T) {
 	t.Parallel()
 
-	admit := &kernel.AdmitRunCommand{CommandID: "c2", RunID: "r2", Origin: "ignored", Token: 2}
+	admit := new(kernel.AdmitRunCommand)
+	admit.CommandID, admit.RunID, admit.Origin, admit.Token = "c2", "r2", "ignored", 2
 	cmdID, runID, token := commandIdentity(admit)
 	if cmdID != "c2" || runID != "r2" || token != 2 {
 		t.Errorf("unexpected identity: %q, %q, %d", cmdID, runID, token)
 	}
 
-	accept := &kernel.AcceptRunCommand{CommandID: "c1", RunID: "r1"}
+	accept := new(kernel.AcceptRunCommand)
+	accept.CommandID, accept.RunID = "c1", "r1"
 	cmdID, runID, token = commandIdentity(accept)
 	if cmdID != "c1" || runID != "r1" || token != 0 {
 		t.Errorf("unexpected accept identity: %q, %q, %d", cmdID, runID, token)
 	}
 
-	for _, c := range []kernel.Command{nil, (*kernel.AdmitRunCommand)(nil), &kernel.TimerFiredCommand{CommandID: "x", RunID: "y"}} {
+	timer := new(kernel.TimerFiredCommand)
+	timer.CommandID, timer.RunID = "x", "y"
+	for _, c := range []kernel.Command{nil, (*kernel.AdmitRunCommand)(nil), timer} {
 		if cmdID, runID, token = commandIdentity(c); cmdID != "" || runID != "" || token != 0 {
 			t.Errorf("expected empty identity for %T, got %q, %q, %d", c, cmdID, runID, token)
 		}
@@ -63,12 +67,14 @@ func TestStampCommandCopiesAndSetsIdentity(t *testing.T) {
 func TestStampCommandOverwritesClaimedOrigin(t *testing.T) {
 	t.Parallel()
 
-	stamped, err := stampCommand(&kernel.ExtendBudgetCommand{Origin: "user", Actor: "user"}, "c", "r", "model", 1)
+	forged := new(kernel.ExtendBudgetCommand)
+	forged.Origin, forged.Actor = "user", "user"
+	stamped, err := stampCommand(forged, "c", "r", "model", 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := stamped.(*kernel.ExtendBudgetCommand).Origin; got != "model" {
-		t.Fatalf("origin %q, want the trusted origin", got)
+	if got, ok := stamped.(*kernel.ExtendBudgetCommand); !ok || got.Origin != "model" {
+		t.Fatalf("origin %+v, want the trusted origin", got)
 	}
 }
 

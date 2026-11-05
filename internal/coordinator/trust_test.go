@@ -132,6 +132,7 @@ func TestObservationRejectsCommandsThatAreNotObservations(t *testing.T) {
 		"RequestStop": &kernel.RequestStopCommand{
 			CommandID: "cmd-x2", RunID: testRunID1, Origin: testOriginUser, Token: 1,
 			Reason: kernel.StopReasonBudget, Mode: kernel.StopModeTerminal, Actor: testOriginUser, Target: "steps",
+			RequestTime: testNow(),
 		},
 		"AdvanceRun": &kernel.AdvanceRunCommand{CommandID: "cmd-x3", RunID: testRunID1, Origin: testOriginUser, Token: 1, StepIndex: 2},
 	}
@@ -163,7 +164,7 @@ func TestMissingDispatchAuthorizationRejectsAndReleasesSlot(t *testing.T) {
 	if count := store.appendCount(); count != 0 {
 		t.Fatalf("a dispatch without authorization appended %d transitions", count)
 	}
-	ref, ok := sess.slots.reserve()
+	ref, ok := reserveSlot(sess.slots)
 	if !ok {
 		t.Fatal("the reserved slot was not released")
 	}

@@ -236,7 +236,7 @@ func TestTerminalObservationReleasesSlot(t *testing.T) {
 	}
 
 	// Slot should be held at capacity 1
-	_, canReserve := sess.slots.reserve()
+	_, canReserve := reserveSlot(sess.slots)
 	if canReserve {
 		t.Fatal("expected slot to be held after dispatch")
 	}
@@ -249,7 +249,7 @@ func TestTerminalObservationReleasesSlot(t *testing.T) {
 	}
 
 	// Slot should now be released
-	ref, canReserveAfter := sess.slots.reserve()
+	ref, canReserveAfter := reserveSlot(sess.slots)
 	if !canReserveAfter {
 		t.Fatal("expected slot to be released after terminal observation commit")
 	}
@@ -257,9 +257,7 @@ func TestTerminalObservationReleasesSlot(t *testing.T) {
 		t.Fatalf("release: %v", err)
 	}
 
-	sess.mu.Lock()
 	activeRun := sess.admission.ActiveRunID
-	sess.mu.Unlock()
 
 	if activeRun != "" {
 		t.Fatalf("expected active run cleared after finish, got %s", activeRun)
@@ -365,14 +363,12 @@ func TestWorkerPanicKeepsAttemptDispatchingAndSlotHeld(t *testing.T) {
 	}
 
 	// Verify run cache still shows attempt Requesting
-	sess.mu.Lock()
 	st := sess.runs["r1"]
-	sess.mu.Unlock()
 
 	verifyAttemptStillRequesting(t, st)
 
 	// Verify slot is still held
-	_, canReserve := sess.slots.reserve()
+	_, canReserve := reserveSlot(sess.slots)
 	if canReserve {
 		t.Fatal("expected slot to still be held after worker panic")
 	}
@@ -488,9 +484,9 @@ func TestWorkerReportsViaCallback(t *testing.T) {
 	defer sess.Stop()
 
 	committed := make(chan struct{}, 2)
-	sess.setOnCommitted(func() {
+	sess.onCommitted = func() {
 		committed <- struct{}{}
-	})
+	}
 
 	req := makeModelDispatchRequest("r1", "m1", "a1", "cmd-disp-cb")
 	_, err = sess.Submit(ctx, &req)
@@ -508,7 +504,7 @@ func TestWorkerReportsViaCallback(t *testing.T) {
 
 func assertWorkerReportCompleted(t *testing.T, sess *Session) {
 	t.Helper()
-	ref, canReserve := sess.slots.reserve()
+	ref, canReserve := reserveSlot(sess.slots)
 	if !canReserve {
 		t.Fatal("expected slot to be released after worker report")
 	}
@@ -516,9 +512,7 @@ func assertWorkerReportCompleted(t *testing.T, sess *Session) {
 		t.Fatalf("release: %v", err)
 	}
 
-	sess.mu.Lock()
 	activeRun := sess.admission.ActiveRunID
-	sess.mu.Unlock()
 
 	if activeRun != "" {
 		t.Fatalf("expected active run cleared after finish, got %s", activeRun)
@@ -657,8 +651,7 @@ func submitMatchingToolObservation(t *testing.T, ctx context.Context, sess *Sess
 		return m
 	}()
 
-	sess.mu.Lock()
-	ref, ok := sess.slots.reserve()
+	ref, ok := reserveSlot(sess.slots)
 	if !ok {
 		t.Fatal("reserve failed")
 	}
@@ -666,13 +659,12 @@ func submitMatchingToolObservation(t *testing.T, ctx context.Context, sess *Sess
 		t.Fatalf("handoff: %v", handoffErr)
 	}
 	sess.attemptSlots[attemptKey{runID: "r1", invocationID: "t1", attemptID: testAttTool1}] = ref
-	sess.mu.Unlock()
 
 	if _, err := sess.SubmitObservation(ctx, &matchingToolObs); err != nil {
 		t.Fatalf("matching tool observation failed: %v", err)
 	}
 
-	if _, canReserve := sess.slots.reserve(); !canReserve {
+	if _, canReserve := reserveSlot(sess.slots); !canReserve {
 		t.Fatal("expected slot to be released after tool result commit")
 	}
 }

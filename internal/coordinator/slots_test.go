@@ -10,22 +10,22 @@ import (
 func TestReserveNeverExceedsCapacity(t *testing.T) {
 	t.Parallel()
 
-	s := newSlots(2)
+	s := newTestSlots(2)
 
-	ref1, ok1 := s.reserve()
+	ref1, ok1 := reserveSlot(s)
 	if !ok1 || ref1 == "" {
 		t.Fatalf("first reserve failed: ref=%q, ok=%v", ref1, ok1)
 	}
 
-	ref2, ok2 := s.reserve()
+	ref2, ok2 := reserveSlot(s)
 	if !ok2 || ref2 == "" {
 		t.Fatalf("second reserve failed: ref=%q, ok=%v", ref2, ok2)
 	}
-	if ref1 != "slot-1" || ref2 != "slot-2" {
-		t.Fatalf("expected slot-1 and slot-2, got %q and %q", ref1, ref2)
+	if ref1 == ref2 {
+		t.Fatalf("reservation refs must be unique, got %q twice", ref1)
 	}
 
-	ref3, ok3 := s.reserve()
+	ref3, ok3 := reserveSlot(s)
 	if ok3 || ref3 != "" {
 		t.Fatalf("third reserve succeeded beyond capacity 2: ref=%q, ok=%v", ref3, ok3)
 	}
@@ -34,7 +34,7 @@ func TestReserveNeverExceedsCapacity(t *testing.T) {
 		t.Fatalf("release ref1 failed: %v", err)
 	}
 
-	ref4, ok4 := s.reserve()
+	ref4, ok4 := reserveSlot(s)
 	if !ok4 || ref4 == "" {
 		t.Fatalf("reserve after release failed: ref=%q, ok=%v", ref4, ok4)
 	}
@@ -43,9 +43,9 @@ func TestReserveNeverExceedsCapacity(t *testing.T) {
 func TestHandoffSucceedsOnceAndNeverBlocks(t *testing.T) {
 	t.Parallel()
 
-	s := newSlots(1)
+	s := newTestSlots(1)
 
-	ref, ok := s.reserve()
+	ref, ok := reserveSlot(s)
 	if !ok {
 		t.Fatal("expected reserve to succeed")
 	}
@@ -76,9 +76,9 @@ func TestHandoffSucceedsOnceAndNeverBlocks(t *testing.T) {
 func TestReleaseOfHandedOffSlotIsRejected(t *testing.T) {
 	t.Parallel()
 
-	s := newSlots(1)
+	s := newTestSlots(1)
 
-	ref, ok := s.reserve()
+	ref, ok := reserveSlot(s)
 	if !ok {
 		t.Fatal("expected reserve to succeed")
 	}
@@ -105,7 +105,7 @@ func TestReleaseOfHandedOffSlotIsRejected(t *testing.T) {
 		t.Fatalf("expected release of handed-off slot to return ErrHandoffFailed, got %v", err)
 	}
 
-	_, canReserve := s.reserve()
+	_, canReserve := reserveSlot(s)
 	if canReserve {
 		t.Fatal("expected handed-off slot to still be occupied")
 	}
@@ -114,12 +114,12 @@ func TestReleaseOfHandedOffSlotIsRejected(t *testing.T) {
 func TestSlotsEdgeCases(t *testing.T) {
 	t.Parallel()
 
-	s0 := newSlots(0)
+	s0 := newTestSlots(0)
 	if s0.capacity != 1 {
 		t.Errorf("expected default capacity 1 for 0, got %d", s0.capacity)
 	}
 
-	s := newSlots(1)
+	s := newTestSlots(1)
 	if err := s.complete("non-existent"); !errors.Is(err, ErrHandoffFailed) {
 		t.Errorf("expected ErrHandoffFailed for unknown complete, got %v", err)
 	}
@@ -130,7 +130,7 @@ func TestSlotsEdgeCases(t *testing.T) {
 		t.Errorf("expected ErrHandoffFailed for unknown handoff, got %v", err)
 	}
 
-	ref, ok := s.reserve()
+	ref, ok := reserveSlot(s)
 	if !ok {
 		t.Fatal("reserve failed")
 	}
