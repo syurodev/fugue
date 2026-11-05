@@ -62,26 +62,24 @@ func (s *Session) resolveDispatchMetadata(
 	state *kernel.State,
 	sub *submission,
 	runID, cmdID, origin string,
-) (string, string, uint64, error) {
+) (string, uint64, error) {
 	if cmdID == "" {
 		newID, err := s.cfg.IDs.NewID()
 		if err != nil {
-			return "", "", 0, fmt.Errorf("new id: %w", err)
+			return "", 0, fmt.Errorf("new id: %w", err)
 		}
 		cmdID = newID
-	}
-	if origin == "" {
-		origin = sub.req.Principal
-		if origin == "" {
-			origin = defaultOriginSession
-		}
 	}
 	var token uint64
 	if state.Admitted {
 		token = s.admission.AdmissionToken
 	}
-	setCommandMetadata(sub.req.Command, cmdID, runID, origin, token)
-	return cmdID, origin, token, nil
+	stamped, err := stampCommand(sub.req.Command, cmdID, runID, origin, token)
+	if err != nil {
+		return "", 0, err
+	}
+	sub.req.Command = stamped
+	return cmdID, token, nil
 }
 
 func (s *Session) populateDispatchFacts(
@@ -110,9 +108,6 @@ func (s *Session) populateDispatchFacts(
 		sub.req.Facts.ModelDispatch.InvocationID = prep.InvocationID
 		sub.req.Facts.ModelDispatch.Token = token
 	}
-	if sub.req.Facts.DispatchAuthorizationRef == "" {
-		sub.req.Facts.DispatchAuthorizationRef = "auth-" + ref
-	}
 }
 
 func (s *Session) executeDispatch(
@@ -121,16 +116,17 @@ func (s *Session) executeDispatch(
 	ref string,
 	prep *kernel.PrepareDispatchCommand,
 ) {
-	cmdID, runID, origin, _ := commandMetadata(sub.req.Command)
+	cmdID, runID, _ := commandIdentity(sub.req.Command)
 	if runID == "" {
 		runID = sub.req.Target
 	}
+	origin := sub.req.Origin
 
 	s.mu.Lock()
 	state := s.runs[runID]
 	s.mu.Unlock()
 
-	cmdID, origin, token, err := s.resolveDispatchMetadata(state, sub, runID, cmdID, origin)
+	cmdID, token, err := s.resolveDispatchMetadata(state, sub, runID, cmdID, origin)
 	if err != nil {
 		s.releaseSlotAndRetry(ctx, ref)
 		sub.replyCh <- submitReply{reply: Reply{}, err: err}

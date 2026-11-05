@@ -80,6 +80,7 @@ func makeModelDispatchRequest(runID, invID, attID, cmdID string) Request {
 		},
 		Kind:      testKindPrepare,
 		Principal: testOriginSystem,
+		Origin:    testOriginSystem,
 		Target:    runID,
 	}
 }
@@ -267,6 +268,7 @@ func submitAcceptR2WhileParked(t *testing.T, ctx context.Context, sess *Session,
 		Facts:     kernel.DecisionFacts{},
 		Kind:      testKindAcceptRun,
 		Principal: testOriginUser,
+		Origin:    testOriginUser,
 		Target:    testRunID2,
 	}
 

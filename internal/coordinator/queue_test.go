@@ -128,6 +128,7 @@ func queueFinishR1(t *testing.T, ctx context.Context, sess *Session, store *fake
 		},
 		Kind:      testKindObserve,
 		Principal: testOriginSystem,
+		Origin:    testOriginSystem,
 		Target:    "r1",
 	}
 	_, err := sess.Submit(ctx, &reqFinish)
@@ -242,6 +243,7 @@ func queueTestAccept(t *testing.T, ctx context.Context, sess *Session, runID, cm
 		},
 		Kind:           testKindAcceptRun,
 		Principal:      testOriginUser,
+		Origin:         testOriginUser,
 		Target:         runID,
 		MetadataInput:  nil,
 		ProtectedInput: nil,

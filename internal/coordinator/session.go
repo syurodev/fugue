@@ -28,9 +28,16 @@ type Config struct {
 }
 
 // Request defines a command and caller context for the session actor.
+//
+// Origin is the envelope origin and the only proof of who is asking: only the
+// host layer (app or hostapi) sets it, from the authenticated caller. The
+// coordinator overwrites the command's own Origin with it and never reads the
+// command's claim; an empty Origin is refused. Principal is audit metadata for
+// the receipt and defaults to Origin.
 type Request struct {
 	Command        kernel.Command
 	Facts          kernel.DecisionFacts
+	Origin         string
 	Kind           string
 	Principal      string
 	Target         string
@@ -280,7 +287,12 @@ func (s *Session) handleSubmission(ctx context.Context, sub *submission) {
 		return
 	}
 
-	cmdID, runID, origin, cmdToken := commandMetadata(sub.req.Command)
+	if sub.req.Origin == "" {
+		s.respond(sub, nil, ErrOriginRequired)
+		return
+	}
+
+	cmdID, runID, cmdToken := commandIdentity(sub.req.Command)
 	if runID == "" {
 		runID = sub.req.Target
 	}
@@ -301,7 +313,8 @@ func (s *Session) handleSubmission(ctx context.Context, sub *submission) {
 		return
 	}
 
-	cmdID, origin, _, prepErr := s.resolveSubmissionFacts(runID, cmdID, origin, cmdToken, state, sub)
+	origin := sub.req.Origin
+	cmdID, prepErr := s.resolveSubmissionFacts(runID, cmdID, origin, cmdToken, state, sub)
 	if prepErr != nil {
 		s.respond(sub, nil, prepErr)
 		return
@@ -342,18 +355,12 @@ func (s *Session) resolveSubmissionFacts(
 	cmdToken uint64,
 	state *kernel.State,
 	sub *submission,
-) (string, string, uint64, error) {
+) (string, error) {
 	var err error
 	if cmdID == "" {
 		cmdID, err = s.cfg.IDs.NewID()
 		if err != nil {
-			return "", "", 0, fmt.Errorf("new id: %w", err)
-		}
-	}
-	if origin == "" {
-		origin = sub.req.Principal
-		if origin == "" {
-			origin = defaultOriginSession
+			return "", fmt.Errorf("new id: %w", err)
 		}
 	}
 
@@ -367,7 +374,11 @@ func (s *Session) resolveSubmissionFacts(
 	} else {
 		token = cmdToken
 	}
-	setCommandMetadata(sub.req.Command, cmdID, runID, origin, token)
+	stamped, err := stampCommand(sub.req.Command, cmdID, runID, origin, token)
+	if err != nil {
+		return "", err
+	}
+	sub.req.Command = stamped
 
 	sub.req.Facts.Envelope = kernel.Envelope{
 		RunID:       runID,
@@ -380,7 +391,7 @@ func (s *Session) resolveSubmissionFacts(
 	}
 	sub.req.Facts.OwnerIncarnation = s.cfg.OwnerIncarnation
 
-	return cmdID, origin, token, nil
+	return cmdID, nil
 }
 
 func (s *Session) fillAcceptDefaults(acceptCmd *kernel.AcceptRunCommand, runID string) {

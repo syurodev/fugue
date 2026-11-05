@@ -26,4 +26,10 @@ var (
 
 	// ErrHandoffFailed is returned when worker slot handoff or release fails due to an invalid or stale reference.
 	ErrHandoffFailed = errcode.New(errcode.FailedPrecondition, "slot handoff failed: invalid or already used reservation reference")
+
+	// ErrOriginRequired is returned when a request carries no host-set origin.
+	ErrOriginRequired = errcode.New(errcode.InvalidArgument, "request origin is required")
+
+	// ErrObservationNotAllowed is returned when a worker observation carries a command that is not an observation.
+	ErrObservationNotAllowed = errcode.New(errcode.InvalidArgument, "command is not an allowed worker observation")
 )

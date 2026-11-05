@@ -58,6 +58,7 @@ func makeEnvelopeTestRequest() Request {
 		},
 		Kind:      testKindAcceptRun,
 		Principal: testOriginUser,
+		Origin:    testOriginUser,
 		Target:    testRunID1,
 	}
 }
@@ -194,6 +195,7 @@ func TestKernelRejectionAppendsNothing(t *testing.T) {
 		Facts:     kernel.DecisionFacts{},
 		Kind:      testKindPrepare,
 		Principal: testOriginSystem,
+		Origin:    testOriginSystem,
 		Target:    "unadmitted-run",
 	}
 
@@ -286,6 +288,7 @@ func makeInheritedPrepareRequest() Request {
 		Facts:     kernel.DecisionFacts{},
 		Kind:      testKindPrepare,
 		Principal: "system",
+		Origin:    "system",
 		Target:    "r0",
 	}
 }
@@ -389,6 +392,7 @@ func TestCallerCancellationDoesNotAbortAcceptedCommand(t *testing.T) {
 		Facts:     kernel.DecisionFacts{},
 		Kind:      testKindAcceptRun,
 		Principal: testOriginUser,
+		Origin:    testOriginUser,
 		Target:    "r1",
 	}
 
@@ -501,6 +505,7 @@ func testSessionSubmitCases(t *testing.T, fakeClk clock.Clock, idGen ids.Generat
 	cmdFail.RunID = "r-fail-load"
 	reqFail := Request{
 		Target:  "r-fail-load",
+		Origin:  testOriginUser,
 		Command: cmdFail,
 	}
 	_, err = sess.Submit(ctx, &reqFail)
@@ -514,6 +519,7 @@ func testSessionSubmitCases(t *testing.T, fakeClk clock.Clock, idGen ids.Generat
 	acceptCmd.RunID = "r-defaults"
 	reqDefaults := Request{
 		Command: acceptCmd,
+		Origin:  defaultOriginSession,
 	}
 	_, err = sess.Submit(ctx, &reqDefaults)
 	if err != nil {

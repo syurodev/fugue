@@ -78,24 +78,26 @@ func (s *Session) prepareObservationCommand(
 	obs *Observation,
 	state *kernel.State,
 ) (string, string, string, uint64, error) {
-	cmdID, runID, origin, token := commandMetadata(obs.Command)
+	cmdID, runID, token := commandIdentity(obs.Command)
+	origin := originWorker
 	if runID == "" {
 		runID = obs.Lease.RunID
-	}
-	if origin == "" {
-		origin = "worker"
 	}
 	if token == 0 {
 		token = obs.Lease.AdmissionToken
 	}
 	if cmdID == "" {
-		var err error
-		cmdID, err = s.cfg.IDs.NewID()
-		if err != nil {
-			return "", "", "", 0, fmt.Errorf("new id: %w", err)
+		newID, idErr := s.cfg.IDs.NewID()
+		if idErr != nil {
+			return "", "", "", 0, fmt.Errorf("new id: %w", idErr)
 		}
+		cmdID = newID
 	}
-	setCommandMetadata(obs.Command, cmdID, runID, origin, token)
+	stamped, err := stampCommand(obs.Command, cmdID, runID, origin, token)
+	if err != nil {
+		return "", "", "", 0, err
+	}
+	obs.Command = stamped
 
 	obs.Facts.Envelope = kernel.Envelope{
 		RunID:       runID,
@@ -121,6 +123,11 @@ func (s *Session) handleObservation(ctx context.Context, sub *submission, obs *O
 
 	if valErr := s.validateObservationLease(&obs.Lease, state); valErr != nil {
 		s.respond(sub, nil, valErr)
+		return
+	}
+
+	if !isWorkerObservation(obs.Command) {
+		s.respond(sub, nil, ErrObservationNotAllowed)
 		return
 	}
 

@@ -1,61 +1,102 @@
 package coordinator
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/syurodev/fugue/internal/kernel"
 )
 
-func TestCommandMetadataFields(t *testing.T) {
+func TestCommandIdentityReadsSupportedCommands(t *testing.T) {
 	t.Parallel()
 
-	accept := new(kernel.AcceptRunCommand)
-	accept.CommandID = "c1"
-	accept.RunID = "r1"
-	accept.Origin = "o1"
-
-	cmdID, runID, origin, token := commandMetadata(accept)
-	if cmdID != "c1" || runID != "r1" || origin != "o1" || token != 0 {
-		t.Errorf("unexpected metadata: %q, %q, %q, %d", cmdID, runID, origin, token)
+	admit := &kernel.AdmitRunCommand{CommandID: "c2", RunID: "r2", Origin: "ignored", Token: 2}
+	cmdID, runID, token := commandIdentity(admit)
+	if cmdID != "c2" || runID != "r2" || token != 2 {
+		t.Errorf("unexpected identity: %q, %q, %d", cmdID, runID, token)
 	}
 
-	admit := new(kernel.AdmitRunCommand)
-	admit.CommandID = "c2"
-	admit.RunID = "r2"
-	admit.Origin = "o2"
-	admit.Token = 2
+	accept := &kernel.AcceptRunCommand{CommandID: "c1", RunID: "r1"}
+	cmdID, runID, token = commandIdentity(accept)
+	if cmdID != "c1" || runID != "r1" || token != 0 {
+		t.Errorf("unexpected accept identity: %q, %q, %d", cmdID, runID, token)
+	}
 
-	cmdID, runID, origin, token = commandMetadata(admit)
-	if cmdID != "c2" || runID != "r2" || origin != "o2" || token != 2 {
-		t.Errorf("unexpected metadata for admit: %q, %q, %q, %d", cmdID, runID, origin, token)
+	for _, c := range []kernel.Command{nil, (*kernel.AdmitRunCommand)(nil), &kernel.TimerFiredCommand{CommandID: "x", RunID: "y"}} {
+		if cmdID, runID, token = commandIdentity(c); cmdID != "" || runID != "" || token != 0 {
+			t.Errorf("expected empty identity for %T, got %q, %q, %d", c, cmdID, runID, token)
+		}
 	}
 }
 
-func TestCommandMetadataNil(t *testing.T) {
-	t.Parallel()
-
-	cmdID, runID, origin, token := commandMetadata(nil)
-	if cmdID != "" || runID != "" || origin != "" || token != 0 {
-		t.Errorf("expected empty metadata for nil, got %q, %q, %q, %d", cmdID, runID, origin, token)
+func supportedCommands() []kernel.Command {
+	return []kernel.Command{
+		new(kernel.AcceptRunCommand), new(kernel.AdmitRunCommand), new(kernel.AdvanceRunCommand),
+		new(kernel.PrepareDispatchCommand), new(kernel.ObserveModelStreamCommand),
+		new(kernel.ObserveModelResponseCommand), new(kernel.ObserveModelFailureCommand),
+		new(kernel.ObserveToolCheckCommand), new(kernel.ObserveToolResultCommand),
+		new(kernel.ExtendBudgetCommand), new(kernel.RequestStopCommand),
 	}
 }
 
-func TestSetCommandMetadata(t *testing.T) {
+func TestStampCommandCopiesAndSetsIdentity(t *testing.T) {
 	t.Parallel()
 
-	accept := new(kernel.AcceptRunCommand)
-	setCommandMetadata(accept, "new-c", "new-r", "new-o", 99)
-	cmdID, runID, origin, _ := commandMetadata(accept)
-	if cmdID != "new-c" || runID != "new-r" || origin != "new-o" {
-		t.Errorf("setCommandMetadata failed: got %q, %q, %q", cmdID, runID, origin)
+	for _, original := range supportedCommands() {
+		stamped, err := stampCommand(original, "cmd", "run", "origin", 7)
+		if err != nil {
+			t.Fatalf("%s: %v", original.CommandName(), err)
+		}
+		if stamped == original {
+			t.Errorf("%s: stamp returned the caller's value", original.CommandName())
+		}
+		if cmdID, runID, _ := commandIdentity(original); cmdID != "" || runID != "" {
+			t.Errorf("%s: the caller's command was modified", original.CommandName())
+		}
+		cmdID, runID, token := commandIdentity(stamped)
+		if cmdID != "cmd" || runID != "run" || (token != 7 && original.CommandName() != "AcceptRun") {
+			t.Errorf("%s: stamped identity %q, %q, %d", original.CommandName(), cmdID, runID, token)
+		}
 	}
+}
 
-	admit := new(kernel.AdmitRunCommand)
-	setCommandMetadata(admit, "new-c", "new-r", "new-o", 99)
-	_, _, _, token := commandMetadata(admit)
-	if token != 99 {
-		t.Errorf("setCommandMetadata token failed: got %d", token)
+func TestStampCommandOverwritesClaimedOrigin(t *testing.T) {
+	t.Parallel()
+
+	stamped, err := stampCommand(&kernel.ExtendBudgetCommand{Origin: "user", Actor: "user"}, "c", "r", "model", 1)
+	if err != nil {
+		t.Fatal(err)
 	}
+	if got := stamped.(*kernel.ExtendBudgetCommand).Origin; got != "model" {
+		t.Fatalf("origin %q, want the trusted origin", got)
+	}
+}
 
-	setCommandMetadata(nil, "c", "r", "o", 1)
+func TestStampCommandRejectsUnsupportedAndNil(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []kernel.Command{nil, (*kernel.AcceptRunCommand)(nil), new(kernel.TimerFiredCommand)} {
+		_, err := stampCommand(c, "c", "r", "o", 1)
+		var rej kernel.Rejection
+		if !errors.As(err, &rej) || rej.Code != kernel.RejectionCodeUnrecognizedCommand {
+			t.Errorf("%T: expected unrecognized-command rejection, got %v", c, err)
+		}
+	}
+}
+
+func TestIsWorkerObservationAllowlist(t *testing.T) {
+	t.Parallel()
+
+	allowed := map[string]bool{
+		"ObserveModelStream": true, "ObserveModelResponse": true, "ObserveModelFailure": true,
+		"ObserveToolCheck": true, "ObserveToolResult": true,
+	}
+	for _, c := range supportedCommands() {
+		if got := isWorkerObservation(c); got != allowed[c.CommandName()] {
+			t.Errorf("%s: allowed=%v", c.CommandName(), got)
+		}
+	}
+	if isWorkerObservation(nil) {
+		t.Error("nil command must not be a worker observation")
+	}
 }
