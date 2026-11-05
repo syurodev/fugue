@@ -91,6 +91,12 @@ func (s *fakeStore) ResolveCommit(_ context.Context, commandID string) (CommitRe
 	return CommitResolutionUnavailable, codec.Receipt{}, nil
 }
 
+func (s *fakeStore) appendCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.transitions)
+}
+
 func (s *fakeStore) LoadRun(ctx context.Context, runID string) (*kernel.State, uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

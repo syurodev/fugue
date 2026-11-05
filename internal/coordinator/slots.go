@@ -58,6 +58,7 @@ func (s *slots) release(ref string) error {
 	return nil
 }
 
+//nolint:gocritic // hugeParam: signature defined by plan
 func (s *slots) handoff(ref string, w Work) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

@@ -1,6 +1,7 @@
 package coordinator
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -58,31 +59,7 @@ func TestAdmissionFollowsFIFOForRunsAcceptedThisIncarnation(t *testing.T) {
 		AdmissionRevision: 2,
 	}, nil)
 
-	modelPlanR1 := &kernel.ModelRequestPlannedEvent{
-		InvocationID:   "m1",
-		FirstAttemptID: "a1",
-		Purpose:        "turn",
-		ModelRef:       "gpt-4",
-		ContextRef:     "c1",
-	}
-
-	_, err = sess.Submit(ctx, Request{
-		Command: &kernel.AcceptRunCommand{
-			CommandID: "cmd-accept-r1",
-			RunID:     "r1",
-			Origin:    "user",
-			SessionID: "s1",
-		},
-		Facts: kernel.DecisionFacts{
-			ModelPlan: modelPlanR1,
-		},
-		Kind:      "AcceptRun",
-		Principal: "user",
-		Target:    "r1",
-	})
-	if err != nil {
-		t.Fatalf("accept r1 failed: %v", err)
-	}
+	queueTestAccept(t, ctx, sess, "r1", "cmd-accept-r1", "m1", "a1", "c1")
 
 	// 2. Accept r2 while r1 is active (results queued: AcceptRun only, no auto AdmitRun yet)
 	store.queueAppend(AppendResult{
@@ -92,31 +69,7 @@ func TestAdmissionFollowsFIFOForRunsAcceptedThisIncarnation(t *testing.T) {
 		AdmissionRevision: 2,
 	}, nil)
 
-	modelPlanR2 := &kernel.ModelRequestPlannedEvent{
-		InvocationID:   "m2",
-		FirstAttemptID: "a2",
-		Purpose:        "turn",
-		ModelRef:       "gpt-4",
-		ContextRef:     "c2",
-	}
-
-	_, err = sess.Submit(ctx, Request{
-		Command: &kernel.AcceptRunCommand{
-			CommandID: "cmd-accept-r2",
-			RunID:     "r2",
-			Origin:    "user",
-			SessionID: "s1",
-		},
-		Facts: kernel.DecisionFacts{
-			ModelPlan: modelPlanR2,
-		},
-		Kind:      "AcceptRun",
-		Principal: "user",
-		Target:    "r2",
-	})
-	if err != nil {
-		t.Fatalf("accept r2 failed: %v", err)
-	}
+	queueTestAccept(t, ctx, sess, "r2", "cmd-accept-r2", "m2", "a2", "c2")
 
 	// 3. Finish r1 -> should trigger auto-admit of r2
 	// For ObserveModelResponseCommand, decide_model produces ModelResponseRecorded + StepCompleted + RunFinished
@@ -254,5 +207,65 @@ func TestQueuedRunsFromEarlierIncarnationAreNotAutoAdmitted(t *testing.T) {
 
 	if txCount != 0 {
 		t.Fatalf("expected zero transitions for queued run from earlier incarnation, got %d", txCount)
+	}
+}
+
+func queueTestAccept(t *testing.T, ctx context.Context, sess *Session, runID, cmdID, invID, attID, ctxRef string) {
+	t.Helper()
+
+	modelPlan := &kernel.ModelRequestPlannedEvent{
+		Envelope:              kernel.Envelope{},
+		InvocationID:          invID,
+		Purpose:               "turn",
+		FirstAttemptID:        attID,
+		ModelRef:              "gpt-4",
+		ContextRef:            ctxRef,
+		ToolDeclarationRefs:   nil,
+		EstimatedBudgetTokens: 0,
+	}
+
+	_, err := sess.Submit(ctx, Request{
+		Command: &kernel.AcceptRunCommand{
+			CommandID:       cmdID,
+			RunID:           runID,
+			Origin:          "user",
+			SessionID:       "s1",
+			InputRef:        "input-" + runID,
+			QueueItemRef:    "queue-" + runID,
+			ProtocolBinding: "binding-v1",
+		},
+		Facts: kernel.DecisionFacts{
+			OwnerIncarnation:         0,
+			ExecutorFence:            0,
+			WorkerReservationRef:     "",
+			DispatchAuthorizationRef: "",
+			BudgetReservationRef:     "",
+			ModelPlan:                modelPlan,
+			ModelDispatch:            nil,
+			ContextRefs:              nil,
+			Usage:                    nil,
+			ToolPlans:                nil,
+			Envelope:                 kernel.Envelope{},
+		},
+		Kind:           "AcceptRun",
+		Principal:      "user",
+		Target:         runID,
+		MetadataInput:  nil,
+		ProtectedInput: nil,
+	})
+	if err != nil {
+		t.Fatalf("accept %s failed: %v", runID, err)
+	}
+}
+
+func TestSessionQueueEmptyPop(t *testing.T) {
+	t.Parallel()
+	q := newSessionQueue()
+	if !q.empty() {
+		t.Error("expected empty queue")
+	}
+	item, ok := q.pop()
+	if ok || item.runID != "" {
+		t.Errorf("expected false, got %v, %v", ok, item)
 	}
 }

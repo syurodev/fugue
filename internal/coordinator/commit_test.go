@@ -318,3 +318,154 @@ func TestShutdownDuringUnknownCommitNeverHandsOff(t *testing.T) {
 		t.Fatalf("expected 0 work items after shutdown during unknown commit, got %d", count)
 	}
 }
+
+func TestBackgroundResolverCommitted(t *testing.T) {
+	t.Parallel()
+
+	startTime := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	fakeClk := clock.NewFake(startTime)
+	idGen := ids.NewUUIDv7(fakeClk, ids.NewDeterministic("bg-committed-test"))
+
+	store := newFakeStore()
+	setupAdmittedRun(store, "r1", "m1", "a1")
+
+	// Append fails with unknown
+	store.queueAppend(AppendResult{}, ErrCommitUnknown)
+	// First resolve: unavailable (spawns background loop)
+	store.queueResolve(CommitResolutionUnavailable, codec.Receipt{}, nil)
+	// Second resolve (inside background loop): committed
+	store.queueResolve(CommitResolutionCommitted, codec.Receipt{
+		CommandID: "cmd-disp-bg-commit",
+		Kind:      "PrepareDispatch",
+		Principal: "system",
+		Target:    "r1",
+	}, nil)
+
+	resolveReport := make(chan time.Time, 10)
+	workCh := make(chan Work, 1)
+	exec := newFakeExecutor()
+	exec.onExec = func(w Work, _ func(Observation)) {
+		select {
+		case workCh <- w:
+		default:
+		}
+	}
+	cfg := Config{
+		SessionID:        "s1",
+		OwnerIncarnation: 1,
+		WorkerCapacity:   1,
+		Store:            store,
+		Executor:         exec,
+		Clock:            fakeClk,
+		IDs:              idGen,
+	}
+
+	ctx := t.Context()
+	sess, err := Start(ctx, cfg)
+	if err != nil {
+		t.Fatalf("start session failed: %v", err)
+	}
+	defer sess.Stop()
+
+	sess.onResolve = func(tm time.Time) {
+		resolveReport <- tm
+	}
+
+	armed := make(chan struct{}, 1)
+	sess.onTimerArmed = func() {
+		select {
+		case armed <- struct{}{}:
+		default:
+		}
+	}
+
+	req := makeModelDispatchRequest("r1", "m1", "a1", "cmd-disp-bg-commit")
+	_ = supervise.Go(ctx, "test.submit", func(_ context.Context) error {
+		_, _ = sess.Submit(ctx, req)
+		return nil
+	})
+
+	// Initial resolve
+	<-resolveReport
+
+	// Wait for background timer to arm, then advance clock
+	<-armed
+	fakeClk.Advance(1 * time.Second)
+	<-resolveReport
+
+	// Work should now be handed off
+	<-workCh
+}
+
+func TestBackgroundResolverNotCommitted(t *testing.T) {
+	t.Parallel()
+
+	startTime := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	fakeClk := clock.NewFake(startTime)
+	idGen := ids.NewUUIDv7(fakeClk, ids.NewDeterministic("bg-not-committed-test"))
+
+	store := newFakeStore()
+	setupAdmittedRun(store, "r1", "m1", "a1")
+
+	// Append fails with unknown
+	store.queueAppend(AppendResult{}, ErrCommitUnknown)
+	// First resolve: unavailable (spawns background loop)
+	store.queueResolve(CommitResolutionUnavailable, codec.Receipt{}, nil)
+	// Second resolve (inside background loop): not committed
+	store.queueResolve(CommitResolutionNotCommitted, codec.Receipt{}, nil)
+
+	resolveReport := make(chan time.Time, 10)
+	workCh := make(chan Work, 1)
+	exec := newFakeExecutor()
+	exec.onExec = func(w Work, _ func(Observation)) {
+		select {
+		case workCh <- w:
+		default:
+		}
+	}
+	cfg := Config{
+		SessionID:        "s1",
+		OwnerIncarnation: 1,
+		WorkerCapacity:   1,
+		Store:            store,
+		Executor:         exec,
+		Clock:            fakeClk,
+		IDs:              idGen,
+	}
+
+	ctx := t.Context()
+	sess, err := Start(ctx, cfg)
+	if err != nil {
+		t.Fatalf("start session failed: %v", err)
+	}
+	defer sess.Stop()
+
+	sess.onResolve = func(tm time.Time) {
+		resolveReport <- tm
+	}
+
+	armed := make(chan struct{}, 1)
+	sess.onTimerArmed = func() {
+		select {
+		case armed <- struct{}{}:
+		default:
+		}
+	}
+
+	req := makeModelDispatchRequest("r1", "m1", "a1", "cmd-disp-bg-not-commit")
+	_ = supervise.Go(ctx, "test.submit", func(_ context.Context) error {
+		_, _ = sess.Submit(ctx, req)
+		return nil
+	})
+
+	// Initial resolve
+	<-resolveReport
+
+	// Wait for timer to arm, advance clock to trigger retry
+	<-armed
+	fakeClk.Advance(1 * time.Second)
+	<-resolveReport
+
+	// Work should be handed off after retry succeeds
+	<-workCh
+}

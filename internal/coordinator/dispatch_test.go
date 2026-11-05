@@ -392,3 +392,121 @@ func TestFailedCommitReleasesSlot(t *testing.T) {
 		t.Fatal("expected slot to be released after failed commit, reserve failed")
 	}
 }
+
+func TestDispatchEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	fakeClk := clock.NewFake(time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC))
+	idGen := ids.NewUUIDv7(fakeClk, ids.NewDeterministic("dispatch-edge-test"))
+
+	store := newFakeStore()
+	setupAdmittedRun(store, "r1", "m1", "a1")
+
+	exec := newFakeExecutor()
+	cfg := Config{
+		SessionID:        "s1",
+		OwnerIncarnation: 1,
+		WorkerCapacity:   2,
+		Store:            store,
+		Executor:         exec,
+		Clock:            fakeClk,
+		IDs:              idGen,
+	}
+
+	ctx := t.Context()
+	sess, err := Start(ctx, cfg)
+	if err != nil {
+		t.Fatalf("start session failed: %v", err)
+	}
+	defer sess.Stop()
+
+	// 1. isDispatch helper edge cases
+	st := kernel.NewState()
+	if isDispatch(nil, &kernel.PrepareDispatchCommand{}) {
+		t.Error("expected false for nil state")
+	}
+	if isDispatch(st, &kernel.AcceptRunCommand{}) {
+		t.Error("expected false for non-prepare command")
+	}
+	// Tool attempt with Planned status (not Ready)
+	st.ToolInvocations["t1"] = &kernel.ToolInvocation{
+		ToolCallID: "t1",
+		Attempts: map[string]*kernel.ToolAttempt{
+			"att-1": {
+				AttemptID: "att-1",
+				Status:    kernel.ToolAttemptStatusPlanned,
+			},
+		},
+	}
+	if isDispatch(st, &kernel.PrepareDispatchCommand{InvocationID: "t1", AttemptID: "att-1"}) {
+		t.Error("expected false for tool attempt in Planned status")
+	}
+	// Tool attempt with Ready status
+	st.ToolInvocations["t1"].Attempts["att-1"].Status = kernel.ToolAttemptStatusReady
+	if !isDispatch(st, &kernel.PrepareDispatchCommand{InvocationID: "t1", AttemptID: "att-1"}) {
+		t.Error("expected true for tool attempt in Ready status")
+	}
+
+	// 2. Dispatch with empty CommandID and Principal (auto-generated ID and default origin)
+	req := makeModelDispatchRequest("r1", "m1", "a1", "")
+	req.Principal = ""
+	_, err = sess.Submit(ctx, req)
+	if err != nil {
+		t.Fatalf("dispatch with empty id/principal failed: %v", err)
+	}
+
+	// 3. Dispatch when halted returns ErrCommitUnresolved
+	sess.mu.Lock()
+	sess.runs["r1"].ModelInvocations["m1"].Attempts["a2"] = &kernel.ModelAttempt{
+		AttemptID: "a2",
+		Status:    kernel.ModelAttemptStatusPlanned,
+	}
+	sess.halted = true
+	sess.mu.Unlock()
+
+	req2 := makeModelDispatchRequest("r1", "m1", "a2", "cmd-halted")
+	_, err = sess.Submit(ctx, req2)
+	if !errors.Is(err, ErrCommitUnresolved) {
+		t.Fatalf("expected ErrCommitUnresolved when halted, got %v", err)
+	}
+
+	sess.mu.Lock()
+	sess.halted = false
+	sess.mu.Unlock()
+
+	// 4. Dispatch with Decide rejection releases slot
+	sess.mu.Lock()
+	sess.runs["r1"].ModelInvocations["m1"].Attempts["a3"] = &kernel.ModelAttempt{
+		AttemptID: "a3",
+		Status:    kernel.ModelAttemptStatusPlanned,
+	}
+	sess.mu.Unlock()
+	rejReq := makeModelDispatchRequest("r1", "m1", "a3", "cmd-rej")
+	rejReq.Facts.ModelDispatch = nil // Causes Decide error
+	_, err = sess.Submit(ctx, rejReq)
+	if err == nil {
+		t.Fatal("expected Decide error on nil ModelDispatch")
+	}
+
+	// 5. Dispatch with empty RunID on command takes req.Target
+	sess.mu.Lock()
+	sess.runs["r1"].ModelInvocations["m1"].Attempts["a1"].Status = kernel.ModelAttemptStatusCompleted
+	sess.runs["r1"].CurrentModelInvocationID = "m2"
+	sess.runs["r1"].ModelInvocations["m2"] = &kernel.ModelInvocation{
+		InvocationID: "m2",
+		Planned:      true,
+		Attempts: map[string]*kernel.ModelAttempt{
+			"a4": {
+				AttemptID: "a4",
+				Status:    kernel.ModelAttemptStatusPlanned,
+			},
+		},
+	}
+	sess.mu.Unlock()
+	reqTarget := makeModelDispatchRequest("", "m2", "a4", "cmd-target")
+	reqTarget.Target = "r1"
+	_, err = sess.Submit(ctx, reqTarget)
+	if err != nil {
+		t.Fatalf("dispatch with target fallback failed: %v", err)
+	}
+}

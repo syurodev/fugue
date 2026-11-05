@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/kernel"
@@ -34,17 +35,17 @@ func isDispatch(state *kernel.State, cmd kernel.Command) bool {
 	return false
 }
 
-func (s *Session) handleDispatch(ctx context.Context, sub submission, prep *kernel.PrepareDispatchCommand) {
+func (s *Session) handleDispatch(ctx context.Context, sub *submission, prep *kernel.PrepareDispatchCommand) {
 	s.mu.Lock()
 	if s.halted {
 		s.mu.Unlock()
-		sub.replyCh <- submitReply{err: ErrCommitUnresolved}
+		sub.replyCh <- submitReply{reply: Reply{}, err: ErrCommitUnresolved}
 		return
 	}
 
 	ref, ok := s.slots.reserve()
 	if !ok {
-		s.parked = append(s.parked, sub)
+		s.parked = append(s.parked, *sub)
 		onP := s.onPark
 		s.mu.Unlock()
 		if onP != nil {
@@ -57,42 +58,39 @@ func (s *Session) handleDispatch(ctx context.Context, sub submission, prep *kern
 	s.executeDispatch(ctx, sub, ref, prep)
 }
 
-func (s *Session) executeDispatch(
-	ctx context.Context,
-	sub submission,
-	ref string,
-	prep *kernel.PrepareDispatchCommand,
-) {
-	cmdID, runID, origin, token := commandMetadata(sub.req.Command)
-	if runID == "" {
-		runID = sub.req.Target
-	}
-
-	s.mu.Lock()
-	state := s.runs[runID]
-	s.mu.Unlock()
-
-	var err error
+func (s *Session) resolveDispatchMetadata(
+	state *kernel.State,
+	sub *submission,
+	runID, cmdID, origin string,
+) (string, string, uint64, error) {
 	if cmdID == "" {
-		cmdID, err = s.cfg.IDs.NewID()
+		newID, err := s.cfg.IDs.NewID()
 		if err != nil {
-			s.releaseSlotAndRetry(ctx, ref)
-			sub.replyCh <- submitReply{err: err}
-			return
+			return "", "", 0, fmt.Errorf("new id: %w", err)
 		}
+		cmdID = newID
 	}
 	if origin == "" {
 		origin = sub.req.Principal
 		if origin == "" {
-			origin = "session"
+			origin = defaultOriginSession
 		}
 	}
+	var token uint64
 	if state.Admitted {
 		token = s.admission.AdmissionToken
 	}
 	setCommandMetadata(sub.req.Command, cmdID, runID, origin, token)
+	return cmdID, origin, token, nil
+}
 
-	nextSeq := state.LastSequence + 1
+func (s *Session) populateDispatchFacts(
+	sub *submission,
+	ref string,
+	prep *kernel.PrepareDispatchCommand,
+	cmdID, runID, origin string,
+	token, nextSeq uint64,
+) {
 	sub.req.Facts.Envelope = kernel.Envelope{
 		RunID:       runID,
 		Sequence:    nextSeq,
@@ -115,11 +113,37 @@ func (s *Session) executeDispatch(
 	if sub.req.Facts.DispatchAuthorizationRef == "" {
 		sub.req.Facts.DispatchAuthorizationRef = "auth-" + ref
 	}
+}
+
+func (s *Session) executeDispatch(
+	ctx context.Context,
+	sub *submission,
+	ref string,
+	prep *kernel.PrepareDispatchCommand,
+) {
+	cmdID, runID, origin, _ := commandMetadata(sub.req.Command)
+	if runID == "" {
+		runID = sub.req.Target
+	}
+
+	s.mu.Lock()
+	state := s.runs[runID]
+	s.mu.Unlock()
+
+	cmdID, origin, token, err := s.resolveDispatchMetadata(state, sub, runID, cmdID, origin)
+	if err != nil {
+		s.releaseSlotAndRetry(ctx, ref)
+		sub.replyCh <- submitReply{reply: Reply{}, err: err}
+		return
+	}
+
+	nextSeq := state.LastSequence + 1
+	s.populateDispatchFacts(sub, ref, prep, cmdID, runID, origin, token, nextSeq)
 
 	events, decErr := kernel.Decide(state, sub.req.Command, &sub.req.Facts)
 	if decErr != nil {
 		s.releaseSlotAndRetry(ctx, ref)
-		sub.replyCh <- submitReply{err: decErr}
+		sub.replyCh <- submitReply{reply: Reply{}, err: decErr}
 		return
 	}
 
@@ -136,23 +160,36 @@ func (s *Session) executeDispatch(
 					Target:    runID,
 				},
 			},
+			err: nil,
 		}
 		return
 	}
 
-	t := s.buildTransition(runID, cmdID, origin, state, events, sub.req)
+	t := s.buildTransition(runID, cmdID, origin, state, events, &sub.req)
 	appRes, appErr := s.cfg.Store.Append(ctx, t)
 	if appErr != nil {
-		if errors.Is(appErr, ErrCommitUnknown) {
-			s.handleUnknownCommit(ctx, sub, t, ref, events, prep)
-			return
-		}
-		s.releaseSlotAndRetry(ctx, ref)
-		sub.replyCh <- submitReply{err: appErr}
+		s.handleDispatchAppendError(ctx, sub, t, ref, events, prep, appErr)
 		return
 	}
 
-	s.onDispatchCommitted(runID, prep, ref, nextSeq, events, appRes, sub)
+	s.onDispatchCommitted(runID, prep, ref, nextSeq, events, &appRes, sub)
+}
+
+func (s *Session) handleDispatchAppendError(
+	ctx context.Context,
+	sub *submission,
+	t *Transition,
+	ref string,
+	events []kernel.Event,
+	prep *kernel.PrepareDispatchCommand,
+	appErr error,
+) {
+	if errors.Is(appErr, ErrCommitUnknown) {
+		s.handleUnknownCommit(ctx, sub, t, ref, events, prep)
+		return
+	}
+	s.releaseSlotAndRetry(ctx, ref)
+	sub.replyCh <- submitReply{reply: Reply{}, err: appErr}
 }
 
 func (s *Session) onDispatchCommitted(
@@ -161,8 +198,8 @@ func (s *Session) onDispatchCommitted(
 	ref string,
 	fence uint64,
 	events []kernel.Event,
-	appRes AppendResult,
-	sub submission,
+	appRes *AppendResult,
+	sub *submission,
 ) {
 	s.mu.Lock()
 	for _, ev := range events {
@@ -194,7 +231,9 @@ func (s *Session) onDispatchCommitted(
 			},
 			Dispatch: dispatchEvt,
 		}
-		_ = s.slots.handoff(ref, w)
+		if err := s.slots.handoff(ref, w); err != nil {
+			_ = err
+		}
 		s.attemptSlots[attemptKey{
 			runID:        runID,
 			invocationID: prep.InvocationID,
@@ -209,11 +248,16 @@ func (s *Session) onDispatchCommitted(
 			Duplicate: appRes.Duplicate,
 			Receipt:   appRes.Receipt,
 		},
+		err: nil,
 	}
+
+	s.notifyCommitted()
 }
 
 func (s *Session) releaseSlotAndRetry(ctx context.Context, ref string) {
-	_ = s.slots.release(ref)
+	if err := s.slots.release(ref); err != nil {
+		_ = err
+	}
 	s.retryParked(ctx)
 }
 
@@ -233,7 +277,9 @@ func (s *Session) retryParked(ctx context.Context) {
 		s.parked = s.parked[1:]
 		s.mu.Unlock()
 
-		prep, _ := head.req.Command.(*kernel.PrepareDispatchCommand)
-		s.executeDispatch(ctx, head, ref, prep)
+		prep, ok := head.req.Command.(*kernel.PrepareDispatchCommand)
+		if ok {
+			s.executeDispatch(ctx, &head, ref, prep)
+		}
 	}
 }

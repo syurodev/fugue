@@ -110,3 +110,33 @@ func TestReleaseOfHandedOffSlotIsRejected(t *testing.T) {
 		t.Fatal("expected handed-off slot to still be occupied")
 	}
 }
+
+func TestSlotsEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	s0 := newSlots(0)
+	if s0.capacity != 1 {
+		t.Errorf("expected default capacity 1 for 0, got %d", s0.capacity)
+	}
+
+	s := newSlots(1)
+	if err := s.complete("non-existent"); !errors.Is(err, ErrHandoffFailed) {
+		t.Errorf("expected ErrHandoffFailed for unknown complete, got %v", err)
+	}
+	if err := s.release("non-existent"); !errors.Is(err, ErrHandoffFailed) {
+		t.Errorf("expected ErrHandoffFailed for unknown release, got %v", err)
+	}
+	if err := s.handoff("non-existent", Work{}); !errors.Is(err, ErrHandoffFailed) {
+		t.Errorf("expected ErrHandoffFailed for unknown handoff, got %v", err)
+	}
+
+	ref, ok := s.reserve()
+	if !ok {
+		t.Fatal("reserve failed")
+	}
+	s.handoffCh <- Work{} // fill channel
+	if err := s.handoff(ref, Work{}); !errors.Is(err, ErrHandoffFailed) {
+		t.Errorf("expected ErrHandoffFailed when handoff channel full, got %v", err)
+	}
+	<-s.handoffCh // drain
+}

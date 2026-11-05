@@ -311,6 +311,14 @@ func TestCallerCancellationDoesNotAbortAcceptedCommand(t *testing.T) {
 	}
 	defer sess.Stop()
 
+	committed := make(chan struct{}, 1)
+	sess.setOnCommitted(func() {
+		select {
+		case committed <- struct{}{}:
+		default:
+		}
+	})
+
 	callerCtx, cancelCaller := context.WithCancel(sessCtx)
 
 	req := Request{
@@ -341,6 +349,7 @@ func TestCallerCancellationDoesNotAbortAcceptedCommand(t *testing.T) {
 
 	close(releaseAppend)
 	<-appendDone
+	<-committed
 
 	// Verify transition recorded and run cache advanced
 	store.mu.Lock()
@@ -357,5 +366,96 @@ func TestCallerCancellationDoesNotAbortAcceptedCommand(t *testing.T) {
 
 	if r1State == nil || !r1State.Accepted {
 		t.Fatalf("expected run r1 cache advanced with Accepted=true, got %+v", r1State)
+	}
+}
+
+func TestSessionEdgeCases(t *testing.T) {
+	t.Parallel()
+
+	fakeClk := clock.NewFake(time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC))
+	idGen := ids.NewUUIDv7(fakeClk, ids.NewDeterministic("session-edge-test"))
+
+	// 1. Start failure when LoadAdmission fails
+	failStore := newFakeStore()
+	admErr := errors.New("admission load boom")
+	failStore.admissionErr = admErr
+	_, err := Start(t.Context(), Config{
+		SessionID: "s-fail",
+		Store:     failStore,
+		Clock:     fakeClk,
+		IDs:       idGen,
+	})
+	if !errors.Is(err, admErr) {
+		t.Errorf("expected admission load error, got %v", err)
+	}
+
+	// 2. Start with 0 worker capacity defaults to 1
+	store := newFakeStore()
+	exec := newFakeExecutor()
+	sess, err := Start(t.Context(), Config{
+		SessionID:      "s-cap0",
+		WorkerCapacity: 0,
+		Store:          store,
+		Executor:       exec,
+		Clock:          fakeClk,
+		IDs:            idGen,
+	})
+	if err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+	if sess.slots.capacity != 1 {
+		t.Errorf("expected capacity 1, got %d", sess.slots.capacity)
+	}
+
+	// 3. Submit on stopped session
+	sess.Stop()
+	_, err = sess.Submit(t.Context(), Request{})
+	if !errors.Is(err, ErrSessionStopped) {
+		t.Errorf("expected ErrSessionStopped, got %v", err)
+	}
+
+	// 4. Submit with canceled context
+	sess2, err := Start(t.Context(), Config{
+		SessionID: "s2",
+		Store:     store,
+		Executor:  exec,
+		Clock:     fakeClk,
+		IDs:       idGen,
+	})
+	if err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+	defer sess2.Stop()
+
+	cancCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err = sess2.Submit(cancCtx, Request{})
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
+	}
+
+	// 5. Submit with LoadRun error
+	loadErr := errors.New("load run boom")
+	store.loadRunFn = func(_ context.Context, _ string) (*kernel.State, uint64, error) {
+		return nil, 0, loadErr
+	}
+	_, err = sess2.Submit(t.Context(), Request{
+		Target:  "r-fail-load",
+		Command: &kernel.AcceptRunCommand{RunID: "r-fail-load"},
+	})
+	if !errors.Is(err, loadErr) {
+		t.Errorf("expected loadErr, got %v", err)
+	}
+
+	// 6. Submit with default fields (auto-populates kind, principal, target)
+	store.loadRunFn = nil
+	acceptCmd := &kernel.AcceptRunCommand{
+		RunID: "r-defaults",
+	}
+	_, err = sess2.Submit(t.Context(), Request{
+		Command: acceptCmd,
+	})
+	if err != nil {
+		t.Fatalf("submit with default fields failed: %v", err)
 	}
 }
