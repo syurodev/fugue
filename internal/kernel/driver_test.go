@@ -11,6 +11,10 @@ const (
 	drvKnown    = "known"
 	drvProvider = "provider"
 	drvAllowed  = "allowed"
+	drvPrompt   = "continue-prompt"
+	drvArgsRef  = "validated-args-ref"
+	actorPeer   = "peer"
+	actorModel  = "model"
 )
 
 // runDriver walks one run through real Decide calls, checking every committed
@@ -126,28 +130,43 @@ func (r *runDriver) respond(step int, finish FinishReason, tools []*ToolCallPlan
 	})
 }
 
-// tool runs one planned tool call to its result. The next model plan is always
-// supplied; it is only used when the result completes the step and the run continues.
-func (r *runDriver) tool(step, position int, mutate func(*DecisionFacts)) []Event {
+// toolStep sends the next command a tool call needs: check start, check result,
+// dispatch, then result. The next model plan is always supplied; it is only used
+// when the result completes the step and the run continues.
+func (r *runDriver) toolStep(step, position int) []Event {
 	r.t.Helper()
 	id, att := fmt.Sprintf("t%d-%d", step, position), fmt.Sprintf("ta%d-%d", step, position)
-	prepare := &PrepareDispatchCommand{CommandID: "", RunID: "", Origin: "", Token: 7, InvocationID: id, AttemptID: att}
-	r.must(prepare, nil)
-	r.must(&ObserveToolCheckCommand{
-		CommandID: "", RunID: "", Origin: "", Token: 7, ToolCallID: id, AttemptID: att, CheckGeneration: 1,
-		ValidatedArgsRef: "validated-args-ref", GateObservation: drvAllowed, ApprovalReceiptRef: "",
-	}, nil)
-	r.must(prepare, nil)
-	return r.must(&ObserveToolResultCommand{
-		CommandID: "", RunID: "", Origin: "", Token: 7, ToolCallID: id, AttemptID: att,
-		Outcome: string(ToolResultOutcomeSucceeded), ResultRef: fmt.Sprintf("result-%d-%d", step, position),
-		Code: "ok", EffectEvidence: "completion-ref", SourcePosition: position,
-	}, func(f *DecisionFacts) {
-		f.ModelPlan = modelPlan(fmt.Sprintf("m%d", step+1), fmt.Sprintf("a%d", step+1))
-		if mutate != nil {
-			mutate(f)
+	var command Command
+	switch r.s.ToolInvocations[id].Attempts[att].Status {
+	case ToolAttemptStatusPlanned, ToolAttemptStatusReady:
+		command = &PrepareDispatchCommand{CommandID: "", RunID: "", Origin: "", Token: 7, InvocationID: id, AttemptID: att}
+	case ToolAttemptStatusChecking:
+		command = &ObserveToolCheckCommand{
+			CommandID: "", RunID: "", Origin: "", Token: 7, ToolCallID: id, AttemptID: att, CheckGeneration: 1,
+			ValidatedArgsRef: drvArgsRef, GateObservation: drvAllowed, ApprovalReceiptRef: "",
 		}
+	case ToolAttemptStatusDispatching:
+		command = &ObserveToolResultCommand{
+			CommandID: "", RunID: "", Origin: "", Token: 7, ToolCallID: id, AttemptID: att,
+			Outcome: string(ToolResultOutcomeSucceeded), ResultRef: fmt.Sprintf("result-%d-%d", step, position),
+			Code: "ok", EffectEvidence: "completion-ref", SourcePosition: position,
+		}
+	case ToolAttemptStatusAwaitingApproval, ToolAttemptStatusSucceeded, ToolAttemptStatusFailed, ToolAttemptStatusDenied,
+		ToolAttemptStatusRefused, ToolAttemptStatusCancelled, ToolAttemptStatusOutcomeUnknown, ToolAttemptStatusAbandonedUnknown:
+		r.t.Fatalf("tool %s has no next command in its state", id)
+	}
+	return r.must(command, func(f *DecisionFacts) {
+		f.ModelPlan = modelPlan(fmt.Sprintf("m%d", step+1), fmt.Sprintf("a%d", step+1))
 	})
+}
+
+// tool runs one planned tool call to its result and returns the result batch.
+func (r *runDriver) tool(step, position int) []Event {
+	r.t.Helper()
+	for range 3 {
+		r.toolStep(step, position)
+	}
+	return r.toolStep(step, position)
 }
 
 func (r *runDriver) advance(step int, mutate func(*DecisionFacts)) ([]Event, error) {

@@ -90,6 +90,10 @@ func (d *decision) command(command Command) ([]Event, error) {
 		return d.check(c)
 	case *ObserveToolResultCommand:
 		return d.result(c)
+	case *ExtendBudgetCommand:
+		return d.extend(c)
+	case *RequestStopCommand:
+		return d.requestStop(c)
 	}
 	return nil, Reject(RejectionCodeUnrecognizedCommand, "unsupported or nil command")
 }

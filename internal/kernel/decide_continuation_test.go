@@ -49,7 +49,7 @@ func TestLengthAutoContinuesOnce(t *testing.T) {
 	if !r.s.AutoContinued || r.s.Finished {
 		t.Fatal("run did not record its one automatic continuation")
 	}
-	second, err := r.advance(2, func(f *DecisionFacts) { f.ContinuationPromptRef = "continue-prompt" })
+	second, err := r.advance(2, func(f *DecisionFacts) { f.ContinuationPromptRef = drvPrompt })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +58,7 @@ func TestLengthAutoContinuesOnce(t *testing.T) {
 		t.Fatal(diff)
 	}
 	injected, _ := findEvent[*ContextInjectedEvent](second)
-	if injected.Source != string(ContinuationReasonTruncatedContinue) || injected.PayloadRef != "continue-prompt" {
+	if injected.Source != string(ContinuationReasonTruncatedContinue) || injected.PayloadRef != drvPrompt {
 		t.Fatalf("continuation injection: %+v", injected)
 	}
 	assertTruncatedEnd(t, r, r.model(2, FinishReasonLength, nil, nil))
@@ -193,7 +193,7 @@ func TestToolTerminateEndsAfterStep(t *testing.T) {
 	terminating := driverToolPlan(1, 0)
 	terminating.Terminates = true
 	r.model(1, FinishReasonToolUse, []*ToolCallPlannedEvent{terminating}, nil)
-	events := r.tool(1, 0, nil)
+	events := r.tool(1, 0)
 	want := kinds(new(ToolResultRecordedEvent), new(StepCompletedEvent), new(RunFinishedEvent))
 	if diff := cmp.Diff(want, eventNames(events)); diff != "" {
 		t.Fatal(diff)
@@ -212,8 +212,8 @@ func TestToolTerminateNeedsEveryTool(t *testing.T) {
 	terminating := driverToolPlan(1, 0)
 	terminating.Terminates = true
 	r.model(1, FinishReasonToolUse, []*ToolCallPlannedEvent{terminating, driverToolPlan(1, 1)}, nil)
-	r.tool(1, 0, nil)
-	events := r.tool(1, 1, nil)
+	r.tool(1, 0)
+	events := r.tool(1, 1)
 	if got := stepCompleted(t, events); got.Reason != ContinuationReasonToolCalls || r.s.Finished {
 		t.Fatalf("a single non-terminating tool must keep the run going: %+v", got)
 	}

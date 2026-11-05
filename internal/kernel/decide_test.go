@@ -104,6 +104,10 @@ func bindDecision(c *decisionCase, s *State, id string) {
 		cmd.CommandID, cmd.RunID, cmd.Origin = id, testTargetRun, decOrigin
 	case *AdvanceRunCommand:
 		cmd.CommandID, cmd.RunID, cmd.Origin = id, testTargetRun, decOrigin
+	case *ExtendBudgetCommand:
+		cmd.CommandID, cmd.RunID, cmd.Origin = id, testTargetRun, decOrigin
+	case *RequestStopCommand:
+		cmd.CommandID, cmd.RunID, cmd.Origin = id, testTargetRun, decOrigin
 	}
 }
 

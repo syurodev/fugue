@@ -67,6 +67,9 @@ func (d *decision) advance(c *AdvanceRunCommand) ([]Event, error) {
 	if err := d.closedStep(); err != nil {
 		return nil, err
 	}
+	if d.budgetExhausted(BudgetKindTokens) {
+		return []Event{d.budgetBlock(BudgetKindTokens)}, nil
+	}
 	return d.planStep(c.StepIndex, d.continuationInjection())
 }
 

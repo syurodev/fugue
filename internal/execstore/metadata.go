@@ -34,6 +34,15 @@ type requestStopMeta struct {
 	Stop   *string            `json:"stop,omitempty"`
 	Reason *kernel.StopReason `json:"Reason,omitempty"`
 	Mode   *kernel.StopMode   `json:"Mode,omitempty"`
+	Actor  *string            `json:"Actor,omitempty"`
+}
+
+// extendBudgetMeta holds only the kind, the amount and the actor of a user's
+// budget extension: no payload, so the command commits while the vault is locked.
+type extendBudgetMeta struct {
+	Kind            *kernel.BudgetKind `json:"Kind,omitempty"`
+	ExtensionAmount *int64             `json:"ExtensionAmount,omitempty"`
+	Actor           *string            `json:"Actor,omitempty"`
 }
 
 type closeWithoutPayloadMeta struct {
@@ -71,6 +80,8 @@ func newMetadataTarget(kind string) (any, error) {
 		return new(advanceRunMeta), nil
 	case cmdRequestStop:
 		return new(requestStopMeta), nil
+	case cmdExtendBudget:
+		return new(extendBudgetMeta), nil
 	case cmdCloseRunWithoutPayload:
 		return new(closeWithoutPayloadMeta), nil
 	case cmdSelectRunContext:
@@ -83,10 +94,30 @@ func newMetadataTarget(kind string) (any, error) {
 }
 
 func validateMetadataSemantics(target any) error {
-	stopMeta, ok := target.(*requestStopMeta)
-	if !ok {
-		return nil
+	switch meta := target.(type) {
+	case *requestStopMeta:
+		return validateStopMeta(meta)
+	case *extendBudgetMeta:
+		return validateExtendBudgetMeta(meta)
 	}
+	return nil
+}
+
+func validateExtendBudgetMeta(meta *extendBudgetMeta) error {
+	if meta.Kind != nil {
+		switch *meta.Kind {
+		case kernel.BudgetKindSteps, kernel.BudgetKindTokens, kernel.BudgetKindTime, kernel.BudgetKindToolCalls:
+		default:
+			return fmt.Errorf("%w: %w", ErrInvalidBatch, errInvalidMetadataSchema)
+		}
+	}
+	if meta.ExtensionAmount != nil && *meta.ExtensionAmount <= 0 {
+		return fmt.Errorf("%w: %w", ErrInvalidBatch, errInvalidMetadataSchema)
+	}
+	return nil
+}
+
+func validateStopMeta(stopMeta *requestStopMeta) error {
 	if stopMeta.Reason != nil {
 		switch *stopMeta.Reason {
 		case kernel.StopReasonUserCancel, kernel.StopReasonParentCancel,
@@ -135,12 +166,16 @@ func isSafeAdmitField(field string) bool {
 }
 
 func isSafeStopField(field string) bool {
-	return field == "stop" || field == "Reason" || field == "Mode"
+	return field == "stop" || field == "Reason" || field == "Mode" || field == fieldActor
+}
+
+func isSafeExtendBudgetField(field string) bool {
+	return field == "Kind" || field == "ExtensionAmount" || field == fieldActor
 }
 
 func isSafeCloseField(field string) bool {
 	switch field {
-	case "RunID", fieldRunRevision, "ExactAttemptIDs", "CauseIDs", "Actor", "UnavailabilityReason":
+	case "RunID", fieldRunRevision, "ExactAttemptIDs", "CauseIDs", fieldActor, "UnavailabilityReason":
 		return true
 	default:
 		return false
@@ -149,7 +184,7 @@ func isSafeCloseField(field string) bool {
 
 func isSafeContextField(field string) bool {
 	switch field {
-	case "OldContextRevision", "NewContextRevision", "Epoch", "StartRunID", "Mode", "Actor", "ValidationEvidence":
+	case "OldContextRevision", "NewContextRevision", "Epoch", "StartRunID", "Mode", fieldActor, "ValidationEvidence":
 		return true
 	default:
 		return false
@@ -168,6 +203,8 @@ func isSafeMetadataField(kind, field string) bool {
 		return field == "StepIndex"
 	case cmdRequestStop:
 		return isSafeStopField(field)
+	case cmdExtendBudget:
+		return isSafeExtendBudgetField(field)
 	case cmdCloseRunWithoutPayload:
 		return isSafeCloseField(field)
 	case cmdSelectRunContext:
@@ -182,7 +219,7 @@ func isSafeMetadataField(kind, field string) bool {
 func isMetadataOnlyPermitted(kind string) bool {
 	switch kind {
 	case cmdAcceptRun, cmdAdmitRun, cmdAcquireRunOwnership, cmdAdvanceRun,
-		cmdRequestStop, cmdCloseRunWithoutPayload, cmdSelectRunContext,
+		cmdRequestStop, cmdExtendBudget, cmdCloseRunWithoutPayload, cmdSelectRunContext,
 		cmdResumeRun, cmdRecoverRun:
 		return true
 	default:
