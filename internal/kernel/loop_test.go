@@ -182,3 +182,48 @@ func TestLoopCounterResets(t *testing.T) {
 		t.Fatal("a new run must start with no repetition")
 	}
 }
+
+func TestCutToolCallsDoNotAdvanceLoopCounter(t *testing.T) {
+	t.Parallel()
+	response := &ModelResponseRecordedEvent{
+		Envelope: budgetEnvelope(2), AttemptID: "a1", InvocationID: "m1", ResponseRef: "r", UsageStatus: drvKnown,
+		FinishReason: FinishReasonLength,
+	}
+	s := NewState()
+	modelCall := modelPlan("m1", "a1")
+	modelCall.Envelope = budgetEnvelope(1)
+	s = Evolve(s, modelCall)
+	s = Evolve(s, plannedCall(3, "a", false))
+	s = Evolve(s, plannedCall(4, "b", true))
+	if s.LoopRepeat != 2 {
+		t.Fatalf("LoopRepeat = %d before the cut answer", s.LoopRepeat)
+	}
+	s = Evolve(s, response)
+	s = Evolve(s, plannedCall(5, "cut", true))
+	if s.LoopRepeat != 2 || s.ToolInvocations["cut"].Repeat != 0 {
+		t.Fatalf("a call that never ran counted: LoopRepeat=%d Repeat=%d", s.LoopRepeat, s.ToolInvocations["cut"].Repeat)
+	}
+}
+
+func TestLoopReminderCountsOnlyCallsThatRan(t *testing.T) {
+	t.Parallel()
+	r := newRunDriver(t, DefaultRunBudgets())
+	for step := 1; step <= 2; step++ {
+		r.model(step, FinishReasonToolUse, []*ToolCallPlannedEvent{repeatedPlan(step)}, nil)
+		r.tool(step, 0)
+	}
+	// Step 3 repeats the call again but the answer is cut, so the call never runs.
+	r.model(3, FinishReasonLength, []*ToolCallPlannedEvent{repeatedPlan(3)}, func(f *DecisionFacts) {
+		f.SyntheticResultRefs = []string{cutRef0}
+	})
+	if _, err := r.advance(4, nil); err != nil {
+		t.Fatal(err)
+	}
+	// The next call that runs is the third that ran: its reminder is due.
+	r.model(4, FinishReasonToolUse, []*ToolCallPlannedEvent{repeatedPlan(4)}, nil)
+	events := r.tool(4, 0)
+	reminders := reminderEvents(events)
+	if len(reminders) != 1 || reminders[0].Tag != "level_3" {
+		t.Fatalf("reminders after the cut call: %+v", reminders)
+	}
+}

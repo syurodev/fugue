@@ -170,7 +170,7 @@ func (d *decision) finishToolBatch(c *ObserveToolResultCommand, batch []Event) (
 	if response == nil {
 		return nil, Reject(RejectionCodeInvalidState, "missing selected response")
 	}
-	dec := AfterStep(d.stepOutcome(response.Response.FinishReason, len(d.state.ToolOrder)))
+	dec := AfterStep(d.stepOutcome(response.Response.FinishReason, d.recordedPlans()))
 	if dec.Continue && d.budgetExhausted(BudgetKindTokens) {
 		// No AdvanceRun separates this step from the next, so the step boundary is checked here.
 		dec = StepDecision{Reason: ContinuationReasonBudget, BudgetKind: BudgetKindTokens}

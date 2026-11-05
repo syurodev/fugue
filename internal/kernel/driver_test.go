@@ -7,17 +7,19 @@ import (
 )
 
 const (
-	drvChunkRef   = "chunk-ref"
-	drvKnown      = "known"
-	drvProvider   = "provider"
-	drvAllowed    = "allowed"
-	drvPrompt     = "continue-prompt"
-	drvReminder   = "loop-reminder-ref"
-	drvDescriptor = "descriptor-v1"
-	drvInputRef   = "args"
-	drvArgsRef    = "validated-args-ref"
-	actorPeer     = "peer"
-	actorModel    = "model"
+	drvChunkRef      = "chunk-ref"
+	drvKnown         = "known"
+	drvProvider      = "provider"
+	drvAllowed       = "allowed"
+	drvPrompt        = "continue-prompt"
+	drvReminder      = "loop-reminder-ref"
+	drvDescriptor    = "descriptor-v1"
+	drvOriginSession = "session"
+	drvOriginTimer   = "timer"
+	drvInputRef      = "args"
+	drvArgsRef       = "validated-args-ref"
+	actorPeer        = "peer"
+	actorModel       = "model"
 )
 
 // runDriver walks one run through real Decide calls, checking every committed

@@ -152,15 +152,35 @@ func planTool(s *State, ev *ToolCallPlannedEvent) {
 		Status:    ToolAttemptStatusPlanned,
 	}
 	tool.Plan = *ev
-	if ev.RepeatsPrevious {
+	countLoopCall(s, tool, ev.RepeatsPrevious)
+	s.ToolInvocations[ev.ToolCallID] = tool
+	recordModelTool(s, ev.ToolCallID)
+	s.ToolOrder = append(s.ToolOrder, ev.ToolCallID)
+}
+
+// countLoopCall advances the run's repetition counter for a planned call. A call
+// from a cut answer is never run, and its synthetic result skips the reminder
+// path, so it neither counts nor resets the count; its Repeat stays zero.
+func countLoopCall(s *State, tool *ToolInvocation, repeatsPrevious bool) {
+	if responseWasCut(s) {
+		return
+	}
+	if repeatsPrevious {
 		s.LoopRepeat++
 	} else {
 		s.LoopRepeat = 1
 	}
 	tool.Repeat = s.LoopRepeat
-	s.ToolInvocations[ev.ToolCallID] = tool
-	recordModelTool(s, ev.ToolCallID)
-	s.ToolOrder = append(s.ToolOrder, ev.ToolCallID)
+}
+
+// responseWasCut reports whether the step's selected model response ended on length.
+func responseWasCut(s *State) bool {
+	inv := s.ModelInvocations[s.CurrentModelInvocationID]
+	if inv == nil {
+		return false
+	}
+	att := inv.Attempts[inv.SelectedAttemptID]
+	return att != nil && att.Response.FinishReason == FinishReasonLength
 }
 
 func resetToolCheck(s *State, toolCallID string, newGen uint64) {
@@ -316,7 +336,7 @@ func evolveTimerBudgetEvents(s *State, e Event) bool {
 	switch ev := e.(type) {
 	case *BudgetObservedEvent:
 		if ev.TokensUsed > 0 {
-			s.TokensUsed += int64(ev.TokensUsed)
+			s.TokensUsed = addSaturating(s.TokensUsed, int64(ev.TokensUsed))
 		}
 		recordResponseUsage(s, ev)
 		return true
