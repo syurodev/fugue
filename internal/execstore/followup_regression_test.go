@@ -64,9 +64,7 @@ func TestRegressionFollowupB_ProtectedRaceReleasesConnection(t *testing.T) {
 	req.ProtectedInputID = p.PayloadID
 	req.SealedPayloads = []SealedPayload{p}
 	req.SealedSessionKey = &key
-	if _, err := s.Append(ctx, req); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(ctx, t, s, req)
 	eq := &dbReadingEquality{db: db, input: input, called: false}
 	s.equality = eq
 	conn, err := db.Conn(ctx)
@@ -105,9 +103,7 @@ func TestRegressionFollowupC_TranscriptUsesAcceptedInputRef(t *testing.T) {
 	req.ProtectedInputID = cmd.PayloadID
 	req.SealedPayloads = []SealedPayload{cmd, user}
 	req.SealedSessionKey = &key
-	if _, err := s.Append(ctx, req); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(ctx, t, s, req)
 	admit := makeRunAdmitted(makeEnvelope("review-run-c", 2, "review-admit-c", 1, s.clk.Now()), 1)
 	admit.ContextEpoch = 1
 	req = reviewReq("review-admit-c", 2, 1, 1, admit)
@@ -116,9 +112,7 @@ func TestRegressionFollowupC_TranscriptUsesAcceptedInputRef(t *testing.T) {
 	req.Kind = "AdmitRun"
 	req.QueueFence = nil
 	req.AdmissionFence = &AdmissionFence{Token: 1, OwnerIncarnation: 1}
-	if _, err := s.Append(ctx, req); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(ctx, t, s, req)
 	var inputRef string
 	if err := db.QueryRowContext(ctx, `SELECT payload_id FROM exec_transcript WHERE role='input' AND context_epoch=1 AND session_id='review-session-c'`).Scan(&inputRef); err != nil {
 		t.Fatal(err)
@@ -132,9 +126,7 @@ func TestRegressionFollowupD_QueuedDispatchRejected(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	s, db, _ := newTestStore(ctx, t, nil)
-	if _, err := s.Append(ctx, reviewReq("review-accept-d", 1, 0, 1, reviewAccepted(s))); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(ctx, t, s, reviewReq("review-accept-d", 1, 0, 1, reviewAccepted(s)))
 	evt := &kernel.ModelDispatchStartedEvent{
 		Envelope:            *makeEnvelope(testRunReg, 2, "review-dispatch-d", 999, s.clk.Now()),
 		InvocationID:        "review-model-d",
@@ -193,9 +185,7 @@ func TestRegressionFollowupF_RetryCanonicalizationIsStable(t *testing.T) {
 	req.MetadataInput = []byte(`{"InputRef": ""}`)
 	req.CanonicalInput = req.MetadataInput
 	retry := *req
-	if _, err := s.Append(ctx, req); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(ctx, t, s, req)
 	out, err := s.Append(ctx, &retry)
 	if err != nil || !out.Duplicate {
 		t.Errorf("identical reconstructed retry falsely conflicts: duplicate=%v err=%v", out.Duplicate, err)
@@ -387,9 +377,7 @@ func TestInBatchAcceptedAndAdmitted(t *testing.T) {
 		SealedPayloads:            []SealedPayload{user},
 		SealedSessionKey:          &key,
 	}
-	if _, err := s.Append(ctx, reqInBatch); err != nil {
-		t.Fatalf("same batch accept+admit failed: %v", err)
-	}
+	appendPersisted(ctx, t, s, reqInBatch)
 }
 
 func TestNilStoreReceiverEdgeCases(t *testing.T) {
@@ -405,9 +393,7 @@ func TestNilStoreReceiverEdgeCases(t *testing.T) {
 	reqProt.ProtectedInputID = p.PayloadID
 	reqProt.SealedPayloads = []SealedPayload{p}
 	reqProt.SealedSessionKey = &key2
-	if _, err := sNoEq.Append(ctx, reqProt); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(ctx, t, sNoEq, reqProt)
 	retryProt := *reqProt
 	if _, err := sNoEq.Append(ctx, &retryProt); !errors.Is(err, ErrProtectedInputUnavailable) {
 		t.Errorf("expected ErrProtectedInputUnavailable when equality nil, got %v", err)
@@ -443,9 +429,7 @@ func TestAdmissionFenceMismatchEdgeCases(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	sAdm, _, _ := newTestStore(ctx, t, nil)
-	if _, err := sAdm.Append(ctx, reviewReq("c-adm-base", 1, 0, 1, reviewAccepted(sAdm))); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(ctx, t, sAdm, reviewReq("c-adm-base", 1, 0, 1, reviewAccepted(sAdm)))
 
 	admEvtBadToken := makeRunAdmitted(makeEnvelope(testRunReg, 2, "c-bad-tok", 1, sAdm.clk.Now()), 999)
 	reqBadTok := reviewReq("c-bad-tok", 2, 1, 1, admEvtBadToken)

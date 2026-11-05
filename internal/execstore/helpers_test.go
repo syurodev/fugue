@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/crypto"
 	"github.com/syurodev/fugue/internal/kernel"
 	"github.com/syurodev/fugue/internal/platform/clock"
@@ -28,6 +29,7 @@ const (
 	testUser1            = "user-1"
 	testSess             = "sess"
 	testRequirementNone  = "none"
+	cheapKeyringJSON     = `{"version":1,"master_kdf":{"algorithm":"argon2id","memory":32768,"iterations":2,"parallelism":1,"key_length":32,"salt":"tVpEp1SJuG76TJDI9r2H1Q=="},"master_wrapped":{"version":2,"algorithm":"xchacha20-poly1305","key_id":"dek","nonce":"S3PG4uILC7IXgVxu7E14YWW2yW8ZWxvT","ciphertext":"tieySptWh8lyenjjCIkuLel5svy5WeHq2w2k7l172/yQP8zRHtdocmDHmzmZvAU4"},"recovery_kdf":{"algorithm":"argon2id","memory":32768,"iterations":2,"parallelism":1,"key_length":32,"salt":"f1EOZLClsIpLqjqSXEzBmg=="},"recovery_wrapped":{"version":2,"algorithm":"xchacha20-poly1305","key_id":"dek","nonce":"5alTvaMhrmgH8xAa2Bfp2yt+htLRoltJ","ciphertext":"uNlkGM5qCYZv+XCNs6J7el0Dg17ffubXFMGjazNVU3mz8SlRx9YCYV+HmfAt2eih"}}`
 )
 
 var (
@@ -83,7 +85,7 @@ func newTestStore(ctx context.Context, t *testing.T, equality ProtectedEquality)
 		AcquiredAt:     clk.Now(),
 	}
 	idGen := ids.NewSequence("test-id")
-	s, err := New(ctx, db, host, clk, idGen, equality)
+	s, err := New(ctx, db, nil, host, clk, idGen, nil, equality)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -284,5 +286,57 @@ func makeModelAttemptAbandoned(env *kernel.Envelope, invID, attID string, next k
 		Receipt:      "",
 		NextAction:   next,
 		UnknownCost:  0,
+	}
+}
+
+func makeAcceptedReq(
+	s *Store,
+	sessionID, runID, cmdID, payloadID string,
+	canonicalInput []byte,
+	sealed []SealedPayload,
+	sealedKey *SealedSessionKey,
+) *AppendRequest {
+	evt := makeRunAccepted(makeEnvelope(runID, 1, cmdID, 0, s.clk.Now()), sessionID, payloadID)
+	return &AppendRequest{
+		SessionID:                 sessionID,
+		RunID:                     runID,
+		CommandID:                 cmdID,
+		Kind:                      cmdAcceptRun,
+		Principal:                 testOriginUser,
+		Target:                    testTargetSession,
+		CodecVersion:              codec.CodecV1,
+		ProtectedInputID:          payloadID,
+		CanonicalInput:            canonicalInput,
+		QueueFence:                &QueueFence{QueueRevision: 0},
+		ExpectedRunRevision:       0,
+		ExpectedAdmissionRevision: 1,
+		Events:                    []kernel.Event{evt},
+		Result:                    codec.ReceiptResult{FirstSequence: 1, LastSequence: 1},
+		SealedPayloads:            sealed,
+		SealedSessionKey:          sealedKey,
+	}
+}
+
+// Assert the persistence result before issuing more SQL: a nil error alone can
+// hide a skipped transaction and leave later assertions waiting on a leaked conn.
+func appendPersisted(ctx context.Context, t *testing.T, s *Store, req *AppendRequest) {
+	t.Helper()
+	out, err := s.Append(ctx, req)
+	if err != nil || (!out.Committed && !out.Duplicate) {
+		t.Fatalf("append did not persist a receipt: committed=%v duplicate=%v err=%v", out.Committed, out.Duplicate, err)
+	}
+}
+
+func requireCommitted(t *testing.T, committed bool, err error) {
+	t.Helper()
+	if err != nil || !committed {
+		t.Fatalf("append must commit: committed=%v err=%v", committed, err)
+	}
+}
+
+func requireIdleDB(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if inUse := db.Stats().InUse; inUse != 0 {
+		t.Fatalf("operation retained %d database connections", inUse)
 	}
 }

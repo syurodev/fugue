@@ -10,17 +10,23 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/storage"
+	"github.com/syurodev/fugue/internal/vault"
 )
 
 // Store provides the transactional execution store adapter over SQLite.
 type Store struct {
-	db          *sql.DB
-	host        storage.HostIncarnation
-	clk         clock.Clock
-	ids         ids.Generator
-	equality    ProtectedEquality
-	faultPoints map[FaultPoint]error
-	mu          sync.Mutex
+	db              *sql.DB
+	vault           *vault.Service
+	host            storage.HostIncarnation
+	clk             clock.Clock
+	ids             ids.Generator
+	random          ids.Random
+	randomReader    randomReader
+	equality        ProtectedEquality
+	faultPoints     map[FaultPoint]error
+	keyCache        *sessionKeyCache
+	unregisterGuard func()
+	mu              sync.Mutex
 }
 
 // New creates and validates an execution store over db.
@@ -28,9 +34,11 @@ type Store struct {
 func New(
 	ctx context.Context,
 	db *sql.DB,
+	v *vault.Service,
 	host storage.HostIncarnation,
 	clk clock.Clock,
 	idGen ids.Generator,
+	random ids.Random,
 	equality ProtectedEquality,
 ) (*Store, error) {
 	if db == nil {
@@ -50,15 +58,56 @@ func New(
 		return nil, fmt.Errorf("%w: %w", ErrUnsafePragmas, err)
 	}
 
-	return &Store{
-		db:          db,
-		host:        host,
-		clk:         clk,
-		ids:         idGen,
-		equality:    equality,
-		faultPoints: make(map[FaultPoint]error),
-		mu:          sync.Mutex{},
-	}, nil
+	if random == nil {
+		random = ids.CryptoRandom{}
+	}
+
+	cache := newSessionKeyCache()
+	s := &Store{
+		db:              db,
+		vault:           v,
+		host:            host,
+		clk:             clk,
+		ids:             idGen,
+		random:          random,
+		randomReader:    randomReader{r: random},
+		equality:        equality,
+		faultPoints:     make(map[FaultPoint]error),
+		keyCache:        cache,
+		unregisterGuard: nil,
+		mu:              sync.Mutex{},
+	}
+
+	if s.equality == nil && v != nil {
+		s.equality = s
+	}
+
+	if v != nil {
+		s.unregisterGuard = v.RegisterLockGuard(s.onVaultStateChange)
+	}
+
+	return s, nil
+}
+
+func (s *Store) onVaultStateChange(snap vault.Snapshot) {
+	if snap.State != vault.StateUnlocked {
+		s.keyCache.clearAndZero()
+	}
+}
+
+// Close unregisters the vault lock guard and zeroes all cached session keys in memory.
+func (s *Store) Close() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.unregisterGuard != nil {
+		s.unregisterGuard()
+		s.unregisterGuard = nil
+	}
+	s.keyCache.clearAndZero()
+	return nil
 }
 
 // DB returns the underlying sql.DB handle.
@@ -67,6 +116,14 @@ func (s *Store) DB() *sql.DB {
 		return nil
 	}
 	return s.db
+}
+
+// Vault returns the vault service associated with this store.
+func (s *Store) Vault() *vault.Service {
+	if s == nil {
+		return nil
+	}
+	return s.vault
 }
 
 // Host returns the host incarnation associated with this store.

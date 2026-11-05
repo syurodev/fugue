@@ -163,9 +163,7 @@ func testAppendQueueFenceMismatch(ctx context.Context, t *testing.T, s *Store, b
 	validReq.ExpectedAdmissionRevision = 1
 	validReq.ExpectedRunRevision = 0
 	validReq.Events = []kernel.Event{accepted}
-	if _, err := s.Append(ctx, &validReq); err != nil {
-		t.Fatalf("valid append failed: %v", err)
-	}
+	appendPersisted(ctx, t, s, &validReq)
 
 	// Now try an append with mismatched queue fence
 	advEnv := makeEnvelope("run-append-edge", 2, "cmd-edge-stale-q", 1, now)
@@ -324,9 +322,7 @@ func TestRebuildRunCorruptHistoryErrors(t *testing.T) {
 		SealedSessionKey:          nil,
 		CorrelationID:             "",
 	}
-	if _, err := s.Append(ctx, req); err != nil {
-		t.Fatalf("append failed: %v", err)
-	}
+	appendPersisted(ctx, t, s, req)
 
 	testRebuildMismatchErrors(ctx, t, s, db, "run-rebuild-corrupt")
 }
@@ -371,9 +367,7 @@ func testRebuildMismatchErrors(ctx context.Context, t *testing.T, s *Store, db *
 		SealedSessionKey:          nil,
 		CorrelationID:             "",
 	}
-	if _, err := s.Append(ctx, req2); err != nil {
-		t.Fatalf("append req2: %v", err)
-	}
+	appendPersisted(ctx, t, s, req2)
 	if _, err := db.ExecContext(ctx, "UPDATE exec_runs SET revision = revision + 1, lifecycle = 'finished' WHERE run_id = 'run-rebuild-lc'"); err != nil {
 		t.Fatalf("update exec_runs lifecycle: %v", err)
 	}
@@ -396,6 +390,7 @@ func testRebuildMismatchErrors(ctx context.Context, t *testing.T, s *Store, db *
 	if _, err := s.ReadEvents(ctx, "run-rebuild-corrupt", 1, 10); !errors.Is(err, ErrCorruptHistory) {
 		t.Fatalf("expected ErrCorruptHistory on invalid timestamp, got %v", err)
 	}
+	requireIdleDB(t, db)
 }
 
 func TestTranscriptAndFailedProjections(t *testing.T) {
@@ -429,9 +424,7 @@ func TestTranscriptAndFailedProjections(t *testing.T) {
 		SealedSessionKey:          &k,
 		CorrelationID:             "",
 	}
-	if _, err := s.Append(ctx, req1); err != nil {
-		t.Fatalf("append req1 failed: %v", err)
-	}
+	appendPersisted(ctx, t, s, req1)
 
 	testFailedInvocationsAndTranscriptEntries(ctx, t, s, db)
 }
@@ -473,9 +466,7 @@ func testFailedInvocationsAndTranscriptEntries(ctx context.Context, t *testing.T
 		SealedSessionKey:          nil,
 		CorrelationID:             "",
 	}
-	if _, err := s.Append(ctx, req2); err != nil {
-		t.Fatalf("append req2 failed: %v", err)
-	}
+	appendPersisted(ctx, t, s, req2)
 
 	verifyTranscriptEntries(ctx, t, db)
 }

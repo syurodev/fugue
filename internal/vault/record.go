@@ -85,3 +85,20 @@ func validateBinding(binding RecordBinding) error {
 func associatedData(binding RecordBinding) crypto.AssociatedData {
 	return crypto.AssociatedData{RecordType: binding.RecordType, RecordID: binding.RecordID, KeyID: binding.KeyID}
 }
+
+// WithUnlocked runs action only while expected still names the current unlocked
+// vault epoch. Lock waits for action before revoking that epoch. Use it for the
+// final publication or bounded database commit, never for network work. The
+// action must not call the vault or change its lifecycle.
+func (s *Service) WithUnlocked(expected Snapshot, action func() error) error {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.state != StateUnlocked || expected.State != StateUnlocked ||
+		expected.Incarnation != s.incarnation || expected.Revision != s.revision {
+		return ErrLocked
+	}
+	if action == nil {
+		return errcode.New(errcode.InvalidArgument, "vault action is required")
+	}
+	return action()
+}

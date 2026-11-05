@@ -5,12 +5,14 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"fmt"
 	"io"
 	"time"
 
 	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/kernel"
+	"github.com/syurodev/fugue/internal/vault"
 )
 
 func discardConn(conn *sql.Conn) {
@@ -64,14 +66,16 @@ func loadCommittedRunState(ctx context.Context, conn *sql.Conn, runID string, cu
 		 ORDER BY sequence ASC`,
 		runID, currentSeq,
 	)
+	if rows != nil {
+		defer func() {
+			if closeErr := rows.Close(); closeErr != nil {
+				return
+			}
+		}()
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: query committed events: %w", ErrStoreUnavailable, err)
 	}
-	defer func() {
-		if closeErr := rows.Close(); closeErr != nil {
-			return
-		}
-	}()
 
 	var expectedSeq uint64 = 1
 	for rows.Next() {
@@ -151,6 +155,9 @@ func (s *Store) Append(ctx context.Context, req *AppendRequest) (AppendOutcome, 
 func (s *Store) acquireConfiguredConn(ctx context.Context) (*sql.Conn, error) {
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
+		if conn != nil {
+			discardConn(conn)
+		}
 		return nil, fmt.Errorf("%w: acquire connection: %w", ErrStoreUnavailable, err)
 	}
 	if _, err := conn.ExecContext(ctx, "PRAGMA journal_mode = DELETE; PRAGMA synchronous = FULL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;"); err != nil {
@@ -189,7 +196,11 @@ func (s *Store) appendTx(ctx context.Context, req *AppendRequest) (AppendOutcome
 	}
 
 	outcome, err := s.executeAppendTx(ctx, conn, req)
+	if errors.Is(err, ErrSessionKeyConflict) {
+		s.keyCache.rejectCandidate(req.SessionID, req.SealedSessionKey)
+	}
 	if outcome.Committed {
+		s.keyCache.committed(req.SessionID, req.SealedSessionKey)
 		committed = true
 		connClean = true
 	}
@@ -372,22 +383,57 @@ func (s *Store) prepareBatchState(ctx context.Context, conn *sql.Conn, req *Appe
 	return state, nil
 }
 
+func (s *Store) checkVaultUnlockedForProtected(req *AppendRequest) error {
+	if s.vault == nil {
+		return nil
+	}
+	if len(req.SealedPayloads) == 0 && req.SealedSessionKey == nil && req.ProtectedInputID == "" {
+		return nil
+	}
+	if s.vault.Snapshot().State != vault.StateUnlocked {
+		return vault.ErrLocked
+	}
+	return nil
+}
+
+func (s *Store) recheckBatchPreconditions(
+	ctx context.Context,
+	conn *sql.Conn,
+	req *AppendRequest,
+) (*storedAdmission, *kernel.State, uint64, error) {
+	admission, _, err := s.recheckFences(ctx, conn, req)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	newRunRevision, currentSeq, err := s.recheckRunRevision(ctx, conn, req)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	state, err := s.prepareBatchState(ctx, conn, req, currentSeq)
+	if err != nil {
+		return nil, nil, 0, err
+	}
+	return admission, state, newRunRevision, nil
+}
+
 func (s *Store) executeAppendTx(ctx context.Context, conn *sql.Conn, req *AppendRequest) (AppendOutcome, error) {
 	if err := checkSessionPurging(ctx, conn, req.SessionID); err != nil {
 		return AppendOutcome{}, err
 	}
+	if err := s.checkVaultUnlockedForProtected(req); err != nil {
+		return AppendOutcome{}, err
+	}
+	var epoch vault.Snapshot
+	if s.vault != nil {
+		epoch = s.vault.Snapshot()
+	}
 	if outcome, found, err := s.checkTxReceipt(ctx, conn, req); found || err != nil {
 		return outcome, err
 	}
-	admission, _, err := s.recheckFences(ctx, conn, req)
-	if err != nil {
+	if err := s.checkPayloadLimits(ctx, conn, req); err != nil {
 		return AppendOutcome{}, err
 	}
-	newRunRevision, currentSeq, err := s.recheckRunRevision(ctx, conn, req)
-	if err != nil {
-		return AppendOutcome{}, err
-	}
-	state, err := s.prepareBatchState(ctx, conn, req, currentSeq)
+	admission, state, newRunRevision, err := s.recheckBatchPreconditions(ctx, conn, req)
 	if err != nil {
 		return AppendOutcome{}, err
 	}
@@ -397,11 +443,29 @@ func (s *Store) executeAppendTx(ctx context.Context, conn *sql.Conn, req *Append
 	if err := s.checkFault(FaultBeforeCommit); err != nil {
 		return AppendOutcome{}, err
 	}
-	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
-		return AppendOutcome{}, fmt.Errorf("%w: commit transaction: %w", ErrStoreUnavailable, err)
+	if err := s.commitProtectedBatch(ctx, conn, req, epoch); err != nil {
+		return AppendOutcome{}, err
 	}
 	if err := s.checkFault(FaultAfterCommit); err != nil {
 		return AppendOutcome{Committed: true}, err
 	}
 	return AppendOutcome{Committed: true, Receipt: buildReceipt(req)}, nil
+}
+
+// The vault read lease covers only COMMIT, not row preparation or crypto. Lock
+// waits for an authorized commit, and a revoked epoch rolls back instead.
+func (s *Store) commitProtectedBatch(ctx context.Context, conn *sql.Conn, req *AppendRequest, epoch vault.Snapshot) error {
+	commit := func() error {
+		if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+			return fmt.Errorf("%w: commit transaction: %w", ErrStoreUnavailable, err)
+		}
+		return nil
+	}
+	if s.vault == nil || (len(req.SealedPayloads) == 0 && req.SealedSessionKey == nil && req.ProtectedInputID == "") {
+		return commit()
+	}
+	if err := s.vault.WithUnlocked(epoch, commit); err != nil {
+		return fmt.Errorf("protected commit authorization: %w", err)
+	}
+	return nil
 }

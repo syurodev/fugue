@@ -34,9 +34,7 @@ func TestRegressionSameBatchInputExactlyOnce(t *testing.T) {
 		SealedPayloads:            []SealedPayload{user},
 		SealedSessionKey:          &key,
 	}
-	if _, err := s.Append(ctx, reqInBatch); err != nil {
-		t.Fatalf("same batch accept+admit failed: %v", err)
-	}
+	appendPersisted(ctx, t, s, reqInBatch)
 	var count int
 	if err := db.QueryRowContext(ctx, `SELECT COUNT(*) FROM exec_transcript WHERE session_id='sess-inbatch' AND role='input'`).Scan(&count); err != nil {
 		t.Fatal(err)
@@ -88,9 +86,7 @@ func TestRegressionQueueCannotStartStep(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	s, _, _ := newTestStore(ctx, t, nil)
-	if _, err := s.Append(ctx, reviewReq("queue-accept", 1, 0, 1, reviewAccepted(s))); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(ctx, t, s, reviewReq("queue-accept", 1, 0, 1, reviewAccepted(s)))
 	evt := makeStepStarted(makeEnvelope(testRunReg, 2, "queue-step", 999, s.clk.Now()), 2)
 	req := reviewReq("queue-step", 2, 1, 1, evt)
 	req.Kind = cmdAdvanceRun
@@ -106,9 +102,7 @@ func TestRegressionQueueAuthorityRejectsExecution(t *testing.T) {
 			t.Parallel()
 			ctx := t.Context()
 			s, db, _ := newTestStore(ctx, t, nil)
-			if _, err := s.Append(ctx, reviewReq("q-accept", 1, 0, 1, reviewAccepted(s))); err != nil {
-				t.Fatal(err)
-			}
+			appendPersisted(ctx, t, s, reviewReq("q-accept", 1, 0, 1, reviewAccepted(s)))
 			evt := makeStepStarted(makeEnvelope(testRunReg, 2, "q-execution", 0, s.clk.Now()), 1)
 			req := reviewReq("q-execution", 2, 1, 1, evt)
 			req.Kind = kind
@@ -164,9 +158,7 @@ func verifyQueuedClosure(t *testing.T, protected bool) {
 	t.Helper()
 	ctx := t.Context()
 	s, db, _ := newTestStore(ctx, t, nil)
-	if _, err := s.Append(ctx, reviewReq("close-accept", 1, 0, 1, reviewAccepted(s))); err != nil {
-		t.Fatal(err)
-	}
+	appendPersisted(ctx, t, s, reviewReq("close-accept", 1, 0, 1, reviewAccepted(s)))
 	closure, err := instantiateEvent("RunClosureConfirmed")
 	if err != nil {
 		t.Fatal(err)

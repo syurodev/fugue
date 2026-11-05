@@ -151,7 +151,7 @@ func TestExecutionRejectsSequenceGap(t *testing.T) {
 
 	payload, key := sealedTestPayload(t, "pay-gap", []byte("in"))
 	evt1 := makeRunAccepted(makeEnvelope("run-gap", 1, "cmd-gap-1", 0, now), "sess-gap", "pay-gap")
-	_, err := s.Append(ctx, &AppendRequest{
+	outcome, err := s.Append(ctx, &AppendRequest{
 		SessionID:                 "sess-gap",
 		RunID:                     "run-gap",
 		CommandID:                 "cmd-gap-1",
@@ -169,9 +169,7 @@ func TestExecutionRejectsSequenceGap(t *testing.T) {
 		SealedPayloads:            []SealedPayload{payload},
 		SealedSessionKey:          &key,
 	})
-	if err != nil {
-		t.Fatalf("Append 1 failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 
 	_, err = db.ExecContext(
 		ctx,
@@ -280,7 +278,7 @@ func TestExecutionControlColumnsNoSensitiveWords(t *testing.T) {
 
 	payload, key := sealedTestPayload(t, "pay-safe", []byte("secret-user-prompt-content"))
 	evt := makeRunAccepted(makeEnvelope("run-safe", 1, "cmd-safe", 0, now), "sess-safe", "pay-safe")
-	_, err := s.Append(ctx, &AppendRequest{
+	outcome, err := s.Append(ctx, &AppendRequest{
 		SessionID:                 "sess-safe",
 		RunID:                     "run-safe",
 		CommandID:                 "cmd-safe",
@@ -298,9 +296,7 @@ func TestExecutionControlColumnsNoSensitiveWords(t *testing.T) {
 		SealedPayloads:            []SealedPayload{payload},
 		SealedSessionKey:          &key,
 	})
-	if err != nil {
-		t.Fatalf("Append failed: %v", err)
-	}
+	requireCommitted(t, outcome.Committed, err)
 
 	var dataStr, orig, cmdID string
 	err = db.QueryRowContext(ctx, "SELECT data, origin, command_id FROM exec_events WHERE run_id = 'run-safe'").Scan(&dataStr, &orig, &cmdID)

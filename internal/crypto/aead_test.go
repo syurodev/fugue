@@ -52,7 +52,7 @@ func TestSealUsesAFreshNonceEachTime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := SealV2(testAssociatedData(), testKey(), []byte("same"))
+	second, err := SealWithRandom(newStream(), testAssociatedData(), testKey(), []byte("same"))
 	if err != nil {
 		t.Fatal(err)
 	}

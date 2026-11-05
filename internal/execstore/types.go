@@ -39,6 +39,8 @@ const (
 	FaultBeforeCommit FaultPoint = "before_commit"
 	// FaultAfterCommit triggers immediately after COMMIT execution completes.
 	FaultAfterCommit FaultPoint = "after_commit"
+	// FaultBeforePurgeCommit triggers immediately before purge transaction COMMIT.
+	FaultBeforePurgeCommit FaultPoint = "before_purge_commit"
 )
 
 // CommitStatus reports the classified outcome of an uncertain commit.

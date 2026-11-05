@@ -12,10 +12,10 @@ const (
 	EnvelopeVersionV2          uint32 = 2
 )
 
-// MaxCiphertextBytes bounds one envelope's ciphertext (1 MiB) so an untrusted
-// envelope cannot force an unbounded allocation during Open. Sealing a
-// plaintext whose ciphertext would exceed it fails.
-const MaxCiphertextBytes = 1 << 20
+// MaxCiphertextBytes bounds one envelope's ciphertext (1 MiB + AEAD overhead)
+// so an untrusted envelope cannot force an unbounded allocation during Open.
+// Sealing a plaintext of up to 1 MiB produces a ciphertext within this bound.
+const MaxCiphertextBytes = (1 << 20) + chacha20poly1305.Overhead
 
 // AssociatedData is the immutable record identity authenticated by SealV2. It
 // is not stored in the envelope: the owning record supplies it when opening.
@@ -63,4 +63,13 @@ func (e *Envelope) Validate() error {
 		return errcode.New(errcode.InvalidArgument, "envelope ciphertext is too large")
 	}
 	return nil
+}
+
+// PlaintextSize returns the length encoded by a valid AEAD envelope without
+// decrypting it. It does not authenticate the ciphertext's contents.
+func (e *Envelope) PlaintextSize() (int, error) {
+	if err := e.Validate(); err != nil {
+		return 0, err
+	}
+	return len(e.Ciphertext) - chacha20poly1305.Overhead, nil
 }
