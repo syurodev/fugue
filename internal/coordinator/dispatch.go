@@ -44,14 +44,14 @@ func (s *Session) handleDispatch(ctx context.Context, sub *submission, prep *ker
 	}
 
 	ref, err := s.slots.reserve()
-	switch {
-	case errors.Is(err, ErrNoCapacity):
-		s.parked = append(s.parked, *sub)
+	if errors.Is(err, ErrNoCapacity) {
+		s.parked = append(s.parked, parkedDispatch{sub: *sub, prep: prep})
 		if s.onPark != nil {
 			s.onPark()
 		}
 		return
-	case err != nil:
+	}
+	if err != nil {
 		s.respond(sub, nil, err)
 		return
 	}
@@ -215,6 +215,12 @@ func (s *Session) releaseSlot(ctx context.Context, ref string) {
 	s.retryParked(ctx)
 }
 
+// parkedDispatch is a dispatch request waiting for worker capacity.
+type parkedDispatch struct {
+	sub  submission
+	prep *kernel.PrepareDispatchCommand
+}
+
 // retryParked gives freed capacity to the requests waiting for it, oldest first.
 // Nothing is dispatched while a commit is unresolved.
 func (s *Session) retryParked(ctx context.Context) {
@@ -225,15 +231,7 @@ func (s *Session) retryParked(ctx context.Context) {
 		}
 		head := s.parked[0]
 		s.parked = s.parked[1:]
-
-		if prep, ok := head.req.Command.(*kernel.PrepareDispatchCommand); ok {
-			s.executeDispatch(ctx, &head, ref, prep)
-			continue
-		}
-		s.respond(&head, nil, ErrHandoffFailed)
-		if err = s.slots.release(ref); err != nil {
-			return
-		}
+		s.executeDispatch(ctx, &head.sub, ref, head.prep)
 	}
 }
 

@@ -85,7 +85,7 @@ type Session struct {
 	runs           map[string]*kernel.State
 	runRevs        map[string]uint64
 	queue          *sessionQueue
-	parked         []submission
+	parked         []parkedDispatch
 	unresolved     map[string]*step
 	attemptSlots   map[attemptKey]string
 
@@ -227,10 +227,8 @@ func (s *Session) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.stopped)
 		s.cancel()
-		if s.task != nil {
-			s.task.Stop()
-			<-s.task.Done()
-		}
+		s.task.Stop()
+		<-s.task.Done()
 		for _, wt := range s.workerTasks {
 			wt.Stop()
 			<-wt.Done()
@@ -287,14 +285,15 @@ func (s *Session) ensureRunLoaded(ctx context.Context, runID string) (*kernel.St
 }
 
 func (s *Session) handleSubmission(ctx context.Context, sub *submission) {
-	switch {
-	case sub.resolved != nil:
+	if sub.resolved != nil {
 		s.handleResolution(ctx, sub.resolved)
-	case sub.obs != nil:
-		s.handleObservation(ctx, sub, sub.obs)
-	default:
-		s.handleRequest(ctx, sub)
+		return
 	}
+	if sub.obs != nil {
+		s.handleObservation(ctx, sub, sub.obs)
+		return
+	}
+	s.handleRequest(ctx, sub)
 }
 
 func (s *Session) handleRequest(ctx context.Context, sub *submission) {
@@ -391,20 +390,25 @@ func (s *Session) decideAndCommit(ctx context.Context, sub *submission, runID st
 // supply. Nothing is defaulted, because a default would be written into a
 // durable event as if the caller had decided it.
 func (s *Session) validateAccept(accept *kernel.AcceptRunCommand, req *Request) error {
-	switch {
-	case accept == nil:
+	if accept == nil {
 		return fmt.Errorf("%w: nil command", ErrInvalidAccept)
-	case accept.InputRef == "":
+	}
+	if accept.InputRef == "" {
 		return fmt.Errorf("%w: input ref", ErrInvalidAccept)
-	case accept.QueueItemRef == "":
+	}
+	if accept.QueueItemRef == "" {
 		return fmt.Errorf("%w: queue item ref", ErrInvalidAccept)
-	case accept.ProtocolBinding == "":
+	}
+	if accept.ProtocolBinding == "" {
 		return fmt.Errorf("%w: protocol binding", ErrInvalidAccept)
-	case accept.SessionID != "" && accept.SessionID != s.cfg.SessionID:
+	}
+	if accept.SessionID != "" && accept.SessionID != s.cfg.SessionID {
 		return fmt.Errorf("%w: session id", ErrInvalidAccept)
-	case req.QueueDecisionRef == "":
+	}
+	if req.QueueDecisionRef == "" {
 		return fmt.Errorf("%w: queue decision ref", ErrInvalidAccept)
-	case req.Facts.ModelPlan == nil:
+	}
+	if req.Facts.ModelPlan == nil {
 		return fmt.Errorf("%w: model plan", ErrInvalidAccept)
 	}
 	return nil

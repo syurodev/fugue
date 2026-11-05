@@ -306,3 +306,39 @@ func TestResolverKeepsAskingAfterStoreErrors(t *testing.T) {
 	}
 	waitSignal(t, ctx, workReceived, "work")
 }
+
+func TestTransitionWithoutEventsHasNoSequenceRange(t *testing.T) {
+	t.Parallel()
+
+	_, sess := startTestSession(t, newFakeStore(), newFakeExecutor(), "no-events", 1)
+	defer sess.Stop()
+
+	tr := sess.buildTransition(testRunID1, "cmd", testOriginUser, kernel.NewState(), nil, new(Request))
+	if tr.Result.FirstSequence != 0 || tr.Result.LastSequence != 0 {
+		t.Fatalf("an empty batch has no sequence range, got %+v", tr.Result)
+	}
+}
+
+func TestResolverBackoffDoublesUpToTheCap(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeStore()
+	setupAdmittedRun(store)
+	store.queueLostAck(false)
+	ctx, sess, fakeClk, resolveReport, armed := setupBackgroundResolveSession(t, store, newFakeExecutor(), "backoff")
+	defer sess.Stop()
+
+	req := makeModelDispatchRequest(testRunID1, "m1", "a1", "cmd-disp-backoff")
+	_ = submitAsync(ctx, sess, &req)
+	waitValue(t, ctx, resolveReport, "inline read-back")
+
+	for _, delay := range []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 16 * time.Second, resolveBackoffMax, resolveBackoffMax} {
+		waitSignal(t, ctx, armed, "resolver timer")
+		fakeClk.Advance(delay - time.Millisecond)
+		if fakeClk.Pending() != 1 {
+			t.Fatalf("the resolver woke before its %v delay elapsed", delay)
+		}
+		fakeClk.Advance(time.Millisecond)
+		waitValue(t, ctx, resolveReport, "resolver read-back")
+	}
+}

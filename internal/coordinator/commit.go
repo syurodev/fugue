@@ -64,16 +64,17 @@ func (s *Session) busy(runID string) bool {
 // admission row so the next append starts from what the store holds.
 func (s *Session) commit(ctx context.Context, st *step) {
 	res, err := s.cfg.Store.Append(ctx, st.t)
-	switch {
-	case err == nil:
+	if err == nil {
 		s.applyAppended(ctx, st, &res)
 		st.done(ctx, &res)
-	case errors.Is(err, ErrCommitUnknown):
-		s.readBack(ctx, st)
-	default:
-		s.reload(ctx, st.t.RunID)
-		st.fail(ctx, err)
+		return
 	}
+	if errors.Is(err, ErrCommitUnknown) {
+		s.readBack(ctx, st)
+		return
+	}
+	s.reload(ctx, st.t.RunID)
+	st.fail(ctx, err)
 }
 
 // applyAppended folds a confirmed append into the cache. A duplicate append means
@@ -130,7 +131,8 @@ func (s *Session) settle(ctx context.Context, st *step, status CommitResolution,
 
 // appendAgain sends the same transition, with the same command ID, after a
 // read-back proved that it did not commit. Other commands may have moved the
-// revisions meanwhile, so the expectations are refreshed from the cache.
+// revisions meanwhile, so the expectations are refreshed from the cache; a
+// fence that went stale is rejected by the store and handled as any rejection.
 func (s *Session) appendAgain(ctx context.Context, st *step) {
 	if st.attempt+1 >= maxCommitAttempts {
 		s.reload(ctx, st.t.RunID)
@@ -140,9 +142,6 @@ func (s *Session) appendAgain(ctx context.Context, st *step) {
 	st.attempt++
 	st.t.ExpectedRunRevision = s.runRevs[st.t.RunID]
 	st.t.ExpectedAdmissionRevision = s.admission.Revision
-	if st.t.Fence.AdmissionToken == 0 {
-		st.t.Fence.QueueRevision = s.admission.QueueRevision
-	}
 	s.commit(ctx, st)
 }
 
