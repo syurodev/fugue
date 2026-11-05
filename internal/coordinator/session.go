@@ -24,7 +24,9 @@ type Config struct {
 	Store            Store
 	Executor         Executor
 	Clock            clock.Clock
-	IDs              ids.Generator
+	// IDs makes command IDs and worker reservation refs; a reservation ref is
+	// recorded and must never repeat, so the generator must not either.
+	IDs ids.Generator
 }
 
 // Request defines a command and caller context for the session actor.

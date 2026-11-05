@@ -58,8 +58,11 @@ type Admission struct {
 	AdmissionToken   uint64
 	Revision         uint64
 	QueueRevision    uint64
-	ContextEpoch     uint64
-	ContextRevision  uint64
+	// ContextEpoch and ContextRevision are the session's current context
+	// continuity. AdmitRun records them as the run's initial context, so the
+	// coordinator takes them from here and never from a constant.
+	ContextEpoch    uint64
+	ContextRevision uint64
 }
 
 // Store defines persistence operations for execution streams, admissions, and receipts.
