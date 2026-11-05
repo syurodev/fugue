@@ -113,6 +113,11 @@ func (s *fakeStore) persistLocked(t *Transition) {
 	s.runs[t.RunID] = st
 	s.runRevs[t.RunID]++
 	s.admission.Revision++
+	for _, ev := range t.Events {
+		if admitted, ok := ev.(*kernel.RunAdmittedEvent); ok {
+			s.persistContextLocked(admitted)
+		}
+	}
 	if st.Admitted && !st.Finished {
 		s.admission.ActiveRunID = t.RunID
 		s.admission.AdmissionToken = st.AdmissionToken
@@ -301,4 +306,15 @@ func newTestSlots(capacity int) *slots {
 func reserveSlot(s *slots) (string, bool) {
 	ref, err := s.reserve()
 	return ref, err == nil
+}
+
+// persistContextLocked mirrors how the admission row takes the context fields of
+// a RunAdmitted: the first admission of a session records the start run, and the
+// epoch and revision only grow.
+func (s *fakeStore) persistContextLocked(ev *kernel.RunAdmittedEvent) {
+	if s.admission.ContextEpoch == 0 {
+		s.admission.ContextStartRunID = ev.StartRunID
+	}
+	s.admission.ContextEpoch = max(s.admission.ContextEpoch, ev.ContextEpoch)
+	s.admission.ContextRevision = max(s.admission.ContextRevision, ev.InitialContextRevision)
 }

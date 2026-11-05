@@ -52,8 +52,6 @@ func TestSubmitAppendsDecidedBatchWithCoordinatorEnvelope(t *testing.T) {
 		AdmissionToken:   0,
 		Revision:         1,
 		QueueRevision:    5,
-		ContextEpoch:     1,
-		ContextRevision:  1,
 	}
 
 	exec := newFakeExecutor()

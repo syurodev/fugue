@@ -20,7 +20,7 @@ func acceptCommand(r *Request) *kernel.AcceptRunCommand {
 func idleAdmission() Admission {
 	return Admission{
 		SessionID: testSessionID, OwnerIncarnation: 1, Revision: 1, QueueRevision: 1,
-		ContextEpoch: 3, ContextRevision: 4,
+		ContextEpoch: 3, ContextRevision: 4, ContextStartRunID: "run-start",
 	}
 }
 
@@ -76,7 +76,7 @@ func TestAdmissionRecordsCallerFactsAndTheAdmissionRowContext(t *testing.T) {
 	}
 	admitted, ok := admit.Events[0].(*kernel.RunAdmittedEvent)
 	if !ok || admitted.QueueDecisionRef != "decision-from-caller" ||
-		admitted.ContextEpoch != 3 || admitted.InitialContextRevision != 4 {
+		admitted.ContextEpoch != 3 || admitted.InitialContextRevision != 4 || admitted.StartRunID != "run-start" {
 		t.Fatalf("admission evidence %+v does not come from the request and the admission row", admitted)
 	}
 	planned, ok := admit.Events[len(admit.Events)-1].(*kernel.ModelRequestPlannedEvent)
@@ -95,13 +95,78 @@ func admitTransition(store *fakeStore) *Transition {
 	return nil
 }
 
-func TestAdmissionWithoutContextEpochKeepsTheRunQueued(t *testing.T) {
+func requireAdmittedContext(t *testing.T, tr *Transition, epoch, revision uint64, startRunID string) {
+	t.Helper()
+	admitted, ok := tr.Events[0].(*kernel.RunAdmittedEvent)
+	if !ok {
+		t.Fatalf("first event of %s is %T, want RunAdmitted", tr.RunID, tr.Events[0])
+	}
+	if admitted.ContextEpoch != epoch || admitted.InitialContextRevision != revision || admitted.StartRunID != startRunID {
+		t.Fatalf("run %s admitted with epoch %d revision %d start %q, want %d %d %q",
+			tr.RunID, admitted.ContextEpoch, admitted.InitialContextRevision, admitted.StartRunID, epoch, revision, startRunID)
+	}
+}
+
+func TestFreshSessionAdmitsItsFirstRunAtEpochOneRevisionOne(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeStore()
+	store.admission = Admission{SessionID: testSessionID, OwnerIncarnation: 1, Revision: 1, QueueRevision: 1}
+	ctx, sess := startTestSession(t, store, newFakeExecutor(), "fresh-session", 1)
+	defer sess.Stop()
+
+	req := acceptRunRequest(testRunID1, testCmdAccept1, "m1", "a1")
+	if _, err := sess.Submit(ctx, &req); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	admit := admitTransition(store)
+	if admit == nil {
+		t.Fatal("the first run of a session with no history was not admitted")
+	}
+	requireAdmittedContext(t, admit, 1, 1, testRunID1)
+}
+
+// execstore creates the admission row with the first AcceptRun: no owner, no
+// token, and context epoch and revision still 0 (insertInitialAdmission).
+func TestAdmissionRowAsExecstoreCreatesItAdmitsTheFirstRun(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeStore()
+	store.admission = Admission{SessionID: testSessionID, Revision: 1, QueueRevision: 1}
+	ctx, sess := startTestSession(t, store, newFakeExecutor(), "execstore-row", 1)
+	defer sess.Stop()
+
+	req := acceptRunRequest(testRunID1, testCmdAccept1, "m1", "a1")
+	if _, err := sess.Submit(ctx, &req); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if sess.admission.ActiveRunID != testRunID1 {
+		t.Fatalf("the first run stayed queued behind a zero context row: active=%q", sess.admission.ActiveRunID)
+	}
+}
+
+func TestRowWithContextHistoryKeepsItsEpochRevisionAndStart(t *testing.T) {
 	t.Parallel()
 
 	store := newFakeStore()
 	store.admission = idleAdmission()
-	store.admission.ContextEpoch = 0
-	ctx, sess := startTestSession(t, store, newFakeExecutor(), "no-context-epoch", 1)
+	ctx, sess := startTestSession(t, store, newFakeExecutor(), "history-row", 1)
+	defer sess.Stop()
+
+	req := acceptRunRequest(testRunID1, testCmdAccept1, "m1", "a1")
+	if _, err := sess.Submit(ctx, &req); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	requireAdmittedContext(t, admitTransition(store), 3, 4, "run-start")
+}
+
+func TestRowWithEpochButNoStartRunKeepsTheRunQueued(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeStore()
+	store.admission = idleAdmission()
+	store.admission.ContextStartRunID = ""
+	ctx, sess := startTestSession(t, store, newFakeExecutor(), "no-start-run", 1)
 	defer sess.Stop()
 
 	req := acceptRunRequest(testRunID1, testCmdAccept1, "m1", "a1")
@@ -109,7 +174,7 @@ func TestAdmissionWithoutContextEpochKeepsTheRunQueued(t *testing.T) {
 		t.Fatalf("accept: %v", err)
 	}
 	if count := store.appendCount(); count != 1 {
-		t.Fatalf("only the acceptance may be appended without a context epoch, got %d appends", count)
+		t.Fatalf("only the acceptance may be appended when the epoch's start run is unknown, got %d appends", count)
 	}
 	if sess.queue.empty() {
 		t.Fatal("the run must stay queued")

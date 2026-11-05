@@ -97,6 +97,12 @@ func (s *Session) maybeAdmitNext(ctx context.Context) {
 		state = kernel.NewState()
 	}
 
+	initial, known := s.initialContext(item.runID)
+	if !known {
+		s.deferAdmission(ctx, item, nil)
+		return
+	}
+
 	if item.admitCmdID == "" {
 		cmdID, err := s.cfg.IDs.NewID()
 		if err != nil {
@@ -106,7 +112,7 @@ func (s *Session) maybeAdmitNext(ctx context.Context) {
 	}
 
 	token := s.admission.AdmissionToken + 1
-	cmd, facts := s.admitDecision(item, state, token)
+	cmd, facts := s.admitDecision(item, state, token, initial)
 	events, err := kernel.Decide(state, cmd, &facts)
 	if err != nil || len(events) == 0 {
 		s.deferAdmission(ctx, item, err)
@@ -118,7 +124,7 @@ func (s *Session) maybeAdmitNext(ctx context.Context) {
 		events:  events,
 		attempt: 0,
 		done: func(context.Context, *AppendResult) {
-			s.admitted(item, token)
+			s.admitted(item, token, initial)
 		},
 		fail: func(ctx context.Context, err error) {
 			s.deferAdmission(ctx, item, err)
@@ -128,7 +134,12 @@ func (s *Session) maybeAdmitNext(ctx context.Context) {
 
 // admitDecision builds the admission command and its facts from what the
 // AcceptRun request supplied and what the admission row holds.
-func (s *Session) admitDecision(item *queuedRun, state *kernel.State, token uint64) (*kernel.AdmitRunCommand, kernel.DecisionFacts) {
+func (s *Session) admitDecision(
+	item *queuedRun,
+	state *kernel.State,
+	token uint64,
+	initial contextStart,
+) (*kernel.AdmitRunCommand, kernel.DecisionFacts) {
 	cmd := &kernel.AdmitRunCommand{
 		CommandID:              item.admitCmdID,
 		RunID:                  item.runID,
@@ -136,9 +147,9 @@ func (s *Session) admitDecision(item *queuedRun, state *kernel.State, token uint
 		Token:                  token,
 		OwnerIncarnation:       s.cfg.OwnerIncarnation,
 		QueueDecisionRef:       item.decisionRef,
-		ContextEpoch:           s.admission.ContextEpoch,
-		StartRunID:             item.runID,
-		InitialContextRevision: s.admission.ContextRevision,
+		ContextEpoch:           initial.epoch,
+		StartRunID:             initial.startRunID,
+		InitialContextRevision: initial.revision,
 	}
 	plan := item.plan
 	plan.ToolDeclarationRefs = slices.Clone(item.plan.ToolDeclarationRefs)
@@ -170,10 +181,39 @@ func (s *Session) deferAdmission(ctx context.Context, item *queuedRun, err error
 	slog.WarnContext(ctx, "admission deferred", attrs...)
 }
 
-func (s *Session) admitted(item *queuedRun, token uint64) {
+func (s *Session) admitted(item *queuedRun, token uint64, initial contextStart) {
 	if head, ok := s.queue.head(); ok && head == item {
 		s.queue.pop()
 	}
 	s.admission.ActiveRunID = item.runID
 	s.admission.AdmissionToken = token
+	s.admission.ContextEpoch = initial.epoch
+	s.admission.ContextRevision = initial.revision
+	s.admission.ContextStartRunID = initial.startRunID
+}
+
+// contextStart is the context continuity a run is admitted with.
+type contextStart struct {
+	epoch      uint64
+	revision   uint64
+	startRunID string
+}
+
+// initialContext decides the context a run is admitted with. A session with no
+// history has epoch and revision 0 on its admission row; its first run starts
+// epoch 1 at revision 1 and is its own start run, and the first RunAdmitted
+// initializes the row (event-storage-recovery §3, context control). Once the
+// row has history, a run continues it with the row's epoch, revision and start
+// run. The start run is unknown when the row carries none, and then the run is
+// not admitted rather than given an invented one (roadmap Q-21).
+func (s *Session) initialContext(runID string) (contextStart, bool) {
+	if s.admission.ContextEpoch == 0 {
+		return contextStart{epoch: 1, revision: 1, startRunID: runID}, true
+	}
+	start := contextStart{
+		epoch:      s.admission.ContextEpoch,
+		revision:   s.admission.ContextRevision,
+		startRunID: s.admission.ContextStartRunID,
+	}
+	return start, start.startRunID != ""
 }

@@ -25,8 +25,6 @@ func TestAdmissionFollowsFIFOForRunsAcceptedThisIncarnation(t *testing.T) {
 		AdmissionToken:   0,
 		Revision:         1,
 		QueueRevision:    1,
-		ContextEpoch:     1,
-		ContextRevision:  1,
 	}
 
 	exec := newFakeExecutor()
@@ -161,6 +159,11 @@ func verifyFIFOTransitions(t *testing.T, store *fakeStore) {
 	if admitR2Tx.Fence.AdmissionToken != 2 {
 		t.Fatalf("expected token 2 for r2, got %d", admitR2Tx.Fence.AdmissionToken)
 	}
+
+	// A new session has no context history: its first run starts epoch 1 at
+	// revision 1, and the next run continues that epoch from the same start run.
+	requireAdmittedContext(t, admitR1Tx, 1, 1, "r1")
+	requireAdmittedContext(t, admitR2Tx, 1, 1, "r1")
 }
 
 func TestQueuedRunsFromEarlierIncarnationAreNotAutoAdmitted(t *testing.T) {

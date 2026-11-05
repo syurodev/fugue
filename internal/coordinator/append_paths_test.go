@@ -292,7 +292,7 @@ func TestLostAckOfAdmissionIsReadBack(t *testing.T) {
 	t.Parallel()
 
 	store := newFakeStore()
-	store.admission = Admission{SessionID: testSessionID, OwnerIncarnation: 1, Revision: 1, QueueRevision: 1, ContextEpoch: 1, ContextRevision: 1}
+	store.admission = Admission{SessionID: testSessionID, OwnerIncarnation: 1, Revision: 1, QueueRevision: 1}
 	ctx, sess := startTestSession(t, store, newFakeExecutor(), "admit-lost-ack", 1)
 	defer sess.Stop()
 
@@ -324,7 +324,7 @@ func TestLostAckOfAdmissionNotCommittedRetriesWithSameCommandID(t *testing.T) {
 	t.Parallel()
 
 	store := newFakeStore()
-	store.admission = Admission{SessionID: testSessionID, OwnerIncarnation: 1, Revision: 1, QueueRevision: 1, ContextEpoch: 1, ContextRevision: 1}
+	store.admission = Admission{SessionID: testSessionID, OwnerIncarnation: 1, Revision: 1, QueueRevision: 1}
 	ctx, sess := startTestSession(t, store, newFakeExecutor(), "admit-not-committed", 1)
 	defer sess.Stop()
 
@@ -349,7 +349,7 @@ func TestRejectedAdmissionKeepsTheRunAtTheHeadOfTheQueue(t *testing.T) {
 	t.Parallel()
 
 	store := newFakeStore()
-	store.admission = Admission{SessionID: testSessionID, OwnerIncarnation: 1, Revision: 1, QueueRevision: 1, ContextEpoch: 1, ContextRevision: 1}
+	store.admission = Admission{SessionID: testSessionID, OwnerIncarnation: 1, Revision: 1, QueueRevision: 1}
 	ctx, sess := startTestSession(t, store, newFakeExecutor(), "admit-rejected", 1)
 	defer sess.Stop()
 
