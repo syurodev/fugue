@@ -14,12 +14,18 @@ import (
 
 	"connectrpc.com/connect"
 	"github.com/google/go-cmp/cmp"
+
 	"github.com/syurodev/fugue/internal/app"
 	hostv1 "github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1"
 	"github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1/hostv1connect"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
+)
+
+const (
+	testHostFakeVersion = "host-fake"
+	testHostE2EVersion  = "host-e2e"
 )
 
 // fakeBackend is a scripted app.Backend for tests that exercise the transport
@@ -98,7 +104,7 @@ func (f *fakeBackend) leasedIDs() []string {
 
 func fakeStatus() app.HostStatusView {
 	return app.HostStatusView{
-		HostVersion:          "host-fake",
+		HostVersion:          testHostFakeVersion,
 		SupportedAPIVersions: []string{"v1", "v2"},
 		StartedAt:            time.Unix(42, 0),
 	}
@@ -123,7 +129,9 @@ func startTestServer(t *testing.T, dir string, backend app.Backend) *Server {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = srv.Drain(context.WithoutCancel(t.Context()), true)
+		if err := srv.Drain(context.WithoutCancel(t.Context()), true); err != nil {
+			t.Errorf("cleanup drain: %v", err)
+		}
 	})
 	return srv
 }
@@ -147,7 +155,7 @@ func newTestClient(t *testing.T, sockPath string) (hostv1connect.HostServiceClie
 
 // hostWithServer wires the real runtime and the real server on a temp data
 // directory. tr replaces the server as the runtime's transport when non-nil.
-func hostWithServer(t *testing.T, cfg app.HostConfig, tr app.HostTransport) (*app.HostProcess, *Server, string, *clock.Fake) {
+func hostWithServer(t *testing.T, cfg app.HostConfig, tr app.HostTransport) (*app.HostProcess, *Server, string) {
 	t.Helper()
 	dir := shortDir(t)
 	clk := clock.NewFake(time.Unix(0, 0))
@@ -164,7 +172,7 @@ func hostWithServer(t *testing.T, cfg app.HostConfig, tr app.HostTransport) (*ap
 	if tr == nil {
 		tr = srv
 	}
-	hp, err := app.StartHost(t.Context(), app.HostDeps{
+	hp, err := app.StartHost(t.Context(), &app.HostDeps{
 		DataDir:   dir,
 		Config:    cfg,
 		Clock:     clk,
@@ -178,10 +186,14 @@ func hostWithServer(t *testing.T, cfg app.HostConfig, tr app.HostTransport) (*ap
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = srv.Drain(context.WithoutCancel(t.Context()), true)
-		_ = hp.Close()
+		if err := srv.Drain(context.WithoutCancel(t.Context()), true); err != nil {
+			t.Errorf("cleanup drain: %v", err)
+		}
+		if err := hp.Close(); err != nil {
+			t.Errorf("close the host: %v", err)
+		}
 	})
-	return hp, srv, dir, clk
+	return hp, srv, dir
 }
 
 // releaseSignalBackend wraps a backend and signals every lease release, so a
@@ -211,15 +223,15 @@ func helloRequest(kind hostv1.ClientKind, versions ...string) *connect.Request[h
 func TestServerServesHelloOverTheSocket(t *testing.T) {
 	t.Parallel()
 	backend := newFakeBackend()
-	backend.helloRes = app.HelloResult{APIVersion: "v2", HostVersion: "host-fake"}
+	backend.helloRes = app.HelloResult{APIVersion: "v2", HostVersion: testHostFakeVersion}
 	srv := startTestServer(t, shortDir(t), backend)
 	client, _ := newTestClient(t, srv.cfg.Socket.Path)
 	res, err := client.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_CLI, "v1", "v2"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.Msg.ApiVersion != "v2" || res.Msg.HostVersion != "host-fake" {
-		t.Fatalf("Hello = %+v, want v2 from host-fake", res.Msg)
+	if res.Msg.ApiVersion != "v2" || res.Msg.HostVersion != testHostFakeVersion {
+		t.Fatalf("Hello = %+v, want v2 from testHostFakeVersion", res.Msg)
 	}
 	leased := backend.leasedIDs()
 	if len(leased) != 1 || leased[0] == "" {
@@ -230,7 +242,7 @@ func TestServerServesHelloOverTheSocket(t *testing.T) {
 func TestSecondHelloOnTheSameConnectionIsRejected(t *testing.T) {
 	t.Parallel()
 	backend := newFakeBackend()
-	backend.helloRes = app.HelloResult{APIVersion: "v1", HostVersion: "host-fake"}
+	backend.helloRes = app.HelloResult{APIVersion: "v1", HostVersion: testHostFakeVersion}
 	srv := startTestServer(t, shortDir(t), backend)
 	client, _ := newTestClient(t, srv.cfg.Socket.Path)
 	req := helloRequest(hostv1.ClientKind_CLIENT_KIND_TUI, "v1")
@@ -294,7 +306,7 @@ func TestConnectionCloseReleasesTheLease(t *testing.T) {
 		if got != leased[0] {
 			t.Fatalf("released connection %q, want %q", got, leased[0])
 		}
-	case <-time.After(5 * time.Second):
+	case <-t.Context().Done():
 		t.Fatal("the lease was not released after the connection closed")
 	}
 }
@@ -313,10 +325,13 @@ func (b *blockingDrainTransport) Drain(ctx context.Context, force bool) error {
 	select {
 	case <-b.block:
 	case <-ctx.Done():
-		return ctx.Err()
+		return errcode.Wrap(errcode.Canceled, "the blocked drain was canceled", ctx.Err())
 	}
 	if b.inner != nil {
-		return b.inner.Drain(ctx, force)
+		derr := b.inner.Drain(ctx, force)
+		if derr != nil {
+			return errcode.Wrap(errcode.Internal, "the inner transport finished the drain", derr)
+		}
 	}
 	return nil
 }
@@ -324,14 +339,14 @@ func (b *blockingDrainTransport) Drain(ctx context.Context, force bool) error {
 func TestShutdownRPCRepliesBeforeDrain(t *testing.T) {
 	t.Parallel()
 	tr := &blockingDrainTransport{block: make(chan struct{}), started: make(chan struct{})}
-	hp, srv, dir, _ := hostWithServer(t, app.HostConfig{HostVersion: "host-e2e", APIVersions: []string{"v1"}}, tr)
+	hp, srv, dir := hostWithServer(t, app.HostConfig{HostVersion: testHostE2EVersion, APIVersions: []string{"v1"}}, tr)
 	tr.inner = srv
 	client, _ := newTestClient(t, srv.cfg.Socket.Path)
 	if _, err := client.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_CLI, "v1")); err != nil {
 		t.Fatal(err)
 	}
 	// The reply arrives while the drain is still blocked on the transport.
-	if _, err := client.Shutdown(t.Context(), connect.NewRequest(&hostv1.ShutdownRequest{CommandId: "cmd-1"})); err != nil {
+	if _, err := client.Shutdown(t.Context(), connect.NewRequest(&hostv1.ShutdownRequest{CommandId: "cmd-1", Force: false})); err != nil {
 		t.Fatal(err)
 	}
 	<-tr.started
@@ -380,26 +395,27 @@ func TestDrainStopsServing(t *testing.T) {
 	if _, err := os.Lstat(srv.cfg.Socket.Path); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("the socket file survived the drain: %v", err)
 	}
-	conn, err := net.DialTimeout("unix", srv.cfg.Socket.Path, time.Second)
+	dialer := &net.Dialer{Timeout: time.Second}
+	conn, err := dialer.DialContext(t.Context(), "unix", srv.cfg.Socket.Path)
 	if err == nil {
 		closeQuietly(conn)
 		t.Fatal("a new dial succeeded after the drain")
 	}
 	select {
 	case <-backend.released:
-	case <-time.After(5 * time.Second):
+	case <-t.Context().Done():
 		t.Fatal("the drained connection's lease was not released")
 	}
 }
 
 func TestShutdownRPCEndToEndWithCleanTeardown(t *testing.T) {
 	t.Parallel()
-	hp, srv, dir, _ := hostWithServer(t, app.HostConfig{HostVersion: "host-e2e", APIVersions: []string{"v1"}}, nil)
+	hp, srv, dir := hostWithServer(t, app.HostConfig{HostVersion: testHostE2EVersion, APIVersions: []string{"v1"}}, nil)
 	client, _ := newTestClient(t, srv.cfg.Socket.Path)
 	if _, err := client.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_CLI, "v1")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Shutdown(t.Context(), connect.NewRequest(&hostv1.ShutdownRequest{CommandId: "cmd-1"})); err != nil {
+	if _, err := client.Shutdown(t.Context(), connect.NewRequest(&hostv1.ShutdownRequest{CommandId: "cmd-1", Force: false})); err != nil {
 		t.Fatal(err)
 	}
 	<-hp.DrainDone()
@@ -424,9 +440,9 @@ func TestLeaseGraceEndToEnd(t *testing.T) {
 		IDs:     ids.NewUUIDv7(clk, ids.NewDeterministic("conn")),
 		HostUID: int64(os.Getuid()),
 	})
-	hp, err := app.StartHost(t.Context(), app.HostDeps{
+	hp, err := app.StartHost(t.Context(), &app.HostDeps{
 		DataDir:   dir,
-		Config:    app.HostConfig{HostVersion: "host-e2e", APIVersions: []string{"v1"}, IdleGrace: 10 * time.Second},
+		Config:    app.HostConfig{HostVersion: testHostE2EVersion, APIVersions: []string{"v1"}, IdleGrace: 10 * time.Second},
 		Clock:     clk,
 		IDs:       ids.NewUUIDv7(clk, ids.NewDeterministic("host")),
 		Transport: srv,
@@ -435,8 +451,12 @@ func TestLeaseGraceEndToEnd(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		_ = srv.Drain(context.WithoutCancel(t.Context()), true)
-		_ = hp.Close()
+		if err := srv.Drain(context.WithoutCancel(t.Context()), true); err != nil {
+			t.Errorf("cleanup drain: %v", err)
+		}
+		if err := hp.Close(); err != nil {
+			t.Errorf("close the host: %v", err)
+		}
 	})
 	backend := &releaseSignalBackend{Backend: hp.Runtime(), released: make(chan struct{}, 1)}
 	if err := srv.Start(t.Context(), backend); err != nil {
@@ -537,7 +557,7 @@ func TestErrorMappingExposesOnlyPublicCodes(t *testing.T) {
 	backend := newFakeBackend()
 	backend.status = fakeStatus()
 	h := &serviceHandler{backend: backend}
-	connectCodes := map[errcode.Code]connect.Code{
+	publicCodes := map[errcode.Code]connect.Code{
 		errcode.InvalidArgument:    connect.CodeInvalidArgument,
 		errcode.NotFound:           connect.CodeNotFound,
 		errcode.AlreadyExists:      connect.CodeAlreadyExists,
@@ -547,47 +567,66 @@ func TestErrorMappingExposesOnlyPublicCodes(t *testing.T) {
 		errcode.Canceled:           connect.CodeCanceled,
 		errcode.DeadlineExceeded:   connect.CodeDeadlineExceeded,
 		errcode.UnsupportedVersion: connect.CodeFailedPrecondition,
-		errcode.Internal:           connect.CodeInternal,
 	}
-	for code, wantConnect := range connectCodes {
+	for code, wantConnect := range publicCodes {
 		err := h.connectError(t.Context(), errcode.New(code, "public message for "+string(code)))
 		if connect.CodeOf(err) != wantConnect {
 			t.Fatalf("code %s mapped to %v, want %v", code, connect.CodeOf(err), wantConnect)
 		}
-		cerr, ok := err.(*connect.Error)
-		if !ok {
-			t.Fatalf("code %s produced %T, want *connect.Error", code, err)
+		assertPublicErrorDetail(t, code, err)
+	}
+}
+
+// assertPublicErrorDetail checks the detail and message of one mapped public
+// code.
+func assertPublicErrorDetail(t *testing.T, code errcode.Code, err error) {
+	t.Helper()
+	var cerr *connect.Error
+	if !errors.As(err, &cerr) {
+		t.Fatalf("code %s produced %T, want *connect.Error", code, err)
+	}
+	if len(cerr.Details()) != 1 {
+		t.Fatalf("public code %s carries %d details, want 1", code, len(cerr.Details()))
+	}
+	value, verr := cerr.Details()[0].Value()
+	if verr != nil {
+		t.Fatal(verr)
+	}
+	detail, dok := value.(*hostv1.ErrorDetail)
+	if !dok {
+		t.Fatalf("detail of type %T, want *hostv1.ErrorDetail", value)
+	}
+	if detail.Code != string(code) {
+		t.Fatalf("detail code = %q, want %q", detail.Code, string(code))
+	}
+	if code != errcode.UnsupportedVersion && len(detail.SupportedApiVersions) != 0 {
+		t.Fatalf("code %s unexpectedly carries versions", code)
+	}
+	if code == errcode.UnsupportedVersion {
+		if diff := cmp.Diff([]string{"v1", "v2"}, detail.SupportedApiVersions); diff != "" {
+			t.Fatalf("detail versions mismatch (-want +got):\n%s", diff)
 		}
-		if !code.IsPublic() {
-			if len(cerr.Details()) != 0 {
-				t.Fatalf("hidden code %s carries a detail", code)
-			}
-			if cerr.Message() != "internal error" {
-				t.Fatalf("hidden code %s leaked the message %q", code, cerr.Message())
-			}
-			continue
-		}
-		if len(cerr.Details()) != 1 {
-			t.Fatalf("public code %s carries %d details, want 1", code, len(cerr.Details()))
-		}
-		value, verr := cerr.Details()[0].Value()
-		if verr != nil {
-			t.Fatal(verr)
-		}
-		detail := value.(*hostv1.ErrorDetail)
-		if detail.Code != string(code) {
-			t.Fatalf("detail code = %q, want %q", detail.Code, string(code))
-		}
-		if code != errcode.UnsupportedVersion && len(detail.SupportedApiVersions) != 0 {
-			t.Fatalf("code %s unexpectedly carries versions", code)
-		}
-		if code == errcode.UnsupportedVersion {
-			if diff := cmp.Diff([]string{"v1", "v2"}, detail.SupportedApiVersions); diff != "" {
-				t.Fatalf("detail versions mismatch (-want +got):\n%s", diff)
-			}
-		}
-		if !strings.Contains(cerr.Message(), "public message") {
-			t.Fatalf("public code %s lost its message: %q", code, cerr.Message())
-		}
+	}
+	if !strings.Contains(cerr.Message(), "public message") {
+		t.Fatalf("public code %s lost its message: %q", code, cerr.Message())
+	}
+}
+
+func TestErrorMappingHidesHiddenCodes(t *testing.T) {
+	t.Parallel()
+	h := &serviceHandler{backend: newFakeBackend()}
+	err := h.connectError(t.Context(), errcode.New(errcode.Internal, "a hidden failure"))
+	if connect.CodeOf(err) != connect.CodeInternal {
+		t.Fatalf("hidden code mapped to %v, want internal", connect.CodeOf(err))
+	}
+	var cerr *connect.Error
+	if !errors.As(err, &cerr) {
+		t.Fatalf("hidden code produced %T, want *connect.Error", err)
+	}
+	if len(cerr.Details()) != 0 {
+		t.Fatalf("hidden code carries %d details, want 0", len(cerr.Details()))
+	}
+	if cerr.Message() != "internal error" {
+		t.Fatalf("hidden code leaked the message %q", cerr.Message())
 	}
 }

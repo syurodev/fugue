@@ -4,11 +4,12 @@ import (
 	"context"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
+
 	"github.com/syurodev/fugue/internal/app"
 	hostv1 "github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1"
 	"github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1/hostv1connect"
 	"github.com/syurodev/fugue/internal/platform/errcode"
-	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // serviceHandler maps the proto contract to the app backend's domain types.
@@ -49,6 +50,8 @@ func connectCode(c errcode.Code) connect.Code {
 		return connect.CodeCanceled
 	case errcode.DeadlineExceeded:
 		return connect.CodeDeadlineExceeded
+	case errcode.Internal:
+		return connect.CodeInternal
 	default:
 		return connect.CodeInternal
 	}
@@ -57,6 +60,8 @@ func connectCode(c errcode.Code) connect.Code {
 // connectError turns err into a Connect error. A public code keeps its
 // message and carries the typed ErrorDetail with the public code; hidden
 // codes become a generic internal error with no detail (host-api §4).
+//
+//nolint:wrapcheck // connect.NewError is the transport boundary conversion itself: wrapping the mapped error again would hide the code and detail the client must decode.
 func (h *serviceHandler) connectError(ctx context.Context, err error) error {
 	if err == nil {
 		return nil
@@ -189,6 +194,8 @@ func requireHelloed(ctx context.Context) error {
 // unspecified or unknown kind is invalid_argument, never a guess.
 func kindFromProto(k hostv1.ClientKind) (app.ClientKind, error) {
 	switch k {
+	case hostv1.ClientKind_CLIENT_KIND_UNSPECIFIED:
+		return "", errcode.New(errcode.InvalidArgument, "client_kind is missing or unknown")
 	case hostv1.ClientKind_CLIENT_KIND_TUI:
 		return app.KindTUI, nil
 	case hostv1.ClientKind_CLIENT_KIND_CLI:

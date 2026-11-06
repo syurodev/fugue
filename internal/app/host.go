@@ -359,7 +359,7 @@ func parseAPIVersion(v string) (int, error) {
 // HostProcess is a running host: the store that owns the data directory, the
 // runtime the transport serves, and the supervised drain.
 type HostProcess struct {
-	deps        HostDeps
+	deps        *HostDeps
 	store       *storage.Store
 	rt          *HostRuntime
 	cancel      context.CancelFunc
@@ -372,8 +372,9 @@ type HostProcess struct {
 
 // StartHost opens the store — the data-directory lock is the liveness
 // authority — builds the runtime from the incarnation value and wires the
-// drain: transport first, store and lock last.
-func StartHost(ctx context.Context, deps HostDeps) (*HostProcess, error) {
+// drain: transport first, store and lock last. The deps are a pointer because
+// the struct is large and shared by the caller's wiring.
+func StartHost(ctx context.Context, deps *HostDeps) (*HostProcess, error) {
 	if deps.Clock == nil {
 		return nil, errcode.New(errcode.InvalidArgument, "clock is nil")
 	}
@@ -395,7 +396,14 @@ func StartHost(ctx context.Context, deps HostDeps) (*HostProcess, error) {
 	}
 	store, err := storage.OpenStore(ctx, config.Config{DataDir: deps.DataDir}, deps.Clock, deps.IDs)
 	if err != nil {
-		return nil, err
+		// OpenStore failures are already typed — the lock failure is public
+		// and a second host must keep failing typed — so the pass-through
+		// keeps the code and message a client already knows.
+		var coded *errcode.Error
+		if errors.As(err, &coded) {
+			return nil, errcode.Wrap(coded.Code(), coded.Message(), err)
+		}
+		return nil, errcode.Wrap(errcode.Internal, "open the host store", err)
 	}
 	// The base context outlives StartHost; it is captured in the closures
 	// below, never stored as a context field.
@@ -448,20 +456,7 @@ func (hp *HostProcess) Stop(reason string) { hp.rt.Stop(reason) }
 func (hp *HostProcess) Close() error {
 	hp.closeOnce.Do(func() {
 		hp.cancel()
-		for {
-			hp.tasksMu.Lock()
-			tasks := hp.tasks
-			hp.tasks = nil
-			hp.tasksMu.Unlock()
-			if len(tasks) == 0 {
-				break
-			}
-			for _, task := range tasks {
-				if err := task.Wait(); err != nil {
-					hp.closeErr = errors.Join(hp.closeErr, err)
-				}
-			}
-		}
+		hp.closeErr = errors.Join(hp.closeErr, hp.waitTasks())
 		if !hp.storeClosed.Load() {
 			if err := hp.store.Close(); err != nil {
 				hp.closeErr = errors.Join(hp.closeErr, err)
@@ -470,4 +465,24 @@ func (hp *HostProcess) Close() error {
 		hp.rt.closeDrained()
 	})
 	return hp.closeErr
+}
+
+// waitTasks waits for every supervised task, re-checking for tasks spawned
+// while waiting (a grace goroutine may start the drain as Close cancels).
+func (hp *HostProcess) waitTasks() error {
+	var waitErr error
+	for {
+		hp.tasksMu.Lock()
+		tasks := hp.tasks
+		hp.tasks = nil
+		hp.tasksMu.Unlock()
+		if len(tasks) == 0 {
+			return waitErr
+		}
+		for _, task := range tasks {
+			if err := task.Wait(); err != nil {
+				waitErr = errors.Join(waitErr, err)
+			}
+		}
+	}
 }

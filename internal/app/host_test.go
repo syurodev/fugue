@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+
 	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -46,10 +47,11 @@ func (s *scriptedTransport) Drain(ctx context.Context, _ bool) error {
 		select {
 		case <-s.block:
 		case <-ctx.Done():
+			err := errcode.Wrap(errcode.Canceled, "the scripted drain was canceled", ctx.Err())
 			s.mu.Lock()
-			s.lastErr = ctx.Err()
+			s.lastErr = err
 			s.mu.Unlock()
-			return ctx.Err()
+			return err
 		}
 	}
 	return nil
@@ -61,20 +63,26 @@ func (s *scriptedTransport) callCount() int {
 	return s.calls
 }
 
+const (
+	testHostVersion = "host-test"
+	testV10         = "v10"
+	testCommandID   = "cmd-1"
+)
+
 func testHostConfig() HostConfig {
 	return HostConfig{
-		HostVersion: "host-test",
+		HostVersion: testHostVersion,
 		APIVersions: []string{"v1", "v2"},
 		IdleGrace:   0,
 	}
 }
 
-func testHostDeps(dir string, clk *clock.Fake, tr HostTransport) HostDeps {
-	return HostDeps{
+func testHostDeps(dir string, clk *clock.Fake, tr HostTransport) *HostDeps {
+	return &HostDeps{
 		DataDir:   dir,
 		Config:    testHostConfig(),
 		Clock:     clk,
-		IDs:       ids.NewUUIDv7(clk, ids.NewDeterministic("host-test")),
+		IDs:       ids.NewUUIDv7(clk, ids.NewDeterministic(testHostVersion)),
 		Transport: tr,
 	}
 }
@@ -116,24 +124,24 @@ func TestHelloNegotiatesHighestCommonVersion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.APIVersion != "v3" || res.HostVersion != "host-test" {
-		t.Fatalf("Hello = %+v, want v3 from host-test", res)
+	if res.APIVersion != "v3" || res.HostVersion != testHostVersion {
+		t.Fatalf("Hello = %+v, want v3 from %s", res, testHostVersion)
 	}
 }
 
 func TestHelloNumericOrderingV10BeatsV2(t *testing.T) {
 	t.Parallel()
 	rt, _ := newRuntime(t, testHostConfig(), clock.NewFake(time.Unix(0, 0)), nil)
-	rt.cfg.APIVersions = []string{"v1", "v2", "v10"}
+	rt.cfg.APIVersions = []string{"v1", "v2", testV10}
 	res, err := rt.Hello(t.Context(), HelloParams{
 		Kind:                 KindTUI,
-		SupportedAPIVersions: []string{"v2", "v10"},
+		SupportedAPIVersions: []string{"v2", testV10},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if res.APIVersion != "v10" {
-		t.Fatalf("Hello = %q, want v10 (numeric, not lexical, ordering)", res.APIVersion)
+	if res.APIVersion != testV10 {
+		t.Fatalf("Hello = %q, want %s (numeric, not lexical, ordering)", res.APIVersion, testV10)
 	}
 }
 
@@ -264,7 +272,7 @@ func TestSecondShutdownWhileDrainingReturnsTheSameReply(t *testing.T) {
 	rt, _ := newRuntime(t, testHostConfig(), clk, func(ctx context.Context, force bool, _ string) error {
 		return rec.Drain(ctx, force)
 	})
-	if err := rt.Shutdown(t.Context(), ShutdownCommand{ID: "cmd-1"}); err != nil {
+	if err := rt.Shutdown(t.Context(), ShutdownCommand{ID: testCommandID}); err != nil {
 		t.Fatal(err)
 	}
 	<-rec.started
@@ -301,7 +309,7 @@ func TestLeaseReleasedDuringDrainDoesNotRearmGrace(t *testing.T) {
 	if err := rt.LeaseAcquired(t.Context(), "conn-1", KindTUI); err != nil {
 		t.Fatal(err)
 	}
-	if err := rt.Shutdown(t.Context(), ShutdownCommand{ID: "cmd-1"}); err != nil {
+	if err := rt.Shutdown(t.Context(), ShutdownCommand{ID: testCommandID}); err != nil {
 		t.Fatal(err)
 	}
 	<-rec.started
@@ -344,7 +352,7 @@ func newDrainingRuntime(t *testing.T) (*HostRuntime, <-chan struct{}, func()) {
 	rt, drained := newRuntime(t, testHostConfig(), clock.NewFake(time.Unix(0, 0)), func(ctx context.Context, force bool, _ string) error {
 		return rec.Drain(ctx, force)
 	})
-	if err := rt.Shutdown(t.Context(), ShutdownCommand{ID: "cmd-1"}); err != nil {
+	if err := rt.Shutdown(t.Context(), ShutdownCommand{ID: testCommandID}); err != nil {
 		t.Fatal(err)
 	}
 	<-rec.started
@@ -361,14 +369,18 @@ func TestStatusReportsVersionIncarnationAndCounts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = hp.Close() })
+	t.Cleanup(func() {
+		if closeErr := hp.Close(); closeErr != nil {
+			t.Errorf("close the host: %v", closeErr)
+		}
+	})
 	rt := hp.Runtime()
 	for connID, kind := range map[string]ClientKind{
 		"conn-tui-1": KindTUI, "conn-tui-2": KindTUI, "conn-cli": KindCLI,
 		"conn-app": KindApp, "conn-bg": KindAppBackground,
 	} {
-		if err := rt.LeaseAcquired(t.Context(), connID, kind); err != nil {
-			t.Fatal(err)
+		if leaseErr := rt.LeaseAcquired(t.Context(), connID, kind); leaseErr != nil {
+			t.Fatal(leaseErr)
 		}
 	}
 	view, err := rt.Status(t.Context())
@@ -379,8 +391,8 @@ func TestStatusReportsVersionIncarnationAndCounts(t *testing.T) {
 	if diff := cmp.Diff(want, view.Clients); diff != "" {
 		t.Fatalf("client counts mismatch (-want +got):\n%s", diff)
 	}
-	if view.HostVersion != "host-test" {
-		t.Fatalf("host version = %q, want host-test", view.HostVersion)
+	if view.HostVersion != testHostVersion {
+		t.Fatalf("host version = %q, want %s", view.HostVersion, testHostVersion)
 	}
 	if diff := cmp.Diff([]string{"v1", "v2"}, view.SupportedAPIVersions); diff != "" {
 		t.Fatalf("supported versions mismatch (-want +got):\n%s", diff)
@@ -406,18 +418,18 @@ func TestStartHostDrainsThroughStoreCloseLast(t *testing.T) {
 	hp.Stop("test")
 	<-tr.started
 	// While the transport is still draining, the store and its lock are open.
-	if _, err := storage.OpenStore(t.Context(), testStoreConfig(dir), clk, ids.NewUUIDv7(clk, ids.NewDeterministic("probe"))); err == nil {
+	if _, probeErr := storage.OpenStore(t.Context(), testStoreConfig(dir), clk, ids.NewUUIDv7(clk, ids.NewDeterministic("probe"))); probeErr == nil {
 		t.Fatal("a second store opened while the transport was still draining")
 	}
 	close(tr.block)
 	<-hp.DrainDone()
 	// The lock is released only by the store close at the end of the drain.
-	again, err := storage.OpenStore(t.Context(), testStoreConfig(dir), clk, ids.NewUUIDv7(clk, ids.NewDeterministic("again")))
-	if err != nil {
-		t.Fatalf("the lock was not released after the drain: %v", err)
+	again, openErr := storage.OpenStore(t.Context(), testStoreConfig(dir), clk, ids.NewUUIDv7(clk, ids.NewDeterministic("again")))
+	if openErr != nil {
+		t.Fatalf("the lock was not released after the drain: %v", openErr)
 	}
-	if err := again.Close(); err != nil {
-		t.Fatal(err)
+	if closeErr := again.Close(); closeErr != nil {
+		t.Fatal(closeErr)
 	}
 }
 

@@ -100,9 +100,13 @@ func (s *Server) Start(ctx context.Context, backend app.Backend) error {
 	protos.SetHTTP1(true)
 	protos.SetHTTP2(true)
 	protos.SetUnencryptedHTTP2(true)
+	// No connection timeouts by decision (host-api §3): a leased connection
+	// survives arbitrary idle periods and the uid check is the gate; F5.2
+	// revisits keep-alive. The explicit zero makes the decision visible.
 	s.httpSrv = &http.Server{
-		Handler:   mux,
-		Protocols: &protos,
+		ReadHeaderTimeout: 0,
+		Handler:           mux,
+		Protocols:         &protos,
 		ConnContext: func(connCtx context.Context, c net.Conn) context.Context {
 			return context.WithValue(connCtx, connStateKey{}, s.registerConn(c))
 		},
@@ -174,8 +178,11 @@ func (s *Server) Drain(ctx context.Context, force bool) error {
 	} else if err := s.httpSrv.Shutdown(ctx); err != nil {
 		return errcode.Wrap(errcode.Internal, "shut the host http server down", err)
 	}
-	// Wait for the serve loop so no stdlib goroutine outlives the drain.
-	_ = s.serveTask.Wait()
+	// Wait for the serve loop so no stdlib goroutine outlives the drain; a
+	// serve failure is part of the drain's outcome.
+	if err := s.serveTask.Wait(); err != nil {
+		return errcode.Wrap(errcode.Internal, "the host api serve loop failed", err)
+	}
 	return nil
 }
 
