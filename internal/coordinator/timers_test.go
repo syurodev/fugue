@@ -704,3 +704,50 @@ func assertParkedDoesNotFire(
 	default:
 	}
 }
+
+func TestMetadataMarshalFailureDropsTimer(t *testing.T) {
+	t.Parallel()
+
+	startTime := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	fakeClk := clock.NewFake(startTime)
+	store := newTestStoreWithAdmission(1)
+	deadline := startTime.Add(5 * time.Second)
+
+	invalidTimerID := "\xff\xfe"
+	ctx, sess := newTestSessionWithClock(t, store, newFakeExecutor(), fakeClk, "marshal-fail")
+	defer sess.Stop()
+
+	droppedCh := make(chan struct{}, 1)
+	fireCh := make(chan struct{}, 1)
+	sched, err := StartScheduler(
+		ctx, store, fakeClk,
+		func(sessionID string) (*Session, bool) {
+			return sess, sessionID == testSessionID1
+		},
+		WithOnDropped(func(at *ArmedTimer) {
+			if at.TimerID == invalidTimerID {
+				droppedCh <- struct{}{}
+			}
+		}),
+		WithOnFire(func(at *ArmedTimer) {
+			if at.TimerID == invalidTimerID {
+				fireCh <- struct{}{}
+			}
+		}),
+	)
+	if err != nil {
+		t.Fatalf("StartScheduler: %v", err)
+	}
+	defer sched.Stop()
+
+	sched.Arm(&ArmedTimer{
+		TimerID:    invalidTimerID,
+		SessionID:  testSessionID1,
+		RunID:      testRun1,
+		Generation: 1,
+		Purpose:    kernel.TimerPurposeModelRetry,
+		Deadline:   deadline,
+	})
+
+	assertDroppedTimerNeverRetries(t, ctx, sched, fakeClk, fireCh, droppedCh)
+}

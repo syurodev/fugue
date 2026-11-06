@@ -55,7 +55,10 @@ const (
 	firedTTL              = 10 * time.Minute
 )
 
-var errUnroutableSession = errcode.New(errcode.NotFound, "unroutable session")
+var (
+	errUnroutableSession = errcode.New(errcode.NotFound, "unroutable session")
+	errMarshalMetadata   = errors.New("marshal timer metadata")
+)
 
 type (
 	timerFiredMetadata struct {
@@ -108,11 +111,8 @@ type Scheduler struct {
 // StartScheduler loads armed timers from store, starts the timer supervision loop,
 // and returns a running Scheduler.
 func StartScheduler(
-	ctx context.Context,
-	store Store,
-	clk clock.Clock,
-	route func(sessionID string) (*Session, bool),
-	opts ...SchedulerOption,
+	ctx context.Context, store Store, clk clock.Clock,
+	route func(sessionID string) (*Session, bool), opts ...SchedulerOption,
 ) (*Scheduler, error) {
 	if store == nil || clk == nil || route == nil {
 		return nil, errcode.New(errcode.InvalidArgument, "nil store, clock, or route")
@@ -155,7 +155,6 @@ func (s *Scheduler) Arm(t *ArmedTimer) {
 	s.armMu.Lock()
 	s.pendingArms = append(s.pendingArms, t)
 	s.armMu.Unlock()
-
 	select {
 	case s.wakeCh <- struct{}{}:
 	default:
@@ -168,7 +167,6 @@ func (s *Scheduler) Wake(sessionID string) {
 	s.armMu.Lock()
 	s.pendingWakes = append(s.pendingWakes, sessionID)
 	s.armMu.Unlock()
-
 	select {
 	case s.wakeCh <- struct{}{}:
 	default:
@@ -370,7 +368,8 @@ func (s *Scheduler) launchFire(fireCtx context.Context, t *scheduledTimer) {
 		now := s.clk.Now()
 		meta, err := codec.MarshalCanonical(timerFiredMetadata{TimerID: t.TimerID, Generation: t.Generation})
 		if err != nil {
-			return fmt.Errorf("marshal timer metadata: %w", err)
+			s.postFireResult(fireResult{timer: t, reply: nil, err: fmt.Errorf("%w: %w", errMarshalMetadata, err)})
+			return nil
 		}
 		req := &Request{
 			Command: &kernel.TimerFiredCommand{
@@ -411,7 +410,10 @@ func (s *Scheduler) handleFireResult(
 		return &t.ArmedTimer, nil, nil, nil
 	}
 
-	var rej kernel.Rejection
+	var (
+		rej     kernel.Rejection
+		rejCode string
+	)
 	if errors.As(res.err, &rej) {
 		if rej.Code == kernel.RejectionCodeEarlyTimer {
 			t.retryAfter = s.clk.Now().Add(timerBackoffStart)
@@ -419,7 +421,12 @@ func (s *Scheduler) handleFireResult(
 			active[t.TimerID] = t
 			return nil, &t.ArmedTimer, nil, nil
 		}
-		slog.WarnContext(ctx, "timer fire rejected", "timer_id", t.TimerID, "code", string(rej.Code))
+		rejCode = string(rej.Code)
+	} else if errors.Is(res.err, errMarshalMetadata) {
+		rejCode = "invalid_metadata"
+	}
+	if rejCode != "" {
+		slog.WarnContext(ctx, "timer fire rejected", "timer_id", t.TimerID, "code", rejCode)
 		delete(active, t.TimerID)
 		return nil, nil, nil, &t.ArmedTimer
 	}
@@ -452,10 +459,8 @@ func (s *Scheduler) handleFireResult(
 }
 
 func earliestTarget(active map[string]*scheduledTimer, inFlight map[string]uint64) (time.Time, bool) {
-	var (
-		earliestTime  time.Time
-		earliestTimer *scheduledTimer
-	)
+	var earliestTime time.Time
+	var earliestTimer *scheduledTimer
 	for _, t := range active {
 		if t.parked || inFlight[t.TimerID] >= t.Generation {
 			continue
