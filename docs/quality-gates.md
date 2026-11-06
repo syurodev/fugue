@@ -120,6 +120,39 @@ value replaces the default `-p=1`, so include `-p=1` there to retain that limit.
 The same tests, race/shuffle/count flags, fuzz duration, mutation selection and thresholds
 still apply locally and in CI. No per-invocation configuration is required.
 
+The heavy tasks (`test`, `test-pkg`, `coverage`, `fuzz-short`, `mutation-changed`,
+`mutation`, `lint`, `vet`) also run at low local priority through the `HEAVY_WRAP` task
+variable (`taskpolicy -c utility` on macOS, `nice -n 10` on Linux, inherited by every
+child process) and behind the machine-wide heavy lock through the `HEAVY_LOCK` variable
+(`go run ./cmd/fuguegate exclusive --`): at most one heavy task runs per machine at a
+time, so heavy work from several worktrees queues instead of swapping the machine. Both
+variables are empty under `CI`, leaving runner settings untouched, and on other
+platforms, which have no equivalent in the base install. The wrappers sit at exactly one
+level — on the heavy tasks' own commands, never on `check`, whose composed tasks would
+nest the same flock and deadlock. `task arch` stays unwrapped on purpose: it is a single
+light package. Measured on an 11-core, 18 GB macOS machine under a saturating bare
+`go test -race ./internal/...` (peak single-process RSS 3.2-4.4 GB): the priority wrap
+left the gate's wall time unchanged within run-to-run noise and shortened a foreground
+stall about 10 %; `-b` (background) measured the same with the added risk of background
+I/O throttling inside the mutation time box, so `utility` is the setting. `quality/`
+pins both expansions and that every heavy task carries both wrappers while no other
+task does.
+
+Targeted runs use `task test-pkg PKG=<pattern> RUN=<regex> [COUNT=<n>]`: exactly the
+`task test` flags (`-race -shuffle=on -count=1`) with the same local limits, wrappers
+included, but no cover profile (a partial profile would fail the coverage baselines).
+A bare `go test` is never used — `AGENTS.md` requires `task test-pkg` or `task arch`.
+
+Heavy commands no task covers go through the machine-wide heavy lock directly:
+`go run ./cmd/fuguegate exclusive -- <cmd...>`. It takes an exclusive `flock` on
+`os.UserCacheDir()/fugue/heavy.lock` (created on first use through an `os.Root`, never
+unlinked), logs once that it is waiting when another process holds the lock, retries on
+the injected clock until the holder dies, then runs the command with inherited stdio,
+propagating its exit code (128+signal for a signal death) and forwarding Interrupt and
+Term to it. The kernel releases the flock when the process dies, so a crash never
+leaves the machine queued. `exclusive` fails closed on platforms without `flock`; CI
+behavior is unchanged either way.
+
 ## 7. Dependencies
 
 | Rule | Enforcement |
@@ -173,3 +206,4 @@ Gate-defining files: `.golangci.yml`, `tools/fuguevet/**`, `internal/arch/**`, `
 | 2026-11-02 | `go-licenses check`: `--ignore=modernc.org/mathutil` | `modernc.org/mathutil@v1.7.1` is BSD-3-Clause (`Copyright (c) 2014 The mathutil Authors`), but its third clause words "the authors" instead of "the copyright holder", scoring ~0.88 in `google/licenseclassifier` below the 0.90 default; `--ignore` still checks its dependencies (`bigfft`) | user (label on the F1.3 PR) |
 | 2026-11-05 | Mutation budget: 20 minutes per package instead of one shared 20-minute deadline | PR #52 completed crypto at 98.1% and execstore at 88.4%, leaving vault only 6.9 seconds. Vault passes separately at 96.1%. Give discovery and each package their own budget; preserve the 85% threshold, selected packages, per-mutant timeout coefficient and CPU limits. Regression: `TestMutationPackageBudgetDoesNotCancelNextPackage` | user (chat approval; owner-applied `gate-change-approved` on PR #52) |
 | 2026-11-05 | Mutation on changed packages **paused**: the PR job `mutation-changed` reports success without running, and `task check` no longer runs it. Threshold (85 %), package selection, budgets and the nightly `mutation-full` job are unchanged; `task mutation-changed` still runs by hand | It made every PR and local check too slow for the current pace of work. Temporary: re-enable by restoring the job step and the `task check` step together, at the latest before F8.1 (`task release-check`). Until then, a nightly `mutation-full` failure is fixed like a broken build. Guard: `TestTaskfileRunsEveryGate` requires the task to exist and the pause to be explicit | user (chat request) |
+| 2026-11-06 | Local heavy tasks run at low priority (`HEAVY_WRAP`: `taskpolicy -c utility` on macOS, `nice -n 10` on Linux) and behind the machine-wide heavy lock (`HEAVY_LOCK`: `fuguegate exclusive`), both empty under `CI`; `task test-pkg` added for targeted runs; `docs/plans` commands use `task test-pkg` instead of bare `go test` | Several agents running gates in separate worktrees swapped and froze an 18 GB machine: a bare `go test` ran 11 race binaries in parallel at about 1 GB each, and concurrent `task check` runs had no machine-wide cap. Measured: a saturating bare race run peaks at 3.2-4.4 GB RSS; under it the `utility` wrap kept gate wall time unchanged and cut a foreground stall about 10 %, `-b` measured the same with added throttling risk, so `utility` won. Concurrent `task check` pairs queue one heavy task at a time; the numbers are in the PR description. No threshold moved and no ratchet baseline changed; guards: `TestHeavyTasksRunWrappedAndQueued`, `TestHeavyWrapExpansion` | user (`gate-change-approved` on this PR) |

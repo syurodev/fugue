@@ -182,9 +182,18 @@ func TestTaskfileRunsEveryGate(t *testing.T) {
 	}
 	_, afterCheck, _ := strings.Cut(string(task), "  check:")
 	check, _, _ := strings.Cut(afterCheck, "  fix:")
-	for _, step := range []string{"fmt", "lint", "vet", "test", "coverage", "deadcode", "mod", "proto", "fuzz-short"} {
-		if !strings.Contains(check, "- task: "+step+"\n") {
-			t.Errorf("`task check` does not run %s", step)
+	for _, step := range prGateTasks() {
+		switch {
+		case step == "arch":
+			// arch runs inside test.
+		case step == "gate-guard", step == "commit-lint":
+			// CI-only jobs.
+		case strings.HasPrefix(step, "mutation"):
+			// Mutation tasks are nightly or paused, never part of check.
+		default:
+			if !strings.Contains(check, "- task: "+step+"\n") {
+				t.Errorf("`task check` does not run %s", step)
+			}
 		}
 	}
 	// Paused by the owner (quality-gates §11): the task stays runnable by hand,

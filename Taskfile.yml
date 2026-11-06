@@ -11,6 +11,20 @@ env:
   GREMLINS_UNLEASH_WORKERS: '{{if env "CI"}}{{env "GREMLINS_UNLEASH_WORKERS"}}{{else}}{{default "1" (env "GREMLINS_UNLEASH_WORKERS")}}{{end}}'
 
 vars:
+  # Priority wrapper for the heavy tasks, local machines only: the gate runs at
+  # a lower CPU class (macOS) or nice level (Linux) so interactive work keeps
+  # precedence while the gate still finishes. Empty under CI, so runner
+  # settings are untouched, and on other platforms, which have no equivalent
+  # in the base install. quality/ pins the expansion and that every heavy task
+  # carries the prefix.
+  HEAVY_WRAP: '{{if env "CI"}}{{else if eq OS "darwin"}}taskpolicy -c utility{{else if eq OS "linux"}}nice -n 10{{end}}'
+  # Machine-wide heavy lock for the heavy tasks, local machines only: the gate
+  # queues behind fuguegate exclusive, so heavy work from several worktrees
+  # runs one task at a time instead of swapping the machine. Empty under CI
+  # and on platforms without flock. It sits at exactly one level — on the
+  # heavy tasks' own commands, never on `check`, whose composed tasks would
+  # nest the same flock and deadlock. quality/ pins that too.
+  HEAVY_LOCK: '{{if env "CI"}}{{else if or (eq OS "darwin") (eq OS "linux")}}go run ./cmd/fuguegate exclusive --{{end}}'
   # Exact pin. Keep in sync with .github/workflows once CI exists (F0.6); quality/lint_test.go
   # reads this value so the tests run the same linter version as `task lint`.
   GOLANGCI_LINT_VERSION: v2.15.0
@@ -50,7 +64,7 @@ tasks:
   lint:
     desc: golangci-lint with the repository configuration
     cmds:
-      - "{{.GOLANGCI_LINT}} run ./..."
+      - "{{.HEAVY_WRAP}} {{.HEAVY_LOCK}} {{.GOLANGCI_LINT}} run ./..."
 
   actions:
     desc: Lint the GitHub Actions workflows
@@ -92,18 +106,25 @@ tasks:
   vet:
     desc: Custom analyzers of tools/fuguevet through go vet
     cmds:
-      - go build -o bin/fuguevet ./tools/fuguevet
-      - go vet -vettool={{.ROOT_DIR}}/bin/fuguevet ./...
+      - "{{.HEAVY_WRAP}} {{.HEAVY_LOCK}} go build -o bin/fuguevet ./tools/fuguevet"
+      - "{{.HEAVY_WRAP}} {{.HEAVY_LOCK}} go vet -vettool={{.ROOT_DIR}}/bin/fuguevet ./..."
 
   test:
     desc: All tests with the race detector, shuffled, uncached
     cmds:
-      - go test -race -shuffle=on -count=1 -covermode=atomic -coverprofile=cover.out ./...
+      - '{{.HEAVY_WRAP}} {{.HEAVY_LOCK}} go test -race -shuffle=on -count=1 -covermode=atomic -coverprofile=cover.out ./...'
+
+  test-pkg:
+    desc: Targeted tests with the flags of `task test` (no cover profile)
+    # PKG, RUN and COUNT arrive as CLI variables; a declared default would
+    # block them, so the fallbacks live in the template instead.
+    cmds:
+      - '{{.HEAVY_WRAP}} {{.HEAVY_LOCK}} go test -race -shuffle=on -count={{if .COUNT}}{{.COUNT}}{{else}}1{{end}}{{if .RUN}} -run {{.RUN | shellQuote}}{{end}} {{if .PKG}}{{.PKG}}{{else}}./...{{end}}'
 
   coverage:
     desc: Per-package coverage floor and baseline
     cmds:
-      - go run ./cmd/fuguegate coverage -profile cover.out -baseline quality/coverage.json
+      - '{{.HEAVY_WRAP}} {{.HEAVY_LOCK}} go run ./cmd/fuguegate coverage -profile cover.out -baseline quality/coverage.json'
 
   deadcode:
     desc: No function unreachable from cmd/* or tests
@@ -131,14 +152,14 @@ tasks:
   fuzz-short:
     desc: 20 seconds per fuzz target
     cmds:
-      - go run ./cmd/fuguegate fuzz -time 20s ./...
+      - '{{.HEAVY_WRAP}} {{.HEAVY_LOCK}} go run ./cmd/fuguegate fuzz -time 20s ./...'
 
   mutation-changed:
     desc: Mutation testing of the guarded packages changed against origin/main
     cmds:
-      - go run ./cmd/fuguegate mutation -base origin/main
+      - '{{.HEAVY_WRAP}} {{.HEAVY_LOCK}} go run ./cmd/fuguegate mutation -base origin/main'
 
   mutation:
     desc: Full mutation testing (nightly)
     cmds:
-      - go run ./cmd/fuguegate mutation -all
+      - '{{.HEAVY_WRAP}} {{.HEAVY_LOCK}} go run ./cmd/fuguegate mutation -all'

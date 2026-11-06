@@ -4,21 +4,45 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 	"go.uber.org/goleak"
+
+	"github.com/syurodev/fugue/internal/platform/clock"
 )
 
 func TestMain(m *testing.M) {
+	// Re-exec entries for the exclusive tests: production dispatches exclusive
+	// in main, which a test binary never calls, and the lock holder is a
+	// test-only mode. Both keep the default signal disposition, so a forwarded
+	// signal kills the process instead of being caught.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case exclusiveCommand:
+			ctx, stop := signalContext()
+			code := run(ctx, clock.Real{}, os.Args[1:], os.Stdout, os.Stderr)
+			stop()
+			os.Exit(code)
+		case "hold":
+			if err := holdLockStdio(os.Args[2:], os.Stdout); err != nil {
+				if _, werr := fmt.Fprintln(os.Stderr, "fuguegate:", err); werr != nil {
+					os.Exit(exitOutputError)
+				}
+				os.Exit(exitFailed)
+			}
+			os.Exit(0)
+		}
+	}
 	goleak.VerifyTestMain(m)
 }
 
 func execute(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
-	err := dispatch(t.Context(), args, &out)
+	err := dispatch(t.Context(), clock.Real{}, args, &out)
 	return out.String(), err
 }
 

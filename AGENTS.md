@@ -72,11 +72,17 @@ Every rule below is machine-enforced; the full list and thresholds are in
 ## Build and validation
 
 - Go version and toolchain are pinned in `go.mod`; dev tools are pinned with `tool` directives.
+- Never run a bare `go test`: use `task test-pkg PKG=<pattern> RUN=<regex>` for targeted runs
+  or `task arch` for the architecture tests. Heavy tasks and `task test-pkg` run at low local
+  priority and behind the machine-wide lock; heavy ad-hoc commands go through
+  `go run ./cmd/fuguegate exclusive -- <cmd...>`, which queues heavy gate work across
+  worktrees. Never wrap a `task` command in it: tasks already take the lock and exclusive
+  refuses them.
 - `task check` runs every PR gate locally: format, lint, `fuguevet`, architecture tests, tests
   with race and coverage, dead code, module hygiene, proto, short fuzz. Mutation on changed
   packages is paused (quality-gates §11); run `task mutation-changed` by hand when needed.
 - `task fix` applies formatters only.
-- `go test ./internal/arch/` after any change to packages, imports, tables or dependencies.
+- `task arch` after any change to packages, imports, tables or dependencies.
 - After changing a `.proto` file run `task generate` and commit the generated code; `task proto`
   checks lint, format, breaking changes and that the generated code is current.
 
