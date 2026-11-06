@@ -73,10 +73,13 @@ func projectTimerScheduled(ctx context.Context, conn *sql.Conn, sessionID, runID
 		ev.TimerID, sessionID, runID, ev.Generation, string(ev.Purpose), ev.TargetID, deadlineStr,
 	)
 	if err != nil {
-		return fmt.Errorf("%w: project TimerScheduled %s: %w", ErrInvalidBatch, ev.TimerID, err)
+		return fmt.Errorf("project TimerScheduled %s: %w", ev.TimerID, err)
 	}
 	n, err := res.RowsAffected()
-	if err != nil || n != 1 {
+	if err != nil {
+		return fmt.Errorf("project TimerScheduled %s rows affected: %w", ev.TimerID, err)
+	}
+	if n != 1 {
 		return fmt.Errorf("%w: project TimerScheduled %s affected %d rows", ErrInvalidBatch, ev.TimerID, n)
 	}
 	return nil
@@ -87,14 +90,17 @@ func projectTimerElapsed(ctx context.Context, conn *sql.Conn, ev *kernel.TimerEl
 		ctx,
 		`UPDATE exec_timers
 		 SET state = 'elapsed'
-		 WHERE timer_id = ? AND generation = ?`,
+		 WHERE timer_id = ? AND generation = ? AND state = 'armed'`,
 		ev.TimerID, ev.Generation,
 	)
 	if err != nil {
-		return fmt.Errorf("%w: project TimerElapsed %s: %w", ErrInvalidBatch, ev.TimerID, err)
+		return fmt.Errorf("project TimerElapsed %s: %w", ev.TimerID, err)
 	}
 	n, err := res.RowsAffected()
-	if err != nil || n != 1 {
+	if err != nil {
+		return fmt.Errorf("project TimerElapsed %s rows affected: %w", ev.TimerID, err)
+	}
+	if n != 1 {
 		return fmt.Errorf("%w: project TimerElapsed %s affected %d rows", ErrInvalidBatch, ev.TimerID, n)
 	}
 	return nil
@@ -105,14 +111,17 @@ func projectTimerCancelled(ctx context.Context, conn *sql.Conn, ev *kernel.Timer
 		ctx,
 		`UPDATE exec_timers
 		 SET state = 'cancelled'
-		 WHERE timer_id = ? AND generation = ?`,
+		 WHERE timer_id = ? AND generation = ? AND state = 'armed'`,
 		ev.TimerID, ev.Generation,
 	)
 	if err != nil {
-		return fmt.Errorf("%w: project TimerCancelled %s: %w", ErrInvalidBatch, ev.TimerID, err)
+		return fmt.Errorf("project TimerCancelled %s: %w", ev.TimerID, err)
 	}
 	n, err := res.RowsAffected()
-	if err != nil || n != 1 {
+	if err != nil {
+		return fmt.Errorf("project TimerCancelled %s rows affected: %w", ev.TimerID, err)
+	}
+	if n != 1 {
 		return fmt.Errorf("%w: project TimerCancelled %s affected %d rows", ErrInvalidBatch, ev.TimerID, n)
 	}
 	return nil

@@ -185,3 +185,85 @@ func assertContextAdmission(t *testing.T, s *execstore.Store, runID string) {
 		t.Fatal("later admission must continue the durable initial context boundary")
 	}
 }
+
+const timerOrigin = "timer"
+
+func submitStaleTimer(
+	t *testing.T,
+	sess *coordinator.Session,
+	cmdID string,
+	req *coordinator.Request,
+) {
+	t.Helper()
+	reply, err := sess.Submit(t.Context(), req)
+	if err != nil {
+		t.Fatalf("stale TimerFired submit failed: %v", err)
+	}
+	if reply.Duplicate {
+		t.Fatal("first submission must not be marked duplicate")
+	}
+	if reply.Receipt.CommandID != cmdID {
+		t.Fatalf("expected command ID %s, got %s", cmdID, reply.Receipt.CommandID)
+	}
+	if reply.Receipt.Result.FirstSequence != 0 || reply.Receipt.Result.LastSequence != 0 {
+		t.Fatalf("expected 0..0 sequence range for no-op receipt, got %+v", reply.Receipt.Result)
+	}
+}
+
+func verifyPersistedReceipt(t *testing.T, s *execstore.Store, cmdID string) {
+	t.Helper()
+	receipt, found, err := s.LookupReceipt(t.Context(), cmdID)
+	if err != nil || !found {
+		t.Fatalf("expected receipt %s to be persisted in store, found=%v err=%v", cmdID, found, err)
+	}
+	if receipt.Result.FirstSequence != 0 || receipt.Result.LastSequence != 0 {
+		t.Fatalf("persisted receipt has non-zero sequence range: %+v", receipt.Result)
+	}
+}
+
+func TestStaleTimerFiredPersistsNoOpReceipt(t *testing.T) {
+	t.Parallel()
+	s, clk, closeHost := openCoordinatorHost(t, t.TempDir())
+	t.Cleanup(closeHost)
+
+	sess := startRealSession(t, NewCoordinatorStore(s), clk, "stale-timer")
+	defer sess.Stop()
+
+	submitRealAccept(t, sess, realFirstRun)
+
+	ctx := t.Context()
+	cmdID := "cmd-stale-timer-1"
+	req := &coordinator.Request{
+		Command: &kernel.TimerFiredCommand{
+			CommandID:    cmdID,
+			RunID:        realFirstRun,
+			Origin:       timerOrigin,
+			TimerID:      "non-existent-timer",
+			Generation:   1,
+			ObservedTime: clk.Now(),
+		},
+		Facts:            kernel.DecisionFacts{},
+		Origin:           timerOrigin,
+		QueueDecisionRef: "",
+		Kind:             "TimerFired",
+		Principal:        timerOrigin,
+		Target:           realFirstRun,
+		MetadataInput:    []byte("{}"),
+		ProtectedInput:   nil,
+		Payloads:         nil,
+	}
+
+	submitStaleTimer(t, sess, cmdID, req)
+	verifyPersistedReceipt(t, s, cmdID)
+
+	retryReply, err := sess.Submit(ctx, req)
+	if err != nil {
+		t.Fatalf("retry submit failed: %v", err)
+	}
+	if !retryReply.Duplicate {
+		t.Fatal("retry with same command ID must be marked duplicate")
+	}
+	if retryReply.Receipt.CommandID != cmdID {
+		t.Fatalf("expected command ID %s on retry, got %s", cmdID, retryReply.Receipt.CommandID)
+	}
+}

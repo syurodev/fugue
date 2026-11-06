@@ -664,3 +664,52 @@ func TestTimerIDCannotMoveAcrossRuns(t *testing.T) {
 		t.Fatal("expected trigger exec_timers_immutable_run to prevent session_id change")
 	}
 }
+
+func TestElapsedAfterCancelledRollsBack(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, db, _ := newTestStore(ctx, t, nil)
+	sessID, runID := "sess-cancel", "run-cancel"
+	setupTestRun(ctx, t, s, sessID, runID)
+
+	t0 := s.clk.Now()
+	timerID := "timer-cancel-test"
+
+	sched := &kernel.TimerScheduledEvent{
+		Envelope:           *makeEnvelope(runID, 3, "cmd-sched", 1, t0),
+		TimerID:            timerID,
+		Generation:         1,
+		Purpose:            kernel.TimerPurposeModelRetry,
+		TargetID:           "target-1",
+		ClockDomain:        testClockDomain,
+		SchedulingDeadline: t0.Add(10 * time.Second),
+		Duration:           10 * time.Second,
+		PolicyVersion:      "v1",
+	}
+	appendEvents(ctx, t, s, sessID, runID, "cmd-sched", 2, 2, 3, sched)
+
+	cancel := &kernel.TimerCancelledEvent{
+		Envelope:   *makeEnvelope(runID, 4, "cmd-cancel", 1, t0.Add(time.Second)),
+		TimerID:    timerID,
+		Generation: 1,
+		CauseRef:   "manual cancellation",
+	}
+	appendEvents(ctx, t, s, sessID, runID, "cmd-cancel", 3, 3, 4, cancel)
+
+	elapsed := &kernel.TimerElapsedEvent{
+		Envelope:     *makeEnvelope(runID, 5, "cmd-elapsed", 1, t0.Add(10*time.Second)),
+		TimerID:      timerID,
+		Generation:   1,
+		ObservedTime: t0.Add(10 * time.Second),
+	}
+	req := buildAppendRequest(sessID, runID, "cmd-elapsed", 4, 4, 5, elapsed)
+	if _, err := s.Append(ctx, req); !errors.Is(err, ErrInvalidBatch) {
+		t.Fatalf("expected ErrInvalidBatch when elapsing cancelled timer, got: %v", err)
+	}
+
+	var state string
+	err := db.QueryRowContext(ctx, "SELECT state FROM exec_timers WHERE timer_id = ?", timerID).Scan(&state)
+	if err != nil || state != "cancelled" {
+		t.Fatalf("expected timer state to remain 'cancelled', got %q, err: %v", state, err)
+	}
+}
