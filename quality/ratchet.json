@@ -1,5 +1,5 @@
 {
-  "nolint": 10,
-  "gosec": 10,
+  "nolint": 5,
+  "gosec": 5,
   "fileSizeExceptions": 0
 }

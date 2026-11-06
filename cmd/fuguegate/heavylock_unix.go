@@ -33,26 +33,6 @@ func tryLock(f *os.File) (busy bool, err error) {
 	}
 }
 
-// lockBlocking waits until this process holds the lock on f. It runs in the
-// lock-wait helper, which installs no signal handlers, so the forwarded
-// signal kills the process and the kernel drops the lock.
-func lockBlocking(f *os.File) error {
-	var ferr error
-	conn, cerr := f.SyscallConn()
-	if cerr != nil {
-		return fmt.Errorf("flock: %w", cerr)
-	}
-	if cerr := conn.Control(func(fd uintptr) {
-		ferr = syscall.Flock(int(fd), syscall.LOCK_EX)
-	}); cerr != nil {
-		return fmt.Errorf("flock: %w", cerr)
-	}
-	if ferr != nil {
-		return fmt.Errorf("flock: %w", ferr)
-	}
-	return nil
-}
-
 // signalExitCode maps a child that a signal killed to the conventional
 // 128+signal exit code.
 func signalExitCode(exit *exec.ExitError) (int, bool) {

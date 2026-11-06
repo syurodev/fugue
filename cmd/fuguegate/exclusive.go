@@ -12,10 +12,11 @@ import (
 	"strconv"
 	"syscall"
 	"time"
+
+	"github.com/syurodev/fugue/internal/platform/clock"
 )
 
-// ErrHeavyLock reports a problem acquiring or handing over the machine-wide
-// heavy gate lock.
+// ErrHeavyLock reports a problem acquiring the machine-wide heavy gate lock.
 var ErrHeavyLock = errors.New("heavy gate lock")
 
 // exclusiveCommand is the subcommand name of the heavy gate lock.
@@ -31,9 +32,11 @@ const (
 	// signalWaitDelay bounds how long a child may ignore the forwarded
 	// termination signal before Wait returns anyway.
 	signalWaitDelay = 10 * time.Second
-	// acquiredByte is the single readiness byte the lock-wait helper writes
-	// once it holds the lock.
-	acquiredByte = 1
+	// lockRetryInterval is how often the waiting exclusive retries the lock.
+	lockRetryInterval = 250 * time.Millisecond
+	// heavyLockName is the lock file's name inside its directory; a constant,
+	// because it is opened through an os.Root.
+	heavyLockName = "heavy.lock"
 )
 
 // ExitError carries the exit status of a command that exclusive ran, so the
@@ -57,145 +60,122 @@ func (e *ExitError) Unwrap() error {
 // runExclusive runs a command while holding the machine-wide heavy gate lock,
 // waiting for the current holder to die first. Heavy work started in several
 // worktrees stays inside the machine's memory this way instead of swapping.
-func runExclusive(ctx context.Context, args []string, stdout io.Writer) error {
+func runExclusive(ctx context.Context, args []string, stdout io.Writer, clk clock.Clock) (err error) {
 	fs := newFlags(exclusiveCommand)
-	override := fs.String("lock", "", "override the heavy gate lock file")
-	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %w", ErrUsage, err)
+	override := fs.String("lockdir", "", "override the directory holding the heavy gate lock")
+	if perr := fs.Parse(args); perr != nil {
+		return fmt.Errorf("%w: %w", ErrUsage, perr)
 	}
 	command := fs.Args()
 	if len(command) == 0 {
 		return fmt.Errorf("%w: exclusive needs a command after --", ErrUsage)
 	}
-	path := *override
-	if path == "" {
-		var err error
-		if path, err = heavyLockPath(); err != nil {
-			return err
+	dir := *override
+	if dir == "" {
+		var derr error
+		if dir, derr = heavyLockDir(); derr != nil {
+			return derr
 		}
 	}
-	lock, err := openHeavyLock(path)
+	lock, path, err := openHeavyLock(dir)
 	if err != nil {
 		return err
 	}
-	defer closeQuietly(lock)
+	defer func() {
+		if rerr := lock.release(); rerr != nil {
+			err = errors.Join(err, fmt.Errorf("%w: release %s: %w", ErrHeavyLock, path, rerr))
+		}
+	}()
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(sigs)
 
-	busy, err := tryLock(lock)
-	if err != nil {
-		return fmt.Errorf("%w: %s: %w", ErrHeavyLock, path, err)
+	busy, terr := tryLock(lock.file)
+	if terr != nil {
+		return fmt.Errorf("%w: %s: %w", ErrHeavyLock, path, terr)
 	}
-	if !busy {
-		return runExclusiveCommand(ctx, sigs, command)
+	if busy {
+		if serr := say(stdout, "waiting for the heavy gate lock at %s", path); serr != nil {
+			return serr
+		}
+		if werr := waitForFree(ctx, clk, func() (bool, error) { return tryLock(lock.file) }); werr != nil {
+			return werr
+		}
 	}
-	if err := say(stdout, "waiting for the heavy gate lock at %s", path); err != nil {
-		return err
-	}
-	return runExclusiveWaiting(ctx, sigs, path, command)
+	return runExclusiveCommand(ctx, sigs, command)
 }
 
-// heavyLockPath is the machine-wide heavy gate lock file.
-func heavyLockPath() (string, error) {
+// heavyLockDir is the directory holding the machine-wide heavy gate lock file.
+func heavyLockDir() (string, error) {
 	base, err := os.UserCacheDir()
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrHeavyLock, err)
 	}
-	return filepath.Join(base, "fugue", "heavy.lock"), nil
+	return filepath.Join(base, "fugue"), nil
 }
 
-// openHeavyLock opens, creating it if needed, the given heavy gate lock file.
-// The file is never unlinked, so concurrent creators race onto the same inode
-// instead of onto two.
-func openHeavyLock(path string) (*os.File, error) {
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return nil, fmt.Errorf("%w: create %s: %w", ErrHeavyLock, filepath.Dir(path), err)
+// heavyLock bundles the open root and the lock file inside it, so both close
+// together when the lock is released.
+type heavyLock struct {
+	root *os.Root
+	file *os.File
+}
+
+// release closes the lock file and its root, dropping the flock.
+func (l *heavyLock) release() error {
+	return errors.Join(l.file.Close(), l.root.Close())
+}
+
+// openHeavyLock opens, creating them if needed, the directory and the heavy
+// gate lock file inside it. The file is never unlinked, so concurrent
+// creators race onto the same inode instead of onto two.
+func openHeavyLock(dir string) (*heavyLock, string, error) {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, "", fmt.Errorf("%w: create %s: %w", ErrHeavyLock, dir, err)
 	}
-	//nolint:gosec // G304: the path is fuguegate's cache file or the test's own override.
-	lock, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	root, err := os.OpenRoot(dir)
 	if err != nil {
-		return nil, fmt.Errorf("%w: open %s: %w", ErrHeavyLock, path, err)
+		return nil, "", fmt.Errorf("%w: open %s: %w", ErrHeavyLock, dir, err)
 	}
-	return lock, nil
+	file, err := root.OpenFile(heavyLockName, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		closeErrs := []error{fmt.Errorf("%w: open %s: %w", ErrHeavyLock, dir, err)}
+		if cerr := root.Close(); cerr != nil {
+			closeErrs = append(closeErrs, fmt.Errorf("%w: close %s: %w", ErrHeavyLock, dir, cerr))
+		}
+		return nil, "", errors.Join(closeErrs...)
+	}
+	return &heavyLock{root: root, file: file}, filepath.Join(dir, heavyLockName), nil
+}
+
+// waitForFree retries try after every lockRetryInterval on clk until the lock
+// frees or ctx ends. The caller announces the wait and made the first try,
+// so waiting starts with one interval of sleep.
+func waitForFree(ctx context.Context, clk clock.Clock, try func() (bool, error)) error {
+	for {
+		busy, err := try()
+		if err != nil {
+			return fmt.Errorf("%w: %w", ErrHeavyLock, err)
+		}
+		if !busy {
+			return nil
+		}
+		if serr := clock.Sleep(ctx, clk, lockRetryInterval); serr != nil {
+			return &ExitError{Code: exitInterrupted, Err: serr}
+		}
+	}
 }
 
 // runExclusiveCommand runs the command in the foreground of this process,
 // which the caller already holds the lock for.
 func runExclusiveCommand(ctx context.Context, sigs <-chan os.Signal, command []string) error {
-	child := passthroughCommand(ctx, sigs, command)
-	return exitStatus(child.Run())
-}
-
-// runExclusiveWaiting spawns a lock-wait helper that holds the heavy gate
-// lock on this process's behalf. The helper reports the lock with one byte on
-// the ready pipe and stays until the watch pipe closes; the pipe closes on a
-// normal exit and on a crash alike, so the lock never outlives this process.
-func runExclusiveWaiting(ctx context.Context, sigs <-chan os.Signal, path string, command []string) error {
-	exe, err := os.Executable()
-	if err != nil {
-		return fmt.Errorf("%w: locate this executable: %w", ErrHeavyLock, err)
-	}
-	readyR, readyW, err := os.Pipe()
-	if err != nil {
-		return fmt.Errorf("%w: ready pipe: %w", ErrHeavyLock, err)
-	}
-	watchR, watchW, err := os.Pipe()
-	if err != nil {
-		closeQuietly(readyR)
-		closeQuietly(readyW)
-		return fmt.Errorf("%w: watch pipe: %w", ErrHeavyLock, err)
-	}
-	defer closeQuietly(readyR)
-	defer closeQuietly(watchW)
-
-	//nolint:gosec // G204: the binary is this process's own and the path is fuguegate's cache file.
-	helper := exec.CommandContext(ctx, exe, "flockwait", "-lock", path)
-	helper.Stdout = readyW
-	helper.Stdin = watchR
-	helper.WaitDelay = signalWaitDelay
-	helper.Cancel = func() error {
-		return helper.Process.Signal(pickSignal(sigs))
-	}
-	if err := helper.Start(); err != nil {
-		closeQuietly(readyW)
-		closeQuietly(watchR)
-		return fmt.Errorf("%w: start the lock waiter: %w", ErrHeavyLock, err)
-	}
-	// The helper holds the only other end of each pipe from here on, which is
-	// why its copy of the watch pipe closes when this process dies.
-	closeQuietly(readyW)
-	closeQuietly(watchR)
-
-	if _, err := io.ReadFull(readyR, make([]byte, 1)); err != nil {
-		waitErr := helper.Wait()
-		if ctx.Err() != nil {
-			return &ExitError{Code: exitInterrupted, Err: ctx.Err()}
-		}
-		return fmt.Errorf("%w: waiter exited before acquiring %s: %w", ErrHeavyLock, path, errors.Join(err, waitErr))
-	}
-
-	runErr := runExclusiveCommand(ctx, sigs, command)
-	// Release the lock: the helper exits when its stdin hits end of file.
-	closeQuietly(watchW)
-	if waitErr := helper.Wait(); waitErr != nil && runErr == nil {
-		return fmt.Errorf("%w: waiter did not exit cleanly: %w", ErrHeavyLock, waitErr)
-	}
-	return runErr
-}
-
-// passthroughCommand builds the child with the terminal's stdio and a Cancel
-// that forwards the signal the user sent instead of killing it outright.
-func passthroughCommand(ctx context.Context, sigs <-chan os.Signal, command []string) *exec.Cmd {
-	//nolint:gosec // G204: the command is this process's own arguments after --.
-	child := exec.CommandContext(ctx, command[0], command[1:]...)
-	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
+	child := newCommand(ctx, "", childStreams{stdin: os.Stdin, stdout: os.Stdout, stderr: os.Stderr}, command[0], command[1:]...)
 	child.WaitDelay = signalWaitDelay
 	child.Cancel = func() error {
 		return child.Process.Signal(pickSignal(sigs))
 	}
-	return child
+	return exitStatus(child.Run())
 }
 
 // pickSignal returns the termination signal observed so far, or Interrupt
@@ -227,45 +207,4 @@ func exitStatus(err error) error {
 		return &ExitError{Code: code, Err: err}
 	}
 	return &ExitError{Code: exitFailed, Err: err}
-}
-
-// runFlockWait is the helper that exclusive spawns to hold the lock while it
-// waits. It blocks until it holds the lock, reports readiness with one byte
-// on stdout, then stays until stdin closes. It installs no signal handlers:
-// dying on the forwarded signal is what tears down an interrupted wait.
-func runFlockWait(args []string, stdout io.Writer) error {
-	fs := newFlags("flockwait")
-	lockPath := fs.String("lock", "", "heavy gate lock file to hold")
-	if err := fs.Parse(args); err != nil {
-		return fmt.Errorf("%w: %w", ErrUsage, err)
-	}
-	if *lockPath == "" || fs.NArg() != 0 {
-		return fmt.Errorf("%w: flockwait needs -lock <path>", ErrUsage)
-	}
-	lock, err := os.OpenFile(*lockPath, os.O_RDWR, 0o600)
-	if err != nil {
-		return fmt.Errorf("%w: open %s: %w", ErrHeavyLock, *lockPath, err)
-	}
-	defer closeQuietly(lock)
-	if err := lockBlocking(lock); err != nil {
-		return fmt.Errorf("%w: %s: %w", ErrHeavyLock, *lockPath, err)
-	}
-	if _, err := stdout.Write([]byte{acquiredByte}); err != nil {
-		return fmt.Errorf("%w: report readiness: %w", ErrHeavyLock, err)
-	}
-	if _, err := io.Copy(io.Discard, os.Stdin); err != nil {
-		return fmt.Errorf("%w: watch the parent: %w", ErrHeavyLock, err)
-	}
-	return nil
-}
-
-// closeQuietly closes a resource whose only remaining failure mode is a
-// descriptor that is already closed.
-func closeQuietly(c io.Closer) {
-	if c == nil {
-		return
-	}
-	if err := c.Close(); err != nil {
-		return
-	}
 }
