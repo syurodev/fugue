@@ -8,13 +8,27 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"syscall"
 )
 
 // ErrUsage reports a malformed command line.
-var ErrUsage = errors.New("usage: fuguegate coverage|fuzz|mutation|deadcode|proto|commitlint|commitmsg|gateguard [flags]")
+var ErrUsage = errors.New("usage: fuguegate coverage|fuzz|mutation|deadcode|proto|commitlint|commitmsg|gateguard|exclusive [flags]")
 
 func main() {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	// The lock-wait helper runs without signal handlers: dying on the
+	// forwarded signal is what releases its lock, and its parent tears it down
+	// by closing stdin.
+	if len(os.Args) > 1 && os.Args[1] == "flockwait" {
+		err := runFlockWait(os.Args[2:], os.Stdout)
+		if err == nil {
+			os.Exit(0)
+		}
+		if _, werr := fmt.Fprintln(os.Stderr, "fuguegate:", err); werr != nil {
+			os.Exit(exitOutputError)
+		}
+		os.Exit(exitFailed)
+	}
+	ctx, stop := signalContext()
 	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
 	stop()
 	os.Exit(code)
@@ -26,13 +40,27 @@ const (
 )
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
-	if err := dispatch(ctx, args, stdout); err != nil {
+	err := dispatch(ctx, args, stdout)
+	var exit *ExitError
+	if errors.As(err, &exit) {
+		// A command that ran through exclusive already reported itself; only
+		// its exit code crosses this boundary.
+		return exit.Code
+	}
+	if err != nil {
 		if _, werr := fmt.Fprintln(stderr, "fuguegate:", err); werr != nil {
 			return exitOutputError
 		}
 		return exitFailed
 	}
 	return 0
+}
+
+// signalContext is the process context of fuguegate and of the re-exec
+// helper entry in tests, which cannot reach main; the context constructors
+// stay in this file.
+func signalContext() (context.Context, func()) {
+	return signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 }
 
 // say writes one formatted line of progress output.
@@ -65,6 +93,8 @@ func dispatch(ctx context.Context, args []string, stdout io.Writer) error {
 		return runCommitMsg(ctx, rest, stdout)
 	case "gateguard":
 		return runGateGuard(ctx, rest, stdout)
+	case "exclusive":
+		return runExclusive(ctx, rest, stdout)
 	default:
 		return fmt.Errorf("%w: unknown command %q", ErrUsage, args[0])
 	}

@@ -39,12 +39,19 @@ func readWorkflow(t *testing.T, name string) string {
 	return string(data)
 }
 
+// prGateTasks lists the tasks quality-gates section 9 requires of every PR;
+// they are the jobs of pr.yml, and their test-shaped members are also the
+// heavy tasks of section 6.
+func prGateTasks() []string {
+	return []string{"fmt", "lint", "vet", "arch", "test", "coverage", "deadcode", "mod", "proto", "fuzz-short", "mutation-changed", "gate-guard", "commit-lint"}
+}
+
 // quality-gates section 9 lists the jobs a PR must pass; each is a job here and,
 // once branch protection is on, a required status check.
 func TestPRWorkflowRunsEveryRequiredJob(t *testing.T) {
 	t.Parallel()
 	pr := readWorkflow(t, "pr.yml")
-	for _, job := range []string{"fmt", "lint", "vet", "arch", "test", "coverage", "deadcode", "mod", "proto", "fuzz-short", "mutation-changed", "gate-guard", "commit-lint"} {
+	for _, job := range prGateTasks() {
 		if !strings.Contains(pr, "\n  "+job+":\n") {
 			t.Errorf("pr.yml has no job %q", job)
 		}

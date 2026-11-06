@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -12,6 +13,27 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	// Re-exec entries for the exclusive tests: production dispatches these in
+	// main, which a test binary never calls. flockwait keeps the default
+	// signal disposition on purpose, so neither entry installs handlers.
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case exclusiveCommand:
+			ctx, stop := signalContext()
+			code := run(ctx, os.Args[1:], os.Stdout, os.Stderr)
+			stop()
+			os.Exit(code)
+		case "flockwait":
+			err := runFlockWait(os.Args[2:], os.Stdout)
+			if err == nil {
+				os.Exit(0)
+			}
+			if _, werr := fmt.Fprintln(os.Stderr, "fuguegate:", err); werr != nil {
+				os.Exit(exitOutputError)
+			}
+			os.Exit(exitFailed)
+		}
+	}
 	goleak.VerifyTestMain(m)
 }
 

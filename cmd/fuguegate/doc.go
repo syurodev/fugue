@@ -1,10 +1,12 @@
 // Command fuguegate runs the quality gates that no off-the-shelf tool covers:
 // the coverage floor and baseline, short fuzzing, mutation testing of changed
 // packages, the dead-code check and the proto gate (buf lint, format, breaking
-// changes, generated code up to date), the commit and PR title rules, and the
-// guard on gate-defining files.
+// changes, generated code up to date), the commit and PR title rules, the
+// guard on gate-defining files, and the machine-wide heavy gate lock that
+// serializes heavy gate work across worktrees (exclusive, with its internal
+// flockwait helper).
 //
 // Owner: quality gates (docs/quality-gates.md sections 6 and 8). It is a
 // development tool, never shipped in a release. Allowed callers: Taskfile.yml
-// and CI; nothing imports it.
+// and CI; nothing imports it, and it imports nothing from internal.
 package main
