@@ -70,6 +70,7 @@ const (
 	cmdRecoverRun             = "RecoverRun"
 	cmdRequestStop            = "RequestStop"
 	cmdExtendBudget           = "ExtendBudget"
+	cmdTimerFired             = "TimerFired"
 	fieldRunRevision          = "RunRevision"
 	fieldActor                = "Actor"
 )

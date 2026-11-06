@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sort"
 	"sync"
 	"time"
 
+	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/kernel"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -18,13 +20,12 @@ import (
 func (s *Session) SetScheduler(sched *Scheduler) {
 	s.scheduler.Store(sched)
 	if sched != nil {
-		sched.Wake()
+		sched.Wake(s.cfg.SessionID)
 	}
 }
 
 func (s *Session) armTimer(t *ArmedTimer) {
-	sched := s.scheduler.Load()
-	if sched != nil {
+	if sched := s.scheduler.Load(); sched != nil {
 		sched.Arm(t)
 	}
 }
@@ -45,40 +46,43 @@ func (s *Session) armCommittedTimers(runID string, events []kernel.Event) {
 	}
 }
 
+// CommandKindTimerFired identifies timer-fired requests.
 const (
-	defaultTimerOrigin = "timer"
-	timerRetryInterval = 50 * time.Millisecond
+	CommandKindTimerFired = "TimerFired"
+	defaultTimerOrigin    = "timer"
+	timerBackoffStart     = time.Second
+	timerBackoffMax       = 30 * time.Second
+	firedTTL              = 10 * time.Minute
 )
 
-var errUnroutableSession = errors.New("unroutable session")
+var (
+	errUnroutableSession = errcode.New(errcode.NotFound, "unroutable session")
+	errMarshalMetadata   = errors.New("marshal timer metadata")
+)
 
-type scheduledTimer struct {
-	ArmedTimer
-	retryAfter time.Time
-}
-
-type fireResult struct {
-	timer *scheduledTimer
-	reply *Reply
-	err   error
-}
-
-// SchedulerOption configures the scheduler upon startup.
-type SchedulerOption func(*Scheduler)
-
-// WithOnFire registers a hook called whenever a timer successfully fires.
-func WithOnFire(fn func(*ArmedTimer)) SchedulerOption {
-	return func(s *Scheduler) {
-		s.onFire = fn
+type (
+	timerFiredMetadata struct {
+		TimerID    string `json:"TimerID"`
+		Generation uint64 `json:"Generation"`
 	}
-}
-
-// WithOnArm registers a hook called whenever a timer is processed into the scheduler.
-func WithOnArm(fn func(*ArmedTimer)) SchedulerOption {
-	return func(s *Scheduler) {
-		s.onArm = fn
+	firedEntry struct {
+		generation uint64
+		firedAt    time.Time
 	}
-}
+	scheduledTimer struct {
+		ArmedTimer
+		retryAfter time.Time
+		backoff    time.Duration
+		parked     bool
+	}
+	fireResult struct {
+		timer *scheduledTimer
+		reply *Reply
+		err   error
+	}
+	// SchedulerOption configures the scheduler upon startup.
+	SchedulerOption func(*Scheduler)
+)
 
 // Scheduler coordinates durable timers across sessions using a single clock.Timer
 // set to the earliest deadline among active armed timers.
@@ -87,37 +91,31 @@ type Scheduler struct {
 	clk   clock.Clock
 	route func(sessionID string) (*Session, bool)
 
-	armMu       sync.Mutex
-	pendingArms []*ArmedTimer
-	wakeCh      chan struct{}
-	fireResCh   chan fireResult
-	stopCh      chan struct{}
-	task        *supervise.Task
-	stopOnce    sync.Once
-	fireWg      sync.WaitGroup
+	armMu        sync.Mutex
+	pendingArms  []*ArmedTimer
+	pendingWakes []string
+	wakeCh       chan struct{}
+	fireResCh    chan fireResult
+	stopCh       chan struct{}
+	fireCancel   context.CancelFunc
+	task         *supervise.Task
+	stopOnce     sync.Once
+	fireWg       sync.WaitGroup
 
-	mu     sync.Mutex
-	onFire func(*ArmedTimer)
-	onArm  func(*ArmedTimer)
+	onFire    func(*ArmedTimer)
+	onArm     func(*ArmedTimer)
+	onParked  func(*ArmedTimer)
+	onDropped func(*ArmedTimer)
 }
 
 // StartScheduler loads armed timers from store, starts the timer supervision loop,
 // and returns a running Scheduler.
 func StartScheduler(
-	ctx context.Context,
-	store Store,
-	clk clock.Clock,
-	route func(sessionID string) (*Session, bool),
-	opts ...SchedulerOption,
+	ctx context.Context, store Store, clk clock.Clock,
+	route func(sessionID string) (*Session, bool), opts ...SchedulerOption,
 ) (*Scheduler, error) {
-	if store == nil {
-		return nil, errcode.New(errcode.InvalidArgument, "store is nil")
-	}
-	if clk == nil {
-		return nil, errcode.New(errcode.InvalidArgument, "clock is nil")
-	}
-	if route == nil {
-		return nil, errcode.New(errcode.InvalidArgument, "route is nil")
+	if store == nil || clk == nil || route == nil {
+		return nil, errcode.New(errcode.InvalidArgument, "nil store, clock, or route")
 	}
 
 	initial, err := store.ListArmedTimers(ctx)
@@ -125,21 +123,15 @@ func StartScheduler(
 		return nil, fmt.Errorf("list armed timers: %w", err)
 	}
 
+	fireCtx, fireCancel := context.WithCancel(ctx)
 	sched := &Scheduler{
-		store:       store,
-		clk:         clk,
-		route:       route,
-		armMu:       sync.Mutex{},
-		pendingArms: nil,
-		wakeCh:      make(chan struct{}, 1),
-		fireResCh:   make(chan fireResult, 64),
-		stopCh:      make(chan struct{}),
-		task:        nil,
-		stopOnce:    sync.Once{},
-		fireWg:      sync.WaitGroup{},
-		mu:          sync.Mutex{},
-		onFire:      nil,
-		onArm:       nil,
+		store:      store,
+		clk:        clk,
+		route:      route,
+		wakeCh:     make(chan struct{}, 1),
+		fireResCh:  make(chan fireResult, 64),
+		stopCh:     make(chan struct{}),
+		fireCancel: fireCancel,
 	}
 
 	for _, opt := range opts {
@@ -149,7 +141,7 @@ func StartScheduler(
 	}
 
 	sched.task = supervise.Go(ctx, "coordinator.timers", func(loopCtx context.Context) error {
-		return sched.loop(loopCtx, initial)
+		return sched.loop(loopCtx, fireCtx, initial)
 	})
 
 	return sched, nil
@@ -163,15 +155,18 @@ func (s *Scheduler) Arm(t *ArmedTimer) {
 	s.armMu.Lock()
 	s.pendingArms = append(s.pendingArms, t)
 	s.armMu.Unlock()
-
 	select {
 	case s.wakeCh <- struct{}{}:
 	default:
 	}
 }
 
-// Wake prompts the scheduler loop to re-evaluate due timers and pending registrations.
-func (s *Scheduler) Wake() {
+// Wake prompts the scheduler loop to re-evaluate due timers and pending registrations,
+// unparking only timers for the given sessionID (or all sessions if sessionID is empty).
+func (s *Scheduler) Wake(sessionID string) {
+	s.armMu.Lock()
+	s.pendingWakes = append(s.pendingWakes, sessionID)
+	s.armMu.Unlock()
 	select {
 	case s.wakeCh <- struct{}{}:
 	default:
@@ -182,6 +177,9 @@ func (s *Scheduler) Wake() {
 func (s *Scheduler) Stop() {
 	s.stopOnce.Do(func() {
 		close(s.stopCh)
+		if s.fireCancel != nil {
+			s.fireCancel()
+		}
 		if s.task != nil {
 			s.task.Stop()
 			<-s.task.Done()
@@ -190,33 +188,52 @@ func (s *Scheduler) Stop() {
 	})
 }
 
-func (s *Scheduler) notifyFire(t *ArmedTimer) {
-	s.mu.Lock()
-	fn := s.onFire
-	s.mu.Unlock()
-	if fn != nil {
-		fn(t)
-	}
-}
-
 func (s *Scheduler) notifyArm(t *ArmedTimer) {
-	s.mu.Lock()
-	fn := s.onArm
-	s.mu.Unlock()
-	if fn != nil {
-		fn(t)
+	if s.onArm != nil {
+		s.onArm(t)
 	}
 }
 
-func (s *Scheduler) loop(ctx context.Context, initial []ArmedTimer) error {
+func (s *Scheduler) drainPending() ([]*ArmedTimer, []string) {
+	s.armMu.Lock()
+	arms, wakes := s.pendingArms, s.pendingWakes
+	s.pendingArms, s.pendingWakes = nil, nil
+	s.armMu.Unlock()
+	return arms, wakes
+}
+
+func handleWakes(wakes []string, active map[string]*scheduledTimer) {
+	for _, sid := range wakes {
+		for _, t := range active {
+			if sid == "" || t.SessionID == sid {
+				t.parked = false
+			}
+		}
+	}
+}
+
+func (s *Scheduler) notifySettledFire(firedT, retriedT, parkedT, droppedT *ArmedTimer) {
+	switch {
+	case retriedT != nil && s.onArm != nil:
+		s.onArm(retriedT)
+	case firedT != nil && s.onFire != nil:
+		s.onFire(firedT)
+	case parkedT != nil && s.onParked != nil:
+		s.onParked(parkedT)
+	case droppedT != nil && s.onDropped != nil:
+		s.onDropped(droppedT)
+	}
+}
+
+func (s *Scheduler) loop(ctx, fireCtx context.Context, initial []ArmedTimer) error {
 	active := make(map[string]*scheduledTimer)
-	fired := make(map[string]uint64)
+	fired := make(map[string]firedEntry)
 	inFlight := make(map[string]uint64)
 
 	for _, t := range initial {
 		tCopy := t
 		if cur, exists := active[t.TimerID]; !exists || t.Generation >= cur.Generation {
-			active[t.TimerID] = &scheduledTimer{ArmedTimer: tCopy, retryAfter: time.Time{}}
+			active[t.TimerID] = &scheduledTimer{ArmedTimer: tCopy}
 		}
 	}
 
@@ -231,7 +248,8 @@ func (s *Scheduler) loop(ctx context.Context, initial []ArmedTimer) error {
 	}()
 
 	recompute := func() {
-		s.fireDueTimers(ctx, active, fired, inFlight)
+		s.cleanFired(fired, s.clk.Now())
+		s.fireDueTimers(fireCtx, active, fired, inFlight)
 		timer, timerCh = s.updateTimer(active, inFlight, timer)
 	}
 
@@ -244,59 +262,63 @@ func (s *Scheduler) loop(ctx context.Context, initial []ArmedTimer) error {
 		case <-s.stopCh:
 			return nil
 		case <-s.wakeCh:
-			s.drainArms(active, fired)
+			arms, wakes := s.drainPending()
+			handleWakes(wakes, active)
+			s.drainArms(arms, active, fired)
 			recompute()
+			for _, t := range arms {
+				s.notifyArm(t)
+			}
 		case res := <-s.fireResCh:
-			s.onFireCompleted(res, active, fired, inFlight)
+			firedT, retriedT, parkedT, droppedT := s.onFireCompleted(ctx, res, active, fired, inFlight)
 			recompute()
+			s.notifySettledFire(firedT, retriedT, parkedT, droppedT)
 		case <-timerCh:
 			recompute()
 		}
 	}
 }
 
+func (s *Scheduler) cleanFired(fired map[string]firedEntry, now time.Time) {
+	for id, entry := range fired {
+		if now.Sub(entry.firedAt) > firedTTL {
+			delete(fired, id)
+		}
+	}
+}
+
 func (s *Scheduler) onFireCompleted(
+	ctx context.Context,
 	res fireResult,
 	active map[string]*scheduledTimer,
-	fired, inFlight map[string]uint64,
-) {
+	fired map[string]firedEntry,
+	inFlight map[string]uint64,
+) (*ArmedTimer, *ArmedTimer, *ArmedTimer, *ArmedTimer) {
 	delete(inFlight, res.timer.TimerID)
-	retried := s.handleFireResult(res, active, fired)
-	if retried {
-		s.notifyArm(&res.timer.ArmedTimer)
-	} else if res.err == nil {
-		s.notifyFire(&res.timer.ArmedTimer)
-	}
+	return s.handleFireResult(ctx, res, active, fired)
 }
 
-func (s *Scheduler) drainArms(active map[string]*scheduledTimer, fired map[string]uint64) {
-	s.armMu.Lock()
-	arms := s.pendingArms
-	s.pendingArms = nil
-	s.armMu.Unlock()
-
+func (s *Scheduler) drainArms(arms []*ArmedTimer, active map[string]*scheduledTimer, fired map[string]firedEntry) {
+	s.cleanFired(fired, s.clk.Now())
 	for _, t := range arms {
-		s.handleArm(t, active, fired)
-		s.notifyArm(t)
-	}
-}
-
-func (s *Scheduler) handleArm(t *ArmedTimer, active map[string]*scheduledTimer, fired map[string]uint64) {
-	if lastFired, ok := fired[t.TimerID]; ok && t.Generation > lastFired {
-		delete(fired, t.TimerID)
-	}
-	if fired[t.TimerID] >= t.Generation {
-		return
-	}
-	cur, exists := active[t.TimerID]
-	if !exists || t.Generation >= cur.Generation {
-		active[t.TimerID] = &scheduledTimer{ArmedTimer: *t, retryAfter: time.Time{}}
+		if entry, ok := fired[t.TimerID]; ok && t.Generation > entry.generation {
+			delete(fired, t.TimerID)
+		}
+		if fired[t.TimerID].generation < t.Generation {
+			cur, exists := active[t.TimerID]
+			if !exists || t.Generation >= cur.Generation {
+				active[t.TimerID] = &scheduledTimer{ArmedTimer: *t}
+			}
+		}
 	}
 }
 
 func (s *Scheduler) dueTimers(active map[string]*scheduledTimer, now time.Time) []*scheduledTimer {
 	var due []*scheduledTimer
 	for _, t := range active {
+		if t.parked {
+			continue
+		}
 		if !t.Deadline.After(now) && (t.retryAfter.IsZero() || !t.retryAfter.After(now)) {
 			due = append(due, t)
 		}
@@ -314,14 +336,14 @@ func (s *Scheduler) dueTimers(active map[string]*scheduledTimer, now time.Time) 
 }
 
 func (s *Scheduler) fireDueTimers(
-	ctx context.Context,
+	fireCtx context.Context,
 	active map[string]*scheduledTimer,
-	fired map[string]uint64,
+	fired map[string]firedEntry,
 	inFlight map[string]uint64,
 ) {
 	due := s.dueTimers(active, s.clk.Now())
 	for _, t := range due {
-		if fired[t.TimerID] >= t.Generation {
+		if entry, ok := fired[t.TimerID]; ok && entry.generation >= t.Generation {
 			delete(active, t.TimerID)
 			continue
 		}
@@ -329,13 +351,13 @@ func (s *Scheduler) fireDueTimers(
 			continue
 		}
 		inFlight[t.TimerID] = t.Generation
-		s.launchFire(ctx, t)
+		s.launchFire(fireCtx, t)
 	}
 }
 
-func (s *Scheduler) launchFire(ctx context.Context, t *scheduledTimer) {
+func (s *Scheduler) launchFire(fireCtx context.Context, t *scheduledTimer) {
 	s.fireWg.Add(1)
-	supervise.Go(ctx, "coordinator.timer.fire", func(fireCtx context.Context) error {
+	supervise.Go(fireCtx, "coordinator.timer.fire", func(taskCtx context.Context) error {
 		defer s.fireWg.Done()
 		sess, ok := s.route(t.SessionID)
 		if !ok || sess == nil {
@@ -344,27 +366,25 @@ func (s *Scheduler) launchFire(ctx context.Context, t *scheduledTimer) {
 		}
 
 		now := s.clk.Now()
+		meta, err := codec.MarshalCanonical(timerFiredMetadata{TimerID: t.TimerID, Generation: t.Generation})
+		if err != nil {
+			s.postFireResult(fireResult{timer: t, reply: nil, err: fmt.Errorf("%w: %w", errMarshalMetadata, err)})
+			return nil
+		}
 		req := &Request{
 			Command: &kernel.TimerFiredCommand{
-				CommandID:    "",
-				RunID:        t.RunID,
-				Origin:       defaultTimerOrigin,
-				TimerID:      t.TimerID,
-				Generation:   t.Generation,
-				ObservedTime: now,
+				CommandID: "", RunID: t.RunID, Origin: defaultTimerOrigin,
+				TimerID: t.TimerID, Generation: t.Generation, ObservedTime: now,
 			},
-			Facts:            kernel.DecisionFacts{},
-			Origin:           defaultTimerOrigin,
-			QueueDecisionRef: "",
-			Kind:             "",
-			Principal:        defaultTimerOrigin,
-			Target:           t.RunID,
-			MetadataInput:    nil,
-			ProtectedInput:   nil,
-			Payloads:         nil,
+			Facts:         kernel.DecisionFacts{},
+			Origin:        defaultTimerOrigin,
+			Kind:          CommandKindTimerFired,
+			Principal:     defaultTimerOrigin,
+			Target:        t.RunID,
+			MetadataInput: meta,
 		}
 
-		rep, err := sess.Submit(fireCtx, req)
+		rep, err := sess.Submit(taskCtx, req)
 		s.postFireResult(fireResult{timer: t, reply: &rep, err: err})
 		return nil
 	})
@@ -378,38 +398,71 @@ func (s *Scheduler) postFireResult(res fireResult) {
 }
 
 func (s *Scheduler) handleFireResult(
+	ctx context.Context,
 	res fireResult,
 	active map[string]*scheduledTimer,
-	fired map[string]uint64,
-) bool {
+	fired map[string]firedEntry,
+) (firedT, retriedT, parkedT, droppedT *ArmedTimer) {
 	t := res.timer
-	if res.err != nil {
-		var rej kernel.Rejection
-		if errors.As(res.err, &rej) && rej.Code == kernel.RejectionCodeEarlyTimer {
-			return false
-		}
-		t.retryAfter = s.clk.Now().Add(timerRetryInterval)
-		active[t.TimerID] = t
-		return true
+	if res.err == nil {
+		fired[t.TimerID] = firedEntry{generation: t.Generation, firedAt: s.clk.Now()}
+		delete(active, t.TimerID)
+		return &t.ArmedTimer, nil, nil, nil
 	}
 
-	fired[t.TimerID] = t.Generation
-	delete(active, t.TimerID)
-	return false
+	var (
+		rej     kernel.Rejection
+		rejCode string
+	)
+	if errors.As(res.err, &rej) {
+		if rej.Code == kernel.RejectionCodeEarlyTimer {
+			t.retryAfter = s.clk.Now().Add(timerBackoffStart)
+			t.backoff = 0
+			active[t.TimerID] = t
+			return nil, &t.ArmedTimer, nil, nil
+		}
+		rejCode = string(rej.Code)
+	} else if errors.Is(res.err, errMarshalMetadata) {
+		rejCode = "invalid_metadata"
+	}
+	if rejCode != "" {
+		slog.WarnContext(ctx, "timer fire rejected", "timer_id", t.TimerID, "code", rejCode)
+		delete(active, t.TimerID)
+		return nil, nil, nil, &t.ArmedTimer
+	}
+
+	if errors.Is(res.err, ErrRecoveryRequired) || errors.Is(res.err, errUnroutableSession) {
+		t.parked = true
+		t.retryAfter = time.Time{}
+		t.backoff = 0
+		active[t.TimerID] = t
+		return nil, nil, &t.ArmedTimer, nil
+	}
+
+	if errors.Is(res.err, context.Canceled) {
+		select {
+		case <-s.stopCh:
+			delete(active, t.TimerID)
+			return nil, nil, nil, nil
+		default:
+		}
+	}
+
+	if t.backoff == 0 {
+		t.backoff = timerBackoffStart
+	} else {
+		t.backoff = min(t.backoff*2, timerBackoffMax)
+	}
+	t.retryAfter = s.clk.Now().Add(t.backoff)
+	active[t.TimerID] = t
+	return nil, &t.ArmedTimer, nil, nil
 }
 
-func (s *Scheduler) updateTimer(
-	active map[string]*scheduledTimer,
-	inFlight map[string]uint64,
-	timer clock.Timer,
-) (clock.Timer, <-chan time.Time) {
-	var (
-		earliestTime  time.Time
-		earliestTimer *scheduledTimer
-	)
-
+func earliestTarget(active map[string]*scheduledTimer, inFlight map[string]uint64) (time.Time, bool) {
+	var earliestTime time.Time
+	var earliestTimer *scheduledTimer
 	for _, t := range active {
-		if inFlight[t.TimerID] >= t.Generation {
+		if t.parked || inFlight[t.TimerID] >= t.Generation {
 			continue
 		}
 		target := t.Deadline
@@ -422,14 +475,19 @@ func (s *Scheduler) updateTimer(
 			earliestTimer = t
 		}
 	}
+	return earliestTime, earliestTimer != nil
+}
 
-	if earliestTimer == nil {
+func (s *Scheduler) updateTimer(
+	active map[string]*scheduledTimer, inFlight map[string]uint64, timer clock.Timer,
+) (clock.Timer, <-chan time.Time) {
+	earliestTime, ok := earliestTarget(active, inFlight)
+	if !ok {
 		if timer != nil {
 			timer.Stop()
 		}
 		return nil, nil
 	}
-
 	d := max(0, earliestTime.Sub(s.clk.Now()))
 	if timer == nil {
 		timer = s.clk.NewTimer(d)

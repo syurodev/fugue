@@ -26,6 +26,7 @@ const (
 	testRun1           = "r1"
 	testRun2           = "r2"
 	testSessionID1     = "s1"
+	timerTestTimeout   = 5 * time.Second
 )
 
 func newTestStoreWithAdmission(queueRev uint64) *fakeStore {
@@ -85,7 +86,7 @@ func newTestSessionWithClock(
 		Clock:            fakeClk,
 		IDs:              idGen,
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
+	ctx, cancel := context.WithTimeout(t.Context(), timerTestTimeout)
 	t.Cleanup(cancel)
 	sess, err := Start(ctx, &cfg)
 	if err != nil {
@@ -563,4 +564,190 @@ func TestQueuedRunTimerNeverTouchesAdmission(t *testing.T) {
 	if sess.admission.ActiveRunID != testRun1 {
 		t.Fatalf("expected active run to remain r1, got %s", sess.admission.ActiveRunID)
 	}
+}
+
+func TestRecoveryRequiredTimerParksUntilWake(t *testing.T) {
+	t.Parallel()
+
+	startTime := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	fakeClk := clock.NewFake(startTime)
+	store := newTestStoreWithAdmission(1)
+	store.admission.OwnerIncarnation = 1
+	store.admission.ActiveRunID = testRun1
+
+	deadline := startTime.Add(5 * time.Second)
+	setupTestRunState(store, testRun1, true, map[string]*kernel.ActiveTimer{
+		testTimer1: {TimerID: testTimer1, Generation: 1, Purpose: kernel.TimerPurposeModelRetry, Deadline: deadline},
+	})
+
+	idGen := ids.NewUUIDv7(fakeClk, ids.NewDeterministic("rec-sess"))
+	cfg := Config{
+		SessionID:        testSessionID1,
+		OwnerIncarnation: 2,
+		WorkerCapacity:   1,
+		Store:            store,
+		Executor:         newFakeExecutor(),
+		Clock:            fakeClk,
+		IDs:              idGen,
+	}
+
+	ctx := t.Context()
+	sess, err := Start(ctx, &cfg)
+	if err != nil {
+		t.Fatalf("Start session: %v", err)
+	}
+	defer sess.Stop()
+
+	var mu sync.Mutex
+	activeSess := sess
+	fireCh := make(chan struct{}, 1)
+	parkedCh := make(chan struct{}, 1)
+	sched, err := StartScheduler(
+		ctx, store, fakeClk,
+		func(sessionID string) (*Session, bool) {
+			mu.Lock()
+			s := activeSess
+			mu.Unlock()
+			return s, sessionID == testSessionID1
+		},
+		WithOnFire(func(at *ArmedTimer) {
+			if at.TimerID == testTimer1 {
+				fireCh <- struct{}{}
+			}
+		}),
+		WithOnParked(func(at *ArmedTimer) {
+			if at.TimerID == testTimer1 {
+				parkedCh <- struct{}{}
+			}
+		}),
+	)
+	if err != nil {
+		t.Fatalf("StartScheduler: %v", err)
+	}
+	defer sched.Stop()
+
+	verifyParkedTimer(t, ctx, sched, fakeClk, store, deadline, fireCh, parkedCh, &activeSess, &mu, &cfg)
+}
+
+func verifyParkedTimer(
+	t *testing.T,
+	ctx context.Context,
+	sched *Scheduler,
+	fakeClk *clock.Fake,
+	store *fakeStore,
+	deadline time.Time,
+	fireCh, parkedCh <-chan struct{},
+	activeSess **Session,
+	mu *sync.Mutex,
+	cfg *Config,
+) {
+	t.Helper()
+	assertParkedDoesNotFire(t, ctx, sched, fakeClk, deadline, fireCh, parkedCh)
+
+	queueTimerAppend(store, "cmd-recovered-fire", testRun1, 2)
+	store.admission.OwnerIncarnation = 2
+	recSess, err := Start(ctx, cfg)
+	if err != nil {
+		t.Fatalf("start recovered session: %v", err)
+	}
+	defer recSess.Stop()
+
+	mu.Lock()
+	*activeSess = recSess
+	mu.Unlock()
+
+	sched.Wake(testSessionID1)
+
+	select {
+	case <-fireCh:
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for timer to fire after Wake")
+	}
+}
+
+func assertParkedDoesNotFire(
+	t *testing.T,
+	ctx context.Context,
+	sched *Scheduler,
+	fakeClk *clock.Fake,
+	deadline time.Time,
+	fireCh, parkedCh <-chan struct{},
+) {
+	t.Helper()
+	sched.Arm(&ArmedTimer{
+		TimerID:    testTimer1,
+		SessionID:  testSessionID1,
+		RunID:      testRun1,
+		Generation: 1,
+		Purpose:    kernel.TimerPurposeModelRetry,
+		Deadline:   deadline,
+	})
+
+	fakeClk.Advance(6 * time.Second)
+
+	select {
+	case <-parkedCh:
+	case <-ctx.Done():
+		t.Fatal("timeout waiting for timer to be parked")
+	}
+
+	select {
+	case <-fireCh:
+		t.Fatal("timer should not succeed while recovery required")
+	default:
+	}
+
+	fakeClk.Advance(10 * time.Minute)
+	select {
+	case <-fireCh:
+		t.Fatal("parked timer should not fire without Wake")
+	default:
+	}
+}
+
+func TestMetadataMarshalFailureDropsTimer(t *testing.T) {
+	t.Parallel()
+
+	startTime := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	fakeClk := clock.NewFake(startTime)
+	store := newTestStoreWithAdmission(1)
+	deadline := startTime.Add(5 * time.Second)
+
+	invalidTimerID := "\xff\xfe"
+	ctx, sess := newTestSessionWithClock(t, store, newFakeExecutor(), fakeClk, "marshal-fail")
+	defer sess.Stop()
+
+	droppedCh := make(chan struct{}, 1)
+	fireCh := make(chan struct{}, 1)
+	sched, err := StartScheduler(
+		ctx, store, fakeClk,
+		func(sessionID string) (*Session, bool) {
+			return sess, sessionID == testSessionID1
+		},
+		WithOnDropped(func(at *ArmedTimer) {
+			if at.TimerID == invalidTimerID {
+				droppedCh <- struct{}{}
+			}
+		}),
+		WithOnFire(func(at *ArmedTimer) {
+			if at.TimerID == invalidTimerID {
+				fireCh <- struct{}{}
+			}
+		}),
+	)
+	if err != nil {
+		t.Fatalf("StartScheduler: %v", err)
+	}
+	defer sched.Stop()
+
+	sched.Arm(&ArmedTimer{
+		TimerID:    invalidTimerID,
+		SessionID:  testSessionID1,
+		RunID:      testRun1,
+		Generation: 1,
+		Purpose:    kernel.TimerPurposeModelRetry,
+		Deadline:   deadline,
+	})
+
+	assertDroppedTimerNeverRetries(t, ctx, sched, fakeClk, fireCh, droppedCh)
 }

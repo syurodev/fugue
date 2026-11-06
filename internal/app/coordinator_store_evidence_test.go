@@ -2,13 +2,17 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
+	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/coordinator"
 	"github.com/syurodev/fugue/internal/execstore"
 	"github.com/syurodev/fugue/internal/kernel"
+	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/storage"
 )
@@ -184,4 +188,207 @@ func assertContextAdmission(t *testing.T, s *execstore.Store, runID string) {
 	if !ok || admitted.ContextEpoch != 1 || admitted.InitialContextRevision != 1 || admitted.StartRunID != realFirstRun {
 		t.Fatal("later admission must continue the durable initial context boundary")
 	}
+}
+
+const (
+	timerOrigin  = "timer"
+	staleTimerID = "timer-stale-gen"
+	cmdSchedGen2 = "cmd-sched-gen2"
+)
+
+type timerFiredMetadata struct {
+	TimerID    string `json:"TimerID"`
+	Generation uint64 `json:"Generation"`
+}
+
+func submitStaleTimer(
+	t *testing.T,
+	sess *coordinator.Session,
+	cmdID string,
+	req *coordinator.Request,
+) {
+	t.Helper()
+	reply, err := sess.Submit(t.Context(), req)
+	if err != nil {
+		t.Fatalf("stale TimerFired submit failed: %v", err)
+	}
+	if reply.Duplicate {
+		t.Fatal("first submission must not be marked duplicate")
+	}
+	if reply.Receipt.CommandID != cmdID {
+		t.Fatalf("expected command ID %s, got %s", cmdID, reply.Receipt.CommandID)
+	}
+	if reply.Receipt.Result.FirstSequence != 0 || reply.Receipt.Result.LastSequence != 0 {
+		t.Fatalf("expected 0..0 sequence range for no-op receipt, got %+v", reply.Receipt.Result)
+	}
+}
+
+func verifyPersistedReceipt(t *testing.T, s *execstore.Store, cmdID, expectedTimerID string, expectedGen uint64) {
+	t.Helper()
+	receipt, found, err := s.LookupReceipt(t.Context(), cmdID)
+	if err != nil || !found {
+		t.Fatalf("expected receipt %s to be persisted in store, found=%v err=%v", cmdID, found, err)
+	}
+	if receipt.Result.FirstSequence != 0 || receipt.Result.LastSequence != 0 {
+		t.Fatalf("persisted receipt has non-zero sequence range: %+v", receipt.Result)
+	}
+	var meta timerFiredMetadata
+	if err := json.Unmarshal(receipt.CanonicalInput, &meta); err != nil {
+		t.Fatalf("unmarshal receipt metadata: %v", err)
+	}
+	if meta.TimerID != expectedTimerID || meta.Generation != expectedGen {
+		t.Fatalf("expected metadata TimerID=%s Gen=%d, got TimerID=%s Gen=%d",
+			expectedTimerID, expectedGen, meta.TimerID, meta.Generation)
+	}
+}
+
+func testMissingTimerPersistsNoOpReceipt(t *testing.T) {
+	t.Parallel()
+	s, clk, closeHost := openCoordinatorHost(t, t.TempDir())
+	t.Cleanup(closeHost)
+
+	sess := startRealSession(t, NewCoordinatorStore(s), clk, "stale-timer")
+	defer sess.Stop()
+
+	submitRealAccept(t, sess, realFirstRun)
+
+	ctx := t.Context()
+	cmdID := "cmd-stale-timer-1"
+	meta, err := codec.MarshalCanonical(timerFiredMetadata{
+		TimerID:    "non-existent-timer",
+		Generation: 1,
+	})
+	if err != nil {
+		t.Fatalf("MarshalCanonical: %v", err)
+	}
+	req := &coordinator.Request{
+		Command: &kernel.TimerFiredCommand{
+			CommandID:    cmdID,
+			RunID:        realFirstRun,
+			Origin:       timerOrigin,
+			TimerID:      "non-existent-timer",
+			Generation:   1,
+			ObservedTime: clk.Now(),
+		},
+		Facts:         kernel.DecisionFacts{},
+		Origin:        timerOrigin,
+		Kind:          coordinator.CommandKindTimerFired,
+		Principal:     timerOrigin,
+		Target:        realFirstRun,
+		MetadataInput: meta,
+	}
+
+	submitStaleTimer(t, sess, cmdID, req)
+	verifyPersistedReceipt(t, s, cmdID, "non-existent-timer", 1)
+
+	retryReply, err := sess.Submit(ctx, req)
+	if err != nil {
+		t.Fatalf("retry submit failed: %v", err)
+	}
+	if !retryReply.Duplicate || retryReply.Receipt.CommandID != cmdID {
+		t.Fatalf("retry duplicate expected for %s, got dup=%t id=%s", cmdID, retryReply.Duplicate, retryReply.Receipt.CommandID)
+	}
+}
+
+func testStaleGenerationPersistsNoOpReceipt(t *testing.T) {
+	t.Parallel()
+	s, clk, closeHost := openCoordinatorHost(t, t.TempDir())
+	t.Cleanup(closeHost)
+
+	sess := startRealSession(t, NewCoordinatorStore(s), clk, "stale-gen")
+	submitRealAccept(t, sess, realFirstRun)
+	sess.Stop()
+
+	appendTimerScheduledGen2(t, s, clk, realFirstRun)
+
+	sess2 := startRealSession(t, NewCoordinatorStore(s), clk, "stale-gen-2")
+	defer sess2.Stop()
+
+	ctx := t.Context()
+	cmdID := "cmd-stale-gen-fire"
+	meta, err := codec.MarshalCanonical(timerFiredMetadata{
+		TimerID:    staleTimerID,
+		Generation: 1,
+	})
+	if err != nil {
+		t.Fatalf("MarshalCanonical: %v", err)
+	}
+	req := &coordinator.Request{
+		Command: &kernel.TimerFiredCommand{
+			CommandID:    cmdID,
+			RunID:        realFirstRun,
+			Origin:       timerOrigin,
+			TimerID:      staleTimerID,
+			Generation:   1,
+			ObservedTime: clk.Now(),
+		},
+		Facts:         kernel.DecisionFacts{},
+		Origin:        timerOrigin,
+		Kind:          coordinator.CommandKindTimerFired,
+		Principal:     timerOrigin,
+		Target:        realFirstRun,
+		MetadataInput: meta,
+	}
+
+	submitStaleTimer(t, sess2, cmdID, req)
+	verifyPersistedReceipt(t, s, cmdID, staleTimerID, 1)
+
+	retryReply, err := sess2.Submit(ctx, req)
+	if err != nil {
+		t.Fatalf("retry submit failed: %v", err)
+	}
+	if !retryReply.Duplicate || retryReply.Receipt.CommandID != cmdID {
+		t.Fatalf("retry duplicate expected for %s, got dup=%t id=%s", cmdID, retryReply.Duplicate, retryReply.Receipt.CommandID)
+	}
+}
+
+func appendTimerScheduledGen2(t *testing.T, s *execstore.Store, clk clock.Clock, runID string) {
+	t.Helper()
+	now := clk.Now()
+	schedEvt := &kernel.TimerScheduledEvent{
+		Envelope: kernel.Envelope{
+			RunID:       runID,
+			Sequence:    5,
+			CommandID:   cmdSchedGen2,
+			CausationID: cmdSchedGen2,
+			Origin:      timerOrigin,
+			Token:       1,
+			Timestamp:   now,
+		},
+		TimerID:            staleTimerID,
+		Generation:         2,
+		Purpose:            kernel.TimerPurposeModelRetry,
+		TargetID:           "target-1",
+		ClockDomain:        "utc_wall",
+		SchedulingDeadline: now.Add(10 * time.Minute),
+		Duration:           10 * time.Minute,
+		PolicyVersion:      "v1",
+	}
+
+	metaBytes := []byte(`{"Generation":2,"TimerID":"` + staleTimerID + `"}`)
+	req := &execstore.AppendRequest{
+		SessionID:                 adapterSession,
+		RunID:                     runID,
+		CommandID:                 cmdSchedGen2,
+		Kind:                      coordinator.CommandKindTimerFired,
+		Principal:                 timerOrigin,
+		Target:                    runID,
+		CodecVersion:              codec.CodecV1,
+		MetadataInput:             metaBytes,
+		CanonicalInput:            metaBytes,
+		ExpectedRunRevision:       2,
+		ExpectedAdmissionRevision: 2,
+		AdmissionFence:            &execstore.AdmissionFence{Token: 1, OwnerIncarnation: 1},
+		Events:                    []kernel.Event{schedEvt},
+		Result:                    codec.ReceiptResult{FirstSequence: 5, LastSequence: 5},
+	}
+	if _, err := s.Append(t.Context(), req); err != nil {
+		t.Fatalf("append timer scheduled gen 2: %v", err)
+	}
+}
+
+func TestStaleTimerFiredPersistsNoOpReceipt(t *testing.T) {
+	t.Parallel()
+	t.Run("missing_timer", testMissingTimerPersistsNoOpReceipt)
+	t.Run("stale_generation", testStaleGenerationPersistsNoOpReceipt)
 }

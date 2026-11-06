@@ -68,6 +68,11 @@ type resumeRunMeta struct {
 	RunRevision *uint64 `json:"RunRevision,omitempty"`
 }
 
+type timerFiredMeta struct {
+	TimerID    *string `json:"TimerID,omitempty"`
+	Generation *uint64 `json:"Generation,omitempty"`
+}
+
 func newMetadataTarget(kind string) (any, error) {
 	switch kind {
 	case cmdAcceptRun:
@@ -88,6 +93,8 @@ func newMetadataTarget(kind string) (any, error) {
 		return new(selectRunContextMeta), nil
 	case cmdResumeRun, cmdRecoverRun:
 		return new(resumeRunMeta), nil
+	case cmdTimerFired:
+		return new(timerFiredMeta), nil
 	default:
 		return nil, fmt.Errorf("%w: command kind %q is not permitted as metadata-only", ErrInvalidBatch, kind)
 	}
@@ -201,6 +208,17 @@ func isSafeMetadataField(kind, field string) bool {
 		return field == "OwnerIncarnation"
 	case cmdAdvanceRun:
 		return field == "StepIndex"
+	case cmdResumeRun, cmdRecoverRun:
+		return field == fieldRunRevision
+	case cmdTimerFired:
+		return field == "TimerID" || field == "Generation"
+	default:
+		return isSafeActionMetadataField(kind, field)
+	}
+}
+
+func isSafeActionMetadataField(kind, field string) bool {
+	switch kind {
 	case cmdRequestStop:
 		return isSafeStopField(field)
 	case cmdExtendBudget:
@@ -209,8 +227,6 @@ func isSafeMetadataField(kind, field string) bool {
 		return isSafeCloseField(field)
 	case cmdSelectRunContext:
 		return isSafeContextField(field)
-	case cmdResumeRun, cmdRecoverRun:
-		return field == fieldRunRevision
 	default:
 		return false
 	}
@@ -220,7 +236,7 @@ func isMetadataOnlyPermitted(kind string) bool {
 	switch kind {
 	case cmdAcceptRun, cmdAdmitRun, cmdAcquireRunOwnership, cmdAdvanceRun,
 		cmdRequestStop, cmdExtendBudget, cmdCloseRunWithoutPayload, cmdSelectRunContext,
-		cmdResumeRun, cmdRecoverRun:
+		cmdResumeRun, cmdRecoverRun, cmdTimerFired:
 		return true
 	default:
 		return false
