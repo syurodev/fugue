@@ -119,6 +119,12 @@ func (s *Store) writeTrailingRows(
 	if err := writeTranscriptProjections(ctx, conn, req, state); err != nil {
 		return err
 	}
+	if err := s.checkFault(FaultBeforeTimers); err != nil {
+		return err
+	}
+	if err := writeTimerProjections(ctx, conn, req); err != nil {
+		return err
+	}
 	if err := s.checkFault(FaultBeforeReceiptInsert); err != nil {
 		return err
 	}

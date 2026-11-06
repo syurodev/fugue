@@ -209,5 +209,9 @@ func (s *Store) RebuildRun(ctx context.Context, runID string) (*kernel.State, er
 		return nil, err
 	}
 
+	if err := s.verifyTimerProjection(ctx, runID, state); err != nil {
+		return nil, err
+	}
+
 	return state, nil
 }

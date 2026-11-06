@@ -73,7 +73,7 @@ func assertTablesEmpty(ctx context.Context, t *testing.T, db *sql.DB, fault Faul
 	t.Helper()
 	tables := []string{
 		"exec_admission", "exec_session_keys", "exec_payloads", "exec_runs", "exec_events",
-		"exec_invocations", "exec_attempts", "exec_transcript", "exec_receipts",
+		"exec_invocations", "exec_attempts", "exec_transcript", "exec_timers", "exec_receipts",
 	}
 
 	for _, table := range tables {
@@ -98,6 +98,7 @@ func TestExecutionBatchAtomicAcrossReopen(t *testing.T) {
 		FaultBeforeEventAppend,
 		FaultBeforeProjections,
 		FaultBeforeTranscript,
+		FaultBeforeTimers,
 		FaultBeforeReceiptInsert,
 		FaultBeforeAdmissionUpdate,
 		FaultBeforeCommit,
