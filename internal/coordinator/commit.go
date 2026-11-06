@@ -88,7 +88,7 @@ func (s *Session) refreshAppendRevisions(ctx context.Context, tr *Transition) er
 		if err := s.refreshAdmission(ctx, false); err != nil {
 			return err
 		}
-		tr.ExpectedAdmissionRevision = s.admission.Revision
+		tr.ExpectedAdmissionRevision = s.expectedAdmissionRevision()
 	}
 	if _, known := s.runRevs[tr.RunID]; !known {
 		if err := s.loadRun(ctx, tr.RunID); err != nil {
@@ -186,7 +186,7 @@ func (s *Session) appendAgain(ctx context.Context, st *step) {
 	}
 	st.attempt++
 	st.t.ExpectedRunRevision = s.runRevs[st.t.RunID]
-	st.t.ExpectedAdmissionRevision = s.admission.Revision
+	st.t.ExpectedAdmissionRevision = s.expectedAdmissionRevision()
 	s.commit(ctx, st)
 }
 
@@ -282,6 +282,14 @@ func (s *Session) reload(ctx context.Context, runID string) {
 	if err := s.refreshAdmission(ctx, true); err != nil {
 		s.admissionStale = true
 	}
+}
+
+// expectedAdmissionRevision is the revision an append must expect. A session
+// with no admission row reads back revision 0 and the store creates the row at
+// revision 1, so the first append expects 1. The adapter passes this value
+// through unchanged; this is the only place that rule lives.
+func (s *Session) expectedAdmissionRevision() uint64 {
+	return max(s.admission.Revision, 1)
 }
 
 // refreshAdmission loads the admission row when it is stale or force is set.

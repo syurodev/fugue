@@ -76,7 +76,7 @@ func adapterAccept() *coordinator.Transition {
 	accepted.Envelope = kernel.Envelope{RunID: adapterRun, Sequence: 1, CommandID: adapterAcceptCommand, CausationID: adapterAcceptCommand, Origin: adapterOriginUser, Timestamp: time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)}
 	accepted.SessionID = adapterSession
 	accepted.Budgets = kernel.DefaultRunBudgets()
-	return &coordinator.Transition{SessionID: adapterSession, RunID: adapterRun, CommandID: adapterAcceptCommand, Kind: "AcceptRun", Principal: adapterOriginUser, Target: adapterRun, Fence: coordinator.Fence{OwnerIncarnation: 1}, MetadataInput: []byte(`{}`), Events: []kernel.Event{accepted}, Result: codec.ReceiptResult{FirstSequence: 1, LastSequence: 1}}
+	return &coordinator.Transition{SessionID: adapterSession, RunID: adapterRun, CommandID: adapterAcceptCommand, Kind: "AcceptRun", Principal: adapterOriginUser, Target: adapterRun, Fence: coordinator.Fence{OwnerIncarnation: 1}, ExpectedAdmissionRevision: 1, MetadataInput: []byte(`{}`), Events: []kernel.Event{accepted}, Result: codec.ReceiptResult{FirstSequence: 1, LastSequence: 1}}
 }
 
 func TestAdapterClassifiesDefiniteRejections(t *testing.T) {

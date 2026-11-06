@@ -3,9 +3,9 @@ package coordinator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"slices"
-	"strconv"
 
 	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/kernel"
@@ -60,11 +60,18 @@ func (q *sessionQueue) empty() bool {
 	return len(q.items) == 0
 }
 
-func (s *Session) buildAdmitTransition(item *queuedRun, cmdID string, token, epoch uint64, events []kernel.Event) *Transition {
-	metadata := strconv.AppendUint([]byte(`{"token":`), token, 10)
-	metadata = append(metadata, `,"ContextEpoch":`...)
-	metadata = strconv.AppendUint(metadata, epoch, 10)
-	metadata = append(metadata, '}')
+// admitMetadata is the command metadata an admission is stored with. The field
+// names are the ones the execution store's metadata allowlist accepts.
+type admitMetadata struct {
+	Token        uint64 `json:"token"`
+	ContextEpoch uint64 `json:"ContextEpoch"`
+}
+
+func (s *Session) buildAdmitTransition(item *queuedRun, cmdID string, token, epoch uint64, events []kernel.Event) (*Transition, error) {
+	metadata, err := codec.MarshalCanonical(admitMetadata{Token: token, ContextEpoch: epoch})
+	if err != nil {
+		return nil, fmt.Errorf("marshal admit metadata: %w", err)
+	}
 	return &Transition{
 		SessionID: s.cfg.SessionID,
 		RunID:     item.runID,
@@ -78,7 +85,7 @@ func (s *Session) buildAdmitTransition(item *queuedRun, cmdID string, token, epo
 			QueueRevision:    0,
 		},
 		ExpectedRunRevision:       s.runRevs[item.runID],
-		ExpectedAdmissionRevision: s.admission.Revision,
+		ExpectedAdmissionRevision: s.expectedAdmissionRevision(),
 		Events:                    events,
 		Result: codec.ReceiptResult{
 			FirstSequence: events[0].EventEnvelope().Sequence,
@@ -87,7 +94,7 @@ func (s *Session) buildAdmitTransition(item *queuedRun, cmdID string, token, epo
 		MetadataInput:  metadata,
 		ProtectedInput: nil,
 		CorrelationID:  "",
-	}
+	}, nil
 }
 
 // maybeAdmitNext admits the head of the queue when no run is active. A failure
@@ -124,8 +131,13 @@ func (s *Session) maybeAdmitNext(ctx context.Context) {
 		return
 	}
 
+	tr, err := s.buildAdmitTransition(item, item.admitCmdID, token, initial.epoch, events)
+	if err != nil {
+		s.deferAdmission(ctx, item, err)
+		return
+	}
 	s.commit(ctx, &step{
-		t:       s.buildAdmitTransition(item, item.admitCmdID, token, initial.epoch, events),
+		t:       tr,
 		events:  events,
 		attempt: 0,
 		done: func(context.Context, *AppendResult) {

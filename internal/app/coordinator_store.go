@@ -46,9 +46,6 @@ func appendRequest(tr *coordinator.Transition) *execstore.AppendRequest {
 		ExpectedRunRevision: tr.ExpectedRunRevision, ExpectedAdmissionRevision: tr.ExpectedAdmissionRevision,
 		Events: tr.Events, Result: tr.Result, CorrelationID: tr.CorrelationID,
 	}
-	if req.ExpectedAdmissionRevision == 0 {
-		req.ExpectedAdmissionRevision = 1
-	}
 	if tr.Fence.AdmissionToken != 0 {
 		req.AdmissionFence = &execstore.AdmissionFence{Token: tr.Fence.AdmissionToken, OwnerIncarnation: tr.Fence.OwnerIncarnation}
 	} else {
