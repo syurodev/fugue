@@ -117,6 +117,11 @@ func (s *Session) applyAppended(ctx context.Context, st *step, res *AppendResult
 	}
 	s.runRevs[runID] = res.RunRevision
 	s.admission.Revision = res.AdmissionRevision
+	// Queue appends also change the durable queue fence; read it before building
+	// another transition rather than deriving it from the event batch.
+	if st.t.Fence.AdmissionToken == 0 {
+		s.admissionStale = true
+	}
 }
 
 // readBack asks the store once, inline, what became of the command. When that

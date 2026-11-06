@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"slices"
+	"strconv"
 
 	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/kernel"
@@ -59,7 +60,11 @@ func (q *sessionQueue) empty() bool {
 	return len(q.items) == 0
 }
 
-func (s *Session) buildAdmitTransition(item *queuedRun, cmdID string, token uint64, events []kernel.Event) *Transition {
+func (s *Session) buildAdmitTransition(item *queuedRun, cmdID string, token, epoch uint64, events []kernel.Event) *Transition {
+	metadata := strconv.AppendUint([]byte(`{"token":`), token, 10)
+	metadata = append(metadata, `,"ContextEpoch":`...)
+	metadata = strconv.AppendUint(metadata, epoch, 10)
+	metadata = append(metadata, '}')
 	return &Transition{
 		SessionID: s.cfg.SessionID,
 		RunID:     item.runID,
@@ -79,7 +84,7 @@ func (s *Session) buildAdmitTransition(item *queuedRun, cmdID string, token uint
 			FirstSequence: events[0].EventEnvelope().Sequence,
 			LastSequence:  events[len(events)-1].EventEnvelope().Sequence,
 		},
-		MetadataInput:  nil,
+		MetadataInput:  metadata,
 		ProtectedInput: nil,
 		CorrelationID:  "",
 	}
@@ -120,7 +125,7 @@ func (s *Session) maybeAdmitNext(ctx context.Context) {
 	}
 
 	s.commit(ctx, &step{
-		t:       s.buildAdmitTransition(item, item.admitCmdID, token, events),
+		t:       s.buildAdmitTransition(item, item.admitCmdID, token, initial.epoch, events),
 		events:  events,
 		attempt: 0,
 		done: func(context.Context, *AppendResult) {

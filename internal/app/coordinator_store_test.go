@@ -16,6 +16,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/redact"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/storage"
 	"github.com/syurodev/fugue/internal/vault"
 )
@@ -24,6 +25,11 @@ const (
 	adapterRun           = "run"
 	adapterSession       = "session"
 	adapterAcceptCommand = "accept"
+	adapterOriginUser    = "user"
+	adapterModelID       = "model"
+	realFirstRun         = "first"
+	realSecondRun        = "second"
+	realThirdRun         = "third"
 )
 
 var errAdapterFault = errors.New("adapter fault")
@@ -67,10 +73,10 @@ func newAdapterStore(t *testing.T, unlocked bool) *execstore.Store {
 
 func adapterAccept() *coordinator.Transition {
 	accepted := new(kernel.RunAcceptedEvent)
-	accepted.Envelope = kernel.Envelope{RunID: adapterRun, Sequence: 1, CommandID: adapterAcceptCommand, CausationID: adapterAcceptCommand, Origin: "user", Timestamp: time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)}
+	accepted.Envelope = kernel.Envelope{RunID: adapterRun, Sequence: 1, CommandID: adapterAcceptCommand, CausationID: adapterAcceptCommand, Origin: adapterOriginUser, Timestamp: time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC)}
 	accepted.SessionID = adapterSession
 	accepted.Budgets = kernel.DefaultRunBudgets()
-	return &coordinator.Transition{SessionID: adapterSession, RunID: adapterRun, CommandID: adapterAcceptCommand, Kind: "AcceptRun", Principal: "user", Target: adapterRun, Fence: coordinator.Fence{OwnerIncarnation: 1}, MetadataInput: []byte(`{}`), Events: []kernel.Event{accepted}, Result: codec.ReceiptResult{FirstSequence: 1, LastSequence: 1}}
+	return &coordinator.Transition{SessionID: adapterSession, RunID: adapterRun, CommandID: adapterAcceptCommand, Kind: "AcceptRun", Principal: adapterOriginUser, Target: adapterRun, Fence: coordinator.Fence{OwnerIncarnation: 1}, MetadataInput: []byte(`{}`), Events: []kernel.Event{accepted}, Result: codec.ReceiptResult{FirstSequence: 1, LastSequence: 1}}
 }
 
 func TestAdapterClassifiesDefiniteRejections(t *testing.T) {
@@ -208,11 +214,11 @@ func adapterResponseBatch() *coordinator.Transition {
 	step.StepIndex = 1
 	plan := new(kernel.ModelRequestPlannedEvent)
 	plan.Envelope = env(4)
-	plan.InvocationID = "model"
+	plan.InvocationID = adapterModelID
 	plan.FirstAttemptID = "attempt"
 	response := new(kernel.ModelResponseRecordedEvent)
 	response.Envelope = env(5)
-	response.InvocationID = "model"
+	response.InvocationID = adapterModelID
 	response.AttemptID = "attempt"
 	response.ResponseRef = "response"
 	response.UsageStatus = "known"
@@ -289,4 +295,68 @@ func TestAdapterMarksRevisionsUnavailableAfterConfirmedCommit(t *testing.T) {
 	if !result.RevisionsUnavailable || result.RunRevision != 0 || result.AdmissionRevision != 0 || result.Receipt.CommandID != adapterAcceptCommand {
 		t.Fatal("confirmed commit must retain receipt and mark failed revision reads without guessing")
 	}
+}
+
+// This catches a coordinator admission that never reaches the durable row.
+func TestAutomaticAdmissionPersistsCallerPlanThroughRealStore(t *testing.T) {
+	t.Parallel()
+	s, clk, closeHost := openCoordinatorHost(t, t.TempDir())
+	t.Cleanup(closeHost)
+	barrier := &realAdmissionBarrier{Store: NewCoordinatorStore(s), reached: make(chan string, 8), release: make(chan struct{}), results: make(chan error, 8)}
+	close(barrier.release)
+	sess := startRealSession(t, barrier, clk, "auto")
+	req := realAccept(realFirstRun)
+	if _, err := sess.Submit(t.Context(), req); err != nil {
+		t.Fatal("accept run")
+	}
+	select {
+	case appendErr := <-barrier.results:
+		if appendErr != nil {
+			t.Fatal("automatic admission append must commit")
+		}
+	default:
+		t.Fatal("automatic admission did not append")
+	}
+	assertInitialAdmission(t, s)
+}
+
+func TestConcurrentAdmissionOnlyOneCommits(t *testing.T) {
+	t.Parallel()
+	s, clk, closeHost := openCoordinatorHost(t, t.TempDir())
+	t.Cleanup(closeHost)
+	barrier := &realAdmissionBarrier{
+		Store: NewCoordinatorStore(s), reached: make(chan string, 8),
+		release: make(chan struct{}), results: make(chan error, 8),
+	}
+	first := startRealSession(t, barrier, clk, "first-owner")
+	second := startRealSession(t, barrier, clk, "second-owner")
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	one := supervise.Go(ctx, "test.first_accept", func(taskCtx context.Context) error {
+		return submitRealRequest(taskCtx, first, realAccept(realFirstRun))
+	})
+	defer stopSubmission(one)
+	waitAdmissionBarrier(t, ctx, barrier.reached)
+	two := supervise.Go(ctx, "test.second_accept", func(taskCtx context.Context) error {
+		return submitRealRequest(taskCtx, second, realAccept(realSecondRun))
+	})
+	defer stopSubmission(two)
+	waitAdmissionBarrier(t, ctx, barrier.reached)
+	close(barrier.release)
+	if one.Wait() != nil || two.Wait() != nil {
+		t.Fatal("both accepts must commit before competing admissions")
+	}
+	assertSingleAdmission(t, s)
+	left, right := <-barrier.results, <-barrier.results
+	if (left == nil) == (right == nil) {
+		t.Fatal("exactly one admission append must commit")
+	}
+	loser := left
+	if loser == nil {
+		loser = right
+	}
+	if !errors.Is(loser, execstore.ErrStaleRevision) || errors.Is(loser, coordinator.ErrCommitUnknown) {
+		t.Fatal("losing admission must be a definite ErrStaleRevision")
+	}
+	assertRejectedAdmissionHasOnlyAcceptance(t, s, realFirstRun)
 }
