@@ -29,6 +29,14 @@ type Config struct {
 	// IDs makes command IDs and worker reservation refs; a reservation ref is
 	// recorded and must never repeat, so the generator must not either.
 	IDs ids.Generator
+	// OnCommitted is called on the actor after every applied commit — a
+	// submission, an admission, a dispatch or a worker observation, including
+	// one settled by a read-back — with the run's snapshot. The snapshot is the
+	// actor's state at delivery, so a commit whose completion ran a follow-up
+	// commit (an accept admitted immediately) delivers the later state. State is
+	// never mutated after publication, but the hook must not block and must not
+	// call back into the session synchronously.
+	OnCommitted func(runID string, state *kernel.State)
 }
 
 // Request defines a command and caller context for the session actor.
@@ -67,13 +75,15 @@ type submitReply struct {
 	err   error
 }
 
-// submission is one mailbox message: a caller request, a worker observation or
-// the result of a background read-back.
+// submission is one mailbox message: a caller request, a worker observation,
+// the result of a background read-back, or a worker whose executor abandoned
+// its work without a terminal observation.
 type submission struct {
-	req      Request
-	obs      *Observation
-	resolved *resolution
-	replyCh  chan submitReply
+	req       Request
+	obs       *Observation
+	resolved  *resolution
+	abandoned *Lease
+	replyCh   chan submitReply
 }
 
 // Session is the per-session coordinator actor. Everything below the channels
@@ -106,7 +116,6 @@ type Session struct {
 	onPark       func()
 	onResolve    func(time.Time)
 	onTimerArmed func()
-	onCommitted  func()
 }
 
 // Start loads the admission row, validates ownership, and starts the actor goroutine.
@@ -159,7 +168,6 @@ func newSessionInstance(cfg *Config, adm *Admission, inherited string, cancel co
 		onPark:         nil,
 		onResolve:      nil,
 		onTimerArmed:   nil,
-		onCommitted:    nil,
 	}
 	return s
 }
@@ -175,7 +183,18 @@ func (s *Session) startWorkers(actorCtx context.Context) {
 					if !ok {
 						return nil
 					}
-					s.cfg.Executor.Execute(wCtx, w, s.report)
+					// Report is expected from the Execute call stack; the
+					// atomic guards the ordering against a late report.
+					terminal := &atomic.Bool{}
+					s.cfg.Executor.Execute(wCtx, w, func(obs *Observation) {
+						if obs != nil && isTerminalObservation(obs.Command) {
+							terminal.Store(true)
+						}
+						s.report(obs)
+					})
+					if !terminal.Load() {
+						s.abandon(w.Lease)
+					}
 				}
 			}
 		})
@@ -189,10 +208,11 @@ func (s *Session) Submit(ctx context.Context, r *Request) (Reply, error) {
 		return Reply{}, errcode.New(errcode.InvalidArgument, "request is nil")
 	}
 	return s.enqueue(ctx, &submission{
-		req:      *r,
-		obs:      nil,
-		resolved: nil,
-		replyCh:  make(chan submitReply, 1),
+		req:       *r,
+		obs:       nil,
+		resolved:  nil,
+		abandoned: nil,
+		replyCh:   make(chan submitReply, 1),
 	})
 }
 
@@ -247,10 +267,29 @@ func (s *Session) report(obs *Observation) {
 		return
 	}
 	sub := submission{
-		req:      Request{},
-		obs:      obs,
-		resolved: nil,
-		replyCh:  nil,
+		req:       Request{},
+		obs:       obs,
+		resolved:  nil,
+		abandoned: nil,
+		replyCh:   nil,
+	}
+	select {
+	case s.mailbox <- sub:
+	case <-s.stopped:
+	}
+}
+
+// abandon tells the actor that the executor returned from its Execute call
+// without a terminal observation, so no commit will ever complete this
+// attempt's slot. The error itself, with its one log line, is the executor's
+// business; the coordinator only reclaims the capacity.
+func (s *Session) abandon(lease Lease) {
+	sub := submission{
+		req:       Request{},
+		obs:       nil,
+		resolved:  nil,
+		abandoned: &lease,
+		replyCh:   nil,
 	}
 	select {
 	case s.mailbox <- sub:
@@ -296,11 +335,23 @@ func (s *Session) handleSubmission(ctx context.Context, sub *submission) {
 		s.handleResolution(ctx, sub.resolved)
 		return
 	}
+	if sub.abandoned != nil {
+		s.handleAbandoned(ctx, sub.abandoned)
+		return
+	}
 	if sub.obs != nil {
 		s.handleObservation(ctx, sub, sub.obs)
 		return
 	}
 	s.handleRequest(ctx, sub)
+}
+
+// handleAbandoned reclaims the slot of an attempt whose executor abandoned it.
+// The attempt keeps whatever state its dispatch committed — no events are
+// appended, nothing retries — so only the capacity comes back.
+func (s *Session) handleAbandoned(ctx context.Context, lease *Lease) {
+	s.completeSlot(ctx, attemptKey{runID: lease.RunID, invocationID: lease.InvocationID, attemptID: lease.AttemptID})
+	s.retryParked(ctx)
 }
 
 func (s *Session) handleRequest(ctx context.Context, sub *submission) {
@@ -484,11 +535,14 @@ func (s *Session) requestCommitted(
 		Receipt:   res.Receipt,
 	}, nil)
 
-	s.notifyCommitted()
+	s.notifyCommitted(runID)
 }
 
-func (s *Session) notifyCommitted() {
-	if s.onCommitted != nil {
-		s.onCommitted()
+// notifyCommitted hands the run's post-commit snapshot to the configured hook.
+// Evolve is copy-on-write and every commit replaces s.runs[runID], so the
+// published state is never mutated by a later commit.
+func (s *Session) notifyCommitted(runID string) {
+	if s.cfg.OnCommitted != nil {
+		s.cfg.OnCommitted(runID, s.runs[runID])
 	}
 }

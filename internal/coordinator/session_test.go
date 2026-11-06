@@ -118,6 +118,10 @@ func verifySubmitEnvelopeTransitions(t *testing.T, store *fakeStore, fakeClk clo
 }
 
 func startSingleCapacitySession(t *testing.T, store *fakeStore, seed string) (context.Context, *Session) {
+	return startSingleCapacitySessionHook(t, store, seed, nil)
+}
+
+func startSingleCapacitySessionHook(t *testing.T, store *fakeStore, seed string, onCommitted func(string, *kernel.State)) (context.Context, *Session) {
 	t.Helper()
 	fakeClk := clock.NewFake(time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC))
 	idGen := ids.NewUUIDv7(fakeClk, ids.NewDeterministic(seed))
@@ -130,6 +134,7 @@ func startSingleCapacitySession(t *testing.T, store *fakeStore, seed string) (co
 		Executor:         exec,
 		Clock:            fakeClk,
 		IDs:              idGen,
+		OnCommitted:      onCommitted,
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
 	t.Cleanup(cancel)
@@ -341,16 +346,14 @@ func TestCallerCancellationDoesNotAbortAcceptedCommand(t *testing.T) {
 
 	appendBlocked, releaseAppend, appendDone := setupBlockedAppend(t, store)
 
-	sessCtx, sess := startSingleCapacitySession(t, store, "cancel-test")
-	defer sess.Stop()
-
 	committed := make(chan struct{}, 1)
-	sess.onCommitted = func() {
+	sessCtx, sess := startSingleCapacitySessionHook(t, store, "cancel-test", func(string, *kernel.State) {
 		select {
 		case committed <- struct{}{}:
 		default:
 		}
-	}
+	})
+	defer sess.Stop()
 
 	callerCtx, cancelCaller := context.WithCancel(sessCtx)
 

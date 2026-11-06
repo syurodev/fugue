@@ -465,6 +465,7 @@ func TestWorkerReportsViaCallback(t *testing.T) {
 		done <- struct{}{}
 	}
 
+	committed := make(chan struct{}, 2)
 	cfg := Config{
 		SessionID:        "s1",
 		OwnerIncarnation: 1,
@@ -473,6 +474,9 @@ func TestWorkerReportsViaCallback(t *testing.T) {
 		Executor:         exec,
 		Clock:            fakeClk,
 		IDs:              idGen,
+		OnCommitted: func(string, *kernel.State) {
+			committed <- struct{}{}
+		},
 	}
 
 	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
@@ -482,11 +486,6 @@ func TestWorkerReportsViaCallback(t *testing.T) {
 		t.Fatalf("start session failed: %v", err)
 	}
 	defer sess.Stop()
-
-	committed := make(chan struct{}, 2)
-	sess.onCommitted = func() {
-		committed <- struct{}{}
-	}
 
 	req := makeModelDispatchRequest("r1", "m1", "a1", "cmd-disp-cb")
 	_, err = sess.Submit(ctx, &req)
