@@ -63,6 +63,10 @@ func (s *Session) busy(runID string) bool {
 // else happens to the run; a definite rejection reloads the run and the
 // admission row so the next append starts from what the store holds.
 func (s *Session) commit(ctx context.Context, st *step) {
+	if err := s.refreshAppendRevisions(ctx, st.t); err != nil {
+		st.fail(ctx, err)
+		return
+	}
 	res, err := s.cfg.Store.Append(ctx, st.t)
 	if err == nil {
 		s.applyAppended(ctx, st, &res)
@@ -77,6 +81,24 @@ func (s *Session) commit(ctx context.Context, st *step) {
 	st.fail(ctx, err)
 }
 
+// Confirmed events remain usable by completion callbacks, while missing revision
+// entries prevent the next append from trusting an incomplete cache update.
+func (s *Session) refreshAppendRevisions(ctx context.Context, tr *Transition) error {
+	if s.admissionStale {
+		if err := s.refreshAdmission(ctx, false); err != nil {
+			return err
+		}
+		tr.ExpectedAdmissionRevision = s.admission.Revision
+	}
+	if _, known := s.runRevs[tr.RunID]; !known {
+		if err := s.loadRun(ctx, tr.RunID); err != nil {
+			return err
+		}
+		tr.ExpectedRunRevision = s.runRevs[tr.RunID]
+	}
+	return nil
+}
+
 // applyAppended folds a confirmed append into the cache. A duplicate append means
 // an earlier attempt committed these events, so the store is the only truth.
 func (s *Session) applyAppended(ctx context.Context, st *step, res *AppendResult) {
@@ -87,6 +109,11 @@ func (s *Session) applyAppended(ctx context.Context, st *step, res *AppendResult
 	}
 	for _, ev := range st.events {
 		s.runs[runID] = kernel.Evolve(s.runs[runID], ev)
+	}
+	if res.RevisionsUnavailable {
+		delete(s.runRevs, runID)
+		s.admissionStale = true
+		return
 	}
 	s.runRevs[runID] = res.RunRevision
 	s.admission.Revision = res.AdmissionRevision

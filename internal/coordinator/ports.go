@@ -14,6 +14,12 @@ type Fence struct {
 	QueueRevision    uint64 // used only when AdmissionToken == 0
 }
 
+// Payload carries protected event content to the adapter; the coordinator treats it as opaque.
+type Payload struct {
+	ID, Kind  string
+	Plaintext []byte
+}
+
 // Transition describes an atomic state transition to be committed to the store.
 type Transition struct {
 	SessionID                 string
@@ -30,6 +36,7 @@ type Transition struct {
 	MetadataInput             []byte
 	ProtectedInput            []byte // sealed by the adapter outside the transaction
 	CorrelationID             string
+	Payloads                  []Payload
 }
 
 // AppendResult is the outcome of a confirmed transition append.
@@ -38,6 +45,8 @@ type AppendResult struct {
 	Receipt           codec.Receipt
 	RunRevision       uint64
 	AdmissionRevision uint64
+	// RevisionsUnavailable marks a confirmed commit whose revision reads failed.
+	RevisionsUnavailable bool
 }
 
 // CommitResolution classifies whether an uncertain commit succeeded.
@@ -98,6 +107,7 @@ type Observation struct {
 	Facts          kernel.DecisionFacts
 	MetadataInput  []byte
 	ProtectedInput []byte
+	Payloads       []Payload
 }
 
 // Executor executes dispatched work items and reports observations.

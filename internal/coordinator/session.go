@@ -50,6 +50,7 @@ type Request struct {
 	Target           string
 	MetadataInput    []byte
 	ProtectedInput   []byte
+	Payloads         []Payload
 }
 
 // Reply reports the outcome of a submitted command.
@@ -276,7 +277,9 @@ func (s *Session) respond(sub *submission, reply *Reply, err error) {
 
 func (s *Session) ensureRunLoaded(ctx context.Context, runID string) (*kernel.State, error) {
 	if state, exists := s.runs[runID]; exists {
-		return state, nil
+		if _, fresh := s.runRevs[runID]; fresh {
+			return state, nil
+		}
 	}
 	if err := s.loadRun(ctx, runID); err != nil {
 		return nil, err

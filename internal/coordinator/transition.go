@@ -59,6 +59,7 @@ func (s *Session) buildTransition(
 		},
 		MetadataInput:  req.MetadataInput,
 		ProtectedInput: req.ProtectedInput,
+		Payloads:       req.Payloads,
 		CorrelationID:  "",
 	}
 }
