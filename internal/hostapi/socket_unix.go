@@ -5,29 +5,23 @@ package hostapi
 import (
 	"io/fs"
 	"os"
-	"path/filepath"
 	"syscall"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
 // osDirs opens directories on unix systems: the final path component is
-// opened through an os.Root with O_DIRECTORY|O_NOFOLLOW, so a symlinked or
-// swapped directory fails the open, and Stat and Chmod act on that open
-// descriptor.
+// opened with O_DIRECTORY|O_NOFOLLOW directly, so a symlinked or swapped
+// directory fails the open even when the symlink target stays inside the
+// parent, and Stat and Chmod act on that open descriptor.
 type osDirs struct{}
 
 func (osDirs) Open(path string) (Dir, error) {
-	root, err := os.OpenRoot(filepath.Dir(path))
-	if err != nil {
-		return nil, errcode.Wrap(errcode.Internal, "open parent of socket directory "+path, err)
-	}
-	f, err := root.OpenFile(filepath.Base(path), os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
-	closeQuietly(root)
+	fd, err := syscall.Open(path, syscall.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW|syscall.O_CLOEXEC, 0)
 	if err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "open socket directory "+path, err)
 	}
-	return osDir{file: f}, nil
+	return osDir{file: os.NewFile(uintptr(fd), path)}, nil
 }
 
 type osDir struct{ file *os.File }

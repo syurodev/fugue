@@ -210,6 +210,27 @@ func TestSocketDirectorySymlinkIsRejected(t *testing.T) {
 	}
 }
 
+// TestSiblingSymlinkSocketDirectoryIsRejected pins the in-root symlink case:
+// the parent of the data directory holds link -> real, both inside the same
+// parent, so an implementation that follows symlinks inside its root would
+// bind the socket through the link.
+func TestSiblingSymlinkSocketDirectoryIsRejected(t *testing.T) {
+	t.Parallel()
+	parent := shortDir(t)
+	real := filepath.Join(parent, "real")
+	if err := os.Mkdir(real, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(parent, "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatal(err)
+	}
+	_, err := ListenSocket(t.Context(), SocketOptions{DataDir: link})
+	if !errors.Is(err, ErrSocketDirectoryUntrusted) {
+		t.Fatalf("ListenSocket through a sibling symlink = %v, want %v", err, ErrSocketDirectoryUntrusted)
+	}
+}
+
 func TestSocketDirectoryForeignOwnerIsRejected(t *testing.T) {
 	t.Parallel()
 	dir := shortDir(t)
