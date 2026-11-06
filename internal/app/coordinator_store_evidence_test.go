@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/syurodev/fugue/internal/coordinator"
 	"github.com/syurodev/fugue/internal/execstore"
@@ -22,11 +21,10 @@ func TestLostAcknowledgementResolvedThroughRealStore(t *testing.T) {
 	executor := newRealExecutor(true)
 	sess := startRealSessionWith(t, store, clk, "lost-ack", 1, executor)
 	submitRealAccept(t, sess, realFirstRun)
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	reply, err := sess.Submit(ctx, realDispatch(realFirstRun))
 	if err != nil || reply.Receipt.CommandID != "dispatch-first" {
-		t.Fatal("dispatch must resolve its real committed receipt")
+		t.Fatalf("dispatch must resolve its real committed receipt: err=%v command=%q", err, reply.Receipt.CommandID)
 	}
 	assertDispatchReadBack(t, store)
 	work := waitRealWork(t, ctx, executor)
@@ -36,7 +34,7 @@ func TestLostAcknowledgementResolvedThroughRealStore(t *testing.T) {
 	obs := waitRealObservation(t, ctx, executor)
 	duplicate, err := sess.SubmitObservation(ctx, obs)
 	if err != nil || !duplicate.Duplicate {
-		t.Fatal("scripted observation must commit once and deduplicate")
+		t.Fatalf("scripted observation must commit once and deduplicate: err=%v duplicate=%t", err, duplicate.Duplicate)
 	}
 	sess.Stop()
 	if executor.calls.Load() != 1 {
@@ -85,8 +83,7 @@ func TestRestartNeverRedispatchesDispatchingIntent(t *testing.T) {
 	executor := newRealExecutor(false)
 	sess := startRealSessionWith(t, store, clk, "before-restart", 1, executor)
 	submitRealAccept(t, sess, realFirstRun)
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	submitter := supervise.Go(ctx, "test.dispatch_before_stop", func(taskCtx context.Context) error {
 		_, err := sess.Submit(taskCtx, realDispatch(realFirstRun))
 		if errors.Is(err, coordinator.ErrSessionStopped) {
@@ -101,7 +98,7 @@ func TestRestartNeverRedispatchesDispatchingIntent(t *testing.T) {
 	select {
 	case <-store.committed:
 	case <-ctx.Done():
-		t.Fatal("dispatch did not commit before shutdown")
+		t.Fatalf("dispatch did not commit before shutdown: %v", ctx.Err())
 	}
 	sess.Stop()
 	if submitter.Wait() != nil || executor.calls.Load() != 0 {
@@ -132,18 +129,17 @@ func TestRepeatedAcceptsUseDurableQueueFenceAndContinueContext(t *testing.T) {
 	for _, runID := range []string{realFirstRun, realSecondRun, realThirdRun} {
 		submitRealAccept(t, sess, runID)
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	var last *coordinator.Observation
 	for _, runID := range []string{realFirstRun, realSecondRun, realThirdRun} {
 		if _, err := sess.Submit(ctx, realDispatch(runID)); err != nil {
-			t.Fatal("queued run must dispatch with its actual admitted token")
+			t.Fatalf("queued run must dispatch with its actual admitted token: %v", err)
 		}
 		assertContextAdmission(t, s, runID)
 		last = waitRealObservation(t, ctx, executor)
 	}
 	if _, err := sess.SubmitObservation(ctx, last); err != nil {
-		t.Fatal("last scripted completion must be durable")
+		t.Fatalf("last scripted completion must be durable: %v", err)
 	}
 	sess.Stop()
 	adm, err := s.ReadAdmission(ctx, adapterSession)

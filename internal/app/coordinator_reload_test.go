@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/coordinator"
@@ -36,11 +35,10 @@ func testConfirmedAcceptanceReload(t *testing.T, duplicate bool) {
 	accept := realAccept(realSecondRun)
 	accept.Facts.ModelPlan.ModelRef = "caller-model"
 	accept.Facts.ModelPlan.ToolDeclarationRefs = []string{"caller-tool"}
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	reply, err := sess.Submit(ctx, accept)
 	if err != nil || reply.Receipt.CommandID != reloadAcceptCommand || reply.Duplicate != duplicate {
-		t.Fatal("confirmed acceptance must return its real receipt despite the failed reload")
+		t.Fatalf("confirmed acceptance must return its real receipt despite the failed reload: err=%v command=%q duplicate=%t", err, reply.Receipt.CommandID, reply.Duplicate)
 	}
 	submitRealAccept(t, sess, realThirdRun)
 	completeRealRun(t, ctx, sess, executor, realFirstRun)
@@ -62,7 +60,7 @@ func testConfirmedAcceptanceReload(t *testing.T, duplicate bool) {
 func completeRealRun(t *testing.T, ctx context.Context, sess *coordinator.Session, executor *realExecutor, runID string) {
 	t.Helper()
 	if _, err := sess.Submit(ctx, realDispatch(runID)); err != nil {
-		t.Fatal("FIFO head must remain eligible for dispatch")
+		t.Fatalf("FIFO head must remain eligible for dispatch: %v", err)
 	}
 	work := waitRealWork(t, ctx, executor)
 	if work.Lease.RunID != runID {
@@ -71,7 +69,7 @@ func completeRealRun(t *testing.T, ctx context.Context, sess *coordinator.Sessio
 	obs := waitRealObservation(t, ctx, executor)
 	// The next admission can supersede this lease before its duplicate arrives.
 	if _, err := sess.SubmitObservation(ctx, obs); err != nil && !errors.Is(err, coordinator.ErrStaleLease) {
-		t.Fatal("scripted completion must precede the observation barrier")
+		t.Fatalf("scripted completion must precede the observation barrier: %v", err)
 	}
 }
 

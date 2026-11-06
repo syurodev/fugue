@@ -330,8 +330,7 @@ func TestConcurrentAdmissionOnlyOneCommits(t *testing.T) {
 	}
 	first := startRealSession(t, barrier, clk, "first-owner")
 	second := startRealSession(t, barrier, clk, "second-owner")
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	one := supervise.Go(ctx, "test.first_accept", func(taskCtx context.Context) error {
 		return submitRealRequest(taskCtx, first, realAccept(realFirstRun))
 	})

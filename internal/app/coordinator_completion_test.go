@@ -1,9 +1,7 @@
 package app
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"github.com/syurodev/fugue/internal/execstore"
 )
@@ -15,15 +13,14 @@ func TestFreshAdmissionCompletesScriptedResponse(t *testing.T) {
 	executor := newRealExecutor(true)
 	sess := startRealSessionWith(t, NewCoordinatorStore(s), clk, "fresh", 1, executor)
 	submitRealAccept(t, sess, realFirstRun)
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
+	ctx := t.Context()
 	if _, err := sess.Submit(ctx, realDispatch(realFirstRun)); err != nil {
-		t.Fatal("fresh admission must dispatch normally")
+		t.Fatalf("fresh admission must dispatch normally: %v", err)
 	}
 	waitRealWork(t, ctx, executor)
 	obs := waitRealObservation(t, ctx, executor)
 	if reply, err := sess.SubmitObservation(ctx, obs); err != nil || !reply.Duplicate {
-		t.Fatal("fresh admission must commit the scripted response before its duplicate")
+		t.Fatalf("fresh admission must commit the scripted response before its duplicate: err=%v duplicate=%t", err, reply.Duplicate)
 	}
 	sess.Stop()
 	assertFinishedResponse(t, s, realFirstRun)

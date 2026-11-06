@@ -154,7 +154,7 @@ func waitAdmissionBarrier(t *testing.T, ctx context.Context, reached <-chan stri
 	select {
 	case <-reached:
 	case <-ctx.Done():
-		t.Fatal("admission did not reach real append barrier")
+		t.Fatalf("admission did not reach real append barrier: %v", ctx.Err())
 	}
 }
 
@@ -225,7 +225,7 @@ func waitRealWork(t *testing.T, ctx context.Context, executor *realExecutor) coo
 	case w := <-executor.work:
 		return w
 	case <-ctx.Done():
-		t.Fatal("executor did not receive committed work")
+		t.Fatalf("executor did not receive committed work: %v", ctx.Err())
 		return coordinator.Work{}
 	}
 }
@@ -236,7 +236,7 @@ func waitRealObservation(t *testing.T, ctx context.Context, executor *realExecut
 	case obs := <-executor.observations:
 		return obs
 	case <-ctx.Done():
-		t.Fatal("executor did not report scripted observation")
+		t.Fatalf("executor did not report scripted observation: %v", ctx.Err())
 		return nil
 	}
 }
