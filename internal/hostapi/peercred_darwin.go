@@ -11,13 +11,11 @@ import (
 )
 
 func peerCredentials(c net.Conn) (PeerCredentials, error) {
-	fd, err := socketFD(c)
-	if err != nil {
-		return PeerCredentials{}, err
-	}
-	cred, err := unix.GetsockoptXucred(fd, unix.SOL_LOCAL, unix.LOCAL_PEERCRED)
-	if err != nil {
-		return PeerCredentials{}, errcode.Wrap(errcode.PermissionDenied, "read peer credentials (LOCAL_PEERCRED)", err)
-	}
-	return PeerCredentials{UID: cred.Uid}, nil
+	return readPeerCredentials(c, func(fd int) (PeerCredentials, error) {
+		cred, err := unix.GetsockoptXucred(fd, unix.SOL_LOCAL, unix.LOCAL_PEERCRED)
+		if err != nil {
+			return PeerCredentials{}, errcode.Wrap(errcode.PermissionDenied, "read peer credentials (LOCAL_PEERCRED)", err)
+		}
+		return PeerCredentials{UID: cred.Uid}, nil
+	})
 }

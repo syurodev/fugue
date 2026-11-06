@@ -1,6 +1,7 @@
 package hostapi
 
 import (
+	"math"
 	"net"
 	"strconv"
 	"syscall"
@@ -32,20 +33,42 @@ func uidAllowed(got uint32, want int64) error {
 		"connection from uid "+strconv.FormatUint(uint64(got), 10), ErrPeerCredentialDenied)
 }
 
-// socketFD extracts the descriptor of a connected socket for the credential
-// getsockopt calls.
-func socketFD(c net.Conn) (int, error) {
+// socketFD runs fn with the descriptor of the connected socket inside the
+// RawConn callback: the descriptor is only valid while Control runs, so the
+// credential getsockopt must happen there — outside it, a concurrent close
+// could recycle the descriptor and the check would read another socket's UID.
+func socketFD(c net.Conn, fn func(fd int) error) error {
 	sc, ok := c.(syscall.Conn)
 	if !ok {
-		return 0, errcode.New(errcode.InvalidArgument, "peer credentials need a socket connection")
+		return errcode.New(errcode.InvalidArgument, "peer credentials need a socket connection")
 	}
 	raw, err := sc.SyscallConn()
 	if err != nil {
-		return 0, errcode.Wrap(errcode.Internal, "raw peer socket", err)
+		return errcode.Wrap(errcode.Internal, "raw peer socket", err)
 	}
-	var fd int
-	if opErr := raw.Control(func(value uintptr) { fd = int(value) }); opErr != nil {
-		return 0, errcode.Wrap(errcode.Internal, "control peer socket", opErr)
+	var opErr error
+	if cerr := raw.Control(func(value uintptr) {
+		if value > uintptr(math.MaxInt) {
+			opErr = errcode.New(errcode.Internal, "peer socket descriptor overflows int")
+			return
+		}
+		opErr = fn(int(value))
+	}); cerr != nil {
+		return errcode.Wrap(errcode.Internal, "control peer socket", cerr)
 	}
-	return fd, nil
+	return opErr
+}
+
+// readPeerCredentials reads the peer credentials of c through the platform's
+// getsockopt call, inside the RawConn callback.
+func readPeerCredentials(c net.Conn, getsockopt func(fd int) (PeerCredentials, error)) (PeerCredentials, error) {
+	var creds PeerCredentials
+	if err := socketFD(c, func(fd int) error {
+		var err error
+		creds, err = getsockopt(fd)
+		return err
+	}); err != nil {
+		return PeerCredentials{}, err
+	}
+	return creds, nil
 }
