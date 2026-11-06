@@ -2,6 +2,16 @@ syntax = "proto3";
 
 package fugue.host.v1;
 
+// ClientKind says what kind of client owns the connection (docs: host-api §8,
+// cli §7). Informational only: it is never a permission.
+enum ClientKind {
+  CLIENT_KIND_UNSPECIFIED = 0;
+  CLIENT_KIND_TUI = 1;
+  CLIENT_KIND_CLI = 2;
+  CLIENT_KIND_APP = 3;
+  CLIENT_KIND_APP_BACKGROUND = 4;
+}
+
 // HelloRequest opens a connection: the client says who it is and which Host API
 // versions it speaks (docs: host-api §8).
 message HelloRequest {
@@ -9,9 +19,12 @@ message HelloRequest {
   string client_version = 2;
   // supported_api_versions are API versions such as "v1", most preferred last.
   repeated string supported_api_versions = 3;
+  ClientKind client_kind = 4;
 }
 
-// HelloResponse carries the highest API version both sides support.
+// HelloResponse carries the version negotiated for this connection and the
+// running host's binary version, informational.
 message HelloResponse {
   string api_version = 1;
+  string host_version = 2;
 }

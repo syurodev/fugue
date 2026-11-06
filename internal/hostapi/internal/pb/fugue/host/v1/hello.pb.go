@@ -21,6 +21,63 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// ClientKind says what kind of client owns the connection (docs: host-api §8,
+// cli §7). Informational only: it is never a permission.
+type ClientKind int32
+
+const (
+	ClientKind_CLIENT_KIND_UNSPECIFIED    ClientKind = 0
+	ClientKind_CLIENT_KIND_TUI            ClientKind = 1
+	ClientKind_CLIENT_KIND_CLI            ClientKind = 2
+	ClientKind_CLIENT_KIND_APP            ClientKind = 3
+	ClientKind_CLIENT_KIND_APP_BACKGROUND ClientKind = 4
+)
+
+// Enum value maps for ClientKind.
+var (
+	ClientKind_name = map[int32]string{
+		0: "CLIENT_KIND_UNSPECIFIED",
+		1: "CLIENT_KIND_TUI",
+		2: "CLIENT_KIND_CLI",
+		3: "CLIENT_KIND_APP",
+		4: "CLIENT_KIND_APP_BACKGROUND",
+	}
+	ClientKind_value = map[string]int32{
+		"CLIENT_KIND_UNSPECIFIED":    0,
+		"CLIENT_KIND_TUI":            1,
+		"CLIENT_KIND_CLI":            2,
+		"CLIENT_KIND_APP":            3,
+		"CLIENT_KIND_APP_BACKGROUND": 4,
+	}
+)
+
+func (x ClientKind) Enum() *ClientKind {
+	p := new(ClientKind)
+	*p = x
+	return p
+}
+
+func (x ClientKind) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ClientKind) Descriptor() protoreflect.EnumDescriptor {
+	return file_fugue_host_v1_hello_proto_enumTypes[0].Descriptor()
+}
+
+func (ClientKind) Type() protoreflect.EnumType {
+	return &file_fugue_host_v1_hello_proto_enumTypes[0]
+}
+
+func (x ClientKind) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ClientKind.Descriptor instead.
+func (ClientKind) EnumDescriptor() ([]byte, []int) {
+	return file_fugue_host_v1_hello_proto_rawDescGZIP(), []int{0}
+}
+
 // HelloRequest opens a connection: the client says who it is and which Host API
 // versions it speaks (docs: host-api §8).
 type HelloRequest struct {
@@ -28,7 +85,8 @@ type HelloRequest struct {
 	ClientName    string                 `protobuf:"bytes,1,opt,name=client_name,json=clientName,proto3" json:"client_name,omitempty"`
 	ClientVersion string                 `protobuf:"bytes,2,opt,name=client_version,json=clientVersion,proto3" json:"client_version,omitempty"`
 	// supported_api_versions are API versions such as "v1", most preferred last.
-	SupportedApiVersions []string `protobuf:"bytes,3,rep,name=supported_api_versions,json=supportedApiVersions,proto3" json:"supported_api_versions,omitempty"`
+	SupportedApiVersions []string   `protobuf:"bytes,3,rep,name=supported_api_versions,json=supportedApiVersions,proto3" json:"supported_api_versions,omitempty"`
+	ClientKind           ClientKind `protobuf:"varint,4,opt,name=client_kind,json=clientKind,proto3,enum=fugue.host.v1.ClientKind" json:"client_kind,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -84,10 +142,19 @@ func (x *HelloRequest) GetSupportedApiVersions() []string {
 	return nil
 }
 
-// HelloResponse carries the highest API version both sides support.
+func (x *HelloRequest) GetClientKind() ClientKind {
+	if x != nil {
+		return x.ClientKind
+	}
+	return ClientKind_CLIENT_KIND_UNSPECIFIED
+}
+
+// HelloResponse carries the version negotiated for this connection and the
+// running host's binary version, informational.
 type HelloResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ApiVersion    string                 `protobuf:"bytes,1,opt,name=api_version,json=apiVersion,proto3" json:"api_version,omitempty"`
+	HostVersion   string                 `protobuf:"bytes,2,opt,name=host_version,json=hostVersion,proto3" json:"host_version,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -129,19 +196,36 @@ func (x *HelloResponse) GetApiVersion() string {
 	return ""
 }
 
+func (x *HelloResponse) GetHostVersion() string {
+	if x != nil {
+		return x.HostVersion
+	}
+	return ""
+}
+
 var File_fugue_host_v1_hello_proto protoreflect.FileDescriptor
 
 const file_fugue_host_v1_hello_proto_rawDesc = "" +
 	"\n" +
-	"\x19fugue/host/v1/hello.proto\x12\rfugue.host.v1\"\x8c\x01\n" +
+	"\x19fugue/host/v1/hello.proto\x12\rfugue.host.v1\"\xc8\x01\n" +
 	"\fHelloRequest\x12\x1f\n" +
 	"\vclient_name\x18\x01 \x01(\tR\n" +
 	"clientName\x12%\n" +
 	"\x0eclient_version\x18\x02 \x01(\tR\rclientVersion\x124\n" +
-	"\x16supported_api_versions\x18\x03 \x03(\tR\x14supportedApiVersions\"0\n" +
+	"\x16supported_api_versions\x18\x03 \x03(\tR\x14supportedApiVersions\x12:\n" +
+	"\vclient_kind\x18\x04 \x01(\x0e2\x19.fugue.host.v1.ClientKindR\n" +
+	"clientKind\"S\n" +
 	"\rHelloResponse\x12\x1f\n" +
 	"\vapi_version\x18\x01 \x01(\tR\n" +
-	"apiVersionB\xc2\x01\n" +
+	"apiVersion\x12!\n" +
+	"\fhost_version\x18\x02 \x01(\tR\vhostVersion*\x88\x01\n" +
+	"\n" +
+	"ClientKind\x12\x1b\n" +
+	"\x17CLIENT_KIND_UNSPECIFIED\x10\x00\x12\x13\n" +
+	"\x0fCLIENT_KIND_TUI\x10\x01\x12\x13\n" +
+	"\x0fCLIENT_KIND_CLI\x10\x02\x12\x13\n" +
+	"\x0fCLIENT_KIND_APP\x10\x03\x12\x1e\n" +
+	"\x1aCLIENT_KIND_APP_BACKGROUND\x10\x04B\xc2\x01\n" +
 	"\x11com.fugue.host.v1B\n" +
 	"HelloProtoP\x01ZKgithub.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1;hostv1\xa2\x02\x03FHX\xaa\x02\rFugue.Host.V1\xca\x02\rFugue\\Host\\V1\xe2\x02\x19Fugue\\Host\\V1\\GPBMetadata\xea\x02\x0fFugue::Host::V1b\x06proto3"
 
@@ -157,17 +241,20 @@ func file_fugue_host_v1_hello_proto_rawDescGZIP() []byte {
 	return file_fugue_host_v1_hello_proto_rawDescData
 }
 
+var file_fugue_host_v1_hello_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
 var file_fugue_host_v1_hello_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_fugue_host_v1_hello_proto_goTypes = []any{
-	(*HelloRequest)(nil),  // 0: fugue.host.v1.HelloRequest
-	(*HelloResponse)(nil), // 1: fugue.host.v1.HelloResponse
+	(ClientKind)(0),       // 0: fugue.host.v1.ClientKind
+	(*HelloRequest)(nil),  // 1: fugue.host.v1.HelloRequest
+	(*HelloResponse)(nil), // 2: fugue.host.v1.HelloResponse
 }
 var file_fugue_host_v1_hello_proto_depIdxs = []int32{
-	0, // [0:0] is the sub-list for method output_type
-	0, // [0:0] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	0, // 0: fugue.host.v1.HelloRequest.client_kind:type_name -> fugue.host.v1.ClientKind
+	1, // [1:1] is the sub-list for method output_type
+	1, // [1:1] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_fugue_host_v1_hello_proto_init() }
@@ -180,13 +267,14 @@ func file_fugue_host_v1_hello_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fugue_host_v1_hello_proto_rawDesc), len(file_fugue_host_v1_hello_proto_rawDesc)),
-			NumEnums:      0,
+			NumEnums:      1,
 			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
 		GoTypes:           file_fugue_host_v1_hello_proto_goTypes,
 		DependencyIndexes: file_fugue_host_v1_hello_proto_depIdxs,
+		EnumInfos:         file_fugue_host_v1_hello_proto_enumTypes,
 		MessageInfos:      file_fugue_host_v1_hello_proto_msgTypes,
 	}.Build()
 	File_fugue_host_v1_hello_proto = out.File

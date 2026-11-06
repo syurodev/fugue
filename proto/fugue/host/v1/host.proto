@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package fugue.host.v1;
+
+import "fugue/host/v1/hello.proto";
+import "fugue/host/v1/shutdown.proto";
+import "fugue/host/v1/status.proto";
+
+// HostService is the connection and lifecycle service every client speaks
+// first (docs: host-api §3, §8; cli §2, §7).
+service HostService {
+  rpc Hello(HelloRequest) returns (HelloResponse);
+  rpc HostStatus(HostStatusRequest) returns (HostStatusResponse);
+  rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+}

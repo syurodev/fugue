@@ -206,6 +206,12 @@ linters:
     generated: strict
     presets: []
     rules:
+      # The transport returns net listener and connection errors unchanged:
+      # http.Server.Serve backs off on a temporary net.Error and detects
+      # net.ErrClosed, and wrapping would turn a recoverable accept failure
+      # into a fatal exit (F5.1a review, 2026-11-07).
+      - path: '^internal/hostapi/listener\.go$'
+        linters: [wrapcheck]
       - path: '^internal/platform/clock/'
         linters: [forbidigo]
         text: 'time\.'
