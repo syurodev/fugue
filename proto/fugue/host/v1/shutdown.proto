@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package fugue.host.v1;
+
+message ShutdownRequest {
+  // command_id is client-generated; it must be non-empty (docs: host-api §5).
+  string command_id = 1;
+  // force skips the graceful drain wait.
+  bool force = 2;
+}
+
+message ShutdownResponse {}

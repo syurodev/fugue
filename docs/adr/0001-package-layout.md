@@ -171,7 +171,7 @@ on this list is the user, by approving this ADR, with the exception flagged belo
 | `golang.org/x/crypto` | BSD-3-Clause | Argon2id, XChaCha20-Poly1305 | F1.1 | `internal/crypto` |
 | `modernc.org/sqlite` | BSD-3-Clause | Pure-Go SQLite driver | F1.3 | `internal/storage` |
 | `golang.org/x/sys` | BSD-3-Clause | `flock`, peer credentials, landlock | F1.3 | `internal/storage`, `internal/sandbox`, `internal/hostapi` |
-| `golang.org/x/net` | BSD-3-Clause | `h2c` for Connect over a unix socket | F5.1 | `internal/hostapi` |
+| `golang.org/x/net` | BSD-3-Clause | `h2c` for Connect over a unix socket — superseded before entry: F5.1 serves unencrypted HTTP/2 with stdlib `http.Protocols` (Q-24 A, 2026-11-06); the module was never added | — | — |
 | `github.com/anthropics/anthropic-sdk-go` | MIT | Anthropic adapter | F4.2 | `internal/modeladapter/anthropic` |
 | `github.com/openai/openai-go` | Apache-2.0 | OpenAI adapter | F4.3 | `internal/modeladapter/openai` |
 | `pgregory.net/rapid` | **MPL-2.0** | Property tests for the kernel (`quality-gates` §6) | F2.2 | tests only |

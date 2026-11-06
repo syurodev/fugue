@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package fugue.host.v1;
+
+import "google/protobuf/timestamp.proto";
+
+message HostStatusRequest {}
+
+// ClientCounts says how many leased connections each client kind has.
+message ClientCounts {
+  uint32 tui = 1;
+  uint32 cli = 2;
+  uint32 app = 3;
+  uint32 app_background = 4;
+  uint32 total = 5;
+}
+
+// HostStatusResponse describes the running host (docs: cli §7). Run, job, goal
+// and verify activity arrives additively with F5.3+.
+message HostStatusResponse {
+  string host_version = 1;
+  // supported_api_versions is ascending, most preferred last; the client
+  // derives the host's maximum from the last entry (docs: cli §2.3).
+  repeated string supported_api_versions = 2;
+  // incarnation_id is the exec_host incarnation of this host process.
+  string incarnation_id = 3;
+  google.protobuf.Timestamp started_at = 4;
+  ClientCounts clients = 5;
+}

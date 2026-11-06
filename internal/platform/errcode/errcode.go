@@ -22,6 +22,7 @@ const (
 	Unavailable        Code = "unavailable"
 	Canceled           Code = "canceled"
 	DeadlineExceeded   Code = "deadline_exceeded"
+	UnsupportedVersion Code = "unsupported_version"
 )
 
 // Entry classifies one code. Hidden codes are never shown to a client; the
@@ -44,6 +45,7 @@ func Registry() []Entry {
 		{Unavailable, true, "a dependency is temporarily out of reach; retrying may help"},
 		{Canceled, true, "the operation was canceled by its caller"},
 		{DeadlineExceeded, true, "the operation took longer than its deadline"},
+		{UnsupportedVersion, true, "the client and the host share no Host API version; the typed detail names the host's supported versions"},
 	}
 }
 

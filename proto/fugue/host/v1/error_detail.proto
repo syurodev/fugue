@@ -1,0 +1,14 @@
+syntax = "proto3";
+
+package fugue.host.v1;
+
+// ErrorDetail is attached to every Connect error (docs: host-api §4). code is
+// the public error code; hidden codes never carry a detail.
+message ErrorDetail {
+  string code = 1;
+  // supported_api_versions is present only when code is unsupported_version:
+  // the host's supported versions, ascending, most preferred last. Comparing
+  // it with the client's own requirement tells "host older" from "host newer"
+  // (docs: cli §2.3).
+  repeated string supported_api_versions = 2;
+}

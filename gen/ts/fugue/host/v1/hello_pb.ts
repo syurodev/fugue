@@ -2,15 +2,15 @@
 // @generated from file fugue/host/v1/hello.proto (package fugue.host.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc } from "@bufbuild/protobuf/codegenv2";
 import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file fugue/host/v1/hello.proto.
  */
 export const file_fugue_host_v1_hello: GenFile = /*@__PURE__*/
-  fileDesc("ChlmdWd1ZS9ob3N0L3YxL2hlbGxvLnByb3RvEg1mdWd1ZS5ob3N0LnYxIlsKDEhlbGxvUmVxdWVzdBITCgtjbGllbnRfbmFtZRgBIAEoCRIWCg5jbGllbnRfdmVyc2lvbhgCIAEoCRIeChZzdXBwb3J0ZWRfYXBpX3ZlcnNpb25zGAMgAygJIiQKDUhlbGxvUmVzcG9uc2USEwoLYXBpX3ZlcnNpb24YASABKAlCwgEKEWNvbS5mdWd1ZS5ob3N0LnYxQgpIZWxsb1Byb3RvUAFaS2dpdGh1Yi5jb20vc3l1cm9kZXYvZnVndWUvaW50ZXJuYWwvaG9zdGFwaS9pbnRlcm5hbC9wYi9mdWd1ZS9ob3N0L3YxO2hvc3R2MaICA0ZIWKoCDUZ1Z3VlLkhvc3QuVjHKAg1GdWd1ZVxIb3N0XFYx4gIZRnVndWVcSG9zdFxWMVxHUEJNZXRhZGF0YeoCD0Z1Z3VlOjpIb3N0OjpWMWIGcHJvdG8z");
+  fileDesc("ChlmdWd1ZS9ob3N0L3YxL2hlbGxvLnByb3RvEg1mdWd1ZS5ob3N0LnYxIosBCgxIZWxsb1JlcXVlc3QSEwoLY2xpZW50X25hbWUYASABKAkSFgoOY2xpZW50X3ZlcnNpb24YAiABKAkSHgoWc3VwcG9ydGVkX2FwaV92ZXJzaW9ucxgDIAMoCRIuCgtjbGllbnRfa2luZBgEIAEoDjIZLmZ1Z3VlLmhvc3QudjEuQ2xpZW50S2luZCI6Cg1IZWxsb1Jlc3BvbnNlEhMKC2FwaV92ZXJzaW9uGAEgASgJEhQKDGhvc3RfdmVyc2lvbhgCIAEoCSqIAQoKQ2xpZW50S2luZBIbChdDTElFTlRfS0lORF9VTlNQRUNJRklFRBAAEhMKD0NMSUVOVF9LSU5EX1RVSRABEhMKD0NMSUVOVF9LSU5EX0NMSRACEhMKD0NMSUVOVF9LSU5EX0FQUBADEh4KGkNMSUVOVF9LSU5EX0FQUF9CQUNLR1JPVU5EEARCwgEKEWNvbS5mdWd1ZS5ob3N0LnYxQgpIZWxsb1Byb3RvUAFaS2dpdGh1Yi5jb20vc3l1cm9kZXYvZnVndWUvaW50ZXJuYWwvaG9zdGFwaS9pbnRlcm5hbC9wYi9mdWd1ZS9ob3N0L3YxO2hvc3R2MaICA0ZIWKoCDUZ1Z3VlLkhvc3QuVjHKAg1GdWd1ZVxIb3N0XFYx4gIZRnVndWVcSG9zdFxWMVxHUEJNZXRhZGF0YeoCD0Z1Z3VlOjpIb3N0OjpWMWIGcHJvdG8z");
 
 /**
  * HelloRequest opens a connection: the client says who it is and which Host API
@@ -35,6 +35,11 @@ export type HelloRequest = Message<"fugue.host.v1.HelloRequest"> & {
    * @generated from field: repeated string supported_api_versions = 3;
    */
   supportedApiVersions: string[];
+
+  /**
+   * @generated from field: fugue.host.v1.ClientKind client_kind = 4;
+   */
+  clientKind: ClientKind;
 };
 
 /**
@@ -45,7 +50,8 @@ export const HelloRequestSchema: GenMessage<HelloRequest> = /*@__PURE__*/
   messageDesc(file_fugue_host_v1_hello, 0);
 
 /**
- * HelloResponse carries the highest API version both sides support.
+ * HelloResponse carries the version negotiated for this connection and the
+ * running host's binary version, informational.
  *
  * @generated from message fugue.host.v1.HelloResponse
  */
@@ -54,6 +60,11 @@ export type HelloResponse = Message<"fugue.host.v1.HelloResponse"> & {
    * @generated from field: string api_version = 1;
    */
   apiVersion: string;
+
+  /**
+   * @generated from field: string host_version = 2;
+   */
+  hostVersion: string;
 };
 
 /**
@@ -62,4 +73,43 @@ export type HelloResponse = Message<"fugue.host.v1.HelloResponse"> & {
  */
 export const HelloResponseSchema: GenMessage<HelloResponse> = /*@__PURE__*/
   messageDesc(file_fugue_host_v1_hello, 1);
+
+/**
+ * ClientKind says what kind of client owns the connection (docs: host-api §8,
+ * cli §7). Informational only: it is never a permission.
+ *
+ * @generated from enum fugue.host.v1.ClientKind
+ */
+export enum ClientKind {
+  /**
+   * @generated from enum value: CLIENT_KIND_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: CLIENT_KIND_TUI = 1;
+   */
+  TUI = 1,
+
+  /**
+   * @generated from enum value: CLIENT_KIND_CLI = 2;
+   */
+  CLI = 2,
+
+  /**
+   * @generated from enum value: CLIENT_KIND_APP = 3;
+   */
+  APP = 3,
+
+  /**
+   * @generated from enum value: CLIENT_KIND_APP_BACKGROUND = 4;
+   */
+  APP_BACKGROUND = 4,
+}
+
+/**
+ * Describes the enum fugue.host.v1.ClientKind.
+ */
+export const ClientKindSchema: GenEnum<ClientKind> = /*@__PURE__*/
+  enumDesc(file_fugue_host_v1_hello, 0);
 
