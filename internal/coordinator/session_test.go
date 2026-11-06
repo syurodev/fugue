@@ -118,6 +118,7 @@ func verifySubmitEnvelopeTransitions(t *testing.T, store *fakeStore, fakeClk clo
 }
 
 func startSingleCapacitySession(t *testing.T, store *fakeStore, seed string) (context.Context, *Session) {
+	t.Helper()
 	return startSingleCapacitySessionHook(t, store, seed, nil)
 }
 

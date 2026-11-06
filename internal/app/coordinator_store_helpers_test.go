@@ -111,7 +111,7 @@ func realAccept(runID string) *coordinator.Request {
 	cmd.Budgets = kernel.DefaultRunBudgets()
 	plan := new(kernel.ModelRequestPlannedEvent)
 	plan.InvocationID, plan.FirstAttemptID = "model-"+runID, "attempt-"+runID
-	plan.Purpose, plan.ModelRef, plan.ContextRef = "turn", adapterModelID, "context-"+runID
+	plan.Purpose, plan.ModelRef, plan.ContextRef = purposeTurn, adapterModelID, "context-"+runID
 	return &coordinator.Request{
 		Command: cmd, Origin: adapterOriginUser, QueueDecisionRef: "decision-" + runID,
 		Facts: kernel.DecisionFacts{ModelPlan: plan}, MetadataInput: []byte(`{}`),
@@ -185,7 +185,7 @@ func realDispatch(runID string) *coordinator.Request {
 	dispatch.InvocationID, dispatch.AttemptID = cmd.InvocationID, cmd.AttemptID
 	dispatch.ProviderSettingsRef, dispatch.AccountID, dispatch.CatalogVersion = "settings", "account", "catalog"
 	return &coordinator.Request{
-		Command: cmd, Origin: "system",
+		Command: cmd, Origin: adapterOriginSystem,
 		ProtectedInput: []byte(`{"kind":"PrepareDispatch"}`),
 		Facts:          kernel.DecisionFacts{ModelDispatch: dispatch, DispatchAuthorizationRef: "authorization-" + runID},
 	}
@@ -195,7 +195,7 @@ func realResponse(w *coordinator.Work) *coordinator.Observation {
 	cmd := new(kernel.ObserveModelResponseCommand)
 	cmd.CommandID, cmd.RunID = "response-"+w.Lease.RunID, w.Lease.RunID
 	cmd.InvocationID, cmd.AttemptID = w.Lease.InvocationID, w.Lease.AttemptID
-	cmd.ResponseRef, cmd.UsageStatus, cmd.FinishReason = "response-payload-"+w.Lease.RunID, "known", kernel.FinishReasonStop
+	cmd.ResponseRef, cmd.UsageStatus, cmd.FinishReason = "response-payload-"+w.Lease.RunID, adapterUsageKnown, kernel.FinishReasonStop
 	usage := new(kernel.BudgetObservedEvent)
 	usage.AttemptID, usage.TokensUsed, usage.Basis = w.Lease.AttemptID, 3, "provider"
 	return &coordinator.Observation{

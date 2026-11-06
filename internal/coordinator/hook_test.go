@@ -1,6 +1,7 @@
 package coordinator
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"slices"
@@ -11,6 +12,7 @@ import (
 	"github.com/syurodev/fugue/internal/kernel"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/ids"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 )
 
 const testReadBackDispatch = "cmd-disp-hook-1"
@@ -113,19 +115,19 @@ func (e *hookExecutor) Execute(_ context.Context, w *Work, report func(*Observat
 	e.sig <- struct{}{}
 }
 
-func (e *hookExecutor) waitWork(t *testing.T, ctx context.Context, n int) {
+func (e *hookExecutor) waitWork(t *testing.T, ctx context.Context) {
 	t.Helper()
 	for {
 		e.mu.Lock()
 		got := len(e.works)
 		e.mu.Unlock()
-		if got >= n {
+		if got >= 1 {
 			return
 		}
 		select {
 		case <-e.sig:
 		case <-ctx.Done():
-			t.Fatalf("timed out waiting for work %d (have %d)", n, got)
+			t.Fatalf("timed out waiting for work (have %d)", got)
 		}
 	}
 }
@@ -175,7 +177,7 @@ func TestOnCommittedSeesEveryAppliedCommit(t *testing.T) {
 		t.Fatalf("submit dispatch: %v", err)
 	}
 	hooks.waitCount(t, ctx, 3)
-	executor.waitWork(t, ctx, 1)
+	executor.waitWork(t, ctx)
 
 	// The terminal observation is the last applied commit of the run.
 	executor.reportResponse(0)
@@ -183,7 +185,7 @@ func TestOnCommittedSeesEveryAppliedCommit(t *testing.T) {
 
 	entries := hooks.snapshot()
 	sorted := slices.Clone(entries)
-	slices.SortFunc(sorted, func(a, b hookEntry) int { return int(a.lastSeq) - int(b.lastSeq) })
+	slices.SortFunc(sorted, func(a, b hookEntry) int { return cmp.Compare(a.lastSeq, b.lastSeq) })
 	wantSequences := []uint64{4, 4, 5, 9}
 	for i, want := range wantSequences {
 		if sorted[i].runID != testRunID1 {
@@ -270,20 +272,10 @@ func TestOnCommittedSnapshotIsImmutable(t *testing.T) {
 	// so its reads genuinely overlap the session's writes.
 	stop := make(chan struct{})
 	corrupt := make(chan bool, 1)
-	go func() {
-		for {
-			select {
-			case <-stop:
-				corrupt <- false
-				return
-			default:
-			}
-			if snapshot.LastSequence != 4 || !snapshot.Accepted || !snapshot.Admitted || len(snapshot.ModelInvocations) != 1 {
-				corrupt <- true
-				return
-			}
-		}
-	}()
+	reader := supervise.Go(ctx, "test.snapshot-reader", func(_ context.Context) error {
+		corrupt <- walkSnapshotUntil(stop, snapshot)
+		return nil
+	})
 
 	// Commit more work while the reader walks the snapshot: the dispatch and its
 	// terminal observation replace the session state twice.
@@ -293,7 +285,7 @@ func TestOnCommittedSnapshotIsImmutable(t *testing.T) {
 	if _, err := sess.Submit(ctx, reqPtr(makeModelDispatchRequest(testRunID1, "m1", "a1", "cmd-disp-imm"))); err != nil {
 		t.Fatalf("submit dispatch: %v", err)
 	}
-	executor.waitWork(t, ctx, 1)
+	executor.waitWork(t, ctx)
 	executor.reportResponse(0)
 	hooks.waitCount(t, ctx, 4)
 
@@ -305,6 +297,9 @@ func TestOnCommittedSnapshotIsImmutable(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatalf("reader did not finish")
+	}
+	if err := reader.Wait(); err != nil {
+		t.Fatalf("reader task failed: %v", err)
 	}
 }
 
@@ -320,7 +315,7 @@ func TestAbandonedWorkFreesTheSlot(t *testing.T) {
 	if _, err := sess.Submit(ctx, reqPtr(makeModelDispatchRequest(testRunID1, "m1", "a1", "cmd-disp-abandon"))); err != nil {
 		t.Fatalf("submit dispatch: %v", err)
 	}
-	executor.waitWork(t, ctx, 1)
+	executor.waitWork(t, ctx)
 
 	// The attempt stays Requesting, so the kernel rejects a second dispatch of
 	// the same attempt - but only after a worker slot was reserved. With the
@@ -333,7 +328,7 @@ func TestAbandonedWorkFreesTheSlot(t *testing.T) {
 		t.Fatalf("second dispatch must be rejected by the kernel, got %v", err)
 	}
 
-	executor.waitWork(t, ctx, 1)
+	executor.waitWork(t, ctx)
 	executor.mu.Lock()
 	handoffs := len(executor.works)
 	executor.mu.Unlock()
@@ -342,4 +337,26 @@ func TestAbandonedWorkFreesTheSlot(t *testing.T) {
 	}
 }
 
-func reqPtr(r Request) *Request { return &r }
+// walkSnapshotUntil reads the snapshot in a tight loop until stop closes,
+// reporting whether the snapshot ever changed under the reader.
+func walkSnapshotUntil(stop <-chan struct{}, snapshot *kernel.State) bool {
+	for {
+		select {
+		case <-stop:
+			return false
+		default:
+		}
+		if snapshotChanged(snapshot) {
+			return true
+		}
+	}
+}
+
+// snapshotChanged reports whether the snapshot stopped being the admitted run
+// the accept's completion published.
+func snapshotChanged(snapshot *kernel.State) bool {
+	return snapshot.LastSequence != 4 || !snapshot.Accepted || !snapshot.Admitted || len(snapshot.ModelInvocations) != 1
+}
+
+// reqPtr hands Submit a request the test built as a value.
+func reqPtr[T any](r T) *T { return &r }

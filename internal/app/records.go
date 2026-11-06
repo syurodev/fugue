@@ -23,6 +23,10 @@ const (
 	kindModelAuthorization = "model_authorization"
 	kindToolAuthorization  = "tool_authorization"
 	kindContext            = "context"
+	kindFirstChunk         = "first_chunk"
+	kindModelResponse      = "model_response"
+	kindToolArgs           = "tool_args"
+	kindToolResult         = "tool_result"
 )
 
 // Values the slice fixes by design; none of them is a decision the kernel
@@ -35,6 +39,14 @@ const (
 	approvalNone             = "none"
 	effectClassPureRead      = "pure_read"
 	toolPureRead             = "pure_read"
+	// descriptorPureRead is the host's descriptor version of the pure_read
+	// tool; it is recorded on every tool plan and dispatch authorization.
+	descriptorPureRead = "pure-read-v1"
+	// purposeTurn is the purpose of the model invocation a step plans.
+	purposeTurn = "turn"
+	// toolEffectEvidence records how a tool result was produced: pure_read
+	// reads immutable in-memory fixtures, so there is no external effect.
+	toolEffectEvidence = "in_memory"
 )
 
 type queueItemRecord struct {
@@ -127,8 +139,12 @@ func newToolAuthorization(gen ids.Generator, descriptorVersion string) (coordina
 
 // newContext seals a step's context: the transcript material the model executor
 // turns into a provider request. The context engine (F4.5) replaces this
-// assembly; no summarization, pruning or layering happens here.
+// assembly; no summarization, pruning or layering happens here. A nil list is
+// the empty transcript, not an invalid one.
 func newContext(gen ids.Generator, items []contextItem) (coordinator.Payload, error) {
+	if items == nil {
+		items = []contextItem{}
+	}
 	return sealRecord(gen, kindContext, items)
 }
 

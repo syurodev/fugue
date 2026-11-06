@@ -172,36 +172,6 @@ func newSessionInstance(cfg *Config, adm *Admission, inherited string, cancel co
 	return s
 }
 
-func (s *Session) startWorkers(actorCtx context.Context) {
-	for range s.cfg.WorkerCapacity {
-		workerTask := supervise.Go(actorCtx, "coordinator.worker", func(wCtx context.Context) error {
-			for {
-				select {
-				case <-wCtx.Done():
-					return nil
-				case w, ok := <-s.slots.handoffCh:
-					if !ok {
-						return nil
-					}
-					// Report is expected from the Execute call stack; the
-					// atomic guards the ordering against a late report.
-					terminal := &atomic.Bool{}
-					s.cfg.Executor.Execute(wCtx, w, func(obs *Observation) {
-						if obs != nil && isTerminalObservation(obs.Command) {
-							terminal.Store(true)
-						}
-						s.report(obs)
-					})
-					if !terminal.Load() {
-						s.abandon(w.Lease)
-					}
-				}
-			}
-		})
-		s.workerTasks = append(s.workerTasks, workerTask)
-	}
-}
-
 // Submit serializes a request through the session actor.
 func (s *Session) Submit(ctx context.Context, r *Request) (Reply, error) {
 	if r == nil {
@@ -262,41 +232,6 @@ func (s *Session) Stop() {
 	})
 }
 
-func (s *Session) report(obs *Observation) {
-	if obs == nil {
-		return
-	}
-	sub := submission{
-		req:       Request{},
-		obs:       obs,
-		resolved:  nil,
-		abandoned: nil,
-		replyCh:   nil,
-	}
-	select {
-	case s.mailbox <- sub:
-	case <-s.stopped:
-	}
-}
-
-// abandon tells the actor that the executor returned from its Execute call
-// without a terminal observation, so no commit will ever complete this
-// attempt's slot. The error itself, with its one log line, is the executor's
-// business; the coordinator only reclaims the capacity.
-func (s *Session) abandon(lease Lease) {
-	sub := submission{
-		req:       Request{},
-		obs:       nil,
-		resolved:  nil,
-		abandoned: &lease,
-		replyCh:   nil,
-	}
-	select {
-	case s.mailbox <- sub:
-	case <-s.stopped:
-	}
-}
-
 func (s *Session) loop(ctx context.Context) error {
 	for {
 		select {
@@ -344,14 +279,6 @@ func (s *Session) handleSubmission(ctx context.Context, sub *submission) {
 		return
 	}
 	s.handleRequest(ctx, sub)
-}
-
-// handleAbandoned reclaims the slot of an attempt whose executor abandoned it.
-// The attempt keeps whatever state its dispatch committed — no events are
-// appended, nothing retries — so only the capacity comes back.
-func (s *Session) handleAbandoned(ctx context.Context, lease *Lease) {
-	s.completeSlot(ctx, attemptKey{runID: lease.RunID, invocationID: lease.InvocationID, attemptID: lease.AttemptID})
-	s.retryParked(ctx)
 }
 
 func (s *Session) handleRequest(ctx context.Context, sub *submission) {

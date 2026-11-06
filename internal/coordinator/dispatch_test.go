@@ -188,7 +188,7 @@ func releaseSlotAndResumeParked(t *testing.T, ctx context.Context, sess *Session
 	// The parked queue is resumed on the actor only: post an empty abandonment
 	// so the actor itself runs retryParked, and no session state is touched from
 	// this test goroutine.
-	sess.abandon(Lease{RunID: testRunID1})
+	sess.abandon(&Lease{RunID: testRunID1})
 
 	sErr := waitValue(t, ctx, parkDone, "parkDone")
 	if sErr != nil {

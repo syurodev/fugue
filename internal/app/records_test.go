@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/syurodev/fugue/internal/coordinator"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/ids"
 )
@@ -14,94 +15,93 @@ func recordsGen() ids.Generator {
 	return ids.NewUUIDv7(clk, ids.NewDeterministic("records"))
 }
 
+type recordFunc func(ids.Generator) (coordinator.Payload, error)
+
 func TestHostRecordsAreCanonicalAndDistinct(t *testing.T) {
 	t.Parallel()
+
+	cases := []struct {
+		name  string
+		kind  string
+		first recordFunc
+		again recordFunc
+		other recordFunc
+	}{
+		{
+			"queue item", "queue_item",
+			func(g ids.Generator) (coordinator.Payload, error) { return newQueueItem(g, "session-1", "run-1") },
+			func(g ids.Generator) (coordinator.Payload, error) { return newQueueItem(g, "session-1", "run-1") },
+			func(g ids.Generator) (coordinator.Payload, error) { return newQueueItem(g, "session-1", "run-2") },
+		},
+		{
+			"queue decision", "queue_decision",
+			func(g ids.Generator) (coordinator.Payload, error) { return newQueueDecision(g, "item-1") },
+			func(g ids.Generator) (coordinator.Payload, error) { return newQueueDecision(g, "item-1") },
+			func(g ids.Generator) (coordinator.Payload, error) { return newQueueDecision(g, "item-2") },
+		},
+		{
+			"model authorization", "model_authorization",
+			func(g ids.Generator) (coordinator.Payload, error) { return newModelAuthorization(g, "faux-model") },
+			func(g ids.Generator) (coordinator.Payload, error) { return newModelAuthorization(g, "faux-model") },
+			func(g ids.Generator) (coordinator.Payload, error) { return newModelAuthorization(g, "other-model") },
+		},
+		{
+			"tool authorization", "tool_authorization",
+			func(g ids.Generator) (coordinator.Payload, error) { return newToolAuthorization(g, "pure-read-v1") },
+			func(g ids.Generator) (coordinator.Payload, error) { return newToolAuthorization(g, "pure-read-v1") },
+			func(g ids.Generator) (coordinator.Payload, error) { return newToolAuthorization(g, "pure-read-v2") },
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			requireCanonicalRecord(t, tc.kind, tc.first, tc.again, tc.other)
+		})
+	}
+}
+
+// requireCanonicalRecord pins the record contract: the kind is exact, equal
+// inputs marshal to equal bytes (the receipt dedup relies on it) and every
+// record carries its own payload ID.
+func requireCanonicalRecord(t *testing.T, kind string, first, again, other recordFunc) {
+	t.Helper()
 	gen := recordsGen()
 
-	queueItem, err := newQueueItem(gen, "session-1", "run-1")
+	payload, err := first(gen)
 	if err != nil {
-		t.Fatalf("newQueueItem: %v", err)
+		t.Fatalf("seal: %v", err)
 	}
-	queueItemAgain, err := newQueueItem(gen, "session-1", "run-1")
+	if payload.Kind != kind {
+		t.Fatalf("kind %q, want %q", payload.Kind, kind)
+	}
+	repeat, err := again(gen)
 	if err != nil {
-		t.Fatalf("newQueueItem again: %v", err)
+		t.Fatalf("seal again: %v", err)
 	}
-	if queueItem.Kind != "queue_item" || queueItemAgain.Kind != "queue_item" {
-		t.Fatalf("queue item kind %q/%q", queueItem.Kind, queueItemAgain.Kind)
-	}
-	if !bytes.Equal(queueItem.Plaintext, queueItemAgain.Plaintext) {
+	if !bytes.Equal(payload.Plaintext, repeat.Plaintext) {
 		t.Fatalf("equal inputs produced different bytes")
 	}
-	if queueItem.ID == queueItemAgain.ID {
+	if payload.ID == repeat.ID {
 		t.Fatalf("two records share one payload ID")
 	}
-
-	decision, err := newQueueDecision(gen, queueItem.ID)
+	different, err := other(gen)
 	if err != nil {
-		t.Fatalf("newQueueDecision: %v", err)
+		t.Fatalf("seal other: %v", err)
 	}
-	if decision.Kind != "queue_decision" {
-		t.Fatalf("queue decision kind %q", decision.Kind)
-	}
-	if !bytes.Contains(decision.Plaintext, []byte(queueItem.ID)) {
-		t.Fatalf("queue decision does not reference its queue item")
-	}
-	otherDecision, err := newQueueDecision(gen, "other-item")
-	if err != nil {
-		t.Fatalf("newQueueDecision other: %v", err)
-	}
-	if bytes.Equal(decision.Plaintext, otherDecision.Plaintext) {
-		t.Fatalf("different queue items produced equal decisions")
-	}
-
-	auth, err := newModelAuthorization(gen, "faux-model")
-	if err != nil {
-		t.Fatalf("newModelAuthorization: %v", err)
-	}
-	if auth.Kind != "model_authorization" {
-		t.Fatalf("model authorization kind %q", auth.Kind)
-	}
-	authAgain, err := newModelAuthorization(gen, "faux-model")
-	if err != nil {
-		t.Fatalf("newModelAuthorization again: %v", err)
-	}
-	if !bytes.Equal(auth.Plaintext, authAgain.Plaintext) {
-		t.Fatalf("equal model authorizations produced different bytes")
-	}
-	otherAuth, err := newModelAuthorization(gen, "other-model")
-	if err != nil {
-		t.Fatalf("newModelAuthorization other: %v", err)
-	}
-	if bytes.Equal(auth.Plaintext, otherAuth.Plaintext) {
-		t.Fatalf("different models produced equal authorizations")
-	}
-
-	tool, err := newToolAuthorization(gen, "pure-read-v1")
-	if err != nil {
-		t.Fatalf("newToolAuthorization: %v", err)
-	}
-	if tool.Kind != "tool_authorization" {
-		t.Fatalf("tool authorization kind %q", tool.Kind)
-	}
-	toolAgain, err := newToolAuthorization(gen, "pure-read-v1")
-	if err != nil {
-		t.Fatalf("newToolAuthorization again: %v", err)
-	}
-	if !bytes.Equal(tool.Plaintext, toolAgain.Plaintext) {
-		t.Fatalf("equal tool authorizations produced different bytes")
+	if bytes.Equal(payload.Plaintext, different.Plaintext) {
+		t.Fatalf("different inputs produced equal bytes")
 	}
 }
 
 func TestContextRoundTrip(t *testing.T) {
 	t.Parallel()
-	gen := recordsGen()
 
 	items := []contextItem{
-		{Role: "user", Ref: "input-1", Content: []byte("the input")},
+		{Role: contextRoleUser, Ref: execInputRef, Content: []byte("the input")},
 		{Role: "assistant", Ref: "response-1", Content: []byte("the response")},
 		{Role: "tool", Ref: "result-1", Content: []byte("the result")},
 	}
-	payload, err := newContext(gen, items)
+	payload, err := newContext(recordsGen(), items)
 	if err != nil {
 		t.Fatalf("newContext: %v", err)
 	}
@@ -112,13 +112,18 @@ func TestContextRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("decodeContext: %v", err)
 	}
-	if len(decoded) != len(items) {
-		t.Fatalf("decoded %d items, want %d", len(decoded), len(items))
+	requireContextItemsEqual(t, decoded, items)
+}
+
+func requireContextItemsEqual(t *testing.T, decoded, want []contextItem) {
+	t.Helper()
+	if len(decoded) != len(want) {
+		t.Fatalf("decoded %d items, want %d", len(decoded), len(want))
 	}
-	for i, want := range items {
+	for i := range want {
 		got := decoded[i]
-		if got.Role != want.Role || got.Ref != want.Ref || !bytes.Equal(got.Content, want.Content) {
-			t.Fatalf("item %d decoded as %+v, want %+v", i, got, want)
+		if got.Role != want[i].Role || got.Ref != want[i].Ref || !bytes.Equal(got.Content, want[i].Content) {
+			t.Fatalf("item %d decoded as %+v, want %+v", i, got, want[i])
 		}
 	}
 }
@@ -126,8 +131,7 @@ func TestContextRoundTrip(t *testing.T) {
 func TestDecodeContextRejectsUnknownFields(t *testing.T) {
 	t.Parallel()
 
-	_, err := decodeContext([]byte(`[{"role":"user","ref":"r","content":"aGk=","extra":1}]`))
-	if err == nil {
+	if _, err := decodeContext([]byte(`[{"role":"user","ref":"r","content":"aGk=","extra":1}]`)); err == nil {
 		t.Fatalf("an unknown field must be rejected")
 	}
 	if _, err := decodeContext([]byte(`{"role":"user"}`)); err == nil {
