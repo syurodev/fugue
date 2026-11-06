@@ -1,6 +1,7 @@
 package hostapi
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -42,7 +43,7 @@ const (
 // fails closed.
 type DirStat struct {
 	Mode     fs.FileMode
-	UID      uint32
+	UID      int64
 	UIDKnown bool
 }
 
@@ -85,7 +86,7 @@ type Socket struct {
 // binds the listener with owner-only permissions. The socket directory is
 // 0700 before the socket exists and the socket is 0600 right after bind, so
 // there is no window in which another user can reach it.
-func ListenSocket(opts SocketOptions) (*Socket, error) {
+func ListenSocket(ctx context.Context, opts SocketOptions) (*Socket, error) {
 	dir, name, err := resolveSocketPath(opts)
 	if err != nil {
 		return nil, err
@@ -95,18 +96,18 @@ func ListenSocket(opts SocketOptions) (*Socket, error) {
 		dirs = osDirs{}
 	}
 	if dir != opts.DataDir {
-		if err := trustDir(dirs, opts.RuntimeDir, isManagedRuntimeBase(opts.RuntimeDir)); err != nil {
-			return nil, err
+		if terr := trustDir(dirs, opts.RuntimeDir, isManagedRuntimeBase(opts.RuntimeDir)); terr != nil {
+			return nil, terr
 		}
 	}
-	if err := trustDir(dirs, dir, true); err != nil {
-		return nil, err
+	if terr := trustDir(dirs, dir, true); terr != nil {
+		return nil, terr
 	}
 	socketPath := filepath.Join(dir, name)
-	if err := clearSocketPath(socketPath); err != nil {
-		return nil, err
+	if serr := clearSocketPath(ctx, socketPath); serr != nil {
+		return nil, serr
 	}
-	ln, err := net.Listen("unix", socketPath)
+	ln, err := new(net.ListenConfig).Listen(ctx, "unix", socketPath)
 	if err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "bind host socket "+socketPath, err)
 	}
@@ -145,30 +146,48 @@ func resolveSocketPath(opts SocketOptions) (dir, name string, err error) {
 // fugue does not create, such as XDG_RUNTIME_DIR, must already exist and keeps
 // its mode (host-api §3).
 func trustDir(dirs DirOps, path string, managed bool) error {
-	d, err := dirs.Open(path)
-	if err != nil && managed && errors.Is(err, fs.ErrNotExist) {
-		if mkdirErr := os.Mkdir(path, dirPerm); mkdirErr != nil && !errors.Is(mkdirErr, fs.ErrExist) {
-			return errcode.Wrap(errcode.Internal, "create socket directory "+path, mkdirErr)
-		}
-		d, err = dirs.Open(path)
-	}
+	d, err := openTrustedDir(dirs, path, managed)
 	if err != nil {
-		return errcode.Wrap(errcode.PermissionDenied,
-			fmt.Sprintf("open socket directory %s: %v", path, err), ErrSocketDirectoryUntrusted)
+		return err
 	}
 	defer closeQuietly(d)
+	return checkTrustedDir(d, path, managed)
+}
+
+// openTrustedDir returns the open descriptor of path, creating a managed
+// directory 0700 when it is absent.
+func openTrustedDir(dirs DirOps, path string, managed bool) (Dir, error) {
+	d, err := dirs.Open(path)
+	if err == nil {
+		return d, nil
+	}
+	if !managed || !errors.Is(err, fs.ErrNotExist) {
+		return nil, untrusted(fmt.Sprintf("open socket directory %s: %v", path, err))
+	}
+	if mkdirErr := os.Mkdir(path, dirPerm); mkdirErr != nil && !errors.Is(mkdirErr, fs.ErrExist) {
+		return nil, errcode.Wrap(errcode.Internal, "create socket directory "+path, mkdirErr)
+	}
+	d, err = dirs.Open(path)
+	if err != nil {
+		return nil, untrusted(fmt.Sprintf("open created socket directory %s: %v", path, err))
+	}
+	return d, nil
+}
+
+// checkTrustedDir inspects the open descriptor and tightens the mode of a
+// managed directory fugue owns. Nothing runs on a path twice.
+func checkTrustedDir(d Dir, path string, managed bool) error {
 	st, err := d.Stat()
 	if err != nil {
 		return errcode.Wrap(errcode.Internal, "stat socket directory "+path, err)
 	}
 	if st.Mode&fs.ModeDir == 0 {
-		return errcode.Wrap(errcode.PermissionDenied,
-			fmt.Sprintf("socket directory %s is not a directory (%v)", path, st.Mode), ErrSocketDirectoryUntrusted)
+		return untrusted(fmt.Sprintf("socket directory %s is not a directory (%v)", path, st.Mode))
 	}
-	if !st.UIDKnown || st.UID != uint32(os.Getuid()) {
-		return errcode.Wrap(errcode.PermissionDenied,
-			fmt.Sprintf("socket directory %s is not owned by this process user (uid %d, known %v)",
-				path, st.UID, st.UIDKnown), ErrSocketDirectoryUntrusted)
+	if !st.UIDKnown || st.UID != int64(os.Getuid()) {
+		return untrusted(fmt.Sprintf(
+			"socket directory %s is not owned by this process user (uid %d, known %v)",
+			path, st.UID, st.UIDKnown))
 	}
 	if managed && st.Mode.Perm() != dirPerm {
 		if err := d.Chmod(dirPerm); err != nil {
@@ -178,11 +197,15 @@ func trustDir(dirs DirOps, path string, managed bool) error {
 	return nil
 }
 
+func untrusted(msg string) error {
+	return errcode.Wrap(errcode.PermissionDenied, msg, ErrSocketDirectoryUntrusted)
+}
+
 // clearSocketPath removes a crashed host's leftover socket after proving that
 // nothing answers it, and refuses to touch anything that is not a socket. The
 // data-directory lock decides who is alive; the probe is defence in depth so
 // a live host's socket is never unlinked even if the lock is wrong.
-func clearSocketPath(path string) error {
+func clearSocketPath(ctx context.Context, path string) error {
 	fi, err := os.Lstat(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
@@ -194,7 +217,7 @@ func clearSocketPath(path string) error {
 		return errcode.Wrap(errcode.FailedPrecondition,
 			fmt.Sprintf("socket path %s exists and is %v, not a socket", path, fi.Mode()), ErrSocketPathNotSocket)
 	}
-	conn, perr := net.DialTimeout("unix", path, probeTimeout)
+	conn, perr := (&net.Dialer{Timeout: probeTimeout}).DialContext(ctx, "unix", path)
 	if perr == nil {
 		closeQuietly(conn)
 		return errcode.Wrap(errcode.FailedPrecondition,

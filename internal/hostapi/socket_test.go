@@ -24,9 +24,19 @@ func shortDir(t *testing.T) string {
 	if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	t.Cleanup(func() { removeAllQuietly(dir) })
 	return dir
 }
+
+func removeAllQuietly(path string) {
+	if err := os.RemoveAll(path); err != nil {
+		return
+	}
+}
+
+// errStatFailed is scripted by the trust tests to make a directory
+// descriptor's stat fail.
+var errStatFailed = errors.New("stat failed")
 
 // fakeDirOps is a DirOps seam whose directories record every open and chmod,
 // so the tests can pin that the trust check and the chmod act on one open
@@ -37,9 +47,10 @@ type fakeDirOps struct {
 }
 
 type fakeDir struct {
-	path   string
-	stat   DirStat
-	chmods int
+	path     string
+	stat     DirStat
+	chmods   int
+	failStat bool
 }
 
 func newFakeDirOps() *fakeDirOps {
@@ -78,7 +89,12 @@ func (f *fakeDirOps) chmodCount() int {
 	return n
 }
 
-func (d *fakeDir) Stat() (DirStat, error) { return d.stat, nil }
+func (d *fakeDir) Stat() (DirStat, error) {
+	if d.failStat {
+		return DirStat{}, errStatFailed
+	}
+	return d.stat, nil
+}
 
 func (d *fakeDir) Chmod(mode fs.FileMode) error {
 	d.chmods++
@@ -88,19 +104,49 @@ func (d *fakeDir) Chmod(mode fs.FileMode) error {
 
 func (d *fakeDir) Close() error { return nil }
 
-func dirStat(perm fs.FileMode, uid uint32, known bool) DirStat {
+func dirStat(perm fs.FileMode, uid int64, known bool) DirStat {
 	return DirStat{Mode: fs.ModeDir | perm, UID: uid, UIDKnown: known}
 }
 
 // listenFor closes the listener when the test ends and fails on a bind error.
 func listenFor(t *testing.T, opts SocketOptions) *Socket {
 	t.Helper()
-	s, err := ListenSocket(opts)
+	s, err := ListenSocket(t.Context(), opts)
 	if err != nil {
 		t.Fatalf("ListenSocket = %v, want nil", err)
 	}
-	t.Cleanup(func() { _ = s.Listener.Close() })
+	t.Cleanup(func() { closeQuietly(s.Listener) })
 	return s
+}
+
+// listenUnix binds a real unix socket for the test. When unlinkOnClose is
+// false the socket file survives Close, like a crashed host's leftover.
+func listenUnix(t *testing.T, path string, unlinkOnClose bool) net.Listener {
+	t.Helper()
+	ln, err := new(net.ListenConfig).Listen(t.Context(), "unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { closeQuietly(ln) })
+	u, ok := ln.(*net.UnixListener)
+	if !ok {
+		t.Fatal("listen on unix returned a non-unix listener")
+	}
+	if !unlinkOnClose {
+		u.SetUnlinkOnClose(false)
+	}
+	return ln
+}
+
+// dialUnix connects to a real unix socket for the test.
+func dialUnix(t *testing.T, path string) net.Conn {
+	t.Helper()
+	conn, err := new(net.Dialer).DialContext(t.Context(), "unix", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { closeQuietly(conn) })
+	return conn
 }
 
 func TestSocketDirectoryAndSocketAreOwnerOnly(t *testing.T) {
@@ -144,7 +190,7 @@ func TestLongSocketPathFallsBackToTheRuntimeDirectory(t *testing.T) {
 
 func TestLongSocketPathNeedsARuntimeDir(t *testing.T) {
 	t.Parallel()
-	_, err := ListenSocket(SocketOptions{DataDir: shortDir(t), MaxPath: 8})
+	_, err := ListenSocket(t.Context(), SocketOptions{DataDir: shortDir(t), MaxPath: 8})
 	if errcode.CodeOf(err) != errcode.InvalidArgument {
 		t.Fatalf("ListenSocket = %v, want invalid_argument", err)
 	}
@@ -158,7 +204,7 @@ func TestSocketDirectorySymlinkIsRejected(t *testing.T) {
 	if err := os.Symlink(real, link); err != nil {
 		t.Fatal(err)
 	}
-	_, err := ListenSocket(SocketOptions{DataDir: link})
+	_, err := ListenSocket(t.Context(), SocketOptions{DataDir: link})
 	if !errors.Is(err, ErrSocketDirectoryUntrusted) || errcode.CodeOf(err) != errcode.PermissionDenied {
 		t.Fatalf("ListenSocket = %v, want %v with permission_denied", err, ErrSocketDirectoryUntrusted)
 	}
@@ -168,8 +214,8 @@ func TestSocketDirectoryForeignOwnerIsRejected(t *testing.T) {
 	t.Parallel()
 	dir := shortDir(t)
 	ops := newFakeDirOps()
-	ops.add(dir, dirStat(0o700, uint32(os.Getuid())+4242, true))
-	_, err := ListenSocket(SocketOptions{DataDir: dir, Dirs: ops})
+	ops.add(dir, dirStat(0o700, int64(os.Getuid())+4242, true))
+	_, err := ListenSocket(t.Context(), SocketOptions{DataDir: dir, Dirs: ops})
 	if !errors.Is(err, ErrSocketDirectoryUntrusted) {
 		t.Fatalf("ListenSocket = %v, want %v", err, ErrSocketDirectoryUntrusted)
 	}
@@ -182,8 +228,8 @@ func TestSocketDirectoryUnknownOwnerFailsClosed(t *testing.T) {
 	t.Parallel()
 	dir := shortDir(t)
 	ops := newFakeDirOps()
-	ops.add(dir, dirStat(0o700, uint32(os.Getuid()), false))
-	_, err := ListenSocket(SocketOptions{DataDir: dir, Dirs: ops})
+	ops.add(dir, dirStat(0o700, int64(os.Getuid()), false))
+	_, err := ListenSocket(t.Context(), SocketOptions{DataDir: dir, Dirs: ops})
 	if !errors.Is(err, ErrSocketDirectoryUntrusted) {
 		t.Fatalf("ListenSocket = %v, want %v", err, ErrSocketDirectoryUntrusted)
 	}
@@ -194,12 +240,12 @@ func TestSocketDirectoryUnknownOwnerFailsClosed(t *testing.T) {
 
 func TestRuntimeBaseDirectoryForeignOwnerIsRejected(t *testing.T) {
 	t.Parallel()
-	base := filepath.Join(t.TempDir(), fmt.Sprintf("fugue-%d", os.Getuid()))
+	base := filepath.Join(t.TempDir(), fmt.Sprintf(runtimeBaseName, os.Getuid()))
 	ops := newFakeDirOps()
-	ops.add(base, dirStat(0o700, uint32(os.Getuid())+4242, true))
+	ops.add(base, dirStat(0o700, int64(os.Getuid())+4242, true))
 	child := filepath.Join(base, runtimeSocketDirName)
-	ops.add(child, dirStat(0o700, uint32(os.Getuid()), true))
-	_, err := ListenSocket(SocketOptions{DataDir: t.TempDir(), RuntimeDir: base, MaxPath: 8, Dirs: ops})
+	ops.add(child, dirStat(0o700, int64(os.Getuid()), true))
+	_, err := ListenSocket(t.Context(), SocketOptions{DataDir: t.TempDir(), RuntimeDir: base, MaxPath: 8, Dirs: ops})
 	if !errors.Is(err, ErrSocketDirectoryUntrusted) {
 		t.Fatalf("ListenSocket = %v, want %v", err, ErrSocketDirectoryUntrusted)
 	}
@@ -212,7 +258,7 @@ func TestTrustCheckChmodsTheOpenedDescriptor(t *testing.T) {
 	t.Parallel()
 	dir := shortDir(t)
 	ops := newFakeDirOps()
-	d := ops.add(dir, dirStat(0o755, uint32(os.Getuid()), true))
+	d := ops.add(dir, dirStat(0o755, int64(os.Getuid()), true))
 	listenFor(t, SocketOptions{DataDir: dir, Dirs: ops})
 	if d.chmods != 1 {
 		t.Fatalf("chmod ran %d times on the opened descriptor, want 1", d.chmods)
@@ -224,8 +270,12 @@ func TestTrustCheckChmodsTheOpenedDescriptor(t *testing.T) {
 
 func TestSocketDirectoryWrongModeIsTightened(t *testing.T) {
 	t.Parallel()
+	// deliberatelyLoose is a wrong, group-accessible directory mode: its
+	// group-readability is the point, because the trust check must tighten a
+	// directory this process owns back to 0700.
+	loose := os.FileMode(0o700) | os.FileMode(0o055)
 	dir := shortDir(t)
-	if err := os.Chmod(dir, 0o755); err != nil {
+	if err := os.Chmod(dir, loose); err != nil {
 		t.Fatal(err)
 	}
 	listenFor(t, SocketOptions{DataDir: dir})
@@ -238,11 +288,7 @@ func TestStaleSocketIsReplacedWhenNoOneAnswers(t *testing.T) {
 	t.Parallel()
 	dir := shortDir(t)
 	path := filepath.Join(dir, SocketFileName)
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ln.(*net.UnixListener).SetUnlinkOnClose(false)
+	ln := listenUnix(t, path, false)
 	if err := ln.Close(); err != nil {
 		t.Fatal(err)
 	}
@@ -259,23 +305,16 @@ func TestLiveSocketIsNeverUnlinked(t *testing.T) {
 	t.Parallel()
 	dir := shortDir(t)
 	path := filepath.Join(dir, SocketFileName)
-	ln, err := net.Listen("unix", path)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = ln.Close() })
-	_, err = ListenSocket(SocketOptions{DataDir: dir})
+	listenUnix(t, path, true)
+	_, err := ListenSocket(t.Context(), SocketOptions{DataDir: dir})
 	if !errors.Is(err, ErrSocketInUse) || errcode.CodeOf(err) != errcode.FailedPrecondition {
 		t.Fatalf("ListenSocket = %v, want %v with failed_precondition", err, ErrSocketInUse)
 	}
 	if _, lerr := os.Lstat(path); lerr != nil {
 		t.Fatalf("the live socket was unlinked: %v", lerr)
 	}
-	conn, derr := net.Dial("unix", path)
-	if derr != nil {
-		t.Fatalf("the original listener no longer answers: %v", derr)
-	}
-	_ = conn.Close()
+	conn := dialUnix(t, path)
+	closeQuietly(conn)
 }
 
 func TestRegularFileAtSocketPathIsNeverUnlinked(t *testing.T) {
@@ -285,11 +324,11 @@ func TestRegularFileAtSocketPathIsNeverUnlinked(t *testing.T) {
 	if err := os.WriteFile(path, []byte("keep"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := ListenSocket(SocketOptions{DataDir: dir})
+	_, err := ListenSocket(t.Context(), SocketOptions{DataDir: dir})
 	if !errors.Is(err, ErrSocketPathNotSocket) {
 		t.Fatalf("ListenSocket = %v, want %v", err, ErrSocketPathNotSocket)
 	}
-	b, rerr := os.ReadFile(path)
+	b, rerr := fs.ReadFile(os.DirFS(dir), SocketFileName)
 	if rerr != nil || string(b) != "keep" {
 		t.Fatalf("socket path file = %q (%v), want it untouched", b, rerr)
 	}

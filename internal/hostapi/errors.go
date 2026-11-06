@@ -20,6 +20,10 @@ var (
 	// foreign-owned, has an unreportable owner or an unacceptable mode, or is
 	// a missing directory fugue does not create.
 	ErrSocketDirectoryUntrusted = errcode.New(errcode.PermissionDenied, "the socket directory is not trusted")
+	// ErrPeerCredentialDenied means the connection's peer uid differs from the
+	// host process user or its credentials could not be read; the connection
+	// is rejected before any request byte is read.
+	ErrPeerCredentialDenied = errcode.New(errcode.PermissionDenied, "the connection is not from this process user")
 )
 
 // closeQuietly closes c and drops the error. Read paths and teardown use it;

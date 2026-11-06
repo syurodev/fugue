@@ -16,6 +16,7 @@ tool (
 )
 
 require (
+	connectrpc.com/connect v1.21.1
 	github.com/google/go-cmp v0.7.0
 	go.uber.org/goleak v1.3.0
 	golang.org/x/crypto v0.58.0
@@ -53,7 +54,6 @@ require (
 	cloud.google.com/go/iam v1.14.0 // indirect
 	cloud.google.com/go/monitoring v1.31.0 // indirect
 	cloud.google.com/go/storage v1.65.1 // indirect
-	connectrpc.com/connect v1.21.1 // indirect
 	connectrpc.com/connect/v2 v2.0.2 // indirect
 	connectrpc.com/otelconnect v0.11.0 // indirect
 	github.com/GoogleCloudPlatform/opentelemetry-operations-go/detectors/gcp v1.38.0 // indirect

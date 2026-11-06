@@ -13,8 +13,8 @@ import (
 // Environment variables, in the SYNX_FUGUE_ namespace, plus the XDG runtime
 // standard read for the socket directory.
 const (
-	EnvDataDir   = "SYNX_FUGUE_DATA_DIR"
-	EnvLogLevel  = "SYNX_FUGUE_LOG_LEVEL"
+	EnvDataDir    = "SYNX_FUGUE_DATA_DIR"
+	EnvLogLevel   = "SYNX_FUGUE_LOG_LEVEL"
 	EnvRuntimeDir = "XDG_RUNTIME_DIR"
 
 	dataDirName = "Fugue"
