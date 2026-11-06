@@ -222,7 +222,10 @@ func TestSiblingSymlinkSocketDirectoryIsRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	link := filepath.Join(parent, "link")
-	if err := os.Symlink(real, link); err != nil {
+	// The target is relative so the symlink stays inside the parent — the
+	// case a root-scoped open follows; an absolute target escapes the parent
+	// and is rejected earlier.
+	if err := os.Symlink("real", link); err != nil {
 		t.Fatal(err)
 	}
 	_, err := ListenSocket(t.Context(), SocketOptions{DataDir: link})
