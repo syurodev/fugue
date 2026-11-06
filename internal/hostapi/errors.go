@@ -1,10 +1,6 @@
 package hostapi
 
-import (
-	"io"
-
-	"github.com/syurodev/fugue/internal/platform/errcode"
-)
+import "github.com/syurodev/fugue/internal/platform/errcode"
 
 // Errors reported by the socket and the transport. They wrap public errcode
 // codes so errcode.Expose can show them to a client.
@@ -25,14 +21,3 @@ var (
 	// is rejected before any request byte is read.
 	ErrPeerCredentialDenied = errcode.New(errcode.PermissionDenied, "the connection is not from this process user")
 )
-
-// closeQuietly closes c and drops the error. Read paths and teardown use it;
-// a Close error on a write path must be handled (quality-gates §2).
-func closeQuietly(c io.Closer) {
-	if c == nil {
-		return
-	}
-	if err := c.Close(); err != nil {
-		return
-	}
-}

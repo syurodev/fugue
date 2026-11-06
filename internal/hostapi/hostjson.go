@@ -48,17 +48,13 @@ func WriteHostFile(dataDir string, hf *HostFile) error {
 	}
 	tmp := f.Name()
 	if _, err := f.Write(b); err != nil {
-		closeQuietly(f)
-		removeQuietly(tmp)
-		return errcode.Wrap(errcode.Internal, "write host file", err)
+		return errcode.Wrap(errcode.Internal, "write host file", errors.Join(err, f.Close(), os.Remove(tmp)))
 	}
 	if err := f.Close(); err != nil {
-		removeQuietly(tmp)
-		return errcode.Wrap(errcode.Internal, "close host file", err)
+		return errcode.Wrap(errcode.Internal, "close host file", errors.Join(err, os.Remove(tmp)))
 	}
 	if err := os.Rename(tmp, HostFilePath(dataDir)); err != nil {
-		removeQuietly(tmp)
-		return errcode.Wrap(errcode.Internal, "publish host file in "+dataDir, err)
+		return errcode.Wrap(errcode.Internal, "publish host file in "+dataDir, errors.Join(err, os.Remove(tmp)))
 	}
 	return nil
 }
@@ -73,10 +69,4 @@ func RemoveHostFile(dataDir string) error {
 		return errcode.Wrap(errcode.Internal, "remove host file", err)
 	}
 	return nil
-}
-
-func removeQuietly(path string) {
-	if err := os.Remove(path); err != nil {
-		return
-	}
 }

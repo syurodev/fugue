@@ -67,17 +67,26 @@ func Load(env Env, userConfigDir func() (string, error)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	return Config{DataDir: dir, LogLevel: level, RuntimeDir: runtimeDir(env)}, nil
+	rt, err := runtimeDir(env)
+	if err != nil {
+		return Config{}, err
+	}
+	return Config{DataDir: dir, LogLevel: level, RuntimeDir: rt}, nil
 }
 
 // runtimeDir resolves the runtime base for sockets that do not fit the data
-// directory. XDG_RUNTIME_DIR is taken as given; otherwise fugue owns a
-// per-user directory under the OS temp dir (host-api §3).
-func runtimeDir(env Env) string {
+// directory (host-api §3). XDG_RUNTIME_DIR must be absolute when set: fugue
+// trust-checks and binds sockets inside it, and a relative value cannot name
+// a place it can defend, so it is rejected like a relative data directory.
+// Otherwise fugue owns a per-user directory under the OS temp dir.
+func runtimeDir(env Env) (string, error) {
 	if v, ok := env.Lookup(EnvRuntimeDir); ok && v != "" {
-		return filepath.Clean(v)
+		if !filepath.IsAbs(v) {
+			return "", errcode.New(errcode.InvalidArgument, EnvRuntimeDir+" must be an absolute path")
+		}
+		return filepath.Clean(v), nil
 	}
-	return filepath.Join(os.TempDir(), fmt.Sprintf("fugue-%d", os.Getuid()))
+	return filepath.Join(os.TempDir(), fmt.Sprintf("fugue-%d", os.Getuid())), nil
 }
 
 func dataDir(env Env, userConfigDir func() (string, error)) (string, error) {

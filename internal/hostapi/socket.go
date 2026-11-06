@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -112,8 +113,8 @@ func ListenSocket(ctx context.Context, opts SocketOptions) (*Socket, error) {
 		return nil, errcode.Wrap(errcode.Internal, "bind host socket "+socketPath, err)
 	}
 	if err := os.Chmod(socketPath, socketFilePerm); err != nil {
-		closeQuietly(ln)
-		return nil, errcode.Wrap(errcode.Internal, "restrict socket permissions "+socketPath, err)
+		return nil, errcode.Wrap(errcode.Internal,
+			"restrict socket permissions "+socketPath, errors.Join(err, ln.Close()))
 	}
 	return &Socket{Path: socketPath, Listener: ln}, nil
 }
@@ -150,7 +151,13 @@ func trustDir(dirs DirOps, path string, managed bool) error {
 	if err != nil {
 		return err
 	}
-	defer closeQuietly(d)
+	defer func() {
+		// Teardown of a checked directory: nothing can act on the error, so
+		// it is logged once with the path.
+		if err := d.Close(); err != nil {
+			slog.Warn("close socket directory descriptor failed", "path", path)
+		}
+	}()
 	return checkTrustedDir(d, path, managed)
 }
 
@@ -219,7 +226,9 @@ func clearSocketPath(ctx context.Context, path string) error {
 	}
 	conn, perr := (&net.Dialer{Timeout: probeTimeout}).DialContext(ctx, "unix", path)
 	if perr == nil {
-		closeQuietly(conn)
+		if cerr := conn.Close(); cerr != nil {
+			slog.Warn("close probe connection failed", "path", path)
+		}
 		return errcode.Wrap(errcode.FailedPrecondition,
 			fmt.Sprintf("socket path %s answers a probe", path), ErrSocketInUse)
 	}

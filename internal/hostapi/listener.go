@@ -1,6 +1,7 @@
 package hostapi
 
 import (
+	"log/slog"
 	"net"
 	"sync"
 )
@@ -77,7 +78,11 @@ func (l *AcceptListener) Accept() (net.Conn, error) {
 }
 
 func (l *AcceptListener) reject(c net.Conn) {
-	closeQuietly(c)
+	// The connection is rejected either way; a close failure is logged once
+	// with the running count, never with per-connection detail.
+	if err := c.Close(); err != nil {
+		slog.Warn("close rejected connection failed", "count", l.rejects+1)
+	}
 	l.rejects++
 	if l.onReject != nil {
 		l.onReject(l.rejects)

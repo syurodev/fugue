@@ -97,9 +97,10 @@ func TestLoadRejectsBadValues(t *testing.T) {
 		wantCode errcode.Code
 		wantText string
 	}{
-		"relative data dir": {config.MapEnv{config.EnvDataDir: "relative/dir"}, userDir("/x"), errcode.InvalidArgument, "absolute"},
-		"unknown level":     {config.MapEnv{config.EnvLogLevel: "chatty"}, userDir("/x"), errcode.InvalidArgument, "debug, info, warn or error"},
-		"no user dir":       {config.MapEnv{}, func() (string, error) { return "", errNoHome }, errcode.FailedPrecondition, config.EnvDataDir},
+		"relative data dir":    {config.MapEnv{config.EnvDataDir: "relative/dir"}, userDir("/x"), errcode.InvalidArgument, "absolute"},
+		"relative runtime dir": {config.MapEnv{config.EnvRuntimeDir: "relative/dir"}, userDir("/x"), errcode.InvalidArgument, "absolute"},
+		"unknown level":        {config.MapEnv{config.EnvLogLevel: "chatty"}, userDir("/x"), errcode.InvalidArgument, "debug, info, warn or error"},
+		"no user dir":          {config.MapEnv{}, func() (string, error) { return "", errNoHome }, errcode.FailedPrecondition, config.EnvDataDir},
 	}
 	for name, c := range cases {
 		t.Run(name, func(t *testing.T) {
