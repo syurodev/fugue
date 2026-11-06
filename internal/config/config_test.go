@@ -2,7 +2,9 @@ package config_test
 
 import (
 	"errors"
+	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -31,9 +33,36 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := config.Config{DataDir: filepath.Join(base, "Fugue"), LogLevel: slog.LevelInfo}
+	want := config.Config{
+		DataDir:    filepath.Join(base, "Fugue"),
+		LogLevel:   slog.LevelInfo,
+		RuntimeDir: filepath.Join(os.TempDir(), fmt.Sprintf("fugue-%d", os.Getuid())),
+	}
 	if diff := cmp.Diff(want, got); diff != "" {
 		t.Fatalf("Config mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func TestLoadReadsRuntimeDirFromEnvironment(t *testing.T) {
+	t.Parallel()
+	got, err := config.Load(config.MapEnv{config.EnvRuntimeDir: "/run/user/1000"}, userDir(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.RuntimeDir != "/run/user/1000" {
+		t.Fatalf("RuntimeDir = %q, want /run/user/1000", got.RuntimeDir)
+	}
+}
+
+func TestLoadFallsBackToPerUserTempRuntimeDir(t *testing.T) {
+	t.Parallel()
+	got, err := config.Load(config.MapEnv{}, userDir(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(os.TempDir(), fmt.Sprintf("fugue-%d", os.Getuid()))
+	if got.RuntimeDir != want {
+		t.Fatalf("RuntimeDir = %q, want %q", got.RuntimeDir, want)
 	}
 }
 

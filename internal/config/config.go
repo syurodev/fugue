@@ -10,10 +10,12 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
-// Environment variables, in the SYNX_FUGUE_ namespace.
+// Environment variables, in the SYNX_FUGUE_ namespace, plus the XDG runtime
+// standard read for the socket directory.
 const (
-	EnvDataDir  = "SYNX_FUGUE_DATA_DIR"
-	EnvLogLevel = "SYNX_FUGUE_LOG_LEVEL"
+	EnvDataDir   = "SYNX_FUGUE_DATA_DIR"
+	EnvLogLevel  = "SYNX_FUGUE_LOG_LEVEL"
+	EnvRuntimeDir = "XDG_RUNTIME_DIR"
 
 	dataDirName = "Fugue"
 )
@@ -25,6 +27,10 @@ type Config struct {
 	DataDir string
 	// LogLevel is the minimum level written to the log.
 	LogLevel slog.Level
+	// RuntimeDir is the base for sockets that do not fit the data directory
+	// (host-api §3): XDG_RUNTIME_DIR when set, otherwise a per-user directory
+	// fugue creates under the OS temp dir.
+	RuntimeDir string
 }
 
 // Env looks up environment variables. Production uses ProcessEnv; tests use MapEnv.
@@ -61,7 +67,17 @@ func Load(env Env, userConfigDir func() (string, error)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	return Config{DataDir: dir, LogLevel: level}, nil
+	return Config{DataDir: dir, LogLevel: level, RuntimeDir: runtimeDir(env)}, nil
+}
+
+// runtimeDir resolves the runtime base for sockets that do not fit the data
+// directory. XDG_RUNTIME_DIR is taken as given; otherwise fugue owns a
+// per-user directory under the OS temp dir (host-api §3).
+func runtimeDir(env Env) string {
+	if v, ok := env.Lookup(EnvRuntimeDir); ok && v != "" {
+		return filepath.Clean(v)
+	}
+	return filepath.Join(os.TempDir(), fmt.Sprintf("fugue-%d", os.Getuid()))
 }
 
 func dataDir(env Env, userConfigDir func() (string, error)) (string, error) {
