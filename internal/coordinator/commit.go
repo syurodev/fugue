@@ -28,7 +28,7 @@ type step struct {
 	events  []kernel.Event
 	attempt int
 	// done runs on the actor once the batch is known to be committed and the
-	// cached run and admission reflect it.
+	// cached events reflect it; revisions may still require a store reload.
 	done func(ctx context.Context, res *AppendResult)
 	// fail runs on the actor when the batch is definitely not committed.
 	fail func(ctx context.Context, err error)
@@ -103,12 +103,12 @@ func (s *Session) refreshAppendRevisions(ctx context.Context, tr *Transition) er
 // an earlier attempt committed these events, so the store is the only truth.
 func (s *Session) applyAppended(ctx context.Context, st *step, res *AppendResult) {
 	runID := st.t.RunID
-	if res.Duplicate {
-		s.reload(ctx, runID)
-		return
-	}
 	for _, ev := range st.events {
 		s.runs[runID] = kernel.Evolve(s.runs[runID], ev)
+	}
+	if res.Duplicate {
+		s.reloadConfirmed(ctx, runID, res)
+		return
 	}
 	if res.RevisionsUnavailable {
 		delete(s.runRevs, runID)
@@ -121,6 +121,20 @@ func (s *Session) applyAppended(ctx context.Context, st *step, res *AppendResult
 	// another transition rather than deriving it from the event batch.
 	if st.t.Fence.AdmissionToken == 0 {
 		s.admissionStale = true
+	}
+}
+
+// A confirmed batch remains available to callbacks even if reading its state
+// fails. Only a successful store read can make the revisions usable again.
+func (s *Session) reloadConfirmed(ctx context.Context, runID string, res *AppendResult) {
+	delete(s.runRevs, runID)
+	s.admissionStale = true
+	runErr := s.loadRun(ctx, runID)
+	admErr := s.refreshAdmission(ctx, true)
+	res.RevisionsUnavailable = runErr != nil || admErr != nil
+	if !res.RevisionsUnavailable {
+		res.RunRevision = s.runRevs[runID]
+		res.AdmissionRevision = s.admission.Revision
 	}
 }
 
@@ -143,13 +157,12 @@ func (s *Session) readBack(ctx context.Context, st *step) {
 func (s *Session) settle(ctx context.Context, st *step, status CommitResolution, receipt *codec.Receipt) bool {
 	switch status {
 	case CommitResolutionCommitted:
-		s.reload(ctx, st.t.RunID)
 		res := AppendResult{
-			Duplicate:         false,
-			Receipt:           *receipt,
-			RunRevision:       s.runRevs[st.t.RunID],
-			AdmissionRevision: s.admission.Revision,
+			Receipt:              *receipt,
+			RevisionsUnavailable: true,
 		}
+		s.applyAppended(ctx, st, &res)
+		s.reloadConfirmed(ctx, st.t.RunID, &res)
 		st.done(ctx, &res)
 		return true
 	case CommitResolutionNotCommitted:

@@ -192,6 +192,7 @@ func (s *Session) admitted(item *queuedRun, token uint64, initial contextStart) 
 	}
 	s.admission.ActiveRunID = item.runID
 	s.admission.AdmissionToken = token
+	s.admission.OwnerIncarnation = s.cfg.OwnerIncarnation
 	s.admission.ContextEpoch = initial.epoch
 	s.admission.ContextRevision = initial.revision
 	s.admission.ContextStartRunID = initial.startRunID
