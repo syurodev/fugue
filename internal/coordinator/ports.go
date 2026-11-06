@@ -2,6 +2,7 @@ package coordinator
 
 import (
 	"context"
+	"time"
 
 	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/kernel"
@@ -75,12 +76,23 @@ type Admission struct {
 	ContextStartRunID string
 }
 
+// ArmedTimer describes a currently armed durable timer.
+type ArmedTimer struct {
+	TimerID    string
+	SessionID  string
+	RunID      string
+	Generation uint64
+	Purpose    kernel.TimerPurpose
+	Deadline   time.Time
+}
+
 // Store defines persistence operations for execution streams, admissions, and receipts.
 type Store interface {
 	Append(ctx context.Context, t *Transition) (AppendResult, error)
 	ResolveCommit(ctx context.Context, commandID string) (CommitResolution, codec.Receipt, error)
 	LoadRun(ctx context.Context, runID string) (*kernel.State, uint64, error)
 	LoadAdmission(ctx context.Context, sessionID string) (Admission, error)
+	ListArmedTimers(ctx context.Context) ([]ArmedTimer, error)
 }
 
 // Lease binds dispatched work to an executor attempt fence and admission token.

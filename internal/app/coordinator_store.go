@@ -133,3 +133,22 @@ func (s *coordinatorStore) LoadAdmission(ctx context.Context, sessionID string) 
 		ContextEpoch: row.ContextEpoch, ContextRevision: row.ContextRevision, ContextStartRunID: row.ContextStartRunID,
 	}, nil
 }
+
+func (s *coordinatorStore) ListArmedTimers(ctx context.Context) ([]coordinator.ArmedTimer, error) {
+	armed, err := s.store.ListArmedTimers(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list armed timers: %w", err)
+	}
+	res := make([]coordinator.ArmedTimer, len(armed))
+	for i, t := range armed {
+		res[i] = coordinator.ArmedTimer{
+			TimerID:    t.TimerID,
+			SessionID:  t.SessionID,
+			RunID:      t.RunID,
+			Generation: t.Generation,
+			Purpose:    t.Purpose,
+			Deadline:   t.Deadline,
+		}
+	}
+	return res, nil
+}

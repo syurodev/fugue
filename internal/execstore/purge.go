@@ -53,6 +53,7 @@ func deleteExecutionData(ctx context.Context, conn *sql.Conn, sessionID string) 
 		"DELETE FROM exec_attempts WHERE run_id IN (SELECT run_id FROM exec_runs WHERE session_id = ?)",
 		"DELETE FROM exec_invocations WHERE run_id IN (SELECT run_id FROM exec_runs WHERE session_id = ?)",
 		"DELETE FROM exec_events WHERE session_id = ?",
+		"DELETE FROM exec_timers WHERE session_id = ?",
 		"DELETE FROM exec_admission WHERE session_id = ?",
 		"DELETE FROM exec_runs WHERE session_id = ?",
 		"DELETE FROM exec_payloads WHERE session_id = ?",

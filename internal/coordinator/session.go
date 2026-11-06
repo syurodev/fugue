@@ -2,8 +2,10 @@ package coordinator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/syurodev/fugue/internal/codec"
@@ -97,6 +99,7 @@ type Session struct {
 	resolvers   sync.WaitGroup
 	stopped     chan struct{}
 	stopOnce    sync.Once
+	scheduler   atomic.Pointer[Scheduler]
 
 	// Test hooks. They are set before the first command is posted and read by
 	// the actor or a resolver started after that, so the mailbox orders them.
@@ -134,7 +137,7 @@ func Start(ctx context.Context, cfg *Config) (*Session, error) {
 }
 
 func newSessionInstance(cfg *Config, adm *Admission, inherited string, cancel context.CancelFunc) *Session {
-	return &Session{
+	s := &Session{
 		cfg:            *cfg,
 		admission:      *adm,
 		admissionStale: false,
@@ -158,6 +161,7 @@ func newSessionInstance(cfg *Config, adm *Admission, inherited string, cancel co
 		onTimerArmed:   nil,
 		onCommitted:    nil,
 	}
+	return s
 }
 
 func (s *Session) startWorkers(actorCtx context.Context) {
@@ -358,6 +362,7 @@ func (s *Session) decideAndCommit(ctx context.Context, sub *submission, runID st
 
 	events, decErr := kernel.Decide(state, sub.req.Command, &sub.req.Facts)
 	if decErr != nil {
+		s.reactEarlyTimerRejection(runID, state, sub.req.Command, decErr)
 		s.respond(sub, nil, decErr)
 		return
 	}
@@ -389,32 +394,22 @@ func (s *Session) decideAndCommit(ctx context.Context, sub *submission, runID st
 	})
 }
 
-// validateAccept refuses an AcceptRun that lacks data only the caller can
-// supply. Nothing is defaulted, because a default would be written into a
-// durable event as if the caller had decided it.
-func (s *Session) validateAccept(accept *kernel.AcceptRunCommand, req *Request) error {
-	if accept == nil {
-		return fmt.Errorf("%w: nil command", ErrInvalidAccept)
+func (s *Session) reactEarlyTimerRejection(runID string, state *kernel.State, cmd kernel.Command, decErr error) {
+	var rej kernel.Rejection
+	if errors.As(decErr, &rej) && rej.Code == kernel.RejectionCodeEarlyTimer {
+		if timerCmd, ok := cmd.(*kernel.TimerFiredCommand); ok {
+			if active, exists := state.ActiveTimers[timerCmd.TimerID]; exists && active != nil && active.Generation == timerCmd.Generation {
+				s.armTimer(&ArmedTimer{
+					TimerID:    active.TimerID,
+					SessionID:  s.cfg.SessionID,
+					RunID:      runID,
+					Generation: active.Generation,
+					Purpose:    active.Purpose,
+					Deadline:   active.Deadline,
+				})
+			}
+		}
 	}
-	if accept.InputRef == "" {
-		return fmt.Errorf("%w: input ref", ErrInvalidAccept)
-	}
-	if accept.QueueItemRef == "" {
-		return fmt.Errorf("%w: queue item ref", ErrInvalidAccept)
-	}
-	if accept.ProtocolBinding == "" {
-		return fmt.Errorf("%w: protocol binding", ErrInvalidAccept)
-	}
-	if accept.SessionID != "" && accept.SessionID != s.cfg.SessionID {
-		return fmt.Errorf("%w: session id", ErrInvalidAccept)
-	}
-	if req.QueueDecisionRef == "" {
-		return fmt.Errorf("%w: queue decision ref", ErrInvalidAccept)
-	}
-	if req.Facts.ModelPlan == nil {
-		return fmt.Errorf("%w: model plan", ErrInvalidAccept)
-	}
-	return nil
 }
 
 func (s *Session) resolveSubmissionFacts(
@@ -481,6 +476,7 @@ func (s *Session) requestCommitted(
 	}
 
 	s.maybeAdmitNext(ctx)
+	s.armCommittedTimers(runID, events)
 
 	s.respond(sub, &Reply{
 		Events:    events,

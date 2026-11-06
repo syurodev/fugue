@@ -31,6 +31,8 @@ const (
 	FaultBeforeProjections FaultPoint = "before_projections"
 	// FaultBeforeTranscript triggers before transcript projections are persisted.
 	FaultBeforeTranscript FaultPoint = "before_transcript"
+	// FaultBeforeTimers triggers immediately before projecting timer rows.
+	FaultBeforeTimers FaultPoint = "before_timers"
 	// FaultBeforeReceiptInsert triggers before receipt record insertion.
 	FaultBeforeReceiptInsert FaultPoint = "before_receipt_insert"
 	// FaultBeforeAdmissionUpdate triggers before session admission row update.
