@@ -93,7 +93,6 @@ linters:
         - all
     wrapcheck:
       # errcode constructors are the repository's way of wrapping, not a boundary leak.
-      # errcode constructors are the repository's way of wrapping, not a boundary leak.
       ignore-package-globs:
         - github.com/syurodev/fugue/internal/platform/errcode
     errcheck:
