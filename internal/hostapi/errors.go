@@ -20,4 +20,13 @@ var (
 	// host process user or its credentials could not be read; the connection
 	// is rejected before any request byte is read.
 	ErrPeerCredentialDenied = errcode.New(errcode.PermissionDenied, "the connection is not from this process user")
+	// ErrAlreadyHelloed means the connection already negotiated a hello; a
+	// second hello on a leased connection is a typed rejection.
+	ErrAlreadyHelloed = errcode.New(errcode.FailedPrecondition, "this connection already negotiated a hello")
+	// ErrHelloFirst means the connection called an rpc before hello.
+	ErrHelloFirst = errcode.New(errcode.PermissionDenied, "call hello before any other rpc")
+	// ErrConnectionStateMissing means the request carries no per-connection
+	// state; the server attached it at accept time, so this is an internal
+	// failure and reaches the client only as the generic internal error.
+	ErrConnectionStateMissing = errcode.New(errcode.Internal, "the connection state is missing")
 )
