@@ -376,13 +376,29 @@ func TestExclusiveUsage(t *testing.T) {
 }
 
 // A task command would deadlock: the inner task's exclusive waits on the lock
-// its own parent already holds, so exclusive refuses it before opening any.
+// its own parent already holds, so exclusive refuses it — directly, by path,
+// and through `go tool task` — while any other command stays allowed.
 func TestExclusiveRefusesTaskCommands(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"task", "/Users/syuro/go/bin/task", "./task"} {
-		if _, err := execute(t, exclusiveCommand, lockdirFlag, t.TempDir(), "--", name, "test"); !errors.Is(err, ErrUsage) {
-			t.Fatalf("command %q: err = %v, want ErrUsage", name, err)
+	dir := t.TempDir()
+	for _, args := range [][]string{
+		{"task", "test"},
+		{"/usr/local/bin/task", "check"},
+		{"./task", "vet"},
+		{"go", "tool", "task", "vet"},
+	} {
+		argv := append([]string{exclusiveCommand, lockdirFlag, dir, "--"}, args...)
+		if _, err := execute(t, argv...); !errors.Is(err, ErrUsage) {
+			t.Fatalf("command %v: err = %v, want ErrUsage", args, err)
 		}
+	}
+	if refused, bad := taskPrefix([]string{"go", "test", "./..."}); bad {
+		t.Fatalf("go test ./... classified as %q; plain go commands must stay allowed", refused)
+	}
+	// Executed end to end with a command that finishes at once: a plain go
+	// invocation runs instead of being refused.
+	if _, err := execute(t, exclusiveCommand, lockdirFlag, dir, "--", "go", "version"); err != nil {
+		t.Fatalf("a plain go command did not run: %v", err)
 	}
 }
 

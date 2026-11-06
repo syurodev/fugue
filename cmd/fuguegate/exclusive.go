@@ -10,6 +10,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -21,6 +22,9 @@ var ErrHeavyLock = errors.New("heavy gate lock")
 
 // exclusiveCommand is the subcommand name of the heavy gate lock.
 const exclusiveCommand = "exclusive"
+
+// taskBinary is the base name of the task runner.
+const taskBinary = "task"
 
 const (
 	// exitSignaled is the base of the conventional exit code for a process a
@@ -70,8 +74,8 @@ func runExclusive(ctx context.Context, args []string, stdout io.Writer, clk cloc
 	if len(command) == 0 {
 		return fmt.Errorf("%w: exclusive needs a command after --", ErrUsage)
 	}
-	if base := filepath.Base(command[0]); base == "task" {
-		return fmt.Errorf("%w: %q: tasks already take the heavy gate lock; run them directly", ErrUsage, command[0])
+	if prefix, bad := taskPrefix(command); bad {
+		return fmt.Errorf("%w: %q: tasks already take the heavy gate lock; run them directly", ErrUsage, prefix)
 	}
 	dir := *override
 	if dir == "" {
@@ -116,6 +120,22 @@ func heavyLockDir() (string, error) {
 		return "", fmt.Errorf("%w: %w", ErrHeavyLock, err)
 	}
 	return filepath.Join(base, "fugue"), nil
+}
+
+// taskPrefix reports the prefix of a command that runs a task, which
+// exclusive must refuse: `task`, a path to it, or `go tool task`. A wrapped
+// task would nest the same flock and wait on its own parent forever. Any
+// other command, `go test ./...` included, stays allowed.
+func taskPrefix(command []string) (string, bool) {
+	base := filepath.Base(command[0])
+	switch {
+	case base == taskBinary:
+		return command[0], true
+	case base == "go" && len(command) >= 3 && command[1] == "tool" && command[2] == taskBinary:
+		return strings.Join(command[:3], " "), true
+	default:
+		return "", false
+	}
 }
 
 // heavyLock bundles the open root and the lock file inside it, so both close
