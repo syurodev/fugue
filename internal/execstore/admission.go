@@ -152,9 +152,9 @@ func insertInitialAdmission(ctx context.Context, conn *sql.Conn, req *AppendRequ
 			session_id, active_run_id, owner_incarnation, admission_token,
 			revision, queue_revision, context_epoch, context_start_run_id,
 			context_revision, context_requirement, context_cause_run_id, context_decided_event_id
-		) VALUES (?, ?, ?, ?, 1, ?, ?, NULL, ?, ?, NULL, NULL)`,
+		) VALUES (?, ?, ?, ?, 1, ?, ?, ?, ?, ?, NULL, NULL)`,
 		req.SessionID, activeRun, incarnation, token, queueRev,
-		state.ContextEpoch, state.ContextRevision, reqStr,
+		state.ContextEpoch, initialContextStart(req), state.ContextRevision, reqStr,
 	)
 	if err != nil {
 		return fmt.Errorf("%w: insert initial exec_admission: %w", ErrInvalidBatch, err)
@@ -162,9 +162,22 @@ func insertInitialAdmission(ctx context.Context, conn *sql.Conn, req *AppendRequ
 	return nil
 }
 
+// The first RunAdmitted establishes the context boundary; later runs continue it.
+func initialContextStart(req *AppendRequest) sql.NullString {
+	for _, ev := range req.Events {
+		if admitted, ok := ev.(*kernel.RunAdmittedEvent); ok {
+			return sql.NullString{String: admitted.StartRunID, Valid: admitted.StartRunID != ""}
+		}
+	}
+	return sql.NullString{}
+}
+
 func computeUpdatedAdmission(req *AppendRequest, state *kernel.State, adm *storedAdmission) storedAdmission {
 	updated := *adm
 	updated.revision = adm.revision + 1
+	if adm.contextEpoch == 0 {
+		updated.startRunID = initialContextStart(req)
+	}
 	if req.AdmissionFence != nil {
 		updated.admissionToken = req.AdmissionFence.Token
 		updated.ownerIncarnation = req.AdmissionFence.OwnerIncarnation
@@ -207,7 +220,8 @@ func (s *Store) updateAdmissionRow(
 		     queue_revision = ?,
 		     context_epoch = ?,
 		     context_revision = ?,
-		     context_requirement = ?
+		     context_requirement = ?,
+		     context_start_run_id = ?
 		 WHERE session_id = ? AND revision = ?`,
 		up.revision,
 		up.activeRunID,
@@ -217,6 +231,7 @@ func (s *Store) updateAdmissionRow(
 		up.contextEpoch,
 		up.contextRevision,
 		up.requirement,
+		up.startRunID,
 		req.SessionID,
 		adm.revision,
 	)

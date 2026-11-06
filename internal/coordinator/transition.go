@@ -49,7 +49,7 @@ func (s *Session) buildTransition(
 		Target:                    target,
 		Fence:                     fence,
 		ExpectedRunRevision:       s.runRevs[runID],
-		ExpectedAdmissionRevision: s.admission.Revision,
+		ExpectedAdmissionRevision: s.expectedAdmissionRevision(),
 		Events:                    events,
 		Result: codec.ReceiptResult{
 			FirstSequence: firstSeq,
@@ -59,6 +59,7 @@ func (s *Session) buildTransition(
 		},
 		MetadataInput:  req.MetadataInput,
 		ProtectedInput: req.ProtectedInput,
+		Payloads:       req.Payloads,
 		CorrelationID:  "",
 	}
 }

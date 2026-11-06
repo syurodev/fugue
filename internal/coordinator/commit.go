@@ -28,7 +28,7 @@ type step struct {
 	events  []kernel.Event
 	attempt int
 	// done runs on the actor once the batch is known to be committed and the
-	// cached run and admission reflect it.
+	// cached events reflect it; revisions may still require a store reload.
 	done func(ctx context.Context, res *AppendResult)
 	// fail runs on the actor when the batch is definitely not committed.
 	fail func(ctx context.Context, err error)
@@ -63,6 +63,10 @@ func (s *Session) busy(runID string) bool {
 // else happens to the run; a definite rejection reloads the run and the
 // admission row so the next append starts from what the store holds.
 func (s *Session) commit(ctx context.Context, st *step) {
+	if err := s.refreshAppendRevisions(ctx, st.t); err != nil {
+		st.fail(ctx, err)
+		return
+	}
 	res, err := s.cfg.Store.Append(ctx, st.t)
 	if err == nil {
 		s.applyAppended(ctx, st, &res)
@@ -77,19 +81,61 @@ func (s *Session) commit(ctx context.Context, st *step) {
 	st.fail(ctx, err)
 }
 
+// Confirmed events remain usable by completion callbacks, while missing revision
+// entries prevent the next append from trusting an incomplete cache update.
+func (s *Session) refreshAppendRevisions(ctx context.Context, tr *Transition) error {
+	if s.admissionStale {
+		if err := s.refreshAdmission(ctx, false); err != nil {
+			return err
+		}
+		tr.ExpectedAdmissionRevision = s.expectedAdmissionRevision()
+	}
+	if _, known := s.runRevs[tr.RunID]; !known {
+		if err := s.loadRun(ctx, tr.RunID); err != nil {
+			return err
+		}
+		tr.ExpectedRunRevision = s.runRevs[tr.RunID]
+	}
+	return nil
+}
+
 // applyAppended folds a confirmed append into the cache. A duplicate append means
 // an earlier attempt committed these events, so the store is the only truth.
 func (s *Session) applyAppended(ctx context.Context, st *step, res *AppendResult) {
 	runID := st.t.RunID
-	if res.Duplicate {
-		s.reload(ctx, runID)
-		return
-	}
 	for _, ev := range st.events {
 		s.runs[runID] = kernel.Evolve(s.runs[runID], ev)
 	}
+	if res.Duplicate {
+		s.reloadConfirmed(ctx, runID, res)
+		return
+	}
+	if res.RevisionsUnavailable {
+		delete(s.runRevs, runID)
+		s.admissionStale = true
+		return
+	}
 	s.runRevs[runID] = res.RunRevision
 	s.admission.Revision = res.AdmissionRevision
+	// Queue appends also change the durable queue fence; read it before building
+	// another transition rather than deriving it from the event batch.
+	if st.t.Fence.AdmissionToken == 0 {
+		s.admissionStale = true
+	}
+}
+
+// A confirmed batch remains available to callbacks even if reading its state
+// fails. Only a successful store read can make the revisions usable again.
+func (s *Session) reloadConfirmed(ctx context.Context, runID string, res *AppendResult) {
+	delete(s.runRevs, runID)
+	s.admissionStale = true
+	runErr := s.loadRun(ctx, runID)
+	admErr := s.refreshAdmission(ctx, true)
+	res.RevisionsUnavailable = runErr != nil || admErr != nil
+	if !res.RevisionsUnavailable {
+		res.RunRevision = s.runRevs[runID]
+		res.AdmissionRevision = s.admission.Revision
+	}
 }
 
 // readBack asks the store once, inline, what became of the command. When that
@@ -111,13 +157,12 @@ func (s *Session) readBack(ctx context.Context, st *step) {
 func (s *Session) settle(ctx context.Context, st *step, status CommitResolution, receipt *codec.Receipt) bool {
 	switch status {
 	case CommitResolutionCommitted:
-		s.reload(ctx, st.t.RunID)
 		res := AppendResult{
-			Duplicate:         false,
-			Receipt:           *receipt,
-			RunRevision:       s.runRevs[st.t.RunID],
-			AdmissionRevision: s.admission.Revision,
+			Receipt:              *receipt,
+			RevisionsUnavailable: true,
 		}
+		s.applyAppended(ctx, st, &res)
+		s.reloadConfirmed(ctx, st.t.RunID, &res)
 		st.done(ctx, &res)
 		return true
 	case CommitResolutionNotCommitted:
@@ -141,7 +186,7 @@ func (s *Session) appendAgain(ctx context.Context, st *step) {
 	}
 	st.attempt++
 	st.t.ExpectedRunRevision = s.runRevs[st.t.RunID]
-	st.t.ExpectedAdmissionRevision = s.admission.Revision
+	st.t.ExpectedAdmissionRevision = s.expectedAdmissionRevision()
 	s.commit(ctx, st)
 }
 
@@ -237,6 +282,14 @@ func (s *Session) reload(ctx context.Context, runID string) {
 	if err := s.refreshAdmission(ctx, true); err != nil {
 		s.admissionStale = true
 	}
+}
+
+// expectedAdmissionRevision is the revision an append must expect. A session
+// with no admission row reads back revision 0 and the store creates the row at
+// revision 1, so the first append expects 1. The adapter passes this value
+// through unchanged; this is the only place that rule lives.
+func (s *Session) expectedAdmissionRevision() uint64 {
+	return max(s.admission.Revision, 1)
 }
 
 // refreshAdmission loads the admission row when it is stale or force is set.

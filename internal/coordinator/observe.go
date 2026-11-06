@@ -154,6 +154,7 @@ func (s *Session) handleObservation(ctx context.Context, sub *submission, obs *O
 		Target:           runID,
 		MetadataInput:    obs.MetadataInput,
 		ProtectedInput:   obs.ProtectedInput,
+		Payloads:         obs.Payloads,
 	}
 
 	s.commit(ctx, &step{
