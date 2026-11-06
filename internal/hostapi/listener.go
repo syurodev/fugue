@@ -3,8 +3,6 @@ package hostapi
 import (
 	"net"
 	"sync"
-
-	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
 // ListenerOptions configures NewAcceptListener.
@@ -58,9 +56,12 @@ func NewAcceptListener(opts ListenerOptions) *AcceptListener {
 // loop keeps accepting so one bad connector cannot stall the host.
 func (l *AcceptListener) Accept() (net.Conn, error) {
 	for {
+		// The inner error must keep its concrete type: http.Server.Serve
+		// backs off on a temporary net.Error and detects net.ErrClosed, and
+		// wrapping would turn a recoverable accept failure into a fatal exit.
 		c, err := l.inner.Accept()
 		if err != nil {
-			return nil, errcode.Wrap(errcode.Unavailable, "accept connection", err)
+			return nil, err
 		}
 		creds, cerr := l.creds(c)
 		if cerr != nil {
@@ -83,13 +84,9 @@ func (l *AcceptListener) reject(c net.Conn) {
 	}
 }
 
-// Close closes the inner listener.
-func (l *AcceptListener) Close() error {
-	if err := l.inner.Close(); err != nil {
-		return errcode.Wrap(errcode.Internal, "close host listener", err)
-	}
-	return nil
-}
+// Close closes the inner listener and returns its error unchanged, for the
+// same reason Accept does.
+func (l *AcceptListener) Close() error { return l.inner.Close() }
 
 // Addr returns the inner listener's address.
 func (l *AcceptListener) Addr() net.Addr { return l.inner.Addr() }
@@ -109,8 +106,5 @@ func (c *trackedConn) Close() error {
 			c.onClosed(c)
 		}
 	})
-	if err != nil {
-		return errcode.Wrap(errcode.Internal, "close connection", err)
-	}
-	return nil
+	return err
 }

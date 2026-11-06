@@ -93,8 +93,17 @@ linters:
         - all
     wrapcheck:
       # errcode constructors are the repository's way of wrapping, not a boundary leak.
+      # net listener and connection errors keep their concrete types:
+      # http.Server.Serve backs off on a temporary net.Error and detects
+      # net.ErrClosed, and wrapping would turn a recoverable accept failure
+      # into a fatal exit (F5.1a review, 2026-11-07). The package glob is
+      # needed because a matched interface exemption falls through to the
+      # cross-package check.
       ignore-package-globs:
         - github.com/syurodev/fugue/internal/platform/errcode
+        - net
+      ignore-interface-regexps:
+        - net\.(Listener|Conn)$
     errcheck:
       check-blank: true
       check-type-assertions: true
