@@ -458,7 +458,7 @@ func assertDroppedTimerNeverRetries(
 	}
 
 	fakeClk.Advance(10 * time.Minute)
-	sched.Wake()
+	sched.Wake(testSessionID1)
 	select {
 	case <-fireCh:
 		t.Fatal("timer should not retry after being dropped")
@@ -720,7 +720,7 @@ func verifyLateRearmNoOp(
 
 	// Advance clock past firedTTL (10 min) to evict entry from fired set
 	fakeClk.Advance(15 * time.Minute)
-	sched.Wake()
+	sched.Wake(testSessionID1)
 
 	// Late re-arm of the same old generation after eviction
 	sched.Arm(&ArmedTimer{

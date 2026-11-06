@@ -656,7 +656,7 @@ func verifyParkedTimer(
 	*activeSess = recSess
 	mu.Unlock()
 
-	sched.Wake()
+	sched.Wake(testSessionID1)
 
 	select {
 	case <-fireCh:
