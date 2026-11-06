@@ -235,3 +235,31 @@ func (s *Session) initialContext(runID string) (contextStart, bool) {
 	}
 	return start, start.startRunID != ""
 }
+
+// validateAccept refuses an AcceptRun that lacks data only the caller can
+// supply. Nothing is defaulted, because a default would be written into a
+// durable event as if the caller had decided it.
+func (s *Session) validateAccept(accept *kernel.AcceptRunCommand, req *Request) error {
+	if accept == nil {
+		return fmt.Errorf("%w: nil command", ErrInvalidAccept)
+	}
+	if accept.InputRef == "" {
+		return fmt.Errorf("%w: input ref", ErrInvalidAccept)
+	}
+	if accept.QueueItemRef == "" {
+		return fmt.Errorf("%w: queue item ref", ErrInvalidAccept)
+	}
+	if accept.ProtocolBinding == "" {
+		return fmt.Errorf("%w: protocol binding", ErrInvalidAccept)
+	}
+	if accept.SessionID != "" && accept.SessionID != s.cfg.SessionID {
+		return fmt.Errorf("%w: session id", ErrInvalidAccept)
+	}
+	if req.QueueDecisionRef == "" {
+		return fmt.Errorf("%w: queue decision ref", ErrInvalidAccept)
+	}
+	if req.Facts.ModelPlan == nil {
+		return fmt.Errorf("%w: model plan", ErrInvalidAccept)
+	}
+	return nil
+}

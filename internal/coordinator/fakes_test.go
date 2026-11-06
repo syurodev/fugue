@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -65,6 +66,7 @@ type fakeStore struct {
 	runs         map[string]*kernel.State
 	runRevs      map[string]uint64
 	onAppend     func(t *Transition)
+	armedTimers  []ArmedTimer
 	inFlight     int
 	maxInFlight  int
 }
@@ -207,6 +209,18 @@ func (s *fakeStore) LoadAdmission(_ context.Context, _ string) (Admission, error
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.admission, s.admissionErr
+}
+
+func (s *fakeStore) ListArmedTimers(_ context.Context) ([]ArmedTimer, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.armedTimers), nil
+}
+
+func (s *fakeStore) setArmedTimers(timers ...ArmedTimer) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.armedTimers = slices.Clone(timers)
 }
 
 type fakeExecutor struct {

@@ -24,9 +24,9 @@ func TestCommandIdentityReadsSupportedCommands(t *testing.T) {
 		t.Errorf("unexpected accept identity: %q, %q, %d", cmdID, runID, token)
 	}
 
-	timer := new(kernel.TimerFiredCommand)
-	timer.CommandID, timer.RunID = "x", "y"
-	for _, c := range []kernel.Command{nil, (*kernel.AdmitRunCommand)(nil), timer} {
+	recoverCmd := new(kernel.RecoverRunCommand)
+	recoverCmd.CommandID, recoverCmd.RunID = "x", "y"
+	for _, c := range []kernel.Command{nil, (*kernel.AdmitRunCommand)(nil), recoverCmd} {
 		if cmdID, runID, token = commandIdentity(c); cmdID != "" || runID != "" || token != 0 {
 			t.Errorf("expected empty identity for %T, got %q, %q, %d", c, cmdID, runID, token)
 		}
@@ -40,6 +40,7 @@ func supportedCommands() []kernel.Command {
 		new(kernel.ObserveModelResponseCommand), new(kernel.ObserveModelFailureCommand),
 		new(kernel.ObserveToolCheckCommand), new(kernel.ObserveToolResultCommand),
 		new(kernel.ExtendBudgetCommand), new(kernel.RequestStopCommand),
+		new(kernel.TimerFiredCommand),
 	}
 }
 
@@ -58,7 +59,7 @@ func TestStampCommandCopiesAndSetsIdentity(t *testing.T) {
 			t.Errorf("%s: the caller's command was modified", original.CommandName())
 		}
 		cmdID, runID, token := commandIdentity(stamped)
-		if cmdID != "cmd" || runID != "run" || (token != 7 && original.CommandName() != "AcceptRun") {
+		if cmdID != "cmd" || runID != "run" || (token != 7 && original.CommandName() != "AcceptRun" && original.CommandName() != "TimerFired") {
 			t.Errorf("%s: stamped identity %q, %q, %d", original.CommandName(), cmdID, runID, token)
 		}
 	}
@@ -81,7 +82,7 @@ func TestStampCommandOverwritesClaimedOrigin(t *testing.T) {
 func TestStampCommandRejectsUnsupportedAndNil(t *testing.T) {
 	t.Parallel()
 
-	for _, c := range []kernel.Command{nil, (*kernel.AcceptRunCommand)(nil), new(kernel.TimerFiredCommand)} {
+	for _, c := range []kernel.Command{nil, (*kernel.AcceptRunCommand)(nil), new(kernel.RecoverRunCommand)} {
 		_, err := stampCommand(c, "c", "r", "o", 1)
 		var rej kernel.Rejection
 		if !errors.As(err, &rej) || rej.Code != kernel.RejectionCodeUnrecognizedCommand {

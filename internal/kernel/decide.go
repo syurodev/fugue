@@ -98,6 +98,8 @@ func (d *decision) command(command Command) ([]Event, error) {
 		return d.extend(c)
 	case *RequestStopCommand:
 		return d.requestStop(c)
+	case *TimerFiredCommand:
+		return d.timerFired(c)
 	}
 	return nil, Reject(RejectionCodeUnrecognizedCommand, "unsupported or nil command")
 }
