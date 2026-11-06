@@ -70,6 +70,9 @@ func runExclusive(ctx context.Context, args []string, stdout io.Writer, clk cloc
 	if len(command) == 0 {
 		return fmt.Errorf("%w: exclusive needs a command after --", ErrUsage)
 	}
+	if base := filepath.Base(command[0]); base == "task" {
+		return fmt.Errorf("%w: %q: tasks already take the heavy gate lock; run them directly", ErrUsage, command[0])
+	}
 	dir := *override
 	if dir == "" {
 		var derr error

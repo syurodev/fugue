@@ -76,7 +76,7 @@ Directories outside `internal/` and not covered by this table:
 | Path | Role |
 | --- | --- |
 | `cmd/fugue` | Layer 6. `main`: `fugue serve` and subcommands. Imports `internal/app`, `internal/hostapi`, `internal/config` and `internal/platform/...`. Only place `context.Background`, `fmt.Print*` and `panic` in `must*` helpers are allowed. |
-| `cmd/fuguegate` | Layer 6, development tool (F0.3). Runs the gates no off-the-shelf tool covers: coverage floor and baseline, short fuzzing, mutation testing, dead code. Imports no `internal/*` package. |
+| `cmd/fuguegate` | Layer 6, development tool (F0.3). Runs the gates no off-the-shelf tool covers: coverage floor and baseline, short fuzzing, mutation testing, dead code. Imports no `internal/*` package except `internal/platform/clock` (stdlib-only leaf; needed because forbidigo bans `time.NewTimer`/`time.Sleep` everywhere). Approved by the user, 2026-11-06. |
 | `tools/fuguevet` | Custom analyzers (`go vet -vettool`). Imported by nothing; imports no `internal/*` package except through test fixtures. |
 | `proto/fugue/<module>/v1` | `.proto` sources and `buf` configuration. |
 | `quality/` | Gate data (`coverage.json`, `ratchet.json`) and gate self-tests with their violating fixtures under `testdata`. No production code. |

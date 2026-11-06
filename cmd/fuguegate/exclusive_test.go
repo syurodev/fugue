@@ -375,6 +375,17 @@ func TestExclusiveUsage(t *testing.T) {
 	}
 }
 
+// A task command would deadlock: the inner task's exclusive waits on the lock
+// its own parent already holds, so exclusive refuses it before opening any.
+func TestExclusiveRefusesTaskCommands(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"task", "/Users/syuro/go/bin/task", "./task"} {
+		if _, err := execute(t, exclusiveCommand, lockdirFlag, t.TempDir(), "--", name, "test"); !errors.Is(err, ErrUsage) {
+			t.Fatalf("command %q: err = %v, want ErrUsage", name, err)
+		}
+	}
+}
+
 // waitForFree tries immediately, retries after every interval, and reports an
 // interrupted wait as the shell's SIGINT code.
 func TestWaitForFree(t *testing.T) {

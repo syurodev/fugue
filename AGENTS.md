@@ -76,7 +76,8 @@ Every rule below is machine-enforced; the full list and thresholds are in
   or `task arch` for the architecture tests. Heavy tasks and `task test-pkg` run at low local
   priority and behind the machine-wide lock; heavy ad-hoc commands go through
   `go run ./cmd/fuguegate exclusive -- <cmd...>`, which queues heavy gate work across
-  worktrees.
+  worktrees. Never wrap a `task` command in it: tasks already take the lock and exclusive
+  refuses them.
 - `task check` runs every PR gate locally: format, lint, `fuguevet`, architecture tests, tests
   with race and coverage, dead code, module hygiene, proto, short fuzz. Mutation on changed
   packages is paused (quality-gates §11); run `task mutation-changed` by hand when needed.
