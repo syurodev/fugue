@@ -60,6 +60,17 @@ The vendor domain packages integrate into the established 7-layer hierarchy:
 | `pkg/pb/...` | 5 | Generated protobuf and Connect code (all subpackages). Never edited by hand. Owner: Host API. | `pkg/pb/...` | F9.9 or F10.2 (whichever first needs a client) |
 | `pkg/client` | 6 | Public Go client library for the Host API, supporting both `local` and `session` principals, socket dialing, token credentials, and subscription catch-up. Owner: client. | `pkg/pb/...` | F9.9 or F10.2 (whichever first needs a client) |
 
+### Amendments
+
+2026-11-07 (F6.7a; owner approval requested on the PR): add the pure, no-I/O
+content-safety detector. `internal/platform/redact` is needed solely for
+`redact.Secret` inputs so known values cannot leak through formatting; log/error
+redaction remains separate. No other internal imports are permitted.
+
+| Package | Layer | Purpose and owner | May import | Phase |
+| --- | --- | --- | --- | --- |
+| `internal/secrets` | 1 | Pure logic, no I/O: known-value, token-pattern and key-name secret detection. Owner: content safety (H-27). | `internal/platform/errcode`, `internal/platform/redact` | F6.7a |
+
 Directories outside `internal/` and `pkg/` governed by this ADR:
 
 | Path | Role |
