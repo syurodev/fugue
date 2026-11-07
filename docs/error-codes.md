@@ -20,6 +20,7 @@ Changing this file needs a review of what clients can rely on; hiding a code nee
 | `canceled` | The operation was canceled by its caller. |
 | `deadline_exceeded` | The operation took longer than its deadline. |
 | `unsupported_version` | The client and the host share no Host API version; the typed detail names the host's supported versions. |
+| `frame_too_large` | A stream frame exceeded the size limit. |
 
 ## Hidden on purpose
 

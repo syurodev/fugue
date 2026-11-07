@@ -42,6 +42,8 @@ func connectCode(c errcode.Code) connect.Code {
 		return connect.CodeAlreadyExists
 	case errcode.FailedPrecondition, errcode.UnsupportedVersion:
 		return connect.CodeFailedPrecondition
+	case errcode.FrameTooLarge:
+		return connect.CodeResourceExhausted
 	case errcode.PermissionDenied:
 		return connect.CodePermissionDenied
 	case errcode.Unavailable:
