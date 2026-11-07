@@ -5,6 +5,8 @@ import (
 	"net"
 	"path/filepath"
 	"testing"
+
+	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
 // TestAcceptListenerCloseIsIdempotent pins the drain contract: the first
@@ -40,14 +42,23 @@ type failCloseListener struct {
 	calls int
 }
 
-func (l *failCloseListener) Accept() (net.Conn, error) { return l.inner.Accept() }
+func (l *failCloseListener) Accept() (net.Conn, error) {
+	conn, err := l.inner.Accept()
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "accept on the scripted listener", err)
+	}
+	return conn, nil
+}
 
 func (l *failCloseListener) Close() error {
 	l.calls++
 	if l.calls == 1 {
 		return errCloseFailed
 	}
-	return l.inner.Close()
+	if err := l.inner.Close(); err != nil {
+		return errcode.Wrap(errcode.Internal, "close the scripted listener", err)
+	}
+	return nil
 }
 
 func (l *failCloseListener) Addr() net.Addr { return l.inner.Addr() }

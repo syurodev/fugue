@@ -60,8 +60,6 @@ func connectCode(c errcode.Code) connect.Code {
 // connectError turns err into a Connect error. A public code keeps its
 // message and carries the typed ErrorDetail with the public code; hidden
 // codes become a generic internal error with no detail (host-api §4).
-//
-//nolint:wrapcheck // connect.NewError is the transport boundary conversion itself: wrapping the mapped error again would hide the code and detail the client must decode.
 func (h *serviceHandler) connectError(ctx context.Context, err error) error {
 	if err == nil {
 		return nil
@@ -106,9 +104,9 @@ func connectionState(ctx context.Context) (*connState, error) {
 }
 
 func (h *serviceHandler) Hello(ctx context.Context, req *connect.Request[hostv1.HelloRequest]) (*connect.Response[hostv1.HelloResponse], error) {
-	st, err := connectionState(ctx)
-	if err != nil {
-		return nil, h.connectError(ctx, err)
+	st, serr := connectionState(ctx)
+	if serr != nil {
+		return nil, h.connectError(ctx, serr)
 	}
 	// The state machine serializes concurrent hellos on one multiplexed
 	// connection: exactly one moves none to acquiring, the rest are rejected.

@@ -19,7 +19,7 @@ func TestConcurrentHelloAcquiresOneLease(t *testing.T) {
 	const n = 8
 	start := make(chan struct{})
 	errs := make(chan error, n)
-	for i := 0; i < n; i++ {
+	for range n {
 		go func() {
 			<-start
 			_, err := client.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_CLI, "v1"))
@@ -28,7 +28,7 @@ func TestConcurrentHelloAcquiresOneLease(t *testing.T) {
 	}
 	close(start)
 	oks := 0
-	for i := 0; i < n; i++ {
+	for range n {
 		if err := <-errs; err == nil {
 			oks++
 		}

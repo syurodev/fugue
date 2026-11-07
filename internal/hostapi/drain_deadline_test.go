@@ -16,6 +16,7 @@ import (
 	hostv1 "github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1"
 	hostv1connect "github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1/hostv1connect"
 	"github.com/syurodev/fugue/internal/platform/clock"
+	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/storage"
 )
@@ -43,16 +44,23 @@ func newBlockingStatusBackend(rt app.Backend) *blockingStatusBackend {
 
 func (b *blockingStatusBackend) Status(ctx context.Context) (app.HostStatusView, error) {
 	if !b.started.Swap(true) {
-		return b.Backend.Status(ctx)
+		view, err := b.Backend.Status(ctx)
+		if err != nil {
+			return app.HostStatusView{}, errcode.Wrap(errcode.Internal, "the runtime status failed", err)
+		}
+		return view, nil
 	}
 	b.enterOnce.Do(func() { close(b.entered) })
 	<-ctx.Done()
 	b.doneOnce.Do(func() { close(b.returned) })
-	return app.HostStatusView{}, ctx.Err()
+	return app.HostStatusView{}, errcode.Wrap(errcode.Canceled, "the blocked status request ended", ctx.Err())
 }
 
-func TestDrainDeadlineForcesCloseBeforeStoreClose(t *testing.T) {
-	t.Parallel()
+// startDeadlineServer wires a real runtime with a drain deadline on the fake
+// clock behind a real server, and a backend whose Status blocks every call
+// after the Start-time one.
+func startDeadlineServer(t *testing.T) (*app.HostProcess, *Server, *blockingStatusBackend, string, *clock.Fake, string) {
+	t.Helper()
 	clk := clock.NewFake(time.Unix(0, 0))
 	dir := shortDir(t)
 	sock, err := ListenSocket(t.Context(), SocketOptions{DataDir: dir})
@@ -94,15 +102,23 @@ func TestDrainDeadlineForcesCloseBeforeStoreClose(t *testing.T) {
 			t.Errorf("close the host = %v, want the deadline escalation error", err)
 		}
 	})
+	return hp, srv, backend, sock.Path, clk, dir
+}
 
-	clientA, _ := newTestClient(t, sock.Path)
-	clientB, _ := newTestClient(t, sock.Path)
+func TestDrainDeadlineForcesCloseBeforeStoreClose(t *testing.T) {
+	t.Parallel()
+	hp, _, backend, sockPath, clk, dir := startDeadlineServer(t)
+
+	clientA, _ := newTestClient(t, sockPath)
+	clientB, _ := newTestClient(t, sockPath)
 
 	// Both connections say hello first; Status and Shutdown reject otherwise.
 	for _, c := range []hostv1connect.HostServiceClient{clientA, clientB} {
 		if _, err := c.Hello(t.Context(), &connect.Request[hostv1.HelloRequest]{
 			Msg: &hostv1.HelloRequest{
 				ClientKind:           hostv1.ClientKind_CLIENT_KIND_CLI,
+				ClientName:           "fugue-test",
+				ClientVersion:        "1.0",
 				SupportedApiVersions: []string{"v1"},
 			},
 		}); err != nil {
@@ -121,7 +137,7 @@ func TestDrainDeadlineForcesCloseBeforeStoreClose(t *testing.T) {
 	// The Shutdown RPC replies at once and starts the drain against the
 	// fake-clock deadline.
 	if _, err := clientB.Shutdown(t.Context(), &connect.Request[hostv1.ShutdownRequest]{
-		Msg: &hostv1.ShutdownRequest{CommandId: "deadline-1"},
+		Msg: &hostv1.ShutdownRequest{CommandId: "deadline-1", Force: false},
 	}); err != nil {
 		t.Fatalf("Shutdown rpc = %v", err)
 	}

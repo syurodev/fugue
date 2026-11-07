@@ -40,8 +40,8 @@ type fakeBackend struct {
 	helloRes     app.HelloResult
 	helloErr     error
 	shutdowns    []app.ShutdownCommand
-	holdLease    chan struct{}      // non-nil: LeaseAcquired blocks until closed
-	leaseEntered chan struct{}      // non-nil: signalled when LeaseAcquired is entered
+	holdLease    chan struct{} // non-nil: LeaseAcquired blocks until closed
+	leaseEntered chan struct{} // non-nil: signalled when LeaseAcquired is entered
 }
 
 func newFakeBackend() *fakeBackend {

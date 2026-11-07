@@ -489,6 +489,20 @@ func TestHostProcessCloseIsIdempotent(t *testing.T) {
 	}
 }
 
+// assertStaleFire checks that a fire from armed, a timer that is no longer
+// the armed one of a draining runtime, starts nothing.
+func assertStaleFire(t *testing.T, rt *HostRuntime, armed clock.Timer, drains chan string) {
+	t.Helper()
+	if rt.fireGrace(armed) {
+		t.Fatal("a fire drained an already draining host")
+	}
+	select {
+	case reason := <-drains:
+		t.Fatalf("a second drain started with reason %q", reason)
+	default:
+	}
+}
+
 // TestStaleGraceFireDoesNotDrain pins the grace fire path: a fire only drains
 // when it comes from the timer that is still armed, no lease is held and the
 // runtime is not already draining.
@@ -502,7 +516,9 @@ func TestStaleGraceFireDoesNotDrain(t *testing.T) {
 		drains <- reason
 		return nil
 	})
-	rt.LeaseAcquired(t.Context(), "c1", KindCLI)
+	if err := rt.LeaseAcquired(t.Context(), "c1", KindCLI); err != nil {
+		t.Fatalf("lease c1 = %v", err)
+	}
 	rt.LeaseReleased(t.Context(), "c1")
 
 	// A fire from a foreign timer is stale.
@@ -516,19 +532,14 @@ func TestStaleGraceFireDoesNotDrain(t *testing.T) {
 	}
 
 	// An armed-but-disarmed timer is stale, and so is a fire while draining.
-	rt.LeaseAcquired(t.Context(), "c2", KindCLI)
+	if err := rt.LeaseAcquired(t.Context(), "c2", KindCLI); err != nil {
+		t.Fatalf("lease c2 = %v", err)
+	}
 	rt.mu.Lock()
 	armed := rt.graceTimer
 	rt.mu.Unlock()
 	rt.beginDrain(false, "shutdown")
-	if rt.fireGrace(armed) {
-		t.Fatal("a fire drained an already draining host")
-	}
-	select {
-	case reason := <-drains:
-		t.Fatalf("a second drain started with reason %q", reason)
-	default:
-	}
+	assertStaleFire(t, rt, armed, drains)
 
 	// The live fire still drains exactly once, with the grace reason, on a
 	// runtime of its own so the first runtime's slow drain cannot leak in.
@@ -537,7 +548,9 @@ func TestStaleGraceFireDoesNotDrain(t *testing.T) {
 		liveDrains <- reason
 		return nil
 	})
-	rt2.LeaseAcquired(t.Context(), "c3", KindCLI)
+	if err := rt2.LeaseAcquired(t.Context(), "c3", KindCLI); err != nil {
+		t.Fatalf("lease c3 = %v", err)
+	}
 	rt2.LeaseReleased(t.Context(), "c3")
 	rt2.mu.Lock()
 	live := rt2.graceTimer
@@ -574,7 +587,7 @@ func TestGraceRearmDoesNotGrowTasks(t *testing.T) {
 		}
 	})
 	rt := hp.Runtime()
-	for i := 0; i < 50; i++ {
+	for i := range 50 {
 		id := strconv.Itoa(i)
 		if err := rt.LeaseAcquired(t.Context(), id, KindCLI); err != nil {
 			t.Fatalf("lease %d = %v", i, err)
