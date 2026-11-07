@@ -91,7 +91,7 @@ func New(
 
 func (s *Store) onVaultStateChange(snap vault.Snapshot) {
 	if snap.State != vault.StateUnlocked {
-		s.keyCache.clearAndZero()
+		s.keyCache.ClearAndZero()
 	}
 }
 
@@ -106,7 +106,7 @@ func (s *Store) Close() error {
 		s.unregisterGuard()
 		s.unregisterGuard = nil
 	}
-	s.keyCache.clearAndZero()
+	s.keyCache.ClearAndZero()
 	return nil
 }
 

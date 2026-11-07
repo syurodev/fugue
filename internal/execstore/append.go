@@ -197,10 +197,10 @@ func (s *Store) appendTx(ctx context.Context, req *AppendRequest) (AppendOutcome
 
 	outcome, err := s.executeAppendTx(ctx, conn, req)
 	if errors.Is(err, ErrSessionKeyConflict) {
-		s.keyCache.rejectCandidate(req.SessionID, req.SealedSessionKey)
+		s.keyCache.RejectCandidate(req.SessionID, req.SealedSessionKey)
 	}
 	if outcome.Committed {
-		s.keyCache.committed(req.SessionID, req.SealedSessionKey)
+		s.keyCache.Committed(req.SessionID, req.SealedSessionKey)
 		committed = true
 		connClean = true
 	}

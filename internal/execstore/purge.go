@@ -119,9 +119,9 @@ func (s *Store) PurgeSession(ctx context.Context, sessionID string) error {
 		return err
 	}
 
-	s.keyCache.beginPurge(sessionID)
+	s.keyCache.BeginPurge(sessionID)
 	permanent := false
-	defer func() { s.keyCache.endPurge(sessionID, permanent) }()
+	defer func() { s.keyCache.EndPurge(sessionID, permanent) }()
 
 	conn, err := s.acquireConfiguredConn(ctx)
 	if err != nil {

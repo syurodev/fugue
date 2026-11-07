@@ -3,13 +3,13 @@ package execstore
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/syurodev/fugue/internal/crypto"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
+	"github.com/syurodev/fugue/internal/sealing"
 	"github.com/syurodev/fugue/internal/vault"
 )
 
@@ -36,13 +36,7 @@ func (rr randomReader) Read(p []byte) (int, error) {
 }
 
 func payloadAssociatedData(sessionID, payloadID, kind, keyID string) crypto.AssociatedData {
-	// Canonical unambiguous format: len(sessionID):sessionID:len(payloadID):payloadID:kind
-	recordID := fmt.Sprintf("%d:%s:%d:%s:%s", len(sessionID), sessionID, len(payloadID), payloadID, kind)
-	return crypto.AssociatedData{
-		RecordType: PayloadRecordType,
-		RecordID:   recordID,
-		KeyID:      keyID,
-	}
+	return sealing.AssociatedData(PayloadRecordType, sessionID, payloadID, kind, keyID)
 }
 
 func isValidKind(kind string) bool {
@@ -108,15 +102,9 @@ func (s *Store) SealPayload(
 	}
 
 	defer clear(rawKey)
-	ad := payloadAssociatedData(sessionID, resolvedID, kind, SessionKeyDefaultKeyID)
-	env, err := crypto.SealWithRandom(s.randomReader, ad, rawKey, plaintext)
+	envBytes, err := sealing.SealPayload(s.randomReader, PayloadRecordType, sessionID, resolvedID, kind, SessionKeyDefaultKeyID, rawKey, plaintext)
 	if err != nil {
-		return SealedPayload{}, nil, fmt.Errorf("%w: seal payload: %w", ErrStoreUnavailable, err)
-	}
-
-	envBytes, err := json.Marshal(env)
-	if err != nil {
-		return SealedPayload{}, nil, fmt.Errorf("%w: marshal envelope: %w", ErrStoreUnavailable, err)
+		return SealedPayload{}, nil, fmt.Errorf("%w: %w", ErrStoreUnavailable, err)
 	}
 
 	if err := s.validatePayloadEpoch(epoch, sessionID); err != nil {
@@ -138,7 +126,7 @@ func (s *Store) validateOpenArgs(sessionID, payloadID string) error {
 	if sessionID == "" || payloadID == "" {
 		return errcode.New(errcode.InvalidArgument, "session ID and payload ID are required")
 	}
-	if s.keyCache != nil && s.keyCache.isPurged(sessionID) {
+	if s.keyCache != nil && s.keyCache.IsPurged(sessionID) {
 		return ErrSessionPurging
 	}
 	if s.vault == nil || s.vault.Snapshot().State != vault.StateUnlocked {
@@ -182,16 +170,11 @@ func (s *Store) OpenPayload(ctx context.Context, sessionID, payloadID string) ([
 	}
 
 	defer clear(rawKey)
-	var env crypto.Envelope
-	if unmarshalErr := json.Unmarshal(envelope, &env); unmarshalErr != nil {
-		return nil, errcode.Wrap(errcode.InvalidArgument, "invalid payload envelope", unmarshalErr)
+	plaintext, openErr := sealing.OpenPayload(PayloadRecordType, sessionID, payloadID, kind, keyID, rawKey, envelope)
+	if openErr != nil {
+		return nil, fmt.Errorf("%w", openErr)
 	}
 
-	ad := payloadAssociatedData(sessionID, payloadID, kind, keyID)
-	plaintext, openErr := crypto.OpenWithAD(rawKey, &env, ad)
-	if openErr != nil {
-		return nil, errcode.Wrap(errcode.CodeOf(openErr), "open payload envelope", openErr)
-	}
 	if err := s.validatePayloadEpoch(epoch, sessionID); err != nil {
 		clear(plaintext)
 		return nil, err
@@ -201,7 +184,7 @@ func (s *Store) OpenPayload(ctx context.Context, sessionID, payloadID string) ([
 
 func (s *Store) validatePayloadEpoch(epoch vault.Snapshot, sessionID string) error {
 	err := s.vault.WithUnlocked(epoch, func() error {
-		if s.keyCache.isPurged(sessionID) {
+		if s.keyCache.IsPurged(sessionID) {
 			return ErrSessionPurging
 		}
 		return nil

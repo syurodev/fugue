@@ -6,6 +6,7 @@ import (
 
 	"github.com/syurodev/fugue/internal/codec"
 	"github.com/syurodev/fugue/internal/kernel"
+	"github.com/syurodev/fugue/internal/sealing"
 )
 
 // ProtectedEquality verifies equality of protected canonical inputs outside database transactions.
@@ -96,10 +97,7 @@ type SealedPayload struct {
 }
 
 // SealedSessionKey carries an already sealed session data key to be persisted atomically.
-type SealedSessionKey struct {
-	KeyID      string
-	WrappedKey []byte
-}
+type SealedSessionKey = sealing.SessionKey
 
 // AppendRequest specifies the complete inputs for an atomic transition append.
 type AppendRequest struct {
