@@ -2,7 +2,6 @@ package coordinator
 
 import (
 	"context"
-	"sync/atomic"
 
 	"github.com/syurodev/fugue/internal/platform/supervise"
 )
@@ -19,8 +18,8 @@ func (s *Session) startWorkers(actorCtx context.Context) {
 }
 
 // work drains the hand-off channel until the session stops. Every item is
-// served to completion: the executor decides what to report, and whatever it
-// did not report is abandoned below.
+// served to completion: the executor decides what to report, and after it
+// returns the slot's fate is settled below.
 func (s *Session) work(wCtx context.Context) error {
 	for {
 		select {
@@ -35,21 +34,15 @@ func (s *Session) work(wCtx context.Context) error {
 	}
 }
 
-// serve runs one dispatched item and posts its outcome. Report is expected
-// from the Execute call stack; the atomic guards the ordering against a late
-// report. An executor that reported nothing terminal abandoned the attempt:
-// no commit will ever complete its slot, so the capacity is reclaimed.
+// serve runs one dispatched item, posts its outcome and — always, whatever the
+// outcome was — tells the actor the attempt is over. Every dispatched slot is
+// then freed exactly once: a terminal observation that committed completes the
+// slot itself and this message becomes a no-op; one that the actor rejected,
+// and one that was never sent, are completed here. Reports post before this
+// message from the same goroutine, so the mailbox orders them.
 func (s *Session) serve(wCtx context.Context, w *Work) {
-	terminal := &atomic.Bool{}
-	s.cfg.Executor.Execute(wCtx, w, func(obs *Observation) {
-		if obs != nil && isTerminalObservation(obs.Command) {
-			terminal.Store(true)
-		}
-		s.report(obs)
-	})
-	if !terminal.Load() {
-		s.abandon(&w.Lease)
-	}
+	s.cfg.Executor.Execute(wCtx, w, s.report)
+	s.served(&w.Lease)
 }
 
 func (s *Session) report(obs *Observation) {
@@ -57,11 +50,11 @@ func (s *Session) report(obs *Observation) {
 		return
 	}
 	sub := submission{
-		req:       Request{},
-		obs:       obs,
-		resolved:  nil,
-		abandoned: nil,
-		replyCh:   nil,
+		req:      Request{},
+		obs:      obs,
+		resolved: nil,
+		served:   nil,
+		replyCh:  nil,
 	}
 	select {
 	case s.mailbox <- sub:
@@ -69,17 +62,16 @@ func (s *Session) report(obs *Observation) {
 	}
 }
 
-// abandon tells the actor that the executor returned from its Execute call
-// without a terminal observation, so no commit will ever complete this
-// attempt's slot. The error itself, with its one log line, is the executor's
-// business; the coordinator only reclaims the capacity.
-func (s *Session) abandon(lease *Lease) {
+// served tells the actor that an executor finished its attempt. The attempt
+// keeps whatever state its dispatch committed — no events are appended,
+// nothing retries — so only the capacity comes back.
+func (s *Session) served(lease *Lease) {
 	sub := submission{
-		req:       Request{},
-		obs:       nil,
-		resolved:  nil,
-		abandoned: lease,
-		replyCh:   nil,
+		req:      Request{},
+		obs:      nil,
+		resolved: nil,
+		served:   lease,
+		replyCh:  nil,
 	}
 	select {
 	case s.mailbox <- sub:
@@ -87,10 +79,10 @@ func (s *Session) abandon(lease *Lease) {
 	}
 }
 
-// handleAbandoned reclaims the slot of an attempt whose executor abandoned it.
-// The attempt keeps whatever state its dispatch committed — no events are
-// appended, nothing retries — so only the capacity comes back.
-func (s *Session) handleAbandoned(ctx context.Context, lease *Lease) {
+// handleServed reclaims the slot of a finished attempt. completeSlot is
+// idempotent: a terminal observation that committed already took the slot, so
+// this is a no-op there and the real reclaim everywhere else.
+func (s *Session) handleServed(ctx context.Context, lease *Lease) {
 	s.completeSlot(ctx, attemptKey{runID: lease.RunID, invocationID: lease.InvocationID, attemptID: lease.AttemptID})
 	s.retryParked(ctx)
 }

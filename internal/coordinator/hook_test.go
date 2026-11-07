@@ -360,3 +360,43 @@ func snapshotChanged(snapshot *kernel.State) bool {
 
 // reqPtr hands Submit a request the test built as a value.
 func reqPtr[T any](r T) *T { return &r }
+
+// TestRejectedTerminalObservationFreesTheSlot pins the invariant that every
+// dispatched slot is freed exactly once: a terminal observation the kernel
+// rejects commits nothing, and the served message still reclaims the slot.
+func TestRejectedTerminalObservationFreesTheSlot(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeStore()
+	setupAdmittedRun(store)
+	executor := newHookExecutor()
+	sess, ctx := startHookSession(t, store, executor, nil)
+
+	if _, err := sess.Submit(ctx, reqPtr(makeModelDispatchRequest(testRunID1, "m1", "a1", "cmd-disp-rejected"))); err != nil {
+		t.Fatalf("submit dispatch: %v", err)
+	}
+	executor.waitWork(t, ctx)
+
+	// The executor reports a response whose usage names another attempt: the
+	// kernel rejects it, nothing is appended, and the slot comes back.
+	executor.mu.Lock()
+	work := executor.works[0]
+	report := executor.reports[0]
+	executor.mu.Unlock()
+	obs := makeModelResponseObservation(
+		work.Lease.SessionID, work.Lease.RunID, work.Lease.InvocationID, work.Lease.AttemptID,
+		"cmd-obs-rejected", work.Lease.AdmissionToken, work.Lease.OwnerIncarnation, work.Lease.ExecutorFence,
+	)
+	obs.Facts.Usage.AttemptID = "another-attempt"
+	report(&obs)
+
+	// The slot was reclaimed: a second dispatch reserves successfully and is
+	// rejected by the kernel instead of parking until the context ends.
+	again := makeModelDispatchRequest(testRunID1, "m1", "a1", "cmd-disp-after-rejection")
+	if _, err := sess.Submit(ctx, reqPtr(again)); err == nil {
+		t.Fatalf("a second dispatch of a requesting attempt must be rejected")
+	}
+	if store.appendCount() != 1 {
+		t.Fatalf("%d transitions committed, want 1", store.appendCount())
+	}
+}

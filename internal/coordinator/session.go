@@ -76,14 +76,14 @@ type submitReply struct {
 }
 
 // submission is one mailbox message: a caller request, a worker observation,
-// the result of a background read-back, or a worker whose executor abandoned
-// its work without a terminal observation.
+// the result of a background read-back, or a worker announcing that its
+// executor finished an attempt.
 type submission struct {
-	req       Request
-	obs       *Observation
-	resolved  *resolution
-	abandoned *Lease
-	replyCh   chan submitReply
+	req      Request
+	obs      *Observation
+	resolved *resolution
+	served   *Lease
+	replyCh  chan submitReply
 }
 
 // Session is the per-session coordinator actor. Everything below the channels
@@ -178,11 +178,11 @@ func (s *Session) Submit(ctx context.Context, r *Request) (Reply, error) {
 		return Reply{}, errcode.New(errcode.InvalidArgument, "request is nil")
 	}
 	return s.enqueue(ctx, &submission{
-		req:       *r,
-		obs:       nil,
-		resolved:  nil,
-		abandoned: nil,
-		replyCh:   make(chan submitReply, 1),
+		req:      *r,
+		obs:      nil,
+		resolved: nil,
+		served:   nil,
+		replyCh:  make(chan submitReply, 1),
 	})
 }
 
@@ -270,8 +270,8 @@ func (s *Session) handleSubmission(ctx context.Context, sub *submission) {
 		s.handleResolution(ctx, sub.resolved)
 		return
 	}
-	if sub.abandoned != nil {
-		s.handleAbandoned(ctx, sub.abandoned)
+	if sub.served != nil {
+		s.handleServed(ctx, sub.served)
 		return
 	}
 	if sub.obs != nil {
