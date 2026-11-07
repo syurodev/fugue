@@ -4,7 +4,9 @@ Fugue by SynX is a local-first, all-in-one Go core. One host process (`fugue ser
 data directory, the vault, the execution store and every service. The desktop shell and other
 clients talk to it only through the versioned Host API.
 
-The current goal is the native agent harness.
+The current goal is stage A: drive the first-party agent CLIs (Claude Code, Codex, Antigravity)
+under the user's own logins, show them in a Gio desktop app, and let agents on different
+vendors work as a team. The native agent harness follows in stage B.
 
 - Work board and status: [docs/roadmap.md](docs/roadmap.md)
 - Quality rules and how they are enforced: [docs/quality-gates.md](docs/quality-gates.md)

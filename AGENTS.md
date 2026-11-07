@@ -5,7 +5,8 @@
 Fugue by SynX is a local-first, all-in-one Go core. One host process (`fugue serve`) owns the
 data directory, the vault, the execution store and every service; the desktop shell and other
 clients talk to it only through the versioned Host API (`proto/fugue/<module>/v1`). The current
-goal is the native agent harness. DevKit (Wails) is frozen: never import from or add a
+goal is stage A: the vendor runtime, the Gio desktop app and teams (`docs/roadmap.md` §0); the
+native harness is stage B. DevKit (Wails) is frozen: never import from or add a
 dependency on `syurodev/dev-kit`; port code only under the porting rules in `docs/roadmap.md` §3.
 
 Design lives in the base-doc repository under `content/projects/dev-kit/core-harness/`. Read
