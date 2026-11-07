@@ -9,6 +9,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 )
 
 // newTestHub returns a hub with one ephemeral topic "t" whose snapshot is a
@@ -196,15 +197,16 @@ func TestNoGapBetweenSnapshotAndStreamUnderConcurrentPublish(t *testing.T) {
 	// Publishing continues while the stream is live: every later event is
 	// delivered exactly once, in order, with no gap.
 	done := make(chan struct{})
-	go func() {
+	_ = supervise.Go(t.Context(), "test.publish", func(context.Context) error {
 		defer close(done)
 		for range secondHalf {
 			if _, err := hub.Publish("t", Event{Type: "e", Payload: []byte("p")}); err != nil {
 				t.Error(err)
-				return
+				return err
 			}
 		}
-	}()
+		return nil
+	})
 	got := make([]Event, 0, secondHalf)
 	for i := range secondHalf {
 		ev, ok := sub.Next(t.Context())
@@ -234,15 +236,16 @@ func TestPublishNeverBlocksOnASlowSubscriber(t *testing.T) {
 	// own — a blocked publish would hang this test, never time out waiting.
 	const n = 3 * subscriberQueueCap
 	done := make(chan struct{})
-	go func() {
+	_ = supervise.Go(t.Context(), "test.publish", func(context.Context) error {
 		defer close(done)
 		for i := range n {
 			if _, err := hub.Publish("t", Event{Type: testDelta, Key: "item-" + string(rune(i)), Payload: []byte("v"), Droppable: true}); err != nil {
 				t.Error(err)
-				return
+				return err
 			}
 		}
-	}()
+		return nil
+	})
 	<-done
 	if got := hub.Dropped(); got != uint64(n-subscriberQueueCap) {
 		t.Fatalf("dropped = %d, want %d", got, n-subscriberQueueCap)
@@ -265,15 +268,16 @@ func TestSlowSubscriberCoalescesDeltasOfTheSameKey(t *testing.T) {
 	t.Cleanup(sub.Close)
 	const n = 5 * subscriberQueueCap
 	done := make(chan struct{})
-	go func() {
+	_ = supervise.Go(t.Context(), "test.publish", func(context.Context) error {
 		defer close(done)
 		for range n {
 			if _, err := hub.Publish("t", Event{Type: testDelta, Key: "item-1", Payload: []byte("v"), Droppable: true}); err != nil {
 				t.Error(err)
-				return
+				return err
 			}
 		}
-	}()
+		return nil
+	})
 	<-done
 	// Same-key deltas merge, so the stalled queue keeps one entry and nothing
 	// is dropped; the newest delta is the one the reader sees.
@@ -398,14 +402,15 @@ func TestEndStreamsEndsOpenSubscriptions(t *testing.T) {
 func startSubscribe(ctx context.Context, hub *EventHub, p SubscribeParams) (<-chan *Subscription, <-chan error) {
 	subs := make(chan *Subscription, 1)
 	errs := make(chan error, 1)
-	go func() {
+	_ = supervise.Go(ctx, "test.subscribe", func(context.Context) error {
 		sub, err := hub.Subscribe(ctx, p)
 		if err != nil {
 			errs <- err
-			return
+			return nil
 		}
 		subs <- sub
-	}()
+		return nil
+	})
 	return subs, errs
 }
 
@@ -414,15 +419,16 @@ func startSubscribe(ctx context.Context, hub *EventHub, p SubscribeParams) (<-ch
 func commitAsync(t *testing.T, fd *fakeDurable, hub *EventHub, topic string, n int) <-chan struct{} {
 	t.Helper()
 	done := make(chan struct{})
-	go func() {
+	_ = supervise.Go(t.Context(), "test.commit", func(context.Context) error {
 		defer close(done)
 		for range n {
 			if _, err := fd.commit(hub, topic, "e"); err != nil {
 				t.Error(err)
-				return
+				return err
 			}
 		}
-	}()
+		return nil
+	})
 	return done
 }
 
