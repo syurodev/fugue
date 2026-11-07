@@ -61,38 +61,77 @@ func Spawn(ctx context.Context, opts *Options) (*Process, error) {
 		SysProcAttr: sysProcAttr(),
 	}
 
-	stdinPipe, stdoutPipe, stderrPipe, err := setupPipes(cmd, opts.Argv[0])
+	pipes, err := setupPipes(cmd, opts.Argv[0])
 	if err != nil {
 		return nil, err
 	}
 
 	if err := cmd.Start(); err != nil {
-		closePipes(stdinPipe, stdoutPipe, stderrPipe)
+		pipes.closeAll()
 		return nil, classifySpawnError(opts.Argv[0], err)
 	}
 
-	p := newProcess(cmd, clk, opts, stdinPipe, stdoutPipe)
-	startStderrDrain(ctx, p, stderrPipe)
+	// Close write ends in the parent so that readers receive io.EOF once
+	// the child closes them on exit.
+	closeQuietly(pipes.stdoutW)
+	closeQuietly(pipes.stderrW)
+
+	p := newProcess(cmd, clk, opts, pipes.stdin, pipes.stdoutR)
+	startStderrDrain(ctx, p, pipes.stderrR)
 	startWaitTask(ctx, p)
 	return p, nil
 }
 
-func setupPipes(cmd *exec.Cmd, argv0 string) (io.WriteCloser, io.ReadCloser, io.ReadCloser, error) {
+type processPipes struct {
+	stdin   io.WriteCloser
+	stdoutR *os.File
+	stdoutW *os.File
+	stderrR *os.File
+	stderrW *os.File
+}
+
+func (pp *processPipes) closeAll() {
+	closeQuietly(pp.stdin)
+	closeQuietly(pp.stdoutR)
+	closeQuietly(pp.stdoutW)
+	closeQuietly(pp.stderrR)
+	closeQuietly(pp.stderrW)
+}
+
+func closeQuietly(c io.Closer) {
+	if c != nil {
+		if err := c.Close(); err != nil {
+			return
+		}
+	}
+}
+
+func setupPipes(cmd *exec.Cmd, argv0 string) (*processPipes, error) {
 	stdinPipe, err := cmd.StdinPipe()
 	if err != nil {
-		return nil, nil, nil, classifySpawnError(argv0, err)
+		return nil, classifySpawnError(argv0, err)
 	}
-	stdoutPipe, err := cmd.StdoutPipe()
+	stdoutR, stdoutW, err := os.Pipe()
 	if err != nil {
-		closePipes(stdinPipe)
-		return nil, nil, nil, classifySpawnError(argv0, err)
+		closeQuietly(stdinPipe)
+		return nil, classifySpawnError(argv0, err)
 	}
-	stderrPipe, err := cmd.StderrPipe()
+	stderrR, stderrW, err := os.Pipe()
 	if err != nil {
-		closePipes(stdinPipe, stdoutPipe)
-		return nil, nil, nil, classifySpawnError(argv0, err)
+		closeQuietly(stdinPipe)
+		closeQuietly(stdoutR)
+		closeQuietly(stdoutW)
+		return nil, classifySpawnError(argv0, err)
 	}
-	return stdinPipe, stdoutPipe, stderrPipe, nil
+	cmd.Stdout = stdoutW
+	cmd.Stderr = stderrW
+	return &processPipes{
+		stdin:   stdinPipe,
+		stdoutR: stdoutR,
+		stdoutW: stdoutW,
+		stderrR: stderrR,
+		stderrW: stderrW,
+	}, nil
 }
 
 func newProcess(
@@ -117,11 +156,12 @@ func newProcess(
 	}
 }
 
-func startStderrDrain(ctx context.Context, p *Process, stderrPipe io.ReadCloser) {
+func startStderrDrain(ctx context.Context, p *Process, stderrR io.ReadCloser) {
 	p.stderrTask = supervise.Go(ctx, "process.stderr_drain", func(ctx context.Context) error {
+		defer closeQuietly(stderrR)
 		buf := make([]byte, defaultReadChunkSize)
 		for {
-			done, err := drainStderrChunk(stderrPipe, p.stderrRing, buf)
+			done, err := drainStderrChunk(stderrR, p.stderrRing, buf)
 			if err != nil {
 				return err
 			}
@@ -140,7 +180,7 @@ func drainStderrChunk(r io.Reader, ring *RingBuffer, buf []byte) (bool, error) {
 		}
 	}
 	if rErr != nil {
-		if errors.Is(rErr, io.EOF) || errors.Is(rErr, os.ErrClosed) {
+		if errors.Is(rErr, io.EOF) {
 			return true, nil
 		}
 		return false, fmt.Errorf("read stderr: %w", rErr)
@@ -154,16 +194,6 @@ func startWaitTask(ctx context.Context, p *Process) {
 		close(p.exitCh)
 		return nil
 	})
-}
-
-func closePipes(pipes ...io.Closer) {
-	for _, p := range pipes {
-		if p != nil {
-			if err := p.Close(); err != nil {
-				continue
-			}
-		}
-	}
 }
 
 // classifySpawnError distinguishes binary not found, not executable, and start failed.

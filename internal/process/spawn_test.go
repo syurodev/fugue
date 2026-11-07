@@ -1,7 +1,9 @@
 package process
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
@@ -101,5 +103,48 @@ func TestProcessStderrFloodCapturedInRing(t *testing.T) {
 
 	if _, err := proc.Stop(ctx); err != nil {
 		t.Fatalf("Stop: %v", err)
+	}
+}
+
+func TestFinalLinesSurviveImmediateExit(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	exe := fakeVendorExe(t)
+
+	for iter := range 20 {
+		proc, err := Spawn(ctx, &Options{
+			Argv: []string{exe, fakeVendorFlag, "burst-and-exit"},
+		})
+		if err != nil {
+			t.Fatalf("iter %d: Spawn: %v", iter, err)
+		}
+
+		linesRead := drainBurstLines(t, proc.Stdout())
+		if linesRead != 500 {
+			t.Fatalf("iter %d: expected 500 lines, got %d", iter, linesRead)
+		}
+
+		if err := proc.Wait(); err != nil {
+			t.Fatalf("iter %d: Wait: %v", iter, err)
+		}
+	}
+}
+
+func drainBurstLines(t *testing.T, lr *LineReader) int {
+	t.Helper()
+	linesRead := 0
+	for {
+		line, rerr := lr.ReadLine()
+		if rerr != nil {
+			if errors.Is(rerr, io.EOF) {
+				return linesRead
+			}
+			t.Fatalf("ReadLine[%d]: %v", linesRead, rerr)
+		}
+		linesRead++
+		if linesRead == 500 && !bytes.HasPrefix(line, []byte("line 499 ")) {
+			t.Fatalf("unexpected final line prefix: %s", line[:20])
+		}
 	}
 }

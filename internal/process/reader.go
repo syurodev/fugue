@@ -98,11 +98,21 @@ func (lr *LineReader) readMore() error {
 	lr.bufRead = 0
 	lr.bufEnd = n
 
-	if err != nil {
-		if !errors.Is(err, io.EOF) {
-			return fmt.Errorf("read stream: %w", err)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, io.EOF) {
+		return fmt.Errorf("read stream: %w", err)
+	}
+	lr.eof = true
+	return lr.closeUnderlying()
+}
+
+func (lr *LineReader) closeUnderlying() error {
+	if closer, ok := lr.r.(io.Closer); ok {
+		if err := closer.Close(); err != nil {
+			return fmt.Errorf("close stream: %w", err)
 		}
-		lr.eof = true
 	}
 	return nil
 }

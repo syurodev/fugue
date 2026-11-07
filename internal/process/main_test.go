@@ -3,8 +3,10 @@ package process
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -39,6 +41,12 @@ func runFakeVendor(mode string) {
 		runFloodStderr()
 	case "exit-on-eof":
 		runExitOnEOF()
+	case "burst-and-exit":
+		runBurstAndExit()
+	case "group-child-worker":
+		runGroupChildWorker()
+	case "group-child-survivor":
+		runGroupChildSurvivor()
 	case "normal", "sleeper":
 		runNormal()
 	default:
@@ -107,6 +115,59 @@ func runExitOnEOF() {
 		os.Exit(1)
 	}
 	os.Exit(0)
+}
+
+func runBurstAndExit() {
+	for i := range 499 {
+		writeQuietly(os.Stdout, fmt.Sprintf("line %03d\n", i))
+	}
+	largePayload := bytes.Repeat([]byte("Z"), 64*1024)
+	writeQuietly(os.Stdout, fmt.Sprintf("line 499 %s\n", string(largePayload)))
+	os.Exit(0)
+}
+
+func runGroupChildWorker() {
+	sigCh := make(chan os.Signal, 2)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	writeQuietly(os.Stdout, "CHILD_READY\n")
+	for {
+		<-sigCh
+	}
+}
+
+func runGroupChildSurvivor() {
+	exe, err := os.Executable()
+	if err != nil {
+		os.Exit(1)
+	}
+	child := &exec.Cmd{
+		Path: exe,
+		Args: []string{exe, fakeVendorFlag, "group-child-worker"},
+	}
+	childOut, pipeErr := child.StdoutPipe()
+	if pipeErr != nil {
+		os.Exit(1)
+	}
+	if startErr := child.Start(); startErr != nil {
+		os.Exit(1)
+	}
+	r := bufio.NewReader(childOut)
+	readyLine, readErr := r.ReadString('\n')
+	if readErr != nil || strings.TrimSpace(readyLine) != "CHILD_READY" {
+		os.Exit(1)
+	}
+
+	writeQuietly(os.Stdout, fmt.Sprintf("CHILD %d\n", child.Process.Pid))
+	writeQuietly(os.Stdout, "READY\n")
+
+	sigCh := make(chan os.Signal, 2)
+	signal.Notify(sigCh, syscall.SIGINT)
+	for {
+		sig := <-sigCh
+		if sig == syscall.SIGINT {
+			os.Exit(0)
+		}
+	}
 }
 
 func runNormal() {
