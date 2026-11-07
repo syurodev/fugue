@@ -35,6 +35,9 @@ type AcceptListener struct {
 	onClosed func(net.Conn)
 	onReject func(uint64)
 	rejects  uint64
+
+	closeMu sync.Mutex
+	closed  bool
 }
 
 // NewAcceptListener wraps inner with the peer-credential check.
@@ -89,9 +92,20 @@ func (l *AcceptListener) reject(c net.Conn) {
 	}
 }
 
-// Close closes the inner listener and returns its error unchanged, for the
-// same reason Accept does.
-func (l *AcceptListener) Close() error { return l.inner.Close() }
+// Close closes the inner listener: the first call closes it and returns its
+// error unchanged, for the same reason Accept does, and every later call
+// returns nil. Server.Drain closes the listener before the http server shuts
+// down, and the shutdown closes the wrapper again, so Close must be safe to
+// repeat.
+func (l *AcceptListener) Close() error {
+	l.closeMu.Lock()
+	defer l.closeMu.Unlock()
+	if l.closed {
+		return nil
+	}
+	l.closed = true
+	return l.inner.Close()
+}
 
 // Addr returns the inner listener's address.
 func (l *AcceptListener) Addr() net.Addr { return l.inner.Addr() }

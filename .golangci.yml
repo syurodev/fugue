@@ -92,6 +92,20 @@ linters:
       checks:
         - all
     wrapcheck:
+      # Setting ignore-sigs replaces the defaults, so the default signatures
+      # are listed explicitly. connect.NewError is the Host API boundary
+      # conversion; the client decodes its code and detail (quality-gates §2).
+      ignore-sigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Unwrap(
+        - errors.Join(
+        - .Wrap(
+        - .Wrapf(
+        - .WithMessage(
+        - .WithMessagef(
+        - .WithStack(
+        - connect.NewError(
       # errcode constructors are the repository's way of wrapping, not a boundary leak.
       ignore-package-globs:
         - github.com/syurodev/fugue/internal/platform/errcode

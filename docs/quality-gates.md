@@ -30,7 +30,7 @@ General principles:
 | Group | Linters | Notes |
 | --- | --- | --- |
 | Correctness | `govet` (every analyzer except `fieldalignment`), `staticcheck` (all checks), `errcheck` (including `check-blank`, `check-type-assertions`), `ineffassign`, `nilerr`, `nilnil`, `bodyclose`, `sqlclosecheck`, `rowserrcheck`, `contextcheck`, `noctx`, `copyloopvar`, `durationcheck`, `makezero`, `reassign`, `recvcheck` | `errcheck` is fully on; a `Close` error on a write path must be handled, read paths use a clearly named `closeQuietly` helper |
-| Errors | `errorlint`, `err113`, `wrapcheck` (package boundaries only) | No dynamic `errors.New` inside functions; use sentinels or typed errors with codes |
+| Errors | `errorlint`, `err113`, `wrapcheck` (package boundaries only; the sanctioned unwrapped conversions are `errcode` constructors and `connect.NewError(`) | No dynamic `errors.New` inside functions; use sentinels or typed errors with codes |
 | Enums and structs | `exhaustive` (`default-signifies-exhaustive: false`), `exhaustruct` (only for `kernel` and `hostapi` types whose names end in `Command`, `Event`, `Request`) | Adding an event and forgetting a `switch` branch fails |
 | Complexity | `cyclop` (12), `gocognit` (15), `nestif` (4), `funlen` (60 lines, 40 statements), `maintidx` | No per-function threshold bumps; split the function |
 | Junk code | `unused`, `unparam`, `dupl` (100 tokens), `goconst`, `gocritic` (with `commentedOutCode`, `deferInLoop`, `hugeParam`, `rangeValCopy`), `unconvert`, `wastedassign`, `prealloc`, `intrange`, `usestdlibvars`, `perfsprint` | Commented-out code is caught by `commentedOutCode` |
