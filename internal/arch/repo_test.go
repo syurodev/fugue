@@ -200,3 +200,25 @@ func expectNone(t *testing.T, got []string) {
 		t.Errorf("unexpected violations:\n%s", strings.Join(got, "\n"))
 	}
 }
+
+// testFixtureRule runs a fixture-backed repository rule over its clean and
+// violating fixtures: the second and third subtests such a rule's test has.
+func testFixtureRule(t *testing.T, check func(ctx context.Context, r repo) ([]string, error), good, bad, violation string) {
+	t.Helper()
+	t.Run("clean fixture", func(t *testing.T) {
+		t.Parallel()
+		got, err := check(t.Context(), fixture(good))
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectNone(t, got)
+	})
+	t.Run("violations", func(t *testing.T) {
+		t.Parallel()
+		got, err := check(t.Context(), fixture(bad))
+		if err != nil {
+			t.Fatal(err)
+		}
+		expectViolations(t, got, violation)
+	})
+}

@@ -108,22 +108,7 @@ func TestPlatformClockImportsOnlyStdlib(t *testing.T) {
 		}
 		expectNone(t, got)
 	})
-	t.Run("clean fixture", func(t *testing.T) {
-		t.Parallel()
-		got, err := checkClockImports(t.Context(), fixture("fuguegate-imports-good"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		expectNone(t, got)
-	})
-	t.Run("violations", func(t *testing.T) {
-		t.Parallel()
-		got, err := checkClockImports(t.Context(), fixture("fuguegate-imports-bad"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		expectViolations(t, got,
-			"internal/platform/clock imports internal/platform/redact: the time port stays a stdlib-only leaf",
-		)
-	})
+	testFixtureRule(t, checkClockImports, "fuguegate-imports-good", "fuguegate-imports-bad",
+		"internal/platform/clock imports internal/platform/redact: the time port stays a stdlib-only leaf",
+	)
 }
