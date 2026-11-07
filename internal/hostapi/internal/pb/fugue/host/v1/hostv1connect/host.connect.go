@@ -39,6 +39,8 @@ const (
 	HostServiceHostStatusProcedure = "/fugue.host.v1.HostService/HostStatus"
 	// HostServiceShutdownProcedure is the fully-qualified name of the HostService's Shutdown RPC.
 	HostServiceShutdownProcedure = "/fugue.host.v1.HostService/Shutdown"
+	// HostServiceSubscribeProcedure is the fully-qualified name of the HostService's Subscribe RPC.
+	HostServiceSubscribeProcedure = "/fugue.host.v1.HostService/Subscribe"
 )
 
 // HostServiceClient is a client for the fugue.host.v1.HostService service.
@@ -46,6 +48,9 @@ type HostServiceClient interface {
 	Hello(context.Context, *connect.Request[v1.HelloRequest]) (*connect.Response[v1.HelloResponse], error)
 	HostStatus(context.Context, *connect.Request[v1.HostStatusRequest]) (*connect.Response[v1.HostStatusResponse], error)
 	Shutdown(context.Context, *connect.Request[v1.ShutdownRequest]) (*connect.Response[v1.ShutdownResponse], error)
+	// Subscribe streams one topic's events after an optional snapshot or
+	// catch-up from a cursor (docs: host-api §6).
+	Subscribe(context.Context, *connect.Request[v1.SubscribeRequest]) (*connect.ServerStreamForClient[v1.SubscribeResponse], error)
 }
 
 // NewHostServiceClient constructs a client for the fugue.host.v1.HostService service. By default,
@@ -77,6 +82,12 @@ func NewHostServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(hostServiceMethods.ByName("Shutdown")),
 			connect.WithClientOptions(opts...),
 		),
+		subscribe: connect.NewClient[v1.SubscribeRequest, v1.SubscribeResponse](
+			httpClient,
+			baseURL+HostServiceSubscribeProcedure,
+			connect.WithSchema(hostServiceMethods.ByName("Subscribe")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -85,6 +96,7 @@ type hostServiceClient struct {
 	hello      *connect.Client[v1.HelloRequest, v1.HelloResponse]
 	hostStatus *connect.Client[v1.HostStatusRequest, v1.HostStatusResponse]
 	shutdown   *connect.Client[v1.ShutdownRequest, v1.ShutdownResponse]
+	subscribe  *connect.Client[v1.SubscribeRequest, v1.SubscribeResponse]
 }
 
 // Hello calls fugue.host.v1.HostService.Hello.
@@ -102,11 +114,19 @@ func (c *hostServiceClient) Shutdown(ctx context.Context, req *connect.Request[v
 	return c.shutdown.CallUnary(ctx, req)
 }
 
+// Subscribe calls fugue.host.v1.HostService.Subscribe.
+func (c *hostServiceClient) Subscribe(ctx context.Context, req *connect.Request[v1.SubscribeRequest]) (*connect.ServerStreamForClient[v1.SubscribeResponse], error) {
+	return c.subscribe.CallServerStream(ctx, req)
+}
+
 // HostServiceHandler is an implementation of the fugue.host.v1.HostService service.
 type HostServiceHandler interface {
 	Hello(context.Context, *connect.Request[v1.HelloRequest]) (*connect.Response[v1.HelloResponse], error)
 	HostStatus(context.Context, *connect.Request[v1.HostStatusRequest]) (*connect.Response[v1.HostStatusResponse], error)
 	Shutdown(context.Context, *connect.Request[v1.ShutdownRequest]) (*connect.Response[v1.ShutdownResponse], error)
+	// Subscribe streams one topic's events after an optional snapshot or
+	// catch-up from a cursor (docs: host-api §6).
+	Subscribe(context.Context, *connect.Request[v1.SubscribeRequest], *connect.ServerStream[v1.SubscribeResponse]) error
 }
 
 // NewHostServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -134,6 +154,12 @@ func NewHostServiceHandler(svc HostServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(hostServiceMethods.ByName("Shutdown")),
 		connect.WithHandlerOptions(opts...),
 	)
+	hostServiceSubscribeHandler := connect.NewServerStreamHandler(
+		HostServiceSubscribeProcedure,
+		svc.Subscribe,
+		connect.WithSchema(hostServiceMethods.ByName("Subscribe")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fugue.host.v1.HostService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case HostServiceHelloProcedure:
@@ -142,6 +168,8 @@ func NewHostServiceHandler(svc HostServiceHandler, opts ...connect.HandlerOption
 			hostServiceHostStatusHandler.ServeHTTP(w, r)
 		case HostServiceShutdownProcedure:
 			hostServiceShutdownHandler.ServeHTTP(w, r)
+		case HostServiceSubscribeProcedure:
+			hostServiceSubscribeHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -161,4 +189,8 @@ func (UnimplementedHostServiceHandler) HostStatus(context.Context, *connect.Requ
 
 func (UnimplementedHostServiceHandler) Shutdown(context.Context, *connect.Request[v1.ShutdownRequest]) (*connect.Response[v1.ShutdownResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.host.v1.HostService.Shutdown is not implemented"))
+}
+
+func (UnimplementedHostServiceHandler) Subscribe(context.Context, *connect.Request[v1.SubscribeRequest], *connect.ServerStream[v1.SubscribeResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("fugue.host.v1.HostService.Subscribe is not implemented"))
 }
