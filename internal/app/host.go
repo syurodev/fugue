@@ -109,6 +109,14 @@ type Backend interface {
 	LeaseReleased(ctx context.Context, connID string)
 	Status(ctx context.Context) (HostStatusView, error)
 	Shutdown(ctx context.Context, cmd ShutdownCommand) error
+	Subscribe(ctx context.Context, p SubscribeParams) (*Subscription, error)
+}
+
+// StreamEnder ends every open event stream. The transport asserts it at the
+// start of a graceful drain so each stream delivers its end message and
+// returns before the connections close.
+type StreamEnder interface {
+	EndStreams()
 }
 
 // HostDeps are the ports StartHost needs.
@@ -128,6 +136,7 @@ type HostRuntime struct {
 	started     time.Time
 	incarnation storage.HostIncarnation
 	clk         clock.Clock
+	hub         *EventHub
 
 	// goTask spawns a supervised goroutine on the host's base context; it is
 	// installed by StartHost because the base context is never stored.
@@ -158,11 +167,30 @@ func newHostRuntime(cfg HostConfig, inc storage.HostIncarnation, clk clock.Clock
 		started:     inc.AcquiredAt,
 		incarnation: inc,
 		clk:         clk,
+		hub:         NewEventHub(inc.IncarnationID),
 		leases:      map[string]ClientKind{},
 		drained:     make(chan struct{}),
 		graceWake:   make(chan struct{}, 1),
 	}
 }
+
+// Subscribe serves one event stream; the runtime delegates to its hub. A bare
+// runtime without a hub (some tests) denies every topic.
+func (rt *HostRuntime) Subscribe(ctx context.Context, p SubscribeParams) (*Subscription, error) {
+	if rt.hub == nil {
+		return nil, ErrSubscriptionDenied
+	}
+	return rt.hub.Subscribe(ctx, p)
+}
+
+// EndStreams ends every open event stream; the transport calls it at the start
+// of a graceful drain.
+func (rt *HostRuntime) EndStreams() {
+	if rt.hub != nil {
+		rt.hub.EndStreams()
+	}
+}
+
 
 // startGraceLoop starts the one long-lived grace goroutine. Arming never
 // spawns a task: the loop returns to its receive after every fire or disarm,
@@ -275,12 +303,14 @@ func (rt *HostRuntime) LeaseAcquired(_ context.Context, connID string, kind Clie
 		return errcode.New(errcode.InvalidArgument, "client kind is missing or unknown")
 	}
 	rt.mu.Lock()
-	defer rt.mu.Unlock()
 	if rt.draining {
+		rt.mu.Unlock()
 		return ErrHostStopping
 	}
 	rt.leases[connID] = kind
 	rt.disarmGraceLocked()
+	rt.mu.Unlock()
+	rt.publishHostClients()
 	return nil
 }
 
@@ -291,6 +321,7 @@ func (rt *HostRuntime) LeaseReleased(_ context.Context, connID string) {
 	delete(rt.leases, connID)
 	if rt.draining || rt.cfg.IdleGrace <= 0 || len(rt.leases) > 0 || rt.graceTimer != nil {
 		rt.mu.Unlock()
+		rt.publishHostClients()
 		return
 	}
 	// The timer and the stop channel are created under the mutex; the wake is
@@ -302,6 +333,7 @@ func (rt *HostRuntime) LeaseReleased(_ context.Context, connID string) {
 	rt.graceTimer = timer
 	rt.disarm = disarm
 	rt.mu.Unlock()
+	rt.publishHostClients()
 	if rt.graceWake == nil {
 		return
 	}
@@ -335,6 +367,17 @@ func (rt *HostRuntime) fireGrace(timer clock.Timer) bool {
 func (rt *HostRuntime) Status(_ context.Context) (HostStatusView, error) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
+	return HostStatusView{
+		HostVersion:          rt.cfg.HostVersion,
+		SupportedAPIVersions: slices.Clone(rt.cfg.APIVersions),
+		Incarnation:          rt.incarnation,
+		StartedAt:            rt.started,
+		Clients:              rt.countsLocked(),
+	}, nil
+}
+
+// countsLocked counts the live leases per kind; the caller holds the mutex.
+func (rt *HostRuntime) countsLocked() ClientCounts {
 	counts := ClientCounts{}
 	for _, kind := range rt.leases {
 		switch kind {
@@ -349,13 +392,7 @@ func (rt *HostRuntime) Status(_ context.Context) (HostStatusView, error) {
 		}
 		counts.Total++
 	}
-	return HostStatusView{
-		HostVersion:          rt.cfg.HostVersion,
-		SupportedAPIVersions: slices.Clone(rt.cfg.APIVersions),
-		Incarnation:          rt.incarnation,
-		StartedAt:            rt.started,
-		Clients:              counts,
-	}, nil
+	return counts
 }
 
 // Shutdown validates the command and begins the drain. Every later call gets
@@ -399,6 +436,7 @@ func (rt *HostRuntime) beginDrainLocked(force bool, reason string) func() {
 	}
 	return func() {
 		slog.Info("host drain started", "reason", reason)
+		rt.publishHostDraining(reason)
 		rt.goTask("app.host-drain", func(ctx context.Context) error {
 			defer rt.closeDrained()
 			return rt.drain(ctx, force, reason)
