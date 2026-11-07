@@ -21,20 +21,22 @@ var (
 )
 
 func (r repo) owners() (map[string]string, []string, error) {
-	rows, err := r.table(adrFile, "| Table | Owner")
-	if err != nil {
-		return nil, nil, err
-	}
 	owners := map[string]string{}
 	var problems []string
-	for _, cells := range rows {
-		if len(cells) < 2 {
-			return nil, nil, fmt.Errorf("%w: table ownership row %v is incomplete", errBadRow, cells)
+	for _, file := range adrFiles() {
+		rows, err := r.table(file, "| Table | Owner")
+		if err != nil {
+			return nil, nil, err
 		}
-		if prev, dup := owners[cells[0]]; dup {
-			problems = append(problems, fmt.Sprintf("table %s has two owner rows: %s and %s", cells[0], prev, cells[1]))
+		for _, cells := range rows {
+			if len(cells) < 2 {
+				return nil, nil, fmt.Errorf("%w: table ownership row %v is incomplete", errBadRow, cells)
+			}
+			if prev, dup := owners[cells[0]]; dup {
+				problems = append(problems, fmt.Sprintf("table %s has two owner rows: %s and %s", cells[0], prev, cells[1]))
+			}
+			owners[cells[0]] = cells[1]
 		}
-		owners[cells[0]] = cells[1]
 	}
 	return owners, problems, nil
 }
@@ -45,7 +47,7 @@ func checkTableOwnership(ctx context.Context, r repo) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	layers, err := r.layerTable()
+	layers, _, err := r.layerTable()
 	if err != nil {
 		return nil, err
 	}
@@ -179,9 +181,9 @@ func TestTableOwnership(t *testing.T) {
 			"internal/rogue/schema.go: creates table stray outside internal/storage/migrations/*.sql",
 			"internal/rogue/schema.go: table stray has no owner row",
 			"internal/storage/migrations/0001_init.sql: table orphan has no owner row",
-			"table exec_events has two owner rows",
+			"table exec_events has two owner rows: internal/execstore and internal/vendorstore",
 			"table exec_runs: owner internal/ghost has no row in the layer table",
-			"internal/coordinator/query.go: SQL touches table exec_events, owned by internal/execstore",
+			"internal/coordinator/query.go: SQL touches table exec_events, owned by internal/vendorstore",
 			"internal/coordinator imports database/sql but owns no table",
 			"internal/coordinator imports the SQLite driver: only internal/storage may",
 		)

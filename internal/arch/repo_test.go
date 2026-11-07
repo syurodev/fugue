@@ -32,6 +32,13 @@ const (
 	repoRoot         = "../.."
 )
 
+func adrFiles() []string {
+	return []string{
+		"docs/adr/0001-package-layout.md",
+		"docs/adr/0002-vendor-domain.md",
+	}
+}
+
 var (
 	errNoTable = errors.New("markdown table not found")
 	errBadRow  = errors.New("malformed table row")
