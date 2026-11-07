@@ -31,15 +31,17 @@ const (
 // fakeBackend is a scripted app.Backend for tests that exercise the transport
 // without the real runtime.
 type fakeBackend struct {
-	mu        sync.Mutex
-	hellos    int
-	leased    []string
-	released  chan string
-	statuses  int
-	status    app.HostStatusView
-	helloRes  app.HelloResult
-	helloErr  error
-	shutdowns []app.ShutdownCommand
+	mu           sync.Mutex
+	hellos       int
+	leased       []string
+	released     chan string
+	statuses     int
+	status       app.HostStatusView
+	helloRes     app.HelloResult
+	helloErr     error
+	shutdowns    []app.ShutdownCommand
+	holdLease    chan struct{}      // non-nil: LeaseAcquired blocks until closed
+	leaseEntered chan struct{}      // non-nil: signalled when LeaseAcquired is entered
 }
 
 func newFakeBackend() *fakeBackend {
@@ -57,6 +59,12 @@ func (f *fakeBackend) Hello(_ context.Context, _ app.HelloParams) (app.HelloResu
 }
 
 func (f *fakeBackend) LeaseAcquired(_ context.Context, connID string, _ app.ClientKind) error {
+	if f.leaseEntered != nil {
+		f.leaseEntered <- struct{}{}
+	}
+	if f.holdLease != nil {
+		<-f.holdLease
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.leased = append(f.leased, connID)

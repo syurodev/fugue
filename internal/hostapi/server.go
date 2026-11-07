@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"sync"
-	"sync/atomic"
 
 	"github.com/syurodev/fugue/internal/app"
 	"github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1/hostv1connect"
@@ -36,11 +35,75 @@ type ServerConfig struct {
 	PeerCredentials func(net.Conn) (PeerCredentials, error)
 }
 
+// connPhase is the hello lifecycle of one connection. HTTP/2 multiplexes
+// concurrent requests on one connection, so the phases move under the
+// per-connection mutex: none, acquiring, leased, closed.
+type connPhase int
+
+const (
+	phaseNone connPhase = iota
+	phaseAcquiring
+	phaseLeased
+	phaseClosed
+)
+
 // connState is the per-connection state attached to the connection's context:
-// the connection's id and whether it has negotiated a hello.
+// the connection's id and its hello phase.
 type connState struct {
-	id      string
-	helloed atomic.Bool
+	id    string
+	mu    sync.Mutex
+	phase connPhase
+}
+
+// beginHello moves none to acquiring; any other phase is a repeated hello.
+func (st *connState) beginHello() error {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.phase != phaseNone {
+		return ErrAlreadyHelloed
+	}
+	st.phase = phaseAcquiring
+	return nil
+}
+
+// leaseHello records a successful hello and reports whether the lease was
+// kept. When the connection closed while the backend calls ran, the close
+// hook has already marked it closed and released nothing — the hello releases
+// the lease itself and reports that it was not kept.
+func (st *connState) leaseHello(release func()) bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.phase == phaseClosed {
+		release()
+		return false
+	}
+	st.phase = phaseLeased
+	return true
+}
+
+// failHello returns a failed hello to none so the client may retry.
+func (st *connState) failHello() {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.phase == phaseAcquiring {
+		st.phase = phaseNone
+	}
+}
+
+// markClosed marks the connection closed and reports whether it held a lease
+// that the close hook must release.
+func (st *connState) markClosed() bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	leased := st.phase == phaseLeased
+	st.phase = phaseClosed
+	return leased
+}
+
+func (st *connState) isLeased() bool {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.phase == phaseLeased
 }
 
 type connStateKey struct{}
@@ -145,10 +208,12 @@ func (s *Server) onConnClosed(baseCtx context.Context) func(net.Conn) {
 		st := s.conns[c]
 		delete(s.conns, c)
 		s.mu.Unlock()
-		if st == nil || !st.helloed.Load() {
+		if st == nil {
 			return
 		}
-		s.backend.LeaseReleased(baseCtx, st.id)
+		if st.markClosed() {
+			s.backend.LeaseReleased(baseCtx, st.id)
+		}
 	}
 }
 

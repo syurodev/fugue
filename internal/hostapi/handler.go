@@ -110,11 +110,14 @@ func (h *serviceHandler) Hello(ctx context.Context, req *connect.Request[hostv1.
 	if err != nil {
 		return nil, h.connectError(ctx, err)
 	}
-	if st.helloed.Load() {
-		return nil, h.connectError(ctx, ErrAlreadyHelloed)
+	// The state machine serializes concurrent hellos on one multiplexed
+	// connection: exactly one moves none to acquiring, the rest are rejected.
+	if err := st.beginHello(); err != nil {
+		return nil, h.connectError(ctx, err)
 	}
 	kind, err := kindFromProto(req.Msg.ClientKind)
 	if err != nil {
+		st.failHello()
 		return nil, h.connectError(ctx, err)
 	}
 	res, err := h.backend.Hello(ctx, app.HelloParams{
@@ -124,16 +127,22 @@ func (h *serviceHandler) Hello(ctx context.Context, req *connect.Request[hostv1.
 		SupportedAPIVersions: req.Msg.SupportedApiVersions,
 	})
 	if err != nil {
-		// A failed hello leaves the connection lease-less and free to retry;
-		// the flag is set only by a successful negotiation.
+		// A failed hello returns the connection to none: it stays lease-less
+		// and the client is free to retry.
+		st.failHello()
 		return nil, h.connectError(ctx, err)
 	}
-	// Negotiation first, then the lease: a failed registration leaves the
-	// connection lease-less and free to retry the hello.
+	// Negotiation first, then the lease: a failed registration returns the
+	// connection to none as well.
 	if err := h.backend.LeaseAcquired(ctx, st.id, kind); err != nil {
+		st.failHello()
 		return nil, h.connectError(ctx, err)
 	}
-	st.helloed.Store(true)
+	// If the connection closed while the backend calls ran, the close hook
+	// has marked it closed without releasing — the hello releases the lease
+	// itself. WithoutCancel keeps the release working past the dead request
+	// context.
+	st.leaseHello(func() { h.backend.LeaseReleased(context.WithoutCancel(ctx), st.id) })
 	return connect.NewResponse(&hostv1.HelloResponse{
 		ApiVersion:  res.APIVersion,
 		HostVersion: res.HostVersion,
@@ -184,7 +193,7 @@ func requireHelloed(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if !st.helloed.Load() {
+	if !st.isLeased() {
 		return ErrHelloFirst
 	}
 	return nil
