@@ -15,24 +15,33 @@ type layerRow struct {
 	imports []string
 }
 
-func (r repo) layerTable() ([]layerRow, error) {
-	rows, err := r.table(adrFile, "| Package | Layer")
-	if err != nil {
-		return nil, err
-	}
+func (r repo) layerTable() ([]layerRow, []string, error) {
 	const columns = 5
 	var out []layerRow
-	for _, cells := range rows {
-		if len(cells) < columns {
-			return nil, fmt.Errorf("%w: layer table row %v has %d cells, want %d", errBadRow, cells, len(cells), columns)
+	var problems []string
+	seen := map[string]string{}
+	for _, file := range adrFiles() {
+		rows, err := r.table(file, "| Package | Layer")
+		if err != nil {
+			return nil, nil, err
 		}
-		row := layerRow{pkg: cells[0], layer: cells[1]}
-		if cells[3] != "" {
-			row.imports = strings.Split(cells[3], ", ")
+		for _, cells := range rows {
+			if len(cells) < columns {
+				return nil, nil, fmt.Errorf("%w: layer table row %v has %d cells, want %d", errBadRow, cells, len(cells), columns)
+			}
+			pkg := cells[0]
+			if _, dup := seen[pkg]; dup {
+				problems = append(problems, fmt.Sprintf("package %s has two layer rows", pkg))
+			}
+			seen[pkg] = file
+			row := layerRow{pkg: pkg, layer: cells[1]}
+			if cells[3] != "" {
+				row.imports = strings.Split(cells[3], ", ")
+			}
+			out = append(out, row)
 		}
-		out = append(out, row)
 	}
-	return out, nil
+	return out, problems, nil
 }
 
 func findRow(rows []layerRow, rel string) (layerRow, bool) {
@@ -72,7 +81,7 @@ func higher(a, b string) bool {
 // checkLayers enforces quality-gates section 5 TestLayerGraph: every internal
 // package has a row, and every import between module packages is listed.
 func checkLayers(ctx context.Context, r repo) ([]string, error) {
-	rows, err := r.layerTable()
+	rows, tableProbs, err := r.layerTable()
 	if err != nil {
 		return nil, err
 	}
@@ -80,7 +89,9 @@ func checkLayers(ctx context.Context, r repo) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	out := tableProblems(rows)
+	var out []string
+	out = append(out, tableProbs...)
+	out = append(out, tableProblems(rows)...)
 	for _, p := range pkgs {
 		out = append(out, packageProblems(rows, p)...)
 	}
@@ -93,8 +104,9 @@ func packageProblems(rows []layerRow, p *goPackage) []string {
 	var out []string
 	row, declared := findRow(rows, rel)
 	internal := strings.HasPrefix(rel, "internal/")
-	if internal && !declared {
-		out = append(out, fmt.Sprintf("%s: package has no row in the layer table of %s", rel, adrFile))
+	isPkg := strings.HasPrefix(rel, "pkg/")
+	if (internal || isPkg) && !declared {
+		out = append(out, fmt.Sprintf("%s: package has no row in the layer table of %s", rel, strings.Join(adrFiles(), ", ")))
 	}
 	for _, imp := range slices.Compact(slices.Sorted(slices.Values(p.allImports()))) {
 		irel, ok := strings.CutPrefix(imp, p.Module.Path+"/")
@@ -106,17 +118,37 @@ func packageProblems(rows []layerRow, p *goPackage) []string {
 	return out
 }
 
-func importProblem(row layerRow, declared, internal bool, rel, irel string) []string {
-	switch {
-	case internal && !strings.HasPrefix(irel, "internal/"):
-		return []string{fmt.Sprintf("%s imports %s: internal packages never import cmd, tools or other roots", rel, irel)}
-	case internal && declared && !slices.ContainsFunc(row.imports, func(e string) bool { return matchPackage(e, irel) }):
+func allowedImport(imports []string, target string) bool {
+	return slices.ContainsFunc(imports, func(e string) bool { return matchPackage(e, target) })
+}
+
+func pkgImportProblem(row layerRow, declared bool, rel, irel string) []string {
+	if strings.HasPrefix(irel, "internal/") {
+		return []string{fmt.Sprintf("%s imports %s: packages under pkg/ never import internal packages", rel, irel)}
+	}
+	if declared && !allowedImport(row.imports, irel) {
 		return []string{fmt.Sprintf("%s imports %s, which is not in its May import column", rel, irel)}
-	case !internal && (strings.HasPrefix(rel, "tools/") || rel == "quality") && strings.HasPrefix(irel, "internal/"):
-		return []string{fmt.Sprintf("%s imports %s: tools and quality tests do not depend on internal packages", rel, irel)}
-	default:
+	}
+	return nil
+}
+
+func importProblem(row layerRow, declared, internal bool, rel, irel string) []string {
+	if strings.HasPrefix(rel, "pkg/") {
+		return pkgImportProblem(row, declared, rel, irel)
+	}
+	if !internal {
+		if (strings.HasPrefix(rel, "tools/") || rel == "quality") && strings.HasPrefix(irel, "internal/") {
+			return []string{fmt.Sprintf("%s imports %s: tools and quality tests do not depend on internal packages", rel, irel)}
+		}
 		return nil
 	}
+	if !strings.HasPrefix(irel, "internal/") {
+		return []string{fmt.Sprintf("%s imports %s: internal packages never import cmd, tools or other roots", rel, irel)}
+	}
+	if declared && !allowedImport(row.imports, irel) {
+		return []string{fmt.Sprintf("%s imports %s, which is not in its May import column", rel, irel)}
+	}
+	return nil
 }
 
 func TestLayerGraph(t *testing.T) {
@@ -151,6 +183,8 @@ func TestLayerGraph(t *testing.T) {
 			"internal/platform/clock (layer 0) may import internal/kernel (layer 1)",
 			"internal/arch is a test-only package and may import nothing",
 			"internal/app may import internal/ghost, which has no row",
+			"package internal/kernel has two layer rows",
+			"pkg/client imports internal/platform/clock: packages under pkg/ never import internal packages",
 		)
 	})
 }

@@ -9,7 +9,5 @@
 | Table | Owner | Phase |
 | --- | --- | --- |
 | `schema_migrations` | `internal/storage` | F1 |
-| `exec_events` | `internal/storage` | F1 |
 | `exec_events` | `internal/execstore` | F1 |
 | `exec_runs` | `internal/ghost` | F1 |
-

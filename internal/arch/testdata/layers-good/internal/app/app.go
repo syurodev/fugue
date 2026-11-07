@@ -1,8 +1,7 @@
 package app
 
 import (
-	"github.com/syurodev/fugue/internal/kernel"
-	"github.com/syurodev/fugue/internal/platform/clock"
+	_ "github.com/syurodev/fugue/internal/kernel"
+	_ "github.com/syurodev/fugue/internal/platform/clock"
+	_ "github.com/syurodev/fugue/internal/vendor"
 )
-
-const Two = kernel.One + clock.Zero
