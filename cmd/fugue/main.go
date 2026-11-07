@@ -16,13 +16,14 @@ import (
 var version = "dev"
 
 func main() {
-	os.Exit(runMain(context.Background(), os.Args[1:], os.Stdout))
+	os.Exit(runMain(context.Background(), os.Args[1:], os.Stdout, os.Stderr))
 }
 
 // runMain dispatches a subcommand. A usage error exits 2 and never touches
 // the environment; serve loads the configuration from the process and exits
-// through RunServe's code (cli §5.2).
-func runMain(ctx context.Context, args []string, out io.Writer) int {
+// through RunServe's code (cli §5.2). Usage goes to out, real errors to
+// errOut.
+func runMain(ctx context.Context, args []string, out, errOut io.Writer) int {
 	if len(args) != 1 || args[0] != "serve" {
 		if uerr := usage(out); uerr != nil {
 			slog.Error("write usage", "err", uerr)
@@ -31,7 +32,7 @@ func runMain(ctx context.Context, args []string, out io.Writer) int {
 	}
 	cfg, err := config.FromProcess()
 	if err != nil {
-		if serr := say(out, "fugue: %v", err); serr != nil {
+		if serr := say(errOut, "fugue: %v", err); serr != nil {
 			slog.Error("write the startup error", "err", serr)
 		}
 		return exitFailure

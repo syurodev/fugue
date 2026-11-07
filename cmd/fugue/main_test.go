@@ -17,6 +17,7 @@ import (
 
 	"go.uber.org/goleak"
 
+	"github.com/syurodev/fugue/internal/app"
 	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/hostapi"
 	"github.com/syurodev/fugue/internal/platform/clock"
@@ -173,7 +174,7 @@ func TestServeStopsOnContextCancel(t *testing.T) {
 func TestServeUsageRejectsUnknownSubcommand(t *testing.T) {
 	t.Parallel()
 	var out bytes.Buffer
-	if code := runMain(t.Context(), []string{"bogus"}, &out); code != exitUsage {
+	if code := runMain(t.Context(), []string{"bogus"}, &out, io.Discard); code != exitUsage {
 		t.Fatalf("unknown subcommand exits %d, want %d", code, exitUsage)
 	}
 	if !strings.Contains(out.String(), "usage") {
@@ -213,4 +214,65 @@ func TestServeExitCodeForSignals(t *testing.T) {
 		}
 		cancel()
 	}
+}
+
+// blockingDrain wraps the real transport with a drain that blocks until the
+// test releases it, then lets the real teardown run so no goroutine outlives
+// the test.
+type blockingDrain struct {
+	app.HostTransport
+	blocked chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingDrain) Drain(ctx context.Context, force bool) error {
+	close(b.blocked)
+	<-b.release
+	if derr := b.HostTransport.Drain(ctx, force); derr != nil {
+		return errcode.Wrap(errcode.Internal, "drain the wrapped host transport", derr)
+	}
+	return nil
+}
+
+// TestSecondSignalDuringDrainExitsWithoutWaiting pins that a second stop
+// signal ends the wait for a drain that has no deadline: the process exits at
+// once with the second signal's code, and the operating system releases the
+// lock when it dies.
+func TestSecondSignalDuringDrainExitsWithoutWaiting(t *testing.T) {
+	t.Parallel()
+	dir := serveDir(t)
+	cfg := config.Config{DataDir: dir}
+	ctx, cancel := context.WithCancel(t.Context())
+	ready := make(chan struct{})
+	blocked := make(chan struct{})
+	release := make(chan struct{})
+	sigs := make(chan os.Signal, 2)
+	results := startServe(t, ctx, cfg, serveOpts{
+		ready: ready,
+		sigs:  sigs,
+		wrapTransport: func(tr app.HostTransport) app.HostTransport {
+			return &blockingDrain{HostTransport: tr, blocked: blocked, release: release}
+		},
+	})
+	<-ready
+
+	// The first signal starts the drain; the wrapped transport blocks it.
+	sigs <- syscall.SIGTERM
+	<-blocked
+
+	// The second signal must return at once with its own code, while the
+	// drain is still blocked.
+	sigs <- syscall.SIGINT
+	res := <-results
+	if res.code != exitInterrupted {
+		t.Fatalf("serve exits %d on the second signal, want %d", res.code, exitInterrupted)
+	}
+	if res.err != nil {
+		t.Fatalf("serve on the second signal reports %v", res.err)
+	}
+
+	// Release the drain so the real teardown runs and the host's base
+	// context ends with the task context; no goroutine outlives the test.
+	close(release)
+	cancel()
 }

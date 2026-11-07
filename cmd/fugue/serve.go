@@ -35,6 +35,9 @@ type serveOpts struct {
 	// handlers. Tests inject a channel so parallel tests cannot hear each
 	// other's process-wide signals.
 	sigs <-chan os.Signal
+	// wrapTransport, when not nil, wraps the server as the host's drain
+	// transport. The tests wrap the real drain with a blocking one.
+	wrapTransport func(app.HostTransport) app.HostTransport
 }
 
 // RunServe runs the foreground host until its context is canceled or a
@@ -72,9 +75,13 @@ func serve(ctx context.Context, out io.Writer, cfg config.Config, version string
 	srv := hostapi.NewServer(hostapi.ServerConfig{
 		Socket:  sock,
 		DataDir: cfg.DataDir,
-		IDs:     ids.NewUUIDv7(clock.Real{}, ids.NewDeterministic("conn")),
+		IDs:     ids.NewUUIDv7(clock.Real{}, ids.CryptoRandom{}),
 		HostUID: int64(os.Getuid()),
 	})
+	transport := app.HostTransport(srv)
+	if opts.wrapTransport != nil {
+		transport = opts.wrapTransport(srv)
+	}
 	hp, err := app.StartHost(ctx, &app.HostDeps{
 		DataDir: cfg.DataDir,
 		Config: app.HostConfig{
@@ -87,8 +94,8 @@ func serve(ctx context.Context, out io.Writer, cfg config.Config, version string
 			DrainTimeout: 0,
 		},
 		Clock:     clock.Real{},
-		IDs:       ids.NewUUIDv7(clock.Real{}, ids.NewDeterministic("host")),
-		Transport: srv,
+		IDs:       ids.NewUUIDv7(clock.Real{}, ids.CryptoRandom{}),
+		Transport: transport,
 	})
 	if err != nil {
 		return exitFailure, errors.Join(startupErr(err, "open the host store"), teardownSocket(sock))
@@ -102,7 +109,14 @@ func serve(ctx context.Context, out io.Writer, cfg config.Config, version string
 	if werr := say(out, "fugue host serving at %s", sock.Path); werr != nil {
 		slog.Warn("write the serving line", "err", werr)
 	}
+	return runUntilStopped(ctx, hp, sigs), nil
+}
 
+// runUntilStopped serves until the context is canceled or a signal arrives,
+// then stops the host and returns the exit code. The signal path is the same
+// beginDrain entry the Shutdown RPC and the idle grace use; the drain closes
+// the transport, then the store and the lock last.
+func runUntilStopped(ctx context.Context, hp *app.HostProcess, sigs <-chan os.Signal) int {
 	var reason string
 	var code int
 	select {
@@ -111,15 +125,23 @@ func serve(ctx context.Context, out io.Writer, cfg config.Config, version string
 	case <-ctx.Done():
 		reason, code = "context canceled", exitOK
 	}
-	// The signal path is the same beginDrain entry the Shutdown RPC and the
-	// idle grace use; the drain closes the transport, then the store and the
-	// lock last.
 	hp.Stop(reason)
-	<-hp.DrainDone()
+	select {
+	case <-hp.DrainDone():
+	case sig := <-sigs:
+		// With DrainTimeout 0 the drain has no deadline, so a second stop
+		// signal must not queue up unheard: the wait ends and the process
+		// exits with the second signal's code. The operating system releases
+		// the data-directory lock when the process dies and the next start
+		// replaces the stale socket and host.json.
+		_, sigCode := exitForSignal(sig)
+		slog.Warn("second stop signal; ending the drain wait", "signal", sig.String())
+		return sigCode
+	}
 	if err := hp.Close(); err != nil {
 		slog.Error("close the fugue host after drain", "err", err)
 	}
-	return code, nil
+	return code
 }
 
 // exitForSignal maps a caught signal to the stop reason and the exit code

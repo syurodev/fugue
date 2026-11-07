@@ -83,6 +83,7 @@ Ordinary Go tests that read the package graph with `go list -deps -json` and the
 | `TestRoadmapEvidence` | Every test name in the Evidence column of a `Done` row in `docs/roadmap.md` exists in code and is not excluded from CI by a build tag |
 | `TestFileSize` | Non-test files at most 500 lines; test files at most 800 lines; exceptions only through the ratchet |
 | `TestNoPlaceholderCode` | No function that only returns `nil, nil`, `errors.New("not implemented")` or has an empty body, except no-op interface implementations named `Nop*` |
+| `TestNewDeterministicIsTestOnly` | `ids.NewDeterministic` appears only in test files; production uses `ids.CryptoRandom` (the deterministic stream is not random and must never feed a key) |
 
 ## 6. Tests
 
