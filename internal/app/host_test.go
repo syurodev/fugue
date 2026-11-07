@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -97,17 +98,19 @@ func newRuntime(t *testing.T, cfg HostConfig, clk *clock.Fake, drain DrainFunc) 
 	}
 	drained := make(chan struct{})
 	rt := &HostRuntime{
-		cfg:     cfg,
-		started: clk.Now(),
-		clk:     clk,
-		leases:  map[string]ClientKind{},
-		drained: drained,
+		cfg:      cfg,
+		started:  clk.Now(),
+		clk:      clk,
+		leases:   map[string]ClientKind{},
+		drained:  drained,
+		graceArm: make(chan graceArming),
 	}
 	ctx := t.Context()
 	rt.goTask = func(name string, fn func(context.Context) error) *supervise.Task {
 		return supervise.Go(ctx, name, fn)
 	}
 	rt.drain = drain
+	rt.startGraceLoop()
 	return rt, drained
 }
 
@@ -549,5 +552,46 @@ func TestStaleGraceFireDoesNotDrain(t *testing.T) {
 	case reason := <-liveDrains:
 		t.Fatalf("an extra drain started with reason %q", reason)
 	default:
+	}
+}
+
+// TestGraceRearmDoesNotGrowTasks pins the bounded task set: many lease cycles
+// re-arm the grace without spawning a new supervised task each time, so the
+// host process holds only the one long-lived grace loop.
+func TestGraceRearmDoesNotGrowTasks(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Unix(0, 0))
+	dir := t.TempDir()
+	deps := testHostDeps(dir, clk, newScriptedTransport())
+	deps.Config.IdleGrace = 10 * time.Second
+	hp, err := StartHost(t.Context(), deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := hp.Close(); err != nil {
+			t.Errorf("close the host: %v", err)
+		}
+	})
+	rt := hp.Runtime()
+	for i := 0; i < 50; i++ {
+		id := strconv.Itoa(i)
+		if err := rt.LeaseAcquired(t.Context(), id, KindCLI); err != nil {
+			t.Fatalf("lease %d = %v", i, err)
+		}
+		rt.LeaseReleased(t.Context(), id)
+	}
+	hp.tasksMu.Lock()
+	tasks := append([]*supervise.Task(nil), hp.tasks...)
+	hp.tasksMu.Unlock()
+	if len(tasks) != 1 {
+		names := make([]string, 0, len(tasks))
+		for _, task := range tasks {
+			names = append(names, task.Name())
+		}
+		t.Fatalf("supervised tasks after 50 lease cycles = %d (%v), want only the grace loop", len(tasks), names)
+	}
+	if name := tasks[0].Name(); name != "app.host-grace" {
+		t.Fatalf("the surviving task is %q, want app.host-grace", name)
 	}
 }

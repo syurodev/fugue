@@ -142,15 +142,24 @@ type HostRuntime struct {
 	leases   map[string]ClientKind
 	draining bool
 	// graceTimer and disarm are the idle-grace timer and its stop channel;
-	// both are nil while no grace goroutine is live.
+	// both are nil while no grace arming is live. graceArm feeds the single
+	// long-lived grace loop that StartHost starts.
 	graceTimer clock.Timer
 	disarm     chan struct{}
+	graceArm   chan graceArming
 
 	drainOnce sync.Once
 	drained   chan struct{}
 }
 
 var _ Backend = (*HostRuntime)(nil)
+
+// graceArming is one armed grace timer handed to the grace loop together with
+// its stop channel.
+type graceArming struct {
+	timer  clock.Timer
+	disarm chan struct{}
+}
 
 func newHostRuntime(cfg HostConfig, inc storage.HostIncarnation, clk clock.Clock) *HostRuntime {
 	return &HostRuntime{
@@ -160,6 +169,42 @@ func newHostRuntime(cfg HostConfig, inc storage.HostIncarnation, clk clock.Clock
 		clk:         clk,
 		leases:      map[string]ClientKind{},
 		drained:     make(chan struct{}),
+		graceArm:    make(chan graceArming),
+	}
+}
+
+// startGraceLoop starts the one long-lived grace goroutine. Arming never
+// spawns a task: the loop returns to its receive after every fire or disarm,
+// so a host that cycles leases holds exactly one grace task for its life.
+func (rt *HostRuntime) startGraceLoop() {
+	if rt.goTask == nil {
+		return
+	}
+	rt.goTask("app.host-grace", rt.graceLoop)
+}
+
+// graceLoop takes armed grace timers and waits for their fire, their disarm
+// or the host's shutdown. The arm send from LeaseReleased blocks until the
+// loop is back at its receive, which it always reaches after a fire or a
+// disarm, so no arming is lost.
+func (rt *HostRuntime) graceLoop(ctx context.Context) error {
+	// Cancellation is the loop's normal stop: Close cancels the host's base
+	// context, so ending by ctx.Done is a clean stop, not a failure.
+	for {
+		select {
+		case <-ctx.Done():
+			rt.disarmGraceLocked()
+			return nil
+		case arm := <-rt.graceArm:
+			select {
+			case <-ctx.Done():
+				rt.disarmGraceLocked()
+				return nil
+			case <-arm.disarm:
+			case <-arm.timer.C():
+				rt.fireGrace(arm.timer)
+			}
+		}
 	}
 }
 
@@ -238,26 +283,20 @@ func (rt *HostRuntime) LeaseReleased(_ context.Context, connID string) {
 		rt.mu.Unlock()
 		return
 	}
-	// The timer and the stop channel are created under the mutex; the
-	// goroutine starts outside it.
+	// The timer and the stop channel are created under the mutex; the hand-off
+	// to the grace loop happens outside it. The send blocks until the loop is
+	// back at its receive — it always gets there after the previous fire or
+	// disarm, so no arming is dropped.
 	timer := rt.clk.NewTimer(rt.cfg.IdleGrace)
 	disarm := make(chan struct{}, 1)
 	rt.graceTimer = timer
 	rt.disarm = disarm
-	goTask := rt.goTask
+	arm := graceArming{timer: timer, disarm: disarm}
 	rt.mu.Unlock()
-	if goTask == nil {
+	if rt.graceArm == nil {
 		return
 	}
-	goTask("app.host-grace", func(ctx context.Context) error {
-		select {
-		case <-timer.C():
-			rt.fireGrace(timer)
-		case <-disarm:
-		case <-ctx.Done():
-		}
-		return nil
-	})
+	rt.graceArm <- arm
 }
 
 // fireGrace is the grace timer's fire path: it re-checks under the mutex that
@@ -432,6 +471,7 @@ func StartHost(ctx context.Context, deps *HostDeps) (*HostProcess, error) {
 		return task
 	}
 	hp.rt.drain = hp.runDrain
+	hp.rt.startGraceLoop()
 	return hp, nil
 }
 
