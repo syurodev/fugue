@@ -504,6 +504,20 @@ func assertStaleFire(t *testing.T, rt *HostRuntime, armed clock.Timer, drains ch
 	}
 }
 
+// awaitDrain waits for the drain a test started itself; the drain reports
+// from its own goroutine, so a non-blocking read would race it.
+func awaitDrain(t *testing.T, drains chan string, want string) {
+	t.Helper()
+	select {
+	case reason := <-drains:
+		if reason != want {
+			t.Fatalf("drain reason = %q, want %q", reason, want)
+		}
+	case <-t.Context().Done():
+		t.Fatalf("the %s drain never started", want)
+	}
+}
+
 // TestStaleGraceFireDoesNotDrain pins the grace fire path: a fire only drains
 // when it comes from the timer that is still armed, no lease is held and the
 // runtime is not already draining.
@@ -540,6 +554,9 @@ func TestStaleGraceFireDoesNotDrain(t *testing.T) {
 	armed := rt.graceTimer
 	rt.mu.Unlock()
 	rt.beginDrain(false, "shutdown")
+	// The drain started above reports on its own goroutine; consume it first so
+	// the stale-fire check below only sees drains the fire itself would start.
+	awaitDrain(t, drains, "shutdown")
 	assertStaleFire(t, rt, armed, drains)
 
 	// The live fire still drains exactly once, with the grace reason, on a
@@ -559,9 +576,7 @@ func TestStaleGraceFireDoesNotDrain(t *testing.T) {
 	if !rt2.fireGrace(live) {
 		t.Fatal("the live grace fire did not drain")
 	}
-	if reason := <-liveDrains; reason != "idle_grace" {
-		t.Fatalf("drain reason = %q, want idle_grace", reason)
-	}
+	awaitDrain(t, liveDrains, "idle_grace")
 	select {
 	case reason := <-liveDrains:
 		t.Fatalf("an extra drain started with reason %q", reason)
