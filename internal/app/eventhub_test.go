@@ -403,12 +403,12 @@ func startSubscribe(ctx context.Context, hub *EventHub, p SubscribeParams) (<-ch
 	subs := make(chan *Subscription, 1)
 	errs := make(chan error, 1)
 	_ = supervise.Go(ctx, "test.subscribe", func(context.Context) error {
-		sub, err := hub.Subscribe(ctx, p)
-		if err != nil {
-			errs <- err
+		sub, serr := hub.Subscribe(ctx, p)
+		if serr == nil {
+			subs <- sub
 			return nil
 		}
-		subs <- sub
+		errs <- serr
 		return nil
 	})
 	return subs, errs
