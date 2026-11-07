@@ -18,7 +18,7 @@ func TestAdapterSealsInputAndSeveralPayloadsUnderOneSessionKey(t *testing.T) {
 	tr.ProtectedInput = []byte(`{"command":"accept"}`)
 	tr.Payloads = []coordinator.Payload{
 		{ID: "queue-decision", Kind: "queue_decision", Plaintext: []byte("queue decision plaintext")},
-		{ID: "context", Kind: "context", Plaintext: []byte("context plaintext")},
+		{ID: kindContext, Kind: kindContext, Plaintext: []byte("context plaintext")},
 		{ID: "tool-declarations", Kind: "tool_declarations", Plaintext: []byte("tool declarations plaintext")},
 	}
 	res, err := NewCoordinatorStore(s).Append(t.Context(), tr)

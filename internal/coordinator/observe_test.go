@@ -204,49 +204,46 @@ func TestObservationFromEarlierIncarnationIsFenced(t *testing.T) {
 func TestTerminalObservationReleasesSlot(t *testing.T) {
 	t.Parallel()
 
-	fakeClk := clock.NewFake(time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC))
-	idGen := ids.NewUUIDv7(fakeClk, ids.NewDeterministic("terminal-release-slot-test"))
+	// The executor holds the work until the test releases it, so the slot is
+	// genuinely held while the attempt is running. An executor that returned
+	// without reporting would have abandoned the attempt instead.
+	workReceived := make(chan struct{}, 1)
+	release := make(chan struct{})
+	exec := newFakeExecutor()
+	exec.onExec = func(w *Work, report func(*Observation)) {
+		workReceived <- struct{}{}
+		<-release
+		obs := makeModelResponseObservation(
+			w.Lease.SessionID, w.Lease.RunID, w.Lease.InvocationID, w.Lease.AttemptID,
+			"cmd-obs-term", w.Lease.AdmissionToken, w.Lease.OwnerIncarnation, w.Lease.ExecutorFence,
+		)
+		report(&obs)
+	}
 
+	committed := make(chan struct{}, 2)
 	store := newFakeStore()
 	setupDispatchedRun(store, 1)
-
-	exec := newFakeExecutor()
-	cfg := Config{
-		SessionID:        "s1",
-		OwnerIncarnation: 1,
-		WorkerCapacity:   1,
-		Store:            store,
-		Executor:         exec,
-		Clock:            fakeClk,
-		IDs:              idGen,
-	}
-
-	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
-	t.Cleanup(cancel)
-	sess, err := Start(ctx, &cfg)
-	if err != nil {
-		t.Fatalf("start session failed: %v", err)
-	}
-	defer sess.Stop()
+	ctx, sess := startTestSessionOnCommit(t, store, exec, "terminal-release-slot-test", func(string, *kernel.State) {
+		committed <- struct{}{}
+	})
 
 	req := makeModelDispatchRequest("r1", "m1", "a1", "cmd-disp-term")
-	_, err = sess.Submit(ctx, &req)
-	if err != nil {
+	if _, err := sess.Submit(ctx, &req); err != nil {
 		t.Fatalf("dispatch failed: %v", err)
 	}
+	waitSignal(t, ctx, workReceived, "work received")
 
-	// Slot should be held at capacity 1
-	_, canReserve := reserveSlot(sess.slots)
-	if canReserve {
+	// Slot should be held at capacity 1 while the executor is running.
+	if _, canReserve := reserveSlot(sess.slots); canReserve {
 		t.Fatal("expected slot to be held after dispatch")
 	}
 
-	// Submit terminal observation
-	obs := makeModelResponseObservation("s1", "r1", "m1", "a1", "cmd-obs-term", 1, 1, 5)
-	_, err = sess.SubmitObservation(ctx, &obs)
-	if err != nil {
-		t.Fatalf("terminal observation failed: %v", err)
-	}
+	// The executor finishes with the terminal observation; its commit completes
+	// the slot and finishes the run. Two deliveries arrive: the dispatch's own
+	// notification and the observation's.
+	release <- struct{}{}
+	waitSignal(t, ctx, committed, "dispatch commit notification")
+	waitSignal(t, ctx, committed, "terminal observation commit")
 
 	// Slot should now be released
 	ref, canReserveAfter := reserveSlot(sess.slots)
@@ -257,11 +254,35 @@ func TestTerminalObservationReleasesSlot(t *testing.T) {
 		t.Fatalf("release: %v", err)
 	}
 
-	activeRun := sess.admission.ActiveRunID
-
-	if activeRun != "" {
+	if activeRun := sess.admission.ActiveRunID; activeRun != "" {
 		t.Fatalf("expected active run cleared after finish, got %s", activeRun)
 	}
+}
+
+// startTestSessionOnCommit starts a single-capacity session whose hook signals
+// every applied commit.
+func startTestSessionOnCommit(t *testing.T, store *fakeStore, exec *fakeExecutor, seed string, onCommitted func(string, *kernel.State)) (context.Context, *Session) {
+	t.Helper()
+	fakeClk := clock.NewFake(time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC))
+	idGen := ids.NewUUIDv7(fakeClk, ids.NewDeterministic(seed))
+	cfg := Config{
+		SessionID:        "s1",
+		OwnerIncarnation: 1,
+		WorkerCapacity:   1,
+		Store:            store,
+		Executor:         exec,
+		Clock:            fakeClk,
+		IDs:              idGen,
+		OnCommitted:      onCommitted,
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
+	t.Cleanup(cancel)
+	sess, err := Start(ctx, &cfg)
+	if err != nil {
+		t.Fatalf("start session failed: %v", err)
+	}
+	t.Cleanup(sess.Stop)
+	return ctx, sess
 }
 
 func TestDuplicateObservationAppendsOnce(t *testing.T) {
@@ -465,6 +486,7 @@ func TestWorkerReportsViaCallback(t *testing.T) {
 		done <- struct{}{}
 	}
 
+	committed := make(chan struct{}, 2)
 	cfg := Config{
 		SessionID:        "s1",
 		OwnerIncarnation: 1,
@@ -473,6 +495,9 @@ func TestWorkerReportsViaCallback(t *testing.T) {
 		Executor:         exec,
 		Clock:            fakeClk,
 		IDs:              idGen,
+		OnCommitted: func(string, *kernel.State) {
+			committed <- struct{}{}
+		},
 	}
 
 	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
@@ -482,11 +507,6 @@ func TestWorkerReportsViaCallback(t *testing.T) {
 		t.Fatalf("start session failed: %v", err)
 	}
 	defer sess.Stop()
-
-	committed := make(chan struct{}, 2)
-	sess.onCommitted = func() {
-		committed <- struct{}{}
-	}
 
 	req := makeModelDispatchRequest("r1", "m1", "a1", "cmd-disp-cb")
 	_, err = sess.Submit(ctx, &req)

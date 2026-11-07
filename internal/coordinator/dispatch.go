@@ -182,7 +182,7 @@ func (s *Session) dispatchCommitted(
 	if dispatchEvt == nil {
 		s.releaseSlot(ctx, ref)
 		s.respond(sub, &Reply{Events: events, Duplicate: res.Duplicate, Receipt: res.Receipt}, nil)
-		s.notifyCommitted()
+		s.notifyCommitted(runID)
 		return
 	}
 
@@ -205,7 +205,7 @@ func (s *Session) dispatchCommitted(
 	s.attemptSlots[attemptKey{runID: runID, invocationID: prep.InvocationID, attemptID: prep.AttemptID}] = ref
 
 	s.respond(sub, &Reply{Events: events, Duplicate: res.Duplicate, Receipt: res.Receipt}, nil)
-	s.notifyCommitted()
+	s.notifyCommitted(runID)
 }
 
 func (s *Session) releaseSlot(ctx context.Context, ref string) {

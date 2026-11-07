@@ -349,3 +349,55 @@ func TestEvolveInvocationAndTimerEvents(t *testing.T) {
 		testToolRecoveryDispositions(t, &env)
 	})
 }
+
+// testPlanPurpose is the purpose every step plan in this file carries.
+const testPlanPurpose = "turn"
+
+// testPlanContextRef is the context reference the first plan names.
+const testPlanContextRef = "ctx-1"
+
+// testPlanModelRef is the model reference the first plan names.
+const testPlanModelRef = "faux-model"
+
+// TestModelInvocationKeepsPlanRefs pins that the folded invocation mirrors its
+// plan's model and context references (as ToolInvocation mirrors its plan), so
+// executors read them from the state without replaying the stream.
+func TestModelInvocationKeepsPlanRefs(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 11, 7, 9, 0, 0, 0, time.UTC)
+	plan := &ModelRequestPlannedEvent{
+		Envelope:              Envelope{RunID: "run-1", Sequence: 1, CommandID: "cmd-1", CausationID: "cmd-1", Origin: drvOriginSession, Timestamp: now},
+		InvocationID:          "m1",
+		Purpose:               testPlanPurpose,
+		FirstAttemptID:        "a1",
+		ModelRef:              testPlanModelRef,
+		ContextRef:            testPlanContextRef,
+		ToolDeclarationRefs:   nil,
+		EstimatedBudgetTokens: 0,
+	}
+
+	state := Evolve(NewState(), plan)
+	inv := state.ModelInvocations["m1"]
+	if inv == nil {
+		t.Fatal("the plan did not create the invocation")
+	}
+	if inv.ModelRef != testPlanModelRef || inv.ContextRef != testPlanContextRef {
+		t.Fatalf("invocation lost the plan refs: model %q context %q", inv.ModelRef, inv.ContextRef)
+	}
+
+	// A plan that replaces the invocation carries its own references.
+	replacement := *plan
+	replacement.Envelope.Sequence = 2
+	replacement.InvocationID = "m2"
+	replacement.ModelRef = "other-model"
+	replacement.ContextRef = "ctx-2"
+	state = Evolve(state, &replacement)
+	reinv := state.ModelInvocations["m2"]
+	if reinv == nil || reinv.ModelRef != "other-model" || reinv.ContextRef != "ctx-2" {
+		t.Fatalf("replacement invocation lost its own refs: %+v", reinv)
+	}
+	if state.ModelInvocations["m1"].ModelRef != testPlanModelRef {
+		t.Fatalf("the earlier invocation was mutated")
+	}
+}
