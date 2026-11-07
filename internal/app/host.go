@@ -139,24 +139,18 @@ type HostRuntime struct {
 	leases   map[string]ClientKind
 	draining bool
 	// graceTimer and disarm are the idle-grace timer and its stop channel;
-	// both are nil while no grace arming is live. graceArm feeds the single
-	// long-lived grace loop that StartHost starts.
+	// both are nil while no grace arming is live. graceWake wakes the single
+	// long-lived grace loop that StartHost starts; the loop reads the armed
+	// state under the mutex.
 	graceTimer clock.Timer
 	disarm     chan struct{}
-	graceArm   chan graceArming
+	graceWake  chan struct{}
 
 	drainOnce sync.Once
 	drained   chan struct{}
 }
 
 var _ Backend = (*HostRuntime)(nil)
-
-// graceArming is one armed grace timer handed to the grace loop together with
-// its stop channel.
-type graceArming struct {
-	timer  clock.Timer
-	disarm chan struct{}
-}
 
 func newHostRuntime(cfg HostConfig, inc storage.HostIncarnation, clk clock.Clock) *HostRuntime {
 	return &HostRuntime{
@@ -166,7 +160,7 @@ func newHostRuntime(cfg HostConfig, inc storage.HostIncarnation, clk clock.Clock
 		clk:         clk,
 		leases:      map[string]ClientKind{},
 		drained:     make(chan struct{}),
-		graceArm:    make(chan graceArming),
+		graceWake:   make(chan struct{}, 1),
 	}
 }
 
@@ -180,26 +174,41 @@ func (rt *HostRuntime) startGraceLoop() {
 	rt.goTask("app.host-grace", rt.graceLoop)
 }
 
-// graceLoop takes armed grace timers and waits for their fire, their disarm
-// or the host's shutdown. The arm send from LeaseReleased blocks until the
-// loop is back at its receive, which it always reaches after a fire or a
-// disarm, so no arming is lost.
+// graceLoop waits for an armed idle grace, its disarm or the host's shutdown.
+// It reads the armed state under the mutex after every wake: LeaseReleased
+// never blocks on the loop, so a dropped or late wake must not lose an
+// arming — the state lives only under the mutex, and the wake is just a
+// nudge.
 func (rt *HostRuntime) graceLoop(ctx context.Context) error {
 	// Cancellation is the loop's normal stop: Close cancels the host's base
 	// context, so ending by ctx.Done is a clean stop, not a failure.
 	for {
 		select {
 		case <-ctx.Done():
+			rt.mu.Lock()
 			rt.disarmGraceLocked()
+			rt.mu.Unlock()
 			return nil
-		case arm := <-rt.graceArm:
+		case <-rt.graceWake:
+			rt.mu.Lock()
+			timer, disarm := rt.graceTimer, rt.disarm
+			rt.mu.Unlock()
+			if timer == nil {
+				continue
+			}
 			select {
 			case <-ctx.Done():
+				rt.mu.Lock()
 				rt.disarmGraceLocked()
+				rt.mu.Unlock()
 				return nil
-			case <-arm.disarm:
-			case <-arm.timer.C():
-				rt.fireGrace(arm.timer)
+			case <-disarm:
+			case <-timer.C():
+				rt.fireGrace(timer)
+			case <-rt.graceWake:
+				// A newer arming superseded this one; the next pass re-reads
+				// the armed state.
+				timer.Stop()
 			}
 		}
 	}
@@ -284,34 +293,42 @@ func (rt *HostRuntime) LeaseReleased(_ context.Context, connID string) {
 		rt.mu.Unlock()
 		return
 	}
-	// The timer and the stop channel are created under the mutex; the hand-off
-	// to the grace loop happens outside it. The send blocks until the loop is
-	// back at its receive — it always gets there after the previous fire or
-	// disarm, so no arming is dropped.
+	// The timer and the stop channel are created under the mutex; the wake is
+	// a non-blocking nudge after unlocking. A dropped wake can only happen
+	// while the loop is already waiting on this arming, and every pass
+	// re-reads the armed state under the mutex.
 	timer := rt.clk.NewTimer(rt.cfg.IdleGrace)
 	disarm := make(chan struct{}, 1)
 	rt.graceTimer = timer
 	rt.disarm = disarm
-	arm := graceArming{timer: timer, disarm: disarm}
 	rt.mu.Unlock()
-	if rt.graceArm == nil {
+	if rt.graceWake == nil {
 		return
 	}
-	rt.graceArm <- arm
+	select {
+	case rt.graceWake <- struct{}{}:
+	default:
+	}
 }
 
-// fireGrace is the grace timer's fire path: it re-checks under the mutex that
-// this timer is still the armed one, that no lease is held and that the
-// runtime is not already draining — a stale fire does nothing.
+// fireGrace is the grace timer's fire path: the staleness check — this timer
+// is still the armed one, no lease is held, the runtime is not draining — and
+// the draining transition share one critical section, so a lease that wins
+// the race against the fire makes the fire stale instead of riding a draining
+// host.
 func (rt *HostRuntime) fireGrace(timer clock.Timer) bool {
 	rt.mu.Lock()
-	stale := timer != rt.graceTimer || rt.draining || len(rt.leases) > 0
-	rt.mu.Unlock()
-	if stale {
+	if timer != rt.graceTimer || rt.draining || len(rt.leases) > 0 {
+		rt.mu.Unlock()
 		return false
 	}
-	rt.beginDrain(false, "idle_grace")
-	return true
+	spawn := rt.beginDrainLocked(false, "idle_grace")
+	rt.mu.Unlock()
+	if spawn != nil {
+		spawn()
+		return true
+	}
+	return false
 }
 
 // Status snapshots the host's versions, incarnation and lease counts.
@@ -353,27 +370,40 @@ func (rt *HostRuntime) Shutdown(_ context.Context, cmd ShutdownCommand) error {
 }
 
 // beginDrain is the one drain entry: the Shutdown RPC, the idle grace and the
-// signal path all converge here. It marks the runtime draining, stops the
-// grace, and spawns the drain outside the mutex — the drain closes
+// signal path all converge here. The draining transition happens under the
+// mutex and the drain goroutine starts after unlocking — the drain closes
 // connections whose close hooks re-enter LeaseReleased.
 func (rt *HostRuntime) beginDrain(force bool, reason string) {
 	rt.mu.Lock()
+	spawn := rt.beginDrainLocked(force, reason)
+	rt.mu.Unlock()
+	if spawn != nil {
+		spawn()
+	}
+}
+
+// beginDrainLocked marks the runtime draining and stops the grace while the
+// mutex is held, then returns the goroutine start for the caller to run after
+// unlocking. It returns nil when a drain is already under way or when nothing
+// spawns (bare runtimes in tests). fireGrace shares this critical section:
+// the staleness check and this transition are one decision, so a lease
+// acquired in between wins the host and the fire becomes stale instead.
+func (rt *HostRuntime) beginDrainLocked(force bool, reason string) func() {
 	if rt.draining {
-		rt.mu.Unlock()
-		return
+		return nil
 	}
 	rt.draining = true
 	rt.disarmGraceLocked()
-	goTask := rt.goTask
-	rt.mu.Unlock()
-	slog.Info("host drain started", "reason", reason)
-	if goTask == nil || rt.drain == nil {
-		return
+	if rt.goTask == nil || rt.drain == nil {
+		return nil
 	}
-	goTask("app.host-drain", func(ctx context.Context) error {
-		defer rt.closeDrained()
-		return rt.drain(ctx, force, reason)
-	})
+	return func() {
+		slog.Info("host drain started", "reason", reason)
+		rt.goTask("app.host-drain", func(ctx context.Context) error {
+			defer rt.closeDrained()
+			return rt.drain(ctx, force, reason)
+		})
+	}
 }
 
 // disarmGraceLocked stops a pending grace timer, if any; the caller holds the

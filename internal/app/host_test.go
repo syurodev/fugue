@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"sync"
@@ -98,12 +99,12 @@ func newRuntime(t *testing.T, cfg HostConfig, clk *clock.Fake, drain DrainFunc) 
 	}
 	drained := make(chan struct{})
 	rt := &HostRuntime{
-		cfg:      cfg,
-		started:  clk.Now(),
-		clk:      clk,
-		leases:   map[string]ClientKind{},
-		drained:  drained,
-		graceArm: make(chan graceArming),
+		cfg:       cfg,
+		started:   clk.Now(),
+		clk:       clk,
+		leases:    map[string]ClientKind{},
+		drained:   drained,
+		graceWake: make(chan struct{}, 1),
 	}
 	ctx := t.Context()
 	rt.goTask = func(name string, fn func(context.Context) error) *supervise.Task {
@@ -606,5 +607,136 @@ func TestGraceRearmDoesNotGrowTasks(t *testing.T) {
 	}
 	if name := tasks[0].Name(); name != "app.host-grace" {
 		t.Fatalf("the surviving task is %q, want app.host-grace", name)
+	}
+}
+
+// TestGraceFireRacingLeaseAcquiredNeverDrainsWithALease pins the fire path's
+// atomicity: the staleness check and the draining transition happen in one
+// critical section, so a lease that wins the race means no drain, and a drain
+// that wins the race means the acquire was rejected.
+func TestGraceFireRacingLeaseAcquiredNeverDrainsWithALease(t *testing.T) {
+	t.Parallel()
+	cfg := testHostConfig()
+	cfg.IdleGrace = 10 * time.Second
+	for i := range 100 {
+		clk := clock.NewFake(time.Unix(0, 0))
+		drains := make(chan string, 1)
+		rt, _ := newRuntime(t, cfg, clk, func(_ context.Context, _ bool, reason string) error {
+			drains <- reason
+			return nil
+		})
+		if err := rt.LeaseAcquired(t.Context(), "seed", KindCLI); err != nil {
+			t.Fatal(err)
+		}
+		rt.LeaseReleased(t.Context(), "seed")
+		rt.mu.Lock()
+		timer := rt.graceTimer
+		rt.mu.Unlock()
+
+		fireDone := make(chan bool, 1)
+		acqErr := make(chan error, 1)
+		supervise.Go(t.Context(), "test.fire", func(context.Context) error {
+			fireDone <- rt.fireGrace(timer)
+			return nil
+		})
+		supervise.Go(t.Context(), "test.acquire", func(ctx context.Context) error {
+			err := rt.LeaseAcquired(ctx, "racer", KindCLI)
+			if err != nil {
+				err = errcode.Wrap(errcode.Internal, "the racing acquire failed", err)
+			}
+			acqErr <- err
+			return nil
+		})
+		fireWon := <-fireDone
+		acquireErr := <-acqErr
+		acquireGranted := acquireErr == nil
+
+		rt.mu.Lock()
+		draining := rt.draining
+		rt.mu.Unlock()
+		if draining && acquireGranted {
+			t.Fatalf("iteration %d: the host drains while a racing lease was granted (fire won=%v)", i, fireWon)
+		}
+		if acquireGranted {
+			rt.LeaseReleased(t.Context(), "racer")
+		}
+	}
+}
+
+// TestLeaseReleasedNeverBlocksAfterClose pins the wake-based hand-off: after
+// Close cancelled the base context the grace loop is gone, and a connection
+// that closes afterwards must not block in LeaseReleased. Completion is
+// guarded by a channel — a regression hangs and fails the package timeout,
+// never a sleep.
+func TestLeaseReleasedNeverBlocksAfterClose(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Unix(0, 0))
+	deps := testHostDeps(t.TempDir(), clk, newScriptedTransport())
+	deps.Config.IdleGrace = 10 * time.Second
+	hp, err := StartHost(t.Context(), deps)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rt := hp.Runtime()
+	if err := rt.LeaseAcquired(t.Context(), "c1", KindCLI); err != nil {
+		t.Fatal(err)
+	}
+	if err := hp.Close(); err != nil {
+		t.Fatalf("close the host = %v", err)
+	}
+	done := make(chan struct{})
+	supervise.Go(t.Context(), "test.release", func(context.Context) error {
+		rt.LeaseReleased(t.Context(), "c1")
+		rt.LeaseReleased(t.Context(), "c1")
+		close(done)
+		return nil
+	})
+	<-done
+}
+
+// TestConcurrentReleasesDoNotBlock pins that concurrent releases never block
+// on the grace hand-off, across repeated armings: every release returns while
+// the test is still in the loop, and the final state is one armed grace.
+func TestConcurrentReleasesDoNotBlock(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Unix(0, 0))
+	cfg := testHostConfig()
+	cfg.IdleGrace = 10 * time.Second
+	rt, _ := newRuntime(t, cfg, clk, nil)
+
+	const rounds = 4
+	const leases = 16
+	for round := range rounds {
+		for i := range leases {
+			if err := rt.LeaseAcquired(t.Context(), fmt.Sprintf("r%d-c%d", round, i), KindCLI); err != nil {
+				t.Fatalf("round %d lease %d = %v", round, i, err)
+			}
+		}
+		var wg sync.WaitGroup
+		done := make(chan struct{})
+		wg.Add(leases)
+		for i := range leases {
+			id := fmt.Sprintf("r%d-c%d", round, i)
+			supervise.Go(t.Context(), "test.release", func(context.Context) error {
+				rt.LeaseReleased(t.Context(), id)
+				wg.Done()
+				return nil
+			})
+		}
+		go func() {
+			wg.Wait()
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-t.Context().Done():
+			t.Fatalf("round %d: a concurrent release never returned", round)
+		}
+	}
+	rt.mu.Lock()
+	armed := rt.graceTimer != nil
+	rt.mu.Unlock()
+	if !armed {
+		t.Fatal("the final release did not arm the grace")
 	}
 }
