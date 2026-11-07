@@ -28,30 +28,26 @@ func TestMain(m *testing.M) {
 }
 
 func runFakeVendor(mode string) {
-	switch mode {
-	case "protocol-interrupt":
-		runProtocolInterrupt()
-	case "ignore-sigint":
-		runIgnoreSigint()
-	case "ignore-sigterm":
-		runIgnoreSigterm()
-	case "frame-too-large":
-		runFrameTooLarge()
-	case "flood-stderr":
-		runFloodStderr()
-	case "exit-on-eof":
-		runExitOnEOF()
-	case "burst-and-exit":
-		runBurstAndExit()
-	case "group-child-worker":
-		runGroupChildWorker()
-	case "group-child-survivor":
-		runGroupChildSurvivor()
-	case "normal", "sleeper":
-		runNormal()
-	default:
+	modes := map[string]func(){
+		"protocol-interrupt":   runProtocolInterrupt,
+		"ignore-sigint":        runIgnoreSigint,
+		"ignore-sigterm":       runIgnoreSigterm,
+		"frame-too-large":      runFrameTooLarge,
+		"flood-stderr":         runFloodStderr,
+		"exit-on-eof":          runExitOnEOF,
+		"burst-and-exit":       runBurstAndExit,
+		"group-child-worker":   runGroupChildWorker,
+		"group-child-survivor": runGroupChildSurvivor,
+		fakeVendorModeNormal:   runNormal,
+	}
+	for name, fn := range unixModes() {
+		modes[name] = fn
+	}
+	run, ok := modes[mode]
+	if !ok {
 		os.Exit(3)
 	}
+	run()
 }
 
 func writeQuietly(w io.Writer, s string) {
@@ -106,7 +102,7 @@ func runFloodStderr() {
 		}
 	}
 	writeQuietly(os.Stdout, "FLOOD_DONE\n")
-	select {}
+	blockForever()
 }
 
 func runExitOnEOF() {
@@ -172,7 +168,7 @@ func runGroupChildSurvivor() {
 
 func runNormal() {
 	writeQuietly(os.Stdout, "READY\n")
-	select {}
+	blockForever()
 }
 
 func fakeVendorExe(t *testing.T) string {

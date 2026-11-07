@@ -25,7 +25,9 @@ type Process struct {
 	onEscalation func(string)
 
 	stdin      io.WriteCloser
+	stdoutPipe *outputPipe
 	stdoutR    *LineReader
+	stderrR    *os.File
 	stderrRing *RingBuffer
 
 	stderrTask *supervise.Task
@@ -77,6 +79,7 @@ func Spawn(ctx context.Context, opts *Options) (*Process, error) {
 	closeQuietly(pipes.stderrW)
 
 	p := newProcess(cmd, clk, opts, pipes.stdin, pipes.stdoutR)
+	p.stderrR = pipes.stderrR
 	startStderrDrain(ctx, p, pipes.stderrR)
 	startWaitTask(ctx, p)
 	return p, nil
@@ -139,10 +142,11 @@ func newProcess(
 	clk clock.Clock,
 	opts *Options,
 	stdin io.WriteCloser,
-	stdout io.ReadCloser,
+	stdout *os.File,
 ) *Process {
 	ring := NewRingBuffer(DefaultStderrRingCapacity)
-	lineReader := NewLineReader(stdout, MaxFrameSize)
+	out := newOutputPipe(stdout)
+	lineReader := NewLineReader(out, MaxFrameSize)
 
 	return &Process{
 		cmd:          cmd,
@@ -150,6 +154,7 @@ func newProcess(
 		interrupt:    opts.Interrupt,
 		onEscalation: opts.OnEscalation,
 		stdin:        stdin,
+		stdoutPipe:   out,
 		stdoutR:      lineReader,
 		stderrRing:   ring,
 		exitCh:       make(chan struct{}),
@@ -180,7 +185,7 @@ func drainStderrChunk(r io.Reader, ring *RingBuffer, buf []byte) (bool, error) {
 		}
 	}
 	if rErr != nil {
-		if errors.Is(rErr, io.EOF) {
+		if errors.Is(rErr, io.EOF) || errors.Is(rErr, os.ErrClosed) {
 			return true, nil
 		}
 		return false, fmt.Errorf("read stderr: %w", rErr)
