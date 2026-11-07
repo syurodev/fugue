@@ -714,9 +714,9 @@ func TestDurableOutOfOrderPublishResyncsSubscribers(t *testing.T) {
 	if _, err := hub.Publish("d", Event{Seq: 2, Type: "e2", Payload: []byte("e2")}); err != nil {
 		t.Fatal(err)
 	}
-	skipped, err := hub.Publish("d", Event{Seq: 1, Type: "e1", Payload: []byte("e1")})
-	if err != nil {
-		t.Fatalf("an out-of-order publish failed: %v", err)
+	skipped, perr := hub.Publish("d", Event{Seq: 1, Type: "e1", Payload: []byte("e1")})
+	if perr != nil {
+		t.Fatalf("an out-of-order publish failed: %v", perr)
 	}
 	if skipped.Seq != 0 {
 		t.Fatalf("the skipped event was fanned out: %+v", skipped)

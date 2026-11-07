@@ -211,23 +211,47 @@ func (h *EventHub) Publish(name string, ev Event) (Event, error) {
 		return Event{}, errcode.Wrap(errcode.Internal, "publish to the event topic "+name, ErrEventTopicInvalid)
 	}
 	if t.kind == topicEphemeral {
-		t.lastSeq++
-		ev.Seq = t.lastSeq
-		h.appendRingLocked(t, ev)
-	} else {
-		if ev.Seq == 0 || ev.Seq <= t.lastSeq {
-			slog.Warn("durable event publish out of order",
-				"topic", name, "sequence", ev.Seq, "last_published", t.lastSeq)
-			if ev.Seq > t.lastSeq {
-				t.lastSeq = ev.Seq
-			}
-			for _, s := range t.subs {
-				s.forceResync()
-			}
-			return Event{}, nil
-		}
+		return h.publishEphemeralLocked(t, ev)
+	}
+	return h.publishDurableLocked(name, t, ev)
+}
+
+// publishEphemeralLocked assigns the topic's next sequence and fans out; the
+// caller holds the hub mutex.
+func (h *EventHub) publishEphemeralLocked(t *eventTopic, ev Event) (Event, error) {
+	t.lastSeq++
+	ev.Seq = t.lastSeq
+	h.appendRingLocked(t, ev)
+	h.fanOutLocked(t, ev)
+	return ev, nil
+}
+
+// publishDurableLocked takes the owner's committed sequence and fans out, or
+// handles the out-of-order anomaly (see Publish); the caller holds the hub
+// mutex.
+func (h *EventHub) publishDurableLocked(name string, t *eventTopic, ev Event) (Event, error) {
+	if ev.Seq > 0 && ev.Seq > t.lastSeq {
+		t.lastSeq = ev.Seq
+		h.fanOutLocked(t, ev)
+		return ev, nil
+	}
+	// The owner's publish order regressed below the topic's last published
+	// sequence: its commits and its publishes have diverged, so live
+	// subscribers would carry a gap the hub can never fill.
+	slog.Warn("durable event publish out of order",
+		"topic", name, "sequence", ev.Seq, "last_published", t.lastSeq)
+	if ev.Seq > t.lastSeq {
 		t.lastSeq = ev.Seq
 	}
+	for _, s := range t.subs {
+		s.forceResync()
+	}
+	return Event{}, nil
+}
+
+// fanOutLocked offers one event to every live subscriber of the topic; the
+// caller holds the hub mutex.
+func (h *EventHub) fanOutLocked(t *eventTopic, ev Event) {
 	for _, s := range t.subs {
 		if kind := s.offer(ev); kind == offerCoalesced {
 			h.coalesce++
@@ -235,7 +259,6 @@ func (h *EventHub) Publish(name string, ev Event) (Event, error) {
 			h.dropped++
 		}
 	}
-	return ev, nil
 }
 
 // appendRingLocked adds ev to an ephemeral topic's catch-up ring, coalescing
