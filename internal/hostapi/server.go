@@ -122,6 +122,7 @@ type Server struct {
 	httpSrv   *http.Server
 	listener  *AcceptListener
 	serveTask *supervise.Task
+	inflight  sync.WaitGroup
 }
 
 // NewServer builds a server for the bound socket; Start serves it.
@@ -155,8 +156,16 @@ func (s *Server) Start(ctx context.Context, backend app.Backend) error {
 		OnClosed:        s.onConnClosed(ctx),
 		OnReject:        onRejectWarn,
 	})
-	mux := http.NewServeMux()
-	mux.Handle(hostv1connect.NewHostServiceHandler(&serviceHandler{backend: backend}))
+	handler := http.NewServeMux()
+	handler.Handle(hostv1connect.NewHostServiceHandler(&serviceHandler{backend: backend}))
+	// The in-flight wrapper lets the drain wait for handlers that are still
+	// running when the deadline force-closes their connections, so none of
+	// them can outlive the store the host closes after this drain.
+	mux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s.inflight.Add(1)
+		defer s.inflight.Done()
+		handler.ServeHTTP(w, r)
+	})
 	// Unencrypted HTTP/2 on the private socket (Q-24 A); http/1.1 stays
 	// enabled for plain clients.
 	var protos http.Protocols
@@ -243,12 +252,15 @@ func (s *Server) Drain(ctx context.Context, force bool) error {
 		}
 	} else if err := s.httpSrv.Shutdown(ctx); err != nil {
 		// Past the deadline Shutdown leaves active handlers running; Close
-		// ends their connections and cancels the serve context, so no handler
-		// outlives the store the host closes after this drain returns.
+		// ends their connections and cancels the serve context, which ends
+		// the handlers that honor their context.
 		closeErr := s.httpSrv.Close()
 		drainErr = errcode.Wrap(errcode.Internal,
 			"shut the host http server down", errors.Join(err, closeErr))
 	}
+	// Wait for the handlers that were still running, so none of them runs
+	// against the store the host closes after this drain returns.
+	s.inflight.Wait()
 	// Wait for the serve loop so no stdlib goroutine outlives the drain; a
 	// serve failure is part of the drain's outcome, joined with any shutdown
 	// failure above.

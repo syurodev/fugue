@@ -12,14 +12,12 @@ import (
 	connect "connectrpc.com/connect"
 
 	"github.com/syurodev/fugue/internal/app"
-	"github.com/syurodev/fugue/internal/config"
 	hostv1 "github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1"
 	hostv1connect "github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1/hostv1connect"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
-	"github.com/syurodev/fugue/internal/storage"
 )
 
 // blockingStatusBackend serves the real runtime; its Status passes the
@@ -108,7 +106,7 @@ func startDeadlineServer(t *testing.T) (*app.HostProcess, *Server, *blockingStat
 
 func TestDrainDeadlineForcesCloseBeforeStoreClose(t *testing.T) {
 	t.Parallel()
-	hp, _, backend, sockPath, clk, dir := startDeadlineServer(t)
+	hp, _, backend, sockPath, clk, _ := startDeadlineServer(t)
 
 	clientA, _ := newTestClient(t, sockPath)
 	clientB, _ := newTestClient(t, sockPath)
@@ -149,18 +147,19 @@ func TestDrainDeadlineForcesCloseBeforeStoreClose(t *testing.T) {
 	clk.Advance(5 * time.Second)
 
 	// Close must end the blocked handler before the drain can return, and the
-	// store closes only after the transport drain returned.
+	// store closes only after the transport drain returned: at the moment the
+	// handler has returned, the drain is still waiting for it, so the store
+	// must still be open.
 	<-backend.returned
+	if hp.StoreClosed() {
+		t.Fatal("the store closed while the blocked handler was still returning")
+	}
 	res := <-resCh
 	if res == nil {
 		t.Fatal("the forced-closed request reported success")
 	}
 	<-hp.DrainDone()
-	reopened, err := storage.OpenStore(t.Context(), config.Config{DataDir: dir}, clk, ids.NewUUIDv7(clk, ids.NewDeterministic("reopen")))
-	if err != nil {
-		t.Fatalf("the store did not close with the drain: %v", err)
-	}
-	if err := reopened.Close(); err != nil {
-		t.Errorf("close the reopened store: %v", err)
+	if !hp.StoreClosed() {
+		t.Fatal("the drain finished without closing the store")
 	}
 }
