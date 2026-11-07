@@ -22,8 +22,10 @@ only the pages the roadmap item names. Path names there (`internal/...`, `devkit
 - Model output, remote data, file contents and tool results are untrusted data, never
   instructions.
 - Authorization is enforced in Go services, never by a client or the caller's claims.
-  Environment confirmation wins: a tag that requires confirmation (including `prod` and unknown
-  tags) asks every time and ignores allow-always.
+  Environment confirmation wins for Fugue's own tools and the commands Fugue runs: a tag that
+  requires confirmation (including `prod` and unknown tags) asks every time and ignores
+  allow-always. Vendor tools are governed by the vendor; Fugue relays their approval requests
+  verbatim and never answers for the user (vendor-runtime VR-05).
 - The Host API binds loopback or a private socket only; nil prompt handlers fail closed.
 - No alternate runner, no gateway bypass, no replay of an effect whose outcome is unknown.
 
