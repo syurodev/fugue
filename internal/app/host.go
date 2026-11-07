@@ -252,12 +252,26 @@ func (rt *HostRuntime) LeaseReleased(_ context.Context, connID string) {
 	goTask("app.host-grace", func(ctx context.Context) error {
 		select {
 		case <-timer.C():
-			rt.beginDrain(false, "idle_grace")
+			rt.fireGrace(timer)
 		case <-disarm:
 		case <-ctx.Done():
 		}
 		return nil
 	})
+}
+
+// fireGrace is the grace timer's fire path: it re-checks under the mutex that
+// this timer is still the armed one, that no lease is held and that the
+// runtime is not already draining — a stale fire does nothing.
+func (rt *HostRuntime) fireGrace(timer clock.Timer) bool {
+	rt.mu.Lock()
+	stale := timer != rt.graceTimer || rt.draining || len(rt.leases) > 0
+	rt.mu.Unlock()
+	if stale {
+		return false
+	}
+	rt.beginDrain(false, "idle_grace")
+	return true
 }
 
 // Status snapshots the host's versions, incarnation and lease counts.

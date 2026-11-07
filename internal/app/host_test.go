@@ -485,3 +485,69 @@ func TestHostProcessCloseIsIdempotent(t *testing.T) {
 		t.Fatalf("second Close = %v, want nil", err)
 	}
 }
+
+// TestStaleGraceFireDoesNotDrain pins the grace fire path: a fire only drains
+// when it comes from the timer that is still armed, no lease is held and the
+// runtime is not already draining.
+func TestStaleGraceFireDoesNotDrain(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Unix(0, 0))
+	cfg := testHostConfig()
+	cfg.IdleGrace = 10 * time.Second
+	drains := make(chan string, 4)
+	rt, _ := newRuntime(t, cfg, clk, func(_ context.Context, _ bool, reason string) error {
+		drains <- reason
+		return nil
+	})
+	rt.LeaseAcquired(t.Context(), "c1", KindCLI)
+	rt.LeaseReleased(t.Context(), "c1")
+
+	// A fire from a foreign timer is stale.
+	if rt.fireGrace(clk.NewTimer(10 * time.Second)) {
+		t.Fatal("a foreign timer drained the host")
+	}
+	select {
+	case reason := <-drains:
+		t.Fatalf("a stale fire drained with reason %q", reason)
+	default:
+	}
+
+	// An armed-but-disarmed timer is stale, and so is a fire while draining.
+	rt.LeaseAcquired(t.Context(), "c2", KindCLI)
+	rt.mu.Lock()
+	armed := rt.graceTimer
+	rt.mu.Unlock()
+	rt.beginDrain(false, "shutdown")
+	if rt.fireGrace(armed) {
+		t.Fatal("a fire drained an already draining host")
+	}
+	select {
+	case reason := <-drains:
+		t.Fatalf("a second drain started with reason %q", reason)
+	default:
+	}
+
+	// The live fire still drains exactly once, with the grace reason, on a
+	// runtime of its own so the first runtime's slow drain cannot leak in.
+	liveDrains := make(chan string, 4)
+	rt2, _ := newRuntime(t, cfg, clk, func(_ context.Context, _ bool, reason string) error {
+		liveDrains <- reason
+		return nil
+	})
+	rt2.LeaseAcquired(t.Context(), "c3", KindCLI)
+	rt2.LeaseReleased(t.Context(), "c3")
+	rt2.mu.Lock()
+	live := rt2.graceTimer
+	rt2.mu.Unlock()
+	if !rt2.fireGrace(live) {
+		t.Fatal("the live grace fire did not drain")
+	}
+	if reason := <-liveDrains; reason != "idle_grace" {
+		t.Fatalf("drain reason = %q, want idle_grace", reason)
+	}
+	select {
+	case reason := <-liveDrains:
+		t.Fatalf("an extra drain started with reason %q", reason)
+	default:
+	}
+}
