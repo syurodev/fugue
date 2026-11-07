@@ -171,19 +171,27 @@ func (s *Server) Drain(ctx context.Context, force bool) error {
 	if err := s.listener.Close(); err != nil {
 		return errcode.Wrap(errcode.Internal, "close the host listener", err)
 	}
+	var drainErr error
 	if force {
 		if err := s.httpSrv.Close(); err != nil {
-			return errcode.Wrap(errcode.Internal, "close the host http server", err)
+			drainErr = errcode.Wrap(errcode.Internal, "close the host http server", err)
 		}
 	} else if err := s.httpSrv.Shutdown(ctx); err != nil {
-		return errcode.Wrap(errcode.Internal, "shut the host http server down", err)
+		// Past the deadline Shutdown leaves active handlers running; Close
+		// ends their connections and cancels the serve context, so no handler
+		// outlives the store the host closes after this drain returns.
+		closeErr := s.httpSrv.Close()
+		drainErr = errcode.Wrap(errcode.Internal,
+			"shut the host http server down", errors.Join(err, closeErr))
 	}
 	// Wait for the serve loop so no stdlib goroutine outlives the drain; a
-	// serve failure is part of the drain's outcome.
+	// serve failure is part of the drain's outcome, joined with any shutdown
+	// failure above.
 	if err := s.serveTask.Wait(); err != nil {
-		return errcode.Wrap(errcode.Internal, "the host api serve loop failed", err)
+		drainErr = errors.Join(drainErr,
+			errcode.Wrap(errcode.Internal, "the host api serve loop failed", err))
 	}
-	return nil
+	return drainErr
 }
 
 // removeSocket unlinks the socket this server bound; an already-absent file
