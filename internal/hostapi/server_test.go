@@ -29,8 +29,10 @@ const (
 )
 
 // fakeBackend is a scripted app.Backend for tests that exercise the transport
-// without the real runtime.
+// without the real runtime. Its hub serves Subscribe; tests register the
+// topics they need on it.
 type fakeBackend struct {
+	hub          *app.EventHub
 	mu           sync.Mutex
 	hellos       int
 	leased       []string
@@ -45,7 +47,7 @@ type fakeBackend struct {
 }
 
 func newFakeBackend() *fakeBackend {
-	return &fakeBackend{released: make(chan string, 8)}
+	return &fakeBackend{released: make(chan string, 8), hub: app.NewEventHub("inc-fake")}
 }
 
 func (f *fakeBackend) Hello(_ context.Context, _ app.HelloParams) (app.HelloResult, error) {
@@ -90,6 +92,10 @@ func (f *fakeBackend) Shutdown(_ context.Context, cmd app.ShutdownCommand) error
 	defer f.mu.Unlock()
 	f.shutdowns = append(f.shutdowns, cmd)
 	return nil
+}
+
+func (f *fakeBackend) Subscribe(ctx context.Context, p app.SubscribeParams) (*app.Subscription, error) {
+	return f.hub.Subscribe(ctx, p)
 }
 
 func (f *fakeBackend) helloCount() int {
