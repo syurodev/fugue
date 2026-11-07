@@ -18,6 +18,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/storage"
 )
 
@@ -128,10 +129,14 @@ func TestDrainDeadlineForcesCloseBeforeStoreClose(t *testing.T) {
 
 	// An in-flight request holds one active connection.
 	resCh := make(chan error, 1)
-	go func() {
-		_, err := clientA.HostStatus(t.Context(), &connect.Request[hostv1.HostStatusRequest]{})
+	supervise.Go(t.Context(), "test.status", func(ctx context.Context) error {
+		_, err := clientA.HostStatus(ctx, &connect.Request[hostv1.HostStatusRequest]{})
+		if err != nil {
+			err = errcode.Wrap(errcode.Internal, "the status rpc failed", err)
+		}
 		resCh <- err
-	}()
+		return nil
+	})
 	<-backend.entered
 
 	// The Shutdown RPC replies at once and starts the drain against the

@@ -1,10 +1,13 @@
 package hostapi
 
 import (
+	"context"
 	"net"
 	"testing"
 
 	hostv1 "github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1"
+	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 )
 
 // TestConcurrentHelloAcquiresOneLease pins the HTTP/2 multiplexing race:
@@ -20,11 +23,15 @@ func TestConcurrentHelloAcquiresOneLease(t *testing.T) {
 	start := make(chan struct{})
 	errs := make(chan error, n)
 	for range n {
-		go func() {
+		supervise.Go(t.Context(), "test.hello", func(ctx context.Context) error {
 			<-start
-			_, err := client.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_CLI, "v1"))
+			_, err := client.Hello(ctx, helloRequest(hostv1.ClientKind_CLIENT_KIND_CLI, "v1"))
+			if err != nil {
+				err = errcode.Wrap(errcode.Internal, "the hello rpc failed", err)
+			}
 			errs <- err
-		}()
+			return nil
+		})
 	}
 	close(start)
 	oks := 0
@@ -57,10 +64,14 @@ func TestConnectionClosedDuringHelloReleasesTheLease(t *testing.T) {
 	client, _ := newTestClient(t, srv.cfg.Socket.Path)
 
 	resCh := make(chan error, 1)
-	go func() {
-		_, err := client.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_CLI, "v1"))
+	supervise.Go(t.Context(), "test.hello", func(ctx context.Context) error {
+		_, err := client.Hello(ctx, helloRequest(hostv1.ClientKind_CLIENT_KIND_CLI, "v1"))
+		if err != nil {
+			err = errcode.Wrap(errcode.Internal, "the hello rpc failed", err)
+		}
 		resCh <- err
-	}()
+		return nil
+	})
 	<-backend.leaseEntered
 
 	// Closing the server-side conn runs the close hook while the hello is
