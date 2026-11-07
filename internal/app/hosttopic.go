@@ -8,6 +8,8 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+
+	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
 // hostTopicSnapshot snapshots the host topic's state: the lease counts and the
@@ -15,10 +17,14 @@ import (
 func (rt *HostRuntime) hostTopicSnapshot(_ context.Context) ([]byte, error) {
 	rt.mu.Lock()
 	defer rt.mu.Unlock()
-	return json.Marshal(hostState{
+	payload, err := json.Marshal(hostState{
 		Clients:  rt.countsLocked(),
 		Draining: rt.draining,
 	})
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "marshal the host topic state", err)
+	}
+	return payload, nil
 }
 
 // publishHostClients publishes the current lease counts on the host topic.
@@ -36,7 +42,7 @@ func (rt *HostRuntime) publishHostClients() {
 		slog.Warn("host topic payload did not marshal", "err", err.Error())
 		return
 	}
-	_, _ = rt.hub.Publish(TopicHost, Event{Type: EventHostClients, Payload: payload})
+	rt.publishHostEvent(Event{Type: EventHostClients, Payload: payload})
 }
 
 // publishHostDraining publishes the draining transition on the host topic.
@@ -49,7 +55,15 @@ func (rt *HostRuntime) publishHostDraining(reason string) {
 		slog.Warn("host topic payload did not marshal", "err", err.Error())
 		return
 	}
-	_, _ = rt.hub.Publish(TopicHost, Event{Type: EventHostDraining, Payload: payload})
+	rt.publishHostEvent(Event{Type: EventHostDraining, Payload: payload})
+}
+
+// publishHostEvent publishes one event on the host topic; a failure is a
+// programming error of the topic's owner, so it is logged, not propagated.
+func (rt *HostRuntime) publishHostEvent(ev Event) {
+	if _, err := rt.hub.Publish(TopicHost, ev); err != nil {
+		slog.Warn("the host topic publish failed", "err", err.Error())
+	}
 }
 
 // hostState is the host topic's snapshot and clients-event payload shape.

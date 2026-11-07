@@ -206,10 +206,9 @@ func (h *EventHub) Publish(name string, ev Event) (Event, error) {
 		t.lastSeq = ev.Seq
 	}
 	for _, s := range t.subs {
-		switch s.offer(ev) {
-		case offerCoalesced:
+		if kind := s.offer(ev); kind == offerCoalesced {
 			h.coalesce++
-		case offerDropped:
+		} else if kind == offerDropped {
 			h.dropped++
 		}
 	}
@@ -277,72 +276,96 @@ func (h *EventHub) Coalesced() uint64 {
 // lost: the stream is the snapshot's sequence plus queued events with greater
 // sequences, deduplicated by a monotone last-sent marker.
 func (h *EventHub) Subscribe(ctx context.Context, p SubscribeParams) (*Subscription, error) {
+	s, t, kind, ring, lastSeq, err := h.registerSubscriber(p)
+	if err != nil {
+		return nil, err
+	}
+	seed, err := h.seedStream(ctx, t, kind, ring, lastSeq, p)
+	if err != nil {
+		s.Close()
+		return nil, err
+	}
+	s.deliver(seed.pending, seed.snapState, seed.snapSeq, seed.haveSnapshot)
+	return s, nil
+}
+
+// streamSeed is what Subscribe resolved for a new subscription: the events to
+// deliver before the live queue and the snapshot the handler sends first.
+type streamSeed struct {
+	pending      []Event
+	snapState    []byte
+	snapSeq      EventSeq
+	haveSnapshot bool
+}
+
+// registerSubscriber authorizes the request and appends the subscriber to the
+// topic before any snapshot is taken, so nothing published from here on can
+// be lost. The topic's kind, ring copy and sequence come back for the cursor
+// resolution that follows without the hub lock.
+func (h *EventHub) registerSubscriber(p SubscribeParams) (*Subscription, *eventTopic, topicKind, []Event, EventSeq, error) {
 	h.mu.Lock()
+	defer h.mu.Unlock()
 	if h.ended {
-		h.mu.Unlock()
-		return nil, ErrHostStopping
+		return nil, nil, 0, nil, 0, ErrHostStopping
 	}
 	t, ok := h.topics[p.Topic]
 	if !ok || !h.authorize(p.Principal, p.Topic) {
-		h.mu.Unlock()
-		return nil, ErrSubscriptionDenied
+		return nil, nil, 0, nil, 0, ErrSubscriptionDenied
 	}
 	s := &Subscription{topic: p.Topic, hub: h, notify: make(chan struct{}, 1)}
 	t.subs = append(t.subs, s)
-	ring := append([]Event(nil), t.ring...)
-	lastSeq := t.lastSeq
-	kind := t.kind
-	h.mu.Unlock()
+	return s, t, t.kind, append([]Event(nil), t.ring...), t.lastSeq, nil
+}
 
-	var (
-		pending      []Event
-		snapState    []byte
-		snapSeq      EventSeq
-		haveSnapshot bool
-	)
+// seedStream resolves the cursor to a snapshot or to catch-up events.
+func (h *EventHub) seedStream(ctx context.Context, t *eventTopic, kind topicKind, ring []Event, lastSeq EventSeq, p SubscribeParams) (streamSeed, error) {
 	switch {
 	case p.Cursor == nil:
-		state, seq, err := h.topicSnapshot(ctx, t)
-		if err != nil {
-			s.Close()
-			return nil, err
-		}
-		snapState, snapSeq, haveSnapshot = state, seq, true
+		return h.snapshotSeed(ctx, t)
 	case kind == topicDurable:
-		events, err := t.durable.Since(ctx, p.Cursor.Sequence)
-		switch {
-		case err == nil:
-			pending, snapSeq = events, p.Cursor.Sequence
-		case errors.Is(err, ErrEventSeqTooOld):
-			state, seq, serr := h.topicSnapshot(ctx, t)
-			if serr != nil {
-				s.Close()
-				return nil, serr
-			}
-			snapState, snapSeq, haveSnapshot = state, seq, true
-		default:
-			s.Close()
-			return nil, err
-		}
+		return h.durableSeed(ctx, t, p.Cursor)
 	default:
-		if p.Cursor.Incarnation != h.incarnation || p.Cursor.Sequence > lastSeq || !ringCovers(ring, lastSeq, p.Cursor.Sequence) {
-			state, seq, err := h.topicSnapshot(ctx, t)
-			if err != nil {
-				s.Close()
-				return nil, err
-			}
-			snapState, snapSeq, haveSnapshot = state, seq, true
-		} else {
-			for _, ev := range ring {
-				if ev.Seq > p.Cursor.Sequence {
-					pending = append(pending, ev)
-				}
-			}
-			snapSeq = p.Cursor.Sequence
+		return h.ephemeralSeed(ctx, t, ring, lastSeq, p.Cursor)
+	}
+}
+
+// snapshotSeed takes a full snapshot of the topic.
+func (h *EventHub) snapshotSeed(ctx context.Context, t *eventTopic) (streamSeed, error) {
+	state, seq, err := h.topicSnapshot(ctx, t)
+	if err != nil {
+		return streamSeed{}, err
+	}
+	return streamSeed{snapState: state, snapSeq: seq, haveSnapshot: true}, nil
+}
+
+// durableSeed catches a durable topic up from the cursor's sequence; a purged
+// sequence falls back to a snapshot. The durable sequence ignores the cursor's
+// incarnation: it lives in the store and survives a restart.
+func (h *EventHub) durableSeed(ctx context.Context, t *eventTopic, c *EventCursor) (streamSeed, error) {
+	events, err := t.durable.Since(ctx, c.Sequence)
+	if err == nil {
+		return streamSeed{pending: events, snapSeq: c.Sequence}, nil
+	}
+	if !errors.Is(err, ErrEventSeqTooOld) {
+		return streamSeed{}, errcode.Wrap(errcode.Internal, "catch up the event topic "+t.name, err)
+	}
+	return h.snapshotSeed(ctx, t)
+}
+
+// ephemeralSeed catches an ephemeral topic up from its in-memory ring; a
+// cursor from another incarnation, a future sequence or a sequence below the
+// ring falls back to a fresh snapshot.
+func (h *EventHub) ephemeralSeed(ctx context.Context, t *eventTopic, ring []Event, lastSeq EventSeq, c *EventCursor) (streamSeed, error) {
+	if c.Incarnation != h.incarnation || c.Sequence > lastSeq || !ringCovers(ring, lastSeq, c.Sequence) {
+		return h.snapshotSeed(ctx, t)
+	}
+	var pending []Event
+	for _, ev := range ring {
+		if ev.Seq > c.Sequence {
+			pending = append(pending, ev)
 		}
 	}
-	s.deliver(pending, snapState, snapSeq, haveSnapshot)
-	return s, nil
+	return streamSeed{pending: pending, snapSeq: c.Sequence}, nil
 }
 
 // topicSnapshot takes a topic's snapshot with the sequence it reflects. A

@@ -71,7 +71,9 @@ func StartHost(ctx context.Context, deps *HostDeps) (*HostProcess, error) {
 	// counts and the draining transition. Later items register theirs.
 	if err := hp.rt.hub.RegisterEphemeral(TopicHost, hp.rt.hostTopicSnapshot, defaultEphemeralBufferCap); err != nil {
 		cancel()
-		_ = store.Close()
+		if serr := store.Close(); serr != nil {
+			return nil, errcode.Wrap(errcode.Internal, "register the host topic", errors.Join(err, serr))
+		}
 		return nil, err
 	}
 	hp.rt.goTask = func(name string, fn func(context.Context) error) *supervise.Task {

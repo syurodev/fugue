@@ -233,7 +233,7 @@ func (h *serviceHandler) Subscribe(ctx context.Context, req *connect.Request[hos
 			Snapshot: &hostv1.SnapshotEvent{Sequence: seq, State: state},
 		}})
 		if serr != nil {
-			return serr
+			return errcode.Wrap(errcode.Internal, "send the snapshot", serr)
 		}
 	}
 	for {
@@ -242,15 +242,19 @@ func (h *serviceHandler) Subscribe(ctx context.Context, req *connect.Request[hos
 			// The stream ended server-side (drain or resync): the client
 			// always gets the end message naming the reason. If the client's
 			// own context is gone the send fails and returns.
-			return stream.Send(&hostv1.SubscribeResponse{Kind: &hostv1.SubscribeResponse_End{
+			serr := stream.Send(&hostv1.SubscribeResponse{Kind: &hostv1.SubscribeResponse_End{
 				End: &hostv1.StreamEnd{ResyncRequired: sub.ResyncRequired()},
 			}})
+			if serr != nil {
+				return errcode.Wrap(errcode.Internal, "send the stream end", serr)
+			}
+			return nil
 		}
 		serr := stream.Send(&hostv1.SubscribeResponse{Kind: &hostv1.SubscribeResponse_Event{
 			Event: &hostv1.HostEvent{Sequence: ev.Seq, Type: ev.Type, Payload: ev.Payload},
 		}})
 		if serr != nil {
-			return serr
+			return errcode.Wrap(errcode.Internal, "send the event", serr)
 		}
 	}
 }

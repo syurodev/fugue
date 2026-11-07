@@ -26,6 +26,8 @@ import (
 const (
 	testHostFakeVersion = "host-fake"
 	testHostE2EVersion  = "host-e2e"
+	// testCommandID is the client-generated command id the tests send.
+	testCommandID = "cmd-1"
 )
 
 // fakeBackend is a scripted app.Backend for tests that exercise the transport
@@ -95,7 +97,16 @@ func (f *fakeBackend) Shutdown(_ context.Context, cmd app.ShutdownCommand) error
 }
 
 func (f *fakeBackend) Subscribe(ctx context.Context, p app.SubscribeParams) (*app.Subscription, error) {
-	return f.hub.Subscribe(ctx, p)
+	sub, err := f.hub.Subscribe(ctx, p)
+	if err != nil {
+		// A typed error keeps its public code; anything else is hidden.
+		var coded *errcode.Error
+		if errors.As(err, &coded) {
+			return nil, errcode.Wrap(coded.Code(), coded.Message(), err)
+		}
+		return nil, errcode.Wrap(errcode.Internal, "subscribe on the fake hub", err)
+	}
+	return sub, nil
 }
 
 func (f *fakeBackend) helloCount() int {
@@ -360,7 +371,7 @@ func TestShutdownRPCRepliesBeforeDrain(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The reply arrives while the drain is still blocked on the transport.
-	if _, err := client.Shutdown(t.Context(), connect.NewRequest(&hostv1.ShutdownRequest{CommandId: "cmd-1", Force: false})); err != nil {
+	if _, err := client.Shutdown(t.Context(), connect.NewRequest(&hostv1.ShutdownRequest{CommandId: testCommandID, Force: false})); err != nil {
 		t.Fatal(err)
 	}
 	<-tr.started
@@ -429,7 +440,7 @@ func TestShutdownRPCEndToEndWithCleanTeardown(t *testing.T) {
 	if _, err := client.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_CLI, "v1")); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.Shutdown(t.Context(), connect.NewRequest(&hostv1.ShutdownRequest{CommandId: "cmd-1", Force: false})); err != nil {
+	if _, err := client.Shutdown(t.Context(), connect.NewRequest(&hostv1.ShutdownRequest{CommandId: testCommandID, Force: false})); err != nil {
 		t.Fatal(err)
 	}
 	<-hp.DrainDone()

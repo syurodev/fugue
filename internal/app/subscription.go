@@ -66,44 +66,12 @@ func (s *Subscription) Snapshot() (state []byte, seq EventSeq, ok bool) {
 // ResyncRequired for the end reason; the caller closes the subscription.
 func (s *Subscription) Next(ctx context.Context) (Event, bool) {
 	for {
-		s.mu.Lock()
-		if len(s.pending) > 0 {
-			ev := s.pending[0]
-			s.pending = s.pending[1:]
-			if ev.Seq > s.lastSent {
-				s.lastSent = ev.Seq
-				s.mu.Unlock()
-				return ev, true
-			}
-			s.mu.Unlock()
-			continue
+		if ev, ok := s.popEvent(); ok {
+			return ev, true
 		}
-		if s.head < len(s.queue) {
-			ev := s.queue[s.head]
-			s.queue[s.head] = Event{}
-			s.head++
-			if s.head == len(s.queue) {
-				s.queue = s.queue[:0]
-				s.head = 0
-			}
-			if ev.Seq > s.lastSent {
-				s.lastSent = ev.Seq
-				s.mu.Unlock()
-				return ev, true
-			}
-			s.mu.Unlock()
-			continue
-		}
-		if s.closed || s.ended {
-			s.mu.Unlock()
+		if ended, _ := s.endState(); ended {
 			return Event{}, false
 		}
-		if s.overflow {
-			s.resync = true
-			s.mu.Unlock()
-			return Event{}, false
-		}
-		s.mu.Unlock()
 		select {
 		case <-s.notify:
 		case <-ctx.Done():
@@ -111,6 +79,61 @@ func (s *Subscription) Next(ctx context.Context) (Event, bool) {
 			return Event{}, false
 		}
 	}
+}
+
+// popEvent returns the next event to deliver from the catch-up list or the
+// live queue, skipping anything already sent (a catch-up overlap). ok=false
+// means both are empty.
+func (s *Subscription) popEvent() (Event, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for {
+		ev, ok := s.popLocked()
+		if !ok {
+			return Event{}, false
+		}
+		if ev.Seq > s.lastSent {
+			s.lastSent = ev.Seq
+			return ev, true
+		}
+	}
+}
+
+// endState reports whether the stream has ended, and whether the end asks the
+// client to resynchronize. Called only when no buffered event is left.
+func (s *Subscription) endState() (ended, resync bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	switch {
+	case s.closed || s.ended:
+		return true, false
+	case s.overflow:
+		s.resync = true
+		return true, true
+	default:
+		return false, false
+	}
+}
+
+// popLocked pops one event from the pending catch-up list or the live queue;
+// the caller holds the mutex.
+func (s *Subscription) popLocked() (Event, bool) {
+	if len(s.pending) > 0 {
+		ev := s.pending[0]
+		s.pending = s.pending[1:]
+		return ev, true
+	}
+	if s.head < len(s.queue) {
+		ev := s.queue[s.head]
+		s.queue[s.head] = Event{}
+		s.head++
+		if s.head == len(s.queue) {
+			s.queue = s.queue[:0]
+			s.head = 0
+		}
+		return ev, true
+	}
+	return Event{}, false
 }
 
 // ResyncRequired reports why the stream ended: true means the client must
