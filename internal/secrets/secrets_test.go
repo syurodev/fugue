@@ -42,7 +42,7 @@ func TestCSE01Assignments(t *testing.T) {
 
 func TestCSE01AssignmentSkips(t *testing.T) {
 	t.Parallel()
-	for _, value := range []string{"", "abc", `os.Getenv("X")`, "some value", "abcd+123", "abcd-123", "abcd(123)", "abcd[123]", "abcd{123}", "${VALUE}", "$VALUE", "{{VALUE}}", "<VALUE>", "xxxx", "****", "changeme", "example", "placeholder", "dummy", "true", "false", "null", "1234567"} {
+	for _, value := range []string{"", "abc", `os.Getenv("X")`, "some value", "a + b", "abcd(123)", "abcd[123]", "abcd{123}", "${VALUE}", "$VALUE", "{{VALUE}}", "<VALUE>", "xxxx", "****", "changeme", "example", "placeholder", "dummy", "true", "false", "null", "1234567"} {
 		if len(Find("PASSWORD="+value)) != 0 {
 			t.Fatal("skip rule failed")
 		}

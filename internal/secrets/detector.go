@@ -2,6 +2,7 @@ package secrets
 
 import (
 	"path"
+	"slices"
 	"strings"
 	"unicode/utf8"
 
@@ -42,22 +43,21 @@ type KnownValue struct {
 	Key   string
 }
 
-// Options defines workspace exceptions. Path uses slash-separated workspace
-// relative paths. AllowPaths uses path.Match globs. Invalid globs never match.
+// Options defines workspace exceptions. AllowPaths uses path.Match globs
+// against slash-separated workspace-relative paths. Invalid globs never match.
 // AllowKeys uses normalized key names. Exceptions never suppress known values.
 type Options struct {
 	AllowKeys  []string
 	AllowPaths []string
-	Path       string
 }
 
 // Detector is immutable after construction and safe for concurrent Find calls.
 // Rebuild with New when values or options change; discard old instances when
 // their owning vault/session closes. Its zero value detects patterns/assignments.
 type Detector struct {
-	nodes     []node
-	allowKeys map[string]bool
-	allowPath bool
+	nodes      []node
+	allowKeys  map[string]bool
+	allowPaths []string
 }
 
 // New builds an independent detector without reading the environment or vault.
@@ -67,12 +67,7 @@ func New(values []KnownValue, options Options) *Detector {
 	for _, key := range options.AllowKeys {
 		d.allowKeys[normalize(key)] = true
 	}
-	for _, glob := range options.AllowPaths {
-		matched, err := path.Match(glob, options.Path)
-		if err == nil && matched {
-			d.allowPath = true
-		}
-	}
+	d.allowPaths = slices.Clone(options.AllowPaths)
 	for _, v := range values {
 		if validKnown(v) {
 			d.insert(v.Value.Reveal(), v.Kind)
@@ -99,92 +94,37 @@ func validKnown(v KnownValue) bool {
 // Find detects patterns and assignments without a known-value set.
 func Find(text string) []Finding { return (&Detector{}).Find(text) }
 
-// Find returns ordered, non-overlapping byte spans. Known values win over
-// patterns, which win over assignments. Equal starts prefer longer spans;
-// overlapping matches are merged under the highest-priority kind so no
-// recognized secret is only partially masked.
-func (d *Detector) Find(text string) []Finding {
-	selected := make([]Finding, len(text))
-	d.findKnown(text, selected)
-	if !d.allowPath {
-		candidates := make([]Finding, len(text))
-		d.findAssignments(text, candidates, true)
-		blocked := coverage(candidates)
-		ranks := make([]uint8, len(text))
-		for i, f := range selected {
-			if f.End > f.Start {
-				ranks[i] = 3
-			}
-		}
-		clear(candidates)
-		findPatterns(text, candidates)
-		selectCandidates(selected, candidates, blocked, ranks, 2)
-		clear(candidates)
-		d.findAssignments(text, candidates, false)
-		selectCandidates(selected, candidates, blocked, ranks, 1)
+// Find returns ordered, non-overlapping byte spans without a path exception.
+// Known values win over patterns, which win over assignments. Overlapping
+// matches are unioned under the highest-priority kind so no recognized secret
+// is only partially masked. Equal-priority ties prefer earlier, longer spans.
+func (d *Detector) Find(text string) []Finding { return d.FindIn(text, "") }
+
+// FindIn applies path exceptions without rebuilding the known-value automaton.
+// An empty filePath means no path; known values are never excepted.
+func (d *Detector) FindIn(text, filePath string) []Finding {
+	candidates := ranked(d.findKnown(text), 3)
+	var allowed []Finding
+	if !d.pathAllowed(filePath) {
+		assignments, exceptions := d.findAssignments(text)
+		allowed = exceptions
+		candidates = append(candidates, ranked(findPatterns(text), 2)...)
+		candidates = append(candidates, ranked(assignments, 1)...)
 	}
-	var findings []Finding
-	for _, f := range selected {
-		if f.End > f.Start {
-			findings = append(findings, f)
-		}
-	}
-	return findings
+	return selectCandidates(candidates, allowed)
 }
 
-func put(candidates []Finding, f Finding) {
-	if f.End > f.Start && f.End > candidates[f.Start].End {
-		candidates[f.Start] = f
+func (d *Detector) pathAllowed(filePath string) bool {
+	if filePath == "" {
+		return false
 	}
-}
-
-func coverage(selected []Finding) []int {
-	prefix := make([]int, len(selected)+1)
-	end := 0
-	for i, f := range selected {
-		end = max(end, f.End)
-		prefix[i+1] = prefix[i]
-		if i < end {
-			prefix[i+1]++
+	for _, glob := range d.allowPaths {
+		matched, err := path.Match(glob, filePath)
+		if err == nil && matched {
+			return true
 		}
 	}
-	return prefix
-}
-
-// Each pass unions intervals in byte order. Ranks survive both passes, so
-// a lower-priority interval bridging two findings cannot change their owner.
-func selectCandidates(selected, candidates []Finding, blocked []int, ranks []uint8, rank uint8) {
-	var current Finding
-	var best uint8
-	for i, existing := range selected {
-		selected[i] = Finding{}
-		if current.End > current.Start && i >= current.End {
-			selected[current.Start], ranks[current.Start] = current, best
-			current, best = Finding{}, 0
-		}
-		current, best = extend(current, best, existing, ranks[i])
-		f := candidates[i]
-		if f.End > f.Start && blocked[f.End] == blocked[f.Start] {
-			current, best = extend(current, best, f, rank)
-		}
-	}
-	if current.End > current.Start {
-		selected[current.Start], ranks[current.Start] = current, best
-	}
-}
-
-func extend(current Finding, best uint8, next Finding, rank uint8) (Finding, uint8) {
-	if next.End <= next.Start {
-		return current, best
-	}
-	if current.End <= current.Start {
-		return next, rank
-	}
-	current.End = max(current.End, next.End)
-	if rank > best {
-		current.Kind, current.Key, best = next.Kind, next.Key, rank
-	}
-	return current, best
+	return false
 }
 
 // Mask replaces valid, ordered spans with fixed kind markers. Invalid spans

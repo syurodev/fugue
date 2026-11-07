@@ -28,15 +28,21 @@ func sensitiveName(name string) bool {
 	return strings.HasSuffix(name, "_KEY") || strings.HasPrefix(name, "AWS_")
 }
 
-func (d *Detector) findAssignments(text string, candidates []Finding, exceptions bool) {
+func (d *Detector) findAssignments(text string) (findings, allowed []Finding) {
 	offset := 0
 	for line := range strings.SplitSeq(text, "\n") {
 		key, start, end := assignment(line)
-		if start < end && d.includeAssignment(key, line[start:end], exceptions) {
-			put(candidates, Finding{Start: offset + start, End: offset + end, Kind: KindAssigned, Key: key})
+		if start < end {
+			f := Finding{Start: offset + start, End: offset + end, Kind: KindAssigned, Key: key}
+			if d.allowKeys[normalize(key)] {
+				allowed = append(allowed, f)
+			} else if sensitiveName(key) && !skipValue(line[start:end]) {
+				findings = append(findings, f)
+			}
 		}
 		offset += len(line) + 1
 	}
+	return findings, allowed
 }
 
 func assignment(line string) (key string, start, end int) {
@@ -74,7 +80,7 @@ func quotedAssignment(key, value string, start int) (string, int, int) {
 		}
 		if value[i] == quote {
 			tail := strings.TrimSpace(value[i+1:])
-			if tail != "" && tail != "," && tail != "}" && tail != ",}" {
+			if tail != "" && !strings.HasPrefix(tail, ",") && tail != "}" {
 				return "", 0, 0
 			}
 			return key, start + 1, start + i
@@ -99,7 +105,7 @@ func skipValue(value string) bool {
 	if utf8.RuneCountInString(value) < 4 {
 		return true
 	}
-	if strings.ContainsAny(value, `()[]{}<>$+-*/%=!&|^?:;\`) || strings.ContainsFunc(value, unicode.IsSpace) {
+	if strings.ContainsAny(value, `()[]{}<>$`) || strings.ContainsFunc(value, unicode.IsSpace) {
 		return true
 	}
 	lower := strings.ToLower(value)
@@ -130,12 +136,4 @@ func shortNumber(value string) bool {
 		}
 	}
 	return true
-}
-
-func (d *Detector) includeAssignment(key, value string, exceptions bool) bool {
-	allowed := d.allowKeys[normalize(key)]
-	if exceptions {
-		return allowed
-	}
-	return sensitiveName(key) && !allowed && !skipValue(value)
 }

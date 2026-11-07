@@ -58,33 +58,18 @@ func (d *Detector) advance(state int, b byte) int {
 	}
 }
 
-func (d *Detector) findKnown(text string, candidates []Finding) {
+func (d *Detector) findKnown(text string) []Finding {
 	if len(d.nodes) == 0 {
-		return
+		return nil
 	}
+	var findings []Finding
 	state := 0
 	for i := range len(text) {
 		state = d.advance(state, text[i])
 		n := d.nodes[state]
 		if n.length > 0 {
-			put(candidates, Finding{Start: i + 1 - n.length, End: i + 1, Kind: n.kind})
+			findings = append(findings, Finding{Start: i + 1 - n.length, End: i + 1, Kind: n.kind})
 		}
 	}
-	mergeKnown(candidates)
-}
-
-func mergeKnown(candidates []Finding) {
-	start, end := -1, 0
-	for i, f := range candidates {
-		if f.End == 0 {
-			continue
-		}
-		if i < end {
-			candidates[start].End = max(end, f.End)
-			end = candidates[start].End
-			candidates[i] = Finding{}
-		} else {
-			start, end = i, f.End
-		}
-	}
+	return findings
 }
