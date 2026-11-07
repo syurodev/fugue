@@ -364,11 +364,15 @@ func reqPtr[T any](r T) *T { return &r }
 // TestRejectedTerminalObservationFreesTheSlot pins the invariant that every
 // dispatched slot is freed exactly once: a terminal observation the kernel
 // rejects commits nothing, and the served message still reclaims the slot.
+// The probe is a dispatch of a second admitted run - a second dispatch of the
+// requesting attempt itself is not routed through the slot machinery at all,
+// so it could never observe the leak.
 func TestRejectedTerminalObservationFreesTheSlot(t *testing.T) {
 	t.Parallel()
 
 	store := newFakeStore()
 	setupAdmittedRun(store)
+	addAdmittedRun(store, testRunID2, "m2", "a2")
 	executor := newHookExecutor()
 	sess, ctx := startHookSession(t, store, executor, nil)
 
@@ -376,9 +380,16 @@ func TestRejectedTerminalObservationFreesTheSlot(t *testing.T) {
 		t.Fatalf("submit dispatch: %v", err)
 	}
 	executor.waitWork(t, ctx)
+	reportResponseWithForeignUsage(t, executor)
+	requireSecondRunDispatches(t, ctx, sess, executor, store)
+	requireRunUntouched(t, ctx, store)
+}
 
-	// The executor reports a response whose usage names another attempt: the
-	// kernel rejects it, nothing is appended, and the slot comes back.
+// reportResponseWithForeignUsage reports a response whose usage names another
+// attempt: the kernel rejects it, nothing is appended, and the slot must come
+// back through the served message.
+func reportResponseWithForeignUsage(t *testing.T, executor *hookExecutor) {
+	t.Helper()
 	executor.mu.Lock()
 	work := executor.works[0]
 	report := executor.reports[0]
@@ -389,14 +400,82 @@ func TestRejectedTerminalObservationFreesTheSlot(t *testing.T) {
 	)
 	obs.Facts.Usage.AttemptID = "another-attempt"
 	report(&obs)
+}
 
-	// The slot was reclaimed: a second dispatch reserves successfully and is
-	// rejected by the kernel instead of parking until the context ends.
-	again := makeModelDispatchRequest(testRunID1, "m1", "a1", "cmd-disp-after-rejection")
-	if _, err := sess.Submit(ctx, reqPtr(again)); err == nil {
-		t.Fatalf("a second dispatch of a requesting attempt must be rejected")
+// requireSecondRunDispatches submits a dispatch of the second admitted run and
+// requires it to run: it can only reserve once the slot comes back - served
+// may beat its reserve, so parking itself is not an observable to assert on.
+func requireSecondRunDispatches(t *testing.T, ctx context.Context, sess *Session, executor *hookExecutor, store *fakeStore) {
+	t.Helper()
+	done := make(chan error, 1)
+	supervise.Go(ctx, "test.submit-r2", func(_ context.Context) error {
+		_, err := sess.Submit(ctx, reqPtr(makeModelDispatchRequest(testRunID2, "m2", "a2", "cmd-disp-r2")))
+		done <- err
+		return err
+	})
+	for {
+		executor.mu.Lock()
+		got := len(executor.works)
+		executor.mu.Unlock()
+		if got >= 2 {
+			break
+		}
+		select {
+		case <-executor.sig:
+		case <-ctx.Done():
+			t.Fatalf("the second dispatch never ran: the rejected observation leaked the slot")
+		}
 	}
-	if store.appendCount() != 1 {
-		t.Fatalf("%d transitions committed, want 1", store.appendCount())
+	executor.mu.Lock()
+	second := executor.works[1].Lease.RunID
+	executor.mu.Unlock()
+	if second != testRunID2 {
+		t.Fatalf("the second dispatch ran for %q, want %q: the rejected observation leaked the slot", second, testRunID2)
 	}
+	if err := <-done; err != nil {
+		t.Fatalf("the resumed dispatch must commit, got %v", err)
+	}
+	if store.appendCount() != 2 {
+		t.Fatalf("%d transitions committed, want 2", store.appendCount())
+	}
+}
+
+// requireRunUntouched verifies the rejected observation changed nothing on its
+// own run.
+func requireRunUntouched(t *testing.T, ctx context.Context, store *fakeStore) {
+	t.Helper()
+	state, _, err := store.LoadRun(ctx, testRunID1)
+	if err != nil {
+		t.Fatalf("load run: %v", err)
+	}
+	if got := state.ModelInvocations["m1"].Attempts["a1"].Status; got != kernel.ModelAttemptStatusRequesting {
+		t.Fatalf("attempt status %q, want requesting", got)
+	}
+}
+
+// addAdmittedRun hands the store a second admitted run with a planned model
+// attempt, so its dispatch contends for the same worker slot.
+func addAdmittedRun(store *fakeStore, runID, invID, attID string) {
+	state := kernel.NewState()
+	state.RunID = runID
+	state.Admitted = true
+	state.AdmissionToken = 1
+	state.OwnerIncarnation = 1
+	state.LastSequence = 2
+	state.StepStarted = true
+	state.CurrentStepIndex = 1
+	state.CurrentModelInvocationID = invID
+	state.ModelInvocations[invID] = &kernel.ModelInvocation{
+		InvocationID:      invID,
+		Planned:           true,
+		Completed:         false,
+		Failed:            false,
+		Closed:            false,
+		SelectedAttemptID: "",
+		Attempts:          map[string]*kernel.ModelAttempt{attID: {AttemptID: attID, Status: kernel.ModelAttemptStatusPlanned}},
+	}
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.runs[runID] = state
+	store.runRevs[runID] = 1
 }
