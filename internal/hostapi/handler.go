@@ -230,7 +230,7 @@ func (h *serviceHandler) Subscribe(ctx context.Context, req *connect.Request[hos
 	// not seen start immediately (host-api §6).
 	if state, seq, ok := sub.Snapshot(); ok {
 		serr := stream.Send(&hostv1.SubscribeResponse{Kind: &hostv1.SubscribeResponse_Snapshot{
-			Snapshot: &hostv1.SnapshotEvent{Sequence: seq, State: state},
+			Snapshot: &hostv1.SnapshotEvent{Sequence: seq, State: state, IncarnationId: sub.Incarnation()},
 		}})
 		if serr != nil {
 			return errcode.Wrap(errcode.Internal, "send the snapshot", serr)

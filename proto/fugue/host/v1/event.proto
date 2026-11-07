@@ -23,7 +23,11 @@ message SubscribeRequest {
 
 // HostEvent is one event on a topic. payload is an opaque, topic-specific
 // encoding documented with the topic; typed messages arrive with the module
-// services that own the topics (docs: host-api §6).
+// services that own the topics (docs: host-api §6). A topic whose deltas can
+// be coalesced or dropped under pressure must publish each delta as the
+// complete latest state for its coalescing key, never an increment or a piece
+// — the host may drop a delta and only a later delta for the same key, or a
+// resync, restores the state (docs: transcript §5).
 message HostEvent {
   uint64 sequence = 1;
   string type = 2;
@@ -36,6 +40,9 @@ message HostEvent {
 message SnapshotEvent {
   uint64 sequence = 1;
   bytes state = 2;
+  // incarnation_id is the host incarnation the sequence belongs to, so a
+  // client can build its next cursor without calling HostStatus.
+  string incarnation_id = 3;
 }
 
 // StreamEnd ends a subscription stream. resync_required tells the client to

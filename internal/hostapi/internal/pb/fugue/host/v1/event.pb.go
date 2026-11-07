@@ -143,7 +143,11 @@ func (x *SubscribeRequest) GetCursor() *EventCursor {
 
 // HostEvent is one event on a topic. payload is an opaque, topic-specific
 // encoding documented with the topic; typed messages arrive with the module
-// services that own the topics (docs: host-api §6).
+// services that own the topics (docs: host-api §6). A topic whose deltas can
+// be coalesced or dropped under pressure must publish each delta as the
+// complete latest state for its coalescing key, never an increment or a piece
+// — the host may drop a delta and only a later delta for the same key, or a
+// resync, restores the state (docs: transcript §5).
 type HostEvent struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Sequence      uint64                 `protobuf:"varint,1,opt,name=sequence,proto3" json:"sequence,omitempty"`
@@ -208,9 +212,12 @@ func (x *HostEvent) GetPayload() []byte {
 // Every event that follows has a greater sequence: there is no gap between
 // the snapshot and the stream (docs: event-storage-recovery §9).
 type SnapshotEvent struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Sequence      uint64                 `protobuf:"varint,1,opt,name=sequence,proto3" json:"sequence,omitempty"`
-	State         []byte                 `protobuf:"bytes,2,opt,name=state,proto3" json:"state,omitempty"`
+	state    protoimpl.MessageState `protogen:"open.v1"`
+	Sequence uint64                 `protobuf:"varint,1,opt,name=sequence,proto3" json:"sequence,omitempty"`
+	State    []byte                 `protobuf:"bytes,2,opt,name=state,proto3" json:"state,omitempty"`
+	// incarnation_id is the host incarnation the sequence belongs to, so a
+	// client can build its next cursor without calling HostStatus.
+	IncarnationId string `protobuf:"bytes,3,opt,name=incarnation_id,json=incarnationId,proto3" json:"incarnation_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -257,6 +264,13 @@ func (x *SnapshotEvent) GetState() []byte {
 		return x.State
 	}
 	return nil
+}
+
+func (x *SnapshotEvent) GetIncarnationId() string {
+	if x != nil {
+		return x.IncarnationId
+	}
+	return ""
 }
 
 // StreamEnd ends a subscription stream. resync_required tells the client to
@@ -420,10 +434,11 @@ const file_fugue_host_v1_event_proto_rawDesc = "" +
 	"\tHostEvent\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x18\n" +
-	"\apayload\x18\x03 \x01(\fR\apayload\"A\n" +
+	"\apayload\x18\x03 \x01(\fR\apayload\"h\n" +
 	"\rSnapshotEvent\x12\x1a\n" +
 	"\bsequence\x18\x01 \x01(\x04R\bsequence\x12\x14\n" +
-	"\x05state\x18\x02 \x01(\fR\x05state\"4\n" +
+	"\x05state\x18\x02 \x01(\fR\x05state\x12%\n" +
+	"\x0eincarnation_id\x18\x03 \x01(\tR\rincarnationId\"4\n" +
 	"\tStreamEnd\x12'\n" +
 	"\x0fresync_required\x18\x01 \x01(\bR\x0eresyncRequired\"\xb7\x01\n" +
 	"\x11SubscribeResponse\x12:\n" +

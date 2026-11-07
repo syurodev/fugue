@@ -64,6 +64,20 @@ func collect(t *testing.T, ctx context.Context, sub *Subscription) []Event {
 }
 
 // subscribeCursor subscribes with an explicit cursor and cleans up.
+// subscribeDurable subscribes to the durable test topic "d" with a cursor.
+func subscribeDurable(t *testing.T, hub *EventHub, topic, incarnation string, seq EventSeq) *Subscription {
+	t.Helper()
+	sub, err := hub.Subscribe(t.Context(), SubscribeParams{
+		Principal: string(KindCLI), Topic: topic,
+		Cursor: &EventCursor{Topic: topic, Incarnation: incarnation, Sequence: seq},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sub.Close)
+	return sub
+}
+
 // subscribeCursor subscribes to the test topic "t" with an explicit cursor.
 func subscribeCursor(t *testing.T, hub *EventHub, incarnation string, seq EventSeq) *Subscription {
 	t.Helper()
@@ -239,7 +253,7 @@ func TestPublishNeverBlocksOnASlowSubscriber(t *testing.T) {
 	_ = supervise.Go(t.Context(), "test.publish", func(context.Context) error {
 		defer close(done)
 		for i := range n {
-			if _, err := hub.Publish("t", Event{Type: testDelta, Key: "item-" + string(rune(i)), Payload: []byte("v"), Droppable: true}); err != nil {
+			if _, err := hub.Publish("t", Event{Type: testDelta, Key: "item-" + string(rune(i)), Payload: []byte("v"), LatestForKey: true}); err != nil {
 				t.Error(err)
 				return err
 			}
@@ -271,7 +285,7 @@ func TestSlowSubscriberCoalescesDeltasOfTheSameKey(t *testing.T) {
 	_ = supervise.Go(t.Context(), "test.publish", func(context.Context) error {
 		defer close(done)
 		for range n {
-			if _, err := hub.Publish("t", Event{Type: testDelta, Key: "item-1", Payload: []byte("v"), Droppable: true}); err != nil {
+			if _, err := hub.Publish("t", Event{Type: testDelta, Key: "item-1", Payload: []byte("v"), LatestForKey: true}); err != nil {
 				t.Error(err)
 				return err
 			}
@@ -680,6 +694,108 @@ func TestDurableSlowClientGetsResyncAndThePublisherNeverBlocks(t *testing.T) {
 	}
 }
 
+func TestDurableOutOfOrderPublishResyncsSubscribers(t *testing.T) {
+	t.Parallel()
+	fd := &fakeDurable{}
+	hub := newDurableHub(t, fd, testIncarnation)
+	sub, err := hub.Subscribe(t.Context(), SubscribeParams{Principal: string(KindCLI), Topic: "d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sub.Close)
+	fd.mustCommit(t, hub, "e1")
+	// The owner publishes seq 2, then publishes seq 1 again: its publish
+	// order has regressed below the topic's last published sequence.
+	fd.mu.Lock()
+	fd.seq++
+	fd.events = append(fd.events, Event{Seq: fd.seq, Type: "e2", Payload: []byte("e2")})
+	fd.state = []byte("e2")
+	fd.mu.Unlock()
+	if _, err := hub.Publish("d", Event{Seq: 2, Type: "e2", Payload: []byte("e2")}); err != nil {
+		t.Fatal(err)
+	}
+	skipped, err := hub.Publish("d", Event{Seq: 1, Type: "e1", Payload: []byte("e1")})
+	if err != nil {
+		t.Fatalf("an out-of-order publish failed: %v", err)
+	}
+	if skipped.Seq != 0 {
+		t.Fatalf("the skipped event was fanned out: %+v", skipped)
+	}
+	// The live subscriber drains what it has, then ends with resync_required
+	// so it catches up through Since instead of missing the gap forever.
+	for {
+		if _, ok := sub.Next(t.Context()); !ok {
+			break
+		}
+	}
+	if !sub.ResyncRequired() {
+		t.Fatal("an out-of-order durable publish did not end the stream with resync_required")
+	}
+	// Since reads the committed log in commit order.
+	resub := subscribeDurable(t, hub, "d", testIncarnation, 1)
+	got := collectN(t, t.Context(), resub, 1)
+	if got[0].Seq != 2 {
+		t.Fatalf("catch-up delivered seq %d, want 2", got[0].Seq)
+	}
+}
+
+func TestSlowSnapshotDoesNotBlockPublishAndKeepsNoGap(t *testing.T) {
+	t.Parallel()
+	hub := NewEventHub(testIncarnation)
+	entered := make(chan struct{})
+	gate := make(chan struct{})
+	err := hub.RegisterEphemeral("t", func(context.Context) ([]byte, error) {
+		close(entered)
+		<-gate
+		return []byte(`"s"`), nil
+	}, 1_000_000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Subscribe reads the sequence under the lock and then blocks in the
+	// snapshot outside it.
+	subs, errs := startSubscribe(t.Context(), hub, SubscribeParams{Principal: string(KindCLI), Topic: "t"})
+	<-entered
+	// Publishing while the snapshot is pending completes on its own, and the
+	// events are queued for after the snapshot: no gap.
+	<-commitDeltas(t, hub, "t", 10)
+	close(gate)
+	var sub *Subscription
+	select {
+	case sub = <-subs:
+	case err := <-errs:
+		t.Fatal(err)
+	}
+	t.Cleanup(sub.Close)
+	_, snapSeq, ok := sub.Snapshot()
+	if !ok || snapSeq != 0 {
+		t.Fatalf("the pending snapshot = (%v, %d), want true at 0", ok, snapSeq)
+	}
+	got := collectN(t, t.Context(), sub, 10)
+	for i, ev := range got {
+		if ev.Seq != uint64(i)+1 {
+			t.Fatalf("event %d has seq %d, want %d", i, ev.Seq, i+1)
+		}
+	}
+}
+
+// commitDeltas publishes n events on a goroutine; a failure fails the test.
+func commitDeltas(t *testing.T, hub *EventHub, topic string, n int) <-chan struct{} {
+	t.Helper()
+	done := make(chan struct{})
+	_ = supervise.Go(t.Context(), "test.publish", func(context.Context) error {
+		defer close(done)
+		for range n {
+			if _, err := hub.Publish(topic, Event{Type: "e", Payload: []byte("p")}); err != nil {
+				t.Error(err)
+				return err
+			}
+		}
+		return nil
+	})
+	return done
+}
+
 func TestRegisterRejectsDuplicatesAndInvalidTopics(t *testing.T) {
 	t.Parallel()
 	hub := newTestHub(t)
@@ -711,7 +827,7 @@ func TestEphemeralRingEvictionForcesSnapshot(t *testing.T) {
 	// ring stays bounded; a cursor below the ring falls back to a snapshot,
 	// so no client is handed a history with a missing event.
 	publishN(t, hub, 4)
-	if _, err := hub.Publish("t", Event{Type: testDelta, Key: "k1", Droppable: true}); err != nil {
+	if _, err := hub.Publish("t", Event{Type: testDelta, Key: "k1", LatestForKey: true}); err != nil {
 		t.Fatal(err)
 	}
 	tooOld := subscribeCursor(t, hub, testIncarnation, 0)
@@ -731,29 +847,43 @@ func TestEphemeralRingEvictionForcesSnapshot(t *testing.T) {
 	}
 }
 
-func TestEphemeralRingEvictsADroppableEntryFirst(t *testing.T) {
+func TestEphemeralRingCatchUpBoundariesWithInterleavedKeys(t *testing.T) {
 	t.Parallel()
 	hub := NewEventHub(testIncarnation)
 	err := hub.RegisterEphemeral("t", func(context.Context) ([]byte, error) { return []byte(`"s"`), nil }, 4)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// One delta in a full ring: the next control event evicts that delta —
-	// counted, and the control history stays complete.
-	publishN(t, hub, 4)
-	if _, err := hub.Publish("t", Event{Type: testDelta, Key: "k1", Droppable: true}); err != nil {
+	// Interleaved control events and latest-for-key deltas of two keys push
+	// the ring past capacity; the ring ends holding exactly seqs 6..9.
+	for i := range 4 {
+		if _, err := hub.Publish("t", Event{Type: "c"}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := hub.Publish("t", Event{Type: testDelta, Key: "k" + string(rune('a'+i%2)), LatestForKey: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := hub.Publish("t", Event{Type: "c"}); err != nil {
 		t.Fatal(err)
 	}
-	publishN(t, hub, 1)
-	if got := hub.Dropped(); got != 1 {
-		t.Fatalf("dropped = %d, want 1", got)
+	// A cursor at the ring's edge catches up and receives exactly the
+	// retained events, whatever keys they carry.
+	edge := subscribeCursor(t, hub, testIncarnation, 5)
+	if _, _, ok := edge.Snapshot(); ok {
+		t.Fatal("a cursor at the ring's edge got a snapshot")
 	}
-	after := subscribeCursor(t, hub, testIncarnation, 2)
-	got := collectN(t, t.Context(), after, 3)
-	for i, want := range []EventSeq{3, 4, 6} {
+	got := collectN(t, t.Context(), edge, 4)
+	for i, want := range []EventSeq{6, 7, 8, 9} {
 		if got[i].Seq != want {
-			t.Fatalf("catch-up after eviction: event %d = seq %d, want %d", i, got[i].Seq, want)
+			t.Fatalf("catch-up event %d = seq %d, want %d", i, got[i].Seq, want)
 		}
+	}
+	// A cursor just below the ring falls back to a snapshot instead of a
+	// partial catch-up.
+	below := subscribeCursor(t, hub, testIncarnation, 4)
+	if _, _, ok := below.Snapshot(); !ok {
+		t.Fatal("a cursor below the ring did not get a snapshot")
 	}
 }
 
@@ -766,7 +896,7 @@ func TestCoalescedRingKeepsCatchUpMonotone(t *testing.T) {
 	}
 	publishN(t, hub, 2)
 	for range 3 {
-		if _, perr := hub.Publish("t", Event{Type: testDelta, Key: "k", Droppable: true}); perr != nil {
+		if _, perr := hub.Publish("t", Event{Type: testDelta, Key: "k", LatestForKey: true}); perr != nil {
 			t.Fatal(perr)
 		}
 	}

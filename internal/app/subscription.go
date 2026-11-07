@@ -22,8 +22,9 @@ const (
 // subscriber fell too far behind (resync_required). Next is the only consume
 // path; the handler owns exactly one consume loop.
 type Subscription struct {
-	topic string
-	hub   *EventHub
+	topic       string
+	hub         *EventHub
+	incarnation string // the host incarnation the topic's sequences belong to
 
 	mu      sync.Mutex
 	pending []Event
@@ -60,6 +61,10 @@ func (s *Subscription) Snapshot() (state []byte, seq EventSeq, ok bool) {
 	defer s.mu.Unlock()
 	return s.snap, s.snapSeq, s.haveSnap
 }
+
+// Incarnation returns the host incarnation the subscription's sequences
+// belong to, so a client can build its next cursor from the snapshot alone.
+func (s *Subscription) Incarnation() string { return s.incarnation }
 
 // Next returns the next event in strict sequence order, blocking until one is
 // published, the stream ends or ctx is done. A ended stream reports
@@ -107,7 +112,7 @@ func (s *Subscription) endState() (ended, resync bool) {
 	switch {
 	case s.closed || s.ended:
 		return true, false
-	case s.overflow:
+	case s.overflow || s.resync:
 		s.resync = true
 		return true, true
 	default:
@@ -167,6 +172,16 @@ func (s *Subscription) Close() {
 	s.wake()
 }
 
+// forceResync ends the stream with resync_required once its buffered events
+// are delivered: the topic's committed history has a gap the live queue can
+// never fill, so the client must catch up through the durable source.
+func (s *Subscription) forceResync() {
+	s.mu.Lock()
+	s.resync = true
+	s.mu.Unlock()
+	s.wake()
+}
+
 // markEnded ends the stream cleanly (a drain): queued events already delivered
 // are followed by the end, nothing more is accepted.
 func (s *Subscription) markEnded() {
@@ -178,25 +193,26 @@ func (s *Subscription) markEnded() {
 
 // offer applies the publisher's backpressure policy to one event. It runs on
 // the publisher's goroutine and never blocks: a full queue coalesces or drops
-// a droppable delta and otherwise marks the subscriber overflown, ending its
-// stream with resync_required instead of dropping a control event silently.
+// a latest-for-key delta and otherwise marks the subscriber overflown, ending
+// its stream with resync_required instead of dropping a control event
+// silently.
 func (s *Subscription) offer(ev Event) offerKind {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	switch {
-	case s.closed || s.ended:
+	case s.closed || s.ended || s.resync:
+		// The stream is already ending; nothing further counts as a drop
+		// this subscriber will see.
 		return offerGone
 	case s.overflow:
-		// The stream is already ending with resync_required; nothing further
-		// counts as a drop this subscriber will see.
 		return offerGone
 	}
-	if n := len(s.queue); n > s.head && ev.Droppable && s.queue[n-1].Droppable && s.queue[n-1].Key == ev.Key {
+	if n := len(s.queue); n > s.head && ev.LatestForKey && s.queue[n-1].LatestForKey && s.queue[n-1].Key == ev.Key {
 		s.queue[n-1] = ev
 		return offerCoalesced
 	}
 	if len(s.queue)-s.head >= subscriberQueueCap {
-		if ev.Droppable {
+		if ev.LatestForKey {
 			return offerDropped
 		}
 		s.overflow = true

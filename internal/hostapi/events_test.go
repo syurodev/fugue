@@ -142,6 +142,9 @@ func TestSubscribeStreamsSnapshotAndEventsOverTheSocket(t *testing.T) {
 	if snap == nil || snap.Sequence != 0 || string(snap.State) != `"state"` {
 		t.Fatalf("first message = %+v, want the snapshot at 0", snap)
 	}
+	if snap.IncarnationId != "inc-fake" {
+		t.Fatalf("snapshot incarnation = %q, want inc-fake", snap.IncarnationId)
+	}
 	if _, err := backend.hub.Publish("things", app.Event{Type: "e", Payload: []byte("one")}); err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +177,11 @@ func TestHostTopicLeaseEventsOverTheSocket(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	snapState := hostStateOf(t, recv(t, stream))
+	snapMsg := recv(t, stream)
+	if snapMsg.GetSnapshot().GetIncarnationId() == "" {
+		t.Fatal("the host snapshot carries no incarnation id")
+	}
+	snapState := hostStateOf(t, snapMsg)
 	if snapState.Clients.Total != 1 || snapState.Draining {
 		t.Fatalf("host snapshot = %+v, want one client and no drain", snapState)
 	}

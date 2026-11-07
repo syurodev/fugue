@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -36,15 +37,23 @@ const (
 // Event is one event on one topic. Payload is an opaque, topic-specific
 // encoding — the hub never inspects it, so no protected payload may travel in
 // Type or Key either.
+//
+// An event with LatestForKey carries the complete latest state for its Key —
+// never an increment, never a piece. That is what makes it safe to coalesce
+// or drop under pressure without telling the client: a later event for the
+// same key (or a resync from the topic's durable state) restores everything.
+// A topic whose deltas are pieces of a larger text must not set LatestForKey;
+// the hub would silently lose pieces under pressure (transcript §5).
 type Event struct {
 	Seq     EventSeq
 	Type    string
-	Key     string // coalescing key: consecutive droppable deltas with the same key merge
+	Key     string // coalescing key; required for a latest-for-key event
 	Payload []byte
-	// Droppable marks an ephemeral delta: under queue pressure it may be
-	// coalesced into a newer delta or dropped (counted), never delivered late.
-	// Control events are never dropped; their subscriber resynchronizes.
-	Droppable bool
+	// LatestForKey marks a delta that carries the full latest state for Key:
+	// under queue or ring pressure it may be coalesced into a newer event of
+	// the same key or dropped (counted). Control events are never dropped;
+	// their subscriber resynchronizes.
+	LatestForKey bool
 }
 
 // EventCursor names a position in one topic's sequence: topic, the host
@@ -138,8 +147,10 @@ func (h *EventHub) RegisterDurable(name string, src DurableTopic) error {
 
 // RegisterEphemeral registers an ephemeral topic: an in-memory catch-up ring
 // of bufferCap events plus a snapshot of the owner's current state. The
-// snapshot call happens under the hub lock together with the sequence it
-// reflects, so the pair is atomic against Publish.
+// snapshot function must read memory only — no I/O and no long waits; the hub
+// calls it without holding any lock, so a slow snapshot could not block
+// Publish even if it tried, and the no-gap guarantee comes from the sequence
+// that is read before the state (see topicSnapshot).
 func (h *EventHub) RegisterEphemeral(name string, snapshot func(ctx context.Context) ([]byte, error), bufferCap int) error {
 	if bufferCap <= 0 {
 		bufferCap = defaultEphemeralBufferCap
@@ -179,15 +190,19 @@ func (h *EventHub) authorize(principal, topic string) bool {
 }
 
 // Publish delivers one event to every live subscriber of the topic and never
-// blocks on a subscriber: a full queue coalesces or drops a droppable delta
-// (counted) and otherwise ends that subscriber's stream with resync_required —
-// a control event is never dropped silently.
+// blocks on a subscriber: a full queue coalesces or drops a latest-for-key
+// delta (counted) and otherwise ends that subscriber's stream with
+// resync_required — a control event is never dropped silently.
 //
-// The sequence is the topic owner's concern: an ephemeral topic gets the next
-// sequence from the hub, while a durable topic's owner sets ev.Seq from its
+// The sequence is the topic owner's concern. An ephemeral topic gets the next
+// sequence from the hub. A durable topic's owner sets ev.Seq from its
 // committed log — that sequence survives a host restart, and a hub counter
-// would not. A durable publish with a sequence at or below the last one is a
-// programming error and fails typed.
+// would not — and publishes after its commit, in commit order. A durable
+// publish at or below the last published sequence is an anomaly: the owner's
+// commit order and its publishes have diverged, so the event is not fanned
+// out, the anomaly is logged without the payload, and the topic's live
+// subscribers are ended with resync_required — they catch up through Since,
+// which reads the committed log the owner has already written.
 func (h *EventHub) Publish(name string, ev Event) (Event, error) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -201,7 +216,15 @@ func (h *EventHub) Publish(name string, ev Event) (Event, error) {
 		h.appendRingLocked(t, ev)
 	} else {
 		if ev.Seq == 0 || ev.Seq <= t.lastSeq {
-			return Event{}, errcode.Wrap(errcode.Internal, "publish to the event topic "+name, ErrEventTopicInvalid)
+			slog.Warn("durable event publish out of order",
+				"topic", name, "sequence", ev.Seq, "last_published", t.lastSeq)
+			if ev.Seq > t.lastSeq {
+				t.lastSeq = ev.Seq
+			}
+			for _, s := range t.subs {
+				s.forceResync()
+			}
+			return Event{}, nil
 		}
 		t.lastSeq = ev.Seq
 	}
@@ -216,12 +239,13 @@ func (h *EventHub) Publish(name string, ev Event) (Event, error) {
 }
 
 // appendRingLocked adds ev to an ephemeral topic's catch-up ring, coalescing
-// into the tail when both are droppable deltas of the same key. A full ring
-// evicts the oldest droppable entry; with none, the oldest entry makes room —
-// any cursor that falls below the ring's oldest gets a fresh snapshot, so no
-// client is ever handed a history with a silently missing control event.
+// into the tail when both are latest-for-key deltas of the same key. A full
+// ring evicts exactly the oldest entry: the ring stays a suffix of the
+// published sequence, so ringCovers's check on the first entry stays sound —
+// a cursor below the ring's oldest gets a fresh snapshot and no catch-up can
+// silently miss an event or a key's latest state.
 func (h *EventHub) appendRingLocked(t *eventTopic, ev Event) {
-	if n := len(t.ring); n > 0 && ev.Droppable && t.ring[n-1].Droppable && t.ring[n-1].Key == ev.Key {
+	if n := len(t.ring); n > 0 && ev.LatestForKey && t.ring[n-1].LatestForKey && t.ring[n-1].Key == ev.Key {
 		t.ring[n-1] = ev
 		h.coalesce++
 		return
@@ -230,16 +254,7 @@ func (h *EventHub) appendRingLocked(t *eventTopic, ev Event) {
 		t.ring = append(t.ring, ev)
 		return
 	}
-	for i := range t.ring {
-		if t.ring[i].Droppable {
-			t.ring = append(t.ring[:i], t.ring[i+1:]...)
-			h.dropped++
-			break
-		}
-	}
-	if len(t.ring) >= t.ringCap {
-		t.ring = append(t.ring[:0], t.ring[1:]...)
-	}
+	t.ring = append(t.ring[:0], t.ring[1:]...)
 	t.ring = append(t.ring, ev)
 }
 
@@ -257,7 +272,8 @@ func (h *EventHub) EndStreams() {
 	}
 }
 
-// Dropped reports how many droppable deltas were dropped under pressure.
+// Dropped reports how many latest-for-key deltas were dropped under
+// subscriber-queue pressure.
 func (h *EventHub) Dropped() uint64 {
 	h.mu.Lock()
 	defer h.mu.Unlock()
@@ -312,7 +328,7 @@ func (h *EventHub) registerSubscriber(p SubscribeParams) (*Subscription, *eventT
 	if !ok || !h.authorize(p.Principal, p.Topic) {
 		return nil, nil, 0, nil, 0, ErrSubscriptionDenied
 	}
-	s := &Subscription{topic: p.Topic, hub: h, notify: make(chan struct{}, 1)}
+	s := &Subscription{topic: p.Topic, hub: h, incarnation: h.incarnation, notify: make(chan struct{}, 1)}
 	t.subs = append(t.subs, s)
 	return s, t, t.kind, append([]Event(nil), t.ring...), t.lastSeq, nil
 }
@@ -369,8 +385,14 @@ func (h *EventHub) ephemeralSeed(ctx context.Context, t *eventTopic, ring []Even
 }
 
 // topicSnapshot takes a topic's snapshot with the sequence it reflects. A
-// durable topic's owner answers atomically from its store; an ephemeral
-// snapshot is taken under the hub lock together with the topic sequence.
+// durable topic's owner answers atomically from its store. For an ephemeral
+// topic the sequence is read under the hub lock first and the state is read
+// outside it — the snapshot call holds no hub lock, so it never blocks
+// Publish. The owner's snapshot function must read memory only: no I/O, no
+// long waits. No gap is possible: every event published after the sequence
+// read is queued and delivered after the snapshot. The state read may also
+// include events that race it; those arrive again from the queue, so a
+// topic's state payloads must be idempotent to re-apply.
 func (h *EventHub) topicSnapshot(ctx context.Context, t *eventTopic) ([]byte, EventSeq, error) {
 	if t.kind == topicDurable {
 		state, seq, err := t.durable.Snapshot(ctx)
@@ -380,12 +402,13 @@ func (h *EventHub) topicSnapshot(ctx context.Context, t *eventTopic) ([]byte, Ev
 		return state, seq, nil
 	}
 	h.mu.Lock()
-	defer h.mu.Unlock()
+	seq := t.lastSeq
+	h.mu.Unlock()
 	state, err := t.snapshot(ctx)
 	if err != nil {
 		return nil, 0, errcode.Wrap(errcode.Internal, "snapshot the event topic "+t.name, err)
 	}
-	return state, t.lastSeq, nil
+	return state, seq, nil
 }
 
 // ringCovers reports whether an ephemeral ring reaches back far enough for

@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fugue/host/v1/event.proto.
  */
 export const file_fugue_host_v1_event: GenFile = /*@__PURE__*/
-  fileDesc("ChlmdWd1ZS9ob3N0L3YxL2V2ZW50LnByb3RvEg1mdWd1ZS5ob3N0LnYxIkYKC0V2ZW50Q3Vyc29yEg0KBXRvcGljGAEgASgJEhYKDmluY2FybmF0aW9uX2lkGAIgASgJEhAKCHNlcXVlbmNlGAMgASgEIk0KEFN1YnNjcmliZVJlcXVlc3QSDQoFdG9waWMYASABKAkSKgoGY3Vyc29yGAIgASgLMhouZnVndWUuaG9zdC52MS5FdmVudEN1cnNvciI8CglIb3N0RXZlbnQSEAoIc2VxdWVuY2UYASABKAQSDAoEdHlwZRgCIAEoCRIPCgdwYXlsb2FkGAMgASgMIjAKDVNuYXBzaG90RXZlbnQSEAoIc2VxdWVuY2UYASABKAQSDQoFc3RhdGUYAiABKAwiJAoJU3RyZWFtRW5kEhcKD3Jlc3luY19yZXF1aXJlZBgBIAEoCCKhAQoRU3Vic2NyaWJlUmVzcG9uc2USMAoIc25hcHNob3QYASABKAsyHC5mdWd1ZS5ob3N0LnYxLlNuYXBzaG90RXZlbnRIABIpCgVldmVudBgCIAEoCzIYLmZ1Z3VlLmhvc3QudjEuSG9zdEV2ZW50SAASJwoDZW5kGAMgASgLMhguZnVndWUuaG9zdC52MS5TdHJlYW1FbmRIAEIGCgRraW5kQsIBChFjb20uZnVndWUuaG9zdC52MUIKRXZlbnRQcm90b1ABWktnaXRodWIuY29tL3N5dXJvZGV2L2Z1Z3VlL2ludGVybmFsL2hvc3RhcGkvaW50ZXJuYWwvcGIvZnVndWUvaG9zdC92MTtob3N0djGiAgNGSFiqAg1GdWd1ZS5Ib3N0LlYxygINRnVndWVcSG9zdFxWMeICGUZ1Z3VlXEhvc3RcVjFcR1BCTWV0YWRhdGHqAg9GdWd1ZTo6SG9zdDo6VjFiBnByb3RvMw");
+  fileDesc("ChlmdWd1ZS9ob3N0L3YxL2V2ZW50LnByb3RvEg1mdWd1ZS5ob3N0LnYxIkYKC0V2ZW50Q3Vyc29yEg0KBXRvcGljGAEgASgJEhYKDmluY2FybmF0aW9uX2lkGAIgASgJEhAKCHNlcXVlbmNlGAMgASgEIk0KEFN1YnNjcmliZVJlcXVlc3QSDQoFdG9waWMYASABKAkSKgoGY3Vyc29yGAIgASgLMhouZnVndWUuaG9zdC52MS5FdmVudEN1cnNvciI8CglIb3N0RXZlbnQSEAoIc2VxdWVuY2UYASABKAQSDAoEdHlwZRgCIAEoCRIPCgdwYXlsb2FkGAMgASgMIkgKDVNuYXBzaG90RXZlbnQSEAoIc2VxdWVuY2UYASABKAQSDQoFc3RhdGUYAiABKAwSFgoOaW5jYXJuYXRpb25faWQYAyABKAkiJAoJU3RyZWFtRW5kEhcKD3Jlc3luY19yZXF1aXJlZBgBIAEoCCKhAQoRU3Vic2NyaWJlUmVzcG9uc2USMAoIc25hcHNob3QYASABKAsyHC5mdWd1ZS5ob3N0LnYxLlNuYXBzaG90RXZlbnRIABIpCgVldmVudBgCIAEoCzIYLmZ1Z3VlLmhvc3QudjEuSG9zdEV2ZW50SAASJwoDZW5kGAMgASgLMhguZnVndWUuaG9zdC52MS5TdHJlYW1FbmRIAEIGCgRraW5kQsIBChFjb20uZnVndWUuaG9zdC52MUIKRXZlbnRQcm90b1ABWktnaXRodWIuY29tL3N5dXJvZGV2L2Z1Z3VlL2ludGVybmFsL2hvc3RhcGkvaW50ZXJuYWwvcGIvZnVndWUvaG9zdC92MTtob3N0djGiAgNGSFiqAg1GdWd1ZS5Ib3N0LlYxygINRnVndWVcSG9zdFxWMeICGUZ1Z3VlXEhvc3RcVjFcR1BCTWV0YWRhdGHqAg9GdWd1ZTo6SG9zdDo6VjFiBnByb3RvMw");
 
 /**
  * EventCursor names a position in one topic's event sequence (docs: host-api
@@ -75,7 +75,11 @@ export const SubscribeRequestSchema: GenMessage<SubscribeRequest> = /*@__PURE__*
 /**
  * HostEvent is one event on a topic. payload is an opaque, topic-specific
  * encoding documented with the topic; typed messages arrive with the module
- * services that own the topics (docs: host-api §6).
+ * services that own the topics (docs: host-api §6). A topic whose deltas can
+ * be coalesced or dropped under pressure must publish each delta as the
+ * complete latest state for its coalescing key, never an increment or a piece
+ * — the host may drop a delta and only a later delta for the same key, or a
+ * resync, restores the state (docs: transcript §5).
  *
  * @generated from message fugue.host.v1.HostEvent
  */
@@ -120,6 +124,14 @@ export type SnapshotEvent = Message<"fugue.host.v1.SnapshotEvent"> & {
    * @generated from field: bytes state = 2;
    */
   state: Uint8Array;
+
+  /**
+   * incarnation_id is the host incarnation the sequence belongs to, so a
+   * client can build its next cursor without calling HostStatus.
+   *
+   * @generated from field: string incarnation_id = 3;
+   */
+  incarnationId: string;
 };
 
 /**
