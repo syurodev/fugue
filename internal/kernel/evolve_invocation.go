@@ -6,6 +6,8 @@ func evolveModelDispatchEvents(s *State, e Event) bool {
 		s.CurrentModelInvocationID = ev.InvocationID
 		inv := &ModelInvocation{
 			InvocationID:      ev.InvocationID,
+			ModelRef:          ev.ModelRef,
+			ContextRef:        ev.ContextRef,
 			Planned:           true,
 			Completed:         false,
 			Failed:            false,
