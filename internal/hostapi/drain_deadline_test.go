@@ -26,11 +26,14 @@ import (
 // fires.
 type blockingStatusBackend struct {
 	app.Backend
-	started   atomic.Bool
-	enterOnce sync.Once
-	entered   chan struct{}
-	doneOnce  sync.Once
-	returned  chan struct{}
+	started    atomic.Bool
+	blockOnce  atomic.Bool
+	enterOnce  sync.Once
+	entered    chan struct{}
+	doneOnce   sync.Once
+	returned   chan struct{}
+	proceed    chan struct{}
+	proceedOne sync.Once
 }
 
 func newBlockingStatusBackend(rt app.Backend) *blockingStatusBackend {
@@ -38,8 +41,12 @@ func newBlockingStatusBackend(rt app.Backend) *blockingStatusBackend {
 		Backend:  rt,
 		entered:  make(chan struct{}),
 		returned: make(chan struct{}),
+		proceed:  make(chan struct{}),
 	}
 }
+
+// release lets the blocked handler finish; safe to call more than once.
+func (b *blockingStatusBackend) release() { b.proceedOne.Do(func() { close(b.proceed) }) }
 
 func (b *blockingStatusBackend) Status(ctx context.Context) (app.HostStatusView, error) {
 	if !b.started.Swap(true) {
@@ -49,16 +56,41 @@ func (b *blockingStatusBackend) Status(ctx context.Context) (app.HostStatusView,
 		}
 		return view, nil
 	}
+	// Only the first call blocks: after the force close the client transport
+	// may replay the request onto a fresh connection, and a replay must not
+	// hold the drain's in-flight wait.
+	if !b.blockOnce.CompareAndSwap(false, true) {
+		return app.HostStatusView{}, errcode.New(errcode.Unavailable, "the forced-close replay was rejected")
+	}
 	b.enterOnce.Do(func() { close(b.entered) })
 	<-ctx.Done()
 	b.doneOnce.Do(func() { close(b.returned) })
+	// Hold the handler open until the test releases it: the drain waits for
+	// in-flight handlers, so the store cannot close while this gate is shut.
+	<-b.proceed
 	return app.HostStatusView{}, errcode.Wrap(errcode.Canceled, "the blocked status request ended", ctx.Err())
+}
+
+// drainStartedTransport signals when the drain reached the transport, after
+// the deadline timer is armed.
+type drainStartedTransport struct {
+	inner   app.HostTransport
+	started chan struct{}
+	once    sync.Once
+}
+
+func (t *drainStartedTransport) Drain(ctx context.Context, force bool) error {
+	t.once.Do(func() { close(t.started) })
+	if err := t.inner.Drain(ctx, force); err != nil {
+		return errcode.Wrap(errcode.Internal, "the inner transport drain failed", err)
+	}
+	return nil
 }
 
 // startDeadlineServer wires a real runtime with a drain deadline on the fake
 // clock behind a real server, and a backend whose Status blocks every call
 // after the Start-time one.
-func startDeadlineServer(t *testing.T) (*app.HostProcess, *Server, *blockingStatusBackend, string, *clock.Fake, string) {
+func startDeadlineServer(t *testing.T) (*app.HostProcess, *Server, *blockingStatusBackend, string, *clock.Fake, <-chan struct{}) {
 	t.Helper()
 	clk := clock.NewFake(time.Unix(0, 0))
 	dir := shortDir(t)
@@ -72,6 +104,8 @@ func startDeadlineServer(t *testing.T) (*app.HostProcess, *Server, *blockingStat
 		IDs:     ids.NewUUIDv7(clk, ids.NewDeterministic("conn")),
 		HostUID: int64(os.Getuid()),
 	})
+	started := make(chan struct{})
+	tr := &drainStartedTransport{inner: srv, started: started}
 	hp, err := app.StartHost(t.Context(), &app.HostDeps{
 		DataDir: dir,
 		Config: app.HostConfig{
@@ -82,7 +116,7 @@ func startDeadlineServer(t *testing.T) (*app.HostProcess, *Server, *blockingStat
 		},
 		Clock:     clk,
 		IDs:       ids.NewUUIDv7(clk, ids.NewDeterministic("host")),
-		Transport: srv,
+		Transport: tr,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -92,6 +126,7 @@ func startDeadlineServer(t *testing.T) (*app.HostProcess, *Server, *blockingStat
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		backend.release()
 		if err := srv.Drain(context.WithoutCancel(t.Context()), true); err != nil {
 			t.Errorf("cleanup drain: %v", err)
 		}
@@ -101,12 +136,12 @@ func startDeadlineServer(t *testing.T) (*app.HostProcess, *Server, *blockingStat
 			t.Errorf("close the host = %v, want the deadline escalation error", err)
 		}
 	})
-	return hp, srv, backend, sock.Path, clk, dir
+	return hp, srv, backend, sock.Path, clk, started
 }
 
 func TestDrainDeadlineForcesCloseBeforeStoreClose(t *testing.T) {
 	t.Parallel()
-	hp, _, backend, sockPath, clk, _ := startDeadlineServer(t)
+	hp, _, backend, sockPath, clk, drainStarted := startDeadlineServer(t)
 
 	clientA, _ := newTestClient(t, sockPath)
 	clientB, _ := newTestClient(t, sockPath)
@@ -144,16 +179,20 @@ func TestDrainDeadlineForcesCloseBeforeStoreClose(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Shutdown rpc = %v", err)
 	}
+	// The deadline timer is armed before the drain enters the transport, so
+	// waiting for the drain to get there makes the advance deterministic.
+	<-drainStarted
 	clk.Advance(5 * time.Second)
 
 	// Close must end the blocked handler before the drain can return, and the
-	// store closes only after the transport drain returned: at the moment the
-	// handler has returned, the drain is still waiting for it, so the store
-	// must still be open.
+	// store closes only after the transport drain returned: the drain is
+	// waiting for this handler until the test releases it, so the store must
+	// still be open here — deterministically.
 	<-backend.returned
 	if hp.StoreClosed() {
-		t.Fatal("the store closed while the blocked handler was still returning")
+		t.Fatal("the store closed while the blocked handler was still held")
 	}
+	backend.release()
 	res := <-resCh
 	if res == nil {
 		t.Fatal("the forced-closed request reported success")
