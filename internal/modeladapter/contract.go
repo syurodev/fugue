@@ -61,6 +61,10 @@ const (
 )
 
 // Usage is normalized token accounting supplied by a provider when known.
+// Input is the total prompt tokens including the cache reads (the context
+// engine uses it as the prompt-size baseline); Reasoning is a subset of
+// Output, never an addition to it, so budget tokens are
+// (Input - CacheRead) + Output (budget §4).
 type Usage struct {
 	Input      int
 	Output     int

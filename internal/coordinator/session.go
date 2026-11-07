@@ -29,6 +29,14 @@ type Config struct {
 	// IDs makes command IDs and worker reservation refs; a reservation ref is
 	// recorded and must never repeat, so the generator must not either.
 	IDs ids.Generator
+	// OnCommitted is called on the actor after every applied commit — a
+	// submission, an admission, a dispatch or a worker observation, including
+	// one settled by a read-back — with the run's snapshot. The snapshot is the
+	// actor's state at delivery, so a commit whose completion ran a follow-up
+	// commit (an accept admitted immediately) delivers the later state. State is
+	// never mutated after publication, but the hook must not block and must not
+	// call back into the session synchronously.
+	OnCommitted func(runID string, state *kernel.State)
 }
 
 // Request defines a command and caller context for the session actor.
@@ -67,12 +75,14 @@ type submitReply struct {
 	err   error
 }
 
-// submission is one mailbox message: a caller request, a worker observation or
-// the result of a background read-back.
+// submission is one mailbox message: a caller request, a worker observation,
+// the result of a background read-back, or a worker announcing that its
+// executor finished an attempt.
 type submission struct {
 	req      Request
 	obs      *Observation
 	resolved *resolution
+	served   *Lease
 	replyCh  chan submitReply
 }
 
@@ -106,7 +116,6 @@ type Session struct {
 	onPark       func()
 	onResolve    func(time.Time)
 	onTimerArmed func()
-	onCommitted  func()
 }
 
 // Start loads the admission row, validates ownership, and starts the actor goroutine.
@@ -159,28 +168,8 @@ func newSessionInstance(cfg *Config, adm *Admission, inherited string, cancel co
 		onPark:         nil,
 		onResolve:      nil,
 		onTimerArmed:   nil,
-		onCommitted:    nil,
 	}
 	return s
-}
-
-func (s *Session) startWorkers(actorCtx context.Context) {
-	for range s.cfg.WorkerCapacity {
-		workerTask := supervise.Go(actorCtx, "coordinator.worker", func(wCtx context.Context) error {
-			for {
-				select {
-				case <-wCtx.Done():
-					return nil
-				case w, ok := <-s.slots.handoffCh:
-					if !ok {
-						return nil
-					}
-					s.cfg.Executor.Execute(wCtx, w, s.report)
-				}
-			}
-		})
-		s.workerTasks = append(s.workerTasks, workerTask)
-	}
 }
 
 // Submit serializes a request through the session actor.
@@ -192,6 +181,7 @@ func (s *Session) Submit(ctx context.Context, r *Request) (Reply, error) {
 		req:      *r,
 		obs:      nil,
 		resolved: nil,
+		served:   nil,
 		replyCh:  make(chan submitReply, 1),
 	})
 }
@@ -242,22 +232,6 @@ func (s *Session) Stop() {
 	})
 }
 
-func (s *Session) report(obs *Observation) {
-	if obs == nil {
-		return
-	}
-	sub := submission{
-		req:      Request{},
-		obs:      obs,
-		resolved: nil,
-		replyCh:  nil,
-	}
-	select {
-	case s.mailbox <- sub:
-	case <-s.stopped:
-	}
-}
-
 func (s *Session) loop(ctx context.Context) error {
 	for {
 		select {
@@ -294,6 +268,10 @@ func (s *Session) ensureRunLoaded(ctx context.Context, runID string) (*kernel.St
 func (s *Session) handleSubmission(ctx context.Context, sub *submission) {
 	if sub.resolved != nil {
 		s.handleResolution(ctx, sub.resolved)
+		return
+	}
+	if sub.served != nil {
+		s.handleServed(ctx, sub.served)
 		return
 	}
 	if sub.obs != nil {
@@ -484,11 +462,14 @@ func (s *Session) requestCommitted(
 		Receipt:   res.Receipt,
 	}, nil)
 
-	s.notifyCommitted()
+	s.notifyCommitted(runID)
 }
 
-func (s *Session) notifyCommitted() {
-	if s.onCommitted != nil {
-		s.onCommitted()
+// notifyCommitted hands the run's post-commit snapshot to the configured hook.
+// Evolve is copy-on-write and every commit replaces s.runs[runID], so the
+// published state is never mutated by a later commit.
+func (s *Session) notifyCommitted(runID string) {
+	if s.cfg.OnCommitted != nil {
+		s.cfg.OnCommitted(runID, s.runs[runID])
 	}
 }

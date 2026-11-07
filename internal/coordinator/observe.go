@@ -222,7 +222,7 @@ func (s *Session) observationCommitted(
 		Receipt:   res.Receipt,
 	}, nil)
 
-	s.notifyCommitted()
+	s.notifyCommitted(runID)
 }
 
 // completeSlot frees the capacity of an attempt whose terminal observation is

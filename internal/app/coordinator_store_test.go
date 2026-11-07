@@ -26,6 +26,8 @@ const (
 	adapterSession       = "session"
 	adapterAcceptCommand = "accept"
 	adapterOriginUser    = "user"
+	adapterOriginSystem  = "system"
+	adapterUsageKnown    = "known"
 	adapterModelID       = "model"
 	realFirstRun         = "first"
 	realSecondRun        = "second"
@@ -221,7 +223,7 @@ func adapterResponseBatch() *coordinator.Transition {
 	response.InvocationID = adapterModelID
 	response.AttemptID = "attempt"
 	response.ResponseRef = "response"
-	response.UsageStatus = "known"
+	response.UsageStatus = adapterUsageKnown
 	response.FinishReason = kernel.FinishReasonStop
 	tr.Events = append(tr.Events, admitted, step, plan, response)
 	tr.Fence.AdmissionToken = 1

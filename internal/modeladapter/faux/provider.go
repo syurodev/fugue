@@ -35,6 +35,7 @@ type Provider struct {
 	mu      sync.Mutex
 	scripts []Script
 	next    int
+	models  []string
 	calls   atomic.Int64
 	done    atomic.Int64
 	failed  atomic.Int64
@@ -54,8 +55,13 @@ func New(scripts ...Script) *Provider {
 
 // Stream starts one scripted model call and closes the result channel at its
 // terminal outcome, cut point, or cancellation.
-func (p *Provider) Stream(ctx context.Context, _ *modeladapter.Request) <-chan modeladapter.Event {
+func (p *Provider) Stream(ctx context.Context, req *modeladapter.Request) <-chan modeladapter.Event {
 	result := make(chan modeladapter.Event)
+	p.mu.Lock()
+	if req != nil {
+		p.models = append(p.models, req.Model)
+	}
+	p.mu.Unlock()
 	p.calls.Add(1)
 	p.active.Add(1)
 	script, ok := p.takeScript()
@@ -140,6 +146,14 @@ func (p *Provider) finish(kind modeladapter.EventKind) bool {
 		return true
 	}
 	return false
+}
+
+// RequestedModels returns the model name of every Stream call in order, so
+// headless tests can pin what the executor asked the provider to run.
+func (p *Provider) RequestedModels() []string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return slices.Clone(p.models)
 }
 
 // Snapshot returns cumulative calls and outcomes, including currently active streams.

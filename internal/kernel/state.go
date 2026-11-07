@@ -25,9 +25,14 @@ type ModelAttempt struct {
 }
 
 // ModelInvocation tracks the logical model operation of a step across retry attempts.
+// ModelRef and ContextRef mirror the plan event that created the invocation
+// (as ToolInvocation mirrors its plan): the folded state stays self-contained
+// without replaying the stream.
 type ModelInvocation struct {
 	ToolIDs           []string
 	InvocationID      string
+	ModelRef          string
+	ContextRef        string
 	Planned           bool
 	Completed         bool
 	Failed            bool

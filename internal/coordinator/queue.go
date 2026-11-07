@@ -208,6 +208,7 @@ func (s *Session) admitted(item *queuedRun, token uint64, initial contextStart) 
 	s.admission.ContextEpoch = initial.epoch
 	s.admission.ContextRevision = initial.revision
 	s.admission.ContextStartRunID = initial.startRunID
+	s.notifyCommitted(item.runID)
 }
 
 // contextStart is the context continuity a run is admitted with.
