@@ -1,0 +1,25 @@
+# Gate definition: docs/quality-gates.md section 9. Changes need the gate-change-approved label.
+# Pull requests run the macOS tests only for platform-specific changes (pr.yml);
+# every merge into main runs them, so a macOS-only failure surfaces at once.
+name: main
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: main-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  test-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: go tool task test

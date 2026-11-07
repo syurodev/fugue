@@ -1,9 +1,9 @@
 # GitHub setup
 
-The CI workflows (`.github/workflows/pr.yml`, `nightly.yml`) and `.github/CODEOWNERS` live in
-the repository, but the settings below belong to the repository owner and are changed in
+The CI workflows (`.github/workflows/pr.yml`, `pr-meta.yml`, `main.yml`, `nightly.yml`) and
+`.github/CODEOWNERS` live in the repository, but the settings below belong to the repository owner and are changed in
 GitHub, not by an agent. Do them once, in this order. The names `fmt`, `lint`, ... are the job
-names of `pr.yml`; branch protection is only as strong as this list.
+names of `pr.yml` and `pr-meta.yml`; branch protection is only as strong as this list.
 
 ## 1. Create the approval label
 

@@ -46,14 +46,15 @@ func prGateTasks() []string {
 	return []string{"fmt", "lint", "vet", "arch", "test", "coverage", "deadcode", "mod", "proto", "fuzz-short", "mutation-changed", "gate-guard", "commit-lint"}
 }
 
-// quality-gates section 9 lists the jobs a PR must pass; each is a job here and,
-// once branch protection is on, a required status check.
+// quality-gates section 9 lists the jobs a PR must pass; each is a job in pr.yml
+// or pr-meta.yml and, once branch protection is on, a required status check.
 func TestPRWorkflowRunsEveryRequiredJob(t *testing.T) {
 	t.Parallel()
 	pr := readWorkflow(t, "pr.yml")
+	meta := readWorkflow(t, "pr-meta.yml")
 	for _, job := range prGateTasks() {
-		if !strings.Contains(pr, "\n  "+job+":\n") {
-			t.Errorf("pr.yml has no job %q", job)
+		if !strings.Contains(pr+meta, "\n  "+job+":\n") {
+			t.Errorf("pr.yml and pr-meta.yml have no job %q", job)
 		}
 	}
 	for _, os := range []string{"ubuntu-latest", "macos-latest"} {
@@ -62,8 +63,36 @@ func TestPRWorkflowRunsEveryRequiredJob(t *testing.T) {
 		}
 	}
 	for _, want := range []string{"fetch-depth: 0", "gateguard", "commitlint", "label-actor", "-approver"} {
+		if !strings.Contains(meta, want) {
+			t.Errorf("pr-meta.yml lacks %q", want)
+		}
+	}
+}
+
+// Labels and title edits rerun only the meta checks; the code gates run on
+// pushes, decide their scope with fuguegate changes, and every merge runs the
+// macOS tests that a portable change skipped.
+func TestPRWorkflowsSplitByTrigger(t *testing.T) {
+	t.Parallel()
+	pr := readWorkflow(t, "pr.yml")
+	meta := readWorkflow(t, "pr-meta.yml")
+	main := readWorkflow(t, "main.yml")
+	if !strings.Contains(pr, "types: [opened, synchronize, reopened]\n") {
+		t.Error("pr.yml must run only on opened, synchronize and reopened")
+	}
+	for _, want := range []string{"edited", "labeled", "unlabeled"} {
+		if !strings.Contains(meta, want) {
+			t.Errorf("pr-meta.yml does not react to %q", want)
+		}
+	}
+	for _, want := range []string{"fuguegate changes", "needs: changes", "needs: [changes, test]"} {
 		if !strings.Contains(pr, want) {
 			t.Errorf("pr.yml lacks %q", want)
+		}
+	}
+	for _, want := range []string{"branches: [main]", "runs-on: macos-latest", "go tool task test"} {
+		if !strings.Contains(main, want) {
+			t.Errorf("main.yml lacks %q", want)
 		}
 	}
 }
@@ -104,7 +133,7 @@ func TestCacheWorkflowWarmsTheDefaultBranch(t *testing.T) {
 func TestCoverageJobReusesTheTestProfile(t *testing.T) {
 	t.Parallel()
 	pr := readWorkflow(t, "pr.yml")
-	for _, want := range []string{"upload-artifact", "download-artifact", "needs: test", "name: cover-profile"} {
+	for _, want := range []string{"upload-artifact", "download-artifact", "needs: [changes, test]", "name: cover-profile"} {
 		if !strings.Contains(pr, want) {
 			t.Errorf("pr.yml lacks %q", want)
 		}
@@ -118,7 +147,7 @@ func TestCoverageJobReusesTheTestProfile(t *testing.T) {
 
 func TestActionsArePinnedToCommits(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"pr.yml", "nightly.yml", "cache.yml"} {
+	for _, name := range []string{"pr.yml", "pr-meta.yml", "main.yml", "nightly.yml", "cache.yml"} {
 		if got := unpinnedActions(readWorkflow(t, name)); len(got) > 0 {
 			t.Errorf("%s uses actions not pinned to a commit SHA: %v", name, got)
 		}
