@@ -27,7 +27,6 @@ import (
 type blockingStatusBackend struct {
 	app.Backend
 	started    atomic.Bool
-	blockOnce  atomic.Bool
 	enterOnce  sync.Once
 	entered    chan struct{}
 	doneOnce   sync.Once
@@ -56,12 +55,9 @@ func (b *blockingStatusBackend) Status(ctx context.Context) (app.HostStatusView,
 		}
 		return view, nil
 	}
-	// Only the first call blocks: after the force close the client transport
-	// may replay the request onto a fresh connection, and a replay must not
-	// hold the drain's in-flight wait.
-	if !b.blockOnce.CompareAndSwap(false, true) {
-		return app.HostStatusView{}, errcode.New(errcode.Unavailable, "the forced-close replay was rejected")
-	}
+	// A request replayed onto a fresh connection after the force close is
+	// rejected by the server's admission gate (drained is already set), so it
+	// never reaches this backend and cannot hold the drain's in-flight wait.
 	b.enterOnce.Do(func() { close(b.entered) })
 	<-ctx.Done()
 	b.doneOnce.Do(func() { close(b.returned) })

@@ -158,11 +158,14 @@ func (s *Server) Start(ctx context.Context, backend app.Backend) error {
 	})
 	handler := http.NewServeMux()
 	handler.Handle(hostv1connect.NewHostServiceHandler(&serviceHandler{backend: backend}))
-	// The in-flight wrapper lets the drain wait for handlers that are still
-	// running when the deadline force-closes their connections, so none of
-	// them can outlive the store the host closes after this drain.
+	// The admission gate and the in-flight wrapper let the drain wait for
+	// handlers that are still running when the deadline force-closes their
+	// connections, so none of them can outlive the store the host closes
+	// after this drain.
 	mux := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.inflight.Add(1)
+		if !s.admit(w) {
+			return
+		}
 		defer s.inflight.Done()
 		handler.ServeHTTP(w, r)
 	})
@@ -193,6 +196,22 @@ func (s *Server) Start(ctx context.Context, backend app.Backend) error {
 		return errcode.Wrap(errcode.Internal, "serve the host api", err)
 	})
 	return nil
+}
+
+// admit gates a request into the handler: after the drain started it is
+// rejected with 503 and not counted, otherwise it is registered in-flight
+// under the same lock. Drain sets drained under that lock before it shuts
+// the http server down, so no request can be added after the drain waits for
+// the in-flight ones.
+func (s *Server) admit(w http.ResponseWriter) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.drained {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		return false
+	}
+	s.inflight.Add(1)
+	return true
 }
 
 // registerConn creates the connection's state under its context value.

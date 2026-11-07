@@ -685,9 +685,9 @@ func TestLeaseReleasedNeverBlocksAfterClose(t *testing.T) {
 		t.Fatalf("close the host = %v", err)
 	}
 	done := make(chan struct{})
-	supervise.Go(t.Context(), "test.release", func(context.Context) error {
-		rt.LeaseReleased(t.Context(), "c1")
-		rt.LeaseReleased(t.Context(), "c1")
+	supervise.Go(t.Context(), "test.release", func(ctx context.Context) error {
+		rt.LeaseReleased(ctx, "c1")
+		rt.LeaseReleased(ctx, "c1")
 		close(done)
 		return nil
 	})
@@ -717,16 +717,17 @@ func TestConcurrentReleasesDoNotBlock(t *testing.T) {
 		wg.Add(leases)
 		for i := range leases {
 			id := fmt.Sprintf("r%d-c%d", round, i)
-			supervise.Go(t.Context(), "test.release", func(context.Context) error {
-				rt.LeaseReleased(t.Context(), id)
+			supervise.Go(t.Context(), "test.release", func(ctx context.Context) error {
+				rt.LeaseReleased(ctx, id)
 				wg.Done()
 				return nil
 			})
 		}
-		go func() {
+		supervise.Go(t.Context(), "test.wait", func(context.Context) error {
 			wg.Wait()
 			close(done)
-		}()
+			return nil
+		})
 		select {
 		case <-done:
 		case <-t.Context().Done():
