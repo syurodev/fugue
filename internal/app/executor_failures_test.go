@@ -100,6 +100,26 @@ func TestModelStreamFailsClosed(t *testing.T) {
 		executor.Execute(t.Context(), modelWork(), capture.report)
 		requireNoTerminal(t, capture)
 	})
+	t.Run("usage out of range", func(t *testing.T) {
+		t.Parallel()
+		capture := &reportCapture{}
+		script := streamScript([]modeladapter.Event{{Kind: modeladapter.EventDone, StopReason: modeladapter.StopReasonStop, Usage: modeladapter.Usage{Input: 100, CacheRead: 200, Output: 1}}})
+		executor := &modelExecutor{provider: script, ids: execGen("usage-range"), source: newFakeSource(modelRunEvents(testModelFence), seededContext(t, nil))}
+		executor.Execute(t.Context(), modelWork(), capture.report)
+		requireNoTerminal(t, capture)
+	})
+	t.Run("orphan tool call delta", func(t *testing.T) {
+		t.Parallel()
+		capture := &reportCapture{}
+		script := streamScript([]modeladapter.Event{
+			{Kind: modeladapter.EventStart},
+			{Kind: modeladapter.EventToolCallDelta, Delta: validArgsJSON},
+			{Kind: modeladapter.EventDone, StopReason: modeladapter.StopReasonToolUse, Usage: modeladapter.Usage{Output: 1}},
+		})
+		executor := &modelExecutor{provider: script, ids: execGen("orphan-delta"), source: newFakeSource(modelRunEvents(testModelFence), seededContext(t, nil))}
+		executor.Execute(t.Context(), modelWork(), capture.report)
+		requireNoTerminal(t, capture)
+	})
 	t.Run("unsupported stop reason", func(t *testing.T) {
 		t.Parallel()
 		capture := &reportCapture{}
@@ -200,5 +220,33 @@ func TestFakeSourceRejectsUnknownPayload(t *testing.T) {
 
 	if _, err := newFakeSource(nil, nil).OpenPayload(t.Context(), "s1", "missing"); !errors.Is(err, errUnknownPayload) {
 		t.Fatalf("unknown payload error %v", err)
+	}
+}
+
+// TestMultipleToolCallsFailTheAttempt pins the slice's single next step: a
+// tool_use response proposing two calls fails closed before anything terminal
+// is reported (Q-30 owns the canonical record and the context fan-in).
+func TestMultipleToolCallsFailTheAttempt(t *testing.T) {
+	t.Parallel()
+
+	capture := &reportCapture{}
+	script := streamScript([]modeladapter.Event{
+		{Kind: modeladapter.EventStart},
+		{Kind: modeladapter.EventToolCallStart, CallID: "call-1", Name: pureReadTool},
+		{Kind: modeladapter.EventToolCallDelta, Delta: validArgsJSON},
+		{Kind: modeladapter.EventToolCallEnd},
+		{Kind: modeladapter.EventToolCallStart, CallID: "call-2", Name: pureReadTool},
+		{Kind: modeladapter.EventToolCallDelta, Delta: `{"Key":"k2"}`},
+		{Kind: modeladapter.EventToolCallEnd},
+		{Kind: modeladapter.EventDone, StopReason: modeladapter.StopReasonToolUse, Usage: modeladapter.Usage{Output: 5}},
+	})
+	executor := &modelExecutor{provider: script, ids: execGen("multi-call"), source: newFakeSource(modelRunEvents(testModelFence), seededContext(t, nil))}
+	executor.Execute(t.Context(), modelWork(), capture.report)
+
+	requireNoTerminal(t, capture)
+	for _, obs := range capture.all() {
+		if _, ok := obs.Command.(*kernel.ObserveModelStreamCommand); !ok {
+			t.Fatalf("reported %T before the response was known to fail", obs.Command)
+		}
 	}
 }

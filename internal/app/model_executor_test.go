@@ -38,10 +38,12 @@ const (
 	execInputRef    = "input-1"
 	contextRoleUser = "user"
 	testContextRef  = "ctx-1"
+	pureReadTool    = "pure_read"
+	validArgsJSON   = `{"Key":"k"}`
 )
 
-// fakeSource answers the executors' reads from memory: the folded state, the
-// run's events (the model plan lives only in the stream) and payload bytes.
+// fakeSource answers the executors' reads from memory: the folded state (its
+// invocations mirror the plan refs) and payload bytes.
 type fakeSource struct {
 	mu       sync.Mutex
 	events   map[string][]kernel.Event
@@ -60,18 +62,6 @@ func (s *fakeSource) LoadRun(_ context.Context, runID string) (*kernel.State, ui
 		state = kernel.Evolve(state, ev)
 	}
 	return state, uint64(len(s.events[runID])), nil
-}
-
-func (s *fakeSource) ReadEvents(_ context.Context, runID string, fromSequence, _ uint64) ([]kernel.Event, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	var out []kernel.Event
-	for _, ev := range s.events[runID] {
-		if ev.EventEnvelope().Sequence >= fromSequence {
-			out = append(out, ev)
-		}
-	}
-	return out, nil
 }
 
 func (s *fakeSource) OpenPayload(_ context.Context, _, payloadID string) ([]byte, error) {
@@ -207,7 +197,7 @@ func TestModelExecutorReportsStreamThenResponse(t *testing.T) {
 		t.Fatalf("executor reported %d observations, want 2", len(obs))
 	}
 	requireStreamObservation(t, obs[0])
-	requireStopResponse(t, obs[1])
+	requireStopResponse(t, obs[1], script)
 }
 
 func requireStreamObservation(t *testing.T, obs *coordinator.Observation) {
@@ -224,7 +214,7 @@ func requireStreamObservation(t *testing.T, obs *coordinator.Observation) {
 	}
 }
 
-func requireStopResponse(t *testing.T, obs *coordinator.Observation) {
+func requireStopResponse(t *testing.T, obs *coordinator.Observation, provider *faux.Provider) {
 	t.Helper()
 	response, ok := obs.Command.(*kernel.ObserveModelResponseCommand)
 	if !ok {
@@ -234,9 +224,10 @@ func requireStopResponse(t *testing.T, obs *coordinator.Observation) {
 		t.Fatalf("response observation incomplete: %+v", response)
 	}
 	usage := obs.Facts.Usage
-	if usage == nil || usage.TokensUsed != 14 || usage.Basis != "provider_reported" || usage.AttemptID != "a1" {
+	if usage == nil || usage.TokensUsed != 13 || usage.Basis != "provider_reported" || usage.AttemptID != "a1" {
 		t.Fatalf("usage observation wrong: %+v", usage)
 	}
+	requireRequestedModel(t, provider, execModelRef)
 	if len(obs.Facts.ToolPlans) != 0 {
 		t.Fatalf("a stop answer must not plan tools")
 	}
@@ -260,8 +251,8 @@ func TestStopReasonsMapToFinishReasons(t *testing.T) {
 		{"refusal", []modeladapter.Event{{Kind: modeladapter.EventDone, StopReason: modeladapter.StopReasonRefusal, Usage: modeladapter.Usage{Output: 1}}}, kernel.FinishReasonRefusal, 0},
 		{"tool_use", []modeladapter.Event{
 			{Kind: modeladapter.EventStart},
-			{Kind: modeladapter.EventToolCallStart, CallID: execCallID, Name: "pure_read"},
-			{Kind: modeladapter.EventToolCallDelta, Delta: `{"Key":"k"}`},
+			{Kind: modeladapter.EventToolCallStart, CallID: execCallID, Name: pureReadTool},
+			{Kind: modeladapter.EventToolCallDelta, Delta: validArgsJSON},
 			{Kind: modeladapter.EventToolCallEnd},
 			{Kind: modeladapter.EventDone, StopReason: modeladapter.StopReasonToolUse, Usage: modeladapter.Usage{Output: 3}},
 		}, kernel.FinishReasonToolUse, 1},
@@ -316,6 +307,8 @@ func requireToolPlan(t *testing.T, reported *coordinator.Observation) {
 	}
 }
 
+// Usage counts new tokens only: reasoning is a subset of output, so the count
+// is uncached input plus output (budget §4).
 func TestUsageCountsNewTokensOnly(t *testing.T) {
 	t.Parallel()
 	gen := execGen("usage")
@@ -330,8 +323,18 @@ func TestUsageCountsNewTokensOnly(t *testing.T) {
 	executor.Execute(t.Context(), modelWork(), capture.report)
 
 	usage := capture.single(t).Facts.Usage
-	if usage.TokensUsed != 100-40+30+10 {
-		t.Fatalf("usage counted %d tokens, want %d", usage.TokensUsed, 100-40+30+10)
+	if usage.TokensUsed != 100-40+30 {
+		t.Fatalf("usage counted %d tokens, want %d", usage.TokensUsed, 100-40+30)
+	}
+}
+
+// requireRequestedModel pins that the executor asked the provider for the
+// planned model, not for the invocation or the attempt.
+func requireRequestedModel(t *testing.T, provider *faux.Provider, want string) {
+	t.Helper()
+	got := provider.RequestedModels()
+	if len(got) != 1 || got[0] != want {
+		t.Fatalf("provider was asked for %v, want [%s]", got, want)
 	}
 }
 
@@ -343,7 +346,7 @@ func TestUnparsableToolArgsFailTheAttempt(t *testing.T) {
 	executor := &modelExecutor{
 		provider: streamScript([]modeladapter.Event{
 			{Kind: modeladapter.EventStart},
-			{Kind: modeladapter.EventToolCallStart, CallID: execCallID, Name: "pure_read"},
+			{Kind: modeladapter.EventToolCallStart, CallID: execCallID, Name: pureReadTool},
 			{Kind: modeladapter.EventToolCallDelta, Delta: `not json`},
 			{Kind: modeladapter.EventToolCallEnd},
 			{Kind: modeladapter.EventDone, StopReason: modeladapter.StopReasonToolUse, Usage: modeladapter.Usage{Output: 3}},

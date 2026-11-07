@@ -17,12 +17,10 @@ import (
 )
 
 // attemptSource is what an executor reads to run one dispatched attempt: the
-// committed run state, the run's event stream — the model plan survives only in
-// the stream, its context reference is not part of the folded state — and the
-// sealed payloads those references name.
+// committed run state — whose invocations mirror their plan's model and
+// context references — and the sealed payloads those references name.
 type attemptSource interface {
 	LoadRun(ctx context.Context, runID string) (*kernel.State, uint64, error)
-	ReadEvents(ctx context.Context, runID string, fromSequence, toSequence uint64) ([]kernel.Event, error)
 	OpenPayload(ctx context.Context, sessionID, payloadID string) ([]byte, error)
 }
 
@@ -39,6 +37,9 @@ var (
 	errPayloadUnreadable   = errcode.New(errcode.InvalidArgument, "payload unreadable")
 	errContextUndecodable  = errcode.New(errcode.InvalidArgument, "context payload undecodable")
 	errUsageMissing        = errcode.New(errcode.FailedPrecondition, "completed model stream carried no usage")
+	errUsageInvalid        = errcode.New(errcode.FailedPrecondition, "model usage counts are out of range")
+	errTooManyToolCalls    = errcode.New(errcode.FailedPrecondition, "a multi-call response has no single next step in this slice")
+	errStreamMalformed     = errcode.New(errcode.FailedPrecondition, "model stream proposed a tool call without starting one")
 	errToolPrepareRejected = errcode.New(errcode.InvalidArgument, "tool check rejected the arguments")
 	errToolExecuteFailed   = errcode.New(errcode.FailedPrecondition, "tool execution failed")
 )
@@ -62,11 +63,11 @@ func (e *modelExecutor) Execute(ctx context.Context, w *coordinator.Work, report
 }
 
 func (e *modelExecutor) execute(ctx context.Context, w *coordinator.Work, report func(*coordinator.Observation)) error {
-	messages, err := e.stepMessages(ctx, w)
+	messages, modelRef, err := e.stepMessages(ctx, w)
 	if err != nil {
 		return err
 	}
-	return e.run(ctx, w, messages, report)
+	return e.run(ctx, w, modelRef, messages, report)
 }
 
 // streamState accumulates one provider response from its stream events.
@@ -77,9 +78,9 @@ type streamState struct {
 	started bool
 }
 
-func (e *modelExecutor) run(ctx context.Context, w *coordinator.Work, messages []modeladapter.Message, report func(*coordinator.Observation)) error {
+func (e *modelExecutor) run(ctx context.Context, w *coordinator.Work, modelRef string, messages []modeladapter.Message, report func(*coordinator.Observation)) error {
 	state := &streamState{}
-	request := &modeladapter.Request{Model: w.Lease.InvocationID, Transcript: messages}
+	request := &modeladapter.Request{Model: modelRef, Transcript: messages}
 	for event := range e.provider.Stream(ctx, request) {
 		if err := e.firstChunk(w, state, &event, report); err != nil {
 			return err
@@ -144,9 +145,10 @@ func (s *streamState) consume(event *modeladapter.Event) error {
 	case modeladapter.EventToolCallStart:
 		s.calls = append(s.calls, observedCall{callID: event.CallID})
 	case modeladapter.EventToolCallDelta:
-		if len(s.calls) > 0 {
-			s.calls[len(s.calls)-1].arguments.WriteString(event.Delta)
+		if len(s.calls) == 0 {
+			return errStreamMalformed
 		}
+		s.calls[len(s.calls)-1].arguments.WriteString(event.Delta)
 	case modeladapter.EventDone:
 		s.done = event
 	case modeladapter.EventError:
@@ -174,13 +176,9 @@ func (s *streamState) terminal() error {
 }
 
 func (e *modelExecutor) reportResponse(w *coordinator.Work, state *streamState, report func(*coordinator.Observation)) error {
-	finish, ok := finishReason(state.done.StopReason)
-	if !ok {
-		return errUnsupportedStop
-	}
-	usage := state.done.Usage
-	if usage.Input == 0 && usage.Output == 0 && usage.Reasoning == 0 {
-		return errUsageMissing
+	finish, err := terminalDecision(state)
+	if err != nil {
+		return err
 	}
 	responseID, err := e.ids.NewID()
 	if err != nil {
@@ -204,7 +202,7 @@ func (e *modelExecutor) reportResponse(w *coordinator.Work, state *streamState, 
 				Envelope:     kernel.Envelope{},
 				AttemptID:    w.Lease.AttemptID,
 				WindowID:     "",
-				TokensUsed:   usage.Input - usage.CacheRead + usage.Output + usage.Reasoning,
+				TokensUsed:   state.done.Usage.Input - state.done.Usage.CacheRead + state.done.Usage.Output,
 				DurationUsed: 0,
 				Basis:        "provider_reported",
 			},
@@ -223,6 +221,31 @@ func (e *modelExecutor) reportResponse(w *coordinator.Work, state *streamState, 
 	return nil
 }
 
+// terminalDecision reads the terminal event: the kernel finish reason this
+// slice can act on, the usage it must account, and the single next step a
+// tool_use answer may plan. Anything else fails the attempt closed.
+func terminalDecision(state *streamState) (kernel.FinishReason, error) {
+	finish, ok := finishReason(state.done.StopReason)
+	if !ok {
+		return "", errUnsupportedStop
+	}
+	usage := state.done.Usage
+	if usage.Input == 0 && usage.Output == 0 && usage.Reasoning == 0 {
+		return "", errUsageMissing
+	}
+	// Untrusted provider numbers: anything negative or a cache read larger
+	// than the whole prompt fails the attempt instead of a negative count.
+	if usage.Input < 0 || usage.Output < 0 || usage.CacheRead < 0 || usage.Reasoning < 0 || usage.CacheRead > usage.Input {
+		return "", errUsageInvalid
+	}
+	// This slice plans exactly one next step; a multi-call response needs the
+	// canonical response record first (Q-30), so it fails closed here.
+	if finish == kernel.FinishReasonToolUse && len(state.calls) > 1 {
+		return "", errTooManyToolCalls
+	}
+	return finish, nil
+}
+
 func (e *modelExecutor) appendToolPlans(observation *coordinator.Observation, calls []observedCall) error {
 	for i := range calls {
 		plan, argsPayload, err := e.toolPlan(&calls[i], i)
@@ -236,41 +259,25 @@ func (e *modelExecutor) appendToolPlans(observation *coordinator.Observation, ca
 }
 
 // stepMessages opens the step's context payload and turns it into the provider
-// transcript.
-func (e *modelExecutor) stepMessages(ctx context.Context, w *coordinator.Work) ([]modeladapter.Message, error) {
+// transcript, naming the model the invocation's plan recorded.
+func (e *modelExecutor) stepMessages(ctx context.Context, w *coordinator.Work) ([]modeladapter.Message, string, error) {
 	state, _, err := e.source.LoadRun(ctx, w.Lease.RunID)
 	if err != nil {
-		return nil, errcode.New(errcode.Internal, "load run")
+		return nil, "", errcode.New(errcode.Internal, "load run")
 	}
-	plan, err := findModelPlan(ctx, e.source, w.Lease.RunID, w.Lease.InvocationID, state.LastSequence)
-	if err != nil {
-		return nil, err
+	inv := state.ModelInvocations[w.Lease.InvocationID]
+	if inv == nil || inv.ContextRef == "" {
+		return nil, "", errPlanNotFound
 	}
-	items, err := openContext(ctx, e.source, w.Lease.SessionID, plan.ContextRef)
+	items, err := openContext(ctx, e.source, w.Lease.SessionID, inv.ContextRef)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	messages := make([]modeladapter.Message, 0, len(items))
 	for _, item := range items {
 		messages = append(messages, modeladapter.Message{Role: item.Role, Content: string(item.Content)})
 	}
-	return messages, nil
-}
-
-// findModelPlan reads the run's stream for the plan of one invocation: the
-// folded state keeps the invocation and its attempts, but the plan's context
-// reference and model reference survive only in the event.
-func findModelPlan(ctx context.Context, source attemptSource, runID, invocationID string, lastSequence uint64) (*kernel.ModelRequestPlannedEvent, error) {
-	events, err := source.ReadEvents(ctx, runID, 1, lastSequence)
-	if err != nil {
-		return nil, errcode.New(errcode.Internal, "read run events")
-	}
-	for _, ev := range events {
-		if plan, ok := ev.(*kernel.ModelRequestPlannedEvent); ok && plan.InvocationID == invocationID {
-			return plan, nil
-		}
-	}
-	return nil, errPlanNotFound
+	return messages, inv.ModelRef, nil
 }
 
 // openContext reads and decodes a sealed step context.

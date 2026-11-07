@@ -163,17 +163,16 @@ func (e *toolExecutor) executeTool(ctx context.Context, sessionID, argsRef strin
 // extendedContext opens the current step's context, appends the selected
 // response and this result, and seals the next step's context payload.
 func (e *toolExecutor) extendedContext(ctx context.Context, state *kernel.State, w *coordinator.Work, resultContent []byte, resultID string) (coordinator.Payload, string, error) {
-	currentPlan, err := findModelPlan(ctx, e.source, w.Lease.RunID, state.CurrentModelInvocationID, state.LastSequence)
-	if err != nil {
-		return coordinator.Payload{}, "", err
-	}
-	items, err := openContext(ctx, e.source, w.Lease.SessionID, currentPlan.ContextRef)
-	if err != nil {
-		return coordinator.Payload{}, "", err
-	}
 	inv := state.ModelInvocations[state.CurrentModelInvocationID]
-	if inv == nil || inv.SelectedAttemptID == "" || inv.Attempts[inv.SelectedAttemptID] == nil {
+	if inv == nil || inv.ContextRef == "" {
 		return coordinator.Payload{}, "", errPlanNotFound
+	}
+	if inv.SelectedAttemptID == "" || inv.Attempts[inv.SelectedAttemptID] == nil {
+		return coordinator.Payload{}, "", errPlanNotFound
+	}
+	items, err := openContext(ctx, e.source, w.Lease.SessionID, inv.ContextRef)
+	if err != nil {
+		return coordinator.Payload{}, "", err
 	}
 	responseRef := inv.Attempts[inv.SelectedAttemptID].Response.ResponseRef
 	responseText, err := e.source.OpenPayload(ctx, w.Lease.SessionID, responseRef)
@@ -185,7 +184,7 @@ func (e *toolExecutor) extendedContext(ctx context.Context, state *kernel.State,
 		contextItem{Role: "tool", Ref: resultID, Content: resultContent},
 	)
 	payload, err := newContext(e.ids, items)
-	return payload, currentPlan.ModelRef, err
+	return payload, inv.ModelRef, err
 }
 
 // nextPlan plans the step the kernel opens in the same batch as the result.
