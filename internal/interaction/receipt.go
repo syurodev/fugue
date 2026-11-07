@@ -6,7 +6,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
-func (o *Owner) issueReceiptLocked(ticket *Ticket, selectedOptionID string, now time.Time) (*Receipt, error) {
+func (o *Owner) issueReceiptLocked(ticket *Ticket, selectedOptionID string, answers []Answer, now time.Time) (*Receipt, error) {
 	receiptID, err := o.ids.NewID()
 	if err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "generate receipt ID failed", err)
@@ -18,6 +18,7 @@ func (o *Owner) issueReceiptLocked(ticket *Ticket, selectedOptionID string, now 
 		Incarnation:      o.incarnation,
 		Kind:             ticket.Kind,
 		SelectedOptionID: selectedOptionID,
+		Answers:          cloneAnswers(answers),
 		Binding:          ticket.Binding,
 		IssuedAt:         now,
 		ExpiresAt:        ticket.ExpiresAt,
@@ -47,6 +48,18 @@ func (o *Owner) ClaimSelection(receiptID string, expected *Binding) (string, err
 	return receipt.SelectedOptionID, nil
 }
 
+// ClaimAnswers atomically validates and consumes a one-use question receipt,
+// returning the answers recorded when the question was resolved. Question
+// receipts carry answers for Execute (interaction §4.1) and never authorize
+// execution or satisfy ClaimReceipt.
+func (o *Owner) ClaimAnswers(receiptID string, expected *Binding) ([]Answer, error) {
+	receipt, err := o.claimByKind(receiptID, KindQuestion, expected)
+	if err != nil {
+		return nil, err
+	}
+	return cloneAnswers(receipt.Answers), nil
+}
+
 func (o *Owner) claimByKind(receiptID string, kind Kind, expected *Binding) (*Receipt, error) {
 	if receiptID == "" || expected == nil {
 		return nil, errcode.New(errcode.InvalidArgument, "receipt ID and expected binding are required")
@@ -69,6 +82,10 @@ func (o *Owner) claimByKind(receiptID string, kind Kind, expected *Binding) (*Re
 	receipt.Claimed = true
 	receipt.ClaimedAt = now
 	cp := *receipt
+	outcome := OutcomeAllowedOnce
+	if kind == KindQuestion {
+		outcome = OutcomeAnswered
+	}
 	ev := AuditEvent{
 		Action:      "receipt_claimed",
 		Incarnation: o.incarnation,
@@ -78,7 +95,7 @@ func (o *Owner) claimByKind(receiptID string, kind Kind, expected *Binding) (*Re
 		SessionID:   receipt.Binding.SessionID,
 		ToolName:    receipt.Binding.ToolName,
 		Kind:        receipt.Kind,
-		Outcome:     OutcomeAllowedOnce,
+		Outcome:     outcome,
 		OccurredAt:  now,
 	}
 	o.mu.Unlock()
