@@ -392,7 +392,7 @@ type fakeDurable struct {
 	state    []byte
 	seq      EventSeq
 	events   []Event
-	purged   EventSeq // Since(seq) with seq < purged reports ErrEventSeqTooOld
+	purged   EventSeq      // Since(seq) with seq < purged reports ErrEventSeqTooOld
 	snapGate chan struct{} // non-nil: Snapshot blocks until closed
 	entered  chan struct{} // non-nil: closed when Snapshot has read the state
 }

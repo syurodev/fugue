@@ -295,9 +295,9 @@ func (h *EventHub) Subscribe(ctx context.Context, p SubscribeParams) (*Subscript
 	h.mu.Unlock()
 
 	var (
-		pending     []Event
-		snapState   []byte
-		snapSeq     EventSeq
+		pending      []Event
+		snapState    []byte
+		snapSeq      EventSeq
 		haveSnapshot bool
 	)
 	switch {

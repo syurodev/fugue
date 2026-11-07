@@ -191,7 +191,6 @@ func (rt *HostRuntime) EndStreams() {
 	}
 }
 
-
 // startGraceLoop starts the one long-lived grace goroutine. Arming never
 // spawns a task: the loop returns to its receive after every fire or disarm,
 // so a host that cycles leases holds exactly one grace task for its life.
