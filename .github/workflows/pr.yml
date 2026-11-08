@@ -1,10 +1,12 @@
 # Gate definition: docs/quality-gates.md section 9. Changes need the gate-change-approved label.
 # Each job name below is a required status check on main; see docs/github-setup.md.
+# The code gates run when the code changes; gate-guard and commit-lint, which also
+# react to labels and title edits, live in pr-meta.yml so a label never reruns them.
 name: pr
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+    types: [opened, synchronize, reopened]
 
 permissions:
   contents: read
@@ -14,6 +16,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Decides which test jobs this change needs (fuguegate changes). It fails safe:
+  # a diff it cannot read runs everything. Skipped steps leave the job green, so
+  # every required check still reports.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      code: ${{ steps.scope.outputs.code }}
+      platform: ${{ steps.scope.outputs.platform }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: go run ./cmd/fuguegate changes -base "$BASE_SHA" -head "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
   fmt:
     runs-on: ubuntu-latest
     steps:
@@ -51,21 +74,39 @@ jobs:
           go-version-file: go.mod
       - run: go tool task arch
 
+  # Linux tests run for every code change; macOS tests run when the change is
+  # platform-specific (fuguegate changes) and after every merge (main.yml).
   test:
     name: test (${{ matrix.os }})
+    needs: changes
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - id: decide
+        env:
+          CODE: ${{ needs.changes.outputs.code }}
+          PLATFORM: ${{ needs.changes.outputs.platform }}
+          OS: ${{ matrix.os }}
+        run: |
+          if [ "$CODE" = "true" ] && { [ "$OS" = "ubuntu-latest" ] || [ "$PLATFORM" = "true" ]; }; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::tests skipped on $OS: no code change that needs them (fuguegate changes)"
+          fi
+      - if: steps.decide.outputs.run == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: steps.decide.outputs.run == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: go tool task test
+      - if: steps.decide.outputs.run == 'true'
+        run: go tool task test
       - name: Keep the coverage profile for the coverage job
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-latest' && steps.decide.outputs.run == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cover-profile
@@ -73,17 +114,23 @@ jobs:
           retention-days: 1
 
   coverage:
-    needs: test
+    needs: [changes, test]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - if: needs.changes.outputs.code != 'true'
+        run: echo "::notice::coverage skipped (documentation-only change)"
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: cover-profile
-      - run: go tool task coverage
+      - if: needs.changes.outputs.code == 'true'
+        run: go tool task coverage
 
   deadcode:
     runs-on: ubuntu-latest
@@ -115,13 +162,19 @@ jobs:
       - run: go tool task proto
 
   fuzz-short:
+    needs: changes
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - if: needs.changes.outputs.code != 'true'
+        run: echo "::notice::fuzz-short skipped (documentation-only change)"
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: needs.changes.outputs.code == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: go tool task fuzz-short
+      - if: needs.changes.outputs.code == 'true'
+        run: go tool task fuzz-short
 
   # Paused by the owner on 2026-11-05 (quality-gates §11). The job stays so the
   # required status check still reports; nightly mutation-full keeps running.
@@ -129,51 +182,3 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "::notice::mutation-changed is paused (quality-gates §11); nightly mutation-full still runs"
-
-  gate-guard:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: read
-      pull-requests: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: Find who applied the approval label
-        id: approval
-        env:
-          GH_TOKEN: ${{ github.token }}
-          REPO: ${{ github.repository }}
-          PR: ${{ github.event.pull_request.number }}
-        run: |
-          actor=$(gh api "repos/$REPO/issues/$PR/events" --paginate \
-            --jq '[.[] | select(.event == "labeled" and .label.name == "gate-change-approved")] | last | .actor.login // ""')
-          echo "actor=$actor" >> "$GITHUB_OUTPUT"
-      - name: Guard gate-defining files
-        env:
-          BASE: origin/${{ github.base_ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
-          ACTOR: ${{ steps.approval.outputs.actor }}
-          OWNER: ${{ github.repository_owner }}
-        run: go run ./cmd/fuguegate gateguard -base "$BASE" -head "$HEAD_SHA" -labels "$LABELS" -label-actor "$ACTOR" -approver "$OWNER"
-
-  commit-lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
-        with:
-          go-version-file: go.mod
-      - name: Lint the PR title and commits
-        env:
-          TITLE: ${{ github.event.pull_request.title }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: go run ./cmd/fuguegate commitlint -title "$TITLE" -base "$BASE_SHA" -head "$HEAD_SHA"

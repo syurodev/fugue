@@ -179,6 +179,21 @@ and Linux), `coverage`, `deadcode`, `mod` (tidy, verify, govulncheck, licenses),
 (`buf lint`, `buf breaking` against `main`, generate without diff), `fuzz-short`,
 `mutation-changed` (paused since 2026-11-05: the job reports success without running, see §11), `gate-guard`.
 
+**Scope (2026-11-08).** `pr.yml` runs the code gates on pushes only (`opened`, `synchronize`,
+`reopened`); `gate-guard` and `commit-lint` live in `pr-meta.yml`, which also reacts to labels
+and title edits, so applying a label reruns only those two. A `changes` job
+(`fuguegate changes`) reads the change set and fails safe (an unreadable diff runs everything):
+
+- documentation-only changes (Markdown outside `testdata`, except this file) skip `test`,
+  `coverage` and `fuzz-short`; the other gates, including `arch`, which reads the roadmap and the
+  ADRs, always run;
+- Linux tests run for every code change; macOS tests run when the change is platform-specific:
+  a build constraint, an OS-suffixed file name, or a path under `cmd/`, `internal/process/`,
+  `internal/hostapi/`, `internal/storage/`, `internal/sandbox/`, `internal/snapshot/` or
+  `.github/workflows/`, or `go.mod`, `go.sum`, `Taskfile.yml`;
+- skipped steps leave the job green, so every required check still reports;
+- every push to `main` runs the macOS tests (`main.yml`).
+
 **Nightly:** long fuzzing, full mutation, tests with `-count=5`, Windows build.
 
 `main` has branch protection: the checks above are required, squash merge only, no direct push
@@ -209,3 +224,4 @@ Gate-defining files: `.golangci.yml`, `tools/fuguevet/**`, `internal/arch/**`, `
 | 2026-11-05 | Mutation on changed packages **paused**: the PR job `mutation-changed` reports success without running, and `task check` no longer runs it. Threshold (85 %), package selection, budgets and the nightly `mutation-full` job are unchanged; `task mutation-changed` still runs by hand | It made every PR and local check too slow for the current pace of work. Temporary: re-enable by restoring the job step and the `task check` step together, at the latest before F8.1 (`task release-check`). Until then, a nightly `mutation-full` failure is fixed like a broken build. Guard: `TestTaskfileRunsEveryGate` requires the task to exist and the pause to be explicit | user (chat request) |
 | 2026-11-06 | Local heavy tasks run at low priority (`HEAVY_WRAP`: `taskpolicy -c utility` on macOS, `nice -n 10` on Linux) and behind the machine-wide heavy lock (`HEAVY_LOCK`: `fuguegate exclusive`), both empty under `CI`; `task test-pkg` added for targeted runs; `docs/plans` commands use `task test-pkg` instead of bare `go test` | Several agents running gates in separate worktrees swapped and froze an 18 GB machine: a bare `go test` ran 11 race binaries in parallel at about 1 GB each, and concurrent `task check` runs had no machine-wide cap. Measured: a saturating bare race run peaks at 3.2-4.4 GB RSS; under it the `utility` wrap kept gate wall time unchanged and cut a foreground stall about 10 %, `-b` measured the same with added throttling risk, so `utility` won. Concurrent `task check` pairs queue one heavy task at a time; the numbers are in the PR description. No threshold moved and no ratchet baseline changed; guards: `TestHeavyTasksRunWrappedAndQueued`, `TestHeavyWrapExpansion` | user (`gate-change-approved` on this PR) |
 | 2026-11-07 | `wrapcheck`: `internal/hostapi/listener.go` is exempt from wrapping by a path-scoped exclusion rule | The transport must return accept and connection-close errors unchanged: `http.Server.Serve` recovers from a temporary `net.Error` by type assertion and detects `net.ErrClosed`; wrapping turned a recoverable accept failure (EMFILE) into a fatal `Serve` exit. The file is the only place that passes `net.Listener`/`net.Conn` errors through. Regression: `TestAcceptReturnsTheInnerErrorUnchanged` | user (`gate-change-approved` on PR #63) |
+| 2026-11-08 | CI scope: documentation-only PRs skip `test`, `coverage` and `fuzz-short`; macOS tests run on PRs only for platform-specific changes and on every push to `main` (`main.yml`); `gate-guard` and `commit-lint` move to `pr-meta.yml` so labels and title edits no longer rerun the code gates (§9) | The macOS test job (5–6 min) was the longest PR job and ran even for roadmap-only PRs, and every label or title edit cancelled and restarted the whole run. No threshold moved and no gate was removed: Linux tests still run for every code change, macOS still runs on every merge, and the change detector fails safe. Guards: `TestChangeScope`, `TestChangesFailsSafeOnABrokenDiff`, `TestPRWorkflowsSplitByTrigger` | user (chat request; `gate-change-approved` on this PR) |
