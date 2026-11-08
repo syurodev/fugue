@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/syurodev/fugue/internal/sealing"
 	"github.com/syurodev/fugue/internal/vault"
 )
 
@@ -24,14 +25,9 @@ func (s *Store) loadCommittedSessionKey(ctx context.Context, sessionID string) (
 	if s.vault == nil || s.vault.Snapshot().State != vault.StateUnlocked {
 		return nil, false, vault.ErrLocked
 	}
-	binding := vault.RecordBinding{
-		RecordType: SessionKeyRecordType,
-		RecordID:   sessionID,
-		KeyID:      keyID,
-	}
-	rawKey, openErr := s.vault.OpenRecord(binding, wrappedKey)
+	rawKey, openErr := sealing.UnwrapSessionKey(s.vault, SessionKeyRecordType, sessionID, keyID, wrappedKey)
 	if openErr != nil {
-		return nil, false, fmt.Errorf("%w: unwrap session key: %w", ErrStoreUnavailable, openErr)
+		return nil, false, fmt.Errorf("%w: %w", ErrStoreUnavailable, openErr)
 	}
 	return rawKey, true, nil
 }
@@ -41,39 +37,17 @@ func (s *Store) generateFreshSessionKey(sessionID string) ([]byte, *SealedSessio
 		return nil, nil, vault.ErrLocked
 	}
 
-	rawKey := make([]byte, 32)
-	success := false
-	defer func() {
-		if !success {
-			clear(rawKey)
-		}
-	}()
-	if err := s.random.Read(rawKey); err != nil {
-		return nil, nil, fmt.Errorf("%w: generate session key bytes: %w", ErrStoreUnavailable, err)
+	rawKey, sealedKey, err := sealing.GenerateSessionKey(s.vault, s.random, SessionKeyRecordType, sessionID, SessionKeyDefaultKeyID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("%w: %w", ErrStoreUnavailable, err)
 	}
-
-	binding := vault.RecordBinding{
-		RecordType: SessionKeyRecordType,
-		RecordID:   sessionID,
-		KeyID:      SessionKeyDefaultKeyID,
-	}
-	wrapped, sealErr := s.vault.SealRecord(binding, rawKey)
-	if sealErr != nil {
-		return nil, nil, fmt.Errorf("%w: wrap session key: %w", ErrStoreUnavailable, sealErr)
-	}
-
-	sealedKey := &SealedSessionKey{
-		KeyID:      SessionKeyDefaultKeyID,
-		WrappedKey: wrapped,
-	}
-	success = true
 	return rawKey, sealedKey, nil
 }
 
 func (s *Store) getOrCreateSessionKey(ctx context.Context, sessionID string) ([]byte, *SealedSessionKey, error) {
-	s.keyCache.prepare.Lock()
-	defer s.keyCache.prepare.Unlock()
-	if s.keyCache.isPurged(sessionID) {
+	s.prepareMu.Lock()
+	defer s.prepareMu.Unlock()
+	if s.keyCache.IsPurged(sessionID) {
 		return nil, nil, ErrSessionPurging
 	}
 	if s.vault == nil {
@@ -83,7 +57,7 @@ func (s *Store) getOrCreateSessionKey(ctx context.Context, sessionID string) ([]
 	if epoch.State != vault.StateUnlocked {
 		return nil, nil, vault.ErrLocked
 	}
-	if raw, pending, found := s.keyCache.prepared(sessionID); found {
+	if raw, pending, found := s.keyCache.Prepared(sessionID); found {
 		if err := s.validatePayloadEpoch(epoch, sessionID); err != nil {
 			clear(raw)
 			return nil, nil, err
@@ -108,10 +82,17 @@ func (s *Store) getOrCreateSessionKey(ctx context.Context, sessionID string) ([]
 			return nil, nil, err
 		}
 	}
-	err = s.vault.WithUnlocked(epoch, func() error { return s.keyCache.install(sessionID, raw, pending) })
+	err = s.vault.WithUnlocked(epoch, func() error { return s.installKey(sessionID, raw, pending) })
 	if err != nil {
 		clear(raw)
 		return nil, nil, fmt.Errorf("cache key authorization: %w", err)
 	}
 	return raw, pending, nil
+}
+
+func (s *Store) installKey(sessionID string, raw []byte, pending *SealedSessionKey) error {
+	if !s.keyCache.Install(sessionID, raw, pending) {
+		return ErrSessionPurging
+	}
+	return nil
 }

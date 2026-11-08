@@ -70,6 +70,7 @@ redaction remains separate. No other internal imports are permitted.
 | Package | Layer | Purpose and owner | May import | Phase |
 | --- | --- | --- | --- | --- |
 | `internal/secrets` | 1 | Pure logic, no I/O: known-value, token-pattern and key-name secret detection. Owner: content safety (H-27). | `internal/platform/errcode`, `internal/platform/redact` | F6.7a |
+| `internal/sealing` | 2 | Protected payload sealing and session key lifecycle. Owner: storage security (G-03). | `internal/crypto`, `internal/vault`, `internal/platform/errcode`, `internal/platform/ids`, `internal/platform/redact` | F9.3a |
 
 Directories outside `internal/` and `pkg/` governed by this ADR:
 

@@ -26,6 +26,7 @@ type Store struct {
 	faultPoints     map[FaultPoint]error
 	keyCache        *sessionKeyCache
 	unregisterGuard func()
+	prepareMu       sync.Mutex
 	mu              sync.Mutex
 }
 
@@ -75,6 +76,7 @@ func New(
 		faultPoints:     make(map[FaultPoint]error),
 		keyCache:        cache,
 		unregisterGuard: nil,
+		prepareMu:       sync.Mutex{},
 		mu:              sync.Mutex{},
 	}
 
@@ -91,7 +93,7 @@ func New(
 
 func (s *Store) onVaultStateChange(snap vault.Snapshot) {
 	if snap.State != vault.StateUnlocked {
-		s.keyCache.clearAndZero()
+		s.keyCache.ClearAndZero()
 	}
 }
 
@@ -106,7 +108,7 @@ func (s *Store) Close() error {
 		s.unregisterGuard()
 		s.unregisterGuard = nil
 	}
-	s.keyCache.clearAndZero()
+	s.keyCache.ClearAndZero()
 	return nil
 }
 

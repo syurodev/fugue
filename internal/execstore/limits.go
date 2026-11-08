@@ -10,18 +10,19 @@ import (
 
 	"github.com/syurodev/fugue/internal/crypto"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/sealing"
 )
 
 // Size limits for protected payloads.
 const (
 	// MaxPayloadPlaintext is the maximum plaintext size of a single payload: 1 MiB (1,048,576 bytes).
-	MaxPayloadPlaintext = 1 << 20
+	MaxPayloadPlaintext = sealing.MaxPayloadPlaintext
 
 	// MaxRunPayloadTotal is the maximum cumulative payload bytes allowed per execution run: 64 MiB.
 	MaxRunPayloadTotal = 64 << 20
 
 	// MaxSessionPayloadTotal is the maximum cumulative payload bytes allowed per session: 1 GiB.
-	MaxSessionPayloadTotal = 1 << 30
+	MaxSessionPayloadTotal = sealing.MaxSessionPayloadTotal
 )
 
 func validateBatchPayloads(payloads []SealedPayload) (int64, map[string]struct{}, error) {
@@ -63,7 +64,7 @@ func checkSessionTotalLimit(ctx context.Context, conn *sql.Conn, sessionID strin
 	if err != nil {
 		return fmt.Errorf("%w: query session payload total: %w", ErrStoreUnavailable, err)
 	}
-	if newBytes > math.MaxInt64-currentTotal || currentTotal+newBytes > MaxSessionPayloadTotal {
+	if sealing.ExceedsLimit(currentTotal, newBytes, MaxSessionPayloadTotal) {
 		return ErrSessionPayloadLimitExceeded
 	}
 	return nil
@@ -143,7 +144,7 @@ func checkRunTotalLimit(
 		runAddition += inputSize
 	}
 
-	if runAddition > math.MaxInt64-currentTotal || currentTotal+runAddition > MaxRunPayloadTotal {
+	if sealing.ExceedsLimit(currentTotal, runAddition, MaxRunPayloadTotal) {
 		return ErrRunPayloadLimitExceeded
 	}
 	return nil
