@@ -37,8 +37,12 @@ const (
 	testAttTool1      = "att-tool-1"
 	testAtt1          = "att-1"
 	testToolAttempt   = "ta1"
-	testTimeout       = 100 * time.Millisecond
 )
+
+// testTimeout only stops a hung test. Tests drive time through the fake clock
+// and wait on explicit signals, so no result may depend on this deadline;
+// keep it generous because -race on slow CI runners makes real work slow.
+const testTimeout = 10 * time.Second
 
 type appendResultOrError struct {
 	result AppendResult
