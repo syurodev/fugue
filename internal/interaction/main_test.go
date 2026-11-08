@@ -77,6 +77,8 @@ const (
 	session2           = "sess-2"
 	genericOptionLabel = "Option"
 	relayDenyNote      = "Not while the tests run"
+	// questionUnofferedID is the option ID no question offers.
+	questionUnofferedID = "db-unknown"
 )
 
 func testQuestion() Question {
@@ -111,15 +113,49 @@ func vendorOptions() []Option {
 	}
 }
 
-func relayedSpec(opID string) *Spec {
+func mustVendorKey(t *testing.T, turnID, vendorRequestID string) string {
+	t.Helper()
+	key, err := VendorOperationKey(testSessionID, turnID, vendorRequestID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
+// vendorBinding is the vendor-shaped binding of a relayed request (VR-05):
+// session plus turn and vendor request; no native check fields.
+func vendorBinding(turnID, vendorRequestID string) Binding {
+	return Binding{
+		SessionID:       testSessionID,
+		TurnID:          turnID,
+		VendorRequestID: vendorRequestID,
+	}
+}
+
+func relayedSpec(t *testing.T, turnID, vendorRequestID string) *Spec {
+	t.Helper()
 	return &Spec{
-		OperationID: opID,
+		OperationID: mustVendorKey(t, turnID, vendorRequestID),
 		Kind:        KindConfirm,
 		Summary:     "Vendor wants to run npm install",
 		Relayed:     true,
 		Options:     vendorOptions(),
 		ExpiresAt:   time.Time{},
-		Binding:     defaultBinding(),
+		Binding:     vendorBinding(turnID, vendorRequestID),
+	}
+}
+
+func relayedQuestionSpec(t *testing.T, turnID, vendorRequestID string) *Spec {
+	t.Helper()
+	return &Spec{
+		OperationID: mustVendorKey(t, turnID, vendorRequestID),
+		Kind:        KindQuestion,
+		Summary:     "Vendor asks before proceeding",
+		Relayed:     true,
+		Questions:   []Question{testQuestion()},
+		Body:        "Context the vendor attached",
+		ExpiresAt:   time.Time{},
+		Binding:     vendorBinding(turnID, vendorRequestID),
 	}
 }
 

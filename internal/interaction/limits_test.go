@@ -8,10 +8,11 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
-func oversizedSpecCases() []struct {
+func oversizedSpecCases(t *testing.T) []struct {
 	name string
 	spec *Spec
 } {
+	t.Helper()
 	long := func(n int) string { return strings.Repeat("a", n) }
 	manyOptions := func(n int) []Option {
 		opts := make([]Option, n)
@@ -28,7 +29,7 @@ func oversizedSpecCases() []struct {
 	bigQuestion.Questions[0].Question = long(MaxPromptBytes + 1)
 	bigSelect := selectSpec("op-big-select")
 	bigSelect.Options = manyOptions(MaxOptions + 1)
-	bigRelay := relayedSpec("op-big-relay")
+	bigRelay := relayedSpec(t, "turn-big", "req-1")
 	bigRelay.Options = manyOptions(MaxOptions + 1)
 	bigQuestionOptions := questionSpec("op-big-question-options")
 	bigQuestionOptions.Questions[0].Options = manyOptions(MaxOptions + 1)
@@ -48,7 +49,7 @@ func oversizedSpecCases() []struct {
 func TestOversizedRequestContentFailsTyped(t *testing.T) {
 	t.Parallel()
 	owner, _, _, _ := newTestOwner(t)
-	for _, item := range oversizedSpecCases() {
+	for _, item := range oversizedSpecCases(t) {
 		if _, err := owner.Ensure(item.spec); err != nil {
 			wantCode(t, err, errcode.InvalidArgument)
 			continue
@@ -71,7 +72,7 @@ func TestOversizedAnswerContentFailsTyped(t *testing.T) {
 	})
 	wantCode(t, err, errcode.InvalidArgument)
 
-	relayTicket := mustEnsure(t, owner, relayedSpec("op-big-relay-note"))
+	relayTicket := mustEnsure(t, owner, relayedSpec(t, "turn-note", "req-1"))
 	_, err = owner.Answer(&Decision{
 		Incarnation: owner.Incarnation(),
 		RequestID:   relayTicket.RequestID,
@@ -82,7 +83,7 @@ func TestOversizedAnswerContentFailsTyped(t *testing.T) {
 	_, err = owner.Answer(&Decision{
 		Incarnation: owner.Incarnation(),
 		RequestID:   relayTicket.RequestID,
-		Outcome:     OutcomeAllowedOnce,
+		Outcome:     OutcomeAnswered,
 		OptionID:    vendorOptionAllow,
 		Text:        long(MaxAnswerBytes + 1),
 	})
@@ -103,7 +104,7 @@ func TestOversizedAnswerContentFailsTyped(t *testing.T) {
 	relayed := mustAnswer(t, owner, &Decision{
 		Incarnation: owner.Incarnation(),
 		RequestID:   relayTicket.RequestID,
-		Outcome:     OutcomeAllowedOnce,
+		Outcome:     OutcomeAnswered,
 		OptionID:    vendorOptionAllow,
 		Text:        long(MaxAnswerBytes),
 	})
@@ -122,7 +123,7 @@ func TestPendingRequestLimitsPerSessionAndHost(t *testing.T) {
 	wantCode(t, err, errcode.FailedPrecondition)
 
 	// Relayed vendor requests bypass the per-session frontier.
-	relay := mustEnsure(t, owner, relayedSpec("op-front-relay"))
+	relay := mustEnsure(t, owner, relayedSpec(t, "turn-front", "req-1"))
 	if relay.Resolved {
 		t.Fatalf("relayed request = %+v, want pending", relay)
 	}

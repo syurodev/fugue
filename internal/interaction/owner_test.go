@@ -123,13 +123,13 @@ func TestEnsureReadsBackByOperationIDAndRejectsConflictingSpecs(t *testing.T) {
 	_, err = owner.Ensure(conflictSummary)
 	wantCode(t, err, errcode.AlreadyExists)
 
-	relayFirst := mustEnsure(t, owner, relayedSpec("op-relay-readback"))
-	relaySecond := mustEnsure(t, owner, relayedSpec("op-relay-readback"))
+	relayFirst := mustEnsure(t, owner, relayedSpec(t, "turn-readback", "req-1"))
+	relaySecond := mustEnsure(t, owner, relayedSpec(t, "turn-readback", "req-1"))
 	if diff := cmp.Diff(relayFirst, relaySecond); diff != "" {
 		t.Fatalf("relayed read-back ticket differed (-first +second):\n%s", diff)
 	}
 
-	conflictRelay := relayedSpec("op-relay-readback")
+	conflictRelay := relayedSpec(t, "turn-readback", "req-1")
 	conflictRelay.Options = vendorOptions()[:2]
 	_, err = owner.Ensure(conflictRelay)
 	wantCode(t, err, errcode.AlreadyExists)
@@ -232,7 +232,7 @@ func assertRequestsWaitWithoutResponder(t *testing.T, owner *Owner) {
 	if t1.Resolved || t1.Outcome != "" || t1.ReceiptID != "" {
 		t.Fatalf("nil responder ticket = %+v, want pending without receipt", t1)
 	}
-	r1 := mustEnsure(t, owner, relayedSpec("op-nil-relay"))
+	r1 := mustEnsure(t, owner, relayedSpec(t, "turn-nil", "req-1"))
 	if r1.Resolved {
 		t.Fatalf("relayed request with nil responder = %+v, want pending", r1)
 	}
@@ -249,7 +249,7 @@ func assertHeadlessResolvesUnavailable(t *testing.T, owner *Owner) {
 	if !t2.Resolved || t2.Outcome != OutcomeUnavailable {
 		t.Fatalf("headless ticket = %+v, want unavailable", t2)
 	}
-	r2 := mustEnsure(t, owner, relayedSpec("op-headless-relay"))
+	r2 := mustEnsure(t, owner, relayedSpec(t, "turn-headless", "req-1"))
 	if !r2.Resolved || r2.Outcome != OutcomeUnavailable {
 		t.Fatalf("headless relayed ticket = %+v, want unavailable", r2)
 	}
@@ -272,7 +272,7 @@ func TestPendingOrderingAndExpiry(t *testing.T) {
 	specA := confirmSpec("op-a")
 	specA.ExpiresAt = startTime().Add(5 * time.Minute)
 	ticketA := mustEnsure(t, owner, specA)
-	ticketB := mustEnsure(t, owner, relayedSpec("op-b"))
+	ticketB := mustEnsure(t, owner, relayedSpec(t, "turn-b", "req-1"))
 
 	fakeClock.Advance(time.Minute)
 	specC := confirmSpec("op-c")

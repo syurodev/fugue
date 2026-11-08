@@ -83,7 +83,7 @@ func TestQuestionAnswersRejectUnofferedOptionsAndPartialSets(t *testing.T) {
 
 	rejected := []Decision{
 		{Outcome: OutcomeAnswered, Answers: nil},
-		{Outcome: OutcomeAnswered, Answers: []Answer{{QuestionID: "db", OptionIDs: []string{"db-unknown"}, Text: "x"}}},
+		{Outcome: OutcomeAnswered, Answers: []Answer{{QuestionID: "db", OptionIDs: []string{questionUnofferedID}, Text: "x"}}},
 		{Outcome: OutcomeAnswered, Answers: []Answer{{QuestionID: "other", OptionIDs: []string{optionDBLocal}}}},
 		{Outcome: OutcomeAnswered, Answers: []Answer{{QuestionID: "db", OptionIDs: []string{optionDBLocal, optionDBStage}}}},
 		{Outcome: OutcomeAnswered, Answers: []Answer{{QuestionID: "db"}}},

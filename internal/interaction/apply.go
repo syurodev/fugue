@@ -136,40 +136,73 @@ func (o *Owner) applyQuestionLocked(ticket *Ticket, decision *Decision, now time
 // applyRelayedLocked records the user's verbatim answer to a relayed vendor
 // request (vendor-runtime VR-05). It never issues a receipt or a grant: the
 // vendor's own permission system protects the vendor's tools, and the
-// decision is delivered back to the caller once.
+// decision is delivered back to the caller once via TakeRelayed. Choosing one
+// of the vendor's options — including the vendor's own reject — resolves the
+// request as answered with the choice recorded; denied stays the Fugue-level
+// deny with an optional note.
 func applyRelayedLocked(ticket *Ticket, decision *Decision, now time.Time) error {
-	if len(decision.Answers) > 0 {
-		return errcode.New(errcode.InvalidArgument, "relayed decision must not carry question answers")
-	}
 	switch decision.Outcome {
-	case OutcomeAllowedOnce:
+	case OutcomeAnswered:
+		if err := applyRelayedChoiceLocked(ticket, decision); err != nil {
+			return err
+		}
+	case OutcomeDenied:
+		if decision.OptionID != "" {
+			return errcode.New(errcode.InvalidArgument, "relayed denial must not specify an option ID")
+		}
+		if len(decision.Answers) > 0 {
+			return errcode.New(errcode.InvalidArgument, "relayed decision must not carry question answers")
+		}
+		if err := checkTextLimit(decision.Text, MaxNoteBytes, "deny note"); err != nil {
+			return err
+		}
+		ticket.Text = decision.Text
+	case OutcomeAllowedOnce, OutcomeAllowedSession:
+		return errcode.New(errcode.InvalidArgument, "relayed requests never create a Fugue approval")
+	case OutcomeCancelled, OutcomeUnavailable, OutcomeExpired:
+		return errcode.New(errcode.InvalidArgument, "relayed decision outcome is not a valid user answer")
+	}
+	ticket.Resolved = true
+	ticket.ResolvedAt = now
+	ticket.Outcome = decision.Outcome
+	return nil
+}
+
+// applyRelayedChoiceLocked records a relayed choice: an option of a relayed
+// confirm, or the validated answers of a relayed question, whose answers live
+// on the resolved ticket only — no receipt is issued.
+func applyRelayedChoiceLocked(ticket *Ticket, decision *Decision) error {
+	switch ticket.Kind {
+	case KindConfirm:
 		if decision.OptionID == "" {
 			return errcode.New(errcode.InvalidArgument, "relayed approval must choose one of the vendor options")
 		}
 		if !hasOption(ticket.Options, decision.OptionID) {
 			return errcode.New(errcode.InvalidArgument, "relayed option was not offered")
 		}
+		if len(decision.Answers) > 0 {
+			return errcode.New(errcode.InvalidArgument, "relayed decision must not carry question answers")
+		}
 		if err := checkTextLimit(decision.Text, MaxAnswerBytes, "answer text"); err != nil {
 			return err
 		}
 		ticket.SelectedOptionID = decision.OptionID
 		ticket.Text = decision.Text
-	case OutcomeDenied:
+	case KindQuestion:
 		if decision.OptionID != "" {
-			return errcode.New(errcode.InvalidArgument, "relayed denial must not specify an option ID")
+			return errcode.New(errcode.InvalidArgument, "question decision must not specify a top-level option ID")
 		}
-		if err := checkTextLimit(decision.Text, MaxNoteBytes, "deny note"); err != nil {
+		if decision.Text != "" {
+			return errcode.New(errcode.InvalidArgument, "question decision carries text only inside answers")
+		}
+		answers, err := normalizeAnswers(ticket.Questions, decision.Answers)
+		if err != nil {
 			return err
 		}
-		ticket.Text = decision.Text
-	case OutcomeAllowedSession:
-		return errcode.New(errcode.InvalidArgument, "relayed requests never create a session grant")
-	case OutcomeCancelled, OutcomeUnavailable, OutcomeExpired, OutcomeAnswered:
-		return errcode.New(errcode.InvalidArgument, "relayed decision outcome is not a valid user answer")
+		ticket.Answers = answers
+	case KindSelect:
+		return errcode.New(errcode.InvalidArgument, "relayed requests are confirm or question interactions")
 	}
-	ticket.Resolved = true
-	ticket.ResolvedAt = now
-	ticket.Outcome = decision.Outcome
 	return nil
 }
 

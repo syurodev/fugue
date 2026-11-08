@@ -2,8 +2,6 @@ package interaction
 
 import (
 	"slices"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -32,45 +30,6 @@ const (
 	OutcomeExpired        Outcome = "expired"
 	OutcomeAnswered       Outcome = "answered"
 )
-
-// The separator and prefixes of the neutral operation ID keys built by
-// NativeOperationKey and VendorOperationKey.
-const (
-	keySeparator   = ":"
-	nativeKeyLabel = "native"
-	vendorKeyLabel = "vendor"
-)
-
-// NativeOperationKey returns the neutral operation ID of a native tool check,
-// keyed on (invocationID, attemptID, checkGeneration). It fails typed when a
-// component is empty, the generation is zero or a component carries the key
-// separator.
-func NativeOperationKey(invocationID, attemptID string, checkGeneration uint64) (string, error) {
-	if invocationID == "" || attemptID == "" || checkGeneration == 0 {
-		return "", errcode.New(errcode.InvalidArgument, "native operation key requires invocation ID, attempt ID and a nonzero generation")
-	}
-	return joinKey(nativeKeyLabel, invocationID, attemptID, strconv.FormatUint(checkGeneration, 10))
-}
-
-// VendorOperationKey returns the neutral operation ID of a relayed vendor
-// request, keyed on (sessionID, turnID, vendorRequestID). The vendor adapter
-// records the turn and vendor request in the Binding as well, so answers stay
-// bound to the asking context.
-func VendorOperationKey(sessionID, turnID, vendorRequestID string) (string, error) {
-	if sessionID == "" || turnID == "" || vendorRequestID == "" {
-		return "", errcode.New(errcode.InvalidArgument, "vendor operation key requires session, turn and vendor request IDs")
-	}
-	return joinKey(vendorKeyLabel, sessionID, turnID, vendorRequestID)
-}
-
-func joinKey(prefix string, parts ...string) (string, error) {
-	for _, part := range parts {
-		if strings.Contains(part, keySeparator) {
-			return "", errcode.New(errcode.InvalidArgument, "operation key components must not contain the key separator")
-		}
-	}
-	return prefix + keySeparator + strings.Join(parts, keySeparator), nil
-}
 
 // Option is one selectable choice offered by a KindSelect request, by a
 // question or by a relayed vendor request. ID and Label are shown verbatim;
@@ -102,7 +61,10 @@ type Answer struct {
 
 // Binding ties a request and its resulting receipt to the exact execution
 // context and revisions observed during Prepare. Any change in these fields
-// invalidates the receipt at ClaimReceipt or ClaimSelection.
+// invalidates the receipt at ClaimReceipt or ClaimSelection. A native request
+// fills the check fields and leaves the vendor fields empty; a relayed vendor
+// request fills SessionID, TurnID and VendorRequestID and leaves the check
+// fields empty (vendor-runtime VR-05).
 type Binding struct {
 	SessionID       string
 	WorkspaceID     string
@@ -114,6 +76,10 @@ type Binding struct {
 	TargetRevision  string
 	EnvRevision     string
 	EnvTag          string
+	// TurnID and VendorRequestID identify the vendor turn and the vendor's
+	// own request inside it; they exist only on relayed bindings.
+	TurnID          string
+	VendorRequestID string
 }
 
 // Spec describes an interaction to ensure for an operation ID.
@@ -245,12 +211,15 @@ func validateSpec(spec *Spec) error {
 	if err := checkTextLimit(spec.Summary, MaxSummaryBytes, "summary"); err != nil {
 		return err
 	}
-	if err := validateBinding(&spec.Binding); err != nil {
-		return err
-	}
 	if spec.Relayed {
 		return validateRelayedSpec(spec)
 	}
+	// Native binding: the check fields are required and the vendor fields empty.
+	if err := validateBinding(&spec.Binding); err != nil {
+		return err
+	}
+	// Native operation IDs keep the legacy F1.5 freedom: any nonempty ID is
+	// accepted, with NativeOperationKey as the recommended constructor.
 	switch spec.Kind {
 	case KindConfirm:
 		return validateConfirmSpec(spec)
@@ -277,8 +246,24 @@ func validateQuestionKindSpec(spec *Spec) error {
 }
 
 func validateBinding(b *Binding) error {
+	if b.TurnID != "" || b.VendorRequestID != "" {
+		return errcode.New(errcode.InvalidArgument, "native binding must not carry vendor fields")
+	}
 	if b.SessionID == "" || b.InvocationID == "" || b.AttemptID == "" || b.ToolName == "" || b.CheckGeneration == 0 {
 		return errcode.New(errcode.InvalidArgument, "interaction binding is incomplete")
+	}
+	return nil
+}
+
+// validateRelayedBinding validates the vendor binding shape (vendor-runtime
+// VR-05): the session plus the vendor turn and request IDs. The native check
+// fields are absent because the vendor runtime owns the execution context.
+func validateRelayedBinding(b *Binding) error {
+	if b.InvocationID != "" || b.AttemptID != "" || b.CheckGeneration != 0 || b.ToolName != "" || b.ArgsDigest != "" {
+		return errcode.New(errcode.InvalidArgument, "relayed binding must not carry native fields")
+	}
+	if b.SessionID == "" || b.TurnID == "" || b.VendorRequestID == "" {
+		return errcode.New(errcode.InvalidArgument, "relayed binding requires session, turn and vendor request IDs")
 	}
 	return nil
 }
@@ -312,9 +297,11 @@ func validateConfirmSpec(spec *Spec) error {
 }
 
 // validateRelayedSpec validates a request relayed from a vendor runtime
-// (vendor-runtime VR-05): the vendor's own options are required, shown
-// verbatim, and no Fugue rule applies to the request, so Offers and question
-// content are rejected. The summary carries the vendor's prompt.
+// (vendor-runtime VR-05): no Fugue rule applies to the request, so Offers are
+// rejected and the operation ID must be built by VendorOperationKey from the
+// binding. A relayed confirm carries the vendor's summary and options; a
+// relayed question carries the vendor's Questions (and optional Body)
+// verbatim.
 func validateRelayedSpec(spec *Spec) error {
 	if spec.Kind != KindConfirm && spec.Kind != KindQuestion {
 		return errcode.New(errcode.InvalidArgument, "relayed requests are confirm or question interactions")
@@ -322,10 +309,40 @@ func validateRelayedSpec(spec *Spec) error {
 	if len(spec.Offers) > 0 {
 		return errcode.New(errcode.InvalidArgument, "relayed requests never offer Fugue outcomes")
 	}
-	if len(spec.Questions) > 0 || spec.Body != "" {
-		return errcode.New(errcode.InvalidArgument, "relayed requests carry only the vendor summary and options")
+	if err := validateRelayedKey(spec); err != nil {
+		return err
 	}
-	return validateOptionList(spec.Options, 1, "relayed")
+	switch spec.Kind {
+	case KindConfirm:
+		if len(spec.Questions) > 0 || spec.Body != "" {
+			return errcode.New(errcode.InvalidArgument, "relayed confirm carries only the vendor summary and options")
+		}
+		return validateOptionList(spec.Options, 1, "relayed")
+	case KindQuestion:
+		if len(spec.Options) > 0 {
+			return errcode.New(errcode.InvalidArgument, "relayed question carries questions, not top-level options")
+		}
+		return validateQuestionSpec(spec)
+	case KindSelect:
+		return errcode.New(errcode.InvalidArgument, "relayed requests are confirm or question interactions")
+	}
+	return errcode.New(errcode.InvalidArgument, "relayed requests are confirm or question interactions")
+}
+
+// validateRelayedKey checks the vendor binding shape and requires the
+// operation ID to be built by VendorOperationKey from it.
+func validateRelayedKey(spec *Spec) error {
+	if err := validateRelayedBinding(&spec.Binding); err != nil {
+		return err
+	}
+	key, err := VendorOperationKey(spec.Binding.SessionID, spec.Binding.TurnID, spec.Binding.VendorRequestID)
+	if err != nil {
+		return err
+	}
+	if spec.OperationID != key {
+		return errcode.New(errcode.InvalidArgument, "relayed operation ID must be built by VendorOperationKey from its binding")
+	}
+	return nil
 }
 
 func validateQuestionSpec(spec *Spec) error {
@@ -401,13 +418,14 @@ func knownOutcome(outcome Outcome) bool {
 	return false
 }
 
-// effectiveOffers returns the outcomes a user may answer a confirm-shaped
-// request with. Relayed requests never offer a Fugue session grant (VR-05);
-// their single Fugue-level outcome is the one-shot approval, recorded
-// without a receipt.
+// effectiveOffers returns the outcomes a user may answer a request with. A
+// relayed request never offers a Fugue approval outcome (VR-05): choosing one
+// of the vendor's options — including the vendor's own reject or "always
+// allow" — records the choice as answered, and denied stays the Fugue-level
+// deny with an optional note. No receipt or grant is ever created.
 func effectiveOffers(spec *Spec) []Outcome {
 	if spec.Relayed {
-		return []Outcome{OutcomeAllowedOnce}
+		return []Outcome{OutcomeAnswered, OutcomeDenied}
 	}
 	return spec.Offers
 }

@@ -67,7 +67,7 @@ func TestSelectionRequestsAcceptOnlyOfferedOptionsAndNeverAuthorizeExecution(t *
 	}
 
 	// Reject unoffered option ID, OutcomeAllowedSession and denied-with-option.
-	_, err := owner.Answer(&Decision{RequestID: ticket.RequestID, Outcome: OutcomeAllowedOnce, OptionID: "db-unknown"})
+	_, err := owner.Answer(&Decision{RequestID: ticket.RequestID, Outcome: OutcomeAllowedOnce, OptionID: questionUnofferedID})
 	wantCode(t, err, errcode.InvalidArgument)
 	_, err = owner.Answer(&Decision{RequestID: ticket.RequestID, Outcome: OutcomeAllowedSession, OptionID: optionDBLocal})
 	wantCode(t, err, errcode.InvalidArgument)

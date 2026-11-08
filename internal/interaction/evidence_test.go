@@ -33,7 +33,15 @@ func TestIE06VaultLockFailsClosedBetweenAnswerAndClaimOrDelivery(t *testing.T) {
 		return owner
 	}
 
-	// Native: a lock between Answer and ClaimReceipt makes the claim fail closed.
+	assertIE06NativeClaimsFailClosed(t, newOwner, &vaultLocked)
+	assertIE06NativeAnswersFailClosed(t, newOwner, &vaultLocked)
+	assertIE06RelayedDeliveryFailsClosed(t, newOwner, &vaultLocked)
+}
+
+// assertIE06NativeClaimsFailClosed locks the vault between Answer and
+// ClaimReceipt and expects the claim to fail closed.
+func assertIE06NativeClaimsFailClosed(t *testing.T, newOwner func(*testing.T) *Owner, vaultLocked *atomic.Bool) {
+	t.Helper()
 	native := newOwner(t)
 	ticket := mustEnsure(t, native, confirmSpec("op-ie06-native"))
 	answered := mustAnswer(t, native, &Decision{
@@ -45,31 +53,39 @@ func TestIE06VaultLockFailsClosedBetweenAnswerAndClaimOrDelivery(t *testing.T) {
 	vaultLocked.Store(true)
 	_, err := native.ClaimReceipt(answered.ReceiptID, &expected)
 	wantCode(t, err, errcode.FailedPrecondition)
+}
 
-	// Native: a lock before the answer fails closed as well.
+// assertIE06NativeAnswersFailClosed locks the vault before the answer of a
+// native request and expects the answer to fail closed.
+func assertIE06NativeAnswersFailClosed(t *testing.T, newOwner func(*testing.T) *Owner, vaultLocked *atomic.Bool) {
+	t.Helper()
 	vaultLocked.Store(false)
 	beforeAnswer := newOwner(t)
 	pendingNative := mustEnsure(t, beforeAnswer, confirmSpec("op-ie06-native-lock"))
 	vaultLocked.Store(true)
-	_, err = beforeAnswer.Answer(&Decision{
+	_, err := beforeAnswer.Answer(&Decision{
 		Incarnation: beforeAnswer.Incarnation(),
 		RequestID:   pendingNative.RequestID,
 		Outcome:     OutcomeAllowedOnce,
 	})
 	wantCode(t, err, errcode.FailedPrecondition)
+}
 
-	// Relayed: a lock between the answer and its delivery fails closed; the
-	// (created and ensured while the vault is unlocked).
-	// pending request is invalidated and cannot be answered anymore.
+// assertIE06RelayedDeliveryFailsClosed locks the vault before the answer and
+// before the delivery of relayed requests, and expects both to fail closed
+// while the pending request is invalidated and the delivery succeeds after
+// the vault unlocks.
+func assertIE06RelayedDeliveryFailsClosed(t *testing.T, newOwner func(*testing.T) *Owner, vaultLocked *atomic.Bool) {
+	t.Helper()
 	vaultLocked.Store(false)
 	relayed := newOwner(t)
-	pendingRelay := mustEnsure(t, relayed, relayedSpec("op-ie06-relay"))
+	pendingRelay := mustEnsure(t, relayed, relayedSpec(t, "turn-ie06", "req-1"))
 	vaultLocked.Store(true)
-	_, err = relayed.Answer(&Decision{
+	_, err := relayed.Answer(&Decision{
 		Incarnation: relayed.Incarnation(),
 		RequestID:   pendingRelay.RequestID,
-		Outcome:     OutcomeAllowedOnce,
-		OptionID:    "allow",
+		Outcome:     OutcomeAnswered,
+		OptionID:    vendorOptionAllow,
 	})
 	wantCode(t, err, errcode.FailedPrecondition)
 	relayed.SetVaultLocked(true)
@@ -79,6 +95,24 @@ func TestIE06VaultLockFailsClosedBetweenAnswerAndClaimOrDelivery(t *testing.T) {
 	locked, err := relayed.LookupRequest(pendingRelay.RequestID)
 	if err != nil || !locked.Resolved || locked.Outcome != OutcomeCancelled {
 		t.Fatalf("relayed request after vault lock = (%+v, %v), want cancelled", locked, err)
+	}
+
+	vaultLocked.Store(false)
+	answeredRelay := newOwner(t)
+	relayTicket := mustEnsure(t, answeredRelay, relayedSpec(t, "turn-ie06-take", "req-1"))
+	mustAnswer(t, answeredRelay, &Decision{
+		Incarnation: answeredRelay.Incarnation(),
+		RequestID:   relayTicket.RequestID,
+		Outcome:     OutcomeAnswered,
+		OptionID:    vendorOptionAllow,
+	})
+	vaultLocked.Store(true)
+	_, err = answeredRelay.TakeRelayed(relayTicket.OperationID)
+	wantCode(t, err, errcode.FailedPrecondition)
+	vaultLocked.Store(false)
+	delivered, err := answeredRelay.TakeRelayed(relayTicket.OperationID)
+	if err != nil || delivered.Outcome != OutcomeAnswered || delivered.SelectedOptionID != vendorOptionAllow {
+		t.Fatalf("delivered relayed ticket = (%+v, %v)", delivered, err)
 	}
 }
 
@@ -189,12 +223,12 @@ func ensurePlantedRequests(t *testing.T, owner *Owner) plantedTickets {
 		t.Fatal(err)
 	}
 	relay := &Spec{
-		OperationID: "op-ie08-relay",
+		OperationID: mustVendorKey(t, "turn-ie08", "req-1"),
 		Kind:        KindConfirm,
 		Summary:     plantSummary,
 		Relayed:     true,
 		Options:     []Option{{ID: vendorOptionAllow, Label: plantOption}},
-		Binding:     defaultBinding(),
+		Binding:     vendorBinding("turn-ie08", "req-1"),
 	}
 	relayTicket, err := owner.Ensure(relay)
 	if err != nil {

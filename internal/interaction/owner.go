@@ -330,6 +330,43 @@ func (o *Owner) Answer(decision *Decision) (*Ticket, error) {
 	return cp, nil
 }
 
+// TakeRelayed delivers a resolved relayed request's decision to the vendor
+// adapter exactly once and frees the request content from memory
+// (vendor-runtime VR-05): the ticket is returned on the first call and
+// removed from both indexes, so later lookups and a second take fail typed.
+// A still-pending request is not deliverable, and the take fails closed while
+// the vault is locked (interaction §5, I-E06).
+func (o *Owner) TakeRelayed(operationID string) (*Ticket, error) {
+	if operationID == "" {
+		return nil, errcode.New(errcode.InvalidArgument, "interaction operation ID is required")
+	}
+	o.mu.Lock()
+	if o.isVaultLockedLocked() {
+		o.mu.Unlock()
+		return nil, errcode.New(errcode.FailedPrecondition, "vault is locked")
+	}
+	ticket, ok := o.byOperation[operationID]
+	if !ok {
+		o.mu.Unlock()
+		return nil, errcode.New(errcode.NotFound, "interaction operation not found")
+	}
+	if !ticket.Relayed {
+		o.mu.Unlock()
+		return nil, errcode.New(errcode.FailedPrecondition, "operation is not a relayed request")
+	}
+	if !ticket.Resolved {
+		o.mu.Unlock()
+		return nil, errcode.New(errcode.FailedPrecondition, "relayed request is not resolved yet")
+	}
+	delete(o.byOperation, ticket.OperationID)
+	delete(o.byRequest, ticket.RequestID)
+	cp := cloneTicket(ticket)
+	ev := o.newAuditEvent("delivered", ticket)
+	o.mu.Unlock()
+	o.emitAudit(&ev)
+	return cp, nil
+}
+
 func (o *Owner) expireIfDueLocked(ticket *Ticket, now time.Time) *AuditEvent {
 	if ticket.Resolved || ticket.ExpiresAt.IsZero() || now.Before(ticket.ExpiresAt) {
 		return nil
