@@ -14,7 +14,7 @@ import (
 )
 
 // ErrUsage reports a malformed command line.
-var ErrUsage = errors.New("usage: fuguegate coverage|fuzz|mutation|deadcode|proto|commitlint|commitmsg|gateguard|exclusive [flags]")
+var ErrUsage = errors.New("usage: fuguegate coverage|fuzz|mutation|deadcode|proto|commitlint|commitmsg|gateguard|changes|exclusive [flags]")
 
 func main() {
 	ctx, stop := signalContext()
@@ -68,24 +68,27 @@ func dispatch(ctx context.Context, clk clock.Clock, args []string, stdout io.Wri
 	switch args[0] {
 	case "coverage":
 		return runCoverage(rest, stdout)
-	case "fuzz":
-		return runFuzz(ctx, rest, stdout)
-	case "mutation":
-		return runMutation(ctx, rest, stdout)
-	case "deadcode":
-		return runDeadcode(ctx, rest, stdout)
-	case "proto":
-		return runProto(ctx, rest, stdout)
-	case "commitlint":
-		return runCommitLint(ctx, rest, stdout)
-	case "commitmsg":
-		return runCommitMsg(ctx, rest, stdout)
-	case "gateguard":
-		return runGateGuard(ctx, rest, stdout)
 	case exclusiveCommand:
 		return runExclusive(ctx, rest, stdout, clk)
-	default:
-		return fmt.Errorf("%w: unknown command %q", ErrUsage, args[0])
+	}
+	if cmd, ok := commands()[args[0]]; ok {
+		return cmd(ctx, rest, stdout)
+	}
+	return fmt.Errorf("%w: unknown command %q", ErrUsage, args[0])
+}
+
+// commands are the subcommands that take a context, their arguments and the
+// output writer.
+func commands() map[string]func(context.Context, []string, io.Writer) error {
+	return map[string]func(context.Context, []string, io.Writer) error{
+		"fuzz":       runFuzz,
+		"mutation":   runMutation,
+		"deadcode":   runDeadcode,
+		"proto":      runProto,
+		"commitlint": runCommitLint,
+		"commitmsg":  runCommitMsg,
+		"gateguard":  runGateGuard,
+		"changes":    runChanges,
 	}
 }
 

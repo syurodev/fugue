@@ -32,8 +32,9 @@ Last updated: 2026-11-07 (vendor runtime pivot: stage A is now F9–F11; F9.1 In
 - **Data starts clean:** data directory `os.UserConfigDir()/Fugue/`, new schema. Importing
   DevKit data is a separate, later item.
 - **Stage A** is defined by `activation` v0.14 (2026-11-07, supersedes v0.13 of Q-02): vendor
-  runtime, the owner dogfoods it, Linux and macOS, the Gio desktop app plus the CLI, one release
-  gate. Native runs, API providers (OpenRouter first, M-12) and Sign in with ChatGPT move to
+  runtime, the owner dogfoods it, Linux and macOS, the Gio desktop app as the only client (the
+  CLI/TUI client is stage B since 2026-11-08; the binary keeps `fugue serve` and `fugue
+  mcp-bridge`), one release gate. Native runs, API providers (OpenRouter first, M-12) and Sign in with ChatGPT move to
   stage B. Items with status `Deferred` or marked *Stage B* in their notes do not start before
   stage A ships.
 
@@ -70,7 +71,7 @@ start) · `Dropped` (replaced; the note names what replaces it).
 | F4 | *Stage B*: context engine and model adapters | Evidence tables of the context engine and model adapter §11 |
 | F5 | Host API (`fugue serve`), input coordination and workspaces | Evidence tables of the Host API and input coordination; `workspace §9` |
 | F6 | Tools and interaction (stage A keeps F6.3 and F6.7a) | Evidence of `interaction §11`, `sandbox-runtime §12`, `shell-job §8`, `content-safety §7`, `file-tools §11`, `ask-plan §7`, `tasks §12` |
-| F7 | CLI/TUI client | Evidence of `cli §9` |
+| F7 | *Stage B*: CLI/TUI client (dropped from stage A on 2026-11-08) | Evidence of `cli §9` |
 | F8 | Stage A release | Evidence of `activation §5` (v0.14) |
 | F9 | Vendor runtime: process supervisor, vendor store, transcript, Claude, Codex and agy adapters, approvals, session service, accounts | Evidence of `vendor-runtime §15` and `transcript §9` |
 | F10 | Gio desktop app: IME go/no-go, client package, markdown, transcript and composer, approvals, accounts, vault | Evidence of `desktop-app §10` (DA-E01–DA-E06) |
@@ -204,8 +205,8 @@ Applies to all code copied from `syurodev/dev-kit`.
 
 | ID | Item | Design | Depends on | Evidence | Status | PR | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| F7.1 | Client core and subcommands: `internal/client` (auto-start, lease, reconnect, version check), every subcommand with `--json`, `fugue run` with `--on-approval` and `--detach`, exit codes, `fugue log` over `SessionTranscript`; the E2E CLI harness (real `fugue` and `fugue serve`, faux provider read from a script file) | `cli §2–3, §5, §7–8`, `verification §3` | F5.1, F5.3 | Host and subcommand rows of `cli §9` (`CL-E01`–`CL-E04`, `CL-E09`–`CL-E12`); every failure UX row of `activation §3` has an E2E test | Awaiting design |  | The only client of stage A (activation A-06). Subcommands of `fugue tasks`, `workspace`, `quota` land with F6.9, F5.6, F4.4. The `cli` page predates activation v0.14; it needs a pass that maps `fugue run`, `log` and approvals onto vendor sessions before this starts |
-| F7.3 | Inline TUI: `internal/tui` on Bubble Tea v2, Lip Gloss v2, Bubbles v2 and Glamour; scrollback items, live area, request boxes, key map, `/` overlays, status line, English strings, every failure UX row | `cli §4, §6` | F7.1 | TUI rows of `cli §9` (`CL-E05`–`CL-E08`) | Awaiting design |  | Same `cli` pass as F7.1 |
+| F7.1 | Client core and subcommands: `internal/client` (auto-start, lease, reconnect, version check), every subcommand with `--json`, `fugue run` with `--on-approval` and `--detach`, exit codes, `fugue log` over `SessionTranscript`; the E2E CLI harness (real `fugue` and `fugue serve`, faux provider read from a script file) | `cli §2–3, §5, §7–8`, `verification §3` | F5.1, F5.3 | Host and subcommand rows of `cli §9` (`CL-E01`–`CL-E04`, `CL-E09`–`CL-E12`); every failure UX row of `activation §3` has an E2E test | Deferred |  | The only client of stage A (activation A-06). Subcommands of `fugue tasks`, `workspace`, `quota` land with F6.9, F5.6, F4.4. The `cli` page predates activation v0.14; it needs a pass that maps `fugue run`, `log` and approvals onto vendor sessions before this starts. *Stage B* since 2026-11-08: the owner dropped the CLI/TUI client from stage A to focus on the Gio app (activation A-06, desktop-app DA-07 and DA-09, cli v0.14 note, base-doc PR #10). The `cli` page still needs a vendor-runtime pass before this starts |
+| F7.3 | Inline TUI: `internal/tui` on Bubble Tea v2, Lip Gloss v2, Bubbles v2 and Glamour; scrollback items, live area, request boxes, key map, `/` overlays, status line, English strings, every failure UX row | `cli §4, §6` | F7.1 | TUI rows of `cli §9` (`CL-E05`–`CL-E08`) | Deferred |  | Same `cli` pass as F7.1. *Stage B* since 2026-11-08: the owner dropped the CLI/TUI client from stage A to focus on the Gio app (activation A-06, desktop-app DA-07 and DA-09, cli v0.14 note, base-doc PR #10). The `cli` page still needs a vendor-runtime pass before this starts |
 | F7.2 | Electron shell and desktop session UI | H-44, H-33 | F5.1 | — | Dropped |  | *Stage B*; may be a separate repository. Replaced by the Gio desktop app (F10, `desktop-app`, activation A-06 v0.14) |
 
 ### F9 — Vendor runtime
@@ -236,7 +237,7 @@ it is Done.
 | ID | Item | Design | Depends on | Evidence | Status | PR | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | F10.1 | Gio go/no-go on the owner's Ubuntu machine: Telex through IBus on Wayland and X11, and the spike thresholds | `desktop-app` DA-06, `§9` | — | DA-E02 live record; first DA-E01 reading | Not started | | The owner runs the probe in `spikes/gio/` and records the result. A failure moves the item to `Needs decision` |
-| F10.2 | Client package and `ui/` module skeleton: Connect client with reconnect and catch-up, window, theme, bundled Inter and JetBrains Mono, the arch rule that the core never imports `ui/` | `desktop-app §4`, DA-01, DA-04 | F10.1, F9.1, F5.2 | DA-E04, DA-E06 | Not started | | `gioui.org` needs a row in `docs/dependencies.md` (gate file, `gate-change-approved`) |
+| F10.2 | Client package and `ui/` module skeleton: Connect client with reconnect and catch-up, window, theme, bundled Inter and JetBrains Mono, the arch rule that the core never imports `ui/`; the app auto-starts `fugue serve` (detached, ready within 10 s), holds its lease, enables the 10 s idle grace for hosts it starts (Q-25) and offers background mode (`app-background`) | `desktop-app §4`, DA-01, DA-04, DA-07, `cli §2` | F10.1, F9.1, F5.2 | DA-E04, DA-E06, DA-E08 | Not started |  | `gioui.org` needs a row in `docs/dependencies.md` (gate file, `gate-change-approved`). Host auto-start and lease ownership moved here from F7.1 |
 | F10.3 | Markdown renderer on goldmark producing Gio layout | `desktop-app` DA-03 | F10.2 | DA-E03 | Not started | | |
 | F10.4 | Transcript view and composer: virtualized list, item cards, deltas, slash menu, model and profile picker, stop | `desktop-app §5, §7` | F10.3, F9.9 | DA-E01 on the owner's Ubuntu machine | Not started | | |
 | F10.5 | Approvals inbox, accounts and quota, vault unlock, settings, failure UX | `desktop-app §5–6` | F10.4, F9.6, F9.10 | DA-E05 | Not started | | |
@@ -457,3 +458,4 @@ together only in `app`.
 | 2026-11-07 | F9.1 | ADR 0002 package layout of the vendor domain: layer table, table ownership, pkg/client, ui/ Go module, fugue mcp-bridge, and TestLayerGraph/TestTableOwnership coverage in internal/arch; Q-31 added. PR #69 opened for review; touches internal/arch, needs gate-change-approved | Agent |
 | 2026-11-07 | F6.3, F5.3a, F9.6 | Approval relay decision (vendor-runtime VR-05 v0.2 and VR-13, base-doc PR #9): vendor tools are relayed, not filtered; Fugue's own tools and the commands Fugue runs keep the interaction policy. F6.3 becomes a composite of F6.3a (relay and owner changes), F6.3b (policy for Fugue tools with the minimal env tag registry), F6.3c (static shell rules) and the deferred native remainder F6.3d; F5.3a carries the interaction service into stage A; F9.6 and F11.5 depend on them | Agent |
 | 2026-11-07 | F6.7a | Opened [#72](https://github.com/syurodev/fugue/pull/72): implemented secret detection library with protected known-value inputs, immutable matching, token patterns, assignment skips and workspace exceptions; CS-E01/CS-E03, invariant fuzzing and 1 MiB size evidence. ADR 0002 amendment approved by the owner. Review revisions replace per-byte arrays with sparse selection, preserve token punctuation, reuse the automaton across paths and enforce token length thresholds. | Agent |
+| 2026-11-08 | F7.1, F7.3, F10.2 | The owner dropped the CLI/TUI client from stage A to focus on the Gio app (base-doc PR #10): F7.1 and F7.3 are `Deferred`; F10.2 takes over host auto-start, the lease, the 10 s idle grace (Q-25) and background mode, with DA-E08; the `fugue` binary keeps `fugue serve` and `fugue mcp-bridge` | Agent |

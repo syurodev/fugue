@@ -1,0 +1,65 @@
+# Gate definition: docs/quality-gates.md section 9. Changes need the gate-change-approved label.
+# gate-guard and commit-lint are required status checks on main (docs/github-setup.md).
+# They react to labels and title edits as well as pushes; keeping them out of pr.yml
+# means applying a label reruns only these two cheap jobs.
+name: pr-meta
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-meta-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  gate-guard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: read
+      pull-requests: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Find who applied the approval label
+        id: approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          actor=$(gh api "repos/$REPO/issues/$PR/events" --paginate \
+            --jq '[.[] | select(.event == "labeled" and .label.name == "gate-change-approved")] | last | .actor.login // ""')
+          echo "actor=$actor" >> "$GITHUB_OUTPUT"
+      - name: Guard gate-defining files
+        env:
+          BASE: origin/${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          ACTOR: ${{ steps.approval.outputs.actor }}
+          OWNER: ${{ github.repository_owner }}
+        run: go run ./cmd/fuguegate gateguard -base "$BASE" -head "$HEAD_SHA" -labels "$LABELS" -label-actor "$ACTOR" -approver "$OWNER"
+
+  commit-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: Lint the PR title and commits
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: go run ./cmd/fuguegate commitlint -title "$TITLE" -base "$BASE_SHA" -head "$HEAD_SHA"
