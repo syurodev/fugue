@@ -25,15 +25,13 @@ import (
 // differs (PID reuse), Reap returns ErrIdentityMismatch without signaling
 // anything. It never re-runs a vendor command.
 func Reap(ctx context.Context, id Identity, opts *ReapOptions) (StopProof, error) {
-	clk := clock.Clock(clock.Real{})
-	var cgroupRoot, procRoot string
-	if opts != nil {
-		if opts.Clock != nil {
-			clk = opts.Clock
-		}
-		cgroupRoot = opts.CgroupRoot
-		procRoot = opts.ProcRoot
+	if opts == nil || opts.Clock == nil {
+		return StopProof{Status: StopProofUnknown, Reason: ReasonIdentityMismatch},
+			errcode.New(errcode.InvalidArgument, "reap requires ReapOptions with a non-nil Clock")
 	}
+	clk := opts.Clock
+	cgroupRoot := opts.CgroupRoot
+	procRoot := opts.ProcRoot
 	if id.ScopeUnit != "" {
 		if !isValidScopeUnit(id.ScopeUnit) {
 			return StopProof{Status: StopProofUnknown, Reason: ReasonScopeUnverified},
@@ -48,11 +46,10 @@ func Reap(ctx context.Context, id Identity, opts *ReapOptions) (StopProof, error
 	return reapPlatform(ctx, id, clk, cgroupRoot, procRoot)
 }
 
-func reapContainedScope(ctx context.Context, unitName string, clk clock.Clock, cgroupRoot string) (StopProof, error) {
-	scope, ok := findScopeDir(cgroupRoot, unitName)
-	if !ok {
-		return StopProof{Status: StopProofUnknown, Reason: ReasonScopeUnverified},
-			fmt.Errorf("%w: scope directory %q not found", ErrIdentityMismatch, unitName)
+func reapContainedScope(ctx context.Context, unitName string, clk clock.Clock, cgroupRoot, procRoot string) (StopProof, error) {
+	scope, err := findScopeDir(cgroupRoot, procRoot, unitName)
+	if err != nil {
+		return StopProof{Status: StopProofUnknown, Reason: ReasonScopeUnverified}, err
 	}
 	if scope.isEmpty() {
 		return StopProof{Status: StopProofProved, Reason: ReasonCgroupEmpty}, nil

@@ -46,8 +46,10 @@ func TestProcessSpawnDistinguishesFailures(t *testing.T) {
 		t.Parallel()
 		exe := fakeVendorExe(t)
 		_, err := Spawn(ctx, &Options{
-			Argv: []string{exe, fakeVendorFlag, fakeVendorModeNormal},
-			Cwd:  "/nonexistent/directory/cannot/chdir",
+			Argv:           []string{exe, fakeVendorFlag, fakeVendorModeNormal},
+			Cwd:            "/nonexistent/directory/cannot/chdir",
+			SystemdRunPath: nonexistentSystemdRun,
+			Probe:          NewSystemdProbe(),
 		})
 		if !errors.Is(err, ErrStartFailed) {
 			t.Fatalf("expected ErrStartFailed, got %v", err)
@@ -62,7 +64,9 @@ func TestProcessExitsOnStdinEOF(t *testing.T) {
 	exe := fakeVendorExe(t)
 
 	proc, err := Spawn(ctx, &Options{
-		Argv: []string{exe, fakeVendorFlag, "exit-on-eof"},
+		Argv:           []string{exe, fakeVendorFlag, "exit-on-eof"},
+		SystemdRunPath: nonexistentSystemdRun,
+		Probe:          NewSystemdProbe(),
 	})
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
@@ -86,7 +90,9 @@ func TestProcessStderrFloodCapturedInRing(t *testing.T) {
 	exe := fakeVendorExe(t)
 
 	proc, err := Spawn(ctx, &Options{
-		Argv: []string{exe, fakeVendorFlag, "flood-stderr"},
+		Argv:           []string{exe, fakeVendorFlag, "flood-stderr"},
+		SystemdRunPath: nonexistentSystemdRun,
+		Probe:          NewSystemdProbe(),
 	})
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
@@ -111,10 +117,13 @@ func TestFinalLinesSurviveImmediateExit(t *testing.T) {
 
 	ctx := t.Context()
 	exe := fakeVendorExe(t)
+	probe := NewSystemdProbe()
 
 	for iter := range 20 {
 		proc, err := Spawn(ctx, &Options{
-			Argv: []string{exe, fakeVendorFlag, "burst-and-exit"},
+			Argv:           []string{exe, fakeVendorFlag, "burst-and-exit"},
+			SystemdRunPath: nonexistentSystemdRun,
+			Probe:          probe,
 		})
 		if err != nil {
 			t.Fatalf("iter %d: Spawn: %v", iter, err)

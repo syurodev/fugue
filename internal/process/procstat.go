@@ -156,3 +156,48 @@ func parseCgroupProcs(content string) ([]int, bool) {
 	}
 	return pids, true
 }
+
+// extractUserManagerCgroupRel parses /proc/self/cgroup content and returns the
+// cgroup v2 relative path of the current user's systemd manager subtree
+// (".../user@<uid>.service").
+func extractUserManagerCgroupRel(content string, uid int) (string, bool) {
+	if uid < 0 {
+		return "", false
+	}
+	userService := "user@" + strconv.Itoa(uid) + ".service"
+	userSlice := "user-" + strconv.Itoa(uid) + ".slice"
+	for _, rawLine := range strings.Split(content, "\n") {
+		rel, ok := strings.CutPrefix(strings.TrimSpace(rawLine), "0::/")
+		if !ok {
+			continue
+		}
+		if mgrRel, found := matchUserManagerSegments(rel, userService, userSlice); found {
+			return mgrRel, true
+		}
+	}
+	return "", false
+}
+
+func matchUserManagerSegments(rel, userService, userSlice string) (string, bool) {
+	trimmed := strings.Trim(rel, "/")
+	if trimmed == "" {
+		return "", false
+	}
+	parts := strings.Split(trimmed, "/")
+	for _, p := range parts {
+		if p == "" || p == "." || p == ".." {
+			return "", false
+		}
+	}
+	for i, p := range parts {
+		if p == userService {
+			return strings.Join(parts[:i+1], "/"), true
+		}
+	}
+	for i, p := range parts {
+		if p == userSlice {
+			return strings.Join(parts[:i+1], "/") + "/" + userService, true
+		}
+	}
+	return "", false
+}

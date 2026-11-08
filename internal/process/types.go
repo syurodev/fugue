@@ -44,7 +44,7 @@ type Options struct {
 	OnEscalation func(step string)
 
 	// SessionID names the systemd scope unit (`fugue-vendor-<id>.scope`) on Linux.
-	// When empty, a unique scope identifier is generated from the process.
+	// Required when Linux systemd scope containment is active.
 	SessionID string
 	// MemoryMax is an optional systemd MemoryMax property (e.g. "4G") passed on Linux.
 	MemoryMax string

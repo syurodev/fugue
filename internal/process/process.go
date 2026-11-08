@@ -62,7 +62,10 @@ func Spawn(ctx context.Context, opts *Options) (*Process, error) {
 
 	effectiveOpts := *opts
 	effectiveOpts.Clock = clk
-	launchArgv, unitName, usedSystemd := prepareSpawnArgv(ctx, &effectiveOpts)
+	launchArgv, unitName, usedSystemd, err := prepareSpawnArgv(ctx, &effectiveOpts)
+	if err != nil {
+		return nil, err
+	}
 
 	path, err := exec.LookPath(launchArgv[0])
 	if err != nil {
@@ -94,9 +97,15 @@ func Spawn(ctx context.Context, opts *Options) (*Process, error) {
 
 	p := newProcess(cmd, clk, opts, pipes.stdin, pipes.stdoutR)
 	p.stderrR = pipes.stderrR
-	attachPlatformContainment(ctx, p, &effectiveOpts, unitName, usedSystemd)
 	startStderrDrain(ctx, p, pipes.stderrR)
+	containmentErr := attachPlatformContainment(ctx, p, &effectiveOpts, unitName, usedSystemd)
 	startWaitTask(ctx, p)
+	if containmentErr != nil {
+		if _, stopErr := p.Stop(ctx); stopErr != nil {
+			return nil, errors.Join(containmentErr, stopErr)
+		}
+		return nil, containmentErr
+	}
 	return p, nil
 }
 

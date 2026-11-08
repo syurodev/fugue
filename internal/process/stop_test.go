@@ -18,11 +18,10 @@ import (
 )
 
 const (
-	escalationInterrupt   = "interrupt"
-	escalationSigint      = "sigint"
-	escalationSigterm     = "sigterm"
-	escalationSigkill     = "sigkill"
-	nonexistentSystemdRun = "/nonexistent/systemd-run"
+	escalationInterrupt = "interrupt"
+	escalationSigint    = "sigint"
+	escalationSigterm   = "sigterm"
+	escalationSigkill   = "sigkill"
 )
 
 func testEpoch() time.Time {
@@ -45,8 +44,10 @@ func TestStopOrderImmediateInterrupt(t *testing.T) {
 
 	var proc *Process
 	proc, err := Spawn(ctx, &Options{
-		Argv:  []string{exe, fakeVendorFlag, "protocol-interrupt"},
-		Clock: clk,
+		Argv:           []string{exe, fakeVendorFlag, "protocol-interrupt"},
+		Clock:          clk,
+		SystemdRunPath: nonexistentSystemdRun,
+		Probe:          NewSystemdProbe(),
 		Interrupt: func(ctx context.Context) error {
 			if _, werr := fmt.Fprintln(proc.stdin, "interrupt"); werr != nil {
 				return fmt.Errorf("write interrupt: %w", werr)
@@ -65,12 +66,8 @@ func TestStopOrderImmediateInterrupt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	wantStatus := StopProofUnknown
-	if proc.Identity().ScopeUnit != "" {
-		wantStatus = StopProofProved
-	}
-	if proof.Status != wantStatus {
-		t.Fatalf("expected %v, got %v", wantStatus, proof.Status)
+	if proof.Status != StopProofUnknown {
+		t.Fatalf("expected StopProofUnknown, got %v", proof.Status)
 	}
 	if clk.Pending() != 0 {
 		t.Fatalf("expected 0 pending timers after immediate exit, got %d", clk.Pending())
@@ -86,8 +83,10 @@ func TestStopOrderEscalatesToSigint(t *testing.T) {
 	stepCh := make(chan string, 10)
 
 	proc, err := Spawn(ctx, &Options{
-		Argv:  []string{exe, fakeVendorFlag, fakeVendorModeNormal},
-		Clock: clk,
+		Argv:           []string{exe, fakeVendorFlag, fakeVendorModeNormal},
+		Clock:          clk,
+		SystemdRunPath: nonexistentSystemdRun,
+		Probe:          NewSystemdProbe(),
 		Interrupt: func(ctx context.Context) error {
 			return nil
 		},
@@ -137,8 +136,10 @@ func TestStopOrderEscalatesToSigterm(t *testing.T) {
 	stepCh := make(chan string, 10)
 
 	proc, err := Spawn(ctx, &Options{
-		Argv:  []string{exe, fakeVendorFlag, "ignore-sigint"},
-		Clock: clk,
+		Argv:           []string{exe, fakeVendorFlag, "ignore-sigint"},
+		Clock:          clk,
+		SystemdRunPath: nonexistentSystemdRun,
+		Probe:          NewSystemdProbe(),
 		Interrupt: func(ctx context.Context) error {
 			return nil
 		},
@@ -193,8 +194,10 @@ func TestStopOrderEscalatesToSigkill(t *testing.T) {
 	stepCh := make(chan string, 10)
 
 	proc, err := Spawn(ctx, &Options{
-		Argv:  []string{exe, fakeVendorFlag, fakeVendorModeIgnoreSigterm},
-		Clock: clk,
+		Argv:           []string{exe, fakeVendorFlag, fakeVendorModeIgnoreSigterm},
+		Clock:          clk,
+		SystemdRunPath: nonexistentSystemdRun,
+		Probe:          NewSystemdProbe(),
 		Interrupt: func(ctx context.Context) error {
 			return nil
 		},
@@ -256,8 +259,10 @@ func TestStopKillsGroupMembersAfterLeaderExits(t *testing.T) {
 	stepCh := make(chan string, 10)
 
 	proc, err := Spawn(ctx, &Options{
-		Argv:  []string{exe, fakeVendorFlag, "group-child-survivor"},
-		Clock: clk,
+		Argv:           []string{exe, fakeVendorFlag, "group-child-survivor"},
+		Clock:          clk,
+		SystemdRunPath: nonexistentSystemdRun,
+		Probe:          NewSystemdProbe(),
 		OnEscalation: func(step string) {
 			stepCh <- step
 		},
@@ -298,9 +303,7 @@ func TestStopKillsGroupMembersAfterLeaderExits(t *testing.T) {
 		t.Fatalf("Stop error: %v", stopErr)
 	}
 	wantReason := ReasonGroupEmpty
-	if proc.Identity().ScopeUnit != "" {
-		wantReason = ReasonCgroupEmpty
-	} else if runtime.GOOS == "linux" {
+	if runtime.GOOS == "linux" {
 		wantReason = ReasonScopeUnavailable
 	}
 	if stopProof.Reason != wantReason {
@@ -335,8 +338,10 @@ func TestStopOnCanceledContext(t *testing.T) {
 	stepCh := make(chan string, 10)
 
 	proc, err := Spawn(ctx, &Options{
-		Argv:  []string{exe, fakeVendorFlag, fakeVendorModeNormal},
-		Clock: clk,
+		Argv:           []string{exe, fakeVendorFlag, fakeVendorModeNormal},
+		Clock:          clk,
+		SystemdRunPath: nonexistentSystemdRun,
+		Probe:          NewSystemdProbe(),
 		OnEscalation: func(step string) {
 			stepCh <- step
 		},
@@ -369,8 +374,10 @@ func TestStopInterruptErrorReturnedSeparately(t *testing.T) {
 	stepCh := make(chan string, 10)
 
 	proc, err := Spawn(ctx, &Options{
-		Argv:  []string{exe, fakeVendorFlag, fakeVendorModeNormal},
-		Clock: clk,
+		Argv:           []string{exe, fakeVendorFlag, fakeVendorModeNormal},
+		Clock:          clk,
+		SystemdRunPath: nonexistentSystemdRun,
+		Probe:          NewSystemdProbe(),
 		Interrupt: func(ctx context.Context) error {
 			return errCustomInterruptFailure
 		},
@@ -441,6 +448,7 @@ func TestStopReturnsWhenEscapedGrandchildHoldsPipes(t *testing.T) {
 		Argv:           []string{exe, fakeVendorFlag, fakeVendorModeSetsidGrandchild},
 		Clock:          clk,
 		SystemdRunPath: nonexistentSystemdRun,
+		Probe:          NewSystemdProbe(),
 		OnEscalation: func(step string) {
 			stepCh <- step
 		},
@@ -505,6 +513,7 @@ func TestStopClosesStdoutWhenConsumerBetweenReads(t *testing.T) {
 		Argv:           []string{exe, fakeVendorFlag, "setsid-grandchild-stdout-only"},
 		Clock:          clk,
 		SystemdRunPath: nonexistentSystemdRun,
+		Probe:          NewSystemdProbe(),
 		OnEscalation: func(step string) {
 			stepCh <- step
 		},

@@ -10,22 +10,28 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
+	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
 const (
-	defaultCgroupRoot      = "/sys/fs/cgroup"
-	defaultProcRoot        = "/proc"
-	defaultSystemdRun      = "systemd-run"
-	scopeUnitPrefix        = "fugue-vendor-"
-	scopeUnitSuffix        = ".scope"
-	maxScopeVerifyAttempts = 500000
+	defaultCgroupRoot = "/sys/fs/cgroup"
+	defaultProcRoot   = "/proc"
+	defaultSystemdRun = "systemd-run"
+	scopeUnitPrefix   = "fugue-vendor-"
+	scopeUnitSuffix   = ".scope"
+
+	// scopeVerifyTimeout bounds the wait on the injected clock for systemd-run
+	// to move the spawned process into its transient scope unit and for
+	// <procRoot>/<pid>/cgroup to resolve to that directory under the current
+	// user's systemd manager cgroup subtree.
+	scopeVerifyTimeout = 2 * time.Second
 )
 
 func readRootFile(dir, rel string) ([]byte, error) {
@@ -116,70 +122,63 @@ func (c *cgroupScope) kill(skipPID int) error {
 	return c.signalProcs(syscall.SIGKILL, skipPID)
 }
 
-// verifyCgroupScope reads <procRoot>/<pid>/cgroup and checks that the v2
-// hierarchy path resolves to a directory under cgroupRoot ending in unitName.
-// When systemd-run has just started, it waits for the scope assignment to
-// become visible in <procRoot>/<pid>/cgroup while the process is alive.
-func verifyCgroupScope(ctx context.Context, procRoot, cgroupRoot string, pid int, unitName string) (*cgroupScope, bool) {
+func resolveUserManagerCgroupRel(procRoot string, uid int) (string, error) {
+	data, err := readRootFile(procRoot, "self/cgroup")
+	if err != nil {
+		return "", fmt.Errorf("%w: read self/cgroup: %w", ErrIdentityMismatch, err)
+	}
+	rel, ok := extractUserManagerCgroupRel(string(data), uid)
+	if !ok {
+		return "", fmt.Errorf("%w: self/cgroup not in user@%d.service subtree", ErrIdentityMismatch, uid)
+	}
+	return rel, nil
+}
+
+// verifyCgroupScope polls <procRoot>/<pid>/cgroup on clk (every reapPollInterval
+// up to scopeVerifyTimeout) and checks that the v2 hierarchy path resolves to a
+// directory ending in unitName inside the current user's user@<uid>.service
+// subtree under cgroupRoot.
+func verifyCgroupScope(ctx context.Context, clk clock.Clock, procRoot, cgroupRoot string, pid int, unitName string) (*cgroupScope, bool) {
 	if !isValidScopeUnit(unitName) || pid <= 0 {
 		return nil, false
 	}
-	realProcAttempts := 0
-	for {
-		scope, retry, isRealProcRetry, ok := tryVerifyCgroupScope(procRoot, cgroupRoot, pid, unitName)
-		if ok {
-			return scope, true
+	var verified *cgroupScope
+	ok := waitPollCondition(ctx, clk, scopeVerifyTimeout, func() bool {
+		scope, match := checkCgroupScopeOnce(procRoot, cgroupRoot, pid, unitName)
+		if match {
+			verified = scope
+			return true
 		}
-		if !retry || ctx.Err() != nil {
-			return nil, false
-		}
-		if isRealProcRetry {
-			realProcAttempts++
-			if realProcAttempts >= maxScopeVerifyAttempts {
-				return nil, false
-			}
-		}
-		runtime.Gosched()
-	}
+		return false
+	})
+	return verified, ok
 }
 
-func tryVerifyCgroupScope(procRoot, cgroupRoot string, pid int, unitName string) (*cgroupScope, bool, bool, bool) {
+func checkCgroupScopeOnce(procRoot, cgroupRoot string, pid int, unitName string) (*cgroupScope, bool) {
+	userMgrRel, err := resolveUserManagerCgroupRel(procRoot, os.Getuid())
+	if err != nil {
+		return nil, false
+	}
 	data, err := readRootFile(procRoot, strconv.Itoa(pid)+"/cgroup")
 	if err != nil {
-		// In fake-systemd-run tests (procRoot != defaultProcRoot), the child
-		// atomically renames <procRoot>/<pid>/cgroup into place before exec.
-		retry := procRoot != defaultProcRoot && errors.Is(err, fs.ErrNotExist)
-		return nil, retry, false, false
+		return nil, false
 	}
 	rel, ok := parseProcCgroupRelPath(string(data), unitName)
-	if !ok {
-		// On real /proc, systemd-run starts in the caller's cgroup and moves
-		// itself into unitName over D-Bus before execing the target command.
-		isReal := procRoot == defaultProcRoot && isProcLiveOnRealProc(procRoot, pid)
-		return nil, isReal, isReal, false
+	if !ok || !strings.HasPrefix(rel, userMgrRel+"/") {
+		return nil, false
 	}
 	dir := filepath.Join(cgroupRoot, filepath.FromSlash(rel))
 	if filepath.Base(dir) != unitName {
-		return nil, false, false, false
+		return nil, false
 	}
 	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() {
-		isReal := procRoot == defaultProcRoot && isProcLiveOnRealProc(procRoot, pid)
-		return nil, isReal, isReal, false
+		return nil, false
 	}
 	return &cgroupScope{
 		unitName: unitName,
 		dirPath:  dir,
-	}, false, false, true
-}
-
-func isProcLiveOnRealProc(procRoot string, pid int) bool {
-	data, err := readRootFile(procRoot, strconv.Itoa(pid)+"/stat")
-	if err != nil {
-		return false
-	}
-	_, err = parseProcStatRaw(string(data))
-	return err == nil
+	}, true
 }
 
 func isValidScopeUnit(unitName string) bool {
@@ -190,41 +189,61 @@ func isValidScopeUnit(unitName string) bool {
 		!strings.Contains(unitName, "..")
 }
 
-// findScopeDir searches cgroupRoot for a directory whose base name is unitName.
-func findScopeDir(cgroupRoot, unitName string) (*cgroupScope, bool) {
+// findScopeDir searches only the current user's user@<uid>.service subtree
+// (resolved from <procRoot>/self/cgroup) for unitName, requiring exactly one
+// match.
+func findScopeDir(cgroupRoot, procRoot, unitName string) (*cgroupScope, error) {
 	if !isValidScopeUnit(unitName) {
-		return nil, false
+		return nil, fmt.Errorf("%w: invalid scope unit %q", ErrIdentityMismatch, unitName)
 	}
-	var found string
-	if err := filepath.WalkDir(cgroupRoot, func(p string, d fs.DirEntry, err error) error {
+	userMgrRel, err := resolveUserManagerCgroupRel(procRoot, os.Getuid())
+	if err != nil {
+		return nil, err
+	}
+	searchRoot := filepath.Join(cgroupRoot, filepath.FromSlash(userMgrRel))
+	info, statErr := os.Stat(searchRoot)
+	if statErr != nil || !info.IsDir() {
+		return nil, fmt.Errorf("%w: user manager cgroup %s not found", ErrIdentityMismatch, userMgrRel)
+	}
+	matches := collectScopeMatches(searchRoot, unitName)
+	if len(matches) != 1 {
+		return nil, fmt.Errorf("%w: expected 1 scope directory for %q under %s, found %d", ErrIdentityMismatch, unitName, userMgrRel, len(matches))
+	}
+	return &cgroupScope{unitName: unitName, dirPath: matches[0]}, nil
+}
+
+func collectScopeMatches(searchRoot, unitName string) []string {
+	var matches []string
+	if err := filepath.WalkDir(searchRoot, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return fs.SkipDir
 		}
 		if d.IsDir() && d.Name() == unitName {
-			found = p
-			return fs.SkipAll
+			matches = append(matches, p)
+			return fs.SkipDir
 		}
 		return nil
 	}); err != nil {
-		return nil, false
+		return nil
 	}
-	if found == "" {
-		return nil, false
-	}
-	return &cgroupScope{unitName: unitName, dirPath: found}, true
+	return matches
 }
 
-func buildScopeUnitName(sessionID string) string {
+func buildScopeUnitName(sessionID string) (string, error) {
+	trimmed := strings.TrimSpace(sessionID)
+	if trimmed == "" {
+		return "", errcode.New(errcode.InvalidArgument, "process spawn requires SessionID when systemd scope containment is enabled")
+	}
 	clean := strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
 			return r
 		}
 		return '-'
-	}, sessionID)
-	if clean == "" {
-		clean = "default"
+	}, trimmed)
+	if strings.Trim(clean, "-_") == "" {
+		return "", errcode.New(errcode.InvalidArgument, "process spawn requires alphanumeric SessionID")
 	}
-	return scopeUnitPrefix + clean + scopeUnitSuffix
+	return scopeUnitPrefix + clean + scopeUnitSuffix, nil
 }
 
 func attachLinuxContainment(
@@ -234,10 +253,10 @@ func attachLinuxContainment(
 	procRoot string,
 	unitName string,
 	usedSystemd bool,
-) {
+) error {
 	var verifiedScope *cgroupScope
 	if usedSystemd {
-		if scope, ok := verifyCgroupScope(ctx, procRoot, cgroupRoot, p.PID(), unitName); ok {
+		if scope, ok := verifyCgroupScope(ctx, p.clock, procRoot, cgroupRoot, p.PID(), unitName); ok {
 			verifiedScope = scope
 		} else {
 			p.uncontainedReason = ReasonScopeUnverified
@@ -247,9 +266,9 @@ func attachLinuxContainment(
 	}
 
 	scanner := newProcfsScanner(procRoot)
-	token, tokErr := scanner.startToken(p.PID())
+	token, tokErr := readLinuxStartToken(ctx, p.clock, scanner, p.PID())
 	if tokErr != nil {
-		token = ""
+		return tokErr
 	}
 
 	p.identity = Identity{
@@ -260,12 +279,31 @@ func attachLinuxContainment(
 	if verifiedScope != nil {
 		p.scope = verifiedScope
 		p.identity.ScopeUnit = unitName
-		return
+		return nil
 	}
 
 	tracker := newDescendantTracker(p.PID(), token, scanner, p.clock)
 	tracker.start(ctx)
 	p.tracker = tracker
+	return nil
+}
+
+func readLinuxStartToken(ctx context.Context, clk clock.Clock, scanner *procfsScanner, pid int) (string, error) {
+	var token string
+	var lastErr error
+	ok := waitPollCondition(ctx, clk, scopeVerifyTimeout, func() bool {
+		tok, err := scanner.startToken(pid)
+		if err == nil && tok != "" {
+			token = tok
+			return true
+		}
+		lastErr = err
+		return false
+	})
+	if !ok {
+		return "", fmt.Errorf("%w: read process start token: %w", ErrStartFailed, lastErr)
+	}
+	return token, nil
 }
 
 func resolveContainmentPaths(opts *Options) (cgroupRoot, procRoot, systemdBin string) {
@@ -284,39 +322,24 @@ func resolveContainmentPaths(opts *Options) (cgroupRoot, procRoot, systemdBin st
 	return cgroupRoot, procRoot, systemdBin
 }
 
-func prepareLinuxSpawnArgv(ctx context.Context, opts *Options) ([]string, string, bool) {
-	cgroupRoot, _, systemdBin := resolveContainmentPaths(opts)
-	probe := opts.Probe
-	if probe == nil {
-		probe = NewSystemdProbe()
+func prepareLinuxSpawnArgv(ctx context.Context, opts *Options) ([]string, string, bool, error) {
+	if opts.Probe == nil {
+		return nil, "", false, errcode.New(errcode.InvalidArgument, "process spawn requires Options.Probe")
 	}
-	if !probe.check(ctx, systemdBin, cgroupRoot) {
-		return opts.Argv, "", false
+	cgroupRoot, _, systemdBin := resolveContainmentPaths(opts)
+	if !opts.Probe.check(ctx, systemdBin, cgroupRoot) {
+		return opts.Argv, "", false, nil
+	}
+	unitName, err := buildScopeUnitName(opts.SessionID)
+	if err != nil {
+		return nil, "", false, err
 	}
 	resolved, err := exec.LookPath(systemdBin)
 	if err != nil {
-		return opts.Argv, "", false
+		return nil, "", false, classifySpawnError(systemdBin, err)
 	}
-	sessionID := opts.SessionID
-	if sessionID == "" {
-		sessionID = uniqueScopeID(opts.Clock)
-	}
-	unitName := buildScopeUnitName(sessionID)
 	args := buildSystemdRunArgs(resolved, unitName, opts.MemoryMax, opts.CPUWeight, opts.Argv)
-	return args, unitName, true
-}
-
-func uniqueScopeID(clk clock.Clock) string {
-	f, err := os.CreateTemp("", "fugue-")
-	if err != nil {
-		return strconv.FormatInt(clk.Now().UnixNano(), 36)
-	}
-	name := f.Name()
-	closeQuietly(f)
-	if rerr := os.Remove(name); rerr != nil {
-		return strings.TrimPrefix(filepath.Base(name), "fugue-")
-	}
-	return strings.TrimPrefix(filepath.Base(name), "fugue-")
+	return args, unitName, true, nil
 }
 
 // buildSystemdRunArgs constructs the systemd-run command line for a scope unit.
@@ -376,11 +399,11 @@ func runSystemdProbe(ctx context.Context, systemdBin, cgroupRoot string) bool {
 	if err != nil {
 		return false
 	}
-	cmd := exec.CommandContext(ctx, "/usr/bin/systemd-run")
-	cmd.Path = resolved
-	cmd.Args = []string{resolved, "--user", "--scope", "--quiet", "--", "true"}
-	cmd.Err = nil
-	return cmd.Run() == nil
+	return execSystemdProbe(ctx, resolved)
+}
+
+func execSystemdProbe(ctx context.Context, resolved string) bool {
+	return exec.CommandContext(ctx, resolved, "--user", "--scope", "--quiet", "--", "true").Run() == nil
 }
 
 func isCgroupV2Mounted(cgroupRoot string) bool {

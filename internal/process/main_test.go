@@ -18,6 +18,7 @@ import (
 const (
 	fakeVendorFlag              = "-fugue-test-fake-vendor"
 	fakeVendorModeIgnoreSigterm = "ignore-sigterm"
+	nonexistentSystemdRun       = "/nonexistent/systemd-run"
 )
 
 func TestMain(m *testing.M) {

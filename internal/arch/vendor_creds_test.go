@@ -30,10 +30,6 @@ func vendorCredentialPatterns() []credentialPattern {
 		{pattern: codexAuthFile, reason: "Codex CLI subscription credential file"},
 		// Claude Code stores OAuth tokens in the macOS Keychain under this service name.
 		{pattern: "Claude Code-credentials", reason: "Claude Code macOS Keychain service name"},
-		// Codex CLI stores credentials in the OS keyring under this service name.
-		{pattern: "Codex-credentials", reason: "Codex macOS Keychain service name"},
-		// Antigravity CLI stores OAuth tokens in the OS keyring under this service name.
-		{pattern: "Antigravity-credentials", reason: "Antigravity macOS Keychain service name"},
 		// macOS Keychain CLI command used to extract generic passwords by service or account.
 		{pattern: "security find-generic-password", reason: "macOS Keychain CLI credential lookup"},
 	}

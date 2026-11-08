@@ -17,11 +17,11 @@ const (
 	sZomb = 5
 )
 
-func prepareSpawnArgv(ctx context.Context, opts *Options) ([]string, string, bool) {
-	if opts != nil && opts.CgroupRoot != "" && opts.ProcRoot != "" {
+func prepareSpawnArgv(ctx context.Context, opts *Options) ([]string, string, bool, error) {
+	if opts != nil && (opts.CgroupRoot != "" || opts.ProcRoot != "") {
 		return prepareLinuxSpawnArgv(ctx, opts)
 	}
-	return opts.Argv, "", false
+	return opts.Argv, "", false, nil
 }
 
 func attachPlatformContainment(
@@ -30,15 +30,15 @@ func attachPlatformContainment(
 	opts *Options,
 	unitName string,
 	usedSystemd bool,
-) {
-	if opts != nil && opts.CgroupRoot != "" && opts.ProcRoot != "" {
-		attachLinuxContainment(ctx, p, opts.CgroupRoot, opts.ProcRoot, unitName, usedSystemd)
-		return
+) error {
+	if opts != nil && (opts.CgroupRoot != "" || opts.ProcRoot != "") {
+		cgroupRoot, procRoot, _ := resolveContainmentPaths(opts)
+		return attachLinuxContainment(ctx, p, cgroupRoot, procRoot, unitName, usedSystemd)
 	}
 	scanner := sysctlScanner{}
 	token, tokErr := scanner.startToken(p.PID())
-	if tokErr != nil {
-		token = ""
+	if tokErr != nil || token == "" {
+		return fmt.Errorf("%w: read process start token: %w", ErrStartFailed, tokErr)
 	}
 	p.identity = Identity{
 		PID:        p.PID(),
@@ -48,12 +48,19 @@ func attachPlatformContainment(
 	tracker := newDescendantTracker(p.PID(), token, scanner, p.clock)
 	tracker.start(ctx)
 	p.tracker = tracker
+	return nil
 }
 
 func reapPlatform(ctx context.Context, id Identity, clk clock.Clock, cgroupRoot, procRoot string) (StopProof, error) {
 	if cgroupRoot != "" || procRoot != "" {
+		if cgroupRoot == "" {
+			cgroupRoot = defaultCgroupRoot
+		}
+		if procRoot == "" {
+			procRoot = defaultProcRoot
+		}
 		if id.ScopeUnit != "" {
-			return reapContainedScope(ctx, id.ScopeUnit, clk, cgroupRoot)
+			return reapContainedScope(ctx, id.ScopeUnit, clk, cgroupRoot, procRoot)
 		}
 		return reapByStartToken(ctx, id, clk, newProcfsScanner(procRoot))
 	}
