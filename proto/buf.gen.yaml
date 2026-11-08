@@ -3,13 +3,13 @@ managed:
   enabled: true
   override:
     - file_option: go_package_prefix
-      value: github.com/syurodev/fugue/internal/hostapi/internal/pb
+      value: github.com/syurodev/fugue/pkg/pb
 plugins:
   - local: [go, tool, protoc-gen-go]
-    out: internal/hostapi/internal/pb
+    out: pkg/pb
     opt: paths=source_relative
   - local: [go, tool, protoc-gen-connect-go]
-    out: internal/hostapi/internal/pb
+    out: pkg/pb
     opt: paths=source_relative
   - remote: buf.build/bufbuild/es:v2.16.0
     out: gen/ts

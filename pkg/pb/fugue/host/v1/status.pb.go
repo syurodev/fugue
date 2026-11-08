@@ -234,8 +234,8 @@ const file_fugue_host_v1_status_proto_rawDesc = "" +
 	"\x0eincarnation_id\x18\x03 \x01(\tR\rincarnationId\x129\n" +
 	"\n" +
 	"started_at\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\tstartedAt\x125\n" +
-	"\aclients\x18\x05 \x01(\v2\x1b.fugue.host.v1.ClientCountsR\aclientsB\xc3\x01\n" +
-	"\x11com.fugue.host.v1B\vStatusProtoP\x01ZKgithub.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1;hostv1\xa2\x02\x03FHX\xaa\x02\rFugue.Host.V1\xca\x02\rFugue\\Host\\V1\xe2\x02\x19Fugue\\Host\\V1\\GPBMetadata\xea\x02\x0fFugue::Host::V1b\x06proto3"
+	"\aclients\x18\x05 \x01(\v2\x1b.fugue.host.v1.ClientCountsR\aclientsB\xad\x01\n" +
+	"\x11com.fugue.host.v1B\vStatusProtoP\x01Z5github.com/syurodev/fugue/pkg/pb/fugue/host/v1;hostv1\xa2\x02\x03FHX\xaa\x02\rFugue.Host.V1\xca\x02\rFugue\\Host\\V1\xe2\x02\x19Fugue\\Host\\V1\\GPBMetadata\xea\x02\x0fFugue::Host::V1b\x06proto3"
 
 var (
 	file_fugue_host_v1_status_proto_rawDescOnce sync.Once

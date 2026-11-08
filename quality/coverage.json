@@ -6,5 +6,6 @@
   "internal/platform/ids": 97.5,
   "internal/platform/redact": 100,
   "internal/platform/supervise": 100,
-  "internal/vault": 97.2
+  "internal/vault": 97.2,
+  "pkg/client": 92.1
 }

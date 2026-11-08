@@ -34,7 +34,7 @@ func runProto(ctx context.Context, args []string, stdout io.Writer) error {
 	template := fs.String("template", "proto/buf.gen.yaml", "buf generation template, relative to root")
 	against := fs.String("against", "", "buf input to compare against, instead of -base (a directory holding the previous module)")
 	base := fs.String("base", "origin/main", "git ref whose proto/ the breaking check compares with")
-	generated := fs.String("generated", "internal/hostapi/internal/pb,gen/ts", "comma-separated generated directories, relative to root")
+	generated := fs.String("generated", "pkg/pb,gen/ts", "comma-separated generated directories, relative to root")
 	if err := fs.Parse(args); err != nil {
 		return fmt.Errorf("%w: %w", ErrUsage, err)
 	}

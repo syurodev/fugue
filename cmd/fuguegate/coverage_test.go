@@ -20,7 +20,7 @@ const sampleProfile = `mode: atomic
 github.com/syurodev/fugue/internal/kernel/a.go:1.1,2.2 10 1
 github.com/syurodev/fugue/internal/kernel/a.go:3.1,4.2 1 0
 github.com/syurodev/fugue/internal/config/c.go:1.1,2.2 4 1
-github.com/syurodev/fugue/internal/hostapi/internal/pb/x.go:1.1,2.2 9 0
+github.com/syurodev/fugue/pkg/pb/x.go:1.1,2.2 9 0
 github.com/syurodev/fugue/cmd/fugue/main.go:1.1,2.2 9 0
 `
 

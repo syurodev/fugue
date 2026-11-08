@@ -30,8 +30,8 @@ const file_fugue_host_v1_host_proto_rawDesc = "" +
 	"\n" +
 	"HostStatus\x12 .fugue.host.v1.HostStatusRequest\x1a!.fugue.host.v1.HostStatusResponse\x12K\n" +
 	"\bShutdown\x12\x1e.fugue.host.v1.ShutdownRequest\x1a\x1f.fugue.host.v1.ShutdownResponse\x12P\n" +
-	"\tSubscribe\x12\x1f.fugue.host.v1.SubscribeRequest\x1a .fugue.host.v1.SubscribeResponse0\x01B\xc1\x01\n" +
-	"\x11com.fugue.host.v1B\tHostProtoP\x01ZKgithub.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1;hostv1\xa2\x02\x03FHX\xaa\x02\rFugue.Host.V1\xca\x02\rFugue\\Host\\V1\xe2\x02\x19Fugue\\Host\\V1\\GPBMetadata\xea\x02\x0fFugue::Host::V1b\x06proto3"
+	"\tSubscribe\x12\x1f.fugue.host.v1.SubscribeRequest\x1a .fugue.host.v1.SubscribeResponse0\x01B\xab\x01\n" +
+	"\x11com.fugue.host.v1B\tHostProtoP\x01Z5github.com/syurodev/fugue/pkg/pb/fugue/host/v1;hostv1\xa2\x02\x03FHX\xaa\x02\rFugue.Host.V1\xca\x02\rFugue\\Host\\V1\xe2\x02\x19Fugue\\Host\\V1\\GPBMetadata\xea\x02\x0fFugue::Host::V1b\x06proto3"
 
 var file_fugue_host_v1_host_proto_goTypes = []any{
 	(*HelloRequest)(nil),       // 0: fugue.host.v1.HelloRequest

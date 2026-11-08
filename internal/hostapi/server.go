@@ -11,10 +11,10 @@ import (
 	"sync"
 
 	"github.com/syurodev/fugue/internal/app"
-	"github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1/hostv1connect"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
 )
 
 // ServerConfig configures the host api server. It carries no version fields:

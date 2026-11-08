@@ -26,6 +26,9 @@ func TestChangeScope(t *testing.T) {
 		}
 	}
 	write("internal/kernel/decide.go", "// Package kernel.\npackage kernel\n")
+	write("ui/internal/hostconn/hostconn.go", "package hostconn\n")
+	write("pkg/client/client.go", "package client\n")
+	write("pkg/pb/x/x.pb.go", "package x\n")
 	write("internal/vendor/proc.go", "//go:build unix\n\npackage vendor\n")
 	write("internal/vendor/after.go", "package vendor\n\n//go:build unix\n")
 
@@ -35,25 +38,30 @@ func TestChangeScope(t *testing.T) {
 		want    changeScope
 	}{
 		{"docs only", []string{"docs/plans/f5.2-event-stream.md", "README.md", "docs/adr/0002-vendor-domain.md", "AGENTS.md"}, changeScope{}},
+		{"ui code", []string{"ui/internal/hostconn/hostconn.go"}, changeScope{code: true, ui: true}},
+		{"ui docs only", []string{"ui/README.md"}, changeScope{ui: true}},
+		{"client code is ui", []string{"pkg/client/client.go"}, changeScope{code: true, ui: true}},
+		{"generated code is ui", []string{"pkg/pb/x/x.pb.go"}, changeScope{code: true, ui: true}},
+		{"proto sources are ui", []string{"proto/fugue/host/v1/event.proto"}, changeScope{code: true, ui: true}},
 		{"markdown fixture is code", []string{"internal/arch/testdata/layers-good/docs/adr/0002-vendor-domain.md"}, changeScope{code: true}},
 		{"root testdata markdown is code", []string{"testdata/notes.md"}, changeScope{code: true}},
 		{"gate document is code", []string{"docs/quality-gates.md"}, changeScope{code: true}},
 		{"portable Go", []string{"internal/kernel/decide.go", "docs/ports.md"}, changeScope{code: true}},
-		{"non-Go code", []string{"proto/fugue/host/v1/event.proto"}, changeScope{code: true}},
-		{"build constraint", []string{"internal/vendor/proc.go"}, everything()},
+		{"non-Go code", []string{"proto/fugue/host/v1/event.proto"}, changeScope{code: true, ui: true}},
+		{"build constraint", []string{"internal/vendor/proc.go"}, changeScope{code: true, platform: true}},
 		{"constraint after the package clause is not one", []string{"internal/vendor/after.go"}, changeScope{code: true}},
-		{"deleted Go file", []string{"internal/vendor/gone.go"}, everything()},
-		{"darwin suffix", []string{"internal/x/peer_darwin.go"}, everything()},
-		{"unix test suffix", []string{"internal/x/lock_unix_test.go"}, everything()},
-		{"other suffix", []string{"internal/x/socket_other.go"}, everything()},
-		{"os before arch", []string{"internal/x/sys_linux_amd64.go"}, everything()},
-		{"process tree", []string{"internal/process/stop.go"}, everything()},
+		{"deleted Go file", []string{"internal/vendor/gone.go"}, changeScope{code: true, platform: true}},
+		{"darwin suffix", []string{"internal/x/peer_darwin.go"}, changeScope{code: true, platform: true}},
+		{"unix test suffix", []string{"internal/x/lock_unix_test.go"}, changeScope{code: true, platform: true}},
+		{"other suffix", []string{"internal/x/socket_other.go"}, changeScope{code: true, platform: true}},
+		{"os before arch", []string{"internal/x/sys_linux_amd64.go"}, changeScope{code: true, platform: true}},
+		{"process tree", []string{"internal/process/stop.go"}, changeScope{code: true, platform: true}},
 		{"host api", []string{"internal/hostapi/README.md"}, changeScope{}},
-		{"host api code", []string{"internal/hostapi/server.go"}, everything()},
-		{"entry point", []string{"cmd/fugue/serve.go"}, everything()},
-		{"workflow", []string{".github/workflows/pr.yml"}, everything()},
-		{"module", []string{"go.sum"}, everything()},
-		{"task file", []string{"Taskfile.yml"}, everything()},
+		{"host api code", []string{"internal/hostapi/server.go"}, changeScope{code: true, platform: true}},
+		{"entry point", []string{"cmd/fugue/serve.go"}, changeScope{code: true, platform: true}},
+		{"workflow", []string{".github/workflows/pr.yml"}, changeScope{code: true, platform: true}},
+		{"module", []string{"go.sum"}, changeScope{code: true, platform: true}},
+		{"task file", []string{"Taskfile.yml"}, changeScope{code: true, platform: true}},
 		{"empty change set runs everything", nil, everything()},
 		{"blank entries only", []string{"", " "}, everything()},
 	}
@@ -71,14 +79,14 @@ func TestChangesCommandPrintsStepOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff := cmp.Diff("code=false\nplatform=false\n", out); diff != "" {
+	if diff := cmp.Diff("code=false\nplatform=false\nui=false\n", out); diff != "" {
 		t.Errorf("output (-want +got):\n%s", diff)
 	}
 	out, err = execute(t, "changes", "-files", "cmd/fugue/serve.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff := cmp.Diff("code=true\nplatform=true\n", out); diff != "" {
+	if diff := cmp.Diff("code=true\nplatform=true\nui=false\n", out); diff != "" {
 		t.Errorf("output (-want +got):\n%s", diff)
 	}
 }
@@ -90,7 +98,8 @@ func TestChangesFailsSafeOnABrokenDiff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, "code=true") || !strings.Contains(out, "platform=true") {
+	if !strings.Contains(out, "code=true") || !strings.Contains(out, "platform=true") ||
+		!strings.Contains(out, "ui=true") {
 		t.Errorf("a broken diff must run everything, got:\n%s", out)
 	}
 	if _, err := execute(t, "changes"); !errors.Is(err, ErrUsage) {

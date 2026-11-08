@@ -5,9 +5,9 @@ import (
 	"net"
 	"testing"
 
-	hostv1 "github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
 )
 
 // TestConcurrentHelloAcquiresOneLease pins the HTTP/2 multiplexing race:

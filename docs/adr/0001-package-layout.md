@@ -67,8 +67,7 @@ library and third-party imports are governed separately (section 4 and `depguard
 | `internal/tools/pure_read` | 3 | Deterministic in-memory read tool. Owner: tool system (G-04). | `internal/kernel`, `internal/platform/errcode` | F2.8 |
 | `internal/workspacememory` | 3 | Workspace memory entries, history, CAS by revision. Owner: context engine. | `internal/storage`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/ids` | F4.7 |
 | `internal/app` | 4 | Composition root and application services. Owner: application layer. | `internal/kernel`, `internal/codec`, `internal/crypto`, `internal/vault`, `internal/storage`, `internal/credentials`, `internal/execstore`, `internal/coordinator`, `internal/contextengine`, `internal/modeladapter`, `internal/modeladapter/faux`, `internal/modeladapter/anthropic`, `internal/modeladapter/openai`, `internal/tools/...`, `internal/interaction`, `internal/sandbox`, `internal/snapshot`, `internal/workspacememory`, `internal/config`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/ids`, `internal/platform/supervise` | F5.1 |
-| `internal/hostapi` | 5 | Connect handlers; maps proto types to domain types and calls `app`. Owner: Host API. | `internal/app`, `internal/kernel`, `internal/hostapi/internal/pb/...`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/ids`, `internal/platform/supervise`, `internal/config` | F5.1 |
-| `internal/hostapi/internal/pb/...` | 5 | Generated protobuf and Connect code (all subpackages). Never edited by hand. The generated Connect subpackage imports the generated message package, so the subtree may import itself. Owner: Host API. | `internal/hostapi/internal/pb/...` | F0.7 |
+| `internal/hostapi` | 5 | Connect handlers; maps proto types to domain types and calls `app`. Owner: Host API. | `internal/app`, `internal/kernel`, `pkg/pb/...`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/ids`, `internal/platform/supervise`, `internal/config` | F5.1 |
 | `internal/arch` | test | Architecture tests only; reads the graph with `go list`. Owner: quality gates. | | F0.5 |
 
 Directories outside `internal/` and not covered by this table:
@@ -91,8 +90,10 @@ Directories outside `internal/` and not covered by this table:
 2. `internal/kernel` imports only pure stdlib and no other package of this module. `fuguevet`
    `kernelpure` enforces it (quality gates §4). Rejections are a kernel type carrying a stable
    code; `app` and `hostapi` translate them to `errcode` values at the boundary.
-3. Generated proto code lives in `internal/hostapi/internal/pb`, so Go's `internal` rule already
-   stops every other package from importing it; `noprotoleak` is the second line of defence.
+3. Generated proto code lives in `pkg/pb` (ADR 0002, amended from this ADR's original
+   `internal/hostapi/internal/pb` by F10.2a, 2026-11-08); `noprotoleak` keeps the protobuf and
+   Connect runtimes inside `internal/hostapi`, `pkg/client` and `cmd/*`, and `TestLayerGraph`
+   keeps `pkg/` free of `internal/` imports.
 4. Ports are defined by the consumer (`coordinator`) and expressed only in kernel types, so
    `execstore`, `modeladapter` and `tools` implement them without importing `coordinator`. They
    are wired together only in `app`.
@@ -196,7 +197,8 @@ in `Taskfile.yml` and CI because its module graph is not meant to be vendored in
   - Errors live in `internal/platform/errcode` (the sketch says "errors").
   - `storage` owns `exec_host`; `execstore` owns the other `exec_*` tables.
   - Generated code lives under `internal/hostapi/internal/pb`; TypeScript output is outside the
-    Go tree and its path is set in F0.7.
+    Go tree and its path is set in F0.7. Amended by F10.2a (2026-11-08): generated code moved to
+    `pkg/pb` so the public client and the UI module can import it (ADR 0002, Q-31 3A).
 
 ## Decisions recorded at approval
 
@@ -204,7 +206,8 @@ in `Taskfile.yml` and CI because its module graph is not meant to be vendored in
 2. The kernel is stricter than first proposed: it imports **no** package of this module, not even
    `errcode`. It owns a rejection type with stable codes instead.
 3. `exec_host` belongs to `storage`; the other `exec_*` tables belong to `execstore`.
-4. Generated proto code lives under `internal/hostapi/internal/pb`.
+4. Generated proto code lives under `internal/hostapi/internal/pb`. (Amended by F10.2a,
+   2026-11-08: it lives under `pkg/pb`, with the `noprotoleak` scope widened as above.)
 5. `TestDependencyAllowlist` requires a row for each module that `go.mod` requires directly
    (including modules added by `tool` directives); `// indirect` modules are covered by
    `go-licenses check` and `govulncheck`.

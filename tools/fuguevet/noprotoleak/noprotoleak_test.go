@@ -11,5 +11,5 @@ import (
 func TestNoProtoLeak(t *testing.T) {
 	t.Parallel()
 	analysistest.Run(t, analysistest.TestData(), noprotoleak.New(),
-		"leaky", "clean", "fugue/internal/hostapi/session")
+		"leaky", "clean", "fugue/internal/hostapi/session", "fugue/pkg/client")
 }

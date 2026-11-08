@@ -141,7 +141,7 @@ Bundled static assets in `ui/`:
 
 - The vendor runtime domain operates cleanly alongside native execution components without cross-contamination.
 - `internal/arch` tests (`TestLayerGraph` and `TestTableOwnership`) enforce layer boundaries, table access, and the `pkg/` non-internal import invariant across both ADR 0001 and ADR 0002.
-- Amendments to `noprotoleak` and ADR 0001 §6 to permit `pkg/client` and `cmd/*` to import protobuf and Connect will land in the PR that moves generated code (F10.2 or F9.9, whichever comes first), not in this PR.
+- Amendments to `noprotoleak` and ADR 0001 §6 to permit `pkg/client` and `cmd/*` to import protobuf and Connect landed in the PR that moved generated code (F10.2a, 2026-11-08): generated code lives in `pkg/pb`, `noprotoleak` allows the importers above, and `pkg/` still never imports `internal/`.
 - The core module has no cgo dependency, and the `ui/` module's cgo build gets its own workflow in F10.2 (`task test` in the core module uses `-race`, which needs cgo, so core CI is not `CGO_ENABLED=0`).
 - The Host API client becomes reusable across desktop UI, CLI commands, and MCP bridge tools through a unified `pkg/client` package.
 

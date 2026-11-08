@@ -12,15 +12,18 @@ import (
 
 // changeScope is what a pull request's changed files require of the CI test
 // jobs (quality-gates §9): code changes run the Linux tests, coverage and
-// short fuzzing; platform changes also run the macOS tests.
+// short fuzzing; platform changes also run the macOS tests; a ui change also
+// runs the ui/ module's own workflow. The client, generated code and proto
+// sources count as ui changes because the app builds against all three.
 type changeScope struct {
 	code     bool
 	platform bool
+	ui       bool
 }
 
 // everything is the fail-safe scope: when the change set cannot be read, every
 // job runs.
-func everything() changeScope { return changeScope{code: true, platform: true} }
+func everything() changeScope { return changeScope{code: true, platform: true, ui: true} }
 
 // platformTrees are the trees whose code is platform-specific even where a
 // file carries no build constraint: process trees, sockets and peer
@@ -56,6 +59,23 @@ func isDocsOnly(file string) bool {
 		return false
 	}
 	return !strings.HasPrefix(file, "testdata/") && !strings.Contains(file, "/testdata/")
+}
+
+// uiTrees are the trees the ui/ module builds on: its own code, the public
+// client and generated code it imports, and the proto sources the generated
+// code comes from.
+func uiTrees() []string {
+	return []string{"ui/", "pkg/", "proto/"}
+}
+
+// isUIPath reports whether a changed path needs the ui/ module's workflow.
+func isUIPath(file string) bool {
+	for _, tree := range uiTrees() {
+		if strings.HasPrefix(file, tree) {
+			return true
+		}
+	}
+	return false
 }
 
 // isPlatformPath reports whether a changed path is platform-specific by its
@@ -119,10 +139,18 @@ func classifyChanges(dir string, changed []string) changeScope {
 			continue
 		}
 		seen = true
+		if isUIPath(file) {
+			scope.ui = true
+		}
 		if isDocsOnly(file) {
 			continue
 		}
 		scope.code = true
+		if strings.HasPrefix(file, "ui/") {
+			// A ui change never makes the core platform-specific: ui/ is its
+			// own module and its workflow runs it on both OSes.
+			continue
+		}
 		if isPlatformPath(file) || (path.Ext(file) == ".go" && hasBuildConstraint(dir, file)) {
 			scope.platform = true
 		}
@@ -159,5 +187,8 @@ func runChanges(ctx context.Context, args []string, stdout io.Writer) error {
 	if err := say(stdout, "code=%t", scope.code); err != nil {
 		return err
 	}
-	return say(stdout, "platform=%t", scope.platform)
+	if err := say(stdout, "platform=%t", scope.platform); err != nil {
+		return err
+	}
+	return say(stdout, "ui=%t", scope.ui)
 }

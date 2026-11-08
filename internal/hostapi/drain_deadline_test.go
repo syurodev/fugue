@@ -12,12 +12,12 @@ import (
 	connect "connectrpc.com/connect"
 
 	"github.com/syurodev/fugue/internal/app"
-	hostv1 "github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1"
-	hostv1connect "github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1/hostv1connect"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
+	hostv1connect "github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
 )
 
 // blockingStatusBackend serves the real runtime; its Status passes the

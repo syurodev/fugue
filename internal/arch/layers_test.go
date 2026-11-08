@@ -142,7 +142,10 @@ func importProblem(row layerRow, declared, internal bool, rel, irel string) []st
 		}
 		return nil
 	}
-	if !strings.HasPrefix(irel, "internal/") {
+	// pkg/pb and pkg/client are module packages with rows of their own (ADR
+	// 0002), so an edge to them is checked against the May import column like
+	// any internal edge, not rejected out of hand.
+	if !strings.HasPrefix(irel, "internal/") && !strings.HasPrefix(irel, "pkg/") {
 		return []string{fmt.Sprintf("%s imports %s: internal packages never import cmd, tools or other roots", rel, irel)}
 	}
 	if declared && !allowedImport(row.imports, irel) {
@@ -178,6 +181,7 @@ func TestLayerGraph(t *testing.T) {
 		expectViolations(t, got,
 			"internal/undeclared: package has no row",
 			"internal/kernel imports internal/app, which is not in its May import column",
+			"internal/kernel imports pkg/pb/x, which is not in its May import column",
 			"internal/kernel imports cmd/tool: internal packages never import cmd",
 			"tools/vet imports internal/kernel: tools and quality tests do not depend on internal packages",
 			"internal/platform/clock (layer 0) may import internal/kernel (layer 1)",

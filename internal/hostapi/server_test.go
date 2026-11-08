@@ -16,11 +16,11 @@ import (
 	"github.com/google/go-cmp/cmp"
 
 	"github.com/syurodev/fugue/internal/app"
-	hostv1 "github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1"
-	"github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1/hostv1connect"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
+	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
+	"github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
 )
 
 const (
