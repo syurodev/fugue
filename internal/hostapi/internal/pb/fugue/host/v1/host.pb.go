@@ -24,31 +24,36 @@ var File_fugue_host_v1_host_proto protoreflect.FileDescriptor
 
 const file_fugue_host_v1_host_proto_rawDesc = "" +
 	"\n" +
-	"\x18fugue/host/v1/host.proto\x12\rfugue.host.v1\x1a\x19fugue/host/v1/hello.proto\x1a\x1cfugue/host/v1/shutdown.proto\x1a\x1afugue/host/v1/status.proto2\xf1\x01\n" +
+	"\x18fugue/host/v1/host.proto\x12\rfugue.host.v1\x1a\x19fugue/host/v1/event.proto\x1a\x19fugue/host/v1/hello.proto\x1a\x1cfugue/host/v1/shutdown.proto\x1a\x1afugue/host/v1/status.proto2\xc3\x02\n" +
 	"\vHostService\x12B\n" +
 	"\x05Hello\x12\x1b.fugue.host.v1.HelloRequest\x1a\x1c.fugue.host.v1.HelloResponse\x12Q\n" +
 	"\n" +
 	"HostStatus\x12 .fugue.host.v1.HostStatusRequest\x1a!.fugue.host.v1.HostStatusResponse\x12K\n" +
-	"\bShutdown\x12\x1e.fugue.host.v1.ShutdownRequest\x1a\x1f.fugue.host.v1.ShutdownResponseB\xc1\x01\n" +
+	"\bShutdown\x12\x1e.fugue.host.v1.ShutdownRequest\x1a\x1f.fugue.host.v1.ShutdownResponse\x12P\n" +
+	"\tSubscribe\x12\x1f.fugue.host.v1.SubscribeRequest\x1a .fugue.host.v1.SubscribeResponse0\x01B\xc1\x01\n" +
 	"\x11com.fugue.host.v1B\tHostProtoP\x01ZKgithub.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1;hostv1\xa2\x02\x03FHX\xaa\x02\rFugue.Host.V1\xca\x02\rFugue\\Host\\V1\xe2\x02\x19Fugue\\Host\\V1\\GPBMetadata\xea\x02\x0fFugue::Host::V1b\x06proto3"
 
 var file_fugue_host_v1_host_proto_goTypes = []any{
 	(*HelloRequest)(nil),       // 0: fugue.host.v1.HelloRequest
 	(*HostStatusRequest)(nil),  // 1: fugue.host.v1.HostStatusRequest
 	(*ShutdownRequest)(nil),    // 2: fugue.host.v1.ShutdownRequest
-	(*HelloResponse)(nil),      // 3: fugue.host.v1.HelloResponse
-	(*HostStatusResponse)(nil), // 4: fugue.host.v1.HostStatusResponse
-	(*ShutdownResponse)(nil),   // 5: fugue.host.v1.ShutdownResponse
+	(*SubscribeRequest)(nil),   // 3: fugue.host.v1.SubscribeRequest
+	(*HelloResponse)(nil),      // 4: fugue.host.v1.HelloResponse
+	(*HostStatusResponse)(nil), // 5: fugue.host.v1.HostStatusResponse
+	(*ShutdownResponse)(nil),   // 6: fugue.host.v1.ShutdownResponse
+	(*SubscribeResponse)(nil),  // 7: fugue.host.v1.SubscribeResponse
 }
 var file_fugue_host_v1_host_proto_depIdxs = []int32{
 	0, // 0: fugue.host.v1.HostService.Hello:input_type -> fugue.host.v1.HelloRequest
 	1, // 1: fugue.host.v1.HostService.HostStatus:input_type -> fugue.host.v1.HostStatusRequest
 	2, // 2: fugue.host.v1.HostService.Shutdown:input_type -> fugue.host.v1.ShutdownRequest
-	3, // 3: fugue.host.v1.HostService.Hello:output_type -> fugue.host.v1.HelloResponse
-	4, // 4: fugue.host.v1.HostService.HostStatus:output_type -> fugue.host.v1.HostStatusResponse
-	5, // 5: fugue.host.v1.HostService.Shutdown:output_type -> fugue.host.v1.ShutdownResponse
-	3, // [3:6] is the sub-list for method output_type
-	0, // [0:3] is the sub-list for method input_type
+	3, // 3: fugue.host.v1.HostService.Subscribe:input_type -> fugue.host.v1.SubscribeRequest
+	4, // 4: fugue.host.v1.HostService.Hello:output_type -> fugue.host.v1.HelloResponse
+	5, // 5: fugue.host.v1.HostService.HostStatus:output_type -> fugue.host.v1.HostStatusResponse
+	6, // 6: fugue.host.v1.HostService.Shutdown:output_type -> fugue.host.v1.ShutdownResponse
+	7, // 7: fugue.host.v1.HostService.Subscribe:output_type -> fugue.host.v1.SubscribeResponse
+	4, // [4:8] is the sub-list for method output_type
+	0, // [0:4] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -59,6 +64,7 @@ func file_fugue_host_v1_host_proto_init() {
 	if File_fugue_host_v1_host_proto != nil {
 		return
 	}
+	file_fugue_host_v1_event_proto_init()
 	file_fugue_host_v1_hello_proto_init()
 	file_fugue_host_v1_shutdown_proto_init()
 	file_fugue_host_v1_status_proto_init()
