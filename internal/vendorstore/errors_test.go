@@ -63,12 +63,12 @@ func TestInvalidArgumentsAndMissingReads(t *testing.T) {
 func TestTurnOutcomeIsSetOnceAndSessionFieldsSurvive(t *testing.T) {
 	t.Parallel()
 	s, _ := testStore(t)
-	requireNoError(t, s.CreateSession(t.Context(), &Session{ID: "s", Vendor: "v", AccountID: "a", Role: "r", State: StateStarting, TeamID: "team", TaskID: "task", ProcessPID: 42, ProcessStartTime: testProcessStart, ResumeHandle: testResumeHandle}))
+	requireNoError(t, s.CreateSession(t.Context(), &Session{ID: "s", Vendor: "v", AccountID: "a", Role: "r", State: StateStarting, TeamID: "team", TaskID: "task", ProcessPID: 42, ProcessStartToken: testStartToken, ResumeHandle: testResumeHandle}))
 	_, err := s.Append(t.Context(), "s", 1, &Event{Type: VendorTurnStarted, TurnID: "t"})
 	requireNoError(t, err)
-	_, err = s.Append(t.Context(), "s", 2, &Event{Type: VendorTurnEnded, TurnID: "t", Outcome: "completed"})
+	_, err = s.Append(t.Context(), "s", 2, &Event{Type: VendorTurnEnded, TurnID: "t", Outcome: OutcomeCompleted})
 	requireNoError(t, err)
-	if _, err = s.Append(t.Context(), "s", 3, &Event{Type: VendorTurnEnded, TurnID: "t", Outcome: "interrupted"}); !errors.Is(err, ErrSequenceConflict) {
+	if _, err = s.Append(t.Context(), "s", 3, &Event{Type: VendorTurnEnded, TurnID: "t", Outcome: OutcomeInterrupted}); !errors.Is(err, ErrTurnNotOpen) {
 		t.Fatal("turn outcome overwritten")
 	}
 	snapshot, err := s.Snapshot(t.Context(), "s")
@@ -130,7 +130,86 @@ func TestApprovalModesAreValidatedOnCreateAndUpdate(t *testing.T) {
 	if err := s.UpdatePolicy(t.Context(), "s", 0, "autoo"); errcode.CodeOf(err) != errcode.InvalidArgument {
 		t.Fatal("unknown updated mode accepted")
 	}
-	for revision, mode := range []string{ItemPlan, ApprovalAsk, ApprovalAuto, ApprovalFull} {
+	for revision, mode := range []string{ApprovalPlan, ApprovalAsk, ApprovalAuto, ApprovalFull} {
 		requireNoError(t, s.UpdatePolicy(t.Context(), "s", int64(revision), mode))
+	}
+}
+
+func TestClosedSessionRejectsAppendAndPolicyWithErrSessionClosed(t *testing.T) {
+	t.Parallel()
+	s, _ := testStore(t)
+	createTestSession(t, s)
+	_, err := s.Append(t.Context(), "s", 1, &Event{Type: VendorSessionClosed, StopProof: StopProved})
+	requireNoError(t, err)
+	_, err = s.Append(t.Context(), "s", 2, &Event{Type: UsageObserved})
+	if !errors.Is(err, ErrSessionClosed) || errors.Is(err, ErrSequenceConflict) {
+		t.Fatalf("append to closed session: %v", err)
+	}
+	err = s.UpdatePolicy(t.Context(), "s", 0, ApprovalAsk)
+	if !errors.Is(err, ErrSessionClosed) || errors.Is(err, ErrSequenceConflict) {
+		t.Fatalf("policy on closed session: %v", err)
+	}
+	if errcode.CodeOf(err) != errcode.FailedPrecondition {
+		t.Fatalf("closed session code: %v", errcode.CodeOf(err))
+	}
+}
+
+func TestMissingSessionIsNotFoundNotConflict(t *testing.T) {
+	t.Parallel()
+	s, _ := testStore(t)
+	_, err := s.Append(t.Context(), "missing", 0, &Event{Type: UsageObserved})
+	if !errors.Is(err, ErrSessionNotFound) || errcode.CodeOf(err) != errcode.NotFound {
+		t.Fatalf("append to missing session: %v", err)
+	}
+	err = s.UpdatePolicy(t.Context(), "missing", 0, ApprovalAsk)
+	if !errors.Is(err, ErrSessionNotFound) {
+		t.Fatalf("policy on missing session: %v", err)
+	}
+}
+
+func TestTurnEndWithoutOpenTurnIsNotFound(t *testing.T) {
+	t.Parallel()
+	s, _ := testStore(t)
+	createTestSession(t, s)
+	_, err := s.Append(t.Context(), "s", 1, &Event{Type: VendorTurnEnded, TurnID: "never-started", Outcome: OutcomeCompleted})
+	if !errors.Is(err, ErrTurnNotOpen) || errcode.CodeOf(err) != errcode.NotFound {
+		t.Fatalf("end of unknown turn: %v", err)
+	}
+	snap, snapErr := s.Snapshot(t.Context(), "s")
+	requireNoError(t, snapErr)
+	if snap.LastSequence != 1 {
+		t.Fatalf("failed turn end advanced the journal to %d", snap.LastSequence)
+	}
+}
+
+func TestUpdateOfMissingItemIsNotFoundAndStaleRevisionIsConflict(t *testing.T) {
+	t.Parallel()
+	s, _ := testStore(t)
+	createTestSession(t, s)
+	_, err := s.Append(t.Context(), "s", 1, &Event{Type: VendorTurnStarted, TurnID: "t"})
+	requireNoError(t, err)
+	missing := &Event{Type: TranscriptItemUpdated, Item: &Item{ID: "missing", TurnID: "t", Kind: KindAssistantMessage, Revision: 1}}
+	if _, err = s.Append(t.Context(), "s", 2, missing); !errors.Is(err, ErrItemNotFound) || errcode.CodeOf(err) != errcode.NotFound {
+		t.Fatalf("update of missing item: %v", err)
+	}
+	recorded := &Event{Type: TranscriptItemRecorded, Item: &Item{ID: "i", TurnID: "t", Kind: KindAssistantMessage}}
+	_, err = s.Append(t.Context(), "s", 2, recorded)
+	requireNoError(t, err)
+	stale := &Event{Type: TranscriptItemUpdated, Item: &Item{ID: "i", TurnID: "t", Kind: KindAssistantMessage, Revision: 7}}
+	if _, err = s.Append(t.Context(), "s", 3, stale); !errors.Is(err, ErrSequenceConflict) {
+		t.Fatalf("stale item revision: %v", err)
+	}
+}
+
+func TestProcessIdentityIsValidated(t *testing.T) {
+	t.Parallel()
+	s, _ := testStore(t)
+	scopeOnly := &Session{ID: "s", Vendor: "v", AccountID: "a", Role: "r", State: StateStarting, ProcessScopeUnit: testScopeUnit}
+	if err := s.CreateSession(t.Context(), scopeOnly); errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatal("scope unit without a PID accepted")
+	}
+	createTestSession(t, s)
+	if _, err := s.Append(t.Context(), "s", 1, &Event{Type: UsageObserved, ProcessScopeUnit: testScopeUnit}); errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatal("event scope unit without a PID accepted")
 	}
 }

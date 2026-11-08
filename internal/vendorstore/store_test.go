@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"go.uber.org/goleak"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
@@ -18,11 +19,11 @@ func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
 func TestSequenceConflictAndSnapshot(t *testing.T) {
 	t.Parallel()
 	s, _ := testStore(t)
-	if operationErr2 := s.CreateSession(t.Context(), &Session{ID: "s", Vendor: "v", AccountID: "a", Role: "r", State: StateStarting}); operationErr2 != nil {
-		t.Fatal(operationErr2)
+	if err := s.CreateSession(t.Context(), &Session{ID: "s", Vendor: "v", AccountID: "a", Role: "r", State: StateStarting}); err != nil {
+		t.Fatal(err)
 	}
-	if _, operationErr4 := s.Append(t.Context(), "s", 0, &Event{Type: UsageObserved}); !errors.Is(operationErr4, ErrSequenceConflict) {
-		t.Fatalf("conflict: %v", operationErr4)
+	if _, err := s.Append(t.Context(), "s", 0, &Event{Type: UsageObserved}); !errors.Is(err, ErrSequenceConflict) {
+		t.Fatalf("conflict: %v", err)
 	}
 	snap, err := s.Snapshot(t.Context(), "s")
 	if err != nil || snap.LastSequence != 1 {
@@ -33,22 +34,23 @@ func TestSequenceConflictAndSnapshot(t *testing.T) {
 func TestRecoveryDetachesSessionsAndMarksOpenTurnsUnknown(t *testing.T) {
 	t.Parallel()
 	s, db := testStore(t)
-	if operationErr6 := s.CreateSession(t.Context(), &Session{ID: "s", Vendor: "v", AccountID: "a", Role: "r", State: StateStarting, ProcessPID: 42, ProcessStartTime: testProcessStart}); operationErr6 != nil {
-		t.Fatal(operationErr6)
+	if err := s.CreateSession(t.Context(), &Session{ID: "s", Vendor: "v", AccountID: "a", Role: "r", State: StateStarting, ProcessPID: 42, ProcessStartToken: testStartToken, ProcessScopeUnit: testScopeUnit}); err != nil {
+		t.Fatal(err)
 	}
 	_, appendErr := s.Append(t.Context(), "s", 1, &Event{Type: VendorTurnStarted, TurnID: "t"})
 	requireNoError(t, appendErr)
 	got, err := s.Recover(t.Context())
-	if err != nil || len(got) != 1 || got[0].PID != 42 || got[0].StartTime != testProcessStart {
-		t.Fatalf("recovery identities: %+v, %v", got, err)
+	want := []ProcessIdentity{{SessionID: "s", PID: 42, StartToken: testStartToken, ScopeUnit: testScopeUnit}}
+	if diff := cmp.Diff(want, got); err != nil || diff != "" {
+		t.Fatalf("recovery identities (-want +got): %s, %v", diff, err)
 	}
 	snap, err := s.Snapshot(t.Context(), "s")
-	if err != nil || snap.State != "detached" {
+	if err != nil || snap.State != StateDetached {
 		t.Fatalf("recovered session: %+v, %v", snap, err)
 	}
 	var outcome string
-	if operationErr9 := db.QueryRowContext(t.Context(), `SELECT outcome FROM vendor_turns WHERE session_id='s' AND turn_id='t'`).Scan(&outcome); operationErr9 != nil || outcome != OutcomeUnknown {
-		t.Fatalf("recovered outcome: %s, %v", outcome, operationErr9)
+	if err := db.QueryRowContext(t.Context(), `SELECT outcome FROM vendor_turns WHERE session_id='s' AND turn_id='t'`).Scan(&outcome); err != nil || outcome != OutcomeUnknown {
+		t.Fatalf("recovered outcome: %s, %v", outcome, err)
 	}
 }
 
@@ -60,8 +62,9 @@ func testStore(t *testing.T) (*Store, *sql.DB) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { requireNoError(t, db.Close()) })
-	if operationErr1 := storage.Migrate(t.Context(), db, clk); operationErr1 != nil {
-		t.Fatal(operationErr1)
+	err = storage.Migrate(t.Context(), db, clk)
+	if err != nil {
+		t.Fatal(err)
 	}
 	s, err := New(t.Context(), db, nil, clk, nil)
 	if err != nil {
@@ -78,6 +81,9 @@ func requireNoError(t *testing.T, err error) {
 	}
 }
 
-const testProcessStart = "start"
+const (
+	testStartToken = "start"
+	testScopeUnit  = "fugue-vendor-s.scope"
+)
 
 const testResumeHandle = "resume"

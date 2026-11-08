@@ -1,34 +1,60 @@
 package vendorstore
 
-// Session contains only session control metadata.
+// Session contains only session control metadata. ProcessPID, ProcessStartToken
+// and ProcessScopeUnit are the process identity that internal/process verifies
+// before it signals a recovered process (F9.2b); ProcessScopeUnit is empty when
+// the process is uncontained.
 type Session struct {
-	ID                                                                                                                        string
-	Vendor                                                                                                                    string
-	AccountID                                                                                                                 string
-	Role                                                                                                                      string
-	State                                                                                                                     string
-	LastSequence                                                                                                              int64
-	TeamID, TaskID, ResumeHandle, WaitingReason, ApprovalMode, CloseReason, StopProof, ProcessStartTime, CreatedAt, UpdatedAt string
-	ProcessPID, PolicyRevision                                                                                                int64
+	ID                string
+	Vendor            string
+	AccountID         string
+	Role              string
+	State             string
+	LastSequence      int64
+	TeamID            string
+	TaskID            string
+	ResumeHandle      string
+	WaitingReason     string
+	ApprovalMode      string
+	CloseReason       string
+	StopProof         string
+	ProcessPID        int64
+	ProcessStartToken string
+	ProcessScopeUnit  string
+	PolicyRevision    int64
+	CreatedAt         string
+	UpdatedAt         string
 }
 
 // Event is a durable vendor-domain event without protected content.
 type Event struct {
-	contentID, rawID                                              string
-	ProcessPID                                                    int64
-	ProcessStartTime, ResumeHandle, CloseReason                   string
-	Type                                                          string
-	State, WaitingReason, TurnID, Outcome, FailureCode, StopProof string
-	Item                                                          *Item
-	Payload                                                       []byte
+	contentID         string
+	rawID             string
+	Type              string
+	ProcessPID        int64
+	ProcessStartToken string
+	ProcessScopeUnit  string
+	ResumeHandle      string
+	CloseReason       string
+	State             string
+	WaitingReason     string
+	TurnID            string
+	Outcome           string
+	FailureCode       string
+	StopProof         string
+	Item              *Item
+	Payload           []byte
 }
 
 // Item contains transcript identity and sealed content references.
 type Item struct {
-	Metadata         ItemMetadata
-	ID, TurnID, Kind string
-	Revision         int64
-	Content, Raw     []byte
+	Metadata ItemMetadata
+	ID       string
+	TurnID   string
+	Kind     string
+	Revision int64
+	Content  []byte
+	Raw      []byte
 }
 
 // Event types persisted by the vendor journal.
@@ -45,9 +71,6 @@ const (
 	VendorProcessExited    = "VendorProcessExited"
 	VendorSessionClosed    = "VendorSessionClosed"
 )
-
-// StateStarting identifies a session awaiting handshake.
-const StateStarting = "starting"
 
 // ItemMetadata contains only the transcript section 3 control fields.
 type ItemMetadata struct {
@@ -86,31 +109,3 @@ type ItemMetadata struct {
 	Level          string  `json:"level,omitempty"`
 	Code           string  `json:"code,omitempty"`
 }
-
-// StateClosed is terminal.
-const StateClosed = "closed"
-
-// ItemPlan and ItemQuota are shared transcript kind names.
-const (
-	ItemPlan  = "plan"
-	ItemQuota = "quota"
-)
-
-// StateWaiting requires a validated waiting reason.
-const (
-	StateWaiting   = "waiting"
-	metadataStatus = "Status"
-)
-
-// Persisted terminal outcome values shared with transcript status metadata.
-const (
-	OutcomeFailed  = "failed"
-	OutcomeUnknown = "unknown"
-)
-
-// Approval modes for Fugue-owned tools (roadmap F6.3b).
-const (
-	ApprovalAuto = "auto"
-	ApprovalAsk  = "ask"
-	ApprovalFull = "full"
-)

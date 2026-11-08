@@ -4,8 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
-	"slices"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
 )
@@ -26,7 +26,7 @@ func validateTurn(e *Event) error {
 	if e.Type == VendorTurnEnded && e.Outcome == "" {
 		return errcode.New(errcode.InvalidArgument, "turn outcome required")
 	}
-	if e.Outcome != "" && !slices.Contains([]string{"completed", "interrupted", OutcomeFailed, OutcomeUnknown}, e.Outcome) {
+	if e.Outcome != "" && !validOutcome(e.Outcome) {
 		return errcode.New(errcode.InvalidArgument, "unknown turn outcome")
 	}
 	if e.Outcome == OutcomeFailed && e.FailureCode == "" {
@@ -36,16 +36,16 @@ func validateTurn(e *Event) error {
 }
 
 func validateState(e *Event) error {
-	if e.State != "" && !slices.Contains([]string{StateStarting, "ready", "running", "awaiting_approval", StateWaiting, "detached", StateClosed}, e.State) {
+	if e.State != "" && !validState(e.State) {
 		return errcode.New(errcode.InvalidArgument, "unknown session state")
 	}
 	if e.State != StateWaiting && e.WaitingReason != "" {
 		return errcode.New(errcode.InvalidArgument, "waiting reason without waiting state")
 	}
-	if e.State == StateWaiting && !slices.Contains([]string{"vault_locked", ItemQuota, "capacity"}, e.WaitingReason) {
+	if e.State == StateWaiting && !validWaitingReason(e.WaitingReason) {
 		return errcode.New(errcode.InvalidArgument, "unknown waiting reason")
 	}
-	if e.Type == VendorSessionClosed && !slices.Contains([]string{"proved", OutcomeUnknown}, e.StopProof) {
+	if e.Type == VendorSessionClosed && !validStopProof(e.StopProof) {
 		return errcode.New(errcode.InvalidArgument, "invalid stop proof")
 	}
 	return nil
@@ -81,17 +81,11 @@ func (s *Store) project(ctx context.Context, tx *sql.Tx, session string, sequenc
 	var err error
 	switch e.Type {
 	case VendorTurnStarted:
-		_, err = tx.ExecContext(ctx, `INSERT INTO vendor_turns(session_id,turn_id,created_at) VALUES (?,?,?)`, session, e.TurnID, now)
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO vendor_turns(session_id,turn_id,created_at) VALUES (?,?,?)`,
+			session, e.TurnID, now)
 	case VendorTurnEnded:
-		var result sql.Result
-		result, err = tx.ExecContext(ctx, `UPDATE vendor_turns SET outcome=?,failure_code=?,ended_at=? WHERE session_id=? AND turn_id=? AND outcome=''`, e.Outcome, e.FailureCode, now, session, e.TurnID)
-		if err == nil {
-			var n int64
-			n, err = result.RowsAffected()
-			if n != 1 && err == nil {
-				return ErrSequenceConflict
-			}
-		}
+		return endTurn(ctx, tx, session, e, now)
 	case TranscriptItemRecorded, TranscriptItemUpdated:
 		if e.Item == nil {
 			return errcode.New(errcode.InvalidArgument, "item required")
@@ -100,6 +94,24 @@ func (s *Store) project(ctx context.Context, tx *sql.Tx, session string, sequenc
 	}
 	if err != nil {
 		return fmt.Errorf("%w: project event: %w", ErrUnavailable, err)
+	}
+	return nil
+}
+
+func endTurn(ctx context.Context, tx *sql.Tx, session string, e *Event, now string) error {
+	result, err := tx.ExecContext(ctx,
+		`UPDATE vendor_turns SET outcome=?,failure_code=?,ended_at=?
+		WHERE session_id=? AND turn_id=? AND outcome=''`,
+		e.Outcome, e.FailureCode, now, session, e.TurnID)
+	if err != nil {
+		return fmt.Errorf("%w: end turn: %w", ErrUnavailable, err)
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("%w: end turn: %w", ErrUnavailable, err)
+	}
+	if n != 1 {
+		return ErrTurnNotOpen
 	}
 	return nil
 }
@@ -115,7 +127,13 @@ func (s *Store) projectItem(ctx context.Context, tx *sql.Tx, session string, seq
 	if e.Type != TranscriptItemRecorded {
 		return updateItem(ctx, tx, session, item, now, content, raw)
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO vendor_transcript_items(session_id,item_id,turn_id,kind,sequence,revision,created_at,updated_at,payload_id,raw_payload_id,metadata) VALUES (?,?,?,?,?,1,?,?,?,?,?)`, session, item.ID, item.TurnID, item.Kind, sequence, now, now, nullable(content), nullable(raw), string(metadata))
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO vendor_transcript_items(
+			session_id,item_id,turn_id,kind,sequence,revision,created_at,updated_at,
+			payload_id,raw_payload_id,metadata)
+		VALUES (?,?,?,?,?,1,?,?,?,?,?)`,
+		session, item.ID, item.TurnID, item.Kind, sequence, now, now,
+		nullable(content), nullable(raw), string(metadata))
 	if err != nil {
 		return fmt.Errorf("%w: project item: %w", ErrUnavailable, err)
 	}
@@ -127,7 +145,13 @@ func updateItem(ctx context.Context, tx *sql.Tx, session string, item *Item, now
 	if marshalErr != nil {
 		return fmt.Errorf("%w: %w", ErrUnavailable, marshalErr)
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE vendor_transcript_items SET metadata=?, revision=revision+1,updated_at=?,payload_id=COALESCE(?,payload_id),raw_payload_id=COALESCE(?,raw_payload_id) WHERE session_id=? AND item_id=? AND kind=? AND revision=? AND revision<9223372036854775807`, string(metadata), now, nullable(content), nullable(raw), session, item.ID, item.Kind, item.Revision)
+	result, err := tx.ExecContext(ctx,
+		`UPDATE vendor_transcript_items
+		SET metadata=?,revision=revision+1,updated_at=?,
+			payload_id=COALESCE(?,payload_id),raw_payload_id=COALESCE(?,raw_payload_id)
+		WHERE session_id=? AND item_id=? AND kind=? AND revision=? AND revision<9223372036854775807`,
+		string(metadata), now, nullable(content), nullable(raw),
+		session, item.ID, item.Kind, item.Revision)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
@@ -136,9 +160,26 @@ func updateItem(ctx context.Context, tx *sql.Tx, session string, item *Item, now
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	if n != 1 {
-		return ErrSequenceConflict
+		return classifyMissedItemUpdate(tx.QueryRowContext(ctx,
+			"SELECT revision FROM vendor_transcript_items WHERE session_id=? AND item_id=?",
+			session, item.ID))
 	}
 	return nil
+}
+
+// classifyMissedItemUpdate tells a missing item from a stale revision or kind,
+// so callers can retry only the second.
+func classifyMissedItemUpdate(row *sql.Row) error {
+	var revision int64
+	err := row.Scan(&revision)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return ErrItemNotFound
+	case err != nil:
+		return fmt.Errorf("%w: classify item update: %w", ErrUnavailable, err)
+	default:
+		return ErrSequenceConflict
+	}
 }
 
 func (s *Store) projectSession(ctx context.Context, tx *sql.Tx, session string, e *Event) error {
@@ -150,13 +191,28 @@ func (s *Store) projectSession(ctx context.Context, tx *sql.Tx, session string, 
 		return errcode.New(errcode.InvalidArgument, "closure requires session close event")
 	}
 	if e.ProcessPID != 0 || e.ResumeHandle != "" || e.CloseReason != "" {
-		_, err = tx.ExecContext(ctx, `UPDATE vendor_sessions SET process_pid=CASE WHEN ?>0 THEN ? ELSE process_pid END,process_start_time=CASE WHEN ?>0 THEN ? ELSE process_start_time END,resume_handle=CASE WHEN ?<>'' THEN ? ELSE resume_handle END,close_reason=CASE WHEN ?<>'' THEN ? ELSE close_reason END WHERE session_id=?`, e.ProcessPID, e.ProcessPID, e.ProcessPID, e.ProcessStartTime, e.ResumeHandle, e.ResumeHandle, e.CloseReason, e.CloseReason, session)
+		_, err = tx.ExecContext(ctx,
+			`UPDATE vendor_sessions SET
+				process_pid=CASE WHEN ?>0 THEN ? ELSE process_pid END,
+				process_start_token=CASE WHEN ?>0 THEN ? ELSE process_start_token END,
+				process_scope_unit=CASE WHEN ?>0 THEN ? ELSE process_scope_unit END,
+				resume_handle=CASE WHEN ?<>'' THEN ? ELSE resume_handle END,
+				close_reason=CASE WHEN ?<>'' THEN ? ELSE close_reason END
+			WHERE session_id=?`,
+			e.ProcessPID, e.ProcessPID,
+			e.ProcessPID, e.ProcessStartToken,
+			e.ProcessPID, e.ProcessScopeUnit,
+			e.ResumeHandle, e.ResumeHandle,
+			e.CloseReason, e.CloseReason,
+			session)
 		if err != nil {
 			return fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
 	}
 	if e.State != "" {
-		_, err = tx.ExecContext(ctx, `UPDATE vendor_sessions SET state=?,waiting_reason=?,stop_proof=? WHERE session_id=?`, e.State, e.WaitingReason, e.StopProof, session)
+		_, err = tx.ExecContext(ctx,
+			`UPDATE vendor_sessions SET state=?,waiting_reason=?,stop_proof=? WHERE session_id=?`,
+			e.State, e.WaitingReason, e.StopProof, session)
 		if err != nil {
 			return fmt.Errorf("%w: project session: %w", ErrUnavailable, err)
 		}

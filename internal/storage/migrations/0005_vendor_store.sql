@@ -8,10 +8,12 @@ CREATE TABLE vendor_sessions (
     waiting_reason TEXT NOT NULL DEFAULT '' CHECK (waiting_reason IN ('','vault_locked','quota','capacity')),
     approval_mode TEXT NOT NULL DEFAULT 'auto' CHECK (approval_mode IN ('plan','ask','auto','full')), policy_revision INTEGER NOT NULL DEFAULT 0 CHECK (policy_revision >= 0),
     resume_handle TEXT NOT NULL DEFAULT '', process_pid INTEGER NOT NULL DEFAULT 0 CHECK (process_pid >= 0),
-    process_start_time TEXT NOT NULL DEFAULT '', close_reason TEXT NOT NULL DEFAULT '', stop_proof TEXT NOT NULL DEFAULT '' CHECK (stop_proof IN ('','proved','unknown')),
+    process_start_token TEXT NOT NULL DEFAULT '', process_scope_unit TEXT NOT NULL DEFAULT '',
+    close_reason TEXT NOT NULL DEFAULT '', stop_proof TEXT NOT NULL DEFAULT '' CHECK (stop_proof IN ('','proved','unknown')),
     last_sequence INTEGER NOT NULL DEFAULT 0 CHECK (last_sequence >= 0),
     created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-    CHECK (process_pid = 0 OR length(process_start_time) > 0),
+    CHECK (process_pid = 0 OR length(process_start_token) > 0),
+    CHECK (process_pid > 0 OR (process_start_token = '' AND process_scope_unit = '')),
     CHECK ((state = 'waiting' AND waiting_reason <> '') OR (state <> 'waiting' AND waiting_reason = '')),
     CHECK ((state = 'closed' AND stop_proof <> '') OR (state <> 'closed' AND stop_proof = ''))
 );

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -25,11 +26,7 @@ func (s *Store) PurgeSession(ctx context.Context, session string) error {
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	defer func() {
-		if closeErr := conn.Close(); closeErr != nil {
-			return
-		}
-	}()
+	defer closeConn(ctx, conn)
 	if _, pragmaErr := conn.ExecContext(ctx, "PRAGMA secure_delete=ON"); pragmaErr != nil {
 		return fmt.Errorf("%w: %w", ErrUnavailable, pragmaErr)
 	}
@@ -38,8 +35,11 @@ func (s *Store) PurgeSession(ctx context.Context, session string) error {
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer func() {
-		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+		rollbackErr := tx.Rollback()
+		if rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			// An unconfirmed rollback keeps the purge barrier up: fail closed.
 			permanent = true
+			slog.WarnContext(ctx, "vendor purge rollback failed", "err", rollbackErr.Error())
 		}
 	}()
 	if writeErr := s.purgeRows(ctx, tx, session); writeErr != nil {

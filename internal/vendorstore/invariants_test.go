@@ -103,9 +103,9 @@ func TestInvalidEnumsAndPolicyConflicts(t *testing.T) {
 	if err := s.UpdatePolicy(t.Context(), "s", 0, ApprovalAuto); !errors.Is(err, ErrSequenceConflict) {
 		t.Fatalf("revision conflict: %v", err)
 	}
-	_, err := s.Append(t.Context(), "s", 1, &Event{Type: VendorSessionClosed, StopProof: OutcomeUnknown})
+	_, err := s.Append(t.Context(), "s", 1, &Event{Type: VendorSessionClosed, StopProof: StopUnknown})
 	requireNoError(t, err)
-	if _, err = s.Append(t.Context(), "s", 2, &Event{Type: UsageObserved}); !errors.Is(err, ErrSequenceConflict) {
+	if _, err = s.Append(t.Context(), "s", 2, &Event{Type: UsageObserved}); !errors.Is(err, ErrSessionClosed) {
 		t.Fatal("closed session accepted append")
 	}
 }
@@ -145,13 +145,19 @@ const (
 func TestProcessIdentitySurvivesResumeHandleUpdate(t *testing.T) {
 	t.Parallel()
 	s, _ := testStore(t)
-	requireNoError(t, s.CreateSession(t.Context(), &Session{ID: "s", Vendor: "v", AccountID: "a", Role: "r", State: StateStarting, ProcessPID: 42, ProcessStartTime: testProcessStart}))
+	requireNoError(t, s.CreateSession(t.Context(), &Session{ID: "s", Vendor: "v", AccountID: "a", Role: "r", State: StateStarting, ProcessPID: 42, ProcessStartToken: testStartToken, ProcessScopeUnit: testScopeUnit}))
 	_, err := s.Append(t.Context(), "s", 1, &Event{Type: UsageObserved, ResumeHandle: testResumeHandle})
 	requireNoError(t, err)
+	want := []ProcessIdentity{{SessionID: "s", PID: 42, StartToken: testStartToken, ScopeUnit: testScopeUnit}}
 	identities, err := s.Recover(t.Context())
 	requireNoError(t, err)
-	if len(identities) != 1 || identities[0].PID != 42 || identities[0].StartTime != testProcessStart {
-		t.Fatal("process identity erased")
+	if diff := cmp.Diff(want, identities); diff != "" {
+		t.Fatalf("process identity erased (-want +got):\n%s", diff)
+	}
+	again, err := s.Recover(t.Context())
+	requireNoError(t, err)
+	if diff := cmp.Diff(want, again); diff != "" {
+		t.Fatalf("detached session identity not reported again (-want +got):\n%s", diff)
 	}
 	if _, err = s.Append(t.Context(), "s", 2, &Event{Type: UsageObserved, ProcessPID: 55}); errcode.CodeOf(err) != errcode.InvalidArgument {
 		t.Fatal("PID without start time accepted")

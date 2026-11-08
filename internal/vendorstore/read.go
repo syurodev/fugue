@@ -25,25 +25,28 @@ func (s *Store) EventsSince(ctx context.Context, session string, sequence int64,
 	if limit < 1 || limit > 1000 {
 		return nil, errcode.New(errcode.InvalidArgument, "invalid page limit")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT sequence,event_type,COALESCE(payload_id,''),recorded_at,metadata FROM vendor_events WHERE session_id=? AND sequence>? ORDER BY sequence LIMIT ?`, session, sequence, limit)
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT sequence,event_type,COALESCE(payload_id,''),recorded_at,metadata
+		FROM vendor_events WHERE session_id=? AND sequence>? ORDER BY sequence LIMIT ?`,
+		session, sequence, limit)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	defer closeRows(rows)
+	defer closeRows(ctx, rows)
 	result := []RecordedEvent{}
 	for rows.Next() {
 		var event RecordedEvent
 		var metadata string
-		if operationErr1 := rows.Scan(&event.Sequence, &event.Type, &event.PayloadID, &event.RecordedAt, &metadata); operationErr1 != nil {
-			return nil, fmt.Errorf("%w: %w", ErrUnavailable, operationErr1)
+		if err = rows.Scan(&event.Sequence, &event.Type, &event.PayloadID, &event.RecordedAt, &metadata); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
 		if decodeErr := json.Unmarshal([]byte(metadata), &event.Metadata); decodeErr != nil {
 			return nil, fmt.Errorf("%w: %w", ErrUnavailable, decodeErr)
 		}
 		result = append(result, event)
 	}
-	if operationErr2 := rows.Err(); operationErr2 != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnavailable, operationErr2)
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	return result, nil
 }
@@ -61,7 +64,13 @@ func (s *Store) OpenPayload(ctx context.Context, session, id string) ([]byte, er
 	}
 	var kind, keyID string
 	var envelope, wrapped []byte
-	err := s.db.QueryRowContext(ctx, `SELECT p.kind,p.key_id,p.envelope,k.wrapped_key FROM vendor_payloads p JOIN vendor_session_keys k ON k.session_id=p.session_id AND k.key_id=p.key_id WHERE p.session_id=? AND p.payload_id=? AND NOT EXISTS (SELECT 1 FROM vendor_purges WHERE session_id=p.session_id)`, session, id).Scan(&kind, &keyID, &envelope, &wrapped)
+	err := s.db.QueryRowContext(ctx,
+		`SELECT p.kind,p.key_id,p.envelope,k.wrapped_key
+		FROM vendor_payloads p
+		JOIN vendor_session_keys k ON k.session_id=p.session_id AND k.key_id=p.key_id
+		WHERE p.session_id=? AND p.payload_id=?
+			AND NOT EXISTS (SELECT 1 FROM vendor_purges WHERE session_id=p.session_id)`,
+		session, id).Scan(&kind, &keyID, &envelope, &wrapped)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
@@ -95,30 +104,51 @@ type StoredItem struct {
 	Sequence, Revision                        int64
 }
 
+const itemColumns = `item_id,turn_id,kind,sequence,revision,COALESCE(payload_id,''),
+	COALESCE(raw_payload_id,''),created_at,updated_at,metadata`
+
+// rowScanner is satisfied by *sql.Row and *sql.Rows, which share the item
+// column list.
+type rowScanner interface{ Scan(dest ...any) error }
+
+func scanItem(row rowScanner, item *StoredItem, metadata *string) error {
+	err := row.Scan(&item.ID, &item.TurnID, &item.Kind, &item.Sequence, &item.Revision,
+		&item.PayloadID, &item.RawPayloadID, &item.CreatedAt, &item.UpdatedAt, metadata)
+	if err != nil {
+		return fmt.Errorf("scan transcript item: %w", err)
+	}
+	return nil
+}
+
 // Transcript returns items before the cursor, oldest first.
 func (s *Store) Transcript(ctx context.Context, session string, before int64, limit int) ([]StoredItem, error) {
 	if limit < 1 || limit > 1000 {
 		return nil, errcode.New(errcode.InvalidArgument, "invalid page limit")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT item_id,turn_id,kind,sequence,revision,COALESCE(payload_id,''),COALESCE(raw_payload_id,''),created_at,updated_at,metadata FROM (SELECT * FROM vendor_transcript_items WHERE session_id=? AND (?=0 OR sequence<?) ORDER BY sequence DESC LIMIT ?) ORDER BY sequence`, session, before, before, limit)
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT `+itemColumns+`
+		FROM (SELECT * FROM vendor_transcript_items
+			WHERE session_id=? AND (?=0 OR sequence<?) ORDER BY sequence DESC LIMIT ?)
+		ORDER BY sequence`,
+		session, before, before, limit)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	defer closeRows(rows)
+	defer closeRows(ctx, rows)
 	result := []StoredItem{}
 	for rows.Next() {
 		var item StoredItem
 		var metadata string
-		if operationErr3 := rows.Scan(&item.ID, &item.TurnID, &item.Kind, &item.Sequence, &item.Revision, &item.PayloadID, &item.RawPayloadID, &item.CreatedAt, &item.UpdatedAt, &metadata); operationErr3 != nil {
-			return nil, fmt.Errorf("%w: %w", ErrUnavailable, operationErr3)
+		if err = scanItem(rows, &item, &metadata); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
 		if decodeErr := json.Unmarshal([]byte(metadata), &item.Metadata); decodeErr != nil {
 			return nil, fmt.Errorf("%w: %w", ErrUnavailable, decodeErr)
 		}
 		result = append(result, item)
 	}
-	if operationErr4 := rows.Err(); operationErr4 != nil {
-		return nil, fmt.Errorf("%w: %w", ErrUnavailable, operationErr4)
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	return result, nil
 }
@@ -130,9 +160,11 @@ func (s *Store) ReadItem(ctx context.Context, session, id string) (StoredItem, [
 	}
 	var item StoredItem
 	var metadata string
-	err := s.db.QueryRowContext(ctx, `SELECT item_id,turn_id,kind,sequence,revision,COALESCE(payload_id,''),COALESCE(raw_payload_id,''),created_at,updated_at,metadata FROM vendor_transcript_items WHERE session_id=? AND item_id=?`, session, id).Scan(&item.ID, &item.TurnID, &item.Kind, &item.Sequence, &item.Revision, &item.PayloadID, &item.RawPayloadID, &item.CreatedAt, &item.UpdatedAt, &metadata)
+	err := scanItem(s.db.QueryRowContext(ctx,
+		`SELECT `+itemColumns+` FROM vendor_transcript_items WHERE session_id=? AND item_id=?`,
+		session, id), &item, &metadata)
 	if errors.Is(err, sql.ErrNoRows) {
-		return StoredItem{}, nil, errcode.New(errcode.NotFound, "item not found")
+		return StoredItem{}, nil, ErrItemNotFound
 	}
 	if err != nil {
 		return StoredItem{}, nil, fmt.Errorf("%w: %w", ErrUnavailable, err)

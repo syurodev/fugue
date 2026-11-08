@@ -6,14 +6,23 @@ import (
 	"time"
 )
 
-// ProcessIdentity identifies a process whose lifetime may outlive the host.
+// ProcessIdentity identifies a process whose lifetime may outlive the host. The
+// fields are the format internal/process Reap verifies (F9.2b): StartToken is an
+// opaque token and ScopeUnit is empty when the process was uncontained.
 type ProcessIdentity struct {
-	SessionID string
-	PID       int64
-	StartTime string
+	SessionID  string
+	PID        int64
+	StartToken string
+	ScopeUnit  string
 }
 
 // Recover detaches unfinished sessions and marks open turns unknown without replay.
+//
+// It returns the identity of every non-closed session that recorded a process,
+// including sessions an earlier restart already detached: a detached session
+// keeps its identity until a close event proves the process stopped. Reporting
+// an identity again is safe because Reap verifies the start token before it
+// signals anything, so a recycled PID is never killed.
 func (s *Store) Recover(ctx context.Context) ([]ProcessIdentity, error) {
 	s.prepare.Lock()
 	defer s.prepare.Unlock()
@@ -21,40 +30,43 @@ func (s *Store) Recover(ctx context.Context) ([]ProcessIdentity, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: begin recovery: %w", ErrUnavailable, err)
 	}
-	defer rollback(tx)
-	rows, err := tx.QueryContext(ctx, `SELECT session_id, process_pid, process_start_time,state FROM vendor_sessions ORDER BY session_id`)
+	defer rollback(ctx, tx)
+	rows, err := tx.QueryContext(ctx,
+		`SELECT session_id,process_pid,process_start_token,process_scope_unit,state
+		FROM vendor_sessions ORDER BY session_id`)
 	if err != nil {
 		return nil, fmt.Errorf("%w: read recovery identities: %w", ErrUnavailable, err)
 	}
-	defer closeRows(rows)
+	defer closeRows(ctx, rows)
 	var result []ProcessIdentity
 	for rows.Next() {
 		var identity ProcessIdentity
 		var state string
-		if operationErr1 := rows.Scan(&identity.SessionID, &identity.PID, &identity.StartTime, &state); operationErr1 != nil {
-			closeRows(rows)
-			return nil, fmt.Errorf("%w: scan recovery identity: %w", ErrUnavailable, operationErr1)
-		}
-		if s.cache.IsPurged(identity.SessionID) {
-			return nil, ErrPurged
+		err = rows.Scan(&identity.SessionID, &identity.PID, &identity.StartToken, &identity.ScopeUnit, &state)
+		if err != nil {
+			return nil, fmt.Errorf("%w: scan recovery identity: %w", ErrUnavailable, err)
 		}
 		if identity.PID > 0 && state != StateClosed {
 			result = append(result, identity)
 		}
 	}
-	if operationErr2 := rows.Err(); operationErr2 != nil {
-		closeRows(rows)
-		return nil, fmt.Errorf("%w: read recovery identities: %w", ErrUnavailable, operationErr2)
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("%w: read recovery identities: %w", ErrUnavailable, err)
 	}
 	now := s.clock.Now().UTC().Format(time.RFC3339Nano)
-	if _, operationErr4 := tx.ExecContext(ctx, `UPDATE vendor_turns SET outcome='unknown', ended_at=? WHERE outcome=''`, now); operationErr4 != nil {
-		return nil, fmt.Errorf("%w: recover turns: %w", ErrUnavailable, operationErr4)
+	_, err = tx.ExecContext(ctx,
+		`UPDATE vendor_turns SET outcome=?,ended_at=? WHERE outcome=''`, OutcomeUnknown, now)
+	if err != nil {
+		return nil, fmt.Errorf("%w: recover turns: %w", ErrUnavailable, err)
 	}
-	if _, operationErr5 := tx.ExecContext(ctx, `UPDATE vendor_sessions SET state='detached', waiting_reason='', updated_at=? WHERE state <> 'closed'`, now); operationErr5 != nil {
-		return nil, fmt.Errorf("%w: recover sessions: %w", ErrUnavailable, operationErr5)
+	_, err = tx.ExecContext(ctx,
+		`UPDATE vendor_sessions SET state=?,waiting_reason='',updated_at=? WHERE state <> ?`,
+		StateDetached, now, StateClosed)
+	if err != nil {
+		return nil, fmt.Errorf("%w: recover sessions: %w", ErrUnavailable, err)
 	}
-	if operationErr6 := tx.Commit(); operationErr6 != nil {
-		return nil, fmt.Errorf("%w: commit recovery: %w", ErrUnavailable, operationErr6)
+	if err = tx.Commit(); err != nil {
+		return nil, fmt.Errorf("%w: commit recovery: %w", ErrUnavailable, err)
 	}
 	return result, nil
 }
