@@ -91,8 +91,9 @@ func TestDeltaCoalescerPublishesRedactedViewsAndFlushesOnClose(t *testing.T) {
 	if err := closer.Wait(); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(sink.snapshot()[1].View.Text, "cross-") {
-		t.Fatal("unredacted delta")
+	views := sink.snapshot()
+	if !strings.Contains(views[0].View.Text, "cross-") || strings.Contains(views[1].View.Text, "cross-") || !strings.Contains(views[1].View.Text, "[maske") {
+		t.Fatal("second delta did not mask the completed secret")
 	}
 }
 
