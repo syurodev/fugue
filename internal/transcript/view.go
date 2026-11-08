@@ -26,9 +26,11 @@ type FileSummary struct {
 
 // View is a redacted, possibly shortened display value.
 type View struct {
-	Text      string
-	Truncated bool
-	Files     []FileSummary
+	Text         string
+	Truncated    bool
+	CutAt        int
+	OmittedBytes int
+	Files        []FileSummary
 }
 
 // BuildView creates a display value without mutating the stored content.
@@ -48,9 +50,10 @@ func BuildView(kind ViewKind, content string, redactor Redactor) View {
 		for tail < len(text) && !utf8.RuneStart(text[tail]) {
 			tail++
 		}
-		return View{Text: text[:head] + text[tail:], Truncated: true}
+		return View{Text: text[:head] + text[tail:], Truncated: true, CutAt: head, OmittedBytes: tail - head}
 	}
-	return View{Text: text[:utf8Prefix(text, limit)], Truncated: true}
+	cut := utf8Prefix(text, limit)
+	return View{Text: text[:cut], Truncated: true, CutAt: cut, OmittedBytes: len(text) - cut}
 }
 
 func utf8Prefix(s string, n int) int {

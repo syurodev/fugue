@@ -3,6 +3,7 @@ package transcript
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -10,52 +11,67 @@ import (
 	"github.com/syurodev/fugue/internal/platform/supervise"
 )
 
-// Delta carries the full current display state for one item.
+// Delta carries the full current display state for one item. Clients discard a
+// delta whose BaseRevision is lower than the durable revision they hold.
 type (
 	Delta struct {
-		ItemID string
-		View   View
+		ItemID       string
+		BaseRevision uint64
+		View         View
 	}
 	// DeltaSink receives only ephemeral, latest-for-key item views.
-	DeltaSink   interface{ Publish(context.Context, Delta) }
+	DeltaSink   interface{ Publish(context.Context, *Delta) }
 	pendingView struct {
-		kind    ViewKind
-		content string
+		baseRevision uint64
+		kind         ViewKind
+		content      string
 	}
 	// DeltaCoalescer publishes at most 30 item views per second for one session.
 	DeltaCoalescer struct {
-		mu      sync.Mutex
-		pending map[string]pendingView
-		order   []string
-		closing bool
-		wake    chan struct{}
-		task    *supervise.Task
-		once    sync.Once
+		mu        sync.Mutex
+		pending   map[string]pendingView
+		completed map[string]uint64
+		order     []string
+		closing   bool
+		wake      chan struct{}
+		task      *supervise.Task
+		once      sync.Once
 	}
 )
 
 // NewDeltaCoalescer starts the supervised publisher for one session.
 func NewDeltaCoalescer(ctx context.Context, c clock.Clock, sink DeltaSink, redactor Redactor) *DeltaCoalescer {
-	d := &DeltaCoalescer{pending: make(map[string]pendingView), wake: make(chan struct{}, 1)}
+	d := &DeltaCoalescer{pending: make(map[string]pendingView), completed: make(map[string]uint64), wake: make(chan struct{}, 1)}
 	d.task = supervise.Go(ctx, "transcript-deltas", func(ctx context.Context) error { return d.run(ctx, c, sink, redactor) })
 	return d
 }
 
 // Update replaces an item's pending full content; completion uses a separate durable path.
-func (d *DeltaCoalescer) Update(id string, kind ViewKind, content string) {
+func (d *DeltaCoalescer) Update(id string, baseRevision uint64, kind ViewKind, content string) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if d.closing {
+	if d.closing || baseRevision < d.completed[id] {
 		return
 	}
 	if _, ok := d.pending[id]; !ok {
 		d.order = append(d.order, id)
 	}
-	d.pending[id] = pendingView{kind: kind, content: content}
+	d.pending[id] = pendingView{baseRevision: baseRevision, kind: kind, content: content}
 	select {
 	case d.wake <- struct{}{}:
 	default:
 	}
+}
+
+// Complete discards pending state before the caller publishes a durable event.
+func (d *DeltaCoalescer) Complete(id string, revision uint64) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if revision > d.completed[id] {
+		d.completed[id] = revision
+	}
+	delete(d.pending, id)
+	d.order = slices.DeleteFunc(d.order, func(key string) bool { return key == id })
 }
 
 // Close flushes pending views at the same rate and waits for the publisher.
@@ -135,7 +151,7 @@ func (d *DeltaCoalescer) run(ctx context.Context, c clock.Clock, sink DeltaSink,
 		if !ok {
 			continue
 		}
-		sink.Publish(ctx, Delta{ItemID: id, View: BuildView(v.kind, v.content, redactor)})
+		sink.Publish(ctx, &Delta{ItemID: id, BaseRevision: v.baseRevision, View: BuildView(v.kind, v.content, redactor)})
 		last = c.Now()
 		first = false
 	}

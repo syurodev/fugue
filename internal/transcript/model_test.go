@@ -11,6 +11,8 @@ import (
 	"go.uber.org/goleak"
 )
 
+const testInfo = "info"
+
 func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
 
 func TestStorageFitKeepsHeadAndTailWithinLimit(t *testing.T) {
@@ -20,17 +22,40 @@ func TestStorageFitKeepsHeadAndTailWithinLimit(t *testing.T) {
 	if !truncated || size != len(in) || len(got) > 9 || !utf8.Valid(got) || !strings.HasPrefix(in, string(got[:4])) || !strings.HasSuffix(in, string(got[len(got)-4:])) {
 		t.Fatal("storage fit did not retain UTF-8 head and tail")
 	}
+	checkStorageEdges(t)
+}
+
+func checkStorageEdges(t *testing.T) {
+	t.Helper()
+	raw := []byte("short")
+	copyResult, cut, original := FitStorage(raw, 20)
+	if cut || original != len(raw) || string(copyResult) != "short" {
+		t.Fatal("short input changed")
+	}
+	copyResult[0] = 'X'
+	if string(raw) != "short" {
+		t.Fatal("storage fit aliases input")
+	}
+	empty, cut, original := FitStorage(raw, 0)
+	if !cut || original != len(raw) || len(empty) != 0 {
+		t.Fatal("zero limit")
+	}
+	boundary := []byte("aéxxxxézzz")
+	fitted, cut, _ := FitStorage(boundary, 5)
+	if !cut || !utf8.Valid(fitted) || len(fitted) > 5 || string(fitted) != "azzz" {
+		t.Fatalf("invalid boundary fit: %q", fitted)
+	}
 }
 
 func TestOversizedItemsShowTruncatedViewsAndKeepFullContent(t *testing.T) {
 	t.Parallel()
 	original := strings.Repeat("a", 70000) + "tail"
 	got := BuildView(ViewText, original, maskingRedactor{})
-	if !got.Truncated || len(got.Text) != 65536 || original[len(original)-4:] != "tail" {
+	if !got.Truncated || got.CutAt != 65536 || got.OmittedBytes != len(original)-65536 || len(got.Text) != 65536 || original[len(original)-4:] != "tail" {
 		t.Fatal("text view or source incorrect")
 	}
 	output := BuildView(ViewToolOutput, original, maskingRedactor{})
-	if !output.Truncated || len(output.Text) != 65536 || !strings.HasSuffix(output.Text, "tail") {
+	if !output.Truncated || output.CutAt != 32768 || output.OmittedBytes != len(original)-65536 || len(output.Text) != 65536 || !strings.HasSuffix(output.Text, "tail") {
 		t.Fatal("tool view incorrect")
 	}
 }
@@ -48,6 +73,11 @@ func TestViewsRedactBeforeTruncating(t *testing.T) {
 	if strings.Contains(got.Text, "cross-") {
 		t.Fatal("secret exposed across cutoff")
 	}
+	tool := strings.Repeat("a", 40000) + "cross-secret" + strings.Repeat("z", 32762)
+	output := BuildView(ViewToolOutput, tool, maskingRedactor{})
+	if strings.Contains(output.Text, "secret") || strings.Contains(output.Text, "cross-") {
+		t.Fatal("secret leaked at tail cutoff")
+	}
 }
 
 func TestUnsupportedEventBecomesNoticeWithRawRef(t *testing.T) {
@@ -61,7 +91,7 @@ func TestUnsupportedEventBecomesNoticeWithRawRef(t *testing.T) {
 
 func TestItemUpdatesKeepIdentityAndIncreaseRevision(t *testing.T) {
 	t.Parallel()
-	old := Item{ID: "i", SessionID: "s", TurnID: "t", Kind: Notice, Revision: 1, Metadata: NoticeMetadata{Level: "info"}}
+	old := Item{ID: "i", SessionID: "s", TurnID: "t", Kind: Notice, Revision: 1, Metadata: NoticeMetadata{Level: testInfo}}
 	next := old
 	next.Revision++
 	if err := ValidateUpdate(&old, &next); err != nil {
@@ -123,7 +153,7 @@ func TestItemMetadataKinds(t *testing.T) {
 		{Notice, NoticeMetadata{Level: "warning"}},
 	}
 	for _, tc := range cases {
-		item := Item{Kind: tc.kind, Metadata: tc.metadata}
+		item := Item{ID: "i", SessionID: "s", Kind: tc.kind, Metadata: tc.metadata}
 		if err := item.Validate(); err != nil {
 			t.Errorf("%s: %v", tc.kind, err)
 		}
@@ -154,8 +184,25 @@ func TestContentKindsMatchItems(t *testing.T) {
 			t.Fatal("missing content kind")
 		}
 	}
-	item := Item{Kind: Notice, Metadata: NoticeMetadata{Level: "info"}, Content: ToolCallContent{}}
+	item := Item{ID: "i", SessionID: "s", Kind: Notice, Metadata: NoticeMetadata{Level: testInfo}, Content: ToolCallContent{}}
 	if err := item.Validate(); err == nil {
 		t.Fatal("mismatched content accepted")
+	}
+}
+
+func TestItemRejectsInvalidIdentityAndTruncation(t *testing.T) {
+	t.Parallel()
+	validItem := Item{ID: "i", SessionID: "s", Kind: Notice, Metadata: NoticeMetadata{Level: testInfo}}
+	cases := []Item{validItem, validItem, validItem, validItem, validItem, validItem}
+	cases[0].ID = ""
+	cases[1].SessionID = ""
+	cases[2].ContentOriginalSize = -1
+	cases[3].RawOriginalSize = -1
+	cases[4].ContentTruncated = true
+	cases[5].RawOriginalSize = 1
+	for _, item := range cases {
+		if errcode.CodeOf(item.Validate()) != errcode.InvalidArgument {
+			t.Fatal("invalid item accepted")
+		}
 	}
 }

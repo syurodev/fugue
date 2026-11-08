@@ -28,9 +28,9 @@ const (
 )
 
 type (
-	// UserMessageMetadata holds the corresponding item fields.
+	// UserMessageMetadata contains the UserMessage metadata described in transcript §3.
 	UserMessageMetadata struct{ Origin string }
-	// UserMessageContent holds the corresponding item fields.
+	// UserMessageContent contains the UserMessage protected content described in transcript §3.
 	UserMessageContent struct {
 		Text        string
 		Attachments []string
@@ -38,15 +38,15 @@ type (
 )
 
 type (
-	// AssistantMessageMetadata holds the corresponding item fields.
+	// AssistantMessageMetadata contains the AssistantMessage metadata described in transcript §3.
 	AssistantMessageMetadata struct{ ModelID string }
-	// AssistantMessageContent holds the corresponding item fields.
+	// AssistantMessageContent contains the AssistantMessage protected content described in transcript §3.
 	AssistantMessageContent struct{ Text string }
-	// ReasoningMetadata holds the corresponding item fields.
+	// ReasoningMetadata contains the Reasoning metadata described in transcript §3.
 	ReasoningMetadata struct{ Status string }
-	// ReasoningContent holds the corresponding item fields.
+	// ReasoningContent contains the Reasoning protected content described in transcript §3.
 	ReasoningContent struct{ Text string }
-	// ToolCallMetadata holds the corresponding item fields.
+	// ToolCallMetadata contains the ToolCall metadata described in transcript §3.
 	ToolCallMetadata struct {
 		ToolName, Status string
 		ExitCode         *int
@@ -55,9 +55,9 @@ type (
 )
 
 type (
-	// ToolCallContent holds the corresponding item fields.
+	// ToolCallContent contains the ToolCall protected content described in transcript §3.
 	ToolCallContent struct{ Title, Input, Output string }
-	// FileChangeMetadata holds the corresponding item fields.
+	// FileChangeMetadata contains the FileChange metadata described in transcript §3.
 	FileChangeMetadata struct {
 		Change         string
 		Added, Removed int
@@ -65,23 +65,23 @@ type (
 )
 
 type (
-	// FileChangeContent holds the corresponding item fields.
+	// FileChangeContent contains the FileChange protected content described in transcript §3.
 	FileChangeContent struct{ Path, OldPath, Diff string }
-	// ApprovalMetadata holds the corresponding item fields.
+	// ApprovalMetadata contains the Approval metadata described in transcript §3.
 	ApprovalMetadata struct{ RequestType, Decision, Decider, Receipt string }
-	// ApprovalContent holds the corresponding item fields.
+	// ApprovalContent contains the Approval protected content described in transcript §3.
 	ApprovalContent struct{ Request string }
-	// PlanMetadata holds the corresponding item fields.
+	// PlanMetadata contains the Plan metadata described in transcript §3.
 	PlanMetadata struct{ Steps, Current int }
-	// PlanContent holds the corresponding item fields.
+	// PlanContent contains the Plan protected content described in transcript §3.
 	PlanContent struct{ Steps []string }
-	// SubagentMetadata holds the corresponding item fields.
+	// SubagentMetadata contains the Subagent metadata described in transcript §3.
 	SubagentMetadata struct{ Status string }
-	// SubagentContent holds the corresponding item fields.
+	// SubagentContent contains the Subagent protected content described in transcript §3.
 	SubagentContent struct{ Name, Description, Result string }
-	// CommandMetadata holds the corresponding item fields.
+	// CommandMetadata contains the Command metadata described in transcript §3.
 	CommandMetadata struct{ Source string }
-	// CommandContent holds the corresponding item fields.
+	// CommandContent contains the Command protected content described in transcript §3.
 	CommandContent struct {
 		Name string
 		Args []string
@@ -95,13 +95,13 @@ type TeamProposalMetadata struct {
 	Decision   string
 }
 type (
-	// TeamProposalContent holds the corresponding item fields.
+	// TeamProposalContent contains the TeamProposal protected content described in transcript §3.
 	TeamProposalContent struct{ Plan string }
-	// TaskLinkMetadata holds the corresponding item fields.
+	// TaskLinkMetadata contains the TaskLink metadata described in transcript §3.
 	TaskLinkMetadata struct{ TaskID, AgentID, Status string }
-	// TaskLinkContent holds the corresponding item fields.
+	// TaskLinkContent contains the TaskLink protected content described in transcript §3.
 	TaskLinkContent struct{ Summary string }
-	// UsageMetadata holds the corresponding item fields.
+	// UsageMetadata contains the Usage metadata described in transcript §3.
 	UsageMetadata struct {
 		InputTokens, OutputTokens, CacheTokens int64
 		Cost                                   float64
@@ -109,9 +109,9 @@ type (
 )
 
 type (
-	// UsageContent holds the corresponding item fields.
+	// UsageContent contains the Usage protected content described in transcript §3.
 	UsageContent struct{}
-	// QuotaMetadata holds the corresponding item fields.
+	// QuotaMetadata contains the Quota metadata described in transcript §3.
 	QuotaMetadata struct {
 		AccountID, Window string
 		Used              float64
@@ -120,11 +120,11 @@ type (
 )
 
 type (
-	// QuotaContent holds the corresponding item fields.
+	// QuotaContent contains the Quota protected content described in transcript §3.
 	QuotaContent struct{}
-	// NoticeMetadata holds the corresponding item fields.
+	// NoticeMetadata contains the Notice metadata described in transcript §3.
 	NoticeMetadata struct{ Level, Code string }
-	// NoticeContent holds the corresponding item fields.
+	// NoticeContent contains the Notice protected content described in transcript §3.
 	NoticeContent struct{ Text string }
 )
 
@@ -157,83 +157,14 @@ func valid(value string, choices ...string) bool {
 
 // Validate rejects unknown kinds and invalid metadata.
 func (i *Item) Validate() error {
-	if i.Metadata == nil || i.Metadata.transcriptMetadata() != i.Kind || (i.Content != nil && i.Content.transcriptContent() != i.Kind) || !i.validMetadata() {
+	if i.Metadata == nil || i.Metadata.transcriptMetadata() != i.Kind || (i.Content != nil && i.Content.transcriptContent() != i.Kind) || !i.Metadata.valid() || !i.validCommon() {
 		return errcode.New(errcode.InvalidArgument, "invalid transcript kind or metadata")
 	}
 	return nil
 }
 
-func (i *Item) validMetadata() bool {
-	var ok bool
-	switch i.Kind {
-	case UserMessage:
-		m, yes := i.Metadata.(UserMessageMetadata)
-		return validateOrigin(m, yes)
-	case AssistantMessage:
-		_, ok = i.Metadata.(AssistantMessageMetadata)
-	case Reasoning:
-		m, yes := i.Metadata.(ReasoningMetadata)
-		ok = yes && valid(m.Status, "plain", "summary", "redacted")
-	case ToolCall:
-		m, yes := i.Metadata.(ToolCallMetadata)
-		ok = yes && valid(m.Status, "pending", "running", "succeeded", "failed", "denied", "unknown")
-	case FileChange:
-		m, yes := i.Metadata.(FileChangeMetadata)
-		ok = yes && valid(m.Change, "add", "modify", "delete", "rename")
-	case Approval:
-		m, yes := i.Metadata.(ApprovalMetadata)
-		return validApproval(m, yes)
-	case Plan, Subagent, Command, TeamProposal, TaskLink, Usage, Quota, Notice:
-		return i.validRemaining()
-	default:
-		return false
-	}
-	return ok
-}
-
-func (i *Item) validRemaining() bool {
-	var ok bool
-	switch i.Kind {
-	case Plan:
-		_, ok = i.Metadata.(PlanMetadata)
-	case Subagent:
-		m, yes := i.Metadata.(SubagentMetadata)
-		return validateSubagent(m, yes)
-	case Command:
-		m, yes := i.Metadata.(CommandMetadata)
-		ok = yes && valid(m.Source, "vendor", "fugue")
-	case TeamProposal:
-		m, yes := i.Metadata.(TeamProposalMetadata)
-		ok = yes && valid(m.Decision, "pending", "approved", "approved_edited", "solo", "rejected")
-	case TaskLink:
-		m, yes := i.Metadata.(TaskLinkMetadata)
-		ok = yes && valid(m.Status, "queued", "starting", "running", "asking", "checking", "review", "integrating", "done", "failed", "stopped", "cancelled", "unknown")
-	case UserMessage, AssistantMessage, Reasoning, ToolCall, FileChange, Approval:
-		return false
-	case Usage, Quota, Notice:
-		return i.validTerminal()
-	default:
-		return false
-	}
-	return ok
-}
-
-func (i *Item) validTerminal() bool {
-	var ok bool
-	switch i.Kind {
-	case Usage:
-		_, ok = i.Metadata.(UsageMetadata)
-	case Quota:
-		_, ok = i.Metadata.(QuotaMetadata)
-	case Notice:
-		m, yes := i.Metadata.(NoticeMetadata)
-		ok = yes && valid(m.Level, "info", "warning", "error")
-	case UserMessage, AssistantMessage, Reasoning, ToolCall, FileChange, Approval, Plan, Subagent, Command, TeamProposal, TaskLink:
-		return false
-	default:
-		return false
-	}
-	return ok
+func (i *Item) validCommon() bool {
+	return i.ID != "" && i.SessionID != "" && i.ContentOriginalSize >= 0 && i.RawOriginalSize >= 0 && i.ContentTruncated == (i.ContentOriginalSize > 0) && i.RawTruncated == (i.RawOriginalSize > 0)
 }
 
 // ValidateUpdate checks stable identity and advancing revision.
@@ -244,21 +175,12 @@ func ValidateUpdate(old, next *Item) error {
 	return next.Validate()
 }
 
-func validateOrigin(m UserMessageMetadata, ok bool) bool {
-	return ok && valid(m.Origin, "user", "lead", "fugue")
-}
-
-func validateSubagent(m SubagentMetadata, ok bool) bool {
-	return ok && valid(m.Status, "pending", "running", "succeeded", "failed", "cancelled", "unknown")
-}
-
-func validApproval(m ApprovalMetadata, ok bool) bool {
-	return ok && (m.Decider == "" || valid(m.Decider, "user", "policy", "lead"))
-}
-
 // Metadata restricts metadata to the allowlisted item types.
 type (
-	Metadata interface{ transcriptMetadata() Kind }
+	Metadata interface {
+		transcriptMetadata() Kind
+		valid() bool
+	}
 	// Content restricts protected content to transcript content types.
 	Content interface{ transcriptContent() Kind }
 )
@@ -304,3 +226,41 @@ func (QuotaContent) transcriptContent() Kind   { return Quota }
 
 func (NoticeMetadata) transcriptMetadata() Kind { return Notice }
 func (NoticeContent) transcriptContent() Kind   { return Notice }
+
+func (m UserMessageMetadata) valid() bool { return valid(m.Origin, "user", "lead", "fugue") }
+
+func (AssistantMessageMetadata) valid() bool { return true }
+
+func (m ReasoningMetadata) valid() bool { return valid(m.Status, "plain", "summary", "redacted") }
+
+func (m ToolCallMetadata) valid() bool {
+	return valid(m.Status, "pending", "running", "succeeded", "failed", "denied", "unknown")
+}
+
+func (m FileChangeMetadata) valid() bool { return valid(m.Change, "add", "modify", "delete", "rename") }
+
+func (m ApprovalMetadata) valid() bool {
+	return m.Decider == "" || valid(m.Decider, "user", "policy", "lead")
+}
+
+func (PlanMetadata) valid() bool { return true }
+
+func (m SubagentMetadata) valid() bool {
+	return valid(m.Status, "pending", "running", "succeeded", "failed", "cancelled", "unknown")
+}
+
+func (m CommandMetadata) valid() bool { return valid(m.Source, "vendor", "fugue") }
+
+func (m TeamProposalMetadata) valid() bool {
+	return valid(m.Decision, "pending", "approved", "approved_edited", "solo", "rejected")
+}
+
+func (m TaskLinkMetadata) valid() bool {
+	return valid(m.Status, "queued", "starting", "running", "asking", "checking", "review", "integrating", "done", "failed", "stopped", "cancelled", "unknown")
+}
+
+func (UsageMetadata) valid() bool { return true }
+
+func (QuotaMetadata) valid() bool { return true }
+
+func (m NoticeMetadata) valid() bool { return valid(m.Level, "info", "warning", "error") }
