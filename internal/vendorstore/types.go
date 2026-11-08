@@ -73,39 +73,43 @@ const (
 )
 
 // ItemMetadata contains only the transcript section 3 control fields.
+// Under INV-09, metadata is an allowlist of enums, counts, IDs, or timestamps;
+// free-text fields (such as titles, paths, argv, or user/vendor-supplied names)
+// are forbidden and belong in protected content payloads instead.
 type ItemMetadata struct {
-	Origin         string  `json:"origin,omitempty"`
-	Model          string  `json:"model,omitempty"`
-	ReasoningState string  `json:"reasoning_state,omitempty"`
-	Tool           string  `json:"tool,omitempty"`
-	Title          string  `json:"title,omitempty"`
-	Status         string  `json:"status,omitempty"`
-	ExitCode       *int    `json:"exit_code,omitempty"`
-	DurationMillis int64   `json:"duration_millis,omitempty"`
-	Path           string  `json:"path,omitempty"`
-	ChangeKind     string  `json:"change_kind,omitempty"`
-	LinesAdded     int64   `json:"lines_added,omitempty"`
-	LinesRemoved   int64   `json:"lines_removed,omitempty"`
-	RequestKind    string  `json:"request_kind,omitempty"`
-	Decision       string  `json:"decision,omitempty"`
-	Decider        string  `json:"decider,omitempty"`
-	Receipt        string  `json:"receipt,omitempty"`
-	StepCount      int64   `json:"step_count,omitempty"`
-	CurrentStep    int64   `json:"current_step,omitempty"`
-	Name           string  `json:"name,omitempty"`
-	Source         string  `json:"source,omitempty"`
-	ProposalID     string  `json:"proposal_id,omitempty"`
-	AgentCount     int64   `json:"agent_count,omitempty"`
-	TaskID         string  `json:"task_id,omitempty"`
-	Agent          string  `json:"agent,omitempty"`
-	InputTokens    int64   `json:"input_tokens,omitempty"`
-	OutputTokens   int64   `json:"output_tokens,omitempty"`
-	CacheTokens    int64   `json:"cache_tokens,omitempty"`
-	Cost           float64 `json:"cost,omitempty"`
-	Account        string  `json:"account,omitempty"`
-	Window         string  `json:"window,omitempty"`
-	Used           float64 `json:"used,omitempty"`
-	ResetAt        string  `json:"reset_at,omitempty"`
-	Level          string  `json:"level,omitempty"`
-	Code           string  `json:"code,omitempty"`
+	Origin               string  `json:"origin,omitempty"`
+	Model                string  `json:"model,omitempty"`
+	ReasoningState       string  `json:"reasoning_state,omitempty"`
+	Tool                 string  `json:"tool,omitempty"`
+	Status               string  `json:"status,omitempty"`
+	ExitCode             *int    `json:"exit_code,omitempty"`
+	DurationMillis       int64   `json:"duration_millis,omitempty"`
+	ChangeKind           string  `json:"change_kind,omitempty"`
+	LinesAdded           int64   `json:"lines_added,omitempty"`
+	LinesRemoved         int64   `json:"lines_removed,omitempty"`
+	RequestKind          string  `json:"request_kind,omitempty"`
+	Decision             string  `json:"decision,omitempty"`
+	Decider              string  `json:"decider,omitempty"`
+	Receipt              string  `json:"receipt,omitempty"`
+	StepCount            int64   `json:"step_count,omitempty"`
+	CurrentStep          int64   `json:"current_step,omitempty"`
+	Source               string  `json:"source,omitempty"`
+	ProposalID           string  `json:"proposal_id,omitempty"`
+	AgentCount           int64   `json:"agent_count,omitempty"`
+	TaskID               string  `json:"task_id,omitempty"`
+	Agent                string  `json:"agent,omitempty"`
+	InputTokens          int64   `json:"input_tokens,omitempty"`
+	OutputTokens         int64   `json:"output_tokens,omitempty"`
+	CacheTokens          int64   `json:"cache_tokens,omitempty"`
+	Cost                 float64 `json:"cost,omitempty"`
+	Account              string  `json:"account,omitempty"`
+	Window               string  `json:"window,omitempty"`
+	Used                 float64 `json:"used,omitempty"`
+	ResetAt              string  `json:"reset_at,omitempty"`
+	Level                string  `json:"level,omitempty"`
+	Code                 string  `json:"code,omitempty"`
+	ContentTruncated     bool    `json:"content_truncated,omitempty"`
+	RawTruncated         bool    `json:"raw_truncated,omitempty"`
+	OriginalContentBytes int64   `json:"original_content_bytes,omitempty"`
+	OriginalRawBytes     int64   `json:"original_raw_bytes,omitempty"`
 }

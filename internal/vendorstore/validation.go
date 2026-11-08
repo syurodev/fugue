@@ -23,12 +23,12 @@ func validateItemMetadata(item *Item) error {
 		KindUserMessage:      {metadataOrigin},
 		KindAssistantMessage: {"Model"},
 		KindReasoning:        {metadataReasoningState},
-		KindToolCall:         {"Tool", "Title", metadataStatus, "ExitCode", "DurationMillis"},
-		KindFileChange:       {"Path", metadataChangeKind, "LinesAdded", "LinesRemoved"},
+		KindToolCall:         {"Tool", metadataStatus, "ExitCode", "DurationMillis"},
+		KindFileChange:       {metadataChangeKind, "LinesAdded", "LinesRemoved"},
 		KindApproval:         {"RequestKind", "Decision", metadataDecider, "Receipt"},
 		KindPlan:             {"StepCount", "CurrentStep"},
-		KindSubagent:         {"Name", metadataStatus},
-		KindCommand:          {"Name", metadataSource},
+		KindSubagent:         {metadataStatus},
+		KindCommand:          {metadataSource},
 		KindTeamProposal:     {"ProposalID", "AgentCount", "Decision"},
 		KindTaskLink:         {"TaskID", "Agent", metadataStatus},
 		KindUsage:            {"InputTokens", "OutputTokens", "CacheTokens", "Cost"},
@@ -41,13 +41,35 @@ func validateItemMetadata(item *Item) error {
 	if err := validateMetadataEnums(item); err != nil {
 		return err
 	}
+	if item.Metadata.OriginalContentBytes < 0 || item.Metadata.OriginalRawBytes < 0 {
+		return errcode.New(errcode.InvalidArgument, "original bytes cannot be negative")
+	}
+	if item.Metadata.ContentTruncated != (item.Metadata.OriginalContentBytes > 0) {
+		return errcode.New(errcode.InvalidArgument, "content truncation flag must match original content bytes")
+	}
+	if item.Metadata.RawTruncated != (item.Metadata.OriginalRawBytes > 0) {
+		return errcode.New(errcode.InvalidArgument, "raw truncation flag must match original raw bytes")
+	}
 	value := reflect.ValueOf(item.Metadata)
 	for i := range value.NumField() {
-		if !value.Field(i).IsZero() && !slices.Contains(fields[item.Kind], value.Type().Field(i).Name) {
+		name := value.Type().Field(i).Name
+		if isCommonItemMetadataField(name) {
+			continue
+		}
+		if !value.Field(i).IsZero() && !slices.Contains(fields[item.Kind], name) {
 			return errcode.New(errcode.InvalidArgument, "metadata field does not belong to item kind")
 		}
 	}
 	return nil
+}
+
+func isCommonItemMetadataField(name string) bool {
+	switch name {
+	case "ContentTruncated", "RawTruncated", "OriginalContentBytes", "OriginalRawBytes":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateMetadataEnums(item *Item) error {
