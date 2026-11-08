@@ -10,10 +10,13 @@ import (
 	"syscall"
 )
 
+const fakeVendorModeHoldPipes = "hold-pipes"
+
 func unixModes() map[string]func() {
 	return map[string]func(){
-		"setsid-grandchild": runSetsidGrandchild,
-		"hold-pipes":        runHoldPipes,
+		"setsid-grandchild":             runSetsidGrandchild,
+		"setsid-grandchild-stdout-only": runSetsidGrandchildStdoutOnly,
+		fakeVendorModeHoldPipes:         runHoldPipes,
 	}
 }
 
@@ -38,12 +41,42 @@ func runSetsidGrandchild() {
 	}
 	grandchild := &exec.Cmd{
 		Path:        exe,
-		Args:        []string{exe, fakeVendorFlag, "hold-pipes"},
+		Args:        []string{exe, fakeVendorFlag, fakeVendorModeHoldPipes},
 		Stdout:      os.Stdout,
 		Stderr:      os.Stderr,
 		SysProcAttr: &syscall.SysProcAttr{Setsid: true},
 	}
 	if startErr := grandchild.Start(); startErr != nil {
+		os.Exit(1)
+	}
+	writeQuietly(os.Stdout, fmt.Sprintf("GRANDCHILD %d\n", grandchild.Process.Pid))
+	writeQuietly(os.Stdout, "READY\n")
+	blockForever()
+}
+
+// runSetsidGrandchildStdoutOnly starts a grandchild in its own session that
+// inherits only stdout, pointing stderr to /dev/null. When the leader dies
+// on SIGINT, stderr reaches EOF at once, isolating stdout as the sole pipe
+// held open by an escaped process.
+func runSetsidGrandchildStdoutOnly() {
+	exe, err := os.Executable()
+	if err != nil {
+		os.Exit(1)
+	}
+	devNull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		os.Exit(1)
+	}
+	grandchild := &exec.Cmd{
+		Path:        exe,
+		Args:        []string{exe, fakeVendorFlag, fakeVendorModeHoldPipes},
+		Stdout:      os.Stdout,
+		Stderr:      devNull,
+		SysProcAttr: &syscall.SysProcAttr{Setsid: true},
+	}
+	startErr := grandchild.Start()
+	closeQuietly(devNull)
+	if startErr != nil {
 		os.Exit(1)
 	}
 	writeQuietly(os.Stdout, fmt.Sprintf("GRANDCHILD %d\n", grandchild.Process.Pid))

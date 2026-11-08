@@ -58,6 +58,7 @@ func TestStopOrderImmediateInterrupt(t *testing.T) {
 	}
 
 	waitReady(t, proc.Stdout())
+	drainStdout(ctx, proc.Stdout())
 
 	proof, err := proc.Stop(ctx)
 	if err != nil {
@@ -94,6 +95,7 @@ func TestStopOrderEscalatesToSigint(t *testing.T) {
 	}
 
 	waitReady(t, proc.Stdout())
+	drainStdout(ctx, proc.Stdout())
 
 	stopDone := make(chan struct{})
 	_ = supervise.Go(ctx, "test.stop_sigint", func(ctx context.Context) error {
@@ -144,6 +146,7 @@ func TestStopOrderEscalatesToSigterm(t *testing.T) {
 	}
 
 	waitReady(t, proc.Stdout())
+	drainStdout(ctx, proc.Stdout())
 
 	stopDone := make(chan struct{})
 	_ = supervise.Go(ctx, "test.stop_sigterm", func(ctx context.Context) error {
@@ -199,6 +202,7 @@ func TestStopOrderEscalatesToSigkill(t *testing.T) {
 	}
 
 	waitReady(t, proc.Stdout())
+	drainStdout(ctx, proc.Stdout())
 
 	stopDone := make(chan struct{})
 	_ = supervise.Go(ctx, "test.stop_sigkill", func(ctx context.Context) error {
@@ -258,6 +262,7 @@ func TestStopKillsGroupMembersAfterLeaderExits(t *testing.T) {
 	}
 
 	childPid := waitChildSurvivorReady(t, proc.Stdout())
+	drainStdout(ctx, proc.Stdout())
 	if err := syscall.Kill(childPid, 0); err != nil {
 		t.Fatalf("child process %d not alive before stop: %v", childPid, err)
 	}
@@ -329,6 +334,7 @@ func TestStopOnCanceledContext(t *testing.T) {
 		t.Fatalf("Spawn: %v", err)
 	}
 	waitReady(t, proc.Stdout())
+	drainStdout(ctx, proc.Stdout())
 
 	cancelingCtx, cancel := context.WithCancel(ctx)
 	cancel()
@@ -361,6 +367,7 @@ func TestStopInterruptErrorReturnedSeparately(t *testing.T) {
 		t.Fatalf("Spawn: %v", err)
 	}
 	waitReady(t, proc.Stdout())
+	drainStdout(ctx, proc.Stdout())
 
 	stopDone := make(chan struct{})
 	var proof StopProof
@@ -464,6 +471,66 @@ func TestStopReturnsWhenEscapedGrandchildHoldsPipes(t *testing.T) {
 	}
 }
 
+func TestStopClosesStdoutWhenConsumerBetweenReads(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	clk := clock.NewFake(testEpoch())
+	exe := fakeVendorExe(t)
+	stepCh := make(chan string, 10)
+
+	proc, err := Spawn(ctx, &Options{
+		Argv:  []string{exe, fakeVendorFlag, "setsid-grandchild-stdout-only"},
+		Clock: clk,
+		OnEscalation: func(step string) {
+			stepCh <- step
+		},
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+
+	grandchild := readPidLine(t, proc.Stdout(), "GRANDCHILD ")
+	t.Cleanup(func() {
+		if kerr := syscall.Kill(grandchild, syscall.SIGKILL); kerr != nil && !errors.Is(kerr, syscall.ESRCH) {
+			t.Errorf("kill grandchild %d: %v", grandchild, kerr)
+		}
+	})
+	waitReady(t, proc.Stdout())
+
+	// The consumer has read all available output and is now between reads;
+	// no goroutine is inside ReadLine.
+	var proof StopProof
+	var stopErr error
+	stopTask := supervise.Go(ctx, "test.stop_consumer_between_reads", func(ctx context.Context) error {
+		proof, stopErr = proc.Stop(ctx)
+		return nil
+	})
+
+	expectEscalationStep(t, stepCh, escalationSigint)
+	<-proc.exitCh
+	driveClockUntil(t, clk, stopTask.Done())
+	if err := stopTask.Wait(); err != nil {
+		t.Fatalf("stopTask: %v", err)
+	}
+
+	if stopErr != nil {
+		t.Fatalf("Stop: %v", stopErr)
+	}
+	if proof.Reason != ReasonPipeHeldOpen {
+		t.Fatalf("expected %s, got %q", ReasonPipeHeldOpen, proof.Reason)
+	}
+	if err := syscall.Kill(grandchild, 0); err != nil {
+		t.Fatalf("grandchild %d should still be alive outside the group: %v", grandchild, err)
+	}
+
+	// After Stop closes the held pipe, the consumer's next ReadLine returns
+	// promptly with an error instead of hanging forever.
+	if _, err := proc.Stdout().ReadLine(); err == nil {
+		t.Fatal("expected consumer ReadLine after Stop to fail")
+	}
+}
+
 func readPidLine(t *testing.T, lr *LineReader, prefix string) int {
 	t.Helper()
 	line, err := lr.ReadLine()
@@ -475,6 +542,24 @@ func readPidLine(t *testing.T, lr *LineReader, prefix string) int {
 		t.Fatalf("invalid pid from %q: %v", string(line), err)
 	}
 	return pid
+}
+
+// drainStdout continuously reads lines from lr in the background until EOF so
+// stdout settles once the process exits, matching the contract that adapters
+// always run a stdout reader.
+func drainStdout(ctx context.Context, lr *LineReader) {
+	_ = supervise.Go(ctx, "test.drain_stdout", func(ctx context.Context) error {
+		drainToEOF(lr)
+		return nil
+	})
+}
+
+func drainToEOF(lr *LineReader) {
+	for {
+		if _, err := lr.ReadLine(); err != nil {
+			return
+		}
+	}
 }
 
 // waitPidGone yields until pid no longer exists. The pid belongs to a

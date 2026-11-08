@@ -3,19 +3,18 @@
 package process
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"sync"
-	"sync/atomic"
 )
 
 // outputPipe is the parent's read end of the child's stdout. It records
-// whether a consumer is blocked in Read and when the stream ended, so Stop can
-// tell a consumer waiting on a pipe held open by an escaped process from one
-// that simply has not read yet, without reading on the consumer's behalf.
+// when the stream ended (EOF or a read error), so Stop knows whether stdout
+// has settled without reading on the consumer's behalf.
 type outputPipe struct {
 	file      *os.File
-	inRead    atomic.Int32
 	ended     chan struct{}
 	endOnce   sync.Once
 	closeOnce sync.Once
@@ -27,11 +26,12 @@ func newOutputPipe(f *os.File) *outputPipe {
 }
 
 func (o *outputPipe) Read(b []byte) (int, error) {
-	o.inRead.Add(1)
 	n, err := o.file.Read(b)
-	o.inRead.Add(-1)
 	if err != nil {
 		o.endOnce.Do(func() { close(o.ended) })
+		if errors.Is(err, io.EOF) {
+			return n, io.EOF
+		}
 		return n, fmt.Errorf("read stdout pipe: %w", err)
 	}
 	return n, nil
@@ -48,13 +48,12 @@ func (o *outputPipe) Close() error {
 	return o.closeErr
 }
 
-// settled reports that no consumer is blocked on the pipe: either the stream
-// ended or nobody is reading right now.
+// settled reports whether the stdout stream has ended (EOF or a read error).
 func (o *outputPipe) settled() bool {
 	select {
 	case <-o.ended:
 		return true
 	default:
-		return o.inRead.Load() == 0
+		return false
 	}
 }

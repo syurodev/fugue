@@ -79,11 +79,14 @@ type stopStep struct {
 // If ctx is canceled before or during Stop, the remaining steps are skipped and
 // Stop sends SIGKILL to the group at once, recording "context_canceled".
 //
-// After the tree is stopped, Stop waits up to 1 s on the clock for the stderr
-// drain to reach EOF and for a blocked stdout reader to reach EOF. A process
-// that left the group (a setsid grandchild) can hold the write ends forever, so
-// on timeout Stop closes both read ends and records "pipe_held_open"; a reader
-// then sees a read error instead of EOF. Escaped processes are reaped by F9.2b.
+// After the tree is stopped, Stop waits up to 1 s on the clock for stdout and
+// stderr to reach EOF. A process that left the group (a setsid grandchild) can
+// hold the write ends forever, so on timeout Stop closes every read end that has
+// not ended and records "pipe_held_open"; any in-flight or subsequent read then
+// returns promptly with an error instead of blocking forever. Escaped processes
+// are reaped by F9.2b. When nothing reads stdout, EOF is never observed, so Stop
+// waits the full 1 s and reports pipe_held_open. The vendor adapter must always
+// run a stdout reader.
 //
 // StopProof.Reason holds only the fixed Reason* codes. A protocol interrupt or
 // signal failure is returned as the error, wrapped with %w.
@@ -228,9 +231,9 @@ func (p *Process) waitTreeTick(ctx context.Context, deadline clock.Timer) (waitO
 	}
 }
 
-// settlePipes waits up to pipeSettleTimeout for the stderr drain to finish
-// and for any blocked stdout reader to reach EOF. On timeout it closes both
-// read ends to unblock them and reports that a pipe was held open.
+// settlePipes waits up to pipeSettleTimeout for stdout and stderr to reach
+// EOF. On timeout it closes any read end that has not ended and reports that
+// a pipe was held open.
 func (p *Process) settlePipes() bool {
 	deadline := p.clock.NewTimer(pipeSettleTimeout)
 	defer deadline.Stop()
@@ -272,8 +275,12 @@ func (p *Process) closeHeldPipes() bool {
 	if stderrC == nil && stdoutC == nil {
 		return false
 	}
-	closeQuietly(p.stderrR)
-	closeQuietly(p.stdoutPipe)
-	<-p.stderrTask.Done()
+	if stderrC != nil {
+		closeQuietly(p.stderrR)
+		<-p.stderrTask.Done()
+	}
+	if stdoutC != nil {
+		closeQuietly(p.stdoutPipe)
+	}
 	return true
 }
