@@ -22,8 +22,10 @@ func TestProtectedEventsAndVaultLock(t *testing.T) {
 	t.Parallel()
 	s, v, path := protectedStore(t)
 	db := s.db
+	_, turnErr := s.Append(t.Context(), "s", 1, &Event{Type: VendorTurnStarted, TurnID: "t", State: "running"})
+	requireNoError(t, turnErr)
 	marker := []byte("planted-vendor-payload-marker-9a36")
-	if _, operationErr5 := s.Append(t.Context(), "s", 1, &Event{Type: UsageObserved, Payload: marker}); operationErr5 != nil {
+	if _, operationErr5 := s.Append(t.Context(), "s", 2, &Event{Type: UsageObserved, Payload: marker}); operationErr5 != nil {
 		t.Fatal(operationErr5)
 	}
 	var id string
@@ -42,16 +44,18 @@ func TestProtectedEventsAndVaultLock(t *testing.T) {
 		t.Fatal("plaintext in database")
 	}
 	v.Lock()
-	if _, operationErr7 := s.Append(t.Context(), "s", 2, &Event{Type: UsageObserved, Payload: marker}); !errors.Is(operationErr7, vault.ErrLocked) {
+	if _, operationErr7 := s.Append(t.Context(), "s", 3, &Event{Type: UsageObserved, Payload: marker}); !errors.Is(operationErr7, vault.ErrLocked) {
 		t.Fatalf("lock: %v", operationErr7)
 	}
-	if _, operationErr8 := s.Append(t.Context(), "s", 2, &Event{Type: QuotaObserved, State: StateWaiting, WaitingReason: "vault_locked"}); operationErr8 != nil {
+	if _, operationErr8 := s.Append(t.Context(), "s", 3, &Event{Type: QuotaObserved, State: StateWaiting, WaitingReason: testVaultLocked}); operationErr8 != nil {
 		t.Fatal(operationErr8)
 	}
+	assertVaultWaiting(t, s)
+	scanAllVendorColumns(t, s, marker)
 	if operationErr9 := s.PurgeSession(t.Context(), "s"); operationErr9 != nil {
 		t.Fatal(operationErr9)
 	}
-	if _, operationErr10 := s.Append(t.Context(), "s", 3, &Event{Type: UsageObserved}); operationErr10 == nil {
+	if _, operationErr10 := s.Append(t.Context(), "s", 4, &Event{Type: UsageObserved}); operationErr10 == nil {
 		t.Fatal("purged write accepted")
 	}
 }
@@ -102,9 +106,7 @@ func TestTranscriptAndRawPayloadNeverAppearInVendorColumns(t *testing.T) {
 	marker := []byte("vendor-confidential-marker-c83d")
 	_, err = s.Append(t.Context(), "s", 2, &Event{Type: TranscriptItemRecorded, Payload: marker, Item: &Item{ID: "i", TurnID: "t", Kind: "tool_call", Content: marker, Raw: marker}})
 	requireNoError(t, err)
-	for _, table := range []string{"SELECT * FROM vendor_sessions", "SELECT * FROM vendor_turns", "SELECT * FROM vendor_events", "SELECT * FROM vendor_transcript_items", "SELECT * FROM vendor_payloads", "SELECT * FROM vendor_session_keys", "SELECT * FROM vendor_purges"} {
-		scanVendorColumns(t, s, table, marker)
-	}
+	scanAllVendorColumns(t, s, marker)
 }
 
 func scanVendorColumns(t *testing.T, s *Store, table string, marker []byte) {
@@ -197,3 +199,21 @@ func TestAmbiguousPurgeBarrierBlocksEveryWrite(t *testing.T) {
 		t.Fatal("recovery bypassed purge barrier")
 	}
 }
+
+func scanAllVendorColumns(t *testing.T, s *Store, marker []byte) {
+	t.Helper()
+	for _, table := range []string{"SELECT * FROM vendor_sessions", "SELECT * FROM vendor_turns", "SELECT * FROM vendor_events", "SELECT * FROM vendor_transcript_items", "SELECT * FROM vendor_payloads", "SELECT * FROM vendor_session_keys", "SELECT * FROM vendor_purges"} {
+		scanVendorColumns(t, s, table, marker)
+	}
+}
+
+func assertVaultWaiting(t *testing.T, s *Store) {
+	t.Helper()
+	snapshot, err := s.Snapshot(t.Context(), "s")
+	requireNoError(t, err)
+	if snapshot.State != StateWaiting || snapshot.WaitingReason != testVaultLocked {
+		t.Fatal("vault waiting state not recorded")
+	}
+}
+
+const testVaultLocked = "vault_locked"
