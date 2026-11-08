@@ -1,0 +1,301 @@
+package app
+
+// The per-session transcript topics: transcript:<session> (durable, snapshot =
+// store sequence plus session and turn state plus the open items' redacted
+// views, no history) and transcript-delta:<session> (ephemeral, memory-only
+// snapshot, latest-for-key events keyed by item ID). Every payload is
+// host-redacted (TR-10); the encoding is JSON until F9.9 moves it to proto.
+// Owner: application layer. Allowed callers: none outside this package.
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+
+	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/transcript"
+	"github.com/syurodev/fugue/internal/vendorstore"
+)
+
+// viewPayload is the JSON shape of a redacted display view.
+type viewPayload struct {
+	Text         string                   `json:"text"`
+	Truncated    bool                     `json:"truncated,omitempty"`
+	CutAt        int                      `json:"cut_at,omitempty"`
+	OmittedBytes int                      `json:"omitted_bytes,omitempty"`
+	Files        []transcript.FileSummary `json:"files,omitempty"`
+}
+
+// itemState is the durable item-event payload: identity, persisted metadata
+// and the redacted view when the vault is open. A nil View means the content
+// is not included — the vault is locked or the event was rebuilt from the
+// journal — and the client reads the content through TranscriptItem.
+type itemState struct {
+	ItemID   string                   `json:"item_id"`
+	TurnID   string                   `json:"turn_id"`
+	Kind     string                   `json:"kind"`
+	Sequence int64                    `json:"sequence,omitempty"`
+	Revision uint64                   `json:"revision"`
+	Metadata vendorstore.ItemMetadata `json:"metadata"`
+	View     *viewPayload             `json:"view,omitempty"`
+}
+
+// deltaPayload is one delta event: the complete latest display state for its
+// item, never an increment (host-api §6).
+type deltaPayload struct {
+	ItemID       string      `json:"item_id"`
+	BaseRevision uint64      `json:"base_revision"`
+	View         viewPayload `json:"view"`
+}
+
+// statePayload carries the non-item durable events (turns, session state).
+type statePayload struct {
+	TurnID        string `json:"turn_id,omitempty"`
+	State         string `json:"state,omitempty"`
+	WaitingReason string `json:"waiting_reason,omitempty"`
+	Outcome       string `json:"outcome,omitempty"`
+	FailureCode   string `json:"failure_code,omitempty"`
+	StopProof     string `json:"stop_proof,omitempty"`
+}
+
+// topicSnapshot is the durable topic's snapshot shape (transcript §6).
+type topicSnapshot struct {
+	Sequence      uint64      `json:"sequence"`
+	SessionState  string      `json:"session_state"`
+	OpenTurns     []string    `json:"open_turns,omitempty"`
+	ContentLocked bool        `json:"content_locked"`
+	Items         []itemState `json:"items,omitempty"`
+}
+
+// deltaSnapshotState is the delta topic's snapshot shape: the latest published
+// view per open item, read from memory only.
+type deltaSnapshotState struct {
+	ContentLocked bool           `json:"content_locked"`
+	Items         []deltaPayload `json:"items,omitempty"`
+}
+
+// transcriptDurable serves the durable topic of one session.
+type transcriptDurable struct {
+	t       *Transcripts
+	session string
+}
+
+// Snapshot answers atomically from one store read transaction: the sequence it
+// returns is the session row's, and every open item's view is rendered from
+// the payload references that transaction captured, so a concurrent append
+// cannot split the answer. While the vault is locked the snapshot carries
+// metadata only (transcript §6).
+func (d *transcriptDurable) Snapshot(ctx context.Context) ([]byte, EventSeq, error) {
+	session, turns, items, err := d.t.deps.Store.Overview(ctx, d.session)
+	if err != nil {
+		return nil, 0, fmt.Errorf("read the vendor session overview: %w", err)
+	}
+	sequence, seqErr := storeSeq(session.LastSequence)
+	if seqErr != nil {
+		return nil, 0, seqErr
+	}
+	locked := !d.t.unlocked()
+	snap := topicSnapshot{
+		Sequence:      sequence,
+		SessionState:  session.State,
+		OpenTurns:     turns,
+		ContentLocked: locked,
+	}
+	for i := range items {
+		state := itemStateFromStored(&items[i])
+		if !locked {
+			view, viewErr := d.t.storedView(ctx, d.session, &items[i])
+			if viewErr != nil {
+				return nil, 0, viewErr
+			}
+			state.View = &view
+		}
+		snap.Items = append(snap.Items, state)
+	}
+	payload, err := json.Marshal(snap)
+	if err != nil {
+		return nil, 0, errcode.Wrap(errcode.Internal, "marshal the transcript topic snapshot", err)
+	}
+	return payload, sequence, nil
+}
+
+// Since maps the store journal onto durable events. Journal payloads are
+// sealed, so catch-up events carry metadata only; a client reads content
+// through the reads (transcript §6).
+func (d *transcriptDurable) Since(ctx context.Context, seq EventSeq) ([]Event, error) {
+	var out []Event
+	cursor, cursorErr := storeCursor(seq)
+	if cursorErr != nil {
+		return nil, cursorErr
+	}
+	for {
+		events, err := d.t.deps.Store.EventsSince(ctx, d.session, cursor, eventPageLimit)
+		if err != nil {
+			return nil, fmt.Errorf("read the vendor events: %w", err)
+		}
+		for i := range events {
+			event, eventErr := durableEvent(&events[i])
+			if eventErr != nil {
+				return nil, eventErr
+			}
+			out = append(out, event)
+		}
+		if len(events) < eventPageLimit {
+			return out, nil
+		}
+		cursor = events[len(events)-1].Sequence
+	}
+}
+
+// eventPageLimit is the store's maximum page for one journal read.
+const eventPageLimit = 1000
+
+// durableEvent rebuilds one durable event from a journal record.
+func durableEvent(recorded *vendorstore.RecordedEvent) (Event, error) {
+	if recorded.Metadata.ItemID != "" {
+		revision, revErr := storeRevision(recorded.Metadata.ItemRevision)
+		if revErr != nil {
+			return Event{}, revErr
+		}
+		state := itemState{
+			ItemID:   recorded.Metadata.ItemID,
+			TurnID:   recorded.Metadata.ItemTurnID,
+			Kind:     recorded.Metadata.ItemKind,
+			Revision: revision,
+			Sequence: recorded.Sequence,
+		}
+		if recorded.Metadata.ItemMetadata != nil {
+			state.Metadata = *recorded.Metadata.ItemMetadata
+		}
+		sequence, seqErr := storeSeq(recorded.Sequence)
+		if seqErr != nil {
+			return Event{}, seqErr
+		}
+		return marshalEvent(EventTranscriptItem, sequence, state)
+	}
+	payload := statePayload{
+		TurnID:        recorded.Metadata.TurnID,
+		State:         recorded.Metadata.State,
+		WaitingReason: recorded.Metadata.WaitingReason,
+		Outcome:       recorded.Metadata.Outcome,
+		FailureCode:   recorded.Metadata.FailureCode,
+		StopProof:     recorded.Metadata.StopProof,
+	}
+	sequence, seqErr := storeSeq(recorded.Sequence)
+	if seqErr != nil {
+		return Event{}, seqErr
+	}
+	return marshalEvent(EventTranscriptState, sequence, payload)
+}
+
+// marshalEvent encodes one durable event payload.
+func marshalEvent(eventType string, seq EventSeq, payload any) (Event, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return Event{}, fmt.Errorf("marshal the %s payload: %w", eventType, err)
+	}
+	return Event{Seq: seq, Type: eventType, Payload: data}, nil
+}
+
+// itemStateFromStored projects a stored item onto the event payload shape.
+func itemStateFromStored(stored *vendorstore.StoredItem) itemState {
+	revision, err := storeRevision(stored.Revision)
+	if err != nil {
+		// The schema CHECK keeps revisions positive; a corrupt row projects
+		// without a usable revision rather than failing the whole snapshot.
+		revision = 0
+	}
+	return itemState{
+		ItemID:   stored.ID,
+		TurnID:   stored.TurnID,
+		Kind:     stored.Kind,
+		Sequence: stored.Sequence,
+		Revision: revision,
+		Metadata: stored.Metadata,
+	}
+}
+
+// storedView renders one stored item's redacted display view from its
+// committed content payload.
+func (t *Transcripts) storedView(ctx context.Context, session string, stored *vendorstore.StoredItem) (viewPayload, error) {
+	if stored.PayloadID == "" {
+		return viewPayload{}, nil
+	}
+	data, err := t.deps.Store.OpenPayload(ctx, session, stored.PayloadID)
+	if err != nil {
+		return viewPayload{}, fmt.Errorf("open the transcript content: %w", err)
+	}
+	content, err := decodeContent(transcript.Kind(stored.Kind), data)
+	if err != nil {
+		return viewPayload{}, err
+	}
+	fields, _ := contentStrings(content)
+	display := largest(fields)
+	if display == nil {
+		return viewPayload{}, nil
+	}
+	view := transcript.BuildView(viewKindFor(transcript.Kind(stored.Kind)), *display, t.redactor)
+	return viewFromTranscript(view), nil
+}
+
+func viewFromTranscript(view transcript.View) viewPayload {
+	return viewPayload{Text: view.Text, Truncated: view.Truncated, CutAt: view.CutAt, OmittedBytes: view.OmittedBytes, Files: view.Files}
+}
+
+// deltaSink returns the sink one session's coalescer publishes to: it records
+// the latest view for the delta snapshot and publishes the latest-for-key
+// event. Deltas never flow while the vault is locked (transcript §5).
+func (t *Transcripts) deltaSink(session string) transcript.DeltaSink {
+	return deltaSinkFunc(func(_ context.Context, d *transcript.Delta) {
+		if !t.unlocked() {
+			return
+		}
+		payload, err := json.Marshal(deltaPayload{ItemID: d.ItemID, BaseRevision: d.BaseRevision, View: viewFromTranscript(d.View)})
+		if err != nil {
+			slog.Warn("a transcript delta payload did not marshal", "err", err.Error())
+			return
+		}
+		t.mu.Lock()
+		st := t.sessions[session]
+		t.mu.Unlock()
+		if st == nil {
+			return
+		}
+		st.mu.Lock()
+		st.views[d.ItemID] = d.View
+		st.revisions[d.ItemID] = d.BaseRevision
+		st.mu.Unlock()
+		if _, err := t.deps.Hub.Publish(TopicTranscriptDelta+session, Event{
+			Type: EventTranscriptDelta, Key: d.ItemID, Payload: payload, LatestForKey: true,
+		}); err != nil {
+			slog.Warn("the transcript delta publish failed", "err", err.Error())
+		}
+	})
+}
+
+type deltaSinkFunc func(ctx context.Context, d *transcript.Delta)
+
+func (f deltaSinkFunc) Publish(ctx context.Context, d *transcript.Delta) { f(ctx, d) }
+
+// deltaSnapshot snapshots the delta topic from memory: the latest view
+// published per open item (transcript §6). The hub calls it without holding
+// any lock, so it reads only its own state.
+func (t *Transcripts) deltaSnapshot(session string) ([]byte, error) {
+	snap := deltaSnapshotState{ContentLocked: !t.unlocked()}
+	t.mu.Lock()
+	st := t.sessions[session]
+	t.mu.Unlock()
+	if st != nil {
+		st.mu.Lock()
+		for id, view := range st.views {
+			snap.Items = append(snap.Items, deltaPayload{ItemID: id, BaseRevision: st.revisions[id], View: viewFromTranscript(view)})
+		}
+		st.mu.Unlock()
+	}
+	data, err := json.Marshal(snap)
+	if err != nil {
+		return nil, fmt.Errorf("marshal the transcript delta snapshot: %w", err)
+	}
+	return data, nil
+}
