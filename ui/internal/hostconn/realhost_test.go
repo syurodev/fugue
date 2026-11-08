@@ -2,7 +2,6 @@ package hostconn
 
 import (
 	"context"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,67 +13,23 @@ import (
 	"github.com/syurodev/fugue/pkg/client"
 )
 
-const binPointerName = "fugue-f10.2a-bin.path"
-
-// TestMain builds the fugue binary from the core module's cmd/fugue — once
-// for the whole package, before any test runs — and checks the package for
-// leaked goroutines. The evidence test needs a real host.
+// TestMain checks the package for leaked goroutines.
 func TestMain(m *testing.M) {
-	dir, err := os.MkdirTemp("", "fugue-f10.2a-bin")
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "fugue-e04 harness: %v\n", err)
-		os.Exit(1)
-	}
-	// go install with GOBIN keeps every command argument literal; the binary
-	// lands at <dir>/fugue.
-	cmd := exec.CommandContext(context.Background(), "go", "install", "./cmd/fugue")
+	goleak.VerifyTestMain(m)
+}
+
+// buildFugue builds the fugue binary into t.TempDir(); a failed build is fatal
+// for the calling test.
+func buildFugue(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	cmd := exec.CommandContext(t.Context(), "go", "install", "./cmd/fugue")
 	cmd.Dir = filepath.Join("..", "..", "..")
 	cmd.Env = append(os.Environ(), "GOBIN="+dir)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		fmt.Fprintf(os.Stderr, "build fugue: %v: %s\n", err, out)
-		removeBuildDir(dir)
-		os.Exit(1)
+		t.Fatalf("build fugue: %v: %s", err, out)
 	}
-	binPath := filepath.Join(dir, "fugue")
-	pointerFile := filepath.Join(os.TempDir(), binPointerName)
-	if writeErr := os.WriteFile(pointerFile, []byte(binPath), 0o600); writeErr != nil {
-		fmt.Fprintf(os.Stderr, "write bin path pointer: %v\n", writeErr)
-		removeBuildDir(dir)
-		os.Exit(1)
-	}
-	code := m.Run()
-	removeBuildDir(dir)
-	if code == 0 {
-		if err := goleak.Find(); err != nil {
-			fmt.Fprintf(os.Stderr, "goleak: %v\n", err)
-			os.Exit(1)
-		}
-	}
-	os.Exit(code)
-}
-
-// removeBuildDir drops the harness's build directory and pointer file; nothing
-// can act on the error this late.
-func removeBuildDir(dir string) {
-	pointerFile := filepath.Join(os.TempDir(), binPointerName)
-	if err := os.Remove(pointerFile); err != nil && !os.IsNotExist(err) {
-		fmt.Fprintf(os.Stderr, "remove the bin pointer: %v\n", err)
-	}
-	if rmErr := os.RemoveAll(dir); rmErr != nil {
-		fmt.Fprintf(os.Stderr, "remove the build dir: %v\n", rmErr)
-	}
-}
-
-// buildFugue returns the binary TestMain built; a failed build is fatal for
-// the calling test.
-func buildFugue(t *testing.T) string {
-	t.Helper()
-	pointerFile := filepath.Join(os.TempDir(), binPointerName)
-	data, err := os.ReadFile(filepath.Clean(pointerFile))
-	if err != nil {
-		t.Fatalf("the host binary was not built in TestMain: %v", err)
-	}
-	return string(data)
+	return filepath.Join(dir, "fugue")
 }
 
 // testHost is one running fugue serve process with its data directory.
