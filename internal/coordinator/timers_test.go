@@ -26,7 +26,6 @@ const (
 	testRun1           = "r1"
 	testRun2           = "r2"
 	testSessionID1     = "s1"
-	timerTestTimeout   = 5 * time.Second
 )
 
 func newTestStoreWithAdmission(queueRev uint64) *fakeStore {
@@ -86,7 +85,7 @@ func newTestSessionWithClock(
 		Clock:            fakeClk,
 		IDs:              idGen,
 	}
-	ctx, cancel := context.WithTimeout(t.Context(), timerTestTimeout)
+	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
 	t.Cleanup(cancel)
 	sess, err := Start(ctx, &cfg)
 	if err != nil {
