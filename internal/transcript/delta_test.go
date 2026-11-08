@@ -83,7 +83,7 @@ func TestDeltaCoalescerPublishesRedactedViewsAndFlushesOnClose(t *testing.T) {
 	c := clock.NewFake(time.Time{})
 	sink := &deltaSink{clock: c}
 	d := NewDeltaCoalescer(t.Context(), c, sink, maskingRedactor{})
-	d.Update("one", 0, ViewText, "cross-")
+	d.Update("one", 0, ViewText, strings.Repeat("x", 65530)+"cross-")
 	awaitDelta(t, c, sink, 1)
 	d.Update("one", 0, ViewText, strings.Repeat("x", 65530)+"cross-secret")
 	closer := supervise.Go(t.Context(), "close transcript test", func(context.Context) error { return d.Close() })
