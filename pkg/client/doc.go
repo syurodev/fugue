@@ -5,9 +5,13 @@
 // session principal arrives with the MCP bridge (F9.9).
 //
 // The client owns exactly one dedicated HTTP/2 connection per Dial: the host's
-// lease is per connection (host-api §7), so a Client is that lease. The
-// transport never closes the connection as idle; losing it is "disconnected"
-// and the caller reconnects by dialing again, which sends a new Hello.
+// lease is per connection (host-api §7), so one Client is one connection is
+// one lease. The transport never closes the connection as idle, and its dial
+// succeeds at most once — after the connection is established, any further
+// dial attempt returns ErrDisconnected without touching the socket. Losing
+// the connection is therefore "disconnected" and never a silent new
+// connection the host has not helloed: the caller reconnects by dialing
+// again, which sends a new Hello and takes a fresh lease.
 //
 // The package has no background goroutines and no clock: every call blocks and
 // every stream is driven by the caller, so the caller owns all lifetimes. It

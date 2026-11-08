@@ -63,7 +63,7 @@ has `analysistest` cases with valid and violating fixtures.
 | Analyzer | Rule |
 | --- | --- |
 | `kernelpure` | `internal/kernel` imports only allowlisted stdlib (no `os`, `io`, `net`, `sync`, `time` beyond the `time.Duration`/`time.Time` types, `runtime`, `reflect`, `unsafe`); no writable package variables; no `go` statements |
-| `nobarego` | `go` statements are allowed only in `internal/platform/supervise` and in the test files of `pkg/` (which cannot import `supervise`; their goroutines are test servers owned by `t.Cleanup`); everything else calls `supervise.Go(ctx, name, fn)` so every goroutine has an owner, a name and a stop path |
+| `nobarego` | `go` statements are allowed only in `internal/platform/supervise`; everything else calls `supervise.Go(ctx, name, fn)` so every goroutine has an owner, a name and a stop path |
 | `secretlog` | Values of type `redact.Secret`, `[]byte` key material, or fields and variables whose names match `(?i)token\|secret\|password\|apikey\|credential\|privatekey` must not reach `slog`, `fmt`, `errors` or error messages directly; only through `redact` |
 | `todoref` | `TODO`, `FIXME`, `HACK`, `XXX` are allowed only as `TODO(F<phase>.<n>): ...` with an ID present in `docs/roadmap.md` and not yet `Done` |
 | `noprotoleak` | Packages outside `internal/hostapi`, `pkg/client` and `cmd/*` do not import code generated from proto, the protobuf runtime or Connect (ADR 0002, Q-31 3A) |

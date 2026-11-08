@@ -61,14 +61,33 @@ func ReadHostFile(dataDir string) (HostFile, error) {
 	return hf, nil
 }
 
-// DefaultDataDir is the data directory a client shares with a host started
-// with the default configuration: <user config dir>/Fugue (roadmap §0). A host
-// started with a custom data directory is found through that directory
-// instead; the auto-start of F10.2b owns passing it on.
-func DefaultDataDir() (string, error) {
-	base, err := os.UserConfigDir()
-	if err != nil {
-		return "", fmt.Errorf("resolve the default data directory: %w", err)
+// EnvDataDir is the environment variable that overrides the data directory.
+// It is the same variable the host's internal/config reads; this package
+// cannot import it, so the name is pinned here and a parity test in cmd/fugue
+// asserts both sides resolve the same directory.
+const EnvDataDir = "SYNX_FUGUE_DATA_DIR"
+
+// dataDirName is the data directory's name under the user config dir, the
+// host's default too (roadmap §0).
+const dataDirName = "Fugue"
+
+// DataDir resolves the data directory a client looks for host.json in, with
+// the same rule the host applies (internal/config): the SYNX_FUGUE_DATA_DIR
+// override when set — it must be absolute, or the typed ErrDataDirNotAbsolute
+// is returned — else <user config dir>/Fugue. The environment lookup and the
+// user-config-dir resolver come in as parameters, so nothing here reads the
+// process environment implicitly; a caller wires os.LookupEnv and
+// os.UserConfigDir (or test doubles).
+func DataDir(lookup func(key string) (string, bool), userConfigDir func() (string, error)) (string, error) {
+	if v, ok := lookup(EnvDataDir); ok {
+		if !filepath.IsAbs(v) {
+			return "", fmt.Errorf("%w: %s must be an absolute path", ErrDataDirNotAbsolute, EnvDataDir)
+		}
+		return filepath.Clean(v), nil
 	}
-	return filepath.Join(base, "Fugue"), nil
+	base, err := userConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("no user configuration directory; set %s: %w", EnvDataDir, err)
+	}
+	return filepath.Join(base, dataDirName), nil
 }

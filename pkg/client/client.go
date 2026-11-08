@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"syscall"
 
 	"connectrpc.com/connect"
@@ -155,13 +156,29 @@ func (c *Client) Close() {
 // newTransport builds the dedicated connection's transport: unencrypted
 // HTTP/2 over the unix socket, one connection at most, and no idle timeout —
 // the lease rides this connection and must survive arbitrary idle periods
-// (host-api §3, F5.1).
+// (host-api §3, F5.1). The dial succeeds at most once: after the Client's
+// connection is established, any further dial attempt returns
+// ErrDisconnected without touching the socket, so a dropped lease surfaces as
+// "disconnected" and never as a silent new connection the host has not
+// helloed.
 func newTransport(socket string) *http.Transport {
 	var protos http.Protocols
 	protos.SetUnencryptedHTTP2(true)
+	var dialMu sync.Mutex
+	dialed := false
 	return &http.Transport{
 		DialContext: func(ctx context.Context, _, _ string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", socket)
+			dialMu.Lock()
+			defer dialMu.Unlock()
+			if dialed {
+				return nil, fmt.Errorf("the Client owns one connection: %w", ErrDisconnected)
+			}
+			conn, err := (&net.Dialer{}).DialContext(ctx, "unix", socket)
+			if err != nil {
+				return nil, fmt.Errorf("dial the host socket: %w", err)
+			}
+			dialed = true
+			return conn, nil
 		},
 		Protocols:       &protos,
 		MaxConnsPerHost: 1,

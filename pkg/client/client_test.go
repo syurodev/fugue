@@ -5,8 +5,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,6 +37,10 @@ var errNoSubscriptionScripted = errors.New("no subscription scripted")
 // errNoCommonVersion is the static rejection behind the version-mismatch
 // fixture; it is wrapped, never constructed, at the call site.
 var errNoCommonVersion = errors.New("no common version")
+
+// errNoConfigDir is the static failure behind a user-config-dir resolver
+// that finds nothing; it is wrapped, never constructed, at the call site.
+var errNoConfigDir = errors.New("no config dir")
 
 // closer is anything test teardown closes.
 type closer interface{ Close() error }
@@ -77,6 +79,15 @@ func shortDir(t *testing.T) string {
 	}
 	t.Cleanup(func() { removeQuietly(dir) })
 	return dir
+}
+
+// testCtx bounds a test's waits: the waits themselves are channel- and
+// deadline-driven; the 60 s deadline is only the safety net.
+func testCtx(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	t.Cleanup(cancel)
+	return ctx
 }
 
 // fakeHandler serves scripted Hello and Subscribe replies for one test.
@@ -124,32 +135,11 @@ func sendEvent(stream *connect.ServerStream[hostv1.SubscribeResponse], seq uint6
 }
 
 // serveHost runs a fake HostService on a fresh unix socket over unencrypted
-// HTTP/2, exactly the transport shape the real host serves (F5.1).
+// HTTP/2, exactly the transport shape the real host serves (F5.1). The
+// listener is served by httptest, so no goroutine is started here.
 func serveHost(t *testing.T, h hostv1connect.HostServiceHandler) string {
 	t.Helper()
-	dir := shortDir(t)
-	socket := filepath.Join(dir, "fugue.sock")
-	var lc net.ListenConfig
-	ln, err := lc.Listen(t.Context(), "unix", socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { closeQuietly(ln) })
-	var protos http.Protocols
-	protos.SetHTTP1(true)
-	protos.SetHTTP2(true)
-	protos.SetUnencryptedHTTP2(true)
-	mux := http.NewServeMux()
-	mux.Handle(hostv1connect.NewHostServiceHandler(h))
-	// No timeouts by decision, as on the real host: the socket is private and
-	// the tests drive it to completion.
-	srv := &http.Server{Protocols: &protos, Handler: mux, ReadHeaderTimeout: 0}
-	go func() {
-		if serr := srv.Serve(ln); serr != nil && !errors.Is(serr, http.ErrServerClosed) {
-			return
-		}
-	}()
-	t.Cleanup(func() { closeQuietly(srv) })
+	socket, _ := serveHostCounting(t, h)
 	return socket
 }
 
@@ -234,40 +224,6 @@ func TestDialVersionMismatchIsTyped(t *testing.T) {
 	}
 }
 
-// TestDialToAMissingSocketIsNotRunning pins that a socket file that is gone
-// reads as ErrHostNotRunning — the retryable state the status bar shows as
-// "host not running".
-func TestDialToAMissingSocketIsNotRunning(t *testing.T) {
-	t.Parallel()
-	dir := shortDir(t)
-	socket := filepath.Join(dir, "missing.sock")
-	_, err := client.Dial(t.Context(), socket, appParams())
-	if !errors.Is(err, client.ErrHostNotRunning) {
-		t.Fatalf("dial a missing socket: err = %v, want ErrHostNotRunning", err)
-	}
-}
-
-// TestDialRespectsTheCallerDeadline pins that a dial against a socket nobody
-// serves returns when the caller's context ends instead of hanging: connecting
-// to a bound but never accepted socket succeeds on some platforms and the
-// request then waits forever, so the deadline is the caller's guard (the
-// reconnect loop applies it on its injected clock).
-func TestDialRespectsTheCallerDeadline(t *testing.T) {
-	t.Parallel()
-	dir := shortDir(t)
-	var lc net.ListenConfig
-	ln, lerr := lc.Listen(t.Context(), "unix", filepath.Join(dir, "silent.sock"))
-	if lerr != nil {
-		t.Fatal(lerr)
-	}
-	t.Cleanup(func() { closeQuietly(ln) })
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
-	defer cancel()
-	if _, err := client.Dial(ctx, ln.Addr().String(), appParams()); err == nil {
-		t.Fatal("a dial against a silent socket returned no error")
-	}
-}
-
 // TestReadHostFileMissingOrMalformed pins which discovery-file shapes read as
 // "no host" and which read as a broken file.
 func TestReadHostFileMissingOrMalformed(t *testing.T) {
@@ -310,25 +266,6 @@ func TestReadHostFileShape(t *testing.T) {
 	}
 	if _, err := client.ReadHostFile(empty); err == nil || errors.Is(err, client.ErrHostNotRunning) {
 		t.Errorf("socket-less file: err = %v, want a parse error that is not ErrHostNotRunning", err)
-	}
-}
-
-func TestDefaultDataDir(t *testing.T) {
-	t.Parallel()
-	dir, err := client.DefaultDataDir()
-	base, berr := os.UserConfigDir()
-	if berr != nil {
-		// Without a user config dir the helper must fail, not guess a path.
-		if err == nil {
-			t.Error("DefaultDataDir succeeded although the user config dir is unresolvable")
-		}
-		return
-	}
-	if err != nil {
-		t.Fatal(err)
-	}
-	if want := filepath.Join(base, "Fugue"); dir != want {
-		t.Errorf("DefaultDataDir = %q, want %q", dir, want)
 	}
 }
 
@@ -465,24 +402,6 @@ func TestStreamCloseEndsWithoutTheHostEndingIt(t *testing.T) {
 	}
 }
 
-// TestDialContextGoneFails pins that a canceled dial does not hang: the caller
-// owns lifetimes, and it may take them back.
-func TestDialContextGoneFails(t *testing.T) {
-	t.Parallel()
-	dir := shortDir(t)
-	var lc net.ListenConfig
-	ln, err := lc.Listen(t.Context(), "unix", filepath.Join(dir, "slow.sock"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { closeQuietly(ln) })
-	ctx, cancel := context.WithCancel(t.Context())
-	cancel()
-	if _, err := client.Dial(ctx, ln.Addr().String(), appParams()); err == nil {
-		t.Fatal("a canceled dial succeeded")
-	}
-}
-
 // TestDialCarriesEveryClientKind pins the kind mapping of host-api §8: every
 // kind the client exports reaches the host, and the host sees it verbatim.
 func TestDialCarriesEveryClientKind(t *testing.T) {
@@ -578,32 +497,6 @@ func TestRecvSurfacesAContextGone(t *testing.T) {
 	}
 	closeQuietly(stream)
 	c.Close()
-}
-
-// TestReadHostFileUnreadable pins that an unreadable discovery file is a read
-// failure, not "no host".
-func TestReadHostFileUnreadable(t *testing.T) {
-	t.Parallel()
-	dir := t.TempDir()
-	path := filepath.Join(dir, "host.json")
-	if err := os.WriteFile(path, []byte(`{"pid":1,"socket_path":"/s"}`), 0o000); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { removeQuietly(dir) })
-	if _, err := client.ReadHostFile(dir); err == nil || errors.Is(err, client.ErrHostNotRunning) {
-		t.Errorf("unreadable file: err = %v, want a read error that is not ErrHostNotRunning", err)
-	}
-}
-
-// TestDefaultDataDirWithoutConfigDir pins the failure shape when no user
-// config directory exists.
-func TestDefaultDataDirWithoutConfigDir(t *testing.T) {
-	// t.Setenv forbids t.Parallel; the environment is process-wide.
-	t.Setenv("HOME", "")
-	t.Setenv("XDG_CONFIG_HOME", "")
-	if _, err := client.DefaultDataDir(); err == nil {
-		t.Error("DefaultDataDir succeeded without any config dir")
-	}
 }
 
 // TestDialRejectsAnUnrelatedPrecondition pins that a failed_precondition

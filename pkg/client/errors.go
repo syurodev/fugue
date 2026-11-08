@@ -23,6 +23,14 @@ var (
 	// ErrStreamMalformed means the host sent a subscription message this
 	// client cannot interpret: a contract violation of the topic's owner.
 	ErrStreamMalformed = errors.New("the host sent a subscription message with no known kind")
+	// ErrDisconnected means this Client's one connection is gone: the
+	// transport will never dial again (one Client is one connection is one
+	// lease), so the caller redials — a fresh Dial, which says a new Hello.
+	ErrDisconnected = errors.New("the leased connection is gone; dial again")
+	// ErrDataDirNotAbsolute is the static cause behind a SYNX_FUGUE_DATA_DIR
+	// override that is not an absolute path; it is wrapped, never
+	// constructed, at the call site.
+	ErrDataDirNotAbsolute = errors.New("the data directory override must be an absolute path")
 )
 
 // VersionMismatchError is the typed shape of the host's unsupported_version
