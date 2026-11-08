@@ -1,0 +1,171 @@
+# Gate definition: docs/quality-gates.md section 2, scoped for the ui module
+# (ADR 0002). Changes need the gate-change-approved label. The linter set
+# mirrors the core module's correctness, complexity, security and test
+# discipline; the core-only bans that name core internals (forbidigo's clock
+# and environment rules, exhaustruct's kernel patterns) do not apply here —
+# the ui module carries its own clock port and owns no kernel types. depguard
+# also bans the core's internal/ outright, which the arch tests enforce
+# module-wide.
+version: "2"
+
+run:
+  tests: true
+  timeout: 10m
+
+issues:
+  uniq-by-line: false
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+linters:
+  default: none
+  enable:
+    # Correctness
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - nilerr
+    - nilnil
+    - bodyclose
+    - contextcheck
+    - noctx
+    - copyloopvar
+    - durationcheck
+    - makezero
+    - reassign
+    # Errors
+    - errorlint
+    - err113
+    - wrapcheck
+    # Complexity
+    - cyclop
+    - gocognit
+    - nestif
+    - funlen
+    # Junk code
+    - unused
+    - unparam
+    - dupl
+    - goconst
+    - gocritic
+    - unconvert
+    - wastedassign
+    - prealloc
+    - intrange
+    - usestdlibvars
+    - perfsprint
+    # Security
+    - gosec
+    # Tests
+    - paralleltest
+    - tparallel
+    - thelper
+    - usetesting
+    - testableexamples
+    # Docs and comments
+    - revive
+    - godot
+    - misspell
+    # nolint discipline
+    - nolintlint
+    # Imports
+    - depguard
+
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    staticcheck:
+      checks:
+        - all
+    wrapcheck:
+      # Setting ignore-sigs replaces the defaults, so the default signatures
+      # are listed explicitly — the same list the core module uses.
+      # connect.NewError/NewErrorDetail are the Host API boundary conversion.
+      ignore-sigs:
+        - .Errorf(
+        - errors.New(
+        - errors.Unwrap(
+        - errors.Join(
+        - .Wrap(
+        - .Wrapf(
+        - .WithMessage(
+        - .WithMessagef(
+        - .WithStack(
+        - connect.NewError(
+        - connect.NewErrorDetail(
+    cyclop:
+      max-complexity: 12
+    gocognit:
+      min-complexity: 15
+    nestif:
+      min-complexity: 4
+    funlen:
+      lines: 60
+      statements: 40
+    dupl:
+      threshold: 150
+    gocritic:
+      # hugeParam stays off: Gio's layout.Context is a value type by design
+      # and every Gio call passes it by value.
+      enabled-checks:
+        - commentedOutCode
+        - deferInLoop
+        - rangeValCopy
+    unused:
+      exported-fields-are-used: false
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+      allow-unused: false
+    revive:
+      rules:
+        - name: package-comments
+        - name: exported
+        - name: var-naming
+        - name: receiver-naming
+        - name: indent-error-flow
+        - name: early-return
+        - name: unexported-return
+    depguard:
+      rules:
+        banned-modules:
+          list-mode: lax
+          files:
+            - '$all'
+          deny:
+            - pkg: github.com/stretchr/testify
+              desc: tests use stdlib testing and go-cmp
+            - pkg: github.com/pkg/errors
+              desc: use the standard errors package with %w
+            - pkg: log
+              desc: use log/slog
+            - pkg: github.com/syurodev/fugue/internal
+              desc: the app imports the core only through pkg/client and pkg/pb
+
+  exclusions:
+    generated: strict
+    presets: []
+    rules:
+      # The clock port is the ui module's equivalent of
+      # internal/platform/clock: it owns the standard library timers.
+      - path: '^internal/hostconn/clock\.go$'
+        linters: [gocritic]
+        text: 'hugeParam'
+      - path: '_test\.go$'
+        linters: [errcheck]
+        text: 'Close'
+
+formatters:
+  enable:
+    - gofumpt
+    - goimports
+  settings:
+    gofumpt:
+      extra:
+        group-params: true
+    goimports:
+      local-prefixes:
+        - github.com/syurodev/fugue/ui

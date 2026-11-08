@@ -10,7 +10,11 @@ import (
 	"testing"
 )
 
-const workflowsDir = ".github/workflows"
+const (
+	workflowsDir = ".github/workflows"
+	osUbuntu     = "ubuntu-latest"
+	osMacOS      = "macos-latest"
+)
 
 var (
 	usesLine  = regexp.MustCompile(`(?m)^\s*(?:-\s*)?uses:\s*(\S+)`)
@@ -57,7 +61,7 @@ func TestPRWorkflowRunsEveryRequiredJob(t *testing.T) {
 			t.Errorf("pr.yml and pr-meta.yml have no job %q", job)
 		}
 	}
-	for _, os := range []string{"ubuntu-latest", "macos-latest"} {
+	for _, os := range []string{osUbuntu, osMacOS} {
 		if !strings.Contains(pr, os) {
 			t.Errorf("pr.yml does not run tests on %s", os)
 		}
@@ -112,7 +116,7 @@ func TestNightlyWorkflowRunsTheLongJobs(t *testing.T) {
 func TestCacheWorkflowWarmsTheDefaultBranch(t *testing.T) {
 	t.Parallel()
 	cache := readWorkflow(t, "cache.yml")
-	for _, want := range []string{"push:", "branches: [main]", "schedule:", "ubuntu-latest", "macos-latest", "go tool task warm"} {
+	for _, want := range []string{"push:", "branches: [main]", "schedule:", osUbuntu, osMacOS, "go tool task warm"} {
 		if !strings.Contains(cache, want) {
 			t.Errorf("cache.yml lacks %q", want)
 		}
@@ -147,7 +151,7 @@ func TestCoverageJobReusesTheTestProfile(t *testing.T) {
 
 func TestActionsArePinnedToCommits(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"pr.yml", "pr-meta.yml", "main.yml", "nightly.yml", "cache.yml"} {
+	for _, name := range []string{"pr.yml", "pr-meta.yml", "main.yml", "nightly.yml", "cache.yml", "ui.yml"} {
 		if got := unpinnedActions(readWorkflow(t, name)); len(got) > 0 {
 			t.Errorf("%s uses actions not pinned to a commit SHA: %v", name, got)
 		}
@@ -203,5 +207,27 @@ func TestCommitHookIsInstalledByTaskHooks(t *testing.T) {
 	}
 	if !strings.Contains(string(task), "git config core.hooksPath .githooks") {
 		t.Error("`task hooks` does not set core.hooksPath")
+	}
+}
+
+// The ui/ module is a separate Go module with a cgo build, so its gates run
+// in their own workflow on both OSes, triggered by the changes scope for ui/,
+// pkg/ and proto/ (ADR 0002, quality-gates §9).
+func TestUIWorkflowRunsTheModuleGates(t *testing.T) {
+	t.Parallel()
+	ui := readWorkflow(t, "ui.yml")
+	pr := readWorkflow(t, "pr.yml")
+	for _, want := range []string{osUbuntu, osMacOS, "-race -shuffle=on", "go vet ./...", "golangci-lint"} {
+		if !strings.Contains(ui, want) {
+			t.Errorf("ui.yml lacks %q", want)
+		}
+	}
+	for _, pkg := range []string{"gcc", "pkg-config", "libwayland-dev", "libx11-xcb-dev", "libxkbcommon-x11-dev", "libgles2-mesa-dev"} {
+		if !strings.Contains(ui, pkg) {
+			t.Errorf("ui.yml does not install the Gio build requirement %q", pkg)
+		}
+	}
+	if !strings.Contains(pr, "ui: ${{ steps.scope.outputs.ui }}") {
+		t.Error("pr.yml does not export the ui change scope")
 	}
 }

@@ -1,0 +1,76 @@
+# Gate definition: docs/quality-gates.md section 9 (the ui/ module workflow,
+# ADR 0002). Changes need the gate-change-approved label. The ui/ module is a
+# separate Go module whose cgo build must never reach the core module, so its
+# gates run here and not in pr.yml.
+name: ui
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ui-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  # The ui scope of fuguegate changes: true when the change set touches ui/,
+  # pkg/ or proto/ (the app builds on all three). A diff it cannot read runs
+  # the job.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      ui: ${{ steps.scope.outputs.ui }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - id: scope
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: go run ./cmd/fuguegate changes -base "$BASE_SHA" -head "$HEAD_SHA" >> "$GITHUB_OUTPUT"
+
+  ui:
+    name: ui (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      # The Gio build requirements on Ubuntu: desktop-app §8 plus the three
+      # packages the F10.1 probe found missing (ui/README.md lists them all).
+      - if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev \
+            libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev \
+            libffi-dev libxcursor-dev libvulkan-dev
+      - name: build
+        working-directory: ui
+        run: go build ./...
+      - name: vet
+        working-directory: ui
+        run: go vet ./...
+      # Keep the version in sync with GOLANGCI_LINT_VERSION in Taskfile.yml.
+      - name: lint
+        working-directory: ui
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run ./...
+      # The evidence test builds fugue from the core module's cmd/fugue, so
+      # the whole repository must be present; it is.
+      - name: test
+        working-directory: ui
+        run: go test -race -shuffle=on -count=1 ./...
