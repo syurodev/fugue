@@ -9,8 +9,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+
 	"github.com/syurodev/fugue/internal/crypto"
 	"github.com/syurodev/fugue/internal/platform/clock"
+	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/sealing"
@@ -101,15 +104,297 @@ func protectedStore(t *testing.T) (*Store, *vault.Service, string) {
 	return s, v, path
 }
 
+const testToolShell = "shell"
+
+func appendPlantedItems(t *testing.T, s *Store, marker, titleMarker, pathMarker, nameMarker []byte) {
+	t.Helper()
+	toolContent := append(append([]byte(`{"title":"`), titleMarker...), []byte(`","input":"run"}`)...)
+	fileContent := append(append([]byte(`{"path":"`), pathMarker...), []byte(`","diff":"@@ -1 +1 @@"}`)...)
+	subagentContent := append(append([]byte(`{"name":"`), nameMarker...), []byte(`","task":"subtask"}`)...)
+
+	for seq, ev := range []*Event{
+		{
+			Type:    TranscriptItemRecorded,
+			Payload: marker,
+			Item: &Item{
+				ID:      "i-tool",
+				TurnID:  "t",
+				Kind:    KindToolCall,
+				Content: toolContent,
+				Raw:     marker,
+				Metadata: ItemMetadata{
+					Tool:   testToolShell,
+					Status: ToolPending,
+				},
+			},
+		},
+		{
+			Type: TranscriptItemRecorded,
+			Item: &Item{
+				ID:      "i-file",
+				TurnID:  "t",
+				Kind:    KindFileChange,
+				Content: fileContent,
+				Metadata: ItemMetadata{
+					ChangeKind:   "modify",
+					LinesAdded:   5,
+					LinesRemoved: 1,
+				},
+			},
+		},
+		{
+			Type: TranscriptItemRecorded,
+			Item: &Item{
+				ID:      "i-subagent",
+				TurnID:  "t",
+				Kind:    KindSubagent,
+				Content: subagentContent,
+				Metadata: ItemMetadata{
+					Status: "running",
+				},
+			},
+		},
+	} {
+		_, err := s.Append(t.Context(), "s", int64(seq+2), ev)
+		requireNoError(t, err)
+	}
+}
+
+func assertPlantedContentSecrets(t *testing.T, s *Store, titleMarker, pathMarker, nameMarker []byte) {
+	t.Helper()
+	checks := []struct {
+		id     string
+		marker []byte
+	}{
+		{"i-tool", titleMarker},
+		{"i-file", pathMarker},
+		{"i-subagent", nameMarker},
+	}
+	for _, check := range checks {
+		_, content, err := s.ReadItem(t.Context(), "s", check.id)
+		requireNoError(t, err)
+		if !bytes.Contains(content, check.marker) {
+			t.Fatalf("planted marker missing from decrypted content of %s", check.id)
+		}
+	}
+}
+
 func TestTranscriptAndRawPayloadNeverAppearInVendorColumns(t *testing.T) {
 	t.Parallel()
 	s, _, _ := protectedStore(t)
 	_, err := s.Append(t.Context(), "s", 1, &Event{Type: VendorTurnStarted, TurnID: "t"})
 	requireNoError(t, err)
+
 	marker := []byte("vendor-confidential-marker-c83d")
-	_, err = s.Append(t.Context(), "s", 2, &Event{Type: TranscriptItemRecorded, Payload: marker, Item: &Item{ID: "i", TurnID: "t", Kind: "tool_call", Content: marker, Raw: marker}})
+	titleMarker := []byte("confidential-planted-title-c83d")
+	pathMarker := []byte("confidential-planted-path-e41a")
+	nameMarker := []byte("confidential-planted-subagent-92bf")
+
+	appendPlantedItems(t, s, marker, titleMarker, pathMarker, nameMarker)
+
+	for _, m := range [][]byte{marker, titleMarker, pathMarker, nameMarker} {
+		scanAllVendorColumns(t, s, m)
+	}
+	assertPlantedContentSecrets(t, s, titleMarker, pathMarker, nameMarker)
+}
+
+func assertItemTruncationRecord(t *testing.T, s *Store, meta *ItemMetadata) {
+	t.Helper()
+	item, content, err := s.ReadItem(t.Context(), "s", "item-trunc")
 	requireNoError(t, err)
-	scanAllVendorColumns(t, s, marker)
+	if item.Revision != 1 || string(content) != "truncated-search-output-head-tail" {
+		t.Fatalf("unexpected record state: rev=%d, content=%s", item.Revision, string(content))
+	}
+	if diff := cmp.Diff(*meta, item.Metadata); diff != "" {
+		t.Fatalf("recorded metadata diff (-want +got):\n%s", diff)
+	}
+	transcript, err := s.Transcript(t.Context(), "s", 0, 10)
+	requireNoError(t, err)
+	if len(transcript) != 1 {
+		t.Fatalf("expected 1 transcript item, got %d", len(transcript))
+	}
+	if diff := cmp.Diff(*meta, transcript[0].Metadata); diff != "" {
+		t.Fatalf("transcript page metadata diff (-want +got):\n%s", diff)
+	}
+}
+
+func assertItemTruncationUpdate(t *testing.T, s *Store, meta *ItemMetadata) {
+	t.Helper()
+	item, content, err := s.ReadItem(t.Context(), "s", "item-trunc")
+	requireNoError(t, err)
+	if item.Revision != 2 || string(content) != "updated-truncated-head-tail" {
+		t.Fatalf("unexpected update state: rev=%d, content=%s", item.Revision, string(content))
+	}
+	if diff := cmp.Diff(*meta, item.Metadata); diff != "" {
+		t.Fatalf("updated metadata diff (-want +got):\n%s", diff)
+	}
+	raw, err := s.OpenPayload(t.Context(), "s", item.RawPayloadID)
+	requireNoError(t, err)
+	if string(raw) != "updated-raw-truncated-payload" {
+		t.Fatalf("unexpected raw payload: %s", string(raw))
+	}
+}
+
+func TestItemTruncationMetadataRoundTrips(t *testing.T) {
+	t.Parallel()
+	s, _, _ := protectedStore(t)
+	_, err := s.Append(t.Context(), "s", 1, &Event{Type: VendorTurnStarted, TurnID: "t"})
+	requireNoError(t, err)
+
+	recordMeta := ItemMetadata{
+		Tool:                 "search",
+		Status:               ToolPending,
+		ContentTruncated:     true,
+		RawTruncated:         false,
+		OriginalContentBytes: 131072,
+		OriginalRawBytes:     0,
+	}
+	_, err = s.Append(t.Context(), "s", 2, &Event{
+		Type: TranscriptItemRecorded,
+		Item: &Item{
+			ID:       "item-trunc",
+			TurnID:   "t",
+			Kind:     KindToolCall,
+			Metadata: recordMeta,
+			Content:  []byte("truncated-search-output-head-tail"),
+		},
+	})
+	requireNoError(t, err)
+	assertItemTruncationRecord(t, s, &recordMeta)
+
+	updatedMeta := ItemMetadata{
+		Tool:                 "search",
+		Status:               ToolSucceeded,
+		ContentTruncated:     true,
+		RawTruncated:         true,
+		OriginalContentBytes: 131072,
+		OriginalRawBytes:     262144,
+	}
+	_, err = s.Append(t.Context(), "s", 3, &Event{
+		Type: TranscriptItemUpdated,
+		Item: &Item{
+			ID:       "item-trunc",
+			TurnID:   "t",
+			Kind:     KindToolCall,
+			Revision: 1,
+			Metadata: updatedMeta,
+			Content:  []byte("updated-truncated-head-tail"),
+			Raw:      []byte("updated-raw-truncated-payload"),
+		},
+	})
+	requireNoError(t, err)
+	assertItemTruncationUpdate(t, s, &updatedMeta)
+
+	events, err := s.EventsSince(t.Context(), "s", 2, 10)
+	requireNoError(t, err)
+	if len(events) != 2 {
+		t.Fatalf("expected 2 recorded events, got %d", len(events))
+	}
+	if diff := cmp.Diff(&recordMeta, events[0].Metadata.ItemMetadata); diff != "" {
+		t.Fatalf("recorded event metadata diff (-want +got):\n%s", diff)
+	}
+	if diff := cmp.Diff(&updatedMeta, events[1].Metadata.ItemMetadata); diff != "" {
+		t.Fatalf("updated event metadata diff (-want +got):\n%s", diff)
+	}
+}
+
+func TestItemMetadataRejectsNegativeOriginalBytes(t *testing.T) {
+	t.Parallel()
+	s, _, _ := protectedStore(t)
+	_, err := s.Append(t.Context(), "s", 1, &Event{Type: VendorTurnStarted, TurnID: "t"})
+	requireNoError(t, err)
+
+	_, err = s.Append(t.Context(), "s", 2, &Event{
+		Type: TranscriptItemRecorded,
+		Item: &Item{
+			ID:     "i-bad-content",
+			TurnID: "t",
+			Kind:   KindToolCall,
+			Metadata: ItemMetadata{
+				Tool:                 testToolShell,
+				OriginalContentBytes: -1,
+			},
+		},
+	})
+	if errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("expected InvalidArgument for negative original content bytes, got %v", err)
+	}
+
+	_, err = s.Append(t.Context(), "s", 2, &Event{
+		Type: TranscriptItemRecorded,
+		Item: &Item{
+			ID:     "i-bad-raw",
+			TurnID: "t",
+			Kind:   KindToolCall,
+			Metadata: ItemMetadata{
+				Tool:             testToolShell,
+				OriginalRawBytes: -1,
+			},
+		},
+	})
+	if errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("expected InvalidArgument for negative original raw bytes, got %v", err)
+	}
+}
+
+func TestItemTruncationFlagsMatchOriginalSizes(t *testing.T) {
+	t.Parallel()
+	s, _, _ := protectedStore(t)
+	_, err := s.Append(t.Context(), "s", 1, &Event{Type: VendorTurnStarted, TurnID: "t"})
+	requireNoError(t, err)
+
+	cases := []struct {
+		id   string
+		name string
+		meta ItemMetadata
+	}{
+		{
+			id:   "i-mismatch-content-flag",
+			name: "content flag true with zero bytes",
+			meta: ItemMetadata{
+				Tool:             testToolShell,
+				ContentTruncated: true,
+			},
+		},
+		{
+			id:   "i-mismatch-content-size",
+			name: "content flag false with positive bytes",
+			meta: ItemMetadata{
+				Tool:                 testToolShell,
+				OriginalContentBytes: 100,
+			},
+		},
+		{
+			id:   "i-mismatch-raw-flag",
+			name: "raw flag true with zero bytes",
+			meta: ItemMetadata{
+				Tool:         testToolShell,
+				RawTruncated: true,
+			},
+		},
+		{
+			id:   "i-mismatch-raw-size",
+			name: "raw flag false with positive bytes",
+			meta: ItemMetadata{
+				Tool:             testToolShell,
+				OriginalRawBytes: 100,
+			},
+		},
+	}
+	for _, tc := range cases {
+		_, err = s.Append(t.Context(), "s", 2, &Event{
+			Type: TranscriptItemRecorded,
+			Item: &Item{
+				ID:       tc.id,
+				TurnID:   "t",
+				Kind:     KindToolCall,
+				Metadata: tc.meta,
+			},
+		})
+		if errcode.CodeOf(err) != errcode.InvalidArgument {
+			t.Fatalf("%s: expected InvalidArgument, got %v", tc.name, err)
+		}
+	}
 }
 
 func scanVendorColumns(t *testing.T, s *Store, table string, marker []byte) {
