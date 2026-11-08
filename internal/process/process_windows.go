@@ -6,6 +6,14 @@ import (
 	"context"
 )
 
+// SystemdProbe is a fail-closed stub on non-Unix platforms.
+type SystemdProbe struct{}
+
+// NewSystemdProbe returns a no-op probe stub on non-Unix platforms.
+func NewSystemdProbe() *SystemdProbe {
+	return &SystemdProbe{}
+}
+
 // Process is a fail-closed stub on platforms without Unix process group support.
 type Process struct{}
 
@@ -17,6 +25,11 @@ func Spawn(ctx context.Context, opts *Options) (*Process, error) {
 // PID returns 0 on unsupported platforms.
 func (p *Process) PID() int {
 	return 0
+}
+
+// Identity returns an empty Identity on unsupported platforms.
+func (p *Process) Identity() Identity {
+	return Identity{}
 }
 
 // Stdout returns nil on unsupported platforms.
@@ -41,6 +54,14 @@ func (p *Process) Wait() error {
 
 // Stop returns ErrUnsupportedPlatform on unsupported platforms.
 func (p *Process) Stop(ctx context.Context) (StopProof, error) {
+	return StopProof{
+		Status: StopProofUnknown,
+		Reason: "windows_unsupported",
+	}, ErrUnsupportedPlatform
+}
+
+// Reap returns ErrUnsupportedPlatform on unsupported platforms.
+func Reap(ctx context.Context, id Identity, opts *ReapOptions) (StopProof, error) {
 	return StopProof{
 		Status: StopProofUnknown,
 		Reason: "windows_unsupported",

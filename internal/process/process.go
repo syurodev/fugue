@@ -33,6 +33,11 @@ type Process struct {
 	stderrTask *supervise.Task
 	waitTask   *supervise.Task
 
+	scope             *cgroupScope
+	tracker           *descendantTracker
+	identity          Identity
+	uncontainedReason string
+
 	exitCh  chan struct{}
 	waitErr error
 
@@ -50,27 +55,39 @@ func Spawn(ctx context.Context, opts *Options) (*Process, error) {
 		clk = clock.Real{}
 	}
 
-	path, err := exec.LookPath(opts.Argv[0])
+	userArgv0 := opts.Argv[0]
+	if _, err := resolveExecutable(userArgv0); err != nil {
+		return nil, err
+	}
+
+	effectiveOpts := *opts
+	effectiveOpts.Clock = clk
+	launchArgv, unitName, usedSystemd, err := prepareSpawnArgv(ctx, &effectiveOpts)
 	if err != nil {
-		path = opts.Argv[0]
+		return nil, err
+	}
+
+	path, err := exec.LookPath(launchArgv[0])
+	if err != nil {
+		path = launchArgv[0]
 	}
 
 	cmd := &exec.Cmd{
 		Path:        path,
-		Args:        opts.Argv,
-		Dir:         opts.Cwd,
-		Env:         opts.Env, // explicit: no inheritance from host process
+		Args:        launchArgv,
+		Dir:         effectiveOpts.Cwd,
+		Env:         effectiveOpts.Env, // explicit: no inheritance from host process
 		SysProcAttr: sysProcAttr(),
 	}
 
-	pipes, err := setupPipes(cmd, opts.Argv[0])
+	pipes, err := setupPipes(cmd, userArgv0)
 	if err != nil {
 		return nil, err
 	}
 
 	if err := cmd.Start(); err != nil {
 		pipes.closeAll()
-		return nil, classifySpawnError(opts.Argv[0], err)
+		return nil, classifySpawnError(userArgv0, err)
 	}
 
 	// Close write ends in the parent so that readers receive io.EOF once
@@ -81,8 +98,23 @@ func Spawn(ctx context.Context, opts *Options) (*Process, error) {
 	p := newProcess(cmd, clk, opts, pipes.stdin, pipes.stdoutR)
 	p.stderrR = pipes.stderrR
 	startStderrDrain(ctx, p, pipes.stderrR)
+	containmentErr := attachPlatformContainment(ctx, p, &effectiveOpts, unitName, usedSystemd)
 	startWaitTask(ctx, p)
+	if containmentErr != nil {
+		if _, stopErr := p.Stop(ctx); stopErr != nil {
+			return nil, errors.Join(containmentErr, stopErr)
+		}
+		return nil, containmentErr
+	}
 	return p, nil
+}
+
+func resolveExecutable(argv0 string) (string, error) {
+	path, err := exec.LookPath(argv0)
+	if err != nil {
+		return "", classifySpawnError(argv0, err)
+	}
+	return path, nil
 }
 
 type processPipes struct {
@@ -196,6 +228,9 @@ func drainStderrChunk(r io.Reader, ring *RingBuffer, buf []byte) (bool, error) {
 func startWaitTask(ctx context.Context, p *Process) {
 	p.waitTask = supervise.Go(ctx, "process.wait", func(ctx context.Context) error {
 		p.waitErr = p.cmd.Wait()
+		if p.tracker != nil {
+			p.tracker.close()
+		}
 		close(p.exitCh)
 		return nil
 	})
@@ -247,6 +282,11 @@ func (p *Process) PID() int {
 	return p.cmd.Process.Pid
 }
 
+// Identity returns the serializable process identity (PID, start token, and scope unit).
+func (p *Process) Identity() Identity {
+	return p.identity
+}
+
 // Stdout returns the continuous frame LineReader.
 func (p *Process) Stdout() *LineReader {
 	return p.stdoutR
@@ -270,5 +310,8 @@ func (p *Process) CloseStdin() error {
 // Wait waits for the process to exit and returns its exit error, if any.
 func (p *Process) Wait() error {
 	<-p.exitCh
+	if p.tracker != nil {
+		p.tracker.close()
+	}
 	return p.waitErr
 }

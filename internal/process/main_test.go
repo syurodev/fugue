@@ -15,9 +15,17 @@ import (
 	"go.uber.org/goleak"
 )
 
-const fakeVendorFlag = "-fugue-test-fake-vendor"
+const (
+	fakeVendorFlag              = "-fugue-test-fake-vendor"
+	fakeVendorModeIgnoreSigterm = "ignore-sigterm"
+	nonexistentSystemdRun       = "/nonexistent/systemd-run"
+)
 
 func TestMain(m *testing.M) {
+	if len(os.Args) > 2 && os.Args[1] == "--user" && os.Args[2] == "--scope" {
+		runFakeVendor("fake-systemd-run")
+		return
+	}
 	for i, arg := range os.Args {
 		if arg == fakeVendorFlag && i+1 < len(os.Args) {
 			runFakeVendor(os.Args[i+1])
@@ -29,16 +37,16 @@ func TestMain(m *testing.M) {
 
 func runFakeVendor(mode string) {
 	modes := map[string]func(){
-		"protocol-interrupt":   runProtocolInterrupt,
-		"ignore-sigint":        runIgnoreSigint,
-		"ignore-sigterm":       runIgnoreSigterm,
-		"frame-too-large":      runFrameTooLarge,
-		"flood-stderr":         runFloodStderr,
-		"exit-on-eof":          runExitOnEOF,
-		"burst-and-exit":       runBurstAndExit,
-		"group-child-worker":   runGroupChildWorker,
-		"group-child-survivor": runGroupChildSurvivor,
-		fakeVendorModeNormal:   runNormal,
+		"protocol-interrupt":        runProtocolInterrupt,
+		"ignore-sigint":             runIgnoreSigint,
+		fakeVendorModeIgnoreSigterm: runIgnoreSigterm,
+		"frame-too-large":           runFrameTooLarge,
+		"flood-stderr":              runFloodStderr,
+		"exit-on-eof":               runExitOnEOF,
+		"burst-and-exit":            runBurstAndExit,
+		"group-child-worker":        runGroupChildWorker,
+		"group-child-survivor":      runGroupChildSurvivor,
+		fakeVendorModeNormal:        runNormal,
 	}
 	for name, fn := range unixModes() {
 		modes[name] = fn
