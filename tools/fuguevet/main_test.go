@@ -54,7 +54,7 @@ func TestVettoolRunsEveryAnalyzer(t *testing.T) {
 		"nobarego":    "bare go statement",
 		"secretlog":   "token looks like a secret",
 		"todoref":     "must read",
-		"noprotoleak": "proto-generated and Connect code stays inside internal/hostapi",
+		"noprotoleak": "proto-generated and Connect code is importable only by internal/hostapi, pkg/client and cmd",
 	} {
 		if !strings.Contains(out, message) {
 			t.Errorf("%s did not report %q:\n%s", analyzer, message, out)

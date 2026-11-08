@@ -8,7 +8,7 @@ import (
 	connect "connectrpc.com/connect"
 	context "context"
 	errors "errors"
-	v1 "github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1"
+	v1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
 	http "net/http"
 	strings "strings"
 )

@@ -86,8 +86,8 @@ const file_fugue_host_v1_error_detail_proto_rawDesc = "" +
 	" fugue/host/v1/error_detail.proto\x12\rfugue.host.v1\"W\n" +
 	"\vErrorDetail\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x124\n" +
-	"\x16supported_api_versions\x18\x02 \x03(\tR\x14supportedApiVersionsB\xc8\x01\n" +
-	"\x11com.fugue.host.v1B\x10ErrorDetailProtoP\x01ZKgithub.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1;hostv1\xa2\x02\x03FHX\xaa\x02\rFugue.Host.V1\xca\x02\rFugue\\Host\\V1\xe2\x02\x19Fugue\\Host\\V1\\GPBMetadata\xea\x02\x0fFugue::Host::V1b\x06proto3"
+	"\x16supported_api_versions\x18\x02 \x03(\tR\x14supportedApiVersionsB\xb2\x01\n" +
+	"\x11com.fugue.host.v1B\x10ErrorDetailProtoP\x01Z5github.com/syurodev/fugue/pkg/pb/fugue/host/v1;hostv1\xa2\x02\x03FHX\xaa\x02\rFugue.Host.V1\xca\x02\rFugue\\Host\\V1\xe2\x02\x19Fugue\\Host\\V1\\GPBMetadata\xea\x02\x0fFugue::Host::V1b\x06proto3"
 
 var (
 	file_fugue_host_v1_error_detail_proto_rawDescOnce sync.Once

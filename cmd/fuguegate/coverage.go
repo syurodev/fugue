@@ -21,7 +21,7 @@ const (
 	strictFloor    = 90.0
 	defaultFloor   = 80.0
 	baselineSlack  = 0.5
-	generatedTree  = "internal/hostapi/internal/pb"
+	generatedTree  = "pkg/pb"
 	baselineIndent = "  "
 	profileFields  = 3
 )
@@ -129,9 +129,10 @@ func parseBlock(line string) (pkg string, statements, hits int, err error) {
 }
 
 // gated reports whether a package directory is subject to the coverage floor:
-// internal packages except generated code; cmd and tools are excluded.
+// internal and pkg packages except generated code; cmd and tools are excluded.
 func gated(pkg string) bool {
-	return strings.HasPrefix(pkg, "internal/") && !strings.HasPrefix(pkg, generatedTree)
+	return (strings.HasPrefix(pkg, "internal/") || strings.HasPrefix(pkg, "pkg/")) &&
+		!strings.HasPrefix(pkg, generatedTree)
 }
 
 func floor(pkg string) float64 {

@@ -7,9 +7,9 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/syurodev/fugue/internal/app"
-	hostv1 "github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1"
-	"github.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1/hostv1connect"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
+	"github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
 )
 
 // serviceHandler maps the proto contract to the app backend's domain types.

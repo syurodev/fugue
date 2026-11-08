@@ -225,9 +225,9 @@ const file_fugue_host_v1_hello_proto_rawDesc = "" +
 	"\x0fCLIENT_KIND_TUI\x10\x01\x12\x13\n" +
 	"\x0fCLIENT_KIND_CLI\x10\x02\x12\x13\n" +
 	"\x0fCLIENT_KIND_APP\x10\x03\x12\x1e\n" +
-	"\x1aCLIENT_KIND_APP_BACKGROUND\x10\x04B\xc2\x01\n" +
+	"\x1aCLIENT_KIND_APP_BACKGROUND\x10\x04B\xac\x01\n" +
 	"\x11com.fugue.host.v1B\n" +
-	"HelloProtoP\x01ZKgithub.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1;hostv1\xa2\x02\x03FHX\xaa\x02\rFugue.Host.V1\xca\x02\rFugue\\Host\\V1\xe2\x02\x19Fugue\\Host\\V1\\GPBMetadata\xea\x02\x0fFugue::Host::V1b\x06proto3"
+	"HelloProtoP\x01Z5github.com/syurodev/fugue/pkg/pb/fugue/host/v1;hostv1\xa2\x02\x03FHX\xaa\x02\rFugue.Host.V1\xca\x02\rFugue\\Host\\V1\xe2\x02\x19Fugue\\Host\\V1\\GPBMetadata\xea\x02\x0fFugue::Host::V1b\x06proto3"
 
 var (
 	file_fugue_host_v1_hello_proto_rawDescOnce sync.Once

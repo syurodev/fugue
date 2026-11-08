@@ -446,9 +446,9 @@ const file_fugue_host_v1_event_proto_rawDesc = "" +
 	"\bsnapshot\x18\x01 \x01(\v2\x1c.fugue.host.v1.SnapshotEventH\x00R\bsnapshot\x120\n" +
 	"\x05event\x18\x02 \x01(\v2\x18.fugue.host.v1.HostEventH\x00R\x05event\x12,\n" +
 	"\x03end\x18\x03 \x01(\v2\x18.fugue.host.v1.StreamEndH\x00R\x03endB\x06\n" +
-	"\x04kindB\xc2\x01\n" +
+	"\x04kindB\xac\x01\n" +
 	"\x11com.fugue.host.v1B\n" +
-	"EventProtoP\x01ZKgithub.com/syurodev/fugue/internal/hostapi/internal/pb/fugue/host/v1;hostv1\xa2\x02\x03FHX\xaa\x02\rFugue.Host.V1\xca\x02\rFugue\\Host\\V1\xe2\x02\x19Fugue\\Host\\V1\\GPBMetadata\xea\x02\x0fFugue::Host::V1b\x06proto3"
+	"EventProtoP\x01Z5github.com/syurodev/fugue/pkg/pb/fugue/host/v1;hostv1\xa2\x02\x03FHX\xaa\x02\rFugue.Host.V1\xca\x02\rFugue\\Host\\V1\xe2\x02\x19Fugue\\Host\\V1\\GPBMetadata\xea\x02\x0fFugue::Host::V1b\x06proto3"
 
 var (
 	file_fugue_host_v1_event_proto_rawDescOnce sync.Once
