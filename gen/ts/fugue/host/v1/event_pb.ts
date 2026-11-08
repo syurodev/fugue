@@ -78,8 +78,9 @@ export const SubscribeRequestSchema: GenMessage<SubscribeRequest> = /*@__PURE__*
  * services that own the topics (docs: host-api §6). A topic whose deltas can
  * be coalesced or dropped under pressure must publish each delta as the
  * complete latest state for its coalescing key, never an increment or a piece
- * — the host may drop a delta and only a later delta for the same key, or a
- * resync, restores the state (docs: transcript §5).
+ * (docs: transcript §5), and must also publish a key's final state as an
+ * event that is never dropped — a dropped delta can then only lose
+ * intermediate states, never the last one.
  *
  * @generated from message fugue.host.v1.HostEvent
  */
