@@ -17,7 +17,7 @@ import (
 const (
 	// testIncarnation is the incarnation the test hubs run in.
 	testIncarnation = "inc-1"
-	// testDelta is the event type of the droppable deltas in these tests.
+	// testDelta is the event type of the latest-for-key deltas in these tests.
 	testDelta = "delta"
 )
 
@@ -329,6 +329,52 @@ func TestControlOverflowEndsWithResync(t *testing.T) {
 	publishN(t, hub, 5)
 	if got := hub.Dropped(); got != 0 {
 		t.Fatalf("control events were counted as dropped: %d", got)
+	}
+}
+
+func TestCursorForAnotherTopicIsRejected(t *testing.T) {
+	t.Parallel()
+	hub := newTestHub(t)
+	publishN(t, hub, 2)
+	// A cursor from topic "other" must not catch topic "t" up: it would
+	// silently skip events.
+	_, err := hub.Subscribe(t.Context(), SubscribeParams{
+		Principal: string(KindCLI), Topic: "t",
+		Cursor: &EventCursor{Topic: "other", Incarnation: testIncarnation, Sequence: 1},
+	})
+	if errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("a foreign cursor = %v, want invalid_argument", err)
+	}
+	// The empty topic of a cursor is equally malformed.
+	_, err = hub.Subscribe(t.Context(), SubscribeParams{
+		Principal: string(KindCLI), Topic: "t",
+		Cursor: &EventCursor{Topic: "", Incarnation: testIncarnation, Sequence: 1},
+	})
+	if errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("an empty cursor topic = %v, want invalid_argument", err)
+	}
+}
+
+func TestDurablePublishWithoutSequenceFailsTyped(t *testing.T) {
+	t.Parallel()
+	fd := &fakeDurable{}
+	hub := newDurableHub(t, fd, testIncarnation)
+	sub, err := hub.Subscribe(t.Context(), SubscribeParams{Principal: string(KindCLI), Topic: "d"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sub.Close)
+	if _, err := hub.Publish("d", Event{Type: "e"}); errcode.CodeOf(err) != errcode.Internal {
+		t.Fatalf("a sequence-less durable publish = %v, want internal", err)
+	}
+	// The subscribers are untouched: the next well-formed publish arrives.
+	fd.mustCommit(t, hub, "e1")
+	got := collectN(t, t.Context(), sub, 1)
+	if got[0].Seq != 1 {
+		t.Fatalf("event seq = %d, want 1", got[0].Seq)
+	}
+	if sub.ResyncRequired() {
+		t.Fatal("a sequence-less publish must not resync the subscribers")
 	}
 }
 

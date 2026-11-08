@@ -22,4 +22,8 @@ var (
 	// ErrEventTopicInvalid means a topic registration or publish is unusable;
 	// a programming error of the topic's owner, never a client's.
 	ErrEventTopicInvalid = errcode.New(errcode.Internal, "the event topic is not usable")
+	// ErrCursorTopicMismatch means the cursor names a different topic than the
+	// subscribe request; honoring it would silently skip events, so it is
+	// rejected as malformed.
+	ErrCursorTopicMismatch = errcode.New(errcode.InvalidArgument, "the cursor names a different topic")
 )

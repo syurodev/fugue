@@ -26,7 +26,7 @@ const (
 
 const (
 	// subscriberQueueCap bounds each subscriber's live queue. A full queue
-	// never blocks the publisher: droppable deltas coalesce or drop, anything
+	// never blocks the publisher: latest-for-key deltas coalesce or drop, anything
 	// else ends that subscriber's stream with resync_required.
 	subscriberQueueCap = 512
 	// defaultEphemeralBufferCap bounds an ephemeral topic's catch-up ring; a
@@ -40,8 +40,10 @@ const (
 //
 // An event with LatestForKey carries the complete latest state for its Key —
 // never an increment, never a piece. That is what makes it safe to coalesce
-// or drop under pressure without telling the client: a later event for the
-// same key (or a resync from the topic's durable state) restores everything.
+// or drop under pressure without telling the client — but only for
+// intermediate states: the topic's owner must also publish a key's final
+// state as an event that is not latest-for-key (a completion, which is never
+// dropped), so a drop can lose nothing but states a later event supersedes.
 // A topic whose deltas are pieces of a larger text must not set LatestForKey;
 // the hub would silently lose pieces under pressure (transcript §5).
 type Event struct {
@@ -230,7 +232,12 @@ func (h *EventHub) publishEphemeralLocked(t *eventTopic, ev Event) (Event, error
 // handles the out-of-order anomaly (see Publish); the caller holds the hub
 // mutex.
 func (h *EventHub) publishDurableLocked(name string, t *eventTopic, ev Event) (Event, error) {
-	if ev.Seq > 0 && ev.Seq > t.lastSeq {
+	if ev.Seq == 0 {
+		// A durable event without its committed sequence is a programming
+		// error of the owner, not an anomaly a live stream recovers from.
+		return Event{}, errcode.Wrap(errcode.Internal, "publish to the event topic "+name, ErrEventTopicInvalid)
+	}
+	if ev.Seq > t.lastSeq {
 		t.lastSeq = ev.Seq
 		h.fanOutLocked(t, ev)
 		return ev, nil
@@ -240,9 +247,6 @@ func (h *EventHub) publishDurableLocked(name string, t *eventTopic, ev Event) (E
 	// subscribers would carry a gap the hub can never fill.
 	slog.Warn("durable event publish out of order",
 		"topic", name, "sequence", ev.Seq, "last_published", t.lastSeq)
-	if ev.Seq > t.lastSeq {
-		t.lastSeq = ev.Seq
-	}
 	for _, s := range t.subs {
 		s.forceResync()
 	}
@@ -350,6 +354,11 @@ func (h *EventHub) registerSubscriber(p SubscribeParams) (*Subscription, *eventT
 	t, ok := h.topics[p.Topic]
 	if !ok || !h.authorize(p.Principal, p.Topic) {
 		return nil, nil, 0, nil, 0, ErrSubscriptionDenied
+	}
+	if p.Cursor != nil && p.Cursor.Topic != p.Topic {
+		// A cursor from another topic would silently skip this topic's
+		// events; it is malformed, not catchable.
+		return nil, nil, 0, nil, 0, ErrCursorTopicMismatch
 	}
 	s := &Subscription{topic: p.Topic, hub: h, incarnation: h.incarnation, notify: make(chan struct{}, 1)}
 	t.subs = append(t.subs, s)
