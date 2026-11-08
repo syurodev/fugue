@@ -46,6 +46,12 @@ type Options struct {
 	// SessionID names the systemd scope unit (`fugue-vendor-<id>.scope`) on Linux.
 	// Required when Linux systemd scope containment is active.
 	SessionID string
+	// XDGRuntimeDir is the XDG_RUNTIME_DIR path added to Options.Env when probing
+	// and spawning `systemd-run --user --scope` on Linux, supplied by the caller
+	// from the config port. Because `systemd-run --scope` execs the vendor binary
+	// in place, XDG_RUNTIME_DIR also reaches the vendor process. If empty, Linux
+	// scope containment is not attempted and the reason is `scope_unavailable`.
+	XDGRuntimeDir string
 	// MemoryMax is an optional systemd MemoryMax property (e.g. "4G") passed on Linux.
 	MemoryMax string
 	// CPUWeight is an optional systemd CPUWeight property (1..10000) passed on Linux.

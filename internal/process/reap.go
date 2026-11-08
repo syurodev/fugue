@@ -6,6 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -132,4 +135,73 @@ func isReapedTreeGone(id Identity, source procTableSource, tracker *descendantTr
 		return false
 	}
 	return !groupHasMembers(id.PID) && !tracker.hasLiveDescendants()
+}
+
+// procfsScanner implements procTableSource over a Linux /proc directory.
+type procfsScanner struct {
+	procRoot string
+}
+
+func newProcfsScanner(procRoot string) *procfsScanner {
+	if procRoot == "" {
+		procRoot = defaultProcRoot
+	}
+	return &procfsScanner{procRoot: procRoot}
+}
+
+func (s *procfsScanner) readBootID() (string, error) {
+	data, err := readRootFile(s.procRoot, "sys/kernel/random/boot_id")
+	if err != nil {
+		return "", fmt.Errorf("read boot_id: %w", err)
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+func (s *procfsScanner) startToken(pid int) (string, error) {
+	if pid <= 1 {
+		return "", fmt.Errorf("%w: invalid pid %d", ErrIdentityMismatch, pid)
+	}
+	bootID, err := s.readBootID()
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrIdentityMismatch, err)
+	}
+	data, err := readRootFile(s.procRoot, strconv.Itoa(pid)+"/stat")
+	if err != nil {
+		return "", fmt.Errorf("%w: %w", ErrIdentityMismatch, err)
+	}
+	entry, err := parseProcStat(string(data), bootID)
+	if err != nil {
+		return "", err
+	}
+	return entry.startToken, nil
+}
+
+func (s *procfsScanner) scan() ([]procEntry, error) {
+	bootID, err := s.readBootID()
+	if err != nil {
+		return nil, err
+	}
+	dirEntries, err := os.ReadDir(s.procRoot)
+	if err != nil {
+		return nil, fmt.Errorf("readdir %s: %w", s.procRoot, err)
+	}
+	var out []procEntry
+	for _, d := range dirEntries {
+		if !d.IsDir() {
+			continue
+		}
+		pid, convErr := strconv.Atoi(d.Name())
+		if convErr != nil || pid <= 1 {
+			continue
+		}
+		data, rerr := readRootFile(s.procRoot, d.Name()+"/stat")
+		if rerr != nil {
+			continue
+		}
+		entry, perr := parseProcStat(string(data), bootID)
+		if perr == nil {
+			out = append(out, entry)
+		}
+	}
+	return out, nil
 }

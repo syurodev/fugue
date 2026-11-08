@@ -18,6 +18,7 @@ const (
 )
 
 func prepareSpawnArgv(ctx context.Context, opts *Options) ([]string, string, bool, error) {
+	// Test seam: setting CgroupRoot or ProcRoot routes to the Linux containment path on macOS CI.
 	if opts != nil && (opts.CgroupRoot != "" || opts.ProcRoot != "") {
 		return prepareLinuxSpawnArgv(ctx, opts)
 	}

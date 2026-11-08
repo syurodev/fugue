@@ -22,29 +22,26 @@ import (
 	"github.com/syurodev/fugue/internal/platform/supervise"
 )
 
+const fakeXDGRuntimeDir = "/run/user/1000"
+
 func TestLinuxCgroupStopProofAndFallback(t *testing.T) {
 	t.Parallel()
-
 	t.Run("proved when cgroup becomes empty", func(t *testing.T) {
 		t.Parallel()
 		testCgroupProvedWhenEmpty(t)
 	})
-
 	t.Run("unknown plus scope_unverified on mismatched proc cgroup path", func(t *testing.T) {
 		t.Parallel()
 		testCgroupScopeUnverified(t)
 	})
-
 	t.Run("fallback to group path plus tracker when probe fails", func(t *testing.T) {
 		t.Parallel()
 		testCgroupFallbackWhenProbeFails(t)
 	})
-
 	t.Run("cgroup.kill preferred over per-pid SIGKILL", func(t *testing.T) {
 		t.Parallel()
 		testCgroupKillPreferredOverPerPidSigkill(t)
 	})
-
 	t.Run("fails closed when probe or session id missing or start token unreadable", func(t *testing.T) {
 		t.Parallel()
 		testContainmentFailClosedValidation(t)
@@ -207,15 +204,17 @@ func testCgroupProvedWhenEmpty(t *testing.T) {
 	exe := fakeVendorExe(t)
 	cgRoot, procRoot := setupTempCgroupAndProc(t)
 	probe := NewSystemdProbe()
+	env := []string{
+		"FUGUE_TEST_CGROUP_ROOT=" + cgRoot,
+		"FUGUE_TEST_PROC_ROOT=" + procRoot,
+	}
 
 	proc, err := spawnFakeContained(ctx, t, clk, procRoot, &Options{
-		Argv:  []string{exe, fakeVendorFlag, fakeVendorModeNormal},
-		Clock: clk,
-		Env: []string{
-			"FUGUE_TEST_CGROUP_ROOT=" + cgRoot,
-			"FUGUE_TEST_PROC_ROOT=" + procRoot,
-		},
+		Argv:           []string{exe, fakeVendorFlag, fakeVendorModeNormal},
+		Clock:          clk,
+		Env:            env,
 		SessionID:      "sess-proved",
+		XDGRuntimeDir:  fakeXDGRuntimeDir,
 		MemoryMax:      "2G",
 		CPUWeight:      100,
 		CgroupRoot:     cgRoot,
@@ -228,7 +227,7 @@ func testCgroupProvedWhenEmpty(t *testing.T) {
 	}
 	waitReady(t, proc.Stdout())
 	drainStdout(ctx, proc.Stdout())
-	assertProbeCachedAndIdentity(ctx, t, probe, exe, cgRoot, proc)
+	assertProbeCachedAndIdentity(ctx, t, probe, exe, cgRoot, env, proc)
 
 	unitDir := filepath.Join(cgRoot, filepath.FromSlash(fakeUserManagerRel()), "app.slice", proc.Identity().ScopeUnit)
 	proof := stopAndDrive(ctx, t, clk, proc, func() {
@@ -240,13 +239,23 @@ func testCgroupProvedWhenEmpty(t *testing.T) {
 	}
 }
 
-func assertProbeCachedAndIdentity(ctx context.Context, t *testing.T, probe *SystemdProbe, exe, cgRoot string, proc *Process) {
+func assertProbeCachedAndIdentity(ctx context.Context, t *testing.T, probe *SystemdProbe, exe, cgRoot string, env []string, proc *Process) {
 	t.Helper()
+	launcherEnv := withXDGRuntimeDir(env, fakeXDGRuntimeDir)
+	cctx, cancel := context.WithCancel(ctx)
+	cancel()
+	freshProbe := NewSystemdProbe()
+	if freshProbe.check(cctx, exe, cgRoot, launcherEnv) || len(freshProbe.cache) != 0 {
+		t.Fatal("expected canceled context probe to return false without caching")
+	}
 	if rerr := os.Remove(filepath.Join(cgRoot, "cgroup.controllers")); rerr != nil {
 		t.Fatal(rerr)
 	}
-	if !probe.check(ctx, exe, cgRoot) {
-		t.Fatal("expected SystemdProbe to return cached true result")
+	if !probe.check(ctx, exe, cgRoot, launcherEnv) {
+		t.Fatal("expected SystemdProbe to return cached true result for matching launcherEnv")
+	}
+	if probe.check(ctx, exe, cgRoot, withXDGRuntimeDir(env, "/run/user/9999")) {
+		t.Fatal("expected SystemdProbe cache key to distinguish different XDG_RUNTIME_DIR values")
 	}
 	wantID := Identity{
 		PID:        proc.PID(),
@@ -274,6 +283,7 @@ func testCgroupScopeUnverified(t *testing.T) {
 			"FUGUE_TEST_PROC_CGROUP_OVERRIDE=0::/user.slice/wrong-unit.scope",
 		},
 		SessionID:      "sess-unverified",
+		XDGRuntimeDir:  fakeXDGRuntimeDir,
 		CgroupRoot:     cgRoot,
 		ProcRoot:       procRoot,
 		SystemdRunPath: exe,
@@ -310,11 +320,23 @@ func testCgroupFallbackWhenProbeFails(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	if _, unit, used, err := prepareLinuxSpawnArgv(ctx, &Options{
+		Argv:           []string{exe},
+		SessionID:      "sess-empty-xdg",
+		CgroupRoot:     cgRoot,
+		ProcRoot:       procRoot,
+		SystemdRunPath: exe,
+		Probe:          NewSystemdProbe(),
+	}); err != nil || used || unit != "" {
+		t.Fatalf("expected empty XDGRuntimeDir to skip containment without error, got used=%v unit=%q err=%v", used, unit, err)
+	}
+
 	proc, err := spawnFakeFallback(ctx, t, clk, procRoot, &Options{
 		Argv:           []string{exe, fakeVendorFlag, fakeVendorModeNormal},
 		Clock:          clk,
 		Env:            []string{"FUGUE_TEST_PROC_ROOT=" + procRoot},
 		SessionID:      "sess-fallback",
+		XDGRuntimeDir:  fakeXDGRuntimeDir,
 		CgroupRoot:     cgRoot,
 		ProcRoot:       procRoot,
 		SystemdRunPath: nonexistentSystemdRun,
@@ -350,20 +372,16 @@ func testCgroupKillPreferredOverPerPidSigkill(t *testing.T) {
 
 	helper := spawnReadyHelper(ctx, t, exe)
 	proc, err := spawnFakeContained(ctx, t, clk, procRoot, &Options{
-		Argv:  []string{exe, fakeVendorFlag, fakeVendorModeIgnoreSigterm},
-		Clock: clk,
-		Env: []string{
-			"FUGUE_TEST_CGROUP_ROOT=" + cgRoot,
-			"FUGUE_TEST_PROC_ROOT=" + procRoot,
-		},
+		Argv:           []string{exe, fakeVendorFlag, fakeVendorModeIgnoreSigterm},
+		Clock:          clk,
+		Env:            []string{"FUGUE_TEST_CGROUP_ROOT=" + cgRoot, "FUGUE_TEST_PROC_ROOT=" + procRoot},
 		SessionID:      "sess-cgkill",
+		XDGRuntimeDir:  fakeXDGRuntimeDir,
 		CgroupRoot:     cgRoot,
 		ProcRoot:       procRoot,
 		SystemdRunPath: exe,
 		Probe:          NewSystemdProbe(),
-		OnEscalation: func(step string) {
-			stepCh <- step
-		},
+		OnEscalation:   func(step string) { stepCh <- step },
 	})
 	if err != nil {
 		t.Fatalf("Spawn: %v", err)
@@ -393,12 +411,8 @@ func testCgroupKillPreferredOverPerPidSigkill(t *testing.T) {
 	<-proc.stdoutPipe.ended
 	markFakeScopeEmpty(t, unitDir)
 	driveClockUntil(t, clk, stopDone)
-
-	if stopErr != nil {
-		t.Fatalf("Stop: %v", stopErr)
-	}
-	if proof.Status != StopProofProved {
-		t.Fatalf("expected StopProofProved, got %+v", proof)
+	if stopErr != nil || proof.Status != StopProofProved {
+		t.Fatalf("Stop: err=%v proof=%+v", stopErr, proof)
 	}
 	assertCgroupKillPreferred(t, unitDir, helper.PID())
 }
@@ -425,6 +439,7 @@ func testContainmentFailClosedValidation(t *testing.T) {
 	if _, err := Spawn(ctx, &Options{
 		Argv:           []string{exe, fakeVendorFlag, fakeVendorModeNormal},
 		Clock:          clk,
+		XDGRuntimeDir:  fakeXDGRuntimeDir,
 		CgroupRoot:     cgRoot,
 		ProcRoot:       procRoot,
 		SystemdRunPath: exe,
@@ -548,22 +563,18 @@ func TestStopCleansAllDescendantsIncludingSetsidGrandchild(t *testing.T) {
 
 func TestReapRefusesMismatchedStartTime(t *testing.T) {
 	t.Parallel()
-
 	t.Run("refuses mismatched start_token without signaling", func(t *testing.T) {
 		t.Parallel()
 		testReapRefusesMismatch(t)
 	})
-
 	t.Run("reaps live process when start_token matches", func(t *testing.T) {
 		t.Parallel()
 		testReapMatchingStartToken(t)
 	})
-
 	t.Run("reaps scope when leader is gone and grandchild remains", func(t *testing.T) {
 		t.Parallel()
 		testReapScopeLeaderGoneGrandchildRemains(t)
 	})
-
 	t.Run("ignores empty same-named scope outside user subtree and rejects duplicates", func(t *testing.T) {
 		t.Parallel()
 		testReapScopeSubtreeIsolationAndDuplicates(t)

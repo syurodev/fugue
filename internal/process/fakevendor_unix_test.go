@@ -120,9 +120,13 @@ func maybeWriteStandaloneFakeProcStat() {
 }
 
 // runFakeSystemdRun emulates systemd-run --user --scope --unit=<name> -- <argv...>
-// by starting in the parent's cgroup, moving into the scope under the current
-// user's user@<uid>.service subtree, and then executing the target fake vendor mode.
+// by verifying XDG_RUNTIME_DIR is present in its environment, starting in the
+// parent's cgroup, moving into the scope under the current user's
+// user@<uid>.service subtree, and then executing the target fake vendor mode.
 func runFakeSystemdRun() {
+	if !hasFakeXDGRuntimeDir() {
+		os.Exit(1)
+	}
 	idx := -1
 	var unitName string
 	for i, arg := range os.Args {
@@ -156,6 +160,15 @@ func cutPrefix(s, prefix string) (string, bool) {
 		return s[len(prefix):], true
 	}
 	return "", false
+}
+
+func hasFakeXDGRuntimeDir() bool {
+	for _, entry := range os.Environ() {
+		if v, ok := cutPrefix(entry, "XDG_RUNTIME_DIR="); ok && v != "" {
+			return true
+		}
+	}
+	return false
 }
 
 func fakeUserManagerRel() string {

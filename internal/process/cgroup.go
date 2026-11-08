@@ -326,8 +326,13 @@ func prepareLinuxSpawnArgv(ctx context.Context, opts *Options) ([]string, string
 	if opts.Probe == nil {
 		return nil, "", false, errcode.New(errcode.InvalidArgument, "process spawn requires Options.Probe")
 	}
+	xdgRuntimeDir := strings.TrimSpace(opts.XDGRuntimeDir)
+	if xdgRuntimeDir == "" {
+		return opts.Argv, "", false, nil
+	}
 	cgroupRoot, _, systemdBin := resolveContainmentPaths(opts)
-	if !opts.Probe.check(ctx, systemdBin, cgroupRoot) {
+	launcherEnv := withXDGRuntimeDir(opts.Env, xdgRuntimeDir)
+	if !opts.Probe.check(ctx, systemdBin, cgroupRoot, launcherEnv) {
 		return opts.Argv, "", false, nil
 	}
 	unitName, err := buildScopeUnitName(opts.SessionID)
@@ -338,8 +343,19 @@ func prepareLinuxSpawnArgv(ctx context.Context, opts *Options) ([]string, string
 	if err != nil {
 		return nil, "", false, classifySpawnError(systemdBin, err)
 	}
+	opts.Env = launcherEnv
 	args := buildSystemdRunArgs(resolved, unitName, opts.MemoryMax, opts.CPUWeight, opts.Argv)
 	return args, unitName, true, nil
+}
+
+func withXDGRuntimeDir(env []string, xdgRuntimeDir string) []string {
+	out := make([]string, 0, len(env)+1)
+	for _, entry := range env {
+		if !strings.HasPrefix(entry, "XDG_RUNTIME_DIR=") {
+			out = append(out, entry)
+		}
+	}
+	return append(out, "XDG_RUNTIME_DIR="+xdgRuntimeDir)
 }
 
 // buildSystemdRunArgs constructs the systemd-run command line for a scope unit.
@@ -363,7 +379,7 @@ func buildSystemdRunArgs(systemdBin, unitName, memoryMax string, cpuWeight int, 
 }
 
 // SystemdProbe caches the result of probing systemd-run and cgroup v2 per
-// (systemdRunPath, cgroupRoot) pair.
+// (systemdRunPath, cgroupRoot, launcherEnv) tuple.
 type SystemdProbe struct {
 	mu    sync.Mutex
 	cache map[string]bool
@@ -374,8 +390,8 @@ func NewSystemdProbe() *SystemdProbe {
 	return &SystemdProbe{cache: make(map[string]bool)}
 }
 
-func (sp *SystemdProbe) check(ctx context.Context, systemdBin, cgroupRoot string) bool {
-	key := systemdBin + "\x00" + cgroupRoot
+func (sp *SystemdProbe) check(ctx context.Context, systemdBin, cgroupRoot string, launcherEnv []string) bool {
+	key := systemdBin + "\x00" + cgroupRoot + "\x00" + strings.Join(launcherEnv, "\x00")
 	sp.mu.Lock()
 	if res, ok := sp.cache[key]; ok {
 		sp.mu.Unlock()
@@ -383,7 +399,13 @@ func (sp *SystemdProbe) check(ctx context.Context, systemdBin, cgroupRoot string
 	}
 	sp.mu.Unlock()
 
-	ok := runSystemdProbe(ctx, systemdBin, cgroupRoot)
+	if ctx.Err() != nil {
+		return false
+	}
+	ok := runSystemdProbe(ctx, systemdBin, cgroupRoot, launcherEnv)
+	if ctx.Err() != nil {
+		return false
+	}
 
 	sp.mu.Lock()
 	sp.cache[key] = ok
@@ -391,7 +413,7 @@ func (sp *SystemdProbe) check(ctx context.Context, systemdBin, cgroupRoot string
 	return ok
 }
 
-func runSystemdProbe(ctx context.Context, systemdBin, cgroupRoot string) bool {
+func runSystemdProbe(ctx context.Context, systemdBin, cgroupRoot string, launcherEnv []string) bool {
 	if !isCgroupV2Mounted(cgroupRoot) {
 		return false
 	}
@@ -399,11 +421,13 @@ func runSystemdProbe(ctx context.Context, systemdBin, cgroupRoot string) bool {
 	if err != nil {
 		return false
 	}
-	return execSystemdProbe(ctx, resolved)
+	return execSystemdProbe(ctx, resolved, launcherEnv)
 }
 
-func execSystemdProbe(ctx context.Context, resolved string) bool {
-	return exec.CommandContext(ctx, resolved, "--user", "--scope", "--quiet", "--", "true").Run() == nil
+func execSystemdProbe(ctx context.Context, resolved string, launcherEnv []string) bool {
+	cmd := exec.CommandContext(ctx, resolved, "--user", "--scope", "--quiet", "--", "true")
+	cmd.Env = launcherEnv
+	return cmd.Run() == nil
 }
 
 func isCgroupV2Mounted(cgroupRoot string) bool {
@@ -414,73 +438,4 @@ func isCgroupV2Mounted(cgroupRoot string) bool {
 		return true
 	}
 	return false
-}
-
-// procfsScanner implements procTableSource over a Linux /proc directory.
-type procfsScanner struct {
-	procRoot string
-}
-
-func newProcfsScanner(procRoot string) *procfsScanner {
-	if procRoot == "" {
-		procRoot = defaultProcRoot
-	}
-	return &procfsScanner{procRoot: procRoot}
-}
-
-func (s *procfsScanner) readBootID() (string, error) {
-	data, err := readRootFile(s.procRoot, "sys/kernel/random/boot_id")
-	if err != nil {
-		return "", fmt.Errorf("read boot_id: %w", err)
-	}
-	return strings.TrimSpace(string(data)), nil
-}
-
-func (s *procfsScanner) startToken(pid int) (string, error) {
-	if pid <= 1 {
-		return "", fmt.Errorf("%w: invalid pid %d", ErrIdentityMismatch, pid)
-	}
-	bootID, err := s.readBootID()
-	if err != nil {
-		return "", fmt.Errorf("%w: %w", ErrIdentityMismatch, err)
-	}
-	data, err := readRootFile(s.procRoot, strconv.Itoa(pid)+"/stat")
-	if err != nil {
-		return "", fmt.Errorf("%w: %w", ErrIdentityMismatch, err)
-	}
-	entry, err := parseProcStat(string(data), bootID)
-	if err != nil {
-		return "", err
-	}
-	return entry.startToken, nil
-}
-
-func (s *procfsScanner) scan() ([]procEntry, error) {
-	bootID, err := s.readBootID()
-	if err != nil {
-		return nil, err
-	}
-	dirEntries, err := os.ReadDir(s.procRoot)
-	if err != nil {
-		return nil, fmt.Errorf("readdir %s: %w", s.procRoot, err)
-	}
-	var out []procEntry
-	for _, d := range dirEntries {
-		if !d.IsDir() {
-			continue
-		}
-		pid, convErr := strconv.Atoi(d.Name())
-		if convErr != nil || pid <= 1 {
-			continue
-		}
-		data, rerr := readRootFile(s.procRoot, d.Name()+"/stat")
-		if rerr != nil {
-			continue
-		}
-		entry, perr := parseProcStat(string(data), bootID)
-		if perr == nil {
-			out = append(out, entry)
-		}
-	}
-	return out, nil
 }

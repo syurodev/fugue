@@ -166,14 +166,19 @@ func extractUserManagerCgroupRel(content string, uid int) (string, bool) {
 	}
 	userService := "user@" + strconv.Itoa(uid) + ".service"
 	userSlice := "user-" + strconv.Itoa(uid) + ".slice"
+	hasV2Line := false
 	for _, rawLine := range strings.Split(content, "\n") {
 		rel, ok := strings.CutPrefix(strings.TrimSpace(rawLine), "0::/")
 		if !ok {
 			continue
 		}
+		hasV2Line = true
 		if mgrRel, found := matchUserManagerSegments(rel, userService, userSlice); found {
 			return mgrRel, true
 		}
+	}
+	if hasV2Line {
+		return "user.slice/" + userSlice + "/" + userService, true
 	}
 	return "", false
 }

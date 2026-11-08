@@ -75,8 +75,8 @@ func Spawn(ctx context.Context, opts *Options) (*Process, error) {
 	cmd := &exec.Cmd{
 		Path:        path,
 		Args:        launchArgv,
-		Dir:         opts.Cwd,
-		Env:         opts.Env, // explicit: no inheritance from host process
+		Dir:         effectiveOpts.Cwd,
+		Env:         effectiveOpts.Env, // explicit: no inheritance from host process
 		SysProcAttr: sysProcAttr(),
 	}
 
