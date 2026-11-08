@@ -1,6 +1,7 @@
 package interaction
 
 import (
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -16,7 +17,7 @@ func TestAReceiptCanBeClaimedOnlyOnceAndMatchesItsBinding(t *testing.T) {
 	spec := confirmSpec("op-claim")
 	spec.ExpiresAt = startTime().Add(10 * time.Minute)
 	ticket := mustEnsure(t, owner, spec)
-	answered := mustAnswer(t, owner, Decision{
+	answered := mustAnswer(t, owner, &Decision{
 		Incarnation: owner.Incarnation(),
 		RequestID:   ticket.RequestID,
 		Outcome:     OutcomeAllowedOnce,
@@ -47,7 +48,7 @@ func TestAReceiptCanBeClaimedOnlyOnceAndMatchesItsBinding(t *testing.T) {
 	specExp := confirmSpec("op-claim-exp")
 	specExp.ExpiresAt = startTime().Add(2 * time.Minute)
 	ticketExp := mustEnsure(t, owner, specExp)
-	ansExp := mustAnswer(t, owner, Decision{
+	ansExp := mustAnswer(t, owner, &Decision{
 		Incarnation: owner.Incarnation(),
 		RequestID:   ticketExp.RequestID,
 		Outcome:     OutcomeAllowedOnce,
@@ -61,19 +62,19 @@ func TestSelectionRequestsAcceptOnlyOfferedOptionsAndNeverAuthorizeExecution(t *
 	t.Parallel()
 	owner, _, _, _ := newTestOwner(t)
 	ticket := mustEnsure(t, owner, selectSpec("op-sel"))
-	if ticket.AllowSessionOffered {
-		t.Fatal("selection request must not offer a session confirmation grant")
+	if len(ticket.Offers) != 0 {
+		t.Fatalf("selection request must not offer confirm outcomes: %v", ticket.Offers)
 	}
 
 	// Reject unoffered option ID, OutcomeAllowedSession and denied-with-option.
-	_, err := owner.Answer(Decision{RequestID: ticket.RequestID, Outcome: OutcomeAllowedOnce, OptionID: "db-unknown"})
+	_, err := owner.Answer(&Decision{RequestID: ticket.RequestID, Outcome: OutcomeAllowedOnce, OptionID: questionUnofferedID})
 	wantCode(t, err, errcode.InvalidArgument)
-	_, err = owner.Answer(Decision{RequestID: ticket.RequestID, Outcome: OutcomeAllowedSession, OptionID: optionDBLocal})
+	_, err = owner.Answer(&Decision{RequestID: ticket.RequestID, Outcome: OutcomeAllowedSession, OptionID: optionDBLocal})
 	wantCode(t, err, errcode.InvalidArgument)
-	_, err = owner.Answer(Decision{RequestID: ticket.RequestID, Outcome: OutcomeDenied, OptionID: optionDBLocal})
+	_, err = owner.Answer(&Decision{RequestID: ticket.RequestID, Outcome: OutcomeDenied, OptionID: optionDBLocal})
 	wantCode(t, err, errcode.InvalidArgument)
 
-	answered := mustAnswer(t, owner, Decision{
+	answered := mustAnswer(t, owner, &Decision{
 		Incarnation: owner.Incarnation(),
 		RequestID:   ticket.RequestID,
 		Outcome:     OutcomeAllowedOnce,
@@ -91,7 +92,7 @@ func TestSelectionRequestsAcceptOnlyOfferedOptionsAndNeverAuthorizeExecution(t *
 	wantCode(t, err, errcode.FailedPrecondition)
 
 	deniedTicket := mustEnsure(t, owner, selectSpec("op-sel-deny"))
-	deniedRes := mustAnswer(t, owner, Decision{RequestID: deniedTicket.RequestID, Outcome: OutcomeDenied})
+	deniedRes := mustAnswer(t, owner, &Decision{RequestID: deniedTicket.RequestID, Outcome: OutcomeDenied})
 	if deniedRes.Outcome != OutcomeDenied || deniedRes.ReceiptID != "" {
 		t.Fatalf("denied selection = %+v", deniedRes)
 	}
@@ -111,7 +112,7 @@ func TestVaultLockInvalidatesPendingRequestsGrantsAndReceipts(t *testing.T) {
 	}
 
 	grantTicket := mustEnsure(t, owner, confirmSpec("op-grant"))
-	ansGrant := mustAnswer(t, owner, Decision{RequestID: grantTicket.RequestID, Outcome: OutcomeAllowedSession})
+	ansGrant := mustAnswer(t, owner, &Decision{RequestID: grantTicket.RequestID, Outcome: OutcomeAllowedSession})
 	pendingTicket := mustEnsure(t, owner, selectSpec("op-pending"))
 
 	// Synchronous vaultCheck blocks receipt claims and allowing answers even before SetVaultLocked runs.
@@ -119,7 +120,7 @@ func TestVaultLockInvalidatesPendingRequestsGrantsAndReceipts(t *testing.T) {
 	expected := defaultBinding()
 	_, err = owner.ClaimReceipt(ansGrant.ReceiptID, &expected)
 	wantCode(t, err, errcode.FailedPrecondition)
-	_, err = owner.Answer(Decision{RequestID: pendingTicket.RequestID, Outcome: OutcomeAllowedOnce, OptionID: optionDBLocal})
+	_, err = owner.Answer(&Decision{RequestID: pendingTicket.RequestID, Outcome: OutcomeAllowedOnce, OptionID: optionDBLocal})
 	wantCode(t, err, errcode.FailedPrecondition)
 
 	// SetVaultLocked(true) cancels pending requests and wipes unconsumed receipts and session grants.
@@ -158,7 +159,7 @@ func TestInvalidateOperationAndResetSession(t *testing.T) {
 	}
 
 	t2 := mustEnsure(t, owner, confirmSpec("op-reset"))
-	ans2 := mustAnswer(t, owner, Decision{RequestID: t2.RequestID, Outcome: OutcomeAllowedOnce})
+	ans2 := mustAnswer(t, owner, &Decision{RequestID: t2.RequestID, Outcome: OutcomeAllowedOnce})
 	if _, invErr := owner.InvalidateOperation("op-reset"); invErr != nil {
 		t.Fatal(invErr)
 	}
@@ -172,11 +173,11 @@ func TestInvalidateOperationAndResetSession(t *testing.T) {
 func assertResetSessionIsolatesSessions(t *testing.T, owner *Owner) {
 	t.Helper()
 	sess1Grant := mustEnsure(t, owner, confirmSpec("op-s1-grant"))
-	ansS1 := mustAnswer(t, owner, Decision{RequestID: sess1Grant.RequestID, Outcome: OutcomeAllowedSession})
+	ansS1 := mustAnswer(t, owner, &Decision{RequestID: sess1Grant.RequestID, Outcome: OutcomeAllowedSession})
 	sess1Pending := mustEnsure(t, owner, selectSpec("op-s1-pending"))
 
 	otherSpec := confirmSpec("op-s2-pending")
-	otherSpec.Binding.SessionID = "sess-2"
+	otherSpec.Binding.SessionID = session2
 	sess2Pending := mustEnsure(t, owner, otherSpec)
 
 	owner.ResetSession(testSessionID)
@@ -218,9 +219,16 @@ func assertSpecValidationErrors(t *testing.T, owner *Owner) {
 		{OperationID: "", Kind: KindConfirm, Binding: defaultBinding()},
 		{OperationID: "op", Kind: KindConfirm, Binding: Binding{}},
 		{OperationID: "op", Kind: KindConfirm, Options: []Option{{ID: "a", Label: "A"}}, Binding: defaultBinding()},
+		{OperationID: "op", Kind: KindConfirm, Offers: []Outcome{OutcomeDenied}, Binding: defaultBinding()},
+		{OperationID: "op", Kind: KindConfirm, Offers: []Outcome{OutcomeAllowedSession}, Binding: Binding{SessionID: testSessionID, InvocationID: "inv-1", AttemptID: "att-1", CheckGeneration: 1, ToolName: testToolName, EnvTag: "prod"}},
 		{OperationID: "op", Kind: KindSelect, Options: nil, Binding: defaultBinding()},
 		{OperationID: "op", Kind: KindSelect, Options: []Option{{ID: "", Label: "A"}}, Binding: defaultBinding()},
 		{OperationID: "op", Kind: KindSelect, Options: []Option{{ID: "a", Label: "A"}, {ID: "a", Label: "B"}}, Binding: defaultBinding()},
+		{OperationID: "op", Kind: KindSelect, Offers: []Outcome{OutcomeAllowedOnce}, Options: []Option{{ID: "a", Label: "A"}}, Binding: defaultBinding()},
+		{OperationID: "op", Kind: KindQuestion, Binding: defaultBinding()},
+		{OperationID: "op", Kind: KindQuestion, Questions: []Question{{ID: "", Question: "q"}}, Binding: defaultBinding()},
+		{Summary: strings.Repeat("a", MaxSummaryBytes+1), OperationID: "op", Kind: KindConfirm, Offers: []Outcome{OutcomeAllowedOnce}, Binding: defaultBinding()},
+		{OperationID: "op", Kind: KindConfirm, Offers: []Outcome{OutcomeAllowedOnce}, Options: []Option{{ID: "a", Label: "A"}}, Relayed: true, Binding: defaultBinding()},
 		{OperationID: "op", Kind: "unknown", Binding: defaultBinding()},
 	}
 	for _, spec := range badSpecs {
@@ -239,19 +247,21 @@ func assertOperationAndDecisionValidationErrors(t *testing.T, owner *Owner) {
 	wantCode(t, err, errcode.InvalidArgument)
 	_, err = owner.InvalidateOperation("")
 	wantCode(t, err, errcode.InvalidArgument)
-	_, err = owner.Answer(Decision{RequestID: ""})
+	_, err = owner.Answer(&Decision{RequestID: ""})
 	wantCode(t, err, errcode.InvalidArgument)
 
 	confirmT := mustEnsure(t, owner, confirmSpec("op-invalid-ans"))
-	_, err = owner.Answer(Decision{RequestID: confirmT.RequestID, Outcome: OutcomeAllowedOnce, OptionID: "unexpected"})
+	_, err = owner.Answer(&Decision{RequestID: confirmT.RequestID, Outcome: OutcomeAllowedOnce, OptionID: "unexpected"})
 	wantCode(t, err, errcode.InvalidArgument)
-	_, err = owner.Answer(Decision{RequestID: confirmT.RequestID, Outcome: OutcomeCancelled})
+	_, err = owner.Answer(&Decision{RequestID: confirmT.RequestID, Outcome: OutcomeCancelled})
 	wantCode(t, err, errcode.InvalidArgument)
-	_, err = owner.Answer(Decision{RequestID: confirmT.RequestID, Outcome: "bogus"})
+	_, err = owner.Answer(&Decision{RequestID: confirmT.RequestID, Outcome: "bogus"})
 	wantCode(t, err, errcode.InvalidArgument)
 
-	selectT := mustEnsure(t, owner, selectSpec("op-invalid-sel"))
-	_, err = owner.Answer(Decision{RequestID: selectT.RequestID, Outcome: "bogus"})
+	selSpec := selectSpec("op-invalid-sel")
+	selSpec.Binding.SessionID = "sess-2"
+	selectT := mustEnsure(t, owner, selSpec)
+	_, err = owner.Answer(&Decision{RequestID: selectT.RequestID, Outcome: "bogus"})
 	wantCode(t, err, errcode.InvalidArgument)
 }
 
@@ -271,6 +281,6 @@ func assertGeneratorFailures(t *testing.T, fakeClock *clock.Fake) {
 		t.Fatal(err)
 	}
 	tReceiptFail := mustEnsure(t, o2, confirmSpec("op-fail-receipt"))
-	_, err = o2.Answer(Decision{RequestID: tReceiptFail.RequestID, Outcome: OutcomeAllowedOnce})
+	_, err = o2.Answer(&Decision{RequestID: tReceiptFail.RequestID, Outcome: OutcomeAllowedOnce})
 	wantCode(t, err, errcode.Internal)
 }

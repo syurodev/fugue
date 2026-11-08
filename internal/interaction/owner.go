@@ -33,7 +33,9 @@ func grantKeyFor(b *Binding) grantKey {
 	}
 }
 
-// Config supplies the ports and optional callbacks for an Owner.
+// Config supplies the ports and optional callbacks for an Owner. Responder
+// may be nil: requests then stay pending until a client picks them up
+// (interaction §5, I-07); only Headless resolves requests as unavailable.
 type Config struct {
 	Clock       clock.Clock
 	IDs         ids.Generator
@@ -108,6 +110,10 @@ func (o *Owner) Ensure(spec *Spec) (*Ticket, error) {
 	if existing, ok := o.byOperation[spec.OperationID]; ok {
 		return o.readBackLocked(existing, spec, now)
 	}
+	if err := o.checkPendingLimitsLocked(spec, now); err != nil {
+		o.mu.Unlock()
+		return nil, err
+	}
 	ticket, err := o.newTicketLocked(spec, now)
 	if err != nil {
 		o.mu.Unlock()
@@ -120,7 +126,14 @@ func (o *Owner) Ensure(spec *Spec) (*Ticket, error) {
 	o.byRequest[ticket.RequestID] = ticket
 	cp := cloneTicket(ticket)
 	openedEv := o.newAuditEvent("opened", ticket)
+	respond := o.responder != nil
 	o.mu.Unlock()
+	if !respond {
+		// No live responder: the request waits for a client to pick it up
+		// (interaction §5, I-07).
+		o.emitAudit(&openedEv)
+		return cp, nil
+	}
 	return o.promptAndAudit(ticket, cp, &openedEv, now)
 }
 
@@ -142,16 +155,19 @@ func (o *Owner) newTicketLocked(spec *Spec, now time.Time) (*Ticket, error) {
 		return nil, errcode.Wrap(errcode.Internal, "generate request ID failed", err)
 	}
 	return &Ticket{
-		RequestID:           requestID,
-		OperationID:         spec.OperationID,
-		Incarnation:         o.incarnation,
-		Kind:                spec.Kind,
-		Summary:             spec.Summary,
-		AllowSessionOffered: spec.Kind == KindConfirm && !requiresEveryTime(spec),
-		Options:             slices.Clone(spec.Options),
-		Binding:             spec.Binding,
-		CreatedAt:           now,
-		ExpiresAt:           spec.ExpiresAt,
+		RequestID:   requestID,
+		OperationID: spec.OperationID,
+		Incarnation: o.incarnation,
+		Kind:        spec.Kind,
+		Summary:     spec.Summary,
+		Relayed:     spec.Relayed,
+		Offers:      slices.Clone(effectiveOffers(spec)),
+		Options:     slices.Clone(spec.Options),
+		Questions:   cloneQuestions(spec.Questions),
+		Body:        spec.Body,
+		Binding:     spec.Binding,
+		CreatedAt:   now,
+		ExpiresAt:   spec.ExpiresAt,
 	}, nil
 }
 
@@ -198,9 +214,9 @@ func (o *Owner) tryImmediateResolutionLocked(ticket *Ticket, now time.Time) (boo
 		ev := o.newAuditEvent("expired", ticket)
 		return true, &ev, nil
 	}
-	if ticket.AllowSessionOffered {
+	if slices.Contains(ticket.Offers, OutcomeAllowedSession) {
 		if _, ok := o.grants[grantKeyFor(&ticket.Binding)]; ok {
-			receipt, err := o.issueReceiptLocked(ticket, "", now)
+			receipt, err := o.issueReceiptLocked(ticket, "", nil, now)
 			if err != nil {
 				return false, nil, err
 			}
@@ -273,10 +289,11 @@ func (o *Owner) Pending() []*Ticket {
 }
 
 // Answer records the human decision for a pending request. A request may be
-// answered at most once, and requests from a previous incarnation or invalidated
-// by vault lock are rejected.
-func (o *Owner) Answer(decision Decision) (*Ticket, error) {
-	if decision.RequestID == "" {
+// answered at most once, requests from a previous incarnation or invalidated
+// by vault lock are rejected, and the first of several concurrent answers
+// wins. Relayed vendor requests never produce a receipt or a grant.
+func (o *Owner) Answer(decision *Decision) (*Ticket, error) {
+	if decision == nil || decision.RequestID == "" {
 		return nil, errcode.New(errcode.InvalidArgument, "interaction request ID is required")
 	}
 	if decision.Incarnation != "" && decision.Incarnation != o.incarnation {
@@ -313,81 +330,41 @@ func (o *Owner) Answer(decision Decision) (*Ticket, error) {
 	return cp, nil
 }
 
-func (o *Owner) applyDecisionLocked(ticket *Ticket, decision Decision, now time.Time) error {
-	switch ticket.Kind {
-	case KindConfirm:
-		return o.applyConfirmLocked(ticket, decision, now)
-	case KindSelect:
-		return o.applySelectLocked(ticket, decision, now)
-	default:
-		return errcode.New(errcode.InvalidArgument, "interaction kind is invalid")
+// TakeRelayed delivers a resolved relayed request's decision to the vendor
+// adapter exactly once and frees the request content from memory
+// (vendor-runtime VR-05): the ticket is returned on the first call and
+// removed from both indexes, so later lookups and a second take fail typed.
+// A still-pending request is not deliverable, and the take fails closed while
+// the vault is locked (interaction §5, I-E06).
+func (o *Owner) TakeRelayed(operationID string) (*Ticket, error) {
+	if operationID == "" {
+		return nil, errcode.New(errcode.InvalidArgument, "interaction operation ID is required")
 	}
-}
-
-func (o *Owner) applyConfirmLocked(ticket *Ticket, decision Decision, now time.Time) error {
-	if decision.OptionID != "" {
-		return errcode.New(errcode.InvalidArgument, "confirm decision must not specify an option ID")
+	o.mu.Lock()
+	if o.isVaultLockedLocked() {
+		o.mu.Unlock()
+		return nil, errcode.New(errcode.FailedPrecondition, "vault is locked")
 	}
-	switch decision.Outcome {
-	case OutcomeAllowedOnce:
-		receipt, err := o.issueReceiptLocked(ticket, "", now)
-		if err != nil {
-			return err
-		}
-		ticket.ReceiptID = receipt.ReceiptID
-	case OutcomeAllowedSession:
-		if !ticket.AllowSessionOffered {
-			return errcode.New(errcode.InvalidArgument, "session grant is not offered for this request")
-		}
-		receipt, err := o.issueReceiptLocked(ticket, "", now)
-		if err != nil {
-			return err
-		}
-		o.grants[grantKeyFor(&ticket.Binding)] = struct{}{}
-		ticket.ReceiptID = receipt.ReceiptID
-	case OutcomeDenied:
-	case OutcomeCancelled, OutcomeUnavailable, OutcomeExpired:
-		return errcode.New(errcode.InvalidArgument, "confirm decision outcome is not a valid user answer")
-	default:
-		return errcode.New(errcode.InvalidArgument, "confirm decision outcome is invalid")
+	ticket, ok := o.byOperation[operationID]
+	if !ok {
+		o.mu.Unlock()
+		return nil, errcode.New(errcode.NotFound, "interaction operation not found")
 	}
-	ticket.Resolved = true
-	ticket.ResolvedAt = now
-	ticket.Outcome = decision.Outcome
-	return nil
-}
-
-func (o *Owner) applySelectLocked(ticket *Ticket, decision Decision, now time.Time) error {
-	switch decision.Outcome {
-	case OutcomeAllowedOnce:
-		if !hasOption(ticket.Options, decision.OptionID) {
-			return errcode.New(errcode.InvalidArgument, "selected option was not offered")
-		}
-		receipt, err := o.issueReceiptLocked(ticket, decision.OptionID, now)
-		if err != nil {
-			return err
-		}
-		ticket.SelectedOptionID = decision.OptionID
-		ticket.ReceiptID = receipt.ReceiptID
-	case OutcomeDenied:
-		if decision.OptionID != "" {
-			return errcode.New(errcode.InvalidArgument, "denied selection must not specify an option ID")
-		}
-	case OutcomeAllowedSession, OutcomeCancelled, OutcomeUnavailable, OutcomeExpired:
-		return errcode.New(errcode.InvalidArgument, "selection decision outcome is not a valid user answer")
-	default:
-		return errcode.New(errcode.InvalidArgument, "selection decision outcome is invalid")
+	if !ticket.Relayed {
+		o.mu.Unlock()
+		return nil, errcode.New(errcode.FailedPrecondition, "operation is not a relayed request")
 	}
-	ticket.Resolved = true
-	ticket.ResolvedAt = now
-	ticket.Outcome = decision.Outcome
-	return nil
-}
-
-func hasOption(options []Option, id string) bool {
-	return slices.ContainsFunc(options, func(opt Option) bool {
-		return opt.ID == id
-	})
+	if !ticket.Resolved {
+		o.mu.Unlock()
+		return nil, errcode.New(errcode.FailedPrecondition, "relayed request is not resolved yet")
+	}
+	delete(o.byOperation, ticket.OperationID)
+	delete(o.byRequest, ticket.RequestID)
+	cp := cloneTicket(ticket)
+	ev := o.newAuditEvent("delivered", ticket)
+	o.mu.Unlock()
+	o.emitAudit(&ev)
+	return cp, nil
 }
 
 func (o *Owner) expireIfDueLocked(ticket *Ticket, now time.Time) *AuditEvent {
@@ -401,8 +378,12 @@ func (o *Owner) expireIfDueLocked(ticket *Ticket, now time.Time) *AuditEvent {
 	return &ev
 }
 
+// isUnavailableLocked reports whether a new request resolves as unavailable
+// immediately: only a headless host (or a locked vault) fails closed at
+// creation (interaction §5, I-07). A missing responder leaves the request
+// pending instead.
 func (o *Owner) isUnavailableLocked() bool {
-	return o.headless || o.responder == nil || o.isVaultLockedLocked()
+	return o.headless || o.isVaultLockedLocked()
 }
 
 func (o *Owner) isVaultLockedLocked() bool {

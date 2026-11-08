@@ -49,8 +49,7 @@ func confirmSpec(opID string) *Spec {
 		OperationID: opID,
 		Kind:        KindConfirm,
 		Summary:     "Write main.go",
-		Important:   false,
-		Options:     nil,
+		Offers:      []Outcome{OutcomeAllowedOnce, OutcomeAllowedSession},
 		ExpiresAt:   time.Time{},
 		Binding:     defaultBinding(),
 	}
@@ -61,13 +60,102 @@ func selectSpec(opID string) *Spec {
 		OperationID: opID,
 		Kind:        KindSelect,
 		Summary:     "Choose database profile",
-		Important:   false,
 		Options: []Option{
 			{ID: optionDBLocal, Label: "Local Postgres"},
 			{ID: optionDBStage, Label: "Staging replica"},
 		},
 		ExpiresAt: time.Time{},
 		Binding:   defaultBinding(),
+	}
+}
+
+// Shared test constants; goconst requires the repeated literals to be named.
+const (
+	vendorOptionAllow  = "allow"
+	vendorOptionAlways = "always"
+	vendorOptionDeny   = "deny"
+	session2           = "sess-2"
+	genericOptionLabel = "Option"
+	relayDenyNote      = "Not while the tests run"
+	// questionUnofferedID is the option ID no question offers.
+	questionUnofferedID = "db-unknown"
+)
+
+func testQuestion() Question {
+	return Question{
+		ID:       "db",
+		Question: "Which database should the tests use?",
+		Header:   "Test DB",
+		Options: []Option{
+			{ID: optionDBLocal, Label: "Local Postgres", Description: "Same as production"},
+			{ID: optionDBStage, Label: "Staging replica"},
+		},
+		MultiSelect: false,
+	}
+}
+
+func questionSpec(opID string) *Spec {
+	return &Spec{
+		OperationID: opID,
+		Kind:        KindQuestion,
+		Summary:     "ask_user",
+		Questions:   []Question{testQuestion()},
+		ExpiresAt:   time.Time{},
+		Binding:     defaultBinding(),
+	}
+}
+
+func vendorOptions() []Option {
+	return []Option{
+		{ID: vendorOptionAllow, Label: "Allow once"},
+		{ID: vendorOptionAlways, Label: "Always allow"},
+		{ID: vendorOptionDeny, Label: "Deny"},
+	}
+}
+
+func mustVendorKey(t *testing.T, turnID, vendorRequestID string) string {
+	t.Helper()
+	key, err := VendorOperationKey(testSessionID, turnID, vendorRequestID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return key
+}
+
+// vendorBinding is the vendor-shaped binding of a relayed request (VR-05):
+// session plus turn and vendor request; no native check fields.
+func vendorBinding(turnID, vendorRequestID string) Binding {
+	return Binding{
+		SessionID:       testSessionID,
+		TurnID:          turnID,
+		VendorRequestID: vendorRequestID,
+	}
+}
+
+func relayedSpec(t *testing.T, turnID, vendorRequestID string) *Spec {
+	t.Helper()
+	return &Spec{
+		OperationID: mustVendorKey(t, turnID, vendorRequestID),
+		Kind:        KindConfirm,
+		Summary:     "Vendor wants to run npm install",
+		Relayed:     true,
+		Options:     vendorOptions(),
+		ExpiresAt:   time.Time{},
+		Binding:     vendorBinding(turnID, vendorRequestID),
+	}
+}
+
+func relayedQuestionSpec(t *testing.T, turnID, vendorRequestID string) *Spec {
+	t.Helper()
+	return &Spec{
+		OperationID: mustVendorKey(t, turnID, vendorRequestID),
+		Kind:        KindQuestion,
+		Summary:     "Vendor asks before proceeding",
+		Relayed:     true,
+		Questions:   []Question{testQuestion()},
+		Body:        "Context the vendor attached",
+		ExpiresAt:   time.Time{},
+		Binding:     vendorBinding(turnID, vendorRequestID),
 	}
 }
 
@@ -135,7 +223,7 @@ func mustEnsure(t *testing.T, owner *Owner, spec *Spec) *Ticket {
 	return ticket
 }
 
-func mustAnswer(t *testing.T, owner *Owner, decision Decision) *Ticket {
+func mustAnswer(t *testing.T, owner *Owner, decision *Decision) *Ticket {
 	t.Helper()
 	ticket, err := owner.Answer(decision)
 	if err != nil {
