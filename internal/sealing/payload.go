@@ -15,6 +15,8 @@ func AssociatedData(recordType, sessionID, payloadID, kind, keyID string) crypto
 }
 
 // SealPayload encrypts and serializes a payload.
+// Its contextual error wraps do not add a store error code; callers must wrap
+// them with their store's typed error, preserving existing dependency codes.
 func SealPayload(random io.Reader, recordType, sessionID, payloadID, kind, keyID string, key, plaintext []byte) ([]byte, error) {
 	env, err := crypto.SealWithRandom(random, AssociatedData(recordType, sessionID, payloadID, kind, keyID), key, plaintext)
 	if err != nil {
@@ -28,6 +30,8 @@ func SealPayload(random io.Reader, recordType, sessionID, payloadID, kind, keyID
 }
 
 // OpenPayload authenticates and decrypts a serialized payload.
+// Errors retain their underlying typed codes; contextual wraps do not add a
+// store code. Callers must wrap errors needing a store-specific typed error.
 func OpenPayload(recordType, sessionID, payloadID, kind, keyID string, key, envelope []byte) ([]byte, error) {
 	var env crypto.Envelope
 	if err := json.Unmarshal(envelope, &env); err != nil {

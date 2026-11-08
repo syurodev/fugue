@@ -5,7 +5,6 @@ import "math"
 // Protected payload size limits.
 const (
 	MaxPayloadPlaintext    = 1 << 20
-	MaxRunPayloadTotal     = 64 << 20
 	MaxSessionPayloadTotal = 1 << 30
 )
 

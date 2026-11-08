@@ -172,7 +172,7 @@ func (s *Store) OpenPayload(ctx context.Context, sessionID, payloadID string) ([
 	defer clear(rawKey)
 	plaintext, openErr := sealing.OpenPayload(PayloadRecordType, sessionID, payloadID, kind, keyID, rawKey, envelope)
 	if openErr != nil {
-		return nil, fmt.Errorf("%w", openErr)
+		return nil, fmt.Errorf("open payload: %w", openErr)
 	}
 
 	if err := s.validatePayloadEpoch(epoch, sessionID); err != nil {

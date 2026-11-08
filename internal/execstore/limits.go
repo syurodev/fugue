@@ -19,7 +19,7 @@ const (
 	MaxPayloadPlaintext = sealing.MaxPayloadPlaintext
 
 	// MaxRunPayloadTotal is the maximum cumulative payload bytes allowed per execution run: 64 MiB.
-	MaxRunPayloadTotal = sealing.MaxRunPayloadTotal
+	MaxRunPayloadTotal = 64 << 20
 
 	// MaxSessionPayloadTotal is the maximum cumulative payload bytes allowed per session: 1 GiB.
 	MaxSessionPayloadTotal = sealing.MaxSessionPayloadTotal

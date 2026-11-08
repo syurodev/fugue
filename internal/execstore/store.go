@@ -26,6 +26,7 @@ type Store struct {
 	faultPoints     map[FaultPoint]error
 	keyCache        *sessionKeyCache
 	unregisterGuard func()
+	prepareMu       sync.Mutex
 	mu              sync.Mutex
 }
 
@@ -75,6 +76,7 @@ func New(
 		faultPoints:     make(map[FaultPoint]error),
 		keyCache:        cache,
 		unregisterGuard: nil,
+		prepareMu:       sync.Mutex{},
 		mu:              sync.Mutex{},
 	}
 

@@ -8,6 +8,8 @@ import (
 )
 
 // UnwrapSessionKey opens a session key bound to its session and key identifiers.
+// Contextual error wraps do not add a store error code; callers must wrap them
+// with their store's typed error, preserving existing dependency codes.
 func UnwrapSessionKey(v *vault.Service, recordType, sessionID, keyID string, wrapped []byte) ([]byte, error) {
 	if v == nil || v.Snapshot().State != vault.StateUnlocked {
 		return nil, vault.ErrLocked
@@ -20,6 +22,8 @@ func UnwrapSessionKey(v *vault.Service, recordType, sessionID, keyID string, wra
 }
 
 // GenerateSessionKey creates a key and wraps it under the vault.
+// Contextual error wraps do not add a store error code; callers must wrap them
+// with their store's typed error, preserving existing dependency codes.
 func GenerateSessionKey(v *vault.Service, random ids.Random, recordType, sessionID, keyID string) ([]byte, *SessionKey, error) {
 	if v == nil || v.Snapshot().State != vault.StateUnlocked {
 		return nil, nil, vault.ErrLocked

@@ -45,8 +45,8 @@ func (s *Store) generateFreshSessionKey(sessionID string) ([]byte, *SealedSessio
 }
 
 func (s *Store) getOrCreateSessionKey(ctx context.Context, sessionID string) ([]byte, *SealedSessionKey, error) {
-	s.keyCache.Prepare.Lock()
-	defer s.keyCache.Prepare.Unlock()
+	s.prepareMu.Lock()
+	defer s.prepareMu.Unlock()
 	if s.keyCache.IsPurged(sessionID) {
 		return nil, nil, ErrSessionPurging
 	}

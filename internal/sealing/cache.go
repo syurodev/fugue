@@ -14,8 +14,6 @@ type SessionKey struct {
 
 // KeyCache manages in-memory keys and purge barriers.
 type KeyCache struct {
-	// prepare may span SQL/vault work; guards only take mu for in-memory work.
-	Prepare sync.Mutex
 	mu      sync.RWMutex
 	keys    map[string][]byte
 	pending map[string]*SessionKey
@@ -75,7 +73,7 @@ func (c *KeyCache) Committed(sessionID string, key *SessionKey) {
 	if pending != nil && pending.KeyID == key.KeyID && bytes.Equal(pending.WrappedKey, key.WrappedKey) {
 		delete(c.pending, sessionID)
 	} else if pending != nil {
-		// A previously Prepared batch may win after a vault epoch changed. Reload
+		// A previously prepared batch may win after a vault epoch changed. Reload
 		// its durable key instead of retaining a different, uncommitted candidate.
 		c.dropKey(sessionID)
 	}
