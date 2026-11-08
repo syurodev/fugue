@@ -48,9 +48,11 @@ const (
 )
 
 // connState is the per-connection state attached to the connection's context:
-// the connection's id and its hello phase.
+// the connection's id, its hello phase and the negotiated client kind, which
+// is the connection's principal for topic authorization (host-api §7).
 type connState struct {
 	id    string
+	kind  app.ClientKind
 	mu    sync.Mutex
 	phase connPhase
 }
@@ -66,19 +68,29 @@ func (st *connState) beginHello() error {
 	return nil
 }
 
-// leaseHello records a successful hello and reports whether the lease was
-// kept. When the connection closed while the backend calls ran, the close
-// hook has already marked it closed and released nothing — the hello releases
-// the lease itself and reports that it was not kept.
-func (st *connState) leaseHello(release func()) bool {
+// leaseHello records a successful hello — the negotiated kind becomes the
+// connection's principal — and reports whether the lease was kept. When the
+// connection closed while the backend calls ran, the close hook has already
+// marked it closed and released nothing — the hello releases the lease itself
+// and reports that it was not kept.
+func (st *connState) leaseHello(kind app.ClientKind, release func()) bool {
 	st.mu.Lock()
 	defer st.mu.Unlock()
 	if st.phase == phaseClosed {
 		release()
 		return false
 	}
+	st.kind = kind
 	st.phase = phaseLeased
 	return true
+}
+
+// principal returns the connection's authenticated client kind, set only
+// after a successful hello.
+func (st *connState) principal() app.ClientKind {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.kind
 }
 
 // failHello returns a failed hello to none so the client may retry.
@@ -263,6 +275,12 @@ func (s *Server) Drain(ctx context.Context, force bool) error {
 	}
 	if err := s.listener.Close(); err != nil {
 		return errcode.Wrap(errcode.Internal, "close the host listener", err)
+	}
+	// End every event stream before the connections close: each handler
+	// delivers its end message and returns, so the in-flight wait below sees
+	// them finish (a host drain ends every stream cleanly, host-api §6).
+	if ender, ok := s.backend.(app.StreamEnder); ok {
+		ender.EndStreams()
 	}
 	var drainErr error
 	if force {

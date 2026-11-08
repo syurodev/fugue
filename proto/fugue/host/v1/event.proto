@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package fugue.host.v1;
+
+// EventCursor names a position in one topic's event sequence (docs: host-api
+// §6). incarnation_id is the host incarnation that produced the sequence: an
+// ephemeral topic compares it to reject a cursor from another process life,
+// while a durable topic's sequence survives a restart in its store.
+message EventCursor {
+  string topic = 1;
+  string incarnation_id = 2;
+  uint64 sequence = 3;
+}
+
+message SubscribeRequest {
+  // topic names a registered event topic (docs: host-api §6). An unregistered
+  // topic is denied.
+  string topic = 1;
+  // cursor resumes a previous stream; absent on the first subscribe. A cursor
+  // the host can no longer catch up from is answered with a fresh snapshot.
+  EventCursor cursor = 2;
+}
+
+// HostEvent is one event on a topic. payload is an opaque, topic-specific
+// encoding documented with the topic; typed messages arrive with the module
+// services that own the topics (docs: host-api §6). A topic whose deltas can
+// be coalesced or dropped under pressure must publish each delta as the
+// complete latest state for its coalescing key, never an increment or a piece
+// (docs: transcript §5), and must also publish a key's final state as an
+// event that is never dropped — a dropped delta can then only lose
+// intermediate states, never the last one.
+message HostEvent {
+  uint64 sequence = 1;
+  string type = 2;
+  bytes payload = 3;
+}
+
+// SnapshotEvent carries a topic's full state and the sequence it reflects.
+// Every event that follows has a greater sequence: there is no gap between
+// the snapshot and the stream (docs: event-storage-recovery §9).
+message SnapshotEvent {
+  uint64 sequence = 1;
+  bytes state = 2;
+  // incarnation_id is the host incarnation the sequence belongs to, so a
+  // client can build its next cursor without calling HostStatus.
+  string incarnation_id = 3;
+}
+
+// StreamEnd ends a subscription stream. resync_required tells the client to
+// discard its state and subscribe again from a fresh snapshot (it fell too far
+// behind); without it the stream simply ended (the host is draining or the
+// client closed the stream).
+message StreamEnd {
+  bool resync_required = 1;
+}
+
+message SubscribeResponse {
+  oneof kind {
+    SnapshotEvent snapshot = 1;
+    HostEvent event = 2;
+    StreamEnd end = 3;
+  }
+}

@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package fugue.host.v1;
 
+import "fugue/host/v1/event.proto";
 import "fugue/host/v1/hello.proto";
 import "fugue/host/v1/shutdown.proto";
 import "fugue/host/v1/status.proto";
@@ -12,4 +13,7 @@ service HostService {
   rpc Hello(HelloRequest) returns (HelloResponse);
   rpc HostStatus(HostStatusRequest) returns (HostStatusResponse);
   rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
+  // Subscribe streams one topic's events after an optional snapshot or
+  // catch-up from a cursor (docs: host-api §6).
+  rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
 }

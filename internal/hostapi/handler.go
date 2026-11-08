@@ -142,7 +142,7 @@ func (h *serviceHandler) Hello(ctx context.Context, req *connect.Request[hostv1.
 	// has marked it closed without releasing — the hello releases the lease
 	// itself. WithoutCancel keeps the release working past the dead request
 	// context.
-	st.leaseHello(func() { h.backend.LeaseReleased(context.WithoutCancel(ctx), st.id) })
+	st.leaseHello(kind, func() { h.backend.LeaseReleased(context.WithoutCancel(ctx), st.id) })
 	return connect.NewResponse(&hostv1.HelloResponse{
 		ApiVersion:  res.APIVersion,
 		HostVersion: res.HostVersion,
@@ -197,6 +197,66 @@ func requireHelloed(ctx context.Context) error {
 		return ErrHelloFirst
 	}
 	return nil
+}
+
+// Subscribe streams one topic's events: an optional snapshot (missing or
+// unusable cursor), then the events the cursor has not seen yet, in strict
+// sequence order (host-api §6). The stream ends with resync_required when the
+// client fell too far behind, and cleanly when the host drains.
+func (h *serviceHandler) Subscribe(ctx context.Context, req *connect.Request[hostv1.SubscribeRequest], stream *connect.ServerStream[hostv1.SubscribeResponse]) error {
+	st, serr := connectionState(ctx)
+	if serr != nil {
+		return h.connectError(ctx, serr)
+	}
+	// Only a client that completed hello may subscribe; its negotiated kind is
+	// the principal the topic authorization decides on.
+	if err := requireHelloed(ctx); err != nil {
+		return h.connectError(ctx, err)
+	}
+	var cursor *app.EventCursor
+	if c := req.Msg.Cursor; c != nil {
+		cursor = &app.EventCursor{Topic: c.Topic, Incarnation: c.IncarnationId, Sequence: c.Sequence}
+	}
+	sub, err := h.backend.Subscribe(ctx, app.SubscribeParams{
+		Principal: string(st.principal()),
+		Topic:     req.Msg.Topic,
+		Cursor:    cursor,
+	})
+	if err != nil {
+		return h.connectError(ctx, err)
+	}
+	defer sub.Close()
+	// Catch-up from a valid cursor sends no snapshot: the events the client has
+	// not seen start immediately (host-api §6).
+	if state, seq, ok := sub.Snapshot(); ok {
+		serr := stream.Send(&hostv1.SubscribeResponse{Kind: &hostv1.SubscribeResponse_Snapshot{
+			Snapshot: &hostv1.SnapshotEvent{Sequence: seq, State: state, IncarnationId: sub.Incarnation()},
+		}})
+		if serr != nil {
+			return errcode.Wrap(errcode.Internal, "send the snapshot", serr)
+		}
+	}
+	for {
+		ev, ok := sub.Next(ctx)
+		if !ok {
+			// The stream ended server-side (drain or resync): the client
+			// always gets the end message naming the reason. If the client's
+			// own context is gone the send fails and returns.
+			serr := stream.Send(&hostv1.SubscribeResponse{Kind: &hostv1.SubscribeResponse_End{
+				End: &hostv1.StreamEnd{ResyncRequired: sub.ResyncRequired()},
+			}})
+			if serr != nil {
+				return errcode.Wrap(errcode.Internal, "send the stream end", serr)
+			}
+			return nil
+		}
+		serr := stream.Send(&hostv1.SubscribeResponse{Kind: &hostv1.SubscribeResponse_Event{
+			Event: &hostv1.HostEvent{Sequence: ev.Seq, Type: ev.Type, Payload: ev.Payload},
+		}})
+		if serr != nil {
+			return errcode.Wrap(errcode.Internal, "send the event", serr)
+		}
+	}
 }
 
 // kindFromProto maps the proto client kind to the domain kind; an

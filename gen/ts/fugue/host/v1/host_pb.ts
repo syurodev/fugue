@@ -4,6 +4,8 @@
 
 import type { GenFile, GenService } from "@bufbuild/protobuf/codegenv2";
 import { fileDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { SubscribeRequestSchema, SubscribeResponseSchema } from "./event_pb";
+import { file_fugue_host_v1_event } from "./event_pb";
 import type { HelloRequestSchema, HelloResponseSchema } from "./hello_pb";
 import { file_fugue_host_v1_hello } from "./hello_pb";
 import type { ShutdownRequestSchema, ShutdownResponseSchema } from "./shutdown_pb";
@@ -15,7 +17,7 @@ import { file_fugue_host_v1_status } from "./status_pb";
  * Describes the file fugue/host/v1/host.proto.
  */
 export const file_fugue_host_v1_host: GenFile = /*@__PURE__*/
-  fileDesc("ChhmdWd1ZS9ob3N0L3YxL2hvc3QucHJvdG8SDWZ1Z3VlLmhvc3QudjEy8QEKC0hvc3RTZXJ2aWNlEkIKBUhlbGxvEhsuZnVndWUuaG9zdC52MS5IZWxsb1JlcXVlc3QaHC5mdWd1ZS5ob3N0LnYxLkhlbGxvUmVzcG9uc2USUQoKSG9zdFN0YXR1cxIgLmZ1Z3VlLmhvc3QudjEuSG9zdFN0YXR1c1JlcXVlc3QaIS5mdWd1ZS5ob3N0LnYxLkhvc3RTdGF0dXNSZXNwb25zZRJLCghTaHV0ZG93bhIeLmZ1Z3VlLmhvc3QudjEuU2h1dGRvd25SZXF1ZXN0Gh8uZnVndWUuaG9zdC52MS5TaHV0ZG93blJlc3BvbnNlQsEBChFjb20uZnVndWUuaG9zdC52MUIJSG9zdFByb3RvUAFaS2dpdGh1Yi5jb20vc3l1cm9kZXYvZnVndWUvaW50ZXJuYWwvaG9zdGFwaS9pbnRlcm5hbC9wYi9mdWd1ZS9ob3N0L3YxO2hvc3R2MaICA0ZIWKoCDUZ1Z3VlLkhvc3QuVjHKAg1GdWd1ZVxIb3N0XFYx4gIZRnVndWVcSG9zdFxWMVxHUEJNZXRhZGF0YeoCD0Z1Z3VlOjpIb3N0OjpWMWIGcHJvdG8z", [file_fugue_host_v1_hello, file_fugue_host_v1_shutdown, file_fugue_host_v1_status]);
+  fileDesc("ChhmdWd1ZS9ob3N0L3YxL2hvc3QucHJvdG8SDWZ1Z3VlLmhvc3QudjEywwIKC0hvc3RTZXJ2aWNlEkIKBUhlbGxvEhsuZnVndWUuaG9zdC52MS5IZWxsb1JlcXVlc3QaHC5mdWd1ZS5ob3N0LnYxLkhlbGxvUmVzcG9uc2USUQoKSG9zdFN0YXR1cxIgLmZ1Z3VlLmhvc3QudjEuSG9zdFN0YXR1c1JlcXVlc3QaIS5mdWd1ZS5ob3N0LnYxLkhvc3RTdGF0dXNSZXNwb25zZRJLCghTaHV0ZG93bhIeLmZ1Z3VlLmhvc3QudjEuU2h1dGRvd25SZXF1ZXN0Gh8uZnVndWUuaG9zdC52MS5TaHV0ZG93blJlc3BvbnNlElAKCVN1YnNjcmliZRIfLmZ1Z3VlLmhvc3QudjEuU3Vic2NyaWJlUmVxdWVzdBogLmZ1Z3VlLmhvc3QudjEuU3Vic2NyaWJlUmVzcG9uc2UwAULBAQoRY29tLmZ1Z3VlLmhvc3QudjFCCUhvc3RQcm90b1ABWktnaXRodWIuY29tL3N5dXJvZGV2L2Z1Z3VlL2ludGVybmFsL2hvc3RhcGkvaW50ZXJuYWwvcGIvZnVndWUvaG9zdC92MTtob3N0djGiAgNGSFiqAg1GdWd1ZS5Ib3N0LlYxygINRnVndWVcSG9zdFxWMeICGUZ1Z3VlXEhvc3RcVjFcR1BCTWV0YWRhdGHqAg9GdWd1ZTo6SG9zdDo6VjFiBnByb3RvMw", [file_fugue_host_v1_event, file_fugue_host_v1_hello, file_fugue_host_v1_shutdown, file_fugue_host_v1_status]);
 
 /**
  * HostService is the connection and lifecycle service every client speaks
@@ -47,6 +49,17 @@ export const HostService: GenService<{
     methodKind: "unary";
     input: typeof ShutdownRequestSchema;
     output: typeof ShutdownResponseSchema;
+  },
+  /**
+   * Subscribe streams one topic's events after an optional snapshot or
+   * catch-up from a cursor (docs: host-api §6).
+   *
+   * @generated from rpc fugue.host.v1.HostService.Subscribe
+   */
+  subscribe: {
+    methodKind: "server_streaming";
+    input: typeof SubscribeRequestSchema;
+    output: typeof SubscribeResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fugue_host_v1_host, 0);
