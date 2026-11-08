@@ -8,15 +8,13 @@ import (
 	"path/filepath"
 	"syscall"
 	"testing"
-	"time"
 
 	"go.uber.org/goleak"
 
 	"github.com/syurodev/fugue/pkg/client"
 )
 
-// fugueBinPath is the host binary TestMain built.
-var fugueBinPath string
+const binPointerName = "fugue-f10.2a-bin.path"
 
 // TestMain builds the fugue binary from the core module's cmd/fugue — once
 // for the whole package, before any test runs — and checks the package for
@@ -37,14 +35,31 @@ func TestMain(m *testing.M) {
 		removeBuildDir(dir)
 		os.Exit(1)
 	}
-	fugueBinPath = filepath.Join(dir, "fugue")
-	goleak.VerifyTestMain(m)
+	binPath := filepath.Join(dir, "fugue")
+	pointerFile := filepath.Join(os.TempDir(), binPointerName)
+	if writeErr := os.WriteFile(pointerFile, []byte(binPath), 0o600); writeErr != nil {
+		fmt.Fprintf(os.Stderr, "write bin path pointer: %v\n", writeErr)
+		removeBuildDir(dir)
+		os.Exit(1)
+	}
+	code := m.Run()
 	removeBuildDir(dir)
+	if code == 0 {
+		if err := goleak.Find(); err != nil {
+			fmt.Fprintf(os.Stderr, "goleak: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	os.Exit(code)
 }
 
-// removeBuildDir drops the harness's build directory; nothing can act on the
-// error this late.
+// removeBuildDir drops the harness's build directory and pointer file; nothing
+// can act on the error this late.
 func removeBuildDir(dir string) {
+	pointerFile := filepath.Join(os.TempDir(), binPointerName)
+	if err := os.Remove(pointerFile); err != nil && !os.IsNotExist(err) {
+		fmt.Fprintf(os.Stderr, "remove the bin pointer: %v\n", err)
+	}
 	if rmErr := os.RemoveAll(dir); rmErr != nil {
 		fmt.Fprintf(os.Stderr, "remove the build dir: %v\n", rmErr)
 	}
@@ -54,10 +69,12 @@ func removeBuildDir(dir string) {
 // the calling test.
 func buildFugue(t *testing.T) string {
 	t.Helper()
-	if fugueBinPath == "" {
-		t.Fatal("the host binary was not built in TestMain")
+	pointerFile := filepath.Join(os.TempDir(), binPointerName)
+	data, err := os.ReadFile(filepath.Clean(pointerFile))
+	if err != nil {
+		t.Fatalf("the host binary was not built in TestMain: %v", err)
 	}
-	return fugueBinPath
+	return string(data)
 }
 
 // testHost is one running fugue serve process with its data directory.
@@ -90,38 +107,45 @@ func startServe(t *testing.T, ctx context.Context, bin string) *testHost {
 	}
 	t.Cleanup(func() {
 		if cmd.ProcessState == nil {
-			_ = cmd.Process.Kill()
+			if kerr := cmd.Process.Kill(); kerr != nil {
+				return
+			}
 		}
 		// Wait reaps the process and ends exec's watch goroutine, even after
 		// a kill.
-		_ = cmd.Wait()
+		if werr := cmd.Wait(); werr != nil {
+			return
+		}
 	})
 	return &testHost{cmd: cmd, dataDir: dataDir}
 }
 
-// stopServe drains the host with SIGTERM and waits for the exit, bounded by a
-// kill after 30 s so a hung drain fails the test's assertions rather than
-// hanging the run.
-func (h *testHost) stopServe(t *testing.T) {
+// stopServe drains the host with SIGTERM and waits for the exit, bounded by
+// ctx so a hung drain fails the test's assertions rather than hanging the run.
+func (h *testHost) stopServe(t *testing.T, ctx context.Context) {
 	t.Helper()
 	if h.cmd.ProcessState != nil {
 		return
 	}
 	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		// cmd.Wait reaps the process and ends exec's watch goroutine.
-		_ = h.cmd.Wait()
-		close(done)
+		if werr := h.cmd.Wait(); werr != nil {
+			return
+		}
 	}()
 	if err := h.cmd.Process.Signal(syscall.SIGTERM); err != nil {
 		t.Errorf("signal the host: %v", err)
 	}
 	select {
 	case <-done:
-	case <-time.After(30 * time.Second):
-		_ = h.cmd.Process.Kill()
+	case <-ctx.Done():
+		if kerr := h.cmd.Process.Kill(); kerr != nil {
+			t.Logf("kill host: %v", kerr)
+		}
 		<-done
-		t.Error("the host did not exit within 30 s of SIGTERM")
+		t.Errorf("the host did not exit before deadline: %v", ctx.Err())
 	}
 }
 
@@ -190,7 +214,7 @@ func TestAppReconnectsAndCatchesUpFromSequence(t *testing.T) {
 	host := startServe(t, ctx, bin)
 	clock := newFakeClock()
 	m, upd := newTestManager(t, host.dataDir, clock, "host")
-	m.Start()
+	m.Start(ctx)
 
 	snap := catchUpAfterDrop(t, ctx, m, clock, upd, host)
 	reconnectAfterRestart(t, ctx, m, clock, upd, host, bin, snap.Incarnation)
@@ -252,7 +276,7 @@ func catchUpAfterDrop(t *testing.T, ctx context.Context, m *Manager, clock *fake
 // incarnation with a fresh snapshot and live events after it.
 func reconnectAfterRestart(t *testing.T, ctx context.Context, m *Manager, clock *fakeClock, upd *collector, host *testHost, bin, firstIncarnation string) {
 	t.Helper()
-	host.stopServe(t)
+	host.stopServe(t, ctx)
 	waitForState(t, ctx, m, clock, upd, StateDisconnected)
 	host2 := startServe(t, ctx, bin)
 	waitForState(t, ctx, m, clock, upd, StateConnected)

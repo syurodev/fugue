@@ -59,7 +59,7 @@ func (t *fakeTimer) Stop() bool {
 
 // fire moves a live timer's channel; a stopped timer does not fire.
 func (t *fakeTimer) fire() {
-	t.c <- time.Now()
+	t.c <- time.Time{}
 }
 
 // fakeClock records requested backoffs and lets the test fire live timers.
@@ -314,8 +314,7 @@ func testCtx(t *testing.T) context.Context {
 func newTestManager(t *testing.T, dataDir string, clock *fakeClock, topics ...string) (*Manager, *collector) {
 	t.Helper()
 	upd := newCollector(256)
-	m := NewManager(Config{
-		Context: testCtx(t),
+	m := NewManager(&Config{
 		DataDir: dataDir,
 		Params:  appParams(),
 		Topics:  topics,
@@ -348,7 +347,7 @@ func TestManagerConnectsAndDeliversSnapshotAndEvents(t *testing.T) {
 	}})
 	clock := newFakeClock()
 	m, upd := newTestManager(t, dataDirWithHost(t, socket), clock, testTopicHost)
-	m.Start()
+	m.Start(ctx)
 	upd.waitFor(t, ctx, func(u Update) bool { return u.State == StateConnected })
 	upd.waitFor(t, ctx, func(u Update) bool { return u.Snapshot != nil && u.Snapshot.Incarnation == testIncA })
 	upd.waitFor(t, ctx, func(u Update) bool { return u.Event != nil && u.Event.Sequence == 8 })
@@ -432,7 +431,7 @@ func TestHostconnReconnectsWithANewClientAndResumesFromTheCursor(t *testing.T) {
 	socket := serveFakeHost(t, h)
 	clock := newFakeClock()
 	m, upd := newTestManager(t, dataDirWithHost(t, socket), clock, testTopicHost)
-	m.Start()
+	m.Start(ctx)
 
 	upd.waitFor(t, ctx, func(u Update) bool { return u.State == StateConnected })
 	upd.waitFor(t, ctx, func(u Update) bool { return u.Event != nil && u.Event.Sequence == 11 })
@@ -511,7 +510,7 @@ func TestHostconnReloadsTheSnapshotOnResyncOrNewIncarnation(t *testing.T) {
 	}})
 	clock := newFakeClock()
 	m, upd := newTestManager(t, dataDirWithHost(t, socket), clock, testTopicHost)
-	m.Start()
+	m.Start(ctx)
 
 	upd.waitFor(t, ctx, func(u Update) bool {
 		return u.Snapshot != nil && u.Snapshot.Sequence == 3 && u.Snapshot.Incarnation == "inc-B"
@@ -569,15 +568,14 @@ func TestHostconnClosesAbandonedStreams(t *testing.T) {
 	upd.start()
 	baseCtx := testCtx(t)
 	runCtx, cancel := context.WithCancel(baseCtx)
-	m := NewManager(Config{
-		Context: runCtx,
+	m := NewManager(&Config{
 		DataDir: dataDirWithHost(t, socket),
 		Params:  appParams(),
 		Topics:  []string{testTopicHost},
 		Updates: upd.ch,
 		Clock:   clock,
 	})
-	m.Start()
+	m.Start(runCtx)
 	upd.waitFor(t, ctx, func(u Update) bool { return u.State == StateConnected })
 	upd.waitFor(t, ctx, func(u Update) bool { return u.Snapshot != nil })
 
@@ -590,8 +588,8 @@ func TestHostconnClosesAbandonedStreams(t *testing.T) {
 	select {
 	case <-serverStreamClosed:
 		// Succeeded: server context completed because stream was closed.
-	case <-time.After(5 * time.Second):
-		t.Fatal("the abandoned stream was not closed within 5s")
+	case <-ctx.Done():
+		t.Fatalf("the abandoned stream was not closed before deadline: %v", ctx.Err())
 	}
 }
 
@@ -613,7 +611,7 @@ func TestManagerReloadsTheCursorAfterASnapshot(t *testing.T) {
 	}})
 	clock := newFakeClock()
 	m, upd := newTestManager(t, dataDirWithHost(t, socket), clock, testTopicHost)
-	m.Start()
+	m.Start(ctx)
 	upd.waitFor(t, ctx, func(u Update) bool { return u.Event != nil && u.Event.Sequence == 6 })
 	got := m.cursorFor(testTopicHost)
 	if got == nil || got.Incarnation != testIncC || got.Sequence != 6 {
@@ -629,7 +627,7 @@ func TestManagerReportsHostNotRunningAndRetries(t *testing.T) {
 	ctx := testCtx(t)
 	clock := newFakeClock()
 	m, upd := newTestManager(t, t.TempDir(), clock, testTopicHost)
-	m.Start()
+	m.Start(ctx)
 	upd.waitFor(t, ctx, func(u Update) bool { return u.State == StateDisconnected && u.Reason == reasonHostNotRunning })
 	// Identical states are not re-pushed; the retry is observable on the
 	// clock: the first backoff is the base, the second doubles it.
@@ -661,7 +659,7 @@ func TestManagerFreezesOnAnIncompatibleHost(t *testing.T) {
 	}}
 	clock := newFakeClock()
 	m, upd := newTestManager(t, dataDirWithHost(t, serveFakeHost(t, h)), clock, testTopicHost)
-	m.Start()
+	m.Start(ctx)
 	upd.waitFor(t, ctx, func(u Update) bool { return u.State == StateIncompatible })
 	if durs := clock.durations(); len(durs) != 0 {
 		t.Errorf("an incompatible host must not arm retries, armed %v", durs)
@@ -692,15 +690,14 @@ func TestManagerStopsWithTheWindowContext(t *testing.T) {
 	upd.start()
 	baseCtx := testCtx(t)
 	ctx, cancel := context.WithCancel(baseCtx)
-	m := NewManager(Config{
-		Context: ctx,
+	m := NewManager(&Config{
 		DataDir: dataDirWithHost(t, socket),
 		Params:  appParams(),
 		Topics:  []string{testTopicHost},
 		Updates: upd.ch,
 		Clock:   clock,
 	})
-	m.Start()
+	m.Start(ctx)
 	upd.waitFor(t, ctx, func(u Update) bool { return u.State == StateConnected })
 	t.Cleanup(func() {
 		cancel()
@@ -739,7 +736,7 @@ func TestHostconnBackoffIsBoundedOnTheFakeClock(t *testing.T) {
 	clock := newFakeClock()
 	// An empty directory means host not running; the manager retries repeatedly.
 	m, upd := newTestManager(t, t.TempDir(), clock, testTopicHost)
-	m.Start()
+	m.Start(ctx)
 	upd.waitFor(t, ctx, func(u Update) bool { return u.State == StateDisconnected && u.Reason == reasonHostNotRunning })
 
 	expected := []time.Duration{

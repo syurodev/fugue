@@ -64,14 +64,13 @@ func Run(ctx context.Context, opts Options) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	updates := make(chan hostconn.Update, 128)
-	m := hostconn.NewManager(hostconn.Config{
-		Context: runCtx,
+	m := hostconn.NewManager(&hostconn.Config{
 		DataDir: opts.DataDir,
 		Params:  opts.Params,
 		Topics:  opts.Topics,
 		Updates: updates,
 	})
-	m.Start()
+	m.Start(runCtx)
 	defer m.Stop()
 
 	// The initial size is the preferred one clamped to the work area the

@@ -32,11 +32,8 @@ type Update struct {
 	Event    *client.Event
 }
 
-// Config configures the Manager. The window context bounds every goroutine
-// the Manager starts: when it ends, the Manager stops.
+// Config configures the Manager.
 type Config struct {
-	// Context is the window's context; the Manager derives its own from it.
-	Context context.Context
 	// DataDir locates the host's discovery file.
 	DataDir string
 	// Params are the Hello identity; the app dials with KindApp (DA-01).
@@ -61,8 +58,7 @@ type streamFailure struct {
 // Start runs it; Stop ends it and waits for its goroutines.
 type Manager struct {
 	cfg Config
-	// ctx is derived from cfg.Context and cancels every goroutine.
-	ctx    context.Context
+	// cancel cancels the connection run loop started in Start.
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
@@ -79,27 +75,51 @@ type Manager struct {
 }
 
 // NewManager builds a Manager; Start runs it.
-func NewManager(cfg Config) *Manager {
-	ctx, cancel := context.WithCancel(cfg.Context)
+func NewManager(cfg *Config) *Manager {
+	c := Config{}
+	if cfg != nil {
+		c = *cfg
+	}
 	return &Manager{
-		cfg:      cfg,
-		ctx:      ctx,
-		cancel:   cancel,
-		failures: make(chan streamFailure),
-		cursors:  map[string]client.Cursor{},
+		cfg:           c,
+		cancel:        nil,
+		wg:            sync.WaitGroup{},
+		failures:      make(chan streamFailure),
+		mu:            sync.Mutex{},
+		state:         "",
+		reason:        "",
+		conn:          nil,
+		cursors:       map[string]client.Cursor{},
+		streamsCancel: nil,
 	}
 }
 
 // Start runs the connection loop. It returns at once; the loop ends with
-// Stop or when the window context ends.
-func (m *Manager) Start() {
+// Stop or when the passed context ends.
+func (m *Manager) Start(ctx context.Context) {
+	m.mu.Lock()
+	runCtx, cancel := context.WithCancel(ctx)
+	m.cancel = cancel
+	m.mu.Unlock()
+
 	m.wg.Add(1)
-	go m.run(m.ctx)
+	go m.run(runCtx)
 }
 
 // Stop ends the Manager's goroutines and waits for them. It is idempotent.
 func (m *Manager) Stop() {
-	m.cancel()
+	m.mu.Lock()
+	cancel := m.cancel
+	m.cancel = nil
+	streamsCancel := m.streamsCancel
+	m.streamsCancel = nil
+	m.mu.Unlock()
+	if streamsCancel != nil {
+		streamsCancel()
+	}
+	if cancel != nil {
+		cancel()
+	}
 	m.wg.Wait()
 }
 
@@ -139,7 +159,7 @@ func (m *Manager) clearCursor(topic string) {
 }
 
 // setState stores the state and, when it changed, pushes it to the window.
-func (m *Manager) setState(s State, reason string) {
+func (m *Manager) setState(ctx context.Context, s State, reason string) {
 	m.mu.Lock()
 	unchanged := m.state == s && m.reason == reason
 	if !unchanged {
@@ -149,7 +169,7 @@ func (m *Manager) setState(s State, reason string) {
 	if unchanged {
 		return
 	}
-	m.deliver(m.ctx, Update{State: s, Reason: reason})
+	m.deliver(ctx, Update{State: s, Reason: reason})
 }
 
 // deliver pushes one update to the window goroutine, giving up when the
@@ -169,7 +189,7 @@ func (m *Manager) deliver(ctx context.Context, u Update) {
 // fix (F10.2b owns the version handling of cli §2.3).
 func (m *Manager) run(ctx context.Context) {
 	defer m.wg.Done()
-	m.setState(StateConnecting, "")
+	m.setState(ctx, StateConnecting, "")
 	attempt := 0
 	for {
 		if ctx.Err() != nil {
@@ -181,7 +201,7 @@ func (m *Manager) run(ctx context.Context) {
 			m.mu.Lock()
 			m.conn = conn
 			m.mu.Unlock()
-			m.setState(StateConnected, "")
+			m.setState(ctx, StateConnected, "")
 			attempt = 0
 			m.runStreams(ctx, conn)
 			if ctx.Err() != nil {
@@ -189,14 +209,14 @@ func (m *Manager) run(ctx context.Context) {
 				return
 			}
 			conn.Close()
-			m.setState(StateDisconnected, "connection lost")
+			m.setState(ctx, StateDisconnected, "connection lost")
 		case isVersionMismatch(err):
-			m.setState(StateIncompatible, err.Error())
+			m.setState(ctx, StateIncompatible, err.Error())
 			return
 		case errors.Is(err, client.ErrHostNotRunning):
-			m.setState(StateDisconnected, "host not running")
+			m.setState(ctx, StateDisconnected, "host not running")
 		default:
-			m.setState(StateDisconnected, "connection failed")
+			m.setState(ctx, StateDisconnected, "connection failed")
 		}
 		attempt++
 		if !m.backoff(ctx, attempt) {
@@ -265,13 +285,13 @@ func (m *Manager) runStreams(ctx context.Context, conn *client.Client) {
 		m.streamsCancel = nil
 		m.mu.Unlock()
 	}()
-	pumps := &pumpSet{ctx: streamsCtx, mgr: m, conn: conn, pumps: map[string]*pump{}}
+	pumps := &pumpSet{mgr: m, conn: conn, pumps: map[string]*pump{}}
 	defer pumps.stopAll()
 	for _, topic := range m.cfg.Topics {
 		pumps.start(streamsCtx, topic, false)
 	}
 	for {
-		f, ok := pumps.await()
+		f, ok := pumps.await(streamsCtx)
 		if !ok {
 			return
 		}
@@ -355,7 +375,6 @@ type pump struct {
 
 // pumpSet owns the stream goroutines of one leased connection.
 type pumpSet struct {
-	ctx   context.Context
 	mgr   *Manager
 	conn  *client.Client
 	pumps map[string]*pump
@@ -386,19 +405,21 @@ func (ps *pumpSet) stopAll() {
 	}
 }
 
-// await waits for the first stream failure or the end of the streams
-// context; ok is false when the context ended.
-func (ps *pumpSet) await() (streamFailure, bool) {
-	select {
-	case <-ps.ctx.Done():
-		return streamFailure{}, false
-	case f := <-ps.mgr.failures:
-		p, ok := ps.pumps[f.topic]
-		if !ok {
-			return streamFailure{}, true
+// await waits for the first stream failure for a topic in this set or the end
+// of ctx; ok is false when the context ended.
+func (ps *pumpSet) await(ctx context.Context) (streamFailure, bool) {
+	for {
+		select {
+		case <-ctx.Done():
+			return streamFailure{}, false
+		case f := <-ps.mgr.failures:
+			p, ok := ps.pumps[f.topic]
+			if !ok {
+				continue
+			}
+			p.cancel()
+			<-p.done
+			return f, true
 		}
-		p.cancel()
-		<-p.done
-		return f, true
 	}
 }

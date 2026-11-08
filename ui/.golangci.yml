@@ -1,11 +1,5 @@
 # Gate definition: docs/quality-gates.md section 2, scoped for the ui module
-# (ADR 0002). Changes need the gate-change-approved label. The linter set
-# mirrors the core module's correctness, complexity, security and test
-# discipline; the core-only bans that name core internals (forbidigo's clock
-# and environment rules, exhaustruct's kernel patterns) do not apply here —
-# the ui module carries its own clock port and owns no kernel types. depguard
-# also bans the core's internal/ outright, which the arch tests enforce
-# module-wide.
+# (ADR 0002). Changes need the gate-change-approved label.
 version: "2"
 
 run:
@@ -28,21 +22,28 @@ linters:
     - nilerr
     - nilnil
     - bodyclose
+    - sqlclosecheck
+    - rowserrcheck
     - contextcheck
     - noctx
     - copyloopvar
     - durationcheck
     - makezero
     - reassign
+    - recvcheck
     # Errors
     - errorlint
     - err113
     - wrapcheck
+    # Enums and structs
+    - exhaustive
+    - exhaustruct_v5
     # Complexity
     - cyclop
     - gocognit
     - nestif
     - funlen
+    - maintidx
     # Junk code
     - unused
     - unparam
@@ -55,8 +56,15 @@ linters:
     - intrange
     - usestdlibvars
     - perfsprint
+    # Global state
+    - gochecknoglobals
+    - gochecknoinits
+    # Concurrency
+    - containedctx
+    - fatcontext
     # Security
     - gosec
+    - forbidigo
     # Tests
     - paralleltest
     - tparallel
@@ -96,6 +104,9 @@ linters:
         - .WithStack(
         - connect.NewError(
         - connect.NewErrorDetail(
+    errcheck:
+      check-blank: true
+      check-type-assertions: true
     cyclop:
       max-complexity: 12
     gocognit:
@@ -105,14 +116,19 @@ linters:
     funlen:
       lines: 60
       statements: 40
+    maintidx:
+      under: 20
     dupl:
-      threshold: 150
+      threshold: 100
+    exhaustive:
+      default-signifies-exhaustive: false
+    exhaustruct_v5:
+      explicit-mode: true
     gocritic:
-      # hugeParam stays off: Gio's layout.Context is a value type by design
-      # and every Gio call passes it by value.
       enabled-checks:
         - commentedOutCode
         - deferInLoop
+        - hugeParam
         - rangeValCopy
     unused:
       exported-fields-are-used: false
@@ -129,12 +145,37 @@ linters:
         - name: indent-error-flow
         - name: early-return
         - name: unexported-return
+    forbidigo:
+      analyze-types: true
+      forbid:
+        - pattern: '^time\.(Now|Since|Until|Sleep|After|Tick|NewTimer|NewTicker)$'
+          msg: use an injected clock.Clock; tests use the fake clock
+        - pattern: '^rand\.Read$'
+          msg: use the injected ids and randomness ports
+        - pattern: '^os\.(Getenv|LookupEnv)$'
+          msg: read the environment only in internal/config
+        - pattern: '^fmt\.(Print|Printf|Println)$'
+          msg: use log/slog with the redacting handler
+        - pattern: '^log\..*$'
+          msg: use log/slog with the redacting handler
+        - pattern: '^(print|println)$'
+          msg: use log/slog with the redacting handler
+        - pattern: '^panic$'
+          msg: return a typed error
+        - pattern: '^testing\.(T|B|F|TB)\.(Skip|Skipf|SkipNow)$'
+          msg: make the test runnable or delete it; OS-specific tests use build tags
+        - pattern: '^testing\.Short$'
+          msg: make the test runnable or delete it
+        - pattern: '^context\.(Background|TODO)$'
+          msg: pass the context in from the caller
     depguard:
       rules:
         banned-modules:
           list-mode: lax
           files:
             - '$all'
+          allow:
+            - log/slog
           deny:
             - pkg: github.com/stretchr/testify
               desc: tests use stdlib testing and go-cmp
@@ -142,21 +183,56 @@ linters:
               desc: use the standard errors package with %w
             - pkg: log
               desc: use log/slog
+            - pkg: github.com/sirupsen/logrus
+              desc: use log/slog
+            - pkg: go.uber.org/zap
+              desc: use log/slog
+            - pkg: github.com/rs/zerolog
+              desc: use log/slog
+            - pkg: github.com/golang/glog
+              desc: use log/slog
             - pkg: github.com/syurodev/fugue/internal
               desc: the app imports the core only through pkg/client and pkg/pb
+        randomness:
+          list-mode: lax
+          files:
+            - '$all'
+          deny:
+            - pkg: math/rand
+              desc: use the injected ids and randomness ports
+            - pkg: math/rand/v2
+              desc: use the injected ids and randomness ports
 
   exclusions:
     generated: strict
     presets: []
     rules:
+      # Gio passes layout.Context by value by design; the hugeParam check flags it.
+      - path: '^internal/appwin/'
+        linters: [gocritic]
+        text: 'hugeParam'
       # The clock port is the ui module's equivalent of
       # internal/platform/clock: it owns the standard library timers.
       - path: '^internal/hostconn/clock\.go$'
-        linters: [gocritic]
-        text: 'hugeParam'
+        linters: [forbidigo]
+        text: 'time\.'
+      # main is the process entrypoint: it reads the environment, resolves the
+      # data directory, prints startup failures to stderr, and roots the context.
+      - path: '^cmd/fugue-app/main\.go$'
+        linters: [forbidigo]
+        text: 'os\.(Getenv|LookupEnv)|context\.(Background|TODO)'
+      # Embedded font data is read-only byte slices populated by the compiler.
+      - path: '^internal/fonts/fonts\.go$'
+        linters: [gochecknoglobals]
+      # version is injected at build time via -ldflags.
+      - path: '^cmd/fugue-app/main\.go$'
+        linters: [gochecknoglobals]
+        text: 'version'
+      # Tests use t.Context() where possible; TestMain and helpers use
+      # context.Background, and test assertions use panic in fatal helpers.
       - path: '_test\.go$'
-        linters: [errcheck]
-        text: 'Close'
+        linters: [forbidigo]
+        text: 'panic|context\.(Background|TODO)'
 
 formatters:
   enable:
