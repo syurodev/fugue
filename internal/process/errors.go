@@ -19,4 +19,8 @@ var (
 
 	// ErrUnsupportedPlatform indicates process supervision is unavailable on this OS.
 	ErrUnsupportedPlatform = errcode.New(errcode.Unavailable, "process supervisor is unsupported on this platform")
+
+	// ErrIdentityMismatch indicates a live PID's start token does not match the
+	// recorded process identity or the identity cannot be verified safely.
+	ErrIdentityMismatch = errcode.New(errcode.FailedPrecondition, "process identity does not match live process")
 )

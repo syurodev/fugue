@@ -1,0 +1,138 @@
+//go:build unix
+
+package process
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"syscall"
+	"time"
+
+	"github.com/syurodev/fugue/internal/platform/clock"
+	"github.com/syurodev/fugue/internal/platform/errcode"
+)
+
+// Reap terminates any leftover processes belonging to a previously recorded
+// session Identity after a host restart (vendor-runtime §11, VR-E06).
+//
+// When id.ScopeUnit is non-empty, Reap validates the "fugue-vendor-" prefix and
+// ".scope" suffix, kills the cgroup scope, and returns StopProofProved once the
+// cgroup is verified empty—even if the original leader PID has already exited.
+//
+// When id.ScopeUnit is empty, Reap reads the live process's start_token and
+// compares it with id.StartToken. If the process is gone or its start_token
+// differs (PID reuse), Reap returns ErrIdentityMismatch without signaling
+// anything. It never re-runs a vendor command.
+func Reap(ctx context.Context, id Identity, opts *ReapOptions) (StopProof, error) {
+	clk := clock.Clock(clock.Real{})
+	var cgroupRoot, procRoot string
+	if opts != nil {
+		if opts.Clock != nil {
+			clk = opts.Clock
+		}
+		cgroupRoot = opts.CgroupRoot
+		procRoot = opts.ProcRoot
+	}
+	if id.ScopeUnit != "" {
+		if !isValidScopeUnit(id.ScopeUnit) {
+			return StopProof{Status: StopProofUnknown, Reason: ReasonScopeUnverified},
+				fmt.Errorf("%w: invalid scope unit %q", ErrIdentityMismatch, id.ScopeUnit)
+		}
+		return reapPlatform(ctx, id, clk, cgroupRoot, procRoot)
+	}
+	if id.PID <= 1 || id.StartToken == "" {
+		return StopProof{Status: StopProofUnknown, Reason: ReasonIdentityMismatch},
+			errcode.Wrap(errcode.InvalidArgument, "reap requires positive pid and start_token", ErrIdentityMismatch)
+	}
+	return reapPlatform(ctx, id, clk, cgroupRoot, procRoot)
+}
+
+func reapContainedScope(ctx context.Context, unitName string, clk clock.Clock, cgroupRoot string) (StopProof, error) {
+	scope, ok := findScopeDir(cgroupRoot, unitName)
+	if !ok {
+		return StopProof{Status: StopProofUnknown, Reason: ReasonScopeUnverified},
+			fmt.Errorf("%w: scope directory %q not found", ErrIdentityMismatch, unitName)
+	}
+	if scope.isEmpty() {
+		return StopProof{Status: StopProofProved, Reason: ReasonCgroupEmpty}, nil
+	}
+	if err := scope.kill(0); err != nil {
+		return StopProof{Status: StopProofUnknown, Reason: ReasonKillFailed},
+			fmt.Errorf("reap cgroup %s: %w", unitName, err)
+	}
+	if !waitPollCondition(context.WithoutCancel(ctx), clk, finalReapTimeout, scope.isEmpty) {
+		return StopProof{Status: StopProofUnknown, Reason: ReasonGroupNotEmpty}, nil
+	}
+	return StopProof{Status: StopProofProved, Reason: ReasonCgroupEmpty}, nil
+}
+
+func waitPollCondition(ctx context.Context, clk clock.Clock, timeout time.Duration, check func() bool) bool {
+	deadline := clk.NewTimer(timeout)
+	defer deadline.Stop()
+	for {
+		if check() {
+			return true
+		}
+		poll := clk.NewTimer(reapPollInterval)
+		select {
+		case <-poll.C():
+		case <-deadline.C():
+			poll.Stop()
+			return check()
+		case <-ctx.Done():
+			poll.Stop()
+			return check()
+		}
+		poll.Stop()
+	}
+}
+
+func reapByStartToken(ctx context.Context, id Identity, clk clock.Clock, source procTableSource) (StopProof, error) {
+	liveToken, err := source.startToken(id.PID)
+	if err != nil || liveToken != id.StartToken {
+		return StopProof{Status: StopProofUnknown, Reason: ReasonIdentityMismatch},
+			fmt.Errorf("%w: pid %d start_token mismatch", ErrIdentityMismatch, id.PID)
+	}
+
+	tracker := newDescendantTracker(id.PID, id.StartToken, source, clk)
+	tracker.snapshot()
+
+	if err := killReapedTree(id.PID, tracker); err != nil {
+		return StopProof{Status: StopProofUnknown, Reason: ReasonKillFailed}, err
+	}
+
+	gone := waitPollCondition(context.WithoutCancel(ctx), clk, finalReapTimeout, func() bool {
+		return isReapedTreeGone(id, source, tracker)
+	})
+	if !gone {
+		return StopProof{Status: StopProofUnknown, Reason: ReasonGroupNotEmpty}, nil
+	}
+	return StopProof{Status: StopProofUnknown, Reason: ReasonGroupEmpty}, nil
+}
+
+func killReapedTree(pid int, tracker *descendantTracker) error {
+	var errs []error
+	if groupHasMembers(pid) {
+		if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+			errs = append(errs, err)
+		}
+	}
+	if err := syscall.Kill(pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+		errs = append(errs, err)
+	}
+	if err := tracker.signalTracked(syscall.SIGKILL); err != nil {
+		errs = append(errs, err)
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("kill reaped tree %d: %w", pid, errors.Join(errs...))
+	}
+	return nil
+}
+
+func isReapedTreeGone(id Identity, source procTableSource, tracker *descendantTracker) bool {
+	if tok, err := source.startToken(id.PID); err == nil && tok == id.StartToken {
+		return false
+	}
+	return !groupHasMembers(id.PID) && !tracker.hasLiveDescendants()
+}

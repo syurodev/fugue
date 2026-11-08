@@ -18,10 +18,11 @@ import (
 )
 
 const (
-	escalationInterrupt = "interrupt"
-	escalationSigint    = "sigint"
-	escalationSigterm   = "sigterm"
-	escalationSigkill   = "sigkill"
+	escalationInterrupt   = "interrupt"
+	escalationSigint      = "sigint"
+	escalationSigterm     = "sigterm"
+	escalationSigkill     = "sigkill"
+	nonexistentSystemdRun = "/nonexistent/systemd-run"
 )
 
 func testEpoch() time.Time {
@@ -64,8 +65,12 @@ func TestStopOrderImmediateInterrupt(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Stop: %v", err)
 	}
-	if proof.Status != StopProofUnknown {
-		t.Fatalf("expected StopProofUnknown, got %v", proof.Status)
+	wantStatus := StopProofUnknown
+	if proc.Identity().ScopeUnit != "" {
+		wantStatus = StopProofProved
+	}
+	if proof.Status != wantStatus {
+		t.Fatalf("expected %v, got %v", wantStatus, proof.Status)
 	}
 	if clk.Pending() != 0 {
 		t.Fatalf("expected 0 pending timers after immediate exit, got %d", clk.Pending())
@@ -188,7 +193,7 @@ func TestStopOrderEscalatesToSigkill(t *testing.T) {
 	stepCh := make(chan string, 10)
 
 	proc, err := Spawn(ctx, &Options{
-		Argv:  []string{exe, fakeVendorFlag, "ignore-sigterm"},
+		Argv:  []string{exe, fakeVendorFlag, fakeVendorModeIgnoreSigterm},
 		Clock: clk,
 		Interrupt: func(ctx context.Context) error {
 			return nil
@@ -292,8 +297,14 @@ func TestStopKillsGroupMembersAfterLeaderExits(t *testing.T) {
 	if stopErr != nil {
 		t.Fatalf("Stop error: %v", stopErr)
 	}
-	if stopProof.Reason != ReasonGroupEmpty {
-		t.Fatalf("expected group_empty, got %q", stopProof.Reason)
+	wantReason := ReasonGroupEmpty
+	if proc.Identity().ScopeUnit != "" {
+		wantReason = ReasonCgroupEmpty
+	} else if runtime.GOOS == "linux" {
+		wantReason = ReasonScopeUnavailable
+	}
+	if stopProof.Reason != wantReason {
+		t.Fatalf("expected %s, got %q", wantReason, stopProof.Reason)
 	}
 
 	if err := syscall.Kill(childPid, 0); !errors.Is(err, syscall.ESRCH) {
@@ -355,12 +366,16 @@ func TestStopInterruptErrorReturnedSeparately(t *testing.T) {
 	ctx := t.Context()
 	clk := clock.NewFake(testEpoch())
 	exe := fakeVendorExe(t)
+	stepCh := make(chan string, 10)
 
 	proc, err := Spawn(ctx, &Options{
 		Argv:  []string{exe, fakeVendorFlag, fakeVendorModeNormal},
 		Clock: clk,
 		Interrupt: func(ctx context.Context) error {
 			return errCustomInterruptFailure
+		},
+		OnEscalation: func(step string) {
+			stepCh <- step
 		},
 	})
 	if err != nil {
@@ -378,6 +393,7 @@ func TestStopInterruptErrorReturnedSeparately(t *testing.T) {
 	})
 	// The vendor ignores the failed interrupt; let the 10 s wait run out so
 	// SIGINT stops it.
+	expectEscalationStep(t, stepCh, escalationInterrupt)
 	advancePending(clk, 10*time.Second)
 	<-stopDone
 
@@ -422,8 +438,9 @@ func TestStopReturnsWhenEscapedGrandchildHoldsPipes(t *testing.T) {
 	stepCh := make(chan string, 10)
 
 	proc, err := Spawn(ctx, &Options{
-		Argv:  []string{exe, fakeVendorFlag, "setsid-grandchild"},
-		Clock: clk,
+		Argv:           []string{exe, fakeVendorFlag, fakeVendorModeSetsidGrandchild},
+		Clock:          clk,
+		SystemdRunPath: nonexistentSystemdRun,
 		OnEscalation: func(step string) {
 			stepCh <- step
 		},
@@ -433,8 +450,13 @@ func TestStopReturnsWhenEscapedGrandchildHoldsPipes(t *testing.T) {
 	}
 
 	grandchild := readPidLine(t, proc.Stdout(), "GRANDCHILD ")
-	// The grandchild left the group, so Stop cannot reach it in F9.2a; the
-	// test reaps it so the machine stays clean.
+	// Disable descendant tracking to simulate a process that escaped between
+	// two snapshots while holding the pipes open.
+	if proc.tracker != nil {
+		proc.tracker.mu.Lock()
+		proc.tracker.disabled = true
+		proc.tracker.mu.Unlock()
+	}
 	t.Cleanup(func() {
 		if kerr := syscall.Kill(grandchild, syscall.SIGKILL); kerr != nil && !errors.Is(kerr, syscall.ESRCH) {
 			t.Errorf("kill grandchild %d: %v", grandchild, kerr)
@@ -480,8 +502,9 @@ func TestStopClosesStdoutWhenConsumerBetweenReads(t *testing.T) {
 	stepCh := make(chan string, 10)
 
 	proc, err := Spawn(ctx, &Options{
-		Argv:  []string{exe, fakeVendorFlag, "setsid-grandchild-stdout-only"},
-		Clock: clk,
+		Argv:           []string{exe, fakeVendorFlag, "setsid-grandchild-stdout-only"},
+		Clock:          clk,
+		SystemdRunPath: nonexistentSystemdRun,
 		OnEscalation: func(step string) {
 			stepCh <- step
 		},
@@ -491,6 +514,11 @@ func TestStopClosesStdoutWhenConsumerBetweenReads(t *testing.T) {
 	}
 
 	grandchild := readPidLine(t, proc.Stdout(), "GRANDCHILD ")
+	if proc.tracker != nil {
+		proc.tracker.mu.Lock()
+		proc.tracker.disabled = true
+		proc.tracker.mu.Unlock()
+	}
 	t.Cleanup(func() {
 		if kerr := syscall.Kill(grandchild, syscall.SIGKILL); kerr != nil && !errors.Is(kerr, syscall.ESRCH) {
 			t.Errorf("kill grandchild %d: %v", grandchild, kerr)
