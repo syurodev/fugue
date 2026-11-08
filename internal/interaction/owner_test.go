@@ -1,6 +1,7 @@
 package interaction
 
 import (
+	"slices"
 	"testing"
 	"time"
 
@@ -19,8 +20,10 @@ func TestAnOldRequestCannotBeAnsweredAfterRestart(t *testing.T) {
 		t.Fatal(err)
 	}
 	pendingBeforeRestart := mustEnsure(t, ownerBeforeRestart, confirmSpec("op-1"))
-	approvedBeforeRestart := mustEnsure(t, ownerBeforeRestart, confirmSpec("op-2"))
-	answeredBeforeRestart := mustAnswer(t, ownerBeforeRestart, Decision{
+	approvedSpec := confirmSpec("op-2")
+	approvedSpec.Binding.SessionID = session2
+	approvedBeforeRestart := mustEnsure(t, ownerBeforeRestart, approvedSpec)
+	answeredBeforeRestart := mustAnswer(t, ownerBeforeRestart, &Decision{
 		Incarnation: pendingBeforeRestart.Incarnation,
 		RequestID:   approvedBeforeRestart.RequestID,
 		Outcome:     OutcomeAllowedOnce,
@@ -36,7 +39,7 @@ func TestAnOldRequestCannotBeAnsweredAfterRestart(t *testing.T) {
 	}
 
 	// Answering with the old incarnation is rejected as stale.
-	_, err = ownerAfterRestart.Answer(Decision{
+	_, err = ownerAfterRestart.Answer(&Decision{
 		Incarnation: pendingBeforeRestart.Incarnation,
 		RequestID:   pendingBeforeRestart.RequestID,
 		Outcome:     OutcomeAllowedOnce,
@@ -44,7 +47,7 @@ func TestAnOldRequestCannotBeAnsweredAfterRestart(t *testing.T) {
 	wantCode(t, err, errcode.FailedPrecondition)
 
 	// Answering without an explicit incarnation still cannot find the old request in memory.
-	_, err = ownerAfterRestart.Answer(Decision{
+	_, err = ownerAfterRestart.Answer(&Decision{
 		RequestID: pendingBeforeRestart.RequestID,
 		Outcome:   OutcomeAllowedOnce,
 	})
@@ -60,7 +63,7 @@ func TestADuplicateAnswerIsRejected(t *testing.T) {
 	t.Parallel()
 	owner, _, _, audits := newTestOwner(t)
 	ticket := mustEnsure(t, owner, confirmSpec("op-dup"))
-	resolved := mustAnswer(t, owner, Decision{
+	resolved := mustAnswer(t, owner, &Decision{
 		Incarnation: owner.Incarnation(),
 		RequestID:   ticket.RequestID,
 		Outcome:     OutcomeAllowedOnce,
@@ -70,14 +73,14 @@ func TestADuplicateAnswerIsRejected(t *testing.T) {
 	}
 
 	// A second answer with the same or a different outcome is rejected.
-	_, err := owner.Answer(Decision{
+	_, err := owner.Answer(&Decision{
 		Incarnation: owner.Incarnation(),
 		RequestID:   ticket.RequestID,
 		Outcome:     OutcomeAllowedOnce,
 	})
 	wantCode(t, err, errcode.FailedPrecondition)
 
-	_, err = owner.Answer(Decision{
+	_, err = owner.Answer(&Decision{
 		Incarnation: owner.Incarnation(),
 		RequestID:   ticket.RequestID,
 		Outcome:     OutcomeDenied,
@@ -101,7 +104,7 @@ func TestEnsureReadsBackByOperationIDAndRejectsConflictingSpecs(t *testing.T) {
 		t.Fatalf("prompts = %d, want 1", got)
 	}
 
-	// Changing the kind, binding or options under the same operationID is rejected.
+	// Changing the kind, binding, offers or options under the same operationID is rejected.
 	_, err := owner.Ensure(selectSpec("op-readback"))
 	wantCode(t, err, errcode.AlreadyExists)
 
@@ -110,27 +113,37 @@ func TestEnsureReadsBackByOperationIDAndRejectsConflictingSpecs(t *testing.T) {
 	_, err = owner.Ensure(conflictBinding)
 	wantCode(t, err, errcode.AlreadyExists)
 
-	selFirst := mustEnsure(t, owner, selectSpec("op-select-readback"))
-	selSecond := mustEnsure(t, owner, selectSpec("op-select-readback"))
-	if selFirst.RequestID != selSecond.RequestID {
-		t.Fatalf("select readback IDs = %q vs %q", selFirst.RequestID, selSecond.RequestID)
+	conflictOffers := confirmSpec("op-readback")
+	conflictOffers.Offers = []Outcome{OutcomeAllowedOnce}
+	_, err = owner.Ensure(conflictOffers)
+	wantCode(t, err, errcode.AlreadyExists)
+
+	conflictSummary := confirmSpec("op-readback")
+	conflictSummary.Summary = "Write other.go"
+	_, err = owner.Ensure(conflictSummary)
+	wantCode(t, err, errcode.AlreadyExists)
+
+	relayFirst := mustEnsure(t, owner, relayedSpec(t, "turn-readback", "req-1"))
+	relaySecond := mustEnsure(t, owner, relayedSpec(t, "turn-readback", "req-1"))
+	if diff := cmp.Diff(relayFirst, relaySecond); diff != "" {
+		t.Fatalf("relayed read-back ticket differed (-first +second):\n%s", diff)
 	}
 
-	conflictOpts := selectSpec("op-select-readback")
-	conflictOpts.Options[1].Label = "Changed label"
-	_, err = owner.Ensure(conflictOpts)
+	conflictRelay := relayedSpec(t, "turn-readback", "req-1")
+	conflictRelay.Options = vendorOptions()[:2]
+	_, err = owner.Ensure(conflictRelay)
 	wantCode(t, err, errcode.AlreadyExists)
 }
 
-func TestImportantRequestsAlwaysAskAndRefuseSessionGrants(t *testing.T) {
+func TestEnvTagHardRuleAndOffersControlSessionGrants(t *testing.T) {
 	t.Parallel()
 	owner, _, responder, _ := newTestOwner(t)
 
 	devTicket := mustEnsure(t, owner, confirmSpec("op-dev-1"))
-	if !devTicket.AllowSessionOffered {
-		t.Fatal("expected AllowSessionOffered for non-important dev request")
+	if !slices.Contains(devTicket.Offers, OutcomeAllowedSession) {
+		t.Fatalf("offers = %v, want the session grant offered for a dev confirm", devTicket.Offers)
 	}
-	mustAnswer(t, owner, Decision{
+	mustAnswer(t, owner, &Decision{
 		Incarnation: owner.Incarnation(),
 		RequestID:   devTicket.RequestID,
 		Outcome:     OutcomeAllowedSession,
@@ -146,35 +159,50 @@ func TestImportantRequestsAlwaysAskAndRefuseSessionGrants(t *testing.T) {
 		t.Fatalf("prompts = %d, want 1", got)
 	}
 
-	assertImportantRequestRefusesSessionGrant(t, owner)
-}
-
-func assertImportantRequestRefusesSessionGrant(t *testing.T, owner *Owner) {
-	t.Helper()
-	importantSpec := confirmSpec("op-important")
-	importantSpec.Important = true
-	importantTicket := mustEnsure(t, owner, importantSpec)
-	if importantTicket.Resolved || importantTicket.AllowSessionOffered {
-		t.Fatalf("important request must ask and not offer session grant: %+v", importantTicket)
+	// A confirm that does not offer allowed_session never grants.
+	onceSpec := confirmSpec("op-once")
+	onceSpec.Offers = []Outcome{OutcomeAllowedOnce}
+	onceTicket := mustEnsure(t, owner, onceSpec)
+	if slices.Contains(onceTicket.Offers, OutcomeAllowedSession) {
+		t.Fatalf("offers = %v, want no session grant", onceTicket.Offers)
 	}
-	_, err := owner.Answer(Decision{
+	_, err := owner.Answer(&Decision{
 		Incarnation: owner.Incarnation(),
-		RequestID:   importantTicket.RequestID,
+		RequestID:   onceTicket.RequestID,
 		Outcome:     OutcomeAllowedSession,
 	})
 	wantCode(t, err, errcode.InvalidArgument)
 
+	// The hard rule refuses a session grant offer up front and, with only the
+	// single-use offer, still asks every time for prod and unknown tags.
 	for _, tag := range []string{"prod", "unknown-env"} {
+		offered := confirmSpec("op-env-offered-" + tag)
+		offered.Binding.EnvTag = tag
+		_, err := owner.Ensure(offered)
+		wantCode(t, err, errcode.InvalidArgument)
+
 		spec := confirmSpec("op-env-" + tag)
 		spec.Binding.EnvTag = tag
+		spec.Binding.SessionID = "sess-env-" + tag
+		spec.Offers = []Outcome{OutcomeAllowedOnce}
 		ticket := mustEnsure(t, owner, spec)
-		if ticket.Resolved || ticket.AllowSessionOffered {
-			t.Fatalf("env %q must ask and refuse session grant: %+v", tag, ticket)
+		if ticket.Resolved || !slices.Equal(ticket.Offers, []Outcome{OutcomeAllowedOnce}) {
+			t.Fatalf("env %q must ask with only allowed_once: %+v", tag, ticket)
 		}
+		_, err = owner.Answer(&Decision{
+			Incarnation: owner.Incarnation(),
+			RequestID:   ticket.RequestID,
+			Outcome:     OutcomeAllowedSession,
+		})
+		wantCode(t, err, errcode.InvalidArgument)
 	}
 }
 
-func TestNilResponderAndHeadlessFailClosed(t *testing.T) {
+// TestOnlyHeadlessResolvesUnavailableWhileNilResponderWaits states the I-07
+// contract of interaction §4.2: a nil Responder no longer fails closed and
+// only a host configured Headless answers unavailable. It replaces
+// TestNilResponderAndHeadlessFailClosed.
+func TestOnlyHeadlessResolvesUnavailableWhileNilResponderWaits(t *testing.T) {
 	t.Parallel()
 	fakeClock := clock.NewFake(startTime())
 
@@ -182,28 +210,56 @@ func TestNilResponderAndHeadlessFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	t1 := mustEnsure(t, nilOwner, confirmSpec("op-nil"))
-	if !t1.Resolved || t1.Outcome != OutcomeUnavailable || t1.ReceiptID != "" {
-		t.Fatalf("nil responder ticket = %+v, want unavailable without receipt", t1)
-	}
+	assertRequestsWaitWithoutResponder(t, nilOwner)
 
 	headlessOwner, err := NewOwner(Config{Clock: fakeClock, IDs: ids.NewSequence("hl"), Responder: NopResponder{}, Headless: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	t2 := mustEnsure(t, headlessOwner, confirmSpec("op-headless"))
-	if !t2.Resolved || t2.Outcome != OutcomeUnavailable {
-		t.Fatalf("headless ticket = %+v, want unavailable", t2)
-	}
+	assertHeadlessResolvesUnavailable(t, headlessOwner)
 
 	failingResponder := &recordingResponder{err: errcode.New(errcode.Unavailable, "ui disconnected")}
 	brokenOwner, err := NewOwner(Config{Clock: fakeClock, IDs: ids.NewSequence("broken"), Responder: failingResponder})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = brokenOwner.Ensure(confirmSpec("op-broken"))
+	assertBrokenPromptResolvesUnavailable(t, brokenOwner)
+}
+
+func assertRequestsWaitWithoutResponder(t *testing.T, owner *Owner) {
+	t.Helper()
+	t1 := mustEnsure(t, owner, confirmSpec("op-nil"))
+	if t1.Resolved || t1.Outcome != "" || t1.ReceiptID != "" {
+		t.Fatalf("nil responder ticket = %+v, want pending without receipt", t1)
+	}
+	r1 := mustEnsure(t, owner, relayedSpec(t, "turn-nil", "req-1"))
+	if r1.Resolved {
+		t.Fatalf("relayed request with nil responder = %+v, want pending", r1)
+	}
+	qSpec := questionSpec("op-nil-question")
+	qSpec.Binding.SessionID = session2
+	if q1 := mustEnsure(t, owner, qSpec); q1.Resolved {
+		t.Fatalf("question with nil responder = %+v, want pending", q1)
+	}
+}
+
+func assertHeadlessResolvesUnavailable(t *testing.T, owner *Owner) {
+	t.Helper()
+	t2 := mustEnsure(t, owner, confirmSpec("op-headless"))
+	if !t2.Resolved || t2.Outcome != OutcomeUnavailable {
+		t.Fatalf("headless ticket = %+v, want unavailable", t2)
+	}
+	r2 := mustEnsure(t, owner, relayedSpec(t, "turn-headless", "req-1"))
+	if !r2.Resolved || r2.Outcome != OutcomeUnavailable {
+		t.Fatalf("headless relayed ticket = %+v, want unavailable", r2)
+	}
+}
+
+func assertBrokenPromptResolvesUnavailable(t *testing.T, owner *Owner) {
+	t.Helper()
+	_, err := owner.Ensure(confirmSpec("op-broken"))
 	wantCode(t, err, errcode.Unavailable)
-	readBack, err := brokenOwner.LookupOperation("op-broken")
+	readBack, err := owner.LookupOperation("op-broken")
 	if err != nil || !readBack.Resolved || readBack.Outcome != OutcomeUnavailable {
 		t.Fatalf("broken prompt readback = (%+v, %v), want unavailable", readBack, err)
 	}
@@ -216,10 +272,12 @@ func TestPendingOrderingAndExpiry(t *testing.T) {
 	specA := confirmSpec("op-a")
 	specA.ExpiresAt = startTime().Add(5 * time.Minute)
 	ticketA := mustEnsure(t, owner, specA)
-	ticketB := mustEnsure(t, owner, confirmSpec("op-b"))
+	ticketB := mustEnsure(t, owner, relayedSpec(t, "turn-b", "req-1"))
 
 	fakeClock.Advance(time.Minute)
-	ticketC := mustEnsure(t, owner, confirmSpec("op-c"))
+	specC := confirmSpec("op-c")
+	specC.Binding.SessionID = "sess-2"
+	ticketC := mustEnsure(t, owner, specC)
 
 	pending := owner.Pending()
 	if len(pending) != 3 || pending[0].RequestID != ticketA.RequestID || pending[1].RequestID != ticketB.RequestID || pending[2].RequestID != ticketC.RequestID {
@@ -228,7 +286,7 @@ func TestPendingOrderingAndExpiry(t *testing.T) {
 
 	// Advance past specA's deadline.
 	fakeClock.Advance(5 * time.Minute)
-	_, err := owner.Answer(Decision{
+	_, err := owner.Answer(&Decision{
 		Incarnation: owner.Incarnation(),
 		RequestID:   ticketA.RequestID,
 		Outcome:     OutcomeAllowedOnce,
