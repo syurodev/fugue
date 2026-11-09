@@ -145,18 +145,21 @@ type editPairRaw struct {
 	NewString string `json:"new_string"`
 }
 
-// toolResultBlocks decodes the user content field, which carries tool_result
-// blocks in an array or, for a plain echo, a bare string.
-func toolResultBlocks(raw json.RawMessage) ([]wireToolResult, bool) {
+// toolResultBlocks decodes the user content field and keeps only tool_result
+// blocks: a user event the CLI echoes back without tool results is not part
+// of the §4 mapping and becomes a notice in the caller.
+func toolResultBlocks(raw json.RawMessage) []wireToolResult {
 	var blocks []wireToolResult
-	if err := json.Unmarshal(raw, &blocks); err == nil {
-		return blocks, true
+	if json.Unmarshal(raw, &blocks) != nil {
+		return nil
 	}
-	var text string
-	if err := json.Unmarshal(raw, &text); err == nil {
-		return nil, true
+	out := blocks[:0]
+	for _, b := range blocks {
+		if b.ToolUseID != "" {
+			out = append(out, b)
+		}
 	}
-	return nil, false
+	return out
 }
 
 // toolResultText flattens a tool_result content field: a bare string or an

@@ -82,6 +82,12 @@ func (n *Normalizer) textItem(msg wireMessage, block *wireBlock, kind transcript
 }
 
 func (n *Normalizer) recordToolUse(block *wireBlock, env *envelope) ([]transcript.Item, []Update) {
+	// Tool identity is the vendor's tool_use id; without one no update can
+	// ever match the item, so the event becomes a notice instead of an
+	// item with an empty id the transcript model rejects.
+	if block.ID == "" {
+		return n.unsupported(env, "assistant/tool_use").Records, nil
+	}
 	switch block.Name {
 	case toolTodoWrite:
 		return n.recordPlan(block, env)
@@ -179,8 +185,8 @@ func (n *Normalizer) normalizeUser(line []byte, env *envelope) Observation {
 	if json.Unmarshal(line, &w) != nil {
 		return n.unsupported(env, noticeLabel(env))
 	}
-	blocks, ok := toolResultBlocks(w.Message.Content)
-	if !ok {
+	blocks := toolResultBlocks(w.Message.Content)
+	if len(blocks) == 0 {
 		return n.unsupported(env, noticeLabel(env))
 	}
 	var obs Observation

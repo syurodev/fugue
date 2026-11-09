@@ -30,7 +30,7 @@ func fakeClaudeBinary(t *testing.T) string {
 
 func TestNewAdapterDefaultsToTheClaudeBinary(t *testing.T) {
 	t.Parallel()
-	hostEnv := []string{"PATH=/usr/bin", "HOME=/home/user"}
+	hostEnv := []string{"PATH=/usr/bin", "HOME=/home/owner"}
 	a := NewAdapter(hostEnv)
 	if a.Binary != DefaultBinary {
 		t.Fatalf("binary = %q, want %q", a.Binary, DefaultBinary)

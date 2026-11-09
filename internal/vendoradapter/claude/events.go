@@ -47,7 +47,10 @@ func (n *Normalizer) normalizePermissionDenied(line []byte, env *envelope) Obser
 		return n.unsupported(env, "system/permission_denied")
 	}
 	item := n.items[w.ToolUseID]
-	if item == nil {
+	// Only a pending tool call can be denied; a denial naming anything else
+	// (a plan id, a subagent id, an id never seen) is data about an event the
+	// normalizer did not map, and becomes a notice.
+	if item == nil || item.Kind != transcript.ToolCall {
 		return n.unsupported(env, "system/permission_denied")
 	}
 	before := *item

@@ -435,3 +435,26 @@ func TestNormalizeErrorsAreTypedNotPanics(t *testing.T) {
 		t.Fatalf("error = %v, want a typed error", err)
 	}
 }
+
+func TestToolUseWithoutIDBecomesNotice(t *testing.T) {
+	t.Parallel()
+	n := NewNormalizer("s")
+	n.BeginTurn("t1")
+	item := oneRecord(t, feedRef(t, n, toolUseLine("", "Read", `{"file_path":"a"}`)))
+	if item.Kind != transcript.Notice {
+		t.Fatalf("kind = %s, want notice for a tool_use with no id", item.Kind)
+	}
+}
+
+func TestPermissionDeniedForNonToolItemBecomesNotice(t *testing.T) {
+	t.Parallel()
+	n := NewNormalizer("s")
+	n.BeginTurn("t1-plan")
+	// A plan item exists under the turn; a denial naming its id must not
+	// rewrite the plan's metadata into a tool call.
+	feedLine(t, n, toolUseLine("tu1", "TodoWrite", `{"todos":[{"content":"a","status":"pending"}]}`))
+	item := oneRecord(t, feedRef(t, n, `{"type":"system","subtype":"permission_denied","tool_name":"X","tool_use_id":"t1-plan-plan","message":"no","uuid":"u-d2","session_id":"s"}`))
+	if item.Kind != transcript.Notice {
+		t.Fatalf("kind = %s, want notice", item.Kind)
+	}
+}
