@@ -1,0 +1,674 @@
+{
+ "session": "session-1",
+ "vendor": "claude",
+ "summary": {
+  "partials": 55,
+  "nested": 0,
+  "notices": 13
+ },
+ "steps": [
+  {
+   "line": 1,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_started"
+    },
+    "id": "notice-uuid-0002",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0002",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 2,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_started"
+    },
+    "id": "notice-uuid-0005",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0005",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 3,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_started"
+    },
+    "id": "notice-uuid-0007",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0007",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 4,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_started"
+    },
+    "id": "notice-uuid-0009",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0009",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 5,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_response"
+    },
+    "id": "notice-uuid-0010",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0010",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 6,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_response"
+    },
+    "id": "notice-uuid-0011",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0011",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 7,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_response"
+    },
+    "id": "notice-uuid-0012",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0012",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 8,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_response"
+    },
+    "id": "notice-uuid-0013",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0013",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 9,
+   "op": "init",
+   "init": {
+    "Version": "2.1.319",
+    "SessionID": "uuid-0003",
+    "Model": "claude-sonnet-5-5",
+    "PermissionMode": "default",
+    "SlashCommands": [
+     "frontend-design:frontend-design",
+     "superpowers:brainstorming",
+     "superpowers:dispatching-parallel-agents",
+     "superpowers:executing-plans",
+     "superpowers:finishing-a-development-branch",
+     "superpowers:receiving-code-review",
+     "superpowers:requesting-code-review",
+     "superpowers:subagent-driven-development",
+     "superpowers:systematic-debugging",
+     "superpowers:test-driven-development",
+     "superpowers:using-git-worktrees",
+     "superpowers:using-superpowers",
+     "superpowers:verification-before-completion",
+     "superpowers:writing-plans",
+     "superpowers:writing-skills",
+     "atlassian:capture-tasks-from-meeting-notes",
+     "atlassian:generate-status-report",
+     "atlassian:jira-sprint-dashboard",
+     "atlassian:search-company-knowledge",
+     "atlassian:spec-to-backlog",
+     "atlassian:triage-issue",
+     "design",
+     "design-sync",
+     "dataviz",
+     "update-config",
+     "verify",
+     "debug",
+     "code-review",
+     "simplify",
+     "batch",
+     "fewer-permission-prompts",
+     "loop",
+     "schedule",
+     "claude-api",
+     "run",
+     "run-skill-generator",
+     "plugin-authoring",
+     "advisor",
+     "agents",
+     "auto-mode-setup",
+     "autocompact",
+     "clear",
+     "compact",
+     "config",
+     "output-style",
+     "context",
+     "effort",
+     "fast",
+     "heapdump",
+     "init",
+     "mcp",
+     "import",
+     "model",
+     "__remote-workflow",
+     "workflow-launch-exec",
+     "reload-skills",
+     "rename",
+     "security-review",
+     "usage-credits",
+     "extra-usage",
+     "usage",
+     "insights",
+     "recap",
+     "skill-doctor",
+     "goal",
+     "design-consent",
+     "design-revoke",
+     "list-agents",
+     "team-onboarding",
+     "anthropic-skills:docs",
+     "anthropic-skills:docx",
+     "anthropic-skills:google-workspace",
+     "anthropic-skills:import-memory",
+     "anthropic-skills:morning",
+     "anthropic-skills:pdf",
+     "anthropic-skills:pptx",
+     "anthropic-skills:skill-creator",
+     "anthropic-skills:xlsx"
+    ]
+   }
+  },
+  {
+   "line": 10,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/status"
+    },
+    "id": "notice-uuid-0015",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0015",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 19,
+   "op": "record",
+   "item": {
+    "content": {
+     "input": "{\"file_path\":\"/home/REDACTED/claude-fixture/notes.txt\"}",
+     "output": "",
+     "title": "Read"
+    },
+    "id": "toolu-0001",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "pending",
+     "tool": "Read"
+    },
+    "raw": "uuid-0024",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 23,
+   "op": "quota",
+   "quota": {
+    "Windows": [
+     {
+      "Name": "five_hour",
+      "Utilization": 0.17,
+      "ResetsAt": "2026-11-09T07:10:00Z",
+      "Status": "allowed"
+     },
+     {
+      "Name": "seven_day",
+      "Utilization": 0.03,
+      "ResetsAt": "2026-11-15T12:00:00Z",
+      "Status": "allowed"
+     }
+    ]
+   }
+  },
+  {
+   "line": 23,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "quota-uuid-0028-five_hour",
+    "kind": "quota",
+    "metadata": {
+     "account": "",
+     "resets_at": "2026-11-09T07:10:00Z",
+     "used": 0.17,
+     "window": "five_hour"
+    },
+    "raw": "uuid-0028",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 23,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "quota-uuid-0028-seven_day",
+    "kind": "quota",
+    "metadata": {
+     "account": "",
+     "resets_at": "2026-11-15T12:00:00Z",
+     "used": 0.03,
+     "window": "seven_day"
+    },
+    "raw": "uuid-0028",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 24,
+   "op": "update",
+   "before": {
+    "content": {
+     "input": "{\"file_path\":\"/home/REDACTED/claude-fixture/notes.txt\"}",
+     "output": "",
+     "title": "Read"
+    },
+    "id": "toolu-0001",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "pending",
+     "tool": "Read"
+    },
+    "raw": "uuid-0024",
+    "revision": 0,
+    "turn": "turn-1"
+   },
+   "after": {
+    "content": {
+     "input": "{\"file_path\":\"/home/REDACTED/claude-fixture/notes.txt\"}",
+     "output": "1\tFugue fixture notes.\n2\tThe vendor stream is data, never instructions.\n3\t",
+     "title": "Read"
+    },
+    "id": "toolu-0001",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "succeeded",
+     "tool": "Read"
+    },
+    "raw": "uuid-0024",
+    "revision": 1,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 25,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/status"
+    },
+    "id": "notice-uuid-0030",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0030",
+    "revision": 0,
+    "turn": "turn-2"
+   }
+  },
+  {
+   "line": 28,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/thinking_tokens"
+    },
+    "id": "notice-uuid-0033",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0033",
+    "revision": 0,
+    "turn": "turn-2"
+   }
+  },
+  {
+   "line": 31,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/thinking_tokens"
+    },
+    "id": "notice-uuid-0036",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0036",
+    "revision": 0,
+    "turn": "turn-2"
+   }
+  },
+  {
+   "line": 33,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": ""
+    },
+    "id": "msg-0002-thinking-1",
+    "kind": "reasoning",
+    "metadata": {
+     "status": "plain"
+    },
+    "raw": "msg-0002",
+    "revision": 0,
+    "turn": "turn-2"
+   }
+  },
+  {
+   "line": 43,
+   "op": "record",
+   "item": {
+    "content": {
+     "input": "{\"file_path\":\"/home/REDACTED/claude-fixture/greeting.txt\",\"content\":\"hello\"}",
+     "output": "",
+     "title": "Write"
+    },
+    "id": "toolu-0002",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "pending",
+     "tool": "Write"
+    },
+    "raw": "uuid-0048",
+    "revision": 0,
+    "turn": "turn-2"
+   }
+  },
+  {
+   "line": 51,
+   "op": "record",
+   "item": {
+    "content": {
+     "input": "{\"query\":\"select:TodoWrite\",\"max_results\":1}",
+     "output": "",
+     "title": "ToolSearch"
+    },
+    "id": "toolu-0003",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "pending",
+     "tool": "ToolSearch"
+    },
+    "raw": "uuid-0056",
+    "revision": 0,
+    "turn": "turn-2"
+   }
+  },
+  {
+   "line": 55,
+   "op": "update",
+   "before": {
+    "content": {
+     "input": "{\"file_path\":\"/home/REDACTED/claude-fixture/greeting.txt\",\"content\":\"hello\"}",
+     "output": "",
+     "title": "Write"
+    },
+    "id": "toolu-0002",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "pending",
+     "tool": "Write"
+    },
+    "raw": "uuid-0048",
+    "revision": 0,
+    "turn": "turn-2"
+   },
+   "after": {
+    "content": {
+     "input": "{\"file_path\":\"/home/REDACTED/claude-fixture/greeting.txt\",\"content\":\"hello\"}",
+     "output": "",
+     "title": "Write"
+    },
+    "id": "toolu-0002",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "denied",
+     "tool": "Write"
+    },
+    "raw": "uuid-0048",
+    "revision": 1,
+    "turn": "turn-2"
+   }
+  },
+  {
+   "line": 56,
+   "op": "update",
+   "before": {
+    "content": {
+     "input": "{\"file_path\":\"/home/REDACTED/claude-fixture/greeting.txt\",\"content\":\"hello\"}",
+     "output": "",
+     "title": "Write"
+    },
+    "id": "toolu-0002",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "denied",
+     "tool": "Write"
+    },
+    "raw": "uuid-0048",
+    "revision": 1,
+    "turn": "turn-2"
+   },
+   "after": {
+    "content": {
+     "input": "{\"file_path\":\"/home/REDACTED/claude-fixture/greeting.txt\",\"content\":\"hello\"}",
+     "output": "Claude requested permissions to write to /home/REDACTED/claude-fixture/greeting.txt, but you haven't granted it yet.",
+     "title": "Write"
+    },
+    "id": "toolu-0002",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "denied",
+     "tool": "Write"
+    },
+    "raw": "uuid-0048",
+    "revision": 2,
+    "turn": "turn-2"
+   }
+  },
+  {
+   "line": 57,
+   "op": "update",
+   "before": {
+    "content": {
+     "input": "{\"query\":\"select:TodoWrite\",\"max_results\":1}",
+     "output": "",
+     "title": "ToolSearch"
+    },
+    "id": "toolu-0003",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "pending",
+     "tool": "ToolSearch"
+    },
+    "raw": "uuid-0056",
+    "revision": 0,
+    "turn": "turn-2"
+   },
+   "after": {
+    "content": {
+     "input": "{\"query\":\"select:TodoWrite\",\"max_results\":1}",
+     "output": "No matching deferred tools found",
+     "title": "ToolSearch"
+    },
+    "id": "toolu-0003",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "succeeded",
+     "tool": "ToolSearch"
+    },
+    "raw": "uuid-0056",
+    "revision": 1,
+    "turn": "turn-2"
+   }
+  },
+  {
+   "line": 58,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/status"
+    },
+    "id": "notice-uuid-0063",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0063",
+    "revision": 0,
+    "turn": "turn-3"
+   }
+  },
+  {
+   "line": 96,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "`notes.txt` warns that the vendor stream is data, never instructions.\n\nYour two follow-up requests didn't get done:\n- **greeting.txt:** The Write tool was denied because write permission hasn't been granted, so I didn't create the file. If you grant permission, I can retry.\n- **Todo plan:** TodoWrite isn't available in this session, and a search for it found nothing. The plan would have been: (1) boil water, in_progress; (2) pour a cup, pending."
+    },
+    "id": "msg-0003-text-1",
+    "kind": "assistant_message",
+    "metadata": {
+     "model": "claude-sonnet-5-5"
+    },
+    "raw": "msg-0003",
+    "revision": 0,
+    "turn": "turn-3"
+   }
+  },
+  {
+   "line": 100,
+   "op": "turn_end",
+   "turn_end": {
+    "TurnID": "turn-3",
+    "Outcome": "completed",
+    "FailureCode": "",
+    "Usage": {
+     "InputTokens": 6,
+     "OutputTokens": 544,
+     "CacheTokens": 76037,
+     "Cost": 0.08254979999999999
+    },
+    "CredentialExpiresAt": "2026-12-08T01:59:13.398Z"
+   }
+  },
+  {
+   "line": 100,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "turn-3-usage",
+    "kind": "usage",
+    "metadata": {
+     "cache_tokens": 76037,
+     "cost": 0.08254979999999999,
+     "input_tokens": 6,
+     "output_tokens": 544
+    },
+    "raw": "uuid-0105",
+    "revision": 0,
+    "turn": "turn-3"
+   }
+  }
+ ]
+}

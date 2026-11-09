@@ -74,10 +74,10 @@ func testStore(t *testing.T) (*Store, *sql.DB) {
 	return s, db
 }
 
-func requireNoError(t *testing.T, err error) {
-	t.Helper()
+func requireNoError(tb testing.TB, err error) {
+	tb.Helper()
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 }
 

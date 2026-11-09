@@ -51,9 +51,9 @@ The vendor domain packages integrate into the established 7-layer hierarchy:
 | `internal/process` | 1 | Supervised OS process trees: spawn, JSON-line reader (8 MiB), stderr ring (64 KiB), stop order (protocol interrupt -> SIGINT -> SIGTERM -> SIGKILL tree), Linux cgroups v2 (`systemd-run --user --scope`) stop proof, macOS `sysctl kern.proc` PID tracking. Owner: vendor runtime (VR-09). | `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/supervise` | F9.2 |
 | `internal/gitops` | 1 | Git manager for multi-agent worktrees: per-repo mutex, `gc.auto=0`, ref-lock retries, worktree add/remove, and branch lifecycle. Owner: orchestration (OR-11). | `internal/platform/errcode`, `internal/platform/clock`, `internal/platform/supervise` | F11.4 |
 | `internal/vendor` | 3 | Neutral vendor domain core: `Adapter` and `Session` ports (`vendor-runtime §6`), capability contracts, session state machine, and session actor supervising process and adapter. Owner: vendor runtime (VR-01, VR-07). | `internal/process`, `internal/transcript`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/ids`, `internal/platform/supervise` | F9.2 |
-| `internal/vendor/claude` | 3 | Claude Code adapter: `-p` stream-json over stdio, normalizer into transcript items, rate limit events, slash commands, permission MCP prompt tool bridge. Owner: vendor runtime (G-04). | `internal/vendor`, `internal/process`, `internal/transcript`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/supervise` | F9.5 |
-| `internal/vendor/codex` | 3 | Codex adapter: `app-server` JSON-RPC over stdio, schema conformance fixtures, approval request routing, turn interrupt/steer, rate limits. Owner: vendor runtime (G-04). | `internal/vendor`, `internal/process`, `internal/transcript`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/supervise` | F9.7 |
-| `internal/vendor/agy` | 3 | Antigravity adapter: ACP v1 over stdio, `session/new`, `session/load`, permission request forwarding, available command updates. Owner: vendor runtime (G-04). | `internal/vendor`, `internal/process`, `internal/transcript`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/supervise` | F9.8 |
+| `internal/vendoradapter/claude` | 3 | Claude Code adapter: `-p` stream-json over stdio, normalizer into transcript items, rate limit events, slash commands, permission MCP prompt tool bridge. Owner: vendor runtime (G-04). | `internal/vendor`, `internal/process`, `internal/transcript`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/supervise` | F9.5 |
+| `internal/vendoradapter/codex` | 3 | Codex adapter: `app-server` JSON-RPC over stdio, schema conformance fixtures, approval request routing, turn interrupt/steer, rate limits. Owner: vendor runtime (G-04). | `internal/vendor`, `internal/process`, `internal/transcript`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/supervise` | F9.7 |
+| `internal/vendoradapter/agy` | 3 | Antigravity adapter: ACP v1 over stdio, `session/new`, `session/load`, permission request forwarding, available command updates. Owner: vendor runtime (G-04). | `internal/vendor`, `internal/process`, `internal/transcript`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/supervise` | F9.8 |
 | `internal/vendorstore` | 3 | SQL persistence for vendor sessions, turns, domain events, transcript items, and team orchestration; sealed protected payloads under session keys (TR-04, INV-09). Owner: vendor runtime & storage (VR-01, TR-04). | `internal/storage`, `internal/sealing`, `internal/crypto`, `internal/vault`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/ids`, `internal/platform/supervise` | F9.3 |
 | `internal/transcript` | 3 | Neutral transcript item model, read model projection, coalesced delta topic (30/s), pagination and truncation limits, display redaction. Owner: transcript (H-48). | `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/ids`, `internal/platform/supervise` | F9.4 |
 | `internal/teams` | 3 | Multi-tier team orchestration (depth <= 2: lead, team manager, member), task and team state machines, role catalog in workspace config, mailbox wake-up, exception routing, and delegation contracts. Owner: orchestration (H-49). | `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/ids`, `internal/platform/supervise` | F11.1 |
@@ -61,6 +61,18 @@ The vendor domain packages integrate into the established 7-layer hierarchy:
 | `pkg/client` | 6 | Public Go client library for the Host API, supporting both `local` and `session` principals, socket dialing, token credentials, and subscription catch-up. Owner: client. | `pkg/pb/...` | F9.9 or F10.2 (whichever first needs a client) |
 
 ### Amendments
+
+2026-11-09 (F9.5a): the concrete adapters move from `internal/vendor/<name>` to
+`internal/vendoradapter/<name>` (claude now, codex and agy per their phases).
+The Go toolchain does not descend into directories named `vendor` when
+expanding `...` patterns (`go help packages`: directories named "vendor" are
+ignored), so every wildcard-driven gate — `go list ./...` behind the arch
+tests, lint, coverage, deadcode, fuzz discovery and the vendor-credential scan
+— silently skips packages below `internal/vendor`. The port stays at
+`internal/vendor` (the directory itself matches); only subpackages need the
+new parent, which parallels `internal/modeladapter`. No import edge, layer or
+table ownership changes; the three adapter rows above already carry the new
+paths.
 
 2026-11-08 (F9.3b): `internal/vendorstore` may import `internal/sealing` for protected payloads and session-key lifecycle.
 
@@ -84,7 +96,7 @@ Directories outside `internal/` and `pkg/` governed by this ADR:
 ### 3. Rules this table creates
 
 1. **Domain isolation**: Layer 3 domain services (`internal/teams`, `internal/vendorstore`, `internal/transcript`) do not import each other, nor do they import `internal/vendor`. They remain decoupled and interact only through composition in `internal/app`.
-2. **Adapter sideways edge**: `internal/vendor` and its concrete adapter subpackages (`internal/vendor/claude`, `internal/vendor/codex`, `internal/vendor/agy`) may import `internal/transcript` solely for the neutral transcript item and delta types emitted by adapter normalizers. Adapters never import `internal/vendorstore`.
+2. **Adapter sideways edge**: `internal/vendoradapter` and its concrete adapter subpackages (`internal/vendoradapter/claude`, `internal/vendoradapter/codex`, `internal/vendoradapter/agy`) may import `internal/transcript` solely for the neutral transcript item and delta types emitted by adapter normalizers. Adapters never import `internal/vendorstore`.
 3. **Single composition root**: Only `internal/app` (layer 4) wires layer-3 services together. Result gates, checks, and worktree operations are composed in `internal/app`.
 4. **Public packages never import internal**: No package under `pkg/` may import anything under `internal/`. Architecture tests in `internal/arch` enforce this invariant.
 5. **Core isolation from UI**: The core module `github.com/syurodev/fugue` must never import `github.com/syurodev/fugue/ui` or any package under `ui/`. Architecture tests enforce this invariant.

@@ -46,14 +46,13 @@ func TestTranscriptPageOver10000ItemsIsStableWithoutDuplicatesOrGaps(t *testing.
 }
 
 // recordPageItems records total notice items through the write path and
-// returns the first item for the update check. The items carry no content
-// payload: TR-E05 exercises pagination, and payload writes would make the run
-// quadratic in the store's per-append payload total scan.
+// returns the first item for the update check.
 func recordPageItems(t *testing.T, f *transcriptFixture, total int) *transcript.Item {
 	t.Helper()
 	first := transcript.Item{
 		ID: "item-000001", SessionID: testSession, TurnID: testTurn, Kind: transcript.Notice,
 		Metadata: transcript.NoticeMetadata{Level: "info", Code: "page"},
+		Content:  transcript.NoticeContent{Text: "page item"},
 	}
 	if err := f.service.RecordItem(t.Context(), testSession, 2, &first, nil); err != nil {
 		t.Fatal(err)
@@ -63,6 +62,7 @@ func recordPageItems(t *testing.T, f *transcriptFixture, total int) *transcript.
 			ID:        fmt.Sprintf("item-%06d", expected-1),
 			SessionID: testSession, TurnID: testTurn, Kind: transcript.Notice,
 			Metadata: transcript.NoticeMetadata{Level: "info", Code: "page"},
+			Content:  transcript.NoticeContent{Text: "page item"},
 		}
 		if err := f.service.RecordItem(t.Context(), testSession, int64(expected), &item, nil); err != nil {
 			t.Fatal(err)
