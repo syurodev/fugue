@@ -2,7 +2,9 @@ package hostapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -46,10 +48,41 @@ type fakeBackend struct {
 	shutdowns    []app.ShutdownCommand
 	holdLease    chan struct{} // non-nil: LeaseAcquired blocks until closed
 	leaseEntered chan struct{} // non-nil: signalled when LeaseAcquired is entered
+
+	pendingMu   sync.Mutex
+	pending     map[string]app.PendingInteractionView
+	pendingSeq  app.EventSeq
+	dedup       map[string]app.AnswerInteractionResult
+	answered    map[string]string
+	inc         string
+	answerCalls int
 }
 
 func newFakeBackend() *fakeBackend {
-	return &fakeBackend{released: make(chan string, 8), hub: app.NewEventHub("inc-fake")}
+	b := &fakeBackend{
+		released: make(chan string, 8),
+		hub:      app.NewEventHub("inc-fake"),
+		pending:  map[string]app.PendingInteractionView{},
+		dedup:    map[string]app.AnswerInteractionResult{},
+		answered: map[string]string{},
+		inc:      "inc-fake",
+	}
+	if err := b.hub.RegisterEphemeral(app.TopicInteraction, func(_ context.Context) ([]byte, error) {
+		b.pendingMu.Lock()
+		defer b.pendingMu.Unlock()
+		views := make([]app.PendingInteractionView, 0, len(b.pending))
+		for k := range b.pending {
+			views = append(views, b.pending[k])
+		}
+		data, err := json.Marshal(views)
+		if err != nil {
+			return nil, fmt.Errorf("marshal views: %w", err)
+		}
+		return data, nil
+	}, 256); err != nil {
+		return nil
+	}
+	return b
 }
 
 func (f *fakeBackend) Hello(_ context.Context, _ app.HelloParams) (app.HelloResult, error) {

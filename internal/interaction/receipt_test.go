@@ -232,7 +232,7 @@ func assertSpecValidationErrors(t *testing.T, owner *Owner) {
 		{OperationID: "op", Kind: "unknown", Binding: defaultBinding()},
 	}
 	for _, spec := range badSpecs {
-		_, err := owner.Ensure(spec)
+		_, _, err := owner.Ensure(spec)
 		wantCode(t, err, errcode.InvalidArgument)
 	}
 }
@@ -271,7 +271,7 @@ func assertGeneratorFailures(t *testing.T, fakeClock *clock.Fake) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = o1.Ensure(confirmSpec("op-fail-req-id"))
+	_, _, err = o1.Ensure(confirmSpec("op-fail-req-id"))
 	wantCode(t, err, errcode.Internal)
 	_, err = o1.InvalidateOperation("op-fail-inv-id")
 	wantCode(t, err, errcode.Internal)

@@ -81,6 +81,7 @@ func (o *Owner) claimByKind(receiptID string, kind Kind, expected *Binding) (*Re
 	}
 	receipt.Claimed = true
 	receipt.ClaimedAt = now
+	o.pruneResolvedLocked(now)
 	cp := *receipt
 	outcome := OutcomeAllowedOnce
 	if kind == KindQuestion {
@@ -156,6 +157,11 @@ func (o *Owner) cancelOperationTicketLocked(ticket *Ticket, now time.Time) *Audi
 	ticket.ResolvedAt = now
 	ticket.Outcome = OutcomeCancelled
 	ev := o.newAuditEvent("cancelled", ticket)
+	o.emitLifecycleLocked(LifecycleEvent{
+		Kind:      EventResolved,
+		RequestID: ticket.RequestID,
+		Outcome:   OutcomeCancelled,
+	})
 	return &ev
 }
 
@@ -181,6 +187,11 @@ func (o *Owner) ResetSession(sessionID string) {
 			ticket.Outcome = OutcomeCancelled
 			ev := o.newAuditEvent("cancelled", ticket)
 			cancelled = append(cancelled, &ev)
+			o.emitLifecycleLocked(LifecycleEvent{
+				Kind:      EventResolved,
+				RequestID: ticket.RequestID,
+				Outcome:   OutcomeCancelled,
+			})
 		}
 	}
 	for id, r := range o.receipts {
@@ -219,6 +230,11 @@ func (o *Owner) SetVaultLocked(locked bool) {
 			ticket.Outcome = OutcomeCancelled
 			ev := o.newAuditEvent("vault_locked", ticket)
 			cancelled = append(cancelled, &ev)
+			o.emitLifecycleLocked(LifecycleEvent{
+				Kind:      EventResolved,
+				RequestID: ticket.RequestID,
+				Outcome:   OutcomeCancelled,
+			})
 		}
 	}
 	o.mu.Unlock()

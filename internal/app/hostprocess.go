@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/syurodev/fugue/internal/config"
+	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/storage"
@@ -32,48 +33,22 @@ type HostProcess struct {
 // drain: transport first, store and lock last. The deps are a pointer because
 // the struct is large and shared by the caller's wiring.
 func StartHost(ctx context.Context, deps *HostDeps) (*HostProcess, error) {
-	if deps.Clock == nil {
-		return nil, errcode.New(errcode.InvalidArgument, "clock is nil")
-	}
-	if deps.IDs == nil {
-		return nil, errcode.New(errcode.InvalidArgument, "id generator is nil")
-	}
-	if deps.Transport == nil {
-		return nil, errcode.New(errcode.InvalidArgument, "transport is nil")
+	if err := validateHostDeps(deps); err != nil {
+		return nil, err
 	}
 	cfg := deps.Config
-	if len(cfg.APIVersions) == 0 {
-		return nil, errcode.New(errcode.InvalidArgument, "the host serves no api versions")
-	}
 	cfg.APIVersions = slices.Clone(cfg.APIVersions)
-	for _, v := range cfg.APIVersions {
-		if _, err := parseAPIVersion(v); err != nil {
-			return nil, err
-		}
-	}
-	store, err := storage.OpenStore(ctx, config.Config{DataDir: deps.DataDir}, deps.Clock, deps.IDs)
+	store, err := openHostStore(ctx, deps)
 	if err != nil {
-		// OpenStore failures are already typed — the lock failure is public
-		// and a second host must keep failing typed — so the pass-through
-		// keeps the code and message a client already knows.
-		var coded *errcode.Error
-		if errors.As(err, &coded) {
-			return nil, errcode.Wrap(coded.Code(), coded.Message(), err)
-		}
-		return nil, errcode.Wrap(errcode.Internal, "open the host store", err)
+		return nil, err
 	}
 	// The base context outlives StartHost; it is captured in the closures
 	// below, never stored as a context field.
 	base, cancel := context.WithCancel(ctx)
 	hp := &HostProcess{deps: deps, store: store, cancel: cancel}
 	hp.rt = newHostRuntime(cfg, store.Incarnation(), deps.Clock)
-	// The host topic is the one stage-A topic this item registers: lease
-	// counts and the draining transition. Later items register theirs.
-	if err := hp.rt.hub.RegisterEphemeral(TopicHost, hp.rt.hostTopicSnapshot, defaultEphemeralBufferCap); err != nil {
+	if err := initHostTopics(hp, store, deps); err != nil {
 		cancel()
-		if serr := store.Close(); serr != nil {
-			return nil, errcode.Wrap(errcode.Internal, "register the host topic", errors.Join(err, serr))
-		}
 		return nil, err
 	}
 	hp.rt.goTask = func(name string, fn func(context.Context) error) *supervise.Task {
@@ -85,7 +60,61 @@ func StartHost(ctx context.Context, deps *HostDeps) (*HostProcess, error) {
 	}
 	hp.rt.drain = hp.runDrain
 	hp.rt.startGraceLoop()
+	if hp.rt.interactions != nil {
+		hp.rt.interactions.Start(base)
+	}
 	return hp, nil
+}
+
+func validateHostDeps(deps *HostDeps) error {
+	if deps.Clock == nil {
+		return errcode.New(errcode.InvalidArgument, "clock is nil")
+	}
+	if deps.IDs == nil {
+		return errcode.New(errcode.InvalidArgument, "id generator is nil")
+	}
+	if deps.Transport == nil {
+		return errcode.New(errcode.InvalidArgument, "transport is nil")
+	}
+	if len(deps.Config.APIVersions) == 0 {
+		return errcode.New(errcode.InvalidArgument, "the host serves no api versions")
+	}
+	for _, v := range deps.Config.APIVersions {
+		if _, err := parseAPIVersion(v); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func openHostStore(ctx context.Context, deps *HostDeps) (*storage.Store, error) {
+	store, err := storage.OpenStore(ctx, config.Config{DataDir: deps.DataDir}, deps.Clock, deps.IDs)
+	if err != nil {
+		var coded *errcode.Error
+		if errors.As(err, &coded) {
+			return nil, errcode.Wrap(coded.Code(), coded.Message(), err)
+		}
+		return nil, errcode.Wrap(errcode.Internal, "open the host store", err)
+	}
+	return store, nil
+}
+
+func initHostTopics(hp *HostProcess, store *storage.Store, deps *HostDeps) error {
+	if terr := hp.rt.hub.RegisterEphemeral(TopicHost, hp.rt.hostTopicSnapshot, defaultEphemeralBufferCap); terr != nil {
+		if serr := store.Close(); serr != nil {
+			return errcode.Wrap(errcode.Internal, "register the host topic", errors.Join(terr, serr))
+		}
+		return terr
+	}
+	interactions, ierr := initInteractions(deps, hp.rt.hub)
+	if ierr != nil {
+		if serr := store.Close(); serr != nil {
+			return errcode.Wrap(errcode.Internal, "create interaction service", errors.Join(ierr, serr))
+		}
+		return ierr
+	}
+	hp.rt.interactions = interactions
+	return nil
 }
 
 // runDrain is the injected drain: the transport step, then the store and lock
@@ -124,6 +153,9 @@ func (hp *HostProcess) Close() error {
 	hp.closeOnce.Do(func() {
 		hp.cancel()
 		hp.closeErr = errors.Join(hp.closeErr, hp.waitTasks())
+		if hp.rt.interactions != nil {
+			hp.closeErr = errors.Join(hp.closeErr, hp.rt.interactions.Close())
+		}
 		if !hp.storeClosed.Load() {
 			if err := hp.store.Close(); err != nil {
 				hp.closeErr = errors.Join(hp.closeErr, err)
@@ -152,4 +184,19 @@ func (hp *HostProcess) waitTasks() error {
 			}
 		}
 	}
+}
+
+func initInteractions(deps *HostDeps, hub *EventHub) (*InteractionService, error) {
+	owner, err := interaction.NewOwner(interaction.Config{
+		Clock:     deps.Clock,
+		IDs:       deps.IDs,
+		Responder: nil,
+		Headless:  false,
+		// TODO(F9.6): wire the host vault lock state to the interaction owner once vault is added to HostDeps.
+		VaultLocked: func() bool { return false },
+	})
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "create interaction owner", err)
+	}
+	return NewInteractionService(owner, hub, deps.Clock)
 }

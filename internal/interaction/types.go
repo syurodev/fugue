@@ -31,6 +31,34 @@ const (
 	OutcomeAnswered       Outcome = "answered"
 )
 
+// Resolution carries the request ID and outcome of a resolved ticket.
+type Resolution struct {
+	RequestID string
+	Outcome   Outcome
+}
+
+// LifecycleEventKind describes the lifecycle transition of an interaction ticket.
+type LifecycleEventKind string
+
+// Lifecycle event kinds for interaction tickets.
+const (
+	EventRequested LifecycleEventKind = "requested"
+	EventResolved  LifecycleEventKind = "resolved"
+)
+
+// LifecycleEvent carries a transition event for an interaction ticket.
+// A requested event carries the cloned Ticket. A resolved event carries
+// the RequestID and Outcome (interaction §7, §8, I-E08).
+//
+// Lifecycle hooks MUST be non-blocking. Called with o.mu held; must only
+// call hub.Publish and take no other locks.
+type LifecycleEvent struct {
+	Kind      LifecycleEventKind
+	Ticket    *Ticket
+	RequestID string
+	Outcome   Outcome
+}
+
 // Option is one selectable choice offered by a KindSelect request, by a
 // question or by a relayed vendor request. ID and Label are shown verbatim;
 // Description is an optional longer explanation (ask-plan §4).
@@ -89,6 +117,10 @@ type Spec struct {
 	// Summary is the content shown to the user, built by the tool from
 	// canonical args or relayed verbatim from the vendor's prompt.
 	Summary string
+	// Risk is the operation's risk level: read, write, destructive, external.
+	Risk string
+	// GrantScopeLabel describes the scope covered by an allowed_session outcome.
+	GrantScopeLabel string
 	// Relayed marks a request relayed from a vendor runtime (vendor-runtime
 	// VR-05): Options are the vendor's own choices shown verbatim, the owner
 	// never creates a grant or an execution receipt for the request, and the
@@ -112,12 +144,14 @@ type Spec struct {
 // (interaction §7): it lives in owner memory and goes only to trusted
 // principals, never into audit, logs or errors.
 type Ticket struct {
-	RequestID   string
-	OperationID string
-	Incarnation string
-	Kind        Kind
-	Summary     string
-	Relayed     bool
+	RequestID       string
+	OperationID     string
+	Incarnation     string
+	Kind            Kind
+	Risk            string
+	GrantScopeLabel string
+	Summary         string
+	Relayed         bool
 	// Offers is the effective set of outcomes the user may answer with.
 	Offers           []Outcome
 	Options          []Option
@@ -416,81 +450,4 @@ func knownOutcome(outcome Outcome) bool {
 		return true
 	}
 	return false
-}
-
-// effectiveOffers returns the outcomes a user may answer a request with. A
-// relayed request never offers a Fugue approval outcome (VR-05): choosing one
-// of the vendor's options — including the vendor's own reject or "always
-// allow" — records the choice as answered, and denied stays the Fugue-level
-// deny with an optional note. No receipt or grant is ever created.
-func effectiveOffers(spec *Spec) []Outcome {
-	if spec.Relayed {
-		return []Outcome{OutcomeAnswered, OutcomeDenied}
-	}
-	return spec.Offers
-}
-
-func sameSpec(t *Ticket, spec *Spec) bool {
-	if t.Kind != spec.Kind || t.Binding != spec.Binding || t.Relayed != spec.Relayed ||
-		t.Summary != spec.Summary || t.Body != spec.Body {
-		return false
-	}
-	if !slices.Equal(t.Offers, effectiveOffers(spec)) || !slices.Equal(t.Options, spec.Options) {
-		return false
-	}
-	return sameQuestions(t.Questions, spec.Questions)
-}
-
-func sameQuestions(a, b []Question) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i].ID != b[i].ID || a[i].Question != b[i].Question || a[i].Header != b[i].Header || a[i].MultiSelect != b[i].MultiSelect {
-			return false
-		}
-		if !slices.Equal(a[i].Options, b[i].Options) {
-			return false
-		}
-	}
-	return true
-}
-
-func hasOption(options []Option, id string) bool {
-	return slices.ContainsFunc(options, func(opt Option) bool {
-		return opt.ID == id
-	})
-}
-
-func cloneTicket(t *Ticket) *Ticket {
-	cp := *t
-	cp.Offers = slices.Clone(t.Offers)
-	cp.Options = slices.Clone(t.Options)
-	cp.Questions = cloneQuestions(t.Questions)
-	cp.Answers = cloneAnswers(t.Answers)
-	return &cp
-}
-
-func cloneQuestions(questions []Question) []Question {
-	if questions == nil {
-		return nil
-	}
-	out := make([]Question, len(questions))
-	for i := range questions {
-		out[i] = questions[i]
-		out[i].Options = slices.Clone(questions[i].Options)
-	}
-	return out
-}
-
-func cloneAnswers(answers []Answer) []Answer {
-	if answers == nil {
-		return nil
-	}
-	out := make([]Answer, len(answers))
-	for i := range answers {
-		out[i] = answers[i]
-		out[i].OptionIDs = slices.Clone(answers[i].OptionIDs)
-	}
-	return out
 }

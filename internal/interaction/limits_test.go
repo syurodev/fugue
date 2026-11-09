@@ -50,7 +50,7 @@ func TestOversizedRequestContentFailsTyped(t *testing.T) {
 	t.Parallel()
 	owner, _, _, _ := newTestOwner(t)
 	for _, item := range oversizedSpecCases(t) {
-		if _, err := owner.Ensure(item.spec); err != nil {
+		if _, _, err := owner.Ensure(item.spec); err != nil {
 			wantCode(t, err, errcode.InvalidArgument)
 			continue
 		}
@@ -119,7 +119,7 @@ func TestPendingRequestLimitsPerSessionAndHost(t *testing.T) {
 
 	// At most one pending native request per session.
 	first := mustEnsure(t, owner, confirmSpec("op-front-1"))
-	_, err := owner.Ensure(confirmSpec("op-front-2"))
+	_, _, err := owner.Ensure(confirmSpec("op-front-2"))
 	wantCode(t, err, errcode.FailedPrecondition)
 
 	// Relayed vendor requests bypass the per-session frontier.
@@ -140,7 +140,7 @@ func TestPendingRequestLimitsPerSessionAndHost(t *testing.T) {
 	}
 	overCap := confirmSpec("op-cap-over")
 	overCap.Binding.SessionID = "sess-cap-over"
-	_, err = owner.Ensure(overCap)
+	_, _, err = owner.Ensure(overCap)
 	wantCode(t, err, errcode.FailedPrecondition)
 
 	// Answering the pending native request frees the session frontier.
