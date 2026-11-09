@@ -139,7 +139,23 @@ func (f *transcriptFixture) awaitKnownValues() {
 	f.t.Fatal("the redactor never rebuilt its detector with the known values")
 }
 
-// pumpDelta flushes pending coalesced deltas on the fake clock.
+// streamAndAwait streams one update and blocks until the coalescer has
+// published it. The coalescer runs on its own goroutine, so returning from
+// StreamItem says nothing about when the delta lands in the delta topic's
+// memory; the published event is the signal. The watching subscription is
+// opened first so the event cannot be missed.
+func (f *transcriptFixture) streamAndAwait(item string, base uint64, kind transcript.ViewKind, content string) {
+	f.t.Helper()
+	watch := subscribe(f.t, f.hub, TopicTranscriptDelta+testSession)
+	f.service.StreamItem(testSession, item, base, kind, content)
+	if ev := nextEvent(f.t, watch); ev.Type != EventTranscriptDelta || ev.Key != item {
+		f.t.Fatalf("delta event = %+v, want a delta for %q", ev, item)
+	}
+}
+
+// pumpDelta flushes pending coalesced deltas on the fake clock. It cannot see
+// a delta still on its way to the coalescer's pending set, so a test that
+// expects a delta to be published uses streamAndAwait instead.
 func (f *transcriptFixture) pumpDelta() {
 	for range 100000 {
 		if f.clock.Pending() == 0 {
@@ -247,8 +263,7 @@ func TestTranscriptReconnectAfterLostDeltaGetsOpenItemsAndFinalDurableState(t *t
 	if err := f.service.RecordItem(t.Context(), testSession, 2, &pending, nil); err != nil {
 		t.Fatal(err)
 	}
-	f.service.StreamItem(testSession, testItem, 1, transcript.ViewToolOutput, "partial output, more")
-	f.pumpDelta()
+	f.streamAndAwait(testItem, 1, transcript.ViewToolOutput, "partial output, more")
 
 	// The client reconnects: one fresh durable subscription receives the
 	// snapshot and then the completion event (TR-E03).

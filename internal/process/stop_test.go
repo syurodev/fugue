@@ -297,7 +297,7 @@ func TestStopKillsGroupMembersAfterLeaderExits(t *testing.T) {
 	// The killed child is reparented and reaped by init; wait for that real
 	// event, then drive the clock so Stop's next group probe sees it.
 	waitPidGone(t, childPid)
-	driveClockUntil(t, clk, stopDone)
+	driveClockOncePipesSettle(t, clk, proc, stopDone)
 
 	if stopErr != nil {
 		t.Fatalf("Stop error: %v", stopErr)
@@ -313,6 +313,20 @@ func TestStopKillsGroupMembersAfterLeaderExits(t *testing.T) {
 	if err := syscall.Kill(childPid, 0); !errors.Is(err, syscall.ESRCH) {
 		t.Fatalf("expected child pid %d to be ESRCH, got %v", childPid, err)
 	}
+}
+
+// driveClockOncePipesSettle drives the fake clock until done closes, but only
+// after the leader's stdout and stderr have really reached EOF. Stop's last
+// wait is the 1 s pipe-settle deadline on the fake clock, which driveClockUntil
+// burns through in microseconds, so an EOF that lands a moment late (a loaded
+// machine, a write end still open elsewhere) would otherwise read as
+// pipe_held_open. Use it whenever the test expects the pipes to settle; the
+// stdout wait needs a drain goroutine reading the pipe.
+func driveClockOncePipesSettle(t *testing.T, clk *clock.Fake, proc *Process, done <-chan struct{}) {
+	t.Helper()
+	<-proc.stderrTask.Done()
+	<-proc.stdoutPipe.ended
+	driveClockUntil(t, clk, done)
 }
 
 func waitChildSurvivorReady(t *testing.T, lr *LineReader) int {

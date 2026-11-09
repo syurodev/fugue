@@ -209,8 +209,7 @@ func TestSecretsAreMaskedInPageItemSnapshotAndDeltaAndStoredPayloadIsOriginal(t 
 	if err := f.service.RecordItem(t.Context(), testSession, 2, &item, []byte("raw "+knownAPIToken)); err != nil {
 		t.Fatal(err)
 	}
-	f.service.StreamItem(testSession, testSecretHit, 1, transcript.ViewToolOutput, secretOutput)
-	f.pumpDelta()
+	f.streamAndAwait(testSecretHit, 1, transcript.ViewToolOutput, secretOutput)
 
 	assertMaskedReads(t, f, token)
 	assertMaskedTopics(t, f, token)
