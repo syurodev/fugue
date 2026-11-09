@@ -40,13 +40,24 @@ reports in its final text.
    everywhere (`cwd`, tool inputs, permission messages).
 4. Thinking `signature` values become `REDACTED_SIGNATURE`; `signature_delta`
    fragments (`partial_json` values that are long pure-base64) become `REDACTED`.
-5. `init.tools` collapses to a fixed representative list — the recorded
-   inventory is the owner's machine-specific MCP set and carries no fixture
-   meaning. `slash_commands` and `terminal_slash_commands` stay as recorded:
-   they are the vendor's own published lists and the input of the slash-list
-   feature.
-6. Scan the result for the old session id, emails, `sk-`/`gh*`/`AKIA` tokens,
-   real UUIDs, the recording path and signature blobs — all must be absent.
+5. Replace the `system/init` event (line 9) with a minimal hand-written one. It
+   keeps only the fields the normalizer reads (`claude_code_version`,
+   `session_id`, `cwd`, `model`, `permissionMode`, `slash_commands`,
+   `terminal_slash_commands`, `tools`) plus a few fields it does not read
+   (`apiKeySource`, `output_style`, `fast_mode_state`, `view_mode`), so the
+   unknown-field path stays covered. The recorded `mcp_servers`, `plugins`,
+   `skills`, `agents` and `slash_commands` describe the recording machine and
+   never go into the repository: use `example-*` names only, with plugin paths
+   under the REDACTED home placeholder. Drop `memory_paths` and `messaging_socket_path`
+   entirely. Keep the line count, because `*.turns.json` refers to line numbers.
+6. Regenerate the golden transcript (`go test ./internal/vendoradapter/claude
+   -run TestVRE01 -update`) and review its diff.
+7. Run `go test ./internal/vendoradapter/claude -run TestFixturesContainNoHostIdentity`
+   before committing. It scans every file under `testdata/` and fails on any
+   home directory other than the REDACTED placeholder, a macOS home directory,
+   a per-user runtime directory, a real UUID, an email address, a provider key
+   or token prefix, and any value under `plugins`, `mcp_servers` or
+   `memory_paths` that is not a placeholder.
 
 Everything else stays as recorded: model names, usage numbers and cost, quota
-`resetsAt` epochs, timestamps, event texts and the slash command lists.
+`resetsAt` epochs, timestamps and event texts.
