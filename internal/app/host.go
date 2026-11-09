@@ -110,6 +110,8 @@ type Backend interface {
 	Status(ctx context.Context) (HostStatusView, error)
 	Shutdown(ctx context.Context, cmd ShutdownCommand) error
 	Subscribe(ctx context.Context, p SubscribeParams) (*Subscription, error)
+	ListPendingInteractions(ctx context.Context, principal string) ([]PendingInteractionView, EventSeq, error)
+	AnswerInteraction(ctx context.Context, cmd *AnswerInteractionCommand) (AnswerInteractionResult, error)
 }
 
 // StreamEnder ends every open event stream. The transport asserts it at the
@@ -132,11 +134,12 @@ type HostDeps struct {
 // Its long-lived context is never stored: StartHost installs the spawn port
 // with the base context captured in the closure.
 type HostRuntime struct {
-	cfg         HostConfig
-	started     time.Time
-	incarnation storage.HostIncarnation
-	clk         clock.Clock
-	hub         *EventHub
+	cfg          HostConfig
+	started      time.Time
+	incarnation  storage.HostIncarnation
+	clk          clock.Clock
+	hub          *EventHub
+	interactions *InteractionService
 
 	// goTask spawns a supervised goroutine on the host's base context; it is
 	// installed by StartHost because the base context is never stored.

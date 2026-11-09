@@ -333,6 +333,20 @@ func (h *EventHub) Coalesced() uint64 {
 	return h.coalesce
 }
 
+// TopicSequence returns the latest sequence published on the topic.
+// It returns 0 if the topic is unknown or has no published events.
+func (h *EventHub) TopicSequence(name string) EventSeq {
+	if h == nil {
+		return 0
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if t, ok := h.topics[name]; ok {
+		return t.lastSeq
+	}
+	return 0
+}
+
 // Subscribe authorizes the request, registers the subscriber's queue first and
 // only then takes the snapshot or catch-up, so nothing published in between is
 // lost: the stream is the snapshot's sequence plus queued events with greater

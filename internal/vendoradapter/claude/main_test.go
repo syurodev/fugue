@@ -3,18 +3,21 @@ package claude
 import (
 	"flag"
 	"os"
+	"os/signal"
 	"strings"
 	"testing"
 
 	"go.uber.org/goleak"
 )
 
-// The fake claude's fail sentinel: a CLAUDE_CONFIG_DIR that makes the
-// version command exit non-zero. fixtureCLI is the pinned version the
-// fixtures were recorded from.
+// The fake claude's sentinels: a CLAUDE_CONFIG_DIR that makes the version
+// command exit non-zero, hang forever, or flood stdout. fixtureCLI is the
+// pinned version the fixtures were recorded from.
 const (
-	fakeFailConfigDir = "/probe/fail"
-	fixtureCLI        = "2.1.319"
+	fakeFailConfigDir  = "/probe/fail"
+	fakeHangConfigDir  = "/probe/hang"
+	fakeFloodConfigDir = "/probe/flood"
+	fixtureCLI         = "2.1.319"
 )
 
 // writeOut writes the fake CLI's stdout, exiting on failure like a real CLI
@@ -60,7 +63,34 @@ func runFakeClaude() {
 	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeFailConfigDir) {
 		os.Exit(1)
 	}
+	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeHangConfigDir) {
+		hangForever()
+		return
+	}
+	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeFloodConfigDir) {
+		floodOut()
+		return
+	}
 	writeOut(fixtureCLI + " (Claude Code)\n")
+}
+
+// hangForever blocks until the process is killed. Waiting on a signal channel
+// keeps the runtime's deadlock detector quiet, unlike a bare channel receive.
+func hangForever() {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt)
+	<-sig
+}
+
+// floodOut writes up to 64 MiB of stdout, stopping at the first write error
+// (the probe killed it or closed the pipe).
+func floodOut() {
+	chunk := strings.Repeat("x", 64<<10)
+	for range 1024 {
+		if _, err := os.Stdout.WriteString(chunk); err != nil {
+			return
+		}
+	}
 }
 
 // envHasPrefix reports whether the process environment holds an entry with

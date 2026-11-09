@@ -17,16 +17,24 @@ import (
 	"gioui.org/text"
 )
 
-//go:embed data/Inter-Variable.ttf data/JetBrainsMono-Variable.ttf
+const interFamily = "Inter"
+
+//go:embed data/*.ttf
 var data embed.FS
 
-// faces are the embedded font files with the typeface each provides.
 var faces = []struct {
 	path     string
 	typeface giofont.Typeface
+	weight   giofont.Weight
+	style    giofont.Style
 }{
-	{path: "data/Inter-Variable.ttf", typeface: "Inter"},
-	{path: "data/JetBrainsMono-Variable.ttf", typeface: "JetBrains Mono"},
+	{"data/Inter-Regular.ttf", interFamily, giofont.Normal, giofont.Regular},
+	{"data/Inter-Medium.ttf", interFamily, giofont.Medium, giofont.Regular},
+	{"data/Inter-SemiBold.ttf", interFamily, giofont.SemiBold, giofont.Regular},
+	{"data/Inter-Bold.ttf", interFamily, giofont.Bold, giofont.Regular},
+	{"data/Inter-Italic.ttf", interFamily, giofont.Normal, giofont.Italic},
+	{"data/JetBrainsMono-Regular.ttf", "JetBrains Mono", giofont.Normal, giofont.Regular},
+	{"data/JetBrainsMono-Bold.ttf", "JetBrains Mono", giofont.Bold, giofont.Regular},
 }
 
 // Collection parses the bundled faces in DA-04 order: Inter first, JetBrains
@@ -46,6 +54,8 @@ func Collection() ([]text.FontFace, error) {
 		}
 		for _, face := range parsed {
 			face.Font.Typeface = f.typeface
+			face.Font.Weight = f.weight
+			face.Font.Style = f.style
 			out = append(out, face)
 		}
 	}
