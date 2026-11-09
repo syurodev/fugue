@@ -1,0 +1,150 @@
+package client_test
+
+import (
+	"bytes"
+	"errors"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/syurodev/fugue/pkg/client"
+)
+
+func TestHostLogPrivateBoundedAndTruncated(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	testSetMode(t, dir, 0o700)
+	log, err := client.OpenHostLog(dir)
+	mustClientTest(t, err)
+	info, err := log.Stat()
+	mustClientTest(t, err)
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("log mode: %o", info.Mode().Perm())
+	}
+	input := strings.NewReader("abcdefgh")
+	mustClientTest(t, client.WriteBoundedLog(log, input, 4))
+	if input.Len() != 0 {
+		t.Fatal("host output was not drained")
+	}
+	mustClientTest(t, log.Close())
+	path := filepath.Join(dir, "logs", "host.log")
+	data, err := os.ReadFile(path)
+	mustClientTest(t, err)
+	if string(data) != "abcd" {
+		t.Fatalf("log = %q", data)
+	}
+	log, err = client.OpenHostLog(dir)
+	mustClientTest(t, err)
+	mustClientTest(t, log.Close())
+	data, err = os.ReadFile(path)
+	mustClientTest(t, err)
+	if len(data) != 0 {
+		t.Fatalf("log was not truncated: %q", data)
+	}
+	testSetMode(t, path, 0o666)
+	if _, err = client.OpenHostLog(dir); err == nil {
+		t.Fatal("unsafe log accepted")
+	}
+	testSetMode(t, filepath.Join(dir, "logs"), 0o777)
+	if _, err = client.OpenHostLog(dir); err == nil {
+		t.Fatal("unsafe log directory accepted")
+	}
+}
+
+type rejectLogWriter struct{}
+
+func (rejectLogWriter) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+func TestHostLogDrainsAfterWriteFailure(t *testing.T) {
+	t.Parallel()
+	input := strings.NewReader("secret data")
+	if err := client.WriteBoundedLog(rejectLogWriter{}, input, 5); !errors.Is(err, io.ErrClosedPipe) {
+		t.Fatalf("write error: %v", err)
+	}
+	if input.Len() != 0 {
+		t.Fatal("host output was not drained")
+	}
+	var output bytes.Buffer
+	mustClientTest(t, client.WriteBoundedLog(&output, strings.NewReader("abc"), 9))
+	if output.String() != "abc" {
+		t.Fatal("short output changed")
+	}
+}
+
+func TestHostLogSinkProcess(t *testing.T) {
+	if os.Getenv("FUGUE_TEST_LOG_SINK") == "1" {
+		if err := client.RunHostLogSink(); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+	t.Parallel()
+	log, err := os.CreateTemp(t.TempDir(), "sink")
+	mustClientTest(t, err)
+	defer closeQuietly(log)
+	executable, err := os.Executable()
+	mustClientTest(t, err)
+	cmd := exec.CommandContext(t.Context(), executable, "-test.run=^TestHostLogSinkProcess$")
+	cmd.Env = []string{"FUGUE_TEST_LOG_SINK=1"}
+	cmd.ExtraFiles = []*os.File{log}
+	cmd.Stdin = strings.NewReader("host output")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("sink: %v: %s", err, output)
+	}
+	data, err := os.ReadFile(log.Name())
+	mustClientTest(t, err)
+	if string(data) != "host output" {
+		t.Fatalf("sink output = %q", data)
+	}
+}
+
+func TestConcurrentHostLogCreation(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	testSetMode(t, dir, 0o700)
+	const count = 16
+	start := make(chan struct{})
+	results := make(chan error, count)
+	for range count {
+		go func() {
+			<-start
+			f, err := client.OpenHostLog(dir)
+			if err == nil {
+				err = f.Close()
+			}
+			results <- err
+		}()
+	}
+	close(start)
+	for range count {
+		if err := <-results; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func TestHostLogRejectsNonDirectoriesAndFiles(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	testSetMode(t, dir, 0o700)
+	file := filepath.Join(dir, "file")
+	mustClientTest(t, os.WriteFile(file, nil, 0o600))
+	if _, err := client.OpenHostLog(file); err == nil {
+		t.Fatal("file accepted as data directory")
+	}
+	logs := filepath.Join(dir, "logs")
+	mustClientTest(t, os.WriteFile(logs, nil, 0o600))
+	if _, err := client.OpenHostLog(dir); err == nil {
+		t.Fatal("file accepted as log directory")
+	}
+	mustClientTest(t, os.Remove(logs))
+	mustClientTest(t, os.Mkdir(logs, 0o700))
+	mustClientTest(t, os.Mkdir(filepath.Join(logs, "host.log"), 0o700))
+	if _, err := client.OpenHostLog(dir); err == nil {
+		t.Fatal("directory accepted as log file")
+	}
+}
