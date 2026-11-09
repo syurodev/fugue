@@ -112,14 +112,14 @@ func (r *Runner) finish(now time.Time) {
 	if !p.Idle {
 		fps = float64(r.frames) / el
 	}
-	row := fmt.Sprintf("| %s | %.0f | %.2f | %.2f | %.2f | %.2f | %.2f | %.1f%% | %d / %d MB |",
-		p.Name, fps, pct(r.dts, 50), pct(r.dts, 95), pct(r.lays, 50), pct(r.lays, 95), pct(r.rens, 95), cpu, rss/1024, hwm/1024)
+	row := fmt.Sprintf("| %s | %.0f | %.2f | %.2f | %.2f | %.2f | %.2f | %.2f | %.1f%% | %d / %d MB |",
+		p.Name, fps, pct(r.dts, 50), pct(r.dts, 95), pct(r.lays, 50), pct(r.lays, 95), pct(r.lays, 100), pct(r.rens, 95), cpu, rss/1024, hwm/1024)
 	r.rows = append(r.rows, row)
 	fmt.Fprintln(r.out, row)
 }
 
 // Header is the markdown table header matching the rows.
-const Header = "| phase | fps | frame p50 ms | frame p95 ms | layout p50 ms | layout p95 ms | render p95 ms | CPU (1 core) | RSS / peak |\n|---|---|---|---|---|---|---|---|---|"
+const Header = "| phase | fps | frame p50 ms | frame p95 ms | layout p50 ms | layout p95 ms | layout max ms | render p95 ms | CPU (1 core) | RSS / peak |\n|---|---|---|---|---|---|---|---|---|---|"
 
 func pct(v []float64, p float64) float64 {
 	if len(v) == 0 {
