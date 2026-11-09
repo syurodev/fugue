@@ -216,11 +216,14 @@ func (m *Manager) run(ctx context.Context) {
 			return
 		case errors.Is(err, client.ErrHostNotRunning):
 			m.setState(ctx, StateDisconnected, "host not running")
+		case isUntrusted(err):
+			// An unsafe executable or an untrusted discovery file or peer
+			// does not heal by retrying; the status bar keeps the reason.
+			m.setState(ctx, StateDisconnected, err.Error())
+			return
 		default:
-			if m.cfg.AutoStart {
-				m.setState(ctx, StateDisconnected, err.Error())
-				return
-			}
+			// A failed Hello or a refused dial can be transient (a host
+			// draining or restarting): back off and try again.
 			m.setState(ctx, StateDisconnected, "connection failed")
 		}
 		attempt++
@@ -233,10 +236,12 @@ func (m *Manager) run(ctx context.Context) {
 func (m *Manager) connected(ctx context.Context, conn *client.Client) bool {
 	defer conn.Close()
 	if m.cfg.AutoStart {
-		status, err := conn.HostStatus(ctx)
+		status, err := m.hostStatus(ctx, conn)
 		if err != nil {
+			// A stalled or failed status read is retried like a failed dial;
+			// only an incompatible version below freezes the manager.
 			m.setState(ctx, StateDisconnected, "host status unavailable")
-			return false
+			return ctx.Err() == nil
 		}
 		if reason := versionAdvice(m.cfg.Params.Version, status.HostVersion, status.Clients); reason != "" {
 			m.setState(ctx, StateIncompatible, reason)
@@ -253,6 +258,41 @@ func (m *Manager) connected(ctx context.Context, conn *client.Client) bool {
 	}
 	m.setState(ctx, StateDisconnected, "connection lost")
 	return true
+}
+
+// hostStatus reads HostStatus under the same ten-second startup deadline as
+// the dial, on the injected clock, so a host that answers Hello but stalls on
+// HostStatus cannot keep the window connecting forever.
+func (m *Manager) hostStatus(ctx context.Context, conn *client.Client) (client.HostStatus, error) {
+	callCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	deadline := m.clock().NewTimer(startupDeadline)
+	defer deadline.Stop()
+	expired := make(chan struct{})
+	go func() {
+		select {
+		case <-deadline.C():
+			close(expired)
+			cancel()
+		case <-callCtx.Done():
+		}
+	}()
+	status, err := conn.HostStatus(callCtx)
+	if err != nil {
+		select {
+		case <-expired:
+			return client.HostStatus{}, ErrStartupTimeout
+		default:
+		}
+		return client.HostStatus{}, fmt.Errorf("host status: %w", err)
+	}
+	return status, nil
+}
+
+// isUntrusted reports the failures that retrying cannot fix: the host
+// executable or the discovered host failed authentication.
+func isUntrusted(err error) bool {
+	return errors.Is(err, ErrUnsafeExecutable) || errors.Is(err, client.ErrUntrustedHost)
 }
 
 // dial reads the host's discovery file and says Hello on its socket.

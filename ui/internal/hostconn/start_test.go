@@ -38,6 +38,33 @@ func TestHostExecutableRejectsWritableBinaryAndDirectory(t *testing.T) {
 	}
 }
 
+// An ancestor directory other users can write without the sticky bit lets
+// them swap the tree under the executable, so the executable is refused.
+func TestHostExecutableRejectsWritableAncestor(t *testing.T) {
+	t.Parallel()
+	shared := filepath.Join(t.TempDir(), "shared")
+	app := filepath.Join(shared, "app")
+	for _, dir := range []string{shared, app} {
+		if err := os.Mkdir(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	bin := filepath.Join(app, "fugue")
+	testExecutable(t, bin, []byte("x"))
+	if err := validateExecutable(bin); err != nil {
+		t.Fatal(err)
+	}
+	testSetMode(t, shared, 0o777)
+	if err := validateExecutable(bin); !errors.Is(err, ErrUnsafeExecutable) {
+		t.Fatalf("writable ancestor: %v", err)
+	}
+	testSetMode(t, shared, 0o777|os.ModeSticky)
+	if err := validateExecutable(bin); err != nil {
+		t.Fatalf("sticky writable ancestor: %v", err)
+	}
+	testSetMode(t, shared, 0o700)
+}
+
 func TestHostStartupTimeoutIsTyped(t *testing.T) {
 	t.Parallel()
 	clk := newFakeClock()

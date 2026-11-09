@@ -13,13 +13,17 @@ import (
 // ErrStartupTimeout means the host did not become ready within ten seconds.
 var ErrStartupTimeout = errors.New("host startup timed out")
 
+// startupDeadline bounds the wait for a starting host: the dial, Hello and
+// the first HostStatus (DA-07, cli §2.1).
+const startupDeadline = 10 * time.Second
+
 type dialResult struct {
 	conn *client.Client
 	err  error
 }
 
 func waitForHost(ctx context.Context, clock Clock, dial func(context.Context) (*client.Client, error)) (*client.Client, error) {
-	deadline := clock.NewTimer(10 * time.Second)
+	deadline := clock.NewTimer(startupDeadline)
 	defer deadline.Stop()
 	child, cancel := context.WithCancel(ctx)
 	defer cancel()
