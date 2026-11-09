@@ -1,0 +1,4 @@
+5000 diff lines from 10486 source lines; chroma tokenised both sides in 587.085364ms, built items in 1.082051ms
+| phase | fps | frame p50 ms | frame p95 ms | layout p50 ms | layout p95 ms | layout max ms | render p95 ms | CPU (1 core) | RSS / peak |
+|---|---|---|---|---|---|---|---|---|---|
+| idle | 0 | 0.00 | 0.00 | 27.54 | 27.54 | 27.54 | 0.00 | 0.0% | 173 / 173 MB |

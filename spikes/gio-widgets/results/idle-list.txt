@@ -1,0 +1,5 @@
+| phase | fps | frame p50 ms | frame p95 ms | layout p50 ms | layout p95 ms | layout max ms | render p95 ms | CPU (1 core) | RSS / peak |
+|---|---|---|---|---|---|---|---|---|---|
+| idle | 0 | 0.00 | 0.00 | 27.28 | 27.28 | 27.28 | 0.00 | 0.1% | 154 / 154 MB |
+
+largest jump of a held item: 0 px

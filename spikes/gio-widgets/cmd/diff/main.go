@@ -60,7 +60,7 @@ func main() {
 						v.List.List.Position = layout.Position{}
 					}
 				}},
-				{Name: "idle", Dur: 5 * time.Second, Idle: true},
+				{Name: "idle", Dur: 9 * time.Second, Idle: true},
 			}
 		}})
 }

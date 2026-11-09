@@ -34,10 +34,12 @@ func main() {
 	v.List.List.ScrollToEnd = true // follow the bottom until the user scrolls up
 	draw := func(gtx layout.Context) { view.Background(gtx, pal.Bg); v.Layout(gtx) }
 	var maxJump int
+	st := &view.Streamer{V: v}
 	perf.Run(perf.Spec{
 		Title: "spike: list", Size: image.Pt(900, 800), Draw: draw,
-		Phases: func() []perf.Phase { return phases(v, &maxJump) },
-		Done:   func() { fmt.Printf("\nlargest jump of a held item: %d px\n", maxJump) },
+		Phases:      func() []perf.Phase { return phases(v, &maxJump) },
+		Interactive: st.Interactive,
+		Done:        func() { fmt.Printf("\nlargest jump of a held item: %d px\n", maxJump) },
 	})
 }
 
@@ -86,7 +88,7 @@ func phases(v *view.View, maxJump *int) []perf.Phase {
 				}
 			}
 		}},
-		{Name: "idle", Dur: 5 * time.Second, Idle: true},
+		{Name: "idle", Dur: 9 * time.Second, Idle: true},
 	}
 }
 

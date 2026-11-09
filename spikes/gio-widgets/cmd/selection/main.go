@@ -1,7 +1,7 @@
 // selection: spike 1. A 2,000-item virtualised markdown transcript with a
 // mouse selection that spans items; Ctrl+C copies plain text.
 //
-//	go run ./cmd/selection              interactive
+//	go run ./cmd/selection              interactive (Ctrl+S starts/stops streaming)
 //	go run ./cmd/selection -auto        scripted measurement in a real window
 //	go run ./cmd/selection -bench       same, headless (no display needed)
 //	go run ./cmd/selection -shot a.png  one frame to a PNG
@@ -40,10 +40,10 @@ func main() {
 	// A selection from the middle of item A into item C, across a code block.
 	a, f := flow.Pos{Item: 1000, Off: 30}, flow.Pos{Item: 1004, Off: 40}
 	v.Sel.Anchor, v.Sel.Focus, v.Sel.Has = a, f, true
+	v.List.List.Position.First = 1000 // start where the selection is
 	draw := func(gtx layout.Context) { view.Background(gtx, pal.Bg); v.Layout(gtx) }
 
 	if *png != "" {
-		v.List.List.Position.First = 1000
 		if err := shot.Render(*png, image.Pt(900, 700), draw); err != nil {
 			log.Fatal(err)
 		}
@@ -51,7 +51,8 @@ func main() {
 	}
 	perf.Run(perf.Spec{
 		Title: "spike: selection", Size: image.Pt(900, 800), Draw: draw,
-		Phases: func() []perf.Phase { return phases(v) },
+		Phases:      func() []perf.Phase { return phases(v) },
+		Interactive: (&view.Streamer{V: v, NewEvery: 2 * time.Second}).Interactive,
 		Done: func() {
 			fmt.Printf("\nselection kept: %v (%v..%v), items now %d\n", v.Sel.Anchor == a && v.Sel.Focus == f, v.Sel.Anchor, v.Sel.Focus, len(v.Entries))
 		},
@@ -88,6 +89,6 @@ func phases(v *view.View) []perf.Phase {
 				e.SetBody([]flow.Block{b})
 			}
 		}},
-		{Name: "idle", Dur: 5 * time.Second, Idle: true},
+		{Name: "idle", Dur: 9 * time.Second, Idle: true},
 	}
 }

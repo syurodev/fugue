@@ -28,6 +28,8 @@ type Spec struct {
 	Draw   func(gtx layout.Context)
 	Phases func() []Phase
 	Done   func() // facts to print after the table (e.g. selection kept)
+	// Interactive runs once per frame in by-hand runs (not -auto or -bench).
+	Interactive func(gtx layout.Context)
 }
 
 // Run starts the spike: interactive by default, scripted with -auto or
@@ -61,6 +63,9 @@ func Run(s Spec) {
 				if rn != nil {
 					rn.Layout(func() { s.Draw(gtx) })
 				} else {
+					if s.Interactive != nil {
+						s.Interactive(gtx)
+					}
 					s.Draw(gtx)
 				}
 				e.Frame(gtx.Ops)

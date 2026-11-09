@@ -1,0 +1,6 @@
+| phase | fps | frame p50 ms | frame p95 ms | layout p50 ms | layout p95 ms | layout max ms | render p95 ms | CPU (1 core) | RSS / peak |
+|---|---|---|---|---|---|---|---|---|---|
+| scroll | 362 | 2.66 | 3.81 | 0.51 | 0.84 | 30.61 | 2.99 | 117.8% | 143 / 143 MB |
+| stream 600 ch/s | 290 | 3.37 | 4.48 | 0.60 | 0.80 | 1.49 | 3.72 | 121.9% | 143 / 143 MB |
+
+selection kept: true ({1000 30}..{1004 40}), items now 2003

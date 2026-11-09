@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"gioui.org/layout"
@@ -42,6 +43,8 @@ type Runner struct {
 	rows   []string
 	wake   func()
 	armed  bool
+	idle0  atomic.Int64 // CPU (ns) when the warm-up of an idle phase ended
+	idleT  atomic.Int64 // unix ns of the same moment
 }
 
 // NewRunner returns a runner; wake must invalidate the window (safe from any
@@ -80,6 +83,9 @@ func (r *Runner) Frame(gtx layout.Context) bool {
 		r.armed = true
 		d := p.Dur - now.Sub(r.start)
 		time.AfterFunc(d+50*time.Millisecond, r.wake)
+		// An idle phase measures after a 2 s warm-up, so start-up work (fonts,
+		// first layout, GPU set-up) does not count as idle cost.
+		time.AfterFunc(2*time.Second, func() { r.idle0.Store(int64(cpuTime())); r.idleT.Store(time.Now().UnixNano()) })
 	}
 	return true
 }
@@ -107,6 +113,9 @@ func (r *Runner) finish(now time.Time) {
 	p := r.phases[r.cur]
 	el := now.Sub(r.start).Seconds()
 	cpu := (cpuTime() - r.cpu0).Seconds() / el * 100
+	if t0 := r.idleT.Swap(0); p.Idle && t0 != 0 {
+		cpu = (cpuTime() - time.Duration(r.idle0.Load())).Seconds() / (float64(now.UnixNano()-t0) / 1e9) * 100
+	}
 	rss, hwm := memKB()
 	fps := 0.0
 	if !p.Idle {
