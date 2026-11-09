@@ -36,7 +36,7 @@ func (o *Owner) applyConfirmLocked(ticket *Ticket, decision *Decision, now time.
 	switch decision.Outcome {
 	case OutcomeAllowedOnce:
 		if !slices.Contains(ticket.Offers, OutcomeAllowedOnce) {
-			return errcode.New(errcode.InvalidArgument, "single-use approval is not offered for this request")
+			return ErrOutcomeNotOffered
 		}
 		receipt, err := o.issueReceiptLocked(ticket, "", nil, now)
 		if err != nil {
@@ -45,7 +45,7 @@ func (o *Owner) applyConfirmLocked(ticket *Ticket, decision *Decision, now time.
 		ticket.ReceiptID = receipt.ReceiptID
 	case OutcomeAllowedSession:
 		if !slices.Contains(ticket.Offers, OutcomeAllowedSession) {
-			return errcode.New(errcode.InvalidArgument, "session grant is not offered for this request")
+			return ErrOutcomeNotOffered
 		}
 		receipt, err := o.issueReceiptLocked(ticket, "", nil, now)
 		if err != nil {
@@ -77,7 +77,7 @@ func (o *Owner) applySelectLocked(ticket *Ticket, decision *Decision, now time.T
 	switch decision.Outcome {
 	case OutcomeAllowedOnce:
 		if !hasOption(ticket.Options, decision.OptionID) {
-			return errcode.New(errcode.InvalidArgument, "selected option was not offered")
+			return ErrOptionNotOffered
 		}
 		receipt, err := o.issueReceiptLocked(ticket, decision.OptionID, nil, now)
 		if err != nil {
@@ -158,7 +158,7 @@ func applyRelayedLocked(ticket *Ticket, decision *Decision, now time.Time) error
 		}
 		ticket.Text = decision.Text
 	case OutcomeAllowedOnce, OutcomeAllowedSession:
-		return errcode.New(errcode.InvalidArgument, "relayed requests never create a Fugue approval")
+		return ErrRelayedGrantDenied
 	case OutcomeCancelled, OutcomeUnavailable, OutcomeExpired:
 		return errcode.New(errcode.InvalidArgument, "relayed decision outcome is not a valid user answer")
 	}
@@ -178,7 +178,7 @@ func applyRelayedChoiceLocked(ticket *Ticket, decision *Decision) error {
 			return errcode.New(errcode.InvalidArgument, "relayed approval must choose one of the vendor options")
 		}
 		if !hasOption(ticket.Options, decision.OptionID) {
-			return errcode.New(errcode.InvalidArgument, "relayed option was not offered")
+			return ErrOptionNotOffered
 		}
 		if len(decision.Answers) > 0 {
 			return errcode.New(errcode.InvalidArgument, "relayed decision must not carry question answers")
@@ -257,7 +257,7 @@ func checkAnswer(q *Question, ans Answer) error {
 	}
 	for _, id := range ans.OptionIDs {
 		if !hasOption(q.Options, id) {
-			return errcode.New(errcode.InvalidArgument, "answered option was not offered")
+			return ErrOptionNotOffered
 		}
 	}
 	if len(ans.OptionIDs) == 0 && ans.Text == "" {

@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fugue/interaction/v1/interaction.proto.
  */
 export const file_fugue_interaction_v1_interaction: GenFile = /*@__PURE__*/
-  fileDesc("CiZmdWd1ZS9pbnRlcmFjdGlvbi92MS9pbnRlcmFjdGlvbi5wcm90bxIUZnVndWUuaW50ZXJhY3Rpb24udjEiOAoGT3B0aW9uEgoKAmlkGAEgASgJEg0KBWxhYmVsGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJIkcKDlF1ZXN0aW9uQW5zd2VyEhMKC3F1ZXN0aW9uX2lkGAEgASgJEhIKCm9wdGlvbl9pZHMYAiADKAkSDAoEdGV4dBgDIAEoCSL9AQoOUGVuZGluZ1JlcXVlc3QSEgoKcmVxdWVzdF9pZBgBIAEoCRITCgtpbmNhcm5hdGlvbhgCIAEoCRISCgpzZXNzaW9uX2lkGAMgASgJEgwKBHRvb2wYBCABKAkSDAoEa2luZBgFIAEoCRIMCgRyaXNrGAYgASgJEg8KB2Vudl90YWcYByABKAkSDwoHc3VtbWFyeRgIIAEoCRIYChBvZmZlcmVkX291dGNvbWVzGAkgAygJEi0KB29wdGlvbnMYCiADKAsyHC5mdWd1ZS5pbnRlcmFjdGlvbi52MS5PcHRpb24SGQoRZ3JhbnRfc2NvcGVfbGFiZWwYCyABKAkiFAoSTGlzdFBlbmRpbmdSZXF1ZXN0Il8KE0xpc3RQZW5kaW5nUmVzcG9uc2USNgoIcmVxdWVzdHMYASADKAsyJC5mdWd1ZS5pbnRlcmFjdGlvbi52MS5QZW5kaW5nUmVxdWVzdBIQCghzZXF1ZW5jZRgCIAEoBCLWAQoNQW5zd2VyUmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJEhMKC2luY2FybmF0aW9uGAIgASgJEhIKCnJlcXVlc3RfaWQYAyABKAkSDwoHb3V0Y29tZRgEIAEoCRIWCglvcHRpb25faWQYBSABKAlIAIgBARIRCgR0ZXh0GAYgASgJSAGIAQESNQoHYW5zd2VycxgHIAMoCzIkLmZ1Z3VlLmludGVyYWN0aW9uLnYxLlF1ZXN0aW9uQW5zd2VyQgwKCl9vcHRpb25faWRCBwoFX3RleHQiNQoOQW5zd2VyUmVzcG9uc2USEgoKcmVxdWVzdF9pZBgBIAEoCRIPCgdvdXRjb21lGAIgASgJMs0BChJJbnRlcmFjdGlvblNlcnZpY2USYgoLTGlzdFBlbmRpbmcSKC5mdWd1ZS5pbnRlcmFjdGlvbi52MS5MaXN0UGVuZGluZ1JlcXVlc3QaKS5mdWd1ZS5pbnRlcmFjdGlvbi52MS5MaXN0UGVuZGluZ1Jlc3BvbnNlElMKBkFuc3dlchIjLmZ1Z3VlLmludGVyYWN0aW9uLnYxLkFuc3dlclJlcXVlc3QaJC5mdWd1ZS5pbnRlcmFjdGlvbi52MS5BbnN3ZXJSZXNwb25zZULjAQoYY29tLmZ1Z3VlLmludGVyYWN0aW9uLnYxQhBJbnRlcmFjdGlvblByb3RvUAFaQ2dpdGh1Yi5jb20vc3l1cm9kZXYvZnVndWUvcGtnL3BiL2Z1Z3VlL2ludGVyYWN0aW9uL3YxO2ludGVyYWN0aW9udjGiAgNGSViqAhRGdWd1ZS5JbnRlcmFjdGlvbi5WMcoCFEZ1Z3VlXEludGVyYWN0aW9uXFYx4gIgRnVndWVcSW50ZXJhY3Rpb25cVjFcR1BCTWV0YWRhdGHqAhZGdWd1ZTo6SW50ZXJhY3Rpb246OlYxYgZwcm90bzM");
+  fileDesc("CiZmdWd1ZS9pbnRlcmFjdGlvbi92MS9pbnRlcmFjdGlvbi5wcm90bxIUZnVndWUuaW50ZXJhY3Rpb24udjEiOAoGT3B0aW9uEgoKAmlkGAEgASgJEg0KBWxhYmVsGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJIogBCghRdWVzdGlvbhITCgtxdWVzdGlvbl9pZBgBIAEoCRIOCgZwcm9tcHQYAiABKAkSLQoHb3B0aW9ucxgDIAMoCzIcLmZ1Z3VlLmludGVyYWN0aW9uLnYxLk9wdGlvbhIUCgxtdWx0aV9zZWxlY3QYBCABKAgSEgoKYWxsb3dfdGV4dBgFIAEoCCJHCg5RdWVzdGlvbkFuc3dlchITCgtxdWVzdGlvbl9pZBgBIAEoCRISCgpvcHRpb25faWRzGAIgAygJEgwKBHRleHQYAyABKAkisAIKDlBlbmRpbmdSZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSEwoLaW5jYXJuYXRpb24YAiABKAkSEgoKc2Vzc2lvbl9pZBgDIAEoCRIMCgR0b29sGAQgASgJEgwKBGtpbmQYBSABKAkSDAoEcmlzaxgGIAEoCRIPCgdlbnZfdGFnGAcgASgJEg8KB3N1bW1hcnkYCCABKAkSGAoQb2ZmZXJlZF9vdXRjb21lcxgJIAMoCRItCgdvcHRpb25zGAogAygLMhwuZnVndWUuaW50ZXJhY3Rpb24udjEuT3B0aW9uEhkKEWdyYW50X3Njb3BlX2xhYmVsGAsgASgJEjEKCXF1ZXN0aW9ucxgMIAMoCzIeLmZ1Z3VlLmludGVyYWN0aW9uLnYxLlF1ZXN0aW9uIhQKEkxpc3RQZW5kaW5nUmVxdWVzdCJfChNMaXN0UGVuZGluZ1Jlc3BvbnNlEjYKCHJlcXVlc3RzGAEgAygLMiQuZnVndWUuaW50ZXJhY3Rpb24udjEuUGVuZGluZ1JlcXVlc3QSEAoIc2VxdWVuY2UYAiABKAQi1gEKDUFuc3dlclJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRITCgtpbmNhcm5hdGlvbhgCIAEoCRISCgpyZXF1ZXN0X2lkGAMgASgJEg8KB291dGNvbWUYBCABKAkSFgoJb3B0aW9uX2lkGAUgASgJSACIAQESEQoEdGV4dBgGIAEoCUgBiAEBEjUKB2Fuc3dlcnMYByADKAsyJC5mdWd1ZS5pbnRlcmFjdGlvbi52MS5RdWVzdGlvbkFuc3dlckIMCgpfb3B0aW9uX2lkQgcKBV90ZXh0IjUKDkFuc3dlclJlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSDwoHb3V0Y29tZRgCIAEoCTLNAQoSSW50ZXJhY3Rpb25TZXJ2aWNlEmIKC0xpc3RQZW5kaW5nEiguZnVndWUuaW50ZXJhY3Rpb24udjEuTGlzdFBlbmRpbmdSZXF1ZXN0GikuZnVndWUuaW50ZXJhY3Rpb24udjEuTGlzdFBlbmRpbmdSZXNwb25zZRJTCgZBbnN3ZXISIy5mdWd1ZS5pbnRlcmFjdGlvbi52MS5BbnN3ZXJSZXF1ZXN0GiQuZnVndWUuaW50ZXJhY3Rpb24udjEuQW5zd2VyUmVzcG9uc2VC4wEKGGNvbS5mdWd1ZS5pbnRlcmFjdGlvbi52MUIQSW50ZXJhY3Rpb25Qcm90b1ABWkNnaXRodWIuY29tL3N5dXJvZGV2L2Z1Z3VlL3BrZy9wYi9mdWd1ZS9pbnRlcmFjdGlvbi92MTtpbnRlcmFjdGlvbnYxogIDRklYqgIURnVndWUuSW50ZXJhY3Rpb24uVjHKAhRGdWd1ZVxJbnRlcmFjdGlvblxWMeICIEZ1Z3VlXEludGVyYWN0aW9uXFYxXEdQQk1ldGFkYXRh6gIWRnVndWU6OkludGVyYWN0aW9uOjpWMWIGcHJvdG8z");
 
 /**
  * Option is one selectable choice offered by a select request, by a question,
@@ -43,6 +43,45 @@ export const OptionSchema: GenMessage<Option> = /*@__PURE__*/
   messageDesc(file_fugue_interaction_v1_interaction, 0);
 
 /**
+ * Question is one question within a question-kind interaction request.
+ *
+ * @generated from message fugue.interaction.v1.Question
+ */
+export type Question = Message<"fugue.interaction.v1.Question"> & {
+  /**
+   * @generated from field: string question_id = 1;
+   */
+  questionId: string;
+
+  /**
+   * @generated from field: string prompt = 2;
+   */
+  prompt: string;
+
+  /**
+   * @generated from field: repeated fugue.interaction.v1.Option options = 3;
+   */
+  options: Option[];
+
+  /**
+   * @generated from field: bool multi_select = 4;
+   */
+  multiSelect: boolean;
+
+  /**
+   * @generated from field: bool allow_text = 5;
+   */
+  allowText: boolean;
+};
+
+/**
+ * Describes the message fugue.interaction.v1.Question.
+ * Use `create(QuestionSchema)` to create a new message.
+ */
+export const QuestionSchema: GenMessage<Question> = /*@__PURE__*/
+  messageDesc(file_fugue_interaction_v1_interaction, 1);
+
+/**
  * QuestionAnswer carries the user's answer to one question of a question-kind
  * request (docs: interaction §4.1).
  *
@@ -70,11 +109,11 @@ export type QuestionAnswer = Message<"fugue.interaction.v1.QuestionAnswer"> & {
  * Use `create(QuestionAnswerSchema)` to create a new message.
  */
 export const QuestionAnswerSchema: GenMessage<QuestionAnswer> = /*@__PURE__*/
-  messageDesc(file_fugue_interaction_v1_interaction, 1);
+  messageDesc(file_fugue_interaction_v1_interaction, 2);
 
 /**
  * PendingRequest is the view of a single pending interaction request (docs:
- * interaction §8). Only the 11 fields defined in the specification are present.
+ * interaction §8). An additive questions field supports multi-question requests.
  *
  * @generated from message fugue.interaction.v1.PendingRequest
  */
@@ -139,6 +178,11 @@ export type PendingRequest = Message<"fugue.interaction.v1.PendingRequest"> & {
    * @generated from field: string grant_scope_label = 11;
    */
   grantScopeLabel: string;
+
+  /**
+   * @generated from field: repeated fugue.interaction.v1.Question questions = 12;
+   */
+  questions: Question[];
 };
 
 /**
@@ -146,7 +190,7 @@ export type PendingRequest = Message<"fugue.interaction.v1.PendingRequest"> & {
  * Use `create(PendingRequestSchema)` to create a new message.
  */
 export const PendingRequestSchema: GenMessage<PendingRequest> = /*@__PURE__*/
-  messageDesc(file_fugue_interaction_v1_interaction, 2);
+  messageDesc(file_fugue_interaction_v1_interaction, 3);
 
 /**
  * ListPendingRequest asks for the current snapshot of pending interaction
@@ -162,7 +206,7 @@ export type ListPendingRequest = Message<"fugue.interaction.v1.ListPendingReques
  * Use `create(ListPendingRequestSchema)` to create a new message.
  */
 export const ListPendingRequestSchema: GenMessage<ListPendingRequest> = /*@__PURE__*/
-  messageDesc(file_fugue_interaction_v1_interaction, 3);
+  messageDesc(file_fugue_interaction_v1_interaction, 4);
 
 /**
  * ListPendingResponse carries the snapshot of pending interaction requests and
@@ -187,7 +231,7 @@ export type ListPendingResponse = Message<"fugue.interaction.v1.ListPendingRespo
  * Use `create(ListPendingResponseSchema)` to create a new message.
  */
 export const ListPendingResponseSchema: GenMessage<ListPendingResponse> = /*@__PURE__*/
-  messageDesc(file_fugue_interaction_v1_interaction, 4);
+  messageDesc(file_fugue_interaction_v1_interaction, 5);
 
 /**
  * AnswerRequest submits a human decision for a pending interaction request
@@ -239,7 +283,7 @@ export type AnswerRequest = Message<"fugue.interaction.v1.AnswerRequest"> & {
  * Use `create(AnswerRequestSchema)` to create a new message.
  */
 export const AnswerRequestSchema: GenMessage<AnswerRequest> = /*@__PURE__*/
-  messageDesc(file_fugue_interaction_v1_interaction, 5);
+  messageDesc(file_fugue_interaction_v1_interaction, 6);
 
 /**
  * AnswerResponse confirms an answer has been recorded.
@@ -263,7 +307,7 @@ export type AnswerResponse = Message<"fugue.interaction.v1.AnswerResponse"> & {
  * Use `create(AnswerResponseSchema)` to create a new message.
  */
 export const AnswerResponseSchema: GenMessage<AnswerResponse> = /*@__PURE__*/
-  messageDesc(file_fugue_interaction_v1_interaction, 6);
+  messageDesc(file_fugue_interaction_v1_interaction, 7);
 
 /**
  * InteractionService exposes interaction approvals, selections, and questions

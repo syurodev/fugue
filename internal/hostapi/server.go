@@ -10,6 +10,8 @@ import (
 	"os"
 	"sync"
 
+	"connectrpc.com/connect"
+
 	"github.com/syurodev/fugue/internal/app"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
@@ -171,7 +173,10 @@ func (s *Server) Start(ctx context.Context, backend app.Backend) error {
 	})
 	handler := http.NewServeMux()
 	handler.Handle(hostv1connect.NewHostServiceHandler(&serviceHandler{backend: backend}))
-	handler.Handle(interactionv1connect.NewInteractionServiceHandler(&interactionHandler{backend: backend}))
+	handler.Handle(interactionv1connect.NewInteractionServiceHandler(
+		&interactionHandler{backend: backend},
+		connect.WithReadMaxBytes(64*1024),
+	))
 	// The admission gate and the in-flight wrapper let the drain wait for
 	// handlers that are still running when the deadline force-closes their
 	// connections, so none of them can outlive the store the host closes

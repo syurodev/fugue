@@ -2,31 +2,31 @@ package app
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"slices"
-	"strings"
 	"sync"
-	"time"
 
 	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
-	"github.com/syurodev/fugue/internal/platform/ids"
 )
 
 // PendingInteractionView is the domain view of a pending request, carrying
-// exactly the 11 fields permitted by interaction §8.
+// the fields permitted by interaction §8 plus additive multi-question support.
 type PendingInteractionView struct {
-	RequestID       string              `json:"request_id"`
-	Incarnation     string              `json:"incarnation"`
-	SessionID       string              `json:"session_id"`
-	Tool            string              `json:"tool"`
-	Kind            string              `json:"kind"`
-	Risk            string              `json:"risk"`
-	EnvTag          string              `json:"env_tag"`
-	Summary         string              `json:"summary"`
-	OfferedOutcomes []string            `json:"offered_outcomes,omitempty"`
-	Options         []InteractionOption `json:"options,omitempty"`
-	GrantScopeLabel string              `json:"grant_scope_label,omitempty"`
+	RequestID       string                `json:"request_id"`
+	Incarnation     string                `json:"incarnation"`
+	SessionID       string                `json:"session_id"`
+	Tool            string                `json:"tool"`
+	Kind            string                `json:"kind"`
+	Risk            string                `json:"risk"`
+	EnvTag          string                `json:"env_tag"`
+	Summary         string                `json:"summary"`
+	OfferedOutcomes []string              `json:"offered_outcomes,omitempty"`
+	Options         []InteractionOption   `json:"options,omitempty"`
+	GrantScopeLabel string                `json:"grant_scope_label,omitempty"`
+	Questions       []InteractionQuestion `json:"questions,omitempty"`
 }
 
 // InteractionOption is an option offered to the user in a pending interaction.
@@ -34,6 +34,15 @@ type InteractionOption struct {
 	ID          string `json:"id"`
 	Label       string `json:"label"`
 	Description string `json:"description,omitempty"`
+}
+
+// InteractionQuestion is one question within a question-kind interaction request.
+type InteractionQuestion struct {
+	QuestionID  string              `json:"question_id"`
+	Prompt      string              `json:"prompt"`
+	Options     []InteractionOption `json:"options,omitempty"`
+	MultiSelect bool                `json:"multi_select,omitempty"`
+	AllowText   bool                `json:"allow_text,omitempty"`
 }
 
 // InteractionAnswer is an answer to a question in an interaction request.
@@ -48,6 +57,8 @@ const (
 	MaxInteractionNoteBytes   = interaction.MaxNoteBytes
 	MaxInteractionAnswerBytes = interaction.MaxAnswerBytes
 	MaxInteractionOptions     = interaction.MaxOptions
+	MaxRiskBytes              = 32
+	MaxGrantScopeLabelBytes   = 256
 	OutcomeAllowedOnce        = string(interaction.OutcomeAllowedOnce)
 	OutcomeAllowedSession     = string(interaction.OutcomeAllowedSession)
 	OutcomeDenied             = string(interaction.OutcomeDenied)
@@ -73,85 +84,6 @@ type AnswerInteractionResult struct {
 	Outcome   string
 }
 
-const (
-	defaultDedupCapacity = 1024
-	defaultDedupTTL      = 10 * time.Minute
-)
-
-type dedupRecord struct {
-	commandID string
-	result    AnswerInteractionResult
-	cachedAt  time.Time
-}
-
-type commandDedupCache struct {
-	mu       sync.Mutex
-	capacity int
-	ttl      time.Duration
-	clock    clock.Clock
-	entries  map[string]AnswerInteractionResult
-	records  []dedupRecord
-}
-
-func newCommandDedupCache(clk clock.Clock, capacity int, ttl time.Duration) *commandDedupCache {
-	if capacity <= 0 {
-		capacity = defaultDedupCapacity
-	}
-	if ttl <= 0 {
-		ttl = defaultDedupTTL
-	}
-	return &commandDedupCache{
-		capacity: capacity,
-		ttl:      ttl,
-		clock:    clk,
-		entries:  map[string]AnswerInteractionResult{},
-	}
-}
-
-func (c *commandDedupCache) Get(commandID string) (AnswerInteractionResult, bool) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	res, ok := c.entries[commandID]
-	return res, ok
-}
-
-func (c *commandDedupCache) Put(commandID string, result AnswerInteractionResult) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	now := c.clock.Now().UTC()
-	c.evictExpiredLocked(now)
-
-	if len(c.entries) >= c.capacity && len(c.records) > 0 {
-		oldest := c.records[0]
-		c.records = c.records[1:]
-		delete(c.entries, oldest.commandID)
-	}
-
-	c.entries[commandID] = result
-	c.records = append(c.records, dedupRecord{
-		commandID: commandID,
-		result:    result,
-		cachedAt:  now,
-	})
-}
-
-func (c *commandDedupCache) evictExpiredLocked(now time.Time) {
-	cutoff := now.Add(-c.ttl)
-	validIdx := 0
-	for i, r := range c.records {
-		if !r.cachedAt.Before(cutoff) {
-			validIdx = i
-			break
-		}
-		delete(c.entries, r.commandID)
-	}
-	if validIdx > 0 {
-		c.records = c.records[validIdx:]
-	}
-}
-
 // InteractionService coordinates interaction requests, durable topic events
 // and deduplication for a host incarnation.
 type InteractionService struct {
@@ -161,6 +93,9 @@ type InteractionService struct {
 	dedup *commandDedupCache
 	clk   clock.Clock
 	inc   string
+
+	cmdMu    sync.Mutex
+	inflight map[string]*inflightCmd
 
 	seenMu       sync.Mutex
 	seenRequests map[string]struct{}
@@ -189,6 +124,7 @@ func NewInteractionService(owner *interaction.Owner, hub *EventHub, clk clock.Cl
 		dedup:        newCommandDedupCache(clk, defaultDedupCapacity, defaultDedupTTL),
 		clk:          clk,
 		inc:          owner.Incarnation(),
+		inflight:     map[string]*inflightCmd{},
 		seenRequests: map[string]struct{}{},
 	}
 	return s, nil
@@ -199,12 +135,24 @@ func (s *InteractionService) Incarnation() string {
 	return s.inc
 }
 
-// Ensure creates or reads back an interaction request and publishes a requested
-// event on the interaction topic when a new request is opened.
+// Ensure creates or reads back an interaction request. F9.6 is the first caller outside tests.
 func (s *InteractionService) Ensure(spec *interaction.Spec) (*interaction.Ticket, error) {
+	if spec == nil {
+		return nil, errcode.New(errcode.InvalidArgument, "interaction spec is required")
+	}
+	if len(spec.Risk) > MaxRiskBytes {
+		return nil, errcode.New(errcode.InvalidArgument, "interaction risk exceeds size limit")
+	}
+	if len(spec.GrantScopeLabel) > MaxGrantScopeLabelBytes {
+		return nil, errcode.New(errcode.InvalidArgument, "interaction grant scope label exceeds size limit")
+	}
+
+	s.topic.mu.Lock()
+	defer s.topic.mu.Unlock()
+
 	ticket, err := s.owner.Ensure(spec)
 	if err != nil {
-		return nil, errcode.Wrap(errcode.Internal, "ensure interaction request", err)
+		return nil, fmt.Errorf("%w", err)
 	}
 
 	s.seenMu.Lock()
@@ -216,11 +164,11 @@ func (s *InteractionService) Ensure(spec *interaction.Spec) (*interaction.Ticket
 
 	if !seen && !ticket.Resolved {
 		view := viewFromTicket(ticket)
-		if perr := s.topic.publishRequested(&view); perr != nil {
+		if perr := s.topic.publishRequestedLocked(&view); perr != nil {
 			return nil, perr
 		}
 	} else if !seen && ticket.Resolved {
-		if perr := s.topic.publishResolved(ticket.RequestID, string(ticket.Outcome)); perr != nil {
+		if perr := s.topic.publishResolvedLocked(ticket.RequestID, string(ticket.Outcome)); perr != nil {
 			return nil, perr
 		}
 	}
@@ -246,7 +194,10 @@ func (s *InteractionService) validateAnswerCmd(cmd *AnswerInteractionCommand) er
 	if cmd.RequestID == "" {
 		return errcode.New(errcode.InvalidArgument, "interaction request ID is required")
 	}
-	if cmd.Incarnation != "" && cmd.Incarnation != s.inc {
+	if cmd.Incarnation == "" {
+		return errcode.New(errcode.InvalidArgument, "incarnation is required")
+	}
+	if cmd.Incarnation != s.inc {
 		return errcode.New(errcode.InteractionStaleIncarnation, "interaction request belongs to a previous incarnation")
 	}
 	return nil
@@ -310,13 +261,52 @@ func checkAnswerItems(answers []InteractionAnswer) error {
 }
 
 // Answer records a human decision for a pending request.
-func (s *InteractionService) Answer(_ context.Context, cmd *AnswerInteractionCommand) (AnswerInteractionResult, error) {
+func (s *InteractionService) Answer(ctx context.Context, cmd *AnswerInteractionCommand) (AnswerInteractionResult, error) {
 	if err := s.validateAnswerCmd(cmd); err != nil {
 		return AnswerInteractionResult{}, err
 	}
+
+	s.cmdMu.Lock()
 	if prev, ok := s.dedup.Get(cmd.CommandID); ok {
+		s.cmdMu.Unlock()
 		return prev, nil
 	}
+	if inf, ok := s.inflight[cmd.CommandID]; ok {
+		s.cmdMu.Unlock()
+		select {
+		case <-inf.done:
+			return inf.result, inf.err
+		case <-ctx.Done():
+			return AnswerInteractionResult{}, fmt.Errorf("context canceled: %w", ctx.Err())
+		}
+	}
+	inf := &inflightCmd{done: make(chan struct{})}
+	s.inflight[cmd.CommandID] = inf
+	s.cmdMu.Unlock()
+
+	var (
+		res AnswerInteractionResult
+		err error
+	)
+	defer func() {
+		s.cmdMu.Lock()
+		delete(s.inflight, cmd.CommandID)
+		inf.result = res
+		inf.err = err
+		close(inf.done)
+		s.cmdMu.Unlock()
+	}()
+
+	res, err = s.executeAnswer(cmd)
+	if err == nil {
+		s.dedup.Put(cmd.CommandID, res)
+	}
+	return res, err
+}
+
+func (s *InteractionService) executeAnswer(cmd *AnswerInteractionCommand) (AnswerInteractionResult, error) {
+	s.topic.mu.Lock()
+	defer s.topic.mu.Unlock()
 
 	ticket, err := s.owner.LookupRequest(cmd.RequestID)
 	if err != nil {
@@ -351,16 +341,18 @@ func (s *InteractionService) Answer(_ context.Context, cmd *AnswerInteractionCom
 		return AnswerInteractionResult{}, mapOwnerError(err)
 	}
 
-	if perr := s.topic.publishResolved(resolvedTicket.RequestID, string(resolvedTicket.Outcome)); perr != nil {
+	if perr := s.topic.publishResolvedLocked(resolvedTicket.RequestID, string(resolvedTicket.Outcome)); perr != nil {
 		return AnswerInteractionResult{}, errcode.Wrap(errcode.Internal, "publish resolved event", perr)
 	}
 
-	res := AnswerInteractionResult{
+	s.seenMu.Lock()
+	delete(s.seenRequests, resolvedTicket.RequestID)
+	s.seenMu.Unlock()
+
+	return AnswerInteractionResult{
 		RequestID: resolvedTicket.RequestID,
 		Outcome:   string(resolvedTicket.Outcome),
-	}
-	s.dedup.Put(cmd.CommandID, res)
-	return res, nil
+	}, nil
 }
 
 // TakeRelayed delivers a resolved relayed request once.
@@ -369,22 +361,24 @@ func (s *InteractionService) TakeRelayed(operationID string) (*interaction.Ticke
 	if err != nil {
 		return nil, mapOwnerError(err)
 	}
+	s.seenMu.Lock()
+	delete(s.seenRequests, ticket.RequestID)
+	s.seenMu.Unlock()
 	return ticket, nil
 }
 
 func mapOwnerError(err error) error {
-	code := errcode.CodeOf(err)
-	msg := err.Error()
 	switch {
-	case code == errcode.NotFound:
+	case errors.Is(err, interaction.ErrRequestNotFound) || errors.Is(err, interaction.ErrOperationNotFound):
 		return errcode.New(errcode.InteractionNotFound, "interaction request not found")
-	case strings.Contains(msg, "already been answered"):
+	case errors.Is(err, interaction.ErrAlreadyAnswered):
 		return errcode.New(errcode.InteractionAlreadyAnswered, "interaction request has already been answered")
-	case strings.Contains(msg, "previous incarnation"):
+	case errors.Is(err, interaction.ErrStaleIncarnation):
 		return errcode.New(errcode.InteractionStaleIncarnation, "interaction request belongs to a previous incarnation")
-	case strings.Contains(msg, "not offered") || strings.Contains(msg, "session grants"):
+	case errors.Is(err, interaction.ErrOptionNotOffered) || errors.Is(err, interaction.ErrOutcomeNotOffered) ||
+		errors.Is(err, interaction.ErrSessionGrantDenied) || errors.Is(err, interaction.ErrRelayedGrantDenied):
 		return errcode.New(errcode.InteractionOptionNotOffered, "option not offered")
-	case strings.Contains(msg, "exceeds its size limit"):
+	case errors.Is(err, interaction.ErrTextTooLarge):
 		return errcode.New(errcode.InteractionTextTooLarge, "interaction text exceeds size limit")
 	default:
 		return err
@@ -417,6 +411,25 @@ func viewFromTicket(t *interaction.Ticket) PendingInteractionView {
 		})
 	}
 
+	questions := make([]InteractionQuestion, 0, len(t.Questions))
+	for _, q := range t.Questions {
+		qOpts := make([]InteractionOption, 0, len(q.Options))
+		for _, o := range q.Options {
+			qOpts = append(qOpts, InteractionOption{
+				ID:          o.ID,
+				Label:       o.Label,
+				Description: o.Description,
+			})
+		}
+		questions = append(questions, InteractionQuestion{
+			QuestionID:  q.ID,
+			Prompt:      q.Question,
+			Options:     qOpts,
+			MultiSelect: q.MultiSelect,
+			AllowText:   true,
+		})
+	}
+
 	return PendingInteractionView{
 		RequestID:       t.RequestID,
 		Incarnation:     t.Incarnation,
@@ -429,70 +442,6 @@ func viewFromTicket(t *interaction.Ticket) PendingInteractionView {
 		OfferedOutcomes: offeredOutcomesFor(t),
 		Options:         options,
 		GrantScopeLabel: t.GrantScopeLabel,
+		Questions:       questions,
 	}
-}
-
-// NewTestInteractionService builds an InteractionService for testing without storage.
-func NewTestInteractionService(clk clock.Clock, idGen ids.Generator, hub *EventHub) (*InteractionService, error) {
-	owner, err := interaction.NewOwner(interaction.Config{
-		Clock: clk,
-		IDs:   idGen,
-	})
-	if err != nil {
-		return nil, errcode.Wrap(errcode.Internal, "create test interaction owner", err)
-	}
-	return NewInteractionService(owner, hub, clk)
-}
-
-// EnsureTestConfirm is a test helper for creating a confirm interaction request.
-func (s *InteractionService) EnsureTestConfirm(opID, summary string) (string, error) {
-	spec := &interaction.Spec{
-		OperationID: opID,
-		Kind:        interaction.KindConfirm,
-		Risk:        "write",
-		Summary:     summary,
-		Offers:      []interaction.Outcome{interaction.OutcomeAllowedOnce, interaction.OutcomeAllowedSession},
-		Binding: interaction.Binding{
-			SessionID:       "sess-1",
-			InvocationID:    "inv-1",
-			AttemptID:       "att-1",
-			CheckGeneration: 1,
-			ToolName:        "file_writer",
-			EnvTag:          "dev",
-		},
-		GrantScopeLabel: "workspace write",
-	}
-	ticket, err := s.Ensure(spec)
-	if err != nil {
-		return "", err
-	}
-	return ticket.RequestID, nil
-}
-
-// EnsureTestRelayed is a test helper for creating a relayed confirm interaction request.
-func (s *InteractionService) EnsureTestRelayed(sessionID, turnID, vendorReqID, summary string) (string, error) {
-	opID, err := interaction.VendorOperationKey(sessionID, turnID, vendorReqID)
-	if err != nil {
-		return "", errcode.Wrap(errcode.Internal, "create test relayed operation key", err)
-	}
-	spec := &interaction.Spec{
-		OperationID: opID,
-		Kind:        interaction.KindConfirm,
-		Summary:     summary,
-		Relayed:     true,
-		Options: []interaction.Option{
-			{ID: "allow", Label: "Allow"},
-			{ID: "deny", Label: "Deny"},
-		},
-		Binding: interaction.Binding{
-			SessionID:       sessionID,
-			TurnID:          turnID,
-			VendorRequestID: vendorReqID,
-		},
-	}
-	ticket, err := s.Ensure(spec)
-	if err != nil {
-		return "", err
-	}
-	return ticket.RequestID, nil
 }

@@ -8,14 +8,11 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"connectrpc.com/connect"
 
 	"github.com/syurodev/fugue/internal/app"
-	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
-	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
 	"github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
@@ -30,24 +27,70 @@ func newInteractionClient(t *testing.T, sockPath string) (interactionv1connect.I
 	return interClient, hostClient, httpClient
 }
 
-func setupInteractionServer(t *testing.T) (*Server, *app.InteractionService, string) {
+func setupInteractionServer(t *testing.T) (*Server, *fakeBackend, string) {
 	t.Helper()
-	clk := clock.NewFake(time.Unix(100, 0))
-	idGen := ids.NewUUIDv7(clk, ids.NewDeterministic("test"))
-	hub := app.NewEventHub("test-hub")
-	svc, err := app.NewTestInteractionService(clk, idGen, hub)
-	if err != nil {
-		t.Fatal(err)
-	}
-
 	backend := newFakeBackend()
 	backend.status = fakeStatus()
-	backend.hub = hub
-	backend.interactions = svc
-
 	dir := shortDir(t)
 	srv := startTestServer(t, dir, backend)
-	return srv, svc, srv.cfg.Socket.Path
+	return srv, backend, srv.cfg.Socket.Path
+}
+
+const (
+	testSessionID   = "sess-1"
+	testKindConfirm = "confirm"
+	testOpQ2        = "op-q2"
+	testColorRed    = "red"
+)
+
+func addTestConfirm(backend *fakeBackend, reqID, summary string) string {
+	backend.pendingMu.Lock()
+	defer backend.pendingMu.Unlock()
+	backend.pendingSeq++
+	backend.pending[reqID] = app.PendingInteractionView{
+		RequestID:       reqID,
+		Incarnation:     backend.inc,
+		SessionID:       testSessionID,
+		Tool:            "file_writer",
+		Kind:            testKindConfirm,
+		Risk:            "write",
+		EnvTag:          "dev",
+		Summary:         summary,
+		OfferedOutcomes: []string{app.OutcomeAllowedOnce, app.OutcomeAllowedSession, app.OutcomeDenied},
+		GrantScopeLabel: "workspace write",
+	}
+	if backend.hub != nil {
+		if payload, err := json.Marshal(backend.pending[reqID]); err == nil {
+			if _, perr := backend.hub.Publish("interaction", app.Event{
+				Seq:     backend.pendingSeq,
+				Type:    "requested",
+				Payload: payload,
+			}); perr != nil {
+				return ""
+			}
+		}
+	}
+	return reqID
+}
+
+func addTestRelayed(backend *fakeBackend, reqID, summary string) string {
+	backend.pendingMu.Lock()
+	defer backend.pendingMu.Unlock()
+	backend.pendingSeq++
+	backend.pending[reqID] = app.PendingInteractionView{
+		RequestID:       reqID,
+		Incarnation:     backend.inc,
+		SessionID:       testSessionID,
+		Tool:            "bash",
+		Kind:            testKindConfirm,
+		Summary:         summary,
+		OfferedOutcomes: []string{app.OutcomeAnswered, app.OutcomeDenied},
+		Options: []app.InteractionOption{
+			{ID: "allow", Label: "Allow"},
+			{ID: "deny", Label: "Deny"},
+		},
+	}
+	return reqID
 }
 
 func assertConnectCode(t *testing.T, err error, want connect.Code, wantCode errcode.Code) {
@@ -80,17 +123,14 @@ func assertDetailCode(t *testing.T, cerr *connect.Error, wantCode errcode.Code) 
 	}
 }
 
-func verifyClient1SeesRequest(t *testing.T, svc *app.InteractionService, sockPath string) string {
+func verifyClient1SeesRequest(t *testing.T, backend *fakeBackend, sockPath string) string {
 	t.Helper()
 	interClient1, hostClient1, http1 := newInteractionClient(t, sockPath)
 	if _, err := hostClient1.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_CLI, "v1")); err != nil {
 		t.Fatal(err)
 	}
 
-	reqID, err := svc.EnsureTestConfirm("op-1", "delete workspace")
-	if err != nil {
-		t.Fatal(err)
-	}
+	reqID := addTestConfirm(backend, "op-1", "delete workspace")
 
 	list1, err := interClient1.ListPending(t.Context(), connect.NewRequest(&interactionv1.ListPendingRequest{}))
 	if err != nil {
@@ -151,9 +191,9 @@ func verifyClient2Stream(t *testing.T, hostClient hostv1connect.HostServiceClien
 
 func TestIE07RequestSurvivesClientReconnectInSnapshot(t *testing.T) {
 	t.Parallel()
-	_, svc, sockPath := setupInteractionServer(t)
-	reqID := verifyClient1SeesRequest(t, svc, sockPath)
-	inc := svc.Incarnation()
+	_, backend, sockPath := setupInteractionServer(t)
+	reqID := verifyClient1SeesRequest(t, backend, sockPath)
+	inc := backend.inc
 
 	interClient2, hostClient2, http2 := newInteractionClient(t, sockPath)
 	t.Cleanup(http2.CloseIdleConnections)
@@ -192,13 +232,10 @@ func assertOneWon(t *testing.T, errA, errB error) {
 
 func TestIE07TwoClientsAnsweringAtOnceExactlyOneIsAccepted(t *testing.T) {
 	t.Parallel()
-	_, svc, sockPath := setupInteractionServer(t)
-	inc := svc.Incarnation()
+	_, backend, sockPath := setupInteractionServer(t)
+	inc := backend.inc
 
-	reqID, err := svc.EnsureTestConfirm("op-race", "concurrent answer")
-	if err != nil {
-		t.Fatal(err)
-	}
+	reqID := addTestConfirm(backend, "op-race", "concurrent answer")
 
 	clientA := newHelloClient(t, sockPath, hostv1.ClientKind_CLIENT_KIND_CLI)
 	clientB := newHelloClient(t, sockPath, hostv1.ClientKind_CLIENT_KIND_TUI)
@@ -242,13 +279,10 @@ func TestIE07TwoClientsAnsweringAtOnceExactlyOneIsAccepted(t *testing.T) {
 
 func TestIE07DuplicateCommandIDReturnsTheSameResult(t *testing.T) {
 	t.Parallel()
-	_, svc, sockPath := setupInteractionServer(t)
-	inc := svc.Incarnation()
+	_, backend, sockPath := setupInteractionServer(t)
+	inc := backend.inc
 
-	reqID, err := svc.EnsureTestConfirm("op-dedup", "duplicate command_id test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	reqID := addTestConfirm(backend, "op-dedup", "duplicate command_id test")
 
 	interClient, hostClient, httpClient := newInteractionClient(t, sockPath)
 	t.Cleanup(httpClient.CloseIdleConnections)
@@ -283,12 +317,9 @@ func TestIE07DuplicateCommandIDReturnsTheSameResult(t *testing.T) {
 
 func TestInteractionSessionPrincipalIsDenied(t *testing.T) {
 	t.Parallel()
-	srv, svc, sockPath := setupInteractionServer(t)
+	srv, backend, sockPath := setupInteractionServer(t)
 
-	reqID, err := svc.EnsureTestConfirm("op-sec", "session principal test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	reqID := addTestConfirm(backend, "op-sec", "session principal test")
 
 	interClient, hostClient, httpClient := newInteractionClient(t, sockPath)
 	t.Cleanup(httpClient.CloseIdleConnections)
@@ -304,12 +335,12 @@ func TestInteractionSessionPrincipalIsDenied(t *testing.T) {
 	}
 	srv.mu.Unlock()
 
-	_, err = interClient.ListPending(t.Context(), connect.NewRequest(&interactionv1.ListPendingRequest{}))
+	_, err := interClient.ListPending(t.Context(), connect.NewRequest(&interactionv1.ListPendingRequest{}))
 	assertConnectCode(t, err, connect.CodePermissionDenied, errcode.PermissionDenied)
 
 	_, err = interClient.Answer(t.Context(), connect.NewRequest(&interactionv1.AnswerRequest{
 		CommandId:   "cmd-session",
-		Incarnation: svc.Incarnation(),
+		Incarnation: backend.inc,
 		RequestId:   reqID,
 		Outcome:     app.OutcomeAllowedOnce,
 	}))
@@ -352,15 +383,12 @@ func assertNoLeakedSecrets(t *testing.T, ev *hostv1.HostEvent, secrets ...string
 
 func TestIE08ResolvedEventAndErrorsContainNoContent(t *testing.T) {
 	t.Parallel()
-	_, svc, sockPath := setupInteractionServer(t)
+	_, backend, sockPath := setupInteractionServer(t)
 
 	secretPrompt := "SECRET_PROMPT_DO_NOT_LEAK_XYZ"
 	secretDenyNote := "SECRET_DENY_NOTE_PRIVATE_123"
 
-	reqID, err := svc.EnsureTestConfirm("op-ie08", secretPrompt)
-	if err != nil {
-		t.Fatal(err)
-	}
+	reqID := addTestConfirm(backend, "op-ie08", secretPrompt)
 
 	interClient, hostClient, httpClient := newInteractionClient(t, sockPath)
 	t.Cleanup(httpClient.CloseIdleConnections)
@@ -379,7 +407,7 @@ func TestIE08ResolvedEventAndErrorsContainNoContent(t *testing.T) {
 
 	_, err = interClient.Answer(t.Context(), connect.NewRequest(&interactionv1.AnswerRequest{
 		CommandId:   "cmd-ie08",
-		Incarnation: svc.Incarnation(),
+		Incarnation: backend.inc,
 		RequestId:   reqID,
 		Outcome:     app.OutcomeDenied,
 		Text:        &secretDenyNote,
@@ -398,12 +426,9 @@ func TestIE08ResolvedEventAndErrorsContainNoContent(t *testing.T) {
 
 func TestInteractionLimitsEnforced(t *testing.T) {
 	t.Parallel()
-	_, svc, sockPath := setupInteractionServer(t)
+	_, backend, sockPath := setupInteractionServer(t)
 
-	reqID, err := svc.EnsureTestConfirm("op-limits", "limits test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	reqID := addTestConfirm(backend, "op-limits", "limits test")
 
 	interClient, hostClient, httpClient := newInteractionClient(t, sockPath)
 	t.Cleanup(httpClient.CloseIdleConnections)
@@ -412,9 +437,9 @@ func TestInteractionLimitsEnforced(t *testing.T) {
 	}
 
 	bigNote := strings.Repeat("x", 4097)
-	_, err = interClient.Answer(t.Context(), connect.NewRequest(&interactionv1.AnswerRequest{
+	_, err := interClient.Answer(t.Context(), connect.NewRequest(&interactionv1.AnswerRequest{
 		CommandId:   "cmd-limit-note",
-		Incarnation: svc.Incarnation(),
+		Incarnation: backend.inc,
 		RequestId:   reqID,
 		Outcome:     app.OutcomeDenied,
 		Text:        &bigNote,
@@ -424,7 +449,7 @@ func TestInteractionLimitsEnforced(t *testing.T) {
 	bigAnswer := strings.Repeat("y", 16385)
 	_, err = interClient.Answer(t.Context(), connect.NewRequest(&interactionv1.AnswerRequest{
 		CommandId:   "cmd-limit-ans",
-		Incarnation: svc.Incarnation(),
+		Incarnation: backend.inc,
 		RequestId:   reqID,
 		Outcome:     app.OutcomeAllowedOnce,
 		Text:        &bigAnswer,
@@ -434,12 +459,9 @@ func TestInteractionLimitsEnforced(t *testing.T) {
 
 func TestInteractionStaleIncarnation(t *testing.T) {
 	t.Parallel()
-	_, svc, sockPath := setupInteractionServer(t)
+	_, backend, sockPath := setupInteractionServer(t)
 
-	reqID, err := svc.EnsureTestConfirm("op-stale", "stale incarnation test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	reqID := addTestConfirm(backend, "op-stale", "stale incarnation test")
 
 	interClient, hostClient, httpClient := newInteractionClient(t, sockPath)
 	t.Cleanup(httpClient.CloseIdleConnections)
@@ -447,7 +469,7 @@ func TestInteractionStaleIncarnation(t *testing.T) {
 		t.Fatal(herr)
 	}
 
-	_, err = interClient.Answer(t.Context(), connect.NewRequest(&interactionv1.AnswerRequest{
+	_, err := interClient.Answer(t.Context(), connect.NewRequest(&interactionv1.AnswerRequest{
 		CommandId:   "cmd-stale",
 		Incarnation: "inc-stale-previous",
 		RequestId:   reqID,
@@ -458,12 +480,9 @@ func TestInteractionStaleIncarnation(t *testing.T) {
 
 func TestInteractionOptionNotOffered(t *testing.T) {
 	t.Parallel()
-	_, svc, sockPath := setupInteractionServer(t)
+	_, backend, sockPath := setupInteractionServer(t)
 
-	reqID, err := svc.EnsureTestConfirm("op-unoffered", "option not offered test")
-	if err != nil {
-		t.Fatal(err)
-	}
+	reqID := addTestConfirm(backend, "op-unoffered", "option not offered test")
 
 	interClient, hostClient, httpClient := newInteractionClient(t, sockPath)
 	t.Cleanup(httpClient.CloseIdleConnections)
@@ -471,9 +490,9 @@ func TestInteractionOptionNotOffered(t *testing.T) {
 		t.Fatal(herr)
 	}
 
-	_, err = interClient.Answer(t.Context(), connect.NewRequest(&interactionv1.AnswerRequest{
+	_, err := interClient.Answer(t.Context(), connect.NewRequest(&interactionv1.AnswerRequest{
 		CommandId:   "cmd-unoffered-outcome",
-		Incarnation: svc.Incarnation(),
+		Incarnation: backend.inc,
 		RequestId:   reqID,
 		Outcome:     "unexpected_outcome_xyz",
 	}))
@@ -482,7 +501,7 @@ func TestInteractionOptionNotOffered(t *testing.T) {
 	badOption := "opt-bad-123"
 	_, err = interClient.Answer(t.Context(), connect.NewRequest(&interactionv1.AnswerRequest{
 		CommandId:   "cmd-unoffered-opt",
-		Incarnation: svc.Incarnation(),
+		Incarnation: backend.inc,
 		RequestId:   reqID,
 		Outcome:     app.OutcomeAllowedOnce,
 		OptionId:    &badOption,
@@ -492,12 +511,9 @@ func TestInteractionOptionNotOffered(t *testing.T) {
 
 func TestInteractionRelayedRejectsSessionGrant(t *testing.T) {
 	t.Parallel()
-	_, svc, sockPath := setupInteractionServer(t)
+	_, backend, sockPath := setupInteractionServer(t)
 
-	reqID, err := svc.EnsureTestRelayed("sess-1", "turn-1", "vreq-1", "Vendor command npm install")
-	if err != nil {
-		t.Fatal(err)
-	}
+	reqID := addTestRelayed(backend, "vreq-1", "Vendor command npm install")
 
 	interClient, hostClient, httpClient := newInteractionClient(t, sockPath)
 	t.Cleanup(httpClient.CloseIdleConnections)
@@ -505,11 +521,125 @@ func TestInteractionRelayedRejectsSessionGrant(t *testing.T) {
 		t.Fatal(herr)
 	}
 
-	_, err = interClient.Answer(t.Context(), connect.NewRequest(&interactionv1.AnswerRequest{
+	_, err := interClient.Answer(t.Context(), connect.NewRequest(&interactionv1.AnswerRequest{
 		CommandId:   "cmd-relayed-grant",
-		Incarnation: svc.Incarnation(),
+		Incarnation: backend.inc,
 		RequestId:   reqID,
 		Outcome:     app.OutcomeAllowedSession,
 	}))
 	assertConnectCode(t, err, connect.CodeInvalidArgument, errcode.InteractionOptionNotOffered)
+}
+
+func seedTwoQuestionInteraction(backend *fakeBackend, reqID string) {
+	backend.pendingMu.Lock()
+	defer backend.pendingMu.Unlock()
+	backend.pendingSeq++
+	backend.pending[reqID] = app.PendingInteractionView{
+		RequestID:       reqID,
+		Incarnation:     backend.inc,
+		SessionID:       testSessionID,
+		Tool:            "ask",
+		Kind:            "question",
+		Summary:         "Please answer both",
+		OfferedOutcomes: []string{app.OutcomeAnswered, app.OutcomeCancelled},
+		Questions: []app.InteractionQuestion{
+			{
+				QuestionID: "q1",
+				Prompt:     "Select color",
+				Options: []app.InteractionOption{
+					{ID: testColorRed, Label: "Red"},
+					{ID: "blue", Label: "Blue"},
+				},
+				MultiSelect: false,
+				AllowText:   true,
+			},
+			{
+				QuestionID:  "q2",
+				Prompt:      "Confirm approval?",
+				MultiSelect: false,
+				AllowText:   true,
+			},
+		},
+	}
+}
+
+func TestInteractionQuestionKindTwoQuestions(t *testing.T) {
+	t.Parallel()
+	_, backend, sockPath := setupInteractionServer(t)
+	seedTwoQuestionInteraction(backend, testOpQ2)
+
+	interClient, hostClient, httpClient := newInteractionClient(t, sockPath)
+	t.Cleanup(httpClient.CloseIdleConnections)
+	if _, herr := hostClient.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_CLI, "v1")); herr != nil {
+		t.Fatal(herr)
+	}
+
+	listRes, err := interClient.ListPending(t.Context(), connect.NewRequest(&interactionv1.ListPendingRequest{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listRes.Msg.Requests) != 1 || len(listRes.Msg.Requests[0].Questions) != 2 {
+		t.Fatalf("expected 2 questions in PendingRequest, got: %+v", listRes.Msg.Requests)
+	}
+	q1 := listRes.Msg.Requests[0].Questions[0]
+	q2 := listRes.Msg.Requests[0].Questions[1]
+	if q1.QuestionId != "q1" || len(q1.Options) != 2 || q2.QuestionId != "q2" {
+		t.Fatalf("question views mismatch: q1=%+v q2=%+v", q1, q2)
+	}
+
+	// Answering missing question q2 fails typed
+	_, err = interClient.Answer(t.Context(), connect.NewRequest(&interactionv1.AnswerRequest{
+		CommandId:   "cmd-q-missing",
+		Incarnation: backend.inc,
+		RequestId:   testOpQ2,
+		Outcome:     app.OutcomeAnswered,
+		Answers: []*interactionv1.QuestionAnswer{
+			{QuestionId: "q1", OptionIds: []string{testColorRed}},
+		},
+	}))
+	assertConnectCode(t, err, connect.CodeInvalidArgument, errcode.InvalidArgument)
+
+	// Answering both questions resolves
+	res, err := interClient.Answer(t.Context(), connect.NewRequest(&interactionv1.AnswerRequest{
+		CommandId:   "cmd-q-both",
+		Incarnation: backend.inc,
+		RequestId:   testOpQ2,
+		Outcome:     app.OutcomeAnswered,
+		Answers: []*interactionv1.QuestionAnswer{
+			{QuestionId: "q1", OptionIds: []string{testColorRed}},
+			{QuestionId: "q2", Text: "confirmed"},
+		},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Msg.Outcome != app.OutcomeAnswered {
+		t.Fatalf("outcome = %s, want answered", res.Msg.Outcome)
+	}
+}
+
+func TestInteractionConnectWithReadMaxBytesOversizedRejected(t *testing.T) {
+	t.Parallel()
+	_, backend, sockPath := setupInteractionServer(t)
+
+	interClient, hostClient, httpClient := newInteractionClient(t, sockPath)
+	t.Cleanup(httpClient.CloseIdleConnections)
+	if _, herr := hostClient.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_CLI, "v1")); herr != nil {
+		t.Fatal(herr)
+	}
+
+	oversized := strings.Repeat("A", 70*1024)
+	_, err := interClient.Answer(t.Context(), connect.NewRequest(&interactionv1.AnswerRequest{
+		CommandId:   "cmd-oversized-body",
+		Incarnation: backend.inc,
+		RequestId:   "op-oversized",
+		Outcome:     app.OutcomeAllowedOnce,
+		Text:        &oversized,
+	}))
+	if connect.CodeOf(err) != connect.CodeResourceExhausted {
+		t.Fatalf("expected CodeResourceExhausted from transport max bytes, got %v (err: %v)", connect.CodeOf(err), err)
+	}
+	if backend.answerCalls > 0 {
+		t.Fatalf("expected request to be rejected before backend, but backend received %d calls", backend.answerCalls)
+	}
 }

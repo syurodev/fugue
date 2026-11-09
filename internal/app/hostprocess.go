@@ -182,10 +182,11 @@ func (hp *HostProcess) waitTasks() error {
 
 func initInteractions(deps *HostDeps, hub *EventHub) (*InteractionService, error) {
 	owner, err := interaction.NewOwner(interaction.Config{
-		Clock:       deps.Clock,
-		IDs:         deps.IDs,
-		Responder:   nil,
-		Headless:    false,
+		Clock:     deps.Clock,
+		IDs:       deps.IDs,
+		Responder: nil,
+		Headless:  false,
+		// TODO(F9.6): wire the host vault lock state to the interaction owner once vault is added to HostDeps.
 		VaultLocked: func() bool { return false },
 	})
 	if err != nil {

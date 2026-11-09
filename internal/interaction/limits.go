@@ -30,7 +30,7 @@ const (
 // checkTextLimit fails typed when content exceeds its interaction §9 limit.
 func checkTextLimit(content string, limit int, what string) error {
 	if len(content) > limit {
-		return errcode.New(errcode.InvalidArgument, "interaction "+what+" exceeds its size limit")
+		return errcode.Wrap(errcode.InvalidArgument, "interaction "+what+" exceeds its size limit", ErrTextTooLarge)
 	}
 	return nil
 }

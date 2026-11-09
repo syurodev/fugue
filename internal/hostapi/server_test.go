@@ -35,7 +35,6 @@ const (
 // topics they need on it.
 type fakeBackend struct {
 	hub          *app.EventHub
-	interactions *app.InteractionService
 	mu           sync.Mutex
 	hellos       int
 	leased       []string
@@ -47,10 +46,29 @@ type fakeBackend struct {
 	shutdowns    []app.ShutdownCommand
 	holdLease    chan struct{} // non-nil: LeaseAcquired blocks until closed
 	leaseEntered chan struct{} // non-nil: signalled when LeaseAcquired is entered
+
+	pendingMu   sync.Mutex
+	pending     map[string]app.PendingInteractionView
+	pendingSeq  app.EventSeq
+	dedup       map[string]app.AnswerInteractionResult
+	answered    map[string]string
+	inc         string
+	answerCalls int
 }
 
 func newFakeBackend() *fakeBackend {
-	return &fakeBackend{released: make(chan string, 8), hub: app.NewEventHub("inc-fake")}
+	b := &fakeBackend{
+		released: make(chan string, 8),
+		hub:      app.NewEventHub("inc-fake"),
+		pending:  map[string]app.PendingInteractionView{},
+		dedup:    map[string]app.AnswerInteractionResult{},
+		answered: map[string]string{},
+		inc:      "inc-fake",
+	}
+	if err := b.hub.RegisterDurable(app.TopicInteraction, &fakeInteractionTopic{backend: b}); err != nil {
+		return nil
+	}
+	return b
 }
 
 func (f *fakeBackend) Hello(_ context.Context, _ app.HelloParams) (app.HelloResult, error) {
@@ -108,36 +126,6 @@ func (f *fakeBackend) Subscribe(ctx context.Context, p app.SubscribeParams) (*ap
 		return nil, errcode.Wrap(errcode.Internal, "subscribe on the fake hub", err)
 	}
 	return sub, nil
-}
-
-func (f *fakeBackend) ListPendingInteractions(ctx context.Context, principal string) ([]app.PendingInteractionView, app.EventSeq, error) {
-	if f.interactions != nil {
-		views, seq, err := f.interactions.ListPending(ctx, principal)
-		if err != nil {
-			var coded *errcode.Error
-			if errors.As(err, &coded) {
-				return nil, 0, errcode.Wrap(coded.Code(), coded.Message(), err)
-			}
-			return nil, 0, errcode.Wrap(errcode.Internal, "list pending interactions", err)
-		}
-		return views, seq, nil
-	}
-	return nil, 0, nil
-}
-
-func (f *fakeBackend) AnswerInteraction(ctx context.Context, cmd *app.AnswerInteractionCommand) (app.AnswerInteractionResult, error) {
-	if f.interactions != nil {
-		res, err := f.interactions.Answer(ctx, cmd)
-		if err != nil {
-			var coded *errcode.Error
-			if errors.As(err, &coded) {
-				return app.AnswerInteractionResult{}, errcode.Wrap(coded.Code(), coded.Message(), err)
-			}
-			return app.AnswerInteractionResult{}, errcode.Wrap(errcode.Internal, "answer interaction", err)
-		}
-		return res, nil
-	}
-	return app.AnswerInteractionResult{RequestID: cmd.RequestID, Outcome: cmd.Outcome}, nil
 }
 
 func (f *fakeBackend) helloCount() int {

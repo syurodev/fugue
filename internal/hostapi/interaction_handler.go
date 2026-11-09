@@ -38,28 +38,7 @@ func (h *interactionHandler) ListPending(ctx context.Context, _ *connect.Request
 
 	protoReqs := make([]*interactionv1.PendingRequest, 0, len(views))
 	for i := range views {
-		v := &views[i]
-		opts := make([]*interactionv1.Option, 0, len(v.Options))
-		for _, o := range v.Options {
-			opts = append(opts, &interactionv1.Option{
-				Id:          o.ID,
-				Label:       o.Label,
-				Description: o.Description,
-			})
-		}
-		protoReqs = append(protoReqs, &interactionv1.PendingRequest{
-			RequestId:       v.RequestID,
-			Incarnation:     v.Incarnation,
-			SessionId:       v.SessionID,
-			Tool:            v.Tool,
-			Kind:            v.Kind,
-			Risk:            v.Risk,
-			EnvTag:          v.EnvTag,
-			Summary:         v.Summary,
-			OfferedOutcomes: v.OfferedOutcomes,
-			Options:         opts,
-			GrantScopeLabel: v.GrantScopeLabel,
-		})
+		protoReqs = append(protoReqs, protoPendingRequest(&views[i]))
 	}
 
 	return connect.NewResponse(&interactionv1.ListPendingResponse{
@@ -68,18 +47,51 @@ func (h *interactionHandler) ListPending(ctx context.Context, _ *connect.Request
 	}), nil
 }
 
+func protoOptions(opts []app.InteractionOption) []*interactionv1.Option {
+	out := make([]*interactionv1.Option, 0, len(opts))
+	for _, o := range opts {
+		out = append(out, &interactionv1.Option{
+			Id:          o.ID,
+			Label:       o.Label,
+			Description: o.Description,
+		})
+	}
+	return out
+}
+
+func protoQuestions(qs []app.InteractionQuestion) []*interactionv1.Question {
+	out := make([]*interactionv1.Question, 0, len(qs))
+	for _, q := range qs {
+		out = append(out, &interactionv1.Question{
+			QuestionId:  q.QuestionID,
+			Prompt:      q.Prompt,
+			Options:     protoOptions(q.Options),
+			MultiSelect: q.MultiSelect,
+			AllowText:   q.AllowText,
+		})
+	}
+	return out
+}
+
+func protoPendingRequest(v *app.PendingInteractionView) *interactionv1.PendingRequest {
+	return &interactionv1.PendingRequest{
+		RequestId:       v.RequestID,
+		Incarnation:     v.Incarnation,
+		SessionId:       v.SessionID,
+		Tool:            v.Tool,
+		Kind:            v.Kind,
+		Risk:            v.Risk,
+		EnvTag:          v.EnvTag,
+		Summary:         v.Summary,
+		OfferedOutcomes: v.OfferedOutcomes,
+		Options:         protoOptions(v.Options),
+		GrantScopeLabel: v.GrantScopeLabel,
+		Questions:       protoQuestions(v.Questions),
+	}
+}
+
 func (h *interactionHandler) Answer(ctx context.Context, req *connect.Request[interactionv1.AnswerRequest]) (*connect.Response[interactionv1.AnswerResponse], error) {
 	principal, err := h.authAnswer(ctx, req)
-	if err != nil {
-		return nil, toConnectError(ctx, h.backend, err)
-	}
-
-	text, err := extractAndValidateText(req.Msg)
-	if err != nil {
-		return nil, toConnectError(ctx, h.backend, err)
-	}
-
-	answers, err := buildDomainAnswers(req.Msg.Answers)
 	if err != nil {
 		return nil, toConnectError(ctx, h.backend, err)
 	}
@@ -96,8 +108,8 @@ func (h *interactionHandler) Answer(ctx context.Context, req *connect.Request[in
 		RequestID:   req.Msg.RequestId,
 		Outcome:     req.Msg.Outcome,
 		OptionID:    optionID,
-		Text:        text,
-		Answers:     answers,
+		Text:        extractText(req.Msg),
+		Answers:     buildDomainAnswers(req.Msg.Answers),
 	})
 	if err != nil {
 		return nil, toConnectError(ctx, h.backend, err)
@@ -124,48 +136,29 @@ func (h *interactionHandler) authAnswer(ctx context.Context, req *connect.Reques
 	if req.Msg == nil {
 		return "", errcode.New(errcode.InvalidArgument, "interaction answer request is required")
 	}
-	if req.Msg.CommandId == "" {
-		return "", errcode.New(errcode.InvalidArgument, "command_id is required")
-	}
-	if req.Msg.RequestId == "" {
-		return "", errcode.New(errcode.InvalidArgument, "interaction request ID is required")
-	}
 	return principal, nil
 }
 
-func extractAndValidateText(msg *interactionv1.AnswerRequest) (string, error) {
+func extractText(msg *interactionv1.AnswerRequest) string {
 	if msg.Text == nil {
-		return "", nil
+		return ""
 	}
-	text := *msg.Text
-	if msg.Outcome == app.OutcomeDenied && len(text) > app.MaxInteractionNoteBytes {
-		return "", errcode.New(errcode.InteractionTextTooLarge, "interaction deny note exceeds size limit")
-	}
-	if msg.Outcome != app.OutcomeDenied && len(text) > app.MaxInteractionAnswerBytes {
-		return "", errcode.New(errcode.InteractionTextTooLarge, "interaction answer text exceeds size limit")
-	}
-	return text, nil
+	return *msg.Text
 }
 
-func buildDomainAnswers(protoAnswers []*interactionv1.QuestionAnswer) ([]app.InteractionAnswer, error) {
-	if len(protoAnswers) > app.MaxInteractionOptions {
-		return nil, errcode.New(errcode.InvalidArgument, "number of question answers exceeds limit")
+func buildDomainAnswers(protoAnswers []*interactionv1.QuestionAnswer) []app.InteractionAnswer {
+	if len(protoAnswers) == 0 {
+		return nil
 	}
 	answers := make([]app.InteractionAnswer, 0, len(protoAnswers))
 	for _, a := range protoAnswers {
-		if len(a.Text) > app.MaxInteractionAnswerBytes {
-			return nil, errcode.New(errcode.InteractionTextTooLarge, "interaction question answer text exceeds size limit")
-		}
-		if len(a.OptionIds) > app.MaxInteractionOptions {
-			return nil, errcode.New(errcode.InvalidArgument, "number of selected options exceeds limit")
-		}
 		answers = append(answers, app.InteractionAnswer{
 			QuestionID: a.QuestionId,
 			OptionIDs:  slices.Clone(a.OptionIds),
 			Text:       a.Text,
 		})
 	}
-	return answers, nil
+	return answers
 }
 
 var _ interactionv1connect.InteractionServiceHandler = (*interactionHandler)(nil)

@@ -239,7 +239,7 @@ func (o *Owner) LookupOperation(operationID string) (*Ticket, error) {
 	ticket, ok := o.byOperation[operationID]
 	if !ok {
 		o.mu.Unlock()
-		return nil, errcode.New(errcode.NotFound, "interaction operation not found")
+		return nil, ErrOperationNotFound
 	}
 	ev := o.expireIfDueLocked(ticket, o.clock.Now().UTC())
 	cp := cloneTicket(ticket)
@@ -254,7 +254,7 @@ func (o *Owner) LookupRequest(requestID string) (*Ticket, error) {
 	ticket, ok := o.byRequest[requestID]
 	if !ok {
 		o.mu.Unlock()
-		return nil, errcode.New(errcode.NotFound, "interaction request not found")
+		return nil, ErrRequestNotFound
 	}
 	ev := o.expireIfDueLocked(ticket, o.clock.Now().UTC())
 	cp := cloneTicket(ticket)
@@ -299,13 +299,13 @@ func (o *Owner) Answer(decision *Decision) (*Ticket, error) {
 		return nil, errcode.New(errcode.InvalidArgument, "interaction request ID is required")
 	}
 	if decision.Incarnation != "" && decision.Incarnation != o.incarnation {
-		return nil, errcode.New(errcode.FailedPrecondition, "interaction request belongs to a previous incarnation")
+		return nil, ErrStaleIncarnation
 	}
 	o.mu.Lock()
 	ticket, ok := o.byRequest[decision.RequestID]
 	if !ok {
 		o.mu.Unlock()
-		return nil, errcode.New(errcode.NotFound, "interaction request not found")
+		return nil, ErrRequestNotFound
 	}
 	now := o.clock.Now().UTC()
 	if ev := o.expireIfDueLocked(ticket, now); ev != nil {
@@ -315,11 +315,11 @@ func (o *Owner) Answer(decision *Decision) (*Ticket, error) {
 	}
 	if ticket.Resolved {
 		o.mu.Unlock()
-		return nil, errcode.New(errcode.FailedPrecondition, "interaction request has already been answered")
+		return nil, ErrAlreadyAnswered
 	}
 	if o.isVaultLockedLocked() && decision.Outcome != OutcomeDenied {
 		o.mu.Unlock()
-		return nil, errcode.New(errcode.FailedPrecondition, "vault is locked")
+		return nil, ErrVaultLocked
 	}
 	if err := o.applyDecisionLocked(ticket, decision, now); err != nil {
 		o.mu.Unlock()
@@ -345,12 +345,12 @@ func (o *Owner) TakeRelayed(operationID string) (*Ticket, error) {
 	o.mu.Lock()
 	if o.isVaultLockedLocked() {
 		o.mu.Unlock()
-		return nil, errcode.New(errcode.FailedPrecondition, "vault is locked")
+		return nil, ErrVaultLocked
 	}
 	ticket, ok := o.byOperation[operationID]
 	if !ok {
 		o.mu.Unlock()
-		return nil, errcode.New(errcode.NotFound, "interaction operation not found")
+		return nil, ErrOperationNotFound
 	}
 	if !ticket.Relayed {
 		o.mu.Unlock()

@@ -10,6 +10,15 @@ message Option {
   string description = 3;
 }
 
+// Question is one question within a question-kind interaction request.
+message Question {
+  string question_id = 1;
+  string prompt = 2;
+  repeated Option options = 3;
+  bool multi_select = 4;
+  bool allow_text = 5;
+}
+
 // QuestionAnswer carries the user's answer to one question of a question-kind
 // request (docs: interaction §4.1).
 message QuestionAnswer {
@@ -19,7 +28,7 @@ message QuestionAnswer {
 }
 
 // PendingRequest is the view of a single pending interaction request (docs:
-// interaction §8). Only the 11 fields defined in the specification are present.
+// interaction §8). An additive questions field supports multi-question requests.
 message PendingRequest {
   string request_id = 1;
   string incarnation = 2;
@@ -36,6 +45,7 @@ message PendingRequest {
   // grant_scope_label is the human-readable description of the scope covered
   // by an "allowed_session" confirmation.
   string grant_scope_label = 11;
+  repeated Question questions = 12;
 }
 
 // ListPendingRequest asks for the current snapshot of pending interaction

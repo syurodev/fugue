@@ -19,6 +19,8 @@ const (
 	EventInteractionResolved  = "resolved"
 )
 
+const defaultInteractionTopicCap = 256
+
 // resolvedPayload is the payload of an EventInteractionResolved event. It
 // contains only metadata and outcome: no summary, prompt, answer or note
 // content is ever included (interaction §7, §8, I-E08).
@@ -29,18 +31,20 @@ type resolvedPayload struct {
 
 // interactionTopic is the DurableTopic implementation for TopicInteraction.
 type interactionTopic struct {
-	hub *EventHub
-
-	mu       sync.Mutex
-	seq      EventSeq
-	events   []Event
+	hub      *EventHub
 	provider func() []*interaction.Ticket
+	capacity int
+
+	mu     sync.Mutex
+	seq    EventSeq
+	events []Event
 }
 
 func newInteractionTopic(hub *EventHub, provider func() []*interaction.Ticket) *interactionTopic {
 	return &interactionTopic{
 		hub:      hub,
 		provider: provider,
+		capacity: defaultInteractionTopicCap,
 	}
 }
 
@@ -59,10 +63,27 @@ func (t *interactionTopic) Snapshot(_ context.Context) ([]byte, EventSeq, error)
 	return data, t.seq, nil
 }
 
-// Since returns the committed events newer than seq (DurableTopic port).
+// Since returns the committed events newer than seq (DurableTopic port). If seq
+// is older than the retained events ring, ErrEventSeqTooOld is returned so the
+// subscriber resynchronizes via a fresh snapshot.
 func (t *interactionTopic) Since(_ context.Context, seq EventSeq) ([]Event, error) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+
+	if len(t.events) == 0 {
+		if seq == t.seq {
+			return nil, nil
+		}
+		if seq < t.seq {
+			return nil, ErrEventSeqTooOld
+		}
+		return nil, nil
+	}
+
+	oldest := t.events[0].Seq
+	if seq < oldest-1 {
+		return nil, ErrEventSeqTooOld
+	}
 
 	var out []Event
 	for _, ev := range t.events {
@@ -94,22 +115,30 @@ func (t *interactionTopic) currentViewsLocked() []PendingInteractionView {
 	return views
 }
 
-// publishRequested records a requested event and fans it out via the hub.
-func (t *interactionTopic) publishRequested(view *PendingInteractionView) error {
+func (t *interactionTopic) appendRingLocked(ev Event) {
+	if len(t.events) < t.capacity {
+		t.events = append(t.events, ev)
+		return
+	}
+	copy(t.events, t.events[1:])
+	t.events[len(t.events)-1] = ev
+}
+
+// publishRequestedLocked records a requested event and fans it out via the hub.
+// Must be called with t.mu held.
+func (t *interactionTopic) publishRequestedLocked(view *PendingInteractionView) error {
 	payload, err := json.Marshal(view)
 	if err != nil {
 		return errcode.Wrap(errcode.Internal, "marshal requested event", err)
 	}
 
-	t.mu.Lock()
 	t.seq++
 	ev := Event{
 		Seq:     t.seq,
 		Type:    EventInteractionRequested,
 		Payload: payload,
 	}
-	t.events = append(t.events, ev)
-	t.mu.Unlock()
+	t.appendRingLocked(ev)
 
 	if t.hub != nil {
 		if _, perr := t.hub.Publish(TopicInteraction, ev); perr != nil {
@@ -119,8 +148,9 @@ func (t *interactionTopic) publishRequested(view *PendingInteractionView) error 
 	return nil
 }
 
-// publishResolved records a resolved event and fans it out via the hub.
-func (t *interactionTopic) publishResolved(requestID, outcome string) error {
+// publishResolvedLocked records a resolved event and fans it out via the hub.
+// Must be called with t.mu held.
+func (t *interactionTopic) publishResolvedLocked(requestID, outcome string) error {
 	payload, err := json.Marshal(resolvedPayload{
 		RequestID: requestID,
 		Outcome:   outcome,
@@ -129,15 +159,13 @@ func (t *interactionTopic) publishResolved(requestID, outcome string) error {
 		return errcode.Wrap(errcode.Internal, "marshal resolved event", err)
 	}
 
-	t.mu.Lock()
 	t.seq++
 	ev := Event{
 		Seq:     t.seq,
 		Type:    EventInteractionResolved,
 		Payload: payload,
 	}
-	t.events = append(t.events, ev)
-	t.mu.Unlock()
+	t.appendRingLocked(ev)
 
 	if t.hub != nil {
 		if _, perr := t.hub.Publish(TopicInteraction, ev); perr != nil {

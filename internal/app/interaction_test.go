@@ -21,6 +21,9 @@ const (
 	testInvID          = "inv-1"
 	testAttID          = "att-1"
 	testToolID         = "tool-id"
+	testSessionID      = "sess-1"
+	testEnvDev         = "dev"
+	testAllow          = "allow"
 )
 
 func newTestInteractionService(t *testing.T, clk clock.Clock) (*InteractionService, *EventHub) {
@@ -30,11 +33,69 @@ func newTestInteractionService(t *testing.T, clk clock.Clock) (*InteractionServi
 	}
 	idGen := ids.NewUUIDv7(clk, ids.NewDeterministic("test"))
 	hub := NewEventHub(testAppIncarnation)
-	svc, err := NewTestInteractionService(clk, idGen, hub)
+	owner, err := interaction.NewOwner(interaction.Config{
+		Clock: clk,
+		IDs:   idGen,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := NewInteractionService(owner, hub, clk)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return svc, hub
+}
+
+func ensureTestConfirm(t *testing.T, svc *InteractionService, opID, summary string) string {
+	t.Helper()
+	ticket, err := svc.Ensure(&interaction.Spec{
+		OperationID: opID,
+		Kind:        interaction.KindConfirm,
+		Risk:        "write",
+		Summary:     summary,
+		Offers:      []interaction.Outcome{interaction.OutcomeAllowedOnce, interaction.OutcomeAllowedSession},
+		Binding: interaction.Binding{
+			SessionID:       testSessionID,
+			InvocationID:    testInvID,
+			AttemptID:       testAttID,
+			CheckGeneration: 1,
+			ToolName:        "file_writer",
+			EnvTag:          testEnvDev,
+		},
+		GrantScopeLabel: "workspace write",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ticket.RequestID
+}
+
+func ensureTestRelayed(t *testing.T, svc *InteractionService, sessionID, turnID, vendorReqID, summary string) string {
+	t.Helper()
+	opID, err := interaction.VendorOperationKey(sessionID, turnID, vendorReqID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ticket, err := svc.Ensure(&interaction.Spec{
+		OperationID: opID,
+		Kind:        interaction.KindConfirm,
+		Summary:     summary,
+		Relayed:     true,
+		Options: []interaction.Option{
+			{ID: testAllow, Label: "Allow"},
+			{ID: "deny", Label: "Deny"},
+		},
+		Binding: interaction.Binding{
+			SessionID:       sessionID,
+			TurnID:          turnID,
+			VendorRequestID: vendorReqID,
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ticket.RequestID
 }
 
 func testSpec(opID, summary string) *interaction.Spec {
@@ -45,7 +106,7 @@ func testSpec(opID, summary string) *interaction.Spec {
 		Summary:     summary,
 		Offers:      []interaction.Outcome{interaction.OutcomeAllowedOnce},
 		Binding: interaction.Binding{
-			SessionID:       "sess-1",
+			SessionID:       testSessionID,
 			InvocationID:    testInvID,
 			AttemptID:       testAttID,
 			CheckGeneration: 1,
@@ -313,12 +374,9 @@ func TestInteractionTextTooLarge(t *testing.T) {
 func TestInteractionServiceRelayedRejectsSessionGrant(t *testing.T) {
 	t.Parallel()
 	svc, _ := newTestInteractionService(t, nil)
-	reqID, err := svc.EnsureTestRelayed("sess-1", "turn-1", "vreq-1", "relayed op")
-	if err != nil {
-		t.Fatal(err)
-	}
+	reqID := ensureTestRelayed(t, svc, testSessionID, "turn-1", "vreq-1", "relayed op")
 
-	_, err = svc.Answer(t.Context(), &AnswerInteractionCommand{
+	_, err := svc.Answer(t.Context(), &AnswerInteractionCommand{
 		CommandID:   "cmd-relayed-grant",
 		Principal:   string(KindCLI),
 		Incarnation: svc.Incarnation(),
@@ -381,7 +439,7 @@ func TestInteractionServiceConcurrentAnswers(t *testing.T) {
 func TestInteractionServiceTakeRelayed(t *testing.T) {
 	t.Parallel()
 	svc, _ := newTestInteractionService(t, nil)
-	opID, err := interaction.VendorOperationKey("sess-1", "turn-1", "vreq-1")
+	opID, err := interaction.VendorOperationKey(testSessionID, "turn-1", "vreq-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -391,11 +449,11 @@ func TestInteractionServiceTakeRelayed(t *testing.T) {
 		Summary:     "take relayed test",
 		Relayed:     true,
 		Options: []interaction.Option{
-			{ID: "allow", Label: "Allow"},
+			{ID: testAllow, Label: "Allow"},
 			{ID: "deny", Label: "Deny"},
 		},
 		Binding: interaction.Binding{
-			SessionID:       "sess-1",
+			SessionID:       testSessionID,
 			TurnID:          "turn-1",
 			VendorRequestID: "vreq-1",
 		},
@@ -416,7 +474,7 @@ func TestInteractionServiceTakeRelayed(t *testing.T) {
 		Incarnation: svc.Incarnation(),
 		RequestID:   ticket.RequestID,
 		Outcome:     OutcomeAnswered,
-		OptionID:    "allow",
+		OptionID:    testAllow,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -434,10 +492,7 @@ func TestInteractionServiceTakeRelayed(t *testing.T) {
 func TestInteractionServiceWithOptions(t *testing.T) {
 	t.Parallel()
 	svc, _ := newTestInteractionService(t, nil)
-	reqID, err := svc.EnsureTestConfirm("op-confirm-opt", "confirm with option")
-	if err != nil {
-		t.Fatal(err)
-	}
+	reqID := ensureTestConfirm(t, svc, "op-confirm-opt", "confirm with option")
 	if reqID == "" {
 		t.Fatal("empty reqID")
 	}
@@ -456,7 +511,7 @@ func TestInteractionServiceWithOptions(t *testing.T) {
 			AttemptID:       testAttID,
 			CheckGeneration: 1,
 			ToolName:        testToolID,
-			EnvTag:          "dev",
+			EnvTag:          testEnvDev,
 		},
 	}
 	ticket, err := svc.Ensure(spec)
@@ -509,7 +564,7 @@ func questionTestSpec(opID string) *interaction.Spec {
 			AttemptID:       testAttID,
 			CheckGeneration: 1,
 			ToolName:        testToolID,
-			EnvTag:          "dev",
+			EnvTag:          testEnvDev,
 		},
 	}
 }

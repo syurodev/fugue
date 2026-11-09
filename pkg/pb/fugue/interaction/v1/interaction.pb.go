@@ -83,6 +83,83 @@ func (x *Option) GetDescription() string {
 	return ""
 }
 
+// Question is one question within a question-kind interaction request.
+type Question struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	QuestionId    string                 `protobuf:"bytes,1,opt,name=question_id,json=questionId,proto3" json:"question_id,omitempty"`
+	Prompt        string                 `protobuf:"bytes,2,opt,name=prompt,proto3" json:"prompt,omitempty"`
+	Options       []*Option              `protobuf:"bytes,3,rep,name=options,proto3" json:"options,omitempty"`
+	MultiSelect   bool                   `protobuf:"varint,4,opt,name=multi_select,json=multiSelect,proto3" json:"multi_select,omitempty"`
+	AllowText     bool                   `protobuf:"varint,5,opt,name=allow_text,json=allowText,proto3" json:"allow_text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Question) Reset() {
+	*x = Question{}
+	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Question) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Question) ProtoMessage() {}
+
+func (x *Question) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Question.ProtoReflect.Descriptor instead.
+func (*Question) Descriptor() ([]byte, []int) {
+	return file_fugue_interaction_v1_interaction_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *Question) GetQuestionId() string {
+	if x != nil {
+		return x.QuestionId
+	}
+	return ""
+}
+
+func (x *Question) GetPrompt() string {
+	if x != nil {
+		return x.Prompt
+	}
+	return ""
+}
+
+func (x *Question) GetOptions() []*Option {
+	if x != nil {
+		return x.Options
+	}
+	return nil
+}
+
+func (x *Question) GetMultiSelect() bool {
+	if x != nil {
+		return x.MultiSelect
+	}
+	return false
+}
+
+func (x *Question) GetAllowText() bool {
+	if x != nil {
+		return x.AllowText
+	}
+	return false
+}
+
 // QuestionAnswer carries the user's answer to one question of a question-kind
 // request (docs: interaction §4.1).
 type QuestionAnswer struct {
@@ -96,7 +173,7 @@ type QuestionAnswer struct {
 
 func (x *QuestionAnswer) Reset() {
 	*x = QuestionAnswer{}
-	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[1]
+	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -108,7 +185,7 @@ func (x *QuestionAnswer) String() string {
 func (*QuestionAnswer) ProtoMessage() {}
 
 func (x *QuestionAnswer) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[1]
+	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -121,7 +198,7 @@ func (x *QuestionAnswer) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use QuestionAnswer.ProtoReflect.Descriptor instead.
 func (*QuestionAnswer) Descriptor() ([]byte, []int) {
-	return file_fugue_interaction_v1_interaction_proto_rawDescGZIP(), []int{1}
+	return file_fugue_interaction_v1_interaction_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *QuestionAnswer) GetQuestionId() string {
@@ -146,7 +223,7 @@ func (x *QuestionAnswer) GetText() string {
 }
 
 // PendingRequest is the view of a single pending interaction request (docs:
-// interaction §8). Only the 11 fields defined in the specification are present.
+// interaction §8). An additive questions field supports multi-question requests.
 type PendingRequest struct {
 	state       protoimpl.MessageState `protogen:"open.v1"`
 	RequestId   string                 `protobuf:"bytes,1,opt,name=request_id,json=requestId,proto3" json:"request_id,omitempty"`
@@ -163,14 +240,15 @@ type PendingRequest struct {
 	Options         []*Option `protobuf:"bytes,10,rep,name=options,proto3" json:"options,omitempty"`
 	// grant_scope_label is the human-readable description of the scope covered
 	// by an "allowed_session" confirmation.
-	GrantScopeLabel string `protobuf:"bytes,11,opt,name=grant_scope_label,json=grantScopeLabel,proto3" json:"grant_scope_label,omitempty"`
+	GrantScopeLabel string      `protobuf:"bytes,11,opt,name=grant_scope_label,json=grantScopeLabel,proto3" json:"grant_scope_label,omitempty"`
+	Questions       []*Question `protobuf:"bytes,12,rep,name=questions,proto3" json:"questions,omitempty"`
 	unknownFields   protoimpl.UnknownFields
 	sizeCache       protoimpl.SizeCache
 }
 
 func (x *PendingRequest) Reset() {
 	*x = PendingRequest{}
-	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[2]
+	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -182,7 +260,7 @@ func (x *PendingRequest) String() string {
 func (*PendingRequest) ProtoMessage() {}
 
 func (x *PendingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[2]
+	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -195,7 +273,7 @@ func (x *PendingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PendingRequest.ProtoReflect.Descriptor instead.
 func (*PendingRequest) Descriptor() ([]byte, []int) {
-	return file_fugue_interaction_v1_interaction_proto_rawDescGZIP(), []int{2}
+	return file_fugue_interaction_v1_interaction_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *PendingRequest) GetRequestId() string {
@@ -275,6 +353,13 @@ func (x *PendingRequest) GetGrantScopeLabel() string {
 	return ""
 }
 
+func (x *PendingRequest) GetQuestions() []*Question {
+	if x != nil {
+		return x.Questions
+	}
+	return nil
+}
+
 // ListPendingRequest asks for the current snapshot of pending interaction
 // requests for the current host incarnation (docs: interaction §8).
 type ListPendingRequest struct {
@@ -285,7 +370,7 @@ type ListPendingRequest struct {
 
 func (x *ListPendingRequest) Reset() {
 	*x = ListPendingRequest{}
-	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[3]
+	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -297,7 +382,7 @@ func (x *ListPendingRequest) String() string {
 func (*ListPendingRequest) ProtoMessage() {}
 
 func (x *ListPendingRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[3]
+	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -310,7 +395,7 @@ func (x *ListPendingRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPendingRequest.ProtoReflect.Descriptor instead.
 func (*ListPendingRequest) Descriptor() ([]byte, []int) {
-	return file_fugue_interaction_v1_interaction_proto_rawDescGZIP(), []int{3}
+	return file_fugue_interaction_v1_interaction_proto_rawDescGZIP(), []int{4}
 }
 
 // ListPendingResponse carries the snapshot of pending interaction requests and
@@ -325,7 +410,7 @@ type ListPendingResponse struct {
 
 func (x *ListPendingResponse) Reset() {
 	*x = ListPendingResponse{}
-	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[4]
+	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -337,7 +422,7 @@ func (x *ListPendingResponse) String() string {
 func (*ListPendingResponse) ProtoMessage() {}
 
 func (x *ListPendingResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[4]
+	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -350,7 +435,7 @@ func (x *ListPendingResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListPendingResponse.ProtoReflect.Descriptor instead.
 func (*ListPendingResponse) Descriptor() ([]byte, []int) {
-	return file_fugue_interaction_v1_interaction_proto_rawDescGZIP(), []int{4}
+	return file_fugue_interaction_v1_interaction_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ListPendingResponse) GetRequests() []*PendingRequest {
@@ -385,7 +470,7 @@ type AnswerRequest struct {
 
 func (x *AnswerRequest) Reset() {
 	*x = AnswerRequest{}
-	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[5]
+	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -397,7 +482,7 @@ func (x *AnswerRequest) String() string {
 func (*AnswerRequest) ProtoMessage() {}
 
 func (x *AnswerRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[5]
+	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -410,7 +495,7 @@ func (x *AnswerRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerRequest.ProtoReflect.Descriptor instead.
 func (*AnswerRequest) Descriptor() ([]byte, []int) {
-	return file_fugue_interaction_v1_interaction_proto_rawDescGZIP(), []int{5}
+	return file_fugue_interaction_v1_interaction_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *AnswerRequest) GetCommandId() string {
@@ -473,7 +558,7 @@ type AnswerResponse struct {
 
 func (x *AnswerResponse) Reset() {
 	*x = AnswerResponse{}
-	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[6]
+	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -485,7 +570,7 @@ func (x *AnswerResponse) String() string {
 func (*AnswerResponse) ProtoMessage() {}
 
 func (x *AnswerResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[6]
+	mi := &file_fugue_interaction_v1_interaction_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -498,7 +583,7 @@ func (x *AnswerResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AnswerResponse.ProtoReflect.Descriptor instead.
 func (*AnswerResponse) Descriptor() ([]byte, []int) {
-	return file_fugue_interaction_v1_interaction_proto_rawDescGZIP(), []int{6}
+	return file_fugue_interaction_v1_interaction_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *AnswerResponse) GetRequestId() string {
@@ -523,13 +608,21 @@ const file_fugue_interaction_v1_interaction_proto_rawDesc = "" +
 	"\x06Option\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05label\x18\x02 \x01(\tR\x05label\x12 \n" +
-	"\vdescription\x18\x03 \x01(\tR\vdescription\"d\n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription\"\xbd\x01\n" +
+	"\bQuestion\x12\x1f\n" +
+	"\vquestion_id\x18\x01 \x01(\tR\n" +
+	"questionId\x12\x16\n" +
+	"\x06prompt\x18\x02 \x01(\tR\x06prompt\x126\n" +
+	"\aoptions\x18\x03 \x03(\v2\x1c.fugue.interaction.v1.OptionR\aoptions\x12!\n" +
+	"\fmulti_select\x18\x04 \x01(\bR\vmultiSelect\x12\x1d\n" +
+	"\n" +
+	"allow_text\x18\x05 \x01(\bR\tallowText\"d\n" +
 	"\x0eQuestionAnswer\x12\x1f\n" +
 	"\vquestion_id\x18\x01 \x01(\tR\n" +
 	"questionId\x12\x1d\n" +
 	"\n" +
 	"option_ids\x18\x02 \x03(\tR\toptionIds\x12\x12\n" +
-	"\x04text\x18\x03 \x01(\tR\x04text\"\xee\x02\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\"\xac\x03\n" +
 	"\x0ePendingRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12 \n" +
@@ -544,7 +637,8 @@ const file_fugue_interaction_v1_interaction_proto_rawDesc = "" +
 	"\x10offered_outcomes\x18\t \x03(\tR\x0fofferedOutcomes\x126\n" +
 	"\aoptions\x18\n" +
 	" \x03(\v2\x1c.fugue.interaction.v1.OptionR\aoptions\x12*\n" +
-	"\x11grant_scope_label\x18\v \x01(\tR\x0fgrantScopeLabel\"\x14\n" +
+	"\x11grant_scope_label\x18\v \x01(\tR\x0fgrantScopeLabel\x12<\n" +
+	"\tquestions\x18\f \x03(\v2\x1e.fugue.interaction.v1.QuestionR\tquestions\"\x14\n" +
 	"\x12ListPendingRequest\"s\n" +
 	"\x13ListPendingResponse\x12@\n" +
 	"\brequests\x18\x01 \x03(\v2$.fugue.interaction.v1.PendingRequestR\brequests\x12\x1a\n" +
@@ -583,29 +677,32 @@ func file_fugue_interaction_v1_interaction_proto_rawDescGZIP() []byte {
 	return file_fugue_interaction_v1_interaction_proto_rawDescData
 }
 
-var file_fugue_interaction_v1_interaction_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_fugue_interaction_v1_interaction_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_fugue_interaction_v1_interaction_proto_goTypes = []any{
 	(*Option)(nil),              // 0: fugue.interaction.v1.Option
-	(*QuestionAnswer)(nil),      // 1: fugue.interaction.v1.QuestionAnswer
-	(*PendingRequest)(nil),      // 2: fugue.interaction.v1.PendingRequest
-	(*ListPendingRequest)(nil),  // 3: fugue.interaction.v1.ListPendingRequest
-	(*ListPendingResponse)(nil), // 4: fugue.interaction.v1.ListPendingResponse
-	(*AnswerRequest)(nil),       // 5: fugue.interaction.v1.AnswerRequest
-	(*AnswerResponse)(nil),      // 6: fugue.interaction.v1.AnswerResponse
+	(*Question)(nil),            // 1: fugue.interaction.v1.Question
+	(*QuestionAnswer)(nil),      // 2: fugue.interaction.v1.QuestionAnswer
+	(*PendingRequest)(nil),      // 3: fugue.interaction.v1.PendingRequest
+	(*ListPendingRequest)(nil),  // 4: fugue.interaction.v1.ListPendingRequest
+	(*ListPendingResponse)(nil), // 5: fugue.interaction.v1.ListPendingResponse
+	(*AnswerRequest)(nil),       // 6: fugue.interaction.v1.AnswerRequest
+	(*AnswerResponse)(nil),      // 7: fugue.interaction.v1.AnswerResponse
 }
 var file_fugue_interaction_v1_interaction_proto_depIdxs = []int32{
-	0, // 0: fugue.interaction.v1.PendingRequest.options:type_name -> fugue.interaction.v1.Option
-	2, // 1: fugue.interaction.v1.ListPendingResponse.requests:type_name -> fugue.interaction.v1.PendingRequest
-	1, // 2: fugue.interaction.v1.AnswerRequest.answers:type_name -> fugue.interaction.v1.QuestionAnswer
-	3, // 3: fugue.interaction.v1.InteractionService.ListPending:input_type -> fugue.interaction.v1.ListPendingRequest
-	5, // 4: fugue.interaction.v1.InteractionService.Answer:input_type -> fugue.interaction.v1.AnswerRequest
-	4, // 5: fugue.interaction.v1.InteractionService.ListPending:output_type -> fugue.interaction.v1.ListPendingResponse
-	6, // 6: fugue.interaction.v1.InteractionService.Answer:output_type -> fugue.interaction.v1.AnswerResponse
-	5, // [5:7] is the sub-list for method output_type
-	3, // [3:5] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	0, // 0: fugue.interaction.v1.Question.options:type_name -> fugue.interaction.v1.Option
+	0, // 1: fugue.interaction.v1.PendingRequest.options:type_name -> fugue.interaction.v1.Option
+	1, // 2: fugue.interaction.v1.PendingRequest.questions:type_name -> fugue.interaction.v1.Question
+	3, // 3: fugue.interaction.v1.ListPendingResponse.requests:type_name -> fugue.interaction.v1.PendingRequest
+	2, // 4: fugue.interaction.v1.AnswerRequest.answers:type_name -> fugue.interaction.v1.QuestionAnswer
+	4, // 5: fugue.interaction.v1.InteractionService.ListPending:input_type -> fugue.interaction.v1.ListPendingRequest
+	6, // 6: fugue.interaction.v1.InteractionService.Answer:input_type -> fugue.interaction.v1.AnswerRequest
+	5, // 7: fugue.interaction.v1.InteractionService.ListPending:output_type -> fugue.interaction.v1.ListPendingResponse
+	7, // 8: fugue.interaction.v1.InteractionService.Answer:output_type -> fugue.interaction.v1.AnswerResponse
+	7, // [7:9] is the sub-list for method output_type
+	5, // [5:7] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_fugue_interaction_v1_interaction_proto_init() }
@@ -613,14 +710,14 @@ func file_fugue_interaction_v1_interaction_proto_init() {
 	if File_fugue_interaction_v1_interaction_proto != nil {
 		return
 	}
-	file_fugue_interaction_v1_interaction_proto_msgTypes[5].OneofWrappers = []any{}
+	file_fugue_interaction_v1_interaction_proto_msgTypes[6].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fugue_interaction_v1_interaction_proto_rawDesc), len(file_fugue_interaction_v1_interaction_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
