@@ -1,7 +1,9 @@
 # Dependencies
 
 Every module that `go.mod` requires directly, and every module that provides a `tool`
-directive, has a row here with a reason, a license and an approver. Licenses allowed without
+directive, has a row here with a reason, a license and an approver. The `ui/` module
+(`github.com/syurodev/fugue/ui`, ADR 0002) has its own `go.mod`; its modules have their own
+section below, governed the same way. Licenses allowed without
 asking: MIT, BSD-2-Clause, BSD-3-Clause, Apache-2.0, ISC; anything else needs the user's
 approval (`quality-gates` §7). Modules that appear only as `// indirect` are covered by
 `go-licenses check` and `govulncheck`, not by a row.
@@ -36,6 +38,26 @@ checks it against `go.mod`.
 | `github.com/bufbuild/buf` | Apache-2.0 | Proto lint, format, breaking-change check and code generation | user, ADR 0001 | F0.7 |
 
 TypeScript generation uses the remote plugin `buf.build/bufbuild/es` (Apache-2.0), pinned by version in `proto/buf.gen.yaml`; it needs network access when `task generate` or `task proto` runs.
+
+## The ui module (`github.com/syurodev/fugue/ui`, enters F10.2a)
+
+Rows for the desktop app's own `go.mod` (ADR 0002 §6); none of them reach the core module.
+
+| Module | License | Reason | Approver | Enters |
+| --- | --- | --- | --- | --- |
+| `gioui.org` | Unlicense OR MIT | Gio immediate-mode GUI toolkit of the desktop app (DA-01) | user, ADR 0002 | F10.2a |
+| `golang.org/x/image` | BSD-3-Clause | `font/sfnt` glyph-index checks of the bundled fonts in tests | user, ADR 0002 | F10.2a |
+
+Bundled static assets of `ui/` (DA-04), not Go modules:
+
+| Asset | License | Source | Approver |
+| --- | --- | --- | --- |
+| `ui/internal/fonts/data/Inter-Variable.ttf` | OFL-1.1 | [rsms/inter v4.1](https://github.com/rsms/inter/releases/tag/v4.1) | user, ADR 0002 |
+| `ui/internal/fonts/data/JetBrainsMono-Variable.ttf` | OFL-1.1 | [JetBrains/JetBrainsMono v2.304](https://github.com/JetBrains/JetBrainsMono/releases/tag/v2.304) | user, ADR 0002 |
+
+The OFL-1.1 license files ship beside the fonts (`Inter-OFL.txt`, `JetBrainsMono-OFL.txt`); OFL-1.1 is
+an approved open font license per ADR 0002 and is not on the code-license list above because it
+licenses embedded font data, not linked code.
 
 ## Pinned outside `go.mod`
 
