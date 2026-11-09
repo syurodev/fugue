@@ -285,6 +285,25 @@ func (h *EventHub) appendRingLocked(t *eventTopic, ev Event) {
 	t.ring = append(t.ring, ev)
 }
 
+// Unregister removes a topic and ends its live subscribers with
+// resync_required; a later Subscribe for the same name is denied like any
+// unregistered topic. The transcript service calls it when a vendor session is
+// purged, so a purged session's topics stop answering. It reports whether the
+// topic existed.
+func (h *EventHub) Unregister(name string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	t, ok := h.topics[name]
+	if !ok {
+		return false
+	}
+	for _, s := range t.subs {
+		s.forceResync()
+	}
+	delete(h.topics, name)
+	return true
+}
+
 // EndStreams ends every open subscription cleanly and refuses new ones. The
 // drain calls it before the transport closes, so each stream delivers its end
 // message and returns.
