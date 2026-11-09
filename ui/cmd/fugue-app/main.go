@@ -44,7 +44,7 @@ func main() {
 		return
 	}
 	if len(os.Args) == 2 && os.Args[1] == "--host-log-sink" {
-		if err := client.RunHostLogSink(); err != nil {
+		if err := runHostLogSink(); err != nil {
 			os.Exit(exitFailure)
 		}
 		return
@@ -122,4 +122,21 @@ func waitBackground(ctx context.Context, dir string, params client.Params, bg *h
 
 func backgroundUnavailable(err error) bool {
 	return errors.Is(err, client.ErrBackgroundDisabled) || errors.Is(err, client.ErrBackgroundOwned)
+}
+
+// runHostLogSink drains the inherited host output into its inherited log file.
+func runHostLogSink() error {
+	f := os.NewFile(3, "host log")
+	if f == nil {
+		return client.ErrUntrustedHost
+	}
+	defer func() {
+		if err := f.Close(); err != nil {
+			return
+		}
+	}()
+	if err := client.WriteBoundedLog(f, os.Stdin, 1<<20); err != nil {
+		return fmt.Errorf("drain host output: %w", err)
+	}
+	return nil
 }

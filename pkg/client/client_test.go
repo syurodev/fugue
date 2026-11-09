@@ -2,6 +2,7 @@ package client_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -66,8 +67,9 @@ func closeQuietly(c closer) {
 // needs). Each test gets a unique directory.
 func shortDir(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp(os.TempDir(), "fugue-")
-	if err != nil {
+	sum := sha256.Sum256([]byte(t.Name()))
+	dir := filepath.Join(os.TempDir(), fmt.Sprintf("fg-%x-%d", sum[:4], os.Getpid()))
+	if err := os.Mkdir(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { removeQuietly(dir) })

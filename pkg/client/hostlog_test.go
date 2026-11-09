@@ -2,15 +2,14 @@ package client_test
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
-	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/pkg/client"
 )
 
@@ -82,25 +81,15 @@ func TestConcurrentHostLogCreation(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	testSetMode(t, dir, 0o700)
-	const count = 16
-	start := make(chan struct{})
-	results := make(chan error, count)
-	for range count {
-		supervise.Go(t.Context(), "test.host-log", func(context.Context) error {
-			<-start
+	for i := range 16 {
+		t.Run(strconv.Itoa(i), func(t *testing.T) {
+			t.Parallel()
 			f, err := client.OpenHostLog(dir)
-			if err == nil {
-				err = f.Close()
+			if err != nil {
+				t.Fatal(err)
 			}
-			results <- err
-			return nil
+			mustClientTest(t, f.Close())
 		})
-	}
-	close(start)
-	for range count {
-		if err := <-results; err != nil {
-			t.Fatal(err)
-		}
 	}
 }
 
