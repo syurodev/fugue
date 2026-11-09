@@ -65,6 +65,11 @@ type InteractionService struct {
 
 	cmdMu    sync.Mutex
 	inflight map[string]*inflightCmd
+
+	// betweenListReads is a test seam: ListPending calls it between reading
+	// the topic sequence and reading the pending views. Always nil in
+	// production.
+	betweenListReads func()
 }
 
 // NewInteractionService creates an InteractionService and binds it to owner and hub.
@@ -168,7 +173,7 @@ func (s *InteractionService) Ensure(spec *interaction.Spec) (*interaction.Ticket
 	if err != nil {
 		var coded *errcode.Error
 		if errors.As(err, &coded) {
-			return nil, errcode.Wrap(coded.Code(), coded.Message(), err)
+			return nil, errcode.Wrap(coded.Code(), "interaction ensure", err)
 		}
 		return nil, errcode.Wrap(errcode.Internal, "interaction ensure", err)
 	}
@@ -199,12 +204,20 @@ func (s *InteractionService) ListPending(_ context.Context, principal string) ([
 	if !IsLocalPrincipal(principal) {
 		return nil, 0, errcode.New(errcode.PermissionDenied, "only local principals may list pending interactions")
 	}
-	views := s.currentPendingViews()
+	// The sequence is read before the views, like EventHub's topicSnapshot: a
+	// request published in the gap is then in the views, or in the stream
+	// after seq, or both. The overlap is harmless because the payloads are
+	// idempotent. The reverse order would let a client subscribe from a seq
+	// that already counts an event whose ticket the views do not contain, and
+	// miss that request.
 	var seq EventSeq
 	if s.hub != nil {
 		seq = s.hub.TopicSequence(TopicInteraction)
 	}
-	return views, seq, nil
+	if s.betweenListReads != nil {
+		s.betweenListReads()
+	}
+	return s.currentPendingViews(), seq, nil
 }
 
 func (s *InteractionService) validateAnswerCmd(cmd *AnswerInteractionCommand) error {
