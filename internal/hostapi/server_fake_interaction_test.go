@@ -12,26 +12,6 @@ import (
 
 const fakeKindConfirm = "confirm"
 
-type fakeInteractionTopic struct{ backend *fakeBackend }
-
-func (t *fakeInteractionTopic) Snapshot(_ context.Context) ([]byte, app.EventSeq, error) {
-	t.backend.pendingMu.Lock()
-	defer t.backend.pendingMu.Unlock()
-	views := make([]app.PendingInteractionView, 0, len(t.backend.pending))
-	for k := range t.backend.pending {
-		views = append(views, t.backend.pending[k])
-	}
-	data, err := json.Marshal(views)
-	if err != nil {
-		return nil, 0, fmt.Errorf("marshal views: %w", err)
-	}
-	return data, t.backend.pendingSeq, nil
-}
-
-func (t *fakeInteractionTopic) Since(_ context.Context, _ app.EventSeq) ([]app.Event, error) {
-	return nil, nil
-}
-
 func (f *fakeBackend) ListPendingInteractions(_ context.Context, principal string) ([]app.PendingInteractionView, app.EventSeq, error) {
 	if !app.IsLocalPrincipal(principal) {
 		return nil, 0, errcode.New(errcode.PermissionDenied, "only local principals may list pending interactions")

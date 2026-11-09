@@ -2,7 +2,9 @@ package hostapi
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"os"
@@ -65,7 +67,19 @@ func newFakeBackend() *fakeBackend {
 		answered: map[string]string{},
 		inc:      "inc-fake",
 	}
-	if err := b.hub.RegisterDurable(app.TopicInteraction, &fakeInteractionTopic{backend: b}); err != nil {
+	if err := b.hub.RegisterEphemeral(app.TopicInteraction, func(_ context.Context) ([]byte, error) {
+		b.pendingMu.Lock()
+		defer b.pendingMu.Unlock()
+		views := make([]app.PendingInteractionView, 0, len(b.pending))
+		for k := range b.pending {
+			views = append(views, b.pending[k])
+		}
+		data, err := json.Marshal(views)
+		if err != nil {
+			return nil, fmt.Errorf("marshal views: %w", err)
+		}
+		return data, nil
+	}, 256); err != nil {
 		return nil
 	}
 	return b

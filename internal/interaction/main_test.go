@@ -216,7 +216,7 @@ func newTestOwner(t *testing.T) (*Owner, *clock.Fake, *recordingResponder, *[]Au
 
 func mustEnsure(t *testing.T, owner *Owner, spec *Spec) *Ticket {
 	t.Helper()
-	ticket, err := owner.Ensure(spec)
+	ticket, _, err := owner.Ensure(spec)
 	if err != nil {
 		t.Fatal(err)
 	}

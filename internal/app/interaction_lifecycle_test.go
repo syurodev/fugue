@@ -78,25 +78,35 @@ func TestInteractionServiceMemoryBounded10kCycles(t *testing.T) {
 		}
 	}
 
-	svc.seenMu.Lock()
-	seenCount := len(svc.seenRequests)
-	svc.seenMu.Unlock()
-	if seenCount != 0 {
-		t.Fatalf("seenRequests leaked resolved entries: count = %d, want 0", seenCount)
+	// Advance clock past ResolvedRetentionTTL so all tickets and receipts become evictable
+	clk.Advance(interaction.ResolvedRetentionTTL + time.Minute)
+	svc.PruneResolved()
+
+	reqCount, opCount, rCount := owner.EntryCounts()
+	if reqCount != 0 || opCount != 0 || rCount != 0 {
+		t.Fatalf("owner memory not bounded after retention TTL: byRequest=%d, byOperation=%d, receipts=%d, want all 0",
+			reqCount, opCount, rCount)
 	}
 
-	svc.topic.mu.Lock()
-	eventsCount := len(svc.topic.events)
-	topicCap := svc.topic.capacity
-	svc.topic.mu.Unlock()
-	if eventsCount > topicCap {
-		t.Fatalf("topic.events exceeded capacity: count = %d, capacity = %d", eventsCount, topicCap)
+	// Answering an evicted request returns ErrInteractionNotFound
+	_, aerr := svc.Answer(t.Context(), &AnswerInteractionCommand{
+		CommandID:   "cmd-evicted-test",
+		Principal:   string(KindCLI),
+		Incarnation: svc.Incarnation(),
+		RequestID:   "non-existent-or-evicted-id",
+		Outcome:     OutcomeAllowedOnce,
+	})
+	if errcode.CodeOf(aerr) != errcode.InteractionNotFound {
+		t.Fatalf("Answer on evicted request = %v, want InteractionNotFound", aerr)
 	}
 
-	// Cursors older than the ring buffer report ErrEventSeqTooOld
-	_, err = svc.topic.Since(t.Context(), 1)
-	if !errors.Is(err, ErrEventSeqTooOld) {
-		t.Fatalf("topic.Since with old seq = %v, want ErrEventSeqTooOld", err)
+	// ListPending shows 0 pending items
+	views, _, perr := svc.ListPending(t.Context(), string(KindCLI))
+	if perr != nil {
+		t.Fatal(perr)
+	}
+	if len(views) != 0 {
+		t.Fatalf("ListPending returned %d views, want 0", len(views))
 	}
 }
 
@@ -412,4 +422,287 @@ func TestInteractionAuthoritativeLimitsEnforcedInApp(t *testing.T) {
 	if errcode.CodeOf(gErr) != errcode.InvalidArgument {
 		t.Fatalf("Ensure with GrantScopeLabel > 256 = %v, want InvalidArgument", gErr)
 	}
+}
+
+func TestInteractionDedupMismatchedRequestOrOutcomeReturnsInvalidArgument(t *testing.T) {
+	t.Parallel()
+	const cmdDedupID = "cmd-dedup-mismatch"
+	svc, _ := newTestInteractionService(t, nil)
+	spec1 := testSpec("op-dedup-1", "dedup mismatch 1")
+	spec1.Binding.SessionID = "sess-dedup-1"
+	t1 := mustEnsure(t, svc, spec1)
+
+	spec2 := testSpec("op-dedup-2", "dedup mismatch 2")
+	spec2.Binding.SessionID = "sess-dedup-2"
+	t2 := mustEnsure(t, svc, spec2)
+
+	// First answer succeeds
+	_, err := svc.Answer(t.Context(), &AnswerInteractionCommand{
+		CommandID:   cmdDedupID,
+		Principal:   string(KindCLI),
+		Incarnation: svc.Incarnation(),
+		RequestID:   t1.RequestID,
+		Outcome:     OutcomeAllowedOnce,
+	})
+	if err != nil {
+		t.Fatalf("first answer failed: %v", err)
+	}
+
+	// Same command_id, different request_id -> InvalidArgument
+	_, err = svc.Answer(t.Context(), &AnswerInteractionCommand{
+		CommandID:   cmdDedupID,
+		Principal:   string(KindCLI),
+		Incarnation: svc.Incarnation(),
+		RequestID:   t2.RequestID,
+		Outcome:     OutcomeAllowedOnce,
+	})
+	if errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("Answer with different request_id = %v, want InvalidArgument", err)
+	}
+
+	// Same command_id, same request_id, different outcome -> InvalidArgument
+	_, err = svc.Answer(t.Context(), &AnswerInteractionCommand{
+		CommandID:   cmdDedupID,
+		Principal:   string(KindCLI),
+		Incarnation: svc.Incarnation(),
+		RequestID:   t1.RequestID,
+		Outcome:     OutcomeDenied,
+	})
+	if errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("Answer with different outcome = %v, want InvalidArgument", err)
+	}
+}
+
+func nextSubEvent(t *testing.T, sub *Subscription) Event {
+	t.Helper()
+	ev, ok := sub.Next(t.Context())
+	if !ok {
+		t.Fatal("expected subscription event")
+	}
+	return ev
+}
+
+func TestInteractionEnsureResolvedDoesNotEmitDuplicateEvent(t *testing.T) {
+	t.Parallel()
+	svc, hub := newTestInteractionService(t, nil)
+	sub, err := hub.Subscribe(t.Context(), SubscribeParams{
+		Principal: string(KindCLI),
+		Topic:     TopicInteraction,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sub.Close)
+
+	spec := testSpec("op-reensure", "reensure test")
+	t1 := mustEnsure(t, svc, spec)
+
+	evReq := nextSubEvent(t, sub)
+	if evReq.Type != EventInteractionRequested {
+		t.Fatalf("expected requested event, got %+v", evReq)
+	}
+
+	_, err = svc.Answer(t.Context(), &AnswerInteractionCommand{
+		CommandID:   "cmd-reensure",
+		Principal:   string(KindCLI),
+		Incarnation: svc.Incarnation(),
+		RequestID:   t1.RequestID,
+		Outcome:     OutcomeAllowedOnce,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	evRes := nextSubEvent(t, sub)
+	assertResolvedEventPayload(t, evRes, t1.RequestID, OutcomeAllowedOnce)
+
+	t2, err := svc.Ensure(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if t2.RequestID != t1.RequestID {
+		t.Fatalf("re-ensured ticket request ID = %s, want %s", t2.RequestID, t1.RequestID)
+	}
+
+	tNew := mustEnsure(t, svc, testSpec("op-new-after-reensure", "new spec"))
+	evNext := nextSubEvent(t, sub)
+	if evNext.Type != EventInteractionRequested {
+		t.Fatalf("expected requested event for new spec, got %+v", evNext)
+	}
+	var view PendingInteractionView
+	if jerr := json.Unmarshal(evNext.Payload, &view); jerr != nil {
+		t.Fatal(jerr)
+	}
+	if view.RequestID != tNew.RequestID {
+		t.Fatalf("expected event for new request %s, got %s", tNew.RequestID, view.RequestID)
+	}
+}
+
+func setupResolveTestService(t *testing.T, clk clock.Clock) (*InteractionService, *interaction.Owner, *Subscription) {
+	t.Helper()
+	idGen := ids.NewUUIDv7(clk, ids.NewDeterministic("resolvetest"))
+	hub := NewEventHub("inc-resolve-all")
+	owner, err := interaction.NewOwner(interaction.Config{
+		Clock: clk,
+		IDs:   idGen,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := NewInteractionService(owner, hub, clk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := hub.Subscribe(t.Context(), SubscribeParams{
+		Principal: string(KindCLI),
+		Topic:     TopicInteraction,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sub.Close)
+	return svc, owner, sub
+}
+
+func TestInteractionResolvedEventEmittedOnExpire(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Unix(100, 0))
+	svc, _, sub := setupResolveTestService(t, clk)
+
+	specExp := testSpec("op-expire", "expire test")
+	specExp.ExpiresAt = clk.Now().Add(5 * time.Minute)
+	tExp := mustEnsure(t, svc, specExp)
+	ev := nextSubEvent(t, sub)
+	if ev.Type != EventInteractionRequested {
+		t.Fatalf("expected requested, got %+v", ev)
+	}
+	clk.Advance(10 * time.Minute)
+	expired := svc.ExpireExpired()
+	if len(expired) != 1 || expired[0].RequestID != tExp.RequestID {
+		t.Fatalf("ExpireExpired = %+v, want %s", expired, tExp.RequestID)
+	}
+	evExp := nextSubEvent(t, sub)
+	assertResolvedEventPayload(t, evExp, tExp.RequestID, OutcomeExpired)
+}
+
+func TestInteractionResolvedEventEmittedOnInvalidate(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Unix(100, 0))
+	svc, owner, sub := setupResolveTestService(t, clk)
+
+	tInv := mustEnsure(t, svc, testSpec("op-inv", "invalidate test"))
+	ev := nextSubEvent(t, sub)
+	if ev.Type != EventInteractionRequested {
+		t.Fatalf("expected requested, got %+v", ev)
+	}
+	if _, ierr := owner.InvalidateOperation("op-inv"); ierr != nil {
+		t.Fatal(ierr)
+	}
+	evInv := nextSubEvent(t, sub)
+	assertResolvedEventPayload(t, evInv, tInv.RequestID, OutcomeCancelled)
+}
+
+func TestInteractionResolvedEventEmittedOnResetSession(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Unix(100, 0))
+	svc, owner, sub := setupResolveTestService(t, clk)
+
+	specReset := testSpec("op-sess-reset", "reset test")
+	specReset.Binding.SessionID = "sess-to-reset"
+	tReset := mustEnsure(t, svc, specReset)
+	ev := nextSubEvent(t, sub)
+	if ev.Type != EventInteractionRequested {
+		t.Fatalf("expected requested, got %+v", ev)
+	}
+	owner.ResetSession("sess-to-reset")
+	evReset := nextSubEvent(t, sub)
+	assertResolvedEventPayload(t, evReset, tReset.RequestID, OutcomeCancelled)
+}
+
+func TestInteractionResolvedEventEmittedOnVaultLock(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Unix(100, 0))
+	svc, owner, sub := setupResolveTestService(t, clk)
+
+	tVault := mustEnsure(t, svc, testSpec("op-vault-lock", "vault lock test"))
+	ev := nextSubEvent(t, sub)
+	if ev.Type != EventInteractionRequested {
+		t.Fatalf("expected requested, got %+v", ev)
+	}
+	owner.SetVaultLocked(true)
+	evVault := nextSubEvent(t, sub)
+	assertResolvedEventPayload(t, evVault, tVault.RequestID, OutcomeCancelled)
+}
+
+func assertEphemeralCursorSnapshot(t *testing.T, hub *EventHub, cursorSeq EventSeq, wantReqID string) {
+	t.Helper()
+	sub, err := hub.Subscribe(t.Context(), SubscribeParams{
+		Principal: string(KindCLI),
+		Topic:     TopicInteraction,
+		Cursor:    &EventCursor{Topic: TopicInteraction, Incarnation: "inc-host-1", Sequence: cursorSeq},
+	})
+	if err != nil {
+		t.Fatalf("Subscribe failed: %v", err)
+	}
+	defer sub.Close()
+
+	snapBytes, snapSeq, hasSnap := sub.Snapshot()
+	if !hasSnap || snapSeq != 1 {
+		t.Fatalf("snapshot = (hasSnap:%v, seq:%d), want (true, 1)", hasSnap, snapSeq)
+	}
+	var views []PendingInteractionView
+	if err := json.Unmarshal(snapBytes, &views); err != nil {
+		t.Fatal(err)
+	}
+	if len(views) != 1 || views[0].RequestID != wantReqID {
+		t.Fatalf("snapshot views = %+v, want 1 request %s", views, wantReqID)
+	}
+}
+
+func TestInteractionEphemeralReconnectDifferentIncarnationSnapshot(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Unix(100, 0))
+
+	hub1 := NewEventHub("inc-host-1")
+	owner1, err := interaction.NewOwner(interaction.Config{
+		Clock: clk,
+		IDs:   ids.NewUUIDv7(clk, ids.NewDeterministic("h1")),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc1, err := NewInteractionService(owner1, hub1, clk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 5 {
+		spec := testSpec(fmt.Sprintf("op-h1-%d", i), "host1 spec")
+		spec.Binding.SessionID = fmt.Sprintf("sess-h1-%d", i)
+		mustEnsure(t, svc1, spec)
+	}
+
+	hub2 := NewEventHub("inc-host-2")
+	owner2, err := interaction.NewOwner(interaction.Config{
+		Clock: clk,
+		IDs:   ids.NewUUIDv7(clk, ids.NewDeterministic("h2")),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc2, err := NewInteractionService(owner2, hub2, clk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ticket2 := mustEnsure(t, svc2, testSpec("op-h2-1", "pending in inc2"))
+	currSeq := hub2.TopicSequence(TopicInteraction)
+	if currSeq != 1 {
+		t.Fatalf("hub2 TopicSequence = %d, want 1", currSeq)
+	}
+
+	// Case A: Client reconnects with old cursor incarnation "inc-host-1" and seq > current seq (seq = 10)
+	assertEphemeralCursorSnapshot(t, hub2, 10, ticket2.RequestID)
+
+	// Case B: Client reconnects with old cursor incarnation "inc-host-1" and seq < current seq (seq = 0)
+	assertEphemeralCursorSnapshot(t, hub2, 0, ticket2.RequestID)
 }

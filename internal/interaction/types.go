@@ -31,6 +31,12 @@ const (
 	OutcomeAnswered       Outcome = "answered"
 )
 
+// Resolution carries the request ID and outcome of a resolved ticket.
+type Resolution struct {
+	RequestID string
+	Outcome   Outcome
+}
+
 // Option is one selectable choice offered by a KindSelect request, by a
 // question or by a relayed vendor request. ID and Label are shown verbatim;
 // Description is an optional longer explanation (ask-plan §4).

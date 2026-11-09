@@ -64,6 +64,8 @@ const (
 	OutcomeDenied             = string(interaction.OutcomeDenied)
 	OutcomeAnswered           = string(interaction.OutcomeAnswered)
 	OutcomeCancelled          = string(interaction.OutcomeCancelled)
+	OutcomeExpired            = string(interaction.OutcomeExpired)
+	OutcomeUnavailable        = string(interaction.OutcomeUnavailable)
 )
 
 // AnswerInteractionCommand carries the input to Answer (interaction §8).
@@ -96,9 +98,6 @@ type InteractionService struct {
 
 	cmdMu    sync.Mutex
 	inflight map[string]*inflightCmd
-
-	seenMu       sync.Mutex
-	seenRequests map[string]struct{}
 }
 
 // NewInteractionService creates an InteractionService and binds it to owner and hub.
@@ -112,22 +111,30 @@ func NewInteractionService(owner *interaction.Owner, hub *EventHub, clk clock.Cl
 
 	topic := newInteractionTopic(hub, owner.Pending)
 	if hub != nil {
-		if err := hub.RegisterDurable(TopicInteraction, topic); err != nil {
+		if err := hub.RegisterEphemeral(TopicInteraction, topic.snapshot, defaultEphemeralBufferCap); err != nil {
 			return nil, err
 		}
 	}
 
 	s := &InteractionService{
-		owner:        owner,
-		topic:        topic,
-		hub:          hub,
-		dedup:        newCommandDedupCache(clk, defaultDedupCapacity, defaultDedupTTL),
-		clk:          clk,
-		inc:          owner.Incarnation(),
-		inflight:     map[string]*inflightCmd{},
-		seenRequests: map[string]struct{}{},
+		owner:    owner,
+		topic:    topic,
+		hub:      hub,
+		dedup:    newCommandDedupCache(clk, defaultDedupCapacity, defaultDedupTTL),
+		clk:      clk,
+		inc:      owner.Incarnation(),
+		inflight: map[string]*inflightCmd{},
 	}
+	owner.SetOnResolved(s.handleResolution)
 	return s, nil
+}
+
+func (s *InteractionService) handleResolution(res interaction.Resolution) {
+	s.topic.mu.Lock()
+	defer s.topic.mu.Unlock()
+	if err := s.topic.publishResolvedLocked(res.RequestID, string(res.Outcome)); err != nil {
+		return
+	}
 }
 
 // Incarnation returns the host incarnation ID this service belongs to.
@@ -147,28 +154,17 @@ func (s *InteractionService) Ensure(spec *interaction.Spec) (*interaction.Ticket
 		return nil, errcode.New(errcode.InvalidArgument, "interaction grant scope label exceeds size limit")
 	}
 
-	s.topic.mu.Lock()
-	defer s.topic.mu.Unlock()
-
-	ticket, err := s.owner.Ensure(spec)
+	ticket, created, err := s.owner.Ensure(spec)
 	if err != nil {
-		return nil, fmt.Errorf("%w", err)
+		return nil, errors.Join(err)
 	}
 
-	s.seenMu.Lock()
-	_, seen := s.seenRequests[ticket.RequestID]
-	if !seen {
-		s.seenRequests[ticket.RequestID] = struct{}{}
-	}
-	s.seenMu.Unlock()
-
-	if !seen && !ticket.Resolved {
+	if created && !ticket.Resolved {
+		s.topic.mu.Lock()
 		view := viewFromTicket(ticket)
-		if perr := s.topic.publishRequestedLocked(&view); perr != nil {
-			return nil, perr
-		}
-	} else if !seen && ticket.Resolved {
-		if perr := s.topic.publishResolvedLocked(ticket.RequestID, string(ticket.Outcome)); perr != nil {
+		perr := s.topic.publishRequestedLocked(&view)
+		s.topic.mu.Unlock()
+		if perr != nil {
 			return nil, perr
 		}
 	}
@@ -181,7 +177,12 @@ func (s *InteractionService) ListPending(_ context.Context, principal string) ([
 	if !IsLocalPrincipal(principal) {
 		return nil, 0, errcode.New(errcode.PermissionDenied, "only local principals may list pending interactions")
 	}
-	return s.topic.pendingSnapshot()
+	s.topic.mu.Lock()
+	defer s.topic.mu.Unlock()
+
+	views := s.topic.currentViewsLocked()
+	seq := s.hub.TopicSequence(TopicInteraction)
+	return views, seq, nil
 }
 
 func (s *InteractionService) validateAnswerCmd(cmd *AnswerInteractionCommand) error {
@@ -269,16 +270,14 @@ func (s *InteractionService) Answer(ctx context.Context, cmd *AnswerInteractionC
 	s.cmdMu.Lock()
 	if prev, ok := s.dedup.Get(cmd.CommandID); ok {
 		s.cmdMu.Unlock()
+		if prev.RequestID != cmd.RequestID || prev.Outcome != cmd.Outcome {
+			return AnswerInteractionResult{}, errcode.New(errcode.InvalidArgument, "command ID was previously used with different request ID or outcome")
+		}
 		return prev, nil
 	}
 	if inf, ok := s.inflight[cmd.CommandID]; ok {
 		s.cmdMu.Unlock()
-		select {
-		case <-inf.done:
-			return inf.result, inf.err
-		case <-ctx.Done():
-			return AnswerInteractionResult{}, fmt.Errorf("context canceled: %w", ctx.Err())
-		}
+		return s.awaitInflight(ctx, cmd, inf)
 	}
 	inf := &inflightCmd{done: make(chan struct{})}
 	s.inflight[cmd.CommandID] = inf
@@ -304,10 +303,22 @@ func (s *InteractionService) Answer(ctx context.Context, cmd *AnswerInteractionC
 	return res, err
 }
 
-func (s *InteractionService) executeAnswer(cmd *AnswerInteractionCommand) (AnswerInteractionResult, error) {
-	s.topic.mu.Lock()
-	defer s.topic.mu.Unlock()
+func (s *InteractionService) awaitInflight(ctx context.Context, cmd *AnswerInteractionCommand, inf *inflightCmd) (AnswerInteractionResult, error) {
+	select {
+	case <-inf.done:
+		if inf.err != nil {
+			return AnswerInteractionResult{}, inf.err
+		}
+		if inf.result.RequestID != cmd.RequestID || inf.result.Outcome != cmd.Outcome {
+			return AnswerInteractionResult{}, errcode.New(errcode.InvalidArgument, "command ID was previously used with different request ID or outcome")
+		}
+		return inf.result, nil
+	case <-ctx.Done():
+		return AnswerInteractionResult{}, fmt.Errorf("context canceled: %w", ctx.Err())
+	}
+}
 
+func (s *InteractionService) executeAnswer(cmd *AnswerInteractionCommand) (AnswerInteractionResult, error) {
 	ticket, err := s.owner.LookupRequest(cmd.RequestID)
 	if err != nil {
 		return AnswerInteractionResult{}, errcode.New(errcode.InteractionNotFound, "interaction request not found")
@@ -341,18 +352,20 @@ func (s *InteractionService) executeAnswer(cmd *AnswerInteractionCommand) (Answe
 		return AnswerInteractionResult{}, mapOwnerError(err)
 	}
 
-	if perr := s.topic.publishResolvedLocked(resolvedTicket.RequestID, string(resolvedTicket.Outcome)); perr != nil {
-		return AnswerInteractionResult{}, errcode.Wrap(errcode.Internal, "publish resolved event", perr)
-	}
-
-	s.seenMu.Lock()
-	delete(s.seenRequests, resolvedTicket.RequestID)
-	s.seenMu.Unlock()
-
 	return AnswerInteractionResult{
 		RequestID: resolvedTicket.RequestID,
 		Outcome:   string(resolvedTicket.Outcome),
 	}, nil
+}
+
+// ExpireExpired resolves any overdue pending requests and emits resolved events.
+func (s *InteractionService) ExpireExpired() []*interaction.Ticket {
+	return s.owner.ExpireExpired()
+}
+
+// PruneResolved prunes non-relayed resolved tickets past retention TTL.
+func (s *InteractionService) PruneResolved() {
+	s.owner.PruneResolved()
 }
 
 // TakeRelayed delivers a resolved relayed request once.
@@ -361,9 +374,6 @@ func (s *InteractionService) TakeRelayed(operationID string) (*interaction.Ticke
 	if err != nil {
 		return nil, mapOwnerError(err)
 	}
-	s.seenMu.Lock()
-	delete(s.seenRequests, ticket.RequestID)
-	s.seenMu.Unlock()
 	return ticket, nil
 }
 

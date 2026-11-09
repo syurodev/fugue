@@ -211,14 +211,14 @@ func ensurePlantedRequests(t *testing.T, owner *Owner) plantedTickets {
 	t.Helper()
 	confirm := confirmSpec("op-ie08-confirm")
 	confirm.Summary = plantSummary
-	confirmTicket, err := owner.Ensure(confirm)
+	confirmTicket, _, err := owner.Ensure(confirm)
 	if err != nil {
 		t.Fatal(err)
 	}
 	question := questionSpec("op-ie08-question")
 	question.Questions[0].Question = plantQuestion
 	question.Binding.SessionID = session2
-	questionTicket, err := owner.Ensure(question)
+	questionTicket, _, err := owner.Ensure(question)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func ensurePlantedRequests(t *testing.T, owner *Owner) plantedTickets {
 		Options:     []Option{{ID: vendorOptionAllow, Label: plantOption}},
 		Binding:     vendorBinding("turn-ie08", "req-1"),
 	}
-	relayTicket, err := owner.Ensure(relay)
+	relayTicket, _, err := owner.Ensure(relay)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +276,7 @@ func recordInvalidContentOps(t *testing.T, owner *Owner, tickets plantedTickets,
 	collector.record(err)
 	oversized := questionSpec("op-ie08-oversized")
 	oversized.Questions[0].Question = strings.Repeat(plantQuestion, 2000)
-	_, err = owner.Ensure(oversized)
+	_, _, err = owner.Ensure(oversized)
 	collector.record(err)
 	_, err = owner.LookupOperation(tickets.operation)
 	collector.record(err)

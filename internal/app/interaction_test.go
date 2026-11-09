@@ -126,15 +126,6 @@ func mustEnsure(t *testing.T, svc *InteractionService, spec *interaction.Spec) *
 	return ticket
 }
 
-func mustSince(t *testing.T, svc *InteractionService, seq EventSeq) []Event {
-	t.Helper()
-	evs, err := svc.topic.Since(t.Context(), seq)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return evs
-}
-
 func mustListPending(t *testing.T, svc *InteractionService, principal string) ([]PendingInteractionView, EventSeq) {
 	t.Helper()
 	views, seq, err := svc.ListPending(t.Context(), principal)
@@ -149,12 +140,9 @@ func TestInteractionTopicSnapshot(t *testing.T) {
 	clk := clock.NewFake(time.Unix(100, 0))
 	svc, hub := newTestInteractionService(t, clk)
 
-	data, seq, err := svc.topic.Snapshot(t.Context())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if seq != 0 || string(data) != "[]" {
-		t.Fatalf("initial snapshot = (%s, %d), want ([], 0)", string(data), seq)
+	views, seq := mustListPending(t, svc, string(KindCLI))
+	if seq != 0 || len(views) != 0 {
+		t.Fatalf("initial ListPending = (%+v, %d), want ([], 0)", views, seq)
 	}
 
 	sub, err := hub.Subscribe(t.Context(), SubscribeParams{Principal: string(KindCLI), Topic: TopicInteraction})
@@ -164,9 +152,12 @@ func TestInteractionTopicSnapshot(t *testing.T) {
 	t.Cleanup(sub.Close)
 
 	ticket := mustEnsure(t, svc, testSpec("op-1", "delete file foo"))
-	evs := mustSince(t, svc, 0)
-	if len(evs) != 1 || evs[0].Seq != 1 || evs[0].Type != EventInteractionRequested {
-		t.Fatalf("events since 0 = %+v, want 1 requested event", evs)
+	ev, ok := sub.Next(t.Context())
+	if !ok {
+		t.Fatal("expected requested event")
+	}
+	if ev.Seq != 1 || ev.Type != EventInteractionRequested {
+		t.Fatalf("first event = %+v, want requested event at seq 1", ev)
 	}
 
 	views, snapSeq := mustListPending(t, svc, string(KindCLI))
@@ -177,8 +168,22 @@ func TestInteractionTopicSnapshot(t *testing.T) {
 
 func TestInteractionTopicResolve(t *testing.T) {
 	t.Parallel()
-	svc, _ := newTestInteractionService(t, nil)
+	svc, hub := newTestInteractionService(t, nil)
+
+	sub, err := hub.Subscribe(t.Context(), SubscribeParams{Principal: string(KindCLI), Topic: TopicInteraction})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sub.Close)
+
 	ticket := mustEnsure(t, svc, testSpec("op-resolve", "resolve test"))
+	evReq, ok := sub.Next(t.Context())
+	if !ok {
+		t.Fatal("expected requested event")
+	}
+	if evReq.Type != EventInteractionRequested {
+		t.Fatalf("first event = %+v, want requested", evReq)
+	}
 
 	res, err := svc.Answer(t.Context(), &AnswerInteractionCommand{
 		CommandID:   "cmd-res-1",
@@ -194,22 +199,29 @@ func TestInteractionTopicResolve(t *testing.T) {
 		t.Fatalf("outcome = %s, want allowed_once", res.Outcome)
 	}
 
-	evs := mustSince(t, svc, 1)
-	if len(evs) != 1 || evs[0].Seq != 2 || evs[0].Type != EventInteractionResolved {
-		t.Fatalf("events since 1 = %+v, want 1 resolved event at seq 2", evs)
+	evRes, ok := sub.Next(t.Context())
+	if !ok {
+		t.Fatal("expected resolved event")
 	}
-
-	var resPayload resolvedPayload
-	if jerr := json.Unmarshal(evs[0].Payload, &resPayload); jerr != nil {
-		t.Fatal(jerr)
-	}
-	if resPayload.RequestID != ticket.RequestID || resPayload.Outcome != OutcomeAllowedOnce {
-		t.Fatalf("resolved payload = %+v", resPayload)
-	}
+	assertResolvedEventPayload(t, evRes, ticket.RequestID, OutcomeAllowedOnce)
 
 	views, snapSeq := mustListPending(t, svc, string(KindCLI))
 	if snapSeq != 2 || len(views) != 0 {
-		t.Fatalf("ListPending = (%+v, %d), want 0 requests at seq 2", views, snapSeq)
+		t.Fatalf("ListPending after resolve = (%+v, %d), want empty at seq 2", views, snapSeq)
+	}
+}
+
+func assertResolvedEventPayload(t *testing.T, ev Event, wantReqID, wantOutcome string) {
+	t.Helper()
+	if ev.Seq != 2 || ev.Type != EventInteractionResolved {
+		t.Fatalf("event = %+v, want resolved event at seq 2", ev)
+	}
+	var resPayload resolvedPayload
+	if jerr := json.Unmarshal(ev.Payload, &resPayload); jerr != nil {
+		t.Fatal(jerr)
+	}
+	if resPayload.RequestID != wantReqID || resPayload.Outcome != wantOutcome {
+		t.Fatalf("resolved payload = %+v, want (%s, %s)", resPayload, wantReqID, wantOutcome)
 	}
 }
 

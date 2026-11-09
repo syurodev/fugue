@@ -81,6 +81,7 @@ func (o *Owner) claimByKind(receiptID string, kind Kind, expected *Binding) (*Re
 	}
 	receipt.Claimed = true
 	receipt.ClaimedAt = now
+	o.pruneResolvedLocked(now)
 	cp := *receipt
 	outcome := OutcomeAllowedOnce
 	if kind == KindQuestion {
@@ -134,15 +135,19 @@ func (o *Owner) InvalidateOperation(operationID string) (string, error) {
 	}
 	now := o.clock.Now().UTC()
 	var auditEv *AuditEvent
+	var res *Resolution
 	if ticket, ok := o.byOperation[operationID]; ok {
-		auditEv = o.cancelOperationTicketLocked(ticket, now)
+		auditEv, res = o.cancelOperationTicketLocked(ticket, now)
 	}
 	o.mu.Unlock()
 	o.emitAudit(auditEv)
+	if res != nil {
+		o.emitResolved(*res)
+	}
 	return invalidationID, nil
 }
 
-func (o *Owner) cancelOperationTicketLocked(ticket *Ticket, now time.Time) *AuditEvent {
+func (o *Owner) cancelOperationTicketLocked(ticket *Ticket, now time.Time) (*AuditEvent, *Resolution) {
 	delete(o.byOperation, ticket.OperationID)
 	if ticket.ReceiptID != "" {
 		if r, exists := o.receipts[ticket.ReceiptID]; exists && !r.Claimed {
@@ -150,13 +155,14 @@ func (o *Owner) cancelOperationTicketLocked(ticket *Ticket, now time.Time) *Audi
 		}
 	}
 	if ticket.Resolved {
-		return nil
+		return nil, nil
 	}
 	ticket.Resolved = true
 	ticket.ResolvedAt = now
 	ticket.Outcome = OutcomeCancelled
 	ev := o.newAuditEvent("cancelled", ticket)
-	return &ev
+	res := Resolution{RequestID: ticket.RequestID, Outcome: OutcomeCancelled}
+	return &ev, &res
 }
 
 // ResetSession drops all session grants, cancels all pending requests and
@@ -170,6 +176,7 @@ func (o *Owner) ResetSession(sessionID string) {
 		}
 	}
 	var cancelled []*AuditEvent
+	var cancelledRes []Resolution
 	for _, ticket := range o.byRequest {
 		if ticket.Binding.SessionID != sessionID {
 			continue
@@ -181,6 +188,7 @@ func (o *Owner) ResetSession(sessionID string) {
 			ticket.Outcome = OutcomeCancelled
 			ev := o.newAuditEvent("cancelled", ticket)
 			cancelled = append(cancelled, &ev)
+			cancelledRes = append(cancelledRes, Resolution{RequestID: ticket.RequestID, Outcome: OutcomeCancelled})
 		}
 	}
 	for id, r := range o.receipts {
@@ -191,6 +199,9 @@ func (o *Owner) ResetSession(sessionID string) {
 	o.mu.Unlock()
 	for _, ev := range cancelled {
 		o.emitAudit(ev)
+	}
+	for _, res := range cancelledRes {
+		o.emitResolved(res)
 	}
 }
 
@@ -212,6 +223,7 @@ func (o *Owner) SetVaultLocked(locked bool) {
 		}
 	}
 	var cancelled []*AuditEvent
+	var cancelledRes []Resolution
 	for _, ticket := range o.byRequest {
 		if !ticket.Resolved {
 			ticket.Resolved = true
@@ -219,11 +231,15 @@ func (o *Owner) SetVaultLocked(locked bool) {
 			ticket.Outcome = OutcomeCancelled
 			ev := o.newAuditEvent("vault_locked", ticket)
 			cancelled = append(cancelled, &ev)
+			cancelledRes = append(cancelledRes, Resolution{RequestID: ticket.RequestID, Outcome: OutcomeCancelled})
 		}
 	}
 	o.mu.Unlock()
 	for _, ev := range cancelled {
 		o.emitAudit(ev)
+	}
+	for _, res := range cancelledRes {
+		o.emitResolved(res)
 	}
 }
 
