@@ -738,3 +738,55 @@ func TestInteractionEnsurePreservesErrorTypes(t *testing.T) {
 		t.Fatalf("expected err to unwrap to *errcode.Error, got %T", err)
 	}
 }
+
+// TestInteractionListPendingRequestInReadGapIsNotLost races an Ensure into the
+// gap between ListPending's two reads. The client must still learn the new
+// request: from the views, or from the stream after the returned sequence.
+func TestInteractionListPendingRequestInReadGapIsNotLost(t *testing.T) {
+	t.Parallel()
+	svc, hub := newTestInteractionService(t, nil)
+
+	var racedID string
+	svc.betweenListReads = func() {
+		svc.betweenListReads = nil
+		racedID = ensureTestConfirm(t, svc, "op-gap", "raced into the read gap")
+	}
+
+	views, seq, err := svc.ListPending(t.Context(), string(KindCLI))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if racedID == "" {
+		t.Fatal("the read-gap hook did not run")
+	}
+	for _, v := range views {
+		if v.RequestID == racedID {
+			return
+		}
+	}
+
+	sub, err := hub.Subscribe(t.Context(), SubscribeParams{
+		Principal: string(KindCLI),
+		Topic:     TopicInteraction,
+		Cursor:    &EventCursor{Topic: TopicInteraction, Incarnation: testAppIncarnation, Sequence: seq},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+
+	// A cancelled context makes Next return only events already buffered.
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	ev, ok := sub.Next(ctx)
+	if !ok || ev.Type != EventInteractionRequested {
+		t.Fatalf("request %s is not in the views (seq %d) and its requested event is not replayed after seq", racedID, seq)
+	}
+	var got PendingInteractionView
+	if err := json.Unmarshal(ev.Payload, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.RequestID != racedID {
+		t.Fatalf("replayed request = %s, want %s", got.RequestID, racedID)
+	}
+}
