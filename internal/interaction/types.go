@@ -37,6 +37,28 @@ type Resolution struct {
 	Outcome   Outcome
 }
 
+// LifecycleEventKind describes the lifecycle transition of an interaction ticket.
+type LifecycleEventKind string
+
+// Lifecycle event kinds for interaction tickets.
+const (
+	EventRequested LifecycleEventKind = "requested"
+	EventResolved  LifecycleEventKind = "resolved"
+)
+
+// LifecycleEvent carries a transition event for an interaction ticket.
+// A requested event carries the cloned Ticket. A resolved event carries
+// the RequestID and Outcome (interaction §7, §8, I-E08).
+//
+// Lifecycle hooks MUST be non-blocking. Called with o.mu held; must only
+// call hub.Publish and take no other locks.
+type LifecycleEvent struct {
+	Kind      LifecycleEventKind
+	Ticket    *Ticket
+	RequestID string
+	Outcome   Outcome
+}
+
 // Option is one selectable choice offered by a KindSelect request, by a
 // question or by a relayed vendor request. ID and Label are shown verbatim;
 // Description is an optional longer explanation (ask-plan §4).

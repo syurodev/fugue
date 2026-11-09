@@ -2,55 +2,18 @@ package app
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"sync"
 
 	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 )
-
-// PendingInteractionView is the domain view of a pending request, carrying
-// the fields permitted by interaction §8 plus additive multi-question support.
-type PendingInteractionView struct {
-	RequestID       string                `json:"request_id"`
-	Incarnation     string                `json:"incarnation"`
-	SessionID       string                `json:"session_id"`
-	Tool            string                `json:"tool"`
-	Kind            string                `json:"kind"`
-	Risk            string                `json:"risk"`
-	EnvTag          string                `json:"env_tag"`
-	Summary         string                `json:"summary"`
-	OfferedOutcomes []string              `json:"offered_outcomes,omitempty"`
-	Options         []InteractionOption   `json:"options,omitempty"`
-	GrantScopeLabel string                `json:"grant_scope_label,omitempty"`
-	Questions       []InteractionQuestion `json:"questions,omitempty"`
-}
-
-// InteractionOption is an option offered to the user in a pending interaction.
-type InteractionOption struct {
-	ID          string `json:"id"`
-	Label       string `json:"label"`
-	Description string `json:"description,omitempty"`
-}
-
-// InteractionQuestion is one question within a question-kind interaction request.
-type InteractionQuestion struct {
-	QuestionID  string              `json:"question_id"`
-	Prompt      string              `json:"prompt"`
-	Options     []InteractionOption `json:"options,omitempty"`
-	MultiSelect bool                `json:"multi_select,omitempty"`
-	AllowText   bool                `json:"allow_text,omitempty"`
-}
-
-// InteractionAnswer is an answer to a question in an interaction request.
-type InteractionAnswer struct {
-	QuestionID string
-	OptionIDs  []string
-	Text       string
-}
 
 // Limit constants for interaction transport checks (interaction §9).
 const (
@@ -89,12 +52,16 @@ type AnswerInteractionResult struct {
 // InteractionService coordinates interaction requests, durable topic events
 // and deduplication for a host incarnation.
 type InteractionService struct {
-	owner *interaction.Owner
-	topic *interactionTopic
-	hub   *EventHub
-	dedup *commandDedupCache
-	clk   clock.Clock
-	inc   string
+	owner      *interaction.Owner
+	hub        *EventHub
+	dedup      *commandDedupCache
+	clk        clock.Clock
+	inc        string
+	wakeExpiry chan struct{}
+
+	taskMu sync.Mutex
+	task   *supervise.Task
+	cancel context.CancelFunc
 
 	cmdMu    sync.Mutex
 	inflight map[string]*inflightCmd
@@ -109,31 +76,74 @@ func NewInteractionService(owner *interaction.Owner, hub *EventHub, clk clock.Cl
 		return nil, errcode.New(errcode.InvalidArgument, "clock is required")
 	}
 
-	topic := newInteractionTopic(hub, owner.Pending)
+	s := &InteractionService{
+		owner:      owner,
+		hub:        hub,
+		dedup:      newCommandDedupCache(clk, defaultDedupCapacity, defaultDedupTTL),
+		clk:        clk,
+		inc:        owner.Incarnation(),
+		wakeExpiry: make(chan struct{}, 1),
+		inflight:   map[string]*inflightCmd{},
+	}
+
 	if hub != nil {
-		if err := hub.RegisterEphemeral(TopicInteraction, topic.snapshot, defaultEphemeralBufferCap); err != nil {
+		if err := hub.RegisterEphemeral(TopicInteraction, s.snapshot, defaultEphemeralBufferCap); err != nil {
 			return nil, err
 		}
 	}
 
-	s := &InteractionService{
-		owner:    owner,
-		topic:    topic,
-		hub:      hub,
-		dedup:    newCommandDedupCache(clk, defaultDedupCapacity, defaultDedupTTL),
-		clk:      clk,
-		inc:      owner.Incarnation(),
-		inflight: map[string]*inflightCmd{},
-	}
-	owner.SetOnResolved(s.handleResolution)
+	owner.SetOnLifecycle(s.handleLifecycle)
 	return s, nil
 }
 
-func (s *InteractionService) handleResolution(res interaction.Resolution) {
-	s.topic.mu.Lock()
-	defer s.topic.mu.Unlock()
-	if err := s.topic.publishResolvedLocked(res.RequestID, string(res.Outcome)); err != nil {
+func (s *InteractionService) handleLifecycle(ev interaction.LifecycleEvent) {
+	if s.hub != nil {
+		switch ev.Kind {
+		case interaction.EventRequested:
+			s.publishRequested(ev.Ticket)
+		case interaction.EventResolved:
+			s.publishResolved(ev.RequestID, ev.Outcome)
+		}
+	}
+	s.nudgeExpiry()
+}
+
+func (s *InteractionService) publishRequested(ticket *interaction.Ticket) {
+	view := viewFromTicket(ticket)
+	payload, err := json.Marshal(view)
+	if err != nil {
+		slog.Warn("marshal requested event failed", "request_id", view.RequestID, "outcome", "", "err", err)
 		return
+	}
+	if _, perr := s.hub.Publish(TopicInteraction, Event{
+		Type:    EventInteractionRequested,
+		Payload: payload,
+	}); perr != nil {
+		slog.Warn("publish requested event failed", "request_id", view.RequestID, "outcome", "", "err", perr)
+	}
+}
+
+func (s *InteractionService) publishResolved(requestID string, outcome interaction.Outcome) {
+	payload, err := json.Marshal(resolvedPayload{
+		RequestID: requestID,
+		Outcome:   string(outcome),
+	})
+	if err != nil {
+		slog.Warn("marshal resolved event failed", "request_id", requestID, "outcome", string(outcome), "err", err)
+		return
+	}
+	if _, perr := s.hub.Publish(TopicInteraction, Event{
+		Type:    EventInteractionResolved,
+		Payload: payload,
+	}); perr != nil {
+		slog.Warn("publish resolved event failed", "request_id", requestID, "outcome", string(outcome), "err", perr)
+	}
+}
+
+func (s *InteractionService) nudgeExpiry() {
+	select {
+	case s.wakeExpiry <- struct{}{}:
+	default:
 	}
 }
 
@@ -154,21 +164,33 @@ func (s *InteractionService) Ensure(spec *interaction.Spec) (*interaction.Ticket
 		return nil, errcode.New(errcode.InvalidArgument, "interaction grant scope label exceeds size limit")
 	}
 
-	ticket, created, err := s.owner.Ensure(spec)
+	ticket, _, err := s.owner.Ensure(spec)
 	if err != nil {
-		return nil, errors.Join(err)
-	}
-
-	if created && !ticket.Resolved {
-		s.topic.mu.Lock()
-		view := viewFromTicket(ticket)
-		perr := s.topic.publishRequestedLocked(&view)
-		s.topic.mu.Unlock()
-		if perr != nil {
-			return nil, perr
+		var coded *errcode.Error
+		if errors.As(err, &coded) {
+			return nil, errcode.Wrap(coded.Code(), coded.Message(), err)
 		}
+		return nil, errcode.Wrap(errcode.Internal, "interaction ensure", err)
 	}
 	return ticket, nil
+}
+
+func (s *InteractionService) snapshot(_ context.Context) ([]byte, error) {
+	views := s.currentPendingViews()
+	data, err := json.Marshal(views)
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "marshal interaction snapshot", err)
+	}
+	return data, nil
+}
+
+func (s *InteractionService) currentPendingViews() []PendingInteractionView {
+	tickets := s.owner.Pending()
+	views := make([]PendingInteractionView, 0, len(tickets))
+	for _, ticket := range tickets {
+		views = append(views, viewFromTicket(ticket))
+	}
+	return views
 }
 
 // ListPending returns the pending interaction views and the topic sequence.
@@ -177,11 +199,11 @@ func (s *InteractionService) ListPending(_ context.Context, principal string) ([
 	if !IsLocalPrincipal(principal) {
 		return nil, 0, errcode.New(errcode.PermissionDenied, "only local principals may list pending interactions")
 	}
-	s.topic.mu.Lock()
-	defer s.topic.mu.Unlock()
-
-	views := s.topic.currentViewsLocked()
-	seq := s.hub.TopicSequence(TopicInteraction)
+	views := s.currentPendingViews()
+	var seq EventSeq
+	if s.hub != nil {
+		seq = s.hub.TopicSequence(TopicInteraction)
+	}
 	return views, seq, nil
 }
 
@@ -392,66 +414,5 @@ func mapOwnerError(err error) error {
 		return errcode.New(errcode.InteractionTextTooLarge, "interaction text exceeds size limit")
 	default:
 		return err
-	}
-}
-
-func hasOption(options []interaction.Option, id string) bool {
-	return slices.ContainsFunc(options, func(opt interaction.Option) bool {
-		return opt.ID == id
-	})
-}
-
-func viewFromTicket(t *interaction.Ticket) PendingInteractionView {
-	summary := t.Summary
-	if summary == "" && len(t.Questions) > 0 {
-		summary = t.Questions[0].Question
-	}
-
-	rawOptions := t.Options
-	if len(rawOptions) == 0 && len(t.Questions) > 0 {
-		rawOptions = t.Questions[0].Options
-	}
-
-	options := make([]InteractionOption, 0, len(rawOptions))
-	for _, o := range rawOptions {
-		options = append(options, InteractionOption{
-			ID:          o.ID,
-			Label:       o.Label,
-			Description: o.Description,
-		})
-	}
-
-	questions := make([]InteractionQuestion, 0, len(t.Questions))
-	for _, q := range t.Questions {
-		qOpts := make([]InteractionOption, 0, len(q.Options))
-		for _, o := range q.Options {
-			qOpts = append(qOpts, InteractionOption{
-				ID:          o.ID,
-				Label:       o.Label,
-				Description: o.Description,
-			})
-		}
-		questions = append(questions, InteractionQuestion{
-			QuestionID:  q.ID,
-			Prompt:      q.Question,
-			Options:     qOpts,
-			MultiSelect: q.MultiSelect,
-			AllowText:   true,
-		})
-	}
-
-	return PendingInteractionView{
-		RequestID:       t.RequestID,
-		Incarnation:     t.Incarnation,
-		SessionID:       t.Binding.SessionID,
-		Tool:            t.Binding.ToolName,
-		Kind:            string(t.Kind),
-		Risk:            t.Risk,
-		EnvTag:          t.Binding.EnvTag,
-		Summary:         summary,
-		OfferedOutcomes: offeredOutcomesFor(t),
-		Options:         options,
-		GrantScopeLabel: t.GrantScopeLabel,
-		Questions:       questions,
 	}
 }

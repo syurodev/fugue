@@ -58,7 +58,7 @@ type Owner struct {
 	headless    bool
 	vaultCheck  func() bool
 	audit       func(AuditEvent)
-	onResolved  func(Resolution)
+	onLifecycle func(LifecycleEvent)
 	incarnation string
 
 	mu          sync.Mutex
@@ -88,7 +88,7 @@ func NewOwner(cfg Config) (*Owner, error) {
 		headless:    cfg.Headless,
 		vaultCheck:  cfg.VaultLocked,
 		audit:       cfg.Audit,
-		onResolved:  nil,
+		onLifecycle: nil,
 		incarnation: incarnation,
 		mu:          sync.Mutex{},
 		vaultLocked: false,
@@ -99,16 +99,18 @@ func NewOwner(cfg Config) (*Owner, error) {
 	}, nil
 }
 
-// SetOnResolved configures or replaces the callback notified on every ticket resolution.
-func (o *Owner) SetOnResolved(fn func(Resolution)) {
+// SetOnLifecycle configures or replaces the callback notified on every ticket lifecycle transition.
+// The hook is called with o.mu held and MUST be non-blocking: it may only call hub.Publish
+// and must take no other locks (interaction §8).
+func (o *Owner) SetOnLifecycle(fn func(LifecycleEvent)) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	o.onResolved = fn
+	o.onLifecycle = fn
 }
 
-func (o *Owner) emitResolved(res Resolution) {
-	if o.onResolved != nil && res.RequestID != "" {
-		o.onResolved(res)
+func (o *Owner) emitLifecycleLocked(ev LifecycleEvent) {
+	if o.onLifecycle != nil {
+		o.onLifecycle(ev)
 	}
 }
 
@@ -146,6 +148,7 @@ func (o *Owner) Ensure(spec *Spec) (*Ticket, bool, error) {
 	o.byOperation[ticket.OperationID] = ticket
 	o.byRequest[ticket.RequestID] = ticket
 	cp := cloneTicket(ticket)
+	o.emitLifecycleLocked(LifecycleEvent{Kind: EventRequested, Ticket: cp})
 	openedEv := o.newAuditEvent("opened", ticket)
 	respond := o.responder != nil
 	o.mu.Unlock()
@@ -163,13 +166,10 @@ func (o *Owner) readBackLocked(existing *Ticket, spec *Spec, now time.Time) (*Ti
 		o.mu.Unlock()
 		return nil, false, errcode.New(errcode.AlreadyExists, "operation ID is already bound to a different request")
 	}
-	auditEv, res := o.expireIfDueLocked(existing, now)
+	auditEv := o.expireIfDueLocked(existing, now)
 	cp := cloneTicket(existing)
 	o.mu.Unlock()
 	o.emitAudit(auditEv)
-	if res != nil {
-		o.emitResolved(*res)
-	}
 	return cp, false, nil
 }
 
@@ -205,11 +205,15 @@ func (o *Owner) finishImmediateLocked(ticket *Ticket, auditEv *AuditEvent, res *
 	o.byOperation[ticket.OperationID] = ticket
 	o.byRequest[ticket.RequestID] = ticket
 	cp := cloneTicket(ticket)
+	if res != nil {
+		o.emitLifecycleLocked(LifecycleEvent{
+			Kind:      EventResolved,
+			RequestID: res.RequestID,
+			Outcome:   res.Outcome,
+		})
+	}
 	o.mu.Unlock()
 	o.emitAudit(auditEv)
-	if res != nil {
-		o.emitResolved(*res)
-	}
 	return cp, true, nil
 }
 
@@ -221,9 +225,13 @@ func (o *Owner) promptAndAudit(ticket, cp *Ticket, openedEv *AuditEvent, now tim
 		ticket.Outcome = OutcomeUnavailable
 		failedEv := o.newAuditEvent("prompt_failed", ticket)
 		res := Resolution{RequestID: ticket.RequestID, Outcome: OutcomeUnavailable}
+		o.emitLifecycleLocked(LifecycleEvent{
+			Kind:      EventResolved,
+			RequestID: res.RequestID,
+			Outcome:   res.Outcome,
+		})
 		o.mu.Unlock()
 		o.emitAudit(&failedEv)
-		o.emitResolved(res)
 		return nil, false, errcode.Wrap(errcode.Unavailable, "prompt responder failed", err)
 	}
 	o.emitAudit(openedEv)
@@ -273,13 +281,10 @@ func (o *Owner) LookupOperation(operationID string) (*Ticket, error) {
 		o.mu.Unlock()
 		return nil, ErrOperationNotFound
 	}
-	ev, res := o.expireIfDueLocked(ticket, o.clock.Now().UTC())
+	ev := o.expireIfDueLocked(ticket, o.clock.Now().UTC())
 	cp := cloneTicket(ticket)
 	o.mu.Unlock()
 	o.emitAudit(ev)
-	if res != nil {
-		o.emitResolved(*res)
-	}
 	return cp, nil
 }
 
@@ -291,13 +296,10 @@ func (o *Owner) LookupRequest(requestID string) (*Ticket, error) {
 		o.mu.Unlock()
 		return nil, ErrRequestNotFound
 	}
-	ev, res := o.expireIfDueLocked(ticket, o.clock.Now().UTC())
+	ev := o.expireIfDueLocked(ticket, o.clock.Now().UTC())
 	cp := cloneTicket(ticket)
 	o.mu.Unlock()
 	o.emitAudit(ev)
-	if res != nil {
-		o.emitResolved(*res)
-	}
 	return cp, nil
 }
 
@@ -323,6 +325,29 @@ func (o *Owner) Pending() []*Ticket {
 	return out
 }
 
+// EarliestPendingExpiry returns the earliest non-zero ExpiresAt among all
+// currently pending tickets, and whether any pending ticket has an expiry.
+func (o *Owner) EarliestPendingExpiry() (time.Time, bool) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	now := o.clock.Now().UTC()
+	var earliest time.Time
+	hasExpiry := false
+	for _, ticket := range o.byRequest {
+		if ticket.Resolved || ticket.ExpiresAt.IsZero() {
+			continue
+		}
+		if !now.Before(ticket.ExpiresAt) {
+			return ticket.ExpiresAt, true
+		}
+		if !hasExpiry || ticket.ExpiresAt.Before(earliest) {
+			earliest = ticket.ExpiresAt
+			hasExpiry = true
+		}
+	}
+	return earliest, hasExpiry
+}
+
 // Answer records the human decision for a pending request. A request may be
 // answered at most once, requests from a previous incarnation or invalidated
 // by vault lock are rejected, and the first of several concurrent answers
@@ -342,12 +367,9 @@ func (o *Owner) Answer(decision *Decision) (*Ticket, error) {
 	}
 	now := o.clock.Now().UTC()
 	o.pruneResolvedLocked(now)
-	if ev, res := o.expireIfDueLocked(ticket, now); ev != nil {
+	if ev := o.expireIfDueLocked(ticket, now); ev != nil {
 		o.mu.Unlock()
 		o.emitAudit(ev)
-		if res != nil {
-			o.emitResolved(*res)
-		}
 		return nil, errcode.New(errcode.DeadlineExceeded, "interaction request has expired")
 	}
 	if ticket.Resolved {
@@ -364,10 +386,13 @@ func (o *Owner) Answer(decision *Decision) (*Ticket, error) {
 	}
 	cp := cloneTicket(ticket)
 	ev := o.newAuditEvent("answered", ticket)
-	res := Resolution{RequestID: ticket.RequestID, Outcome: ticket.Outcome}
+	o.emitLifecycleLocked(LifecycleEvent{
+		Kind:      EventResolved,
+		RequestID: ticket.RequestID,
+		Outcome:   ticket.Outcome,
+	})
 	o.mu.Unlock()
 	o.emitAudit(&ev)
-	o.emitResolved(res)
 	return cp, nil
 }
 
@@ -408,29 +433,31 @@ func (o *Owner) TakeRelayed(operationID string) (*Ticket, error) {
 	return cp, nil
 }
 
-func (o *Owner) expireIfDueLocked(ticket *Ticket, now time.Time) (*AuditEvent, *Resolution) {
+func (o *Owner) expireIfDueLocked(ticket *Ticket, now time.Time) *AuditEvent {
 	if ticket.Resolved || ticket.ExpiresAt.IsZero() || now.Before(ticket.ExpiresAt) {
-		return nil, nil
+		return nil
 	}
 	ticket.Resolved = true
 	ticket.ResolvedAt = now
 	ticket.Outcome = OutcomeExpired
 	ev := o.newAuditEvent("expired", ticket)
-	res := Resolution{RequestID: ticket.RequestID, Outcome: OutcomeExpired}
-	return &ev, &res
+	o.emitLifecycleLocked(LifecycleEvent{
+		Kind:      EventResolved,
+		RequestID: ticket.RequestID,
+		Outcome:   OutcomeExpired,
+	})
+	return &ev
 }
 
-// ExpireExpired resolves any overdue pending tickets and notifies OnResolved.
+// ExpireExpired resolves any overdue pending tickets and emits resolved lifecycle events.
 func (o *Owner) ExpireExpired() []*Ticket {
 	o.mu.Lock()
 	now := o.clock.Now().UTC()
 	var expired []*Ticket
 	var auditEvents []*AuditEvent
-	var resolutions []Resolution
 	for _, ticket := range o.byRequest {
-		if ev, res := o.expireIfDueLocked(ticket, now); ev != nil {
+		if ev := o.expireIfDueLocked(ticket, now); ev != nil {
 			auditEvents = append(auditEvents, ev)
-			resolutions = append(resolutions, *res)
 			expired = append(expired, cloneTicket(ticket))
 		}
 	}
@@ -438,9 +465,6 @@ func (o *Owner) ExpireExpired() []*Ticket {
 	o.mu.Unlock()
 	for _, ev := range auditEvents {
 		o.emitAudit(ev)
-	}
-	for _, res := range resolutions {
-		o.emitResolved(res)
 	}
 	return expired
 }

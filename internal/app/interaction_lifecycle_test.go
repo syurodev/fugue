@@ -20,6 +20,8 @@ import (
 const (
 	lifecycleSessionID = "sess-1"
 	lifecycleEnvDev    = "dev"
+	lifecycleRiskTest  = "test"
+	lifecycleToolTest  = "tester"
 )
 
 func runMemoryCycle(ctx context.Context, svc *InteractionService, i uint64) error {
@@ -27,15 +29,15 @@ func runMemoryCycle(ctx context.Context, svc *InteractionService, i uint64) erro
 	ticket, eerr := svc.Ensure(&interaction.Spec{
 		OperationID: opID,
 		Kind:        interaction.KindConfirm,
-		Risk:        "test",
+		Risk:        lifecycleRiskTest,
 		Summary:     "cycle test summary",
 		Offers:      []interaction.Outcome{interaction.OutcomeAllowedOnce},
 		Binding: interaction.Binding{
 			SessionID:       lifecycleSessionID,
-			InvocationID:    "inv-1",
-			AttemptID:       "att-1",
+			InvocationID:    testInvID,
+			AttemptID:       testAttID,
 			CheckGeneration: i + 1,
-			ToolName:        "tester",
+			ToolName:        lifecycleToolTest,
 			EnvTag:          lifecycleEnvDev,
 		},
 	})

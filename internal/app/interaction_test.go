@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -44,6 +45,12 @@ func newTestInteractionService(t *testing.T, clk clock.Clock) (*InteractionServi
 	if err != nil {
 		t.Fatal(err)
 	}
+	task := svc.Start(t.Context())
+	t.Cleanup(func() {
+		if werr := task.Wait(); werr != nil && !errors.Is(werr, context.Canceled) {
+			t.Errorf("interaction service task wait: %v", werr)
+		}
+	})
 	return svc, hub
 }
 
@@ -711,5 +718,23 @@ func TestHostRuntimeInteractionMethods(t *testing.T) {
 	}
 	if len(views) != 0 {
 		t.Fatalf("views = %d, want 0", len(views))
+	}
+}
+
+func TestInteractionEnsurePreservesErrorTypes(t *testing.T) {
+	t.Parallel()
+	svc, _ := newTestInteractionService(t, nil)
+
+	_, err := svc.Ensure(&interaction.Spec{})
+	if err == nil {
+		t.Fatal("expected error on empty spec")
+	}
+	if errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("code = %v, want %v", errcode.CodeOf(err), errcode.InvalidArgument)
+	}
+
+	var coded *errcode.Error
+	if !errors.As(err, &coded) {
+		t.Fatalf("expected err to unwrap to *errcode.Error, got %T", err)
 	}
 }

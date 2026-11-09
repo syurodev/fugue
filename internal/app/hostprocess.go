@@ -60,6 +60,9 @@ func StartHost(ctx context.Context, deps *HostDeps) (*HostProcess, error) {
 	}
 	hp.rt.drain = hp.runDrain
 	hp.rt.startGraceLoop()
+	if hp.rt.interactions != nil {
+		hp.rt.interactions.Start(base)
+	}
 	return hp, nil
 }
 
@@ -150,6 +153,9 @@ func (hp *HostProcess) Close() error {
 	hp.closeOnce.Do(func() {
 		hp.cancel()
 		hp.closeErr = errors.Join(hp.closeErr, hp.waitTasks())
+		if hp.rt.interactions != nil {
+			hp.closeErr = errors.Join(hp.closeErr, hp.rt.interactions.Close())
+		}
 		if !hp.storeClosed.Load() {
 			if err := hp.store.Close(); err != nil {
 				hp.closeErr = errors.Join(hp.closeErr, err)
