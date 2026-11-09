@@ -36,6 +36,7 @@ func buildFugue(t *testing.T) string {
 type testHost struct {
 	cmd     *exec.Cmd
 	dataDir string
+	runtime string
 }
 
 // startServe runs `fugue serve` on a fresh data directory with short runtime
@@ -52,6 +53,20 @@ func startServe(t *testing.T, ctx context.Context, bin string) *testHost {
 			t.Fatal(err)
 		}
 	}
+	return serveIn(t, ctx, bin, dataDir, runtime)
+}
+
+// restartServe starts a new `fugue serve` on the stopped host's data and
+// runtime directories: the manager watches that data directory, so the
+// restarted host must come back on it, as it does for the app.
+func (h *testHost) restartServe(t *testing.T, ctx context.Context, bin string) *testHost {
+	t.Helper()
+	return serveIn(t, ctx, bin, h.dataDir, h.runtime)
+}
+
+// serveIn runs `fugue serve` on existing data and runtime directories.
+func serveIn(t *testing.T, ctx context.Context, bin, dataDir, runtime string) *testHost {
+	t.Helper()
 	cmd := exec.CommandContext(ctx, bin, "serve")
 	cmd.Env = append(os.Environ(),
 		"SYNX_FUGUE_DATA_DIR="+dataDir,
@@ -72,7 +87,7 @@ func startServe(t *testing.T, ctx context.Context, bin string) *testHost {
 			return
 		}
 	})
-	return &testHost{cmd: cmd, dataDir: dataDir}
+	return &testHost{cmd: cmd, dataDir: dataDir, runtime: runtime}
 }
 
 // stopServe drains the host with SIGTERM and waits for the exit, bounded by
@@ -233,7 +248,7 @@ func reconnectAfterRestart(t *testing.T, ctx context.Context, m *Manager, clock 
 	t.Helper()
 	host.stopServe(t, ctx)
 	waitForState(t, ctx, m, clock, upd, StateDisconnected)
-	host2 := startServe(t, ctx, bin)
+	host2 := host.restartServe(t, ctx, bin)
 	waitForState(t, ctx, m, clock, upd, StateConnected)
 	snap2Upd, snap2Next := upd.find(t, ctx, upd.offset()-1, isSnapshot("host"))
 	if snap2Upd.Snapshot.Incarnation == firstIncarnation {

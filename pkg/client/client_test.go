@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,13 +65,25 @@ func closeQuietly(c closer) {
 // shortDir creates a directory whose path is short enough to bind a unix
 // socket, which t.TempDir() cannot promise on macOS: sun_path holds 104 bytes
 // and macOS test temp dirs already exceed 100 (the same helper internal/hostapi
-// needs). Each test gets a unique directory.
+// needs). Each call gets a unique directory.
 func shortDir(t *testing.T) string {
 	t.Helper()
+	// The test name and the process ID separate parallel tests and
+	// concurrent test binaries; the index separates the calls of one test,
+	// such as a host restarted on a new directory. Mkdir fails on an existing
+	// path, so a later call, a hash collision or a leftover from a crashed
+	// run moves on to the next index instead of sharing a directory.
 	sum := sha256.Sum256([]byte(t.Name()))
-	dir := filepath.Join(os.TempDir(), fmt.Sprintf("fg-%x-%d", sum[:4], os.Getpid()))
-	if err := os.Mkdir(dir, 0o700); err != nil {
-		t.Fatal(err)
+	var dir string
+	for index := 0; ; index++ {
+		dir = filepath.Join(os.TempDir(), fmt.Sprintf("fg-%x-%d-%d", sum[:4], os.Getpid(), index))
+		err := os.Mkdir(dir, 0o700)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, fs.ErrExist) || index == 100 {
+			t.Fatal(err)
+		}
 	}
 	t.Cleanup(func() { removeQuietly(dir) })
 	return dir
