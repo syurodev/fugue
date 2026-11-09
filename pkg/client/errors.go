@@ -9,6 +9,12 @@ import (
 // the host already showed on the wire: no internal cause and no secret ever
 // reaches this package's errors.
 var (
+	// ErrBackgroundDisabled reports that background mode is disabled.
+	ErrBackgroundDisabled = errors.New("background mode disabled")
+	// ErrBackgroundOwned reports another process owns the background lease.
+	ErrBackgroundOwned = errors.New("background lease already owned")
+	// ErrUntrustedHost means discovery or its peer failed an ownership or permissions check.
+	ErrUntrustedHost = errors.New("untrusted host discovery or peer")
 	// ErrHostNotRunning means no usable host answered: host.json is absent or
 	// nothing listens on the socket. The caller may start a host or retry
 	// (auto-start is F10.2b).

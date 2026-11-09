@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net"
 	"net/http"
 	"os"
@@ -166,13 +167,22 @@ func (h *fakeHandler) Subscribe(ctx context.Context, req *connect.Request[hostv1
 // and macOS test temp dirs already exceed 100.
 func shortDir(t *testing.T) string {
 	t.Helper()
+	// The test name and the process ID separate parallel tests and
+	// concurrent test binaries; the index separates the calls of one test,
+	// such as a host restarted on a new directory. Mkdir fails on an existing
+	// path, so a later call, a hash collision or a leftover from a crashed
+	// run moves on to the next index instead of sharing a directory.
 	sum := sha256.Sum256([]byte(t.Name()))
-	dir := filepath.Join(os.TempDir(), fmt.Sprintf("fugue-%x", sum[:4]))
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(dir, 0o700); err != nil {
-		t.Fatal(err)
+	var dir string
+	for index := 0; ; index++ {
+		dir = filepath.Join(os.TempDir(), fmt.Sprintf("fg-%x-%d-%d", sum[:4], os.Getpid(), index))
+		err := os.Mkdir(dir, 0o700)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, fs.ErrExist) || index == 100 {
+			t.Fatal(err)
+		}
 	}
 	t.Cleanup(func() { removeQuietly(dir) })
 	return dir
@@ -437,6 +447,7 @@ func TestHostconnReconnectsWithANewClientAndResumesFromTheCursor(t *testing.T) {
 	upd.waitFor(t, ctx, func(u Update) bool { return u.Event != nil && u.Event.Sequence == 11 })
 	upd.waitFor(t, ctx, func(u Update) bool { return u.State == StateDisconnected && u.Reason == "connection lost" })
 
+	clock.armedFor(t, ctx)
 	if durs := clock.durations(); len(durs) != 1 || durs[0] != backoffBase {
 		t.Fatalf("backoff durations = %v, want [%v]", durs, backoffBase)
 	}

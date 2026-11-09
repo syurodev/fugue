@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,18 +65,25 @@ func closeQuietly(c closer) {
 // shortDir creates a directory whose path is short enough to bind a unix
 // socket, which t.TempDir() cannot promise on macOS: sun_path holds 104 bytes
 // and macOS test temp dirs already exceed 100 (the same helper internal/hostapi
-// needs). The per-test name is hashed so parallel tests never share a dir.
+// needs). Each call gets a unique directory.
 func shortDir(t *testing.T) string {
 	t.Helper()
+	// The test name and the process ID separate parallel tests and
+	// concurrent test binaries; the index separates the calls of one test,
+	// such as a host restarted on a new directory. Mkdir fails on an existing
+	// path, so a later call, a hash collision or a leftover from a crashed
+	// run moves on to the next index instead of sharing a directory.
 	sum := sha256.Sum256([]byte(t.Name()))
-	dir := filepath.Join(os.TempDir(), fmt.Sprintf("fugue-%x", sum[:4]))
-	// A previous run's leftovers (a killed test leaves sockets behind) must
-	// not break this one: start empty.
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(dir, 0o700); err != nil {
-		t.Fatal(err)
+	var dir string
+	for index := 0; ; index++ {
+		dir = filepath.Join(os.TempDir(), fmt.Sprintf("fg-%x-%d-%d", sum[:4], os.Getpid(), index))
+		err := os.Mkdir(dir, 0o700)
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, fs.ErrExist) || index == 100 {
+			t.Fatal(err)
+		}
 	}
 	t.Cleanup(func() { removeQuietly(dir) })
 	return dir
@@ -544,5 +552,51 @@ func TestHostStatusCarriesTheHostIdentity(t *testing.T) {
 	plainClient := dialApp(t, plainSocket)
 	if _, err := plainClient.HostStatus(t.Context()); err == nil {
 		t.Error("a host that rejects the status read succeeded anyway")
+	}
+}
+
+func TestHostStatusReportsClientCounts(t *testing.T) {
+	t.Parallel()
+	h := &fakeHandler{status: func(context.Context, *connect.Request[hostv1.HostStatusRequest]) (*connect.Response[hostv1.HostStatusResponse], error) {
+		return connect.NewResponse(&hostv1.HostStatusResponse{Clients: &hostv1.ClientCounts{App: 1, Cli: 2, Total: 3}}), nil
+	}}
+	c := dialApp(t, serveHost(t, h))
+	status, err := c.HostStatus(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Clients.App != 1 || status.Clients.CLI != 2 || status.Clients.Total != 3 {
+		t.Fatalf("client counts = %+v", status.Clients)
+	}
+}
+
+type shutdownHandler struct {
+	fakeHandler
+	commands chan *hostv1.ShutdownRequest
+}
+
+func (h *shutdownHandler) Shutdown(_ context.Context, req *connect.Request[hostv1.ShutdownRequest]) (*connect.Response[hostv1.ShutdownResponse], error) {
+	h.commands <- req.Msg
+	return connect.NewResponse(&hostv1.ShutdownResponse{}), nil
+}
+
+func TestShutdownUsesHostAPI(t *testing.T) {
+	t.Parallel()
+	h := &shutdownHandler{commands: make(chan *hostv1.ShutdownRequest, 1)}
+	c := dialApp(t, serveHost(t, h))
+	if err := c.Shutdown(t.Context(), "upgrade-1"); err != nil {
+		t.Fatal(err)
+	}
+	cmd := <-h.commands
+	if cmd.GetCommandId() != "upgrade-1" || cmd.GetForce() {
+		t.Fatalf("unexpected shutdown request: %+v", cmd)
+	}
+}
+
+func TestShutdownReportsHostRejection(t *testing.T) {
+	t.Parallel()
+	c := dialApp(t, serveHost(t, &fakeHandler{}))
+	if err := c.Shutdown(t.Context(), "upgrade-rejected"); err == nil {
+		t.Fatal("host rejection was ignored")
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/syurodev/fugue/internal/app"
 	"github.com/syurodev/fugue/internal/config"
@@ -28,6 +29,7 @@ const (
 
 // serveOpts are the seams of a serve run the tests inject.
 type serveOpts struct {
+	idleGrace time.Duration
 	// ready, when not nil, is closed once the signal handlers are installed
 	// and the host serves the socket.
 	ready chan<- struct{}
@@ -44,8 +46,8 @@ type serveOpts struct {
 // signal arrives, then returns the exit code (cli §5.2): SIGINT 130, SIGTERM
 // and explicit cancellation 0, a failed startup 1. Startup failures are
 // logged; the exit code is the caller's outcome.
-func RunServe(ctx context.Context, out io.Writer, cfg config.Config, version string) int {
-	code, err := serve(ctx, out, cfg, version, serveOpts{})
+func RunServe(ctx context.Context, out io.Writer, cfg config.Config, version string, idleGrace time.Duration) int {
+	code, err := serve(ctx, out, cfg, version, serveOpts{idleGrace: idleGrace})
 	if err != nil {
 		slog.Error("fugue serve stopped", "err", err)
 	}
@@ -88,9 +90,8 @@ func serve(ctx context.Context, out io.Writer, cfg config.Config, version string
 			HostVersion: version,
 			// F5.1 serves the one published Host API version.
 			APIVersions: []string{"v1"},
-			// Foreground serve never self-exits (Q-25 A); the drain waits
-			// unbounded until the design names a deadline.
-			IdleGrace:    0,
+			// Foreground serve defaults to no idle shutdown (Q-25).
+			IdleGrace:    opts.idleGrace,
 			DrainTimeout: 0,
 		},
 		Clock:     clock.Real{},
@@ -102,6 +103,9 @@ func serve(ctx context.Context, out io.Writer, cfg config.Config, version string
 	}
 	if err := srv.Start(ctx, hp.Runtime()); err != nil {
 		return exitFailure, errors.Join(startupErr(err, "serve the host api"), teardownHost(hp, cfg.DataDir, sock))
+	}
+	if opts.idleGrace > 0 {
+		hp.Runtime().ArmInitialIdleGrace(ctx)
 	}
 	if opts.ready != nil {
 		close(opts.ready)
@@ -120,6 +124,11 @@ func runUntilStopped(ctx context.Context, hp *app.HostProcess, sigs <-chan os.Si
 	var reason string
 	var code int
 	select {
+	case <-hp.DrainDone():
+		if err := hp.Close(); err != nil {
+			slog.Error("close the fugue host after drain", "err", err)
+		}
+		return exitOK
 	case sig := <-sigs:
 		reason, code = exitForSignal(sig)
 	case <-ctx.Done():

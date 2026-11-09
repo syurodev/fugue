@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 
 	"github.com/syurodev/fugue/pkg/client"
@@ -38,6 +39,10 @@ type Config struct {
 	DataDir string
 	// Params are the Hello identity; the app dials with KindApp (DA-01).
 	Params client.Params
+	// AutoStart launches a local host when discovery is absent.
+	AutoStart bool
+	// ExecutablePath is a test seam; empty resolves the current app executable.
+	ExecutablePath string
 	// Topics are the event topics to stream, one stream goroutine each.
 	Topics []string
 	// Updates receives state changes and topic deliveries. It is the
@@ -63,6 +68,7 @@ type Manager struct {
 	wg     sync.WaitGroup
 
 	failures chan streamFailure
+	children launchedChildren
 
 	mu      sync.Mutex
 	state   State
@@ -198,24 +204,26 @@ func (m *Manager) run(ctx context.Context) {
 		conn, err := m.dial(ctx)
 		switch {
 		case err == nil:
-			m.mu.Lock()
-			m.conn = conn
-			m.mu.Unlock()
-			m.setState(ctx, StateConnected, "")
-			attempt = 0
-			m.runStreams(ctx, conn)
-			if ctx.Err() != nil {
-				conn.Close()
+			if !m.connected(ctx, conn) {
 				return
 			}
-			conn.Close()
-			m.setState(ctx, StateDisconnected, "connection lost")
+			attempt = 0
 		case isVersionMismatch(err):
 			m.setState(ctx, StateIncompatible, err.Error())
 			return
+		case errors.Is(err, ErrStartupTimeout):
+			m.setState(ctx, StateDisconnected, err.Error())
+			return
 		case errors.Is(err, client.ErrHostNotRunning):
 			m.setState(ctx, StateDisconnected, "host not running")
+		case isUntrusted(err):
+			// An unsafe executable or an untrusted discovery file or peer
+			// does not heal by retrying; the status bar keeps the reason.
+			m.setState(ctx, StateDisconnected, err.Error())
+			return
 		default:
+			// A failed Hello or a refused dial can be transient (a host
+			// draining or restarting): back off and try again.
 			m.setState(ctx, StateDisconnected, "connection failed")
 		}
 		attempt++
@@ -225,13 +233,80 @@ func (m *Manager) run(ctx context.Context) {
 	}
 }
 
+func (m *Manager) connected(ctx context.Context, conn *client.Client) bool {
+	defer conn.Close()
+	if m.cfg.AutoStart {
+		status, err := m.hostStatus(ctx, conn)
+		if err != nil {
+			// A stalled or failed status read is retried like a failed dial;
+			// only an incompatible version below freezes the manager.
+			m.setState(ctx, StateDisconnected, "host status unavailable")
+			return ctx.Err() == nil
+		}
+		if reason := versionAdvice(m.cfg.Params.Version, status.HostVersion, status.Clients); reason != "" {
+			m.setState(ctx, StateIncompatible, reason)
+			return false
+		}
+	}
+	m.mu.Lock()
+	m.conn = conn
+	m.mu.Unlock()
+	m.setState(ctx, StateConnected, "")
+	m.runStreams(ctx, conn)
+	if ctx.Err() != nil {
+		return false
+	}
+	m.setState(ctx, StateDisconnected, "connection lost")
+	return true
+}
+
 // dial reads the host's discovery file and says Hello on its socket.
 func (m *Manager) dial(ctx context.Context) (*client.Client, error) {
-	hf, err := client.ReadHostFile(m.cfg.DataDir)
+	if !m.cfg.AutoStart {
+		return m.dialOnce(ctx, false)
+	}
+	launched := false
+	return waitForHost(ctx, m.clock(), func(callCtx context.Context) (*client.Client, error) {
+		conn, err := m.dialOnce(callCtx, true)
+		if !errors.Is(err, client.ErrHostNotRunning) || launched {
+			return conn, err
+		}
+		path := m.cfg.ExecutablePath
+		if path == "" {
+			path, err = os.Executable()
+			if err != nil {
+				return nil, fmt.Errorf("resolve app executable: %w", err)
+			}
+		}
+		children, launchErr := launchDetached(callCtx, path, m.cfg.DataDir, os.Environ())
+		if launchErr != nil {
+			return nil, launchErr
+		}
+		m.mu.Lock()
+		m.children = children
+		m.mu.Unlock()
+		launched = true
+		return nil, client.ErrHostNotRunning
+	})
+}
+
+func (m *Manager) dialOnce(ctx context.Context, trusted bool) (*client.Client, error) {
+	var hf client.HostFile
+	var err error
+	if trusted {
+		hf, err = client.ReadTrustedHostFile(m.cfg.DataDir)
+	} else {
+		hf, err = client.ReadHostFile(m.cfg.DataDir)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("find the host: %w", err)
 	}
-	conn, err := client.Dial(ctx, hf.SocketPath, m.cfg.Params)
+	var conn *client.Client
+	if trusted {
+		conn, err = client.DialTrusted(ctx, hf.SocketPath, m.cfg.Params)
+	} else {
+		conn, err = client.Dial(ctx, hf.SocketPath, m.cfg.Params)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("dial the host: %w", err)
 	}

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -90,4 +91,47 @@ func DataDir(lookup func(key string) (string, bool), userConfigDir func() (strin
 		return "", fmt.Errorf("no user configuration directory; set %s: %w", EnvDataDir, err)
 	}
 	return filepath.Join(base, dataDirName), nil
+}
+
+// ReadTrustedHostFile reads discovery only from a private user-owned directory and file.
+func ReadTrustedHostFile(dataDir string) (HostFile, error) {
+	f, err := openTrustedDiscovery(dataDir)
+	if err != nil {
+		return HostFile{}, err
+	}
+	defer closeBestEffort(f)
+	data, err := io.ReadAll(io.LimitReader(f, 65537))
+	if err != nil {
+		return HostFile{}, fmt.Errorf("read host discovery: %w", err)
+	}
+	if len(data) > 65536 {
+		return HostFile{}, fmt.Errorf("host discovery too large: %w", ErrUntrustedHost)
+	}
+	var hf HostFile
+	if err = json.Unmarshal(data, &hf); err != nil {
+		return HostFile{}, fmt.Errorf("parse host discovery: %w", err)
+	}
+	if hf.SocketPath == "" {
+		return HostFile{}, fmt.Errorf("parse host discovery: %w", errNoSocketPath)
+	}
+	return hf, nil
+}
+
+func openTrustedDiscovery(dataDir string) (*os.File, error) {
+	f, err := openTrustedDiscoveryFile(dataDir)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("open host discovery: %w", ErrHostNotRunning)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("open host discovery: %w", err)
+	}
+	info, err := f.Stat()
+	if err == nil {
+		err = trustPrivate(info, false)
+	}
+	if err != nil {
+		closeBestEffort(f)
+		return nil, fmt.Errorf("verify host discovery: %w", err)
+	}
+	return f, nil
 }

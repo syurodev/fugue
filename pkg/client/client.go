@@ -79,12 +79,21 @@ type Client struct {
 // with ErrHostNotRunning so a caller can retry; a Hello without a common API
 // version fails with VersionMismatchError.
 func Dial(ctx context.Context, socket string, p Params) (*Client, error) {
+	return dial(ctx, socket, p, false)
+}
+
+// DialTrusted authenticates the local host before sending Hello.
+func DialTrusted(ctx context.Context, socket string, p Params) (*Client, error) {
+	return dial(ctx, socket, p, true)
+}
+
+func dial(ctx context.Context, socket string, p Params, trusted bool) (*Client, error) {
 	kind, err := p.Kind.proto()
 	if err != nil {
 		return nil, err
 	}
 	c := &Client{
-		hc:   &http.Client{Transport: newTransport(socket)},
+		hc:   &http.Client{Transport: newTransport(socket, trusted)},
 		base: "http://fugue",
 	}
 	svc := hostv1connect.NewHostServiceClient(c.hc, c.base)
@@ -124,13 +133,15 @@ func (c *Client) Subscribe(ctx context.Context, topic string, cursor *Cursor) (*
 	return &Stream{inner: inner}, nil
 }
 
-// HostStatus describes the running host the client is connected to (cli §7):
-// its versions, so the version handling of cli §2.3 can compare them with the
-// client's own, and the incarnation of this host process.
+// Counts reports the number of leased connections by kind.
+type Counts struct{ TUI, CLI, App, AppBackground, Total uint32 }
+
+// HostStatus describes the running host, its versions, incarnation and leases.
 type HostStatus struct {
 	HostVersion          string
 	SupportedAPIVersions []string
 	Incarnation          string
+	Clients              Counts
 }
 
 // HostStatus asks the host for its status. It fails on a connection the host
@@ -144,7 +155,21 @@ func (c *Client) HostStatus(ctx context.Context) (HostStatus, error) {
 		HostVersion:          res.Msg.GetHostVersion(),
 		SupportedAPIVersions: res.Msg.GetSupportedApiVersions(),
 		Incarnation:          res.Msg.GetIncarnationId(),
+		Clients: Counts{
+			TUI: res.Msg.GetClients().GetTui(), CLI: res.Msg.GetClients().GetCli(),
+			App: res.Msg.GetClients().GetApp(), AppBackground: res.Msg.GetClients().GetAppBackground(),
+			Total: res.Msg.GetClients().GetTotal(),
+		},
 	}, nil
+}
+
+// Shutdown asks the host to drain without forcing active work.
+func (c *Client) Shutdown(ctx context.Context, commandID string) error {
+	_, err := hostv1connect.NewHostServiceClient(c.hc, c.base).Shutdown(ctx, connect.NewRequest(&hostv1.ShutdownRequest{CommandId: commandID, Force: false}))
+	if err != nil {
+		return fmt.Errorf("request host shutdown: %w", err)
+	}
+	return nil
 }
 
 // Close releases the connection's idle transport state. It does not end open
@@ -161,7 +186,7 @@ func (c *Client) Close() {
 // ErrDisconnected without touching the socket, so a dropped lease surfaces as
 // "disconnected" and never as a silent new connection the host has not
 // helloed.
-func newTransport(socket string) *http.Transport {
+func newTransport(socket string, trusted bool) *http.Transport {
 	var protos http.Protocols
 	protos.SetUnencryptedHTTP2(true)
 	var dialMu sync.Mutex
@@ -173,7 +198,13 @@ func newTransport(socket string) *http.Transport {
 			if dialed {
 				return nil, fmt.Errorf("the Client owns one connection: %w", ErrDisconnected)
 			}
-			conn, err := (&net.Dialer{}).DialContext(ctx, "unix", socket)
+			var conn net.Conn
+			var err error
+			if trusted {
+				conn, err = dialTrustedSocket(ctx, socket)
+			} else {
+				conn, err = (&net.Dialer{}).DialContext(ctx, "unix", socket)
+			}
 			if err != nil {
 				return nil, fmt.Errorf("dial the host socket: %w", err)
 			}

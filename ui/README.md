@@ -35,8 +35,9 @@ Metal through cgo, no extra packages.
 - The core module never imports this module, and this module imports the core
   only through `pkg/client` and `pkg/pb` (arch tests `TestCoreNeverImportsUI`
   and `TestAppWritesOnlyThroughHostAPI` in the core's `internal/arch`).
-- The app opens no data-directory file, socket or SQLite path itself: the
-  host owns them and `pkg/client` is the only way in.
+- The app accesses host sockets through `pkg/client` and does not open the
+  database. That package also manages private discovery, background preference,
+  ownership lock and bounded startup log files for the app lifecycle.
 - Fonts are bundled: Inter and JetBrains Mono with their OFL-1.1 license
   files (`internal/fonts/data/`), leading the shaper collection with system
   fonts only as the fallback (desktop-app DA-04).
@@ -61,3 +62,17 @@ The `ui` workflow (`.github/workflows/ui.yml`) runs build, vet, lint and
 `go test -race` for this module on ubuntu-latest and macos-latest, triggered
 when a change touches `ui/`, `pkg/` or `proto/`. The core module's own gates
 never build this module.
+
+## Host lifecycle
+
+Place `fugue` beside the resolved `fugue-app` executable. The app starts it
+when no host is running, after checking ownership and permissions. Hosts
+started by the app use a ten-second idle grace; a manually started host does
+not exit merely because its clients disconnect.
+
+Run `fugue-app --background-on` to enable background mode and open a window.
+The preference is private to the data directory. One app process holds the
+background lease after its window closes; other app launches still open their
+own windows. Run `fugue-app --background-off` to disable the preference and
+release the background lease. Confirmation before closing while sessions are
+active is deferred until the host exposes activity counts.
