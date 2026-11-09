@@ -86,7 +86,7 @@ func TestPayloadTotalSurvivesRecovery(t *testing.T) {
 	assertPayloadTotal(t, reopened)
 }
 
-func TestAppend10000PayloadsWithinBudget(t *testing.T) {
+func TestAppend10000PayloadsKeepsTotalConsistent(t *testing.T) {
 	t.Parallel()
 	s, _, _ := protectedStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)

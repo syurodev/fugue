@@ -67,7 +67,7 @@ func (s *Store) writePayload(ctx context.Context, tx *sql.Tx, session, kind stri
 }
 
 func reservePayload(ctx context.Context, tx *sql.Tx, session string, size int64) error {
-	if size < 0 || size > sealing.MaxPayloadPlaintext {
+	if size < 0 {
 		return errcode.New(errcode.InvalidArgument, "payload limit exceeded")
 	}
 	// Subtraction keeps the guarded addition within the signed integer range.
