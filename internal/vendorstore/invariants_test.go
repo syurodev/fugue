@@ -74,6 +74,7 @@ func TestItemRevisionAndBackwardPagination(t *testing.T) {
 	}
 	_, err = s.Append(t.Context(), "s", 5, &Event{Type: TranscriptItemUpdated, Item: &Item{ID: "c", TurnID: "t", Kind: testAssistantKind, Revision: 1, Content: []byte("updated")}})
 	requireNoError(t, err)
+	assertPayloadTotal(t, s)
 	item, content, err := s.ReadItem(t.Context(), "s", "c")
 	requireNoError(t, err)
 	if item.Revision != 2 || item.ID != "c" || string(content) != "updated" {
@@ -110,17 +111,28 @@ func TestInvalidEnumsAndPolicyConflicts(t *testing.T) {
 	}
 }
 
+func assertPayloadTotal(t *testing.T, s *Store) {
+	t.Helper()
+	var total, actual int64
+	requireNoError(t, s.db.QueryRowContext(t.Context(), `SELECT payload_bytes, (SELECT COALESCE(SUM(size),0) FROM vendor_payloads WHERE session_id=vendor_sessions.session_id) FROM vendor_sessions WHERE session_id='s'`).Scan(&total, &actual))
+	if total != actual {
+		t.Fatalf("payload total = %d, want %d", total, actual)
+	}
+}
+
 func TestMidCommitFailureRollsBackPayloadEventAndProjection(t *testing.T) {
 	t.Parallel()
 	s, _, _ := protectedStore(t)
 	_, err := s.Append(t.Context(), "s", 1, &Event{Type: VendorTurnStarted, TurnID: "t"})
 	requireNoError(t, err)
+	assertPayloadTotal(t, s)
 	s.SetCommitFault(ErrUnavailable)
 	_, err = s.Append(t.Context(), "s", 2, &Event{Type: TranscriptItemRecorded, Item: &Item{ID: "x", TurnID: "t", Kind: testAssistantKind, Content: []byte("atomic marker")}})
 	if !errors.Is(err, ErrUnavailable) {
 		t.Fatalf("fault: %v", err)
 	}
 	s.SetCommitFault(nil)
+	assertPayloadTotal(t, s)
 	snap, err := s.Snapshot(t.Context(), "s")
 	requireNoError(t, err)
 	items, err := s.Transcript(t.Context(), "s", 0, 100)
