@@ -326,8 +326,8 @@ func TestNestedEventsAreCountedNotItemized(t *testing.T) {
 func TestSlashCommandListHidesTerminalCommandsInVendorOrder(t *testing.T) {
 	t.Parallel()
 	n := NewNormalizer("s")
-	feedLine(t, n, `{"type":"system","subtype":"init","claude_code_version":"2.1.319","session_id":"s","model":"m","permissionMode":"default","slash_commands":["model","superpowers:plan","doctor","compact","color"],"terminal_slash_commands":["doctor","color"]}`)
-	want := []string{"model", "superpowers:plan", "compact"}
+	feedLine(t, n, `{"type":"system","subtype":"init","claude_code_version":"2.1.319","session_id":"s","model":"m","permissionMode":"default","slash_commands":["model","example:plan","doctor","compact","color"],"terminal_slash_commands":["doctor","color"]}`)
+	want := []string{"model", "example:plan", "compact"}
 	if diff := cmp.Diff(want, n.SlashCommands()); diff != "" {
 		t.Errorf("slash list mismatch (-want +got):\n%s", diff)
 	}
