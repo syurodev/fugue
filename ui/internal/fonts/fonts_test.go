@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	giofont "gioui.org/font"
+
 	"go.uber.org/goleak"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/sfnt"
@@ -27,7 +29,7 @@ const vietnameseSample = "Vụn ẮẶẰẲẴẾỀỂỄỆỈỊỌỘỐỒ
 // notdef index 0.
 func TestBundledFacesRenderTheVietnameseSample(t *testing.T) {
 	t.Parallel()
-	for _, path := range []string{"data/Inter-Variable.ttf", "data/JetBrainsMono-Variable.ttf"} {
+	for _, path := range []string{"data/Inter-Regular.ttf", "data/JetBrainsMono-Regular.ttf"} {
 		f := parseFont(t, path)
 		buf := &sfnt.Buffer{}
 		for _, r := range vietnameseSample {
@@ -99,7 +101,7 @@ func TestShaperBuilds(t *testing.T) {
 // has real advance widths, so the faces shape rather than fall back silently.
 func TestAdvanceIsPositiveOnTheSample(t *testing.T) {
 	t.Parallel()
-	src, err := data.ReadFile("data/Inter-Variable.ttf")
+	src, err := data.ReadFile("data/Inter-Regular.ttf")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,5 +124,55 @@ func TestAdvanceIsPositiveOnTheSample(t *testing.T) {
 	}
 	if total <= 0 {
 		t.Errorf("sample advance = %v, want positive", total)
+	}
+}
+
+func TestBundledBoldOutlinesDifferFromRegular(t *testing.T) {
+	t.Parallel()
+	for _, family := range []string{interFamily, "JetBrainsMono"} {
+		regular := parseFont(t, "data/"+family+"-Regular.ttf")
+		bold := parseFont(t, "data/"+family+"-Bold.ttf")
+		width := func(f *sfnt.Font) fixed.Int26_6 {
+			var buf sfnt.Buffer
+			glyph, err := f.GlyphIndex(&buf, 'M')
+			if err != nil {
+				t.Fatal(err)
+			}
+			bounds, _, err := f.GlyphBounds(&buf, glyph, 16*64, font.HintingNone)
+			if err != nil {
+				t.Fatal(err)
+			}
+			return bounds.Max.X - bounds.Min.X
+		}
+		if width(regular) == width(bold) {
+			t.Fatalf("%s bold outline has regular width", family)
+		}
+	}
+}
+
+func TestCollectionRegistersStaticWeightsAndStyles(t *testing.T) {
+	t.Parallel()
+	faces, err := Collection()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[giofont.Font]bool{
+		{Typeface: interFamily, Weight: giofont.Normal, Style: giofont.Regular}:      false,
+		{Typeface: interFamily, Weight: giofont.Medium, Style: giofont.Regular}:      false,
+		{Typeface: interFamily, Weight: giofont.SemiBold, Style: giofont.Regular}:    false,
+		{Typeface: interFamily, Weight: giofont.Bold, Style: giofont.Regular}:        false,
+		{Typeface: interFamily, Weight: giofont.Normal, Style: giofont.Italic}:       false,
+		{Typeface: "JetBrains Mono", Weight: giofont.Normal, Style: giofont.Regular}: false,
+		{Typeface: "JetBrains Mono", Weight: giofont.Bold, Style: giofont.Regular}:   false,
+	}
+	for _, face := range faces {
+		if _, ok := want[face.Font]; ok {
+			want[face.Font] = true
+		}
+	}
+	for face, found := range want {
+		if !found {
+			t.Errorf("missing font %+v", face)
+		}
 	}
 }
