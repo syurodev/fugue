@@ -46,8 +46,11 @@ type Capability struct {
 }
 
 // Probe reports what a probe learned: the CLI version, whether it lies inside
-// the adapter's tested range (VR-08), the login state and the capability.
+// the adapter's tested range (VR-08), the login state and the capability. Path
+// is the absolute path of the binary the probe ran, so the session spawn runs
+// the very file that was probed instead of resolving the name again.
 type Probe struct {
+	Path           string
 	Version        string
 	VersionTested  bool
 	VersionWarning string
