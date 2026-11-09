@@ -1,0 +1,16 @@
+{
+ "sends": [
+  {
+   "beforeLine": 1,
+   "turn": "turn-1"
+  },
+  {
+   "beforeLine": 25,
+   "turn": "turn-2"
+  },
+  {
+   "beforeLine": 58,
+   "turn": "turn-3"
+  }
+ ]
+}
