@@ -21,6 +21,11 @@ Changing this file needs a review of what clients can rely on; hiding a code nee
 | `deadline_exceeded` | The operation took longer than its deadline. |
 | `unsupported_version` | The client and the host share no Host API version; the typed detail names the host's supported versions. |
 | `frame_too_large` | A stream frame exceeded the size limit. |
+| `interaction.not_found` | The interaction request does not exist or is no longer available. |
+| `interaction.already_answered` | The interaction request has already been answered. |
+| `interaction.stale_incarnation` | The interaction request belongs to a previous host incarnation. |
+| `interaction.option_not_offered` | The selected outcome or option was not offered. |
+| `interaction.text_too_large` | The interaction answer text or deny note exceeds the size limit. |
 
 ## Hidden on purpose
 

@@ -155,19 +155,21 @@ func (o *Owner) newTicketLocked(spec *Spec, now time.Time) (*Ticket, error) {
 		return nil, errcode.Wrap(errcode.Internal, "generate request ID failed", err)
 	}
 	return &Ticket{
-		RequestID:   requestID,
-		OperationID: spec.OperationID,
-		Incarnation: o.incarnation,
-		Kind:        spec.Kind,
-		Summary:     spec.Summary,
-		Relayed:     spec.Relayed,
-		Offers:      slices.Clone(effectiveOffers(spec)),
-		Options:     slices.Clone(spec.Options),
-		Questions:   cloneQuestions(spec.Questions),
-		Body:        spec.Body,
-		Binding:     spec.Binding,
-		CreatedAt:   now,
-		ExpiresAt:   spec.ExpiresAt,
+		RequestID:       requestID,
+		OperationID:     spec.OperationID,
+		Incarnation:     o.incarnation,
+		Kind:            spec.Kind,
+		Risk:            spec.Risk,
+		GrantScopeLabel: spec.GrantScopeLabel,
+		Summary:         spec.Summary,
+		Relayed:         spec.Relayed,
+		Offers:          slices.Clone(effectiveOffers(spec)),
+		Options:         slices.Clone(spec.Options),
+		Questions:       cloneQuestions(spec.Questions),
+		Body:            spec.Body,
+		Binding:         spec.Binding,
+		CreatedAt:       now,
+		ExpiresAt:       spec.ExpiresAt,
 	}, nil
 }
 
