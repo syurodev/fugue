@@ -3,6 +3,7 @@
 package client_test
 
 import (
+	"errors"
 	"os"
 	"testing"
 
@@ -12,6 +13,8 @@ import (
 )
 
 // This test runs before parallel tests because it temporarily redirects stdin and fd 3.
+//
+//nolint:paralleltest // The test temporarily redirects process-wide descriptors.
 func TestInheritedHostLogSink(t *testing.T) {
 	log, err := os.CreateTemp(t.TempDir(), "log")
 	mustClientTest(t, err)
@@ -24,11 +27,14 @@ func TestInheritedHostLogSink(t *testing.T) {
 	_, err = input.Seek(0, 0)
 	mustClientTest(t, err)
 	previous, err := unix.Dup(3)
-	if err != nil && err != unix.EBADF {
+	if err != nil && !errors.Is(err, unix.EBADF) {
 		t.Fatal(err)
 	}
 	if err == nil {
-		defer func() { _ = unix.Dup2(previous, 3); _ = unix.Close(previous) }()
+		defer func() {
+			mustClientTest(t, unix.Dup2(previous, 3))
+			mustClientTest(t, unix.Close(previous))
+		}()
 	}
 	mustClientTest(t, unix.Dup2(int(log.Fd()), 3))
 	stdin := os.Stdin

@@ -27,7 +27,7 @@ func TestReadHostFileRejectsWritableDiscovery(t *testing.T) {
 
 func TestDialTrustedRejectsWritableSocket(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
+	dir := shortDir(t)
 	testSetMode(t, dir, 0o700)
 	socket := filepath.Join(dir, "socket")
 	listener, err := new(net.ListenConfig).Listen(t.Context(), "unix", socket)
@@ -109,7 +109,7 @@ func TestTrustedDiscoveryParsesAndRejectsInvalidContents(t *testing.T) {
 
 func TestTrustedDialRejectsUnsafeOrMissingSocketPaths(t *testing.T) {
 	t.Parallel()
-	dir := t.TempDir()
+	dir := shortDir(t)
 	testSetMode(t, dir, 0o700)
 	socket := filepath.Join(dir, "socket")
 	_, err := client.DialTrusted(t.Context(), socket, appParams())
@@ -128,7 +128,11 @@ func TestTrustedDialRejectsUnsafeOrMissingSocketPaths(t *testing.T) {
 	testSetMode(t, dir, 0o700)
 	listener, err := new(net.ListenConfig).Listen(t.Context(), "unix", socket)
 	mustClientTest(t, err)
-	listener.(*net.UnixListener).SetUnlinkOnClose(false)
+	unixListener, ok := listener.(*net.UnixListener)
+	if !ok {
+		t.Fatal("expected a Unix listener")
+	}
+	unixListener.SetUnlinkOnClose(false)
 	mustClientTest(t, listener.Close())
 	testSetMode(t, socket, 0o600)
 	_, err = client.DialTrusted(t.Context(), socket, appParams())

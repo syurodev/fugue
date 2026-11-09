@@ -2,7 +2,6 @@ package client_test
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"os"
@@ -64,17 +63,11 @@ func closeQuietly(c closer) {
 // shortDir creates a directory whose path is short enough to bind a unix
 // socket, which t.TempDir() cannot promise on macOS: sun_path holds 104 bytes
 // and macOS test temp dirs already exceed 100 (the same helper internal/hostapi
-// needs). The per-test name is hashed so parallel tests never share a dir.
+// needs). Each test gets a unique directory.
 func shortDir(t *testing.T) string {
 	t.Helper()
-	sum := sha256.Sum256([]byte(t.Name()))
-	dir := filepath.Join(os.TempDir(), fmt.Sprintf("fugue-%x", sum[:4]))
-	// A previous run's leftovers (a killed test leaves sockets behind) must
-	// not break this one: start empty.
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(dir, 0o700); err != nil {
+	dir, err := os.MkdirTemp(os.TempDir(), "fugue-")
+	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { removeQuietly(dir) })
@@ -582,5 +575,13 @@ func TestShutdownUsesHostAPI(t *testing.T) {
 	cmd := <-h.commands
 	if cmd.GetCommandId() != "upgrade-1" || cmd.GetForce() {
 		t.Fatalf("unexpected shutdown request: %+v", cmd)
+	}
+}
+
+func TestShutdownReportsHostRejection(t *testing.T) {
+	t.Parallel()
+	c := dialApp(t, serveHost(t, &fakeHandler{}))
+	if err := c.Shutdown(t.Context(), "upgrade-rejected"); err == nil {
+		t.Fatal("host rejection was ignored")
 	}
 }

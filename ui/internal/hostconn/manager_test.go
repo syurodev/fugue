@@ -2,7 +2,6 @@ package hostconn
 
 import (
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"net"
@@ -166,12 +165,8 @@ func (h *fakeHandler) Subscribe(ctx context.Context, req *connect.Request[hostv1
 // and macOS test temp dirs already exceed 100.
 func shortDir(t *testing.T) string {
 	t.Helper()
-	sum := sha256.Sum256([]byte(t.Name()))
-	dir := filepath.Join(os.TempDir(), fmt.Sprintf("fugue-%x", sum[:4]))
-	if err := os.RemoveAll(dir); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(dir, 0o700); err != nil {
+	dir, err := os.MkdirTemp(os.TempDir(), "fugue-")
+	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { removeQuietly(dir) })

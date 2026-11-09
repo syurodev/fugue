@@ -22,6 +22,9 @@ func TestBackgroundPreferenceAndSingleOwner(t *testing.T) {
 		t.Fatalf("second owner: %v, %v", second, err)
 	}
 	mustClientTest(t, first.Close())
+	if err := first.Close(); err == nil {
+		t.Fatal("closing an already closed lock succeeded")
+	}
 	third := acquireBackground(t, dir)
 	mustClientTest(t, third.Close())
 	mustClientTest(t, client.SetBackgroundEnabled(dir, false))
@@ -69,7 +72,7 @@ func TestBackgroundRejectsUnsafePreferenceAndLock(t *testing.T) {
 	mustClientTest(t, client.SetBackgroundEnabled(dir, false))
 	mustClientTest(t, client.SetBackgroundEnabled(dir, false))
 	lockPath := filepath.Join(dir, "background.lock")
-	mustClientTest(t, os.WriteFile(lockPath, nil, 0o666))
+	mustClientTest(t, os.WriteFile(lockPath, nil, 0o600))
 	testSetMode(t, lockPath, 0o666)
 	if _, err := client.TryBackgroundLock(dir); err == nil {
 		t.Fatal("unsafe lock accepted")

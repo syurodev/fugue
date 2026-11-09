@@ -2,14 +2,15 @@ package client_test
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/pkg/client"
 )
 
@@ -31,7 +32,10 @@ func TestHostLogPrivateBoundedAndTruncated(t *testing.T) {
 	}
 	mustClientTest(t, log.Close())
 	path := filepath.Join(dir, "logs", "host.log")
-	data, err := os.ReadFile(path)
+	root, err := os.OpenRoot(dir)
+	mustClientTest(t, err)
+	defer closeQuietly(root)
+	data, err := root.ReadFile("logs/host.log")
 	mustClientTest(t, err)
 	if string(data) != "abcd" {
 		t.Fatalf("log = %q", data)
@@ -39,7 +43,7 @@ func TestHostLogPrivateBoundedAndTruncated(t *testing.T) {
 	log, err = client.OpenHostLog(dir)
 	mustClientTest(t, err)
 	mustClientTest(t, log.Close())
-	data, err = os.ReadFile(path)
+	data, err = root.ReadFile("logs/host.log")
 	mustClientTest(t, err)
 	if len(data) != 0 {
 		t.Fatalf("log was not truncated: %q", data)
@@ -74,34 +78,6 @@ func TestHostLogDrainsAfterWriteFailure(t *testing.T) {
 	}
 }
 
-func TestHostLogSinkProcess(t *testing.T) {
-	if os.Getenv("FUGUE_TEST_LOG_SINK") == "1" {
-		if err := client.RunHostLogSink(); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-	t.Parallel()
-	log, err := os.CreateTemp(t.TempDir(), "sink")
-	mustClientTest(t, err)
-	defer closeQuietly(log)
-	executable, err := os.Executable()
-	mustClientTest(t, err)
-	cmd := exec.CommandContext(t.Context(), executable, "-test.run=^TestHostLogSinkProcess$")
-	cmd.Env = []string{"FUGUE_TEST_LOG_SINK=1"}
-	cmd.ExtraFiles = []*os.File{log}
-	cmd.Stdin = strings.NewReader("host output")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("sink: %v: %s", err, output)
-	}
-	data, err := os.ReadFile(log.Name())
-	mustClientTest(t, err)
-	if string(data) != "host output" {
-		t.Fatalf("sink output = %q", data)
-	}
-}
-
 func TestConcurrentHostLogCreation(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -110,14 +86,15 @@ func TestConcurrentHostLogCreation(t *testing.T) {
 	start := make(chan struct{})
 	results := make(chan error, count)
 	for range count {
-		go func() {
+		supervise.Go(t.Context(), "test.host-log", func(context.Context) error {
 			<-start
 			f, err := client.OpenHostLog(dir)
 			if err == nil {
 				err = f.Close()
 			}
 			results <- err
-		}()
+			return nil
+		})
 	}
 	close(start)
 	for range count {
