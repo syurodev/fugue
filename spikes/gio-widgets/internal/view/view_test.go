@@ -165,3 +165,71 @@ func TestToggleKeepsItemsAboveStill(t *testing.T) {
 		}
 	}
 }
+
+func (g *rig) wheel(dy float32) {
+	g.r.Queue(pointer.Event{Kind: pointer.Scroll, Source: pointer.Mouse, Position: f32.Pt(300, 300), Scroll: f32.Pt(0, dy)})
+	g.frame()
+}
+
+func (g *rig) tops() map[int]int {
+	m := map[int]int{}
+	for _, s := range g.v.Sel.Visible() {
+		m[s.Idx] = s.Top
+	}
+	return m
+}
+
+func (g *rig) stream() {
+	e := g.v.Entries[len(g.v.Entries)-1]
+	e.Kind = "assistant"
+	b := append([]flow.Block(nil), e.Body...)
+	b = append(b, flow.Block{Runs: gen.Inline("a streamed paragraph that adds a few lines of text at the very end of the transcript, again and again and again")})
+	e.SetBody(b)
+	g.frame()
+}
+
+func TestFollowBottomThenHoldWhenScrolledUp(t *testing.T) {
+	g := newRig(t, 500)
+	g.v.List.List.ScrollToEnd = true
+	g.v.List.List.Position.BeforeEnd = false
+	g.frame()
+	bottom := func() int { vs := g.v.Sel.Visible(); l := vs[len(vs)-1]; return l.Top + l.H }
+	for i := 0; i < 5; i++ {
+		g.stream()
+		if got := bottom(); got != 700 {
+			t.Fatalf("at the bottom the last item must end at the viewport edge, ends at %d", got)
+		}
+	}
+	g.wheel(-400) // the user scrolls up
+	if !g.v.List.List.Position.BeforeEnd {
+		t.Fatal("scrolling up must leave the follow-bottom mode")
+	}
+	before := g.tops()
+	for i := 0; i < 5; i++ {
+		g.stream()
+	}
+	for idx, top := range g.tops() {
+		if old, ok := before[idx]; ok && old != top {
+			t.Fatalf("item %d jumped from %d to %d while streaming below the viewport", idx, old, top)
+		}
+	}
+	g.wheel(20000) // and back down: following resumes
+	g.stream()
+	if got := bottom(); got != 700 || g.v.List.List.Position.BeforeEnd {
+		t.Fatalf("scrolling back to the end must resume following (bottom %d, BeforeEnd %v)", got, g.v.List.List.Position.BeforeEnd)
+	}
+}
+
+func TestDragBelowViewportAutoScrolls(t *testing.T) {
+	g := newRig(t, 400)
+	g.ptr(pointer.Press, f32.Pt(100, 120), 0)
+	start := g.v.Sel.Anchor.Item
+	for i := 0; i < 120; i++ {
+		g.ptr(pointer.Move, f32.Pt(100, 900), 0) // held below the window edge
+	}
+	g.ptr(pointer.Release, f32.Pt(100, 900), 0)
+	if g.v.Sel.Focus.Item < start+10 {
+		t.Fatalf("focus only reached item %d from %d: the drag did not autoscroll", g.v.Sel.Focus.Item, start)
+	}
+	t.Logf("anchor item %d, focus item %d after 120 frames", start, g.v.Sel.Focus.Item)
+}
