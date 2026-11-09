@@ -105,22 +105,22 @@ func TestEnsureReadsBackByOperationIDAndRejectsConflictingSpecs(t *testing.T) {
 	}
 
 	// Changing the kind, binding, offers or options under the same operationID is rejected.
-	_, err := owner.Ensure(selectSpec("op-readback"))
+	_, _, err := owner.Ensure(selectSpec("op-readback"))
 	wantCode(t, err, errcode.AlreadyExists)
 
 	conflictBinding := confirmSpec("op-readback")
 	conflictBinding.Binding.ArgsDigest = "sha256:different"
-	_, err = owner.Ensure(conflictBinding)
+	_, _, err = owner.Ensure(conflictBinding)
 	wantCode(t, err, errcode.AlreadyExists)
 
 	conflictOffers := confirmSpec("op-readback")
 	conflictOffers.Offers = []Outcome{OutcomeAllowedOnce}
-	_, err = owner.Ensure(conflictOffers)
+	_, _, err = owner.Ensure(conflictOffers)
 	wantCode(t, err, errcode.AlreadyExists)
 
 	conflictSummary := confirmSpec("op-readback")
 	conflictSummary.Summary = "Write other.go"
-	_, err = owner.Ensure(conflictSummary)
+	_, _, err = owner.Ensure(conflictSummary)
 	wantCode(t, err, errcode.AlreadyExists)
 
 	relayFirst := mustEnsure(t, owner, relayedSpec(t, "turn-readback", "req-1"))
@@ -131,7 +131,7 @@ func TestEnsureReadsBackByOperationIDAndRejectsConflictingSpecs(t *testing.T) {
 
 	conflictRelay := relayedSpec(t, "turn-readback", "req-1")
 	conflictRelay.Options = vendorOptions()[:2]
-	_, err = owner.Ensure(conflictRelay)
+	_, _, err = owner.Ensure(conflictRelay)
 	wantCode(t, err, errcode.AlreadyExists)
 }
 
@@ -178,7 +178,7 @@ func TestEnvTagHardRuleAndOffersControlSessionGrants(t *testing.T) {
 	for _, tag := range []string{"prod", "unknown-env"} {
 		offered := confirmSpec("op-env-offered-" + tag)
 		offered.Binding.EnvTag = tag
-		_, err := owner.Ensure(offered)
+		_, _, err := owner.Ensure(offered)
 		wantCode(t, err, errcode.InvalidArgument)
 
 		spec := confirmSpec("op-env-" + tag)
@@ -257,7 +257,7 @@ func assertHeadlessResolvesUnavailable(t *testing.T, owner *Owner) {
 
 func assertBrokenPromptResolvesUnavailable(t *testing.T, owner *Owner) {
 	t.Helper()
-	_, err := owner.Ensure(confirmSpec("op-broken"))
+	_, _, err := owner.Ensure(confirmSpec("op-broken"))
 	wantCode(t, err, errcode.Unavailable)
 	readBack, err := owner.LookupOperation("op-broken")
 	if err != nil || !readBack.Resolved || readBack.Outcome != OutcomeUnavailable {

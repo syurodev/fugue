@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package fugue.interaction.v1;
+
+// Option is one selectable choice offered by a select request, by a question,
+// or by a relayed vendor request (docs: interaction §4.1).
+message Option {
+  string id = 1;
+  string label = 2;
+  string description = 3;
+}
+
+// Question is one question within a question-kind interaction request.
+message Question {
+  string question_id = 1;
+  string prompt = 2;
+  repeated Option options = 3;
+  bool multi_select = 4;
+  bool allow_text = 5;
+}
+
+// QuestionAnswer carries the user's answer to one question of a question-kind
+// request (docs: interaction §4.1).
+message QuestionAnswer {
+  string question_id = 1;
+  repeated string option_ids = 2;
+  string text = 3;
+}
+
+// PendingRequest is the view of a single pending interaction request (docs:
+// interaction §8). An additive questions field supports multi-question requests.
+message PendingRequest {
+  string request_id = 1;
+  string incarnation = 2;
+  string session_id = 3;
+  string tool = 4;
+  string kind = 5;
+  string risk = 6;
+  string env_tag = 7;
+  // summary carries the content shown to the user: the tool summary for
+  // confirm or select requests, or the prompt for question and relayed requests.
+  string summary = 8;
+  repeated string offered_outcomes = 9;
+  repeated Option options = 10;
+  // grant_scope_label is the human-readable description of the scope covered
+  // by an "allowed_session" confirmation.
+  string grant_scope_label = 11;
+  repeated Question questions = 12;
+}
+
+// ListPendingRequest asks for the current snapshot of pending interaction
+// requests for the current host incarnation (docs: interaction §8).
+message ListPendingRequest {}
+
+// ListPendingResponse carries the snapshot of pending interaction requests and
+// the sequence of the interaction topic corresponding to the snapshot.
+message ListPendingResponse {
+  repeated PendingRequest requests = 1;
+  uint64 sequence = 2;
+}
+
+// AnswerRequest submits a human decision for a pending interaction request
+// (docs: interaction §8).
+message AnswerRequest {
+  // command_id is client-generated for request deduplication (docs: host-api §5).
+  string command_id = 1;
+  string incarnation = 2;
+  string request_id = 3;
+  string outcome = 4;
+  optional string option_id = 5;
+  optional string text = 6;
+  repeated QuestionAnswer answers = 7;
+}
+
+// AnswerResponse confirms an answer has been recorded.
+message AnswerResponse {
+  string request_id = 1;
+  string outcome = 2;
+}
+
+// InteractionService exposes interaction approvals, selections, and questions
+// over the Host API (docs: interaction §8; host-api §4).
+service InteractionService {
+  // ListPending returns all pending interaction requests of the current host
+  // incarnation, accompanied by the sequence of the interaction topic.
+  rpc ListPending(ListPendingRequest) returns (ListPendingResponse);
+
+  // Answer records the human decision for a pending interaction request.
+  rpc Answer(AnswerRequest) returns (AnswerResponse);
+}

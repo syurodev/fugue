@@ -34,15 +34,15 @@ const genericInternalMessage = "internal error"
 // public code and the host's versions in the typed detail.
 func connectCode(c errcode.Code) connect.Code {
 	switch c {
-	case errcode.InvalidArgument:
+	case errcode.InvalidArgument, errcode.InteractionOptionNotOffered:
 		return connect.CodeInvalidArgument
-	case errcode.NotFound:
+	case errcode.NotFound, errcode.InteractionNotFound:
 		return connect.CodeNotFound
 	case errcode.AlreadyExists:
 		return connect.CodeAlreadyExists
-	case errcode.FailedPrecondition, errcode.UnsupportedVersion:
+	case errcode.FailedPrecondition, errcode.UnsupportedVersion, errcode.InteractionAlreadyAnswered, errcode.InteractionStaleIncarnation:
 		return connect.CodeFailedPrecondition
-	case errcode.FrameTooLarge:
+	case errcode.FrameTooLarge, errcode.InteractionTextTooLarge:
 		return connect.CodeResourceExhausted
 	case errcode.PermissionDenied:
 		return connect.CodePermissionDenied
@@ -63,6 +63,10 @@ func connectCode(c errcode.Code) connect.Code {
 // message and carries the typed ErrorDetail with the public code; hidden
 // codes become a generic internal error with no detail (host-api §4).
 func (h *serviceHandler) connectError(ctx context.Context, err error) error {
+	return toConnectError(ctx, h.backend, err)
+}
+
+func toConnectError(ctx context.Context, backend app.Backend, err error) error {
 	if err == nil {
 		return nil
 	}
@@ -72,8 +76,10 @@ func (h *serviceHandler) connectError(ctx context.Context, err error) error {
 	}
 	cerr := connect.NewError(connectCode(code), clientMessage(msg))
 	detail := &hostv1.ErrorDetail{Code: string(code)}
-	if code == errcode.UnsupportedVersion {
-		detail.SupportedApiVersions = h.hostVersions(ctx)
+	if code == errcode.UnsupportedVersion && backend != nil {
+		if st, serr := backend.Status(ctx); serr == nil {
+			detail.SupportedApiVersions = st.SupportedAPIVersions
+		}
 	}
 	d, derr := connect.NewErrorDetail(detail)
 	if derr != nil {
@@ -83,16 +89,6 @@ func (h *serviceHandler) connectError(ctx context.Context, err error) error {
 	}
 	cerr.AddDetail(d)
 	return cerr
-}
-
-// hostVersions reads the host's supported versions from the backend — the
-// runtime is their single source; the server config carries none.
-func (h *serviceHandler) hostVersions(ctx context.Context) []string {
-	view, err := h.backend.Status(ctx)
-	if err != nil {
-		return nil
-	}
-	return view.SupportedAPIVersions
 }
 
 // connectionState returns the per-connection state the server attached at

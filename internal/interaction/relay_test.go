@@ -199,19 +199,19 @@ func TestRelayedSpecsRequireVendorShapedBindingsAndTheirVendorKey(t *testing.T) 
 	// A relayed spec with native binding fields is rejected.
 	nativeShaped := relayedSpec(t, "turn-bind", "req-1")
 	nativeShaped.Binding = defaultBinding()
-	_, err := owner.Ensure(nativeShaped)
+	_, _, err := owner.Ensure(nativeShaped)
 	wantCode(t, err, errcode.InvalidArgument)
 
 	// A native spec with vendor binding fields is rejected.
 	vendorShaped := confirmSpec("op-native-vendor-binding")
 	vendorShaped.Binding.TurnID = "turn-1"
-	_, err = owner.Ensure(vendorShaped)
+	_, _, err = owner.Ensure(vendorShaped)
 	wantCode(t, err, errcode.InvalidArgument)
 
 	// A relayed spec whose operation ID is not its vendor key is rejected.
 	mismatched := relayedSpec(t, "turn-bind", "req-2")
 	mismatched.OperationID = "vendor:other-session:turn:req"
-	_, err = owner.Ensure(mismatched)
+	_, _, err = owner.Ensure(mismatched)
 	wantCode(t, err, errcode.InvalidArgument)
 }
 

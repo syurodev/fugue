@@ -24,6 +24,12 @@ const (
 	DeadlineExceeded   Code = "deadline_exceeded"
 	UnsupportedVersion Code = "unsupported_version"
 	FrameTooLarge      Code = "frame_too_large"
+
+	InteractionNotFound         Code = "interaction.not_found"
+	InteractionAlreadyAnswered  Code = "interaction.already_answered"
+	InteractionStaleIncarnation Code = "interaction.stale_incarnation"
+	InteractionOptionNotOffered Code = "interaction.option_not_offered"
+	InteractionTextTooLarge     Code = "interaction.text_too_large"
 )
 
 // Entry classifies one code. Hidden codes are never shown to a client; the
@@ -48,6 +54,11 @@ func Registry() []Entry {
 		{DeadlineExceeded, true, "the operation took longer than its deadline"},
 		{UnsupportedVersion, true, "the client and the host share no Host API version; the typed detail names the host's supported versions"},
 		{FrameTooLarge, true, "a stream frame exceeded the size limit"},
+		{InteractionNotFound, true, "the interaction request does not exist or is no longer available"},
+		{InteractionAlreadyAnswered, true, "the interaction request has already been answered"},
+		{InteractionStaleIncarnation, true, "the interaction request belongs to a previous host incarnation"},
+		{InteractionOptionNotOffered, true, "the selected outcome or option was not offered"},
+		{InteractionTextTooLarge, true, "the interaction answer text or deny note exceeds the size limit"},
 	}
 }
 
