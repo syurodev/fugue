@@ -30,6 +30,9 @@ func (s *Store) CreateSession(ctx context.Context, session *Session) error {
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer rollback(ctx, tx)
+	if purgeErr := rejectPurged(ctx, tx, session.ID); purgeErr != nil {
+		return purgeErr
+	}
 	now := s.clock.Now().UTC().Format(time.RFC3339Nano)
 	_, err = tx.ExecContext(ctx,
 		`INSERT INTO vendor_sessions(
@@ -139,14 +142,8 @@ func (s *Store) payloadGate(event *Event) (vault.Snapshot, bool, error) {
 }
 
 func (s *Store) appendRows(ctx context.Context, tx *sql.Tx, sessionID string, sequence int64, event *Event, now string) error {
-	var purged int
-	err := tx.QueryRowContext(ctx,
-		"SELECT COUNT(*) FROM vendor_purges WHERE session_id=?", sessionID).Scan(&purged)
-	if err != nil {
-		return fmt.Errorf("%w: purge barrier: %w", ErrUnavailable, err)
-	}
-	if purged != 0 {
-		return ErrPurged
+	if err := rejectPurged(ctx, tx, sessionID); err != nil {
+		return err
 	}
 	payloadID, err := s.writePayload(ctx, tx, sessionID, "event", event.Payload, now)
 	if err != nil {
@@ -360,8 +357,22 @@ func advanceSequence(ctx context.Context, tx *sql.Tx, sessionID string, expected
 		return fmt.Errorf("%w: check sequence: %w", ErrUnavailable, err)
 	}
 	if n != 1 {
+		if err := rejectPurged(ctx, tx, sessionID); err != nil {
+			return err
+		}
 		return classifyMissedUpdate(tx.QueryRowContext(ctx,
 			"SELECT state FROM vendor_sessions WHERE session_id=?", sessionID))
+	}
+	return nil
+}
+
+func rejectPurged(ctx context.Context, tx *sql.Tx, session string) error {
+	var purged int
+	if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM vendor_purges WHERE session_id=?)", session).Scan(&purged); err != nil {
+		return fmt.Errorf("%w: purge barrier: %w", ErrUnavailable, err)
+	}
+	if purged != 0 {
+		return ErrPurged
 	}
 	return nil
 }

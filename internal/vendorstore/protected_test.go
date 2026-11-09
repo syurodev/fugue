@@ -63,43 +63,43 @@ func TestProtectedEventsAndVaultLock(t *testing.T) {
 	}
 }
 
-func protectedStore(t *testing.T) (*Store, *vault.Service, string) {
-	t.Helper()
+func protectedStore(tb testing.TB) (*Store, *vault.Service, string) {
+	tb.Helper()
 	clk := clock.NewFake(time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC))
-	path := filepath.Join(t.TempDir(), "test.db")
-	db, err := storage.Open(t.Context(), path)
+	path := filepath.Join(tb.TempDir(), "test.db")
+	db, err := storage.Open(tb.Context(), path)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
-	t.Cleanup(func() { requireNoError(t, db.Close()) })
-	err = storage.Migrate(t.Context(), db, clk)
+	tb.Cleanup(func() { requireNoError(tb, db.Close()) })
+	err = storage.Migrate(tb.Context(), db, clk)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	fixture, err := os.ReadFile("../vault/testdata/keyring-cheap.json")
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
 	var ring crypto.Keyring
 	err = json.Unmarshal(fixture, &ring)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
-	v, err := vault.NewService(t.Context(), vault.NewMemoryKeyringStore(&ring), ids.NewSequence("v-"))
+	v, err := vault.NewService(tb.Context(), vault.NewMemoryKeyringStore(&ring), ids.NewSequence("v-"))
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
-	err = v.Unlock(t.Context(), redact.NewSecret("master-pw"))
+	err = v.Unlock(tb.Context(), redact.NewSecret("master-pw"))
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
-	s, err := New(t.Context(), db, v, clk, nil)
+	s, err := New(tb.Context(), db, v, clk, nil)
 	if err != nil {
-		t.Fatal(err)
+		tb.Fatal(err)
 	}
-	t.Cleanup(func() { requireNoError(t, s.Close()) })
-	if err := s.CreateSession(t.Context(), &Session{ID: "s", Vendor: "v", AccountID: "a", Role: "r", State: StateStarting}); err != nil {
-		t.Fatal(err)
+	tb.Cleanup(func() { requireNoError(tb, s.Close()) })
+	if err := s.CreateSession(tb.Context(), &Session{ID: "s", Vendor: "v", AccountID: "a", Role: "r", State: StateStarting}); err != nil {
+		tb.Fatal(err)
 	}
 	return s, v, path
 }
@@ -426,7 +426,9 @@ func TestPayloadAndSessionLimits(t *testing.T) {
 	}
 	_, err := s.Append(t.Context(), "s", 1, &Event{Type: UsageObserved, Payload: []byte("small")})
 	requireNoError(t, err)
-	_, err = s.db.ExecContext(t.Context(), `INSERT INTO vendor_payloads(payload_id,session_id,kind,key_id,size,envelope) SELECT 'limit',session_id,kind,key_id,?,envelope FROM vendor_payloads LIMIT 1`, sealing.MaxSessionPayloadTotal)
+	_, err = s.db.ExecContext(t.Context(), `INSERT INTO vendor_payloads(payload_id,session_id,kind,key_id,size,envelope) SELECT 'limit',session_id,kind,key_id,?,envelope FROM vendor_payloads LIMIT 1`, sealing.MaxSessionPayloadTotal-5)
+	requireNoError(t, err)
+	_, err = s.db.ExecContext(t.Context(), `UPDATE vendor_sessions SET payload_bytes=? WHERE session_id='s'`, sealing.MaxSessionPayloadTotal)
 	requireNoError(t, err)
 	if _, err = s.Append(t.Context(), "s", 2, &Event{Type: UsageObserved, Payload: []byte("extra")}); err == nil {
 		t.Fatal("session limit exceeded")
@@ -449,7 +451,7 @@ func assertNoMarker(t *testing.T, value any, marker []byte) {
 
 func TestPurgeRollbackPreservesPayloadAndPermanentPurgeRevokesIt(t *testing.T) {
 	t.Parallel()
-	s, _, _ := protectedStore(t)
+	s, v, _ := protectedStore(t)
 	_, err := s.Append(t.Context(), "s", 1, &Event{Type: UsageObserved, Payload: []byte("protected")})
 	requireNoError(t, err)
 	events, err := s.EventsSince(t.Context(), "s", 1, 10)
@@ -459,9 +461,28 @@ func TestPurgeRollbackPreservesPayloadAndPermanentPurgeRevokesIt(t *testing.T) {
 		t.Fatal("purge fault not returned")
 	}
 	s.SetCommitFault(nil)
+	assertPayloadTotal(t, s)
 	_, err = s.OpenPayload(t.Context(), "s", events[0].PayloadID)
 	requireNoError(t, err)
 	requireNoError(t, s.PurgeSession(t.Context(), "s"))
+	var remaining int
+	requireNoError(t, s.db.QueryRowContext(t.Context(), `SELECT (SELECT COUNT(*) FROM vendor_sessions WHERE session_id='s') + (SELECT COUNT(*) FROM vendor_payloads WHERE session_id='s')`).Scan(&remaining))
+	if remaining != 0 {
+		t.Fatal("purge retained session or payload")
+	}
+	if _, err = s.Append(t.Context(), "s", 2, &Event{Type: UsageObserved, Payload: []byte("x")}); !errors.Is(err, ErrPurged) {
+		t.Fatal("purged session resurrected")
+	}
+	reopened, err := New(t.Context(), s.db, v, s.clock, nil)
+	requireNoError(t, err)
+	t.Cleanup(func() { requireNoError(t, reopened.Close()) })
+	if _, err = reopened.Append(t.Context(), "s", 2, &Event{Type: UsageObserved, Payload: []byte("x")}); !errors.Is(err, ErrPurged) {
+		t.Fatalf("append after restart: %v", err)
+	}
+	err = reopened.CreateSession(t.Context(), &Session{ID: "s", Vendor: "v", AccountID: "a", Role: "r", State: StateStarting})
+	if !errors.Is(err, ErrPurged) {
+		t.Fatalf("create after restart: %v", err)
+	}
 	if _, err = s.OpenPayload(t.Context(), "s", events[0].PayloadID); err == nil {
 		t.Fatal("purged payload opened")
 	}
