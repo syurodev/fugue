@@ -481,8 +481,13 @@ func secretText(size int, token string) string {
 	return b.String()[:size]
 }
 
+// TestRedactionCostIsLinear measures wall-clock time, so it measures before
+// joining the parallel phase: the other parallel tests are paused at
+// t.Parallel until this body returns to it, so the heavy payload tests of this
+// package cannot share the CPU. One contended sample can otherwise inflate
+// either size by an order of magnitude; run alone the ratio is about 16x to
+// 19x.
 func TestRedactionCostIsLinear(t *testing.T) {
-	t.Parallel()
 	// The fixture wires the credential directly and exercises the J-04
 	// environment mapping the composition will use.
 	f := newTranscriptFixture(t, func(context.Context) ([]secrets.KnownValue, error) {
@@ -497,17 +502,25 @@ func TestRedactionCostIsLinear(t *testing.T) {
 	})
 	f.awaitKnownValues()
 	token := githubToken()
+	// bench returns the fastest of several measurements: contention only ever
+	// adds time, so the minimum is the closest sample to the true cost.
 	bench := func(size int) time.Duration {
 		text := secretText(size, token)
-		return time.Duration(testing.Benchmark(func(b *testing.B) {
-			b.Helper()
-			for b.Loop() {
-				f.service.redactor.Redact(text)
-			}
-		}).NsPerOp())
+		best := time.Duration(math.MaxInt64)
+		for range 3 {
+			ns := time.Duration(testing.Benchmark(func(b *testing.B) {
+				b.Helper()
+				for b.Loop() {
+					f.service.redactor.Redact(text)
+				}
+			}).NsPerOp())
+			best = min(best, ns)
+		}
+		return best
 	}
 	small := bench(64 << 10)
 	large := bench(1 << 20)
+	t.Parallel()
 	// 16x the input at a linear cost is about 16x the time (about 40x under
 	// the race detector and low I/O priority); a quadratic detector would cost
 	// at least 256x. The bound sits between the two with room for jitter.
