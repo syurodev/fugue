@@ -30,6 +30,11 @@ type Entry struct {
 }
 
 func (e *Entry) rebuild() {
+	if e.Kind == "raw" { // the entry brings its own blocks (diff lines)
+		e.Item.Blocks = e.Body
+		e.Item.Rev++
+		return
+	}
 	e.Item.Blocks = e.Item.Blocks[:0]
 	e.Item.Blocks = append(e.Item.Blocks, flow.Block{Runs: gen.Inline(e.Head)})
 	if e.Kind == "assistant" || e.Kind == "user" || e.Open {

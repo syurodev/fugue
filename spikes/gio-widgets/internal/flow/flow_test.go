@@ -37,3 +37,35 @@ func TestHitCaretRoundTrip(t *testing.T) {
 		}
 	}
 }
+
+// A streamed message is laid out again on every delta. Warm = the words were
+// seen before (they are cached), cold = first sight of every word.
+func benchLayout(b *testing.B, kb int, cold bool) {
+	sh, _ := fonts.Shaper()
+	env := flow.NewEnv(sh, &flow.Palette{}, 15)
+	r := rand.New(rand.NewSource(5))
+	var bl []flow.Block
+	for n := 0; n < kb*1024; {
+		m := gen.Message(r, 1)
+		for _, x := range m {
+			for _, run := range x.Runs {
+				n += len(run.Text)
+			}
+		}
+		bl = append(bl, m...)
+	}
+	it := &flow.Item{Blocks: bl}
+	env.Layout(it, 800)
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		if cold {
+			env = flow.NewEnv(sh, &flow.Palette{}, 15)
+		}
+		it.Rev++
+		env.Layout(it, 800)
+	}
+}
+
+func BenchmarkLayout20KBWarm(b *testing.B) { benchLayout(b, 20, false) }
+func BenchmarkLayout20KBCold(b *testing.B) { benchLayout(b, 20, true) }
+func BenchmarkLayout5KBWarm(b *testing.B)  { benchLayout(b, 5, false) }
