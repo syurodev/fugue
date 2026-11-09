@@ -342,6 +342,11 @@ func (rt *HostRuntime) LeaseReleased(_ context.Context, connID string) {
 	}
 }
 
+// ArmInitialIdleGrace starts the idle timer when an app-started host has no lease yet.
+func (rt *HostRuntime) ArmInitialIdleGrace(ctx context.Context) {
+	rt.LeaseReleased(ctx, "")
+}
+
 // fireGrace is the grace timer's fire path: the staleness check — this timer
 // is still the armed one, no lease is held, the runtime is not draining — and
 // the draining transition share one critical section, so a lease that wins

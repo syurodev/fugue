@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"time"
 
 	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/platform/redact"
@@ -24,7 +25,8 @@ func main() {
 // through RunServe's code (cli §5.2). Usage goes to out, real errors to
 // errOut.
 func runMain(ctx context.Context, args []string, out, errOut io.Writer) int {
-	if len(args) != 1 || args[0] != "serve" {
+	grace, valid := serveArguments(args)
+	if !valid {
 		if uerr := usage(out); uerr != nil {
 			slog.Error("write usage", "err", uerr)
 		}
@@ -38,7 +40,17 @@ func runMain(ctx context.Context, args []string, out, errOut io.Writer) int {
 		return exitFailure
 	}
 	slog.SetDefault(slog.New(redact.NewJSONHandler(os.Stderr, cfg.LogLevel)))
-	return RunServe(ctx, out, cfg, version)
+	return RunServe(ctx, out, cfg, version, grace)
+}
+
+func serveArguments(args []string) (time.Duration, bool) {
+	if len(args) == 1 && args[0] == "serve" {
+		return 0, true
+	}
+	if len(args) == 2 && args[0] == "serve" && args[1] == "--app-idle-grace" {
+		return 10 * time.Second, true
+	}
+	return 0, false
 }
 
 // usage prints the one-line command surface of this binary.

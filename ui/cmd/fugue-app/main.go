@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/syurodev/fugue/pkg/client"
 
 	"github.com/syurodev/fugue/ui/internal/appwin"
+	"github.com/syurodev/fugue/ui/internal/hostconn"
 )
 
 // version is the app's own version, injected at release time with -ldflags;
@@ -30,6 +32,23 @@ const (
 )
 
 func main() {
+	if len(os.Args) == 2 && os.Args[1] == "--background-off" {
+		dir, err := client.DataDir(os.LookupEnv, os.UserConfigDir)
+		if err == nil {
+			err = client.SetBackgroundEnabled(dir, false)
+		}
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "fugue-app:", err)
+			os.Exit(exitFailure)
+		}
+		return
+	}
+	if len(os.Args) == 2 && os.Args[1] == "--host-log-sink" {
+		if err := client.RunHostLogSink(); err != nil {
+			os.Exit(exitFailure)
+		}
+		return
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go func() {
@@ -43,27 +62,64 @@ func main() {
 // run resolves the data directory, opens the window, and returns the exit
 // code.
 func run(ctx context.Context) int {
-	// The same rule the host applies (internal/config): the
-	// SYNX_FUGUE_DATA_DIR override when absolute, else the user config dir;
-	// the lookup and the resolver are wired here, not read implicitly.
-	dataDir, err := client.DataDir(os.LookupEnv, os.UserConfigDir)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, "fugue-app:", err)
-		return exitFailure
-	}
-	err = appwin.Run(ctx, appwin.Options{
-		DataDir: dataDir,
-		Params: client.Params{
-			Kind:        client.KindApp,
-			Name:        "fugue-app",
-			Version:     version,
-			APIVersions: []string{"v1"},
-		},
-		Topics: []string{"host"},
-	})
-	if err != nil {
+	if err := runApp(ctx); err != nil {
 		fmt.Fprintln(os.Stderr, "fugue-app:", err)
 		return exitFailure
 	}
 	return exitOK
+}
+
+func runApp(ctx context.Context) error {
+	dataDir, err := client.DataDir(os.LookupEnv, os.UserConfigDir)
+	if err != nil {
+		return fmt.Errorf("resolve data directory: %w", err)
+	}
+	if len(os.Args) == 2 && os.Args[1] == "--background-on" {
+		if err = client.SetBackgroundEnabled(dataDir, true); err != nil {
+			return fmt.Errorf("enable background mode: %w", err)
+		}
+	}
+	params := client.Params{Kind: client.KindApp, Name: "fugue-app", Version: version, APIVersions: []string{"v1"}}
+	return runWindow(ctx, dataDir, params)
+}
+
+func runWindow(ctx context.Context, dir string, params client.Params) error {
+	bg, err := hostconn.StartBackground(ctx, dir, params, "")
+	if err != nil && !backgroundUnavailable(err) {
+		return fmt.Errorf("start background mode: %w", err)
+	}
+	if err = appwin.Run(ctx, appwin.Options{DataDir: dir, Params: params, Topics: []string{"host"}}); err != nil {
+		if bg != nil {
+			bg.Close()
+		}
+		return fmt.Errorf("run window: %w", err)
+	}
+	return waitBackground(ctx, dir, params, bg)
+}
+
+func waitBackground(ctx context.Context, dir string, params client.Params, bg *hostconn.Background) error {
+	if bg != nil {
+		select {
+		case <-bg.Done():
+			bg.Close()
+			bg = nil
+		default:
+		}
+	}
+	if bg == nil {
+		var err error
+		bg, err = hostconn.StartBackground(ctx, dir, params, "")
+		if err != nil && !errors.Is(err, context.Canceled) && !backgroundUnavailable(err) {
+			return fmt.Errorf("start background mode: %w", err)
+		}
+	}
+	if bg != nil {
+		<-bg.Done()
+		bg.Close()
+	}
+	return nil
+}
+
+func backgroundUnavailable(err error) bool {
+	return errors.Is(err, client.ErrBackgroundDisabled) || errors.Is(err, client.ErrBackgroundOwned)
 }

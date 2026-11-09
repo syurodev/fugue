@@ -65,10 +65,11 @@ func Run(ctx context.Context, opts Options) error {
 	defer cancel()
 	updates := make(chan hostconn.Update, 128)
 	m := hostconn.NewManager(&hostconn.Config{
-		DataDir: opts.DataDir,
-		Params:  opts.Params,
-		Topics:  opts.Topics,
-		Updates: updates,
+		DataDir:   opts.DataDir,
+		AutoStart: true,
+		Params:    opts.Params,
+		Topics:    opts.Topics,
+		Updates:   updates,
 	})
 	m.Start(runCtx)
 	defer m.Stop()
@@ -144,6 +145,7 @@ func eventLoop(w *app.Window, m *hostconn.Manager, q *updateQueue, light, dark *
 	for {
 		switch e := w.Event().(type) {
 		case app.DestroyEvent:
+			// TODO(F9.9): Ask before closing when active-session counts are available (F10.5).
 			return e.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)

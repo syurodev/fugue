@@ -546,3 +546,41 @@ func TestHostStatusCarriesTheHostIdentity(t *testing.T) {
 		t.Error("a host that rejects the status read succeeded anyway")
 	}
 }
+
+func TestHostStatusReportsClientCounts(t *testing.T) {
+	t.Parallel()
+	h := &fakeHandler{status: func(context.Context, *connect.Request[hostv1.HostStatusRequest]) (*connect.Response[hostv1.HostStatusResponse], error) {
+		return connect.NewResponse(&hostv1.HostStatusResponse{Clients: &hostv1.ClientCounts{App: 1, Cli: 2, Total: 3}}), nil
+	}}
+	c := dialApp(t, serveHost(t, h))
+	status, err := c.HostStatus(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Clients.App != 1 || status.Clients.CLI != 2 || status.Clients.Total != 3 {
+		t.Fatalf("client counts = %+v", status.Clients)
+	}
+}
+
+type shutdownHandler struct {
+	fakeHandler
+	commands chan *hostv1.ShutdownRequest
+}
+
+func (h *shutdownHandler) Shutdown(_ context.Context, req *connect.Request[hostv1.ShutdownRequest]) (*connect.Response[hostv1.ShutdownResponse], error) {
+	h.commands <- req.Msg
+	return connect.NewResponse(&hostv1.ShutdownResponse{}), nil
+}
+
+func TestShutdownUsesHostAPI(t *testing.T) {
+	t.Parallel()
+	h := &shutdownHandler{commands: make(chan *hostv1.ShutdownRequest, 1)}
+	c := dialApp(t, serveHost(t, h))
+	if err := c.Shutdown(t.Context(), "upgrade-1"); err != nil {
+		t.Fatal(err)
+	}
+	cmd := <-h.commands
+	if cmd.GetCommandId() != "upgrade-1" || cmd.GetForce() {
+		t.Fatalf("unexpected shutdown request: %+v", cmd)
+	}
+}

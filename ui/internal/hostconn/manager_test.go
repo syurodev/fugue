@@ -437,6 +437,7 @@ func TestHostconnReconnectsWithANewClientAndResumesFromTheCursor(t *testing.T) {
 	upd.waitFor(t, ctx, func(u Update) bool { return u.Event != nil && u.Event.Sequence == 11 })
 	upd.waitFor(t, ctx, func(u Update) bool { return u.State == StateDisconnected && u.Reason == "connection lost" })
 
+	clock.armedFor(t, ctx)
 	if durs := clock.durations(); len(durs) != 1 || durs[0] != backoffBase {
 		t.Fatalf("backoff durations = %v, want [%v]", durs, backoffBase)
 	}
