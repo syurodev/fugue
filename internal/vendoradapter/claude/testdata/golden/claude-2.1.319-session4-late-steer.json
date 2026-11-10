@@ -1,0 +1,489 @@
+{
+ "session": "session-1",
+ "vendor": "claude",
+ "summary": {
+  "partials": 2,
+  "nested": 0,
+  "notices": 16
+ },
+ "steps": [
+  {
+   "line": 1,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_started"
+    },
+    "id": "notice-uuid-0001",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0001",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 2,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_started"
+    },
+    "id": "notice-uuid-0004",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0004",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 3,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_started"
+    },
+    "id": "notice-uuid-0006",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0006",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 4,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_started"
+    },
+    "id": "notice-uuid-0008",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0008",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 5,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_response"
+    },
+    "id": "notice-uuid-0010",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0010",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 6,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_response"
+    },
+    "id": "notice-uuid-0011",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0011",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 7,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_response"
+    },
+    "id": "notice-uuid-0012",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0012",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 8,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_response"
+    },
+    "id": "notice-uuid-0013",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0013",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 9,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "command_lifecycle"
+    },
+    "id": "notice-uuid-0014",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0014",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 10,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "command_lifecycle"
+    },
+    "id": "notice-uuid-0016",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0016",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 11,
+   "op": "init",
+   "init": {
+    "Version": "2.1.319",
+    "SessionID": "uuid-0003",
+    "Model": "claude-sonnet-5-5",
+    "PermissionMode": "default",
+    "SlashCommands": [
+     "example-plugin:review",
+     "example-skill",
+     "clear",
+     "compact"
+    ]
+   }
+  },
+  {
+   "line": 12,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/status"
+    },
+    "id": "notice-uuid-0017",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0017",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 17,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "PING"
+    },
+    "id": "msg-0001-text-1",
+    "kind": "assistant_message",
+    "metadata": {
+     "model": "claude-sonnet-5-5"
+    },
+    "raw": "msg-0001",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 21,
+   "op": "quota",
+   "quota": {
+    "Windows": [
+     {
+      "Name": "five_hour",
+      "Utilization": 0.15,
+      "ResetsAt": "2026-11-10T12:40:00Z",
+      "Status": "allowed"
+     },
+     {
+      "Name": "seven_day",
+      "Utilization": 0.36,
+      "ResetsAt": "2026-11-15T12:00:00Z",
+      "Status": "allowed"
+     }
+    ]
+   }
+  },
+  {
+   "line": 21,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "quota-uuid-0025-five_hour",
+    "kind": "quota",
+    "metadata": {
+     "account": "",
+     "resets_at": "2026-11-10T12:40:00Z",
+     "used": 0.15,
+     "window": "five_hour"
+    },
+    "raw": "uuid-0025",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 21,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "quota-uuid-0025-seven_day",
+    "kind": "quota",
+    "metadata": {
+     "account": "",
+     "resets_at": "2026-11-15T12:00:00Z",
+     "used": 0.36,
+     "window": "seven_day"
+    },
+    "raw": "uuid-0025",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 22,
+   "op": "turn_end",
+   "turn_end": {
+    "TurnID": "turn-1",
+    "Outcome": "completed",
+    "FailureCode": "",
+    "Usage": {
+     "InputTokens": 2,
+     "OutputTokens": 4,
+     "CacheTokens": 23685,
+     "Cost": 0.0561896
+    },
+    "CredentialExpiresAt": "2026-12-08T01:59:12.069Z"
+   }
+  },
+  {
+   "line": 22,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "turn-1-usage",
+    "kind": "usage",
+    "metadata": {
+     "cache_tokens": 23685,
+     "cost": 0.0561896,
+     "input_tokens": 2,
+     "output_tokens": 4
+    },
+    "raw": "uuid-0026",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 23,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "command_lifecycle"
+    },
+    "id": "notice-uuid-0027",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0027",
+    "revision": 0,
+    "turn": ""
+   }
+  },
+  {
+   "line": 24,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "command_lifecycle"
+    },
+    "id": "notice-uuid-0028",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0028",
+    "revision": 0,
+    "turn": ""
+   }
+  },
+  {
+   "line": 25,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "command_lifecycle"
+    },
+    "id": "notice-uuid-0030",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0030",
+    "revision": 0,
+    "turn": ""
+   }
+  },
+  {
+   "line": 26,
+   "op": "init",
+   "init": {
+    "Version": "2.1.319",
+    "SessionID": "uuid-0003",
+    "Model": "claude-sonnet-5-5",
+    "PermissionMode": "default",
+    "SlashCommands": [
+     "example-plugin:review",
+     "example-skill",
+     "clear",
+     "compact"
+    ]
+   }
+  },
+  {
+   "line": 27,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/status"
+    },
+    "id": "notice-uuid-0031",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0031",
+    "revision": 0,
+    "turn": ""
+   }
+  },
+  {
+   "line": 28,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "vendor opened separate turn for late steer"
+    },
+    "id": "notice-uuid-0029",
+    "kind": "notice",
+    "metadata": {
+     "code": "late_steer",
+     "level": "info"
+    },
+    "raw": "uuid-0029",
+    "revision": 0,
+    "turn": "vendor-uuid-0029"
+   }
+  },
+  {
+   "line": 32,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "PONG"
+    },
+    "id": "msg-0002-text-1",
+    "kind": "assistant_message",
+    "metadata": {
+     "model": "claude-sonnet-5-5"
+    },
+    "raw": "msg-0002",
+    "revision": 0,
+    "turn": "vendor-uuid-0029"
+   }
+  },
+  {
+   "line": 36,
+   "op": "turn_end",
+   "turn_end": {
+    "TurnID": "vendor-uuid-0029",
+    "Outcome": "completed",
+    "FailureCode": "",
+    "Usage": {
+     "InputTokens": 2,
+     "OutputTokens": 5,
+     "CacheTokens": 26301,
+     "Cost": 0.11475289999999999
+    },
+    "CredentialExpiresAt": "2026-12-08T01:59:12.069Z"
+   }
+  },
+  {
+   "line": 36,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "vendor-uuid-0029-usage",
+    "kind": "usage",
+    "metadata": {
+     "cache_tokens": 26301,
+     "cost": 0.11475289999999999,
+     "input_tokens": 2,
+     "output_tokens": 5
+    },
+    "raw": "uuid-0039",
+    "revision": 0,
+    "turn": "vendor-uuid-0029"
+   }
+  }
+ ]
+}

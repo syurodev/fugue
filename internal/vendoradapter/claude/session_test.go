@@ -7,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,8 +17,11 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/process"
+	"github.com/syurodev/fugue/internal/transcript"
 	"github.com/syurodev/fugue/internal/vendor"
 )
+
+const stepSigint = "sigint"
 
 func testEpoch() time.Time {
 	return time.Date(2026, 11, 10, 10, 0, 0, 0, time.UTC)
@@ -86,11 +91,10 @@ func TestSessionStartAndSendEchoTurn(t *testing.T) {
 	ctx := t.Context()
 	exe := fakeClaudeExe(t)
 
-	adapter := NewAdapter(nil)
+	adapter := NewAdapter(nil, WithBinary(exe))
 	spec := vendor.StartSpec{
-		BinaryPath: exe,
-		Cwd:        t.TempDir(),
-		SessionID:  "session-test-echo",
+		Cwd:       t.TempDir(),
+		SessionID: "session-test-echo",
 	}
 
 	sess, err := adapter.Start(ctx, &spec)
@@ -129,11 +133,10 @@ func TestSessionSendWhileRunningReturnsErrBusy(t *testing.T) {
 	ctx := t.Context()
 	exe := fakeClaudeExe(t)
 
-	adapter := NewAdapter(nil)
+	adapter := NewAdapter(nil, WithBinary(exe))
 	spec := vendor.StartSpec{
-		BinaryPath: exe,
-		Cwd:        t.TempDir(),
-		SessionID:  "session-test-busy",
+		Cwd:       t.TempDir(),
+		SessionID: "session-test-busy",
 	}
 
 	sess, err := adapter.Start(ctx, &spec)
@@ -161,11 +164,10 @@ func TestSessionSteerMidTurn(t *testing.T) {
 	ctx := t.Context()
 	exe := fakeClaudeExe(t)
 
-	adapter := NewAdapter(nil)
+	adapter := NewAdapter(nil, WithBinary(exe))
 	spec := vendor.StartSpec{
-		BinaryPath: exe,
-		Cwd:        t.TempDir(),
-		SessionID:  "session-test-steer",
+		Cwd:       t.TempDir(),
+		SessionID: "session-test-steer",
 	}
 
 	sess, err := adapter.Start(ctx, &spec)
@@ -198,11 +200,10 @@ func TestSessionSteerWhenNotRunningFailsTyped(t *testing.T) {
 	ctx := t.Context()
 	exe := fakeClaudeExe(t)
 
-	adapter := NewAdapter(nil)
+	adapter := NewAdapter(nil, WithBinary(exe))
 	spec := vendor.StartSpec{
-		BinaryPath: exe,
-		Cwd:        t.TempDir(),
-		SessionID:  "session-test-steer-idle",
+		Cwd:       t.TempDir(),
+		SessionID: "session-test-steer-idle",
 	}
 
 	sess, err := adapter.Start(ctx, &spec)
@@ -224,11 +225,10 @@ func TestSessionInterruptSuccess(t *testing.T) {
 	ctx := t.Context()
 	exe := fakeClaudeExe(t)
 
-	adapter := NewAdapter(nil)
+	adapter := NewAdapter(nil, WithBinary(exe))
 	spec := vendor.StartSpec{
-		BinaryPath: exe,
-		Cwd:        t.TempDir(),
-		SessionID:  "session-test-interrupt-success",
+		Cwd:       t.TempDir(),
+		SessionID: "session-test-interrupt-success",
 	}
 
 	sess, err := adapter.Start(ctx, &spec)
@@ -260,10 +260,10 @@ func TestSessionInterruptEscalatesToStopWhenCLIHangs(t *testing.T) {
 	adapter := NewAdapter(nil,
 		WithClock(clk),
 		WithOnEscalation(func(step string) { stepCh <- step }),
+		WithBinary(exe),
 	)
 	spec := vendor.StartSpec{
-		BinaryPath: exe,
-		Cwd:        t.TempDir(),
+		Cwd: t.TempDir(),
 		Home: vendor.AccountHome{
 			ConfigDir: fakeIgnoreInterruptConfigDir,
 		},
@@ -290,12 +290,12 @@ func TestSessionInterruptEscalatesToStopWhenCLIHangs(t *testing.T) {
 	waitAndAdvance(clk, 2, 10*time.Second)
 
 	// Stop escalation steps in F9.2 stop order
-	if step := <-stepCh; step != "interrupt" {
+	if step := <-stepCh; step != controlInterrupt {
 		t.Fatalf("expected interrupt step, got %q", step)
 	}
 	waitAndAdvance(clk, 1, 10*time.Second)
 
-	if step := <-stepCh; step != "sigint" {
+	if step := <-stepCh; step != stepSigint {
 		t.Fatalf("expected sigint step, got %q", step)
 	}
 
@@ -322,10 +322,10 @@ func TestSessionHandshakeTimeoutStopsProcess(t *testing.T) {
 	adapter := NewAdapter(nil,
 		WithClock(clk),
 		WithOnEscalation(func(step string) { stepCh <- step }),
+		WithBinary(exe),
 	)
 	spec := vendor.StartSpec{
-		BinaryPath: exe,
-		Cwd:        t.TempDir(),
+		Cwd: t.TempDir(),
 		Home: vendor.AccountHome{
 			ConfigDir: fakeNoInitConfigDir,
 		},
@@ -343,12 +343,12 @@ func TestSessionHandshakeTimeoutStopsProcess(t *testing.T) {
 	waitAndAdvance(clk, 2, 30*time.Second)
 
 	// Allow stop escalation
-	if step := <-stepCh; step != "interrupt" {
+	if step := <-stepCh; step != controlInterrupt {
 		t.Fatalf("expected interrupt step, got %q", step)
 	}
 	waitAndAdvance(clk, 1, 10*time.Second)
 
-	if step := <-stepCh; step != "sigint" {
+	if step := <-stepCh; step != stepSigint {
 		t.Fatalf("expected sigint step, got %q", step)
 	}
 
@@ -364,10 +364,9 @@ func TestSessionFrameTooLargeFailsAndCloses(t *testing.T) {
 	ctx := t.Context()
 	exe := fakeClaudeExe(t)
 
-	adapter := NewAdapter(nil)
+	adapter := NewAdapter(nil, WithBinary(exe))
 	spec := vendor.StartSpec{
-		BinaryPath: exe,
-		Cwd:        t.TempDir(),
+		Cwd: t.TempDir(),
 		Home: vendor.AccountHome{
 			ConfigDir: fakeFrameTooLargeConfigDir,
 		},
@@ -396,11 +395,10 @@ func TestSessionResolveReturnsErrUnsupported(t *testing.T) {
 	ctx := t.Context()
 	exe := fakeClaudeExe(t)
 
-	adapter := NewAdapter(nil)
+	adapter := NewAdapter(nil, WithBinary(exe))
 	spec := vendor.StartSpec{
-		BinaryPath: exe,
-		Cwd:        t.TempDir(),
-		SessionID:  "session-test-resolve",
+		Cwd:       t.TempDir(),
+		SessionID: "session-test-resolve",
 	}
 
 	sess, err := adapter.Start(ctx, &spec)
@@ -421,11 +419,10 @@ func TestSessionCloseIdempotentAndStopsProcess(t *testing.T) {
 	ctx := t.Context()
 	exe := fakeClaudeExe(t)
 
-	adapter := NewAdapter(nil)
+	adapter := NewAdapter(nil, WithBinary(exe))
 	spec := vendor.StartSpec{
-		BinaryPath: exe,
-		Cwd:        t.TempDir(),
-		SessionID:  "session-test-close-idempotent",
+		Cwd:       t.TempDir(),
+		SessionID: "session-test-close-idempotent",
 	}
 
 	sess, err := adapter.Start(ctx, &spec)
@@ -468,10 +465,9 @@ func TestSessionUntestedVersionWarnsButRuns(t *testing.T) {
 	ctx := t.Context()
 	exe := fakeClaudeExe(t)
 
-	adapter := NewAdapter(nil)
+	adapter := NewAdapter(nil, WithBinary(exe))
 	spec := vendor.StartSpec{
-		BinaryPath: exe,
-		Cwd:        t.TempDir(),
+		Cwd: t.TempDir(),
 		Home: vendor.AccountHome{
 			ConfigDir: fakeUntestedVersionConfigDir,
 		},
@@ -489,11 +485,9 @@ func TestSessionStartRelativeBinaryFailsTyped(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
-	adapter := NewAdapter(nil)
+	adapter := NewAdapter(nil, WithBinary("relative/path/claude"))
 
-	_, err := adapter.Start(ctx, &vendor.StartSpec{
-		BinaryPath: "relative/path/claude",
-	})
+	_, err := adapter.Start(ctx, &vendor.StartSpec{})
 	if errcode.CodeOf(err) != errcode.InvalidArgument {
 		t.Fatalf("expected InvalidArgument for relative BinaryPath, got %v", err)
 	}
@@ -533,11 +527,10 @@ func TestSessionCloseUnblocksWhenSendBlocked(t *testing.T) {
 	}
 
 	clk := clock.NewFake(testEpoch())
-	adapter := NewAdapter(nil, WithClock(clk))
+	adapter := NewAdapter(nil, WithClock(clk), WithBinary(testExe))
 	ctx := t.Context()
 	sess, err := adapter.Start(ctx, &vendor.StartSpec{
-		SessionID:  "session-blocked-write",
-		BinaryPath: testExe,
+		SessionID: "session-blocked-write",
 		Home: vendor.AccountHome{
 			ConfigDir: fakeNeverReadStdinConfigDir,
 		},
@@ -587,11 +580,10 @@ func TestSessionNormalizerRace(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	adapter := NewAdapter(nil)
+	adapter := NewAdapter(nil, WithBinary(testExe))
 	ctx := t.Context()
 	sess, err := adapter.Start(ctx, &vendor.StartSpec{
-		SessionID:  "session-race",
-		BinaryPath: testExe,
+		SessionID: "session-race",
 		Home: vendor.AccountHome{
 			ConfigDir: fakeContinuousOutputConfigDir,
 		},
@@ -626,11 +618,10 @@ func TestSessionInterruptContextCanceledDoesNotCloseSession(t *testing.T) {
 	ctx := t.Context()
 	exe := fakeClaudeExe(t)
 
-	adapter := NewAdapter(nil)
+	adapter := NewAdapter(nil, WithBinary(exe))
 	spec := vendor.StartSpec{
-		BinaryPath: exe,
-		Cwd:        t.TempDir(),
-		SessionID:  "session-test-interrupt-canceled",
+		Cwd:       t.TempDir(),
+		SessionID: "session-test-interrupt-canceled",
 	}
 
 	sess, err := adapter.Start(ctx, &spec)
@@ -684,11 +675,10 @@ func TestSessionSteerThenSubsequentSendWorks(t *testing.T) {
 	ctx := t.Context()
 	exe := fakeClaudeExe(t)
 
-	adapter := NewAdapter(nil)
+	adapter := NewAdapter(nil, WithBinary(exe))
 	spec := vendor.StartSpec{
-		BinaryPath: exe,
-		Cwd:        t.TempDir(),
-		SessionID:  "session-test-steer-subsequent",
+		Cwd:       t.TempDir(),
+		SessionID: "session-test-steer-subsequent",
 	}
 
 	sess, err := adapter.Start(ctx, &spec)
@@ -732,37 +722,241 @@ func TestSessionSteerThenSubsequentSendWorks(t *testing.T) {
 	}
 }
 
-func TestSteerFixtureReplayExactOneTurnEndAndReady(t *testing.T) {
-	t.Parallel()
-
-	lines := readFixture(t, "claude-2.1.319-session3-steer.jsonl")
-	if len(lines) == 0 {
-		t.Fatal("fixture lines empty")
-	}
-
-	n := NewNormalizer("test-session-steer-golden")
-	n.BeginTurn("turn-steer-1")
-
+func drainSteerFixtureObservations(obsCh <-chan Observation) (int, *TurnEnd, bool) {
 	var turnEndCount int
 	var lastTurnEnd *TurnEnd
-	for i, line := range lines {
-		obs, err := n.Normalize(line)
-		if err != nil {
-			t.Fatalf("line %d did not normalize: %v", i+1, err)
+	var sawPONG bool
+	for obs := range obsCh {
+		for i := range obs.Records {
+			rec := &obs.Records[i]
+			if rec.Kind == transcript.AssistantMessage {
+				if content, ok := rec.Content.(transcript.AssistantMessageContent); ok && strings.Contains(content.Text, "PONG") {
+					sawPONG = true
+				}
+			}
 		}
 		if obs.TurnEnd != nil {
 			turnEndCount++
 			lastTurnEnd = obs.TurnEnd
+			break
 		}
 	}
+	return turnEndCount, lastTurnEnd, sawPONG
+}
+
+func getSessionState(s *Session) sessionState {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.state
+}
+
+func waitForRunningTurn(s *Session) vendor.TurnRef {
+	for {
+		s.mu.Lock()
+		running := s.state == stateRunning
+		currTurn := s.currentTurn
+		s.mu.Unlock()
+		if running && currTurn != "" {
+			return vendor.TurnRef{ID: currTurn}
+		}
+		runtime.Gosched()
+	}
+}
+
+func TestSteerFixtureReplayExactOneTurnEndAndReady(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	fixtureAbs, err := filepath.Abs(filepath.Join("testdata", "fixtures", "claude-2.1.319-session3-steer.jsonl"))
+	if err != nil {
+		t.Fatalf("resolve fixture path: %v", err)
+	}
+
+	adapter := NewAdapter(nil, WithBinary(fakeClaudeExe(t)))
+	spec := vendor.StartSpec{
+		Cwd: t.TempDir(),
+		Home: vendor.AccountHome{
+			ConfigDir: fakeReplaySteerFixtureConfigDir + ":" + fixtureAbs,
+		},
+		SessionID: "session-test-steer-fixture-replay",
+	}
+
+	sess, err := adapter.Start(ctx, &spec)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer closeSession(t, ctx, sess)
+
+	turn, err := sess.Send(ctx, vendor.Input{Text: "Read the file notes.txt with the Read tool, then answer what it warns about."})
+	if err != nil {
+		t.Fatalf("Send failed: %v", err)
+	}
+
+	if err := sess.Steer(ctx, turn, vendor.Input{Text: "Also include the exact uppercase word PONG in your response."}); err != nil {
+		t.Fatalf("Steer failed: %v", err)
+	}
+
+	claudeSess := asClaudeSession(t, sess)
+	turnEndCount, lastTurnEnd, sawPONG := drainSteerFixtureObservations(claudeSess.Observations())
 
 	if turnEndCount != 1 {
-		t.Fatalf("expected exactly 1 TurnEnd in steer fixture, got %d", turnEndCount)
+		t.Fatalf("expected exactly 1 TurnEnd in steer fixture replay, got %d", turnEndCount)
 	}
 	if lastTurnEnd.Outcome != OutcomeCompleted {
 		t.Fatalf("expected OutcomeCompleted, got %q", lastTurnEnd.Outcome)
 	}
-	if n.turn != "" {
-		t.Fatalf("expected normalizer turn to be cleared after result, got %q", n.turn)
+	if !sawPONG {
+		t.Fatal("expected assistant message containing PONG")
+	}
+	if state := getSessionState(claudeSess); state != stateReady {
+		t.Fatalf("expected session state to be stateReady, got %d", state)
+	}
+}
+
+func TestSessionInterruptEscalatesWhenWriteIsWedged(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	clk := clock.NewFake(testEpoch())
+	adapter := NewAdapter(nil, WithBinary(fakeClaudeExe(t)), WithClock(clk))
+	spec := vendor.StartSpec{
+		Cwd:       t.TempDir(),
+		Home:      vendor.AccountHome{ConfigDir: fakeNeverReadStdinConfigDir},
+		SessionID: "session-test-interrupt-wedged",
+	}
+
+	sess, err := adapter.Start(ctx, &spec)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer closeSession(t, ctx, sess)
+
+	claudeSess := asClaudeSession(t, sess)
+	sendErrCh := make(chan error, 1)
+	_ = supervise.Go(ctx, "test.send_wedged", func(taskCtx context.Context) error {
+		_, sendErr := sess.Send(ctx, vendor.Input{Text: strings.Repeat("A", 1024*1024)})
+		sendErrCh <- sendErr
+		return nil
+	})
+
+	turn := waitForRunningTurn(claudeSess)
+
+	initialPending := clk.Pending()
+	intErrCh := make(chan error, 1)
+	_ = supervise.Go(ctx, "test.interrupt_wedged", func(taskCtx context.Context) error {
+		intErrCh <- sess.Interrupt(ctx, turn)
+		return nil
+	})
+
+	waitAndAdvance(clk, initialPending+1, 10*time.Second)
+
+	intErr := driveUntilErr(ctx, clk, intErrCh)
+	if errcode.CodeOf(intErr) != errcode.DeadlineExceeded {
+		t.Fatalf("expected DeadlineExceeded from Interrupt, got %v", intErr)
+	}
+
+	if state := getSessionState(claudeSess); state != stateClosed {
+		t.Fatalf("expected stateClosed, got %d", state)
+	}
+
+	if sendErr := <-sendErrCh; !errors.Is(sendErr, vendor.ErrSessionClosed) {
+		t.Fatalf("expected ErrSessionClosed for wedged Send, got %v", sendErr)
+	}
+}
+
+func TestProtocolInterruptSkipsWhenWriteBusy(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	exe := fakeClaudeExe(t)
+
+	adapter := NewAdapter(nil, WithBinary(exe))
+	spec := vendor.StartSpec{
+		Cwd:       t.TempDir(),
+		SessionID: "session-test-protocol-interrupt-busy",
+	}
+
+	sess, err := adapter.Start(ctx, &spec)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer closeSession(t, ctx, sess)
+
+	claudeSess := asClaudeSession(t, sess)
+
+	// Simulate writeSem being busy (e.g. held by Send/Steer)
+	claudeSess.writeSem <- struct{}{}
+
+	intFn := makeProtocolInterrupt(claudeSess)
+	// Must not block and return nil (skip protocol interrupt)
+	if err := intFn(ctx); err != nil {
+		t.Fatalf("expected nil when write is busy, got %v", err)
+	}
+
+	// Release semaphore
+	<-claudeSess.writeSem
+
+	// When writeSem is free, makeProtocolInterrupt succeeds
+	if err := intFn(ctx); err != nil {
+		t.Fatalf("expected nil when write is free, got %v", err)
+	}
+}
+
+func TestFrameTooLargeAfterStartContextCanceledStillUsesStopOrder(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	exe := fakeClaudeExe(t)
+
+	var escalationSteps []string
+	var escMu sync.Mutex
+
+	adapter := NewAdapter(nil,
+		WithBinary(exe),
+		WithOnEscalation(func(step string) {
+			escMu.Lock()
+			escalationSteps = append(escalationSteps, step)
+			escMu.Unlock()
+		}),
+	)
+
+	startCtx, cancelStart := context.WithCancel(ctx)
+	spec := vendor.StartSpec{
+		Cwd: t.TempDir(),
+		Home: vendor.AccountHome{
+			ConfigDir: fakeFrameTooLargeConfigDir,
+		},
+		SessionID: "session-test-frame-too-large-start-canceled",
+	}
+
+	sess, err := adapter.Start(startCtx, &spec)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	// Cancel the context passed to Start immediately after Start succeeds
+	cancelStart()
+
+	claudeSess := asClaudeSession(t, sess)
+	// Wait for reader to hit frame too large and handleReaderError to stop the process
+	<-claudeSess.readerDoneCh
+
+	escMu.Lock()
+	steps := slices.Clone(escalationSteps)
+	escMu.Unlock()
+
+	if len(steps) == 0 {
+		t.Fatal("expected escalation steps to be recorded")
+	}
+	if steps[0] != controlInterrupt && steps[0] != stepSigint {
+		t.Fatalf("expected stop order to start with interrupt or sigint, got %v", steps)
+	}
+
+	proof, closeErr := sess.Close(ctx, vendor.CloseHostStop)
+	if closeErr != nil {
+		t.Fatalf("Close failed: %v", closeErr)
+	}
+	if proof.Reason == process.ReasonContextCanceled {
+		t.Fatalf("StopProof must not be ReasonContextCanceled when Start ctx was canceled, got %q", proof.Reason)
 	}
 }

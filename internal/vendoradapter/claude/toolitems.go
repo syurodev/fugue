@@ -73,7 +73,7 @@ func (n *Normalizer) textItem(msg wireMessage, block *wireBlock, kind transcript
 	return transcript.Item{
 		ID:        msg.ID + "-" + block.Type + "-" + strconv.Itoa(n.msgCounts[key]),
 		SessionID: n.session,
-		TurnID:    n.turn,
+		TurnID:    n.currentTurnID(),
 		Kind:      kind,
 		RawRef:    msg.ID,
 		Metadata:  metadata,
@@ -102,7 +102,7 @@ func (n *Normalizer) toolCallItem(block *wireBlock, env *envelope) transcript.It
 	item := transcript.Item{
 		ID:        block.ID,
 		SessionID: n.session,
-		TurnID:    n.turn,
+		TurnID:    n.currentTurnID(),
 		Kind:      transcript.ToolCall,
 		RawRef:    n.rawRef(env),
 		Metadata:  transcript.ToolCallMetadata{ToolName: block.Name, Status: toolPending},
@@ -127,7 +127,7 @@ func (n *Normalizer) subagentItem(block *wireBlock, env *envelope) transcript.It
 	item := transcript.Item{
 		ID:        block.ID,
 		SessionID: n.session,
-		TurnID:    n.turn,
+		TurnID:    n.currentTurnID(),
 		Kind:      transcript.Subagent,
 		RawRef:    n.rawRef(env),
 		Metadata:  transcript.SubagentMetadata{Status: toolPending},
@@ -160,7 +160,7 @@ func (n *Normalizer) recordPlan(block *wireBlock, env *envelope) ([]transcript.I
 	}
 	meta := transcript.PlanMetadata{Steps: len(steps), Current: current}
 	content := transcript.PlanContent{Steps: steps}
-	planID := n.turn + "-plan"
+	planID := n.currentTurnID() + "-plan"
 	if item, ok := n.items[planID]; ok {
 		next := bumpRevision(item)
 		next.Metadata = meta
@@ -170,7 +170,7 @@ func (n *Normalizer) recordPlan(block *wireBlock, env *envelope) ([]transcript.I
 	item := transcript.Item{
 		ID:        planID,
 		SessionID: n.session,
-		TurnID:    n.turn,
+		TurnID:    n.currentTurnID(),
 		Kind:      transcript.Plan,
 		RawRef:    n.rawRef(env),
 		Metadata:  meta,
@@ -184,6 +184,24 @@ func (n *Normalizer) normalizeUser(line []byte, env *envelope) Observation {
 	var w wireUser
 	if json.Unmarshal(line, &w) != nil {
 		return n.unsupported(env, noticeLabel(env))
+	}
+	if w.IsReplay {
+		targetTurn, isSteer := n.steerTurns[w.UUID]
+		if isSteer && n.turnFinished[targetTurn] {
+			vendorTurnID := "vendor-" + w.UUID
+			n.vendorTurn = vendorTurnID
+			item := transcript.Item{
+				ID:        "notice-" + n.rawRef(env),
+				SessionID: n.session,
+				TurnID:    vendorTurnID,
+				Kind:      transcript.Notice,
+				RawRef:    n.rawRef(env),
+				Metadata:  transcript.NoticeMetadata{Level: "info", Code: "late_steer"},
+				Content:   transcript.NoticeContent{Text: "vendor opened separate turn for late steer"},
+			}
+			return Observation{Records: []transcript.Item{item}}
+		}
+		return Observation{}
 	}
 	blocks := toolResultBlocks(w.Message.Content)
 	if len(blocks) == 0 {

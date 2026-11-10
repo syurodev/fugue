@@ -1,0 +1,15 @@
+{
+ "sends": [
+  {
+   "beforeLine": 1,
+   "turn": "turn-1"
+  }
+ ],
+ "steers": [
+  {
+   "beforeLine": 23,
+   "text": "Reply with exactly: PONG",
+   "uuid": "uuid-0029"
+  }
+ ]
+}

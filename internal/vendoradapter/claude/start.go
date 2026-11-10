@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -116,6 +117,7 @@ func BuildArgv(binary string, spec *vendor.StartSpec) ([]string, error) {
 		"--output-format", "stream-json",
 		"--verbose",
 		"--include-partial-messages",
+		"--replay-user-messages",
 	}
 
 	if spec.Model != "" {
@@ -136,14 +138,24 @@ func BuildArgv(binary string, spec *vendor.StartSpec) ([]string, error) {
 	return argv, nil
 }
 
-func (a *Adapter) resolveStartBinary(ctx context.Context, spec *vendor.StartSpec) (string, error) {
-	if spec.BinaryPath != "" {
-		if !filepath.IsAbs(spec.BinaryPath) {
-			return "", errcode.New(errcode.InvalidArgument, "spec binary path must be an absolute path")
+func checkAbsoluteBinary(path string) (string, error) {
+	if _, err := os.Stat(path); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", errcode.Wrap(errcode.NotFound, "claude binary not found", err)
 		}
-		return spec.BinaryPath, nil
+		if errors.Is(err, os.ErrPermission) {
+			return "", errcode.Wrap(errcode.PermissionDenied, "claude binary permission denied", err)
+		}
+		return "", errcode.Wrap(errcode.Internal, "stat claude binary", err)
 	}
-	probe, err := a.Probe(ctx, spec.Home)
+	return path, nil
+}
+
+func (a *Adapter) resolveStartBinary(ctx context.Context, home vendor.AccountHome) (string, error) {
+	if a.Binary != "" && filepath.IsAbs(a.Binary) {
+		return checkAbsoluteBinary(a.Binary)
+	}
+	probe, err := a.Probe(ctx, home)
 	if err != nil {
 		return "", err
 	}
@@ -157,7 +169,7 @@ func (a *Adapter) Start(ctx context.Context, spec *vendor.StartSpec) (vendor.Ses
 		return nil, errcode.New(errcode.InvalidArgument, "spec must not be nil")
 	}
 
-	binaryPath, err := a.resolveStartBinary(ctx, spec)
+	binaryPath, err := a.resolveStartBinary(ctx, spec.Home)
 	if err != nil {
 		return nil, err
 	}
@@ -184,6 +196,7 @@ func (a *Adapter) Start(ctx context.Context, spec *vendor.StartSpec) (vendor.Ses
 		obsCh:        make(chan Observation, observationBufferSize),
 		closeNotify:  make(chan struct{}),
 		readerDoneCh: make(chan struct{}),
+		writeSem:     make(chan struct{}, 1),
 		state:        stateStarting,
 	}
 
@@ -197,7 +210,7 @@ func (a *Adapter) Start(ctx context.Context, spec *vendor.StartSpec) (vendor.Ses
 	initCh := make(chan *Init, 1)
 	readerErrCh := make(chan error, 1)
 
-	supervise.Go(ctx, "claude.reader", func(taskCtx context.Context) error {
+	supervise.Go(context.WithoutCancel(ctx), "claude.reader", func(taskCtx context.Context) error {
 		sess.runReader(taskCtx, initCh, readerErrCh)
 		return nil
 	})
@@ -234,13 +247,19 @@ func (a *Adapter) spawnSessionProcess(
 
 	proc, err := process.Spawn(ctx, opts)
 	if err != nil {
+		if errors.Is(err, process.ErrBinaryNotFound) {
+			return nil, errcode.Wrap(errcode.NotFound, "spawn claude process", err)
+		}
+		if errors.Is(err, process.ErrNotExecutable) {
+			return nil, errcode.Wrap(errcode.PermissionDenied, "spawn claude process", err)
+		}
 		return nil, errcode.Wrap(errcode.Internal, "spawn claude process", err)
 	}
 	return proc, nil
 }
 
 func makeProtocolInterrupt(sess *Session) func(context.Context) error {
-	return func(_ context.Context) error {
+	return func(ctx context.Context) error {
 		if sess == nil || sess.proc == nil {
 			return nil
 		}
@@ -255,8 +274,13 @@ func makeProtocolInterrupt(sess *Session) func(context.Context) error {
 		if err != nil {
 			return errcode.Wrap(errcode.Internal, "encode stop interrupt", err)
 		}
-		sess.writeMu.Lock()
-		defer sess.writeMu.Unlock()
+		select {
+		case sess.writeSem <- struct{}{}:
+			defer func() { <-sess.writeSem }()
+		default:
+			// Write is busy with Send/Steer; skip protocol interrupt to allow stop order to proceed.
+			return nil
+		}
 		if writeErr := sess.proc.WriteLine(raw); writeErr != nil {
 			if errors.Is(writeErr, process.ErrStdinClosed) {
 				return nil
@@ -297,10 +321,10 @@ func (s *Session) waitForHandshake(ctx context.Context, initCh <-chan *Init, rea
 
 func (s *Session) cleanupStartup(ctx context.Context) {
 	if err := s.proc.CloseStdin(); err != nil {
-		slog.Warn("claude startup cleanup: close stdin error", "session_id", s.sessionID, "error", err)
+		slog.WarnContext(ctx, "claude startup cleanup: close stdin error", "session_id", s.sessionID, "error", err)
 	}
-	if _, err := s.proc.Stop(ctx); err != nil {
-		slog.Warn("claude startup cleanup: stop error", "session_id", s.sessionID, "error", err)
+	if _, err := s.proc.Stop(context.WithoutCancel(ctx)); err != nil {
+		slog.WarnContext(ctx, "claude startup cleanup: stop error", "session_id", s.sessionID, "error", err)
 	}
 	close(s.closeNotify)
 	<-s.readerDoneCh

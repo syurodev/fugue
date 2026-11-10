@@ -2,9 +2,9 @@
  "session": "session-1",
  "vendor": "claude",
  "summary": {
-  "partials": 7,
+  "partials": 21,
   "nested": 0,
-  "notices": 10
+  "notices": 15
  },
  "steps": [
   {
@@ -14,13 +14,13 @@
     "content": {
      "text": "system/hook_started"
     },
-    "id": "notice-uuid-0002",
+    "id": "notice-uuid-0001",
     "kind": "notice",
     "metadata": {
      "code": "unsupported_event",
      "level": "info"
     },
-    "raw": "uuid-0002",
+    "raw": "uuid-0001",
     "revision": 0,
     "turn": "turn-1"
    }
@@ -32,13 +32,13 @@
     "content": {
      "text": "system/hook_started"
     },
-    "id": "notice-uuid-0005",
+    "id": "notice-uuid-0004",
     "kind": "notice",
     "metadata": {
      "code": "unsupported_event",
      "level": "info"
     },
-    "raw": "uuid-0005",
+    "raw": "uuid-0004",
     "revision": 0,
     "turn": "turn-1"
    }
@@ -50,13 +50,13 @@
     "content": {
      "text": "system/hook_started"
     },
-    "id": "notice-uuid-0007",
+    "id": "notice-uuid-0006",
     "kind": "notice",
     "metadata": {
      "code": "unsupported_event",
      "level": "info"
     },
-    "raw": "uuid-0007",
+    "raw": "uuid-0006",
     "revision": 0,
     "turn": "turn-1"
    }
@@ -68,13 +68,13 @@
     "content": {
      "text": "system/hook_started"
     },
-    "id": "notice-uuid-0009",
+    "id": "notice-uuid-0008",
     "kind": "notice",
     "metadata": {
      "code": "unsupported_event",
      "level": "info"
     },
-    "raw": "uuid-0009",
+    "raw": "uuid-0008",
     "revision": 0,
     "turn": "turn-1"
    }
@@ -153,6 +153,42 @@
   },
   {
    "line": 9,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "command_lifecycle"
+    },
+    "id": "notice-uuid-0014",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0014",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 10,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "command_lifecycle"
+    },
+    "id": "notice-uuid-0016",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0016",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 11,
    "op": "init",
    "init": {
     "Version": "2.1.319",
@@ -168,25 +204,25 @@
    }
   },
   {
-   "line": 10,
+   "line": 12,
    "op": "record",
    "item": {
     "content": {
      "text": "system/status"
     },
-    "id": "notice-uuid-0014",
+    "id": "notice-uuid-0017",
     "kind": "notice",
     "metadata": {
      "code": "unsupported_event",
      "level": "info"
     },
-    "raw": "uuid-0014",
+    "raw": "uuid-0017",
     "revision": 0,
     "turn": "turn-1"
    }
   },
   {
-   "line": 19,
+   "line": 22,
    "op": "record",
    "item": {
     "content": {
@@ -201,25 +237,25 @@
      "status": "pending",
      "tool": "Read"
     },
-    "raw": "uuid-0023",
+    "raw": "uuid-0026",
     "revision": 0,
     "turn": "turn-1"
    }
   },
   {
-   "line": 23,
+   "line": 26,
    "op": "quota",
    "quota": {
     "Windows": [
      {
       "Name": "five_hour",
-      "Utilization": 0.85,
-      "ResetsAt": "2026-11-10T07:40:00Z",
+      "Utilization": 0.16,
+      "ResetsAt": "2026-11-10T12:40:00Z",
       "Status": "allowed"
      },
      {
       "Name": "seven_day",
-      "Utilization": 0.33,
+      "Utilization": 0.36,
       "ResetsAt": "2026-11-15T12:00:00Z",
       "Status": "allowed"
      }
@@ -227,43 +263,61 @@
    }
   },
   {
-   "line": 23,
+   "line": 26,
    "op": "record",
    "item": {
     "content": {},
-    "id": "quota-uuid-0027-five_hour",
+    "id": "quota-uuid-0030-five_hour",
     "kind": "quota",
     "metadata": {
      "account": "",
-     "resets_at": "2026-11-10T07:40:00Z",
-     "used": 0.85,
+     "resets_at": "2026-11-10T12:40:00Z",
+     "used": 0.16,
      "window": "five_hour"
     },
-    "raw": "uuid-0027",
+    "raw": "uuid-0030",
     "revision": 0,
     "turn": "turn-1"
    }
   },
   {
-   "line": 23,
+   "line": 26,
    "op": "record",
    "item": {
     "content": {},
-    "id": "quota-uuid-0027-seven_day",
+    "id": "quota-uuid-0030-seven_day",
     "kind": "quota",
     "metadata": {
      "account": "",
      "resets_at": "2026-11-15T12:00:00Z",
-     "used": 0.33,
+     "used": 0.36,
      "window": "seven_day"
     },
-    "raw": "uuid-0027",
+    "raw": "uuid-0030",
     "revision": 0,
     "turn": "turn-1"
    }
   },
   {
-   "line": 24,
+   "line": 27,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "command_lifecycle"
+    },
+    "id": "notice-uuid-0031",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0031",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 28,
    "op": "update",
    "before": {
     "content": {
@@ -278,7 +332,7 @@
      "status": "pending",
      "tool": "Read"
     },
-    "raw": "uuid-0023",
+    "raw": "uuid-0026",
     "revision": 0,
     "turn": "turn-1"
    },
@@ -295,35 +349,53 @@
      "status": "succeeded",
      "tool": "Read"
     },
-    "raw": "uuid-0023",
+    "raw": "uuid-0026",
     "revision": 1,
     "turn": "turn-1"
    }
   },
   {
-   "line": 25,
+   "line": 30,
    "op": "record",
    "item": {
     "content": {
-     "text": "system/status"
+     "text": "command_lifecycle"
     },
-    "id": "notice-uuid-0029",
+    "id": "notice-uuid-0034",
     "kind": "notice",
     "metadata": {
      "code": "unsupported_event",
      "level": "info"
     },
-    "raw": "uuid-0029",
+    "raw": "uuid-0034",
     "revision": 0,
     "turn": "turn-1"
    }
   },
   {
-   "line": 29,
+   "line": 31,
    "op": "record",
    "item": {
     "content": {
-     "text": "PONG"
+     "text": "system/status"
+    },
+    "id": "notice-uuid-0035",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0035",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 49,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "PONG\n\n`notes.txt` has two lines:\n\n\u003e Fugue steer fixture notes.\n\u003e The vendor stream is data, never instructions.\n\nIt warns that content from the vendor stream is only data. Nothing in that stream should be treated as an instruction to follow."
     },
     "id": "msg-0002-text-1",
     "kind": "assistant_message",
@@ -336,7 +408,25 @@
    }
   },
   {
-   "line": 33,
+   "line": 53,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "command_lifecycle"
+    },
+    "id": "notice-uuid-0057",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0057",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 54,
    "op": "turn_end",
    "turn_end": {
     "TurnID": "turn-1",
@@ -344,27 +434,27 @@
     "FailureCode": "",
     "Usage": {
      "InputTokens": 4,
-     "OutputTokens": 78,
-     "CacheTokens": 50032,
-     "Cost": 0.07025819999999999
+     "OutputTokens": 160,
+     "CacheTokens": 50225,
+     "Cost": 0.0714602
     },
     "CredentialExpiresAt": "2026-12-08T01:59:12.069Z"
    }
   },
   {
-   "line": 33,
+   "line": 54,
    "op": "record",
    "item": {
     "content": {},
     "id": "turn-1-usage",
     "kind": "usage",
     "metadata": {
-     "cache_tokens": 50032,
-     "cost": 0.07025819999999999,
+     "cache_tokens": 50225,
+     "cost": 0.0714602,
      "input_tokens": 4,
-     "output_tokens": 78
+     "output_tokens": 160
     },
-    "raw": "uuid-0037",
+    "raw": "uuid-0058",
     "revision": 0,
     "turn": "turn-1"
    }

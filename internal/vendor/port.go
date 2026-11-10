@@ -78,7 +78,6 @@ type StartSpec struct {
 	Model           string
 	Effort          string
 	ResumeSessionID string
-	BinaryPath      string
 }
 
 // Input is one user input: a message text, or a slash command as the whole

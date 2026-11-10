@@ -11,6 +11,7 @@ import (
 	"errors"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
@@ -143,6 +144,9 @@ func (a *Adapter) Probe(ctx context.Context, home vendor.AccountHome) (vendor.Pr
 func (a *Adapter) resolveBinary() (string, error) {
 	if a.Binary == "" {
 		return "", errcode.New(errcode.InvalidArgument, "claude binary is empty")
+	}
+	if strings.ContainsRune(a.Binary, filepath.Separator) && !filepath.IsAbs(a.Binary) {
+		return "", errcode.New(errcode.InvalidArgument, "claude binary must be an absolute path")
 	}
 	path, err := exec.LookPath(a.Binary)
 	switch {

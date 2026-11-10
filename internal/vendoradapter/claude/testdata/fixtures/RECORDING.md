@@ -28,6 +28,32 @@ F9.6), so the fixture also covers `system/permission_denied` and an error
 `tool_result`. A TodoWrite tool is not offered by this install, which the model
 reports in its final text.
 
+## Additional Fixtures (F9.5b)
+
+### Interrupt: `claude-2.1.319-session2-interrupt.jsonl`
+Recorded from `claude 2.1.319` with a long-running turn interrupted mid-flight via a control message request:
+```sh
+{"type":"control_request","request_id":"req-interrupt-1","request":{"subtype":"interrupt"}}
+```
+The CLI emits `control_response`, records user interrupt notice, and produces an error result with `[Request interrupted by user]`.
+
+### Steer: `claude-2.1.319-session3-steer.jsonl`
+Recorded from `claude 2.1.319` with `--replay-user-messages` enabled:
+1. Sent initial prompt requesting the model to read `notes.txt` using the `Read` tool.
+2. While the turn was running (at line 23 in `turns.json`), sent mid-turn steer input:
+   ```json
+   {"type":"user","uuid":"...","message":{"role":"user","content":[{"type":"text","text":"Also include the exact uppercase word PONG in your response."}]}}
+   ```
+3. The CLI incorporated the steer input into the same turn, echoed the user message with `isReplay: true` retaining the input `uuid`, and emitted exactly ONE `result` event containing the uppercase word `PONG`.
+4. Consistent file path `/home/REDACTED/claude-fixture/notes.txt` used throughout.
+
+### Late Steer: `claude-2.1.319-session4-late-steer.jsonl`
+Recorded from `claude 2.1.319` with `--replay-user-messages` enabled:
+1. Sent prompt "Reply with exactly: PING", which completes turn 1 with result "PING" at line 22.
+2. After turn 1 finished, sent late steer "Reply with exactly: PONG".
+3. The real CLI reopened execution as a second vendor turn, echoing the user message with `isReplay: true` and the preserved `uuid`, producing a second `result` with "PONG".
+4. Normalizer tracks completed turns, emits a `transcript.Notice` (level: "info", code: "late_steer"), and attributes subsequent vendor events and `turn_end` to `vendor-<uuid>`.
+
 ## Redaction (apply before commit; verified by scanning the result)
 
 1. Every UUID (session id, event `uuid`, `hook_id`) becomes `uuid-NNNN` in order

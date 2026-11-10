@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	"testing"
 
 	"go.uber.org/goleak"
+	"golang.org/x/sys/unix"
 
 	"github.com/syurodev/fugue/internal/platform/supervise"
 )
@@ -21,19 +23,20 @@ import (
 // command exit non-zero, hang forever, or flood stdout. fixtureCLI is the
 // pinned version the fixtures were recorded from.
 const (
-	fakeFailConfigDir             = "/probe/fail"
-	fakeHangConfigDir             = "/probe/hang"
-	fakeFloodConfigDir            = "/probe/flood"
-	fakeNoInitConfigDir           = "/session/no-init"
-	fakeIgnoreInterruptConfigDir  = "/session/ignore-interrupt"
-	fakeFrameTooLargeConfigDir    = "/session/frame-too-large"
-	fakeCheckEnvConfigDir         = "/session/check-env"
-	fakePrintArgvConfigDir        = "/session/print-argv"
-	fakeUntestedVersionConfigDir  = "/session/untested-version"
-	fakeNeverReadStdinConfigDir   = "/session/never-read-stdin"
-	fakeContinuousOutputConfigDir = "/session/continuous-output"
-	fakeCrashConfigDir            = "/session/crash"
-	fixtureCLI                    = "2.1.319"
+	fakeFailConfigDir               = "/probe/fail"
+	fakeHangConfigDir               = "/probe/hang"
+	fakeFloodConfigDir              = "/probe/flood"
+	fakeNoInitConfigDir             = "/session/no-init"
+	fakeIgnoreInterruptConfigDir    = "/session/ignore-interrupt"
+	fakeFrameTooLargeConfigDir      = "/session/frame-too-large"
+	fakeCheckEnvConfigDir           = "/session/check-env"
+	fakePrintArgvConfigDir          = "/session/print-argv"
+	fakeUntestedVersionConfigDir    = "/session/untested-version"
+	fakeNeverReadStdinConfigDir     = "/session/never-read-stdin"
+	fakeContinuousOutputConfigDir   = "/session/continuous-output"
+	fakeCrashConfigDir              = "/session/crash"
+	fakeReplaySteerFixtureConfigDir = "/session/replay-steer-fixture"
+	fixtureCLI                      = "2.1.319"
 )
 
 // writeOut writes the fake CLI's stdout, exiting on failure like a real CLI
@@ -102,6 +105,41 @@ func hangForever() {
 	<-sig
 }
 
+// hangUntilStdinHUP blocks until stdin's write end is closed (POLLHUP) or SIGINT
+// is received, without reading any data from stdin.
+func pollStdinClosed(fds []unix.PollFd) bool {
+	n, err := unix.Poll(fds, 50)
+	if err != nil {
+		return !errors.Is(err, unix.EINTR)
+	}
+	return n > 0 && (fds[0].Revents&(unix.POLLHUP|unix.POLLERR|unix.POLLNVAL)) != 0
+}
+
+func monitorStdinHUP(ctx context.Context, hupCh chan struct{}) {
+	//nolint:gosec // stdin fd fits in int32
+	fds := []unix.PollFd{{Fd: int32(os.Stdin.Fd()), Events: 0}}
+	for {
+		if ctx.Err() != nil || pollStdinClosed(fds) {
+			close(hupCh)
+			return
+		}
+	}
+}
+
+func hangUntilStdinHUP() {
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt)
+	hupCh := make(chan struct{})
+	_ = supervise.Go(context.Background(), "fake.stdin_hup", func(ctx context.Context) error {
+		monitorStdinHUP(ctx, hupCh)
+		return nil
+	})
+	select {
+	case <-sig:
+	case <-hupCh:
+	}
+}
+
 // floodOut writes up to 64 MiB of stdout, stopping at the first write error
 // (the probe killed it or closed the pipe).
 func floodOut() {
@@ -148,6 +186,10 @@ func handleEarlyExitEnvs() bool {
 		if _, err := os.Stdout.Write(large); err != nil {
 			os.Exit(1)
 		}
+		scanner := bufio.NewScanner(os.Stdin)
+		if scanner.Scan() {
+			os.Exit(0)
+		}
 		return true
 	}
 	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakePrintArgvConfigDir) {
@@ -162,39 +204,49 @@ func handleEarlyExitEnvs() bool {
 	return false
 }
 
-func runFakeClaudeSession() {
-	if checkSpecialStartupEnv() {
-		return
-	}
-
+func fakeInitJSON() string {
 	version := fixtureCLI
 	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeUntestedVersionConfigDir) {
 		version = "2.1.999"
 	}
-	initJSON := fmt.Sprintf(`{"type":"system","subtype":"init","session_id":"uuid-fake","tools":["Bash","Edit","Read","Task","Write"],"claude_code_version":"%s","model":"claude-sonnet-5-5","permissionMode":"default","slash_commands":["clear","compact"],"terminal_slash_commands":[]}`+"\n", version)
-	writeOut(initJSON)
+	return fmt.Sprintf(`{"type":"system","subtype":"init","session_id":"uuid-fake","tools":["Bash","Edit","Read","Task","Write"],"claude_code_version":"%s","model":"claude-sonnet-5-5","permissionMode":"default","slash_commands":["clear","compact"],"terminal_slash_commands":[]}`+"\n", version)
+}
+
+func startContinuousOutput() {
+	supervise.Go(context.Background(), "fake.stdin_reader", func(taskCtx context.Context) error {
+		scanner := bufio.NewScanner(os.Stdin)
+		for scanner.Scan() {
+			if strings.Contains(scanner.Text(), `"interrupt"`) {
+				writeOut(`{"type":"result","subtype":"success","is_error":false,"result":"interrupted","session_id":"uuid-fake"}` + "\n")
+			}
+		}
+		return nil
+	})
+	for i := 0; ; i++ {
+		writeOut(fmt.Sprintf(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"chunk-%d"}]},"session_id":"uuid-fake"}`+"\n", i))
+	}
+}
+
+func runFakeClaudeSession() {
+	if checkSpecialStartupEnv() {
+		return
+	}
+	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeReplaySteerFixtureConfigDir) {
+		runReplaySteerFixture()
+		return
+	}
+
+	writeOut(fakeInitJSON())
 
 	if handleEarlyExitEnvs() {
 		return
 	}
 	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeNeverReadStdinConfigDir) {
-		hangForever()
+		hangUntilStdinHUP()
 		return
 	}
 	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeContinuousOutputConfigDir) {
-		supervise.Go(context.Background(), "fake.stdin_reader", func(taskCtx context.Context) error {
-			scanner := bufio.NewScanner(os.Stdin)
-			for scanner.Scan() {
-				line := scanner.Text()
-				if strings.Contains(line, `"interrupt"`) {
-					writeOut(`{"type":"result","subtype":"success","is_error":false,"result":"interrupted","session_id":"uuid-fake"}` + "\n")
-				}
-			}
-			return nil
-		})
-		for i := 0; ; i++ {
-			writeOut(fmt.Sprintf(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"chunk-%d"}]},"session_id":"uuid-fake"}`+"\n", i))
-		}
+		startContinuousOutput()
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -227,6 +279,68 @@ func handleFakeClaudeLine(line string) {
 		writeOut(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"fake reply"}]},"session_id":"uuid-fake"}` + "\n")
 		writeOut(`{"type":"result","subtype":"success","is_error":false,"result":"fake reply","session_id":"uuid-fake"}` + "\n")
 	}
+}
+
+func replayFixturePath() string {
+	for _, entry := range os.Environ() {
+		if strings.HasPrefix(entry, "CLAUDE_CONFIG_DIR="+fakeReplaySteerFixtureConfigDir+":") {
+			return strings.TrimPrefix(entry, "CLAUDE_CONFIG_DIR="+fakeReplaySteerFixtureConfigDir+":")
+		}
+	}
+	return ""
+}
+
+func writeFixtureSlice(lines []string, start, end int) {
+	for i := start; i < end && i < len(lines); i++ {
+		writeOut(lines[i] + "\n")
+	}
+}
+
+func scanSteerUUID(scanner *bufio.Scanner) string {
+	if scanner.Scan() {
+		var msg struct {
+			Type string `json:"type"`
+			UUID string `json:"uuid"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &msg) == nil {
+			return msg.UUID
+		}
+	}
+	return ""
+}
+
+func emitRemainingFixture(lines []string, start int, steerUUID string) {
+	for i := start; i < len(lines); i++ {
+		line := lines[i]
+		if steerUUID != "" && strings.Contains(line, "uuid-0032") {
+			line = strings.ReplaceAll(line, "uuid-0032", steerUUID)
+		}
+		writeOut(line + "\n")
+	}
+}
+
+func runReplaySteerFixture() {
+	fixturePath := replayFixturePath()
+	if fixturePath == "" {
+		os.Exit(1)
+	}
+	//nolint:gosec // fixturePath is set by test harness
+	raw, err := os.ReadFile(fixturePath)
+	if err != nil {
+		os.Exit(1)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	writeFixtureSlice(lines, 0, 11)
+
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		os.Exit(1)
+	}
+	writeFixtureSlice(lines, 11, 22)
+
+	steerUUID := scanSteerUUID(scanner)
+	emitRemainingFixture(lines, 22, steerUUID)
+	os.Exit(0)
 }
 
 func fakeClaudeExe(t *testing.T) string {

@@ -50,6 +50,7 @@ func TestSessionArgvExactMatchForStartSpecCombinations(t *testing.T) {
 		"--output-format", "stream-json",
 		"--verbose",
 		"--include-partial-messages",
+		"--replay-user-messages",
 	}
 
 	for _, tt := range argvCases(base) {
@@ -199,10 +200,9 @@ func TestSessionEnvIsAllowlistedWithoutHostSecrets(t *testing.T) {
 		"DATABASE_URL=postgres://user:pass@localhost:5432/fugue",
 	}
 
-	adapter := NewAdapter(hostEnv)
+	adapter := NewAdapter(hostEnv, WithBinary(exe))
 	spec := vendor.StartSpec{
-		BinaryPath: exe,
-		Cwd:        t.TempDir(),
+		Cwd: t.TempDir(),
 		Home: vendor.AccountHome{
 			ConfigDir: fakeCheckEnvConfigDir,
 		},

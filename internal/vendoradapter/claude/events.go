@@ -65,7 +65,8 @@ func (n *Normalizer) normalizePermissionDenied(line []byte, env *envelope) Obser
 
 func (n *Normalizer) normalizeResult(line []byte, env *envelope) Observation {
 	var w wireResult
-	if json.Unmarshal(line, &w) != nil || n.turn == "" {
+	currentTurn := n.currentTurnID()
+	if json.Unmarshal(line, &w) != nil || currentTurn == "" {
 		return n.unsupported(env, "result")
 	}
 	usage := UsageData{
@@ -75,21 +76,29 @@ func (n *Normalizer) normalizeResult(line []byte, env *envelope) Observation {
 		Cost:         w.TotalCostUSD,
 	}
 	item := transcript.Item{
-		ID:        n.turn + "-usage",
+		ID:        currentTurn + "-usage",
 		SessionID: n.session,
-		TurnID:    n.turn,
+		TurnID:    currentTurn,
 		Kind:      transcript.Usage,
 		RawRef:    n.rawRef(env),
 		Metadata:  transcript.UsageMetadata{InputTokens: usage.InputTokens, OutputTokens: usage.OutputTokens, CacheTokens: usage.CacheTokens, Cost: usage.Cost},
 		Content:   transcript.UsageContent{},
 	}
-	end := &TurnEnd{TurnID: n.turn, Usage: usage, CredentialExpiresAt: expiryTime(w.CredentialExpiresAt)}
+	end := &TurnEnd{TurnID: currentTurn, Usage: usage, CredentialExpiresAt: expiryTime(w.CredentialExpiresAt)}
 	if w.Subtype != "success" || w.IsError {
 		end.Outcome, end.FailureCode = OutcomeFailed, w.Subtype
 	} else {
 		end.Outcome = OutcomeCompleted
 	}
-	n.turn = ""
+	if n.vendorTurn != "" {
+		n.vendorTurn = ""
+	} else {
+		if n.turnFinished == nil {
+			n.turnFinished = map[string]bool{}
+		}
+		n.turnFinished[currentTurn] = true
+		n.turn = ""
+	}
 	return Observation{Records: []transcript.Item{item}, TurnEnd: end}
 }
 
@@ -129,7 +138,7 @@ func (n *Normalizer) normalizeRateLimit(line []byte, env *envelope) Observation 
 		obs.Records = append(obs.Records, transcript.Item{
 			ID:        "quota-" + n.rawRef(env) + "-" + win.Name,
 			SessionID: n.session,
-			TurnID:    n.turn,
+			TurnID:    n.currentTurnID(),
 			Kind:      transcript.Quota,
 			RawRef:    n.rawRef(env),
 			// Account stays empty until the quota owner exists (F9.10).

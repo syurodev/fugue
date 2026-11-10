@@ -99,24 +99,39 @@ const (
 // turn id it minted before sending the user line; events attach to the active
 // turn and the result event closes it.
 type Normalizer struct {
-	mu        sync.Mutex
-	session   string
-	turn      string
-	prevTurn  string
-	items     map[string]*transcript.Item
-	msgCounts map[string]int
-	init      *Init
-	nested    int
-	line      int
+	mu           sync.Mutex
+	session      string
+	turn         string
+	prevTurn     string
+	vendorTurn   string
+	steerTurns   map[string]string
+	turnFinished map[string]bool
+	items        map[string]*transcript.Item
+	msgCounts    map[string]int
+	init         *Init
+	nested       int
+	line         int
 }
 
 // NewNormalizer builds the per-session normalizer.
 func NewNormalizer(sessionID string) *Normalizer {
 	return &Normalizer{
-		session:   sessionID,
-		items:     map[string]*transcript.Item{},
-		msgCounts: map[string]int{},
+		session:      sessionID,
+		steerTurns:   map[string]string{},
+		turnFinished: map[string]bool{},
+		items:        map[string]*transcript.Item{},
+		msgCounts:    map[string]int{},
 	}
+}
+
+// RegisterSteer records a steer message UUID associated with a turn ID.
+func (n *Normalizer) RegisterSteer(turnID, uuid string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.steerTurns == nil {
+		n.steerTurns = map[string]string{}
+	}
+	n.steerTurns[uuid] = turnID
 }
 
 // BeginTurn activates a turn; the actor calls it right before each Send.
@@ -125,6 +140,9 @@ func (n *Normalizer) BeginTurn(turnID string) {
 	defer n.mu.Unlock()
 	n.prevTurn = n.turn
 	n.turn = turnID
+	if n.turnFinished != nil {
+		delete(n.turnFinished, turnID)
+	}
 }
 
 // RollbackTurn restores the normalizer turn to its previous state.
@@ -133,6 +151,14 @@ func (n *Normalizer) RollbackTurn() {
 	defer n.mu.Unlock()
 	n.turn = n.prevTurn
 	n.prevTurn = ""
+	n.vendorTurn = ""
+}
+
+func (n *Normalizer) currentTurnID() string {
+	if n.vendorTurn != "" {
+		return n.vendorTurn
+	}
+	return n.turn
 }
 
 // SlashCommands returns the latest vendor slash command list, terminal-only
@@ -197,7 +223,7 @@ func (n *Normalizer) rawRef(env *envelope) string {
 // unsupported turns an event the normalizer does not map into a notice with
 // the raw reference (TR-06).
 func (n *Normalizer) unsupported(env *envelope, label string) Observation {
-	item := transcript.UnsupportedEvent("notice-"+n.rawRef(env), n.session, n.turn, n.rawRef(env))
+	item := transcript.UnsupportedEvent("notice-"+n.rawRef(env), n.session, n.currentTurnID(), n.rawRef(env))
 	item.Content = transcript.NoticeContent{Text: label}
 	return Observation{Records: []transcript.Item{item}}
 }
