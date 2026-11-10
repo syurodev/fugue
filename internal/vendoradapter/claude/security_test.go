@@ -13,7 +13,11 @@ import (
 	"github.com/syurodev/fugue/internal/vendor"
 )
 
-const testModelSonnet = "claude-sonnet-5-5"
+const (
+	testModelSonnet         = "claude-sonnet-5-5"
+	testResumeUUID          = "018e3a24-7ef5-7000-8000-000000000001"
+	defaultTestClaudeBinary = "/usr/bin/claude"
+)
 
 type argvCase struct {
 	name string
@@ -26,11 +30,11 @@ func argvCases(base []string) []argvCase {
 		{name: "baseline", spec: vendor.StartSpec{}, want: base},
 		{name: "with model", spec: vendor.StartSpec{Model: testModelSonnet}, want: append(slices.Clone(base), "--model", testModelSonnet)},
 		{name: "with effort", spec: vendor.StartSpec{Effort: "high"}, want: append(slices.Clone(base), "--effort", "high")},
-		{name: "with resume", spec: vendor.StartSpec{ResumeSessionID: "session-abc-123"}, want: append(slices.Clone(base), "--resume", "session-abc-123")},
+		{name: "with resume", spec: vendor.StartSpec{ResumeSessionID: testResumeUUID}, want: append(slices.Clone(base), "--resume", testResumeUUID)},
 		{
 			name: "with all options",
-			spec: vendor.StartSpec{Model: "claude-opus-4", Effort: "low", ResumeSessionID: "sess-999"},
-			want: append(slices.Clone(base), "--model", "claude-opus-4", "--effort", "low", "--resume", "sess-999"),
+			spec: vendor.StartSpec{Model: "claude-opus-4", Effort: "low", ResumeSessionID: "018e3a24-7ef5-7000-8000-000000000002"},
+			want: append(slices.Clone(base), "--model", "claude-opus-4", "--effort", "low", "--resume", "018e3a24-7ef5-7000-8000-000000000002"),
 		},
 	}
 }
@@ -38,7 +42,7 @@ func argvCases(base []string) []argvCase {
 func TestSessionArgvExactMatchForStartSpecCombinations(t *testing.T) {
 	t.Parallel()
 
-	binary := "/usr/bin/claude"
+	binary := defaultTestClaudeBinary
 	base := []string{
 		binary,
 		"-p",
@@ -65,7 +69,7 @@ func TestSessionArgvExactMatchForStartSpecCombinations(t *testing.T) {
 func TestSessionArgvDenylistNeverAppears(t *testing.T) {
 	t.Parallel()
 
-	binary := "/usr/bin/claude"
+	binary := defaultTestClaudeBinary
 	for _, denied := range DenylistedFlags() {
 		checkFlagRejections(t, binary, denied)
 	}
@@ -100,8 +104,8 @@ func checkStandardSpecsDenylist(t *testing.T, binary string) {
 		{},
 		{Model: testModelSonnet},
 		{Effort: "high"},
-		{ResumeSessionID: "sess-1"},
-		{Model: testModelSonnet, Effort: "medium", ResumeSessionID: "sess-2"},
+		{ResumeSessionID: testResumeUUID},
+		{Model: testModelSonnet, Effort: "medium", ResumeSessionID: "018e3a24-7ef5-7000-8000-000000000002"},
 	}
 	for i := range specs {
 		argv, err := BuildArgv(binary, &specs[i])
@@ -113,6 +117,64 @@ func checkStandardSpecsDenylist(t *testing.T, binary string) {
 				t.Fatalf("denylisted flag %q found in generated argv: %v", arg, argv)
 			}
 		}
+	}
+}
+
+const (
+	targetModel  = "model"
+	targetEffort = "effort"
+	targetResume = "resume"
+)
+
+func checkBadArgvInput(t *testing.T, binary, field, val string) {
+	t.Helper()
+	var spec vendor.StartSpec
+	switch field {
+	case targetModel:
+		spec.Model = val
+	case targetEffort:
+		spec.Effort = val
+	case targetResume:
+		spec.ResumeSessionID = val
+	}
+	_, err := BuildArgv(binary, &spec)
+	if errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("expected InvalidArgument, got %v", err)
+	}
+	if strings.Contains(err.Error(), val) {
+		t.Fatalf("error message must NOT echo invalid input, got %q", err.Error())
+	}
+}
+
+func TestSessionArgvAllowlistPositiveAndNegativeTable(t *testing.T) {
+	t.Parallel()
+
+	badInputs := []struct {
+		name string
+		val  string
+	}{
+		{name: "flag injection -p", val: "-p"},
+		{name: "flag injection --settings", val: "--settings={}"},
+		{name: "flag injection --permission-mode", val: "--permission-mode"},
+		{name: "spaces x y", val: "x y"},
+		{name: "whitespace only after trim", val: "   "},
+		{name: "unicode", val: "môdel"},
+		{name: "path traversal resume id", val: "../x"},
+	}
+
+	for _, tc := range badInputs {
+		t.Run("model rejects "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			checkBadArgvInput(t, defaultTestClaudeBinary, targetModel, tc.val)
+		})
+		t.Run("effort rejects "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			checkBadArgvInput(t, defaultTestClaudeBinary, targetEffort, tc.val)
+		})
+		t.Run("resume rejects "+tc.name, func(t *testing.T) {
+			t.Parallel()
+			checkBadArgvInput(t, defaultTestClaudeBinary, targetResume, tc.val)
+		})
 	}
 }
 

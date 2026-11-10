@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -255,16 +257,17 @@ func TestSessionInterruptEscalatesToStopWhenCLIHangs(t *testing.T) {
 	exe := fakeClaudeExe(t)
 
 	stepCh := make(chan string, 10)
-	adapter := NewAdapter(nil)
+	adapter := NewAdapter(nil,
+		WithClock(clk),
+		WithOnEscalation(func(step string) { stepCh <- step }),
+	)
 	spec := vendor.StartSpec{
 		BinaryPath: exe,
 		Cwd:        t.TempDir(),
 		Home: vendor.AccountHome{
 			ConfigDir: fakeIgnoreInterruptConfigDir,
 		},
-		SessionID:    "session-test-interrupt-escalates",
-		Clock:        clk,
-		OnEscalation: func(step string) { stepCh <- step },
+		SessionID: "session-test-interrupt-escalates",
 	}
 
 	sess, err := adapter.Start(ctx, &spec)
@@ -316,16 +319,17 @@ func TestSessionHandshakeTimeoutStopsProcess(t *testing.T) {
 	exe := fakeClaudeExe(t)
 
 	stepCh := make(chan string, 10)
-	adapter := NewAdapter(nil)
+	adapter := NewAdapter(nil,
+		WithClock(clk),
+		WithOnEscalation(func(step string) { stepCh <- step }),
+	)
 	spec := vendor.StartSpec{
 		BinaryPath: exe,
 		Cwd:        t.TempDir(),
 		Home: vendor.AccountHome{
 			ConfigDir: fakeNoInitConfigDir,
 		},
-		SessionID:    "session-test-handshake-timeout",
-		Clock:        clk,
-		OnEscalation: func(step string) { stepCh <- step },
+		SessionID: "session-test-handshake-timeout",
 	}
 
 	startErrCh := make(chan error, 1)
@@ -506,5 +510,259 @@ func TestSessionStartBinaryNotFoundFailsTyped(t *testing.T) {
 	_, err := adapter.Start(ctx, &vendor.StartSpec{})
 	if errcode.CodeOf(err) != errcode.NotFound {
 		t.Fatalf("expected NotFound for nonexistent binary, got %v", err)
+	}
+}
+
+func waitForRunningState(s *Session) {
+	for {
+		s.mu.Lock()
+		running := s.state == stateRunning
+		s.mu.Unlock()
+		if running {
+			return
+		}
+		runtime.Gosched()
+	}
+}
+
+func TestSessionCloseUnblocksWhenSendBlocked(t *testing.T) {
+	t.Parallel()
+	testExe, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	clk := clock.NewFake(testEpoch())
+	adapter := NewAdapter(nil, WithClock(clk))
+	ctx := t.Context()
+	sess, err := adapter.Start(ctx, &vendor.StartSpec{
+		SessionID:  "session-blocked-write",
+		BinaryPath: testExe,
+		Home: vendor.AccountHome{
+			ConfigDir: fakeNeverReadStdinConfigDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	largeText := strings.Repeat("A", 1024*1024)
+	sendErrCh := make(chan error, 1)
+	supervise.Go(ctx, "test.large_send", func(taskCtx context.Context) error {
+		_, sErr := sess.Send(taskCtx, vendor.Input{Text: largeText})
+		sendErrCh <- sErr
+		return nil
+	})
+
+	waitForRunningState(asClaudeSession(t, sess))
+
+	closeDone := make(chan error, 1)
+	supervise.Go(ctx, "test.close_session", func(taskCtx context.Context) error {
+		_, cErr := sess.Close(taskCtx, vendor.CloseUserRequest)
+		closeDone <- cErr
+		return nil
+	})
+
+	if err := driveUntilErr(ctx, clk, closeDone); err != nil {
+		t.Fatalf("Close failed: %v", err)
+	}
+
+	select {
+	case sErr := <-sendErrCh:
+		if sErr == nil {
+			t.Fatal("expected Send to fail with typed error, got nil")
+		}
+		if !errors.Is(sErr, vendor.ErrSessionClosed) {
+			t.Fatalf("expected ErrSessionClosed, got %v", sErr)
+		}
+	case <-ctx.Done():
+		t.Fatal("Send did not return after Close")
+	}
+}
+
+func TestSessionNormalizerRace(t *testing.T) {
+	t.Parallel()
+	testExe, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adapter := NewAdapter(nil)
+	ctx := t.Context()
+	sess, err := adapter.Start(ctx, &vendor.StartSpec{
+		SessionID:  "session-race",
+		BinaryPath: testExe,
+		Home: vendor.AccountHome{
+			ConfigDir: fakeContinuousOutputConfigDir,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer closeSession(t, ctx, sess)
+
+	claudeSess := asClaudeSession(t, sess)
+	supervise.Go(ctx, "test.drain_obs", func(taskCtx context.Context) error {
+		for range claudeSess.Observations() {
+		}
+		return nil
+	})
+
+	for range 20 {
+		turn, sErr := sess.Send(ctx, vendor.Input{Text: "ping"})
+		if sErr != nil {
+			t.Fatalf("Send failed: %v", sErr)
+		}
+		if err := sess.Interrupt(ctx, turn); err != nil && !errors.Is(err, vendor.ErrTurnNotRunning) {
+			t.Fatalf("Interrupt failed: %v", err)
+		}
+		runtime.Gosched()
+	}
+}
+
+func TestSessionInterruptContextCanceledDoesNotCloseSession(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	exe := fakeClaudeExe(t)
+
+	adapter := NewAdapter(nil)
+	spec := vendor.StartSpec{
+		BinaryPath: exe,
+		Cwd:        t.TempDir(),
+		SessionID:  "session-test-interrupt-canceled",
+	}
+
+	sess, err := adapter.Start(ctx, &spec)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer closeSession(t, ctx, sess)
+
+	turn, err := sess.Send(ctx, vendor.Input{Text: "please interrupt-me"})
+	if err != nil {
+		t.Fatalf("Send failed: %v", err)
+	}
+
+	// Create a context that is canceled immediately
+	cancelCtx, cancel := context.WithCancel(ctx)
+	cancel()
+
+	intErr := sess.Interrupt(cancelCtx, turn)
+	if !errors.Is(intErr, context.Canceled) {
+		t.Fatalf("expected context.Canceled, got %v", intErr)
+	}
+
+	// Session is NOT closed: verify state is not stateClosed
+	claudeSess := asClaudeSession(t, sess)
+	claudeSess.mu.Lock()
+	state := claudeSess.state
+	claudeSess.mu.Unlock()
+	if state == stateClosed {
+		t.Fatal("session must not be closed when interrupt ctx is canceled")
+	}
+
+	// After result arrives from the fake CLI for the interrupt, session becomes ready
+	_, sawTurnEnd := drainUntilTurnEnd(claudeSess.Observations())
+	if !sawTurnEnd {
+		t.Fatal("expected TurnEnd from interrupted turn")
+	}
+
+	// Subsequent Send works normally
+	turn2, err := sess.Send(ctx, vendor.Input{Text: "second prompt"})
+	if err != nil {
+		t.Fatalf("subsequent Send failed: %v", err)
+	}
+	if turn2.ID == "" {
+		t.Fatal("expected non-empty turn ID")
+	}
+}
+
+func TestSessionSteerThenSubsequentSendWorks(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	exe := fakeClaudeExe(t)
+
+	adapter := NewAdapter(nil)
+	spec := vendor.StartSpec{
+		BinaryPath: exe,
+		Cwd:        t.TempDir(),
+		SessionID:  "session-test-steer-subsequent",
+	}
+
+	sess, err := adapter.Start(ctx, &spec)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer closeSession(t, ctx, sess)
+
+	claudeSess := asClaudeSession(t, sess)
+
+	// Turn 1: Send steerable prompt
+	turn1, err := sess.Send(ctx, vendor.Input{Text: "please steer-me"})
+	if err != nil {
+		t.Fatalf("Send turn1 failed: %v", err)
+	}
+
+	// Steer while running
+	err = sess.Steer(ctx, turn1, vendor.Input{Text: "please adjust focus"})
+	if err != nil {
+		t.Fatalf("Steer failed: %v", err)
+	}
+
+	// Wait for Turn 1 to complete
+	_, sawTurnEnd1 := drainUntilTurnEnd(claudeSess.Observations())
+	if !sawTurnEnd1 {
+		t.Fatal("expected TurnEnd for turn 1")
+	}
+
+	// Turn 2: Subsequent Send works normally
+	turn2, err := sess.Send(ctx, vendor.Input{Text: "subsequent turn"})
+	if err != nil {
+		t.Fatalf("subsequent Send failed: %v", err)
+	}
+	if turn2.ID == "" || turn2.ID == turn1.ID {
+		t.Fatalf("expected distinct turn ID, got %q vs %q", turn2.ID, turn1.ID)
+	}
+
+	_, sawTurnEnd2 := drainUntilTurnEnd(claudeSess.Observations())
+	if !sawTurnEnd2 {
+		t.Fatal("expected TurnEnd for turn 2")
+	}
+}
+
+func TestSteerFixtureReplayExactOneTurnEndAndReady(t *testing.T) {
+	t.Parallel()
+
+	lines := readFixture(t, "claude-2.1.319-session3-steer.jsonl")
+	if len(lines) == 0 {
+		t.Fatal("fixture lines empty")
+	}
+
+	n := NewNormalizer("test-session-steer-golden")
+	n.BeginTurn("turn-steer-1")
+
+	var turnEndCount int
+	var lastTurnEnd *TurnEnd
+	for i, line := range lines {
+		obs, err := n.Normalize(line)
+		if err != nil {
+			t.Fatalf("line %d did not normalize: %v", i+1, err)
+		}
+		if obs.TurnEnd != nil {
+			turnEndCount++
+			lastTurnEnd = obs.TurnEnd
+		}
+	}
+
+	if turnEndCount != 1 {
+		t.Fatalf("expected exactly 1 TurnEnd in steer fixture, got %d", turnEndCount)
+	}
+	if lastTurnEnd.Outcome != OutcomeCompleted {
+		t.Fatalf("expected OutcomeCompleted, got %q", lastTurnEnd.Outcome)
+	}
+	if n.turn != "" {
+		t.Fatalf("expected normalizer turn to be cleared after result, got %q", n.turn)
 	}
 }
