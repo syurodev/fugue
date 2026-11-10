@@ -4,15 +4,66 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"path/filepath"
 	"strings"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/vendor"
 )
+
+const maxModelLength = 128
+
+func isModelChar(i int, c byte) bool {
+	if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
+		return true
+	}
+	return i > 0 && strings.IndexByte("._:[]-", c) != -1
+}
+
+func validateModel(model string) error {
+	if model == "" {
+		return nil
+	}
+	if strings.TrimSpace(model) == "" || len(model) > maxModelLength || IsDenylistedFlag(model) {
+		return errcode.New(errcode.InvalidArgument, "claude: invalid model parameter")
+	}
+	for i := range len(model) {
+		if !isModelChar(i, model[i]) {
+			return errcode.New(errcode.InvalidArgument, "claude: invalid model parameter")
+		}
+	}
+	return nil
+}
+
+func validateEffort(effort string) error {
+	if effort == "" {
+		return nil
+	}
+	switch effort {
+	case "low", "medium", "high", "xhigh", "max":
+		if IsDenylistedFlag(effort) {
+			return errcode.New(errcode.InvalidArgument, "claude: invalid effort parameter")
+		}
+		return nil
+	default:
+		return errcode.New(errcode.InvalidArgument, "claude: invalid effort parameter")
+	}
+}
+
+func validateResumeSessionID(id string) error {
+	if id == "" {
+		return nil
+	}
+	if !ids.IsUUID(id) || IsDenylistedFlag(id) {
+		return errcode.New(errcode.InvalidArgument, "claude: invalid resume session id parameter")
+	}
+	return nil
+}
 
 // DenylistedFlags returns the flags forbidden by vendor runtime §8.
 func DenylistedFlags() []string {
@@ -48,6 +99,16 @@ func BuildArgv(binary string, spec *vendor.StartSpec) ([]string, error) {
 	if spec == nil {
 		spec = &vendor.StartSpec{}
 	}
+	if err := validateModel(spec.Model); err != nil {
+		return nil, err
+	}
+	if err := validateEffort(spec.Effort); err != nil {
+		return nil, err
+	}
+	if err := validateResumeSessionID(spec.ResumeSessionID); err != nil {
+		return nil, err
+	}
+
 	argv := []string{
 		binary,
 		"-p",
@@ -58,27 +119,18 @@ func BuildArgv(binary string, spec *vendor.StartSpec) ([]string, error) {
 	}
 
 	if spec.Model != "" {
-		if IsDenylistedFlag(spec.Model) {
-			return nil, errcode.New(errcode.InvalidArgument, "denylisted argument: "+spec.Model)
-		}
 		argv = append(argv, "--model", spec.Model)
 	}
 	if spec.Effort != "" {
-		if IsDenylistedFlag(spec.Effort) {
-			return nil, errcode.New(errcode.InvalidArgument, "denylisted argument: "+spec.Effort)
-		}
 		argv = append(argv, "--effort", spec.Effort)
 	}
 	if spec.ResumeSessionID != "" {
-		if IsDenylistedFlag(spec.ResumeSessionID) {
-			return nil, errcode.New(errcode.InvalidArgument, "denylisted argument: "+spec.ResumeSessionID)
-		}
 		argv = append(argv, "--resume", spec.ResumeSessionID)
 	}
 
 	for _, arg := range argv[1:] {
 		if IsDenylistedFlag(arg) {
-			return nil, errcode.New(errcode.InvalidArgument, "denylisted argument: "+arg)
+			return nil, errcode.New(errcode.InvalidArgument, "claude: invalid argument")
 		}
 	}
 	return argv, nil
@@ -115,17 +167,18 @@ func (a *Adapter) Start(ctx context.Context, spec *vendor.StartSpec) (vendor.Ses
 		return nil, err
 	}
 
-	clk := spec.Clock
+	clk := a.Clock
 	if clk == nil {
 		clk = clock.Real{}
 	}
 
-	var idGen idGenerator = &defaultSequenceIDGen{}
-	if spec.IDs != nil {
-		idGen = spec.IDs
+	idGen := a.IDs
+	if idGen == nil {
+		idGen = ids.NewUUIDv7(clk, ids.CryptoRandom{})
 	}
 
 	sess := &Session{
+		sessionID:    spec.SessionID,
 		clock:        clk,
 		idGen:        idGen,
 		obsCh:        make(chan Observation, observationBufferSize),
@@ -144,7 +197,7 @@ func (a *Adapter) Start(ctx context.Context, spec *vendor.StartSpec) (vendor.Ses
 	initCh := make(chan *Init, 1)
 	readerErrCh := make(chan error, 1)
 
-	_ = supervise.Go(ctx, "claude.reader", func(taskCtx context.Context) error {
+	supervise.Go(ctx, "claude.reader", func(taskCtx context.Context) error {
 		sess.runReader(taskCtx, initCh, readerErrCh)
 		return nil
 	})
@@ -162,7 +215,7 @@ func (a *Adapter) spawnSessionProcess(
 	clk clock.Clock,
 	sess *Session,
 ) (*process.Process, error) {
-	probe := spec.Probe
+	probe := a.SystemdProbe
 	if probe == nil {
 		probe = process.NewSystemdProbe()
 	}
@@ -174,9 +227,9 @@ func (a *Adapter) spawnSessionProcess(
 		Clock:         clk,
 		Interrupt:     makeProtocolInterrupt(sess),
 		SessionID:     spec.SessionID,
-		XDGRuntimeDir: spec.XDGRuntimeDir,
+		XDGRuntimeDir: a.XDGRuntimeDir,
 		Probe:         probe,
-		OnEscalation:  spec.OnEscalation,
+		OnEscalation:  a.OnEscalation,
 	}
 
 	proc, err := process.Spawn(ctx, opts)
@@ -202,6 +255,8 @@ func makeProtocolInterrupt(sess *Session) func(context.Context) error {
 		if err != nil {
 			return errcode.Wrap(errcode.Internal, "encode stop interrupt", err)
 		}
+		sess.writeMu.Lock()
+		defer sess.writeMu.Unlock()
 		if writeErr := sess.proc.WriteLine(raw); writeErr != nil {
 			if errors.Is(writeErr, process.ErrStdinClosed) {
 				return nil
@@ -242,10 +297,10 @@ func (s *Session) waitForHandshake(ctx context.Context, initCh <-chan *Init, rea
 
 func (s *Session) cleanupStartup(ctx context.Context) {
 	if err := s.proc.CloseStdin(); err != nil {
-		_ = err
+		slog.Warn("claude startup cleanup: close stdin error", "session_id", s.sessionID, "error", err)
 	}
 	if _, err := s.proc.Stop(ctx); err != nil {
-		_ = err
+		slog.Warn("claude startup cleanup: stop error", "session_id", s.sessionID, "error", err)
 	}
 	close(s.closeNotify)
 	<-s.readerDoneCh

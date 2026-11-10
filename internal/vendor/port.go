@@ -4,9 +4,7 @@ import (
 	"context"
 	"strings"
 
-	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
-	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/process"
 )
 
@@ -81,11 +79,6 @@ type StartSpec struct {
 	Effort          string
 	ResumeSessionID string
 	BinaryPath      string
-	XDGRuntimeDir   string
-	Probe           *process.SystemdProbe
-	Clock           clock.Clock
-	IDs             ids.Generator
-	OnEscalation    func(step string)
 }
 
 // Input is one user input: a message text, or a slash command as the whole
