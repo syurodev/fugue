@@ -12,7 +12,6 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/paint"
-	"gioui.org/text"
 	"gioui.org/unit"
 	"gioui.org/widget/material"
 
@@ -20,6 +19,7 @@ import (
 
 	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
+	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
 // Options are the window's inputs: what to connect to and how it looks.
@@ -91,7 +91,7 @@ func Run(ctx context.Context, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("build the text shaper: %w", err)
 	}
-	light, dark := themes(shaper)
+	light, dark := theme.Light(shaper), theme.Dark(shaper)
 	return eventLoop(w, m, q, light, dark)
 }
 
@@ -137,10 +137,11 @@ func stopSideGoroutines(cancel context.CancelFunc, feederDone, closerDone <-chan
 }
 
 // eventLoop is the window's event loop until it is destroyed.
-func eventLoop(w *app.Window, m *hostconn.Manager, q *updateQueue, light, dark *material.Theme) error {
+func eventLoop(w *app.Window, m *hostconn.Manager, q *updateQueue, light, dark theme.Theme) error {
 	var ops op.Ops
-	// The skeleton starts light; Ctrl+D toggles the theme (DA-08). Following
-	// the system preference arrives with the screens that need it.
+	// The window starts light: Gio v0.10.3 exposes no OS light/dark
+	// preference to follow (F10.2c plan), so light is the default and
+	// Ctrl+D toggles (DA-08).
 	darkMode := false
 	for {
 		switch e := w.Event().(type) {
@@ -158,7 +159,7 @@ func eventLoop(w *app.Window, m *hostconn.Manager, q *updateQueue, light, dark *
 // frame drains the deliveries into UI state on the window goroutine, handles
 // the theme toggle, and lays the window out; it returns whether dark mode is
 // on for the next frame.
-func frame(gtx layout.Context, m *hostconn.Manager, q *updateQueue, light, dark *material.Theme, darkMode bool) bool {
+func frame(gtx layout.Context, m *hostconn.Manager, q *updateQueue, light, dark theme.Theme, darkMode bool) bool {
 	// Deliveries become UI state here, on the window goroutine.
 	for _, u := range q.drain() {
 		_ = u
@@ -183,16 +184,18 @@ func frame(gtx layout.Context, m *hostconn.Manager, q *updateQueue, light, dark 
 }
 
 // drawWindow lays out the skeleton: a body placeholder for the screens of
-// F10.3–F10.5 and the status bar with the connection state (F10.2a).
-func drawWindow(gtx layout.Context, th *material.Theme, m *hostconn.Manager) {
-	paint.Fill(gtx.Ops, th.Bg)
+// F10.3–F10.5 and the status bar with the connection state (F10.2a). Every
+// color comes from the theme tokens (F10.2c); appwin defines none of its own.
+func drawWindow(gtx layout.Context, th theme.Theme, m *hostconn.Manager) {
+	paint.Fill(gtx.Ops, th.Chrome().AppBg)
 	state, reason := m.State()
 	status := statusLine(state, reason)
+	mt := th.Material()
 	layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				title := material.Label(th, unit.Sp(20), "Fugue")
-				title.Color = th.Fg
+				title := material.Label(mt, unit.Sp(20), "Fugue")
+				title.Color = th.Chrome().Fg
 				return title.Layout(gtx)
 			})
 		}),
@@ -200,12 +203,30 @@ func drawWindow(gtx layout.Context, th *material.Theme, m *hostconn.Manager) {
 			return layout.Inset{
 				Left: unit.Dp(12), Right: unit.Dp(12), Bottom: unit.Dp(8),
 			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				bar := material.Label(th, unit.Sp(13), status)
-				bar.Color = th.Fg
+				bar := material.Label(mt, unit.Sp(13), status)
+				bar.Color = statusColor(th, state)
 				return bar.Layout(gtx)
 			})
 		}),
 	)
+}
+
+// statusColor maps the connection state onto the theme's status tokens
+// (F10.2c): connected is success, connecting is quiet, disconnected is
+// danger and an incompatible host is a warning only the version flow can
+// resolve.
+func statusColor(th theme.Theme, state hostconn.State) color.NRGBA {
+	switch state {
+	case hostconn.StateConnected:
+		return th.Status().Success
+	case hostconn.StateConnecting:
+		return th.Chrome().FgMuted
+	case hostconn.StateDisconnected:
+		return th.Status().Danger
+	case hostconn.StateIncompatible:
+		return th.Status().Warning
+	}
+	return th.Chrome().Fg
 }
 
 // statusLine renders the status bar text; "host not running" is its own
@@ -215,30 +236,6 @@ func statusLine(state hostconn.State, reason string) string {
 		return "connection: " + string(state)
 	}
 	return "connection: " + string(state) + " (" + reason + ")"
-}
-
-// themes builds the light and dark palettes over the bundled fonts (DA-08,
-// DA-04).
-func themes(shaper *text.Shaper) (light, dark *material.Theme) {
-	light = material.NewTheme()
-	light.Shaper = shaper
-	dark = material.NewTheme()
-	dark.Shaper = shaper
-	dark.Fg = rgb(0xf2f2f2)
-	dark.Bg = rgb(0x14161a)
-	dark.ContrastBg = rgb(0xf2f2f2)
-	dark.ContrastFg = rgb(0x14161a)
-	return light, dark
-}
-
-// rgb builds an opaque color from 0xRRGGBB.
-func rgb(v uint32) color.NRGBA {
-	return color.NRGBA{
-		R: uint8(v >> 16 & 0xff),
-		G: uint8(v >> 8 & 0xff),
-		B: uint8(v & 0xff),
-		A: 0xff,
-	}
 }
 
 // workArea returns the main screen's pixel work area and scale for the clamp.
