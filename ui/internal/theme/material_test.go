@@ -1,6 +1,7 @@
 package theme_test
 
 import (
+	"image/color"
 	"testing"
 
 	"github.com/syurodev/fugue/ui/internal/fonts"
@@ -39,5 +40,26 @@ func TestMaterialReflectsTokens(t *testing.T) {
 		if mt.Shaper != shaper {
 			t.Errorf("%s: material theme does not share the shaper it was built with", m.name)
 		}
+	}
+}
+
+// TestMaterialReturnsIndependentShallowCopies pins the per-frame contract:
+// the mode's material theme is built once, Material() hands out shallow
+// copies (distinct pointers sharing the cached icons), and restyling one
+// copy never leaks into the next call.
+func TestMaterialReturnsIndependentShallowCopies(t *testing.T) {
+	t.Parallel()
+	dark := theme.Dark(nil)
+	first := dark.Material()
+	second := dark.Material()
+	if first == second {
+		t.Fatal("Material() returned the same pointer; callers must get independent copies")
+	}
+	if first.Icon.CheckBoxChecked != second.Icon.CheckBoxChecked {
+		t.Error("copies do not share the icon cache; widget.Icon would re-render per copy")
+	}
+	first.Fg = color.NRGBA{R: 0xde, G: 0xad, B: 0xbe, A: 0xff}
+	if dark.Material().Fg == first.Fg {
+		t.Error("a restyled copy leaked into later Material() calls")
 	}
 }

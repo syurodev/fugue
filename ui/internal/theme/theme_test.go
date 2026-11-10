@@ -49,6 +49,7 @@ func foregroundTokens(m *mode) []namedColor {
 		{name: "link", color: m.theme.Link()},
 		{name: "fg", color: c.Fg},
 		{name: "fg muted", color: c.FgMuted},
+		{name: "fg subtle", color: c.FgSubtle},
 		{name: "icon muted", color: c.IconMuted},
 	}
 }
@@ -65,34 +66,51 @@ func backgroundTokens(c theme.Chrome) []namedColor {
 	}
 }
 
-// requireContrast fails unless fg reaches min contrast on bg.
-func requireContrast(t *testing.T, label string, fg, bg color.NRGBA, min float64) {
+// requireContrast fails unless fg reaches the 4.5:1 budget on bg.
+func requireContrast(t *testing.T, label string, fg, bg color.NRGBA) {
 	t.Helper()
-	if ratio := contrastRatio(fg, bg); ratio < min {
-		t.Errorf("%s contrasts %.2f:1 on its background, want at least %.1f:1",
-			label, ratio, min)
+	if ratio := contrastRatio(fg, bg); ratio < 4.5 {
+		t.Errorf("%s contrasts %.2f:1 on its background, want at least 4.5:1", label, ratio)
 	}
 }
 
 // TestContrastOfTextAndHueTokensOnEveryChromeBackground pins the WCAG 2.x
-// contrast budget of F10.2c: every hue, status and link token and the main
-// and muted text tokens reach at least 4.5:1 on every chrome background of
-// their mode; the subtle text token reaches at least 3:1 (the AA large-text
-// threshold — see the plan for why subtle text stops there).
+// contrast budget of F10.2c: every hue, status, link and text token —
+// including the subtle text of comments and meta, which code blocks render
+// on tinted and raised surfaces — reaches at least 4.5:1 on every chrome
+// background of its mode. The action fg must also hold 4.5:1 on the hover
+// and pressed fills.
 func TestContrastOfTextAndHueTokensOnEveryChromeBackground(t *testing.T) {
 	t.Parallel()
 	for _, m := range bothModes() {
 		backgrounds := backgroundTokens(m.theme.Chrome())
 		for _, fgk := range foregroundTokens(&m) {
 			for _, bgk := range backgrounds {
-				requireContrast(t, m.name+" "+fgk.name, fgk.color, bgk.color, 4.5)
+				requireContrast(t, m.name+" "+fgk.name, fgk.color, bgk.color)
 			}
 		}
-		for _, bgk := range backgrounds {
-			requireContrast(t, m.name+" fg subtle", m.theme.Chrome().FgSubtle, bgk.color, 3)
-		}
 		c := m.theme.Chrome()
-		requireContrast(t, m.name+" action fg on action", c.ActionFg, c.Action, 4.5)
+		requireContrast(t, m.name+" action fg on action", c.ActionFg, c.Action)
+		requireContrast(t, m.name+" action fg on action hover", c.ActionFg, c.ActionHover)
+		requireContrast(t, m.name+" action fg on action pressed", c.ActionFg, c.ActionPressed)
+	}
+}
+
+// TestFgSubtleStaysBelowFgMuted keeps the text hierarchy: subtle is now held
+// to the same 4.5:1 budget as muted, so only its lower contrast on every
+// background keeps it visibly quieter.
+func TestFgSubtleStaysBelowFgMuted(t *testing.T) {
+	t.Parallel()
+	for _, m := range bothModes() {
+		c := m.theme.Chrome()
+		for _, bgk := range backgroundTokens(c) {
+			subtle := contrastRatio(c.FgSubtle, bgk.color)
+			muted := contrastRatio(c.FgMuted, bgk.color)
+			if subtle >= muted {
+				t.Errorf("%s: fg subtle contrasts %.2f:1 on %s, not below muted's %.2f:1",
+					m.name, subtle, bgk.name, muted)
+			}
+		}
 	}
 }
 

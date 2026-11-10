@@ -3,7 +3,8 @@
 // palette tier for syntax, status and accents. There are exactly two modes,
 // light and dark (DA-08); the tables are constants tuned so every text token
 // and hue reaches a WCAG contrast of at least 4.5:1 on every chrome
-// background of its mode (fg subtle reaches 3:1, see the plan).
+// background of its mode; the subtle text token holds the same 4.5:1
+// budget because code blocks sit on tinted and raised surfaces.
 //
 // Owner: F10.2c. Allowed callers: every ui/ package that draws; nothing
 // outside ui/.
@@ -14,6 +15,7 @@ import (
 
 	"gioui.org/font"
 	"gioui.org/text"
+	"gioui.org/widget/material"
 )
 
 // SyntaxRole names the highlighting roles shared with the markdown renderer
@@ -66,7 +68,8 @@ type Chrome struct {
 	Fg color.NRGBA
 	// FgMuted is secondary text (labels, meta lines): at least 4.5:1.
 	FgMuted color.NRGBA
-	// FgSubtle is tertiary text (comments, placeholders): at least 3:1.
+	// FgSubtle is tertiary text (comments, meta, placeholders): at least
+	// 4.5:1, still below FgMuted on every background so the hierarchy holds.
 	FgSubtle color.NRGBA
 	// IconMuted is the quiet icon color; same contrast budget as FgMuted.
 	IconMuted color.NRGBA
@@ -109,7 +112,8 @@ type Status struct {
 }
 
 // Theme is one immutable mode: every token plus the derived status, link and
-// syntax colors, and the shaper its Material() hands to widgets.
+// syntax colors, the shaper its Material() hands to widgets, and the one
+// material theme those tokens seed — built once here, never per frame.
 type Theme struct {
 	chrome  Chrome
 	palette Palette
@@ -117,6 +121,7 @@ type Theme struct {
 	link    color.NRGBA
 	syntax  map[SyntaxRole]SyntaxStyle
 	shaper  *text.Shaper
+	mat     *material.Theme
 }
 
 // Light builds the light mode over shaper.
@@ -151,7 +156,7 @@ func newTheme(c Chrome, p Palette, shaper *text.Shaper) Theme {
 		RoleMeta:       {Color: c.FgSubtle, Weight: defaultWeight},
 		RoleInvalid:    {Color: status.Danger, Weight: defaultWeight},
 	}
-	return Theme{
+	t := Theme{
 		chrome:  c,
 		palette: p,
 		status:  status,
@@ -159,6 +164,8 @@ func newTheme(c Chrome, p Palette, shaper *text.Shaper) Theme {
 		syntax:  syntax,
 		shaper:  shaper,
 	}
+	t.mat = t.newMaterialTheme()
+	return t
 }
 
 // Chrome returns the neutral token set of this mode.
@@ -196,7 +203,7 @@ func lightChrome() Chrome {
 		SurfaceTinted: nrgba(0xE4E4E8),
 		Fg:            nrgba(0x1C1D20),
 		FgMuted:       nrgba(0x52535A),
-		FgSubtle:      nrgba(0x6E6F77),
+		FgSubtle:      nrgba(0x656570),
 		IconMuted:     nrgba(0x52535A),
 		Border:        nrgba(0xC9C9CE),
 		FocusBorder:   nrgba(0x1C1D20),
@@ -218,7 +225,7 @@ func darkChrome() Chrome {
 		SurfaceTinted: nrgba(0x23272E),
 		Fg:            nrgba(0xF0F0F2),
 		FgMuted:       nrgba(0xA8AAB2),
-		FgSubtle:      nrgba(0x85878F),
+		FgSubtle:      nrgba(0x919199),
 		IconMuted:     nrgba(0xA8AAB2),
 		Border:        nrgba(0x3B3F48),
 		FocusBorder:   nrgba(0xF0F0F2),
