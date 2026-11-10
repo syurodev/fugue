@@ -239,6 +239,11 @@ func (s *Session) acquireInterruptWrite(ctx context.Context, timer clock.Timer) 
 	select {
 	case s.writeSem <- struct{}{}:
 		return nil
+	default:
+	}
+	select {
+	case s.writeSem <- struct{}{}:
+		return nil
 	case <-timer.C():
 		return s.escalateInterrupt(ctx, "claude interrupt: write acquisition timed out, escalating to stop")
 	case <-ctx.Done():

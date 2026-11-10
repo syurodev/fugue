@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -116,8 +117,7 @@ func pollStdinClosed(fds []unix.PollFd) bool {
 }
 
 func monitorStdinHUP(ctx context.Context, hupCh chan struct{}) {
-	//nolint:gosec // stdin fd fits in int32
-	fds := []unix.PollFd{{Fd: int32(os.Stdin.Fd()), Events: 0}}
+	fds := []unix.PollFd{{Fd: 0, Events: 0}}
 	for {
 		if ctx.Err() != nil || pollStdinClosed(fds) {
 			close(hupCh)
@@ -324,8 +324,7 @@ func runReplaySteerFixture() {
 	if fixturePath == "" {
 		os.Exit(1)
 	}
-	//nolint:gosec // fixturePath is set by test harness
-	raw, err := os.ReadFile(fixturePath)
+	raw, err := os.ReadFile(filepath.Clean(fixturePath))
 	if err != nil {
 		os.Exit(1)
 	}
