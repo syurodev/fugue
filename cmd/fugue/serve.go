@@ -127,6 +127,7 @@ func runUntilStopped(ctx context.Context, hp *app.HostProcess, sigs <-chan os.Si
 	case <-hp.DrainDone():
 		if err := hp.Close(); err != nil {
 			slog.Error("close the fugue host after drain", "err", err)
+			return exitFailure
 		}
 		return exitOK
 	case sig := <-sigs:
@@ -149,6 +150,7 @@ func runUntilStopped(ctx context.Context, hp *app.HostProcess, sigs <-chan os.Si
 	}
 	if err := hp.Close(); err != nil {
 		slog.Error("close the fugue host after drain", "err", err)
+		return exitFailure
 	}
 	return code
 }
