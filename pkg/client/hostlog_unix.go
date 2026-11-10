@@ -90,7 +90,7 @@ func hostLogs(logs *os.Root) ([]hostLogEntry, error) {
 		}
 		number, parseErr := strconv.ParseUint(digits, 10, 64)
 		if parseErr != nil {
-			return nil, fmt.Errorf("parse host log sequence: %w", parseErr)
+			continue
 		}
 		result = append(result, hostLogEntry{name: name, number: number})
 	}

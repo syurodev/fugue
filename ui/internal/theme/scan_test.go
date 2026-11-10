@@ -63,36 +63,6 @@ func colorLiterals(fset *token.FileSet, name string, file *ast.File) []string {
 	return found
 }
 
-// reportColorLiteralsInDir parses dir's non-test sources and fails the test
-// on every image/color composite literal found by colorLiterals.
-func reportColorLiteralsInDir(t *testing.T, dir string) {
-	t.Helper()
-	entries, err := os.ReadDir(dir)
-	if err != nil {
-		t.Fatalf("read %s: %v", dir, err)
-	}
-	fset := token.NewFileSet()
-	scanned := 0
-	for _, entry := range entries {
-		name := entry.Name()
-		if entry.IsDir() || !strings.HasSuffix(name, ".go") || strings.HasSuffix(name, "_test.go") {
-			continue
-		}
-		path := filepath.Join(dir, name)
-		file, err := parser.ParseFile(fset, path, nil, 0)
-		if err != nil {
-			t.Fatalf("parse %s: %v", path, err)
-		}
-		scanned++
-		for _, msg := range colorLiterals(fset, path, file) {
-			t.Error(msg)
-		}
-	}
-	if scanned == 0 {
-		t.Fatalf("no non-test sources scanned in %s; the scan is not looking at a real package", dir)
-	}
-}
-
 // TestUiInternalDefinesNoColorsOutsideTheme keeps every color definition in
 // this package: no non-test source file anywhere under ui/internal except
 // ui/internal/theme itself may construct an image/color value, so the
@@ -105,20 +75,15 @@ func TestUiInternalDefinesNoColorsOutsideTheme(t *testing.T) {
 		t.Fatal("cannot locate this package's directory")
 	}
 	internal := filepath.Dir(filepath.Dir(thisFile))
-	entries, err := os.ReadDir(internal)
+	found, scanned, err := scanColorLiterals(internal)
 	if err != nil {
-		t.Fatalf("read ui/internal: %v", err)
+		t.Fatal(err)
 	}
-	scanned := 0
-	for _, entry := range entries {
-		if !entry.IsDir() || entry.Name() == "theme" {
-			continue
-		}
-		reportColorLiteralsInDir(t, filepath.Join(internal, entry.Name()))
-		scanned++
+	for _, msg := range found {
+		t.Error(msg)
 	}
 	if scanned == 0 {
-		t.Fatal("no sibling packages scanned; the scan is not looking under ui/internal")
+		t.Fatal("no non-test sources scanned under ui/internal")
 	}
 }
 
@@ -147,4 +112,72 @@ var b = color.NRGBA{}
 	if len(found) != 1 || !strings.Contains(found[0], "image/color.RGBA") {
 		t.Fatalf("scanner reported %v, want exactly the aliased c.RGBA literal", found)
 	}
+}
+
+func TestScanDescendsIntoNestedPackages(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	nested := filepath.Join(root, "a", "b")
+	if err := os.MkdirAll(nested, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(root, "empty"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, dir := range []string{filepath.Join(root, "theme", "nested"), filepath.Join(root, "a", "testdata", "nested")} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "ignored.go"), []byte("package ignored\nimport \"image/color\"\nvar x = color.NRGBA{}\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(root, "tests"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "tests", "only_test.go"), []byte("package empty\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(nested, "x.go")
+	if err := os.WriteFile(path, []byte("package b\nimport \"image/color\"\nvar x = color.NRGBA{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	found, _, err := scanColorLiterals(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(found) != 1 || !strings.Contains(found[0], path) {
+		t.Fatalf("violations = %v, want one in %s", found, path)
+	}
+}
+
+func scanColorLiterals(root string) ([]string, int, error) {
+	var found []string
+	scanned := 0
+	fset := token.NewFileSet()
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() {
+			if path != root && (entry.Name() == "testdata" || path == filepath.Join(root, "theme")) {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(entry.Name(), ".go") || strings.HasSuffix(entry.Name(), "_test.go") {
+			return nil
+		}
+		file, err := parser.ParseFile(fset, path, nil, 0)
+		if err != nil {
+			return fmt.Errorf("parse %s: %w", path, err)
+		}
+		scanned++
+		found = append(found, colorLiterals(fset, path, file)...)
+		return nil
+	})
+	if err != nil {
+		return nil, scanned, fmt.Errorf("walk %s: %w", root, err)
+	}
+	return found, scanned, nil
 }

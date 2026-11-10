@@ -204,7 +204,7 @@ func TestHostLogRetriesOccupiedNames(t *testing.T) {
 
 func TestHostLogReportsExhaustedSequence(t *testing.T) {
 	t.Parallel()
-	for _, number := range []string{"18446744073709551615", "18446744073709551616"} {
+	for _, number := range []string{"18446744073709551615"} {
 		t.Run(number, func(t *testing.T) {
 			t.Parallel()
 			dir := t.TempDir()
@@ -256,5 +256,37 @@ func TestHostLogRetainsNumericallyNewestWithLeadingZeros(t *testing.T) {
 	mustClientTest(t, f.Close())
 	if filepath.Base(f.Name()) != "host-2.log" {
 		t.Fatalf("allocated %s", f.Name())
+	}
+}
+
+func TestOpenHostLogIgnoresOverflowingSequenceNames(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	testSetMode(t, dir, 0o700)
+	logs := filepath.Join(dir, "logs")
+	mustClientTest(t, os.Mkdir(logs, 0o700))
+	for _, name := range []string{"host-10.log", "host-20.log", "host-30.log", "host-40.log"} {
+		mustClientTest(t, os.WriteFile(filepath.Join(logs, name), nil, 0o600))
+	}
+	junk := filepath.Join(logs, "host-99999999999999999999.log")
+	mustClientTest(t, os.WriteFile(junk, []byte("keep"), 0o600))
+	f, err := client.OpenHostLog(dir)
+	mustClientTest(t, err)
+	mustClientTest(t, f.Close())
+	if filepath.Base(f.Name()) != "host-41.log" {
+		t.Fatalf("allocated %s", f.Name())
+	}
+	root, err := os.OpenRoot(logs)
+	mustClientTest(t, err)
+	defer closeQuietly(root)
+	data, err := root.ReadFile(filepath.Base(junk))
+	mustClientTest(t, err)
+	if string(data) != "keep" {
+		t.Fatalf("junk changed: %q", data)
+	}
+	entries, err := os.ReadDir(logs)
+	mustClientTest(t, err)
+	if len(entries) != 6 {
+		t.Fatalf("got %d entries, want five logs and junk", len(entries))
 	}
 }
