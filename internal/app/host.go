@@ -213,33 +213,30 @@ func (rt *HostRuntime) graceLoop(ctx context.Context) error {
 	// Cancellation is the loop's normal stop: Close cancels the host's base
 	// context, so ending by ctx.Done is a clean stop, not a failure.
 	for {
-		select {
-		case <-ctx.Done():
-			rt.mu.Lock()
-			rt.disarmGraceLocked()
-			rt.mu.Unlock()
-			return nil
-		case <-rt.graceWake:
-			rt.mu.Lock()
-			timer, disarm := rt.graceTimer, rt.disarm
-			rt.mu.Unlock()
-			if timer == nil {
-				continue
-			}
+		rt.mu.Lock()
+		timer, disarm := rt.graceTimer, rt.disarm
+		rt.mu.Unlock()
+		if timer == nil {
 			select {
 			case <-ctx.Done():
 				rt.mu.Lock()
 				rt.disarmGraceLocked()
 				rt.mu.Unlock()
 				return nil
-			case <-disarm:
-			case <-timer.C():
-				rt.fireGrace(timer)
 			case <-rt.graceWake:
-				// A newer arming superseded this one; the next pass re-reads
-				// the armed state.
-				timer.Stop()
 			}
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			rt.mu.Lock()
+			rt.disarmGraceLocked()
+			rt.mu.Unlock()
+			return nil
+		case <-disarm:
+		case <-timer.C():
+			rt.fireGrace(timer)
+		case <-rt.graceWake:
 		}
 	}
 }
