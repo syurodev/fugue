@@ -4,7 +4,9 @@ import (
 	"context"
 	"strings"
 
+	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/process"
 )
 
@@ -74,7 +76,16 @@ type StartSpec struct {
 	Home      AccountHome
 	// HostEnv is the caller's environment snapshot; Start filters it through
 	// the §8 allowlist, so no Fugue secret reaches the vendor process.
-	HostEnv []string
+	HostEnv         []string
+	Model           string
+	Effort          string
+	ResumeSessionID string
+	BinaryPath      string
+	XDGRuntimeDir   string
+	Probe           *process.SystemdProbe
+	Clock           clock.Clock
+	IDs             ids.Generator
+	OnEscalation    func(step string)
 }
 
 // Input is one user input: a message text, or a slash command as the whole
@@ -117,7 +128,7 @@ type Adapter interface {
 	// login state and capability. It never reads vendor credential files.
 	Probe(ctx context.Context, home AccountHome) (Probe, error)
 	// Start spawns one session process and returns its Session.
-	Start(ctx context.Context, spec StartSpec) (Session, error)
+	Start(ctx context.Context, spec *StartSpec) (Session, error)
 }
 
 // Session is one running vendor session process (vendor-runtime §6).
@@ -145,6 +156,19 @@ var ErrUnsupported = errcode.New(errcode.FailedPrecondition, "the vendor adapter
 // command namespace: those commands run on the host and never reach a vendor
 // (vendor-runtime §9).
 var ErrFugueCommand = errcode.New(errcode.InvalidArgument, "the /fugue: command namespace never reaches a vendor")
+
+// ErrBusy reports that a turn is already running in this session: concurrent
+// turns are rejected and never queued implicitly (vendor-runtime §6).
+var ErrBusy = errcode.New(errcode.FailedPrecondition, "vendor session has an active turn in progress")
+
+// ErrSessionClosed reports that the vendor session process has been closed.
+var ErrSessionClosed = errcode.New(errcode.FailedPrecondition, "vendor session is closed")
+
+// ErrTurnNotRunning reports an operation on a turn that is not currently running.
+var ErrTurnNotRunning = errcode.New(errcode.FailedPrecondition, "turn is not currently active")
+
+// ErrHandshakeTimeout reports that the vendor session failed to receive system/init within 30 s.
+var ErrHandshakeTimeout = errcode.New(errcode.DeadlineExceeded, "vendor session handshake timed out waiting for system/init")
 
 // ValidateInput enforces the input rules shared by every adapter: the text is
 // non-empty, and a prompt beginning with /fugue: is rejected with a typed
