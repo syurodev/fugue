@@ -49,7 +49,7 @@ func (n *Normalizer) normalizeAssistant(line []byte, env *envelope) Observation 
 // (one block each), so text and thinking ids count per message.
 func (n *Normalizer) recordBlock(msg wireMessage, block *wireBlock, env *envelope) ([]transcript.Item, []Update) {
 	switch block.Type {
-	case "text":
+	case contentTypeText:
 		return []transcript.Item{n.textItem(msg, block, transcript.AssistantMessage,
 			transcript.AssistantMessageMetadata{ModelID: msg.Model},
 			transcript.AssistantMessageContent{Text: block.Text})}, nil

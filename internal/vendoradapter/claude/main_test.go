@@ -1,7 +1,11 @@
 package claude
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/json"
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"strings"
@@ -14,10 +18,17 @@ import (
 // command exit non-zero, hang forever, or flood stdout. fixtureCLI is the
 // pinned version the fixtures were recorded from.
 const (
-	fakeFailConfigDir  = "/probe/fail"
-	fakeHangConfigDir  = "/probe/hang"
-	fakeFloodConfigDir = "/probe/flood"
-	fixtureCLI         = "2.1.319"
+	fakeFailConfigDir            = "/probe/fail"
+	fakeHangConfigDir            = "/probe/hang"
+	fakeFloodConfigDir           = "/probe/flood"
+	fakeNoInitConfigDir          = "/session/no-init"
+	fakeIgnoreInterruptConfigDir = "/session/ignore-interrupt"
+	fakeFrameTooLargeConfigDir   = "/session/frame-too-large"
+	fakeCheckEnvConfigDir        = "/session/check-env"
+	fakePrintArgvConfigDir       = "/session/print-argv"
+	fakeUntestedVersionConfigDir = "/session/untested-version"
+	fakeCrashConfigDir           = "/session/crash"
+	fixtureCLI                   = "2.1.319"
 )
 
 // writeOut writes the fake CLI's stdout, exiting on failure like a real CLI
@@ -31,7 +42,11 @@ func writeOut(s string) {
 func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
 		runFakeClaude()
-		return
+		os.Exit(0)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "-p" {
+		runFakeClaudeSession()
+		os.Exit(0)
 	}
 	// The golden rewrite flag is registered here, not as a package variable,
 	// so the package owns no mutable globals; the golden test reads it back
@@ -103,4 +118,98 @@ func envHasPrefix(prefix string) bool {
 		}
 	}
 	return false
+}
+
+func checkSpecialStartupEnv() bool {
+	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeCrashConfigDir) {
+		os.Exit(1)
+	}
+	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeNoInitConfigDir) {
+		hangForever()
+		return true
+	}
+	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeCheckEnvConfigDir) {
+		if envHasPrefix("FUGUE_") || envHasPrefix("ANTHROPIC_") || !envHasPrefix("TERM=dumb") {
+			os.Exit(2)
+		}
+	}
+	return false
+}
+
+func handleEarlyExitEnvs() bool {
+	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeFrameTooLargeConfigDir) {
+		large := bytes.Repeat([]byte("X"), 8*1024*1024+1024)
+		large = append(large, '\n')
+		if _, err := os.Stdout.Write(large); err != nil {
+			os.Exit(1)
+		}
+		return true
+	}
+	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakePrintArgvConfigDir) {
+		argvBytes, err := json.Marshal(os.Args)
+		if err != nil {
+			os.Exit(1)
+		}
+		writeOut(fmt.Sprintf(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":%s}]},"session_id":"uuid-fake"}`+"\n", string(argvBytes)))
+		writeOut(`{"type":"result","subtype":"success","is_error":false,"result":"argv-printed","session_id":"uuid-fake"}` + "\n")
+		return true
+	}
+	return false
+}
+
+func runFakeClaudeSession() {
+	if checkSpecialStartupEnv() {
+		return
+	}
+
+	version := fixtureCLI
+	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeUntestedVersionConfigDir) {
+		version = "2.1.999"
+	}
+	initJSON := fmt.Sprintf(`{"type":"system","subtype":"init","session_id":"uuid-fake","tools":["Bash","Edit","Read","Task","Write"],"claude_code_version":"%s","model":"claude-sonnet-5-5","permissionMode":"default","slash_commands":["clear","compact"],"terminal_slash_commands":[]}`+"\n", version)
+	writeOut(initJSON)
+
+	if handleEarlyExitEnvs() {
+		return
+	}
+
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		handleFakeClaudeLine(scanner.Text())
+	}
+	os.Exit(0)
+}
+
+func handleFakeClaudeLine(line string) {
+	if strings.Contains(line, `"subtype":"interrupt"`) {
+		if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeIgnoreInterruptConfigDir) {
+			hangForever()
+			os.Exit(0)
+		}
+		writeOut(`{"type":"control_response","response":{"subtype":"success","request_id":"req-interrupt"}}` + "\n")
+		writeOut(`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]},"session_id":"uuid-fake"}` + "\n")
+		writeOut(`{"type":"result","subtype":"error_during_execution","is_error":true,"result":"[Request interrupted by user]","session_id":"uuid-fake"}` + "\n")
+		return
+	}
+	if strings.Contains(line, `"type":"user"`) {
+		if strings.Contains(line, "interrupt-me") {
+			writeOut(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"working..."}]},"session_id":"uuid-fake"}` + "\n")
+			return
+		}
+		if strings.Contains(line, "steer-me") {
+			writeOut(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"waiting steer..."}]},"session_id":"uuid-fake"}` + "\n")
+			return
+		}
+		writeOut(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"fake reply"}]},"session_id":"uuid-fake"}` + "\n")
+		writeOut(`{"type":"result","subtype":"success","is_error":false,"result":"fake reply","session_id":"uuid-fake"}` + "\n")
+	}
+}
+
+func fakeClaudeExe(t *testing.T) string {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatalf("os.Executable: %v", err)
+	}
+	return exe
 }

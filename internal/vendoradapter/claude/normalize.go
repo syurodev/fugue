@@ -152,7 +152,7 @@ func (n *Normalizer) normalizeTop(line []byte, env *envelope) (Observation, erro
 		return n.normalizeSystem(line, env), nil
 	case "assistant":
 		return n.normalizeAssistant(line, env), nil
-	case "user":
+	case roleUser:
 		return n.normalizeUser(line, env), nil
 	case "result":
 		return n.normalizeResult(line, env), nil

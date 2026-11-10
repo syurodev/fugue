@@ -175,7 +175,7 @@ func (n *Normalizer) normalizeStream(line []byte, env *envelope) Observation {
 func deltaFragment(d *wireDelta) (blockType, fragment string) {
 	switch d.Type {
 	case "text_delta":
-		return "text", d.Text
+		return contentTypeText, d.Text
 	case "thinking_delta":
 		return "thinking", d.Thinking
 	case "input_json_delta":
