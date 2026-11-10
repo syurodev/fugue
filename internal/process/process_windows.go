@@ -47,6 +47,11 @@ func (p *Process) CloseStdin() error {
 	return ErrUnsupportedPlatform
 }
 
+// WriteLine returns ErrUnsupportedPlatform on unsupported platforms.
+func (p *Process) WriteLine(line []byte) error {
+	return ErrUnsupportedPlatform
+}
+
 // Wait returns ErrUnsupportedPlatform on unsupported platforms.
 func (p *Process) Wait() error {
 	return ErrUnsupportedPlatform

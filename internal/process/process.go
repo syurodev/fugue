@@ -24,11 +24,13 @@ type Process struct {
 	interrupt    func(context.Context) error
 	onEscalation func(string)
 
-	stdin      io.WriteCloser
-	stdoutPipe *outputPipe
-	stdoutR    *LineReader
-	stderrR    *os.File
-	stderrRing *RingBuffer
+	stdin       io.WriteCloser
+	stdinClosed bool
+	stdinMu     sync.Mutex
+	stdoutPipe  *outputPipe
+	stdoutR     *LineReader
+	stderrR     *os.File
+	stderrRing  *RingBuffer
 
 	stderrTask *supervise.Task
 	waitTask   *supervise.Task
@@ -299,9 +301,48 @@ func (p *Process) StderrRing() *RingBuffer {
 
 // CloseStdin closes the stdin pipe to notify the child of EOF.
 func (p *Process) CloseStdin() error {
+	p.stdinMu.Lock()
+	defer p.stdinMu.Unlock()
+	if p.stdinClosed {
+		return nil
+	}
+	p.stdinClosed = true
 	if p.stdin != nil {
 		if err := p.stdin.Close(); err != nil {
 			return fmt.Errorf("close stdin: %w", err)
+		}
+	}
+	return nil
+}
+
+// WriteLine writes line to the process stdin followed by a newline if line does
+// not already end with one. Writes are serialized under p.stdinMu. If line
+// exceeds MaxFrameSize, ErrFrameTooLarge is returned without writing. If stdin
+// has been closed or the process has exited, ErrStdinClosed is returned.
+func (p *Process) WriteLine(line []byte) error {
+	needsNewline := len(line) == 0 || line[len(line)-1] != '\n'
+	totalLen := len(line)
+	if needsNewline {
+		totalLen++
+	}
+	if totalLen > MaxFrameSize {
+		return ErrFrameTooLarge
+	}
+
+	p.stdinMu.Lock()
+	defer p.stdinMu.Unlock()
+	if p.stdinClosed || p.isLeaderExited() {
+		return ErrStdinClosed
+	}
+	if p.stdin == nil {
+		return ErrStdinClosed
+	}
+	if _, err := p.stdin.Write(line); err != nil {
+		return fmt.Errorf("write stdin: %w", err)
+	}
+	if needsNewline {
+		if _, err := p.stdin.Write([]byte{'\n'}); err != nil {
+			return fmt.Errorf("write stdin newline: %w", err)
 		}
 	}
 	return nil

@@ -23,4 +23,7 @@ var (
 	// ErrIdentityMismatch indicates a live PID's start token does not match the
 	// recorded process identity or the identity cannot be verified safely.
 	ErrIdentityMismatch = errcode.New(errcode.FailedPrecondition, "process identity does not match live process")
+
+	// ErrStdinClosed indicates a write was attempted after CloseStdin or process termination.
+	ErrStdinClosed = errcode.New(errcode.FailedPrecondition, "process stdin is closed")
 )

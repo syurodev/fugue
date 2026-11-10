@@ -2,6 +2,7 @@ package process
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"io"
 	"os"
@@ -155,5 +156,73 @@ func drainBurstLines(t *testing.T, lr *LineReader) int {
 		if linesRead == 500 && !bytes.HasPrefix(line, []byte("line 499 ")) {
 			t.Fatalf("unexpected final line prefix: %s", line[:20])
 		}
+	}
+}
+
+func TestProcessWriteLine(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	proc, err := Spawn(ctx, &Options{
+		Argv:           []string{fakeVendorExe(t), fakeVendorFlag, "echo-stdin"},
+		SystemdRunPath: nonexistentSystemdRun,
+		Probe:          NewSystemdProbe(),
+	})
+	if err != nil {
+		t.Fatalf("Spawn: %v", err)
+	}
+	waitReady(t, proc.Stdout())
+
+	testWriteLineEchoAndLimit(t, proc)
+	testWriteLineClosedAndStopped(ctx, t, proc)
+}
+
+func testWriteLineEchoAndLimit(t *testing.T, proc *Process) {
+	t.Helper()
+	if err := proc.WriteLine([]byte(`{"hello":"world"}`)); err != nil {
+		t.Fatalf("WriteLine: %v", err)
+	}
+	line, err := proc.Stdout().ReadLine()
+	if err != nil {
+		t.Fatalf("ReadLine: %v", err)
+	}
+	if string(line) != `{"hello":"world"}` {
+		t.Fatalf("expected echo, got %q", string(line))
+	}
+
+	if werr := proc.WriteLine([]byte("second line\n")); werr != nil {
+		t.Fatalf("WriteLine with newline: %v", werr)
+	}
+	line, err = proc.Stdout().ReadLine()
+	if err != nil {
+		t.Fatalf("ReadLine: %v", err)
+	}
+	if string(line) != "second line" {
+		t.Fatalf("expected second line, got %q", string(line))
+	}
+
+	oversized := bytes.Repeat([]byte("a"), MaxFrameSize+1)
+	if err := proc.WriteLine(oversized); !errors.Is(err, ErrFrameTooLarge) {
+		t.Fatalf("expected ErrFrameTooLarge, got %v", err)
+	}
+}
+
+func testWriteLineClosedAndStopped(ctx context.Context, t *testing.T, proc *Process) {
+	t.Helper()
+	if err := proc.CloseStdin(); err != nil {
+		t.Fatalf("CloseStdin: %v", err)
+	}
+	if err := proc.WriteLine([]byte("after close")); !errors.Is(err, ErrStdinClosed) {
+		t.Fatalf("expected ErrStdinClosed after CloseStdin, got %v", err)
+	}
+	if err := proc.CloseStdin(); err != nil {
+		t.Fatalf("CloseStdin idempotent: %v", err)
+	}
+
+	if _, err := proc.Stop(ctx); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if err := proc.WriteLine([]byte("after stop")); !errors.Is(err, ErrStdinClosed) {
+		t.Fatalf("expected ErrStdinClosed after Stop, got %v", err)
 	}
 }
