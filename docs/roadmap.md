@@ -382,6 +382,7 @@ together only in `app`.
 
 | Date | Item | Change | Updated by |
 | --- | --- | --- | --- |
+| 2026-11-10 | F10.2b | Preserve bounded host output in separate per-launch logs, retaining the five newest. | Agent |
 | 2026-11-09 | F9.3c | Opened [#90](https://github.com/syurodev/fugue/pull/90): transactional payload total, backfill and regression coverage for protected transcript pagination. | Agent |
 | 2026-11-10 | F5.1, F10.2b | Fixed lost idle-grace wakeups and propagated host drain cleanup failures to the serve exit status. | Agent |
 | 2026-11-09 | F10.2b | Opened [#92](https://github.com/syurodev/fugue/pull/92) for static fonts as a separate PR; lifecycle implementation follows. | Agent |

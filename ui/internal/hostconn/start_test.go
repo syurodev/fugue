@@ -175,7 +175,7 @@ func TestDetachedHostOutputIsCapturedAndChildrenReaped(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer closeQuietly(root)
-	data, err := root.ReadFile("logs/host.log")
+	data, err := root.ReadFile("logs/host-1.log")
 	if err != nil {
 		t.Fatal(err)
 	}
