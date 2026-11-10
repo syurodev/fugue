@@ -205,6 +205,12 @@ func testWriteLineEchoAndLimit(t *testing.T, proc *Process) {
 	if err := proc.WriteLine(oversized); !errors.Is(err, ErrFrameTooLarge) {
 		t.Fatalf("expected ErrFrameTooLarge, got %v", err)
 	}
+
+	for _, invalid := range []string{"hello\nworld", "hello\nworld\n", "\nhello"} {
+		if err := proc.WriteLine([]byte(invalid)); !errors.Is(err, ErrInvalidFrame) {
+			t.Fatalf("expected ErrInvalidFrame for %q, got %v", invalid, err)
+		}
+	}
 }
 
 func testWriteLineClosedAndStopped(ctx context.Context, t *testing.T, proc *Process) {

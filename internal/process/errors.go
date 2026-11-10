@@ -26,4 +26,7 @@ var (
 
 	// ErrStdinClosed indicates a write was attempted after CloseStdin or process termination.
 	ErrStdinClosed = errcode.New(errcode.FailedPrecondition, "process stdin is closed")
+
+	// ErrInvalidFrame indicates that a line contains an interior newline.
+	ErrInvalidFrame = errcode.New(errcode.InvalidArgument, "process: line contains interior newline")
 )
