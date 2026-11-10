@@ -387,6 +387,7 @@ together only in `app`.
 | 2026-11-10 | F10.2c | Opened [#99](https://github.com/syurodev/fugue/pull/99): `ui/internal/theme` (chrome + palette tiers, derived status/link/syntax roles, `Material()` bridge), appwin on tokens with a source-scan test banning color literals; In review. | Agent |
 | 2026-11-10 | F10.2c | Item added (theme tokens in `ui/internal/theme`, shared by the screens of F10.3–F10.5); the F10.2 composite is In progress again until F10.2c merges. | Agent |
 | 2026-11-09 | F9.3c | Opened [#90](https://github.com/syurodev/fugue/pull/90): transactional payload total, backfill and regression coverage for protected transcript pagination. | Agent |
+| 2026-11-10 | F5.1, F10.2b | Fixed lost idle-grace wakeups and propagated host drain cleanup failures to the serve exit status. | Agent |
 | 2026-11-09 | F10.2b | Opened [#92](https://github.com/syurodev/fugue/pull/92) for static fonts as a separate PR; lifecycle implementation follows. | Agent |
 | 2026-11-09 | F10.2b | Close-out on [#94](https://github.com/syurodev/fugue/pull/94): each `shortDir` call gets its own directory and the DA-E04 restart reuses the stopped host's data directory; an auto-starting manager retries a failed Hello or HostStatus with backoff, HostStatus shares the 10 s startup deadline, and the host executable check covers every ancestor directory. F10.2b, the F10.2 composite and F9.5a (#91, #95) marked Done | Agent |
 | 2026-11-09 | F9.3c | Marked Done after [#90](https://github.com/syurodev/fugue/pull/90) merged. | Agent |

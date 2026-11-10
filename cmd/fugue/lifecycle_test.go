@@ -3,8 +3,14 @@ package main
 import (
 	"context"
 	"os"
+	"syscall"
 	"testing"
 	"time"
+
+	"github.com/syurodev/fugue/internal/app"
+	"github.com/syurodev/fugue/internal/platform/clock"
+	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/ids"
 
 	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/pkg/client"
@@ -72,5 +78,40 @@ func TestServeWithoutInitialLeaseExitsAfterGrace(t *testing.T) {
 	case <-ctx.Done():
 		<-result
 		t.Fatal("host with no clients did not exit")
+	}
+}
+
+type failingDrainTransport struct{}
+
+func (failingDrainTransport) Drain(context.Context, bool) error {
+	return errcode.New(errcode.Internal, "drain failed")
+}
+
+func TestRunUntilStoppedCloseErrorExitsFailure(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []string{"drain", "signal", "context"} {
+		t.Run(mode, func(t *testing.T) {
+			t.Parallel()
+			clk := clock.NewFake(time.Unix(0, 0))
+			hp, err := app.StartHost(t.Context(), &app.HostDeps{DataDir: t.TempDir(), Config: app.HostConfig{HostVersion: "test", APIVersions: []string{"v1"}}, Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("test")), Transport: failingDrainTransport{}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			sigs := make(chan os.Signal, 1)
+			switch mode {
+			case "drain":
+				hp.Stop("test")
+				<-hp.DrainDone()
+			case "signal":
+				sigs <- syscall.SIGTERM
+			case "context":
+				cancel()
+			}
+			if code := runUntilStopped(ctx, hp, sigs); code != exitFailure {
+				t.Fatalf("exit = %d, want %d", code, exitFailure)
+			}
+		})
 	}
 }
