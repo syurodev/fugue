@@ -10,6 +10,7 @@ package claude
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -98,8 +99,10 @@ const (
 // turn id it minted before sending the user line; events attach to the active
 // turn and the result event closes it.
 type Normalizer struct {
+	mu        sync.Mutex
 	session   string
 	turn      string
+	prevTurn  string
 	items     map[string]*transcript.Item
 	msgCounts map[string]int
 	init      *Init
@@ -117,11 +120,26 @@ func NewNormalizer(sessionID string) *Normalizer {
 }
 
 // BeginTurn activates a turn; the actor calls it right before each Send.
-func (n *Normalizer) BeginTurn(turnID string) { n.turn = turnID }
+func (n *Normalizer) BeginTurn(turnID string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.prevTurn = n.turn
+	n.turn = turnID
+}
+
+// RollbackTurn restores the normalizer turn to its previous state.
+func (n *Normalizer) RollbackTurn() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.turn = n.prevTurn
+	n.prevTurn = ""
+}
 
 // SlashCommands returns the latest vendor slash command list, terminal-only
 // commands hidden, vendor order kept (vendor-runtime §9).
 func (n *Normalizer) SlashCommands() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	if n.init == nil {
 		return nil
 	}
@@ -133,6 +151,8 @@ func (n *Normalizer) SlashCommands() []string {
 // wrong shapes included — becomes a notice(unsupported_event), never an error
 // and never a panic.
 func (n *Normalizer) Normalize(line []byte) (Observation, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	n.line++
 	var env envelope
 	if err := json.Unmarshal(line, &env); err != nil {

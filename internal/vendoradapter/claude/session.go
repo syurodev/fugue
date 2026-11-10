@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
+	"log/slog"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/vendor"
 )
@@ -34,20 +34,18 @@ const (
 	stateClosed
 )
 
-type idGenerator interface {
-	NewID() (string, error)
-}
-
 // Session runs one supervised Claude Code CLI process.
 type Session struct {
+	sessionID    string
 	proc         *process.Process
 	normalizer   *Normalizer
 	clock        clock.Clock
-	idGen        idGenerator
+	idGen        ids.Generator
 	obsCh        chan Observation
 	closeNotify  chan struct{}
 	readerDoneCh chan struct{}
 
+	writeMu     sync.Mutex
 	mu          sync.Mutex
 	state       sessionState
 	currentTurn string
@@ -115,6 +113,23 @@ func (s *Session) Send(ctx context.Context, in vendor.Input) (vendor.TurnRef, er
 		return vendor.TurnRef{}, errcode.Wrap(errcode.InvalidArgument, "validate input", err)
 	}
 
+	msg := wireUserMessage{
+		Type: roleUser,
+		Message: wireUserMessagePayload{
+			Role: roleUser,
+			Content: []wireUserContent{
+				{Type: contentTypeText, Text: in.Text},
+			},
+		},
+	}
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		return vendor.TurnRef{}, errcode.Wrap(errcode.Internal, "encode user message", err)
+	}
+
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
 	s.mu.Lock()
 	if s.state == stateClosed {
 		s.mu.Unlock()
@@ -137,23 +152,11 @@ func (s *Session) Send(ctx context.Context, in vendor.Input) (vendor.TurnRef, er
 	s.normalizer.BeginTurn(turnID)
 	s.mu.Unlock()
 
-	msg := wireUserMessage{
-		Type: roleUser,
-		Message: wireUserMessagePayload{
-			Role: roleUser,
-			Content: []wireUserContent{
-				{Type: contentTypeText, Text: in.Text},
-			},
-		},
-	}
-	raw, err := json.Marshal(msg)
-	if err != nil {
-		s.rollbackTurn()
-		return vendor.TurnRef{}, errcode.Wrap(errcode.Internal, "encode user message", err)
-	}
-
 	if err := s.proc.WriteLine(raw); err != nil {
 		s.rollbackTurn()
+		if errors.Is(err, process.ErrStdinClosed) {
+			return vendor.TurnRef{}, vendor.ErrSessionClosed
+		}
 		return vendor.TurnRef{}, errcode.Wrap(errcode.Internal, "write user message", err)
 	}
 
@@ -166,17 +169,6 @@ func (s *Session) Steer(ctx context.Context, turn vendor.TurnRef, in vendor.Inpu
 	if err := vendor.ValidateInput(in); err != nil {
 		return errcode.Wrap(errcode.InvalidArgument, "validate steer input", err)
 	}
-
-	s.mu.Lock()
-	if s.state == stateClosed {
-		s.mu.Unlock()
-		return s.closedErr()
-	}
-	if s.state != stateRunning || s.currentTurn != turn.ID {
-		s.mu.Unlock()
-		return vendor.ErrTurnNotRunning
-	}
-	s.mu.Unlock()
 
 	msg := wireUserMessage{
 		Type: roleUser,
@@ -192,16 +184,9 @@ func (s *Session) Steer(ctx context.Context, turn vendor.TurnRef, in vendor.Inpu
 		return errcode.Wrap(errcode.Internal, "encode steer message", err)
 	}
 
-	if err := s.proc.WriteLine(raw); err != nil {
-		return errcode.Wrap(errcode.Internal, "write steer message", err)
-	}
-	return nil
-}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 
-// Interrupt transmits a protocol control message interrupt on stdin and
-// awaits turn conclusion up to 10 s. If the turn does not finish within 10 s,
-// it escalates to the stop order and closes the session.
-func (s *Session) Interrupt(ctx context.Context, turn vendor.TurnRef) error {
 	s.mu.Lock()
 	if s.state == stateClosed {
 		s.mu.Unlock()
@@ -211,13 +196,24 @@ func (s *Session) Interrupt(ctx context.Context, turn vendor.TurnRef) error {
 		s.mu.Unlock()
 		return vendor.ErrTurnNotRunning
 	}
-	doneCh := s.turnDoneCh
-	reqID := "req-interrupt-" + s.currentTurn
 	s.mu.Unlock()
 
+	if err := s.proc.WriteLine(raw); err != nil {
+		if errors.Is(err, process.ErrStdinClosed) {
+			return vendor.ErrSessionClosed
+		}
+		return errcode.Wrap(errcode.Internal, "write steer message", err)
+	}
+	return nil
+}
+
+// Interrupt transmits a protocol control message interrupt on stdin and
+// awaits turn conclusion up to 10 s. If the turn does not finish within 10 s,
+// it escalates to the stop order and closes the session.
+func (s *Session) Interrupt(ctx context.Context, turn vendor.TurnRef) error {
 	ctrl := wireControlRequest{
 		Type:      "control_request",
-		RequestID: reqID,
+		RequestID: "req-interrupt-" + turn.ID,
 		Request: wireControlSubtype{
 			Subtype: controlInterrupt,
 		},
@@ -226,11 +222,31 @@ func (s *Session) Interrupt(ctx context.Context, turn vendor.TurnRef) error {
 	if err != nil {
 		return errcode.Wrap(errcode.Internal, "encode interrupt request", err)
 	}
-	if err := s.proc.WriteLine(raw); err != nil {
-		if _, closeErr := s.Close(ctx, vendor.CloseHostStop); closeErr != nil {
-			_ = closeErr
+
+	s.writeMu.Lock()
+	s.mu.Lock()
+	if s.state == stateClosed {
+		s.mu.Unlock()
+		s.writeMu.Unlock()
+		return s.closedErr()
+	}
+	if s.state != stateRunning || s.currentTurn != turn.ID {
+		s.mu.Unlock()
+		s.writeMu.Unlock()
+		return vendor.ErrTurnNotRunning
+	}
+	doneCh := s.turnDoneCh
+	s.mu.Unlock()
+
+	writeErr := s.proc.WriteLine(raw)
+	s.writeMu.Unlock()
+
+	if writeErr != nil {
+		slog.Error("claude interrupt: write control message failed, closing session", "session_id", s.sessionID, "error", writeErr)
+		if _, closeErr := s.Close(context.WithoutCancel(ctx), vendor.CloseHostStop); closeErr != nil {
+			slog.Warn("claude interrupt: close failed after write error", "session_id", s.sessionID, "error", closeErr)
 		}
-		return errcode.Wrap(errcode.Internal, "write interrupt control message", err)
+		return errcode.Wrap(errcode.Internal, "write interrupt control message", writeErr)
 	}
 
 	timer := s.clock.NewTimer(defaultInterruptTimeout)
@@ -240,14 +256,12 @@ func (s *Session) Interrupt(ctx context.Context, turn vendor.TurnRef) error {
 	case <-doneCh:
 		return nil
 	case <-timer.C():
-		if _, closeErr := s.Close(ctx, vendor.CloseHostStop); closeErr != nil {
-			_ = closeErr
+		slog.Warn("claude interrupt: turn did not finish within 10s, escalating to stop", "session_id", s.sessionID)
+		if _, closeErr := s.Close(context.WithoutCancel(ctx), vendor.CloseHostStop); closeErr != nil {
+			slog.Warn("claude interrupt: close failed after timeout", "session_id", s.sessionID, "error", closeErr)
 		}
 		return errcode.New(errcode.DeadlineExceeded, "turn interrupt timed out; session stopped")
 	case <-ctx.Done():
-		if _, closeErr := s.Close(ctx, vendor.CloseHostStop); closeErr != nil {
-			_ = closeErr
-		}
 		return errcode.Wrap(errcode.Canceled, "turn interrupt canceled", ctx.Err())
 	}
 }
@@ -278,9 +292,12 @@ func (s *Session) Close(ctx context.Context, reason vendor.CloseReason) (process
 
 		close(s.closeNotify)
 		if err := s.proc.CloseStdin(); err != nil {
-			_ = err
+			slog.Warn("claude close: close stdin error", "session_id", s.sessionID, "error", err)
 		}
 		proof, err := s.proc.Stop(ctx)
+		if err != nil {
+			slog.Warn("claude close: stop process error", "session_id", s.sessionID, "error", err)
+		}
 		s.closeProof = proof
 		s.closeErr = err
 
@@ -299,6 +316,7 @@ func (s *Session) rollbackTurn() {
 			close(s.turnDoneCh)
 			s.turnDoneCh = nil
 		}
+		s.normalizer.RollbackTurn()
 	}
 }
 
@@ -358,7 +376,7 @@ func (s *Session) handleReaderError(ctx context.Context, err error, initReported
 
 	if errors.Is(err, process.ErrFrameTooLarge) {
 		if _, stopErr := s.proc.Stop(ctx); stopErr != nil {
-			_ = stopErr
+			slog.Warn("claude reader: stop after frame too large failed", "session_id", s.sessionID, "error", stopErr)
 		}
 	}
 }
@@ -384,13 +402,4 @@ func (s *Session) handleObservation(obs *Observation, initReported *bool, initCh
 		}
 		s.mu.Unlock()
 	}
-}
-
-type defaultSequenceIDGen struct {
-	counter atomic.Uint64
-}
-
-func (d *defaultSequenceIDGen) NewID() (string, error) {
-	n := d.counter.Add(1)
-	return fmt.Sprintf("turn-%d", n), nil
 }

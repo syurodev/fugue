@@ -3,6 +3,7 @@ package claude
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -12,23 +13,27 @@ import (
 	"testing"
 
 	"go.uber.org/goleak"
+
+	"github.com/syurodev/fugue/internal/platform/supervise"
 )
 
 // The fake claude's sentinels: a CLAUDE_CONFIG_DIR that makes the version
 // command exit non-zero, hang forever, or flood stdout. fixtureCLI is the
 // pinned version the fixtures were recorded from.
 const (
-	fakeFailConfigDir            = "/probe/fail"
-	fakeHangConfigDir            = "/probe/hang"
-	fakeFloodConfigDir           = "/probe/flood"
-	fakeNoInitConfigDir          = "/session/no-init"
-	fakeIgnoreInterruptConfigDir = "/session/ignore-interrupt"
-	fakeFrameTooLargeConfigDir   = "/session/frame-too-large"
-	fakeCheckEnvConfigDir        = "/session/check-env"
-	fakePrintArgvConfigDir       = "/session/print-argv"
-	fakeUntestedVersionConfigDir = "/session/untested-version"
-	fakeCrashConfigDir           = "/session/crash"
-	fixtureCLI                   = "2.1.319"
+	fakeFailConfigDir             = "/probe/fail"
+	fakeHangConfigDir             = "/probe/hang"
+	fakeFloodConfigDir            = "/probe/flood"
+	fakeNoInitConfigDir           = "/session/no-init"
+	fakeIgnoreInterruptConfigDir  = "/session/ignore-interrupt"
+	fakeFrameTooLargeConfigDir    = "/session/frame-too-large"
+	fakeCheckEnvConfigDir         = "/session/check-env"
+	fakePrintArgvConfigDir        = "/session/print-argv"
+	fakeUntestedVersionConfigDir  = "/session/untested-version"
+	fakeNeverReadStdinConfigDir   = "/session/never-read-stdin"
+	fakeContinuousOutputConfigDir = "/session/continuous-output"
+	fakeCrashConfigDir            = "/session/crash"
+	fixtureCLI                    = "2.1.319"
 )
 
 // writeOut writes the fake CLI's stdout, exiting on failure like a real CLI
@@ -171,6 +176,25 @@ func runFakeClaudeSession() {
 
 	if handleEarlyExitEnvs() {
 		return
+	}
+	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeNeverReadStdinConfigDir) {
+		hangForever()
+		return
+	}
+	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeContinuousOutputConfigDir) {
+		supervise.Go(context.Background(), "fake.stdin_reader", func(taskCtx context.Context) error {
+			scanner := bufio.NewScanner(os.Stdin)
+			for scanner.Scan() {
+				line := scanner.Text()
+				if strings.Contains(line, `"interrupt"`) {
+					writeOut(`{"type":"result","subtype":"success","is_error":false,"result":"interrupted","session_id":"uuid-fake"}` + "\n")
+				}
+			}
+			return nil
+		})
+		for i := 0; ; i++ {
+			writeOut(fmt.Sprintf(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"chunk-%d"}]},"session_id":"uuid-fake"}`+"\n", i))
+		}
 	}
 
 	scanner := bufio.NewScanner(os.Stdin)
