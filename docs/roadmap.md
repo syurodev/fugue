@@ -4,7 +4,7 @@ The living work board of the repository. It answers: what to do, in what order, 
 design, what counts as done, and where each item stands. This page **does not** change the
 design.
 
-Last updated: 2026-11-11 (F9.9 review updates; Q-53–Q-56 decided, Q-57–Q-58 open).
+Last updated: 2026-11-11 (F9.9 plan approved; Q-53–Q-58 decided).
 
 ## 0. Context
 
@@ -392,13 +392,14 @@ together only in `app`.
 | Q-54 | 2026-11-11 | F9.9 | Which executable `/fugue:` commands belong in F9.9? A (recommended): implement only commands with a settled owner; keep `/fugue:team` and `/fugue:solo` in F11.2 and `/fugue:account` in F9.10, while F9.9 rejects unknown namespace inputs before vendor dispatch. B: include those commands as typed-unavailable placeholders. C: move their implementations into F9.9 and make their owners depend on it. | A decided by the owner. |
 | Q-55 | 2026-11-11 | F9.9 | Before F11.6 scheduler exists, what is the per-host concurrent Claude-session cap and capacity behavior? A (recommended): cap at two active processes; reject a new start with a typed capacity error, and use `waiting(capacity)` only for sessions explicitly queued by a later scheduler. B: cap at one and reject excess starts. C: choose a higher fixed cap and queue excess sessions now. | A decided by the owner. |
 | Q-56 | 2026-11-11 | F9.9 | What Host API deadlines and transcript page-size ceiling should F9.9 publish? A (recommended): host maxima of 35 s for probe/start/resume, 30 s for close, 12 s for interrupt, 5 s for other unary calls, page default 200/max 500; client deadlines may shorten but not extend them. B: require client deadlines only and cap pages at 200. C: select longer deadlines and page maximum after desktop profiling. | A decided by the owner, with the cancellation rule of plan §Limits: CloseSession, Interrupt escalation and StartSession cleanup run detached from the RPC context and always complete the F9.2 stop order; a retry with the same `command_id` attaches to the in-flight operation. |
-| Q-57 | 2026-11-11 | F9.9 | Before F5.6 workspace support, how should the host constrain the `cwd` that `StartSession` receives from the app client (where the user selected a folder, VR-06)? A (recommended): require an absolute existing directory, resolve the real path with `EvalSymlinks`, reject Fugue's data directory and descendants or `/`, and when F5.6 lands require the path to be a workspace root. B: allow only directories configured on the host. | |
-| Q-58 | 2026-11-11 | F9.9, F10.4 | How should the app learn when the vendor session list changes? A (recommended): F9.9b adds durable `vendor-sessions` topic with a snapshot of sessions and state plus created/state-changed events; F10.4 gets initial state from `ListSessions` and subscribes for updates. B: F10.4 polls `ListSessions`. | |
+| Q-57 | 2026-11-11 | F9.9 | Before F5.6 workspace support, how should the host constrain the `cwd` that `StartSession` receives from the app client (where the user selected a folder, VR-06)? A (recommended): require an absolute existing directory, resolve the real path with `EvalSymlinks`, reject Fugue's data directory and descendants or `/`, and when F5.6 lands require the path to be a workspace root. B: allow only directories configured on the host. | A decided by the owner, with one addition: the `cwd` must also not be the Fugue home directory (`~/Fugue`, Q-60 of the F5.6 plan) or any path inside it, so a vendor session never runs where Fugue configuration lives. |
+| Q-58 | 2026-11-11 | F9.9, F10.4 | How should the app learn when the vendor session list changes? A (recommended): F9.9b adds durable `vendor-sessions` topic with a snapshot of sessions and state plus created/state-changed events; F10.4 gets initial state from `ListSessions` and subscribes for updates. B: F10.4 polls `ListSessions`. | A decided by the owner: durable `vendor-sessions` topic in F9.9b; F10.4 reads `ListSessions` first and then subscribes. |
 
 ## 8. Log
 
 | Date | Item | Change | Updated by |
 | --- | --- | --- | --- |
+| 2026-11-11 | F9.9 | Recorded the owner's answers to Q-57 (client `cwd` validated, also outside the Fugue home) and Q-58 (`vendor-sessions` topic); the F9.9 plan is approved and F9.9a can start. | Agent |
 | 2026-11-11 | F9.9 | Review of #107: recorded owner decisions Q-53–Q-56; added Q-57 for client-selected working directory and Q-58 for session-list updates; expanded F9.9a–c for durable vendor-origin turns, deadline-safe stop operations, and the F10.4 session-list path. | Agent |
 | 2026-11-11 | F9.9 | Added the session-service plan and F9.9a–F9.9d composite split; recorded Q-53–Q-56 for profile fields, `/fugue:` command scope, pre-scheduler capacity and RPC/page limits. | Agent |
 | 2026-11-11 | F9.5b, F9.5 | Marked Done after [#100](https://github.com/syurodev/fugue/pull/100) merged; the F9.5 composite is Done (F9.5a and F9.5b merged). | Agent |
