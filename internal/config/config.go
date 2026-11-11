@@ -14,6 +14,7 @@ import (
 // standard read for the socket directory.
 const (
 	EnvDataDir    = "SYNX_FUGUE_DATA_DIR"
+	EnvFugueHome  = "SYNX_FUGUE_HOME"
 	EnvLogLevel   = "SYNX_FUGUE_LOG_LEVEL"
 	EnvRuntimeDir = "XDG_RUNTIME_DIR"
 
