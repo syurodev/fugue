@@ -1,0 +1,9 @@
+doc truncated=false
+para
+  span plain "Keep the spaces around "
+  span code "code"
+  span plain " and "
+  span bold "bold"
+  span plain ", and between "
+  span italic "em"
+  span plain " and text."

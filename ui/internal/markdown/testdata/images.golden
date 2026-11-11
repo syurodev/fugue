@@ -1,0 +1,7 @@
+doc truncated=false
+para
+  span plain "Alt text "
+  span plain "logo" image url="https://example.com/logo.png" host="example.com"
+  span plain " and "
+  span plain "bücher" image url="https://xn--bcher-kva.example/img.png" host="bücher.example"
+  span plain " here."
