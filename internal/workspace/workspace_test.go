@@ -262,10 +262,7 @@ func TestWorkspaceRootMissing_WSE05(t *testing.T) {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
 
-	cwd, err := f.svc.SelectSessionCwd(ctx, ws.ID, "fragile")
-	if err != nil || cwd != targetDir {
-		t.Fatalf("SelectSessionCwd before deletion: %v", err)
-	}
+	verifyCwdMatches(t, f.svc, ws.ID, "fragile", targetDir)
 
 	if removeErr := os.RemoveAll(targetDir); removeErr != nil {
 		t.Fatal(removeErr)
@@ -280,11 +277,28 @@ func TestWorkspaceRootMissing_WSE05(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetWorkspace: %v", err)
 	}
-	if !slices.Contains(loaded.MissingRoots, "fragile") {
-		t.Errorf("expected 'fragile' in missing_roots, got %v", loaded.MissingRoots)
+	verifyMissingRoot(t, loaded, "fragile")
+}
+
+func verifyCwdMatches(t *testing.T, svc *Service, wsID, rootName, wantDir string) {
+	t.Helper()
+	realDir, err := filepath.EvalSymlinks(wantDir)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(loaded.Roots) != 1 || loaded.Roots[0].Name != "fragile" {
-		t.Errorf("missing root was unexpectedly removed from configuration: %v", loaded.Roots)
+	cwd, err := svc.SelectSessionCwd(t.Context(), wsID, rootName)
+	if err != nil || cwd != realDir {
+		t.Fatalf("SelectSessionCwd(%s): %v, got=%q, want=%q", rootName, err, cwd, realDir)
+	}
+}
+
+func verifyMissingRoot(t *testing.T, ws *Workspace, rootName string) {
+	t.Helper()
+	if !slices.Contains(ws.MissingRoots, rootName) {
+		t.Errorf("expected %q in missing_roots, got %v", rootName, ws.MissingRoots)
+	}
+	if len(ws.Roots) != 1 || ws.Roots[0].Name != rootName {
+		t.Errorf("missing root was unexpectedly removed from configuration: %v", ws.Roots)
 	}
 }
 
@@ -391,10 +405,7 @@ func TestSelectSessionCwd(t *testing.T) {
 		t.Fatalf("CreateWorkspace: %v", err)
 	}
 
-	cwd, err := f.svc.SelectSessionCwd(ctx, ws.ID, "frontend")
-	if err != nil || cwd != repo1 {
-		t.Errorf("SelectSessionCwd(frontend) = %q, want %q", cwd, repo1)
-	}
+	verifyCwdMatches(t, f.svc, ws.ID, "frontend", repo1)
 
 	_, err = f.svc.SelectSessionCwd(ctx, ws.ID, "unknown")
 	if err == nil || CodeOf(err) != ErrRootInvalid {
