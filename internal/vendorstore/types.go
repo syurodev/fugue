@@ -39,6 +39,7 @@ type Event struct {
 	State             string
 	WaitingReason     string
 	TurnID            string
+	TurnOrigin        string
 	Outcome           string
 	FailureCode       string
 	StopProof         string
@@ -59,17 +60,24 @@ type Item struct {
 
 // Event types persisted by the vendor journal.
 const (
-	VendorSessionStarted   = "VendorSessionStarted"
-	VendorTurnStarted      = "VendorTurnStarted"
-	TranscriptItemRecorded = "TranscriptItemRecorded"
-	TranscriptItemUpdated  = "TranscriptItemUpdated"
-	ApprovalRequested      = "ApprovalRequested"
-	ApprovalDecided        = "ApprovalDecided"
-	VendorTurnEnded        = "VendorTurnEnded"
-	UsageObserved          = "UsageObserved"
-	QuotaObserved          = "QuotaObserved"
-	VendorProcessExited    = "VendorProcessExited"
-	VendorSessionClosed    = "VendorSessionClosed"
+	VendorSessionStarted      = "VendorSessionStarted"
+	VendorTurnStarted         = "VendorTurnStarted"
+	TranscriptItemRecorded    = "TranscriptItemRecorded"
+	TranscriptItemUpdated     = "TranscriptItemUpdated"
+	ApprovalRequested         = "ApprovalRequested"
+	ApprovalDecided           = "ApprovalDecided"
+	VendorTurnEnded           = "VendorTurnEnded"
+	UsageObserved             = "UsageObserved"
+	QuotaObserved             = "QuotaObserved"
+	VendorProcessExited       = "VendorProcessExited"
+	VendorSessionClosed       = "VendorSessionClosed"
+	VendorSessionStateChanged = "VendorSessionStateChanged"
+)
+
+// Turn origins distinguish Fugue-owned turns from turns opened by the vendor.
+const (
+	TurnOriginFugue  = "fugue"
+	TurnOriginVendor = "vendor"
 )
 
 // ItemMetadata contains only the transcript section 3 control fields.
