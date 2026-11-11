@@ -74,6 +74,7 @@ const (
 	VendorSessionStateChanged = "VendorSessionStateChanged"
 )
 
+// Turn origins distinguish Fugue-owned turns from turns opened by the vendor.
 const (
 	TurnOriginFugue  = "fugue"
 	TurnOriginVendor = "vendor"

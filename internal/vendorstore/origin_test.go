@@ -15,21 +15,21 @@ func TestVendorTurnOriginMigrationPreservesExistingRows(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	clk := clock.NewFake(time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC))
-	db, err := storage.Open(ctx, filepath.Join(t.TempDir(), "origin.db"))
-	if err != nil {
-		t.Fatal(err)
+	db, openErr := storage.Open(ctx, filepath.Join(t.TempDir(), "origin.db"))
+	if openErr != nil {
+		t.Fatal(openErr)
 	}
 	t.Cleanup(func() { requireNoError(t, db.Close()) })
-	migrations, err := storage.Migrations()
-	if err != nil {
-		t.Fatal(err)
+	migrations, migrationErr := storage.Migrations()
+	if migrationErr != nil {
+		t.Fatal(migrationErr)
 	}
 	if err := storage.RunMigrations(ctx, db, clk, migrations[:6]); err != nil {
 		t.Fatal(err)
 	}
-	store, err := New(ctx, db, nil, clk, nil)
-	if err != nil {
-		t.Fatal(err)
+	store, storeErr := New(ctx, db, nil, clk, nil)
+	if storeErr != nil {
+		t.Fatal(storeErr)
 	}
 	if err := store.CreateSession(ctx, &Session{ID: "old", Vendor: "claude", AccountID: "account", Role: "assistant", State: StateStarting}); err != nil {
 		t.Fatal(err)

@@ -22,6 +22,15 @@ func validateEvent(e *Event) error {
 }
 
 func validateTurn(e *Event) error {
+	for _, validate := range []func(*Event) error{validateTurnOrigin, validateTurnIdentity, validateTurnOutcome} {
+		if err := validate(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateTurnOrigin(e *Event) error {
 	if e.TurnOrigin != "" && e.TurnOrigin != TurnOriginFugue && e.TurnOrigin != TurnOriginVendor {
 		return errcode.New(errcode.InvalidArgument, "unknown turn origin")
 	}
@@ -31,9 +40,17 @@ func validateTurn(e *Event) error {
 	if e.TurnOrigin == TurnOriginVendor && (!strings.HasPrefix(e.TurnID, "vendor-") || !ids.IsUUID(strings.TrimPrefix(e.TurnID, "vendor-"))) {
 		return errcode.New(errcode.InvalidArgument, "vendor turn ID must contain a UUID")
 	}
+	return nil
+}
+
+func validateTurnIdentity(e *Event) error {
 	if (e.Type == VendorTurnStarted || e.Type == VendorTurnEnded) && e.TurnID == "" {
 		return errcode.New(errcode.InvalidArgument, "turn ID required")
 	}
+	return nil
+}
+
+func validateTurnOutcome(e *Event) error {
 	if e.Type == VendorTurnEnded && e.Outcome == "" {
 		return errcode.New(errcode.InvalidArgument, "turn outcome required")
 	}

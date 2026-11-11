@@ -7,7 +7,6 @@ package app
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -44,7 +43,6 @@ const (
 // the transcript service with one created and registered session.
 type transcriptFixture struct {
 	t       *testing.T
-	db      *sql.DB
 	store   *vendorstore.Store
 	vault   *vault.Service
 	hub     *EventHub
@@ -104,7 +102,7 @@ func newTranscriptFixture(t *testing.T, known KnownValues) *transcriptFixture {
 			t.Error(cerr)
 		}
 	})
-	f := &transcriptFixture{t: t, db: db, store: s, vault: v, hub: hub, clock: clk, service: service}
+	f := &transcriptFixture{t: t, store: s, vault: v, hub: hub, clock: clk, service: service}
 	f.mustCreateSession(testSession)
 	return f
 }
