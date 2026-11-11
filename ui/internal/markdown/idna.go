@@ -88,7 +88,7 @@ func punyThreshold(k, bias int) int {
 }
 
 // punyAdapt recalculates the bias (§6.1).
-func punyAdapt(delta int, numpoints int, firsttime bool) int {
+func punyAdapt(delta, numpoints int, firsttime bool) int {
 	if firsttime {
 		delta /= punyDamp
 	} else {
@@ -260,7 +260,7 @@ func insertRune(out []rune, i int, r rune) []rune {
 // splitPunycode splits a label body into its extended digits and its
 // copied-through basic code points: the basic part is everything before
 // the last '-' (§6.2).
-func splitPunycode(encoded string) (digits []rune, basic []rune) {
+func splitPunycode(encoded string) (digits, basic []rune) {
 	pos := strings.LastIndexByte(encoded, '-')
 	if pos < 0 {
 		return []rune(encoded), nil
