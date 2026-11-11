@@ -118,7 +118,7 @@ func pollStdinClosed(fds []unix.PollFd) bool {
 }
 
 func monitorStdinHUP(ctx context.Context, hupCh chan struct{}) {
-	fds := []unix.PollFd{{Fd: 0, Events: 0}}
+	fds := []unix.PollFd{{Fd: 0, Events: unix.POLLIN}}
 	for {
 		if ctx.Err() != nil || pollStdinClosed(fds) {
 			close(hupCh)
