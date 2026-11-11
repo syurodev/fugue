@@ -425,6 +425,17 @@ func TestSendAbsorbedIntoVendorTurnEndsFugueTurn(t *testing.T) {
 	assertAbsorbedResults(t, turn2.ID, turnEndCount, lastTurnEnd, sawNotice, beforeItems, claudeSess)
 }
 
+func closeWithFakeClock(t *testing.T, ctx context.Context, clk *clock.Fake, sess vendor.Session) error {
+	t.Helper()
+	closeDone := make(chan error, 1)
+	_ = supervise.Go(ctx, "test.close_fake_clock", func(taskCtx context.Context) error {
+		_, cErr := sess.Close(taskCtx, vendor.CloseHostStop)
+		closeDone <- cErr
+		return nil
+	})
+	return driveUntilErr(ctx, clk, closeDone)
+}
+
 func TestInterruptWithStaleTurnWhileWriteWedgedDoesNotCloseSession(t *testing.T) {
 	t.Parallel()
 
@@ -441,7 +452,12 @@ func TestInterruptWithStaleTurnWhileWriteWedgedDoesNotCloseSession(t *testing.T)
 	if err != nil {
 		t.Fatalf("Start failed: %v", err)
 	}
-	defer closeSession(t, ctx, sess)
+	t.Cleanup(func() {
+		cleanupCtx := context.WithoutCancel(ctx)
+		if cErr := closeWithFakeClock(t, cleanupCtx, clk, sess); cErr != nil {
+			t.Errorf("cleanup Close failed: %v", cErr)
+		}
+	})
 
 	claudeSess := asClaudeSession(t, sess)
 	sendErrCh := make(chan error, 1)
@@ -463,7 +479,7 @@ func TestInterruptWithStaleTurnWhileWriteWedgedDoesNotCloseSession(t *testing.T)
 		t.Fatalf("expected session to remain stateRunning, got %d", state)
 	}
 
-	if _, closeErr := sess.Close(ctx, vendor.CloseHostStop); closeErr != nil {
+	if closeErr := closeWithFakeClock(t, ctx, clk, sess); closeErr != nil {
 		t.Fatalf("Close failed: %v", closeErr)
 	}
 	sendErr := <-sendErrCh
