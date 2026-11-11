@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/sealing"
@@ -74,6 +75,9 @@ func (t *Transcripts) storeItem(ctx context.Context, session string, expectedSeq
 		return revErr
 	}
 	metadata := storeMetadata(item.Metadata)
+	if strings.HasPrefix(item.TurnID, "vendor-") {
+		metadata.Origin = vendorstore.TurnOriginVendor
+	}
 	withTruncation(&metadata, truncated, originalSize, rawTruncated, rawOriginal)
 	stored := vendorstore.Item{
 		ID:       item.ID,
