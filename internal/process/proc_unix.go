@@ -35,7 +35,7 @@ func (p *Process) signalTree(sig syscall.Signal) error {
 
 	var errs []error
 	if plan.group {
-		if err := syscall.Kill(-pid, sig); err != nil && !errors.Is(err, syscall.ESRCH) {
+		if err := groupSignalError(pid, syscall.Kill(-pid, sig)); err != nil {
 			errs = append(errs, err)
 		}
 	}
@@ -45,4 +45,11 @@ func (p *Process) signalTree(sig syscall.Signal) error {
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func groupSignalError(pgid int, err error) error {
+	if errors.Is(err, syscall.ESRCH) {
+		return nil
+	}
+	return platformGroupSignalError(pgid, err)
 }
