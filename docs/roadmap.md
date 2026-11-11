@@ -4,7 +4,7 @@ The living work board of the repository. It answers: what to do, in what order, 
 design, what counts as done, and where each item stands. This page **does not** change the
 design.
 
-Last updated: 2026-11-11 (F5.6 dependency corrected after Q-43).
+Last updated: 2026-11-11 (F5.6 dependency corrected after Q-50).
 
 ## 0. Context
 
@@ -334,7 +334,6 @@ together only in `app`.
 
 | ID | Date | Item | Question | Answer |
 | --- | --- | --- | --- | --- |
-| Q-43 | 2026-11-11 | F5.6 | F5.6 depends on composite F6.3, which is Done only when F6.3a–F6.3d merge. F6.3b depends on F5.6, while F6.3d is Stage B. As a result, F5.6, F6.3b, F6.3c and F11.1 cannot start in Stage A. Which dependency should F5.6 use? | A decided by the owner: F5.6 depends on F6.3a (Done), not on the composite. |
 | Q-01 | 2026-11-01 | F0.1 | Repository name and Go module path. Proposal: rename the repository to `fugue` (the target name in the Fugue naming ADR), module `github.com/syurodev/fugue`, unless a SynX GitHub organization exists. Which LICENSE? | Repository `fugue`, module `github.com/syurodev/fugue`; LICENSE Apache-2.0 (user, 2026-11-01) |
 | Q-02 | 2026-11-01 | F8.1 | The activation design (H-36, H-37, G-06, G-07) assumes the native harness runs beside vendor sessions inside DevKit. Fugue is a new product: what does a stage A release require? | `activation` v0.13 (decisions A-01 to A-08): native only, owner dogfood, Linux and macOS, CLI/TUI client, Sign in with ChatGPT only, one release gate, "A stable" by the owner's decision (user, 2026-11-03) |
 | Q-03 | 2026-11-01 | F1.3 | DB file name. The old ADR kept `devkit.db` only to avoid a migration; data now starts clean, so the proposal is `fugue.db` | `fugue.db` (user, 2026-11-02) |
@@ -377,12 +376,13 @@ together only in `app`.
 | Q-40 | 2026-11-09 | F10.2b | How does an app-started host opt into the Q-25 grace? A (recommended): an explicit fixed idle-grace option on `fugue serve`, used only by the app; ordinary foreground serve retains zero. B: an environment variable. | A selected by the task instruction; the option carries no secret. |
 | Q-41 | 2026-11-09 | F5.3a, F9.6 | The local principal is the `client_kind` a client claims in `Hello`, not an authenticated identity. A vendor process of the same UID can connect to `fugue.sock`, claim `app` and call `Answer` to approve its own permission requests; the per-session token protects only `mcp-bridge`. A (recommended): before F9.6, the host rejects local-only RPCs (`Answer`, vault operations, ...) from a peer whose PID (`SO_PEERCRED`) belongs to the process tree or cgroup of a vendor session (F9.2 containment). B: accept the risk and record it in the security documentation. Which? | |
 | Q-42 | 2026-11-09 | F5.3a | The implemented F5.3a scope (proto contract, interaction service, dedup cache, ephemeral interaction topic, connect transport handler and limit enforcement) measures about 1,730 gross changed non-test lines (1,641 Go and 90 proto, in 21 files; tests, generated code and docs excluded) — above the ~1,000 ceiling. A (recommended): accept one PR of about 1,730 lines, as with F9.2b (1,234 lines), F9.3b (1,340 lines) and F9.4b (1,617 lines). B: split into two PRs (PR 1: core interaction service & topic in `internal/app`; PR 2: connect transport in `internal/hostapi`). Which? | |
+| Q-50 | 2026-11-11 | F5.6 | F5.6 depends on composite F6.3, which is Done only when F6.3a–F6.3d merge. F6.3b depends on F5.6, while F6.3d is Stage B. As a result, F5.6, F6.3b, F6.3c and F11.1 cannot start in Stage A. Which dependency should F5.6 use? | A decided by the owner: F5.6 depends on F6.3a (Done), not on the composite. |
 
 ## 8. Log
 
 | Date | Item | Change | Updated by |
 | --- | --- | --- | --- |
-| 2026-11-11 | F5.6 | Recorded Q-43: F5.6 now depends on F6.3a instead of composite F6.3, unblocking stage A. | Agent |
+| 2026-11-11 | F5.6 | Recorded Q-50 (Q-43 to Q-49 are reserved by F9.5b in [#100](https://github.com/syurodev/fugue/pull/100)): F5.6 now depends on F6.3a instead of composite F6.3, unblocking stage A. | Agent |
 | 2026-11-10 | F9.5, F9.6 | Removed the obsolete F9.5 row replaced by the composite; consolidated the two F9.6 rows and retained the Q-41 note. | Agent |
 | 2026-11-10 | F10.2c, F10.2 | Marked Done after [#99](https://github.com/syurodev/fugue/pull/99) merged; the F10.2 composite is Done (F10.2a, F10.2b and F10.2c merged). | Agent |
 | 2026-11-10 | F10.2b | Preserve bounded host output in separate per-launch logs, retaining the five newest. | Agent |
