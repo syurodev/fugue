@@ -15,7 +15,7 @@ import (
 // firstBlock returns the document's first block of the given kind.
 func firstBlock(t *testing.T, src string, kind markdown.BlockKind) markdown.Block {
 	t.Helper()
-	d := markdown.Parse(src)
+	d := markdown.Parse(src, markdown.WithClock(frozenClock{}))
 	for i := range d.Blocks {
 		if d.Blocks[i].Kind == kind {
 			return d.Blocks[i]
@@ -65,6 +65,9 @@ func TestParseKeepsSpacesAroundCodeAndBold(t *testing.T) {
 // testHost is the example host of the link cases; a constant keeps the
 // string count below the goconst threshold.
 const testHost = "example.com"
+
+// testLoopback6 is the IPv6 loopback literal of the bracketed-host cases.
+const testLoopback6 = "::1"
 
 // findList returns the first list block in a slice, or nil.
 func findList(blocks []markdown.Block) *markdown.List {
@@ -247,6 +250,41 @@ func (c *steppingClock) Now() time.Time {
 	return t
 }
 
+// frozenClock always reads the same instant, so a parse with it never
+// spends the highlight budget and highlighting is deterministic.
+type frozenClock struct{}
+
+// Now implements markdown.Clock.
+func (frozenClock) Now() time.Time { return time.Unix(0, 0) }
+
+// TestHighlightWithoutClockStaysPlain checks that a parse with no injected
+// clock leaves every known-language code block plain — no lexer runs
+// without its time budget — while the same source with a clock is
+// highlighted, and the lines survive either way.
+func TestHighlightWithoutClockStaysPlain(t *testing.T) {
+	t.Parallel()
+	src := "```go\nfunc f() { x := 1 }\n```"
+	with := markdown.Parse(src, markdown.WithClock(frozenClock{}))
+	if !with.Blocks[0].Highlighted {
+		t.Fatal("control: block not highlighted with a clock")
+	}
+	without := markdown.Parse(src)
+	block := without.Blocks[0]
+	if block.Highlighted {
+		t.Fatal("block highlighted without a clock")
+	}
+	if len(block.Lines) == 0 {
+		t.Fatal("clockless block lost its lines")
+	}
+	for _, line := range block.Lines {
+		for _, span := range line {
+			if span.Role != markdown.RolePlain && span.Role != "" {
+				t.Fatalf("clockless block kept role %v", span.Role)
+			}
+		}
+	}
+}
+
 // TestHighlightOverBudgetStaysPlain checks that a highlight call whose
 // clock walks past the budget between tokens leaves the code block plain.
 func TestHighlightOverBudgetStaysPlain(t *testing.T) {
@@ -311,9 +349,12 @@ func TestParseSanitizesLinks(t *testing.T) {
 		// the browser would open, or the link is not openable.
 		{src: `[a](https://evil.example\@good.example/login)`},
 		{src: "[a](https://alice@good.example/)"},
-		{src: "[a](https://%E2%80%AEelpmaxe.live/)", host: "elpmaxe.live", puny: "elpmaxe.live"},
-		{src: "[a](https://exa%E2%80%8Bmple.com/)", host: testHost, puny: testHost},
+		{src: "[a](https://%E2%80%AEelpmaxe.live/)"},
+		{src: "[a](https://exa%E2%80%8Bmple.com/)"},
 		{src: "[a](https://good.example%2F@evil.example)"},
+		// IPv6 literals keep their brackets and port in the opened URL.
+		{src: "[a](https://[::1]/x)", openable: true, host: testLoopback6, puny: testLoopback6, urlContains: "https://[::1]/x"},
+		{src: "[a](https://[::1]:8080/x)", openable: true, host: testLoopback6, puny: testLoopback6, urlContains: "https://[::1]:8080/x"},
 	} {
 		t.Run(tc.src, func(t *testing.T) {
 			t.Parallel()
@@ -439,5 +480,48 @@ func TestParseNeverImportsGio(t *testing.T) {
 	}
 	if checked == 0 {
 		t.Fatal("no package files found")
+	}
+}
+
+// TestParseIPv6LiteralsMustBeWellFormed checks that only a well-formed
+// IPv6 literal makes a bracketed host openable; the malformed ones the
+// fuzzer found (an empty literal) and their relatives stay plain text.
+func TestParseIPv6LiteralsMustBeWellFormed(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		host     string
+		openable bool
+	}{
+		{host: testLoopback6, openable: true},
+		{host: "::", openable: true},
+		{host: "2001:db8::1", openable: true},
+		{host: "1:2:3:4:5:6:7:8", openable: true},
+		{host: "::ffff:1.2.3.4", openable: true},
+		{host: "1:2:3:4:5:6:7::", openable: true},
+		{host: ""},
+		{host: ":"},
+		{host: ":::"},
+		{host: "1::2::3"},
+		{host: "1:2:3:4:5:6:7"},
+		{host: "1:2:3:4:5:6:7:8:9"},
+		{host: "1:2:3:4:5:6:7:8::"},
+		{host: "12345::1"},
+		{host: "zz::1"},
+		{host: "::1.2.3"},
+		{host: "::1.2.3.256"},
+		{host: "::01.2.3.4"},
+		{host: "1.2.3.4::1"},
+		{host: ":1::2"},
+	} {
+		t.Run(tc.host, func(t *testing.T) {
+			t.Parallel()
+			l := linkOf(firstBlock(t, "[a](https://["+tc.host+"]/x)", markdown.BlockParagraph).Spans)
+			if l == nil {
+				t.Fatal("no link parsed")
+			}
+			if l.Openable != tc.openable {
+				t.Fatalf("openable = %v, want %v (url %q)", l.Openable, tc.openable, l.URL)
+			}
+		})
 	}
 }

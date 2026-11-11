@@ -206,7 +206,7 @@ func checkGolden(t *testing.T, name string) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := dumpDoc(markdown.Parse(string(src)))
+	got := dumpDoc(markdown.Parse(string(src), markdown.WithClock(frozenClock{})))
 	golden := filepath.Join(goldenDir(t), name+".golden")
 	if goldensRequested() {
 		if writeErr := os.WriteFile(filepath.Clean(golden), []byte(got), 0o600); writeErr != nil {

@@ -23,6 +23,8 @@ func FuzzParse(f *testing.F) {
 	f.Add("[l](https://example.com/x) [e](javascript:alert(1))")
 	f.Add("[bidi](https://example.com/\u202Eevil\u2066)")
 	f.Add("[idn](https://bücher.example/p)")
+	f.Add("[v6](https://[::1]/x) [v6p](https://[2001:db8::1]:8080/x?q=1#f)")
+	f.Add("[bad](https://[::1/x) [bad2](https://[zz]/x) [bad3](https://exa%E2%80%8Bmple.com/)")
 	f.Add("<div>raw</div> and <b>inline</b>")
 	f.Add("![alt](https://example.com/x.png)")
 	f.Add(strings.Repeat(">", 10000))
@@ -30,7 +32,7 @@ func FuzzParse(f *testing.F) {
 	f.Add("\t\t\t tabbed \t\t")
 
 	f.Fuzz(func(t *testing.T, src string) {
-		d := markdown.Parse(src)
+		d := markdown.Parse(src, markdown.WithClock(frozenClock{}))
 		walkDoc(t, d)
 	})
 }
@@ -84,6 +86,8 @@ func checkSpans(t *testing.T, spans []markdown.Span) {
 		}
 		if l := s.Link; l != nil && l.Openable {
 			checkOpenableLink(t, l)
+		} else if l != nil && (l.Host != "" || l.HostPunycode != "") && !strings.HasPrefix(l.URL, "mailto:") {
+			t.Fatalf("non-openable link %q carries host %q / %q", l.URL, l.Host, l.HostPunycode)
 		}
 	}
 }

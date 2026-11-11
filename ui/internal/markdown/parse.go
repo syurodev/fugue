@@ -26,9 +26,9 @@ type Clock interface {
 type Option func(*parseState)
 
 // WithClock injects the time source of the highlight budget. Without a
-// clock the size and line caps still bound the lexer, but no total time
-// budget runs; callers that parse untrusted input should always pass one
-// (the layout layer of F10.3b wires the app clock).
+// clock no code block is highlighted — every one stays plain — because
+// the lexer must never run without its time budget; callers that want
+// syntax roles pass one (the layout layer of F10.3b wires the app clock).
 func WithClock(c Clock) Option {
 	return func(p *parseState) { p.clock = c }
 }

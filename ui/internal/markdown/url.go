@@ -73,8 +73,8 @@ func authorityOf(rest string) string {
 // safe to open and display: no userinfo, a non-empty host of plain name
 // runes after percent-decoding (letters, digits, combining marks, '-' and
 // '.'; bracketed IPv6 literals allow hex, ':' and '.'), and a numeric
-// port only. The returned host never contains an unsafe rune; when the
-// authority is not simple the cleaned host still comes back for display.
+// port only. The returned host never contains an unsafe rune and is empty
+// whenever the authority is not simple.
 func simpleHost(authority string) (host string, ok bool) {
 	if authority == "" || strings.ContainsAny(authority, "@\\") {
 		return "", false
@@ -93,8 +93,10 @@ func simpleHost(authority string) (host string, ok bool) {
 		return "", false
 	}
 	decoded := percentDecode(hostport)
-	clean := sanitizeText(decoded)
-	return clean, validHostRunes(decoded)
+	if !validHostRunes(decoded) {
+		return "", false
+	}
+	return sanitizeText(decoded), true
 }
 
 // ipv6Host validates a bracketed IPv6 authority and returns the literal
@@ -105,16 +107,94 @@ func ipv6Host(authority string) (string, bool) {
 		return "", false
 	}
 	literal := authority[1:end]
-	for i := range len(literal) {
-		c := literal[i]
-		if !isHexDigit(c) && c != ':' && c != '.' {
-			return "", false
-		}
-	}
-	if !numericPort(authority[end+1:]) {
+	if !validIPv6(literal) || !numericPort(authority[end+1:]) {
 		return "", false
 	}
 	return literal, true
+}
+
+// validIPv6 reports whether s is a well-formed IPv6 address without zone:
+// eight groups of one to four hex digits, at most one "::" standing for at
+// least one zero group, and an optional dotted IPv4 tail counting as two
+// groups. The check is local (the net tree is off limits, see above) and
+// strict on purpose: a literal a URL parser would reject must not make a
+// link openable.
+func validIPv6(s string) bool {
+	head, tail, gap := strings.Cut(s, "::")
+	if gap && strings.Contains(tail, "::") {
+		return false
+	}
+	headGroups, ok := ipv6Groups(head, !gap)
+	if !ok {
+		return false
+	}
+	if !gap {
+		return headGroups == 8
+	}
+	tailGroups, ok := ipv6Groups(tail, true)
+	return ok && headGroups+tailGroups <= 7
+}
+
+// ipv6Groups counts the 16-bit groups of one colon-separated run; only the
+// last group of a run that ends the address may be a dotted IPv4 quad.
+func ipv6Groups(run string, mayEndInIPv4 bool) (int, bool) {
+	if run == "" {
+		return 0, true
+	}
+	groups := strings.Split(run, ":")
+	count := 0
+	for i, g := range groups {
+		switch {
+		case mayEndInIPv4 && i == len(groups)-1 && strings.Contains(g, "."):
+			if !validIPv4(g) {
+				return 0, false
+			}
+			count += 2
+		case validIPv6Group(g):
+			count++
+		default:
+			return 0, false
+		}
+	}
+	return count, true
+}
+
+// validIPv6Group reports whether g is one to four hex digits.
+func validIPv6Group(g string) bool {
+	if g == "" || len(g) > 4 {
+		return false
+	}
+	for i := range len(g) {
+		if !isHexDigit(g[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// validIPv4 reports whether s is a dotted quad of decimal octets without
+// leading zeros.
+func validIPv4(s string) bool {
+	octets := strings.Split(s, ".")
+	if len(octets) != 4 {
+		return false
+	}
+	for _, o := range octets {
+		if o == "" || len(o) > 3 || (len(o) > 1 && o[0] == '0') {
+			return false
+		}
+		n := 0
+		for _, c := range o {
+			if c < '0' || c > '9' {
+				return false
+			}
+			n = n*10 + int(c-'0')
+		}
+		if n > 255 {
+			return false
+		}
+	}
+	return true
 }
 
 // numericPort reports whether s is empty or a colon followed by digits.
@@ -217,7 +297,9 @@ func newLink(dest []byte) Link {
 
 // httpLink builds an http(s) link: openable only with a simple authority,
 // the host kept in display and punycode form, and the URL rewritten with
-// the punycode host when it opens.
+// the punycode host when it opens. A link that does not open keeps only
+// its sanitized URL and no host, so no cleaned host can pass for the real
+// destination.
 func httpLink(scheme, rest string) Link {
 	l := Link{URL: scheme + ":" + rest}
 	host, ok := simpleHost(authorityOf(rest))
@@ -227,11 +309,6 @@ func httpLink(scheme, rest string) Link {
 		l.Host = hostDisplay(host)
 		l.HostPunycode = hostASCII(host)
 		l.URL = rewriteHost(scheme, rest, l.HostPunycode)
-		return l
-	}
-	if host != "" {
-		l.Host = hostDisplay(host)
-		l.HostPunycode = hostASCII(host)
 	}
 	return l
 }
@@ -254,11 +331,15 @@ func validEscapes(s string) bool {
 
 // rewriteHost replaces the authority of the destination with the
 // punycode host, keeping the port and everything after the authority; the
-// scheme comes in already lowercased.
+// scheme comes in already lowercased. An IPv6 literal goes back inside its
+// brackets, or the URL would no longer parse as the host shown.
 func rewriteHost(scheme, rest, host string) string {
-	port := ""
 	authority := authorityOf(rest)
-	if i := strings.LastIndexByte(authority, ':'); i >= 0 && !strings.HasPrefix(authority, "[") {
+	port := ""
+	if strings.HasPrefix(authority, "[") {
+		port = authority[strings.IndexByte(authority, ']')+1:]
+		host = "[" + host + "]"
+	} else if i := strings.LastIndexByte(authority, ':'); i >= 0 {
 		port = authority[i:]
 	}
 	tail := ""

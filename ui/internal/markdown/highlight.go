@@ -15,11 +15,13 @@ import (
 
 // highlight tokenizes one code block into role-tagged lines and reports
 // whether tokenization happened. src must already be tab-expanded and
-// sanitized; the size caps are checked against it here. A lexer panic is
-// recovered: a lexer that misbehaves on hostile input leaves the block
-// plain instead of taking the process down.
+// sanitized; the size caps are checked against it here. Without a clock
+// there is no time budget to enforce, so the block stays plain: the
+// highlighter fails safe instead of running the lexer unbounded. A lexer
+// panic is recovered: a lexer that misbehaves on hostile input leaves the
+// block plain instead of taking the process down.
 func highlight(language, src string, lineCount int, clock Clock) (lines [][]Span, ok bool) {
-	if language == "" || len(src) > maxHighlightBytes || lineCount > maxHighlightLines {
+	if clock == nil || language == "" || len(src) > maxHighlightBytes || lineCount > maxHighlightLines {
 		return nil, false
 	}
 	lexer := lexers.Get(language)
@@ -42,12 +44,9 @@ func highlight(language, src string, lineCount int, clock Clock) (lines [][]Span
 	return tokenized, true
 }
 
-// newDeadline returns the budget checker of one highlight call; without
-// an injected clock it never reports the budget spent.
+// newDeadline returns the budget checker of one highlight call; the
+// caller has already rejected a nil clock.
 func newDeadline(clock Clock) func() bool {
-	if clock == nil {
-		return func() bool { return false }
-	}
 	start := clock.Now()
 	return func() bool { return clock.Now().Sub(start) > highlightBudget }
 }

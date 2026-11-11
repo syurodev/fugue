@@ -92,11 +92,13 @@ const (
 type Link struct {
 	// URL is the normalized destination.
 	URL string
-	// Host is the display form of the host: unicode for IDN, empty for
-	// mailto and hostless URLs.
+	// Host is the display form of the host: unicode for IDN, the bare
+	// literal (no brackets) for IPv6. It is empty for mailto, hostless
+	// URLs and every link that is not openable, so a cleaned host never
+	// stands in for a destination that cannot be opened.
 	Host string
 	// HostPunycode is the ASCII punycode form of the host; identical to
-	// Host when the host is already ASCII.
+	// Host when the host is already ASCII, empty whenever Host is.
 	HostPunycode string
 	// Openable reports whether the URL may be opened by the caller.
 	Openable bool
