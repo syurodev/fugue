@@ -31,11 +31,8 @@ func NewStore(db *sql.DB) *Store { return &Store{db: db} }
 
 // Create inserts a new workspace record.
 func (s *Store) Create(ctx context.Context, rec *Record) error {
-	missingJSON, err := marshalMissing(rec.MissingRoots)
-	if err != nil {
-		return err
-	}
-	_, err = s.db.ExecContext(ctx,
+	missingJSON := marshalMissing(rec.MissingRoots)
+	_, err := s.db.ExecContext(ctx,
 		"INSERT INTO workspaces ("+workspaceColumns+") VALUES (?, ?, ?, ?, ?, ?, ?)",
 		rec.WorkspaceID, rec.ConfigRevision, rec.PolicyRevision, rec.ConfigHash, rec.AcceptedConfigHash, missingJSON, rec.CreatedAt,
 	)
@@ -60,21 +57,15 @@ func (s *Store) Get(ctx context.Context, id string) (*Record, error) {
 
 // Update updates revisions, hashes, and missing_roots for an existing workspace.
 func (s *Store) Update(ctx context.Context, rec *Record) error {
-	missingJSON, err := marshalMissing(rec.MissingRoots)
-	if err != nil {
-		return err
-	}
-	query := "UPDATE workspaces SET config_revision = ?, policy_revision = ?, config_hash = ?, accepted_config_hash = ?, missing_roots = ? WHERE workspace_id = ?"
-	return s.execUpdate(ctx, query, rec.ConfigRevision, rec.PolicyRevision, rec.ConfigHash, rec.AcceptedConfigHash, missingJSON, rec.WorkspaceID)
+	return s.execUpdate(ctx,
+		"UPDATE workspaces SET config_revision = ?, policy_revision = ?, config_hash = ?, accepted_config_hash = ?, missing_roots = ? WHERE workspace_id = ?",
+		rec.ConfigRevision, rec.PolicyRevision, rec.ConfigHash, rec.AcceptedConfigHash, marshalMissing(rec.MissingRoots), rec.WorkspaceID,
+	)
 }
 
 // UpdateMissingRoots updates only the missing_roots column for a workspace.
 func (s *Store) UpdateMissingRoots(ctx context.Context, id string, missingRoots []string) error {
-	missingJSON, err := marshalMissing(missingRoots)
-	if err != nil {
-		return err
-	}
-	return s.execUpdate(ctx, "UPDATE workspaces SET missing_roots = ? WHERE workspace_id = ?", missingJSON, id)
+	return s.execUpdate(ctx, "UPDATE workspaces SET missing_roots = ? WHERE workspace_id = ?", marshalMissing(missingRoots), id)
 }
 
 func (s *Store) execUpdate(ctx context.Context, query string, args ...any) error {
@@ -83,10 +74,7 @@ func (s *Store) execUpdate(ctx context.Context, query string, args ...any) error
 		return WrapError(ErrNotFound, "execute update", execErr)
 	}
 	rows, rowsErr := res.RowsAffected()
-	if rowsErr != nil {
-		return WrapError(ErrNotFound, "check rows affected", rowsErr)
-	}
-	if rows == 0 {
+	if rowsErr != nil || rows == 0 {
 		return NewError(ErrNotFound, "workspace not found")
 	}
 	return nil
@@ -120,19 +108,18 @@ func (s *Store) List(ctx context.Context) ([]*Record, error) {
 
 // Delete removes a workspace record from the database.
 func (s *Store) Delete(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM workspaces WHERE workspace_id = ?", id)
-	if err != nil {
+	if _, err := s.db.ExecContext(ctx, "DELETE FROM workspaces WHERE workspace_id = ?", id); err != nil {
 		return WrapError(ErrNotFound, "delete workspace "+id, err)
 	}
 	return nil
 }
 
-func marshalMissing(roots []string) (string, error) {
+func marshalMissing(roots []string) string {
 	b, err := json.Marshal(roots)
 	if err != nil {
-		return "", WrapError(ErrRootInvalid, "marshal missing_roots", err)
+		return "[]"
 	}
-	return string(b), nil
+	return string(b)
 }
 
 func scanRecord(row interface{ Scan(...any) error }) (*Record, error) {

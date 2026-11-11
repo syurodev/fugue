@@ -3,24 +3,28 @@ package workspace
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
 )
 
 const (
-	dirPerm  os.FileMode = 0o700
-	filePerm os.FileMode = 0o600
+	dirPerm, filePerm os.FileMode = 0o700, 0o600
 )
 
-// CheckAndEnforcePermissions verifies that rootPath and all its contents belong
-// to the current process UID (failing closed with workspace.ownership_invalid otherwise),
-// and tightens any permissive group or world permissions to 0700 (directories) or
-// 0600 (files), logging an audit message for every adjusted entry.
+type pathEntry struct {
+	path     string
+	optional bool
+}
+
+// CheckAndEnforcePermissions verifies ownership and permissions for the Fugue home,
+// workspaces directory, workspace directory, scratch directory, fugue.toml, WORKSPACE.md,
+// and AGENTS.md (if present). It does not walk into scratch contents, rejects any symlink
+// with workspace.ownership_invalid, and tightens permissive modes to 0700/0600.
 func CheckAndEnforcePermissions(
 	ctx context.Context,
-	rootPath string,
+	paths Paths,
+	workspaceID string,
 	statUID func(os.FileInfo) (int, error),
 	logger *slog.Logger,
 ) error {
@@ -31,37 +35,49 @@ func CheckAndEnforcePermissions(
 		logger = slog.Default()
 	}
 
-	walkErr := filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return WrapError(ErrOwnershipInvalid, "access "+path, err)
+	wsDir := paths.WorkspaceDir(workspaceID)
+	entries := []pathEntry{
+		{path: paths.FugueHome},
+		{path: paths.WorkspacesDir},
+		{path: wsDir},
+		{path: paths.ScratchDir(workspaceID)},
+		{path: paths.ConfigPath(workspaceID)},
+		{path: paths.WorkspaceMDPath(workspaceID)},
+		{path: filepath.Join(wsDir, "AGENTS.md"), optional: true},
+	}
+
+	for _, entry := range entries {
+		if err := checkEntry(ctx, entry, statUID, logger); err != nil {
+			return err
 		}
-		info, infoErr := d.Info()
-		if infoErr != nil {
-			return WrapError(ErrOwnershipInvalid, "stat "+path, infoErr)
-		}
-		return checkEntry(ctx, path, info, statUID, logger)
-	})
-	if walkErr != nil {
-		return WrapError(ErrOwnershipInvalid, "walk directory "+rootPath, walkErr)
 	}
 	return nil
 }
 
 func checkEntry(
 	ctx context.Context,
-	path string,
-	info os.FileInfo,
+	entry pathEntry,
 	statUID func(os.FileInfo) (int, error),
 	logger *slog.Logger,
 ) error {
+	info, err := os.Lstat(entry.path)
+	if err != nil {
+		if entry.optional && os.IsNotExist(err) {
+			return nil
+		}
+		return WrapError(ErrOwnershipInvalid, "lstat "+entry.path, err)
+	}
+	if info.Mode()&os.ModeSymlink != 0 {
+		return NewError(ErrOwnershipInvalid, "symlink not allowed in workspace: "+entry.path)
+	}
 	uid, err := statUID(info)
 	if err != nil {
-		return WrapError(ErrOwnershipInvalid, "stat UID for "+path, err)
+		return WrapError(ErrOwnershipInvalid, "stat UID for "+entry.path, err)
 	}
 	if uid != os.Getuid() {
-		return NewError(ErrOwnershipInvalid, fmt.Sprintf("entry %s belongs to foreign UID %d (expected UID %d)", path, uid, os.Getuid()))
+		return NewError(ErrOwnershipInvalid, fmt.Sprintf("entry %s belongs to foreign UID %d (expected UID %d)", entry.path, uid, os.Getuid()))
 	}
-	return enforcePerm(ctx, path, info.IsDir(), info.Mode().Perm(), logger)
+	return enforcePerm(ctx, entry.path, info.IsDir(), info.Mode().Perm(), logger)
 }
 
 func enforcePerm(ctx context.Context, path string, isDir bool, mode os.FileMode, logger *slog.Logger) error {
@@ -75,10 +91,6 @@ func enforcePerm(ctx context.Context, path string, isDir bool, mode os.FileMode,
 	if err := os.Chmod(path, target); err != nil {
 		return WrapError(ErrOwnershipInvalid, "chmod "+path, err)
 	}
-	logger.WarnContext(ctx, "tightened workspace "+kind+" permissions",
-		"path", path,
-		"old_mode", fmt.Sprintf("%04o", mode),
-		"new_mode", fmt.Sprintf("%04o", target),
-	)
+	logger.WarnContext(ctx, "tightened workspace "+kind+" permissions", "path", path, "old_mode", fmt.Sprintf("%04o", mode), "new_mode", fmt.Sprintf("%04o", target))
 	return nil
 }

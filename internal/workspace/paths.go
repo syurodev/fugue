@@ -18,12 +18,10 @@ type Paths struct {
 type PathOption func(*pathOptions)
 
 type pathOptions struct {
-	// workspacesDirOverride sets an explicit workspaces directory (junction point for F5.6b [host].workspaces_dir).
 	workspacesDirOverride string
 }
 
 // WithWorkspacesDir sets an explicit workspaces directory override.
-// Junction point for [host].workspaces_dir from F5.6b.
 func WithWorkspacesDir(dir string) PathOption {
 	return func(o *pathOptions) { o.workspacesDirOverride = dir }
 }
@@ -34,12 +32,10 @@ func ResolvePaths(env config.Env, userHomeDir func() (string, error), dataDir st
 	for _, opt := range opts {
 		opt(&options)
 	}
-
 	fugueHome, err := resolveFugueHome(env, userHomeDir)
 	if err != nil {
 		return Paths{}, err
 	}
-
 	workspacesDir := filepath.Join(fugueHome, "workspaces")
 	if options.workspacesDirOverride != "" {
 		if !filepath.IsAbs(options.workspacesDirOverride) {
@@ -47,7 +43,6 @@ func ResolvePaths(env config.Env, userHomeDir func() (string, error), dataDir st
 		}
 		workspacesDir = filepath.Clean(options.workspacesDirOverride)
 	}
-
 	cleanDataDir := ""
 	if dataDir != "" {
 		if !filepath.IsAbs(dataDir) {
@@ -55,7 +50,6 @@ func ResolvePaths(env config.Env, userHomeDir func() (string, error), dataDir st
 		}
 		cleanDataDir = filepath.Clean(dataDir)
 	}
-
 	return Paths{FugueHome: fugueHome, WorkspacesDir: workspacesDir, DataDir: cleanDataDir}, nil
 }
 

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/pelletier/go-toml/v2"
+
 	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/platform/ids"
 )
@@ -332,6 +334,13 @@ func testSetMode(t *testing.T, path string, mode os.FileMode) {
 	}
 }
 
+func testWriteFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Clean(path), data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestWorkspacePermissiveModeChmoddedWithOwnerAudit(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -355,7 +364,7 @@ func TestWorkspacePermissiveModeChmoddedWithOwnerAudit(t *testing.T) {
 	testSetMode(t, wsDir, 0o777)
 	testSetMode(t, cfgPath, 0o666)
 
-	if checkErr := CheckAndEnforcePermissions(ctx, wsDir, nil, logger); checkErr != nil {
+	if checkErr := CheckAndEnforcePermissions(ctx, f.paths, ws.ID, nil, logger); checkErr != nil {
 		t.Fatalf("CheckAndEnforcePermissions: %v", checkErr)
 	}
 
@@ -505,5 +514,205 @@ func TestPathsResolution(t *testing.T) {
 	pathsOpt, err := ResolvePaths(envEmpty, func() (string, error) { return homeDir, nil }, dataDir, WithWorkspacesDir(filepath.Join(temp, "ws-opt")))
 	if err != nil || pathsOpt.WorkspacesDir != filepath.Join(temp, "ws-opt") {
 		t.Fatalf("WithWorkspacesDir failed: %v", err)
+	}
+}
+
+func TestPermissionsNeverFollowSymlinks(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	f := newTestFixture(t)
+
+	extFile := filepath.Join(f.tempDir, "external-target.txt")
+	testWriteFile(t, extFile, []byte("sensitive-data"))
+	testSetMode(t, extFile, 0o644)
+
+	ws, err := f.svc.CreateWorkspace(ctx, CreateWorkspaceRequest{
+		Name:    "symlink-test",
+		HomeDir: filepath.Join(f.tempDir, "userhome"),
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	// Symlink in scratch/ pointing to external 0644 file: must not be followed or chmodded.
+	scratchLink := filepath.Join(f.paths.ScratchDir(ws.ID), "scratch-symlink.txt")
+	if err := os.Symlink(extFile, scratchLink); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := f.svc.GetWorkspace(ctx, ws.ID); err != nil {
+		t.Fatalf("GetWorkspace should succeed with symlink in scratch: %v", err)
+	}
+	verifyFileMode(t, extFile, 0o644)
+
+	// Symlink instead of fugue.toml pointing to external 0644 file: must fail closed and NOT chmod.
+	cfgPath := f.paths.ConfigPath(ws.ID)
+	if err := os.Remove(cfgPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(extFile, cfgPath); err != nil {
+		t.Fatal(err)
+	}
+
+	checkErr := CheckAndEnforcePermissions(ctx, f.paths, ws.ID, nil, nil)
+	if checkErr == nil || CodeOf(checkErr) != ErrOwnershipInvalid {
+		t.Fatalf("expected ErrOwnershipInvalid for symlink config, got %v", checkErr)
+	}
+	verifyFileMode(t, extFile, 0o644)
+}
+
+func verifyFileMode(t *testing.T, path string, want os.FileMode) {
+	t.Helper()
+	st, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Mode().Perm() != want {
+		t.Fatalf("target %s mode = %04o, want %04o", path, st.Mode().Perm(), want)
+	}
+}
+
+func TestPermissionsDoNotWalkScratchContents(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	f := newTestFixture(t)
+
+	ws, err := f.svc.CreateWorkspace(ctx, CreateWorkspaceRequest{
+		Name:    "scratch-nowalk-test",
+		HomeDir: filepath.Join(f.tempDir, "userhome"),
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	scratchFile := filepath.Join(f.paths.ScratchDir(ws.ID), "sub-item.txt")
+	testWriteFile(t, scratchFile, []byte("content"))
+	testSetMode(t, scratchFile, 0o644)
+
+	if err := CheckAndEnforcePermissions(ctx, f.paths, ws.ID, nil, nil); err != nil {
+		t.Fatalf("CheckAndEnforcePermissions failed: %v", err)
+	}
+	verifyFileMode(t, scratchFile, 0o644)
+}
+
+func TestRootsFromFileAreRevalidated(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	f := newTestFixture(t)
+
+	validRepo := filepath.Join(f.tempDir, "valid-base-repo")
+	if err := os.MkdirAll(validRepo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	nestedRepo := filepath.Join(validRepo, "nested-sub")
+	if err := os.MkdirAll(nestedRepo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	inHome := filepath.Join(f.paths.FugueHome, "forbidden")
+	if err := os.MkdirAll(inHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	inData := filepath.Join(f.paths.DataDir, "forbidden")
+	if err := os.MkdirAll(inData, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	ws, err := f.svc.CreateWorkspace(ctx, CreateWorkspaceRequest{
+		Name:    "revalidate-roots",
+		Roots:   []RootSpec{{Name: "main", Path: validRepo, Access: AccessReadWrite}},
+		HomeDir: filepath.Join(f.tempDir, "userhome"),
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	cases := []struct {
+		name     string
+		rootName string
+		rootPath string
+		wantCode Code
+	}{
+		{"filesystem root", "fsroot", "/", ErrPathDenied},
+		{"inside Fugue home", "inhome", filepath.Join(f.paths.FugueHome, "forbidden"), ErrPathDenied},
+		{"inside data dir", "indata", filepath.Join(f.paths.DataDir, "forbidden"), ErrPathDenied},
+		{"nested root", "nested", nestedRepo, ErrRootInvalid},
+		{"invalid name", "INVALID_NAME", validRepo, ErrRootInvalid},
+	}
+
+	for _, tc := range cases {
+		testInvalidRootRevalidated(t, ctx, f, ws.ID, validRepo, tc.rootName, tc.rootPath, tc.wantCode)
+	}
+}
+
+func testInvalidRootRevalidated(t *testing.T, ctx context.Context, f *testFixture, wsID, validRepo, rootName, rootPath string, wantCode Code) {
+	t.Helper()
+	cfg := tomlConfig{
+		Name: "revalidate-roots",
+		Roots: []Root{
+			{Name: "main", Path: validRepo, Access: AccessReadWrite},
+			{Name: rootName, Path: rootPath, Access: AccessReadWrite},
+		},
+	}
+	encoded, err := toml.Marshal(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfgPath := f.paths.ConfigPath(wsID)
+	testWriteFile(t, cfgPath, encoded)
+	hash := computeConfigHash(encoded)
+	if _, execErr := f.db.ExecContext(ctx, "UPDATE workspaces SET accepted_config_hash = ?, config_hash = ? WHERE workspace_id = ?", hash, hash, wsID); execErr != nil {
+		t.Fatal(execErr)
+	}
+
+	loaded, err := f.svc.GetWorkspace(ctx, wsID)
+	if err != nil {
+		t.Fatalf("GetWorkspace should return workspace even with invalid root: %v", err)
+	}
+	invErr, ok := loaded.InvalidRoots[rootName]
+	if !ok {
+		t.Fatalf("expected root %q to be in InvalidRoots, got %+v", rootName, loaded.InvalidRoots)
+	}
+	if CodeOf(invErr) != wantCode {
+		t.Fatalf("expected code %s for root %q, got %s (%v)", wantCode, rootName, CodeOf(invErr), invErr)
+	}
+
+	_, cwdErr := f.svc.SelectSessionCwd(ctx, wsID, rootName)
+	if cwdErr == nil || CodeOf(cwdErr) != wantCode {
+		t.Fatalf("expected SelectSessionCwd to reject invalid root with %s, got %v", wantCode, cwdErr)
+	}
+}
+
+func TestSelectSessionCwdRefusesUnconfirmedConfig(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	f := newTestFixture(t)
+
+	repo := filepath.Join(f.tempDir, "unconf-repo")
+	if err := os.MkdirAll(repo, 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	ws, err := f.svc.CreateWorkspace(ctx, CreateWorkspaceRequest{
+		Name:    "unconf-test",
+		Roots:   []RootSpec{{Name: "repo", Path: repo, Access: AccessReadWrite}},
+		HomeDir: filepath.Join(f.tempDir, "userhome"),
+	})
+	if err != nil {
+		t.Fatalf("CreateWorkspace: %v", err)
+	}
+
+	cfg := tomlConfig{
+		Name:  "unconf-test-edited",
+		Roots: []Root{{Name: "repo", Path: repo, Access: AccessReadWrite}},
+	}
+	encoded, marshalErr := toml.Marshal(cfg)
+	if marshalErr != nil {
+		t.Fatal(marshalErr)
+	}
+	testWriteFile(t, f.paths.ConfigPath(ws.ID), encoded)
+
+	_, err = f.svc.SelectSessionCwd(ctx, ws.ID, "repo")
+	if err == nil || CodeOf(err) != ErrConfigUnconfirmed {
+		t.Fatalf("expected ErrConfigUnconfirmed when config hash diverges, got %v", err)
 	}
 }

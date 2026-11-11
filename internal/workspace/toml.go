@@ -1,75 +1,44 @@
 package workspace
 
 import (
-	"bufio"
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
-	"strings"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
-type rawConfig struct {
-	Name  string
-	Roots []Root
+type tomlConfig struct {
+	Name  string `toml:"name"`
+	Roots []Root `toml:"roots,omitempty"`
 }
 
-func formatMinimalTOML(name string, roots []Root) string {
-	var sb strings.Builder
-	fmt.Fprintf(&sb, "name = %q\n", name)
-	for _, r := range roots {
-		fmt.Fprintf(&sb, "\n[[roots]]\nname = %q\npath = %q\naccess = %q\n", r.Name, r.Path, r.Access)
+func encodeConfigTOML(name string, roots []Root) ([]byte, error) {
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(tomlConfig{Name: name, Roots: roots}); err != nil {
+		return nil, WrapError(ErrConfigInvalid, "encode config", err)
 	}
-	return sb.String()
+	return buf.Bytes(), nil
 }
 
-func parseMinimalTOML(data []byte) (rawConfig, error) {
-	scanner := bufio.NewScanner(bytes.NewReader(data))
-	var cfg rawConfig
-	var curRoot *Root
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if line == "[[roots]]" {
-			if curRoot != nil {
-				cfg.Roots = append(cfg.Roots, *curRoot)
+func decodeConfigTOML(data []byte) (tomlConfig, error) {
+	dec := toml.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	var cfg tomlConfig
+	if err := dec.Decode(&cfg); err != nil {
+		var decErr *toml.DecodeError
+		if errors.As(err, &decErr) {
+			row, col := decErr.Position()
+			return tomlConfig{}, &Error{
+				Code: ErrConfigInvalid, Line: row, Column: col, Cause: err,
+				Message: fmt.Sprintf("decode config at line %d, col %d: %s", row, col, decErr.Error()),
 			}
-			curRoot = &Root{}
-			continue
 		}
-		parseKeyValue(line, &cfg, curRoot)
-	}
-	if curRoot != nil {
-		cfg.Roots = append(cfg.Roots, *curRoot)
-	}
-	if err := scanner.Err(); err != nil {
-		return rawConfig{}, WrapError(ErrRootInvalid, "parse config file", err)
+		return tomlConfig{}, WrapError(ErrConfigInvalid, "decode config", err)
 	}
 	return cfg, nil
-}
-
-func parseKeyValue(line string, cfg *rawConfig, curRoot *Root) {
-	k, v, ok := strings.Cut(line, "=")
-	if !ok {
-		return
-	}
-	key, val := strings.TrimSpace(k), strings.Trim(strings.TrimSpace(v), `"`)
-	if curRoot == nil {
-		if key == "name" {
-			cfg.Name = val
-		}
-		return
-	}
-	switch key {
-	case "name":
-		curRoot.Name = val
-	case "path":
-		curRoot.Path = val
-	case "access":
-		curRoot.Access = RootAccess(val)
-	}
 }
 
 func computeConfigHash(content []byte) string {

@@ -27,38 +27,29 @@ func writeAtomic(dir, filename string, content []byte) error {
 	if err != nil {
 		return WrapError(ErrOwnershipInvalid, "create temp file", err)
 	}
-	defer removeQuietly(tmpFile.Name())
+	tmpName := tmpFile.Name()
+	defer func() {
+		if remErr := os.Remove(tmpName); remErr != nil {
+			return
+		}
+	}()
+	defer func() {
+		if cErr := tmpFile.Close(); cErr != nil {
+			return
+		}
+	}()
 
 	if err := tmpFile.Chmod(filePerm); err != nil {
-		closeQuietly(tmpFile)
 		return WrapError(ErrOwnershipInvalid, "chmod temp file", err)
 	}
 	if _, err := tmpFile.Write(content); err != nil {
-		closeQuietly(tmpFile)
 		return WrapError(ErrOwnershipInvalid, "write temp file", err)
 	}
 	if err := tmpFile.Close(); err != nil {
 		return WrapError(ErrOwnershipInvalid, "close temp file", err)
 	}
-
-	dest := filepath.Join(dir, filename)
-	if err := os.Rename(tmpFile.Name(), dest); err != nil {
+	if err := os.Rename(tmpName, filepath.Join(dir, filename)); err != nil {
 		return WrapError(ErrOwnershipInvalid, "rename temp file", err)
 	}
 	return nil
-}
-
-func closeQuietly(c interface{ Close() error }) {
-	if c == nil {
-		return
-	}
-	if err := c.Close(); err != nil {
-		return
-	}
-}
-
-func removeQuietly(path string) {
-	if err := os.Remove(path); err != nil {
-		return
-	}
 }

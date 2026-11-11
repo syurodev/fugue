@@ -57,7 +57,8 @@ func newTestFixture(t *testing.T, opts ...ServiceOption) *testFixture {
 		t.Fatalf("resolve paths: %v", pathErr)
 	}
 
-	svc := NewService(paths, db, clk, gen, opts...)
+	optsWithHome := append([]ServiceOption{WithUserHome(fakeHome)}, opts...)
+	svc := NewService(paths, db, clk, gen, optsWithHome...)
 
 	return &testFixture{
 		svc:     svc,
@@ -66,5 +67,13 @@ func newTestFixture(t *testing.T, opts ...ServiceOption) *testFixture {
 		ids:     gen,
 		paths:   paths,
 		tempDir: temp,
+	}
+}
+
+func closeQuietly(c interface{ Close() error }) {
+	if c != nil {
+		if err := c.Close(); err != nil {
+			return
+		}
 	}
 }

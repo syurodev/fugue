@@ -21,16 +21,15 @@ var rootNameRegex = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,31}$`)
 
 // Root represents a named root directory in a workspace.
 type Root struct {
-	Name   string     `json:"name"`
-	Path   string     `json:"path"` // Canonical absolute path on disk
-	Access RootAccess `json:"access"`
+	Name   string     `json:"name" toml:"name"`
+	Path   string     `json:"path" toml:"path"` // Canonical absolute path on disk
+	Access RootAccess `json:"access" toml:"access"`
 }
 
 // RootSpec specifies input for creating or updating a root.
 type RootSpec struct {
-	Name   string
-	Path   string
-	Access RootAccess
+	Name, Path string
+	Access     RootAccess
 }
 
 // ValidateRootName verifies that name matches ^[a-z0-9][a-z0-9-]{0,31}$.
@@ -56,40 +55,45 @@ func ValidateAndResolveRootPath(rawPath, homeDir, fugueHome, dataDir string) (st
 	if !filepath.IsAbs(expanded) {
 		return "", NewError(ErrRootInvalid, "root path must be absolute: "+rawPath)
 	}
-
-	resolved, err := filepath.EvalSymlinks(filepath.Clean(expanded))
+	clean := filepath.Clean(expanded)
+	if err := checkRootTarget(clean, fugueHome, dataDir); err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(clean)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return "", NewError(ErrRootInvalid, "root path does not exist: "+rawPath)
+			return "", NewError(ErrRootMissing, "root path does not exist: "+rawPath)
 		}
 		return "", WrapError(ErrRootInvalid, "resolve root path "+rawPath, err)
 	}
-
-	stat, statErr := os.Stat(resolved)
-	if statErr != nil {
-		return "", WrapError(ErrRootInvalid, "stat root path "+resolved, statErr)
+	stat, err := os.Stat(resolved)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", NewError(ErrRootMissing, "root path does not exist: "+resolved)
+		}
+		return "", WrapError(ErrRootInvalid, "stat root path "+resolved, err)
 	}
 	if !stat.IsDir() {
 		return "", NewError(ErrRootInvalid, "root path is not a directory: "+rawPath)
 	}
-
 	canonical := filepath.Clean(resolved)
-	if canonical == "/" {
-		return "", NewError(ErrPathDenied, "root cannot be the filesystem root '/'")
-	}
-
-	if checkErr := checkForbiddenZones(canonical, fugueHome, dataDir); checkErr != nil {
-		return "", checkErr
+	if err := checkRootTarget(canonical, fugueHome, dataDir); err != nil {
+		return "", err
 	}
 	return canonical, nil
 }
 
-func checkForbiddenZones(canonical, fugueHome, dataDir string) error {
+func checkRootTarget(p, fugueHome, dataDir string) error {
+	if p == "/" {
+		return NewError(ErrPathDenied, "root cannot be the filesystem root '/'")
+	}
+	return checkForbiddenZones(p, fugueHome, dataDir)
+}
+
+func checkForbiddenZones(p, fugueHome, dataDir string) error {
 	for _, z := range []struct{ name, path string }{{"Fugue home", fugueHome}, {"data directory", dataDir}} {
-		if z.path != "" {
-			if can := canonicalPath(z.path); canonical == can || isSubPath(canonical, can) {
-				return NewError(ErrPathDenied, fmt.Sprintf("root path %s is inside %s %s", canonical, z.name, z.path))
-			}
+		if z.path != "" && (p == canonicalPath(z.path) || isSubPath(p, canonicalPath(z.path))) {
+			return NewError(ErrPathDenied, fmt.Sprintf("root path %s is inside %s %s", p, z.name, z.path))
 		}
 	}
 	return nil
@@ -105,7 +109,10 @@ func canonicalPath(p string) string {
 
 func isSubPath(target, parent string) bool {
 	rel, err := filepath.Rel(parent, target)
-	return err == nil && !strings.HasPrefix(rel, "..") && rel != "."
+	if err != nil || rel == "." {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 func expandHome(p, homeDir string) string {
