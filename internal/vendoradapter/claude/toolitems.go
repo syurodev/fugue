@@ -186,22 +186,7 @@ func (n *Normalizer) normalizeUser(line []byte, env *envelope) Observation {
 		return n.unsupported(env, noticeLabel(env))
 	}
 	if w.IsReplay {
-		targetTurn, isSteer := n.steerTurns[w.UUID]
-		if isSteer && n.turnFinished[targetTurn] {
-			vendorTurnID := "vendor-" + w.UUID
-			n.vendorTurn = vendorTurnID
-			item := transcript.Item{
-				ID:        "notice-" + n.rawRef(env),
-				SessionID: n.session,
-				TurnID:    vendorTurnID,
-				Kind:      transcript.Notice,
-				RawRef:    n.rawRef(env),
-				Metadata:  transcript.NoticeMetadata{Level: "info", Code: "late_steer"},
-				Content:   transcript.NoticeContent{Text: "vendor opened separate turn for late steer"},
-			}
-			return Observation{Records: []transcript.Item{item}}
-		}
-		return Observation{}
+		return n.handleUserReplay(env, &w)
 	}
 	blocks := toolResultBlocks(w.Message.Content)
 	if len(blocks) == 0 {
@@ -214,6 +199,58 @@ func (n *Normalizer) normalizeUser(line []byte, env *envelope) Observation {
 		obs.Updates = append(obs.Updates, updates...)
 	}
 	return obs
+}
+
+func (n *Normalizer) handleUserReplay(env *envelope, w *wireUser) Observation {
+	if sendTurn, isSend := n.sendTurns[w.UUID]; isSend {
+		delete(n.sendTurns, w.UUID)
+		if n.vendorTurn != "" {
+			n.vendorTurn = ""
+			return n.absorbedSendNotice(env, sendTurn)
+		}
+		return Observation{}
+	}
+	return n.handleSteerReplay(env, w)
+}
+
+func (n *Normalizer) handleSteerReplay(env *envelope, w *wireUser) Observation {
+	targetTurn, isSteer := n.steerTurns[w.UUID]
+	if !isSteer {
+		return Observation{}
+	}
+	delete(n.steerTurns, w.UUID)
+	wasFinished := n.turnFinished[targetTurn]
+	if !n.hasPendingSteers(targetTurn) {
+		delete(n.turnFinished, targetTurn)
+	}
+	if !wasFinished {
+		return Observation{}
+	}
+	vendorTurnID := "vendor-" + w.UUID
+	n.vendorTurn = vendorTurnID
+	item := transcript.Item{
+		ID:        "notice-" + n.rawRef(env),
+		SessionID: n.session,
+		TurnID:    vendorTurnID,
+		Kind:      transcript.Notice,
+		RawRef:    n.rawRef(env),
+		Metadata:  transcript.NoticeMetadata{Level: "info", Code: "late_steer"},
+		Content:   transcript.NoticeContent{Text: "vendor opened separate turn for late steer"},
+	}
+	return Observation{Records: []transcript.Item{item}}
+}
+
+func (n *Normalizer) absorbedSendNotice(env *envelope, sendTurn string) Observation {
+	item := transcript.Item{
+		ID:        "notice-" + n.rawRef(env),
+		SessionID: n.session,
+		TurnID:    sendTurn,
+		Kind:      transcript.Notice,
+		RawRef:    n.rawRef(env),
+		Metadata:  transcript.NoticeMetadata{Level: "info", Code: "absorbed_into_vendor_turn"},
+		Content:   transcript.NoticeContent{Text: "send absorbed into vendor turn"},
+	}
+	return Observation{Records: []transcript.Item{item}}
 }
 
 // applyToolResult resolves a pending item by the tool_use id: tool calls take

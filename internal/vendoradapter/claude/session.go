@@ -106,6 +106,24 @@ func (s *Session) StderrRing() *process.RingBuffer {
 	return s.proc.StderrRing()
 }
 
+func encodeUserMessage(msgUUID, text string) ([]byte, error) {
+	msg := wireUserMessage{
+		Type: roleUser,
+		UUID: msgUUID,
+		Message: wireUserMessagePayload{
+			Role: roleUser,
+			Content: []wireUserContent{
+				{Type: contentTypeText, Text: text},
+			},
+		},
+	}
+	raw, err := json.Marshal(msg)
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "encode user message", err)
+	}
+	return raw, nil
+}
+
 // Send delivers one user message or slash command to the vendor process on
 // stdin and returns the new TurnRef. It validates the input and returns
 // vendor.ErrBusy if a turn is already in progress.
@@ -123,19 +141,9 @@ func (s *Session) Send(ctx context.Context, in vendor.Input) (vendor.TurnRef, er
 		return vendor.TurnRef{}, errcode.Wrap(errcode.Internal, "generate message uuid", err)
 	}
 
-	msg := wireUserMessage{
-		Type: roleUser,
-		UUID: msgUUID,
-		Message: wireUserMessagePayload{
-			Role: roleUser,
-			Content: []wireUserContent{
-				{Type: contentTypeText, Text: in.Text},
-			},
-		},
-	}
-	raw, err := json.Marshal(msg)
+	raw, err := encodeUserMessage(msgUUID, in.Text)
 	if err != nil {
-		return vendor.TurnRef{}, errcode.Wrap(errcode.Internal, "encode user message", err)
+		return vendor.TurnRef{}, err
 	}
 
 	select {
@@ -159,9 +167,11 @@ func (s *Session) Send(ctx context.Context, in vendor.Input) (vendor.TurnRef, er
 	s.currentTurn = turnID
 	s.turnDoneCh = make(chan struct{})
 	s.normalizer.BeginTurn(turnID)
+	s.normalizer.RegisterSend(turnID, msgUUID)
 	s.mu.Unlock()
 
 	if err := s.proc.WriteLine(raw); err != nil {
+		s.normalizer.UnregisterSend(msgUUID)
 		s.rollbackTurn()
 		if errors.Is(err, process.ErrStdinClosed) {
 			return vendor.TurnRef{}, vendor.ErrSessionClosed
@@ -219,6 +229,7 @@ func (s *Session) Steer(ctx context.Context, turn vendor.TurnRef, in vendor.Inpu
 	s.mu.Unlock()
 
 	if err := s.proc.WriteLine(raw); err != nil {
+		s.normalizer.UnregisterSteer(steerUUID)
 		if errors.Is(err, process.ErrStdinClosed) {
 			return vendor.ErrSessionClosed
 		}
@@ -288,6 +299,10 @@ func (s *Session) Interrupt(ctx context.Context, turn vendor.TurnRef) error {
 	raw, err := json.Marshal(ctrl)
 	if err != nil {
 		return errcode.Wrap(errcode.Internal, "encode interrupt request", err)
+	}
+
+	if _, valErr := s.validateInterruptTurn(turn); valErr != nil {
+		return valErr
 	}
 
 	timer := s.clock.NewTimer(defaultInterruptTimeout)

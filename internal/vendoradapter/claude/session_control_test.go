@@ -310,3 +310,164 @@ func TestFrameTooLargeAfterStartContextCanceledStillUsesStopOrder(t *testing.T) 
 		t.Fatalf("StopProof must not be ReasonContextCanceled when Start ctx was canceled, got %q", proof.Reason)
 	}
 }
+
+func recordNoticeIfAbsorbed(rec *transcript.Item, turn2ID string, beforeItems *[]transcript.Item) bool {
+	meta, ok := rec.Metadata.(transcript.NoticeMetadata)
+	if !ok {
+		return false
+	}
+	if meta.Code == "late_steer" {
+		*beforeItems = append(*beforeItems, *rec)
+	}
+	return meta.Code == "absorbed_into_vendor_turn" && rec.TurnID == turn2ID
+}
+
+func drainAbsorbedObservations(obsCh <-chan Observation, turn2ID string) (int, *TurnEnd, bool, []transcript.Item) {
+	var turnEndCount int
+	var lastTurnEnd *TurnEnd
+	var sawNotice bool
+	var beforeItems []transcript.Item
+
+	for obs := range obsCh {
+		for i := range obs.Records {
+			if obs.Records[i].Kind == transcript.Notice && recordNoticeIfAbsorbed(&obs.Records[i], turn2ID, &beforeItems) {
+				sawNotice = true
+			}
+		}
+		if obs.TurnEnd != nil {
+			turnEndCount++
+			lastTurnEnd = obs.TurnEnd
+			if obs.TurnEnd.TurnID == turn2ID {
+				break
+			}
+		}
+	}
+	return turnEndCount, lastTurnEnd, sawNotice, beforeItems
+}
+
+func assertAbsorbedResults(
+	t *testing.T,
+	turn2ID string,
+	turnEndCount int,
+	lastTurnEnd *TurnEnd,
+	sawNotice bool,
+	beforeItems []transcript.Item,
+	sess *Session,
+) {
+	t.Helper()
+	if turnEndCount != 1 || lastTurnEnd == nil || lastTurnEnd.TurnID != turn2ID {
+		t.Fatalf("expected 1 TurnEnd for %s, got count %d, end: %+v", turn2ID, turnEndCount, lastTurnEnd)
+	}
+	if !sawNotice {
+		t.Fatal("expected absorbed_into_vendor_turn notice")
+	}
+	if len(beforeItems) == 0 {
+		t.Fatal("expected items before echo to be recorded")
+	}
+	for i := range beforeItems {
+		item := &beforeItems[i]
+		if !strings.HasPrefix(item.TurnID, "vendor-") {
+			t.Fatalf("expected vendor turn ID, got %q", item.TurnID)
+		}
+	}
+	if state := getSessionState(sess); state != stateReady {
+		t.Fatalf("expected stateReady, got %d", state)
+	}
+}
+
+func TestSendAbsorbedIntoVendorTurnEndsFugueTurn(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	fixtureAbs, err := filepath.Abs(filepath.Join("testdata", "fixtures", "claude-2.1.319-session4-late-steer.jsonl"))
+	if err != nil {
+		t.Fatalf("resolve fixture path: %v", err)
+	}
+
+	adapter := NewAdapter(nil, WithBinary(fakeClaudeExe(t)))
+	spec := vendor.StartSpec{
+		Cwd: t.TempDir(),
+		Home: vendor.AccountHome{
+			ConfigDir: fakeReplayLateSteerAbsorbedConfigDir + ":" + fixtureAbs,
+		},
+		SessionID: "session-test-send-absorbed",
+	}
+
+	sess, err := adapter.Start(ctx, &spec)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer closeSession(t, ctx, sess)
+
+	turn1, err := sess.Send(ctx, vendor.Input{Text: "Reply with exactly: PING"})
+	if err != nil {
+		t.Fatalf("Send turn1 failed: %v", err)
+	}
+
+	if steerErr := sess.Steer(ctx, turn1, vendor.Input{Text: "Reply with exactly: PONG"}); steerErr != nil {
+		t.Fatalf("Steer failed: %v", steerErr)
+	}
+
+	claudeSess := asClaudeSession(t, sess)
+	obsCh := claudeSess.Observations()
+	for obs := range obsCh {
+		if obs.TurnEnd != nil && obs.TurnEnd.TurnID == turn1.ID {
+			break
+		}
+	}
+
+	turn2, err := sess.Send(ctx, vendor.Input{Text: "send-t2"})
+	if err != nil {
+		t.Fatalf("Send turn2 failed: %v", err)
+	}
+
+	turnEndCount, lastTurnEnd, sawNotice, beforeItems := drainAbsorbedObservations(obsCh, turn2.ID)
+	assertAbsorbedResults(t, turn2.ID, turnEndCount, lastTurnEnd, sawNotice, beforeItems, claudeSess)
+}
+
+func TestInterruptWithStaleTurnWhileWriteWedgedDoesNotCloseSession(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	clk := clock.NewFake(testEpoch())
+	adapter := NewAdapter(nil, WithBinary(fakeClaudeExe(t)), WithClock(clk))
+	spec := vendor.StartSpec{
+		Cwd:       t.TempDir(),
+		Home:      vendor.AccountHome{ConfigDir: fakeNeverReadStdinConfigDir},
+		SessionID: "session-test-interrupt-stale-wedged",
+	}
+
+	sess, err := adapter.Start(ctx, &spec)
+	if err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer closeSession(t, ctx, sess)
+
+	claudeSess := asClaudeSession(t, sess)
+	sendErrCh := make(chan error, 1)
+	_ = supervise.Go(ctx, "test.send_wedged", func(taskCtx context.Context) error {
+		_, sendErr := sess.Send(ctx, vendor.Input{Text: strings.Repeat("A", 1024*1024)})
+		sendErrCh <- sendErr
+		return nil
+	})
+
+	_ = waitForRunningTurn(claudeSess)
+
+	staleTurn := vendor.TurnRef{ID: "stale-turn-id"}
+	intErr := sess.Interrupt(ctx, staleTurn)
+	if !errors.Is(intErr, vendor.ErrTurnNotRunning) {
+		t.Fatalf("expected ErrTurnNotRunning immediately, got %v", intErr)
+	}
+
+	if state := getSessionState(claudeSess); state != stateRunning {
+		t.Fatalf("expected session to remain stateRunning, got %d", state)
+	}
+
+	if _, closeErr := sess.Close(ctx, vendor.CloseHostStop); closeErr != nil {
+		t.Fatalf("Close failed: %v", closeErr)
+	}
+	sendErr := <-sendErrCh
+	if !errors.Is(sendErr, vendor.ErrSessionClosed) {
+		t.Fatalf("expected ErrSessionClosed for wedged send, got %v", sendErr)
+	}
+}

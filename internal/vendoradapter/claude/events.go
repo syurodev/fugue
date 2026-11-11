@@ -90,16 +90,22 @@ func (n *Normalizer) normalizeResult(line []byte, env *envelope) Observation {
 	} else {
 		end.Outcome = OutcomeCompleted
 	}
+	n.finalizeTurnResult(currentTurn)
+	return Observation{Records: []transcript.Item{item}, TurnEnd: end}
+}
+
+func (n *Normalizer) finalizeTurnResult(currentTurn string) {
 	if n.vendorTurn != "" {
 		n.vendorTurn = ""
-	} else {
+		return
+	}
+	if n.hasPendingSteers(currentTurn) {
 		if n.turnFinished == nil {
 			n.turnFinished = map[string]bool{}
 		}
 		n.turnFinished[currentTurn] = true
-		n.turn = ""
 	}
-	return Observation{Records: []transcript.Item{item}, TurnEnd: end}
+	n.turn = ""
 }
 
 func expiryTime(raw string) *time.Time {

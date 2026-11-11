@@ -104,6 +104,7 @@ type Normalizer struct {
 	turn         string
 	prevTurn     string
 	vendorTurn   string
+	sendTurns    map[string]string
 	steerTurns   map[string]string
 	turnFinished map[string]bool
 	items        map[string]*transcript.Item
@@ -117,11 +118,29 @@ type Normalizer struct {
 func NewNormalizer(sessionID string) *Normalizer {
 	return &Normalizer{
 		session:      sessionID,
+		sendTurns:    map[string]string{},
 		steerTurns:   map[string]string{},
 		turnFinished: map[string]bool{},
 		items:        map[string]*transcript.Item{},
 		msgCounts:    map[string]int{},
 	}
+}
+
+// RegisterSend records a send message UUID associated with a turn ID.
+func (n *Normalizer) RegisterSend(turnID, uuid string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.sendTurns == nil {
+		n.sendTurns = map[string]string{}
+	}
+	n.sendTurns[uuid] = turnID
+}
+
+// UnregisterSend removes a registered send message UUID on write failure.
+func (n *Normalizer) UnregisterSend(uuid string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	delete(n.sendTurns, uuid)
 }
 
 // RegisterSteer records a steer message UUID associated with a turn ID.
@@ -132,6 +151,22 @@ func (n *Normalizer) RegisterSteer(turnID, uuid string) {
 		n.steerTurns = map[string]string{}
 	}
 	n.steerTurns[uuid] = turnID
+}
+
+// UnregisterSteer removes a registered steer message UUID on write failure.
+func (n *Normalizer) UnregisterSteer(uuid string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	delete(n.steerTurns, uuid)
+}
+
+func (n *Normalizer) hasPendingSteers(turnID string) bool {
+	for _, tID := range n.steerTurns {
+		if tID == turnID {
+			return true
+		}
+	}
+	return false
 }
 
 // BeginTurn activates a turn; the actor calls it right before each Send.

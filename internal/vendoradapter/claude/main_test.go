@@ -24,20 +24,21 @@ import (
 // command exit non-zero, hang forever, or flood stdout. fixtureCLI is the
 // pinned version the fixtures were recorded from.
 const (
-	fakeFailConfigDir               = "/probe/fail"
-	fakeHangConfigDir               = "/probe/hang"
-	fakeFloodConfigDir              = "/probe/flood"
-	fakeNoInitConfigDir             = "/session/no-init"
-	fakeIgnoreInterruptConfigDir    = "/session/ignore-interrupt"
-	fakeFrameTooLargeConfigDir      = "/session/frame-too-large"
-	fakeCheckEnvConfigDir           = "/session/check-env"
-	fakePrintArgvConfigDir          = "/session/print-argv"
-	fakeUntestedVersionConfigDir    = "/session/untested-version"
-	fakeNeverReadStdinConfigDir     = "/session/never-read-stdin"
-	fakeContinuousOutputConfigDir   = "/session/continuous-output"
-	fakeCrashConfigDir              = "/session/crash"
-	fakeReplaySteerFixtureConfigDir = "/session/replay-steer-fixture"
-	fixtureCLI                      = "2.1.319"
+	fakeFailConfigDir                    = "/probe/fail"
+	fakeHangConfigDir                    = "/probe/hang"
+	fakeFloodConfigDir                   = "/probe/flood"
+	fakeNoInitConfigDir                  = "/session/no-init"
+	fakeIgnoreInterruptConfigDir         = "/session/ignore-interrupt"
+	fakeFrameTooLargeConfigDir           = "/session/frame-too-large"
+	fakeCheckEnvConfigDir                = "/session/check-env"
+	fakePrintArgvConfigDir               = "/session/print-argv"
+	fakeUntestedVersionConfigDir         = "/session/untested-version"
+	fakeNeverReadStdinConfigDir          = "/session/never-read-stdin"
+	fakeContinuousOutputConfigDir        = "/session/continuous-output"
+	fakeCrashConfigDir                   = "/session/crash"
+	fakeReplaySteerFixtureConfigDir      = "/session/replay-steer-fixture"
+	fakeReplayLateSteerAbsorbedConfigDir = "/session/replay-late-steer-absorbed"
+	fixtureCLI                           = "2.1.319"
 )
 
 // writeOut writes the fake CLI's stdout, exiting on failure like a real CLI
@@ -235,6 +236,10 @@ func runFakeClaudeSession() {
 		runReplaySteerFixture()
 		return
 	}
+	if envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeReplayLateSteerAbsorbedConfigDir) {
+		runReplayLateSteerAbsorbedFixture()
+		return
+	}
 
 	writeOut(fakeInitJSON())
 
@@ -281,10 +286,11 @@ func handleFakeClaudeLine(line string) {
 	}
 }
 
-func replayFixturePath() string {
+func replayFixturePath(prefix string) string {
+	target := "CLAUDE_CONFIG_DIR=" + prefix + ":"
 	for _, entry := range os.Environ() {
-		if strings.HasPrefix(entry, "CLAUDE_CONFIG_DIR="+fakeReplaySteerFixtureConfigDir+":") {
-			return strings.TrimPrefix(entry, "CLAUDE_CONFIG_DIR="+fakeReplaySteerFixtureConfigDir+":")
+		if strings.HasPrefix(entry, target) {
+			return strings.TrimPrefix(entry, target)
 		}
 	}
 	return ""
@@ -320,7 +326,7 @@ func emitRemainingFixture(lines []string, start int, steerUUID string) {
 }
 
 func runReplaySteerFixture() {
-	fixturePath := replayFixturePath()
+	fixturePath := replayFixturePath(fakeReplaySteerFixtureConfigDir)
 	if fixturePath == "" {
 		os.Exit(1)
 	}
@@ -340,6 +346,51 @@ func runReplaySteerFixture() {
 	steerUUID := scanSteerUUID(scanner)
 	emitRemainingFixture(lines, 22, steerUUID)
 	os.Exit(0)
+}
+
+func runReplayLateSteerAbsorbedFixture() {
+	fixturePath := replayFixturePath(fakeReplayLateSteerAbsorbedConfigDir)
+	if fixturePath == "" {
+		os.Exit(1)
+	}
+	raw, err := os.ReadFile(filepath.Clean(fixturePath))
+	if err != nil {
+		os.Exit(1)
+	}
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	writeFixtureSlice(lines, 0, 11)
+
+	scanner := bufio.NewScanner(os.Stdin)
+	if !scanner.Scan() {
+		os.Exit(1)
+	}
+	writeFixtureSlice(lines, 11, 21)
+
+	steerUUID := scanSteerUUID(scanner)
+	writeFixtureSlice(lines, 21, 23)
+
+	sendUUID := scanSteerUUID(scanner)
+	emitLateSteerAbsorbed(lines, steerUUID, sendUUID)
+	os.Exit(0)
+}
+
+func emitLateSteerAbsorbed(lines []string, steerUUID, sendUUID string) {
+	for i := 23; i < 28 && i < len(lines); i++ {
+		line := lines[i]
+		if steerUUID != "" && strings.Contains(line, "uuid-0029") {
+			line = strings.ReplaceAll(line, "uuid-0029", steerUUID)
+		}
+		writeOut(line + "\n")
+	}
+	echoT2 := fmt.Sprintf(`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"send-t2"}]},"session_id":"uuid-0002","uuid":%q,"isReplay":true}`, sendUUID)
+	writeOut(echoT2 + "\n")
+	for i := 28; i < len(lines); i++ {
+		line := lines[i]
+		if steerUUID != "" && strings.Contains(line, "uuid-0029") {
+			line = strings.ReplaceAll(line, "uuid-0029", steerUUID)
+		}
+		writeOut(line + "\n")
+	}
 }
 
 func fakeClaudeExe(t *testing.T) string {
