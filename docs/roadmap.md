@@ -4,7 +4,7 @@ The living work board of the repository. It answers: what to do, in what order, 
 design, what counts as done, and where each item stands. This page **does not** change the
 design.
 
-Last updated: 2026-11-10 (F9.5 and F9.6 duplicate rows cleaned up).
+Last updated: 2026-11-11 (F5.6 dependency corrected after Q-43).
 
 ## 0. Context
 
@@ -180,7 +180,7 @@ Applies to all code copied from `syurodev/dev-kit`.
 | F5.3a | Interaction service for stage A: `fugue.interaction.v1` `ListPending` and `Answer` (dedup by `command_id`, stale incarnation, option not offered, text too large), the `interaction` topic with snapshot and catch-up, public codes of `interaction §8` | `interaction §8`, `host-api §5–6` | F5.2, F6.3a | I-E07: `TestIE07RequestSurvivesClientReconnectInSnapshot`, `TestIE07TwoClientsAnsweringAtOnceExactlyOneIsAccepted`, `TestIE07DuplicateCommandIDReturnsTheSameResult`; security: `TestInteractionSessionPrincipalIsDenied`, `TestIE08ResolvedEventAndErrorsContainNoContent`, `TestInteractionLimitsEnforced`, `TestInteractionStaleIncarnation`, `TestInteractionOptionNotOffered`, `TestInteractionRelayedRejectsSessionGrant`; ordering & lifecycle: `TestInteractionOrderingRequestedBeforeResolvedUnderRace`, `TestInteractionAutomaticExpiryTimer`, `TestInteractionEnsurePreservesErrorTypes`, `TestInteractionListPendingRequestInReadGapIsNotLost`, `TestHostProcessStopsInteractionExpiryOnClose` | Done | [#89](https://github.com/syurodev/fugue/pull/89), [#96](https://github.com/syurodev/fugue/pull/96) | Split out of F5.3 for the vendor runtime: approvals of vendor and Fugue tools reach the app and CLI through it. `SetSessionPolicy` for vendor sessions lands with F9.9. `PendingRequest` gains additive `repeated Question questions` to support question-kind requests (§8 deviation). `VaultLocked` is hardcoded to false pending host vault wiring in F9.6. Topic `interaction` registered as ephemeral (`RegisterEphemeral`) because tickets are held in-memory per incarnation and do not survive restart (`host-api §6` deviation). Unified `OnLifecycle` hook in Owner emits under `o.mu` for both requested (when created/pending) and resolved (when resolved), guaranteeing requested precedes resolved; immediately resolved tickets emit resolved and omit requested. Background automatic expiry loop on injected clock (`app.interaction-expiry`) re-arms to earliest pending `ExpiresAt`, waking via non-blocking channel and terminating cleanly on host stop. `Ensure` has no production caller yet because F9.6 is its first caller. Evicted resolved requests return `interaction.not_found`. Subject to Q-42 (size ceiling). |
 | F5.4 | Input coordination: durable queue, Steer, Interject, Stop returns items to the composer, `Continue`, `Inject` | `coordination` | F5.3, F3.2 | Coordination evidence table §10, except peers | Deferred |  | Peers dropped (Q-04. *Stage B* since the vendor runtime pivot (activation v0.14, 2026-11-07) |
 | F5.5 | Goal mode | `continuation §5` | F5.4, F6.1 | Goal evidence in continuation §8 | Deferred |  | Waits for F6.1. *Stage B* since the vendor runtime pivot (activation v0.14, 2026-11-07) |
-| F5.6 | Workspaces and configuration: `internal/workspace`, `~/Fugue/` layout with `workspaces/<id>/`, named `rw`/`ro` roots, the `workspaces` table, four TOML layers with strict validation, reload at step boundaries, `policy_revision` bumps on policy keys, root changes applied at step boundaries | `workspace` | F5.1, F2.4, F6.3 | `workspace §9` | Not started | | Jail restarts on root changes land with F6.4; `fugue workspace` commands land with F7.1 |
+| F5.6 | Workspaces and configuration: `internal/workspace`, `~/Fugue/` layout with `workspaces/<id>/`, named `rw`/`ro` roots, the `workspaces` table, four TOML layers with strict validation, reload at step boundaries, `policy_revision` bumps on policy keys, root changes applied at step boundaries | `workspace` | F5.1, F2.4, F6.3a | `workspace §9` | Not started | | Jail restarts on root changes land with F6.4; `fugue workspace` commands land with F7.1 |
 
 ### F6 — Tools and interaction
 
@@ -334,6 +334,7 @@ together only in `app`.
 
 | ID | Date | Item | Question | Answer |
 | --- | --- | --- | --- | --- |
+| Q-43 | 2026-11-11 | F5.6 | F5.6 depends on composite F6.3, which is Done only when F6.3a–F6.3d merge. F6.3b depends on F5.6, while F6.3d is Stage B. As a result, F5.6, F6.3b, F6.3c and F11.1 cannot start in Stage A. Which dependency should F5.6 use? | A decided by the owner: F5.6 depends on F6.3a (Done), not on the composite. |
 | Q-01 | 2026-11-01 | F0.1 | Repository name and Go module path. Proposal: rename the repository to `fugue` (the target name in the Fugue naming ADR), module `github.com/syurodev/fugue`, unless a SynX GitHub organization exists. Which LICENSE? | Repository `fugue`, module `github.com/syurodev/fugue`; LICENSE Apache-2.0 (user, 2026-11-01) |
 | Q-02 | 2026-11-01 | F8.1 | The activation design (H-36, H-37, G-06, G-07) assumes the native harness runs beside vendor sessions inside DevKit. Fugue is a new product: what does a stage A release require? | `activation` v0.13 (decisions A-01 to A-08): native only, owner dogfood, Linux and macOS, CLI/TUI client, Sign in with ChatGPT only, one release gate, "A stable" by the owner's decision (user, 2026-11-03) |
 | Q-03 | 2026-11-01 | F1.3 | DB file name. The old ADR kept `devkit.db` only to avoid a migration; data now starts clean, so the proposal is `fugue.db` | `fugue.db` (user, 2026-11-02) |
@@ -381,6 +382,7 @@ together only in `app`.
 
 | Date | Item | Change | Updated by |
 | --- | --- | --- | --- |
+| 2026-11-11 | F5.6 | Recorded Q-43: F5.6 now depends on F6.3a instead of composite F6.3, unblocking stage A. | Agent |
 | 2026-11-10 | F9.5, F9.6 | Removed the obsolete F9.5 row replaced by the composite; consolidated the two F9.6 rows and retained the Q-41 note. | Agent |
 | 2026-11-10 | F10.2c, F10.2 | Marked Done after [#99](https://github.com/syurodev/fugue/pull/99) merged; the F10.2 composite is Done (F10.2a, F10.2b and F10.2c merged). | Agent |
 | 2026-11-10 | F10.2b | Preserve bounded host output in separate per-launch logs, retaining the five newest. | Agent |

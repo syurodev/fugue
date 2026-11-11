@@ -21,7 +21,7 @@ checks it against `go.mod`.
 | `go.uber.org/goleak` | MIT | `TestMain` goroutine-leak check in every package | user, ADR 0001 | F0.3 |
 | `golang.org/x/crypto` | BSD-3-Clause | Argon2id and XChaCha20-Poly1305 for `internal/crypto` | user, ADR 0001 | F1.1 |
 | `modernc.org/sqlite` | BSD-3-Clause | Pure-Go SQLite driver for `internal/storage` | user, ADR 0001 | F1.3 |
-| `golang.org/x/sys` | BSD-3-Clause | `flock`, `statfs`, peer credentials and landlock for `internal/storage`, `internal/sandbox` and `internal/hostapi` | user, ADR 0001 | F1.3 |
+| `golang.org/x/sys` | BSD-3-Clause | `flock` for `internal/storage`, `internal/process` and `pkg/client` host logs; `statfs`, peer credentials and landlock for `internal/sandbox` and `internal/hostapi` | user, ADR 0001 | F1.3 |
 | `pgregory.net/rapid` | MPL-2.0 (approved: Q-06, tests only) | F2.2 property tests only; excluded from production imports; [license and provenance](third-party-licenses/rapid/README.md) | user, Q-06, 2026-11-02 | F2.2 |
 
 ## Dev tools (`tool` directives, not linked into the binary)
