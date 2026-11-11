@@ -15,7 +15,7 @@ para
   span plain ", "
   span plain "mail" link url="mailto:someone@example.org" host="" puny="" openable=true
   span plain " and"
-  span plain "IDN" link url="https://bücher.example/x" host="bücher.example" puny="xn--bcher-kva.example" openable=true
+  span plain "IDN" link url="https://xn--bcher-kva.example/x" host="bücher.example" puny="xn--bcher-kva.example" openable=true
   span plain " with "
   span plain "puny" link url="https://xn--bcher-kva.example/x" host="bücher.example" puny="xn--bcher-kva.example" openable=true
   span plain "."

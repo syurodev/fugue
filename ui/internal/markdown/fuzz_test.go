@@ -1,6 +1,7 @@
 package markdown_test
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 
@@ -81,10 +82,45 @@ func checkSpans(t *testing.T, spans []markdown.Span) {
 		if strings.ContainsAny(s.Text, "\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\u200B\u200C\u200D\uFEFF") {
 			t.Fatalf("unsafe rune survived into span %q", s.Text)
 		}
-		if l := s.Link; l != nil && l.Openable && !allowedScheme(l.URL) {
-			t.Fatalf("openable link with disallowed url %q", l.URL)
+		if l := s.Link; l != nil && l.Openable {
+			checkOpenableLink(t, l)
 		}
 	}
+}
+
+// checkOpenableLink pins the display-equals-destination rule on every
+// openable link: the shown host carries no unsafe rune, userinfo marker,
+// backslash or space, and parsing the kept URL with the standard library
+// (tests may use net/url; DA-E06 binds production files only) yields
+// exactly the punycode host the model would open.
+func checkOpenableLink(t *testing.T, l *markdown.Link) {
+	t.Helper()
+	if !allowedScheme(l.URL) {
+		t.Fatalf("openable link with disallowed url %q", l.URL)
+	}
+	if strings.ContainsAny(l.Host, "@\\ \t\n") {
+		t.Fatalf("openable host %q holds a forbidden character", l.Host)
+	}
+	for _, r := range l.Host {
+		if unsafeHostRune(r) {
+			t.Fatalf("openable host %q holds an unsafe rune", l.Host)
+		}
+	}
+	parsed, err := url.Parse(l.URL)
+	if err != nil {
+		t.Fatalf("openable url %q does not parse: %v", l.URL, err)
+	}
+	if !strings.EqualFold(parsed.Hostname(), l.HostPunycode) {
+		t.Fatalf("url host %q != punycode host %q (url %q)", parsed.Hostname(), l.HostPunycode, l.URL)
+	}
+}
+
+// unsafeHostRune mirrors the model's unsafe rune set for hosts; reaching
+// into the test copy keeps the fuzz property honest without exporting the
+// production helper.
+func unsafeHostRune(r rune) bool {
+	return strings.ContainsRune("\u202A\u202B\u202C\u202D\u202E\u2066\u2067\u2068\u2069\u200B\u200C\u200D\uFEFF", r) ||
+		(r < 0x20 || r == 0x7F)
 }
 
 // allowedScheme reports whether an openable URL starts with an allowed

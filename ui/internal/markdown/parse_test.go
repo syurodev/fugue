@@ -242,8 +242,10 @@ func linkOf(spans []markdown.Span) *markdown.Link {
 	return nil
 }
 
-// TestParseSanitizesLinks checks openability, unsafe characters and the
-// two IDN host forms.
+// TestParseSanitizesLinks checks openability, unsafe characters, the two
+// IDN host forms and the host-spoofing destinations: userinfo,
+// backslash- userinfo tricks and percent-encoded bidi or zero-width runes
+// in the host never yield an openable link.
 func TestParseSanitizesLinks(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -261,10 +263,17 @@ func TestParseSanitizesLinks(t *testing.T) {
 		{src: "[a](data:text/html,x)"},
 		{src: "[a](vbscript:x)"},
 		{src: "[a](./relative)"},
-		{src: "[a](FTP://example.com/f)", host: testHost, puny: testHost},
-		{src: "[a](https://bücher.example/x)", openable: true, host: "bücher.example", puny: "xn--bcher-kva.example"},
+		{src: "[a](FTP://example.com/f)"},
+		{src: "[a](https://bücher.example/x)", openable: true, host: "bücher.example", puny: "xn--bcher-kva.example", urlContains: "https://xn--bcher-kva.example/x"},
 		{src: "[a](https://xn--bcher-kva.example/x)", openable: true, host: "bücher.example", puny: "xn--bcher-kva.example"},
 		{src: "[a](https://example.com/\u202Eevil)", openable: true, host: testHost, puny: testHost, urlContains: "https://example.com/evil"},
+		// Host-spoofing destinations: the display host must be the host
+		// the browser would open, or the link is not openable.
+		{src: `[a](https://evil.example\@good.example/login)`},
+		{src: "[a](https://user:pw@good.example/)"},
+		{src: "[a](https://%E2%80%AEelpmaxe.live/)", host: "elpmaxe.live", puny: "elpmaxe.live"},
+		{src: "[a](https://exa%E2%80%8Bmple.com/)", host: testHost, puny: testHost},
+		{src: "[a](https://good.example%2F@evil.example)"},
 	} {
 		t.Run(tc.src, func(t *testing.T) {
 			t.Parallel()
