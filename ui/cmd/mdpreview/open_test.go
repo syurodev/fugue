@@ -45,10 +45,10 @@ func TestOpenCommandPassesTheURLAsOneArgument(t *testing.T) {
 // runs before anything is executed.
 func TestOpenURLRefusesBlockedSchemesWithoutStartingAProcess(t *testing.T) {
 	t.Parallel()
-	if err := openURL(t.Context(), "javascript:alert(1)"); !errors.Is(err, errBlockedScheme) {
+	if err := openURL("javascript:alert(1)"); !errors.Is(err, errBlockedScheme) {
 		t.Errorf("openURL error = %v, want errBlockedScheme", err)
 	}
-	if err := openURL(t.Context(), "file:///etc/passwd"); !errors.Is(err, errBlockedScheme) {
+	if err := openURL("file:///etc/passwd"); !errors.Is(err, errBlockedScheme) {
 		t.Errorf("openURL error = %v, want errBlockedScheme", err)
 	}
 }

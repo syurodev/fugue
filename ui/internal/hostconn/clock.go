@@ -27,6 +27,10 @@ func (RealClock) NewTimer(d time.Duration) Timer {
 	return realTimer{t}
 }
 
+// Now reads the wall clock; the markdown preview of F10.3b uses RealClock as
+// the highlight budget's time source.
+func (RealClock) Now() time.Time { return time.Now() }
+
 // realTimer adapts *time.Timer to Timer.
 type realTimer struct{ t *time.Timer }
 

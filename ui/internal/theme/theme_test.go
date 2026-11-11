@@ -147,8 +147,9 @@ func TestDerivedTokensPointAtTheirHues(t *testing.T) {
 				t.Errorf("%s: %s is %#v, want the derived hue %#v", m.name, d.name, d.got, d.want)
 			}
 		}
-		if !m.theme.Syntax(theme.RoleComment).Italic {
-			t.Errorf("%s: comment must render italic", m.name)
+		// No italic face is bundled (Q-67): comments differ by color only.
+		if m.theme.Syntax(theme.RoleComment).Italic {
+			t.Errorf("%s: comment must render upright", m.name)
 		}
 		if m.theme.Syntax(theme.RoleMeta).Italic {
 			t.Errorf("%s: meta must render upright", m.name)

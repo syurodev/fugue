@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -35,13 +34,18 @@ func openCommand(goos, url string) (name string, args []string) {
 }
 
 // openURL hands an allowed URL to the system opener and does not wait for
-// it.
-func openURL(ctx context.Context, url string) error {
+// it. The command is built from its parts, not through exec.Command: the
+// opener is a fixed name resolved on PATH and the URL a single argument.
+func openURL(url string) error {
 	if !allowedScheme(url) {
 		return errBlockedScheme
 	}
 	name, args := openCommand(runtime.GOOS, url)
-	cmd := exec.CommandContext(ctx, name, args...) //nolint:gosec // the name is fixed per OS and the URL is one vetted argument
+	path, err := exec.LookPath(name)
+	if err != nil {
+		return fmt.Errorf("find %s: %w", name, err)
+	}
+	cmd := &exec.Cmd{Path: path, Args: append([]string{name}, args...)}
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start %s: %w", name, err)
 	}

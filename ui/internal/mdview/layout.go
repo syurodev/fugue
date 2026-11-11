@@ -1,4 +1,3 @@
-//nolint:gocritic // Gio passes layout.Context by value by design; hugeParam flags it.
 package mdview
 
 import (
@@ -41,7 +40,7 @@ func headingSize(level int) unit.Sp {
 // it took; the caller scrolls it. State holds everything that outlives a
 // frame: laid-out text, popover and scroll state, and the queue of open
 // requests (State.PollOpen).
-func Layout(gtx layout.Context, th *theme.Theme, doc *markdown.Doc, st *State) layout.Dimensions {
+func Layout(gtx *layout.Context, th *theme.Theme, doc *markdown.Doc, st *State) layout.Dimensions {
 	v := &view{th: th, st: st, shaper: th.Shaper(), locale: gtx.Locale}
 	st.sync(doc, v.shaper, gtx.Metric, th.Chrome())
 	dims := v.blocks(gtx, doc.Blocks)
@@ -51,13 +50,13 @@ func Layout(gtx layout.Context, th *theme.Theme, doc *markdown.Doc, st *State) l
 	off := op.Offset(image.Pt(0, dims.Size.Y+gtx.Dp(blockGap))).Push(gtx.Ops)
 	note := material.Label(th.Material(), 13, "Output truncated")
 	note.Color = th.Chrome().FgMuted
-	n := note.Layout(gtx)
+	n := note.Layout(*gtx)
 	off.Pop()
 	return layout.Dimensions{Size: image.Pt(dims.Size.X, dims.Size.Y+gtx.Dp(blockGap)+n.Size.Y)}
 }
 
 // blocks stacks blocks with the block gap between them.
-func (v *view) blocks(gtx layout.Context, bs []markdown.Block) layout.Dimensions {
+func (v *view) blocks(gtx *layout.Context, bs []markdown.Block) layout.Dimensions {
 	y := 0
 	for i := range bs {
 		if i > 0 {
@@ -72,7 +71,7 @@ func (v *view) blocks(gtx layout.Context, bs []markdown.Block) layout.Dimensions
 }
 
 // block draws one block.
-func (v *view) block(gtx layout.Context, b *markdown.Block) layout.Dimensions {
+func (v *view) block(gtx *layout.Context, b *markdown.Block) layout.Dimensions {
 	body := flowStyle{px: fixed.I(gtx.Sp(bodySize))}
 	switch b.Kind {
 	case markdown.BlockParagraph:
@@ -99,7 +98,7 @@ func (v *view) block(gtx layout.Context, b *markdown.Block) layout.Dimensions {
 }
 
 // text lays out and draws one run of spans at the full width.
-func (v *view) text(gtx layout.Context, spans []markdown.Span, fs flowStyle) layout.Dimensions {
+func (v *view) text(gtx *layout.Context, spans []markdown.Span, fs flowStyle) layout.Dimensions {
 	w := gtx.Constraints.Max.X
 	f := v.flowFor(spans, w, fs)
 	// A word wider than the block overflows its line; the block clips it.
@@ -110,12 +109,12 @@ func (v *view) text(gtx layout.Context, spans []markdown.Span, fs flowStyle) lay
 }
 
 // quote draws nested blocks behind a bar on the left.
-func (v *view) quote(gtx layout.Context, b *markdown.Block) layout.Dimensions {
+func (v *view) quote(gtx *layout.Context, b *markdown.Block) layout.Dimensions {
 	indent := gtx.Dp(quoteIndent)
-	inner := gtx
+	inner := *gtx
 	inner.Constraints.Max.X = max(gtx.Constraints.Max.X-indent, 0)
 	rec := op.Record(gtx.Ops)
-	d := v.blocks(inner, b.Blocks)
+	d := v.blocks(&inner, b.Blocks)
 	call := rec.Stop()
 	bar := image.Rect(0, 0, gtx.Dp(quoteBar), d.Size.Y)
 	paint.FillShape(gtx.Ops, v.th.Chrome().Border, clip.Rect(bar).Op())
@@ -127,9 +126,9 @@ func (v *view) quote(gtx layout.Context, b *markdown.Block) layout.Dimensions {
 
 // list draws items beside their markers: a bullet, a number or a read-only
 // checkbox.
-func (v *view) list(gtx layout.Context, l *markdown.List) layout.Dimensions {
+func (v *view) list(gtx *layout.Context, l *markdown.List) layout.Dimensions {
 	indent := gtx.Dp(listIndent)
-	inner := gtx
+	inner := *gtx
 	inner.Constraints.Max.X = max(gtx.Constraints.Max.X-indent, 0)
 	y := 0
 	for i := range l.Items {
@@ -140,7 +139,7 @@ func (v *view) list(gtx layout.Context, l *markdown.List) layout.Dimensions {
 		off := op.Offset(image.Pt(0, y)).Push(gtx.Ops)
 		v.marker(gtx, l, i, indent)
 		body := op.Offset(image.Pt(indent, 0)).Push(gtx.Ops)
-		d := v.blocks(inner, item.Blocks)
+		d := v.blocks(&inner, item.Blocks)
 		body.Pop()
 		off.Pop()
 		y += max(d.Size.Y, gtx.Sp(bodySize)*3/2)
@@ -150,7 +149,7 @@ func (v *view) list(gtx layout.Context, l *markdown.List) layout.Dimensions {
 
 // marker draws item i's marker in the indent column, level with the item's
 // first line.
-func (v *view) marker(gtx layout.Context, l *markdown.List, i, indent int) {
+func (v *view) marker(gtx *layout.Context, l *markdown.List, i, indent int) {
 	item := &l.Items[i]
 	line := gtx.Sp(bodySize) * 3 / 2
 	if item.Task {
@@ -164,12 +163,13 @@ func (v *view) marker(gtx layout.Context, l *markdown.List, i, indent int) {
 	w := indent - gtx.Dp(6)
 	spans := v.st.marker(item, label)
 	f := v.flowFor(spans, w, flowStyle{px: fixed.I(gtx.Sp(bodySize))})
-	gtx.Constraints.Max.X = w
-	v.drawFlow(gtx, f, markdown.AlignRight, w)
+	cell := *gtx
+	cell.Constraints.Max.X = w
+	v.drawFlow(&cell, f, markdown.AlignRight, w)
 }
 
 // checkbox draws a read-only task box; a checked one is filled with a tick.
-func (v *view) checkbox(gtx layout.Context, checked bool, line int) {
+func (v *view) checkbox(gtx *layout.Context, checked bool, line int) {
 	c := v.th.Chrome()
 	size := gtx.Dp(checkboxSize)
 	box := image.Rect(0, (line-size)/2, size, (line+size)/2)
@@ -190,10 +190,10 @@ func (v *view) checkbox(gtx layout.Context, checked bool, line int) {
 // code draws a code block on its own rounded surface; long lines scroll
 // sideways and never wrap, so no token is ever broken. A block that fits
 // draws without the scroll widget.
-func (v *view) code(gtx layout.Context, b *markdown.Block) layout.Dimensions {
+func (v *view) code(gtx *layout.Context, b *markdown.Block) layout.Dimensions {
 	pad := gtx.Dp(codePad)
 	fs := flowStyle{px: fixed.I(gtx.Sp(bodySize)), mono: true, whole: true}
-	inner := gtx
+	inner := *gtx
 	inner.Constraints.Max.X = max(gtx.Constraints.Max.X-2*pad, 0)
 	inner.Constraints.Min = image.Point{X: inner.Constraints.Max.X}
 	flows, widest := make([]*flow, len(b.Lines)), 0
@@ -204,11 +204,11 @@ func (v *view) code(gtx layout.Context, b *markdown.Block) layout.Dimensions {
 	rec := op.Record(gtx.Ops)
 	var d layout.Dimensions
 	if widest <= inner.Constraints.Max.X {
-		d = v.codeLines(inner, flows)
+		d = v.codeLines(&inner, flows)
 	} else {
 		list := material.List(v.th.Material(), v.st.codeList(b))
 		d = list.Layout(inner, 1, func(gtx layout.Context, _ int) layout.Dimensions {
-			return v.codeLines(gtx, flows)
+			return v.codeLines(&gtx, flows)
 		})
 	}
 	call := rec.Stop()
@@ -221,7 +221,7 @@ func (v *view) code(gtx layout.Context, b *markdown.Block) layout.Dimensions {
 }
 
 // codeLines draws a code block's lines, one flow each, top to bottom.
-func (v *view) codeLines(gtx layout.Context, flows []*flow) layout.Dimensions {
+func (v *view) codeLines(gtx *layout.Context, flows []*flow) layout.Dimensions {
 	y, w := 0, 0
 	for _, f := range flows {
 		off := op.Offset(image.Pt(0, y)).Push(gtx.Ops)
@@ -236,7 +236,7 @@ func (v *view) codeLines(gtx layout.Context, flows []*flow) layout.Dimensions {
 // table draws a GFM table: columns as wide as their widest cell, shrunk
 // proportionally when the table is wider than the block, the header on the
 // tinted surface and a hairline under every row.
-func (v *view) table(gtx layout.Context, t *markdown.Table) layout.Dimensions {
+func (v *view) table(gtx *layout.Context, t *markdown.Table) layout.Dimensions {
 	rows := append([][]markdown.Cell{t.Header}, t.Rows...)
 	px := fixed.I(gtx.Sp(bodySize))
 	widths := v.columnWidths(gtx, rows, len(t.Aligns), px)
@@ -257,10 +257,10 @@ func (v *view) table(gtx layout.Context, t *markdown.Table) layout.Dimensions {
 		}
 		x := 0
 		for c := range min(len(row), len(widths)) {
-			inner := gtx
+			inner := *gtx
 			inner.Constraints.Max.X = widths[c] - 2*padX
 			off := op.Offset(image.Pt(x+padX, y+padY)).Push(gtx.Ops)
-			v.drawFlow(inner, v.flowFor(row[c].Spans, widths[c]-2*padX, fs), t.Aligns[c], inner.Constraints.Max.X)
+			v.drawFlow(&inner, v.flowFor(row[c].Spans, widths[c]-2*padX, fs), t.Aligns[c], inner.Constraints.Max.X)
 			off.Pop()
 			x += widths[c]
 		}
@@ -271,7 +271,7 @@ func (v *view) table(gtx layout.Context, t *markdown.Table) layout.Dimensions {
 }
 
 // columnWidths is each column's natural width, shrunk to fit the block.
-func (v *view) columnWidths(gtx layout.Context, rows [][]markdown.Cell, cols int, px fixed.Int26_6) []int {
+func (v *view) columnWidths(gtx *layout.Context, rows [][]markdown.Cell, cols int, px fixed.Int26_6) []int {
 	widths := make([]int, cols)
 	sum := 0
 	for r, row := range rows {

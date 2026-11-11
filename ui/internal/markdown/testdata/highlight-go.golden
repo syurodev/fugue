@@ -5,9 +5,11 @@ code lang="go" highlighted=true
       token plain " "
       token variable "main"
   line
+  line
       token keyword "import"
       token plain " "
       token string "\"fmt\""
+  line
   line
       token keyword "const"
       token plain " "
@@ -16,6 +18,7 @@ code lang="go" highlighted=true
       token operator "="
       token plain " "
       token number "42"
+  line
   line
       token keyword "func"
       token plain " "
@@ -63,4 +66,5 @@ code lang="go" highlighted=true
   line
       token plain "    "
       token operator "}"
+  line
       token operator "}"

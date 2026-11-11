@@ -152,7 +152,7 @@ func newTheme(c Chrome, p Palette, shaper *text.Shaper) Theme {
 		RoleDefinition: {Color: c.Fg, Weight: defaultWeight},
 		RoleVariable:   {Color: c.Fg, Weight: defaultWeight},
 		RoleOperator:   {Color: c.FgMuted, Weight: defaultWeight},
-		RoleComment:    {Color: c.FgSubtle, Weight: defaultWeight, Italic: true},
+		RoleComment:    {Color: c.FgSubtle, Weight: defaultWeight},
 		RoleMeta:       {Color: c.FgSubtle, Weight: defaultWeight},
 		RoleInvalid:    {Color: status.Danger, Weight: defaultWeight},
 	}

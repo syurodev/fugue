@@ -13,15 +13,14 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"time"
 
 	"gioui.org/app"
 
+	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/markdown"
 )
 
@@ -33,29 +32,18 @@ const maxInput = 2 << 20
 // for typing.
 var errNoInput = errors.New("no markdown on standard input: pass a file, e.g. < internal/markdown/testdata/preview.md")
 
-// wallClock is the preview's time source for the highlight budget; the
-// renderer itself reads no clock.
-type wallClock struct{}
-
-// Now implements markdown.Clock.
-func (wallClock) Now() time.Time {
-	return time.Now() //nolint:forbidigo // the dev-only preview owns the wall clock the highlight budget needs
-}
-
 func main() {
 	src, err := readInput(os.Stdin)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "mdpreview:", err)
 		os.Exit(1)
 	}
-	doc := markdown.Parse(src, markdown.WithClock(wallClock{}))
-	ctx, cancel := context.WithCancel(context.Background()) //nolint:forbidigo // main roots the context of the opener processes
-	defer cancel()
+	doc := markdown.Parse(src, markdown.WithClock(hostconn.RealClock{}))
 	go func() {
 		// app.Main owns the main thread; the window runs beside it and ends
 		// the process with its own outcome.
 		code := 0
-		if err := run(ctx, doc); err != nil {
+		if err := run(doc); err != nil {
 			fmt.Fprintln(os.Stderr, "mdpreview:", err)
 			code = 1
 		}

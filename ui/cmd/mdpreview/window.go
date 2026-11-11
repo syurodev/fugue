@@ -1,8 +1,6 @@
-//nolint:gocritic // Gio passes layout.Context by value by design; hugeParam flags it.
 package main
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 
@@ -37,7 +35,7 @@ type preview struct {
 }
 
 // run opens the preview window and runs its event loop until it is closed.
-func run(ctx context.Context, doc *markdown.Doc) error {
+func run(doc *markdown.Doc) error {
 	shaper, err := fonts.Shaper()
 	if err != nil {
 		return fmt.Errorf("build the text shaper: %w", err)
@@ -53,14 +51,14 @@ func run(ctx context.Context, doc *markdown.Doc) error {
 			return e.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
-			p.frame(ctx, gtx)
+			p.frame(&gtx)
 			e.Frame(gtx.Ops)
 		}
 	}
 }
 
 // frame lays the window out and hands queued open requests to the opener.
-func (p *preview) frame(ctx context.Context, gtx layout.Context) {
+func (p *preview) frame(gtx *layout.Context) {
 	for {
 		ke, ok := gtx.Event(key.Filter{Required: key.ModCtrl, Name: key.Name("D")})
 		if !ok {
@@ -70,7 +68,7 @@ func (p *preview) frame(ctx context.Context, gtx layout.Context) {
 			p.isDark = !p.isDark
 		}
 	}
-	for p.toggle.Clicked(gtx) {
+	for p.toggle.Clicked(*gtx) {
 		p.isDark = !p.isDark
 	}
 	th := &p.light
@@ -78,7 +76,7 @@ func (p *preview) frame(ctx context.Context, gtx layout.Context) {
 		th = &p.dark
 	}
 	paint.Fill(gtx.Ops, th.Chrome().CanvasBg)
-	layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+	layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.UniformInset(8).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return material.Button(th.Material(), &p.toggle, "Light / dark (Ctrl+D)").Layout(gtx)
@@ -89,7 +87,7 @@ func (p *preview) frame(ctx context.Context, gtx layout.Context) {
 			return list.Layout(gtx, 1, func(gtx layout.Context, _ int) layout.Dimensions {
 				gtx.Constraints.Max.X = min(gtx.Constraints.Max.X-gtx.Dp(48), gtx.Dp(contentWidth))
 				return layout.UniformInset(24).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-					return mdview.Layout(gtx, th, p.doc, &p.state)
+					return mdview.Layout(&gtx, th, p.doc, &p.state)
 				})
 			})
 		}),
@@ -99,7 +97,7 @@ func (p *preview) frame(ctx context.Context, gtx layout.Context) {
 		if !ok {
 			return
 		}
-		if err := openURL(ctx, req.URL); err != nil {
+		if err := openURL(req.URL); err != nil {
 			slog.Warn("mdpreview: open link", "err", err)
 		}
 	}

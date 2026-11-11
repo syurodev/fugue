@@ -1,4 +1,3 @@
-//nolint:gocritic // Gio passes layout.Context by value by design; hugeParam flags it.
 package mdview
 
 import (
@@ -48,7 +47,7 @@ func (v *view) ink(sp *markdown.Span) color.NRGBA {
 // replayed every frame; what changes with input (hover, focus ring, popover)
 // is handled live. avail is the width lines align inside and popovers stay
 // within.
-func (v *view) drawFlow(gtx layout.Context, f *flow, align markdown.Align, avail int) {
+func (v *view) drawFlow(gtx *layout.Context, f *flow, align markdown.Align, avail int) {
 	if f.rec == nil {
 		v.record(gtx, f, align, avail)
 	}
@@ -67,9 +66,10 @@ func (v *view) drawFlow(gtx layout.Context, f *flow, align markdown.Align, avail
 }
 
 // record draws the static part of a run into the run's own ops.
-func (v *view) record(gtx layout.Context, f *flow, align markdown.Align, avail int) {
+func (v *view) record(gtx *layout.Context, f *flow, align markdown.Align, avail int) {
 	f.rec = new(op.Ops)
-	gtx.Ops = f.rec
+	rec := *gtx
+	rec.Ops = f.rec
 	m := op.Record(f.rec)
 	for i := range f.lines {
 		l := &f.lines[i]
@@ -84,9 +84,9 @@ func (v *view) record(gtx layout.Context, f *flow, align markdown.Align, avail i
 		for k := range l.atoms {
 			a := &l.atoms[k]
 			x, base := shift+a.x, l.top+l.base
-			v.drawAtom(gtx, a, x, base)
+			v.drawAtom(&rec, a, x, base)
 			if lk := a.span.Link; lk != nil && lk.Openable {
-				f.links = v.noteLink(gtx, f.links, lk, image.Rect(x, base-a.asc, x+a.w, base+a.desc))
+				f.links = v.noteLink(&rec, f.links, lk, image.Rect(x, base-a.asc, x+a.w, base+a.desc))
 			}
 		}
 	}
@@ -102,7 +102,7 @@ type linkAnchor struct {
 
 // noteLink registers one atom's box as a pointer and focus target of its link
 // and files the box under the link.
-func (v *view) noteLink(gtx layout.Context, anchors []linkAnchor, lk *markdown.Link, box image.Rectangle) []linkAnchor {
+func (v *view) noteLink(gtx *layout.Context, anchors []linkAnchor, lk *markdown.Link, box image.Rectangle) []linkAnchor {
 	area := clip.Rect(box).Push(gtx.Ops)
 	event.Op(gtx.Ops, v.st.link(lk))
 	pointer.CursorPointer.Add(gtx.Ops)
@@ -118,7 +118,7 @@ func (v *view) noteLink(gtx layout.Context, anchors []linkAnchor, lk *markdown.L
 
 // drawAtom paints one atom: the code surface behind inline code, the glyphs,
 // the strikethrough line and the dotted underline of a link.
-func (v *view) drawAtom(gtx layout.Context, a *atom, x, base int) {
+func (v *view) drawAtom(gtx *layout.Context, a *atom, x, base int) {
 	sp := a.span
 	if sp.Style&markdown.StyleCode != 0 {
 		box := image.Rect(x, base-a.asc-1, x+a.w, base+a.desc+1)
@@ -149,14 +149,14 @@ func (v *view) drawAtom(gtx layout.Context, a *atom, x, base int) {
 }
 
 // outline strokes a rounded box in c.
-func (v *view) outline(gtx layout.Context, box image.Rectangle, c color.NRGBA) {
+func (v *view) outline(gtx *layout.Context, box image.Rectangle, c color.NRGBA) {
 	w := float32(max(gtx.Dp(unit.Dp(1.5)), 1))
 	paint.FillShape(gtx.Ops, c, clip.Stroke{Path: clip.UniformRRect(box, gtx.Dp(3)).Path(gtx.Ops), Width: w}.Op())
 }
 
 // pointerState folds a tag's pointer events: whether the pointer is over it
 // after them, and whether the primary button was pressed.
-func pointerState(gtx layout.Context, tag event.Tag, over bool) (hovered, pressed bool) {
+func pointerState(gtx *layout.Context, tag event.Tag, over bool) (hovered, pressed bool) {
 	hovered = over
 	for {
 		ev, ok := gtx.Event(pointer.Filter{
@@ -186,7 +186,7 @@ func pointerState(gtx layout.Context, tag event.Tag, over bool) (hovered, presse
 // state: hover of the link and of its popover (polled together, so a pointer
 // that crosses from one to the other never leaves a frame with neither),
 // pin on click or Enter or Space, unpin on Escape.
-func (v *view) pollLink(gtx layout.Context, lk *markdown.Link, ls *linkState) {
+func (v *view) pollLink(gtx *layout.Context, lk *markdown.Link, ls *linkState) {
 	var pressed bool
 	ls.hover, pressed = pointerState(gtx, ls, ls.hover)
 	ls.popHover, _ = pointerState(gtx, &ls.popTag, ls.popHover)
@@ -227,6 +227,6 @@ func (v *view) togglePin(lk *markdown.Link) {
 }
 
 // fill paints a solid rectangle.
-func fill(gtx layout.Context, c color.NRGBA, r image.Rectangle) {
+func fill(gtx *layout.Context, c color.NRGBA, r image.Rectangle) {
 	paint.FillShape(gtx.Ops, c, clip.Rect(r).Op())
 }

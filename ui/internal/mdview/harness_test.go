@@ -1,4 +1,3 @@
-//nolint:gocritic // Gio passes layout.Context by value by design; hugeParam flags it.
 package mdview
 
 import (
@@ -55,8 +54,8 @@ func newHarness(t *testing.T, src string, width int) *harness {
 }
 
 // context builds this frame's layout context over the router.
-func (h *harness) context() layout.Context {
-	return layout.Context{
+func (h *harness) context() *layout.Context {
+	return &layout.Context{
 		Ops:         &h.ops,
 		Metric:      unit.Metric{PxPerDp: 1, PxPerSp: 1},
 		Constraints: layout.Constraints{Max: image.Pt(h.width, 1_000_000)},
@@ -91,7 +90,8 @@ func (h *harness) click(p image.Point) {
 // link returns the first link of the document.
 func (h *harness) link() *markdown.Link {
 	h.t.Helper()
-	for _, b := range h.doc.Blocks {
+	for bi := range h.doc.Blocks {
+		b := &h.doc.Blocks[bi]
 		for i := range b.Spans {
 			if b.Spans[i].Link != nil {
 				return b.Spans[i].Link

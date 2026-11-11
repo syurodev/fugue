@@ -1,4 +1,3 @@
-//nolint:gocritic // Gio passes layout.Context by value by design; hugeParam flags it.
 package mdview
 
 import (
@@ -72,27 +71,28 @@ func middleTruncate(url, host string, cols int) string {
 // link or the popover, keyboard focus is on the link or in the popover, or
 // the popover is pinned. A pointer over one of the buttons counts as over
 // the popover: the buttons sit above the popover's own hover area.
-func (v *view) visible(gtx layout.Context, lk *markdown.Link, ls *linkState) bool {
+func (v *view) visible(gtx *layout.Context, lk *markdown.Link, ls *linkState) bool {
 	return ls.hover || ls.popHover || gtx.Focused(ls) || gtx.Focused(&ls.open) || gtx.Focused(&ls.copy) ||
 		ls.open.Hovered() || ls.copy.Hovered() || v.st.pinned == lk
 }
 
 // popover handles the popover's buttons and, while it is visible, draws it
 // deferred above the link, or below it when the document has no room above.
-func (v *view) popover(gtx layout.Context, an *linkAnchor, avail int) {
+func (v *view) popover(gtx *layout.Context, an *linkAnchor, avail int) {
 	ls := v.st.link(an.link)
-	for ls.open.Clicked(gtx) {
+	for ls.open.Clicked(*gtx) {
 		v.st.opens = append(v.st.opens, OpenLink{URL: an.link.URL})
 	}
-	for ls.copy.Clicked(gtx) {
+	for ls.copy.Clicked(*gtx) {
 		gtx.Execute(clipboard.WriteCmd{Type: clipboardMIME, Data: io.NopCloser(strings.NewReader(an.link.URL))})
 	}
 	if !v.visible(gtx, an.link, ls) {
 		return
 	}
-	gtx.Constraints.Max.X = min(avail, gtx.Dp(popoverWidth))
+	sized := *gtx
+	sized.Constraints.Max.X = min(avail, gtx.Dp(popoverWidth))
 	card := op.Record(gtx.Ops)
-	dims := v.card(gtx, an.link, ls)
+	dims := v.card(&sized, an.link, ls)
 	call := card.Stop()
 	skirt := gtx.Dp(popoverSkirt)
 	box := an.boxes[0]
@@ -114,16 +114,17 @@ func (v *view) popover(gtx layout.Context, an *linkAnchor, avail int) {
 // card lays out the popover card: a generic link icon, the host (and its
 // punycode form when that differs), the middle-truncated URL and the open and
 // copy buttons. Nothing here loads anything: no favicon, no network.
-func (v *view) card(gtx layout.Context, lk *markdown.Link, ls *linkState) layout.Dimensions {
+func (v *view) card(gtx *layout.Context, lk *markdown.Link, ls *linkState) layout.Dimensions {
 	c := v.th.Chrome()
 	mt := v.th.Material()
 	pad := gtx.Dp(popoverPad)
-	gtx.Constraints.Min = image.Point{}
+	inner := *gtx
+	inner.Constraints.Min = image.Point{}
 	body := op.Record(gtx.Ops)
-	dims := layout.UniformInset(popoverPad).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	dims := layout.UniformInset(popoverPad).Layout(inner, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return v.hostRow(gtx, lk)
+				return v.hostRow(&gtx, lk)
 			}),
 			layout.Rigid(layout.Spacer{Height: 6}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -167,11 +168,13 @@ func hostLines(lk *markdown.Link) (host, punycode string) {
 
 // hostRow is the icon with the host whole: the display form, and under it the
 // punycode form when the display host is an IDN.
-func (v *view) hostRow(gtx layout.Context, lk *markdown.Link) layout.Dimensions {
+func (v *view) hostRow(gtx *layout.Context, lk *markdown.Link) layout.Dimensions {
 	c, mt := v.th.Chrome(), v.th.Material()
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(gtx,
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Start}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Right: 8, Top: 2}.Layout(gtx, v.linkIcon)
+			return layout.Inset{Right: 8, Top: 2}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return v.linkIcon(&gtx)
+			})
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			host, puny := hostLines(lk)
@@ -204,7 +207,7 @@ func (v *view) button(c *widget.Clickable, label string, primary bool) layout.Wi
 
 // linkIcon is the generic link glyph, two interlocked pills; it is drawn, not
 // fetched.
-func (v *view) linkIcon(gtx layout.Context) layout.Dimensions {
+func (v *view) linkIcon(gtx *layout.Context) layout.Dimensions {
 	size := gtx.Dp(16)
 	h := size * 3 / 8
 	w := float32(max(gtx.Dp(unit.Dp(1.5)), 1))

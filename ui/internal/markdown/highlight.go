@@ -37,7 +37,7 @@ func highlight(language, src string, lineCount int, clock Clock) (lines [][]Span
 	if err != nil {
 		return nil, false
 	}
-	tokenized := tokenizeLines(it, newDeadline(clock))
+	tokenized := tokenizeLines(it, newDeadline(clock), !strings.HasSuffix(src, "\n"))
 	if tokenized == nil {
 		return nil, false
 	}
@@ -51,18 +51,19 @@ func newDeadline(clock Clock) func() bool {
 	return func() bool { return clock.Now().Sub(start) > highlightBudget }
 }
 
-// tokenizeLines folds the flat token stream into per-line span slices,
-// dropping the newline that ends each tokenized line. An empty line stays
-// an empty slice so line counts survive.
-func tokenizeLines(it chroma.Iterator, overBudget func() bool) [][]Span {
+// tokenizeLines folds the flat token stream into per-line span slices.
+// Every newline ends a line, whatever token carries it; the lexer appends
+// one more after the last line when the source lacks it (EnsureLF), and that
+// one ends no line of the source. An empty line stays an empty slice so line
+// counts survive.
+func tokenizeLines(it chroma.Iterator, overBudget func() bool, addedLF bool) [][]Span {
 	var lines [][]Span
 	var cur []Span
 	for tok := it(); tok != chroma.EOF; tok = it() {
 		if overBudget() {
 			return nil
 		}
-		parts := strings.Split(strings.TrimSuffix(tok.Value, "\n"), "\n")
-		for i, part := range parts {
+		for i, part := range strings.Split(tok.Value, "\n") {
 			if i > 0 {
 				lines = append(lines, cur)
 				cur = nil
@@ -71,6 +72,9 @@ func tokenizeLines(it chroma.Iterator, overBudget func() bool) [][]Span {
 				cur = append(cur, Span{Text: part, Role: roleFor(tok.Type)})
 			}
 		}
+	}
+	if addedLF && len(cur) == 0 {
+		return lines
 	}
 	return append(lines, cur)
 }
