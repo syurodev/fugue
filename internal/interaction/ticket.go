@@ -95,6 +95,11 @@ func (o *Owner) isTicketDoneLocked(t *Ticket, now time.Time) bool {
 }
 
 func (o *Owner) pruneTicketsLocked(now time.Time) {
+	// Ticket retention cannot make progress before the earliest eviction deadline.
+	if !o.nextResolvedPrune.IsZero() && now.Before(o.nextResolvedPrune) {
+		return
+	}
+	o.nextResolvedPrune = time.Time{}
 	for reqID, ticket := range o.byRequest {
 		if ticket.Relayed || !ticket.Resolved {
 			continue
@@ -102,22 +107,95 @@ func (o *Owner) pruneTicketsLocked(now time.Time) {
 		if o.isTicketDoneLocked(ticket, now) {
 			delete(o.byRequest, reqID)
 			delete(o.byOperation, ticket.OperationID)
+			continue
 		}
+		o.scheduleResolvedPruneLocked(ticketPruneDeadline(ticket, o.receipts, now))
 	}
 }
 
-func (o *Owner) pruneReceiptsLocked(now time.Time) {
-	for id, r := range o.receipts {
-		switch {
-		case !r.ExpiresAt.IsZero() && !now.Before(r.ExpiresAt):
-			delete(o.receipts, id)
-		case r.Claimed:
-			if !r.ClaimedAt.IsZero() && now.Sub(r.ClaimedAt) >= ResolvedRetentionTTL {
-				delete(o.receipts, id)
-			}
-		case !r.IssuedAt.IsZero() && now.Sub(r.IssuedAt) >= ResolvedRetentionTTL:
-			delete(o.receipts, id)
+func ticketPruneDeadline(ticket *Ticket, receipts map[string]*Receipt, now time.Time) time.Time {
+	deadline := ticket.ResolvedAt.Add(ResolvedRetentionTTL)
+	if ticket.ReceiptID == "" {
+		return deadline
+	}
+	receipt, ok := receipts[ticket.ReceiptID]
+	if !ok || receipt.Claimed {
+		return now
+	}
+	if !receipt.ExpiresAt.IsZero() && receipt.ExpiresAt.Before(deadline) {
+		return receipt.ExpiresAt
+	}
+	return deadline
+}
+
+func (o *Owner) scheduleResolvedPruneLocked(deadline time.Time) {
+	if o.nextResolvedPrune.IsZero() || deadline.Before(o.nextResolvedPrune) {
+		o.nextResolvedPrune = deadline
+	}
+}
+
+func (o *Owner) markResolvedLocked(ticket *Ticket, now time.Time, outcome Outcome) {
+	o.removePendingLocked(ticket)
+	ticket.Resolved = true
+	ticket.ResolvedAt = now
+	ticket.Outcome = outcome
+	deadline := now.Add(ResolvedRetentionTTL)
+	if ticket.ReceiptID != "" {
+		if receipt, ok := o.receipts[ticket.ReceiptID]; ok && !receipt.ExpiresAt.IsZero() && receipt.ExpiresAt.Before(deadline) {
+			deadline = receipt.ExpiresAt
 		}
+	}
+	o.scheduleResolvedPruneLocked(deadline)
+}
+
+func (o *Owner) pruneReceiptsLocked(now time.Time) {
+	// Receipt retention cannot make progress before the earliest receipt deadline.
+	if !o.nextReceiptPrune.IsZero() && now.Before(o.nextReceiptPrune) {
+		return
+	}
+	o.nextReceiptPrune = time.Time{}
+	for id, r := range o.receipts {
+		deadline, expired := receiptPruneDeadline(r, now)
+		if expired {
+			delete(o.receipts, id)
+			continue
+		}
+		o.scheduleReceiptPruneLocked(deadline)
+	}
+}
+
+func receiptPruneDeadline(receipt *Receipt, now time.Time) (time.Time, bool) {
+	if !receipt.ExpiresAt.IsZero() && !now.Before(receipt.ExpiresAt) {
+		return time.Time{}, true
+	}
+	if receipt.Claimed {
+		if !receipt.ClaimedAt.IsZero() && now.Sub(receipt.ClaimedAt) >= ResolvedRetentionTTL {
+			return time.Time{}, true
+		}
+		if !receipt.ClaimedAt.IsZero() {
+			return receipt.ClaimedAt.Add(ResolvedRetentionTTL), false
+		}
+		return time.Time{}, false
+	}
+	if !receipt.IssuedAt.IsZero() && now.Sub(receipt.IssuedAt) >= ResolvedRetentionTTL {
+		return time.Time{}, true
+	}
+	if receipt.IssuedAt.IsZero() {
+		return time.Time{}, false
+	}
+	deadline := receipt.IssuedAt.Add(ResolvedRetentionTTL)
+	if !receipt.ExpiresAt.IsZero() && receipt.ExpiresAt.Before(deadline) {
+		deadline = receipt.ExpiresAt
+	}
+	return deadline, false
+}
+
+func (o *Owner) scheduleReceiptPruneLocked(deadline time.Time) {
+	if deadline.IsZero() {
+		return
+	}
+	if o.nextReceiptPrune.IsZero() || deadline.Before(o.nextReceiptPrune) {
+		o.nextReceiptPrune = deadline
 	}
 }
 

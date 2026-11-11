@@ -56,6 +56,15 @@ func runMemoryCycle(ctx context.Context, svc *InteractionService, i uint64) erro
 	return aerr
 }
 
+func runMemoryCycles(t *testing.T, ctx context.Context, svc *InteractionService, start, end uint64) {
+	t.Helper()
+	for i := start; i < end; i++ {
+		if err := runMemoryCycle(ctx, svc, i); err != nil {
+			t.Fatalf("cycle %d failed: %v", i, err)
+		}
+	}
+}
+
 func TestInteractionServiceMemoryBounded10kCycles(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Unix(100, 0))
@@ -73,11 +82,19 @@ func TestInteractionServiceMemoryBounded10kCycles(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	const measuredCycles = 1000
 	const totalCycles = 10000
-	for i := range uint64(totalCycles) {
-		if cerr := runMemoryCycle(t.Context(), svc, i); cerr != nil {
-			t.Fatalf("cycle %d failed: %v", i, cerr)
-		}
+	realClock := clock.Real{}
+	firstStart := realClock.Now()
+	runMemoryCycles(t, t.Context(), svc, 0, measuredCycles)
+	firstDuration := realClock.Now().Sub(firstStart)
+	runMemoryCycles(t, t.Context(), svc, measuredCycles, totalCycles-measuredCycles)
+	lastStart := realClock.Now()
+	runMemoryCycles(t, t.Context(), svc, totalCycles-measuredCycles, totalCycles)
+	lastDuration := realClock.Now().Sub(lastStart)
+	t.Logf("first 1,000 cycles: %s; last 1,000 cycles: %s", firstDuration, lastDuration)
+	if lastDuration > firstDuration*3 {
+		t.Fatalf("last 1,000 cycles took %s, more than 3x first 1,000 cycles %s", lastDuration, firstDuration)
 	}
 
 	// Advance clock past ResolvedRetentionTTL so all tickets and receipts become evictable

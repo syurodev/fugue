@@ -120,6 +120,65 @@ func TestInteractionAutomaticExpiryTimer(t *testing.T) {
 	assertResolvedExpired(t, svc, sub, ticket.RequestID)
 }
 
+func TestInteractionExpiryLoopHandlesOverdueTicketAtStart(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Unix(100, 0))
+	idGen := ids.NewUUIDv7(clk, ids.NewDeterministic("overdue-start-test"))
+	hub := NewEventHub("inc-overdue")
+	owner, err := interaction.NewOwner(interaction.Config{Clock: clk, IDs: idGen})
+	if err != nil {
+		t.Fatal(err)
+	}
+	svc, err := NewInteractionService(owner, hub, clk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sub, err := hub.Subscribe(t.Context(), SubscribeParams{Principal: string(KindCLI), Topic: TopicInteraction})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+
+	ticket := ensureExpiringTicket(t, svc, clk.Now().Add(time.Minute))
+	if _, ok := sub.Next(t.Context()); !ok {
+		t.Fatal("requested event was not published")
+	}
+	clk.Advance(2 * time.Minute)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	task := svc.Start(ctx)
+	defer func() {
+		cancel()
+		if err := task.Wait(); err != nil && !errors.Is(err, context.Canceled) {
+			t.Errorf("task wait failed: %v", err)
+		}
+	}()
+
+	assertResolvedExpiredWithContext(t, svc, sub, ticket.RequestID, ctx)
+}
+
+func assertResolvedExpiredWithContext(t *testing.T, svc *InteractionService, sub *Subscription, reqID string, ctx context.Context) {
+	t.Helper()
+	resEv, ok := sub.Next(ctx)
+	if !ok || resEv.Type != EventInteractionResolved {
+		t.Fatalf("expected resolved event, got ok=%v ev=%+v", ok, resEv)
+	}
+	var payload resolvedPayload
+	if err := json.Unmarshal(resEv.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.RequestID != reqID || payload.Outcome != OutcomeExpired {
+		t.Fatalf("payload = %+v, want reqID=%s outcome=%s", payload, reqID, OutcomeExpired)
+	}
+	found, err := svc.owner.LookupRequest(reqID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !found.Resolved || found.Outcome != interaction.OutcomeExpired {
+		t.Fatalf("ticket resolved=%v outcome=%v, want resolved=true outcome=expired", found.Resolved, found.Outcome)
+	}
+}
+
 func TestInteractionExpiryTimerStopsOnContextCancel(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Unix(100, 0))

@@ -26,6 +26,11 @@ func (o *Owner) issueReceiptLocked(ticket *Ticket, selectedOptionID string, answ
 		ClaimedAt:        time.Time{},
 	}
 	o.receipts[receiptID] = receipt
+	deadline := now.Add(ResolvedRetentionTTL)
+	if !receipt.ExpiresAt.IsZero() && receipt.ExpiresAt.Before(deadline) {
+		deadline = receipt.ExpiresAt
+	}
+	o.scheduleReceiptPruneLocked(deadline)
 	return receipt, nil
 }
 
@@ -81,6 +86,8 @@ func (o *Owner) claimByKind(receiptID string, kind Kind, expected *Binding) (*Re
 	}
 	receipt.Claimed = true
 	receipt.ClaimedAt = now
+	// A claimed receipt makes its resolved ticket immediately evictable.
+	o.nextResolvedPrune = now
 	o.pruneResolvedLocked(now)
 	cp := *receipt
 	outcome := OutcomeAllowedOnce
@@ -148,14 +155,13 @@ func (o *Owner) cancelOperationTicketLocked(ticket *Ticket, now time.Time) *Audi
 	if ticket.ReceiptID != "" {
 		if r, exists := o.receipts[ticket.ReceiptID]; exists && !r.Claimed {
 			delete(o.receipts, ticket.ReceiptID)
+			o.nextResolvedPrune = now
 		}
 	}
 	if ticket.Resolved {
 		return nil
 	}
-	ticket.Resolved = true
-	ticket.ResolvedAt = now
-	ticket.Outcome = OutcomeCancelled
+	o.markResolvedLocked(ticket, now, OutcomeCancelled)
 	ev := o.newAuditEvent("cancelled", ticket)
 	o.emitLifecycleLocked(LifecycleEvent{
 		Kind:      EventResolved,
@@ -170,6 +176,7 @@ func (o *Owner) cancelOperationTicketLocked(ticket *Ticket, now time.Time) *Audi
 func (o *Owner) ResetSession(sessionID string) {
 	o.mu.Lock()
 	now := o.clock.Now().UTC()
+	o.nextResolvedPrune = now
 	for k := range o.grants {
 		if k.sessionID == sessionID {
 			delete(o.grants, k)
@@ -182,9 +189,7 @@ func (o *Owner) ResetSession(sessionID string) {
 		}
 		delete(o.byOperation, ticket.OperationID)
 		if !ticket.Resolved {
-			ticket.Resolved = true
-			ticket.ResolvedAt = now
-			ticket.Outcome = OutcomeCancelled
+			o.markResolvedLocked(ticket, now, OutcomeCancelled)
 			ev := o.newAuditEvent("cancelled", ticket)
 			cancelled = append(cancelled, &ev)
 			o.emitLifecycleLocked(LifecycleEvent{
@@ -222,12 +227,11 @@ func (o *Owner) SetVaultLocked(locked bool) {
 			delete(o.receipts, id)
 		}
 	}
+	o.nextResolvedPrune = now
 	var cancelled []*AuditEvent
 	for _, ticket := range o.byRequest {
 		if !ticket.Resolved {
-			ticket.Resolved = true
-			ticket.ResolvedAt = now
-			ticket.Outcome = OutcomeCancelled
+			o.markResolvedLocked(ticket, now, OutcomeCancelled)
 			ev := o.newAuditEvent("vault_locked", ticket)
 			cancelled = append(cancelled, &ev)
 			o.emitLifecycleLocked(LifecycleEvent{

@@ -1,6 +1,7 @@
 package secrets
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -111,16 +112,34 @@ func mixedText(size int) string {
 func TestFindOneMiBLinearBound(t *testing.T) {
 	t.Parallel()
 	d := New([]KnownValue{{Value: redact.NewSecret("abcd1234"), Kind: KindVault}}, Options{})
-	text := mixedText(1 << 20)
-	result := testing.Benchmark(func(b *testing.B) {
-		b.Helper()
-		for b.Loop() {
-			d.Find(text)
-		}
-	})
-	if result.NsPerOp() > 30_000_000_000 || result.AllocedBytesPerOp() > 256<<20 {
-		t.Fatal("1 MiB scan exceeded generous time/allocation bound")
+	measure := func(size int) ([]int64, testing.BenchmarkResult) {
+		text := mixedText(size)
+		samples := make([]int64, 0, 5)
+		result := testing.Benchmark(func(b *testing.B) {
+			b.Helper()
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				for len(samples) < 5 {
+					start := b.Elapsed()
+					d.Find(text)
+					samples = append(samples, (b.Elapsed() - start).Nanoseconds())
+				}
+				d.Find(text)
+			}
+		})
+		slices.Sort(samples)
+		return samples, result
 	}
+	short, _ := measure(256 << 10)
+	long, result := measure(1 << 20)
+	if long[2] > short[2]*6 {
+		t.Fatalf("1 MiB median scan took %d ns, more than 6x 256 KiB median %d ns", long[2], short[2])
+	}
+	if result.AllocedBytesPerOp() > 256<<20 {
+		t.Fatal("1 MiB scan exceeded allocation bound")
+	}
+	text := mixedText(1 << 20)
 	got := d.Find(text)
 	if len(got) == 0 || strings.Contains(Mask(text, got), "abcd1234") {
 		t.Fatal("1 MiB masking failed")
