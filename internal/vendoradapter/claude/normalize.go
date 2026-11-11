@@ -10,6 +10,7 @@ package claude
 import (
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -98,30 +99,108 @@ const (
 // turn id it minted before sending the user line; events attach to the active
 // turn and the result event closes it.
 type Normalizer struct {
-	session   string
-	turn      string
-	items     map[string]*transcript.Item
-	msgCounts map[string]int
-	init      *Init
-	nested    int
-	line      int
+	mu           sync.Mutex
+	session      string
+	turn         string
+	prevTurn     string
+	vendorTurn   string
+	sendTurns    map[string]string
+	steerTurns   map[string]string
+	turnFinished map[string]bool
+	items        map[string]*transcript.Item
+	msgCounts    map[string]int
+	init         *Init
+	nested       int
+	line         int
 }
 
 // NewNormalizer builds the per-session normalizer.
 func NewNormalizer(sessionID string) *Normalizer {
 	return &Normalizer{
-		session:   sessionID,
-		items:     map[string]*transcript.Item{},
-		msgCounts: map[string]int{},
+		session:      sessionID,
+		sendTurns:    map[string]string{},
+		steerTurns:   map[string]string{},
+		turnFinished: map[string]bool{},
+		items:        map[string]*transcript.Item{},
+		msgCounts:    map[string]int{},
 	}
 }
 
+// RegisterSend records a send message UUID associated with a turn ID.
+func (n *Normalizer) RegisterSend(turnID, uuid string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.sendTurns == nil {
+		n.sendTurns = map[string]string{}
+	}
+	n.sendTurns[uuid] = turnID
+}
+
+// UnregisterSend removes a registered send message UUID on write failure.
+func (n *Normalizer) UnregisterSend(uuid string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	delete(n.sendTurns, uuid)
+}
+
+// RegisterSteer records a steer message UUID associated with a turn ID.
+func (n *Normalizer) RegisterSteer(turnID, uuid string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	if n.steerTurns == nil {
+		n.steerTurns = map[string]string{}
+	}
+	n.steerTurns[uuid] = turnID
+}
+
+// UnregisterSteer removes a registered steer message UUID on write failure.
+func (n *Normalizer) UnregisterSteer(uuid string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	delete(n.steerTurns, uuid)
+}
+
+func (n *Normalizer) hasPendingSteers(turnID string) bool {
+	for _, tID := range n.steerTurns {
+		if tID == turnID {
+			return true
+		}
+	}
+	return false
+}
+
 // BeginTurn activates a turn; the actor calls it right before each Send.
-func (n *Normalizer) BeginTurn(turnID string) { n.turn = turnID }
+func (n *Normalizer) BeginTurn(turnID string) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.prevTurn = n.turn
+	n.turn = turnID
+	if n.turnFinished != nil {
+		delete(n.turnFinished, turnID)
+	}
+}
+
+// RollbackTurn restores the normalizer turn to its previous state.
+func (n *Normalizer) RollbackTurn() {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	n.turn = n.prevTurn
+	n.prevTurn = ""
+	n.vendorTurn = ""
+}
+
+func (n *Normalizer) currentTurnID() string {
+	if n.vendorTurn != "" {
+		return n.vendorTurn
+	}
+	return n.turn
+}
 
 // SlashCommands returns the latest vendor slash command list, terminal-only
 // commands hidden, vendor order kept (vendor-runtime §9).
 func (n *Normalizer) SlashCommands() []string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	if n.init == nil {
 		return nil
 	}
@@ -133,6 +212,8 @@ func (n *Normalizer) SlashCommands() []string {
 // wrong shapes included — becomes a notice(unsupported_event), never an error
 // and never a panic.
 func (n *Normalizer) Normalize(line []byte) (Observation, error) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
 	n.line++
 	var env envelope
 	if err := json.Unmarshal(line, &env); err != nil {
@@ -152,7 +233,7 @@ func (n *Normalizer) normalizeTop(line []byte, env *envelope) (Observation, erro
 		return n.normalizeSystem(line, env), nil
 	case "assistant":
 		return n.normalizeAssistant(line, env), nil
-	case "user":
+	case roleUser:
 		return n.normalizeUser(line, env), nil
 	case "result":
 		return n.normalizeResult(line, env), nil
@@ -177,7 +258,7 @@ func (n *Normalizer) rawRef(env *envelope) string {
 // unsupported turns an event the normalizer does not map into a notice with
 // the raw reference (TR-06).
 func (n *Normalizer) unsupported(env *envelope, label string) Observation {
-	item := transcript.UnsupportedEvent("notice-"+n.rawRef(env), n.session, n.turn, n.rawRef(env))
+	item := transcript.UnsupportedEvent("notice-"+n.rawRef(env), n.session, n.currentTurnID(), n.rawRef(env))
 	item.Content = transcript.NoticeContent{Text: label}
 	return Observation{Records: []transcript.Item{item}}
 }

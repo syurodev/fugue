@@ -3,6 +3,7 @@
 package process
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"syscall"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
@@ -24,11 +26,13 @@ type Process struct {
 	interrupt    func(context.Context) error
 	onEscalation func(string)
 
-	stdin      io.WriteCloser
-	stdoutPipe *outputPipe
-	stdoutR    *LineReader
-	stderrR    *os.File
-	stderrRing *RingBuffer
+	stdin       io.WriteCloser
+	stdinClosed atomic.Bool
+	stdinMu     sync.Mutex
+	stdoutPipe  *outputPipe
+	stdoutR     *LineReader
+	stderrR     *os.File
+	stderrRing  *RingBuffer
 
 	stderrTask *supervise.Task
 	waitTask   *supervise.Task
@@ -299,12 +303,85 @@ func (p *Process) StderrRing() *RingBuffer {
 
 // CloseStdin closes the stdin pipe to notify the child of EOF.
 func (p *Process) CloseStdin() error {
+	if p.stdinClosed.Swap(true) {
+		return nil
+	}
 	if p.stdin != nil {
 		if err := p.stdin.Close(); err != nil {
 			return fmt.Errorf("close stdin: %w", err)
 		}
 	}
 	return nil
+}
+
+func validateLineFrame(line []byte) (bool, error) {
+	if n := len(line); n > 1 && bytes.IndexByte(line[:n-1], '\n') != -1 {
+		return false, ErrInvalidFrame
+	}
+	needsNewline := len(line) == 0 || line[len(line)-1] != '\n'
+	totalLen := len(line)
+	if needsNewline {
+		totalLen++
+	}
+	if totalLen > MaxFrameSize {
+		return false, ErrFrameTooLarge
+	}
+	return needsNewline, nil
+}
+
+func (p *Process) canWriteStdin() bool {
+	return !p.stdinClosed.Load() && !p.isLeaderExited() && p.stdin != nil
+}
+
+func (p *Process) writeChunk(b []byte, op string) error {
+	if _, err := p.stdin.Write(b); err != nil {
+		if p.stdinClosed.Load() || isPipeClosedError(err) {
+			return ErrStdinClosed
+		}
+		return fmt.Errorf("write stdin %s: %w", op, err)
+	}
+	return nil
+}
+
+// WriteLine writes line to the process stdin followed by a newline if line does
+// not already end with one. Writes are serialized under p.stdinMu. If line
+// contains an interior newline, ErrInvalidFrame is returned. If line
+// exceeds MaxFrameSize, ErrFrameTooLarge is returned without writing. If stdin
+// has been closed or the process has exited, ErrStdinClosed is returned.
+func (p *Process) WriteLine(line []byte) error {
+	needsNewline, err := validateLineFrame(line)
+	if err != nil {
+		return err
+	}
+	if !p.canWriteStdin() {
+		return ErrStdinClosed
+	}
+
+	p.stdinMu.Lock()
+	defer p.stdinMu.Unlock()
+	if !p.canWriteStdin() {
+		return ErrStdinClosed
+	}
+
+	if err := p.writeChunk(line, "payload"); err != nil {
+		return err
+	}
+	if needsNewline {
+		if err := p.writeChunk([]byte{'\n'}, "newline"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func isPipeClosedError(err error) bool {
+	if err == nil {
+		return false
+	}
+	return errors.Is(err, io.ErrClosedPipe) ||
+		errors.Is(err, os.ErrClosed) ||
+		errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.EBADF)
 }
 
 // Wait waits for the process to exit and returns its exit error, if any.

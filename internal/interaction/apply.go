@@ -13,7 +13,7 @@ func (o *Owner) applyDecisionLocked(ticket *Ticket, decision *Decision, now time
 		return errcode.New(errcode.InvalidArgument, "decision outcome is invalid")
 	}
 	if ticket.Relayed {
-		return applyRelayedLocked(ticket, decision, now)
+		return o.applyRelayedLocked(ticket, decision, now)
 	}
 	switch ticket.Kind {
 	case KindConfirm:
@@ -61,9 +61,7 @@ func (o *Owner) applyConfirmLocked(ticket *Ticket, decision *Decision, now time.
 	case OutcomeCancelled, OutcomeUnavailable, OutcomeExpired, OutcomeAnswered:
 		return errcode.New(errcode.InvalidArgument, "confirm decision outcome is not a valid user answer")
 	}
-	ticket.Resolved = true
-	ticket.ResolvedAt = now
-	ticket.Outcome = decision.Outcome
+	o.markResolvedLocked(ticket, now, decision.Outcome)
 	return nil
 }
 
@@ -92,9 +90,7 @@ func (o *Owner) applySelectLocked(ticket *Ticket, decision *Decision, now time.T
 	case OutcomeAllowedSession, OutcomeCancelled, OutcomeUnavailable, OutcomeExpired, OutcomeAnswered:
 		return errcode.New(errcode.InvalidArgument, "selection decision outcome is not a valid user answer")
 	}
-	ticket.Resolved = true
-	ticket.ResolvedAt = now
-	ticket.Outcome = decision.Outcome
+	o.markResolvedLocked(ticket, now, decision.Outcome)
 	return nil
 }
 
@@ -127,9 +123,7 @@ func (o *Owner) applyQuestionLocked(ticket *Ticket, decision *Decision, now time
 	case OutcomeAllowedOnce, OutcomeAllowedSession, OutcomeDenied, OutcomeUnavailable, OutcomeExpired:
 		return errcode.New(errcode.InvalidArgument, "question decision outcome is not a valid user answer")
 	}
-	ticket.Resolved = true
-	ticket.ResolvedAt = now
-	ticket.Outcome = decision.Outcome
+	o.markResolvedLocked(ticket, now, decision.Outcome)
 	return nil
 }
 
@@ -140,7 +134,7 @@ func (o *Owner) applyQuestionLocked(ticket *Ticket, decision *Decision, now time
 // of the vendor's options — including the vendor's own reject — resolves the
 // request as answered with the choice recorded; denied stays the Fugue-level
 // deny with an optional note.
-func applyRelayedLocked(ticket *Ticket, decision *Decision, now time.Time) error {
+func (o *Owner) applyRelayedLocked(ticket *Ticket, decision *Decision, now time.Time) error {
 	switch decision.Outcome {
 	case OutcomeAnswered:
 		if err := applyRelayedChoiceLocked(ticket, decision); err != nil {
@@ -162,9 +156,7 @@ func applyRelayedLocked(ticket *Ticket, decision *Decision, now time.Time) error
 	case OutcomeCancelled, OutcomeUnavailable, OutcomeExpired:
 		return errcode.New(errcode.InvalidArgument, "relayed decision outcome is not a valid user answer")
 	}
-	ticket.Resolved = true
-	ticket.ResolvedAt = now
-	ticket.Outcome = decision.Outcome
+	o.markResolvedLocked(ticket, now, decision.Outcome)
 	return nil
 }
 

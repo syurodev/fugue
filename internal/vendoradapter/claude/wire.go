@@ -58,10 +58,11 @@ type wireAssistant struct {
 	Message wireMessage `json:"message"`
 }
 
-// wireUser carries tool_result blocks; the content field is a string or a
-// block array, so it stays raw until the tool result decodes it.
+// wireUser carries tool_result blocks or replayed user messages.
 type wireUser struct {
-	Message struct {
+	UUID     string `json:"uuid,omitempty"`
+	IsReplay bool   `json:"isReplay,omitempty"`
+	Message  struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
 	} `json:"message"`
