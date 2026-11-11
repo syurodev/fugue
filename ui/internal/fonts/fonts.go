@@ -19,6 +19,15 @@ import (
 
 const interFamily = "Inter"
 
+// The typefaces of the bundled collection, so a layer picks a face by role and
+// not by a string of its own.
+const (
+	// Sans is the text face.
+	Sans giofont.Typeface = interFamily
+	// Mono is the code face.
+	Mono giofont.Typeface = "JetBrains Mono"
+)
+
 //go:embed data/*.ttf
 var data embed.FS
 
@@ -33,8 +42,8 @@ var faces = []struct {
 	{"data/Inter-SemiBold.ttf", interFamily, giofont.SemiBold, giofont.Regular},
 	{"data/Inter-Bold.ttf", interFamily, giofont.Bold, giofont.Regular},
 	{"data/Inter-Italic.ttf", interFamily, giofont.Normal, giofont.Italic},
-	{"data/JetBrainsMono-Regular.ttf", "JetBrains Mono", giofont.Normal, giofont.Regular},
-	{"data/JetBrainsMono-Bold.ttf", "JetBrains Mono", giofont.Bold, giofont.Regular},
+	{"data/JetBrainsMono-Regular.ttf", Mono, giofont.Normal, giofont.Regular},
+	{"data/JetBrainsMono-Bold.ttf", Mono, giofont.Bold, giofont.Regular},
 }
 
 // Collection parses the bundled faces in DA-04 order: Inter first, JetBrains

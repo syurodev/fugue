@@ -180,6 +180,10 @@ func (t *Theme) Status() Status { return t.status }
 // Link returns the hyperlink color, derived from the palette (blue).
 func (t *Theme) Link() color.NRGBA { return t.link }
 
+// CodeSurface returns the surface code blocks and inline code sit on. Every
+// syntax role reaches 4.5:1 on it in both modes.
+func (t *Theme) CodeSurface() color.NRGBA { return t.chrome.SurfaceTinted }
+
 // Syntax returns the style of one syntax role. Unknown roles render as
 // unstyled main text, so a renderer that meets a new role degrades safely.
 func (t *Theme) Syntax(role SyntaxRole) SyntaxStyle {

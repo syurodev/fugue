@@ -175,6 +175,25 @@ func TestSyntaxStylesDefaultToWeight400(t *testing.T) {
 	}
 }
 
+// TestSyntaxRolesMeetContrastOnTheCodeSurface holds every syntax role, and
+// the plain fallback, to 4.5:1 on the surface code blocks are drawn on, in
+// both modes.
+func TestSyntaxRolesMeetContrastOnTheCodeSurface(t *testing.T) {
+	t.Parallel()
+	roles := []theme.SyntaxRole{
+		theme.RoleKeyword, theme.RoleString, theme.RoleNumber, theme.RoleType,
+		theme.RoleFunction, theme.RoleDefinition, theme.RoleVariable,
+		theme.RoleOperator, theme.RoleComment, theme.RoleMeta, theme.RoleInvalid,
+		theme.SyntaxRole("plain"),
+	}
+	for _, m := range bothModes() {
+		surface := m.theme.CodeSurface()
+		for _, role := range roles {
+			requireContrast(t, m.name+" "+string(role)+" on the code surface", m.theme.Syntax(role).Color, surface)
+		}
+	}
+}
+
 // TestSyntaxUnknownRoleFallsBackToMainText pins the safe degradation: a role
 // this package does not know renders as plain main text.
 func TestSyntaxUnknownRoleFallsBackToMainText(t *testing.T) {
