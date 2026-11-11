@@ -56,17 +56,22 @@ func (s *InteractionService) expiryLoop(ctx context.Context) error {
 
 	rearm := func() {
 		stopTimer()
-		earliest, hasExpiry := s.owner.EarliestPendingExpiry()
-		if !hasExpiry {
+		for {
+			earliest, hasExpiry := s.owner.EarliestPendingExpiry()
+			if !hasExpiry {
+				return
+			}
+			now := s.clk.Now().UTC()
+			if !earliest.After(now) {
+				// A fake clock only fires timers during Advance; resolve overdue
+				// tickets directly so a zero-duration timer cannot remain armed.
+				s.owner.ExpireExpired()
+				continue
+			}
+			timer = s.clk.NewTimer(earliest.Sub(now))
+			timerCh = timer.C()
 			return
 		}
-		now := s.clk.Now().UTC()
-		var d time.Duration
-		if earliest.After(now) {
-			d = earliest.Sub(now)
-		}
-		timer = s.clk.NewTimer(d)
-		timerCh = timer.C()
 	}
 
 	rearm()
