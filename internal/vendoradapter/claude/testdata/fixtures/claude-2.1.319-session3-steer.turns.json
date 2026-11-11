@@ -1,0 +1,15 @@
+{
+ "sends": [
+  {
+   "beforeLine": 1,
+   "turn": "turn-1"
+  }
+ ],
+ "steers": [
+  {
+   "beforeLine": 23,
+   "text": "Also include the exact uppercase word PONG in your response.",
+   "uuid": "uuid-0032"
+  }
+ ]
+}

@@ -46,6 +46,7 @@ func runFakeVendor(mode string) {
 		"burst-and-exit":            runBurstAndExit,
 		"group-child-worker":        runGroupChildWorker,
 		"group-child-survivor":      runGroupChildSurvivor,
+		"echo-stdin":                runEchoStdin,
 		fakeVendorModeNormal:        runNormal,
 	}
 	for name, fn := range unixModes() {
@@ -171,6 +172,14 @@ func runGroupChildSurvivor() {
 		if sig == syscall.SIGINT {
 			os.Exit(0)
 		}
+	}
+}
+
+func runEchoStdin() {
+	writeQuietly(os.Stdout, "READY\n")
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		writeQuietly(os.Stdout, scanner.Text()+"\n")
 	}
 }
 

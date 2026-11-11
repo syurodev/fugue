@@ -11,9 +11,12 @@ import (
 	"errors"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/vendor"
 )
@@ -41,15 +44,62 @@ const (
 // child process sees it. ProbeTimeout bounds the probe when the caller's
 // context has no deadline; zero means DefaultProbeTimeout.
 type Adapter struct {
-	Binary       string
-	HostEnv      []string
-	ProbeTimeout time.Duration
+	Binary        string
+	HostEnv       []string
+	ProbeTimeout  time.Duration
+	Clock         clock.Clock
+	IDs           ids.Generator
+	SystemdProbe  *process.SystemdProbe
+	OnEscalation  func(string)
+	XDGRuntimeDir string
 }
 
-// NewAdapter builds an adapter with the default binary and the host
-// environment snapshot supplied by the composition root.
-func NewAdapter(hostEnv []string) *Adapter {
-	return &Adapter{Binary: DefaultBinary, HostEnv: hostEnv}
+// Option configures an Adapter.
+type Option func(*Adapter)
+
+// WithClock injects the clock used by sessions.
+func WithClock(clk clock.Clock) Option {
+	return func(a *Adapter) { a.Clock = clk }
+}
+
+// WithIDs injects the turn ID generator used by sessions.
+func WithIDs(idGen ids.Generator) Option {
+	return func(a *Adapter) { a.IDs = idGen }
+}
+
+// WithSystemdProbe injects the systemd probe for process isolation.
+func WithSystemdProbe(probe *process.SystemdProbe) Option {
+	return func(a *Adapter) { a.SystemdProbe = probe }
+}
+
+// WithOnEscalation registers a callback invoked on process stop order escalation.
+func WithOnEscalation(fn func(string)) Option {
+	return func(a *Adapter) { a.OnEscalation = fn }
+}
+
+// WithXDGRuntimeDir sets the runtime directory for systemd containment.
+func WithXDGRuntimeDir(dir string) Option {
+	return func(a *Adapter) { a.XDGRuntimeDir = dir }
+}
+
+// WithBinary overrides the Claude binary name or path.
+func WithBinary(binary string) Option {
+	return func(a *Adapter) { a.Binary = binary }
+}
+
+// WithProbeTimeout overrides the probe execution timeout.
+func WithProbeTimeout(d time.Duration) Option {
+	return func(a *Adapter) { a.ProbeTimeout = d }
+}
+
+// NewAdapter builds an adapter with the default binary, the host
+// environment snapshot supplied by the composition root, and optional configuration.
+func NewAdapter(hostEnv []string, opts ...Option) *Adapter {
+	a := &Adapter{Binary: DefaultBinary, HostEnv: hostEnv}
+	for _, opt := range opts {
+		opt(a)
+	}
+	return a
 }
 
 // Probe runs `claude --version` once and reports the version verdict, the
@@ -94,6 +144,9 @@ func (a *Adapter) Probe(ctx context.Context, home vendor.AccountHome) (vendor.Pr
 func (a *Adapter) resolveBinary() (string, error) {
 	if a.Binary == "" {
 		return "", errcode.New(errcode.InvalidArgument, "claude binary is empty")
+	}
+	if strings.ContainsRune(a.Binary, filepath.Separator) && !filepath.IsAbs(a.Binary) {
+		return "", errcode.New(errcode.InvalidArgument, "claude binary must be an absolute path")
 	}
 	path, err := exec.LookPath(a.Binary)
 	switch {

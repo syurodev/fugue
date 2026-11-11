@@ -6,6 +6,7 @@ package claude
 
 import (
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -456,5 +457,42 @@ func TestPermissionDeniedForNonToolItemBecomesNotice(t *testing.T) {
 	item := oneRecord(t, feedRef(t, n, `{"type":"system","subtype":"permission_denied","tool_name":"X","tool_use_id":"t1-plan-plan","message":"no","uuid":"u-d2","session_id":"s"}`))
 	if item.Kind != transcript.Notice {
 		t.Fatalf("kind = %s, want notice", item.Kind)
+	}
+}
+
+func normalizerMapCounts(n *Normalizer) (sendCount, steerCount, finishedCount int) {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	return len(n.sendTurns), len(n.steerTurns), len(n.turnFinished)
+}
+
+func TestNormalizerMapsStayBoundedOverManyTurns(t *testing.T) {
+	t.Parallel()
+
+	n := NewNormalizer("session-test-bounded-maps")
+	const turns = 1000
+
+	for i := range turns {
+		turnID := fmt.Sprintf("turn-%d", i)
+		sendUUID := fmt.Sprintf("send-%d", i)
+		steerUUID := fmt.Sprintf("steer-%d", i)
+
+		n.BeginTurn(turnID)
+		n.RegisterSend(turnID, sendUUID)
+		n.RegisterSteer(turnID, steerUUID)
+
+		feed(t, n, fmt.Sprintf(`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"send"}]},"uuid":%q,"isReplay":true}`, sendUUID))
+		feed(t, n, fmt.Sprintf(`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"steer"}]},"uuid":%q,"isReplay":true}`, steerUUID))
+		feed(t, n, fmt.Sprintf(`{"type":"result","subtype":"success","is_error":false,"result":"ok","uuid":"res-%d"}`, i))
+	}
+
+	sendCount, steerCount, finishedCount := normalizerMapCounts(n)
+	if sendCount > 1 || steerCount > 1 || finishedCount > 1 {
+		t.Fatalf("maps grew unbounded: sendTurns=%d, steerTurns=%d, turnFinished=%d",
+			sendCount, steerCount, finishedCount)
+	}
+	if sendCount != 0 || steerCount != 0 || finishedCount != 0 {
+		t.Fatalf("expected all maps to be 0 after completed turns, got sendTurns=%d, steerTurns=%d, turnFinished=%d",
+			sendCount, steerCount, finishedCount)
 	}
 }

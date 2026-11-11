@@ -50,6 +50,11 @@ type turnSends struct {
 		BeforeLine int    `json:"beforeLine"`
 		Turn       string `json:"turn"`
 	} `json:"sends"`
+	Steers []struct {
+		BeforeLine int    `json:"beforeLine"`
+		Text       string `json:"text"`
+		UUID       string `json:"uuid"`
+	} `json:"steers"`
 }
 
 // replay drives one fixture exactly as the session actor would: BeginTurn at
@@ -67,6 +72,11 @@ func replay(t *testing.T, fixture string) goldenFile {
 	}
 
 	n := NewNormalizer("session-1")
+	for _, st := range sends.Steers {
+		if st.UUID != "" {
+			n.RegisterSteer("turn-1", st.UUID)
+		}
+	}
 	out := goldenFile{Session: "session-1", Vendor: "claude"}
 	sendAt := 0
 	for i, line := range lines {

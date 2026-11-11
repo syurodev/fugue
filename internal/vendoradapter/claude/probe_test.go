@@ -15,7 +15,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/ids"
+	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/vendor"
 )
 
@@ -42,6 +45,35 @@ func TestNewAdapterDefaultsToTheClaudeBinary(t *testing.T) {
 	}
 	if len(a.HostEnv) != len(hostEnv) {
 		t.Fatalf("host env = %v, want the caller's snapshot", a.HostEnv)
+	}
+}
+
+func TestAdapterOptionsConfigureFields(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(testEpoch())
+	idGen := ids.NewSequence("test")
+	probe := process.NewSystemdProbe()
+	var escalationCalled bool
+	onEsc := func(string) { escalationCalled = true }
+
+	a := NewAdapter(nil,
+		WithClock(clk),
+		WithIDs(idGen),
+		WithSystemdProbe(probe),
+		WithOnEscalation(onEsc),
+		WithXDGRuntimeDir("/run/user/1000"),
+		WithBinary("/custom/claude"),
+		WithProbeTimeout(5*time.Second),
+	)
+
+	if a.Clock != clk || a.IDs != idGen || a.SystemdProbe != probe || a.XDGRuntimeDir != "/run/user/1000" || a.Binary != "/custom/claude" || a.ProbeTimeout != 5*time.Second {
+		t.Fatalf("unexpected adapter configuration: %+v", a)
+	}
+	if a.OnEscalation != nil {
+		a.OnEscalation("test")
+		if !escalationCalled {
+			t.Fatal("expected escalation callback to be invoked")
+		}
 	}
 }
 

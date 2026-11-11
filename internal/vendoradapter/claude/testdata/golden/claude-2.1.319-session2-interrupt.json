@@ -1,0 +1,347 @@
+{
+ "session": "session-1",
+ "vendor": "claude",
+ "summary": {
+  "partials": 4,
+  "nested": 0,
+  "notices": 14
+ },
+ "steps": [
+  {
+   "line": 1,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_started"
+    },
+    "id": "notice-uuid-0002",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0002",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 2,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_started"
+    },
+    "id": "notice-uuid-0005",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0005",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 3,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_started"
+    },
+    "id": "notice-uuid-0007",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0007",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 4,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_started"
+    },
+    "id": "notice-uuid-0009",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0009",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 5,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_response"
+    },
+    "id": "notice-uuid-0010",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0010",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 6,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_response"
+    },
+    "id": "notice-uuid-0011",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0011",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 7,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_response"
+    },
+    "id": "notice-uuid-0012",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0012",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 8,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_response"
+    },
+    "id": "notice-uuid-0013",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0013",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 9,
+   "op": "init",
+   "init": {
+    "Version": "2.1.319",
+    "SessionID": "uuid-0003",
+    "Model": "claude-sonnet-5-5",
+    "PermissionMode": "default",
+    "SlashCommands": [
+     "example-plugin:review",
+     "example-skill",
+     "clear",
+     "compact"
+    ]
+   }
+  },
+  {
+   "line": 10,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/status"
+    },
+    "id": "notice-uuid-0014",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0014",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 13,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/thinking_tokens"
+    },
+    "id": "notice-uuid-0017",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0017",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 15,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/thinking_tokens"
+    },
+    "id": "notice-uuid-0019",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0019",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 18,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/thinking_tokens"
+    },
+    "id": "notice-uuid-0022",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0022",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 20,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": ""
+    },
+    "id": "msg-0001-thinking-1",
+    "kind": "reasoning",
+    "metadata": {
+     "status": "plain"
+    },
+    "raw": "msg-0001",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 24,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "control_response"
+    },
+    "id": "notice-line-24",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-24",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 25,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "#"
+    },
+    "id": "msg-0001-text-1",
+    "kind": "assistant_message",
+    "metadata": {
+     "model": "claude-sonnet-5-5"
+    },
+    "raw": "msg-0001",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 26,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "user"
+    },
+    "id": "notice-uuid-0029",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0029",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 30,
+   "op": "turn_end",
+   "turn_end": {
+    "TurnID": "turn-1",
+    "Outcome": "failed",
+    "FailureCode": "error_during_execution",
+    "Usage": {
+     "InputTokens": 0,
+     "OutputTokens": 0,
+     "CacheTokens": 0,
+     "Cost": 0
+    },
+    "CredentialExpiresAt": "2026-12-08T01:59:12.069Z"
+   }
+  },
+  {
+   "line": 30,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "turn-1-usage",
+    "kind": "usage",
+    "metadata": {
+     "cache_tokens": 0,
+     "cost": 0,
+     "input_tokens": 0,
+     "output_tokens": 0
+    },
+    "raw": "uuid-0033",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  }
+ ]
+}

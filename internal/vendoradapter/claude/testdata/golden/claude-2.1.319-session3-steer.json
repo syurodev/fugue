@@ -1,0 +1,463 @@
+{
+ "session": "session-1",
+ "vendor": "claude",
+ "summary": {
+  "partials": 21,
+  "nested": 0,
+  "notices": 15
+ },
+ "steps": [
+  {
+   "line": 1,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_started"
+    },
+    "id": "notice-uuid-0001",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0001",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 2,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_started"
+    },
+    "id": "notice-uuid-0004",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0004",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 3,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_started"
+    },
+    "id": "notice-uuid-0006",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0006",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 4,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_started"
+    },
+    "id": "notice-uuid-0008",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0008",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 5,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_response"
+    },
+    "id": "notice-uuid-0010",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0010",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 6,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_response"
+    },
+    "id": "notice-uuid-0011",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0011",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 7,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_response"
+    },
+    "id": "notice-uuid-0012",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0012",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 8,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/hook_response"
+    },
+    "id": "notice-uuid-0013",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0013",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 9,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "command_lifecycle"
+    },
+    "id": "notice-uuid-0014",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0014",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 10,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "command_lifecycle"
+    },
+    "id": "notice-uuid-0016",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0016",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 11,
+   "op": "init",
+   "init": {
+    "Version": "2.1.319",
+    "SessionID": "uuid-0003",
+    "Model": "claude-sonnet-5-5",
+    "PermissionMode": "default",
+    "SlashCommands": [
+     "example-plugin:review",
+     "example-skill",
+     "clear",
+     "compact"
+    ]
+   }
+  },
+  {
+   "line": 12,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/status"
+    },
+    "id": "notice-uuid-0017",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0017",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 22,
+   "op": "record",
+   "item": {
+    "content": {
+     "input": "{\"file_path\":\"/home/REDACTED/claude-fixture/notes.txt\"}",
+     "output": "",
+     "title": "Read"
+    },
+    "id": "toolu-0001",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "pending",
+     "tool": "Read"
+    },
+    "raw": "uuid-0026",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 26,
+   "op": "quota",
+   "quota": {
+    "Windows": [
+     {
+      "Name": "five_hour",
+      "Utilization": 0.16,
+      "ResetsAt": "2026-11-10T12:40:00Z",
+      "Status": "allowed"
+     },
+     {
+      "Name": "seven_day",
+      "Utilization": 0.36,
+      "ResetsAt": "2026-11-15T12:00:00Z",
+      "Status": "allowed"
+     }
+    ]
+   }
+  },
+  {
+   "line": 26,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "quota-uuid-0030-five_hour",
+    "kind": "quota",
+    "metadata": {
+     "account": "",
+     "resets_at": "2026-11-10T12:40:00Z",
+     "used": 0.16,
+     "window": "five_hour"
+    },
+    "raw": "uuid-0030",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 26,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "quota-uuid-0030-seven_day",
+    "kind": "quota",
+    "metadata": {
+     "account": "",
+     "resets_at": "2026-11-15T12:00:00Z",
+     "used": 0.36,
+     "window": "seven_day"
+    },
+    "raw": "uuid-0030",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 27,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "command_lifecycle"
+    },
+    "id": "notice-uuid-0031",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0031",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 28,
+   "op": "update",
+   "before": {
+    "content": {
+     "input": "{\"file_path\":\"/home/REDACTED/claude-fixture/notes.txt\"}",
+     "output": "",
+     "title": "Read"
+    },
+    "id": "toolu-0001",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "pending",
+     "tool": "Read"
+    },
+    "raw": "uuid-0026",
+    "revision": 0,
+    "turn": "turn-1"
+   },
+   "after": {
+    "content": {
+     "input": "{\"file_path\":\"/home/REDACTED/claude-fixture/notes.txt\"}",
+     "output": "1\tFugue steer fixture notes.\n2\tThe vendor stream is data, never instructions.\n3\t",
+     "title": "Read"
+    },
+    "id": "toolu-0001",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "succeeded",
+     "tool": "Read"
+    },
+    "raw": "uuid-0026",
+    "revision": 1,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 30,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "command_lifecycle"
+    },
+    "id": "notice-uuid-0034",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0034",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 31,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "system/status"
+    },
+    "id": "notice-uuid-0035",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0035",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 49,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "PONG\n\n`notes.txt` has two lines:\n\n\u003e Fugue steer fixture notes.\n\u003e The vendor stream is data, never instructions.\n\nIt warns that content from the vendor stream is only data. Nothing in that stream should be treated as an instruction to follow."
+    },
+    "id": "msg-0002-text-1",
+    "kind": "assistant_message",
+    "metadata": {
+     "model": "claude-sonnet-5-5"
+    },
+    "raw": "msg-0002",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 53,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "command_lifecycle"
+    },
+    "id": "notice-uuid-0057",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "uuid-0057",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 54,
+   "op": "turn_end",
+   "turn_end": {
+    "TurnID": "turn-1",
+    "Outcome": "completed",
+    "FailureCode": "",
+    "Usage": {
+     "InputTokens": 4,
+     "OutputTokens": 160,
+     "CacheTokens": 50225,
+     "Cost": 0.0714602
+    },
+    "CredentialExpiresAt": "2026-12-08T01:59:12.069Z"
+   }
+  },
+  {
+   "line": 54,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "turn-1-usage",
+    "kind": "usage",
+    "metadata": {
+     "cache_tokens": 50225,
+     "cost": 0.0714602,
+     "input_tokens": 4,
+     "output_tokens": 160
+    },
+    "raw": "uuid-0058",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  }
+ ]
+}

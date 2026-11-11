@@ -49,7 +49,7 @@ func (n *Normalizer) normalizeAssistant(line []byte, env *envelope) Observation 
 // (one block each), so text and thinking ids count per message.
 func (n *Normalizer) recordBlock(msg wireMessage, block *wireBlock, env *envelope) ([]transcript.Item, []Update) {
 	switch block.Type {
-	case "text":
+	case contentTypeText:
 		return []transcript.Item{n.textItem(msg, block, transcript.AssistantMessage,
 			transcript.AssistantMessageMetadata{ModelID: msg.Model},
 			transcript.AssistantMessageContent{Text: block.Text})}, nil
@@ -73,7 +73,7 @@ func (n *Normalizer) textItem(msg wireMessage, block *wireBlock, kind transcript
 	return transcript.Item{
 		ID:        msg.ID + "-" + block.Type + "-" + strconv.Itoa(n.msgCounts[key]),
 		SessionID: n.session,
-		TurnID:    n.turn,
+		TurnID:    n.currentTurnID(),
 		Kind:      kind,
 		RawRef:    msg.ID,
 		Metadata:  metadata,
@@ -102,7 +102,7 @@ func (n *Normalizer) toolCallItem(block *wireBlock, env *envelope) transcript.It
 	item := transcript.Item{
 		ID:        block.ID,
 		SessionID: n.session,
-		TurnID:    n.turn,
+		TurnID:    n.currentTurnID(),
 		Kind:      transcript.ToolCall,
 		RawRef:    n.rawRef(env),
 		Metadata:  transcript.ToolCallMetadata{ToolName: block.Name, Status: toolPending},
@@ -127,7 +127,7 @@ func (n *Normalizer) subagentItem(block *wireBlock, env *envelope) transcript.It
 	item := transcript.Item{
 		ID:        block.ID,
 		SessionID: n.session,
-		TurnID:    n.turn,
+		TurnID:    n.currentTurnID(),
 		Kind:      transcript.Subagent,
 		RawRef:    n.rawRef(env),
 		Metadata:  transcript.SubagentMetadata{Status: toolPending},
@@ -160,7 +160,7 @@ func (n *Normalizer) recordPlan(block *wireBlock, env *envelope) ([]transcript.I
 	}
 	meta := transcript.PlanMetadata{Steps: len(steps), Current: current}
 	content := transcript.PlanContent{Steps: steps}
-	planID := n.turn + "-plan"
+	planID := n.currentTurnID() + "-plan"
 	if item, ok := n.items[planID]; ok {
 		next := bumpRevision(item)
 		next.Metadata = meta
@@ -170,7 +170,7 @@ func (n *Normalizer) recordPlan(block *wireBlock, env *envelope) ([]transcript.I
 	item := transcript.Item{
 		ID:        planID,
 		SessionID: n.session,
-		TurnID:    n.turn,
+		TurnID:    n.currentTurnID(),
 		Kind:      transcript.Plan,
 		RawRef:    n.rawRef(env),
 		Metadata:  meta,
@@ -185,6 +185,9 @@ func (n *Normalizer) normalizeUser(line []byte, env *envelope) Observation {
 	if json.Unmarshal(line, &w) != nil {
 		return n.unsupported(env, noticeLabel(env))
 	}
+	if w.IsReplay {
+		return n.handleUserReplay(env, &w)
+	}
 	blocks := toolResultBlocks(w.Message.Content)
 	if len(blocks) == 0 {
 		return n.unsupported(env, noticeLabel(env))
@@ -196,6 +199,58 @@ func (n *Normalizer) normalizeUser(line []byte, env *envelope) Observation {
 		obs.Updates = append(obs.Updates, updates...)
 	}
 	return obs
+}
+
+func (n *Normalizer) handleUserReplay(env *envelope, w *wireUser) Observation {
+	if sendTurn, isSend := n.sendTurns[w.UUID]; isSend {
+		delete(n.sendTurns, w.UUID)
+		if n.vendorTurn != "" {
+			n.vendorTurn = ""
+			return n.absorbedSendNotice(env, sendTurn)
+		}
+		return Observation{}
+	}
+	return n.handleSteerReplay(env, w)
+}
+
+func (n *Normalizer) handleSteerReplay(env *envelope, w *wireUser) Observation {
+	targetTurn, isSteer := n.steerTurns[w.UUID]
+	if !isSteer {
+		return Observation{}
+	}
+	delete(n.steerTurns, w.UUID)
+	wasFinished := n.turnFinished[targetTurn]
+	if !n.hasPendingSteers(targetTurn) {
+		delete(n.turnFinished, targetTurn)
+	}
+	if !wasFinished {
+		return Observation{}
+	}
+	vendorTurnID := "vendor-" + w.UUID
+	n.vendorTurn = vendorTurnID
+	item := transcript.Item{
+		ID:        "notice-" + n.rawRef(env),
+		SessionID: n.session,
+		TurnID:    vendorTurnID,
+		Kind:      transcript.Notice,
+		RawRef:    n.rawRef(env),
+		Metadata:  transcript.NoticeMetadata{Level: "info", Code: "late_steer"},
+		Content:   transcript.NoticeContent{Text: "vendor opened separate turn for late steer"},
+	}
+	return Observation{Records: []transcript.Item{item}}
+}
+
+func (n *Normalizer) absorbedSendNotice(env *envelope, sendTurn string) Observation {
+	item := transcript.Item{
+		ID:        "notice-" + n.rawRef(env),
+		SessionID: n.session,
+		TurnID:    sendTurn,
+		Kind:      transcript.Notice,
+		RawRef:    n.rawRef(env),
+		Metadata:  transcript.NoticeMetadata{Level: "info", Code: "absorbed_into_vendor_turn"},
+		Content:   transcript.NoticeContent{Text: "send absorbed into vendor turn"},
+	}
+	return Observation{Records: []transcript.Item{item}}
 }
 
 // applyToolResult resolves a pending item by the tool_use id: tool calls take
