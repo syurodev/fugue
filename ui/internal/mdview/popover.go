@@ -43,16 +43,18 @@ const (
 )
 
 // middleTruncate shortens url to about cols runes by cutting the middle of
-// what follows the host: the scheme and the host (host, as the URL spells it)
-// always stay whole, even past cols. A URL without the host, such as mailto,
-// is cut in the middle as a whole.
+// what follows the host: the scheme and the host (as the URL spells it) always
+// stay whole, even past cols. The host is read at the authority, right after
+// "scheme://" (an IPv6 literal sits in brackets there), never searched for
+// elsewhere in the URL, where it could match inside the scheme or the path. A
+// URL with no such host, such as mailto, is cut in the middle as a whole.
 func middleTruncate(url, host string, cols int) string {
 	if utf8.RuneCountInString(url) <= cols {
 		return url
 	}
 	head, tail := "", url
-	if i := strings.Index(url, host); host != "" && i >= 0 {
-		head, tail = url[:i+len(host)], url[i+len(host):]
+	if end := hostEnd(url, host); end > 0 {
+		head, tail = url[:end], url[end:]
 	}
 	room := cols - utf8.RuneCountInString(head)
 	if room < 3 {
@@ -65,6 +67,23 @@ func middleTruncate(url, host string, cols int) string {
 	keepEnd := (room - 1) / 2
 	keepStart := room - 1 - keepEnd
 	return head + string(r[:keepStart]) + "…" + string(r[len(r)-keepEnd:])
+}
+
+// hostEnd is the offset in url just past the host that follows "scheme://",
+// or 0 when url has no authority starting with host.
+func hostEnd(url, host string) int {
+	i := strings.Index(url, "://")
+	if host == "" || i < 0 {
+		return 0
+	}
+	start := i + len("://")
+	if strings.HasPrefix(url[start:], "[") {
+		host = "[" + host + "]"
+	}
+	if len(url) < start+len(host) || !strings.EqualFold(url[start:start+len(host)], host) {
+		return 0
+	}
+	return start + len(host)
 }
 
 // visible reports whether a link's popover shows: the pointer is over the
