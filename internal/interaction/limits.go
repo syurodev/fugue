@@ -35,27 +35,64 @@ func checkTextLimit(content string, limit int, what string) error {
 	return nil
 }
 
+// addPendingLocked keeps admission checks constant-time between expiry deadlines.
+func (o *Owner) addPendingLocked(ticket *Ticket) {
+	o.pendingIDs[ticket.RequestID] = struct{}{}
+	o.pendingCount++
+	if !ticket.Relayed {
+		o.pendingBySession[ticket.Binding.SessionID]++
+	}
+	if !ticket.ExpiresAt.IsZero() && (o.nextPendingExpiry.IsZero() || ticket.ExpiresAt.Before(o.nextPendingExpiry)) {
+		o.nextPendingExpiry = ticket.ExpiresAt
+	}
+}
+
+func (o *Owner) removePendingLocked(ticket *Ticket) {
+	if _, ok := o.pendingIDs[ticket.RequestID]; !ok {
+		return
+	}
+	delete(o.pendingIDs, ticket.RequestID)
+	o.pendingCount--
+	if ticket.Relayed {
+		return
+	}
+	sessionID := ticket.Binding.SessionID
+	if o.pendingBySession[sessionID] <= 1 {
+		delete(o.pendingBySession, sessionID)
+	} else {
+		o.pendingBySession[sessionID]--
+	}
+}
+
+func (o *Owner) expirePendingCountsLocked(now time.Time) {
+	o.nextPendingExpiry = time.Time{}
+	for requestID, ticket := range o.byRequest {
+		if _, pending := o.pendingIDs[requestID]; !pending || ticket.ExpiresAt.IsZero() {
+			continue
+		}
+		if !now.Before(ticket.ExpiresAt) {
+			o.removePendingLocked(ticket)
+			continue
+		}
+		if o.nextPendingExpiry.IsZero() || ticket.ExpiresAt.Before(o.nextPendingExpiry) {
+			o.nextPendingExpiry = ticket.ExpiresAt
+		}
+	}
+}
+
 // checkPendingLimitsLocked enforces the pending-request limits of §9: at most
 // one pending native request per session (the tool frontier of a session is
 // sequential) and at most 64 pending requests per host. Relayed vendor
 // requests ignore the per-session frontier and are bounded only by the host
 // limit.
 func (o *Owner) checkPendingLimitsLocked(spec *Spec, now time.Time) error {
-	pending := 0
-	nativeForSession := 0
-	for _, ticket := range o.byRequest {
-		if ticket.Resolved || (!ticket.ExpiresAt.IsZero() && !now.Before(ticket.ExpiresAt)) {
-			continue
-		}
-		pending++
-		if !ticket.Relayed && ticket.Binding.SessionID == spec.Binding.SessionID {
-			nativeForSession++
-		}
+	if !o.nextPendingExpiry.IsZero() && !now.Before(o.nextPendingExpiry) {
+		o.expirePendingCountsLocked(now)
 	}
-	if pending >= MaxPendingPerHost {
+	if o.pendingCount >= MaxPendingPerHost {
 		return errcode.New(errcode.FailedPrecondition, "interaction pending request limit reached for the host")
 	}
-	if !spec.Relayed && nativeForSession >= MaxPendingNativePerSession {
+	if !spec.Relayed && o.pendingBySession[spec.Binding.SessionID] >= MaxPendingNativePerSession {
 		return errcode.New(errcode.FailedPrecondition, "session already has a pending native interaction request")
 	}
 	return nil

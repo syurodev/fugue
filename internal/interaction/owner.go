@@ -61,12 +61,18 @@ type Owner struct {
 	onLifecycle func(LifecycleEvent)
 	incarnation string
 
-	mu          sync.Mutex
-	vaultLocked bool
-	byOperation map[string]*Ticket
-	byRequest   map[string]*Ticket
-	grants      map[grantKey]struct{}
-	receipts    map[string]*Receipt
+	mu                sync.Mutex
+	vaultLocked       bool
+	byOperation       map[string]*Ticket
+	byRequest         map[string]*Ticket
+	grants            map[grantKey]struct{}
+	receipts          map[string]*Receipt
+	nextResolvedPrune time.Time
+	nextReceiptPrune  time.Time
+	pendingCount      int
+	pendingBySession  map[string]int
+	pendingIDs        map[string]struct{}
+	nextPendingExpiry time.Time
 }
 
 // NewOwner creates an Owner with a fresh incarnation ID.
@@ -82,20 +88,22 @@ func NewOwner(cfg Config) (*Owner, error) {
 		return nil, errcode.Wrap(errcode.Internal, "generate interaction incarnation failed", err)
 	}
 	return &Owner{
-		clock:       cfg.Clock,
-		ids:         cfg.IDs,
-		responder:   cfg.Responder,
-		headless:    cfg.Headless,
-		vaultCheck:  cfg.VaultLocked,
-		audit:       cfg.Audit,
-		onLifecycle: nil,
-		incarnation: incarnation,
-		mu:          sync.Mutex{},
-		vaultLocked: false,
-		byOperation: map[string]*Ticket{},
-		byRequest:   map[string]*Ticket{},
-		grants:      map[grantKey]struct{}{},
-		receipts:    map[string]*Receipt{},
+		clock:            cfg.Clock,
+		ids:              cfg.IDs,
+		responder:        cfg.Responder,
+		headless:         cfg.Headless,
+		vaultCheck:       cfg.VaultLocked,
+		audit:            cfg.Audit,
+		onLifecycle:      nil,
+		incarnation:      incarnation,
+		mu:               sync.Mutex{},
+		vaultLocked:      false,
+		byOperation:      map[string]*Ticket{},
+		byRequest:        map[string]*Ticket{},
+		grants:           map[grantKey]struct{}{},
+		receipts:         map[string]*Receipt{},
+		pendingBySession: map[string]int{},
+		pendingIDs:       map[string]struct{}{},
 	}, nil
 }
 
@@ -147,6 +155,7 @@ func (o *Owner) Ensure(spec *Spec) (*Ticket, bool, error) {
 	}
 	o.byOperation[ticket.OperationID] = ticket
 	o.byRequest[ticket.RequestID] = ticket
+	o.addPendingLocked(ticket)
 	cp := cloneTicket(ticket)
 	o.emitLifecycleLocked(LifecycleEvent{Kind: EventRequested, Ticket: cp})
 	openedEv := o.newAuditEvent("opened", ticket)
@@ -220,9 +229,7 @@ func (o *Owner) finishImmediateLocked(ticket *Ticket, auditEv *AuditEvent, res *
 func (o *Owner) promptAndAudit(ticket, cp *Ticket, openedEv *AuditEvent, now time.Time) (*Ticket, bool, error) {
 	if err := o.responder.Prompt(cloneTicket(cp)); err != nil {
 		o.mu.Lock()
-		ticket.Resolved = true
-		ticket.ResolvedAt = now
-		ticket.Outcome = OutcomeUnavailable
+		o.markResolvedLocked(ticket, now, OutcomeUnavailable)
 		failedEv := o.newAuditEvent("prompt_failed", ticket)
 		res := Resolution{RequestID: ticket.RequestID, Outcome: OutcomeUnavailable}
 		o.emitLifecycleLocked(LifecycleEvent{
@@ -240,17 +247,13 @@ func (o *Owner) promptAndAudit(ticket, cp *Ticket, openedEv *AuditEvent, now tim
 
 func (o *Owner) tryImmediateResolutionLocked(ticket *Ticket, now time.Time) (bool, *AuditEvent, *Resolution, error) {
 	if o.isUnavailableLocked() {
-		ticket.Resolved = true
-		ticket.ResolvedAt = now
-		ticket.Outcome = OutcomeUnavailable
+		o.markResolvedLocked(ticket, now, OutcomeUnavailable)
 		ev := o.newAuditEvent("unavailable", ticket)
 		res := Resolution{RequestID: ticket.RequestID, Outcome: OutcomeUnavailable}
 		return true, &ev, &res, nil
 	}
 	if !ticket.ExpiresAt.IsZero() && !now.Before(ticket.ExpiresAt) {
-		ticket.Resolved = true
-		ticket.ResolvedAt = now
-		ticket.Outcome = OutcomeExpired
+		o.markResolvedLocked(ticket, now, OutcomeExpired)
 		ev := o.newAuditEvent("expired", ticket)
 		res := Resolution{RequestID: ticket.RequestID, Outcome: OutcomeExpired}
 		return true, &ev, &res, nil
@@ -261,10 +264,8 @@ func (o *Owner) tryImmediateResolutionLocked(ticket *Ticket, now time.Time) (boo
 			if err != nil {
 				return false, nil, nil, err
 			}
-			ticket.Resolved = true
-			ticket.ResolvedAt = now
-			ticket.Outcome = OutcomeAllowedSession
 			ticket.ReceiptID = receipt.ReceiptID
+			o.markResolvedLocked(ticket, now, OutcomeAllowedSession)
 			ev := o.newAuditEvent("session_grant_used", ticket)
 			res := Resolution{RequestID: ticket.RequestID, Outcome: OutcomeAllowedSession}
 			return true, &ev, &res, nil
@@ -437,9 +438,7 @@ func (o *Owner) expireIfDueLocked(ticket *Ticket, now time.Time) *AuditEvent {
 	if ticket.Resolved || ticket.ExpiresAt.IsZero() || now.Before(ticket.ExpiresAt) {
 		return nil
 	}
-	ticket.Resolved = true
-	ticket.ResolvedAt = now
-	ticket.Outcome = OutcomeExpired
+	o.markResolvedLocked(ticket, now, OutcomeExpired)
 	ev := o.newAuditEvent("expired", ticket)
 	o.emitLifecycleLocked(LifecycleEvent{
 		Kind:      EventResolved,
