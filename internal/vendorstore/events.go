@@ -181,6 +181,7 @@ type EventMetadata struct {
 	State         string
 	WaitingReason string
 	TurnID        string
+	TurnOrigin    string
 	Outcome       string
 	FailureCode   string
 	StopProof     string
@@ -198,6 +199,7 @@ func marshalEventMetadata(event *Event) ([]byte, error) {
 		State:         event.State,
 		WaitingReason: event.WaitingReason,
 		TurnID:        event.TurnID,
+		TurnOrigin:    event.TurnOrigin,
 		Outcome:       event.Outcome,
 		FailureCode:   event.FailureCode,
 		StopProof:     event.StopProof,
@@ -280,7 +282,7 @@ func normalizeEvent(event *Event) (*Event, error) {
 		event.State = StateClosed
 	}
 	switch event.Type {
-	case VendorSessionStarted, VendorTurnStarted, TranscriptItemRecorded, TranscriptItemUpdated, ApprovalRequested, ApprovalDecided, VendorTurnEnded, UsageObserved, QuotaObserved, VendorProcessExited, VendorSessionClosed:
+	case VendorSessionStarted, VendorSessionStateChanged, VendorTurnStarted, TranscriptItemRecorded, TranscriptItemUpdated, ApprovalRequested, ApprovalDecided, VendorTurnEnded, UsageObserved, QuotaObserved, VendorProcessExited, VendorSessionClosed:
 	default:
 		return nil, errcode.New(errcode.InvalidArgument, "invalid event type")
 	}
