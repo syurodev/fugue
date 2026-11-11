@@ -1,5 +1,7 @@
 package markdown
 
+import "time"
+
 // Resource limits, all named. Vendor output is untrusted, so Parse caps
 // everything it reads; when a cap bites, content is cut and Doc.Truncated
 // is set (or, for the highlight caps, the code block stays plain).
@@ -26,6 +28,11 @@ const (
 	// tabStop is the column width tabs expand to before any text enters
 	// the model, so no tab ever reaches a shaper (transcript TR-07).
 	tabStop = 4
+	// highlightBudget bounds one syntax tokenization. Chroma's regexes
+	// time out per match (250 ms each, chroma regexp.go:375), but a block
+	// within the size caps can still stack thousands of matches; the
+	// budget, checked between tokens on an injected clock, caps the total.
+	highlightBudget = 100 * time.Millisecond
 )
 
 // capSource cuts an over-long source at a rune boundary and reports the

@@ -22,18 +22,6 @@ import (
 // percent-encoding). The kept URL of an openable link carries the
 // punycode host, so what the popover shows is exactly what opens.
 
-// openableScheme reports whether a destination scheme may be opened by the
-// caller. Every other scheme — javascript:, file:, data:, vbscript:,
-// unknown — and every relative destination renders as plain text.
-func openableScheme(scheme string) bool {
-	switch scheme {
-	case "http", "https", "mailto":
-		return true
-	default:
-		return false
-	}
-}
-
 // splitScheme splits a destination into its lowercased scheme and the rest;
 // hasScheme is false for relative destinations, whose text stays plain.
 func splitScheme(raw string) (scheme, rest string, hasScheme bool) {
@@ -137,8 +125,8 @@ func numericPort(s string) bool {
 	if s[0] != ':' {
 		return false
 	}
-	for i := 1; i < len(s); i++ {
-		if s[i] < '0' || s[i] > '9' {
+	for _, c := range s[1:] {
+		if c < '0' || c > '9' {
 			return false
 		}
 	}
@@ -253,7 +241,7 @@ func httpLink(scheme, rest string) Link {
 // not a URL any parser would read back the same way, so the link stays
 // plain text.
 func validEscapes(s string) bool {
-	for i := 0; i < len(s); i++ {
+	for i := range len(s) {
 		if s[i] != '%' {
 			continue
 		}

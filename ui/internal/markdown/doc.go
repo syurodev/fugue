@@ -12,6 +12,11 @@
 // fetched, and every resource limit is a named constant with truncation
 // marked on the document.
 //
+// Parse is CPU-bound (parsing, sanitizing and lexing one document): it
+// must not run on the window goroutine. F10.4 runs it off the UI loop
+// behind a cache keyed by item id and revision; callers pass the app
+// clock through WithClock so the highlight budget is enforced.
+//
 // Owner: F10.3a. Allowed callers: the layout layer (F10.3b) and tests;
 // nothing outside ui/.
 package markdown

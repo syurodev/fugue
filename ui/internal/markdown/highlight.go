@@ -18,7 +18,7 @@ import (
 // sanitized; the size caps are checked against it here. A lexer panic is
 // recovered: a lexer that misbehaves on hostile input leaves the block
 // plain instead of taking the process down.
-func highlight(language, src string, lineCount int) (lines [][]Span, ok bool) {
+func highlight(language, src string, lineCount int, clock Clock) (lines [][]Span, ok bool) {
 	if language == "" || len(src) > maxHighlightBytes || lineCount > maxHighlightLines {
 		return nil, false
 	}
@@ -35,16 +35,33 @@ func highlight(language, src string, lineCount int) (lines [][]Span, ok bool) {
 	if err != nil {
 		return nil, false
 	}
-	return tokenizeLines(it), true
+	tokenized := tokenizeLines(it, newDeadline(clock))
+	if tokenized == nil {
+		return nil, false
+	}
+	return tokenized, true
+}
+
+// newDeadline returns the budget checker of one highlight call; without
+// an injected clock it never reports the budget spent.
+func newDeadline(clock Clock) func() bool {
+	if clock == nil {
+		return func() bool { return false }
+	}
+	start := clock.Now()
+	return func() bool { return clock.Now().Sub(start) > highlightBudget }
 }
 
 // tokenizeLines folds the flat token stream into per-line span slices,
 // dropping the newline that ends each tokenized line. An empty line stays
 // an empty slice so line counts survive.
-func tokenizeLines(it chroma.Iterator) [][]Span {
+func tokenizeLines(it chroma.Iterator, overBudget func() bool) [][]Span {
 	var lines [][]Span
 	var cur []Span
 	for tok := it(); tok != chroma.EOF; tok = it() {
+		if overBudget() {
+			return nil
+		}
 		parts := strings.Split(strings.TrimSuffix(tok.Value, "\n"), "\n")
 		for i, part := range parts {
 			if i > 0 {

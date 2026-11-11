@@ -2,6 +2,7 @@ package markdown
 
 import (
 	"strings"
+	"time"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -12,14 +13,38 @@ import (
 	"github.com/yuin/goldmark/ast"
 )
 
+// Clock reads the current time; Parse uses it only for the highlight
+// budget. It is injected (WithClock) so tests drive the budget without
+// real time and the caller owns the production clock; the package reads
+// no clock of its own.
+type Clock interface {
+	// Now returns the current reading.
+	Now() time.Time
+}
+
+// Option configures Parse.
+type Option func(*parseState)
+
+// WithClock injects the time source of the highlight budget. Without a
+// clock the size and line caps still bound the lexer, but no total time
+// budget runs; callers that parse untrusted input should always pass one
+// (the layout layer of F10.3b wires the app clock).
+func WithClock(c Clock) Option {
+	return func(p *parseState) { p.clock = c }
+}
+
 // Parse parses CommonMark plus the GFM tables, strikethrough and task
 // lists (transcript TR-07) into an immutable document. It never fails and
 // never panics: hostile input is bounded by the named limits, and anything
 // it cannot render — raw HTML, blocked links, unsafe characters — degrades
-// to literal text.
-func Parse(src string) *Doc {
+// to literal text. It is CPU-bound: run it off the window goroutine
+// (F10.4 does, with a cache).
+func Parse(src string, opts ...Option) *Doc {
 	cut, truncated := capSource(src)
 	p := &parseState{source: []byte(cut), doc: &Doc{Truncated: truncated}}
+	for _, opt := range opts {
+		opt(p)
+	}
 	root := newEngine().Parser().Parse(text.NewReader(p.source))
 	p.doc.Blocks = p.blocks(root, 0)
 	return p.doc
@@ -34,10 +59,12 @@ func newEngine() goldmark.Markdown {
 	)
 }
 
-// parseState carries the source and the truncation flag through the walk.
+// parseState carries the source, the truncation flag and the injected
+// clock of the highlight budget through the walk.
 type parseState struct {
 	source []byte
 	doc    *Doc
+	clock  Clock
 }
 
 // blocks converts a container's children, skipping nesting beyond the
@@ -120,7 +147,7 @@ func (p *parseState) code(n ast.Node) Block {
 	if !highlightable(b.Language, joined, len(b.Lines)) {
 		return b
 	}
-	if lines, ok := highlight(b.Language, joined, len(b.Lines)); ok {
+	if lines, ok := highlight(b.Language, joined, len(b.Lines), p.clock); ok {
 		b.Lines, b.Highlighted = lines, true
 	}
 	return b

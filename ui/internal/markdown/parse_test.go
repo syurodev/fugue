@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/syurodev/fugue/ui/internal/markdown"
 )
@@ -232,6 +233,45 @@ func TestParseUnknownOrOversizedCodeStaysPlain(t *testing.T) {
 	}
 }
 
+// steppingClock advances a fixed step per Now call, so the highlight
+// budget is spent deterministically without real time.
+type steppingClock struct {
+	step time.Duration
+	n    int
+}
+
+// Now implements markdown.Clock.
+func (c *steppingClock) Now() time.Time {
+	t := time.Unix(0, 0).Add(c.step * time.Duration(c.n))
+	c.n++
+	return t
+}
+
+// TestHighlightOverBudgetStaysPlain checks that a highlight call whose
+// clock walks past the budget between tokens leaves the code block plain.
+func TestHighlightOverBudgetStaysPlain(t *testing.T) {
+	t.Parallel()
+	src := "```go\nfunc f() { x := 1; y := \"s\"; z := 3 }\n```"
+	fast := markdown.Parse(src, markdown.WithClock(&steppingClock{step: time.Millisecond}))
+	if !fast.Blocks[0].Highlighted {
+		t.Fatal("control: block not highlighted with a slow-stepping clock")
+	}
+	slow := markdown.Parse(src, markdown.WithClock(&steppingClock{step: 60 * time.Millisecond}))
+	if slow.Blocks[0].Highlighted {
+		t.Fatal("over-budget block still highlighted")
+	}
+	if len(slow.Blocks[0].Lines) == 0 {
+		t.Fatal("over-budget block lost its lines")
+	}
+	for _, line := range slow.Blocks[0].Lines {
+		for _, span := range line {
+			if span.Role != markdown.RolePlain && span.Role != "" {
+				t.Fatalf("over-budget block kept role %v", span.Role)
+			}
+		}
+	}
+}
+
 // linkOf returns the first link span's link in a paragraph.
 func linkOf(spans []markdown.Span) *markdown.Link {
 	for _, s := range spans {
@@ -270,7 +310,7 @@ func TestParseSanitizesLinks(t *testing.T) {
 		// Host-spoofing destinations: the display host must be the host
 		// the browser would open, or the link is not openable.
 		{src: `[a](https://evil.example\@good.example/login)`},
-		{src: "[a](https://user:pw@good.example/)"},
+		{src: "[a](https://alice@good.example/)"},
 		{src: "[a](https://%E2%80%AEelpmaxe.live/)", host: "elpmaxe.live", puny: "elpmaxe.live"},
 		{src: "[a](https://exa%E2%80%8Bmple.com/)", host: testHost, puny: testHost},
 		{src: "[a](https://good.example%2F@evil.example)"},
