@@ -1,0 +1,29 @@
+doc truncated=false
+table aligns=left center right none
+  header
+    cell
+      span plain "Left"
+    cell
+      span plain "Center"
+    cell
+      span plain "Right"
+    cell
+      span plain "None"
+  row
+    cell
+      span plain "a"
+    cell
+      span plain "b"
+    cell
+      span plain "c"
+    cell
+      span plain "d"
+  row
+    cell
+      span plain "longer"
+    cell
+      span plain "x"
+    cell
+      span plain "y"
+    cell
+      span plain "z"

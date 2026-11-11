@@ -1,0 +1,39 @@
+doc truncated=false
+code lang="go" highlighted=true
+  line
+      token keyword "func"
+      token plain " "
+      token function "greet"
+      token operator "("
+      token variable "name"
+      token plain " "
+      token type "string"
+      token operator ")"
+      token plain " "
+      token type "string"
+      token plain " "
+      token operator "{"
+  line
+      token plain "    "
+      token variable "msg"
+      token plain " "
+      token operator ":="
+      token plain " "
+      token string "\"hello, \""
+      token plain " "
+      token operator "+"
+      token plain " "
+      token variable "name"
+      token plain " "
+      token comment "// comment"
+  line
+      token plain "    "
+      token keyword "return"
+      token plain " "
+      token variable "msg"
+      token operator "}"
+code lang="" highlighted=false
+  line
+      token plain "indented code"
+  line
+      token plain "with tab"

@@ -1,0 +1,24 @@
+doc truncated=false
+list ordered=false start=1
+  item task=none
+    para
+      span plain "outer"
+    list ordered=false start=1
+      item task=none
+        para
+          span plain "inner"
+        list ordered=false start=1
+          item task=none
+            para
+              span plain "deepest"
+list ordered=true start=1
+  item task=none
+    para
+      span plain "first"
+  item task=none
+    para
+      span plain "second"
+    list ordered=true start=1
+      item task=none
+        para
+          span plain "nested ordered"

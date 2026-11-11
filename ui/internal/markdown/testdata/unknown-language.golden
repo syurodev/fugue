@@ -1,0 +1,7 @@
+doc truncated=false
+code lang="neverheardof" highlighted=false
+  line
+      token plain "some text here"
+code lang="" highlighted=false
+  line
+      token plain "no language at all"
