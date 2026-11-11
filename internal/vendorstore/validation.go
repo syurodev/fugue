@@ -65,7 +65,7 @@ func validateItemMetadata(item *Item) error {
 
 func isCommonItemMetadataField(name string) bool {
 	switch name {
-	case "ContentTruncated", "RawTruncated", "OriginalContentBytes", "OriginalRawBytes":
+	case metadataOrigin, "ContentTruncated", "RawTruncated", "OriginalContentBytes", "OriginalRawBytes":
 		return true
 	default:
 		return false
@@ -75,7 +75,7 @@ func isCommonItemMetadataField(name string) bool {
 func validateMetadataEnums(item *Item) error {
 	metadata := item.Metadata
 	enums := map[string][]string{
-		metadataOrigin:         {"user", "lead", "fugue"},
+		metadataOrigin:         {"user", "lead", "fugue", "vendor"},
 		metadataReasoningState: {"plain", "summary", "redacted"},
 		metadataChangeKind:     {"add", "modify", "delete", "rename"},
 		metadataDecider:        {"user", "policy", "lead"},

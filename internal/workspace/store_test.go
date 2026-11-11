@@ -3,6 +3,7 @@ package workspace
 import (
 	"database/sql"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -119,8 +120,14 @@ func TestMigrationWithExistingData(t *testing.T) {
 	if err != nil {
 		t.Fatalf("storage.Migrations: %v", err)
 	}
-	if len(allMigrations) < 7 {
-		t.Fatalf("expected at least 7 migrations, got %d", len(allMigrations))
+	if len(allMigrations) < 8 {
+		t.Fatalf("expected at least 8 migrations, got %d", len(allMigrations))
+	}
+	if got := allMigrations[6].Name; !strings.Contains(got, "vendor_turn_origin") {
+		t.Fatalf("migration 7 = %q, want the vendor turn origin migration", got)
+	}
+	if got := allMigrations[7].Name; !strings.Contains(got, "workspaces") {
+		t.Fatalf("migration 8 = %q, want the workspaces migration", got)
 	}
 
 	dbPath := filepath.Join(t.TempDir(), "migration_test.db")
@@ -132,14 +139,14 @@ func TestMigrationWithExistingData(t *testing.T) {
 		closeQuietly(db)
 	})
 
-	if runErr := storage.RunMigrations(ctx, db, clk, allMigrations[:6]); runErr != nil {
-		t.Fatalf("run migrations 1-6: %v", runErr)
+	if runErr := storage.RunMigrations(ctx, db, clk, allMigrations[:7]); runErr != nil {
+		t.Fatalf("run migrations 1-7: %v", runErr)
 	}
 
 	insertOlderTableData(t, db)
 
 	if migErr := storage.Migrate(ctx, db, clk); migErr != nil {
-		t.Fatalf("storage.Migrate to 0007: %v", migErr)
+		t.Fatalf("storage.Migrate to 0008: %v", migErr)
 	}
 
 	verifyOlderTableData(t, db)

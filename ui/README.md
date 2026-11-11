@@ -46,6 +46,27 @@ Metal through cgo, no extra packages.
   module's `supervise` port is `internal/`, so this module carries the same
   discipline in its own packages.
 
+## Markdown preview
+
+`cmd/mdpreview` is a development viewer for the markdown renderer
+(`internal/mdview`, F10.3b). It reads one markdown file on standard input and
+shows it in a scrollable window with a light/dark toggle (the button, or
+Ctrl+D); hover or Tab to a link for its popover. It is not packaged and
+`fugue-app` never imports it.
+
+```sh
+go run ./cmd/mdpreview < internal/markdown/testdata/preview.md   # from this directory
+```
+
+`testdata/preview.md` gathers the DA-E03 cases: whitespace around bold and
+inline code, nested and task lists, aligned tables, tabbed code, Go and
+TypeScript blocks, an unknown language, links (blocked schemes, IDN, mailto, a
+long URL), raw HTML and an image. The popover's open button hands the URL to
+`xdg-open` (Linux) or `open` (macOS), as a single argument and only for http,
+https and mailto; the preview reads its input from standard input because the
+app's arch rule keeps `os.Open` and `os.ReadFile` out of the ui module's
+production code.
+
 ## Window size
 
 The initial size is the preferred 900x1000 dp clamped to the screen's work

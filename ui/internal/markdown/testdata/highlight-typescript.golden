@@ -18,8 +18,10 @@ code lang="typescript" highlighted=true
       token plain " "
       token operator "}"
   line
+  line
       token keyword "@decorator"
       token operator "()"
+  line
       token keyword "export"
       token plain " "
       token keyword "function"
@@ -73,4 +75,5 @@ code lang="typescript" highlighted=true
       token plain " "
       token number "2"
       token operator ");"
+  line
       token operator "}"

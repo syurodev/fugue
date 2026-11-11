@@ -147,8 +147,9 @@ func TestDerivedTokensPointAtTheirHues(t *testing.T) {
 				t.Errorf("%s: %s is %#v, want the derived hue %#v", m.name, d.name, d.got, d.want)
 			}
 		}
-		if !m.theme.Syntax(theme.RoleComment).Italic {
-			t.Errorf("%s: comment must render italic", m.name)
+		// No italic face is bundled (Q-67): comments differ by color only.
+		if m.theme.Syntax(theme.RoleComment).Italic {
+			t.Errorf("%s: comment must render upright", m.name)
 		}
 		if m.theme.Syntax(theme.RoleMeta).Italic {
 			t.Errorf("%s: meta must render upright", m.name)
@@ -171,6 +172,25 @@ func TestSyntaxStylesDefaultToWeight400(t *testing.T) {
 				t.Errorf("%s: %s defaults to weight %d, want %d (400)",
 					m.name, role, got, font.Normal)
 			}
+		}
+	}
+}
+
+// TestSyntaxRolesMeetContrastOnTheCodeSurface holds every syntax role, and
+// the plain fallback, to 4.5:1 on the surface code blocks are drawn on, in
+// both modes.
+func TestSyntaxRolesMeetContrastOnTheCodeSurface(t *testing.T) {
+	t.Parallel()
+	roles := []theme.SyntaxRole{
+		theme.RoleKeyword, theme.RoleString, theme.RoleNumber, theme.RoleType,
+		theme.RoleFunction, theme.RoleDefinition, theme.RoleVariable,
+		theme.RoleOperator, theme.RoleComment, theme.RoleMeta, theme.RoleInvalid,
+		theme.SyntaxRole("plain"),
+	}
+	for _, m := range bothModes() {
+		surface := m.theme.CodeSurface()
+		for _, role := range roles {
+			requireContrast(t, m.name+" "+string(role)+" on the code surface", m.theme.Syntax(role).Color, surface)
 		}
 	}
 }

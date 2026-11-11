@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/ids"
 )
 
 func validateEvent(e *Event) error {
@@ -20,9 +22,35 @@ func validateEvent(e *Event) error {
 }
 
 func validateTurn(e *Event) error {
+	for _, validate := range []func(*Event) error{validateTurnOrigin, validateTurnIdentity, validateTurnOutcome} {
+		if err := validate(e); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func validateTurnOrigin(e *Event) error {
+	if e.TurnOrigin != "" && e.TurnOrigin != TurnOriginFugue && e.TurnOrigin != TurnOriginVendor {
+		return errcode.New(errcode.InvalidArgument, "unknown turn origin")
+	}
+	if e.TurnOrigin != "" && e.Type != VendorTurnStarted {
+		return errcode.New(errcode.InvalidArgument, "turn origin only valid when starting a turn")
+	}
+	if e.TurnOrigin == TurnOriginVendor && (!strings.HasPrefix(e.TurnID, "vendor-") || !ids.IsUUID(strings.TrimPrefix(e.TurnID, "vendor-"))) {
+		return errcode.New(errcode.InvalidArgument, "vendor turn ID must contain a UUID")
+	}
+	return nil
+}
+
+func validateTurnIdentity(e *Event) error {
 	if (e.Type == VendorTurnStarted || e.Type == VendorTurnEnded) && e.TurnID == "" {
 		return errcode.New(errcode.InvalidArgument, "turn ID required")
 	}
+	return nil
+}
+
+func validateTurnOutcome(e *Event) error {
 	if e.Type == VendorTurnEnded && e.Outcome == "" {
 		return errcode.New(errcode.InvalidArgument, "turn outcome required")
 	}
@@ -82,8 +110,8 @@ func (s *Store) project(ctx context.Context, tx *sql.Tx, session string, sequenc
 	switch e.Type {
 	case VendorTurnStarted:
 		_, err = tx.ExecContext(ctx,
-			`INSERT INTO vendor_turns(session_id,turn_id,created_at) VALUES (?,?,?)`,
-			session, e.TurnID, now)
+			`INSERT INTO vendor_turns(session_id,turn_id,origin,created_at) VALUES (?,?,?,?)`,
+			session, e.TurnID, turnOrigin(e.TurnOrigin), now)
 	case VendorTurnEnded:
 		return endTurn(ctx, tx, session, e, now)
 	case TranscriptItemRecorded, TranscriptItemUpdated:
@@ -96,6 +124,13 @@ func (s *Store) project(ctx context.Context, tx *sql.Tx, session string, sequenc
 		return fmt.Errorf("%w: project event: %w", ErrUnavailable, err)
 	}
 	return nil
+}
+
+func turnOrigin(origin string) string {
+	if origin == "" {
+		return TurnOriginFugue
+	}
+	return origin
 }
 
 func endTurn(ctx context.Context, tx *sql.Tx, session string, e *Event, now string) error {
