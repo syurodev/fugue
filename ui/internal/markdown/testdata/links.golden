@@ -1,0 +1,26 @@
+doc truncated=false
+para
+  span plain "See "
+  span plain "the docs" link url="https://example.com/a?b=c" host="example.com" puny="example.com" openable=true
+  span plain " and "
+  span plain "evil" link url="javascript:alert(1)" host="" puny="" openable=false
+  span plain " plus"
+  span plain "file" link url="file:///etc/passwd" host="" puny="" openable=false
+  span plain ", "
+  span plain "data" link url="data:text/html,hi" host="" puny="" openable=false
+  span plain ", "
+  span plain "vbs" link url="vbscript:x" host="" puny="" openable=false
+  span plain ","
+  span plain "rel" link url="./local/page" host="" puny="" openable=false
+  span plain ", "
+  span plain "mail" link url="mailto:someone@example.org" host="" puny="" openable=true
+  span plain " and"
+  span plain "IDN" link url="https://xn--bcher-kva.example/x" host="bücher.example" puny="xn--bcher-kva.example" openable=true
+  span plain " with "
+  span plain "puny" link url="https://xn--bcher-kva.example/x" host="bücher.example" puny="xn--bcher-kva.example" openable=true
+  span plain "."
+  span plain "Bidi "
+  span plain "attack" link url="https://example.com/%E2%80%AEevil" host="example.com" puny="example.com" openable=true
+  span plain " and "
+  span plain "zero" link url="https://example.com/" host="example.com" puny="example.com" openable=true
+  span plain "."

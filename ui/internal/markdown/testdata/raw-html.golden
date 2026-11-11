@@ -1,0 +1,13 @@
+doc truncated=false
+html
+  span plain "<div class=\"x\">block html</div>\n"
+para
+  span plain "Inline "
+  span plain "<b>"
+  span plain "bold"
+  span plain "</b>"
+  span plain " and "
+  span plain "<script>"
+  span plain "alert(1)"
+  span plain "</script>"
+  span plain " stay literal."

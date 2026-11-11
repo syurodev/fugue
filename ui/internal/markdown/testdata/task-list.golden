@@ -1,0 +1,11 @@
+doc truncated=false
+list ordered=false start=1
+  item task=checked
+    para
+      span plain "done task"
+  item task=unchecked
+    para
+      span plain "open task"
+  item task=none
+    para
+      span plain "plain item"
