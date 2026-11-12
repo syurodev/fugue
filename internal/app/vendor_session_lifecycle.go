@@ -10,11 +10,6 @@ import (
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
-func (a *vendorSessionActor) close(ctx context.Context, reason vendor.CloseReason) error {
-	proof, closeErr := a.session.Close(context.WithoutCancel(ctx), reason)
-	return a.persistClose(ctx, reason, proof, closeErr)
-}
-
 func (a *vendorSessionActor) persistClose(ctx context.Context, reason vendor.CloseReason, proof process.StopProof, closeErr error) error {
 	status := string(proof.Status)
 	if status != string(process.StopProofProved) || closeErr != nil {

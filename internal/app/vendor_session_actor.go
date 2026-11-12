@@ -358,7 +358,9 @@ func (a *vendorSessionActor) send(ctx context.Context, input vendor.Input) error
 	}
 	state, waiting := stateToStore(next)
 	if appendErr := a.append(ctx, &vendorstore.Event{Type: vendorstore.VendorTurnStarted, TurnID: turn.ID, TurnOrigin: vendorstore.TurnOriginFugue, State: state, WaitingReason: waiting}); appendErr != nil {
-		a.requestClose(vendor.CloseActorFailure)
+		if closeErr := a.requestClose(vendor.CloseActorFailure); closeErr != nil {
+			return closeErr
+		}
 		return errcode.New(errcode.Unavailable, "vendor turn could not be persisted; session is closing")
 	}
 	a.turnID, a.turns[turn.ID] = turn.ID, true
