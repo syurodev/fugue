@@ -152,7 +152,7 @@ func newTheme(c Chrome, p Palette, shaper *text.Shaper) Theme {
 		RoleDefinition: {Color: c.Fg, Weight: defaultWeight},
 		RoleVariable:   {Color: c.Fg, Weight: defaultWeight},
 		RoleOperator:   {Color: c.FgMuted, Weight: defaultWeight},
-		RoleComment:    {Color: c.FgSubtle, Weight: defaultWeight, Italic: true},
+		RoleComment:    {Color: c.FgSubtle, Weight: defaultWeight},
 		RoleMeta:       {Color: c.FgSubtle, Weight: defaultWeight},
 		RoleInvalid:    {Color: status.Danger, Weight: defaultWeight},
 	}
@@ -179,6 +179,10 @@ func (t *Theme) Status() Status { return t.status }
 
 // Link returns the hyperlink color, derived from the palette (blue).
 func (t *Theme) Link() color.NRGBA { return t.link }
+
+// CodeSurface returns the surface code blocks and inline code sit on. Every
+// syntax role reaches 4.5:1 on it in both modes.
+func (t *Theme) CodeSurface() color.NRGBA { return t.chrome.SurfaceTinted }
 
 // Syntax returns the style of one syntax role. Unknown roles render as
 // unstyled main text, so a renderer that meets a new role degrades safely.

@@ -66,6 +66,8 @@ func (a *vendorSessionActor) persistObservedUpdates(ctx context.Context, updates
 			update.After.Content = nil
 			update.After.ContentTruncated = false
 			update.After.ContentOriginalSize = 0
+			update.After.RawTruncated = false
+			update.After.RawOriginalSize = 0
 		}
 		if err := a.manager.deps.Transcripts.UpdateItem(ctx, a.info.ID, a.sequence, &update.Before, &update.After, nil); err != nil {
 			return fmt.Errorf("%w: %w", ErrVendorActorFailed, safeActorError(err))
@@ -76,7 +78,7 @@ func (a *vendorSessionActor) persistObservedUpdates(ctx context.Context, updates
 }
 
 func (a *vendorSessionActor) publishPartial(partial *claude.Partial) {
-	if partial != nil {
+	if partial != nil && a.manager.deps.Vault.Snapshot().State == vault.StateUnlocked {
 		a.manager.deps.Transcripts.StreamItem(a.info.ID, partial.MessageID, 0, transcript.ViewText, partial.Fragment)
 	}
 }
@@ -114,6 +116,9 @@ func (a *vendorSessionActor) persistFugueTurnEnd(ctx context.Context, observedTu
 	turnID := a.turnID
 	if turnID == "" || observedTurnID != turnID {
 		return nil
+	}
+	if a.vaultInterruptTurnID == turnID {
+		return a.endVaultLockedTurn(ctx, vendorstore.OutcomeInterrupted, vendor.Fact{Kind: vendor.FactTurnInterrupted})
 	}
 	next, _, err := vendor.Transition(a.state, fact)
 	if err != nil {

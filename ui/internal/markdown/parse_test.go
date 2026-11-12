@@ -525,3 +525,25 @@ func TestParseIPv6LiteralsMustBeWellFormed(t *testing.T) {
 		})
 	}
 }
+
+// TestHighlightKeepsNewlineOnlyTokensAsLineBreaks checks that a token that is
+// only a newline still ends its line, and that the newline the lexer adds
+// after the last line makes no extra line.
+func TestHighlightKeepsNewlineOnlyTokensAsLineBreaks(t *testing.T) {
+	t.Parallel()
+	for _, src := range []string{"```ts\nconst a = 1\nshort\n```", "```ts\nconst a = 1\n\nshort\n```"} {
+		doc := markdown.Parse(src, markdown.WithClock(frozenClock{}))
+		b := doc.Blocks[0]
+		if !b.Highlighted {
+			t.Fatalf("%q: block not highlighted", src)
+		}
+		want := strings.Count(src, "\n") - 1
+		if len(b.Lines) != want {
+			t.Errorf("%q: %d lines, want %d", src, len(b.Lines), want)
+		}
+		last := b.Lines[len(b.Lines)-1]
+		if len(last) != 1 || last[0].Text != "short" {
+			t.Errorf("%q: last line = %v, want only \"short\"", src, last)
+		}
+	}
+}

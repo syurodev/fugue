@@ -38,19 +38,26 @@ type actorRequest struct {
 }
 
 type vendorSessionActor struct {
-	manager  *VendorSessions
-	info     vendorstore.Session
-	session  vendor.Session
-	obs      <-chan claude.Observation
-	commands chan actorRequest
-	state    vendor.State
-	sequence int64
-	turnID   string
-	turns    map[string]bool
-	finished bool
-	task     *supervise.Task
-	vaultSub *vault.Subscription
-	done     chan struct{}
+	manager              *VendorSessions
+	info                 vendorstore.Session
+	session              vendor.Session
+	obs                  <-chan claude.Observation
+	commands             chan actorRequest
+	state                vendor.State
+	sequence             int64
+	turnID               string
+	turns                map[string]bool
+	finished             bool
+	task                 *supervise.Task
+	vaultSub             *vault.Subscription
+	done                 chan struct{}
+	interruptResults     chan vaultInterruptResult
+	vaultInterruptTurnID string
+}
+
+type vaultInterruptResult struct {
+	turnID string
+	err    error
 }
 
 func newVendorSessionActor(manager *VendorSessions, info *vendorstore.Session, session vendor.Session, obs <-chan claude.Observation) *vendorSessionActor {
@@ -64,6 +71,7 @@ func newVendorSessionActor(manager *VendorSessions, info *vendorstore.Session, s
 		manager: manager, info: *info, session: session, obs: obs,
 		commands: make(chan actorRequest), state: state,
 		sequence: sequence, turns: make(map[string]bool), vaultSub: vaultSub, done: make(chan struct{}),
+		interruptResults: make(chan vaultInterruptResult, 1),
 	}
 }
 
@@ -104,26 +112,33 @@ func (a *vendorSessionActor) run(ctx context.Context) error {
 	defer close(a.done)
 	defer a.vaultSub.Close()
 	for {
-		select {
-		case req := <-a.commands:
-			if err := a.handleRequest(ctx, req); err != nil {
-				return err
-			}
-		case observation, ok := <-a.obs:
-			if err := a.handleObserved(ctx, &observation, ok); err != nil {
-				return a.fail(ctx, err)
-			}
-		case snapshot, ok := <-a.vaultSub.Events():
-			if err := a.handleVaultEvent(ctx, snapshot, ok); err != nil {
-				return err
-			}
-		case <-ctx.Done():
-			return a.stopAfterHostCancel(ctx)
+		if err := a.runStep(ctx); err != nil {
+			return err
 		}
 		if a.finished {
 			return nil
 		}
 	}
+}
+
+func (a *vendorSessionActor) runStep(ctx context.Context) error {
+	select {
+	case req := <-a.commands:
+		return a.handleRequest(ctx, req)
+	case observation, ok := <-a.obs:
+		if err := a.handleObserved(ctx, &observation, ok); err != nil {
+			return a.fail(ctx, err)
+		}
+	case snapshot, ok := <-a.vaultSub.Events():
+		return a.handleVaultEvent(ctx, snapshot, ok)
+	case result := <-a.interruptResults:
+		if err := a.handleVaultInterruptResult(ctx, result); err != nil {
+			return a.fail(ctx, err)
+		}
+	case <-ctx.Done():
+		return a.stopAfterHostCancel(ctx)
+	}
+	return nil
 }
 
 func (a *vendorSessionActor) handleRequest(ctx context.Context, req actorRequest) error {
@@ -162,6 +177,7 @@ func (a *vendorSessionActor) stopAfterHostCancel(ctx context.Context) error {
 	if err != nil {
 		a.manager.deps.Logger.ErrorContext(context.WithoutCancel(ctx), "stopping vendor session actor after host cancellation failed", "proof", proof.Status)
 	}
+	a.finished = true
 	return nil
 }
 
@@ -176,26 +192,54 @@ func (a *vendorSessionActor) handleVaultState(ctx context.Context, snapshot vaul
 		return nil
 	}
 	if a.turnID != "" {
-		interruptErr := a.session.Interrupt(context.WithoutCancel(ctx), vendor.TurnRef{ID: a.turnID})
-		outcome := vendorstore.OutcomeInterrupted
-		fact := vendor.Fact{Kind: vendor.FactTurnInterrupted}
-		if interruptErr != nil {
-			outcome = vendorstore.OutcomeUnknown
-			fact = vendor.Fact{Kind: vendor.FactTurnUnknown, Reason: vendor.WaitingVaultLocked}
+		if a.vaultInterruptTurnID == a.turnID {
+			return nil
 		}
-		if err := a.append(context.WithoutCancel(ctx), &vendorstore.Event{Type: vendorstore.VendorTurnEnded, TurnID: a.turnID, Outcome: outcome}); err != nil {
-			return err
-		}
-		a.turnID = ""
-		next, _, transitionErr := vendor.Transition(a.state, fact)
-		if transitionErr != nil {
-			return fmt.Errorf("record vault interruption state: %w", transitionErr)
-		}
-		a.state = next
+		turnID := a.turnID
+		a.vaultInterruptTurnID = turnID
+		supervise.Go(ctx, "vault-interrupt-"+a.info.ID, func(taskCtx context.Context) error {
+			err := a.session.Interrupt(taskCtx, vendor.TurnRef{ID: turnID})
+			select {
+			case a.interruptResults <- vaultInterruptResult{turnID: turnID, err: err}:
+			case <-taskCtx.Done():
+			}
+			return nil
+		})
+		return nil
 	}
 	if a.state.Kind != vendor.StateWaiting {
 		return a.transition(ctx, vendor.Fact{Kind: vendor.FactWait, Reason: vendor.WaitingVaultLocked})
 	}
+	return nil
+}
+
+func (a *vendorSessionActor) handleVaultInterruptResult(ctx context.Context, result vaultInterruptResult) error {
+	if result.turnID == "" || result.turnID != a.vaultInterruptTurnID || a.turnID != result.turnID || result.err == nil {
+		return nil
+	}
+	return a.endVaultLockedTurn(ctx, vendorstore.OutcomeUnknown, vendor.Fact{Kind: vendor.FactTurnUnknown, Reason: vendor.WaitingVaultLocked})
+}
+
+func (a *vendorSessionActor) endVaultLockedTurn(ctx context.Context, outcome string, fact vendor.Fact) error {
+	next, _, err := vendor.Transition(a.state, fact)
+	if err != nil {
+		return fmt.Errorf("record vault interruption state: %w", err)
+	}
+	if next.Kind != vendor.StateWaiting || next.Reason != vendor.WaitingVaultLocked {
+		next, _, err = vendor.Transition(next, vendor.Fact{Kind: vendor.FactWait, Reason: vendor.WaitingVaultLocked})
+		if err != nil {
+			return fmt.Errorf("wait for vault unlock after interrupt: %w", err)
+		}
+	}
+	state, reason := stateToStore(next)
+	turnID := a.turnID
+	if err := a.append(context.WithoutCancel(ctx), &vendorstore.Event{Type: vendorstore.VendorTurnEnded, TurnID: turnID, Outcome: outcome, State: state, WaitingReason: reason}); err != nil {
+		return err
+	}
+	a.state = next
+	a.turnID = ""
+	a.vaultInterruptTurnID = ""
+	delete(a.turns, turnID)
 	return nil
 }
 

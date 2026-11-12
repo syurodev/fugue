@@ -81,15 +81,19 @@ func (a actorTestAdapter) Start(_ context.Context, spec *vendor.StartSpec) (vend
 }
 
 type actorTestSession struct {
-	observations  chan claude.Observation
-	turnID        string
-	sent          int
-	closed        bool
-	interrupted   atomic.Int32
-	closeCalls    atomic.Int32
-	closeCanceled atomic.Bool
-	closeStarted  chan struct{}
-	closeGate     <-chan struct{}
+	observations     chan claude.Observation
+	turnID           string
+	sent             int
+	steered          atomic.Int32
+	closed           bool
+	interrupted      atomic.Int32
+	closeCalls       atomic.Int32
+	closeCanceled    atomic.Bool
+	closeStarted     chan struct{}
+	closeStartedOnce sync.Once
+	closeGate        <-chan struct{}
+	interruptStarted chan struct{}
+	interruptGate    <-chan struct{}
 }
 
 func newActorTestSession() *actorTestSession {
@@ -108,9 +112,20 @@ func (s *actorTestSession) Send(context.Context, vendor.Input) (vendor.TurnRef, 
 
 func (s *actorTestSession) Interrupt(context.Context, vendor.TurnRef) error {
 	s.interrupted.Add(1)
+	if s.interruptStarted != nil {
+		close(s.interruptStarted)
+	}
+	if s.interruptGate != nil {
+		<-s.interruptGate
+	}
 	return nil
 }
-func (*actorTestSession) Steer(context.Context, vendor.TurnRef, vendor.Input) error { return nil }
+
+func (s *actorTestSession) Steer(context.Context, vendor.TurnRef, vendor.Input) error {
+	s.steered.Add(1)
+	return nil
+}
+
 func (*actorTestSession) Resolve(context.Context, vendor.ApprovalRef, vendor.Decision) error {
 	return vendor.ErrUnsupported
 }
@@ -122,7 +137,7 @@ func (s *actorTestSession) Close(ctx context.Context, _ vendor.CloseReason) (pro
 		return process.StopProof{Status: process.StopProofUnknown}, fmt.Errorf("fake close canceled: %w", ctx.Err())
 	}
 	if s.closeStarted != nil {
-		close(s.closeStarted)
+		s.closeStartedOnce.Do(func() { close(s.closeStarted) })
 	}
 	if s.closeGate != nil {
 		<-s.closeGate
@@ -169,6 +184,44 @@ func TestActorPersistsVendorInitiatedTurnFromLateSteer(t *testing.T) {
 	if err != nil || itemMeta.TurnID != testVendorTurnID || itemMeta.Metadata.Origin != vendorstore.TurnOriginVendor {
 		t.Fatalf("stored vendor item = %+v, %v; want vendor-origin grouping", itemMeta, err)
 	}
+	mustCloseActorSessions(t, manager)
+}
+
+func TestVendorSessionSteerInterruptAndList(t *testing.T) {
+	t.Parallel()
+	f := newTranscriptFixture(t, nil)
+	session := newActorTestSession()
+	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
+		Store: f.store, Transcripts: f.service, Adapter: actorTestAdapter{session: session}, Vault: f.vault,
+		Clock: f.clock, IDs: ids.NewSequence("actor-item-"),
+	})
+	mustStartActorSession(t, manager)
+	mustSendActorInput(t, manager, "start turn")
+	if err := manager.Steer(t.Context(), testActorSessionID, vendor.Input{Text: "steer turn"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manager.Interrupt(t.Context(), testActorSessionID); err != nil {
+		t.Fatal(err)
+	}
+	if got := session.steered.Load(); got != 1 {
+		t.Fatalf("steer calls = %d, want 1", got)
+	}
+	sessions, err := manager.List(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for i := range sessions {
+		found = found || sessions[i].ID == testActorSessionID
+	}
+	if !found {
+		t.Fatalf("vendor sessions = %+v; want %q", sessions, testActorSessionID)
+	}
+	session.observations <- claude.Observation{TurnEnd: &claude.TurnEnd{TurnID: testFugueTurnID, Outcome: claude.OutcomeCompleted}}
+	awaitActor(t, func() bool {
+		snap, err := f.store.Snapshot(t.Context(), testActorSessionID)
+		return err == nil && snap.State == vendorstore.StateReady
+	})
 	mustCloseActorSessions(t, manager)
 }
 
@@ -225,6 +278,7 @@ func TestVRE11VaultLockInterruptsAndWaitsWithoutPlaintext(t *testing.T) {
 	t.Parallel()
 	f := newTranscriptFixture(t, nil)
 	session := newActorTestSession()
+	session.interruptStarted = make(chan struct{})
 	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
 		Store: f.store, Transcripts: f.service, Adapter: actorTestAdapter{session: session}, Vault: f.vault,
 		Clock: f.clock, IDs: ids.NewSequence("actor-item-"),
@@ -232,6 +286,8 @@ func TestVRE11VaultLockInterruptsAndWaitsWithoutPlaintext(t *testing.T) {
 	mustStartActorSession(t, manager)
 	mustSendActorInput(t, manager, "protected user input")
 	f.vault.Lock()
+	<-session.interruptStarted
+	session.observations <- claude.Observation{TurnEnd: &claude.TurnEnd{TurnID: testFugueTurnID, Outcome: claude.OutcomeCompleted}}
 	awaitActor(t, func() bool {
 		snap, snapErr := f.store.Snapshot(t.Context(), testActorSessionID)
 		return snapErr == nil && snap.State == vendorstore.StateWaiting && snap.WaitingReason == string(vendor.WaitingVaultLocked)
@@ -263,6 +319,76 @@ func TestVRE11VaultLockInterruptsAndWaitsWithoutPlaintext(t *testing.T) {
 		return snapErr == nil && snap.State == vendorstore.StateReady
 	})
 	mustCloseActorSessions(t, manager)
+}
+
+func TestVaultLockInterruptKeepsDrainingObservations(t *testing.T) {
+	t.Parallel()
+	f := newTranscriptFixture(t, nil)
+	interruptGate := make(chan struct{})
+	session := newActorTestSession()
+	session.interruptStarted = make(chan struct{})
+	session.interruptGate = interruptGate
+	var releaseOnce sync.Once
+	releaseInterrupt := func() { releaseOnce.Do(func() { close(interruptGate) }) }
+	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
+		Store: f.store, Transcripts: f.service, Adapter: actorTestAdapter{session: session}, Vault: f.vault,
+		Clock: f.clock, IDs: ids.NewSequence("actor-item-"),
+	})
+	defer func() {
+		releaseInterrupt()
+		mustCloseActorSessions(t, manager)
+	}()
+	mustStartActorSession(t, manager)
+	mustSendActorInput(t, manager, "protected user input")
+	f.vault.Lock()
+	<-session.interruptStarted
+
+	producer, sent := sendVaultLockObservationBurst(t.Context(), session)
+	awaitActor(t, func() bool { return sent.Load() == 301 })
+	if err := producer.Wait(); err != nil {
+		t.Fatal(err)
+	}
+	releaseInterrupt()
+	awaitActor(t, func() bool {
+		snap, err := f.store.Snapshot(t.Context(), testActorSessionID)
+		return err == nil && snap.State == vendorstore.StateWaiting && snap.WaitingReason == string(vendor.WaitingVaultLocked)
+	})
+	if session.interrupted.Load() != 1 {
+		t.Fatalf("Interrupt calls = %d, want 1", session.interrupted.Load())
+	}
+	events, err := f.store.EventsSince(t.Context(), testActorSessionID, 0, 400)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertInterruptedTurnEvent(t, events)
+	assertStoredItemHasNoPayload(t, f, "locked-burst-final")
+}
+
+func sendVaultLockObservationBurst(ctx context.Context, session *actorTestSession) (*supervise.Task, *atomic.Int32) {
+	var sent atomic.Int32
+	producer := supervise.Go(ctx, "test-vendor-observation-burst", func(ctx context.Context) error {
+		for range 300 {
+			select {
+			case session.observations <- claude.Observation{}:
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+			sent.Add(1)
+		}
+		item := transcript.Item{
+			ID: "locked-burst-final", SessionID: testActorSessionID, TurnID: testFugueTurnID, Kind: transcript.AssistantMessage,
+			Metadata: transcript.AssistantMessageMetadata{ModelID: "safe-model"},
+			Content:  transcript.AssistantMessageContent{Text: "protected vendor output"},
+		}
+		select {
+		case session.observations <- claude.Observation{Records: []transcript.Item{item}, TurnEnd: &claude.TurnEnd{TurnID: testFugueTurnID, Outcome: claude.OutcomeCompleted}}:
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+		sent.Add(1)
+		return nil
+	})
+	return producer, &sent
 }
 
 func assertInterruptedTurnEvent(t *testing.T, events []vendorstore.RecordedEvent) {
@@ -328,16 +454,15 @@ func appendRecoveredExit(t *testing.T, f *transcriptFixture, sequence int64) {
 
 func assertRecoveredTurnUnknown(t *testing.T, f *transcriptFixture) {
 	t.Helper()
-	events, err := f.store.EventsSince(t.Context(), testActorSessionID, 0, 100)
+	_, turns, _, err := f.store.Overview(t.Context(), testActorSessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := range events {
-		if events[i].Type == vendorstore.VendorTurnEnded && events[i].Metadata.TurnID == testFugueTurnID && events[i].Metadata.Outcome == vendorstore.OutcomeUnknown {
-			return
-		}
+	if len(turns) != 0 {
+		t.Fatalf("recovered open turns = %v; want none", turns)
 	}
-	t.Fatal("recovered turn outcome is not unknown")
+	// Store.Recover updates the turn projection atomically without appending
+	// public events; vendorstore's recovery test checks the projected unknown outcome.
 }
 
 func hasProvedProcessExit(events []vendorstore.RecordedEvent) bool {
@@ -393,6 +518,7 @@ func TestVendorSessionResumeUsesStoredHandleAndStartsNewProcess(t *testing.T) {
 	t.Parallel()
 	f := newTranscriptFixture(t, nil)
 	firstSession := newActorTestSession()
+	firstSession.closeStarted = make(chan struct{})
 	actorCtx, cancelActor := context.WithCancel(t.Context())
 	firstManager := mustNewVendorSessions(t, actorCtx, &VendorSessionDeps{
 		Store: f.store, Transcripts: f.service, Adapter: actorTestAdapter{session: firstSession}, Vault: f.vault,
@@ -406,7 +532,10 @@ func TestVendorSessionResumeUsesStoredHandleAndStartsNewProcess(t *testing.T) {
 		return snapErr == nil && snap.ResumeHandle == resumeHandle
 	})
 	cancelActor()
-	awaitActor(t, func() bool { return firstSession.closeCalls.Load() == 1 })
+	<-firstSession.closeStarted
+	if err := firstManager.actors[testActorSessionID].task.Wait(); err != nil {
+		t.Fatalf("stopped actor = %v", err)
+	}
 	if _, err := f.store.Recover(t.Context()); err != nil {
 		t.Fatal(err)
 	}

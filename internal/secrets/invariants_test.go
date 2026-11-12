@@ -133,9 +133,7 @@ func TestFindOneMiBLinearBound(t *testing.T) {
 	}
 	short, _ := measure(256 << 10)
 	long, result := measure(1 << 20)
-	if long[2] > short[2]*6 {
-		t.Fatalf("1 MiB median scan took %d ns, more than 6x 256 KiB median %d ns", long[2], short[2])
-	}
+	enforceScanRatio(t, short[2], long[2])
 	if result.AllocedBytesPerOp() > 256<<20 {
 		t.Fatal("1 MiB scan exceeded allocation bound")
 	}
