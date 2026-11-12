@@ -116,11 +116,8 @@ func isSubPath(target, parent string) bool {
 }
 
 func expandHome(p, homeDir string) string {
-	if p == "~" {
-		return homeDir
-	}
-	if strings.HasPrefix(p, "~/") {
-		return filepath.Join(homeDir, p[2:])
+	if homeDir != "" && (p == "~" || strings.HasPrefix(p, "~/")) {
+		return filepath.Join(homeDir, strings.TrimPrefix(p, "~"))
 	}
 	return p
 }

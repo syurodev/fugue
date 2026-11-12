@@ -19,8 +19,10 @@ import (
 )
 
 const (
-	testCoreRoot      = "core"
-	testWorkspaceName = "test"
+	testCoreRoot        = "core"
+	testMainRoot        = "main"
+	testWorkspaceName   = "test"
+	defaultApprovalMode = "auto"
 )
 
 func TestWorkspaceLayoutAndPermissions_WSE01(t *testing.T) {
@@ -619,7 +621,7 @@ func TestRootsFromFileAreRevalidated(t *testing.T) {
 
 	ws, err := f.svc.CreateWorkspace(ctx, CreateWorkspaceRequest{
 		Name:    "revalidate-roots",
-		Roots:   []RootSpec{{Name: "main", Path: validRepo, Access: AccessReadWrite}},
+		Roots:   []RootSpec{{Name: testMainRoot, Path: validRepo, Access: AccessReadWrite}},
 		HomeDir: filepath.Join(f.tempDir, "userhome"),
 	})
 	if err != nil {
@@ -649,7 +651,7 @@ func testInvalidRootRevalidated(t *testing.T, ctx context.Context, f *testFixtur
 	cfg := tomlConfig{
 		Name: "revalidate-roots",
 		Roots: []Root{
-			{Name: "main", Path: validRepo, Access: AccessReadWrite},
+			{Name: testMainRoot, Path: validRepo, Access: AccessReadWrite},
 			{Name: rootName, Path: rootPath, Access: AccessReadWrite},
 		},
 	}
@@ -659,6 +661,7 @@ func testInvalidRootRevalidated(t *testing.T, ctx context.Context, f *testFixtur
 	}
 	cfgPath := f.paths.ConfigPath(wsID)
 	testWriteFile(t, cfgPath, encoded)
+	testWriteFile(t, f.paths.AcceptedConfigPath(wsID), encoded)
 	hash := computeConfigHash(encoded)
 	if _, execErr := f.db.ExecContext(ctx, "UPDATE workspaces SET accepted_config_hash = ?, config_hash = ? WHERE workspace_id = ?", hash, hash, wsID); execErr != nil {
 		t.Fatal(execErr)
@@ -703,7 +706,7 @@ func TestSelectSessionCwdRefusesUnconfirmedConfig(t *testing.T) {
 
 	cfg := tomlConfig{
 		Name:  "unconf-test-edited",
-		Roots: []Root{{Name: "repo", Path: repo, Access: AccessReadWrite}},
+		Roots: []Root{{Name: "repo", Path: repo, Access: AccessReadOnly}},
 	}
 	encoded, marshalErr := toml.Marshal(cfg)
 	if marshalErr != nil {

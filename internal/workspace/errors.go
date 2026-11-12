@@ -18,25 +18,33 @@ const (
 	ErrAlreadyExists     Code = "workspace.already_exists"
 	ErrConfigInvalid     Code = "workspace.config_invalid"
 	ErrConfigUnconfirmed Code = "workspace.config_unconfirmed"
+	ErrConfigChanged     Code = "workspace.config_changed"
 )
 
 // Error is a typed workspace error with a stable machine-readable Code.
 type Error struct {
 	Code         Code
 	Message      string
+	File, Key    string
 	Line, Column int
 	Cause        error
 }
 
 func (e *Error) Error() string {
-	pos := ""
+	var meta string
+	if e.File != "" {
+		meta += fmt.Sprintf("[file %s] ", e.File)
+	}
 	if e.Line > 0 && e.Column > 0 {
-		pos = fmt.Sprintf("[line %d, col %d] ", e.Line, e.Column)
+		meta += fmt.Sprintf("[line %d, col %d] ", e.Line, e.Column)
+	}
+	if e.Key != "" {
+		meta += fmt.Sprintf("[key %s] ", e.Key)
 	}
 	if e.Cause != nil {
-		return fmt.Sprintf("%s: %s%s: %v", e.Code, pos, e.Message, e.Cause)
+		return fmt.Sprintf("%s: %s%s: %v", e.Code, meta, e.Message, e.Cause)
 	}
-	return fmt.Sprintf("%s: %s%s", e.Code, pos, e.Message)
+	return fmt.Sprintf("%s: %s%s", e.Code, meta, e.Message)
 }
 
 func (e *Error) Unwrap() error { return e.Cause }

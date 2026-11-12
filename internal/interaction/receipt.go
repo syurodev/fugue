@@ -210,6 +210,21 @@ func (o *Owner) ResetSession(sessionID string) {
 	}
 }
 
+// InvalidateWorkspaceGrants drops all session grants belonging to workspaceID
+// when the workspace policy revision increases (workspace §7, interaction §3.4).
+func (o *Owner) InvalidateWorkspaceGrants(workspaceID string) {
+	if workspaceID == "" {
+		return
+	}
+	o.mu.Lock()
+	for k := range o.grants {
+		if k.workspaceID == workspaceID {
+			delete(o.grants, k)
+		}
+	}
+	o.mu.Unlock()
+}
+
 // SetVaultLocked updates the vault lock state observed by this Owner. Locking
 // the vault immediately cancels all pending requests and wipes all session
 // grants and unconsumed receipts in memory (storage-security §8, tool-system §5.1).
