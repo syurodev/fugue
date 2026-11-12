@@ -308,3 +308,53 @@ func TestPendingOrderingAndExpiry(t *testing.T) {
 		t.Fatalf("already-expired ticket = %+v", expiredTicket)
 	}
 }
+
+func TestInvalidateWorkspaceGrantsDropsOnlyMatchingWorkspace(t *testing.T) {
+	t.Parallel()
+	owner, _, _, _ := newTestOwner(t)
+
+	specA := confirmSpec("op-ws-a1")
+	specA.Binding.WorkspaceID = "ws-a"
+	specA.Offers = []Outcome{OutcomeAllowedOnce, OutcomeAllowedSession}
+	tA1 := mustEnsure(t, owner, specA)
+	if _, err := owner.Answer(&Decision{
+		Incarnation: owner.Incarnation(),
+		RequestID:   tA1.RequestID,
+		Outcome:     OutcomeAllowedSession,
+	}); err != nil {
+		t.Fatalf("answer ws-a: %v", err)
+	}
+
+	specB := confirmSpec("op-ws-b1")
+	specB.Binding.WorkspaceID = "ws-b"
+	specB.Binding.SessionID = "sess-b"
+	specB.Offers = []Outcome{OutcomeAllowedOnce, OutcomeAllowedSession}
+	tB1 := mustEnsure(t, owner, specB)
+	if _, err := owner.Answer(&Decision{
+		Incarnation: owner.Incarnation(),
+		RequestID:   tB1.RequestID,
+		Outcome:     OutcomeAllowedSession,
+	}); err != nil {
+		t.Fatalf("answer ws-b: %v", err)
+	}
+
+	owner.InvalidateWorkspaceGrants("")
+	owner.InvalidateWorkspaceGrants("ws-a")
+
+	specA2 := confirmSpec("op-ws-a2")
+	specA2.Binding.WorkspaceID = "ws-a"
+	specA2.Offers = []Outcome{OutcomeAllowedOnce, OutcomeAllowedSession}
+	tA2 := mustEnsure(t, owner, specA2)
+	if tA2.Resolved {
+		t.Fatalf("expected ws-a grant to be invalidated, got resolved %+v", tA2)
+	}
+
+	specB2 := confirmSpec("op-ws-b2")
+	specB2.Binding.WorkspaceID = "ws-b"
+	specB2.Binding.SessionID = "sess-b"
+	specB2.Offers = []Outcome{OutcomeAllowedOnce, OutcomeAllowedSession}
+	tB2 := mustEnsure(t, owner, specB2)
+	if !tB2.Resolved || tB2.Outcome != OutcomeAllowedSession {
+		t.Fatalf("expected ws-b grant to remain active, got %+v", tB2)
+	}
+}
