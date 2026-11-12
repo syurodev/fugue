@@ -87,8 +87,6 @@ type actorTestSession struct {
 	turnID           string
 	sent             int
 	steered          atomic.Int32
-	closed           bool
-	closedFlag       atomic.Bool
 	closedCh         chan struct{}
 	closedOnce       sync.Once
 	sendStarted      chan struct{}
@@ -160,8 +158,6 @@ func (s *actorTestSession) Close(ctx context.Context, _ vendor.CloseReason) (pro
 	if s.closeGate != nil {
 		<-s.closeGate
 	}
-	s.closed = true
-	s.closedFlag.Store(true)
 	s.closedOnce.Do(func() { close(s.closedCh) })
 	return process.StopProof{Status: process.StopProofProved}, nil
 }
@@ -592,12 +588,11 @@ func TestActorAppendFailureDoesNotAdvanceSequence(t *testing.T) {
 	if err == nil {
 		t.Fatal("Send succeeded after turn append failure")
 	}
-	snap, err := f.store.Snapshot(t.Context(), testActorSessionID)
 	awaitActor(t, func() bool {
 		current, snapshotErr := f.store.Snapshot(t.Context(), testActorSessionID)
 		return snapshotErr == nil && current.State == vendorstore.StateClosed
 	})
-	snap, err = f.store.Snapshot(t.Context(), testActorSessionID)
+	snap, err := f.store.Snapshot(t.Context(), testActorSessionID)
 	if err != nil || snap.LastSequence != 3 || snap.State != vendorstore.StateClosed {
 		t.Fatalf("session after failed append = %+v, %v; want sequence 3 and closed", snap, err)
 	}
@@ -606,6 +601,9 @@ func TestActorAppendFailureDoesNotAdvanceSequence(t *testing.T) {
 func TestSendAppendFailureClosesSession(t *testing.T) {
 	t.Parallel()
 	f := newTranscriptFixture(t, nil)
+	// SetCommitFault is persistent across appends, so it would also reject the
+	// close event that must durably follow the failed turn start. Inject only
+	// VendorTurnStarted here and let the close event use the real store.
 	store := &failAppendVendorStore{Store: f.store, eventType: vendorstore.VendorTurnStarted}
 	session := newActorTestSession()
 	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
