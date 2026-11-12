@@ -23,6 +23,11 @@ const (
 	testToolName    = "file.write"
 	optionDBLocal   = "db-local"
 	optionDBStage   = "db-stage"
+	testEnvDev      = "dev"
+	testEnvProd     = "prod"
+	testEnvStg      = "stg"
+	testTagUnknown  = "unknown"
+	testBogus       = "bogus"
 )
 
 func startTime() time.Time {
@@ -37,10 +42,12 @@ func defaultBinding() Binding {
 		AttemptID:       "att-1",
 		CheckGeneration: 1,
 		ToolName:        testToolName,
+		GrantScopeKey:   "tool:" + testToolName,
+		HasTarget:       true,
 		ArgsDigest:      "sha256:abc",
 		TargetRevision:  "target-v1",
 		EnvRevision:     "env-v1",
-		EnvTag:          "dev",
+		EnvTag:          testEnvDev,
 	}
 }
 
@@ -194,16 +201,56 @@ func (g *failingGenerator) NewID() (string, error) {
 	return fmt.Sprintf("gen-%d", g.calls), nil
 }
 
+type stubTagPolicy struct {
+	mu        sync.Mutex
+	revisions map[string]uint64
+	confirms  map[string]bool
+}
+
+func newStubTagPolicy() *stubTagPolicy {
+	return &stubTagPolicy{
+		revisions: map[string]uint64{testEnvDev: 1, testEnvStg: 1, testEnvProd: 1},
+		confirms:  map[string]bool{testEnvDev: false, testEnvStg: true, testEnvProd: true},
+	}
+}
+
+func (p *stubTagPolicy) RequiresConfirmation(name string) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if name == "" {
+		return true
+	}
+	c, ok := p.confirms[name]
+	if !ok {
+		return true
+	}
+	return c
+}
+
+func (p *stubTagPolicy) PolicyRevision(name string) uint64 {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.revisions[name]
+}
+
+func (p *stubTagPolicy) set(name string, requiresConfirmation bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.confirms[name] = requiresConfirmation
+	p.revisions[name]++
+}
+
 func newTestOwner(t *testing.T) (*Owner, *clock.Fake, *recordingResponder, *[]AuditEvent) {
 	t.Helper()
 	fakeClock := clock.NewFake(startTime())
 	responder := &recordingResponder{}
 	var audits []AuditEvent
-	owner, err := NewOwner(Config{
+	owner, err := NewOwner(&Config{
 		Clock:     fakeClock,
 		IDs:       ids.NewSequence("id"),
 		Responder: responder,
 		Headless:  false,
+		TagPolicy: newStubTagPolicy(),
 		Audit: func(ev AuditEvent) {
 			audits = append(audits, ev)
 		},

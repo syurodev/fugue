@@ -100,6 +100,8 @@ type Binding struct {
 	AttemptID       string
 	CheckGeneration uint64
 	ToolName        string
+	GrantScopeKey   string
+	HasTarget       bool
 	ArgsDigest      string
 	TargetRevision  string
 	EnvRevision     string
@@ -235,7 +237,7 @@ type NopResponder struct{}
 // Prompt implements Responder.
 func (NopResponder) Prompt(*Ticket) error { return nil }
 
-func validateSpec(spec *Spec) error {
+func validateSpec(spec *Spec, tags TagPolicy) error {
 	if spec == nil {
 		return errcode.New(errcode.InvalidArgument, "interaction spec is required")
 	}
@@ -256,7 +258,7 @@ func validateSpec(spec *Spec) error {
 	// accepted, with NativeOperationKey as the recommended constructor.
 	switch spec.Kind {
 	case KindConfirm:
-		return validateConfirmSpec(spec)
+		return validateConfirmSpec(spec, tags)
 	case KindSelect:
 		return validateSelectSpec(spec)
 	case KindQuestion:
@@ -302,7 +304,7 @@ func validateRelayedBinding(b *Binding) error {
 	return nil
 }
 
-func validateConfirmSpec(spec *Spec) error {
+func validateConfirmSpec(spec *Spec, tags TagPolicy) error {
 	if len(spec.Questions) > 0 || spec.Body != "" {
 		return errcode.New(errcode.InvalidArgument, "confirm interaction must not carry question content")
 	}
@@ -324,8 +326,13 @@ func validateConfirmSpec(spec *Spec) error {
 		}
 		seen[outcome] = struct{}{}
 	}
-	if slices.Contains(spec.Offers, OutcomeAllowedSession) && requiresEveryTime(&spec.Binding) {
-		return errcode.New(errcode.InvalidArgument, "requests that always ask never offer a session grant")
+	if slices.Contains(spec.Offers, OutcomeAllowedSession) {
+		if spec.Binding.GrantScopeKey == "" {
+			return errcode.New(errcode.InvalidArgument, "allowed_session offer requires a non-empty grant scope key")
+		}
+		if requiresEveryTime(&spec.Binding, tags) {
+			return errcode.New(errcode.InvalidArgument, "requests that always ask never offer a session grant")
+		}
 	}
 	return nil
 }
@@ -430,15 +437,20 @@ func validateOptionList(options []Option, minCount int, what string) error {
 }
 
 // requiresEveryTime reports whether the request must always ask the user and
-// may never offer a session grant (interaction §3.2 step 1 and AGENTS.md:
-// prod and unknown environment tags always ask and ignore session grants).
-func requiresEveryTime(b *Binding) bool {
-	switch b.EnvTag {
-	case "", "dev", "local", "test":
+// may never offer a session grant (interaction §3.2 step 1, I-03).
+//
+// When HasTarget is false, the tool has no target and is not subjected to
+// environment tag confirmation. When HasTarget is true, an empty or unknown
+// tag fails closed by requiring confirmation. A nil TagPolicy treats every
+// target as requiring confirmation.
+func requiresEveryTime(b *Binding, tags TagPolicy) bool {
+	if !b.HasTarget {
 		return false
-	default:
+	}
+	if tags == nil {
 		return true
 	}
+	return tags.RequiresConfirmation(b.EnvTag)
 }
 
 // knownOutcome reports whether outcome is one of the defined outcomes;

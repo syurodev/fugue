@@ -70,7 +70,7 @@ func TestInteractionServiceMemoryBounded10kCycles(t *testing.T) {
 	clk := clock.NewFake(time.Unix(100, 0))
 	idGen := ids.NewUUIDv7(clk, ids.NewDeterministic("memtest"))
 	hub := NewEventHub("inc-mem")
-	owner, err := interaction.NewOwner(interaction.Config{
+	owner, err := interaction.NewOwner(&interaction.Config{
 		Clock: clk,
 		IDs:   idGen,
 	})
@@ -220,7 +220,7 @@ func TestInteractionConcurrentEnsureAnswerSubscribeConsistency(t *testing.T) {
 	clk := clock.NewFake(time.Unix(100, 0))
 	idGen := ids.NewUUIDv7(clk, ids.NewDeterministic("conctest"))
 	hub := NewEventHub("inc-race")
-	owner, err := interaction.NewOwner(interaction.Config{
+	owner, err := interaction.NewOwner(&interaction.Config{
 		Clock: clk,
 		IDs:   idGen,
 	})
@@ -561,7 +561,7 @@ func setupResolveTestService(t *testing.T, clk clock.Clock) (*InteractionService
 	t.Helper()
 	idGen := ids.NewUUIDv7(clk, ids.NewDeterministic("resolvetest"))
 	hub := NewEventHub("inc-resolve-all")
-	owner, err := interaction.NewOwner(interaction.Config{
+	owner, err := interaction.NewOwner(&interaction.Config{
 		Clock: clk,
 		IDs:   idGen,
 	})
@@ -683,7 +683,7 @@ func TestInteractionEphemeralReconnectDifferentIncarnationSnapshot(t *testing.T)
 	clk := clock.NewFake(time.Unix(100, 0))
 
 	hub1 := NewEventHub("inc-host-1")
-	owner1, err := interaction.NewOwner(interaction.Config{
+	owner1, err := interaction.NewOwner(&interaction.Config{
 		Clock: clk,
 		IDs:   ids.NewUUIDv7(clk, ids.NewDeterministic("h1")),
 	})
@@ -701,7 +701,7 @@ func TestInteractionEphemeralReconnectDifferentIncarnationSnapshot(t *testing.T)
 	}
 
 	hub2 := NewEventHub("inc-host-2")
-	owner2, err := interaction.NewOwner(interaction.Config{
+	owner2, err := interaction.NewOwner(&interaction.Config{
 		Clock: clk,
 		IDs:   ids.NewUUIDv7(clk, ids.NewDeterministic("h2")),
 	})

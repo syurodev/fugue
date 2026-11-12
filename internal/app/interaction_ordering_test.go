@@ -119,6 +119,7 @@ func runEnsurerLoop(
 				AttemptID:       testAttID,
 				CheckGeneration: uint64(i + 1),
 				ToolName:        "tool-race",
+				GrantScopeKey:   "tool-race:scope",
 				TargetRevision:  "rev-1",
 				EnvRevision:     "env-1",
 				EnvTag:          lifecycleEnvDev,
@@ -265,7 +266,7 @@ func setupOrderingService(t *testing.T) (*clock.Fake, *EventHub, *InteractionSer
 	clk := clock.NewFake(time.Unix(100, 0))
 	idGen := ids.NewUUIDv7(clk, ids.NewDeterministic("race-order"))
 	hub := NewEventHub("inc-race-order")
-	owner, err := interaction.NewOwner(interaction.Config{
+	owner, err := interaction.NewOwner(&interaction.Config{
 		Clock: clk,
 		IDs:   idGen,
 	})
@@ -375,6 +376,7 @@ func seedSessionGrant(t *testing.T, svc *InteractionService, sessionID string) {
 			AttemptID:       testAttID,
 			CheckGeneration: 1,
 			ToolName:        "tool-race",
+			GrantScopeKey:   "tool-race:scope",
 			TargetRevision:  "rev-1",
 			EnvRevision:     "env-1",
 			EnvTag:          lifecycleEnvDev,

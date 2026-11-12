@@ -16,11 +16,11 @@ import (
 const ResolvedRetentionTTL = 10 * time.Minute
 
 // grantKey scopes a session-level confirmation grant to a single session,
-// workspace, tool and target/environment revision.
+// workspace, grant scope key and target/environment revision.
 type grantKey struct {
 	sessionID      string
 	workspaceID    string
-	toolName       string
+	grantScopeKey  string
 	targetRevision string
 	envRevision    string
 	envTag         string
@@ -30,7 +30,7 @@ func grantKeyFor(b *Binding) grantKey {
 	return grantKey{
 		sessionID:      b.SessionID,
 		workspaceID:    b.WorkspaceID,
-		toolName:       b.ToolName,
+		grantScopeKey:  b.GrantScopeKey,
 		targetRevision: b.TargetRevision,
 		envRevision:    b.EnvRevision,
 		envTag:         b.EnvTag,
@@ -47,6 +47,7 @@ type Config struct {
 	Headless    bool
 	VaultLocked func() bool
 	Audit       func(AuditEvent)
+	TagPolicy   TagPolicy
 }
 
 // Owner holds the in-memory interaction requests, session grants and one-use
@@ -59,6 +60,7 @@ type Owner struct {
 	vaultCheck  func() bool
 	audit       func(AuditEvent)
 	onLifecycle func(LifecycleEvent)
+	tagPolicy   TagPolicy
 	incarnation string
 
 	mu                sync.Mutex
@@ -76,7 +78,10 @@ type Owner struct {
 }
 
 // NewOwner creates an Owner with a fresh incarnation ID.
-func NewOwner(cfg Config) (*Owner, error) {
+func NewOwner(cfg *Config) (*Owner, error) {
+	if cfg == nil {
+		return nil, errcode.New(errcode.InvalidArgument, "interaction config is required")
+	}
 	if cfg.Clock == nil {
 		return nil, errcode.New(errcode.InvalidArgument, "interaction clock is required")
 	}
@@ -95,6 +100,7 @@ func NewOwner(cfg Config) (*Owner, error) {
 		vaultCheck:       cfg.VaultLocked,
 		audit:            cfg.Audit,
 		onLifecycle:      nil,
+		tagPolicy:        cfg.TagPolicy,
 		incarnation:      incarnation,
 		mu:               sync.Mutex{},
 		vaultLocked:      false,
@@ -132,7 +138,7 @@ func (o *Owner) Incarnation() string {
 // Ticket without prompting a second time. It reports whether the ticket was
 // freshly created (true) or read back (false).
 func (o *Owner) Ensure(spec *Spec) (*Ticket, bool, error) {
-	if err := validateSpec(spec); err != nil {
+	if err := validateSpec(spec, o.tagPolicy); err != nil {
 		return nil, false, err
 	}
 	o.mu.Lock()
