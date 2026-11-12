@@ -204,16 +204,6 @@ func assertShellAllowHardRule(t *testing.T) {
 }
 
 const sampleTier2TOML = `
-[policy]
-approval_mode = "ask"
-shell_allow = ["git status", "git diff"]
-
-[env]
-keep = ["LANG", "PATH"]
-
-[redact]
-allow_keys = ["PUBLIC_ID"]
-
 [profiles.default]
 vendor = "claude"
 model = "claude-sonnet-4-6"
@@ -228,10 +218,11 @@ const sampleTier3TOML = `
 name = "ws-merged"
 
 [policy]
-shell_allow_add = ["go test"]
+shell_allow = ["git status", "git diff", "go test"]
+approval_mode = "ask"
 
 [env]
-keep_add = ["GOFLAGS"]
+keep = ["LANG", "PATH", "GOFLAGS"]
 
 [redact]
 allow_keys = ["OVERRIDE_KEY"]
@@ -296,7 +287,7 @@ func assertMergedValuesAndProvenance(t *testing.T, eff *EffectiveConfig, wantWsD
 		wantVal  string
 		wantTier Tier
 	}{
-		{"policy.approval_mode", eff.Policy.ApprovalMode, "ask", TierGlobal},
+		{"policy.approval_mode", eff.Policy.ApprovalMode, "ask", TierWorkspace},
 		{"policy.sandbox_profile", eff.Policy.SandboxProfile, "workspace-write", TierDefault},
 		{"policy.shell_allow", strings.Join(eff.Policy.ShellAllow, ","), "git status,git diff,go test", TierWorkspace},
 		{"env.keep", strings.Join(eff.Env.Keep, ","), "LANG,PATH,GOFLAGS", TierWorkspace},
@@ -369,5 +360,29 @@ func assertDenylistedEnvNamesRejected(t *testing.T) {
 				t.Fatalf("error message leaked denylisted value %q: %s", denied, err.Error())
 			}
 		}
+	}
+}
+
+func TestTier2RejectsPolicyEnvAndRedactKeys(t *testing.T) {
+	t.Parallel()
+	const secretish = "never-leak-this-value"
+	cases := map[string]string{
+		"policy": "[host]\nsnapshot_disk = \"2 GiB\"\n[policy]\napproval_mode = \"" + secretish + "\"\n",
+		"env":    "[env]\nkeep = [\"" + secretish + "\"]\n",
+		"redact": "[redact]\nallow_keys = [\"" + secretish + "\"]\n",
+	}
+	for group, raw := range cases {
+		t.Run(group, func(t *testing.T) {
+			t.Parallel()
+			assertConfigErrorKey(t, TierGlobal, raw, group)
+			err := ValidateConfig(TierGlobal, []byte(raw))
+			var wsErr *Error
+			if !errors.As(err, &wsErr) || wsErr.Line < 1 || wsErr.Column < 1 {
+				t.Fatalf("expected line and column, got %+v", wsErr)
+			}
+			if strings.Contains(err.Error(), secretish) {
+				t.Fatalf("error leaked the value: %s", err.Error())
+			}
+		})
 	}
 }

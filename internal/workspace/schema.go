@@ -154,7 +154,7 @@ func mergeConfigs(base *EffectiveConfig, t2 *tier2RawConfig, t3 *tier3RawConfig,
 	out := *base
 	out.Provenance, out.Profiles = maps.Clone(base.Provenance), maps.Clone(base.Profiles)
 	if t2 != nil {
-		applyCommonTier(&out, TierGlobal, t2.Policy, t2.Env, t2.Redact, t2.Roles, t2.Profiles, t2.Session, homeDir)
+		applyCommonTier(&out, TierGlobal, nil, nil, nil, t2.Roles, t2.Profiles, t2.Session, homeDir)
 		if t2.Host != nil {
 			setPathScalar(&out.Host.WorkspacesDir, out.Provenance, "host.workspaces_dir", TierGlobal, t2.Host.WorkspacesDir, homeDir)
 			setScalar(&out.Host.OutputRetentionTotal, out.Provenance, "host.output_retention_total", TierGlobal, t2.Host.OutputRetentionTotal)

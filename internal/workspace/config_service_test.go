@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"testing"
 )
@@ -299,3 +300,31 @@ func TestEnvChangeBumpsPolicyRevision(t *testing.T) {
 type grantInvalidatorFunc func(string)
 
 func (fn grantInvalidatorFunc) InvalidateWorkspaceGrants(workspaceID string) { fn(workspaceID) }
+
+func TestTier2EditCannotChangeEffectivePolicy(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	f := newTestFixture(t)
+	ws, _ := createTestWorkspaceWithRepo(t, f, "tier2-edit")
+	before, loadedBefore, err := f.svc.GetEffectiveConfig(ctx, ws.ID, nil)
+	if err != nil {
+		t.Fatalf("GetEffectiveConfig: %v", err)
+	}
+
+	testWriteFile(t, f.paths.GlobalConfigPath(), []byte("[host]\nsnapshot_disk = \"2 GiB\"\n"))
+	after, loadedAfter, err := f.svc.GetEffectiveConfig(ctx, ws.ID, nil)
+	if err != nil {
+		t.Fatalf("GetEffectiveConfig after tier 2 edit: %v", err)
+	}
+	if !reflect.DeepEqual(before.Policy, after.Policy) || !reflect.DeepEqual(before.Env, after.Env) || !reflect.DeepEqual(before.Redact, after.Redact) {
+		t.Fatalf("tier 2 edit changed effective policy: before=%+v after=%+v", before, after)
+	}
+	if loadedAfter.PolicyRevision != loadedBefore.PolicyRevision || loadedAfter.PendingPolicyConfirmation {
+		t.Fatalf("policy_revision or pending state changed: before=%+v after=%+v", loadedBefore, loadedAfter)
+	}
+
+	testWriteFile(t, f.paths.GlobalConfigPath(), []byte("[policy]\napproval_mode = \"full\"\n"))
+	if _, _, err := f.svc.GetEffectiveConfig(ctx, ws.ID, nil); err == nil || CodeOf(err) != ErrConfigInvalid {
+		t.Fatalf("expected ErrConfigInvalid for tier 2 policy, got %v", err)
+	}
+}

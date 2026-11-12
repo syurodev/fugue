@@ -51,10 +51,9 @@ type rawHost struct {
 	SnapshotDisk           *string `toml:"snapshot_disk,omitempty"`
 }
 
+// tier2RawConfig deliberately omits policy, env and redact (Q-72): tier 2 has no accepted copy,
+// so strict decoding must reject those groups instead of letting an out-of-band edit widen policy.
 type tier2RawConfig struct {
-	Policy   *rawPolicy               `toml:"policy,omitempty"`
-	Env      *rawEnv                  `toml:"env,omitempty"`
-	Redact   *rawRedact               `toml:"redact,omitempty"`
 	Roles    *[]RoleConfig            `toml:"roles,omitempty"`
 	Profiles map[string]ProfileConfig `toml:"profiles,omitempty"`
 	Session  *rawSession              `toml:"session,omitempty"`
@@ -189,7 +188,7 @@ func ValidateConfig(tier Tier, rawTOML []byte) error {
 }
 
 func validateTier2(file string, cfg *tier2RawConfig, homeDir string) error {
-	return firstErr(validateCommon(file, cfg.Policy, cfg.Env, cfg.Redact, cfg.Roles, cfg.Profiles, cfg.Session, homeDir), validateHost(file, cfg.Host, homeDir))
+	return firstErr(validateCommon(file, nil, nil, nil, cfg.Roles, cfg.Profiles, cfg.Session, homeDir), validateHost(file, cfg.Host, homeDir))
 }
 
 func validateTier3(file string, cfg *tier3RawConfig, homeDir string) error {

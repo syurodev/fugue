@@ -89,11 +89,6 @@ func (p Paths) WorkspaceMDPath(id string) string {
 // GlobalConfigPath returns the path to the Tier 2 global config (<FugueHome>/config.toml).
 func (p Paths) GlobalConfigPath() string { return filepath.Join(p.FugueHome, "config.toml") }
 
-// AcceptedGlobalConfigPath returns the path to the Tier 2 accepted copy (<DataDir>/accepted-config.toml).
-func (p Paths) AcceptedGlobalConfigPath() string {
-	return filepath.Join(p.DataDir, "accepted-config.toml")
-}
-
 // AcceptedWorkspaceDir returns the directory in DataDir holding the Tier 3 accepted copy.
 func (p Paths) AcceptedWorkspaceDir(id string) string {
 	if p.DataDir != "" {
