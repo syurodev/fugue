@@ -66,6 +66,7 @@ library and third-party imports are governed separately (section 4 and `depguard
 | `internal/tools` | 3 | Tool registry, descriptors, binding revision. Concrete tools are subpackages with their own rows added by the PR that introduces them. Owner: tool system (G-04). | `internal/kernel`, `internal/interaction`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/ids`, `internal/platform/supervise` | F2.8 |
 | `internal/tools/pure_read` | 3 | Deterministic in-memory read tool. Owner: tool system (G-04). | `internal/kernel`, `internal/platform/errcode` | F2.8 |
 | `internal/workspacememory` | 3 | Workspace memory entries, history, CAS by revision. Owner: context engine. | `internal/storage`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/ids` | F4.7 |
+| `internal/workspace` | 3 | Workspace layout, named roots, and workspace metadata store. Owner: workspace. | `internal/storage`, `internal/config`, `internal/platform/errcode`, `internal/platform/clock`, `internal/platform/ids` | F5.6a |
 | `internal/app` | 4 | Composition root and application services. Owner: application layer. | `internal/kernel`, `internal/codec`, `internal/crypto`, `internal/vault`, `internal/storage`, `internal/credentials`, `internal/execstore`, `internal/coordinator`, `internal/contextengine`, `internal/modeladapter`, `internal/modeladapter/faux`, `internal/modeladapter/anthropic`, `internal/modeladapter/openai`, `internal/tools/...`, `internal/interaction`, `internal/sandbox`, `internal/snapshot`, `internal/workspacememory`, `internal/secrets`, `internal/sealing`, `internal/transcript`, `internal/vendorstore`, `internal/config`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/ids`, `internal/platform/supervise` | F5.1 |
 | `internal/hostapi` | 5 | Connect handlers; maps proto types to domain types and calls `app`. Owner: Host API. | `internal/app`, `internal/kernel`, `pkg/pb/...`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/ids`, `internal/platform/supervise`, `internal/config` | F5.1 |
 | `internal/arch` | test | Architecture tests only; reads the graph with `go list`. Owner: quality gates. | | F0.5 |
@@ -104,8 +105,8 @@ Directories outside `internal/` and not covered by this table:
 ### 4. Where `database/sql` and the SQLite driver may be used
 
 `modernc.org/sqlite` is imported only by `internal/storage`. `database/sql` is imported only by
-`internal/storage`, `internal/vault`, `internal/credentials`, `internal/execstore` and
-`internal/workspacememory`, each touching only the tables it owns. These five are the
+`internal/storage`, `internal/vault`, `internal/credentials`, `internal/execstore`,
+`internal/workspacememory` and `internal/workspace`, each touching only the tables it owns. These six are the
 allowlist for `TestTableOwnership`.
 
 `storage.Open` returns the single connection handle (`journal_mode=DELETE`,
@@ -142,6 +143,7 @@ amendment. Column details are fixed by the migration, not here.
 | `exec_purges` | `internal/execstore` | F2.4 |
 | `workspace_memory_entries` | `internal/workspacememory` | F4.7 |
 | `workspace_memory_history` | `internal/workspacememory` | F4.7 |
+| `workspaces` | `internal/workspace` | F5.6a |
 
 Q-13 (user, 2026-11-03, option A): the F2.4 phase for `exec_payloads`,
 `exec_session_keys` and `exec_purges` introduces physical schema, constraints, trigger support
