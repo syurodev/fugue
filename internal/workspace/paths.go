@@ -2,6 +2,7 @@ package workspace
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 
 	"github.com/syurodev/fugue/internal/config"
@@ -42,6 +43,10 @@ func ResolvePaths(env config.Env, userHomeDir func() (string, error), dataDir st
 			return Paths{}, NewError(ErrPathDenied, "workspaces_dir must be an absolute path: "+options.workspacesDirOverride)
 		}
 		workspacesDir = filepath.Clean(options.workspacesDirOverride)
+	} else if dir, cfgErr := resolveGlobalWorkspacesDir(Paths{FugueHome: fugueHome}, userHomeDir); cfgErr != nil {
+		return Paths{}, cfgErr
+	} else if dir != "" {
+		workspacesDir = dir
 	}
 	cleanDataDir := ""
 	if dataDir != "" {
@@ -79,4 +84,41 @@ func (p Paths) ConfigPath(id string) string { return filepath.Join(p.WorkspaceDi
 // WorkspaceMDPath returns the path to WORKSPACE.md for the given workspace ID.
 func (p Paths) WorkspaceMDPath(id string) string {
 	return filepath.Join(p.WorkspaceDir(id), "WORKSPACE.md")
+}
+
+// GlobalConfigPath returns the path to the Tier 2 global config (<FugueHome>/config.toml).
+func (p Paths) GlobalConfigPath() string { return filepath.Join(p.FugueHome, "config.toml") }
+
+// AcceptedWorkspaceDir returns the directory in DataDir holding the Tier 3 accepted copy.
+func (p Paths) AcceptedWorkspaceDir(id string) string {
+	if p.DataDir != "" {
+		return filepath.Join(p.DataDir, "workspaces", id)
+	}
+	return p.WorkspaceDir(id)
+}
+
+// AcceptedConfigPath returns the path to the Tier 3 accepted copy (<DataDir>/workspaces/<id>/accepted.toml).
+func (p Paths) AcceptedConfigPath(id string) string {
+	return filepath.Join(p.AcceptedWorkspaceDir(id), "accepted.toml")
+}
+
+func resolveGlobalWorkspacesDir(p Paths, userHomeDir func() (string, error)) (string, error) {
+	raw, err := os.ReadFile(p.GlobalConfigPath())
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", nil
+		}
+		return "", WrapError(ErrConfigInvalid, "read config.toml", err)
+	}
+	var home string
+	if userHomeDir != nil {
+		if h, hErr := userHomeDir(); hErr == nil {
+			home = h
+		}
+	}
+	cfg, decErr := decodeTier2TOML(p.GlobalConfigPath(), raw, home)
+	if decErr != nil || cfg.Host == nil || cfg.Host.WorkspacesDir == nil || *cfg.Host.WorkspacesDir == "" {
+		return "", decErr
+	}
+	return filepath.Clean(expandHome(*cfg.Host.WorkspacesDir, home)), nil
 }

@@ -15,6 +15,12 @@ import (
 	"github.com/syurodev/fugue/internal/platform/ids"
 )
 
+// GrantInvalidator invalidates session grants belonging to a workspace when
+// its policy_revision increases (plan §2.6, interaction §3.4).
+type GrantInvalidator interface {
+	InvalidateWorkspaceGrants(workspaceID string)
+}
+
 // Workspace represents a fully resolved workspace.
 type Workspace struct {
 	ID, Name, Dir                  string
@@ -23,6 +29,9 @@ type Workspace struct {
 	ConfigHash, AcceptedConfigHash string
 	MissingRoots                   []string
 	InvalidRoots                   map[string]error
+	PendingPolicyConfirmation      bool
+	PolicyDiff                     []PolicyDiffEntry
+	ConfigError                    error
 	CreatedAt                      string
 }
 
@@ -46,15 +55,27 @@ func WithLogger(logger *slog.Logger) ServiceOption { return func(s *Service) { s
 // WithUserHome configures the home directory for expanding ~ in root paths.
 func WithUserHome(homeDir string) ServiceOption { return func(s *Service) { s.homeDir = homeDir } }
 
+// WithGrantInvalidator wires the interaction grant invalidation hook (plan §2.6).
+func WithGrantInvalidator(inv GrantInvalidator) ServiceOption {
+	return func(s *Service) { s.grantInvalidator = inv }
+}
+
+// WithBeforeStoreUpdate installs a fault-injection hook invoked before DB update in ConfirmWorkspaceConfig (Q-70).
+func WithBeforeStoreUpdate(fn func(ctx context.Context, id string) error) ServiceOption {
+	return func(s *Service) { s.beforeStoreUpdate = fn }
+}
+
 // Service manages workspace lifecycle, directory layout, roots and persistence.
 type Service struct {
-	paths   Paths
-	store   *Store
-	clock   clock.Clock
-	ids     ids.Generator
-	statUID func(os.FileInfo) (int, error)
-	logger  *slog.Logger
-	homeDir string
+	paths             Paths
+	store             *Store
+	clock             clock.Clock
+	ids               ids.Generator
+	statUID           func(os.FileInfo) (int, error)
+	logger            *slog.Logger
+	homeDir           string
+	grantInvalidator  GrantInvalidator
+	beforeStoreUpdate func(ctx context.Context, id string) error
 }
 
 // NewService returns a new workspace Service.
@@ -73,7 +94,7 @@ func NewService(paths Paths, db *sql.DB, clk clock.Clock, gen ids.Generator, opt
 func (s *Service) Paths() Paths { return s.paths }
 
 // CreateWorkspace creates a new workspace directory layout, minimal fugue.toml,
-// read-only WORKSPACE.md, and database record.
+// accepted.toml copy in DataDir, read-only WORKSPACE.md, and database record.
 func (s *Service) CreateWorkspace(ctx context.Context, req CreateWorkspaceRequest) (*Workspace, error) {
 	if req.Name == "" {
 		return nil, NewError(ErrRootInvalid, "workspace name cannot be empty")
@@ -95,6 +116,9 @@ func (s *Service) CreateWorkspace(ctx context.Context, req CreateWorkspaceReques
 	tomlBytes, layoutErr := s.createWorkspaceLayout(ctx, wsDir, id, req.Name, validatedRoots)
 	if layoutErr != nil {
 		return nil, layoutErr
+	}
+	if accErr := s.writeAcceptedCopy(ctx, id, tomlBytes); accErr != nil {
+		return nil, accErr
 	}
 
 	hash := computeConfigHash(tomlBytes)
@@ -180,52 +204,11 @@ func (s *Service) validateRoots(specs []RootSpec, homeDir string) ([]Root, error
 	return roots, nil
 }
 
-// GetWorkspace loads a workspace, enforcing file permissions, revalidating roots,
-// and detecting missing roots.
+// GetWorkspace loads a workspace, enforcing file permissions, verifying the
+// accepted copy (Q-70), handling out-of-band edits (Q-64), and revalidating roots.
 func (s *Service) GetWorkspace(ctx context.Context, id string) (*Workspace, error) {
-	rec, err := s.store.Get(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if checkErr := CheckAndEnforcePermissions(ctx, s.paths, id, s.statUID, s.logger); checkErr != nil {
-		return nil, checkErr
-	}
-	cfgData, readErr := os.ReadFile(s.paths.ConfigPath(id))
-	if readErr != nil {
-		return nil, WrapError(ErrNotFound, "read config for workspace "+id, readErr)
-	}
-	cfg, parseErr := decodeConfigTOML(cfgData)
-	if parseErr != nil {
-		return nil, parseErr
-	}
-	homeDir, homeErr := s.userHome("")
-	if homeErr != nil {
-		return nil, homeErr
-	}
-
-	ws := &Workspace{
-		ID: rec.WorkspaceID, Name: cfg.Name,
-		ConfigRevision: rec.ConfigRevision, PolicyRevision: rec.PolicyRevision,
-		ConfigHash: computeConfigHash(cfgData), AcceptedConfigHash: rec.AcceptedConfigHash,
-		MissingRoots: rec.MissingRoots, InvalidRoots: make(map[string]error),
-		CreatedAt: rec.CreatedAt, Dir: s.paths.WorkspaceDir(id),
-	}
-
-	validRoots := s.revalidateRoots(cfg.Roots, homeDir, ws)
-	ws.Roots = append([]Root(nil), cfg.Roots...)
-	for i, r := range ws.Roots {
-		if idx := slices.IndexFunc(validRoots, func(v Root) bool { return v.Name == r.Name }); idx != -1 {
-			ws.Roots[i].Path = validRoots[idx].Path
-		}
-	}
-
-	if missing := DetectMissingRoots(validRoots); !slices.Equal(missing, rec.MissingRoots) {
-		if updateErr := s.store.UpdateMissingRoots(ctx, id, missing); updateErr != nil {
-			return nil, updateErr
-		}
-		ws.MissingRoots = missing
-	}
-	return ws, nil
+	ws, _, err := s.loadWorkspaceAndConfig(ctx, id, nil)
+	return ws, err
 }
 
 func (s *Service) revalidateRoots(rawRoots []Root, userHome string, ws *Workspace) []Root {
@@ -269,7 +252,10 @@ func (s *Service) SelectSessionCwd(ctx context.Context, workspaceID, rootName st
 	if err != nil {
 		return "", err
 	}
-	if ws.ConfigHash != ws.AcceptedConfigHash {
+	if ws.ConfigError != nil {
+		return "", ws.ConfigError
+	}
+	if ws.PendingPolicyConfirmation || ws.ConfigHash != ws.AcceptedConfigHash {
 		return "", NewError(ErrConfigUnconfirmed, fmt.Sprintf("workspace configuration hash %s does not match accepted hash %s", ws.ConfigHash, ws.AcceptedConfigHash))
 	}
 	targetName, resolveErr := resolveTargetRootName(ws.Roots, rootName)
