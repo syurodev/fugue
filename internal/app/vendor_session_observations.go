@@ -120,6 +120,9 @@ func (a *vendorSessionActor) persistFugueTurnEnd(ctx context.Context, observedTu
 	if a.vaultInterruptTurnID == turnID {
 		return a.endVaultLockedTurn(ctx, vendorstore.OutcomeInterrupted, vendor.Fact{Kind: vendor.FactTurnInterrupted})
 	}
+	if a.userInterruptTurnID == turnID {
+		return a.endInterruptedTurn(ctx, turnID, vendorstore.OutcomeInterrupted, vendor.Fact{Kind: vendor.FactTurnInterrupted})
+	}
 	next, _, err := vendor.Transition(a.state, fact)
 	if err != nil {
 		return fmt.Errorf("end Fugue turn state: %w", err)

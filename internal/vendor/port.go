@@ -108,8 +108,9 @@ type CloseReason string
 
 // Close reasons.
 const (
-	CloseUserRequest CloseReason = "user_request"
-	CloseHostStop    CloseReason = "host_stop"
+	CloseUserRequest  CloseReason = "user_request"
+	CloseHostStop     CloseReason = "host_stop"
+	CloseActorFailure CloseReason = "actor_failure"
 )
 
 // Adapter is the port every vendor CLI implements (vendor-runtime §6). The

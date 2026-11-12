@@ -4,9 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/transcript"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
@@ -53,10 +55,21 @@ type vendorSessionActor struct {
 	done                 chan struct{}
 	interruptResults     chan vaultInterruptResult
 	vaultInterruptTurnID string
+	userInterruptTurnID  string
+	closeResults         chan actorCloseResult
+	closeOnce            sync.Once
+	closeMu              sync.Mutex
+	closeReason          vendor.CloseReason
 }
 
 type vaultInterruptResult struct {
 	turnID string
+	err    error
+}
+
+type actorCloseResult struct {
+	reason vendor.CloseReason
+	proof  process.StopProof
 	err    error
 }
 
@@ -71,7 +84,7 @@ func newVendorSessionActor(manager *VendorSessions, info *vendorstore.Session, s
 		manager: manager, info: *info, session: session, obs: obs,
 		commands: make(chan actorRequest), state: state,
 		sequence: sequence, turns: make(map[string]bool), vaultSub: vaultSub, done: make(chan struct{}),
-		interruptResults: make(chan vaultInterruptResult, 1),
+		interruptResults: make(chan vaultInterruptResult, 1), closeResults: make(chan actorCloseResult, 1),
 	}
 }
 
@@ -132,7 +145,11 @@ func (a *vendorSessionActor) runStep(ctx context.Context) error {
 	case snapshot, ok := <-a.vaultSub.Events():
 		return a.handleVaultEvent(ctx, snapshot, ok)
 	case result := <-a.interruptResults:
-		if err := a.handleVaultInterruptResult(ctx, result); err != nil {
+		if err := a.handleInterruptResult(ctx, result); err != nil {
+			return a.fail(ctx, err)
+		}
+	case result := <-a.closeResults:
+		if err := a.persistClose(ctx, result.reason, result.proof, result.err); err != nil {
 			return a.fail(ctx, err)
 		}
 	case <-ctx.Done():
@@ -220,6 +237,39 @@ func (a *vendorSessionActor) handleVaultInterruptResult(ctx context.Context, res
 	return a.endVaultLockedTurn(ctx, vendorstore.OutcomeUnknown, vendor.Fact{Kind: vendor.FactTurnUnknown, Reason: vendor.WaitingVaultLocked})
 }
 
+func (a *vendorSessionActor) handleInterruptResult(ctx context.Context, result vaultInterruptResult) error {
+	if result.turnID == a.vaultInterruptTurnID {
+		return a.handleVaultInterruptResult(ctx, result)
+	}
+	if result.turnID == "" || result.turnID != a.userInterruptTurnID || a.turnID != result.turnID || result.err == nil {
+		return nil
+	}
+	next, _, err := vendor.Transition(a.state, vendor.Fact{Kind: vendor.FactTurnUnknown})
+	if err != nil {
+		return fmt.Errorf("record interrupted turn state: %w", err)
+	}
+	if err := a.append(ctx, &vendorstore.Event{Type: vendorstore.VendorTurnEnded, TurnID: result.turnID, Outcome: vendorstore.OutcomeUnknown, State: vendorstore.StateDetached}); err != nil {
+		return err
+	}
+	a.state, a.turnID, a.userInterruptTurnID = next, "", ""
+	delete(a.turns, result.turnID)
+	return nil
+}
+
+func (a *vendorSessionActor) endInterruptedTurn(ctx context.Context, turnID, outcome string, fact vendor.Fact) error {
+	next, _, err := vendor.Transition(a.state, fact)
+	if err != nil {
+		return fmt.Errorf("record interrupted turn state: %w", err)
+	}
+	state, waiting := stateToStore(next)
+	if err := a.append(ctx, &vendorstore.Event{Type: vendorstore.VendorTurnEnded, TurnID: turnID, Outcome: outcome, State: state, WaitingReason: waiting}); err != nil {
+		return err
+	}
+	a.state, a.turnID, a.userInterruptTurnID = next, "", ""
+	delete(a.turns, turnID)
+	return nil
+}
+
 func (a *vendorSessionActor) endVaultLockedTurn(ctx context.Context, outcome string, fact vendor.Fact) error {
 	next, _, err := vendor.Transition(a.state, fact)
 	if err != nil {
@@ -239,6 +289,7 @@ func (a *vendorSessionActor) endVaultLockedTurn(ctx context.Context, outcome str
 	a.state = next
 	a.turnID = ""
 	a.vaultInterruptTurnID = ""
+	a.userInterruptTurnID = ""
 	delete(a.turns, turnID)
 	return nil
 }
@@ -258,7 +309,7 @@ func (a *vendorSessionActor) handleCommand(ctx context.Context, command actorCom
 	case commandInterrupt:
 		return a.interrupt(ctx)
 	case commandClose:
-		return a.close(ctx, command.reason)
+		return a.requestClose(command.reason)
 	default:
 		return errcode.New(errcode.InvalidArgument, "unknown vendor session command")
 	}
@@ -294,19 +345,23 @@ func (a *vendorSessionActor) send(ctx context.Context, input vendor.Input) error
 	if a.state.Kind != vendor.StateReady {
 		return vendor.ErrBusy
 	}
-	turn, err := a.session.Send(context.WithoutCancel(ctx), input)
+	turn, err := a.session.Send(ctx, input)
 	if err != nil {
+		if errors.Is(err, vendor.ErrSessionClosed) {
+			return vendor.ErrSessionClosed
+		}
 		return safeActorError(err)
 	}
 	next, _, err := vendor.Transition(a.state, vendor.Fact{Kind: vendor.FactFugueSend})
 	if err != nil {
 		return fmt.Errorf("start Fugue turn state: %w", err)
 	}
-	a.turnID, a.turns[turn.ID] = turn.ID, true
 	state, waiting := stateToStore(next)
 	if appendErr := a.append(ctx, &vendorstore.Event{Type: vendorstore.VendorTurnStarted, TurnID: turn.ID, TurnOrigin: vendorstore.TurnOriginFugue, State: state, WaitingReason: waiting}); appendErr != nil {
-		return appendErr
+		a.requestClose(vendor.CloseActorFailure)
+		return errcode.New(errcode.Unavailable, "vendor turn could not be persisted; session is closing")
 	}
+	a.turnID, a.turns[turn.ID] = turn.ID, true
 	a.state = next
 	itemID, err := a.manager.deps.IDs.NewID()
 	if err != nil {
@@ -324,7 +379,10 @@ func (a *vendorSessionActor) steer(ctx context.Context, input vendor.Input) erro
 	if a.state.Kind != vendor.StateRunning || a.turnID == "" {
 		return vendor.ErrTurnNotRunning
 	}
-	err := a.session.Steer(context.WithoutCancel(ctx), vendor.TurnRef{ID: a.turnID}, input)
+	err := a.session.Steer(ctx, vendor.TurnRef{ID: a.turnID}, input)
+	if errors.Is(err, vendor.ErrSessionClosed) {
+		return nil
+	}
 	return safeActorError(err)
 }
 
@@ -332,9 +390,38 @@ func (a *vendorSessionActor) interrupt(ctx context.Context) error {
 	if a.state.Kind != vendor.StateRunning || a.turnID == "" {
 		return vendor.ErrTurnNotRunning
 	}
-	err := a.session.Interrupt(context.WithoutCancel(ctx), vendor.TurnRef{ID: a.turnID})
-	if err != nil {
-		return a.close(ctx, vendor.CloseUserRequest)
-	}
+	turnID := a.turnID
+	a.userInterruptTurnID = turnID
+	supervise.Go(ctx, "user-interrupt-"+a.info.ID, func(taskCtx context.Context) error {
+		err := a.session.Interrupt(taskCtx, vendor.TurnRef{ID: turnID})
+		select {
+		case a.interruptResults <- vaultInterruptResult{turnID: turnID, err: err}:
+		case <-taskCtx.Done():
+		}
+		return nil
+	})
 	return nil
+}
+
+func (a *vendorSessionActor) requestClose(reason vendor.CloseReason) error {
+	a.closeOnce.Do(func() {
+		a.closeMu.Lock()
+		a.closeReason = reason
+		a.closeMu.Unlock()
+		a.manager.spawn("close-vendor-session-"+a.info.ID, func(ctx context.Context) error {
+			proof, err := a.session.Close(context.WithoutCancel(ctx), reason)
+			select {
+			case a.closeResults <- actorCloseResult{reason: reason, proof: proof, err: err}:
+			case <-a.done:
+			}
+			return nil
+		})
+	})
+	return nil
+}
+
+func (a *vendorSessionActor) requestedCloseReason() vendor.CloseReason {
+	a.closeMu.Lock()
+	defer a.closeMu.Unlock()
+	return a.closeReason
 }

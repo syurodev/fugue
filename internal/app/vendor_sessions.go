@@ -132,7 +132,19 @@ func (m *VendorSessions) Interrupt(ctx context.Context, sessionID string) error 
 
 // Close stops a vendor session and persists its stop proof.
 func (m *VendorSessions) Close(ctx context.Context, sessionID string, reason vendor.CloseReason) error {
-	return m.call(ctx, sessionID, actorCommand{kind: commandClose, reason: reason})
+	actor := m.actor(sessionID)
+	if actor == nil {
+		return vendorstore.ErrSessionNotFound
+	}
+	if err := actor.requestClose(reason); err != nil {
+		return err
+	}
+	select {
+	case <-actor.done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for vendor session close: %w", ctx.Err())
+	}
 }
 
 // Resume attaches a fresh adapter process to a detached session. Existing
@@ -272,13 +284,17 @@ func (m *VendorSessions) List(ctx context.Context) ([]vendorstore.Session, error
 }
 
 func (m *VendorSessions) call(ctx context.Context, sessionID string, cmd actorCommand) error {
-	m.mu.RLock()
-	actor := m.actors[sessionID]
-	m.mu.RUnlock()
+	actor := m.actor(sessionID)
 	if actor == nil {
 		return vendorstore.ErrSessionNotFound
 	}
 	return actor.call(ctx, cmd)
+}
+
+func (m *VendorSessions) actor(sessionID string) *vendorSessionActor {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.actors[sessionID]
 }
 
 // CloseAll asks every live actor to stop during host shutdown.
@@ -290,10 +306,17 @@ func (m *VendorSessions) CloseAll(ctx context.Context) error {
 		actors = append(actors, actor)
 	}
 	m.mu.Unlock()
+	for _, actor := range actors {
+		if err := actor.requestClose(vendor.CloseHostStop); err != nil {
+			return err
+		}
+	}
 	var failures []error
 	for _, actor := range actors {
-		if err := actor.call(ctx, actorCommand{kind: commandClose, reason: vendor.CloseHostStop}); err != nil && !errors.Is(err, context.Canceled) {
-			failures = append(failures, err)
+		select {
+		case <-actor.done:
+		case <-ctx.Done():
+			failures = append(failures, ctx.Err())
 		}
 	}
 	return errors.Join(failures...)

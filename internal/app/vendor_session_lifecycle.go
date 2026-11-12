@@ -12,11 +12,12 @@ import (
 
 func (a *vendorSessionActor) close(ctx context.Context, reason vendor.CloseReason) error {
 	proof, closeErr := a.session.Close(context.WithoutCancel(ctx), reason)
+	return a.persistClose(ctx, reason, proof, closeErr)
+}
+
+func (a *vendorSessionActor) persistClose(ctx context.Context, reason vendor.CloseReason, proof process.StopProof, closeErr error) error {
 	status := string(proof.Status)
-	if status != string(process.StopProofProved) {
-		status = string(process.StopProofUnknown)
-	}
-	if closeErr != nil {
+	if status != string(process.StopProofProved) || closeErr != nil {
 		status = string(process.StopProofUnknown)
 	}
 	if a.turnID != "" {
@@ -34,6 +35,7 @@ func (a *vendorSessionActor) close(ctx context.Context, reason vendor.CloseReaso
 		if err := a.append(context.WithoutCancel(ctx), &vendorstore.Event{Type: vendorstore.VendorTurnEnded, TurnID: a.turnID, Outcome: outcome, State: state, WaitingReason: waiting}); err != nil {
 			return err
 		}
+		delete(a.turns, a.turnID)
 		a.state = next
 		a.turnID = ""
 	}
@@ -41,11 +43,10 @@ func (a *vendorSessionActor) close(ctx context.Context, reason vendor.CloseReaso
 	if transitionErr != nil {
 		return fmt.Errorf("close vendor session state: %w", transitionErr)
 	}
-	err := a.append(context.WithoutCancel(ctx), &vendorstore.Event{
+	if err := a.append(context.WithoutCancel(ctx), &vendorstore.Event{
 		Type: vendorstore.VendorSessionClosed, CloseReason: string(reason), StopProof: status,
 		State: vendorstore.StateClosed,
-	})
-	if err != nil {
+	}); err != nil {
 		return err
 	}
 	a.state = closedState
@@ -54,9 +55,13 @@ func (a *vendorSessionActor) close(ctx context.Context, reason vendor.CloseReaso
 }
 
 func (a *vendorSessionActor) processExited(ctx context.Context) error {
-	next, _, transitionErr := vendor.Transition(a.state, vendor.Fact{Kind: vendor.FactProcessExited})
-	if transitionErr != nil {
-		return fmt.Errorf("record process exit state: %w", transitionErr)
+	next := vendor.State{Kind: vendor.StateClosed}
+	if a.state.Kind != vendor.StateDetached {
+		var transitionErr error
+		next, _, transitionErr = vendor.Transition(a.state, vendor.Fact{Kind: vendor.FactProcessExited})
+		if transitionErr != nil {
+			return fmt.Errorf("record process exit state: %w", transitionErr)
+		}
 	}
 	if a.turnID != "" {
 		if err := a.append(ctx, &vendorstore.Event{Type: vendorstore.VendorTurnEnded, TurnID: a.turnID, Outcome: vendorstore.OutcomeUnknown}); err != nil {
@@ -64,7 +69,11 @@ func (a *vendorSessionActor) processExited(ctx context.Context) error {
 		}
 		a.turnID = ""
 	}
-	proof, stopErr := a.session.Close(context.WithoutCancel(ctx), vendor.CloseHostStop)
+	reason := a.requestedCloseReason()
+	if reason == "" {
+		reason = vendor.CloseHostStop
+	}
+	proof, stopErr := a.session.Close(context.WithoutCancel(ctx), reason)
 	status := string(proof.Status)
 	if stopErr != nil || status != string(process.StopProofProved) {
 		status = string(process.StopProofUnknown)
@@ -72,7 +81,7 @@ func (a *vendorSessionActor) processExited(ctx context.Context) error {
 	if err := a.append(ctx, &vendorstore.Event{Type: vendorstore.VendorProcessExited, StopProof: status}); err != nil {
 		return err
 	}
-	if err := a.append(ctx, &vendorstore.Event{Type: vendorstore.VendorSessionClosed, StopProof: status, State: vendorstore.StateClosed, CloseReason: string(vendor.CloseHostStop)}); err != nil {
+	if err := a.append(ctx, &vendorstore.Event{Type: vendorstore.VendorSessionClosed, StopProof: status, State: vendorstore.StateClosed, CloseReason: string(reason)}); err != nil {
 		return err
 	}
 	a.finished = true
