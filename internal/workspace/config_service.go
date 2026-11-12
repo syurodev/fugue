@@ -178,6 +178,7 @@ func (s *Service) reconcileOutOfBand(
 	if parseErr != nil {
 		return accCfg, false, nil, parseErr, nil
 	}
+	s.canonicalizeConfiguredRoots(&diskCfg, homeDir)
 	if diskHash == rec.AcceptedConfigHash {
 		return diskCfg, false, nil, nil, nil
 	}
@@ -253,7 +254,27 @@ func (s *Service) loadAcceptedCopy(ctx context.Context, id, expectedHash, homeDi
 		return nil, tier3RawConfig{}, NewError(ErrConfigUnconfirmed, "accepted configuration copy hash does not match accepted_config_hash")
 	}
 	cfg, decErr := decodeTier3TOML(accPath, raw, homeDir)
+	s.canonicalizeConfiguredRoots(&cfg, homeDir)
 	return raw, cfg, decErr
+}
+
+// canonicalizeConfiguredRoots makes equivalent filesystem aliases compare the
+// same in effective configuration and policy diffs. Missing and invalid roots
+// stay intact so buildWorkspace can report them through its usual fields.
+func (s *Service) canonicalizeConfiguredRoots(cfg *tier3RawConfig, homeDir string) {
+	if cfg.Roots == nil {
+		return
+	}
+	roots := make([]Root, 0, len(*cfg.Roots))
+	for _, spec := range *cfg.Roots {
+		root, err := s.validateRoot(spec.Name, spec.Access, spec.Path, homeDir, roots)
+		if err != nil {
+			roots = append(roots, Root{Name: spec.Name, Path: spec.Path, Access: spec.Access})
+			continue
+		}
+		roots = append(roots, root)
+	}
+	cfg.Roots = &roots
 }
 
 func (s *Service) loadTier2Config(ctx context.Context, homeDir string) (tier2RawConfig, error) {
