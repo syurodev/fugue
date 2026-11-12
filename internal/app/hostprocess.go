@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"os"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -12,6 +13,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/storage"
+	"github.com/syurodev/fugue/internal/workspace"
 )
 
 // HostProcess is a running host: the store that owns the data directory, the
@@ -114,6 +116,26 @@ func initHostTopics(hp *HostProcess, store *storage.Store, deps *HostDeps) error
 		return ierr
 	}
 	hp.rt.interactions = interactions
+	env := deps.WorkspaceEnv
+	if env == nil {
+		env = config.ProcessEnv{}
+	}
+	paths, pathErr := workspace.ResolvePaths(env, os.UserHomeDir, store.DataDir())
+	if pathErr != nil {
+		if serr := store.Close(); serr != nil {
+			return errcode.Wrap(errcode.Internal, "resolve workspace paths", errors.Join(pathErr, serr))
+		}
+		return publicWorkspaceError(pathErr)
+	}
+	domain := workspace.NewService(paths, store.DB(), deps.Clock, deps.IDs, workspace.WithGrantInvalidator(interactions.owner))
+	workspaces, werr := NewWorkspaceService(domain, hp.rt.hub)
+	if werr != nil {
+		if serr := store.Close(); serr != nil {
+			return errcode.Wrap(errcode.Internal, "create workspace service", errors.Join(werr, serr))
+		}
+		return werr
+	}
+	hp.rt.workspaces = workspaces
 	return nil
 }
 

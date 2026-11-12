@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
@@ -123,11 +124,12 @@ type StreamEnder interface {
 
 // HostDeps are the ports StartHost needs.
 type HostDeps struct {
-	DataDir   string
-	Config    HostConfig
-	Clock     clock.Clock
-	IDs       ids.Generator
-	Transport HostTransport
+	DataDir      string
+	WorkspaceEnv config.Env
+	Config       HostConfig
+	Clock        clock.Clock
+	IDs          ids.Generator
+	Transport    HostTransport
 }
 
 // HostRuntime tracks versions, leases and the drain state of a running host.
@@ -140,6 +142,7 @@ type HostRuntime struct {
 	clk          clock.Clock
 	hub          *EventHub
 	interactions *InteractionService
+	workspaces   *WorkspaceService
 
 	// goTask spawns a supervised goroutine on the host's base context; it is
 	// installed by StartHost because the base context is never stored.

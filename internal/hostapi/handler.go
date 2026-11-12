@@ -34,17 +34,17 @@ const genericInternalMessage = "internal error"
 // public code and the host's versions in the typed detail.
 func connectCode(c errcode.Code) connect.Code {
 	switch c {
-	case errcode.InvalidArgument, errcode.InteractionOptionNotOffered:
+	case errcode.InvalidArgument, errcode.InteractionOptionNotOffered, errcode.WorkspaceConfigInvalid, errcode.WorkspaceRootInvalid:
 		return connect.CodeInvalidArgument
-	case errcode.NotFound, errcode.InteractionNotFound:
+	case errcode.NotFound, errcode.InteractionNotFound, errcode.WorkspaceNotFound, errcode.WorkspaceRootMissing:
 		return connect.CodeNotFound
-	case errcode.AlreadyExists:
+	case errcode.AlreadyExists, errcode.WorkspaceAlreadyExists:
 		return connect.CodeAlreadyExists
-	case errcode.FailedPrecondition, errcode.UnsupportedVersion, errcode.InteractionAlreadyAnswered, errcode.InteractionStaleIncarnation:
+	case errcode.FailedPrecondition, errcode.UnsupportedVersion, errcode.InteractionAlreadyAnswered, errcode.InteractionStaleIncarnation, errcode.WorkspaceConfigChanged, errcode.WorkspaceConfigUnconfirmed:
 		return connect.CodeFailedPrecondition
-	case errcode.FrameTooLarge, errcode.InteractionTextTooLarge:
+	case errcode.FrameTooLarge, errcode.InteractionTextTooLarge, errcode.WorkspaceConfigTooLarge:
 		return connect.CodeResourceExhausted
-	case errcode.PermissionDenied:
+	case errcode.PermissionDenied, errcode.WorkspacePathDenied, errcode.WorkspaceOwnershipInvalid:
 		return connect.CodePermissionDenied
 	case errcode.Unavailable:
 		return connect.CodeUnavailable

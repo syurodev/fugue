@@ -18,6 +18,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/interaction/v1/interactionv1connect"
+	"github.com/syurodev/fugue/pkg/pb/fugue/workspace/v1/workspacev1connect"
 )
 
 // ServerConfig configures the host api server. It carries no version fields:
@@ -176,6 +177,10 @@ func (s *Server) Start(ctx context.Context, backend app.Backend) error {
 	handler.Handle(interactionv1connect.NewInteractionServiceHandler(
 		&interactionHandler{backend: backend},
 		connect.WithReadMaxBytes(64*1024),
+	))
+	handler.Handle(workspacev1connect.NewWorkspaceServiceHandler(
+		&workspaceHandler{backend: backend},
+		connect.WithReadMaxBytes(app.WorkspaceConfigMaxBytes),
 	))
 	// The admission gate and the in-flight wrapper let the drain wait for
 	// handlers that are still running when the deadline force-closes their

@@ -1,0 +1,114 @@
+syntax = "proto3";
+
+package fugue.workspace.v1;
+
+import "google/protobuf/struct.proto";
+
+message Root {
+  string name = 1;
+  string path = 2;
+  string access = 3;
+  bool missing = 4;
+}
+
+message PolicyDiffEntry {
+  string key = 1;
+  string old_value = 2;
+  string new_value = 3;
+}
+
+message WorkspaceSummary {
+  string id = 1;
+  string name = 2;
+  repeated string missing_roots = 3;
+  int64 config_revision = 4;
+  bool pending_policy_confirmation = 5;
+}
+
+message Workspace {
+  string id = 1;
+  string name = 2;
+  repeated Root roots = 3;
+  repeated string missing_roots = 4;
+  bytes raw_toml = 5;
+  string config_hash = 6;
+  int64 config_revision = 7;
+  int64 policy_revision = 8;
+  bool pending_policy_confirmation = 9;
+  repeated PolicyDiffEntry policy_diff = 10;
+  string created_at = 11;
+  string config_error_key = 12;
+  int64 config_error_line = 13;
+  int64 config_error_column = 14;
+}
+
+message ConfigIssue {
+  string key = 1;
+  int64 line = 2;
+  int64 column = 3;
+  string message = 4;
+}
+
+message CreateWorkspaceRequest {
+  string name = 1;
+}
+message CreateWorkspaceResponse {
+  Workspace workspace = 1;
+}
+message ListWorkspacesRequest {}
+message ListWorkspacesResponse {
+  repeated WorkspaceSummary workspaces = 1;
+}
+message GetWorkspaceRequest {
+  string id = 1;
+}
+message GetWorkspaceResponse {
+  Workspace workspace = 1;
+}
+message GetEffectiveConfigRequest {
+  string id = 1;
+}
+message GetEffectiveConfigResponse {
+  google.protobuf.Struct values = 1;
+  map<string, int64> provenance = 2;
+}
+message ValidateConfigRequest {
+  string id = 1;
+  bytes raw_toml = 2;
+}
+message ValidateConfigResponse {
+  repeated ConfigIssue issues = 1;
+}
+message UpdateWorkspaceConfigRequest {
+  string id = 1;
+  bytes raw_toml = 2;
+  string expected_hash = 3;
+}
+message UpdateWorkspaceConfigResponse {
+  Workspace workspace = 1;
+}
+message ConfirmWorkspaceConfigRequest {
+  string id = 1;
+  string expected_hash = 2;
+}
+message ConfirmWorkspaceConfigResponse {
+  Workspace workspace = 1;
+}
+message RejectWorkspaceConfigRequest {
+  string id = 1;
+  string expected_hash = 2;
+}
+message RejectWorkspaceConfigResponse {
+  Workspace workspace = 1;
+}
+
+service WorkspaceService {
+  rpc CreateWorkspace(CreateWorkspaceRequest) returns (CreateWorkspaceResponse);
+  rpc ListWorkspaces(ListWorkspacesRequest) returns (ListWorkspacesResponse);
+  rpc GetWorkspace(GetWorkspaceRequest) returns (GetWorkspaceResponse);
+  rpc GetEffectiveConfig(GetEffectiveConfigRequest) returns (GetEffectiveConfigResponse);
+  rpc ValidateConfig(ValidateConfigRequest) returns (ValidateConfigResponse);
+  rpc UpdateWorkspaceConfig(UpdateWorkspaceConfigRequest) returns (UpdateWorkspaceConfigResponse);
+  rpc ConfirmWorkspaceConfig(ConfirmWorkspaceConfigRequest) returns (ConfirmWorkspaceConfigResponse);
+  rpc RejectWorkspaceConfig(RejectWorkspaceConfigRequest) returns (RejectWorkspaceConfigResponse);
+}

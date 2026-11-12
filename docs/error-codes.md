@@ -26,6 +26,16 @@ Changing this file needs a review of what clients can rely on; hiding a code nee
 | `interaction.stale_incarnation` | The interaction request belongs to a previous host incarnation. |
 | `interaction.option_not_offered` | The selected outcome or option was not offered. |
 | `interaction.text_too_large` | The interaction answer text or deny note exceeds the size limit. |
+| `workspace.not_found` | The workspace does not exist. |
+| `workspace.already_exists` | The workspace already exists. |
+| `workspace.config_invalid` | The workspace configuration is invalid; safe key and source position may be included. |
+| `workspace.config_changed` | The workspace configuration changed since it was reviewed. |
+| `workspace.config_unconfirmed` | The workspace configuration requires confirmation. |
+| `workspace.root_invalid` | The workspace root is invalid. |
+| `workspace.root_missing` | The workspace root is missing. |
+| `workspace.path_denied` | The workspace path is not allowed. |
+| `workspace.ownership_invalid` | Workspace ownership or permissions are invalid. |
+| `workspace.config_too_large` | The workspace configuration exceeds the size limit. |
 
 ## Hidden on purpose
 

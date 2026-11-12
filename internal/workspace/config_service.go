@@ -23,8 +23,8 @@ func (s *Service) UpdateWorkspaceConfig(ctx context.Context, id string, rawTOML 
 }
 
 // ConfirmWorkspaceConfig confirms a pending out-of-band configuration change (Q-64, Q-70: write accepted.toml first, update DB second).
-func (s *Service) ConfirmWorkspaceConfig(ctx context.Context, id string) (*Workspace, error) {
-	return s.applyWorkspaceConfig(ctx, id, nil, "", true)
+func (s *Service) ConfirmWorkspaceConfig(ctx context.Context, id, expectedHash string) (*Workspace, error) {
+	return s.applyWorkspaceConfig(ctx, id, nil, expectedHash, true)
 }
 
 func (s *Service) applyWorkspaceConfig(ctx context.Context, id string, rawTOML []byte, expectedHash string, isConfirm bool) (*Workspace, error) {
@@ -33,6 +33,9 @@ func (s *Service) applyWorkspaceConfig(ctx context.Context, id string, rawTOML [
 		return nil, err
 	}
 	if isConfirm {
+		if err := checkExpectedHash(diskBytes, rec.ConfigHash, expectedHash); err != nil {
+			return nil, err
+		}
 		rawTOML = diskBytes
 	} else if err := checkExpectedHash(diskBytes, rec.ConfigHash, expectedHash); err != nil {
 		return nil, err
@@ -52,7 +55,7 @@ func (s *Service) applyWorkspaceConfig(ctx context.Context, id string, rawTOML [
 }
 
 // RejectWorkspaceConfig restores fugue.toml atomically from accepted.toml without bumping policy_revision (Q-64, Q-70).
-func (s *Service) RejectWorkspaceConfig(ctx context.Context, id string) (*Workspace, error) {
+func (s *Service) RejectWorkspaceConfig(ctx context.Context, id, expectedHash string) (*Workspace, error) {
 	rec, homeDir, err := s.prepareWorkspaceOp(ctx, id)
 	if err != nil {
 		return nil, err
@@ -60,6 +63,13 @@ func (s *Service) RejectWorkspaceConfig(ctx context.Context, id string) (*Worksp
 	accBytes, _, accErr := s.loadAcceptedCopy(ctx, id, rec.AcceptedConfigHash, homeDir)
 	if accErr != nil {
 		return nil, accErr
+	}
+	diskBytes, readErr := os.ReadFile(s.paths.ConfigPath(id))
+	if readErr != nil {
+		return nil, WrapError(ErrNotFound, "read config for workspace", readErr)
+	}
+	if err := checkExpectedHash(diskBytes, rec.ConfigHash, expectedHash); err != nil {
+		return nil, err
 	}
 	rec.ConfigHash = rec.AcceptedConfigHash
 	if err := firstErr(writeAtomic(s.paths.WorkspaceDir(id), "fugue.toml", accBytes), s.store.Update(ctx, rec)); err != nil {
@@ -69,7 +79,7 @@ func (s *Service) RejectWorkspaceConfig(ctx context.Context, id string) (*Worksp
 }
 
 func checkExpectedHash(diskBytes []byte, recHash, expectedHash string) error {
-	if expectedHash != "" && (computeConfigHash(diskBytes) != expectedHash || recHash != expectedHash) {
+	if expectedHash == "" || computeConfigHash(diskBytes) != expectedHash || recHash != expectedHash {
 		return NewError(ErrConfigChanged, "workspace configuration hash does not match expected_hash")
 	}
 	return nil
