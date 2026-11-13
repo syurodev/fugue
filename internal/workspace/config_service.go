@@ -176,6 +176,13 @@ func (s *Service) reconcileOutOfBand(
 ) (tier3RawConfig, bool, []PolicyDiffEntry, error, error) {
 	diskCfg, parseErr := decodeTier3TOML(s.paths.ConfigPath(id), diskBytes, homeDir)
 	if parseErr != nil {
+		// Record the hash the client is shown so Reject/Update can pass the CAS check on a corrupted file (WS-E12).
+		if rec.ConfigHash != diskHash {
+			rec.ConfigHash = diskHash
+			if err := s.store.Update(ctx, rec); err != nil {
+				return tier3RawConfig{}, false, nil, nil, err
+			}
+		}
 		return accCfg, false, nil, parseErr, nil
 	}
 	s.canonicalizeConfiguredRoots(&diskCfg, homeDir)
