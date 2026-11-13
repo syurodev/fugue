@@ -10,9 +10,13 @@ import (
 	"github.com/syurodev/fugue/internal/platform/ids"
 )
 
-// DeleteWorkspace removes the workspace record and accepted copy before its
-// Fugue-owned directory. It never follows a workspace symlink or a root link.
-func (s *Service) DeleteWorkspace(ctx context.Context, id, expectedHash, confirmName string) (*Workspace, error) {
+const acceptedConfigName = "accepted.toml"
+
+// DeleteWorkspace removes the workspace record, its accepted-copy directory and
+// its Fugue-owned directory. It never follows a workspace symlink or a root
+// link. Both directories are opened and verified before the record is removed,
+// so a refused deletion keeps the record and can be retried.
+func (s *Service) DeleteWorkspace(ctx context.Context, id, expectedHash, confirmName string) (ws *Workspace, result error) {
 	if !isWorkspaceID(id) {
 		return nil, NewError(ErrIDInvalid, "workspace id is invalid")
 	}
@@ -26,18 +30,22 @@ func (s *Service) DeleteWorkspace(ctx context.Context, id, expectedHash, confirm
 	if err != nil {
 		return nil, err
 	}
-	acceptedPath, err := s.acceptedCopyForDeletion(id)
+	roots, err := s.openRemovalRoots(id)
 	if err != nil {
 		return nil, err
 	}
-	deleteErr := s.store.DeleteExpected(ctx, id, expectedHash)
-	if deleteErr != nil {
+	defer func() {
+		if closeErr := roots.close(); closeErr != nil {
+			result = WrapError(ErrDeleteFailed, "workspace directories could not be closed", errors.Join(result, closeErr))
+		}
+	}()
+	if deleteErr := s.store.DeleteExpected(ctx, id, expectedHash); deleteErr != nil {
 		if CodeOf(deleteErr) == ErrConfigChanged {
 			return nil, deleteErr
 		}
 		return nil, WrapError(ErrDeleteFailed, "workspace record could not be removed", deleteErr)
 	}
-	if err := s.removeWorkspaceFiles(id, acceptedPath); err != nil {
+	if err := roots.remove(id); err != nil {
 		return ws, err
 	}
 	return ws, nil
@@ -61,48 +69,60 @@ func (s *Service) deletionCandidate(ctx context.Context, id, expectedHash, confi
 	return ws, nil
 }
 
-func (s *Service) acceptedCopyForDeletion(id string) (string, error) {
-	acceptedPath := s.paths.AcceptedConfigPath(id)
-	info, err := os.Lstat(acceptedPath)
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
-		return "", WrapError(ErrDeleteFailed, "accepted configuration copy is unavailable", err)
-	}
-	return acceptedPath, nil
+// removalRoots holds the two parent directories a deletion removes one entry
+// from: <DataDir>/workspaces (accepted copy) and the workspaces directory.
+type removalRoots struct {
+	accepted   *os.Root
+	workspaces *os.Root
 }
 
-func (s *Service) removeWorkspaceFiles(id, acceptedPath string) (result error) {
-	if filepath.Clean(acceptedPath) != filepath.Clean(s.paths.AcceptedConfigPath(id)) {
-		return NewError(ErrPathDenied, "accepted configuration path is outside workspace data")
-	}
-	acceptedRoot, err := s.openAcceptedCopyRemovalRoot(id)
+// openRemovalRoots opens both parents and checks that each workspace entry is
+// a real directory and that the accepted copy is a regular file.
+func (s *Service) openRemovalRoots(id string) (*removalRoots, error) {
+	accepted, err := s.openAcceptedParentRoot()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	defer func() {
-		if closeErr := acceptedRoot.Close(); closeErr != nil {
-			result = WrapError(ErrDeleteFailed, "accepted configuration directory could not be closed", errors.Join(result, closeErr))
-		}
-	}()
-	workspaceRoot, err := s.openWorkspaceRemovalRoot()
+	workspaces, err := s.openWorkspaceRemovalRoot()
 	if err != nil {
-		return err
+		return nil, closeRootsDenied("workspace parent could not be opened safely", err, accepted)
 	}
-	defer func() {
-		if closeErr := workspaceRoot.Close(); closeErr != nil {
-			result = WrapError(ErrDeleteFailed, "workspace directory root could not be closed", errors.Join(result, closeErr))
+	roots := &removalRoots{accepted: accepted, workspaces: workspaces}
+	if err := roots.verifyEntries(id); err != nil {
+		return nil, closeRootsDenied("workspace directories are not safe to remove", err, accepted, workspaces)
+	}
+	return roots, nil
+}
+
+func (r *removalRoots) verifyEntries(id string) error {
+	for _, entry := range []struct {
+		root *os.Root
+		what string
+	}{{r.accepted, "accepted configuration directory"}, {r.workspaces, "workspace directory"}} {
+		info, err := entry.root.Lstat(id)
+		if err != nil || !isRealDir(info) {
+			return WrapError(ErrPathDenied, entry.what+" is not a real directory", err)
 		}
-	}()
-	workspaceInfo, err := workspaceRoot.Lstat(id)
-	if err != nil || workspaceInfo.Mode()&os.ModeSymlink != 0 || !workspaceInfo.IsDir() {
-		return WrapError(ErrPathDenied, "workspace directory is not a real directory", err)
 	}
-	if err := acceptedRoot.Remove("accepted.toml"); err != nil {
-		return WrapError(ErrDeleteFailed, "accepted configuration copy could not be removed", err)
+	info, err := r.accepted.Lstat(filepath.Join(id, acceptedConfigName))
+	if err != nil || !info.Mode().IsRegular() {
+		return WrapError(ErrDeleteFailed, "accepted configuration copy is unavailable", err)
 	}
-	if err := workspaceRoot.RemoveAll(id); err != nil {
+	return nil
+}
+
+func (r *removalRoots) remove(id string) error {
+	if err := r.accepted.RemoveAll(id); err != nil {
+		return WrapError(ErrDeleteFailed, "accepted configuration directory could not be removed", err)
+	}
+	if err := r.workspaces.RemoveAll(id); err != nil {
 		return WrapError(ErrDeleteFailed, "workspace directory could not be removed", err)
 	}
 	return nil
+}
+
+func (r *removalRoots) close() error {
+	return errors.Join(r.accepted.Close(), r.workspaces.Close())
 }
 
 func (s *Service) openWorkspaceRemovalRoot() (*os.Root, error) {
@@ -110,113 +130,84 @@ func (s *Service) openWorkspaceRemovalRoot() (*os.Root, error) {
 	if err != nil {
 		return nil, err
 	}
-	root, err := os.OpenRoot(s.paths.WorkspacesDir)
+	root, err := openVerifiedRoot(s.paths.WorkspacesDir)
 	if err != nil {
-		return nil, WrapError(ErrPathDenied, "workspace parent could not be opened safely", err)
-	}
-	openedInfo, err := root.Stat(".")
-	if err != nil {
-		return rejectUnsafeRoot(root, "workspace parent could not be verified", err)
-	}
-	currentInfo, err := os.Lstat(s.paths.WorkspacesDir)
-	if err != nil || currentInfo.Mode()&os.ModeSymlink != 0 || !currentInfo.IsDir() || !os.SameFile(openedInfo, currentInfo) {
-		return rejectUnsafeRoot(root, "workspace parent changed while it was opened", err)
+		return nil, err
 	}
 	resolved, err := filepath.EvalSymlinks(s.paths.WorkspacesDir)
 	if err != nil || filepath.Clean(resolved) != filepath.Clean(expected) {
-		return rejectUnsafeRoot(root, "workspace parent changed while it was opened", err)
+		return nil, closeRootsDenied("workspace parent changed while it was opened", err, root)
 	}
 	return root, nil
 }
 
-func (s *Service) openAcceptedCopyRemovalRoot(id string) (*os.Root, error) {
-	dataRoot, err := s.openDataRemovalRoot()
+// openAcceptedParentRoot opens <DataDir>/workspaces through a verified DataDir
+// root, so neither directory can be a symlink or swapped while it is opened.
+func (s *Service) openAcceptedParentRoot() (*os.Root, error) {
+	if s.paths.DataDir == "" {
+		return nil, NewError(ErrPathDenied, "workspace data directory is not configured")
+	}
+	dataRoot, err := openVerifiedRoot(s.paths.DataDir)
 	if err != nil {
 		return nil, err
 	}
-	workspacesInfo, workspaceInfo, err := acceptedCopyDirectoryInfo(dataRoot, id)
-	if err != nil {
-		return nil, err
+	before, err := dataRoot.Lstat("workspaces")
+	if err != nil || !isRealDir(before) {
+		return nil, closeRootsDenied("accepted configuration parent is not a real directory", err, dataRoot)
 	}
-	root, err := dataRoot.OpenRoot(filepath.Join("workspaces", id))
+	root, err := dataRoot.OpenRoot("workspaces")
 	if err != nil {
-		return rejectUnsafeRoot(dataRoot, "accepted configuration directory could not be opened safely", err)
+		return nil, closeRootsDenied("accepted configuration parent could not be opened safely", err, dataRoot)
 	}
-	if err := verifyAcceptedCopyRemovalRoot(root, dataRoot, id, workspacesInfo, workspaceInfo); err != nil {
-		return nil, err
+	opened, openedErr := root.Stat(".")
+	after, afterErr := dataRoot.Lstat("workspaces")
+	if openedErr != nil || afterErr != nil || !isRealDir(after) || !os.SameFile(before, after) || !os.SameFile(opened, after) {
+		return nil, closeRootsDenied("accepted configuration parent changed while it was opened", errors.Join(openedErr, afterErr), root, dataRoot)
 	}
 	if err := dataRoot.Close(); err != nil {
-		return rejectUnsafeRoot(root, "workspace data directory could not be closed", err)
+		return nil, closeRootsDenied("workspace data directory could not be closed", err, root)
 	}
 	return root, nil
 }
 
-func (s *Service) openDataRemovalRoot() (*os.Root, error) {
-	dataInfo, err := os.Lstat(s.paths.DataDir)
-	if err != nil || dataInfo.Mode()&os.ModeSymlink != 0 || !dataInfo.IsDir() {
-		return nil, WrapError(ErrPathDenied, "workspace data directory is not a real directory", err)
+// openVerifiedRoot opens path as an os.Root and checks that path is a real
+// directory that is still the one that was opened.
+func openVerifiedRoot(path string) (*os.Root, error) {
+	before, err := os.Lstat(path)
+	if err != nil || !isRealDir(before) {
+		return nil, WrapError(ErrPathDenied, "directory is not a real directory", err)
 	}
-	dataRoot, err := os.OpenRoot(s.paths.DataDir)
+	root, err := os.OpenRoot(path)
 	if err != nil {
-		return nil, WrapError(ErrPathDenied, "workspace data directory could not be opened safely", err)
+		return nil, WrapError(ErrPathDenied, "directory could not be opened safely", err)
 	}
-	openedDataInfo, err := dataRoot.Stat(".")
-	if err != nil {
-		return rejectUnsafeRoot(dataRoot, "workspace data directory could not be verified", err)
+	opened, openedErr := root.Stat(".")
+	after, afterErr := os.Lstat(path)
+	if openedErr != nil || afterErr != nil || !isRealDir(after) || !os.SameFile(opened, after) {
+		return nil, closeRootsDenied("directory changed while it was opened", errors.Join(openedErr, afterErr), root)
 	}
-	currentDataInfo, err := os.Lstat(s.paths.DataDir)
-	if err != nil || currentDataInfo.Mode()&os.ModeSymlink != 0 || !os.SameFile(openedDataInfo, currentDataInfo) {
-		return rejectUnsafeRoot(dataRoot, "workspace data directory changed while it was opened", err)
-	}
-	return dataRoot, nil
+	return root, nil
 }
 
-func acceptedCopyDirectoryInfo(dataRoot *os.Root, id string) (os.FileInfo, os.FileInfo, error) {
-	workspacesInfo, err := dataRoot.Lstat("workspaces")
-	if err != nil || workspacesInfo.Mode()&os.ModeSymlink != 0 || !workspacesInfo.IsDir() {
-		return nil, nil, rejectErrorRoot(dataRoot, "accepted configuration parent is not a real directory", err)
-	}
-	workspaceInfo, err := dataRoot.Lstat(filepath.Join("workspaces", id))
-	if err != nil || workspaceInfo.Mode()&os.ModeSymlink != 0 || !workspaceInfo.IsDir() {
-		return nil, nil, rejectErrorRoot(dataRoot, "accepted configuration directory is not a real directory", err)
-	}
-	return workspacesInfo, workspaceInfo, nil
+func isRealDir(info os.FileInfo) bool {
+	return info.Mode()&os.ModeSymlink == 0 && info.IsDir()
 }
 
-func verifyAcceptedCopyRemovalRoot(root, dataRoot *os.Root, id string, workspacesInfo, workspaceInfo os.FileInfo) error {
-	openedInfo, err := root.Stat(".")
-	if err != nil {
-		return rejectTwoUnsafeRoots(root, dataRoot, "accepted configuration directory could not be verified", err)
+// closeRootsDenied closes roots after a failure. A cause that already carries a
+// workspace code keeps it; any other cause becomes ErrPathDenied.
+func closeRootsDenied(message string, cause error, roots ...*os.Root) error {
+	code := ErrPathDenied
+	var closeErr error
+	for _, root := range roots {
+		closeErr = errors.Join(closeErr, root.Close())
 	}
-	currentParent, parentErr := dataRoot.Lstat("workspaces")
-	currentWorkspace, workspaceErr := dataRoot.Lstat(filepath.Join("workspaces", id))
-	if parentErr != nil || currentParent.Mode()&os.ModeSymlink != 0 || !os.SameFile(workspacesInfo, currentParent) ||
-		workspaceErr != nil || currentWorkspace.Mode()&os.ModeSymlink != 0 || !os.SameFile(workspaceInfo, currentWorkspace) || !os.SameFile(openedInfo, currentWorkspace) {
-		return rejectTwoUnsafeRoots(root, dataRoot, "accepted configuration directory changed while it was opened", errors.Join(parentErr, workspaceErr))
+	if inner := CodeOf(cause); inner != "" {
+		if closeErr == nil {
+			return cause
+		}
+		code = inner
 	}
-	return nil
-}
-
-func rejectErrorRoot(root *os.Root, message string, cause error) error {
-	_, err := rejectUnsafeRoot(root, message, cause)
-	return err
-}
-
-func rejectUnsafeRoot(root *os.Root, message string, cause error) (*os.Root, error) {
-	if closeErr := root.Close(); closeErr != nil {
-		cause = errors.Join(cause, closeErr)
-	}
-	return nil, WrapError(ErrPathDenied, message, cause)
-}
-
-func rejectTwoUnsafeRoots(root, parent *os.Root, message string, cause error) error {
-	if closeErr := root.Close(); closeErr != nil {
-		cause = errors.Join(cause, closeErr)
-	}
-	if closeErr := parent.Close(); closeErr != nil {
-		cause = errors.Join(cause, closeErr)
-	}
-	return WrapError(ErrPathDenied, message, cause)
+	return WrapError(code, message, errors.Join(cause, closeErr))
 }
 
 func (s *Service) validateWorkspaceDirectory(id string) error {
@@ -225,7 +216,7 @@ func (s *Service) validateWorkspaceDirectory(id string) error {
 	if os.IsNotExist(err) {
 		return NewError(ErrNotFound, "workspace was not found")
 	}
-	if err != nil || info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+	if err != nil || !isRealDir(info) {
 		return WrapError(ErrPathDenied, "workspace directory is not a real directory", err)
 	}
 	resolved, err := filepath.EvalSymlinks(workspaceDir)
@@ -244,7 +235,7 @@ func (s *Service) validateWorkspaceDirectory(id string) error {
 
 func (s *Service) workspaceParentPath() (string, error) {
 	parentInfo, err := os.Lstat(s.paths.WorkspacesDir)
-	if err != nil || parentInfo.Mode()&os.ModeSymlink != 0 || !parentInfo.IsDir() {
+	if err != nil || !isRealDir(parentInfo) {
 		return "", WrapError(ErrPathDenied, "workspace parent is not a real directory", err)
 	}
 	parent, err := filepath.EvalSymlinks(s.paths.WorkspacesDir)

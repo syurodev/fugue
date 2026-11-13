@@ -104,8 +104,8 @@ func assertDeleteWorkspaceRemovesOnlyFugueState(t *testing.T, f *testFixture, ct
 	if _, err = os.Stat(workspaceDir); !os.IsNotExist(err) {
 		t.Fatalf("workspace directory remains: %v", err)
 	}
-	if _, err = os.Stat(f.paths.AcceptedConfigPath(ws.ID)); !os.IsNotExist(err) {
-		t.Fatalf("accepted copy remains: %v", err)
+	if _, err = os.Lstat(f.paths.AcceptedWorkspaceDir(ws.ID)); !os.IsNotExist(err) {
+		t.Fatalf("accepted configuration directory remains: %v", err)
 	}
 	if items, listErr := f.svc.ListWorkspaces(ctx); listErr != nil || len(items) != 0 {
 		t.Fatalf("deleted workspace records = %+v, err %v", items, listErr)
@@ -155,7 +155,7 @@ func TestDeleteWorkspaceRejectsSymlinkAndMissingAcceptedCopy(t *testing.T) {
 	}
 }
 
-func TestRemoveWorkspaceFilesRejectsSwappedWorkspacesSymlink(t *testing.T) {
+func TestOpenRemovalRootsRejectsSwappedWorkspacesSymlink(t *testing.T) {
 	t.Parallel()
 	f := newTestFixture(t)
 	ctx := context.Background()
@@ -181,7 +181,7 @@ func TestRemoveWorkspaceFilesRejectsSwappedWorkspacesSymlink(t *testing.T) {
 	if err = os.Symlink(fakeRoot, f.paths.WorkspacesDir); err != nil {
 		t.Fatal(err)
 	}
-	if err = f.svc.removeWorkspaceFiles(ws.ID, f.paths.AcceptedConfigPath(ws.ID)); CodeOf(err) != ErrPathDenied {
+	if err = openRemovalRootsErr(f.svc, ws.ID); CodeOf(err) != ErrPathDenied {
 		t.Fatalf("swapped workspace parent error = %v", err)
 	}
 	if data, readErr := os.ReadFile(filepath.Clean(rootFile)); readErr != nil || string(data) != rootMutationFileContent {
@@ -195,7 +195,7 @@ func TestRemoveWorkspaceFilesRejectsSwappedWorkspacesSymlink(t *testing.T) {
 	}
 }
 
-func TestRemoveWorkspaceFilesRejectsWorkspaceSymlink(t *testing.T) {
+func TestOpenRemovalRootsRejectsWorkspaceSymlink(t *testing.T) {
 	t.Parallel()
 	f := newTestFixture(t)
 	ctx := context.Background()
@@ -222,7 +222,7 @@ func TestRemoveWorkspaceFilesRejectsWorkspaceSymlink(t *testing.T) {
 	if err = os.Symlink(fakeRoot, workspaceDir); err != nil {
 		t.Fatal(err)
 	}
-	if err = f.svc.removeWorkspaceFiles(ws.ID, f.paths.AcceptedConfigPath(ws.ID)); CodeOf(err) != ErrPathDenied {
+	if err = openRemovalRootsErr(f.svc, ws.ID); CodeOf(err) != ErrPathDenied {
 		t.Fatalf("swapped workspace error = %v", err)
 	}
 	if data, readErr := os.ReadFile(filepath.Clean(rootFile)); readErr != nil || string(data) != rootMutationFileContent {
@@ -234,6 +234,53 @@ func TestRemoveWorkspaceFilesRejectsWorkspaceSymlink(t *testing.T) {
 	if _, statErr := os.Stat(filepath.Join(movedWorkspaceDir, "fugue.toml")); statErr != nil {
 		t.Fatalf("rejected removal touched original workspace: %v", statErr)
 	}
+}
+
+func TestDeleteWorkspaceRefusedAfterValidationKeepsRecord(t *testing.T) {
+	t.Parallel()
+	f := newTestFixture(t)
+	ctx := context.Background()
+	ws, err := f.svc.CreateWorkspace(ctx, CreateWorkspaceRequest{Name: "swap accepted parent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acceptedParent := filepath.Dir(f.paths.AcceptedWorkspaceDir(ws.ID))
+	movedParent := filepath.Join(f.tempDir, "accepted-parent-before-swap")
+	if err = os.Rename(acceptedParent, movedParent); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink(movedParent, acceptedParent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.svc.DeleteWorkspace(ctx, ws.ID, ws.ConfigHash, ws.Name); CodeOf(err) != ErrPathDenied {
+		t.Fatalf("accepted parent symlink error = %v", err)
+	}
+	if _, err = f.svc.store.Get(ctx, ws.ID); err != nil {
+		t.Fatalf("refused deletion removed DB row: %v", err)
+	}
+	if _, err = os.Stat(filepath.Join(movedParent, ws.ID, acceptedConfigName)); err != nil {
+		t.Fatalf("refused deletion touched accepted copy: %v", err)
+	}
+	if _, err = os.Stat(f.paths.ConfigPath(ws.ID)); err != nil {
+		t.Fatalf("refused deletion touched workspace directory: %v", err)
+	}
+	if err = os.Remove(acceptedParent); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Rename(movedParent, acceptedParent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = f.svc.DeleteWorkspace(ctx, ws.ID, ws.ConfigHash, ws.Name); err != nil {
+		t.Fatalf("retried deletion: %v", err)
+	}
+}
+
+func openRemovalRootsErr(svc *Service, id string) error {
+	roots, err := svc.openRemovalRoots(id)
+	if err != nil {
+		return err
+	}
+	return roots.close()
 }
 
 func createMutationRoots(t *testing.T, paths ...string) {
