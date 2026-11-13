@@ -1,0 +1,20 @@
+{
+  "id": "A-S01",
+  "check": "recovery-drill",
+  "revision": "0123456789abcdef0123456789abcdef01234567",
+  "fugue_version": "0.1.0",
+  "schema_version": 9,
+  "protocol_version": "v1",
+  "os": "linux",
+  "arch": "amd64",
+  "started_at": "2026-11-13T10:00:00Z",
+  "finished_at": "2026-11-13T10:05:00Z",
+  "result": "pass",
+  "measurements": {
+    "kills": 20
+  },
+  "covers": [
+    "internal/app/**"
+  ],
+  "notes": "Clean recovery drill record."
+}
