@@ -38,12 +38,13 @@ func (s *Store) CreateSession(ctx context.Context, session *Session) error {
 		`INSERT INTO vendor_sessions(
 			session_id,vendor,account_id,role,state,created_at,updated_at,team_id,task_id,
 			resume_handle,process_pid,process_start_token,process_scope_unit,last_sequence,
-			approval_mode,waiting_reason,stop_proof,close_reason)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?)`,
+			approval_mode,waiting_reason,stop_proof,close_reason,workspace_id,workspace_root)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?)`,
 		session.ID, session.Vendor, session.AccountID, session.Role, session.State, now, now,
 		nullable(session.TeamID), nullable(session.TaskID), session.ResumeHandle,
 		session.ProcessPID, session.ProcessStartToken, session.ProcessScopeUnit,
-		session.ApprovalMode, session.WaitingReason, session.StopProof, session.CloseReason)
+		session.ApprovalMode, session.WaitingReason, session.StopProof, session.CloseReason,
+		session.WorkspaceID, session.WorkspaceRoot)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
@@ -110,16 +111,7 @@ func (s *Store) Append(ctx context.Context, sessionID string, expected int64, ev
 // Snapshot reads the session and last sequence atomically.
 func (s *Store) Snapshot(ctx context.Context, sessionID string) (Session, error) {
 	var result Session
-	err := s.db.QueryRowContext(ctx,
-		`SELECT session_id,vendor,account_id,role,state,last_sequence,COALESCE(team_id,''),
-			COALESCE(task_id,''),resume_handle,process_pid,process_start_token,process_scope_unit,
-			approval_mode,policy_revision,waiting_reason,close_reason,stop_proof,created_at,updated_at
-		FROM vendor_sessions WHERE session_id=?`, sessionID).Scan(
-		&result.ID, &result.Vendor, &result.AccountID, &result.Role, &result.State,
-		&result.LastSequence, &result.TeamID, &result.TaskID, &result.ResumeHandle,
-		&result.ProcessPID, &result.ProcessStartToken, &result.ProcessScopeUnit,
-		&result.ApprovalMode, &result.PolicyRevision, &result.WaitingReason,
-		&result.CloseReason, &result.StopProof, &result.CreatedAt, &result.UpdatedAt)
+	err := s.db.QueryRowContext(ctx, sessionColumns+` FROM vendor_sessions WHERE session_id=?`, sessionID).Scan(scanSession(&result)...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrSessionNotFound
 	}

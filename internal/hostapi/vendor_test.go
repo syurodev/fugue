@@ -219,6 +219,7 @@ func runTurns(t *testing.T, v *vendorHost, stream *connect.ServerStreamForClient
 	}
 	awaitVendorState(t, stream, sessionID, "ready")
 	assertConnectCode(t, v.send(t, "fugue-1", sessionID, "/fugue:team build it"), connect.CodeInvalidArgument, errcode.VendorUnknownCommand)
+	assertConnectCode(t, v.send(t, "fugue-2", sessionID, "\n /fugue:team"), connect.CodeInvalidArgument, errcode.VendorUnknownCommand)
 	if err := v.send(t, "send-2", sessionID, fakeHoldTurn); err != nil {
 		t.Fatal(err)
 	}

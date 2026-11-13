@@ -35,7 +35,7 @@ const genericInternalMessage = "internal error"
 func connectCode(c errcode.Code) connect.Code {
 	switch c {
 	case errcode.InvalidArgument, errcode.InteractionOptionNotOffered, errcode.WorkspaceConfigInvalid, errcode.WorkspaceRootInvalid,
-		errcode.VendorInvalidProfile, errcode.VendorUnknownCommand, errcode.VendorCommandConflict:
+		errcode.VendorInvalidProfile, errcode.VendorUnknownCommand, errcode.VendorCommandConflict, errcode.VendorWorkspaceMismatch:
 		return connect.CodeInvalidArgument
 	case errcode.NotFound, errcode.InteractionNotFound, errcode.WorkspaceNotFound, errcode.WorkspaceRootMissing, errcode.VendorSessionNotFound:
 		return connect.CodeNotFound

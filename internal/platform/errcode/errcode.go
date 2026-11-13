@@ -49,6 +49,7 @@ const (
 	VendorInvalidProfile        Code = "vendor.invalid_profile"
 	VendorUnknownCommand        Code = "vendor.unknown_command"
 	VendorCommandConflict       Code = "vendor.command_conflict"
+	VendorWorkspaceMismatch     Code = "vendor.workspace_mismatch"
 )
 
 // Entry classifies one code. Hidden codes are never shown to a client; the
@@ -97,6 +98,7 @@ func Registry() []Entry {
 		{VendorInvalidProfile, true, "a session profile value is not allowed"},
 		{VendorUnknownCommand, true, "the /fugue: command is not available; it never reaches the vendor"},
 		{VendorCommandConflict, true, "the command_id was already used for a different command"},
+		{VendorWorkspaceMismatch, true, "the session is bound to the workspace root it was created in"},
 	}
 }
 

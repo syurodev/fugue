@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"github.com/syurodev/fugue/internal/config"
@@ -12,6 +13,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/redact"
+	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
 const (
@@ -54,15 +56,23 @@ func newVendorServiceFixture(t *testing.T) *vendorServiceFixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ws, err := rt.CreateWorkspace(t.Context(), testAppPrincipal, "svc-ws")
+	f := &vendorServiceFixture{svc: svc, rt: rt}
+	f.ws = f.addWorkspace(t, "svc-ws")
+	return f
+}
+
+// addWorkspace creates a workspace with one root named "main".
+func (f *vendorServiceFixture) addWorkspace(t *testing.T, name string) string {
+	t.Helper()
+	ws, err := f.rt.CreateWorkspace(t.Context(), testAppPrincipal, name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := []byte("name = \"svc-ws\"\n[[roots]]\nname = \"main\"\npath = \"" + filepath.ToSlash(t.TempDir()) + "\"\naccess = \"rw\"\n")
-	if _, err := rt.UpdateWorkspaceConfig(t.Context(), testAppPrincipal, ws.ID, raw, ws.ConfigHash); err != nil {
+	raw := []byte("name = \"" + name + "\"\n[[roots]]\nname = \"main\"\npath = \"" + filepath.ToSlash(t.TempDir()) + "\"\naccess = \"rw\"\n")
+	if _, err := f.rt.UpdateWorkspaceConfig(t.Context(), testAppPrincipal, ws.ID, raw, ws.ConfigHash); err != nil {
 		t.Fatal(err)
 	}
-	return &vendorServiceFixture{svc: svc, rt: rt, ws: ws.ID}
+	return ws.ID
 }
 
 func (f *vendorServiceFixture) start(t *testing.T, commandID string) VendorSessionView {
@@ -190,7 +200,12 @@ func TestVendorServiceLimitsAndTypedRejections(t *testing.T) {
 	requireCode(t, err, errcode.VendorInvalidProfile)
 	_, err = f.svc.Resume(t.Context(), testAppPrincipal, &ResumeVendorSession{CommandID: "r2", SessionID: first.ID, WorkspaceID: f.ws})
 	requireCode(t, err, errcode.VendorSessionState)
-	requireCode(t, f.svc.Send(t.Context(), testAppPrincipal, VendorInput{CommandID: "f", SessionID: first.ID, Text: "/fugue:solo"}), errcode.VendorUnknownCommand)
+	for i, text := range []string{"/fugue:solo", " /fugue:team", "\n/fugue:x", "\u3000/fugue:account"} {
+		send := VendorInput{CommandID: "fs" + strconv.Itoa(i), SessionID: first.ID, Text: text}
+		requireCode(t, f.svc.Send(t.Context(), testAppPrincipal, send), errcode.VendorUnknownCommand)
+		steer := VendorInput{CommandID: "ft" + strconv.Itoa(i), SessionID: first.ID, Text: text}
+		requireCode(t, f.svc.Steer(t.Context(), testAppPrincipal, steer), errcode.VendorUnknownCommand)
+	}
 	requireCode(t, f.svc.Send(t.Context(), testAppPrincipal, VendorInput{CommandID: "n", SessionID: testNoSession, Text: "hi"}), errcode.VendorSessionNotFound)
 	_, err = f.svc.Interrupt(t.Context(), testAppPrincipal, VendorStop{CommandID: "i", SessionID: testNoSession})
 	requireCode(t, err, errcode.VendorSessionNotFound)
@@ -215,4 +230,40 @@ func TestVendorServiceDeniesNonLocalPrincipal(t *testing.T) {
 	requireCode(t, err, errcode.PermissionDenied)
 	_, err = f.rt.Subscribe(t.Context(), SubscribeParams{Principal: session, Topic: TopicVendorSessions})
 	requireCode(t, err, errcode.PermissionDenied)
+}
+
+// A session records its workspace root at Start; Resume reuses it, and a
+// client that names another workspace or root is refused before spawn.
+func TestVendorResumeIsBoundToTheSessionWorkspace(t *testing.T) {
+	t.Parallel()
+	f := newVendorServiceFixture(t)
+	started := f.start(t, "bind-start")
+	info, err := f.svc.store.Snapshot(t.Context(), started.ID)
+	if err != nil || info.WorkspaceID != f.ws || info.WorkspaceRoot != "main" {
+		t.Fatalf("started session binding = %q/%q, %v; want %q/main", info.WorkspaceID, info.WorkspaceRoot, err, f.ws)
+	}
+	other := f.addWorkspace(t, "other-ws")
+	detached := &vendorstore.Session{
+		ID: "bound-session", Vendor: VendorClaude, AccountID: vendorDefaultAccount, Role: vendorSessionRole,
+		State: vendorstore.StateDetached, ResumeHandle: "123e4567-e89b-12d3-a456-426614174000",
+		WorkspaceID: f.ws, WorkspaceRoot: "main",
+	}
+	if err := f.svc.store.CreateSession(t.Context(), detached); err != nil {
+		t.Fatal(err)
+	}
+	resume := func(id, workspaceID, root string) error {
+		_, resumeErr := f.svc.Resume(t.Context(), testAppPrincipal, &ResumeVendorSession{CommandID: id, SessionID: detached.ID, WorkspaceID: workspaceID, RootName: root})
+		return resumeErr
+	}
+	requireCode(t, resume("bind-other-ws", other, ""), errcode.VendorWorkspaceMismatch)
+	requireCode(t, resume("bind-other-root", f.ws, "elsewhere"), errcode.VendorWorkspaceMismatch)
+	if still, snapErr := f.svc.store.Snapshot(t.Context(), detached.ID); snapErr != nil || still.State != vendorstore.StateDetached || still.ProcessPID != 0 {
+		t.Fatalf("refused resume changed the session: %+v, %v", still, snapErr)
+	}
+	if err := resume("bind-same", f.ws, "main"); err != nil {
+		t.Fatalf("resume in the bound workspace = %v", err)
+	}
+	if resumed, snapErr := f.svc.store.Snapshot(t.Context(), detached.ID); snapErr != nil || resumed.State != vendorstore.StateReady {
+		t.Fatalf("resumed session = %+v, %v; want ready", resumed, snapErr)
+	}
 }

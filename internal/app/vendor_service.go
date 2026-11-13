@@ -34,7 +34,6 @@ const VendorClaude = "claude"
 const (
 	vendorDefaultAccount = "default"
 	vendorSessionRole    = "assistant"
-	fugueCommandPrefix   = "/fugue:"
 )
 
 // VendorCapability is the adapter's declared contract, as the Host API shows it.
@@ -132,14 +131,17 @@ func (s *VendorService) Start(ctx context.Context, principal string, cmd *StartV
 	}
 	canonical := []string{"start", cmd.Vendor, cmd.WorkspaceID, cmd.RootName, cmd.Profile.Model, cmd.Profile.Effort, cmd.Profile.ResumeSessionID}
 	return s.runForView(ctx, cmd.CommandID, canonical, VendorSpawnLimit, func(opCtx context.Context) (VendorSessionView, error) {
-		spec, err := s.spawnSpec(opCtx, cmd.WorkspaceID, cmd.RootName, cmd.Profile)
+		spec, root, err := s.spawnSpec(opCtx, cmd.WorkspaceID, cmd.RootName, cmd.Profile)
 		if err != nil {
 			return VendorSessionView{}, err
 		}
 		if spec.SessionID, err = s.ids.NewID(); err != nil {
 			return VendorSessionView{}, errcode.Wrap(errcode.Internal, "allocate a vendor session identity", err)
 		}
-		info := &vendorstore.Session{ID: spec.SessionID, Vendor: VendorClaude, AccountID: vendorDefaultAccount, Role: vendorSessionRole}
+		info := &vendorstore.Session{
+			ID: spec.SessionID, Vendor: VendorClaude, AccountID: vendorDefaultAccount, Role: vendorSessionRole,
+			WorkspaceID: cmd.WorkspaceID, WorkspaceRoot: root,
+		}
 		if err := s.sessions.Start(opCtx, info, spec); err != nil {
 			return VendorSessionView{}, publicVendorError(err)
 		}
@@ -160,7 +162,11 @@ func (s *VendorService) Resume(ctx context.Context, principal string, cmd *Resum
 	}
 	canonical := []string{"resume", cmd.SessionID, cmd.WorkspaceID, cmd.RootName, cmd.Profile.Model, cmd.Profile.Effort}
 	return s.runForView(ctx, cmd.CommandID, canonical, VendorSpawnLimit, func(opCtx context.Context) (VendorSessionView, error) {
-		spec, err := s.spawnSpec(opCtx, cmd.WorkspaceID, cmd.RootName, cmd.Profile)
+		workspaceID, root, err := s.boundWorkspace(opCtx, cmd)
+		if err != nil {
+			return VendorSessionView{}, err
+		}
+		spec, _, err := s.spawnSpec(opCtx, workspaceID, root, cmd.Profile)
 		if err != nil {
 			return VendorSessionView{}, err
 		}
@@ -172,8 +178,25 @@ func (s *VendorService) Resume(ctx context.Context, principal string, cmd *Resum
 	})
 }
 
-// Send starts a turn. A /fugue: input is rejected before vendor dispatch:
-// stage A registers no host command (Q-54 A).
+// boundWorkspace returns the workspace root the session was created in. A
+// session never moves: a client that names another workspace or root is
+// refused before anything spawns.
+func (s *VendorService) boundWorkspace(ctx context.Context, cmd *ResumeVendorSession) (string, string, error) {
+	info, err := s.store.Snapshot(ctx, cmd.SessionID)
+	if err != nil {
+		return "", "", publicVendorError(err)
+	}
+	mismatch := info.WorkspaceID == "" ||
+		(cmd.WorkspaceID != "" && cmd.WorkspaceID != info.WorkspaceID) ||
+		(cmd.RootName != "" && cmd.RootName != info.WorkspaceRoot)
+	if mismatch {
+		return "", "", errcode.New(errcode.VendorWorkspaceMismatch, "the session is bound to the workspace root it was created in")
+	}
+	return info.WorkspaceID, info.WorkspaceRoot, nil
+}
+
+// Send starts a turn. A /fugue: input, leading whitespace ignored, is
+// rejected before vendor dispatch: stage A registers no host command (Q-54 A).
 func (s *VendorService) Send(ctx context.Context, principal string, cmd VendorInput) error {
 	return s.input(ctx, principal, "send", cmd, s.sessions.Send)
 }
@@ -189,7 +212,7 @@ func (s *VendorService) input(ctx context.Context, principal, kind string, cmd V
 	if err := authorizeVendor(principal); err != nil {
 		return err
 	}
-	if strings.HasPrefix(cmd.Text, fugueCommandPrefix) {
+	if vendor.IsFugueCommand(cmd.Text) {
 		return errcode.New(errcode.VendorUnknownCommand, "the /fugue: command is not available")
 	}
 	_, err := s.runForView(ctx, cmd.CommandID, []string{kind, cmd.SessionID, cmd.Text}, VendorUnaryLimit, func(opCtx context.Context) (VendorSessionView, error) {
@@ -268,20 +291,30 @@ func (s *VendorService) runForView(ctx context.Context, commandID string, canoni
 	return view, nil
 }
 
-func (s *VendorService) spawnSpec(ctx context.Context, workspaceID, rootName string, profile VendorProfile) (*vendor.StartSpec, error) {
+// spawnSpec resolves the working directory and returns the spec with the
+// resolved root name, which the session records.
+func (s *VendorService) spawnSpec(ctx context.Context, workspaceID, rootName string, profile VendorProfile) (*vendor.StartSpec, string, error) {
 	if err := s.requireUnlocked(); err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	// The workspace re-validates the root on every load, so the Q-57
 	// rejections (filesystem root, data directory, Fugue home) hold for the
 	// resolved directory too.
 	cwd, err := s.workspaces.SelectSessionCwd(ctx, workspaceID, rootName)
 	if err != nil {
-		return nil, publicWorkspaceError(err)
+		return nil, "", publicWorkspaceError(err)
+	}
+	if rootName == "" {
+		// SelectSessionCwd accepted an empty name, so there is exactly one root.
+		ws, getErr := s.workspaces.GetWorkspace(ctx, workspaceID)
+		if getErr != nil || len(ws.Roots) != 1 {
+			return nil, "", errcode.New(errcode.WorkspaceRootInvalid, "the workspace root could not be resolved")
+		}
+		rootName = ws.Roots[0].Name
 	}
 	return &vendor.StartSpec{
 		Cwd: cwd, HostEnv: s.hostEnv, Model: profile.Model, Effort: profile.Effort, ResumeSessionID: profile.ResumeSessionID,
-	}, nil
+	}, rootName, nil
 }
 
 func (s *VendorService) requireUnlocked() error {

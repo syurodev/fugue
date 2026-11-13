@@ -10,3 +10,8 @@ CREATE TABLE vendor_session_changes (
     waiting_reason TEXT NOT NULL DEFAULT '',
     recorded_at TEXT NOT NULL
 );
+
+-- A session is bound to the workspace and root it was created in; resume
+-- reuses them and never takes new ones from the client (workspace §2).
+ALTER TABLE vendor_sessions ADD COLUMN workspace_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE vendor_sessions ADD COLUMN workspace_root TEXT NOT NULL DEFAULT '';

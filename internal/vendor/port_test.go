@@ -13,6 +13,9 @@ func TestFugueNamespaceInputIsRejected(t *testing.T) {
 		"/fugue:team",
 		"/fugue:solo lead the migration",
 		"/fugue:",
+		" /fugue:team",
+		"\n/fugue:x",
+		"\t\u3000/fugue:account",
 	} {
 		err := ValidateInput(Input{Text: text})
 		if !errors.Is(err, ErrFugueCommand) {

@@ -45,6 +45,7 @@ Changing this file needs a review of what clients can rely on; hiding a code nee
 | `vendor.invalid_profile` | A session profile value is not allowed. |
 | `vendor.unknown_command` | The /fugue: command is not available; it never reaches the vendor. |
 | `vendor.command_conflict` | The command_id was already used for a different command. |
+| `vendor.workspace_mismatch` | The session is bound to the workspace root it was created in; resume cannot move it. |
 
 ## Hidden on purpose
 
