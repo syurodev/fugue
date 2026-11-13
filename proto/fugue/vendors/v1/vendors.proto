@@ -1,0 +1,151 @@
+syntax = "proto3";
+
+package fugue.vendors.v1;
+
+// Vendor names a vendor CLI. Stage A serves Claude only; Codex and agy return
+// the typed vendor.unsupported error until their adapters land.
+enum Vendor {
+  VENDOR_UNSPECIFIED = 0;
+  VENDOR_CLAUDE = 1;
+  VENDOR_CODEX = 2;
+  VENDOR_AGY = 3;
+}
+
+// Capability is the adapter's declared contract (vendor-runtime §6).
+message Capability {
+  bool per_request_approval = 1;
+  bool block_all_tool_calls = 2;
+  bool interrupt = 3;
+  bool steer = 4;
+  bool resume = 5;
+  bool partial_deltas = 6;
+  bool vendor_slash_commands = 7;
+  bool direct_quota = 8;
+  bool model_list = 9;
+}
+
+// VendorProbe is what one vendor probe learned. It never carries a path or
+// credential material.
+message VendorProbe {
+  Vendor vendor = 1;
+  string version = 2;
+  bool version_tested = 3;
+  string version_warning = 4;
+  // login is "unknown", "logged_in" or "logged_out".
+  string login = 5;
+  Capability capability = 6;
+}
+
+// SessionProfile holds the only values a client may choose (Q-53 A); every
+// other profile value stays a host-side default.
+message SessionProfile {
+  string model = 1;
+  string effort = 2;
+  // resume_session_id resumes a vendor session by its vendor UUID; only
+  // StartSession accepts it.
+  string resume_session_id = 3;
+}
+
+// VendorSession is the safe list shape of one session: identity and state.
+message VendorSession {
+  string session_id = 1;
+  Vendor vendor = 2;
+  string state = 3;
+  string waiting_reason = 4;
+  string created_at = 5;
+  string updated_at = 6;
+}
+
+message ProbeVendorsRequest {
+  // vendors defaults to Claude when empty.
+  repeated Vendor vendors = 1;
+}
+message ProbeVendorsResponse {
+  repeated VendorProbe probes = 1;
+}
+
+// StartSessionRequest never carries a path: the host resolves the working
+// directory from the workspace root (Q-57, F5.6).
+message StartSessionRequest {
+  string command_id = 1;
+  Vendor vendor = 2;
+  string workspace_id = 3;
+  // root_name may be empty when the workspace has exactly one root.
+  string root_name = 4;
+  SessionProfile profile = 5;
+}
+message StartSessionResponse {
+  VendorSession session = 1;
+}
+
+message SendRequest {
+  string command_id = 1;
+  string session_id = 2;
+  string text = 3;
+}
+message SendResponse {}
+
+message SteerRequest {
+  string command_id = 1;
+  string session_id = 2;
+  string text = 3;
+}
+message SteerResponse {}
+
+// OperationStatus says whether a stop operation finished inside the caller's
+// deadline. A pending operation keeps running on the host; its outcome is
+// published on the vendor-sessions topic.
+enum OperationStatus {
+  OPERATION_STATUS_UNSPECIFIED = 0;
+  OPERATION_STATUS_DONE = 1;
+  OPERATION_STATUS_PENDING = 2;
+}
+
+message InterruptRequest {
+  string command_id = 1;
+  string session_id = 2;
+}
+message InterruptResponse {
+  OperationStatus status = 1;
+}
+
+message CloseSessionRequest {
+  string command_id = 1;
+  string session_id = 2;
+}
+message CloseSessionResponse {
+  OperationStatus status = 1;
+}
+
+message ResumeSessionRequest {
+  string command_id = 1;
+  string session_id = 2;
+  string workspace_id = 3;
+  string root_name = 4;
+  SessionProfile profile = 5;
+}
+message ResumeSessionResponse {
+  VendorSession session = 1;
+}
+
+message ListSessionsRequest {}
+
+// ListSessionsResponse carries the vendor-sessions topic sequence of the
+// list, so a client subscribes from it without a gap (Q-58 A).
+message ListSessionsResponse {
+  repeated VendorSession sessions = 1;
+  uint64 sequence = 2;
+}
+
+// VendorService owns vendor session operations (F9.9c). State-changing calls
+// carry a command_id: a retry attaches to the original operation.
+service VendorService {
+  rpc ProbeVendors(ProbeVendorsRequest) returns (ProbeVendorsResponse);
+  rpc StartSession(StartSessionRequest) returns (StartSessionResponse);
+  rpc Send(SendRequest) returns (SendResponse);
+  rpc Steer(SteerRequest) returns (SteerResponse);
+  rpc Interrupt(InterruptRequest) returns (InterruptResponse);
+  rpc CloseSession(CloseSessionRequest) returns (CloseSessionResponse);
+  rpc ResumeSession(ResumeSessionRequest) returns (ResumeSessionResponse);
+  rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+}

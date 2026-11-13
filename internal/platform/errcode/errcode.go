@@ -40,6 +40,16 @@ const (
 	WorkspacePathDenied         Code = "workspace.path_denied"
 	WorkspaceOwnershipInvalid   Code = "workspace.ownership_invalid"
 	WorkspaceConfigTooLarge     Code = "workspace.config_too_large"
+	VendorUnsupported           Code = "vendor.unsupported"
+	VendorSessionNotFound       Code = "vendor.session_not_found"
+	VendorSessionState          Code = "vendor.session_state"
+	VendorTurnNotActive         Code = "vendor.turn_not_active"
+	VendorCapacity              Code = "vendor.capacity"
+	VendorVaultLocked           Code = "vendor.vault_locked"
+	VendorInvalidProfile        Code = "vendor.invalid_profile"
+	VendorUnknownCommand        Code = "vendor.unknown_command"
+	VendorCommandConflict       Code = "vendor.command_conflict"
+	VendorWorkspaceMismatch     Code = "vendor.workspace_mismatch"
 )
 
 // Entry classifies one code. Hidden codes are never shown to a client; the
@@ -79,6 +89,16 @@ func Registry() []Entry {
 		{WorkspacePathDenied, true, "the workspace path is not allowed"},
 		{WorkspaceOwnershipInvalid, true, "workspace ownership or permissions are invalid"},
 		{WorkspaceConfigTooLarge, true, "the workspace configuration exceeds the size limit"},
+		{VendorUnsupported, true, "the vendor or operation is not supported in this phase"},
+		{VendorSessionNotFound, true, "the vendor session does not exist or is not live"},
+		{VendorSessionState, true, "the vendor session state does not allow the operation (busy, closed or not resumable)"},
+		{VendorTurnNotActive, true, "no vendor turn is running"},
+		{VendorCapacity, true, "the host already runs the maximum number of vendor sessions"},
+		{VendorVaultLocked, true, "the vault is locked; vendor sessions cannot start or take input"},
+		{VendorInvalidProfile, true, "a session profile value is not allowed"},
+		{VendorUnknownCommand, true, "the /fugue: command is not available; it never reaches the vendor"},
+		{VendorCommandConflict, true, "the command_id was already used for a different command"},
+		{VendorWorkspaceMismatch, true, "the session is bound to the workspace root it was created in"},
 	}
 }
 

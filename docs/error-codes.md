@@ -36,6 +36,16 @@ Changing this file needs a review of what clients can rely on; hiding a code nee
 | `workspace.path_denied` | The workspace path is not allowed. |
 | `workspace.ownership_invalid` | Workspace ownership or permissions are invalid. |
 | `workspace.config_too_large` | The workspace configuration exceeds the size limit. |
+| `vendor.unsupported` | The vendor or operation is not supported in this phase. |
+| `vendor.session_not_found` | The vendor session does not exist or is not live. |
+| `vendor.session_state` | The vendor session state does not allow the operation (busy, closed or not resumable). |
+| `vendor.turn_not_active` | No vendor turn is running. |
+| `vendor.capacity` | The host already runs the maximum number of vendor sessions. |
+| `vendor.vault_locked` | The vault is locked; vendor sessions cannot start or take input. |
+| `vendor.invalid_profile` | A session profile value is not allowed. |
+| `vendor.unknown_command` | The /fugue: command is not available; it never reaches the vendor. |
+| `vendor.command_conflict` | The command_id was already used for a different command. |
+| `vendor.workspace_mismatch` | The session is bound to the workspace root it was created in; resume cannot move it. |
 
 ## Hidden on purpose
 

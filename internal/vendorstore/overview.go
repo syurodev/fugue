@@ -73,7 +73,8 @@ func (s *Store) Overview(ctx context.Context, session string) (Session, []string
 // sessionColumns is the shared session projection; scanSession matches its order.
 const sessionColumns = `SELECT session_id,vendor,account_id,role,state,last_sequence,COALESCE(team_id,''),
 	COALESCE(task_id,''),resume_handle,process_pid,process_start_token,process_scope_unit,
-	approval_mode,policy_revision,waiting_reason,close_reason,stop_proof,created_at,updated_at`
+	approval_mode,policy_revision,waiting_reason,close_reason,stop_proof,created_at,updated_at,
+	workspace_id,workspace_root`
 
 // scanSession returns the scan destinations for a Session in sessionColumns order.
 func scanSession(s *Session) []any {
@@ -81,7 +82,7 @@ func scanSession(s *Session) []any {
 		&s.ID, &s.Vendor, &s.AccountID, &s.Role, &s.State, &s.LastSequence,
 		&s.TeamID, &s.TaskID, &s.ResumeHandle, &s.ProcessPID, &s.ProcessStartToken,
 		&s.ProcessScopeUnit, &s.ApprovalMode, &s.PolicyRevision, &s.WaitingReason,
-		&s.CloseReason, &s.StopProof, &s.CreatedAt, &s.UpdatedAt,
+		&s.CloseReason, &s.StopProof, &s.CreatedAt, &s.UpdatedAt, &s.WorkspaceID, &s.WorkspaceRoot,
 	}
 }
 

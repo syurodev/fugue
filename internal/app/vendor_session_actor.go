@@ -40,16 +40,20 @@ type actorRequest struct {
 }
 
 type vendorSessionActor struct {
-	manager              *VendorSessions
-	info                 vendorstore.Session
-	session              vendor.Session
-	obs                  <-chan claude.Observation
-	commands             chan actorRequest
-	state                vendor.State
-	sequence             int64
-	turnID               string
-	turns                map[string]bool
-	finished             bool
+	manager  *VendorSessions
+	info     vendorstore.Session
+	session  vendor.Session
+	obs      <-chan claude.Observation
+	commands chan actorRequest
+	state    vendor.State
+	sequence int64
+	turnID   string
+	turns    map[string]bool
+	finished bool
+	// attached turns on once the create or resume command has committed:
+	// a real process reports observations immediately, and none may be
+	// appended before the session row exists.
+	attached             bool
 	task                 *supervise.Task
 	vaultSub             *vault.Subscription
 	done                 chan struct{}
@@ -135,14 +139,19 @@ func (a *vendorSessionActor) run(ctx context.Context) error {
 }
 
 func (a *vendorSessionActor) runStep(ctx context.Context) error {
+	var observations <-chan claude.Observation
+	var vaultEvents <-chan vault.Snapshot
+	if a.attached {
+		observations, vaultEvents = a.obs, a.vaultSub.Events()
+	}
 	select {
 	case req := <-a.commands:
 		return a.handleRequest(ctx, req)
-	case observation, ok := <-a.obs:
+	case observation, ok := <-observations:
 		if err := a.handleObserved(ctx, &observation, ok); err != nil {
 			return a.fail(ctx, err)
 		}
-	case snapshot, ok := <-a.vaultSub.Events():
+	case snapshot, ok := <-vaultEvents:
 		return a.handleVaultEvent(ctx, snapshot, ok)
 	case result := <-a.interruptResults:
 		if err := a.handleInterruptResult(ctx, result); err != nil {
@@ -322,6 +331,7 @@ func (a *vendorSessionActor) createSession(ctx context.Context) error {
 	if err := a.manager.deps.Transcripts.RegisterSession(a.info.ID); err != nil {
 		return fmt.Errorf("%w: %w", ErrVendorActorFailed, safeActorError(err))
 	}
+	a.attached = true
 	return nil
 }
 
@@ -337,7 +347,7 @@ func (a *vendorSessionActor) resumeSession(ctx context.Context) error {
 	}); err != nil {
 		return err
 	}
-	a.state = next
+	a.state, a.attached = next, true
 	return nil
 }
 
