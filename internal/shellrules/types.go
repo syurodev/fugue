@@ -36,12 +36,14 @@ const (
 
 // Command represents a single resolved simple command extracted from a compound shell command.
 type Command struct {
-	Raw     string
-	Name    string
-	Base    string
-	Args    []string
-	Env     []string
-	PipedTo bool
+	Raw  string
+	Name string
+	Base string
+	Args []string
+	Env  []string
+	// Redirects holds the static targets of output redirections (>, >>, >|, &>, N>).
+	Redirects []string
+	PipedTo   bool
 }
 
 // TagPolicy reports whether an environment tag requires confirmation (interaction §3.4).

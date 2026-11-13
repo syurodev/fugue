@@ -2,6 +2,7 @@ package shellrules
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 	"unicode"
 )
@@ -15,8 +16,8 @@ func flushWord(words []string, cur *strings.Builder, inWord *bool) []string {
 	return words
 }
 
-func tokenizeWords(raw string) ([]string, bool) {
-	var words []string
+func tokenizeWords(raw string) ([]string, []string, bool) {
+	var words, redirs []string
 	var cur strings.Builder
 	inWord, i, n := false, 0, len(raw)
 
@@ -28,10 +29,14 @@ func tokenizeWords(raw string) ([]string, bool) {
 			continue
 		}
 		if c == '>' || c == '<' {
+			trimFDPrefix(&cur, &inWord)
 			words = flushWord(words, &cur, &inWord)
-			nextI, ok := skipRedirection(raw, i)
+			target, nextI, ok := readRedirection(raw, i)
 			if !ok {
-				return nil, false
+				return nil, nil, false
+			}
+			if target != "" {
+				redirs = append(redirs, target)
 			}
 			i = nextI
 			continue
@@ -40,12 +45,22 @@ func tokenizeWords(raw string) ([]string, bool) {
 		inWord = true
 		nextI, ok := readTokenChar(raw, i, c, &cur)
 		if !ok {
-			return nil, false
+			return nil, nil, false
 		}
 		i = nextI
 	}
 	words = flushWord(words, &cur, &inWord)
-	return words, true
+	return words, redirs, true
+}
+
+// trimFDPrefix drops the "2" of "2>" and the "&" of "&>" so they are not read as arguments.
+func trimFDPrefix(cur *strings.Builder, inWord *bool) {
+	rest := strings.TrimSuffix(cur.String(), "&")
+	if strings.Trim(rest, "0123456789") != "" {
+		return
+	}
+	cur.Reset()
+	*inWord = false
 }
 
 func readTokenChar(raw string, i int, c byte, cur *strings.Builder) (int, bool) {
@@ -62,58 +77,67 @@ func readTokenChar(raw string, i int, c byte, cur *strings.Builder) (int, bool) 
 	}
 }
 
-func skipRedirection(raw string, i int) (int, bool) {
-	i = skipRedirectionPrefix(raw, i)
-	return skipRedirectTarget(raw, i)
+// readRedirection parses the operator at raw[i] and returns the output target (empty for
+// input redirections and fd duplication). A dynamic output target is unparsable.
+func readRedirection(raw string, i int) (string, int, bool) {
+	out := raw[i] == '>'
+	i, dup := skipRedirectOperator(raw, i, out)
+	if dup {
+		return "", i, true
+	}
+	start := i
+	var cur strings.Builder
+	for i < len(raw) && !isRedirectTerminator(raw[i]) {
+		next, ok := readTokenChar(raw, i, raw[i], &cur)
+		if !ok {
+			return "", 0, false
+		}
+		i = next
+	}
+	if i == start || (out && strings.ContainsAny(raw[start:i], "$`")) {
+		return "", 0, false
+	}
+	if !out {
+		return "", i, true
+	}
+	return cur.String(), i, true
 }
 
-func skipRedirectionPrefix(raw string, i int) int {
+// skipRedirectOperator consumes the operator and following blanks; dup reports N>&M.
+func skipRedirectOperator(raw string, i int, out bool) (next int, dup bool) {
 	n := len(raw)
-	for i < n {
-		c := raw[i]
-		if c != '>' && c != '<' && c != '&' {
-			break
+	i++
+	if i < n && raw[i] == raw[i-1] {
+		i++
+	}
+	if out && i < n && raw[i] == '|' {
+		i++
+	}
+	if i < n && raw[i] == '&' {
+		if j := skipFDDup(raw, i+1); j > i+1 {
+			return j, true
 		}
 		i++
 	}
 	for i < n && unicode.IsSpace(rune(raw[i])) {
 		i++
 	}
-	return i
+	return i, false
+}
+
+func skipFDDup(raw string, j int) int {
+	k := j
+	for k < len(raw) && raw[k] >= '0' && raw[k] <= '9' {
+		k++
+	}
+	if k == j && k < len(raw) && raw[k] == '-' {
+		k++
+	}
+	return k
 }
 
 func isRedirectTerminator(c byte) bool {
 	return unicode.IsSpace(rune(c)) || c == ';' || c == '|' || c == '&'
-}
-
-func skipRedirectTarget(raw string, i int) (int, bool) {
-	n := len(raw)
-	for i < n && !isRedirectTerminator(raw[i]) {
-		nextI, ok := advanceRedirectTargetChar(raw, i)
-		if !ok {
-			return 0, false
-		}
-		i = nextI
-	}
-	return i, true
-}
-
-func advanceRedirectTargetChar(raw string, i int) (int, bool) {
-	switch raw[i] {
-	case '\'':
-		end := strings.IndexByte(raw[i+1:], '\'')
-		if end < 0 {
-			return 0, false
-		}
-		return i + end + 2, true
-	case '"':
-		end, _, ok := scanDoubleQuote(raw, i)
-		return end, ok
-	case '\\':
-		return i + 2, true
-	default:
-		return i + 1, true
-	}
 }
 
 func readSingleQuote(raw string, i int, cur *strings.Builder) (int, bool) {
@@ -158,17 +182,17 @@ func parseSimpleCommand(raw string, pipedTo bool) (Command, bool, bool) {
 		return Command{}, false, false
 	}
 
-	words, ok := tokenizeWords(raw)
+	words, redirs, ok := tokenizeWords(raw)
 	if !ok {
 		return Command{}, false, true
 	}
-	if len(words) == 0 {
+	if len(words) == 0 && len(redirs) == 0 {
 		return Command{}, false, false
 	}
 
 	words, env := extractEnvAssignments(words)
 	if len(words) == 0 {
-		return Command{Raw: raw, Env: env}, true, false
+		return Command{Raw: raw, Env: env, Redirects: redirs}, true, false
 	}
 	if strings.HasPrefix(words[0], "$") {
 		return Command{}, false, true
@@ -186,12 +210,13 @@ func parseSimpleCommand(raw string, pipedTo bool) (Command, bool, bool) {
 	}
 
 	return Command{
-		Raw:     raw,
-		Name:    cmdName,
-		Base:    cmdBase,
-		Args:    words[1:],
-		Env:     env,
-		PipedTo: pipedTo,
+		Raw:       raw,
+		Name:      cmdName,
+		Base:      cmdBase,
+		Args:      words[1:],
+		Env:       env,
+		Redirects: redirs,
+		PipedTo:   pipedTo,
 	}, true, false
 }
 
@@ -214,36 +239,122 @@ func isBannedCommand(name, base string, args []string) bool {
 	if base == "eval" || base == "source" || name == "." {
 		return true
 	}
-	return isShellBinary(base) && containsFlag(args, "-c")
+	return (isShellBinary(base) && containsFlag(args, "-c")) || runsCodeFromData(base, args)
+}
+
+// runsCodeFromData reports runners and interpreters whose command is data the splitter
+// cannot see: xargs, find -exec, inline interpreter code.
+func runsCodeFromData(base string, args []string) bool {
+	switch base {
+	case "xargs", "watch", "parallel", "busybox":
+		return true
+	case "find":
+		return slices.ContainsFunc(args, func(a string) bool {
+			return a == "-exec" || a == "-execdir" || a == "-ok" || a == "-okdir"
+		})
+	}
+	return slices.ContainsFunc(inlineCodeFlags(base), func(f string) bool {
+		return containsFlag(args, f) || slices.ContainsFunc(args, func(a string) bool { return strings.HasPrefix(a, f+"=") })
+	})
+}
+
+func inlineCodeFlags(base string) []string {
+	switch {
+	case strings.HasPrefix(base, "python"):
+		return []string{"-c"}
+	case base == "perl":
+		return []string{"-e", "-E"}
+	case base == "ruby":
+		return []string{"-e"}
+	case base == "node":
+		return []string{"-e", "-p", "--eval", "--print"}
+	case base == "php":
+		return []string{"-r"}
+	}
+	return nil
+}
+
+// wrapperSpec describes a prefix wrapper: option flags that take a value and the number of
+// positional operands (a duration, a priority) before the wrapped command.
+type wrapperSpec struct {
+	argFlags []string
+	operands int
+}
+
+func prefixWrapper(base string) (wrapperSpec, bool) {
+	switch base {
+	case "command", "nohup", "setsid":
+		return wrapperSpec{}, true
+	case "time":
+		return wrapperSpec{argFlags: []string{"-f", "-o", "--format", "--output"}}, true
+	case "nice":
+		return wrapperSpec{argFlags: []string{"-n", "--adjustment"}}, true
+	case "sudo":
+		return wrapperSpec{argFlags: []string{"-u", "-g", "-h", "-p", "-C", "-T", "-r", "-t", "-D", "-R", "-U"}}, true
+	case "doas":
+		return wrapperSpec{argFlags: []string{"-u", "-C"}}, true
+	case "timeout":
+		return wrapperSpec{argFlags: []string{"-s", "-k", "--signal", "--kill-after"}, operands: 1}, true
+	case "exec":
+		return wrapperSpec{argFlags: []string{"-a"}}, true
+	case "stdbuf":
+		return wrapperSpec{argFlags: []string{"-i", "-o", "-e", "--input", "--output", "--error"}}, true
+	case "ionice":
+		return wrapperSpec{argFlags: []string{"-c", "-n", "-p", "-P", "-u"}}, true
+	case "chrt":
+		return wrapperSpec{operands: 1}, true
+	}
+	return wrapperSpec{}, false
 }
 
 func unwrapWrappers(words, env []string) ([]string, []string, bool) {
 	for len(words) > 0 {
 		base := filepath.Base(words[0])
+		spec, isPrefix := prefixWrapper(base)
 		var ok bool
-		switch base {
-		case "env":
+		switch {
+		case base == "env":
 			words, env, ok = unwrapEnv(words[1:], env)
-			if !ok {
-				return nil, nil, false
-			}
-		case "command":
-			words = unwrapCommand(words[1:])
-		case "nice":
-			words, ok = unwrapNice(words[1:])
-			if !ok {
-				return nil, nil, false
-			}
-		case "nohup":
-			words = words[1:]
+		case isPrefix:
+			words, env, ok = unwrapPrefix(words[1:], env, spec)
 		default:
-			if len(words) == 0 || strings.HasPrefix(words[0], "$") {
-				return nil, nil, false
-			}
-			return words, env, true
+			return words, env, !strings.HasPrefix(words[0], "$")
+		}
+		if !ok {
+			return nil, nil, false
 		}
 	}
 	return nil, nil, false
+}
+
+func unwrapPrefix(words, env []string, spec wrapperSpec) ([]string, []string, bool) {
+	for len(words) > 0 {
+		w := words[0]
+		if w == "--" {
+			words = words[1:]
+			break
+		}
+		if isAssignment(w) {
+			env = append(env, w)
+			words = words[1:]
+			continue
+		}
+		if !strings.HasPrefix(w, "-") {
+			break
+		}
+		step := 1
+		if slices.Contains(spec.argFlags, w) {
+			step = 2
+		}
+		if len(words) < step {
+			return nil, nil, false
+		}
+		words = words[step:]
+	}
+	if len(words) < spec.operands {
+		return nil, nil, false
+	}
+	return words[spec.operands:], env, true
 }
 
 func unwrapEnv(words, env []string) ([]string, []string, bool) {
@@ -271,27 +382,6 @@ func unwrapEnv(words, env []string) ([]string, []string, bool) {
 		break
 	}
 	return words, env, true
-}
-
-func unwrapCommand(words []string) []string {
-	for len(words) > 0 && strings.HasPrefix(words[0], "-") {
-		words = words[1:]
-	}
-	return words
-}
-
-func unwrapNice(words []string) ([]string, bool) {
-	for len(words) > 0 && strings.HasPrefix(words[0], "-") {
-		if words[0] == "-n" {
-			if len(words) <= 1 {
-				return nil, false
-			}
-			words = words[2:]
-			continue
-		}
-		words = words[1:]
-	}
-	return words, true
 }
 
 func isAssignment(w string) bool {

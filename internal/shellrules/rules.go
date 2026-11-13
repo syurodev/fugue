@@ -2,6 +2,7 @@ package shellrules
 
 import (
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
@@ -83,7 +84,7 @@ func matchDefaultRule(cmd *Command, roots []string) (bool, Risk, string) {
 	if matchesDeployInfra(cmd) {
 		return true, RiskExternal, RuleDeployInfra
 	}
-	if matchesDestructiveOutside(cmd, roots) {
+	if matchesDestructiveOutside(cmd, roots) || redirectsOutside(cmd, roots) {
 		return true, RiskDestructive, RuleDestructiveOutside
 	}
 	return false, "", ""
@@ -186,6 +187,13 @@ func matchesDestructiveOutside(cmd *Command, roots []string) bool {
 	return false
 }
 
+// redirectsOutside reports output redirections that write outside the workspace.
+func redirectsOutside(cmd *Command, roots []string) bool {
+	return slices.ContainsFunc(cmd.Redirects, func(t string) bool {
+		return t != "/dev/null" && t != "/dev/stdout" && t != "/dev/stderr" && isOutsideWorkspace(t, roots)
+	})
+}
+
 func isRecursiveRm(args []string) bool {
 	for _, a := range args {
 		if a == "-r" || a == "-R" || a == "--recursive" ||
@@ -228,7 +236,7 @@ func isOutsideWorkspace(p string, roots []string) bool {
 }
 
 func isHomeOrParent(p string) bool {
-	if p == "~" || strings.HasPrefix(p, "~/") || strings.HasPrefix(p, "~\\") {
+	if strings.HasPrefix(p, "~") { // ~, ~/x, ~user/x all expand to a home directory
 		return true
 	}
 	clean := filepath.Clean(p)

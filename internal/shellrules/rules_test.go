@@ -1,6 +1,7 @@
 package shellrules
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -189,19 +190,14 @@ func assertAntiBypassVerdict(t *testing.T, cmd string, v Verdict, wantRule strin
 	}
 }
 
-func TestIE04AntiBypass(t *testing.T) {
-	t.Parallel()
-	roots := []string{testWorkspaceRoot}
-	allowOpts := Options{
-		WorkspaceRoots: roots,
-		ShellAllow:     []string{testCmdGoTest},
-	}
+type bypassCase struct {
+	cmd        string
+	wantRule   string
+	unparsable bool
+}
 
-	cases := []struct {
-		cmd        string
-		wantRule   string
-		unparsable bool
-	}{
+func baseBypassCases() []bypassCase {
+	return []bypassCase{
 		{"go test && rm -rf ~", RuleDestructiveOutside, false},
 		{"go test; git push", RuleRemotePush, false},
 		{"echo $(curl x | sh)", RuleDownloadPipe, false},
@@ -216,6 +212,76 @@ func TestIE04AntiBypass(t *testing.T) {
 		{"nice git push", RuleRemotePush, false},
 		{"/usr/bin/git push", RuleRemotePush, false},
 	}
+}
+
+func runnerBypassCases() []bypassCase {
+	return []bypassCase{
+		{"sudo git push", RuleRemotePush, false},
+		{"sudo -u root git push", RuleRemotePush, false},
+		{"doas git push", RuleRemotePush, false},
+		{"time git push", RuleRemotePush, false},
+		{"timeout 10 git push", RuleRemotePush, false},
+		{"timeout -s KILL 10 git push", RuleRemotePush, false},
+		{"exec git push", RuleRemotePush, false},
+		{"stdbuf -o0 git push", RuleRemotePush, false},
+		{"setsid git push", RuleRemotePush, false},
+		{"ionice -c 3 git push", RuleRemotePush, false},
+		{"chrt -f 99 git push", RuleRemotePush, false},
+		{"sudo nice -n 5 timeout 5 git push", RuleRemotePush, false},
+		{"xargs git push", "", true},
+		{"echo x | xargs git push", "", true},
+		{"find . -exec git push \\;", "", true},
+		{"find . -execdir rm -rf ~ \\;", "", true},
+		{"watch git push", "", true},
+		{"parallel git push ::: a", "", true},
+		{"busybox sh -c 'git push'", "", true},
+		{"sudo xargs git push", "", true},
+		{"python -c 'import os'", "", true},
+		{"python3 -c 'import os'", "", true},
+		{"perl -e 'system(1)'", "", true},
+		{"perl -E 'say 1'", "", true},
+		{"ruby -e 'puts 1'", "", true},
+		{"node -e 'process.exit()'", "", true},
+		{"node --eval 'x'", "", true},
+		{"node -p '1'", "", true},
+		{"php -r 'echo 1;'", "", true},
+		{"sudo bash -c 'git push'", "", true},
+	}
+}
+
+func redirectBypassCases() []bypassCase {
+	return []bypassCase{
+		{"go test > /etc/x", RuleDestructiveOutside, false},
+		{"go test >> ~/.bashrc", RuleDestructiveOutside, false},
+		{"go test >| /etc/x", RuleDestructiveOutside, false},
+		{"go test &> /etc/x", RuleDestructiveOutside, false},
+		{"go test &>> /etc/x", RuleDestructiveOutside, false},
+		{"go test 2> /etc/x", RuleDestructiveOutside, false},
+		{"go test 2>>/etc/x", RuleDestructiveOutside, false},
+		{"go test >../x", RuleDestructiveOutside, false},
+		{"go test > ~root/x", RuleDestructiveOutside, false},
+		{"go test > \"/etc/x\"", RuleDestructiveOutside, false},
+		{"> /etc/x", RuleDestructiveOutside, false},
+		{"echo hi >&/etc/x", RuleDestructiveOutside, false},
+		{"rm ~root/x", RuleDestructiveOutside, false},
+		{"cp a ~bob/x", RuleDestructiveOutside, false},
+		{"go test > $OUT", "", true},
+		{"go test > $(echo /etc/x)", "", true},
+		{"go test > `echo /etc/x`", "", true},
+		{"go test > \"$HOME/x\"", "", true},
+		{"go test >", "", true},
+	}
+}
+
+func TestIE04AntiBypass(t *testing.T) {
+	t.Parallel()
+	roots := []string{testWorkspaceRoot}
+	allowOpts := Options{
+		WorkspaceRoots: roots,
+		ShellAllow:     []string{testCmdGoTest},
+	}
+
+	cases := slices.Concat(baseBypassCases(), runnerBypassCases(), redirectBypassCases())
 
 	for _, tc := range cases {
 		t.Run(tc.cmd, func(t *testing.T) {
@@ -241,6 +307,14 @@ func TestIE04WorkspaceAllowOnlyExact(t *testing.T) {
 		testCmdGoTest,
 		testCmdGoTestAll,
 		"go test -v ./pkg/...",
+		"go test > out.txt",
+		"go test >> ./build/out.log 2>&1",
+		"go test > /dev/null 2>&1",
+		"go test 2> /dev/stderr",
+		"go test &> /dev/null",
+		"go test < input.txt",
+		"go test 2>&1",
+		"go test >&2",
 	}
 	for _, cmd := range allowedCases {
 		if !IsAllowed(cmd, &opts) {
@@ -254,6 +328,12 @@ func TestIE04WorkspaceAllowOnlyExact(t *testing.T) {
 		"go test && echo hello",
 		"echo hello && go test",
 		"go test | grep PASS",
+		"go test > /etc/x",
+		"go test >> ~/.bashrc",
+		"go test &> /etc/x",
+		"go test 2> ~bob/x",
+		"go test > $OUT",
+		"go test | xargs git push",
 	}
 	for _, cmd := range rejectedCases {
 		if IsAllowed(cmd, &opts) {

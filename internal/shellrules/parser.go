@@ -155,6 +155,9 @@ func scanDelimiter(s string, i int) (int, bool, bool) {
 }
 
 func scanPipe(s string, i int) (int, bool, bool) {
+	if i > 0 && s[i-1] == '>' { // the clobber operator >|
+		return 0, false, false
+	}
 	if i+1 < len(s) {
 		switch s[i+1] {
 		case '&':
@@ -170,7 +173,7 @@ func scanAmp(s string, i int) (int, bool, bool) {
 	if i+1 < len(s) && s[i+1] == '&' {
 		return 2, false, true
 	}
-	if i > 0 && (s[i-1] == '>' || s[i-1] == '<') {
+	if (i > 0 && (s[i-1] == '>' || s[i-1] == '<')) || (i+1 < len(s) && s[i+1] == '>') {
 		return 0, false, false
 	}
 	return 1, false, true
