@@ -341,6 +341,9 @@ func (a *vendorSessionActor) resumeSession(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("resume vendor session state: %w", err)
 	}
+	if err := a.manager.deps.Transcripts.RegisterSession(a.info.ID); err != nil {
+		return fmt.Errorf("register resumed transcript topics: %w", err)
+	}
 	if err := a.append(ctx, &vendorstore.Event{
 		Type: vendorstore.VendorSessionStateChanged, State: vendorstore.StateStarting,
 		ProcessPID: a.info.ProcessPID, ProcessStartToken: a.info.ProcessStartToken,
