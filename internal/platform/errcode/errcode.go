@@ -30,6 +30,16 @@ const (
 	InteractionStaleIncarnation Code = "interaction.stale_incarnation"
 	InteractionOptionNotOffered Code = "interaction.option_not_offered"
 	InteractionTextTooLarge     Code = "interaction.text_too_large"
+	WorkspaceNotFound           Code = "workspace.not_found"
+	WorkspaceAlreadyExists      Code = "workspace.already_exists"
+	WorkspaceConfigInvalid      Code = "workspace.config_invalid"
+	WorkspaceConfigChanged      Code = "workspace.config_changed"
+	WorkspaceConfigUnconfirmed  Code = "workspace.config_unconfirmed"
+	WorkspaceRootInvalid        Code = "workspace.root_invalid"
+	WorkspaceRootMissing        Code = "workspace.root_missing"
+	WorkspacePathDenied         Code = "workspace.path_denied"
+	WorkspaceOwnershipInvalid   Code = "workspace.ownership_invalid"
+	WorkspaceConfigTooLarge     Code = "workspace.config_too_large"
 )
 
 // Entry classifies one code. Hidden codes are never shown to a client; the
@@ -59,6 +69,16 @@ func Registry() []Entry {
 		{InteractionStaleIncarnation, true, "the interaction request belongs to a previous host incarnation"},
 		{InteractionOptionNotOffered, true, "the selected outcome or option was not offered"},
 		{InteractionTextTooLarge, true, "the interaction answer text or deny note exceeds the size limit"},
+		{WorkspaceNotFound, true, "the workspace does not exist"},
+		{WorkspaceAlreadyExists, true, "the workspace already exists"},
+		{WorkspaceConfigInvalid, true, "the workspace configuration is invalid"},
+		{WorkspaceConfigChanged, true, "the workspace configuration changed since it was reviewed"},
+		{WorkspaceConfigUnconfirmed, true, "the workspace configuration requires confirmation"},
+		{WorkspaceRootInvalid, true, "the workspace root is invalid"},
+		{WorkspaceRootMissing, true, "the workspace root is missing"},
+		{WorkspacePathDenied, true, "the workspace path is not allowed"},
+		{WorkspaceOwnershipInvalid, true, "workspace ownership or permissions are invalid"},
+		{WorkspaceConfigTooLarge, true, "the workspace configuration exceeds the size limit"},
 	}
 }
 

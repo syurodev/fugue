@@ -23,8 +23,8 @@ func (s *Service) UpdateWorkspaceConfig(ctx context.Context, id string, rawTOML 
 }
 
 // ConfirmWorkspaceConfig confirms a pending out-of-band configuration change (Q-64, Q-70: write accepted.toml first, update DB second).
-func (s *Service) ConfirmWorkspaceConfig(ctx context.Context, id string) (*Workspace, error) {
-	return s.applyWorkspaceConfig(ctx, id, nil, "", true)
+func (s *Service) ConfirmWorkspaceConfig(ctx context.Context, id, expectedHash string) (*Workspace, error) {
+	return s.applyWorkspaceConfig(ctx, id, nil, expectedHash, true)
 }
 
 func (s *Service) applyWorkspaceConfig(ctx context.Context, id string, rawTOML []byte, expectedHash string, isConfirm bool) (*Workspace, error) {
@@ -33,6 +33,9 @@ func (s *Service) applyWorkspaceConfig(ctx context.Context, id string, rawTOML [
 		return nil, err
 	}
 	if isConfirm {
+		if err := checkExpectedHash(diskBytes, rec.ConfigHash, expectedHash); err != nil {
+			return nil, err
+		}
 		rawTOML = diskBytes
 	} else if err := checkExpectedHash(diskBytes, rec.ConfigHash, expectedHash); err != nil {
 		return nil, err
@@ -52,7 +55,7 @@ func (s *Service) applyWorkspaceConfig(ctx context.Context, id string, rawTOML [
 }
 
 // RejectWorkspaceConfig restores fugue.toml atomically from accepted.toml without bumping policy_revision (Q-64, Q-70).
-func (s *Service) RejectWorkspaceConfig(ctx context.Context, id string) (*Workspace, error) {
+func (s *Service) RejectWorkspaceConfig(ctx context.Context, id, expectedHash string) (*Workspace, error) {
 	rec, homeDir, err := s.prepareWorkspaceOp(ctx, id)
 	if err != nil {
 		return nil, err
@@ -60,6 +63,13 @@ func (s *Service) RejectWorkspaceConfig(ctx context.Context, id string) (*Worksp
 	accBytes, _, accErr := s.loadAcceptedCopy(ctx, id, rec.AcceptedConfigHash, homeDir)
 	if accErr != nil {
 		return nil, accErr
+	}
+	diskBytes, readErr := os.ReadFile(s.paths.ConfigPath(id))
+	if readErr != nil {
+		return nil, WrapError(ErrNotFound, "read config for workspace", readErr)
+	}
+	if err := checkExpectedHash(diskBytes, rec.ConfigHash, expectedHash); err != nil {
+		return nil, err
 	}
 	rec.ConfigHash = rec.AcceptedConfigHash
 	if err := firstErr(writeAtomic(s.paths.WorkspaceDir(id), "fugue.toml", accBytes), s.store.Update(ctx, rec)); err != nil {
@@ -69,7 +79,7 @@ func (s *Service) RejectWorkspaceConfig(ctx context.Context, id string) (*Worksp
 }
 
 func checkExpectedHash(diskBytes []byte, recHash, expectedHash string) error {
-	if expectedHash != "" && (computeConfigHash(diskBytes) != expectedHash || recHash != expectedHash) {
+	if expectedHash == "" || computeConfigHash(diskBytes) != expectedHash || recHash != expectedHash {
 		return NewError(ErrConfigChanged, "workspace configuration hash does not match expected_hash")
 	}
 	return nil
@@ -166,8 +176,16 @@ func (s *Service) reconcileOutOfBand(
 ) (tier3RawConfig, bool, []PolicyDiffEntry, error, error) {
 	diskCfg, parseErr := decodeTier3TOML(s.paths.ConfigPath(id), diskBytes, homeDir)
 	if parseErr != nil {
+		// Record the hash the client is shown so Reject/Update can pass the CAS check on a corrupted file (WS-E12).
+		if rec.ConfigHash != diskHash {
+			rec.ConfigHash = diskHash
+			if err := s.store.Update(ctx, rec); err != nil {
+				return tier3RawConfig{}, false, nil, nil, err
+			}
+		}
 		return accCfg, false, nil, parseErr, nil
 	}
+	s.canonicalizeConfiguredRoots(&diskCfg, homeDir)
 	if diskHash == rec.AcceptedConfigHash {
 		return diskCfg, false, nil, nil, nil
 	}
@@ -243,7 +261,27 @@ func (s *Service) loadAcceptedCopy(ctx context.Context, id, expectedHash, homeDi
 		return nil, tier3RawConfig{}, NewError(ErrConfigUnconfirmed, "accepted configuration copy hash does not match accepted_config_hash")
 	}
 	cfg, decErr := decodeTier3TOML(accPath, raw, homeDir)
+	s.canonicalizeConfiguredRoots(&cfg, homeDir)
 	return raw, cfg, decErr
+}
+
+// canonicalizeConfiguredRoots makes equivalent filesystem aliases compare the
+// same in effective configuration and policy diffs. Missing and invalid roots
+// stay intact so buildWorkspace can report them through its usual fields.
+func (s *Service) canonicalizeConfiguredRoots(cfg *tier3RawConfig, homeDir string) {
+	if cfg.Roots == nil {
+		return
+	}
+	roots := make([]Root, 0, len(*cfg.Roots))
+	for _, spec := range *cfg.Roots {
+		root, err := s.validateRoot(spec.Name, spec.Access, spec.Path, homeDir, roots)
+		if err != nil {
+			roots = append(roots, Root{Name: spec.Name, Path: spec.Path, Access: spec.Access})
+			continue
+		}
+		roots = append(roots, root)
+	}
+	cfg.Roots = &roots
 }
 
 func (s *Service) loadTier2Config(ctx context.Context, homeDir string) (tier2RawConfig, error) {

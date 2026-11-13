@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
@@ -110,6 +111,33 @@ func TestOutOfBandPolicyChangeIsNotAppliedUntilConfirmed(t *testing.T) {
 	testConfirmCrashBetweenFileAndDBFailsClosed(t)
 }
 
+func TestConfirmRejectsWhenFileChangedAfterReview(t *testing.T) {
+	t.Parallel()
+	f := newTestFixture(t)
+	ws, repo := createTestWorkspaceWithRepo(t, f, "confirm-race")
+	reviewed := []byte("name = \"reviewed\"\n[[roots]]\nname = \"main\"\npath = \"" + filepath.ToSlash(repo) + "\"\naccess = \"rw\"\n\n[policy]\napproval_mode = \"full\"\n")
+	changed := []byte("name = \"not-reviewed\"\n[[roots]]\nname = \"main\"\npath = \"" + filepath.ToSlash(repo) + "\"\naccess = \"rw\"\n\n[policy]\napproval_mode = \"full\"\nshell_allow = [\"rm -rf\"]\n")
+	testWriteFile(t, f.paths.ConfigPath(ws.ID), reviewed)
+	_, pending, err := f.svc.GetEffectiveConfig(t.Context(), ws.ID, nil)
+	if err != nil || !pending.PendingPolicyConfirmation {
+		t.Fatalf("GetEffectiveConfig pending = %+v, err %v", pending, err)
+	}
+	reviewedHash := pending.ConfigHash
+	testWriteFile(t, f.paths.ConfigPath(ws.ID), changed)
+	_, confirmErr := f.svc.ConfirmWorkspaceConfig(t.Context(), ws.ID, reviewedHash)
+	if CodeOf(confirmErr) != ErrConfigChanged {
+		t.Fatalf("ConfirmWorkspaceConfig error = %v, want config_changed", confirmErr)
+	}
+	_, rejectErr := f.svc.RejectWorkspaceConfig(t.Context(), ws.ID, reviewedHash)
+	if CodeOf(rejectErr) != ErrConfigChanged {
+		t.Fatalf("RejectWorkspaceConfig error = %v, want config_changed", rejectErr)
+	}
+	got, err := os.ReadFile(f.paths.ConfigPath(ws.ID))
+	if err != nil || !bytes.Equal(got, changed) {
+		t.Fatalf("config file after rejected confirm = %q, err %v", got, err)
+	}
+}
+
 func assertPendingPolicyChangeHeld(t *testing.T, ctx context.Context, f *testFixture, wsID string) {
 	t.Helper()
 	eff, loaded, err := f.svc.GetEffectiveConfig(ctx, wsID, nil)
@@ -131,7 +159,11 @@ func assertPendingPolicyChangeHeld(t *testing.T, ctx context.Context, f *testFix
 
 func assertRejectRestoresAcceptedCopy(t *testing.T, ctx context.Context, f *testFixture, ws *Workspace) {
 	t.Helper()
-	rejected, err := f.svc.RejectWorkspaceConfig(ctx, ws.ID)
+	pending, err := f.svc.GetWorkspace(ctx, ws.ID)
+	if err != nil {
+		t.Fatalf("GetWorkspace before Reject: %v", err)
+	}
+	rejected, err := f.svc.RejectWorkspaceConfig(ctx, ws.ID, pending.ConfigHash)
 	if err != nil {
 		t.Fatalf("RejectWorkspaceConfig: %v", err)
 	}
@@ -142,7 +174,11 @@ func assertRejectRestoresAcceptedCopy(t *testing.T, ctx context.Context, f *test
 
 func assertConfirmAppliesPolicyChange(t *testing.T, ctx context.Context, f *testFixture, wsID string) {
 	t.Helper()
-	confirmed, err := f.svc.ConfirmWorkspaceConfig(ctx, wsID)
+	pending, err := f.svc.GetWorkspace(ctx, wsID)
+	if err != nil {
+		t.Fatalf("GetWorkspace before Confirm: %v", err)
+	}
+	confirmed, err := f.svc.ConfirmWorkspaceConfig(ctx, wsID, pending.ConfigHash)
 	if err != nil {
 		t.Fatalf("ConfirmWorkspaceConfig: %v", err)
 	}
@@ -167,7 +203,11 @@ func testConfirmCrashBetweenFileAndDBFailsClosed(t *testing.T) {
 		filepath.ToSlash(repo) + "\"\naccess = \"rw\"\n\n[policy]\napproval_mode = \"plan\"\n")
 	testWriteFile(t, f.paths.ConfigPath(ws.ID), tampered)
 
-	if _, err := f.svc.ConfirmWorkspaceConfig(t.Context(), ws.ID); !errors.Is(err, crashErr) {
+	pending, err := f.svc.GetWorkspace(t.Context(), ws.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.svc.ConfirmWorkspaceConfig(t.Context(), ws.ID, pending.ConfigHash); !errors.Is(err, crashErr) {
 		t.Fatalf("expected simulated crash error, got %v", err)
 	}
 	if _, err := f.svc.GetWorkspace(t.Context(), ws.ID); err == nil || CodeOf(err) != ErrConfigUnconfirmed {
