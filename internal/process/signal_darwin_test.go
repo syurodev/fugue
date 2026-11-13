@@ -4,7 +4,6 @@ package process
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"os/exec"
 	"runtime"
@@ -15,59 +14,74 @@ import (
 )
 
 func TestSignalTreeTreatsZombieOnlyGroupEPERMAsGone(t *testing.T) {
+	t.Parallel()
 	const attempts = 200
 	observedEPERM := 0
 	for range attempts {
-		cmd := exec.Command("/bin/sh", "-c", "exit 0")
-		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-		stdout, err := cmd.StdoutPipe()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := cmd.Start(); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := io.Copy(io.Discard, stdout); err != nil {
-			_ = cmd.Wait()
-			t.Fatal(err)
-		}
-		pgid := cmd.Process.Pid
-		zombie, live := waitForZombieGroup(t, pgid)
-		if zombie == 0 || live != 0 {
-			_ = cmd.Wait()
-			t.Fatalf("process group %d has %d zombies and %d live members", pgid, zombie, live)
-		}
-		err = syscall.Kill(-pgid, syscall.SIGKILL)
-		if errors.Is(err, syscall.EPERM) {
+		if runZombieGroupAttempt(t) {
 			observedEPERM++
-			if got := groupSignalError(pgid, err); got != nil {
-				_ = cmd.Wait()
-				t.Fatalf("zombie-only process group EPERM was not ignored: %v", got)
-			}
-		} else if got := groupSignalError(pgid, err); got != nil {
-			_ = cmd.Wait()
-			t.Fatalf("signal error for zombie-only process group: %v", got)
-		}
-		if err := cmd.Wait(); err != nil {
-			t.Fatal(err)
 		}
 	}
 	if observedEPERM == 0 {
 		t.Fatalf("EPERM was not observed in %d zombie-only process-group attempts", attempts)
 	}
-	fmt.Printf("observed EPERM for zombie-only process groups: %d/%d attempts\n", observedEPERM, attempts)
+	t.Logf("observed EPERM for zombie-only process groups: %d/%d attempts", observedEPERM, attempts)
+}
+
+func runZombieGroupAttempt(t *testing.T) bool {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", "exit 0")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	stdout, pipeErr := cmd.StdoutPipe()
+	if pipeErr != nil {
+		t.Fatal(pipeErr)
+	}
+	if startErr := cmd.Start(); startErr != nil {
+		t.Fatal(startErr)
+	}
+	if _, copyErr := io.Copy(io.Discard, stdout); copyErr != nil {
+		reapCommand(t, cmd)
+		t.Fatal(copyErr)
+	}
+	pgid := cmd.Process.Pid
+	zombie, live := waitForZombieGroup(t, pgid)
+	if zombie == 0 || live != 0 {
+		reapCommand(t, cmd)
+		t.Fatalf("process group %d has %d zombies and %d live members", pgid, zombie, live)
+	}
+	killErr := syscall.Kill(-pgid, syscall.SIGKILL)
+	if got := groupSignalError(pgid, killErr); got != nil {
+		reapCommand(t, cmd)
+		t.Fatalf("signal error for zombie-only process group: %v", got)
+	}
+	if waitErr := cmd.Wait(); waitErr != nil {
+		t.Fatal(waitErr)
+	}
+	return errors.Is(killErr, syscall.EPERM)
+}
+
+func reapCommand(t *testing.T, cmd *exec.Cmd) {
+	t.Helper()
+	if waitErr := cmd.Wait(); waitErr != nil {
+		t.Logf("wait after failure: %v", waitErr)
+	}
 }
 
 func TestSignalTreeKeepsEPERMWhenLiveMemberRemains(t *testing.T) {
-	cmd := exec.Command("/bin/sleep", "30")
+	t.Parallel()
+	cmd := exec.CommandContext(t.Context(), "/bin/sleep", "30")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
-		_ = cmd.Wait()
-	}()
+	t.Cleanup(func() {
+		if killErr := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); killErr != nil && !errors.Is(killErr, syscall.ESRCH) {
+			t.Logf("cleanup kill: %v", killErr)
+		}
+		if waitErr := cmd.Wait(); waitErr != nil {
+			t.Logf("cleanup wait: %v", waitErr)
+		}
+	})
 
 	live, err := sysctlGroupHasLiveMembers(cmd.Process.Pid)
 	if err != nil {
