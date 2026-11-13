@@ -2,12 +2,17 @@ package hostapi
 
 import (
 	"io"
+	"os"
 	"testing"
 
 	"go.uber.org/goleak"
 )
 
 func TestMain(m *testing.M) {
+	// The vendor tests run this test binary as the Claude CLI.
+	if playFakeVendor(os.Args) {
+		os.Exit(0)
+	}
 	goleak.VerifyTestMain(m)
 }
 

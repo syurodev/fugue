@@ -34,15 +34,17 @@ const genericInternalMessage = "internal error"
 // public code and the host's versions in the typed detail.
 func connectCode(c errcode.Code) connect.Code {
 	switch c {
-	case errcode.InvalidArgument, errcode.InteractionOptionNotOffered, errcode.WorkspaceConfigInvalid, errcode.WorkspaceRootInvalid:
+	case errcode.InvalidArgument, errcode.InteractionOptionNotOffered, errcode.WorkspaceConfigInvalid, errcode.WorkspaceRootInvalid,
+		errcode.VendorInvalidProfile, errcode.VendorUnknownCommand, errcode.VendorCommandConflict:
 		return connect.CodeInvalidArgument
-	case errcode.NotFound, errcode.InteractionNotFound, errcode.WorkspaceNotFound, errcode.WorkspaceRootMissing:
+	case errcode.NotFound, errcode.InteractionNotFound, errcode.WorkspaceNotFound, errcode.WorkspaceRootMissing, errcode.VendorSessionNotFound:
 		return connect.CodeNotFound
 	case errcode.AlreadyExists, errcode.WorkspaceAlreadyExists:
 		return connect.CodeAlreadyExists
-	case errcode.FailedPrecondition, errcode.UnsupportedVersion, errcode.InteractionAlreadyAnswered, errcode.InteractionStaleIncarnation, errcode.WorkspaceConfigChanged, errcode.WorkspaceConfigUnconfirmed:
+	case errcode.FailedPrecondition, errcode.UnsupportedVersion, errcode.InteractionAlreadyAnswered, errcode.InteractionStaleIncarnation, errcode.WorkspaceConfigChanged, errcode.WorkspaceConfigUnconfirmed,
+		errcode.VendorUnsupported, errcode.VendorSessionState, errcode.VendorTurnNotActive, errcode.VendorVaultLocked:
 		return connect.CodeFailedPrecondition
-	case errcode.FrameTooLarge, errcode.InteractionTextTooLarge, errcode.WorkspaceConfigTooLarge:
+	case errcode.FrameTooLarge, errcode.InteractionTextTooLarge, errcode.WorkspaceConfigTooLarge, errcode.VendorCapacity:
 		return connect.CodeResourceExhausted
 	case errcode.PermissionDenied, errcode.WorkspacePathDenied, errcode.WorkspaceOwnershipInvalid:
 		return connect.CodePermissionDenied

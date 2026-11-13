@@ -97,6 +97,9 @@ func serve(ctx context.Context, out io.Writer, cfg config.Config, version string
 		Clock:     clock.Real{},
 		IDs:       ids.NewUUIDv7(clock.Real{}, ids.CryptoRandom{}),
 		Transport: transport,
+		// The snapshot is filtered through the vendor allowlist before any
+		// vendor process sees it.
+		VendorHostEnv: os.Environ(),
 	})
 	if err != nil {
 		return exitFailure, errors.Join(startupErr(err, "open the host store"), teardownSocket(sock))

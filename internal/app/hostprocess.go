@@ -13,6 +13,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/storage"
+	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/workspace"
 )
 
@@ -28,6 +29,10 @@ type HostProcess struct {
 	storeClosed atomic.Bool
 	closeOnce   sync.Once
 	closeErr    error
+	vault       *vault.Service
+	// closeVendor stops every vendor session and then closes the vendor
+	// read model; it runs before the store closes and is idempotent.
+	closeVendor func() error
 }
 
 // StartHost opens the store — the data-directory lock is the liveness
@@ -61,6 +66,10 @@ func StartHost(ctx context.Context, deps *HostDeps) (*HostProcess, error) {
 		return task
 	}
 	hp.rt.drain = hp.runDrain
+	if err := initVendor(ctx, base, hp, store, deps); err != nil {
+		cancel()
+		return nil, errors.Join(err, store.Close())
+	}
 	hp.rt.startGraceLoop()
 	if hp.rt.interactions != nil {
 		hp.rt.interactions.Start(base)
@@ -157,12 +166,13 @@ func (hp *HostProcess) runDrain(ctx context.Context, force bool, reason string) 
 		})
 	}
 	derr := hp.deps.Transport.Drain(ctx, force)
+	verr := hp.closeVendor()
 	serr := hp.store.Close()
 	hp.storeClosed.Store(true)
-	if derr == nil && serr == nil {
+	if derr == nil && verr == nil && serr == nil {
 		return nil
 	}
-	return errcode.Wrap(errcode.Internal, "the host drain did not finish cleanly", errors.Join(derr, serr))
+	return errcode.Wrap(errcode.Internal, "the host drain did not finish cleanly", errors.Join(derr, verr, serr))
 }
 
 // Stop begins the drain; the reason names the trigger in the log.
@@ -173,6 +183,7 @@ func (hp *HostProcess) Stop(reason string) { hp.rt.Stop(reason) }
 // idempotent. A drain still in progress is waited for.
 func (hp *HostProcess) Close() error {
 	hp.closeOnce.Do(func() {
+		hp.closeErr = hp.closeVendor()
 		hp.cancel()
 		hp.closeErr = errors.Join(hp.closeErr, hp.waitTasks())
 		if hp.rt.interactions != nil {

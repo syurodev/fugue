@@ -103,7 +103,7 @@ func nullable(value string) any {
 }
 
 func (s *Store) project(ctx context.Context, tx *sql.Tx, session string, sequence int64, e *Event, now string) error {
-	if err := s.projectSession(ctx, tx, session, e); err != nil {
+	if err := s.projectSession(ctx, tx, session, e, now); err != nil {
 		return err
 	}
 	var err error
@@ -217,7 +217,7 @@ func classifyMissedItemUpdate(row *sql.Row) error {
 	}
 }
 
-func (s *Store) projectSession(ctx context.Context, tx *sql.Tx, session string, e *Event) error {
+func (s *Store) projectSession(ctx context.Context, tx *sql.Tx, session string, e *Event, now string) error {
 	var err error
 	if e.Type == VendorSessionClosed {
 		e.State = StateClosed
@@ -251,6 +251,7 @@ func (s *Store) projectSession(ctx context.Context, tx *sql.Tx, session string, 
 		if err != nil {
 			return fmt.Errorf("%w: project session: %w", ErrUnavailable, err)
 		}
+		return recordChange(ctx, tx, session, ChangeStateChanged, e.State, e.WaitingReason, now)
 	}
 	return nil
 }

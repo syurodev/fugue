@@ -18,6 +18,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/interaction/v1/interactionv1connect"
+	"github.com/syurodev/fugue/pkg/pb/fugue/vendors/v1/vendorsv1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/workspace/v1/workspacev1connect"
 )
 
@@ -146,6 +147,25 @@ func NewServer(cfg ServerConfig) *Server {
 	return &Server{cfg: cfg, conns: map[net.Conn]*connState{}}
 }
 
+// newServiceMux mounts every Host API service with its request read limit.
+func newServiceMux(backend app.Backend) *http.ServeMux {
+	handler := http.NewServeMux()
+	handler.Handle(hostv1connect.NewHostServiceHandler(&serviceHandler{backend: backend}))
+	handler.Handle(interactionv1connect.NewInteractionServiceHandler(
+		&interactionHandler{backend: backend},
+		connect.WithReadMaxBytes(64*1024),
+	))
+	handler.Handle(workspacev1connect.NewWorkspaceServiceHandler(
+		&workspaceHandler{backend: backend},
+		connect.WithReadMaxBytes(app.WorkspaceConfigMaxBytes),
+	))
+	handler.Handle(vendorsv1connect.NewVendorServiceHandler(
+		&vendorHandler{backend: backend},
+		connect.WithReadMaxBytes(app.VendorRequestMaxBytes),
+	))
+	return handler
+}
+
 // Start writes host.json from the backend's status and serves the Connect
 // handlers on the socket under a supervised serve loop. The base context is
 // captured in the closures below; it is never stored.
@@ -172,16 +192,7 @@ func (s *Server) Start(ctx context.Context, backend app.Backend) error {
 		OnClosed:        s.onConnClosed(ctx),
 		OnReject:        onRejectWarn,
 	})
-	handler := http.NewServeMux()
-	handler.Handle(hostv1connect.NewHostServiceHandler(&serviceHandler{backend: backend}))
-	handler.Handle(interactionv1connect.NewInteractionServiceHandler(
-		&interactionHandler{backend: backend},
-		connect.WithReadMaxBytes(64*1024),
-	))
-	handler.Handle(workspacev1connect.NewWorkspaceServiceHandler(
-		&workspaceHandler{backend: backend},
-		connect.WithReadMaxBytes(app.WorkspaceConfigMaxBytes),
-	))
+	handler := newServiceMux(backend)
 	// The admission gate and the in-flight wrapper let the drain wait for
 	// handlers that are still running when the deadline force-closes their
 	// connections, so none of them can outlive the store the host closes
