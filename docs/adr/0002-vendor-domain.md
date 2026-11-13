@@ -127,6 +127,7 @@ One owning package per table. Only `internal/vendorstore` reads and writes `vend
 | `vendor_payloads` | `internal/vendorstore` | F9.3 |
 | `vendor_session_keys` | `internal/vendorstore` | F9.3 |
 | `vendor_purges` | `internal/vendorstore` | F9.3 |
+| `vendor_session_changes` | `internal/vendorstore` | F9.9c |
 | `team_records` | `internal/vendorstore` | F11.1 |
 | `team_tasks` | `internal/vendorstore` | F11.1 |
 | `team_task_events` | `internal/vendorstore` | F11.1 |

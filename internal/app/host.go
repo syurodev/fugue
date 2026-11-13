@@ -130,6 +130,12 @@ type HostDeps struct {
 	Clock        clock.Clock
 	IDs          ids.Generator
 	Transport    HostTransport
+	// VendorBinary overrides the Claude binary (absolute path); empty
+	// resolves claude on PATH at probe time.
+	VendorBinary string
+	// VendorHostEnv is the environment snapshot vendor processes filter
+	// through the vendor-runtime §8 allowlist.
+	VendorHostEnv []string
 }
 
 // HostRuntime tracks versions, leases and the drain state of a running host.
@@ -143,6 +149,7 @@ type HostRuntime struct {
 	hub          *EventHub
 	interactions *InteractionService
 	workspaces   *WorkspaceService
+	vendors      *VendorService
 
 	// goTask spawns a supervised goroutine on the host's base context; it is
 	// installed by StartHost because the base context is never stored.

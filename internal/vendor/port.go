@@ -3,6 +3,7 @@ package vendor
 import (
 	"context"
 	"strings"
+	"unicode"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/process"
@@ -163,12 +164,19 @@ var ErrTurnNotRunning = errcode.New(errcode.FailedPrecondition, "turn is not cur
 // ErrHandshakeTimeout reports that the vendor session failed to receive system/init within 30 s.
 var ErrHandshakeTimeout = errcode.New(errcode.DeadlineExceeded, "vendor session handshake timed out waiting for system/init")
 
+// IsFugueCommand reports whether text addresses Fugue's /fugue: namespace.
+// Leading whitespace is ignored, so an indented or newline-prefixed command
+// cannot slip past the host to a vendor.
+func IsFugueCommand(text string) bool {
+	return strings.HasPrefix(strings.TrimLeftFunc(text, unicode.IsSpace), "/fugue:")
+}
+
 // ValidateInput enforces the input rules shared by every adapter: the text is
 // non-empty, and a prompt beginning with /fugue: is rejected with a typed
 // error because Fugue commands run on the host (vendor-runtime §9). Every
 // Session.Send and Steer calls it before anything reaches a vendor process.
 func ValidateInput(in Input) error {
-	if strings.HasPrefix(in.Text, "/fugue:") {
+	if IsFugueCommand(in.Text) {
 		return ErrFugueCommand
 	}
 	if strings.TrimSpace(in.Text) == "" {

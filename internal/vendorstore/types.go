@@ -24,6 +24,10 @@ type Session struct {
 	PolicyRevision    int64
 	CreatedAt         string
 	UpdatedAt         string
+	// WorkspaceID and WorkspaceRoot bind the session to the workspace root
+	// it was created in (F9.9c); empty for sessions created before.
+	WorkspaceID   string
+	WorkspaceRoot string
 }
 
 // Event is a durable vendor-domain event without protected content.

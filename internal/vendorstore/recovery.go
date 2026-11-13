@@ -60,6 +60,13 @@ func (s *Store) Recover(ctx context.Context) ([]ProcessIdentity, error) {
 		return nil, fmt.Errorf("%w: recover turns: %w", ErrUnavailable, err)
 	}
 	_, err = tx.ExecContext(ctx,
+		`INSERT INTO vendor_session_changes(session_id,kind,state,waiting_reason,recorded_at)
+		SELECT session_id,?,?,'',? FROM vendor_sessions WHERE state NOT IN (?,?) ORDER BY session_id`,
+		ChangeStateChanged, StateDetached, now, StateClosed, StateDetached)
+	if err != nil {
+		return nil, fmt.Errorf("%w: record recovered sessions: %w", ErrUnavailable, err)
+	}
+	_, err = tx.ExecContext(ctx,
 		`UPDATE vendor_sessions SET state=?,waiting_reason='',updated_at=? WHERE state <> ?`,
 		StateDetached, now, StateClosed)
 	if err != nil {

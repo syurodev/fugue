@@ -27,17 +27,13 @@ func TestVendorTurnOriginMigrationPreservesExistingRows(t *testing.T) {
 	if err := storage.RunMigrations(ctx, db, clk, migrations[:6]); err != nil {
 		t.Fatal(err)
 	}
-	store, storeErr := New(ctx, db, nil, clk, nil)
-	if storeErr != nil {
-		t.Fatal(storeErr)
-	}
-	if err := store.CreateSession(ctx, &Session{ID: "old", Vendor: "claude", AccountID: "account", Role: "assistant", State: StateStarting}); err != nil {
+	// The rows are written with the schema of migration 6 directly: the
+	// current store code writes tables that later migrations add.
+	if _, err := db.ExecContext(ctx, `INSERT INTO vendor_sessions(session_id,vendor,account_id,role,state,created_at,updated_at,last_sequence)
+		VALUES ('old','claude','account','assistant','starting','2026-11-08T00:00:00Z','2026-11-08T00:00:00Z',1)`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, `INSERT INTO vendor_turns(session_id,turn_id,created_at) VALUES ('old','old-turn','2026-11-08T00:00:00Z')`); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Close(); err != nil {
 		t.Fatal(err)
 	}
 	if err := storage.Migrate(ctx, db, clk); err != nil {
