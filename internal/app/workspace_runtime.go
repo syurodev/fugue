@@ -43,3 +43,23 @@ func (rt *HostRuntime) ConfirmWorkspaceConfig(ctx context.Context, principal, id
 func (rt *HostRuntime) RejectWorkspaceConfig(ctx context.Context, principal, id, hash string) (*WorkspaceView, error) {
 	return rt.workspaces.Reject(ctx, principal, id, hash)
 }
+
+// AddWorkspaceRoot serves the AddRoot Host API RPC.
+func (rt *HostRuntime) AddWorkspaceRoot(ctx context.Context, principal, id, name, path, access, hash string) (*WorkspaceView, error) {
+	return rt.workspaces.AddRoot(ctx, principal, id, name, path, access, hash)
+}
+
+// RemoveWorkspaceRoot serves the RemoveRoot Host API RPC.
+func (rt *HostRuntime) RemoveWorkspaceRoot(ctx context.Context, principal, id, name, hash string) (*WorkspaceView, error) {
+	return rt.workspaces.RemoveRoot(ctx, principal, id, name, hash)
+}
+
+// UpdateWorkspaceRoot serves the UpdateRoot Host API RPC.
+func (rt *HostRuntime) UpdateWorkspaceRoot(ctx context.Context, principal, id, name, newName, path, access, hash string) (*WorkspaceView, error) {
+	return rt.workspaces.UpdateRoot(ctx, principal, id, name, newName, path, access, hash)
+}
+
+// DeleteWorkspace serves the DeleteWorkspace Host API RPC.
+func (rt *HostRuntime) DeleteWorkspace(ctx context.Context, principal, id, hash, confirmName string) error {
+	return rt.workspaces.Delete(ctx, principal, id, hash, confirmName)
+}

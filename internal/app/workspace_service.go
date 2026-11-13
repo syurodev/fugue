@@ -13,6 +13,8 @@ import (
 	"github.com/syurodev/fugue/internal/workspace"
 )
 
+const workspaceOperationFailedMessage = "workspace operation failed"
+
 // TopicWorkspaces carries workspace summaries and lifecycle/configuration events.
 const TopicWorkspaces = "workspaces"
 
@@ -23,6 +25,10 @@ const (
 	EventWorkspacePendingConfirm = "pending_confirmation"
 	EventWorkspaceConfirmed      = "confirmed"
 	EventWorkspaceRejected       = "rejected"
+	EventWorkspaceRootAdded      = "root_added"
+	EventWorkspaceRootRemoved    = "root_removed"
+	EventWorkspaceRootUpdated    = "root_updated"
+	EventWorkspaceDeleted        = "deleted"
 	WorkspaceConfigMaxBytes      = 256 * 1024
 )
 
@@ -79,6 +85,10 @@ type WorkspaceBackend interface {
 	UpdateWorkspaceConfig(context.Context, string, string, []byte, string) (*WorkspaceView, error)
 	ConfirmWorkspaceConfig(context.Context, string, string, string) (*WorkspaceView, error)
 	RejectWorkspaceConfig(context.Context, string, string, string) (*WorkspaceView, error)
+	AddWorkspaceRoot(context.Context, string, string, string, string, string, string) (*WorkspaceView, error)
+	RemoveWorkspaceRoot(context.Context, string, string, string, string) (*WorkspaceView, error)
+	UpdateWorkspaceRoot(context.Context, string, string, string, string, string, string, string) (*WorkspaceView, error)
+	DeleteWorkspace(context.Context, string, string, string, string) error
 }
 
 // WorkspaceService composes workspace domain operations with the ephemeral topic.
@@ -237,6 +247,54 @@ func (s *WorkspaceService) Reject(ctx context.Context, principal, id, expectedHa
 	return workspaceView(ws), publicWorkspaceError(err)
 }
 
+// AddRoot adds a root and publishes the effective metadata change.
+func (s *WorkspaceService) AddRoot(ctx context.Context, principal, id, name, path, access, expectedHash string) (*WorkspaceView, error) {
+	if err := authorizeWorkspace(principal); err != nil {
+		return nil, err
+	}
+	ws, err := s.domain.AddRoot(ctx, id, expectedHash, workspace.RootSpec{Name: name, Path: path, Access: workspace.RootAccess(access)})
+	if err == nil {
+		s.publish(EventWorkspaceRootAdded, ws)
+	}
+	return workspaceView(ws), publicWorkspaceError(err)
+}
+
+// RemoveRoot removes a root and publishes the effective metadata change.
+func (s *WorkspaceService) RemoveRoot(ctx context.Context, principal, id, name, expectedHash string) (*WorkspaceView, error) {
+	if err := authorizeWorkspace(principal); err != nil {
+		return nil, err
+	}
+	ws, err := s.domain.RemoveRoot(ctx, id, expectedHash, name)
+	if err == nil {
+		s.publish(EventWorkspaceRootRemoved, ws)
+	}
+	return workspaceView(ws), publicWorkspaceError(err)
+}
+
+// UpdateRoot changes a root and publishes the effective metadata change.
+func (s *WorkspaceService) UpdateRoot(ctx context.Context, principal, id, name, newName, path, access, expectedHash string) (*WorkspaceView, error) {
+	if err := authorizeWorkspace(principal); err != nil {
+		return nil, err
+	}
+	ws, err := s.domain.UpdateRoot(ctx, id, expectedHash, name, workspace.RootSpec{Name: newName, Path: path, Access: workspace.RootAccess(access)})
+	if err == nil {
+		s.publish(EventWorkspaceRootUpdated, ws)
+	}
+	return workspaceView(ws), publicWorkspaceError(err)
+}
+
+// Delete removes only Fugue-owned workspace state and announces a committed row deletion.
+func (s *WorkspaceService) Delete(ctx context.Context, principal, id, expectedHash, confirmName string) error {
+	if err := authorizeWorkspace(principal); err != nil {
+		return err
+	}
+	ws, err := s.domain.DeleteWorkspace(ctx, id, expectedHash, confirmName)
+	if ws != nil {
+		s.publish(EventWorkspaceDeleted, ws)
+	}
+	return publicWorkspaceError(err)
+}
+
 func authorizeWorkspace(principal string) error {
 	if !IsLocalPrincipal(principal) {
 		return errcode.New(errcode.PermissionDenied, "only local principals may access workspaces")
@@ -334,7 +392,26 @@ func workspaceErrorCode(code workspace.Code) (errcode.Code, string) {
 		return errcode.WorkspacePathDenied, "workspace path is not allowed"
 	case workspace.ErrOwnershipInvalid:
 		return errcode.WorkspaceOwnershipInvalid, "workspace ownership or permissions are invalid"
+	case workspace.ErrIDInvalid, workspace.ErrConfirmationRequired, workspace.ErrDeleteFailed:
+		return additionalWorkspaceErrorCode(code)
 	default:
-		return errcode.Internal, "workspace operation failed"
+		return errcode.Internal, workspaceOperationFailedMessage
+	}
+}
+
+func additionalWorkspaceErrorCode(code workspace.Code) (errcode.Code, string) {
+	switch code {
+	case workspace.ErrIDInvalid:
+		return errcode.WorkspaceNotFound, "workspace was not found"
+	case workspace.ErrConfirmationRequired:
+		return errcode.WorkspaceConfigUnconfirmed, "workspace deletion requires matching confirmation"
+	case workspace.ErrDeleteFailed:
+		return errcode.WorkspaceOwnershipInvalid, "workspace state could not be safely removed"
+	case workspace.ErrNotFound, workspace.ErrAlreadyExists, workspace.ErrConfigInvalid,
+		workspace.ErrConfigChanged, workspace.ErrConfigUnconfirmed, workspace.ErrRootInvalid,
+		workspace.ErrRootMissing, workspace.ErrPathDenied, workspace.ErrOwnershipInvalid:
+		return errcode.Internal, workspaceOperationFailedMessage
+	default:
+		return errcode.Internal, workspaceOperationFailedMessage
 	}
 }

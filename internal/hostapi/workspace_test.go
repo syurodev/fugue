@@ -273,6 +273,10 @@ func TestWorkspaceRPCRejectsSessionPrincipal(t *testing.T) {
 	ctx := context.WithValue(t.Context(), connStateKey{}, state)
 	_, err := (&workspaceHandler{backend: backend}).ListWorkspaces(ctx, connect.NewRequest(&workspacev1.ListWorkspacesRequest{}))
 	assertConnectCode(t, err, connect.CodePermissionDenied, errcode.PermissionDenied)
+	_, err = (&workspaceHandler{backend: backend}).AddRoot(ctx, connect.NewRequest(&workspacev1.AddRootRequest{}))
+	assertConnectCode(t, err, connect.CodePermissionDenied, errcode.PermissionDenied)
+	_, err = (&workspaceHandler{backend: backend}).DeleteWorkspace(ctx, connect.NewRequest(&workspacev1.DeleteWorkspaceRequest{}))
+	assertConnectCode(t, err, connect.CodePermissionDenied, errcode.PermissionDenied)
 }
 
 func assertWorkspaceEvent(t *testing.T, stream *connect.ServerStreamForClient[hostv1.SubscribeResponse], sequence uint64, eventType string) {

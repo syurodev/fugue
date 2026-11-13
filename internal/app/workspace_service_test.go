@@ -15,12 +15,96 @@ import (
 	"github.com/syurodev/fugue/internal/workspace"
 )
 
+const workspaceRuntimeTestRoot = "runtime-root"
+
 func TestWorkspaceRuntimeAndTopic(t *testing.T) {
 	t.Parallel()
 	rt, stream, home := workspaceRuntimeFixture(t)
 	created := workspaceCreateAndRead(t, rt, stream)
 	workspaceValidateAndUpdate(t, rt, stream, created)
 	workspaceConfirmAndReject(t, rt, stream, home, created.ID)
+}
+
+func TestWorkspaceRootRuntimeAndDeleteTopic(t *testing.T) {
+	t.Parallel()
+	rt, stream, _ := workspaceRuntimeFixture(t)
+	created := createRootRuntimeWorkspace(t, rt, stream)
+	updated := exerciseWorkspaceRootRuntime(t, rt, stream, created)
+	exerciseWorkspaceDeleteRuntime(t, rt, stream, updated, created.Name)
+}
+
+func createRootRuntimeWorkspace(t *testing.T, rt *HostRuntime, stream *Subscription) *WorkspaceView {
+	t.Helper()
+	created, err := rt.CreateWorkspace(t.Context(), string(KindApp), "root-api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertAppWorkspaceEvent(t, stream, 1, EventWorkspaceCreated)
+	first := filepath.Join(t.TempDir(), "first")
+	if err = os.Mkdir(first, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = rt.AddWorkspaceRoot(t.Context(), "session", created.ID, workspaceRuntimeTestRoot, first, "rw", created.ConfigHash); errcode.CodeOf(err) != errcode.PermissionDenied {
+		t.Fatalf("non-local AddRoot error = %v", err)
+	}
+	_, err = rt.AddWorkspaceRoot(t.Context(), string(KindApp), created.ID, workspaceRuntimeTestRoot, first, "rw", created.ConfigHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertAppWorkspaceEvent(t, stream, 2, EventWorkspaceRootAdded)
+	return created
+}
+
+func exerciseWorkspaceRootRuntime(t *testing.T, rt *HostRuntime, stream *Subscription, created *WorkspaceView) *WorkspaceView {
+	t.Helper()
+	second := filepath.Join(t.TempDir(), "second")
+	if err := os.Mkdir(second, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	added, _, err := rt.GetWorkspace(t.Context(), string(KindApp), created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = rt.UpdateWorkspaceRoot(t.Context(), string(KindApp), created.ID, workspaceRuntimeTestRoot, "", second, "ro", "stale"); errcode.CodeOf(err) != errcode.WorkspaceConfigChanged {
+		t.Fatalf("stale UpdateRoot error = %v", err)
+	}
+	updated, err := rt.UpdateWorkspaceRoot(t.Context(), string(KindApp), created.ID, workspaceRuntimeTestRoot, "renamed", second, "ro", added.ConfigHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertAppWorkspaceEvent(t, stream, 3, EventWorkspaceRootUpdated)
+	assertUpdatedWorkspaceRuntimeRoot(t, updated, second)
+	removed, err := rt.RemoveWorkspaceRoot(t.Context(), string(KindApp), created.ID, "renamed", updated.ConfigHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertAppWorkspaceEvent(t, stream, 4, EventWorkspaceRootRemoved)
+	if removed.ConfigRevision != 4 || removed.PolicyRevision != 4 || len(removed.Roots) != 0 {
+		t.Fatalf("removed root workspace = %+v", removed)
+	}
+	return removed
+}
+
+func assertUpdatedWorkspaceRuntimeRoot(t *testing.T, ws *WorkspaceView, expectedPath string) {
+	t.Helper()
+	resolvedSecond, err := filepath.EvalSymlinks(expectedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ws.Roots[0].Name != "renamed" || ws.Roots[0].Path != resolvedSecond || ws.Roots[0].Access != "ro" {
+		t.Fatalf("updated root = %+v", ws.Roots)
+	}
+}
+
+func exerciseWorkspaceDeleteRuntime(t *testing.T, rt *HostRuntime, stream *Subscription, removed *WorkspaceView, name string) {
+	t.Helper()
+	if err := rt.DeleteWorkspace(t.Context(), string(KindApp), removed.ID, removed.ConfigHash, "wrong"); errcode.CodeOf(err) != errcode.WorkspaceConfigUnconfirmed {
+		t.Fatalf("wrong Delete confirmation error = %v", err)
+	}
+	if err := rt.DeleteWorkspace(t.Context(), string(KindApp), removed.ID, removed.ConfigHash, name); err != nil {
+		t.Fatal(err)
+	}
+	assertAppWorkspaceEvent(t, stream, 5, EventWorkspaceDeleted)
 }
 
 func workspaceRuntimeFixture(t *testing.T) (*HostRuntime, *Subscription, string) {

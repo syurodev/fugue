@@ -11,7 +11,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file fugue/workspace/v1/workspace.proto.
  */
 export const file_fugue_workspace_v1_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CiJmdWd1ZS93b3Jrc3BhY2UvdjEvd29ya3NwYWNlLnByb3RvEhJmdWd1ZS53b3Jrc3BhY2UudjEiQwoEUm9vdBIMCgRuYW1lGAEgASgJEgwKBHBhdGgYAiABKAkSDgoGYWNjZXNzGAMgASgJEg8KB21pc3NpbmcYBCABKAgiRAoPUG9saWN5RGlmZkVudHJ5EgsKA2tleRgBIAEoCRIRCglvbGRfdmFsdWUYAiABKAkSEQoJbmV3X3ZhbHVlGAMgASgJIoEBChBXb3Jrc3BhY2VTdW1tYXJ5EgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSFQoNbWlzc2luZ19yb290cxgDIAMoCRIXCg9jb25maWdfcmV2aXNpb24YBCABKAMSIwobcGVuZGluZ19wb2xpY3lfY29uZmlybWF0aW9uGAUgASgIIoMDCglXb3Jrc3BhY2USCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRInCgVyb290cxgDIAMoCzIYLmZ1Z3VlLndvcmtzcGFjZS52MS5Sb290EhUKDW1pc3Npbmdfcm9vdHMYBCADKAkSEAoIcmF3X3RvbWwYBSABKAwSEwoLY29uZmlnX2hhc2gYBiABKAkSFwoPY29uZmlnX3JldmlzaW9uGAcgASgDEhcKD3BvbGljeV9yZXZpc2lvbhgIIAEoAxIjChtwZW5kaW5nX3BvbGljeV9jb25maXJtYXRpb24YCSABKAgSOAoLcG9saWN5X2RpZmYYCiADKAsyIy5mdWd1ZS53b3Jrc3BhY2UudjEuUG9saWN5RGlmZkVudHJ5EhIKCmNyZWF0ZWRfYXQYCyABKAkSGAoQY29uZmlnX2Vycm9yX2tleRgMIAEoCRIZChFjb25maWdfZXJyb3JfbGluZRgNIAEoAxIbChNjb25maWdfZXJyb3JfY29sdW1uGA4gASgDIkkKC0NvbmZpZ0lzc3VlEgsKA2tleRgBIAEoCRIMCgRsaW5lGAIgASgDEg4KBmNvbHVtbhgDIAEoAxIPCgdtZXNzYWdlGAQgASgJIiYKFkNyZWF0ZVdvcmtzcGFjZVJlcXVlc3QSDAoEbmFtZRgBIAEoCSJLChdDcmVhdGVXb3Jrc3BhY2VSZXNwb25zZRIwCgl3b3Jrc3BhY2UYASABKAsyHS5mdWd1ZS53b3Jrc3BhY2UudjEuV29ya3NwYWNlIhcKFUxpc3RXb3Jrc3BhY2VzUmVxdWVzdCJSChZMaXN0V29ya3NwYWNlc1Jlc3BvbnNlEjgKCndvcmtzcGFjZXMYASADKAsyJC5mdWd1ZS53b3Jrc3BhY2UudjEuV29ya3NwYWNlU3VtbWFyeSIhChNHZXRXb3Jrc3BhY2VSZXF1ZXN0EgoKAmlkGAEgASgJIkgKFEdldFdvcmtzcGFjZVJlc3BvbnNlEjAKCXdvcmtzcGFjZRgBIAEoCzIdLmZ1Z3VlLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2UiJwoZR2V0RWZmZWN0aXZlQ29uZmlnUmVxdWVzdBIKCgJpZBgBIAEoCSLMAQoaR2V0RWZmZWN0aXZlQ29uZmlnUmVzcG9uc2USJwoGdmFsdWVzGAEgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBJSCgpwcm92ZW5hbmNlGAIgAygLMj4uZnVndWUud29ya3NwYWNlLnYxLkdldEVmZmVjdGl2ZUNvbmZpZ1Jlc3BvbnNlLlByb3ZlbmFuY2VFbnRyeRoxCg9Qcm92ZW5hbmNlRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgDOgI4ASI1ChVWYWxpZGF0ZUNvbmZpZ1JlcXVlc3QSCgoCaWQYASABKAkSEAoIcmF3X3RvbWwYAiABKAwiSQoWVmFsaWRhdGVDb25maWdSZXNwb25zZRIvCgZpc3N1ZXMYASADKAsyHy5mdWd1ZS53b3Jrc3BhY2UudjEuQ29uZmlnSXNzdWUiUwocVXBkYXRlV29ya3NwYWNlQ29uZmlnUmVxdWVzdBIKCgJpZBgBIAEoCRIQCghyYXdfdG9tbBgCIAEoDBIVCg1leHBlY3RlZF9oYXNoGAMgASgJIlEKHVVwZGF0ZVdvcmtzcGFjZUNvbmZpZ1Jlc3BvbnNlEjAKCXdvcmtzcGFjZRgBIAEoCzIdLmZ1Z3VlLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2UiQgodQ29uZmlybVdvcmtzcGFjZUNvbmZpZ1JlcXVlc3QSCgoCaWQYASABKAkSFQoNZXhwZWN0ZWRfaGFzaBgCIAEoCSJSCh5Db25maXJtV29ya3NwYWNlQ29uZmlnUmVzcG9uc2USMAoJd29ya3NwYWNlGAEgASgLMh0uZnVndWUud29ya3NwYWNlLnYxLldvcmtzcGFjZSJBChxSZWplY3RXb3Jrc3BhY2VDb25maWdSZXF1ZXN0EgoKAmlkGAEgASgJEhUKDWV4cGVjdGVkX2hhc2gYAiABKAkiUQodUmVqZWN0V29ya3NwYWNlQ29uZmlnUmVzcG9uc2USMAoJd29ya3NwYWNlGAEgASgLMh0uZnVndWUud29ya3NwYWNlLnYxLldvcmtzcGFjZTKlBwoQV29ya3NwYWNlU2VydmljZRJqCg9DcmVhdGVXb3Jrc3BhY2USKi5mdWd1ZS53b3Jrc3BhY2UudjEuQ3JlYXRlV29ya3NwYWNlUmVxdWVzdBorLmZ1Z3VlLndvcmtzcGFjZS52MS5DcmVhdGVXb3Jrc3BhY2VSZXNwb25zZRJnCg5MaXN0V29ya3NwYWNlcxIpLmZ1Z3VlLndvcmtzcGFjZS52MS5MaXN0V29ya3NwYWNlc1JlcXVlc3QaKi5mdWd1ZS53b3Jrc3BhY2UudjEuTGlzdFdvcmtzcGFjZXNSZXNwb25zZRJhCgxHZXRXb3Jrc3BhY2USJy5mdWd1ZS53b3Jrc3BhY2UudjEuR2V0V29ya3NwYWNlUmVxdWVzdBooLmZ1Z3VlLndvcmtzcGFjZS52MS5HZXRXb3Jrc3BhY2VSZXNwb25zZRJzChJHZXRFZmZlY3RpdmVDb25maWcSLS5mdWd1ZS53b3Jrc3BhY2UudjEuR2V0RWZmZWN0aXZlQ29uZmlnUmVxdWVzdBouLmZ1Z3VlLndvcmtzcGFjZS52MS5HZXRFZmZlY3RpdmVDb25maWdSZXNwb25zZRJnCg5WYWxpZGF0ZUNvbmZpZxIpLmZ1Z3VlLndvcmtzcGFjZS52MS5WYWxpZGF0ZUNvbmZpZ1JlcXVlc3QaKi5mdWd1ZS53b3Jrc3BhY2UudjEuVmFsaWRhdGVDb25maWdSZXNwb25zZRJ8ChVVcGRhdGVXb3Jrc3BhY2VDb25maWcSMC5mdWd1ZS53b3Jrc3BhY2UudjEuVXBkYXRlV29ya3NwYWNlQ29uZmlnUmVxdWVzdBoxLmZ1Z3VlLndvcmtzcGFjZS52MS5VcGRhdGVXb3Jrc3BhY2VDb25maWdSZXNwb25zZRJ/ChZDb25maXJtV29ya3NwYWNlQ29uZmlnEjEuZnVndWUud29ya3NwYWNlLnYxLkNvbmZpcm1Xb3Jrc3BhY2VDb25maWdSZXF1ZXN0GjIuZnVndWUud29ya3NwYWNlLnYxLkNvbmZpcm1Xb3Jrc3BhY2VDb25maWdSZXNwb25zZRJ8ChVSZWplY3RXb3Jrc3BhY2VDb25maWcSMC5mdWd1ZS53b3Jrc3BhY2UudjEuUmVqZWN0V29ya3NwYWNlQ29uZmlnUmVxdWVzdBoxLmZ1Z3VlLndvcmtzcGFjZS52MS5SZWplY3RXb3Jrc3BhY2VDb25maWdSZXNwb25zZULTAQoWY29tLmZ1Z3VlLndvcmtzcGFjZS52MUIOV29ya3NwYWNlUHJvdG9QAVo/Z2l0aHViLmNvbS9zeXVyb2Rldi9mdWd1ZS9wa2cvcGIvZnVndWUvd29ya3NwYWNlL3YxO3dvcmtzcGFjZXYxogIDRldYqgISRnVndWUuV29ya3NwYWNlLlYxygISRnVndWVcV29ya3NwYWNlXFYx4gIeRnVndWVcV29ya3NwYWNlXFYxXEdQQk1ldGFkYXRh6gIURnVndWU6OldvcmtzcGFjZTo6VjFiBnByb3RvMw", [file_google_protobuf_struct]);
+  fileDesc("CiJmdWd1ZS93b3Jrc3BhY2UvdjEvd29ya3NwYWNlLnByb3RvEhJmdWd1ZS53b3Jrc3BhY2UudjEiQwoEUm9vdBIMCgRuYW1lGAEgASgJEgwKBHBhdGgYAiABKAkSDgoGYWNjZXNzGAMgASgJEg8KB21pc3NpbmcYBCABKAgiRAoPUG9saWN5RGlmZkVudHJ5EgsKA2tleRgBIAEoCRIRCglvbGRfdmFsdWUYAiABKAkSEQoJbmV3X3ZhbHVlGAMgASgJIoEBChBXb3Jrc3BhY2VTdW1tYXJ5EgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSFQoNbWlzc2luZ19yb290cxgDIAMoCRIXCg9jb25maWdfcmV2aXNpb24YBCABKAMSIwobcGVuZGluZ19wb2xpY3lfY29uZmlybWF0aW9uGAUgASgIIoMDCglXb3Jrc3BhY2USCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRInCgVyb290cxgDIAMoCzIYLmZ1Z3VlLndvcmtzcGFjZS52MS5Sb290EhUKDW1pc3Npbmdfcm9vdHMYBCADKAkSEAoIcmF3X3RvbWwYBSABKAwSEwoLY29uZmlnX2hhc2gYBiABKAkSFwoPY29uZmlnX3JldmlzaW9uGAcgASgDEhcKD3BvbGljeV9yZXZpc2lvbhgIIAEoAxIjChtwZW5kaW5nX3BvbGljeV9jb25maXJtYXRpb24YCSABKAgSOAoLcG9saWN5X2RpZmYYCiADKAsyIy5mdWd1ZS53b3Jrc3BhY2UudjEuUG9saWN5RGlmZkVudHJ5EhIKCmNyZWF0ZWRfYXQYCyABKAkSGAoQY29uZmlnX2Vycm9yX2tleRgMIAEoCRIZChFjb25maWdfZXJyb3JfbGluZRgNIAEoAxIbChNjb25maWdfZXJyb3JfY29sdW1uGA4gASgDIkkKC0NvbmZpZ0lzc3VlEgsKA2tleRgBIAEoCRIMCgRsaW5lGAIgASgDEg4KBmNvbHVtbhgDIAEoAxIPCgdtZXNzYWdlGAQgASgJIiYKFkNyZWF0ZVdvcmtzcGFjZVJlcXVlc3QSDAoEbmFtZRgBIAEoCSJLChdDcmVhdGVXb3Jrc3BhY2VSZXNwb25zZRIwCgl3b3Jrc3BhY2UYASABKAsyHS5mdWd1ZS53b3Jrc3BhY2UudjEuV29ya3NwYWNlIhcKFUxpc3RXb3Jrc3BhY2VzUmVxdWVzdCJSChZMaXN0V29ya3NwYWNlc1Jlc3BvbnNlEjgKCndvcmtzcGFjZXMYASADKAsyJC5mdWd1ZS53b3Jrc3BhY2UudjEuV29ya3NwYWNlU3VtbWFyeSIhChNHZXRXb3Jrc3BhY2VSZXF1ZXN0EgoKAmlkGAEgASgJIkgKFEdldFdvcmtzcGFjZVJlc3BvbnNlEjAKCXdvcmtzcGFjZRgBIAEoCzIdLmZ1Z3VlLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2UiJwoZR2V0RWZmZWN0aXZlQ29uZmlnUmVxdWVzdBIKCgJpZBgBIAEoCSLMAQoaR2V0RWZmZWN0aXZlQ29uZmlnUmVzcG9uc2USJwoGdmFsdWVzGAEgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBJSCgpwcm92ZW5hbmNlGAIgAygLMj4uZnVndWUud29ya3NwYWNlLnYxLkdldEVmZmVjdGl2ZUNvbmZpZ1Jlc3BvbnNlLlByb3ZlbmFuY2VFbnRyeRoxCg9Qcm92ZW5hbmNlRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgDOgI4ASI1ChVWYWxpZGF0ZUNvbmZpZ1JlcXVlc3QSCgoCaWQYASABKAkSEAoIcmF3X3RvbWwYAiABKAwiSQoWVmFsaWRhdGVDb25maWdSZXNwb25zZRIvCgZpc3N1ZXMYASADKAsyHy5mdWd1ZS53b3Jrc3BhY2UudjEuQ29uZmlnSXNzdWUiUwocVXBkYXRlV29ya3NwYWNlQ29uZmlnUmVxdWVzdBIKCgJpZBgBIAEoCRIQCghyYXdfdG9tbBgCIAEoDBIVCg1leHBlY3RlZF9oYXNoGAMgASgJIlEKHVVwZGF0ZVdvcmtzcGFjZUNvbmZpZ1Jlc3BvbnNlEjAKCXdvcmtzcGFjZRgBIAEoCzIdLmZ1Z3VlLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2UiQgodQ29uZmlybVdvcmtzcGFjZUNvbmZpZ1JlcXVlc3QSCgoCaWQYASABKAkSFQoNZXhwZWN0ZWRfaGFzaBgCIAEoCSJSCh5Db25maXJtV29ya3NwYWNlQ29uZmlnUmVzcG9uc2USMAoJd29ya3NwYWNlGAEgASgLMh0uZnVndWUud29ya3NwYWNlLnYxLldvcmtzcGFjZSJBChxSZWplY3RXb3Jrc3BhY2VDb25maWdSZXF1ZXN0EgoKAmlkGAEgASgJEhUKDWV4cGVjdGVkX2hhc2gYAiABKAkiUQodUmVqZWN0V29ya3NwYWNlQ29uZmlnUmVzcG9uc2USMAoJd29ya3NwYWNlGAEgASgLMh0uZnVndWUud29ya3NwYWNlLnYxLldvcmtzcGFjZSJfCg5BZGRSb290UmVxdWVzdBIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEgwKBHBhdGgYAyABKAkSDgoGYWNjZXNzGAQgASgJEhUKDWV4cGVjdGVkX2hhc2gYBSABKAkiQwoPQWRkUm9vdFJlc3BvbnNlEjAKCXdvcmtzcGFjZRgBIAEoCzIdLmZ1Z3VlLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2UiRAoRUmVtb3ZlUm9vdFJlcXVlc3QSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIVCg1leHBlY3RlZF9oYXNoGAMgASgJIkYKElJlbW92ZVJvb3RSZXNwb25zZRIwCgl3b3Jrc3BhY2UYASABKAsyHS5mdWd1ZS53b3Jrc3BhY2UudjEuV29ya3NwYWNlInQKEVVwZGF0ZVJvb3RSZXF1ZXN0EgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEAoIbmV3X25hbWUYAyABKAkSDAoEcGF0aBgEIAEoCRIOCgZhY2Nlc3MYBSABKAkSFQoNZXhwZWN0ZWRfaGFzaBgGIAEoCSJGChJVcGRhdGVSb290UmVzcG9uc2USMAoJd29ya3NwYWNlGAEgASgLMh0uZnVndWUud29ya3NwYWNlLnYxLldvcmtzcGFjZSJRChZEZWxldGVXb3Jrc3BhY2VSZXF1ZXN0EgoKAmlkGAEgASgJEhUKDWV4cGVjdGVkX2hhc2gYAiABKAkSFAoMY29uZmlybV9uYW1lGAMgASgJIiUKF0RlbGV0ZVdvcmtzcGFjZVJlc3BvbnNlEgoKAmlkGAEgASgJMp8KChBXb3Jrc3BhY2VTZXJ2aWNlEmoKD0NyZWF0ZVdvcmtzcGFjZRIqLmZ1Z3VlLndvcmtzcGFjZS52MS5DcmVhdGVXb3Jrc3BhY2VSZXF1ZXN0GisuZnVndWUud29ya3NwYWNlLnYxLkNyZWF0ZVdvcmtzcGFjZVJlc3BvbnNlEmcKDkxpc3RXb3Jrc3BhY2VzEikuZnVndWUud29ya3NwYWNlLnYxLkxpc3RXb3Jrc3BhY2VzUmVxdWVzdBoqLmZ1Z3VlLndvcmtzcGFjZS52MS5MaXN0V29ya3NwYWNlc1Jlc3BvbnNlEmEKDEdldFdvcmtzcGFjZRInLmZ1Z3VlLndvcmtzcGFjZS52MS5HZXRXb3Jrc3BhY2VSZXF1ZXN0GiguZnVndWUud29ya3NwYWNlLnYxLkdldFdvcmtzcGFjZVJlc3BvbnNlEnMKEkdldEVmZmVjdGl2ZUNvbmZpZxItLmZ1Z3VlLndvcmtzcGFjZS52MS5HZXRFZmZlY3RpdmVDb25maWdSZXF1ZXN0Gi4uZnVndWUud29ya3NwYWNlLnYxLkdldEVmZmVjdGl2ZUNvbmZpZ1Jlc3BvbnNlEmcKDlZhbGlkYXRlQ29uZmlnEikuZnVndWUud29ya3NwYWNlLnYxLlZhbGlkYXRlQ29uZmlnUmVxdWVzdBoqLmZ1Z3VlLndvcmtzcGFjZS52MS5WYWxpZGF0ZUNvbmZpZ1Jlc3BvbnNlEnwKFVVwZGF0ZVdvcmtzcGFjZUNvbmZpZxIwLmZ1Z3VlLndvcmtzcGFjZS52MS5VcGRhdGVXb3Jrc3BhY2VDb25maWdSZXF1ZXN0GjEuZnVndWUud29ya3NwYWNlLnYxLlVwZGF0ZVdvcmtzcGFjZUNvbmZpZ1Jlc3BvbnNlEn8KFkNvbmZpcm1Xb3Jrc3BhY2VDb25maWcSMS5mdWd1ZS53b3Jrc3BhY2UudjEuQ29uZmlybVdvcmtzcGFjZUNvbmZpZ1JlcXVlc3QaMi5mdWd1ZS53b3Jrc3BhY2UudjEuQ29uZmlybVdvcmtzcGFjZUNvbmZpZ1Jlc3BvbnNlEnwKFVJlamVjdFdvcmtzcGFjZUNvbmZpZxIwLmZ1Z3VlLndvcmtzcGFjZS52MS5SZWplY3RXb3Jrc3BhY2VDb25maWdSZXF1ZXN0GjEuZnVndWUud29ya3NwYWNlLnYxLlJlamVjdFdvcmtzcGFjZUNvbmZpZ1Jlc3BvbnNlElIKB0FkZFJvb3QSIi5mdWd1ZS53b3Jrc3BhY2UudjEuQWRkUm9vdFJlcXVlc3QaIy5mdWd1ZS53b3Jrc3BhY2UudjEuQWRkUm9vdFJlc3BvbnNlElsKClJlbW92ZVJvb3QSJS5mdWd1ZS53b3Jrc3BhY2UudjEuUmVtb3ZlUm9vdFJlcXVlc3QaJi5mdWd1ZS53b3Jrc3BhY2UudjEuUmVtb3ZlUm9vdFJlc3BvbnNlElsKClVwZGF0ZVJvb3QSJS5mdWd1ZS53b3Jrc3BhY2UudjEuVXBkYXRlUm9vdFJlcXVlc3QaJi5mdWd1ZS53b3Jrc3BhY2UudjEuVXBkYXRlUm9vdFJlc3BvbnNlEmoKD0RlbGV0ZVdvcmtzcGFjZRIqLmZ1Z3VlLndvcmtzcGFjZS52MS5EZWxldGVXb3Jrc3BhY2VSZXF1ZXN0GisuZnVndWUud29ya3NwYWNlLnYxLkRlbGV0ZVdvcmtzcGFjZVJlc3BvbnNlQtMBChZjb20uZnVndWUud29ya3NwYWNlLnYxQg5Xb3Jrc3BhY2VQcm90b1ABWj9naXRodWIuY29tL3N5dXJvZGV2L2Z1Z3VlL3BrZy9wYi9mdWd1ZS93b3Jrc3BhY2UvdjE7d29ya3NwYWNldjGiAgNGV1iqAhJGdWd1ZS5Xb3Jrc3BhY2UuVjHKAhJGdWd1ZVxXb3Jrc3BhY2VcVjHiAh5GdWd1ZVxXb3Jrc3BhY2VcVjFcR1BCTWV0YWRhdGHqAhRGdWd1ZTo6V29ya3NwYWNlOjpWMWIGcHJvdG8z", [file_google_protobuf_struct]);
 
 /**
  * @generated from message fugue.workspace.v1.Root
@@ -522,6 +522,207 @@ export const RejectWorkspaceConfigResponseSchema: GenMessage<RejectWorkspaceConf
   messageDesc(file_fugue_workspace_v1_workspace, 20);
 
 /**
+ * @generated from message fugue.workspace.v1.AddRootRequest
+ */
+export type AddRootRequest = Message<"fugue.workspace.v1.AddRootRequest"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string path = 3;
+   */
+  path: string;
+
+  /**
+   * @generated from field: string access = 4;
+   */
+  access: string;
+
+  /**
+   * @generated from field: string expected_hash = 5;
+   */
+  expectedHash: string;
+};
+
+/**
+ * Describes the message fugue.workspace.v1.AddRootRequest.
+ * Use `create(AddRootRequestSchema)` to create a new message.
+ */
+export const AddRootRequestSchema: GenMessage<AddRootRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_workspace_v1_workspace, 21);
+
+/**
+ * @generated from message fugue.workspace.v1.AddRootResponse
+ */
+export type AddRootResponse = Message<"fugue.workspace.v1.AddRootResponse"> & {
+  /**
+   * @generated from field: fugue.workspace.v1.Workspace workspace = 1;
+   */
+  workspace?: Workspace | undefined;
+};
+
+/**
+ * Describes the message fugue.workspace.v1.AddRootResponse.
+ * Use `create(AddRootResponseSchema)` to create a new message.
+ */
+export const AddRootResponseSchema: GenMessage<AddRootResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_workspace_v1_workspace, 22);
+
+/**
+ * @generated from message fugue.workspace.v1.RemoveRootRequest
+ */
+export type RemoveRootRequest = Message<"fugue.workspace.v1.RemoveRootRequest"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string expected_hash = 3;
+   */
+  expectedHash: string;
+};
+
+/**
+ * Describes the message fugue.workspace.v1.RemoveRootRequest.
+ * Use `create(RemoveRootRequestSchema)` to create a new message.
+ */
+export const RemoveRootRequestSchema: GenMessage<RemoveRootRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_workspace_v1_workspace, 23);
+
+/**
+ * @generated from message fugue.workspace.v1.RemoveRootResponse
+ */
+export type RemoveRootResponse = Message<"fugue.workspace.v1.RemoveRootResponse"> & {
+  /**
+   * @generated from field: fugue.workspace.v1.Workspace workspace = 1;
+   */
+  workspace?: Workspace | undefined;
+};
+
+/**
+ * Describes the message fugue.workspace.v1.RemoveRootResponse.
+ * Use `create(RemoveRootResponseSchema)` to create a new message.
+ */
+export const RemoveRootResponseSchema: GenMessage<RemoveRootResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_workspace_v1_workspace, 24);
+
+/**
+ * @generated from message fugue.workspace.v1.UpdateRootRequest
+ */
+export type UpdateRootRequest = Message<"fugue.workspace.v1.UpdateRootRequest"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string name = 2;
+   */
+  name: string;
+
+  /**
+   * @generated from field: string new_name = 3;
+   */
+  newName: string;
+
+  /**
+   * @generated from field: string path = 4;
+   */
+  path: string;
+
+  /**
+   * @generated from field: string access = 5;
+   */
+  access: string;
+
+  /**
+   * @generated from field: string expected_hash = 6;
+   */
+  expectedHash: string;
+};
+
+/**
+ * Describes the message fugue.workspace.v1.UpdateRootRequest.
+ * Use `create(UpdateRootRequestSchema)` to create a new message.
+ */
+export const UpdateRootRequestSchema: GenMessage<UpdateRootRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_workspace_v1_workspace, 25);
+
+/**
+ * @generated from message fugue.workspace.v1.UpdateRootResponse
+ */
+export type UpdateRootResponse = Message<"fugue.workspace.v1.UpdateRootResponse"> & {
+  /**
+   * @generated from field: fugue.workspace.v1.Workspace workspace = 1;
+   */
+  workspace?: Workspace | undefined;
+};
+
+/**
+ * Describes the message fugue.workspace.v1.UpdateRootResponse.
+ * Use `create(UpdateRootResponseSchema)` to create a new message.
+ */
+export const UpdateRootResponseSchema: GenMessage<UpdateRootResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_workspace_v1_workspace, 26);
+
+/**
+ * @generated from message fugue.workspace.v1.DeleteWorkspaceRequest
+ */
+export type DeleteWorkspaceRequest = Message<"fugue.workspace.v1.DeleteWorkspaceRequest"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+
+  /**
+   * @generated from field: string expected_hash = 2;
+   */
+  expectedHash: string;
+
+  /**
+   * @generated from field: string confirm_name = 3;
+   */
+  confirmName: string;
+};
+
+/**
+ * Describes the message fugue.workspace.v1.DeleteWorkspaceRequest.
+ * Use `create(DeleteWorkspaceRequestSchema)` to create a new message.
+ */
+export const DeleteWorkspaceRequestSchema: GenMessage<DeleteWorkspaceRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_workspace_v1_workspace, 27);
+
+/**
+ * @generated from message fugue.workspace.v1.DeleteWorkspaceResponse
+ */
+export type DeleteWorkspaceResponse = Message<"fugue.workspace.v1.DeleteWorkspaceResponse"> & {
+  /**
+   * @generated from field: string id = 1;
+   */
+  id: string;
+};
+
+/**
+ * Describes the message fugue.workspace.v1.DeleteWorkspaceResponse.
+ * Use `create(DeleteWorkspaceResponseSchema)` to create a new message.
+ */
+export const DeleteWorkspaceResponseSchema: GenMessage<DeleteWorkspaceResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_workspace_v1_workspace, 28);
+
+/**
  * @generated from service fugue.workspace.v1.WorkspaceService
  */
 export const WorkspaceService: GenService<{
@@ -588,6 +789,38 @@ export const WorkspaceService: GenService<{
     methodKind: "unary";
     input: typeof RejectWorkspaceConfigRequestSchema;
     output: typeof RejectWorkspaceConfigResponseSchema;
+  },
+  /**
+   * @generated from rpc fugue.workspace.v1.WorkspaceService.AddRoot
+   */
+  addRoot: {
+    methodKind: "unary";
+    input: typeof AddRootRequestSchema;
+    output: typeof AddRootResponseSchema;
+  },
+  /**
+   * @generated from rpc fugue.workspace.v1.WorkspaceService.RemoveRoot
+   */
+  removeRoot: {
+    methodKind: "unary";
+    input: typeof RemoveRootRequestSchema;
+    output: typeof RemoveRootResponseSchema;
+  },
+  /**
+   * @generated from rpc fugue.workspace.v1.WorkspaceService.UpdateRoot
+   */
+  updateRoot: {
+    methodKind: "unary";
+    input: typeof UpdateRootRequestSchema;
+    output: typeof UpdateRootResponseSchema;
+  },
+  /**
+   * @generated from rpc fugue.workspace.v1.WorkspaceService.DeleteWorkspace
+   */
+  deleteWorkspace: {
+    methodKind: "unary";
+    input: typeof DeleteWorkspaceRequestSchema;
+    output: typeof DeleteWorkspaceResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fugue_workspace_v1_workspace, 0);

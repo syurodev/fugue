@@ -10,15 +10,18 @@ type Code string
 
 // Workspace error codes.
 const (
-	ErrOwnershipInvalid  Code = "workspace.ownership_invalid"
-	ErrPathDenied        Code = "workspace.path_denied"
-	ErrRootMissing       Code = "workspace.root_missing"
-	ErrRootInvalid       Code = "workspace.root_invalid"
-	ErrNotFound          Code = "workspace.not_found"
-	ErrAlreadyExists     Code = "workspace.already_exists"
-	ErrConfigInvalid     Code = "workspace.config_invalid"
-	ErrConfigUnconfirmed Code = "workspace.config_unconfirmed"
-	ErrConfigChanged     Code = "workspace.config_changed"
+	ErrOwnershipInvalid     Code = "workspace.ownership_invalid"
+	ErrPathDenied           Code = "workspace.path_denied"
+	ErrRootMissing          Code = "workspace.root_missing"
+	ErrRootInvalid          Code = "workspace.root_invalid"
+	ErrNotFound             Code = "workspace.not_found"
+	ErrAlreadyExists        Code = "workspace.already_exists"
+	ErrConfigInvalid        Code = "workspace.config_invalid"
+	ErrConfigUnconfirmed    Code = "workspace.config_unconfirmed"
+	ErrConfigChanged        Code = "workspace.config_changed"
+	ErrIDInvalid            Code = "workspace.id_invalid"
+	ErrConfirmationRequired Code = "workspace.confirmation_required"
+	ErrDeleteFailed         Code = "workspace.delete_failed"
 )
 
 // Error is a typed workspace error with a stable machine-readable Code.

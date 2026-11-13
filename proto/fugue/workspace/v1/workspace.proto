@@ -101,6 +101,43 @@ message RejectWorkspaceConfigRequest {
 message RejectWorkspaceConfigResponse {
   Workspace workspace = 1;
 }
+message AddRootRequest {
+  string id = 1;
+  string name = 2;
+  string path = 3;
+  string access = 4;
+  string expected_hash = 5;
+}
+message AddRootResponse {
+  Workspace workspace = 1;
+}
+message RemoveRootRequest {
+  string id = 1;
+  string name = 2;
+  string expected_hash = 3;
+}
+message RemoveRootResponse {
+  Workspace workspace = 1;
+}
+message UpdateRootRequest {
+  string id = 1;
+  string name = 2;
+  string new_name = 3;
+  string path = 4;
+  string access = 5;
+  string expected_hash = 6;
+}
+message UpdateRootResponse {
+  Workspace workspace = 1;
+}
+message DeleteWorkspaceRequest {
+  string id = 1;
+  string expected_hash = 2;
+  string confirm_name = 3;
+}
+message DeleteWorkspaceResponse {
+  string id = 1;
+}
 
 service WorkspaceService {
   rpc CreateWorkspace(CreateWorkspaceRequest) returns (CreateWorkspaceResponse);
@@ -111,4 +148,8 @@ service WorkspaceService {
   rpc UpdateWorkspaceConfig(UpdateWorkspaceConfigRequest) returns (UpdateWorkspaceConfigResponse);
   rpc ConfirmWorkspaceConfig(ConfirmWorkspaceConfigRequest) returns (ConfirmWorkspaceConfigResponse);
   rpc RejectWorkspaceConfig(RejectWorkspaceConfigRequest) returns (RejectWorkspaceConfigResponse);
+  rpc AddRoot(AddRootRequest) returns (AddRootResponse);
+  rpc RemoveRoot(RemoveRootRequest) returns (RemoveRootResponse);
+  rpc UpdateRoot(UpdateRootRequest) returns (UpdateRootResponse);
+  rpc DeleteWorkspace(DeleteWorkspaceRequest) returns (DeleteWorkspaceResponse);
 }
