@@ -7,6 +7,8 @@ import (
 	"testing"
 )
 
+const rootMutationFileContent = "keep"
+
 type workspaceGrantInvalidator struct {
 	ids []string
 }
@@ -56,7 +58,7 @@ func createDeleteWorkspaceWithRoot(t *testing.T, f *testFixture, ctx context.Con
 		t.Fatal(err)
 	}
 	content := filepath.Join(root, "keep.txt")
-	if err := os.WriteFile(content, []byte("keep"), 0o600); err != nil {
+	if err := os.WriteFile(content, []byte(rootMutationFileContent), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	ws, err := f.svc.CreateWorkspace(ctx, CreateWorkspaceRequest{Name: "delete me"})
@@ -108,7 +110,7 @@ func assertDeleteWorkspaceRemovesOnlyFugueState(t *testing.T, f *testFixture, ct
 	if items, listErr := f.svc.ListWorkspaces(ctx); listErr != nil || len(items) != 0 {
 		t.Fatalf("deleted workspace records = %+v, err %v", items, listErr)
 	}
-	if data, readErr := os.ReadFile(filepath.Clean(content)); readErr != nil || string(data) != "keep" {
+	if data, readErr := os.ReadFile(filepath.Clean(content)); readErr != nil || string(data) != rootMutationFileContent {
 		t.Fatalf("root content = %q, err %v", data, readErr)
 	}
 }
@@ -150,6 +152,87 @@ func TestDeleteWorkspaceRejectsSymlinkAndMissingAcceptedCopy(t *testing.T) {
 	}
 	if _, err = f.svc.store.Get(ctx, missingCopy.ID); err != nil {
 		t.Fatalf("failed deletion removed DB row: %v", err)
+	}
+}
+
+func TestRemoveWorkspaceFilesRejectsSwappedWorkspacesSymlink(t *testing.T) {
+	t.Parallel()
+	f := newTestFixture(t)
+	ctx := context.Background()
+	ws, err := f.svc.CreateWorkspace(ctx, CreateWorkspaceRequest{Name: "swap parent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = f.svc.validateWorkspaceDirectory(ws.ID); err != nil {
+		t.Fatal(err)
+	}
+	fakeRoot := filepath.Join(f.tempDir, "fake-root")
+	if err = os.MkdirAll(fakeRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rootFile := filepath.Join(fakeRoot, "keep.txt")
+	if err = os.WriteFile(rootFile, []byte(rootMutationFileContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	movedWorkspaceDir := filepath.Join(f.tempDir, "workspaces-before-swap")
+	if err = os.Rename(f.paths.WorkspacesDir, movedWorkspaceDir); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink(fakeRoot, f.paths.WorkspacesDir); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.svc.removeWorkspaceFiles(ws.ID, f.paths.AcceptedConfigPath(ws.ID)); CodeOf(err) != ErrPathDenied {
+		t.Fatalf("swapped workspace parent error = %v", err)
+	}
+	if data, readErr := os.ReadFile(filepath.Clean(rootFile)); readErr != nil || string(data) != rootMutationFileContent {
+		t.Fatalf("fake root file = %q, err %v", data, readErr)
+	}
+	if _, statErr := os.Lstat(f.paths.AcceptedConfigPath(ws.ID)); statErr != nil {
+		t.Fatalf("rejected removal touched accepted copy: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(movedWorkspaceDir, ws.ID)); statErr != nil {
+		t.Fatalf("rejected removal touched original workspace: %v", statErr)
+	}
+}
+
+func TestRemoveWorkspaceFilesRejectsWorkspaceSymlink(t *testing.T) {
+	t.Parallel()
+	f := newTestFixture(t)
+	ctx := context.Background()
+	ws, err := f.svc.CreateWorkspace(ctx, CreateWorkspaceRequest{Name: "swap workspace"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	workspaceDir := f.paths.WorkspaceDir(ws.ID)
+	if err = f.svc.validateWorkspaceDirectory(ws.ID); err != nil {
+		t.Fatal(err)
+	}
+	movedWorkspaceDir := filepath.Join(f.tempDir, "workspace-before-swap")
+	if err = os.Rename(workspaceDir, movedWorkspaceDir); err != nil {
+		t.Fatal(err)
+	}
+	fakeRoot := filepath.Join(f.tempDir, "fake-root")
+	if err = os.MkdirAll(fakeRoot, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	rootFile := filepath.Join(fakeRoot, "keep.txt")
+	if err = os.WriteFile(rootFile, []byte(rootMutationFileContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.Symlink(fakeRoot, workspaceDir); err != nil {
+		t.Fatal(err)
+	}
+	if err = f.svc.removeWorkspaceFiles(ws.ID, f.paths.AcceptedConfigPath(ws.ID)); CodeOf(err) != ErrPathDenied {
+		t.Fatalf("swapped workspace error = %v", err)
+	}
+	if data, readErr := os.ReadFile(filepath.Clean(rootFile)); readErr != nil || string(data) != rootMutationFileContent {
+		t.Fatalf("fake root file = %q, err %v", data, readErr)
+	}
+	if _, statErr := os.Lstat(f.paths.AcceptedConfigPath(ws.ID)); statErr != nil {
+		t.Fatalf("rejected removal touched accepted copy: %v", statErr)
+	}
+	if _, statErr := os.Stat(filepath.Join(movedWorkspaceDir, "fugue.toml")); statErr != nil {
+		t.Fatalf("rejected removal touched original workspace: %v", statErr)
 	}
 }
 

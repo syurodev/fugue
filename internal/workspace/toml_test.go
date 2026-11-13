@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/syurodev/fugue/internal/config"
+	"github.com/syurodev/fugue/internal/environments"
 )
 
 func TestConfigRejectsUnknownKeys(t *testing.T) {
@@ -167,39 +168,65 @@ func testHardRuleI03Protection(t *testing.T) {
 	raw := "[[policy.env_tags]]\nmatch = \"deploy/*\"\ntag = \"prod\"\nrequires_confirmation = false\n"
 	assertConfigErrorKey(t, TierWorkspace, raw, "policy.env_tags.requires_confirmation")
 
-	for _, tag := range []string{"prod", "", "staging"} {
-		if !RequiresConfirmationForTag(tag) {
-			t.Fatalf("tag %q must always require confirmation (I-03)", tag)
+	reg := environments.New()
+	for _, tag := range []string{"prod", "", "staging", "local", "test"} {
+		if !reg.RequiresConfirmation(tag) {
+			t.Fatalf("tag %q must require confirmation via registry (I-03, Q-75)", tag)
 		}
 	}
-	for _, tag := range []string{"dev", "local", "test"} {
-		if RequiresConfirmationForTag(tag) {
-			t.Fatalf("tag %q should not require confirmation", tag)
-		}
+	if reg.RequiresConfirmation("dev") {
+		t.Fatal("tag dev should not require confirmation")
 	}
-	assertShellAllowHardRule(t)
+	assertShellAllowHardRule(t, reg)
 }
 
-func assertShellAllowHardRule(t *testing.T) {
+func assertShellAllowHardRule(t *testing.T, reg *environments.Registry) {
 	t.Helper()
 	cfg := DefaultConfig("/tmp/fugue", "ws-1")
-	cfg.Policy.ShellAllow = []string{"kubectl apply", "git status"}
-	cfg.Policy.ShellAsk = []string{"kubectl apply --force"}
+	cfg.Policy.ShellAllow = []string{"build app", "git status"}
+	cfg.Policy.ShellAsk = []string{"build app --force"}
 	cfg.Policy.EnvTags = []EnvTagRule{
 		{Match: "prod-*", Tag: "prod"},
 		{Match: "dev-*", Tag: "dev"},
 	}
-	if IsShellAllowed(&cfg, "kubectl apply -f app.yaml", "prod-cluster") {
+	if IsShellAllowed(&cfg, reg, "build app -v", "prod-cluster") {
 		t.Fatal("shell_allow must never beat a target with a tag requiring confirmation (prod)")
 	}
-	if IsShellAllowed(&cfg, "kubectl apply -f app.yaml", "unmapped-target") {
+	if IsShellAllowed(&cfg, reg, "build app -v", "unmapped-target") {
 		t.Fatal("shell_allow must never beat an unmapped target requiring confirmation")
 	}
-	if !IsShellAllowed(&cfg, "kubectl apply -f app.yaml", "dev-cluster") {
+	if !IsShellAllowed(&cfg, reg, "build app -v", "dev-cluster") {
 		t.Fatal("expected shell_allow to permit command on dev-cluster")
 	}
-	if IsShellAllowed(&cfg, "kubectl apply --force -f app.yaml", "dev-cluster") {
+	if IsShellAllowed(&cfg, reg, "build app --force", "dev-cluster") {
 		t.Fatal("shell_ask must take precedence over shell_allow")
+	}
+
+	// Default rules cannot be bypassed by shell_allow
+	cfg.Policy.ShellAllow = append(cfg.Policy.ShellAllow, "kubectl apply", "git push", "rm -rf ~")
+	if IsShellAllowed(&cfg, reg, "kubectl apply -f app.yaml", "dev-cluster") {
+		t.Fatal("default deploy rule must never be bypassed by shell_allow")
+	}
+	if IsShellAllowed(&cfg, reg, "git push", "dev-cluster") {
+		t.Fatal("default remote push rule must never be bypassed by shell_allow")
+	}
+	if IsShellAllowed(&cfg, reg, "rm -rf ~", "dev-cluster") {
+		t.Fatal("default destructive outside rule must never be bypassed by shell_allow")
+	}
+
+	// Compound command allow check: allow "go test" only permits "go test ./..."
+	cfg.Policy.ShellAllow = []string{"go test"}
+	if !IsShellAllowed(&cfg, reg, "go test ./...", "") {
+		t.Fatal("expected go test ./... to be allowed")
+	}
+	if IsShellAllowed(&cfg, reg, "go test && rm -rf ~", "") {
+		t.Fatal("compound command with rm -rf ~ must be rejected")
+	}
+	if IsShellAllowed(&cfg, reg, "go test; git push", "") {
+		t.Fatal("compound command with git push must be rejected")
+	}
+	if IsShellAllowed(&cfg, reg, "go test && echo hello", "") {
+		t.Fatal("compound command with unallowed sub-command must be rejected")
 	}
 }
 

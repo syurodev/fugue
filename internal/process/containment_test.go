@@ -402,9 +402,9 @@ func testCgroupKillPreferredOverPerPidSigkill(t *testing.T) {
 	})
 
 	expectEscalationStep(t, stepCh, escalationSigint)
-	advancePending(clk, 5*time.Second)
+	advancePending(t.Context(), t, clk, 5*time.Second)
 	expectEscalationStep(t, stepCh, escalationSigterm)
-	advancePending(clk, 5*time.Second)
+	advancePending(t.Context(), t, clk, 5*time.Second)
 	expectEscalationStep(t, stepCh, escalationSigkill)
 	<-proc.exitCh
 	<-proc.stderrTask.Done()
@@ -529,10 +529,8 @@ func TestStopCleansAllDescendantsIncludingSetsidGrandchild(t *testing.T) {
 
 	// Advance the clock by one trackerInterval so the periodic snapshot samples
 	// the setsid grandchild while the leader is still alive.
-	advancePending(clk, trackerInterval)
-	for clk.Pending() == 0 {
-		runtime.Gosched()
-	}
+	advancePending(t.Context(), t, clk, trackerInterval)
+	awaitPending(t.Context(), t, clk, 1)
 
 	stopDone := make(chan struct{})
 	var proof StopProof

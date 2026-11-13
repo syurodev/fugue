@@ -1,6 +1,8 @@
 package clock
 
 import (
+	"context"
+	"fmt"
 	"slices"
 	"sync"
 	"time"
@@ -13,6 +15,9 @@ type Fake struct {
 	now    time.Time
 	timers []*fakeTimer
 	seq    uint64
+	// armed is closed, then cleared, by the next arm so BlockUntilPending
+	// waiters re-check without polling.
+	armed chan struct{}
 }
 
 // NewFake returns a Fake that starts at start.
@@ -34,12 +39,36 @@ func (f *Fake) NewTimer(d time.Duration) Timer {
 	return t
 }
 
-// Pending reports how many timers are waiting to fire. A test that starts a
-// goroutine which waits on the clock polls this instead of sleeping.
+// Pending reports how many timers are waiting to fire right now. To wait for
+// a goroutine to arm its timer use BlockUntilPending: a poll on Pending
+// depends on the scheduler.
 func (f *Fake) Pending() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.timers)
+}
+
+// BlockUntilPending returns once at least n timers are waiting to fire, or
+// with the context's error when ctx ends first. It wakes on each arm, so it
+// does not depend on how fast the goroutine under test is scheduled.
+func (f *Fake) BlockUntilPending(ctx context.Context, n int) error {
+	for {
+		f.mu.Lock()
+		if len(f.timers) >= n {
+			f.mu.Unlock()
+			return nil
+		}
+		if f.armed == nil {
+			f.armed = make(chan struct{})
+		}
+		wake := f.armed
+		f.mu.Unlock()
+		select {
+		case <-wake:
+		case <-ctx.Done():
+			return fmt.Errorf("wait for pending timers: %w", context.Cause(ctx))
+		}
+	}
 }
 
 // Advance moves the clock forward by d, firing due timers on the way. A timer
@@ -84,6 +113,10 @@ func (f *Fake) arm(t *fakeTimer, d time.Duration) {
 	t.deadline = f.now.Add(d)
 	t.armed = true
 	f.timers = append(f.timers, t)
+	if f.armed != nil {
+		close(f.armed)
+		f.armed = nil
+	}
 }
 
 type fakeTimer struct {

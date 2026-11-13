@@ -185,3 +185,39 @@ func TestRealClockMovesForward(t *testing.T) {
 		t.Fatal("Stop on a re-armed timer must report true")
 	}
 }
+
+// The clock package may not import supervise, so the wake-on-arm path is
+// exercised by the app tests that block on a goroutine's timer; this test pins
+// the already-satisfied path.
+func TestFakeBlockUntilPendingReturnsWhenTimersAreArmed(t *testing.T) {
+	t.Parallel()
+	f := clock.NewFake(epoch())
+	f.NewTimer(time.Minute)
+	f.NewTimer(time.Hour)
+	if err := f.BlockUntilPending(t.Context(), 2); err != nil {
+		t.Fatalf("BlockUntilPending = %v, want nil", err)
+	}
+	f.Advance(time.Minute)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	if err := f.BlockUntilPending(ctx, 2); !errors.Is(err, context.Canceled) {
+		t.Fatalf("BlockUntilPending after a timer fired = %v, want context.Canceled", err)
+	}
+}
+
+func TestFakeBlockUntilPendingStopsWhenTheContextEnds(t *testing.T) {
+	t.Parallel()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	f := clock.NewFake(epoch())
+	err := f.BlockUntilPending(ctx, 1)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("BlockUntilPending = %v, want context.Canceled", err)
+	}
+	// The abandoned wait left a wake channel behind; arming must release it
+	// and a later wait must still see the timer.
+	f.NewTimer(time.Minute)
+	if err := f.BlockUntilPending(t.Context(), 1); err != nil {
+		t.Fatalf("BlockUntilPending after an abandoned wait = %v, want nil", err)
+	}
+}
