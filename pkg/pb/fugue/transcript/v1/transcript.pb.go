@@ -1017,6 +1017,7 @@ type TranscriptTurnState struct {
 	TurnId        string                 `protobuf:"bytes,1,opt,name=turn_id,json=turnId,proto3" json:"turn_id,omitempty"`
 	TurnOrigin    string                 `protobuf:"bytes,2,opt,name=turn_origin,json=turnOrigin,proto3" json:"turn_origin,omitempty"`
 	Outcome       string                 `protobuf:"bytes,3,opt,name=outcome,proto3" json:"outcome,omitempty"`
+	State         string                 `protobuf:"bytes,4,opt,name=state,proto3" json:"state,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1068,6 +1069,13 @@ func (x *TranscriptTurnState) GetTurnOrigin() string {
 func (x *TranscriptTurnState) GetOutcome() string {
 	if x != nil {
 		return x.Outcome
+	}
+	return ""
+}
+
+func (x *TranscriptTurnState) GetState() string {
+	if x != nil {
+		return x.State
 	}
 	return ""
 }
@@ -1572,12 +1580,13 @@ const file_fugue_transcript_v1_transcript_proto_rawDesc = "" +
 	"\rsession_state\x18\x02 \x01(\tR\fsessionState\x12>\n" +
 	"\x05turns\x18\x03 \x03(\v2(.fugue.transcript.v1.TranscriptTurnStateR\x05turns\x12%\n" +
 	"\x0econtent_locked\x18\x04 \x01(\bR\rcontentLocked\x12@\n" +
-	"\x05items\x18\x05 \x03(\v2*.fugue.transcript.v1.TranscriptDurableItemR\x05items\"i\n" +
+	"\x05items\x18\x05 \x03(\v2*.fugue.transcript.v1.TranscriptDurableItemR\x05items\"\x7f\n" +
 	"\x13TranscriptTurnState\x12\x17\n" +
 	"\aturn_id\x18\x01 \x01(\tR\x06turnId\x12\x1f\n" +
 	"\vturn_origin\x18\x02 \x01(\tR\n" +
 	"turnOrigin\x12\x18\n" +
-	"\aoutcome\x18\x03 \x01(\tR\aoutcome\"\xd9\x02\n" +
+	"\aoutcome\x18\x03 \x01(\tR\aoutcome\x12\x14\n" +
+	"\x05state\x18\x04 \x01(\tR\x05state\"\xd9\x02\n" +
 	"\x15TranscriptDurableItem\x12\x17\n" +
 	"\aitem_id\x18\x01 \x01(\tR\x06itemId\x12\x17\n" +
 	"\aturn_id\x18\x02 \x01(\tR\x06turnId\x127\n" +

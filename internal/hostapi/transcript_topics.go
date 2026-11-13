@@ -4,135 +4,160 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 
 	"github.com/syurodev/fugue/internal/app"
+	"github.com/syurodev/fugue/internal/platform/errcode"
 	transcriptv1 "github.com/syurodev/fugue/pkg/pb/fugue/transcript/v1"
 )
 
 func transcriptSnapshotProto(topic string, payload []byte) ([]byte, error) {
-	var target proto.Message
 	switch {
-	case len(topic) > len(app.TopicTranscriptDelta) && topic[:len(app.TopicTranscriptDelta)] == app.TopicTranscriptDelta:
-		target = &transcriptv1.TranscriptDeltaSnapshot{}
-	case len(topic) > len(app.TopicTranscript) && topic[:len(app.TopicTranscript)] == app.TopicTranscript:
-		target = &transcriptv1.TranscriptSnapshot{}
+	case transcriptTopicHasPrefix(topic, app.TopicTranscriptDelta):
+		var snapshot app.TranscriptDeltaSnapshot
+		if err := decodeTranscriptTopicPayload(payload, &snapshot); err != nil {
+			return nil, err
+		}
+		mapped := &transcriptv1.TranscriptDeltaSnapshot{ContentLocked: snapshot.ContentLocked}
+		for i := range snapshot.Items {
+			mapped.Items = append(mapped.Items, protoTranscriptDelta(&snapshot.Items[i]))
+		}
+		return marshalTranscriptTopic(mapped)
+	case transcriptTopicHasPrefix(topic, app.TopicTranscript):
+		var snapshot app.TranscriptTopicSnapshot
+		if err := decodeTranscriptTopicPayload(payload, &snapshot); err != nil {
+			return nil, err
+		}
+		mapped := &transcriptv1.TranscriptSnapshot{
+			Sequence: snapshot.Sequence, SessionState: snapshot.SessionState, ContentLocked: snapshot.ContentLocked,
+		}
+		for i := range snapshot.Turns {
+			turn := &snapshot.Turns[i]
+			mapped.Turns = append(mapped.Turns, &transcriptv1.TranscriptTurnState{
+				TurnId: turn.ID, TurnOrigin: turn.Origin, State: turn.State, Outcome: turn.Outcome,
+			})
+		}
+		for i := range snapshot.Items {
+			item, itemErr := protoTranscriptTopicItem(&snapshot.Items[i])
+			if itemErr != nil {
+				return nil, itemErr
+			}
+			mapped.Items = append(mapped.Items, item)
+		}
+		return marshalTranscriptTopic(mapped)
 	default:
 		return payload, nil
 	}
-	return transcodeTranscriptPayload(payload, target)
 }
 
 func transcriptEventProto(topic, eventType string, payload []byte) ([]byte, error) {
-	var target proto.Message
 	switch {
-	case len(topic) > len(app.TopicTranscriptDelta) && topic[:len(app.TopicTranscriptDelta)] == app.TopicTranscriptDelta:
-		target = &transcriptv1.TranscriptDelta{}
-	case len(topic) > len(app.TopicTranscript) && topic[:len(app.TopicTranscript)] == app.TopicTranscript:
-		if eventType == app.EventTranscriptItem {
-			target = &transcriptv1.TranscriptItemEvent{}
-		} else {
-			target = &transcriptv1.TranscriptStateEvent{}
+	case transcriptTopicHasPrefix(topic, app.TopicTranscriptDelta):
+		var delta app.TranscriptTopicDelta
+		if err := decodeTranscriptTopicPayload(payload, &delta); err != nil {
+			return nil, err
 		}
+		return marshalTranscriptTopic(protoTranscriptDelta(&delta))
+	case transcriptTopicHasPrefix(topic, app.TopicTranscript):
+		if eventType == app.EventTranscriptItem {
+			var item app.TranscriptTopicItemEvent
+			if err := decodeTranscriptTopicPayload(payload, &item); err != nil {
+				return nil, err
+			}
+			mapped, mapErr := protoTranscriptTopicItemEvent(&item)
+			if mapErr != nil {
+				return nil, mapErr
+			}
+			return marshalTranscriptTopic(mapped)
+		}
+		var state app.TranscriptTopicStateEvent
+		if err := decodeTranscriptTopicPayload(payload, &state); err != nil {
+			return nil, err
+		}
+		return marshalTranscriptTopic(&transcriptv1.TranscriptStateEvent{
+			TurnId: state.TurnID, State: state.State, WaitingReason: state.WaitingReason,
+			Outcome: state.Outcome, FailureCode: state.FailureCode, StopProof: state.StopProof,
+			TurnOrigin: state.TurnOrigin,
+		})
 	default:
 		return payload, nil
 	}
-	return transcodeTranscriptPayload(payload, target)
 }
 
-func transcodeTranscriptPayload(payload []byte, target proto.Message) ([]byte, error) {
-	var wire map[string]any
-	if err := json.Unmarshal(payload, &wire); err != nil {
-		return nil, fmt.Errorf("decode transcript topic payload: %w", err)
+func transcriptTopicHasPrefix(topic, prefix string) bool {
+	return len(topic) > len(prefix) && topic[:len(prefix)] == prefix
+}
+
+func decodeTranscriptTopicPayload[T any](payload []byte, value *T) error {
+	if err := json.Unmarshal(payload, value); err != nil {
+		return fmt.Errorf("decode transcript topic payload: %w", err)
 	}
-	fixTranscriptKinds(wire)
-	wireBytes, err := json.Marshal(wire)
-	if err != nil {
-		return nil, fmt.Errorf("encode transcript topic mapping: %w", err)
-	}
-	if mapErr := (protojson.UnmarshalOptions{DiscardUnknown: false}).Unmarshal(wireBytes, target); mapErr != nil {
-		return nil, fmt.Errorf("map transcript topic payload: %w", mapErr)
-	}
-	encoded, err := proto.Marshal(target)
+	return nil
+}
+
+func marshalTranscriptTopic(message proto.Message) ([]byte, error) {
+	encoded, err := proto.Marshal(message)
 	if err != nil {
 		return nil, fmt.Errorf("encode transcript topic payload: %w", err)
 	}
 	return encoded, nil
 }
 
-func fixTranscriptKinds(value map[string]any) {
-	if kind, ok := value["kind"].(string); ok {
-		value["kind"] = transcriptKindName(kind)
+func protoTranscriptTopicItem(item *app.TranscriptTopicItemEvent) (*transcriptv1.TranscriptDurableItem, error) {
+	appEntry, err := transcriptEntryFromTopicItem(item)
+	if err != nil {
+		return nil, err
 	}
-	fixTranscriptViewKinds(value)
-	fixTranscriptItemKinds(value)
+	entry := protoTranscriptEntry(appEntry)
+	view := entry.View
+	if item.View == nil {
+		view = nil
+	}
+	return &transcriptv1.TranscriptDurableItem{
+		ItemId: entry.ItemId, TurnId: entry.TurnId, Kind: entry.Kind,
+		Sequence: entry.Sequence, Revision: entry.Revision, Metadata: entry.Metadata,
+		View: view, TurnOrigin: entry.TurnOrigin,
+	}, nil
 }
 
-func fixTranscriptViewKinds(value map[string]any) {
-	if view, ok := value["view"].(map[string]any); ok {
-		if files, ok := view["files"].([]any); ok {
-			for _, entry := range files {
-				if file, ok := entry.(map[string]any); ok {
-					file["header"], file["added"], file["removed"] = file["Header"], file["Added"], file["Removed"]
-					delete(file, "Header")
-					delete(file, "Added")
-					delete(file, "Removed")
-				}
-			}
-		}
+func protoTranscriptTopicItemEvent(item *app.TranscriptTopicItemEvent) (*transcriptv1.TranscriptItemEvent, error) {
+	appEntry, err := transcriptEntryFromTopicItem(item)
+	if err != nil {
+		return nil, err
 	}
+	entry := protoTranscriptEntry(appEntry)
+	view := entry.View
+	if item.View == nil {
+		view = nil
+	}
+	return &transcriptv1.TranscriptItemEvent{
+		ItemId: entry.ItemId, TurnId: entry.TurnId, Kind: entry.Kind,
+		Sequence: entry.Sequence, Revision: entry.Revision, Metadata: entry.Metadata,
+		View: view, TurnOrigin: entry.TurnOrigin,
+	}, nil
 }
 
-func fixTranscriptItemKinds(value map[string]any) {
-	if items, ok := value["items"].([]any); ok {
-		for _, entry := range items {
-			if child, ok := entry.(map[string]any); ok {
-				fixTranscriptKinds(child)
-			}
-		}
+func transcriptEntryFromTopicItem(item *app.TranscriptTopicItemEvent) (*app.TranscriptEntry, error) {
+	if item.Sequence < 0 {
+		return nil, errcode.New(errcode.Internal, "transcript topic item sequence is negative")
 	}
+	var view app.TranscriptView
+	if item.View != nil {
+		view = *item.View
+	}
+	var sequence uint64
+	if item.Sequence > 0 {
+		sequence = uint64(item.Sequence)
+	}
+	return &app.TranscriptEntry{
+		ID: item.ItemID, TurnID: item.TurnID, Kind: app.TranscriptKind(item.Kind),
+		Sequence: sequence, Revision: item.Revision, Metadata: item.Metadata,
+		View: view, TurnOrigin: item.TurnOrigin,
+	}, nil
 }
 
-func transcriptKindName(kind string) string {
-	const prefix = "TRANSCRIPT_KIND_"
-	switch kind {
-	case "user_message":
-		return prefix + "USER_MESSAGE"
-	case "assistant_message":
-		return prefix + "ASSISTANT_MESSAGE"
-	case "reasoning":
-		return prefix + "REASONING"
-	case "tool_call":
-		return prefix + "TOOL_CALL"
-	case "file_change":
-		return prefix + "FILE_CHANGE"
-	case "approval":
-		return prefix + "APPROVAL"
-	case "plan":
-		return prefix + "PLAN"
-	case "subagent":
-		return prefix + "SUBAGENT"
-	case "command":
-		return prefix + "COMMAND"
-	default:
-		return transcriptSpecialKindName(kind, prefix)
-	}
-}
-
-func transcriptSpecialKindName(kind, prefix string) string {
-	switch kind {
-	case "team_proposal":
-		return prefix + "TEAM_PROPOSAL"
-	case "task_link":
-		return prefix + "TASK_LINK"
-	case "usage":
-		return prefix + "USAGE"
-	case "quota":
-		return prefix + "QUOTA"
-	case "notice":
-		return prefix + "NOTICE"
-	default:
-		return prefix + "UNSPECIFIED"
+func protoTranscriptDelta(delta *app.TranscriptTopicDelta) *transcriptv1.TranscriptDelta {
+	return &transcriptv1.TranscriptDelta{
+		ItemId: delta.ItemID, BaseRevision: delta.BaseRevision, View: protoTranscriptView(delta.View),
 	}
 }

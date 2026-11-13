@@ -4,8 +4,8 @@ package app
 // store sequence plus session and turn state plus the open items' redacted
 // views, no history) and transcript-delta:<session> (ephemeral, memory-only
 // snapshot, latest-for-key events keyed by item ID). Every payload is
-// host-redacted (TR-10); the encoding is JSON until F9.9 moves it to proto.
-// Owner: application layer. Allowed callers: none outside this package.
+// host-redacted (TR-10) and serialized as JSON for hostapi to map to protobuf.
+// Owner: application layer. Allowed callers: hostapi.
 
 import (
 	"context"
@@ -18,8 +18,8 @@ import (
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
-// viewPayload is the JSON shape of a redacted display view.
-type viewPayload struct {
+// TranscriptView is the JSON shape of a redacted display view.
+type TranscriptView struct {
 	Text         string                   `json:"text"`
 	Truncated    bool                     `json:"truncated,omitempty"`
 	CutAt        int                      `json:"cut_at,omitempty"`
@@ -27,31 +27,30 @@ type viewPayload struct {
 	Files        []transcript.FileSummary `json:"files,omitempty"`
 }
 
-// itemState is the durable item-event payload: identity, persisted metadata
-// and the redacted view when the vault is open. A nil View means the content
-// is not included — the vault is locked or the event was rebuilt from the
-// journal — and the client reads the content through TranscriptItem.
-type itemState struct {
+// TranscriptTopicItemEvent is the durable item payload. A nil View means the
+// content is not included — the vault is locked or the event was rebuilt from
+// the journal — and the client reads the content through TranscriptItem.
+type TranscriptTopicItemEvent struct {
 	ItemID     string                   `json:"item_id"`
 	TurnID     string                   `json:"turn_id"`
 	Kind       string                   `json:"kind"`
 	Sequence   int64                    `json:"sequence,omitempty"`
 	Revision   uint64                   `json:"revision"`
 	Metadata   vendorstore.ItemMetadata `json:"metadata"`
-	View       *viewPayload             `json:"view,omitempty"`
+	View       *TranscriptView          `json:"view,omitempty"`
 	TurnOrigin string                   `json:"turn_origin"`
 }
 
-// deltaPayload is one delta event: the complete latest display state for its
-// item, never an increment (host-api §6).
-type deltaPayload struct {
-	ItemID       string      `json:"item_id"`
-	BaseRevision uint64      `json:"base_revision"`
-	View         viewPayload `json:"view"`
+// TranscriptTopicDelta is one delta event: the latest complete display state
+// for its item, never an increment (host-api §6).
+type TranscriptTopicDelta struct {
+	ItemID       string         `json:"item_id"`
+	BaseRevision uint64         `json:"base_revision"`
+	View         TranscriptView `json:"view"`
 }
 
-// statePayload carries the non-item durable events (turns, session state).
-type statePayload struct {
+// TranscriptTopicStateEvent carries durable turn and session state events.
+type TranscriptTopicStateEvent struct {
 	TurnID        string `json:"turn_id,omitempty"`
 	State         string `json:"state,omitempty"`
 	WaitingReason string `json:"waiting_reason,omitempty"`
@@ -61,20 +60,20 @@ type statePayload struct {
 	TurnOrigin    string `json:"turn_origin,omitempty"`
 }
 
-// topicSnapshot is the durable topic's snapshot shape (transcript §6).
-type topicSnapshot struct {
-	Sequence      uint64                  `json:"sequence"`
-	SessionState  string                  `json:"session_state"`
-	Turns         []vendorstore.TurnState `json:"turns,omitempty"`
-	ContentLocked bool                    `json:"content_locked"`
-	Items         []itemState             `json:"items,omitempty"`
+// TranscriptTopicSnapshot is the durable topic's snapshot shape (transcript §6).
+type TranscriptTopicSnapshot struct {
+	Sequence      uint64                     `json:"sequence"`
+	SessionState  string                     `json:"session_state"`
+	Turns         []vendorstore.TurnState    `json:"turns,omitempty"`
+	ContentLocked bool                       `json:"content_locked"`
+	Items         []TranscriptTopicItemEvent `json:"items,omitempty"`
 }
 
-// deltaSnapshotState is the delta topic's snapshot shape: the latest published
-// view per open item, read from memory only.
-type deltaSnapshotState struct {
-	ContentLocked bool           `json:"content_locked"`
-	Items         []deltaPayload `json:"items,omitempty"`
+// TranscriptDeltaSnapshot carries the latest published view per open item,
+// read from memory only.
+type TranscriptDeltaSnapshot struct {
+	ContentLocked bool                   `json:"content_locked"`
+	Items         []TranscriptTopicDelta `json:"items,omitempty"`
 }
 
 // transcriptDurable serves the durable topic of one session.
@@ -98,7 +97,7 @@ func (d *transcriptDurable) Snapshot(ctx context.Context) ([]byte, EventSeq, err
 		return nil, 0, seqErr
 	}
 	locked := !d.t.unlocked()
-	snap := topicSnapshot{
+	snap := TranscriptTopicSnapshot{
 		Sequence:      sequence,
 		SessionState:  session.State,
 		Turns:         turns,
@@ -160,7 +159,7 @@ func durableEvent(recorded *vendorstore.RecordedEvent) (Event, error) {
 		if revErr != nil {
 			return Event{}, revErr
 		}
-		state := itemState{
+		state := TranscriptTopicItemEvent{
 			ItemID:     recorded.Metadata.ItemID,
 			TurnID:     recorded.Metadata.ItemTurnID,
 			Kind:       recorded.Metadata.ItemKind,
@@ -177,7 +176,7 @@ func durableEvent(recorded *vendorstore.RecordedEvent) (Event, error) {
 		}
 		return marshalEvent(EventTranscriptItem, sequence, state)
 	}
-	payload := statePayload{
+	payload := TranscriptTopicStateEvent{
 		TurnID:        recorded.Metadata.TurnID,
 		State:         recorded.Metadata.State,
 		WaitingReason: recorded.Metadata.WaitingReason,
@@ -226,14 +225,14 @@ func marshalEvent(eventType string, seq EventSeq, payload any) (Event, error) {
 }
 
 // itemStateFromStored projects a stored item onto the event payload shape.
-func itemStateFromStored(stored *vendorstore.StoredItem) itemState {
+func itemStateFromStored(stored *vendorstore.StoredItem) TranscriptTopicItemEvent {
 	revision, err := storeRevision(stored.Revision)
 	if err != nil {
 		// The schema CHECK keeps revisions positive; a corrupt row projects
 		// without a usable revision rather than failing the whole snapshot.
 		revision = 0
 	}
-	return itemState{
+	return TranscriptTopicItemEvent{
 		ItemID:     stored.ID,
 		TurnID:     stored.TurnID,
 		Kind:       stored.Kind,
@@ -246,29 +245,29 @@ func itemStateFromStored(stored *vendorstore.StoredItem) itemState {
 
 // storedView renders one stored item's redacted display view from its
 // committed content payload.
-func (t *Transcripts) storedView(ctx context.Context, session string, stored *vendorstore.StoredItem) (viewPayload, error) {
+func (t *Transcripts) storedView(ctx context.Context, session string, stored *vendorstore.StoredItem) (TranscriptView, error) {
 	if stored.PayloadID == "" {
-		return viewPayload{}, nil
+		return TranscriptView{}, nil
 	}
 	data, err := t.deps.Store.OpenPayload(ctx, session, stored.PayloadID)
 	if err != nil {
-		return viewPayload{}, fmt.Errorf("open the transcript content: %w", err)
+		return TranscriptView{}, fmt.Errorf("open the transcript content: %w", err)
 	}
 	content, err := decodeContent(transcript.Kind(stored.Kind), data)
 	if err != nil {
-		return viewPayload{}, err
+		return TranscriptView{}, err
 	}
 	fields, _ := contentStrings(content)
 	display := largest(fields)
 	if display == nil {
-		return viewPayload{}, nil
+		return TranscriptView{}, nil
 	}
 	view := transcript.BuildView(viewKindFor(transcript.Kind(stored.Kind)), *display, t.redactor)
 	return viewFromTranscript(view), nil
 }
 
-func viewFromTranscript(view transcript.View) viewPayload {
-	return viewPayload{Text: view.Text, Truncated: view.Truncated, CutAt: view.CutAt, OmittedBytes: view.OmittedBytes, Files: view.Files}
+func viewFromTranscript(view transcript.View) TranscriptView {
+	return TranscriptView{Text: view.Text, Truncated: view.Truncated, CutAt: view.CutAt, OmittedBytes: view.OmittedBytes, Files: view.Files}
 }
 
 // deltaSink returns the sink one session's coalescer publishes to: it records
@@ -279,7 +278,7 @@ func (t *Transcripts) deltaSink(session string) transcript.DeltaSink {
 		if !t.unlocked() {
 			return
 		}
-		payload, err := json.Marshal(deltaPayload{ItemID: d.ItemID, BaseRevision: d.BaseRevision, View: viewFromTranscript(d.View)})
+		payload, err := json.Marshal(TranscriptTopicDelta{ItemID: d.ItemID, BaseRevision: d.BaseRevision, View: viewFromTranscript(d.View)})
 		if err != nil {
 			slog.Warn("a transcript delta payload did not marshal", "err", err.Error())
 			return
@@ -310,14 +309,14 @@ func (f deltaSinkFunc) Publish(ctx context.Context, d *transcript.Delta) { f(ctx
 // published per open item (transcript §6). The hub calls it without holding
 // any lock, so it reads only its own state.
 func (t *Transcripts) deltaSnapshot(session string) ([]byte, error) {
-	snap := deltaSnapshotState{ContentLocked: !t.unlocked()}
+	snap := TranscriptDeltaSnapshot{ContentLocked: !t.unlocked()}
 	t.mu.Lock()
 	st := t.sessions[session]
 	t.mu.Unlock()
 	if st != nil {
 		st.mu.Lock()
 		for id, view := range st.views {
-			snap.Items = append(snap.Items, deltaPayload{ItemID: id, BaseRevision: st.revisions[id], View: viewFromTranscript(view)})
+			snap.Items = append(snap.Items, TranscriptTopicDelta{ItemID: id, BaseRevision: st.revisions[id], View: viewFromTranscript(view)})
 		}
 		st.mu.Unlock()
 	}

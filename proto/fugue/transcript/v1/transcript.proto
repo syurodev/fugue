@@ -118,6 +118,7 @@ message TranscriptTurnState {
   string turn_id = 1;
   string turn_origin = 2;
   string outcome = 3;
+  string state = 4;
 }
 message TranscriptDurableItem {
   string item_id = 1;

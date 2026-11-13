@@ -21,9 +21,6 @@ import (
 // defaultPageLimit is the transcript page default (transcript §6).
 const defaultPageLimit = 200
 
-// TranscriptView is the public-safe transcript view mapped by hostapi.
-type TranscriptView = viewPayload
-
 // TranscriptMetadata is the public-safe metadata mapped by hostapi.
 type TranscriptMetadata = vendorstore.ItemMetadata
 
@@ -49,7 +46,7 @@ type TranscriptEntry struct {
 	CreatedAt     string                   `json:"created_at"`
 	UpdatedAt     string                   `json:"updated_at"`
 	Metadata      vendorstore.ItemMetadata `json:"metadata"`
-	View          viewPayload              `json:"view"`
+	View          TranscriptView           `json:"view"`
 	ContentLocked bool                     `json:"content_locked"`
 	TurnOrigin    string                   `json:"turn_origin"`
 }

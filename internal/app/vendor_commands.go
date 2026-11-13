@@ -53,35 +53,15 @@ func fugueCommandRegistry() []FugueCommand {
 	}
 }
 
-func dispatchFugueCommand(text string) (registered, available bool) {
+func fugueCommandError(text string) error {
 	command := strings.TrimLeftFunc(text, unicode.IsSpace)
 	if !strings.HasPrefix(command, "/fugue:") {
-		return false, false
+		return nil
 	}
 	for _, entry := range fugueCommandRegistry() {
 		if command == entry.Name {
-			return true, entry.Available
-		}
-	}
-	return true, false
-}
-
-func unknownFugueCommand() error {
-	return errcode.New(errcode.VendorUnknownCommand, "the /fugue: command is not available")
-}
-
-func fugueCommandError(text string) error {
-	registered, available := dispatchFugueCommand(text)
-	if !registered {
-		return nil
-	}
-	if available {
-		return errcode.New(errcode.VendorCommandUnavailable, "the /fugue: command is not available yet")
-	}
-	for _, command := range fugueCommandRegistry() {
-		if strings.TrimLeftFunc(text, unicode.IsSpace) == command.Name {
 			return errcode.New(errcode.VendorCommandUnavailable, "the /fugue: command is not available yet")
 		}
 	}
-	return unknownFugueCommand()
+	return errcode.New(errcode.VendorUnknownCommand, "the /fugue: command is not available")
 }

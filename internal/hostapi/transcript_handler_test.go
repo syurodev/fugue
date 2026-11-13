@@ -100,24 +100,167 @@ func TestTranscriptProtoMappingCoversKindsMetadataAndNumericBounds(t *testing.T)
 	}
 }
 
-func TestTranscriptTopicConversionMapsNestedKindsAndRejectsMalformedPayload(t *testing.T) {
+func TestTranscriptTopicSnapshotMatchesRPCItemMapping(t *testing.T) {
 	t.Parallel()
-	payload := []byte(`{"items":[{"kind":"team_proposal","view":{"files":[{"Header":"file.go","Added":2,"Removed":1}]}}]}`)
-	encoded, err := transcriptSnapshotProto(app.TopicTranscript+"session", payload)
+	item := transcriptTopicItemFixture(t)
+	snapshot := app.TranscriptTopicSnapshot{Sequence: 24, SessionState: "ready", ContentLocked: false}
+	snapshotPayload := []byte(`{"sequence":24,"session_state":"ready","turns":[{"turn_id":"vendor-turn-7","turn_origin":"vendor","state":"running","outcome":""}],"content_locked":false,"items":[` + string(marshalTopicPayload(t, item)) + `]}`)
+	if err := json.Unmarshal(snapshotPayload, &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	mapped := decodeSnapshotTopic(t, app.TopicTranscript+"session", marshalTopicPayload(t, snapshot))
+	wantEntry := transcriptTopicRPCEntry(&item)
+	wantItem := &transcriptv1.TranscriptDurableItem{
+		ItemId: wantEntry.ItemId, TurnId: wantEntry.TurnId, Kind: wantEntry.Kind,
+		Sequence: wantEntry.Sequence, Revision: wantEntry.Revision, Metadata: wantEntry.Metadata,
+		View: wantEntry.View, TurnOrigin: wantEntry.TurnOrigin,
+	}
+	if mapped.Sequence != 24 || len(mapped.Turns) != 1 || mapped.Turns[0].State != "running" || len(mapped.Items) != 1 || !proto.Equal(mapped.Items[0], wantItem) {
+		t.Fatalf("mapped snapshot = %+v; want item from RPC mapping %+v", &mapped, wantItem)
+	}
+}
+
+func TestTranscriptItemTopicEventMatchesRPCMapping(t *testing.T) {
+	t.Parallel()
+	item := transcriptTopicItemFixture(t)
+	mapped := decodeItemTopicEvent(t, app.TopicTranscript+"session", marshalTopicPayload(t, item))
+	entry := transcriptTopicRPCEntry(&item)
+	want := &transcriptv1.TranscriptItemEvent{
+		ItemId: entry.ItemId, TurnId: entry.TurnId, Kind: entry.Kind,
+		Sequence: entry.Sequence, Revision: entry.Revision, Metadata: entry.Metadata,
+		View: entry.View, TurnOrigin: entry.TurnOrigin,
+	}
+	if !proto.Equal(mapped, want) {
+		t.Fatalf("mapped item event = %+v; want RPC mapping %+v", mapped, want)
+	}
+}
+
+func TestTranscriptStateTopicEventMapsTypedAppPayload(t *testing.T) {
+	t.Parallel()
+	var state app.TranscriptTopicStateEvent
+	if err := json.Unmarshal([]byte(`{"turn_id":"vendor-turn-7","state":"running","waiting_reason":"tool","outcome":"","failure_code":"","stop_proof":"","turn_origin":"vendor"}`), &state); err != nil {
+		t.Fatal(err)
+	}
+	mapped := decodeStateTopicEvent(t, app.TopicTranscript+"session", marshalTopicPayload(t, state))
+	want := &transcriptv1.TranscriptStateEvent{
+		TurnId: state.TurnID, State: state.State, WaitingReason: state.WaitingReason,
+		Outcome: state.Outcome, FailureCode: state.FailureCode, StopProof: state.StopProof, TurnOrigin: state.TurnOrigin,
+	}
+	if !proto.Equal(mapped, want) {
+		t.Fatalf("mapped state event = %+v; want %+v", mapped, want)
+	}
+}
+
+func TestTranscriptDeltaTopicPayloadsMatchRPCViewMapping(t *testing.T) {
+	t.Parallel()
+	var delta app.TranscriptTopicDelta
+	if err := json.Unmarshal([]byte(`{"item_id":"item-7","base_revision":3,"view":{"text":"redacted display","truncated":true,"cut_at":16,"omitted_bytes":8,"files":[{"Header":"change.go","Added":3,"Removed":1}]}}`), &delta); err != nil {
+		t.Fatal(err)
+	}
+	wantView := protoTranscriptEntry(&app.TranscriptEntry{View: delta.View}).View
+	mapped := decodeDeltaTopicEvent(t, app.TopicTranscriptDelta+"session", marshalTopicPayload(t, delta))
+	wantDelta := &transcriptv1.TranscriptDelta{ItemId: delta.ItemID, BaseRevision: delta.BaseRevision, View: wantView}
+	if !proto.Equal(mapped, wantDelta) {
+		t.Fatalf("mapped delta = %+v; want RPC view mapping %+v", &mapped, wantDelta)
+	}
+
+	var snapshot app.TranscriptDeltaSnapshot
+	if err := json.Unmarshal([]byte(`{"content_locked":false,"items":[{"item_id":"item-7","base_revision":3,"view":{"text":"redacted display","truncated":true,"cut_at":16,"omitted_bytes":8,"files":[{"Header":"change.go","Added":3,"Removed":1}]}}]}`), &snapshot); err != nil {
+		t.Fatal(err)
+	}
+	mappedSnapshot := decodeDeltaSnapshotTopic(t, app.TopicTranscriptDelta+"session", marshalTopicPayload(t, snapshot))
+	if len(mappedSnapshot.Items) != 1 || !proto.Equal(mappedSnapshot.Items[0].View, wantView) {
+		t.Fatalf("mapped delta snapshot = %+v; want RPC view mapping %+v", &mappedSnapshot, wantView)
+	}
+}
+
+func transcriptTopicItemFixture(t *testing.T) app.TranscriptTopicItemEvent {
+	t.Helper()
+	var item app.TranscriptTopicItemEvent
+	if err := json.Unmarshal([]byte(`{"item_id":"item-7","turn_id":"vendor-turn-7","kind":"assistant_message","sequence":21,"revision":4,"metadata":{"model":"model-x","status":"complete"},"view":{"text":"redacted display","truncated":true,"cut_at":16,"omitted_bytes":8,"files":[{"Header":"change.go","Added":3,"Removed":1}]},"turn_origin":"vendor"}`), &item); err != nil {
+		t.Fatal(err)
+	}
+	return item
+}
+
+func transcriptTopicRPCEntry(item *app.TranscriptTopicItemEvent) *transcriptv1.TranscriptEntry {
+	return protoTranscriptEntry(&app.TranscriptEntry{
+		ID: item.ItemID, TurnID: item.TurnID, Kind: app.TranscriptKind(item.Kind),
+		Sequence: 21, Revision: item.Revision, Metadata: item.Metadata,
+		View: *item.View, TurnOrigin: item.TurnOrigin,
+	})
+}
+
+func marshalTopicPayload(t *testing.T, value any) []byte {
+	t.Helper()
+	payload, err := json.Marshal(value)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var snapshot transcriptv1.TranscriptSnapshot
-	if err := proto.Unmarshal(encoded, &snapshot); err != nil {
+	return payload
+}
+
+func decodeSnapshotTopic(t *testing.T, topic string, payload []byte) *transcriptv1.TranscriptSnapshot {
+	t.Helper()
+	encoded, err := transcriptSnapshotProto(topic, payload)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Items) != 1 || snapshot.Items[0].Kind != transcriptv1.TranscriptKind_TRANSCRIPT_KIND_TEAM_PROPOSAL || len(snapshot.Items[0].View.Files) != 1 || snapshot.Items[0].View.Files[0].Header != "file.go" {
-		t.Fatalf("mapped topic snapshot = %+v", &snapshot)
-	}
-	if _, err := transcriptEventProto(app.TopicTranscript+"session", app.EventTranscriptItem, []byte("{")); err == nil {
-		t.Fatal("malformed transcript event was accepted")
-	}
-	if _, err := transcriptSnapshotProto("other:topic", []byte(`{"state":"kept"}`)); err != nil {
+	var value transcriptv1.TranscriptSnapshot
+	if err := proto.Unmarshal(encoded, &value); err != nil {
 		t.Fatal(err)
 	}
+	return &value
+}
+
+func decodeDeltaSnapshotTopic(t *testing.T, topic string, payload []byte) *transcriptv1.TranscriptDeltaSnapshot {
+	t.Helper()
+	encoded, err := transcriptSnapshotProto(topic, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value transcriptv1.TranscriptDeltaSnapshot
+	if err := proto.Unmarshal(encoded, &value); err != nil {
+		t.Fatal(err)
+	}
+	return &value
+}
+
+func decodeItemTopicEvent(t *testing.T, topic string, payload []byte) *transcriptv1.TranscriptItemEvent {
+	t.Helper()
+	encoded, err := transcriptEventProto(topic, app.EventTranscriptItem, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value transcriptv1.TranscriptItemEvent
+	if err := proto.Unmarshal(encoded, &value); err != nil {
+		t.Fatal(err)
+	}
+	return &value
+}
+
+func decodeStateTopicEvent(t *testing.T, topic string, payload []byte) *transcriptv1.TranscriptStateEvent {
+	t.Helper()
+	encoded, err := transcriptEventProto(topic, app.EventTranscriptState, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value transcriptv1.TranscriptStateEvent
+	if err := proto.Unmarshal(encoded, &value); err != nil {
+		t.Fatal(err)
+	}
+	return &value
+}
+
+func decodeDeltaTopicEvent(t *testing.T, topic string, payload []byte) *transcriptv1.TranscriptDelta {
+	t.Helper()
+	encoded, err := transcriptEventProto(topic, app.EventTranscriptDelta, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var value transcriptv1.TranscriptDelta
+	if err := proto.Unmarshal(encoded, &value); err != nil {
+		t.Fatal(err)
+	}
+	return &value
 }
