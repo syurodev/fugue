@@ -101,11 +101,12 @@ func TestSelectionRequestsAcceptOnlyOfferedOptionsAndNeverAuthorizeExecution(t *
 func TestVaultLockInvalidatesPendingRequestsGrantsAndReceipts(t *testing.T) {
 	t.Parallel()
 	var vaultLocked atomic.Bool
-	owner, err := NewOwner(Config{
+	owner, err := NewOwner(&Config{
 		Clock:       clock.NewFake(startTime()),
 		IDs:         ids.NewSequence("vl"),
 		Responder:   NopResponder{},
 		VaultLocked: vaultLocked.Load,
+		TagPolicy:   newStubTagPolicy(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -199,11 +200,11 @@ func TestValidationAndGeneratorFailures(t *testing.T) {
 	t.Parallel()
 	fakeClock := clock.NewFake(startTime())
 
-	_, err := NewOwner(Config{Clock: nil, IDs: ids.NewSequence("x")})
+	_, err := NewOwner(&Config{Clock: nil, IDs: ids.NewSequence("x")})
 	wantCode(t, err, errcode.InvalidArgument)
-	_, err = NewOwner(Config{Clock: fakeClock, IDs: nil})
+	_, err = NewOwner(&Config{Clock: fakeClock, IDs: nil})
 	wantCode(t, err, errcode.InvalidArgument)
-	_, err = NewOwner(Config{Clock: fakeClock, IDs: &failingGenerator{failAfter: 0}})
+	_, err = NewOwner(&Config{Clock: fakeClock, IDs: &failingGenerator{failAfter: 0}})
 	wantCode(t, err, errcode.Internal)
 
 	owner, _, _, _ := newTestOwner(t)
@@ -220,7 +221,7 @@ func assertSpecValidationErrors(t *testing.T, owner *Owner) {
 		{OperationID: "op", Kind: KindConfirm, Binding: Binding{}},
 		{OperationID: "op", Kind: KindConfirm, Options: []Option{{ID: "a", Label: "A"}}, Binding: defaultBinding()},
 		{OperationID: "op", Kind: KindConfirm, Offers: []Outcome{OutcomeDenied}, Binding: defaultBinding()},
-		{OperationID: "op", Kind: KindConfirm, Offers: []Outcome{OutcomeAllowedSession}, Binding: Binding{SessionID: testSessionID, InvocationID: "inv-1", AttemptID: "att-1", CheckGeneration: 1, ToolName: testToolName, EnvTag: "prod"}},
+		{OperationID: "op", Kind: KindConfirm, Offers: []Outcome{OutcomeAllowedSession}, Binding: Binding{SessionID: testSessionID, InvocationID: "inv-1", AttemptID: "att-1", CheckGeneration: 1, ToolName: testToolName, EnvTag: testEnvProd}},
 		{OperationID: "op", Kind: KindSelect, Options: nil, Binding: defaultBinding()},
 		{OperationID: "op", Kind: KindSelect, Options: []Option{{ID: "", Label: "A"}}, Binding: defaultBinding()},
 		{OperationID: "op", Kind: KindSelect, Options: []Option{{ID: "a", Label: "A"}, {ID: "a", Label: "B"}}, Binding: defaultBinding()},
@@ -229,7 +230,7 @@ func assertSpecValidationErrors(t *testing.T, owner *Owner) {
 		{OperationID: "op", Kind: KindQuestion, Questions: []Question{{ID: "", Question: "q"}}, Binding: defaultBinding()},
 		{Summary: strings.Repeat("a", MaxSummaryBytes+1), OperationID: "op", Kind: KindConfirm, Offers: []Outcome{OutcomeAllowedOnce}, Binding: defaultBinding()},
 		{OperationID: "op", Kind: KindConfirm, Offers: []Outcome{OutcomeAllowedOnce}, Options: []Option{{ID: "a", Label: "A"}}, Relayed: true, Binding: defaultBinding()},
-		{OperationID: "op", Kind: "unknown", Binding: defaultBinding()},
+		{OperationID: "op", Kind: Kind(testTagUnknown), Binding: defaultBinding()},
 	}
 	for _, spec := range badSpecs {
 		_, _, err := owner.Ensure(spec)
@@ -255,19 +256,19 @@ func assertOperationAndDecisionValidationErrors(t *testing.T, owner *Owner) {
 	wantCode(t, err, errcode.InvalidArgument)
 	_, err = owner.Answer(&Decision{RequestID: confirmT.RequestID, Outcome: OutcomeCancelled})
 	wantCode(t, err, errcode.InvalidArgument)
-	_, err = owner.Answer(&Decision{RequestID: confirmT.RequestID, Outcome: "bogus"})
+	_, err = owner.Answer(&Decision{RequestID: confirmT.RequestID, Outcome: Outcome(testBogus)})
 	wantCode(t, err, errcode.InvalidArgument)
 
 	selSpec := selectSpec("op-invalid-sel")
 	selSpec.Binding.SessionID = "sess-2"
 	selectT := mustEnsure(t, owner, selSpec)
-	_, err = owner.Answer(&Decision{RequestID: selectT.RequestID, Outcome: "bogus"})
+	_, err = owner.Answer(&Decision{RequestID: selectT.RequestID, Outcome: Outcome(testBogus)})
 	wantCode(t, err, errcode.InvalidArgument)
 }
 
 func assertGeneratorFailures(t *testing.T, fakeClock *clock.Fake) {
 	t.Helper()
-	o1, err := NewOwner(Config{Clock: fakeClock, IDs: &failingGenerator{failAfter: 1}, Responder: NopResponder{}})
+	o1, err := NewOwner(&Config{Clock: fakeClock, IDs: &failingGenerator{failAfter: 1}, Responder: NopResponder{}, TagPolicy: newStubTagPolicy()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +277,7 @@ func assertGeneratorFailures(t *testing.T, fakeClock *clock.Fake) {
 	_, err = o1.InvalidateOperation("op-fail-inv-id")
 	wantCode(t, err, errcode.Internal)
 
-	o2, err := NewOwner(Config{Clock: fakeClock, IDs: &failingGenerator{failAfter: 2}, Responder: NopResponder{}})
+	o2, err := NewOwner(&Config{Clock: fakeClock, IDs: &failingGenerator{failAfter: 2}, Responder: NopResponder{}, TagPolicy: newStubTagPolicy()})
 	if err != nil {
 		t.Fatal(err)
 	}

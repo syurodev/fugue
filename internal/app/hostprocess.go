@@ -209,7 +209,7 @@ func (hp *HostProcess) waitTasks() error {
 }
 
 func initInteractions(deps *HostDeps, hub *EventHub) (*InteractionService, error) {
-	owner, err := interaction.NewOwner(interaction.Config{
+	owner, err := interaction.NewOwner(&interaction.Config{
 		Clock:     deps.Clock,
 		IDs:       deps.IDs,
 		Responder: nil,

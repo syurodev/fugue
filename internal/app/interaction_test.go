@@ -34,7 +34,7 @@ func newTestInteractionService(t *testing.T, clk clock.Clock) (*InteractionServi
 	}
 	idGen := ids.NewUUIDv7(clk, ids.NewDeterministic("test"))
 	hub := NewEventHub(testAppIncarnation)
-	owner, err := interaction.NewOwner(interaction.Config{
+	owner, err := interaction.NewOwner(&interaction.Config{
 		Clock: clk,
 		IDs:   idGen,
 	})
@@ -68,6 +68,7 @@ func ensureTestConfirm(t *testing.T, svc *InteractionService, opID, summary stri
 			AttemptID:       testAttID,
 			CheckGeneration: 1,
 			ToolName:        "file_writer",
+			GrantScopeKey:   "file_writer:workspace",
 			EnvTag:          testEnvDev,
 		},
 		GrantScopeLabel: "workspace write",
@@ -673,7 +674,7 @@ func TestInteractionServiceConstructorValidation(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Unix(100, 0))
 	idGen := ids.NewUUIDv7(clk, ids.NewDeterministic("test"))
-	owner, err := interaction.NewOwner(interaction.Config{Clock: clk, IDs: idGen})
+	owner, err := interaction.NewOwner(&interaction.Config{Clock: clk, IDs: idGen})
 	if err != nil {
 		t.Fatal(err)
 	}

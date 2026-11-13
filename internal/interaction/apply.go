@@ -51,7 +51,7 @@ func (o *Owner) applyConfirmLocked(ticket *Ticket, decision *Decision, now time.
 		if err != nil {
 			return err
 		}
-		o.grants[grantKeyFor(&ticket.Binding)] = struct{}{}
+		o.recordGrantLocked(&ticket.Binding)
 		ticket.ReceiptID = receipt.ReceiptID
 	case OutcomeDenied:
 		if err := checkTextLimit(decision.Text, MaxNoteBytes, "deny note"); err != nil {
@@ -63,6 +63,14 @@ func (o *Owner) applyConfirmLocked(ticket *Ticket, decision *Decision, now time.
 	}
 	o.markResolvedLocked(ticket, now, decision.Outcome)
 	return nil
+}
+
+// recordGrantLocked stores a session grant for the binding; a target binding
+// without a TagPolicy cannot be keyed and records nothing (fail closed).
+func (o *Owner) recordGrantLocked(b *Binding) {
+	if key, ok := o.grantKeyFor(b); ok {
+		o.grants[key] = struct{}{}
+	}
 }
 
 func (o *Owner) applySelectLocked(ticket *Ticket, decision *Decision, now time.Time) error {
