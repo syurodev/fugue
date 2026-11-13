@@ -4,6 +4,7 @@ package process
 
 import (
 	"errors"
+	"fmt"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -26,7 +27,7 @@ func sysctlGroupHasLiveMembers(pgid int) (bool, error) {
 	}
 	kprocs, err := unix.SysctlKinfoProcSlice("kern.proc.all")
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("sysctl kern.proc.all: %w", err)
 	}
 	for i := range kprocs {
 		proc := &kprocs[i]

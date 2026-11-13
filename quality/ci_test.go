@@ -73,6 +73,16 @@ func TestPRWorkflowRunsEveryRequiredJob(t *testing.T) {
 	}
 }
 
+func TestPRWorkflowLintsDarwin(t *testing.T) {
+	t.Parallel()
+	pr := readWorkflow(t, "pr.yml")
+	for _, want := range []string{"GOOS=darwin", "golangci-lint/v2"} {
+		if !strings.Contains(pr, want) {
+			t.Errorf("pr.yml lint job lacks %q for darwin-only files", want)
+		}
+	}
+}
+
 // Labels and title edits rerun only the meta checks; the code gates run on
 // pushes, decide their scope with fuguegate changes, and every merge runs the
 // macOS tests that a portable change skipped.
