@@ -62,6 +62,8 @@ The vendor domain packages integrate into the established 7-layer hierarchy:
 
 ### Amendments
 
+2026-11-13 (F6.3c): add `internal/shellrules` at layer 1 for shell command parsing, default risk rules, and workspace policy evaluation.
+
 2026-11-12 (F6.3b): add `internal/environments` at layer 1 for the environment tag registry and confirmation policies for targets.
 
 2026-11-09 (F9.5a): the concrete adapters move from `internal/vendor/<name>` to
@@ -85,6 +87,7 @@ redaction remains separate. No other internal imports are permitted.
 
 | Package | Layer | Purpose and owner | May import | Phase |
 | --- | --- | --- | --- | --- |
+| `internal/shellrules` | 1 | Pure logic, no I/O: shell command parsing, default risk rules, and workspace policy evaluation. Owner: interaction (I-03, §3.3). | `internal/interaction`, `internal/environments` | F6.3c |
 | `internal/environments` | 1 | Pure logic, no I/O: environment tag registry and confirmation policies for targets. Owner: interaction (I-03, §3.4). | `internal/platform/errcode` | F6.3b |
 | `internal/secrets` | 1 | Pure logic, no I/O: known-value, token-pattern and key-name secret detection. Owner: content safety (H-27). | `internal/platform/errcode`, `internal/platform/redact` | F6.7a |
 | `internal/sealing` | 2 | Protected payload sealing and session key lifecycle. Owner: storage security (G-03). | `internal/crypto`, `internal/vault`, `internal/platform/errcode`, `internal/platform/ids`, `internal/platform/redact` | F9.3a |

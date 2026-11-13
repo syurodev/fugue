@@ -24,9 +24,10 @@ func testEpoch() time.Time {
 	return time.Date(2026, 11, 10, 10, 0, 0, 0, time.UTC)
 }
 
-func waitAndAdvance(clk *clock.Fake, minPending int, d time.Duration) {
-	for clk.Pending() < minPending {
-		runtime.Gosched()
+func waitAndAdvance(t *testing.T, clk *clock.Fake, minPending int, d time.Duration) {
+	t.Helper()
+	if err := clk.BlockUntilPending(t.Context(), minPending); err != nil {
+		t.Fatalf("fewer than %d timers armed on the fake clock: %v", minPending, err)
 	}
 	clk.Advance(d)
 }
@@ -284,13 +285,13 @@ func TestSessionInterruptEscalatesToStopWhenCLIHangs(t *testing.T) {
 	})
 
 	// Advance clock past 10s interrupt wait on Session.Interrupt (minPending: tracker + interrupt timer)
-	waitAndAdvance(clk, 2, 10*time.Second)
+	waitAndAdvance(t, clk, 2, 10*time.Second)
 
 	// Stop escalation steps in F9.2 stop order
 	if step := <-stepCh; step != controlInterrupt {
 		t.Fatalf("expected interrupt step, got %q", step)
 	}
-	waitAndAdvance(clk, 1, 10*time.Second)
+	waitAndAdvance(t, clk, 1, 10*time.Second)
 
 	if step := <-stepCh; step != stepSigint {
 		t.Fatalf("expected sigint step, got %q", step)
@@ -337,13 +338,13 @@ func TestSessionHandshakeTimeoutStopsProcess(t *testing.T) {
 	})
 
 	// Advance clock past 30s handshake timeout (minPending: tracker + handshake timer)
-	waitAndAdvance(clk, 2, 30*time.Second)
+	waitAndAdvance(t, clk, 2, 30*time.Second)
 
 	// Allow stop escalation
 	if step := <-stepCh; step != controlInterrupt {
 		t.Fatalf("expected interrupt step, got %q", step)
 	}
-	waitAndAdvance(clk, 1, 10*time.Second)
+	waitAndAdvance(t, clk, 1, 10*time.Second)
 
 	if step := <-stepCh; step != stepSigint {
 		t.Fatalf("expected sigint step, got %q", step)

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+
+	"github.com/syurodev/fugue/internal/shellrules"
 )
 
 // Tier identifies one of the four configuration precedence layers (WS-05).
@@ -120,9 +122,9 @@ func DefaultConfig(fugueHome, workspaceID string) EffectiveConfig {
 	}
 }
 
-// RequiresConfirmationForTag enforces hard rule I-03: prod, empty, and unknown tags require confirmation.
-func RequiresConfirmationForTag(tag string) bool {
-	return tag != "dev" && tag != "local" && tag != "test"
+// TagPolicy reports whether an environment tag requires confirmation (interaction §3.4).
+type TagPolicy interface {
+	RequiresConfirmation(name string) bool
 }
 
 // ResolveEnvTag returns the environment tag for target using rules in declaration order.
@@ -135,19 +137,30 @@ func ResolveEnvTag(rules []EnvTagRule, target string) string {
 	return ""
 }
 
-// IsShellAllowed reports whether command on target is permitted by policy.shell_allow without violating I-03.
-func IsShellAllowed(cfg *EffectiveConfig, command, target string) bool {
+// IsShellAllowed reports whether command on target is permitted by policy.shell_allow
+// without violating hard rule I-03 or matching default risk rules (interaction §3.3).
+// Every simple command in a compound command must be covered by shell_allow.
+func IsShellAllowed(cfg *EffectiveConfig, tags TagPolicy, command, target string) bool {
 	cmd := strings.TrimSpace(command)
-	if cmd == "" || (target != "" && RequiresConfirmationForTag(ResolveEnvTag(cfg.Policy.EnvTags, target))) ||
-		slices.ContainsFunc(cfg.Policy.ShellAsk, func(p string) bool { return matchesShellPrefix(cmd, p) }) {
+	if cmd == "" {
 		return false
 	}
-	return slices.ContainsFunc(cfg.Policy.ShellAllow, func(p string) bool { return matchesShellPrefix(cmd, p) })
-}
-
-func matchesShellPrefix(cmd, prefix string) bool {
-	p := strings.TrimSpace(prefix)
-	return p != "" && (cmd == p || strings.HasPrefix(cmd, p+" "))
+	tag := ""
+	if target != "" {
+		tag = ResolveEnvTag(cfg.Policy.EnvTags, target)
+	}
+	roots := make([]string, 0, len(cfg.Roots))
+	for _, r := range cfg.Roots {
+		roots = append(roots, r.Path)
+	}
+	return shellrules.IsAllowed(command, &shellrules.Options{
+		WorkspaceRoots: roots,
+		ShellAsk:       cfg.Policy.ShellAsk,
+		ShellAllow:     cfg.Policy.ShellAllow,
+		Target:         target,
+		EnvTag:         tag,
+		TagPolicy:      tags,
+	})
 }
 
 func mergeConfigs(base *EffectiveConfig, t2 *tier2RawConfig, t3 *tier3RawConfig, t4 *SessionOverride, homeDir string) EffectiveConfig {

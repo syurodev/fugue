@@ -40,6 +40,9 @@ type serveOpts struct {
 	// wrapTransport, when not nil, wraps the server as the host's drain
 	// transport. The tests wrap the real drain with a blocking one.
 	wrapTransport func(app.HostTransport) app.HostTransport
+	// clock drives the host's idle grace; nil is the wall clock. Tests inject
+	// a fake so the grace cannot expire before a slow runner dials.
+	clock clock.Clock
 }
 
 // RunServe runs the foreground host until its context is canceled or a
@@ -84,6 +87,10 @@ func serve(ctx context.Context, out io.Writer, cfg config.Config, version string
 	if opts.wrapTransport != nil {
 		transport = opts.wrapTransport(srv)
 	}
+	clk := opts.clock
+	if clk == nil {
+		clk = clock.Real{}
+	}
 	hp, err := app.StartHost(ctx, &app.HostDeps{
 		DataDir: cfg.DataDir,
 		Config: app.HostConfig{
@@ -94,8 +101,8 @@ func serve(ctx context.Context, out io.Writer, cfg config.Config, version string
 			IdleGrace:    opts.idleGrace,
 			DrainTimeout: 0,
 		},
-		Clock:     clock.Real{},
-		IDs:       ids.NewUUIDv7(clock.Real{}, ids.CryptoRandom{}),
+		Clock:     clk,
+		IDs:       ids.NewUUIDv7(clk, ids.CryptoRandom{}),
 		Transport: transport,
 		// The snapshot is filtered through the vendor allowlist before any
 		// vendor process sees it.
