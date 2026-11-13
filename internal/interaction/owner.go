@@ -3,7 +3,6 @@ package interaction
 import (
 	"cmp"
 	"slices"
-	"strconv"
 	"sync"
 	"time"
 
@@ -15,42 +14,6 @@ import (
 // ResolvedRetentionTTL is how long non-relayed resolved tickets are retained
 // in memory before being evicted (matching dedup TTL).
 const ResolvedRetentionTTL = 10 * time.Minute
-
-// grantKey scopes a session-level confirmation grant to a single session,
-// workspace, grant scope key and target/environment revision.
-type grantKey struct {
-	sessionID      string
-	workspaceID    string
-	grantScopeKey  string
-	targetRevision string
-	envRevision    string
-	envTag         string
-}
-
-// grantKeyFor derives the session grant key for a binding. The environment
-// revision is never taken from the caller: for a binding with a target it is the
-// tag registry's current policy revision, so changing a tag's policy (even
-// changing it and reverting) invalidates every grant recorded under the old
-// revision (interaction §3.4, I-E03). With no TagPolicy a target cannot be
-// keyed and the second result is false: targets never get session grants.
-func (o *Owner) grantKeyFor(b *Binding) (grantKey, bool) {
-	key := grantKey{
-		sessionID:      b.SessionID,
-		workspaceID:    b.WorkspaceID,
-		grantScopeKey:  b.GrantScopeKey,
-		targetRevision: b.TargetRevision,
-		envRevision:    "",
-		envTag:         b.EnvTag,
-	}
-	if !b.HasTarget {
-		return key, true
-	}
-	if o.tagPolicy == nil {
-		return grantKey{}, false
-	}
-	key.envRevision = strconv.FormatUint(o.tagPolicy.PolicyRevision(b.EnvTag), 10)
-	return key, true
-}
 
 // Config supplies the ports and optional callbacks for an Owner. Responder
 // may be nil: requests then stay pending until a client picks them up
