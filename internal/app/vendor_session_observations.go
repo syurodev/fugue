@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/syurodev/fugue/internal/platform/ids"
@@ -16,6 +17,16 @@ import (
 const vendorFailureCode = "vendor_failure"
 
 func (a *vendorSessionActor) handleObservation(ctx context.Context, observation *claude.Observation) error {
+	if observation.Init != nil {
+		commands := slices.Clone(observation.Init.SlashCommands)
+		if !slices.Equal(commands, a.slashCommands) {
+			a.slashCommands = commands
+			state, reason := stateToStore(a.state)
+			if err := a.append(ctx, &vendorstore.Event{Type: vendorstore.VendorSessionStateChanged, State: state, WaitingReason: reason}); err != nil {
+				return err
+			}
+		}
+	}
 	if err := a.persistInit(ctx, observation.Init); err != nil {
 		return err
 	}
@@ -171,6 +182,9 @@ func (a *vendorSessionActor) append(ctx context.Context, event *vendorstore.Even
 	}
 	if next != a.sequence+1 {
 		return fmt.Errorf("%w: non-contiguous append result", ErrVendorActorFailed)
+	}
+	if err := a.manager.deps.Transcripts.PublishCommittedEvent(context.WithoutCancel(ctx), a.info.ID, next); err != nil {
+		return fmt.Errorf("%w: publish committed transcript event: %w", ErrVendorActorFailed, err)
 	}
 	a.sequence = next
 	return nil

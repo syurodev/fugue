@@ -201,10 +201,14 @@ func TestVendorServiceLimitsAndTypedRejections(t *testing.T) {
 	_, err = f.svc.Resume(t.Context(), testAppPrincipal, &ResumeVendorSession{CommandID: "r2", SessionID: first.ID, WorkspaceID: f.ws})
 	requireCode(t, err, errcode.VendorSessionState)
 	for i, text := range []string{"/fugue:solo", " /fugue:team", "\n/fugue:x", "\u3000/fugue:account"} {
+		want := errcode.VendorCommandUnavailable
+		if i == 2 {
+			want = errcode.VendorUnknownCommand
+		}
 		send := VendorInput{CommandID: "fs" + strconv.Itoa(i), SessionID: first.ID, Text: text}
-		requireCode(t, f.svc.Send(t.Context(), testAppPrincipal, send), errcode.VendorUnknownCommand)
+		requireCode(t, f.svc.Send(t.Context(), testAppPrincipal, send), want)
 		steer := VendorInput{CommandID: "ft" + strconv.Itoa(i), SessionID: first.ID, Text: text}
-		requireCode(t, f.svc.Steer(t.Context(), testAppPrincipal, steer), errcode.VendorUnknownCommand)
+		requireCode(t, f.svc.Steer(t.Context(), testAppPrincipal, steer), want)
 	}
 	requireCode(t, f.svc.Send(t.Context(), testAppPrincipal, VendorInput{CommandID: "n", SessionID: testNoSession, Text: "hi"}), errcode.VendorSessionNotFound)
 	_, err = f.svc.Interrupt(t.Context(), testAppPrincipal, VendorStop{CommandID: "i", SessionID: testNoSession})

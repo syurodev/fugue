@@ -1,0 +1,164 @@
+syntax = "proto3";
+
+package fugue.transcript.v1;
+
+option go_package = "github.com/syurodev/fugue/pkg/pb/fugue/transcript/v1;transcriptv1";
+
+message TranscriptPageRequest {
+  string session_id = 1;
+  int64 before_sequence = 2;
+  uint32 limit = 3;
+}
+message TranscriptPageResponse {
+  repeated TranscriptEntry entries = 1;
+}
+message TranscriptItemRequest {
+  string session_id = 1;
+  string item_id = 2;
+}
+message TranscriptItemResponse {
+  TranscriptDetail item = 1;
+}
+
+enum TranscriptKind {
+  TRANSCRIPT_KIND_UNSPECIFIED = 0;
+  TRANSCRIPT_KIND_USER_MESSAGE = 1;
+  TRANSCRIPT_KIND_ASSISTANT_MESSAGE = 2;
+  TRANSCRIPT_KIND_REASONING = 3;
+  TRANSCRIPT_KIND_TOOL_CALL = 4;
+  TRANSCRIPT_KIND_FILE_CHANGE = 5;
+  TRANSCRIPT_KIND_APPROVAL = 6;
+  TRANSCRIPT_KIND_PLAN = 7;
+  TRANSCRIPT_KIND_SUBAGENT = 8;
+  TRANSCRIPT_KIND_COMMAND = 9;
+  TRANSCRIPT_KIND_TEAM_PROPOSAL = 10;
+  TRANSCRIPT_KIND_TASK_LINK = 11;
+  TRANSCRIPT_KIND_USAGE = 12;
+  TRANSCRIPT_KIND_QUOTA = 13;
+  TRANSCRIPT_KIND_NOTICE = 14;
+}
+
+message TranscriptMetadata {
+  string origin = 1;
+  string model = 2;
+  string reasoning_state = 3;
+  string tool = 4;
+  string status = 5;
+  optional int32 exit_code = 6;
+  int64 duration_millis = 7;
+  string change_kind = 8;
+  int64 lines_added = 9;
+  int64 lines_removed = 10;
+  string request_kind = 11;
+  string decision = 12;
+  string decider = 13;
+  string receipt = 14;
+  int64 step_count = 15;
+  int64 current_step = 16;
+  string source = 17;
+  string proposal_id = 18;
+  int64 agent_count = 19;
+  string task_id = 20;
+  string agent = 21;
+  int64 input_tokens = 22;
+  int64 output_tokens = 23;
+  int64 cache_tokens = 24;
+  double cost = 25;
+  string account = 26;
+  string window = 27;
+  double used = 28;
+  string reset_at = 29;
+  string level = 30;
+  string code = 31;
+  bool content_truncated = 32;
+  bool raw_truncated = 33;
+  int64 original_content_bytes = 34;
+  int64 original_raw_bytes = 35;
+}
+message TranscriptFileSummary {
+  string header = 1;
+  uint32 added = 2;
+  uint32 removed = 3;
+}
+message TranscriptView {
+  string text = 1;
+  bool truncated = 2;
+  uint32 cut_at = 3;
+  uint32 omitted_bytes = 4;
+  repeated TranscriptFileSummary files = 5;
+}
+message TranscriptEntry {
+  string item_id = 1;
+  string turn_id = 2;
+  TranscriptKind kind = 3;
+  uint64 sequence = 4;
+  uint64 revision = 5;
+  string created_at = 6;
+  string updated_at = 7;
+  TranscriptMetadata metadata = 8;
+  TranscriptView view = 9;
+  bool content_locked = 10;
+  string turn_origin = 11;
+}
+message TranscriptDetail {
+  TranscriptEntry entry = 1;
+  bytes content_json = 2;
+}
+
+// Existing transcript topics use these protobuf payloads. Their topic names
+// and durable/ephemeral behavior are unchanged.
+message TranscriptSnapshot {
+  uint64 sequence = 1;
+  string session_state = 2;
+  repeated TranscriptTurnState turns = 3;
+  bool content_locked = 4;
+  repeated TranscriptDurableItem items = 5;
+}
+message TranscriptTurnState {
+  string turn_id = 1;
+  string turn_origin = 2;
+  string outcome = 3;
+}
+message TranscriptDurableItem {
+  string item_id = 1;
+  string turn_id = 2;
+  TranscriptKind kind = 3;
+  uint64 sequence = 4;
+  uint64 revision = 5;
+  TranscriptMetadata metadata = 6;
+  TranscriptView view = 7;
+  string turn_origin = 8;
+}
+message TranscriptItemEvent {
+  string item_id = 1;
+  string turn_id = 2;
+  TranscriptKind kind = 3;
+  uint64 sequence = 4;
+  uint64 revision = 5;
+  TranscriptMetadata metadata = 6;
+  TranscriptView view = 7;
+  string turn_origin = 8;
+}
+message TranscriptStateEvent {
+  string turn_id = 1;
+  string state = 2;
+  string waiting_reason = 3;
+  string outcome = 4;
+  string failure_code = 5;
+  string stop_proof = 6;
+  string turn_origin = 7;
+}
+message TranscriptDeltaSnapshot {
+  bool content_locked = 1;
+  repeated TranscriptDelta items = 2;
+}
+message TranscriptDelta {
+  string item_id = 1;
+  uint64 base_revision = 2;
+  TranscriptView view = 3;
+}
+
+service TranscriptService {
+  rpc TranscriptPage(TranscriptPageRequest) returns (TranscriptPageResponse);
+  rpc TranscriptItem(TranscriptItemRequest) returns (TranscriptItemResponse);
+}

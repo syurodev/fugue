@@ -35,6 +35,7 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 		return errors.Join(err, transcripts.Close(), vs.Close())
 	}
 	hp.vault = v
+	hp.rt.transcripts = transcripts
 	hp.closeVendor = func() error {
 		// Stops run on the host's lifetime context without its cancellation,
 		// so a host close never skips the F9.2 stop order.
@@ -80,4 +81,12 @@ func (rt *HostRuntime) VendorService() (*VendorService, error) {
 		return nil, errcode.New(errcode.Unavailable, "the vendor service is unavailable")
 	}
 	return rt.vendors, nil
+}
+
+// TranscriptService returns the composed transcript read model.
+func (rt *HostRuntime) TranscriptService() (*Transcripts, error) {
+	if rt.transcripts == nil {
+		return nil, errcode.New(errcode.Unavailable, "the transcript service is unavailable")
+	}
+	return rt.transcripts, nil
 }

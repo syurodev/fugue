@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/syurodev/fugue/internal/app"
 	"github.com/syurodev/fugue/internal/config"
@@ -19,21 +20,26 @@ import (
 	"github.com/syurodev/fugue/internal/platform/redact"
 	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
 	"github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
+	transcriptv1 "github.com/syurodev/fugue/pkg/pb/fugue/transcript/v1"
+	"github.com/syurodev/fugue/pkg/pb/fugue/transcript/v1/transcriptv1connect"
 	vendorsv1 "github.com/syurodev/fugue/pkg/pb/fugue/vendors/v1"
 	"github.com/syurodev/fugue/pkg/pb/fugue/vendors/v1/vendorsv1connect"
 	workspacev1 "github.com/syurodev/fugue/pkg/pb/fugue/workspace/v1"
 	"github.com/syurodev/fugue/pkg/pb/fugue/workspace/v1/workspacev1connect"
 )
 
+const testFugueOrigin = "fugue"
+
 // vendorHost is a real host on a real socket whose Claude adapter runs this
 // test binary as the vendor CLI.
 type vendorHost struct {
-	hp         *app.HostProcess
-	srv        *Server
-	fugueHome  string
-	host       hostv1connect.HostServiceClient
-	vendors    vendorsv1connect.VendorServiceClient
-	workspaces workspacev1connect.WorkspaceServiceClient
+	hp          *app.HostProcess
+	srv         *Server
+	fugueHome   string
+	host        hostv1connect.HostServiceClient
+	vendors     vendorsv1connect.VendorServiceClient
+	transcripts transcriptv1connect.TranscriptServiceClient
+	workspaces  workspacev1connect.WorkspaceServiceClient
 }
 
 func startVendorHost(t *testing.T, unlock bool) *vendorHost {
@@ -80,8 +86,9 @@ func startVendorHost(t *testing.T, unlock bool) *vendorHost {
 	}
 	return &vendorHost{
 		hp: hp, srv: srv, fugueHome: fugueHome, host: host,
-		vendors:    vendorsv1connect.NewVendorServiceClient(httpClient, "http://fugue"),
-		workspaces: workspacev1connect.NewWorkspaceServiceClient(httpClient, "http://fugue"),
+		vendors:     vendorsv1connect.NewVendorServiceClient(httpClient, "http://fugue"),
+		transcripts: transcriptv1connect.NewTranscriptServiceClient(httpClient, "http://fugue"),
+		workspaces:  workspacev1connect.NewWorkspaceServiceClient(httpClient, "http://fugue"),
 	}
 }
 
@@ -185,6 +192,209 @@ func assertFakeVendorProbe(t *testing.T, v *vendorHost) {
 	}
 }
 
+func TestListCommandsHidesTerminalCommandsAndListsTheFugueGroup(t *testing.T) {
+	t.Parallel()
+	v := startVendorHost(t, true)
+	stream := subscribeVendorSessions(t, v.host, nil)
+	wsID := v.workspaceWithRoot(t, t.TempDir())
+	session := v.start(t, "commands-start", wsID)
+	revision := awaitCommandRevision(t, stream, session.SessionId, 0)
+	listed, err := v.vendors.ListCommands(t.Context(), connect.NewRequest(&vendorsv1.ListCommandsRequest{SessionId: session.SessionId}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed.Msg.CommandsRevision < revision || len(listed.Msg.Groups) != 2 {
+		t.Fatalf("commands = %+v; want two groups at revision >= %d", listed.Msg, revision)
+	}
+	assertListedVendorCommands(t, listed.Msg.Groups[0])
+	assertListedFugueCommands(t, listed.Msg.Groups[1])
+}
+
+func assertListedVendorCommands(t *testing.T, group *vendorsv1.CommandGroup) {
+	t.Helper()
+	if group.Name != "vendor" || len(group.VendorCommands) != 2 || group.VendorCommands[0].Name != "clear" || group.VendorCommands[1].Name != "compact" {
+		t.Fatalf("vendor group = %+v; terminal commands should be hidden in vendor order", group)
+	}
+}
+
+func assertListedFugueCommands(t *testing.T, group *vendorsv1.CommandGroup) {
+	t.Helper()
+	if group.Name != testFugueOrigin || len(group.FugueCommands) != 3 {
+		t.Fatalf("Fugue group = %+v", group)
+	}
+	want := []struct{ name, owner string }{{"/fugue:team", "F11.2"}, {"/fugue:solo", "F11.2"}, {"/fugue:account", "F9.10"}}
+	for i, command := range group.FugueCommands {
+		if command.Name != want[i].name || command.Owner != want[i].owner || command.Available {
+			t.Fatalf("registered Fugue commands = %+v", group.FugueCommands)
+		}
+	}
+}
+
+func TestFugueCommandsNeverReachTheVendor(t *testing.T) {
+	t.Parallel()
+	v := startVendorHost(t, true)
+	stream := subscribeVendorSessions(t, v.host, nil)
+	wsID := v.workspaceWithRoot(t, t.TempDir())
+	session := v.start(t, "fugue-command-start", wsID)
+	awaitCommandRevision(t, stream, session.SessionId, 0)
+	before, err := v.transcripts.TranscriptPage(t.Context(), connect.NewRequest(&transcriptv1.TranscriptPageRequest{SessionId: session.SessionId}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, text := range []string{" /fugue:team", "\u3000/fugue:unknown"} {
+		_, callErr := v.vendors.Send(t.Context(), connect.NewRequest(&vendorsv1.SendRequest{
+			CommandId: fmt.Sprintf("fugue-command-%d", i), SessionId: session.SessionId, Text: text,
+		}))
+		want := errcode.VendorUnknownCommand
+		if i == 0 {
+			want = errcode.VendorCommandUnavailable
+		}
+		assertConnectCode(t, callErr, connect.CodeInvalidArgument, want)
+	}
+	after, err := v.transcripts.TranscriptPage(t.Context(), connect.NewRequest(&transcriptv1.TranscriptPageRequest{SessionId: session.SessionId}))
+	if err != nil || len(after.Msg.Entries) != len(before.Msg.Entries) {
+		t.Fatalf("transcript after rejected commands = %d entries, %v; before = %d", len(after.Msg.Entries), err, len(before.Msg.Entries))
+	}
+}
+
+func TestCommandListChangeIsAnnouncedOnTheVendorSessionsTopic(t *testing.T) {
+	t.Parallel()
+	v := startVendorHost(t, true)
+	stream := subscribeVendorSessions(t, v.host, nil)
+	wsID := v.workspaceWithRoot(t, t.TempDir())
+	session := v.start(t, "commands-change-start", wsID)
+	initialRevision := awaitCommandRevision(t, stream, session.SessionId, 0)
+	if err := v.send(t, "commands-change-input", session.SessionId, "change-commands"); err != nil {
+		t.Fatal(err)
+	}
+	changedRevision := awaitCommandRevision(t, stream, session.SessionId, initialRevision)
+	listed, err := v.vendors.ListCommands(t.Context(), connect.NewRequest(&vendorsv1.ListCommandsRequest{SessionId: session.SessionId}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listed.Msg.CommandsRevision < changedRevision || len(listed.Msg.Groups[0].VendorCommands) != 2 || listed.Msg.Groups[0].VendorCommands[1].Name != "new-command" {
+		t.Fatalf("changed command list = %+v at revision %d; announced revision %d", listed.Msg.Groups, listed.Msg.CommandsRevision, changedRevision)
+	}
+}
+
+func awaitCommandRevision(t *testing.T, stream *connect.ServerStreamForClient[hostv1.SubscribeResponse], sessionID string, after uint64) uint64 {
+	t.Helper()
+	for {
+		message := recv(t, stream)
+		event := message.GetEvent()
+		if event == nil {
+			continue
+		}
+		var payload struct {
+			SessionID        string `json:"session_id"`
+			CommandsRevision uint64 `json:"commands_revision"`
+		}
+		if err := json.Unmarshal(event.Payload, &payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload.SessionID == sessionID && payload.CommandsRevision > after {
+			return payload.CommandsRevision
+		}
+	}
+}
+
+func TestTranscriptTopicsCarryProtoPayloadsWithoutGap(t *testing.T) {
+	t.Parallel()
+	v := startVendorHost(t, true)
+	wsID := v.workspaceWithRoot(t, t.TempDir())
+	session := v.start(t, "transcript-topic-start", wsID)
+	vendorStream := subscribeVendorSessions(t, v.host, nil)
+	checkLockedTranscriptSnapshot(t, v, session.SessionId)
+	if err := v.hp.Vault().Unlock(t.Context(), redact.NewSecret("vendor-test-master-password")); err != nil {
+		t.Fatal(err)
+	}
+	awaitVendorState(t, vendorStream, session.SessionId, "ready")
+	sessionID := session.SessionId
+	checkTranscriptEventSequence(t, v, sessionID)
+	checkTranscriptDeltaPayloads(t, sessionID)
+}
+
+func checkLockedTranscriptSnapshot(t *testing.T, v *vendorHost, sessionID string) {
+	t.Helper()
+	v.hp.Vault().Lock()
+	stream, err := v.host.Subscribe(streamCtx(t), connect.NewRequest(&hostv1.SubscribeRequest{Topic: app.TopicTranscript + sessionID}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := recv(t, stream).GetSnapshot()
+	var decoded transcriptv1.TranscriptSnapshot
+	if snapshot == nil {
+		t.Fatal("missing locked transcript snapshot")
+	}
+	if unmarshalErr := proto.Unmarshal(snapshot.State, &decoded); unmarshalErr != nil || decoded.Sequence != snapshot.Sequence || !decoded.ContentLocked {
+		t.Fatalf("locked initial snapshot = %+v / %+v, %v", snapshot, &decoded, unmarshalErr)
+	}
+}
+
+func checkTranscriptEventSequence(t *testing.T, v *vendorHost, sessionID string) {
+	t.Helper()
+	stream, err := v.host.Subscribe(streamCtx(t), connect.NewRequest(&hostv1.SubscribeRequest{Topic: app.TopicTranscript + sessionID}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapshot := recv(t, stream).GetSnapshot()
+	var decoded transcriptv1.TranscriptSnapshot
+	if err := proto.Unmarshal(snapshot.State, &decoded); err != nil || decoded.Sequence != snapshot.Sequence || decoded.ContentLocked {
+		t.Fatalf("unlocked initial snapshot = %+v / %+v, %v", snapshot, &decoded, err)
+	}
+	if err := v.send(t, "transcript-topic-send", sessionID, "stream message"); err != nil {
+		t.Fatal(err)
+	}
+	stateSequence := checkTranscriptStateEvent(t, stream, snapshot.Sequence)
+	checkTranscriptItemEvent(t, stream, stateSequence)
+}
+
+func checkTranscriptStateEvent(t *testing.T, stream *connect.ServerStreamForClient[hostv1.SubscribeResponse], snapshotSequence uint64) uint64 {
+	t.Helper()
+	state := recv(t, stream).GetEvent()
+	if state == nil || state.Sequence != snapshotSequence+1 || state.Type != app.EventTranscriptState {
+		t.Fatalf("state event = %+v; want sequence after snapshot %d", state, snapshotSequence)
+	}
+	var statePayload transcriptv1.TranscriptStateEvent
+	if decodeErr := proto.Unmarshal(state.Payload, &statePayload); decodeErr != nil || statePayload.TurnOrigin != testFugueOrigin {
+		t.Fatalf("transcript state protobuf = %+v, %v", &statePayload, decodeErr)
+	}
+	return state.Sequence
+}
+
+func checkTranscriptItemEvent(t *testing.T, stream *connect.ServerStreamForClient[hostv1.SubscribeResponse], stateSequence uint64) {
+	t.Helper()
+	itemEvent := recv(t, stream).GetEvent()
+	if itemEvent == nil || itemEvent.Sequence != stateSequence+1 || itemEvent.Type != app.EventTranscriptItem {
+		t.Fatalf("item event = %+v; want sequence after state event %d", itemEvent, stateSequence)
+	}
+	var item transcriptv1.TranscriptItemEvent
+	if decodeErr := proto.Unmarshal(itemEvent.Payload, &item); decodeErr != nil || item.ItemId == "" || item.TurnOrigin != testFugueOrigin {
+		t.Fatalf("transcript item protobuf = %+v, %v", &item, decodeErr)
+	}
+}
+
+func checkTranscriptDeltaPayloads(t *testing.T, sessionID string) {
+	t.Helper()
+	topic := app.TopicTranscriptDelta + sessionID
+	snapshot, err := transcriptSnapshotProto(topic, []byte(`{"content_locked":true,"items":[]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded transcriptv1.TranscriptDeltaSnapshot
+	if decodeErr := proto.Unmarshal(snapshot, &decoded); decodeErr != nil || !decoded.ContentLocked {
+		t.Fatalf("delta snapshot protobuf = %+v, %v", &decoded, decodeErr)
+	}
+	payload, err := transcriptEventProto(topic, app.EventTranscriptDelta, []byte(`{"item_id":"i","base_revision":7,"view":{"text":"redacted"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var delta transcriptv1.TranscriptDelta
+	if err := proto.Unmarshal(payload, &delta); err != nil || delta.ItemId != "i" || delta.BaseRevision != 7 {
+		t.Fatalf("delta protobuf = %+v, %v", &delta, err)
+	}
+}
+
 // closeAndList closes the session, checks that a closed session is not
 // resumable and that the list is ahead of the created event.
 func closeAndList(t *testing.T, v *vendorHost, stream *connect.ServerStreamForClient[hostv1.SubscribeResponse], sessionID, wsID string, createdSeq uint64) {
@@ -219,7 +429,7 @@ func runTurns(t *testing.T, v *vendorHost, stream *connect.ServerStreamForClient
 	}
 	awaitVendorState(t, stream, sessionID, "ready")
 	assertConnectCode(t, v.send(t, "fugue-1", sessionID, "/fugue:team build it"), connect.CodeInvalidArgument, errcode.VendorUnknownCommand)
-	assertConnectCode(t, v.send(t, "fugue-2", sessionID, "\n /fugue:team"), connect.CodeInvalidArgument, errcode.VendorUnknownCommand)
+	assertConnectCode(t, v.send(t, "fugue-2", sessionID, "\n /fugue:team"), connect.CodeInvalidArgument, errcode.VendorCommandUnavailable)
 	if err := v.send(t, "send-2", sessionID, fakeHoldTurn); err != nil {
 		t.Fatal(err)
 	}

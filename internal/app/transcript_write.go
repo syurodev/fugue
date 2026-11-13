@@ -105,15 +105,20 @@ func (t *Transcripts) storeItem(ctx context.Context, session string, expectedSeq
 	if seqErr != nil {
 		return seqErr
 	}
+	projection, projectionErr := t.deps.Store.StoredItemMeta(ctx, session, item.ID)
+	if projectionErr != nil {
+		return fmt.Errorf("read the committed transcript item: %w", projectionErr)
+	}
 
 	t.publishItemEvent(session, committed, &itemState{
-		ItemID:   item.ID,
-		TurnID:   item.TurnID,
-		Kind:     string(item.Kind),
-		Sequence: seq,
-		Revision: newRevision,
-		Metadata: stored.Metadata,
-		View:     t.itemView(display, string(item.Kind)),
+		ItemID:     item.ID,
+		TurnID:     item.TurnID,
+		Kind:       string(item.Kind),
+		Sequence:   seq,
+		Revision:   newRevision,
+		Metadata:   stored.Metadata,
+		View:       t.itemView(display, string(item.Kind)),
+		TurnOrigin: projection.TurnOrigin,
 	})
 
 	t.clearDeltaView(session, item.ID)

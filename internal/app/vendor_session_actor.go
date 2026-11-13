@@ -40,16 +40,17 @@ type actorRequest struct {
 }
 
 type vendorSessionActor struct {
-	manager  *VendorSessions
-	info     vendorstore.Session
-	session  vendor.Session
-	obs      <-chan claude.Observation
-	commands chan actorRequest
-	state    vendor.State
-	sequence int64
-	turnID   string
-	turns    map[string]bool
-	finished bool
+	manager       *VendorSessions
+	info          vendorstore.Session
+	session       vendor.Session
+	obs           <-chan claude.Observation
+	commands      chan actorRequest
+	state         vendor.State
+	sequence      int64
+	turnID        string
+	slashCommands []string
+	turns         map[string]bool
+	finished      bool
 	// attached turns on once the create or resume command has committed:
 	// a real process reports observations immediately, and none may be
 	// appended before the session row exists.

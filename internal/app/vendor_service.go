@@ -212,8 +212,8 @@ func (s *VendorService) input(ctx context.Context, principal, kind string, cmd V
 	if err := authorizeVendor(principal); err != nil {
 		return err
 	}
-	if vendor.IsFugueCommand(cmd.Text) {
-		return errcode.New(errcode.VendorUnknownCommand, "the /fugue: command is not available")
+	if commandErr := fugueCommandError(cmd.Text); commandErr != nil {
+		return commandErr
 	}
 	_, err := s.runForView(ctx, cmd.CommandID, []string{kind, cmd.SessionID, cmd.Text}, VendorUnaryLimit, func(opCtx context.Context) (VendorSessionView, error) {
 		if err := s.requireUnlocked(); err != nil {

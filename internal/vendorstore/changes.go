@@ -3,6 +3,7 @@ package vendorstore
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 )
 
@@ -24,6 +25,21 @@ type SessionChange struct {
 	Kind          string
 	State         string
 	WaitingReason string
+}
+
+// CommandRevision returns the newest durable vendor-sessions change for a session.
+func (s *Store) CommandRevision(ctx context.Context, session string) (int64, error) {
+	var revision int64
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COALESCE(MAX(c.seq),0) FROM vendor_sessions s
+		LEFT JOIN vendor_session_changes c ON c.session_id=s.session_id WHERE s.session_id=?`, session).Scan(&revision)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrSessionNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	return revision, nil
 }
 
 func recordChange(ctx context.Context, tx *sql.Tx, session, kind, state, waiting, now string) error {

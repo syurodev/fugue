@@ -9,6 +9,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"slices"
 
@@ -19,6 +20,15 @@ import (
 
 // defaultPageLimit is the transcript page default (transcript §6).
 const defaultPageLimit = 200
+
+// TranscriptView is the public-safe transcript view mapped by hostapi.
+type TranscriptView = viewPayload
+
+// TranscriptMetadata is the public-safe metadata mapped by hostapi.
+type TranscriptMetadata = vendorstore.ItemMetadata
+
+// TranscriptKind is the public transcript item kind mapped by hostapi.
+type TranscriptKind = transcript.Kind
 
 // TranscriptPageParams are the page request's domain fields. Before zero means
 // the newest page; Limit zero uses the default.
@@ -41,6 +51,7 @@ type TranscriptEntry struct {
 	Metadata      vendorstore.ItemMetadata `json:"metadata"`
 	View          viewPayload              `json:"view"`
 	ContentLocked bool                     `json:"content_locked"`
+	TurnOrigin    string                   `json:"turn_origin"`
 }
 
 // TranscriptDetail is TranscriptItem's answer: the entry plus the full stored
@@ -53,9 +64,18 @@ type TranscriptDetail struct {
 // TranscriptPage returns one page of items, newest first, each as its redacted
 // display view at its latest revision.
 func (t *Transcripts) TranscriptPage(ctx context.Context, p TranscriptPageParams) ([]TranscriptEntry, error) {
+	if p.Before < 0 || p.Limit < 0 {
+		return nil, errcode.New(errcode.InvalidArgument, "transcript page cursor and limit must not be negative")
+	}
 	limit := p.Limit
 	if limit <= 0 {
 		limit = defaultPageLimit
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	if _, err := t.deps.Store.Snapshot(ctx, p.Session); err != nil {
+		return nil, transcriptSessionError(err)
 	}
 	items, err := t.deps.Store.Transcript(ctx, p.Session, p.Before, limit)
 	if err != nil {
@@ -75,8 +95,14 @@ func (t *Transcripts) TranscriptPage(ctx context.Context, p TranscriptPageParams
 	return entries, nil
 }
 
-// entryWithView projects one stored item and, while the vault is open, builds
-// its redacted display view.
+// TranscriptPageFor applies the Host API principal check before reading.
+func (t *Transcripts) TranscriptPageFor(ctx context.Context, principal string, p TranscriptPageParams) ([]TranscriptEntry, error) {
+	if !IsLocalPrincipal(principal) {
+		return nil, errcode.New(errcode.PermissionDenied, "only local principals may read transcripts")
+	}
+	return t.TranscriptPage(ctx, p)
+}
+
 func (t *Transcripts) entryWithView(ctx context.Context, session string, stored *vendorstore.StoredItem, locked bool) (TranscriptEntry, error) {
 	entry, err := entryFromStored(stored, locked)
 	if err != nil {
@@ -95,9 +121,15 @@ func (t *Transcripts) entryWithView(ctx context.Context, session string, stored 
 // TranscriptItem returns one item at its latest revision with its full stored
 // content, redacted, and its display view.
 func (t *Transcripts) TranscriptItem(ctx context.Context, session, id string) (TranscriptDetail, error) {
+	if _, err := t.deps.Store.Snapshot(ctx, session); err != nil {
+		return TranscriptDetail{}, transcriptSessionError(err)
+	}
 	locked := !t.unlocked()
 	stored, err := t.deps.Store.StoredItemMeta(ctx, session, id)
 	if err != nil {
+		if errors.Is(err, vendorstore.ErrItemNotFound) {
+			return TranscriptDetail{}, errcode.New(errcode.TranscriptItemNotFound, "the transcript item does not exist in this session")
+		}
 		return TranscriptDetail{}, fmt.Errorf("read the transcript item: %w", err)
 	}
 	entry, entryErr := entryFromStored(&stored, locked)
@@ -131,7 +163,14 @@ func (t *Transcripts) TranscriptItem(ctx context.Context, session, id string) (T
 	return detail, nil
 }
 
-// entryFromStored projects a stored item onto the read model.
+// TranscriptItemFor applies the Host API principal check before reading.
+func (t *Transcripts) TranscriptItemFor(ctx context.Context, principal, session, id string) (TranscriptDetail, error) {
+	if !IsLocalPrincipal(principal) {
+		return TranscriptDetail{}, errcode.New(errcode.PermissionDenied, "only local principals may read transcripts")
+	}
+	return t.TranscriptItem(ctx, session, id)
+}
+
 func entryFromStored(stored *vendorstore.StoredItem, locked bool) (TranscriptEntry, error) {
 	sequence, err := storeRevision(stored.Sequence)
 	if err != nil {
@@ -151,5 +190,13 @@ func entryFromStored(stored *vendorstore.StoredItem, locked bool) (TranscriptEnt
 		UpdatedAt:     stored.UpdatedAt,
 		Metadata:      stored.Metadata,
 		ContentLocked: locked,
+		TurnOrigin:    stored.TurnOrigin,
 	}, nil
+}
+
+func transcriptSessionError(err error) error {
+	if errors.Is(err, vendorstore.ErrSessionNotFound) {
+		return errcode.New(errcode.TranscriptSessionNotFound, "the transcript session does not exist")
+	}
+	return fmt.Errorf("read the transcript session: %w", err)
 }

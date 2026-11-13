@@ -44,8 +44,11 @@ Changing this file needs a review of what clients can rely on; hiding a code nee
 | `vendor.vault_locked` | The vault is locked; vendor sessions cannot start or take input. |
 | `vendor.invalid_profile` | A session profile value is not allowed. |
 | `vendor.unknown_command` | The /fugue: command is not available; it never reaches the vendor. |
+| `vendor.command_unavailable` | The registered /fugue: command is not available yet; it never reaches the vendor. |
 | `vendor.command_conflict` | The command_id was already used for a different command. |
 | `vendor.workspace_mismatch` | The session is bound to the workspace root it was created in; resume cannot move it. |
+| `transcript.session_not_found` | The transcript session does not exist. |
+| `transcript.item_not_found` | The transcript item does not exist in this session. |
 
 ## Hidden on purpose
 

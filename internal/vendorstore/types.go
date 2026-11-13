@@ -30,6 +30,14 @@ type Session struct {
 	WorkspaceRoot string
 }
 
+// TurnState is the read-only turn grouping exposed by an atomic transcript overview.
+type TurnState struct {
+	ID      string `json:"turn_id"`
+	Origin  string `json:"turn_origin"`
+	State   string `json:"state"`
+	Outcome string `json:"outcome"`
+}
+
 // Event is a durable vendor-domain event without protected content.
 type Event struct {
 	contentID         string

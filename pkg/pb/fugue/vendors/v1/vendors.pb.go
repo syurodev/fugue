@@ -1278,6 +1278,266 @@ func (x *ListSessionsResponse) GetSequence() uint64 {
 	return 0
 }
 
+type ListCommandsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListCommandsRequest) Reset() {
+	*x = ListCommandsRequest{}
+	mi := &file_fugue_vendors_v1_vendors_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListCommandsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListCommandsRequest) ProtoMessage() {}
+
+func (x *ListCommandsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_vendors_v1_vendors_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListCommandsRequest.ProtoReflect.Descriptor instead.
+func (*ListCommandsRequest) Descriptor() ([]byte, []int) {
+	return file_fugue_vendors_v1_vendors_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *ListCommandsRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+type VendorCommand struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *VendorCommand) Reset() {
+	*x = VendorCommand{}
+	mi := &file_fugue_vendors_v1_vendors_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *VendorCommand) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*VendorCommand) ProtoMessage() {}
+
+func (x *VendorCommand) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_vendors_v1_vendors_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use VendorCommand.ProtoReflect.Descriptor instead.
+func (*VendorCommand) Descriptor() ([]byte, []int) {
+	return file_fugue_vendors_v1_vendors_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *VendorCommand) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+type FugueCommand struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Available     bool                   `protobuf:"varint,2,opt,name=available,proto3" json:"available,omitempty"`
+	Owner         string                 `protobuf:"bytes,3,opt,name=owner,proto3" json:"owner,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FugueCommand) Reset() {
+	*x = FugueCommand{}
+	mi := &file_fugue_vendors_v1_vendors_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FugueCommand) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FugueCommand) ProtoMessage() {}
+
+func (x *FugueCommand) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_vendors_v1_vendors_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FugueCommand.ProtoReflect.Descriptor instead.
+func (*FugueCommand) Descriptor() ([]byte, []int) {
+	return file_fugue_vendors_v1_vendors_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *FugueCommand) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *FugueCommand) GetAvailable() bool {
+	if x != nil {
+		return x.Available
+	}
+	return false
+}
+
+func (x *FugueCommand) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+type CommandGroup struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	Name           string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	VendorCommands []*VendorCommand       `protobuf:"bytes,2,rep,name=vendor_commands,json=vendorCommands,proto3" json:"vendor_commands,omitempty"`
+	FugueCommands  []*FugueCommand        `protobuf:"bytes,3,rep,name=fugue_commands,json=fugueCommands,proto3" json:"fugue_commands,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *CommandGroup) Reset() {
+	*x = CommandGroup{}
+	mi := &file_fugue_vendors_v1_vendors_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CommandGroup) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CommandGroup) ProtoMessage() {}
+
+func (x *CommandGroup) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_vendors_v1_vendors_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CommandGroup.ProtoReflect.Descriptor instead.
+func (*CommandGroup) Descriptor() ([]byte, []int) {
+	return file_fugue_vendors_v1_vendors_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *CommandGroup) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *CommandGroup) GetVendorCommands() []*VendorCommand {
+	if x != nil {
+		return x.VendorCommands
+	}
+	return nil
+}
+
+func (x *CommandGroup) GetFugueCommands() []*FugueCommand {
+	if x != nil {
+		return x.FugueCommands
+	}
+	return nil
+}
+
+type ListCommandsResponse struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Groups           []*CommandGroup        `protobuf:"bytes,1,rep,name=groups,proto3" json:"groups,omitempty"`
+	CommandsRevision uint64                 `protobuf:"varint,2,opt,name=commands_revision,json=commandsRevision,proto3" json:"commands_revision,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *ListCommandsResponse) Reset() {
+	*x = ListCommandsResponse{}
+	mi := &file_fugue_vendors_v1_vendors_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListCommandsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListCommandsResponse) ProtoMessage() {}
+
+func (x *ListCommandsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_vendors_v1_vendors_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListCommandsResponse.ProtoReflect.Descriptor instead.
+func (*ListCommandsResponse) Descriptor() ([]byte, []int) {
+	return file_fugue_vendors_v1_vendors_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *ListCommandsResponse) GetGroups() []*CommandGroup {
+	if x != nil {
+		return x.Groups
+	}
+	return nil
+}
+
+func (x *ListCommandsResponse) GetCommandsRevision() uint64 {
+	if x != nil {
+		return x.CommandsRevision
+	}
+	return 0
+}
+
 var File_fugue_vendors_v1_vendors_proto protoreflect.FileDescriptor
 
 const file_fugue_vendors_v1_vendors_proto_rawDesc = "" +
@@ -1372,7 +1632,23 @@ const file_fugue_vendors_v1_vendors_proto_rawDesc = "" +
 	"\x13ListSessionsRequest\"o\n" +
 	"\x14ListSessionsResponse\x12;\n" +
 	"\bsessions\x18\x01 \x03(\v2\x1f.fugue.vendors.v1.VendorSessionR\bsessions\x12\x1a\n" +
-	"\bsequence\x18\x02 \x01(\x04R\bsequence*U\n" +
+	"\bsequence\x18\x02 \x01(\x04R\bsequence\"4\n" +
+	"\x13ListCommandsRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\"#\n" +
+	"\rVendorCommand\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\"V\n" +
+	"\fFugueCommand\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1c\n" +
+	"\tavailable\x18\x02 \x01(\bR\tavailable\x12\x14\n" +
+	"\x05owner\x18\x03 \x01(\tR\x05owner\"\xb3\x01\n" +
+	"\fCommandGroup\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12H\n" +
+	"\x0fvendor_commands\x18\x02 \x03(\v2\x1f.fugue.vendors.v1.VendorCommandR\x0evendorCommands\x12E\n" +
+	"\x0efugue_commands\x18\x03 \x03(\v2\x1e.fugue.vendors.v1.FugueCommandR\rfugueCommands\"{\n" +
+	"\x14ListCommandsResponse\x126\n" +
+	"\x06groups\x18\x01 \x03(\v2\x1e.fugue.vendors.v1.CommandGroupR\x06groups\x12+\n" +
+	"\x11commands_revision\x18\x02 \x01(\x04R\x10commandsRevision*U\n" +
 	"\x06Vendor\x12\x16\n" +
 	"\x12VENDOR_UNSPECIFIED\x10\x00\x12\x11\n" +
 	"\rVENDOR_CLAUDE\x10\x01\x12\x10\n" +
@@ -1382,7 +1658,7 @@ const file_fugue_vendors_v1_vendors_proto_rawDesc = "" +
 	"\x0fOperationStatus\x12 \n" +
 	"\x1cOPERATION_STATUS_UNSPECIFIED\x10\x00\x12\x19\n" +
 	"\x15OPERATION_STATUS_DONE\x10\x01\x12\x1c\n" +
-	"\x18OPERATION_STATUS_PENDING\x10\x022\xd4\x05\n" +
+	"\x18OPERATION_STATUS_PENDING\x10\x022\xb3\x06\n" +
 	"\rVendorService\x12]\n" +
 	"\fProbeVendors\x12%.fugue.vendors.v1.ProbeVendorsRequest\x1a&.fugue.vendors.v1.ProbeVendorsResponse\x12]\n" +
 	"\fStartSession\x12%.fugue.vendors.v1.StartSessionRequest\x1a&.fugue.vendors.v1.StartSessionResponse\x12E\n" +
@@ -1391,7 +1667,8 @@ const file_fugue_vendors_v1_vendors_proto_rawDesc = "" +
 	"\tInterrupt\x12\".fugue.vendors.v1.InterruptRequest\x1a#.fugue.vendors.v1.InterruptResponse\x12]\n" +
 	"\fCloseSession\x12%.fugue.vendors.v1.CloseSessionRequest\x1a&.fugue.vendors.v1.CloseSessionResponse\x12`\n" +
 	"\rResumeSession\x12&.fugue.vendors.v1.ResumeSessionRequest\x1a'.fugue.vendors.v1.ResumeSessionResponse\x12]\n" +
-	"\fListSessions\x12%.fugue.vendors.v1.ListSessionsRequest\x1a&.fugue.vendors.v1.ListSessionsResponseB\xc3\x01\n" +
+	"\fListSessions\x12%.fugue.vendors.v1.ListSessionsRequest\x1a&.fugue.vendors.v1.ListSessionsResponse\x12]\n" +
+	"\fListCommands\x12%.fugue.vendors.v1.ListCommandsRequest\x1a&.fugue.vendors.v1.ListCommandsResponseB\xc3\x01\n" +
 	"\x14com.fugue.vendors.v1B\fVendorsProtoP\x01Z;github.com/syurodev/fugue/pkg/pb/fugue/vendors/v1;vendorsv1\xa2\x02\x03FVX\xaa\x02\x10Fugue.Vendors.V1\xca\x02\x10Fugue\\Vendors\\V1\xe2\x02\x1cFugue\\Vendors\\V1\\GPBMetadata\xea\x02\x12Fugue::Vendors::V1b\x06proto3"
 
 var (
@@ -1407,7 +1684,7 @@ func file_fugue_vendors_v1_vendors_proto_rawDescGZIP() []byte {
 }
 
 var file_fugue_vendors_v1_vendors_proto_enumTypes = make([]protoimpl.EnumInfo, 2)
-var file_fugue_vendors_v1_vendors_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
+var file_fugue_vendors_v1_vendors_proto_msgTypes = make([]protoimpl.MessageInfo, 25)
 var file_fugue_vendors_v1_vendors_proto_goTypes = []any{
 	(Vendor)(0),                   // 0: fugue.vendors.v1.Vendor
 	(OperationStatus)(0),          // 1: fugue.vendors.v1.OperationStatus
@@ -1431,6 +1708,11 @@ var file_fugue_vendors_v1_vendors_proto_goTypes = []any{
 	(*ResumeSessionResponse)(nil), // 19: fugue.vendors.v1.ResumeSessionResponse
 	(*ListSessionsRequest)(nil),   // 20: fugue.vendors.v1.ListSessionsRequest
 	(*ListSessionsResponse)(nil),  // 21: fugue.vendors.v1.ListSessionsResponse
+	(*ListCommandsRequest)(nil),   // 22: fugue.vendors.v1.ListCommandsRequest
+	(*VendorCommand)(nil),         // 23: fugue.vendors.v1.VendorCommand
+	(*FugueCommand)(nil),          // 24: fugue.vendors.v1.FugueCommand
+	(*CommandGroup)(nil),          // 25: fugue.vendors.v1.CommandGroup
+	(*ListCommandsResponse)(nil),  // 26: fugue.vendors.v1.ListCommandsResponse
 }
 var file_fugue_vendors_v1_vendors_proto_depIdxs = []int32{
 	0,  // 0: fugue.vendors.v1.VendorProbe.vendor:type_name -> fugue.vendors.v1.Vendor
@@ -1446,27 +1728,32 @@ var file_fugue_vendors_v1_vendors_proto_depIdxs = []int32{
 	4,  // 10: fugue.vendors.v1.ResumeSessionRequest.profile:type_name -> fugue.vendors.v1.SessionProfile
 	5,  // 11: fugue.vendors.v1.ResumeSessionResponse.session:type_name -> fugue.vendors.v1.VendorSession
 	5,  // 12: fugue.vendors.v1.ListSessionsResponse.sessions:type_name -> fugue.vendors.v1.VendorSession
-	6,  // 13: fugue.vendors.v1.VendorService.ProbeVendors:input_type -> fugue.vendors.v1.ProbeVendorsRequest
-	8,  // 14: fugue.vendors.v1.VendorService.StartSession:input_type -> fugue.vendors.v1.StartSessionRequest
-	10, // 15: fugue.vendors.v1.VendorService.Send:input_type -> fugue.vendors.v1.SendRequest
-	12, // 16: fugue.vendors.v1.VendorService.Steer:input_type -> fugue.vendors.v1.SteerRequest
-	14, // 17: fugue.vendors.v1.VendorService.Interrupt:input_type -> fugue.vendors.v1.InterruptRequest
-	16, // 18: fugue.vendors.v1.VendorService.CloseSession:input_type -> fugue.vendors.v1.CloseSessionRequest
-	18, // 19: fugue.vendors.v1.VendorService.ResumeSession:input_type -> fugue.vendors.v1.ResumeSessionRequest
-	20, // 20: fugue.vendors.v1.VendorService.ListSessions:input_type -> fugue.vendors.v1.ListSessionsRequest
-	7,  // 21: fugue.vendors.v1.VendorService.ProbeVendors:output_type -> fugue.vendors.v1.ProbeVendorsResponse
-	9,  // 22: fugue.vendors.v1.VendorService.StartSession:output_type -> fugue.vendors.v1.StartSessionResponse
-	11, // 23: fugue.vendors.v1.VendorService.Send:output_type -> fugue.vendors.v1.SendResponse
-	13, // 24: fugue.vendors.v1.VendorService.Steer:output_type -> fugue.vendors.v1.SteerResponse
-	15, // 25: fugue.vendors.v1.VendorService.Interrupt:output_type -> fugue.vendors.v1.InterruptResponse
-	17, // 26: fugue.vendors.v1.VendorService.CloseSession:output_type -> fugue.vendors.v1.CloseSessionResponse
-	19, // 27: fugue.vendors.v1.VendorService.ResumeSession:output_type -> fugue.vendors.v1.ResumeSessionResponse
-	21, // 28: fugue.vendors.v1.VendorService.ListSessions:output_type -> fugue.vendors.v1.ListSessionsResponse
-	21, // [21:29] is the sub-list for method output_type
-	13, // [13:21] is the sub-list for method input_type
-	13, // [13:13] is the sub-list for extension type_name
-	13, // [13:13] is the sub-list for extension extendee
-	0,  // [0:13] is the sub-list for field type_name
+	23, // 13: fugue.vendors.v1.CommandGroup.vendor_commands:type_name -> fugue.vendors.v1.VendorCommand
+	24, // 14: fugue.vendors.v1.CommandGroup.fugue_commands:type_name -> fugue.vendors.v1.FugueCommand
+	25, // 15: fugue.vendors.v1.ListCommandsResponse.groups:type_name -> fugue.vendors.v1.CommandGroup
+	6,  // 16: fugue.vendors.v1.VendorService.ProbeVendors:input_type -> fugue.vendors.v1.ProbeVendorsRequest
+	8,  // 17: fugue.vendors.v1.VendorService.StartSession:input_type -> fugue.vendors.v1.StartSessionRequest
+	10, // 18: fugue.vendors.v1.VendorService.Send:input_type -> fugue.vendors.v1.SendRequest
+	12, // 19: fugue.vendors.v1.VendorService.Steer:input_type -> fugue.vendors.v1.SteerRequest
+	14, // 20: fugue.vendors.v1.VendorService.Interrupt:input_type -> fugue.vendors.v1.InterruptRequest
+	16, // 21: fugue.vendors.v1.VendorService.CloseSession:input_type -> fugue.vendors.v1.CloseSessionRequest
+	18, // 22: fugue.vendors.v1.VendorService.ResumeSession:input_type -> fugue.vendors.v1.ResumeSessionRequest
+	20, // 23: fugue.vendors.v1.VendorService.ListSessions:input_type -> fugue.vendors.v1.ListSessionsRequest
+	22, // 24: fugue.vendors.v1.VendorService.ListCommands:input_type -> fugue.vendors.v1.ListCommandsRequest
+	7,  // 25: fugue.vendors.v1.VendorService.ProbeVendors:output_type -> fugue.vendors.v1.ProbeVendorsResponse
+	9,  // 26: fugue.vendors.v1.VendorService.StartSession:output_type -> fugue.vendors.v1.StartSessionResponse
+	11, // 27: fugue.vendors.v1.VendorService.Send:output_type -> fugue.vendors.v1.SendResponse
+	13, // 28: fugue.vendors.v1.VendorService.Steer:output_type -> fugue.vendors.v1.SteerResponse
+	15, // 29: fugue.vendors.v1.VendorService.Interrupt:output_type -> fugue.vendors.v1.InterruptResponse
+	17, // 30: fugue.vendors.v1.VendorService.CloseSession:output_type -> fugue.vendors.v1.CloseSessionResponse
+	19, // 31: fugue.vendors.v1.VendorService.ResumeSession:output_type -> fugue.vendors.v1.ResumeSessionResponse
+	21, // 32: fugue.vendors.v1.VendorService.ListSessions:output_type -> fugue.vendors.v1.ListSessionsResponse
+	26, // 33: fugue.vendors.v1.VendorService.ListCommands:output_type -> fugue.vendors.v1.ListCommandsResponse
+	25, // [25:34] is the sub-list for method output_type
+	16, // [16:25] is the sub-list for method input_type
+	16, // [16:16] is the sub-list for extension type_name
+	16, // [16:16] is the sub-list for extension extendee
+	0,  // [0:16] is the sub-list for field type_name
 }
 
 func init() { file_fugue_vendors_v1_vendors_proto_init() }
@@ -1480,7 +1767,7 @@ func file_fugue_vendors_v1_vendors_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fugue_vendors_v1_vendors_proto_rawDesc), len(file_fugue_vendors_v1_vendors_proto_rawDesc)),
 			NumEnums:      2,
-			NumMessages:   20,
+			NumMessages:   25,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

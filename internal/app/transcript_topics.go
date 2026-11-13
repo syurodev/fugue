@@ -32,13 +32,14 @@ type viewPayload struct {
 // is not included — the vault is locked or the event was rebuilt from the
 // journal — and the client reads the content through TranscriptItem.
 type itemState struct {
-	ItemID   string                   `json:"item_id"`
-	TurnID   string                   `json:"turn_id"`
-	Kind     string                   `json:"kind"`
-	Sequence int64                    `json:"sequence,omitempty"`
-	Revision uint64                   `json:"revision"`
-	Metadata vendorstore.ItemMetadata `json:"metadata"`
-	View     *viewPayload             `json:"view,omitempty"`
+	ItemID     string                   `json:"item_id"`
+	TurnID     string                   `json:"turn_id"`
+	Kind       string                   `json:"kind"`
+	Sequence   int64                    `json:"sequence,omitempty"`
+	Revision   uint64                   `json:"revision"`
+	Metadata   vendorstore.ItemMetadata `json:"metadata"`
+	View       *viewPayload             `json:"view,omitempty"`
+	TurnOrigin string                   `json:"turn_origin"`
 }
 
 // deltaPayload is one delta event: the complete latest display state for its
@@ -57,15 +58,16 @@ type statePayload struct {
 	Outcome       string `json:"outcome,omitempty"`
 	FailureCode   string `json:"failure_code,omitempty"`
 	StopProof     string `json:"stop_proof,omitempty"`
+	TurnOrigin    string `json:"turn_origin,omitempty"`
 }
 
 // topicSnapshot is the durable topic's snapshot shape (transcript §6).
 type topicSnapshot struct {
-	Sequence      uint64      `json:"sequence"`
-	SessionState  string      `json:"session_state"`
-	OpenTurns     []string    `json:"open_turns,omitempty"`
-	ContentLocked bool        `json:"content_locked"`
-	Items         []itemState `json:"items,omitempty"`
+	Sequence      uint64                  `json:"sequence"`
+	SessionState  string                  `json:"session_state"`
+	Turns         []vendorstore.TurnState `json:"turns,omitempty"`
+	ContentLocked bool                    `json:"content_locked"`
+	Items         []itemState             `json:"items,omitempty"`
 }
 
 // deltaSnapshotState is the delta topic's snapshot shape: the latest published
@@ -99,7 +101,7 @@ func (d *transcriptDurable) Snapshot(ctx context.Context) ([]byte, EventSeq, err
 	snap := topicSnapshot{
 		Sequence:      sequence,
 		SessionState:  session.State,
-		OpenTurns:     turns,
+		Turns:         turns,
 		ContentLocked: locked,
 	}
 	for i := range items {
@@ -159,11 +161,12 @@ func durableEvent(recorded *vendorstore.RecordedEvent) (Event, error) {
 			return Event{}, revErr
 		}
 		state := itemState{
-			ItemID:   recorded.Metadata.ItemID,
-			TurnID:   recorded.Metadata.ItemTurnID,
-			Kind:     recorded.Metadata.ItemKind,
-			Revision: revision,
-			Sequence: recorded.Sequence,
+			ItemID:     recorded.Metadata.ItemID,
+			TurnID:     recorded.Metadata.ItemTurnID,
+			Kind:       recorded.Metadata.ItemKind,
+			Revision:   revision,
+			Sequence:   recorded.Sequence,
+			TurnOrigin: recorded.TurnOrigin,
 		}
 		if recorded.Metadata.ItemMetadata != nil {
 			state.Metadata = *recorded.Metadata.ItemMetadata
@@ -181,12 +184,36 @@ func durableEvent(recorded *vendorstore.RecordedEvent) (Event, error) {
 		Outcome:       recorded.Metadata.Outcome,
 		FailureCode:   recorded.Metadata.FailureCode,
 		StopProof:     recorded.Metadata.StopProof,
+		TurnOrigin:    recorded.TurnOrigin,
 	}
 	sequence, seqErr := storeSeq(recorded.Sequence)
 	if seqErr != nil {
 		return Event{}, seqErr
 	}
 	return marshalEvent(EventTranscriptState, sequence, payload)
+}
+
+// PublishCommittedEvent fans out one actor commit after the store transaction
+// finishes; item commits use the transcript writer's richer view path.
+func (t *Transcripts) PublishCommittedEvent(ctx context.Context, session string, sequence int64) error {
+	if sequence < 1 {
+		return errcode.New(errcode.InvalidArgument, "transcript event sequence must be positive")
+	}
+	records, err := t.deps.Store.EventsSince(ctx, session, sequence-1, 1)
+	if err != nil {
+		return fmt.Errorf("read the committed transcript event: %w", err)
+	}
+	if len(records) != 1 || records[0].Sequence != sequence {
+		return errcode.New(errcode.Unavailable, "the committed transcript event is not available")
+	}
+	event, err := durableEvent(&records[0])
+	if err != nil {
+		return err
+	}
+	if _, err := t.deps.Hub.Publish(TopicTranscript+session, event); err != nil {
+		return fmt.Errorf("publish the committed transcript event: %w", err)
+	}
+	return nil
 }
 
 // marshalEvent encodes one durable event payload.
@@ -207,12 +234,13 @@ func itemStateFromStored(stored *vendorstore.StoredItem) itemState {
 		revision = 0
 	}
 	return itemState{
-		ItemID:   stored.ID,
-		TurnID:   stored.TurnID,
-		Kind:     stored.Kind,
-		Sequence: stored.Sequence,
-		Revision: revision,
-		Metadata: stored.Metadata,
+		ItemID:     stored.ID,
+		TurnID:     stored.TurnID,
+		Kind:       stored.Kind,
+		Sequence:   stored.Sequence,
+		Revision:   revision,
+		Metadata:   stored.Metadata,
+		TurnOrigin: stored.TurnOrigin,
 	}
 }
 

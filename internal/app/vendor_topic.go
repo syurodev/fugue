@@ -25,9 +25,10 @@ const (
 
 // vendorSessionChange is one event payload.
 type vendorSessionChange struct {
-	SessionID     string `json:"session_id"`
-	State         string `json:"state"`
-	WaitingReason string `json:"waiting_reason,omitempty"`
+	SessionID        string `json:"session_id"`
+	State            string `json:"state"`
+	WaitingReason    string `json:"waiting_reason,omitempty"`
+	CommandsRevision int64  `json:"commands_revision"`
 }
 
 type vendorSessionsSnapshot struct {
@@ -116,7 +117,7 @@ func vendorChangeEvent(change *vendorstore.SessionChange) (Event, error) {
 	if change.Kind == vendorstore.ChangeCreated {
 		eventType = EventVendorSessionCreated
 	}
-	return marshalEvent(eventType, seq, vendorSessionChange{SessionID: change.SessionID, State: change.State, WaitingReason: change.WaitingReason})
+	return marshalEvent(eventType, seq, vendorSessionChange{SessionID: change.SessionID, State: change.State, WaitingReason: change.WaitingReason, CommandsRevision: change.Sequence})
 }
 
 // notify publishes every committed change not yet published. Commits happen

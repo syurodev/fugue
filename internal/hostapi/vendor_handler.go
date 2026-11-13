@@ -21,16 +21,9 @@ type vendorProvider interface {
 }
 
 func (h *vendorHandler) auth(ctx context.Context) (*app.VendorService, string, error) {
-	st, err := connectionState(ctx)
-	if err != nil {
-		return nil, "", toConnectError(ctx, h.backend, err)
-	}
-	if helloErr := requireHelloed(ctx); helloErr != nil {
-		return nil, "", toConnectError(ctx, h.backend, helloErr)
-	}
-	principal := string(st.principal())
-	if !app.IsLocalPrincipal(principal) {
-		return nil, "", toConnectError(ctx, h.backend, errcode.New(errcode.PermissionDenied, "only local principals may use vendor sessions"))
+	principal, authErr := localSessionPrincipal(ctx, h.backend, "vendor sessions")
+	if authErr != nil {
+		return nil, "", authErr
 	}
 	provider, ok := h.backend.(vendorProvider)
 	if !ok {
@@ -181,6 +174,31 @@ func (h *vendorHandler) ListSessions(ctx context.Context, _ *connect.Request[ven
 		out.Sessions = append(out.Sessions, protoVendorSession(&views[i]))
 	}
 	return connect.NewResponse(out), nil
+}
+
+func (h *vendorHandler) ListCommands(ctx context.Context, req *connect.Request[vendorsv1.ListCommandsRequest]) (*connect.Response[vendorsv1.ListCommandsResponse], error) {
+	svc, principal, err := h.auth(ctx)
+	if err != nil {
+		return nil, err
+	}
+	groups, revision, err := svc.Commands(ctx, principal, req.Msg.SessionId)
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	response := &vendorsv1.ListCommandsResponse{CommandsRevision: revision}
+	for i := range groups {
+		group := &vendorsv1.CommandGroup{Name: groups[i].Name}
+		for _, name := range groups[i].VendorCommands {
+			group.VendorCommands = append(group.VendorCommands, &vendorsv1.VendorCommand{Name: name})
+		}
+		for _, command := range groups[i].FugueCommands {
+			group.FugueCommands = append(group.FugueCommands, &vendorsv1.FugueCommand{
+				Name: command.Name, Owner: command.Owner, Available: command.Available,
+			})
+		}
+		response.Groups = append(response.Groups, group)
+	}
+	return connect.NewResponse(response), nil
 }
 
 // vendorName maps the enum to the app's vendor name; an unspecified value

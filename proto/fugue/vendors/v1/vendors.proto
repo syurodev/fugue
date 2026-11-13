@@ -137,6 +137,27 @@ message ListSessionsResponse {
   uint64 sequence = 2;
 }
 
+message ListCommandsRequest {
+  string session_id = 1;
+}
+message VendorCommand {
+  string name = 1;
+}
+message FugueCommand {
+  string name = 1;
+  bool available = 2;
+  string owner = 3;
+}
+message CommandGroup {
+  string name = 1;
+  repeated VendorCommand vendor_commands = 2;
+  repeated FugueCommand fugue_commands = 3;
+}
+message ListCommandsResponse {
+  repeated CommandGroup groups = 1;
+  uint64 commands_revision = 2;
+}
+
 // VendorService owns vendor session operations (F9.9c). State-changing calls
 // carry a command_id: a retry attaches to the original operation.
 service VendorService {
@@ -148,4 +169,5 @@ service VendorService {
   rpc CloseSession(CloseSessionRequest) returns (CloseSessionResponse);
   rpc ResumeSession(ResumeSessionRequest) returns (ResumeSessionResponse);
   rpc ListSessions(ListSessionsRequest) returns (ListSessionsResponse);
+  rpc ListCommands(ListCommandsRequest) returns (ListCommandsResponse);
 }
