@@ -1,0 +1,5 @@
+--- a/example.go
++++ b/example.go
+@@ -1 +1 @@
+-if casOk {
++if true {
