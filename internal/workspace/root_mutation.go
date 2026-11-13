@@ -3,6 +3,7 @@ package workspace
 import (
 	"bytes"
 	"context"
+	"slices"
 
 	"github.com/pelletier/go-toml/v2"
 )
@@ -53,7 +54,7 @@ func (s *Service) UpdateRoot(ctx context.Context, id, expectedHash, name string,
 		if update.Access == "" {
 			update.Access = current.Access
 		}
-		others := append(slicesClone(roots[:idx]), roots[idx+1:]...)
+		others := append(slices.Clone(roots[:idx]), roots[idx+1:]...)
 		changed, err := s.validateRoot(update.Name, update.Access, update.Path, home, others)
 		if err != nil {
 			return nil, err
@@ -89,5 +90,3 @@ func (s *Service) mutateRoots(ctx context.Context, id, expectedHash string, muta
 	}
 	return s.UpdateWorkspaceConfig(ctx, id, encoded.Bytes(), expectedHash)
 }
-
-func slicesClone[T any](values []T) []T { return append([]T(nil), values...) }
