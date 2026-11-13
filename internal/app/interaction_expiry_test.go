@@ -83,7 +83,7 @@ func TestInteractionAutomaticExpiryTimer(t *testing.T) {
 	clk := clock.NewFake(time.Unix(100, 0))
 	idGen := ids.NewUUIDv7(clk, ids.NewDeterministic("expiry-test"))
 	hub := NewEventHub("inc-expiry")
-	owner, err := interaction.NewOwner(interaction.Config{
+	owner, err := interaction.NewOwner(&interaction.Config{
 		Clock: clk,
 		IDs:   idGen,
 	})
@@ -125,7 +125,7 @@ func TestInteractionExpiryLoopHandlesOverdueTicketAtStart(t *testing.T) {
 	clk := clock.NewFake(time.Unix(100, 0))
 	idGen := ids.NewUUIDv7(clk, ids.NewDeterministic("overdue-start-test"))
 	hub := NewEventHub("inc-overdue")
-	owner, err := interaction.NewOwner(interaction.Config{Clock: clk, IDs: idGen})
+	owner, err := interaction.NewOwner(&interaction.Config{Clock: clk, IDs: idGen})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestInteractionExpiryTimerStopsOnContextCancel(t *testing.T) {
 	clk := clock.NewFake(time.Unix(100, 0))
 	idGen := ids.NewUUIDv7(clk, ids.NewDeterministic("stop-test"))
 	hub := NewEventHub("inc-stop")
-	owner, err := interaction.NewOwner(interaction.Config{
+	owner, err := interaction.NewOwner(&interaction.Config{
 		Clock: clk,
 		IDs:   idGen,
 	})

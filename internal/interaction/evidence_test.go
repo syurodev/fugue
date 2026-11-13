@@ -21,11 +21,12 @@ func TestIE06VaultLockFailsClosedBetweenAnswerAndClaimOrDelivery(t *testing.T) {
 	var vaultLocked atomic.Bool
 	newOwner := func(t *testing.T) *Owner {
 		t.Helper()
-		owner, err := NewOwner(Config{
+		owner, err := NewOwner(&Config{
 			Clock:       clock.NewFake(startTime()),
 			IDs:         ids.NewSequence("ie06"),
 			Responder:   NopResponder{},
 			VaultLocked: vaultLocked.Load,
+			TagPolicy:   newStubTagPolicy(),
 		})
 		if err != nil {
 			t.Fatal(err)
@@ -193,10 +194,11 @@ type plantedTickets struct {
 
 func newAuditOwner(t *testing.T, collector *contentCollector) *Owner {
 	t.Helper()
-	owner, err := NewOwner(Config{
+	owner, err := NewOwner(&Config{
 		Clock:     clock.NewFake(startTime()),
 		IDs:       ids.NewSequence("ie08"),
 		Responder: NopResponder{},
+		TagPolicy: newStubTagPolicy(),
 		Audit: func(ev AuditEvent) {
 			collector.audit(&ev)
 		},

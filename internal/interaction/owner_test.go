@@ -15,7 +15,7 @@ import (
 func TestAnOldRequestCannotBeAnsweredAfterRestart(t *testing.T) {
 	t.Parallel()
 	sharedGen := ids.NewSequence("inc")
-	ownerBeforeRestart, err := NewOwner(Config{Clock: clock.NewFake(startTime()), IDs: sharedGen, Responder: NopResponder{}})
+	ownerBeforeRestart, err := NewOwner(&Config{Clock: clock.NewFake(startTime()), IDs: sharedGen, Responder: NopResponder{}, TagPolicy: newStubTagPolicy()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestAnOldRequestCannotBeAnsweredAfterRestart(t *testing.T) {
 	})
 
 	// Simulate a process restart by constructing a new Owner instance.
-	ownerAfterRestart, err := NewOwner(Config{Clock: clock.NewFake(startTime()), IDs: sharedGen, Responder: NopResponder{}})
+	ownerAfterRestart, err := NewOwner(&Config{Clock: clock.NewFake(startTime()), IDs: sharedGen, Responder: NopResponder{}, TagPolicy: newStubTagPolicy()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func TestEnvTagHardRuleAndOffersControlSessionGrants(t *testing.T) {
 
 	// The hard rule refuses a session grant offer up front and, with only the
 	// single-use offer, still asks every time for prod and unknown tags.
-	for _, tag := range []string{"prod", "unknown-env"} {
+	for _, tag := range []string{testEnvProd, "unknown-env"} {
 		offered := confirmSpec("op-env-offered-" + tag)
 		offered.Binding.EnvTag = tag
 		_, _, err := owner.Ensure(offered)
@@ -206,20 +206,20 @@ func TestOnlyHeadlessResolvesUnavailableWhileNilResponderWaits(t *testing.T) {
 	t.Parallel()
 	fakeClock := clock.NewFake(startTime())
 
-	nilOwner, err := NewOwner(Config{Clock: fakeClock, IDs: ids.NewSequence("nil"), Responder: nil})
+	nilOwner, err := NewOwner(&Config{Clock: fakeClock, IDs: ids.NewSequence("nil"), Responder: nil, TagPolicy: newStubTagPolicy()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertRequestsWaitWithoutResponder(t, nilOwner)
 
-	headlessOwner, err := NewOwner(Config{Clock: fakeClock, IDs: ids.NewSequence("hl"), Responder: NopResponder{}, Headless: true})
+	headlessOwner, err := NewOwner(&Config{Clock: fakeClock, IDs: ids.NewSequence("hl"), Responder: NopResponder{}, Headless: true, TagPolicy: newStubTagPolicy()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertHeadlessResolvesUnavailable(t, headlessOwner)
 
 	failingResponder := &recordingResponder{err: errcode.New(errcode.Unavailable, "ui disconnected")}
-	brokenOwner, err := NewOwner(Config{Clock: fakeClock, IDs: ids.NewSequence("broken"), Responder: failingResponder})
+	brokenOwner, err := NewOwner(&Config{Clock: fakeClock, IDs: ids.NewSequence("broken"), Responder: failingResponder, TagPolicy: newStubTagPolicy()})
 	if err != nil {
 		t.Fatal(err)
 	}
