@@ -2,7 +2,6 @@ package interaction
 
 import (
 	"slices"
-	"strconv"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -356,20 +355,40 @@ func testIE03ScopeKeyMatching(t *testing.T, owner *Owner, tags TagPolicy, spec *
 	}
 }
 
+func newOwnerWithTags(t *testing.T, tags TagPolicy) *Owner {
+	t.Helper()
+	owner, err := NewOwner(&Config{
+		Clock:     clock.NewFake(startTime()),
+		IDs:       ids.NewSequence("id"),
+		Responder: NopResponder{},
+		TagPolicy: tags,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return owner
+}
+
+// testIE03RevisionInvalidation changes the tag policy without touching the
+// binding: the Owner must derive the revision itself, so the old grant stops
+// covering the call, also after the policy is reverted.
 func testIE03RevisionInvalidation(t *testing.T, owner *Owner, tags *stubTagPolicy, spec *Spec) {
 	t.Helper()
-	tags.set(testEnvDev, true)
-	rev2Binding := spec.Binding
-	rev2Binding.EnvRevision = strconv.FormatUint(tags.PolicyRevision(testEnvDev), 10)
-	if owner.HasBindingGrant(&rev2Binding) {
-		t.Fatalf("grant remained valid after PolicyRevision changed from 1 to 2")
+	if err := tags.set(testEnvDev, true); err != nil {
+		t.Fatal(err)
+	}
+	if owner.HasBindingGrant(&spec.Binding) {
+		t.Fatalf("grant remained valid after the tag policy changed")
+	}
+	if owner.GrantLookupFor(&spec.Binding).HasGrant(spec.Binding.GrantScopeKey) {
+		t.Fatalf("GrantLookupFor still matched after the tag policy changed")
 	}
 
-	tags.set(testEnvDev, false)
-	rev3Binding := spec.Binding
-	rev3Binding.EnvRevision = strconv.FormatUint(tags.PolicyRevision(testEnvDev), 10)
-	if owner.HasBindingGrant(&rev3Binding) {
-		t.Fatalf("grant remained valid after PolicyRevision reverted (rev 3)")
+	if err := tags.set(testEnvDev, false); err != nil {
+		t.Fatal(err)
+	}
+	if owner.HasBindingGrant(&spec.Binding) {
+		t.Fatalf("grant remained valid after the tag policy was reverted")
 	}
 }
 
@@ -377,18 +396,28 @@ func TestIE03GrantScopeKeyMatchingAndPolicyRevisionInvalidation(t *testing.T) {
 	t.Parallel()
 
 	tags := newStubTagPolicy()
-	owner, _, _, _ := newTestOwner(t)
+	owner := newOwnerWithTags(t, tags)
 
 	const baseScopeKey = "edit:dir:fugue/src/"
 	spec := confirmSpec("op-ie03-grant")
 	spec.Binding.GrantScopeKey = baseScopeKey
 	spec.Binding.HasTarget = true
 	spec.Binding.EnvTag = testEnvDev
-	spec.Binding.EnvRevision = "1"
 	spec.Offers = []Outcome{OutcomeAllowedOnce, OutcomeAllowedSession}
 
 	testIE03ScopeKeyMatching(t, owner, tags, spec, baseScopeKey)
 	testIE03RevisionInvalidation(t, owner, tags, spec)
+}
+
+func TestIE03NilTagPolicyNeverKeysTargetGrants(t *testing.T) {
+	t.Parallel()
+
+	owner := newOwnerWithTags(t, nil)
+	b := defaultBinding()
+	b.HasTarget = true
+	if owner.HasBindingGrant(&b) || owner.GrantLookupFor(&b).HasGrant(b.GrantScopeKey) {
+		t.Fatalf("target binding matched a grant with nil TagPolicy")
+	}
 }
 
 func testIE10MutationProbes(t *testing.T, tags TagPolicy) {

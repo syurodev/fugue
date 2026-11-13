@@ -254,32 +254,25 @@ func Decide(
 	return Verdict{Kind: VerdictRun}, nil
 }
 
-// HasGrant reports whether a session grant exists matching the given binding context
-// and grant scope key (interaction §3.1, §3.2).
-func (o *Owner) HasGrant(sessionID, workspaceID, grantScopeKey, targetRevision, envRevision, envTag string) bool {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	_, ok := o.grants[grantKey{
-		sessionID:      sessionID,
-		workspaceID:    workspaceID,
-		grantScopeKey:  grantScopeKey,
-		targetRevision: targetRevision,
-		envRevision:    envRevision,
-		envTag:         envTag,
-	}]
-	return ok
-}
-
 // HasBindingGrant reports whether a session grant exists matching the exact binding
-// context and its GrantScopeKey.
+// context and its GrantScopeKey. The environment revision is derived from the
+// Owner's tag policy, not from the binding.
 func (o *Owner) HasBindingGrant(b *Binding) bool {
 	if b == nil {
 		return false
 	}
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	_, ok := o.grants[grantKeyFor(b)]
-	return ok
+	return o.hasGrantLocked(b)
+}
+
+func (o *Owner) hasGrantLocked(b *Binding) bool {
+	key, ok := o.grantKeyFor(b)
+	if !ok {
+		return false
+	}
+	_, found := o.grants[key]
+	return found
 }
 
 // GrantLookupFor returns a GrantLookup implementation checking grants recorded

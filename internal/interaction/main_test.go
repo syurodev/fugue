@@ -46,7 +46,6 @@ func defaultBinding() Binding {
 		HasTarget:       true,
 		ArgsDigest:      "sha256:abc",
 		TargetRevision:  "target-v1",
-		EnvRevision:     "env-v1",
 		EnvTag:          testEnvDev,
 	}
 }
@@ -233,11 +232,12 @@ func (p *stubTagPolicy) PolicyRevision(name string) uint64 {
 	return p.revisions[name]
 }
 
-func (p *stubTagPolicy) set(name string, requiresConfirmation bool) {
+func (p *stubTagPolicy) set(name string, requiresConfirmation bool) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.confirms[name] = requiresConfirmation
 	p.revisions[name]++
+	return nil
 }
 
 func newTestOwner(t *testing.T) (*Owner, *clock.Fake, *recordingResponder, *[]AuditEvent) {

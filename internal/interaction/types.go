@@ -104,7 +104,6 @@ type Binding struct {
 	HasTarget       bool
 	ArgsDigest      string
 	TargetRevision  string
-	EnvRevision     string
 	EnvTag          string
 	// TurnID and VendorRequestID identify the vendor turn and the vendor's
 	// own request inside it; they exist only on relayed bindings.

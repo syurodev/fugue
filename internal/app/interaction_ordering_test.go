@@ -121,7 +121,6 @@ func runEnsurerLoop(
 				ToolName:        "tool-race",
 				GrantScopeKey:   "tool-race:scope",
 				TargetRevision:  "rev-1",
-				EnvRevision:     "env-1",
 				EnvTag:          lifecycleEnvDev,
 			},
 		})
@@ -378,7 +377,6 @@ func seedSessionGrant(t *testing.T, svc *InteractionService, sessionID string) {
 			ToolName:        "tool-race",
 			GrantScopeKey:   "tool-race:scope",
 			TargetRevision:  "rev-1",
-			EnvRevision:     "env-1",
 			EnvTag:          lifecycleEnvDev,
 		},
 	})
