@@ -57,6 +57,18 @@ const (
 	// WorkspaceServiceRejectWorkspaceConfigProcedure is the fully-qualified name of the
 	// WorkspaceService's RejectWorkspaceConfig RPC.
 	WorkspaceServiceRejectWorkspaceConfigProcedure = "/fugue.workspace.v1.WorkspaceService/RejectWorkspaceConfig"
+	// WorkspaceServiceAddRootProcedure is the fully-qualified name of the WorkspaceService's AddRoot
+	// RPC.
+	WorkspaceServiceAddRootProcedure = "/fugue.workspace.v1.WorkspaceService/AddRoot"
+	// WorkspaceServiceRemoveRootProcedure is the fully-qualified name of the WorkspaceService's
+	// RemoveRoot RPC.
+	WorkspaceServiceRemoveRootProcedure = "/fugue.workspace.v1.WorkspaceService/RemoveRoot"
+	// WorkspaceServiceUpdateRootProcedure is the fully-qualified name of the WorkspaceService's
+	// UpdateRoot RPC.
+	WorkspaceServiceUpdateRootProcedure = "/fugue.workspace.v1.WorkspaceService/UpdateRoot"
+	// WorkspaceServiceDeleteWorkspaceProcedure is the fully-qualified name of the WorkspaceService's
+	// DeleteWorkspace RPC.
+	WorkspaceServiceDeleteWorkspaceProcedure = "/fugue.workspace.v1.WorkspaceService/DeleteWorkspace"
 )
 
 // WorkspaceServiceClient is a client for the fugue.workspace.v1.WorkspaceService service.
@@ -69,6 +81,10 @@ type WorkspaceServiceClient interface {
 	UpdateWorkspaceConfig(context.Context, *connect.Request[v1.UpdateWorkspaceConfigRequest]) (*connect.Response[v1.UpdateWorkspaceConfigResponse], error)
 	ConfirmWorkspaceConfig(context.Context, *connect.Request[v1.ConfirmWorkspaceConfigRequest]) (*connect.Response[v1.ConfirmWorkspaceConfigResponse], error)
 	RejectWorkspaceConfig(context.Context, *connect.Request[v1.RejectWorkspaceConfigRequest]) (*connect.Response[v1.RejectWorkspaceConfigResponse], error)
+	AddRoot(context.Context, *connect.Request[v1.AddRootRequest]) (*connect.Response[v1.AddRootResponse], error)
+	RemoveRoot(context.Context, *connect.Request[v1.RemoveRootRequest]) (*connect.Response[v1.RemoveRootResponse], error)
+	UpdateRoot(context.Context, *connect.Request[v1.UpdateRootRequest]) (*connect.Response[v1.UpdateRootResponse], error)
+	DeleteWorkspace(context.Context, *connect.Request[v1.DeleteWorkspaceRequest]) (*connect.Response[v1.DeleteWorkspaceResponse], error)
 }
 
 // NewWorkspaceServiceClient constructs a client for the fugue.workspace.v1.WorkspaceService
@@ -130,6 +146,30 @@ func NewWorkspaceServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(workspaceServiceMethods.ByName("RejectWorkspaceConfig")),
 			connect.WithClientOptions(opts...),
 		),
+		addRoot: connect.NewClient[v1.AddRootRequest, v1.AddRootResponse](
+			httpClient,
+			baseURL+WorkspaceServiceAddRootProcedure,
+			connect.WithSchema(workspaceServiceMethods.ByName("AddRoot")),
+			connect.WithClientOptions(opts...),
+		),
+		removeRoot: connect.NewClient[v1.RemoveRootRequest, v1.RemoveRootResponse](
+			httpClient,
+			baseURL+WorkspaceServiceRemoveRootProcedure,
+			connect.WithSchema(workspaceServiceMethods.ByName("RemoveRoot")),
+			connect.WithClientOptions(opts...),
+		),
+		updateRoot: connect.NewClient[v1.UpdateRootRequest, v1.UpdateRootResponse](
+			httpClient,
+			baseURL+WorkspaceServiceUpdateRootProcedure,
+			connect.WithSchema(workspaceServiceMethods.ByName("UpdateRoot")),
+			connect.WithClientOptions(opts...),
+		),
+		deleteWorkspace: connect.NewClient[v1.DeleteWorkspaceRequest, v1.DeleteWorkspaceResponse](
+			httpClient,
+			baseURL+WorkspaceServiceDeleteWorkspaceProcedure,
+			connect.WithSchema(workspaceServiceMethods.ByName("DeleteWorkspace")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -143,6 +183,10 @@ type workspaceServiceClient struct {
 	updateWorkspaceConfig  *connect.Client[v1.UpdateWorkspaceConfigRequest, v1.UpdateWorkspaceConfigResponse]
 	confirmWorkspaceConfig *connect.Client[v1.ConfirmWorkspaceConfigRequest, v1.ConfirmWorkspaceConfigResponse]
 	rejectWorkspaceConfig  *connect.Client[v1.RejectWorkspaceConfigRequest, v1.RejectWorkspaceConfigResponse]
+	addRoot                *connect.Client[v1.AddRootRequest, v1.AddRootResponse]
+	removeRoot             *connect.Client[v1.RemoveRootRequest, v1.RemoveRootResponse]
+	updateRoot             *connect.Client[v1.UpdateRootRequest, v1.UpdateRootResponse]
+	deleteWorkspace        *connect.Client[v1.DeleteWorkspaceRequest, v1.DeleteWorkspaceResponse]
 }
 
 // CreateWorkspace calls fugue.workspace.v1.WorkspaceService.CreateWorkspace.
@@ -185,6 +229,26 @@ func (c *workspaceServiceClient) RejectWorkspaceConfig(ctx context.Context, req 
 	return c.rejectWorkspaceConfig.CallUnary(ctx, req)
 }
 
+// AddRoot calls fugue.workspace.v1.WorkspaceService.AddRoot.
+func (c *workspaceServiceClient) AddRoot(ctx context.Context, req *connect.Request[v1.AddRootRequest]) (*connect.Response[v1.AddRootResponse], error) {
+	return c.addRoot.CallUnary(ctx, req)
+}
+
+// RemoveRoot calls fugue.workspace.v1.WorkspaceService.RemoveRoot.
+func (c *workspaceServiceClient) RemoveRoot(ctx context.Context, req *connect.Request[v1.RemoveRootRequest]) (*connect.Response[v1.RemoveRootResponse], error) {
+	return c.removeRoot.CallUnary(ctx, req)
+}
+
+// UpdateRoot calls fugue.workspace.v1.WorkspaceService.UpdateRoot.
+func (c *workspaceServiceClient) UpdateRoot(ctx context.Context, req *connect.Request[v1.UpdateRootRequest]) (*connect.Response[v1.UpdateRootResponse], error) {
+	return c.updateRoot.CallUnary(ctx, req)
+}
+
+// DeleteWorkspace calls fugue.workspace.v1.WorkspaceService.DeleteWorkspace.
+func (c *workspaceServiceClient) DeleteWorkspace(ctx context.Context, req *connect.Request[v1.DeleteWorkspaceRequest]) (*connect.Response[v1.DeleteWorkspaceResponse], error) {
+	return c.deleteWorkspace.CallUnary(ctx, req)
+}
+
 // WorkspaceServiceHandler is an implementation of the fugue.workspace.v1.WorkspaceService service.
 type WorkspaceServiceHandler interface {
 	CreateWorkspace(context.Context, *connect.Request[v1.CreateWorkspaceRequest]) (*connect.Response[v1.CreateWorkspaceResponse], error)
@@ -195,6 +259,10 @@ type WorkspaceServiceHandler interface {
 	UpdateWorkspaceConfig(context.Context, *connect.Request[v1.UpdateWorkspaceConfigRequest]) (*connect.Response[v1.UpdateWorkspaceConfigResponse], error)
 	ConfirmWorkspaceConfig(context.Context, *connect.Request[v1.ConfirmWorkspaceConfigRequest]) (*connect.Response[v1.ConfirmWorkspaceConfigResponse], error)
 	RejectWorkspaceConfig(context.Context, *connect.Request[v1.RejectWorkspaceConfigRequest]) (*connect.Response[v1.RejectWorkspaceConfigResponse], error)
+	AddRoot(context.Context, *connect.Request[v1.AddRootRequest]) (*connect.Response[v1.AddRootResponse], error)
+	RemoveRoot(context.Context, *connect.Request[v1.RemoveRootRequest]) (*connect.Response[v1.RemoveRootResponse], error)
+	UpdateRoot(context.Context, *connect.Request[v1.UpdateRootRequest]) (*connect.Response[v1.UpdateRootResponse], error)
+	DeleteWorkspace(context.Context, *connect.Request[v1.DeleteWorkspaceRequest]) (*connect.Response[v1.DeleteWorkspaceResponse], error)
 }
 
 // NewWorkspaceServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -252,6 +320,30 @@ func NewWorkspaceServiceHandler(svc WorkspaceServiceHandler, opts ...connect.Han
 		connect.WithSchema(workspaceServiceMethods.ByName("RejectWorkspaceConfig")),
 		connect.WithHandlerOptions(opts...),
 	)
+	workspaceServiceAddRootHandler := connect.NewUnaryHandler(
+		WorkspaceServiceAddRootProcedure,
+		svc.AddRoot,
+		connect.WithSchema(workspaceServiceMethods.ByName("AddRoot")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workspaceServiceRemoveRootHandler := connect.NewUnaryHandler(
+		WorkspaceServiceRemoveRootProcedure,
+		svc.RemoveRoot,
+		connect.WithSchema(workspaceServiceMethods.ByName("RemoveRoot")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workspaceServiceUpdateRootHandler := connect.NewUnaryHandler(
+		WorkspaceServiceUpdateRootProcedure,
+		svc.UpdateRoot,
+		connect.WithSchema(workspaceServiceMethods.ByName("UpdateRoot")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workspaceServiceDeleteWorkspaceHandler := connect.NewUnaryHandler(
+		WorkspaceServiceDeleteWorkspaceProcedure,
+		svc.DeleteWorkspace,
+		connect.WithSchema(workspaceServiceMethods.ByName("DeleteWorkspace")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fugue.workspace.v1.WorkspaceService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case WorkspaceServiceCreateWorkspaceProcedure:
@@ -270,6 +362,14 @@ func NewWorkspaceServiceHandler(svc WorkspaceServiceHandler, opts ...connect.Han
 			workspaceServiceConfirmWorkspaceConfigHandler.ServeHTTP(w, r)
 		case WorkspaceServiceRejectWorkspaceConfigProcedure:
 			workspaceServiceRejectWorkspaceConfigHandler.ServeHTTP(w, r)
+		case WorkspaceServiceAddRootProcedure:
+			workspaceServiceAddRootHandler.ServeHTTP(w, r)
+		case WorkspaceServiceRemoveRootProcedure:
+			workspaceServiceRemoveRootHandler.ServeHTTP(w, r)
+		case WorkspaceServiceUpdateRootProcedure:
+			workspaceServiceUpdateRootHandler.ServeHTTP(w, r)
+		case WorkspaceServiceDeleteWorkspaceProcedure:
+			workspaceServiceDeleteWorkspaceHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -309,4 +409,20 @@ func (UnimplementedWorkspaceServiceHandler) ConfirmWorkspaceConfig(context.Conte
 
 func (UnimplementedWorkspaceServiceHandler) RejectWorkspaceConfig(context.Context, *connect.Request[v1.RejectWorkspaceConfigRequest]) (*connect.Response[v1.RejectWorkspaceConfigResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.workspace.v1.WorkspaceService.RejectWorkspaceConfig is not implemented"))
+}
+
+func (UnimplementedWorkspaceServiceHandler) AddRoot(context.Context, *connect.Request[v1.AddRootRequest]) (*connect.Response[v1.AddRootResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.workspace.v1.WorkspaceService.AddRoot is not implemented"))
+}
+
+func (UnimplementedWorkspaceServiceHandler) RemoveRoot(context.Context, *connect.Request[v1.RemoveRootRequest]) (*connect.Response[v1.RemoveRootResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.workspace.v1.WorkspaceService.RemoveRoot is not implemented"))
+}
+
+func (UnimplementedWorkspaceServiceHandler) UpdateRoot(context.Context, *connect.Request[v1.UpdateRootRequest]) (*connect.Response[v1.UpdateRootResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.workspace.v1.WorkspaceService.UpdateRoot is not implemented"))
+}
+
+func (UnimplementedWorkspaceServiceHandler) DeleteWorkspace(context.Context, *connect.Request[v1.DeleteWorkspaceRequest]) (*connect.Response[v1.DeleteWorkspaceResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.workspace.v1.WorkspaceService.DeleteWorkspace is not implemented"))
 }

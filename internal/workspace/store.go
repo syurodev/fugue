@@ -114,6 +114,23 @@ func (s *Store) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// DeleteExpected deletes a workspace only if its stored config hash still
+// matches the reviewed version.
+func (s *Store) DeleteExpected(ctx context.Context, id, expectedHash string) error {
+	result, err := s.db.ExecContext(ctx, "DELETE FROM workspaces WHERE workspace_id = ? AND config_hash = ?", id, expectedHash)
+	if err != nil {
+		return WrapError(ErrDeleteFailed, "delete workspace record", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return WrapError(ErrDeleteFailed, "check workspace deletion", err)
+	}
+	if rows == 0 {
+		return NewError(ErrConfigChanged, "workspace configuration hash does not match expected_hash")
+	}
+	return nil
+}
+
 func marshalMissing(roots []string) string {
 	b, err := json.Marshal(roots)
 	if err != nil {
