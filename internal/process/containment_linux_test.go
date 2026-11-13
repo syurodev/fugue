@@ -7,7 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"runtime"
 	"strings"
 	"syscall"
 	"testing"
@@ -146,10 +145,8 @@ func runRealSystemdFallbackBranch(
 		t.Fatalf("expected empty ScopeUnit on fallback, got %q", proc.Identity().ScopeUnit)
 	}
 
-	advancePending(clk, trackerInterval)
-	for clk.Pending() == 0 {
-		runtime.Gosched()
-	}
+	advancePending(ctx, t, clk, trackerInterval)
+	awaitPending(ctx, t, clk, 1)
 	stopDone := make(chan struct{})
 	var proof StopProof
 	var stopErr error

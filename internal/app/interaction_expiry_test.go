@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"runtime"
 	"testing"
 	"time"
 
@@ -21,13 +20,9 @@ const (
 
 func waitExpiryTimerArmed(t *testing.T, clk *clock.Fake) {
 	t.Helper()
-	for range 1000 {
-		if clk.Pending() == 1 {
-			return
-		}
-		runtime.Gosched()
+	if err := clk.BlockUntilPending(t.Context(), 1); err != nil {
+		t.Fatalf("the expiry timer was never armed on the fake clock: %v", err)
 	}
-	t.Fatalf("expected 1 pending timer on fake clock, got %d", clk.Pending())
 }
 
 func ensureExpiringTicket(t *testing.T, svc *InteractionService, expiresAt time.Time) *interaction.Ticket {

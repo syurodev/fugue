@@ -18,6 +18,24 @@ import (
 
 const testServe = "serve"
 
+// testIdleGrace is the fake-clock idle grace the lifecycle tests serve with.
+const testIdleGrace = 100 * time.Millisecond
+
+// expireGrace waits for the host to arm its idle grace on the fake clock and
+// then advances the clock past it.
+func expireGrace(t *testing.T, ctx context.Context, clk *clock.Fake, result <-chan serveResult) {
+	t.Helper()
+	if err := clk.BlockUntilPending(ctx, 1); err != nil {
+		select {
+		case res := <-result:
+			t.Fatalf("serve ended before it armed the idle grace: exit %d, error: %v", res.code, res.err)
+		default:
+			t.Fatalf("the idle grace was never armed: %v", err)
+		}
+	}
+	clk.Advance(testIdleGrace)
+}
+
 func TestServeArgumentsSelectOnlyAppIdleGrace(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -44,13 +62,17 @@ func TestServeExitsAfterLastLeaseIdleGrace(t *testing.T) {
 	defer cancel()
 	cfg := config.Config{DataDir: serveDir(t)}
 	ready := make(chan struct{})
-	result := startServe(t, ctx, cfg, serveOpts{ready: ready, sigs: make(chan os.Signal), idleGrace: 100 * time.Millisecond})
-	<-ready
+	clk := clock.NewFake(time.Unix(0, 0))
+	result := startServe(t, ctx, cfg, serveOpts{ready: ready, sigs: make(chan os.Signal), idleGrace: testIdleGrace, clock: clk})
+	awaitReady(t, ctx, ready, result)
 	c, err := client.Dial(ctx, socketPath(cfg.DataDir), client.Params{Kind: client.KindApp, APIVersions: []string{"v1"}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	c.Close()
+	// The last lease's release arms the grace; the fake clock fires it only
+	// once the test says so, however slow the runner is.
+	expireGrace(t, ctx, clk, result)
 	select {
 	case got := <-result:
 		if got.code != exitOK || got.err != nil {
@@ -68,8 +90,10 @@ func TestServeWithoutInitialLeaseExitsAfterGrace(t *testing.T) {
 	defer cancel()
 	cfg := config.Config{DataDir: serveDir(t)}
 	ready := make(chan struct{})
-	result := startServe(t, ctx, cfg, serveOpts{ready: ready, sigs: make(chan os.Signal), idleGrace: 100 * time.Millisecond})
-	<-ready
+	clk := clock.NewFake(time.Unix(0, 0))
+	result := startServe(t, ctx, cfg, serveOpts{ready: ready, sigs: make(chan os.Signal), idleGrace: testIdleGrace, clock: clk})
+	awaitReady(t, ctx, ready, result)
+	expireGrace(t, ctx, clk, result)
 	select {
 	case got := <-result:
 		if got.code != exitOK || got.err != nil {

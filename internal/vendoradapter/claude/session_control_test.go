@@ -198,7 +198,7 @@ func TestSessionInterruptEscalatesWhenWriteIsWedged(t *testing.T) {
 		return nil
 	})
 
-	waitAndAdvance(clk, initialPending+1, 10*time.Second)
+	waitAndAdvance(t, clk, initialPending+1, 10*time.Second)
 
 	intErr := driveUntilErr(ctx, clk, intErrCh)
 	if errcode.CodeOf(intErr) != errcode.DeadlineExceeded {

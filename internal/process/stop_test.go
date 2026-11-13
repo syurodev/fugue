@@ -28,10 +28,16 @@ func testEpoch() time.Time {
 	return time.Date(2026, 11, 7, 12, 0, 0, 0, time.UTC)
 }
 
-func advancePending(clk *clock.Fake, d time.Duration) {
-	for clk.Pending() == 0 {
-		runtime.Gosched()
+func awaitPending(ctx context.Context, t *testing.T, clk *clock.Fake, n int) {
+	t.Helper()
+	if err := clk.BlockUntilPending(ctx, n); err != nil {
+		t.Fatalf("fewer than %d timers armed on the fake clock: %v", n, err)
 	}
+}
+
+func advancePending(ctx context.Context, t *testing.T, clk *clock.Fake, d time.Duration) {
+	t.Helper()
+	awaitPending(ctx, t, clk, 1)
 	clk.Advance(d)
 }
 
@@ -113,7 +119,7 @@ func TestStopOrderEscalatesToSigint(t *testing.T) {
 	if step := <-stepCh; step != escalationInterrupt {
 		t.Fatalf("expected interrupt step, got %q", step)
 	}
-	advancePending(clk, 10*time.Second)
+	advancePending(t.Context(), t, clk, 10*time.Second)
 
 	if step := <-stepCh; step != escalationSigint {
 		t.Fatalf("expected sigint step, got %q", step)
@@ -166,12 +172,12 @@ func TestStopOrderEscalatesToSigterm(t *testing.T) {
 	if step := <-stepCh; step != escalationInterrupt {
 		t.Fatalf("expected interrupt step, got %q", step)
 	}
-	advancePending(clk, 10*time.Second)
+	advancePending(t.Context(), t, clk, 10*time.Second)
 
 	if step := <-stepCh; step != escalationSigint {
 		t.Fatalf("expected sigint step, got %q", step)
 	}
-	advancePending(clk, 5*time.Second)
+	advancePending(t.Context(), t, clk, 5*time.Second)
 
 	if step := <-stepCh; step != escalationSigterm {
 		t.Fatalf("expected sigterm step, got %q", step)
@@ -224,17 +230,17 @@ func TestStopOrderEscalatesToSigkill(t *testing.T) {
 	if step := <-stepCh; step != escalationInterrupt {
 		t.Fatalf("expected interrupt step, got %q", step)
 	}
-	advancePending(clk, 10*time.Second)
+	advancePending(t.Context(), t, clk, 10*time.Second)
 
 	if step := <-stepCh; step != escalationSigint {
 		t.Fatalf("expected sigint step, got %q", step)
 	}
-	advancePending(clk, 5*time.Second)
+	advancePending(t.Context(), t, clk, 5*time.Second)
 
 	if step := <-stepCh; step != escalationSigterm {
 		t.Fatalf("expected sigterm step, got %q", step)
 	}
-	advancePending(clk, 5*time.Second)
+	advancePending(t.Context(), t, clk, 5*time.Second)
 
 	if step := <-stepCh; step != escalationSigkill {
 		t.Fatalf("expected sigkill step, got %q", step)
@@ -288,10 +294,10 @@ func TestStopKillsGroupMembersAfterLeaderExits(t *testing.T) {
 
 	expectEscalationStep(t, stepCh, escalationSigint)
 	<-proc.exitCh
-	advancePending(clk, 5*time.Second)
+	advancePending(t.Context(), t, clk, 5*time.Second)
 
 	expectEscalationStep(t, stepCh, escalationSigterm)
-	advancePending(clk, 5*time.Second)
+	advancePending(t.Context(), t, clk, 5*time.Second)
 
 	expectEscalationStep(t, stepCh, escalationSigkill)
 	// The killed child is reparented and reaped by init; wait for that real
@@ -415,7 +421,7 @@ func TestStopInterruptErrorReturnedSeparately(t *testing.T) {
 	// The vendor ignores the failed interrupt; let the 10 s wait run out so
 	// SIGINT stops it.
 	expectEscalationStep(t, stepCh, escalationInterrupt)
-	advancePending(clk, 10*time.Second)
+	advancePending(t.Context(), t, clk, 10*time.Second)
 	<-stopDone
 
 	if err == nil {

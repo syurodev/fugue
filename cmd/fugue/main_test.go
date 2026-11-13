@@ -57,6 +57,26 @@ func startServe(t *testing.T, ctx context.Context, cfg config.Config, opts serve
 	return results
 }
 
+// readyTimeout bounds the wait for serve to signal ready when the caller's
+// context carries no deadline of its own.
+const readyTimeout = 30 * time.Second
+
+// awaitReady blocks until serve signals ready. A serve that fails or exits
+// first reports its exit code and error instead of leaving the test blocked
+// until the package timeout, which would hide the startup error.
+func awaitReady(t *testing.T, ctx context.Context, ready <-chan struct{}, results <-chan serveResult) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, readyTimeout)
+	defer cancel()
+	select {
+	case <-ready:
+	case res := <-results:
+		t.Fatalf("serve ended before it was ready: exit %d, error: %v", res.code, res.err)
+	case <-ctx.Done():
+		t.Fatalf("serve was not ready before the context ended: %v", context.Cause(ctx))
+	}
+}
+
 // serveDir returns a short data directory so the socket path fits sun_path
 // and binds inside the data directory (host-api §3), like the hostapi tests.
 func serveDir(t *testing.T) string {
@@ -89,9 +109,11 @@ func TestSecondServeOnTheSameDataDirectoryFailsTyped(t *testing.T) {
 	dir := serveDir(t)
 	cfg := config.Config{DataDir: dir}
 	winnerCtx, stopWinner := context.WithCancel(t.Context())
+	defer stopWinner()
 	ready := make(chan struct{})
-	results := startServe(t, winnerCtx, cfg, serveOpts{ready: ready, sigs: make(chan os.Signal, 1)})
-	<-ready
+	winnerSigs := make(chan os.Signal, 1)
+	results := startServe(t, winnerCtx, cfg, serveOpts{ready: ready, sigs: winnerSigs})
+	awaitReady(t, winnerCtx, ready, results)
 
 	hostJSON, err := os.ReadFile(hostapi.HostFilePath(dir))
 	if err != nil {
@@ -127,10 +149,12 @@ func TestSecondServeOnTheSameDataDirectoryFailsTyped(t *testing.T) {
 		t.Fatalf("the loser disturbed the winner's socket: %v", err)
 	}
 
-	stopWinner()
+	// A stop signal, not a canceled context: a canceled context also cancels
+	// the drain, which then cannot wait for the loser's probe connection.
+	winnerSigs <- syscall.SIGTERM
 	res := <-results
 	if res.code != exitOK {
-		t.Fatalf("winner exits %d after cancel, want %d", res.code, exitOK)
+		t.Fatalf("winner exits %d after SIGTERM, want %d", res.code, exitOK)
 	}
 	if res.err != nil {
 		t.Fatalf("winner on a clean stop reports %v", res.err)
@@ -144,7 +168,7 @@ func TestServeStopsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	ready := make(chan struct{})
 	results := startServe(t, ctx, cfg, serveOpts{ready: ready, sigs: make(chan os.Signal, 1)})
-	<-ready
+	awaitReady(t, ctx, ready, results)
 
 	cancel()
 	res := <-results
@@ -200,7 +224,7 @@ func TestServeExitCodeForSignals(t *testing.T) {
 		ctx, cancel := context.WithCancel(t.Context())
 		ready := make(chan struct{})
 		results := startServe(t, ctx, cfg, serveOpts{ready: ready})
-		<-ready
+		awaitReady(t, ctx, ready, results)
 
 		if err := syscall.Kill(os.Getpid(), tc.sig); err != nil {
 			t.Fatalf("send %v: %v", tc.sig, err)
@@ -254,7 +278,7 @@ func TestSecondSignalDuringDrainExitsWithoutWaiting(t *testing.T) {
 			return &blockingDrain{HostTransport: tr, blocked: blocked, release: release}
 		},
 	})
-	<-ready
+	awaitReady(t, ctx, ready, results)
 
 	// The first signal starts the drain; the wrapped transport blocks it.
 	sigs <- syscall.SIGTERM
