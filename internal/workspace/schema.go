@@ -212,7 +212,7 @@ func applyCommonTier(
 		mergeStringList(&dst.Redact.AllowPaths, dst.Provenance, "redact.allow_paths", tier, red.AllowPaths, red.AllowPathsAdd)
 	}
 	if roles != nil {
-		dst.Roles, dst.Provenance["roles"] = slices.Clone(*roles), tier
+		dst.Roles, dst.Provenance["roles"] = mergeRoles(dst.Roles, *roles), tier
 	}
 	applyProfiles(dst, tier, profiles)
 	if sess != nil {
@@ -275,5 +275,44 @@ func diffPolicy(accepted, candidate *EffectiveConfig) []PolicyDiffEntry {
 	add("redact.allow_keys", fmtStrs(accepted.Redact.AllowKeys), fmtStrs(candidate.Redact.AllowKeys))
 	add("redact.allow_paths", fmtStrs(accepted.Redact.AllowPaths), fmtStrs(candidate.Redact.AllowPaths))
 	add("roots", fmt.Sprint(accepted.Roots), fmt.Sprint(candidate.Roots))
+	add("roles", formatRolesForDiff(accepted.Roles), formatRolesForDiff(candidate.Roles))
 	return diffs
+}
+
+func mergeRoles(base, overlay []RoleConfig) []RoleConfig {
+	out := make([]RoleConfig, 0, len(base)+len(overlay))
+	index := make(map[string]int, len(base)+len(overlay))
+	for i := range base {
+		r := base[i]
+		r.Checks = slices.Clone(r.Checks)
+		index[r.Name] = len(out)
+		out = append(out, r)
+	}
+	for i := range overlay {
+		r := overlay[i]
+		r.Checks = slices.Clone(r.Checks)
+		if idx, exists := index[r.Name]; exists {
+			out[idx] = r
+			continue
+		}
+		index[r.Name] = len(out)
+		out = append(out, r)
+	}
+	return out
+}
+
+func formatRolesForDiff(roles []RoleConfig) string {
+	if len(roles) == 0 {
+		return "[]"
+	}
+	parts := make([]string, len(roles))
+	for i := range roles {
+		r := &roles[i]
+		parts[i] = fmt.Sprintf(
+			"{name:%s vendor:%s model:%s effort:%s permission:%s lead:%t checks:[%s] desc:%q}",
+			r.Name, r.Vendor, r.Model, r.Effort, r.Permission, r.IsLeadEligible,
+			strings.Join(r.Checks, ", "), r.Description,
+		)
+	}
+	return "[" + strings.Join(parts, "; ") + "]"
 }

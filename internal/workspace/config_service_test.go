@@ -75,7 +75,7 @@ func TestOutOfBandNonPolicyChangeApplies(t *testing.T) {
 	ws, repo := createTestWorkspaceWithRepo(t, f, "oob-non-policy")
 
 	nonPolicyTOML := []byte("name = \"oob-renamed\"\n[[roots]]\nname = \"main\"\npath = \"" +
-		filepath.ToSlash(repo) + "\"\naccess = \"rw\"\n\n[[roles]]\nname = \"reviewer\"\nvendor = \"claude\"\neffort = \"medium\"\npermission = \"read\"\n\n[profiles.fast]\nvendor = \"claude\"\neffort = \"low\"\n")
+		filepath.ToSlash(repo) + "\"\naccess = \"rw\"\n\n[profiles.fast]\nvendor = \"claude\"\neffort = \"low\"\n")
 	testWriteFile(t, f.paths.ConfigPath(ws.ID), nonPolicyTOML)
 
 	eff, loaded, err := f.svc.GetEffectiveConfig(ctx, ws.ID, nil)
@@ -88,9 +88,118 @@ func TestOutOfBandNonPolicyChangeApplies(t *testing.T) {
 	if loaded.ConfigRevision != 2 || loaded.PolicyRevision != 1 || loaded.ConfigHash != loaded.AcceptedConfigHash {
 		t.Fatalf("unexpected revisions/hashes: %+v", loaded)
 	}
-	if eff.Name != "oob-renamed" || len(eff.Roles) != 1 || eff.Profiles["fast"].Effort != "low" {
+	if eff.Name != "oob-renamed" || eff.Profiles["fast"].Effort != "low" {
 		t.Fatalf("expected non-policy changes to apply immediately, got %+v", eff)
 	}
+}
+
+func TestTier2WriteRoleIsRejected(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	homeDir := filepath.Join(tempDir, "home")
+	fugueHome := filepath.Join(homeDir, "Fugue")
+	if err := os.MkdirAll(fugueHome, 0o700); err != nil {
+		t.Fatalf("mkdir %s: %v", fugueHome, err)
+	}
+
+	assertTier2WriteRejected(t, fugueHome, homeDir)
+	assertTier3OverridesTier2Roles(t, tempDir, fugueHome, homeDir)
+}
+
+func assertTier2WriteRejected(t *testing.T, fugueHome, homeDir string) {
+	t.Helper()
+	tier2Write := []byte("[[roles]]\nname = \"coder\"\nvendor = \"claude\"\npermission = \"write\"\n")
+	var wsErr *Error
+	err := ValidateConfig(TierGlobal, tier2Write)
+	if !errors.As(err, &wsErr) || wsErr.Code != ErrConfigInvalid || wsErr.Key != "roles.permission" {
+		t.Fatalf("ValidateConfig tier 2 write role err = %v, want *Error{Code:%s Key:roles.permission}", err, ErrConfigInvalid)
+	}
+	tier2Path := filepath.Join(fugueHome, "config.toml")
+	testWriteFile(t, tier2Path, tier2Write)
+	if _, decErr := decodeTier2TOML(tier2Path, tier2Write, homeDir); !errors.As(decErr, &wsErr) || wsErr.Code != ErrConfigInvalid || wsErr.Key != "roles.permission" {
+		t.Fatalf("decodeTier2TOML write role err = %v, want *Error{Code:%s Key:roles.permission}", decErr, ErrConfigInvalid)
+	}
+}
+
+func assertTier3OverridesTier2Roles(t *testing.T, tempDir, fugueHome, homeDir string) {
+	t.Helper()
+	tier2Read := []byte("[[roles]]\nname = \"researcher\"\nvendor = \"claude\"\npermission = \"read\"\n[[roles]]\nname = \"reviewer\"\nvendor = \"claude\"\npermission = \"read\"\n")
+	t2Cfg, err := decodeTier2TOML(filepath.Join(fugueHome, "config.toml"), tier2Read, homeDir)
+	if err != nil {
+		t.Fatalf("decodeTier2TOML read roles: %v", err)
+	}
+	tier3Override := []byte("name = \"ws\"\n[[roles]]\nname = \"reviewer\"\nvendor = \"codex\"\npermission = \"write\"\n")
+	t3Cfg, err := decodeTier3TOML(filepath.Join(tempDir, "fugue.toml"), tier3Override, homeDir)
+	if err != nil {
+		t.Fatalf("decodeTier3TOML: %v", err)
+	}
+	base := DefaultConfig(fugueHome, "ws-1")
+	eff := mergeConfigs(&base, &t2Cfg, &t3Cfg, nil, homeDir)
+	if len(eff.Roles) != 2 || eff.Roles[0].Name != "researcher" || eff.Roles[0].Permission != "read" ||
+		eff.Roles[1].Name != "reviewer" || eff.Roles[1].Vendor != "codex" || eff.Roles[1].Permission != "write" {
+		t.Fatalf("unexpected merged roles: %+v", eff.Roles)
+	}
+}
+
+func TestOutOfBandRoleEditWaitsForConfirmationAndBumpsPolicyRevision(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	f := newTestFixture(t)
+	ws, repo := createTestWorkspaceWithRepo(t, f, "oob-role-policy")
+
+	readRoleTOML := []byte("name = \"oob-role-policy\"\n[[roots]]\nname = \"main\"\npath = \"" +
+		filepath.ToSlash(repo) + "\"\naccess = \"rw\"\n\n[[roles]]\nname = \"reviewer\"\nvendor = \"claude\"\npermission = \"read\"\n")
+	testWriteFile(t, f.paths.ConfigPath(ws.ID), readRoleTOML)
+	_, loaded, err := f.svc.GetEffectiveConfig(ctx, ws.ID, nil)
+	if err != nil {
+		t.Fatalf("GetEffectiveConfig initial read role: %v", err)
+	}
+	confirmed, err := f.svc.ConfirmWorkspaceConfig(ctx, ws.ID, loaded.ConfigHash)
+	if err != nil {
+		t.Fatalf("ConfirmWorkspaceConfig initial read role: %v", err)
+	}
+	revBefore := confirmed.PolicyRevision
+
+	writeRoleTOML := []byte("name = \"oob-role-policy\"\n[[roots]]\nname = \"main\"\npath = \"" +
+		filepath.ToSlash(repo) + "\"\naccess = \"rw\"\n\n[[roles]]\nname = \"reviewer\"\nvendor = \"claude\"\npermission = \"write\"\n")
+	testWriteFile(t, f.paths.ConfigPath(ws.ID), writeRoleTOML)
+
+	eff, pending, err := f.svc.GetEffectiveConfig(ctx, ws.ID, nil)
+	if err != nil {
+		t.Fatalf("GetEffectiveConfig pending write role: %v", err)
+	}
+	assertPendingRoleDiff(t, &eff, pending, revBefore)
+
+	afterConfirm, err := f.svc.ConfirmWorkspaceConfig(ctx, ws.ID, pending.ConfigHash)
+	if err != nil {
+		t.Fatalf("ConfirmWorkspaceConfig role escalation: %v", err)
+	}
+	if afterConfirm.PolicyRevision != revBefore+1 {
+		t.Fatalf("PolicyRevision = %d, want %d", afterConfirm.PolicyRevision, revBefore+1)
+	}
+	effAfter, _, err := f.svc.GetEffectiveConfig(ctx, ws.ID, nil)
+	if err != nil {
+		t.Fatalf("GetEffectiveConfig after confirm: %v", err)
+	}
+	if len(effAfter.Roles) != 1 || effAfter.Roles[0].Permission != "write" {
+		t.Fatalf("confirmed role did not apply: %+v", effAfter.Roles)
+	}
+}
+
+func assertPendingRoleDiff(t *testing.T, eff *EffectiveConfig, pending *Workspace, revBefore int64) {
+	t.Helper()
+	if !pending.PendingPolicyConfirmation || pending.PolicyRevision != revBefore {
+		t.Fatalf("expected pending policy confirmation before confirm, got %+v", pending)
+	}
+	if len(eff.Roles) != 1 || eff.Roles[0].Permission != "read" {
+		t.Fatalf("unconfirmed role edit applied prematurely: %+v", eff.Roles)
+	}
+	for _, d := range pending.PolicyDiff {
+		if d.Key == "roles" {
+			return
+		}
+	}
+	t.Fatalf("expected PolicyDiff to include roles, got %+v", pending.PolicyDiff)
 }
 
 func TestOutOfBandPolicyChangeIsNotAppliedUntilConfirmed(t *testing.T) {

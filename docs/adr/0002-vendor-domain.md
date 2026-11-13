@@ -131,7 +131,7 @@ One owning package per table. Only `internal/vendorstore` reads and writes `vend
 | `team_records` | `internal/vendorstore` | F11.1 |
 | `team_tasks` | `internal/vendorstore` | F11.1 |
 | `team_task_events` | `internal/vendorstore` | F11.1 |
-| `team_mailbox_messages` | `internal/vendorstore` | F11.1 |
+| `team_mailbox_messages` | `internal/vendorstore` | F11.3 |
 
 `vendorstore` owns `vendor_payloads`, `vendor_session_keys`, and `vendor_purges`, but will not duplicate the sealing code. When F9.3 starts, the session-key wrap, AEAD seal/open, size limits, and crypto-shred logic of `execstore` move into one shared layer-2 package used by both stores. `execstore` only changes its imports, and its existing tests must stay green unchanged.
 

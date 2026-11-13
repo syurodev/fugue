@@ -188,7 +188,20 @@ func ValidateConfig(tier Tier, rawTOML []byte) error {
 }
 
 func validateTier2(file string, cfg *tier2RawConfig, homeDir string) error {
-	return firstErr(validateCommon(file, nil, nil, nil, cfg.Roles, cfg.Profiles, cfg.Session, homeDir), validateHost(file, cfg.Host, homeDir))
+	return firstErr(
+		validateCommon(file, nil, nil, nil, cfg.Roles, cfg.Profiles, cfg.Session, homeDir),
+		validateTier2Roles(file, cfg.Roles),
+		validateHost(file, cfg.Host, homeDir),
+	)
+}
+
+func validateTier2Roles(file string, roles *[]RoleConfig) error {
+	for i := range derefSlice(roles) {
+		if (*roles)[i].Permission != "read" {
+			return cfgErr(file, "roles.permission", "tier 2 roles may only have permission read")
+		}
+	}
+	return nil
 }
 
 func validateTier3(file string, cfg *tier3RawConfig, homeDir string) error {
@@ -300,6 +313,7 @@ func validateRoles(file string, roles *[]RoleConfig) error {
 			errIf(role.Permission != "read" && role.Permission != "write", file, "roles.permission", "role permission must be read or write"),
 			checkNoSecret(file, "roles.description", role.Description),
 			checkNoSecret(file, "roles.model", role.Model),
+			validateRoleModel(file, "roles.model", role.Model),
 			validateAddPair(file, "roles.checks", &role.Checks, nil, false),
 		); err != nil {
 			return err
@@ -307,6 +321,33 @@ func validateRoles(file string, roles *[]RoleConfig) error {
 		seen[role.Name] = struct{}{}
 	}
 	return nil
+}
+
+func validateRoleModel(file, key, model string) error {
+	if model == "" {
+		return nil
+	}
+	if len(model) > 128 || model[0] == '-' {
+		return cfgErr(file, key, "invalid model identifier")
+	}
+	for i := range len(model) {
+		if !isRoleModelChar(model[i]) {
+			return cfgErr(file, key, "invalid character in model identifier")
+		}
+	}
+	return nil
+}
+
+func isRoleModelChar(b byte) bool {
+	if (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') {
+		return true
+	}
+	switch b {
+	case '-', '_', '.', ':', '/', '@':
+		return true
+	default:
+		return false
+	}
 }
 
 func validateProfiles(file string, profiles map[string]ProfileConfig) error {
