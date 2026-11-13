@@ -286,10 +286,20 @@ func assertWorkspacePathsRemoved(t *testing.T, id, workspaceDir, dataDir string)
 
 func assertMutationState(t *testing.T, ws *workspacev1.Workspace, configRevision, policyRevision int64, name, path, access string) {
 	t.Helper()
+	path = canonicalWorkspaceTestPath(t, path)
 	if ws.ConfigRevision != configRevision || ws.PolicyRevision != policyRevision || len(ws.Roots) != 1 ||
 		ws.Roots[0].Name != name || ws.Roots[0].Path != path || ws.Roots[0].Access != access {
 		t.Fatalf("workspace mutation result = %+v", ws)
 	}
+}
+
+func canonicalWorkspaceTestPath(t *testing.T, path string) string {
+	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resolved
 }
 
 func assertWorkspaceFile(t *testing.T, home, id string, roots ...string) {
@@ -299,6 +309,9 @@ func assertWorkspaceFile(t *testing.T, home, id string, roots ...string) {
 		t.Fatal(err)
 	}
 	for _, want := range roots {
+		if resolved, resolveErr := filepath.EvalSymlinks(want); resolveErr == nil {
+			want = resolved
+		}
 		if !strings.Contains(string(data), want) {
 			t.Fatalf("WORKSPACE.md does not contain %q: %s", want, data)
 		}

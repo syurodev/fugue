@@ -73,9 +73,7 @@ func exerciseWorkspaceRootRuntime(t *testing.T, rt *HostRuntime, stream *Subscri
 		t.Fatal(err)
 	}
 	assertAppWorkspaceEvent(t, stream, 3, EventWorkspaceRootUpdated)
-	if updated.Roots[0].Name != "renamed" || updated.Roots[0].Path != second || updated.Roots[0].Access != "ro" {
-		t.Fatalf("updated root = %+v", updated.Roots)
-	}
+	assertUpdatedWorkspaceRuntimeRoot(t, updated, second)
 	removed, err := rt.RemoveWorkspaceRoot(t.Context(), string(KindApp), created.ID, "renamed", updated.ConfigHash)
 	if err != nil {
 		t.Fatal(err)
@@ -85,6 +83,17 @@ func exerciseWorkspaceRootRuntime(t *testing.T, rt *HostRuntime, stream *Subscri
 		t.Fatalf("removed root workspace = %+v", removed)
 	}
 	return removed
+}
+
+func assertUpdatedWorkspaceRuntimeRoot(t *testing.T, ws *WorkspaceView, expectedPath string) {
+	t.Helper()
+	resolvedSecond, err := filepath.EvalSymlinks(expectedPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ws.Roots[0].Name != "renamed" || ws.Roots[0].Path != resolvedSecond || ws.Roots[0].Access != "ro" {
+		t.Fatalf("updated root = %+v", ws.Roots)
+	}
 }
 
 func exerciseWorkspaceDeleteRuntime(t *testing.T, rt *HostRuntime, stream *Subscription, removed *WorkspaceView, name string) {

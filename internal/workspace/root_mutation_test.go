@@ -208,8 +208,12 @@ func assertAcceptedWorkspaceFiles(t *testing.T, f *testFixture, ws *Workspace) {
 
 func assertWorkspaceRootRevision(t *testing.T, ws *Workspace, revision int64, name, path string, access RootAccess) {
 	t.Helper()
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if ws.ConfigRevision != revision || ws.PolicyRevision != revision || len(ws.Roots) != 1 ||
-		ws.Roots[0].Name != name || ws.Roots[0].Path != path || ws.Roots[0].Access != access {
+		ws.Roots[0].Name != name || ws.Roots[0].Path != resolved || ws.Roots[0].Access != access {
 		t.Fatalf("workspace root revision = %+v", ws)
 	}
 }
