@@ -41,11 +41,13 @@ type descendantTracker struct {
 	clock     clock.Clock
 	disabled  bool
 
-	mu        sync.Mutex
-	tracked   map[int]string // pid -> startToken when first observed
-	task      *supervise.Task
-	stop      context.CancelFunc
-	closeOnce sync.Once
+	mu         sync.Mutex
+	tracked    map[int]string // pid -> startToken when first observed
+	scanSeq    uint64
+	lastMerged uint64
+	task       *supervise.Task
+	stop       context.CancelFunc
+	closeOnce  sync.Once
 }
 
 func newDescendantTracker(leaderPID int, leaderToken string, source procTableSource, clk clock.Clock) *descendantTracker {
@@ -98,25 +100,43 @@ func (d *descendantTracker) close() {
 
 // snapshot scans the OS process table once and records any newly discovered
 // group members or children of already-tracked processes.
-func (d *descendantTracker) snapshot() {
+func (d *descendantTracker) beginScan(respectDisabled bool) (uint64, bool) {
 	d.mu.Lock()
-	if d.disabled {
-		d.mu.Unlock()
+	defer d.mu.Unlock()
+	if respectDisabled && d.disabled {
+		return 0, false
+	}
+	d.scanSeq++
+	return d.scanSeq, true
+}
+
+func (d *descendantTracker) mergeScanLocked(ticket uint64, entries []procEntry) {
+	prune := ticket > d.lastMerged
+	if prune {
+		d.lastMerged = ticket
+	}
+	mergeDescendants(d.tracked, d.leaderPID, entries, prune)
+}
+
+func (d *descendantTracker) snapshot() {
+	ticket, ok := d.beginScan(true)
+	if !ok {
 		return
 	}
-	d.mu.Unlock()
 	entries, err := d.source.scan()
 	if err != nil {
 		return
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	mergeDescendants(d.tracked, d.leaderPID, entries)
+	d.mergeScanLocked(ticket, entries)
 }
 
-func mergeDescendants(tracked map[int]string, leaderPID int, entries []procEntry) {
+func mergeDescendants(tracked map[int]string, leaderPID int, entries []procEntry, prune bool) {
 	byPID := indexProcEntries(entries)
-	pruneStaleTracked(tracked, leaderPID, byPID)
+	if prune {
+		pruneStaleTracked(tracked, leaderPID, byPID)
+	}
 	leaderReused := syncLeaderTracked(tracked, leaderPID, byPID)
 	// Fixed-point propagation through ppid chains and pgid membership.
 	for {
@@ -189,19 +209,17 @@ func shouldTrackEntry(tracked map[int]string, leaderPID int, leaderReused bool, 
 // still matches the recorded token. A PID whose startToken differs is never
 // returned (protecting against PID reuse).
 func (d *descendantTracker) liveTrackedPIDs() []int {
-	d.mu.Lock()
-	if d.disabled {
-		d.mu.Unlock()
+	ticket, ok := d.beginScan(true)
+	if !ok {
 		return nil
 	}
-	d.mu.Unlock()
 	entries, err := d.source.scan()
 	if err != nil {
 		return nil
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	mergeDescendants(d.tracked, d.leaderPID, entries)
+	d.mergeScanLocked(ticket, entries)
 
 	current := make(map[int]string, len(entries))
 	for _, e := range entries {

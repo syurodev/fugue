@@ -1,6 +1,8 @@
 package app
 
 import (
+	"context"
+
 	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/ids"
@@ -37,4 +39,10 @@ type HostDeps struct {
 	// TestFugueTools registers Fugue MCP tools for tests only. The fugue
 	// binary never sets it, so a normal host serves none of them.
 	TestFugueTools []*FugueTool
+	// TestDelaySpawnRegistration, when set by tests, runs right before an
+	// in-flight spawn registers its peer owner in VendorSessions.
+	TestDelaySpawnRegistration func(context.Context)
+	// TestOnWaitInflightSpawn, when set by tests, runs when OwnsPeer begins
+	// waiting for in-flight spawn registrations to settle.
+	TestOnWaitInflightSpawn func()
 }

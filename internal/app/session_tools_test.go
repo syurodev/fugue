@@ -472,7 +472,7 @@ func TestSessionTokenDiesWithItsSessionAndItsPurge(t *testing.T) {
 	if !minted || binding.Role != vendorSessionRole || !tools.tokens.live(binding) {
 		t.Fatalf("no live token for the spawned session: %+v", binding)
 	}
-	if owned, ownErr := f.rt.VendorOwnsPeer(1 << 30); ownErr == nil || owned {
+	if owned, ownErr := f.rt.VendorOwnsPeer(t.Context(), 1<<30); ownErr == nil || owned {
 		t.Fatalf("VendorOwnsPeer of an unknown pid = %v, %v; want an error", owned, ownErr)
 	}
 	if done, closeErr := f.svc.Close(t.Context(), testAppPrincipal, VendorStop{CommandID: "token-close", SessionID: session.ID}); closeErr != nil || !done {

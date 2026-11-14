@@ -1,21 +1,26 @@
 package hostapi
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
 
+	"github.com/syurodev/fugue/internal/app"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
 	sessiontoolsv1 "github.com/syurodev/fugue/pkg/pb/fugue/sessiontools/v1"
 	"github.com/syurodev/fugue/pkg/pb/fugue/sessiontools/v1/sessiontoolsv1connect"
@@ -34,7 +39,7 @@ type peerBackend struct {
 	asked []int
 }
 
-func (b *peerBackend) VendorOwnsPeer(pid int) (bool, error) {
+func (b *peerBackend) VendorOwnsPeer(_ context.Context, pid int) (bool, error) {
 	b.askMu.Lock()
 	defer b.askMu.Unlock()
 	b.asked = append(b.asked, pid)
@@ -147,4 +152,141 @@ func TestSessionToolRPCsWithoutAService(t *testing.T) {
 	assertConnectCode(t, err, connect.CodePermissionDenied, errcode.PermissionDenied)
 	_, err = client.CallTool(t.Context(), connect.NewRequest(&sessiontoolsv1.CallToolRequest{Name: "any"}))
 	assertConnectCode(t, err, connect.CodePermissionDenied, errcode.PermissionDenied)
+}
+
+// TestLocalPeerCheckWaitsForInFlightSpawnRegistration proves that a Hello sent
+// after cmd.Start() and before OnSpawned has registered the owner waits for the
+// in-flight spawn to register and is denied (never racing past Q-41), and that
+// timeout or cancellation while waiting also denies typed.
+func TestLocalPeerCheckWaitsForInFlightSpawnRegistration(t *testing.T) {
+	t.Parallel()
+	t.Run("child_hello_before_onspawned", func(t *testing.T) {
+		t.Parallel()
+		assertPreOnSpawnedChildHelloDenied(t)
+	})
+	t.Run("timeout_and_cancel_while_waiting", func(t *testing.T) {
+		t.Parallel()
+		assertInflightWaitTimeoutAndCancelDenied(t)
+	})
+}
+
+func assertPreOnSpawnedChildHelloDenied(t *testing.T) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	beforeOnSpawned := make(chan struct{})
+	releaseOnSpawned := make(chan struct{})
+	waitStarted := make(chan struct{})
+	var beforeOnce, waitOnce sync.Once
+	v := startVendorHostWith(t, true, func(deps *app.HostDeps, sockPath string) {
+		deps.Random = ids.NewDeterministic(sessionTokenSeed)
+		deps.Bridge = app.VendorBridge{Binary: exe, Socket: sockPath}
+		deps.TestDelaySpawnRegistration = func(ctx context.Context) {
+			beforeOnce.Do(func() { close(beforeOnSpawned) })
+			select {
+			case <-releaseOnSpawned:
+			case <-ctx.Done():
+			}
+		}
+		deps.TestOnWaitInflightSpawn = func() {
+			waitOnce.Do(func() { close(waitStarted) })
+		}
+	})
+	root := t.TempDir()
+	wsID := v.workspaceWithRoot(t, root)
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", filepath.Join(shortDir(t), "pre-onspawned.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { closeQuietly(ln) })
+	if writeErr := os.WriteFile(filepath.Join(root, fakePreInitHelloFile), []byte(ln.Addr().String()), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	startErr := make(chan error, 1)
+	supervise.Go(t.Context(), "test.pre-onspawned-start", func(ctx context.Context) error {
+		_, callErr := v.vendors.StartSession(ctx, newPreInitSessionReq("pre-onspawned-start", wsID))
+		startErr <- callErr
+		return nil
+	})
+	<-beforeOnSpawned
+	<-waitStarted
+	close(releaseOnSpawned)
+	conn, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, readErr := bufio.NewReader(conn).ReadString('\n')
+	closeQuietly(conn)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	if got := strings.TrimSpace(line); !strings.HasPrefix(got, connect.CodePermissionDenied.String()+":") {
+		t.Fatalf("child hello before OnSpawned = %q, want permission_denied", got)
+	}
+	if sErr := <-startErr; sErr != nil {
+		t.Fatalf("StartSession after releasing OnSpawned = %v", sErr)
+	}
+}
+
+func assertInflightWaitTimeoutAndCancelDenied(t *testing.T) {
+	t.Helper()
+	clk := clock.NewFake(time.Unix(0, 0))
+	beforeOnSpawned := make(chan struct{})
+	releaseOnSpawned := make(chan struct{})
+	waitStarted := make(chan struct{}, 4)
+	var beforeOnce sync.Once
+	v := startVendorHostWith(t, true, func(deps *app.HostDeps, _ string) {
+		deps.Clock = clk
+		deps.TestDelaySpawnRegistration = func(ctx context.Context) {
+			beforeOnce.Do(func() { close(beforeOnSpawned) })
+			select {
+			case <-releaseOnSpawned:
+			case <-ctx.Done():
+			}
+		}
+		deps.TestOnWaitInflightSpawn = func() {
+			waitStarted <- struct{}{}
+		}
+	})
+	wsID := v.workspaceWithRoot(t, t.TempDir())
+	startErr := make(chan error, 1)
+	supervise.Go(t.Context(), "test.inflight-timeout-start", func(ctx context.Context) error {
+		_, callErr := v.vendors.StartSession(ctx, newPreInitSessionReq("inflight-timeout-start", wsID))
+		startErr <- callErr
+		return nil
+	})
+	<-beforeOnSpawned
+
+	timeoutErr := make(chan error, 1)
+	hostTimeout, _ := newTestClient(t, v.sockPath)
+	supervise.Go(t.Context(), "test.inflight-hello-timeout", func(ctx context.Context) error {
+		_, callErr := hostTimeout.Hello(ctx, helloRequest(hostv1.ClientKind_CLIENT_KIND_APP, "v1"))
+		timeoutErr <- callErr
+		return nil
+	})
+	<-waitStarted
+	clk.Advance(10 * time.Second)
+	assertConnectCode(t, <-timeoutErr, connect.CodePermissionDenied, errcode.PermissionDenied)
+
+	cancelErr := make(chan error, 1)
+	helloCtx, cancel := context.WithCancel(t.Context())
+	hostCancel, _ := newTestClient(t, v.sockPath)
+	supervise.Go(t.Context(), "test.inflight-hello-cancel", func(context.Context) error {
+		_, callErr := hostCancel.Hello(helloCtx, helloRequest(hostv1.ClientKind_CLIENT_KIND_APP, "v1"))
+		cancelErr <- callErr
+		return nil
+	})
+	<-waitStarted
+	cancel()
+	gotCancel := <-cancelErr
+	if code := connect.CodeOf(gotCancel); code != connect.CodeCanceled && code != connect.CodePermissionDenied {
+		t.Fatalf("canceled hello while spawn in flight = %v (code %v), want canceled or permission_denied", gotCancel, code)
+	}
+
+	close(releaseOnSpawned)
+	if sErr := <-startErr; sErr != nil {
+		t.Fatalf("StartSession after releasing OnSpawned = %v", sErr)
+	}
 }

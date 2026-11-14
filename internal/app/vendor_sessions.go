@@ -37,6 +37,10 @@ type VendorSessionDeps struct {
 	// OnSessionEnded runs once when a session's actor stops, however it
 	// stopped; the host revokes the session token there.
 	OnSessionEnded func(sessionID string)
+	// TestDelaySpawnRegistration runs inside OnSpawned before owner registration.
+	TestDelaySpawnRegistration func(context.Context)
+	// TestOnWaitInflightSpawn runs when OwnsPeer begins waiting on in-flight spawns.
+	TestOnWaitInflightSpawn func()
 }
 
 type vendorVaultObserver interface {
@@ -61,6 +65,8 @@ type VendorSessions struct {
 	pendingOwners     map[*pendingOwner]struct{}
 	closed            bool
 	startReservations int
+	inflightSpawns    int
+	spawnSettled      chan struct{}
 }
 
 type pendingOwner struct {
@@ -233,20 +239,28 @@ func (m *VendorSessions) reserveSlot(ctx context.Context, sessionID string) (fun
 }
 
 func (m *VendorSessions) startAdapter(ctx context.Context, spec *vendor.StartSpec) (vendor.Session, <-chan claude.Observation, *pendingOwner, error) {
+	finishSpawn := m.beginInflightSpawn()
+	defer finishSpawn()
 	var pending *pendingOwner
 	specCopy := *spec
 	origOnSpawned := spec.OnSpawned
 	specCopy.OnSpawned = func(owner vendor.PeerOwner) {
+		if m.deps.TestDelaySpawnRegistration != nil {
+			m.deps.TestDelaySpawnRegistration(ctx)
+		}
 		pending = m.addPendingOwner(owner)
+		finishSpawn()
 		if origOnSpawned != nil {
 			origOnSpawned(owner)
 		}
 	}
 	session, err := m.deps.Adapter.Start(ctx, &specCopy)
 	if err != nil {
+		finishSpawn()
 		m.removePendingOwner(pending)
 		return nil, nil, nil, safeActorError(err)
 	}
+	finishSpawn()
 	observations, ok := observationsOf(session)
 	if !ok {
 		m.closeUntracked(ctx, session)
@@ -383,48 +397,4 @@ func (m *VendorSessions) CloseAll(ctx context.Context) error {
 		}
 	}
 	return errors.Join(failures...)
-}
-
-// OwnsPeer reports whether pid belongs to the process tree of any live or
-// starting session (roadmap Q-41 A). A session that cannot answer is an error:
-// the caller must treat the peer as owned.
-func (m *VendorSessions) OwnsPeer(pid int) (bool, error) {
-	m.mu.RLock()
-	actors := make([]*vendorSessionActor, 0, len(m.actors))
-	for _, actor := range m.actors {
-		actors = append(actors, actor)
-	}
-	pending := make([]vendor.PeerOwner, 0, len(m.pendingOwners))
-	for p := range m.pendingOwners {
-		pending = append(pending, p.owner)
-	}
-	m.mu.RUnlock()
-	for _, owner := range pending {
-		if owned, err := checkPeerOwner(owner, pid); err != nil || owned {
-			return owned, err
-		}
-	}
-	for _, actor := range actors {
-		select {
-		case <-actor.done:
-			continue
-		default:
-		}
-		tree, ok := actor.session.(vendor.PeerOwner)
-		if !ok {
-			return false, errcode.New(errcode.Internal, "a vendor session cannot report its process tree")
-		}
-		if owned, err := checkPeerOwner(tree, pid); err != nil || owned {
-			return owned, err
-		}
-	}
-	return false, nil
-}
-
-func checkPeerOwner(owner vendor.PeerOwner, pid int) (bool, error) {
-	owned, err := owner.OwnsPID(pid)
-	if err != nil {
-		return false, errcode.Wrap(errcode.Internal, "read a vendor session's process tree", err)
-	}
-	return owned, nil
 }

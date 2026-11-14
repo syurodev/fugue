@@ -3,12 +3,52 @@
 package process
 
 import (
+	"context"
 	"errors"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 )
+
+const (
+	outOfOrderLeader = "leader-100"
+	outOfOrderChild  = "child-101"
+)
+
+type gatedProcTable struct {
+	mu           sync.Mutex
+	calls        int
+	scan1Entered chan struct{}
+	releaseScan1 chan struct{}
+}
+
+func (g *gatedProcTable) scan() ([]procEntry, error) {
+	g.mu.Lock()
+	g.calls++
+	call := g.calls
+	g.mu.Unlock()
+	switch call {
+	case 1:
+		close(g.scan1Entered)
+		<-g.releaseScan1
+		return []procEntry{{pid: 100, ppid: 50, pgid: 100, startToken: outOfOrderLeader}}, nil
+	case 2:
+		return []procEntry{
+			{pid: 100, ppid: 50, pgid: 100, startToken: outOfOrderLeader},
+			{pid: 101, ppid: 100, pgid: 100, startToken: outOfOrderChild},
+		}, nil
+	default:
+		return []procEntry{
+			{pid: 100, ppid: 50, pgid: 100, startToken: outOfOrderLeader},
+			{pid: 101, ppid: 1, pgid: 101, startToken: outOfOrderChild},
+		}, nil
+	}
+}
+
+func (*gatedProcTable) startToken(int) (string, error) { return "", ErrIdentityMismatch }
 
 type fakeProcTable struct {
 	entries []procEntry
@@ -103,6 +143,40 @@ func TestOwnsPIDReadsTheCgroupScope(t *testing.T) {
 func TestOwnsPIDFollowsTheTrackedTree(t *testing.T) {
 	t.Parallel()
 	testTrackerOwnership(t)
+}
+
+func TestOwnsPIDKeepsReparentedChildAcrossOutOfOrderScans(t *testing.T) {
+	t.Parallel()
+	table := &gatedProcTable{
+		scan1Entered: make(chan struct{}),
+		releaseScan1: make(chan struct{}),
+	}
+	tracker := newDescendantTracker(100, outOfOrderLeader, table, clock.NewFake(testEpoch()))
+	proc := &Process{tracker: tracker}
+
+	scan1Done := make(chan struct{})
+	supervise.Go(t.Context(), "test.stale-tracker-scan", func(context.Context) error {
+		defer close(scan1Done)
+		tracker.snapshot()
+		return nil
+	})
+	<-table.scan1Entered
+
+	// Newer scan observes the child under leader and records it before the older
+	// pre-fork snapshot finishes scanning.
+	if owned, err := proc.OwnsPID(101); err != nil || !owned {
+		t.Fatalf("OwnsPID(101) during newer scan = %v, %v; want true", owned, err)
+	}
+
+	// Unblock the older snapshot (missing 101) so it merges after the newer scan.
+	close(table.releaseScan1)
+	<-scan1Done
+
+	// Child has now reparented to PID 1 with its own process group; it stays owned
+	// only if the stale scan did not prune the record added by the newer scan.
+	if owned, err := proc.OwnsPID(101); err != nil || !owned {
+		t.Fatalf("OwnsPID(101) after reparenting and out-of-order scan = %v, %v; want true", owned, err)
+	}
 }
 
 func TestOwnsPIDOfARealProcessTree(t *testing.T) {

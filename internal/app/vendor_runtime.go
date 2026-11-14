@@ -80,6 +80,8 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	sessions, err := NewVendorSessions(base, &VendorSessionDeps{
 		Store: topicNotifyingStore{Store: vs, topic: topic}, Transcripts: transcripts, Adapter: adapter,
 		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: tokens.revoke,
+		TestDelaySpawnRegistration: deps.TestDelaySpawnRegistration,
+		TestOnWaitInflightSpawn:    deps.TestOnWaitInflightSpawn,
 	})
 	if err != nil {
 		return nil, err

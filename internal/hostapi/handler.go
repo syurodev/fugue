@@ -108,7 +108,7 @@ func (h *serviceHandler) Hello(ctx context.Context, req *connect.Request[hostv1.
 	if serr != nil {
 		return nil, h.connectError(ctx, serr)
 	}
-	if err := localPeerAllowed(h.backend, st.peerPID); err != nil {
+	if err := localPeerAllowed(ctx, h.backend, st.peerPID); err != nil {
 		return nil, h.connectError(ctx, err)
 	}
 	// The state machine serializes concurrent hellos on one multiplexed
@@ -201,14 +201,15 @@ func requireHelloed(ctx context.Context) error {
 // a live vendor session". A backend without vendor sessions does not
 // implement it.
 type vendorPeerChecker interface {
-	VendorOwnsPeer(pid int) (bool, error)
+	VendorOwnsPeer(ctx context.Context, pid int) (bool, error)
 }
 
 // localPeerAllowed decides whether the peer may become a local principal
 // (roadmap Q-41 A). A process of a live vendor session may not: it could
 // otherwise answer its own approval requests or reach the vault. An unknown
-// PID and an unreadable process tree deny as well.
-func localPeerAllowed(backend app.Backend, pid int) error {
+// PID, an unreadable process tree, and a timeout/cancellation while waiting
+// for in-flight spawns all fail closed with a typed denial.
+func localPeerAllowed(ctx context.Context, backend app.Backend, pid int) error {
 	checker, ok := backend.(vendorPeerChecker)
 	if !ok {
 		return nil
@@ -216,7 +217,7 @@ func localPeerAllowed(backend app.Backend, pid int) error {
 	if pid <= 0 {
 		return ErrVendorPeerDenied
 	}
-	if owned, err := checker.VendorOwnsPeer(pid); err != nil || owned {
+	if owned, err := checker.VendorOwnsPeer(ctx, pid); err != nil || owned {
 		return ErrVendorPeerDenied
 	}
 	return nil

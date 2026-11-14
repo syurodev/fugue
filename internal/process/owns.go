@@ -34,13 +34,14 @@ func (p *Process) OwnsPID(pid int) (bool, error) {
 // the start token it has now. A recorded pid whose token changed was reused
 // by an unrelated process and is not owned.
 func (d *descendantTracker) owns(pid int) (bool, error) {
+	ticket, _ := d.beginScan(false)
 	entries, err := d.source.scan()
 	if err != nil {
 		return false, fmt.Errorf("%w: scan the process table: %w", ErrIdentityMismatch, err)
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	mergeDescendants(d.tracked, d.leaderPID, entries)
+	d.mergeScanLocked(ticket, entries)
 	for _, e := range entries {
 		if e.pid == pid {
 			return e.startToken != "" && d.tracked[pid] == e.startToken, nil
