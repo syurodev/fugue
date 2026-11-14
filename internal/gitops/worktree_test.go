@@ -172,6 +172,17 @@ func assertOperationsValidateInputs(t *testing.T) {
 			_, err := TaskWorktreePath(root, "repo/id", "t1")
 			return err
 		}},
+		{"TaskWorktreePath relative root", func() error {
+			_, err := TaskWorktreePath("data/rel", testRepoID, "t1")
+			return err
+		}},
+		{"CreateTaskWorktree relative root", func() error {
+			_, err := m.CreateTaskWorktree(ctx, "data/rel", repoDir, testRepoID, "t1", "main")
+			return err
+		}},
+		{"RemoveTaskWorktree relative root", func() error {
+			return m.RemoveTaskWorktree(ctx, repoDir, "data/rel", testRepoID, "t1")
+		}},
 	}
 	for _, tc := range calls {
 		if err := tc.call(); errcode.CodeOf(err) != errcode.InvalidArgument {
@@ -232,4 +243,70 @@ func TestTeamBranchLifecycle(t *testing.T) {
 	if strings.TrimSpace(out) != "" {
 		t.Fatalf("task branch survived removal: %q", out)
 	}
+}
+
+// TestFailedWorktreeAddLeavesNoBranch pins the failure cleanup of the task
+// worktree creation: git can create the branch and the worktree before the
+// add fails, and gitops removes what that call made — never a pre-existing
+// branch — so a retry starts clean.
+//
+// Not parallel: it changes the process environment.
+func TestFailedWorktreeAddLeavesNoBranch(t *testing.T) {
+	t.Setenv("REAL_GIT", locateGit(t))
+	t.Setenv("FAIL_ADD", "1")
+	// The wrapper runs the real git and, when the invocation is a worktree
+	// add, pretends it failed after git created the branch and the worktree.
+	script := `is_add=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "worktree" ] && [ "$a" = "add" ]; then
+    is_add=1
+  fi
+  prev="$a"
+done
+"$REAL_GIT" "$@"
+status=$?
+if [ -n "$is_add" ] && [ -n "$FAIL_ADD" ] && [ $status -eq 0 ]; then
+  exit 1
+fi
+exit $status
+`
+	ctx := t.Context()
+	m, root, _ := testManagerWithGit(t, wrapperGit(t, script))
+	repoDir := initRepo(t)
+
+	_, err := m.CreateTaskWorktree(ctx, root, repoDir, testRepoID, "t1", "main")
+	if err == nil {
+		t.Fatal("the failing add did not surface")
+	}
+	if out := fixtureGit(t, repoDir, "branch", "--list", "fugue/task/t1"); strings.TrimSpace(out) != "" {
+		t.Fatalf("the branch created by the failed add survived: %q", out)
+	}
+	if rows, rowsErr := m.worktreeListRows(ctx, repoDir); len(rows) != 1 {
+		var dbg *GitError
+		errors.As(rowsErr, &dbg)
+		t.Fatalf("worktrees after the failed add = %v (detail %q), want only the main worktree", rowsErr, dbg.Detail)
+	}
+
+	// A retry starts clean and behaves like a first attempt.
+	t.Setenv("FAIL_ADD", "")
+	wt, err := m.CreateTaskWorktree(ctx, root, repoDir, testRepoID, "t1", "main")
+	if err != nil {
+		t.Fatalf("retry after the failed add: %v", err)
+	}
+	if _, statErr := os.Stat(filepath.Join(wt, ".git")); statErr != nil {
+		t.Fatalf("retried worktree missing .git: %v", statErr)
+	}
+	if err := m.RemoveTaskWorktree(ctx, repoDir, root, testRepoID, "t1"); err != nil {
+		t.Fatalf("remove retried worktree: %v", err)
+	}
+}
+
+// wrapperGit installs script at a fresh path and returns it as the manager's
+// git binary.
+func wrapperGit(t *testing.T, script string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "wrappergit")
+	writeScript(t, path, script)
+	return path
 }

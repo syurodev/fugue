@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 )
@@ -60,6 +61,7 @@ func assertRunnerArgs(t *testing.T, root string, res gitResult) {
 	want := []string{
 		"-c", "gc.auto=0",
 		"-c", "core.hooksPath=" + filepath.Join(root, gitopsDirName, hooksDirName),
+		"-c", "core.fsmonitor=false",
 		"status", "--porcelain",
 	}
 	got := stdoutLines(res)
@@ -169,6 +171,112 @@ echo "done after $n invocations"
 	}
 }
 
+// TestRefLockExhaustionReturnsTypedUnavailable pins the end of the retry
+// policy: when lock contention survives every attempt, the failure is the
+// ref-lock kind (unavailable) carrying the log detail, not the generic
+// classification of the last stderr.
+//
+// Not parallel: it drives the fake clock and the environment.
+func TestRefLockExhaustionReturnsTypedUnavailable(t *testing.T) {
+	script := `n=$(cat "$COUNT" 2>/dev/null || echo 0)
+n=$((n+1))
+echo "$n" > "$COUNT"
+echo "fatal: cannot lock ref 'refs/heads/fugue/task/t1': is at 1111 but expected 2222" >&2
+exit 1
+`
+	t.Setenv("COUNT", filepath.Join(t.TempDir(), "count"))
+	m, _, clk := fakeGitManager(t, script)
+
+	done := make(chan error, 1)
+	task := supervise.Go(t.Context(), "test.lock-exhaustion", func(ctx context.Context) error {
+		_, execErr := m.exec(ctx, t.TempDir(), "branch", "target")
+		done <- execErr
+		return nil
+	})
+	defer task.Stop()
+
+	for i := range refLockMaxRetries {
+		if err := clk.BlockUntilPending(t.Context(), 1); err != nil {
+			t.Fatalf("wait for backoff timer %d: %v", i, err)
+		}
+		clk.Advance(refLockBackoffBase << uint(i))
+	}
+	err := <-done
+	var gitErr *GitError
+	if !errors.As(err, &gitErr) || gitErr.Kind != failureRefLock {
+		t.Fatalf("err = %v, want a typed ref-lock failure", err)
+	}
+	if !errors.Is(err, ErrRefLockExhausted) {
+		t.Fatalf("err = %v, want the ErrRefLockExhausted sentinel", err)
+	}
+	if got := errcode.CodeOf(err); got != errcode.Unavailable {
+		t.Fatalf("CodeOf = %s, want unavailable", got)
+	}
+	if !strings.Contains(gitErr.Detail, "cannot lock ref") {
+		t.Fatalf("detail = %q, want git's ref-lock message for the logs", gitErr.Detail)
+	}
+	if elapsed := clk.Now().Sub(epoch()); elapsed != 350*time.Millisecond {
+		t.Fatalf("backoff total = %s, want 350ms", elapsed)
+	}
+}
+
+// TestContextCancellationReturnsTheContextError pins that a git process cut
+// down by its context reports the context error, not an exit-status
+// classification of the killed process.
+//
+// Not parallel: it changes the process environment and cancels under a
+// running git.
+func TestContextCancellationReturnsTheContextError(t *testing.T) {
+	started := filepath.Join(t.TempDir(), "started")
+	// The fake git signals that it is running and then blocks until killed.
+	t.Setenv("STARTED", started)
+	// exec replaces the shell with the sleeper, so the context kill reaches
+	// the only process and no child keeps the output pipes open.
+	m, _, _ := fakeGitManager(t, `echo ready > "$STARTED"
+exec sleep 30
+`)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	errCh := make(chan error, 1)
+	task := supervise.Go(ctx, "test.cancel-exec", func(ctx context.Context) error {
+		_, execErr := m.exec(ctx, t.TempDir(), "branch", "target")
+		errCh <- execErr
+		return nil
+	})
+	defer task.Stop()
+
+	waitForFile(t, ctx, started)
+	cancel()
+	err := <-errCh
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want the context error", err)
+	}
+	if got := errcode.CodeOf(err); got != errcode.Canceled {
+		t.Fatalf("CodeOf = %s, want canceled", got)
+	}
+}
+
+// waitForFile polls for the handshake file a fake git writes when it starts,
+// on the real clock with a bounded deadline (no busy waiting, no bare time
+// calls).
+func waitForFile(t *testing.T, ctx context.Context, path string) {
+	t.Helper()
+	clk := clock.Real{}
+	deadline := clk.Now().Add(10 * time.Second)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		if clk.Now().After(deadline) {
+			t.Fatalf("the fake git never signalled readiness at %s", path)
+		}
+		if err := clock.Sleep(ctx, clk, 10*time.Millisecond); err != nil {
+			t.Fatalf("wait for the handshake file: %v", err)
+		}
+	}
+}
+
 // TestNonRefLockErrorIsNotRetried pins that only ref-lock failures retry:
 // any other git failure returns immediately as a typed error.
 func TestNonRefLockErrorIsNotRetried(t *testing.T) {
@@ -187,6 +295,9 @@ exit 1
 	}
 	if gitErr.Code() != errcode.Unavailable {
 		t.Fatalf("code = %s, want unavailable", gitErr.Code())
+	}
+	if got := errcode.CodeOf(err); got != errcode.Unavailable {
+		t.Fatalf("CodeOf = %s, want unavailable", got)
 	}
 	if errors.Is(err, ErrRefLockExhausted) {
 		t.Fatal("a non-ref-lock failure must not be classified as ref lock")

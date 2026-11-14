@@ -12,7 +12,9 @@ import (
 // TestBranchContainsCommitForReconciliation pins the reconciliation query
 // behind the F11.4 restart note (OR-15): after a restart the merge queue
 // confirms an integrating outcome by asking whether the task's head commit is
-// already contained in the target branch instead of re-merging.
+// already contained in the target branch instead of re-merging. The target is
+// resolved strictly as a local branch, so a tag sharing the branch's name
+// never satisfies the query and a missing branch is a typed error.
 func TestBranchContainsCommitForReconciliation(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -31,6 +33,17 @@ func TestBranchContainsCommitForReconciliation(t *testing.T) {
 	// The base commit is an ancestor of every branch built on it.
 	base := strings.TrimSpace(fixtureGit(t, repoDir, "rev-parse", taskBranch+"~1"))
 	assertContains(t, ctx, m, repoDir, taskBranch, base, true)
+
+	// A branch and a tag share the name "shared": the branch sits at the
+	// base, the tag at the task head. The query must read the branch, so the
+	// task head is not contained even though the tag holds it.
+	fixtureGit(t, repoDir, "branch", "shared", base)
+	fixtureGit(t, repoDir, "tag", "shared", res.SHA)
+	assertContains(t, ctx, m, repoDir, "shared", res.SHA, false)
+
+	// A tag with no branch of the same name is never a target.
+	fixtureGit(t, repoDir, "tag", "orphan-tag", res.SHA)
+	assertMissingRef(t, ctx, m, repoDir, "orphan-tag", res.SHA)
 
 	// A missing branch or commit is a typed not-found error, not a silent no.
 	assertMissingRef(t, ctx, m, repoDir, "fugue/task/absent", res.SHA)
@@ -82,19 +95,32 @@ func assertMissingRef(t *testing.T, ctx context.Context, m *Manager, repoDir, br
 
 // TestWorktreeHeadReadsTheTaskHead covers the head read the merge queue uses
 // together with the containment query. The task branch is born at the parent
-// commit, so the head is the base commit until the first result commit lands.
+// commit, so the head is the base commit until the first result commit lands,
+// and an unborn HEAD reports no head without failing.
 func TestWorktreeHeadReadsTheTaskHead(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	m, root, _ := testManager(t)
 	repoDir := initRepo(t)
 
+	// An unborn HEAD: a repository whose HEAD names a branch without commits.
+	unborn := t.TempDir()
+	fixtureGit(t, unborn, "init", "--quiet")
+	fixtureGit(t, unborn, "symbolic-ref", "HEAD", "refs/heads/fresh")
+	head, err := m.WorktreeHead(ctx, unborn)
+	if err != nil {
+		t.Fatalf("worktree head on an unborn branch: %v", err)
+	}
+	if head != "" {
+		t.Fatalf("head = %q, want empty on an unborn branch", head)
+	}
+
 	wt, err := m.CreateTaskWorktree(ctx, root, repoDir, testRepoID, "t1", "main")
 	if err != nil {
 		t.Fatalf("create task worktree: %v", err)
 	}
 	base := strings.TrimSpace(fixtureGit(t, repoDir, "rev-parse", "main"))
-	head, err := m.WorktreeHead(ctx, wt)
+	head, err = m.WorktreeHead(ctx, wt)
 	if err != nil {
 		t.Fatalf("worktree head before any result commit: %v", err)
 	}

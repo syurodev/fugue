@@ -24,9 +24,9 @@ const (
 // envFixedCount is the number of variables scrubbedEnv appends.
 const envFixedCount = 6
 
-// runnerFixedArgs is the number of argument slots (two -c pairs) the runner
+// runnerFixedArgs is the number of argument slots (three -c pairs) the runner
 // puts in front of the caller's arguments.
-const runnerFixedArgs = 2
+const runnerFixedArgs = 3
 
 // gitResult carries the outcome of one git invocation. A non-zero exit is not
 // an error here; callers decide what an exit code means for their operation.
@@ -38,9 +38,11 @@ type gitResult struct {
 
 // exec runs one git command in dir with the runner's fixed arguments: the
 // injected binary, -c gc.auto=0, core.hooksPath pointing at Fugue's empty
-// directory, and a scrubbed environment with LC_ALL=C (orchestration §9).
-// Ref-lock failures are retried with backoff on the injected clock; every
-// other failure returns at once. The context bounds the command.
+// directory, -c core.fsmonitor=false (a repo-local fsmonitor command, writable
+// by an agent inside a worktree, must never run), and a scrubbed environment
+// with LC_ALL=C (orchestration §9). Ref-lock failures are retried with backoff
+// on the injected clock; every other failure returns at once. The context
+// bounds the command.
 func (m *Manager) exec(ctx context.Context, dir string, args ...string) (gitResult, error) {
 	hooks, err := m.HooksDir()
 	if err != nil {
@@ -50,6 +52,7 @@ func (m *Manager) exec(ctx context.Context, dir string, args ...string) (gitResu
 	full = append(full,
 		"-c", "gc.auto=0",
 		"-c", "core.hooksPath="+hooks,
+		"-c", "core.fsmonitor=false",
 	)
 	full = append(full, args...)
 
@@ -71,7 +74,9 @@ func (m *Manager) exec(ctx context.Context, dir string, args ...string) (gitResu
 		result.Stderr = lockErr.stderr
 		result.ExitCode = lockErr.exitCode
 	}
-	return result, m.gitFailure(opName(full), result)
+	// Every attempt failed on lock contention, so the failure is the ref-lock
+	// kind, not whatever stderr classification would guess.
+	return gitResult{}, newGitError(opName(full), failureRefLock, trimDetail(result.Stderr))
 }
 
 // runOnce performs a single exec of the git binary.
@@ -93,6 +98,11 @@ func (m *Manager) runOnce(ctx context.Context, dir string, args []string) (gitRe
 		Stdout: stdout.String(),
 		Stderr: stderr.String(),
 	}
+	// Cancellation beats every classification: when the context ended, the
+	// process was killed by it and its exit status says nothing about git.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return result, fmt.Errorf("gitops: %s: %w", opName(args), ctxErr)
+	}
 	if runErr == nil {
 		return result, nil
 	}
@@ -103,9 +113,6 @@ func (m *Manager) runOnce(ctx context.Context, dir string, args []string) (gitRe
 			return result, &lockBusyError{stderr: stderr.String(), exitCode: result.ExitCode}
 		}
 		return result, nil
-	}
-	if ctx.Err() != nil {
-		return result, fmt.Errorf("gitops: %s: %w", opName(args), ctx.Err())
 	}
 	return result, fmt.Errorf("gitops: start %s: %w", opName(args), runErr)
 }

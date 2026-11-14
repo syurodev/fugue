@@ -49,10 +49,15 @@ type PruneResult struct {
 // the retention duration ago and runs git worktree prune for stale admin
 // entries (orchestration §9, the fugue task prune primitive). The caller
 // supplies the ended-at times; the injected clock supplies now. A nil spec is
-// a typed error.
+// a typed error; spec.Root must be absolute and is resolved once for both the
+// existence check and the worktree removal.
 func (m *Manager) Prune(ctx context.Context, spec *PruneSpec) (PruneResult, error) {
 	if spec == nil {
 		return PruneResult{}, errcode.New(errcode.InvalidArgument, "gitops: prune spec is nil")
+	}
+	root, rootErr := resolveRoot(spec.Root)
+	if rootErr != nil {
+		return PruneResult{}, rootErr
 	}
 	retention, err := pruneRetention(spec.Retention)
 	if err != nil {
@@ -76,7 +81,7 @@ func (m *Manager) Prune(ctx context.Context, spec *PruneSpec) (PruneResult, erro
 			if task.TeamEndedAt.After(cutoff) {
 				continue
 			}
-			if taskErr := m.pruneTask(ctx, spec, task, &result); taskErr != nil {
+			if taskErr := m.pruneTask(ctx, spec.RepoDir, root, spec.RepoID, task, &result); taskErr != nil {
 				return taskErr
 			}
 		}
@@ -110,22 +115,22 @@ func validateTaskIDs(tasks []PruneTask) error {
 // pruneTask removes one expired task's worktree and branch. A worktree
 // directory that is already gone is left to the admin-entry prune; a missing
 // branch is not an error.
-func (m *Manager) pruneTask(ctx context.Context, spec *PruneSpec, task PruneTask, result *PruneResult) error {
+func (m *Manager) pruneTask(ctx context.Context, repoDir, root, repoID string, task PruneTask, result *PruneResult) error {
 	branch, err := TaskBranchName(task.TaskID)
 	if err != nil {
 		return err
 	}
-	wtPath, err := TaskWorktreePath(spec.Root, spec.RepoID, task.TaskID)
+	wtPath, err := TaskWorktreePath(root, repoID, task.TaskID)
 	if err != nil {
 		return err
 	}
 	if _, statErr := os.Lstat(wtPath); statErr == nil {
-		if _, rmErr := m.run(ctx, spec.RepoDir, "worktree", "remove", "--force", wtPath); rmErr != nil {
+		if _, rmErr := m.run(ctx, repoDir, "worktree", "remove", "--force", wtPath); rmErr != nil {
 			return rmErr
 		}
 		result.RemovedWorktrees = append(result.RemovedWorktrees, wtPath)
 	}
-	if err := m.deleteBranch(ctx, spec.RepoDir, branch); err != nil {
+	if err := m.deleteBranch(ctx, repoDir, branch); err != nil {
 		return err
 	}
 	result.RemovedBranches = append(result.RemovedBranches, branch)

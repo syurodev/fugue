@@ -101,7 +101,8 @@ func TestHooksDirFailureIsTyped(t *testing.T) {
 }
 
 // TestGitErrorKindMapping pins the public text, code and sentinel of every
-// failure kind; the texts never repeat git stderr.
+// failure kind; the texts never repeat git stderr, and the stable code is
+// reachable through errcode.CodeOf.
 func TestGitErrorKindMapping(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
@@ -117,15 +118,22 @@ func TestGitErrorKindMapping(t *testing.T) {
 		{failureMissingRef, errcode.NotFound, "unknown branch or commit", nil},
 	}
 	for _, tc := range cases {
-		e := &GitError{Op: gitName, Kind: tc.kind, Detail: "detail kept for logs"}
+		e := newGitError(gitName, tc.kind, "detail kept for logs")
 		if !strings.Contains(e.Error(), tc.text) || strings.Contains(e.Error(), "detail kept") {
 			t.Fatalf("kind %d text = %q, want it to name %q without the detail", tc.kind, e.Error(), tc.text)
 		}
 		if e.Code() != tc.code {
 			t.Fatalf("kind %d code = %s, want %s", tc.kind, e.Code(), tc.code)
 		}
-		if !errors.Is(e.Unwrap(), tc.unwrap) {
-			t.Fatalf("kind %d unwrap = %v, want %v", tc.kind, e.Unwrap(), tc.unwrap)
+		if got := errcode.CodeOf(e); got != tc.code {
+			t.Fatalf("kind %d CodeOf = %s, want %s", tc.kind, got, tc.code)
+		}
+		_, exposed := errcode.Expose(e)
+		if strings.Contains(exposed, "detail kept") {
+			t.Fatalf("kind %d exposed message %q carries the log detail", tc.kind, exposed)
+		}
+		if tc.unwrap != nil && !errors.Is(e, tc.unwrap) {
+			t.Fatalf("kind %d does not match its sentinel %v", tc.kind, tc.unwrap)
 		}
 	}
 }
@@ -159,17 +167,19 @@ func TestRunnerHelperDetails(t *testing.T) {
 }
 
 // TestWorktreeHeadOutsideARepository pins that a path that is not a
-// repository reports no head instead of failing the reconciliation query.
+// repository is a typed error: only the documented unborn-HEAD case reports
+// no head.
 func TestWorktreeHeadOutsideARepository(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	m, _, _ := testManager(t)
-	head, err := m.WorktreeHead(ctx, t.TempDir())
-	if err != nil {
-		t.Fatalf("worktree head outside a repository: %v", err)
+	_, err := m.WorktreeHead(ctx, t.TempDir())
+	var gitErr *GitError
+	if !errors.As(err, &gitErr) || gitErr.Code() != errcode.Unavailable {
+		t.Fatalf("err = %v, want a typed failure for a path that is not a repository", err)
 	}
-	if head != "" {
-		t.Fatalf("head = %q, want empty outside a repository", head)
+	if gitErr.Detail == "" {
+		t.Fatalf("detail = %q, want git's message for the logs", gitErr.Detail)
 	}
 }
 

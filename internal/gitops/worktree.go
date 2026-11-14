@@ -2,6 +2,7 @@ package gitops
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,7 +40,10 @@ func (m *Manager) CreateTeamBranch(ctx context.Context, repoDir, teamID, base st
 // CreateTaskWorktree creates the task branch fugue/task/<task-id> from
 // parentBranch and checks it out in a worktree at
 // <root>/worktrees/<repo-id>/<task-id> (orchestration §9). It returns the
-// worktree path. The caller passes the data directory and the repository id.
+// worktree path. The caller passes the data directory, which must be absolute
+// and is resolved once for both the existence check and the worktree add. When
+// the add fails after git created the branch, what this call made is removed
+// so a retry starts clean; a pre-existing branch is never deleted.
 func (m *Manager) CreateTaskWorktree(ctx context.Context, root, repoDir, repoID, taskID, parentBranch string) (string, error) {
 	branch, err := TaskBranchName(taskID)
 	if err != nil {
@@ -48,33 +52,64 @@ func (m *Manager) CreateTaskWorktree(ctx context.Context, root, repoDir, repoID,
 	if err := ValidateRefName(parentBranch); err != nil {
 		return "", errcode.New(errcode.InvalidArgument, "gitops: invalid parent branch")
 	}
+	root, rootErr := resolveRoot(root)
+	if rootErr != nil {
+		return "", rootErr
+	}
 	wtPath, pathErr := TaskWorktreePath(root, repoID, taskID)
 	if pathErr != nil {
 		return "", pathErr
 	}
 	lockErr := m.withRepoLock(ctx, repoDir, func() error {
-		exists, existsErr := m.branchExists(ctx, repoDir, branch)
-		if existsErr != nil {
-			return existsErr
-		}
-		if exists {
-			return errcode.New(errcode.AlreadyExists, "gitops: task branch already exists")
-		}
-		if _, statErr := os.Lstat(wtPath); statErr == nil {
-			return errcode.New(errcode.AlreadyExists, "gitops: task worktree path already exists")
-		}
-		if mkdirErr := os.MkdirAll(filepath.Dir(wtPath), 0o700); mkdirErr != nil {
-			return fmt.Errorf("gitops: create worktree parent directory: %w", mkdirErr)
-		}
-		if _, addErr := m.run(ctx, repoDir, "worktree", "add", "-b", branch, wtPath, parentBranch); addErr != nil {
-			return addErr
-		}
-		return nil
+		return m.addTaskWorktree(ctx, repoDir, wtPath, branch, parentBranch)
 	})
 	if lockErr != nil {
 		return "", lockErr
 	}
 	return wtPath, nil
+}
+
+// addTaskWorktree is the lock-held body of CreateTaskWorktree.
+func (m *Manager) addTaskWorktree(ctx context.Context, repoDir, wtPath, branch, parentBranch string) error {
+	exists, existsErr := m.branchExists(ctx, repoDir, branch)
+	if existsErr != nil {
+		return existsErr
+	}
+	if exists {
+		return errcode.New(errcode.AlreadyExists, "gitops: task branch already exists")
+	}
+	if _, statErr := os.Lstat(wtPath); statErr == nil {
+		return errcode.New(errcode.AlreadyExists, "gitops: task worktree path already exists")
+	}
+	if mkdirErr := os.MkdirAll(filepath.Dir(wtPath), 0o700); mkdirErr != nil {
+		return fmt.Errorf("gitops: create worktree parent directory: %w", mkdirErr)
+	}
+	if _, addErr := m.run(ctx, repoDir, "worktree", "add", "-b", branch, wtPath, parentBranch); addErr != nil {
+		if undoErr := m.undoFailedWorktreeAdd(ctx, repoDir, wtPath, branch); undoErr != nil {
+			return errors.Join(addErr, undoErr)
+		}
+		return addErr
+	}
+	return nil
+}
+
+// undoFailedWorktreeAdd removes the worktree and branch a failed worktree add
+// may have left behind. The branch was verified absent under the repo lock
+// before the add, so deleting it never touches a pre-existing one. Every step
+// is best effort: the caller reports the original add failure alongside.
+func (m *Manager) undoFailedWorktreeAdd(ctx context.Context, repoDir, wtPath, branch string) error {
+	var undoErrs []error
+	if _, removeErr := m.run(ctx, repoDir, "worktree", "remove", "--force", wtPath); removeErr != nil {
+		// The worktree directory may be missing or half-built; the admin
+		// entry prune is what clears it either way.
+		if _, pruneErr := m.run(ctx, repoDir, "worktree", "prune"); pruneErr != nil {
+			undoErrs = append(undoErrs, pruneErr)
+		}
+	}
+	if deleteErr := m.deleteBranch(ctx, repoDir, branch); deleteErr != nil {
+		undoErrs = append(undoErrs, deleteErr)
+	}
+	return errors.Join(undoErrs...)
 }
 
 // RemoveTaskWorktree removes the worktree of a task and deletes its branch
@@ -86,9 +121,13 @@ func (m *Manager) RemoveTaskWorktree(ctx context.Context, repoDir, root, repoID,
 	if err != nil {
 		return err
 	}
-	wtPath, err := TaskWorktreePath(root, repoID, taskID)
-	if err != nil {
-		return err
+	root, rootErr := resolveRoot(root)
+	if rootErr != nil {
+		return rootErr
+	}
+	wtPath, pathErr := TaskWorktreePath(root, repoID, taskID)
+	if pathErr != nil {
+		return pathErr
 	}
 	return m.withRepoLock(ctx, repoDir, func() error {
 		if _, statErr := os.Lstat(wtPath); statErr == nil {

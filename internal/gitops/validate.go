@@ -140,17 +140,30 @@ func TaskBranchName(taskID string) (string, error) {
 	return TaskBranchPrefix + taskID, nil
 }
 
+// resolveRoot validates the caller-supplied data directory: it must be
+// absolute and is cleaned once, so the single resolved value feeds both the
+// existence check and the worktree add and matches the admin entries git
+// records.
+func resolveRoot(root string) (string, error) {
+	if root == "" || !filepath.IsAbs(root) {
+		return "", errcode.New(errcode.InvalidArgument, "gitops: data directory is not an absolute path")
+	}
+	return filepath.Clean(root), nil
+}
+
 // TaskWorktreePath returns <root>/worktrees/<repo-id>/<task-id>, the worktree
-// location of a task under the data directory (orchestration §9).
+// location of a task under the data directory (orchestration §9). The root
+// must be absolute.
 func TaskWorktreePath(root, repoID, taskID string) (string, error) {
+	root, rootErr := resolveRoot(root)
+	if rootErr != nil {
+		return "", rootErr
+	}
 	if err := ValidateID("repo", repoID); err != nil {
 		return "", err
 	}
 	if err := ValidateID("task", taskID); err != nil {
 		return "", err
-	}
-	if root == "" {
-		return "", errcode.New(errcode.InvalidArgument, "gitops: data directory is empty")
 	}
 	return filepath.Join(root, worktreesDirName, repoID, taskID), nil
 }

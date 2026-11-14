@@ -8,9 +8,9 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
-// The failure kinds behind a GitError. Each maps to one public error code and
-// one message that never repeats git's raw stderr, which can contain
-// repository paths.
+// The failure kinds behind a GitError. Each maps to one public error code,
+// one public message that never repeats git's raw stderr (which can contain
+// repository paths), and an optional sentinel callers can match.
 type failureKind int
 
 const (
@@ -29,52 +29,9 @@ const (
 	failureMissingRef
 )
 
-// Sentinel errors callers can match with errors.Is.
-var (
-	// ErrRefLockExhausted is returned when a ref-lock error survives every retry.
-	ErrRefLockExhausted = errors.New("gitops: ref lock stayed busy after retries")
-	// ErrNoCommit is returned by CommitWorktree when the worktree had nothing to commit.
-	ErrNoCommit = errors.New("gitops: no changes to commit")
-)
-
-// GitError reports a failed git operation. Error names only the operation and
-// the failure kind: git stderr is kept in Detail for the host's logs, because
-// it can contain repository paths and is untrusted output.
-type GitError struct {
-	Op     string
-	Kind   failureKind
-	Detail string
-}
-
-// Error implements error without git's raw stderr.
-func (e *GitError) Error() string {
-	switch e.Kind {
-	case failureGit:
-		return fmt.Sprintf("gitops: %s failed", e.Op)
-	case failureIdentity:
-		return fmt.Sprintf("gitops: %s failed: no usable git identity or signing key", e.Op)
-	case failureSigning:
-		return fmt.Sprintf("gitops: %s failed: signature creation failed", e.Op)
-	case failureRefLock:
-		return fmt.Sprintf("gitops: %s failed: %v", e.Op, ErrRefLockExhausted)
-	case failureMissingRef:
-		return fmt.Sprintf("gitops: %s failed: unknown branch or commit", e.Op)
-	default:
-		return fmt.Sprintf("gitops: %s failed", e.Op)
-	}
-}
-
-// Unwrap reports the sentinel behind the failure, if any.
-func (e *GitError) Unwrap() error {
-	if e.Kind == failureRefLock {
-		return ErrRefLockExhausted
-	}
-	return nil
-}
-
-// Code returns the public error code for the failure.
-func (e *GitError) Code() errcode.Code {
-	switch e.Kind {
+// code returns the public error code for the kind.
+func (k failureKind) code() errcode.Code {
+	switch k {
 	case failureGit, failureRefLock:
 		return errcode.Unavailable
 	case failureIdentity, failureSigning:
@@ -86,14 +43,77 @@ func (e *GitError) Code() errcode.Code {
 	}
 }
 
+// message returns the public text for the kind; it names only the operation.
+func (k failureKind) message(op string) string {
+	switch k {
+	case failureGit:
+		return fmt.Sprintf("gitops: %s failed", op)
+	case failureIdentity:
+		return fmt.Sprintf("gitops: %s failed: no usable git identity or signing key", op)
+	case failureSigning:
+		return fmt.Sprintf("gitops: %s failed: signature creation failed", op)
+	case failureRefLock:
+		return fmt.Sprintf("gitops: %s failed: %v", op, ErrRefLockExhausted)
+	case failureMissingRef:
+		return fmt.Sprintf("gitops: %s failed: unknown branch or commit", op)
+	default:
+		return fmt.Sprintf("gitops: %s failed", op)
+	}
+}
+
+// sentinel returns the error kind callers can match with errors.Is.
+func (k failureKind) sentinel() error {
+	if k == failureRefLock {
+		return ErrRefLockExhausted
+	}
+	return nil
+}
+
+// Sentinel errors callers can match with errors.Is.
+var (
+	// ErrRefLockExhausted is returned when a ref-lock error survives every retry.
+	ErrRefLockExhausted = errors.New("gitops: ref lock stayed busy after retries")
+	// ErrNoCommit is returned by CommitWorktree when the worktree had nothing to commit.
+	ErrNoCommit = errors.New("gitops: no changes to commit")
+)
+
+// GitError reports a failed git operation. Error names only the operation and
+// the failure kind: git stderr is kept in Detail for the host's logs, because
+// it can contain repository paths and is untrusted output. Unwrap reaches an
+// *errcode.Error carrying the stable code, so errcode.CodeOf and Expose see
+// the typed code, and the kind's sentinel behind it.
+type GitError struct {
+	Op     string
+	Kind   failureKind
+	Detail string
+
+	coded *errcode.Error
+}
+
+// newGitError builds the typed error for one failure kind.
+func newGitError(op string, kind failureKind, detail string) *GitError {
+	return &GitError{
+		Op:     op,
+		Kind:   kind,
+		Detail: detail,
+		coded:  errcode.Wrap(kind.code(), kind.message(op), kind.sentinel()),
+	}
+}
+
+// Error implements error without git's raw stderr.
+func (e *GitError) Error() string { return e.Kind.message(e.Op) }
+
+// Unwrap reaches the coded error (and, through it, the kind's sentinel), so
+// errcode.CodeOf, errcode.Expose and errors.Is all see the stable code.
+func (e *GitError) Unwrap() error { return e.coded }
+
+// Code returns the public error code for the failure.
+func (e *GitError) Code() errcode.Code { return e.Kind.code() }
+
 // gitFailure turns a non-zero git exit into a typed GitError, classifying
 // identity and signing problems on the way.
 func (m *Manager) gitFailure(op string, res gitResult) *GitError {
-	return &GitError{
-		Op:     op,
-		Kind:   classify(res.Stderr),
-		Detail: trimDetail(res.Stderr),
-	}
+	return newGitError(op, classify(res.Stderr), trimDetail(res.Stderr))
 }
 
 // classify maps git's stderr (LC_ALL=C keeps the wording stable) to a failure
