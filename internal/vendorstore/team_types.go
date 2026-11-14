@@ -13,6 +13,13 @@ var (
 	ErrTeamTransition = errcode.New(errcode.FailedPrecondition, "invalid team or task state transition")
 	// ErrTeamChildrenNotTerminal indicates a team_manager reported before all children reached terminal states.
 	ErrTeamChildrenNotTerminal = errcode.New(errcode.FailedPrecondition, "team manager children are not terminal")
+	// ErrTeamTasksUnsettled indicates a terminal team outcome was recorded while
+	// tasks of the team are not all terminal (Q-84: settle tasks first; unknown
+	// is not terminal).
+	ErrTeamTasksUnsettled = errcode.New(errcode.FailedPrecondition, "team has unsettled tasks")
+	// ErrTeamTerminal indicates a task event was attempted on a team whose state
+	// is already terminal; the team ended, so nothing further is appended (Q-84).
+	ErrTeamTerminal = errcode.New(errcode.FailedPrecondition, "team is terminal")
 	// ErrTeamInvalidInput indicates malformed team creation or event input.
 	ErrTeamInvalidInput = errcode.New(errcode.InvalidArgument, "invalid team or task input")
 )
@@ -78,8 +85,13 @@ const (
 	EventTeamProposed    TeamEventType = "TeamProposed"
 	EventTeamStarted     TeamEventType = "TeamStarted"
 	EventTeamFinalReview TeamEventType = "TeamFinalReview"
-	EventTeamDecided     TeamEventType = "TeamDecided"
-	EventTeamEnded       TeamEventType = "TeamEnded"
+	// EventTeamAmended is reserved in the migration's event-type CHECK for
+	// orchestration §3.2; F11.2 owns its transition, so the store defines no
+	// domain transition for it yet. SQLite cannot alter a CHECK constraint,
+	// so the name must be admitted while the table is still empty.
+	EventTeamAmended TeamEventType = "TeamAmended"
+	EventTeamDecided TeamEventType = "TeamDecided"
+	EventTeamEnded   TeamEventType = "TeamEnded"
 
 	EventTaskCreated          TeamEventType = "TaskCreated"
 	EventTaskAssigned         TeamEventType = "TaskAssigned"

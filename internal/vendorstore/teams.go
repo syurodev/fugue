@@ -274,22 +274,66 @@ func applyTeamOrTaskProjection(
 	ev *AppendTeamEventInput,
 ) (string, string, error) {
 	if isTeamEventType(ev.EventType) {
-		if ev.TaskID != "" {
-			return "", "", fmt.Errorf("%w: team event %s must not set task_id", ErrTeamInvalidInput, ev.EventType)
-		}
-		nextState, err := nextTeamState(curTeamState, ev.EventType, ev.Outcome, ev.FailureCode)
-		if err != nil {
-			return "", "", err
-		}
-		if err := updateTeamProjection(ctx, tx, teamID, nextState, nextSeq, ev.FailureCode, now); err != nil {
-			return "", "", err
-		}
-		return string(curTeamState), string(nextState), nil
+		return applyTeamProjection(ctx, tx, teamID, curTeamState, nextSeq, now, ev)
 	}
 	if ev.TaskID == "" {
 		return "", "", fmt.Errorf("%w: task event %s requires task_id", ErrTeamInvalidInput, ev.EventType)
 	}
+	// Q-84: once the team is terminal, nothing further is appended for it;
+	// F11.2/F11.3 cancel every task first, then append TeamEnded.
+	if isTeamTerminal(curTeamState) {
+		return "", "", fmt.Errorf("%w: %s on team %s in terminal state %s", ErrTeamTerminal, ev.EventType, teamID, curTeamState)
+	}
 	return applyTaskProjection(ctx, tx, teamID, nextSeq, now, ev)
+}
+
+func applyTeamProjection(
+	ctx context.Context,
+	tx *sql.Tx,
+	teamID string,
+	curTeamState TeamState,
+	nextSeq, now int64,
+	ev *AppendTeamEventInput,
+) (string, string, error) {
+	if ev.TaskID != "" {
+		return "", "", fmt.Errorf("%w: team event %s must not set task_id", ErrTeamInvalidInput, ev.EventType)
+	}
+	nextState, err := nextTeamState(curTeamState, ev.EventType, ev.Outcome, ev.FailureCode)
+	if err != nil {
+		return "", "", err
+	}
+	// Q-84 (settle tasks first): a team event that ends the team is accepted
+	// only when every task is already terminal. The check runs inside this
+	// transaction, so the append and the settledness it relies on commit or
+	// roll back together.
+	if isTeamTerminal(nextState) {
+		if err := ensureTeamTasksSettled(ctx, tx, teamID); err != nil {
+			return "", "", err
+		}
+	}
+	if err := updateTeamProjection(ctx, tx, teamID, nextState, nextSeq, ev.FailureCode, now); err != nil {
+		return "", "", err
+	}
+	return string(curTeamState), string(nextState), nil
+}
+
+// ensureTeamTasksSettled rejects a terminal team outcome while any task of the
+// team is still non-terminal; unknown counts as not settled, so a restarted
+// task must go through its recovery decision before the team may end.
+func ensureTeamTasksSettled(ctx context.Context, tx *sql.Tx, teamID string) error {
+	var unsettled int
+	err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM team_tasks
+		WHERE team_id = ? AND state NOT IN ('done', 'failed', 'stopped', 'cancelled')`,
+		teamID,
+	).Scan(&unsettled)
+	if err != nil {
+		return fmt.Errorf("count unsettled team tasks: %w", err)
+	}
+	if unsettled > 0 {
+		return fmt.Errorf("%w: %d task(s) not terminal", ErrTeamTasksUnsettled, unsettled)
+	}
+	return nil
 }
 
 func applyTaskProjection(
@@ -407,72 +451,6 @@ func insertAppendedTeamEvent(
 	)
 	if err != nil {
 		return fmt.Errorf("insert team_task_event: %w", err)
-	}
-	return nil
-}
-
-func (s *Store) sealEventPayloadIfPresent(teamID, keyID string, wrappedKey []byte, ev *AppendTeamEventInput) ([]byte, error) {
-	if len(ev.ProtectedPayload) == 0 {
-		return nil, nil
-	}
-	rawKey, err := s.unwrapTeamKey(teamID, keyID, wrappedKey)
-	if err != nil {
-		return nil, err
-	}
-	defer clear(rawKey)
-	env, err := sealing.SealPayload(randomReader{s.random}, teamEventRecordType, teamID, ev.EventID, string(ev.EventType), keyID, rawKey, ev.ProtectedPayload)
-	if err != nil {
-		return nil, fmt.Errorf("seal event payload: %w", err)
-	}
-	return env, nil
-}
-
-// unwrapTeamKey unwraps the per-team key for one use. The raw key is never
-// cached: a vault lock clears the cache through its guard, but an install that
-// races that guard would retain key material while the vault is locked. The
-// vendor payload path unwraps per use for the same reason.
-func (s *Store) unwrapTeamKey(teamID, keyID string, wrappedKey []byte) ([]byte, error) {
-	raw, err := sealing.UnwrapSessionKey(s.vault, teamKeyRecordType, teamID, keyID, wrappedKey)
-	if err != nil {
-		return nil, fmt.Errorf("%w: unwrap team key: %w", ErrUnavailable, err)
-	}
-	return raw, nil
-}
-
-func (s *Store) requireUnlockedVault() (vault.Snapshot, error) {
-	if s.vault == nil {
-		return vault.Snapshot{}, fmt.Errorf("%w: %w", ErrUnavailable, vault.ErrLocked)
-	}
-	snap := s.vault.Snapshot()
-	if snap.State != vault.StateUnlocked {
-		return snap, fmt.Errorf("%w: %w", ErrUnavailable, vault.ErrLocked)
-	}
-	return snap, nil
-}
-
-func (s *Store) teamPayloadGate(payload []byte) (vault.Snapshot, bool, error) {
-	if len(payload) == 0 {
-		return vault.Snapshot{}, false, nil
-	}
-	snap, err := s.requireUnlockedVault()
-	return snap, true, err
-}
-
-func (s *Store) commitTeamTx(snap vault.Snapshot, needVault bool, commitFn func() error) error {
-	s.prepare.Lock()
-	fault := s.beforeCommit
-	s.prepare.Unlock()
-	if fault != nil {
-		return fmt.Errorf("%w: %w", ErrUnavailable, fault)
-	}
-	if needVault {
-		if err := s.vault.WithUnlocked(snap, commitFn); err != nil {
-			return fmt.Errorf("commit sealed team tx: %w", err)
-		}
-		return nil
-	}
-	if err := commitFn(); err != nil {
-		return fmt.Errorf("commit team tx: %w", err)
 	}
 	return nil
 }

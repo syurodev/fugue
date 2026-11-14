@@ -56,7 +56,7 @@ CREATE TABLE IF NOT EXISTS team_task_events (
     event_id TEXT NOT NULL,
     task_id TEXT NOT NULL DEFAULT '',
     event_type TEXT NOT NULL CHECK (event_type IN (
-        'TeamProposed', 'TeamStarted', 'TeamFinalReview', 'TeamDecided', 'TeamEnded',
+        'TeamProposed', 'TeamStarted', 'TeamFinalReview', 'TeamAmended', 'TeamDecided', 'TeamEnded',
         'TaskCreated', 'TaskAssigned', 'TaskStarted', 'TaskQuestionAsked',
         'TaskQuestionAnswered', 'TaskReported', 'TaskCheckCompleted',
         'TaskReviewed', 'TaskIntegrated', 'TaskMarkedUnknown',

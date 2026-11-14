@@ -31,6 +31,10 @@ const (
 	testTaskAskID     = "t-asking"
 	testTaskCheckID   = "t-checking"
 	testTaskReviewID  = "t-review"
+	testSettleLeadID  = "ts-lead"
+	testSettleMemID   = "ts-mem"
+	testEndLeadID     = "tt-lead"
+	testEndMemID      = "tt-mem"
 )
 
 var errSimulatedIO = errors.New("simulated io failure")
@@ -289,6 +293,20 @@ func assertContiguousAndAppendOnly(t *testing.T, s *Store) {
 	if _, updErr := s.db.ExecContext(ctx, `UPDATE team_task_events SET outcome = 'x' WHERE team_id = 'team-atomic' AND sequence = 1`); updErr == nil {
 		t.Fatal("expected append-only trigger to reject UPDATE on team_task_events")
 	}
+	// TeamAmended (§3.2) is admitted by the migration's CHECK ahead of F11.2,
+	// which owns its transition: SQLite cannot alter a CHECK on this
+	// append-only table, so the name must be accepted while it is empty.
+	next := events[len(events)-1].Sequence + 1
+	if _, amendErr := s.db.ExecContext(ctx, `
+		INSERT INTO team_task_events (team_id, sequence, event_id, event_type, created_at)
+		VALUES ('team-atomic', ?, 'ev-amend', 'TeamAmended', 100)`, next); amendErr != nil {
+		t.Fatalf("insert TeamAmended event: %v", amendErr)
+	}
+	if _, badErr := s.db.ExecContext(ctx, `
+		INSERT INTO team_task_events (team_id, sequence, event_id, event_type, created_at)
+		VALUES ('team-atomic', ?, 'ev-unknown', 'TeamHatched', 100)`, next+1); badErr == nil || !strings.Contains(badErr.Error(), "CHECK") {
+		t.Fatalf("unknown event type err = %v, want a CHECK violation", badErr)
+	}
 }
 
 func TestRestartMarksRunningTasksUnknownAndNeverReruns(t *testing.T) {
@@ -416,6 +434,134 @@ func assertUnknownDecisionsOnlyLeaveUnknown(t *testing.T, s2 *Store, seq int64) 
 		if err != nil {
 			t.Fatalf("decision %s: %v", ev.EventID, err)
 		}
+	}
+}
+
+// TestTerminalTeamRequiresSettledTasks enforces the Q-84 rule (settle tasks
+// first): a team event that moves the team to done, cancelled or failed is
+// accepted only when every task of the team is terminal, and unknown counts as
+// not terminal. Nothing is appended when the guard rejects.
+func TestTerminalTeamRequiresSettledTasks(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, _, _ := protectedStore(t)
+
+	rec, _, err := s.CreateTeam(ctx, &NewTeamInput{
+		TeamID: "team-settle", WorkspaceID: testWorkspaceID, ProposedEventID: testEvProposed,
+		Tasks: []NewTaskInput{
+			{TaskID: testSettleLeadID, HierarchyRole: RoleLead, CatalogRole: testRoleResearch, Deliverable: DeliverableReport, CreatedEventID: "ts-0", ProtectedSpec: []byte("{}")},
+			{TaskID: testSettleMemID, ParentTaskID: testSettleLeadID, HierarchyRole: RoleMember, CatalogRole: testRoleCoder, Deliverable: DeliverableDiff, CreatedEventID: "ts-1", ProtectedSpec: []byte("{}")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	seq := appendSeq(t, s, "team-settle", rec.LastSeq, []AppendTeamEventInput{
+		{EventID: "ts-team-start", EventType: EventTeamStarted},
+		{EventID: "ts-m-1", TaskID: testSettleMemID, EventType: EventTaskAssigned},
+		{EventID: "ts-m-2", TaskID: testSettleMemID, EventType: EventTaskStarted},
+		{EventID: "ts-m-3", TaskID: testSettleMemID, EventType: EventTaskReported},
+		{EventID: "ts-m-4", TaskID: testSettleMemID, EventType: EventTaskCheckCompleted, Outcome: testOutcomePassed},
+		{EventID: "ts-m-5", TaskID: testSettleMemID, EventType: EventTaskReviewed, Outcome: "complete_no_diff"},
+	})
+	assertTeamEndRejected(t, s, "team-settle", seq, TeamStateActive)
+
+	// An unknown task also blocks the team outcome: its recovery decision
+	// settles it before the team may end.
+	seq = appendSeq(t, s, "team-settle", seq, []AppendTeamEventInput{
+		{EventID: "ts-l-1", TaskID: testSettleLeadID, EventType: EventTaskAssigned},
+		{EventID: "ts-l-2", TaskID: testSettleLeadID, EventType: EventTaskStarted},
+		{EventID: "ts-l-3", TaskID: testSettleLeadID, EventType: EventTaskMarkedUnknown},
+	})
+	if _, unknownErr := s.AppendTeamEvent(ctx, "team-settle", seq, &AppendTeamEventInput{
+		EventID: "ts-end-unknown", EventType: EventTeamEnded, Outcome: outcomeCancelled,
+	}); !errors.Is(unknownErr, ErrTeamTasksUnsettled) {
+		t.Fatalf("TeamEnded with unknown task err = %v, want ErrTeamTasksUnsettled", unknownErr)
+	}
+	seq = appendSeq(t, s, "team-settle", seq, []AppendTeamEventInput{
+		{EventID: "ts-l-4", TaskID: testSettleLeadID, EventType: EventTaskRecoveryDecided, Outcome: "cancel"},
+		{EventID: "ts-final", EventType: EventTeamFinalReview},
+		{EventID: "ts-complete", EventType: EventTeamDecided, Outcome: "complete"},
+	})
+	recDone, _, err := s.TeamSnapshot(ctx, "team-settle")
+	if err != nil || recDone.State != TeamStateDone || recDone.LastSeq != seq {
+		t.Fatalf("settled team = (%+v, %v), want state done at seq %d", recDone, err, seq)
+	}
+}
+
+// TestTaskEventOnTerminalTeamIsRejected enforces the second half of Q-84: once
+// the team is terminal, every task event for that team is rejected with a typed
+// error and nothing is appended.
+func TestTaskEventOnTerminalTeamIsRejected(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, _, _ := protectedStore(t)
+
+	rec, _, err := s.CreateTeam(ctx, &NewTeamInput{
+		TeamID: "team-terminal", WorkspaceID: testWorkspaceID, ProposedEventID: testEvProposed,
+		Tasks: []NewTaskInput{
+			{TaskID: testEndLeadID, HierarchyRole: RoleLead, CatalogRole: testRoleResearch, Deliverable: DeliverableReport, CreatedEventID: "tt-0", ProtectedSpec: []byte("{}")},
+			{TaskID: testEndMemID, ParentTaskID: testEndLeadID, HierarchyRole: RoleMember, CatalogRole: testRoleCoder, Deliverable: DeliverableDiff, CreatedEventID: "tt-1", ProtectedSpec: []byte("{}")},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	// Cancellation order: cancel each task first, then append TeamEnded.
+	seq := appendSeq(t, s, "team-terminal", rec.LastSeq, []AppendTeamEventInput{
+		{EventID: "tt-start", EventType: EventTeamStarted},
+		{EventID: "tt-m-1", TaskID: testEndMemID, EventType: EventTaskEnded, Outcome: outcomeCancelled},
+		{EventID: "tt-l-1", TaskID: testEndLeadID, EventType: EventTaskEnded, Outcome: outcomeCancelled},
+		{EventID: "tt-end", EventType: EventTeamEnded, Outcome: outcomeCancelled},
+	})
+	recEnd, _, err := s.TeamSnapshot(ctx, "team-terminal")
+	if err != nil || recEnd.State != TeamStateCancelled {
+		t.Fatalf("cancelled team = (%+v, %v), want state cancelled", recEnd, err)
+	}
+	if _, afterErr := s.AppendTeamEvent(ctx, "team-terminal", seq, &AppendTeamEventInput{
+		EventID: "tt-after", TaskID: testEndLeadID, EventType: EventTaskAssigned,
+	}); !errors.Is(afterErr, ErrTeamTerminal) {
+		t.Fatalf("task event on terminal team err = %v, want ErrTeamTerminal", afterErr)
+	}
+	after, _, err := s.TeamSnapshot(ctx, "team-terminal")
+	if err != nil || after.LastSeq != seq {
+		t.Fatalf("rejected task event changed the team: %+v, err=%v", after, err)
+	}
+	events, err := s.TeamEventsSince(ctx, "team-terminal", seq, 10)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("rejected task event left event rows: (%d, %v)", len(events), err)
+	}
+}
+
+func appendSeq(t *testing.T, s *Store, teamID string, seq int64, events []AppendTeamEventInput) int64 {
+	t.Helper()
+	ctx := t.Context()
+	for _, ev := range events {
+		evCopy := ev
+		var err error
+		seq, err = s.AppendTeamEvent(ctx, teamID, seq, &evCopy)
+		if err != nil {
+			t.Fatalf("AppendTeamEvent(%s): %v", ev.EventID, err)
+		}
+	}
+	return seq
+}
+
+func assertTeamEndRejected(t *testing.T, s *Store, teamID string, seq int64, wantState TeamState) {
+	t.Helper()
+	ctx := t.Context()
+	if _, endErr := s.AppendTeamEvent(ctx, teamID, seq, &AppendTeamEventInput{
+		EventID: "ts-end-early-" + teamID, EventType: EventTeamEnded, Outcome: outcomeCancelled,
+	}); !errors.Is(endErr, ErrTeamTasksUnsettled) {
+		t.Fatalf("TeamEnded with unsettled tasks err = %v, want ErrTeamTasksUnsettled", endErr)
+	}
+	rec, _, err := s.TeamSnapshot(ctx, teamID)
+	if err != nil || rec.LastSeq != seq || rec.State != wantState {
+		t.Fatalf("rejected team end changed the team: %+v, err=%v", rec, err)
+	}
+	events, err := s.TeamEventsSince(ctx, teamID, seq, 10)
+	if err != nil || len(events) != 0 {
+		t.Fatalf("rejected team end left event rows: (%d, %v)", len(events), err)
 	}
 }
 
