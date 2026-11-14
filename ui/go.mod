@@ -10,6 +10,7 @@ require (
 	github.com/yuin/goldmark v1.7.13
 	go.uber.org/goleak v1.3.0
 	golang.org/x/image v0.47.0
+	google.golang.org/protobuf v1.36.12
 )
 
 replace github.com/syurodev/fugue => ../
@@ -23,5 +24,4 @@ require (
 	golang.org/x/net v0.61.0 // indirect
 	golang.org/x/sys v0.49.0 // indirect
 	golang.org/x/text v0.43.0 // indirect
-	google.golang.org/protobuf v1.36.12 // indirect
 )
