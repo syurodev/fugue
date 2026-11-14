@@ -26,12 +26,15 @@ type topicScript struct {
 // subscribe is the fake handler's callback.
 func (ts *topicScript) subscribe(ctx context.Context, req *connect.Request[hostv1.SubscribeRequest], stream *connect.ServerStream[hostv1.SubscribeResponse]) error {
 	ts.mu.Lock()
-	ts.hasCursor = req.Msg.GetCursor() != nil
-	ts.curCursor = req.Msg.GetCursor().GetSequence()
-	ts.cursors[req.Msg.Topic] = append(ts.cursors[req.Msg.Topic], ts.curCursor)
+	hasCursor := req.Msg.GetCursor() != nil
+	cursor := req.Msg.GetCursor().GetSequence()
+	ts.hasCursor, ts.curCursor = hasCursor, cursor
+	ts.cursors[req.Msg.Topic] = append(ts.cursors[req.Msg.Topic], cursor)
+	topic := ts.topic
+	catchUpSeq := ts.catchUpSeq
 	ts.mu.Unlock()
-	if req.Msg.Topic != ts.topic {
-		if ts.hasCursor {
+	if req.Msg.Topic != topic {
+		if hasCursor {
 			return fmt.Errorf("the host topic never carries a cursor: %w", errTransportFailure)
 		}
 		if err := stream.Send(&hostv1.SubscribeResponse{Kind: &hostv1.SubscribeResponse_Snapshot{
@@ -42,9 +45,9 @@ func (ts *topicScript) subscribe(ctx context.Context, req *connect.Request[hostv
 		<-ctx.Done()
 		return nil
 	}
-	if ts.hasCursor {
+	if hasCursor {
 		if err := stream.Send(&hostv1.SubscribeResponse{Kind: &hostv1.SubscribeResponse_Event{
-			Event: &hostv1.HostEvent{Sequence: ts.catchUpSeq, Type: testTrailer},
+			Event: &hostv1.HostEvent{Sequence: catchUpSeq, Type: testTrailer},
 		}}); err != nil {
 			return fmt.Errorf("send the catch-up event: %w", err)
 		}
