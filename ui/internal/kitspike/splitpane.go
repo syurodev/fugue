@@ -29,8 +29,14 @@ type SplitPaneState struct {
 	// drag is the pointer.ID currently dragging the handle.
 	drag     pointer.ID
 	dragging bool
-	// lastUp is when the handle was released; two quick releases reset.
+	// lastUp is when the handle was last released without dragging; two
+	// quick such releases reset. A release that ends a real drag is not a
+	// click, so it never counts toward the double.
 	lastUp time.Time
+	// pressPos is where the current drag started; moved is whether the
+	// pointer travelled far enough to call it a drag.
+	pressPosX float32
+	moved     bool
 	// reset animates the double-click reset with Smooth (§3.7: a command,
 	// not a drag, may animate); dragging cancels it.
 	reset     motion.Spring
@@ -94,16 +100,24 @@ func (s *SplitPaneState) Layout(env *Env, gtx *layout.Context, left, right func(
 				s.drag = e.PointerID
 				s.dragging = true
 				s.resetting = false
+				s.pressPosX = e.Position.X
+				s.moved = false
 				s.follow(e.Position.X, span, hit)
 			case pointer.Drag:
 				if s.dragging && e.PointerID == s.drag {
+					if d := e.Position.X - s.pressPosX; d > 4 || d < -4 {
+						s.moved = true
+					}
 					s.follow(e.Position.X, span, hit)
 				}
 			case pointer.Release:
 				if s.dragging && e.PointerID == s.drag {
 					s.dragging = false
-					// Double-click reset (§6.27).
-					if !s.lastUp.IsZero() && gtx.Now.Sub(s.lastUp) < 300*time.Millisecond {
+					// Double-click reset (§6.27): two quick clicks, and a
+					// release that ends a drag is not a click.
+					if s.moved {
+						s.lastUp = time.Time{}
+					} else if !s.lastUp.IsZero() && gtx.Now.Sub(s.lastUp) < 300*time.Millisecond {
 						s.reset = motion.NewSpringSpec(s.ratio, motion.Smooth())
 						s.resetting = true
 						s.lastUp = time.Time{}
@@ -118,7 +132,9 @@ func (s *SplitPaneState) Layout(env *Env, gtx *layout.Context, left, right func(
 	}()
 
 	// Keyboard (§6.27): the handle is focusable; arrows move 16 dp,
-	// Shift+arrow 64 dp.
+	// Shift+arrow 64 dp. Reading the FocusFilter is what makes the router
+	// treat the tag as focusable across frames (see the guide).
+	gtx.Event(key.FocusFilter{Target: tag})
 	move := func(stepDp int) {
 		s.ratio = clampF32(float32(leftW+stepDp)/float32(span), 0, 1)
 		s.resetting = false
@@ -150,6 +166,7 @@ func (s *SplitPaneState) Layout(env *Env, gtx *layout.Context, left, right func(
 		}
 	}
 	leftW = clamp(int(float32(span)*s.ratio), p.MinLeft, span-p.MinRight)
+	s.ratio = float32(leftW) / float32(span)
 
 	// Left pane, clipped to its area.
 	lg := *gtx

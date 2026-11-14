@@ -80,22 +80,22 @@ func (e *Env) TrackInput(gtx *layout.Context) {
 // FocusVisible reports whether tag is focused AND focus came from the
 // keyboard, so the focus ring shows only for keyboard focus (UK-05).
 func (e *Env) FocusVisible(gtx *layout.Context, tag event.Tag) bool {
-	if e.SimFocus == tag {
+	if tag != nil && e.SimFocus == tag {
 		return true
 	}
-	return gtx.Focused(tag) && e.modality
+	return tag != nil && gtx.Focused(tag) && e.modality
 }
 
 // Hovered reports whether the pointer rests on tag, honoring the screenshot
 // simulation.
 func (e *Env) Hovered(tag event.Tag) bool {
-	return e.SimHover == tag
+	return tag != nil && e.SimHover == tag
 }
 
 // Pressed reports whether tag is being held down, honoring the screenshot
 // simulation.
 func (e *Env) Pressed(tag event.Tag) bool {
-	return e.SimPressed == tag
+	return tag != nil && e.SimPressed == tag
 }
 
 // Begin starts a frame: advance the driver and remember the step. The window

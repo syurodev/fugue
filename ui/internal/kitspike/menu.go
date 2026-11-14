@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"image"
 
+	"gioui.org/f32"
 	"gioui.org/io/event"
 	"gioui.org/io/key"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/widget"
 
@@ -37,7 +40,6 @@ type MenuSelected []int
 type menuPanel struct {
 	items     []MenuItem
 	clicks    []widget.Clickable
-	scrim     widget.Clickable
 	itemRects []image.Rectangle
 	panel     image.Rectangle
 	presence  motion.Presence
@@ -51,6 +53,7 @@ type menuPanel struct {
 	typeahead string
 	// sub is the open submenu, nil for none.
 	sub       *menuPanel
+	parent    *menuPanel
 	ownerItem int
 	// grabbedFocus is set once the level has taken keyboard focus.
 	grabbedFocus bool
@@ -98,8 +101,9 @@ func (o *Overlay) CloseAll() {
 	}
 }
 
-// Shown reports whether a menu is open or still animating out.
-func (o *Overlay) Shown() bool { return o.top != nil }
+// Shown reports whether a menu is open (the exit animation may still be
+// running after this turns false; Visible levels keep drawing).
+func (o *Overlay) Shown() bool { return o.top != nil && o.top.presence.Shown() }
 
 // Top exposes the root level for tests and scripts.
 func (o *Overlay) Top() *menuPanel { return o.top }
@@ -150,30 +154,31 @@ func (o *Overlay) layoutLevel(env *Env, gtx *layout.Context, p *menuPanel, isRoo
 	if p.presence.Visible() {
 		prog := p.presence.Progress()
 
-		// The root level gets the full-window click-catcher under the panel
-		// (§6.15: click outside closes). While leaving, no input at all: a
-		// click must pass to whatever is under the dying panel.
+		// The root level takes the whole window as its input area (§6.15:
+		// click outside closes). Pointer absorption makes the TOPMOST
+		// non-pass area win, so this area only sees the clicks the item
+		// rows above did not take: any of those outside the panel closes
+		// the menu. While leaving, no input at all.
 		if isRoot && p.presence.Shown() {
-			far := 1 << 14
-			s := op.Offset(image.Pt(-far, -far)).Push(gtx.Ops)
-			big := *gtx
-			big.Constraints = layout.Exact(image.Pt(2*far, 2*far))
-			p.scrim.Layout(big, func(gtx layout.Context) layout.Dimensions {
-				return layout.Dimensions{Size: gtx.Constraints.Min, Baseline: 0}
-			})
-			s.Pop()
-			if p.scrim.Clicked(*gtx) {
-				o.CloseAll()
-				o.focusBack = p.opener
+			event.Op(gtx.Ops, p)
+			for {
+				ev, ok := gtx.Event(pointer.Filter{Target: p, Kinds: pointer.Press | pointer.Release})
+				if !ok {
+					break
+				}
+				e := ev.(pointer.Event)
+				if e.Kind == pointer.Press && !pointInRect(e.Position, p.panel) {
+					o.CloseAll()
+					o.focusBack = p.opener
+				}
 			}
 		}
 
 		if p.presence.Shown() {
-			// Hold keyboard focus while open, so arrows and typeahead reach
-			// the menu (§6.15). Re-issued when lost: a FocusCmd from the
-			// opening frame can lose the race with the opener's own focus
-			// handling.
-			if !p.grabbedFocus || !gtx.Focused(p) {
+			// Take keyboard focus once when the level opens, so arrows and
+			// typeahead reach the menu (§6.15). Focus later moves on
+			// purpose: into an open submenu, and back on Escape.
+			if !p.grabbedFocus {
 				p.grabbedFocus = true
 				gtx.Execute(key.FocusCmd{Tag: p})
 			}
@@ -188,7 +193,15 @@ func (o *Overlay) layoutLevel(env *Env, gtx *layout.Context, p *menuPanel, isRoo
 			// key.FocusFilter through gtx.Event is what makes the router
 			// treat the tag as focusable at all — a bare key.Filter with
 			// Focus is not enough to hold focus across frames.
-			event.Op(gtx.Ops, p)
+			//
+			// The event.Op must be clipped to the panel: an input area
+			// covers its current clip, and a non-pass-through area STOPS
+			// the hit-test walk — an unclipped panel tag would swallow
+			// every click in the window, including the scrim's.
+			func() {
+				defer clip.Rect(p.panel).Push(gtx.Ops).Pop()
+				event.Op(gtx.Ops, p)
+			}()
 
 			// Items: the clickable IS the row, laid out at the item rect so
 			// its pointer and focus area land on the row.
@@ -398,8 +411,8 @@ func (o *Overlay) handleKeys(env *Env, gtx *layout.Context, p *menuPanel) {
 				o.openSub(p, p.kbd, gtx)
 			}
 		case key.NameLeftArrow:
-			if p.sub != nil {
-				o.closeSub(p, gtx)
+			if p.parent != nil {
+				o.closeSub(p.parent, gtx)
 			}
 		case key.NameReturn, key.NameEnter:
 			if p.kbd >= 0 && !p.items[p.kbd].Disabled {
@@ -410,8 +423,8 @@ func (o *Overlay) handleKeys(env *Env, gtx *layout.Context, p *menuPanel) {
 				}
 			}
 		case key.NameEscape:
-			if p.sub != nil {
-				o.closeSub(p, gtx)
+			if p.parent != nil {
+				o.closeSub(p.parent, gtx)
 			} else {
 				o.CloseAll()
 				o.focusBack = p.opener
@@ -445,6 +458,12 @@ func (p *menuPanel) Sub() *menuPanel { return p.sub }
 // Debug renders the panel state for tests.
 func (p *menuPanel) Debug() string {
 	return fmt.Sprintf("kbd=%d sub=%v shown=%v progress=%.2f", p.kbd, p.sub != nil, p.presence.Shown(), p.presence.Progress())
+}
+
+// pointInRect reports whether p is inside r.
+func pointInRect(p f32.Point, r image.Rectangle) bool {
+	return p.X >= float32(r.Min.X) && p.X < float32(r.Max.X) &&
+		p.Y >= float32(r.Min.Y) && p.Y < float32(r.Max.Y)
 }
 
 // nextIndex moves the highlight with wrap-around, skipping disabled items
@@ -522,9 +541,11 @@ func (o *Overlay) openSub(p *menuPanel, i int, gtx *layout.Context) {
 		presence: motion.NewPresence(motion.Snappy(), motion.Exit()),
 		opener:   p.opener, kbd: -1, ownerItem: i,
 		pathBase: append(append([]int{}, p.pathBase...), i),
+		parent:   p,
 	}
 	p.sub.presence.Show(true)
-	o.highlight(p, i, gtx)
+	// Keyboard focus moves into the submenu; Left and Escape return it.
+	gtx.Execute(key.FocusCmd{Tag: p.sub})
 }
 
 // closeSub closes the submenu of a level and returns the highlight to its

@@ -21,7 +21,48 @@ func bench(w io.Writer, scale float32) error {
 	if err := benchFrames(w); err != nil {
 		return err
 	}
-	return benchUIScale(w)
+	if err := benchUIScale(w); err != nil {
+		return err
+	}
+	return benchIcons(w, scale)
+}
+
+// benchIcons measures the per-frame cost of the two icon render paths of Q5
+// over a 100-icon grid at 16 dp.
+func benchIcons(w io.Writer, scale float32) error {
+	for _, d := range []struct {
+		name  string
+		dense int
+	}{{"icons fresh per frame", 1}, {"icons cached stroke", 2}} {
+		r, err := newRig(false, scale, 1)
+		if err != nil {
+			return err
+		}
+		r.g.pages.cur = pageIcons
+		r.g.pages.icons.dense = d.dense
+		// Warm up (font and shader caches, the stroke cache).
+		for i := 0; i < 10; i++ {
+			if err := r.layout(); err != nil {
+				return err
+			}
+			r.now = r.now.Add(frameStep)
+		}
+		clk := hostconn.RealClock{}
+		var costs []time.Duration
+		for i := 0; i < 120; i++ {
+			t0 := clk.Now()
+			if err := r.layout(); err != nil {
+				return err
+			}
+			costs = append(costs, clk.Now().Sub(t0))
+			r.now = r.now.Add(frameStep)
+		}
+		r.release()
+		if err := report(w, d.name, costs); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // benchShadow measures layout+render cost of the shadow page in its three

@@ -54,7 +54,10 @@ func (typ) layout(env *kitspike.Env, gtx *layout.Context) {
 }
 
 // iconPage compares the two icon render paths (Q5) at the §3.4 sizes.
-type iconPage struct{}
+// dense switches the bench's 10×10 grid: 1 = fresh per frame, 2 = cached.
+type iconPage struct {
+	dense int
+}
 
 var iconSizes = []struct {
 	name string
@@ -63,8 +66,28 @@ var iconSizes = []struct {
 	{"12", 12}, {"14", 14}, {"16", 16}, {"20", 20},
 }
 
-func (iconPage) layout(env *kitspike.Env, gtx *layout.Context) {
+func (p iconPage) layout(env *kitspike.Env, gtx *layout.Context) {
 	c := env.Th.Chrome()
+	if p.dense > 0 {
+		// The bench grid: 100 icons at 16 dp, one render path each.
+		x, y := 0, 0
+		for _, name := range kitspike.IconNames() {
+			for row := 0; row < 10; row++ {
+				at(gtx, image.Pt(x, y), func(gtx *layout.Context) layout.Dimensions {
+					if p.dense == 1 {
+						_ = kitspike.DrawIcon(gtx, name, 16, c.Fg)
+					} else {
+						_ = kitspike.DrawIconCached(gtx, name, 16, c.Fg)
+					}
+					return layout.Dimensions{Size: image.Pt(gtx.Dp(16), gtx.Dp(16)), Baseline: 0}
+				})
+				y += gtx.Dp(20)
+			}
+			x += gtx.Dp(24)
+			y = 0
+		}
+		return
+	}
 	y := kitspike.DrawText(gtx, env.Sh, kitspike.TypeSmall, gtx.Constraints.Max.X,
 		"Lucide on the 24 grid, stroke 1.25 dp at 12/14 and 1.5 dp at 16/20. Top row: path parsed and stroked per frame (a). Bottom row: stroked once, transformed per frame (b).", c.FgMuted).Size.Y + gtx.Dp(16)
 	for _, name := range kitspike.IconNames() {
