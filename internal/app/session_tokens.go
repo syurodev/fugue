@@ -33,21 +33,34 @@ type SessionBinding struct {
 // spawn. One token is live per session; pending tokens wait until spawn
 // succeeds before replacing the session's binding.
 type sessionTokens struct {
-	random ids.Random
+	random   ids.Random
+	closedCh chan struct{}
 
 	mu        sync.Mutex
 	bySession map[string]SessionBinding
 	pending   map[[sha256.Size]byte]SessionBinding
+	revokers  map[[sha256.Size]byte]chan struct{}
 }
 
 func newSessionTokens(random ids.Random) *sessionTokens {
 	if random == nil {
 		random = ids.CryptoRandom{}
 	}
+	closed := make(chan struct{})
+	close(closed)
 	return &sessionTokens{
 		random:    random,
+		closedCh:  closed,
 		bySession: map[string]SessionBinding{},
 		pending:   map[[sha256.Size]byte]SessionBinding{},
+		revokers:  map[[sha256.Size]byte]chan struct{}{},
+	}
+}
+
+func (t *sessionTokens) closeRevokerLocked(hash [sha256.Size]byte) {
+	if ch, ok := t.revokers[hash]; ok {
+		delete(t.revokers, hash)
+		close(ch)
 	}
 }
 
@@ -71,7 +84,11 @@ func (t *sessionTokens) mint(sessionID, role string) (redact.Secret, error) {
 		return redact.Secret{}, err
 	}
 	t.mu.Lock()
+	if old, ok := t.bySession[sessionID]; ok {
+		t.closeRevokerLocked(old.hash)
+	}
 	t.bySession[sessionID] = binding
+	t.revokers[binding.hash] = make(chan struct{})
 	t.mu.Unlock()
 	return secret, nil
 }
@@ -85,6 +102,7 @@ func (t *sessionTokens) mintPending(sessionID, role string) (redact.Secret, Sess
 	}
 	t.mu.Lock()
 	t.pending[binding.hash] = binding
+	t.revokers[binding.hash] = make(chan struct{})
 	t.mu.Unlock()
 	return secret, binding, nil
 }
@@ -95,6 +113,9 @@ func (t *sessionTokens) commit(binding SessionBinding) {
 	t.mu.Lock()
 	if _, ok := t.pending[binding.hash]; ok {
 		delete(t.pending, binding.hash)
+		if old, had := t.bySession[binding.SessionID]; had && subtle.ConstantTimeCompare(old.hash[:], binding.hash[:]) != 1 {
+			t.closeRevokerLocked(old.hash)
+		}
 		t.bySession[binding.SessionID] = binding
 	}
 	t.mu.Unlock()
@@ -105,6 +126,7 @@ func (t *sessionTokens) commit(binding SessionBinding) {
 func (t *sessionTokens) discard(binding SessionBinding) {
 	t.mu.Lock()
 	delete(t.pending, binding.hash)
+	t.closeRevokerLocked(binding.hash)
 	if current, ok := t.bySession[binding.SessionID]; ok && subtle.ConstantTimeCompare(current.hash[:], binding.hash[:]) == 1 {
 		delete(t.bySession, binding.SessionID)
 	}
@@ -144,6 +166,13 @@ func (t *sessionTokens) live(binding SessionBinding) bool {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	return t.liveLocked(binding)
+}
+
+func (t *sessionTokens) liveLocked(binding SessionBinding) bool {
+	if binding.SessionID == "" || binding.Role == "" {
+		return false
+	}
 	if current, ok := t.bySession[binding.SessionID]; ok && current.Role == binding.Role &&
 		subtle.ConstantTimeCompare(current.hash[:], binding.hash[:]) == 1 {
 		return true
@@ -152,13 +181,31 @@ func (t *sessionTokens) live(binding SessionBinding) bool {
 	return ok && pend.SessionID == binding.SessionID && pend.Role == binding.Role
 }
 
+// watch returns a channel that is closed when binding's token is revoked,
+// replaced or discarded. If binding is already dead, a closed channel is returned.
+func (t *sessionTokens) watch(binding SessionBinding) <-chan struct{} {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if !t.liveLocked(binding) {
+		return t.closedCh
+	}
+	if ch, ok := t.revokers[binding.hash]; ok {
+		return ch
+	}
+	return t.closedCh
+}
+
 // revoke ends the session's token: on close, on purge and on actor exit.
 func (t *sessionTokens) revoke(sessionID string) {
 	t.mu.Lock()
-	delete(t.bySession, sessionID)
+	if current, ok := t.bySession[sessionID]; ok {
+		delete(t.bySession, sessionID)
+		t.closeRevokerLocked(current.hash)
+	}
 	for hash, binding := range t.pending {
 		if binding.SessionID == sessionID {
 			delete(t.pending, hash)
+			t.closeRevokerLocked(hash)
 		}
 	}
 	t.mu.Unlock()
@@ -169,5 +216,8 @@ func (t *sessionTokens) revokeAll() {
 	t.mu.Lock()
 	clear(t.bySession)
 	clear(t.pending)
+	for hash := range t.revokers {
+		t.closeRevokerLocked(hash)
+	}
 	t.mu.Unlock()
 }

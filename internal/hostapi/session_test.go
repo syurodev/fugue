@@ -269,7 +269,7 @@ func assertLocalClientCannotAttach(t *testing.T, v *vendorHost, token string) {
 
 func TestTestOnlyToolIsRefusedByTheNormalHost(t *testing.T) {
 	t.Parallel()
-	// A host with no test configuration: the registry ships empty in stage A.
+	// A host with no test configuration: only the built-in approve relay is served.
 	v := startTokenHost(t, "")
 	v.readySession(t, "normal-start", "", t.TempDir())
 	client, _, err := attachSession(t, v.sockPath, sessionTokens(t, 1)[0])
@@ -277,8 +277,8 @@ func TestTestOnlyToolIsRefusedByTheNormalHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	list, err := client.ListTools(t.Context(), connect.NewRequest(&sessiontoolsv1.ListToolsRequest{}))
-	if err != nil || len(list.Msg.Tools) != 0 {
-		t.Fatalf("tools of a normal host = %v, %v; want none", list, err)
+	if err != nil || len(list.Msg.Tools) != 1 || list.Msg.Tools[0].Name != "approve" {
+		t.Fatalf("tools of a normal host = %v, %v; want [approve]", list, err)
 	}
 	_, err = callEcho(t, client)
 	assertConnectCode(t, err, connect.CodeNotFound, errcode.NotFound)
@@ -468,7 +468,8 @@ func assertBridgeLifecycle(t *testing.T, run *fakeBridgeRun, replies []mcpReply)
 	if initialize.Result.ProtocolVersion != "2025-06-18" || initialize.Result.Capabilities.Tools == nil {
 		t.Errorf("initialize = %s", run.Replies[0])
 	}
-	if len(list.Result.Tools) != 1 || list.Result.Tools[0].Name != testEchoTool || !json.Valid(list.Result.Tools[0].InputSchema) {
+	if len(list.Result.Tools) != 2 || list.Result.Tools[0].Name != "approve" || !json.Valid(list.Result.Tools[0].InputSchema) ||
+		list.Result.Tools[1].Name != testEchoTool || !json.Valid(list.Result.Tools[1].InputSchema) {
 		t.Errorf("tools/list = %s", run.Replies[1])
 	}
 }

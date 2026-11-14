@@ -126,7 +126,7 @@ func newToolFixture(t *testing.T) *toolFixture {
 		{Name: toolDeploy, Description: "deploy", Descriptor: interaction.Descriptor{Risk: interaction.RiskWrite, Confirm: interaction.ConfirmEnvTag}, Plan: deployPlan, Run: f.record(toolDeploy)},
 		{Name: toolLeadOnly, Description: "lead only", Roles: []string{roleLead}, Descriptor: interaction.Descriptor{Risk: interaction.RiskRead, Confirm: interaction.ConfirmNever}, Plan: noFacts, Run: f.record(toolLeadOnly)},
 	}
-	f.svc = newSessionToolService(newSessionTokens(ids.NewDeterministic(tokenSeed)), tools, f.records, f.inter, f.tags, gen)
+	f.svc = newSessionToolService(newSessionTokens(ids.NewDeterministic(tokenSeed)), tools, f.records, f.inter, f.tags, gen, nil)
 	return f
 }
 
@@ -192,10 +192,10 @@ func TestSessionTokenOpensOnlyItsSessionAndRole(t *testing.T) {
 // own role and session only.
 func (f *toolFixture) assertToolsByRole(t *testing.T, lead, worker SessionBinding) {
 	t.Helper()
-	if diff := cmp.Diff([]string{toolDeploy, toolEcho, toolLeadOnly}, toolNames(t, f.svc, lead)); diff != "" {
+	if diff := cmp.Diff([]string{approveToolName, toolDeploy, toolEcho, toolLeadOnly}, toolNames(t, f.svc, lead)); diff != "" {
 		t.Errorf("lead tools (-want +got):\n%s", diff)
 	}
-	if diff := cmp.Diff([]string{toolDeploy, toolEcho}, toolNames(t, f.svc, worker)); diff != "" {
+	if diff := cmp.Diff([]string{approveToolName, toolDeploy, toolEcho}, toolNames(t, f.svc, worker)); diff != "" {
 		t.Errorf("worker tools (-want +got):\n%s", diff)
 	}
 	if _, err := f.svc.Call(t.Context(), worker, toolLeadOnly, nil); errcode.CodeOf(err) != errcode.NotFound {

@@ -286,3 +286,113 @@ func recordInvalidContentOps(t *testing.T, owner *Owner, tickets plantedTickets,
 	collector.record(err)
 	_ = owner.Pending()
 }
+
+// TestVendorKeyComponentsWithTheSeparatorAreEncoded proves VendorOperationKey
+// base64url-encodes untrusted components without padding so separators neither
+// reject valid vendor IDs nor collide across component boundaries.
+func TestVendorKeyComponentsWithTheSeparatorAreEncoded(t *testing.T) {
+	t.Parallel()
+	owner, _, _, _ := newTestOwner(t)
+
+	k1, err := VendorOperationKey("sess:1", "turn:2", "toolu:01:abc/+=?")
+	if err != nil {
+		t.Fatalf("VendorOperationKey with separators failed: %v", err)
+	}
+	if strings.Contains(k1, "=") {
+		t.Fatalf("encoded vendor key %q must not contain base64 padding", k1)
+	}
+	if parts := strings.Split(k1, keySeparator); len(parts) != 4 || parts[0] != vendorKeyLabel {
+		t.Fatalf("encoded vendor key %q must split into 4 segments", k1)
+	}
+
+	k2, err := VendorOperationKey("a:b", "c", "d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	k3, err := VendorOperationKey("a", "b:c", "d")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k2 == k3 {
+		t.Fatalf("distinct components collided on key %q", k2)
+	}
+
+	spec := &Spec{
+		OperationID: k1,
+		Kind:        KindConfirm,
+		Summary:     "relay separator request",
+		Relayed:     true,
+		Options:     []Option{{ID: vendorOptionAllow, Label: "Allow"}},
+		Binding: Binding{
+			SessionID:       "sess:1",
+			TurnID:          "turn:2",
+			VendorRequestID: "toolu:01:abc/+=?",
+		},
+	}
+	ticket := mustEnsure(t, owner, spec)
+	if ticket.OperationID != k1 {
+		t.Fatalf("ticket operation ID = %q, want %q", ticket.OperationID, k1)
+	}
+	mustAnswer(t, owner, &Decision{
+		Incarnation: owner.Incarnation(),
+		RequestID:   ticket.RequestID,
+		Outcome:     OutcomeAnswered,
+		OptionID:    vendorOptionAllow,
+	})
+	delivered, err := owner.TakeRelayed(k1)
+	if err != nil || delivered.SelectedOptionID != vendorOptionAllow {
+		t.Fatalf("TakeRelayed(%q) = (%+v, %v)", k1, delivered, err)
+	}
+}
+
+// TestResolvedUndeliveredRelayedRequestsExpire proves a resolved relayed
+// request that is never delivered does not leak in memory: after
+// ResolvedRetentionTTL on the injected clock TakeRelayed drops it and fails
+// closed, and ResetSession drops resolved undelivered requests immediately.
+func TestResolvedUndeliveredRelayedRequestsExpire(t *testing.T) {
+	t.Parallel()
+	owner, clk, _, _ := newTestOwner(t)
+
+	spec := relayedSpec(t, "turn-expire", "req-expire")
+	ticket := mustEnsure(t, owner, spec)
+	mustAnswer(t, owner, &Decision{
+		Incarnation: owner.Incarnation(),
+		RequestID:   ticket.RequestID,
+		Outcome:     OutcomeAnswered,
+		OptionID:    vendorOptionAllow,
+	})
+
+	// Before expiry the resolved ticket remains deliverable.
+	clk.Advance(ResolvedRetentionTTL / 2)
+	if _, err := owner.LookupOperation(spec.OperationID); err != nil {
+		t.Fatalf("LookupOperation before expiry = %v", err)
+	}
+
+	// Past ResolvedRetentionTTL on the injected clock, TakeRelayed drops it and fails closed.
+	clk.Advance(ResolvedRetentionTTL)
+	if _, err := owner.TakeRelayed(spec.OperationID); errcode.CodeOf(err) != errcode.NotFound {
+		t.Fatalf("TakeRelayed after expiry = %v, want not_found", err)
+	}
+	byReq, byOp, receipts := owner.EntryCounts()
+	if byReq != 0 || byOp != 0 || receipts != 0 {
+		t.Fatalf("EntryCounts after expiry = (%d, %d, %d), want (0, 0, 0)", byReq, byOp, receipts)
+	}
+
+	// Session close (ResetSession) drops a resolved undelivered relayed request immediately.
+	spec2 := relayedSpec(t, "turn-close", "req-close")
+	ticket2 := mustEnsure(t, owner, spec2)
+	mustAnswer(t, owner, &Decision{
+		Incarnation: owner.Incarnation(),
+		RequestID:   ticket2.RequestID,
+		Outcome:     OutcomeAnswered,
+		OptionID:    vendorOptionAllow,
+	})
+	owner.ResetSession(testSessionID)
+	if _, err := owner.TakeRelayed(spec2.OperationID); errcode.CodeOf(err) != errcode.NotFound {
+		t.Fatalf("TakeRelayed after ResetSession = %v, want not_found", err)
+	}
+	byReq, byOp, receipts = owner.EntryCounts()
+	if byReq != 0 || byOp != 0 || receipts != 0 {
+		t.Fatalf("EntryCounts after ResetSession = (%d, %d, %d), want (0, 0, 0)", byReq, byOp, receipts)
+	}
+}

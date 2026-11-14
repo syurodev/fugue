@@ -403,6 +403,8 @@ func (o *Owner) TakeRelayed(operationID string) (*Ticket, error) {
 		o.mu.Unlock()
 		return nil, ErrVaultLocked
 	}
+	now := o.clock.Now().UTC()
+	o.pruneTicketsLocked(now)
 	ticket, ok := o.byOperation[operationID]
 	if !ok {
 		o.mu.Unlock()

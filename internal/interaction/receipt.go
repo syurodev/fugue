@@ -197,6 +197,10 @@ func (o *Owner) ResetSession(sessionID string) {
 				RequestID: ticket.RequestID,
 				Outcome:   OutcomeCancelled,
 			})
+		} else if ticket.Relayed {
+			// Resolved undelivered relayed tickets have no receipt and cannot be
+			// delivered after the session closes; drop them immediately.
+			delete(o.byRequest, ticket.RequestID)
 		}
 	}
 	for id, r := range o.receipts {
@@ -243,6 +247,15 @@ func (o *Owner) SetVaultLocked(locked bool) {
 	for _, ev := range cancelled {
 		o.emitAudit(ev)
 	}
+}
+
+// IsVaultLocked reports whether the owner currently observes the vault locked
+// or has no lock-state probe configured (fail closed).
+func (o *Owner) IsVaultLocked() bool {
+	o.mu.Lock()
+	locked := o.isVaultLockedLocked()
+	o.mu.Unlock()
+	return locked
 }
 
 // CancelPending marks the Owner as draining, cancels all pending requests as

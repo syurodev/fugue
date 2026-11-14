@@ -232,11 +232,12 @@ func filteredEnv(hostEnv []string, home vendor.AccountHome, extras []string) []s
 	return process.FilterEnv(hostEnv, process.DefaultAllowlist(), vendorHome, extras)
 }
 
-// Capability is what the F9.5 adapter declares (vendor-runtime §6). Approval
-// relay arrives with the MCP prompt tool in F9.6; blocking every tool call is
-// the stage-B strict profile; the CLI offers no model list.
+// Capability is what the Claude Code adapter declares (vendor-runtime §6).
+// Blocking every tool call is the stage-B strict profile; the CLI offers no
+// model list.
 func Capability() vendor.Capability {
 	return vendor.Capability{
+		PerRequestApproval:  true,
 		Interrupt:           true,
 		Steer:               true,
 		Resume:              true,

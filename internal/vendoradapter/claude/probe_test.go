@@ -98,12 +98,12 @@ func TestProbeReportsTheTestedVersionAndCapability(t *testing.T) {
 
 func assertClaudeCapability(t *testing.T, capability vendor.Capability) {
 	t.Helper()
-	if !capability.Interrupt || !capability.Steer || !capability.Resume ||
+	if !capability.PerRequestApproval || !capability.Interrupt || !capability.Steer || !capability.Resume ||
 		!capability.PartialDeltas || !capability.VendorSlashCommands || !capability.DirectQuota {
 		t.Fatalf("capability = %+v", capability)
 	}
-	if capability.PerRequestApproval || capability.BlockAllToolCalls || capability.ModelList {
-		t.Fatalf("F9.5 must not declare capabilities it does not have: %+v", capability)
+	if capability.BlockAllToolCalls || capability.ModelList {
+		t.Fatalf("Claude adapter must not declare stage-B/unsupported capabilities: %+v", capability)
 	}
 }
 

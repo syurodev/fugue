@@ -101,7 +101,7 @@ func (o *Owner) pruneTicketsLocked(now time.Time) {
 	}
 	o.nextResolvedPrune = time.Time{}
 	for reqID, ticket := range o.byRequest {
-		if ticket.Relayed || !ticket.Resolved {
+		if !ticket.Resolved {
 			continue
 		}
 		if o.isTicketDoneLocked(ticket, now) {
@@ -204,8 +204,8 @@ func (o *Owner) pruneResolvedLocked(now time.Time) {
 	o.pruneReceiptsLocked(now)
 }
 
-// PruneResolved evicts non-relayed resolved tickets whose receipt has been
-// claimed/expired or whose retention TTL has elapsed.
+// PruneResolved evicts resolved tickets (including undelivered relayed tickets)
+// whose receipt has been claimed/expired or whose retention TTL has elapsed.
 func (o *Owner) PruneResolved() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
