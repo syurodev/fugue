@@ -87,3 +87,14 @@ menu's animation states.
 | [Type-light-px125.png](Type-light-px125.png) | Type page, light mode, pixel scale 1.25 |
 | [Type-light-ui125.png](Type-light-ui125.png) | Type page, light mode, UI scale 125% |
 | [Type-light-ui90.png](Type-light-ui90.png) | Type page, light mode, UI scale 90% |
+
+## IME (Q3, macOS Simple Telex, real keystrokes)
+
+Captured from the interactive window (`/tmp/kitspike-app -focus-field`) while a
+CGEvent script typed raw keycodes through the active macOS input source
+(Vietnamese Simple Telex):
+
+- [telex-1-aa-becomes-â.png](ime/telex-1-aa-becomes-â.png) — typing `aa` composes to `â`.
+- [telex-2-vieets-space-becomes-viết.png](ime/telex-2-vieets-space-becomes-viết.png) — `vieets␣` composes to `viết␣` (with the spelling check on, the word only commits at the boundary).
+- [telex-3-backspace-removes-one-char.png](ime/telex-3-backspace-removes-one-char.png) — one backspace after the commit removes exactly one character (`viết` → `viê`).
+- [telex-4-second-backspace.png](ime/telex-4-second-backspace.png) — the next backspace removes the `ê` glyph as one unit.

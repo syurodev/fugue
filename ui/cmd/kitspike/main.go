@@ -47,6 +47,7 @@ func main() {
 	scale := flag.Float64("scale", 2, "pixels per dp for -shots and -bench")
 	uiscale := flag.Float64("uiscale", 1, "UI scale on top of the platform dp (0.9, 1, 1.1, 1.25)")
 	onePage := flag.Int("page", -1, "lay out only this page index once and exit (debug)")
+	focusField := flag.Bool("focus-field", false, "start on the TextField page with the first field focused (for the IME check)")
 	flag.Parse()
 
 	if *onePage >= 0 {
@@ -67,7 +68,7 @@ func main() {
 	default:
 		go func() {
 			code := 0
-			if werr := runWindow(*light, float32(*uiscale)); werr != nil {
+			if werr := runWindow(*light, float32(*uiscale), *focusField); werr != nil {
 				fmt.Fprintln(os.Stderr, "kitspike:", werr)
 				code = 1
 			}
@@ -107,12 +108,14 @@ func debugPage(light bool, page int, scale, uiscale float32) error {
 }
 
 // runWindow opens the gallery and runs it until the window closes.
-func runWindow(light bool, uiscale float32) error {
+func runWindow(light bool, uiscale float32, focusField bool) error {
 	th, err := newTheme(light)
 	if err != nil {
 		return err
 	}
 	g := newGallery(&th, false)
+	g.focusField = focusField
+	g.pages.cur = pageFields
 	w := new(app.Window)
 	w.Option(app.Title("Fugue kit spike"), app.Size(unit.Dp(windowW), unit.Dp(windowH)))
 	var ops op.Ops
@@ -144,6 +147,10 @@ type gallery struct {
 	env    kitspike.Env
 	script *autoplay
 	pages  *pages
+	// focusField focuses the first text field on the first frame; the
+	// IME check uses it so keystrokes land in the editor immediately.
+	focusField  bool
+	focusedOnce bool
 }
 
 func newGallery(th *theme.Theme, autoplay bool) *gallery {
@@ -165,7 +172,7 @@ func (g *gallery) frame(gtx *layout.Context) {
 	if g.script != nil {
 		g.script.step(gtx)
 	}
-	g.pages.layout(gtx)
+	g.pages.layout(gtx, &g.focusField, &g.focusedOnce)
 	g.env.FrameEnd(gtx)
 }
 

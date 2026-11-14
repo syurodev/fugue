@@ -5,11 +5,15 @@ import (
 	"image"
 	"strings"
 
+	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op"
 
 	"github.com/syurodev/fugue/ui/internal/kitspike"
 )
+
+// keyFocusCmd builds a focus command for a tag.
+func keyFocusCmd(tag any) key.FocusCmd { return key.FocusCmd{Tag: tag} }
 
 // pageID names one gallery page.
 type pageID int
@@ -64,7 +68,11 @@ const (
 )
 
 // layout draws the whole window: nav, current page, then the overlay last.
-func (p *pages) layout(gtx *layout.Context) {
+func (p *pages) layout(gtx *layout.Context, focusField *bool, focusedOnce *bool) {
+	if *focusField && !*focusedOnce {
+		*focusedOnce = true
+		gtx.Execute(keyFocusCmd(p.field.text.Tag()))
+	}
 	p.overlay.SetSize(gtx.Constraints.Max.X, gtx.Constraints.Max.Y)
 	c := p.env.Th.Chrome()
 	kitspike.FillRect(gtx, image.Rectangle{Max: gtx.Constraints.Max}, c.AppBg)
