@@ -2,6 +2,8 @@ package session
 
 import (
 	"cmp"
+	"fmt"
+	"math"
 	"slices"
 
 	"github.com/syurodev/fugue/pkg/client"
@@ -86,7 +88,7 @@ func (t *Transcript) NeedsNewestPage() bool { return !t.pageLoaded && !t.exhaust
 // OlderCursor returns the creation sequence to page older from, and whether
 // there is older history to read at all.
 func (t *Transcript) OlderCursor() (int64, bool) {
-	if !t.pageLoaded || t.exhausted || t.oldestSeq <= 1 {
+	if !t.pageLoaded || t.exhausted || t.oldestSeq <= 1 || t.oldestSeq > uint64(math.MaxInt64) {
 		return 0, false
 	}
 	return int64(t.oldestSeq), true
@@ -99,7 +101,7 @@ func (t *Transcript) OlderCursor() (int64, bool) {
 func (t *Transcript) ApplySnapshot(payload []byte) error {
 	snap, err := client.DecodeTranscriptSnapshot(payload)
 	if err != nil {
-		return err
+		return fmt.Errorf("apply the transcript snapshot: %w", err)
 	}
 	t.items = nil
 	t.byID = map[string]*Item{}
@@ -123,7 +125,7 @@ func (t *Transcript) ApplyEvent(eventType string, sequence uint64, payload []byt
 	case EventTranscriptItem:
 		item, err := client.DecodeTranscriptItem(payload)
 		if err != nil {
-			return err
+			return fmt.Errorf("apply the transcript item event: %w", err)
 		}
 		t.upsert(&Item{TranscriptItem: item})
 	case EventTranscriptState:
@@ -142,7 +144,7 @@ func (t *Transcript) ApplyEvent(eventType string, sequence uint64, payload []byt
 func (t *Transcript) ApplyDelta(payload []byte) error {
 	delta, err := client.DecodeTranscriptDelta(payload)
 	if err != nil {
-		return err
+		return fmt.Errorf("apply the transcript delta: %w", err)
 	}
 	item, ok := t.byID[delta.ItemID]
 	if !ok || delta.BaseRevision < item.Revision {

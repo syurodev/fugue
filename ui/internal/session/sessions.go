@@ -2,6 +2,7 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	"github.com/syurodev/fugue/pkg/client"
@@ -37,6 +38,11 @@ type sessionChange struct {
 	WaitingReason    string `json:"waiting_reason,omitempty"`
 	CommandsRevision int64  `json:"commands_revision"`
 }
+
+// errUnknownSessionEvent is the static cause behind an event type the
+// vendor-sessions topic does not define; it is wrapped, never constructed,
+// at the call site.
+var errUnknownSessionEvent = errors.New("unknown session event type")
 
 // Session is one sidebar row: a vendor session's identity and state.
 type Session struct {
@@ -114,7 +120,7 @@ func (s *Sidebar) ApplyEvent(eventType string, payload []byte) error {
 			existing.WaitingReason = change.WaitingReason
 		}
 	default:
-		return fmt.Errorf("unknown session event type %q", eventType)
+		return fmt.Errorf("%w: %q", errUnknownSessionEvent, eventType)
 	}
 	return nil
 }

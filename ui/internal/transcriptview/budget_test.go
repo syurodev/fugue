@@ -9,6 +9,7 @@ import (
 	"gioui.org/layout"
 
 	"github.com/syurodev/fugue/pkg/client"
+
 	"github.com/syurodev/fugue/ui/internal/session"
 )
 
@@ -21,7 +22,7 @@ func budgetItems(n int) []*session.Item {
 		id := fmt.Sprintf("b%d", i)
 		switch i % 8 {
 		case 0, 1, 2:
-			items[i] = message(id, uint64(i+1), 1, sampleParagraph(i))
+			items[i] = message(id, uint64(i+1), sampleParagraph(i))
 		case 3:
 			items[i] = &session.Item{TranscriptItem: client.TranscriptItem{
 				ItemID: id, Kind: "tool_call", Sequence: uint64(i + 1), Revision: 1,
@@ -29,7 +30,7 @@ func budgetItems(n int) []*session.Item {
 				View:     client.TranscriptView{Text: sampleOutput(i)},
 			}}
 		case 4:
-			items[i] = message(id, uint64(i+1), 1, sampleCode(i))
+			items[i] = message(id, uint64(i+1), sampleCode(i))
 		case 5:
 			items[i] = &session.Item{TranscriptItem: client.TranscriptItem{
 				ItemID: id, Kind: "file_change", Sequence: uint64(i + 1), Revision: 1,
@@ -37,7 +38,7 @@ func budgetItems(n int) []*session.Item {
 				View:     client.TranscriptView{Text: sampleDiff(i)},
 			}}
 		case 6:
-			items[i] = message(id, uint64(i+1), 1, sampleParagraph(i))
+			items[i] = message(id, uint64(i+1), sampleParagraph(i))
 		default:
 			items[i] = &session.Item{TranscriptItem: client.TranscriptItem{
 				ItemID: id, Kind: "usage", Sequence: uint64(i + 1), Revision: 1,

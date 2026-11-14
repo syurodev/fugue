@@ -10,7 +10,7 @@ import (
 )
 
 // mustItemPayload encodes one item upsert the way the host writes it.
-func mustItemPayload(t *testing.T, item client.TranscriptItem) []byte {
+func mustItemPayload(t *testing.T, item *client.TranscriptItem) []byte {
 	t.Helper()
 	wire := &transcriptv1.TranscriptItemEvent{
 		ItemId: item.ItemID, TurnId: item.TurnID, Kind: protoKind(item.Kind),
@@ -37,7 +37,7 @@ func mustDeltaPayload(t *testing.T, itemID string, base uint64, text string) []b
 }
 
 // mustSnapshotPayload encodes the durable topic's snapshot.
-func mustSnapshotPayload(t *testing.T, seq uint64, state string, items ...client.TranscriptItem) []byte {
+func mustSnapshotPayload(t *testing.T, seq uint64, state string, items []*client.TranscriptItem) []byte {
 	t.Helper()
 	wire := &transcriptv1.TranscriptSnapshot{Sequence: seq, SessionState: state}
 	for _, item := range items {

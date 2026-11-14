@@ -2,7 +2,6 @@ package appwin
 
 import (
 	"fmt"
-	"strings"
 
 	"gioui.org/layout"
 	"gioui.org/op/clip"
@@ -16,9 +15,6 @@ import (
 	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/transcriptview"
 )
-
-// sidebarWidth is the session list's width.
-const sidebarWidth = 240
 
 // The topic name pieces the screens route on; the constants mirror the
 // host's topic owners.
@@ -82,49 +78,64 @@ func (s *screens) update(updates []hostconn.Update, results []session.Result) {
 func (s *screens) applyUpdate(u hostconn.Update) {
 	switch {
 	case u.State == hostconn.StateConnected:
-		// A fresh connection: the list and the open session's topics ride it.
-		// A request dropped while the host was down re-arms here.
-		delete(s.pendingPage, s.open)
-		delete(s.pendingOlder, s.open)
-		s.fetcher.RequestSessions()
-		if s.open != "" {
-			s.m.AddTopic(topicTranscript + s.open)
-			s.m.AddTopic(topicTranscriptDlt + s.open)
-			s.requestNewestPage(s.open)
-		}
+		s.reconnected()
 	case u.Topic == topicVendorSessions && u.Snapshot != nil:
-		if err := s.sidebar.ApplySnapshot(u.Snapshot.State); err != nil {
-			s.fail(err)
-		}
+		s.fail(s.sidebar.ApplySnapshot(u.Snapshot.State))
 	case u.Topic == topicVendorSessions && u.Event != nil:
-		if err := s.sidebar.ApplyEvent(u.Event.Type, u.Event.Payload); err != nil {
-			s.fail(err)
-		}
-		// A created event carries no vendor or timestamps; the list read
-		// names them.
-		if u.Event.Type == session.EventSessionCreated {
-			s.fetcher.RequestSessions()
-		}
-	case strings.HasPrefix(u.Topic, topicTranscriptDlt) && u.Event != nil:
-		if t := s.transcripts[s.open]; t != nil && u.Topic == topicTranscriptDlt+s.open {
-			if err := t.ApplyDelta(u.Event.Payload); err != nil {
-				s.fail(err)
-			}
-		}
-	case strings.HasPrefix(u.Topic, topicTranscript) && u.Topic == topicTranscript+s.open:
-		t := s.transcripts[s.open]
-		if t == nil {
-			return
-		}
-		if u.Snapshot != nil {
-			err := t.ApplySnapshot(u.Snapshot.State)
-			s.requestNewestPage(s.open)
-			s.fail(err)
-			return
-		}
-		if u.Event != nil {
-			s.fail(t.ApplyEvent(u.Event.Type, u.Event.Sequence, u.Event.Payload))
-		}
+		s.applySessionEvent(u.Event.Type, u.Event.Payload)
+	case u.Topic == topicTranscriptDlt+s.open && u.Event != nil:
+		s.applyDelta(u.Event.Payload)
+	case u.Topic == topicTranscript+s.open:
+		s.applyTranscriptDelivery(u)
+	}
+}
+
+// reconnected arms the reads a fresh connection carries: the session list,
+// the open session's topics, and its newest page. A request dropped while the
+// host was down re-arms here.
+func (s *screens) reconnected() {
+	delete(s.pendingPage, s.open)
+	delete(s.pendingOlder, s.open)
+	s.fetcher.RequestSessions()
+	if s.open != "" {
+		s.m.AddTopic(topicTranscript + s.open)
+		s.m.AddTopic(topicTranscriptDlt + s.open)
+		s.requestNewestPage(s.open)
+	}
+}
+
+// applySessionEvent applies one vendor-sessions event. A created event
+// carries no vendor or timestamps; the list read names them.
+func (s *screens) applySessionEvent(eventType string, payload []byte) {
+	if err := s.sidebar.ApplyEvent(eventType, payload); err != nil {
+		s.fail(err)
+		return
+	}
+	if eventType == session.EventSessionCreated {
+		s.fetcher.RequestSessions()
+	}
+}
+
+// applyDelta applies one transcript-delta delivery to the open session.
+func (s *screens) applyDelta(payload []byte) {
+	if t := s.transcripts[s.open]; t != nil {
+		s.fail(t.ApplyDelta(payload))
+	}
+}
+
+// applyTranscriptDelivery applies one durable transcript topic delivery.
+func (s *screens) applyTranscriptDelivery(u hostconn.Update) {
+	t := s.transcripts[s.open]
+	if t == nil {
+		return
+	}
+	if u.Snapshot != nil {
+		s.fail(t.ApplySnapshot(u.Snapshot.State))
+		s.requestNewestPage(s.open)
+		return
+	}
+	if u.Event != nil {
+		s.fail(t.ApplyEvent(u.Event.Type, u.Event.Sequence, u.Event.Payload))
 	}
 }
 

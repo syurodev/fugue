@@ -79,7 +79,11 @@ func (c *cardCache) evict() {
 			return
 		}
 		c.order.Remove(last)
-		delete(c.entries, last.Value.(cardKey))
+		key, ok := last.Value.(cardKey)
+		if !ok {
+			return
+		}
+		delete(c.entries, key)
 	}
 }
 

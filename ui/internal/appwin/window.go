@@ -98,7 +98,7 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("build the text shaper: %w", err)
 	}
 	light, dark := theme.Light(shaper), theme.Dark(shaper)
-	return eventLoop(w, m, newScreens(m, fetcher), q, light, dark)
+	return eventLoop(w, newScreens(m, fetcher), q, light, dark)
 }
 
 // startFeeder runs the update feeder: it moves deliveries into the queue and
@@ -143,7 +143,7 @@ func stopSideGoroutines(cancel context.CancelFunc, feederDone, closerDone <-chan
 }
 
 // eventLoop is the window's event loop until it is destroyed.
-func eventLoop(w *app.Window, m *hostconn.Manager, sc *screens, q *updateQueue, light, dark theme.Theme) error {
+func eventLoop(w *app.Window, sc *screens, q *updateQueue, light, dark theme.Theme) error {
 	var ops op.Ops
 	// The window starts light: Gio v0.10.3 exposes no OS light/dark
 	// preference to follow (F10.2c plan), so light is the default and

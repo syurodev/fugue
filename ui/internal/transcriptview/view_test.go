@@ -14,6 +14,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/syurodev/fugue/pkg/client"
+
 	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
@@ -65,20 +66,20 @@ func (h *harness) frame() layout.Dimensions {
 }
 
 // scroll queues one wheel event and runs the frame that sees it.
-func (h *harness) scroll(deltaY int) layout.Dimensions {
+func (h *harness) scroll(deltaY int) {
 	h.router.Queue(pointer.Event{
 		Kind:   pointer.Scroll,
 		Source: pointer.Mouse,
 		Scroll: f32.Pt(0, float32(deltaY)),
 	})
-	return h.frame()
+	h.frame()
 }
 
-// message builds one assistant message item.
-func message(itemID string, seq, rev uint64, text string) *session.Item {
+// message builds one assistant message item at revision 1.
+func message(itemID string, seq uint64, text string) *session.Item {
 	return &session.Item{TranscriptItem: client.TranscriptItem{
 		ItemID: itemID, TurnID: "turn", Kind: "assistant_message",
-		Sequence: seq, Revision: rev, View: client.TranscriptView{Text: text},
+		Sequence: seq, Revision: 1, View: client.TranscriptView{Text: text},
 	}}
 }
 
@@ -100,7 +101,7 @@ func TestVirtualListLaysOutVisiblePlusFiftyEachSide(t *testing.T) {
 	t.Parallel()
 	items := make([]*session.Item, 2000)
 	for i := range items {
-		items[i] = message(fmt.Sprintf("i%d", i), uint64(i+1), 1, "paragraph")
+		items[i] = message(fmt.Sprintf("i%d", i), uint64(i+1), "paragraph")
 	}
 	h := newHarness(t, 600, 400, items)
 
@@ -155,7 +156,7 @@ func TestLayoutCacheIsBoundedAndKeyedByItemAndRevision(t *testing.T) {
 	}
 
 	// Through the layout: one item at two revisions is two cache entries.
-	items := []*session.Item{message("i1", 1, 1, "one")}
+	items := []*session.Item{message("i1", 1, "one")}
 	h := newHarness(t, 400, 800, items)
 	h.frame()
 	h.items[0].Revision = 2

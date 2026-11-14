@@ -97,6 +97,23 @@ func (ps *pumpSet) stopAll() {
 	}
 }
 
+// applyReq starts or stops one dynamic topic's pump. An already-streaming
+// topic — a configured one, or one requested twice — keeps its pump.
+func (ps *pumpSet) applyReq(ctx context.Context, req topicReq) {
+	p, ok := ps.pumps[req.topic]
+	if req.add {
+		if !ok {
+			ps.start(ctx, req.topic, false)
+		}
+		return
+	}
+	if ok {
+		p.cancel()
+		<-p.done
+		delete(ps.pumps, req.topic)
+	}
+}
+
 // await waits for the first stream failure for a topic in this set, the next
 // dynamic-topic request, or the end of ctx; ok is false when the context
 // ended.
@@ -114,20 +131,7 @@ func (ps *pumpSet) await(ctx context.Context) (streamFailure, bool) {
 			<-p.done
 			return f, true
 		case req := <-ps.mgr.topicReqs:
-			p, ok := ps.pumps[req.topic]
-			if req.add {
-				// An already-streaming topic — a configured one, or one
-				// requested twice — keeps its pump.
-				if !ok {
-					ps.start(ctx, req.topic, false)
-				}
-				continue
-			}
-			if ok {
-				p.cancel()
-				<-p.done
-				delete(ps.pumps, req.topic)
-			}
+			ps.applyReq(ctx, req)
 		}
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"gioui.org/widget/material"
 
 	"github.com/syurodev/fugue/pkg/client"
+
 	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/markdown"
 	"github.com/syurodev/fugue/ui/internal/mdview"
@@ -104,16 +105,18 @@ func plainBody(gtx *layout.Context, th *theme.Theme, c *card, header string, ite
 
 // flexBody stacks the clickable header and, when expanded, the body.
 func flexBody(gtx *layout.Context, th *theme.Theme, c *card, header string, body func(*layout.Context) layout.Dimensions, expanded bool) layout.Dimensions {
-	head := func(gtx layout.Context) layout.Dimensions {
-		return c.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+	head := func() layout.Dimensions {
+		return c.click.Layout(*gtx, func(layout.Context) layout.Dimensions {
+			// Clickable calls its widget with the same context, so the
+			// pointer form and the value form are the same frame here.
 			return headerRow(gtx, th, header, c.expanded)
 		})
 	}
 	if !expanded {
-		return head(*gtx)
+		return head()
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
-		layout.Rigid(head),
+		layout.Rigid(func(layout.Context) layout.Dimensions { return head() }),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				local := gtx
@@ -140,13 +143,13 @@ func surface(gtx *layout.Context, th *theme.Theme, body func(*layout.Context) la
 }
 
 // headerRow renders the header text; expansion is told by the caret.
-func headerRow(gtx layout.Context, th *theme.Theme, header string, expanded bool) layout.Dimensions {
+func headerRow(gtx *layout.Context, th *theme.Theme, header string, expanded bool) layout.Dimensions {
 	mt := th.Material()
 	caret := "▸"
 	if expanded {
 		caret = "▾"
 	}
-	return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+	return layout.Flex{Axis: layout.Horizontal}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return label(mt, unit.Sp(12), caret+" ", th.Chrome().FgMuted).Layout(gtx)
 		}),
@@ -232,8 +235,18 @@ func headerFor(item *session.Item) string {
 		return h
 	case kindFileChange:
 		return fmt.Sprintf("%s · +%d −%d", m.ChangeKind, m.LinesAdded, m.LinesRemoved)
+	default:
+		return compactHeader(item)
+	}
+}
+
+// compactHeader builds the header of the compact cards: approval, plan,
+// subagent, command, usage, quota and notice.
+func compactHeader(item *session.Item) string {
+	m := item.Metadata
+	switch item.Kind {
 	case kindApproval:
-		return fmt.Sprintf("approval · %s · %s", m.RequestKind, decisionOf(m))
+		return fmt.Sprintf("approval · %s · %s", m.RequestKind, decisionOf(&m))
 	case kindPlan:
 		return fmt.Sprintf("plan · step %d of %d", m.CurrentStep, m.StepCount)
 	case kindSubagent:
@@ -269,7 +282,7 @@ func knownKindName(kind string) bool {
 }
 
 // decisionOf names the approval's decision, or "pending".
-func decisionOf(m client.TranscriptMetadata) string {
+func decisionOf(m *client.TranscriptMetadata) string {
 	if m.Decision == "" {
 		return "pending"
 	}

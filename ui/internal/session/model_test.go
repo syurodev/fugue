@@ -20,6 +20,14 @@ func TestMain(m *testing.M) {
 func TestSessionListAppliesSnapshotThenLiveChanges(t *testing.T) {
 	t.Parallel()
 	s := NewSidebar()
+	applySnapshotFixture(t, s)
+	applyStateChangeFixture(t, s)
+	applyCreateFixture(t, s)
+}
+
+// applySnapshotFixture applies the two-session snapshot and asserts the list.
+func applySnapshotFixture(t *testing.T, s *Sidebar) {
+	t.Helper()
 	snap := []byte(`{"sessions":[
 		{"session_id":"s1","vendor":"claude","state":"running","created_at":"t1","updated_at":"t1"},
 		{"session_id":"s2","vendor":"claude","state":"waiting_input","waiting_reason":"approval","created_at":"t2","updated_at":"t2"}]}`)
@@ -30,21 +38,17 @@ func TestSessionListAppliesSnapshotThenLiveChanges(t *testing.T) {
 	if len(list) != 2 || list[0].ID != "s1" || list[1].State != "waiting_input" {
 		t.Fatalf("list after snapshot = %+v", list)
 	}
+}
 
+// applyStateChangeFixture applies a state change and asserts it landed.
+func applyStateChangeFixture(t *testing.T, s *Sidebar) {
+	t.Helper()
 	if err := s.ApplyEvent(EventSessionStateChanged, []byte(`{"session_id":"s1","state":"waiting_input","waiting_reason":"steer"}`)); err != nil {
 		t.Fatal(err)
 	}
 	got, ok := s.Lookup("s1")
 	if !ok || got.State != "waiting_input" || got.WaitingReason != "steer" {
 		t.Fatalf("s1 after state change = %+v, ok %v", got, ok)
-	}
-
-	if err := s.ApplyEvent(EventSessionCreated, []byte(`{"session_id":"s3","state":"starting"}`)); err != nil {
-		t.Fatal(err)
-	}
-	list = s.List()
-	if len(list) != 3 || list[2].ID != "s3" || list[2].State != "starting" {
-		t.Fatalf("list after create = %+v", list)
 	}
 
 	// A state change for a session the list has not seen stays ignored; the
@@ -54,6 +58,18 @@ func TestSessionListAppliesSnapshotThenLiveChanges(t *testing.T) {
 	}
 	if _, ok := s.Lookup("s9"); ok {
 		t.Fatal("an unknown session joined the list from a state change")
+	}
+}
+
+// applyCreateFixture applies a created event and asserts the row joined.
+func applyCreateFixture(t *testing.T, s *Sidebar) {
+	t.Helper()
+	if err := s.ApplyEvent(EventSessionCreated, []byte(`{"session_id":"s3","state":"starting"}`)); err != nil {
+		t.Fatal(err)
+	}
+	list := s.List()
+	if len(list) != 3 || list[2].ID != "s3" || list[2].State != "starting" {
+		t.Fatalf("list after create = %+v", list)
 	}
 }
 
@@ -84,7 +100,7 @@ func TestTranscriptModelAppliesUpsertsByRevisionAndIgnoresStale(t *testing.T) {
 
 	// A newer revision replaces the held state.
 	upsert := transcriptFixture(t, "i1", 3, 2, "one, revised")
-	if err := m.ApplyEvent(EventTranscriptItem, 9, mustItemPayload(t, upsert)); err != nil {
+	if err := m.ApplyEvent(EventTranscriptItem, 9, mustItemPayload(t, &upsert)); err != nil {
 		t.Fatal(err)
 	}
 	if got := m.Items()[0]; got.Revision != 2 || got.View().Text != "one, revised" {
@@ -94,7 +110,7 @@ func TestTranscriptModelAppliesUpsertsByRevisionAndIgnoresStale(t *testing.T) {
 	// The same revision again, and a stale one, change nothing.
 	for _, rev := range []uint64{2, 1} {
 		stale := transcriptFixture(t, "i1", 3, rev, "stale")
-		if err := m.ApplyEvent(EventTranscriptItem, 9, mustItemPayload(t, stale)); err != nil {
+		if err := m.ApplyEvent(EventTranscriptItem, 9, mustItemPayload(t, &stale)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -125,7 +141,7 @@ func TestTranscriptDeltaAppliesToTheOpenItem(t *testing.T) {
 	}
 	// A newer revision of the item ends the streaming view.
 	item := transcriptFixture(t, "i1", 3, 3, "final")
-	if err := m.ApplyEvent(EventTranscriptItem, 10, mustItemPayload(t, item)); err != nil {
+	if err := m.ApplyEvent(EventTranscriptItem, 10, mustItemPayload(t, &item)); err != nil {
 		t.Fatal(err)
 	}
 	if got := m.Items()[0].View().Text; got != "final" {
@@ -173,18 +189,16 @@ func TestTranscriptReconnectCatchesUpFromTheCursor(t *testing.T) {
 		{4, transcriptFixture(t, "i2", 2, 2, "two, revised")},
 		{5, transcriptFixture(t, "i4", 4, 1, "four")},
 	}
-	want := uint64(0)
 	for _, e := range events {
-		if err := m.ApplyEvent(EventTranscriptItem, e.seq, mustItemPayload(t, e.item)); err != nil {
+		if err := m.ApplyEvent(EventTranscriptItem, e.seq, mustItemPayload(t, &e.item)); err != nil {
 			t.Fatal(err)
 		}
-		want = e.seq
-		if m.LastSequence() != want {
-			t.Fatalf("last sequence = %d after event %d, want %d: gap", m.LastSequence(), e.seq, want)
+		if m.LastSequence() != e.seq {
+			t.Fatalf("last sequence = %d after event %d, want %d: gap", m.LastSequence(), e.seq, e.seq)
 		}
 	}
 	// The host also replays the newest of the catch-up once more.
-	if err := m.ApplyEvent(EventTranscriptItem, 5, mustItemPayload(t, events[2].item)); err != nil {
+	if err := m.ApplyEvent(EventTranscriptItem, 5, mustItemPayload(t, &events[2].item)); err != nil {
 		t.Fatal(err)
 	}
 	if m.LastSequence() != 5 || len(m.Items()) != 4 {
@@ -208,7 +222,7 @@ func TestResyncRequiredReloadsFromTheSnapshot(t *testing.T) {
 
 	// resync_required: the manager clears its cursor, the host answers with a
 	// fresh snapshot, and the model must reload from it.
-	snap := mustSnapshotPayload(t, 20, "running", transcriptFixture(t, "i2", 21, 1, "open item"))
+	snap := mustSnapshotPayload(t, 20, "running", []*client.TranscriptItem{func() *client.TranscriptItem { item := transcriptFixture(t, "i2", 21, 1, "open item"); return &item }()})
 	if err := m.ApplySnapshot(snap); err != nil {
 		t.Fatal(err)
 	}
