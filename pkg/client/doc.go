@@ -1,8 +1,8 @@
 // Package client is the public Go client for the Host API: it finds a running
 // host through its discovery file, says Hello with a client kind, and
 // subscribes to event topics with catch-up from a cursor (host-api §3, §6,
-// §8). It supports the local principal kinds; the per-session token of the
-// session principal arrives with the MCP bridge (F9.9).
+// §8). It supports the local principal kinds and, through DialSession, the
+// session principal with its per-session token (host-api §7).
 //
 // The client owns exactly one dedicated HTTP/2 connection per Dial: the host's
 // lease is per connection (host-api §7), so one Client is one connection is

@@ -34,6 +34,15 @@ type VendorSessionDeps struct {
 	Clock       clock.Clock
 	IDs         ids.Generator
 	Logger      *slog.Logger
+	// OnSessionEnded runs once when a session's actor stops, however it
+	// stopped; the host revokes the session token there.
+	OnSessionEnded func(sessionID string)
+	// TestDelaySpawnRegistration runs inside OnSpawned before owner registration.
+	TestDelaySpawnRegistration func(context.Context)
+	// TestOnWaitInflightSpawn runs when OwnsPeer begins waiting on in-flight spawns.
+	TestOnWaitInflightSpawn func()
+	// TestAfterPeerSnapshot runs between snapshotting owners and checking live actors.
+	TestAfterPeerSnapshot func()
 }
 
 type vendorVaultObserver interface {
@@ -55,8 +64,20 @@ type VendorSessions struct {
 	spawn             func(string, func(context.Context) error) *supervise.Task
 	mu                sync.RWMutex
 	actors            map[string]*vendorSessionActor
+	pendingOwners     map[*pendingOwner]struct{}
+	retainedOwners    map[*retainedOwner]struct{}
 	closed            bool
 	startReservations int
+	inflightSpawns    int
+	spawnSettled      chan struct{}
+}
+
+type pendingOwner struct {
+	owner vendor.PeerOwner
+}
+
+type retainedOwner struct {
+	owner vendor.PeerOwner
 }
 
 // NewVendorSessions creates the in-process manager and binds actor lifetime to ctx.
@@ -73,7 +94,9 @@ func NewVendorSessions(ctx context.Context, deps *VendorSessionDeps) (*VendorSes
 		spawn: func(name string, fn func(context.Context) error) *supervise.Task {
 			return supervise.Go(ctx, name, fn)
 		},
-		actors: make(map[string]*vendorSessionActor),
+		actors:         make(map[string]*vendorSessionActor),
+		pendingOwners:  make(map[*pendingOwner]struct{}),
+		retainedOwners: make(map[*retainedOwner]struct{}),
 	}, nil
 }
 
@@ -91,7 +114,7 @@ func (m *VendorSessions) Start(ctx context.Context, session *vendorstore.Session
 		return capacityErr
 	}
 	defer release()
-	started, observations, err := m.startAdapter(ctx, spec)
+	started, observations, pending, err := m.startAdapter(ctx, spec)
 	if err != nil {
 		return err
 	}
@@ -99,8 +122,8 @@ func (m *VendorSessions) Start(ctx context.Context, session *vendorstore.Session
 	session.State = vendorstore.StateStarting
 	session.ResumeHandle = spec.ResumeSessionID
 	actor := newVendorSessionActor(m, session, started, observations)
-	if err := m.installActor(session.ID, actor); err != nil {
-		m.closeUntracked(ctx, started)
+	if err := m.installActor(session.ID, actor, pending); err != nil {
+		m.closeAndSettlePending(ctx, started, pending)
 		return err
 	}
 	if err := actor.call(ctx, actorCommand{kind: commandCreate}); err != nil {
@@ -171,14 +194,14 @@ func (m *VendorSessions) Resume(ctx context.Context, sessionID string, spec *ven
 	}
 	resumeSpec := *spec
 	resumeSpec.ResumeSessionID = info.ResumeHandle
-	started, observations, err := m.startAdapter(ctx, &resumeSpec)
+	started, observations, pending, err := m.startAdapter(ctx, &resumeSpec)
 	if err != nil {
 		return err
 	}
 	setProcessIdentity(&info, started)
 	actor := newVendorSessionActor(m, &info, started, observations)
-	if err := m.installActor(sessionID, actor); err != nil {
-		m.closeUntracked(ctx, started)
+	if err := m.installActor(sessionID, actor, pending); err != nil {
+		m.closeAndSettlePending(ctx, started, pending)
 		return err
 	}
 	if err := actor.call(ctx, actorCommand{kind: commandResume}); err != nil {
@@ -221,31 +244,106 @@ func (m *VendorSessions) reserveSlot(ctx context.Context, sessionID string) (fun
 	return release, nil
 }
 
-func (m *VendorSessions) startAdapter(ctx context.Context, spec *vendor.StartSpec) (vendor.Session, <-chan claude.Observation, error) {
-	session, err := m.deps.Adapter.Start(ctx, spec)
-	if err != nil {
-		return nil, nil, safeActorError(err)
+func (m *VendorSessions) startAdapter(ctx context.Context, spec *vendor.StartSpec) (vendor.Session, <-chan claude.Observation, *pendingOwner, error) {
+	finishSpawn := m.beginInflightSpawn()
+	defer finishSpawn()
+	var pending *pendingOwner
+	specCopy := *spec
+	origOnSpawned := spec.OnSpawned
+	specCopy.OnSpawned = func(owner vendor.PeerOwner) {
+		if m.deps.TestDelaySpawnRegistration != nil {
+			m.deps.TestDelaySpawnRegistration(ctx)
+		}
+		pending = m.addPendingOwner(owner)
+		finishSpawn()
+		if origOnSpawned != nil {
+			origOnSpawned(owner)
+		}
 	}
+	session, err := m.deps.Adapter.Start(ctx, &specCopy)
+	if err != nil {
+		finishSpawn()
+		m.retirePendingOwner(pending)
+		return nil, nil, nil, safeActorError(err)
+	}
+	finishSpawn()
 	observations, ok := observationsOf(session)
 	if !ok {
-		m.closeUntracked(ctx, session)
-		return nil, nil, errcode.New(errcode.FailedPrecondition, "adapter session does not expose observations")
+		m.closeAndSettlePending(ctx, session, pending)
+		return nil, nil, nil, errcode.New(errcode.FailedPrecondition, "adapter session does not expose observations")
 	}
-	return session, observations, nil
+	return session, observations, pending, nil
 }
 
-func (m *VendorSessions) closeUntracked(ctx context.Context, session vendor.Session) {
+func (m *VendorSessions) addPendingOwner(owner vendor.PeerOwner) *pendingOwner {
+	if owner == nil {
+		return nil
+	}
+	p := &pendingOwner{owner: owner}
+	m.mu.Lock()
+	m.pendingOwners[p] = struct{}{}
+	m.mu.Unlock()
+	return p
+}
+
+func (m *VendorSessions) removePendingOwner(p *pendingOwner) {
+	if p == nil {
+		return
+	}
+	m.mu.Lock()
+	delete(m.pendingOwners, p)
+	m.mu.Unlock()
+}
+
+func (m *VendorSessions) retainOwner(owner vendor.PeerOwner) {
+	if owner == nil {
+		owner = missingPeerOwner{}
+	}
+	m.mu.Lock()
+	m.retainedOwners[&retainedOwner{owner: owner}] = struct{}{}
+	m.mu.Unlock()
+}
+
+func (m *VendorSessions) retirePendingOwner(p *pendingOwner) {
+	if p == nil {
+		return
+	}
+	m.mu.Lock()
+	delete(m.pendingOwners, p)
+	if p.owner != nil {
+		m.retainedOwners[&retainedOwner{owner: p.owner}] = struct{}{}
+	}
+	m.mu.Unlock()
+}
+
+func (m *VendorSessions) closeAndSettlePending(ctx context.Context, session vendor.Session, pending *pendingOwner) {
 	proof, err := session.Close(context.WithoutCancel(ctx), vendor.CloseHostStop)
 	if err != nil {
 		m.deps.Logger.ErrorContext(ctx, "cleaning up an untracked vendor process failed", "proof", proof.Status)
 	}
+	if err == nil && proof.Status == process.StopProofProved {
+		m.removePendingOwner(pending)
+		return
+	}
+	if pending != nil {
+		m.retirePendingOwner(pending)
+		return
+	}
+	if owner, ok := session.(vendor.PeerOwner); ok {
+		m.retainOwner(owner)
+		return
+	}
+	m.retainOwner(missingPeerOwner{})
 }
 
-func (m *VendorSessions) installActor(sessionID string, actor *vendorSessionActor) error {
+func (m *VendorSessions) installActor(sessionID string, actor *vendorSessionActor, pending *pendingOwner) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed || m.actors[sessionID] != nil {
 		return errcode.New(errcode.FailedPrecondition, "vendor session is already active or manager is closed")
+	}
+	if pending != nil {
+		delete(m.pendingOwners, pending)
 	}
 	m.actors[sessionID] = actor
 	actor.task = m.spawn("app.vendor-session", actor.run)

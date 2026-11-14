@@ -91,6 +91,8 @@ type VendorService struct {
 	ids        ids.Generator
 	hostEnv    []string
 	ops        *vendorOps
+	tokens     *sessionTokens
+	bridge     vendor.Bridge
 }
 
 // Probe reports each requested vendor; an empty list means Claude.
@@ -142,7 +144,7 @@ func (s *VendorService) Start(ctx context.Context, principal string, cmd *StartV
 			ID: spec.SessionID, Vendor: VendorClaude, AccountID: vendorDefaultAccount, Role: vendorSessionRole,
 			WorkspaceID: cmd.WorkspaceID, WorkspaceRoot: root,
 		}
-		if err := s.sessions.Start(opCtx, info, spec); err != nil {
+		if err := s.spawn(spec, info.Role, func() error { return s.sessions.Start(opCtx, info, spec) }); err != nil {
 			return VendorSessionView{}, publicVendorError(err)
 		}
 		return s.view(opCtx, spec.SessionID)
@@ -162,37 +164,66 @@ func (s *VendorService) Resume(ctx context.Context, principal string, cmd *Resum
 	}
 	canonical := []string{"resume", cmd.SessionID, cmd.WorkspaceID, cmd.RootName, cmd.Profile.Model, cmd.Profile.Effort}
 	return s.runForView(ctx, cmd.CommandID, canonical, VendorSpawnLimit, func(opCtx context.Context) (VendorSessionView, error) {
-		workspaceID, root, err := s.boundWorkspace(opCtx, cmd)
+		info, err := s.boundWorkspace(opCtx, cmd)
 		if err != nil {
 			return VendorSessionView{}, err
 		}
-		spec, _, err := s.spawnSpec(opCtx, workspaceID, root, cmd.Profile)
+		if s.sessions.actor(cmd.SessionID) != nil {
+			return VendorSessionView{}, errcode.New(errcode.VendorSessionState, "vendor session operation failed")
+		}
+		spec, _, err := s.spawnSpec(opCtx, info.WorkspaceID, info.WorkspaceRoot, cmd.Profile)
 		if err != nil {
 			return VendorSessionView{}, err
 		}
 		spec.SessionID = cmd.SessionID
-		if err := s.sessions.Resume(opCtx, cmd.SessionID, spec); err != nil {
+		if err := s.spawn(spec, info.Role, func() error { return s.sessions.Resume(opCtx, cmd.SessionID, spec) }); err != nil {
 			return VendorSessionView{}, publicVendorError(err)
 		}
 		return s.view(opCtx, cmd.SessionID)
 	})
 }
 
-// boundWorkspace returns the workspace root the session was created in. A
-// session never moves: a client that names another workspace or root is
-// refused before anything spawns.
-func (s *VendorService) boundWorkspace(ctx context.Context, cmd *ResumeVendorSession) (string, string, error) {
+// spawn mints a pending session token (host-api §7), hands it to the process
+// through the spec, and promotes it only after start succeeds. On any failure
+// only the token this call minted is discarded, leaving any existing live
+// session's token untouched.
+func (s *VendorService) spawn(spec *vendor.StartSpec, role string, start func() error) error {
+	token, binding, err := s.tokens.mintPending(spec.SessionID, role)
+	if err != nil {
+		return err
+	}
+	spec.SessionToken = token
+	if err := start(); err != nil {
+		s.tokens.discard(binding)
+		return err
+	}
+	if actor := s.sessions.actor(spec.SessionID); actor != nil {
+		select {
+		case <-actor.done:
+			s.tokens.discard(binding)
+			return nil
+		default:
+		}
+	}
+	s.tokens.commit(binding)
+	return nil
+}
+
+// boundWorkspace returns the record of the session, whose workspace root is
+// the one it was created in. A session never moves: a client that names
+// another workspace or root is refused before anything spawns.
+func (s *VendorService) boundWorkspace(ctx context.Context, cmd *ResumeVendorSession) (vendorstore.Session, error) {
 	info, err := s.store.Snapshot(ctx, cmd.SessionID)
 	if err != nil {
-		return "", "", publicVendorError(err)
+		return vendorstore.Session{}, publicVendorError(err)
 	}
 	mismatch := info.WorkspaceID == "" ||
 		(cmd.WorkspaceID != "" && cmd.WorkspaceID != info.WorkspaceID) ||
 		(cmd.RootName != "" && cmd.RootName != info.WorkspaceRoot)
 	if mismatch {
-		return "", "", errcode.New(errcode.VendorWorkspaceMismatch, "the session is bound to the workspace root it was created in")
+		return vendorstore.Session{}, errcode.New(errcode.VendorWorkspaceMismatch, "the session is bound to the workspace root it was created in")
 	}
-	return info.WorkspaceID, info.WorkspaceRoot, nil
+	return info, nil
 }
 
 // Send starts a turn. A /fugue: input, leading whitespace ignored, is
@@ -314,6 +345,7 @@ func (s *VendorService) spawnSpec(ctx context.Context, workspaceID, rootName str
 	}
 	return &vendor.StartSpec{
 		Cwd: cwd, HostEnv: s.hostEnv, Model: profile.Model, Effort: profile.Effort, ResumeSessionID: profile.ResumeSessionID,
+		Bridge: s.bridge,
 	}, rootName, nil
 }
 

@@ -12,14 +12,18 @@ import (
 // PeerCredentials is what the transport knows about the process on the other
 // end of a unix connection. Only the UID decides access (host-api §7): being
 // the same OS user is the accepted trust model — it proves the same user, not
-// a particular app, which the security documentation records.
+// a particular app, which the security documentation records. The PID is
+// recorded at accept time and decides one thing more: a process of a live
+// vendor session never becomes a local principal (roadmap Q-41 A). Zero means
+// the PID could not be read, and the local principal is then denied.
 type PeerCredentials struct {
 	UID uint32
+	PID int
 }
 
 // peerCredentials reads the peer credentials of a connected unix socket; the
 // platform files implement the getsockopt calls (SO_PEERCRED on Linux,
-// LOCAL_PEERCRED on macOS) and unsupported platforms fail closed
+// LOCAL_PEERCRED and LOCAL_PEERPID on macOS) and unsupported platforms fail closed
 // (peercred_other.go).
 
 // uidAllowed reports whether a connection from uid may talk to a host run by

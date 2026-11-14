@@ -43,6 +43,7 @@ type Owner struct {
 
 	mu                sync.Mutex
 	vaultLocked       bool
+	draining          bool
 	byOperation       map[string]*Ticket
 	byRequest         map[string]*Ticket
 	grants            map[grantKey]struct{}
@@ -230,6 +231,12 @@ func (o *Owner) promptAndAudit(ticket, cp *Ticket, openedEv *AuditEvent, now tim
 }
 
 func (o *Owner) tryImmediateResolutionLocked(ticket *Ticket, now time.Time) (bool, *AuditEvent, *Resolution, error) {
+	if o.draining {
+		o.markResolvedLocked(ticket, now, OutcomeCancelled)
+		ev := o.newAuditEvent("cancelled", ticket)
+		res := Resolution{RequestID: ticket.RequestID, Outcome: OutcomeCancelled}
+		return true, &ev, &res, nil
+	}
 	if o.isUnavailableLocked() {
 		o.markResolvedLocked(ticket, now, OutcomeUnavailable)
 		ev := o.newAuditEvent("unavailable", ticket)

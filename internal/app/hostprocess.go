@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/syurodev/fugue/internal/config"
+	"github.com/syurodev/fugue/internal/environments"
 	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
@@ -32,6 +33,7 @@ type HostProcess struct {
 	closeErr    error
 	vault       *vault.Service
 	vendorStore *vendorstore.Store
+	vaultRef    atomic.Pointer[vault.Service]
 	// closeVendor stops every vendor session and then closes the vendor
 	// read model; it runs before the store closes and is idempotent.
 	closeVendor func() error
@@ -119,7 +121,8 @@ func initHostTopics(hp *HostProcess, store *storage.Store, deps *HostDeps) error
 		}
 		return terr
 	}
-	interactions, ierr := initInteractions(deps, hp.rt.hub)
+	hp.rt.tags = environments.New()
+	interactions, ierr := initInteractions(hp, deps, hp.rt.hub, hp.rt.tags)
 	if ierr != nil {
 		if serr := store.Close(); serr != nil {
 			return errcode.Wrap(errcode.Internal, "create interaction service", errors.Join(ierr, serr))
@@ -166,6 +169,9 @@ func (hp *HostProcess) runDrain(ctx context.Context, force bool, reason string) 
 			}
 			return nil
 		})
+	}
+	if hp.rt.interactions != nil {
+		hp.rt.interactions.CancelPending()
 	}
 	derr := hp.deps.Transport.Drain(ctx, force)
 	verr := hp.closeVendor()
@@ -221,17 +227,21 @@ func (hp *HostProcess) waitTasks() error {
 	}
 }
 
-func initInteractions(deps *HostDeps, hub *EventHub) (*InteractionService, error) {
+func initInteractions(hp *HostProcess, deps *HostDeps, hub *EventHub, tags interaction.TagPolicy) (*InteractionService, error) {
 	owner, err := interaction.NewOwner(&interaction.Config{
 		Clock:     deps.Clock,
 		IDs:       deps.IDs,
 		Responder: nil,
 		Headless:  false,
-		// TODO(F9.6): wire the host vault lock state to the interaction owner once vault is added to HostDeps.
-		VaultLocked: func() bool { return false },
+		TagPolicy: tags,
+		VaultLocked: func() bool {
+			v := hp.vaultRef.Load()
+			return v == nil || v.Snapshot().State != vault.StateUnlocked
+		},
 	})
 	if err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "create interaction owner", err)
 	}
+	owner.SetVaultLocked(true)
 	return NewInteractionService(owner, hub, deps.Clock)
 }

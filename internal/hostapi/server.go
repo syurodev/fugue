@@ -18,6 +18,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/interaction/v1/interactionv1connect"
+	"github.com/syurodev/fugue/pkg/pb/fugue/sessiontools/v1/sessiontoolsv1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/transcript/v1/transcriptv1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/vendors/v1/vendorsv1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/workspace/v1/workspacev1connect"
@@ -51,27 +52,59 @@ const (
 	phaseAcquiring
 	phaseLeased
 	phaseClosed
+	// phaseSession is a connection that presented a session token. It holds
+	// no lease and never leaves this phase except by closing.
+	phaseSession
 )
 
 // connState is the per-connection state attached to the connection's context:
 // the connection's id, its hello phase and the negotiated client kind, which
 // is the connection's principal for topic authorization (host-api §7).
 type connState struct {
-	id    string
-	kind  app.ClientKind
-	mu    sync.Mutex
-	phase connPhase
+	id string
+	// peerPID is the peer's process ID from accept time; zero if unknown.
+	peerPID int
+	kind    app.ClientKind
+	// session is the binding of a connection in phaseSession.
+	session app.SessionBinding
+	mu      sync.Mutex
+	phase   connPhase
 }
 
 // beginHello moves none to acquiring; any other phase is a repeated hello.
 func (st *connState) beginHello() error {
 	st.mu.Lock()
 	defer st.mu.Unlock()
+	if st.phase == phaseSession {
+		return ErrSessionPrincipalDenied
+	}
 	if st.phase != phaseNone {
 		return ErrAlreadyHelloed
 	}
 	st.phase = phaseAcquiring
 	return nil
+}
+
+// attachSession makes a fresh connection the session principal of binding.
+// A connection that already negotiated a hello, or is doing so, stays what it
+// is: a local client never turns into a session and the reverse.
+func (st *connState) attachSession(binding app.SessionBinding) error {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.phase != phaseNone {
+		return ErrSessionAttachDenied
+	}
+	st.kind = app.ClientKind(app.PrincipalSession)
+	st.session = binding
+	st.phase = phaseSession
+	return nil
+}
+
+// sessionBinding returns the binding of a session-principal connection.
+func (st *connState) sessionBinding() (app.SessionBinding, bool) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.session, st.phase == phaseSession
 }
 
 // leaseHello records a successful hello — the negotiated kind becomes the
@@ -118,10 +151,21 @@ func (st *connState) markClosed() bool {
 	return leased
 }
 
-func (st *connState) isLeased() bool {
+// requireLeased is the gate of every local RPC: the connection must have
+// completed a hello. A session-principal connection is denied typed, whatever
+// the RPC (HA-06).
+func (st *connState) requireLeased() error {
 	st.mu.Lock()
 	defer st.mu.Unlock()
-	return st.phase == phaseLeased
+	switch st.phase {
+	case phaseLeased:
+		return nil
+	case phaseSession:
+		return ErrSessionPrincipalDenied
+	case phaseNone, phaseAcquiring, phaseClosed:
+		return ErrHelloFirst
+	}
+	return ErrHelloFirst
 }
 
 type connStateKey struct{}
@@ -165,6 +209,10 @@ func newServiceMux(backend app.Backend) *http.ServeMux {
 		connect.WithReadMaxBytes(app.VendorRequestMaxBytes),
 	))
 	handler.Handle(transcriptv1connect.NewTranscriptServiceHandler(&transcriptHandler{backend: backend}, connect.WithReadMaxBytes(app.VendorRequestMaxBytes)))
+	handler.Handle(sessiontoolsv1connect.NewSessionToolServiceHandler(
+		&sessionToolHandler{backend: backend},
+		connect.WithReadMaxBytes(app.SessionToolMaxBytes),
+	))
 	return handler
 }
 
@@ -254,6 +302,9 @@ func (s *Server) admit(w http.ResponseWriter) bool {
 // registerConn creates the connection's state under its context value.
 func (s *Server) registerConn(c net.Conn) *connState {
 	st := &connState{}
+	if tracked, ok := c.(*trackedConn); ok {
+		st.peerPID = tracked.peerPID
+	}
 	if s.cfg.IDs != nil {
 		if id, err := s.cfg.IDs.NewID(); err == nil {
 			st.id = id

@@ -91,23 +91,13 @@ func serve(ctx context.Context, out io.Writer, cfg config.Config, version string
 	if clk == nil {
 		clk = clock.Real{}
 	}
-	hp, err := app.StartHost(ctx, &app.HostDeps{
-		DataDir: cfg.DataDir,
-		Config: app.HostConfig{
-			HostVersion: version,
-			// F5.1 serves the one published Host API version.
-			APIVersions: []string{"v1"},
-			// Foreground serve defaults to no idle shutdown (Q-25).
-			IdleGrace:    opts.idleGrace,
-			DrainTimeout: 0,
-		},
-		Clock:     clk,
-		IDs:       ids.NewUUIDv7(clk, ids.CryptoRandom{}),
-		Transport: transport,
-		// The snapshot is filtered through the vendor allowlist before any
-		// vendor process sees it.
-		VendorHostEnv: os.Environ(),
-	})
+	// Vendor sessions spawn this very binary as their MCP bridge.
+	self, err := os.Executable()
+	if err != nil {
+		return exitFailure, errors.Join(errcode.Wrap(errcode.Internal, "locate the fugue binary", err), teardownSocket(sock))
+	}
+	bridge := app.VendorBridge{Binary: self, Socket: sock.Path}
+	hp, err := app.StartHost(ctx, hostDeps(cfg, version, opts.idleGrace, clk, transport, bridge))
 	if err != nil {
 		return exitFailure, errors.Join(startupErr(err, "open the host store"), teardownSocket(sock))
 	}
@@ -124,6 +114,30 @@ func serve(ctx context.Context, out io.Writer, cfg config.Config, version string
 		slog.Warn("write the serving line", "err", werr)
 	}
 	return runUntilStopped(ctx, hp, sigs), nil
+}
+
+// hostDeps is the host's wiring. A normal serve registers no Fugue MCP tool:
+// only tests set HostDeps.TestFugueTools.
+func hostDeps(cfg config.Config, version string, idleGrace time.Duration, clk clock.Clock, transport app.HostTransport, bridge app.VendorBridge) *app.HostDeps {
+	return &app.HostDeps{
+		DataDir: cfg.DataDir,
+		Config: app.HostConfig{
+			HostVersion: version,
+			// F5.1 serves the one published Host API version.
+			APIVersions: []string{"v1"},
+			// Foreground serve defaults to no idle shutdown (Q-25).
+			IdleGrace:    idleGrace,
+			DrainTimeout: 0,
+		},
+		Clock:     clk,
+		IDs:       ids.NewUUIDv7(clk, ids.CryptoRandom{}),
+		Transport: transport,
+		// The snapshot is filtered through the vendor allowlist before any
+		// vendor process sees it.
+		VendorHostEnv: os.Environ(),
+		Random:        ids.CryptoRandom{},
+		Bridge:        bridge,
+	}
 }
 
 // runUntilStopped serves until the context is canceled or a signal arrives,

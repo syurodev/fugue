@@ -69,6 +69,7 @@ func (a *vendorSessionActor) processExited(ctx context.Context) error {
 		reason = vendor.CloseHostStop
 	}
 	proof, stopErr := a.session.Close(context.WithoutCancel(ctx), reason)
+	a.recordStopResult(proof, stopErr)
 	status := string(proof.Status)
 	if stopErr != nil || status != string(process.StopProofProved) {
 		status = string(process.StopProofUnknown)
@@ -86,7 +87,8 @@ func (a *vendorSessionActor) processExited(ctx context.Context) error {
 
 func (a *vendorSessionActor) fail(ctx context.Context, cause error) error {
 	a.manager.deps.Logger.ErrorContext(ctx, "vendor session actor stopped after a persistence failure", "error_code", string(errcode.CodeOf(cause)))
-	_, closeErr := a.session.Close(context.WithoutCancel(ctx), vendor.CloseHostStop)
+	proof, closeErr := a.session.Close(context.WithoutCancel(ctx), vendor.CloseHostStop)
+	a.recordStopResult(proof, closeErr)
 	if closeErr != nil {
 		a.manager.deps.Logger.ErrorContext(ctx, "vendor process cleanup after actor failure failed")
 	}

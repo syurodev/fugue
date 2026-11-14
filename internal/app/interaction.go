@@ -66,6 +66,11 @@ type InteractionService struct {
 	cmdMu    sync.Mutex
 	inflight map[string]*inflightCmd
 
+	// waitMu is a leaf lock: the lifecycle hook takes it under the owner's
+	// mutex, and nothing that holds it calls the owner.
+	waitMu  sync.Mutex
+	waiters map[string][]chan struct{}
+
 	// betweenListReads is a test seam: ListPending calls it between reading
 	// the topic sequence and reading the pending views. Always nil in
 	// production.
@@ -89,6 +94,7 @@ func NewInteractionService(owner *interaction.Owner, hub *EventHub, clk clock.Cl
 		inc:        owner.Incarnation(),
 		wakeExpiry: make(chan struct{}, 1),
 		inflight:   map[string]*inflightCmd{},
+		waiters:    map[string][]chan struct{}{},
 	}
 
 	if hub != nil {
@@ -110,7 +116,49 @@ func (s *InteractionService) handleLifecycle(ev interaction.LifecycleEvent) {
 			s.publishResolved(ev.RequestID, ev.Outcome)
 		}
 	}
+	if ev.Kind == interaction.EventResolved {
+		s.wakeWaiters(ev.RequestID)
+	}
 	s.nudgeExpiry()
+}
+
+func (s *InteractionService) wakeWaiters(requestID string) {
+	s.waitMu.Lock()
+	defer s.waitMu.Unlock()
+	for _, ch := range s.waiters[requestID] {
+		close(ch)
+	}
+	delete(s.waiters, requestID)
+}
+
+// AwaitResolved blocks until the request is resolved and returns its ticket.
+// It waits as long as ctx lives: with no client connected the request stays
+// pending (interaction §5, I-07). The waiter is registered before the state
+// is read, so a resolution in between is never missed.
+func (s *InteractionService) AwaitResolved(ctx context.Context, requestID string) (*interaction.Ticket, error) {
+	ch := make(chan struct{})
+	s.waitMu.Lock()
+	s.waiters[requestID] = append(s.waiters[requestID], ch)
+	s.waitMu.Unlock()
+	ticket, err := s.owner.LookupRequest(requestID)
+	if err == nil && !ticket.Resolved {
+		select {
+		case <-ch:
+			ticket, err = s.owner.LookupRequest(requestID)
+		case <-ctx.Done():
+			err = errcode.Wrap(errcode.Canceled, "the wait for the interaction answer ended", ctx.Err())
+		}
+	}
+	s.waitMu.Lock()
+	s.waiters[requestID] = slices.DeleteFunc(s.waiters[requestID], func(c chan struct{}) bool { return c == ch })
+	if len(s.waiters[requestID]) == 0 {
+		delete(s.waiters, requestID)
+	}
+	s.waitMu.Unlock()
+	if err != nil {
+		return nil, mapOwnerError(err)
+	}
+	return ticket, nil
 }
 
 func (s *InteractionService) publishRequested(ticket *interaction.Ticket) {
@@ -401,6 +449,12 @@ func (s *InteractionService) ExpireExpired() []*interaction.Ticket {
 // PruneResolved prunes non-relayed resolved tickets past retention TTL.
 func (s *InteractionService) PruneResolved() {
 	s.owner.PruneResolved()
+}
+
+// CancelPending cancels every pending interaction wait so a graceful drain
+// never hangs on an unanswered approval.
+func (s *InteractionService) CancelPending() {
+	s.owner.CancelPending()
 }
 
 // TakeRelayed delivers a resolved relayed request once.

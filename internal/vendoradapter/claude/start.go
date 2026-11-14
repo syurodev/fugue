@@ -92,6 +92,16 @@ func IsDenylistedFlag(arg string) bool {
 	return false
 }
 
+func validateProfile(spec *vendor.StartSpec) error {
+	if err := validateModel(spec.Model); err != nil {
+		return err
+	}
+	if err := validateEffort(spec.Effort); err != nil {
+		return err
+	}
+	return validateResumeSessionID(spec.ResumeSessionID)
+}
+
 // BuildArgv constructs the vetted spawn argv for a Claude Code session.
 func BuildArgv(binary string, spec *vendor.StartSpec) ([]string, error) {
 	if binary == "" {
@@ -100,13 +110,7 @@ func BuildArgv(binary string, spec *vendor.StartSpec) ([]string, error) {
 	if spec == nil {
 		spec = &vendor.StartSpec{}
 	}
-	if err := validateModel(spec.Model); err != nil {
-		return nil, err
-	}
-	if err := validateEffort(spec.Effort); err != nil {
-		return nil, err
-	}
-	if err := validateResumeSessionID(spec.ResumeSessionID); err != nil {
+	if err := validateProfile(spec); err != nil {
 		return nil, err
 	}
 
@@ -135,7 +139,60 @@ func BuildArgv(binary string, spec *vendor.StartSpec) ([]string, error) {
 			return nil, errcode.New(errcode.InvalidArgument, "claude: invalid argument")
 		}
 	}
-	return argv, nil
+	// The denylist above covers every profile-derived argument. The MCP
+	// flags below are Fugue's own and are appended after it: a profile can
+	// never set them, and --strict-mcp-config keeps the user's and the
+	// project's MCP servers out of the session.
+	if spec.Bridge.Binary == "" {
+		return argv, nil
+	}
+	config, err := bridgeConfig(spec.Bridge)
+	if err != nil {
+		return nil, err
+	}
+	return append(argv, "--mcp-config", config, "--strict-mcp-config"), nil
+}
+
+// BridgeServerName is the MCP server name Claude sees; its tools are named
+// mcp__fugue__<tool>.
+const BridgeServerName = "fugue"
+
+type mcpServer struct {
+	Type    string            `json:"type"`
+	Command string            `json:"command"`
+	Args    []string          `json:"args"`
+	Env     map[string]string `json:"env"`
+}
+
+// bridgeConfig renders the inline MCP configuration that makes Claude spawn
+// `fugue mcp-bridge`. It names only the binary and the socket: the session
+// token travels as an expanded environment entry, never in argv.
+func bridgeConfig(bridge vendor.Bridge) (string, error) {
+	if !filepath.IsAbs(bridge.Binary) || !filepath.IsAbs(bridge.Socket) {
+		return "", errcode.New(errcode.InvalidArgument, "claude: the mcp bridge needs absolute binary and socket paths")
+	}
+	raw, err := json.Marshal(map[string]map[string]mcpServer{"mcpServers": {BridgeServerName: {
+		Type: "stdio", Command: bridge.Binary, Args: []string{"mcp-bridge", "--socket", bridge.Socket},
+		// Claude Code expands the placeholder from its own environment, where
+		// the host put the token. The config carries only the placeholder, so
+		// the token is in neither argv nor any file, and the bridge does not
+		// depend on the CLI passing its whole environment on.
+		Env: map[string]string{vendor.SessionTokenEnv: "${" + vendor.SessionTokenEnv + "}"},
+	}}})
+	if err != nil {
+		return "", errcode.Wrap(errcode.Internal, "claude: encode the mcp bridge configuration", err)
+	}
+	return string(raw), nil
+}
+
+// SessionEnv is the environment of a session process: the §8 allowlist of
+// ProbeEnv plus, when the host minted one, the session token as the single
+// added variable (VR-E09).
+func SessionEnv(spec *vendor.StartSpec) []string {
+	if spec.SessionToken.IsZero() {
+		return ProbeEnv(spec.HostEnv, spec.Home)
+	}
+	return filteredEnv(spec.HostEnv, spec.Home, []string{vendor.SessionTokenEnv + "=" + spec.SessionToken.Reveal()})
 }
 
 func checkAbsoluteBinary(path string) (string, error) {
@@ -206,6 +263,9 @@ func (a *Adapter) Start(ctx context.Context, spec *vendor.StartSpec) (vendor.Ses
 	}
 	sess.proc = proc
 	sess.normalizer = NewNormalizer(spec.SessionID)
+	if spec.OnSpawned != nil {
+		spec.OnSpawned(sess)
+	}
 
 	initCh := make(chan *Init, 1)
 	readerErrCh := make(chan error, 1)
@@ -236,7 +296,7 @@ func (a *Adapter) spawnSessionProcess(
 	opts := &process.Options{
 		Argv:          argv,
 		Cwd:           spec.Cwd,
-		Env:           ProbeEnv(spec.HostEnv, spec.Home),
+		Env:           SessionEnv(spec),
 		Clock:         clk,
 		Interrupt:     makeProtocolInterrupt(sess),
 		SessionID:     spec.SessionID,

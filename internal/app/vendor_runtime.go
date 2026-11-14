@@ -38,12 +38,25 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 		return errors.Join(err, transcripts.Close(), vs.Close())
 	}
 	hp.vault = v
+	hp.vaultRef.Store(v)
+	var unregisterVaultGuard func()
+	if hp.rt.interactions != nil {
+		owner := hp.rt.interactions.owner
+		unregisterVaultGuard = v.RegisterLockGuard(func(snap vault.Snapshot) {
+			owner.SetVaultLocked(snap.State != vault.StateUnlocked)
+		})
+	}
 	hp.rt.transcripts = transcripts
 	hp.vendorStore = vs
 	hp.closeVendor = func() error {
+		if unregisterVaultGuard != nil {
+			unregisterVaultGuard()
+		}
 		// Stops run on the host's lifetime context without its cancellation,
 		// so a host close never skips the F9.2 stop order.
-		return errors.Join(sessions.CloseAll(context.WithoutCancel(base)), transcripts.Close(), vs.Close())
+		err := errors.Join(sessions.CloseAll(context.WithoutCancel(base)), transcripts.Close(), vs.Close())
+		hp.rt.sessionTools.tokens.revokeAll()
+		return err
 	}
 	return nil
 }
@@ -61,16 +74,23 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 		options = append(options, claude.WithBinary(deps.VendorBinary))
 	}
 	adapter := claude.NewAdapter(deps.VendorHostEnv, options...)
+	// A session's token dies with its actor, with a purge and with the host.
+	tokens := newSessionTokens(deps.Random)
+	transcripts.onPurge = tokens.revoke
 	sessions, err := NewVendorSessions(base, &VendorSessionDeps{
 		Store: topicNotifyingStore{Store: vs, topic: topic}, Transcripts: transcripts, Adapter: adapter,
-		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(),
+		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: tokens.revoke,
+		TestDelaySpawnRegistration: deps.TestDelaySpawnRegistration,
+		TestOnWaitInflightSpawn:    deps.TestOnWaitInflightSpawn,
 	})
 	if err != nil {
 		return nil, err
 	}
+	hp.rt.sessionTools = newSessionToolService(tokens, deps.TestFugueTools, vs, hp.rt.interactions, hp.rt.tags, deps.IDs)
 	hp.rt.vendors = &VendorService{
 		sessions: sessions, store: vs, adapter: adapter, vault: v, workspaces: hp.rt.workspaces.domain,
 		ids: deps.IDs, hostEnv: deps.VendorHostEnv, ops: newVendorOps(deps.Clock, hp.rt.goTask),
+		tokens: tokens, bridge: deps.Bridge,
 	}
 	return sessions, nil
 }

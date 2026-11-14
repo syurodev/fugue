@@ -30,6 +30,13 @@ type vendorServiceFixture struct {
 
 func newVendorServiceFixture(t *testing.T) *vendorServiceFixture {
 	t.Helper()
+	return newVendorServiceFixtureWith(t, nil)
+}
+
+// newVendorServiceFixtureWith starts the production host wiring with the
+// given test tools registered.
+func newVendorServiceFixtureWith(t *testing.T, tools []*FugueTool) *vendorServiceFixture {
+	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +45,7 @@ func newVendorServiceFixture(t *testing.T) *vendorServiceFixture {
 	hp, err := StartHost(t.Context(), &HostDeps{
 		DataDir: t.TempDir(), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("vendor-svc")),
-		Transport: newScriptedTransport(), VendorBinary: exe,
+		Transport: newScriptedTransport(), VendorBinary: exe, TestFugueTools: tools,
 	})
 	if err != nil {
 		t.Fatal(err)

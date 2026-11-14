@@ -221,11 +221,15 @@ func (c *cappedBuffer) String() string { return c.buf.String() }
 // home override when the account uses a separate config directory. No Fugue
 // secret and no other host variable reaches the child.
 func ProbeEnv(hostEnv []string, home vendor.AccountHome) []string {
+	return filteredEnv(hostEnv, home, nil)
+}
+
+func filteredEnv(hostEnv []string, home vendor.AccountHome, extras []string) []string {
 	vendorHome := map[string]string{}
 	if home.ConfigDir != "" {
 		vendorHome["CLAUDE_CONFIG_DIR"] = home.ConfigDir
 	}
-	return process.FilterEnv(hostEnv, process.DefaultAllowlist(), vendorHome, nil)
+	return process.FilterEnv(hostEnv, process.DefaultAllowlist(), vendorHome, extras)
 }
 
 // Capability is what the F9.5 adapter declares (vendor-runtime §6). Approval

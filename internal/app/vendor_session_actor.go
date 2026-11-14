@@ -51,6 +51,7 @@ type vendorSessionActor struct {
 	slashCommands []string
 	turns         map[string]bool
 	finished      bool
+	stopProved    bool
 	// attached turns on once the create or resume command has committed:
 	// a real process reports observations immediately, and none may be
 	// appended before the session row exists.
@@ -128,7 +129,11 @@ func (a *vendorSessionActor) call(ctx context.Context, command actorCommand) err
 
 func (a *vendorSessionActor) run(ctx context.Context) error {
 	defer close(a.done)
+	if ended := a.manager.deps.OnSessionEnded; ended != nil {
+		defer ended(a.info.ID)
+	}
 	defer a.vaultSub.Close()
+	defer a.retirePeerOwner()
 	for {
 		if err := a.runStep(ctx); err != nil {
 			return err
@@ -159,6 +164,7 @@ func (a *vendorSessionActor) runStep(ctx context.Context) error {
 			return a.fail(ctx, err)
 		}
 	case result := <-a.closeResults:
+		a.recordStopResult(result.proof, result.err)
 		if err := a.persistClose(ctx, result.reason, result.proof, result.err); err != nil {
 			return a.fail(ctx, err)
 		}
@@ -201,11 +207,27 @@ func (a *vendorSessionActor) handleVaultEvent(ctx context.Context, snapshot vaul
 
 func (a *vendorSessionActor) stopAfterHostCancel(ctx context.Context) error {
 	proof, err := a.session.Close(context.WithoutCancel(ctx), vendor.CloseHostStop)
+	a.recordStopResult(proof, err)
 	if err != nil {
 		a.manager.deps.Logger.ErrorContext(context.WithoutCancel(ctx), "stopping vendor session actor after host cancellation failed", "proof", proof.Status)
 	}
 	a.finished = true
 	return nil
+}
+
+func (a *vendorSessionActor) recordStopResult(proof process.StopProof, err error) {
+	a.stopProved = err == nil && proof.Status == process.StopProofProved
+}
+
+func (a *vendorSessionActor) retirePeerOwner() {
+	if a.stopProved {
+		return
+	}
+	owner, ok := a.session.(vendor.PeerOwner)
+	if !ok {
+		owner = missingPeerOwner{}
+	}
+	a.manager.retainOwner(owner)
 }
 
 func (a *vendorSessionActor) handleVaultState(ctx context.Context, snapshot vault.Snapshot) error {

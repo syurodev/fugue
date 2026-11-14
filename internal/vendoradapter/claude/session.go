@@ -104,6 +104,26 @@ func (s *Session) Identity() process.Identity {
 	return s.proc.Identity()
 }
 
+// OwnsPID reports whether pid belongs to this session's process tree; an
+// unreadable tree is an error and the caller fails closed (Q-41 A).
+func (s *Session) OwnsPID(pid int) (bool, error) {
+	owned, err := s.proc.OwnsPID(pid)
+	if err != nil {
+		return false, errcode.Wrap(errcode.Internal, "read the session process tree", err)
+	}
+	return owned, nil
+}
+
+// TreeEmpty reports whether this session's process containment is verified to
+// have no remaining live processes.
+func (s *Session) TreeEmpty() (bool, error) {
+	empty, err := s.proc.TreeEmpty()
+	if err != nil {
+		return false, errcode.Wrap(errcode.Internal, "check whether the session process tree is empty", err)
+	}
+	return empty, nil
+}
+
 // StderrRing returns the 64 KiB ring buffer capturing raw process stderr.
 func (s *Session) StderrRing() *process.RingBuffer {
 	return s.proc.StderrRing()

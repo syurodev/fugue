@@ -237,17 +237,44 @@ func (o *Owner) SetVaultLocked(locked bool) {
 	}
 	now := o.clock.Now().UTC()
 	clear(o.grants)
+	o.wipeUnconsumedReceiptsLocked()
+	cancelled := o.cancelAllPendingLocked("vault_locked", now)
+	o.mu.Unlock()
+	for _, ev := range cancelled {
+		o.emitAudit(ev)
+	}
+}
+
+// CancelPending marks the Owner as draining, cancels all pending requests as
+// OutcomeCancelled (never approved), and wipes unconsumed receipts so a
+// graceful drain cannot hang on an unanswered approval.
+func (o *Owner) CancelPending() {
+	o.mu.Lock()
+	o.draining = true
+	now := o.clock.Now().UTC()
+	o.wipeUnconsumedReceiptsLocked()
+	cancelled := o.cancelAllPendingLocked("cancelled", now)
+	o.mu.Unlock()
+	for _, ev := range cancelled {
+		o.emitAudit(ev)
+	}
+}
+
+func (o *Owner) wipeUnconsumedReceiptsLocked() {
 	for id, r := range o.receipts {
 		if !r.Claimed {
 			delete(o.receipts, id)
 		}
 	}
+}
+
+func (o *Owner) cancelAllPendingLocked(action string, now time.Time) []*AuditEvent {
 	o.nextResolvedPrune = now
 	var cancelled []*AuditEvent
 	for _, ticket := range o.byRequest {
 		if !ticket.Resolved {
 			o.markResolvedLocked(ticket, now, OutcomeCancelled)
-			ev := o.newAuditEvent("vault_locked", ticket)
+			ev := o.newAuditEvent(action, ticket)
 			cancelled = append(cancelled, &ev)
 			o.emitLifecycleLocked(LifecycleEvent{
 				Kind:      EventResolved,
@@ -256,10 +283,7 @@ func (o *Owner) SetVaultLocked(locked bool) {
 			})
 		}
 	}
-	o.mu.Unlock()
-	for _, ev := range cancelled {
-		o.emitAudit(ev)
-	}
+	return cancelled
 }
 
 func (o *Owner) newAuditEvent(action string, ticket *Ticket) AuditEvent {
