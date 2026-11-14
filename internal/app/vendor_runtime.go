@@ -71,6 +71,7 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 		// so a host close never skips the F9.2 stop order.
 		err := errors.Join(sessions.CloseAll(context.WithoutCancel(base)), transcripts.Close(), vs.Close())
 		hp.rt.sessionTools.tokens.revokeAll()
+		hp.rt.sessionTools.endAllSessions()
 		return err
 	}
 	return nil
@@ -103,20 +104,29 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 		options = append(options, claude.WithXDGRuntimeDir(dir))
 	}
 	adapter := claude.NewAdapter(deps.VendorHostEnv, options...)
-	// A session's token dies with its actor, with a purge and with the host.
+	// A session's token, tombstones and relayed interactions die with its actor, with a purge and with the host.
 	tokens := newSessionTokens(deps.Random)
-	transcripts.onPurge = tokens.revoke
+	endSession := func(sessionID string) {
+		tokens.revoke(sessionID)
+		if hp.rt.sessionTools != nil {
+			hp.rt.sessionTools.endSession(sessionID)
+		}
+		if hp.rt.interactions != nil && hp.rt.interactions.owner != nil {
+			hp.rt.interactions.owner.ResetSession(sessionID)
+		}
+	}
+	transcripts.onPurge = endSession
 	hp.vendorAdapter = adapter
 	sessions, err := NewVendorSessions(base, &VendorSessionDeps{
 		Store: topicNotifyingStore{Store: vs, topic: topic}, Transcripts: transcripts, Adapter: adapter,
-		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: tokens.revoke,
+		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: endSession,
 		TestDelaySpawnRegistration: deps.TestDelaySpawnRegistration,
 		TestOnWaitInflightSpawn:    deps.TestOnWaitInflightSpawn,
 	})
 	if err != nil {
 		return nil, err
 	}
-	hp.rt.sessionTools = newSessionToolService(tokens, deps.TestFugueTools, vs, hp.rt.interactions, hp.rt.tags, deps.IDs)
+	hp.rt.sessionTools = newSessionToolService(tokens, deps.TestFugueTools, vs, hp.rt.interactions, hp.rt.tags, deps.IDs, sessions)
 	hp.rt.vendors = &VendorService{
 		sessions: sessions, store: vs, adapter: adapter, vault: v, workspaces: hp.rt.workspaces.domain,
 		ids: deps.IDs, hostEnv: deps.VendorHostEnv, ops: newVendorOps(deps.Clock, hp.rt.goTask),

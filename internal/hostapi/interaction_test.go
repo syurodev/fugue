@@ -643,3 +643,78 @@ func TestInteractionConnectWithReadMaxBytesOversizedRejected(t *testing.T) {
 		t.Fatalf("expected request to be rejected before backend, but backend received %d calls", backend.answerCalls)
 	}
 }
+
+func TestInteractionListPendingAndTopicCarryFull256KiBDetail(t *testing.T) {
+	t.Parallel()
+	_, backend, sockPath := setupInteractionServer(t)
+
+	view := buildFull256KiBView(backend.inc)
+	backend.pendingMu.Lock()
+	backend.pendingSeq++
+	seq := backend.pendingSeq
+	backend.pending[view.RequestID] = view
+	backend.pendingMu.Unlock()
+
+	interClient, hostClient, httpClient := newInteractionClient(t, sockPath)
+	t.Cleanup(httpClient.CloseIdleConnections)
+	if _, err := hostClient.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_CLI, "v1")); err != nil {
+		t.Fatal(err)
+	}
+	stream, err := hostClient.Subscribe(streamCtx(t), connect.NewRequest(&hostv1.SubscribeRequest{Topic: app.TopicInteraction}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = recv(t, stream).GetSnapshot()
+
+	listRes, err := interClient.ListPending(t.Context(), connect.NewRequest(&interactionv1.ListPendingRequest{}))
+	if err != nil {
+		t.Fatalf("ListPending 256 KiB detail failed: %v", err)
+	}
+	if len(listRes.Msg.Requests) != 1 || listRes.Msg.Requests[0].Detail != view.Detail {
+		t.Fatalf("ListPending Detail len=%d, want %d", len(listRes.Msg.Requests[0].GetDetail()), len(view.Detail))
+	}
+
+	assertTopicCarriesFullDetail(t, backend, stream, seq+1, &view)
+}
+
+func buildFull256KiBView(inc string) app.PendingInteractionView {
+	const maxDetail = 256 * 1024
+	const prefix = `{"command":"`
+	const suffix = `"}`
+	fullDetail := prefix + strings.Repeat("d", maxDetail-len(prefix)-len(suffix)) + suffix
+	return app.PendingInteractionView{
+		RequestID:       "req-256k",
+		Incarnation:     inc,
+		SessionID:       testSessionID,
+		Kind:            testKindConfirm,
+		Summary:         "Bash: " + strings.Repeat("a", 64) + "… [truncated, full input in detail]",
+		Detail:          fullDetail,
+		OfferedOutcomes: []string{app.OutcomeAnswered, app.OutcomeDenied},
+	}
+}
+
+func assertTopicCarriesFullDetail(t *testing.T, backend *fakeBackend, stream *connect.ServerStreamForClient[hostv1.SubscribeResponse], seq uint64, view *app.PendingInteractionView) {
+	t.Helper()
+	payload, err := json.Marshal(view)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, perr := backend.hub.Publish(app.TopicInteraction, app.Event{
+		Seq:     seq,
+		Type:    app.EventInteractionRequested,
+		Payload: payload,
+	}); perr != nil {
+		t.Fatalf("Publish 256 KiB requested event: %v", perr)
+	}
+	ev := recv(t, stream).GetEvent()
+	if ev == nil || ev.Type != app.EventInteractionRequested {
+		t.Fatalf("stream event = %+v, want requested", ev)
+	}
+	var got app.PendingInteractionView
+	if err := json.Unmarshal(ev.Payload, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got.Detail != view.Detail {
+		t.Fatalf("topic requested Detail len=%d, want %d", len(got.Detail), len(view.Detail))
+	}
+}

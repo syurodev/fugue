@@ -260,7 +260,7 @@ func TestOperationKeysHaveNeutralFormats(t *testing.T) {
 	if native, err := NativeOperationKey("inv-1", "att-2", 3); err != nil || native != "native:inv-1:att-2:3" {
 		t.Fatalf("native key = (%q, %v)", native, err)
 	}
-	if vendor, err := VendorOperationKey("sess-1", "turn-7", "req-9"); err != nil || vendor != "vendor:sess-1:turn-7:req-9" {
+	if vendor, err := VendorOperationKey("sess-1", "turn-7", "req-9"); err != nil || vendor != "vendor:c2Vzcy0x:dHVybi03:cmVxLTk" {
 		t.Fatalf("vendor key = (%q, %v)", vendor, err)
 	}
 	if key, err := NativeOperationKey("", "att", 1); err == nil {
@@ -272,8 +272,8 @@ func TestOperationKeysHaveNeutralFormats(t *testing.T) {
 	if key, err := VendorOperationKey("sess", "", "req"); err == nil {
 		t.Fatalf("empty turn accepted: %q", key)
 	}
-	if key, err := VendorOperationKey("sess", "turn", "re:req"); err == nil {
-		t.Fatalf("separator in component accepted: %q", key)
+	if key, err := VendorOperationKey("sess", "turn", "re:req"); err != nil || key == "" {
+		t.Fatalf("separator in component rejected: (%q, %v)", key, err)
 	}
 
 	// A relayed request's operation ID is its vendor key.

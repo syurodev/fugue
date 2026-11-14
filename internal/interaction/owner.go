@@ -180,6 +180,7 @@ func (o *Owner) newTicketLocked(spec *Spec, now time.Time) (*Ticket, error) {
 		Risk:            spec.Risk,
 		GrantScopeLabel: spec.GrantScopeLabel,
 		Summary:         spec.Summary,
+		Detail:          spec.Detail,
 		Relayed:         spec.Relayed,
 		Offers:          slices.Clone(effectiveOffers(spec)),
 		Options:         slices.Clone(spec.Options),
@@ -403,6 +404,8 @@ func (o *Owner) TakeRelayed(operationID string) (*Ticket, error) {
 		o.mu.Unlock()
 		return nil, ErrVaultLocked
 	}
+	now := o.clock.Now().UTC()
+	o.pruneTicketsLocked(now)
 	ticket, ok := o.byOperation[operationID]
 	if !ok {
 		o.mu.Unlock()

@@ -31,6 +31,23 @@ func oversizedSpecCases(t *testing.T) []struct {
 	bigSelect.Options = manyOptions(MaxOptions + 1)
 	bigRelay := relayedSpec(t, "turn-big", "req-1")
 	bigRelay.Options = manyOptions(MaxOptions + 1)
+	bigRelayDetail := relayedSpec(t, "turn-big-detail", "req-2")
+	bigRelayDetail.Detail = long(MaxRelayedDetailBytes + 1)
+	nativeConfirmWithDetail := confirmSpec("op-native-confirm-detail")
+	nativeConfirmWithDetail.Detail = "{}"
+	nativeSelectWithDetail := selectSpec("op-native-select-detail")
+	nativeSelectWithDetail.Detail = "{}"
+	nativeQuestionWithDetail := questionSpec("op-native-question-detail")
+	nativeQuestionWithDetail.Detail = "{}"
+	relayedQuestionWithDetail := &Spec{
+		OperationID: mustVendorKey(t, "turn-relayed-q", "req-q"),
+		Kind:        KindQuestion,
+		Summary:     "question?",
+		Detail:      "{}",
+		Relayed:     true,
+		Questions:   []Question{{ID: "q1", Question: "pick one"}},
+		Binding:     vendorBinding("turn-relayed-q", "req-q"),
+	}
 	bigQuestionOptions := questionSpec("op-big-question-options")
 	bigQuestionOptions.Questions[0].Options = manyOptions(MaxOptions + 1)
 	return []struct {
@@ -42,6 +59,11 @@ func oversizedSpecCases(t *testing.T) []struct {
 		{name: "question text over 8 KiB", spec: bigQuestion},
 		{name: "select with 21 options", spec: bigSelect},
 		{name: "relayed with 21 options", spec: bigRelay},
+		{name: "relayed confirm detail over 256 KiB", spec: bigRelayDetail},
+		{name: "detail on non-relayed confirm", spec: nativeConfirmWithDetail},
+		{name: "detail on non-relayed select", spec: nativeSelectWithDetail},
+		{name: "detail on non-relayed question", spec: nativeQuestionWithDetail},
+		{name: "detail on relayed question", spec: relayedQuestionWithDetail},
 		{name: "question with 21 options", spec: bigQuestionOptions},
 	}
 }

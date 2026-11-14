@@ -155,7 +155,7 @@ func BuildArgv(binary string, spec *vendor.StartSpec) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	return append(argv, "--mcp-config", config, "--strict-mcp-config"), nil
+	return append(argv, "--mcp-config", config, "--strict-mcp-config", "--permission-prompt-tool", "mcp__fugue__approve"), nil
 }
 
 // BridgeServerName is the MCP server name Claude sees; its tools are named

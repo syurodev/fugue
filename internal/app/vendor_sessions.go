@@ -405,6 +405,20 @@ func (m *VendorSessions) SlashCommands(ctx context.Context, sessionID string) ([
 	return provider.SlashCommands(), nil
 }
 
+// ActiveTurnID returns the session actor's active turn ID.
+func (m *VendorSessions) ActiveTurnID(ctx context.Context, sessionID string) (string, error) {
+	var turnID string
+	if err := m.call(ctx, sessionID, actorCommand{kind: commandActiveTurn, turnOut: &turnID}); err != nil {
+		return "", err
+	}
+	return turnID, nil
+}
+
+// RecordEvent appends a domain event through the session's single-writer actor.
+func (m *VendorSessions) RecordEvent(ctx context.Context, sessionID string, event *vendorstore.Event) error {
+	return m.call(ctx, sessionID, actorCommand{kind: commandRecordEvent, event: event})
+}
+
 func (m *VendorSessions) call(ctx context.Context, sessionID string, cmd actorCommand) error {
 	actor := m.actor(sessionID)
 	if actor == nil {

@@ -17,6 +17,7 @@ type PendingInteractionView struct {
 	Risk            string                `json:"risk"`
 	EnvTag          string                `json:"env_tag"`
 	Summary         string                `json:"summary"`
+	Detail          string                `json:"detail,omitempty"`
 	OfferedOutcomes []string              `json:"offered_outcomes,omitempty"`
 	Options         []InteractionOption   `json:"options,omitempty"`
 	GrantScopeLabel string                `json:"grant_scope_label,omitempty"`
@@ -100,6 +101,7 @@ func viewFromTicket(t *interaction.Ticket) PendingInteractionView {
 		Risk:            t.Risk,
 		EnvTag:          t.Binding.EnvTag,
 		Summary:         summary,
+		Detail:          t.Detail,
 		OfferedOutcomes: offeredOutcomesFor(t),
 		Options:         options,
 		GrantScopeLabel: t.GrantScopeLabel,

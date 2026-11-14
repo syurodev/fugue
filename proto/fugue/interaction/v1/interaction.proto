@@ -46,6 +46,10 @@ message PendingRequest {
   // by an "allowed_session" confirmation.
   string grant_scope_label = 11;
   repeated Question questions = 12;
+  // detail carries the full compact JSON tool input for a relayed confirm
+  // request (docs: interaction v0.16, §8, §9). Content only: never written to
+  // audit, logs, errors, or journal metadata.
+  string detail = 13;
 }
 
 // ListPendingRequest asks for the current snapshot of pending interaction

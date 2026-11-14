@@ -1,6 +1,7 @@
 package interaction
 
 import (
+	"encoding/base64"
 	"strconv"
 	"strings"
 
@@ -27,14 +28,19 @@ func NativeOperationKey(invocationID, attemptID string, checkGeneration uint64) 
 }
 
 // VendorOperationKey returns the neutral operation ID of a relayed vendor
-// request, keyed on (sessionID, turnID, vendorRequestID). A relayed spec's
-// Binding carries the same components in TurnID and VendorRequestID, and its
-// OperationID must equal this key.
+// request, keyed on (sessionID, turnID, vendorRequestID). Components are
+// base64url-encoded without padding so untrusted vendor IDs containing the key
+// separator never fail or collide. A relayed spec's Binding carries the same
+// raw components in TurnID and VendorRequestID, and its OperationID must equal
+// this key.
 func VendorOperationKey(sessionID, turnID, vendorRequestID string) (string, error) {
 	if sessionID == "" || turnID == "" || vendorRequestID == "" {
 		return "", errcode.New(errcode.InvalidArgument, "vendor operation key requires session, turn and vendor request IDs")
 	}
-	return joinKey(vendorKeyLabel, sessionID, turnID, vendorRequestID)
+	return vendorKeyLabel + keySeparator +
+		base64.RawURLEncoding.EncodeToString([]byte(sessionID)) + keySeparator +
+		base64.RawURLEncoding.EncodeToString([]byte(turnID)) + keySeparator +
+		base64.RawURLEncoding.EncodeToString([]byte(vendorRequestID)), nil
 }
 
 func joinKey(prefix string, parts ...string) (string, error) {

@@ -131,11 +131,15 @@ func (s *InteractionService) wakeWaiters(requestID string) {
 	delete(s.waiters, requestID)
 }
 
-// AwaitResolved blocks until the request is resolved and returns its ticket.
+// AwaitResolved waits for requestID to resolve without creating a new request.
 // It waits as long as ctx lives: with no client connected the request stays
 // pending (interaction §5, I-07). The waiter is registered before the state
 // is read, so a resolution in between is never missed.
 func (s *InteractionService) AwaitResolved(ctx context.Context, requestID string) (*interaction.Ticket, error) {
+	return s.awaitResolvedUntil(ctx, requestID, nil)
+}
+
+func (s *InteractionService) awaitResolvedUntil(ctx context.Context, requestID string, aborted <-chan struct{}) (*interaction.Ticket, error) {
 	ch := make(chan struct{})
 	s.waitMu.Lock()
 	s.waiters[requestID] = append(s.waiters[requestID], ch)
@@ -145,6 +149,8 @@ func (s *InteractionService) AwaitResolved(ctx context.Context, requestID string
 		select {
 		case <-ch:
 			ticket, err = s.owner.LookupRequest(requestID)
+		case <-aborted:
+			err = errSessionEnded()
 		case <-ctx.Done():
 			err = errcode.Wrap(errcode.Canceled, "the wait for the interaction answer ended", ctx.Err())
 		}
@@ -159,6 +165,11 @@ func (s *InteractionService) AwaitResolved(ctx context.Context, requestID string
 		return nil, mapOwnerError(err)
 	}
 	return ticket, nil
+}
+
+// IsVaultLocked reports whether the interaction owner currently observes the vault locked.
+func (s *InteractionService) IsVaultLocked() bool {
+	return s.owner.IsVaultLocked()
 }
 
 func (s *InteractionService) publishRequested(ticket *interaction.Ticket) {

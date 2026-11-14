@@ -26,12 +26,16 @@ const (
 	commandInterrupt
 	commandClose
 	commandResume
+	commandActiveTurn
+	commandRecordEvent
 )
 
 type actorCommand struct {
-	kind   commandKind
-	input  vendor.Input
-	reason vendor.CloseReason
+	kind    commandKind
+	input   vendor.Input
+	reason  vendor.CloseReason
+	turnOut *string
+	event   *vendorstore.Event
 }
 
 type actorRequest struct {
@@ -342,9 +346,31 @@ func (a *vendorSessionActor) handleCommand(ctx context.Context, command actorCom
 		return a.interrupt(ctx)
 	case commandClose:
 		return a.requestClose(command.reason)
+	case commandActiveTurn:
+		turnID := a.activeTurnID()
+		if turnID == "" {
+			return errcode.New(errcode.FailedPrecondition, "no active vendor turn")
+		}
+		*command.turnOut = turnID
+		return nil
+	case commandRecordEvent:
+		return a.append(ctx, command.event)
 	default:
 		return errcode.New(errcode.InvalidArgument, "unknown vendor session command")
 	}
+}
+
+func (a *vendorSessionActor) activeTurnID() string {
+	if a.turnID != "" {
+		return a.turnID
+	}
+	if len(a.turns) != 1 {
+		return ""
+	}
+	for id := range a.turns {
+		return id
+	}
+	return ""
 }
 
 func (a *vendorSessionActor) createSession(ctx context.Context) error {

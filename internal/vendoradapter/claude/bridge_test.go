@@ -79,9 +79,10 @@ func TestSessionArgvCarriesTheFugueBridgeAndNoToken(t *testing.T) {
 	if strings.Contains(strings.Join(argv, "\x00"), testSessionValue) {
 		t.Fatal("the session token is in argv")
 	}
-	tail := argv[len(argv)-3:]
-	if tail[0] != "--mcp-config" || tail[2] != "--strict-mcp-config" {
-		t.Fatalf("argv tail = %q, want --mcp-config <json> --strict-mcp-config", tail)
+	tail := argv[len(argv)-5:]
+	if tail[0] != "--mcp-config" || tail[2] != "--strict-mcp-config" ||
+		tail[3] != "--permission-prompt-tool" || tail[4] != "mcp__fugue__approve" {
+		t.Fatalf("argv tail = %q, want --mcp-config <json> --strict-mcp-config --permission-prompt-tool mcp__fugue__approve", tail)
 	}
 	var got map[string]map[string]mcpServer
 	if err := json.Unmarshal([]byte(tail[1]), &got); err != nil {
@@ -96,7 +97,7 @@ func TestSessionArgvCarriesTheFugueBridgeAndNoToken(t *testing.T) {
 	}
 	// Fugue's own flags are the only MCP flags: everything before them is
 	// free of the denylist.
-	for _, arg := range argv[1 : len(argv)-3] {
+	for _, arg := range argv[1 : len(argv)-5] {
 		if IsDenylistedFlag(arg) {
 			t.Errorf("denylisted flag %q among the profile arguments", arg)
 		}

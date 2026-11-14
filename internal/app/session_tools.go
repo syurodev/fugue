@@ -15,7 +15,7 @@ import (
 )
 
 // SessionToolMaxBytes bounds one session tool RPC request on the wire.
-const SessionToolMaxBytes = 256 << 10
+const SessionToolMaxBytes = 512 << 10
 
 // FugueTool is one MCP tool Fugue serves to vendor sessions through
 // `fugue mcp-bridge`. Every call passes the interaction policy before Run
@@ -84,16 +84,24 @@ type SessionToolService struct {
 	interactions *InteractionService
 	tags         interaction.TagPolicy
 	ids          ids.Generator
+	recorder     approvalRecorder
+	tombstones   *approveTombstones
 }
 
 func newSessionToolService(tokens *sessionTokens, tools []*FugueTool, sessions sessionRecords,
-	interactions *InteractionService, tags interaction.TagPolicy, gen ids.Generator,
+	interactions *InteractionService, tags interaction.TagPolicy, gen ids.Generator, recorder approvalRecorder,
 ) *SessionToolService {
 	byName := make(map[string]*FugueTool, len(tools))
 	for _, tool := range tools {
+		if tool.Name == approveToolName {
+			continue
+		}
 		byName[tool.Name] = tool
 	}
-	return &SessionToolService{tokens: tokens, tools: byName, sessions: sessions, interactions: interactions, tags: tags, ids: gen}
+	return &SessionToolService{
+		tokens: tokens, tools: byName, sessions: sessions, interactions: interactions,
+		tags: tags, ids: gen, recorder: recorder, tombstones: newApproveTombstones(),
+	}
 }
 
 // Attach verifies a presented token. The error never says why it failed.
@@ -110,7 +118,8 @@ func (s *SessionToolService) List(binding SessionBinding) ([]FugueToolView, erro
 	if !s.tokens.live(binding) {
 		return nil, errSessionEnded()
 	}
-	out := make([]FugueToolView, 0, len(s.tools))
+	out := make([]FugueToolView, 0, len(s.tools)+1)
+	out = append(out, approveToolView())
 	for _, tool := range s.tools {
 		if servesRole(tool, binding.Role) {
 			out = append(out, FugueToolView{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
@@ -123,9 +132,13 @@ func (s *SessionToolService) List(binding SessionBinding) ([]FugueToolView, erro
 // Call runs one tool call of the binding's session through Decide: the
 // session's approval mode, the env-tag hard rule (I-03), grants and the
 // tool's own facts decide whether it runs, asks the user or is refused.
+// The built-in approve relay bypasses Decide completely (vendor-runtime VR-05).
 func (s *SessionToolService) Call(ctx context.Context, binding SessionBinding, name string, args []byte) (FugueToolResult, error) {
 	if !s.tokens.live(binding) {
 		return FugueToolResult{}, errSessionEnded()
+	}
+	if name == approveToolName {
+		return s.callApprove(ctx, binding, args)
 	}
 	tool, ok := s.tools[name]
 	if !ok || !servesRole(tool, binding.Role) {

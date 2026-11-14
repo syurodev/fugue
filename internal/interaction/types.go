@@ -116,8 +116,11 @@ type Spec struct {
 	OperationID string
 	Kind        Kind
 	// Summary is the content shown to the user, built by the tool from
-	// canonical args or relayed verbatim from the vendor's prompt.
+	// canonical args or as a header for a relayed vendor request.
 	Summary string
+	// Detail carries the full compact JSON tool input for a relayed confirm
+	// request (interaction v0.16, §7–9). Allowed only on relayed KindConfirm.
+	Detail string
 	// Risk is the operation's risk level: read, write, destructive, external.
 	Risk string
 	// GrantScopeLabel describes the scope covered by an allowed_session outcome.
@@ -152,7 +155,10 @@ type Ticket struct {
 	Risk            string
 	GrantScopeLabel string
 	Summary         string
-	Relayed         bool
+	// Detail carries the full compact JSON tool input for a relayed confirm
+	// request (interaction v0.16, §7–9). Content only: never in audit or logs.
+	Detail  string
+	Relayed bool
 	// Offers is the effective set of outcomes the user may answer with.
 	Offers           []Outcome
 	Options          []Option
@@ -245,6 +251,9 @@ func validateSpec(spec *Spec, tags TagPolicy) error {
 	}
 	if err := checkTextLimit(spec.Summary, MaxSummaryBytes, "summary"); err != nil {
 		return err
+	}
+	if spec.Detail != "" && (!spec.Relayed || spec.Kind != KindConfirm) {
+		return errcode.New(errcode.InvalidArgument, "interaction detail is allowed only on relayed confirm requests")
 	}
 	if spec.Relayed {
 		return validateRelayedSpec(spec)
@@ -355,7 +364,10 @@ func validateRelayedSpec(spec *Spec) error {
 	switch spec.Kind {
 	case KindConfirm:
 		if len(spec.Questions) > 0 || spec.Body != "" {
-			return errcode.New(errcode.InvalidArgument, "relayed confirm carries only the vendor summary and options")
+			return errcode.New(errcode.InvalidArgument, "relayed confirm carries only the vendor summary, detail and options")
+		}
+		if err := checkTextLimit(spec.Detail, MaxRelayedDetailBytes, "detail"); err != nil {
+			return err
 		}
 		return validateOptionList(spec.Options, 1, "relayed")
 	case KindQuestion:

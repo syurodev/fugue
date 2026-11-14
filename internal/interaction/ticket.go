@@ -17,7 +17,7 @@ func effectiveOffers(spec *Spec) []Outcome {
 func sameSpec(t *Ticket, spec *Spec) bool {
 	if t.Kind != spec.Kind || t.Risk != spec.Risk || t.GrantScopeLabel != spec.GrantScopeLabel ||
 		t.Binding != spec.Binding || t.Relayed != spec.Relayed ||
-		t.Summary != spec.Summary || t.Body != spec.Body {
+		t.Summary != spec.Summary || t.Detail != spec.Detail || t.Body != spec.Body {
 		return false
 	}
 	if !slices.Equal(t.Offers, effectiveOffers(spec)) || !slices.Equal(t.Options, spec.Options) {
@@ -101,7 +101,7 @@ func (o *Owner) pruneTicketsLocked(now time.Time) {
 	}
 	o.nextResolvedPrune = time.Time{}
 	for reqID, ticket := range o.byRequest {
-		if ticket.Relayed || !ticket.Resolved {
+		if !ticket.Resolved {
 			continue
 		}
 		if o.isTicketDoneLocked(ticket, now) {
@@ -204,8 +204,8 @@ func (o *Owner) pruneResolvedLocked(now time.Time) {
 	o.pruneReceiptsLocked(now)
 }
 
-// PruneResolved evicts non-relayed resolved tickets whose receipt has been
-// claimed/expired or whose retention TTL has elapsed.
+// PruneResolved evicts resolved tickets (including undelivered relayed tickets)
+// whose receipt has been claimed/expired or whose retention TTL has elapsed.
 func (o *Owner) PruneResolved() {
 	o.mu.Lock()
 	defer o.mu.Unlock()
