@@ -42,7 +42,8 @@ func headingSize(level int) unit.Sp {
 // requests (State.PollOpen).
 func Layout(gtx *layout.Context, th *theme.Theme, doc *markdown.Doc, st *State) layout.Dimensions {
 	v := &view{th: th, st: st, shaper: th.Shaper(), locale: gtx.Locale}
-	st.sync(doc, v.shaper, gtx.Metric, th.Chrome())
+	chrome := th.Chrome()
+	st.sync(doc, v.shaper, gtx.Metric, &chrome)
 	dims := v.blocks(gtx, doc.Blocks)
 	if !doc.Truncated {
 		return dims

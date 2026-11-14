@@ -56,7 +56,7 @@ func foregroundTokens(m *mode) []namedColor {
 
 // backgroundTokens lists the five chrome backgrounds every text token and
 // hue must hold up on.
-func backgroundTokens(c theme.Chrome) []namedColor {
+func backgroundTokens(c *theme.Chrome) []namedColor {
 	return []namedColor{
 		{name: "app bg", color: c.AppBg},
 		{name: "canvas bg", color: c.CanvasBg},
@@ -83,7 +83,7 @@ func requireContrast(t *testing.T, label string, fg, bg color.NRGBA) {
 func TestContrastOfTextAndHueTokensOnEveryChromeBackground(t *testing.T) {
 	t.Parallel()
 	for _, m := range bothModes() {
-		backgrounds := backgroundTokens(m.theme.Chrome())
+		backgrounds := backgroundTokens(chromeOf(&m.theme))
 		for _, fgk := range foregroundTokens(&m) {
 			for _, bgk := range backgrounds {
 				requireContrast(t, m.name+" "+fgk.name, fgk.color, bgk.color)
@@ -103,7 +103,7 @@ func TestFgSubtleStaysBelowFgMuted(t *testing.T) {
 	t.Parallel()
 	for _, m := range bothModes() {
 		c := m.theme.Chrome()
-		for _, bgk := range backgroundTokens(c) {
+		for _, bgk := range backgroundTokens(&c) {
 			subtle := contrastRatio(c.FgSubtle, bgk.color)
 			muted := contrastRatio(c.FgMuted, bgk.color)
 			if subtle >= muted {
@@ -251,4 +251,11 @@ func lin(v uint8) float64 {
 		return s / 12.92
 	}
 	return math.Pow((s+0.055)/1.055, 2.4)
+}
+
+// chromeOf returns a pointer to the mode's chrome so the 15-token table
+// passes by reference.
+func chromeOf(t *theme.Theme) *theme.Chrome {
+	c := t.Chrome()
+	return &c
 }
