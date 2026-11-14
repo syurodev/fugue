@@ -364,13 +364,13 @@ func (a *vendorSessionActor) activeTurnID() string {
 	if a.turnID != "" {
 		return a.turnID
 	}
-	var best string
-	for id := range a.turns {
-		if best == "" || id < best {
-			best = id
-		}
+	if len(a.turns) != 1 {
+		return ""
 	}
-	return best
+	for id := range a.turns {
+		return id
+	}
+	return ""
 }
 
 func (a *vendorSessionActor) createSession(ctx context.Context) error {

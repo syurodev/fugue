@@ -51,7 +51,6 @@ type rawApproveRequest struct {
 type parsedApproveArgs struct {
 	toolName     string
 	toolUseID    string
-	rawInput     json.RawMessage
 	compactInput string
 	digest       [sha256.Size]byte
 }
@@ -80,20 +79,20 @@ func parseApproveArgs(args []byte) (*parsedApproveArgs, error) {
 	if err := json.Compact(&compacted, trimmed); err != nil {
 		return nil, errcode.Wrap(errcode.InvalidArgument, "compact approve input", err)
 	}
+	compactInput := compacted.String()
 	return &parsedApproveArgs{
 		toolName:     req.ToolName,
 		toolUseID:    req.ToolUseID,
-		rawInput:     json.RawMessage(trimmed),
-		compactInput: compacted.String(),
-		digest:       approveArgsDigest(req.ToolName, compacted.Bytes()),
+		compactInput: compactInput,
+		digest:       approveArgsDigest(req.ToolName, compactInput),
 	}, nil
 }
 
-func approveArgsDigest(toolName string, compactInput []byte) [sha256.Size]byte {
+func approveArgsDigest(toolName, compactInput string) [sha256.Size]byte {
 	h := sha256.New()
 	_, _ = h.Write([]byte(toolName))
 	_, _ = h.Write([]byte{0})
-	_, _ = h.Write(compactInput)
+	_, _ = h.Write([]byte(compactInput))
 	var digest [sha256.Size]byte
 	copy(digest[:], h.Sum(nil))
 	return digest
@@ -104,16 +103,16 @@ func formatApproveSummary(toolName, compactInput string) string {
 	if len(raw) <= interaction.MaxSummaryBytes {
 		return raw
 	}
-	const ellipsis = "..."
-	limit := interaction.MaxSummaryBytes - len(ellipsis)
+	const marker = "… [truncated, full input in detail]"
+	limit := interaction.MaxSummaryBytes - len(marker)
 	cut := limit
 	for cut > 0 && !utf8.RuneStart(raw[cut]) {
 		cut--
 	}
-	return raw[:cut] + ellipsis
+	return raw[:cut] + marker
 }
 
-func formatApproveResult(allow bool, originalInput json.RawMessage, note string) (FugueToolResult, error) {
+func formatApproveResult(allow bool, compactInput, note string) (FugueToolResult, error) {
 	var payload any
 	if allow {
 		payload = struct {
@@ -121,7 +120,7 @@ func formatApproveResult(allow bool, originalInput json.RawMessage, note string)
 			UpdatedInput json.RawMessage `json:"updatedInput"`
 		}{
 			Behavior:     approveOptionAllow,
-			UpdatedInput: originalInput,
+			UpdatedInput: json.RawMessage(compactInput),
 		}
 	} else {
 		payload = struct {
@@ -132,11 +131,13 @@ func formatApproveResult(allow bool, originalInput json.RawMessage, note string)
 			Message:  note,
 		}
 	}
-	raw, err := json.Marshal(payload)
-	if err != nil {
+	var buf bytes.Buffer
+	enc := json.NewEncoder(&buf)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(payload); err != nil {
 		return FugueToolResult{}, errcode.Wrap(errcode.Internal, "marshal approve response", err)
 	}
-	return FugueToolResult{Text: string(raw)}, nil
+	return FugueToolResult{Text: string(bytes.TrimSuffix(buf.Bytes(), []byte{'\n'}))}, nil
 }
 
 func (s *SessionToolService) callApprove(ctx context.Context, binding SessionBinding, args []byte) (FugueToolResult, error) {
@@ -168,7 +169,7 @@ func (s *SessionToolService) executeApprove(ctx context.Context, binding Session
 	if !s.canApproveNow(binding) {
 		return FugueToolResult{}, false
 	}
-	res, err := formatApproveResult(choice.allow, req.rawInput, choice.note)
+	res, err := formatApproveResult(choice.allow, req.compactInput, choice.note)
 	if err != nil {
 		return FugueToolResult{}, false
 	}
@@ -177,7 +178,7 @@ func (s *SessionToolService) executeApprove(ctx context.Context, binding Session
 }
 
 func (s *SessionToolService) prepareApprove(ctx context.Context, binding SessionBinding, req *parsedApproveArgs) (string, string, bool) {
-	if !s.canApproveNow(binding) {
+	if len(req.compactInput) > interaction.MaxRelayedDetailBytes || !s.canApproveNow(binding) {
 		return "", "", false
 	}
 	turnID, err := s.recorder.ActiveTurnID(ctx, binding.SessionID)
@@ -196,6 +197,7 @@ func buildApproveSpec(sessionID, turnID, opID string, req *parsedApproveArgs) *i
 		OperationID: opID,
 		Kind:        interaction.KindConfirm,
 		Summary:     formatApproveSummary(req.toolName, req.compactInput),
+		Detail:      req.compactInput,
 		Relayed:     true,
 		Options: []interaction.Option{
 			{ID: approveOptionAllow, Label: "Allow"},
@@ -260,7 +262,7 @@ func (s *SessionToolService) replayTombstone(binding SessionBinding, opID string
 	if entry.digest != req.digest || !s.canApproveNow(binding) {
 		return approveToolError(), true
 	}
-	res, err := formatApproveResult(entry.allow, req.rawInput, entry.note)
+	res, err := formatApproveResult(entry.allow, req.compactInput, entry.note)
 	if err != nil {
 		return approveToolError(), true
 	}

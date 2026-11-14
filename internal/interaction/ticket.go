@@ -17,7 +17,7 @@ func effectiveOffers(spec *Spec) []Outcome {
 func sameSpec(t *Ticket, spec *Spec) bool {
 	if t.Kind != spec.Kind || t.Risk != spec.Risk || t.GrantScopeLabel != spec.GrantScopeLabel ||
 		t.Binding != spec.Binding || t.Relayed != spec.Relayed ||
-		t.Summary != spec.Summary || t.Body != spec.Body {
+		t.Summary != spec.Summary || t.Detail != spec.Detail || t.Body != spec.Body {
 		return false
 	}
 	if !slices.Equal(t.Offers, effectiveOffers(spec)) || !slices.Equal(t.Options, spec.Options) {

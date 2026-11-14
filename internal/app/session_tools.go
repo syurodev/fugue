@@ -15,7 +15,7 @@ import (
 )
 
 // SessionToolMaxBytes bounds one session tool RPC request on the wire.
-const SessionToolMaxBytes = 256 << 10
+const SessionToolMaxBytes = 512 << 10
 
 // FugueTool is one MCP tool Fugue serves to vendor sessions through
 // `fugue mcp-bridge`. Every call passes the interaction policy before Run

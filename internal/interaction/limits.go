@@ -10,6 +10,9 @@ import (
 const (
 	// MaxSummaryBytes bounds the summary of every request.
 	MaxSummaryBytes = 2 * 1024
+	// MaxRelayedDetailBytes bounds the full compact JSON input carried in Detail
+	// for a relayed confirm request (interaction §9).
+	MaxRelayedDetailBytes = 256 * 1024
 	// MaxPromptBytes bounds the prompt content of a KindQuestion request:
 	// the body and each question and header text.
 	MaxPromptBytes = 8 * 1024

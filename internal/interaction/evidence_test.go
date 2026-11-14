@@ -122,7 +122,7 @@ func assertIE06RelayedDeliveryFailsClosed(t *testing.T, newOwner func(*testing.T
 // summary, prompt, answer or note text (interaction §4.3, §7).
 func TestIE08AuditAndErrorsNeverContainRequestContent(t *testing.T) {
 	t.Parallel()
-	planted := []string{plantSummary, plantQuestion, plantAnswer, plantNote, plantOption}
+	planted := []string{plantSummary, plantDetail, plantQuestion, plantAnswer, plantNote, plantOption}
 	collector := &contentCollector{}
 	owner := newAuditOwner(t, collector)
 
@@ -135,6 +135,7 @@ func TestIE08AuditAndErrorsNeverContainRequestContent(t *testing.T) {
 
 const (
 	plantSummary  = "PLANTED-SUMMARY-mockvaulthook"
+	plantDetail   = "PLANTED-DETAIL-mockvaulthook"
 	plantQuestion = "PLANTED-QUESTION-mockvaulthook"
 	plantAnswer   = "PLANTED-ANSWER-mockvaulthook"
 	plantNote     = "PLANTED-NOTE-mockvaulthook"
@@ -228,6 +229,7 @@ func ensurePlantedRequests(t *testing.T, owner *Owner) plantedTickets {
 		OperationID: mustVendorKey(t, "turn-ie08", "req-1"),
 		Kind:        KindConfirm,
 		Summary:     plantSummary,
+		Detail:      plantDetail,
 		Relayed:     true,
 		Options:     []Option{{ID: vendorOptionAllow, Label: plantOption}},
 		Binding:     vendorBinding("turn-ie08", "req-1"),
@@ -279,6 +281,17 @@ func recordInvalidContentOps(t *testing.T, owner *Owner, tickets plantedTickets,
 	oversized := questionSpec("op-ie08-oversized")
 	oversized.Questions[0].Question = strings.Repeat(plantQuestion, 2000)
 	_, _, err = owner.Ensure(oversized)
+	collector.record(err)
+	oversizedRelay := &Spec{
+		OperationID: mustVendorKey(t, "turn-ie08-oversized", "req-big"),
+		Kind:        KindConfirm,
+		Summary:     plantSummary,
+		Detail:      strings.Repeat(plantDetail, 12000),
+		Relayed:     true,
+		Options:     []Option{{ID: vendorOptionAllow, Label: plantOption}},
+		Binding:     vendorBinding("turn-ie08-oversized", "req-big"),
+	}
+	_, _, err = owner.Ensure(oversizedRelay)
 	collector.record(err)
 	_, err = owner.LookupOperation(tickets.operation)
 	collector.record(err)

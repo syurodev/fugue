@@ -242,8 +242,12 @@ type PendingRequest struct {
 	// by an "allowed_session" confirmation.
 	GrantScopeLabel string      `protobuf:"bytes,11,opt,name=grant_scope_label,json=grantScopeLabel,proto3" json:"grant_scope_label,omitempty"`
 	Questions       []*Question `protobuf:"bytes,12,rep,name=questions,proto3" json:"questions,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// detail carries the full compact JSON tool input for a relayed confirm
+	// request (docs: interaction v0.16, §8, §9). Content only: never written to
+	// audit, logs, errors, or journal metadata.
+	Detail        string `protobuf:"bytes,13,opt,name=detail,proto3" json:"detail,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *PendingRequest) Reset() {
@@ -358,6 +362,13 @@ func (x *PendingRequest) GetQuestions() []*Question {
 		return x.Questions
 	}
 	return nil
+}
+
+func (x *PendingRequest) GetDetail() string {
+	if x != nil {
+		return x.Detail
+	}
+	return ""
 }
 
 // ListPendingRequest asks for the current snapshot of pending interaction
@@ -622,7 +633,7 @@ const file_fugue_interaction_v1_interaction_proto_rawDesc = "" +
 	"questionId\x12\x1d\n" +
 	"\n" +
 	"option_ids\x18\x02 \x03(\tR\toptionIds\x12\x12\n" +
-	"\x04text\x18\x03 \x01(\tR\x04text\"\xac\x03\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\"\xc4\x03\n" +
 	"\x0ePendingRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12 \n" +
@@ -638,7 +649,8 @@ const file_fugue_interaction_v1_interaction_proto_rawDesc = "" +
 	"\aoptions\x18\n" +
 	" \x03(\v2\x1c.fugue.interaction.v1.OptionR\aoptions\x12*\n" +
 	"\x11grant_scope_label\x18\v \x01(\tR\x0fgrantScopeLabel\x12<\n" +
-	"\tquestions\x18\f \x03(\v2\x1e.fugue.interaction.v1.QuestionR\tquestions\"\x14\n" +
+	"\tquestions\x18\f \x03(\v2\x1e.fugue.interaction.v1.QuestionR\tquestions\x12\x16\n" +
+	"\x06detail\x18\r \x01(\tR\x06detail\"\x14\n" +
 	"\x12ListPendingRequest\"s\n" +
 	"\x13ListPendingResponse\x12@\n" +
 	"\brequests\x18\x01 \x03(\v2$.fugue.interaction.v1.PendingRequestR\brequests\x12\x1a\n" +

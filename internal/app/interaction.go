@@ -131,10 +131,6 @@ func (s *InteractionService) wakeWaiters(requestID string) {
 	delete(s.waiters, requestID)
 }
 
-// AwaitResolved blocks until the request is resolved and returns its ticket.
-// It waits as long as ctx lives: with no client connected the request stays
-// pending (interaction §5, I-07). The waiter is registered before the state
-// is read, so a resolution in between is never missed.
 // AwaitResolved waits for requestID to resolve without creating a new request.
 // It waits as long as ctx lives: with no client connected the request stays
 // pending (interaction §5, I-07). The waiter is registered before the state

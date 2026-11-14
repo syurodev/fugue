@@ -180,6 +180,7 @@ func (o *Owner) newTicketLocked(spec *Spec, now time.Time) (*Ticket, error) {
 		Risk:            spec.Risk,
 		GrantScopeLabel: spec.GrantScopeLabel,
 		Summary:         spec.Summary,
+		Detail:          spec.Detail,
 		Relayed:         spec.Relayed,
 		Offers:          slices.Clone(effectiveOffers(spec)),
 		Options:         slices.Clone(spec.Options),
