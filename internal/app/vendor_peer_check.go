@@ -36,6 +36,9 @@ func (m *VendorSessions) OwnsPeer(ctx context.Context, pid int) (bool, error) {
 	if err != nil {
 		return false, err
 	}
+	if m.deps.TestAfterPeerSnapshot != nil {
+		m.deps.TestAfterPeerSnapshot()
+	}
 	for _, owner := range pending {
 		if owned, err := checkPeerOwner(owner, pid); err != nil || owned {
 			return owned, err
@@ -50,11 +53,6 @@ func (m *VendorSessions) OwnsPeer(ctx context.Context, pid int) (bool, error) {
 }
 
 func checkLiveActorOwner(actor *vendorSessionActor, pid int) (bool, error) {
-	select {
-	case <-actor.done:
-		return false, nil
-	default:
-	}
 	tree, ok := actor.session.(vendor.PeerOwner)
 	if !ok {
 		return false, errcode.New(errcode.Internal, "a vendor session cannot report its process tree")

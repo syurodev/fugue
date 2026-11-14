@@ -41,6 +41,8 @@ type VendorSessionDeps struct {
 	TestDelaySpawnRegistration func(context.Context)
 	// TestOnWaitInflightSpawn runs when OwnsPeer begins waiting on in-flight spawns.
 	TestOnWaitInflightSpawn func()
+	// TestAfterPeerSnapshot runs between snapshotting owners and checking live actors.
+	TestAfterPeerSnapshot func()
 }
 
 type vendorVaultObserver interface {

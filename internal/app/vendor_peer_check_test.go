@@ -336,6 +336,86 @@ func assertFailedStopCase(t *testing.T, tc failedStopCase) {
 	}
 }
 
+// TestActorRetiringDuringPeerCheckStillDenies verifies that an actor retiring
+// after OwnsPeer snapshots actors (before checkLiveActorOwner runs) cannot slip
+// surviving descendants or missing-tree sessions past the ownership check.
+func TestActorRetiringDuringPeerCheckStillDenies(t *testing.T) {
+	t.Parallel()
+	const descendantPID = 9191
+	f := newTranscriptFixture(t, nil)
+	surviving := &verifiableRetainedSession{
+		actorTestSession: newActorTestSession(),
+		ownedPIDs:        []int{descendantPID},
+		closeProof:       process.StopProof{Status: process.StopProofUnknown, Reason: process.ReasonGroupNotEmpty},
+	}
+
+	var manager *VendorSessions
+	var closeOnce sync.Once
+	var closeErr error
+	manager = mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
+		Store: f.store, Transcripts: f.service,
+		Adapter: retainedTestAdapter{session: surviving},
+		Vault:   f.vault, Clock: f.clock, IDs: ids.NewSequence("ret-snap-"),
+		TestAfterPeerSnapshot: func() {
+			closeOnce.Do(func() {
+				actor := manager.actor("ret-live-s1")
+				closeErr = manager.Close(t.Context(), "ret-live-s1", vendor.CloseUserRequest)
+				if actor != nil {
+					<-actor.done
+				}
+			})
+		},
+	})
+	if err := manager.Start(t.Context(), &vendorstore.Session{
+		ID: "ret-live-s1", Vendor: testVendorName, AccountID: testAccountID, Role: testActorRole,
+	}, &vendor.StartSpec{SessionID: "ret-live-s1"}); err != nil {
+		t.Fatal(err)
+	}
+
+	owned, err := manager.OwnsPeer(t.Context(), descendantPID)
+	if closeErr != nil {
+		t.Fatalf("Close inside TestAfterPeerSnapshot = %v", closeErr)
+	}
+	if err != nil || !owned {
+		t.Fatalf("OwnsPeer(%d) after actor retired post-snapshot = %v, %v; want true, nil", descendantPID, owned, err)
+	}
+
+	noTreeManager, noTreeCloseErr := newRetiringNonTreeManager(t, f)
+	if owned, err := noTreeManager.OwnsPeer(t.Context(), descendantPID); err == nil || owned {
+		t.Fatalf("OwnsPeer with retiring non-PeerOwner session = %v, %v; want false, error", owned, err)
+	}
+	if *noTreeCloseErr != nil {
+		t.Fatalf("Close inside non-PeerOwner TestAfterPeerSnapshot = %v", *noTreeCloseErr)
+	}
+}
+
+func newRetiringNonTreeManager(t *testing.T, f *transcriptFixture) (*VendorSessions, *error) {
+	t.Helper()
+	var manager *VendorSessions
+	var closeOnce sync.Once
+	var closeErr error
+	manager = mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
+		Store: f.store, Transcripts: f.service,
+		Adapter: retainedTestAdapter{session: newActorTestSession()},
+		Vault:   f.vault, Clock: f.clock, IDs: ids.NewSequence("ret-nt-"),
+		TestAfterPeerSnapshot: func() {
+			closeOnce.Do(func() {
+				actor := manager.actor("ret-notree-s1")
+				closeErr = manager.Close(t.Context(), "ret-notree-s1", vendor.CloseUserRequest)
+				if actor != nil {
+					<-actor.done
+				}
+			})
+		},
+	})
+	if err := manager.Start(t.Context(), &vendorstore.Session{
+		ID: "ret-notree-s1", Vendor: testVendorName, AccountID: testAccountID, Role: testActorRole,
+	}, &vendor.StartSpec{SessionID: "ret-notree-s1"}); err != nil {
+		t.Fatal(err)
+	}
+	return manager, &closeErr
+}
+
 func retainedOwnerCount(m *VendorSessions) int {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
