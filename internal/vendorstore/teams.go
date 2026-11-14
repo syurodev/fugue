@@ -38,6 +38,10 @@ func (s *Store) CreateTeam(ctx context.Context, in *NewTeamInput) (TeamRecord, [
 	if err != nil {
 		return TeamRecord{}, nil, fmt.Errorf("%w: generate team key: %w", ErrUnavailable, err)
 	}
+	// Zero the raw key on every return, not only after a successful commit:
+	// a duplicate team, a sealing failure or a vault lock mid-create must not
+	// leave key material in memory.
+	defer clear(rawKey)
 	now := s.clock.Now().UnixMilli()
 	return s.commitNewTeam(ctx, snap, in, depths, rawKey, wrapped, now)
 }
@@ -81,7 +85,6 @@ func (s *Store) commitNewTeam(
 	if err := s.commitTeamTx(snap, true, tx.Commit); err != nil {
 		return TeamRecord{}, nil, err
 	}
-	clear(rawKey)
 	return rec, tasks, nil
 }
 
