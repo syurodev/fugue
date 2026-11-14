@@ -104,6 +104,9 @@ func TestVirtualListLaysOutVisiblePlusFiftyEachSide(t *testing.T) {
 		items[i] = message(fmt.Sprintf("i%d", i), uint64(i+1), "paragraph")
 	}
 	h := newHarness(t, 600, 400, items)
+	// This test pins the window arithmetic, not the follow: read from a
+	// fixed offset instead of the pinned bottom.
+	h.st.follow = false
 
 	w0, w1 := h.windowOf(0)
 	dims := h.frame()
@@ -114,8 +117,10 @@ func TestVirtualListLaysOutVisiblePlusFiftyEachSide(t *testing.T) {
 		t.Fatalf("pane size = %v, want the viewport", dims.Size)
 	}
 
-	// Scroll into the middle: the window follows, still the visible items
-	// plus fifty on each side, and the far ends stay unlaid out.
+	// Scroll into the middle: the first wheel up ends the follow, then the
+	// window follows the offset — still the visible items plus fifty on each
+	// side, and the far ends stay unlaid out.
+	h.scroll(-1)
 	w0, w1 = h.windowOf(1000 * estimateH)
 	h.scroll(1000 * estimateH)
 	if got := h.st.rendered; got != w1-w0+1 {
@@ -190,17 +195,16 @@ func TestToolCallAndReasoningCardsStartCollapsed(t *testing.T) {
 	h := newHarness(t, 600, 900, items)
 	h.frame()
 	for _, item := range items {
-		c, ok := h.st.cards.get(cardKey{itemID: item.ItemID, revision: item.Revision})
-		if !ok {
+		if _, ok := h.st.cards.get(cardKey{itemID: item.ItemID, revision: item.Revision}); !ok {
 			t.Fatalf("%s card was not laid out", item.Kind)
 		}
-		if c.expanded {
+		if h.st.expanded[item.ItemID] {
 			t.Fatalf("%s card started expanded", item.Kind)
 		}
 	}
 	// Expanding a card grows it: the body renders only then.
 	before := h.st.heightOf(items[0])
-	h.st.cards.entries[cardKey{"t1", 1}].card.expanded = true
+	h.st.expanded["t1"] = true
 	h.frame()
 	if after := h.st.heightOf(items[0]); after <= before {
 		t.Fatalf("expanded tool card height = %d, want more than the collapsed %d", after, before)

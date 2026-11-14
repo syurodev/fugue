@@ -49,17 +49,22 @@ func layoutCard(gtx *layout.Context, th *theme.Theme, st *State, item *session.I
 	c, ok := st.cards.get(key)
 	if !ok {
 		c = &card{}
+		// Seed the new revision's height from the previous one, so the
+		// list does not jump back to the estimate when an item completes.
+		if prev, held := st.cards.latest[item.ItemID]; held {
+			c.height = prev.height
+		}
 		st.cards.put(key, c)
 	}
 	if c.click.Clicked(*gtx) {
-		c.expanded = !c.expanded
+		st.expanded[item.ItemID] = !st.expanded[item.ItemID]
 	}
 	st.rendered++
 	gap := layout.Inset{Bottom: unit.Dp(6)}
 	return gap.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
 		local := gtx
 		dims := surface(&local, th, func(gtx *layout.Context) layout.Dimensions {
-			return cardBody(gtx, th, c, item)
+			return cardBody(gtx, th, st, c, item)
 		})
 		c.height = dims.Size.Y
 		return dims
@@ -67,21 +72,24 @@ func layoutCard(gtx *layout.Context, th *theme.Theme, st *State, item *session.I
 }
 
 // cardBody renders the item's kind onto the card surface.
-func cardBody(gtx *layout.Context, th *theme.Theme, c *card, item *session.Item) layout.Dimensions {
+func cardBody(gtx *layout.Context, th *theme.Theme, st *State, c *card, item *session.Item) layout.Dimensions {
 	switch item.Kind {
 	case kindUserMessage, kindAssistantMessage:
-		return messageBody(gtx, th, c, item.View().Text)
+		return messageBody(gtx, th, c, item.Display().Text)
 	case kindReasoning, kindToolCall, kindFileChange:
-		return collapsibleBody(gtx, th, c, headerFor(item), item)
+		return collapsibleBody(gtx, th, c, headerFor(item), item, st.expanded[item.ItemID])
 	default:
-		return plainBody(gtx, th, c, headerFor(item), item)
+		return plainBody(gtx, th, c, headerFor(item), item, st.expanded[item.ItemID])
 	}
 }
 
-// messageBody parses and renders a message's markdown once per revision.
+// messageBody parses and renders a message's markdown, re-parsing when the
+// display text changes — a streaming delta grows the text under the same
+// revision.
 func messageBody(gtx *layout.Context, th *theme.Theme, c *card, src string) layout.Dimensions {
-	if c.doc == nil {
+	if c.doc == nil || c.docSrc != src {
 		c.doc = markdown.Parse(src)
+		c.docSrc = src
 	}
 	return mdview.Layout(gtx, th, c.doc, &c.md)
 }
@@ -89,18 +97,18 @@ func messageBody(gtx *layout.Context, th *theme.Theme, c *card, src string) layo
 // collapsibleBody renders the collapsed-by-default cards: reasoning, tool
 // calls and file changes show their header; the text or diff expands on
 // click.
-func collapsibleBody(gtx *layout.Context, th *theme.Theme, c *card, header string, item *session.Item) layout.Dimensions {
+func collapsibleBody(gtx *layout.Context, th *theme.Theme, c *card, header string, item *session.Item, expanded bool) layout.Dimensions {
 	return flexBody(gtx, th, c, header, func(gtx *layout.Context) layout.Dimensions {
-		return monoText(gtx, th, item.View().Text)
-	}, c.expanded)
+		return monoText(gtx, th, item.Display().Text)
+	}, expanded)
 }
 
 // plainBody renders the compact cards and the generic card: a header line,
 // and, for an unknown kind, the view text underneath so no item is dropped.
-func plainBody(gtx *layout.Context, th *theme.Theme, c *card, header string, item *session.Item) layout.Dimensions {
+func plainBody(gtx *layout.Context, th *theme.Theme, c *card, header string, item *session.Item, expanded bool) layout.Dimensions {
 	return flexBody(gtx, th, c, header, func(gtx *layout.Context) layout.Dimensions {
-		return wrappedText(gtx, th, item.View().Text, colorFor(th, item.Metadata.Level))
-	}, c.expanded || !knownKind(item.Kind))
+		return wrappedText(gtx, th, item.Display().Text, colorFor(th, item.Metadata.Level))
+	}, expanded || !knownKind(item.Kind))
 }
 
 // flexBody stacks the clickable header and, when expanded, the body.
@@ -109,7 +117,7 @@ func flexBody(gtx *layout.Context, th *theme.Theme, c *card, header string, body
 		return c.click.Layout(*gtx, func(layout.Context) layout.Dimensions {
 			// Clickable calls its widget with the same context, so the
 			// pointer form and the value form are the same frame here.
-			return headerRow(gtx, th, header, c.expanded)
+			return headerRow(gtx, th, header, expanded)
 		})
 	}
 	if !expanded {

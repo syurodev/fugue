@@ -13,6 +13,13 @@ import (
 	"github.com/syurodev/fugue/ui/internal/session"
 )
 
+// budgetTool and budgetStatus are the tool identity the budget's tool-call
+// cards carry.
+const (
+	budgetTool   = "read_file"
+	budgetStatus = "succeeded"
+)
+
 // budgetItems builds the 2,000 mixed items the budget measures: messages with
 // markdown, tool calls with output, file changes with diffs, and the compact
 // kinds, in a repeating mix.
@@ -25,8 +32,8 @@ func budgetItems(n int) []*session.Item {
 			items[i] = message(id, uint64(i+1), sampleParagraph(i))
 		case 3:
 			items[i] = &session.Item{TranscriptItem: client.TranscriptItem{
-				ItemID: id, Kind: "tool_call", Sequence: uint64(i + 1), Revision: 1,
-				Metadata: client.TranscriptMetadata{Tool: "read_file", Status: "succeeded", ExitCode: int32Ptr(0), DurationMillis: 12},
+				ItemID: id, Kind: kindToolCall, Sequence: uint64(i + 1), Revision: 1,
+				Metadata: client.TranscriptMetadata{Tool: budgetTool, Status: budgetStatus, ExitCode: int32Ptr(0), DurationMillis: 12},
 				View:     client.TranscriptView{Text: sampleOutput(i)},
 			}}
 		case 4:
@@ -72,7 +79,7 @@ func (bh *budgetHarness) frame() layout.Dimensions {
 	bh.h.scroll(estimateH)
 	open := bh.h.items[bh.step%len(bh.h.items)]
 	open.Revision++
-	open.TranscriptItem.View.Text = sampleParagraph(bh.step)
+	open.View.Text = sampleParagraph(bh.step)
 	return bh.h.frame()
 }
 

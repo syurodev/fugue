@@ -17,15 +17,17 @@ type cardKey struct {
 	revision uint64
 }
 
-// card is one item's cached view state: its parsed markdown when it is a
-// message, its expansion, and the height its last layout measured.
+// card is one item revision's cached view state: its parsed markdown when it
+// is a message, and the height its last layout measured. The expansion lives
+// per item_id in the State, so it survives a new revision.
 type card struct {
-	doc      *markdown.Doc
-	md       mdState
-	click    widget.Clickable
-	expanded bool
+	doc    *markdown.Doc
+	docSrc string
+	md     mdState
+	click  widget.Clickable
 	// height is the card's last full height in px; it feeds the scroll math
-	// until the next layout replaces it.
+	// until the next layout replaces it. A new revision's entry is seeded
+	// from the previous revision's height so the list does not jump.
 	height int
 }
 
@@ -36,16 +38,18 @@ type entry struct {
 }
 
 // cardCache is the layout cache: at most maxCards cards, evicting the least
-// recently used.
+// recently used. latest names each item's most recent entry, so a new
+// revision can seed its height from the old one.
 type cardCache struct {
 	max     int
 	entries map[cardKey]*entry
+	latest  map[string]*card
 	order   *list.List
 }
 
 // newCardCache builds a cache with the given bound.
 func newCardCache(max int) *cardCache {
-	return &cardCache{max: max, entries: map[cardKey]*entry{}, order: list.New()}
+	return &cardCache{max: max, entries: map[cardKey]*entry{}, latest: map[string]*card{}, order: list.New()}
 }
 
 // get returns the card of the key and marks it the most recently used.
@@ -63,11 +67,13 @@ func (c *cardCache) get(k cardKey) (*card, bool) {
 func (c *cardCache) put(k cardKey, card *card) {
 	if e, ok := c.entries[k]; ok {
 		e.card = card
+		c.latest[k.itemID] = card
 		c.order.MoveToFront(e.self)
 		return
 	}
 	el := c.order.PushFront(k)
 	c.entries[k] = &entry{card: card, self: el}
+	c.latest[k.itemID] = card
 	c.evict()
 }
 

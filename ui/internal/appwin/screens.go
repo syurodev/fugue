@@ -24,20 +24,30 @@ const (
 	topicTranscriptDlt  = "transcript-delta:"
 )
 
+// pageFetcher is the read side the screens drive: the session.Fetcher, and a
+// recording fake in the tests.
+type pageFetcher interface {
+	RequestSessions()
+	RequestPage(session string, before int64)
+	Results() <-chan session.Result
+}
+
 // screens is the app's read side (F10.4a): the sidebar's session list, the
-// open session's transcript model, and the transcript view's state. It
-// changes only on the window goroutine, which applies every delivered update
-// here.
+// open session's transcript model, and each session's transcript view state.
+// It changes only on the window goroutine, which applies every delivered
+// update here.
 type screens struct {
 	m       *hostconn.Manager
-	fetcher *session.Fetcher
+	fetcher pageFetcher
 
 	sidebar     *session.Sidebar
 	transcripts map[string]*session.Transcript
+	// views holds one scroll state per session, so session A's offset never
+	// leaks into session B.
+	views map[string]*transcriptview.State
 	// open is the open session's id, empty when none is.
 	open string
 
-	view   *transcriptview.State
 	clicks map[string]*widget.Clickable
 	// pendingPage and pendingOlder guard one read per trigger, and scrolled
 	// makes paging older a user-driven act: it arms after the first scroll
@@ -51,17 +61,28 @@ type screens struct {
 }
 
 // newScreens builds the screens over the manager and its fetcher.
-func newScreens(m *hostconn.Manager, fetcher *session.Fetcher) *screens {
+func newScreens(m *hostconn.Manager, fetcher pageFetcher) *screens {
 	return &screens{
 		m:            m,
 		fetcher:      fetcher,
 		sidebar:      session.NewSidebar(),
 		transcripts:  map[string]*session.Transcript{},
-		view:         transcriptview.NewState(),
+		views:        map[string]*transcriptview.State{},
 		clicks:       map[string]*widget.Clickable{},
 		pendingPage:  map[string]bool{},
 		pendingOlder: map[string]bool{},
 	}
+}
+
+// viewFor returns the session's scroll state, building it on first use. A new
+// state follows the newest item, so opening a session lands on it.
+func (s *screens) viewFor(id string) *transcriptview.State {
+	view, ok := s.views[id]
+	if !ok {
+		view = transcriptview.NewState()
+		s.views[id] = view
+	}
+	return view
 }
 
 // update folds one frame's deliveries into the screens.
@@ -158,7 +179,11 @@ func (s *screens) applyResult(r session.Result) {
 			return
 		}
 		if r.Older {
-			t.ApplyOlderPage(r.Items)
+			// Keep the reader's anchor: the prepended items shift the
+			// content under the scroll offset by their height.
+			if prepended := t.ApplyOlderPage(r.Items); prepended > 0 {
+				s.viewFor(r.Session).AccountForPrepended(prepended)
+			}
 			s.pendingOlder[r.Session] = false
 		} else {
 			t.ApplyNewestPage(r.Items)
@@ -178,6 +203,7 @@ func (s *screens) openSession(id string) {
 		s.m.RemoveTopic(topicTranscriptDlt + s.open)
 	}
 	s.open, s.scrolled = id, false
+	s.viewFor(id)
 	s.m.AddTopic(topicTranscript + id)
 	s.m.AddTopic(topicTranscriptDlt + id)
 	if _, ok := s.transcripts[id]; !ok {
@@ -196,10 +222,13 @@ func (s *screens) requestNewestPage(id string) {
 }
 
 // maybePageOlder reads the next older page when the reader has scrolled back
-// to the top: paging older is on demand, never a background crawl.
+// to the top: paging older is on demand, one page per arrival at the top —
+// the prepended history moves the reader off the top again — and never while
+// the view follows the newest item.
 func (s *screens) maybePageOlder() {
 	t := s.transcripts[s.open]
-	if t == nil || !s.scrolled || s.pendingOlder[s.open] || !s.view.AtTop() {
+	view := s.viewFor(s.open)
+	if t == nil || !s.scrolled || s.pendingOlder[s.open] || view.Following() || !view.AtTop() {
 		return
 	}
 	if before, ok := t.OlderCursor(); ok {
@@ -282,6 +311,7 @@ func (s *screens) layoutTranscript(gtx layout.Context, th theme.Theme) layout.Di
 	if t := s.transcripts[s.open]; t != nil {
 		items = t.Items()
 	}
+	view := s.viewFor(s.open)
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			paint.FillShape(gtx.Ops, th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
@@ -290,8 +320,8 @@ func (s *screens) layoutTranscript(gtx layout.Context, th theme.Theme) layout.Di
 				l.Color = th.Chrome().FgMuted
 				return layout.Center.Layout(gtx, l.Layout)
 			}
-			dims := transcriptview.Layout(&gtx, &th, s.view, items)
-			s.trackScroll()
+			dims := transcriptview.Layout(&gtx, &th, view, items)
+			s.trackScroll(view)
 			s.maybePageOlder()
 			return dims
 		}),
@@ -307,8 +337,8 @@ func (s *screens) layoutTranscript(gtx layout.Context, th theme.Theme) layout.Di
 }
 
 // trackScroll marks that the reader has scrolled, which arms paging older.
-func (s *screens) trackScroll() {
-	if s.view.Offset() > 0 {
+func (s *screens) trackScroll(view *transcriptview.State) {
+	if view.Offset() > 0 {
 		s.scrolled = true
 	}
 }

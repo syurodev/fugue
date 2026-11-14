@@ -30,13 +30,14 @@ type Item struct {
 	Streaming *client.TranscriptView
 }
 
-// View returns the view to render: the streaming one while the item streams,
-// the durable one otherwise.
-func (i *Item) View() *client.TranscriptView {
+// Display returns the view to render: the streaming one while the item
+// streams, the durable one otherwise. It is named Display so the embedded
+// TranscriptItem.View field stays unambiguous to a reader.
+func (i *Item) Display() *client.TranscriptView {
 	if i.Streaming != nil {
 		return i.Streaming
 	}
-	return &i.TranscriptItem.View
+	return &i.View
 }
 
 // Transcript is one open session's read model: the newest page's history, the
@@ -111,8 +112,12 @@ func (t *Transcript) ApplySnapshot(payload []byte) error {
 	t.lastSeq = snap.Sequence
 	t.sessionState = snap.SessionState
 	t.contentLocked = snap.ContentLocked
+	grew := false
 	for i := range snap.Items {
-		t.upsert(&Item{TranscriptItem: snap.Items[i]})
+		grew = t.upsert(&Item{TranscriptItem: snap.Items[i]}) || grew
+	}
+	if grew {
+		t.sortBySequence()
 	}
 	return nil
 }
@@ -127,7 +132,9 @@ func (t *Transcript) ApplyEvent(eventType string, sequence uint64, payload []byt
 		if err != nil {
 			return fmt.Errorf("apply the transcript item event: %w", err)
 		}
-		t.upsert(&Item{TranscriptItem: item})
+		if t.upsert(&Item{TranscriptItem: item}) {
+			t.sortBySequence()
+		}
 	case EventTranscriptState:
 		// Turn and outcome states are rendered by the composer and the
 		// status row (F10.4b); the read side records the sequence only.
@@ -166,37 +173,52 @@ func (t *Transcript) ApplyNewestPage(items []client.TranscriptItem) {
 	}
 }
 
-// ApplyOlderPage applies one page of older history. An empty page completes
-// the history.
-func (t *Transcript) ApplyOlderPage(items []client.TranscriptItem) {
+// ApplyOlderPage applies one page of older history and returns how many new
+// items it prepended, so the caller can keep the reader's anchor in place. An
+// empty page completes the history.
+func (t *Transcript) ApplyOlderPage(items []client.TranscriptItem) int {
+	before := len(t.items)
 	t.applyPage(items)
 	if len(items) == 0 {
 		t.exhausted = true
 	}
+	return len(t.items) - before
 }
 
-// applyPage merges the page's items into the model.
+// applyPage merges the page's items into the model, appending the new ones
+// and sorting once — a page is one insert, not one per item.
 func (t *Transcript) applyPage(items []client.TranscriptItem) {
+	grew := false
 	for i := range items {
-		t.upsert(&Item{TranscriptItem: items[i]})
+		grew = t.upsert(&Item{TranscriptItem: items[i]}) || grew
+	}
+	if grew {
+		t.sortBySequence()
 	}
 }
 
 // upsert applies one item by item_id and revision: a first sighting is
-// inserted at its sequence, a newer revision replaces the held state and ends
-// any streaming view, and a revision that is not newer is ignored.
-func (t *Transcript) upsert(item *Item) {
+// appended (the caller sorts), a newer revision replaces the held state and
+// ends any streaming view, and a revision that is not newer is ignored. It
+// reports whether the item is new.
+func (t *Transcript) upsert(item *Item) bool {
 	held, ok := t.byID[item.ItemID]
 	if ok {
 		if item.Revision <= held.Revision {
-			return
+			return false
 		}
 		item.Streaming = nil
 		*held = *item
-		return
+		return false
 	}
 	t.byID[item.ItemID] = item
 	t.items = append(t.items, item)
+	return true
+}
+
+// sortBySequence restores the creation order and the oldest cursor after a
+// batch of inserts.
+func (t *Transcript) sortBySequence() {
 	slices.SortStableFunc(t.items, func(a, b *Item) int { return cmp.Compare(a.Sequence, b.Sequence) })
 	t.oldestSeq = t.items[0].Sequence
 }

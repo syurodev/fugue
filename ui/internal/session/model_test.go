@@ -103,8 +103,8 @@ func TestTranscriptModelAppliesUpsertsByRevisionAndIgnoresStale(t *testing.T) {
 	if err := m.ApplyEvent(EventTranscriptItem, 9, mustItemPayload(t, &upsert)); err != nil {
 		t.Fatal(err)
 	}
-	if got := m.Items()[0]; got.Revision != 2 || got.View().Text != "one, revised" {
-		t.Fatalf("i1 after upsert = rev %d %q, want rev 2", got.Revision, got.View().Text)
+	if got := m.Items()[0]; got.Revision != 2 || got.Display().Text != "one, revised" {
+		t.Fatalf("i1 after upsert = rev %d %q, want rev 2", got.Revision, got.Display().Text)
 	}
 
 	// The same revision again, and a stale one, change nothing.
@@ -114,8 +114,8 @@ func TestTranscriptModelAppliesUpsertsByRevisionAndIgnoresStale(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := m.Items()[0]; got.Revision != 2 || got.View().Text != "one, revised" {
-		t.Fatalf("i1 after stale upserts = rev %d %q, want the rev-2 text", got.Revision, got.View().Text)
+	if got := m.Items()[0]; got.Revision != 2 || got.Display().Text != "one, revised" {
+		t.Fatalf("i1 after stale upserts = rev %d %q, want the rev-2 text", got.Revision, got.Display().Text)
 	}
 
 	// A page never rolls a held item back: only newer revisions replace.
@@ -136,7 +136,7 @@ func TestTranscriptDeltaAppliesToTheOpenItem(t *testing.T) {
 	if err := m.ApplyDelta(mustDeltaPayload(t, "i1", 2, "streaming…")); err != nil {
 		t.Fatal(err)
 	}
-	if got := m.Items()[0].View().Text; got != "streaming…" {
+	if got := m.Items()[0].Display().Text; got != "streaming…" {
 		t.Fatalf("open item view = %q, want the streaming view", got)
 	}
 	// A newer revision of the item ends the streaming view.
@@ -144,7 +144,7 @@ func TestTranscriptDeltaAppliesToTheOpenItem(t *testing.T) {
 	if err := m.ApplyEvent(EventTranscriptItem, 10, mustItemPayload(t, &item)); err != nil {
 		t.Fatal(err)
 	}
-	if got := m.Items()[0].View().Text; got != "final" {
+	if got := m.Items()[0].Display().Text; got != "final" {
 		t.Fatalf("open item view after the durable event = %q, want the durable text", got)
 	}
 	if m.Items()[0].Streaming != nil {
@@ -154,7 +154,7 @@ func TestTranscriptDeltaAppliesToTheOpenItem(t *testing.T) {
 	if err := m.ApplyDelta(mustDeltaPayload(t, "i1", 2, "stale")); err != nil {
 		t.Fatal(err)
 	}
-	if got := m.Items()[0].View().Text; got != "final" {
+	if got := m.Items()[0].Display().Text; got != "final" {
 		t.Fatalf("stale delta overwrote the durable view with %q", got)
 	}
 	// A delta for an item the model has not seen is dropped, not created.
