@@ -85,7 +85,7 @@ func TestOverviewReadsSessionTurnsAndOpenItems(t *testing.T) {
 	if session.ID != "s" || session.LastSequence != 4 || session.State != StateRunning {
 		t.Fatalf("session = %+v, want s at sequence 4 running", session)
 	}
-	if len(turns) != 1 || turns[0] != "t" {
+	if len(turns) != 1 || turns[0].ID != "t" {
 		t.Fatalf("open turns = %v, want [t]", turns)
 	}
 	if len(items) != 1 || items[0].ID != overviewOpenItem {

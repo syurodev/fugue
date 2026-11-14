@@ -105,15 +105,20 @@ func (t *Transcripts) storeItem(ctx context.Context, session string, expectedSeq
 	if seqErr != nil {
 		return seqErr
 	}
+	projection, projectionErr := t.deps.Store.StoredItemMeta(ctx, session, item.ID)
+	if projectionErr != nil {
+		return fmt.Errorf("read the committed transcript item: %w", projectionErr)
+	}
 
-	t.publishItemEvent(session, committed, &itemState{
-		ItemID:   item.ID,
-		TurnID:   item.TurnID,
-		Kind:     string(item.Kind),
-		Sequence: seq,
-		Revision: newRevision,
-		Metadata: stored.Metadata,
-		View:     t.itemView(display, string(item.Kind)),
+	t.publishItemEvent(session, committed, &TranscriptTopicItemEvent{
+		ItemID:     item.ID,
+		TurnID:     item.TurnID,
+		Kind:       string(item.Kind),
+		Sequence:   seq,
+		Revision:   newRevision,
+		Metadata:   stored.Metadata,
+		View:       t.itemView(display, string(item.Kind)),
+		TurnOrigin: projection.TurnOrigin,
 	})
 
 	t.clearDeltaView(session, item.ID)
@@ -148,7 +153,7 @@ func withTruncation(metadata *vendorstore.ItemMetadata, truncated bool, original
 // itemView renders the durable event's redacted view from the fitted display
 // field; while the vault is locked the event carries metadata only (TR-10,
 // transcript §6).
-func (t *Transcripts) itemView(display, kind string) *viewPayload {
+func (t *Transcripts) itemView(display, kind string) *TranscriptView {
 	if !t.unlocked() || display == "" {
 		return nil
 	}
@@ -160,7 +165,7 @@ func (t *Transcripts) itemView(display, kind string) *viewPayload {
 // publishItemEvent publishes the durable event with the committed sequence,
 // after the commit. A failure is a programming error of the topic's owner —
 // the journal is committed — so it is logged, not propagated.
-func (t *Transcripts) publishItemEvent(session string, seq EventSeq, state *itemState) {
+func (t *Transcripts) publishItemEvent(session string, seq EventSeq, state *TranscriptTopicItemEvent) {
 	event, err := marshalEvent(EventTranscriptItem, seq, state)
 	if err != nil {
 		slog.Warn("a transcript event payload did not marshal", "err", err.Error())

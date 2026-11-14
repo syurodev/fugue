@@ -54,6 +54,9 @@ const (
 	// VendorServiceListSessionsProcedure is the fully-qualified name of the VendorService's
 	// ListSessions RPC.
 	VendorServiceListSessionsProcedure = "/fugue.vendors.v1.VendorService/ListSessions"
+	// VendorServiceListCommandsProcedure is the fully-qualified name of the VendorService's
+	// ListCommands RPC.
+	VendorServiceListCommandsProcedure = "/fugue.vendors.v1.VendorService/ListCommands"
 )
 
 // VendorServiceClient is a client for the fugue.vendors.v1.VendorService service.
@@ -66,6 +69,7 @@ type VendorServiceClient interface {
 	CloseSession(context.Context, *connect.Request[v1.CloseSessionRequest]) (*connect.Response[v1.CloseSessionResponse], error)
 	ResumeSession(context.Context, *connect.Request[v1.ResumeSessionRequest]) (*connect.Response[v1.ResumeSessionResponse], error)
 	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
+	ListCommands(context.Context, *connect.Request[v1.ListCommandsRequest]) (*connect.Response[v1.ListCommandsResponse], error)
 }
 
 // NewVendorServiceClient constructs a client for the fugue.vendors.v1.VendorService service. By
@@ -127,6 +131,12 @@ func NewVendorServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(vendorServiceMethods.ByName("ListSessions")),
 			connect.WithClientOptions(opts...),
 		),
+		listCommands: connect.NewClient[v1.ListCommandsRequest, v1.ListCommandsResponse](
+			httpClient,
+			baseURL+VendorServiceListCommandsProcedure,
+			connect.WithSchema(vendorServiceMethods.ByName("ListCommands")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -140,6 +150,7 @@ type vendorServiceClient struct {
 	closeSession  *connect.Client[v1.CloseSessionRequest, v1.CloseSessionResponse]
 	resumeSession *connect.Client[v1.ResumeSessionRequest, v1.ResumeSessionResponse]
 	listSessions  *connect.Client[v1.ListSessionsRequest, v1.ListSessionsResponse]
+	listCommands  *connect.Client[v1.ListCommandsRequest, v1.ListCommandsResponse]
 }
 
 // ProbeVendors calls fugue.vendors.v1.VendorService.ProbeVendors.
@@ -182,6 +193,11 @@ func (c *vendorServiceClient) ListSessions(ctx context.Context, req *connect.Req
 	return c.listSessions.CallUnary(ctx, req)
 }
 
+// ListCommands calls fugue.vendors.v1.VendorService.ListCommands.
+func (c *vendorServiceClient) ListCommands(ctx context.Context, req *connect.Request[v1.ListCommandsRequest]) (*connect.Response[v1.ListCommandsResponse], error) {
+	return c.listCommands.CallUnary(ctx, req)
+}
+
 // VendorServiceHandler is an implementation of the fugue.vendors.v1.VendorService service.
 type VendorServiceHandler interface {
 	ProbeVendors(context.Context, *connect.Request[v1.ProbeVendorsRequest]) (*connect.Response[v1.ProbeVendorsResponse], error)
@@ -192,6 +208,7 @@ type VendorServiceHandler interface {
 	CloseSession(context.Context, *connect.Request[v1.CloseSessionRequest]) (*connect.Response[v1.CloseSessionResponse], error)
 	ResumeSession(context.Context, *connect.Request[v1.ResumeSessionRequest]) (*connect.Response[v1.ResumeSessionResponse], error)
 	ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error)
+	ListCommands(context.Context, *connect.Request[v1.ListCommandsRequest]) (*connect.Response[v1.ListCommandsResponse], error)
 }
 
 // NewVendorServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -249,6 +266,12 @@ func NewVendorServiceHandler(svc VendorServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(vendorServiceMethods.ByName("ListSessions")),
 		connect.WithHandlerOptions(opts...),
 	)
+	vendorServiceListCommandsHandler := connect.NewUnaryHandler(
+		VendorServiceListCommandsProcedure,
+		svc.ListCommands,
+		connect.WithSchema(vendorServiceMethods.ByName("ListCommands")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fugue.vendors.v1.VendorService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case VendorServiceProbeVendorsProcedure:
@@ -267,6 +290,8 @@ func NewVendorServiceHandler(svc VendorServiceHandler, opts ...connect.HandlerOp
 			vendorServiceResumeSessionHandler.ServeHTTP(w, r)
 		case VendorServiceListSessionsProcedure:
 			vendorServiceListSessionsHandler.ServeHTTP(w, r)
+		case VendorServiceListCommandsProcedure:
+			vendorServiceListCommandsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -306,4 +331,8 @@ func (UnimplementedVendorServiceHandler) ResumeSession(context.Context, *connect
 
 func (UnimplementedVendorServiceHandler) ListSessions(context.Context, *connect.Request[v1.ListSessionsRequest]) (*connect.Response[v1.ListSessionsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.vendors.v1.VendorService.ListSessions is not implemented"))
+}
+
+func (UnimplementedVendorServiceHandler) ListCommands(context.Context, *connect.Request[v1.ListCommandsRequest]) (*connect.Response[v1.ListCommandsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.vendors.v1.VendorService.ListCommands is not implemented"))
 }

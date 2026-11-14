@@ -283,6 +283,24 @@ func (m *VendorSessions) List(ctx context.Context) ([]vendorstore.Session, error
 	return sessions, nil
 }
 
+// SlashCommands returns the live actor's latest vendor command list.
+func (m *VendorSessions) SlashCommands(ctx context.Context, sessionID string) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, fmt.Errorf("check slash command context: %w", err)
+	}
+	m.mu.RLock()
+	actor := m.actors[sessionID]
+	m.mu.RUnlock()
+	if actor == nil {
+		return nil, errcode.New(errcode.VendorSessionNotFound, "the vendor session does not exist or is not live")
+	}
+	provider, ok := actor.session.(interface{ SlashCommands() []string })
+	if !ok {
+		return nil, errcode.New(errcode.VendorUnsupported, "the vendor does not publish slash commands")
+	}
+	return provider.SlashCommands(), nil
+}
+
 func (m *VendorSessions) call(ctx context.Context, sessionID string, cmd actorCommand) error {
 	actor := m.actor(sessionID)
 	if actor == nil {

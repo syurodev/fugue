@@ -188,35 +188,35 @@ func nextEvent(t *testing.T, sub *Subscription) Event {
 	return ev
 }
 
-func decodeItemState(t *testing.T, payload []byte) itemState {
+func decodeItemState(t *testing.T, payload []byte) TranscriptTopicItemEvent {
 	t.Helper()
-	var state itemState
+	var state TranscriptTopicItemEvent
 	if err := json.Unmarshal(payload, &state); err != nil {
 		t.Fatalf("decode item event: %v", err)
 	}
 	return state
 }
 
-func decodeSnapshot(t *testing.T, sub *Subscription) (topicSnapshot, EventSeq) {
+func decodeSnapshot(t *testing.T, sub *Subscription) (TranscriptTopicSnapshot, EventSeq) {
 	t.Helper()
 	state, seq, ok := sub.Snapshot()
 	if !ok {
 		t.Fatal("the subscription has no snapshot")
 	}
-	var snap topicSnapshot
+	var snap TranscriptTopicSnapshot
 	if err := json.Unmarshal(state, &snap); err != nil {
 		t.Fatalf("decode topic snapshot: %v", err)
 	}
 	return snap, seq
 }
 
-func decodeDeltaSnapshot(t *testing.T, sub *Subscription) deltaSnapshotState {
+func decodeDeltaSnapshot(t *testing.T, sub *Subscription) TranscriptDeltaSnapshot {
 	t.Helper()
 	state, _, ok := sub.Snapshot()
 	if !ok {
 		t.Fatal("the subscription has no snapshot")
 	}
-	var snap deltaSnapshotState
+	var snap TranscriptDeltaSnapshot
 	if err := json.Unmarshal(state, &snap); err != nil {
 		t.Fatalf("decode delta snapshot: %v", err)
 	}

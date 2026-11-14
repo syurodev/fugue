@@ -42,7 +42,7 @@ func (s *Store) ListSessions(ctx context.Context) ([]Session, error) {
 // Overview reads the session row, its open turns and its open items in one
 // read transaction, so the durable topic snapshot reflects exactly one store
 // sequence. A session that does not exist reports ErrSessionNotFound.
-func (s *Store) Overview(ctx context.Context, session string) (Session, []string, []StoredItem, error) {
+func (s *Store) Overview(ctx context.Context, session string) (Session, []TurnState, []StoredItem, error) {
 	s.prepare.Lock()
 	defer s.prepare.Unlock()
 	tx, err := s.db.BeginTx(ctx, nil)
@@ -93,7 +93,9 @@ func (s *Store) StoredItemMeta(ctx context.Context, session, id string) (StoredI
 	var item StoredItem
 	var metadata string
 	err := scanItem(s.db.QueryRowContext(ctx,
-		`SELECT `+itemColumns+` FROM vendor_transcript_items WHERE session_id=? AND item_id=?`,
+		`SELECT `+qualifiedItemColumns+` FROM vendor_transcript_items i
+		LEFT JOIN vendor_turns t ON t.session_id=i.session_id AND t.turn_id=i.turn_id
+		WHERE i.session_id=? AND i.item_id=?`,
 		session, id), &item, &metadata)
 	if errors.Is(err, sql.ErrNoRows) {
 		return StoredItem{}, ErrItemNotFound
@@ -109,21 +111,22 @@ func (s *Store) StoredItemMeta(ctx context.Context, session, id string) (StoredI
 
 // openTurnIDs returns the session's unended turn IDs, oldest first, inside the
 // caller's transaction.
-func openTurnIDs(ctx context.Context, tx *sql.Tx, session string) ([]string, error) {
+func openTurnIDs(ctx context.Context, tx *sql.Tx, session string) ([]TurnState, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT turn_id FROM vendor_turns WHERE session_id=? AND outcome='' ORDER BY created_at,turn_id`,
+		`SELECT turn_id,origin,outcome FROM vendor_turns WHERE session_id=? AND outcome='' ORDER BY created_at,turn_id`,
 		session)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer closeRows(ctx, rows)
-	var result []string
+	var result []TurnState
 	for rows.Next() {
-		var id string
-		if err = rows.Scan(&id); err != nil {
+		var turn TurnState
+		if err = rows.Scan(&turn.ID, &turn.Origin, &turn.Outcome); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
-		result = append(result, id)
+		turn.State = "running"
+		result = append(result, turn)
 	}
 	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
@@ -138,14 +141,15 @@ func openTurnIDs(ctx context.Context, tx *sql.Tx, session string) ([]string, err
 // CHECK constraint guarantees is valid. Runs inside the caller's transaction.
 func openItems(ctx context.Context, tx *sql.Tx, session string) ([]StoredItem, error) {
 	rows, err := tx.QueryContext(ctx,
-		`SELECT `+itemColumns+` FROM vendor_transcript_items
-		WHERE session_id=? AND kind IN (`+openItemKinds+`) AND (
-			kind IN ('tool_call','subagent') AND json_extract(metadata,'$.status') IN ('pending','running')
-			OR kind='task_link' AND json_extract(metadata,'$.status') IN
+		`SELECT `+qualifiedItemColumns+` FROM vendor_transcript_items i
+		LEFT JOIN vendor_turns t ON t.session_id=i.session_id AND t.turn_id=i.turn_id
+		WHERE i.session_id=? AND i.kind IN (`+openItemKinds+`) AND (
+			i.kind IN ('tool_call','subagent') AND json_extract(i.metadata,'$.status') IN ('pending','running')
+			OR i.kind='task_link' AND json_extract(i.metadata,'$.status') IN
 				('queued','starting','running','asking','checking','review','integrating')
-			OR kind='approval' AND json_extract(metadata,'$.decision')=''
-			OR kind='team_proposal' AND json_extract(metadata,'$.decision')='pending'
-		) ORDER BY sequence`, session)
+			OR i.kind='approval' AND json_extract(i.metadata,'$.decision')=''
+			OR i.kind='team_proposal' AND json_extract(i.metadata,'$.decision')='pending'
+		) ORDER BY i.sequence`, session)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}

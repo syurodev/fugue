@@ -91,6 +91,9 @@ func (s *Session) Observations() <-chan Observation {
 	return s.obsCh
 }
 
+// SlashCommands returns the normalizer's latest vendor-order command list.
+func (s *Session) SlashCommands() []string { return s.normalizer.SlashCommands() }
+
 // PID returns the operating system process ID of the supervised CLI.
 func (s *Session) PID() int {
 	return s.proc.PID()

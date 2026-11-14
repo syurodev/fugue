@@ -48,8 +48,11 @@ const (
 	VendorVaultLocked           Code = "vendor.vault_locked"
 	VendorInvalidProfile        Code = "vendor.invalid_profile"
 	VendorUnknownCommand        Code = "vendor.unknown_command"
+	VendorCommandUnavailable    Code = "vendor.command_unavailable"
 	VendorCommandConflict       Code = "vendor.command_conflict"
 	VendorWorkspaceMismatch     Code = "vendor.workspace_mismatch"
+	TranscriptSessionNotFound   Code = "transcript.session_not_found"
+	TranscriptItemNotFound      Code = "transcript.item_not_found"
 )
 
 // Entry classifies one code. Hidden codes are never shown to a client; the
@@ -97,8 +100,11 @@ func Registry() []Entry {
 		{VendorVaultLocked, true, "the vault is locked; vendor sessions cannot start or take input"},
 		{VendorInvalidProfile, true, "a session profile value is not allowed"},
 		{VendorUnknownCommand, true, "the /fugue: command is not available; it never reaches the vendor"},
+		{VendorCommandUnavailable, true, "the registered /fugue: command is not available yet; it never reaches the vendor"},
 		{VendorCommandConflict, true, "the command_id was already used for a different command"},
 		{VendorWorkspaceMismatch, true, "the session is bound to the workspace root it was created in"},
+		{TranscriptSessionNotFound, true, "the transcript session does not exist"},
+		{TranscriptItemNotFound, true, "the transcript item does not exist in this session"},
 	}
 }
 

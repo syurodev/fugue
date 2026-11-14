@@ -17,6 +17,7 @@ type RecordedEvent struct {
 	Sequence              int64
 	Type                  string
 	PayloadID, RecordedAt string
+	TurnOrigin            string
 	Metadata              EventMetadata
 }
 
@@ -26,7 +27,10 @@ func (s *Store) EventsSince(ctx context.Context, session string, sequence int64,
 		return nil, errcode.New(errcode.InvalidArgument, "invalid page limit")
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT sequence,event_type,COALESCE(payload_id,''),recorded_at,metadata
+		`SELECT sequence,event_type,COALESCE(payload_id,''),recorded_at,metadata,
+		COALESCE((SELECT origin FROM vendor_turns WHERE session_id=vendor_events.session_id
+			AND turn_id=COALESCE(json_extract(vendor_events.metadata,'$.ItemTurnID'),json_extract(vendor_events.metadata,'$.TurnID'))),
+			json_extract(vendor_events.metadata,'$.TurnOrigin'),'')
 		FROM vendor_events WHERE session_id=? AND sequence>? ORDER BY sequence LIMIT ?`,
 		session, sequence, limit)
 	if err != nil {
@@ -37,7 +41,7 @@ func (s *Store) EventsSince(ctx context.Context, session string, sequence int64,
 	for rows.Next() {
 		var event RecordedEvent
 		var metadata string
-		if err = rows.Scan(&event.Sequence, &event.Type, &event.PayloadID, &event.RecordedAt, &metadata); err != nil {
+		if err = rows.Scan(&event.Sequence, &event.Type, &event.PayloadID, &event.RecordedAt, &metadata, &event.TurnOrigin); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
 		if decodeErr := json.Unmarshal([]byte(metadata), &event.Metadata); decodeErr != nil {
@@ -99,13 +103,14 @@ func (s *Store) OpenPayload(ctx context.Context, session, id string) ([]byte, er
 // StoredItem is the transcript projection with immutable creation sequence.
 type StoredItem struct {
 	CreatedAt, UpdatedAt                      string
+	TurnOrigin                                string
 	Metadata                                  ItemMetadata
 	ID, TurnID, Kind, PayloadID, RawPayloadID string
 	Sequence, Revision                        int64
 }
 
-const itemColumns = `item_id,turn_id,kind,sequence,revision,COALESCE(payload_id,''),
-	COALESCE(raw_payload_id,''),created_at,updated_at,metadata`
+const qualifiedItemColumns = `i.item_id,i.turn_id,i.kind,i.sequence,i.revision,COALESCE(i.payload_id,''),
+	COALESCE(i.raw_payload_id,''),i.created_at,i.updated_at,i.metadata,COALESCE(t.origin,'')`
 
 // rowScanner is satisfied by *sql.Row and *sql.Rows, which share the item
 // column list.
@@ -113,7 +118,7 @@ type rowScanner interface{ Scan(dest ...any) error }
 
 func scanItem(row rowScanner, item *StoredItem, metadata *string) error {
 	err := row.Scan(&item.ID, &item.TurnID, &item.Kind, &item.Sequence, &item.Revision,
-		&item.PayloadID, &item.RawPayloadID, &item.CreatedAt, &item.UpdatedAt, metadata)
+		&item.PayloadID, &item.RawPayloadID, &item.CreatedAt, &item.UpdatedAt, metadata, &item.TurnOrigin)
 	if err != nil {
 		return fmt.Errorf("scan transcript item: %w", err)
 	}
@@ -126,10 +131,11 @@ func (s *Store) Transcript(ctx context.Context, session string, before int64, li
 		return nil, errcode.New(errcode.InvalidArgument, "invalid page limit")
 	}
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT `+itemColumns+`
+		`SELECT `+qualifiedItemColumns+`
 		FROM (SELECT * FROM vendor_transcript_items
 			WHERE session_id=? AND (?=0 OR sequence<?) ORDER BY sequence DESC LIMIT ?)
-		ORDER BY sequence`,
+			AS i LEFT JOIN vendor_turns t ON t.session_id=i.session_id AND t.turn_id=i.turn_id
+		ORDER BY i.sequence`,
 		session, before, before, limit)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
@@ -161,7 +167,9 @@ func (s *Store) ReadItem(ctx context.Context, session, id string) (StoredItem, [
 	var item StoredItem
 	var metadata string
 	err := scanItem(s.db.QueryRowContext(ctx,
-		`SELECT `+itemColumns+` FROM vendor_transcript_items WHERE session_id=? AND item_id=?`,
+		`SELECT `+qualifiedItemColumns+` FROM vendor_transcript_items i
+		LEFT JOIN vendor_turns t ON t.session_id=i.session_id AND t.turn_id=i.turn_id
+		WHERE i.session_id=? AND i.item_id=?`,
 		session, id), &item, &metadata)
 	if errors.Is(err, sql.ErrNoRows) {
 		return StoredItem{}, nil, ErrItemNotFound

@@ -35,9 +35,9 @@ const genericInternalMessage = "internal error"
 func connectCode(c errcode.Code) connect.Code {
 	switch c {
 	case errcode.InvalidArgument, errcode.InteractionOptionNotOffered, errcode.WorkspaceConfigInvalid, errcode.WorkspaceRootInvalid,
-		errcode.VendorInvalidProfile, errcode.VendorUnknownCommand, errcode.VendorCommandConflict, errcode.VendorWorkspaceMismatch:
+		errcode.VendorInvalidProfile, errcode.VendorUnknownCommand, errcode.VendorCommandUnavailable, errcode.VendorCommandConflict, errcode.VendorWorkspaceMismatch:
 		return connect.CodeInvalidArgument
-	case errcode.NotFound, errcode.InteractionNotFound, errcode.WorkspaceNotFound, errcode.WorkspaceRootMissing, errcode.VendorSessionNotFound:
+	case errcode.NotFound, errcode.InteractionNotFound, errcode.WorkspaceNotFound, errcode.WorkspaceRootMissing, errcode.VendorSessionNotFound, errcode.TranscriptSessionNotFound, errcode.TranscriptItemNotFound:
 		return connect.CodeNotFound
 	case errcode.AlreadyExists, errcode.WorkspaceAlreadyExists:
 		return connect.CodeAlreadyExists
@@ -202,9 +202,9 @@ func requireHelloed(ctx context.Context) error {
 // sequence order (host-api §6). The stream ends with resync_required when the
 // client fell too far behind, and cleanly when the host drains.
 func (h *serviceHandler) Subscribe(ctx context.Context, req *connect.Request[hostv1.SubscribeRequest], stream *connect.ServerStream[hostv1.SubscribeResponse]) error {
-	st, serr := connectionState(ctx)
-	if serr != nil {
-		return h.connectError(ctx, serr)
+	st, stateErr := connectionState(ctx)
+	if stateErr != nil {
+		return h.connectError(ctx, stateErr)
 	}
 	// Only a client that completed hello may subscribe; its negotiated kind is
 	// the principal the topic authorization decides on.
@@ -227,11 +227,8 @@ func (h *serviceHandler) Subscribe(ctx context.Context, req *connect.Request[hos
 	// Catch-up from a valid cursor sends no snapshot: the events the client has
 	// not seen start immediately (host-api §6).
 	if state, seq, ok := sub.Snapshot(); ok {
-		serr := stream.Send(&hostv1.SubscribeResponse{Kind: &hostv1.SubscribeResponse_Snapshot{
-			Snapshot: &hostv1.SnapshotEvent{Sequence: seq, State: state, IncarnationId: sub.Incarnation()},
-		}})
-		if serr != nil {
-			return errcode.Wrap(errcode.Internal, "send the snapshot", serr)
+		if sendErr := h.sendTopicSnapshot(ctx, req.Msg.Topic, seq, sub.Incarnation(), state, stream); sendErr != nil {
+			return sendErr
 		}
 	}
 	for {
@@ -248,13 +245,38 @@ func (h *serviceHandler) Subscribe(ctx context.Context, req *connect.Request[hos
 			}
 			return nil
 		}
-		serr := stream.Send(&hostv1.SubscribeResponse{Kind: &hostv1.SubscribeResponse_Event{
-			Event: &hostv1.HostEvent{Sequence: ev.Seq, Type: ev.Type, Payload: ev.Payload},
-		}})
-		if serr != nil {
-			return errcode.Wrap(errcode.Internal, "send the event", serr)
+		if sendErr := h.sendTopicEvent(ctx, req.Msg.Topic, ev, stream); sendErr != nil {
+			return sendErr
 		}
 	}
+}
+
+func (h *serviceHandler) sendTopicSnapshot(ctx context.Context, topic string, sequence uint64, incarnation string, state []byte, stream *connect.ServerStream[hostv1.SubscribeResponse]) error {
+	encoded, err := transcriptSnapshotProto(topic, state)
+	if err != nil {
+		return h.connectError(ctx, errcode.Wrap(errcode.Internal, "encode transcript snapshot", err))
+	}
+	response := &hostv1.SubscribeResponse{Kind: &hostv1.SubscribeResponse_Snapshot{
+		Snapshot: &hostv1.SnapshotEvent{Sequence: sequence, State: encoded, IncarnationId: incarnation},
+	}}
+	if err := stream.Send(response); err != nil {
+		return errcode.Wrap(errcode.Internal, "send the snapshot", err)
+	}
+	return nil
+}
+
+func (h *serviceHandler) sendTopicEvent(ctx context.Context, topic string, event app.Event, stream *connect.ServerStream[hostv1.SubscribeResponse]) error {
+	encoded, err := transcriptEventProto(topic, event.Type, event.Payload)
+	if err != nil {
+		return h.connectError(ctx, errcode.Wrap(errcode.Internal, "encode transcript event", err))
+	}
+	response := &hostv1.SubscribeResponse{Kind: &hostv1.SubscribeResponse_Event{
+		Event: &hostv1.HostEvent{Sequence: event.Seq, Type: event.Type, Payload: encoded},
+	}}
+	if err := stream.Send(response); err != nil {
+		return errcode.Wrap(errcode.Internal, "send the event", err)
+	}
+	return nil
 }
 
 // kindFromProto maps the proto client kind to the domain kind; an

@@ -150,6 +150,7 @@ type HostRuntime struct {
 	interactions *InteractionService
 	workspaces   *WorkspaceService
 	vendors      *VendorService
+	transcripts  *Transcripts
 
 	// goTask spawns a supervised goroutine on the host's base context; it is
 	// installed by StartHost because the base context is never stored.

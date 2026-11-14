@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fugue/vendors/v1/vendors.proto.
  */
 export const file_fugue_vendors_v1_vendors: GenFile = /*@__PURE__*/
-  fileDesc("Ch5mdWd1ZS92ZW5kb3JzL3YxL3ZlbmRvcnMucHJvdG8SEGZ1Z3VlLnZlbmRvcnMudjEi2wEKCkNhcGFiaWxpdHkSHAoUcGVyX3JlcXVlc3RfYXBwcm92YWwYASABKAgSHAoUYmxvY2tfYWxsX3Rvb2xfY2FsbHMYAiABKAgSEQoJaW50ZXJydXB0GAMgASgIEg0KBXN0ZWVyGAQgASgIEg4KBnJlc3VtZRgFIAEoCBIWCg5wYXJ0aWFsX2RlbHRhcxgGIAEoCBIdChV2ZW5kb3Jfc2xhc2hfY29tbWFuZHMYByABKAgSFAoMZGlyZWN0X3F1b3RhGAggASgIEhIKCm1vZGVsX2xpc3QYCSABKAgiugEKC1ZlbmRvclByb2JlEigKBnZlbmRvchgBIAEoDjIYLmZ1Z3VlLnZlbmRvcnMudjEuVmVuZG9yEg8KB3ZlcnNpb24YAiABKAkSFgoOdmVyc2lvbl90ZXN0ZWQYAyABKAgSFwoPdmVyc2lvbl93YXJuaW5nGAQgASgJEg0KBWxvZ2luGAUgASgJEjAKCmNhcGFiaWxpdHkYBiABKAsyHC5mdWd1ZS52ZW5kb3JzLnYxLkNhcGFiaWxpdHkiSgoOU2Vzc2lvblByb2ZpbGUSDQoFbW9kZWwYASABKAkSDgoGZWZmb3J0GAIgASgJEhkKEXJlc3VtZV9zZXNzaW9uX2lkGAMgASgJIpwBCg1WZW5kb3JTZXNzaW9uEhIKCnNlc3Npb25faWQYASABKAkSKAoGdmVuZG9yGAIgASgOMhguZnVndWUudmVuZG9ycy52MS5WZW5kb3ISDQoFc3RhdGUYAyABKAkSFgoOd2FpdGluZ19yZWFzb24YBCABKAkSEgoKY3JlYXRlZF9hdBgFIAEoCRISCgp1cGRhdGVkX2F0GAYgASgJIkAKE1Byb2JlVmVuZG9yc1JlcXVlc3QSKQoHdmVuZG9ycxgBIAMoDjIYLmZ1Z3VlLnZlbmRvcnMudjEuVmVuZG9yIkUKFFByb2JlVmVuZG9yc1Jlc3BvbnNlEi0KBnByb2JlcxgBIAMoCzIdLmZ1Z3VlLnZlbmRvcnMudjEuVmVuZG9yUHJvYmUirwEKE1N0YXJ0U2Vzc2lvblJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRIoCgZ2ZW5kb3IYAiABKA4yGC5mdWd1ZS52ZW5kb3JzLnYxLlZlbmRvchIUCgx3b3Jrc3BhY2VfaWQYAyABKAkSEQoJcm9vdF9uYW1lGAQgASgJEjEKB3Byb2ZpbGUYBSABKAsyIC5mdWd1ZS52ZW5kb3JzLnYxLlNlc3Npb25Qcm9maWxlIkgKFFN0YXJ0U2Vzc2lvblJlc3BvbnNlEjAKB3Nlc3Npb24YASABKAsyHy5mdWd1ZS52ZW5kb3JzLnYxLlZlbmRvclNlc3Npb24iQwoLU2VuZFJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEgwKBHRleHQYAyABKAkiDgoMU2VuZFJlc3BvbnNlIkQKDFN0ZWVyUmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDAoEdGV4dBgDIAEoCSIPCg1TdGVlclJlc3BvbnNlIjoKEEludGVycnVwdFJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIkYKEUludGVycnVwdFJlc3BvbnNlEjEKBnN0YXR1cxgBIAEoDjIhLmZ1Z3VlLnZlbmRvcnMudjEuT3BlcmF0aW9uU3RhdHVzIj0KE0Nsb3NlU2Vzc2lvblJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIkkKFENsb3NlU2Vzc2lvblJlc3BvbnNlEjEKBnN0YXR1cxgBIAEoDjIhLmZ1Z3VlLnZlbmRvcnMudjEuT3BlcmF0aW9uU3RhdHVzIpoBChRSZXN1bWVTZXNzaW9uUmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSFAoMd29ya3NwYWNlX2lkGAMgASgJEhEKCXJvb3RfbmFtZRgEIAEoCRIxCgdwcm9maWxlGAUgASgLMiAuZnVndWUudmVuZG9ycy52MS5TZXNzaW9uUHJvZmlsZSJJChVSZXN1bWVTZXNzaW9uUmVzcG9uc2USMAoHc2Vzc2lvbhgBIAEoCzIfLmZ1Z3VlLnZlbmRvcnMudjEuVmVuZG9yU2Vzc2lvbiIVChNMaXN0U2Vzc2lvbnNSZXF1ZXN0IlsKFExpc3RTZXNzaW9uc1Jlc3BvbnNlEjEKCHNlc3Npb25zGAEgAygLMh8uZnVndWUudmVuZG9ycy52MS5WZW5kb3JTZXNzaW9uEhAKCHNlcXVlbmNlGAIgASgEKlUKBlZlbmRvchIWChJWRU5ET1JfVU5TUEVDSUZJRUQQABIRCg1WRU5ET1JfQ0xBVURFEAESEAoMVkVORE9SX0NPREVYEAISDgoKVkVORE9SX0FHWRADKmwKD09wZXJhdGlvblN0YXR1cxIgChxPUEVSQVRJT05fU1RBVFVTX1VOU1BFQ0lGSUVEEAASGQoVT1BFUkFUSU9OX1NUQVRVU19ET05FEAESHAoYT1BFUkFUSU9OX1NUQVRVU19QRU5ESU5HEAIy1AUKDVZlbmRvclNlcnZpY2USXQoMUHJvYmVWZW5kb3JzEiUuZnVndWUudmVuZG9ycy52MS5Qcm9iZVZlbmRvcnNSZXF1ZXN0GiYuZnVndWUudmVuZG9ycy52MS5Qcm9iZVZlbmRvcnNSZXNwb25zZRJdCgxTdGFydFNlc3Npb24SJS5mdWd1ZS52ZW5kb3JzLnYxLlN0YXJ0U2Vzc2lvblJlcXVlc3QaJi5mdWd1ZS52ZW5kb3JzLnYxLlN0YXJ0U2Vzc2lvblJlc3BvbnNlEkUKBFNlbmQSHS5mdWd1ZS52ZW5kb3JzLnYxLlNlbmRSZXF1ZXN0Gh4uZnVndWUudmVuZG9ycy52MS5TZW5kUmVzcG9uc2USSAoFU3RlZXISHi5mdWd1ZS52ZW5kb3JzLnYxLlN0ZWVyUmVxdWVzdBofLmZ1Z3VlLnZlbmRvcnMudjEuU3RlZXJSZXNwb25zZRJUCglJbnRlcnJ1cHQSIi5mdWd1ZS52ZW5kb3JzLnYxLkludGVycnVwdFJlcXVlc3QaIy5mdWd1ZS52ZW5kb3JzLnYxLkludGVycnVwdFJlc3BvbnNlEl0KDENsb3NlU2Vzc2lvbhIlLmZ1Z3VlLnZlbmRvcnMudjEuQ2xvc2VTZXNzaW9uUmVxdWVzdBomLmZ1Z3VlLnZlbmRvcnMudjEuQ2xvc2VTZXNzaW9uUmVzcG9uc2USYAoNUmVzdW1lU2Vzc2lvbhImLmZ1Z3VlLnZlbmRvcnMudjEuUmVzdW1lU2Vzc2lvblJlcXVlc3QaJy5mdWd1ZS52ZW5kb3JzLnYxLlJlc3VtZVNlc3Npb25SZXNwb25zZRJdCgxMaXN0U2Vzc2lvbnMSJS5mdWd1ZS52ZW5kb3JzLnYxLkxpc3RTZXNzaW9uc1JlcXVlc3QaJi5mdWd1ZS52ZW5kb3JzLnYxLkxpc3RTZXNzaW9uc1Jlc3BvbnNlQsMBChRjb20uZnVndWUudmVuZG9ycy52MUIMVmVuZG9yc1Byb3RvUAFaO2dpdGh1Yi5jb20vc3l1cm9kZXYvZnVndWUvcGtnL3BiL2Z1Z3VlL3ZlbmRvcnMvdjE7dmVuZG9yc3YxogIDRlZYqgIQRnVndWUuVmVuZG9ycy5WMcoCEEZ1Z3VlXFZlbmRvcnNcVjHiAhxGdWd1ZVxWZW5kb3JzXFYxXEdQQk1ldGFkYXRh6gISRnVndWU6OlZlbmRvcnM6OlYxYgZwcm90bzM");
+  fileDesc("Ch5mdWd1ZS92ZW5kb3JzL3YxL3ZlbmRvcnMucHJvdG8SEGZ1Z3VlLnZlbmRvcnMudjEi2wEKCkNhcGFiaWxpdHkSHAoUcGVyX3JlcXVlc3RfYXBwcm92YWwYASABKAgSHAoUYmxvY2tfYWxsX3Rvb2xfY2FsbHMYAiABKAgSEQoJaW50ZXJydXB0GAMgASgIEg0KBXN0ZWVyGAQgASgIEg4KBnJlc3VtZRgFIAEoCBIWCg5wYXJ0aWFsX2RlbHRhcxgGIAEoCBIdChV2ZW5kb3Jfc2xhc2hfY29tbWFuZHMYByABKAgSFAoMZGlyZWN0X3F1b3RhGAggASgIEhIKCm1vZGVsX2xpc3QYCSABKAgiugEKC1ZlbmRvclByb2JlEigKBnZlbmRvchgBIAEoDjIYLmZ1Z3VlLnZlbmRvcnMudjEuVmVuZG9yEg8KB3ZlcnNpb24YAiABKAkSFgoOdmVyc2lvbl90ZXN0ZWQYAyABKAgSFwoPdmVyc2lvbl93YXJuaW5nGAQgASgJEg0KBWxvZ2luGAUgASgJEjAKCmNhcGFiaWxpdHkYBiABKAsyHC5mdWd1ZS52ZW5kb3JzLnYxLkNhcGFiaWxpdHkiSgoOU2Vzc2lvblByb2ZpbGUSDQoFbW9kZWwYASABKAkSDgoGZWZmb3J0GAIgASgJEhkKEXJlc3VtZV9zZXNzaW9uX2lkGAMgASgJIpwBCg1WZW5kb3JTZXNzaW9uEhIKCnNlc3Npb25faWQYASABKAkSKAoGdmVuZG9yGAIgASgOMhguZnVndWUudmVuZG9ycy52MS5WZW5kb3ISDQoFc3RhdGUYAyABKAkSFgoOd2FpdGluZ19yZWFzb24YBCABKAkSEgoKY3JlYXRlZF9hdBgFIAEoCRISCgp1cGRhdGVkX2F0GAYgASgJIkAKE1Byb2JlVmVuZG9yc1JlcXVlc3QSKQoHdmVuZG9ycxgBIAMoDjIYLmZ1Z3VlLnZlbmRvcnMudjEuVmVuZG9yIkUKFFByb2JlVmVuZG9yc1Jlc3BvbnNlEi0KBnByb2JlcxgBIAMoCzIdLmZ1Z3VlLnZlbmRvcnMudjEuVmVuZG9yUHJvYmUirwEKE1N0YXJ0U2Vzc2lvblJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRIoCgZ2ZW5kb3IYAiABKA4yGC5mdWd1ZS52ZW5kb3JzLnYxLlZlbmRvchIUCgx3b3Jrc3BhY2VfaWQYAyABKAkSEQoJcm9vdF9uYW1lGAQgASgJEjEKB3Byb2ZpbGUYBSABKAsyIC5mdWd1ZS52ZW5kb3JzLnYxLlNlc3Npb25Qcm9maWxlIkgKFFN0YXJ0U2Vzc2lvblJlc3BvbnNlEjAKB3Nlc3Npb24YASABKAsyHy5mdWd1ZS52ZW5kb3JzLnYxLlZlbmRvclNlc3Npb24iQwoLU2VuZFJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJEgwKBHRleHQYAyABKAkiDgoMU2VuZFJlc3BvbnNlIkQKDFN0ZWVyUmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDAoEdGV4dBgDIAEoCSIPCg1TdGVlclJlc3BvbnNlIjoKEEludGVycnVwdFJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIkYKEUludGVycnVwdFJlc3BvbnNlEjEKBnN0YXR1cxgBIAEoDjIhLmZ1Z3VlLnZlbmRvcnMudjEuT3BlcmF0aW9uU3RhdHVzIj0KE0Nsb3NlU2Vzc2lvblJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRISCgpzZXNzaW9uX2lkGAIgASgJIkkKFENsb3NlU2Vzc2lvblJlc3BvbnNlEjEKBnN0YXR1cxgBIAEoDjIhLmZ1Z3VlLnZlbmRvcnMudjEuT3BlcmF0aW9uU3RhdHVzIpoBChRSZXN1bWVTZXNzaW9uUmVxdWVzdBISCgpjb21tYW5kX2lkGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSFAoMd29ya3NwYWNlX2lkGAMgASgJEhEKCXJvb3RfbmFtZRgEIAEoCRIxCgdwcm9maWxlGAUgASgLMiAuZnVndWUudmVuZG9ycy52MS5TZXNzaW9uUHJvZmlsZSJJChVSZXN1bWVTZXNzaW9uUmVzcG9uc2USMAoHc2Vzc2lvbhgBIAEoCzIfLmZ1Z3VlLnZlbmRvcnMudjEuVmVuZG9yU2Vzc2lvbiIVChNMaXN0U2Vzc2lvbnNSZXF1ZXN0IlsKFExpc3RTZXNzaW9uc1Jlc3BvbnNlEjEKCHNlc3Npb25zGAEgAygLMh8uZnVndWUudmVuZG9ycy52MS5WZW5kb3JTZXNzaW9uEhAKCHNlcXVlbmNlGAIgASgEIikKE0xpc3RDb21tYW5kc1JlcXVlc3QSEgoKc2Vzc2lvbl9pZBgBIAEoCSIdCg1WZW5kb3JDb21tYW5kEgwKBG5hbWUYASABKAkiPgoMRnVndWVDb21tYW5kEgwKBG5hbWUYASABKAkSEQoJYXZhaWxhYmxlGAIgASgIEg0KBW93bmVyGAMgASgJIo4BCgxDb21tYW5kR3JvdXASDAoEbmFtZRgBIAEoCRI4Cg92ZW5kb3JfY29tbWFuZHMYAiADKAsyHy5mdWd1ZS52ZW5kb3JzLnYxLlZlbmRvckNvbW1hbmQSNgoOZnVndWVfY29tbWFuZHMYAyADKAsyHi5mdWd1ZS52ZW5kb3JzLnYxLkZ1Z3VlQ29tbWFuZCJhChRMaXN0Q29tbWFuZHNSZXNwb25zZRIuCgZncm91cHMYASADKAsyHi5mdWd1ZS52ZW5kb3JzLnYxLkNvbW1hbmRHcm91cBIZChFjb21tYW5kc19yZXZpc2lvbhgCIAEoBCpVCgZWZW5kb3ISFgoSVkVORE9SX1VOU1BFQ0lGSUVEEAASEQoNVkVORE9SX0NMQVVERRABEhAKDFZFTkRPUl9DT0RFWBACEg4KClZFTkRPUl9BR1kQAypsCg9PcGVyYXRpb25TdGF0dXMSIAocT1BFUkFUSU9OX1NUQVRVU19VTlNQRUNJRklFRBAAEhkKFU9QRVJBVElPTl9TVEFUVVNfRE9ORRABEhwKGE9QRVJBVElPTl9TVEFUVVNfUEVORElORxACMrMGCg1WZW5kb3JTZXJ2aWNlEl0KDFByb2JlVmVuZG9ycxIlLmZ1Z3VlLnZlbmRvcnMudjEuUHJvYmVWZW5kb3JzUmVxdWVzdBomLmZ1Z3VlLnZlbmRvcnMudjEuUHJvYmVWZW5kb3JzUmVzcG9uc2USXQoMU3RhcnRTZXNzaW9uEiUuZnVndWUudmVuZG9ycy52MS5TdGFydFNlc3Npb25SZXF1ZXN0GiYuZnVndWUudmVuZG9ycy52MS5TdGFydFNlc3Npb25SZXNwb25zZRJFCgRTZW5kEh0uZnVndWUudmVuZG9ycy52MS5TZW5kUmVxdWVzdBoeLmZ1Z3VlLnZlbmRvcnMudjEuU2VuZFJlc3BvbnNlEkgKBVN0ZWVyEh4uZnVndWUudmVuZG9ycy52MS5TdGVlclJlcXVlc3QaHy5mdWd1ZS52ZW5kb3JzLnYxLlN0ZWVyUmVzcG9uc2USVAoJSW50ZXJydXB0EiIuZnVndWUudmVuZG9ycy52MS5JbnRlcnJ1cHRSZXF1ZXN0GiMuZnVndWUudmVuZG9ycy52MS5JbnRlcnJ1cHRSZXNwb25zZRJdCgxDbG9zZVNlc3Npb24SJS5mdWd1ZS52ZW5kb3JzLnYxLkNsb3NlU2Vzc2lvblJlcXVlc3QaJi5mdWd1ZS52ZW5kb3JzLnYxLkNsb3NlU2Vzc2lvblJlc3BvbnNlEmAKDVJlc3VtZVNlc3Npb24SJi5mdWd1ZS52ZW5kb3JzLnYxLlJlc3VtZVNlc3Npb25SZXF1ZXN0GicuZnVndWUudmVuZG9ycy52MS5SZXN1bWVTZXNzaW9uUmVzcG9uc2USXQoMTGlzdFNlc3Npb25zEiUuZnVndWUudmVuZG9ycy52MS5MaXN0U2Vzc2lvbnNSZXF1ZXN0GiYuZnVndWUudmVuZG9ycy52MS5MaXN0U2Vzc2lvbnNSZXNwb25zZRJdCgxMaXN0Q29tbWFuZHMSJS5mdWd1ZS52ZW5kb3JzLnYxLkxpc3RDb21tYW5kc1JlcXVlc3QaJi5mdWd1ZS52ZW5kb3JzLnYxLkxpc3RDb21tYW5kc1Jlc3BvbnNlQsMBChRjb20uZnVndWUudmVuZG9ycy52MUIMVmVuZG9yc1Byb3RvUAFaO2dpdGh1Yi5jb20vc3l1cm9kZXYvZnVndWUvcGtnL3BiL2Z1Z3VlL3ZlbmRvcnMvdjE7dmVuZG9yc3YxogIDRlZYqgIQRnVndWUuVmVuZG9ycy5WMcoCEEZ1Z3VlXFZlbmRvcnNcVjHiAhxGdWd1ZVxWZW5kb3JzXFYxXEdQQk1ldGFkYXRh6gISRnVndWU6OlZlbmRvcnM6OlYxYgZwcm90bzM");
 
 /**
  * Capability is the adapter's declared contract (vendor-runtime §6).
@@ -541,6 +541,116 @@ export const ListSessionsResponseSchema: GenMessage<ListSessionsResponse> = /*@_
   messageDesc(file_fugue_vendors_v1_vendors, 19);
 
 /**
+ * @generated from message fugue.vendors.v1.ListCommandsRequest
+ */
+export type ListCommandsRequest = Message<"fugue.vendors.v1.ListCommandsRequest"> & {
+  /**
+   * @generated from field: string session_id = 1;
+   */
+  sessionId: string;
+};
+
+/**
+ * Describes the message fugue.vendors.v1.ListCommandsRequest.
+ * Use `create(ListCommandsRequestSchema)` to create a new message.
+ */
+export const ListCommandsRequestSchema: GenMessage<ListCommandsRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_vendors_v1_vendors, 20);
+
+/**
+ * @generated from message fugue.vendors.v1.VendorCommand
+ */
+export type VendorCommand = Message<"fugue.vendors.v1.VendorCommand"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+};
+
+/**
+ * Describes the message fugue.vendors.v1.VendorCommand.
+ * Use `create(VendorCommandSchema)` to create a new message.
+ */
+export const VendorCommandSchema: GenMessage<VendorCommand> = /*@__PURE__*/
+  messageDesc(file_fugue_vendors_v1_vendors, 21);
+
+/**
+ * @generated from message fugue.vendors.v1.FugueCommand
+ */
+export type FugueCommand = Message<"fugue.vendors.v1.FugueCommand"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: bool available = 2;
+   */
+  available: boolean;
+
+  /**
+   * @generated from field: string owner = 3;
+   */
+  owner: string;
+};
+
+/**
+ * Describes the message fugue.vendors.v1.FugueCommand.
+ * Use `create(FugueCommandSchema)` to create a new message.
+ */
+export const FugueCommandSchema: GenMessage<FugueCommand> = /*@__PURE__*/
+  messageDesc(file_fugue_vendors_v1_vendors, 22);
+
+/**
+ * @generated from message fugue.vendors.v1.CommandGroup
+ */
+export type CommandGroup = Message<"fugue.vendors.v1.CommandGroup"> & {
+  /**
+   * @generated from field: string name = 1;
+   */
+  name: string;
+
+  /**
+   * @generated from field: repeated fugue.vendors.v1.VendorCommand vendor_commands = 2;
+   */
+  vendorCommands: VendorCommand[];
+
+  /**
+   * @generated from field: repeated fugue.vendors.v1.FugueCommand fugue_commands = 3;
+   */
+  fugueCommands: FugueCommand[];
+};
+
+/**
+ * Describes the message fugue.vendors.v1.CommandGroup.
+ * Use `create(CommandGroupSchema)` to create a new message.
+ */
+export const CommandGroupSchema: GenMessage<CommandGroup> = /*@__PURE__*/
+  messageDesc(file_fugue_vendors_v1_vendors, 23);
+
+/**
+ * @generated from message fugue.vendors.v1.ListCommandsResponse
+ */
+export type ListCommandsResponse = Message<"fugue.vendors.v1.ListCommandsResponse"> & {
+  /**
+   * @generated from field: repeated fugue.vendors.v1.CommandGroup groups = 1;
+   */
+  groups: CommandGroup[];
+
+  /**
+   * @generated from field: uint64 commands_revision = 2;
+   */
+  commandsRevision: bigint;
+};
+
+/**
+ * Describes the message fugue.vendors.v1.ListCommandsResponse.
+ * Use `create(ListCommandsResponseSchema)` to create a new message.
+ */
+export const ListCommandsResponseSchema: GenMessage<ListCommandsResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_vendors_v1_vendors, 24);
+
+/**
  * Vendor names a vendor CLI. Stage A serves Claude only; Codex and agy return
  * the typed vendor.unsupported error until their adapters land.
  *
@@ -674,6 +784,14 @@ export const VendorService: GenService<{
     methodKind: "unary";
     input: typeof ListSessionsRequestSchema;
     output: typeof ListSessionsResponseSchema;
+  },
+  /**
+   * @generated from rpc fugue.vendors.v1.VendorService.ListCommands
+   */
+  listCommands: {
+    methodKind: "unary";
+    input: typeof ListCommandsRequestSchema;
+    output: typeof ListCommandsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fugue_vendors_v1_vendors, 0);

@@ -273,7 +273,7 @@ func TestActorAbsorbedSendEndsFugueTurn(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(turns) != 1 || turns[0] != testVendorTurnID {
+	if len(turns) != 1 || turns[0].ID != testVendorTurnID {
 		t.Fatalf("open turns = %v, want only vendor-origin turn", turns)
 	}
 	assertAbsorbedTurnItems(t, f)

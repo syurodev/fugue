@@ -40,16 +40,17 @@ type actorRequest struct {
 }
 
 type vendorSessionActor struct {
-	manager  *VendorSessions
-	info     vendorstore.Session
-	session  vendor.Session
-	obs      <-chan claude.Observation
-	commands chan actorRequest
-	state    vendor.State
-	sequence int64
-	turnID   string
-	turns    map[string]bool
-	finished bool
+	manager       *VendorSessions
+	info          vendorstore.Session
+	session       vendor.Session
+	obs           <-chan claude.Observation
+	commands      chan actorRequest
+	state         vendor.State
+	sequence      int64
+	turnID        string
+	slashCommands []string
+	turns         map[string]bool
+	finished      bool
 	// attached turns on once the create or resume command has committed:
 	// a real process reports observations immediately, and none may be
 	// appended before the session row exists.
@@ -339,6 +340,9 @@ func (a *vendorSessionActor) resumeSession(ctx context.Context) error {
 	next, _, err := vendor.Transition(a.state, vendor.Fact{Kind: vendor.FactResume})
 	if err != nil {
 		return fmt.Errorf("resume vendor session state: %w", err)
+	}
+	if err := a.manager.deps.Transcripts.RegisterSession(a.info.ID); err != nil {
+		return fmt.Errorf("register resumed transcript topics: %w", err)
 	}
 	if err := a.append(ctx, &vendorstore.Event{
 		Type: vendorstore.VendorSessionStateChanged, State: vendorstore.StateStarting,
