@@ -103,7 +103,7 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 		options = append(options, claude.WithXDGRuntimeDir(dir))
 	}
 	adapter := claude.NewAdapter(deps.VendorHostEnv, options...)
-	// A session.s token dies with its actor, with a purge and with the host.
+	// A session's token dies with its actor, with a purge and with the host.
 	tokens := newSessionTokens(deps.Random)
 	transcripts.onPurge = tokens.revoke
 	hp.vendorAdapter = adapter

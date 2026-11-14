@@ -65,14 +65,18 @@ func recordChange(ctx context.Context, tx *sql.Tx, session, kind, state, waiting
 	if err != nil {
 		return fmt.Errorf("%w: record session change: %w", ErrUnavailable, err)
 	}
-	// The journal keeps only its newest retention rows; the delete runs in the
-	// insert's transaction, so a reader never sees the insert without the
-	// pruning or the other way round. A non-positive retention is a store
-	// misconfiguration, not a request to keep nothing.
+	return pruneChanges(ctx, tx, retention)
+}
+
+// pruneChanges keeps only the journal's newest retention rows. Every insert
+// calls it in the insert's transaction, so a reader never sees the insert
+// without the pruning or the other way round. A non-positive retention is a
+// store misconfiguration, not a request to keep nothing.
+func pruneChanges(ctx context.Context, tx *sql.Tx, retention int) error {
 	if retention < 1 {
 		retention = ChangeJournalRetention
 	}
-	_, err = tx.ExecContext(ctx,
+	_, err := tx.ExecContext(ctx,
 		`DELETE FROM vendor_session_changes WHERE seq IN (
 			SELECT seq FROM vendor_session_changes ORDER BY seq DESC LIMIT -1 OFFSET ?)`,
 		retention)

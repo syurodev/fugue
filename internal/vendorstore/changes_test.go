@@ -95,6 +95,31 @@ func TestSessionChangeJournalRetentionAndStaleCursor(t *testing.T) {
 	}
 }
 
+// Recovery's bulk detach rows also respect the bound: the journal never stays
+// above its retention after Recover commits.
+func TestRecoveryPrunesTheChangeJournal(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	store := testStoreWithJournalRetention(t, 2)
+	for _, id := range []string{"a", "b", "c"} {
+		if err := store.CreateSession(ctx, &Session{ID: id, Vendor: journalTestVendor, AccountID: journalTestAccount, Role: journalTestRole, State: StateStarting}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := store.Recover(ctx); err != nil {
+		t.Fatal(err)
+	}
+	// Three creations then three recovery detaches: sequences 1..6, of which
+	// only the newest two remain.
+	if _, err := store.SessionChangesSince(ctx, 3, 100); !errors.Is(err, ErrChangeCursorTooOld) {
+		t.Fatalf("catch-up from before the kept rows = %v, want %v", err, ErrChangeCursorTooOld)
+	}
+	tail, err := store.SessionChangesSince(ctx, 4, 100)
+	if err != nil || len(tail) != 2 || tail[0].Sequence != 5 || tail[1].Sequence != 6 || tail[1].State != StateDetached {
+		t.Fatalf("journal after recovery = %+v, %v; want detach rows 5..6", tail, err)
+	}
+}
+
 // A non-positive retention is a store misconfiguration, not a request to keep
 // nothing: the default applies.
 func TestNonPositiveJournalRetentionFallsBackToTheDefault(t *testing.T) {
