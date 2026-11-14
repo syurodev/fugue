@@ -14,6 +14,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/storage"
 	"github.com/syurodev/fugue/internal/vault"
+	"github.com/syurodev/fugue/internal/vendorstore"
 	"github.com/syurodev/fugue/internal/workspace"
 )
 
@@ -30,6 +31,7 @@ type HostProcess struct {
 	closeOnce   sync.Once
 	closeErr    error
 	vault       *vault.Service
+	vendorStore *vendorstore.Store
 	// closeVendor stops every vendor session and then closes the vendor
 	// read model; it runs before the store closes and is idempotent.
 	closeVendor func() error

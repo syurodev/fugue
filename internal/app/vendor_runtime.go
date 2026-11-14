@@ -26,6 +26,9 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 	if err != nil {
 		return errcode.Wrap(errcode.Internal, "open the vendor store", err)
 	}
+	if _, recErr := vs.RecoverTeams(ctx); recErr != nil {
+		return errors.Join(errcode.Wrap(errcode.Internal, "recover team tasks", recErr), vs.Close())
+	}
 	transcripts, err := NewTranscripts(base, TranscriptDeps{Store: vs, Hub: hp.rt.hub, Vault: v, Clock: deps.Clock})
 	if err != nil {
 		return errors.Join(err, vs.Close())
@@ -36,6 +39,7 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 	}
 	hp.vault = v
 	hp.rt.transcripts = transcripts
+	hp.vendorStore = vs
 	hp.closeVendor = func() error {
 		// Stops run on the host's lifetime context without its cancellation,
 		// so a host close never skips the F9.2 stop order.
