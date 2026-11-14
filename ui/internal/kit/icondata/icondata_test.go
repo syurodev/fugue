@@ -445,14 +445,24 @@ func arcToCubics(from rawPoint, rx, ry, xrotDeg float64, large, sweep bool, to r
 		d0x, d0y := arcDeriv(rx, ry, phi, t)
 		d1x, d1y := arcDeriv(rx, ry, phi, t2)
 		segs = append(segs, rawSeg{
-			C0:      rawPoint{p0.X + float32(k*d0x), p0.Y + float32(k*d0y)},
-			C1:      rawPoint{p1.X - float32(k*d1x), p1.Y - float32(k*d1y)},
+			C0:      rawPoint{quantize(p0.X + float32(k*d0x)), quantize(p0.Y + float32(k*d0y))},
+			C1:      rawPoint{quantize(p1.X - float32(k*d1x)), quantize(p1.Y - float32(k*d1y))},
 			End:     p1,
 			IsCubic: true,
 		})
 		t = t2
 	}
 	return segs
+}
+
+// quantize rounds a converted coordinate to the nearest thousandth of the
+// 24 grid before it becomes the committed constant. The arc conversion
+// calls the platform's transcendental functions, whose last ulp differs
+// between macOS and Linux; rounding to a thousandth (an error of at most
+// 0.0005 grid units, invisible at any icon size) makes the generator's
+// output identical on every platform, so the committed file does not drift.
+func quantize(v float32) float32 {
+	return float32(math.Round(float64(v)*1000) / 1000)
 }
 
 // arcCenter finds the arc's center and start and sweep angles, scaling the
@@ -503,8 +513,8 @@ func arcCenter(from, to rawPoint, rx, ry, phi float64, large, sweep bool) (cx, c
 func arcPoint(cx, cy, rx, ry, phi, t float64) rawPoint {
 	cosT, sinT := math.Cos(t), math.Sin(t)
 	return rawPoint{
-		X: float32(cx + rx*cosT*math.Cos(phi) - ry*sinT*math.Sin(phi)),
-		Y: float32(cy + rx*cosT*math.Sin(phi) + ry*sinT*math.Cos(phi)),
+		X: quantize(float32(cx + rx*cosT*math.Cos(phi) - ry*sinT*math.Sin(phi))),
+		Y: quantize(float32(cy + rx*cosT*math.Sin(phi) + ry*sinT*math.Cos(phi))),
 	}
 }
 
