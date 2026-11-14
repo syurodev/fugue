@@ -34,6 +34,9 @@ type VendorSessionDeps struct {
 	Clock       clock.Clock
 	IDs         ids.Generator
 	Logger      *slog.Logger
+	// OnSessionEnded runs once when a session's actor stops, however it
+	// stopped; the host revokes the session token there.
+	OnSessionEnded func(sessionID string)
 }
 
 type vendorVaultObserver interface {
@@ -338,4 +341,35 @@ func (m *VendorSessions) CloseAll(ctx context.Context) error {
 		}
 	}
 	return errors.Join(failures...)
+}
+
+// OwnsPeer reports whether pid belongs to the process tree of any live
+// session (roadmap Q-41 A). A session that cannot answer is an error: the
+// caller must treat the peer as owned.
+func (m *VendorSessions) OwnsPeer(pid int) (bool, error) {
+	m.mu.RLock()
+	actors := make([]*vendorSessionActor, 0, len(m.actors))
+	for _, actor := range m.actors {
+		actors = append(actors, actor)
+	}
+	m.mu.RUnlock()
+	for _, actor := range actors {
+		select {
+		case <-actor.done:
+			continue
+		default:
+		}
+		tree, ok := actor.session.(interface{ OwnsPID(pid int) (bool, error) })
+		if !ok {
+			return false, errcode.New(errcode.Internal, "a vendor session cannot report its process tree")
+		}
+		owned, err := tree.OwnsPID(pid)
+		if err != nil {
+			return false, errcode.Wrap(errcode.Internal, "read a vendor session's process tree", err)
+		}
+		if owned {
+			return true, nil
+		}
+	}
+	return false, nil
 }

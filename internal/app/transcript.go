@@ -73,8 +73,11 @@ type Transcripts struct {
 	tasksMu         sync.Mutex
 	tasks           []*supervise.Task
 	unregisterVault func()
-	closeOnce       sync.Once
-	closeErr        error
+	// onPurge runs after a session was purged; the host revokes the
+	// session token there.
+	onPurge   func(session string)
+	closeOnce sync.Once
+	closeErr  error
 }
 
 // NewTranscripts builds the service and registers its vault lock guard: on
@@ -189,6 +192,9 @@ func (t *Transcripts) PurgeSession(ctx context.Context, session string) error {
 		return fmt.Errorf("purge the vendor session: %w", err)
 	}
 	t.UnregisterSession(session)
+	if t.onPurge != nil {
+		t.onPurge(session)
+	}
 	return nil
 }
 

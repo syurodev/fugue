@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/syurodev/fugue/internal/config"
+	"github.com/syurodev/fugue/internal/environments"
 	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
@@ -119,7 +120,8 @@ func initHostTopics(hp *HostProcess, store *storage.Store, deps *HostDeps) error
 		}
 		return terr
 	}
-	interactions, ierr := initInteractions(deps, hp.rt.hub)
+	hp.rt.tags = environments.New()
+	interactions, ierr := initInteractions(deps, hp.rt.hub, hp.rt.tags)
 	if ierr != nil {
 		if serr := store.Close(); serr != nil {
 			return errcode.Wrap(errcode.Internal, "create interaction service", errors.Join(ierr, serr))
@@ -221,12 +223,13 @@ func (hp *HostProcess) waitTasks() error {
 	}
 }
 
-func initInteractions(deps *HostDeps, hub *EventHub) (*InteractionService, error) {
+func initInteractions(deps *HostDeps, hub *EventHub, tags interaction.TagPolicy) (*InteractionService, error) {
 	owner, err := interaction.NewOwner(&interaction.Config{
 		Clock:     deps.Clock,
 		IDs:       deps.IDs,
 		Responder: nil,
 		Headless:  false,
+		TagPolicy: tags,
 		// TODO(F9.6): wire the host vault lock state to the interaction owner once vault is added to HostDeps.
 		VaultLocked: func() bool { return false },
 	})

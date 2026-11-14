@@ -25,6 +25,19 @@ var (
 	ErrAlreadyHelloed = errcode.New(errcode.FailedPrecondition, "this connection already negotiated a hello")
 	// ErrHelloFirst means the connection called an rpc before hello.
 	ErrHelloFirst = errcode.New(errcode.PermissionDenied, "call hello before any other rpc")
+	// ErrSessionPrincipalDenied means a connection that presented a session
+	// token called an rpc outside the session tool service (host-api §7).
+	ErrSessionPrincipalDenied = errcode.New(errcode.PermissionDenied, "the session principal may not call this rpc")
+	// ErrSessionAttachDenied means a connection that already negotiated a
+	// hello tried to attach a session token.
+	ErrSessionAttachDenied = errcode.New(errcode.PermissionDenied, "this connection cannot attach a session")
+	// ErrSessionAttachFirst means a session tool rpc arrived on a connection
+	// that is not a session principal.
+	ErrSessionAttachFirst = errcode.New(errcode.PermissionDenied, "only an attached session may call this rpc")
+	// ErrVendorPeerDenied means the peer process belongs to a live vendor
+	// session, or its process could not be identified; it never becomes a
+	// local principal (roadmap Q-41 A).
+	ErrVendorPeerDenied = errcode.New(errcode.PermissionDenied, "this process may not act as a local client")
 	// ErrConnectionStateMissing means the request carries no per-connection
 	// state; the server attached it at accept time, so this is an internal
 	// failure and reaches the client only as the generic internal error.

@@ -76,7 +76,7 @@ func (l *AcceptListener) Accept() (net.Conn, error) {
 			l.reject(c)
 			continue
 		}
-		return &trackedConn{Conn: c, onClosed: l.onClosed}, nil
+		return &trackedConn{Conn: c, onClosed: l.onClosed, peerPID: creds.PID}, nil
 	}
 }
 
@@ -116,6 +116,8 @@ type trackedConn struct {
 	net.Conn
 	onClosed func(net.Conn)
 	once     sync.Once
+	// peerPID is the peer's process ID read at accept time; zero if unknown.
+	peerPID int
 }
 
 func (c *trackedConn) Close() error {

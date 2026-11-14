@@ -51,7 +51,7 @@ const (
 // the RequestID and Outcome (interaction §7, §8, I-E08).
 //
 // Lifecycle hooks MUST be non-blocking. Called with o.mu held; must only
-// call hub.Publish and take no other locks.
+// call hub.Publish and take leaf locks whose holders never call the owner.
 type LifecycleEvent struct {
 	Kind      LifecycleEventKind
 	Ticket    *Ticket

@@ -6,6 +6,7 @@ import (
 	"unicode"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/process"
 )
 
@@ -79,6 +80,24 @@ type StartSpec struct {
 	Model           string
 	Effort          string
 	ResumeSessionID string
+	// SessionToken is the per-session token of the session principal
+	// (host-api §7). It reaches the vendor process only as SessionTokenEnv
+	// and never appears in argv, files, logs or errors.
+	SessionToken redact.Secret
+	// Bridge names the MCP bridge the vendor CLI spawns for Fugue's tools.
+	Bridge Bridge
+}
+
+// SessionTokenEnv is the one variable that carries the session token into a
+// vendor process; `fugue mcp-bridge` inherits it from the vendor CLI.
+const SessionTokenEnv = "FUGUE_SESSION_TOKEN"
+
+// Bridge locates `fugue mcp-bridge`: the absolute path of the fugue binary
+// and of the host socket. Both are host values, never client or profile
+// input. An empty Binary means the session runs without Fugue's MCP tools.
+type Bridge struct {
+	Binary string
+	Socket string
 }
 
 // Input is one user input: a message text, or a slash command as the whole

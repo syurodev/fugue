@@ -9,10 +9,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/syurodev/fugue/internal/config"
+	"github.com/syurodev/fugue/internal/environments"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
-	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/storage"
 )
@@ -122,22 +121,6 @@ type StreamEnder interface {
 	EndStreams()
 }
 
-// HostDeps are the ports StartHost needs.
-type HostDeps struct {
-	DataDir      string
-	WorkspaceEnv config.Env
-	Config       HostConfig
-	Clock        clock.Clock
-	IDs          ids.Generator
-	Transport    HostTransport
-	// VendorBinary overrides the Claude binary (absolute path); empty
-	// resolves claude on PATH at probe time.
-	VendorBinary string
-	// VendorHostEnv is the environment snapshot vendor processes filter
-	// through the vendor-runtime §8 allowlist.
-	VendorHostEnv []string
-}
-
 // HostRuntime tracks versions, leases and the drain state of a running host.
 // Its long-lived context is never stored: StartHost installs the spawn port
 // with the base context captured in the closure.
@@ -151,6 +134,8 @@ type HostRuntime struct {
 	workspaces   *WorkspaceService
 	vendors      *VendorService
 	transcripts  *Transcripts
+	sessionTools *SessionToolService
+	tags         *environments.Registry
 
 	// goTask spawns a supervised goroutine on the host's base context; it is
 	// installed by StartHost because the base context is never stored.

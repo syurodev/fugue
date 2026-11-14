@@ -16,6 +16,17 @@ func peerCredentials(c net.Conn) (PeerCredentials, error) {
 		if err != nil {
 			return PeerCredentials{}, errcode.Wrap(errcode.PermissionDenied, "read peer credentials (LOCAL_PEERCRED)", err)
 		}
-		return PeerCredentials{UID: cred.Uid}, nil
+		return PeerCredentials{UID: cred.Uid, PID: peerPID(fd)}, nil
 	})
+}
+
+// peerPID reads LOCAL_PEERPID. An unreadable PID keeps the connection — the
+// session principal does not need it — and is zero, which denies the local
+// principal.
+func peerPID(fd int) int {
+	pid, err := unix.GetsockoptInt(fd, unix.SOL_LOCAL, unix.LOCAL_PEERPID)
+	if err != nil || pid <= 0 {
+		return 0
+	}
+	return pid
 }

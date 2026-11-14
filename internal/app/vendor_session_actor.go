@@ -128,6 +128,9 @@ func (a *vendorSessionActor) call(ctx context.Context, command actorCommand) err
 
 func (a *vendorSessionActor) run(ctx context.Context) error {
 	defer close(a.done)
+	if ended := a.manager.deps.OnSessionEnded; ended != nil {
+		defer ended(a.info.ID)
+	}
 	defer a.vaultSub.Close()
 	for {
 		if err := a.runStep(ctx); err != nil {

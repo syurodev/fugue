@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package fugue.sessiontools.v1;
+
+// SessionToolService is the only service the session principal may call
+// (host-api §7, HA-06). `fugue mcp-bridge` is its client: a vendor session
+// reaches Fugue's MCP tools through it and reaches nothing else.
+service SessionToolService {
+  // Attach presents the session token. On success the connection becomes
+  // the session principal of that session and role for its whole lifetime;
+  // it can never become a local principal.
+  rpc Attach(AttachRequest) returns (AttachResponse);
+
+  // ListTools returns the Fugue MCP tools of the attached session's role.
+  rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
+
+  // CallTool runs one tool call through the interaction policy of the
+  // attached session (vendor-runtime VR-13). It waits while the user is
+  // asked.
+  rpc CallTool(CallToolRequest) returns (CallToolResponse);
+}
+
+message AttachRequest {
+  // session_token is the token the host minted when it spawned the session.
+  string session_token = 1;
+}
+
+message AttachResponse {
+  string session_id = 1;
+  string role = 2;
+}
+
+// Tool is one Fugue MCP tool as the vendor sees it.
+message Tool {
+  string name = 1;
+  string description = 2;
+  // input_schema is the JSON Schema of the tool's arguments.
+  bytes input_schema = 3;
+}
+
+message ListToolsRequest {}
+
+message ListToolsResponse {
+  repeated Tool tools = 1;
+}
+
+message CallToolRequest {
+  string name = 1;
+  // arguments is the JSON object of the call's arguments.
+  bytes arguments = 2;
+}
+
+// CallToolResponse is the tool's answer. A refused or denied call is an
+// answer with is_error set, not an RPC error, so the vendor model reads it.
+message CallToolResponse {
+  string text = 1;
+  bool is_error = 2;
+}

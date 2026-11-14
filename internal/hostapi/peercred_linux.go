@@ -16,6 +16,6 @@ func peerCredentials(c net.Conn) (PeerCredentials, error) {
 		if err != nil {
 			return PeerCredentials{}, errcode.Wrap(errcode.PermissionDenied, "read peer credentials (SO_PEERCRED)", err)
 		}
-		return PeerCredentials{UID: cred.Uid}, nil
+		return PeerCredentials{UID: cred.Uid, PID: int(cred.Pid)}, nil
 	})
 }

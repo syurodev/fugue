@@ -32,6 +32,11 @@ func (p *Process) Identity() Identity {
 	return Identity{}
 }
 
+// OwnsPID fails closed on unsupported platforms.
+func (p *Process) OwnsPID(int) (bool, error) {
+	return false, ErrUnsupportedPlatform
+}
+
 // Stdout returns nil on unsupported platforms.
 func (p *Process) Stdout() *LineReader {
 	return nil

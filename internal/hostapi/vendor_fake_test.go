@@ -48,6 +48,7 @@ func fakeVendorLine(line string) {
 	case strings.Contains(line, `"type":"user"`) && strings.Contains(line, fakeHoldTurn):
 		fakeOut(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"working"}]},"session_id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301"}` + "\n")
 	case strings.Contains(line, `"type":"user"`):
+		fakeVendorAction(line)
 		fakeOut(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"reply"}]},"session_id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301"}` + "\n")
 		fakeOut(result)
 	}

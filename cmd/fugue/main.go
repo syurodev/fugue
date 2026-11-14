@@ -25,6 +25,12 @@ func main() {
 // through RunServe's code (cli §5.2). Usage goes to out, real errors to
 // errOut.
 func runMain(ctx context.Context, args []string, out, errOut io.Writer) int {
+	if socket, ok := bridgeArguments(args); ok {
+		// The bridge's stdout is the MCP channel; its log goes to stderr,
+		// which the vendor CLI owns.
+		slog.SetDefault(slog.New(redact.NewJSONHandler(os.Stderr, slog.LevelWarn)))
+		return RunBridge(ctx, os.Stdin, out, config.ProcessEnv{}, socket, version)
+	}
 	grace, valid := serveArguments(args)
 	if !valid {
 		if uerr := usage(out); uerr != nil {
@@ -53,12 +59,27 @@ func serveArguments(args []string) (time.Duration, bool) {
 	return 0, false
 }
 
-// usage prints the one-line command surface of this binary.
+// bridgeArguments recognizes `mcp-bridge --socket <path>`, the command line
+// the host writes into a vendor session's MCP configuration.
+func bridgeArguments(args []string) (string, bool) {
+	if len(args) == 3 && args[0] == bridgeCommand && args[1] == bridgeSocketFlag && args[2] != "" {
+		return args[2], true
+	}
+	return "", false
+}
+
+// usage prints the command surface of this binary.
 func usage(out io.Writer) error {
 	if err := say(out, "usage: fugue serve"); err != nil {
 		return err
 	}
-	return say(out, "  runs the Fugue host in the foreground; configuration comes from the environment")
+	if err := say(out, "  runs the Fugue host in the foreground; configuration comes from the environment"); err != nil {
+		return err
+	}
+	if err := say(out, "usage: fugue mcp-bridge --socket <path>"); err != nil {
+		return err
+	}
+	return say(out, "  serves Fugue's MCP tools to a vendor session; started by the host, not by hand")
 }
 
 // say writes one formatted line of user output.

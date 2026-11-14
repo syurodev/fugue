@@ -379,7 +379,7 @@ func buildSystemdRunArgs(systemdBin, unitName, memoryMax string, cpuWeight int, 
 }
 
 // SystemdProbe caches the result of probing systemd-run and cgroup v2 per
-// (systemdRunPath, cgroupRoot, launcherEnv) tuple.
+// (systemdRunPath, cgroupRoot, XDG_RUNTIME_DIR) tuple.
 type SystemdProbe struct {
 	mu    sync.Mutex
 	cache map[string]bool
@@ -391,7 +391,9 @@ func NewSystemdProbe() *SystemdProbe {
 }
 
 func (sp *SystemdProbe) check(ctx context.Context, systemdBin, cgroupRoot string, launcherEnv []string) bool {
-	key := systemdBin + "\x00" + cgroupRoot + "\x00" + strings.Join(launcherEnv, "\x00")
+	// Only XDG_RUNTIME_DIR decides the probe's answer. Keying on the whole
+	// environment would keep every session's token in this map.
+	key := systemdBin + "\x00" + cgroupRoot + "\x00" + xdgRuntimeDirOf(launcherEnv)
 	sp.mu.Lock()
 	if res, ok := sp.cache[key]; ok {
 		sp.mu.Unlock()
@@ -411,6 +413,15 @@ func (sp *SystemdProbe) check(ctx context.Context, systemdBin, cgroupRoot string
 	sp.cache[key] = ok
 	sp.mu.Unlock()
 	return ok
+}
+
+func xdgRuntimeDirOf(env []string) string {
+	for _, entry := range env {
+		if value, ok := strings.CutPrefix(entry, "XDG_RUNTIME_DIR="); ok {
+			return value
+		}
+	}
+	return ""
 }
 
 func runSystemdProbe(ctx context.Context, systemdBin, cgroupRoot string, launcherEnv []string) bool {

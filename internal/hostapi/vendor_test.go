@@ -35,6 +35,8 @@ const testFugueOrigin = "fugue"
 type vendorHost struct {
 	hp          *app.HostProcess
 	srv         *Server
+	dataDir     string
+	sockPath    string
 	fugueHome   string
 	host        hostv1connect.HostServiceClient
 	vendors     vendorsv1connect.VendorServiceClient
@@ -43,6 +45,13 @@ type vendorHost struct {
 }
 
 func startVendorHost(t *testing.T, unlock bool) *vendorHost {
+	t.Helper()
+	return startVendorHostWith(t, unlock, nil)
+}
+
+// startVendorHostWith lets a test complete the host's dependencies — the
+// randomness port, the MCP bridge, test tools — before the host starts.
+func startVendorHostWith(t *testing.T, unlock bool, configure func(deps *app.HostDeps, sockPath string)) *vendorHost {
 	t.Helper()
 	dir := shortDir(t)
 	fugueHome := filepath.Join(t.TempDir(), "Fugue")
@@ -56,11 +65,15 @@ func startVendorHost(t *testing.T, unlock bool) *vendorHost {
 		t.Fatal(err)
 	}
 	srv := NewServer(ServerConfig{Socket: sock, DataDir: dir, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("conn")), HostUID: int64(os.Getuid())})
-	hp, err := app.StartHost(t.Context(), &app.HostDeps{
+	deps := &app.HostDeps{
 		DataDir: dir, WorkspaceEnv: config.MapEnv{config.EnvFugueHome: fugueHome},
 		Config: app.HostConfig{HostVersion: testHostE2EVersion, APIVersions: []string{"v1"}},
 		Clock:  clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("host")), Transport: srv, VendorBinary: exe,
-	})
+	}
+	if configure != nil {
+		configure(deps, sock.Path)
+	}
+	hp, err := app.StartHost(t.Context(), deps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +98,7 @@ func startVendorHost(t *testing.T, unlock bool) *vendorHost {
 		t.Fatal(err)
 	}
 	return &vendorHost{
-		hp: hp, srv: srv, fugueHome: fugueHome, host: host,
+		hp: hp, srv: srv, dataDir: dir, sockPath: sock.Path, fugueHome: fugueHome, host: host,
 		vendors:     vendorsv1connect.NewVendorServiceClient(httpClient, "http://fugue"),
 		transcripts: transcriptv1connect.NewTranscriptServiceClient(httpClient, "http://fugue"),
 		workspaces:  workspacev1connect.NewWorkspaceServiceClient(httpClient, "http://fugue"),
