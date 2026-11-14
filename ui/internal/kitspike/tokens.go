@@ -62,8 +62,8 @@ const (
 	HandleHit = unit.Dp(8)
 	// HandleStep is how far one arrow press moves a focused handle;
 	// HandleStepBig with Shift.
-	HandleStep     = unit.Dp(16)
-	HandleStepBig  = unit.Dp(64)
+	HandleStep    = unit.Dp(16)
+	HandleStepBig = unit.Dp(64)
 	// IconButtonGapSM/MD is the icon-to-label gap of a control sized sm
 	// resp. md/lg (§6.2).
 	IconButtonGapSM = SpaceXS

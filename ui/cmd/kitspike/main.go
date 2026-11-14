@@ -46,8 +46,16 @@ func main() {
 	light := flag.Bool("light", false, "use the light theme")
 	scale := flag.Float64("scale", 2, "pixels per dp for -shots and -bench")
 	uiscale := flag.Float64("uiscale", 1, "UI scale on top of the platform dp (0.9, 1, 1.1, 1.25)")
+	onePage := flag.Int("page", -1, "lay out only this page index once and exit (debug)")
 	flag.Parse()
 
+	if *onePage >= 0 {
+		if err := debugPage(*light, *onePage, float32(*scale), float32(*uiscale)); err != nil {
+			fmt.Fprintln(os.Stderr, "kitspike:", err)
+			os.Exit(1)
+		}
+		return
+	}
 	var err error
 	switch {
 	case *shotsDir != "":
@@ -84,6 +92,18 @@ func newTheme(light bool) (theme.Theme, error) {
 		return theme.Light(sh), nil
 	}
 	return theme.Dark(sh), nil
+}
+
+// debugPage lays one page out once in a headless window: the panic bisection
+// helper behind -page.
+func debugPage(light bool, page int, scale, uiscale float32) error {
+	r, err := newRig(light, scale, uiscale)
+	if err != nil {
+		return err
+	}
+	defer r.release()
+	r.g.pages.cur = pageID(page)
+	return r.layout()
 }
 
 // runWindow opens the gallery and runs it until the window closes.
@@ -131,7 +151,7 @@ func newGallery(th *theme.Theme, autoplay bool) *gallery {
 		env: kitspike.Env{Th: th, Sh: th.Shaper(), Driver: &motion.Driver{}},
 	}
 	g.pages = newPages(&g.env)
-_ = g.pages
+	_ = g.pages
 	if autoplay {
 		g.script = newAutoplay(&g.env, g.pages)
 	}

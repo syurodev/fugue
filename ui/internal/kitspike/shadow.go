@@ -2,6 +2,7 @@ package kitspike
 
 import (
 	"image"
+	"sync"
 
 	"gioui.org/f32"
 	"gioui.org/layout"
@@ -45,7 +46,9 @@ var shadowSprite *image.RGBA
 var shadowSpriteSize = image.Pt(160, 120)
 var shadowCore = image.Rect(shadowMargin, shadowMargin, shadowSpriteSize.X-shadowMargin, shadowSpriteSize.Y-shadowMargin)
 
-func init() {
+var spriteOnce sync.Once
+
+func buildSprite() {
 	src := image.NewRGBA(image.Rect(0, 0, shadowSpriteSize.X, shadowSpriteSize.Y))
 	for y := shadowCore.Min.Y; y < shadowCore.Max.Y; y++ {
 		for x := shadowCore.Min.X; x < shadowCore.Max.X; x++ {
@@ -54,6 +57,7 @@ func init() {
 	}
 	blurAlpha(src, 7, 3)
 	shadowSprite = src
+	shadowImageOp = paint.NewImageOp(src)
 }
 
 // blurAlpha blurs the alpha channel of m in place with `passes` box blurs of
@@ -99,11 +103,12 @@ func blurPass(src, dst []float32, wd, ht, r int, horizontal bool) {
 }
 
 // shadowImageOp uploads the sprite once; NewImageOp caches by handle.
-var shadowImageOp = paint.NewImageOp(shadowSprite)
+var shadowImageOp paint.ImageOp
 
 // TextureShadow draws the pre-blurred sprite stretched so its core covers r
 // (the transparent margin hangs outside it).
 func TextureShadow(gtx *layout.Context, r image.Rectangle) {
+	spriteOnce.Do(buildSprite)
 	x0, y0 := float32(r.Min.X-shadowMargin), float32(r.Min.Y-shadowMargin)
 	dw := float32(r.Dx() + 2*shadowMargin)
 	dh := float32(r.Dy() + 2*shadowMargin)

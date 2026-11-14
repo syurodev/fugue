@@ -1,6 +1,7 @@
 package kitspike
 
 import (
+	"fmt"
 	"image"
 
 	"gioui.org/io/event"
@@ -100,6 +101,9 @@ func (o *Overlay) CloseAll() {
 // Shown reports whether a menu is open or still animating out.
 func (o *Overlay) Shown() bool { return o.top != nil }
 
+// Top exposes the root level for tests and scripts.
+func (o *Overlay) Top() *menuPanel { return o.top }
+
 // Selected drains the frame's activations.
 func (o *Overlay) Selected() []MenuSelected {
 	sel := o.selected
@@ -165,9 +169,11 @@ func (o *Overlay) layoutLevel(env *Env, gtx *layout.Context, p *menuPanel, isRoo
 		}
 
 		if p.presence.Shown() {
-			// Take keyboard focus once, so arrows and typeahead reach the
-			// menu (§6.15).
-			if !p.grabbedFocus {
+			// Hold keyboard focus while open, so arrows and typeahead reach
+			// the menu (§6.15). Re-issued when lost: a FocusCmd from the
+			// opening frame can lose the race with the opener's own focus
+			// handling.
+			if !p.grabbedFocus || !gtx.Focused(p) {
 				p.grabbedFocus = true
 				gtx.Execute(key.FocusCmd{Tag: p})
 			}
@@ -177,6 +183,12 @@ func (o *Overlay) layoutLevel(env *Env, gtx *layout.Context, p *menuPanel, isRoo
 			defer paint.PushOpacity(gtx.Ops, min(prog*1.6, 1)).Pop()
 			fillRRect(gtx.Ops, p.panel, dp(gtx, RadiusXL), c.SurfaceRaised)
 			strokeRRect(gtx.Ops, p.panel, dp(gtx, RadiusXL), float32(dp(gtx, Hairline)), c.Border)
+			// The panel is its own keyboard handler (Q1 evidence): event.Op
+			// declares the tag for input routing, and READING a
+			// key.FocusFilter through gtx.Event is what makes the router
+			// treat the tag as focusable at all — a bare key.Filter with
+			// Focus is not enough to hold focus across frames.
+			event.Op(gtx.Ops, p)
 
 			// Items: the clickable IS the row, laid out at the item rect so
 			// its pointer and focus area land on the row.
@@ -358,6 +370,15 @@ func (o *Overlay) handlePointer(env *Env, gtx *layout.Context, p *menuPanel) {
 
 // handleKeys runs the keyboard side of one level (§6.15).
 func (o *Overlay) handleKeys(env *Env, gtx *layout.Context, p *menuPanel) {
+	// Reading the FocusFilter marks the panel focusable for the router and
+	// delivers the focus transitions.
+	for {
+		e, ok := gtx.Event(key.FocusFilter{Target: p})
+		if !ok {
+			break
+		}
+		_ = e.(key.FocusEvent)
+	}
 	for {
 		e, ok := gtx.Event(key.Filter{Focus: p, Optional: key.ModShift | key.ModCtrl | key.ModAlt | key.ModCommand})
 		if !ok {
@@ -416,6 +437,14 @@ func (o *Overlay) activate(p *menuPanel, i int) {
 	if p.opener != nil {
 		o.focusBack = p.opener
 	}
+}
+
+// Sub exposes the open submenu for tests.
+func (p *menuPanel) Sub() *menuPanel { return p.sub }
+
+// Debug renders the panel state for tests.
+func (p *menuPanel) Debug() string {
+	return fmt.Sprintf("kbd=%d sub=%v shown=%v progress=%.2f", p.kbd, p.sub != nil, p.presence.Shown(), p.presence.Progress())
 }
 
 // nextIndex moves the highlight with wrap-around, skipping disabled items

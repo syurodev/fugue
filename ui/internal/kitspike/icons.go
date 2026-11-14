@@ -23,7 +23,7 @@ var iconData embed.FS
 
 // iconSpec is one parsed icon: subpaths on the 24 dp Lucide grid.
 type iconSpec struct {
-	name    string
+	name     string
 	subpaths []svgSubpath
 }
 
@@ -50,14 +50,27 @@ func loadIcons() error {
 		if err != nil {
 			return fmt.Errorf("read the icon %s: %w", name, err)
 		}
-		p, err := parseSVGPath(strings.TrimSpace(string(raw)))
-		if err != nil {
-			return fmt.Errorf("parse the icon %s: %w", name, err)
+		// One line per SVG <path> element: each starts its own coordinate
+		// space, so relative commands must not carry across lines.
+		var subpaths []svgSubpath
+		for _, line := range strings.Split(strings.TrimSpace(string(raw)), "\n") {
+			if strings.TrimSpace(line) == "" {
+				continue
+			}
+			p, err := parseSVGPath(strings.TrimSpace(line))
+			if err != nil {
+				return fmt.Errorf("parse the icon %s: %w", name, err)
+			}
+			subpaths = append(subpaths, p...)
 		}
-		icons[name] = iconSpec{name: name, subpaths: p}
+		icons[name] = iconSpec{name: name, subpaths: subpaths}
 	}
 	return nil
 }
+
+// iconOps holds the cached icon strokes; it is written once per (icon,
+// size) pair and never reset.
+var iconOps op.Ops
 
 // iconNames are the ten packaged icons, in gallery order.
 var iconNames = []string{
@@ -80,16 +93,16 @@ func drawIconFresh(gtx *layout.Context, name string, size unit.Dp, c color.NRGBA
 	scale := float32(gtx.Dp(size)) / iconGrid
 	var p clip.Path
 	p.Begin(gtx.Ops)
-		for _, sp := range spec.subpaths {
-			p.MoveTo(scalePt(sp.Move, scale))
-			for _, seg := range sp.Segments {
-				if seg.IsCubic {
-					p.CubeTo(scalePt(seg.C0, scale), scalePt(seg.C1, scale), scalePt(seg.End, scale))
-				} else {
-					p.LineTo(scalePt(seg.To, scale))
-				}
+	for _, sp := range spec.subpaths {
+		p.MoveTo(scalePt(sp.Move, scale))
+		for _, seg := range sp.Segments {
+			if seg.IsCubic {
+				p.CubeTo(scalePt(seg.C0, scale), scalePt(seg.C1, scale), scalePt(seg.End, scale))
+			} else {
+				p.LineTo(scalePt(seg.To, scale))
 			}
 		}
+	}
 	paint.FillShape(gtx.Ops, c, clip.Stroke{Path: p.End(), Width: IconStroke(size) * gtx.Metric.PxPerDp}.Op())
 	return nil
 }
@@ -108,7 +121,7 @@ func drawIconCached(gtx *layout.Context, name string, size unit.Dp, c color.NRGB
 		// IconStroke(size): w * size/24 = IconStroke(size).
 		w := IconStroke(size) * iconGrid / float32(gtx.Dp(size))
 		var p clip.Path
-		p.Begin(gtx.Ops)
+		p.Begin(&iconOps)
 		spec := icons[name]
 		for _, sp := range spec.subpaths {
 			p.MoveTo(f32.Pt(sp.Move.X, sp.Move.Y))

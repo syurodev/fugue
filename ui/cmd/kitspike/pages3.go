@@ -40,7 +40,7 @@ func (typ) layout(env *kitspike.Env, gtx *layout.Context) {
 			})
 			return layout.Dimensions{}
 		})
-		y += h + gtx.Dp(10)
+		y += h + gtx.Dp(14)
 	}
 	at(gtx, image.Pt(0, y+gtx.Dp(8)), func(gtx *layout.Context) layout.Dimensions {
 		return kitspike.DrawText(gtx, env.Sh, kitspike.TypeSmall, gtx.Constraints.Max.X,
@@ -86,7 +86,7 @@ func (iconPage) layout(env *kitspike.Env, gtx *layout.Context) {
 				x += 44
 			}
 		}
-		y += gtx.Dp(28) * 2 + gtx.Dp(6)
+		y += gtx.Dp(28)*2 + gtx.Dp(6)
 	}
 }
 

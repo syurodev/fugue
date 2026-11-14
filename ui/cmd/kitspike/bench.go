@@ -28,7 +28,7 @@ func bench(w io.Writer, scale float32) error {
 // variants: no shadow, layered rects, pre-blurred texture (Q6).
 func benchShadow(w io.Writer, scale float32) error {
 	for _, c := range []struct {
-		name   string
+		name    string
 		pageVal int
 	}{{"no shadow", 0}, {"layered rects", 1}, {"pre-blurred texture", 2}} {
 		r, err := newRig(false, scale, 1)
@@ -55,73 +55,101 @@ func benchShadow(w io.Writer, scale float32) error {
 	return nil
 }
 
-// benchFrames counts frames: an idle gallery must draw none; a menu opening
+// benchFrames counts frames: an idle page must draw none; a menu opening
 // and closing must stop once it settles (Q7).
 func benchFrames(w io.Writer) error {
+	// Idle pages, 120 ticks each: the buttons matrix is excluded because
+	// its busy cells legitimately spin forever.
+	for _, pid := range []pageID{pageFields, pageSplit, pageType, pageIcons, pageShadow} {
+		r, err := newRig(false, 1, 1)
+		if err != nil {
+			return err
+		}
+		r.g.pages.cur = pid
+		if err := r.layout(); err != nil {
+			return err
+		}
+		idle := 0
+		for i := 0; i < 120; i++ {
+			if at, ok := r.g.env.Driver.Next(); ok && at.IsZero() {
+				idle++
+			}
+			r.now = r.now.Add(frameStep)
+			if err := r.layout(); err != nil {
+				return err
+			}
+		}
+		r.release()
+		if _, err = fmt.Fprintf(w, "idle %-10s %d frames drawn beyond the first (want 0)\n", pageNames[pid], idle); err != nil {
+			return fmt.Errorf("write the report: %w", err)
+		}
+	}
+
+	// Menu: open → submenu → Escape, counting the frames the springs ask
+	// for until each settles.
 	r, err := newRig(false, 1, 1)
 	if err != nil {
 		return err
 	}
 	defer r.release()
-
-	// Idle: 2 seconds, no script, nothing moving.
-	idle := 0
-	for i := 0; i < 120; i++ {
-		at, ok := r.g.env.Driver.Next()
-		if ok && at.IsZero() {
-			idle++
-		}
-		if err := r.step(); err != nil {
-			return err
-		}
-	}
-	if _, err = fmt.Fprintf(w, "idle gallery: %d frames drawn in 120 ticks (want 0)\n", idle); err != nil {
-		return fmt.Errorf("write the report: %w", err)
-	}
-
-	// Menu open → settle → Escape → settle: count the frames the springs
-	// actually need.
 	r.g.pages.cur = pageMenu
+	if err := r.layout(); err != nil {
+		return err
+	}
 	r.focusTag(r.g.pages.menu.trigger.Tag())
-	drawn := 0
-	counted := func() error {
-		drawn++
-		return r.step()
-	}
-	// open
-	r.router.Queue(key.Event{Name: key.NameEnter, State: key.Press})
-	for r.elapsed() < time.Second && menuAnimating(r) {
-		if err := counted(); err != nil {
-			return err
+	count := func() (int, error) {
+		frames := 0
+		quiet := 0
+		for i := 0; i < 600 && quiet < 2; i++ {
+			if err := r.step(); err != nil {
+				return frames, err
+			}
+			at, ok := r.g.env.Driver.Next()
+			if ok && at.IsZero() {
+				frames++ // the scene wants the next frame immediately
+				quiet = 0
+				continue
+			}
+			// Two quiet frames: a close requested in the last quiet frame
+			// only starts moving in the next one.
+			quiet++
 		}
+		return frames, nil
 	}
-	openFrames := drawn
-	// submenu
+	r.router.Queue(key.Event{Name: key.NameReturn, State: key.Press})
+	r.router.Queue(key.Event{Name: key.NameReturn, State: key.Release})
+	open, err := count()
+	if err != nil {
+		return err
+	}
+	r.pressName(key.NameDownArrow)
+	r.pressName(key.NameDownArrow)
+	r.pressName(key.NameDownArrow)
+	sub, err := count()
+	if err != nil {
+		return err
+	}
+	// Right opens the submenu; count its spring too.
 	r.pressName(key.NameRightArrow)
-	subStart := drawn
-	for r.elapsed() < 2*time.Second && menuAnimating(r) {
-		if err := counted(); err != nil {
-			return err
-		}
+	subOpen, err := count()
+	if err != nil {
+		return err
 	}
-	subFrames := drawn - subStart
-	// close
+	// The first Escape closes the submenu; the second closes the root, and
+	// its Exit animation runs while the frames keep coming.
 	r.pressName(key.NameEscape)
-	closeStart := drawn
-	for r.elapsed() < 3*time.Second && menuAnimating(r) {
-		if err := counted(); err != nil {
-			return err
-		}
+	_, err = count()
+	if err != nil {
+		return err
 	}
-	_, err = fmt.Fprintf(w, "menu open: %d frames to settle, submenu: %d, close: %d (at 60 Hz a naive always-drawing menu would use 60/s)\n",
-		openFrames, subFrames, drawn-closeStart)
+	r.pressName(key.NameEscape)
+	closing, err := count()
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(w, "menu: open %d frames, walk %d, submenu %d, close %d (a naive always-drawing menu spends 60/s)\n",
+		open, sub, subOpen, closing)
 	return err
-}
-
-// menuAnimating reports whether the overlay or any control still moves.
-func menuAnimating(r *rig) bool {
-	at, ok := r.g.env.Driver.Next()
-	return ok && at.IsZero()
 }
 
 // benchUIScale lays every page out at each UI scale of §3.0 and reports the
@@ -169,4 +197,3 @@ func report(w io.Writer, what string, d []time.Duration) error {
 	}
 	return nil
 }
-

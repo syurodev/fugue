@@ -53,6 +53,7 @@ func newPages(env *kitspike.Env) *pages {
 	p.field = newFieldsPage()
 	p.menu = newMenuPage(env)
 	p.split = newSplitPage()
+	p.shad.only = -1
 	return p
 }
 
@@ -68,25 +69,26 @@ func (p *pages) layout(gtx *layout.Context) {
 	c := p.env.Th.Chrome()
 	kitspike.FillRect(gtx, image.Rectangle{Max: gtx.Constraints.Max}, c.AppBg)
 
-	// Sidebar.
+	// Sidebar: one button per page, stacked.
 	navW := gtx.Dp(navWidth)
-	at(gtx, image.Pt(0, gtx.Dp(pagePad)), func(gtx *layout.Context) layout.Dimensions {
-		y := 0
-		for i, name := range pageNames {
-			cur := p.cur == pageID(i)
-			props := kitspike.ButtonProps{Text: name, Variant: kitspike.Secondary, Size: kitspike.SizeMD}
-			if cur {
-				// The current page reads as selected (§3.5 SelectedWash).
-				props.Variant = kitspike.Primary
-			}
-			clicked := p.nav[i].Layout(p.env, gtx, props)
-			if clicked {
-				p.cur = pageID(i)
-			}
-			y += gtx.Dp(36)
+	for i, name := range pageNames {
+		cur := p.cur == pageID(i)
+		props := kitspike.ButtonProps{Text: name, Variant: kitspike.Secondary, Size: kitspike.SizeMD}
+		if cur {
+			// The current page reads as selected (§3.5 SelectedWash).
+			props.Variant = kitspike.Primary
 		}
-		return layout.Dimensions{Size: image.Pt(navW, y), Baseline: 0}
-	})
+		row := i * gtx.Dp(36)
+		clicked := false
+		at(gtx, image.Pt(0, gtx.Dp(pagePad)+row), func(gtx *layout.Context) layout.Dimensions {
+			clicked = p.nav[i].Layout(p.env, gtx, props)
+			return layout.Dimensions{}
+		})
+		if clicked {
+			p.cur = pageID(i)
+		}
+		_ = navW
+	}
 
 	// Content area.
 	cx := navW + gtx.Dp(pagePad)
@@ -160,13 +162,17 @@ func (b *buttonsPage) layout(env *kitspike.Env, gtx *layout.Context) {
 	y += drawLabel(env, gtx, image.Pt(0, y), "Every variant × size × state of §4.1. Enter and Space activate; the ring shows only for keyboard focus.", c.FgMuted) + gtx.Dp(12)
 
 	for vi, v := range variants {
+		y += drawLabel(env, gtx, image.Pt(0, y), v.name, c.FgSubtle) + gtx.Dp(6)
 		for si, s := range sizes {
 			st := b.states[vi][si]
 			props := kitspike.ButtonProps{Text: "Save", Icon: "", Variant: v.variant, Size: s.size}
-			x := 0
-			// Row label.
-			x += drawLabel(env, gtx, image.Pt(x, y), v.name+"·"+s.name, c.FgSubtle) + gtx.Dp(16)
-			slot := 108
+			x := gtx.Dp(16)
+			// The size tag sits left of the row.
+			at(gtx, image.Pt(0, y), func(gtx *layout.Context) layout.Dimensions {
+				drawLabel(env, gtx, image.Pt(0, 0), s.name, c.FgSubtle)
+				return layout.Dimensions{}
+			})
+			slot := 100
 			for ci := range cellLabels {
 				cell := ci
 				w := 0
@@ -192,10 +198,11 @@ func (b *buttonsPage) layout(env *kitspike.Env, gtx *layout.Context) {
 				default:
 					draw()
 				}
-				x += max(w, slot) + gtx.Dp(4)
+				x += max(w, slot)
 			}
 			y += gtx.Dp(36)
 		}
+		y += gtx.Dp(4)
 	}
 }
 

@@ -11,9 +11,10 @@ import (
 	"github.com/syurodev/fugue/ui/internal/kitspike"
 )
 
-// printTypeMetrics answers Q4: for every §3.3 token, shape the Vietnamese
-// stress string twice and report the ink bounds against the line box, plus
-// the smallest safe line-height ratio. It is pure shaping: no window needed.
+// printTypeMetrics answers Q4: for every §3.3 token, shape two lines of the
+// Vietnamese stress string and report, per line, where the ink falls inside
+// the line box, whether consecutive lines' ink overlaps, and the smallest
+// line-height ratio that keeps them apart. Pure shaping: no window needed.
 func printTypeMetrics(w io.Writer, scale float32) error {
 	sh, err := fonts.Shaper()
 	if err != nil {
@@ -30,53 +31,64 @@ func printTypeMetrics(w io.Writer, scale float32) error {
 		{"code", kitspike.TypeCode}, {"codeSmall", kitspike.TypeCodeSmall},
 	}
 	text2 := kitspike.VietnameseInk + "\n" + kitspike.VietnameseInk
-	if _, err = fmt.Fprintf(w, "%-10s %5s %5s | %8s %8s | %9s %9s | %8s\n",
-		"token", "sp", "line", "inkTop", "inkBot", "gapAbove", "gapBelow", "safeRatio"); err != nil {
+	if _, err = fmt.Fprintf(w, "%-10s %4s %4s | %8s %8s %8s | %9s %9s | %9s\n",
+		"token", "sp", "line", "inkTop", "inkBot", "inkH", "clipTop", "clipBot", "lineGap"); err != nil {
 		return err
 	}
 	for _, tk := range tokens {
 		m := unit.Metric{PxPerDp: scale, PxPerSp: scale}
-		// Shape with the token's absolute line height, LineHeightScale = 1.
+		linePx := float32(m.Sp(tk.t.Line))
 		sh.LayoutString(kitspike.TextParameters(sh, tk.t, m, 1<<20), text2)
-		var inkTop, inkBot float32 = 1e9, -1e9
-		var lineTops []float32
-		lineStart := float32(0)
+		// Split glyphs into lines on the line-break flag; record each
+		// line's ink extent and baseline.
+		type ln struct {
+			baseline float32
+			inkTop   float32
+			inkBot   float32
+			asc      float32
+			desc     float32
+		}
+		var lines []ln
+		cur := ln{baseline: -1, inkTop: 1e9, inkBot: -1e9}
+		flush := func() {
+			if cur.baseline >= 0 {
+				lines = append(lines, cur)
+			}
+			cur = ln{baseline: -1, inkTop: 1e9, inkBot: -1e9}
+		}
 		for g, ok := sh.NextGlyph(); ok; g, ok = sh.NextGlyph() {
-			top := float32(g.Y) + float32(g.Bounds.Min.Y)/64
-			bot := float32(g.Y) + float32(g.Bounds.Max.Y)/64
-			inkTop = min(inkTop, top)
-			inkBot = max(inkBot, bot)
+			cur.baseline = float32(g.Y)
+			cur.inkTop = min(cur.inkTop, float32(g.Y)+float32(g.Bounds.Min.Y)/64)
+			cur.inkBot = max(cur.inkBot, float32(g.Y)+float32(g.Bounds.Max.Y)/64)
+			cur.asc = max(cur.asc, float32(g.Ascent)/64)
+			cur.desc = max(cur.desc, float32(g.Descent)/64)
 			if g.Flags&text.FlagLineBreak != 0 {
-				lineStart = float32(g.Y)
-				lineTops = append(lineTops, lineStart)
+				flush()
 			}
 		}
-		_ = lineTops
-		line := float32(m.Sp(tk.t.Line))
-		// The line box of the first line: the shaper starts at y=0 with
-		// half-leading; inkTop - 0 is the head margin, and the bottom
-		// margin is line - (inkBot - 0) for a single line of box height
-		// `line`. With two lines the overlap test is (inkBot - inkTop of
-		// line 1) versus the second baseline.
-		gapAbove := inkTop
-		gapBelow := 2*line - inkBot // bottom of the second line's box
-		inkExtent := inkBot - inkTop
-		safe := inkExtent / line
-		// A two-line block with explicit line height L places line 2's ink
-		// at inkTop + L + (leading shifts); the honest overlap check is
-		// whether inkExtent <= L: then no two lines of this token can
-		// touch, whatever the leading.
-		if _, err = fmt.Fprintf(w, "%-10s %5.0f %5.0f | %8.1f %8.1f | %9.1f %9.1f | %8.2f\n",
-			tk.name, float32(tk.t.Size), line, inkTop, inkBot, gapAbove, gapBelow, safe); err != nil {
+		flush()
+		if len(lines) != 2 {
+			return fmt.Errorf("want two shaped lines, got %d", len(lines))
+		}
+		// How far ink pokes out of its own line box. The box of a line sits
+		// around its baseline with the natural ascent/descent plus the
+		// half-leading the absolute line height adds.
+		lead := (linePx - (lines[0].asc + lines[0].desc)) / 2
+		clipTop := lines[0].inkTop - (lines[0].baseline - lines[0].asc - lead)
+		clipBot := lines[1].inkBot - (lines[1].baseline + lines[1].desc + lead)
+		gap := lines[1].inkTop - lines[0].inkBot // negative: the lines' ink overlaps
+		inkH := lines[0].inkBot - lines[0].inkTop
+		if _, err = fmt.Fprintf(w, "%-10s %4.0f %4.0f | %8.1f %8.1f %8.1f | %9.1f %9.1f | %9.1f\n",
+			tk.name, float32(tk.t.Size), linePx, lines[0].inkTop, lines[0].inkBot, inkH, clipTop, clipBot, gap); err != nil {
 			return err
 		}
 	}
 	_, err = fmt.Fprintln(w, `
-safeRatio = ink height / line height: 1.00 means the two lines just touch.
-gapAbove/Below are in px at the given scale, for a two-line block.
-Anything with safeRatio > 1.0 overlaps; anything with gapBelow < 0 clips a
-descender at the bottom of a single-line box of exactly `+"`line`"+` px.`)
+All numbers in px at the given scale; the string is `+"`"+kitspike.VietnameseInk+"`"+`.
+clipTop/clipBot: how far ink reaches outside its line box (negative = fits).
+lineGap: distance between line 1's ink bottom and line 2's ink top
+(negative means the stacked marks of line 2 touch line 1's descenders).
+safeLineRatio = inkH / linePx is the smallest line-height ratio that keeps
+two lines of this token apart; §3.3 requires >= 1.35 with margin.`)
 	return err
 }
-
-

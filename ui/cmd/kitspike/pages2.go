@@ -45,7 +45,7 @@ func (f *fieldsPage) layout(env *kitspike.Env, gtx *layout.Context) {
 		})
 		y += h
 	}
-	fieldH := gtx.Dp(74)
+	fieldH := gtx.Dp(88)
 	drawField := func(st *kitspike.TextFieldState, p kitspike.FieldProps) func(gtx *layout.Context) layout.Dimensions {
 		return func(gtx *layout.Context) layout.Dimensions {
 			ev := st.Layout(env, gtx, p)

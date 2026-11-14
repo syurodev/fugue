@@ -200,7 +200,7 @@ func shootMenu(r *rig, dir, base string) error {
 	// Open the menu the way a user does: focus the trigger, press Enter.
 	r.g.pages.overlay.CloseAll()
 	r.focusTag(r.g.pages.menu.trigger.Tag())
-	r.pressName(key.NameEnter)
+	r.pressName(key.NameReturn)
 	for i := 0; i < 30; i++ { // let the open spring settle
 		if err := r.step(); err != nil {
 			return err
@@ -209,7 +209,8 @@ func shootMenu(r *rig, dir, base string) error {
 	if err := r.shoot(dir, base+"-open"); err != nil {
 		return err
 	}
-	// Walk to the Export item and open its submenu with Right.
+	// Walk to the Export item (index 2) and open its submenu with Right.
+	r.pressName(key.NameDownArrow)
 	r.pressName(key.NameDownArrow)
 	r.pressName(key.NameDownArrow)
 	r.pressName(key.NameRightArrow)
@@ -221,7 +222,9 @@ func shootMenu(r *rig, dir, base string) error {
 	if err := r.shoot(dir, base+"-submenu"); err != nil {
 		return err
 	}
-	// Escape closes and returns focus to the opener.
+	// Escape closes the submenu, then the root, and returns focus to the
+	// opener.
+	r.pressName(key.NameEscape)
 	r.pressName(key.NameEscape)
 	for i := 0; i < 40; i++ {
 		if err := r.step(); err != nil {
