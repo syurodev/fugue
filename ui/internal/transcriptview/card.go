@@ -46,15 +46,15 @@ const (
 // drop.
 func layoutCard(gtx *layout.Context, th *theme.Theme, st *State, item *session.Item) layout.Dimensions {
 	key := cardKey{itemID: item.ItemID, revision: item.Revision}
-	c, ok := st.cards.get(key)
+	c, ok := st.cache.cards.get(key)
 	if !ok {
 		c = &card{}
 		// Seed the new revision's height from the previous one, so the
 		// list does not jump back to the estimate when an item completes.
-		if prev, held := st.cards.latest[item.ItemID]; held {
-			c.height = prev.height
+		if height, held := st.cache.cards.heightOf(item.ItemID); held {
+			c.height = height
 		}
-		st.cards.put(key, c)
+		st.cache.cards.put(key, c)
 	}
 	if c.click.Clicked(*gtx) {
 		st.expanded[item.ItemID] = !st.expanded[item.ItemID]
@@ -67,6 +67,7 @@ func layoutCard(gtx *layout.Context, th *theme.Theme, st *State, item *session.I
 			return cardBody(gtx, th, st, c, item)
 		})
 		c.height = dims.Size.Y
+		st.cache.cards.recordHeight(item.ItemID, item.Revision, c.height)
 		return dims
 	})
 }

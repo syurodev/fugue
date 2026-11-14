@@ -43,8 +43,10 @@ type screens struct {
 	sidebar     *session.Sidebar
 	transcripts map[string]*session.Transcript
 	// views holds one scroll state per session, so session A's offset never
-	// leaks into session B.
-	views map[string]*transcriptview.State
+	// leaks into session B; the cards themselves live in the one shared
+	// window cache.
+	views     map[string]*transcriptview.State
+	viewCache *transcriptview.Cache
 	// open is the open session's id, empty when none is.
 	open string
 
@@ -68,6 +70,7 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher) *screens {
 		sidebar:      session.NewSidebar(),
 		transcripts:  map[string]*session.Transcript{},
 		views:        map[string]*transcriptview.State{},
+		viewCache:    transcriptview.NewCache(),
 		clicks:       map[string]*widget.Clickable{},
 		pendingPage:  map[string]bool{},
 		pendingOlder: map[string]bool{},
@@ -79,10 +82,33 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher) *screens {
 func (s *screens) viewFor(id string) *transcriptview.State {
 	view, ok := s.views[id]
 	if !ok {
-		view = transcriptview.NewState()
+		view = transcriptview.NewState(s.viewCache)
 		s.views[id] = view
 	}
 	return view
+}
+
+// prune drops the state of sessions that left the sidebar list, so a closed
+// session's scroll and expansion state does not outlive it.
+func (s *screens) prune() {
+	known := map[string]bool{}
+	for _, sess := range s.sidebar.List() {
+		known[sess.ID] = true
+	}
+	pruneKnown(s.views, known)
+	pruneKnown(s.transcripts, known)
+	pruneKnown(s.pendingPage, known)
+	pruneKnown(s.pendingOlder, known)
+	pruneKnown(s.clicks, known)
+}
+
+// pruneKnown deletes every key of m the known set does not name.
+func pruneKnown[T any](m map[string]T, known map[string]bool) {
+	for id := range m {
+		if !known[id] {
+			delete(m, id)
+		}
+	}
 }
 
 // update folds one frame's deliveries into the screens.
@@ -102,6 +128,7 @@ func (s *screens) applyUpdate(u hostconn.Update) {
 		s.reconnected()
 	case u.Topic == topicVendorSessions && u.Snapshot != nil:
 		s.fail(s.sidebar.ApplySnapshot(u.Snapshot.State))
+		s.prune()
 	case u.Topic == topicVendorSessions && u.Event != nil:
 		s.applySessionEvent(u.Event.Type, u.Event.Payload)
 	case u.Topic == topicTranscriptDlt+s.open && u.Event != nil:
@@ -169,6 +196,7 @@ func (s *screens) applyResult(r session.Result) {
 			return
 		}
 		s.sidebar.ApplyList(r.Sessions)
+		s.prune()
 	case session.ResultPage:
 		t := s.transcripts[r.Session]
 		if t == nil {

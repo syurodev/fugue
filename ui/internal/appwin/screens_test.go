@@ -123,4 +123,18 @@ func TestScrollStateIsPerSession(t *testing.T) {
 	if !s.viewFor("b").Following() {
 		t.Fatal("session b lost its own follow state")
 	}
+
+	// When a session leaves the list, its scroll and expansion state goes
+	// with it.
+	snap := []byte(`{"sessions":[{"session_id":"b","vendor":"claude","state":"running"}]}`)
+	if err := s.sidebar.ApplySnapshot(snap); err != nil {
+		t.Fatal(err)
+	}
+	s.prune()
+	if _, ok := s.views["a"]; ok {
+		t.Fatal("session a's state outlived the session")
+	}
+	if _, ok := s.views["b"]; !ok {
+		t.Fatal("session b's state was pruned with session a")
+	}
 }

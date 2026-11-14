@@ -84,6 +84,20 @@ func TestNewItemsAreFollowedOnlyAtTheBottom(t *testing.T) {
 	if _, last := h.visibleIDs(); last != "i22" {
 		t.Fatalf("resumed follow shows %q last, want the new i22", last)
 	}
+
+	// Short content never scrolls: an upward wheel must not end the follow,
+	// and a new item still shows when the content grows.
+	short := newHarness(t, 600, 400, uniformItems(2, "s"))
+	short.frame()
+	short.scroll(-200)
+	if !short.st.Following() {
+		t.Fatal("an upward wheel ended the follow on content shorter than the viewport")
+	}
+	short.items = append(short.items, message("s2", 3, "new"))
+	short.frame()
+	if _, last := short.visibleIDs(); last != "s2" {
+		t.Fatalf("short content shows %q last, want the new s2", last)
+	}
 }
 
 // TestPrependingOlderItemsKeepsTheReaderAnchor pins the anchor rule: when an

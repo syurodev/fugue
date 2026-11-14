@@ -33,7 +33,9 @@ const scrollUnit = 1 << 24
 // follow flag that keeps the newest item on screen while the reader sits at
 // the bottom. It changes only on the window goroutine.
 type State struct {
-	cards cardCache
+	// cache is the window's shared layout cache; the State itself holds
+	// only the session's own scroll and expansion state.
+	cache *Cache
 	// expanded holds one expansion bit per item_id, so a card the reader
 	// opened stays open across its revisions.
 	expanded map[string]bool
@@ -51,14 +53,11 @@ type State struct {
 	rendered int
 }
 
-// NewState builds the view state with its bounded layout cache, following
-// the newest item until the reader scrolls up.
-func NewState() *State {
-	return &State{cards: *newCardCache(maxCards), expanded: map[string]bool{}, follow: true}
+// NewState builds a session's view state over the window's shared cache,
+// following the newest item until the reader scrolls up.
+func NewState(cache *Cache) *State {
+	return &State{cache: cache, expanded: map[string]bool{}, follow: true}
 }
-
-// CachedCards reports the layout cache's size.
-func (s *State) CachedCards() int { return s.cards.len() }
 
 // Following reports whether the view pins the newest item on screen.
 func (s *State) Following() bool { return s.follow }
@@ -163,11 +162,11 @@ func (s *State) prefix(items []*session.Item) []int {
 // for a revision not laid out yet, or the estimate for a card the view has
 // never seen.
 func (s *State) heightOf(item *session.Item) int {
-	if c, ok := s.cards.get(cardKey{itemID: item.ItemID, revision: item.Revision}); ok {
+	if c, ok := s.cache.cards.get(cardKey{itemID: item.ItemID, revision: item.Revision}); ok {
 		return c.height
 	}
-	if c, ok := s.cards.latest[item.ItemID]; ok && c.height > 0 {
-		return c.height
+	if height, ok := s.cache.cards.heightOf(item.ItemID); ok && height > 0 {
+		return height
 	}
 	return estimateH
 }
@@ -205,7 +204,10 @@ func (s *State) pollScroll(gtx *layout.Context, maxOffset int) {
 		}
 	}
 	s.scrollOffset = min(max(s.scrollOffset, 0), maxOffset)
-	if maxOffset > 0 && s.scrollOffset >= maxOffset {
+	// The bottom is where the offset meets the content's end, including when
+	// the content is shorter than the viewport: there, nothing ever scrolls,
+	// and the follow stays on.
+	if s.scrollOffset >= maxOffset {
 		s.follow = true
 	}
 }

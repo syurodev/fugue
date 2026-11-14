@@ -25,12 +25,13 @@ func TestMain(m *testing.M) {
 }
 
 // harness is a headless transcript pane: a router for input, one theme, one
-// State and the items it renders.
+// State over its own cache, and the items it renders.
 type harness struct {
 	t      *testing.T
 	router input.Router
 	ops    op.Ops
 	th     theme.Theme
+	cache  *Cache
 	st     *State
 	items  []*session.Item
 	width  int
@@ -44,7 +45,8 @@ func newHarness(t *testing.T, width, height int, items []*session.Item) *harness
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &harness{t: t, th: theme.Light(shaper), st: NewState(), items: items, width: width, height: height}
+	cache := NewCache()
+	return &harness{t: t, th: theme.Light(shaper), cache: cache, st: NewState(cache), items: items, width: width, height: height}
 }
 
 // context builds this frame's layout context over the router.
@@ -163,10 +165,11 @@ func TestLayoutCacheIsBoundedAndKeyedByItemAndRevision(t *testing.T) {
 	// Through the layout: one item at two revisions is two cache entries.
 	items := []*session.Item{message("i1", 1, "one")}
 	h := newHarness(t, 400, 800, items)
+	h.st.follow = false
 	h.frame()
 	h.items[0].Revision = 2
 	h.frame()
-	if got := h.st.CachedCards(); got != 2 {
+	if got := h.cache.Len(); got != 2 {
 		t.Fatalf("cache holds %d cards for two revisions, want 2", got)
 	}
 }
@@ -195,7 +198,7 @@ func TestToolCallAndReasoningCardsStartCollapsed(t *testing.T) {
 	h := newHarness(t, 600, 900, items)
 	h.frame()
 	for _, item := range items {
-		if _, ok := h.st.cards.get(cardKey{itemID: item.ItemID, revision: item.Revision}); !ok {
+		if _, ok := h.cache.cards.get(cardKey{itemID: item.ItemID, revision: item.Revision}); !ok {
 			t.Fatalf("%s card was not laid out", item.Kind)
 		}
 		if h.st.expanded[item.ItemID] {
