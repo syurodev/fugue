@@ -168,6 +168,9 @@ func (s *VendorService) Resume(ctx context.Context, principal string, cmd *Resum
 		if err != nil {
 			return VendorSessionView{}, err
 		}
+		if s.sessions.actor(cmd.SessionID) != nil {
+			return VendorSessionView{}, errcode.New(errcode.VendorSessionState, "vendor session operation failed")
+		}
 		spec, _, err := s.spawnSpec(opCtx, info.WorkspaceID, info.WorkspaceRoot, cmd.Profile)
 		if err != nil {
 			return VendorSessionView{}, err
@@ -180,19 +183,29 @@ func (s *VendorService) Resume(ctx context.Context, principal string, cmd *Resum
 	})
 }
 
-// spawn mints the session token (host-api §7), hands it to the process through
-// the spec and revokes it again when the spawn fails. A live token therefore
-// always belongs to a session whose actor will revoke it.
+// spawn mints a pending session token (host-api §7), hands it to the process
+// through the spec, and promotes it only after start succeeds. On any failure
+// only the token this call minted is discarded, leaving any existing live
+// session's token untouched.
 func (s *VendorService) spawn(spec *vendor.StartSpec, role string, start func() error) error {
-	token, err := s.tokens.mint(spec.SessionID, role)
+	token, binding, err := s.tokens.mintPending(spec.SessionID, role)
 	if err != nil {
 		return err
 	}
 	spec.SessionToken = token
 	if err := start(); err != nil {
-		s.tokens.revoke(spec.SessionID)
+		s.tokens.discard(binding)
 		return err
 	}
+	if actor := s.sessions.actor(spec.SessionID); actor != nil {
+		select {
+		case <-actor.done:
+			s.tokens.discard(binding)
+			return nil
+		default:
+		}
+	}
+	s.tokens.commit(binding)
 	return nil
 }
 

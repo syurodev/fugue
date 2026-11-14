@@ -146,22 +146,25 @@ func (s *SessionToolService) Call(ctx context.Context, binding SessionBinding, n
 	if err != nil {
 		return FugueToolResult{}, errcode.New(errcode.Internal, "the tool policy could not be evaluated")
 	}
-	stopped, run, err := s.admit(ctx, check, tool, &plan, &verdict)
+	stopped, run, err := s.admit(ctx, binding, check, tool, &plan, &verdict)
 	if err != nil || !run {
 		return stopped, err
+	}
+	if !s.tokens.live(binding) {
+		return FugueToolResult{}, errSessionEnded()
 	}
 	return runTool(ctx, tool, binding.SessionID, args), nil
 }
 
 // admit applies the verdict: run reports whether the tool may run; when it
 // may not, the result is what the vendor's model reads instead.
-func (s *SessionToolService) admit(ctx context.Context, check *interaction.Binding, tool *FugueTool, plan *FugueToolPlan, verdict *interaction.Verdict,
+func (s *SessionToolService) admit(ctx context.Context, binding SessionBinding, check *interaction.Binding, tool *FugueTool, plan *FugueToolPlan, verdict *interaction.Verdict,
 ) (result FugueToolResult, run bool, err error) {
 	switch verdict.Kind {
 	case interaction.VerdictRefuse:
 		return FugueToolResult{Text: "refused by the session policy: " + verdict.Reason, IsError: true}, false, nil
 	case interaction.VerdictAsk:
-		allowed, askErr := s.confirm(ctx, check, tool, plan, verdict.Offers)
+		allowed, askErr := s.confirm(ctx, binding, check, tool, plan, verdict.Offers)
 		if askErr != nil {
 			return FugueToolResult{}, false, askErr
 		}
@@ -219,10 +222,40 @@ func (s *SessionToolService) bind(ctx context.Context, binding SessionBinding, t
 // confirm asks the user and waits for the answer, however long no client is
 // connected (I-07). An approval is a one-use receipt bound to this exact
 // call; it is claimed here, at the execution boundary.
-func (s *SessionToolService) confirm(ctx context.Context, check *interaction.Binding, tool *FugueTool, plan *FugueToolPlan, offers []interaction.Outcome) (bool, error) {
+func (s *SessionToolService) confirm(ctx context.Context, binding SessionBinding, check *interaction.Binding, tool *FugueTool, plan *FugueToolPlan, offers []interaction.Outcome) (bool, error) {
+	spec, err := buildConfirmSpec(check, tool, plan, offers)
+	if err != nil {
+		return false, err
+	}
+	ticket, err := s.interactions.Ensure(spec)
+	if err != nil {
+		return false, err
+	}
+	if !ticket.Resolved {
+		if ticket, err = s.interactions.AwaitResolved(ctx, ticket.RequestID); err != nil {
+			// The caller is gone: the prompt must not outlive the call.
+			if _, cancelErr := s.interactions.owner.InvalidateOperation(spec.OperationID); cancelErr != nil {
+				return false, errcode.Wrap(errcode.Internal, "cancel the abandoned tool confirmation", cancelErr)
+			}
+			return false, err
+		}
+	}
+	if !s.tokens.live(binding) {
+		return false, errSessionEnded()
+	}
+	if ticket.Outcome != interaction.OutcomeAllowedOnce && ticket.Outcome != interaction.OutcomeAllowedSession {
+		return false, nil
+	}
+	if _, err := s.interactions.owner.ClaimReceipt(ticket.ReceiptID, check); err != nil {
+		return false, errcode.New(errcode.FailedPrecondition, "the approval could not be used for this call")
+	}
+	return true, nil
+}
+
+func buildConfirmSpec(check *interaction.Binding, tool *FugueTool, plan *FugueToolPlan, offers []interaction.Outcome) (*interaction.Spec, error) {
 	operation, err := interaction.NativeOperationKey(check.InvocationID, check.AttemptID, check.CheckGeneration)
 	if err != nil {
-		return false, errcode.Wrap(errcode.Internal, "key the tool confirmation", err)
+		return nil, errcode.Wrap(errcode.Internal, "key the tool confirmation", err)
 	}
 	if check.GrantScopeKey == "" {
 		offers = []interaction.Outcome{interaction.OutcomeAllowedOnce}
@@ -236,29 +269,10 @@ func (s *SessionToolService) confirm(ctx context.Context, check *interaction.Bin
 	if tool.Descriptor.Confirm == interaction.ConfirmCustom {
 		risk = plan.Call.EffectiveRisk
 	}
-	ticket, err := s.interactions.Ensure(&interaction.Spec{
+	return &interaction.Spec{
 		OperationID: operation, Kind: interaction.KindConfirm, Summary: plan.Summary, Risk: string(risk),
 		GrantScopeLabel: label, Offers: offers, Binding: *check,
-	})
-	if err != nil {
-		return false, err
-	}
-	if !ticket.Resolved {
-		if ticket, err = s.interactions.AwaitResolved(ctx, ticket.RequestID); err != nil {
-			// The caller is gone: the prompt must not outlive the call.
-			if _, cancelErr := s.interactions.owner.InvalidateOperation(operation); cancelErr != nil {
-				return false, errcode.Wrap(errcode.Internal, "cancel the abandoned tool confirmation", cancelErr)
-			}
-			return false, err
-		}
-	}
-	if ticket.Outcome != interaction.OutcomeAllowedOnce && ticket.Outcome != interaction.OutcomeAllowedSession {
-		return false, nil
-	}
-	if _, err := s.interactions.owner.ClaimReceipt(ticket.ReceiptID, check); err != nil {
-		return false, errcode.New(errcode.FailedPrecondition, "the approval could not be used for this call")
-	}
-	return true, nil
+	}, nil
 }
 
 func servesRole(tool *FugueTool, role string) bool {

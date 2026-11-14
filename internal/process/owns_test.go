@@ -56,16 +56,19 @@ func testTrackerOwnership(t *testing.T) {
 		{pid: 102, ppid: 101, pgid: 102, startToken: "gc-9"},
 		{pid: 200, ppid: 50, pgid: 200, startToken: "stranger"},
 		{pid: 300, ppid: 50, pgid: 300, startToken: "reused"},
+		{pid: 301, ppid: 300, pgid: 301, startToken: "child-of-reused"},
 	}}
 	tracker := newDescendantTracker(100, "leader", table, clock.NewFake(testEpoch()))
-	// 300 was a descendant once; the pid now belongs to another process.
+	// 300 was a descendant once; the pid now belongs to another process, so
+	// neither 300 nor its child 301 may be treated as vendor-owned.
 	tracker.tracked[300] = "exited-descendant"
 	proc := &Process{tracker: tracker}
-	for pid, want := range map[int]bool{100: true, 101: true, 102: true, 200: false, 300: false} {
+	for pid, want := range map[int]bool{100: true, 101: true, 102: true, 200: false, 300: false, 301: false} {
 		if got, err := proc.OwnsPID(pid); err != nil || got != want {
 			t.Errorf("OwnsPID(%d) = %v, %v; want %v", pid, got, err, want)
 		}
 	}
+	assertReusedLeaderOwnsNothing(t)
 	if owned, err := proc.OwnsPID(999); err == nil || owned {
 		t.Errorf("OwnsPID of a pid outside the table = %v, %v; want an error", owned, err)
 	}
@@ -75,6 +78,20 @@ func testTrackerOwnership(t *testing.T) {
 	}
 	if owned, err := (&Process{}).OwnsPID(101); err == nil || owned {
 		t.Errorf("OwnsPID without a containment record = %v, %v; want an error", owned, err)
+	}
+}
+
+func assertReusedLeaderOwnsNothing(t *testing.T) {
+	t.Helper()
+	tracker := newDescendantTracker(100, "leader", fakeProcTable{entries: []procEntry{
+		{pid: 100, ppid: 50, pgid: 100, startToken: "other"},
+		{pid: 103, ppid: 100, pgid: 100, startToken: "other-child"},
+	}}, clock.NewFake(testEpoch()))
+	proc := &Process{tracker: tracker}
+	for _, pid := range []int{100, 103} {
+		if got, err := proc.OwnsPID(pid); err != nil || got {
+			t.Errorf("OwnsPID(%d) with reused leader = %v, %v; want false", pid, got, err)
+		}
 	}
 }
 

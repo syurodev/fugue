@@ -115,22 +115,14 @@ func (d *descendantTracker) snapshot() {
 }
 
 func mergeDescendants(tracked map[int]string, leaderPID int, entries []procEntry) {
-	byPID := make(map[int]procEntry, len(entries))
-	for _, e := range entries {
-		if e.pid > 1 && e.startToken != "" {
-			byPID[e.pid] = e
-		}
-	}
-	if leader, ok := byPID[leaderPID]; ok {
-		if _, seen := tracked[leaderPID]; !seen {
-			tracked[leaderPID] = leader.startToken
-		}
-	}
+	byPID := indexProcEntries(entries)
+	pruneStaleTracked(tracked, leaderPID, byPID)
+	leaderReused := syncLeaderTracked(tracked, leaderPID, byPID)
 	// Fixed-point propagation through ppid chains and pgid membership.
 	for {
 		added := false
 		for _, e := range byPID {
-			if !shouldTrackEntry(tracked, leaderPID, e) {
+			if !shouldTrackEntry(tracked, leaderPID, leaderReused, e) {
 				continue
 			}
 			tracked[e.pid] = e.startToken
@@ -142,8 +134,47 @@ func mergeDescendants(tracked map[int]string, leaderPID int, entries []procEntry
 	}
 }
 
-func shouldTrackEntry(tracked map[int]string, leaderPID int, e procEntry) bool {
+func indexProcEntries(entries []procEntry) map[int]procEntry {
+	byPID := make(map[int]procEntry, len(entries))
+	for _, e := range entries {
+		if e.pid > 1 && e.startToken != "" {
+			byPID[e.pid] = e
+		}
+	}
+	return byPID
+}
+
+// pruneStaleTracked drops non-leader records whose PID exited or was reused
+// before propagating ancestry so a reused PID cannot taint its new children.
+func pruneStaleTracked(tracked map[int]string, leaderPID int, byPID map[int]procEntry) {
+	for pid, token := range tracked {
+		if pid == leaderPID {
+			continue
+		}
+		if e, ok := byPID[pid]; !ok || e.startToken != token {
+			delete(tracked, pid)
+		}
+	}
+}
+
+func syncLeaderTracked(tracked map[int]string, leaderPID int, byPID map[int]procEntry) bool {
+	leader, ok := byPID[leaderPID]
+	if !ok {
+		return false
+	}
+	want, seen := tracked[leaderPID]
+	if !seen {
+		tracked[leaderPID] = leader.startToken
+		return false
+	}
+	return want != leader.startToken
+}
+
+func shouldTrackEntry(tracked map[int]string, leaderPID int, leaderReused bool, e procEntry) bool {
 	if _, already := tracked[e.pid]; already {
+		return false
+	}
+	if leaderReused && (e.pgid == leaderPID || e.ppid == leaderPID) {
 		return false
 	}
 	if e.pgid == leaderPID && leaderPID > 1 {

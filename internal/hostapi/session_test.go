@@ -1,6 +1,7 @@
 package hostapi
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -11,12 +12,14 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -27,6 +30,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/redact"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
 	"github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
 	sessiontoolsv1 "github.com/syurodev/fugue/pkg/pb/fugue/sessiontools/v1"
@@ -502,5 +506,172 @@ func assertVendorChildHelloDenied(t *testing.T) {
 	host, _ := newTestClient(t, v.sockPath)
 	if _, err := host.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_APP, "v1")); err != nil {
 		t.Fatalf("a local client's hello = %v", err)
+	}
+}
+
+func newPreInitSessionReq(cmdID, wsID string) *connect.Request[vendorsv1.StartSessionRequest] {
+	return connect.NewRequest(&vendorsv1.StartSessionRequest{
+		CommandId: cmdID, Vendor: vendorsv1.Vendor_VENDOR_CLAUDE, WorkspaceId: wsID,
+		Profile: &vendorsv1.SessionProfile{Model: "fake-model", Effort: "high"},
+	})
+}
+
+// TestVendorPeerDeniedBeforeHandshakeCompletes verifies that the spawned vendor
+// process is registered with localPeerAllowed before the handshake completes
+// and removed if spawn fails before reaching a live actor (Q-41 window).
+func TestVendorPeerDeniedBeforeHandshakeCompletes(t *testing.T) {
+	t.Parallel()
+	v := startTokenHost(t, "")
+	root := t.TempDir()
+	wsID := v.workspaceWithRoot(t, root)
+
+	ln, err := (&net.ListenConfig{}).Listen(t.Context(), "unix", filepath.Join(shortDir(t), "preinit.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { closeQuietly(ln) })
+	if writeErr := os.WriteFile(filepath.Join(root, fakePreInitHelloFile), []byte(ln.Addr().String()), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+
+	startErr := make(chan error, 1)
+	supervise.Go(t.Context(), "test.pre-init-start", func(ctx context.Context) error {
+		_, callErr := v.vendors.StartSession(ctx, newPreInitSessionReq("preinit-start", wsID))
+		startErr <- callErr
+		return nil
+	})
+
+	conn, err := ln.Accept()
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, readErr := bufio.NewReader(conn).ReadString('\n')
+	closeQuietly(conn)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	got := strings.TrimSpace(line)
+	if !strings.HasPrefix(got, connect.CodePermissionDenied.String()+":") {
+		t.Fatalf("vendor peer hello before handshake = %q, want permission_denied", got)
+	}
+	if startResErr := <-startErr; startResErr != nil {
+		t.Fatalf("StartSession after releasing handshake = %v", startResErr)
+	}
+
+	// Failed spawn before handshake must drop the pending owner registration.
+	failRoot := t.TempDir()
+	failWS := v.workspaceWithRoot(t, failRoot)
+	if writeErr := os.WriteFile(filepath.Join(failRoot, fakeFailPreInitFile), []byte("fail"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
+	}
+	if _, failStartErr := v.vendors.StartSession(t.Context(), newPreInitSessionReq("preinit-fail", failWS)); failStartErr == nil {
+		t.Fatal("StartSession with pre-init failure succeeded unexpectedly")
+	}
+	host, _ := newTestClient(t, v.sockPath)
+	if _, helloErr := host.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_APP, "v1")); helloErr != nil {
+		t.Fatalf("local client hello after failed vendor spawn = %v", helloErr)
+	}
+}
+
+func newDrainConfirmHost(t *testing.T, ran *atomic.Bool) (*vendorHost, string) {
+	t.Helper()
+	confirmTool := app.NewReadOnlyTool(
+		"fugue_test_confirm_drain", "Deploy.",
+		json.RawMessage(`{"type":"object","properties":{"env":{"type":"string"}},"additionalProperties":false}`),
+		func(context.Context, string, json.RawMessage) (string, error) {
+			ran.Store(true)
+			return "deployed-drain", nil
+		},
+	)
+	confirmTool.Descriptor.Risk = "destructive"
+	confirmTool.Descriptor.Confirm = "always"
+	confirmTool.Plan = func(json.RawMessage) (app.FugueToolPlan, error) {
+		return app.FugueToolPlan{Summary: "deploy"}, nil
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := startVendorHostWith(t, true, func(deps *app.HostDeps, sockPath string) {
+		deps.Config.DrainTimeout = 0
+		deps.Random = ids.NewDeterministic(sessionTokenSeed)
+		deps.Bridge = app.VendorBridge{Binary: exe, Socket: sockPath}
+		deps.TestFugueTools = []*app.FugueTool{confirmTool}
+	})
+	_ = v.readySession(t, "drain-start", "", t.TempDir())
+	return v, confirmTool.Name
+}
+
+type callOutcome struct {
+	res *sessiontoolsv1.CallToolResponse
+	err error
+}
+
+func startPendingToolCall(t *testing.T, v *vendorHost, toolName string) <-chan callOutcome {
+	t.Helper()
+	stream, err := v.host.Subscribe(streamCtx(t), connect.NewRequest(&hostv1.SubscribeRequest{Topic: app.TopicInteraction}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer closeQuietly(stream)
+
+	client, _, err := attachSession(t, v.sockPath, sessionTokens(t, 1)[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	callCh := make(chan callOutcome, 1)
+	supervise.Go(t.Context(), "test.drain-confirm-call", func(ctx context.Context) error {
+		resp, callErr := client.CallTool(ctx, connect.NewRequest(&sessiontoolsv1.CallToolRequest{
+			Name: toolName, Arguments: []byte(`{"env":"prod"}`),
+		}))
+		var msg *sessiontoolsv1.CallToolResponse
+		if resp != nil {
+			msg = resp.Msg
+		}
+		callCh <- callOutcome{res: msg, err: callErr}
+		return nil
+	})
+	for {
+		event := recv(t, stream).GetEvent()
+		if event != nil && event.Type == app.EventInteractionRequested {
+			return callCh
+		}
+	}
+}
+
+// TestGracefulDrainCancelsPendingToolApproval verifies that a graceful drain
+// with DrainTimeout 0 cancels pending session-tool confirmation waits before
+// waiting for in-flight RPC handlers, so serve drain cannot hang and the tool
+// never runs.
+func TestGracefulDrainCancelsPendingToolApproval(t *testing.T) {
+	t.Parallel()
+	var ran atomic.Bool
+	v, toolName := newDrainConfirmHost(t, &ran)
+	callCh := startPendingToolCall(t, v, toolName)
+
+	v.hp.Stop("test-graceful-drain")
+	select {
+	case <-v.hp.DrainDone():
+	case <-t.Context().Done():
+		t.Fatal("graceful drain with DrainTimeout 0 hung on pending confirmation")
+	}
+
+	got := <-callCh
+	if got.err != nil {
+		t.Fatalf("cancelled confirmation CallTool RPC err = %v, want typed tool denial", got.err)
+	}
+	if !got.res.IsError {
+		t.Fatalf("CallTool during drain = %+v, want IsError=true", got.res)
+	}
+	if ran.Load() {
+		t.Fatal("tool ran despite graceful drain cancelling confirmation")
+	}
+	pending, _, err := v.hp.Runtime().Interactions().ListPending(t.Context(), string(app.KindApp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 0 {
+		t.Fatalf("pending interactions after drain = %d, want 0", len(pending))
 	}
 }

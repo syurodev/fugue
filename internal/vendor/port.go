@@ -86,6 +86,15 @@ type StartSpec struct {
 	SessionToken redact.Secret
 	// Bridge names the MCP bridge the vendor CLI spawns for Fugue's tools.
 	Bridge Bridge
+	// OnSpawned, when set, runs as soon as the session process has spawned (PID
+	// and start token known) and before the adapter waits for the handshake.
+	OnSpawned func(PeerOwner)
+}
+
+// PeerOwner reports whether an OS process belongs to a spawned vendor
+// session's containment (roadmap Q-41 A).
+type PeerOwner interface {
+	OwnsPID(pid int) (bool, error)
 }
 
 // SessionTokenEnv is the one variable that carries the session token into a

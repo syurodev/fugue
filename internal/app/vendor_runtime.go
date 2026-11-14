@@ -38,9 +38,20 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 		return errors.Join(err, transcripts.Close(), vs.Close())
 	}
 	hp.vault = v
+	hp.vaultRef.Store(v)
+	var unregisterVaultGuard func()
+	if hp.rt.interactions != nil {
+		owner := hp.rt.interactions.owner
+		unregisterVaultGuard = v.RegisterLockGuard(func(snap vault.Snapshot) {
+			owner.SetVaultLocked(snap.State != vault.StateUnlocked)
+		})
+	}
 	hp.rt.transcripts = transcripts
 	hp.vendorStore = vs
 	hp.closeVendor = func() error {
+		if unregisterVaultGuard != nil {
+			unregisterVaultGuard()
+		}
 		// Stops run on the host's lifetime context without its cancellation,
 		// so a host close never skips the F9.2 stop order.
 		err := errors.Join(sessions.CloseAll(context.WithoutCancel(base)), transcripts.Close(), vs.Close())

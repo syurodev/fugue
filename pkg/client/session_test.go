@@ -118,8 +118,14 @@ func TestHostMessageIsThePublicTextOfARefusal(t *testing.T) {
 	if connect.CodeOf(err) != connect.CodeNotFound || client.HostMessage(err) != "the tool is not available to this session" {
 		t.Fatalf("a refusal = %v (message %q)", err, client.HostMessage(err))
 	}
-	if got := client.HostMessage(errLocalOnly); strings.Contains(got, "secret") {
-		t.Fatalf("a local error reached the vendor: %q", got)
+	for _, localErr := range []error{
+		errLocalOnly,
+		connect.NewError(connect.CodeUnavailable, errLocalOnly),
+		fmt.Errorf("call the session tool: %w", connect.NewError(connect.CodeUnavailable, errLocalOnly)),
+	} {
+		if got := client.HostMessage(localErr); strings.Contains(got, "secret") || got != "the fugue host could not be reached" {
+			t.Fatalf("a local error %v reached the vendor: %q", localErr, got)
+		}
 	}
 }
 

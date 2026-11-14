@@ -128,11 +128,11 @@ func (s *SessionClient) CallTool(ctx context.Context, name string, arguments []b
 func (s *SessionClient) Close() { s.hc.CloseIdleConnections() }
 
 // HostMessage returns the public text of a host refusal, which the host has
-// already reduced to a vetted message; an error that is not the host's yields
-// a fixed text so no local detail reaches a vendor.
+// already reduced to a vetted message; an error that did not arrive from the
+// host yields a fixed text so no local transport detail reaches a vendor.
 func HostMessage(err error) string {
 	var cerr *connect.Error
-	if errors.As(err, &cerr) && cerr.Message() != "" {
+	if connect.IsWireError(err) && errors.As(err, &cerr) && cerr.Message() != "" {
 		return cerr.Message()
 	}
 	return "the fugue host could not be reached"

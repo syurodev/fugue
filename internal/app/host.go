@@ -182,9 +182,12 @@ func (rt *HostRuntime) Subscribe(ctx context.Context, p SubscribeParams) (*Subsc
 	return rt.hub.Subscribe(ctx, p)
 }
 
-// EndStreams ends every open event stream; the transport calls it at the start
-// of a graceful drain.
+// EndStreams ends every open event stream and cancels pending approval waits;
+// the transport calls it at the start of a graceful drain.
 func (rt *HostRuntime) EndStreams() {
+	if rt.interactions != nil {
+		rt.interactions.CancelPending()
+	}
 	if rt.hub != nil {
 		rt.hub.EndStreams()
 	}

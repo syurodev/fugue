@@ -263,6 +263,9 @@ func (a *Adapter) Start(ctx context.Context, spec *vendor.StartSpec) (vendor.Ses
 	}
 	sess.proc = proc
 	sess.normalizer = NewNormalizer(spec.SessionID)
+	if spec.OnSpawned != nil {
+		spec.OnSpawned(sess)
+	}
 
 	initCh := make(chan *Init, 1)
 	readerErrCh := make(chan error, 1)

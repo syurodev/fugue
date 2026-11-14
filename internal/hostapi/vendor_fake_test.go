@@ -2,6 +2,9 @@ package hostapi
 
 import (
 	"bufio"
+	"errors"
+	"io"
+	"net"
 	"os"
 	"strings"
 )
@@ -12,6 +15,11 @@ const fakeVendorVersion = "2.1.319"
 // fakeHoldTurn makes the fake leave a turn running until the next steer or
 // interrupt arrives.
 const fakeHoldTurn = "hold-turn"
+
+const (
+	fakeFailPreInitFile  = "fake-fail-pre-init"
+	fakePreInitHelloFile = "fake-pre-init-hello"
+)
 
 // playFakeVendor runs the test binary as a minimal Claude CLI speaking
 // stream-json, so the vendor RPC tests exercise the real adapter, process
@@ -25,6 +33,7 @@ func playFakeVendor(args []string) bool {
 		fakeOut(fakeVendorVersion + " (Claude Code)\n")
 		return true
 	case "-p":
+		fakePreInitHook()
 		fakeOut(`{"type":"system","subtype":"init","session_id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","tools":["Read"],"claude_code_version":"` +
 			fakeVendorVersion + `","model":"fake-model","permissionMode":"default","slash_commands":["clear","terminal","compact"],"terminal_slash_commands":["terminal"]}` + "\n")
 		scanner := bufio.NewScanner(os.Stdin)
@@ -35,6 +44,31 @@ func playFakeVendor(args []string) bool {
 	default:
 		return false
 	}
+}
+
+func fakePreInitHook() {
+	if _, err := os.Stat(fakeFailPreInitFile); err == nil {
+		os.Exit(1)
+	}
+	sockRaw, err := os.ReadFile(fakePreInitHelloFile)
+	if err != nil {
+		return
+	}
+	sockPath := strings.TrimSpace(string(sockRaw))
+	conn, err := (&net.Dialer{}).Dial("unix", sockPath)
+	if err != nil {
+		os.Exit(1)
+	}
+	if _, err := conn.Write([]byte(fakeLocalHello() + "\n")); err != nil {
+		closeQuietly(conn)
+		os.Exit(1)
+	}
+	var buf [1]byte
+	if _, err := conn.Read(buf[:]); err != nil && !errors.Is(err, io.EOF) {
+		closeQuietly(conn)
+		os.Exit(1)
+	}
+	closeQuietly(conn)
 }
 
 func fakeVendorLine(line string) {

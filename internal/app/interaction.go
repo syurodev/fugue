@@ -451,6 +451,12 @@ func (s *InteractionService) PruneResolved() {
 	s.owner.PruneResolved()
 }
 
+// CancelPending cancels every pending interaction wait so a graceful drain
+// never hangs on an unanswered approval.
+func (s *InteractionService) CancelPending() {
+	s.owner.CancelPending()
+}
+
 // TakeRelayed delivers a resolved relayed request once.
 func (s *InteractionService) TakeRelayed(operationID string) (*interaction.Ticket, error) {
 	ticket, err := s.owner.TakeRelayed(operationID)

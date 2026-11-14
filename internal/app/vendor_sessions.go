@@ -58,8 +58,13 @@ type VendorSessions struct {
 	spawn             func(string, func(context.Context) error) *supervise.Task
 	mu                sync.RWMutex
 	actors            map[string]*vendorSessionActor
+	pendingOwners     map[*pendingOwner]struct{}
 	closed            bool
 	startReservations int
+}
+
+type pendingOwner struct {
+	owner vendor.PeerOwner
 }
 
 // NewVendorSessions creates the in-process manager and binds actor lifetime to ctx.
@@ -76,7 +81,8 @@ func NewVendorSessions(ctx context.Context, deps *VendorSessionDeps) (*VendorSes
 		spawn: func(name string, fn func(context.Context) error) *supervise.Task {
 			return supervise.Go(ctx, name, fn)
 		},
-		actors: make(map[string]*vendorSessionActor),
+		actors:        make(map[string]*vendorSessionActor),
+		pendingOwners: make(map[*pendingOwner]struct{}),
 	}, nil
 }
 
@@ -94,15 +100,16 @@ func (m *VendorSessions) Start(ctx context.Context, session *vendorstore.Session
 		return capacityErr
 	}
 	defer release()
-	started, observations, err := m.startAdapter(ctx, spec)
+	started, observations, pending, err := m.startAdapter(ctx, spec)
 	if err != nil {
 		return err
 	}
+	defer m.removePendingOwner(pending)
 	setProcessIdentity(session, started)
 	session.State = vendorstore.StateStarting
 	session.ResumeHandle = spec.ResumeSessionID
 	actor := newVendorSessionActor(m, session, started, observations)
-	if err := m.installActor(session.ID, actor); err != nil {
+	if err := m.installActor(session.ID, actor, pending); err != nil {
 		m.closeUntracked(ctx, started)
 		return err
 	}
@@ -174,13 +181,14 @@ func (m *VendorSessions) Resume(ctx context.Context, sessionID string, spec *ven
 	}
 	resumeSpec := *spec
 	resumeSpec.ResumeSessionID = info.ResumeHandle
-	started, observations, err := m.startAdapter(ctx, &resumeSpec)
+	started, observations, pending, err := m.startAdapter(ctx, &resumeSpec)
 	if err != nil {
 		return err
 	}
+	defer m.removePendingOwner(pending)
 	setProcessIdentity(&info, started)
 	actor := newVendorSessionActor(m, &info, started, observations)
-	if err := m.installActor(sessionID, actor); err != nil {
+	if err := m.installActor(sessionID, actor, pending); err != nil {
 		m.closeUntracked(ctx, started)
 		return err
 	}
@@ -224,17 +232,48 @@ func (m *VendorSessions) reserveSlot(ctx context.Context, sessionID string) (fun
 	return release, nil
 }
 
-func (m *VendorSessions) startAdapter(ctx context.Context, spec *vendor.StartSpec) (vendor.Session, <-chan claude.Observation, error) {
-	session, err := m.deps.Adapter.Start(ctx, spec)
+func (m *VendorSessions) startAdapter(ctx context.Context, spec *vendor.StartSpec) (vendor.Session, <-chan claude.Observation, *pendingOwner, error) {
+	var pending *pendingOwner
+	specCopy := *spec
+	origOnSpawned := spec.OnSpawned
+	specCopy.OnSpawned = func(owner vendor.PeerOwner) {
+		pending = m.addPendingOwner(owner)
+		if origOnSpawned != nil {
+			origOnSpawned(owner)
+		}
+	}
+	session, err := m.deps.Adapter.Start(ctx, &specCopy)
 	if err != nil {
-		return nil, nil, safeActorError(err)
+		m.removePendingOwner(pending)
+		return nil, nil, nil, safeActorError(err)
 	}
 	observations, ok := observationsOf(session)
 	if !ok {
 		m.closeUntracked(ctx, session)
-		return nil, nil, errcode.New(errcode.FailedPrecondition, "adapter session does not expose observations")
+		m.removePendingOwner(pending)
+		return nil, nil, nil, errcode.New(errcode.FailedPrecondition, "adapter session does not expose observations")
 	}
-	return session, observations, nil
+	return session, observations, pending, nil
+}
+
+func (m *VendorSessions) addPendingOwner(owner vendor.PeerOwner) *pendingOwner {
+	if owner == nil {
+		return nil
+	}
+	p := &pendingOwner{owner: owner}
+	m.mu.Lock()
+	m.pendingOwners[p] = struct{}{}
+	m.mu.Unlock()
+	return p
+}
+
+func (m *VendorSessions) removePendingOwner(p *pendingOwner) {
+	if p == nil {
+		return
+	}
+	m.mu.Lock()
+	delete(m.pendingOwners, p)
+	m.mu.Unlock()
 }
 
 func (m *VendorSessions) closeUntracked(ctx context.Context, session vendor.Session) {
@@ -244,11 +283,14 @@ func (m *VendorSessions) closeUntracked(ctx context.Context, session vendor.Sess
 	}
 }
 
-func (m *VendorSessions) installActor(sessionID string, actor *vendorSessionActor) error {
+func (m *VendorSessions) installActor(sessionID string, actor *vendorSessionActor, pending *pendingOwner) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed || m.actors[sessionID] != nil {
 		return errcode.New(errcode.FailedPrecondition, "vendor session is already active or manager is closed")
+	}
+	if pending != nil {
+		delete(m.pendingOwners, pending)
 	}
 	m.actors[sessionID] = actor
 	actor.task = m.spawn("app.vendor-session", actor.run)
@@ -343,33 +385,46 @@ func (m *VendorSessions) CloseAll(ctx context.Context) error {
 	return errors.Join(failures...)
 }
 
-// OwnsPeer reports whether pid belongs to the process tree of any live
-// session (roadmap Q-41 A). A session that cannot answer is an error: the
-// caller must treat the peer as owned.
+// OwnsPeer reports whether pid belongs to the process tree of any live or
+// starting session (roadmap Q-41 A). A session that cannot answer is an error:
+// the caller must treat the peer as owned.
 func (m *VendorSessions) OwnsPeer(pid int) (bool, error) {
 	m.mu.RLock()
 	actors := make([]*vendorSessionActor, 0, len(m.actors))
 	for _, actor := range m.actors {
 		actors = append(actors, actor)
 	}
+	pending := make([]vendor.PeerOwner, 0, len(m.pendingOwners))
+	for p := range m.pendingOwners {
+		pending = append(pending, p.owner)
+	}
 	m.mu.RUnlock()
+	for _, owner := range pending {
+		if owned, err := checkPeerOwner(owner, pid); err != nil || owned {
+			return owned, err
+		}
+	}
 	for _, actor := range actors {
 		select {
 		case <-actor.done:
 			continue
 		default:
 		}
-		tree, ok := actor.session.(interface{ OwnsPID(pid int) (bool, error) })
+		tree, ok := actor.session.(vendor.PeerOwner)
 		if !ok {
 			return false, errcode.New(errcode.Internal, "a vendor session cannot report its process tree")
 		}
-		owned, err := tree.OwnsPID(pid)
-		if err != nil {
-			return false, errcode.Wrap(errcode.Internal, "read a vendor session's process tree", err)
-		}
-		if owned {
-			return true, nil
+		if owned, err := checkPeerOwner(tree, pid); err != nil || owned {
+			return owned, err
 		}
 	}
 	return false, nil
+}
+
+func checkPeerOwner(owner vendor.PeerOwner, pid int) (bool, error) {
+	owned, err := owner.OwnsPID(pid)
+	if err != nil {
+		return false, errcode.Wrap(errcode.Internal, "read a vendor session's process tree", err)
+	}
+	return owned, nil
 }
