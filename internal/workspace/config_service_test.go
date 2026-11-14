@@ -202,6 +202,54 @@ func assertPendingRoleDiff(t *testing.T, eff *EffectiveConfig, pending *Workspac
 	t.Fatalf("expected PolicyDiff to include roles, got %+v", pending.PolicyDiff)
 }
 
+// TestOutOfBandRoleChecksGroupingWaitsForConfirmation covers the delimiter
+// collision: one check containing the join separator must not render equal to
+// the split list, or the out-of-band edit would skip confirmation.
+func TestOutOfBandRoleChecksGroupingWaitsForConfirmation(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	f := newTestFixture(t)
+	ws, repo := createTestWorkspaceWithRepo(t, f, "oob-role-checks")
+
+	base := "name = \"oob-role-checks\"\n[[roots]]\nname = \"main\"\npath = \"" +
+		filepath.ToSlash(repo) + "\"\naccess = \"rw\"\n\n[[roles]]\nname = \"tester\"\nvendor = \"codex\"\npermission = \"write\"\n"
+	testWriteFile(t, f.paths.ConfigPath(ws.ID), []byte(base+"checks = [\"task lint, task test\"]\n"))
+	_, loaded, err := f.svc.GetEffectiveConfig(ctx, ws.ID, nil)
+	if err != nil {
+		t.Fatalf("GetEffectiveConfig initial checks: %v", err)
+	}
+	confirmed, err := f.svc.ConfirmWorkspaceConfig(ctx, ws.ID, loaded.ConfigHash)
+	if err != nil {
+		t.Fatalf("ConfirmWorkspaceConfig initial checks: %v", err)
+	}
+
+	testWriteFile(t, f.paths.ConfigPath(ws.ID), []byte(base+"checks = [\"task lint\", \"task test\"]\n"))
+	_, pending, err := f.svc.GetEffectiveConfig(ctx, ws.ID, nil)
+	if err != nil {
+		t.Fatalf("GetEffectiveConfig regrouped checks: %v", err)
+	}
+	if !pending.PendingPolicyConfirmation || pending.PolicyRevision != confirmed.PolicyRevision {
+		t.Fatalf("expected pending policy confirmation for regrouped checks, got %+v", pending)
+	}
+	hasRolesDiff := false
+	for _, d := range pending.PolicyDiff {
+		if d.Key == "roles" {
+			hasRolesDiff = true
+		}
+	}
+	if !hasRolesDiff {
+		t.Fatalf("expected PolicyDiff to include roles, got %+v", pending.PolicyDiff)
+	}
+
+	afterConfirm, err := f.svc.ConfirmWorkspaceConfig(ctx, ws.ID, pending.ConfigHash)
+	if err != nil {
+		t.Fatalf("ConfirmWorkspaceConfig regrouped checks: %v", err)
+	}
+	if afterConfirm.PolicyRevision != confirmed.PolicyRevision+1 {
+		t.Fatalf("PolicyRevision = %d, want %d", afterConfirm.PolicyRevision, confirmed.PolicyRevision+1)
+	}
+}
+
 func TestOutOfBandPolicyChangeIsNotAppliedUntilConfirmed(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()

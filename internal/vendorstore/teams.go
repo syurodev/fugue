@@ -81,7 +81,7 @@ func (s *Store) commitNewTeam(
 	if err := s.commitTeamTx(snap, true, tx.Commit); err != nil {
 		return TeamRecord{}, nil, err
 	}
-	s.cache.Install(teamCacheKey(in.TeamID), rawKey, wrapped)
+	clear(rawKey)
 	return rec, tasks, nil
 }
 
@@ -419,6 +419,7 @@ func (s *Store) sealEventPayloadIfPresent(teamID, keyID string, wrappedKey []byt
 	if err != nil {
 		return nil, err
 	}
+	defer clear(rawKey)
 	env, err := sealing.SealPayload(randomReader{s.random}, teamEventRecordType, teamID, ev.EventID, string(ev.EventType), keyID, rawKey, ev.ProtectedPayload)
 	if err != nil {
 		return nil, fmt.Errorf("seal event payload: %w", err)
@@ -426,16 +427,15 @@ func (s *Store) sealEventPayloadIfPresent(teamID, keyID string, wrappedKey []byt
 	return env, nil
 }
 
+// unwrapTeamKey unwraps the per-team key for one use. The raw key is never
+// cached: a vault lock clears the cache through its guard, but an install that
+// races that guard would retain key material while the vault is locked. The
+// vendor payload path unwraps per use for the same reason.
 func (s *Store) unwrapTeamKey(teamID, keyID string, wrappedKey []byte) ([]byte, error) {
-	cacheKey := teamCacheKey(teamID)
-	if raw, ok := s.cache.Get(cacheKey); ok {
-		return raw, nil
-	}
 	raw, err := sealing.UnwrapSessionKey(s.vault, teamKeyRecordType, teamID, keyID, wrappedKey)
 	if err != nil {
 		return nil, fmt.Errorf("%w: unwrap team key: %w", ErrUnavailable, err)
 	}
-	s.cache.Install(cacheKey, raw, nil)
 	return raw, nil
 }
 
@@ -475,8 +475,4 @@ func (s *Store) commitTeamTx(snap vault.Snapshot, needVault bool, commitFn func(
 		return fmt.Errorf("commit team tx: %w", err)
 	}
 	return nil
-}
-
-func teamCacheKey(teamID string) string {
-	return "team:" + teamID
 }

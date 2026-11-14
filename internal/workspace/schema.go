@@ -6,6 +6,7 @@ import (
 	"path"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/syurodev/fugue/internal/shellrules"
@@ -308,10 +309,18 @@ func formatRolesForDiff(roles []RoleConfig) string {
 	parts := make([]string, len(roles))
 	for i := range roles {
 		r := &roles[i]
+		// Checks are free-form strings, so each one is quoted: a joined
+		// rendering must never make two distinct catalogs compare equal (a
+		// single check "task lint, task test" is not ["task lint", "task
+		// test"]), or an out-of-band check edit would skip confirmation.
+		checks := make([]string, len(r.Checks))
+		for j, check := range r.Checks {
+			checks[j] = strconv.Quote(check)
+		}
 		parts[i] = fmt.Sprintf(
 			"{name:%s vendor:%s model:%s effort:%s permission:%s lead:%t checks:[%s] desc:%q}",
 			r.Name, r.Vendor, r.Model, r.Effort, r.Permission, r.IsLeadEligible,
-			strings.Join(r.Checks, ", "), r.Description,
+			strings.Join(checks, ", "), r.Description,
 		)
 	}
 	return "[" + strings.Join(parts, "; ") + "]"

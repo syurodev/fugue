@@ -11,21 +11,35 @@ import (
 	"github.com/syurodev/fugue/internal/vault"
 )
 
+// teamQueryer abstracts the database and transaction handles, so a snapshot
+// can read the team record and its tasks in one consistent view.
+type teamQueryer interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
 // TeamSnapshot reads the metadata-only team record and all projected tasks for teamID.
-// It succeeds even when the vault is locked (INV-09).
+// Both queries run in one read transaction, so they always describe the same
+// committed version even when an append commits concurrently. It succeeds even
+// when the vault is locked (INV-09).
 func (s *Store) TeamSnapshot(ctx context.Context, teamID string) (TeamRecord, []TaskRecord, error) {
-	rec, err := queryTeamRecord(ctx, s.db, teamID)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return TeamRecord{}, nil, fmt.Errorf("%w: begin team snapshot: %w", ErrUnavailable, err)
+	}
+	defer rollback(ctx, tx)
+	rec, err := queryTeamRecord(ctx, tx, teamID)
 	if err != nil {
 		return TeamRecord{}, nil, err
 	}
-	tasks, err := queryTeamTasks(ctx, s.db, teamID)
+	tasks, err := queryTeamTasks(ctx, tx, teamID)
 	if err != nil {
 		return TeamRecord{}, nil, err
 	}
 	return rec, tasks, nil
 }
 
-func queryTeamRecord(ctx context.Context, db *sql.DB, teamID string) (TeamRecord, error) {
+func queryTeamRecord(ctx context.Context, db teamQueryer, teamID string) (TeamRecord, error) {
 	var rec TeamRecord
 	var stateStr string
 	var endedAt sql.NullInt64
@@ -51,7 +65,7 @@ func queryTeamRecord(ctx context.Context, db *sql.DB, teamID string) (TeamRecord
 	return rec, nil
 }
 
-func queryTeamTasks(ctx context.Context, db *sql.DB, teamID string) ([]TaskRecord, error) {
+func queryTeamTasks(ctx context.Context, db teamQueryer, teamID string) ([]TaskRecord, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT task_id, team_id, parent_task_id, hierarchy_role, catalog_role,
 		       deliverable, depends_on_json, depth, state, failure_code,
@@ -196,12 +210,16 @@ func (s *Store) openTeamCiphertext(
 	recordType, payloadID, kind string,
 	envelope []byte,
 ) ([]byte, error) {
+	// Unwrap outside WithUnlocked: the unwrap calls back into the vault, whose
+	// OpenRecord takes the same read lock WithUnlocked holds. Nested read locks
+	// block once a writer waits, so a concurrent Lock would deadlock both.
+	rawKey, err := s.unwrapTeamKey(teamID, keyID, wrapped)
+	if err != nil {
+		return nil, fmt.Errorf("open team payload: %w", err)
+	}
+	defer clear(rawKey)
 	var plaintext []byte
-	err := s.vault.WithUnlocked(snap, func() error {
-		rawKey, unwrapErr := s.unwrapTeamKey(teamID, keyID, wrapped)
-		if unwrapErr != nil {
-			return unwrapErr
-		}
+	err = s.vault.WithUnlocked(snap, func() error {
 		opened, openErr := sealing.OpenPayload(recordType, teamID, payloadID, kind, keyID, rawKey, envelope)
 		if openErr != nil {
 			return fmt.Errorf("open sealed payload: %w", openErr)
