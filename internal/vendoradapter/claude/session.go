@@ -16,11 +16,9 @@ import (
 )
 
 const (
-	roleUser         = "user"
-	contentTypeText  = "text"
-	controlInterrupt = "interrupt"
-
-	defaultHandshakeTimeout = 30 * time.Second
+	roleUser                = "user"
+	contentTypeText         = "text"
+	controlInterrupt        = "interrupt"
 	defaultInterruptTimeout = 10 * time.Second
 	observationBufferSize   = 256
 )

@@ -109,6 +109,46 @@ func (s *Store) StoredItemMeta(ctx context.Context, session, id string) (StoredI
 	return item, nil
 }
 
+// Turn display states: SessionTurns and the overview snapshot report an open
+// turn as TurnStateRunning and an ended one as TurnStateEnded, regardless of
+// its outcome.
+const (
+	TurnStateRunning = "running"
+	TurnStateEnded   = "ended"
+)
+
+// SessionTurns returns every turn of the session — open and ended — with its
+// outcome, oldest first. Recovery verification reads it; turn content never
+// travels with it. An open turn reports State TurnStateRunning, an ended one
+// TurnStateEnded.
+func (s *Store) SessionTurns(ctx context.Context, session string) ([]TurnState, error) {
+	s.prepare.Lock()
+	defer s.prepare.Unlock()
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT turn_id,origin,outcome FROM vendor_turns WHERE session_id=? ORDER BY created_at,turn_id`,
+		session)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	defer closeRows(ctx, rows)
+	var result []TurnState
+	for rows.Next() {
+		var turn TurnState
+		if err = rows.Scan(&turn.ID, &turn.Origin, &turn.Outcome); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+		}
+		turn.State = TurnStateEnded
+		if turn.Outcome == "" {
+			turn.State = TurnStateRunning
+		}
+		result = append(result, turn)
+	}
+	if err = rows.Err(); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+	}
+	return result, nil
+}
+
 // openTurnIDs returns the session's unended turn IDs, oldest first, inside the
 // caller's transaction.
 func openTurnIDs(ctx context.Context, tx *sql.Tx, session string) ([]TurnState, error) {
@@ -125,7 +165,7 @@ func openTurnIDs(ctx context.Context, tx *sql.Tx, session string) ([]TurnState, 
 		if err = rows.Scan(&turn.ID, &turn.Origin, &turn.Outcome); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 		}
-		turn.State = "running"
+		turn.State = TurnStateRunning
 		result = append(result, turn)
 	}
 	if err = rows.Err(); err != nil {

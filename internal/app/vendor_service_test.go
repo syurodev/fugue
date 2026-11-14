@@ -20,11 +20,16 @@ const (
 	testAppPrincipal = string(KindApp)
 	testStateClosed  = "closed"
 	testNoSession    = "no-such-session"
+	// testRootName is the single workspace root the fixtures create.
+	testRootName = "main"
+	// testPATHEnv is the minimal PATH the fixtures hand a vendor process.
+	testPATHEnv = "PATH=/usr/bin:/bin"
 )
 
 type vendorServiceFixture struct {
 	svc *VendorService
 	rt  *HostRuntime
+	hp  *HostProcess
 	ws  string
 }
 
@@ -63,7 +68,7 @@ func newVendorServiceFixtureWith(t *testing.T, tools []*FugueTool) *vendorServic
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &vendorServiceFixture{svc: svc, rt: rt}
+	f := &vendorServiceFixture{svc: svc, rt: rt, hp: hp}
 	f.ws = f.addWorkspace(t, "svc-ws")
 	return f
 }
@@ -250,14 +255,14 @@ func TestVendorResumeIsBoundToTheSessionWorkspace(t *testing.T) {
 	f := newVendorServiceFixture(t)
 	started := f.start(t, "bind-start")
 	info, err := f.svc.store.Snapshot(t.Context(), started.ID)
-	if err != nil || info.WorkspaceID != f.ws || info.WorkspaceRoot != "main" {
+	if err != nil || info.WorkspaceID != f.ws || info.WorkspaceRoot != testRootName {
 		t.Fatalf("started session binding = %q/%q, %v; want %q/main", info.WorkspaceID, info.WorkspaceRoot, err, f.ws)
 	}
 	other := f.addWorkspace(t, "other-ws")
 	detached := &vendorstore.Session{
 		ID: "bound-session", Vendor: VendorClaude, AccountID: vendorDefaultAccount, Role: vendorSessionRole,
 		State: vendorstore.StateDetached, ResumeHandle: "123e4567-e89b-12d3-a456-426614174000",
-		WorkspaceID: f.ws, WorkspaceRoot: "main",
+		WorkspaceID: f.ws, WorkspaceRoot: testRootName,
 	}
 	if err := f.svc.store.CreateSession(t.Context(), detached); err != nil {
 		t.Fatal(err)
@@ -271,7 +276,7 @@ func TestVendorResumeIsBoundToTheSessionWorkspace(t *testing.T) {
 	if still, snapErr := f.svc.store.Snapshot(t.Context(), detached.ID); snapErr != nil || still.State != vendorstore.StateDetached || still.ProcessPID != 0 {
 		t.Fatalf("refused resume changed the session: %+v, %v", still, snapErr)
 	}
-	if err := resume("bind-same", f.ws, "main"); err != nil {
+	if err := resume("bind-same", f.ws, testRootName); err != nil {
 		t.Fatalf("resume in the bound workspace = %v", err)
 	}
 	if resumed, snapErr := f.svc.store.Snapshot(t.Context(), detached.ID); snapErr != nil || resumed.State != vendorstore.StateReady {

@@ -15,6 +15,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/storage"
 	"github.com/syurodev/fugue/internal/vault"
+	"github.com/syurodev/fugue/internal/vendoradapter/claude"
 	"github.com/syurodev/fugue/internal/vendorstore"
 	"github.com/syurodev/fugue/internal/workspace"
 )
@@ -34,6 +35,9 @@ type HostProcess struct {
 	vault       *vault.Service
 	vendorStore *vendorstore.Store
 	vaultRef    atomic.Pointer[vault.Service]
+	// vendorAdapter is the composed vendor adapter; composition-root state the
+	// lifecycle tests inspect. nil for hosts without a vendor runtime.
+	vendorAdapter *claude.Adapter
 	// closeVendor stops every vendor session and then closes the vendor
 	// read model; it runs before the store closes and is idempotent.
 	closeVendor func() error

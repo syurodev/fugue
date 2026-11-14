@@ -54,7 +54,7 @@ func (s *Store) CreateSession(ctx context.Context, session *Session) error {
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	if err = recordChange(ctx, tx, session.ID, ChangeCreated, session.State, session.WaitingReason, now); err != nil {
+	if err = recordChange(ctx, tx, session.ID, ChangeCreated, session.State, session.WaitingReason, now, s.changeRetention); err != nil {
 		return err
 	}
 	if err = tx.Commit(); err != nil {

@@ -51,7 +51,7 @@ func TestVendorTurnOriginMigrationPreservesExistingRows(t *testing.T) {
 func TestVendorTurnOriginIsProjectedAndUnknownOriginRejected(t *testing.T) {
 	t.Parallel()
 	store, db := testStore(t)
-	if err := store.CreateSession(t.Context(), &Session{ID: "s", Vendor: "claude", AccountID: "a", Role: "assistant", State: StateStarting}); err != nil {
+	if err := store.CreateSession(t.Context(), &Session{ID: "s", Vendor: journalTestVendor, AccountID: "a", Role: journalTestRole, State: StateStarting}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := store.Append(t.Context(), "s", 1, &Event{Type: VendorTurnStarted, TurnID: "vendor-123e4567-e89b-12d3-a456-426614174000", TurnOrigin: TurnOriginVendor}); err != nil {

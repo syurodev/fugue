@@ -127,23 +127,15 @@ func runFakeSystemdRun() {
 	if !hasFakeXDGRuntimeDir() {
 		os.Exit(1)
 	}
-	idx := -1
-	var unitName string
-	for i, arg := range os.Args {
-		if v, ok := cutPrefix(arg, "--unit="); ok {
-			unitName = v
-		}
-		if arg == "--" {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 || idx+1 >= len(os.Args) {
+	unitName, targetArgv := parseSystemdRunInvocation()
+	if len(targetArgv) == 0 {
 		os.Exit(2)
 	}
-	targetArgv := os.Args[idx+1:]
 	if len(targetArgv) == 1 && targetArgv[0] == "true" {
 		os.Exit(0)
+	}
+	if refuseExistingUnit(unitName) {
+		os.Exit(1)
 	}
 	setupFakeSystemdFiles(unitName)
 	for i, arg := range targetArgv {
@@ -153,6 +145,26 @@ func runFakeSystemdRun() {
 		}
 	}
 	os.Exit(2)
+}
+
+// parseSystemdRunInvocation splits os.Args into the --unit name and the argv
+// after the -- separator.
+func parseSystemdRunInvocation() (string, []string) {
+	unitName := ""
+	separator := -1
+	for i, arg := range os.Args {
+		if arg == "--" {
+			separator = i
+			break
+		}
+		if v, ok := cutPrefix(arg, "--unit="); ok {
+			unitName = v
+		}
+	}
+	if separator < 0 {
+		return unitName, nil
+	}
+	return unitName, os.Args[separator+1:]
 }
 
 func cutPrefix(s, prefix string) (string, bool) {
@@ -187,6 +199,36 @@ func readFakeSystemdEnv() (cgRoot, procRoot, procCgOverride string) {
 		}
 	}
 	return cgRoot, procRoot, procCgOverride
+}
+
+// refuseExistingUnit emulates systemd-run refusing a unit that already exists:
+// with FUGUE_TEST_REFUSE_EXISTING_UNIT=1 the launcher exits before it touches
+// anything when the unit's cgroup directory is present, which is how a real
+// systemd-run refuses a respawn while the old scope still has processes.
+func refuseExistingUnit(unitName string) bool {
+	if unitName == "" {
+		return false
+	}
+	refuse := false
+	for _, entry := range os.Environ() {
+		if v, ok := cutPrefix(entry, "FUGUE_TEST_REFUSE_EXISTING_UNIT="); ok && v == "1" {
+			refuse = true
+		}
+	}
+	if !refuse {
+		return false
+	}
+	cgRoot, _, _ := readFakeSystemdEnv()
+	if cgRoot == "" {
+		return false
+	}
+	root, err := os.OpenRoot(cgRoot)
+	if err != nil {
+		return false
+	}
+	defer closeQuietly(root)
+	_, statErr := root.Stat(fakeUserManagerRel() + "/app.slice/" + unitName)
+	return statErr == nil
 }
 
 func setupFakeSystemdFiles(unitName string) {

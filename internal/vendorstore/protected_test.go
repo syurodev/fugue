@@ -25,7 +25,7 @@ func TestProtectedEventsAndVaultLock(t *testing.T) {
 	t.Parallel()
 	s, v, path := protectedStore(t)
 	db := s.db
-	_, turnErr := s.Append(t.Context(), "s", 1, &Event{Type: VendorTurnStarted, TurnID: "t", State: "running"})
+	_, turnErr := s.Append(t.Context(), "s", 1, &Event{Type: VendorTurnStarted, TurnID: "t", State: StateRunning})
 	requireNoError(t, turnErr)
 	marker := []byte("planted-vendor-payload-marker-9a36")
 	if _, err := s.Append(t.Context(), "s", 2, &Event{Type: UsageObserved, Payload: marker}); err != nil {

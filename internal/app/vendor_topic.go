@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -82,7 +83,10 @@ func (t *vendorSessionsTopic) Snapshot(ctx context.Context) ([]byte, EventSeq, e
 	return payload, seq, nil
 }
 
-// Since maps the change journal onto events; the journal is never trimmed.
+// Since maps the change journal onto events. The journal is pruned to its
+// newest ChangeJournalRetention rows: a cursor older than the oldest kept row
+// is a gap, so catch-up fails with the hidden resync signal (the hub answers
+// a snapshot) instead of streaming over silent holes.
 func (t *vendorSessionsTopic) Since(ctx context.Context, seq EventSeq) ([]Event, error) {
 	cursor, err := storeCursor(seq)
 	if err != nil {
@@ -92,6 +96,9 @@ func (t *vendorSessionsTopic) Since(ctx context.Context, seq EventSeq) ([]Event,
 	for {
 		changes, readErr := t.store.SessionChangesSince(ctx, cursor, eventPageLimit)
 		if readErr != nil {
+			if errors.Is(readErr, vendorstore.ErrChangeCursorTooOld) {
+				return nil, ErrEventSeqTooOld
+			}
 			return nil, fmt.Errorf("read the vendor session changes: %w", readErr)
 		}
 		for i := range changes {
@@ -121,13 +128,16 @@ func vendorChangeEvent(change *vendorstore.SessionChange) (Event, error) {
 }
 
 // notify publishes every committed change not yet published. Commits happen
-// before notify runs, so a published event is always durable.
+// before notify runs, so a published event is always durable. When the
+// published cursor has fallen behind the journal's retention, the missing rows
+// are gone: every live subscriber is ended with resync_required and the cursor
+// jumps to the newest committed sequence, so later notifies publish from there.
 func (t *vendorSessionsTopic) notify(ctx context.Context) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	events, err := t.Since(ctx, t.published)
 	if err != nil {
-		slog.WarnContext(ctx, "reading vendor session changes for publish failed", "error_code", string(errcode.CodeOf(err)))
+		t.notifyFailed(ctx, err)
 		return
 	}
 	for _, event := range events {
@@ -137,6 +147,30 @@ func (t *vendorSessionsTopic) notify(ctx context.Context) {
 		}
 		t.published = event.Seq
 	}
+}
+
+// notifyFailed handles a failed catch-up read: a cursor behind the journal's
+// retention is a gap the live queue can never fill, so the topic resyncs;
+// anything else is logged and retried on the next commit.
+func (t *vendorSessionsTopic) notifyFailed(ctx context.Context, err error) {
+	if errors.Is(err, ErrEventSeqTooOld) {
+		t.resyncBehindCursor(ctx)
+		return
+	}
+	slog.WarnContext(ctx, "reading vendor session changes for publish failed", "error_code", string(errcode.CodeOf(err)))
+}
+
+// resyncBehindCursor ends the topic's live subscribers with resync_required
+// and advances the published cursor to the newest journal row.
+func (t *vendorSessionsTopic) resyncBehindCursor(ctx context.Context) {
+	_, last, listErr := t.store.SessionList(ctx)
+	if listErr != nil {
+		slog.WarnContext(ctx, "reading the vendor session journal after a stale cursor failed",
+			"error_code", string(errcode.CodeOf(listErr)))
+	} else if seq, seqErr := storeSeq(last); seqErr == nil {
+		t.published = seq
+	}
+	t.hub.ResyncTopic(TopicVendorSessions)
 }
 
 // topicNotifyingStore is the actor's store: after a committed creation or
