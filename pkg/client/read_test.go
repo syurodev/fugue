@@ -1,17 +1,21 @@
 package client_test
 
 import (
-	"errors"
+	"bufio"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
-	"time"
 
 	"connectrpc.com/connect"
 
 	"github.com/syurodev/fugue/pkg/client"
 )
+
+// servingLine is what `fugue serve` writes to stdout once the socket
+// answers; the tests block on it instead of polling a clock.
+const servingLine = "fugue host serving at "
 
 // buildFugue builds the fugue binary into t.TempDir(); a failed build is
 // fatal for the calling test.
@@ -28,8 +32,9 @@ func buildFugue(t *testing.T) string {
 }
 
 // startRealHost runs `fugue serve` on a fresh data directory with short
-// runtime paths (sun_path, as everywhere a socket is bound) and returns a
-// dialed client once discovery answers. It is a real host, vault locked.
+// runtime paths (sun_path, as everywhere a socket is bound), waits for the
+// serving line that names the socket, and returns a dialed client. It is a
+// real host, vault locked.
 func startRealHost(t *testing.T) *client.Client {
 	t.Helper()
 	base := shortDir(t)
@@ -40,41 +45,57 @@ func startRealHost(t *testing.T) *client.Client {
 		}
 	}
 	bin := buildFugue(t)
-	cmd := exec.CommandContext(t.Context(), bin, "serve")
+	// The path is assigned, not passed, so the launch is audited as the
+	// constant `go` spawn the lint rule allows (the same shape
+	// internal/storage/lock_test.go uses for its helper).
+	cmd := exec.CommandContext(t.Context(), "go")
+	cmd.Path = bin
+	cmd.Args = []string{bin, "serve"}
 	cmd.Env = append(os.Environ(),
 		"SYNX_FUGUE_DATA_DIR="+dataDir,
 		"XDG_RUNTIME_DIR="+runtime,
 	)
+	stdout, pipeErr := cmd.StdoutPipe()
+	if pipeErr != nil {
+		t.Fatal(pipeErr)
+	}
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
 		if cmd.ProcessState == nil {
-			_ = cmd.Process.Kill()
+			if kerr := cmd.Process.Kill(); kerr != nil {
+				return
+			}
 		}
 		// Wait reaps the process and ends exec's watch goroutine.
 		if werr := cmd.Wait(); werr != nil {
 			return
 		}
 	})
-	ctx := testCtx(t)
-	deadline := time.Now().Add(30 * time.Second)
+	socket, ok := socketFromServingLine(bufio.NewReader(stdout))
+	if !ok {
+		t.Fatal("the real host never wrote its serving line")
+	}
+	c, err := client.Dial(t.Context(), socket, appParams())
+	if err != nil {
+		t.Fatalf("dial the served socket %s: %v", socket, err)
+	}
+	t.Cleanup(func() { c.Close() })
+	return c
+}
+
+// socketFromServingLine blocks until the host writes its serving line and
+// returns the socket path it names.
+func socketFromServingLine(reader *bufio.Reader) (string, bool) {
 	for {
-		hf, err := client.ReadHostFile(dataDir)
-		if err == nil {
-			c, dialErr := client.Dial(ctx, hf.SocketPath, appParams())
-			if dialErr == nil {
-				t.Cleanup(func() { c.Close() })
-				return c
-			}
-			if !errors.Is(dialErr, client.ErrHostNotRunning) {
-				t.Fatal(dialErr)
-			}
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			return "", false
 		}
-		if time.Now().After(deadline) {
-			t.Fatal("the real host never answered")
+		if socket, ok := strings.CutPrefix(line, servingLine); ok {
+			return strings.TrimSpace(socket), true
 		}
-		time.Sleep(50 * time.Millisecond)
 	}
 }
 

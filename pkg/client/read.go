@@ -3,6 +3,8 @@ package client
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
 	"connectrpc.com/connect"
 
@@ -57,6 +59,8 @@ func (c *Client) ListSessions(ctx context.Context) (SessionList, error) {
 // the empty name, exactly what the host sends it for.
 func vendorString(v vendorsv1.Vendor) string {
 	switch v {
+	case vendorsv1.Vendor_VENDOR_UNSPECIFIED:
+		return ""
 	case vendorsv1.Vendor_VENDOR_CLAUDE:
 		return "claude"
 	case vendorsv1.Vendor_VENDOR_CODEX:
@@ -114,8 +118,8 @@ type TranscriptMetadata struct {
 
 // TranscriptItem is one transcript entry at its latest revision (transcript
 // §6): metadata and redacted display view. Kind is the item kind's name, for
-// example "user_message"; an empty Kind means the host sent a kind this
-// client's proto does not name, and the item is still carried whole.
+// example "user_message"; a kind this client's proto does not name arrives as
+// its numeric wire value in decimal, and the item is still carried whole.
 type TranscriptItem struct {
 	ItemID, TurnID string
 	Kind           string
@@ -214,39 +218,16 @@ func viewFromProto(v *transcriptv1.TranscriptView) TranscriptView {
 	return out
 }
 
-// kindString maps the wire kind to its name (transcript §3); an unspecified
-// kind keeps the empty name, and an unknown item is still carried whole.
+// kindString maps the wire kind to its name (transcript §3). Proto3 enums
+// are open: a kind this proto does not name arrives as its numeric value,
+// which is carried as the decimal string — never collapsed to unspecified —
+// so the client can still tell the item apart and show it.
 func kindString(k transcriptv1.TranscriptKind) string {
-	switch k {
-	case transcriptv1.TranscriptKind_TRANSCRIPT_KIND_USER_MESSAGE:
-		return "user_message"
-	case transcriptv1.TranscriptKind_TRANSCRIPT_KIND_ASSISTANT_MESSAGE:
-		return "assistant_message"
-	case transcriptv1.TranscriptKind_TRANSCRIPT_KIND_REASONING:
-		return "reasoning"
-	case transcriptv1.TranscriptKind_TRANSCRIPT_KIND_TOOL_CALL:
-		return "tool_call"
-	case transcriptv1.TranscriptKind_TRANSCRIPT_KIND_FILE_CHANGE:
-		return "file_change"
-	case transcriptv1.TranscriptKind_TRANSCRIPT_KIND_APPROVAL:
-		return "approval"
-	case transcriptv1.TranscriptKind_TRANSCRIPT_KIND_PLAN:
-		return "plan"
-	case transcriptv1.TranscriptKind_TRANSCRIPT_KIND_SUBAGENT:
-		return "subagent"
-	case transcriptv1.TranscriptKind_TRANSCRIPT_KIND_COMMAND:
-		return "command"
-	case transcriptv1.TranscriptKind_TRANSCRIPT_KIND_TEAM_PROPOSAL:
-		return "team_proposal"
-	case transcriptv1.TranscriptKind_TRANSCRIPT_KIND_TASK_LINK:
-		return "task_link"
-	case transcriptv1.TranscriptKind_TRANSCRIPT_KIND_USAGE:
-		return "usage"
-	case transcriptv1.TranscriptKind_TRANSCRIPT_KIND_QUOTA:
-		return "quota"
-	case transcriptv1.TranscriptKind_TRANSCRIPT_KIND_NOTICE:
-		return "notice"
-	default:
+	if k == transcriptv1.TranscriptKind_TRANSCRIPT_KIND_UNSPECIFIED {
 		return ""
 	}
+	if name, ok := transcriptv1.TranscriptKind_name[int32(k)]; ok {
+		return strings.ToLower(strings.TrimPrefix(name, "TRANSCRIPT_KIND_"))
+	}
+	return strconv.FormatInt(int64(k), 10)
 }

@@ -210,12 +210,13 @@ func TestToolCallAndReasoningCardsStartCollapsed(t *testing.T) {
 func int32Ptr(v int32) *int32 { return &v }
 
 // TestUnknownItemKindRendersAGenericCard pins that a kind the app does not
-// know renders as a generic card carrying its kind name: never a crash and
-// never a dropped item.
+// know renders as a generic card naming its wire value: never a crash and
+// never a dropped item. The client carries an unnamed kind as its decimal
+// wire value, and the card says "Unknown item (kind N)".
 func TestUnknownItemKindRendersAGenericCard(t *testing.T) {
 	t.Parallel()
 	items := []*session.Item{{TranscriptItem: client.TranscriptItem{
-		ItemID: "x1", Kind: "mind_map", Sequence: 1, Revision: 1,
+		ItemID: "x1", Kind: "99", Sequence: 1, Revision: 1,
 		View: client.TranscriptView{Text: "future content"},
 	}}}
 	h := newHarness(t, 600, 900, items)
@@ -226,7 +227,12 @@ func TestUnknownItemKindRendersAGenericCard(t *testing.T) {
 	if dims.Size.Y <= 0 {
 		t.Fatal("the unknown card rendered nothing")
 	}
-	if got := headerFor(items[0]); got != "mind_map" {
-		t.Fatalf("generic header = %q, want the kind name", got)
+	if got := headerFor(items[0]); got != "Unknown item (kind 99)" {
+		t.Fatalf("generic header = %q, want the kind's wire value", got)
+	}
+	// A named kind keeps its name on the generic header.
+	named := headerFor(&session.Item{TranscriptItem: client.TranscriptItem{Kind: "notice"}})
+	if named == "Unknown item (kind notice)" {
+		t.Fatalf("named kind %q rendered as unknown", named)
 	}
 }

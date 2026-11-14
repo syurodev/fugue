@@ -247,7 +247,24 @@ func headerFor(item *session.Item) string {
 	case kindNotice:
 		return "notice · " + m.Level + " · " + m.Code
 	default:
+		// The client carries a kind its proto does not name as the decimal
+		// wire value; the generic card says so instead of dropping the item.
+		if !knownKindName(item.Kind) {
+			return "Unknown item (kind " + item.Kind + ")"
+		}
 		return item.Kind
+	}
+}
+
+// knownKindName reports whether the string is a kind name transcript §3
+// defines; anything else arrived from the wire unnamed.
+func knownKindName(kind string) bool {
+	switch kind {
+	case kindUserMessage, kindAssistantMessage, kindReasoning, kindToolCall, kindFileChange,
+		kindApproval, kindPlan, kindSubagent, kindCommand, kindUsage, kindQuota, kindNotice:
+		return true
+	default:
+		return false
 	}
 }
 
