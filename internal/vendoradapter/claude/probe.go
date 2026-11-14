@@ -6,12 +6,7 @@ package claude
 // credential files (VR-03) and never guesses a login state (VR-08).
 
 import (
-	"bytes"
 	"context"
-	"errors"
-	"os/exec"
-	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
@@ -27,15 +22,7 @@ const (
 
 	// DefaultProbeTimeout bounds the version command when the caller's context
 	// carries no deadline of its own.
-	DefaultProbeTimeout = 10 * time.Second
-
-	// versionOutputLimit caps the version command's stdout: a version line is
-	// a few dozen bytes, so anything past the cap is not a version.
-	versionOutputLimit = 4 << 10
-
-	// probeWaitDelay is how long Wait lets the output pipe drain after the
-	// process was killed, so a grandchild holding the pipe cannot hang it.
-	probeWaitDelay = time.Second
+	DefaultProbeTimeout = vendor.DefaultProbeTimeout
 )
 
 // Adapter runs the Claude Code CLI (F9.5: probe and normalizer; F9.5b adds
@@ -106,28 +93,14 @@ func NewAdapter(hostEnv []string, opts ...Option) *Adapter {
 // login state and the capability. Fugue does not read the CLI's credential
 // store; the CLI reports login only during a turn, so the state stays unknown
 // here and F9.10 owns account discovery.
-//
-// The binary is resolved once to an absolute path and that path is what runs
-// and what the report carries. A name that resolves into the current
-// directory, or any non-absolute result, is refused: a workspace must not be
-// able to plant the "claude" that Fugue executes.
 func (a *Adapter) Probe(ctx context.Context, home vendor.AccountHome) (vendor.Probe, error) {
-	path, err := a.resolveBinary()
+	path, err := vendor.ResolveBinary(DefaultBinary, a.Binary)
 	if err != nil {
-		return vendor.Probe{}, err
+		return vendor.Probe{}, errcode.Wrap(errcode.CodeOf(err), "resolve claude binary", err)
 	}
-	timeout := a.ProbeTimeout
-	if timeout <= 0 {
-		timeout = DefaultProbeTimeout
-	}
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-	output, err := a.versionOutput(ctx, path, home)
+	output, err := vendor.RunVersionCommand(ctx, DefaultBinary, path, ProbeEnv(a.HostEnv, home), a.ProbeTimeout)
 	if err != nil {
-		return vendor.Probe{}, err
+		return vendor.Probe{}, errcode.Wrap(errcode.CodeOf(err), "run claude version command", err)
 	}
 	version, tested, warning := versionVerdict(output)
 	return vendor.Probe{
@@ -139,82 +112,6 @@ func (a *Adapter) Probe(ctx context.Context, home vendor.AccountHome) (vendor.Pr
 		Capability:     Capability(),
 	}, nil
 }
-
-// resolveBinary turns Binary into the absolute path the probe may run.
-func (a *Adapter) resolveBinary() (string, error) {
-	if a.Binary == "" {
-		return "", errcode.New(errcode.InvalidArgument, "claude binary is empty")
-	}
-	if strings.ContainsRune(a.Binary, filepath.Separator) && !filepath.IsAbs(a.Binary) {
-		return "", errcode.New(errcode.InvalidArgument, "claude binary must be an absolute path")
-	}
-	path, err := exec.LookPath(a.Binary)
-	switch {
-	case errors.Is(err, exec.ErrDot):
-		return "", errcode.Wrap(errcode.PermissionDenied, "claude binary resolves inside the current directory", err)
-	case err != nil:
-		return "", errcode.Wrap(errcode.NotFound, "claude binary not found", err)
-	case !filepath.IsAbs(path):
-		return "", errcode.New(errcode.InvalidArgument, "claude binary must resolve to an absolute path")
-	}
-	return path, nil
-}
-
-// versionOutput runs the one-shot version command with the filtered
-// environment under the caller's context. A context that ends first is a
-// typed error: the probe did not complete. Output past the cap, a failed
-// start and a non-zero exit leave the version unknown, never a guess.
-func (a *Adapter) versionOutput(ctx context.Context, path string, home vendor.AccountHome) (string, error) {
-	runCtx, stop := context.WithCancel(ctx)
-	defer stop()
-	out := &cappedBuffer{limit: versionOutputLimit, onOverflow: stop}
-	cmd := exec.CommandContext(runCtx, path, "--version")
-	cmd.Env = ProbeEnv(a.HostEnv, home)
-	cmd.Stdout = out
-	cmd.WaitDelay = probeWaitDelay
-	runErr := cmd.Run()
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		if errors.Is(ctxErr, context.DeadlineExceeded) {
-			return "", errcode.Wrap(errcode.DeadlineExceeded, "claude version probe timed out", ctxErr)
-		}
-		return "", errcode.Wrap(errcode.Canceled, "claude version probe was canceled", ctxErr)
-	}
-	if runErr != nil || out.overflowed {
-		return "", nil
-	}
-	return out.String(), nil
-}
-
-// cappedBuffer keeps at most limit bytes and discards the rest, reporting
-// every write as accepted so the child never blocks on a full pipe. The first
-// write past the limit marks the buffer overflowed and calls onOverflow, which
-// stops the child instead of draining an endless stream.
-type cappedBuffer struct {
-	buf        bytes.Buffer
-	limit      int
-	overflowed bool
-	onOverflow func()
-}
-
-func (c *cappedBuffer) Write(p []byte) (int, error) {
-	room := c.limit - c.buf.Len()
-	if len(p) <= room {
-		c.buf.Write(p) // a bytes.Buffer write never fails
-		return len(p), nil
-	}
-	if room > 0 {
-		c.buf.Write(p[:room])
-	}
-	if !c.overflowed {
-		c.overflowed = true
-		if c.onOverflow != nil {
-			c.onOverflow()
-		}
-	}
-	return len(p), nil
-}
-
-func (c *cappedBuffer) String() string { return c.buf.String() }
 
 // ProbeEnv filters the host environment through the §8 allowlist for a
 // one-shot probe: the standard allowlist, TERM forced to dumb, and the vendor

@@ -204,7 +204,7 @@ func TestVendorServiceLimitsAndTypedRejections(t *testing.T) {
 	}
 	_, err = f.svc.Start(gone, testAppPrincipal, &StartVendorSession{CommandID: "lim-late", Vendor: VendorClaude, WorkspaceID: f.ws})
 	requireCode(t, err, errcode.DeadlineExceeded)
-	_, err = f.svc.Probe(t.Context(), testAppPrincipal, []string{"codex"})
+	_, err = f.svc.Probe(t.Context(), testAppPrincipal, []string{"agy"})
 	requireCode(t, err, errcode.VendorUnsupported)
 	_, err = f.svc.Start(t.Context(), testAppPrincipal, &StartVendorSession{CommandID: "p", Vendor: VendorClaude, WorkspaceID: f.ws, Profile: VendorProfile{Effort: "turbo"}})
 	requireCode(t, err, errcode.VendorInvalidProfile)

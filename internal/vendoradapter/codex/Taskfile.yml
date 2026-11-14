@@ -1,0 +1,12 @@
+version: "3"
+
+tasks:
+  schema-diff:
+    desc: Regenerate the Codex app-server JSON schema from the installed codex CLI and diff against the pinned schema (dev-only, not run in CI).
+    cmds:
+      - |
+        tmp_dir="$(mktemp -d)"
+        trap 'rm -rf "$tmp_dir"' EXIT
+        codex --version
+        codex app-server generate-json-schema --out "$tmp_dir"
+        diff -u testdata/schema/codex_app_server_protocol.schemas.json "$tmp_dir/codex_app_server_protocol.schemas.json"

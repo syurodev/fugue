@@ -19,7 +19,7 @@ func TestCheckedRangePinsTheFixtureVersion(t *testing.T) {
 		t.Errorf("parse mismatch (-want +got):\n%s", diff)
 	}
 	r := checkedRange()
-	if r.Min != parsed || r.Max != parsed {
+	if r.Min != parsed || r.Max != parsed || !VersionTested(parsed) {
 		t.Fatalf("checked range = %s, want both ends at 2.1.319", r)
 	}
 }

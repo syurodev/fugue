@@ -11,88 +11,45 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
-	"time"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/transcript"
+	"github.com/syurodev/fugue/internal/vendor"
 )
 
 // Update pairs the stored item with its next revision.
-type Update struct {
-	Before transcript.Item
-	After  transcript.Item
-}
+type Update = vendor.Update
 
 // Init is the system/init observation: identity, model, permission mode and
 // the vendor's own slash command list with the terminal-only commands hidden
 // (vendor-runtime §5.1, §9).
-type Init struct {
-	Version        string
-	SessionID      string
-	Model          string
-	PermissionMode string
-	SlashCommands  []string
-}
+type Init = vendor.Init
 
 // Partial is one stream_event delta, exposed as data: the session actor wires
 // it to the transcript delta topic (transcript §5, F9.9).
-type Partial struct {
-	MessageID string
-	BlockType string
-	DeltaType string
-	Fragment  string
-}
+type Partial = vendor.Partial
 
 // UsageData is the turn usage the result event reports.
-type UsageData struct {
-	InputTokens  int64
-	OutputTokens int64
-	CacheTokens  int64
-	Cost         float64
-}
+type UsageData = vendor.UsageData
 
 // TurnEnd closes the active turn: outcome, failure code, usage and the
 // credential expiry the CLI reported, if any.
-type TurnEnd struct {
-	TurnID              string
-	Outcome             string
-	FailureCode         string
-	Usage               UsageData
-	CredentialExpiresAt *time.Time
-}
+type TurnEnd = vendor.TurnEnd
 
 // Window is one quota window of a rate_limit_event.
-type Window struct {
-	Name        string
-	Utilization float64
-	ResetsAt    time.Time
-	Status      string
-}
+type Window = vendor.Window
 
 // RateLimit carries the full rate_limit_event data for the future quota owner
 // (F9.10); the normalizer only reports it, it never acts on quota.
-type RateLimit struct {
-	Windows []Window
-}
+type RateLimit = vendor.RateLimit
 
 // Observation is everything one event normalized into.
-type Observation struct {
-	Init    *Init
-	Records []transcript.Item
-	Updates []Update
-	Partial *Partial
-	TurnEnd *TurnEnd
-	Quota   *RateLimit
-	// Nested counts events with a parent_tool_use_id (subagent streams). They
-	// belong to the subagent item, not the session transcript; F9.5b/F9.9
-	// enrich the subagent item with them.
-	Nested int
-}
+type Observation = vendor.Observation
 
 // Turn outcomes (vendor-runtime §10).
 const (
-	OutcomeCompleted = "completed"
-	OutcomeFailed    = "failed"
+	OutcomeCompleted = string(vendor.OutcomeCompleted)
+	OutcomeFailed    = string(vendor.OutcomeFailed)
 )
 
 // Normalizer is one session's stream state. The actor calls BeginTurn with the

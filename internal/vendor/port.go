@@ -126,10 +126,14 @@ type ApprovalRef struct {
 }
 
 // Decision is the user's answer to a relayed approval request: allow or deny,
-// with an optional message the vendor receives verbatim (VR-05).
+// with an optional choice/message or question answers the vendor receives
+// verbatim (VR-05), or Error when the host must return a JSON-RPC error response
+// without making a decision.
 type Decision struct {
 	Allow   bool
 	Message string
+	Answers map[string][]string
+	Error   error
 }
 
 // CloseReason says why a session is being closed.
