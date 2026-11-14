@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -16,6 +17,10 @@ import (
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/vendor"
 )
+
+// DefaultHandshakeTimeout is the vendor-runtime §13 handshake budget: a session
+// without system/init within 30 s fails typed (vendor.ErrHandshakeTimeout).
+const DefaultHandshakeTimeout = 30 * time.Second
 
 const maxModelLength = 128
 
@@ -352,7 +357,7 @@ func makeProtocolInterrupt(sess *Session) func(context.Context) error {
 }
 
 func (s *Session) waitForHandshake(ctx context.Context, initCh <-chan *Init, readerErrCh <-chan error) error {
-	timer := s.clock.NewTimer(defaultHandshakeTimeout)
+	timer := s.clock.NewTimer(DefaultHandshakeTimeout)
 	defer timer.Stop()
 
 	select {

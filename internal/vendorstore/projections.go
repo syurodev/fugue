@@ -251,7 +251,7 @@ func (s *Store) projectSession(ctx context.Context, tx *sql.Tx, session string, 
 		if err != nil {
 			return fmt.Errorf("%w: project session: %w", ErrUnavailable, err)
 		}
-		return recordChange(ctx, tx, session, ChangeStateChanged, e.State, e.WaitingReason, now)
+		return recordChange(ctx, tx, session, ChangeStateChanged, e.State, e.WaitingReason, now, s.changeRetention)
 	}
 	return nil
 }

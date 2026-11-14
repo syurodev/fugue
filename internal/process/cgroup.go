@@ -229,6 +229,11 @@ func collectScopeMatches(searchRoot, unitName string) []string {
 	return matches
 }
 
+// buildScopeUnitName derives the scope unit name from the SessionID alone:
+// `fugue-vendor-<sessionID>.scope`. The unit name never encodes anything else,
+// so a respawn of the same session targets the same unit and systemd-run
+// refuses it while the old scope still has processes (F9.9e): the respawn
+// fails closed instead of silently joining or replacing the live tree.
 func buildScopeUnitName(sessionID string) (string, error) {
 	trimmed := strings.TrimSpace(sessionID)
 	if trimmed == "" {
@@ -330,14 +335,17 @@ func prepareLinuxSpawnArgv(ctx context.Context, opts *Options) ([]string, string
 	if xdgRuntimeDir == "" {
 		return opts.Argv, "", false, nil
 	}
+	// Containment is about to be attempted, so a scope unit must be nameable:
+	// the SessionID is the unit's only source. Fail typed before the probe so
+	// no launcher process runs for a spawn that can never be contained.
+	unitName, err := buildScopeUnitName(opts.SessionID)
+	if err != nil {
+		return nil, "", false, err
+	}
 	cgroupRoot, _, systemdBin := resolveContainmentPaths(opts)
 	launcherEnv := withXDGRuntimeDir(opts.Env, xdgRuntimeDir)
 	if !opts.Probe.check(ctx, systemdBin, cgroupRoot, launcherEnv) {
 		return opts.Argv, "", false, nil
-	}
-	unitName, err := buildScopeUnitName(opts.SessionID)
-	if err != nil {
-		return nil, "", false, err
 	}
 	resolved, err := exec.LookPath(systemdBin)
 	if err != nil {

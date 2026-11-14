@@ -43,10 +43,22 @@ type Store struct {
 	// beforeCommit is a test seam set through export_test.go; production code
 	// never sets it.
 	beforeCommit error
+	// changeRetention bounds the cross-session change journal (F9.9e);
+	// ChangeJournalRetention unless a test shrank it.
+	changeRetention int
+}
+
+// Option configures the store beyond its defaults.
+type Option func(*Store)
+
+// WithChangeJournalRetention overrides ChangeJournalRetention (tests shrink
+// the journal; production always uses the default).
+func WithChangeJournalRetention(n int) Option {
+	return func(s *Store) { s.changeRetention = n }
 }
 
 // New verifies database durability and registers vault lock invalidation.
-func New(ctx context.Context, db *sql.DB, v *vault.Service, clk clock.Clock, random ids.Random) (*Store, error) {
+func New(ctx context.Context, db *sql.DB, v *vault.Service, clk clock.Clock, random ids.Random, opts ...Option) (*Store, error) {
 	if db == nil || clk == nil {
 		return nil, errcode.New(errcode.InvalidArgument, "database and clock required")
 	}
@@ -57,14 +69,20 @@ func New(ctx context.Context, db *sql.DB, v *vault.Service, clk clock.Clock, ran
 		random = ids.CryptoRandom{}
 	}
 	s := &Store{
-		db:           db,
-		vault:        v,
-		clock:        clk,
-		cache:        sealing.NewKeyCache(),
-		unregister:   nil,
-		prepare:      sync.Mutex{},
-		random:       random,
-		beforeCommit: nil,
+		db:              db,
+		vault:           v,
+		clock:           clk,
+		cache:           sealing.NewKeyCache(),
+		unregister:      nil,
+		prepare:         sync.Mutex{},
+		random:          random,
+		beforeCommit:    nil,
+		changeRetention: ChangeJournalRetention,
+	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(s)
+		}
 	}
 	if v != nil {
 		s.unregister = v.RegisterLockGuard(func(snap vault.Snapshot) {

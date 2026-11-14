@@ -511,7 +511,7 @@ func TestRedactionCostIsLinear(t *testing.T) {
 			Value: redact.NewSecret(knownAPIToken), Kind: secrets.KindCredential,
 		})
 		known = append(known, EnvKnownValues([]string{
-			"PATH=/usr/bin:/bin", "HOME=/home/fugue", "GITHUB_TOKEN=" + githubToken(),
+			testPATHEnv, "HOME=/home/fugue", "GITHUB_TOKEN=" + githubToken(),
 		})...)
 		return known, nil
 	})

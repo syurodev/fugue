@@ -25,6 +25,12 @@ var (
 	ErrVendorSessionCapacity = errcode.New(errcode.FailedPrecondition, "vendor session capacity reached")
 )
 
+// maxVendorSessionsPerHost is the vendor-runtime §13 concurrent-session cap:
+// a scheduler-owned value (orchestration §7) that has no scheduler yet, so it
+// is the fixed pre-scheduler default of two active processes (Q-55 A). A start
+// beyond the cap fails typed with ErrVendorSessionCapacity (vendor.capacity).
+const maxVendorSessionsPerHost = 2
+
 // VendorSessionDeps contains the runtime dependencies for vendor sessions.
 type VendorSessionDeps struct {
 	Store       vendorSessionStore
@@ -237,7 +243,7 @@ func (m *VendorSessions) reserveSlot(ctx context.Context, sessionID string) (fun
 	m.mu.RLock()
 	reserved := m.startReservations
 	m.mu.RUnlock()
-	if active+reserved > 2 {
+	if active+reserved > maxVendorSessionsPerHost {
 		release()
 		return nil, ErrVendorSessionCapacity
 	}

@@ -172,6 +172,23 @@ func (s *Subscription) Close() {
 	s.wake()
 }
 
+// ResyncTopic ends every live subscriber of one topic with resync_required:
+// the topic's committed history has a gap the live queue can never fill, so
+// each client resubscribes from a fresh snapshot. It reports whether the
+// topic exists.
+func (h *EventHub) ResyncTopic(name string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	t, ok := h.topics[name]
+	if !ok {
+		return false
+	}
+	for _, s := range t.subs {
+		s.forceResync()
+	}
+	return true
+}
+
 // forceResync ends the stream with resync_required once its buffered events
 // are delivered: the topic's committed history has a gap the live queue can
 // never fill, so the client must catch up through the durable source.

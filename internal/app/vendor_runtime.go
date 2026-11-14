@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"strings"
 
+	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/storage"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendoradapter/claude"
@@ -17,6 +20,13 @@ import (
 // transcript read model, the Claude adapter, the session actors and the
 // vendor-sessions topic. ctx bounds the setup reads; base is the host's
 // lifetime context, captured in closures and never stored.
+//
+// Vendor-session recovery runs here, before StartHost returns and therefore
+// before the Host API accepts its first client (vendor-runtime §11): unfinished
+// sessions come back detached, open turns turn unknown, and the leftover
+// process trees of the previous incarnation are reaped. No session is
+// respawned and no turn is replayed; a client brings a detached session back
+// through Resume.
 func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store, deps *HostDeps) error {
 	v, err := vault.NewService(ctx, vault.NewSQLKeyringStore(store.DB()), deps.IDs)
 	if err != nil {
@@ -29,6 +39,11 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 	if _, recErr := vs.RecoverTeams(ctx); recErr != nil {
 		return errors.Join(errcode.Wrap(errcode.Internal, "recover team tasks", recErr), vs.Close())
 	}
+	identities, recErr := vs.Recover(ctx)
+	if recErr != nil {
+		return errors.Join(errcode.Wrap(errcode.Internal, "recover vendor sessions", recErr), vs.Close())
+	}
+	reapLeftoverVendorProcesses(ctx, identities, deps)
 	transcripts, err := NewTranscripts(base, TranscriptDeps{Store: vs, Hub: hp.rt.hub, Vault: v, Clock: deps.Clock})
 	if err != nil {
 		return errors.Join(err, vs.Close())
@@ -69,14 +84,29 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	if err != nil {
 		return nil, err
 	}
-	options := []claude.Option{claude.WithClock(deps.Clock), claude.WithIDs(deps.IDs)}
+	options := []claude.Option{
+		claude.WithClock(deps.Clock),
+		claude.WithIDs(deps.IDs),
+		// One systemd probe per owner (the vendor runtime), never per spawn:
+		// the probe caches its capability check, so every session of this host
+		// reuses the answer (F9.2b review note).
+		claude.WithSystemdProbe(process.NewSystemdProbe()),
+	}
 	if deps.VendorBinary != "" {
 		options = append(options, claude.WithBinary(deps.VendorBinary))
 	}
+	// The launcher's XDG_RUNTIME_DIR is the raw value of the injected
+	// environment, never config.RuntimeDir, whose per-user fallback is not a
+	// systemd runtime dir (F9.2b review note). Empty leaves containment
+	// unattempted, which is the stage-A macOS path.
+	if dir := rawXDGRuntimeDir(deps.VendorHostEnv); dir != "" {
+		options = append(options, claude.WithXDGRuntimeDir(dir))
+	}
 	adapter := claude.NewAdapter(deps.VendorHostEnv, options...)
-	// A session's token dies with its actor, with a purge and with the host.
+	// A session.s token dies with its actor, with a purge and with the host.
 	tokens := newSessionTokens(deps.Random)
 	transcripts.onPurge = tokens.revoke
+	hp.vendorAdapter = adapter
 	sessions, err := NewVendorSessions(base, &VendorSessionDeps{
 		Store: topicNotifyingStore{Store: vs, topic: topic}, Transcripts: transcripts, Adapter: adapter,
 		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: tokens.revoke,
@@ -93,6 +123,33 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 		tokens: tokens, bridge: deps.Bridge,
 	}
 	return sessions, nil
+}
+
+// reapLeftoverVendorProcesses kills the process trees the previous host
+// incarnation recorded (vendor-runtime §11): the store verified their identity
+// when it read them, and Reap verifies the start token again before it signals
+// anything, so a recycled PID is never killed. A leftover that cannot be
+// reaped is logged and left for the session's close or resume paths; startup
+// never fails for it.
+func reapLeftoverVendorProcesses(ctx context.Context, identities []vendorstore.ProcessIdentity, deps *HostDeps) {
+	for _, id := range identities {
+		identity := process.Identity{PID: int(id.PID), StartToken: id.StartToken, ScopeUnit: id.ScopeUnit}
+		if _, err := process.Reap(ctx, identity, &process.ReapOptions{Clock: deps.Clock}); err != nil {
+			slog.Warn("reaping a leftover vendor process failed",
+				"error_code", string(errcode.CodeOf(err)))
+		}
+	}
+}
+
+// rawXDGRuntimeDir reads XDG_RUNTIME_DIR straight out of the injected host
+// environment snapshot, without config's absolute-path fallbacks.
+func rawXDGRuntimeDir(env []string) string {
+	for _, entry := range env {
+		if value, ok := strings.CutPrefix(entry, config.EnvRuntimeDir+"="); ok {
+			return value
+		}
+	}
+	return ""
 }
 
 // Vault returns the host's vault. Clients cannot unlock it before F10.5; the
