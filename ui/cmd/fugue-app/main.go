@@ -88,7 +88,7 @@ func runWindow(ctx context.Context, dir string, params client.Params) error {
 	if err != nil && !backgroundUnavailable(err) {
 		return fmt.Errorf("start background mode: %w", err)
 	}
-	if err = appwin.Run(ctx, appwin.Options{DataDir: dir, Params: params, Topics: []string{"host"}}); err != nil {
+	if err = appwin.Run(ctx, appwin.Options{DataDir: dir, Params: params, Topics: []string{"host", "vendor-sessions"}}); err != nil {
 		if bg != nil {
 			bg.Close()
 		}

@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"sync"
 
 	"github.com/syurodev/fugue/pkg/client"
@@ -58,6 +60,17 @@ type streamFailure struct {
 	err   error
 }
 
+// topicReq asks the stream loop to start or stop one topic's pump.
+type topicReq struct {
+	topic string
+	add   bool
+}
+
+// topicReqBuffer bounds the request queue. Requests only pile up while no
+// connection is running the stream loop; a dropped request is harmless
+// because every topic added to the dynamic set starts on the next connect.
+const topicReqBuffer = 64
+
 // Manager owns the app's connection to the host: one leased client
 // connection, one event stream per topic, reconnect with bounded backoff.
 // Start runs it; Stop ends it and waits for its goroutines.
@@ -67,8 +80,9 @@ type Manager struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	failures chan streamFailure
-	children launchedChildren
+	failures  chan streamFailure
+	topicReqs chan topicReq
+	children  launchedChildren
 
 	mu      sync.Mutex
 	state   State
@@ -78,6 +92,9 @@ type Manager struct {
 	// streamsCancel cancels the current connection's stream pumps; a network
 	// drop and an explicit disconnect end through the same cancel.
 	streamsCancel context.CancelFunc
+	// dynamic holds the topics added and removed after Start (the per-session
+	// transcript topics of F10.4a), guarded by mu.
+	dynamic map[string]bool
 }
 
 // NewManager builds a Manager; Start runs it.
@@ -91,11 +108,13 @@ func NewManager(cfg *Config) *Manager {
 		cancel:        nil,
 		wg:            sync.WaitGroup{},
 		failures:      make(chan streamFailure),
+		topicReqs:     make(chan topicReq, topicReqBuffer),
 		mu:            sync.Mutex{},
 		state:         "",
 		reason:        "",
 		conn:          nil,
 		cursors:       map[string]client.Cursor{},
+		dynamic:       map[string]bool{},
 		streamsCancel: nil,
 	}
 }
@@ -135,6 +154,54 @@ func (m *Manager) State() (State, string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.state, m.reason
+}
+
+// AddTopic streams one more topic from the current connection, subscribing
+// from its stored cursor when it has one and from a snapshot otherwise. The
+// topic survives reconnects until RemoveTopic. Safe from the window
+// goroutine: while the stream loop is not running the request buffers, and a
+// buffered request the loop never sees is harmless because the dynamic set,
+// not the request, is what a connect starts from.
+func (m *Manager) AddTopic(topic string) {
+	m.mu.Lock()
+	first := !m.dynamic[topic] && !slices.Contains(m.cfg.Topics, topic)
+	m.dynamic[topic] = true
+	m.mu.Unlock()
+	if first {
+		select {
+		case m.topicReqs <- topicReq{topic: topic, add: true}:
+		default:
+		}
+	}
+}
+
+// RemoveTopic stops one dynamic topic's stream. Its cursor is kept, so a
+// later AddTopic catches up instead of reloading. Safe from the window
+// goroutine.
+func (m *Manager) RemoveTopic(topic string) {
+	m.mu.Lock()
+	delete(m.dynamic, topic)
+	m.mu.Unlock()
+	select {
+	case m.topicReqs <- topicReq{topic: topic, add: false}:
+	default:
+	}
+}
+
+// Client returns the leased connection the streams run on, or nil while
+// disconnected. The caller may use it for unary reads; a connection being
+// torn down fails the call, which the caller retries.
+func (m *Manager) Client() *client.Client {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.conn
+}
+
+// dynamicTopics snapshots the dynamic set.
+func (m *Manager) dynamicTopics() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return slices.Sorted(maps.Keys(m.dynamic))
 }
 
 // cursorFor returns the stored cursor for a topic, or nil on first subscribe.
@@ -365,6 +432,11 @@ func (m *Manager) runStreams(ctx context.Context, conn *client.Client) {
 	for _, topic := range m.cfg.Topics {
 		pumps.start(streamsCtx, topic, false)
 	}
+	for _, topic := range m.dynamicTopics() {
+		if !slices.Contains(m.cfg.Topics, topic) {
+			pumps.start(streamsCtx, topic, false)
+		}
+	}
 	for {
 		f, ok := pumps.await(streamsCtx)
 		if !ok {
@@ -390,111 +462,4 @@ func (m *Manager) restartInPlace(ctx context.Context, f streamFailure) bool {
 		return false
 	}
 	return m.backoff(ctx, 1)
-}
-
-// pump streams one topic: it subscribes from the stored cursor — a cursor the
-// host can no longer catch up from, including one from a dead host
-// incarnation, is answered with a fresh snapshot (host-api §6) — and forwards
-// every message to the window. The stream lives while ctx does.
-func (m *Manager) pump(ctx context.Context, conn *client.Client, topic string) {
-	stream, err := conn.Subscribe(ctx, topic, m.cursorFor(topic))
-	if err != nil {
-		m.report(ctx, topic, err)
-		return
-	}
-	defer func() {
-		// The stream is ending either way; a close error cannot be acted on.
-		if cerr := stream.Close(); cerr != nil {
-			return
-		}
-	}()
-	for {
-		msg, err := stream.Recv()
-		if err != nil {
-			m.report(ctx, topic, err)
-			return
-		}
-		switch {
-		case msg.Snapshot != nil:
-			m.setCursor(topic, client.Cursor{
-				Topic:       topic,
-				Incarnation: msg.Snapshot.Incarnation,
-				Sequence:    msg.Snapshot.Sequence,
-			})
-			m.deliver(ctx, Update{Topic: topic, Snapshot: msg.Snapshot})
-		case msg.Event != nil:
-			c := client.Cursor{Topic: topic, Sequence: msg.Event.Sequence}
-			if old := m.cursorFor(topic); old != nil {
-				c.Incarnation = old.Incarnation
-			}
-			m.setCursor(topic, c)
-			m.deliver(ctx, Update{Topic: topic, Event: msg.Event})
-		}
-	}
-}
-
-// report hands a stream's end reason to the run loop, giving up when the
-// stream's context ends first.
-func (m *Manager) report(ctx context.Context, topic string, err error) {
-	select {
-	case m.failures <- streamFailure{topic: topic, err: err}:
-	case <-ctx.Done():
-	}
-}
-
-// pump is one topic's stream goroutine and its cancel.
-type pump struct {
-	cancel context.CancelFunc
-	done   chan struct{}
-}
-
-// pumpSet owns the stream goroutines of one leased connection.
-type pumpSet struct {
-	mgr   *Manager
-	conn  *client.Client
-	pumps map[string]*pump
-}
-
-// start launches (or relaunches) one topic's pump. A fresh start drops the
-// stored cursor so the host answers with a snapshot.
-func (ps *pumpSet) start(ctx context.Context, topic string, fresh bool) {
-	if fresh {
-		ps.mgr.clearCursor(topic)
-	}
-	pctx, cancel := context.WithCancel(ctx)
-	p := &pump{cancel: cancel, done: make(chan struct{})}
-	ps.pumps[topic] = p
-	go func() {
-		defer close(p.done)
-		ps.mgr.pump(pctx, ps.conn, topic)
-	}()
-}
-
-// stopAll cancels every pump and waits for the goroutines.
-func (ps *pumpSet) stopAll() {
-	for _, p := range ps.pumps {
-		p.cancel()
-	}
-	for _, p := range ps.pumps {
-		<-p.done
-	}
-}
-
-// await waits for the first stream failure for a topic in this set or the end
-// of ctx; ok is false when the context ended.
-func (ps *pumpSet) await(ctx context.Context) (streamFailure, bool) {
-	for {
-		select {
-		case <-ctx.Done():
-			return streamFailure{}, false
-		case f := <-ps.mgr.failures:
-			p, ok := ps.pumps[f.topic]
-			if !ok {
-				continue
-			}
-			p.cancel()
-			<-p.done
-			return f, true
-		}
-	}
 }

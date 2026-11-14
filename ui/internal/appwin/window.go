@@ -19,6 +19,7 @@ import (
 
 	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
+	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
@@ -85,6 +86,11 @@ func Run(ctx context.Context, opts Options) error {
 	w.Option(app.Size(unit.Dp(initW), unit.Dp(initH)))
 
 	q := &updateQueue{}
+	// The fetcher owns the read side's one goroutine: it runs the blocking
+	// reads off the window goroutine and hands the results back (F10.4a).
+	fetcher := session.NewFetcher(m.Client)
+	fetcher.Start(runCtx)
+	defer fetcher.Stop()
 	defer stopSideGoroutines(cancel, startFeeder(runCtx, w, updates, q), startCloser(runCtx, w))
 
 	shaper, err := fonts.Shaper()
@@ -92,7 +98,7 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("build the text shaper: %w", err)
 	}
 	light, dark := theme.Light(shaper), theme.Dark(shaper)
-	return eventLoop(w, m, q, light, dark)
+	return eventLoop(w, m, newScreens(m, fetcher), q, light, dark)
 }
 
 // startFeeder runs the update feeder: it moves deliveries into the queue and
@@ -137,7 +143,7 @@ func stopSideGoroutines(cancel context.CancelFunc, feederDone, closerDone <-chan
 }
 
 // eventLoop is the window's event loop until it is destroyed.
-func eventLoop(w *app.Window, m *hostconn.Manager, q *updateQueue, light, dark theme.Theme) error {
+func eventLoop(w *app.Window, m *hostconn.Manager, sc *screens, q *updateQueue, light, dark theme.Theme) error {
 	var ops op.Ops
 	// The window starts light: Gio v0.10.3 exposes no OS light/dark
 	// preference to follow (F10.2c plan), so light is the default and
@@ -150,20 +156,29 @@ func eventLoop(w *app.Window, m *hostconn.Manager, q *updateQueue, light, dark t
 			return e.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
-			darkMode = frame(gtx, m, q, light, dark, darkMode)
+			darkMode = frame(gtx, sc, q, light, dark, darkMode)
 			e.Frame(gtx.Ops)
 		}
 	}
 }
 
-// frame drains the deliveries into UI state on the window goroutine, handles
-// the theme toggle, and lays the window out; it returns whether dark mode is
-// on for the next frame.
-func frame(gtx layout.Context, m *hostconn.Manager, q *updateQueue, light, dark theme.Theme, darkMode bool) bool {
-	// Deliveries become UI state here, on the window goroutine.
-	for _, u := range q.drain() {
-		_ = u
+// frame drains the deliveries and read results into UI state on the window
+// goroutine, handles the theme toggle, and lays the window out; it returns
+// whether dark mode is on for the next frame.
+func frame(gtx layout.Context, sc *screens, q *updateQueue, light, dark theme.Theme, darkMode bool) bool {
+	// Deliveries and read results become UI state here, on the window
+	// goroutine.
+	results := make([]session.Result, 0, 8)
+drain:
+	for {
+		select {
+		case r := <-sc.fetcher.Results():
+			results = append(results, r)
+		default:
+			break drain
+		}
 	}
+	sc.update(q.drain(), results)
 	for {
 		// Letters arrive as their upper-case name on every platform Gio
 		// supports.
@@ -179,24 +194,27 @@ func frame(gtx layout.Context, m *hostconn.Manager, q *updateQueue, light, dark 
 	if darkMode {
 		th = dark
 	}
-	drawWindow(gtx, th, m)
+	drawWindow(gtx, th, sc)
 	return darkMode
 }
 
-// drawWindow lays out the skeleton: a body placeholder for the screens of
-// F10.3–F10.5 and the status bar with the connection state (F10.2a). Every
-// color comes from the theme tokens (F10.2c); appwin defines none of its own.
-func drawWindow(gtx layout.Context, th theme.Theme, m *hostconn.Manager) {
+// drawWindow lays out the screens — the sidebar and the read-only transcript
+// pane (F10.4a) — and the status bar with the connection state (F10.2a).
+// Every color comes from the theme tokens (F10.2c); appwin defines none of
+// its own.
+func drawWindow(gtx layout.Context, th theme.Theme, sc *screens) {
 	paint.Fill(gtx.Ops, th.Chrome().AppBg)
-	state, reason := m.State()
+	state, reason := sc.m.State()
 	status := statusLine(state, reason)
 	mt := th.Material()
 	layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				title := material.Label(mt, unit.Sp(20), "Fugue")
-				title.Color = th.Chrome().Fg
-				return title.Layout(gtx)
+			inset := layout.Inset{
+				Top: unit.Dp(8), Left: unit.Dp(12), Right: unit.Dp(12),
+			}
+			return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				sc.layout(gtx, th)
+				return layout.Dimensions{Size: gtx.Constraints.Max}
 			})
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
