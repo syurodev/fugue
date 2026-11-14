@@ -53,5 +53,8 @@ scope has no such gap. Closing it on macOS needs kernel-level containment and is
 stage A. Related limits of the same mechanism:
 
 - The check runs at `Hello`. A local client that was accepted keeps its principal.
-- It covers live sessions. Processes a closed session left behind (stop proof `unknown`) are
-  not tracked any more.
+- Ended or failed sessions stay retained in the peer check until their stop proof proves the
+  tree empty or a later check observes no live members (when stop failed or proof is unknown
+  without a verifiable empty tree, they stay retained for the host's lifetime).
+- A continuous stream of spawns can make the local peer check wait up to the 5 s cap and deny
+  (fail closed); affected local clients retry `Hello`.

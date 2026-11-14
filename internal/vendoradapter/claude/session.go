@@ -114,6 +114,16 @@ func (s *Session) OwnsPID(pid int) (bool, error) {
 	return owned, nil
 }
 
+// TreeEmpty reports whether this session's process containment is verified to
+// have no remaining live processes.
+func (s *Session) TreeEmpty() (bool, error) {
+	empty, err := s.proc.TreeEmpty()
+	if err != nil {
+		return false, errcode.Wrap(errcode.Internal, "check whether the session process tree is empty", err)
+	}
+	return empty, nil
+}
+
 // StderrRing returns the 64 KiB ring buffer capturing raw process stderr.
 func (s *Session) StderrRing() *process.RingBuffer {
 	return s.proc.StderrRing()

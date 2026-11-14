@@ -155,6 +155,16 @@ func TestOwnsPIDKeepsReparentedChildAcrossOutOfOrderScans(t *testing.T) {
 	proc := &Process{tracker: tracker}
 
 	scan1Done := make(chan struct{})
+	var releaseOnce sync.Once
+	release := func() {
+		releaseOnce.Do(func() {
+			close(table.releaseScan1)
+		})
+	}
+	t.Cleanup(func() {
+		release()
+		<-scan1Done
+	})
 	supervise.Go(t.Context(), "test.stale-tracker-scan", func(context.Context) error {
 		defer close(scan1Done)
 		tracker.snapshot()
@@ -169,7 +179,7 @@ func TestOwnsPIDKeepsReparentedChildAcrossOutOfOrderScans(t *testing.T) {
 	}
 
 	// Unblock the older snapshot (missing 101) so it merges after the newer scan.
-	close(table.releaseScan1)
+	release()
 	<-scan1Done
 
 	// Child has now reparented to PID 1 with its own process group; it stays owned
@@ -185,7 +195,56 @@ func TestOwnsPIDOfARealProcessTree(t *testing.T) {
 	if owned, err := helper.OwnsPID(helper.PID()); err != nil || !owned {
 		t.Fatalf("OwnsPID(leader) = %v, %v; want true", owned, err)
 	}
+	if empty, err := helper.TreeEmpty(); err != nil || empty {
+		t.Fatalf("TreeEmpty() while leader alive = %v, %v; want false, nil", empty, err)
+	}
 	if owned, err := helper.OwnsPID(os.Getpid()); err != nil || owned {
 		t.Fatalf("OwnsPID(the test process) = %v, %v; want false", owned, err)
+	}
+}
+
+func TestProcessTreeEmpty(t *testing.T) {
+	t.Parallel()
+	assertScopedTreeEmpty(t)
+	assertTrackerTreeEmpty(t)
+}
+
+func assertScopedTreeEmpty(t *testing.T) {
+	t.Helper()
+	dir := t.TempDir()
+	if err := writeRootFile(dir, "cgroup.procs", []byte("4242\n")); err != nil {
+		t.Fatal(err)
+	}
+	scoped := &Process{scope: &cgroupScope{unitName: "fugue-vendor-s2.scope", dirPath: dir}}
+	if empty, err := scoped.TreeEmpty(); err != nil || empty {
+		t.Fatalf("scoped TreeEmpty(non-empty) = %v, %v; want false, nil", empty, err)
+	}
+	if err := writeRootFile(dir, "cgroup.procs", nil); err != nil {
+		t.Fatal(err)
+	}
+	if empty, err := scoped.TreeEmpty(); err != nil || !empty {
+		t.Fatalf("scoped TreeEmpty(empty) = %v, %v; want true, nil", empty, err)
+	}
+	if err := writeRootFile(dir, "cgroup.procs", []byte("bad\n")); err != nil {
+		t.Fatal(err)
+	}
+	if empty, err := scoped.TreeEmpty(); err == nil || empty {
+		t.Fatalf("scoped TreeEmpty(unreadable) = %v, %v; want error", empty, err)
+	}
+}
+
+func assertTrackerTreeEmpty(t *testing.T) {
+	t.Helper()
+	aliveTable := fakeProcTable{entries: []procEntry{{pid: 100, ppid: 50, pgid: 100, startToken: outOfOrderLeader}}}
+	trackerAlive := newDescendantTracker(100, outOfOrderLeader, aliveTable, clock.NewFake(testEpoch()))
+	if empty, err := (&Process{tracker: trackerAlive}).TreeEmpty(); err != nil || empty {
+		t.Fatalf("tracker TreeEmpty(leader alive) = %v, %v; want false, nil", empty, err)
+	}
+	trackerAlive.source = fakeProcTable{}
+	if empty, err := (&Process{tracker: trackerAlive}).TreeEmpty(); err != nil || !empty {
+		t.Fatalf("tracker TreeEmpty(all exited) = %v, %v; want true, nil", empty, err)
+	}
+	if empty, err := (&Process{}).TreeEmpty(); err == nil || empty {
+		t.Fatalf("TreeEmpty(no containment) = %v, %v; want error", empty, err)
 	}
 }

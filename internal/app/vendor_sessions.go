@@ -63,6 +63,7 @@ type VendorSessions struct {
 	mu                sync.RWMutex
 	actors            map[string]*vendorSessionActor
 	pendingOwners     map[*pendingOwner]struct{}
+	retainedOwners    map[*retainedOwner]struct{}
 	closed            bool
 	startReservations int
 	inflightSpawns    int
@@ -70,6 +71,10 @@ type VendorSessions struct {
 }
 
 type pendingOwner struct {
+	owner vendor.PeerOwner
+}
+
+type retainedOwner struct {
 	owner vendor.PeerOwner
 }
 
@@ -87,8 +92,9 @@ func NewVendorSessions(ctx context.Context, deps *VendorSessionDeps) (*VendorSes
 		spawn: func(name string, fn func(context.Context) error) *supervise.Task {
 			return supervise.Go(ctx, name, fn)
 		},
-		actors:        make(map[string]*vendorSessionActor),
-		pendingOwners: make(map[*pendingOwner]struct{}),
+		actors:         make(map[string]*vendorSessionActor),
+		pendingOwners:  make(map[*pendingOwner]struct{}),
+		retainedOwners: make(map[*retainedOwner]struct{}),
 	}, nil
 }
 
@@ -110,13 +116,12 @@ func (m *VendorSessions) Start(ctx context.Context, session *vendorstore.Session
 	if err != nil {
 		return err
 	}
-	defer m.removePendingOwner(pending)
 	setProcessIdentity(session, started)
 	session.State = vendorstore.StateStarting
 	session.ResumeHandle = spec.ResumeSessionID
 	actor := newVendorSessionActor(m, session, started, observations)
 	if err := m.installActor(session.ID, actor, pending); err != nil {
-		m.closeUntracked(ctx, started)
+		m.closeAndSettlePending(ctx, started, pending)
 		return err
 	}
 	if err := actor.call(ctx, actorCommand{kind: commandCreate}); err != nil {
@@ -191,11 +196,10 @@ func (m *VendorSessions) Resume(ctx context.Context, sessionID string, spec *ven
 	if err != nil {
 		return err
 	}
-	defer m.removePendingOwner(pending)
 	setProcessIdentity(&info, started)
 	actor := newVendorSessionActor(m, &info, started, observations)
 	if err := m.installActor(sessionID, actor, pending); err != nil {
-		m.closeUntracked(ctx, started)
+		m.closeAndSettlePending(ctx, started, pending)
 		return err
 	}
 	if err := actor.call(ctx, actorCommand{kind: commandResume}); err != nil {
@@ -257,14 +261,13 @@ func (m *VendorSessions) startAdapter(ctx context.Context, spec *vendor.StartSpe
 	session, err := m.deps.Adapter.Start(ctx, &specCopy)
 	if err != nil {
 		finishSpawn()
-		m.removePendingOwner(pending)
+		m.retirePendingOwner(pending)
 		return nil, nil, nil, safeActorError(err)
 	}
 	finishSpawn()
 	observations, ok := observationsOf(session)
 	if !ok {
-		m.closeUntracked(ctx, session)
-		m.removePendingOwner(pending)
+		m.closeAndSettlePending(ctx, session, pending)
 		return nil, nil, nil, errcode.New(errcode.FailedPrecondition, "adapter session does not expose observations")
 	}
 	return session, observations, pending, nil
@@ -290,11 +293,45 @@ func (m *VendorSessions) removePendingOwner(p *pendingOwner) {
 	m.mu.Unlock()
 }
 
-func (m *VendorSessions) closeUntracked(ctx context.Context, session vendor.Session) {
+func (m *VendorSessions) retainOwner(owner vendor.PeerOwner) {
+	if owner == nil {
+		owner = missingPeerOwner{}
+	}
+	m.mu.Lock()
+	m.retainedOwners[&retainedOwner{owner: owner}] = struct{}{}
+	m.mu.Unlock()
+}
+
+func (m *VendorSessions) retirePendingOwner(p *pendingOwner) {
+	if p == nil {
+		return
+	}
+	m.mu.Lock()
+	delete(m.pendingOwners, p)
+	if p.owner != nil {
+		m.retainedOwners[&retainedOwner{owner: p.owner}] = struct{}{}
+	}
+	m.mu.Unlock()
+}
+
+func (m *VendorSessions) closeAndSettlePending(ctx context.Context, session vendor.Session, pending *pendingOwner) {
 	proof, err := session.Close(context.WithoutCancel(ctx), vendor.CloseHostStop)
 	if err != nil {
 		m.deps.Logger.ErrorContext(ctx, "cleaning up an untracked vendor process failed", "proof", proof.Status)
 	}
+	if err == nil && proof.Status == process.StopProofProved {
+		m.removePendingOwner(pending)
+		return
+	}
+	if pending != nil {
+		m.retirePendingOwner(pending)
+		return
+	}
+	if owner, ok := session.(vendor.PeerOwner); ok {
+		m.retainOwner(owner)
+		return
+	}
+	m.retainOwner(missingPeerOwner{})
 }
 
 func (m *VendorSessions) installActor(sessionID string, actor *vendorSessionActor, pending *pendingOwner) error {

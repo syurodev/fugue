@@ -12,16 +12,27 @@ import (
 
 const defaultInflightSpawnWaitCap = 5 * time.Second
 
-// OwnsPeer reports whether pid belongs to the process tree of any live or
-// starting session (roadmap Q-41 A). When vendor spawns are in flight between
-// adapter Start and OnSpawned registration, it waits (bounded by ctx and a
-// short cap) for registrations to settle before evaluating ownership, and fails
-// closed on timeout or cancellation.
+type peerTreeEmptyChecker interface {
+	TreeEmpty() (bool, error)
+}
+
+type missingPeerOwner struct{}
+
+func (missingPeerOwner) OwnsPID(int) (bool, error) {
+	return false, errcode.New(errcode.Internal, "a vendor session cannot report its process tree")
+}
+
+// OwnsPeer reports whether pid belongs to the process tree of any live,
+// starting, or retained ended/failed session whose tree is not yet verified
+// empty (roadmap Q-41 A). When vendor spawns are in flight between adapter
+// Start and OnSpawned registration, it waits (bounded by ctx and a short cap)
+// for registrations to settle before evaluating ownership, and fails closed on
+// timeout or cancellation.
 func (m *VendorSessions) OwnsPeer(ctx context.Context, pid int) (bool, error) {
 	if ctx == nil {
 		return false, errcode.New(errcode.InvalidArgument, "peer check context is required")
 	}
-	pending, actors, err := m.snapshotOwnersAfterInflight(ctx)
+	pending, actors, retained, err := m.snapshotOwnersAfterInflight(ctx)
 	if err != nil {
 		return false, err
 	}
@@ -31,20 +42,57 @@ func (m *VendorSessions) OwnsPeer(ctx context.Context, pid int) (bool, error) {
 		}
 	}
 	for _, actor := range actors {
-		select {
-		case <-actor.done:
-			continue
-		default:
-		}
-		tree, ok := actor.session.(vendor.PeerOwner)
-		if !ok {
-			return false, errcode.New(errcode.Internal, "a vendor session cannot report its process tree")
-		}
-		if owned, err := checkPeerOwner(tree, pid); err != nil || owned {
+		if owned, err := checkLiveActorOwner(actor, pid); err != nil || owned {
 			return owned, err
 		}
 	}
+	return m.checkRetainedOwners(retained, pid)
+}
+
+func checkLiveActorOwner(actor *vendorSessionActor, pid int) (bool, error) {
+	select {
+	case <-actor.done:
+		return false, nil
+	default:
+	}
+	tree, ok := actor.session.(vendor.PeerOwner)
+	if !ok {
+		return false, errcode.New(errcode.Internal, "a vendor session cannot report its process tree")
+	}
+	return checkPeerOwner(tree, pid)
+}
+
+func (m *VendorSessions) checkRetainedOwners(retained []*retainedOwner, pid int) (bool, error) {
+	var verifiedEmpty []*retainedOwner
+	defer func() {
+		m.pruneRetainedOwners(verifiedEmpty)
+	}()
+	for _, r := range retained {
+		if owned, err := checkPeerOwner(r.owner, pid); err != nil || owned {
+			return owned, err
+		}
+		if checker, ok := r.owner.(peerTreeEmptyChecker); ok {
+			empty, err := checker.TreeEmpty()
+			if err != nil {
+				return false, errcode.Wrap(errcode.Internal, "check whether a retained vendor session tree is empty", err)
+			}
+			if empty {
+				verifiedEmpty = append(verifiedEmpty, r)
+			}
+		}
+	}
 	return false, nil
+}
+
+func (m *VendorSessions) pruneRetainedOwners(empty []*retainedOwner) {
+	if len(empty) == 0 {
+		return
+	}
+	m.mu.Lock()
+	for _, r := range empty {
+		delete(m.retainedOwners, r)
+	}
+	m.mu.Unlock()
 }
 
 func (m *VendorSessions) beginInflightSpawn() func() {
@@ -70,7 +118,7 @@ func (m *VendorSessions) endInflightSpawn() {
 	m.mu.Unlock()
 }
 
-func (m *VendorSessions) snapshotOwnersAfterInflight(ctx context.Context) ([]vendor.PeerOwner, []*vendorSessionActor, error) {
+func (m *VendorSessions) snapshotOwnersAfterInflight(ctx context.Context) ([]vendor.PeerOwner, []*vendorSessionActor, []*retainedOwner, error) {
 	var timer clock.Timer
 	defer func() {
 		if timer != nil {
@@ -78,9 +126,9 @@ func (m *VendorSessions) snapshotOwnersAfterInflight(ctx context.Context) ([]ven
 		}
 	}()
 	for {
-		waitCh, pending, actors := m.trySnapshotOwners()
+		waitCh, pending, actors, retained := m.trySnapshotOwners()
 		if waitCh == nil {
-			return pending, actors, nil
+			return pending, actors, retained, nil
 		}
 		if timer == nil {
 			timer = m.deps.Clock.NewTimer(defaultInflightSpawnWaitCap)
@@ -89,16 +137,16 @@ func (m *VendorSessions) snapshotOwnersAfterInflight(ctx context.Context) ([]ven
 			m.deps.TestOnWaitInflightSpawn()
 		}
 		if err := waitForSpawnSettle(ctx, waitCh, timer.C()); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 }
 
-func (m *VendorSessions) trySnapshotOwners() (<-chan struct{}, []vendor.PeerOwner, []*vendorSessionActor) {
+func (m *VendorSessions) trySnapshotOwners() (<-chan struct{}, []vendor.PeerOwner, []*vendorSessionActor, []*retainedOwner) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if m.spawnSettled != nil {
-		return m.spawnSettled, nil, nil
+		return m.spawnSettled, nil, nil, nil
 	}
 	actors := make([]*vendorSessionActor, 0, len(m.actors))
 	for _, actor := range m.actors {
@@ -108,7 +156,11 @@ func (m *VendorSessions) trySnapshotOwners() (<-chan struct{}, []vendor.PeerOwne
 	for p := range m.pendingOwners {
 		pending = append(pending, p.owner)
 	}
-	return nil, pending, actors
+	retained := make([]*retainedOwner, 0, len(m.retainedOwners))
+	for r := range m.retainedOwners {
+		retained = append(retained, r)
+	}
+	return nil, pending, actors, retained
 }
 
 func waitForSpawnSettle(ctx context.Context, settled <-chan struct{}, deadline <-chan time.Time) error {

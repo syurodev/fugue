@@ -37,6 +37,11 @@ func (p *Process) OwnsPID(int) (bool, error) {
 	return false, ErrUnsupportedPlatform
 }
 
+// TreeEmpty fails closed on unsupported platforms.
+func (p *Process) TreeEmpty() (bool, error) {
+	return false, ErrUnsupportedPlatform
+}
+
 // Stdout returns nil on unsupported platforms.
 func (p *Process) Stdout() *LineReader {
 	return nil
