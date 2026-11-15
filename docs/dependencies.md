@@ -57,6 +57,7 @@ Bundled static assets of `ui/` (DA-04), not Go modules:
 | --- | --- | --- | --- |
 | `ui/internal/fonts/data/Inter-Variable.ttf` | OFL-1.1 | [rsms/inter v4.1](https://github.com/rsms/inter/releases/tag/v4.1) | user, ADR 0002 |
 | `ui/internal/fonts/data/JetBrainsMono-Variable.ttf` | OFL-1.1 | [JetBrains/JetBrainsMono v2.304](https://github.com/JetBrains/JetBrainsMono/releases/tag/v2.304) | user, ADR 0002 |
+| `ui/internal/kit/icondata/testdata/*.txt` (source), `ui/internal/kit/icondata/icondata.go` (generated) | ISC ([LICENSE-lucide.txt](ui/internal/kit/icondata/LICENSE-lucide.txt), kept beside the code like the fonts' OFL files) | [Lucide](https://lucide.dev) icon path data for the icons the kit packages (ui-kit §10), one file per icon, regenerated into `icondata.go` by the committed generator | user, roadmap F10.8 |
 
 The OFL-1.1 license files ship beside the fonts (`Inter-OFL.txt`, `JetBrainsMono-OFL.txt`); OFL-1.1 is
 an approved open font license per ADR 0002 and is not on the code-license list above because it

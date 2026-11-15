@@ -1,0 +1,30 @@
+// Code generated from the Lucide path data in testdata (ISC license at
+// LICENSE-lucide.txt); DO NOT EDIT. Regenerate with:
+//
+//	go test -tags regenerate ./internal/kit/icondata -run TestRegenerateIconData
+
+package icondata
+
+// Check is the "check" icon; the constants below are the packaged set.
+const (
+	Check = "M20 6L9 17L4 12"
+
+	// ChevronDown is the "chevron-down" icon.
+	ChevronDown = "M6 9L12 15L18 9"
+	// ChevronRight is the "chevron-right" icon.
+	ChevronRight = "M9 18L15 12L9 6"
+	// Search is the "search" icon.
+	Search = "M21 21L16.66 16.66M3 11C3 15.418 6.582 19 11 19C15.418 19 19 15.418 19 11C19 6.582 15.418 3 11 3C6.582 3 3 6.582 3 11"
+	// X is the "x" icon.
+	X = "M18 6L6 18M6 6L18 18"
+	// Eye is the "eye" icon.
+	Eye = "M2.062 12.348C1.979 12.123 1.979 11.877 2.062 11.652C3.722 7.627 7.646 5.001 12 5.001C16.354 5.001 20.278 7.627 21.938 11.652C22.021 11.877 22.021 12.123 21.938 12.348C20.278 16.373 16.354 18.999 12 18.999C7.646 18.999 3.722 16.373 2.062 12.348M9 12C9 13.657 10.343 15 12 15C13.657 15 15 13.657 15 12C15 10.343 13.657 9 12 9C10.343 9 9 10.343 9 12"
+	// EyeOff is the "eye-off" icon.
+	EyeOff = "M10.733 5.076C15.52 4.506 20.101 7.194 21.938 11.651C22.021 11.876 22.021 12.122 21.938 12.347C21.57 13.238 21.085 14.076 20.494 14.837M14.084 14.158C12.907 15.295 11.036 15.278 9.879 14.121C8.722 12.964 8.705 11.093 9.842 9.916M17.479 17.499C14.795 19.089 11.553 19.435 8.594 18.446C5.635 17.457 3.251 15.232 2.062 12.348C1.979 12.123 1.979 11.877 2.062 11.652C2.949 9.502 4.509 7.697 6.508 6.509M2 2L22 22"
+	// Copy is the "copy" icon.
+	Copy = "M10 8L20 8C21.105 8 22 8.895 22 10L22 20C22 21.105 21.105 22 20 22L10 22C8.895 22 8 21.105 8 20L8 10C8 8.895 8.895 8 10 8ZM4 16C2.9 16 2 15.1 2 14L2 4C2 2.9 2.9 2 4 2L14 2C15.1 2 16 2.9 16 4"
+	// RotateCCW is the "rotate-ccw" icon.
+	RotateCCW = "M3 12C3 16.971 7.029 21 12 21C16.971 21 21 16.971 21 12C21 7.029 16.971 3 12 3C9.484 3.009 7.069 3.991 5.26 5.74L3 8M3 3L3 8L8 8"
+	// CircleHelp is the "circle-help" icon.
+	CircleHelp = "M2 12C2 17.523 6.477 22 12 22C17.523 22 22 17.523 22 12C22 6.477 17.523 2 12 2C6.477 2 2 6.477 2 12M9 9.5C9 8.119 10.343 7 12 7C13.657 7 15 8.119 15 9.5C15 11.5 13 11.5 12 13M12 17L12.01 17"
+)

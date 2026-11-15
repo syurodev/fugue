@@ -58,7 +58,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev \
             libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev \
-            libffi-dev libxcursor-dev libvulkan-dev
+            libffi-dev libxcursor-dev libvulkan-dev xvfb
       - name: build
         working-directory: ui
         run: go build ./...
@@ -71,6 +71,17 @@ jobs:
         run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run ./...
       # The evidence test builds fugue from the core module's cmd/fugue, so
       # the whole repository must be present; it is.
+      #
+      # The kit's icon evidence test renders through gio's headless window,
+      # which needs an EGL context; the runner has no GPU, so the test step
+      # runs under Xvfb with Mesa's software GL.
       - name: test
         working-directory: ui
         run: go test -race -shuffle=on -count=1 ./...
+        if: matrix.os == 'macos-latest'
+      - name: test (under Xvfb, software GL)
+        working-directory: ui
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: xvfb-run -a go test -race -shuffle=on -count=1 ./...
+        if: matrix.os == 'ubuntu-latest'
