@@ -15,6 +15,45 @@ import (
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
+// TestEveryIconParses runs the path parser over every packaged icon, so a
+// new glyph cannot ship with path data the parser mishandles: the copy
+// icon's Z once sent close() into an endless loop because it never
+// consumed its token, and none of the first nine icons had a Z to catch it.
+func TestEveryIconParses(t *testing.T) {
+	t.Parallel()
+	for _, name := range []IconName{
+		IconCheck, IconChevronDown, IconChevronRight, IconSearch, IconClose,
+		IconEye, IconEyeOff, IconCopy, IconRestart, IconHelp,
+	} {
+		t.Run(string(name), func(t *testing.T) {
+			t.Parallel()
+			paths, err := parseIconPath(mustIconData(t, name))
+			if err != nil {
+				t.Fatalf("parse %s: %v", name, err)
+			}
+			if len(paths) == 0 {
+				t.Fatalf("%s parsed to no subpaths", name)
+			}
+			for _, sp := range paths {
+				if len(sp.Segs) == 0 {
+					t.Fatalf("%s has an empty subpath", name)
+				}
+			}
+		})
+	}
+}
+
+// mustIconData returns the generated data of one icon, failing the test on
+// an unknown name.
+func mustIconData(t *testing.T, n IconName) string {
+	t.Helper()
+	d, err := pathOf(n)
+	if err != nil {
+		t.Fatalf("path data of %s: %v", n, err)
+	}
+	return d
+}
+
 // TestIconStrokeWidthIsTheTokenAtEveryDensity pins §3.0 and §6.1 at every
 // density: the inked stroke of an icon is theme.IconStroke(size) dp wide —
 // IconStroke × PxPerDp × UIScale in pixels — at any pixel density and UI
