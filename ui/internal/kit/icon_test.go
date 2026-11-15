@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"math"
+	"sync"
 	"testing"
 
 	"gioui.org/gpu/headless"
@@ -27,6 +28,12 @@ import (
 // geometry, so the comparison holds to a ±0.5 px band.
 func TestIconStrokeWidthIsTheTokenAtEveryDensity(t *testing.T) {
 	t.Parallel()
+	// glGate serializes the headless GL renders of the subtests: the
+	// software GL of the CI runners loses EGL contexts (BAD_CONTEXT,
+	// BAD_DISPLAY) when several goroutines drive EGL at the same time,
+	// while one goroutine at a time is stable on macOS Metal and Mesa's
+	// llvmpipe alike.
+	var glGate sync.Mutex
 	for _, tc := range []struct {
 		name   string
 		size   unit.Dp
@@ -38,9 +45,15 @@ func TestIconStrokeWidthIsTheTokenAtEveryDensity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			th := theme.Dark(nil)
+			// One window for the whole subtest: the densities share it, so
+			// the GL context is created once.
+			glGate.Lock()
+			defer glGate.Unlock()
+			win := openHeadless(t)
+			defer win.Release()
 			for _, pxPerDp := range []float32{2, 1.25, 1} {
 				for _, ui := range []float32{1.25, 1} {
-					assertStrokeWidth(t, &th, tc.size, tc.stroke, pxPerDp, ui)
+					assertStrokeWidth(t, win, &th, tc.size, tc.stroke, pxPerDp, ui)
 				}
 			}
 		})
@@ -48,10 +61,14 @@ func TestIconStrokeWidthIsTheTokenAtEveryDensity(t *testing.T) {
 	t.Run("cache is reused across densities", func(t *testing.T) {
 		t.Parallel()
 		th := theme.Dark(nil)
+		glGate.Lock()
+		defer glGate.Unlock()
+		win := openHeadless(t)
+		defer win.Release()
 		env := &Env{Th: &th}
 		for _, pxPerDp := range []float32{2, 1.25, 1} {
 			env.UIScale = 1.25
-			measureStrokeWidth(t, env, theme.IconMD, pxPerDp)
+			measureStrokeWidth(t, win, env, theme.IconMD, pxPerDp)
 			if n := len(env.iconStrokes); n != 1 {
 				t.Fatalf("cache holds %d strokes at PxPerDp %v, want the one dp-size entry", n, pxPerDp)
 			}
@@ -59,29 +76,35 @@ func TestIconStrokeWidthIsTheTokenAtEveryDensity(t *testing.T) {
 	})
 }
 
+// openHeadless opens the 64×64 render window the width measurements draw
+// into.
+func openHeadless(t *testing.T) *headless.Window {
+	t.Helper()
+	win, err := headless.NewWindow(64, 64)
+	if err != nil {
+		t.Fatalf("open a headless window: %v", err)
+	}
+	return win
+}
+
 // assertStrokeWidth builds a fresh Env at the density and checks the inked
 // stroke against the token: the cache must be correct at whatever density
 // builds it first, not only at density 1.
-func assertStrokeWidth(t *testing.T, th *theme.Theme, size unit.Dp, stroke, pxPerDp, ui float32) {
+func assertStrokeWidth(t *testing.T, win *headless.Window, th *theme.Theme, size unit.Dp, stroke, pxPerDp, ui float32) {
 	t.Helper()
 	env := &Env{Th: th, UIScale: ui}
-	got := measureStrokeWidth(t, env, size, pxPerDp)
+	got := measureStrokeWidth(t, win, env, size, pxPerDp)
 	want := float64(stroke) * float64(pxPerDp) * float64(ui)
 	if math.Abs(got-want) > 0.5 {
 		t.Errorf("PxPerDp %v, UI scale %v: stroke %.2f px, want %.2f ±0.5", pxPerDp, ui, got, want)
 	}
 }
 
-// measureStrokeWidth draws IconCheck at size into a headless window with
-// the given density and the env's UI scale and returns the perpendicular
-// ink width in pixels, measured from the alpha coverage of a scan row.
-func measureStrokeWidth(t *testing.T, env *Env, size unit.Dp, pxPerDp float32) float64 {
+// measureStrokeWidth draws IconCheck at size into win with the given
+// density and the env's UI scale and returns the perpendicular ink width in
+// pixels, measured from the alpha coverage of a scan row.
+func measureStrokeWidth(t *testing.T, win *headless.Window, env *Env, size unit.Dp, pxPerDp float32) float64 {
 	t.Helper()
-	win, err := headless.NewWindow(64, 64)
-	if err != nil {
-		t.Fatalf("open a headless window: %v", err)
-	}
-	defer win.Release()
 	var ops op.Ops
 	gtx := layout.Context{
 		Ops:         &ops,
