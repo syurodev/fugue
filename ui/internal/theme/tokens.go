@@ -22,13 +22,14 @@ const (
 	SpaceXXXL = unit.Dp(32)
 )
 
-// Corner radii (§3.2). RadiusFull is half the element's height, computed at
-// the point of use and never a constant here.
+// Corner radii (§3.2, v0.3). radius.full is half the element's height,
+// computed at the point of use and never a constant here.
 const (
-	RadiusSM = unit.Dp(4)
-	RadiusMD = unit.Dp(6)
-	RadiusLG = unit.Dp(8)
-	RadiusXL = unit.Dp(12)
+	RadiusXS = unit.Dp(4)
+	RadiusSM = unit.Dp(6)
+	RadiusMD = unit.Dp(10)
+	RadiusLG = unit.Dp(14)
+	RadiusXL = unit.Dp(16)
 )
 
 // Control, row and tab heights (§3.4).
@@ -53,13 +54,21 @@ const (
 const (
 	// Hairline is the width of borders and dividers.
 	Hairline = unit.Dp(1)
-	// FocusStroke is the keyboard focus ring width; the ring sits FocusInset
-	// inside the control's edge.
+	// FocusStroke is the keyboard focus ring width; the ring is drawn
+	// FocusOffset outside the control's edge (§3.4, v0.3), so a standalone
+	// control needs FocusStroke+FocusOffset of room around it.
 	FocusStroke = unit.Dp(2)
-	FocusInset  = unit.Dp(1)
+	FocusOffset = unit.Dp(2)
 	// HitMin is the smallest pointer target (WCAG 2.5.8), even for an icon
 	// of IconXS or IconSM.
 	HitMin = unit.Dp(24)
+)
+
+// Press scale and disabled opacity (§3.4, §3.5): a held control draws at
+// MotionPress of its size, a disabled one at DisabledOpacity.
+const (
+	MotionPress     = float32(0.97)
+	DisabledOpacity = float32(0.5)
 )
 
 // IconStroke returns the icon stroke width of §3.4 for an icon of size s:
