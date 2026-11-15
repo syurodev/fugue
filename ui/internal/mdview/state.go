@@ -48,7 +48,7 @@ func (s *State) PollOpen() (OpenLink, bool) {
 // sync keeps the state valid for this frame: another document starts with
 // fresh link and scroll state, and a changed shaper, scale or theme mode
 // drops the laid-out text, which depends on them.
-func (s *State) sync(doc *markdown.Doc, shaper *text.Shaper, m unit.Metric, chrome theme.Chrome) {
+func (s *State) sync(doc *markdown.Doc, shaper *text.Shaper, m unit.Metric, chrome *theme.Chrome) {
 	if s.doc != doc {
 		s.doc = doc
 		s.links = map[*markdown.Link]*linkState{}
@@ -57,8 +57,8 @@ func (s *State) sync(doc *markdown.Doc, shaper *text.Shaper, m unit.Metric, chro
 		s.pinned = nil
 		s.flows = nil
 	}
-	if s.shaper != shaper || s.metric != m || s.chrome != chrome || len(s.flows) > maxCachedFlows {
-		s.shaper, s.metric, s.chrome = shaper, m, chrome
+	if s.shaper != shaper || s.metric != m || s.chrome != *chrome || len(s.flows) > maxCachedFlows {
+		s.shaper, s.metric, s.chrome = shaper, m, *chrome
 		s.flows = nil
 	}
 	if s.flows == nil {

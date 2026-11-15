@@ -86,6 +86,22 @@ type Chrome struct {
 	ActionHover color.NRGBA
 	// ActionPressed is Action's fill while pressed.
 	ActionPressed color.NRGBA
+	// The interaction washes of ui-kit §3.5, derived from this mode's Fg so
+	// they keep their contrast on every surface Fg is readable on. A
+	// component never mixes a wash of its own; drawing Fg-derived washes
+	// over a surface is exactly drawing text on it, one derivation to check.
+	// HoverWash overlays a resting row, ghost button or tab under the
+	// pointer.
+	HoverWash color.NRGBA
+	// PressedWash overlays a control while it is held down.
+	PressedWash color.NRGBA
+	// SelectedWash is the background of the selected item, stronger than
+	// HoverWash so selection stays visible while another row hovers.
+	SelectedWash color.NRGBA
+	// FgDisabled is the text and icon color of a disabled control.
+	FgDisabled color.NRGBA
+	// Scrim is the dim behind a dialog: black at 40%, mode-independent.
+	Scrim color.NRGBA
 }
 
 // Palette is the eight-hue tier for syntax, status and accents. Hues are
@@ -126,17 +142,26 @@ type Theme struct {
 
 // Light builds the light mode over shaper.
 func Light(shaper *text.Shaper) Theme {
-	return newTheme(lightChrome(), lightPalette(), shaper)
+	c := lightChrome()
+	return newTheme(&c, lightPalette(), shaper)
 }
 
 // Dark builds the dark mode over shaper.
 func Dark(shaper *text.Shaper) Theme {
-	return newTheme(darkChrome(), darkPalette(), shaper)
+	c := darkChrome()
+	return newTheme(&c, darkPalette(), shaper)
 }
 
 // newTheme assembles one mode: chrome and palette are the tables, and every
 // derived color is computed here so the mapping exists exactly once.
-func newTheme(c Chrome, p Palette, shaper *text.Shaper) Theme {
+func newTheme(c *Chrome, p Palette, shaper *text.Shaper) Theme {
+	// The §3.5 washes derive from Fg here, once per mode, so no component
+	// ever fades a color of its own.
+	c.HoverWash = fgWash(c.Fg, 0.07)
+	c.PressedWash = fgWash(c.Fg, 0.14)
+	c.SelectedWash = fgWash(c.Fg, 0.11)
+	c.FgDisabled = fgWash(c.Fg, 0.35)
+	c.Scrim = color.NRGBA{A: 0x66} // black at 40%
 	status := Status{
 		Info:    p.Blue,
 		Success: p.Green,
@@ -157,7 +182,7 @@ func newTheme(c Chrome, p Palette, shaper *text.Shaper) Theme {
 		RoleInvalid:    {Color: status.Danger, Weight: defaultWeight},
 	}
 	t := Theme{
-		chrome:  c,
+		chrome:  *c,
 		palette: p,
 		status:  status,
 		link:    p.Blue,
@@ -278,4 +303,17 @@ func nrgba(v uint32) color.NRGBA {
 		B: uint8(v & 0xff),
 		A: 0xff,
 	}
+}
+
+// fgWash returns c with its alpha scaled by fraction, clamped to [0, 1]:
+// the Fg-derived wash of §3.5.
+func fgWash(c color.NRGBA, fraction float32) color.NRGBA {
+	if fraction < 0 {
+		fraction = 0
+	}
+	if fraction > 1 {
+		fraction = 1
+	}
+	c.A = uint8(float32(c.A) * fraction)
+	return c
 }
