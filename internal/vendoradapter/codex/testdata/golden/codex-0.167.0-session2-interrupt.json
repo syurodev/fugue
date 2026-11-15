@@ -1,0 +1,238 @@
+{
+ "session": "session-1",
+ "vendor": "codex",
+ "summary": {
+  "partials": 0,
+  "notices": 6,
+  "server_requests": 0
+ },
+ "steps": [
+  {
+   "line": 2,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "remoteControl/status/changed"
+    },
+    "id": "notice-line-2",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-2",
+    "revision": 0,
+    "turn": ""
+   }
+  },
+  {
+   "line": 3,
+   "op": "init",
+   "init": {
+    "Version": "0.167.0",
+    "SessionID": "uuid-0002",
+    "Model": "gpt-6-luna",
+    "PermissionMode": "on-request",
+    "SlashCommands": [
+     "/compact",
+     "/review"
+    ]
+   }
+  },
+  {
+   "line": 5,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-5",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-5",
+    "revision": 0,
+    "turn": ""
+   }
+  },
+  {
+   "line": 7,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "thread/status/changed"
+    },
+    "id": "notice-line-7",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-7",
+    "revision": 0,
+    "turn": ""
+   }
+  },
+  {
+   "line": 9,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "account/updated"
+    },
+    "id": "notice-line-9",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-9",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 10,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-10",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-10",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 11,
+   "op": "record",
+   "item": {
+    "content": {
+     "attachments": [],
+     "text": "Run the shell command `sleep 5` and then reply DONE."
+    },
+    "id": "uuid-0004",
+    "kind": "user_message",
+    "metadata": {
+     "origin": "user"
+    },
+    "raw": "uuid-0004",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 13,
+   "op": "record",
+   "item": {
+    "content": {
+     "input": "/bin/zsh -lc 'sleep 5'",
+     "output": "",
+     "title": "/bin/zsh -lc 'sleep 5'"
+    },
+    "id": "exec-uuid-0005",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "running",
+     "tool": "commandExecution"
+    },
+    "raw": "exec-uuid-0005",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 14,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "turn-1-usage",
+    "kind": "usage",
+    "metadata": {
+     "cache_tokens": 10880,
+     "cost": 0,
+     "input_tokens": 13942,
+     "output_tokens": 35
+    },
+    "raw": "line-14",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 15,
+   "op": "quota",
+   "quota": {
+    "Windows": [
+     {
+      "Name": "primary",
+      "Utilization": 0.01,
+      "ResetsAt": "2026-12-14T15:01:41Z",
+      "Status": ""
+     }
+    ]
+   }
+  },
+  {
+   "line": 15,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "quota-line-15-primary",
+    "kind": "quota",
+    "metadata": {
+     "account": "",
+     "resets_at": "2026-12-14T15:01:41Z",
+     "used": 0.01,
+     "window": "primary"
+    },
+    "raw": "line-15",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 17,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "thread/status/changed"
+    },
+    "id": "notice-line-17",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-17",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 18,
+   "op": "turn_end",
+   "turn_end": {
+    "TurnID": "turn-1",
+    "Outcome": "interrupted",
+    "FailureCode": "",
+    "Usage": {
+     "InputTokens": 13942,
+     "OutputTokens": 35,
+     "CacheTokens": 10880,
+     "Cost": 0
+    },
+    "CredentialExpiresAt": null
+   }
+  }
+ ]
+}

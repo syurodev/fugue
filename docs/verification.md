@@ -25,14 +25,14 @@ exists on `main` (`V-05`).
 | ID | Source | Gate | Tier | Evidence | Status |
 | --- | --- | --- | --- | --- | --- |
 | `VR-E01` | `vendor-runtime §15` | `release` | `pr` | `TestVRE01ClaudeFixturesReplayToGoldenTranscript` | `Done` |
-| `VR-E02` | `vendor-runtime §15` | `release` | `pr` | Codex conformance and pinned JSON schema check (F9.7) | `Not started` |
+| `VR-E02` | `vendor-runtime §15` | `release` | `pr` | `TestVRE02CodexFixturesReplayToGoldenTranscript`, `TestCodexDecodersMatchThePinnedSchema` | `Done` |
 | `VR-E03` | `vendor-runtime §15` | `release` | `pr` | Antigravity conformance and ACP handshake (F9.8) | `Not started` |
 | `VR-E04` | `vendor-runtime §15` | `release` | `live` | Real-account approval relay for Claude, Codex, and agy (F9.6–F9.8) | `Not started` |
-| `VR-E05` | `vendor-runtime §15` | `release` | `pr` | `TestStopOrderImmediateInterrupt`, `TestStopOrderEscalatesToSigint`, `TestStopOrderEscalatesToSigterm`, `TestStopOrderEscalatesToSigkill`, `TestStopKillsGroupMembersAfterLeaderExits`, `TestStopCleansAllDescendantsIncludingSetsidGrandchild`, `TestLinuxCgroupStopProofAndFallback` | `Done` |
+| `VR-E05` | `vendor-runtime §15` | `release` | `pr` | `TestStopOrderImmediateInterrupt`, `TestStopOrderEscalatesToSigint`, `TestStopOrderEscalatesToSigterm`, `TestStopOrderEscalatesToSigkill`, `TestStopKillsGroupMembersAfterLeaderExits`, `TestStopCleansAllDescendantsIncludingSetsidGrandchild`, `TestLinuxCgroupStopProofAndFallback`, `TestCodexStopKillsASetsidChildTree` | `Done` |
 | `VR-E06` | `vendor-runtime §15` | `release` | `pr` | `TestVRE06HostCrashDuringTurnMarksDetachedAndUnknown`, `TestRecoveryDetachesSessionsAndMarksOpenTurnsUnknown`, `TestReapRefusesMismatchedStartTime` | `Done` |
 | `VR-E07` | `vendor-runtime §15` | `release` | `pr` | agy ACP `session/request_permission` flow (F9.8) | `Not started` |
-| `VR-E08` | `vendor-runtime §15` | `release` | `pr` | `TestUnknownEventsBecomeUnsupportedNoticesWithRawRef`, `TestVersionOutsideCheckedRangeWarnsButRuns` | `Done` |
-| `VR-E09` | `vendor-runtime §15` | `release` | `pr` | `TestEnvFilterAllowlistAndForcedDumbTerm`, `TestNoVendorCredentialAccess`, `TestProbeEnvIsAllowlistedWithoutHostSecrets`, `TestSessionEnvIsAllowlistedWithoutHostSecrets` | `Done` |
+| `VR-E08` | `vendor-runtime §15` | `release` | `pr` | `TestUnknownEventsBecomeUnsupportedNoticesWithRawRef`, `TestVersionOutsideCheckedRangeWarnsButRuns`, `TestCodexUnknownNotificationsBecomeUnsupportedNoticesWithRawRef`, `TestCodexVersionOutsideTheTestedRangeWarnsButRuns` | `Done` |
+| `VR-E09` | `vendor-runtime §15` | `release` | `pr` | `TestEnvFilterAllowlistAndForcedDumbTerm`, `TestNoVendorCredentialAccess`, `TestProbeEnvIsAllowlistedWithoutHostSecrets`, `TestSessionEnvIsAllowlistedWithoutHostSecrets`, `TestCodexProbeEnvIsAllowlistedWithoutHostSecrets`, `TestCodexSessionEnvIsAllowlistedWithoutHostSecrets` | `Done` |
 | `VR-E10` | `vendor-runtime §15` | `release` | `pr` | Claude/agy/Codex slash command lists and `/fugue:` blocking (F9.7–F9.9d) | `Not started` |
 | `VR-E11` | `vendor-runtime §15` | `release` | `pr` | `TestVRE11VaultLockInterruptsAndWaitsWithoutPlaintext`, `TestProtectedEventsAndVaultLock` | `Done` |
 | `VR-E13` | `vendor-runtime §15` | `release` | `pr` | Fugue MCP tool `Decide` env-tag hard rule from vendor session (F9.6) | `Not started` |

@@ -12,7 +12,6 @@ import (
 	"github.com/syurodev/fugue/internal/transcript"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
-	"github.com/syurodev/fugue/internal/vendoradapter/claude"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
@@ -47,7 +46,7 @@ type vendorSessionActor struct {
 	manager       *VendorSessions
 	info          vendorstore.Session
 	session       vendor.Session
-	obs           <-chan claude.Observation
+	obs           <-chan vendor.Observation
 	commands      chan actorRequest
 	state         vendor.State
 	sequence      int64
@@ -83,7 +82,7 @@ type actorCloseResult struct {
 	err    error
 }
 
-func newVendorSessionActor(manager *VendorSessions, info *vendorstore.Session, session vendor.Session, obs <-chan claude.Observation) *vendorSessionActor {
+func newVendorSessionActor(manager *VendorSessions, info *vendorstore.Session, session vendor.Session, obs <-chan vendor.Observation) *vendorSessionActor {
 	_, vaultSub := manager.deps.Vault.Observe()
 	state := vendor.State{Kind: vendor.SessionState(info.State), Reason: vendor.WaitingReason(info.WaitingReason)}
 	sequence := info.LastSequence
@@ -149,7 +148,7 @@ func (a *vendorSessionActor) run(ctx context.Context) error {
 }
 
 func (a *vendorSessionActor) runStep(ctx context.Context) error {
-	var observations <-chan claude.Observation
+	var observations <-chan vendor.Observation
 	var vaultEvents <-chan vault.Snapshot
 	if a.attached {
 		observations, vaultEvents = a.obs, a.vaultSub.Events()
@@ -190,7 +189,7 @@ func (a *vendorSessionActor) handleRequest(ctx context.Context, req actorRequest
 	return nil
 }
 
-func (a *vendorSessionActor) handleObserved(ctx context.Context, observation *claude.Observation, ok bool) error {
+func (a *vendorSessionActor) handleObserved(ctx context.Context, observation *vendor.Observation, ok bool) error {
 	if !ok {
 		return a.processExited(ctx)
 	}
@@ -472,6 +471,9 @@ func (a *vendorSessionActor) requestClose(reason vendor.CloseReason) error {
 		a.closeMu.Lock()
 		a.closeReason = reason
 		a.closeMu.Unlock()
+		if ended := a.manager.deps.OnSessionEnded; ended != nil {
+			ended(a.info.ID)
+		}
 		a.manager.spawn("close-vendor-session-"+a.info.ID, func(ctx context.Context) error {
 			proof, err := a.session.Close(context.WithoutCancel(ctx), reason)
 			select {

@@ -14,7 +14,6 @@ import (
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
-	"github.com/syurodev/fugue/internal/vendoradapter/claude"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
@@ -36,6 +35,8 @@ type VendorSessionDeps struct {
 	Store       vendorSessionStore
 	Transcripts *Transcripts
 	Adapter     vendor.Adapter
+	Adapters    map[string]vendor.Adapter
+	Relay       serverRequestRelayer
 	Vault       vendorVaultObserver
 	Clock       clock.Clock
 	IDs         ids.Generator
@@ -88,7 +89,7 @@ type retainedOwner struct {
 
 // NewVendorSessions creates the in-process manager and binds actor lifetime to ctx.
 func NewVendorSessions(ctx context.Context, deps *VendorSessionDeps) (*VendorSessions, error) {
-	if ctx == nil || deps == nil || deps.Store == nil || deps.Transcripts == nil || deps.Adapter == nil || deps.Vault == nil || deps.Clock == nil || deps.IDs == nil {
+	if ctx == nil || deps == nil || deps.Store == nil || deps.Transcripts == nil || (deps.Adapter == nil && len(deps.Adapters) == 0) || deps.Vault == nil || deps.Clock == nil || deps.IDs == nil {
 		return nil, errcode.New(errcode.InvalidArgument, "vendor session dependencies are required")
 	}
 	copyDeps := *deps
@@ -106,7 +107,12 @@ func NewVendorSessions(ctx context.Context, deps *VendorSessionDeps) (*VendorSes
 	}, nil
 }
 
-// Start creates a Claude process and hands its observations to a single actor.
+// SetRelay binds the server-request relay after SessionToolService is constructed.
+func (m *VendorSessions) SetRelay(relay serverRequestRelayer) {
+	m.deps.Relay = relay
+}
+
+// Start creates a vendor process and hands its observations to a single actor.
 // The supplied session ID is also the adapter StartSpec session ID.
 func (m *VendorSessions) Start(ctx context.Context, session *vendorstore.Session, spec *vendor.StartSpec) error {
 	if session == nil || spec == nil || session.ID == "" || spec.SessionID != session.ID {
@@ -120,7 +126,7 @@ func (m *VendorSessions) Start(ctx context.Context, session *vendorstore.Session
 		return capacityErr
 	}
 	defer release()
-	started, observations, pending, err := m.startAdapter(ctx, spec)
+	started, observations, pending, err := m.startAdapter(ctx, session.Vendor, spec)
 	if err != nil {
 		return err
 	}
@@ -200,7 +206,7 @@ func (m *VendorSessions) Resume(ctx context.Context, sessionID string, spec *ven
 	}
 	resumeSpec := *spec
 	resumeSpec.ResumeSessionID = info.ResumeHandle
-	started, observations, pending, err := m.startAdapter(ctx, &resumeSpec)
+	started, observations, pending, err := m.startAdapter(ctx, info.Vendor, &resumeSpec)
 	if err != nil {
 		return err
 	}
@@ -250,7 +256,23 @@ func (m *VendorSessions) reserveSlot(ctx context.Context, sessionID string) (fun
 	return release, nil
 }
 
-func (m *VendorSessions) startAdapter(ctx context.Context, spec *vendor.StartSpec) (vendor.Session, <-chan claude.Observation, *pendingOwner, error) {
+func (m *VendorSessions) adapterFor(vendorName string) (vendor.Adapter, error) {
+	if m.deps.Adapters != nil {
+		if ad, ok := m.deps.Adapters[vendorName]; ok && ad != nil {
+			return ad, nil
+		}
+	}
+	if (vendorName == "" || vendorName == VendorClaude) && m.deps.Adapter != nil {
+		return m.deps.Adapter, nil
+	}
+	return nil, errcode.New(errcode.VendorUnsupported, "the vendor is not supported yet")
+}
+
+func (m *VendorSessions) startAdapter(ctx context.Context, vendorName string, spec *vendor.StartSpec) (vendor.Session, <-chan vendor.Observation, *pendingOwner, error) {
+	adapter, err := m.adapterFor(vendorName)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 	finishSpawn := m.beginInflightSpawn()
 	defer finishSpawn()
 	var pending *pendingOwner
@@ -266,7 +288,7 @@ func (m *VendorSessions) startAdapter(ctx context.Context, spec *vendor.StartSpe
 			origOnSpawned(owner)
 		}
 	}
-	session, err := m.deps.Adapter.Start(ctx, &specCopy)
+	session, err := adapter.Start(ctx, &specCopy)
 	if err != nil {
 		finishSpawn()
 		m.retirePendingOwner(pending)
@@ -356,9 +378,9 @@ func (m *VendorSessions) installActor(sessionID string, actor *vendorSessionActo
 	return nil
 }
 
-func observationsOf(session vendor.Session) (<-chan claude.Observation, bool) {
+func observationsOf(session vendor.Session) (<-chan vendor.Observation, bool) {
 	observed, ok := session.(interface {
-		Observations() <-chan claude.Observation
+		Observations() <-chan vendor.Observation
 	})
 	if !ok {
 		return nil, false

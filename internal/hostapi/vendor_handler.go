@@ -54,7 +54,7 @@ func (h *vendorHandler) ProbeVendors(ctx context.Context, req *connect.Request[v
 		p := &probes[i]
 		c := p.Capability
 		out.Probes = append(out.Probes, &vendorsv1.VendorProbe{
-			Vendor: vendorsv1.Vendor_VENDOR_CLAUDE, Version: p.Version, VersionTested: p.VersionTested,
+			Vendor: protoVendor(p.Vendor), Version: p.Version, VersionTested: p.VersionTested,
 			VersionWarning: p.VersionWarning, Login: p.Login,
 			Capability: &vendorsv1.Capability{
 				PerRequestApproval: c.PerRequestApproval, BlockAllToolCalls: c.BlockAllToolCalls, Interrupt: c.Interrupt,
@@ -225,13 +225,20 @@ func vendorProfile(p *vendorsv1.SessionProfile) app.VendorProfile {
 	return app.VendorProfile{Model: p.Model, Effort: p.Effort, ResumeSessionID: p.ResumeSessionId}
 }
 
-func protoVendorSession(v *app.VendorSessionView) *vendorsv1.VendorSession {
-	vendor := vendorsv1.Vendor_VENDOR_UNSPECIFIED
-	if v.Vendor == app.VendorClaude {
-		vendor = vendorsv1.Vendor_VENDOR_CLAUDE
+func protoVendor(name string) vendorsv1.Vendor {
+	switch name {
+	case app.VendorClaude:
+		return vendorsv1.Vendor_VENDOR_CLAUDE
+	case app.VendorCodex:
+		return vendorsv1.Vendor_VENDOR_CODEX
+	default:
+		return vendorsv1.Vendor_VENDOR_UNSPECIFIED
 	}
+}
+
+func protoVendorSession(v *app.VendorSessionView) *vendorsv1.VendorSession {
 	return &vendorsv1.VendorSession{
-		SessionId: v.ID, Vendor: vendor, State: v.State, WaitingReason: v.WaitingReason,
+		SessionId: v.ID, Vendor: protoVendor(v.Vendor), State: v.State, WaitingReason: v.WaitingReason,
 		CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
 	}
 }

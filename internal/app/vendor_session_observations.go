@@ -10,13 +10,12 @@ import (
 	"github.com/syurodev/fugue/internal/transcript"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
-	"github.com/syurodev/fugue/internal/vendoradapter/claude"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
 const vendorFailureCode = "vendor_failure"
 
-func (a *vendorSessionActor) handleObservation(ctx context.Context, observation *claude.Observation) error {
+func (a *vendorSessionActor) handleObservation(ctx context.Context, observation *vendor.Observation) error {
 	if observation.Init != nil {
 		commands := slices.Clone(observation.Init.SlashCommands)
 		if !slices.Equal(commands, a.slashCommands) {
@@ -37,10 +36,13 @@ func (a *vendorSessionActor) handleObservation(ctx context.Context, observation 
 		return err
 	}
 	a.publishPartial(observation.Partial)
+	if err := a.handleServerRequest(ctx, observation.ServerRequest); err != nil {
+		return err
+	}
 	return a.persistTurnEnd(ctx, observation.TurnEnd)
 }
 
-func (a *vendorSessionActor) persistInit(ctx context.Context, init *claude.Init) error {
+func (a *vendorSessionActor) persistInit(ctx context.Context, init *vendor.Init) error {
 	if init == nil || !ids.IsUUID(init.SessionID) || init.SessionID == a.info.ResumeHandle {
 		return nil
 	}
@@ -54,14 +56,14 @@ func (a *vendorSessionActor) persistInit(ctx context.Context, init *claude.Init)
 func (a *vendorSessionActor) persistObservedItems(ctx context.Context, items []transcript.Item) error {
 	for i := range items {
 		item := items[i]
-		if strings.HasPrefix(item.TurnID, "vendor-") && !a.turns[item.TurnID] {
-			if err := a.append(ctx, &vendorstore.Event{Type: vendorstore.VendorTurnStarted, TurnID: item.TurnID, TurnOrigin: vendorstore.TurnOriginVendor}); err != nil {
-				return err
-			}
-			a.turns[item.TurnID] = true
-			if _, _, err := vendor.Transition(a.state, vendor.Fact{Kind: vendor.FactVendorTurn}); err != nil {
-				return fmt.Errorf("record vendor-origin turn: %w", err)
-			}
+		if item.TurnID == "" {
+			item.TurnID = a.activeTurnID()
+		}
+		if item.TurnID == "" {
+			continue
+		}
+		if err := a.ensureVendorTurnStarted(ctx, item.TurnID); err != nil {
+			return err
 		}
 		if err := a.recordItem(ctx, &item); err != nil {
 			return err
@@ -70,7 +72,38 @@ func (a *vendorSessionActor) persistObservedItems(ctx context.Context, items []t
 	return nil
 }
 
-func (a *vendorSessionActor) persistObservedUpdates(ctx context.Context, updates []claude.Update) error {
+func (a *vendorSessionActor) ensureVendorTurnStarted(ctx context.Context, turnID string) error {
+	if !strings.HasPrefix(turnID, "vendor-") || a.turns[turnID] {
+		return nil
+	}
+	if err := a.append(ctx, &vendorstore.Event{Type: vendorstore.VendorTurnStarted, TurnID: turnID, TurnOrigin: vendorstore.TurnOriginVendor}); err != nil {
+		return err
+	}
+	a.turns[turnID] = true
+	if _, _, err := vendor.Transition(a.state, vendor.Fact{Kind: vendor.FactVendorTurn}); err != nil {
+		return fmt.Errorf("record vendor-origin turn: %w", err)
+	}
+	return nil
+}
+
+func (a *vendorSessionActor) handleServerRequest(ctx context.Context, req *vendor.ServerRequest) error {
+	if req == nil {
+		return nil
+	}
+	if err := a.ensureVendorTurnStarted(ctx, req.TurnID); err != nil {
+		return err
+	}
+	if a.manager.deps.Relay != nil {
+		reqCopy := *req
+		a.manager.spawn("codex-relay-"+a.info.ID, func(taskCtx context.Context) error {
+			a.manager.deps.Relay.RelayServerRequest(taskCtx, a.info.ID, &reqCopy, a.session)
+			return nil
+		})
+	}
+	return nil
+}
+
+func (a *vendorSessionActor) persistObservedUpdates(ctx context.Context, updates []vendor.Update) error {
 	for i := range updates {
 		update := updates[i]
 		if a.manager.deps.Vault.Snapshot().State != vault.StateUnlocked {
@@ -88,13 +121,13 @@ func (a *vendorSessionActor) persistObservedUpdates(ctx context.Context, updates
 	return nil
 }
 
-func (a *vendorSessionActor) publishPartial(partial *claude.Partial) {
+func (a *vendorSessionActor) publishPartial(partial *vendor.Partial) {
 	if partial != nil && a.manager.deps.Vault.Snapshot().State == vault.StateUnlocked {
 		a.manager.deps.Transcripts.StreamItem(a.info.ID, partial.MessageID, 0, transcript.ViewText, partial.Fragment)
 	}
 }
 
-func (a *vendorSessionActor) persistTurnEnd(ctx context.Context, turnEnd *claude.TurnEnd) error {
+func (a *vendorSessionActor) persistTurnEnd(ctx context.Context, turnEnd *vendor.TurnEnd) error {
 	if turnEnd == nil {
 		return nil
 	}
@@ -106,10 +139,14 @@ func (a *vendorSessionActor) persistTurnEnd(ctx context.Context, turnEnd *claude
 }
 
 func turnOutcome(observed string) (vendor.Outcome, vendor.Fact, string) {
-	if observed == claude.OutcomeCompleted {
+	switch observed {
+	case string(vendor.OutcomeCompleted):
 		return vendor.OutcomeCompleted, vendor.Fact{Kind: vendor.FactTurnCompleted}, vendorstore.OutcomeCompleted
+	case string(vendor.OutcomeInterrupted):
+		return vendor.OutcomeInterrupted, vendor.Fact{Kind: vendor.FactTurnInterrupted}, vendorstore.OutcomeInterrupted
+	default:
+		return vendor.OutcomeFailed, vendor.Fact{Kind: vendor.FactTurnFailed, Code: vendorFailureCode}, vendorstore.OutcomeFailed
 	}
-	return vendor.OutcomeFailed, vendor.Fact{Kind: vendor.FactTurnFailed, Code: vendorFailureCode}, vendorstore.OutcomeFailed
 }
 
 func (a *vendorSessionActor) persistVendorTurnEnd(ctx context.Context, turnID, outcome, failure string) error {

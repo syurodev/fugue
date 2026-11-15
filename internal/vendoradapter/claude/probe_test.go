@@ -244,7 +244,7 @@ func TestProbeOutputFloodIsBoundedAndUnverified(t *testing.T) {
 func TestCappedBufferKeepsOnlyTheLimit(t *testing.T) {
 	t.Parallel()
 	calls := 0
-	buf := &cappedBuffer{limit: 16, onOverflow: func() { calls++ }}
+	buf := vendor.NewCappedBuffer(16, func() { calls++ })
 	chunk := []byte(strings.Repeat("y", 1<<20))
 	for range 8 {
 		if n, err := buf.Write(chunk); n != len(chunk) || err != nil {
@@ -254,8 +254,8 @@ func TestCappedBufferKeepsOnlyTheLimit(t *testing.T) {
 	if got := len(buf.String()); got != 16 {
 		t.Fatalf("kept %d bytes, want the 16-byte limit", got)
 	}
-	if !buf.overflowed || calls != 1 {
-		t.Fatalf("overflowed = %v, onOverflow calls = %d, want true and exactly one", buf.overflowed, calls)
+	if !buf.Overflowed() || calls != 1 {
+		t.Fatalf("overflowed = %v, onOverflow calls = %d, want true and exactly one", buf.Overflowed(), calls)
 	}
 }
 

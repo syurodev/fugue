@@ -169,6 +169,23 @@ func (t *sessionTokens) live(binding SessionBinding) bool {
 	return t.liveLocked(binding)
 }
 
+func (t *sessionTokens) bindingFor(sessionID string) (SessionBinding, bool) {
+	if sessionID == "" {
+		return SessionBinding{}, false
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if current, ok := t.bySession[sessionID]; ok {
+		return current, true
+	}
+	for _, b := range t.pending {
+		if b.SessionID == sessionID {
+			return b, true
+		}
+	}
+	return SessionBinding{}, false
+}
+
 func (t *sessionTokens) liveLocked(binding SessionBinding) bool {
 	if binding.SessionID == "" || binding.Role == "" {
 		return false
