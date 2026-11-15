@@ -37,6 +37,7 @@ type Session struct {
 	acpSessionID    string
 	model           string
 	cwd             string
+	clientVersion   string
 	proc            *process.Process
 	codec           *Codec
 	normalizer      *Normalizer

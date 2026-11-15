@@ -23,13 +23,18 @@ import (
 	"github.com/syurodev/fugue/internal/vendor"
 )
 
-func newTestAdapter(t *testing.T, clk clock.Clock) *Adapter {
+func newTestAdapter(t *testing.T, clk clock.Clock, extra ...Option) *Adapter {
 	t.Helper()
-	return NewAdapter(
-		[]string{"PATH=/usr/bin:/bin", "HOME=" + fakeHome, "LANG=C"},
+	opts := make([]Option, 0, 3+len(extra))
+	opts = append(opts,
 		WithBinary(fakeAgyBinary(t)),
 		WithClock(clk),
 		WithIDs(ids.NewSequence("agy")),
+	)
+	opts = append(opts, extra...)
+	return NewAdapter(
+		[]string{"PATH=/usr/bin:/bin", "HOME=" + fakeHome, "LANG=C"},
+		opts...,
 	)
 }
 
@@ -83,6 +88,42 @@ func TestAgyHandshakeMatchesThePinnedCapabilities(t *testing.T) {
 		HostEnv:   badAdapter.HostEnv,
 	}); errcode.CodeOf(err) != errcode.Internal {
 		t.Fatalf("bad protocolVersion err = %v, want internal", err)
+	}
+
+	verifyInjectedClientVersion(t)
+}
+
+func verifyInjectedClientVersion(t *testing.T) {
+	t.Helper()
+	const wantClientVersion = "1.2.3-test-build"
+	rpcLog := filepath.Join(t.TempDir(), "init-version-rpcs.jsonl")
+	clk := clock.NewFake(testEpoch())
+	adapter := newTestAdapter(t, clk, WithClientVersion(wantClientVersion))
+	sess, err := adapter.Start(t.Context(), &vendor.StartSpec{
+		SessionID: "fugue-sess-ver",
+		Cwd:       t.TempDir(),
+		Home:      vendor.AccountHome{ConfigDir: fakeRecordRPCsConfigDir + ":" + rpcLog},
+		HostEnv:   adapter.HostEnv,
+	})
+	if err != nil {
+		t.Fatalf("Start with injected client version: %v", err)
+	}
+	if _, cErr := sess.Close(t.Context(), vendor.CloseHostStop); cErr != nil {
+		t.Fatalf("Close: %v", cErr)
+	}
+	lines := nonEmptyLines(string(readFile(t, rpcLog)))
+	if len(lines) == 0 {
+		t.Fatal("expected initialize RPC line")
+	}
+	var initReq struct {
+		Method string           `json:"method"`
+		Params InitializeParams `json:"params"`
+	}
+	if uErr := json.Unmarshal([]byte(lines[0]), &initReq); uErr != nil {
+		t.Fatalf("unmarshal initialize request %q: %v", lines[0], uErr)
+	}
+	if initReq.Method != MethodInitialize || initReq.Params.ClientInfo.Name != "fugue" || initReq.Params.ClientInfo.Version != wantClientVersion {
+		t.Fatalf("initialize clientInfo = %+v, want {Name:fugue Version:%s}", initReq.Params.ClientInfo, wantClientVersion)
 	}
 }
 
@@ -217,18 +258,110 @@ func awaitPermUnsupportedNotice(t *testing.T, sess *Session) {
 
 func assertPermErrorWirePayloads(t *testing.T, rawRPCs string) {
 	t.Helper()
-	if !strings.Contains(rawRPCs, `"id":"perm-1"`) || !strings.Contains(rawRPCs, `"error"`) ||
-		strings.Contains(rawRPCs, `"selected"`) || strings.Contains(rawRPCs, `"cancelled"`) {
-		t.Fatalf("unexpected stdin wire messages for session/request_permission:\n%s", rawRPCs)
-	}
-	respBytes, err := NewCodec().EncodeResponseError(json.RawMessage(`"perm-1"`), RPCErrorMethodNotSupported, RPCErrorPermissionNotRelayed)
+	wantBytes, err := NewCodec().EncodeResponseError(json.RawMessage(`"perm-1"`), RPCErrorMethodNotSupported, RPCErrorPermissionNotRelayed)
 	if err != nil {
 		t.Fatal(err)
 	}
-	respStr := string(respBytes)
-	if !strings.Contains(respStr, `"error"`) || strings.Contains(respStr, `"result"`) {
-		t.Fatalf("permission response = %s, want JSON-RPC error only", respStr)
+	wantLine := strings.TrimSuffix(string(wantBytes), "\n")
+	lines := nonEmptyLines(rawRPCs)
+	var responses []string
+	for _, line := range lines {
+		if !strings.Contains(line, `"method":`) {
+			responses = append(responses, line)
+		}
 	}
+	if !slices.Equal(responses, []string{wantLine}) {
+		t.Fatalf("responses = %q, want exact %q (all RPCs:\n%s)", responses, []string{wantLine}, rawRPCs)
+	}
+	if strings.Contains(rawRPCs, `"selected"`) || strings.Contains(rawRPCs, `"cancelled"`) || strings.Contains(rawRPCs, `"result"`) {
+		t.Fatalf("unexpected outcome/result payload in RPC log:\n%s", rawRPCs)
+	}
+}
+
+func TestAgyOtherServerRequestsGetANeutralError(t *testing.T) {
+	t.Parallel()
+	rpcLog := filepath.Join(t.TempDir(), "other-req-rpcs.jsonl")
+	sess, _ := startFakeSession(t, fakeOtherRequestsConfigDir+":"+rpcLog, "")
+	if _, err := sess.Send(t.Context(), vendor.Input{Text: "run requests"}); err != nil {
+		t.Fatalf("Send: %v", err)
+	}
+	notices := collectServerRequestNotices(t, sess)
+	if _, err := sess.Close(t.Context(), vendor.CloseHostStop); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	assertServerRequestNoticeSplit(t, notices)
+	assertExactServerRequestRPCs(t, string(readFile(t, rpcLog)))
+}
+
+func collectServerRequestNotices(t *testing.T, sess *Session) map[string]transcript.Item {
+	t.Helper()
+	notices := make(map[string]transcript.Item, 3)
+	for obs := range sess.Observations() {
+		if obs.ServerRequest != nil {
+			t.Fatalf("F9.8a must not emit ServerRequest, got %+v", obs.ServerRequest)
+		}
+		for i := range obs.Records {
+			rec := obs.Records[i]
+			if rec.Kind == transcript.Notice {
+				notices[rec.RawRef] = rec
+			}
+		}
+		if obs.TurnEnd != nil {
+			return notices
+		}
+	}
+	t.Fatal("expected TurnEnd after server requests")
+	return nil
+}
+
+func assertServerRequestNoticeSplit(t *testing.T, notices map[string]transcript.Item) {
+	t.Helper()
+	const codeUnsupported = "unsupported_event"
+	permRec, ok := notices["acp:"+MethodSessionRequestPermission]
+	wantPermMeta := transcript.NoticeMetadata{Level: "warning", Code: codeUnsupported}
+	wantPermContent := transcript.NoticeContent{Text: "Antigravity requested permission, which Fugue cannot relay yet"}
+	if !ok || permRec.Metadata != wantPermMeta || permRec.Content != wantPermContent {
+		t.Fatalf("permission notice = %+v, want warning with permission text", permRec)
+	}
+	wantNeutralMeta := transcript.NoticeMetadata{Level: "info", Code: codeUnsupported}
+	wantNeutralContent := transcript.NoticeContent{}
+	for _, ref := range []string{"acp:fs/read_text_file", "acp:custom/unknown_method"} {
+		rec, exists := notices[ref]
+		if !exists || rec.Metadata != wantNeutralMeta || rec.Content != wantNeutralContent {
+			t.Fatalf("notice[%s] = %+v, want neutral info unsupported_event without permission text", ref, rec)
+		}
+	}
+}
+
+func assertExactServerRequestRPCs(t *testing.T, rawRPCs string) {
+	t.Helper()
+	lines := nonEmptyLines(rawRPCs)
+	wantLines := []string{
+		`{"jsonrpc":"2.0","id":"perm-1","error":{"code":-32601,"message":"permission relay is not supported yet"}}`,
+		`{"jsonrpc":"2.0","id":42,"error":{"code":-32601,"message":"method not supported by Fugue"}}`,
+		`{"jsonrpc":"2.0","id":"req-str-9","error":{"code":-32601,"message":"method not supported by Fugue"}}`,
+	}
+	if len(lines) != 6 {
+		t.Fatalf("total stdin wire lines = %d, want 6 (3 requests + 3 exact error responses):\n%s", len(lines), rawRPCs)
+	}
+	for idx, wantMethod := range []string{MethodInitialize, MethodSessionNew, MethodSessionPrompt} {
+		if !strings.Contains(lines[idx], `"`+wantMethod+`"`) {
+			t.Fatalf("line %d = %s, want %s", idx, lines[idx], wantMethod)
+		}
+	}
+	if !slices.Equal(lines[3:], wantLines) {
+		t.Fatalf("response lines = %q, want exact %q", lines[3:], wantLines)
+	}
+}
+
+func nonEmptyLines(raw string) []string {
+	var out []string
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
 }
 
 func TestAgySessionArgvDenylistNeverAppears(t *testing.T) {

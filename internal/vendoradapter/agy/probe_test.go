@@ -58,9 +58,10 @@ func TestAdapterOptionsConfigureFields(t *testing.T) {
 		WithOnEscalation(func(string) { escalated = true }),
 		WithXDGRuntimeDir("/run/user/1000"),
 		WithBinary("/custom/agy"),
+		WithClientVersion("1.2.3-test"),
 		WithProbeTimeout(5*time.Second),
 	)
-	if a.Clock != clk || a.IDs != idGen || a.SystemdProbe != probe || a.XDGRuntimeDir != "/run/user/1000" || a.Binary != "/custom/agy" || a.ProbeTimeout != 5*time.Second {
+	if a.Clock != clk || a.IDs != idGen || a.SystemdProbe != probe || a.XDGRuntimeDir != "/run/user/1000" || a.Binary != "/custom/agy" || a.ClientVersion != "1.2.3-test" || a.ProbeTimeout != 5*time.Second {
 		t.Fatalf("unexpected adapter configuration: %+v", a)
 	}
 	a.OnEscalation("test")

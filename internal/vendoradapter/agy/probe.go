@@ -23,6 +23,10 @@ const (
 	// DefaultProbeTimeout bounds the version command when the caller's context
 	// carries no deadline of its own.
 	DefaultProbeTimeout = vendor.DefaultProbeTimeout
+
+	// DefaultClientVersion is reported in ACP initialize clientInfo.version when
+	// the caller does not inject the binary build version.
+	DefaultClientVersion = "dev"
 )
 
 // Adapter runs the Antigravity CLI (`agy acp`). Binary defaults to DefaultBinary;
@@ -37,6 +41,7 @@ type Adapter struct {
 	SystemdProbe  *process.SystemdProbe
 	OnEscalation  func(string)
 	XDGRuntimeDir string
+	ClientVersion string
 }
 
 // Option configures an Adapter.
@@ -75,6 +80,11 @@ func WithBinary(binary string) Option {
 // WithProbeTimeout overrides the probe execution timeout.
 func WithProbeTimeout(d time.Duration) Option {
 	return func(a *Adapter) { a.ProbeTimeout = d }
+}
+
+// WithClientVersion injects the binary build version reported in ACP initialize.
+func WithClientVersion(version string) Option {
+	return func(a *Adapter) { a.ClientVersion = version }
 }
 
 // NewAdapter builds an adapter with the default binary, the host environment

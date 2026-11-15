@@ -183,6 +183,9 @@ func buildAgyAdapter(deps *HostDeps, systemdProbe *process.SystemdProbe, xdgDir 
 	if xdgDir != "" {
 		opts = append(opts, agy.WithXDGRuntimeDir(xdgDir))
 	}
+	if deps.Config.HostVersion != "" {
+		opts = append(opts, agy.WithClientVersion(deps.Config.HostVersion))
+	}
 	return agy.NewAdapter(deps.VendorHostEnv, opts...)
 }
 

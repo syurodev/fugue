@@ -215,21 +215,26 @@ func (a *Adapter) newSessionState(spec *vendor.StartSpec) *Session {
 	if idGen == nil {
 		idGen = ids.NewUUIDv7(clk, ids.CryptoRandom{})
 	}
+	clientVer := strings.TrimSpace(a.ClientVersion)
+	if clientVer == "" {
+		clientVer = DefaultClientVersion
+	}
 	codec := NewCodec()
 	return &Session{
-		sessionID:    spec.SessionID,
-		model:        spec.Model,
-		cwd:          spec.Cwd,
-		codec:        codec,
-		normalizer:   NewNormalizerWithCodec(spec.SessionID, codec),
-		clock:        clk,
-		idGen:        idGen,
-		obsCh:        make(chan Observation, observationBufferSize),
-		closeNotify:  make(chan struct{}),
-		readerDoneCh: make(chan struct{}),
-		writeSem:     make(chan struct{}, 1),
-		state:        stateStarting,
-		pendingRPCs:  make(map[string]chan Frame),
+		sessionID:     spec.SessionID,
+		model:         spec.Model,
+		cwd:           spec.Cwd,
+		clientVersion: clientVer,
+		codec:         codec,
+		normalizer:    NewNormalizerWithCodec(spec.SessionID, codec),
+		clock:         clk,
+		idGen:         idGen,
+		obsCh:         make(chan Observation, observationBufferSize),
+		closeNotify:   make(chan struct{}),
+		readerDoneCh:  make(chan struct{}),
+		writeSem:      make(chan struct{}, 1),
+		state:         stateStarting,
+		pendingRPCs:   make(map[string]chan Frame),
 	}
 }
 
@@ -318,7 +323,7 @@ func (s *Session) runInitializeHandshake(
 	initParams := InitializeParams{
 		ProtocolVersion:    ProtocolVersion,
 		ClientCapabilities: map[string]any{},
-		ClientInfo:         ClientInfo{Name: "fugue", Version: "0.1.0"},
+		ClientInfo:         ClientInfo{Name: "fugue", Version: s.clientVersion},
 	}
 	initFrame, err := s.callHandshakeRPC(ctx, timer, readerErrCh, MethodInitialize, initParams)
 	if err != nil {

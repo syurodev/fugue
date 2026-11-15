@@ -30,6 +30,7 @@ const (
 	fakeSetsidChildConfigDir     = "/session/setsid-child"
 	fakeCheckEnvConfigDir        = "/session/check-env"
 	fakePermissionConfigDir      = "/session/permission"
+	fakeOtherRequestsConfigDir   = "/session/other-requests"
 	fakeCancelWaitConfigDir      = "/session/cancel-wait"
 	fakeRecordRPCsConfigDir      = "/session/record-rpcs"
 	fixtureCLI                   = "1.5.9"
@@ -177,6 +178,8 @@ func serveFakeACPLoop(home string) {
 		rpcLogPath = path
 	} else if path, ok := strings.CutPrefix(home, fakePermissionConfigDir+":"); ok {
 		rpcLogPath = path
+	} else if path, ok := strings.CutPrefix(home, fakeOtherRequestsConfigDir+":"); ok {
+		rpcLogPath = path
 	}
 	var activePromptID string
 	for scanner.Scan() {
@@ -255,6 +258,12 @@ func handleFakePrompt(home, id string) string {
 		writeOut(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-uuid-0001","update":{"sessionUpdate":"tool_call","toolCallId":"call-0001","name":"run_command","kind":"execute","status":"pending","title":"echo hi"}}}` + "\n")
 		writeOut(`{"jsonrpc":"2.0","id":"perm-1","method":"session/request_permission","params":{"sessionId":"session-uuid-0001","toolCall":{"sessionUpdate":"tool_call","toolCallId":"call-0001","name":"run_command","kind":"execute","status":"pending"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},{"optionId":"deny","name":"Deny","kind":"reject_once"}]}}` + "\n")
 		return id
+	case strings.HasPrefix(home, fakeOtherRequestsConfigDir+":"):
+		writeOut(`{"jsonrpc":"2.0","id":"perm-1","method":"session/request_permission","params":{"sessionId":"session-uuid-0001","toolCall":{"sessionUpdate":"tool_call","toolCallId":"call-0001","name":"run_command","kind":"execute","status":"pending"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"}]}}` + "\n")
+		writeOut(`{"jsonrpc":"2.0","id":42,"method":"fs/read_text_file","params":{"sessionId":"session-uuid-0001","path":"README.md"}}` + "\n")
+		writeOut(`{"jsonrpc":"2.0","id":"req-str-9","method":"custom/unknown_method","params":{"sessionId":"session-uuid-0001"}}` + "\n")
+		writeOut(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}`+"\n", id))
+		return ""
 	case home == fakeCancelWaitConfigDir || home == fakeIgnoreCancelConfigDir:
 		writeOut(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-uuid-0001","update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"working..."}}}}` + "\n")
 		return id
