@@ -48,6 +48,21 @@ type Env struct {
 	// spinner holds still, springs snap. Filled by the window from the
 	// app's settings.
 	ReducedMotion bool
+	// TimeScale multiplies every frame step, springs and the spinner alike:
+	// the gallery's slow-motion mode runs everything at a quarter speed so
+	// motion can be judged by eye (§8). Zero means 1.
+	TimeScale float32
+	// KeyboardOnly is the gallery's keyboard-only mode: focus moves count as
+	// coming from the keyboard for the whole session, so focus rings stay
+	// visible no matter how focus landed (UK-05). Production windows leave
+	// it false; a pointer press then clears the modality again.
+	KeyboardOnly bool
+	// Preview forces interaction states the gallery and the evidence tests
+	// must render without pointing a real pointer at every cell (UK-09):
+	// one pointer can hover one control at a time, but a state matrix shows
+	// every hover at once. The tags short-circuit the matching interaction
+	// check on the controls they name. Production windows leave it zero.
+	Preview Preview
 
 	// modality is true while focus moves come from the keyboard.
 	modality bool
@@ -74,6 +89,16 @@ type Env struct {
 type iconKey struct {
 	name IconName
 	size unit.Dp
+}
+
+// Preview names the controls whose interaction states a gallery frame
+// forces (Env.Preview); the zero value forces nothing.
+type Preview struct {
+	// Hover and Press render the named control hovered and held down.
+	Hover, Press event.Tag
+	// Focus renders the named control with its keyboard focus ring, even
+	// though no window focus event moved it.
+	Focus event.Tag
 }
 
 // Metric returns the window metric with the UI scale of §3.0 applied: both
@@ -118,6 +143,9 @@ func (e *Env) Content(t theme.Type) (size, line unit.Sp) {
 // into gtx.Now.
 func (e *Env) Begin(now time.Time) {
 	e.dt = e.Driver.Begin(now)
+	if e.TimeScale > 0 {
+		e.dt = time.Duration(float64(e.dt) * float64(e.TimeScale))
+	}
 	e.now = now
 }
 
@@ -145,6 +173,13 @@ func (e *Env) FrameEnd(gtx *layout.Context) {
 // so it sees presses anywhere (Gio delivers pointer events to every area
 // under the pointer, so this hides nothing).
 func (e *Env) TrackInput(gtx *layout.Context) {
+	if e.KeyboardOnly {
+		// The gallery's keyboard-only mode: every focus move came from the
+		// keyboard as far as the controls are concerned, so the rings stay
+		// on for the whole session (UK-05).
+		e.modality = true
+		return
+	}
 	// Tab turns the keyboard modality on. Naming Tab explicitly receives it
 	// even though the window also consumes it for focus movement.
 	for {
@@ -178,4 +213,19 @@ func (e *Env) TrackInput(gtx *layout.Context) {
 // pointer click focuses quietly.
 func (e *Env) FocusVisible(gtx *layout.Context, tag event.Tag) bool {
 	return tag != nil && gtx.Focused(tag) && e.modality
+}
+
+// previewHover reports whether the gallery frame forces tag hovered.
+func (e *Env) previewHover(tag event.Tag) bool {
+	return tag != nil && e.Preview.Hover == tag
+}
+
+// previewPress reports whether the gallery frame forces tag held down.
+func (e *Env) previewPress(tag event.Tag) bool {
+	return tag != nil && e.Preview.Press == tag
+}
+
+// previewFocus reports whether the gallery frame forces tag's focus ring.
+func (e *Env) previewFocus(tag event.Tag) bool {
+	return tag != nil && e.Preview.Focus == tag
 }

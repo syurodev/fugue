@@ -67,6 +67,39 @@ https and mailto; the preview reads its input from standard input because the
 app's arch rule keeps `os.Open` and `os.ReadFile` out of the ui module's
 production code.
 
+## Kit gallery
+
+`cmd/kitgallery` is the development gallery of the shared component kit
+(`internal/kit`, F10.9): one page per component with every variant × size ×
+state in light and dark, a keyboard-only mode that keeps the focus rings on,
+a reduced-motion mode, a slow-motion mode that runs every motion at a quarter
+speed, and a headless shot mode that writes the whole matrix — every page ×
+theme × UI scale 90/100/125% × pixel scale 1/1.25 — as PNGs into a tar stream
+on standard output (the arch rule keeps direct file writes out of the ui
+module; redirect and extract):
+
+```sh
+go run ./cmd/kitgallery                     # interactive window
+go run ./cmd/kitgallery -light -keyboard    # light mode, rings always on
+go run ./cmd/kitgallery -slow               # judge the motion at a quarter speed
+go run ./cmd/kitgallery -shots > shots.tar  # the shot matrix
+```
+
+In the window: Ctrl+D toggles the theme, M toggles reduced motion, K toggles
+keyboard-only, S toggles slow motion, Tab walks the controls, Enter and Space
+activate; press and hold a button to see the shrink and the ripple. The shots
+are one fixed window (1360×1000 dp) whatever the UI scale, as a user's window
+is: a zoomed page wraps its blocks instead of growing sideways. The gallery
+lays every block out from measured sizes and records the laid-out text
+bounds, control rects and matrix cells per frame — that recording is what the
+UK-E03 coverage test and the UK-E09 scale test assert on.
+
+Headless GL: every test or command that renders through Gio's headless window
+opens it with `internal/glwin.Open` and never releases it. Gio's `Release` ends
+with `eglTerminate` on the process-wide default display, and Mesa's software GL
+(Xvfb on the CI runners) cannot initialize it again afterwards, so a window
+lives until the process exits.
+
 ## Window size
 
 The initial size is the preferred 900x1000 dp clamped to the screen's work

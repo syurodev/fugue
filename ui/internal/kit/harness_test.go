@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"gioui.org/f32"
+	"gioui.org/gpu/headless"
 	"gioui.org/io/input"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -15,6 +16,7 @@ import (
 	"go.uber.org/goleak"
 
 	"github.com/syurodev/fugue/ui/internal/fonts"
+	"github.com/syurodev/fugue/ui/internal/glwin"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
@@ -34,6 +36,11 @@ type harness struct {
 	env    *Env
 	gtx    layout.Context
 	now    time.Time
+	// px is the device pixel scale of the frames; zero means 1.
+	px float32
+	// win is the headless render window of shot, opened on first use and,
+	// like every glwin window, never released.
+	win *headless.Window
 }
 
 func newHarness(t *testing.T) *harness {
@@ -55,7 +62,8 @@ func newHarness(t *testing.T) *harness {
 func (h *harness) frame(t *testing.T) {
 	t.Helper()
 	h.ops.Reset()
-	device := unit.Metric{PxPerDp: 1, PxPerSp: 1}
+	px := max(h.px, 1)
+	device := unit.Metric{PxPerDp: px, PxPerSp: px}
 	h.gtx = layout.Context{
 		Ops:         &h.ops,
 		Metric:      h.env.Metric(device),
@@ -64,6 +72,28 @@ func (h *harness) frame(t *testing.T) {
 	}
 	h.gtx.Now = h.now
 	h.env.Begin(h.now)
+}
+
+// shot renders the frame's ops through the harness's headless window of size
+// w×h (opened on the first call, so every shot of a harness has one size) and
+// returns the top-left w×h pixels.
+func (h *harness) shot(t *testing.T, w, hgt int) *image.RGBA {
+	t.Helper()
+	if h.win == nil {
+		win, err := glwin.Open(w, hgt)
+		if err != nil {
+			t.Fatalf("open a headless window: %v", err)
+		}
+		h.win = win
+	}
+	if err := h.win.Frame(&h.ops); err != nil {
+		t.Fatalf("render a frame: %v", err)
+	}
+	img := image.NewRGBA(image.Rect(0, 0, w, hgt))
+	if err := h.win.Screenshot(img); err != nil {
+		t.Fatalf("read the frame back: %v", err)
+	}
+	return img
 }
 
 // end hands the frame's ops to the router and advances the fake clock.

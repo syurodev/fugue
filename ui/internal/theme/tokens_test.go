@@ -2,6 +2,7 @@ package theme_test
 
 import (
 	"image/color"
+	"math"
 	"testing"
 
 	"gioui.org/font"
@@ -57,10 +58,11 @@ func testSpacingTokens(t *testing.T) {
 func testRadiusTokens(t *testing.T) {
 	t.Parallel()
 	expectDp(t, []named{
-		{"radius.sm", theme.RadiusSM, 4},
-		{"radius.md", theme.RadiusMD, 6},
-		{"radius.lg", theme.RadiusLG, 8},
-		{"radius.xl", theme.RadiusXL, 12},
+		{"radius.xs", theme.RadiusXS, 4},
+		{"radius.sm", theme.RadiusSM, 6},
+		{"radius.md", theme.RadiusMD, 10},
+		{"radius.lg", theme.RadiusLG, 14},
+		{"radius.xl", theme.RadiusXL, 16},
 	})
 }
 
@@ -85,7 +87,7 @@ func testIconTokens(t *testing.T) {
 		{"size.icon.lg", theme.IconLG, 20},
 		{"stroke.hairline", theme.Hairline, 1},
 		{"stroke.focus", theme.FocusStroke, 2},
-		{"focus.inset", theme.FocusInset, 1},
+		{"focus.offset", theme.FocusOffset, 2},
 		{"size.hit.min", theme.HitMin, 24},
 	})
 	for _, tc := range []struct {
@@ -137,32 +139,104 @@ func testTypeTokens(t *testing.T) {
 	}
 }
 
+// washTarget is one translucent token with the fraction of its tint it
+// must perceive as: the sRGB composite of tint at fraction over the surface.
+type washTarget struct {
+	name     string
+	got      color.NRGBA
+	tint     color.NRGBA
+	fraction float32
+}
+
+// washTargets lists every solved fill and wash of §3.5 and §3.7 for a mode,
+// over its main surface (CanvasBg); the ripple over the solid Action fill is
+// listed separately, over Action.
+func washTargets(m *mode) (onSurface []washTarget, onAction washTarget) {
+	c := m.theme.Chrome()
+	red := m.theme.Palette().Red
+	return []washTarget{
+			{"HoverWash", c.HoverWash, c.Fg, 0.07},
+			{"PressedWash", c.PressedWash, c.Fg, 0.14},
+			{"SelectedWash", c.SelectedWash, c.Fg, 0.11},
+			{"FillSoft", c.FillSoft, c.Fg, 0.06},
+			{"FillSoftHover", c.FillSoftHover, c.Fg, 0.10},
+			{"BorderSubtle", c.BorderSubtle, c.Fg, 0.09},
+			{"DangerSoft", c.DangerSoft, red, 0.14},
+			{"DangerSoftHover", c.DangerSoftHover, red, 0.22},
+			{"DangerSoftPressed", c.DangerSoftPressed, red, 0.30},
+			{"RippleWash", c.RippleWash, c.Fg, 0.11},
+		},
+		washTarget{"RippleOnAction", c.RippleOnAction, c.ActionFg, 0.11}
+}
+
 // TestInteractionWashesDeriveFromFg pins the §3.5 washes: every one derives
-// from the mode's Fg at its spec fraction, and the scrim is plain black at
-// 40%. One derivation keeps the UK-E02 scan and the UK-E04 contrast checks
-// pointed at a single place.
+// from the mode's Fg (the danger tint from Status.Danger) at its spec
+// fraction, as a perceived value — blended in linear light over the main
+// surface it lands within 2 levels per channel of the sRGB composite — and
+// the scrim is plain black at 40%. One derivation keeps the UK-E02 scan and
+// the UK-E04 contrast checks pointed at a single place.
 func TestInteractionWashesDeriveFromFg(t *testing.T) {
 	t.Parallel()
 	for _, m := range bothModes() {
 		c := m.theme.Chrome()
-		for _, tc := range []struct {
-			name     string
-			got      color.NRGBA
-			fraction float32
-		}{
-			{"HoverWash", c.HoverWash, 0.07},
-			{"PressedWash", c.PressedWash, 0.14},
-			{"SelectedWash", c.SelectedWash, 0.11},
-			{"FgDisabled", c.FgDisabled, 0.35},
-		} {
-			if want := fgWashOf(c.Fg, tc.fraction); tc.got != want {
-				t.Errorf("%s %s = %v, want Fg at %v = %v", m.name, tc.name, tc.got, tc.fraction, want)
-			}
+		onSurface, onAction := washTargets(&m)
+		for _, tc := range onSurface {
+			checkPerceived(t, m.name, tc, c.CanvasBg, linearBlend(c.CanvasBg, tc.got))
+		}
+		checkPerceived(t, m.name, onAction, c.Action, linearBlend(c.Action, onAction.got))
+		if want := fgWashOf(c.Fg, 0.35); c.FgDisabled != want {
+			t.Errorf("%s FgDisabled = %v, want Fg at 35%% = %v", m.name, c.FgDisabled, want)
 		}
 		if want := (color.NRGBA{A: 0x66}); c.Scrim != want {
 			t.Errorf("%s Scrim = %v, want black at 40%% = %v", m.name, c.Scrim, want)
 		}
 	}
+}
+
+// checkPerceived fails when got — what the token rendered or blended to over
+// surface — is more than 2 levels per channel from the sRGB composite.
+func checkPerceived(t *testing.T, mode string, tc washTarget, surface, got color.NRGBA) {
+	t.Helper()
+	want := srgbComposite(surface, tc.tint, tc.fraction)
+	for _, d := range []struct {
+		ch        string
+		got, want uint8
+	}{{"R", got.R, want.R}, {"G", got.G, want.G}, {"B", got.B, want.B}} {
+		if diff := int(d.got) - int(d.want); diff < -2 || diff > 2 {
+			t.Errorf("%s %s renders %s=%d over its surface, want the sRGB composite %d ±2", mode, tc.name, d.ch, d.got, d.want)
+		}
+	}
+}
+
+// srgbComposite is tint at fraction over surface in plain sRGB arithmetic:
+// the perceived target of a token.
+func srgbComposite(surface, tint color.NRGBA, fraction float32) color.NRGBA {
+	mix := func(s, t uint8) uint8 {
+		return uint8(math.Round(float64(s) + float64(fraction)*(float64(t)-float64(s))))
+	}
+	return color.NRGBA{R: mix(surface.R, tint.R), G: mix(surface.G, tint.G), B: mix(surface.B, tint.B), A: 0xff}
+}
+
+// linearBlend is what Gio's sRGB framebuffer shows for the translucent wash
+// over an opaque surface: the blend in linear light.
+func linearBlend(surface, wash color.NRGBA) color.NRGBA {
+	a := float64(wash.A) / 255
+	lin := func(v uint8) float64 {
+		s := float64(v) / 255
+		if s <= 0.04045 {
+			return s / 12.92
+		}
+		return math.Pow((s+0.055)/1.055, 2.4)
+	}
+	enc := func(l float64) uint8 {
+		s := l * 12.92
+		if l > 0.0031308 {
+			s = 1.055*math.Pow(l, 1/2.4) - 0.055
+		}
+		return uint8(math.Round(math.Min(math.Max(s, 0), 1) * 255))
+	}
+	mix := func(s, w uint8) uint8 { return enc(lin(s)*(1-a) + lin(w)*a) }
+	return color.NRGBA{R: mix(surface.R, wash.R), G: mix(surface.G, wash.G), B: mix(surface.B, wash.B), A: 0xff}
 }
 
 // fgWashOf mirrors the derivation: Fg with its alpha scaled by fraction.

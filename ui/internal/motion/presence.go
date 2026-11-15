@@ -86,3 +86,10 @@ func (f *Follower) Moving() bool { return !f.spring.AtRest() }
 
 // Value is the current value without advancing.
 func (f *Follower) Value() float32 { return f.spring.Value }
+
+// Snap puts the follower at rest on v: the reduced-motion path (UK-04),
+// where a change lands in the same frame instead of springing.
+func (f *Follower) Snap(v float32) {
+	f.ready = true
+	f.spring.Snap(v)
+}

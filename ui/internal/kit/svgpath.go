@@ -136,11 +136,14 @@ func (p *iconParser) cubeto() error {
 	return nil
 }
 
-// close handles Z: back to the subpath's move point.
+// close handles Z: back to the subpath's move point. It consumes its
+// token — the one command with no arguments, and the only way command()
+// could ever leave the stream untouched and loop forever.
 func (p *iconParser) close() error {
 	if !p.haveCur {
 		return fmt.Errorf("%w: Z", errIconOrphan)
 	}
+	p.toks = p.toks[1:]
 	last := &p.out[len(p.out)-1]
 	last.Closed = true
 	if p.cur != last.Move {

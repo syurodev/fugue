@@ -37,10 +37,12 @@ func (s *Spinner) Layout(env *Env, gtx *layout.Context, d int, c color.NRGBA) la
 		env.Keep()
 		s.phase += env.DT().Seconds() / 1.1
 	}
-	defer op.Affine(f32.AffineId().Rotate(f32.Point{}, float32(s.phase)*2*math.Pi)).Push(gtx.Ops).Pop()
+	// Turn about the center of the box: rotating about the origin swings
+	// the ring around the box's corner and out of its slot.
+	center := f32.Pt(float32(d)/2, float32(d)/2)
+	defer op.Affine(f32.AffineId().Rotate(center, float32(s.phase)*2*math.Pi)).Push(gtx.Ops).Pop()
 	var p clip.Path
 	p.Begin(gtx.Ops)
-	center := f32.Pt(float32(d)/2, float32(d)/2)
 	radius := float32(d) / 2 * 0.8
 	const arc = 4.4 // radians, about 250 degrees
 	for i := range 25 {
