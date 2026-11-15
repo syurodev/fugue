@@ -101,7 +101,7 @@ func (e *Env) iconOf(n IconName) ([]iconSubpath, error) {
 // An unknown icon or unparseable data is a programming error and comes back
 // as an error instead of drawing nothing.
 func (e *Env) Icon(gtx *layout.Context, name IconName, size unit.Dp, c color.NRGBA) (layout.Dimensions, error) {
-	stroke, err := e.iconStroke(gtx, name, size)
+	stroke, err := e.iconStroke(name, size)
 	if err != nil {
 		return layout.Dimensions{}, err
 	}
@@ -114,7 +114,7 @@ func (e *Env) Icon(gtx *layout.Context, name IconName, size unit.Dp, c color.NRG
 // iconStroke returns the cached stroke of one icon at one dp size, building
 // it once on the 24 grid: the width is chosen so the draw-time transform
 // lands on theme.IconStroke(size) exactly.
-func (e *Env) iconStroke(gtx *layout.Context, name IconName, size unit.Dp) (clip.Op, error) {
+func (e *Env) iconStroke(name IconName, size unit.Dp) (clip.Op, error) {
 	if e.iconStrokes == nil {
 		e.iconStrokes = make(map[iconKey]clip.Op)
 	}
@@ -126,10 +126,13 @@ func (e *Env) iconStroke(gtx *layout.Context, name IconName, size unit.Dp) (clip
 	if err != nil {
 		return clip.Op{}, err
 	}
-	// Stroke on the 24 grid: w * (size/24) = IconStroke(size) dp. Closed
-	// subpaths carry a trailing line back to their move point from the
-	// parser, so no extra close op is needed.
-	w := theme.IconStroke(size) * iconGrid / float32(gtx.Dp(size))
+	// Stroke on the 24 grid: w * (size/24) = IconStroke(size) dp, both
+	// sides in dp — the dp value of the size token, never gtx.Dp's pixels —
+	// so the cached width is metric-independent and the draw-time affine
+	// carries it to IconStroke(size) × PxPerDp × UIScale on any display
+	// (§3.0). Closed subpaths carry a trailing line back to their move
+	// point from the parser, so no extra close op is needed.
+	w := theme.IconStroke(size) * iconGrid / float32(size)
 	var p clip.Path
 	p.Begin(&e.iconOps)
 	for _, sp := range paths {

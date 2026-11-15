@@ -1,5 +1,5 @@
 // Code generated from the Lucide path data in testdata (ISC license at
-// testdata/lucide-ISC-LICENSE.txt); DO NOT EDIT. Regenerate with:
+// LICENSE-lucide.txt); DO NOT EDIT. Regenerate with:
 //
 //	go test -tags regenerate ./internal/kit/icondata -run TestRegenerateIconData
 
