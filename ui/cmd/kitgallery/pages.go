@@ -50,6 +50,8 @@ type component int
 const (
 	compButton component = iota
 	compIconButton
+	compTextField
+	compTextArea
 )
 
 // cell identifies one matrix cell of the inventory (UK-E03).
@@ -80,6 +82,8 @@ type pages struct {
 	btns  [numVariants][numSizes][numStates]*kit.ButtonState
 	icon  [numVariants][2]*kit.ButtonState
 	icons [numIconVariants][numStates]*kit.IconButtonState
+	text  [numFieldVariants][numFieldStates]*kit.TextFieldState
+	area  [numAreaStates]*kit.TextAreaState
 	nav   []*kit.ButtonState
 	// runs are the text runs and ctl the control boxes of the frame, in
 	// window coordinates; cells is the matrix inventory.
@@ -97,6 +101,16 @@ type pages struct {
 // tables are fixed, so the indexes are the stable IDs (UK-02).
 func newPages(env *kit.Env) *pages {
 	p := &pages{env: env, cells: map[cell]bool{}}
+	p.newButtonStates()
+	p.newFieldStates()
+	for range pageNames() {
+		p.nav = append(p.nav, kit.NewButtonState())
+	}
+	return p
+}
+
+// newButtonStates allocates the Button and IconButton matrices.
+func (p *pages) newButtonStates() {
 	for v := range p.btns {
 		for s := range p.btns[v] {
 			for c := range p.btns[v][s] {
@@ -112,10 +126,6 @@ func newPages(env *kit.Env) *pages {
 			p.icons[v][c] = kit.NewIconButtonState()
 		}
 	}
-	for range pageNames() {
-		p.nav = append(p.nav, kit.NewButtonState())
-	}
-	return p
 }
 
 // beginFrame drops the previous frame's recordings.

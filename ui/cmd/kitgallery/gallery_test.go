@@ -49,28 +49,61 @@ func layFrame(t *testing.T, g *gallery, cur int, px float32) (gtx layout.Context
 	return gtx, size
 }
 
-// expectedCells is the matrix UK-E03 demands for one page: every Button
-// variant × size × state on the Button page, every IconButton variant ×
-// state on the IconButton page.
+// expectedCells is the matrix UK-E03 demands for one page: every variant
+// × size × state its page presents.
 func expectedCells(cur int) map[cell]bool {
 	want := map[cell]bool{}
 	switch pageNames()[cur] {
 	case "Button":
-		for vi := range numVariants {
-			for si := range numSizes {
-				for _, st := range buttonStates() {
-					want[cell{compButton, vi, si, st}] = true
-				}
-			}
-		}
+		buttonCells(want)
 	case "IconButton":
-		for vi := range numIconVariants {
-			for _, st := range iconStates() {
-				want[cell{compIconButton, vi, 0, st}] = true
+		iconButtonCells(want)
+	case "TextField":
+		textFieldCells(want)
+	case "TextArea":
+		textAreaCells(want)
+	}
+	return want
+}
+
+// buttonCells are the Button cells: every variant × size × state.
+func buttonCells(want map[cell]bool) {
+	for vi := range numVariants {
+		for si := range numSizes {
+			for _, st := range buttonStates() {
+				want[cell{compButton, vi, si, st}] = true
 			}
 		}
 	}
-	return want
+}
+
+// iconButtonCells are the IconButton cells: every variant × state.
+func iconButtonCells(want map[cell]bool) {
+	for vi := range numIconVariants {
+		for _, st := range iconStates() {
+			want[cell{compIconButton, vi, 0, st}] = true
+		}
+	}
+}
+
+// textFieldCells are the TextField cells: every variant × state.
+func textFieldCells(want map[cell]bool) {
+	for vi := range numFieldVariants {
+		states := fieldStates()
+		if vi == 2 {
+			states = secretStates()
+		}
+		for _, st := range states {
+			want[cell{compTextField, vi, 0, st}] = true
+		}
+	}
+}
+
+// textAreaCells are the TextArea cells.
+func textAreaCells(want map[cell]bool) {
+	for _, st := range fieldStates() {
+		want[cell{compTextArea, 0, 0, st}] = true
+	}
 }
 
 // TestGalleryPagesCoverEveryVariantAndState covers UK-E03: every page
