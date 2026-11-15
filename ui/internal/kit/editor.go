@@ -257,6 +257,18 @@ func (f *fieldCore) focused(env *Env, gtx *layout.Context) bool {
 	return env.FocusVisible(gtx, &f.ed) || env.previewFocus(&f.ed)
 }
 
+// recordRun notes the bounds of one text run in the local frame of the
+// control being drawn, when the gallery's recorder is attached (UK-E09):
+// the gallery knows the control's window position and translates. Gio
+// does not expose the current transform (ui-guide §5), so the kit records
+// at the draw sites that know their own offsets. Production windows leave
+// the recorder nil and nothing is recorded.
+func recordRun(env *Env, r image.Rectangle) {
+	if env.RunRecorder != nil {
+		env.RunRecorder(r)
+	}
+}
+
 // hovered reports the field's §4.1 hover, real or forced.
 func (f *fieldCore) hovered(env *Env) bool {
 	return f.hover || env.previewHover(&f.ed)
@@ -338,33 +350,41 @@ func drawEditor(env *Env, gtx *layout.Context, ed *widget.Editor, fg, sel color.
 func editorType() theme.Type { return theme.TypeBody() }
 
 // belowLine draws the helper or error line: the two texts crossfade on
-// swap (error wins at 1), clipped to the animated line height, so a new
-// error line opens and content below the field moves with it (§6.8).
-func belowLine(env *Env, gtx *layout.Context, width int, helper, errMsg string, cHelper, cError color.NRGBA, fm fieldMotion) {
+// swap (error wins at 1), wrapped within width (§6.8 — a long message
+// wraps, it never runs past the field), clipped to the animated line
+// height, so a new error line opens and content below the field moves
+// with it. It returns the laid-out bounds of what it drew, local to its
+// own origin, for the gallery's run recording (UK-E09).
+func belowLine(env *Env, gtx *layout.Context, width int, helper, errMsg string, cHelper, cError color.NRGBA, fm fieldMotion) image.Rectangle {
+	var bounds image.Rectangle
 	if fm.linePx <= 0 {
-		return
+		return bounds
 	}
 	defer clip.Rect(image.Rect(0, 0, width, int(fm.linePx+0.5))).Push(gtx.Ops).Pop()
+	g := *gtx
+	g.Constraints.Max.X = width
 	if helper != "" && fm.swap < 1 {
-		drawText(env, gtx, theme.TypeSmall(), fade(cHelper, 1-fm.swap), helper, true)
+		dims := drawText(env, &g, theme.TypeSmall(), fade(cHelper, 1-fm.swap), helper, true)
+		bounds = bounds.Union(image.Rectangle{Max: dims.Size})
 	}
 	if errMsg != "" && fm.swap > 0 {
-		drawText(env, gtx, theme.TypeSmall(), fade(cError, fm.swap), errMsg, true)
+		dims := drawText(env, &g, theme.TypeSmall(), fade(cError, fm.swap), errMsg, true)
+		bounds = bounds.Union(image.Rectangle{Max: dims.Size})
 	}
+	return bounds
 }
 
 // fieldSizes are the px metrics of one field frame, derived once for both
 // the variant's measure and its layout: label height, box height and
-// paddings, the below-line's gap and animated height. Every number comes
-// from a token or the animated state (UK-03).
+// paddings, the below-line's gap. The below-line's own height is the
+// animated state, carried separately from fieldLineHeight (UK-03).
 type fieldSizes struct {
 	labelH, boxH, padX, boxPadY int
-	lineGapPx, linePx           float32
+	lineGapPx                   float32
 }
 
-// fieldMetrics derives fieldSizes at the current metric. showLine says
-// whether the below-line has content this frame.
-func fieldMetrics(env *Env, gtx *layout.Context, label string, showLine bool) fieldSizes {
+// fieldMetrics derives fieldSizes at the current metric.
+func fieldMetrics(env *Env, gtx *layout.Context, label string) fieldSizes {
 	s := fieldSizes{
 		boxH:      gtx.Dp(theme.ControlMD),
 		padX:      gtx.Dp(theme.SpaceLG),
@@ -374,16 +394,39 @@ func fieldMetrics(env *Env, gtx *layout.Context, label string, showLine bool) fi
 	if label != "" {
 		s.labelH = labelLine(env, gtx, theme.TypeSmall()) + gtx.Dp(theme.SpaceXS)
 	}
-	if showLine {
-		s.linePx = float32(labelLine(env, gtx, theme.TypeSmall()))
-	}
 	return s
 }
 
-// total is the field's full height: label, box, gap and the animated
-// below-line — the number a page places from.
-func (s fieldSizes) total() int {
-	return s.labelH + s.boxH + int(s.lineGapPx+s.linePx+0.5)
+// total is the field's full height: label, box, gap and the below-line at
+// linePx — the number a page places from.
+func (s fieldSizes) total(linePx float32) int {
+	return s.labelH + s.boxH + int(s.lineGapPx+linePx+0.5)
+}
+
+// wrappedTextHeight is the px height txt wraps to at width, without
+// painting: the number the below-line opens to when txt shows.
+func wrappedTextHeight(env *Env, gtx *layout.Context, txt string, width int) int {
+	if txt == "" {
+		return 0
+	}
+	m := op.Record(gtx.Ops)
+	g := *gtx
+	g.Constraints = layout.Constraints{Max: image.Pt(width, 1<<20)}
+	dims := drawText(env, &g, theme.TypeSmall(), env.Th.Chrome().Fg, txt, true)
+	m.Stop()
+	return dims.Size.Y
+}
+
+// fieldLineHeight is the px height the below-line needs at width: the
+// taller of the helper and — when the error shows — the error message,
+// both wrapped (§6.8). While the two crossfade, both are visible, so the
+// showing error reserves its own height too.
+func fieldLineHeight(env *Env, gtx *layout.Context, helper, errMsg string, errored bool, width int) float32 {
+	h := wrappedTextHeight(env, gtx, helper, width)
+	if errored {
+		h = max(h, wrappedTextHeight(env, gtx, errMsg, width))
+	}
+	return float32(h)
 }
 
 // fieldMinWidth is the natural width of a field: the widest of its label

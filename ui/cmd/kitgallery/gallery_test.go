@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image"
+	"slices"
 	"testing"
 	"time"
 
@@ -146,9 +147,12 @@ func diffCells(want, got map[cell]bool) []string {
 
 // checkPageBounds asserts UK-E09 for one laid-out frame in the fixed
 // window: everything inside the window, everything of the page inside its
-// column — no sideways overflow — every hit area at least size.hit.min, and
-// no overlap between text runs, between controls (their focus rings
-// included: a ring needs its room) or between a control and a text run.
+// column — no sideways overflow — every hit area at least size.hit.min, no
+// overlap between text runs, between controls (their focus rings included:
+// a ring needs its room) or between a control and a page text run; and
+// every run a control drew — label, placeholder, helper, error — sits
+// inside its control's box, so a run drawn wider than the slot it was
+// given, clipped on the way, cannot pass just because the clip hid it.
 func checkPageBounds(t *testing.T, g *gallery, gtx *layout.Context, size image.Point) {
 	t.Helper()
 	win := image.Rectangle{Max: size}
@@ -168,11 +172,25 @@ func checkPageBounds(t *testing.T, g *gallery, gtx *layout.Context, size image.P
 		checkInside(t, "control", r, r.Inset(-ring), win, column, g.pgs.origin.X)
 		all = append(all, r.Inset(-ring))
 	}
+	checkRunsInsideControls(t, g.pgs.ctlRuns, g.pgs.ctl)
 	for a := range all {
 		for b := a + 1; b < len(all); b++ {
 			if all[a].Overlaps(all[b]) {
 				t.Fatalf("items overlap: %v and %v", all[a], all[b])
 			}
+		}
+	}
+}
+
+// checkRunsInsideControls asserts every run a control drew sits inside one
+// of the frame's control boxes: a run wider than the slot its control was
+// given — clipped on the way — cannot pass just because the clip hid it
+// (UK-E09).
+func checkRunsInsideControls(t *testing.T, runs, ctls []image.Rectangle) {
+	t.Helper()
+	for _, r := range runs {
+		if !slices.ContainsFunc(ctls, r.In) {
+			t.Fatalf("a control's text run %v sits outside every control box, so the control drew it wider than its slot or clipped it", r)
 		}
 	}
 }

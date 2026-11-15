@@ -136,7 +136,8 @@ func (s *ButtonState) content(env *Env, gtx *layout.Context, p ButtonProps, fg c
 	labelAt := image.Pt(x, centerLabelY(env, gtx, theme.TypeLabel(), h))
 	drawLabel := func(a float32) {
 		at(gtx, labelAt, func(gtx *layout.Context) {
-			drawText(env, gtx, theme.TypeLabel(), fade(fg, a), p.Text, false)
+			dims := drawText(env, gtx, theme.TypeLabel(), fade(fg, a), p.Text, false)
+			recordRun(env, image.Rectangle{Max: dims.Size}.Add(labelAt))
 		})
 	}
 	if p.Icon == "" {

@@ -14,13 +14,14 @@ import (
 )
 
 // TextAreaProps is TextFieldProps's flowing sibling on the same editing
-// core, ui-kit §6.9 (UK-08). Enter inserts a newline; the submit key belongs to the
-// caller — the core never reports Submitted here (the composer wires its
-// own key, F10.4b). The box grows with its content to MaxLines lines and
-// then scrolls inside: the editor is laid out constrained to the cap, so
-// its viewport clamps and its own wheel scrolling takes over, while the
-// box's height follows the content on Smooth (§3.7) and clips what it is
-// not tall enough for yet.
+// core, ui-kit §6.9 (UK-08). Enter inserts a newline; the submit key
+// belongs to the caller — the core never reports Submitted here (the
+// composer wires its own key, F10.4b). The box grows with its content to
+// MaxLines lines and then scrolls inside: past the cap the editor flows at
+// its full height inside a list viewport of the inner rect — the box inset
+// by its padding, the mdview code-surface pattern — so the box stays put,
+// the padding stays clear, and the content moves inside the viewport while
+// the box's height follows the content on Smooth (§3.7).
 type TextAreaProps struct {
 	Label       string
 	Placeholder string
@@ -65,14 +66,15 @@ func (s *TextAreaState) MarkSubmitted() { s.err.submitted = true }
 
 // Measure returns the area's natural box at its current content: the
 // editor laid out into a throwaway macro with a dead input source, so
-// nothing paints and no event is consumed, plus the label and the helper
-// line.
+// nothing paints and no event is consumed, plus the label and the room
+// the below-line needs. A capped area measures at its cap — the box the
+// control actually draws (§6.9).
 func (s *TextAreaState) Measure(env *Env, gtx *layout.Context, p *TextAreaProps) layout.Dimensions {
-	sz := fieldMetrics(env, gtx, p.Label, p.Helper != "")
-	w := fieldMinWidth(env, gtx, p.Label, p.Placeholder, 0)
-	body := s.bodyHeight(env, gtx, w)
+	sz := fieldMetrics(env, gtx, p.Label)
+	w := textAreaWidth(env, gtx, p)
+	line := fieldLineHeight(env, gtx, p.Helper, p.Error, p.Error != "", w)
 	return layout.Dimensions{
-		Size:     image.Pt(w, sz.labelH+min(body, 1<<20)+2*sz.boxPadY+int(sz.lineGapPx+sz.linePx+0.5)),
+		Size:     image.Pt(w, sz.labelH+min(s.bodyHeight(env, gtx, w), s.maxBody(env, gtx, p))+2*sz.boxPadY+int(sz.lineGapPx+line+0.5)),
 		Baseline: sz.labelH + sz.boxPadY + labelLine(env, gtx, editorType())/2,
 	}
 }
@@ -81,13 +83,9 @@ func (s *TextAreaState) Measure(env *Env, gtx *layout.Context, p *TextAreaProps)
 // the frame (UK-06). Submitted is never set: Enter inserts a newline and
 // the submit key belongs to the caller (§6.9).
 func (s *TextAreaState) Layout(env *Env, gtx *layout.Context, p *TextAreaProps) FieldEvents {
-	pre := fieldMetrics(env, gtx, p.Label, false)
+	pre := fieldMetrics(env, gtx, p.Label)
 	w := textAreaWidth(env, gtx, p)
-	maxBody := 1 << 20
-	if p.MaxLines > 0 {
-		_, line := env.Content(editorType())
-		maxBody = p.MaxLines * gtx.Sp(line)
-	}
+	maxBody := s.maxBody(env, gtx, p)
 	full := s.bodyHeight(env, gtx, w)
 	content := min(full, maxBody)
 	scrolls := full > maxBody
@@ -96,9 +94,19 @@ func (s *TextAreaState) Layout(env *Env, gtx *layout.Context, p *TextAreaProps) 
 
 	ev := s.core.begin(gtx, box, fieldOpts{}, p.Disabled)
 	errored := s.err.visible(p.Error, false, ev)
-	fm := s.core.advance(env, s.core.hovered(env) && !p.Disabled, s.core.focused(env, gtx) && !p.Disabled, errored, fieldLineTarget(env, gtx, p.Helper, errored))
+	fm := s.core.advance(env, s.core.hovered(env) && !p.Disabled, s.core.focused(env, gtx) && !p.Disabled, errored, fieldLineHeight(env, gtx, p.Helper, p.Error, errored, w))
 	s.draw(env, gtx, p, pre, boxH, maxBody, scrolls, errored, fm)
 	return ev
+}
+
+// maxBody is the px height the editor's text may occupy: MaxLines lines,
+// unbounded when the area is uncapped (§6.9).
+func (s *TextAreaState) maxBody(env *Env, gtx *layout.Context, p *TextAreaProps) int {
+	if p.MaxLines <= 0 {
+		return 1 << 20
+	}
+	_, line := env.Content(editorType())
+	return p.MaxLines * gtx.Sp(line)
 }
 
 // bodyHeight lays the editor into a throwaway macro with a dead input
@@ -127,15 +135,18 @@ func textAreaWidth(env *Env, gtx *layout.Context, p *TextAreaProps) int {
 	return min(w, gtx.Constraints.Max.X)
 }
 
-// draw paints the area: the label, the box clipped to its animated height
-// with the editor inside, and the helper/error line below.
+// draw paints the area: the label, the box with the editor inside the
+// inner rect — the box inset by its padding, which the scroll clip is
+// too, so text never draws into the padding however far it scrolls — and
+// the helper/error line below.
 func (s *TextAreaState) draw(env *Env, gtx *layout.Context, p *TextAreaProps, sz fieldSizes, boxH, maxBody int, scrolls, errored bool, fm fieldMotion) {
 	c := env.Th.Chrome()
 	look := fieldLookOf(env, p.Disabled, errored)
 	w := textAreaWidth(env, gtx, p)
 	if p.Label != "" {
 		at(gtx, image.Pt(0, 0), func(gtx *layout.Context) {
-			drawText(env, gtx, theme.TypeSmall(), fade(c.FgMuted, dimOf(p.Disabled)), p.Label, false)
+			dims := drawText(env, gtx, theme.TypeSmall(), fade(c.FgMuted, dimOf(p.Disabled)), p.Label, false)
+			recordRun(env, image.Rectangle{Max: dims.Size})
 		})
 	}
 	box := image.Rect(0, sz.labelH, w, sz.labelH+boxH)
@@ -146,15 +157,16 @@ func (s *TextAreaState) draw(env *Env, gtx *layout.Context, p *TextAreaProps, sz
 		ig = gtx.Disabled()
 	}
 	at(&ig, box.Min, func(gtx *layout.Context) {
-		defer clip.Rect(image.Rect(0, 0, w, boxH)).Push(gtx.Ops).Pop()
-		pad := image.Pt(sz.padX, sz.boxPadY)
-		textW := max(w-2*sz.padX, 0)
+		inner := image.Rect(sz.padX, sz.boxPadY, max(w-sz.padX, sz.padX), max(boxH-sz.boxPadY, sz.boxPadY))
+		defer clip.Rect(inner).Push(gtx.Ops).Pop()
+		textW := inner.Dx()
 		if scrolls {
 			// Past the cap the editor flows at its full height inside the
-			// scrolling viewport; the list owns the wheel.
-			at(gtx, image.Pt(sz.padX, 0), func(gtx *layout.Context) {
+			// scrolling viewport of the inner rect; the list owns the
+			// wheel, and nothing draws under the padding.
+			at(gtx, inner.Min, func(gtx *layout.Context) {
 				g := *gtx
-				g.Constraints = layout.Constraints{Max: image.Pt(textW, boxH)}
+				g.Constraints = layout.Constraints{Max: image.Pt(textW, inner.Dy())}
 				s.list.Layout(g, 1, func(gtx layout.Context, _ int) layout.Dimensions {
 					g.Constraints = layout.Constraints{Max: image.Pt(textW, 1<<20)}
 					return drawEditor(env, &g, &s.core.ed, look.fg, fade(c.SelectedWash, dimOf(p.Disabled)))
@@ -162,18 +174,22 @@ func (s *TextAreaState) draw(env *Env, gtx *layout.Context, p *TextAreaProps, sz
 			})
 		} else {
 			if s.core.text() == "" && p.Placeholder != "" {
-				at(gtx, pad, func(gtx *layout.Context) {
-					drawText(env, gtx, editorType(), fade(c.Placeholder, dimOf(p.Disabled)), p.Placeholder, false)
+				at(gtx, inner.Min, func(gtx *layout.Context) {
+					dims := drawText(env, gtx, editorType(), fade(c.Placeholder, dimOf(p.Disabled)), p.Placeholder, false)
+					recordRun(env, image.Rectangle{Max: dims.Size}.Add(inner.Min))
 				})
 			}
-			at(gtx, pad, func(gtx *layout.Context) {
+			at(gtx, inner.Min, func(gtx *layout.Context) {
 				g := *gtx
 				g.Constraints = layout.Constraints{Max: image.Pt(textW, maxBody)}
 				drawEditor(env, &g, &s.core.ed, look.fg, fade(c.SelectedWash, dimOf(p.Disabled)))
 			})
 		}
 	})
-	at(gtx, image.Pt(0, sz.labelH+boxH+int(sz.lineGapPx+0.5)), func(gtx *layout.Context) {
-		belowLine(env, gtx, w, p.Helper, p.Error, c.FgSubtle, env.Th.Status().Danger, fm)
+	lineY := sz.labelH + boxH + int(sz.lineGapPx+0.5)
+	var lineBounds image.Rectangle
+	at(gtx, image.Pt(0, lineY), func(gtx *layout.Context) {
+		lineBounds = belowLine(env, gtx, w, p.Helper, p.Error, c.FgSubtle, env.Th.Status().Danger, fm)
 	})
+	recordRun(env, lineBounds.Add(image.Pt(0, lineY)))
 }

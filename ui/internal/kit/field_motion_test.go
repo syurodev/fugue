@@ -1,8 +1,11 @@
 package kit
 
 import (
+	"fmt"
 	"image"
+	"image/color"
 	"math"
+	"strings"
 	"testing"
 
 	"gioui.org/op/paint"
@@ -55,7 +58,7 @@ func fieldMetricsForTest(t *testing.T, h *harness) (linePx, bodyLine, boxPadY in
 	h.frame(t)
 	linePx = labelLine(h.env, &h.gtx, theme.TypeSmall())
 	bodyLine = labelLine(h.env, &h.gtx, editorType())
-	sz := fieldMetrics(h.env, &h.gtx, "", false)
+	sz := fieldMetrics(h.env, &h.gtx, "")
 	boxPadY = sz.boxPadY
 	h.end()
 	return linePx, bodyLine, boxPadY
@@ -275,4 +278,154 @@ func imagesDiffer(a, b *image.RGBA) bool {
 		}
 	}
 	return false
+}
+
+// abs is the absolute value of an int.
+func abs(v int) int {
+	if v < 0 {
+		return -v
+	}
+	return v
+}
+
+// areaPixel is the expected composited color of the box fill over the
+// render tests' green background: the fill draws at full weight, so the
+// framebuffer shows the linear-light blend of the token over the green.
+func areaPixel(env *Env) color.NRGBA {
+	return over(shotBG(), fieldLookOf(env, false, false).base)
+}
+
+// isAreaFill tolerates the one-level rounding of the sRGB framebuffer.
+func isAreaFill(c color.RGBA, fill color.NRGBA) bool {
+	return abs(int(c.R)-int(fill.R)) <= 2 && abs(int(c.G)-int(fill.G)) <= 2 && abs(int(c.B)-int(fill.B)) <= 2
+}
+
+// TestTextAreaContentStaysInsideItsPadding covers §6.9 as the review round
+// 1 fix pins it: the scroll clip is the box inset by its padding, so text
+// never draws into the padding band — however far the content scrolls —
+// and a capped box renders exactly MaxLines lines plus the two paddings,
+// at pixel scale 1 and 1.25, capped and uncapped.
+func TestTextAreaContentStaysInsideItsPadding(t *testing.T) {
+	t.Parallel()
+	for _, px := range []float32{1, 1.25} {
+		for _, tc := range []struct {
+			name    string
+			text    string
+			maxLine int
+		}{
+			{"capped", "l1\nl2\nl3\nl4\nl5", 3},
+			{"uncapped", "l1\nl2", 3},
+		} {
+			t.Run(fmt.Sprintf("%s-px%v", tc.name, px), func(t *testing.T) {
+				t.Parallel()
+				checkAreaPadding(t, px, tc.text, tc.maxLine)
+			})
+		}
+	}
+}
+
+// checkAreaPadding renders one capped-or-uncapped area at pixel scale px,
+// asserts the box renders at its token height with no ink in the padding
+// band — before and after a viewport scroll past the cap — and that the
+// text is inside.
+func checkAreaPadding(t *testing.T, px float32, text string, maxLines int) {
+	t.Helper()
+	h := newHarness(t)
+	h.px = px
+	_, bodyLine, padY := fieldMetricsForTest(t, h)
+	fill := areaPixel(h.env)
+	st := NewTextAreaState()
+	p := &TextAreaProps{MaxLines: maxLines, Placeholder: "write"}
+	st.SetText(text)
+	areaSettle(t, h, st, p)
+
+	img := areaShot(t, h, st, p)
+	box, _, _, n := scan(img, img.Rect, isBody)
+	if n == 0 {
+		t.Fatal("the area drew no box")
+	}
+	lines := strings.Count(text, "\n") + 1
+	visible := min(lines, maxLines)
+	wantH := 2*padY + visible*bodyLine
+	if got := box.Dy(); abs(got-wantH) > 3 {
+		t.Fatalf("px %v: the box is %d px tall, want %d = %d lines + 2×%d padding", px, got, wantH, visible, padY)
+	}
+	radius := radiusFor(t, h)
+	padX := max(padXFor(t, h), 1)
+	checkBandClean(t, img, box, padY, padX, radius, fill)
+
+	// Past the cap, scroll the viewport one line: the box stays put and the
+	// padding band stays clear of the scrolled text.
+	if lines > maxLines {
+		st.list.Position.Offset = bodyLine
+		img = areaShot(t, h, st, p)
+		box, _, _, _ = scan(img, img.Rect, isBody)
+		checkBandClean(t, img, box, padY, padX, radius, fill)
+	}
+}
+
+// radiusFor is the px corner radius of a field box.
+func radiusFor(t *testing.T, h *harness) int {
+	t.Helper()
+	h.frame(t)
+	r := h.gtx.Dp(theme.RadiusMD)
+	h.end()
+	return r
+}
+
+// padXFor is the px horizontal padding of a field box.
+func padXFor(t *testing.T, h *harness) int {
+	t.Helper()
+	h.frame(t)
+	sz := fieldMetrics(h.env, &h.gtx, "")
+	h.end()
+	return sz.padX
+}
+
+// bandSide reports whether the pixel sits in the band's top or bottom
+// strip (true) or its left or right strip (false), given it is in a strip
+// at all.
+func bandSide(y int, box image.Rectangle, padY int) bool {
+	return y < box.Min.Y+padY || y >= box.Max.Y-padY
+}
+
+// bandPixel classifies one pixel of a box: band says whether it lies in
+// the padding band (the box minus its inner rect), and corner whether it
+// lies in a skipped rounded-corner arc — its antialiased edge is neither
+// the background nor the fill by design.
+func bandPixel(x, y int, box image.Rectangle, padY, padX, radius int) (band, corner bool) {
+	band = y < box.Min.Y+padY || y >= box.Max.Y-padY || x < box.Min.X+padX || x >= box.Max.X-padX
+	if !band {
+		return band, false
+	}
+	inArcX := x < box.Min.X+radius || x >= box.Max.X-radius
+	inArcY := y < box.Min.Y+radius || y >= box.Max.Y-radius
+	if bandSide(y, box, padY) {
+		return band, inArcX
+	}
+	return band, inArcY
+}
+
+// checkBandClean asserts no pixel of the padding band — the box minus its
+// inner rect — is text ink: every pixel is the green background (the
+// rounded corners) or the box fill.
+func checkBandClean(t *testing.T, img *image.RGBA, box image.Rectangle, padY, padX, radius int, fill color.NRGBA) {
+	t.Helper()
+	ink := 0
+	for y := box.Min.Y; y < box.Max.Y; y++ {
+		for x := box.Min.X; x < box.Max.X; x++ {
+			band, corner := bandPixel(x, y, box, padY, padX, radius)
+			if !band || corner {
+				continue
+			}
+			c := img.RGBAAt(x, y)
+			if isBackground(c) || isAreaFill(c, fill) {
+				continue
+			}
+			ink++
+		}
+	}
+	if ink > 0 {
+		t.Fatalf("%d ink pixels in the padding band of box %v — text draws under the padding", ink, box)
+	}
 }

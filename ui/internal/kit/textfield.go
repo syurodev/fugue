@@ -124,11 +124,12 @@ func (s *TextFieldState) Number() (float64, bool) {
 // placeholder plus paddings and slots, at the full §6.8 height of label,
 // box and helper line. It draws nothing and touches no input source.
 func (s *TextFieldState) Measure(env *Env, gtx *layout.Context, p *TextFieldProps) layout.Dimensions {
-	sz := fieldMetrics(env, gtx, p.Label, p.Helper != "")
+	sz := fieldMetrics(env, gtx, p.Label)
 	lead, right := textFieldSlots(env, gtx, p)
 	w := fieldMinWidth(env, gtx, p.Label, p.Placeholder, lead+right)
+	line := fieldLineHeight(env, gtx, p.Helper, p.Error, p.Error != "", w)
 	return layout.Dimensions{
-		Size:     image.Pt(w, sz.total()),
+		Size:     image.Pt(w, sz.total(line)),
 		Baseline: sz.labelH + sz.boxPadY + labelLine(env, gtx, editorType())/2,
 	}
 }
@@ -142,7 +143,7 @@ func (s *TextFieldState) Layout(env *Env, gtx *layout.Context, p *TextFieldProps
 	if p.Variant < TextFieldText || p.Variant > TextFieldNumber {
 		return FieldEvents{}, fmt.Errorf("unknown text field variant %d: %w", int(p.Variant), errUnknownVariant)
 	}
-	pre := fieldMetrics(env, gtx, p.Label, false)
+	pre := fieldMetrics(env, gtx, p.Label)
 	w := textFieldWidth(env, gtx, p)
 	box := image.Rect(0, pre.labelH, w, pre.labelH+pre.boxH)
 
@@ -176,7 +177,7 @@ func (s *TextFieldState) Layout(env *Env, gtx *layout.Context, p *TextFieldProps
 	}
 
 	errored := s.err.visible(p.Error, s.outOfRange(p), ev)
-	fm := s.core.advance(env, s.core.hovered(env) && !p.Disabled, s.core.focused(env, gtx) && !p.Disabled, errored, fieldLineTarget(env, gtx, p.Helper, errored))
+	fm := s.core.advance(env, s.core.hovered(env) && !p.Disabled, s.core.focused(env, gtx) && !p.Disabled, errored, fieldLineHeight(env, gtx, p.Helper, p.Error, errored, w))
 	if err := s.draw(env, gtx, p, w, pre, errored, fm); err != nil {
 		return FieldEvents{}, fmt.Errorf("draw the text field: %w", err)
 	}
@@ -236,15 +237,6 @@ func (s *TextFieldState) outOfRange(p *TextFieldProps) bool {
 	return p.Min != nil && v < *p.Min || p.Max != nil && v > *p.Max
 }
 
-// fieldLineTarget is the target height of the below-line: present when a
-// helper stands or the error shows (§6.8), zero otherwise.
-func fieldLineTarget(env *Env, gtx *layout.Context, helper string, errored bool) float32 {
-	if helper == "" && !errored {
-		return 0
-	}
-	return float32(labelLine(env, gtx, theme.TypeSmall()))
-}
-
 // draw paints the whole field at the width Layout resolved: the label,
 // the box with its fill, border and ring, the leading icon, the editor
 // (and the placeholder while empty), the unit, the trailing buttons and
@@ -254,7 +246,8 @@ func (s *TextFieldState) draw(env *Env, gtx *layout.Context, p *TextFieldProps, 
 	look := fieldLookOf(env, p.Disabled, errored)
 	if p.Label != "" {
 		at(gtx, image.Pt(0, 0), func(gtx *layout.Context) {
-			drawText(env, gtx, theme.TypeSmall(), fade(c.FgMuted, dimOf(p.Disabled)), p.Label, false)
+			dims := drawText(env, gtx, theme.TypeSmall(), fade(c.FgMuted, dimOf(p.Disabled)), p.Label, false)
+			recordRun(env, image.Rectangle{Max: dims.Size})
 		})
 	}
 	paintBox(gtx, image.Rect(0, sz.labelH, w, sz.labelH+sz.boxH), look, fm)
@@ -269,9 +262,12 @@ func (s *TextFieldState) draw(env *Env, gtx *layout.Context, p *TextFieldProps, 
 	if err := s.drawTrailing(env, &ig, p, w, sz, p.Disabled); err != nil {
 		return err
 	}
-	at(gtx, image.Pt(0, sz.labelH+sz.boxH+int(sz.lineGapPx+0.5)), func(gtx *layout.Context) {
-		belowLine(env, gtx, w, p.Helper, p.Error, c.FgSubtle, env.Th.Status().Danger, fm)
+	lineY := sz.labelH + sz.boxH + int(sz.lineGapPx+0.5)
+	var lineBounds image.Rectangle
+	at(gtx, image.Pt(0, lineY), func(gtx *layout.Context) {
+		lineBounds = belowLine(env, gtx, w, p.Helper, p.Error, c.FgSubtle, env.Th.Status().Danger, fm)
 	})
+	recordRun(env, lineBounds.Add(image.Pt(0, lineY)))
 	return nil
 }
 
@@ -292,7 +288,8 @@ func (s *TextFieldState) drawInside(env *Env, gtx *layout.Context, p *TextFieldP
 	}
 	if s.core.text() == "" && p.Placeholder != "" {
 		at(gtx, image.Pt(textX, top+sz.boxPadY), func(gtx *layout.Context) {
-			drawText(env, gtx, editorType(), fade(c.Placeholder, dimOf(disabled)), p.Placeholder, false)
+			dims := drawText(env, gtx, editorType(), fade(c.Placeholder, dimOf(disabled)), p.Placeholder, false)
+			recordRun(env, image.Rectangle{Max: dims.Size}.Add(image.Pt(textX, top+sz.boxPadY)))
 		})
 	}
 	at(gtx, image.Pt(textX, top+sz.boxPadY), func(gtx *layout.Context) {
@@ -304,7 +301,8 @@ func (s *TextFieldState) drawInside(env *Env, gtx *layout.Context, p *TextFieldP
 		uw := measureLabel(env, gtx, theme.TypeSmall(), p.Unit).X
 		pt := image.Pt(w-gtx.Dp(theme.SpaceXS)-uw, top+(sz.boxH-labelLine(env, gtx, theme.TypeSmall()))/2)
 		at(gtx, pt, func(gtx *layout.Context) {
-			drawText(env, gtx, theme.TypeSmall(), fade(c.FgMuted, dimOf(disabled)), p.Unit, false)
+			dims := drawText(env, gtx, theme.TypeSmall(), fade(c.FgMuted, dimOf(disabled)), p.Unit, false)
+			recordRun(env, image.Rectangle{Max: dims.Size}.Add(pt))
 		})
 	}
 	return nil

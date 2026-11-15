@@ -63,6 +63,14 @@ type Env struct {
 	// every hover at once. The tags short-circuit the matching interaction
 	// check on the controls they name. Production windows leave it zero.
 	Preview Preview
+	// RunRecorder, when non-nil, receives the bounds of every text run the
+	// kit draws — label, placeholder, helper, error, button label — in the
+	// local frame of the control being drawn (UK-E09): the gallery attaches
+	// one per placed cell, knows the cell's window position and translates.
+	// Gio exposes no current transform (ui-guide §5), so the kit records at
+	// the draw sites that know their own offsets. Production windows leave
+	// it nil and nothing is recorded.
+	RunRecorder func(image.Rectangle)
 
 	// modality is true while focus moves come from the keyboard.
 	modality bool
