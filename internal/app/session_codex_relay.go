@@ -20,9 +20,10 @@ type serverRequestRelayer interface {
 }
 
 type codexRelayChoice struct {
-	decision      vendor.Decision
-	decisionLabel string
-	note          string
+	decision       vendor.Decision
+	selectedOption string
+	decisionLabel  string
+	note           string
 }
 
 // RelayServerRequest relays a Codex server request (item/*/requestApproval or
@@ -75,7 +76,7 @@ func (s *SessionToolService) executeCodexRelay(
 		resolveCodexRelayError(ctx, session, req.RequestID)
 		return
 	}
-	s.tombstones.putCodex(binding.SessionID, opID, digest, choice.decision.Allow, choice.decisionLabel, choice.decision.Answers)
+	s.tombstones.putCodex(binding.SessionID, opID, digest, choice.decision.Allow, choice.selectedOption, choice.decision.Answers)
 	if err := session.Resolve(context.WithoutCancel(ctx), vendor.ApprovalRef{ID: req.RequestID}, choice.decision); err != nil {
 		return
 	}
@@ -125,11 +126,7 @@ func (s *SessionToolService) replayCodexTombstone(
 		resolveCodexRelayError(ctx, session, requestID)
 		return true
 	}
-	if err := session.Resolve(context.WithoutCancel(ctx), vendor.ApprovalRef{ID: requestID}, vendor.Decision{
-		Allow:   entry.allow,
-		Message: entry.note,
-		Answers: entry.answers,
-	}); err != nil {
+	if err := session.Resolve(context.WithoutCancel(ctx), vendor.ApprovalRef{ID: requestID}, codexDecisionFromTombstone(&entry)); err != nil {
 		return true
 	}
 	return true
@@ -254,9 +251,25 @@ func (s *SessionToolService) awaitAndTakeCodexRelayed(
 	}
 	delivered, err := s.interactions.TakeRelayed(opID)
 	if err != nil {
-		return s.fallbackCodexRelayedTombstone(err, binding, opID, digest)
+		return s.fallbackCodexRelayedTombstone(err, binding, opID, digest, kind)
 	}
 	return translateCodexRelayedOutcome(delivered, kind)
+}
+
+func codexTombstoneLabel(entry *approveTombstoneEntry, kind vendor.ServerRequestKind) string {
+	if kind == vendor.ServerRequestQuestion {
+		if entry.allow {
+			return string(interaction.OutcomeAnswered)
+		}
+		return string(interaction.OutcomeDenied)
+	}
+	if entry.selectedOption != "" {
+		return entry.selectedOption
+	}
+	if entry.allow {
+		return codex.DecisionAccept
+	}
+	return codex.DecisionDecline
 }
 
 func (s *SessionToolService) fallbackCodexRelayedTombstone(
@@ -264,6 +277,7 @@ func (s *SessionToolService) fallbackCodexRelayedTombstone(
 	binding SessionBinding,
 	opID string,
 	digest [sha256.Size]byte,
+	kind vendor.ServerRequestKind,
 ) (codexRelayChoice, bool) {
 	code := errcode.CodeOf(err)
 	if code != errcode.NotFound && code != errcode.InteractionNotFound {
@@ -274,26 +288,33 @@ func (s *SessionToolService) fallbackCodexRelayedTombstone(
 		return codexRelayChoice{}, false
 	}
 	return codexRelayChoice{
-		decision:      vendor.Decision{Allow: entry.allow, Message: entry.note, Answers: entry.answers},
-		decisionLabel: entry.note,
+		decision:       codexDecisionFromTombstone(&entry),
+		selectedOption: entry.selectedOption,
+		decisionLabel:  codexTombstoneLabel(&entry, kind),
 	}, true
+}
+
+func translateCodexQuestionAnswers(ticket *interaction.Ticket) map[string][]string {
+	answers := make(map[string][]string, len(ticket.Answers))
+	for _, ans := range ticket.Answers {
+		var vals []string
+		vals = append(vals, ans.OptionIDs...)
+		if ans.Text != "" {
+			vals = append(vals, ans.Text)
+		}
+		if len(vals) > 0 {
+			answers[ans.QuestionID] = vals
+		}
+	}
+	return answers
 }
 
 func translateCodexRelayedOutcome(ticket *interaction.Ticket, kind vendor.ServerRequestKind) (codexRelayChoice, bool) {
 	switch ticket.Outcome {
 	case interaction.OutcomeAnswered:
 		if kind == vendor.ServerRequestQuestion {
-			answers := make(map[string][]string, len(ticket.Answers))
-			for _, ans := range ticket.Answers {
-				var vals []string
-				vals = append(vals, ans.OptionIDs...)
-				if ans.Text != "" {
-					vals = append(vals, ans.Text)
-				}
-				answers[ans.QuestionID] = vals
-			}
 			return codexRelayChoice{
-				decision:      vendor.Decision{Allow: true, Answers: answers},
+				decision:      vendor.Decision{Allow: true, Answers: translateCodexQuestionAnswers(ticket)},
 				decisionLabel: string(interaction.OutcomeAnswered),
 			}, true
 		}
@@ -302,9 +323,10 @@ func translateCodexRelayedOutcome(ticket *interaction.Ticket, kind vendor.Server
 		}
 		allow := ticket.SelectedOptionID != codex.DecisionDecline && ticket.SelectedOptionID != codex.DecisionCancel
 		return codexRelayChoice{
-			decision:      vendor.Decision{Allow: allow, Message: ticket.SelectedOptionID},
-			decisionLabel: ticket.SelectedOptionID,
-			note:          ticket.Text,
+			decision:       vendor.Decision{Allow: allow, Message: ticket.SelectedOptionID},
+			selectedOption: ticket.SelectedOptionID,
+			decisionLabel:  ticket.SelectedOptionID,
+			note:           ticket.Text,
 		}, true
 	case interaction.OutcomeDenied:
 		if kind == vendor.ServerRequestQuestion {
@@ -315,9 +337,10 @@ func translateCodexRelayedOutcome(ticket *interaction.Ticket, kind vendor.Server
 			}, true
 		}
 		return codexRelayChoice{
-			decision:      vendor.Decision{Allow: false, Message: codex.DecisionDecline},
-			decisionLabel: codex.DecisionDecline,
-			note:          ticket.Text,
+			decision:       vendor.Decision{Allow: false, Message: codex.DecisionDecline},
+			selectedOption: codex.DecisionDecline,
+			decisionLabel:  codex.DecisionDecline,
+			note:           ticket.Text,
 		}, true
 	case interaction.OutcomeAllowedOnce, interaction.OutcomeAllowedSession,
 		interaction.OutcomeCancelled, interaction.OutcomeUnavailable, interaction.OutcomeExpired:
@@ -408,11 +431,32 @@ func (t *approveTombstones) finishInFlight(sessionID, opID string) {
 	}
 }
 
+func codexDecisionFromTombstone(entry *approveTombstoneEntry) vendor.Decision {
+	return vendor.Decision{
+		Allow:   entry.allow,
+		Message: entry.selectedOption,
+		Answers: cloneCodexAnswers(entry.answers),
+	}
+}
+
+func cloneCodexAnswers(answers map[string][]string) map[string][]string {
+	if answers == nil {
+		return nil
+	}
+	out := make(map[string][]string, len(answers))
+	for k, vals := range answers {
+		cloned := make([]string, len(vals))
+		copy(cloned, vals)
+		out[k] = cloned
+	}
+	return out
+}
+
 func (t *approveTombstones) putCodex(
 	sessionID, opID string,
 	digest [sha256.Size]byte,
 	allow bool,
-	decisionLabel string,
+	selectedOption string,
 	answers map[string][]string,
 ) {
 	t.mu.Lock()
@@ -431,9 +475,9 @@ func (t *approveTombstones) putCodex(
 		sess.order = append(sess.order, opID)
 	}
 	sess.entries[opID] = approveTombstoneEntry{
-		digest:  digest,
-		allow:   allow,
-		note:    decisionLabel,
-		answers: answers,
+		digest:         digest,
+		allow:          allow,
+		selectedOption: selectedOption,
+		answers:        cloneCodexAnswers(answers),
 	}
 }

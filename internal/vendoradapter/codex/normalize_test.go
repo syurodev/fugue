@@ -234,4 +234,27 @@ func assertUserInputRequestNormalizes(t *testing.T, n *Normalizer) {
 	if qObs.ServerRequest == nil || qObs.ServerRequest.Kind != vendor.ServerRequestQuestion || len(qObs.ServerRequest.QuestionOptions) != 2 || !qObs.ServerRequest.AllowFreeText {
 		t.Fatalf("user input request = %+v", qObs.ServerRequest)
 	}
+	assertExecpolicyAndSecretUserInputNormalize(t, n)
+}
+
+func assertExecpolicyAndSecretUserInputNormalize(t *testing.T, n *Normalizer) {
+	t.Helper()
+	amendObs := feed(t, n, `{"id":14,"method":"item/commandExecution/requestApproval","params":{"threadId":"th-1","turnId":"t-1","itemId":"cmd-2","command":"git status","proposedExecpolicyAmendment":["git","status"]}}`)
+	if amendObs.ServerRequest == nil || len(amendObs.ServerRequest.Options) != 5 || amendObs.ServerRequest.Options[2] != DecisionAcceptWithExecpolicyAmendment {
+		t.Fatalf("command approval with amendment options = %+v", amendObs.ServerRequest)
+	}
+
+	secretObs := feed(t, n, `{"id":15,"method":"item/tool/requestUserInput","params":{"threadId":"th-1","turnId":"t-1","itemId":"q-sec","isBlocking":true,"questions":[{"id":"tok","header":"API-TOKEN-HDR","question":"SECRET-TOKEN-PROMPT","isOther":true,"isSecret":true}]}}`)
+	if secretObs.ServerRequest != nil {
+		t.Fatalf("secret question produced ServerRequest = %+v, want nil", secretObs.ServerRequest)
+	}
+	noticeItem := oneRecord(t, &secretObs)
+	noticeMeta := metaOf[transcript.NoticeMetadata](t, noticeItem.Metadata)
+	noticeBody, ok := noticeItem.Content.(transcript.NoticeContent)
+	if !ok || noticeMeta.Code != "unsupported_event" || noticeBody.Text != secretInputUnsupportedMessage {
+		t.Fatalf("secret question notice = (%+v, %+v)", noticeMeta, noticeBody)
+	}
+	if strings.Contains(noticeItem.RawRef, "SECRET") || strings.Contains(noticeBody.Text, "API-TOKEN-HDR") || strings.Contains(noticeBody.Text, "SECRET-TOKEN-PROMPT") {
+		t.Fatalf("secret question text leaked into notice item: %+v", noticeItem)
+	}
 }

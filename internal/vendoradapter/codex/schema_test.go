@@ -19,6 +19,7 @@ const (
 	schemaTypeString  = "string"
 	schemaTypeObject  = "object"
 	schemaTypeInteger = "integer"
+	schemaTypeArray   = "array"
 )
 
 type schemaDoc struct {
@@ -364,6 +365,7 @@ func assertServerRequestFieldsMatchSchema(t *testing.T, defs map[string]schemaNo
 		"CommandExecutionRequestApprovalParams.command:string",
 		"CommandExecutionRequestApprovalParams.cwd:string",
 		"CommandExecutionRequestApprovalParams.reason:string",
+		"CommandExecutionRequestApprovalParams.proposedExecpolicyAmendment:array",
 		"FileChangeRequestApprovalParams.threadId:string",
 		"FileChangeRequestApprovalParams.turnId:string",
 		"FileChangeRequestApprovalParams.itemId:string",
@@ -393,5 +395,18 @@ func assertServerRequestFieldsMatchSchema(t *testing.T, defs map[string]schemaNo
 				t.Errorf("%s missing %q in pinned schema", defName, want)
 			}
 		}
+	}
+	foundExecpolicy := false
+	for i := range defs["CommandExecutionApprovalDecision"].OneOf {
+		variant := defs["CommandExecutionApprovalDecision"].OneOf[i]
+		if payload, ok := variant.Properties[DecisionAcceptWithExecpolicyAmendment]; ok {
+			arr := payload.Properties["execpolicy_amendment"]
+			if schemaMatchesType(defs, &arr, schemaTypeArray) {
+				foundExecpolicy = true
+			}
+		}
+	}
+	if !foundExecpolicy {
+		t.Errorf("CommandExecutionApprovalDecision missing %s.execpolicy_amendment array in pinned schema", DecisionAcceptWithExecpolicyAmendment)
 	}
 }

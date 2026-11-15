@@ -63,10 +63,11 @@ const (
 	ItemStatusFailed     = "failed"
 	ItemStatusDeclined   = "declined"
 
-	DecisionAccept           = "accept"
-	DecisionAcceptForSession = "acceptForSession"
-	DecisionDecline          = "decline"
-	DecisionCancel           = "cancel"
+	DecisionAccept                        = "accept"
+	DecisionAcceptForSession              = "acceptForSession"
+	DecisionAcceptWithExecpolicyAmendment = "acceptWithExecpolicyAmendment"
+	DecisionDecline                       = "decline"
+	DecisionCancel                        = "cancel"
 
 	PermissionScopeTurn    = "turn"
 	PermissionScopeSession = "session"

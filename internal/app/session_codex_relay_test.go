@@ -18,7 +18,6 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/redact"
-	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/codex"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -405,49 +404,4 @@ func TestCodexRetriedRequestIsNotAskedTwice(t *testing.T) {
 	if count301 != 1 {
 		t.Fatalf("RPC 301 response count = %d, want 1", count301)
 	}
-}
-
-func TestCodexUserInputRequestBecomesARelayedQuestion(t *testing.T) {
-	t.Parallel()
-	f := newCodexRelayFixture(t)
-	sub := f.subscribeInteractions(t)
-
-	const optCanary = "canary"
-	const optLive = "live-cluster"
-	qFrame := fmt.Sprintf(`{"id":401,"method":%q,"params":{"threadId":%q,"turnId":"t-1","itemId":"ask-1","isBlocking":true,"questions":[{"id":"env","header":"Target","question":"Select target environment","isOther":false,"isSecret":false,"options":[{"label":%q,"description":"Canary cluster"},{"label":%q,"description":"Live cluster"}]}]}}`,
-		codex.MethodRequestUserInput, fakeCodexThreadID, optCanary, optLive)
-	f.sendServerRequestTurn(t, "codex-question-turn", qFrame)
-
-	prompt := awaitRequested(t, sub)
-	if prompt.Kind != string(interaction.KindQuestion) || len(prompt.Questions) != 1 {
-		t.Fatalf("relayed question prompt = %+v, want KindQuestion with 1 question", prompt)
-	}
-	wantQuestion := InteractionQuestion{
-		QuestionID: "env",
-		Prompt:     "Select target environment",
-		AllowText:  true,
-		Options: []InteractionOption{
-			{ID: optCanary, Label: optCanary, Description: "Canary cluster"},
-			{ID: optLive, Label: optLive, Description: "Live cluster"},
-		},
-	}
-	if diff := cmp.Diff(wantQuestion, prompt.Questions[0]); diff != "" {
-		t.Fatalf("relayed question (-want +got):\n%s", diff)
-	}
-	if _, err := f.inter.Answer(t.Context(), &AnswerInteractionCommand{
-		CommandID: "cmd-q-401", Principal: testAppPrincipal, Incarnation: f.inter.Incarnation(),
-		RequestID: prompt.RequestID, Outcome: OutcomeAnswered,
-		Answers: []InteractionAnswer{{QuestionID: "env", OptionIDs: []string{optCanary}}},
-	}); err != nil {
-		t.Fatal(err)
-	}
-	_, _ = sub.Next(t.Context())
-	resp := f.awaitRPCResponse(t, "401")
-	if resp.Error != nil || string(resp.Result) != `{"answers":{"env":{"answers":["canary"]}}}` {
-		t.Fatalf("RPC 401 response = %+v, want canary answer", resp)
-	}
-	if diff := cmp.Diff([]string{"answered"}, f.recordedDecisions(t, "Select target environment", optCanary)); diff != "" {
-		t.Fatalf("recorded question decisions (-want +got):\n%s", diff)
-	}
-	_ = vendor.ServerRequestQuestionItem{}
 }

@@ -352,10 +352,11 @@ func (s *SessionToolService) endAllSessions() {
 }
 
 type approveTombstoneEntry struct {
-	digest  [sha256.Size]byte
-	allow   bool
-	note    string
-	answers map[string][]string
+	digest         [sha256.Size]byte
+	allow          bool
+	selectedOption string
+	note           string
+	answers        map[string][]string
 }
 
 type sessionApproveTombstone struct {

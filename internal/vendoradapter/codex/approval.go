@@ -8,20 +8,18 @@ package codex
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 
-	"github.com/syurodev/fugue/internal/platform/errcode"
-	"github.com/syurodev/fugue/internal/process"
+	"github.com/syurodev/fugue/internal/transcript"
 	"github.com/syurodev/fugue/internal/vendor"
 )
 
 const (
-	maxSummaryBytes        = 2 << 10
-	truncationSuffix       = "… [truncated, full input in detail]"
-	jsonRPCServerErrorCode = -32000
+	maxSummaryBytes               = 2 << 10
+	truncationSuffix              = "… [truncated, full input in detail]"
+	jsonRPCServerErrorCode        = -32000
+	secretInputUnsupportedMessage = "Codex asked for secret input, which Fugue cannot relay yet"
 )
 
 type pendingServerRequest struct {
@@ -46,6 +44,14 @@ type (
 	// CommandApprovalResponse answers item/commandExecution/requestApproval.
 	CommandApprovalResponse struct {
 		Decision any `json:"decision"`
+	}
+	// ExecpolicyAmendmentPayload holds an approved execpolicy amendment rule list.
+	ExecpolicyAmendmentPayload struct {
+		ExecpolicyAmendment []string `json:"execpolicy_amendment"`
+	}
+	// AcceptWithExecpolicyAmendmentDecision encodes Codex's execpolicy amendment decision object.
+	AcceptWithExecpolicyAmendmentDecision struct {
+		AcceptWithExecpolicyAmendment ExecpolicyAmendmentPayload `json:"acceptWithExecpolicyAmendment"`
 	}
 	// FileChangeApprovalParams is the server request payload for item/fileChange/requestApproval.
 	FileChangeApprovalParams struct {
@@ -132,6 +138,11 @@ func (n *Normalizer) normalizeCommandApproval(frame *Frame) Observation {
 	if params.Reason != nil && *params.Reason != "" {
 		summary += " (" + *params.Reason + ")"
 	}
+	options := []string{DecisionAccept, DecisionAcceptForSession}
+	if len(params.ProposedExecpolicyAmendment) > 0 {
+		options = append(options, DecisionAcceptWithExecpolicyAmendment)
+	}
+	options = append(options, DecisionDecline, DecisionCancel)
 	return Observation{
 		ServerRequest: &ServerRequest{
 			RequestID: frame.CanonicalID,
@@ -141,7 +152,7 @@ func (n *Normalizer) normalizeCommandApproval(frame *Frame) Observation {
 			Kind:      vendor.ServerRequestConfirm,
 			Summary:   boundSummary(summary),
 			Detail:    compactJSON(frame.Params),
-			Options:   []string{DecisionAccept, DecisionAcceptForSession, DecisionDecline, DecisionCancel},
+			Options:   options,
 		},
 	}
 }
@@ -216,6 +227,9 @@ func (n *Normalizer) normalizeUserInputRequest(frame *Frame) Observation {
 	if json.Unmarshal(frame.Params, &params) != nil || params.TurnID == "" || params.ItemID == "" || len(params.Questions) == 0 {
 		return n.unsupported(n.frameRef(frame), frame.Method)
 	}
+	if hasSecretQuestion(params.Questions) {
+		return n.secretInputUnsupported(frame, params.TurnID)
+	}
 	var qOpts []vendor.ServerRequestQuestionOption
 	questions := make([]vendor.ServerRequestQuestionItem, 0, len(params.Questions))
 	allowFreeText := false
@@ -264,6 +278,31 @@ func (n *Normalizer) normalizeUserInputRequest(frame *Frame) Observation {
 	}
 }
 
+func hasSecretQuestion(questions []UserInputQuestion) bool {
+	for _, q := range questions {
+		if q.IsSecret {
+			return true
+		}
+	}
+	return false
+}
+
+func (n *Normalizer) secretInputUnsupported(frame *Frame, codexTurnID string) Observation {
+	rawRef := n.frameRef(frame)
+	item := transcript.UnsupportedEvent("notice-"+rawRef, n.session, n.resolveTurnID(codexTurnID), rawRef)
+	item.Content = transcript.NoticeContent{Text: secretInputUnsupportedMessage}
+	return Observation{Records: []transcript.Item{item}}
+}
+
+func unrelayedServerRequestMessage(obs *Observation) string {
+	if obs != nil && len(obs.Records) > 0 {
+		if nc, ok := obs.Records[0].Content.(transcript.NoticeContent); ok && nc.Text == secretInputUnsupportedMessage {
+			return secretInputUnsupportedMessage
+		}
+	}
+	return "unsupported server request"
+}
+
 func boundSummary(s string) string {
 	if len(s) <= maxSummaryBytes {
 		return s
@@ -296,138 +335,4 @@ func (s *Session) registerServerRequest(frame *Frame) bool {
 		params: append(json.RawMessage(nil), frame.Params...),
 	}
 	return true
-}
-
-// Resolve sends the user's choice (or a JSON-RPC error response when d.Error != nil)
-// back to Codex for req.ID, at most once.
-func (s *Session) Resolve(ctx context.Context, req vendor.ApprovalRef, d vendor.Decision) error {
-	if req.ID == "" {
-		return errcode.New(errcode.InvalidArgument, "approval request id is required")
-	}
-	if ctx.Err() != nil {
-		return errcode.Wrap(errcode.Canceled, "codex resolve canceled", ctx.Err())
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if s.state == stateClosed {
-		return s.closedErrLocked()
-	}
-	if s.resolvedApprovals[req.ID] {
-		return errcode.New(errcode.FailedPrecondition, "codex server request already resolved")
-	}
-	pending, ok := s.pendingApprovals[req.ID]
-	if !ok {
-		return errcode.New(errcode.NotFound, "codex server request not found")
-	}
-	raw, err := s.encodeServerRequestResponse(pending, d)
-	if err != nil {
-		return err
-	}
-	delete(s.pendingApprovals, req.ID)
-	s.resolvedApprovals[req.ID] = true
-	if err := s.proc.WriteLine(bytes.TrimRight(raw, "\r\n")); err != nil {
-		if errors.Is(err, process.ErrStdinClosed) {
-			return vendor.ErrSessionClosed
-		}
-		return errcode.Wrap(errcode.Internal, "write codex approval response", err)
-	}
-	return nil
-}
-
-func (s *Session) encodeServerRequestResponse(pending pendingServerRequest, d vendor.Decision) ([]byte, error) {
-	if d.Error != nil {
-		return s.codec.EncodeResponse(pending.rawID, nil, &RPCError{
-			Code:    jsonRPCServerErrorCode,
-			Message: d.Error.Error(),
-		})
-	}
-	switch pending.method {
-	case MethodCommandApproval:
-		return s.codec.EncodeResponse(pending.rawID, CommandApprovalResponse{Decision: resolveChoice(d)}, nil)
-	case MethodFileChangeApproval:
-		return s.codec.EncodeResponse(pending.rawID, FileChangeApprovalResponse{Decision: resolveChoice(d)}, nil)
-	case MethodPermissionsApproval:
-		return s.encodePermissionsResponse(pending, d)
-	case MethodRequestUserInput:
-		return s.encodeUserInputResponse(pending, d)
-	default:
-		return s.codec.EncodeResponse(pending.rawID, nil, &RPCError{
-			Code:    jsonRPCServerErrorCode,
-			Message: "unsupported server request method",
-		})
-	}
-}
-
-func resolveChoice(d vendor.Decision) string {
-	if d.Message != "" {
-		return d.Message
-	}
-	if d.Allow {
-		return DecisionAccept
-	}
-	return DecisionDecline
-}
-
-func (s *Session) encodePermissionsResponse(pending pendingServerRequest, d vendor.Decision) ([]byte, error) {
-	choice := d.Message
-	if choice == DecisionDecline || (!d.Allow && choice == "") {
-		return s.codec.EncodeResponse(pending.rawID, PermissionsApprovalResponse{
-			Permissions: json.RawMessage(`{}`),
-			Scope:       PermissionScopeTurn,
-		}, nil)
-	}
-	var params PermissionsApprovalParams
-	if json.Unmarshal(pending.params, &params) != nil {
-		params.Permissions = nil
-	}
-	perms := params.Permissions
-	if len(perms) == 0 {
-		perms = json.RawMessage(`{}`)
-	}
-	scope := PermissionScopeTurn
-	if choice == PermissionScopeSession {
-		scope = PermissionScopeSession
-	}
-	return s.codec.EncodeResponse(pending.rawID, PermissionsApprovalResponse{
-		Permissions: perms,
-		Scope:       scope,
-	}, nil)
-}
-
-func (s *Session) encodeUserInputResponse(pending pendingServerRequest, d vendor.Decision) ([]byte, error) {
-	if !d.Allow && len(d.Answers) == 0 && d.Message == "" {
-		return s.codec.EncodeResponse(pending.rawID, ToolRequestUserInputResponse{
-			Answers: map[string]ToolUserInputAnswer{},
-		}, nil)
-	}
-	var params ToolRequestUserInputParams
-	if json.Unmarshal(pending.params, &params) != nil {
-		params.Questions = nil
-	}
-	answers := make(map[string]ToolUserInputAnswer, len(params.Questions))
-	for _, q := range params.Questions {
-		if vals, ok := d.Answers[q.ID]; ok {
-			answers[q.ID] = ToolUserInputAnswer{Answers: vals}
-			continue
-		}
-		answers[q.ID] = ToolUserInputAnswer{Answers: []string{d.Message}}
-	}
-	return s.codec.EncodeResponse(pending.rawID, ToolRequestUserInputResponse{Answers: answers}, nil)
-}
-
-func (s *Session) rejectPendingApprovalsLocked() {
-	for id, req := range s.pendingApprovals {
-		delete(s.pendingApprovals, id)
-		s.resolvedApprovals[id] = true
-		raw, err := s.codec.EncodeResponse(req.rawID, nil, &RPCError{
-			Code:    jsonRPCServerErrorCode,
-			Message: "the approval request could not be completed",
-		})
-		if err != nil {
-			continue
-		}
-		if wErr := s.proc.WriteLine(bytes.TrimRight(raw, "\r\n")); wErr != nil {
-			continue
-		}
-	}
 }

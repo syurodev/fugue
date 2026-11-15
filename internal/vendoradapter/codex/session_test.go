@@ -317,7 +317,9 @@ func TestCodexSessionResolveAnswersOnceAndDeduplicatesRetriedRequest(t *testing.
 	t.Parallel()
 	ctx := t.Context()
 
-	rpcLog := filepath.Join(t.TempDir(), "resolve-rpcs.jsonl")
+	rpcDir := t.TempDir()
+	const rpcLogName = "resolve-rpcs.jsonl"
+	rpcLog := filepath.Join(rpcDir, rpcLogName)
 	adapter := NewAdapter(nil, WithBinary(fakeCodexBinary(t)))
 	sess, err := adapter.Start(ctx, &vendor.StartSpec{
 		Cwd:       t.TempDir(),
@@ -327,12 +329,27 @@ func TestCodexSessionResolveAnswersOnceAndDeduplicatesRetriedRequest(t *testing.
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
-	defer closeTestSession(t, sess)
+	closed := false
+	defer func() {
+		if !closed {
+			closeTestSession(t, sess)
+		}
+	}()
 
 	codexSess, ok := sess.(*Session)
 	if !ok {
 		t.Fatalf("expected *Session, got %T", sess)
 	}
+	assertDeduplicatedInitialRequest(t, codexSess)
+	assertAdditionalServerRequestResolutions(t, codexSess)
+	closeTestSession(t, sess)
+	closed = true
+	assertResolvedRPCLog(t, rpcDir, rpcLogName)
+}
+
+func assertDeduplicatedInitialRequest(t *testing.T, codexSess *Session) {
+	t.Helper()
+	ctx := t.Context()
 	frame := Frame{
 		Kind:        FrameServerRequest,
 		ID:          json.RawMessage(`0`),
@@ -346,14 +363,40 @@ func TestCodexSessionResolveAnswersOnceAndDeduplicatesRetriedRequest(t *testing.
 	if codexSess.registerServerRequest(&frame) {
 		t.Fatal("retried server request with same ID must not register twice")
 	}
-
 	if err := codexSess.Resolve(ctx, vendor.ApprovalRef{ID: "0"}, vendor.Decision{Allow: false, Message: DecisionDecline}); err != nil {
 		t.Fatalf("first Resolve failed: %v", err)
 	}
 	if err := codexSess.Resolve(ctx, vendor.ApprovalRef{ID: "0"}, vendor.Decision{Allow: true, Message: DecisionAccept}); errcode.CodeOf(err) != errcode.FailedPrecondition {
 		t.Fatalf("second Resolve err = %v, want failed_precondition", err)
 	}
-	assertAdditionalServerRequestResolutions(t, codexSess)
+}
+
+func assertResolvedRPCLog(t *testing.T, rpcDir, rpcLogName string) {
+	t.Helper()
+	root, oErr := os.OpenRoot(rpcDir)
+	if oErr != nil {
+		t.Fatalf("OpenRoot(%s): %v", rpcDir, oErr)
+	}
+	defer func() {
+		if cErr := root.Close(); cErr != nil {
+			t.Errorf("close root: %v", cErr)
+		}
+	}()
+	rawRPCLog, rErr := root.ReadFile(rpcLogName)
+	if rErr != nil {
+		t.Fatalf("read rpcLog: %v", rErr)
+	}
+	logText := string(rawRPCLog)
+	for _, wantSubstr := range []string{
+		`"id":4,"result":{"answers":{"q1":{"answers":["yes"]}}}`,
+		`"id":5,"result":{"answers":{}}`,
+		`"id":8,"result":{"decision":{"acceptWithExecpolicyAmendment":{"execpolicy_amendment":["git","status"]}}}`,
+		`"id":9,"error":{"code":-32000,"message":"Codex asked for secret input, which Fugue cannot relay yet"}`,
+	} {
+		if !strings.Contains(logText, wantSubstr) {
+			t.Fatalf("rpcLog missing %s\ngot:\n%s", wantSubstr, logText)
+		}
+	}
 }
 
 type serverRequestResolutionCase struct {
@@ -368,9 +411,10 @@ func assertAdditionalServerRequestResolutions(t *testing.T, codexSess *Session) 
 		{"1", MethodFileChangeApproval, `{"threadId":"th-1","turnId":"t-1","itemId":"fc-1"}`, vendor.Decision{Allow: true}},
 		{"2", MethodPermissionsApproval, `{"threadId":"th-1","turnId":"t-1","itemId":"p-1","cwd":"/tmp","permissions":{"network":true}}`, vendor.Decision{Allow: true, Message: PermissionScopeSession}},
 		{"3", MethodPermissionsApproval, `{"threadId":"th-1","turnId":"t-1","itemId":"p-2","cwd":"/tmp","permissions":{"network":true}}`, vendor.Decision{Allow: false, Message: DecisionDecline}},
-		{"4", MethodRequestUserInput, `{"threadId":"th-1","turnId":"t-1","itemId":"q-1","questions":[{"id":"q1","header":"H","question":"Q?"}]}`, vendor.Decision{Allow: true, Answers: map[string][]string{"q1": {"yes"}}}},
-		{"5", MethodRequestUserInput, `{"threadId":"th-1","turnId":"t-1","itemId":"q-2","questions":[{"id":"q2","header":"H","question":"Q?"}]}`, vendor.Decision{Allow: false}},
+		{"4", MethodRequestUserInput, `{"threadId":"th-1","turnId":"t-1","itemId":"q-1","questions":[{"id":"q1","header":"H","question":"Q?"},{"id":"q2","header":"H2","question":"Q2?"}]}`, vendor.Decision{Allow: true, Message: "answered", Answers: map[string][]string{"q1": {"yes"}}}},
+		{"5", MethodRequestUserInput, `{"threadId":"th-1","turnId":"t-1","itemId":"q-2","questions":[{"id":"q2","header":"H","question":"Q?"}]}`, vendor.Decision{Allow: false, Message: "denied"}},
 		{"6", MethodCommandApproval, `{"threadId":"th-1","turnId":"t-1","itemId":"c-6"}`, vendor.Decision{Error: errcode.New(errcode.FailedPrecondition, "relay rejected")}},
+		{"8", MethodCommandApproval, `{"threadId":"th-1","turnId":"t-1","itemId":"c-8","proposedExecpolicyAmendment":["git","status"]}`, vendor.Decision{Allow: true, Message: DecisionAcceptWithExecpolicyAmendment}},
 	}
 	for _, tc := range cases {
 		frame := Frame{Kind: FrameServerRequest, ID: json.RawMessage(tc.id), CanonicalID: tc.id, Method: tc.method, Params: json.RawMessage(tc.params)}
@@ -381,6 +425,16 @@ func assertAdditionalServerRequestResolutions(t *testing.T, codexSess *Session) 
 			t.Fatalf("Resolve(%s) failed: %v", tc.id, err)
 		}
 	}
+	secretFrame := Frame{
+		Kind: FrameServerRequest, ID: json.RawMessage(`9`), CanonicalID: "9", Method: MethodRequestUserInput,
+		Params: json.RawMessage(`{"threadId":"th-1","turnId":"t-1","itemId":"q-sec","questions":[{"id":"s1","header":"H","question":"SECRET-LOG-CANARY","isSecret":true}]}`),
+	}
+	if !codexSess.registerServerRequest(&secretFrame) {
+		t.Fatal("registerServerRequest(9) returned false")
+	}
+	secObs := codexSess.normalizer.NormalizeFrame(&secretFrame)
+	codexSess.rejectUnrelayedServerRequest(secretFrame.CanonicalID, unrelayedServerRequestMessage(&secObs))
+
 	// Register one more pending request so Close exercises rejectPendingApprovalsLocked.
 	pendingFrame := Frame{Kind: FrameServerRequest, ID: json.RawMessage(`7`), CanonicalID: "7", Method: MethodCommandApproval, Params: json.RawMessage(`{"threadId":"th-1","turnId":"t-1","itemId":"c-7"}`)}
 	codexSess.registerServerRequest(&pendingFrame)

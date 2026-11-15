@@ -229,6 +229,7 @@
     "Options": [
      "accept",
      "acceptForSession",
+     "acceptWithExecpolicyAmendment",
      "decline",
      "cancel"
     ],
