@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -200,22 +199,13 @@ func SessionEnv(spec *vendor.StartSpec) []string {
 	return filteredEnv(spec.HostEnv, spec.Home, []string{vendor.SessionTokenEnv + "=" + spec.SessionToken.Reveal()})
 }
 
-func checkAbsoluteBinary(path string) (string, error) {
-	if _, err := os.Stat(path); err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return "", errcode.Wrap(errcode.NotFound, "claude binary not found", err)
-		}
-		if errors.Is(err, os.ErrPermission) {
-			return "", errcode.Wrap(errcode.PermissionDenied, "claude binary permission denied", err)
-		}
-		return "", errcode.Wrap(errcode.Internal, "stat claude binary", err)
-	}
-	return path, nil
-}
-
 func (a *Adapter) resolveStartBinary(ctx context.Context, home vendor.AccountHome) (string, error) {
 	if a.Binary != "" && filepath.IsAbs(a.Binary) {
-		return checkAbsoluteBinary(a.Binary)
+		path, err := vendor.CheckAbsoluteBinary(DefaultBinary, a.Binary)
+		if err != nil {
+			return "", errcode.Wrap(errcode.CodeOf(err), "check claude binary", err)
+		}
+		return path, nil
 	}
 	probe, err := a.Probe(ctx, home)
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/claude"
+	"github.com/syurodev/fugue/internal/vendoradapter/codex"
 	"github.com/syurodev/fugue/internal/vendorstore"
 	"github.com/syurodev/fugue/internal/workspace"
 )
@@ -26,8 +27,11 @@ const (
 	VendorRequestMaxBytes = 1 << 20
 )
 
-// VendorClaude is the only vendor stage A serves.
-const VendorClaude = "claude"
+// Supported vendor names in stage A (F9.5 Claude, F9.7 Codex).
+const (
+	VendorClaude = "claude"
+	VendorCodex  = "codex"
+)
 
 // The host-side identity of a stage-A session: the vendor's default account
 // home (F9.10 adds account selection) and the solo assistant role.
@@ -86,6 +90,7 @@ type VendorService struct {
 	sessions   *VendorSessions
 	store      *vendorstore.Store
 	adapter    vendor.Adapter
+	adapters   map[string]vendor.Adapter
 	vault      *vault.Service
 	workspaces *workspace.Service
 	ids        ids.Generator
@@ -93,6 +98,18 @@ type VendorService struct {
 	ops        *vendorOps
 	tokens     *sessionTokens
 	bridge     vendor.Bridge
+}
+
+func (s *VendorService) adapterFor(name string) (vendor.Adapter, error) {
+	if s.adapters != nil {
+		if ad, ok := s.adapters[name]; ok && ad != nil {
+			return ad, nil
+		}
+	}
+	if name == VendorClaude && s.adapter != nil {
+		return s.adapter, nil
+	}
+	return nil, errcode.New(errcode.VendorUnsupported, "the vendor is not supported yet")
 }
 
 // Probe reports each requested vendor; an empty list means Claude.
@@ -103,21 +120,28 @@ func (s *VendorService) Probe(ctx context.Context, principal string, vendors []s
 	if len(vendors) == 0 {
 		vendors = []string{VendorClaude}
 	}
-	for _, name := range vendors {
-		if err := requireClaude(name); err != nil {
+	adapters := make([]vendor.Adapter, len(vendors))
+	for i, name := range vendors {
+		ad, err := s.adapterFor(name)
+		if err != nil {
 			return nil, err
 		}
+		adapters[i] = ad
 	}
 	ctx, cancel := context.WithTimeout(ctx, VendorSpawnLimit)
 	defer cancel()
-	probe, err := s.adapter.Probe(ctx, vendor.AccountHome{})
-	if err != nil {
-		return nil, publicVendorError(err)
+	out := make([]VendorProbeView, 0, len(vendors))
+	for i, name := range vendors {
+		probe, err := adapters[i].Probe(ctx, vendor.AccountHome{})
+		if err != nil {
+			return nil, publicVendorError(err)
+		}
+		out = append(out, VendorProbeView{
+			Vendor: name, Version: probe.Version, VersionTested: probe.VersionTested,
+			VersionWarning: probe.VersionWarning, Login: string(probe.Login), Capability: probe.Capability,
+		})
 	}
-	return []VendorProbeView{{
-		Vendor: VendorClaude, Version: probe.Version, VersionTested: probe.VersionTested,
-		VersionWarning: probe.VersionWarning, Login: string(probe.Login), Capability: probe.Capability,
-	}}, nil
+	return out, nil
 }
 
 // Start validates the vendor, profile and workspace root, then spawns a session.
@@ -125,10 +149,10 @@ func (s *VendorService) Start(ctx context.Context, principal string, cmd *StartV
 	if err := authorizeVendor(principal); err != nil {
 		return VendorSessionView{}, err
 	}
-	if err := requireClaude(cmd.Vendor); err != nil {
+	if _, err := s.adapterFor(cmd.Vendor); err != nil {
 		return VendorSessionView{}, err
 	}
-	if err := validateVendorProfile(cmd.Profile); err != nil {
+	if err := validateVendorProfileFor(cmd.Vendor, cmd.Profile); err != nil {
 		return VendorSessionView{}, err
 	}
 	canonical := []string{"start", cmd.Vendor, cmd.WorkspaceID, cmd.RootName, cmd.Profile.Model, cmd.Profile.Effort, cmd.Profile.ResumeSessionID}
@@ -141,7 +165,7 @@ func (s *VendorService) Start(ctx context.Context, principal string, cmd *StartV
 			return VendorSessionView{}, errcode.Wrap(errcode.Internal, "allocate a vendor session identity", err)
 		}
 		info := &vendorstore.Session{
-			ID: spec.SessionID, Vendor: VendorClaude, AccountID: vendorDefaultAccount, Role: vendorSessionRole,
+			ID: spec.SessionID, Vendor: cmd.Vendor, AccountID: vendorDefaultAccount, Role: vendorSessionRole,
 			WorkspaceID: cmd.WorkspaceID, WorkspaceRoot: root,
 		}
 		if err := s.spawn(spec, info.Role, func() error { return s.sessions.Start(opCtx, info, spec) }); err != nil {
@@ -371,18 +395,21 @@ func authorizeVendor(principal string) error {
 	return nil
 }
 
-func requireClaude(name string) error {
-	if name != VendorClaude {
-		return errcode.New(errcode.VendorUnsupported, "the vendor is not supported yet")
-	}
-	return nil
+// validateVendorProfile reuses the vetted adapter profile allowlist, so a value
+// that would not reach argv or RPC never reaches spawn either. The value is
+// never echoed back.
+func validateVendorProfile(profile VendorProfile) error {
+	return validateVendorProfileFor(VendorClaude, profile)
 }
 
-// validateVendorProfile reuses the vetted Claude argv allowlist, so a value
-// that would not reach argv never reaches spawn either. The value is never
-// echoed back.
-func validateVendorProfile(profile VendorProfile) error {
+func validateVendorProfileFor(vendorName string, profile VendorProfile) error {
 	spec := &vendor.StartSpec{Model: profile.Model, Effort: profile.Effort, ResumeSessionID: profile.ResumeSessionID}
+	if vendorName == VendorCodex {
+		if _, err := codex.BuildArgv(codex.DefaultBinary, spec); err != nil {
+			return errcode.New(errcode.VendorInvalidProfile, "a session profile value is not allowed")
+		}
+		return nil
+	}
 	if _, err := claude.BuildArgv(claude.DefaultBinary, spec); err != nil {
 		return errcode.New(errcode.VendorInvalidProfile, "a session profile value is not allowed")
 	}

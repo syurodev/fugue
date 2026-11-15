@@ -191,3 +191,22 @@ Not carried over:
 - Turning rate-limit headers into `LimitWindow`s (F4.2), the Sign in with ChatGPT login, validation and revocation (F4.3, F7) and the
   account policy settings: the adapters and the UI call `Book`.
 
+## `internal/vendoradapter/codex` (`commands.go`, F9.7)
+
+| | |
+| --- | --- |
+| Original | `internal/agenthub/codex_commands.go` and `codex_commands_test.go` |
+| dev-kit commit | `b3c8ff5df42e6fc58c1cd8077dddd278fc7dd84e` |
+| Wire and storage format | JSON-RPC 2.0 `app-server` calls (`thread/compact/start`, `review/start` with `target` and `delivery: "inline"`) |
+| Vector tests | `commands_test.go`: `TestCodexSlashTableRunsTheMeasuredRPCs`, `TestFugueNamespaceNeverReachesCodex` |
+
+Changed for `vendor-runtime §5.2, §9` and `VR-E10`:
+
+- Only the commands measured working on `codex-cli 0.167.0` (`app-server`) are kept: `/compact` (`thread/compact/start`) and `/review` (`review/start` with `uncommittedChanges` or `custom` instructions).
+- `/fugue:` inputs (with leading Unicode whitespace ignored) are rejected with `errcode.InvalidArgument` (`vendor.ErrFugueNamespace`) before any RPC reaches Codex.
+
+Not carried over:
+
+- TUI-only, interactive picker, and local client commands (`/init`, `/plan`, `/diff`, `/mention`, `/status`, `/model`, `/approvals`, `/permissions`, `/experimental`, `/skills`, `/fork`, `/rename`, `/new`, `/resume`, `/clear`, `/ps`, `/clean`, `/personality`, `/realtime`, `/settings`, `/apps`, `/logout`, `/quit`, `/exit`, `/feedback`, `/rollout`, `/debug-config`, `/statusline`, `/mcp`): per `vendor-runtime §9`, terminal and TUI commands that do not map to working `app-server` RPCs are omitted rather than synthesised into prompts.
+
+

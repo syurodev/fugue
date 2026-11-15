@@ -511,7 +511,7 @@ func TestVendorTypedErrorsCarryNoClientValues(t *testing.T) {
 		}
 		return nil
 	}
-	assertConnectCode(t, startWith(vendorsv1.Vendor_VENDOR_CODEX, "", nil), connect.CodeFailedPrecondition, errcode.VendorUnsupported)
+	assertConnectCode(t, startWith(vendorsv1.Vendor_VENDOR_AGY, "", nil), connect.CodeFailedPrecondition, errcode.VendorUnsupported)
 	_, err := v.vendors.ProbeVendors(t.Context(), connect.NewRequest(&vendorsv1.ProbeVendorsRequest{Vendors: []vendorsv1.Vendor{vendorsv1.Vendor_VENDOR_AGY}}))
 	assertConnectCode(t, err, connect.CodeFailedPrecondition, errcode.VendorUnsupported)
 	for _, profile := range []*vendorsv1.SessionProfile{{Effort: "turbo"}, {Model: "--dangerously-skip-permissions"}, {ResumeSessionId: "not-a-uuid"}} {

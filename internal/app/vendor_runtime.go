@@ -11,7 +11,9 @@ import (
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/storage"
 	"github.com/syurodev/fugue/internal/vault"
+	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/claude"
+	"github.com/syurodev/fugue/internal/vendoradapter/codex"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
@@ -85,25 +87,7 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	if err != nil {
 		return nil, err
 	}
-	options := []claude.Option{
-		claude.WithClock(deps.Clock),
-		claude.WithIDs(deps.IDs),
-		// One systemd probe per owner (the vendor runtime), never per spawn:
-		// the probe caches its capability check, so every session of this host
-		// reuses the answer (F9.2b review note).
-		claude.WithSystemdProbe(process.NewSystemdProbe()),
-	}
-	if deps.VendorBinary != "" {
-		options = append(options, claude.WithBinary(deps.VendorBinary))
-	}
-	// The launcher's XDG_RUNTIME_DIR is the raw value of the injected
-	// environment, never config.RuntimeDir, whose per-user fallback is not a
-	// systemd runtime dir (F9.2b review note). Empty leaves containment
-	// unattempted, which is the stage-A macOS path.
-	if dir := rawXDGRuntimeDir(deps.VendorHostEnv); dir != "" {
-		options = append(options, claude.WithXDGRuntimeDir(dir))
-	}
-	adapter := claude.NewAdapter(deps.VendorHostEnv, options...)
+	adapter, adapters := buildVendorAdapters(deps)
 	// A session's token, tombstones and relayed interactions die with its actor, with a purge and with the host.
 	tokens := newSessionTokens(deps.Random)
 	endSession := func(sessionID string) {
@@ -118,7 +102,8 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	transcripts.onPurge = endSession
 	hp.vendorAdapter = adapter
 	sessions, err := NewVendorSessions(base, &VendorSessionDeps{
-		Store: topicNotifyingStore{Store: vs, topic: topic}, Transcripts: transcripts, Adapter: adapter,
+		Store: topicNotifyingStore{Store: vs, topic: topic}, Transcripts: transcripts,
+		Adapter: adapter, Adapters: adapters,
 		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: endSession,
 		TestDelaySpawnRegistration: deps.TestDelaySpawnRegistration,
 		TestOnWaitInflightSpawn:    deps.TestOnWaitInflightSpawn,
@@ -127,12 +112,56 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 		return nil, err
 	}
 	hp.rt.sessionTools = newSessionToolService(tokens, deps.TestFugueTools, vs, hp.rt.interactions, hp.rt.tags, deps.IDs, sessions)
+	sessions.SetRelay(hp.rt.sessionTools)
 	hp.rt.vendors = &VendorService{
-		sessions: sessions, store: vs, adapter: adapter, vault: v, workspaces: hp.rt.workspaces.domain,
+		sessions: sessions, store: vs, adapter: adapter, adapters: adapters, vault: v, workspaces: hp.rt.workspaces.domain,
 		ids: deps.IDs, hostEnv: deps.VendorHostEnv, ops: newVendorOps(deps.Clock, hp.rt.goTask),
 		tokens: tokens, bridge: deps.Bridge,
 	}
 	return sessions, nil
+}
+
+func buildVendorAdapters(deps *HostDeps) (*claude.Adapter, map[string]vendor.Adapter) {
+	// One systemd probe per owner (the vendor runtime), never per spawn:
+	// the probe caches its capability check, so every session of this host
+	// reuses the answer (F9.2b review note).
+	systemdProbe := process.NewSystemdProbe()
+	xdgDir := rawXDGRuntimeDir(deps.VendorHostEnv)
+
+	claudeOpts := []claude.Option{
+		claude.WithClock(deps.Clock),
+		claude.WithIDs(deps.IDs),
+		claude.WithSystemdProbe(systemdProbe),
+	}
+	if deps.VendorBinary != "" {
+		claudeOpts = append(claudeOpts, claude.WithBinary(deps.VendorBinary))
+	}
+	if xdgDir != "" {
+		claudeOpts = append(claudeOpts, claude.WithXDGRuntimeDir(xdgDir))
+	}
+	claudeAdapter := claude.NewAdapter(deps.VendorHostEnv, claudeOpts...)
+
+	codexOpts := []codex.Option{
+		codex.WithClock(deps.Clock),
+		codex.WithIDs(deps.IDs),
+		codex.WithSystemdProbe(systemdProbe),
+	}
+	codexBin := deps.CodexBinary
+	if codexBin == "" {
+		codexBin = deps.VendorBinary
+	}
+	if codexBin != "" {
+		codexOpts = append(codexOpts, codex.WithBinary(codexBin))
+	}
+	if xdgDir != "" {
+		codexOpts = append(codexOpts, codex.WithXDGRuntimeDir(xdgDir))
+	}
+	codexAdapter := codex.NewAdapter(deps.VendorHostEnv, codexOpts...)
+
+	return claudeAdapter, map[string]vendor.Adapter{
+		VendorClaude: claudeAdapter,
+		VendorCodex:  codexAdapter,
+	}
 }
 
 // reapLeftoverVendorProcesses kills the process trees the previous host

@@ -27,6 +27,9 @@ type HostDeps struct {
 	// VendorBinary overrides the Claude binary (absolute path); empty
 	// resolves claude on PATH at probe time.
 	VendorBinary string
+	// CodexBinary overrides the Codex binary (absolute path); empty falls back
+	// to VendorBinary when set or resolves codex on PATH at probe time.
+	CodexBinary string
 	// VendorHostEnv is the environment snapshot vendor processes filter
 	// through the vendor-runtime §8 allowlist.
 	VendorHostEnv []string
