@@ -1,0 +1,323 @@
+{
+ "session": "session-1",
+ "vendor": "agy",
+ "summary": {
+  "partials": 0,
+  "notices": 7
+ },
+ "steps": [
+  {
+   "line": 2,
+   "op": "init",
+   "init": {
+    "Version": "1.5.9",
+    "SessionID": "session-uuid-0001",
+    "Model": "gemini-4-argon-medium",
+    "PermissionMode": "default",
+    "SlashCommands": null
+   }
+  },
+  {
+   "line": 4,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": ""
+    },
+    "id": "agy-notice-line-4",
+    "kind": "notice",
+    "meta": {
+     "Level": "info",
+     "Code": "unsupported_event"
+    },
+    "rawRef": "acp:config_option_update",
+    "revision": 0,
+    "turnId": ""
+   }
+  },
+  {
+   "line": 5,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": ""
+    },
+    "id": "agy-notice-line-5",
+    "kind": "notice",
+    "meta": {
+     "Level": "info",
+     "Code": "unsupported_event"
+    },
+    "rawRef": "acp:available_commands_update",
+    "revision": 0,
+    "turnId": ""
+   }
+  },
+  {
+   "line": 6,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": ""
+    },
+    "id": "agy-notice-line-6",
+    "kind": "notice",
+    "meta": {
+     "Level": "info",
+     "Code": "unsupported_event"
+    },
+    "rawRef": "acp:available_commands_update",
+    "revision": 0,
+    "turnId": ""
+   }
+  },
+  {
+   "line": 7,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": ""
+    },
+    "id": "agy-notice-line-7",
+    "kind": "notice",
+    "meta": {
+     "Level": "info",
+     "Code": "unsupported_event"
+    },
+    "rawRef": "acp:usage_update",
+    "revision": 0,
+    "turnId": ""
+   }
+  },
+  {
+   "line": 8,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": "Use run_command to execute `printf declined-test`.",
+     "Attachments": null
+    },
+    "id": "agy-user-turn-1:user",
+    "kind": "user_message",
+    "meta": {
+     "Origin": "user"
+    },
+    "rawRef": "",
+    "revision": 1,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 9,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": ""
+    },
+    "id": "agy-notice-line-9",
+    "kind": "notice",
+    "meta": {
+     "Level": "info",
+     "Code": "unsupported_event"
+    },
+    "rawRef": "acp:session_info_update",
+    "revision": 0,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 10,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": ""
+    },
+    "id": "agy-notice-line-10",
+    "kind": "notice",
+    "meta": {
+     "Level": "info",
+     "Code": "unsupported_event"
+    },
+    "rawRef": "acp:usage_update",
+    "revision": 0,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 11,
+   "op": "record",
+   "item": {
+    "content": {
+     "Title": "printf declined-test",
+     "Input": "{\"CommandLine\":\"printf declined-test\",\"WaitMsBeforeAsync\":5000,\"toolSummary\":\"Execute printf command\"}",
+     "Output": ""
+    },
+    "id": "call-0001",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "run_command",
+     "Status": "running",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 1,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 12,
+   "op": "update",
+   "before": {
+    "content": {
+     "Title": "printf declined-test",
+     "Input": "{\"CommandLine\":\"printf declined-test\",\"WaitMsBeforeAsync\":5000,\"toolSummary\":\"Execute printf command\"}",
+     "Output": ""
+    },
+    "id": "call-0001",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "run_command",
+     "Status": "running",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 1,
+    "turnId": "turn-1"
+   },
+   "after": {
+    "content": {
+     "Title": "printf declined-test",
+     "Input": "{\"CommandLine\":\"printf declined-test\",\"WaitMsBeforeAsync\":5000,\"toolSummary\":\"Execute printf command\"}",
+     "Output": ""
+    },
+    "id": "call-0001",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "run_command",
+     "Status": "pending",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 2,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 13,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": "Antigravity requested permission, which Fugue cannot relay yet"
+    },
+    "id": "agy-perm-1",
+    "kind": "notice",
+    "meta": {
+     "Level": "warning",
+     "Code": "unsupported_event"
+    },
+    "rawRef": "acp:session/request_permission",
+    "revision": 0,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 14,
+   "op": "update",
+   "before": {
+    "content": {
+     "Title": "printf declined-test",
+     "Input": "{\"CommandLine\":\"printf declined-test\",\"WaitMsBeforeAsync\":5000,\"toolSummary\":\"Execute printf command\"}",
+     "Output": ""
+    },
+    "id": "call-0001",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "run_command",
+     "Status": "pending",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 2,
+    "turnId": "turn-1"
+   },
+   "after": {
+    "content": {
+     "Title": "printf declined-test",
+     "Input": "{\"CommandLine\":\"printf declined-test\",\"WaitMsBeforeAsync\":5000,\"toolSummary\":\"Execute printf command\"}",
+     "Output": ""
+    },
+    "id": "call-0001",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "run_command",
+     "Status": "running",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 3,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 15,
+   "op": "update",
+   "before": {
+    "content": {
+     "Title": "printf declined-test",
+     "Input": "{\"CommandLine\":\"printf declined-test\",\"WaitMsBeforeAsync\":5000,\"toolSummary\":\"Execute printf command\"}",
+     "Output": ""
+    },
+    "id": "call-0001",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "run_command",
+     "Status": "running",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 3,
+    "turnId": "turn-1"
+   },
+   "after": {
+    "content": {
+     "Title": "printf declined-test",
+     "Input": "{\"CommandLine\":\"printf declined-test\",\"WaitMsBeforeAsync\":5000,\"toolSummary\":\"Execute printf command\"}",
+     "Output": "{\"output\":\"\"}"
+    },
+    "id": "call-0001",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "run_command",
+     "Status": "failed",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 4,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 16,
+   "op": "turn_end",
+   "turn_end": {
+    "TurnID": "turn-1",
+    "Outcome": "completed",
+    "FailureCode": "",
+    "Usage": {
+     "InputTokens": 8819,
+     "OutputTokens": 117,
+     "CacheTokens": 0,
+     "Cost": 0
+    },
+    "CredentialExpiresAt": null
+   }
+  }
+ ]
+}

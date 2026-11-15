@@ -511,8 +511,8 @@ func TestVendorTypedErrorsCarryNoClientValues(t *testing.T) {
 		}
 		return nil
 	}
-	assertConnectCode(t, startWith(vendorsv1.Vendor_VENDOR_AGY, "", nil), connect.CodeFailedPrecondition, errcode.VendorUnsupported)
-	_, err := v.vendors.ProbeVendors(t.Context(), connect.NewRequest(&vendorsv1.ProbeVendorsRequest{Vendors: []vendorsv1.Vendor{vendorsv1.Vendor_VENDOR_AGY}}))
+	assertConnectCode(t, startWith(vendorsv1.Vendor_VENDOR_UNSPECIFIED, "", nil), connect.CodeFailedPrecondition, errcode.VendorUnsupported)
+	_, err := v.vendors.ProbeVendors(t.Context(), connect.NewRequest(&vendorsv1.ProbeVendorsRequest{Vendors: []vendorsv1.Vendor{vendorsv1.Vendor_VENDOR_UNSPECIFIED}}))
 	assertConnectCode(t, err, connect.CodeFailedPrecondition, errcode.VendorUnsupported)
 	for _, profile := range []*vendorsv1.SessionProfile{{Effort: "turbo"}, {Model: "--dangerously-skip-permissions"}, {ResumeSessionId: "not-a-uuid"}} {
 		startErr := startWith(vendorsv1.Vendor_VENDOR_CLAUDE, "", profile)
@@ -588,4 +588,58 @@ func TestVendorNonLocalPrincipalIsDeniedOnRPCsAndTopic(t *testing.T) {
 	if connect.CodeOf(stream.Err()) != connect.CodePermissionDenied {
 		t.Fatalf("vendor-sessions subscribe = %v, want permission_denied", stream.Err())
 	}
+}
+
+func TestVendorAgyPromptStreamAndCancel(t *testing.T) {
+	t.Parallel()
+	exe, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	agyLink := filepath.Join(t.TempDir(), "agy")
+	if sErr := os.Symlink(exe, agyLink); sErr != nil {
+		t.Fatal(sErr)
+	}
+	v := startVendorHostWith(t, true, func(deps *app.HostDeps, _ string) {
+		deps.AgyBinary = agyLink
+	})
+	wsID := v.workspaceWithRoot(t, t.TempDir())
+	stream := subscribeVendorSessions(t, v.host, nil)
+	started, err := v.vendors.StartSession(t.Context(), connect.NewRequest(&vendorsv1.StartSessionRequest{
+		CommandId: "agy-host-start", Vendor: vendorsv1.Vendor_VENDOR_AGY, WorkspaceId: wsID,
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sid := started.Msg.Session.SessionId
+	awaitVendorState(t, stream, sid, "ready")
+
+	tStream, err := v.host.Subscribe(streamCtx(t), connect.NewRequest(&hostv1.SubscribeRequest{Topic: app.TopicTranscript + sid}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	snapSeq := recv(t, tStream).GetSnapshot().GetSequence()
+	if sErr := v.send(t, "agy-host-send-1", sid, "ping"); sErr != nil {
+		t.Fatal(sErr)
+	}
+	awaitVendorState(t, stream, sid, "running")
+	awaitVendorState(t, stream, sid, "ready")
+	checkTranscriptItemEvent(t, tStream, checkTranscriptStateEvent(t, tStream, snapSeq))
+
+	if sErr := v.send(t, "agy-host-send-2", sid, fakeHoldTurn); sErr != nil {
+		t.Fatal(sErr)
+	}
+	awaitVendorState(t, stream, sid, "running")
+	if _, iErr := v.vendors.Interrupt(t.Context(), connect.NewRequest(&vendorsv1.InterruptRequest{
+		CommandId: "agy-host-int-1", SessionId: sid,
+	})); iErr != nil {
+		t.Fatal(iErr)
+	}
+	awaitVendorState(t, stream, sid, "ready")
+	if _, cErr := v.vendors.CloseSession(t.Context(), connect.NewRequest(&vendorsv1.CloseSessionRequest{
+		CommandId: "agy-host-close-1", SessionId: sid,
+	})); cErr != nil {
+		t.Fatal(cErr)
+	}
+	awaitVendorState(t, stream, sid, "closed")
 }

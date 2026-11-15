@@ -210,7 +210,7 @@ func vendorName(v vendorsv1.Vendor) string {
 	case vendorsv1.Vendor_VENDOR_CODEX:
 		return "codex"
 	case vendorsv1.Vendor_VENDOR_AGY:
-		return "agy"
+		return app.VendorAGY
 	case vendorsv1.Vendor_VENDOR_UNSPECIFIED:
 		return ""
 	default:
@@ -231,6 +231,8 @@ func protoVendor(name string) vendorsv1.Vendor {
 		return vendorsv1.Vendor_VENDOR_CLAUDE
 	case app.VendorCodex:
 		return vendorsv1.Vendor_VENDOR_CODEX
+	case app.VendorAGY:
+		return vendorsv1.Vendor_VENDOR_AGY
 	default:
 		return vendorsv1.Vendor_VENDOR_UNSPECIFIED
 	}
