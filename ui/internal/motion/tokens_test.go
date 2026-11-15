@@ -33,7 +33,7 @@ func TestMotionTokensMatchTheKitSpec(t *testing.T) {
 	// The roles the kit assigns assume this ordering: leaving is the
 	// quickest, content movement the slowest, and only Snappy and Bouncy
 	// bounce — Smooth and Exit settle without overshoot.
-	if !(Exit().Response < Snappy().Response && Snappy().Response < Bouncy().Response && Bouncy().Response < Smooth().Response) {
+	if Exit().Response >= Snappy().Response || Snappy().Response >= Bouncy().Response || Bouncy().Response >= Smooth().Response {
 		t.Errorf("token responses are out of order: Exit %v, Snappy %v, Bouncy %v, Smooth %v",
 			Exit().Response, Snappy().Response, Bouncy().Response, Smooth().Response)
 	}
