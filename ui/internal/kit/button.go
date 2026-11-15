@@ -5,39 +5,46 @@ import (
 	"image"
 	"image/color"
 
-	"gioui.org/io/event"
+	"gioui.org/f32"
 	"gioui.org/layout"
 	"gioui.org/unit"
-	"gioui.org/widget"
 
 	"github.com/syurodev/fugue/ui/internal/motion"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
 // Button, ui-kit §6.2: an optional icon and a type.label label on a
-// size.control box, in four variants and the three §3.4 sizes. It shows
-// every §4.1 state — rest, hover, pressed, the focus-visible ring (only
-// after Tab, via Env.FocusVisible), disabled and busy — and reports
-// Clicked during the frame that saw it (UK-06). Enter and Space activate
-// while focused, Space on release: widget.Clickable owns both. The
-// background changes on Snappy (§3.7); the button never scales on press.
-// Busy swaps the icon for a spinner and keeps the measured width, so a
-// toolbar never jumps; the spinner asks for frames only while drawn.
+// size.control box with radius.md, in five variants and the three §3.4
+// sizes. It shows every §4.1 state — rest, hover, pressed, the focus ring
+// outside the body (only after Tab, via Env.FocusVisible), disabled (the
+// whole control at DisabledOpacity) and busy — and reports Clicked during
+// the frame that saw it (UK-06). Enter and Space activate while focused,
+// Space on release: widget.Clickable owns both.
+//
+// Motion (§3.7): fills and the label color change on Snappy, a press shrinks
+// the drawing — never the hit area — to motion.press and sends a ripple
+// from the press point, the ring fades in, and the icon and the spinner
+// cross-fade when busy begins or ends. Busy keeps the idle-measured box, so
+// a toolbar never jumps; the spinner asks for frames only while drawn.
+// Reduced motion makes all of it instant.
 //
 // Props and state are separate values (UK-02): the caller rebuilds
 // ButtonProps every frame and keeps one ButtonState per logical button for
 // its lifetime — in lists, keyed by the object's stable ID, never by index.
+// A Button draws outside its box (the ring), so no parent may clip it.
 
-// ButtonVariant is the visual variant (§6.2): Primary is the one main
-// action of a frame or dialog, Secondary is the default, Ghost carries
-// secondary actions in toolbars and rows, Danger marks data-destroying
-// actions (never the busiest button of a frequently used screen).
+// ButtonVariant is the visual variant (§6.2): Secondary is the default tinted
+// fill, Primary is the one main action of a frame or dialog, Bordered adds a
+// faint border to a transparent body, Ghost shows its body only on hover,
+// and Danger marks data-destroying actions (never the busiest button of a
+// frequently used screen).
 type ButtonVariant int
 
 // The §6.2 variants.
 const (
-	Primary   ButtonVariant = iota
-	Secondary               // the default variant
+	Secondary ButtonVariant = iota // the default variant
+	Primary
+	Bordered
 	Ghost
 	Danger
 )
@@ -47,8 +54,8 @@ type ButtonSize int
 
 // The §3.4 control sizes.
 const (
-	SizeSM ButtonSize = iota // toolbar and in-row (24 dp)
-	SizeMD                   // the default (28 dp)
+	SizeMD ButtonSize = iota // the default (28 dp)
+	SizeSM                   // toolbar and in-row (24 dp)
 	SizeLG                   // dialog primary and composer (32 dp)
 )
 
@@ -66,164 +73,149 @@ type ButtonProps struct {
 }
 
 // ButtonState is the long-lived state the caller keeps per logical button
-// (UK-02): the clickable, the busy spinner and the §3.7 transitions.
+// (UK-02): the clickable, the motion followers and the busy spinner.
 type ButtonState struct {
-	click  widget.Clickable
-	spin   Spinner
-	hoverF motion.Follower
-	pressF motion.Follower
+	pressable
+	spin  Spinner
+	busyF motion.Follower
 }
 
 // NewButtonState builds the state for one button.
-func NewButtonState() *ButtonState { return &ButtonState{} }
-
-// Tag is the button's input tag, for focus scripting and previews.
-func (s *ButtonState) Tag() event.Tag { return &s.click }
+func NewButtonState() *ButtonState {
+	return &ButtonState{pressable: newPressable(), busyF: motion.NewFollower(motion.Snappy())}
+}
 
 // Measure returns the box the button draws from its idle content: the
 // number measured layouts need, without drawing or touching the input
 // source. Busy never changes it (§6.2).
 func (s *ButtonState) Measure(env *Env, gtx *layout.Context, p ButtonProps) layout.Dimensions {
-	w, h := buttonBox(env, gtx, p)
+	w, h, _ := buttonBox(env, gtx, p)
 	return layout.Dimensions{Size: image.Pt(w, h), Baseline: (h + labelLine(env, gtx, theme.TypeLabel())) / 2}
 }
 
 // buttonBox is the idle box of §6.2: the height token of the size, twice
 // the padding, the label and — when there is one — the icon slot with its
-// gap, at least HitMin wide.
-func buttonBox(env *Env, gtx *layout.Context, p ButtonProps) (w, h int) {
+// gap, at least HitMin wide. cw is the content's width inside it.
+func buttonBox(env *Env, gtx *layout.Context, p ButtonProps) (w, h, cw int) {
 	padX, iconGap := buttonMetrics(p.Size)
-	iconD := buttonIconSize(p.Size)
 	h = controlHeight(gtx, p.Size)
-	w = 2*gtx.Dp(padX) + measureLabel(env, gtx, theme.TypeLabel(), p.Text).X
+	cw = measureLabel(env, gtx, theme.TypeLabel(), p.Text).X
 	if p.Icon != "" {
-		w += gtx.Dp(iconD) + gtx.Dp(iconGap)
+		cw += gtx.Dp(buttonIconSize(p.Size)) + gtx.Dp(iconGap)
 	}
-	w = max(w, gtx.Dp(theme.HitMin))
-	return w, h
+	return max(cw+2*gtx.Dp(padX), gtx.Dp(theme.HitMin)), h, cw
 }
 
-// Layout draws the button and reports whether it was activated this frame
-// (UK-06): by pointer click, or by Enter and Space while focused. Busy
-// blocks repeat activation (§4.1). An unknown icon is a programming error
-// and comes back as an error instead of a button with no glyph.
+// Layout draws the button at the current offset and reports whether it was
+// activated this frame (UK-06): by pointer click, or by Enter and Space
+// while focused. Busy blocks repeat activation (§4.1). An unknown icon is a
+// programming error and comes back as an error instead of a button with no
+// glyph.
 func (s *ButtonState) Layout(env *Env, gtx *layout.Context, p ButtonProps) (bool, error) {
-	var clicked bool
-	if p.Disabled {
-		// A disabled control consumes nothing: no hover, no focus (§4.1).
-		d := gtx.Disabled()
-		gtx = &d
-	} else {
-		clicked = s.click.Clicked(*gtx) && !p.Busy
-	}
-	st := resolveState(env, gtx, s.Tag(), &s.click, p.Disabled, p.Busy, false)
-	var drawErr error
-	s.click.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
-		d, err := s.draw(env, &gtx, p, st)
-		drawErr = err
-		return d
-	})
-	if drawErr != nil {
-		return false, fmt.Errorf("draw the button: %w", drawErr)
+	w, h, cw := buttonBox(env, gtx, p)
+	busy := p.Busy && !p.Disabled
+	clicked, mv := s.begin(env, gtx, image.Pt(w, h), pressOpts{disabled: p.Disabled, busy: p.Busy})
+	swap := followState(env, &s.busyF, busy)
+	var err error
+	s.paint(env, gtx, image.Rect(0, 0, w, h), gtx.Dp(theme.RadiusMD), buttonLookOf(env, p.Variant, p.Disabled), mv,
+		func(fg color.NRGBA) { err = s.content(env, gtx, p, fg, w, h, cw, swap) })
+	if err != nil {
+		return false, fmt.Errorf("draw the button: %w", err)
 	}
 	return clicked, nil
 }
 
-// draw paints the body in the resolved state: the variant fills, the
-// content centered, then the focus ring last. The box comes from the idle
-// content only — busy swaps content inside the same box, never re-measures
-// (§6.2).
-func (s *ButtonState) draw(env *Env, gtx *layout.Context, p ButtonProps, st controlState) (layout.Dimensions, error) {
-	w, h := buttonBox(env, gtx, p)
-	r := image.Rect(0, 0, w, h)
-
-	look, border := buttonLookOf(env, p.Variant, st)
-	hv, pv := followState(env, &s.hoverF, st.hovered), followState(env, &s.pressF, st.pressed)
-	drawControlBody(env, gtx, r, gtx.Dp(theme.RadiusMD), look, border, hv, pv)
-
-	padX, iconGap := buttonMetrics(p.Size)
-	iconD := buttonIconSize(p.Size)
-	slot := 0
-	x := gtx.Dp(padX)
-	if p.Icon != "" {
-		slot = gtx.Dp(iconD)
-	}
-	labelY := centerLabelY(env, gtx, theme.TypeLabel(), h)
-	drawLabel := func(x int) {
-		at(gtx, image.Pt(x, labelY), func(gtx *layout.Context) {
-			drawText(env, gtx, theme.TypeLabel(), look.fg, p.Text, false)
+// content draws the label and the icon or spinner in fg. swap is the busy
+// cross-fade, 0 idle to 1 busy: with an icon the spinner takes the icon's
+// slot and the label stays put (§4.1, §6.2); without one the spinner fades
+// in over the fading label, centered in the same box, so the width never
+// changes. Entering content scales up from 0.8, leaving content down to it.
+func (s *ButtonState) content(env *Env, gtx *layout.Context, p ButtonProps, fg color.NRGBA, w, h, cw int, swap float32) error {
+	_, iconGap := buttonMetrics(p.Size)
+	x := (w - cw) / 2
+	labelAt := image.Pt(x, centerLabelY(env, gtx, theme.TypeLabel(), h))
+	drawLabel := func(a float32) {
+		at(gtx, labelAt, func(gtx *layout.Context) {
+			drawText(env, gtx, theme.TypeLabel(), fade(fg, a), p.Text, false)
 		})
 	}
-
-	switch {
-	case st.busy && !st.disabled && slot > 0:
-		// Busy with an icon: the spinner takes the icon's slot, the label
-		// stays put (§4.1, §6.2).
-		drawSpinner(env, gtx, &s.spin, image.Pt(x, (h-slot)/2), slot, look.fg)
-		x += slot + gtx.Dp(iconGap)
-		drawLabel(x)
-	case st.busy && !st.disabled:
-		// Busy without an icon: the spinner replaces the content, centered
-		// in the same box, so the width still never changes.
-		box := gtx.Dp(theme.IconMD)
-		drawSpinner(env, gtx, &s.spin, image.Pt((w-box)/2, (h-box)/2), box, look.fg)
-	default:
-		if slot > 0 {
-			if err := drawIconAt(env, gtx, image.Pt(x, (h-slot)/2), p.Icon, iconD, look.fg); err != nil {
-				return layout.Dimensions{}, err
-			}
-			x += slot + gtx.Dp(iconGap)
+	if p.Icon == "" {
+		if swap < 1 {
+			drawLabel(1 - swap)
 		}
-		drawLabel(x)
+		box := gtx.Dp(theme.IconMD)
+		s.spinner(env, gtx, image.Pt((w-box)/2, (h-box)/2), box, fade(fg, swap), swap)
+		return nil
 	}
-
-	if st.focused {
-		focusRing(env, gtx, r, gtx.Dp(theme.RadiusMD))
+	iconD := buttonIconSize(p.Size)
+	slot := gtx.Dp(iconD)
+	pt := image.Pt(x, (h-slot)/2)
+	if swap < 1 {
+		if err := drawIconScaled(env, gtx, pt, p.Icon, iconD, fade(fg, 1-swap), 0.8+0.2*(1-swap)); err != nil {
+			return err
+		}
 	}
-	return layout.Dimensions{Size: image.Pt(w, h), Baseline: (h + labelLine(env, gtx, theme.TypeLabel())) / 2}, nil
+	labelAt.X = x + slot + gtx.Dp(iconGap)
+	drawLabel(1)
+	s.spinner(env, gtx, pt, slot, fade(fg, swap), swap)
+	return nil
 }
 
-// buttonLookOf resolves the color pairing of one Button state (UK-03): the
-// base fill of the variant, the hover and press overlays of §3.5 on top of
-// it, and the label and icon color. Disabled drops the fill and reads
-// FgDisabled (§4.1); busy changes only the content, never the pairing.
-// Ghost rests on FgMuted and lifts to Fg under interaction, so the label
-// keeps 4.5:1 over its wash on every chrome surface (UK-E04). The bool is
-// secondary's hairline border.
-func buttonLookOf(env *Env, v ButtonVariant, st controlState) (controlLook, bool) {
+// spinner draws the busy ring in the box×box slot at p while the
+// cross-fade shows any of it: it asks for frames only while drawn (§6.5).
+func (s *ButtonState) spinner(env *Env, gtx *layout.Context, p image.Point, box int, c color.NRGBA, swap float32) {
+	if swap <= 0 {
+		return
+	}
+	at(gtx, p, func(gtx *layout.Context) {
+		center := f32.Pt(float32(box)/2, float32(box)/2)
+		defer scaleAbout(gtx, center, 0.8+0.2*swap).Pop()
+		s.spin.Layout(env, gtx, box, c)
+	})
+}
+
+// buttonLookOf resolves the color pairing of one Button variant (UK-03):
+// primary on Action with its hover and press fills, secondary on FillSoft,
+// bordered on BorderSubtle over nothing, ghost on nothing until hover, and
+// danger on DangerSoft in DangerFg, deepening to its hover and press fills.
+// The focus ring takes the control's own tone, always solid (§3.8): Action for
+// primary, the solid Status.Danger — never DangerSoft — for danger, FocusBorder
+// for the rest. Disabled
+// draws the whole look at DisabledOpacity (§4.1). Ghost rests on FgMuted
+// and lifts to Fg under interaction, so the label keeps 4.5:1 over its wash
+// on every chrome surface (UK-E04).
+func buttonLookOf(env *Env, v ButtonVariant, disabled bool) controlLook {
 	c := env.Th.Chrome()
-	l := controlLook{hover: c.HoverWash, press: c.PressedWash}
-	border := false
+	l := controlLook{hover: c.HoverWash, press: c.PressedWash, fg: c.Fg, ripple: c.RippleWash, ring: c.FocusBorder}
 	switch v {
 	case Primary:
-		l.fill, l.base, l.fg = true, c.Action, c.ActionFg
-		l.hover, l.press = c.ActionHover, c.ActionPressed
+		l.base, l.hover, l.press, l.fg, l.ripple = c.Action, c.ActionHover, c.ActionPressed, c.ActionFg, c.RippleOnAction
+		l.ring = c.Action
 	case Secondary:
-		l.fg = c.Fg
-		border = true
+		l.base, l.hover = c.FillSoft, c.FillSoftHover
+	case Bordered:
+		l.border, l.hover, l.press = c.BorderSubtle, c.FillSoft, c.FillSoftHover
 	case Ghost:
-		l.fg = c.FgMuted
-		if st.hovered || st.pressed {
-			l.fg = c.Fg
-		}
+		l.fg, l.fgHover = c.FgMuted, c.Fg
 	case Danger:
-		l.fill, l.base, l.fg = true, env.Th.Status().Danger, c.ActionFg
+		l.base, l.hover, l.press, l.fg = c.DangerSoft, c.DangerSoftHover, c.DangerSoftPressed, c.DangerFg
+		l.ring = env.Th.Status().Danger
 	}
-	if st.disabled {
-		l.fill = false
-		l.fg = c.FgDisabled
+	if l.fgHover.A == 0 {
+		l.fgHover = l.fg
 	}
-	return l, border
+	if disabled {
+		l = l.dim(theme.DisabledOpacity)
+	}
+	return l
 }
 
 // controlHeight is the height token of a §3.4 control size.
 func controlHeight(gtx *layout.Context, s ButtonSize) int {
-	switch s {
-	case SizeSM:
+	if s == SizeSM {
 		return gtx.Dp(theme.ControlSM)
-	case SizeMD:
-		return gtx.Dp(theme.ControlMD)
-	case SizeLG:
+	}
+	if s == SizeLG {
 		return gtx.Dp(theme.ControlLG)
 	}
 	return gtx.Dp(theme.ControlMD)
@@ -245,12 +237,4 @@ func buttonIconSize(s ButtonSize) unit.Dp {
 		return theme.IconSM
 	}
 	return theme.IconMD
-}
-
-// drawSpinner lays the busy spinner of §4.1 in a box×box slot at p: the
-// spinner keeps asking for frames only while it is drawn (§6.5).
-func drawSpinner(env *Env, gtx *layout.Context, sp *Spinner, p image.Point, box int, c color.NRGBA) {
-	at(gtx, p, func(gtx *layout.Context) {
-		sp.Layout(env, gtx, box, c)
-	})
 }

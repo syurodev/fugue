@@ -1,6 +1,7 @@
 package kit
 
 import (
+	"fmt"
 	"image/color"
 	"math"
 	"testing"
@@ -11,6 +12,9 @@ import (
 	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
+
+// labelSave is the label the button tests draw.
+const labelSave = "Save"
 
 // focusButton lays one frame out and moves focus to the button the way a
 // real window's Tab handler would: the headless router does not synthesize
@@ -45,7 +49,7 @@ func TestButtonActivatesOnEnterAndOnSpaceRelease(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	st := NewButtonState()
-	p := ButtonProps{Text: "Save", Variant: Secondary}
+	p := ButtonProps{Text: labelSave, Variant: Secondary}
 
 	// Register the input filters, then take focus, then sit quiet.
 	h.frame(t)
@@ -85,10 +89,10 @@ func TestButtonActivatesOnEnterAndOnSpaceRelease(t *testing.T) {
 	}
 }
 
-// TestButtonBusyKeepsItsWidth covers §6.2: busy swaps the content inside
-// the box measured from the idle content — with an icon the spinner takes
-// the icon's slot, without one it replaces the content centered — and the
-// size never moves.
+// TestButtonBusyKeepsItsWidth covers §6.2: busy swaps the content inside the
+// box measured from the idle content, so the size never moves — the measured
+// box ignores Busy, and the drawn body of a busy frame covers exactly the
+// pixels the idle body does.
 func TestButtonBusyKeepsItsWidth(t *testing.T) {
 	t.Parallel()
 	for _, tc := range []struct {
@@ -97,38 +101,69 @@ func TestButtonBusyKeepsItsWidth(t *testing.T) {
 	}{
 		{"text only", ButtonProps{Text: "Run checks", Variant: Primary}},
 		{"icon and text", ButtonProps{Text: "Run checks", Icon: IconRestart, Variant: Secondary}},
-		{"long label", ButtonProps{Text: "Rebuild every index now", Variant: Ghost, Size: SizeLG}},
+		{"long label", ButtonProps{Text: "Rebuild every index now", Variant: Primary, Size: SizeLG, Icon: IconRestart}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			h := newHarness(t)
 			st := NewButtonState()
-			h.frame(t)
-			idle, err := st.draw(h.env, &h.gtx, tc.p, controlState{})
-			if err != nil {
-				t.Fatalf("draw the idle button: %v", err)
-			}
-			h.end()
 			busy := tc.p
 			busy.Busy = true
 			h.frame(t)
-			got, err := st.draw(h.env, &h.gtx, busy, controlState{busy: true})
-			if err != nil {
-				t.Fatalf("draw the busy button: %v", err)
+			if idle, got := st.Measure(h.env, &h.gtx, tc.p).Size, st.Measure(h.env, &h.gtx, busy).Size; idle != got {
+				t.Fatalf("busy moved the measured box from %v to %v", idle, got)
 			}
-			h.end()
-			if got.Size != idle.Size {
-				t.Fatalf("busy moved the button from %v to %v; busy must keep the idle size", idle.Size, got.Size)
+			if tc.p.Variant != Primary {
+				return
+			}
+			idle := bodyBounds(t, h, st, tc.p, false)
+			if got := bodyBounds(t, h, st, busy, true); got != idle {
+				t.Fatalf("the busy body covers %v, the idle one %v", got, idle)
 			}
 		})
+	}
+}
+
+// TestBusyShowsNoHoverOrPressWash covers §4.1: a busy control draws no hover
+// or press wash — nor does a disabled one — even when the pointer is on it.
+func TestBusyShowsNoHoverOrPressWash(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	st := NewButtonState()
+	h.env.Preview = Preview{Hover: st.Tag(), Press: st.Tag()}
+	h.frame(t)
+	for _, o := range []pressOpts{{busy: true}, {disabled: true}, {}} {
+		got := resolveState(h.env, &h.gtx, st.Tag(), &st.click, o)
+		if live := !o.busy && !o.disabled; got.hovered != live || got.pressed != live {
+			t.Errorf("%+v: hovered %v pressed %v, want both %v", o, got.hovered, got.pressed, live)
+		}
+	}
+}
+
+// TestButtonDisabledDrawsTheWholeControlAtDisabledOpacity covers §4.1: every
+// color of a disabled look — fill, border and label — is the enabled one at
+// DisabledOpacity.
+func TestButtonDisabledDrawsTheWholeControlAtDisabledOpacity(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	for _, v := range []ButtonVariant{Secondary, Primary, Bordered, Ghost, Danger} {
+		on, off := buttonLookOf(h.env, v, false), buttonLookOf(h.env, v, true)
+		for name, pair := range map[string][2]color.NRGBA{
+			"base": {on.base, off.base}, "border": {on.border, off.border}, "fg": {on.fg, off.fg}, "ripple": {on.ripple, off.ripple},
+		} {
+			if want := fade(pair[0], theme.DisabledOpacity); pair[1] != want {
+				t.Errorf("variant %d %s disabled = %v, want %v", v, name, pair[1], want)
+			}
+		}
 	}
 }
 
 // TestButtonTextContrastInEveryState covers UK-E04: the label and icon
 // color reaches 4.5:1 on the composited background of rest, hover, pressed
 // and selected, in both modes, on every chrome surface the gallery puts
-// under a control. FgDisabled is the §4.1 disabled look and is exempt;
-// busy is in the matrix to pin that it never changes the pairing.
+// under a control, for every variant including danger on DangerSoft in
+// DangerFg. A disabled control draws at DisabledOpacity and is exempt
+// (§4.1).
 func TestButtonTextContrastInEveryState(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []struct {
@@ -145,11 +180,26 @@ func TestButtonTextContrastInEveryState(t *testing.T) {
 				t.Fatalf("build the shaper: %v", err)
 			}
 			th := mode.th(sh)
-			env := &Env{Th: &th, Sh: sh}
-			surfaces := contrastSurfaces(&th)
-			checkContrast(t, surfaces, buttonContrastCases(env))
-			checkContrast(t, surfaces, iconContrastCases(env))
+			checkContrastInEveryState(t, &Env{Th: &th, Sh: sh})
 		})
+	}
+}
+
+// checkContrastInEveryState asserts the 4.5:1 budget of every case on every
+// chrome surface of env's mode.
+func checkContrastInEveryState(t *testing.T, env *Env) {
+	t.Helper()
+	for _, surface := range contrastSurfaces(env.Th) {
+		for _, tc := range contrastCases(env) {
+			bg := composited(surface.c, tc.look, tc.hovered, tc.pressed, tc.toggled)
+			fg := tc.look.fg
+			if tc.hovered || tc.pressed {
+				fg = tc.look.fgHover
+			}
+			if got := contrastRatio(fg, bg); got < 4.5 {
+				t.Errorf("%s on %s: contrast %.2f below 4.5", tc.name, surface.name, got)
+			}
+		}
 	}
 }
 
@@ -161,120 +211,100 @@ type contrastSurface struct {
 
 // contrastSurfaces are the surfaces the gallery draws controls over.
 func contrastSurfaces(th *theme.Theme) []contrastSurface {
+	c := th.Chrome()
 	return []contrastSurface{
-		{"AppBg", th.Chrome().AppBg},
-		{"CanvasBg", th.Chrome().CanvasBg},
-		{"SurfaceBase", th.Chrome().SurfaceBase},
-		{"SurfaceRaised", th.Chrome().SurfaceRaised},
+		{"AppBg", c.AppBg},
+		{"CanvasBg", c.CanvasBg},
+		{"SurfaceBase", c.SurfaceBase},
+		{"SurfaceRaised", c.SurfaceRaised},
+		{"SurfaceTinted", c.SurfaceTinted},
 	}
 }
 
 // contrastCase is one control state and the look it settles into.
 type contrastCase struct {
-	name    string
-	look    controlLook
-	hovered bool
-	pressed bool
+	name                      string
+	look                      controlLook
+	hovered, pressed, toggled bool
 }
 
-// buttonContrastCases are the Button variant × state cases: rest, hover,
-// pressed (with the pointer still over it) and busy.
-func buttonContrastCases(env *Env) []contrastCase {
-	states := []struct {
-		name string
-		st   controlState
-	}{
-		{"rest", controlState{}},
-		{"hover", controlState{hovered: true}},
-		{"pressed", controlState{hovered: true, pressed: true}},
-		{"busy", controlState{busy: true}},
+// contrastCases are every Button and IconButton variant at rest, hovered,
+// pressed (pointer still over it) and, for icons, toggled with and without
+// hover. Busy shares the rest look: it adds no wash (§4.1).
+func contrastCases(env *Env) []contrastCase {
+	cases := make([]contrastCase, 0, 5*3+3*6)
+	for _, v := range []ButtonVariant{Secondary, Primary, Bordered, Ghost, Danger} {
+		look := buttonLookOf(env, v, false)
+		cases = append(cases,
+			contrastCase{name: fmt.Sprintf("button %d rest", v), look: look},
+			contrastCase{name: fmt.Sprintf("button %d hover", v), look: look, hovered: true},
+			contrastCase{name: fmt.Sprintf("button %d pressed", v), look: look, hovered: true, pressed: true})
 	}
-	cases := make([]contrastCase, 0, len(states)*4)
-	for _, v := range []ButtonVariant{Primary, Secondary, Ghost, Danger} {
-		for _, bs := range states {
-			look, _ := buttonLookOf(env, v, bs.st)
-			cases = append(cases, contrastCase{buttonVariantName(v) + " " + bs.name, look, bs.st.hovered, bs.st.pressed})
-		}
+	for _, v := range []IconButtonVariant{IconButtonGhost, IconButtonSecondary, IconButtonBordered} {
+		rest, tog := iconButtonLookOf(env, v, false, false), iconButtonLookOf(env, v, true, false)
+		cases = append(cases,
+			contrastCase{name: fmt.Sprintf("icon %d rest", v), look: rest},
+			contrastCase{name: fmt.Sprintf("icon %d hover", v), look: rest, hovered: true},
+			contrastCase{name: fmt.Sprintf("icon %d pressed", v), look: rest, hovered: true, pressed: true},
+			contrastCase{name: fmt.Sprintf("icon %d selected", v), look: tog, toggled: true},
+			contrastCase{name: fmt.Sprintf("icon %d selected hovered", v), look: tog, toggled: true, hovered: true},
+			contrastCase{name: fmt.Sprintf("icon %d selected pressed", v), look: tog, toggled: true, hovered: true, pressed: true})
 	}
 	return cases
-}
-
-// iconContrastCases are the IconButton variant × state cases, selected
-// being the toggled state of §6.3.
-func iconContrastCases(env *Env) []contrastCase {
-	states := []struct {
-		name string
-		st   controlState
-	}{
-		{"rest", controlState{}},
-		{"hover", controlState{hovered: true}},
-		{"pressed", controlState{hovered: true, pressed: true}},
-		{"selected", controlState{toggled: true}},
-		{"selected and hovered", controlState{toggled: true, hovered: true}},
-	}
-	cases := make([]contrastCase, 0, len(states)*2)
-	for _, v := range []IconButtonVariant{IconButtonGhost, IconButtonSecondary} {
-		for _, is := range states {
-			look, _ := iconButtonLookOf(env, v, is.st)
-			cases = append(cases, contrastCase{"icon button " + is.name, look, is.st.hovered, is.st.pressed})
-		}
-	}
-	return cases
-}
-
-// checkContrast asserts every case's label color reaches 4.5:1 on its
-// composited background over every surface.
-func checkContrast(t *testing.T, surfaces []contrastSurface, cases []contrastCase) {
-	t.Helper()
-	for _, tc := range cases {
-		for _, surface := range surfaces {
-			bg := composited(surface.c, tc.look, tc.hovered, tc.pressed)
-			if got := contrastRatio(tc.look.fg, bg); got < 4.5 {
-				t.Fatalf("%s on %s: contrast %.2f below 4.5", tc.name, surface.name, got)
-			}
-		}
-	}
-}
-
-// buttonVariantName names a variant for the failure line.
-func buttonVariantName(v ButtonVariant) string {
-	switch v {
-	case Primary:
-		return "primary"
-	case Secondary:
-		return "secondary"
-	case Ghost:
-		return "ghost"
-	case Danger:
-		return "danger"
-	}
-	return "unknown"
 }
 
 // composited layers the fills a settled state actually draws over an
-// opaque surface, in draw order: exactly what the GPU composites (the
-// washes ride at their token alpha, and pressed replaces hover, §4.1).
-func composited(surface color.NRGBA, look controlLook, hovered, pressed bool) color.NRGBA {
-	bg := surface
-	if look.base.A > 0 {
-		bg = over(bg, look.base)
+// opaque surface, in the order paint draws them, with the weights paint
+// itself computes (layerWeights) for the settled transitions.
+func composited(surface color.NRGBA, look controlLook, hovered, pressed, toggled bool) color.NRGBA {
+	var mv motionVals
+	if hovered {
+		mv.hover = 1
 	}
-	switch {
-	case pressed:
-		bg = over(bg, look.press)
-	case hovered:
-		bg = over(bg, look.hover)
+	if pressed {
+		mv.press = 1
+	}
+	if toggled {
+		mv.sel = 1
+	}
+	base, sel, hover, press := layerWeights(mv)
+	bg := surface
+	for _, l := range []struct {
+		c color.NRGBA
+		w float32
+	}{{look.base, base}, {look.sel, sel}, {look.hover, hover}, {look.press, press}} {
+		bg = over(bg, fade(l.c, l.w))
 	}
 	return bg
 }
 
-// over blends src over dst.
+// over blends src over the opaque dst the way the GPU does: Gio draws into
+// an sRGB framebuffer, which blends in linear light, so a translucent Fg
+// wash over a dark surface lifts it far more than the same alpha would in
+// sRGB arithmetic (measured: Fg at 6% over AppBg renders as 0x44, not 0x21).
 func over(dst, src color.NRGBA) color.NRGBA {
 	a := float64(src.A) / 255
 	mix := func(d, s uint8) uint8 {
-		return uint8(math.Round(float64(s)*a + float64(d)*(1-a)))
+		return fromLinear(toLinear(s)*a + toLinear(d)*(1-a))
 	}
 	return color.NRGBA{R: mix(dst.R, src.R), G: mix(dst.G, src.G), B: mix(dst.B, src.B), A: 0xff}
+}
+
+// toLinear and fromLinear convert one sRGB channel to and from linear light.
+func toLinear(v uint8) float64 {
+	s := float64(v) / 255
+	if s <= 0.04045 {
+		return s / 12.92
+	}
+	return math.Pow((s+0.055)/1.055, 2.4)
+}
+
+func fromLinear(l float64) uint8 {
+	s := l * 12.92
+	if l > 0.0031308 {
+		s = 1.055*math.Pow(l, 1/2.4) - 0.055
+	}
+	return uint8(math.Round(min(max(s, 0), 1) * 255))
 }
 
 // contrastRatio is the WCAG 2.x contrast of two opaque colors.
@@ -294,4 +324,54 @@ func luminance(c color.NRGBA) float64 {
 		return math.Pow((s+0.055)/1.055, 2.4)
 	}
 	return 0.2126*lin(c.R) + 0.7152*lin(c.G) + 0.0722*lin(c.B)
+}
+
+// TestFocusRingReaches3to1InEveryVariant covers UK-E04 for the ring of §3.8:
+// the solid ring of every Button and IconButton variant — Action for primary,
+// Status.Danger for danger, FocusBorder for the rest — reaches 3:1 against
+// every chrome surface around it, in both modes, with the opaque colors
+// compared directly (a solid ring has no blend to lift it).
+func TestFocusRingReaches3to1InEveryVariant(t *testing.T) {
+	t.Parallel()
+	for _, mode := range []struct {
+		name string
+		th   func(*text.Shaper) theme.Theme
+	}{{"light", theme.Light}, {"dark", theme.Dark}} {
+		t.Run(mode.name, func(t *testing.T) {
+			t.Parallel()
+			sh, err := fonts.Shaper()
+			if err != nil {
+				t.Fatalf("build the shaper: %v", err)
+			}
+			th := mode.th(sh)
+			for name, ring := range variantRings(&Env{Th: &th, Sh: sh}) {
+				checkRing(t, &th, name, ring)
+			}
+		})
+	}
+}
+
+// variantRings is the ring color of every Button and IconButton variant.
+func variantRings(env *Env) map[string]color.NRGBA {
+	rings := map[string]color.NRGBA{}
+	for _, v := range []ButtonVariant{Secondary, Primary, Bordered, Ghost, Danger} {
+		rings[fmt.Sprintf("button %d", v)] = buttonLookOf(env, v, false).ring
+	}
+	for _, v := range []IconButtonVariant{IconButtonGhost, IconButtonSecondary, IconButtonBordered} {
+		rings[fmt.Sprintf("icon %d", v)] = iconButtonLookOf(env, v, false, false).ring
+	}
+	return rings
+}
+
+// checkRing asserts one ring is solid and reaches 3:1 on every chrome surface.
+func checkRing(t *testing.T, th *theme.Theme, name string, ring color.NRGBA) {
+	t.Helper()
+	if ring.A != 0xff {
+		t.Errorf("%s ring %v is not solid", name, ring)
+	}
+	for _, surface := range contrastSurfaces(th) {
+		if got := contrastRatio(ring, surface.c); got < 3 {
+			t.Errorf("%s ring on %s: %.2f:1, want at least 3:1", name, surface.name, got)
+		}
+	}
 }

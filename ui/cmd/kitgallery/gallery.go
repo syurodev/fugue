@@ -14,18 +14,23 @@ import (
 )
 
 // The gallery window: a nav rail of kit Buttons, one page per component,
-// and the three modes — light/dark (Ctrl+D), reduced motion (M) and
-// keyboard-only (K), which keeps the focus-visible modality on so rings
-// show for every focused control (UK-05, UK-09). Everything on screen is
+// and the modes — light/dark (Ctrl+D), reduced motion (M), keyboard-only (K),
+// which keeps the focus-visible modality on so rings show for every focused
+// control, and slow motion (S), which runs every motion at a quarter speed
+// to judge it by eye (UK-05, UK-09, ui-kit §8). Everything on screen is
 // assembled from kit; the gallery draws none of its own controls.
 
-// The window geometry in dp: tall enough for the whole Button matrix at
-// 100%, since the pages clip nothing (UK-E09).
+// The window geometry in dp, fixed whatever the UI scale — like a user's
+// real window: zooming makes the dp smaller on screen, never the window
+// bigger, so a page wraps its blocks onto more lines instead of growing
+// sideways (UK-E09).
 const (
-	windowW = unit.Dp(920)
-	windowH = unit.Dp(900)
+	windowW = unit.Dp(1360)
+	windowH = unit.Dp(1000)
 	navRail = unit.Dp(140)
 	chrome  = unit.Dp(24)
+	// slowFactor is the slow-motion mode's time scale.
+	slowFactor = float32(0.25)
 )
 
 // pageNames are the nav labels, one page per component (UK-09).
@@ -73,51 +78,49 @@ func (g *gallery) layout(gtx *layout.Context) error {
 	c := g.env.Th.Chrome()
 
 	// Nav rail: one kit button per page, the current one secondary.
-	x := gtx.Dp(chrome)
-	y := gtx.Dp(chrome)
+	x, y := gtx.Dp(chrome), gtx.Dp(chrome)
 	for i, name := range pageNames() {
 		variant := kit.Ghost
 		if i == g.cur {
 			variant = kit.Secondary
 		}
-		pr := kit.ButtonProps{Text: name, Variant: variant, Size: kit.SizeMD}
-		var clicked bool
-		var navErr error
+		pr := kit.ButtonProps{Text: name, Variant: variant}
 		box := measure(gtx, func(gtx *layout.Context) image.Point {
 			return p.nav[i].Measure(g.env, gtx, pr).Size
 		})
-		p.put(gtx, image.Pt(x, y), box, func(gtx *layout.Context) {
-			clicked, navErr = p.nav[i].Layout(g.env, gtx, pr)
+		p.base = image.Pt(x, y)
+		var clicked bool
+		at(gtx, image.Pt(x, y), func(gtx *layout.Context) {
+			var err error
+			if clicked, err = p.nav[i].Layout(g.env, gtx, pr); err != nil {
+				p.err = fmt.Errorf("nav %s: %w", name, err)
+			}
 		})
-		if navErr != nil {
-			return fmt.Errorf("nav %s: %w", name, navErr)
-		}
+		p.ctl = append(p.ctl, image.Rectangle{Min: p.base, Max: p.base.Add(box)})
 		if clicked {
 			g.cur = i
 		}
-		y += box.Y + gtx.Dp(theme.SpaceSM)
+		y += box.Y + gtx.Dp(theme.SpaceLG)
 	}
 
 	// The mode line, so a shot tells which modes it was taken in.
 	y += gtx.Dp(theme.SpaceXL)
 	for _, m := range g.modes() {
-		r := p.caption(gtx, image.Pt(x, y), m, c.FgSubtle)
-		y += r.Dy() + gtx.Dp(theme.SpaceXS)
+		p.base = image.Point{}
+		y += p.caption(gtx, image.Pt(x, y), m, c.FgSubtle).Dy() + gtx.Dp(theme.SpaceXS)
 	}
 
-	// The current page in its column, measured from the top of the frame.
-	origin := image.Pt(x+gtx.Dp(navRail), gtx.Dp(chrome))
-	p.origin = origin
-	at(gtx, origin, func(gtx *layout.Context) layout.Dimensions {
+	// The current page in its column, from the top of the frame.
+	p.origin = image.Pt(x+gtx.Dp(navRail), gtx.Dp(chrome))
+	at(gtx, p.origin, func(gtx *layout.Context) {
 		col := *gtx
 		col.Constraints.Min = image.Point{}
 		col.Constraints.Max.X = pageW(gtx)
 		if g.cur == 0 {
-			p.layoutButtons(&col, 0)
+			p.layoutButtons(&col)
 		} else {
-			p.layoutIcons(&col, 0)
+			p.layoutIcons(&col)
 		}
-		return layout.Dimensions{}
 	})
 	if p.err != nil {
 		return fmt.Errorf("page %s: %w", pageNames()[g.cur], p.err)
@@ -137,6 +140,9 @@ func (g *gallery) modes() []string {
 	if g.env.KeyboardOnly {
 		m = append(m, "keyboard-only")
 	}
+	if g.env.TimeScale > 0 {
+		m = append(m, "slow motion ¼×")
+	}
 	return m
 }
 
@@ -151,6 +157,17 @@ func (g *gallery) keys(gtx *layout.Context) {
 	}
 	if keyPressed(gtx, key.Filter{Name: "K"}) {
 		g.env.KeyboardOnly = !g.env.KeyboardOnly
+	}
+	if keyPressed(gtx, key.Filter{Name: "S"}) {
+		g.setSlow(g.env.TimeScale == 0)
+	}
+}
+
+// setSlow turns the slow-motion mode on or off.
+func (g *gallery) setSlow(on bool) {
+	g.env.TimeScale = 0
+	if on {
+		g.env.TimeScale = slowFactor
 	}
 }
 

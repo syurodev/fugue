@@ -9,10 +9,12 @@
 //	go run ./cmd/kitgallery -light              # start in light mode
 //	go run ./cmd/kitgallery -keyboard           # keyboard-only: rings stay on
 //	go run ./cmd/kitgallery -reduced            # reduced motion
+//	go run ./cmd/kitgallery -slow               # every motion at a quarter speed
 //	go run ./cmd/kitgallery -shots > shots.tar  # pages × themes × UI scale 90/100/125% × pixel scale 1/1.25
 //
 // In the window: Ctrl+D toggles the theme, M toggles reduced motion, K
-// toggles keyboard-only, Tab walks the controls, Enter and Space activate.
+// toggles keyboard-only, S toggles slow motion, Tab walks the controls,
+// Enter and Space activate.
 //
 // Owner: F10.9. Allowed callers: none, it is an entry point; fugue-app
 // never imports it.
@@ -38,6 +40,7 @@ func main() {
 	light := flag.Bool("light", false, "start in light mode")
 	keyboard := flag.Bool("keyboard", false, "start in keyboard-only mode: rings stay on")
 	reduced := flag.Bool("reduced", false, "start with reduced motion")
+	slow := flag.Bool("slow", false, "start in slow motion: every motion at a quarter speed")
 	uiscale := flag.Float64("uiscale", 1, "interface size, a multiplier on dp and sp: 0.9, 1 or 1.25")
 	shots := flag.Bool("shots", false, "write the shot matrix as a tar stream of PNGs to standard output and exit")
 	flag.Parse()
@@ -50,7 +53,7 @@ func main() {
 	}
 	go func() {
 		code := 0
-		if err := runWindow(*light, *keyboard, *reduced, float32(*uiscale)); err != nil {
+		if err := runWindow(*light, *keyboard, *reduced, *slow, float32(*uiscale)); err != nil {
 			fmt.Fprintln(os.Stderr, "kitgallery:", err)
 			code = 1
 		}
@@ -60,7 +63,7 @@ func main() {
 }
 
 // runWindow opens the gallery window and runs it until it is closed.
-func runWindow(light, keyboard, reduced bool, uiscale float32) error {
+func runWindow(light, keyboard, reduced, slow bool, uiscale float32) error {
 	env, err := newEnv(light)
 	if err != nil {
 		return err
@@ -69,6 +72,7 @@ func runWindow(light, keyboard, reduced bool, uiscale float32) error {
 	env.ReducedMotion = reduced
 	env.UIScale = uiscale
 	g := newGallery(env, light)
+	g.setSlow(slow)
 	w := new(app.Window)
 	w.Option(app.Title("Fugue kit gallery"), app.Size(windowW, windowH))
 	var ops op.Ops

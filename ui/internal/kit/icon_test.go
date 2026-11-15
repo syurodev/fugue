@@ -4,7 +4,6 @@ import (
 	"image"
 	"image/color"
 	"math"
-	"sync"
 	"testing"
 
 	"gioui.org/gpu/headless"
@@ -12,6 +11,7 @@ import (
 	"gioui.org/op"
 	"gioui.org/unit"
 
+	"github.com/syurodev/fugue/ui/internal/glwin"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
@@ -67,12 +67,6 @@ func mustIconData(t *testing.T, n IconName) string {
 // geometry, so the comparison holds to a ±0.5 px band.
 func TestIconStrokeWidthIsTheTokenAtEveryDensity(t *testing.T) {
 	t.Parallel()
-	// glGate serializes the headless GL renders of the subtests: the
-	// software GL of the CI runners loses EGL contexts (BAD_CONTEXT,
-	// BAD_DISPLAY) when several goroutines drive EGL at the same time,
-	// while one goroutine at a time is stable on macOS Metal and Mesa's
-	// llvmpipe alike.
-	var glGate sync.Mutex
 	for _, tc := range []struct {
 		name   string
 		size   unit.Dp
@@ -84,12 +78,8 @@ func TestIconStrokeWidthIsTheTokenAtEveryDensity(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			th := theme.Dark(nil)
-			// One window for the whole subtest: the densities share it, so
-			// the GL context is created once.
-			glGate.Lock()
-			defer glGate.Unlock()
+			// One window for the whole subtest: the densities share it.
 			win := openHeadless(t)
-			defer win.Release()
 			for _, pxPerDp := range []float32{2, 1.25, 1} {
 				for _, ui := range []float32{1.25, 1} {
 					assertStrokeWidth(t, win, &th, tc.size, tc.stroke, pxPerDp, ui)
@@ -100,10 +90,7 @@ func TestIconStrokeWidthIsTheTokenAtEveryDensity(t *testing.T) {
 	t.Run("cache is reused across densities", func(t *testing.T) {
 		t.Parallel()
 		th := theme.Dark(nil)
-		glGate.Lock()
-		defer glGate.Unlock()
 		win := openHeadless(t)
-		defer win.Release()
 		env := &Env{Th: &th}
 		for _, pxPerDp := range []float32{2, 1.25, 1} {
 			env.UIScale = 1.25
@@ -116,10 +103,10 @@ func TestIconStrokeWidthIsTheTokenAtEveryDensity(t *testing.T) {
 }
 
 // openHeadless opens the 64×64 render window the width measurements draw
-// into.
+// into, through glwin: it is never released.
 func openHeadless(t *testing.T) *headless.Window {
 	t.Helper()
-	win, err := headless.NewWindow(64, 64)
+	win, err := glwin.Open(64, 64)
 	if err != nil {
 		t.Fatalf("open a headless window: %v", err)
 	}

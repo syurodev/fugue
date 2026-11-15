@@ -48,6 +48,10 @@ type Env struct {
 	// spinner holds still, springs snap. Filled by the window from the
 	// app's settings.
 	ReducedMotion bool
+	// TimeScale multiplies every frame step, springs and the spinner alike:
+	// the gallery's slow-motion mode runs everything at a quarter speed so
+	// motion can be judged by eye (§8). Zero means 1.
+	TimeScale float32
 	// KeyboardOnly is the gallery's keyboard-only mode: focus moves count as
 	// coming from the keyboard for the whole session, so focus rings stay
 	// visible no matter how focus landed (UK-05). Production windows leave
@@ -139,6 +143,9 @@ func (e *Env) Content(t theme.Type) (size, line unit.Sp) {
 // into gtx.Now.
 func (e *Env) Begin(now time.Time) {
 	e.dt = e.Driver.Begin(now)
+	if e.TimeScale > 0 {
+		e.dt = time.Duration(float64(e.dt) * float64(e.TimeScale))
+	}
 	e.now = now
 }
 

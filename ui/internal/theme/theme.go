@@ -98,10 +98,35 @@ type Chrome struct {
 	// SelectedWash is the background of the selected item, stronger than
 	// HoverWash so selection stays visible while another row hovers.
 	SelectedWash color.NRGBA
-	// FgDisabled is the text and icon color of a disabled control.
+	// FgDisabled is the text and icon color of a disabled control outside a
+	// control (a disabled menu item, a row's secondary text); a disabled
+	// control itself draws whole at DisabledOpacity.
 	FgDisabled color.NRGBA
 	// Scrim is the dim behind a dialog: black at 40%, mode-independent.
 	Scrim color.NRGBA
+	// FillSoft is the tinted fill of the secondary button and the neutral
+	// tag: Fg at 6% (v0.3); FillSoftHover is the same at 10%.
+	FillSoft      color.NRGBA
+	FillSoftHover color.NRGBA
+	// BorderSubtle is the faint border of bordered controls, cards, inputs
+	// and floating surfaces: Fg at 9%. Border stays for Divider.
+	BorderSubtle color.NRGBA
+	// DangerSoft is the tinted fill of the danger button: Status.Danger at
+	// 14%; DangerFg is the label color on it, the danger hue shifted until
+	// it holds 4.5:1 over that fill and its hover and press fills on every
+	// chrome surface.
+	DangerSoft color.NRGBA
+	DangerFg   color.NRGBA
+	// DangerSoftHover and DangerSoftPressed are the same tint at 22% and 30%
+	// perceived, the danger variant's hover and press fills (HeroUI deepens a
+	// flat danger the same way); DangerFg holds 4.5:1 on all three.
+	DangerSoftHover   color.NRGBA
+	DangerSoftPressed color.NRGBA
+	// RippleWash is the press ripple over a control body, and RippleOnAction
+	// the one over the solid Action fill: about 11% perceived, faint on top
+	// of the whole-body pressed fill (§3.7).
+	RippleWash     color.NRGBA
+	RippleOnAction color.NRGBA
 }
 
 // Palette is the eight-hue tier for syntax, status and accents. Hues are
@@ -155,13 +180,23 @@ func Dark(shaper *text.Shaper) Theme {
 // newTheme assembles one mode: chrome and palette are the tables, and every
 // derived color is computed here so the mapping exists exactly once.
 func newTheme(c *Chrome, p Palette, shaper *text.Shaper) Theme {
-	// The §3.5 washes derive from Fg here, once per mode, so no component
-	// ever fades a color of its own.
-	c.HoverWash = fgWash(c.Fg, 0.07)
-	c.PressedWash = fgWash(c.Fg, 0.14)
-	c.SelectedWash = fgWash(c.Fg, 0.11)
+	// The §3.5 washes derive from Fg here, once per mode, solved to their
+	// perceived value (wash.go), so no component ever fades a color of its
+	// own.
+	surface := c.CanvasBg
+	c.HoverWash = perceived(surface, c.Fg, 0.07)
+	c.PressedWash = perceived(surface, c.Fg, 0.14)
+	c.SelectedWash = perceived(surface, c.Fg, 0.11)
 	c.FgDisabled = fgWash(c.Fg, 0.35)
 	c.Scrim = color.NRGBA{A: 0x66} // black at 40%
+	c.FillSoft = perceived(surface, c.Fg, 0.06)
+	c.FillSoftHover = perceived(surface, c.Fg, 0.10)
+	c.BorderSubtle = perceived(surface, c.Fg, 0.09)
+	c.DangerSoft = perceived(surface, p.Red, 0.14)
+	c.DangerSoftHover = perceived(surface, p.Red, 0.22)
+	c.DangerSoftPressed = perceived(surface, p.Red, 0.30)
+	c.RippleWash = perceived(surface, c.Fg, 0.11)
+	c.RippleOnAction = perceived(c.Action, c.ActionFg, 0.11)
 	status := Status{
 		Info:    p.Blue,
 		Success: p.Green,
@@ -240,6 +275,7 @@ func lightChrome() Chrome {
 		ActionFg:      nrgba(0xFFFFFF),
 		ActionHover:   nrgba(0x2E3036),
 		ActionPressed: nrgba(0x0A0B0C),
+		DangerFg:      nrgba(0x752822),
 	}
 }
 
@@ -262,6 +298,7 @@ func darkChrome() Chrome {
 		ActionFg:      nrgba(0x14161A),
 		ActionHover:   nrgba(0xD6D6DA),
 		ActionPressed: nrgba(0xFFFFFF),
+		DangerFg:      nrgba(0xF4B8B3),
 	}
 }
 

@@ -5,7 +5,8 @@
 // tokens, Lucide icons with strokes cached per dp size in a never-reset
 // ops buffer, an indeterminate spinner that asks for frames only while
 // drawn, the elevation.float shadow, and the pressable controls (Button
-// and IconButton, F10.9). Fields, menus and the rest of kit v1 land in
+// and IconButton, F10.9: the v0.3 HeroUI style, every change animated on
+// the motion tokens). Fields, menus and the rest of kit v1 land in
 // F10.10–F10.12; every component's doc comment points at its ui-kit
 // § section.
 //
