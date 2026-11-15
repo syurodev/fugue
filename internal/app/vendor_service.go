@@ -10,6 +10,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
+	"github.com/syurodev/fugue/internal/vendoradapter/agy"
 	"github.com/syurodev/fugue/internal/vendoradapter/claude"
 	"github.com/syurodev/fugue/internal/vendoradapter/codex"
 	"github.com/syurodev/fugue/internal/vendorstore"
@@ -27,10 +28,11 @@ const (
 	VendorRequestMaxBytes = 1 << 20
 )
 
-// Supported vendor names in stage A (F9.5 Claude, F9.7 Codex).
+// Supported vendor names in stage A (F9.5 Claude, F9.7 Codex, F9.8a Antigravity).
 const (
 	VendorClaude = "claude"
 	VendorCodex  = "codex"
+	VendorAGY    = "agy"
 )
 
 // The host-side identity of a stage-A session: the vendor's default account
@@ -404,16 +406,23 @@ func validateVendorProfile(profile VendorProfile) error {
 
 func validateVendorProfileFor(vendorName string, profile VendorProfile) error {
 	spec := &vendor.StartSpec{Model: profile.Model, Effort: profile.Effort, ResumeSessionID: profile.ResumeSessionID}
-	if vendorName == VendorCodex {
+	switch vendorName {
+	case VendorCodex:
 		if _, err := codex.BuildArgv(codex.DefaultBinary, spec); err != nil {
 			return errcode.New(errcode.VendorInvalidProfile, "a session profile value is not allowed")
 		}
 		return nil
+	case VendorAGY:
+		if _, err := agy.BuildArgv(agy.DefaultBinary, spec); err != nil {
+			return errcode.New(errcode.VendorInvalidProfile, "a session profile value is not allowed")
+		}
+		return nil
+	default:
+		if _, err := claude.BuildArgv(claude.DefaultBinary, spec); err != nil {
+			return errcode.New(errcode.VendorInvalidProfile, "a session profile value is not allowed")
+		}
+		return nil
 	}
-	if _, err := claude.BuildArgv(claude.DefaultBinary, spec); err != nil {
-		return errcode.New(errcode.VendorInvalidProfile, "a session profile value is not allowed")
-	}
-	return nil
 }
 
 func vendorSessionView(info *vendorstore.Session) VendorSessionView {

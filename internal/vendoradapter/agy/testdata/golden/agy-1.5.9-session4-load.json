@@ -1,0 +1,74 @@
+{
+ "session": "session-1",
+ "vendor": "agy",
+ "summary": {
+  "partials": 1,
+  "notices": 1
+ },
+ "steps": [
+  {
+   "line": 2,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": "Run the shell command `sleep 5` and tell me when done.",
+     "Attachments": null
+    },
+    "id": "agy-user-replay:user",
+    "kind": "user_message",
+    "meta": {
+     "Origin": "user"
+    },
+    "rawRef": "",
+    "revision": 1,
+    "turnId": ""
+   }
+  },
+  {
+   "line": 3,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": "The command is expected to complete within a specific timeframe, so adjusting the timeout parameter might be necessary to ensure the command runs to completion. It seems best to set a larger value to avoid premature backgrounding. Using 5000 as the timeout value looks reasonable, as the command is designed to sleep for 5 seconds.\n\n\n"
+    },
+    "id": "agy-thought-replay:thought",
+    "kind": "reasoning",
+    "meta": {
+     "Status": "plain"
+    },
+    "rawRef": "",
+    "revision": 1,
+    "turnId": ""
+   }
+  },
+  {
+   "line": 4,
+   "op": "init",
+   "init": {
+    "Version": "1.5.9",
+    "SessionID": "session-uuid-0001",
+    "Model": "gemini-4-argon-medium",
+    "PermissionMode": "default",
+    "SlashCommands": null
+   }
+  },
+  {
+   "line": 5,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": ""
+    },
+    "id": "agy-notice-line-5",
+    "kind": "notice",
+    "meta": {
+     "Level": "info",
+     "Code": "unsupported_event"
+    },
+    "rawRef": "acp:session_info_update",
+    "revision": 0,
+    "turnId": ""
+   }
+  }
+ ]
+}

@@ -12,6 +12,7 @@ import (
 	"github.com/syurodev/fugue/internal/storage"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
+	"github.com/syurodev/fugue/internal/vendoradapter/agy"
 	"github.com/syurodev/fugue/internal/vendoradapter/claude"
 	"github.com/syurodev/fugue/internal/vendoradapter/codex"
 	"github.com/syurodev/fugue/internal/vendorstore"
@@ -157,11 +158,32 @@ func buildVendorAdapters(deps *HostDeps) (*claude.Adapter, map[string]vendor.Ada
 		codexOpts = append(codexOpts, codex.WithXDGRuntimeDir(xdgDir))
 	}
 	codexAdapter := codex.NewAdapter(deps.VendorHostEnv, codexOpts...)
+	agyAdapter := buildAgyAdapter(deps, systemdProbe, xdgDir)
 
 	return claudeAdapter, map[string]vendor.Adapter{
 		VendorClaude: claudeAdapter,
 		VendorCodex:  codexAdapter,
+		VendorAGY:    agyAdapter,
 	}
+}
+
+func buildAgyAdapter(deps *HostDeps, systemdProbe *process.SystemdProbe, xdgDir string) *agy.Adapter {
+	opts := []agy.Option{
+		agy.WithClock(deps.Clock),
+		agy.WithIDs(deps.IDs),
+		agy.WithSystemdProbe(systemdProbe),
+	}
+	bin := deps.AgyBinary
+	if bin == "" {
+		bin = deps.VendorBinary
+	}
+	if bin != "" {
+		opts = append(opts, agy.WithBinary(bin))
+	}
+	if xdgDir != "" {
+		opts = append(opts, agy.WithXDGRuntimeDir(xdgDir))
+	}
+	return agy.NewAdapter(deps.VendorHostEnv, opts...)
 }
 
 // reapLeftoverVendorProcesses kills the process trees the previous host

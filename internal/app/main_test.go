@@ -23,6 +23,10 @@ func TestMain(m *testing.M) {
 			writeFakeCLI(fakeCodexVersion + "\n")
 			os.Exit(0)
 		}
+		if strings.Contains(filepath.Base(os.Args[0]), "agy") {
+			writeFakeCLI(fakeAgyVersion + "\n")
+			os.Exit(0)
+		}
 		writeFakeCLI(fakeCLIVersion + " (Claude Code)\n")
 		os.Exit(0)
 	}
@@ -34,12 +38,17 @@ func TestMain(m *testing.M) {
 		runFakeCodexAppServer()
 		os.Exit(0)
 	}
+	if len(os.Args) > 1 && os.Args[1] == "acp" {
+		runFakeAgyACP()
+		os.Exit(0)
+	}
 	goleak.VerifyTestMain(m)
 }
 
 const (
 	fakeCLIVersion     = "2.1.319"
 	fakeCodexVersion   = "codex-cli 0.167.0"
+	fakeAgyVersion     = "1.5.9"
 	fakeCLIHold        = "hold-turn"
 	fakeCLISession     = `"session_id":"9b2e4f10-5c1d-4e8a-9f3b-2d7c6a1e0b55"`
 	fakeCodexThreadID  = "9b2e4f10-5c1d-4e8a-9f3b-2d7c6a1e0b55"
@@ -177,5 +186,48 @@ func appendFakeCodexStdin(line string) {
 func writeFakeCLI(s string) {
 	if _, err := os.Stdout.WriteString(s); err != nil {
 		os.Exit(1)
+	}
+}
+
+type fakeACPInbound struct {
+	ID     json.RawMessage `json:"id"`
+	Method string          `json:"method"`
+	Params struct {
+		Prompt []struct {
+			Text string `json:"text"`
+		} `json:"prompt"`
+	} `json:"params"`
+}
+
+func runFakeAgyACP() {
+	signal.Ignore(syscall.SIGINT, syscall.SIGTERM)
+	lines := bufio.NewScanner(os.Stdin)
+	lines.Buffer(make([]byte, 64*1024), 4*1024*1024)
+	var heldPromptID string
+	for lines.Scan() {
+		var msg fakeACPInbound
+		if json.Unmarshal(lines.Bytes(), &msg) != nil || msg.Method == "" {
+			continue
+		}
+		id := string(msg.ID)
+		switch msg.Method {
+		case "initialize":
+			writeFakeCLI(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"audio":false,"embeddedContext":true},"sessionCapabilities":{"resume":{},"close":{},"load":{},"list":{},"additionalDirectories":{}}},"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.9"}}}`+"\n", id))
+		case "session/new", "session/load":
+			writeFakeCLI(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"sessionId":%q,"models":{"availableModels":[{"modelId":"gemini-3.8-flash","name":"Gemini 3.8 Flash"}],"currentModelId":"gemini-3.8-flash"},"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Default"}]}}}`+"\n", id, fakeCodexThreadID))
+		case "session/prompt":
+			if len(msg.Params.Prompt) > 0 && strings.Contains(msg.Params.Prompt[0].Text, fakeCLIHold) {
+				heldPromptID = id
+				writeFakeCLI(fmt.Sprintf(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":%q,"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"working"}}}}`+"\n", fakeCodexThreadID))
+				continue
+			}
+			writeFakeCLI(fmt.Sprintf(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":%q,"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"PONG"}}}}`+"\n", fakeCodexThreadID))
+			writeFakeCLI(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}`+"\n", id))
+		case "session/cancel":
+			if heldPromptID != "" {
+				writeFakeCLI(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"cancelled"}}`+"\n", heldPromptID))
+				heldPromptID = ""
+			}
+		}
 	}
 }

@@ -30,6 +30,9 @@ type HostDeps struct {
 	// CodexBinary overrides the Codex binary (absolute path); empty falls back
 	// to VendorBinary when set or resolves codex on PATH at probe time.
 	CodexBinary string
+	// AgyBinary overrides the Antigravity binary (absolute path); empty falls back
+	// to VendorBinary when set or resolves agy on PATH at probe time.
+	AgyBinary string
 	// VendorHostEnv is the environment snapshot vendor processes filter
 	// through the vendor-runtime §8 allowlist.
 	VendorHostEnv []string
