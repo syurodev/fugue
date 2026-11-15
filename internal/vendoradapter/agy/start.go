@@ -420,6 +420,9 @@ func (s *Session) callHandshakeRPC(
 
 	if err := s.writeRawLine(ctx, raw); err != nil {
 		s.cleanupStartup(ctx)
+		if fErr := s.fatalFrameError(readerErrCh); fErr != nil {
+			return Frame{}, fErr
+		}
 		return Frame{}, err
 	}
 
@@ -454,4 +457,18 @@ func (s *Session) cleanupStartup(ctx context.Context) {
 	}
 	s.closeNotifyOnce.Do(func() { close(s.closeNotify) })
 	<-s.readerDoneCh
+}
+
+func (s *Session) fatalFrameError(readerErrCh <-chan error) error {
+	if errors.Is(s.closedErr(), process.ErrFrameTooLarge) {
+		return process.ErrFrameTooLarge
+	}
+	select {
+	case rErr := <-readerErrCh:
+		if errors.Is(rErr, process.ErrFrameTooLarge) || errcode.CodeOf(rErr) == errcode.FrameTooLarge {
+			return rErr
+		}
+	default:
+	}
+	return nil
 }

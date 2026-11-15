@@ -494,20 +494,16 @@ func TestAgySessionHandshakeTimeoutAndOversizedFrame(t *testing.T) {
 	}
 
 	// Oversized stdio frame fails typed (ErrFrameTooLarge).
-	clk2 := clock.NewFake(testEpoch())
-	adapter2 := newTestAdapter(t, clk2)
-	frameCh := make(chan error, 1)
-	_ = supervise.Go(ctx, "test.agy_frame_too_large", func(taskCtx context.Context) error {
-		_, fErr := adapter2.Start(taskCtx, &vendor.StartSpec{
-			SessionID: "frame-1",
-			Cwd:       t.TempDir(),
-			Home:      vendor.AccountHome{ConfigDir: fakeFrameTooLargeConfigDir},
-			HostEnv:   adapter2.HostEnv,
-		})
-		frameCh <- fErr
-		return nil
+	// Use clock.Real so process.Stop's 1s pipe-settle timeout fires cleanly
+	// without racing the handshake timeout on an unadvanced fake clock.
+	adapter2 := newTestAdapter(t, clock.Real{})
+	_, frameErr := adapter2.Start(ctx, &vendor.StartSpec{
+		SessionID: "frame-1",
+		Cwd:       t.TempDir(),
+		Home:      vendor.AccountHome{ConfigDir: fakeFrameTooLargeConfigDir},
+		HostEnv:   adapter2.HostEnv,
 	})
-	if frameErr := driveFakeClock(ctx, clk2, frameCh); errcode.CodeOf(frameErr) != errcode.FrameTooLarge {
+	if errcode.CodeOf(frameErr) != errcode.FrameTooLarge {
 		t.Fatalf("frameErr = %v, want frame_too_large", frameErr)
 	}
 }
