@@ -30,6 +30,9 @@ func TestMain(m *testing.M) {
 		writeFakeCLI(fakeCLIVersion + " (Claude Code)\n")
 		os.Exit(0)
 	}
+	if playFakeLoginStatus(os.Args) {
+		os.Exit(0)
+	}
 	if len(os.Args) > 1 && os.Args[1] == "-p" {
 		runFakeCLISession()
 		os.Exit(0)
@@ -182,6 +185,23 @@ func appendFakeCodexStdin(line string) {
 	if cErr := f.Close(); cErr != nil {
 		os.Exit(1)
 	}
+}
+
+// playFakeLoginStatus answers the login status commands (F9.10a) for the
+// vendor service tests: `claude auth status` and `codex login status` both
+// state a logged-in account.
+func playFakeLoginStatus(args []string) bool {
+	if len(args) < 2 {
+		return false
+	}
+	switch args[1] {
+	case "auth":
+		writeFakeCLI(`{"loggedIn":true}` + "\n")
+		return true
+	case "login":
+		return true
+	}
+	return false
 }
 
 func writeFakeCLI(s string) {

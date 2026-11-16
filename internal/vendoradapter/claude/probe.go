@@ -89,10 +89,9 @@ func NewAdapter(hostEnv []string, opts ...Option) *Adapter {
 	return a
 }
 
-// Probe runs `claude --version` once and reports the version verdict, the
-// login state and the capability. Fugue does not read the CLI's credential
-// store; the CLI reports login only during a turn, so the state stays unknown
-// here and F9.10 owns account discovery.
+// Probe runs `claude --version` and `claude auth status` once each and reports
+// the version verdict, the login state the CLI states and the capability.
+// Fugue does not read the CLI's credential store (VR-03).
 func (a *Adapter) Probe(ctx context.Context, home vendor.AccountHome) (vendor.Probe, error) {
 	path, err := vendor.ResolveBinary(DefaultBinary, a.Binary)
 	if err != nil {
@@ -103,12 +102,16 @@ func (a *Adapter) Probe(ctx context.Context, home vendor.AccountHome) (vendor.Pr
 		return vendor.Probe{}, errcode.Wrap(errcode.CodeOf(err), "run claude version command", err)
 	}
 	version, tested, warning := versionVerdict(output)
+	login, err := a.probeLogin(ctx, path, home)
+	if err != nil {
+		return vendor.Probe{}, err
+	}
 	return vendor.Probe{
 		Path:           path,
 		Version:        version,
 		VersionTested:  tested,
 		VersionWarning: warning,
-		Login:          vendor.LoginUnknown,
+		Login:          login,
 		Capability:     Capability(),
 	}, nil
 }

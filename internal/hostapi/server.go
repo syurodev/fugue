@@ -16,6 +16,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/pkg/pb/fugue/accounts/v1/accountsv1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/interaction/v1/interactionv1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/sessiontools/v1/sessiontoolsv1connect"
@@ -206,6 +207,10 @@ func newServiceMux(backend app.Backend) *http.ServeMux {
 	))
 	handler.Handle(vendorsv1connect.NewVendorServiceHandler(
 		&vendorHandler{backend: backend},
+		connect.WithReadMaxBytes(app.VendorRequestMaxBytes),
+	))
+	handler.Handle(accountsv1connect.NewAccountServiceHandler(
+		&accountsHandler{backend: backend},
 		connect.WithReadMaxBytes(app.VendorRequestMaxBytes),
 	))
 	handler.Handle(transcriptv1connect.NewTranscriptServiceHandler(&transcriptHandler{backend: backend}, connect.WithReadMaxBytes(app.VendorRequestMaxBytes)))
