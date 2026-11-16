@@ -101,7 +101,7 @@ func (s *SessionToolService) recordRelayTombstone(
 	choice *codexRelayChoice,
 ) {
 	if isAgyPermissionMethod(method) {
-		s.tombstones.putAgy(sessionID, opID, digest, choice.selectedOption, choice.decision.Cancelled)
+		s.tombstones.putAgy(sessionID, opID, digest, choice.selectedOption, choice.decision.Allow, choice.decision.Cancelled)
 		return
 	}
 	s.tombstones.putCodex(sessionID, opID, digest, choice.decision.Allow, choice.selectedOption, choice.decision.Answers)
@@ -279,6 +279,9 @@ func (s *SessionToolService) awaitAndTakeCodexRelayed(
 	if err != nil {
 		return codexRelayChoice{}, false
 	}
+	if ticket.TurnCancelled {
+		return translateServerRelayedOutcome(ticket, req)
+	}
 	resolved, err := s.interactions.awaitResolvedUntil(ctx, ticket.RequestID, s.tokens.watch(binding))
 	if err != nil || resolved == nil || !resolved.Resolved {
 		if !s.tokens.live(binding) {
@@ -303,7 +306,7 @@ func (s *SessionToolService) awaitAndTakeCodexRelayed(
 
 func translateServerRelayedOutcome(ticket *interaction.Ticket, req *vendor.ServerRequest) (codexRelayChoice, bool) {
 	if req != nil && isAgyPermissionMethod(req.Method) {
-		return translateAgyRelayedOutcome(ticket)
+		return translateAgyRelayedOutcome(ticket, req)
 	}
 	var kind vendor.ServerRequestKind
 	if req != nil {
@@ -312,14 +315,14 @@ func translateServerRelayedOutcome(ticket *interaction.Ticket, req *vendor.Serve
 	return translateCodexRelayedOutcome(ticket, kind)
 }
 
-func translateAgyRelayedOutcome(ticket *interaction.Ticket) (codexRelayChoice, bool) {
+func translateAgyRelayedOutcome(ticket *interaction.Ticket, req *vendor.ServerRequest) (codexRelayChoice, bool) {
 	switch ticket.Outcome {
 	case interaction.OutcomeAnswered:
 		if ticket.SelectedOptionID == "" {
 			return codexRelayChoice{}, false
 		}
 		return codexRelayChoice{
-			decision:       vendor.Decision{Allow: true, Message: ticket.SelectedOptionID},
+			decision:       vendor.Decision{Allow: agyOptionAllows(req, ticket.SelectedOptionID), Message: ticket.SelectedOptionID},
 			selectedOption: ticket.SelectedOptionID,
 			decisionLabel:  ticket.SelectedOptionID,
 			note:           ticket.Text,
@@ -337,6 +340,16 @@ func translateAgyRelayedOutcome(ticket *interaction.Ticket) (codexRelayChoice, b
 	default:
 		return codexRelayChoice{}, false
 	}
+}
+
+// agyOptionAllows reports whether the chosen agy option is an allow kind.
+func agyOptionAllows(req *vendor.ServerRequest, optionID string) bool {
+	for _, opt := range req.OptionDetails {
+		if opt.ID == optionID {
+			return opt.Kind == agy.PermissionOptionKindAllowOnce || opt.Kind == agy.PermissionOptionKindAllowAlways
+		}
+	}
+	return false
 }
 
 func codexTombstoneLabel(entry *approveTombstoneEntry, kind vendor.ServerRequestKind) string {
@@ -436,13 +449,7 @@ func translateCodexRelayedOutcome(ticket *interaction.Ticket, kind vendor.Server
 	}
 }
 
-func (s *SessionToolService) recordCodexApprovalDecided(
-	ctx context.Context,
-	binding SessionBinding,
-	turnID, opID string,
-	req *vendor.ServerRequest,
-	choice *codexRelayChoice,
-) error {
+func (s *SessionToolService) recordCodexApprovalDecided(ctx context.Context, binding SessionBinding, turnID, opID string, req *vendor.ServerRequest, choice *codexRelayChoice) error {
 	if s.recorder == nil || s.ids == nil {
 		return errcode.New(errcode.FailedPrecondition, approveUnavailableMessage)
 	}

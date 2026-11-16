@@ -327,6 +327,62 @@ func TestAgySlashListHidesTerminalCommands(t *testing.T) {
 	if obs.Init == nil || !cmp.Equal(obs.Init.SlashCommands, wantUpdated) || !cmp.Equal(n.SlashCommands(), wantUpdated) {
 		t.Fatalf("updated SlashCommands = %v (init=%+v), want %v", n.SlashCommands(), obs.Init, wantUpdated)
 	}
+	assertUntrustedSlashNamesAreDropped(t)
+}
+
+// assertUntrustedSlashNamesAreDropped checks the filter on untrusted vendor
+// names: fugue namespace, empty, whitespace, control characters, over 64
+// bytes, and at most 128 commands.
+func assertUntrustedSlashNamesAreDropped(t *testing.T) {
+	t.Helper()
+	bad := []AvailableCommand{
+		{Name: "fugue:status"},
+		{Name: "/fugue:help"},
+		{Name: ""},
+		{Name: "  "},
+		{Name: "/"},
+		{Name: "two words"},
+		{Name: "tab\tname"},
+		{Name: "nl\nname"},
+		{Name: "bell\x07"},
+		{Name: "del\x7f"},
+		{Name: strings.Repeat("a", 65)},
+		{Name: "ok"},
+		{Name: strings.Repeat("b", 64)},
+	}
+	if diff := cmp.Diff([]string{"ok", strings.Repeat("b", 64)}, hideTerminalCommands(bad)); diff != "" {
+		t.Fatalf("hideTerminalCommands(untrusted) (-want +got):\n%s", diff)
+	}
+	many := make([]AvailableCommand, 0, maxSlashCommands+10)
+	for i := range maxSlashCommands + 10 {
+		many = append(many, AvailableCommand{Name: fmt.Sprintf("cmd-%d", i)})
+	}
+	if got := hideTerminalCommands(many); len(got) != 128 || got[127] != "cmd-127" {
+		t.Fatalf("hideTerminalCommands(%d) kept %d (last %q), want the first 128", len(many), len(got), got[len(got)-1])
+	}
+}
+
+func TestAgyApprovalIDWindowsStayBounded(t *testing.T) {
+	t.Parallel()
+	s := &Session{}
+	for i := range maxApprovalIDs + 1 {
+		id := fmt.Sprintf("req-%d", i)
+		if !s.registerServerRequest(&Frame{ID: json.RawMessage(`"` + id + `"`), CanonicalID: id, Method: MethodSessionRequestPermission}) {
+			t.Fatalf("register %s = false, want true", id)
+		}
+		delete(s.pendingApprovals, id)
+		s.resolvedApprovals.add(id)
+	}
+	if len(s.seenApprovals.set) != maxApprovalIDs || len(s.resolvedApprovals.set) != maxApprovalIDs {
+		t.Fatalf("seen=%d resolved=%d, want both bounded at %d", len(s.seenApprovals.set), len(s.resolvedApprovals.set), maxApprovalIDs)
+	}
+	last := fmt.Sprintf("req-%d", maxApprovalIDs)
+	if s.seenApprovals.has("req-0") || !s.seenApprovals.has(last) || !s.resolvedApprovals.has(last) {
+		t.Fatal("window must evict the oldest ID and keep the newest")
+	}
+	if s.registerServerRequest(&Frame{ID: json.RawMessage(`"` + last + `"`), CanonicalID: last, Method: MethodSessionRequestPermission}) {
+		t.Fatalf("re-register %s inside the window = true, want answered once", last)
+	}
 }
 
 func TestFugueNamespaceNeverReachesAgy(t *testing.T) {

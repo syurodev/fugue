@@ -11,25 +11,19 @@ package agy
 //     `agy-customizations`, `antigravity-guide`, `run-workflow`, `swarm`.
 //
 // `agy acp` expands prompt slash commands via `acp.expandSlashCommands` ->
-// `slashcmd.Expand`, which looks up `ModelFacingText` on the registered
-// resolvers. Among the 13 advertised commands, `/compact` has no
-// `ModelFacingText` resolver in `agy acp` and is handled only in the interactive
-// TUI (`jetski/cli/commands`), so `compact` is hidden from the session's slash
-// command list along with all interactive TUI-only commands (`add-dir`,
-// `agents`, `artifact`, `branch`, `btw`, `changelog`, `clear`, `codesearch`,
-// `config`, `context`, `conversation`, `copy`, `credits`, `cs`, `dictate`,
-// `diff`, `effort`, `exit`, `feedback`, `fork`, `help`, `hooks`, `keybindings`,
-// `login`, `logout`, `mcp`, `model`, `new`, `open`, `permissions`, `plugin`,
-// `projects`, `quit`, `quota`, `remote-control`, `rename`, `resume`, `rewind`,
-// `search`, `settings`, `skills`, `statusline`, `switch`, `tasks`, `theme`,
-// `title`, `undo`, `usage`, `vim`).
-//
-// The `/fugue:` namespace is reserved by the host and rejected before reaching
-// `agy` (`Session.Send` -> `vendor.ValidateInput`).
+// `slashcmd.Expand`; `/compact` and the 49 TUI-only commands from
+// `jetski/cli/commands` have no `ModelFacingText` resolver and are hidden.
+// `/fugue:` is reserved by the host and rejected before reaching `agy`.
 
 import (
 	"slices"
 	"strings"
+	"unicode"
+)
+
+const (
+	maxSlashCommands    = 128
+	maxSlashCommandName = 64
 )
 
 // IsTerminalSlashCommand reports whether name is a terminal-only command in
@@ -50,14 +44,20 @@ func IsTerminalSlashCommand(name string) bool {
 	}
 }
 
-// hideTerminalCommands filters terminal-only commands from the vendor's
-// `available_commands_update` list while preserving vendor order.
+// hideTerminalCommands filters terminal-only, `fugue:`, empty, oversized and
+// whitespace or control-character names from the vendor's untrusted
+// `available_commands_update` list, keeping vendor order and at most
+// maxSlashCommands names.
 func hideTerminalCommands(commands []AvailableCommand) []string {
-	out := make([]string, 0, len(commands))
+	out := make([]string, 0, min(len(commands), maxSlashCommands))
 	seen := make(map[string]bool, len(commands))
 	for _, cmd := range commands {
 		bare := strings.TrimPrefix(strings.TrimSpace(cmd.Name), "/")
-		if IsTerminalSlashCommand(bare) || seen[bare] {
+		if len(out) == maxSlashCommands {
+			break
+		}
+		if len(bare) > maxSlashCommandName || strings.HasPrefix(bare, "fugue:") || IsTerminalSlashCommand(bare) || seen[bare] ||
+			strings.IndexFunc(bare, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
 			continue
 		}
 		seen[bare] = true

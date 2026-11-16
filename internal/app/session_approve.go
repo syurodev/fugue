@@ -416,9 +416,9 @@ func (t *approveTombstones) putCodex(sessionID, opID string, digest [sha256.Size
 	})
 }
 
-func (t *approveTombstones) putAgy(sessionID, opID string, digest [sha256.Size]byte, selectedOption string, cancelled bool) {
+func (t *approveTombstones) putAgy(sessionID, opID string, digest [sha256.Size]byte, selectedOption string, allow, cancelled bool) {
 	t.putEntry(sessionID, opID, &approveTombstoneEntry{
-		digest: digest, allow: !cancelled && selectedOption != "", cancelled: cancelled, selectedOption: selectedOption,
+		digest: digest, allow: allow && !cancelled, cancelled: cancelled, selectedOption: selectedOption,
 	})
 }
 

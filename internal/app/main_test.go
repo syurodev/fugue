@@ -211,6 +211,10 @@ type fakeACPInbound struct {
 type fakeACPLoopState struct {
 	heldPromptID string
 	shellMarker  string
+	// lateFrame is a permission request sent only after session/cancel; the
+	// held prompt then ends cancelled once agy's answer to it arrives.
+	lateFrame   string
+	lateWaiting bool
 }
 
 func runFakeAgyACP() {
@@ -250,6 +254,11 @@ func handleFakeACPMethod(st *fakeACPLoopState, id, method, prompt string) {
 	case "session/prompt":
 		handleFakeACPPrompt(st, id, prompt)
 	case "session/cancel":
+		if st.lateFrame != "" {
+			writeFakeCLI(st.lateFrame + "\n")
+			st.lateFrame, st.lateWaiting = "", true
+			return
+		}
 		if st.heldPromptID != "" {
 			writeFakeCLI(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"cancelled"}}`+"\n", st.heldPromptID))
 			st.heldPromptID = ""
@@ -266,6 +275,10 @@ func handleFakeACPPrompt(st *fakeACPLoopState, id, prompt string) {
 		writeFakeCLI(fmt.Sprintf(`{"jsonrpc":"2.0","id":"perm-shell-1","method":"session/request_permission","params":{"sessionId":%q,"toolCall":{"sessionUpdate":"tool_call_update","toolCallId":"call-shell-1","name":"run_command","kind":"execute","status":"pending","title":"printf allowed > marker","rawInput":{"CommandLine":"printf allowed > marker"}},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"},{"optionId":"allow_always","name":"Always Allow","kind":"allow_always"},{"optionId":"deny","name":"Deny","kind":"reject_once"}]}}`+"\n", fakeCodexThreadID))
 		return
 	}
+	if late, ok := strings.CutPrefix(prompt, "perm-after-cancel:"); ok {
+		st.heldPromptID, st.lateFrame = id, strings.TrimSpace(late)
+		return
+	}
 	if emitFakeAgyServerRequests(prompt) {
 		st.heldPromptID = id
 		return
@@ -280,6 +293,11 @@ func handleFakeACPPrompt(st *fakeACPLoopState, id, prompt string) {
 }
 
 func handleFakeACPResponse(st *fakeACPLoopState, msg *fakeACPInbound) {
+	if st.lateWaiting && st.heldPromptID != "" {
+		writeFakeCLI(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"cancelled"}}`+"\n", st.heldPromptID))
+		st.heldPromptID, st.lateWaiting = "", false
+		return
+	}
 	if st.heldPromptID == "" || string(msg.ID) != `"perm-shell-1"` {
 		return
 	}

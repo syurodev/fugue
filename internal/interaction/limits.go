@@ -28,6 +28,8 @@ const (
 	MaxPendingNativePerSession = 1
 	// MaxPendingPerHost bounds pending requests of every kind per host.
 	MaxPendingPerHost = 64
+	// maxCancelledTurns bounds the remembered user-cancelled turns, one per session.
+	maxCancelledTurns = 1024
 )
 
 // checkTextLimit fails typed when content exceeds its interaction §9 limit.

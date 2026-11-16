@@ -495,6 +495,36 @@ func TestAgyTurnCancelAnswersCancelledAndClosesItsTickets(t *testing.T) {
 	}
 }
 
+// TestAgyPermissionAfterTurnCancelIsAnsweredCancelled covers the cancel race:
+// a request of the cancelled turn that reaches Fugue only after the user
+// interrupt is answered cancelled at once and never becomes a pending ticket.
+func TestAgyPermissionAfterTurnCancelIsAnsweredCancelled(t *testing.T) {
+	t.Parallel()
+	f := newAgyRelayFixture(t)
+	interSub := f.subscribeInteractions(t)
+	sessSub, err := f.rt.Subscribe(t.Context(), SubscribeParams{Principal: testAppPrincipal, Topic: TopicVendorSessions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sessSub.Close()
+	late := makeTestAgyPermissionFrame("late-1", "call-late", "sleep 30")
+	if err := f.svc.Send(t.Context(), testAppPrincipal, VendorInput{
+		CommandID: "agy-late-turn", SessionID: f.session.ID, Text: "perm-after-cancel:" + late,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	awaitSessionState(t, sessSub, f.session.ID, "running")
+	if _, err := f.svc.Interrupt(t.Context(), testAppPrincipal, VendorStop{CommandID: "agy-late-int", SessionID: f.session.ID}); err != nil {
+		t.Fatal(err)
+	}
+	resp := f.awaitRPCResponse(t, "late-1")
+	if resp.Error != nil || string(resp.Result) != `{"outcome":"cancelled"}` {
+		t.Fatalf("late permission response = %+v, want {\"outcome\":\"cancelled\"}", resp)
+	}
+	awaitSessionState(t, sessSub, f.session.ID, "ready")
+	assertNoPendingOrRecordedAgyDecisions(t, f, interSub)
+}
+
 func makeTestAgyPermissionFrame(id, callID, title string) string {
 	return fmt.Sprintf(
 		`{"jsonrpc":"2.0","id":%q,"method":%q,"params":{"sessionId":%q,"toolCall":{"toolCallId":%q,"name":"run_command","kind":"execute","title":%q},"options":[{"optionId":%q,"name":%q,"kind":"allow_once"},{"optionId":%q,"name":%q,"kind":"reject_once"}]}}`,
@@ -570,7 +600,7 @@ func seedAndResolveCancelledAgyPermission(t *testing.T, f *agyRelayFixture, turn
 	if err != nil {
 		t.Fatal(err)
 	}
-	f.tools.tombstones.putAgy(f.binding.SessionID, opID, approveArgsDigest(req.Method, req.Detail), "", true)
+	f.tools.tombstones.putAgy(f.binding.SessionID, opID, approveArgsDigest(req.Method, req.Detail), "", false, true)
 	if rErr := sess.Resolve(t.Context(), vendor.ApprovalRef{ID: req.RequestID}, vendor.Decision{Cancelled: true}); rErr != nil {
 		t.Fatalf("first cancelled Resolve: %v", rErr)
 	}
@@ -724,5 +754,33 @@ func TestFugueNamespaceNeverReachesAgy(t *testing.T) {
 	}
 	if bytes.Contains(raw, []byte("fugue:")) || bytes.Contains(raw, []byte(agy.MethodSessionPrompt)) {
 		t.Fatalf("/fugue: command leaked to agy process stdin:\n%s", raw)
+	}
+}
+
+// TestAgyDecisionAllowFollowsTheOptionKind checks that Decision.Allow follows
+// the kind of the chosen agy option and that the tombstone replay keeps it.
+func TestAgyDecisionAllowFollowsTheOptionKind(t *testing.T) {
+	t.Parallel()
+	req := &vendor.ServerRequest{
+		RequestID: "9", Method: agy.MethodSessionRequestPermission, Kind: vendor.ServerRequestConfirm,
+		OptionDetails: []vendor.ServerRequestOption{
+			{ID: "a1", Name: agyLabelAllow, Kind: agy.PermissionOptionKindAllowOnce},
+			{ID: "a2", Name: agyLabelAllowAlways, Kind: agy.PermissionOptionKindAllowAlways},
+			{ID: "r1", Name: agyLabelDeny, Kind: agy.PermissionOptionKindRejectOnce},
+			{ID: "r2", Name: agyLabelDenyAlways, Kind: agy.PermissionOptionKindRejectAlways},
+		},
+	}
+	tombs := newApproveTombstones()
+	for option, wantAllow := range map[string]bool{"a1": true, "a2": true, "r1": false, "r2": false} {
+		choice, ok := translateAgyRelayedOutcome(&interaction.Ticket{Outcome: interaction.OutcomeAnswered, SelectedOptionID: option}, req)
+		if !ok || choice.decision.Allow != wantAllow || choice.decision.Message != option {
+			t.Fatalf("option %s: choice = %+v (ok=%v), want Allow=%v", option, choice, ok, wantAllow)
+		}
+		svc := &SessionToolService{tombstones: tombs}
+		svc.recordRelayTombstone("s1", "op-"+option, [32]byte{}, req.Method, &choice)
+		entry, found := tombs.get("s1", "op-"+option)
+		if replay := codexDecisionFromTombstone(&entry); !found || replay.Allow != wantAllow || replay.Message != option || replay.Cancelled {
+			t.Fatalf("option %s: tombstone replay = %+v (found=%v), want Allow=%v", option, replay, found, wantAllow)
+		}
 	}
 }

@@ -177,6 +177,7 @@ func (o *Owner) ResetSession(sessionID string) {
 	o.mu.Lock()
 	now := o.clock.Now().UTC()
 	o.nextResolvedPrune = now
+	delete(o.cancelledTurns, sessionID)
 	for k := range o.grants {
 		if k.sessionID == sessionID {
 			delete(o.grants, k)
@@ -225,6 +226,13 @@ func (o *Owner) CancelTurn(sessionID, turnID string) []*Ticket {
 	o.mu.Lock()
 	now := o.clock.Now().UTC()
 	o.nextResolvedPrune = now
+	if _, ok := o.cancelledTurns[sessionID]; !ok && len(o.cancelledTurns) >= maxCancelledTurns {
+		for k := range o.cancelledTurns {
+			delete(o.cancelledTurns, k)
+			break
+		}
+	}
+	o.cancelledTurns[sessionID] = turnID
 	var (
 		closed    []*Ticket
 		cancelled []*AuditEvent

@@ -27,7 +27,7 @@ func (s *Session) runReader(ctx context.Context, readerErrCh chan<- error) {
 		}
 		obs := s.normalizer.NormalizeFrame(&frame)
 		if registered && obs.ServerRequest == nil {
-			s.rejectUnrelayedServerRequest(frame.CanonicalID, RPCErrorPermissionNotRelayed)
+			s.rejectUnrelayedServerRequest(ctx, frame.CanonicalID, RPCErrorPermissionNotRelayed)
 		}
 		s.dispatchFrameAndObservation(&frame, &obs)
 		if isEmptyObservation(&obs) {

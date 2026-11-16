@@ -59,10 +59,11 @@ type Session struct {
 	modes         *SessionModeState
 	configOptions []ConfigOption
 
-	pendingRPCs       map[string]chan Frame
-	seenApprovals     map[string]bool
+	pendingRPCs map[string]chan Frame
+
+	seenApprovals     idWindow
 	pendingApprovals  map[string]pendingServerRequest
-	resolvedApprovals map[string]bool
+	resolvedApprovals idWindow
 
 	closeOnce  sync.Once
 	closeProof process.StopProof

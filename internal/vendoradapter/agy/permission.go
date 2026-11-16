@@ -17,6 +17,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"strings"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -152,10 +153,13 @@ func (s *Session) registerServerRequest(frame *Frame) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.seenApprovals[frame.CanonicalID] {
+	if _, pending := s.pendingApprovals[frame.CanonicalID]; pending || s.seenApprovals.has(frame.CanonicalID) {
 		return false
 	}
-	s.seenApprovals[frame.CanonicalID] = true
+	s.seenApprovals.add(frame.CanonicalID)
+	if s.pendingApprovals == nil {
+		s.pendingApprovals = make(map[string]pendingServerRequest)
+	}
 	s.pendingApprovals[frame.CanonicalID] = pendingServerRequest{
 		rawID:  append(json.RawMessage(nil), frame.ID...),
 		method: frame.Method,
@@ -163,13 +167,34 @@ func (s *Session) registerServerRequest(frame *Frame) bool {
 	return true
 }
 
-func (s *Session) rejectUnrelayedServerRequest(id, message string) {
+// maxApprovalIDs bounds seen/resolved request IDs (matches approveMaxTombstonesPerSess).
+const maxApprovalIDs = 256
+
+type idWindow struct {
+	set  map[string]bool
+	ring [maxApprovalIDs]string
+	next int
+}
+
+func (w *idWindow) has(id string) bool { return w.set[id] }
+func (w *idWindow) add(id string) {
+	if w.set == nil {
+		w.set = make(map[string]bool, maxApprovalIDs)
+	}
+	if !w.set[id] {
+		delete(w.set, w.ring[w.next])
+		w.ring[w.next], w.set[id] = id, true
+		w.next = (w.next + 1) % maxApprovalIDs
+	}
+}
+
+func (s *Session) rejectUnrelayedServerRequest(ctx context.Context, id, message string) {
 	if id == "" {
 		return
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.state == stateClosed || s.resolvedApprovals[id] {
+	if s.state == stateClosed || s.resolvedApprovals.has(id) {
 		return
 	}
 	pending, ok := s.pendingApprovals[id]
@@ -181,10 +206,11 @@ func (s *Session) rejectUnrelayedServerRequest(id, message string) {
 	}
 	raw, err := s.codec.EncodeResponseError(pending.rawID, RPCErrorServerError, message)
 	if err != nil {
+		slog.WarnContext(ctx, "agy: encode unrelayed server request error response failed", "session_id", s.sessionID, "method", pending.method, "error", err)
 		return
 	}
 	if err := s.commitApprovalResponseLocked(id, raw); err != nil {
-		return
+		slog.WarnContext(ctx, "agy: write unrelayed server request error response failed", "session_id", s.sessionID, "method", pending.method, "error", err)
 	}
 }
 
@@ -202,7 +228,7 @@ func (s *Session) Resolve(ctx context.Context, req vendor.ApprovalRef, d vendor.
 	if s.state == stateClosed {
 		return s.closedErrLocked()
 	}
-	if s.resolvedApprovals[req.ID] {
+	if s.resolvedApprovals.has(req.ID) {
 		return errcode.New(errcode.FailedPrecondition, "agy server request already resolved")
 	}
 	pending, ok := s.pendingApprovals[req.ID]
@@ -240,7 +266,7 @@ func (s *Session) encodePermissionResponse(pending pendingServerRequest, d vendo
 
 func (s *Session) commitApprovalResponseLocked(id string, raw []byte) error {
 	delete(s.pendingApprovals, id)
-	s.resolvedApprovals[id] = true
+	s.resolvedApprovals.add(id)
 	if err := s.proc.WriteLine(bytes.TrimRight(raw, "\r\n")); err != nil {
 		if errors.Is(err, process.ErrStdinClosed) {
 			return vendor.ErrSessionClosed
@@ -253,7 +279,7 @@ func (s *Session) commitApprovalResponseLocked(id string, raw []byte) error {
 func (s *Session) rejectPendingApprovalsLocked() {
 	for id, req := range s.pendingApprovals {
 		delete(s.pendingApprovals, id)
-		s.resolvedApprovals[id] = true
+		s.resolvedApprovals.add(id)
 		raw, err := s.codec.EncodeResponseError(req.rawID, RPCErrorServerError, RPCErrorPermissionNotRelayed)
 		if err != nil {
 			continue
