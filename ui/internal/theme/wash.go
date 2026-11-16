@@ -62,3 +62,14 @@ func fromLinear(l float64) uint8 {
 	}
 	return uint8(math.Round(math.Min(math.Max(s, 0), 1) * 255))
 }
+
+// placeholderOf derives the placeholder text tone: halfway from FgMuted
+// toward Fg, the point where the text keeps its 4.5:1 budget over the
+// lifted fills of every chrome surface in this mode (UK-E04; the fields'
+// contrast test pins every combination).
+func placeholderOf(muted, fg color.NRGBA) color.NRGBA {
+	ch := func(x, y uint8) uint8 {
+		return uint8(math.Round(float64(x) + 0.5*(float64(y)-float64(x))))
+	}
+	return color.NRGBA{R: ch(muted.R, fg.R), G: ch(muted.G, fg.G), B: ch(muted.B, fg.B), A: muted.A}
+}

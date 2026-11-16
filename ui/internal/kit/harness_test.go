@@ -8,6 +8,7 @@ import (
 	"gioui.org/f32"
 	"gioui.org/gpu/headless"
 	"gioui.org/io/input"
+	"gioui.org/io/key"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -61,13 +62,20 @@ func newHarness(t *testing.T) *harness {
 // device metric exactly as a window would.
 func (h *harness) frame(t *testing.T) {
 	t.Helper()
+	h.frameSize(t, 200, 100)
+}
+
+// frameSize lays one frame out at w×h like frame does, for a control wider
+// or taller than the default box.
+func (h *harness) frameSize(t *testing.T, w, hgt int) {
+	t.Helper()
 	h.ops.Reset()
 	px := max(h.px, 1)
 	device := unit.Metric{PxPerDp: px, PxPerSp: px}
 	h.gtx = layout.Context{
 		Ops:         &h.ops,
 		Metric:      h.env.Metric(device),
-		Constraints: layout.Exact(image.Pt(200, 100)),
+		Constraints: layout.Exact(image.Pt(w, hgt)),
 		Source:      h.router.Source(),
 	}
 	h.gtx.Now = h.now
@@ -106,4 +114,10 @@ func (h *harness) end() {
 func (h *harness) click(x, y float32) {
 	h.router.Queue(pointer.Event{Kind: pointer.Press, Position: f32.Pt(x, y), Buttons: pointer.ButtonPrimary})
 	h.router.Queue(pointer.Event{Kind: pointer.Release, Position: f32.Pt(x, y)})
+}
+
+// tap queues one key press and its release, the way a keystroke arrives.
+func (h *harness) tap(name key.Name, mod key.Modifiers) {
+	h.router.Queue(key.Event{Name: name, Modifiers: mod, State: key.Press})
+	h.router.Queue(key.Event{Name: name, Modifiers: mod, State: key.Release})
 }

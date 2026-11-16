@@ -50,6 +50,8 @@ type component int
 const (
 	compButton component = iota
 	compIconButton
+	compTextField
+	compTextArea
 )
 
 // cell identifies one matrix cell of the inventory (UK-E03).
@@ -80,12 +82,18 @@ type pages struct {
 	btns  [numVariants][numSizes][numStates]*kit.ButtonState
 	icon  [numVariants][2]*kit.ButtonState
 	icons [numIconVariants][numStates]*kit.IconButtonState
+	text  [numFieldVariants][numFieldStates]*kit.TextFieldState
+	area  [numAreaStates]*kit.TextAreaState
 	nav   []*kit.ButtonState
-	// runs are the text runs and ctl the control boxes of the frame, in
-	// window coordinates; cells is the matrix inventory.
-	runs  []image.Rectangle
-	ctl   []image.Rectangle
-	cells map[cell]bool
+	// runs are the page-level text runs and ctl the control boxes of the
+	// frame, in window coordinates; ctlRuns are the runs drawn inside a
+	// control — labels, placeholders, helper and error lines — which the
+	// strict bounds check holds inside their control's box (UK-E09).
+	// cells is the matrix inventory.
+	runs    []image.Rectangle
+	ctlRuns []image.Rectangle
+	ctl     []image.Rectangle
+	cells   map[cell]bool
 	// origin is the window position of the page column; base is the window
 	// position of the block being drawn. Recorders add base.
 	origin, base image.Point
@@ -97,6 +105,16 @@ type pages struct {
 // tables are fixed, so the indexes are the stable IDs (UK-02).
 func newPages(env *kit.Env) *pages {
 	p := &pages{env: env, cells: map[cell]bool{}}
+	p.newButtonStates()
+	p.newFieldStates()
+	for range pageNames() {
+		p.nav = append(p.nav, kit.NewButtonState())
+	}
+	return p
+}
+
+// newButtonStates allocates the Button and IconButton matrices.
+func (p *pages) newButtonStates() {
 	for v := range p.btns {
 		for s := range p.btns[v] {
 			for c := range p.btns[v][s] {
@@ -112,15 +130,12 @@ func newPages(env *kit.Env) *pages {
 			p.icons[v][c] = kit.NewIconButtonState()
 		}
 	}
-	for range pageNames() {
-		p.nav = append(p.nav, kit.NewButtonState())
-	}
-	return p
 }
 
 // beginFrame drops the previous frame's recordings.
 func (p *pages) beginFrame() {
 	p.runs = p.runs[:0]
+	p.ctlRuns = p.ctlRuns[:0]
 	p.ctl = p.ctl[:0]
 	clear(p.cells)
 }
@@ -181,12 +196,22 @@ type cellDraw struct {
 }
 
 // place lays one cell at pt (block coordinates) under its state's forced
-// preview and records its control box.
+// preview and records its control box. While the cell lays, a run recorder
+// on the env collects the bounds of every text run the control draws,
+// local to the cell; they are translated into window coordinates and held
+// against the control's box by the strict bounds check (UK-E09).
 func (p *pages) place(gtx *layout.Context, pt image.Point, cd *cellDraw) {
 	p.force(cd.key.state, cd.tag)
+	var cellRuns []image.Rectangle
+	p.env.RunRecorder = func(r image.Rectangle) { cellRuns = append(cellRuns, r) }
 	at(gtx, pt, cd.lay)
+	p.env.RunRecorder = nil
 	p.force(stRest, nil)
-	p.ctl = append(p.ctl, image.Rectangle{Min: pt.Add(p.base), Max: pt.Add(p.base).Add(cd.box)})
+	box := image.Rectangle{Min: pt.Add(p.base), Max: pt.Add(p.base).Add(cd.box)}
+	for _, r := range cellRuns {
+		p.ctlRuns = append(p.ctlRuns, r.Add(pt).Add(p.base))
+	}
+	p.ctl = append(p.ctl, box)
 	p.cells[cd.key] = true
 }
 

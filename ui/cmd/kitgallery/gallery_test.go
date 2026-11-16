@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"image"
+	"slices"
 	"testing"
 	"time"
 
@@ -49,28 +50,61 @@ func layFrame(t *testing.T, g *gallery, cur int, px float32) (gtx layout.Context
 	return gtx, size
 }
 
-// expectedCells is the matrix UK-E03 demands for one page: every Button
-// variant × size × state on the Button page, every IconButton variant ×
-// state on the IconButton page.
+// expectedCells is the matrix UK-E03 demands for one page: every variant
+// × size × state its page presents.
 func expectedCells(cur int) map[cell]bool {
 	want := map[cell]bool{}
 	switch pageNames()[cur] {
 	case "Button":
-		for vi := range numVariants {
-			for si := range numSizes {
-				for _, st := range buttonStates() {
-					want[cell{compButton, vi, si, st}] = true
-				}
-			}
-		}
+		buttonCells(want)
 	case "IconButton":
-		for vi := range numIconVariants {
-			for _, st := range iconStates() {
-				want[cell{compIconButton, vi, 0, st}] = true
+		iconButtonCells(want)
+	case "TextField":
+		textFieldCells(want)
+	case "TextArea":
+		textAreaCells(want)
+	}
+	return want
+}
+
+// buttonCells are the Button cells: every variant × size × state.
+func buttonCells(want map[cell]bool) {
+	for vi := range numVariants {
+		for si := range numSizes {
+			for _, st := range buttonStates() {
+				want[cell{compButton, vi, si, st}] = true
 			}
 		}
 	}
-	return want
+}
+
+// iconButtonCells are the IconButton cells: every variant × state.
+func iconButtonCells(want map[cell]bool) {
+	for vi := range numIconVariants {
+		for _, st := range iconStates() {
+			want[cell{compIconButton, vi, 0, st}] = true
+		}
+	}
+}
+
+// textFieldCells are the TextField cells: every variant × state.
+func textFieldCells(want map[cell]bool) {
+	for vi := range numFieldVariants {
+		states := fieldStates()
+		if vi == 2 {
+			states = secretStates()
+		}
+		for _, st := range states {
+			want[cell{compTextField, vi, 0, st}] = true
+		}
+	}
+}
+
+// textAreaCells are the TextArea cells.
+func textAreaCells(want map[cell]bool) {
+	for _, st := range fieldStates() {
+		want[cell{compTextArea, 0, 0, st}] = true
+	}
 }
 
 // TestGalleryPagesCoverEveryVariantAndState covers UK-E03: every page
@@ -113,9 +147,12 @@ func diffCells(want, got map[cell]bool) []string {
 
 // checkPageBounds asserts UK-E09 for one laid-out frame in the fixed
 // window: everything inside the window, everything of the page inside its
-// column — no sideways overflow — every hit area at least size.hit.min, and
-// no overlap between text runs, between controls (their focus rings
-// included: a ring needs its room) or between a control and a text run.
+// column — no sideways overflow — every hit area at least size.hit.min, no
+// overlap between text runs, between controls (their focus rings included:
+// a ring needs its room) or between a control and a page text run; and
+// every run a control drew — label, placeholder, helper, error — sits
+// inside its control's box, so a run drawn wider than the slot it was
+// given, clipped on the way, cannot pass just because the clip hid it.
 func checkPageBounds(t *testing.T, g *gallery, gtx *layout.Context, size image.Point) {
 	t.Helper()
 	win := image.Rectangle{Max: size}
@@ -135,11 +172,25 @@ func checkPageBounds(t *testing.T, g *gallery, gtx *layout.Context, size image.P
 		checkInside(t, "control", r, r.Inset(-ring), win, column, g.pgs.origin.X)
 		all = append(all, r.Inset(-ring))
 	}
+	checkRunsInsideControls(t, g.pgs.ctlRuns, g.pgs.ctl)
 	for a := range all {
 		for b := a + 1; b < len(all); b++ {
 			if all[a].Overlaps(all[b]) {
 				t.Fatalf("items overlap: %v and %v", all[a], all[b])
 			}
+		}
+	}
+}
+
+// checkRunsInsideControls asserts every run a control drew sits inside one
+// of the frame's control boxes: a run wider than the slot its control was
+// given — clipped on the way — cannot pass just because the clip hid it
+// (UK-E09).
+func checkRunsInsideControls(t *testing.T, runs, ctls []image.Rectangle) {
+	t.Helper()
+	for _, r := range runs {
+		if !slices.ContainsFunc(ctls, r.In) {
+			t.Fatalf("a control's text run %v sits outside every control box, so the control drew it wider than its slot or clipped it", r)
 		}
 	}
 }

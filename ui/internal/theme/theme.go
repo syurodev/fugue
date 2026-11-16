@@ -68,9 +68,14 @@ type Chrome struct {
 	Fg color.NRGBA
 	// FgMuted is secondary text (labels, meta lines): at least 4.5:1.
 	FgMuted color.NRGBA
-	// FgSubtle is tertiary text (comments, meta, placeholders): at least
-	// 4.5:1, still below FgMuted on every background so the hierarchy holds.
+	// FgSubtle is tertiary text (comments, meta): at least 4.5:1, still
+	// below FgMuted on every background so the hierarchy holds.
 	FgSubtle color.NRGBA
+	// Placeholder is the placeholder text inside a field: derived per mode
+	// between FgMuted and Fg, because the placeholder must keep 4.5:1 over
+	// the field's lifted fills (FillSoft, FillSoftHover) on every chrome
+	// surface, and neither text token alone does (UK-E04).
+	Placeholder color.NRGBA
 	// IconMuted is the quiet icon color; same contrast budget as FgMuted.
 	IconMuted color.NRGBA
 	// Border is the hairline border color.
@@ -191,6 +196,7 @@ func newTheme(c *Chrome, p Palette, shaper *text.Shaper) Theme {
 	c.Scrim = color.NRGBA{A: 0x66} // black at 40%
 	c.FillSoft = perceived(surface, c.Fg, 0.06)
 	c.FillSoftHover = perceived(surface, c.Fg, 0.10)
+	c.Placeholder = placeholderOf(c.FgMuted, c.Fg)
 	c.BorderSubtle = perceived(surface, c.Fg, 0.09)
 	c.DangerSoft = perceived(surface, p.Red, 0.14)
 	c.DangerSoftHover = perceived(surface, p.Red, 0.22)

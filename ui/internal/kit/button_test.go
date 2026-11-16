@@ -166,13 +166,7 @@ func TestButtonDisabledDrawsTheWholeControlAtDisabledOpacity(t *testing.T) {
 // (§4.1).
 func TestButtonTextContrastInEveryState(t *testing.T) {
 	t.Parallel()
-	for _, mode := range []struct {
-		name string
-		th   func(*text.Shaper) theme.Theme
-	}{
-		{"light", theme.Light},
-		{"dark", theme.Dark},
-	} {
+	for _, mode := range themeModes() {
 		t.Run(mode.name, func(t *testing.T) {
 			t.Parallel()
 			sh, err := fonts.Shaper()
