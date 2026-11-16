@@ -81,6 +81,8 @@ type Env struct {
 	win, origin image.Point
 	// overlay is the menu that holds the window's one overlay.
 	overlay event.Tag
+	// tip is the window's tooltip manager (UK-07, §6.7).
+	tip tooltipManager
 
 	// modality is true while focus moves come from the keyboard.
 	modality bool
@@ -180,6 +182,7 @@ func (e *Env) Keep() { e.Driver.Keep() }
 // FrameEnd schedules the next frame if anything asked for one. The window
 // calls it after layout.
 func (e *Env) FrameEnd(gtx *layout.Context) {
+	e.tip.endFrame(e, gtx)
 	if at, ok := e.Driver.Next(); ok {
 		gtx.Execute(op.InvalidateCmd{At: at})
 	}
@@ -193,6 +196,7 @@ func (e *Env) FrameEnd(gtx *layout.Context) {
 // under the pointer, so this hides nothing).
 func (e *Env) TrackInput(gtx *layout.Context) {
 	e.win, e.origin = gtx.Constraints.Max, image.Point{}
+	e.tip.beginFrame()
 	if e.KeyboardOnly {
 		// The gallery's keyboard-only mode: every focus move came from the
 		// keyboard as far as the controls are concerned, so the rings stay

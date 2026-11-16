@@ -35,7 +35,7 @@ const (
 
 // pageNames are the nav labels, one page per component (UK-09).
 func pageNames() []string {
-	return []string{"Button", "IconButton", "TextField", "TextArea", "Menu", "Kbd"}
+	return []string{"Button", "IconButton", "TextField", "TextArea", "Menu", "Kbd", "Combobox", "Select", "Tooltip"}
 }
 
 // pageW is the content width of the page column: the window minus the nav
@@ -141,6 +141,12 @@ func (p *pages) layoutPage(col *layout.Context, cur int) {
 		p.layoutMenus(col)
 	case 5:
 		p.layoutKbd(col)
+	case 6:
+		p.layoutComboboxes(col)
+	case 7:
+		p.layoutSelects(col)
+	case 8:
+		p.layoutTooltips(col)
 	}
 }
 

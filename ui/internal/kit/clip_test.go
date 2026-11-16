@@ -21,7 +21,7 @@ type clipRig struct {
 // tag themselves at their own origin or at more than the box they draw would
 // show here.
 func clipRigNames() []string {
-	return []string{"Button", "IconButton", "TextField", "TextArea", "search clear button", "secret reveal button"}
+	return []string{"Button", "IconButton", "TextField", "TextArea", "search clear button", "secret reveal button", "Select", "Combobox"}
 }
 
 // freeGtx is gtx without a minimum size, so a field lays out at its own width.
@@ -75,14 +75,15 @@ func fieldRig(h *harness, s *TextFieldState, v TextFieldVariant, trailing bool, 
 }
 
 // clipRigs builds the rig of a control over its own state.
-func clipRigs(h *harness, name string) clipRig {
+func clipRigs(t *testing.T, h *harness, name string) clipRig {
+	t.Helper()
 	switch name {
 	case "Button":
 		s, bp := NewButtonState(), ButtonProps{Text: "Save"}
 		return pressRig(&s.pressable, func(gtx *layout.Context) (bool, error) { return s.Layout(h.env, gtx, bp) },
 			func(gtx *layout.Context) image.Point { return s.Measure(h.env, gtx, bp).Size })
 	case "IconButton":
-		s, ip := NewIconButtonState(), IconButtonProps{Icon: IconSearch, Label: "Search"}
+		s, ip := NewIconButtonState(), &IconButtonProps{Icon: IconSearch, Label: "Find"}
 		return pressRig(&s.pressable, func(gtx *layout.Context) (bool, error) { return s.Layout(h.env, gtx, ip) },
 			func(gtx *layout.Context) image.Point { return s.Measure(h.env, gtx, ip).Size })
 	case "TextArea":
@@ -104,6 +105,34 @@ func clipRigs(h *harness, name string) clipRig {
 		s := NewTextFieldState()
 		s.SetText("s3cret")
 		return fieldRig(h, s, TextFieldSecret, true, func() bool { return s.revealed })
+	case "Select":
+		s := NewSelectState()
+		p := &SelectProps{Label: "Engine", Placeholder: "Choose", Options: []SelectOption{{ID: "a", Label: "First"}}}
+		return clipRig{
+			lay: func(gtx *layout.Context) (image.Rectangle, image.Rectangle) {
+				g := freeGtx(gtx)
+				box := image.Rectangle{Max: s.Measure(h.env, g, p).Size}
+				if _, err := s.Layout(h.env, g, p); err != nil {
+					t.Fatal(err)
+				}
+				return box, box
+			},
+			got: func() bool { return h.gtx.Focused(s.Tag()) || s.IsOpen() },
+		}
+	case "Combobox":
+		s := NewComboboxState()
+		p := &ComboboxProps{Label: "Engine", Placeholder: "Filter"}
+		return clipRig{
+			lay: func(gtx *layout.Context) (image.Rectangle, image.Rectangle) {
+				g := freeGtx(gtx)
+				box := image.Rectangle{Max: s.Measure(h.env, g, p).Size}
+				if _, err := s.Layout(h.env, g, p); err != nil {
+					t.Fatal(err)
+				}
+				return box, box
+			},
+			got: func() bool { return h.gtx.Focused(s.Tag()) },
+		}
 	}
 	s := NewTextFieldState()
 	return fieldRig(h, s, TextFieldText, false, func() bool { return h.gtx.Focused(&s.core.ed) })
@@ -126,7 +155,7 @@ type clipRun struct {
 func newClipRun(t *testing.T, name string) *clipRun {
 	t.Helper()
 	h := newHarness(t)
-	r := &clipRun{t: t, h: h, rig: clipRigs(h, name), origin: image.Pt(60, 40)}
+	r := &clipRun{t: t, h: h, rig: clipRigs(t, h, name), origin: image.Pt(60, 40)}
 	for range 30 {
 		r.frame()
 	}

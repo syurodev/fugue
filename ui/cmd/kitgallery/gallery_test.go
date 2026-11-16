@@ -67,6 +67,12 @@ func expectedCells(cur int) map[cell]bool {
 		menuCells(want)
 	case "Kbd":
 		kbdCells(want)
+	case "Combobox":
+		comboboxCells(want)
+	case "Select":
+		selectCells(want)
+	case "Tooltip":
+		tooltipCells(want)
 	}
 	return want
 }
@@ -133,6 +139,35 @@ func kbdCells(want map[cell]bool) {
 				want[kbdCellKey(pi, gi, s)] = true
 			}
 		}
+	}
+}
+
+func comboboxCells(want map[cell]bool) {
+	for _, st := range comboboxFieldStates() {
+		want[cell{compCombobox, 0, 0, st}] = true
+	}
+	for _, st := range comboboxListStates() {
+		want[cell{compCombobox, 1, 0, st}] = true
+	}
+	want[cell{compCombobox, 2, 0, cbLive}] = true
+}
+
+func selectCells(want map[cell]bool) {
+	for vi := range selectVariantNames() {
+		for _, st := range selectStates() {
+			want[cell{compSelect, vi, 0, st}] = true
+		}
+	}
+	want[cell{compSelect, 2, 0, selOpen}] = true
+	want[cell{compSelect, 3, 0, selLive}] = true
+}
+
+func tooltipCells(want map[cell]bool) {
+	for _, st := range []string{tipPlain, tipKbd, tipFlipped} {
+		want[cell{compTooltip, 0, 0, st}] = true
+	}
+	for _, st := range []string{tipLiveA, tipLiveB} {
+		want[cell{compTooltip, 1, 0, st}] = true
 	}
 }
 
