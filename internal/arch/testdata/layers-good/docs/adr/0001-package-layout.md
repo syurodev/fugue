@@ -6,3 +6,4 @@
 | `internal/kernel` | 1 | x | `internal/platform/clock` | F0 |
 | `internal/app` | 4 | x | `internal/kernel`, `internal/platform/clock`, `internal/vendor` | F0 |
 | `internal/arch` | test | x |  | F0 |
+| `internal/testutil` | support | x |  | F0 |

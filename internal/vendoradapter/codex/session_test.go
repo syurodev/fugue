@@ -20,6 +20,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/process"
+	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/vendor"
 )
 
@@ -222,16 +223,11 @@ func TestCodexStopKillsASetsidChildTree(t *testing.T) {
 		}
 	})
 
-	realClk := clock.Real{}
-	deadline := realClk.Now().Add(2 * time.Second)
-	for realClk.Now().Before(deadline) {
+	testutil.Poll(t, "the session to own the grandchild", func() bool {
 		clk.Advance(100 * time.Millisecond)
 		owned, oErr := codexSess.OwnsPID(grandchildPID)
-		if oErr == nil && owned {
-			break
-		}
-		sleepReal(10 * time.Millisecond)
-	}
+		return oErr == nil && owned
+	})
 
 	closeErrCh := make(chan error, 1)
 	_ = supervise.Go(ctx, "test.codex_setsid_close", func(taskCtx context.Context) error {
@@ -243,36 +239,28 @@ func TestCodexStopKillsASetsidChildTree(t *testing.T) {
 		t.Fatalf("Close failed: %v", err)
 	}
 
-	waitDeadline := realClk.Now().Add(2 * time.Second)
-	for realClk.Now().Before(waitDeadline) {
-		if kErr := syscall.Kill(grandchildPID, 0); errors.Is(kErr, syscall.ESRCH) {
-			return
-		}
-		sleepReal(20 * time.Millisecond)
-	}
-	t.Fatalf("expected setsid child PID %d to be killed on Close", grandchildPID)
+	testutil.Poll(t, "the setsid child to be killed on Close", func() bool {
+		return errors.Is(syscall.Kill(grandchildPID, 0), syscall.ESRCH)
+	})
 }
 
 func waitForSetsidPIDFile(t *testing.T, pidFile string) int {
 	t.Helper()
-	realClk := clock.Real{}
-	deadline := realClk.Now().Add(2 * time.Second)
-	for realClk.Now().Before(deadline) {
+	pid := 0
+	testutil.Poll(t, "the setsid child pid file", func() bool {
 		raw, err := os.ReadFile(filepath.Clean(pidFile))
-		if err == nil && len(strings.TrimSpace(string(raw))) > 0 {
-			pid, pErr := strconv.Atoi(strings.TrimSpace(string(raw)))
-			if pErr == nil && pid > 0 {
-				return pid
-			}
+		if err != nil {
+			return false
 		}
-		sleepReal(15 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for setsid child pid file %s", pidFile)
-	return 0
+		n, pErr := strconv.Atoi(strings.TrimSpace(string(raw)))
+		pid = n
+		return pErr == nil && n > 0
+	})
+	return pid
 }
 
 func sleepReal(d time.Duration) {
-	tm := clock.Real{}.NewTimer(d)
+	tm := testutil.OSClock().NewTimer(d)
 	<-tm.C()
 	tm.Stop()
 }

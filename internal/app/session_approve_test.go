@@ -20,6 +20,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/claude"
 	"github.com/syurodev/fugue/internal/vendorstore"
@@ -44,7 +45,7 @@ func newApproveFixture(t *testing.T) *approveFixture {
 	}
 	clk := clock.NewFake(time.Unix(100, 0))
 	hp, err := StartHost(t.Context(), &HostDeps{
-		DataDir: cheapVaultDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
+		DataDir: cheapvault.DataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("approve-test")),
 		Transport: newScriptedTransport(), VendorBinary: exe,
 		Bridge: VendorBridge{Binary: exe, Socket: filepath.Join(t.TempDir(), "host.sock")},
@@ -628,7 +629,7 @@ func startReadySessionWithoutTurn(t *testing.T) (*HostRuntime, *SessionToolServi
 	t.Helper()
 	clk := clock.NewFake(time.Unix(100, 0))
 	hp, err := StartHost(t.Context(), &HostDeps{
-		DataDir: cheapVaultDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
+		DataDir: cheapvault.DataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("approve-noturn")),
 		Transport: newScriptedTransport(), VendorBinary: mustExe(t),
 		Bridge: VendorBridge{Binary: mustExe(t), Socket: filepath.Join(t.TempDir(), "host.sock")},

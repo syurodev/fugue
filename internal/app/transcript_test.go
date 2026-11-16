@@ -11,19 +11,17 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/syurodev/fugue/internal/crypto"
 	"github.com/syurodev/fugue/internal/platform/clock"
-	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/secrets"
 	"github.com/syurodev/fugue/internal/storage"
+	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/transcript"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendorstore"
@@ -66,21 +64,7 @@ func newTranscriptFixture(t *testing.T, known KnownValues) *transcriptFixture {
 	if err := storage.Migrate(t.Context(), db, clk); err != nil {
 		t.Fatal(err)
 	}
-	fixture, readErr := os.ReadFile(filepath.Join("..", "vault", "testdata", "keyring-cheap.json"))
-	if readErr != nil {
-		t.Fatal(readErr)
-	}
-	var ring crypto.Keyring
-	if err := json.Unmarshal(fixture, &ring); err != nil {
-		t.Fatal(err)
-	}
-	v, vaultErr := vault.NewService(t.Context(), vault.NewMemoryKeyringStore(&ring), ids.NewSequence("v-"))
-	if vaultErr != nil {
-		t.Fatal(vaultErr)
-	}
-	if err := v.Unlock(t.Context(), redact.NewSecret(testMasterPW)); err != nil {
-		t.Fatal(err)
-	}
+	v := cheapvault.Unlocked(t)
 	s, storeErr := vendorstore.New(t.Context(), db, v, clk, nil)
 	if storeErr != nil {
 		t.Fatal(storeErr)
@@ -502,9 +486,10 @@ func secretText(size int, token string) string {
 // package cannot share the CPU. One contended sample can otherwise inflate
 // either size by an order of magnitude; run alone the ratio is about 16x to
 // 19x.
-func TestRedactionCostIsLinear(t *testing.T) {
+func TestRedactionMasksOneMiB(t *testing.T) {
 	// The fixture wires the credential directly and exercises the J-04
-	// environment mapping the composition will use.
+	// environment mapping the composition will use. The linear-cost budget is
+	// a speed assertion and lives in internal/perf (nightly).
 	f := newTranscriptFixture(t, func(context.Context) ([]secrets.KnownValue, error) {
 		known := make([]secrets.KnownValue, 0, 4)
 		known = append(known, secrets.KnownValue{
@@ -516,32 +501,8 @@ func TestRedactionCostIsLinear(t *testing.T) {
 		return known, nil
 	})
 	f.awaitKnownValues()
-	token := githubToken()
-	// bench returns the fastest of several measurements: contention only ever
-	// adds time, so the minimum is the closest sample to the true cost.
-	bench := func(size int) time.Duration {
-		text := secretText(size, token)
-		best := time.Duration(math.MaxInt64)
-		for range 3 {
-			ns := time.Duration(testing.Benchmark(func(b *testing.B) {
-				b.Helper()
-				for b.Loop() {
-					f.service.redactor.Redact(text)
-				}
-			}).NsPerOp())
-			best = min(best, ns)
-		}
-		return best
-	}
-	small := bench(64 << 10)
-	large := bench(1 << 20)
 	t.Parallel()
-	// 16x the input at a linear cost is about 16x the time (about 40x under
-	// the race detector and low I/O priority); a quadratic detector would cost
-	// at least 256x. The bound sits between the two with room for jitter.
-	if large > 64*small {
-		t.Fatalf("1 MiB redaction %v exceeds 64x the 64 KiB cost %v", large, small)
-	}
+	token := githubToken()
 	if masked := f.service.redactor.Redact(secretText(1<<20, token)); strings.Contains(masked, knownAPIToken) || strings.Contains(masked, token) {
 		t.Fatal("1 MiB masking failed")
 	}

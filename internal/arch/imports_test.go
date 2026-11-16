@@ -3,6 +3,7 @@ package arch
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -22,7 +23,9 @@ func checkFuguegateImports(ctx context.Context, r repo) ([]string, error) {
 		}
 		for _, imp := range p.allImports() {
 			irel, ok := strings.CutPrefix(imp, p.Module.Path+"/")
-			if ok && strings.HasPrefix(irel, "internal/") && irel != "internal/platform/clock" {
+			// Test files may also use the shared test helpers (F0.9).
+			testOnly := irel == "internal/testutil" && !slices.Contains(p.Imports, imp)
+			if ok && strings.HasPrefix(irel, "internal/") && irel != "internal/platform/clock" && !testOnly {
 				out = append(out, fmt.Sprintf("%s imports %s: the only internal package the development tool may import is internal/platform/clock", p.rel(), irel))
 			}
 		}

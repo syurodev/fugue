@@ -14,10 +14,10 @@ import (
 
 	"github.com/syurodev/fugue/internal/app"
 	"github.com/syurodev/fugue/internal/config"
-	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
-	"github.com/syurodev/fugue/internal/platform/redact"
+	"github.com/syurodev/fugue/internal/testutil"
+	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
 	"github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
 	transcriptv1 "github.com/syurodev/fugue/pkg/pb/fugue/transcript/v1"
@@ -54,12 +54,15 @@ func startVendorHost(t *testing.T, unlock bool) *vendorHost {
 func startVendorHostWith(t *testing.T, unlock bool, configure func(deps *app.HostDeps, sockPath string)) *vendorHost {
 	t.Helper()
 	dir := shortDir(t)
+	if unlock {
+		cheapvault.SeedDataDir(t, dir)
+	}
 	fugueHome := filepath.Join(t.TempDir(), "Fugue")
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	clk := clock.Real{}
+	clk := testutil.OSClock()
 	sock, err := ListenSocket(t.Context(), SocketOptions{DataDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -89,9 +92,7 @@ func startVendorHostWith(t *testing.T, unlock bool, configure func(deps *app.Hos
 		}
 	})
 	if unlock {
-		if _, err := hp.Vault().Setup(t.Context(), redact.NewSecret("vendor-test-master-password")); err != nil {
-			t.Fatal(err)
-		}
+		cheapvault.Unlock(t, hp.Vault())
 	}
 	host, httpClient := newTestClient(t, sock.Path)
 	if _, err := host.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_APP, "v1")); err != nil {
@@ -318,9 +319,7 @@ func TestTranscriptTopicsCarryProtoPayloadsWithoutGap(t *testing.T) {
 	session := v.start(t, "transcript-topic-start", wsID)
 	vendorStream := subscribeVendorSessions(t, v.host, nil)
 	checkLockedTranscriptSnapshot(t, v, session.SessionId)
-	if err := v.hp.Vault().Unlock(t.Context(), redact.NewSecret("vendor-test-master-password")); err != nil {
-		t.Fatal(err)
-	}
+	cheapvault.Unlock(t, v.hp.Vault())
 	awaitVendorState(t, vendorStream, session.SessionId, "ready")
 	sessionID := session.SessionId
 	checkTranscriptEventSequence(t, v, sessionID)

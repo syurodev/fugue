@@ -7,18 +7,23 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
 // changeScope is what a pull request's changed files require of the CI test
 // jobs (quality-gates §9): code changes run the Linux tests, coverage and
 // short fuzzing; platform changes also run the macOS tests; a ui change also
-// runs the ui/ module's own workflow. The client, generated code and proto
+// runs the ui/ module's own workflow; a changed test file adds its package to
+// the stress rerun. The client, generated code and proto
 // sources count as ui changes because the app builds against all three.
 type changeScope struct {
 	code     bool
 	platform bool
 	ui       bool
+	// testPkgs are the core packages whose test files changed, as go package
+	// patterns, for the PR stress job (quality-gates §6).
+	testPkgs []string
 }
 
 // everything is the fail-safe scope: when the change set cannot be read, every
@@ -146,6 +151,7 @@ func classifyChanges(dir string, changed []string) changeScope {
 			continue
 		}
 		scope.code = true
+		scope.testPkgs = addTestPackage(dir, scope.testPkgs, file)
 		if strings.HasPrefix(file, "ui/") {
 			// A ui change never makes the core platform-specific: ui/ is its
 			// own module and its workflow runs it on both OSes.
@@ -158,7 +164,23 @@ func classifyChanges(dir string, changed []string) changeScope {
 	if !seen {
 		return everything()
 	}
+	slices.Sort(scope.testPkgs)
 	return scope
+}
+
+// addTestPackage appends the package pattern of a changed core test file. The
+// ui/ module has its own workflow, testdata trees are fixtures and a deleted
+// file leaves nothing to rerun.
+func addTestPackage(dir string, pkgs []string, file string) []string {
+	if !strings.HasSuffix(file, "_test.go") || strings.HasPrefix(file, "ui/") ||
+		file == "testdata" || strings.Contains(file, "testdata/") {
+		return pkgs
+	}
+	pkg := "./" + path.Dir(file)
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(path.Dir(file)))); err != nil || slices.Contains(pkgs, pkg) {
+		return pkgs
+	}
+	return append(pkgs, pkg)
 }
 
 // runChanges prints the change scope as GitHub Actions step outputs. It never
@@ -190,5 +212,8 @@ func runChanges(ctx context.Context, args []string, stdout io.Writer) error {
 	if err := say(stdout, "platform=%t", scope.platform); err != nil {
 		return err
 	}
-	return say(stdout, "ui=%t", scope.ui)
+	if err := say(stdout, "ui=%t", scope.ui); err != nil {
+		return err
+	}
+	return say(stdout, "test_pkgs=%s", strings.Join(scope.testPkgs, " "))
 }

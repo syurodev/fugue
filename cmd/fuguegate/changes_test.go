@@ -10,10 +10,9 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-// TestChangeScope pins which pull requests skip which test jobs. Every case
-// that could hide a regression must land on the side that runs more.
-func TestChangeScope(t *testing.T) {
-	t.Parallel()
+// scopeFixture writes the files the change-scope cases read from disk.
+func scopeFixture(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
 	write := func(rel, body string) {
 		t.Helper()
@@ -28,9 +27,22 @@ func TestChangeScope(t *testing.T) {
 	write("internal/kernel/decide.go", "// Package kernel.\npackage kernel\n")
 	write("ui/internal/hostconn/hostconn.go", "package hostconn\n")
 	write("pkg/client/client.go", "package client\n")
+	write("internal/kernel/decide_test.go", "package kernel\n")
+	write("internal/kernel/testdata/decide_test.go", "package kernel\n")
+	write("internal/vendor/a_test.go", "package vendor\n")
+	write("internal/vendor/b_test.go", "package vendor\n")
+	write("ui/internal/hostconn/hostconn_test.go", "package hostconn\n")
 	write("pkg/pb/x/x.pb.go", "package x\n")
 	write("internal/vendor/proc.go", "//go:build unix\n\npackage vendor\n")
 	write("internal/vendor/after.go", "package vendor\n\n//go:build unix\n")
+	return dir
+}
+
+// TestChangeScope pins which pull requests skip which test jobs. Every case
+// that could hide a regression must land on the side that runs more.
+func TestChangeScope(t *testing.T) {
+	t.Parallel()
+	dir := scopeFixture(t)
 
 	cases := []struct {
 		name    string
@@ -62,6 +74,10 @@ func TestChangeScope(t *testing.T) {
 		{"workflow", []string{".github/workflows/pr.yml"}, changeScope{code: true, platform: true}},
 		{"module", []string{"go.sum"}, changeScope{code: true, platform: true}},
 		{"task file", []string{"Taskfile.yml"}, changeScope{code: true, platform: true}},
+		{"changed tests name their packages once, sorted", []string{"internal/vendor/b_test.go", "internal/kernel/decide_test.go", "internal/vendor/a_test.go", "internal/kernel/decide.go"}, changeScope{code: true, platform: false, testPkgs: []string{"./internal/kernel", "./internal/vendor"}}},
+		{"ui tests have their own workflow", []string{"ui/internal/hostconn/hostconn_test.go"}, changeScope{code: true, ui: true}},
+		{"test fixtures are not packages", []string{"internal/kernel/testdata/decide_test.go"}, changeScope{code: true}},
+		{"a deleted test leaves nothing to rerun", []string{"internal/gone/gone_test.go"}, changeScope{code: true, platform: true}},
 		{"empty change set runs everything", nil, everything()},
 		{"blank entries only", []string{"", " "}, everything()},
 	}
@@ -79,14 +95,14 @@ func TestChangesCommandPrintsStepOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff := cmp.Diff("code=false\nplatform=false\nui=false\n", out); diff != "" {
+	if diff := cmp.Diff("code=false\nplatform=false\nui=false\ntest_pkgs=\n", out); diff != "" {
 		t.Errorf("output (-want +got):\n%s", diff)
 	}
 	out, err = execute(t, "changes", "-files", "cmd/fugue/serve.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff := cmp.Diff("code=true\nplatform=true\nui=false\n", out); diff != "" {
+	if diff := cmp.Diff("code=true\nplatform=true\nui=false\ntest_pkgs=\n", out); diff != "" {
 		t.Errorf("output (-want +got):\n%s", diff)
 	}
 }
