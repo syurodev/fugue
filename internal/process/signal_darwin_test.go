@@ -125,35 +125,71 @@ func waitForZombieGroup(t *testing.T, pgid int) (zombies, live int) {
 	return 0, 0
 }
 
-func TestLeaderSignalEPERMIsGoneOnlyForAZombieLeader(t *testing.T) {
+// TestSignalErrorsForAMemberMidExitAreGone reproduces the window after
+// SIGKILL in which XNU has set P_WEXIT but the process is still SRUN: every
+// signal to it fails with EPERM although the process table lists it as not
+// yet a zombie. The window is real but short, so the test polls for it
+// across many short-lived groups and fails if it is never observed.
+func TestSignalErrorsForAMemberMidExitAreGone(t *testing.T) {
 	t.Parallel()
-	cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", "exit 0")
+	const attempts = 300
+	observed := 0
+	for range attempts {
+		observed += midExitAttempt(t)
+	}
+	if observed == 0 {
+		t.Fatalf("no mid-exit EPERM window was observed in %d attempts", attempts)
+	}
+	t.Logf("mid-exit EPERM observations: %d in %d attempts", observed, attempts)
+}
+
+// midExitAttempt kills a one-process group and, each time a signal fails
+// with EPERM while the process is mid-exit, checks that both stop-path
+// filters call it gone. It returns the number of such observations.
+func midExitAttempt(t *testing.T) int {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), "/bin/sleep", "30")
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
-	stdout, pipeErr := cmd.StdoutPipe()
-	if pipeErr != nil {
-		t.Fatal(pipeErr)
-	}
-	if startErr := cmd.Start(); startErr != nil {
-		t.Fatal(startErr)
-	}
-	if _, copyErr := io.Copy(io.Discard, stdout); copyErr != nil {
-		reapCommand(t, cmd)
-		t.Fatal(copyErr)
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
 	}
 	pid := cmd.Process.Pid
-	zombie, live := waitForZombieGroup(t, pid)
-	if zombie == 0 || live != 0 {
-		reapCommand(t, cmd)
-		t.Fatalf("leader %d: %d zombies, %d live members", pid, zombie, live)
+	if err := syscall.Kill(-pid, syscall.SIGKILL); err != nil {
+		reapKilled(t, cmd)
+		t.Fatalf("first kill: %v", err)
 	}
-	// The leader exited and is not reaped yet: the window where the exit
-	// channel is still open but signaling the pid returns EPERM.
-	if got := platformLeaderSignalError(pid, syscall.EPERM); got != nil {
-		reapCommand(t, cmd)
-		t.Fatalf("zombie leader EPERM = %v, want nil", got)
+	observed := 0
+	for range 20000 {
+		kp, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
+		if err != nil || kp.Proc.P_stat == sZomb {
+			break
+		}
+		groupErr := syscall.Kill(-pid, syscall.SIGKILL)
+		if !errors.Is(groupErr, syscall.EPERM) || kp.Proc.P_flag&pWExit == 0 {
+			continue
+		}
+		observed++
+		if got := groupSignalError(pid, groupErr); got != nil {
+			reapKilled(t, cmd)
+			t.Fatalf("group EPERM for a mid-exit member = %v, want nil", got)
+		}
+		leaderErr := syscall.Kill(pid, syscall.SIGKILL)
+		if got := platformLeaderSignalError(pid, leaderErr); got != nil {
+			reapKilled(t, cmd)
+			t.Fatalf("leader signal %v for a mid-exit leader = %v, want nil", leaderErr, got)
+		}
 	}
-	if waitErr := cmd.Wait(); waitErr != nil {
-		t.Fatal(waitErr)
+	reapKilled(t, cmd)
+	return observed
+}
+
+// reapKilled waits for a command the test killed; the kill is the expected
+// exit, any other wait error is real.
+func reapKilled(t *testing.T, cmd *exec.Cmd) {
+	t.Helper()
+	var exitErr *exec.ExitError
+	if err := cmd.Wait(); err != nil && !errors.As(err, &exitErr) {
+		t.Errorf("wait: %v", err)
 	}
 }
 
