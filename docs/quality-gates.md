@@ -222,7 +222,8 @@ and title edits, so applying a label reruns only those two. A `changes` job
 
 **Stress (PR, new 2026-11-16):** the `stress` job reruns the packages whose test files changed
 with `-race -shuffle=on -count=10`, on ubuntu and, when `platform` is true, on macOS. It reports
-success when no test file changed, like the other conditional jobs.
+success when no test file changed, like the other conditional jobs. The stress jobs report only: they are
+not required status checks (owner decision, 2026-11-16). The `ui/` module is not stress-run (known gap).
 
 **Nightly:** long fuzzing, full mutation, every test repeated twenty times on ubuntu and macOS
 (`repeat-tests`, with a report of every test that both passed and failed), the `perf` speed
