@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"image"
 	"os"
+	"runtime"
 
 	"gioui.org/app"
 	"gioui.org/layout"
@@ -104,7 +105,11 @@ func newEnv(light bool) (*kit.Env, error) {
 	} else {
 		th = theme.Dark(sh)
 	}
-	return &kit.Env{Th: &th, Sh: sh}, nil
+	env := &kit.Env{Th: &th, Sh: sh}
+	if runtime.GOOS == "darwin" {
+		env.Platform = kit.PlatformMac
+	}
+	return env, nil
 }
 
 // frameContext is the layout context of a headless frame at pixel scale px

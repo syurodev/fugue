@@ -65,6 +65,8 @@ func expectedCells(cur int) map[cell]bool {
 		textAreaCells(want)
 	case "Menu":
 		menuCells(want)
+	case "Kbd":
+		kbdCells(want)
 	}
 	return want
 }
@@ -119,6 +121,18 @@ func menuCells(want map[cell]bool) {
 	}
 	for _, st := range liveStates() {
 		want[cell{compMenu, numMenuSpecimens, 0, st}] = true
+	}
+}
+
+// kbdCells are the Kbd cells: every shortcut of every group in both
+// notations.
+func kbdCells(want map[cell]bool) {
+	for pi := range kbdPlatforms() {
+		for gi, g := range kbdGroups() {
+			for _, s := range g.keys {
+				want[kbdCellKey(pi, gi, s)] = true
+			}
+		}
 	}
 }
 

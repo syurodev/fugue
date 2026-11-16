@@ -19,7 +19,7 @@ import (
 // disabled one, a separator, an item with a submenu, and a plain one.
 func testMenuItems() []MenuItem {
 	return []MenuItem{
-		{ID: "open", Label: "Open", Icon: IconSearch, Shortcut: "Ctrl+O"},
+		{ID: "open", Label: "Open", Icon: IconSearch, Shortcut: Shortcut{Mods: ModPrimary, Key: Char('o')}},
 		{ID: "paste", Label: "Paste", Disabled: true},
 		MenuSeparator(),
 		{ID: "share", Label: "Share", Sub: []MenuItem{
@@ -319,7 +319,7 @@ func TestMenuFlipsAtTheWindowEdge(t *testing.T) {
 			func(p []image.Rectangle) bool { return len(p) == 2 && p[1].Min.X >= p[0].Max.X },
 		},
 		{
-			"submenu at the edge: left of its parent", image.Pt(230, 20),
+			"submenu at the edge: left of its parent", image.Pt(290, 20),
 			[]int{itemShare},
 			func(p []image.Rectangle) bool { return len(p) == 2 && p[1].Max.X <= p[0].Min.X },
 		},
