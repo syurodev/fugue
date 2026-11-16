@@ -15,7 +15,18 @@ import (
 const (
 	// sZomb is the XNU process state for a zombie (bsd/sys/proc.h SZOMB = 5).
 	sZomb = 5
+	// pWExit is XNU's P_WEXIT in p_flag (bsd/sys/proc.h, 0x00002000): the
+	// process is tearing itself down after SIGKILL. Its p_stat is still SRUN
+	// until it becomes a zombie, but signals to it fail with EPERM, so it
+	// counts as gone for signaling purposes.
+	pWExit = 0x00002000
 )
+
+// kinfoCanBeSignaled reports whether the process could still receive a
+// signal: it exists and is neither a zombie nor mid-exit.
+func kinfoCanBeSignaled(kp *unix.KinfoProc) bool {
+	return kp.Proc.P_stat != 0 && kp.Proc.P_stat != sZomb && kp.Proc.P_flag&pWExit == 0
+}
 
 func prepareSpawnArgv(ctx context.Context, opts *Options) ([]string, string, bool, error) {
 	// Test seam: setting CgroupRoot or ProcRoot routes to the Linux containment path on macOS CI.
@@ -107,7 +118,7 @@ func (sysctlScanner) startToken(pid int) (string, error) {
 
 func kinfoToEntry(kp *unix.KinfoProc) (procEntry, bool) {
 	pid := int(kp.Proc.P_pid)
-	if pid <= 1 || kp.Proc.P_stat == sZomb || kp.Proc.P_stat == 0 {
+	if pid <= 1 || !kinfoCanBeSignaled(kp) {
 		return procEntry{}, false
 	}
 	sec := kp.Proc.P_starttime.Sec
