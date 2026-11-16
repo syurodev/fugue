@@ -221,20 +221,23 @@ func (a *Adapter) newSessionState(spec *vendor.StartSpec) *Session {
 	}
 	codec := NewCodec()
 	return &Session{
-		sessionID:     spec.SessionID,
-		model:         spec.Model,
-		cwd:           spec.Cwd,
-		clientVersion: clientVer,
-		codec:         codec,
-		normalizer:    NewNormalizerWithCodec(spec.SessionID, codec),
-		clock:         clk,
-		idGen:         idGen,
-		obsCh:         make(chan Observation, observationBufferSize),
-		closeNotify:   make(chan struct{}),
-		readerDoneCh:  make(chan struct{}),
-		writeSem:      make(chan struct{}, 1),
-		state:         stateStarting,
-		pendingRPCs:   make(map[string]chan Frame),
+		sessionID:         spec.SessionID,
+		model:             spec.Model,
+		cwd:               spec.Cwd,
+		clientVersion:     clientVer,
+		codec:             codec,
+		normalizer:        NewNormalizerWithCodec(spec.SessionID, codec),
+		clock:             clk,
+		idGen:             idGen,
+		obsCh:             make(chan Observation, observationBufferSize),
+		closeNotify:       make(chan struct{}),
+		readerDoneCh:      make(chan struct{}),
+		writeSem:          make(chan struct{}, 1),
+		state:             stateStarting,
+		pendingRPCs:       make(map[string]chan Frame),
+		seenApprovals:     make(map[string]bool),
+		pendingApprovals:  make(map[string]pendingServerRequest),
+		resolvedApprovals: make(map[string]bool),
 	}
 }
 

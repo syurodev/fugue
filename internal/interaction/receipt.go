@@ -214,6 +214,55 @@ func (o *Owner) ResetSession(sessionID string) {
 	}
 }
 
+// CancelTurn closes all pending interaction tickets belonging to (sessionID,
+// turnID) as OutcomeCancelled with TurnCancelled set so a relayed ACP
+// permission request can distinguish a user turn cancel (`session/cancel`) from
+// a host drain or session teardown.
+func (o *Owner) CancelTurn(sessionID, turnID string) []*Ticket {
+	if sessionID == "" || turnID == "" {
+		return nil
+	}
+	o.mu.Lock()
+	now := o.clock.Now().UTC()
+	o.nextResolvedPrune = now
+	var (
+		closed    []*Ticket
+		cancelled []*AuditEvent
+	)
+	for _, ticket := range o.byRequest {
+		if ticket.Binding.SessionID != sessionID || ticket.Binding.TurnID != turnID || ticket.Resolved {
+			continue
+		}
+		ev := o.cancelTurnTicketLocked(ticket, now)
+		closed = append(closed, cloneTicket(ticket))
+		cancelled = append(cancelled, &ev)
+	}
+	o.mu.Unlock()
+	for _, ev := range cancelled {
+		o.emitAudit(ev)
+	}
+	return closed
+}
+
+func (o *Owner) cancelTurnTicketLocked(ticket *Ticket, now time.Time) AuditEvent {
+	if !ticket.Relayed {
+		delete(o.byOperation, ticket.OperationID)
+		if ticket.ReceiptID != "" {
+			if r, exists := o.receipts[ticket.ReceiptID]; exists && !r.Claimed {
+				delete(o.receipts, ticket.ReceiptID)
+			}
+		}
+	}
+	ticket.TurnCancelled = true
+	o.markResolvedLocked(ticket, now, OutcomeCancelled)
+	o.emitLifecycleLocked(LifecycleEvent{
+		Kind:      EventResolved,
+		RequestID: ticket.RequestID,
+		Outcome:   OutcomeCancelled,
+	})
+	return o.newAuditEvent("cancelled", ticket)
+}
+
 // InvalidateWorkspaceGrants drops all session grants belonging to workspaceID
 // when the workspace policy revision increases (workspace §7, interaction §3.4).
 func (o *Owner) InvalidateWorkspaceGrants(workspaceID string) {

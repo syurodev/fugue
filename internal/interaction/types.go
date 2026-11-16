@@ -170,6 +170,7 @@ type Ticket struct {
 	Resolved         bool
 	ResolvedAt       time.Time
 	Outcome          Outcome
+	TurnCancelled    bool
 	SelectedOptionID string
 	// Text is the user's note delivered with the decision: the deny note of
 	// a confirm or the optional message of a relayed answer.

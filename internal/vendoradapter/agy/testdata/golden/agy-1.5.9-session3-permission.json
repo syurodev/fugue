@@ -3,7 +3,8 @@
  "vendor": "agy",
  "summary": {
   "partials": 0,
-  "notices": 7
+  "notices": 4,
+  "server_requests": 1
  },
  "steps": [
   {
@@ -37,38 +38,50 @@
   },
   {
    "line": 5,
-   "op": "record",
-   "item": {
-    "content": {
-     "Text": ""
-    },
-    "id": "agy-notice-line-5",
-    "kind": "notice",
-    "meta": {
-     "Level": "info",
-     "Code": "unsupported_event"
-    },
-    "rawRef": "acp:available_commands_update",
-    "revision": 0,
-    "turnId": ""
+   "op": "init",
+   "init": {
+    "Version": "1.5.9",
+    "SessionID": "session-uuid-0001",
+    "Model": "gemini-4-argon-medium",
+    "PermissionMode": "default",
+    "SlashCommands": [
+     "goal",
+     "schedule",
+     "browser",
+     "plan",
+     "grill-me",
+     "teamwork",
+     "learn",
+     "boost",
+     "agy-customizations",
+     "antigravity-guide",
+     "run-workflow",
+     "swarm"
+    ]
    }
   },
   {
    "line": 6,
-   "op": "record",
-   "item": {
-    "content": {
-     "Text": ""
-    },
-    "id": "agy-notice-line-6",
-    "kind": "notice",
-    "meta": {
-     "Level": "info",
-     "Code": "unsupported_event"
-    },
-    "rawRef": "acp:available_commands_update",
-    "revision": 0,
-    "turnId": ""
+   "op": "init",
+   "init": {
+    "Version": "1.5.9",
+    "SessionID": "session-uuid-0001",
+    "Model": "gemini-4-argon-medium",
+    "PermissionMode": "default",
+    "SlashCommands": [
+     "goal",
+     "schedule",
+     "browser",
+     "plan",
+     "grill-me",
+     "teamwork",
+     "learn",
+     "boost",
+     "agy-customizations",
+     "antigravity-guide",
+     "run-workflow",
+     "swarm"
+    ]
    }
   },
   {
@@ -103,7 +116,7 @@
      "Origin": "user"
     },
     "rawRef": "",
-    "revision": 1,
+    "revision": 0,
     "turnId": "turn-1"
    }
   },
@@ -161,7 +174,7 @@
      "Duration": 0
     },
     "rawRef": "",
-    "revision": 1,
+    "revision": 0,
     "turnId": "turn-1"
    }
   },
@@ -183,7 +196,7 @@
      "Duration": 0
     },
     "rawRef": "",
-    "revision": 1,
+    "revision": 0,
     "turnId": "turn-1"
    },
    "after": {
@@ -201,26 +214,40 @@
      "Duration": 0
     },
     "rawRef": "",
-    "revision": 2,
+    "revision": 1,
     "turnId": "turn-1"
    }
   },
   {
    "line": 13,
-   "op": "record",
-   "item": {
-    "content": {
-     "Text": "Antigravity requested permission, which Fugue cannot relay yet"
-    },
-    "id": "agy-perm-1",
-    "kind": "notice",
-    "meta": {
-     "Level": "warning",
-     "Code": "unsupported_event"
-    },
-    "rawRef": "acp:session/request_permission",
-    "revision": 0,
-    "turnId": "turn-1"
+   "op": "server_request",
+   "server_request": {
+    "RequestID": "1",
+    "TurnID": "turn-1",
+    "ItemID": "call-0001",
+    "Method": "session/request_permission",
+    "Kind": "confirm",
+    "Summary": "printf declined-test",
+    "Detail": "{\"sessionUpdate\":\"tool_call\",\"toolCallId\":\"call-0001\",\"name\":\"run_command\",\"args\":{\"CommandLine\":\"printf declined-test\",\"WaitMsBeforeAsync\":5000,\"toolSummary\":\"Execute printf command\"},\"status\":\"pending\",\"kind\":\"execute\",\"title\":\"printf declined-test\",\"rawInput\":{\"CommandLine\":\"printf declined-test\",\"WaitMsBeforeAsync\":5000,\"toolSummary\":\"Execute printf command\"}}",
+    "Options": [
+     "allow",
+     "deny"
+    ],
+    "OptionDetails": [
+     {
+      "id": "allow",
+      "name": "Allow",
+      "kind": "allow_once"
+     },
+     {
+      "id": "deny",
+      "name": "Deny",
+      "kind": "reject_once"
+     }
+    ],
+    "QuestionOptions": null,
+    "AllowFreeText": false,
+    "ExpiresAt": "0001-01-01T00:00:00Z"
    }
   },
   {
@@ -241,7 +268,7 @@
      "Duration": 0
     },
     "rawRef": "",
-    "revision": 2,
+    "revision": 1,
     "turnId": "turn-1"
    },
    "after": {
@@ -259,7 +286,7 @@
      "Duration": 0
     },
     "rawRef": "",
-    "revision": 3,
+    "revision": 2,
     "turnId": "turn-1"
    }
   },
@@ -281,7 +308,7 @@
      "Duration": 0
     },
     "rawRef": "",
-    "revision": 3,
+    "revision": 2,
     "turnId": "turn-1"
    },
    "after": {
@@ -299,7 +326,7 @@
      "Duration": 0
     },
     "rawRef": "",
-    "revision": 4,
+    "revision": 3,
     "turnId": "turn-1"
    }
   },

@@ -1,15 +1,16 @@
 package agy
 
 // The ACP v1 normalizer: one pure per-session state machine that translates
-// decoded JSON-RPC frames into transcript records, updates, partials, and
-// session lifecycle observations. Every unknown notification or unmodeled
-// update (including available_commands_update in F9.8a) becomes a
-// notice(unsupported_event) with a raw ref — never silently dropped (VR-E08).
-// _meta.antigravity is never inspected for safety or routing (VR-02).
+// decoded JSON-RPC frames into transcript records, updates, partials, server
+// requests, and session lifecycle observations. Every unknown notification or
+// unmodeled update becomes a notice(unsupported_event) with a raw ref — never
+// silently dropped (VR-E08). _meta.antigravity is never inspected for safety
+// or routing (VR-02).
 
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"strings"
 	"sync"
 
@@ -44,20 +45,23 @@ const (
 
 // Normalizer holds per-session ACP stream normalization state.
 type Normalizer struct {
-	mu           sync.Mutex
-	codec        *Codec
-	session      string
-	turn         string
-	prevTurn     string
-	promptCID    string
-	version      string
-	model        string
-	capabilities HandshakeCapabilities
-	line         int
-	items        map[string]*transcript.Item
-	textBufs     map[string]string
-	tools        map[string]*toolState
-	diffs        map[string]bool
+	mu            sync.Mutex
+	codec         *Codec
+	session       string
+	acpSessionID  string
+	turn          string
+	prevTurn      string
+	promptCID     string
+	version       string
+	model         string
+	mode          string
+	slashCommands []string
+	capabilities  HandshakeCapabilities
+	line          int
+	items         map[string]*transcript.Item
+	textBufs      map[string]string
+	tools         map[string]*toolState
+	diffs         map[string]bool
 }
 
 type toolState struct {
@@ -191,6 +195,7 @@ func (n *Normalizer) normalizeSessionStateResponse(frame *Frame, method string) 
 	if json.Unmarshal(frame.Result, &resp) != nil || resp.SessionID == "" {
 		return n.unsupported(n.frameRef(frame), method)
 	}
+	n.acpSessionID = resp.SessionID
 	var modelID string
 	if resp.Models != nil {
 		modelID = resp.Models.CurrentModelID
@@ -202,12 +207,16 @@ func (n *Normalizer) normalizeSessionStateResponse(frame *Frame, method string) 
 	if resp.Modes != nil {
 		modeID = resp.Modes.CurrentModeID
 	}
+	if modeID != "" {
+		n.mode = modeID
+	}
 	return Observation{
 		Init: &Init{
 			Version:        n.version,
 			SessionID:      resp.SessionID,
-			Model:          modelID,
-			PermissionMode: modeID,
+			Model:          n.model,
+			PermissionMode: n.mode,
+			SlashCommands:  slices.Clone(n.slashCommands),
 		},
 	}
 }
@@ -275,18 +284,6 @@ func (n *Normalizer) normalizeNotification(frame *Frame) Observation {
 	return n.normalizeUpdate(&wire)
 }
 
-func (n *Normalizer) normalizeServerRequest(frame *Frame) Observation {
-	turnID := n.currentTurnID()
-	if frame.Method == MethodSessionRequestPermission {
-		id := n.itemID("perm", frame.CanonicalID)
-		item := transcript.UnsupportedEvent(id, n.session, turnID, "acp:"+MethodSessionRequestPermission)
-		item.Metadata = transcript.NoticeMetadata{Level: "warning", Code: "unsupported_event"}
-		item.Content = transcript.NoticeContent{Text: "Antigravity requested permission, which Fugue cannot relay yet"}
-		return Observation{Records: []transcript.Item{item}}
-	}
-	return n.unsupported(n.frameRef(frame), "acp:"+frame.Method)
-}
-
 func (n *Normalizer) unsupported(rawRefSuffix, rawRef string) Observation {
 	id := n.itemID("notice", rawRefSuffix)
 	item := transcript.UnsupportedEvent(id, n.session, n.currentTurnID(), rawRef)
@@ -304,7 +301,6 @@ func (n *Normalizer) recordNew(
 		SessionID: n.session,
 		TurnID:    turnID,
 		Kind:      kind,
-		Revision:  1,
 		Metadata:  meta,
 		Content:   content,
 	}
@@ -318,10 +314,12 @@ func (n *Normalizer) updateExisting(
 	content transcript.Content,
 ) Observation {
 	before := *existing
-	existing.Revision++
-	existing.Metadata = meta
-	existing.Content = content
-	return Observation{Updates: []Update{{Before: before, After: *existing}}}
+	next := *existing
+	next.Revision++
+	next.Metadata = meta
+	next.Content = content
+	*existing = next
+	return Observation{Updates: []Update{{Before: before, After: next}}}
 }
 
 func (n *Normalizer) currentTurnID() string {

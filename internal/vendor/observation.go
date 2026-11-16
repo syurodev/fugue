@@ -87,6 +87,15 @@ type ServerRequestQuestionItem struct {
 	Options  []ServerRequestQuestionOption
 }
 
+// ServerRequestOption is one selectable choice in a relayed confirmation
+// request when the vendor supplies structured options (`optionId`, `name`,
+// `kind`).
+type ServerRequestOption struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Kind string `json:"kind,omitempty"`
+}
+
 // ServerRequest describes a vendor server request that must be relayed verbatim
 // through the interaction owner and answered via Session.Resolve.
 type ServerRequest struct {
@@ -98,6 +107,7 @@ type ServerRequest struct {
 	Summary         string
 	Detail          string
 	Options         []string
+	OptionDetails   []ServerRequestOption       `json:",omitempty"`
 	Questions       []ServerRequestQuestionItem `json:",omitempty"`
 	QuestionOptions []ServerRequestQuestionOption
 	AllowFreeText   bool

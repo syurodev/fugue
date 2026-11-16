@@ -19,10 +19,16 @@ func (s *Session) runReader(ctx context.Context, readerErrCh chan<- error) {
 			s.handleReaderError(ctx, err, readerErrCh)
 			return
 		}
+		registered := false
 		if frame.Kind == FrameServerRequest {
-			s.rejectServerRequest(ctx, &frame)
+			if !s.handleServerRequestFrame(ctx, &frame, &registered) {
+				continue
+			}
 		}
 		obs := s.normalizer.NormalizeFrame(&frame)
+		if registered && obs.ServerRequest == nil {
+			s.rejectUnrelayedServerRequest(frame.CanonicalID, RPCErrorPermissionNotRelayed)
+		}
 		s.dispatchFrameAndObservation(&frame, &obs)
 		if isEmptyObservation(&obs) {
 			continue
@@ -36,6 +42,21 @@ func (s *Session) runReader(ctx context.Context, readerErrCh chan<- error) {
 	}
 }
 
+func (s *Session) handleServerRequestFrame(ctx context.Context, frame *Frame, registered *bool) bool {
+	if frame.Method != MethodSessionRequestPermission {
+		s.rejectServerRequest(ctx, frame, RPCErrorMethodNotSupported, RPCErrorMethodNotSupportedByFugue)
+		return true
+	}
+	if frame.CanonicalID == "" {
+		if len(frame.ID) > 0 {
+			s.rejectServerRequest(ctx, frame, RPCErrorServerError, RPCErrorPermissionNotRelayed)
+		}
+		return false
+	}
+	*registered = s.registerServerRequest(frame)
+	return true
+}
+
 func (s *Session) drainStdout() {
 	for {
 		if _, err := s.codec.ReadFrame(s.proc.Stdout()); err != nil {
@@ -44,8 +65,8 @@ func (s *Session) drainStdout() {
 	}
 }
 
-func (s *Session) rejectServerRequest(ctx context.Context, frame *Frame) {
-	raw, err := s.codec.EncodeResponseError(frame.ID, RPCErrorMethodNotSupported, serverRequestRejectMessage(frame.Method))
+func (s *Session) rejectServerRequest(ctx context.Context, frame *Frame, code int, message string) {
+	raw, err := s.codec.EncodeResponseError(frame.ID, code, message)
 	if err != nil {
 		slog.WarnContext(ctx, "agy: encode server request error response failed", "session_id", s.sessionID, "method", frame.Method, "error", err)
 		return
@@ -53,13 +74,6 @@ func (s *Session) rejectServerRequest(ctx context.Context, frame *Frame) {
 	if writeErr := s.writeRawLine(ctx, raw); writeErr != nil {
 		slog.DebugContext(ctx, "agy: write server request error response failed", "session_id", s.sessionID, "method", frame.Method, "error", writeErr)
 	}
-}
-
-func serverRequestRejectMessage(method string) string {
-	if method == MethodSessionRequestPermission {
-		return RPCErrorPermissionNotRelayed
-	}
-	return RPCErrorMethodNotSupportedByFugue
 }
 
 func (s *Session) dispatchFrameAndObservation(frame *Frame, obs *Observation) {

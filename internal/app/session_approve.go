@@ -10,6 +10,7 @@ import (
 
 	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
@@ -354,6 +355,7 @@ func (s *SessionToolService) endAllSessions() {
 type approveTombstoneEntry struct {
 	digest         [sha256.Size]byte
 	allow          bool
+	cancelled      bool
 	selectedOption string
 	note           string
 	answers        map[string][]string
@@ -386,6 +388,10 @@ func (t *approveTombstones) get(sessionID, opID string) (approveTombstoneEntry, 
 }
 
 func (t *approveTombstones) put(sessionID, opID string, digest [sha256.Size]byte, allow bool, note string) {
+	t.putEntry(sessionID, opID, &approveTombstoneEntry{digest: digest, allow: allow, note: note})
+}
+
+func (t *approveTombstones) putEntry(sessionID, opID string, entry *approveTombstoneEntry) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	sess, ok := t.sessions[sessionID]
@@ -401,7 +407,72 @@ func (t *approveTombstones) put(sessionID, opID string, digest [sha256.Size]byte
 		}
 		sess.order = append(sess.order, opID)
 	}
-	sess.entries[opID] = approveTombstoneEntry{digest: digest, allow: allow, note: note}
+	sess.entries[opID] = *entry
+}
+
+func (t *approveTombstones) putCodex(sessionID, opID string, digest [sha256.Size]byte, allow bool, selectedOption string, answers map[string][]string) {
+	t.putEntry(sessionID, opID, &approveTombstoneEntry{
+		digest: digest, allow: allow, selectedOption: selectedOption, answers: cloneCodexAnswers(answers),
+	})
+}
+
+func (t *approveTombstones) putAgy(sessionID, opID string, digest [sha256.Size]byte, selectedOption string, cancelled bool) {
+	t.putEntry(sessionID, opID, &approveTombstoneEntry{
+		digest: digest, allow: !cancelled && selectedOption != "", cancelled: cancelled, selectedOption: selectedOption,
+	})
+}
+
+func (t *approveTombstones) tryBeginInFlight(sessionID, opID string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	sess, ok := t.sessions[sessionID]
+	if !ok {
+		sess = &sessionApproveTombstone{
+			entries:  make(map[string]approveTombstoneEntry),
+			inFlight: make(map[string]bool),
+		}
+		t.sessions[sessionID] = sess
+	}
+	if sess.inFlight == nil {
+		sess.inFlight = make(map[string]bool)
+	}
+	if sess.inFlight[opID] {
+		return false
+	}
+	sess.inFlight[opID] = true
+	return true
+}
+
+func (t *approveTombstones) finishInFlight(sessionID, opID string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if sess, ok := t.sessions[sessionID]; ok && sess.inFlight != nil {
+		delete(sess.inFlight, opID)
+	}
+}
+
+func codexDecisionFromTombstone(entry *approveTombstoneEntry) vendor.Decision {
+	if entry.cancelled {
+		return vendor.Decision{Cancelled: true}
+	}
+	return vendor.Decision{
+		Allow:   entry.allow,
+		Message: entry.selectedOption,
+		Answers: cloneCodexAnswers(entry.answers),
+	}
+}
+
+func cloneCodexAnswers(answers map[string][]string) map[string][]string {
+	if answers == nil {
+		return nil
+	}
+	out := make(map[string][]string, len(answers))
+	for k, vals := range answers {
+		cloned := make([]string, len(vals))
+		copy(cloned, vals)
+		out[k] = cloned
+	}
+	return out
 }
 
 func (t *approveTombstones) clearSession(sessionID string) {

@@ -41,9 +41,18 @@ const (
 	ToolStatusCompletedWire           = "completed"
 	ToolStatusFailedWire              = "failed"
 	ToolStatusErrorWire               = "error"
+	RPCErrorServerError               = -32000
 	RPCErrorMethodNotSupported        = -32601
-	RPCErrorPermissionNotRelayed      = "permission relay is not supported yet"
+	RPCErrorInvalidParams             = -32602
+	RPCErrorPermissionNotRelayed      = "the approval request could not be completed"
 	RPCErrorMethodNotSupportedByFugue = "method not supported by Fugue"
+
+	PermissionOptionKindAllowOnce    = "allow_once"
+	PermissionOptionKindAllowAlways  = "allow_always"
+	PermissionOptionKindRejectOnce   = "reject_once"
+	PermissionOptionKindRejectAlways = "reject_always"
+	PermissionOutcomeSelected        = "selected"
+	PermissionOutcomeCancelled       = "cancelled"
 )
 
 type (
@@ -277,22 +286,29 @@ type (
 		Status   string `json:"status,omitempty"`
 	}
 
+	// AvailableCommand is one slash command entry in available_commands_update.
+	AvailableCommand struct {
+		Name        string `json:"name"`
+		Description string `json:"description,omitempty"`
+	}
+
 	// UpdateWire decodes all supported ACP session/update variants while keeping
 	// Meta strictly read-only.
 	UpdateWire struct {
-		SessionUpdate string             `json:"sessionUpdate"`
-		MessageID     string             `json:"messageId,omitempty"`
-		Content       json.RawMessage    `json:"content,omitempty"`
-		ToolCallID    string             `json:"toolCallId,omitempty"`
-		Name          string             `json:"name,omitempty"`
-		Title         string             `json:"title,omitempty"`
-		Kind          string             `json:"kind,omitempty"`
-		Status        string             `json:"status,omitempty"`
-		Locations     []ToolCallLocation `json:"locations,omitempty"`
-		RawInput      json.RawMessage    `json:"rawInput,omitempty"`
-		RawOutput     json.RawMessage    `json:"rawOutput,omitempty"`
-		Entries       []PlanEntry        `json:"entries,omitempty"`
-		Meta          json.RawMessage    `json:"_meta,omitempty"`
+		SessionUpdate     string             `json:"sessionUpdate"`
+		MessageID         string             `json:"messageId,omitempty"`
+		Content           json.RawMessage    `json:"content,omitempty"`
+		ToolCallID        string             `json:"toolCallId,omitempty"`
+		Name              string             `json:"name,omitempty"`
+		Title             string             `json:"title,omitempty"`
+		Kind              string             `json:"kind,omitempty"`
+		Status            string             `json:"status,omitempty"`
+		Locations         []ToolCallLocation `json:"locations,omitempty"`
+		RawInput          json.RawMessage    `json:"rawInput,omitempty"`
+		RawOutput         json.RawMessage    `json:"rawOutput,omitempty"`
+		Entries           []PlanEntry        `json:"entries,omitempty"`
+		AvailableCommands []AvailableCommand `json:"availableCommands,omitempty"`
+		Meta              json.RawMessage    `json:"_meta,omitempty"`
 	}
 
 	// PermissionOption describes one choice in session/request_permission.
@@ -308,5 +324,13 @@ type (
 		ToolCall  json.RawMessage    `json:"toolCall"`
 		Options   []PermissionOption `json:"options"`
 		Meta      json.RawMessage    `json:"_meta,omitempty"`
+	}
+
+	// RequestPermissionResult is the ACP JSON-RPC result payload for
+	// session/request_permission: `{"outcome":"selected","optionId":...}` or
+	// `{"outcome":"cancelled"}`.
+	RequestPermissionResult struct {
+		Outcome  string `json:"outcome"`
+		OptionID string `json:"optionId,omitempty"`
 	}
 )

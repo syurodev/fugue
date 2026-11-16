@@ -3,7 +3,8 @@
  "vendor": "agy",
  "summary": {
   "partials": 1,
-  "notices": 1
+  "notices": 1,
+  "server_requests": 0
  },
  "steps": [
   {
@@ -20,7 +21,7 @@
      "Origin": "user"
     },
     "rawRef": "",
-    "revision": 1,
+    "revision": 0,
     "turnId": ""
    }
   },
@@ -37,7 +38,7 @@
      "Status": "plain"
     },
     "rawRef": "",
-    "revision": 1,
+    "revision": 0,
     "turnId": ""
    }
   },

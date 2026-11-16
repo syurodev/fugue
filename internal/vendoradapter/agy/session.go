@@ -59,7 +59,10 @@ type Session struct {
 	modes         *SessionModeState
 	configOptions []ConfigOption
 
-	pendingRPCs map[string]chan Frame
+	pendingRPCs       map[string]chan Frame
+	seenApprovals     map[string]bool
+	pendingApprovals  map[string]pendingServerRequest
+	resolvedApprovals map[string]bool
 
 	closeOnce  sync.Once
 	closeProof process.StopProof
@@ -212,11 +215,6 @@ func (s *Session) Steer(_ context.Context, _ vendor.TurnRef, _ vendor.Input) err
 	return vendor.ErrUnsupported
 }
 
-// Resolve is unsupported in F9.8a; F9.8b adds verbatim permission relay.
-func (s *Session) Resolve(_ context.Context, _ vendor.ApprovalRef, _ vendor.Decision) error {
-	return vendor.ErrUnsupported
-}
-
 func (s *Session) validateInterruptTurn(turn vendor.TurnRef) (doneCh chan struct{}, acpSID string, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -270,6 +268,7 @@ func (s *Session) Close(ctx context.Context, _ vendor.CloseReason) (process.Stop
 	s.closeOnce.Do(func() {
 		s.mu.Lock()
 		s.state = stateClosed
+		s.rejectPendingApprovalsLocked()
 		if s.turnDoneCh != nil {
 			close(s.turnDoneCh)
 			s.turnDoneCh = nil

@@ -453,19 +453,17 @@ func (s *InteractionService) executeAnswer(cmd *AnswerInteractionCommand) (Answe
 }
 
 // ExpireExpired resolves any overdue pending requests and emits resolved events.
-func (s *InteractionService) ExpireExpired() []*interaction.Ticket {
-	return s.owner.ExpireExpired()
-}
+func (s *InteractionService) ExpireExpired() []*interaction.Ticket { return s.owner.ExpireExpired() }
 
 // PruneResolved prunes non-relayed resolved tickets past retention TTL.
-func (s *InteractionService) PruneResolved() {
-	s.owner.PruneResolved()
-}
+func (s *InteractionService) PruneResolved() { s.owner.PruneResolved() }
 
-// CancelPending cancels every pending interaction wait so a graceful drain
-// never hangs on an unanswered approval.
-func (s *InteractionService) CancelPending() {
-	s.owner.CancelPending()
+// CancelPending cancels every pending interaction wait so a graceful drain never hangs.
+func (s *InteractionService) CancelPending() { s.owner.CancelPending() }
+
+// CancelTurn closes all pending interaction requests belonging to (sessionID, turnID).
+func (s *InteractionService) CancelTurn(sessionID, turnID string) {
+	s.owner.CancelTurn(sessionID, turnID)
 }
 
 // TakeRelayed delivers a resolved relayed request once.
