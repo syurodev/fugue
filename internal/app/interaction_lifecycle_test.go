@@ -65,6 +65,28 @@ func runMemoryCycles(t *testing.T, ctx context.Context, svc *InteractionService,
 	}
 }
 
+const (
+	memoryWindows      = 5
+	memoryWindowCycles = 200
+)
+
+// fastestWindow runs memoryWindows windows of memoryWindowCycles cycles from
+// start and returns the shortest window's wall time.
+func fastestWindow(t *testing.T, svc *InteractionService, start uint64) time.Duration {
+	t.Helper()
+	realClock := clock.Real{}
+	var fastest time.Duration
+	for w := range uint64(memoryWindows) {
+		from := start + w*memoryWindowCycles
+		began := realClock.Now()
+		runMemoryCycles(t, t.Context(), svc, from, from+memoryWindowCycles)
+		if took := realClock.Now().Sub(began); w == 0 || took < fastest {
+			fastest = took
+		}
+	}
+	return fastest
+}
+
 func TestInteractionServiceMemoryBounded10kCycles(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Unix(100, 0))
@@ -82,19 +104,19 @@ func TestInteractionServiceMemoryBounded10kCycles(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	const measuredCycles = 1000
+	// The cost of one cycle must not grow with the number of resolved tickets
+	// held: a scan over them would make the last cycles about ten times slower
+	// than the first. Wall time on a shared runner is noisy, so each end is
+	// measured as the fastest of several short windows; noise only ever adds
+	// time, so the fastest window is the closest to the real cost.
 	const totalCycles = 10000
-	realClock := clock.Real{}
-	firstStart := realClock.Now()
-	runMemoryCycles(t, t.Context(), svc, 0, measuredCycles)
-	firstDuration := realClock.Now().Sub(firstStart)
-	runMemoryCycles(t, t.Context(), svc, measuredCycles, totalCycles-measuredCycles)
-	lastStart := realClock.Now()
-	runMemoryCycles(t, t.Context(), svc, totalCycles-measuredCycles, totalCycles)
-	lastDuration := realClock.Now().Sub(lastStart)
-	t.Logf("first 1,000 cycles: %s; last 1,000 cycles: %s", firstDuration, lastDuration)
-	if lastDuration > firstDuration*3 {
-		t.Fatalf("last 1,000 cycles took %s, more than 3x first 1,000 cycles %s", lastDuration, firstDuration)
+	const measured = memoryWindows * memoryWindowCycles
+	first := fastestWindow(t, svc, 0)
+	runMemoryCycles(t, t.Context(), svc, measured, totalCycles-measured)
+	last := fastestWindow(t, svc, totalCycles-measured)
+	t.Logf("fastest %d-cycle window: first %s, last %s", memoryWindowCycles, first, last)
+	if last > first*3 {
+		t.Fatalf("fastest late window took %s, more than 3x the fastest early window %s", last, first)
 	}
 
 	// Advance clock past ResolvedRetentionTTL so all tickets and receipts become evictable
