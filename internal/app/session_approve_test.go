@@ -19,7 +19,6 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
-	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/claude"
@@ -45,7 +44,7 @@ func newApproveFixture(t *testing.T) *approveFixture {
 	}
 	clk := clock.NewFake(time.Unix(100, 0))
 	hp, err := StartHost(t.Context(), &HostDeps{
-		DataDir: t.TempDir(), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
+		DataDir: cheapVaultDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("approve-test")),
 		Transport: newScriptedTransport(), VendorBinary: exe,
 		Bridge: VendorBridge{Binary: exe, Socket: filepath.Join(t.TempDir(), "host.sock")},
@@ -58,9 +57,7 @@ func newApproveFixture(t *testing.T) *approveFixture {
 			t.Errorf("close host: %v", closeErr)
 		}
 	})
-	if _, setupErr := hp.Vault().Setup(t.Context(), redact.NewSecret("approve-test-password")); setupErr != nil {
-		t.Fatal(setupErr)
-	}
+	unlockCheapVault(t, hp)
 	return startApproveSession(t, hp, clk)
 }
 
@@ -631,7 +628,7 @@ func startReadySessionWithoutTurn(t *testing.T) (*HostRuntime, *SessionToolServi
 	t.Helper()
 	clk := clock.NewFake(time.Unix(100, 0))
 	hp, err := StartHost(t.Context(), &HostDeps{
-		DataDir: t.TempDir(), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
+		DataDir: cheapVaultDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("approve-noturn")),
 		Transport: newScriptedTransport(), VendorBinary: mustExe(t),
 		Bridge: VendorBridge{Binary: mustExe(t), Socket: filepath.Join(t.TempDir(), "host.sock")},
@@ -644,9 +641,7 @@ func startReadySessionWithoutTurn(t *testing.T) (*HostRuntime, *SessionToolServi
 			t.Errorf("close host: %v", closeErr)
 		}
 	})
-	if _, setupErr := hp.Vault().Setup(t.Context(), redact.NewSecret("approve-noturn-pw")); setupErr != nil {
-		t.Fatal(setupErr)
-	}
+	unlockCheapVault(t, hp)
 	rt := hp.Runtime()
 	svc, err := rt.VendorService()
 	if err != nil {

@@ -65,20 +65,24 @@ func (s *Store) CreateSession(ctx context.Context, session *Session) error {
 
 // Append records one event with a contiguous per-session sequence.
 func (s *Store) Append(ctx context.Context, sessionID string, expected int64, event *Event) (int64, error) {
-	normalized, normalizeErr := normalizeEvent(event)
-	if normalizeErr != nil {
-		return 0, normalizeErr
+	return s.AppendBatch(ctx, sessionID, expected, []*Event{event})
+}
+
+// AppendBatch records the events in order with contiguous sequences, expected+1
+// through expected+len(events), in one transaction: all of them commit or none
+// does, and the commit's durable sync is paid once. It returns the last
+// sequence. An empty batch is invalid.
+func (s *Store) AppendBatch(ctx context.Context, sessionID string, expected int64, events []*Event) (int64, error) {
+	normalized, err := normalizeEvents(events)
+	if err != nil {
+		return 0, err
 	}
-	event = normalized
 	s.prepare.Lock()
 	defer s.prepare.Unlock()
 	if s.cache.IsPurged(sessionID) {
 		return 0, ErrPurged
 	}
-	if err := validateEvent(event); err != nil {
-		return 0, err
-	}
-	epoch, protected, gateErr := s.payloadGate(event)
+	epoch, protected, gateErr := s.batchGate(normalized)
 	if gateErr != nil {
 		return 0, gateErr
 	}
@@ -88,12 +92,15 @@ func (s *Store) Append(ctx context.Context, sessionID string, expected int64, ev
 	}
 	defer rollback(ctx, tx)
 	now := s.clock.Now().UTC().Format(time.RFC3339Nano)
-	if sequenceErr := advanceSequence(ctx, tx, sessionID, expected, now); sequenceErr != nil {
-		return 0, sequenceErr
-	}
-	sequence := expected + 1
-	if writeErr := s.appendRows(ctx, tx, sessionID, sequence, event, now); writeErr != nil {
-		return 0, writeErr
+	sequence := expected
+	for _, event := range normalized {
+		if sequenceErr := advanceSequence(ctx, tx, sessionID, sequence, now); sequenceErr != nil {
+			return 0, sequenceErr
+		}
+		sequence++
+		if writeErr := s.appendRows(ctx, tx, sessionID, sequence, event, now); writeErr != nil {
+			return 0, writeErr
+		}
 	}
 	if s.beforeCommit != nil {
 		return 0, fmt.Errorf("%w: %w", ErrUnavailable, s.beforeCommit)
@@ -106,6 +113,40 @@ func (s *Store) Append(ctx context.Context, sessionID string, expected int64, ev
 		return 0, fmt.Errorf("%w: commit event: %w", ErrUnavailable, err)
 	}
 	return sequence, nil
+}
+
+func normalizeEvents(events []*Event) ([]*Event, error) {
+	if len(events) == 0 {
+		return nil, errcode.New(errcode.InvalidArgument, "events required")
+	}
+	normalized := make([]*Event, len(events))
+	for i, event := range events {
+		var err error
+		if normalized[i], err = normalizeEvent(event); err != nil {
+			return nil, err
+		}
+	}
+	return normalized, nil
+}
+
+// batchGate validates every event and returns the vault epoch the commit must
+// hold when any event carries a protected payload.
+func (s *Store) batchGate(events []*Event) (vault.Snapshot, bool, error) {
+	var epoch vault.Snapshot
+	protected := false
+	for _, event := range events {
+		if err := validateEvent(event); err != nil {
+			return vault.Snapshot{}, false, err
+		}
+		eventEpoch, eventProtected, err := s.payloadGate(event)
+		if err != nil {
+			return vault.Snapshot{}, false, err
+		}
+		if eventProtected {
+			epoch, protected = eventEpoch, true
+		}
+	}
+	return epoch, protected, nil
 }
 
 // Snapshot reads the session and last sequence atomically.
