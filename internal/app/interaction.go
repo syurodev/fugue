@@ -462,10 +462,14 @@ func (s *InteractionService) PruneResolved() {
 	s.owner.PruneResolved()
 }
 
-// CancelPending cancels every pending interaction wait so a graceful drain
-// never hangs on an unanswered approval.
+// CancelPending cancels every pending interaction wait on drain.
 func (s *InteractionService) CancelPending() {
 	s.owner.CancelPending()
+}
+
+// CancelTurn closes all pending interaction requests belonging to (sessionID, turnID).
+func (s *InteractionService) CancelTurn(sessionID, turnID string) {
+	s.owner.CancelTurn(sessionID, turnID)
 }
 
 // TakeRelayed delivers a resolved relayed request once.

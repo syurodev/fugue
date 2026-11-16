@@ -171,8 +171,8 @@ func verifyPromptAndEndTurn(t *testing.T) {
 	if steerErr := sess.Steer(t.Context(), turn, vendor.Input{Text: "steer"}); !errors.Is(steerErr, vendor.ErrUnsupported) {
 		t.Fatalf("Steer = %v, want ErrUnsupported", steerErr)
 	}
-	if resolveErr := sess.Resolve(t.Context(), vendor.ApprovalRef{ID: "p"}, vendor.Decision{Allow: true}); !errors.Is(resolveErr, vendor.ErrUnsupported) {
-		t.Fatalf("Resolve = %v, want ErrUnsupported", resolveErr)
+	if resolveErr := sess.Resolve(t.Context(), vendor.ApprovalRef{ID: "p"}, vendor.Decision{Allow: true}); errcode.CodeOf(resolveErr) != errcode.NotFound {
+		t.Fatalf("Resolve unknown id = %v, want not_found", resolveErr)
 	}
 	if _, closeErr := sess.Close(t.Context(), vendor.CloseHostStop); closeErr != nil {
 		t.Fatalf("Close: %v", closeErr)
@@ -227,38 +227,52 @@ func verifyLoadSession(t *testing.T) {
 	}
 }
 
-func TestAgyPermissionRequestIsAnErrorUntilRelayed(t *testing.T) {
+const testPermOptionAllow = "allow"
+
+func TestAgyPermissionRequestIsRelayedAndResolved(t *testing.T) {
 	t.Parallel()
 	rpcLog := filepath.Join(t.TempDir(), "perm-rpcs.jsonl")
 	sess, _ := startFakeSession(t, fakePermissionConfigDir+":"+rpcLog, "")
 	if _, err := sess.Send(t.Context(), vendor.Input{Text: "run command"}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	awaitPermUnsupportedNotice(t, sess)
+	req := awaitPermServerRequest(t, sess)
+	_ = sess.SlashCommands()
+	if err := sess.Resolve(t.Context(), vendor.ApprovalRef{}, vendor.Decision{}); errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("empty id Resolve = %v, want invalid_argument", err)
+	}
+	if err := sess.Resolve(t.Context(), vendor.ApprovalRef{ID: "missing"}, vendor.Decision{}); errcode.CodeOf(err) != errcode.NotFound {
+		t.Fatalf("missing id Resolve = %v, want not_found", err)
+	}
+	if err := sess.Resolve(t.Context(), vendor.ApprovalRef{ID: req.RequestID}, vendor.Decision{Allow: true, Message: testPermOptionAllow}); err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if dupErr := sess.Resolve(t.Context(), vendor.ApprovalRef{ID: req.RequestID}, vendor.Decision{Allow: true, Message: testPermOptionAllow}); errcode.CodeOf(dupErr) != errcode.FailedPrecondition {
+		t.Fatalf("duplicate Resolve = %v, want failed_precondition", dupErr)
+	}
 	if _, err := sess.Close(t.Context(), vendor.CloseHostStop); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	assertPermErrorWirePayloads(t, string(readFile(t, rpcLog)))
+	assertPermSelectedWirePayload(t, string(readFile(t, rpcLog)))
 }
 
-func awaitPermUnsupportedNotice(t *testing.T, sess *Session) {
+func awaitPermServerRequest(t *testing.T, sess *Session) *vendor.ServerRequest {
 	t.Helper()
 	for obs := range sess.Observations() {
 		if obs.ServerRequest != nil {
-			t.Fatalf("F9.8a must not emit ServerRequest, got %+v", obs.ServerRequest)
-		}
-		for i := range obs.Records {
-			if obs.Records[i].Kind == transcript.Notice && obs.Records[i].RawRef == "acp:"+MethodSessionRequestPermission {
-				return
-			}
+			return obs.ServerRequest
 		}
 	}
-	t.Fatal("expected unsupported_event notice for session/request_permission")
+	t.Fatal("expected ServerRequest for session/request_permission")
+	return nil
 }
 
-func assertPermErrorWirePayloads(t *testing.T, rawRPCs string) {
+func assertPermSelectedWirePayload(t *testing.T, rawRPCs string) {
 	t.Helper()
-	wantBytes, err := NewCodec().EncodeResponseError(json.RawMessage(`"perm-1"`), RPCErrorMethodNotSupported, RPCErrorPermissionNotRelayed)
+	wantBytes, err := NewCodec().EncodeResponseResult(json.RawMessage(`"perm-1"`), RequestPermissionResult{
+		Outcome:  PermissionOutcomeSelected,
+		OptionID: testPermOptionAllow,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -273,9 +287,6 @@ func assertPermErrorWirePayloads(t *testing.T, rawRPCs string) {
 	if !slices.Equal(responses, []string{wantLine}) {
 		t.Fatalf("responses = %q, want exact %q (all RPCs:\n%s)", responses, []string{wantLine}, rawRPCs)
 	}
-	if strings.Contains(rawRPCs, `"selected"`) || strings.Contains(rawRPCs, `"cancelled"`) || strings.Contains(rawRPCs, `"result"`) {
-		t.Fatalf("unexpected outcome/result payload in RPC log:\n%s", rawRPCs)
-	}
 }
 
 func TestAgyOtherServerRequestsGetANeutralError(t *testing.T) {
@@ -285,20 +296,24 @@ func TestAgyOtherServerRequestsGetANeutralError(t *testing.T) {
 	if _, err := sess.Send(t.Context(), vendor.Input{Text: "run requests"}); err != nil {
 		t.Fatalf("Send: %v", err)
 	}
-	notices := collectServerRequestNotices(t, sess)
+	notices, sawPermReq := collectServerRequestNotices(t, sess)
 	if _, err := sess.Close(t.Context(), vendor.CloseHostStop); err != nil {
 		t.Fatalf("Close: %v", err)
+	}
+	if !sawPermReq {
+		t.Fatal("expected session/request_permission to emit ServerRequest")
 	}
 	assertServerRequestNoticeSplit(t, notices)
 	assertExactServerRequestRPCs(t, string(readFile(t, rpcLog)))
 }
 
-func collectServerRequestNotices(t *testing.T, sess *Session) map[string]transcript.Item {
+func collectServerRequestNotices(t *testing.T, sess *Session) (map[string]transcript.Item, bool) {
 	t.Helper()
-	notices := make(map[string]transcript.Item, 3)
+	notices := make(map[string]transcript.Item, 2)
+	sawPermReq := false
 	for obs := range sess.Observations() {
-		if obs.ServerRequest != nil {
-			t.Fatalf("F9.8a must not emit ServerRequest, got %+v", obs.ServerRequest)
+		if obs.ServerRequest != nil && obs.ServerRequest.Method == MethodSessionRequestPermission {
+			sawPermReq = true
 		}
 		for i := range obs.Records {
 			rec := obs.Records[i]
@@ -307,21 +322,18 @@ func collectServerRequestNotices(t *testing.T, sess *Session) map[string]transcr
 			}
 		}
 		if obs.TurnEnd != nil {
-			return notices
+			return notices, sawPermReq
 		}
 	}
 	t.Fatal("expected TurnEnd after server requests")
-	return nil
+	return nil, false
 }
 
 func assertServerRequestNoticeSplit(t *testing.T, notices map[string]transcript.Item) {
 	t.Helper()
 	const codeUnsupported = "unsupported_event"
-	permRec, ok := notices["acp:"+MethodSessionRequestPermission]
-	wantPermMeta := transcript.NoticeMetadata{Level: "warning", Code: codeUnsupported}
-	wantPermContent := transcript.NoticeContent{Text: "Antigravity requested permission, which Fugue cannot relay yet"}
-	if !ok || permRec.Metadata != wantPermMeta || permRec.Content != wantPermContent {
-		t.Fatalf("permission notice = %+v, want warning with permission text", permRec)
+	if _, ok := notices["acp:"+MethodSessionRequestPermission]; ok {
+		t.Fatalf("session/request_permission must be relayed, not recorded as unsupported notice: %+v", notices)
 	}
 	wantNeutralMeta := transcript.NoticeMetadata{Level: "info", Code: codeUnsupported}
 	wantNeutralContent := transcript.NoticeContent{}
@@ -337,9 +349,9 @@ func assertExactServerRequestRPCs(t *testing.T, rawRPCs string) {
 	t.Helper()
 	lines := nonEmptyLines(rawRPCs)
 	wantLines := []string{
-		`{"jsonrpc":"2.0","id":"perm-1","error":{"code":-32601,"message":"permission relay is not supported yet"}}`,
 		`{"jsonrpc":"2.0","id":42,"error":{"code":-32601,"message":"method not supported by Fugue"}}`,
 		`{"jsonrpc":"2.0","id":"req-str-9","error":{"code":-32601,"message":"method not supported by Fugue"}}`,
+		`{"jsonrpc":"2.0","id":"perm-1","error":{"code":-32000,"message":"the approval request could not be completed"}}`,
 	}
 	if len(lines) != 6 {
 		t.Fatalf("total stdin wire lines = %d, want 6 (3 requests + 3 exact error responses):\n%s", len(lines), rawRPCs)

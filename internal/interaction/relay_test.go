@@ -2,6 +2,7 @@ package interaction
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -281,5 +282,38 @@ func TestOperationKeysHaveNeutralFormats(t *testing.T) {
 	key := mustVendorKey(t, "turn-1", "req-1")
 	if ensured := mustEnsure(t, owner, relayedSpec(t, "turn-1", "req-1")); ensured.OperationID != key {
 		t.Fatalf("operation ID = %q, want %q", ensured.OperationID, key)
+	}
+}
+
+func TestRequestOfACancelledTurnIsAnsweredCancelledWithoutATicket(t *testing.T) {
+	t.Parallel()
+	owner, _, responder, _ := newTestOwner(t)
+	var events []LifecycleEvent
+	owner.SetOnLifecycle(func(ev LifecycleEvent) { events = append(events, ev) })
+	owner.CancelTurn(testSessionID, "turn-1")
+	ticket := mustEnsure(t, owner, relayedSpec(t, "turn-1", "late-1"))
+	if !ticket.Resolved || ticket.Outcome != OutcomeCancelled || !ticket.TurnCancelled {
+		t.Fatalf("late ticket = %+v, want resolved cancelled with TurnCancelled", ticket)
+	}
+	if len(owner.Pending()) != 0 || len(events) != 0 || responder.count() != 0 {
+		t.Fatalf("pending=%d events=%+v prompts=%d, want none", len(owner.Pending()), events, responder.count())
+	}
+	if _, err := owner.LookupOperation(ticket.OperationID); err == nil {
+		t.Fatal("the cancelled-turn ticket must not be stored")
+	}
+	// A new turn of the session forgets the cancelled one.
+	if next := mustEnsure(t, owner, relayedSpec(t, "turn-2", "req-2")); next.Resolved {
+		t.Fatalf("new-turn ticket = %+v, want pending", next)
+	}
+	owner.CancelTurn(testSessionID, "turn-3")
+	owner.ResetSession(testSessionID)
+	if again := mustEnsure(t, owner, relayedSpec(t, "turn-3", "req-3")); again.Resolved {
+		t.Fatalf("after ResetSession ticket = %+v, want pending", again)
+	}
+	for i := range maxCancelledTurns + 5 {
+		owner.CancelTurn(fmt.Sprintf("s-%d", i), "t")
+	}
+	if got := len(owner.cancelledTurns); got > maxCancelledTurns {
+		t.Fatalf("cancelled turns = %d, want <= %d", got, maxCancelledTurns)
 	}
 }

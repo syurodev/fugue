@@ -19,6 +19,10 @@ no installed CLI.
    - `initialize`, `session/new`, and Turn 1 emitting `session/request_permission` (`id: "1"`). During recording the harness returned JSON-RPC error `-32601` (`permission relay is not supported yet`), producing `tool_call_update` with `status: "failed"` and `end_turn`.
 4. `agy-1.5.9-session4-load.jsonl` (and `.turns.json`):
    - `initialize` and `session/load` of the cancelled session, replaying `user_message_chunk` and `agent_thought_chunk` notifications plus the `session/load` result and `session_info_update`.
+5. `agy-1.5.9-session5-permission-reject.jsonl` (and `.turns.json`):
+   - `initialize`, `session/new`, `available_commands_update`, and Turn 1 emitting `session/request_permission` (`id: "1"`). Answered `reject_once` (`optionId: "deny"`), producing `tool_call_update` with `status: "failed"` (`permission denied for tool run_command`) and `end_turn`.
+6. `agy-1.5.9-session6-permission-cancel.jsonl` (and `.turns.json`):
+   - `initialize`, `session/new`, `available_commands_update`, and Turn 1 emitting `session/request_permission` (`id: "1"`). Cancelled via `session/cancel` (`{"outcome":"cancelled"}`), returning `stopReason: "cancelled"`.
 
 ## Redaction (applied before commit; verified by `TestAgyFixturesContainNoHostIdentity`)
 

@@ -54,6 +54,9 @@ type Owner struct {
 	pendingBySession  map[string]int
 	pendingIDs        map[string]struct{}
 	nextPendingExpiry time.Time
+	// cancelledTurns holds the last user-cancelled turn per session so a late
+	// request of that turn is answered cancelled instead of opening a ticket.
+	cancelledTurns map[string]string
 }
 
 // NewOwner creates an Owner with a fresh incarnation ID.
@@ -89,6 +92,7 @@ func NewOwner(cfg *Config) (*Owner, error) {
 		receipts:         map[string]*Receipt{},
 		pendingBySession: map[string]int{},
 		pendingIDs:       map[string]struct{}{},
+		cancelledTurns:   map[string]string{},
 	}, nil
 }
 
@@ -126,6 +130,11 @@ func (o *Owner) Ensure(spec *Spec) (*Ticket, bool, error) {
 	if existing, ok := o.byOperation[spec.OperationID]; ok {
 		return o.readBackLocked(existing, spec, now)
 	}
+	if turn, ok := o.cancelledTurns[spec.Binding.SessionID]; ok && turn == spec.Binding.TurnID {
+		return o.cancelledTurnTicketLocked(spec, now)
+	} else if ok {
+		delete(o.cancelledTurns, spec.Binding.SessionID)
+	}
 	if err := o.checkPendingLimitsLocked(spec, now); err != nil {
 		o.mu.Unlock()
 		return nil, false, err
@@ -153,6 +162,18 @@ func (o *Owner) Ensure(spec *Spec) (*Ticket, bool, error) {
 		return cp, true, nil
 	}
 	return o.promptAndAudit(ticket, cp, &openedEv, now)
+}
+
+// cancelledTurnTicketLocked returns an unstored ticket already resolved as a
+// turn cancel, without a requested event, and unlocks o.mu.
+func (o *Owner) cancelledTurnTicketLocked(spec *Spec, now time.Time) (*Ticket, bool, error) {
+	defer o.mu.Unlock()
+	ticket, err := o.newTicketLocked(spec, now)
+	if err != nil {
+		return nil, false, err
+	}
+	ticket.Resolved, ticket.ResolvedAt, ticket.Outcome, ticket.TurnCancelled = true, now, OutcomeCancelled, true
+	return ticket, true, nil
 }
 
 func (o *Owner) readBackLocked(existing *Ticket, spec *Spec, now time.Time) (*Ticket, bool, error) {

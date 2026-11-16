@@ -9,6 +9,7 @@ import (
 	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/vendor"
+	"github.com/syurodev/fugue/internal/vendoradapter/agy"
 	"github.com/syurodev/fugue/internal/vendoradapter/codex"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -17,6 +18,7 @@ var errRelayUnavailable = errors.New(approveUnavailableMessage)
 
 type serverRequestRelayer interface {
 	RelayServerRequest(ctx context.Context, sessionID string, req *vendor.ServerRequest, session vendor.Session)
+	CancelTurn(sessionID, turnID string)
 }
 
 type codexRelayChoice struct {
@@ -24,6 +26,14 @@ type codexRelayChoice struct {
 	selectedOption string
 	decisionLabel  string
 	note           string
+}
+
+// CancelTurn closes pending interaction tickets for (sessionID, turnID) when
+// the user interrupts a turn.
+func (s *SessionToolService) CancelTurn(sessionID, turnID string) {
+	if s.interactions != nil {
+		s.interactions.CancelTurn(sessionID, turnID)
+	}
 }
 
 // RelayServerRequest relays a Codex server request (item/*/requestApproval or
@@ -67,19 +77,38 @@ func (s *SessionToolService) executeCodexRelay(
 		resolveCodexRelayError(ctx, session, req.RequestID)
 		return
 	}
-	choice, ok := s.awaitAndTakeCodexRelayed(ctx, binding, opID, digest, req.Kind, spec)
+	choice, ok := s.awaitAndTakeCodexRelayed(ctx, binding, opID, digest, req, spec)
 	if !ok || !s.canApproveNow(binding) {
 		resolveCodexRelayError(ctx, session, req.RequestID)
 		return
 	}
-	if err := s.recordCodexApprovalDecided(ctx, binding, turnID, opID, req, &choice); err != nil || !s.canApproveNow(binding) {
-		resolveCodexRelayError(ctx, session, req.RequestID)
-		return
+	if !choice.decision.Cancelled {
+		if err := s.recordCodexApprovalDecided(ctx, binding, turnID, opID, req, &choice); err != nil || !s.canApproveNow(binding) {
+			resolveCodexRelayError(ctx, session, req.RequestID)
+			return
+		}
 	}
-	s.tombstones.putCodex(binding.SessionID, opID, digest, choice.decision.Allow, choice.selectedOption, choice.decision.Answers)
+	s.recordRelayTombstone(binding.SessionID, opID, digest, req.Method, &choice)
 	if err := session.Resolve(context.WithoutCancel(ctx), vendor.ApprovalRef{ID: req.RequestID}, choice.decision); err != nil {
 		return
 	}
+}
+
+func (s *SessionToolService) recordRelayTombstone(
+	sessionID, opID string,
+	digest [sha256.Size]byte,
+	method string,
+	choice *codexRelayChoice,
+) {
+	if isAgyPermissionMethod(method) {
+		s.tombstones.putAgy(sessionID, opID, digest, choice.selectedOption, choice.decision.Allow, choice.decision.Cancelled)
+		return
+	}
+	s.tombstones.putCodex(sessionID, opID, digest, choice.decision.Allow, choice.selectedOption, choice.decision.Answers)
+}
+
+func isAgyPermissionMethod(method string) bool {
+	return method == agy.MethodSessionRequestPermission
 }
 
 func resolveCodexRelayError(ctx context.Context, session vendor.Session, requestID string) {
@@ -144,10 +173,7 @@ func buildCodexRelaySpec(sessionID, turnID, opID string, req *vendor.ServerReque
 	}
 	switch req.Kind {
 	case vendor.ServerRequestConfirm:
-		options := make([]interaction.Option, 0, len(req.Options))
-		for _, opt := range req.Options {
-			options = append(options, interaction.Option{ID: opt, Label: opt})
-		}
+		options := buildConfirmRelayOptions(req)
 		return &interaction.Spec{
 			OperationID: opID,
 			Kind:        interaction.KindConfirm,
@@ -172,6 +198,25 @@ func buildCodexRelaySpec(sessionID, turnID, opID string, req *vendor.ServerReque
 	default:
 		return nil, errcode.New(errcode.InvalidArgument, "unsupported server request kind")
 	}
+}
+
+func buildConfirmRelayOptions(req *vendor.ServerRequest) []interaction.Option {
+	if len(req.OptionDetails) > 0 {
+		options := make([]interaction.Option, 0, len(req.OptionDetails))
+		for _, opt := range req.OptionDetails {
+			options = append(options, interaction.Option{
+				ID:          opt.ID,
+				Label:       opt.Name,
+				Description: opt.Kind,
+			})
+		}
+		return options
+	}
+	options := make([]interaction.Option, 0, len(req.Options))
+	for _, opt := range req.Options {
+		options = append(options, interaction.Option{ID: opt, Label: opt})
+	}
+	return options
 }
 
 func buildCodexRelayQuestions(req *vendor.ServerRequest) []interaction.Question {
@@ -227,12 +272,15 @@ func (s *SessionToolService) awaitAndTakeCodexRelayed(
 	binding SessionBinding,
 	opID string,
 	digest [sha256.Size]byte,
-	kind vendor.ServerRequestKind,
+	req *vendor.ServerRequest,
 	spec *interaction.Spec,
 ) (codexRelayChoice, bool) {
 	ticket, err := s.interactions.Ensure(spec)
 	if err != nil {
 		return codexRelayChoice{}, false
+	}
+	if ticket.TurnCancelled {
+		return translateServerRelayedOutcome(ticket, req)
 	}
 	resolved, err := s.interactions.awaitResolvedUntil(ctx, ticket.RequestID, s.tokens.watch(binding))
 	if err != nil || resolved == nil || !resolved.Resolved {
@@ -246,17 +294,68 @@ func (s *SessionToolService) awaitAndTakeCodexRelayed(
 	if !s.canApproveNow(binding) {
 		return codexRelayChoice{}, false
 	}
-	if _, ok := translateCodexRelayedOutcome(resolved, kind); !ok {
+	if _, ok := translateServerRelayedOutcome(resolved, req); !ok {
 		return codexRelayChoice{}, false
 	}
 	delivered, err := s.interactions.TakeRelayed(opID)
 	if err != nil {
-		return s.fallbackCodexRelayedTombstone(err, binding, opID, digest, kind)
+		return s.fallbackCodexRelayedTombstone(err, binding, opID, digest, req.Kind)
 	}
-	return translateCodexRelayedOutcome(delivered, kind)
+	return translateServerRelayedOutcome(delivered, req)
+}
+
+func translateServerRelayedOutcome(ticket *interaction.Ticket, req *vendor.ServerRequest) (codexRelayChoice, bool) {
+	if req != nil && isAgyPermissionMethod(req.Method) {
+		return translateAgyRelayedOutcome(ticket, req)
+	}
+	var kind vendor.ServerRequestKind
+	if req != nil {
+		kind = req.Kind
+	}
+	return translateCodexRelayedOutcome(ticket, kind)
+}
+
+func translateAgyRelayedOutcome(ticket *interaction.Ticket, req *vendor.ServerRequest) (codexRelayChoice, bool) {
+	switch ticket.Outcome {
+	case interaction.OutcomeAnswered:
+		if ticket.SelectedOptionID == "" {
+			return codexRelayChoice{}, false
+		}
+		return codexRelayChoice{
+			decision:       vendor.Decision{Allow: agyOptionAllows(req, ticket.SelectedOptionID), Message: ticket.SelectedOptionID},
+			selectedOption: ticket.SelectedOptionID,
+			decisionLabel:  ticket.SelectedOptionID,
+			note:           ticket.Text,
+		}, true
+	case interaction.OutcomeCancelled:
+		if !ticket.TurnCancelled {
+			return codexRelayChoice{}, false
+		}
+		return codexRelayChoice{
+			decision: vendor.Decision{Cancelled: true},
+		}, true
+	case interaction.OutcomeDenied, interaction.OutcomeAllowedOnce, interaction.OutcomeAllowedSession,
+		interaction.OutcomeUnavailable, interaction.OutcomeExpired:
+		return codexRelayChoice{}, false
+	default:
+		return codexRelayChoice{}, false
+	}
+}
+
+// agyOptionAllows reports whether the chosen agy option is an allow kind.
+func agyOptionAllows(req *vendor.ServerRequest, optionID string) bool {
+	for _, opt := range req.OptionDetails {
+		if opt.ID == optionID {
+			return opt.Kind == agy.PermissionOptionKindAllowOnce || opt.Kind == agy.PermissionOptionKindAllowAlways
+		}
+	}
+	return false
 }
 
 func codexTombstoneLabel(entry *approveTombstoneEntry, kind vendor.ServerRequestKind) string {
+	if entry.cancelled {
+		return ""
+	}
 	if kind == vendor.ServerRequestQuestion {
 		if entry.allow {
 			return string(interaction.OutcomeAnswered)
@@ -350,13 +449,7 @@ func translateCodexRelayedOutcome(ticket *interaction.Ticket, kind vendor.Server
 	}
 }
 
-func (s *SessionToolService) recordCodexApprovalDecided(
-	ctx context.Context,
-	binding SessionBinding,
-	turnID, opID string,
-	req *vendor.ServerRequest,
-	choice *codexRelayChoice,
-) error {
+func (s *SessionToolService) recordCodexApprovalDecided(ctx context.Context, binding SessionBinding, turnID, opID string, req *vendor.ServerRequest, choice *codexRelayChoice) error {
 	if s.recorder == nil || s.ids == nil {
 		return errcode.New(errcode.FailedPrecondition, approveUnavailableMessage)
 	}
@@ -400,84 +493,4 @@ func (s *SessionToolService) recordCodexApprovalDecided(
 		return errcode.Wrap(errcode.Internal, "record approval decision", recErr)
 	}
 	return nil
-}
-
-func (t *approveTombstones) tryBeginInFlight(sessionID, opID string) bool {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	sess, ok := t.sessions[sessionID]
-	if !ok {
-		sess = &sessionApproveTombstone{
-			entries:  make(map[string]approveTombstoneEntry),
-			inFlight: make(map[string]bool),
-		}
-		t.sessions[sessionID] = sess
-	}
-	if sess.inFlight == nil {
-		sess.inFlight = make(map[string]bool)
-	}
-	if sess.inFlight[opID] {
-		return false
-	}
-	sess.inFlight[opID] = true
-	return true
-}
-
-func (t *approveTombstones) finishInFlight(sessionID, opID string) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	if sess, ok := t.sessions[sessionID]; ok && sess.inFlight != nil {
-		delete(sess.inFlight, opID)
-	}
-}
-
-func codexDecisionFromTombstone(entry *approveTombstoneEntry) vendor.Decision {
-	return vendor.Decision{
-		Allow:   entry.allow,
-		Message: entry.selectedOption,
-		Answers: cloneCodexAnswers(entry.answers),
-	}
-}
-
-func cloneCodexAnswers(answers map[string][]string) map[string][]string {
-	if answers == nil {
-		return nil
-	}
-	out := make(map[string][]string, len(answers))
-	for k, vals := range answers {
-		cloned := make([]string, len(vals))
-		copy(cloned, vals)
-		out[k] = cloned
-	}
-	return out
-}
-
-func (t *approveTombstones) putCodex(
-	sessionID, opID string,
-	digest [sha256.Size]byte,
-	allow bool,
-	selectedOption string,
-	answers map[string][]string,
-) {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	sess, ok := t.sessions[sessionID]
-	if !ok {
-		sess = &sessionApproveTombstone{entries: make(map[string]approveTombstoneEntry)}
-		t.sessions[sessionID] = sess
-	}
-	if _, exists := sess.entries[opID]; !exists {
-		if len(sess.order) >= approveMaxTombstonesPerSess {
-			oldest := sess.order[0]
-			sess.order = sess.order[1:]
-			delete(sess.entries, oldest)
-		}
-		sess.order = append(sess.order, opID)
-	}
-	sess.entries[opID] = approveTombstoneEntry{
-		digest:         digest,
-		allow:          allow,
-		selectedOption: selectedOption,
-		answers:        cloneCodexAnswers(answers),
-	}
 }
