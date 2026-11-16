@@ -76,6 +76,7 @@ type Service struct {
 	homeDir           string
 	grantInvalidator  GrantInvalidator
 	beforeStoreUpdate func(ctx context.Context, id string) error
+	rewriteRootsFn    func([]byte, []Root) ([]byte, bool)
 }
 
 // NewService returns a new workspace Service.

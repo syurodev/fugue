@@ -37,6 +37,17 @@ func (p *Presence) Show(v bool) {
 	p.spring.Target = 0
 }
 
+// Snap puts the element at rest, present or absent, with no animation: the
+// reduced-motion path (UK-04), where a change lands in the same frame.
+func (p *Presence) Snap(shown bool) {
+	p.shown = shown
+	v := float32(0)
+	if shown {
+		v = 1
+	}
+	p.spring.Snap(v)
+}
+
 // Shown reports whether the element was last asked to be present.
 func (p *Presence) Shown() bool { return p.shown }
 

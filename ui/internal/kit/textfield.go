@@ -157,9 +157,8 @@ func (s *TextFieldState) Layout(env *Env, gtx *layout.Context, p *TextFieldProps
 	if p.Variant == TextFieldSearch {
 		cf := followState(env, &s.core.clearF, s.core.text() != "")
 		if cf > 0 {
-			btn := trailingButtonSize(gtx)
 			var clicked bool
-			clicked, s.clearMv = s.clear.begin(env, gtx, image.Pt(btn, btn), pressOpts{disabled: p.Disabled})
+			clicked, s.clearMv = trailingBegin(env, gtx, &s.clear, trailingRect(gtx, w, pre), pressOpts{disabled: p.Disabled})
 			if clicked {
 				s.core.setText("")
 				ev.Changed = true
@@ -168,9 +167,8 @@ func (s *TextFieldState) Layout(env *Env, gtx *layout.Context, p *TextFieldProps
 	}
 	if p.Variant == TextFieldSecret {
 		followState(env, &s.core.revealF, s.revealed)
-		btn := trailingButtonSize(gtx)
 		var clicked bool
-		clicked, s.revealMv = s.reveal.begin(env, gtx, image.Pt(btn, btn), pressOpts{disabled: p.Disabled, toggled: s.revealed})
+		clicked, s.revealMv = trailingBegin(env, gtx, &s.reveal, trailingRect(gtx, w, pre), pressOpts{disabled: p.Disabled, toggled: s.revealed})
 		if clicked {
 			s.revealed = !s.revealed
 		}
@@ -221,6 +219,22 @@ func textFieldSlots(env *Env, gtx *layout.Context, p *TextFieldProps) (lead, rig
 // buttons: the small control token, never under size.hit.min (§3.4).
 func trailingButtonSize(gtx *layout.Context) int {
 	return max(gtx.Dp(theme.ControlSM), gtx.Dp(theme.HitMin))
+}
+
+// trailingRect is the box of the in-box clear and reveal buttons in the
+// field's coordinates: the right edge of the box, centered on it.
+func trailingRect(gtx *layout.Context, w int, sz fieldSizes) image.Rectangle {
+	btn := trailingButtonSize(gtx)
+	top := sz.labelH + (sz.boxH-btn)/2
+	return image.Rect(w-gtx.Dp(theme.SpaceXS)-btn, top, w-gtx.Dp(theme.SpaceXS), top+btn)
+}
+
+// trailingBegin runs a trailing button's input with its hit area where the
+// button is drawn: an area registered at the field's origin would sit over
+// the label and the leading icon instead (UK-E10).
+func trailingBegin(env *Env, gtx *layout.Context, c *pressable, r image.Rectangle, o pressOpts) (clicked bool, mv motionVals) {
+	at(gtx, r.Min, func(gtx *layout.Context) { clicked, mv = c.begin(env, gtx, r.Size(), o) })
+	return clicked, mv
 }
 
 // outOfRange reports a parsed number outside the caller's range (§6.8);
@@ -312,43 +326,39 @@ func (s *TextFieldState) drawInside(env *Env, gtx *layout.Context, p *TextFieldP
 // button fading in with text, the secret reveal with its eye crossfade.
 // Their input ran in Layout; this is the painting half of the frame.
 func (s *TextFieldState) drawTrailing(env *Env, gtx *layout.Context, p *TextFieldProps, w int, sz fieldSizes, disabled bool) error {
-	btn := trailingButtonSize(gtx)
-	top := sz.labelH + (sz.boxH-btn)/2
+	r := trailingRect(gtx, w, sz)
+	body := image.Rectangle{Max: r.Size()}
+	btn := r.Dx()
+	var err error
+	// The button paints in its own coordinates, where its hit area and its
+	// ripple are (trailingBegin), so the area and the drawing never part.
 	switch p.Variant {
 	case TextFieldSearch:
 		if cf := s.core.clearF.Value(); cf > 0 {
-			r := image.Rect(w-gtx.Dp(theme.SpaceXS)-btn, top, w-gtx.Dp(theme.SpaceXS), top+btn)
 			l := iconButtonLookOf(env, IconButtonGhost, false, disabled).dim(cf)
-			var err error
-			s.clear.paint(env, gtx, r, gtx.Dp(theme.RadiusSM), l, s.clearMv, func(fg color.NRGBA) {
-				// The paint body sits at r; the content draws from r's origin,
-				// like a Button's does from its own box's.
-				at(gtx, r.Min, func(gtx *layout.Context) {
+			at(gtx, r.Min, func(gtx *layout.Context) {
+				s.clear.paint(env, gtx, body, gtx.Dp(theme.RadiusSM), l, s.clearMv, func(fg color.NRGBA) {
 					pt := image.Pt((btn-gtx.Dp(theme.IconSM))/2, (btn-gtx.Dp(theme.IconSM))/2)
 					if e := drawIconAt(env, gtx, pt, IconClose, theme.IconSM, fg); e != nil {
 						err = fmt.Errorf("draw the clear icon: %w", e)
 					}
 				})
 			})
-			return err
 		}
 	case TextFieldSecret:
-		r := image.Rect(w-gtx.Dp(theme.SpaceXS)-btn, top, w-gtx.Dp(theme.SpaceXS), top+btn)
 		l := iconButtonLookOf(env, IconButtonGhost, s.revealed, disabled)
 		rv := s.core.revealF.Value()
-		var err error
-		s.reveal.paint(env, gtx, r, gtx.Dp(theme.RadiusSM), l, s.revealMv, func(fg color.NRGBA) {
-			at(gtx, r.Min, func(gtx *layout.Context) {
+		at(gtx, r.Min, func(gtx *layout.Context) {
+			s.reveal.paint(env, gtx, body, gtx.Dp(theme.RadiusSM), l, s.revealMv, func(fg color.NRGBA) {
 				pt := image.Pt((btn-gtx.Dp(theme.IconMD))/2, (btn-gtx.Dp(theme.IconMD))/2)
 				if e := crossfadeIcons(env, gtx, pt, theme.IconMD, IconEye, IconEyeOff, fg, rv); e != nil {
 					err = fmt.Errorf("draw the reveal icon: %w", e)
 				}
 			})
 		})
-		return err
 	case TextFieldText, TextFieldNumber:
 	}
-	return nil
+	return err
 }
 
 // maskOf is the editor's Mask: the bullet while masked, none revealed.
