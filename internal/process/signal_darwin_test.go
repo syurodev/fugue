@@ -128,8 +128,9 @@ func waitForZombieGroup(t *testing.T, pgid int) (zombies, live int) {
 // TestSignalErrorsForAMemberMidExitAreGone reproduces the window after
 // SIGKILL in which XNU has set P_WEXIT but the process is still SRUN: every
 // signal to it fails with EPERM although the process table lists it as not
-// yet a zombie. The window is real but short, so the test polls for it
-// across many short-lived groups and fails if it is never observed.
+// yet a zombie. The window is real but short and depends on runner speed, so
+// this real-kernel check asserts only when it sees the window; the
+// deterministic guarantee is TestKinfoCanBeSignaled.
 func TestSignalErrorsForAMemberMidExitAreGone(t *testing.T) {
 	t.Parallel()
 	const attempts = 300
@@ -137,10 +138,31 @@ func TestSignalErrorsForAMemberMidExitAreGone(t *testing.T) {
 	for range attempts {
 		observed += midExitAttempt(t)
 	}
-	if observed == 0 {
-		t.Fatalf("no mid-exit EPERM window was observed in %d attempts", attempts)
-	}
 	t.Logf("mid-exit EPERM observations: %d in %d attempts", observed, attempts)
+}
+
+func TestKinfoCanBeSignaled(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name  string
+		stat  int8
+		flag  int32
+		alive bool
+	}{
+		{"running", 2, 0x4004, true},
+		{"running mid-exit", 2, 0x4004 | pWExit, false},
+		{"zombie", sZomb, 0x4004, false},
+		{"zombie mid-exit", sZomb, 0x4004 | pWExit, false},
+		{"no state", 0, 0, false},
+	}
+	for _, tc := range cases {
+		var kp unix.KinfoProc
+		kp.Proc.P_stat = tc.stat
+		kp.Proc.P_flag = tc.flag
+		if got := kinfoCanBeSignaled(&kp); got != tc.alive {
+			t.Errorf("%s: kinfoCanBeSignaled = %v, want %v", tc.name, got, tc.alive)
+		}
+	}
 }
 
 // midExitAttempt kills a one-process group and, each time a signal fails
