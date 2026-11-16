@@ -134,17 +134,16 @@ func filteredEnv(hostEnv []string, home vendor.AccountHome, extras []string) []s
 	return process.FilterEnv(hostEnv, process.DefaultAllowlist(), vendorHome, extras)
 }
 
-// Capability is what the Antigravity F9.8a core adapter declares (vendor-runtime §6).
-// Per-request approval relay and vendor slash commands land in F9.8b.
+// Capability is what the Antigravity adapter declares (vendor-runtime §6).
 func Capability() vendor.Capability {
 	return vendor.Capability{
-		PerRequestApproval:  false,
+		PerRequestApproval:  true,
 		BlockAllToolCalls:   false,
 		Interrupt:           true,
 		Steer:               false,
 		Resume:              true,
 		PartialDeltas:       true,
-		VendorSlashCommands: false,
+		VendorSlashCommands: true,
 		DirectQuota:         false,
 		ModelList:           true,
 	}

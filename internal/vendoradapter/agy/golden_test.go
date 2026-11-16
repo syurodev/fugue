@@ -17,21 +17,24 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/transcript"
+	"github.com/syurodev/fugue/internal/vendor"
 )
 
 type replayStep struct {
-	Line   int            `json:"line"`
-	Op     string         `json:"op"`
-	Item   map[string]any `json:"item,omitempty"`
-	Before map[string]any `json:"before,omitempty"`
-	After  map[string]any `json:"after,omitempty"`
-	Init   *Init          `json:"init,omitempty"`
-	End    *TurnEnd       `json:"turn_end,omitempty"`
+	Line          int                   `json:"line"`
+	Op            string                `json:"op"`
+	Item          map[string]any        `json:"item,omitempty"`
+	Before        map[string]any        `json:"before,omitempty"`
+	After         map[string]any        `json:"after,omitempty"`
+	Init          *Init                 `json:"init,omitempty"`
+	End           *TurnEnd              `json:"turn_end,omitempty"`
+	ServerRequest *vendor.ServerRequest `json:"server_request,omitempty"`
 }
 
 type replaySummary struct {
-	Partials int `json:"partials"`
-	Notices  int `json:"notices"`
+	Partials       int `json:"partials"`
+	Notices        int `json:"notices"`
+	ServerRequests int `json:"server_requests"`
 }
 
 type goldenFile struct {
@@ -129,10 +132,28 @@ func replayObservation(out *goldenFile, obs *Observation, line int) {
 	if obs.Partial != nil {
 		out.Summary.Partials++
 	}
+	if obs.ServerRequest != nil {
+		out.Summary.ServerRequests++
+		out.Steps = append(out.Steps, replayStep{
+			Line:          line,
+			Op:            "server_request",
+			ServerRequest: obs.ServerRequest,
+		})
+	}
 }
 
 func TestVRE03AgyFixturesReplayToGoldenTranscript(t *testing.T) {
 	t.Parallel()
+	runGoldenFixtureSuite(t)
+}
+
+func TestVRE03AgyRelayFixturesReplayToGoldenTranscript(t *testing.T) {
+	t.Parallel()
+	runGoldenFixtureSuite(t)
+}
+
+func runGoldenFixtureSuite(t *testing.T) {
+	t.Helper()
 	fixtures, err := filepath.Glob(filepath.Join("testdata", "fixtures", "agy-*.jsonl"))
 	if err != nil || len(fixtures) == 0 {
 		t.Fatalf("no agy fixtures found: %v", err)
@@ -189,7 +210,6 @@ func TestAgyUnknownUpdatesBecomeUnsupportedNoticesWithRawRef(t *testing.T) {
 	n.BeginTurn("turn-1", "")
 
 	lines := []string{
-		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"goal"}]}}}`,
 		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"brand_new_vendor_event","payload":123}}}`,
 		`{"jsonrpc":"2.0","method":"session/custom_notification","params":{"foo":"bar"}}`,
 		`not valid json at all`,
@@ -220,9 +240,9 @@ func TestAgyMetaIsNeverASafetyCondition(t *testing.T) {
 	withMeta.BeginTurn("turn-1", "")
 	withoutMeta.BeginTurn("turn-1", "")
 
-	// Permission request carrying _meta.antigravity claiming auto-approve/safe must still produce identical error/notice behavior.
-	permWithMeta := `{"jsonrpc":"2.0","id":"1","method":"session/request_permission","params":{"sessionId":"s1","toolCall":{"sessionUpdate":"tool_call","toolCallId":"c1","name":"run_command"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"}],"_meta":{"antigravity":{"autoApprove":true,"trusted":true,"tier":"enterprise"}}}}`
-	permNoMeta := `{"jsonrpc":"2.0","id":"1","method":"session/request_permission","params":{"sessionId":"s1","toolCall":{"sessionUpdate":"tool_call","toolCallId":"c1","name":"run_command"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"}]}}`
+	// Permission request carrying _meta.antigravity claiming auto-approve/safe must still produce identical ServerRequest relay behavior.
+	permWithMeta := `{"jsonrpc":"2.0","id":"1","method":"session/request_permission","params":{"sessionId":"s1","toolCall":{"sessionUpdate":"tool_call","toolCallId":"c1","name":"run_command","title":"echo hi"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"}],"_meta":{"antigravity":{"autoApprove":true,"trusted":true,"tier":"enterprise"}}}}`
+	permNoMeta := `{"jsonrpc":"2.0","id":"1","method":"session/request_permission","params":{"sessionId":"s1","toolCall":{"sessionUpdate":"tool_call","toolCallId":"c1","name":"run_command","title":"echo hi"},"options":[{"optionId":"allow","name":"Allow","kind":"allow_once"}]}}`
 
 	obsWith, err := withMeta.Normalize([]byte(permWithMeta))
 	if err != nil {
@@ -232,11 +252,11 @@ func TestAgyMetaIsNeverASafetyCondition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(obsWith.Records) != 1 || len(obsNo.Records) != 1 {
-		t.Fatalf("records = %d vs %d, want 1 each", len(obsWith.Records), len(obsNo.Records))
+	if obsWith.ServerRequest == nil || obsNo.ServerRequest == nil {
+		t.Fatalf("expected ServerRequest on both, got with=%+v without=%+v", obsWith, obsNo)
 	}
-	if obsWith.Records[0].Kind != transcript.Notice || obsWith.Records[0].RawRef != obsNo.Records[0].RawRef || obsWith.ServerRequest != nil {
-		t.Fatalf("_meta altered safety/routing behavior: with=%+v without=%+v", obsWith, obsNo)
+	if diff := cmp.Diff(obsNo.ServerRequest, obsWith.ServerRequest); diff != "" {
+		t.Fatalf("_meta altered safety/routing behavior (-without +with):\n%s", diff)
 	}
 }
 
@@ -269,6 +289,120 @@ func TestAgyPlanAndDiffNormalization(t *testing.T) {
 	}
 }
 
+func TestAgySlashListHidesTerminalCommands(t *testing.T) {
+	t.Parallel()
+	n := NewNormalizer("session-1")
+	fixtureLines := readFixture(t, "agy-1.5.9-session1.jsonl")
+	for _, line := range fixtureLines[:6] {
+		if _, err := n.Normalize(line); err != nil {
+			t.Fatal(err)
+		}
+	}
+	want := []string{
+		"goal",
+		"schedule",
+		"browser",
+		"plan",
+		"grill-me",
+		"teamwork",
+		"learn",
+		"boost",
+		"agy-customizations",
+		"antigravity-guide",
+		"run-workflow",
+		"swarm",
+	}
+	if diff := cmp.Diff(want, n.SlashCommands()); diff != "" {
+		t.Fatalf("SlashCommands() after real fixture available_commands_update (-want +got):\n%s", diff)
+	}
+	if IsTerminalSlashCommand("goal") || !IsTerminalSlashCommand("compact") || !IsTerminalSlashCommand("/clear") {
+		t.Fatal("unexpected terminal slash command classification")
+	}
+	// Updating available_commands_update replaces the session command list while hiding terminal commands.
+	obs, err := n.Normalize([]byte(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-uuid-0001","update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"plan"},{"name":"compact"},{"name":"clear"},{"name":"custom-skill"}]}}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantUpdated := []string{"plan", "custom-skill"}
+	if obs.Init == nil || !cmp.Equal(obs.Init.SlashCommands, wantUpdated) || !cmp.Equal(n.SlashCommands(), wantUpdated) {
+		t.Fatalf("updated SlashCommands = %v (init=%+v), want %v", n.SlashCommands(), obs.Init, wantUpdated)
+	}
+	assertUntrustedSlashNamesAreDropped(t)
+}
+
+// assertUntrustedSlashNamesAreDropped checks the filter on untrusted vendor
+// names: fugue namespace, empty, whitespace, control characters, over 64
+// bytes, and at most 128 commands.
+func assertUntrustedSlashNamesAreDropped(t *testing.T) {
+	t.Helper()
+	bad := []AvailableCommand{
+		{Name: "fugue:status"},
+		{Name: "/fugue:help"},
+		{Name: ""},
+		{Name: "  "},
+		{Name: "/"},
+		{Name: "two words"},
+		{Name: "tab\tname"},
+		{Name: "nl\nname"},
+		{Name: "bell\x07"},
+		{Name: "del\x7f"},
+		{Name: strings.Repeat("a", 65)},
+		{Name: "ok"},
+		{Name: strings.Repeat("b", 64)},
+	}
+	if diff := cmp.Diff([]string{"ok", strings.Repeat("b", 64)}, hideTerminalCommands(bad)); diff != "" {
+		t.Fatalf("hideTerminalCommands(untrusted) (-want +got):\n%s", diff)
+	}
+	many := make([]AvailableCommand, 0, maxSlashCommands+10)
+	for i := range maxSlashCommands + 10 {
+		many = append(many, AvailableCommand{Name: fmt.Sprintf("cmd-%d", i)})
+	}
+	if got := hideTerminalCommands(many); len(got) != 128 || got[127] != "cmd-127" {
+		t.Fatalf("hideTerminalCommands(%d) kept %d (last %q), want the first 128", len(many), len(got), got[len(got)-1])
+	}
+}
+
+func TestAgyApprovalIDWindowsStayBounded(t *testing.T) {
+	t.Parallel()
+	s := &Session{}
+	for i := range maxApprovalIDs + 1 {
+		id := fmt.Sprintf("req-%d", i)
+		if !s.registerServerRequest(&Frame{ID: json.RawMessage(`"` + id + `"`), CanonicalID: id, Method: MethodSessionRequestPermission}) {
+			t.Fatalf("register %s = false, want true", id)
+		}
+		delete(s.pendingApprovals, id)
+		s.resolvedApprovals.add(id)
+	}
+	if len(s.seenApprovals.set) != maxApprovalIDs || len(s.resolvedApprovals.set) != maxApprovalIDs {
+		t.Fatalf("seen=%d resolved=%d, want both bounded at %d", len(s.seenApprovals.set), len(s.resolvedApprovals.set), maxApprovalIDs)
+	}
+	last := fmt.Sprintf("req-%d", maxApprovalIDs)
+	if s.seenApprovals.has("req-0") || !s.seenApprovals.has(last) || !s.resolvedApprovals.has(last) {
+		t.Fatal("window must evict the oldest ID and keep the newest")
+	}
+	if s.registerServerRequest(&Frame{ID: json.RawMessage(`"` + last + `"`), CanonicalID: last, Method: MethodSessionRequestPermission}) {
+		t.Fatalf("re-register %s inside the window = true, want answered once", last)
+	}
+}
+
+func TestFugueNamespaceNeverReachesAgy(t *testing.T) {
+	t.Parallel()
+	rpcLog := filepath.Join(t.TempDir(), "fugue-ns-rpcs.jsonl")
+	sess, _ := startFakeSession(t, fakeRecordRPCsConfigDir+":"+rpcLog, "")
+	for _, cmd := range []string{"/fugue:status", "  /fugue:help arg", "/fugue:compact"} {
+		if _, err := sess.Send(t.Context(), vendor.Input{Text: cmd}); errcode.CodeOf(err) != errcode.InvalidArgument {
+			t.Fatalf("Send(%q) err = %v, want invalid_argument", cmd, err)
+		}
+	}
+	if _, err := sess.Close(t.Context(), vendor.CloseHostStop); err != nil {
+		t.Fatal(err)
+	}
+	rawRPCs := string(readFile(t, rpcLog))
+	if strings.Contains(rawRPCs, "fugue:") || strings.Contains(rawRPCs, MethodSessionPrompt) {
+		t.Fatalf("/fugue: command leaked to agy stdin:\n%s", rawRPCs)
+	}
+}
+
 func TestAgyCodecAndNormalizerHelpers(t *testing.T) {
 	t.Parallel()
 	if got := (&RPCError{Code: -1, Message: "boom"}).Error(); !strings.Contains(got, "boom") {
@@ -287,6 +421,27 @@ func TestAgyCodecAndNormalizerHelpers(t *testing.T) {
 	}
 	n.BeginTurn("t-roll", "p-roll")
 	n.RollbackTurn()
+	assertPermissionHelpers(t, n)
+}
+
+func assertPermissionHelpers(t *testing.T, n *Normalizer) {
+	t.Helper()
+	for _, line := range []string{
+		`{"jsonrpc":"2.0","id":"1","method":"session/request_permission","params":{}}`,
+		`{"jsonrpc":"2.0","id":"1","method":"session/request_permission","params":{"sessionId":"s1","toolCall":{},"options":[{"optionId":"a","name":"A","kind":"allow_once"}]}}`,
+		`{"jsonrpc":"2.0","id":"1","method":"session/request_permission","params":{"sessionId":"s1","toolCall":{"toolCallId":"c1"},"options":[{"optionId":"a","name":"A","kind":"bad"}]}}`,
+		`{"jsonrpc":"2.0","id":"1","method":"session/request_permission","params":{"sessionId":"s1","toolCall":{"toolCallId":"c1","name":"run"},"options":[{"optionId":"a","name":"A","kind":"allow_always"},{"optionId":"d","name":"D","kind":"reject_always"}]}}`,
+		`{"jsonrpc":"2.0","id":"1","method":"session/request_permission","params":{"sessionId":"s1","toolCall":{"toolCallId":"c1"},"options":[{"optionId":"a","name":"A","kind":"allow_once"}]}}`,
+		`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"s1","update":{"sessionUpdate":"available_commands_update"}}}`,
+	} {
+		if _, err := n.Normalize([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	longUTF8 := strings.Repeat("x", maxSummaryBytes-1) + "é" + strings.Repeat("y", 32)
+	if got := boundSummary(longUTF8); len(got) > maxSummaryBytes {
+		t.Fatalf("boundSummary len = %d, want <= %d", len(got), maxSummaryBytes)
+	}
 }
 
 func readFixture(t *testing.T, name string) [][]byte {

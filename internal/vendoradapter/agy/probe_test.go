@@ -88,11 +88,11 @@ func TestProbeReportsTheTestedVersionAndCapability(t *testing.T) {
 
 func assertProbeCapabilities(t *testing.T, cap vendor.Capability) {
 	t.Helper()
-	if !cap.Interrupt || !cap.Resume || !cap.PartialDeltas || !cap.ModelList {
+	if !cap.Interrupt || !cap.Resume || !cap.PartialDeltas || !cap.ModelList || !cap.PerRequestApproval || !cap.VendorSlashCommands {
 		t.Fatalf("capability missing expected flags: %+v", cap)
 	}
-	if cap.PerRequestApproval || cap.VendorSlashCommands || cap.Steer || cap.DirectQuota {
-		t.Fatalf("capability must not declare unsupported F9.8a flags: %+v", cap)
+	if cap.Steer || cap.DirectQuota {
+		t.Fatalf("capability must not declare unsupported flags: %+v", cap)
 	}
 }
 

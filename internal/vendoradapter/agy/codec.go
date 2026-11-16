@@ -138,9 +138,27 @@ func (c *Codec) EncodeNotification(method string, params any) ([]byte, error) {
 	})
 }
 
+// EncodeResponseResult encodes a JSON-RPC 2.0 result response to a server request.
+func (c *Codec) EncodeResponseResult(id json.RawMessage, result any) ([]byte, error) {
+	if !hasJSONID(id) {
+		return nil, errcode.New(errcode.InvalidArgument, "agy response id is required")
+	}
+	rawResult := json.RawMessage(`{}`)
+	if result != nil {
+		b, err := json.Marshal(result)
+		if err != nil {
+			return nil, errcode.Wrap(errcode.InvalidArgument, "marshal agy response result", err)
+		}
+		rawResult = b
+	}
+	return encodeWireMessage(&wireMessage{
+		JSONRPC: jsonRPCVersion,
+		ID:      append(json.RawMessage(nil), id...),
+		Result:  rawResult,
+	})
+}
+
 // EncodeResponseError encodes a JSON-RPC 2.0 error response to a server request.
-// F9.8a uses only error responses for session/request_permission and never sends
-// allow, reject, or cancelled outcomes.
 func (c *Codec) EncodeResponseError(id json.RawMessage, code int, message string) ([]byte, error) {
 	if !hasJSONID(id) {
 		return nil, errcode.New(errcode.InvalidArgument, "agy response id is required")

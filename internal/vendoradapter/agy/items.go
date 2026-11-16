@@ -22,8 +22,7 @@ func (n *Normalizer) normalizeUpdate(wire *UpdateWire) Observation {
 	case UpdatePlan:
 		return n.normalizePlan(wire)
 	case UpdateAvailableCommands:
-		// F9.8a records available_commands_update as an unsupported notice; F9.8b builds the slash list.
-		return n.unsupported(n.lineRef(), "acp:"+UpdateAvailableCommands)
+		return n.normalizeAvailableCommands(wire)
 	default:
 		return n.unsupported(n.lineRef(), "acp:"+wire.SessionUpdate)
 	}

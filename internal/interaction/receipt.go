@@ -177,6 +177,7 @@ func (o *Owner) ResetSession(sessionID string) {
 	o.mu.Lock()
 	now := o.clock.Now().UTC()
 	o.nextResolvedPrune = now
+	delete(o.cancelledTurns, sessionID)
 	for k := range o.grants {
 		if k.sessionID == sessionID {
 			delete(o.grants, k)
@@ -212,6 +213,62 @@ func (o *Owner) ResetSession(sessionID string) {
 	for _, ev := range cancelled {
 		o.emitAudit(ev)
 	}
+}
+
+// CancelTurn closes all pending interaction tickets belonging to (sessionID,
+// turnID) as OutcomeCancelled with TurnCancelled set so a relayed ACP
+// permission request can distinguish a user turn cancel (`session/cancel`) from
+// a host drain or session teardown.
+func (o *Owner) CancelTurn(sessionID, turnID string) []*Ticket {
+	if sessionID == "" || turnID == "" {
+		return nil
+	}
+	o.mu.Lock()
+	now := o.clock.Now().UTC()
+	o.nextResolvedPrune = now
+	if _, ok := o.cancelledTurns[sessionID]; !ok && len(o.cancelledTurns) >= maxCancelledTurns {
+		for k := range o.cancelledTurns {
+			delete(o.cancelledTurns, k)
+			break
+		}
+	}
+	o.cancelledTurns[sessionID] = turnID
+	var (
+		closed    []*Ticket
+		cancelled []*AuditEvent
+	)
+	for _, ticket := range o.byRequest {
+		if ticket.Binding.SessionID != sessionID || ticket.Binding.TurnID != turnID || ticket.Resolved {
+			continue
+		}
+		ev := o.cancelTurnTicketLocked(ticket, now)
+		closed = append(closed, cloneTicket(ticket))
+		cancelled = append(cancelled, &ev)
+	}
+	o.mu.Unlock()
+	for _, ev := range cancelled {
+		o.emitAudit(ev)
+	}
+	return closed
+}
+
+func (o *Owner) cancelTurnTicketLocked(ticket *Ticket, now time.Time) AuditEvent {
+	if !ticket.Relayed {
+		delete(o.byOperation, ticket.OperationID)
+		if ticket.ReceiptID != "" {
+			if r, exists := o.receipts[ticket.ReceiptID]; exists && !r.Claimed {
+				delete(o.receipts, ticket.ReceiptID)
+			}
+		}
+	}
+	ticket.TurnCancelled = true
+	o.markResolvedLocked(ticket, now, OutcomeCancelled)
+	o.emitLifecycleLocked(LifecycleEvent{
+		Kind:      EventResolved,
+		RequestID: ticket.RequestID,
+		Outcome:   OutcomeCancelled,
+	})
+	return o.newAuditEvent("cancelled", ticket)
 }
 
 // InvalidateWorkspaceGrants drops all session grants belonging to workspaceID

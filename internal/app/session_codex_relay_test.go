@@ -405,3 +405,33 @@ func TestCodexRetriedRequestIsNotAskedTwice(t *testing.T) {
 		t.Fatalf("RPC 301 response count = %d, want 1", count301)
 	}
 }
+
+// TestCodexTurnInterruptAnswersRelayedRequestWithAnError covers CancelTurn for
+// Codex: an interrupt while a relayed request waits closes its ticket and
+// answers Codex with a JSON-RPC error, never a synthesized decision.
+func TestCodexTurnInterruptAnswersRelayedRequestWithAnError(t *testing.T) {
+	t.Parallel()
+	f := newCodexRelayFixture(t)
+	sub := f.subscribeInteractions(t)
+	cmdFrame := fmt.Sprintf(`{"id":401,"method":%q,"params":{"threadId":%q,"turnId":"t-1","itemId":"call-401","command":"sleep 5","cwd":"/workspace"}}`,
+		codex.MethodCommandApproval, fakeCodexThreadID)
+	f.sendServerRequestTurn(t, "codex-int-turn", cmdFrame)
+	prompt := awaitRequested(t, sub)
+	if _, err := f.svc.Interrupt(t.Context(), testAppPrincipal, VendorStop{CommandID: "codex-int", SessionID: f.session.ID}); err != nil {
+		t.Fatal(err)
+	}
+	assertCodexErrorResponse(t, f.awaitRPCResponse(t, "401"), "interrupted turn")
+	if pending, _, pErr := f.inter.ListPending(t.Context(), testAppPrincipal); pErr != nil || len(pending) != 0 {
+		t.Fatalf("ListPending after interrupt = (%+v, %v), want 0", pending, pErr)
+	}
+	_, ansErr := f.inter.Answer(t.Context(), &AnswerInteractionCommand{
+		CommandID: "codex-int-stale", Principal: testAppPrincipal, Incarnation: f.inter.Incarnation(),
+		RequestID: prompt.RequestID, Outcome: OutcomeAnswered, OptionID: codex.DecisionAccept,
+	})
+	if code := errcode.CodeOf(ansErr); code != errcode.InteractionNotFound && code != errcode.InteractionAlreadyAnswered {
+		t.Fatalf("answering the closed ticket err = %v, want not_found or already_answered", ansErr)
+	}
+	if got := len(f.recordedDecisions(t)); got != 0 {
+		t.Fatalf("interrupt recorded %d ApprovalDecided events, want 0", got)
+	}
+}

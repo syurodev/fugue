@@ -455,6 +455,9 @@ func (a *vendorSessionActor) interrupt(ctx context.Context) error {
 	}
 	turnID := a.turnID
 	a.userInterruptTurnID = turnID
+	if a.manager.deps.Relay != nil {
+		a.manager.deps.Relay.CancelTurn(a.info.ID, turnID)
+	}
 	supervise.Go(ctx, "user-interrupt-"+a.info.ID, func(taskCtx context.Context) error {
 		err := a.session.Interrupt(taskCtx, vendor.TurnRef{ID: turnID})
 		select {
