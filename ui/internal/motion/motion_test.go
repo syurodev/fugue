@@ -186,3 +186,16 @@ func TestSpringFollowingALargeValueComesToRest(t *testing.T) {
 		t.Fatalf("follower of a large value = %v moving=%v, want at rest on 16002", f.Value(), f.Moving())
 	}
 }
+
+func TestPresenceSnapLandsAtOnceAndAtRest(t *testing.T) {
+	t.Parallel()
+	p := NewPresence(Snappy(), Exit())
+	p.Snap(true)
+	if p.Progress() != 1 || !p.Shown() || p.Advance(time.Second/60) {
+		t.Fatalf("a snapped-in presence is at %v, shown %v, or still moving", p.Progress(), p.Shown())
+	}
+	p.Snap(false)
+	if p.Progress() != 0 || p.Visible() {
+		t.Fatalf("a snapped-out presence is at %v or still visible", p.Progress())
+	}
+}

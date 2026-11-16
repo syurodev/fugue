@@ -72,6 +72,13 @@ type Env struct {
 	// it nil and nothing is recorded.
 	RunRecorder func(image.Rectangle)
 
+	// win is the window size in px and origin the window position of the
+	// layout cursor: Gio cannot read the current transform, so the overlay
+	// learns where an anchor is from TrackInput and Offset (UK-07).
+	win, origin image.Point
+	// overlay is the menu that holds the window's one overlay.
+	overlay event.Tag
+
 	// modality is true while focus moves come from the keyboard.
 	modality bool
 	// inputTag backs the window-level listeners of TrackInput; its address
@@ -176,11 +183,13 @@ func (e *Env) FrameEnd(gtx *layout.Context) {
 }
 
 // TrackInput registers the window-level listeners that maintain the
-// focus-visible modality (UK-05). The window calls it first in every frame,
+// focus-visible modality (UK-05) and records the window's size for the
+// overlay (UK-07). The window calls it first in every frame,
 // before any component: the pointer area is pushed at the back of the frame
 // so it sees presses anywhere (Gio delivers pointer events to every area
 // under the pointer, so this hides nothing).
 func (e *Env) TrackInput(gtx *layout.Context) {
+	e.win, e.origin = gtx.Constraints.Max, image.Point{}
 	if e.KeyboardOnly {
 		// The gallery's keyboard-only mode: every focus move came from the
 		// keyboard as far as the controls are concerned, so the rings stay
