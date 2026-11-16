@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -55,6 +56,21 @@ type AccountsService struct {
 	accounts *vendor.Accounts
 	vendors  *VendorService
 	hub      *EventHub
+
+	// notifyMu orders publication: the view is re-read under it, so the last
+	// event of a vendor is never older than the registry. It is never held
+	// while the registry lock is, and the registry never calls into it.
+	notifyMu sync.Mutex
+
+	flightMu sync.Mutex
+	flight   *refreshFlight
+}
+
+// refreshFlight is one in-flight login refresh that concurrent List calls
+// share, so a burst runs each vendor's status command once.
+type refreshFlight struct {
+	done    chan struct{}
+	waiters int // guarded by flightMu
 }
 
 // newAccountsService registers the quota topic and publishes every account
@@ -71,8 +87,16 @@ func newAccountsService(accounts *vendor.Accounts, vendors *VendorService, hub *
 	return s, nil
 }
 
-func (s *AccountsService) publish(account *vendor.Account) {
-	view := accountView(account)
+// publish sends the current view of the changed vendor. It ignores the
+// callback's copy, which a concurrent observation may already have outdated.
+func (s *AccountsService) publish(changed *vendor.Account) {
+	s.notifyMu.Lock()
+	defer s.notifyMu.Unlock()
+	account, ok := s.accounts.Account(changed.Vendor)
+	if !ok {
+		return
+	}
+	view := accountView(&account)
 	payload, err := json.Marshal(view)
 	if err != nil {
 		slog.Warn("marshal a quota event", "code", errcode.CodeOf(err))
@@ -92,14 +116,39 @@ func (s *AccountsService) List(ctx context.Context, principal string) ([]Account
 	}
 	ctx, cancel := context.WithTimeout(ctx, AccountsRefreshLimit)
 	defer cancel()
+	s.refresh(ctx)
+	return accountViews(s.accounts.Snapshot()), nil
+}
+
+// refresh runs one login refresh, or waits for the one already running. A
+// waiter whose context ends first returns and leaves the refresh to its owner.
+func (s *AccountsService) refresh(ctx context.Context) {
+	s.flightMu.Lock()
+	if cur := s.flight; cur != nil {
+		cur.waiters++
+		s.flightMu.Unlock()
+		select {
+		case <-cur.done:
+		case <-ctx.Done():
+		}
+		return
+	}
+	cur := &refreshFlight{done: make(chan struct{})}
+	s.flight = cur
+	s.flightMu.Unlock()
+	defer func() {
+		s.flightMu.Lock()
+		s.flight = nil
+		s.flightMu.Unlock()
+		close(cur.done)
+	}()
 	accounts := s.accounts.Snapshot()
 	for i := range accounts {
 		if ctx.Err() != nil {
-			break
+			return
 		}
 		s.vendors.refreshLogin(ctx, accounts[i].Vendor)
 	}
-	return accountViews(s.accounts.Snapshot()), nil
 }
 
 func accountViews(accounts []vendor.Account) []AccountView {

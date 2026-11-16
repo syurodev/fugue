@@ -1,6 +1,7 @@
 package vendor
 
 import (
+	"fmt"
 	"math"
 	"testing"
 	"time"
@@ -197,5 +198,36 @@ func TestAccountOnChangeFiresOnlyWhenTheViewChanges(t *testing.T) {
 	a.ObserveFailure("claude", FailureAuth)
 	if len(seen) != 2 || seen[1].State != AccountNeedsLogin {
 		t.Fatalf("changes = %+v, want the needs_login change", seen)
+	}
+}
+
+func TestAccountWindowsStayBoundedAcrossObservations(t *testing.T) {
+	t.Parallel()
+	a := newTestAccounts(clock.NewFake(accountEpoch()))
+	names := func(prefix string, n int) []Window {
+		out := make([]Window, 0, n)
+		for i := range n {
+			out = append(out, Window{Name: fmt.Sprintf("%s%d", prefix, i), Utilization: 0.1})
+		}
+		return out
+	}
+	a.ObserveQuota("claude", &RateLimit{Windows: names("k", maxQuotaWindows)})
+	for round := range 50 {
+		a.ObserveQuota("claude", &RateLimit{Windows: names(fmt.Sprintf("n%d_", round), maxQuotaWindows)})
+	}
+	got := accountOf(t, a, "claude").Windows
+	if len(got) != maxQuotaWindows {
+		t.Fatalf("held %d windows, want the cap %d", len(got), maxQuotaWindows)
+	}
+	for _, w := range got {
+		if w.Name[0] != 'k' {
+			t.Errorf("a new name %q displaced a known window", w.Name)
+		}
+	}
+	a.ObserveQuota("claude", &RateLimit{Windows: []Window{{Name: "k3", Utilization: 0.7}}})
+	for _, w := range accountOf(t, a, "claude").Windows {
+		if w.Name == "k3" && w.Utilization != 0.7 {
+			t.Errorf("known window k3 utilization = %v, want the update 0.7", w.Utilization)
+		}
 	}
 }

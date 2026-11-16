@@ -90,7 +90,8 @@ func NewAccounts(clk clock.Clock, vendors []AccountVendor) *Accounts {
 
 // SetOnChange registers the callback that receives an account after an
 // observation changed what Snapshot reports for it. It runs on the observing
-// goroutine without the registry lock.
+// goroutine without the registry lock, so concurrent callbacks may interleave:
+// a receiver that publishes must re-read the account with Account.
 func (a *Accounts) SetOnChange(fn func(*Account)) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -122,7 +123,13 @@ func (a *Accounts) ObserveQuota(vendor string, limit *RateLimit) {
 	now := a.clk.Now()
 	a.observe(vendor, func(r *accountRecord) {
 		for i := range min(len(limit.Windows), maxQuotaWindows) {
-			if w, ok := sanitizeWindow(&limit.Windows[i], now); ok {
+			w, ok := sanitizeWindow(&limit.Windows[i], now)
+			if !ok {
+				continue
+			}
+			// Names are untrusted: a known window always updates, a new one
+			// past the cap is dropped, and nothing known is evicted.
+			if _, known := r.windows[w.Name]; known || len(r.windows) < maxQuotaWindows {
 				r.windows[w.Name] = w
 			}
 		}
@@ -151,6 +158,18 @@ func (a *Accounts) Snapshot() []Account {
 		out = append(out, a.records[name].view(now))
 	}
 	return out
+}
+
+// Account returns one vendor's current account, or false for an unknown vendor.
+func (a *Accounts) Account(vendor string) (Account, bool) {
+	now := a.clk.Now()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	r, ok := a.records[vendor]
+	if !ok {
+		return Account{}, false
+	}
+	return r.view(now), true
 }
 
 func (a *Accounts) observe(vendor string, apply func(*accountRecord)) {
