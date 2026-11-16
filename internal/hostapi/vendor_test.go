@@ -16,7 +16,6 @@ import (
 	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
-	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	accountsv1connect "github.com/syurodev/fugue/pkg/pb/fugue/accounts/v1/accountsv1connect"
@@ -285,13 +284,24 @@ func TestCommandListChangeIsAnnouncedOnTheVendorSessionsTopic(t *testing.T) {
 	if err := v.send(t, "commands-change-input", session.SessionId, "change-commands"); err != nil {
 		t.Fatal(err)
 	}
-	changedRevision := awaitCommandRevision(t, stream, session.SessionId, initialRevision)
-	listed, err := v.vendors.ListCommands(t.Context(), connect.NewRequest(&vendorsv1.ListCommandsRequest{SessionId: session.SessionId}))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if listed.Msg.CommandsRevision < changedRevision || len(listed.Msg.Groups[0].VendorCommands) != 2 || listed.Msg.Groups[0].VendorCommands[1].Name != "new-command" {
-		t.Fatalf("changed command list = %+v at revision %d; announced revision %d", listed.Msg.Groups, listed.Msg.CommandsRevision, changedRevision)
+	// Other command groups (Fugue's own) bump the revision too, so the first
+	// higher revision is not necessarily the vendor's change: keep reading
+	// announcements until a listing at or after one carries the new command. The
+	// stream's own deadline fails the test if it never does.
+	seen := initialRevision
+	for {
+		announced := awaitCommandRevision(t, stream, session.SessionId, seen)
+		listed, err := v.vendors.ListCommands(t.Context(), connect.NewRequest(&vendorsv1.ListCommandsRequest{SessionId: session.SessionId}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if listed.Msg.CommandsRevision < announced {
+			t.Fatalf("listing revision %d is behind the announced revision %d", listed.Msg.CommandsRevision, announced)
+		}
+		if vendorCommands := listed.Msg.Groups[0].VendorCommands; len(vendorCommands) == 2 && vendorCommands[1].Name == "new-command" {
+			return
+		}
+		seen = max(announced, listed.Msg.CommandsRevision)
 	}
 }
 

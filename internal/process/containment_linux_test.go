@@ -15,6 +15,7 @@ import (
 
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/internal/testutil"
 )
 
 func TestLinuxRealSystemdScopeOrFallback(t *testing.T) {
@@ -61,7 +62,7 @@ func runRealSystemdContainedBranch(
 	probe *SystemdProbe,
 ) {
 	t.Helper()
-	clk := clock.Real{}
+	clk := testutil.OSClock()
 	unitName := scopeUnitPrefix + sessionID + scopeUnitSuffix
 
 	proc, err := Spawn(ctx, &Options{

@@ -12,6 +12,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/internal/testutil"
 )
 
 // TestGitRunsWithGcAutoDisabledHooksOffAndScrubbedEnv pins the runner's fixed
@@ -262,7 +263,7 @@ exec sleep 30
 // calls).
 func waitForFile(t *testing.T, ctx context.Context, path string) {
 	t.Helper()
-	clk := clock.Real{}
+	clk := testutil.OSClock()
 	deadline := clk.Now().Add(10 * time.Second)
 	for {
 		if _, err := os.Stat(path); err == nil {

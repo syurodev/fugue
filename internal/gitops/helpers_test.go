@@ -7,11 +7,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
+	"github.com/syurodev/fugue/internal/testutil"
 )
 
 // epoch returns the fixed instant the fake clock starts at in every test.
@@ -123,21 +123,7 @@ func writeFile(t *testing.T, dir, rel, content string) {
 // script fails with ETXTBSY ("text file busy") until the child execs.
 func writeScript(t *testing.T, path, body string) {
 	t.Helper()
-	writeExecutableLocked(t, path, []byte("#!/bin/sh\n"+body))
-}
-
-// writeExecutableLocked writes the file, which opens, writes and closes it,
-// before releasing the fork lock.
-func writeExecutableLocked(t *testing.T, path string, content []byte) {
-	t.Helper()
-	// The executable bit is required for the OS to run the script.
-	mode := os.FileMode(0o700)
-	syscall.ForkLock.RLock()
-	err := os.WriteFile(path, content, mode)
-	syscall.ForkLock.RUnlock()
-	if err != nil {
-		t.Fatalf("write %s: %v", path, err)
-	}
+	testutil.WriteExecutable(t, path, []byte("#!/bin/sh\n"+body))
 }
 
 // fakeGitManager returns a Manager whose git binary is a fresh shell script
