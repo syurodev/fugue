@@ -2,6 +2,7 @@ package main
 
 import (
 	"image"
+	"slices"
 
 	"gioui.org/layout"
 
@@ -10,16 +11,18 @@ import (
 )
 
 // The Menu page (UK-09, ui-kit §6.15): two specimens of a menu — labels
-// only, and icons with shortcuts, a separator and a disabled item — each
-// drawn inline, open and still, at rest, with an item highlighted and with
-// its submenu open; and two live triggers that open the real menu on the
-// window's overlay. The right-hand trigger sits at the window's edge, so its
-// menu and its submenu flip. The specimens use the same drawing as the
-// overlay and the matrix, bounds recording and cell inventory of the other
-// pages; the keyboard side comes with F10.11b.
+// only, and icons with Kbd shortcuts, a separator and a disabled item — each
+// drawn inline, open and still: at rest, with the pointer's item
+// highlighted, with the keyboard-active item highlighted (the same sliding
+// pill, one row down), and with its submenu open; and two live triggers that
+// open the real menu on the window's overlay. The right-hand trigger sits at
+// the window's edge, so its menu and its submenu flip. The specimens use the
+// same drawing as the overlay and the matrix, bounds recording and cell
+// inventory of the other pages.
 
 // The Menu page's state columns: the specimens', then the live triggers'.
 const (
+	mstKeyboard = "keyboard"
 	mstSubmenu  = "submenu"
 	mstDropdown = "dropdown"
 	mstFlip     = "flip-right"
@@ -30,7 +33,7 @@ const (
 const numMenuSpecimens = 2
 
 // menuStates are the specimen columns.
-func menuStates() []string { return []string{stRest, stHover, mstSubmenu} }
+func menuStates() []string { return []string{stRest, stHover, mstKeyboard, mstSubmenu} }
 
 // liveStates are the live triggers.
 func liveStates() []string { return []string{mstDropdown, mstFlip} }
@@ -43,7 +46,7 @@ func menuSpecimenNames() []string {
 // menuPage is the Menu page's state: one menu per specimen cell, and a
 // button and a menu per live trigger.
 type menuPage struct {
-	specimens [numMenuSpecimens][3]*kit.MenuState
+	specimens [numMenuSpecimens][4]*kit.MenuState
 	trigger   [2]*kit.ButtonState
 	live      [2]*kit.MenuState
 	chosen    string
@@ -63,12 +66,12 @@ func menuItems(variant int) ([]kit.MenuItem, int) {
 		}, 3
 	}
 	return []kit.MenuItem{
-		{ID: "open", Label: "Open", Icon: kit.IconSearch, Shortcut: "Ctrl+O"},
-		{ID: "copy", Label: "Copy", Icon: kit.IconCopy, Shortcut: "Ctrl+C"},
-		{ID: "paste", Label: "Paste", Icon: kit.IconRestart, Shortcut: "Ctrl+V", Disabled: true},
+		{ID: "open", Label: "Open", Icon: kit.IconSearch, Shortcut: kit.Shortcut{Mods: kit.ModPrimary, Key: kit.Char('o')}},
+		{ID: "copy", Label: "Copy", Icon: kit.IconCopy, Shortcut: kit.Shortcut{Mods: kit.ModPrimary, Key: kit.Char('c')}},
+		{ID: "paste", Label: "Paste", Icon: kit.IconRestart, Shortcut: kit.Shortcut{Mods: kit.ModPrimary, Key: kit.Char('v')}, Disabled: true},
 		kit.MenuSeparator(),
 		{ID: "share", Label: "Share", Icon: kit.IconEye, Sub: share},
-		{ID: "delete", Label: "Delete", Icon: kit.IconClose},
+		{ID: "delete", Label: "Delete", Icon: kit.IconClose, Shortcut: kit.Shortcut{Key: kit.KeyDelete}},
 	}, 4
 }
 
@@ -79,7 +82,7 @@ func newMenuPage() menuPage {
 	var mp menuPage
 	for v := range mp.specimens {
 		_, sub := menuItems(v)
-		for c, path := range [][]int{nil, {0}, {sub, 0}} {
+		for c, path := range [][]int{nil, {0}, {1}, {sub, 0}} {
 			mp.specimens[v][c] = kit.NewMenuState()
 			mp.specimens[v][c].Open(path...)
 		}
@@ -95,11 +98,23 @@ func newMenuPage() menuPage {
 func (p *pages) layoutMenus(gtx *layout.Context) {
 	p.base = p.origin
 	y := p.paragraph(gtx, gtx.Constraints.Max.X, "Menu §6.15: the highlight is the pointer's item, a submenu opens sideways and survives a diagonal move toward it, a disabled item shows no interaction. A press outside closes the menu and goes no further. The right-hand trigger is at the window edge: its menu flips to the trigger's right edge and its submenu to the left.") + gtx.Dp(theme.SpaceXL)
-	blocks := make([]block, 0, numMenuSpecimens+1)
+	blocks := make([]block, 0, numMenuSpecimens+2)
 	for vi, name := range menuSpecimenNames() {
-		blocks = append(blocks, func(gtx *layout.Context, dry bool) image.Point {
-			return p.matrix(gtx, name, menuStates(), [][]cellDraw{p.specimenRow(gtx, vi)}, dry)
-		})
+		// The icon variant is wide with its shortcut chips, so its submenu
+		// state is a block of its own that wraps when the row is full.
+		groups := [][]string{menuStates()}
+		if vi == 1 {
+			groups = [][]string{{stRest, stHover, mstKeyboard}, {mstSubmenu}}
+		}
+		for gi, states := range groups {
+			title := name
+			if gi > 0 {
+				title += " (open submenu)"
+			}
+			blocks = append(blocks, func(gtx *layout.Context, dry bool) image.Point {
+				return p.matrix(gtx, title, states, [][]cellDraw{p.specimenRow(gtx, vi, states)}, dry)
+			})
+		}
 	}
 	blocks = append(blocks, p.liveBlock)
 	p.flow(gtx, y, blocks)
@@ -107,14 +122,14 @@ func (p *pages) layoutMenus(gtx *layout.Context) {
 
 // specimenRow is the row of one specimen variant: a cell per state, each as
 // big as the menu and its open submenu.
-func (p *pages) specimenRow(gtx *layout.Context, vi int) []cellDraw {
+func (p *pages) specimenRow(gtx *layout.Context, vi int, states []string) []cellDraw {
 	items, _ := menuItems(vi)
-	row := make([]cellDraw, 0, len(menuStates()))
-	for ci, st := range menuStates() {
-		m := p.menu.specimens[vi][ci]
+	row := make([]cellDraw, 0, len(states))
+	for col, st := range states {
+		m := p.menu.specimens[vi][slices.Index(menuStates(), st)]
 		props := kit.MenuProps{Items: items, Inline: true}
 		row = append(row, cellDraw{
-			col: ci, key: cell{compMenu, vi, 0, st},
+			col: col, key: cell{compMenu, vi, 0, st}, tag: m,
 			box: measure(gtx, func(gtx *layout.Context) image.Point {
 				res, err := m.Layout(p.env, gtx, props)
 				if err != nil {
@@ -165,8 +180,13 @@ func (p *pages) liveCell(gtx *layout.Context, i int) cellDraw {
 				p.err = err
 			}
 			if clicked {
-				m.Open()
+				if btn.KeyClicked() {
+					m.OpenKeyboard()
+				} else {
+					m.Open()
+				}
 			}
+			m.SetOpener(btn.Tag())
 			res, err := m.Layout(p.env, gtx, kit.MenuProps{Items: items, Anchor: image.Rectangle{Max: box}, Inline: false})
 			if err != nil {
 				p.err = err

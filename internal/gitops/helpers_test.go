@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -116,11 +117,25 @@ func writeFile(t *testing.T, dir, rel, content string) {
 
 // writeScript installs an executable shell script the OS can run as a fake
 // git binary.
+//
+// The write holds syscall.ForkLock for reading: a concurrent fork would
+// otherwise hand the child this still-open write descriptor, and exec of the
+// script fails with ETXTBSY ("text file busy") until the child execs.
 func writeScript(t *testing.T, path, body string) {
+	t.Helper()
+	writeExecutableLocked(t, path, []byte("#!/bin/sh\n"+body))
+}
+
+// writeExecutableLocked writes the file, which opens, writes and closes it,
+// before releasing the fork lock.
+func writeExecutableLocked(t *testing.T, path string, content []byte) {
 	t.Helper()
 	// The executable bit is required for the OS to run the script.
 	mode := os.FileMode(0o700)
-	if err := os.WriteFile(path, []byte("#!/bin/sh\n"+body), mode); err != nil {
+	syscall.ForkLock.RLock()
+	err := os.WriteFile(path, content, mode)
+	syscall.ForkLock.RUnlock()
+	if err != nil {
 		t.Fatalf("write %s: %v", path, err)
 	}
 }

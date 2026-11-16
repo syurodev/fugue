@@ -3,10 +3,11 @@ package kit
 import (
 	"fmt"
 	"image"
-	"image/color"
+	"time"
 
 	"gioui.org/f32"
 	"gioui.org/io/event"
+	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -47,7 +48,7 @@ type MenuItem struct {
 	ID        string
 	Label     string
 	Icon      IconName
-	Shortcut  string
+	Shortcut  Shortcut
 	Disabled  bool
 	Sub       []MenuItem
 	separator bool
@@ -97,6 +98,7 @@ type menuLevel struct {
 	rect      image.Rectangle
 	from, dir image.Point
 	pad       int
+	cols      menuCols
 }
 
 // MenuState is the long-lived state of one menu (UK-02).
@@ -110,11 +112,22 @@ type MenuState struct {
 	// last is the previous pointer position, for the diagonal travel.
 	last   image.Point
 	origin image.Point
+
+	active      int
+	opener      event.Tag
+	focusOnOpen bool
+	openFirst   bool
+	composing   bool
+	typeBuf     string
+	typeAt      time.Time
+	dwellLevel  int
+	dwellPos    image.Point
+	dwellAt     time.Time
 }
 
 // NewMenuState builds the state of one menu: a zero state has no springs.
 func NewMenuState() *MenuState {
-	m := &MenuState{}
+	m := &MenuState{dwellLevel: -1}
 	for k := range m.lv {
 		m.lv[k] = newMenuLevel()
 	}
@@ -143,6 +156,24 @@ func (m *MenuState) Open(path ...int) {
 	}
 	m.lv[0].open.Show(true)
 	m.claim = true
+	m.focusOnOpen = true
+	m.openFirst = false
+	m.active = max(0, min(len(path)-1, menuDepth-1))
+	m.dwellLevel = -1
+	m.typeBuf = ""
+	m.composing = false
+}
+
+// SetOpener records the trigger tag that opens the menu: while the menu is
+// closed, Down on a focused opener opens it on the first enabled item; when
+// Escape or a choice closes the root menu, focus returns to it (§6.15).
+func (m *MenuState) SetOpener(tag event.Tag) { m.opener = tag }
+
+// OpenKeyboard opens the root menu from a keyboard trigger (Enter, Space or
+// Down) with the first enabled item active (§6.15).
+func (m *MenuState) OpenKeyboard() {
+	m.Open()
+	m.openFirst = true
 }
 
 // Close closes the menu and its submenus on Exit.
@@ -150,6 +181,11 @@ func (m *MenuState) Close() {
 	for k := range m.lv {
 		m.lv[k].open.Show(false)
 	}
+	m.dwellLevel = -1
+	m.typeBuf = ""
+	m.composing = false
+	m.openFirst = false
+	m.focusOnOpen = false
 }
 
 // IsOpen reports whether the menu was last asked to be open.
@@ -173,16 +209,27 @@ func (m *MenuState) Panels() []image.Rectangle {
 func (m *MenuState) Layout(env *Env, gtx *layout.Context, p MenuProps) (MenuResult, error) {
 	var res MenuResult
 	if !m.lv[0].open.Visible() {
-		env.releaseOverlay(m)
-		return res, nil
+		if !p.Inline && m.opener != nil {
+			m.openerInput(gtx, m.opener)
+		}
+		if !m.lv[0].open.Visible() {
+			env.releaseOverlay(m)
+			return res, nil
+		}
 	}
 	if !p.Inline {
+		if m.focusOnOpen {
+			gtx.Execute(key.FocusCmd{Tag: m})
+			m.focusOnOpen = false
+		}
 		m.syncOverlay(env)
-		m.input(gtx, &res)
+		m.input(env, gtx, &res)
 	}
 	m.resolve(p.Items)
 	m.advance(env, p.Inline)
-	m.place(env, gtx, p)
+	if err := m.place(env, gtx, p); err != nil {
+		return res, fmt.Errorf("place the menu: %w", err)
+	}
 	res.Size = m.footprint()
 	if err := m.draw(env, gtx, p.Inline); err != nil {
 		return res, fmt.Errorf("draw the menu: %w", err)
@@ -211,8 +258,11 @@ func (m *MenuState) resolve(items []MenuItem) {
 		if live || k == 0 {
 			lv.items = cur
 		}
-		s := lv.sub
-		sub := live && k+1 < menuDepth && s >= 0 && s < len(cur) && len(cur[s].Sub) > 0 && !cur[s].Disabled
+		if k == 0 && m.openFirst {
+			lv.hi = edgeEnabled(lv.items, true)
+			m.openFirst = false
+		}
+		sub := live && k+1 < menuDepth && levelHasSub(cur, lv.sub)
 		if !sub {
 			lv.sub = -1
 		}
@@ -220,10 +270,14 @@ func (m *MenuState) resolve(items []MenuItem) {
 			m.lv[k+1].open.Show(sub)
 		}
 		if sub {
-			cur = cur[s].Sub
+			cur = cur[lv.sub].Sub
 		}
 		live = sub
 	}
+}
+
+func levelHasSub(items []MenuItem, s int) bool {
+	return s >= 0 && s < len(items) && len(items[s].Sub) > 0 && !items[s].Disabled
 }
 
 // advance moves each panel's presence, or snaps it under reduced motion.
@@ -252,7 +306,7 @@ func (lv *menuLevel) progress(inline bool) float32 {
 // place sizes and places every open panel: the root under the anchor,
 // each submenu beside its parent item, flipping at the window's edges. A
 // panel on its way out keeps the place it had.
-func (m *MenuState) place(env *Env, gtx *layout.Context, p MenuProps) {
+func (m *MenuState) place(env *Env, gtx *layout.Context, p MenuProps) error {
 	m.origin = env.origin
 	win := env.windowRect()
 	if p.Inline {
@@ -265,7 +319,10 @@ func (m *MenuState) place(env *Env, gtx *layout.Context, p MenuProps) {
 			break
 		}
 		if lv.open.Shown() {
-			size := lv.layoutRows(env, gtx)
+			size, err := lv.layoutRows(env, gtx)
+			if err != nil {
+				return err
+			}
 			switch {
 			case k == 0 && p.Inline:
 				lv.setRect(image.Point{}, size, image.Pt(0, -1))
@@ -279,6 +336,7 @@ func (m *MenuState) place(env *Env, gtx *layout.Context, p MenuProps) {
 		}
 		lv.follow(env)
 	}
+	return nil
 }
 
 // dirOf is the side a flipped panel shifts in from: +1 when flipped.
@@ -315,48 +373,26 @@ func (lv *menuLevel) parentItem() image.Rectangle {
 // layoutRows measures the items into rows and returns the panel's size: the
 // widest item plus the padding, never under MenuMinWidth. When any item has
 // an icon every item leaves the icon column, so the labels line up (§6.15).
-func (lv *menuLevel) layoutRows(env *Env, gtx *layout.Context) image.Point {
+func (lv *menuLevel) layoutRows(env *Env, gtx *layout.Context) (image.Point, error) {
 	lv.pad = gtx.Dp(theme.SpaceSM)
 	lv.rows = lv.rows[:0]
-	icons := menuHasIcon(lv.items)
+	cols, err := menuColumns(env, gtx, lv.items)
+	if err != nil {
+		return image.Point{}, err
+	}
+	lv.cols = cols
 	y, w := 0, gtx.Dp(theme.MenuMinWidth)-2*lv.pad
 	for i := range lv.items {
 		h := gtx.Dp(theme.Row)
 		if lv.items[i].separator {
 			h = 2*gtx.Dp(theme.SpaceXS) + gtx.Dp(theme.Hairline)
 		} else {
-			w = max(w, menuItemWidth(env, gtx, &lv.items[i], icons))
+			w = max(w, menuItemWidth(env, gtx, &lv.items[i], cols))
 		}
 		lv.rows = append(lv.rows, menuRow{y: y, h: h})
 		y += h
 	}
-	return image.Pt(w+2*lv.pad, y+2*lv.pad)
-}
-
-// menuHasIcon reports whether any item carries an icon.
-func menuHasIcon(items []MenuItem) bool {
-	for i := range items {
-		if items[i].Icon != "" {
-			return true
-		}
-	}
-	return false
-}
-
-// menuItemWidth is the room one item needs: the paddings, the icon column,
-// the label, the shortcut and the submenu arrow.
-func menuItemWidth(env *Env, gtx *layout.Context, it *MenuItem, icons bool) int {
-	w := 2*gtx.Dp(theme.SpaceMD) + measureLabel(env, gtx, theme.TypeBody(), it.Label).X
-	if icons {
-		w += gtx.Dp(theme.IconMD) + gtx.Dp(theme.SpaceSM)
-	}
-	if it.Shortcut != "" {
-		w += gtx.Dp(theme.SpaceXL) + measureLabel(env, gtx, theme.TypeSmall(), it.Shortcut).X
-	}
-	if len(it.Sub) > 0 {
-		w += gtx.Dp(theme.SpaceLG) + gtx.Dp(theme.IconSM)
-	}
-	return w
+	return image.Pt(w+2*lv.pad, y+2*lv.pad), nil
 }
 
 // follow moves the highlight toward the item under the pointer: it slides
@@ -388,6 +424,9 @@ func (m *MenuState) draw(env *Env, gtx *layout.Context, inline bool) error {
 	macro := op.Record(gtx.Ops)
 	if !inline && m.lv[0].open.Shown() {
 		m.absorb(env, gtx)
+		area := clip.Rect(m.lv[0].rect).Push(gtx.Ops)
+		event.Op(gtx.Ops, m)
+		area.Pop()
 	}
 	var err error
 	for k := range m.lv {
@@ -435,65 +474,14 @@ func (m *MenuState) drawLevel(env *Env, gtx *layout.Context, k int, inline bool)
 	inner := lv.rect.Inset(lv.pad)
 	if lv.hiAv > 0 {
 		top := inner.Min.Y + int(lv.hiYv+0.5)
-		fillRRect(gtx.Ops, image.Rect(inner.Min.X, top, inner.Max.X, top+gtx.Dp(theme.Row)), gtx.Dp(theme.RadiusMD), fade(c.HoverWash, lv.hiAv))
+		hiRect := image.Rect(inner.Min.X, top, inner.Max.X, top+gtx.Dp(theme.Row))
+		fillRRect(gtx.Ops, hiRect, gtx.Dp(theme.RadiusMD), fade(c.HoverWash, lv.hiAv))
 	}
-	icons := menuHasIcon(lv.items)
 	for j := range lv.items {
 		row := image.Rect(inner.Min.X, inner.Min.Y+lv.rows[j].y, inner.Max.X, inner.Min.Y+lv.rows[j].y+lv.rows[j].h)
-		if err := drawMenuItem(env, gtx, &lv.items[j], row, icons); err != nil {
+		if err := drawMenuItem(env, gtx, &lv.items[j], row, lv.cols); err != nil {
 			return err
 		}
 	}
 	return nil
-}
-
-// drawMenuItem draws one row inside r: a separator is a hairline; an item is
-// the icon column, the label, and the shortcut and the arrow at the right
-// edge. A disabled item draws in FgDisabled (§3.5).
-func drawMenuItem(env *Env, gtx *layout.Context, it *MenuItem, r image.Rectangle, icons bool) error {
-	c := env.Th.Chrome()
-	if it.separator {
-		y := r.Min.Y + r.Dy()/2
-		paint.FillShape(gtx.Ops, c.Border, clip.Rect(image.Rect(r.Min.X, y, r.Max.X, y+gtx.Dp(theme.Hairline))).Op())
-		return nil
-	}
-	fg, ink, sub := c.Fg, c.IconMuted, c.FgSubtle
-	if it.Disabled {
-		fg, ink, sub = c.FgDisabled, c.FgDisabled, c.FgDisabled
-	}
-	x := r.Min.X + gtx.Dp(theme.SpaceMD)
-	iconPx := gtx.Dp(theme.IconMD)
-	if icons {
-		if it.Icon != "" {
-			if err := drawIconAt(env, gtx, image.Pt(x, r.Min.Y+(r.Dy()-iconPx)/2), it.Icon, theme.IconMD, ink); err != nil {
-				return err
-			}
-		}
-		x += iconPx + gtx.Dp(theme.SpaceSM)
-	}
-	drawMenuText(env, gtx, theme.TypeBody(), fg, it.Label, image.Pt(x, r.Min.Y), r.Dy())
-	right := r.Max.X - gtx.Dp(theme.SpaceMD)
-	if len(it.Sub) > 0 {
-		arrow := gtx.Dp(theme.IconSM)
-		right -= arrow
-		if err := drawIconAt(env, gtx, image.Pt(right, r.Min.Y+(r.Dy()-arrow)/2), IconChevronRight, theme.IconSM, ink); err != nil {
-			return err
-		}
-		right -= gtx.Dp(theme.SpaceLG)
-	}
-	if it.Shortcut != "" {
-		w := measureLabel(env, gtx, theme.TypeSmall(), it.Shortcut).X
-		drawMenuText(env, gtx, theme.TypeSmall(), sub, it.Shortcut, image.Pt(right-w, r.Min.Y), r.Dy())
-	}
-	return nil
-}
-
-// drawMenuText draws one line of a row, centered on the row's height h, and
-// records its bounds for the gallery's overflow check (UK-E09).
-func drawMenuText(env *Env, gtx *layout.Context, t theme.Type, c color.NRGBA, txt string, pt image.Point, h int) {
-	pt.Y += centerLabelY(env, gtx, t, h)
-	at(gtx, pt, func(gtx *layout.Context) {
-		dims := drawText(env, gtx, t, c, txt, false)
-		recordRun(env, image.Rectangle{Max: dims.Size}.Add(pt))
-	})
 }

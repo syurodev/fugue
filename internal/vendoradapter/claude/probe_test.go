@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -91,7 +92,7 @@ func TestProbeReportsTheTestedVersionAndCapability(t *testing.T) {
 		t.Fatalf("path = %q, want the resolved binary %q", report.Path, a.Binary)
 	}
 	if report.Login != vendor.LoginUnknown {
-		t.Fatalf("login = %s, want unknown: the CLI reports login only during a turn", report.Login)
+		t.Fatalf("login = %s, want unknown: the status command printed nothing", report.Login)
 	}
 	assertClaudeCapability(t, report.Capability)
 }
@@ -132,7 +133,12 @@ func TestProbeBinaryNotFoundFailsTyped(t *testing.T) {
 func writeExecutable(t *testing.T, path, content string) {
 	t.Helper()
 	mode := os.FileMode(0o700)
-	if err := os.WriteFile(path, []byte(content), mode); err != nil {
+	// The fork lock keeps a concurrent fork from inheriting the open write
+	// descriptor, which would make the later exec fail with ETXTBSY.
+	syscall.ForkLock.RLock()
+	err := os.WriteFile(path, []byte(content), mode)
+	syscall.ForkLock.RUnlock()
+	if err != nil {
 		t.Fatal(err)
 	}
 }

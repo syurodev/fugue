@@ -100,6 +100,7 @@ type VendorService struct {
 	ops        *vendorOps
 	tokens     *sessionTokens
 	bridge     vendor.Bridge
+	accounts   *vendor.Accounts
 }
 
 func (s *VendorService) adapterFor(name string) (vendor.Adapter, error) {
@@ -138,12 +139,31 @@ func (s *VendorService) Probe(ctx context.Context, principal string, vendors []s
 		if err != nil {
 			return nil, publicVendorError(err)
 		}
+		s.observeLogin(name, probe.Login)
 		out = append(out, VendorProbeView{
 			Vendor: name, Version: probe.Version, VersionTested: probe.VersionTested,
 			VersionWarning: probe.VersionWarning, Login: string(probe.Login), Capability: probe.Capability,
 		})
 	}
 	return out, nil
+}
+
+func (s *VendorService) observeLogin(name string, login vendor.LoginState) {
+	if s.accounts != nil {
+		s.accounts.ObserveLogin(name, login)
+	}
+}
+
+// refreshLogin probes one vendor's default account and records its login
+// state. A probe that cannot run leaves the last known state.
+func (s *VendorService) refreshLogin(ctx context.Context, name string) {
+	ad, err := s.adapterFor(name)
+	if err != nil {
+		return
+	}
+	if probe, err := ad.Probe(ctx, vendor.AccountHome{}); err == nil {
+		s.observeLogin(name, probe.Login)
+	}
 }
 
 // Start validates the vendor, profile and workspace root, then spawns a session.

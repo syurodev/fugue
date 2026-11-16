@@ -41,7 +41,9 @@ func (p *Process) signalTree(sig syscall.Signal) error {
 	}
 	if plan.leader {
 		if err := p.cmd.Process.Signal(sig); err != nil && !errors.Is(err, os.ErrProcessDone) {
-			errs = append(errs, err)
+			if err = platformLeaderSignalError(pid, err); err != nil {
+				errs = append(errs, err)
+			}
 		}
 	}
 	return errors.Join(errs...)

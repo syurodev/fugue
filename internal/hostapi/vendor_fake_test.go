@@ -41,6 +41,13 @@ func playFakeVendor(args []string) bool {
 		}
 		fakeOut(fakeVendorVersion + " (Claude Code)\n")
 		return true
+	case "auth":
+		// `claude auth status`: the fake account is logged in (F9.10a).
+		fakeOut(`{"loggedIn":true}` + "\n")
+		return true
+	case "login":
+		// `codex login status` exits 0 when logged in.
+		return true
 	case "acp":
 		runHostFakeAgyACP()
 		return true

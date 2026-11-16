@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -121,7 +122,12 @@ func TestAgyVersionOutsideTheTestedRangeWarnsButRuns(t *testing.T) {
 func writeExecutable(t *testing.T, path, content string) {
 	t.Helper()
 	mode := os.FileMode(0o700)
-	if err := os.WriteFile(path, []byte(content), mode); err != nil {
+	// The fork lock keeps a concurrent fork from inheriting the open write
+	// descriptor, which would make the later exec fail with ETXTBSY.
+	syscall.ForkLock.RLock()
+	err := os.WriteFile(path, []byte(content), mode)
+	syscall.ForkLock.RUnlock()
+	if err != nil {
 		t.Fatal(err)
 	}
 }

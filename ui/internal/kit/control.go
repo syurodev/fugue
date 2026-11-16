@@ -89,6 +89,8 @@ type pressable struct {
 	click                        widget.Clickable
 	hoverF, pressF, focusF, selF motion.Follower
 	rip                          ripple
+	lastPressEnd                 time.Time
+	keyClicked                   bool
 }
 
 func newPressable() pressable {
@@ -103,18 +105,29 @@ func newPressable() pressable {
 // Tag is the control's input tag, for focus scripting and previews.
 func (c *pressable) Tag() event.Tag { return &c.click }
 
+// KeyClicked reports whether the last Layout activation came from Enter or
+// Space rather than a pointer click (a pointer click records a Press end).
+func (c *pressable) KeyClicked() bool { return c.keyClicked }
+
 // begin runs the input and the motion of a frame at the current offset:
 // it reads the activation (busy blocks it, §4.1), registers the hit area of
 // box — which press scaling never touches (§3.7) — resolves the state and
 // advances the followers.
 func (c *pressable) begin(env *Env, gtx *layout.Context, box image.Point, o pressOpts) (clicked bool, mv motionVals) {
 	ig := *gtx
+	prevEnd := c.lastPressEnd
 	if o.disabled {
 		// A disabled control consumes nothing: no hover, no focus (§4.1).
 		ig = gtx.Disabled()
 	} else {
 		clicked = c.click.Clicked(ig) && !o.busy
 	}
+	var curEnd time.Time
+	if h := c.click.History(); len(h) > 0 {
+		curEnd = h[len(h)-1].End
+	}
+	c.lastPressEnd = curEnd
+	c.keyClicked = clicked && (curEnd.IsZero() || curEnd.Equal(prevEnd))
 	st := resolveState(env, &ig, c.Tag(), &c.click, o)
 	c.click.Layout(ig, func(layout.Context) layout.Dimensions { return layout.Dimensions{Size: box} })
 	mv = motionVals{
