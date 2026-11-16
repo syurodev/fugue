@@ -30,15 +30,16 @@ func openCoordinatorHost(t *testing.T, dir string) (*execstore.Store, *clock.Fak
 	if err != nil {
 		t.Fatal("open host store")
 	}
+	if exists, existsErr := vault.NewSQLKeyringStore(host.DB()).Exists(t.Context()); existsErr != nil {
+		t.Fatal("check host keyring")
+	} else if !exists {
+		saveCheapKeyring(t, vault.NewSQLKeyringStore(host.DB()))
+	}
 	v, err := vault.NewService(t.Context(), vault.NewSQLKeyringStore(host.DB()), ids.NewSequence("vault"))
 	if err != nil {
 		t.Fatal("create host vault")
 	}
-	if v.Snapshot().State == vault.StateNotConfigured {
-		if _, err = v.Setup(t.Context(), redact.NewSecret("real-store-master")); err != nil {
-			t.Fatal("set up host vault")
-		}
-	} else if err = v.Unlock(t.Context(), redact.NewSecret("real-store-master")); err != nil {
+	if err = v.Unlock(t.Context(), redact.NewSecret(testMasterPW)); err != nil {
 		t.Fatal("unlock host vault")
 	}
 	s, err := execstore.New(t.Context(), host.DB(), v, host.Incarnation(), clk, ids.NewSequence("exec"), ids.NewDeterministic("seal"), nil)

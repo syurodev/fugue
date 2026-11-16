@@ -23,7 +23,6 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
-	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/storage"
 	"github.com/syurodev/fugue/internal/vendor"
@@ -86,6 +85,7 @@ func startLifecycleHost(t *testing.T, dir string) *HostProcess {
 	if err != nil {
 		t.Fatal(err)
 	}
+	seedCheapVaultDir(t, dir)
 	clk := clock.NewFake(time.Unix(0, 0))
 	hp, err := StartHost(t.Context(), &HostDeps{
 		DataDir: dir, Config: testHostConfig(), Clock: clk,
@@ -109,9 +109,7 @@ func startLifecycleHost(t *testing.T, dir string) *HostProcess {
 // itself arrives with F10.5, so the test holds the vault.
 func unlockLifecycleVault(t *testing.T, hp *HostProcess) {
 	t.Helper()
-	if _, err := hp.Vault().Setup(t.Context(), redact.NewSecret("lifecycle-password")); err != nil {
-		t.Fatal(err)
-	}
+	unlockCheapVault(t, hp)
 }
 
 // The first client a recovered host serves already sees the detached session:

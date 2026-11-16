@@ -20,7 +20,6 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
-	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/agy"
 	"github.com/syurodev/fugue/internal/vendorstore"
@@ -57,7 +56,7 @@ func newAgyRelayFixture(t *testing.T) *agyRelayFixture {
 	}
 	clk := clock.NewFake(time.Unix(200, 0))
 	hp, err := StartHost(t.Context(), &HostDeps{
-		DataDir:      t.TempDir(),
+		DataDir:      cheapVaultDir(t),
 		WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config:       testHostConfig(),
 		Clock:        clk,
@@ -74,9 +73,7 @@ func newAgyRelayFixture(t *testing.T) *agyRelayFixture {
 			t.Errorf("close host: %v", closeErr)
 		}
 	})
-	if _, setupErr := hp.Vault().Setup(t.Context(), redact.NewSecret("agy-relay-pw")); setupErr != nil {
-		t.Fatal(setupErr)
-	}
+	unlockCheapVault(t, hp)
 	rt := hp.Runtime()
 	rootDir := t.TempDir()
 	ws, err := rt.CreateWorkspace(t.Context(), testAppPrincipal, "agy-ws")
