@@ -163,15 +163,9 @@ func (s *SessionToolService) Call(ctx context.Context, binding SessionBinding, n
 	if name == approveToolName {
 		return s.callApprove(ctx, binding, args)
 	}
-	tool, ok := s.tools[name]
-	if !ok || !servesRole(tool, binding.Role) {
+	tool, ok := s.lookupTool(ctx, binding, name)
+	if !ok {
 		return FugueToolResult{}, errcode.New(errcode.NotFound, "the tool is not available to this session")
-	}
-	if tool.Available != nil {
-		info, err := s.sessions.Snapshot(ctx, binding.SessionID)
-		if err != nil || !tool.Available(ctx, info) {
-			return FugueToolResult{}, errcode.New(errcode.NotFound, "the tool is not available to this session")
-		}
 	}
 	if len(args) == 0 {
 		args = []byte("{}")
@@ -315,6 +309,22 @@ func buildConfirmSpec(check *interaction.Binding, tool *FugueTool, plan *FugueTo
 		OperationID: operation, Kind: interaction.KindConfirm, Summary: plan.Summary, Risk: string(risk),
 		GrantScopeLabel: label, Offers: offers, Binding: *check,
 	}, nil
+}
+
+// lookupTool finds the tool and applies the role and availability gates with
+// one outcome, so a session never learns why a tool is missing.
+func (s *SessionToolService) lookupTool(ctx context.Context, binding SessionBinding, name string) (*FugueTool, bool) {
+	tool, ok := s.tools[name]
+	if !ok || !servesRole(tool, binding.Role) {
+		return nil, false
+	}
+	if tool.Available != nil {
+		info, err := s.sessions.Snapshot(ctx, binding.SessionID)
+		if err != nil || !tool.Available(ctx, info) {
+			return nil, false
+		}
+	}
+	return tool, true
 }
 
 func servesRole(tool *FugueTool, role string) bool {

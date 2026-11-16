@@ -462,9 +462,7 @@ func TestSessionTokenDiesWithItsSessionAndItsPurge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.tools) != 0 {
-		t.Fatal("a normal host serves tools")
-	}
+	assertProductionToolsOnly(t, tools)
 	session := f.start(t, "token-1")
 	tools.tokens.mu.Lock()
 	binding, minted := tools.tokens.bySession[session.ID]
@@ -589,5 +587,15 @@ func awaitRequested(t *testing.T, sub *Subscription) PendingInteractionView {
 			t.Fatal(err)
 		}
 		return view
+	}
+}
+
+// assertProductionToolsOnly asserts a normal host serves exactly the
+// production Fugue tools: the team proposal tool (F11.2a); tests add theirs
+// through HostDeps.
+func assertProductionToolsOnly(t *testing.T, tools *SessionToolService) {
+	t.Helper()
+	if len(tools.tools) != 1 || tools.tools[teamProposeToolName] == nil {
+		t.Fatal("a normal host serves only the production Fugue tools")
 	}
 }

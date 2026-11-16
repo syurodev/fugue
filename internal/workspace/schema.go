@@ -288,7 +288,7 @@ func diffPolicy(accepted, candidate *EffectiveConfig) []PolicyDiffEntry {
 	add("redact.allow_paths", fmtStrs(accepted.Redact.AllowPaths), fmtStrs(candidate.Redact.AllowPaths))
 	add("roots", fmt.Sprint(accepted.Roots), fmt.Sprint(candidate.Roots))
 	add("roles", formatRolesForDiff(accepted.Roles), formatRolesForDiff(candidate.Roles))
-	add("session.teams", fmt.Sprint(accepted.Session.Teams), fmt.Sprint(candidate.Session.Teams))
+	add("session.teams", strconv.FormatBool(accepted.Session.Teams), strconv.FormatBool(candidate.Session.Teams))
 	return diffs
 }
 

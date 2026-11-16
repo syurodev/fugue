@@ -17,6 +17,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -277,8 +278,13 @@ func TestTestOnlyToolIsRefusedByTheNormalHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	list, err := client.ListTools(t.Context(), connect.NewRequest(&sessiontoolsv1.ListToolsRequest{}))
-	if err != nil || len(list.Msg.Tools) != 1 || list.Msg.Tools[0].Name != "approve" {
-		t.Fatalf("tools of a normal host = %v, %v; want [approve]", list, err)
+	if err != nil || len(list.Msg.Tools) != 2 {
+		t.Fatalf("tools of a normal host = %v, %v; want the approve relay and fugue_team_propose", list, err)
+	}
+	for _, want := range []string{"approve", "fugue_team_propose"} {
+		if !slices.ContainsFunc(list.Msg.Tools, func(t *sessiontoolsv1.Tool) bool { return t.Name == want }) {
+			t.Fatalf("tools of a normal host = %v, want %s offered", list.Msg.Tools, want)
+		}
 	}
 	_, err = callEcho(t, client)
 	assertConnectCode(t, err, connect.CodeNotFound, errcode.NotFound)
@@ -468,9 +474,24 @@ func assertBridgeLifecycle(t *testing.T, run *fakeBridgeRun, replies []mcpReply)
 	if initialize.Result.ProtocolVersion != "2025-06-18" || initialize.Result.Capabilities.Tools == nil {
 		t.Errorf("initialize = %s", run.Replies[0])
 	}
-	if len(list.Result.Tools) != 2 || list.Result.Tools[0].Name != "approve" || !json.Valid(list.Result.Tools[0].InputSchema) ||
-		list.Result.Tools[1].Name != testEchoTool || !json.Valid(list.Result.Tools[1].InputSchema) {
+	if len(list.Result.Tools) != 3 {
 		t.Errorf("tools/list = %s", run.Replies[1])
+	}
+	for _, want := range []string{"approve", "fugue_team_propose", testEchoTool} {
+		if !slices.ContainsFunc(list.Result.Tools, func(t struct {
+			Name        string          `json:"name"`
+			InputSchema json.RawMessage `json:"inputSchema"`
+		},
+		) bool {
+			return t.Name == want
+		}) {
+			t.Errorf("tools/list = %s, want %s offered", run.Replies[1], want)
+		}
+	}
+	for _, tool := range list.Result.Tools {
+		if !json.Valid(tool.InputSchema) {
+			t.Errorf("tools/list schema of %s is not JSON", tool.Name)
+		}
 	}
 }
 

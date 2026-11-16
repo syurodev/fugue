@@ -113,7 +113,7 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 			// keeps the proposal pending rather than blocking the close.
 			cancelCtx := context.WithoutCancel(base)
 			supervise.Go(cancelCtx, "team-cancel-"+sessionID, func(taskCtx context.Context) error {
-				if err := hp.rt.teamProposals.CancelForSession(taskCtx, sessionID); err != nil {
+				if cancelErr := hp.rt.teamProposals.CancelForSession(taskCtx, sessionID); cancelErr != nil {
 					slog.WarnContext(taskCtx, "cancelling the pending team proposal failed", "session_id", sessionID)
 				}
 				return nil

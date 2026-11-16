@@ -37,37 +37,38 @@ func proposalDecisionOptions() []interaction.Option {
 // recordProposalItem records the team_proposal item through the session's
 // single-writer actor, so the item's sequence stays contiguous with the
 // actor's journal.
-func (s *TeamProposalService) recordProposalItem(ctx context.Context, sessionID string, snap vendorstore.Session,
-	teamID string, input *teams.ProposalInput, warnings []teams.Warning, eff *workspace.EffectiveConfig,
+func (s *TeamProposalService) recordProposalItem(ctx context.Context, sessionID string,
+	teamID string, input *teams.ProposalInput,
 ) error {
 	turnID, err := s.recorder.ActiveTurnID(ctx, sessionID)
 	if err != nil {
-		return err
+		return boundaryError("read the active turn", err)
 	}
 	itemID, err := s.ids.NewID()
 	if err != nil {
 		return errcode.Wrap(errcode.Internal, "generate the proposal item ID", err)
 	}
-	content, err := json.Marshal(transcript.TeamProposalContent{Plan: proposalPlanText(input, warnings, eff)})
+	content, err := json.Marshal(transcript.TeamProposalContent{Plan: proposalPlanText(input)})
 	if err != nil {
 		return errcode.Wrap(errcode.Internal, "marshal the proposal plan", err)
 	}
-	return s.recorder.RecordEvent(ctx, sessionID, &vendorstore.Event{
+	err = s.recorder.RecordEvent(ctx, sessionID, &vendorstore.Event{
 		Type: vendorstore.TranscriptItemRecorded, TurnID: turnID,
 		Item: &vendorstore.Item{
 			ID: itemID, TurnID: turnID, Kind: vendorstore.KindTeamProposal,
 			Metadata: vendorstore.ItemMetadata{
-				ProposalID: teamID, AgentCount: int64(teams.AgentCount(input)), Decision: "pending",
+				ProposalID: teamID, AgentCount: int64(teams.AgentCount(input)), Decision: teamPendingDecision,
 			},
 			Content: content,
 		},
 	})
+	return boundaryError("record the proposal item", err)
 }
 
 // ensureCard creates the proposal's inbox card: one question with the four
 // §5.3 choices (F11.2b consumes the answer). The operation key is derived
 // from the team ID, so supersede can invalidate the exact card (Q-103).
-func (s *TeamProposalService) ensureCard(ctx context.Context, snap vendorstore.Session, teamID string,
+func (s *TeamProposalService) ensureCard(ctx context.Context, snap *vendorstore.Session, teamID string,
 	input *teams.ProposalInput, warnings []teams.Warning, eff *workspace.EffectiveConfig,
 ) error {
 	lines, err := s.proposalCardLines(ctx, input, warnings, eff)
@@ -154,7 +155,7 @@ type roleProfile struct{ vendor, model string }
 
 // proposalPlanText renders the proposal as the transcript item's protected
 // plan content. Everything in it is untrusted proposal data (§13).
-func proposalPlanText(input *teams.ProposalInput, warnings []teams.Warning, eff *workspace.EffectiveConfig) string {
+func proposalPlanText(input *teams.ProposalInput) string {
 	var b strings.Builder
 	b.WriteString("# " + input.Title + "\n\n" + input.Brief + "\n\n## roles\n")
 	for i := range input.Roles {

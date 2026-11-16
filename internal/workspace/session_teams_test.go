@@ -8,17 +8,14 @@ import (
 
 func decodeTier(t *testing.T, path string, raw []byte, tier2 bool) tier2RawConfig {
 	t.Helper()
-	var cfg tier2RawConfig
-	var err error
-	if tier2 {
-		cfg, err = decodeTier2TOML(path, raw, t.TempDir())
-	} else {
+	if !tier2 {
 		t3, decodeErr := decodeTier3TOML(path, raw, t.TempDir())
 		if decodeErr != nil {
 			t.Fatalf("decodeTier3TOML: %v", decodeErr)
 		}
 		return tier2RawConfig{Session: t3.Session, Roles: t3.Roles}
 	}
+	cfg, err := decodeTier2TOML(path, raw, t.TempDir())
 	if err != nil {
 		t.Fatalf("decodeTier2TOML: %v", err)
 	}

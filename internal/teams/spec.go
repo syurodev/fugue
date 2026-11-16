@@ -71,7 +71,7 @@ type ProtectedTaskContent struct {
 }
 
 // ProtectedContent returns the protected content view of spec for envelope sealing.
-func (s TaskSpec) ProtectedContent() ProtectedTaskContent {
+func (s *TaskSpec) ProtectedContent() ProtectedTaskContent {
 	out := ProtectedTaskContent{
 		Goal:       s.Goal,
 		Context:    s.Context,

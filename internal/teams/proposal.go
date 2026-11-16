@@ -97,10 +97,10 @@ func ValidateProposal(in *ProposalInput, catalog []Role) ([]Warning, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := validateProposalTasks(in, catalog, proposed); err != nil {
+	if err := validateProposalTasks(in, proposed); err != nil {
 		return nil, err
 	}
-	return proposalWarnings(in, catalog, proposed), nil
+	return proposalWarnings(in, catalog), nil
 }
 
 func validateProposalBounds(in *ProposalInput) error {
@@ -141,7 +141,7 @@ func validateProposalRoles(in *ProposalInput, catalog []Role) (map[string]Role, 
 	return resolved, nil
 }
 
-func validateProposalTasks(in *ProposalInput, catalog []Role, resolved map[string]Role) error {
+func validateProposalTasks(in *ProposalInput, resolved map[string]Role) error {
 	nodes := make([]TaskNode, 0, len(in.Tasks))
 	specs := make([]TeamTaskSpec, 0, len(in.Tasks))
 	for i := range in.Tasks {
@@ -167,7 +167,7 @@ func taskSpecOf(t *ProposedTask) TaskSpec {
 
 // proposalWarnings computes the §5.3 warnings: new roles, models the catalog
 // cannot vouch for, and overlapping write scopes without depends_on.
-func proposalWarnings(in *ProposalInput, catalog []Role, resolved map[string]Role) []Warning {
+func proposalWarnings(in *ProposalInput, catalog []Role) []Warning {
 	var out []Warning
 	catalogNames := make(map[string]struct{}, len(catalog))
 	for i := range catalog {
@@ -218,7 +218,7 @@ func scopeOverlapWarnings(in *ProposalInput) []Warning {
 		}
 		for j := i + 1; j < len(in.Tasks); j++ {
 			other := &in.Tasks[j]
-			if len(other.WriteScope) == 0 || dependsEitherWay(in.Tasks[i], *other) {
+			if len(other.WriteScope) == 0 || dependsEitherWay(&in.Tasks[i], other) {
 				continue
 			}
 			if scopesOverlap(in.Tasks[i].WriteScope, other.WriteScope) {
@@ -229,7 +229,7 @@ func scopeOverlapWarnings(in *ProposalInput) []Warning {
 	return out
 }
 
-func dependsEitherWay(a, b ProposedTask) bool {
+func dependsEitherWay(a, b *ProposedTask) bool {
 	return containsTask(a.DependsOn, b.ID) || containsTask(b.DependsOn, a.ID)
 }
 

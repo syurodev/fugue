@@ -24,6 +24,9 @@ import (
 const (
 	teamTestWorkspace = "team-ws"
 	teamTestRole      = "researcher"
+	teamTestLeadTask  = "t-lead"
+	teamTestPending   = "pending"
+	teamTestRejected  = "rejected"
 )
 
 // teamProposalFixture is the F11.2a fixture: a host with the fake vendor CLI,
@@ -76,16 +79,23 @@ func newTeamProposalFixture(t *testing.T, extraTOML string) *teamProposalFixture
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw := teamWorkspaceTOML(t, extraTOML)
-	if _, cfgErr := rt.UpdateWorkspaceConfig(t.Context(), testAppPrincipal, ws.ID, raw, ws.ConfigHash); cfgErr != nil {
+	if _, cfgErr := rt.UpdateWorkspaceConfig(t.Context(), testAppPrincipal, ws.ID, teamWorkspaceTOML(t, extraTOML), ws.ConfigHash); cfgErr != nil {
 		t.Fatal(cfgErr)
 	}
+	session, binding := startTeamFixtureSession(t, rt, svc, tools, ws.ID)
+	return &teamProposalFixture{hp: hp, rt: rt, svc: svc, tools: tools, session: session, binding: binding, wsID: ws.ID}
+}
+
+// startTeamFixtureSession starts one Claude session in the workspace and
+// holds its turn, so the propose path runs against a live actor.
+func startTeamFixtureSession(t *testing.T, rt *HostRuntime, svc *VendorService, tools *SessionToolService, workspaceID string) (VendorSessionView, SessionBinding) {
+	t.Helper()
 	sub, err := rt.Subscribe(t.Context(), SubscribeParams{Principal: testAppPrincipal, Topic: TopicVendorSessions})
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer sub.Close()
-	session, err := svc.Start(t.Context(), testAppPrincipal, &StartVendorSession{CommandID: "team-start", Vendor: VendorClaude, WorkspaceID: ws.ID})
+	session, err := svc.Start(t.Context(), testAppPrincipal, &StartVendorSession{CommandID: "team-start", Vendor: VendorClaude, WorkspaceID: workspaceID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +109,7 @@ func newTeamProposalFixture(t *testing.T, extraTOML string) *teamProposalFixture
 	if !ok {
 		t.Fatalf("missing live session binding for %s", session.ID)
 	}
-	return &teamProposalFixture{hp: hp, rt: rt, svc: svc, tools: tools, session: session, binding: binding, wsID: ws.ID}
+	return session, binding
 }
 
 func teamWorkspaceTOML(t *testing.T, extra string) []byte {
@@ -116,9 +126,9 @@ func validTeamProposalArgs() *ProposeArgs {
 		Title: "Split the syntax work",
 		Brief: "Two independent read streams reported to the lead.",
 		Tasks: []teams.ProposedTask{
-			{ID: "t-lead", TeamRole: teams.RoleLead, Role: teamTestRole, Goal: "Coordinate the streams", WriteScope: []string{}, Deliverable: teams.DeliverableReport},
-			{ID: "t-a", ParentTaskID: "t-lead", TeamRole: teams.RoleMember, Role: teamTestRole, Goal: "Read the lexer", WriteScope: []string{"docs/lexer.md"}, Deliverable: teams.DeliverableReport},
-			{ID: "t-b", ParentTaskID: "t-lead", TeamRole: teams.RoleMember, Role: teamTestRole, Goal: "Read the parser", WriteScope: []string{"docs/parser.md"}, Deliverable: teams.DeliverableReport},
+			{ID: teamTestLeadTask, TeamRole: teams.RoleLead, Role: teamTestRole, Goal: "Coordinate the streams", WriteScope: []string{}, Deliverable: teams.DeliverableReport},
+			{ID: "t-a", ParentTaskID: teamTestLeadTask, TeamRole: teams.RoleMember, Role: teamTestRole, Goal: "Read the lexer", WriteScope: []string{"docs/lexer.md"}, Deliverable: teams.DeliverableReport},
+			{ID: "t-b", ParentTaskID: teamTestLeadTask, TeamRole: teams.RoleMember, Role: teamTestRole, Goal: "Read the parser", WriteScope: []string{"docs/parser.md"}, Deliverable: teams.DeliverableReport},
 		},
 	}
 }
@@ -196,18 +206,7 @@ func TestNoTaskStartsBeforeApproval(t *testing.T) {
 	if proposalID == "" {
 		t.Fatal("Propose returned no proposal ID")
 	}
-	rec, tasks := f.teamSnapshot(t, proposalID)
-	if rec.State != vendorstore.TeamStateProposed {
-		t.Fatalf("team state = %s, want proposed", rec.State)
-	}
-	if len(tasks) != 3 {
-		t.Fatalf("task count = %d, want 3", len(tasks))
-	}
-	for i := range tasks {
-		if tasks[i].State != vendorstore.TaskStateQueued {
-			t.Fatalf("task %s state = %s, want queued", tasks[i].TaskID, tasks[i].State)
-		}
-	}
+	assertProposedTeam(t, f, proposalID, 3)
 	sessions, err := f.hp.vendorStore.ListSessions(t.Context())
 	if err != nil {
 		t.Fatal(err)
@@ -216,9 +215,35 @@ func TestNoTaskStartsBeforeApproval(t *testing.T) {
 		t.Fatalf("sessions = %+v, want only the proposing session", sessions)
 	}
 	item := f.proposalItem(t, proposalID)
-	if item.Metadata.Decision != "pending" || item.Metadata.AgentCount != 2 {
+	if item.Metadata.Decision != teamTestPending || item.Metadata.AgentCount != 2 {
 		t.Fatalf("item metadata = %+v, want pending with 2 agents", item.Metadata)
 	}
+	assertSingleProposalCard(t, f)
+}
+
+// assertProposedTeam asserts the team is proposed with every task still
+// queued (OR-E13's state half).
+func assertProposedTeam(t *testing.T, f *teamProposalFixture, teamID string, wantTasks int) (vendorstore.TeamRecord, []vendorstore.TaskRecord) {
+	t.Helper()
+	rec, tasks := f.teamSnapshot(t, teamID)
+	if rec.State != vendorstore.TeamStateProposed {
+		t.Fatalf("team state = %s, want proposed", rec.State)
+	}
+	if len(tasks) != wantTasks {
+		t.Fatalf("task count = %d, want %d", len(tasks), wantTasks)
+	}
+	for i := range tasks {
+		if tasks[i].State != vendorstore.TaskStateQueued {
+			t.Fatalf("task %s state = %s, want queued", tasks[i].TaskID, tasks[i].State)
+		}
+	}
+	return rec, tasks
+}
+
+// assertSingleProposalCard asserts exactly one proposal card with the four
+// §5.3 choices is pending for the fixture's session.
+func assertSingleProposalCard(t *testing.T, f *teamProposalFixture) {
+	t.Helper()
 	cards := f.pendingCards(t)
 	if len(cards) != 1 {
 		t.Fatalf("pending cards = %d, want 1", len(cards))
@@ -254,7 +279,24 @@ func TestNewProposalSupersedesThePendingOne(t *testing.T) {
 			t.Fatalf("superseded task %s state = %s, want cancelled", tasks[i].TaskID, tasks[i].State)
 		}
 	}
-	events, err := f.hp.vendorStore.TeamEventsSince(t.Context(), first, 0, 100)
+	assertTasksSettledBeforeTeamEnd(t, f, first)
+	if item := f.proposalItem(t, first); item.Metadata.Decision != teamTestRejected {
+		t.Fatalf("superseded item decision = %s, want rejected", item.Metadata.Decision)
+	}
+	if rec2, _ := f.teamSnapshot(t, second); rec2.State != vendorstore.TeamStateProposed {
+		t.Fatalf("second team state = %s, want proposed", rec2.State)
+	}
+	if item := f.proposalItem(t, second); item.Metadata.Decision != teamTestPending {
+		t.Fatalf("second item decision = %s, want pending", item.Metadata.Decision)
+	}
+	assertSingleProposalCard(t, f)
+}
+
+// assertTasksSettledBeforeTeamEnd pins the Q-84 order: every task-cancel
+// event precedes TeamEnded.
+func assertTasksSettledBeforeTeamEnd(t *testing.T, f *teamProposalFixture, teamID string) {
+	t.Helper()
+	events, err := f.hp.vendorStore.TeamEventsSince(t.Context(), teamID, 0, 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -262,23 +304,10 @@ func TestNewProposalSupersedesThePendingOne(t *testing.T) {
 	if endedAt < 0 {
 		t.Fatal("superseded team has no TeamEnded event")
 	}
-	for _, e := range events[:endedAt] {
-		if e.EventType == vendorstore.EventTeamEnded {
+	for i := range events[:endedAt] {
+		if events[i].EventType == vendorstore.EventTeamEnded {
 			t.Fatal("TeamEnded appended before every task settled (Q-84)")
 		}
-	}
-	if item := f.proposalItem(t, first); item.Metadata.Decision != "rejected" {
-		t.Fatalf("superseded item decision = %s, want rejected", item.Metadata.Decision)
-	}
-	if rec2, _ := f.teamSnapshot(t, second); rec2.State != vendorstore.TeamStateProposed {
-		t.Fatalf("second team state = %s, want proposed", rec2.State)
-	}
-	if item := f.proposalItem(t, second); item.Metadata.Decision != "pending" {
-		t.Fatalf("second item decision = %s, want pending", item.Metadata.Decision)
-	}
-	cards := f.pendingCards(t)
-	if len(cards) != 1 {
-		t.Fatalf("pending cards = %d, want only the new card", len(cards))
 	}
 }
 
@@ -291,30 +320,16 @@ func TestPendingProposalIsCancelledWhenTheSessionEnds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Propose: %v", err)
 	}
-	sub, err := f.rt.Subscribe(t.Context(), SubscribeParams{Principal: testAppPrincipal, Topic: TopicVendorSessions})
-	if err != nil {
-		t.Fatal(err)
+	sub, subErr := f.rt.Subscribe(t.Context(), SubscribeParams{Principal: testAppPrincipal, Topic: TopicVendorSessions})
+	if subErr != nil {
+		t.Fatal(subErr)
 	}
 	defer sub.Close()
-	if _, err := f.svc.Close(t.Context(), testAppPrincipal, VendorStop{CommandID: "team-close", SessionID: f.session.ID}); err != nil {
-		t.Fatalf("Close: %v", err)
+	if _, closeErr := f.svc.Close(t.Context(), testAppPrincipal, VendorStop{CommandID: "team-close", SessionID: f.session.ID}); closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
 	}
 	awaitSessionState(t, sub, f.session.ID, "closed")
-	// The cancel runs off the endSession hook on its own goroutine; poll
-	// until the durable state and the item flip have landed.
-	var rec vendorstore.TeamRecord
-	var tasks []vendorstore.TaskRecord
-	var item vendorstore.StoredItem
-	for range 20000 {
-		rec, tasks = f.teamSnapshot(t, proposalID)
-		if rec.State == vendorstore.TeamStateCancelled {
-			item = f.proposalItem(t, proposalID)
-			if item.Metadata.Decision == "rejected" {
-				break
-			}
-		}
-		runtime.Gosched()
-	}
+	rec, tasks, item := awaitCancelledProposal(t, f, proposalID)
 	if rec.State != vendorstore.TeamStateCancelled {
 		t.Fatalf("team state after close = %s, want cancelled", rec.State)
 	}
@@ -323,7 +338,7 @@ func TestPendingProposalIsCancelledWhenTheSessionEnds(t *testing.T) {
 			t.Fatalf("task %s state after close = %s, want cancelled", tasks[i].TaskID, tasks[i].State)
 		}
 	}
-	if item.Metadata.Decision != "rejected" {
+	if item.Metadata.Decision != teamTestRejected {
 		t.Fatalf("item decision after close = %s, want rejected", item.Metadata.Decision)
 	}
 	payload, err := f.hp.vendorStore.OpenTeamEventPayload(t.Context(), proposalID, rec.LastSeq)
@@ -443,6 +458,15 @@ func TestTeamProposeToolOfferingFollowsSessionTeamsFlag(t *testing.T) {
 	if !slices.Contains(names, teamProposeToolName) {
 		t.Fatalf("tools/list = %v, want fugue_team_propose offered", names)
 	}
+	// The tool path proposes end to end: policy, run, store, item, card.
+	proposalID, proposeErr := enabled.proposeThroughTool(t, validTeamProposalArgs())
+	if proposeErr != nil {
+		t.Fatalf("tool propose: %v", proposeErr)
+	}
+	if rec, _ := enabled.teamSnapshot(t, proposalID); rec.State != vendorstore.TeamStateProposed {
+		t.Fatalf("tool-proposed team state = %s, want proposed", rec.State)
+	}
+	assertSingleProposalCard(t, enabled)
 	disabled := newTeamProposalFixture(t, "[session]\nteams = false\n")
 	names = teamToolNames(t, disabled.tools, disabled.binding)
 	if slices.Contains(names, teamProposeToolName) {
@@ -468,4 +492,25 @@ func teamToolNames(t *testing.T, tools *SessionToolService, binding SessionBindi
 		names = append(names, views[i].Name)
 	}
 	return names
+}
+
+// awaitCancelledProposal polls until the session-end cancel has landed: the
+// team cancelled, every task cancelled and the item rejected. The cancel runs
+// off the endSession hook on its own goroutine.
+func awaitCancelledProposal(t *testing.T, f *teamProposalFixture, teamID string) (vendorstore.TeamRecord, []vendorstore.TaskRecord, vendorstore.StoredItem) {
+	t.Helper()
+	var rec vendorstore.TeamRecord
+	var tasks []vendorstore.TaskRecord
+	var item vendorstore.StoredItem
+	for range 20000 {
+		rec, tasks = f.teamSnapshot(t, teamID)
+		if rec.State == vendorstore.TeamStateCancelled {
+			item = f.proposalItem(t, teamID)
+			if item.Metadata.Decision == teamTestRejected {
+				return rec, tasks, item
+			}
+		}
+		runtime.Gosched()
+	}
+	return rec, tasks, item
 }

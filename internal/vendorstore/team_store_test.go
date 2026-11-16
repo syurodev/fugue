@@ -392,9 +392,9 @@ func reopenStoreLocked(t *testing.T, s *Store, v *vault.Service, path string) *S
 
 func assertRecoveredTaskStates(t *testing.T, s2 *Store) TeamRecord {
 	t.Helper()
-	teamAfter, tasksAfter, err := s2.TeamSnapshot(t.Context(), "team-recover")
-	if err != nil {
-		t.Fatalf("TeamSnapshot: %v", err)
+	teamAfter, tasksAfter, snapErr := s2.TeamSnapshot(t.Context(), "team-recover")
+	if snapErr != nil {
+		t.Fatalf("TeamSnapshot: %v", snapErr)
 	}
 	byID := make(map[string]TaskState, len(tasksAfter))
 	for i := range tasksAfter {
@@ -726,12 +726,12 @@ func TestPendingTeamForSessionReturnsOnlyTheProposedTeam(t *testing.T) {
 	if err != nil || !ok || pending.TeamID != "team-pending" || pending.State != TeamStateProposed {
 		t.Fatalf("pending = (%+v, %v, %v), want team-pending proposed", pending, ok, err)
 	}
-	if _, ok, err := s.PendingTeamForSession(ctx, "sess-other"); err != nil || ok {
-		t.Fatalf("pending for session without a team = (%v, %v), want none", ok, err)
+	if _, otherOK, otherErr := s.PendingTeamForSession(ctx, "sess-other"); otherErr != nil || otherOK {
+		t.Fatalf("pending for session without a team = (%v, %v), want none", otherOK, otherErr)
 	}
-	rec, _, err := s.TeamSnapshot(ctx, "team-pending")
-	if err != nil {
-		t.Fatalf("TeamSnapshot: %v", err)
+	rec, _, snapErr := s.TeamSnapshot(ctx, "team-pending")
+	if snapErr != nil {
+		t.Fatalf("TeamSnapshot: %v", snapErr)
 	}
 	appendSeq(t, s, "team-pending", rec.LastSeq, []AppendTeamEventInput{
 		{EventID: "tp-cancel", TaskID: testTaskLeadID, EventType: EventTaskEnded, Outcome: outcomeCancelled},
