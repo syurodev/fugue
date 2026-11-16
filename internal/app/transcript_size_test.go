@@ -45,30 +45,44 @@ func TestTranscriptPageOver10000ItemsIsStableWithoutDuplicatesOrGaps(t *testing.
 	assertPagedTranscript(t, entries, totalPageItems)
 }
 
-// recordPageItems records total notice items through the write path and
-// returns the first item for the update check.
+// recordPageItems records the first item through the service write path, then
+// appends the rest as one store batch and returns the first item for the
+// update check. One commit per item costs a durable sync each, which made
+// 10,000 service writes take minutes on a slow runner; the per-item write path
+// is covered elsewhere, and this test is about paging over the stored items.
 func recordPageItems(t *testing.T, f *transcriptFixture, total int) *transcript.Item {
 	t.Helper()
-	first := transcript.Item{
-		ID: "item-000001", SessionID: testSession, TurnID: testTurn, Kind: transcript.Notice,
-		Metadata: transcript.NoticeMetadata{Level: "info", Code: "page"},
-		Content:  transcript.NoticeContent{Text: "page item"},
-	}
+	first := pageItem(1)
 	if err := f.service.RecordItem(t.Context(), testSession, 2, &first, nil); err != nil {
 		t.Fatal(err)
 	}
-	for expected := 3; expected <= total+1; expected++ {
-		item := transcript.Item{
-			ID:        fmt.Sprintf("item-%06d", expected-1),
-			SessionID: testSession, TurnID: testTurn, Kind: transcript.Notice,
-			Metadata: transcript.NoticeMetadata{Level: "info", Code: "page"},
-			Content:  transcript.NoticeContent{Text: "page item"},
-		}
-		if err := f.service.RecordItem(t.Context(), testSession, int64(expected), &item, nil); err != nil {
+	events := make([]*vendorstore.Event, 0, total-1)
+	for n := 2; n <= total; n++ {
+		item := pageItem(n)
+		content, _, _, _, err := fitContent(item.Content, sealing.MaxPayloadPlaintext)
+		if err != nil {
 			t.Fatal(err)
 		}
+		events = append(events, &vendorstore.Event{
+			Type: vendorstore.TranscriptItemRecorded,
+			Item: &vendorstore.Item{
+				ID: item.ID, TurnID: item.TurnID, Kind: string(item.Kind),
+				Metadata: storeMetadata(item.Metadata), Content: content,
+			},
+		})
+	}
+	if _, err := f.store.AppendBatch(t.Context(), testSession, 3, events); err != nil {
+		t.Fatal(err)
 	}
 	return &first
+}
+
+func pageItem(n int) transcript.Item {
+	return transcript.Item{
+		ID: fmt.Sprintf("item-%06d", n), SessionID: testSession, TurnID: testTurn, Kind: transcript.Notice,
+		Metadata: transcript.NoticeMetadata{Level: "info", Code: "page"},
+		Content:  transcript.NoticeContent{Text: "page item"},
+	}
 }
 
 // collectAllPages pages the transcript newest first with the default limit.

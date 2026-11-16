@@ -52,7 +52,7 @@ func newVaultLockFixture(t *testing.T) *vaultLockFixture {
 	}
 	clk := clock.Real{}
 	hp, err := StartHost(t.Context(), &HostDeps{
-		DataDir: t.TempDir(), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
+		DataDir: cheapVaultDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("vault-lock-test")),
 		Transport: newScriptedTransport(), VendorBinary: exe, TestFugueTools: []*FugueTool{deploy},
 	})
@@ -139,9 +139,7 @@ func TestSessionToolConfirmationFailsClosedWhileVaultLocked(t *testing.T) {
 	f.hp.vaultRef.Store(savedVault)
 
 	// 2. Unlock, open a confirmation, then Lock to cancel it.
-	if _, err := f.hp.Vault().Setup(t.Context(), redact.NewSecret("vault-lock-test-password")); err != nil {
-		t.Fatal(err)
-	}
+	unlockCheapVault(t, f.hp)
 	sub, err := f.rt.hub.Subscribe(t.Context(), SubscribeParams{Principal: string(KindApp), Topic: TopicInteraction})
 	if err != nil {
 		t.Fatal(err)
@@ -161,7 +159,7 @@ func TestSessionToolConfirmationFailsClosedWhileVaultLocked(t *testing.T) {
 	f.assertLockedProdDenied(t, "post-Lock")
 
 	// 3. Unlock restores confirmations so an allowed call runs the tool.
-	if unlockErr := f.hp.Vault().Unlock(t.Context(), redact.NewSecret("vault-lock-test-password")); unlockErr != nil {
+	if unlockErr := f.hp.Vault().Unlock(t.Context(), redact.NewSecret(testMasterPW)); unlockErr != nil {
 		t.Fatal(unlockErr)
 	}
 	prompt, callCh = f.startProdCall(t, sub)

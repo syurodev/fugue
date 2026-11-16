@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
-	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
@@ -43,13 +42,12 @@ const testHostLeadTaskID = "task-host-lead"
 func setupTeamForHostRestart(t *testing.T, dir string, clk *clock.Fake) {
 	t.Helper()
 	ctx := t.Context()
+	seedCheapVaultDir(t, dir)
 	hp1, err := StartHost(ctx, testHostDeps(dir, clk, newScriptedTransport()))
 	if err != nil {
 		t.Fatalf("StartHost 1: %v", err)
 	}
-	if _, setupErr := hp1.vault.Setup(ctx, redact.NewSecret("correct-horse-battery-staple")); setupErr != nil {
-		t.Fatalf("vault.Setup: %v", setupErr)
-	}
+	unlockCheapVault(t, hp1)
 	rec, _, err := hp1.vendorStore.CreateTeam(ctx, &vendorstore.NewTeamInput{
 		TeamID:          "team-host-restart",
 		WorkspaceID:     "ws-host-restart",

@@ -52,13 +52,16 @@ func newAdapterStore(t *testing.T, unlocked bool) *execstore.Store {
 	if err = storage.Migrate(ctx, db, clk); err != nil {
 		t.Fatal("migrate database")
 	}
+	if unlocked {
+		saveCheapKeyring(t, vault.NewSQLKeyringStore(db))
+	}
 	v, err := vault.NewService(ctx, vault.NewSQLKeyringStore(db), ids.NewSequence("vault"))
 	if err != nil {
 		t.Fatal("create vault")
 	}
 	if unlocked {
-		if _, err = v.Setup(ctx, redact.NewSecret("adapter-test-master")); err != nil {
-			t.Fatal("set up vault")
+		if err = v.Unlock(ctx, redact.NewSecret(testMasterPW)); err != nil {
+			t.Fatal("unlock vault")
 		}
 	}
 	s, err := execstore.New(ctx, db, v, storage.HostIncarnation{LockGeneration: 1, IncarnationID: "adapter-host", AcquiredAt: clk.Now()}, clk, ids.NewSequence("adapter-id"), ids.NewDeterministic("adapter-seal"), nil)
