@@ -6,9 +6,11 @@
 // ops buffer, an indeterminate spinner that asks for frames only while
 // drawn, the elevation.float shadow, and the pressable controls (Button
 // and IconButton, F10.9: the v0.3 HeroUI style, every change animated on
-// the motion tokens). Fields, menus and the rest of kit v1 land in
-// F10.10–F10.12; every component's doc comment points at its ui-kit
-// § section.
+// the motion tokens), the text fields (F10.10), and the menu on the window
+// overlay (F10.11: one overlay owned by the window and drawn last, anchors,
+// flips at the edges, submenus, a window-wide absorbing area under the root
+// menu). The rest of kit v1 lands in F10.12; every component's doc comment
+// points at its ui-kit § section.
 //
 // The kit knows nothing about the Host API, vendors or modules (UK-10): it
 // takes colors and sizes from ui/internal/theme and reports what happened

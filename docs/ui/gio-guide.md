@@ -123,28 +123,38 @@ Findings, all verified in the spike and re-verified for the kit:
 - Escape: handle it where the focus is, and return focus with `key.FocusCmd`
   toward the opener (F10.11, §6.15).
 
-## 5. The overlay layer (UK-07) — **F10.11**
+## 5. The overlay layer (UK-07) — F10.11a
 
-One overlay owned by the window, laid out **last** in the frame:
+One overlay owned by the window (`kit.Env`), laid out **last** in the frame:
 
 ```go
 m := op.Record(gtx.Ops)
-drawMenuStack()             // panels at window coordinates
+drawPanels()                // in the coordinates of the call site
 op.Defer(gtx.Ops, m.Stop()) // paint + input on top of everything laid out after
 ```
 
-- `op.Defer` puts the recorded ops (drawing *and* input) after the rest of
-  the frame: the menu floats over content laid out later and its areas win.
-- Anchors are **window coordinates**; Gio does not expose the current
-  transform — F10.11 should thread a small offset stack through the layout
-  helpers instead of the spike's manual bookkeeping.
-- Flipping at the window edge is arithmetic on the measured panel rect
-  (`measure → place → flip if beyond edge`), done every frame.
-- Menu state per level: items, clickables, `motion.Presence` for open/close,
-  keyboard highlight, typeahead buffer. `Presence` gives "turn round
-  mid-way" for free (open with Snappy, close with Exit).
-- Diagonal travel: keep the submenu open while the pointer is not hovering a
-  different parent item (a trapezoid corridor is a refinement).
+- `op.Defer` runs the recorded ops (drawing *and* input) after every other op
+  of the frame, first in first out, **in the transform of the call site**; the
+  clip is reset. So the menu floats over content laid out later and its areas
+  win the hit test.
+- Gio cannot read the current transform, so anchors learn where they are in
+  the window from `Env.Offset(gtx, p, fn)`, which moves the cursor and records
+  the move; `Env.TrackInput` records the window size. A floating surface
+  works in the cursor's own coordinates and reads the window rectangle in
+  them (`Env.windowRect`); `MenuState.Panels` reports window coordinates.
+- Flipping at the window edge is arithmetic on the measured panel
+  (`placeBelow`, `placeBeside`), done every frame: a dropdown flips above its
+  anchor and to the anchor's right edge, a submenu to the left of its parent.
+- The window-wide absorbing area is registered before the panels, under them,
+  and only while the root menu is open (a closing menu takes no input).
+  Because a non-pass area stops the walk, nothing registered earlier gets the
+  press; every other area in the kit is clipped to its control's box (UK-E10).
+- Input is read at the top of the frame against the previous frame's panels —
+  the ones the pointer was over — and the changed state is then resolved,
+  placed and drawn.
+- Diagonal travel is a triangle: while the pointer is inside the triangle of
+  its previous position and the submenu's near edge, moving over the items
+  below the parent does not retarget.
 
 ## 6. Text: shaper, line height, Editor, IME
 

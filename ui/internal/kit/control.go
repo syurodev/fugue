@@ -227,7 +227,10 @@ func (r *ripple) draw(gtx *layout.Context, body image.Rectangle, radius int, c c
 	defer clip.UniformRRect(body, radius).Push(gtx.Ops).Pop()
 	rad := r.size.Value() * r.reach
 	d := image.Pt(int(rad+0.5), int(rad+0.5))
-	disc := clip.Ellipse{Min: r.at.Sub(d), Max: r.at.Add(d)}.Op(gtx.Ops)
+	// The press point is local to the control's hit area, which sits at the
+	// body's corner (a field's trailing button is not at its field's origin).
+	centre := r.at.Add(body.Min)
+	disc := clip.Ellipse{Min: centre.Sub(d), Max: centre.Add(d)}.Op(gtx.Ops)
 	paint.FillShape(gtx.Ops, fade(c, a), disc)
 }
 
@@ -240,6 +243,12 @@ func followState(env *Env, f *motion.Follower, target bool) float32 {
 	if target {
 		v = 1
 	}
+	return followTo(env, f, v)
+}
+
+// followTo is followState for any target value, such as the place a menu's
+// highlight slides to.
+func followTo(env *Env, f *motion.Follower, v float32) float32 {
 	if env.ReducedMotion {
 		f.Snap(v)
 		return v
