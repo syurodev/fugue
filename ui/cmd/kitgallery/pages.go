@@ -52,6 +52,7 @@ const (
 	compIconButton
 	compTextField
 	compTextArea
+	compMenu
 )
 
 // cell identifies one matrix cell of the inventory (UK-E03).
@@ -84,6 +85,7 @@ type pages struct {
 	icons [numIconVariants][numStates]*kit.IconButtonState
 	text  [numFieldVariants][numFieldStates]*kit.TextFieldState
 	area  [numAreaStates]*kit.TextAreaState
+	menu  menuPage
 	nav   []*kit.ButtonState
 	// runs are the page-level text runs and ctl the control boxes of the
 	// frame, in window coordinates; ctlRuns are the runs drawn inside a
@@ -107,6 +109,7 @@ func newPages(env *kit.Env) *pages {
 	p := &pages{env: env, cells: map[cell]bool{}}
 	p.newButtonStates()
 	p.newFieldStates()
+	p.menu = newMenuPage()
 	for range pageNames() {
 		p.nav = append(p.nav, kit.NewButtonState())
 	}
@@ -204,7 +207,7 @@ func (p *pages) place(gtx *layout.Context, pt image.Point, cd *cellDraw) {
 	p.force(cd.key.state, cd.tag)
 	var cellRuns []image.Rectangle
 	p.env.RunRecorder = func(r image.Rectangle) { cellRuns = append(cellRuns, r) }
-	at(gtx, pt, cd.lay)
+	p.env.Offset(gtx, pt, cd.lay)
 	p.env.RunRecorder = nil
 	p.force(stRest, nil)
 	box := image.Rectangle{Min: pt.Add(p.base), Max: pt.Add(p.base).Add(cd.box)}
@@ -293,7 +296,7 @@ func (p *pages) flow(gtx *layout.Context, y int, blocks []block) {
 			x, y, rowH = 0, y+rowH+gap, 0
 		}
 		p.base = p.origin.Add(image.Pt(x, y))
-		at(gtx, image.Pt(x, y), func(gtx *layout.Context) { b(gtx, false) })
+		p.env.Offset(gtx, image.Pt(x, y), func(gtx *layout.Context) { b(gtx, false) })
 		x += size.X + gap
 		rowH = max(rowH, size.Y)
 	}

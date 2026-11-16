@@ -63,6 +63,8 @@ func expectedCells(cur int) map[cell]bool {
 		textFieldCells(want)
 	case "TextArea":
 		textAreaCells(want)
+	case "Menu":
+		menuCells(want)
 	}
 	return want
 }
@@ -104,6 +106,19 @@ func textFieldCells(want map[cell]bool) {
 func textAreaCells(want map[cell]bool) {
 	for _, st := range fieldStates() {
 		want[cell{compTextArea, 0, 0, st}] = true
+	}
+}
+
+// menuCells are the Menu cells: the two specimen variants in every state,
+// and the live triggers.
+func menuCells(want map[cell]bool) {
+	for vi := range numMenuSpecimens {
+		for _, st := range menuStates() {
+			want[cell{compMenu, vi, 0, st}] = true
+		}
+	}
+	for _, st := range liveStates() {
+		want[cell{compMenu, numMenuSpecimens, 0, st}] = true
 	}
 }
 

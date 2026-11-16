@@ -34,7 +34,7 @@ const (
 )
 
 // pageNames are the nav labels, one page per component (UK-09).
-func pageNames() []string { return []string{"Button", "IconButton", "TextField", "TextArea"} }
+func pageNames() []string { return []string{"Button", "IconButton", "TextField", "TextArea", "Menu"} }
 
 // pageW is the content width of the page column: the window minus the nav
 // rail and the frame padding.
@@ -112,7 +112,7 @@ func (g *gallery) layout(gtx *layout.Context) error {
 
 	// The current page in its column, from the top of the frame.
 	p.origin = image.Pt(x+gtx.Dp(navRail), gtx.Dp(chrome))
-	at(gtx, p.origin, func(gtx *layout.Context) {
+	g.env.Offset(gtx, p.origin, func(gtx *layout.Context) {
 		col := *gtx
 		col.Constraints.Min = image.Point{}
 		col.Constraints.Max.X = pageW(gtx)
@@ -125,6 +125,8 @@ func (g *gallery) layout(gtx *layout.Context) error {
 			p.layoutTextFields(&col)
 		case 3:
 			p.layoutTextArea(&col)
+		case 4:
+			p.layoutMenus(&col)
 		}
 	})
 	if p.err != nil {

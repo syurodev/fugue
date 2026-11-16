@@ -42,6 +42,10 @@ const (
 	Tab       = unit.Dp(32)
 )
 
+// MenuMinWidth is the narrowest a menu panel is laid out (§6.15), so a menu
+// of short labels does not shrink to a sliver around its widest item.
+const MenuMinWidth = unit.Dp(160)
+
 // Icon sizes (§3.4).
 const (
 	IconXS = unit.Dp(12)
