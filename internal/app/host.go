@@ -125,7 +125,6 @@ type StreamEnder interface {
 // Its long-lived context is never stored: StartHost installs the spawn port
 // with the base context captured in the closure.
 type HostRuntime struct {
-
 	cfg             HostConfig
 	started         time.Time
 	incarnation     storage.HostIncarnation
@@ -137,10 +136,10 @@ type HostRuntime struct {
 	accountsService *AccountsService
 	transcripts     *Transcripts
 	sessionTools    *SessionToolService
-	teamProposals *TeamProposalService
+	teamProposals   *TeamProposalService
 	tags            *environments.Registry
 
-// goTask spawns a supervised goroutine on the host's base context; it is
+	// goTask spawns a supervised goroutine on the host's base context; it is
 	// installed by StartHost because the base context is never stored.
 	goTask func(name string, fn func(context.Context) error) *supervise.Task
 	// drain is the injected drain: transport, then store, in that order.
