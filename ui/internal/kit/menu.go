@@ -48,7 +48,7 @@ type MenuItem struct {
 	ID        string
 	Label     string
 	Icon      IconName
-	Shortcut  string
+	Shortcut  Shortcut
 	Disabled  bool
 	Sub       []MenuItem
 	separator bool
@@ -98,6 +98,7 @@ type menuLevel struct {
 	rect      image.Rectangle
 	from, dir image.Point
 	pad       int
+	cols      menuCols
 }
 
 // MenuState is the long-lived state of one menu (UK-02).
@@ -226,7 +227,9 @@ func (m *MenuState) Layout(env *Env, gtx *layout.Context, p MenuProps) (MenuResu
 	}
 	m.resolve(p.Items)
 	m.advance(env, p.Inline)
-	m.place(env, gtx, p)
+	if err := m.place(env, gtx, p); err != nil {
+		return res, fmt.Errorf("place the menu: %w", err)
+	}
 	res.Size = m.footprint()
 	if err := m.draw(env, gtx, p.Inline); err != nil {
 		return res, fmt.Errorf("draw the menu: %w", err)
@@ -303,7 +306,7 @@ func (lv *menuLevel) progress(inline bool) float32 {
 // place sizes and places every open panel: the root under the anchor,
 // each submenu beside its parent item, flipping at the window's edges. A
 // panel on its way out keeps the place it had.
-func (m *MenuState) place(env *Env, gtx *layout.Context, p MenuProps) {
+func (m *MenuState) place(env *Env, gtx *layout.Context, p MenuProps) error {
 	m.origin = env.origin
 	win := env.windowRect()
 	if p.Inline {
@@ -316,7 +319,10 @@ func (m *MenuState) place(env *Env, gtx *layout.Context, p MenuProps) {
 			break
 		}
 		if lv.open.Shown() {
-			size := lv.layoutRows(env, gtx)
+			size, err := lv.layoutRows(env, gtx)
+			if err != nil {
+				return err
+			}
 			switch {
 			case k == 0 && p.Inline:
 				lv.setRect(image.Point{}, size, image.Pt(0, -1))
@@ -330,6 +336,7 @@ func (m *MenuState) place(env *Env, gtx *layout.Context, p MenuProps) {
 		}
 		lv.follow(env)
 	}
+	return nil
 }
 
 // dirOf is the side a flipped panel shifts in from: +1 when flipped.
@@ -366,22 +373,26 @@ func (lv *menuLevel) parentItem() image.Rectangle {
 // layoutRows measures the items into rows and returns the panel's size: the
 // widest item plus the padding, never under MenuMinWidth. When any item has
 // an icon every item leaves the icon column, so the labels line up (§6.15).
-func (lv *menuLevel) layoutRows(env *Env, gtx *layout.Context) image.Point {
+func (lv *menuLevel) layoutRows(env *Env, gtx *layout.Context) (image.Point, error) {
 	lv.pad = gtx.Dp(theme.SpaceSM)
 	lv.rows = lv.rows[:0]
-	icons := menuHasIcon(lv.items)
+	cols, err := menuColumns(env, gtx, lv.items)
+	if err != nil {
+		return image.Point{}, err
+	}
+	lv.cols = cols
 	y, w := 0, gtx.Dp(theme.MenuMinWidth)-2*lv.pad
 	for i := range lv.items {
 		h := gtx.Dp(theme.Row)
 		if lv.items[i].separator {
 			h = 2*gtx.Dp(theme.SpaceXS) + gtx.Dp(theme.Hairline)
 		} else {
-			w = max(w, menuItemWidth(env, gtx, &lv.items[i], icons))
+			w = max(w, menuItemWidth(env, gtx, &lv.items[i], cols))
 		}
 		lv.rows = append(lv.rows, menuRow{y: y, h: h})
 		y += h
 	}
-	return image.Pt(w+2*lv.pad, y+2*lv.pad)
+	return image.Pt(w+2*lv.pad, y+2*lv.pad), nil
 }
 
 // follow moves the highlight toward the item under the pointer: it slides
@@ -465,14 +476,10 @@ func (m *MenuState) drawLevel(env *Env, gtx *layout.Context, k int, inline bool)
 		top := inner.Min.Y + int(lv.hiYv+0.5)
 		hiRect := image.Rect(inner.Min.X, top, inner.Max.X, top+gtx.Dp(theme.Row))
 		fillRRect(gtx.Ops, hiRect, gtx.Dp(theme.RadiusMD), fade(c.HoverWash, lv.hiAv))
-		if k == m.active && (env.FocusVisible(gtx, m) || env.previewFocus(m)) {
-			strokeRRect(gtx.Ops, hiRect, gtx.Dp(theme.RadiusMD), float32(gtx.Dp(theme.FocusStroke)), fade(c.FocusBorder, lv.hiAv))
-		}
 	}
-	icons := menuHasIcon(lv.items)
 	for j := range lv.items {
 		row := image.Rect(inner.Min.X, inner.Min.Y+lv.rows[j].y, inner.Max.X, inner.Min.Y+lv.rows[j].y+lv.rows[j].h)
-		if err := drawMenuItem(env, gtx, &lv.items[j], row, icons); err != nil {
+		if err := drawMenuItem(env, gtx, &lv.items[j], row, lv.cols); err != nil {
 			return err
 		}
 	}

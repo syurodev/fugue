@@ -192,7 +192,10 @@ func (m *MenuState) keyInput(gtx *layout.Context, res *MenuResult) {
 		case key.CompositionEvent:
 			m.composing = ke.Start >= 0 && ke.End > ke.Start
 		case key.EditEvent:
-			if !m.composing && ke.Text != "" {
+			// The Space key press carries the space (it extends a live
+			// prefix or chooses), so the platform's own " " edit would
+			// count it twice.
+			if !m.composing && ke.Text != "" && ke.Text != " " {
 				m.typeahead(gtx.Now, ke.Text)
 			}
 		case key.Event:
@@ -220,7 +223,13 @@ func (m *MenuState) handleKey(gtx *layout.Context, name key.Name, res *MenuResul
 		m.closeSub()
 	case string(key.NameEscape):
 		m.escape(gtx, res)
-	case string(key.NameReturn), string(key.NameEnter), string(key.NameSpace):
+	case string(key.NameSpace):
+		if m.typeaheadLive(gtx.Now) {
+			m.typeahead(gtx.Now, " ")
+			return
+		}
+		m.chooseActive(gtx, res)
+	case string(key.NameReturn), string(key.NameEnter):
 		m.chooseActive(gtx, res)
 	}
 }
@@ -315,10 +324,16 @@ func (m *MenuState) chooseActive(gtx *layout.Context, res *MenuResult) {
 	}
 }
 
+// typeaheadLive reports whether a typed prefix is still being built: Space
+// then continues it ("doi ten") instead of choosing the item.
+func (m *MenuState) typeaheadLive(now time.Time) bool {
+	return m.typeBuf != "" && now.Sub(m.typeAt) <= typeaheadReset
+}
+
 // typeahead appends committed text (resetting after typeaheadReset) and jumps
 // to the next enabled item whose folded label starts with the prefix.
 func (m *MenuState) typeahead(now time.Time, txt string) {
-	if m.typeAt.IsZero() || now.Sub(m.typeAt) > typeaheadReset {
+	if !m.typeaheadLive(now) {
 		m.typeBuf = ""
 	}
 	m.typeBuf += txt

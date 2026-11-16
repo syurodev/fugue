@@ -1,6 +1,7 @@
 package kit
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 
@@ -11,25 +12,41 @@ import (
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
-// menuHasIcon reports whether any item carries an icon.
-func menuHasIcon(items []MenuItem) bool {
+// menuCols are the columns a panel's items share: whether the icon column
+// exists, and the width of the widest shortcut chip, which every shortcut
+// right-aligns in so the labels and the chips line up (§6.15).
+type menuCols struct {
+	icons bool
+	kbd   int
+}
+
+// menuColumns measures the shared columns of items.
+func menuColumns(env *Env, gtx *layout.Context, items []MenuItem) (menuCols, error) {
+	var cols menuCols
 	for i := range items {
 		if items[i].Icon != "" {
-			return true
+			cols.icons = true
+		}
+		if items[i].Shortcut.Key != "" {
+			size, err := KbdSize(env, gtx, items[i].Shortcut)
+			if err != nil {
+				return cols, fmt.Errorf("menu item %q: %w", items[i].ID, err)
+			}
+			cols.kbd = max(cols.kbd, size.X)
 		}
 	}
-	return false
+	return cols, nil
 }
 
 // menuItemWidth is the room one item needs: the paddings, the icon column,
-// the label, the shortcut and the submenu arrow.
-func menuItemWidth(env *Env, gtx *layout.Context, it *MenuItem, icons bool) int {
+// the label, the shortcut column and the submenu arrow.
+func menuItemWidth(env *Env, gtx *layout.Context, it *MenuItem, cols menuCols) int {
 	w := 2*gtx.Dp(theme.SpaceMD) + measureLabel(env, gtx, theme.TypeBody(), it.Label).X
-	if icons {
+	if cols.icons {
 		w += gtx.Dp(theme.IconMD) + gtx.Dp(theme.SpaceSM)
 	}
-	if it.Shortcut != "" {
-		w += gtx.Dp(theme.SpaceXL) + measureLabel(env, gtx, theme.TypeSmall(), it.Shortcut).X
+	if cols.kbd > 0 {
+		w += gtx.Dp(theme.SpaceXL) + cols.kbd
 	}
 	if len(it.Sub) > 0 {
 		w += gtx.Dp(theme.SpaceLG) + gtx.Dp(theme.IconSM)
@@ -38,22 +55,22 @@ func menuItemWidth(env *Env, gtx *layout.Context, it *MenuItem, icons bool) int 
 }
 
 // drawMenuItem draws one row inside r: a separator is a hairline; an item is
-// the icon column, the label, and the shortcut and the arrow at the right
-// edge. A disabled item draws in FgDisabled (§3.5).
-func drawMenuItem(env *Env, gtx *layout.Context, it *MenuItem, r image.Rectangle, icons bool) error {
+// the icon column, the label, and the shortcut chip and the arrow at the
+// right edge. A disabled item draws in FgDisabled (§3.5).
+func drawMenuItem(env *Env, gtx *layout.Context, it *MenuItem, r image.Rectangle, cols menuCols) error {
 	c := env.Th.Chrome()
 	if it.separator {
 		y := r.Min.Y + r.Dy()/2
 		paint.FillShape(gtx.Ops, c.Border, clip.Rect(image.Rect(r.Min.X, y, r.Max.X, y+gtx.Dp(theme.Hairline))).Op())
 		return nil
 	}
-	fg, ink, sub := c.Fg, c.IconMuted, c.FgSubtle
+	fg, ink := c.Fg, c.IconMuted
 	if it.Disabled {
-		fg, ink, sub = c.FgDisabled, c.FgDisabled, c.FgDisabled
+		fg, ink = c.FgDisabled, c.FgDisabled
 	}
 	x := r.Min.X + gtx.Dp(theme.SpaceMD)
 	iconPx := gtx.Dp(theme.IconMD)
-	if icons {
+	if cols.icons {
 		if it.Icon != "" {
 			if err := drawIconAt(env, gtx, image.Pt(x, r.Min.Y+(r.Dy()-iconPx)/2), it.Icon, theme.IconMD, ink); err != nil {
 				return err
@@ -71,11 +88,24 @@ func drawMenuItem(env *Env, gtx *layout.Context, it *MenuItem, r image.Rectangle
 		}
 		right -= gtx.Dp(theme.SpaceLG)
 	}
-	if it.Shortcut != "" {
-		w := measureLabel(env, gtx, theme.TypeSmall(), it.Shortcut).X
-		drawMenuText(env, gtx, theme.TypeSmall(), sub, it.Shortcut, image.Pt(right-w, r.Min.Y), r.Dy())
+	return drawMenuShortcut(env, gtx, it, r, right)
+}
+
+// drawMenuShortcut draws the item's Kbd chip, right-aligned at x right.
+func drawMenuShortcut(env *Env, gtx *layout.Context, it *MenuItem, r image.Rectangle, right int) error {
+	if it.Shortcut.Key == "" {
+		return nil
 	}
-	return nil
+	size, err := KbdSize(env, gtx, it.Shortcut)
+	if err != nil {
+		return fmt.Errorf("menu item %q: %w", it.ID, err)
+	}
+	var kerr error
+	pt := image.Pt(right-size.X, r.Min.Y+(r.Dy()-size.Y)/2)
+	at(gtx, pt, func(gtx *layout.Context) {
+		_, kerr = drawKbd(env, gtx, it.Shortcut, it.Disabled, pt)
+	})
+	return kerr
 }
 
 // drawMenuText draws one line of a row, centered on the row's height h, and

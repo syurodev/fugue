@@ -10,16 +10,18 @@ import (
 )
 
 // The Menu page (UK-09, ui-kit §6.15): two specimens of a menu — labels
-// only, and icons with shortcuts, a separator and a disabled item — each
-// drawn inline, open and still, at rest, with an item highlighted and with
-// its submenu open; and two live triggers that open the real menu on the
-// window's overlay. The right-hand trigger sits at the window's edge, so its
-// menu and its submenu flip. The specimens use the same drawing as the
-// overlay and the matrix, bounds recording and cell inventory of the other
-// pages; the keyboard side comes with F10.11b.
+// only, and icons with Kbd shortcuts, a separator and a disabled item — each
+// drawn inline, open and still: at rest, with the pointer's item
+// highlighted, with the keyboard-active item highlighted (the same sliding
+// pill, one row down), and with its submenu open; and two live triggers that
+// open the real menu on the window's overlay. The right-hand trigger sits at
+// the window's edge, so its menu and its submenu flip. The specimens use the
+// same drawing as the overlay and the matrix, bounds recording and cell
+// inventory of the other pages.
 
 // The Menu page's state columns: the specimens', then the live triggers'.
 const (
+	mstKeyboard = "keyboard"
 	mstSubmenu  = "submenu"
 	mstDropdown = "dropdown"
 	mstFlip     = "flip-right"
@@ -30,7 +32,7 @@ const (
 const numMenuSpecimens = 2
 
 // menuStates are the specimen columns.
-func menuStates() []string { return []string{stRest, stHover, stFocus, mstSubmenu} }
+func menuStates() []string { return []string{stRest, stHover, mstKeyboard, mstSubmenu} }
 
 // liveStates are the live triggers.
 func liveStates() []string { return []string{mstDropdown, mstFlip} }
@@ -63,12 +65,12 @@ func menuItems(variant int) ([]kit.MenuItem, int) {
 		}, 3
 	}
 	return []kit.MenuItem{
-		{ID: "open", Label: "Open", Icon: kit.IconSearch, Shortcut: "Ctrl+O"},
-		{ID: "copy", Label: "Copy", Icon: kit.IconCopy, Shortcut: "Ctrl+C"},
-		{ID: "paste", Label: "Paste", Icon: kit.IconRestart, Shortcut: "Ctrl+V", Disabled: true},
+		{ID: "open", Label: "Open", Icon: kit.IconSearch, Shortcut: kit.Shortcut{Mods: kit.ModPrimary, Key: kit.Char('o')}},
+		{ID: "copy", Label: "Copy", Icon: kit.IconCopy, Shortcut: kit.Shortcut{Mods: kit.ModPrimary, Key: kit.Char('c')}},
+		{ID: "paste", Label: "Paste", Icon: kit.IconRestart, Shortcut: kit.Shortcut{Mods: kit.ModPrimary, Key: kit.Char('v')}, Disabled: true},
 		kit.MenuSeparator(),
 		{ID: "share", Label: "Share", Icon: kit.IconEye, Sub: share},
-		{ID: "delete", Label: "Delete", Icon: kit.IconClose},
+		{ID: "delete", Label: "Delete", Icon: kit.IconClose, Shortcut: kit.Shortcut{Key: kit.KeyDelete}},
 	}, 4
 }
 
@@ -79,7 +81,7 @@ func newMenuPage() menuPage {
 	var mp menuPage
 	for v := range mp.specimens {
 		_, sub := menuItems(v)
-		for c, path := range [][]int{nil, {0}, {0}, {sub, 0}} {
+		for c, path := range [][]int{nil, {0}, {1}, {sub, 0}} {
 			mp.specimens[v][c] = kit.NewMenuState()
 			mp.specimens[v][c].Open(path...)
 		}

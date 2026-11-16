@@ -53,6 +53,7 @@ const (
 	compTextField
 	compTextArea
 	compMenu
+	compKbd
 )
 
 // cell identifies one matrix cell of the inventory (UK-E03).

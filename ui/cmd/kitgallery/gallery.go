@@ -34,7 +34,9 @@ const (
 )
 
 // pageNames are the nav labels, one page per component (UK-09).
-func pageNames() []string { return []string{"Button", "IconButton", "TextField", "TextArea", "Menu"} }
+func pageNames() []string {
+	return []string{"Button", "IconButton", "TextField", "TextArea", "Menu", "Kbd"}
+}
 
 // pageW is the content width of the page column: the window minus the nav
 // rail and the frame padding.
@@ -116,23 +118,30 @@ func (g *gallery) layout(gtx *layout.Context) error {
 		col := *gtx
 		col.Constraints.Min = image.Point{}
 		col.Constraints.Max.X = pageW(gtx)
-		switch g.cur {
-		case 0:
-			p.layoutButtons(&col)
-		case 1:
-			p.layoutIcons(&col)
-		case 2:
-			p.layoutTextFields(&col)
-		case 3:
-			p.layoutTextArea(&col)
-		case 4:
-			p.layoutMenus(&col)
-		}
+		p.layoutPage(&col, g.cur)
 	})
 	if p.err != nil {
 		return fmt.Errorf("page %s: %w", pageNames()[g.cur], p.err)
 	}
 	return nil
+}
+
+// layoutPage draws page cur in the column.
+func (p *pages) layoutPage(col *layout.Context, cur int) {
+	switch cur {
+	case 0:
+		p.layoutButtons(col)
+	case 1:
+		p.layoutIcons(col)
+	case 2:
+		p.layoutTextFields(col)
+	case 3:
+		p.layoutTextArea(col)
+	case 4:
+		p.layoutMenus(col)
+	case 5:
+		p.layoutKbd(col)
+	}
 }
 
 // modes names the modes the window is in, for the mode line.

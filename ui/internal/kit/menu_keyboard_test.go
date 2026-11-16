@@ -16,7 +16,7 @@ import (
 
 func testKeyboardMenuItems() []MenuItem {
 	return []MenuItem{
-		{ID: "kb-open", Label: "Open", Icon: IconSearch, Shortcut: "Ctrl+O"},
+		{ID: "kb-open", Label: "Open", Icon: IconSearch, Shortcut: Shortcut{Mods: ModPrimary, Key: Char('o')}},
 		{ID: "kb-paste", Label: "Paste", Disabled: true},
 		MenuSeparator(),
 		{ID: "kb-read", Label: "Đọc"},
@@ -196,6 +196,40 @@ func TestMenuTypeaheadFollowsTheInputMethod(t *testing.T) {
 	h.menuFrame(t, m, p)
 	if m.lv[0].hi != 0 {
 		t.Fatalf("after 700 ms reset 'o': hi=%d, want 0 (Open)", m.lv[0].hi)
+	}
+
+	assertTypeaheadSpace(t, h, m, p)
+}
+
+// assertTypeaheadSpace checks Space against the typeahead prefix: inside a
+// live prefix it continues it, after the prefix expired it chooses.
+func assertTypeaheadSpace(t *testing.T, h *harness, m *MenuState, p MenuProps) {
+	t.Helper()
+	// "doi ten" lands on "Đổi tên" and chooses nothing; the platform's own
+	// " " edit that comes with the key is not counted twice.
+	h.now = h.now.Add(750 * time.Millisecond)
+	for _, txt := range []string{"d", "o", "i"} {
+		h.router.Queue(key.EditEvent{Text: txt})
+		h.menuFrame(t, m, p)
+	}
+	h.tap(key.NameSpace, 0)
+	h.router.Queue(key.EditEvent{Text: " "})
+	if res := h.menuFrame(t, m, p); res.Chosen != "" || !m.IsOpen() {
+		t.Fatalf("Space inside the prefix chose %q (open %v), want it to extend the prefix", res.Chosen, m.IsOpen())
+	}
+	for _, txt := range []string{"t", "e", "n"} {
+		h.router.Queue(key.EditEvent{Text: txt})
+		h.menuFrame(t, m, p)
+	}
+	if m.lv[0].hi != 4 {
+		t.Fatalf("typed 'doi ten': hi=%d, want 4 (Đổi tên)", m.lv[0].hi)
+	}
+
+	// With the prefix expired, Space chooses the active item.
+	h.now = h.now.Add(750 * time.Millisecond)
+	h.tap(key.NameSpace, 0)
+	if res := h.menuFrame(t, m, p); res.Chosen != "kb-rename" {
+		t.Fatalf("Space after the prefix expired chose %q, want kb-rename", res.Chosen)
 	}
 }
 

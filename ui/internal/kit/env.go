@@ -44,6 +44,9 @@ type Env struct {
 	// only (theme.Type.Content: prose and code), never the shared metric
 	// (§3.0). Zero means 1.
 	ContentScale float32
+	// Platform picks the notation of keyboard shortcuts (Kbd). The window
+	// sets it once from the OS it runs on; the kit never asks the OS.
+	Platform Platform
 	// ReducedMotion replaces animation with instant changes (UK-04): the
 	// spinner holds still, springs snap. Filled by the window from the
 	// app's settings.
