@@ -125,17 +125,18 @@ type StreamEnder interface {
 // Its long-lived context is never stored: StartHost installs the spawn port
 // with the base context captured in the closure.
 type HostRuntime struct {
-	cfg          HostConfig
-	started      time.Time
-	incarnation  storage.HostIncarnation
-	clk          clock.Clock
-	hub          *EventHub
-	interactions *InteractionService
-	workspaces   *WorkspaceService
-	vendors      *VendorService
-	transcripts  *Transcripts
-	sessionTools *SessionToolService
-	tags         *environments.Registry
+	cfg             HostConfig
+	started         time.Time
+	incarnation     storage.HostIncarnation
+	clk             clock.Clock
+	hub             *EventHub
+	interactions    *InteractionService
+	workspaces      *WorkspaceService
+	vendors         *VendorService
+	accountsService *AccountsService
+	transcripts     *Transcripts
+	sessionTools    *SessionToolService
+	tags            *environments.Registry
 
 	// goTask spawns a supervised goroutine on the host's base context; it is
 	// installed by StartHost because the base context is never stored.

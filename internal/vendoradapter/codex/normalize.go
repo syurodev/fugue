@@ -299,12 +299,28 @@ func (n *Normalizer) normalizeTurnCompleted(frame *Frame) Observation {
 	case TurnStatusFailed:
 		end.Outcome = OutcomeFailed
 		end.FailureCode = turnFailureCode(notif.Turn.Error)
+		end.Failure = failureClass(end.FailureCode)
 	default:
 		return n.unsupported(n.lineRef(), MethodTurnCompleted)
 	}
 	n.turn = ""
 	n.codexTurn = ""
 	return Observation{TurnEnd: end}
+}
+
+// failureClass maps Codex's own error codes (CodexErrorInfo) to the account
+// classes: `unauthorized` needs login, `usageLimitExceeded` is the plan running
+// out, `rateLimitExceeded` is a passing limit the vendor retries itself.
+func failureClass(code string) vendor.FailureClass {
+	switch code {
+	case "unauthorized":
+		return vendor.FailureAuth
+	case "usageLimitExceeded":
+		return vendor.FailureQuota
+	case "rateLimitExceeded":
+		return vendor.FailureRateLimited
+	}
+	return vendor.FailureNone
 }
 
 func turnFailureCode(errObj *TurnError) string {

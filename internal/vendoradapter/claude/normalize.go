@@ -69,6 +69,9 @@ type Normalizer struct {
 	init         *Init
 	nested       int
 	line         int
+	// planExhausted is set when the last rate_limit_event rejected a window:
+	// a following HTTP 429 is then the plan running out, not a passing limit.
+	planExhausted bool
 }
 
 // NewNormalizer builds the per-session normalizer.

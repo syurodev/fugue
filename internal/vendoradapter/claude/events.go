@@ -9,9 +9,11 @@ package claude
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/syurodev/fugue/internal/transcript"
+	"github.com/syurodev/fugue/internal/vendor"
 )
 
 func (n *Normalizer) normalizeSystem(line []byte, env *envelope) Observation {
@@ -87,11 +89,29 @@ func (n *Normalizer) normalizeResult(line []byte, env *envelope) Observation {
 	end := &TurnEnd{TurnID: currentTurn, Usage: usage, CredentialExpiresAt: expiryTime(w.CredentialExpiresAt)}
 	if w.Subtype != "success" || w.IsError {
 		end.Outcome, end.FailureCode = OutcomeFailed, w.Subtype
+		end.Failure = n.failureClass(w.APIErrorStatus)
 	} else {
 		end.Outcome = OutcomeCompleted
 	}
 	n.finalizeTurnResult(currentTurn)
 	return Observation{Records: []transcript.Item{item}, TurnEnd: end}
+}
+
+// failureClass classifies a failed result by the HTTP status the CLI reports:
+// 401 is a login problem; 429 is the plan running out only when the latest
+// rate_limit_event rejected a window, and a passing limit otherwise.
+func (n *Normalizer) failureClass(status *int) vendor.FailureClass {
+	switch {
+	case status == nil:
+		return vendor.FailureNone
+	case *status == http.StatusUnauthorized:
+		return vendor.FailureAuth
+	case *status == http.StatusTooManyRequests && n.planExhausted:
+		return vendor.FailureQuota
+	case *status == http.StatusTooManyRequests:
+		return vendor.FailureRateLimited
+	}
+	return vendor.FailureNone
 }
 
 func (n *Normalizer) finalizeTurnResult(currentTurn string) {
@@ -140,7 +160,9 @@ func (n *Normalizer) normalizeRateLimit(line []byte, env *envelope) Observation 
 		}}
 	}
 	obs := Observation{Quota: quota}
+	n.planExhausted = false
 	for _, win := range quota.Windows {
+		n.planExhausted = n.planExhausted || win.Status == "rejected"
 		obs.Records = append(obs.Records, transcript.Item{
 			ID:        "quota-" + n.rawRef(env) + "-" + win.Name,
 			SessionID: n.session,

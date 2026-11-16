@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -38,6 +39,10 @@ const (
 	fakeCrashConfigDir                   = "/session/crash"
 	fakeReplaySteerFixtureConfigDir      = "/session/replay-steer-fixture"
 	fakeReplayLateSteerAbsorbedConfigDir = "/session/replay-late-steer-absorbed"
+	fakeAuthLoggedInConfigDir            = "/auth/logged-in"
+	fakeAuthLoggedOutConfigDir           = "/auth/logged-out"
+	fakeAuthGarbageConfigDir             = "/auth/garbage"
+	fakeAuthHangConfigDir                = "/auth/hang"
 	fixtureCLI                           = "2.1.319"
 )
 
@@ -52,6 +57,10 @@ func writeOut(s string) {
 func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
 		runFakeClaude()
+		os.Exit(0)
+	}
+	if len(os.Args) > 1 && os.Args[1] == "auth" {
+		runFakeClaudeAuthStatus()
 		os.Exit(0)
 	}
 	if len(os.Args) > 1 && os.Args[1] == "-p" {
@@ -97,6 +106,36 @@ func runFakeClaude() {
 		return
 	}
 	writeOut(fixtureCLI + " (Claude Code)\n")
+}
+
+// runFakeClaudeAuthStatus plays `claude auth status --json`: the recorded
+// 2.1.325 documents for the logged-in and logged-out sentinels, garbage for a
+// CLI that prints something else, and nothing for the default home. A leaked
+// Fugue secret in the environment makes it print a document that is not a
+// status, so the login stays unknown and the test notices.
+func runFakeClaudeAuthStatus() {
+	if envHasPrefix("FUGUE_VAULT_KEY=") || envHasPrefix("FUGUE_TEST_OUTER_SECRET=") || envHasPrefix("ANTHROPIC_API_KEY=") {
+		writeOut("leaked-env\n")
+		return
+	}
+	record := func(name string) {
+		doc, err := fs.ReadFile(os.DirFS(filepath.Join("testdata", "fixtures")), name)
+		if err != nil {
+			os.Exit(2)
+		}
+		writeOut(string(doc))
+	}
+	switch {
+	case envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeAuthLoggedInConfigDir):
+		record("claude-2.1.325-auth-status-logged-in.json")
+	case envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeAuthLoggedOutConfigDir):
+		record("claude-2.1.325-auth-status-logged-out.json")
+		os.Exit(1)
+	case envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeAuthGarbageConfigDir):
+		writeOut("{not json\n")
+	case envHasPrefix("CLAUDE_CONFIG_DIR=" + fakeAuthHangConfigDir):
+		hangForever()
+	}
 }
 
 // hangForever blocks until the process is killed. Waiting on a signal channel

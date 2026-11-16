@@ -89,6 +89,9 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 		return nil, err
 	}
 	adapter, adapters := buildVendorAdapters(deps)
+	accounts := vendor.NewAccounts(deps.Clock, []vendor.AccountVendor{
+		{Name: VendorClaude, DirectQuota: true}, {Name: VendorCodex, DirectQuota: true}, {Name: VendorAGY},
+	})
 	// A session's token, tombstones and relayed interactions die with its actor, with a purge and with the host.
 	tokens := newSessionTokens(deps.Random)
 	endSession := func(sessionID string) {
@@ -104,7 +107,7 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	hp.vendorAdapter = adapter
 	sessions, err := NewVendorSessions(base, &VendorSessionDeps{
 		Store: topicNotifyingStore{Store: vs, topic: topic}, Transcripts: transcripts,
-		Adapter: adapter, Adapters: adapters,
+		Adapter: adapter, Adapters: adapters, Accounts: accounts,
 		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: endSession,
 		TestDelaySpawnRegistration: deps.TestDelaySpawnRegistration,
 		TestOnWaitInflightSpawn:    deps.TestOnWaitInflightSpawn,
@@ -117,7 +120,11 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	hp.rt.vendors = &VendorService{
 		sessions: sessions, store: vs, adapter: adapter, adapters: adapters, vault: v, workspaces: hp.rt.workspaces.domain,
 		ids: deps.IDs, hostEnv: deps.VendorHostEnv, ops: newVendorOps(deps.Clock, hp.rt.goTask),
-		tokens: tokens, bridge: deps.Bridge,
+		tokens: tokens, bridge: deps.Bridge, accounts: accounts,
+	}
+	hp.rt.accountsService, err = newAccountsService(accounts, hp.rt.vendors, hp.rt.hub)
+	if err != nil {
+		return nil, err
 	}
 	return sessions, nil
 }
@@ -226,6 +233,14 @@ func (rt *HostRuntime) VendorService() (*VendorService, error) {
 		return nil, errcode.New(errcode.Unavailable, "the vendor service is unavailable")
 	}
 	return rt.vendors, nil
+}
+
+// AccountsService returns the vendor accounts service the Host API serves.
+func (rt *HostRuntime) AccountsService() (*AccountsService, error) {
+	if rt.accountsService == nil {
+		return nil, errcode.New(errcode.Unavailable, "the accounts service is unavailable")
+	}
+	return rt.accountsService, nil
 }
 
 // TranscriptService returns the composed transcript read model.

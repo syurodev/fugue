@@ -18,6 +18,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/redact"
+	accountsv1connect "github.com/syurodev/fugue/pkg/pb/fugue/accounts/v1/accountsv1connect"
 	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
 	"github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
 	transcriptv1 "github.com/syurodev/fugue/pkg/pb/fugue/transcript/v1"
@@ -40,6 +41,7 @@ type vendorHost struct {
 	fugueHome   string
 	host        hostv1connect.HostServiceClient
 	vendors     vendorsv1connect.VendorServiceClient
+	accounts    accountsv1connect.AccountServiceClient
 	transcripts transcriptv1connect.TranscriptServiceClient
 	workspaces  workspacev1connect.WorkspaceServiceClient
 }
@@ -100,6 +102,7 @@ func startVendorHostWith(t *testing.T, unlock bool, configure func(deps *app.Hos
 	return &vendorHost{
 		hp: hp, srv: srv, dataDir: dir, sockPath: sock.Path, fugueHome: fugueHome, host: host,
 		vendors:     vendorsv1connect.NewVendorServiceClient(httpClient, "http://fugue"),
+		accounts:    accountsv1connect.NewAccountServiceClient(httpClient, "http://fugue"),
 		transcripts: transcriptv1connect.NewTranscriptServiceClient(httpClient, "http://fugue"),
 		workspaces:  workspacev1connect.NewWorkspaceServiceClient(httpClient, "http://fugue"),
 	}

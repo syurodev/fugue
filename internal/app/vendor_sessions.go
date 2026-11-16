@@ -37,10 +37,12 @@ type VendorSessionDeps struct {
 	Adapter     vendor.Adapter
 	Adapters    map[string]vendor.Adapter
 	Relay       serverRequestRelayer
-	Vault       vendorVaultObserver
-	Clock       clock.Clock
-	IDs         ids.Generator
-	Logger      *slog.Logger
+	// Accounts receives each session's quota windows and classified failures.
+	Accounts *vendor.Accounts
+	Vault    vendorVaultObserver
+	Clock    clock.Clock
+	IDs      ids.Generator
+	Logger   *slog.Logger
 	// OnSessionEnded runs once when a session's actor stops, however it
 	// stopped; the host revokes the session token there.
 	OnSessionEnded func(sessionID string)
