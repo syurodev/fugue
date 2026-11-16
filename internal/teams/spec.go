@@ -32,9 +32,9 @@ func IsValidDeliverable(d Deliverable) bool {
 
 // ProfileOverride optionally overrides vendor/model/effort for a single task.
 type ProfileOverride struct {
-	Vendor Vendor
-	Model  string
-	Effort Effort
+	Vendor Vendor `json:"vendor,omitempty"`
+	Model  string `json:"model,omitempty"`
+	Effort Effort `json:"effort,omitempty"`
 }
 
 // TaskBudget constrains execution limits for a task (§4).
@@ -71,7 +71,7 @@ type ProtectedTaskContent struct {
 }
 
 // ProtectedContent returns the protected content view of spec for envelope sealing.
-func (s *TaskSpec) ProtectedContent() ProtectedTaskContent {
+func (s TaskSpec) ProtectedContent() ProtectedTaskContent {
 	out := ProtectedTaskContent{
 		Goal:       s.Goal,
 		Context:    s.Context,

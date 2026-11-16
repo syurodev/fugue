@@ -213,7 +213,7 @@ func assertClaudeBridgeArgvAndList(t *testing.T, f *approveFixture) {
 	if err != nil || !slices.Contains(argv, "--permission-prompt-tool") || !slices.Contains(argv, "mcp__fugue__approve") {
 		t.Fatalf("BuildArgv = (%q, %v), want --permission-prompt-tool mcp__fugue__approve", argv, err)
 	}
-	listed, err := f.tools.List(f.binding)
+	listed, err := f.tools.List(t.Context(), f.binding)
 	if err != nil || len(listed) != 1 || listed[0].Name != approveToolName {
 		t.Fatalf("List = (%+v, %v), want [approve]", listed, err)
 	}

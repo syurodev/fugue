@@ -29,7 +29,11 @@ type FugueTool struct {
 	InputSchema json.RawMessage
 	// Roles lists the session roles that may see and call the tool; empty
 	// means every role.
-	Roles      []string
+	Roles []string
+	// Available reports whether the tool is offered to this session at all
+	// (F11.2a: [session].teams gates fugue_team_propose). A nil Available
+	// offers the tool to every session that passes the role check.
+	Available  func(ctx context.Context, info vendorstore.Session) bool
 	Descriptor interaction.Descriptor
 	// Plan derives the policy facts of one call from its arguments. It is
 	// pure and runs before any effect.
@@ -113,17 +117,36 @@ func (s *SessionToolService) Attach(token string) (SessionBinding, error) {
 	return binding, nil
 }
 
-// List returns the tools of the binding's role, by name.
-func (s *SessionToolService) List(binding SessionBinding) ([]FugueToolView, error) {
+// List returns the tools of the binding's role, by name. A tool whose
+// Available gate fails for this session is not listed.
+func (s *SessionToolService) List(ctx context.Context, binding SessionBinding) ([]FugueToolView, error) {
 	if !s.tokens.live(binding) {
 		return nil, errSessionEnded()
+	}
+	var info *vendorstore.Session
+	sessionInfo := func() (vendorstore.Session, bool) {
+		if info == nil {
+			snapshot, err := s.sessions.Snapshot(ctx, binding.SessionID)
+			if err != nil {
+				return vendorstore.Session{}, false
+			}
+			info = &snapshot
+		}
+		return *info, true
 	}
 	out := make([]FugueToolView, 0, len(s.tools)+1)
 	out = append(out, approveToolView())
 	for _, tool := range s.tools {
-		if servesRole(tool, binding.Role) {
-			out = append(out, FugueToolView{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
+		if !servesRole(tool, binding.Role) {
+			continue
 		}
+		if tool.Available != nil {
+			snapshot, ok := sessionInfo()
+			if !ok || !tool.Available(ctx, snapshot) {
+				continue
+			}
+		}
+		out = append(out, FugueToolView{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
 	}
 	slices.SortFunc(out, func(a, b FugueToolView) int { return strings.Compare(a.Name, b.Name) })
 	return out, nil
@@ -143,6 +166,12 @@ func (s *SessionToolService) Call(ctx context.Context, binding SessionBinding, n
 	tool, ok := s.tools[name]
 	if !ok || !servesRole(tool, binding.Role) {
 		return FugueToolResult{}, errcode.New(errcode.NotFound, "the tool is not available to this session")
+	}
+	if tool.Available != nil {
+		info, err := s.sessions.Snapshot(ctx, binding.SessionID)
+		if err != nil || !tool.Available(ctx, info) {
+			return FugueToolResult{}, errcode.New(errcode.NotFound, "the tool is not available to this session")
+		}
 	}
 	if len(args) == 0 {
 		args = []byte("{}")

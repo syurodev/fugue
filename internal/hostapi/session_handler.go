@@ -72,7 +72,7 @@ func (h *sessionToolHandler) ListTools(ctx context.Context, _ *connect.Request[s
 	if err != nil {
 		return nil, toConnectError(ctx, h.backend, err)
 	}
-	tools, err := svc.List(binding)
+	tools, err := svc.List(ctx, binding)
 	if err != nil {
 		return nil, toConnectError(ctx, h.backend, err)
 	}

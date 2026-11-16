@@ -84,6 +84,7 @@ func protoPendingRequest(v *app.PendingInteractionView) *interactionv1.PendingRe
 		EnvTag:          v.EnvTag,
 		Summary:         v.Summary,
 		Detail:          v.Detail,
+		Body:            v.Body,
 		OfferedOutcomes: v.OfferedOutcomes,
 		Options:         protoOptions(v.Options),
 		GrantScopeLabel: v.GrantScopeLabel,

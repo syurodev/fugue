@@ -9,15 +9,18 @@ import (
 // PendingInteractionView is the domain view of a pending request, carrying
 // the fields permitted by interaction §8 plus additive multi-question support.
 type PendingInteractionView struct {
-	RequestID       string                `json:"request_id"`
-	Incarnation     string                `json:"incarnation"`
-	SessionID       string                `json:"session_id"`
-	Tool            string                `json:"tool"`
-	Kind            string                `json:"kind"`
-	Risk            string                `json:"risk"`
-	EnvTag          string                `json:"env_tag"`
-	Summary         string                `json:"summary"`
-	Detail          string                `json:"detail,omitempty"`
+	RequestID   string `json:"request_id"`
+	Incarnation string `json:"incarnation"`
+	SessionID   string `json:"session_id"`
+	Tool        string `json:"tool"`
+	Kind        string `json:"kind"`
+	Risk        string `json:"risk"`
+	EnvTag      string `json:"env_tag"`
+	Summary     string `json:"summary"`
+	Detail      string `json:"detail,omitempty"`
+	// Body is the optional text shown alongside the questions (§4.1): the
+	// team proposal card's plan, estimates and warnings. Content only.
+	Body            string                `json:"body,omitempty"`
 	OfferedOutcomes []string              `json:"offered_outcomes,omitempty"`
 	Options         []InteractionOption   `json:"options,omitempty"`
 	GrantScopeLabel string                `json:"grant_scope_label,omitempty"`
@@ -102,6 +105,7 @@ func viewFromTicket(t *interaction.Ticket) PendingInteractionView {
 		EnvTag:          t.Binding.EnvTag,
 		Summary:         summary,
 		Detail:          t.Detail,
+		Body:            t.Body,
 		OfferedOutcomes: offeredOutcomesFor(t),
 		Options:         options,
 		GrantScopeLabel: t.GrantScopeLabel,

@@ -145,7 +145,7 @@ func (f *toolFixture) attach(t *testing.T, sessionID, role string) (SessionBindi
 
 func toolNames(t *testing.T, svc *SessionToolService, binding SessionBinding) []string {
 	t.Helper()
-	views, err := svc.List(binding)
+	views, err := svc.List(t.Context(), binding)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestSessionTokenOpensOnlyItsSessionAndRole(t *testing.T) {
 	if _, err := f.svc.Attach(leadToken); errcode.CodeOf(err) != errcode.PermissionDenied {
 		t.Errorf("a replaced token = %v, want permission_denied", err)
 	}
-	if _, err := f.svc.List(lead); errcode.CodeOf(err) != errcode.PermissionDenied {
+	if _, err := f.svc.List(t.Context(), lead); errcode.CodeOf(err) != errcode.PermissionDenied {
 		t.Errorf("a binding of a replaced token = %v, want permission_denied", err)
 	}
 }
@@ -229,7 +229,7 @@ func assertForgedBindingsOpenNothing(t *testing.T, f *toolFixture, lead SessionB
 	forged[1].Role = roleWorker
 	forged[2].SessionID = sessionWork
 	for _, binding := range forged {
-		if _, err := f.svc.List(binding); errcode.CodeOf(err) != errcode.PermissionDenied {
+		if _, err := f.svc.List(t.Context(), binding); errcode.CodeOf(err) != errcode.PermissionDenied {
 			t.Errorf("List(%+v) = %v, want permission_denied", binding, err)
 		}
 		if _, err := f.svc.Call(t.Context(), binding, toolEcho, nil); errcode.CodeOf(err) != errcode.PermissionDenied {

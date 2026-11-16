@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/storage"
 	"github.com/syurodev/fugue/internal/vault"
@@ -102,6 +104,21 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 		if hp.rt.interactions != nil && hp.rt.interactions.owner != nil {
 			hp.rt.interactions.owner.ResetSession(sessionID)
 		}
+		if hp.rt.teamProposals != nil {
+			// Q-104: the session's pending proposal is cancelled when its
+			// session ends. The cancel runs off the close path on its own
+			// goroutine: endSession fires inside requestClose while the
+			// actor and the close sequence still write, and the single
+			// SQLite connection serializes writers. Best-effort: a failure
+			// keeps the proposal pending rather than blocking the close.
+			cancelCtx := context.WithoutCancel(base)
+			supervise.Go(cancelCtx, "team-cancel-"+sessionID, func(taskCtx context.Context) error {
+				if err := hp.rt.teamProposals.CancelForSession(taskCtx, sessionID); err != nil {
+					slog.WarnContext(taskCtx, "cancelling the pending team proposal failed", "session_id", sessionID)
+				}
+				return nil
+			})
+		}
 	}
 	transcripts.onPurge = endSession
 	hp.vendorAdapter = adapter
@@ -115,7 +132,9 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	if err != nil {
 		return nil, err
 	}
-	hp.rt.sessionTools = newSessionToolService(tokens, deps.TestFugueTools, vs, hp.rt.interactions, hp.rt.tags, deps.IDs, sessions)
+	hp.rt.teamProposals = newTeamProposalService(vs, sessions, hp.rt.workspaces.domain, hp.rt.interactions, nopUsageHistory{}, deps.IDs)
+	tools := append(slices.Clone(deps.TestFugueTools), teamProposeTool(hp.rt.teamProposals))
+	hp.rt.sessionTools = newSessionToolService(tokens, tools, vs, hp.rt.interactions, hp.rt.tags, deps.IDs, sessions)
 	sessions.SetRelay(hp.rt.sessionTools)
 	hp.rt.vendors = &VendorService{
 		sessions: sessions, store: vs, adapter: adapter, adapters: adapters, vault: v, workspaces: hp.rt.workspaces.domain,

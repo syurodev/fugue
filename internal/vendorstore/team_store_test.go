@@ -707,3 +707,37 @@ func scanTeamNonEnvelopeColumns(t *testing.T, s *Store, table, skipCol string, m
 	}
 	requireNoError(t, rows.Err())
 }
+
+func TestPendingTeamForSessionReturnsOnlyTheProposedTeam(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, _, _ := protectedStore(t)
+	spec := mustMarshalProtectedSpec(t, []string{"g1", "c1", "s1", "k1", "p1", "q1", "r1", "u1"})
+	if _, _, err := s.CreateTeam(ctx, &NewTeamInput{
+		TeamID: "team-pending", WorkspaceID: testWorkspaceID, SessionID: "sess-propose", ProposedEventID: testEvProposed,
+		Tasks: []NewTaskInput{{
+			TaskID: testTaskLeadID, HierarchyRole: RoleLead, CatalogRole: testRoleResearch,
+			Deliverable: DeliverableReport, CreatedEventID: testEvLead, ProtectedSpec: spec,
+		}},
+	}); err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	pending, ok, err := s.PendingTeamForSession(ctx, "sess-propose")
+	if err != nil || !ok || pending.TeamID != "team-pending" || pending.State != TeamStateProposed {
+		t.Fatalf("pending = (%+v, %v, %v), want team-pending proposed", pending, ok, err)
+	}
+	if _, ok, err := s.PendingTeamForSession(ctx, "sess-other"); err != nil || ok {
+		t.Fatalf("pending for session without a team = (%v, %v), want none", ok, err)
+	}
+	rec, _, err := s.TeamSnapshot(ctx, "team-pending")
+	if err != nil {
+		t.Fatalf("TeamSnapshot: %v", err)
+	}
+	appendSeq(t, s, "team-pending", rec.LastSeq, []AppendTeamEventInput{
+		{EventID: "tp-cancel", TaskID: testTaskLeadID, EventType: EventTaskEnded, Outcome: outcomeCancelled},
+		{EventID: "tp-end", EventType: EventTeamEnded, Outcome: outcomeCancelled},
+	})
+	if _, ok, err := s.PendingTeamForSession(ctx, "sess-propose"); err != nil || ok {
+		t.Fatalf("pending after cancel = (%v, %v), want none", ok, err)
+	}
+}

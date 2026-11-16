@@ -26,6 +26,9 @@ var (
 	ErrMissingDependency = errors.New("teams: missing or cross-team dependency")
 	// ErrInvalidCatalog indicates a role catalog entry failed validation.
 	ErrInvalidCatalog = errors.New("teams: invalid role catalog")
+	// ErrUnknownRole indicates a proposal task named a role that is neither
+	// in the workspace catalog nor proposed by the proposal itself.
+	ErrUnknownRole = errors.New("teams: unknown role")
 )
 
 // TransitionError describes a rejected state transition for a task or team.
