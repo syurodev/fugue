@@ -2,6 +2,7 @@ package main
 
 import (
 	"image"
+	"slices"
 
 	"gioui.org/layout"
 
@@ -97,11 +98,23 @@ func newMenuPage() menuPage {
 func (p *pages) layoutMenus(gtx *layout.Context) {
 	p.base = p.origin
 	y := p.paragraph(gtx, gtx.Constraints.Max.X, "Menu §6.15: the highlight is the pointer's item, a submenu opens sideways and survives a diagonal move toward it, a disabled item shows no interaction. A press outside closes the menu and goes no further. The right-hand trigger is at the window edge: its menu flips to the trigger's right edge and its submenu to the left.") + gtx.Dp(theme.SpaceXL)
-	blocks := make([]block, 0, numMenuSpecimens+1)
+	blocks := make([]block, 0, numMenuSpecimens+2)
 	for vi, name := range menuSpecimenNames() {
-		blocks = append(blocks, func(gtx *layout.Context, dry bool) image.Point {
-			return p.matrix(gtx, name, menuStates(), [][]cellDraw{p.specimenRow(gtx, vi)}, dry)
-		})
+		// The icon variant is wide with its shortcut chips, so its submenu
+		// state is a block of its own that wraps when the row is full.
+		groups := [][]string{menuStates()}
+		if vi == 1 {
+			groups = [][]string{{stRest, stHover, mstKeyboard}, {mstSubmenu}}
+		}
+		for gi, states := range groups {
+			title := name
+			if gi > 0 {
+				title += " (open submenu)"
+			}
+			blocks = append(blocks, func(gtx *layout.Context, dry bool) image.Point {
+				return p.matrix(gtx, title, states, [][]cellDraw{p.specimenRow(gtx, vi, states)}, dry)
+			})
+		}
 	}
 	blocks = append(blocks, p.liveBlock)
 	p.flow(gtx, y, blocks)
@@ -109,14 +122,14 @@ func (p *pages) layoutMenus(gtx *layout.Context) {
 
 // specimenRow is the row of one specimen variant: a cell per state, each as
 // big as the menu and its open submenu.
-func (p *pages) specimenRow(gtx *layout.Context, vi int) []cellDraw {
+func (p *pages) specimenRow(gtx *layout.Context, vi int, states []string) []cellDraw {
 	items, _ := menuItems(vi)
-	row := make([]cellDraw, 0, len(menuStates()))
-	for ci, st := range menuStates() {
-		m := p.menu.specimens[vi][ci]
+	row := make([]cellDraw, 0, len(states))
+	for col, st := range states {
+		m := p.menu.specimens[vi][slices.Index(menuStates(), st)]
 		props := kit.MenuProps{Items: items, Inline: true}
 		row = append(row, cellDraw{
-			col: ci, key: cell{compMenu, vi, 0, st}, tag: m,
+			col: col, key: cell{compMenu, vi, 0, st}, tag: m,
 			box: measure(gtx, func(gtx *layout.Context) image.Point {
 				res, err := m.Layout(p.env, gtx, props)
 				if err != nil {
