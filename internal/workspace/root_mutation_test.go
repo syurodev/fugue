@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -504,4 +506,103 @@ func TestRootMutationFallsBackWhenRootsCannotBeLocated(t *testing.T) {
 
 func quoteTOMLString(s string) string {
 	return `"` + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`) + `"`
+}
+
+func TestRootRewriteNeverChangesKeysOutsideRoots(t *testing.T) {
+	t.Parallel()
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+	f := newTestFixture(t, WithLogger(logger))
+	ctx := context.Background()
+	first := filepath.Join(f.tempDir, "first")
+	createMutationRoots(t, first)
+	ws, err := f.svc.CreateWorkspace(ctx, CreateWorkspaceRequest{Name: "guard"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := "name = \"guard\"\n\n[policy]\napproval_mode = \"ask\"\n"
+	ws, err = f.svc.UpdateWorkspaceConfig(ctx, ws.ID, []byte(initial), ws.ConfigHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f.svc.rewriteRootsFn = func(_ []byte, newRoots []Root) ([]byte, bool) {
+		var sb strings.Builder
+		sb.WriteString("name = \"guard\"\n\n[policy]\napproval_mode = \"full\"\n")
+		for _, r := range newRoots {
+			sb.WriteString("\n[[roots]]\nname = ")
+			sb.WriteString(quoteTOMLString(r.Name))
+			sb.WriteString("\npath = ")
+			sb.WriteString(quoteTOMLString(r.Path))
+			sb.WriteString("\naccess = ")
+			sb.WriteString(quoteTOMLString(string(r.Access)))
+			sb.WriteByte('\n')
+		}
+		return []byte(sb.String()), true
+	}
+
+	ws, err = f.svc.AddRoot(ctx, ws.ID, ws.ConfigHash, RootSpec{Name: "main", Path: first, Access: AccessReadWrite})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ws.Roots) != 1 {
+		t.Fatalf("len(ws.Roots) = %d, want 1", len(ws.Roots))
+	}
+	if !strings.Contains(logBuf.String(), "falling back to full-file TOML encode") {
+		t.Fatalf("expected fallback warning in log, got:\n%s", logBuf.String())
+	}
+	eff, _, err := f.svc.GetEffectiveConfig(ctx, ws.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if eff.Policy.ApprovalMode != "ask" {
+		t.Fatalf("policy.approval_mode = %q, want %q", eff.Policy.ApprovalMode, "ask")
+	}
+}
+
+func FuzzRewriteRootsKeepsOtherKeys(f *testing.F) {
+	seeds := []string{
+		"name = \"\"\"\n[[roots]]\nname = \"fake\"\n\"\"\"\n",
+		"[policy]\nshell_allow = [\n  \"[[roots]]\",\n  \"git status\",\n]\n",
+		"[[\"roots\"]] # quoted header\nname = \"a\"\npath = \"/tmp/a\"\naccess = \"rw\"\n",
+		"name = \"crlf\"\r\n\r\n[[roots]]\r\nname = \"a\"\r\npath = \"/tmp/a\"\r\naccess = \"rw\"\r\n\r\n[policy]\r\napproval_mode = \"ask\"\r\n",
+		"name = \"scattered\"\n[[roots]]\nname = \"a\"\npath = \"/tmp/a\"\naccess = \"rw\"\n[policy]\napproval_mode = \"ask\"\n[[roots]]\nname = \"b\"\npath = \"/tmp/b\"\naccess = \"ro\"\n",
+		"name = \"no-nl\"\n[env]\nkeep = [\"HOME\"]",
+		"name = \"inline\"\nroots = [{ name = \"a\", path = \"/tmp/a\", access = \"rw\" }]\n",
+	}
+	for i, s := range seeds {
+		f.Add([]byte(s), uint8(i%3))
+	}
+	f.Fuzz(func(t *testing.T, raw []byte, mode uint8) {
+		var origCfg tier3RawConfig
+		if decodeStrictTOML("fugue.toml", raw, &origCfg) != nil {
+			return
+		}
+		var newRoots []Root
+		switch mode % 3 {
+		case 1:
+			newRoots = []Root{{Name: "one", Path: "/tmp/one", Access: AccessReadWrite}}
+		case 2:
+			newRoots = []Root{
+				{Name: "one", Path: "/tmp/one", Access: AccessReadWrite},
+				{Name: "two", Path: "/tmp/two", Access: AccessReadOnly},
+			}
+		}
+		updated, ok := rewriteRootsTOML(raw, newRoots)
+		if !ok {
+			return
+		}
+		var gotCfg tier3RawConfig
+		if err := decodeStrictTOML("fugue.toml", updated, &gotCfg); err != nil {
+			t.Fatalf("rewritten TOML failed to parse: %v\n%s", err, updated)
+		}
+		if !slices.Equal(derefSlice(gotCfg.Roots), newRoots) {
+			t.Fatalf("roots = %+v, want %+v", derefSlice(gotCfg.Roots), newRoots)
+		}
+		origCfg.Roots = nil
+		gotCfg.Roots = nil
+		if !reflect.DeepEqual(origCfg, gotCfg) {
+			t.Fatalf("keys outside roots changed: orig=%+v got=%+v", origCfg, gotCfg)
+		}
+	})
 }

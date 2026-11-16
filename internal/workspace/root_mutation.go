@@ -3,6 +3,7 @@ package workspace
 import (
 	"bytes"
 	"context"
+	"reflect"
 	"slices"
 
 	"github.com/pelletier/go-toml/v2"
@@ -89,10 +90,8 @@ func (s *Service) mutateRoots(ctx context.Context, id, expectedHash string, muta
 	if err != nil {
 		return nil, err
 	}
-	if updated, ok := rewriteRootsTOML(raw, newRoots); ok {
-		if _, parsedRoots, parseErr := s.parseAndValidateTier3WithRoots(id, updated, home); parseErr == nil && slices.Equal(parsedRoots, newRoots) {
-			return s.UpdateWorkspaceConfig(ctx, id, updated, expectedHash)
-		}
+	if updated, ok := s.tryRewriteRootsTOML(id, home, raw, cfg, newRoots); ok {
+		return s.UpdateWorkspaceConfig(ctx, id, updated, expectedHash)
 	}
 	if s.logger != nil {
 		s.logger.WarnContext(ctx, "could not rewrite [[roots]] tables in place; falling back to full-file TOML encode", "workspace_id", id)
@@ -103,6 +102,28 @@ func (s *Service) mutateRoots(ctx context.Context, id, expectedHash string, muta
 		return nil, WrapError(ErrConfigInvalid, "encode workspace configuration", err)
 	}
 	return s.UpdateWorkspaceConfig(ctx, id, encoded.Bytes(), expectedHash)
+}
+
+func (s *Service) tryRewriteRootsTOML(id, home string, raw []byte, origCfg tier3RawConfig, newRoots []Root) ([]byte, bool) {
+	rewriteFn := s.rewriteRootsFn
+	if rewriteFn == nil {
+		rewriteFn = rewriteRootsTOML
+	}
+	updated, ok := rewriteFn(raw, newRoots)
+	if !ok {
+		return nil, false
+	}
+	parsedCfg, parsedRoots, parseErr := s.parseAndValidateTier3WithRoots(id, updated, home)
+	if parseErr != nil || !slices.Equal(parsedRoots, newRoots) || !configsEqualOutsideRoots(origCfg, parsedCfg) {
+		return nil, false
+	}
+	return updated, true
+}
+
+func configsEqualOutsideRoots(a, b tier3RawConfig) bool {
+	a.Roots = nil
+	b.Roots = nil
+	return reflect.DeepEqual(a, b)
 }
 
 type rootTableSpan struct {
@@ -119,6 +140,10 @@ type rootsTOMLBlock struct {
 // Any comments inside a [[roots]] table are lost when the block is rewritten.
 // Scattered [[roots]] tables are gathered into the position of the first one.
 func rewriteRootsTOML(raw []byte, newRoots []Root) ([]byte, bool) {
+	lineSep := []byte("\n")
+	if bytes.Contains(raw, []byte("\r\n")) {
+		lineSep = []byte("\r\n")
+	}
 	var rootsBytes []byte
 	if len(newRoots) > 0 {
 		var buf bytes.Buffer
@@ -126,34 +151,49 @@ func rewriteRootsTOML(raw []byte, newRoots []Root) ([]byte, bool) {
 			return nil, false
 		}
 		rootsBytes = buf.Bytes()
+		if len(lineSep) == 2 {
+			rootsBytes = bytes.ReplaceAll(rootsBytes, []byte("\n"), lineSep)
+		}
 	}
 	spans := locateRootTables(raw)
+	var out []byte
 	if len(spans) == 0 {
-		return appendRootsTOML(raw, rootsBytes), true
+		out = appendRootsTOML(raw, rootsBytes, lineSep)
+	} else {
+		out = spliceRootTables(raw, spans, rootsBytes, lineSep)
 	}
-	return spliceRootTables(raw, spans, rootsBytes), true
+	var origCfg, gotCfg tier3RawConfig
+	if decodeStrictTOML("fugue.toml", raw, &origCfg) == nil {
+		if decodeStrictTOML("fugue.toml", out, &gotCfg) != nil ||
+			!slices.Equal(derefSlice(gotCfg.Roots), newRoots) ||
+			!configsEqualOutsideRoots(origCfg, gotCfg) {
+			return nil, false
+		}
+	}
+	return out, true
 }
 
-func appendRootsTOML(raw, rootsBytes []byte) []byte {
+func appendRootsTOML(raw, rootsBytes, lineSep []byte) []byte {
 	if len(rootsBytes) == 0 {
 		return slices.Clone(raw)
 	}
 	if len(raw) == 0 {
 		return rootsBytes
 	}
-	out := make([]byte, 0, len(raw)+2+len(rootsBytes))
+	out := make([]byte, 0, len(raw)+2*len(lineSep)+len(rootsBytes))
 	out = append(out, raw...)
 	if !bytes.HasSuffix(out, []byte("\n\n")) && !bytes.HasSuffix(out, []byte("\r\n\r\n")) {
 		if bytes.HasSuffix(out, []byte("\n")) {
-			out = append(out, '\n')
+			out = append(out, lineSep...)
 		} else {
-			out = append(out, '\n', '\n')
+			out = append(out, lineSep...)
+			out = append(out, lineSep...)
 		}
 	}
 	return append(out, rootsBytes...)
 }
 
-func spliceRootTables(raw []byte, spans []rootTableSpan, rootsBytes []byte) []byte {
+func spliceRootTables(raw []byte, spans []rootTableSpan, rootsBytes, lineSep []byte) []byte {
 	var out []byte
 	cursor := 0
 	for i, span := range spans {
@@ -161,11 +201,25 @@ func spliceRootTables(raw []byte, spans []rootTableSpan, rootsBytes []byte) []by
 		if i == 0 && len(rootsBytes) > 0 {
 			out = append(out, rootsBytes...)
 			cursor = span.end
+			if (len(spans) == 1 || cursor < spans[1].start) &&
+				cursor < len(raw) && !hasBlankLinePrefix(raw[cursor:]) && startsWithTableHeader(raw[cursor:]) {
+				out = append(out, lineSep...)
+			}
 			continue
 		}
 		cursor = skipAdjacentBlankLine(raw, span.end, &out)
 	}
 	return append(out, raw[cursor:]...)
+}
+
+func hasBlankLinePrefix(b []byte) bool {
+	return bytes.HasPrefix(b, []byte("\n")) || bytes.HasPrefix(b, []byte("\r\n"))
+}
+
+func startsWithTableHeader(b []byte) bool {
+	line := trimLineEnding(b[:nextLineEnd(b, 0)])
+	_, isHeader := parseTableHeaderLine(line)
+	return isHeader
 }
 
 func skipAdjacentBlankLine(raw []byte, end int, out *[]byte) int {
