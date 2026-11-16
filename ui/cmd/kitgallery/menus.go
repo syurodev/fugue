@@ -30,7 +30,7 @@ const (
 const numMenuSpecimens = 2
 
 // menuStates are the specimen columns.
-func menuStates() []string { return []string{stRest, stHover, mstSubmenu} }
+func menuStates() []string { return []string{stRest, stHover, stFocus, mstSubmenu} }
 
 // liveStates are the live triggers.
 func liveStates() []string { return []string{mstDropdown, mstFlip} }
@@ -43,7 +43,7 @@ func menuSpecimenNames() []string {
 // menuPage is the Menu page's state: one menu per specimen cell, and a
 // button and a menu per live trigger.
 type menuPage struct {
-	specimens [numMenuSpecimens][3]*kit.MenuState
+	specimens [numMenuSpecimens][4]*kit.MenuState
 	trigger   [2]*kit.ButtonState
 	live      [2]*kit.MenuState
 	chosen    string
@@ -79,7 +79,7 @@ func newMenuPage() menuPage {
 	var mp menuPage
 	for v := range mp.specimens {
 		_, sub := menuItems(v)
-		for c, path := range [][]int{nil, {0}, {sub, 0}} {
+		for c, path := range [][]int{nil, {0}, {0}, {sub, 0}} {
 			mp.specimens[v][c] = kit.NewMenuState()
 			mp.specimens[v][c].Open(path...)
 		}
@@ -114,7 +114,7 @@ func (p *pages) specimenRow(gtx *layout.Context, vi int) []cellDraw {
 		m := p.menu.specimens[vi][ci]
 		props := kit.MenuProps{Items: items, Inline: true}
 		row = append(row, cellDraw{
-			col: ci, key: cell{compMenu, vi, 0, st},
+			col: ci, key: cell{compMenu, vi, 0, st}, tag: m,
 			box: measure(gtx, func(gtx *layout.Context) image.Point {
 				res, err := m.Layout(p.env, gtx, props)
 				if err != nil {
@@ -165,8 +165,13 @@ func (p *pages) liveCell(gtx *layout.Context, i int) cellDraw {
 				p.err = err
 			}
 			if clicked {
-				m.Open()
+				if btn.KeyClicked() {
+					m.OpenKeyboard()
+				} else {
+					m.Open()
+				}
 			}
+			m.SetOpener(btn.Tag())
 			res, err := m.Layout(p.env, gtx, kit.MenuProps{Items: items, Anchor: image.Rectangle{Max: box}, Inline: false})
 			if err != nil {
 				p.err = err
