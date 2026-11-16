@@ -91,7 +91,7 @@ func TestProbeReportsTheTestedVersionAndCapability(t *testing.T) {
 		t.Fatalf("path = %q, want the resolved binary %q", report.Path, a.Binary)
 	}
 	if report.Login != vendor.LoginUnknown {
-		t.Fatalf("login = %s, want unknown: the CLI reports login only during a turn", report.Login)
+		t.Fatalf("login = %s, want unknown: the status command printed nothing", report.Login)
 	}
 	assertClaudeCapability(t, report.Capability)
 }

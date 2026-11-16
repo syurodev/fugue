@@ -27,3 +27,11 @@ CI needs no account and no installed CLI.
 2. Long item/message/call identifiers (`msg_…`, `item_…`, `call_…`) become `msg-NNNN`, `item-NNNN`, `call-NNNN`.
 3. Throwaway working and config directories become `/home/REDACTED/codex-fixture` and `/home/REDACTED/.codex`.
 4. Host/machine names (`serverName`, `userAgent` OS strings, MCP server names) become placeholders (`host.example`, `codex_cli_rs/0.167.0 (Linux; x86_64) terminal`, `example-mcp`).
+
+## Login status (F9.10a)
+
+`codex-0.147.0-login-status-logged-in.stdout` is the stdout of the real `codex login status`
+(0.147.0, recorded 2026-11-16, exit 0). `codex-0.147.0-login-status-logged-out.stderr` is its
+stderr with `CODEX_HOME` pointing at an empty temporary directory (exit 1); the CLI's extra
+warning line about helper binaries under a temporary directory is dropped. The probe treats exit 0 as
+logged in and exit 1 with `Not logged in` as logged out, and keeps neither text.

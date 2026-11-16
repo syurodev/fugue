@@ -42,9 +42,12 @@ type UsageData struct {
 // TurnEnd closes the active turn: outcome, failure code, usage and the
 // credential expiry the CLI reported, if any.
 type TurnEnd struct {
-	TurnID              string
-	Outcome             string
-	FailureCode         string
+	TurnID      string
+	Outcome     string
+	FailureCode string
+	// Failure is the adapter's classification of a failed turn for the
+	// account; it never replaces FailureCode.
+	Failure             FailureClass `json:",omitempty"`
 	Usage               UsageData
 	CredentialExpiresAt *time.Time
 }

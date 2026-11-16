@@ -87,3 +87,11 @@ Recorded from `claude 2.1.319` with `--replay-user-messages` enabled:
 
 Everything else stays as recorded: model names, usage numbers and cost, quota
 `resetsAt` epochs, timestamps and event texts.
+
+## Login status (F9.10a)
+
+`claude-2.1.325-auth-status-logged-in.json` and `...-logged-out.json` are the stdout of the
+real `claude auth status --json` (2.1.325, recorded 2026-11-16). The logged-out document was
+recorded with `CLAUDE_CONFIG_DIR` pointing at an empty temporary directory, which exits 1. In
+the logged-in document the `email`, `orgId` and `orgName` keys are removed and the home paths
+are replaced with placeholders; the probe reads only `loggedIn` and never stores the rest.

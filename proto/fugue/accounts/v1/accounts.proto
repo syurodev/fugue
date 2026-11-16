@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package fugue.accounts.v1;
+
+import "fugue/vendors/v1/vendors.proto";
+
+// QuotaWindow is one quota window a vendor reports. utilization is a fraction
+// in [0, 1]; resets_at is RFC 3339 and empty when the vendor gave no usable
+// reset time.
+message QuotaWindow {
+  string name = 1;
+  double utilization = 2;
+  string resets_at = 3;
+  // status is "allowed", "allowed_warning", "rejected" or empty when unknown.
+  string status = 4;
+}
+
+// Account is a vendor's default account (F9.10a: one account per vendor).
+// It never carries an identity, a path or credential material.
+message Account {
+  fugue.vendors.v1.Vendor vendor = 1;
+  // state is "ok", "paused" or "needs_login". A paused account whose
+  // paused_until has passed is ok again; the host also reports it so.
+  string state = 2;
+  // paused_until is RFC 3339 and set only while state is "paused".
+  string paused_until = 3;
+  // login is "unknown", "logged_in" or "logged_out", as the vendor's own CLI
+  // last stated it.
+  string login = 4;
+  // quota_known is false for a vendor with no quota signal: its usage is
+  // unknown, never unlimited.
+  bool quota_known = 5;
+  repeated QuotaWindow windows = 6;
+  string updated_at = 7;
+}
+
+message ListAccountsRequest {}
+
+message ListAccountsResponse {
+  repeated Account accounts = 1;
+}
+
+// AccountService reports the vendor accounts (F9.10a). The `quota` topic
+// carries the same account shape as JSON: a snapshot {"accounts": [...]} and
+// one event per changed account.
+service AccountService {
+  // ListAccounts refreshes each vendor's login state through the CLI's own
+  // status command, then lists the accounts.
+  rpc ListAccounts(ListAccountsRequest) returns (ListAccountsResponse);
+}

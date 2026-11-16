@@ -69,6 +69,38 @@ func CheckAbsoluteBinary(vendorName, path string) (string, error) {
 // deadline). A context that ends first is a typed error; output past the cap,
 // a failed start, or a non-zero exit leave the version unknown ("", nil).
 func RunVersionCommand(ctx context.Context, vendorName, path string, env []string, timeout time.Duration) (string, error) {
+	res, err := runBounded(ctx, vendorName, path, []string{"--version"}, env, timeout, VersionOutputLimit, "version probe")
+	if err != nil {
+		return "", err
+	}
+	if !res.Ran || res.ExitCode != 0 {
+		return "", nil
+	}
+	return res.Stdout, nil
+}
+
+// StatusOutputLimit caps each stream of a login status command. The status of
+// a CLI is a handful of short fields; anything past the cap is not a status.
+const StatusOutputLimit = 16 << 10
+
+// CommandResult is what a bounded one-shot command printed and how it ended.
+// Ran is false when the process did not start, was cut off by the output cap,
+// or ended by a signal: the exit code is then meaningless.
+type CommandResult struct {
+	Stdout, Stderr string
+	ExitCode       int
+	Ran            bool
+}
+
+// RunStatusCommand runs `<path> <args...>` once under the caller's context
+// with the filtered environment and the same bounds as RunVersionCommand. It
+// is for the CLI's own status commands (VR-03): the host reads what the CLI
+// prints, never a credential file. Output is untrusted data.
+func RunStatusCommand(ctx context.Context, vendorName, path string, args, env []string, timeout time.Duration) (CommandResult, error) {
+	return runBounded(ctx, vendorName, path, args, env, timeout, StatusOutputLimit, "status probe")
+}
+
+func runBounded(ctx context.Context, vendorName, path string, args, env []string, timeout time.Duration, limit int, what string) (CommandResult, error) {
 	if timeout <= 0 {
 		timeout = DefaultProbeTimeout
 	}
@@ -79,22 +111,33 @@ func RunVersionCommand(ctx context.Context, vendorName, path string, env []strin
 	}
 	runCtx, stop := context.WithCancel(ctx)
 	defer stop()
-	out := NewCappedBuffer(VersionOutputLimit, stop)
-	cmd := exec.CommandContext(runCtx, path, "--version")
+	out := NewCappedBuffer(limit, stop)
+	errOut := NewCappedBuffer(limit, stop)
+	// The path comes from ResolveBinary or an explicit absolute path, and args
+	// are literals fixed by the adapter (never client input), so they are
+	// appended to the command after it is built.
+	cmd := exec.CommandContext(runCtx, path)
+	cmd.Args = append(cmd.Args, args...)
 	cmd.Env = env
 	cmd.Stdout = out
+	cmd.Stderr = errOut
 	cmd.WaitDelay = ProbeWaitDelay
 	runErr := cmd.Run()
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		if errors.Is(ctxErr, context.DeadlineExceeded) {
-			return "", errcode.Wrap(errcode.DeadlineExceeded, vendorName+" version probe timed out", ctxErr)
+			return CommandResult{}, errcode.Wrap(errcode.DeadlineExceeded, vendorName+" "+what+" timed out", ctxErr)
 		}
-		return "", errcode.Wrap(errcode.Canceled, vendorName+" version probe was canceled", ctxErr)
+		return CommandResult{}, errcode.Wrap(errcode.Canceled, vendorName+" "+what+" was canceled", ctxErr)
 	}
-	if runErr != nil || out.Overflowed() {
-		return "", nil
+	if out.Overflowed() || errOut.Overflowed() {
+		return CommandResult{}, nil
 	}
-	return out.String(), nil
+	res := CommandResult{Stdout: out.String(), Stderr: errOut.String(), Ran: runErr == nil}
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) && exitErr.ExitCode() >= 0 {
+		res.ExitCode, res.Ran = exitErr.ExitCode(), true
+	}
+	return res, nil
 }
 
 // CappedBuffer keeps at most limit bytes and discards the rest, reporting
@@ -138,3 +181,28 @@ func (c *CappedBuffer) String() string { return c.buf.String() }
 
 // Overflowed reports whether a write exceeded the buffer limit.
 func (c *CappedBuffer) Overflowed() bool { return c.overflowed }
+
+// LoginStatusTimeout bounds one login status command, so a CLI that stalls on
+// the network leaves the login unknown instead of failing the whole probe.
+const LoginStatusTimeout = 5 * time.Second
+
+// ProbeLogin runs the CLI's own login status command and lets classify turn
+// what it printed into a LoginState (VR-03: the host asks the CLI, it never
+// opens a credential file). Anything the CLI does not state clearly is
+// LoginUnknown, including a timeout of this command. Only the caller's own
+// context ending is an error.
+func ProbeLogin(ctx context.Context, vendorName, path string, args, env []string, classify func(*CommandResult) LoginState) (LoginState, error) {
+	sub, cancel := context.WithTimeout(ctx, LoginStatusTimeout)
+	defer cancel()
+	res, err := RunStatusCommand(sub, vendorName, path, args, env, LoginStatusTimeout)
+	if err != nil {
+		if ctx.Err() != nil {
+			return LoginUnknown, err
+		}
+		return LoginUnknown, nil
+	}
+	if !res.Ran {
+		return LoginUnknown, nil
+	}
+	return classify(&res), nil
+}

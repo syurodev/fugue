@@ -16,6 +16,7 @@ import (
 const vendorFailureCode = "vendor_failure"
 
 func (a *vendorSessionActor) handleObservation(ctx context.Context, observation *vendor.Observation) error {
+	a.observeAccount(observation)
 	if observation.Init != nil {
 		commands := slices.Clone(observation.Init.SlashCommands)
 		if !slices.Equal(commands, a.slashCommands) {
@@ -132,10 +133,36 @@ func (a *vendorSessionActor) persistTurnEnd(ctx context.Context, turnEnd *vendor
 		return nil
 	}
 	outcome, fact, stored := turnOutcome(turnEnd.Outcome)
+	failure := storedFailureCode(outcome, turnEnd.Failure)
 	if strings.HasPrefix(turnEnd.TurnID, "vendor-") {
-		return a.persistVendorTurnEnd(ctx, turnEnd.TurnID, stored, failureCode(outcome))
+		return a.persistVendorTurnEnd(ctx, turnEnd.TurnID, stored, failure)
 	}
-	return a.persistFugueTurnEnd(ctx, turnEnd.TurnID, fact, stored, failureCode(outcome))
+	return a.persistFugueTurnEnd(ctx, turnEnd.TurnID, fact, stored, failure)
+}
+
+// storedFailureCode is the failure code a failed turn is stored with: the
+// account-relevant classes (vendor-runtime §11 failed(auth), failed(quota))
+// keep their name, every other failure is the generic vendor failure.
+func storedFailureCode(outcome vendor.Outcome, class vendor.FailureClass) string {
+	failure := failureCode(outcome)
+	if failure != "" && (class == vendor.FailureAuth || class == vendor.FailureQuota) {
+		return string(class)
+	}
+	return failure
+}
+
+// observeAccount feeds the session's quota windows and classified failure to
+// the vendor's account (orchestration §8). It runs before anything is stored,
+// so a storage failure never loses a quota signal.
+func (a *vendorSessionActor) observeAccount(observation *vendor.Observation) {
+	accounts := a.manager.deps.Accounts
+	if accounts == nil {
+		return
+	}
+	accounts.ObserveQuota(a.info.Vendor, observation.Quota)
+	if observation.TurnEnd != nil {
+		accounts.ObserveFailure(a.info.Vendor, observation.TurnEnd.Failure)
+	}
 }
 
 func turnOutcome(observed string) (vendor.Outcome, vendor.Fact, string) {

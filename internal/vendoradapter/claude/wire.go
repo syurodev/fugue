@@ -89,6 +89,7 @@ type wireResult struct {
 	TotalCostUSD        float64   `json:"total_cost_usd"`
 	NumTurns            int       `json:"num_turns"`
 	CredentialExpiresAt string    `json:"credential_expires_at"`
+	APIErrorStatus      *int      `json:"api_error_status"`
 }
 
 // rate_limit_event (vendor-runtime §5.1): the windows the CLI reports.

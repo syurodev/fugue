@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -31,6 +32,10 @@ const (
 	fakeApprovalConfigDir        = "/session/approval"
 	fakeUserInputConfigDir       = "/session/user-input"
 	fakeRecordRPCsConfigDir      = "/session/record-rpcs"
+	fakeLoginLoggedInConfigDir   = "/login/logged-in"
+	fakeLoginLoggedOutConfigDir  = "/login/logged-out"
+	fakeLoginGarbageConfigDir    = "/login/garbage"
+	fakeLoginHangConfigDir       = "/login/hang"
 	fixtureCLI                   = "0.167.0"
 	untestedCLI                  = "0.168.0"
 )
@@ -45,6 +50,10 @@ func TestMain(m *testing.M) {
 	if len(os.Args) > 1 && os.Args[1] == "--version" {
 		runFakeCodexVersion()
 		os.Exit(0)
+	}
+	if len(os.Args) > 2 && os.Args[1] == "login" && os.Args[2] == "status" {
+		runFakeCodexLoginStatus()
+		os.Exit(1)
 	}
 	if len(os.Args) > 1 && os.Args[1] == "app-server" {
 		runFakeCodexAppServer()
@@ -88,6 +97,37 @@ func runFakeCodexVersion() {
 		return
 	}
 	writeOut("codex-cli " + fixtureCLI + "\n")
+}
+
+// runFakeCodexLoginStatus plays `codex login status`: it exits 0 after the
+// recorded 0.147.0 stdout for the logged-in sentinel, and returns to exit 1 for
+// the others (the recorded stderr, unrelated output, nothing). A leaked Fugue
+// secret makes it print nothing and exit 1, so the login is not logged in and
+// the test notices.
+func runFakeCodexLoginStatus() {
+	if envHasPrefix("FUGUE_VAULT_KEY=") || envHasPrefix("FUGUE_TEST_OUTER_SECRET=") || envHasPrefix("OPENAI_API_KEY=") || envHasPrefix("ANTHROPIC_API_KEY=") {
+		return
+	}
+	record := func(name string, out *os.File) {
+		doc, err := fs.ReadFile(os.DirFS(filepath.Join("testdata", "fixtures")), name)
+		if err != nil {
+			os.Exit(2)
+		}
+		if _, werr := out.Write(doc); werr != nil {
+			os.Exit(1)
+		}
+	}
+	switch {
+	case envHasPrefix("CODEX_HOME=" + fakeLoginLoggedInConfigDir):
+		record("codex-0.147.0-login-status-logged-in.stdout", os.Stdout)
+		os.Exit(0)
+	case envHasPrefix("CODEX_HOME=" + fakeLoginLoggedOutConfigDir):
+		record("codex-0.147.0-login-status-logged-out.stderr", os.Stderr)
+	case envHasPrefix("CODEX_HOME=" + fakeLoginGarbageConfigDir):
+		writeOut("error: something else\n")
+	case envHasPrefix("CODEX_HOME=" + fakeLoginHangConfigDir):
+		hangForever()
+	}
 }
 
 func hangForever() {
