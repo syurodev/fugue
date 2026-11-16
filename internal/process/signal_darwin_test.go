@@ -124,3 +124,53 @@ func waitForZombieGroup(t *testing.T, pgid int) (zombies, live int) {
 	t.Fatalf("process group %d did not reach zombie state", pgid)
 	return 0, 0
 }
+
+func TestLeaderSignalEPERMIsGoneOnlyForAZombieLeader(t *testing.T) {
+	t.Parallel()
+	cmd := exec.CommandContext(t.Context(), "/bin/sh", "-c", "exit 0")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	stdout, pipeErr := cmd.StdoutPipe()
+	if pipeErr != nil {
+		t.Fatal(pipeErr)
+	}
+	if startErr := cmd.Start(); startErr != nil {
+		t.Fatal(startErr)
+	}
+	if _, copyErr := io.Copy(io.Discard, stdout); copyErr != nil {
+		reapCommand(t, cmd)
+		t.Fatal(copyErr)
+	}
+	pid := cmd.Process.Pid
+	zombie, live := waitForZombieGroup(t, pid)
+	if zombie == 0 || live != 0 {
+		reapCommand(t, cmd)
+		t.Fatalf("leader %d: %d zombies, %d live members", pid, zombie, live)
+	}
+	// The leader exited and is not reaped yet: the window where the exit
+	// channel is still open but signaling the pid returns EPERM.
+	if got := platformLeaderSignalError(pid, syscall.EPERM); got != nil {
+		reapCommand(t, cmd)
+		t.Fatalf("zombie leader EPERM = %v, want nil", got)
+	}
+	if waitErr := cmd.Wait(); waitErr != nil {
+		t.Fatal(waitErr)
+	}
+}
+
+func TestLeaderSignalEPERMIsKeptForALiveLeader(t *testing.T) {
+	t.Parallel()
+	cmd := exec.CommandContext(t.Context(), "/bin/sleep", "30")
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if killErr := cmd.Process.Kill(); killErr != nil {
+			t.Logf("cleanup kill: %v", killErr)
+		}
+		reapCommand(t, cmd)
+	})
+	if got := platformLeaderSignalError(cmd.Process.Pid, syscall.EPERM); !errors.Is(got, syscall.EPERM) {
+		t.Fatalf("live leader EPERM = %v, want EPERM kept", got)
+	}
+}
