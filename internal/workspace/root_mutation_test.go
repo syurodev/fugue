@@ -1,9 +1,12 @@
 package workspace
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -346,4 +349,159 @@ func assertWorkspaceRootRevision(t *testing.T, ws *Workspace, revision int64, na
 		ws.Roots[0].Name != name || ws.Roots[0].Path != resolved || ws.Roots[0].Access != access {
 		t.Fatalf("workspace root revision = %+v", ws)
 	}
+}
+
+func TestRootMutationPreservesCommentsAndFormatting(t *testing.T) {
+	t.Parallel()
+	f := newTestFixture(t)
+	ctx := context.Background()
+	first, second := filepath.Join(f.tempDir, "first"), filepath.Join(f.tempDir, "second")
+	createMutationRoots(t, first, second)
+	ws, err := f.svc.CreateWorkspace(ctx, CreateWorkspaceRequest{Name: "preserve"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	initialTOML := "" +
+		"# Top of file comment\n" +
+		"# Second header line\n" +
+		"name = \"preserve\"\n\n" +
+		"[env]\n" +
+		"override_allow = [\"LANG\"]\n" +
+		"keep = [\"HOME\", \"PATH\"]\n\n" +
+		"[policy] # comment next to [policy]\n" +
+		"shell_allow = [\"git status\"]\n" +
+		"approval_mode = \"ask\"\n"
+	ws, err = f.svc.UpdateWorkspaceConfig(ctx, ws.ID, []byte(initialTOML), ws.ConfigHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ws, err = f.svc.AddRoot(ctx, ws.ID, ws.ConfigHash, RootSpec{Name: "main", Path: first, Access: AccessReadWrite})
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterAdd, err := os.ReadFile(f.paths.ConfigPath(ws.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(afterAdd, []byte(initialTOML)) {
+		t.Fatalf("AddRoot altered bytes outside roots block:\ngot:\n%s\nwant prefix:\n%s", afterAdd, initialTOML)
+	}
+
+	ws, err = f.svc.UpdateRoot(ctx, ws.ID, ws.ConfigHash, "main", RootSpec{Name: "renamed", Path: second, Access: AccessReadOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterUpdate, err := os.ReadFile(f.paths.ConfigPath(ws.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.HasPrefix(afterUpdate, []byte(initialTOML)) {
+		t.Fatalf("UpdateRoot altered bytes outside roots block:\ngot:\n%s\nwant prefix:\n%s", afterUpdate, initialTOML)
+	}
+
+	ws, err = f.svc.RemoveRoot(ctx, ws.ID, ws.ConfigHash, "renamed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterRemove, err := os.ReadFile(f.paths.ConfigPath(ws.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterRemove) != initialTOML {
+		t.Fatalf("RemoveRoot did not restore original bytes:\ngot:\n%q\nwant:\n%q", afterRemove, initialTOML)
+	}
+}
+
+func TestRootMutationGathersScatteredRootTables(t *testing.T) {
+	t.Parallel()
+	f := newTestFixture(t)
+	ctx := context.Background()
+	r1, r2, r3 := filepath.Join(f.tempDir, "r1"), filepath.Join(f.tempDir, "r2"), filepath.Join(f.tempDir, "r3")
+	createMutationRoots(t, r1, r2, r3)
+	ws, err := f.svc.CreateWorkspace(ctx, CreateWorkspaceRequest{Name: "scattered"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scatteredTOML := "" +
+		"# Header comment\n" +
+		"name = \"scattered\"\n\n" +
+		"[[roots]]\n" +
+		"# comment inside first root\n" +
+		"name = \"one\"\n" +
+		"path = " + quoteTOMLString(r1) + "\n" +
+		"access = \"rw\"\n\n" +
+		"[policy] # keep policy comment\n" +
+		"approval_mode = \"ask\"\n\n" +
+		"[[roots]]\n" +
+		"name = \"two\"\n" +
+		"path = " + quoteTOMLString(r2) + "\n" +
+		"access = \"ro\"\n\n" +
+		"# Env comment\n" +
+		"[env]\n" +
+		"keep = [\"HOME\"]\n"
+	ws, err = f.svc.UpdateWorkspaceConfig(ctx, ws.ID, []byte(scatteredTOML), ws.ConfigHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ws, err = f.svc.AddRoot(ctx, ws.ID, ws.ConfigHash, RootSpec{Name: "three", Path: r3, Access: AccessReadWrite})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ws.Roots) != 3 {
+		t.Fatalf("len(ws.Roots) = %d, want 3", len(ws.Roots))
+	}
+	gotBytes, err := os.ReadFile(f.paths.ConfigPath(ws.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(gotBytes)
+	policySection := "[policy] # keep policy comment\napproval_mode = \"ask\"\n"
+	envSection := "# Env comment\n[env]\nkeep = [\"HOME\"]\n"
+	if !strings.HasPrefix(got, "# Header comment\nname = \"scattered\"\n\n[[roots]]\n") {
+		t.Fatalf("expected roots gathered at first [[roots]] position, got:\n%s", got)
+	}
+	if !strings.Contains(got, policySection) || !strings.Contains(got, envSection) {
+		t.Fatalf("expected policy and env sections preserved verbatim, got:\n%s", got)
+	}
+	policyIdx := strings.Index(got, policySection)
+	lastRootIdx := strings.LastIndex(got, "[[roots]]")
+	if lastRootIdx > policyIdx {
+		t.Fatalf("expected all [[roots]] tables gathered before [policy], got:\n%s", got)
+	}
+}
+
+func TestRootMutationFallsBackWhenRootsCannotBeLocated(t *testing.T) {
+	t.Parallel()
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+	f := newTestFixture(t, WithLogger(logger))
+	ctx := context.Background()
+	first, second := filepath.Join(f.tempDir, "first"), filepath.Join(f.tempDir, "second")
+	createMutationRoots(t, first, second)
+	ws, err := f.svc.CreateWorkspace(ctx, CreateWorkspaceRequest{Name: "inline-roots"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	inlineTOML := "name = \"inline-roots\"\nroots = [{ name = \"main\", path = " + quoteTOMLString(first) + ", access = \"rw\" }]\n"
+	ws, err = f.svc.UpdateWorkspaceConfig(ctx, ws.ID, []byte(inlineTOML), ws.ConfigHash)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ws, err = f.svc.AddRoot(ctx, ws.ID, ws.ConfigHash, RootSpec{Name: "extra", Path: second, Access: AccessReadOnly})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ws.Roots) != 2 {
+		t.Fatalf("len(ws.Roots) = %d, want 2", len(ws.Roots))
+	}
+	if !strings.Contains(logBuf.String(), "falling back to full-file TOML encode") {
+		t.Fatalf("expected fallback warning in log, got:\n%s", logBuf.String())
+	}
+}
+
+func quoteTOMLString(s string) string {
+	return `"` + strings.ReplaceAll(strings.ReplaceAll(s, `\`, `\\`), `"`, `\"`) + `"`
 }
