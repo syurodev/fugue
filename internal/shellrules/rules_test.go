@@ -237,14 +237,26 @@ func runnerBypassCases() []bypassCase {
 		{"busybox sh -c 'git push'", "", true},
 		{"sudo xargs git push", "", true},
 		{"python -c 'import os'", "", true},
+		{"python -Ic 'import os'", "", true},
 		{"python3 -c 'import os'", "", true},
+		{"python3 -Ic 'import os'", "", true},
+		{"python3 -Bc 'import os'", "", true},
+		{"python3 -IBc 'import os'", "", true},
 		{"perl -e 'system(1)'", "", true},
+		{"perl -we 'system(1)'", "", true},
+		{"perl -lne 'system(1)'", "", true},
 		{"perl -E 'say 1'", "", true},
+		{"perl -wE 'say 1'", "", true},
 		{"ruby -e 'puts 1'", "", true},
+		{"ruby -we 'puts 1'", "", true},
 		{"node -e 'process.exit()'", "", true},
 		{"node --eval 'x'", "", true},
+		{"node --eval='x'", "", true},
 		{"node -p '1'", "", true},
+		{"node -pe '1'", "", true},
+		{"node --print '1'", "", true},
 		{"php -r 'echo 1;'", "", true},
+		{"php -nr 'echo 1;'", "", true},
 		{"sudo bash -c 'git push'", "", true},
 	}
 }
@@ -290,6 +302,22 @@ func TestIE04AntiBypass(t *testing.T) {
 			assertAntiBypassVerdict(t, tc.cmd, v, tc.wantRule, tc.unparsable)
 			if IsAllowed(tc.cmd, &allowOpts) {
 				t.Fatalf("command %q must NEVER be allowed under ShellAllow", tc.cmd)
+			}
+		})
+	}
+
+	nonInlineCases := []string{
+		"python3 -m pytest",
+		"python3 -I script.py",
+		"perl -w script.pl",
+		"node script.js",
+	}
+	for _, cmd := range nonInlineCases {
+		t.Run("non-inline/"+cmd, func(t *testing.T) {
+			t.Parallel()
+			v := Inspect(cmd, &Options{WorkspaceRoots: roots})
+			if v.Unparsable || v.Ask || v.MatchedRule != "" {
+				t.Fatalf("Inspect(%q) = %+v, want Unparsable=false Ask=false MatchedRule=\"\"", cmd, v)
 			}
 		})
 	}

@@ -408,8 +408,13 @@ func isShellBinary(b string) bool {
 }
 
 func containsFlag(args []string, target string) bool {
+	short := strings.HasPrefix(target, "-") && !strings.HasPrefix(target, "--")
+	shortFlag := strings.TrimPrefix(target, "-")
 	for _, a := range args {
-		if a == target || (strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, strings.TrimPrefix(target, "-"))) {
+		if a == target {
+			return true
+		}
+		if short && strings.HasPrefix(a, "-") && !strings.HasPrefix(a, "--") && strings.Contains(a, shortFlag) {
 			return true
 		}
 	}

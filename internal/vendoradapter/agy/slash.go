@@ -24,6 +24,7 @@ import (
 const (
 	maxSlashCommands    = 128
 	maxSlashCommandName = 64
+	fugueSlashPrefix    = "fugue:"
 )
 
 // IsTerminalSlashCommand reports whether name is a terminal-only command in
@@ -44,10 +45,10 @@ func IsTerminalSlashCommand(name string) bool {
 	}
 }
 
-// hideTerminalCommands filters terminal-only, `fugue:`, empty, oversized and
-// whitespace or control-character names from the vendor's untrusted
-// `available_commands_update` list, keeping vendor order and at most
-// maxSlashCommands names.
+// hideTerminalCommands filters terminal-only, `fugue:` (case-insensitive),
+// empty, oversized and whitespace, control, or format-character names from the
+// vendor's untrusted `available_commands_update` list, keeping vendor order and
+// at most maxSlashCommands names.
 func hideTerminalCommands(commands []AvailableCommand) []string {
 	out := make([]string, 0, min(len(commands), maxSlashCommands))
 	seen := make(map[string]bool, len(commands))
@@ -56,14 +57,22 @@ func hideTerminalCommands(commands []AvailableCommand) []string {
 		if len(out) == maxSlashCommands {
 			break
 		}
-		if len(bare) > maxSlashCommandName || strings.HasPrefix(bare, "fugue:") || IsTerminalSlashCommand(bare) || seen[bare] ||
-			strings.IndexFunc(bare, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }) >= 0 {
+		if len(bare) > maxSlashCommandName || hasFoldPrefix(bare, fugueSlashPrefix) || IsTerminalSlashCommand(bare) || seen[bare] ||
+			strings.IndexFunc(bare, isDisallowedSlashRune) >= 0 {
 			continue
 		}
 		seen[bare] = true
 		out = append(out, bare)
 	}
 	return out
+}
+
+func hasFoldPrefix(s, prefix string) bool {
+	return len(s) >= len(prefix) && strings.EqualFold(s[:len(prefix)], prefix)
+}
+
+func isDisallowedSlashRune(r rune) bool {
+	return unicode.IsSpace(r) || unicode.IsControl(r) || unicode.Is(unicode.Cf, r)
 }
 
 func (n *Normalizer) normalizeAvailableCommands(wire *UpdateWire) Observation {
