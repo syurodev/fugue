@@ -338,6 +338,9 @@ func assertUntrustedSlashNamesAreDropped(t *testing.T) {
 	bad := []AvailableCommand{
 		{Name: "fugue:status"},
 		{Name: "/fugue:help"},
+		{Name: "Fugue:status"},
+		{Name: "/FUGUE:help"},
+		{Name: "FuGuE:mixed"},
 		{Name: ""},
 		{Name: "  "},
 		{Name: "/"},
@@ -346,6 +349,8 @@ func assertUntrustedSlashNamesAreDropped(t *testing.T) {
 		{Name: "nl\nname"},
 		{Name: "bell\x07"},
 		{Name: "del\x7f"},
+		{Name: "rtl\u202ename"},
+		{Name: "zw\u200bname"},
 		{Name: strings.Repeat("a", 65)},
 		{Name: "ok"},
 		{Name: strings.Repeat("b", 64)},
