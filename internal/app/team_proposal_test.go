@@ -519,17 +519,14 @@ func awaitCancelledProposal(t *testing.T, f *teamProposalFixture, teamID string)
 	return rec, tasks, item
 }
 
-// TestConcurrentProposalsLeaveOnePending pins Q-103 under concurrency: N
-// parallel proposes from one session are serialized by the service, so
-// exactly one team stays proposed, every earlier one is cancelled, and
-// exactly one card is live.
-func TestConcurrentProposalsLeaveOnePending(t *testing.T) {
-	t.Parallel()
-	f := newTeamProposalFixture(t, "")
-	const proposals = 6
-	ids := make([]string, proposals)
+// proposeConcurrently runs n proposes from the fixture's session in
+// parallel and returns the distinct proposal IDs; any failed propose fails
+// the test.
+func proposeConcurrently(t *testing.T, f *teamProposalFixture, n int) map[string]struct{} {
+	t.Helper()
+	ids := make([]string, n)
 	var wg sync.WaitGroup
-	for i := range proposals {
+	for i := range n {
 		wg.Add(1)
 		supervise.Go(t.Context(), "test.concurrent-propose", func(ctx context.Context) error {
 			defer wg.Done()
@@ -543,34 +540,122 @@ func TestConcurrentProposalsLeaveOnePending(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	distinct := make(map[string]struct{}, proposals)
+	distinct := make(map[string]struct{}, n)
 	for i := range ids {
 		if ids[i] == "" {
 			t.Fatal("a concurrent propose failed")
 		}
 		distinct[ids[i]] = struct{}{}
 	}
-	if len(distinct) != proposals {
-		t.Fatalf("distinct proposal IDs = %d, want %d", len(distinct), proposals)
-	}
+	return distinct
+}
+
+// countProposed returns how many of the teams are still proposed and fails
+// on any state other than proposed or cancelled.
+func countProposed(t *testing.T, f *teamProposalFixture, ids map[string]struct{}) int {
+	t.Helper()
 	pending := 0
-	for id := range distinct {
+	for id := range ids {
 		rec, _ := f.teamSnapshot(t, id)
 		switch rec.State {
 		case vendorstore.TeamStateProposed:
 			pending++
 		case vendorstore.TeamStateCancelled:
-		default:
+		case vendorstore.TeamStateActive, vendorstore.TeamStateFinalReview,
+			vendorstore.TeamStateDone, vendorstore.TeamStateFailed:
 			t.Fatalf("proposal %s state = %s, want proposed or cancelled", id, rec.State)
+		default:
+			t.Fatalf("proposal %s has unknown state %s", id, rec.State)
 		}
 	}
-	if pending != 1 {
+	return pending
+}
+
+// TestConcurrentProposalsLeaveOnePending pins Q-103 under concurrency: N
+// parallel proposes from one session are serialized by the service, so
+// exactly one team stays proposed, every earlier one is cancelled, and
+// exactly one card is live.
+func TestConcurrentProposalsLeaveOnePending(t *testing.T) {
+	t.Parallel()
+	f := newTeamProposalFixture(t, "")
+	const proposals = 6
+	distinct := proposeConcurrently(t, f, proposals)
+	if len(distinct) != proposals {
+		t.Fatalf("distinct proposal IDs = %d, want %d", len(distinct), proposals)
+	}
+	if pending := countProposed(t, f, distinct); pending != 1 {
 		t.Fatalf("proposed teams = %d, want exactly one (Q-103)", pending)
 	}
 	if _, ok, err := f.hp.vendorStore.PendingTeamForSession(t.Context(), f.session.ID); err != nil || !ok {
 		t.Fatalf("no pending proposal left = (%v, %v), want one", ok, err)
 	}
 	assertSingleProposalCard(t, f)
+}
+
+// raceProposeAndClose runs one propose and one session close concurrently
+// and waits for the session to read closed. It returns what the propose saw.
+func raceProposeAndClose(t *testing.T, f *teamProposalFixture, round int) (string, error) {
+	t.Helper()
+	sub, err := f.rt.Subscribe(t.Context(), SubscribeParams{Principal: testAppPrincipal, Topic: TopicVendorSessions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	var wg sync.WaitGroup
+	var proposalID string
+	var proposeErr error
+	wg.Add(2)
+	supervise.Go(t.Context(), "test.race-propose", func(ctx context.Context) error {
+		defer wg.Done()
+		proposalID, proposeErr = f.rt.teamProposals.Propose(ctx, f.session.ID, validTeamProposalArgs())
+		return nil
+	})
+	supervise.Go(t.Context(), "test.race-close", func(ctx context.Context) error {
+		defer wg.Done()
+		if _, closeErr := f.svc.Close(ctx, testAppPrincipal, VendorStop{CommandID: "team-race-close", SessionID: f.session.ID}); closeErr != nil {
+			t.Errorf("round %d Close: %v", round, closeErr)
+		}
+		return nil
+	})
+	wg.Wait()
+	awaitSessionState(t, sub, f.session.ID, "closed")
+	return proposalID, proposeErr
+}
+
+// assertRaceOutcome checks that a propose that won the race was cancelled by
+// the session-end cancel, and that one that lost was refused.
+func assertRaceOutcome(t *testing.T, f *teamProposalFixture, round int, proposalID string, proposeErr error) {
+	t.Helper()
+	if proposalID == "" {
+		if proposeErr != nil && errcode.CodeOf(proposeErr) != errcode.PermissionDenied {
+			t.Fatalf("round %d: propose error = %v, want permission denied", round, proposeErr)
+		}
+		return
+	}
+	rec, _, item := awaitCancelledProposal(t, f, proposalID)
+	if rec.State != vendorstore.TeamStateCancelled {
+		t.Fatalf("round %d: proposal %s state = %s, want cancelled", round, proposalID, rec.State)
+	}
+	if item.Metadata.Decision != teamTestRejected {
+		t.Fatalf("round %d: item decision = %s, want rejected", round, item.Metadata.Decision)
+	}
+}
+
+// awaitNoPendingProposal polls until the session has no pending proposal and
+// fails if one survives.
+func awaitNoPendingProposal(t *testing.T, f *teamProposalFixture, round int) {
+	t.Helper()
+	for range 20000 {
+		_, ok, err := f.hp.vendorStore.PendingTeamForSession(t.Context(), f.session.ID)
+		if err != nil {
+			t.Fatalf("round %d: PendingTeamForSession: %v", round, err)
+		}
+		if !ok {
+			return
+		}
+		runtime.Gosched()
+	}
+	t.Fatalf("round %d: pending proposal survived its session", round)
 }
 
 // TestProposalRacingSessionEndNeverStaysPending pins Q-104 under the race:
@@ -581,49 +666,9 @@ func TestProposalRacingSessionEndNeverStaysPending(t *testing.T) {
 	t.Parallel()
 	for round := range 4 {
 		f := newTeamProposalFixture(t, "")
-		sub, err := f.rt.Subscribe(t.Context(), SubscribeParams{Principal: testAppPrincipal, Topic: TopicVendorSessions})
-		if err != nil {
-			t.Fatal(err)
-		}
-		var wg sync.WaitGroup
-		var proposalID string
-		var proposeErr error
-		wg.Add(2)
-		supervise.Go(t.Context(), "test.race-propose", func(ctx context.Context) error {
-			defer wg.Done()
-			proposalID, proposeErr = f.rt.teamProposals.Propose(ctx, f.session.ID, validTeamProposalArgs())
-			return nil
-		})
-		supervise.Go(t.Context(), "test.race-close", func(ctx context.Context) error {
-			defer wg.Done()
-			if _, closeErr := f.svc.Close(ctx, testAppPrincipal, VendorStop{CommandID: "team-race-close", SessionID: f.session.ID}); closeErr != nil {
-				t.Errorf("round %d Close: %v", round, closeErr)
-			}
-			return nil
-		})
-		wg.Wait()
-		awaitSessionState(t, sub, f.session.ID, "closed")
-		sub.Close()
-		if proposalID != "" {
-			rec, _, item := awaitCancelledProposal(t, f, proposalID)
-			if rec.State != vendorstore.TeamStateCancelled {
-				t.Fatalf("round %d: proposal %s state = %s, want cancelled", round, proposalID, rec.State)
-			}
-			if item.Metadata.Decision != teamTestRejected {
-				t.Fatalf("round %d: item decision = %s, want rejected", round, item.Metadata.Decision)
-			}
-		} else if proposeErr != nil && errcode.CodeOf(proposeErr) != errcode.PermissionDenied {
-			t.Fatalf("round %d: propose error = %v, want permission denied", round, proposeErr)
-		}
-		for range 20000 {
-			if _, ok, _ := f.hp.vendorStore.PendingTeamForSession(t.Context(), f.session.ID); !ok {
-				break
-			}
-			runtime.Gosched()
-		}
-		if _, ok, err := f.hp.vendorStore.PendingTeamForSession(t.Context(), f.session.ID); err != nil || ok {
-			t.Fatalf("round %d: pending proposal survived its session = (%v, %v)", round, ok, err)
-		}
+		proposalID, proposeErr := raceProposeAndClose(t, f, round)
+		assertRaceOutcome(t, f, round, proposalID, proposeErr)
+		awaitNoPendingProposal(t, f, round)
 	}
 }
 
