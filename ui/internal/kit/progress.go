@@ -12,12 +12,10 @@ import (
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
-// Progress, ui-kit §6.5: a linear progress bar (radius.full) with determinate
-// and indeterminate modes. In determinate mode, the filled portion animates to
-// Value via Smooth and stops requesting frames once settled. In indeterminate
-// mode, a pill sweeps across the track at a steady rate while laid out; under
-// ReducedMotion (UK-04), motion stops and a static centered segment renders
-// instead.
+// Progress, ui-kit §6.5: a determinate linear progress bar (radius.full)
+// for a real total reported by the backend (unknown durations use Spinner).
+// The filled portion animates to Value via Smooth and stops requesting frames
+// once settled; under ReducedMotion (UK-04) it snaps immediately.
 //
 //	dims := progressState.Layout(env, gtx, kit.ProgressProps{
 //	    Value: 0.65,
@@ -37,16 +35,14 @@ const (
 
 // ProgressProps are the per-frame, caller-owned properties of Progress (UK-02).
 type ProgressProps struct {
-	Value         float32 // determinate fraction in [0, 1]
-	Indeterminate bool
-	Tone          ProgressTone
+	Value float32 // determinate fraction in [0, 1]
+	Tone  ProgressTone
 }
 
 // ProgressState is the long-lived state the caller keeps per Progress bar (UK-02).
 type ProgressState struct {
 	valueF motion.Follower
 	init   bool
-	phase  float64
 }
 
 // NewProgressState builds the state for one Progress bar.
@@ -76,7 +72,7 @@ func (s *ProgressState) Measure(gtx *layout.Context) layout.Dimensions {
 	return layout.Dimensions{Size: progressSize(gtx)}
 }
 
-// Layout draws the Progress bar and advances its animation when active (§6.5).
+// Layout draws the Progress bar and advances its Smooth transition (§6.5).
 func (s *ProgressState) Layout(env *Env, gtx *layout.Context, p ProgressProps) layout.Dimensions {
 	box := progressSize(gtx)
 	radius := box.Y / 2
@@ -86,11 +82,6 @@ func (s *ProgressState) Layout(env *Env, gtx *layout.Context, p ProgressProps) l
 	fill := ResolveProgressColor(env.Th, p.Tone)
 
 	defer clip.UniformRRect(track, radius).Push(gtx.Ops).Pop()
-	if p.Indeterminate {
-		s.drawIndeterminate(env, gtx, box, radius, fill)
-		return layout.Dimensions{Size: box}
-	}
-
 	target := unit01(p.Value)
 	if !s.init {
 		s.init = true
@@ -102,25 +93,6 @@ func (s *ProgressState) Layout(env *Env, gtx *layout.Context, p ProgressProps) l
 		fillRRect(gtx.Ops, image.Rect(0, 0, fillW, box.Y), radius, fill)
 	}
 	return layout.Dimensions{Size: box}
-}
-
-func (s *ProgressState) drawIndeterminate(env *Env, gtx *layout.Context, box image.Point, radius int, fill color.NRGBA) {
-	if box.X <= 0 {
-		return
-	}
-	const barFrac = 0.35
-	barW := max(int(math.Round(float64(box.X)*barFrac)), box.Y)
-	if env.ReducedMotion {
-		// Under ReducedMotion, stop requesting frames and show a static segment (§3.7, UK-04).
-		x0 := (box.X - barW) / 2
-		fillRRect(gtx.Ops, image.Rect(x0, 0, x0+barW, box.Y), radius, fill)
-		return
-	}
-	env.Keep()
-	s.phase = math.Mod(s.phase+env.DT().Seconds()/1.4, 1)
-	span := float64(box.X + barW)
-	x0 := int(math.Round(s.phase*span)) - barW
-	fillRRect(gtx.Ops, image.Rect(x0, 0, x0+barW, box.Y), radius, fill)
 }
 
 func progressSize(gtx *layout.Context) image.Point {

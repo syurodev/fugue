@@ -260,7 +260,17 @@ func (s *SplitPaneState) keyInput(gtx *layout.Context, p SplitPaneProps, firstPx
 }
 
 func (s *SplitPaneState) drawHandle(env *Env, gtx *layout.Context, orient Orientation, firstPx, total, cross int) {
+	hovered := s.hovered || env.previewHover(&s.tag)
+	dragging := s.dragged || env.previewPress(&s.tag)
 	thick := max(gtx.Dp(theme.Hairline), 1)
+	lineColor := env.Th.Chrome().Border
+	if dragging {
+		thick = max(gtx.Dp(2*theme.Hairline), 2)
+		lineColor = env.Th.Chrome().Action
+	} else if hovered {
+		thick = max(gtx.Dp(2*theme.Hairline), 2)
+		lineColor = env.Th.Chrome().FgMuted
+	}
 	pos := min(max(firstPx-thick/2, 0), max(total-thick, 0))
 	var bar image.Rectangle
 	if orient == Vertical {
@@ -268,7 +278,7 @@ func (s *SplitPaneState) drawHandle(env *Env, gtx *layout.Context, orient Orient
 	} else {
 		bar = image.Rect(pos, 0, pos+thick, cross)
 	}
-	paint.FillShape(gtx.Ops, env.Th.Chrome().BorderSubtle, clip.Rect(bar).Op())
+	paint.FillShape(gtx.Ops, lineColor, clip.Rect(bar).Op())
 
 	focused := env.FocusVisible(gtx, &s.tag) || env.previewFocus(&s.tag)
 	focusAlpha := followState(env, &s.focusF, focused)

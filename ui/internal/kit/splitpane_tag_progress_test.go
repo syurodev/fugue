@@ -351,32 +351,7 @@ func TestTagAndProgressUseStatusTokens(t *testing.T) {
 		t.Error("ProgressTone did not resolve to Theme.Status() tokens")
 	}
 
-	prog := NewProgressState()
-	// Indeterminate requests frames when ReducedMotion is false.
-	h.frameSize(t, 200, 20)
-	prog.Layout(h.env, &h.gtx, ProgressProps{Indeterminate: true, Tone: ProgressInfo})
-	h.env.FrameEnd(&h.gtx)
-	h.end()
-	if _, moving := h.env.Driver.Next(); !moving {
-		t.Fatal("indeterminate Progress should request frames when ReducedMotion is false")
-	}
-
-	// Indeterminate stops requesting frames and holds phase under ReducedMotion.
-	h.env.ReducedMotion = true
-	phaseBefore := prog.phase
-	h.frameSize(t, 200, 20)
-	prog.Layout(h.env, &h.gtx, ProgressProps{Indeterminate: true, Tone: ProgressInfo})
-	h.env.FrameEnd(&h.gtx)
-	h.end()
-	if _, moving := h.env.Driver.Next(); moving {
-		t.Fatal("indeterminate Progress must not request frames under ReducedMotion")
-	}
-	if prog.phase != phaseBefore {
-		t.Fatal("indeterminate Progress phase must stay frozen under ReducedMotion")
-	}
-
 	// Determinate Progress settles and stops requesting frames (UK-E11).
-	h.env.ReducedMotion = false
 	det := NewProgressState()
 	h.frameSize(t, 200, 20)
 	det.Layout(h.env, &h.gtx, ProgressProps{Value: 0.2, Tone: ProgressSuccess})
@@ -401,6 +376,106 @@ func TestTagAndProgressUseStatusTokens(t *testing.T) {
 	}
 	if !settled {
 		t.Fatal("determinate Progress did not settle and stop requesting frames")
+	}
+}
+
+// TestTagAppearsScaledAndCollapsesOnRemove covers UK-E11 and §6.4:
+// Tag appears with fade + scale from 0.9 (Snappy), removes with fade then
+// width collapse (Exit) before stopping frame requests, and snaps under
+// ReducedMotion.
+func TestTagAppearsScaledAndCollapsesOnRemove(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	tag := NewTagState()
+	props := TagProps{Variant: TagStatus, Status: theme.StatusInfo, Text: "Building"}
+
+	h.frameSize(t, 200, 40)
+	fullDims, err := tag.Measure(h.env, &h.gtx, props)
+	if err != nil {
+		t.Fatalf("measure tag: %v", err)
+	}
+
+	// Enter: starts at scale 0.9 and settles at rest.
+	tag.Enter()
+	_, scaleStart, wStart := tag.presenceVisuals(fullDims.Size.X)
+	if math.Abs(float64(scaleStart-0.9)) > 0.01 || wStart != fullDims.Size.X {
+		t.Fatalf("at Enter start: scale=%v width=%d, want 0.9 and %d", scaleStart, wStart, fullDims.Size.X)
+	}
+
+	entered := false
+	for range 120 {
+		h.frameSize(t, 200, 40)
+		if _, err := tag.Layout(h.env, &h.gtx, props); err != nil {
+			t.Fatalf("tag layout: %v", err)
+		}
+		h.env.FrameEnd(&h.gtx)
+		h.end()
+		if _, moving := h.env.Driver.Next(); !moving {
+			entered = true
+			break
+		}
+	}
+	if !entered || !tag.Visible() {
+		t.Fatalf("tag did not settle after Enter: entered=%v visible=%v", entered, tag.Visible())
+	}
+
+	// Remove: fades first while keeping width, then collapses width to 0.
+	tag.Remove()
+	sawShrinkingWidth := false
+	removed := false
+	for range 120 {
+		h.frameSize(t, 200, 40)
+		dims, err := tag.Layout(h.env, &h.gtx, props)
+		if err != nil {
+			t.Fatalf("tag layout on remove: %v", err)
+		}
+		if dims.Size.X > 0 && dims.Size.X < fullDims.Size.X {
+			sawShrinkingWidth = true
+		}
+		h.env.FrameEnd(&h.gtx)
+		h.end()
+		if _, moving := h.env.Driver.Next(); !moving {
+			removed = true
+			break
+		}
+	}
+	if !sawShrinkingWidth {
+		t.Fatal("expected Tag width to collapse during Exit")
+	}
+	if !removed || tag.Visible() {
+		t.Fatalf("expected Tag to finish removing and stop requesting frames: removed=%v visible=%v", removed, tag.Visible())
+	}
+
+	// ReducedMotion: Enter and Remove snap immediately without requesting frames.
+	h.env.ReducedMotion = true
+	tag.Enter()
+	h.frameSize(t, 200, 40)
+	dims, err := tag.Layout(h.env, &h.gtx, props)
+	if err != nil {
+		t.Fatalf("reduced-motion enter: %v", err)
+	}
+	h.env.FrameEnd(&h.gtx)
+	h.end()
+	if dims.Size != fullDims.Size {
+		t.Fatalf("reduced-motion enter size=%v, want %v", dims.Size, fullDims.Size)
+	}
+	if _, moving := h.env.Driver.Next(); moving {
+		t.Fatal("reduced-motion enter must not request frames")
+	}
+
+	tag.Remove()
+	h.frameSize(t, 200, 40)
+	dims, err = tag.Layout(h.env, &h.gtx, props)
+	if err != nil {
+		t.Fatalf("reduced-motion remove: %v", err)
+	}
+	h.env.FrameEnd(&h.gtx)
+	h.end()
+	if dims.Size != (image.Point{}) || tag.Visible() {
+		t.Fatalf("reduced-motion remove size=%v visible=%v, want 0x0 and false", dims.Size, tag.Visible())
+	}
+	if _, moving := h.env.Driver.Next(); moving {
+		t.Fatal("reduced-motion remove must not request frames")
 	}
 }
 

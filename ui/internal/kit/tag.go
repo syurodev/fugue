@@ -3,7 +3,9 @@ package kit
 import (
 	"errors"
 	"image"
+	"math"
 
+	"gioui.org/f32"
 	"gioui.org/layout"
 
 	"github.com/syurodev/fugue/ui/internal/motion"
@@ -14,7 +16,9 @@ import (
 // radius.full, flat tinted fill, no border). Variants are neutral (FillSoft),
 // status (Info, Success, Warning, Danger), hue (8 palette hues) and env
 // ("prod" danger, "stg" warning, "dev" neutral, unknown warning). Text always
-// carries the meaning, never color alone. Color transitions follow Snappy.
+// carries the meaning, never color alone. Presence animates in with fade plus
+// scale from 0.9 (Snappy), removes with fade then width collapse (Exit), and
+// color changes follow Snappy; ReducedMotion snaps immediately (UK-04).
 //
 //	dims, err := tagState.Layout(env, gtx, kit.TagProps{
 //	    Variant: kit.TagStatus,
@@ -44,16 +48,34 @@ type TagProps struct {
 
 // TagState is the long-lived state the caller keeps per Tag (UK-02).
 type TagState struct {
+	pres   motion.Presence
 	colorF motion.Follower
 	init   bool
 	from   theme.Tone
 	target theme.Tone
 }
 
-// NewTagState builds the state for one Tag.
+// NewTagState builds the state for one Tag, initially present at rest.
 func NewTagState() *TagState {
-	return &TagState{colorF: motion.NewFollower(motion.Snappy())}
+	p := motion.NewPresence(motion.Snappy(), motion.Exit())
+	p.Snap(true)
+	return &TagState{
+		pres:   p,
+		colorF: motion.NewFollower(motion.Snappy()),
+	}
 }
+
+// Enter starts the §6.4 appear animation (fade + scale from 0.9 on Snappy).
+func (s *TagState) Enter() {
+	s.pres.Snap(false)
+	s.pres.Show(true)
+}
+
+// Remove starts the §6.4 exit animation (fade out then width collapse on Exit).
+func (s *TagState) Remove() { s.pres.Show(false) }
+
+// Visible reports whether the Tag is present or still animating out.
+func (s *TagState) Visible() bool { return s.pres.Visible() }
 
 var errTagEmptyText = errors.New("kit.Tag: Text is required")
 
@@ -98,33 +120,65 @@ func (s *TagState) Measure(env *Env, gtx *layout.Context, p TagProps) (layout.Di
 	return layout.Dimensions{Size: tagSize(env, gtx, p.Icon, label)}, nil
 }
 
-// Layout draws the Tag and advances any Snappy tone transition (§6.4).
+// Layout draws the Tag and advances its presence and Snappy tone transitions (§6.4).
 func (s *TagState) Layout(env *Env, gtx *layout.Context, p TagProps) (layout.Dimensions, error) {
 	label := tagLabel(p)
 	if label == "" {
 		return layout.Dimensions{}, errTagEmptyText
 	}
+	if env.ReducedMotion {
+		s.pres.Snap(s.pres.Shown())
+	} else if s.pres.Advance(env.DT()) {
+		env.Keep()
+	}
+	if !s.pres.Visible() {
+		return layout.Dimensions{}, nil
+	}
+
 	box := tagSize(env, gtx, p.Icon, label)
 	tone := s.stepTone(env, ResolveTagTone(env.Th, p))
+	alpha, scale, outW := s.presenceVisuals(box.X)
+	if alpha <= 0 || outW <= 0 {
+		return layout.Dimensions{Size: image.Pt(outW, box.Y)}, nil
+	}
+
+	fill := fade(tone.Fill, alpha)
+	fg := fade(tone.Fg, alpha)
+	if scale < 1 {
+		center := f32.Pt(float32(box.X)/2, float32(box.Y)/2)
+		defer scaleAbout(gtx, center, scale).Pop()
+	}
 
 	radius := box.Y / 2
-	fillRRect(gtx.Ops, image.Rectangle{Max: box}, radius, tone.Fill)
+	fillRRect(gtx.Ops, image.Rectangle{Max: box}, radius, fill)
 
 	padX := gtx.Dp(theme.SpaceSM)
 	x := padX
 	if p.Icon != "" {
 		iconPx := gtx.Dp(theme.IconXS)
 		iconY := (box.Y - iconPx) / 2
-		if err := drawIconAt(env, gtx, image.Pt(x, iconY), p.Icon, theme.IconXS, tone.Fg); err != nil {
+		if err := drawIconAt(env, gtx, image.Pt(x, iconY), p.Icon, theme.IconXS, fg); err != nil {
 			return layout.Dimensions{}, err
 		}
 		x += iconPx + gtx.Dp(theme.SpaceXS)
 	}
 	textY := centerLabelY(env, gtx, theme.TypeSmall(), box.Y)
 	at(gtx, image.Pt(x, textY), func(g *layout.Context) {
-		drawText(env, g, theme.TypeSmall(), tone.Fg, label, true)
+		drawText(env, g, theme.TypeSmall(), fg, label, true)
 	})
-	return layout.Dimensions{Size: box}, nil
+	return layout.Dimensions{Size: image.Pt(outW, box.Y)}, nil
+}
+
+func (s *TagState) presenceVisuals(fullW int) (alpha, scale float32, outW int) {
+	prog := unit01(s.pres.Progress())
+	if s.pres.Shown() {
+		return prog, 0.9 + 0.1*prog, fullW
+	}
+	// Exit (§6.4): fade out during the first half (1 -> 0.5), then collapse width (0.5 -> 0).
+	alpha = unit01((prog - 0.5) * 2)
+	widthFrac := unit01(prog * 2)
+	outW = int(math.Round(float64(fullW) * float64(widthFrac)))
+	return alpha, 1, outW
 }
 
 func (s *TagState) stepTone(env *Env, target theme.Tone) theme.Tone {

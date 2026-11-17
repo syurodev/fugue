@@ -205,14 +205,16 @@ func progressAndDividerCells(want map[cell]bool) {
 	for i := range progressSpecs() {
 		want[cell{compProgress, i, 0, "determinate"}] = true
 	}
-	want[cell{compProgress, 0, 1, "indeterminate"}] = true
 	want[cell{compDivider, 0, 0, "horizontal"}] = true
 	want[cell{compDivider, 1, 0, "vertical"}] = true
 }
 
 func splitPaneCells(want map[cell]bool) {
-	want[cell{compSplitPane, 0, 0, "horizontal"}] = true
-	want[cell{compSplitPane, 1, 0, "vertical"}] = true
+	for oi := range 2 {
+		for _, st := range splitStateNames() {
+			want[cell{compSplitPane, oi, 0, st}] = true
+		}
+	}
 }
 
 // TestGalleryPagesCoverEveryVariantAndState covers UK-E03: every page

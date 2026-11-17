@@ -22,21 +22,21 @@ const (
 	numTagHues     = 8
 	numTagEnvs     = 4
 	numProgTones   = 5
+	numSplitStates = 4
 )
 
 type f1012Pages struct {
-	tags       []*kit.TagState
-	progDet    [numProgTones]*kit.ProgressState
-	progInd    *kit.ProgressState
-	outerSplit *kit.SplitPaneState
-	innerSplit *kit.SplitPaneState
-	outerRatio float32
-	innerRatio float32
+	tags         []*kit.TagState
+	progDet      [numProgTones]*kit.ProgressState
+	outerSplit   *kit.SplitPaneState
+	innerSplit   *kit.SplitPaneState
+	outerRatio   float32
+	innerRatio   float32
+	splitSamples [2][numSplitStates]*kit.SplitPaneState
 }
 
 func newF1012Pages() f1012Pages {
 	fp := f1012Pages{
-		progInd:    kit.NewProgressState(),
 		outerSplit: kit.NewSplitPaneState(),
 		innerSplit: kit.NewSplitPaneState(),
 		outerRatio: 0.40,
@@ -47,6 +47,11 @@ func newF1012Pages() f1012Pages {
 	}
 	for i := range fp.progDet {
 		fp.progDet[i] = kit.NewProgressState()
+	}
+	for o := range fp.splitSamples {
+		for s := range fp.splitSamples[o] {
+			fp.splitSamples[o][s] = kit.NewSplitPaneState()
+		}
 	}
 	return fp
 }
@@ -168,7 +173,7 @@ func progressSpecs() []struct {
 func (p *pages) layoutProgressAndDivider(gtx *layout.Context) {
 	p.base = p.origin
 	y := p.paragraph(gtx, gtx.Constraints.Max.X,
-		"Progress (§6.5) and Divider (§6.6): determinate Smooth bars, indeterminate sweep (static under ReducedMotion), and hairline rules in BorderSubtle.") +
+		"Progress (§6.5) and Divider (§6.6): determinate Smooth bars for real totals, and hairline rules in Border.") +
 		gtx.Dp(theme.SpaceXL)
 
 	c := p.env.Th.Chrome()
@@ -188,16 +193,7 @@ func (p *pages) layoutProgressAndDivider(gtx *layout.Context) {
 	}
 
 	y += gtx.Dp(theme.SpaceSM)
-	y += p.caption(gtx, image.Pt(0, y), "Progress — indeterminate (static under ReducedMotion)", c.FgMuted).Dy() + gtx.Dp(theme.SpaceXS)
-	at(gtx, image.Pt(0, y), func(g *layout.Context) {
-		cg := *g
-		cg.Constraints = layout.Exact(image.Pt(barW, gtx.Dp(theme.SpaceSM)))
-		dims := p.f1012.progInd.Layout(p.env, &cg, kit.ProgressProps{Indeterminate: true, Tone: kit.ProgressInfo})
-		y += dims.Size.Y + gtx.Dp(theme.SpaceXL)
-	})
-	p.cells[cell{compProgress, 0, 1, "indeterminate"}] = true
-
-	y += p.caption(gtx, image.Pt(0, y), "Divider — Horizontal and Vertical (BorderSubtle)", c.FgMuted).Dy() + gap
+	y += p.caption(gtx, image.Pt(0, y), "Divider — Horizontal and Vertical (Border)", c.FgMuted).Dy() + gap
 	at(gtx, image.Pt(0, y), func(g *layout.Context) {
 		cg := *g
 		cg.Constraints = layout.Exact(image.Pt(barW, gtx.Dp(theme.Hairline)))
@@ -215,20 +211,24 @@ func (p *pages) layoutProgressAndDivider(gtx *layout.Context) {
 	p.cells[cell{compDivider, 1, 0, "vertical"}] = true
 }
 
+func splitStateNames() [numSplitStates]string {
+	return [numSplitStates]string{stRest, stHover, "dragging", stFocus}
+}
+
 func (p *pages) layoutSplitPane(gtx *layout.Context) {
 	p.base = p.origin
 	y := p.paragraph(gtx, gtx.Constraints.Max.X,
-		"SplitPane (§6.27, desktop-app §5.3): live nested Horizontal + Vertical splits. Drag handles, double-click to reset, or Tab and use Arrow / Shift+Arrow / Home / End.") +
+		"SplitPane (§6.27, desktop-app §5.3): live nested Horizontal + Vertical splits and handle states (rest, hover, dragging, keyboard focus).") +
 		gtx.Dp(theme.SpaceXL)
 
 	c := p.env.Th.Chrome()
-	status := fmt.Sprintf("Outer H: %d%% | Inner V: %d%%",
+	status := fmt.Sprintf("Live nested — Outer H: %d%% | Inner V: %d%%",
 		int(math.Round(float64(p.f1012.outerRatio)*100)),
 		int(math.Round(float64(p.f1012.innerRatio)*100)))
 	y += p.caption(gtx, image.Pt(0, y), status, c.FgMuted).Dy() + gtx.Dp(theme.SpaceMD)
 
 	boxW := min(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(520)))
-	boxH := gtx.Dp(unit.Dp(260))
+	boxH := gtx.Dp(unit.Dp(200))
 
 	baseTop := p.origin.Add(image.Pt(0, y))
 	at(gtx, image.Pt(0, y), func(g *layout.Context) {
@@ -273,8 +273,55 @@ func (p *pages) layoutSplitPane(gtx *layout.Context) {
 			p.f1012.outerRatio = r
 		}
 	})
-	p.cells[cell{compSplitPane, 0, 0, "horizontal"}] = true
-	p.cells[cell{compSplitPane, 1, 0, "vertical"}] = true
+
+	y += boxH + gtx.Dp(theme.SpaceXL)
+	orients := []struct {
+		name   string
+		orient kit.Orientation
+	}{
+		{"Horizontal", kit.Horizontal},
+		{"Vertical", kit.Vertical},
+	}
+	blocks := make([]block, 0, len(orients)*numSplitStates)
+	for oi, o := range orients {
+		for si, st := range splitStateNames() {
+			blocks = append(blocks, func(g *layout.Context, dry bool) image.Point {
+				return p.splitStateSpecimen(g, oi, o.name, o.orient, si, st, dry)
+			})
+		}
+	}
+	p.flow(gtx, y, blocks)
+}
+
+func (p *pages) splitStateSpecimen(gtx *layout.Context, oi int, orientName string, orient kit.Orientation, si int, stateName string, dry bool) image.Point {
+	c := p.env.Th.Chrome()
+	title := orientName + " · " + stateName
+	boxW := max(gtx.Dp(unit.Dp(120)), p.captionWidth(gtx, title))
+	boxH := gtx.Dp(unit.Dp(64))
+	capH := gtx.Sp(theme.TypeSmall().Line) + gtx.Dp(theme.SpaceXS)
+	if dry {
+		return image.Pt(boxW, capH+boxH)
+	}
+	p.caption(gtx, image.Point{}, title, c.FgMuted)
+	sp := p.f1012.splitSamples[oi][si]
+	saved := p.env.Preview
+	switch stateName {
+	case stHover:
+		p.env.Preview = kit.Preview{Hover: sp.Tag()}
+	case "dragging":
+		p.env.Preview = kit.Preview{Press: sp.Tag()}
+	case stFocus:
+		p.env.Preview = kit.Preview{Focus: sp.Tag()}
+	}
+	at(gtx, image.Pt(0, capH), func(g *layout.Context) {
+		cg := *g
+		cg.Constraints = layout.Exact(image.Pt(boxW, boxH))
+		paint.FillShape(cg.Ops, c.SurfaceTinted, clip.Rect{Max: image.Pt(boxW, boxH)}.Op())
+		sp.Layout(p.env, &cg, kit.SplitPaneProps{Orientation: orient, Ratio: 0.5}, nil, nil)
+	})
+	p.env.Preview = saved
+	p.cells[cell{compSplitPane, oi, 0, stateName}] = true
+	return image.Pt(boxW, capH+boxH)
 }
 
 func (p *pages) splitPaneBox(gtx *layout.Context, title string, bg color.NRGBA) layout.Dimensions {

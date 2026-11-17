@@ -27,7 +27,7 @@ type DividerProps struct {
 	Orientation Orientation
 }
 
-// Divider draws a stroke.hairline rule in BorderSubtle across the available
+// Divider draws a stroke.hairline rule in Border across the available
 // width (Horizontal) or height (Vertical) (ui-kit §6.6).
 //
 //	kit.Divider(env, gtx, kit.DividerProps{Orientation: kit.Horizontal})
@@ -47,6 +47,6 @@ func Divider(env *Env, gtx *layout.Context, p DividerProps) layout.Dimensions {
 		}
 		size = gtx.Constraints.Constrain(image.Pt(w, thick))
 	}
-	paint.FillShape(gtx.Ops, env.Th.Chrome().BorderSubtle, clip.Rect{Max: size}.Op())
+	paint.FillShape(gtx.Ops, env.Th.Chrome().Border, clip.Rect{Max: size}.Op())
 	return layout.Dimensions{Size: size}
 }
