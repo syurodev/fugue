@@ -5,77 +5,100 @@ import (
 
 	"gioui.org/io/key"
 	"gioui.org/layout"
+	"gioui.org/op"
 
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
-// ListState coordinates selection, keyboard navigation (Up/Down/Enter/Menu),
-// and the Smooth sliding selection pill across a list of ListRows.
-type ListState struct {
-	selected int
-	pill     slidingPill
-	rows     []*ListRowState
-}
-
-// NewListState builds a ListState with no row selected (-1).
-func NewListState() *ListState {
-	return &ListState{selected: -1, pill: newSlidingPill()}
-}
-
-// Selected returns the selected row index, or -1 if none.
-func (l *ListState) Selected() int { return l.selected }
-
-// SetSelected updates the selected row index.
-func (l *ListState) SetSelected(idx int) { l.selected = idx }
-
-// Row returns the ListRowState at index i, growing as needed.
-func (l *ListState) Row(i int) *ListRowState {
-	for len(l.rows) <= i {
-		l.rows = append(l.rows, NewListRowState())
-	}
-	return l.rows[i]
-}
-
-// ListItem pairs a ListRowProps with its key for ListState.Layout.
+// ListItem pairs a stable object Key with its frame ListRowProps (§6.20, §6.26).
 type ListItem struct {
+	Key   string
 	Props ListRowProps
 }
 
 // ListEvents reports list-level selection or activation in the frame.
 type ListEvents struct {
-	Selected      int
-	Opened        int
-	ActionIndex   int
+	Selected      string
+	Opened        string
+	ActionKey     string
 	ActionID      string
 	ContextChosen string
 	Changed       bool
 }
 
-// Layout lays out items vertically, sliding the shared selected pill on Smooth
-// and handling Up/Down keyboard navigation.
+// ListState coordinates selection, keyboard navigation (Up/Down/Enter/Menu),
+// keyed row states, and the Smooth sliding selection pill across ListRows.
+type ListState struct {
+	selected string
+	pill     slidingPill
+	rows     map[string]*ListRowState
+}
+
+// NewListState builds a ListState with no row selected.
+func NewListState() *ListState {
+	return &ListState{pill: newSlidingPill(), rows: map[string]*ListRowState{}}
+}
+
+// Selected returns the selected item key, or "" if none.
+func (l *ListState) Selected() string { return l.selected }
+
+// SetSelected updates the selected item key.
+func (l *ListState) SetSelected(itemKey string) { l.selected = itemKey }
+
+// Row returns the ListRowState for itemKey, creating it on first use.
+func (l *ListState) Row(itemKey string) *ListRowState {
+	if l.rows == nil {
+		l.rows = map[string]*ListRowState{}
+	}
+	rs, ok := l.rows[itemKey]
+	if !ok {
+		rs = NewListRowState()
+		l.rows[itemKey] = rs
+	}
+	return rs
+}
+
+// Enter starts the insert animation on the keyed row.
+func (l *ListState) Enter(itemKey string) { l.Row(itemKey).Enter() }
+
+// Remove starts the removal animation on the keyed row.
+func (l *ListState) Remove(itemKey string) { l.Row(itemKey).Remove() }
+
+// Layout lays out items vertically, records each key's real y and height,
+// slides the shared selected pill to the selected key's measured rect on Smooth,
+// and handles Up/Down keyboard navigation.
 func (l *ListState) Layout(env *Env, gtx *layout.Context, items []ListItem) (layout.Dimensions, ListEvents) {
-	ev := ListEvents{Selected: l.selected, Opened: -1, ActionIndex: -1}
+	ev := ListEvents{Selected: l.selected}
 	w := gtx.Constraints.Max.X
-	rowH := gtx.Dp(theme.Row)
 
 	l.pollArrows(gtx, items, &ev)
 
-	var target image.Rectangle
-	hasSel := l.selected >= 0 && l.selected < len(items) && !items[l.selected].Props.Disabled
-	if hasSel {
-		y := l.selected * rowH
-		target = pillRect(gtx, image.Rect(0, y, w, y+rowH))
-	}
-	l.pill.step(env, target, hasSel)
-	l.pill.draw(gtx, gtx.Dp(theme.RadiusMD), env.Th.Chrome().SelectedWash)
+	m := op.Record(gtx.Ops)
+	y, selRect, hasSel := l.layoutRows(env, gtx, items, &ev)
+	call := m.Stop()
 
-	y := l.layoutRows(env, gtx, items, &ev)
+	l.pruneGone(items)
+	l.pill.step(env, selRect, hasSel)
+	l.pill.draw(gtx, gtx.Dp(theme.RadiusMD), env.Th.Chrome().SelectedWash)
+	call.Add(gtx.Ops)
 	return layout.Dimensions{Size: image.Pt(w, y)}, ev
+}
+
+func (l *ListState) pruneGone(items []ListItem) {
+	live := make(map[string]bool, len(items))
+	for i := range items {
+		live[items[i].Key] = true
+	}
+	for k, rs := range l.rows {
+		if !live[k] && (!rs.removing || rs.Removed()) {
+			delete(l.rows, k)
+		}
+	}
 }
 
 func (l *ListState) pollArrows(gtx *layout.Context, items []ListItem, ev *ListEvents) {
 	for i := range items {
-		rs := l.Row(i)
+		rs := l.Row(items[i].Key)
 		if !gtx.Focused(&rs.tag) {
 			continue
 		}
@@ -101,44 +124,48 @@ func (l *ListState) stepArrowKeys(gtx *layout.Context, items []ListItem, idx int
 		if k.Name == key.NameUpArrow {
 			dir = -1
 		}
-		if next := l.nextEnabled(items, idx, dir); next >= 0 && next != l.selected {
-			l.selected = next
-			ev.Selected = next
+		if next := l.nextEnabled(items, idx, dir); next >= 0 && items[next].Key != l.selected {
+			l.selected = items[next].Key
+			ev.Selected = l.selected
 			ev.Changed = true
-			gtx.Execute(key.FocusCmd{Tag: &l.Row(next).tag})
+			gtx.Execute(key.FocusCmd{Tag: &l.Row(l.selected).tag})
 		}
 	}
 }
 
-func (l *ListState) layoutRows(env *Env, gtx *layout.Context, items []ListItem, ev *ListEvents) int {
-	y := 0
+func (l *ListState) layoutRows(env *Env, gtx *layout.Context, items []ListItem, ev *ListEvents) (y int, selRect image.Rectangle, hasSel bool) {
 	for i := range items {
-		rs := l.Row(i)
-		p := items[i].Props
-		p.Selected = i == l.selected
+		item := items[i]
+		rs := l.Row(item.Key)
+		p := item.Props
+		p.Selected = item.Key == l.selected
 		var dims layout.Dimensions
 		var rev ListRowEvents
 		at(gtx, image.Pt(0, y), func(gtx *layout.Context) {
 			dims, rev = rs.layoutRow(env, gtx, &p, true)
 		})
-		l.foldRowEvents(env, i, rev, ev)
+		if p.Selected && !p.Disabled && dims.Size.Y > 0 {
+			selRect = pillRect(gtx, image.Rect(0, y, dims.Size.X, y+dims.Size.Y))
+			hasSel = true
+		}
+		l.foldRowEvents(env, item.Key, rev, ev)
 		y += dims.Size.Y
 	}
-	return y
+	return y, selRect, hasSel
 }
 
-func (l *ListState) foldRowEvents(env *Env, i int, rev ListRowEvents, ev *ListEvents) {
-	if rev.Clicked && i != l.selected {
-		l.selected = i
-		ev.Selected = i
+func (l *ListState) foldRowEvents(env *Env, itemKey string, rev ListRowEvents, ev *ListEvents) {
+	if rev.Clicked && itemKey != l.selected {
+		l.selected = itemKey
+		ev.Selected = itemKey
 		ev.Changed = true
 		env.Keep()
 	}
 	if rev.Opened {
-		ev.Opened = i
+		ev.Opened = itemKey
 	}
 	if rev.Action != "" {
-		ev.ActionIndex = i
+		ev.ActionKey = itemKey
 		ev.ActionID = rev.Action
 	}
 	if rev.ContextChosen != "" {

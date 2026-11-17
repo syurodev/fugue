@@ -18,16 +18,20 @@ const (
 )
 
 type scrollAreaPage struct {
-	vert   *kit.ScrollAreaState
-	horiz  *kit.ScrollAreaState
-	stream *kit.ScrollAreaState
+	vert    *kit.ScrollAreaState
+	vertBar *kit.ScrollAreaState
+	horiz   *kit.ScrollAreaState
+	horzBar *kit.ScrollAreaState
+	stream  *kit.ScrollAreaState
 }
 
 func newScrollAreaPage() scrollAreaPage {
 	return scrollAreaPage{
-		vert:   kit.NewScrollAreaState(),
-		horiz:  kit.NewScrollAreaState(),
-		stream: kit.NewScrollAreaState(),
+		vert:    kit.NewScrollAreaState(),
+		vertBar: kit.NewScrollAreaState(),
+		horiz:   kit.NewScrollAreaState(),
+		horzBar: kit.NewScrollAreaState(),
+		stream:  kit.NewScrollAreaState(),
 	}
 }
 
@@ -36,27 +40,34 @@ func (p *pages) layoutScrollAreas(gtx *layout.Context) {
 	y := p.paragraph(gtx, gtx.Constraints.Max.X, "ScrollArea §6.29: vertical or horizontal non-virtualized scroll, thin radius.full bar fading in on scroll/hover and out after ~1 s idle, no nested same-axis scroll, non-yanking streaming.") + gtx.Dp(theme.SpaceXL)
 	p.flow(gtx, y, []block{
 		func(gtx *layout.Context, dry bool) image.Point {
-			return p.scrollSpecBlock(gtx, dry, saVertical, layout.Vertical, p.scroll.vert, false)
+			return p.scrollSpecBlock(gtx, dry, saVertical, 0, stRest, layout.Vertical, p.scroll.vert, false)
 		},
 		func(gtx *layout.Context, dry bool) image.Point {
-			return p.scrollSpecBlock(gtx, dry, saHorizontal, layout.Horizontal, p.scroll.horiz, false)
+			return p.scrollSpecBlock(gtx, dry, saVertical+" bar visible", 0, stHover, layout.Vertical, p.scroll.vertBar, false)
 		},
 		func(gtx *layout.Context, dry bool) image.Point {
-			return p.scrollSpecBlock(gtx, dry, saStream, layout.Vertical, p.scroll.stream, true)
+			return p.scrollSpecBlock(gtx, dry, saHorizontal, 1, stRest, layout.Horizontal, p.scroll.horiz, false)
+		},
+		func(gtx *layout.Context, dry bool) image.Point {
+			return p.scrollSpecBlock(gtx, dry, saHorizontal+" bar visible", 1, stHover, layout.Horizontal, p.scroll.horzBar, false)
+		},
+		func(gtx *layout.Context, dry bool) image.Point {
+			return p.scrollSpecBlock(gtx, dry, saStream, 2, stRest, layout.Vertical, p.scroll.stream, true)
 		},
 	})
 }
 
-func (p *pages) scrollSpecBlock(gtx *layout.Context, dry bool, name string, axis layout.Axis, st *kit.ScrollAreaState, follow bool) image.Point {
+func (p *pages) scrollSpecBlock(gtx *layout.Context, dry bool, title string, variant int, state string, axis layout.Axis, st *kit.ScrollAreaState, follow bool) image.Point {
 	c := p.env.Th.Chrome()
 	line := gtx.Sp(theme.TypeSmall().Line)
 	gap := gtx.Dp(theme.SpaceMD)
 	w, h := gtx.Dp(unit.Dp(260)), gtx.Dp(unit.Dp(140))
 	y := line + gap
 	if !dry {
-		p.caption(gtx, image.Point{}, name, c.FgMuted)
+		p.caption(gtx, image.Point{}, title, c.FgMuted)
 		cd := cellDraw{
-			key: cell{compScrollArea, 0, 0, name},
+			key: cell{compScrollArea, variant, 0, state},
+			tag: st.Tag(),
 			box: image.Pt(w, h),
 			lay: func(gtx *layout.Context) {
 				g := *gtx

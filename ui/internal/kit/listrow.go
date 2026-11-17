@@ -166,8 +166,8 @@ func (s *ListRowState) layoutRow(env *Env, gtx *layout.Context, p *ListRowProps,
 	focA := followSmooth(env, &s.focusF, boolFloat(foc))
 	actA := followSmooth(env, &s.actionF, boolFloat(hov || foc))
 
-	defer clip.Rect(rowBox).Push(gtx.Ops).Pop()
 	if pres < 1 {
+		defer clip.Rect(rowBox).Push(gtx.Ops).Pop()
 		defer op.Offset(image.Pt(0, (h-fullH)/2)).Push(gtx.Ops).Pop()
 	}
 
@@ -197,6 +197,9 @@ func rowHeight(fullH int, pres float32) int {
 
 func (s *ListRowState) paintRowChrome(env *Env, gtx *layout.Context, pill image.Rectangle, radius int, p *ListRowProps, suppressSelectedFill bool, pres, hovA float32) {
 	c := env.Th.Chrome()
+	if p.Dragging {
+		DrawFloatShadow(gtx, pill, radius)
+	}
 	if !suppressSelectedFill && p.Selected {
 		fillLayer(gtx, pill, radius, c.SelectedWash, pres)
 	}
@@ -204,7 +207,6 @@ func (s *ListRowState) paintRowChrome(env *Env, gtx *layout.Context, pill image.
 		fillLayer(gtx, pill, radius, c.HoverWash, hovA*pres)
 	}
 	if p.Dragging {
-		fillLayer(gtx, pill, radius, c.PressedWash, pres)
 		strokeRRect(gtx.Ops, pill, radius, float32(gtx.Dp(theme.Hairline)), fade(c.BorderSubtle, pres))
 	}
 }

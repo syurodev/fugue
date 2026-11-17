@@ -183,9 +183,11 @@ func sectionHeaderCells(want map[cell]bool) {
 }
 
 func scrollAreaCells(want map[cell]bool) {
-	for _, st := range []string{saVertical, saHorizontal, saStream} {
-		want[cell{compScrollArea, 0, 0, st}] = true
-	}
+	want[cell{compScrollArea, 0, 0, stRest}] = true
+	want[cell{compScrollArea, 0, 0, stHover}] = true
+	want[cell{compScrollArea, 1, 0, stRest}] = true
+	want[cell{compScrollArea, 1, 0, stHover}] = true
+	want[cell{compScrollArea, 2, 0, stRest}] = true
 }
 
 // TestGalleryPagesCoverEveryVariantAndState covers UK-E03: every page

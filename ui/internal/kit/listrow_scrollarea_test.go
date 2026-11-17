@@ -32,11 +32,11 @@ func TestListRowSelectionSlidesAndStaysVisibleUnderHover(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	l := NewListState()
-	l.SetSelected(0)
+	l.SetSelected("a")
 	items := []ListItem{
-		{Props: ListRowProps{Label: "First", Secondary: "1st"}},
-		{Props: ListRowProps{Label: "Second", Secondary: "2nd"}},
-		{Props: ListRowProps{Label: "Third", Secondary: "3rd"}},
+		{Key: "a", Props: ListRowProps{Label: "First", Secondary: "1st"}},
+		{Key: "b", Props: ListRowProps{Label: "Second", Secondary: "2nd"}},
+		{Key: "c", Props: ListRowProps{Label: "Third", Secondary: "3rd"}},
 	}
 	layListFrames(t, h, l, items, 240, 140, 40)
 	rowH := h.gtx.Dp(theme.Row)
@@ -44,14 +44,14 @@ func TestListRowSelectionSlidesAndStaysVisibleUnderHover(t *testing.T) {
 		t.Fatalf("settled pill = alpha %v y %d, want 1, 0", l.pill.alpha, l.pill.rect.Min.Y)
 	}
 
-	// Hover row 1 while row 0 is selected: selection stays visible, row 1 hovers.
+	// Hover row "b" while row "a" is selected: selection stays visible, row "b" hovers.
 	h.router.Queue(pointer.Event{Kind: pointer.Move, Position: f32.Pt(100, float32(rowH)+10)})
 	layListFrames(t, h, l, items, 240, 140, 30)
 	if l.pill.alpha != 1 || l.pill.rect.Min.Y != 0 {
 		t.Fatalf("under hover, selected pill = alpha %v y %d, want 1, 0", l.pill.alpha, l.pill.rect.Min.Y)
 	}
-	if l.Row(1).hoverF.Value() < 0.9 {
-		t.Fatalf("row 1 hoverF = %v, want settled near 1", l.Row(1).hoverF.Value())
+	if l.Row("b").hoverF.Value() < 0.9 {
+		t.Fatalf("row b hoverF = %v, want settled near 1", l.Row("b").hoverF.Value())
 	}
 
 	// Move selection to row 2: pill slides on Smooth, then retarget back to row 0 (UK-E11).
@@ -71,7 +71,7 @@ func TestListRowSelectionSlidesAndStaysVisibleUnderHover(t *testing.T) {
 	h.click(100, float32(2*rowH)+10)
 	layListFrames(t, h, l, items, 240, 140, 3)
 	if l.pill.rect.Min.Y != 2*rowH {
-		t.Fatalf("ReducedMotion pill y = %d (selected=%d), want %d", l.pill.rect.Min.Y, l.Selected(), 2*rowH)
+		t.Fatalf("ReducedMotion pill y = %d (selected=%q), want %d", l.pill.rect.Min.Y, l.Selected(), 2*rowH)
 	}
 }
 
@@ -79,16 +79,16 @@ func TestListRowActionsShowOnHoverAndOnKeyboardFocus(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	l := NewListState()
-	l.SetSelected(0)
+	l.SetSelected("a")
 	const actID = "clone"
 	const actLabel = "Clone"
 	items := []ListItem{
-		{Props: ListRowProps{
+		{Key: "a", Props: ListRowProps{
 			Label:       "Alpha",
 			Actions:     []ListAction{{ID: actID, Icon: IconCopy, Label: actLabel}},
 			ContextMenu: []MenuItem{{ID: actID, Label: actLabel}},
 		}},
-		{Props: ListRowProps{
+		{Key: "b", Props: ListRowProps{
 			Label:       "Beta",
 			Actions:     []ListAction{{ID: actID, Icon: IconCopy, Label: actLabel}},
 			ContextMenu: []MenuItem{{ID: actID, Label: actLabel}},
@@ -97,19 +97,19 @@ func TestListRowActionsShowOnHoverAndOnKeyboardFocus(t *testing.T) {
 	layListFrames(t, h, l, items, 260, 120, 1)
 
 	// At rest, action alpha is 0 and clicking the right action slot does not fire.
-	if l.Row(0).actionF.Value() != 0 {
-		t.Fatalf("resting actionF = %v, want 0", l.Row(0).actionF.Value())
+	if l.Row("a").actionF.Value() != 0 {
+		t.Fatalf("resting actionF = %v, want 0", l.Row("a").actionF.Value())
 	}
 	h.click(235, 14)
 	if ev := layListFrames(t, h, l, items, 260, 120, 2); ev.ActionID != "" {
 		t.Fatalf("resting click fired action %q", ev.ActionID)
 	}
 
-	// Hover row 0: action fades in and clicking it fires ev.ActionID.
+	// Hover row "a": action fades in and clicking it fires ev.ActionID.
 	h.router.Queue(pointer.Event{Kind: pointer.Move, Position: f32.Pt(100, 14)})
 	layListFrames(t, h, l, items, 260, 120, 30)
-	if l.Row(0).actionF.Value() < 0.99 {
-		t.Fatalf("hovered actionF = %v, want ~1", l.Row(0).actionF.Value())
+	if l.Row("a").actionF.Value() < 0.99 {
+		t.Fatalf("hovered actionF = %v, want ~1", l.Row("a").actionF.Value())
 	}
 	h.click(235, 14)
 	ev := layListFrames(t, h, l, items, 260, 120, 1)
@@ -129,24 +129,67 @@ func verifyListRowKeyboard(t *testing.T, h *harness, l *ListState, items []ListI
 	h.env.KeyboardOnly = true
 	h.frameSize(t, 260, 120)
 	l.Layout(h.env, &h.gtx, items)
-	h.gtx.Execute(key.FocusCmd{Tag: l.Row(0).Tag()})
+	h.gtx.Execute(key.FocusCmd{Tag: l.Row("a").Tag()})
 	h.end()
 	layListFrames(t, h, l, items, 260, 120, 30)
-	if l.Row(0).actionF.Value() < 0.99 {
-		t.Fatalf("focused actionF = %v, want ~1", l.Row(0).actionF.Value())
+	if l.Row("a").actionF.Value() < 0.99 {
+		t.Fatalf("focused actionF = %v, want ~1", l.Row("a").actionF.Value())
 	}
 	h.tap(key.NameDownArrow, 0)
-	if ev := layListFrames(t, h, l, items, 260, 120, 1); !ev.Changed || ev.Selected != 1 {
-		t.Fatalf("Down arrow selected = %d (changed=%v), want 1", ev.Selected, ev.Changed)
+	if ev := layListFrames(t, h, l, items, 260, 120, 1); !ev.Changed || ev.Selected != "b" {
+		t.Fatalf("Down arrow selected = %q (changed=%v), want b", ev.Selected, ev.Changed)
 	}
 	h.tap(key.NameReturn, 0)
-	if ev := layListFrames(t, h, l, items, 260, 120, 1); ev.Opened != 1 {
-		t.Fatalf("Enter opened = %d, want 1", ev.Opened)
+	if ev := layListFrames(t, h, l, items, 260, 120, 1); ev.Opened != "b" {
+		t.Fatalf("Enter opened = %q, want b", ev.Opened)
 	}
 	h.tap(key.NameF10, key.ModShift)
 	layListFrames(t, h, l, items, 260, 120, 1)
-	if !l.Row(1).menu.IsOpen() {
+	if !l.Row("b").menu.IsOpen() {
 		t.Fatal("Shift+F10 did not open row context menu")
+	}
+}
+
+func TestListSelectionAndRowStateFollowTheKeyOnInsertAbove(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	l := NewListState()
+	l.SetSelected("b")
+	items := []ListItem{
+		{Key: "a", Props: ListRowProps{Label: "A"}},
+		{Key: "b", Props: ListRowProps{Label: "B"}},
+		{Key: "c", Props: ListRowProps{Label: "C"}},
+	}
+	layListFrames(t, h, l, items, 240, 160, 40)
+	rowH := h.gtx.Dp(theme.Row)
+	if l.Selected() != "b" || l.pill.rect.Min.Y != rowH {
+		t.Fatalf("before insert: selected=%q pill y=%d, want b, %d", l.Selected(), l.pill.rect.Min.Y, rowH)
+	}
+
+	// Insert "x" above "b": "b" stays selected, only "x" plays enter motion, pill ends on "b".
+	withX := append([]ListItem{{Key: "x", Props: ListRowProps{Label: "X"}}}, items...)
+	l.Enter("x")
+	layListFrames(t, h, l, withX, 240, 160, 2)
+	if l.Selected() != "b" {
+		t.Fatalf("after insert: selected=%q, want b", l.Selected())
+	}
+	if l.Row("x").presence.Progress() >= 1 || l.Row("b").presence.Progress() != 1 {
+		t.Fatalf("presence x=%v b=%v, want x<1 and b=1", l.Row("x").presence.Progress(), l.Row("b").presence.Progress())
+	}
+	layListFrames(t, h, l, withX, 240, 160, 60)
+	if l.pill.rect.Min.Y != 2*rowH {
+		t.Fatalf("settled pill after insert: y=%d, want %d", l.pill.rect.Min.Y, 2*rowH)
+	}
+
+	// Remove "a" above "b": pill slides smoothly with the collapse to rowH without jumping.
+	l.Remove("a")
+	layListFrames(t, h, l, withX, 240, 160, 4)
+	if mid := l.pill.rect.Min.Y; mid <= rowH || mid >= 2*rowH {
+		t.Fatalf("during collapse: pill y=%d, want strictly between %d and %d", mid, rowH, 2*rowH)
+	}
+	layListFrames(t, h, l, withX, 240, 160, 60)
+	if l.pill.rect.Min.Y != rowH {
+		t.Fatalf("settled pill after collapse: y=%d, want %d", l.pill.rect.Min.Y, rowH)
 	}
 }
 

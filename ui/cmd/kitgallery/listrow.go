@@ -31,7 +31,7 @@ func newListRowPage() listRowPage {
 		specs[i] = kit.NewListRowState()
 	}
 	live := kit.NewListState()
-	live.SetSelected(0)
+	live.SetSelected("main")
 	return listRowPage{specs: specs, live: live}
 }
 
@@ -93,9 +93,9 @@ func (p *pages) listRowLiveBlock(gtx *layout.Context, dry bool) image.Point {
 	rowW := gtx.Dp(unit.Dp(360))
 	rowH := gtx.Dp(theme.Row)
 	items := []kit.ListItem{
-		{Props: kit.ListRowProps{Icon: kit.IconCheck, Label: "Main workspace", Secondary: "fugue-harness", Trailing: "now", StateLabel: "ok", StateTone: kit.ToneSuccess, Actions: []kit.ListAction{{ID: "restart", Icon: kit.IconRestart, Label: "Restart"}}, ContextMenu: []kit.MenuItem{{ID: "inspect", Label: "Inspect"}, {ID: "restart", Label: "Restart"}}}},
-		{Props: kit.ListRowProps{Icon: kit.IconSearch, Label: "Vendor session", Secondary: "codex", Trailing: "4m", StateLabel: "needs you", StateTone: kit.ToneWarning, Draggable: true}},
-		{Props: kit.ListRowProps{Icon: kit.IconHelp, Label: "Failed job", Secondary: "build", Trailing: "12m", StateLabel: "failed", StateTone: kit.ToneDanger}},
+		{Key: "main", Props: kit.ListRowProps{Icon: kit.IconCheck, Label: "Main workspace", Secondary: "fugue-harness", Trailing: "now", StateLabel: "ok", StateTone: kit.ToneSuccess, Actions: []kit.ListAction{{ID: "restart", Icon: kit.IconRestart, Label: "Restart"}}, ContextMenu: []kit.MenuItem{{ID: "inspect", Label: "Inspect"}, {ID: "restart", Label: "Restart"}}}},
+		{Key: "vendor", Props: kit.ListRowProps{Icon: kit.IconSearch, Label: "Vendor session", Secondary: "codex", Trailing: "4m", StateLabel: "needs you", StateTone: kit.ToneWarning, Draggable: true}},
+		{Key: "failed", Props: kit.ListRowProps{Icon: kit.IconHelp, Label: "Failed job", Secondary: "build", Trailing: "12m", StateLabel: "failed", StateTone: kit.ToneDanger}},
 	}
 	totalH := len(items) * rowH
 	y := line + gap
