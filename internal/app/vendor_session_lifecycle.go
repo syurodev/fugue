@@ -10,7 +10,38 @@ import (
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
+// awaitSessionEndWork holds the actor's final close writes until the
+// session-end work (the pending team proposal's cancel) has settled. The
+// store refuses transcript writes once the session row is closed, so that
+// work's item flip must land first; the actor keeps serving commands while it
+// waits, because the flip arrives as one.
+func (a *vendorSessionActor) awaitSessionEndWork(ctx context.Context) error {
+	wait := a.manager.deps.SessionEndSettled
+	if wait == nil {
+		return nil
+	}
+	settled := wait(a.info.ID)
+	if settled == nil {
+		return nil
+	}
+	for {
+		select {
+		case <-settled:
+			return nil
+		case req := <-a.commands:
+			if err := a.handleRequest(ctx, req); err != nil {
+				return err
+			}
+		case <-ctx.Done():
+			return nil
+		}
+	}
+}
+
 func (a *vendorSessionActor) persistClose(ctx context.Context, reason vendor.CloseReason, proof process.StopProof, closeErr error) error {
+	if err := a.awaitSessionEndWork(ctx); err != nil {
+		return err
+	}
 	status := string(proof.Status)
 	if status != string(process.StopProofProved) || closeErr != nil {
 		status = string(process.StopProofUnknown)
@@ -50,6 +81,9 @@ func (a *vendorSessionActor) persistClose(ctx context.Context, reason vendor.Clo
 }
 
 func (a *vendorSessionActor) processExited(ctx context.Context) error {
+	if err := a.awaitSessionEndWork(ctx); err != nil {
+		return err
+	}
 	next := vendor.State{Kind: vendor.StateClosed}
 	if a.state.Kind != vendor.StateDetached {
 		var transitionErr error

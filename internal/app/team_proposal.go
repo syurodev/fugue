@@ -23,6 +23,9 @@ const teamProposeToolName = "fugue_team_propose"
 const (
 	teamPendingDecision  = "pending"
 	decisionRejectedItem = "rejected"
+	// sessionEndFlipAttempts bounds the retries of the session-end item
+	// flip on a transient unavailable.
+	sessionEndFlipAttempts = 3
 )
 
 // TeamProposalService receives team proposals from sessions (F11.2a). It
@@ -51,6 +54,70 @@ type TeamProposalService struct {
 	// goroutines and no package state: the map lives on this service and
 	// each session keeps one small mutex for its lifetime.
 	locks sessionLocks
+	// settling tracks the session-end cancels in flight, so the session's
+	// actor holds its close until the item flip has been journaled: the
+	// store refuses writes to a closed session, and a flip that loses that
+	// race could never land.
+	settling sessionSettles
+}
+
+// sessionSettles counts in-flight session-end cancels per session and hands
+// out a channel that closes when the last one finishes.
+type sessionSettles struct {
+	mu      sync.Mutex
+	pending map[string]*settleState
+}
+
+type settleState struct {
+	done chan struct{}
+	n    int
+}
+
+// begin registers one in-flight cancel and returns the func that settles it.
+func (l *sessionSettles) begin(sessionID string) func() {
+	l.mu.Lock()
+	if l.pending == nil {
+		l.pending = make(map[string]*settleState)
+	}
+	st := l.pending[sessionID]
+	if st == nil {
+		st = &settleState{done: make(chan struct{})}
+		l.pending[sessionID] = st
+	}
+	st.n++
+	l.mu.Unlock()
+	return func() {
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		st.n--
+		if st.n == 0 {
+			close(st.done)
+			delete(l.pending, sessionID)
+		}
+	}
+}
+
+// wait returns a channel that closes once no cancel is in flight for the
+// session; it is nil when none is.
+func (l *sessionSettles) wait(sessionID string) <-chan struct{} {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if st := l.pending[sessionID]; st != nil {
+		return st.done
+	}
+	return nil
+}
+
+// BeginSessionEnd registers the session-end cancel before its goroutine
+// starts and returns the func the goroutine calls when it is done.
+func (s *TeamProposalService) BeginSessionEnd(sessionID string) func() {
+	return s.settling.begin(sessionID)
+}
+
+// SessionEndSettled is nil when no cancel is in flight for the session, else
+// a channel that closes when it is.
+func (s *TeamProposalService) SessionEndSettled(sessionID string) <-chan struct{} {
+	return s.settling.wait(sessionID)
 }
 
 // sessionLocks is a keyed mutex: one lock per session ID, created on first
@@ -201,9 +268,9 @@ func (s *TeamProposalService) supersedePending(ctx context.Context, sessionID st
 // CancelForSession cancels the session's pending proposal because its session
 // ended (Q-104). It is idempotent: a proposal that is already decided or
 // cancelled is left alone, and only non-terminal tasks are cancelled. The
-// item flip goes through the actor while it still serves commands; a miss
-// leaves the item pending, because the durable team state stays
-// authoritative and expiry or closing is never an approval.
+// item flip goes through the actor, which holds its close until this cancel
+// settles; a failed flip leaves the whole proposal pending, because expiry or
+// closing is never an approval.
 func (s *TeamProposalService) CancelForSession(ctx context.Context, sessionID string) error {
 	// The same per-session lock as Propose (Q-103, Q-104): whichever runs
 	// first, a proposal the cancel misses is refused by the liveness
@@ -217,11 +284,20 @@ func (s *TeamProposalService) CancelForSession(ctx context.Context, sessionID st
 	if !ok {
 		return nil
 	}
-	itemErr := s.markItemRejected(ctx, pending.SessionID, pending.TeamID)
-	if teamErr := s.cancelPendingTeam(ctx, &pending, "session ended"); teamErr != nil {
-		return teamErr
+	// Fail closed: the item flip comes first and a failure leaves the
+	// proposal fully pending (team, tasks and card untouched), never a
+	// cancelled team behind a still-actionable card. Only a transient
+	// unavailable is retried; the flip is idempotent.
+	var markErr error
+	for range sessionEndFlipAttempts {
+		if markErr = s.markItemRejected(ctx, pending.SessionID, pending.TeamID); markErr == nil || errcode.CodeOf(markErr) != errcode.Unavailable {
+			break
+		}
 	}
-	return itemErr
+	if markErr != nil {
+		return markErr
+	}
+	return s.cancelPendingTeam(ctx, &pending, "session ended")
 }
 
 // cancelPendingProposal settles tasks first, then appends TeamEnded (Q-84).

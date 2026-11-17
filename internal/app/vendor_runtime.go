@@ -104,31 +104,20 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 		if hp.rt.interactions != nil && hp.rt.interactions.owner != nil {
 			hp.rt.interactions.owner.ResetSession(sessionID)
 		}
-		if hp.rt.teamProposals != nil {
-			// Q-104: the session's pending proposal is cancelled when its
-			// session ends. The cancel runs off the close path on its own
-			// goroutine: endSession fires inside requestClose while the
-			// actor and the close sequence still write, and the single
-			// SQLite connection serializes writers. Best-effort: a failure
-			// keeps the proposal pending rather than blocking the close.
-			// The cancel runs on the host's base context so a shutdown
-			// stops it (F11.2a review): a stopped cancel leaves the
-			// proposal pending, which is the fail-closed side.
-			supervise.Go(base, "team-cancel-"+sessionID, func(taskCtx context.Context) error {
-				if cancelErr := hp.rt.teamProposals.CancelForSession(taskCtx, sessionID); cancelErr != nil {
-					slog.WarnContext(taskCtx, "cancelling the pending team proposal failed",
-						"session_id", sessionID, "error_code", string(errcode.CodeOf(cancelErr)))
-				}
-				return nil
-			})
+		hp.cancelTeamProposalOnEnd(base, sessionID)
+	}
+	sessionEndSettled := func(sessionID string) <-chan struct{} {
+		if hp.rt.teamProposals == nil {
+			return nil
 		}
+		return hp.rt.teamProposals.SessionEndSettled(sessionID)
 	}
 	transcripts.onPurge = endSession
 	hp.vendorAdapter = adapter
 	sessions, err := NewVendorSessions(base, &VendorSessionDeps{
 		Store: topicNotifyingStore{Store: vs, topic: topic}, Transcripts: transcripts,
 		Adapter: adapter, Adapters: adapters, Accounts: accounts,
-		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: endSession,
+		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: endSession, SessionEndSettled: sessionEndSettled,
 		TestDelaySpawnRegistration: deps.TestDelaySpawnRegistration,
 		TestOnWaitInflightSpawn:    deps.TestOnWaitInflightSpawn,
 	})
@@ -271,4 +260,27 @@ func (rt *HostRuntime) TranscriptService() (*Transcripts, error) {
 		return nil, errcode.New(errcode.Unavailable, "the transcript service is unavailable")
 	}
 	return rt.transcripts, nil
+}
+
+// cancelTeamProposalOnEnd cancels the session's pending proposal when its
+// session ends (Q-104). The cancel runs off the close path on its own
+// goroutine, on the host's base context so a shutdown stops it: a stopped
+// cancel leaves the proposal pending, the fail-closed side. endSession fires
+// inside requestClose while the actor and the close sequence still write, and
+// the single SQLite connection serializes writers; the session's actor holds
+// its final close writes until the cancel settles (SessionEndSettled),
+// because the store refuses the item flip once the session row is closed.
+func (hp *HostProcess) cancelTeamProposalOnEnd(base context.Context, sessionID string) {
+	if hp.rt.teamProposals == nil {
+		return
+	}
+	settled := hp.rt.teamProposals.BeginSessionEnd(sessionID)
+	supervise.Go(base, "team-cancel-"+sessionID, func(taskCtx context.Context) error {
+		defer settled()
+		if cancelErr := hp.rt.teamProposals.CancelForSession(taskCtx, sessionID); cancelErr != nil && taskCtx.Err() == nil {
+			slog.WarnContext(taskCtx, "cancelling the pending team proposal failed",
+				"session_id", sessionID, "error_code", string(errcode.CodeOf(cancelErr)))
+		}
+		return nil
+	})
 }

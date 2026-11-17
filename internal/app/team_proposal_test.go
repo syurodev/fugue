@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -20,6 +20,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/teams"
+	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -504,17 +505,81 @@ func awaitCancelledProposal(t *testing.T, f *teamProposalFixture, teamID string)
 	var rec vendorstore.TeamRecord
 	var tasks []vendorstore.TaskRecord
 	var item vendorstore.StoredItem
-	for range 20000 {
+	testutil.Poll(t, "the session-end cancel to settle the proposal", func() bool {
 		rec, tasks = f.teamSnapshot(t, teamID)
-		if rec.State == vendorstore.TeamStateCancelled {
-			item = f.proposalItem(t, teamID)
-			if item.Metadata.Decision == teamTestRejected {
-				return rec, tasks, item
-			}
+		if rec.State != vendorstore.TeamStateCancelled {
+			return false
 		}
-		runtime.Gosched()
-	}
+		item = f.proposalItem(t, teamID)
+		return item.Metadata.Decision == teamTestRejected
+	})
 	return rec, tasks, item
+}
+
+// failingItemFlipRecorder refuses the transcript item update the proposal
+// flip needs, with a transient unavailable, and passes everything else on.
+type failingItemFlipRecorder struct {
+	approvalRecorder
+	failures int
+}
+
+func (r *failingItemFlipRecorder) RecordEvent(ctx context.Context, sessionID string, event *vendorstore.Event) error {
+	if event.Type == vendorstore.TranscriptItemUpdated && r.failures != 0 {
+		if r.failures > 0 {
+			r.failures--
+		}
+		return errcode.New(errcode.Unavailable, "test: item flip refused")
+	}
+	if err := r.approvalRecorder.RecordEvent(ctx, sessionID, event); err != nil {
+		return errcode.Wrap(errcode.CodeOf(err), "record event", err)
+	}
+	return nil
+}
+
+// TestFailedItemFlipLeavesTheProposalFullyPending pins the fail-closed
+// ordering of the session-end cancel and of supersede: when the item flip
+// fails, the team, its tasks, the item and the card all stay pending, and a
+// later cancel finishes the job.
+func TestFailedItemFlipLeavesTheProposalFullyPending(t *testing.T) {
+	t.Parallel()
+	f := newTeamProposalFixture(t, "")
+	first, err := f.rt.teamProposals.Propose(t.Context(), f.session.ID, validTeamProposalArgs())
+	if err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	svc := f.rt.teamProposals
+	real := svc.recorder
+	assertPending := func(step string) {
+		t.Helper()
+		rec, _ := f.teamSnapshot(t, first)
+		if rec.State != vendorstore.TeamStateProposed {
+			t.Fatalf("%s: team state = %s, want proposed", step, rec.State)
+		}
+		if item := f.proposalItem(t, first); item.Metadata.Decision != teamTestPending {
+			t.Fatalf("%s: item decision = %s, want pending", step, item.Metadata.Decision)
+		}
+		assertSingleProposalCard(t, f)
+	}
+
+	svc.recorder = &failingItemFlipRecorder{approvalRecorder: real, failures: -1}
+	if cancelErr := svc.CancelForSession(t.Context(), f.session.ID); errcode.CodeOf(cancelErr) != errcode.Unavailable {
+		t.Fatalf("CancelForSession error = %v, want unavailable", cancelErr)
+	}
+	assertPending("session-end cancel")
+	if _, supErr := svc.Propose(t.Context(), f.session.ID, validTeamProposalArgs()); errcode.CodeOf(supErr) != errcode.Unavailable {
+		t.Fatalf("superseding Propose error = %v, want unavailable", supErr)
+	}
+	assertPending("supersede")
+
+	// One transient failure is retried within the bound.
+	svc.recorder = &failingItemFlipRecorder{approvalRecorder: real, failures: 1}
+	if cancelErr := svc.CancelForSession(t.Context(), f.session.ID); cancelErr != nil {
+		t.Fatalf("CancelForSession after one transient failure: %v", cancelErr)
+	}
+	rec, _, item := awaitCancelledProposal(t, f, first)
+	if rec.State != vendorstore.TeamStateCancelled || item.Metadata.Decision != teamTestRejected {
+		t.Fatalf("after the retried cancel = (%s, %s), want cancelled/rejected", rec.State, item.Metadata.Decision)
+	}
 }
 
 // proposeConcurrently runs n proposes from the fixture's session in
@@ -643,17 +708,13 @@ func assertRaceOutcome(t *testing.T, f *teamProposalFixture, round int, proposal
 // fails if one survives.
 func awaitNoPendingProposal(t *testing.T, f *teamProposalFixture, round int) {
 	t.Helper()
-	for range 20000 {
+	testutil.Poll(t, fmt.Sprintf("round %d: the pending proposal to be cancelled", round), func() bool {
 		_, ok, err := f.hp.vendorStore.PendingTeamForSession(t.Context(), f.session.ID)
 		if err != nil {
 			t.Fatalf("round %d: PendingTeamForSession: %v", round, err)
 		}
-		if !ok {
-			return
-		}
-		runtime.Gosched()
-	}
-	t.Fatalf("round %d: pending proposal survived its session", round)
+		return !ok
+	})
 }
 
 // TestProposalRacingSessionEndNeverStaysPending pins Q-104 under the race:
