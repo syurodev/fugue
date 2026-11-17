@@ -7,18 +7,20 @@ import (
 	"gioui.org/io/event"
 	"gioui.org/io/key"
 	"gioui.org/layout"
-	"gioui.org/op/clip"
 )
 
 // Combobox, ui-kit §6.14: a TextField search core paired with a SuggestList
 // on the window overlay (UK-07, UK-08). The caller owns the items and the
 // async loading flag; the default filter folds case and Vietnamese diacritics
 // with the Menu's foldTypeahead rule (substring match, prefix matches ranked
-// first). Editor text includes IME composing text and filters on it, but
-// never chooses while composing. Arrows move the highlight while the caret
-// stays in the field; Enter chooses; Tab chooses only when the list is open
-// with a highlight; Escape closes the list and a second Escape clears the
-// text; focus leaving the field closes the list.
+// first). Editor text includes IME composing text and filters on it; on macOS
+// (Gio v0.10.3 os_macos.go: interpretKeyEvents + convertCommandKey), the
+// platform IME consumes Return/Enter/Tab while marked text is active and
+// never delivers a key.Event for them to the app, so Combobox never steals
+// FocusFilter events from the editor. Arrows move the highlight while the
+// caret stays in the field; Enter chooses; Tab chooses only when the user
+// moved the highlight with the keyboard; Escape closes the list and a second
+// Escape clears the text; focus leaving the field closes the list.
 
 // ComboboxProps are the per-frame, caller-owned properties (UK-02).
 type ComboboxProps struct {
@@ -110,7 +112,7 @@ func (s *ComboboxState) Layout(env *Env, gtx *layout.Context, p *ComboboxProps) 
 	var res ComboboxResult
 	filtered := filterSuggestItems(s.field.Text(), p.Items, p.Filter)
 	if !p.Disabled {
-		s.handleKeys(gtx, filtered, &res)
+		s.handleKeys(env, gtx, filtered, &res)
 	} else {
 		s.list.Close()
 	}
@@ -172,13 +174,13 @@ func filterSuggestItems(query string, items []SuggestItem, fn func(string, []Sug
 	return DefaultComboboxFilter(query, items)
 }
 
-func (s *ComboboxState) handleKeys(gtx *layout.Context, items []SuggestItem, res *ComboboxResult) {
+func (s *ComboboxState) handleKeys(env *Env, gtx *layout.Context, items []SuggestItem, res *ComboboxResult) {
 	tag := s.field.Tag()
 	if !s.list.IsOpen() {
 		s.openOnDown(gtx, tag)
 		return
 	}
-	s.handleOpenKeys(gtx, tag, items, res)
+	s.handleOpenKeys(env, gtx, tag, items, res)
 }
 
 func (s *ComboboxState) openOnDown(gtx *layout.Context, tag event.Tag) {
@@ -194,7 +196,10 @@ func (s *ComboboxState) openOnDown(gtx *layout.Context, tag event.Tag) {
 	}
 }
 
-func (s *ComboboxState) handleOpenKeys(gtx *layout.Context, tag event.Tag, items []SuggestItem, res *ComboboxResult) {
+func (s *ComboboxState) handleOpenKeys(env *Env, gtx *layout.Context, tag event.Tag, items []SuggestItem, res *ComboboxResult) {
+	if s.handleOpenTab(env, gtx, tag, items, res) {
+		return
+	}
 	filters := []event.Filter{
 		key.Filter{Focus: tag, Name: key.NameUpArrow},
 		key.Filter{Focus: tag, Name: key.NameDownArrow},
@@ -203,13 +208,8 @@ func (s *ComboboxState) handleOpenKeys(gtx *layout.Context, tag event.Tag, items
 		key.Filter{Focus: tag, Name: key.NamePageUp},
 		key.Filter{Focus: tag, Name: key.NamePageDown},
 		key.Filter{Focus: tag, Name: key.NameEscape},
-	}
-	if !s.field.core.composing {
-		filters = append(filters,
-			key.Filter{Focus: tag, Name: key.NameReturn},
-			key.Filter{Focus: tag, Name: key.NameEnter},
-			key.Filter{Focus: tag, Name: key.NameTab},
-		)
+		key.Filter{Focus: tag, Name: key.NameReturn},
+		key.Filter{Focus: tag, Name: key.NameEnter},
 	}
 	for {
 		ev, ok := gtx.Event(filters...)
@@ -230,53 +230,13 @@ func (s *ComboboxState) handleOpenKeys(gtx *layout.Context, tag event.Tag, items
 	}
 }
 
-func (f *fieldCore) primeSubRouter() {
-	f.subOps.Reset()
-	area := clip.Rect(image.Rect(0, 0, 1, 1)).Push(&f.subOps)
-	event.Op(&f.subOps, &f.ed)
-	area.Pop()
-	f.subRouter.Frame(&f.subOps)
-	src := f.subRouter.Source()
-	src.Event(key.FocusFilter{Target: &f.ed})
-	f.subRouter.Frame(&f.subOps)
-	src = f.subRouter.Source()
-	src.Event(key.FocusFilter{Target: &f.ed})
-	src.Execute(key.FocusCmd{Tag: &f.ed})
-	f.subRouter.Frame(&f.subOps)
-	f.subRouter.Source().Event(key.FocusFilter{Target: &f.ed})
-}
-
-func (f *fieldCore) stepSubRouter() {
-	f.subRouter.Frame(&f.subOps)
-}
-
-func (f *fieldCore) drainIME(gtx *layout.Context, o fieldOpts, ev *FieldEvents) {
-	if !f.subReady {
-		f.subReady = true
-		f.primeSubRouter()
+func (s *ComboboxState) handleOpenTab(env *Env, gtx *layout.Context, tag event.Tag, items []SuggestItem, res *ComboboxResult) bool {
+	if !s.list.userMoved || s.list.hi < 0 || !gtx.Focused(tag) || !env.takeTab() {
+		return false
 	}
-	var any bool
-	for {
-		e, ok := gtx.Event(key.FocusFilter{Target: &f.ed})
-		if !ok {
-			break
-		}
-		any = true
-		switch ke := e.(type) {
-		case key.CompositionEvent:
-			f.composing = ke.Start >= 0 && ke.End > ke.Start
-		case key.FocusEvent:
-			if !ke.Focus {
-				f.composing = false
-			}
-		}
-		f.subRouter.Queue(e)
+	if chosen, _, _ := s.list.HandleKey(key.Event{Name: key.NameTab, State: key.Press}, items); chosen != "" {
+		res.Chosen = chosen
+		return true
 	}
-	if !any {
-		return
-	}
-	sub := *gtx
-	sub.Source = f.subRouter.Source()
-	f.drainEditor(&sub, o, ev)
-	f.stepSubRouter()
+	return false
 }

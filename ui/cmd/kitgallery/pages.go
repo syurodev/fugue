@@ -240,6 +240,8 @@ func (p *pages) force(st string, tag event.Tag) {
 		p.env.Preview.Press = tag
 	case stFocus:
 		p.env.Preview.Focus = tag
+	case selOpen:
+		p.env.Preview.Open = tag
 	}
 }
 

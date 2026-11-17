@@ -83,6 +83,7 @@ type SuggestListState struct {
 	spinner      Spinner
 	loadingSince time.Time
 	origin       image.Point
+	userMoved    bool
 }
 
 // NewSuggestListState builds the state of one suggestion list.
@@ -96,10 +97,11 @@ func NewSuggestListState() *SuggestListState {
 }
 
 // Open opens the suggestion list on Snappy and highlights the first enabled
-// item when transitioning from closed.
+// item (or -1 if none) when transitioning from closed.
 func (s *SuggestListState) Open() {
 	if !s.open.Shown() {
 		s.hi = 0
+		s.userMoved = false
 	}
 	s.open.Show(true)
 }
@@ -108,6 +110,7 @@ func (s *SuggestListState) Open() {
 func (s *SuggestListState) Close() {
 	s.open.Show(false)
 	s.loadingSince = time.Time{}
+	s.userMoved = false
 }
 
 // IsOpen reports whether the suggestion list was last asked to be open.
@@ -156,13 +159,21 @@ func (s *SuggestListState) handleNavKey(name key.Name, items []SuggestItem) bool
 	default:
 		return false
 	}
+	s.userMoved = true
 	return true
 }
 
 func (s *SuggestListState) handleActionKey(name key.Name, items []SuggestItem) (chosen string, closed, handled bool) {
 	switch string(name) {
-	case string(key.NameReturn), string(key.NameEnter), string(key.NameTab):
+	case string(key.NameReturn), string(key.NameEnter):
 		if s.hi >= 0 && s.hi < len(items) && !items[s.hi].Disabled {
+			id := items[s.hi].ID
+			s.Close()
+			return id, true, true
+		}
+		return "", false, false
+	case string(key.NameTab):
+		if s.userMoved && s.hi >= 0 && s.hi < len(items) && !items[s.hi].Disabled {
 			id := items[s.hi].ID
 			s.Close()
 			return id, true, true

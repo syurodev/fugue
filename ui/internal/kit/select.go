@@ -135,15 +135,16 @@ func (s *SelectState) Layout(env *Env, gtx *layout.Context, p *SelectProps) (Sel
 }
 
 func (s *SelectState) resolveMotion(env *Env, gtx *layout.Context, p *SelectProps, w int, errored bool) (fieldMotion, float32) {
+	open := s.menu.IsOpen() || env.previewOpen(&s.trigger)
 	focused := !p.Disabled && (env.FocusVisible(gtx, &s.trigger) || env.previewFocus(&s.trigger))
-	hovered := !p.Disabled && (s.hover || s.menu.IsOpen() || env.previewHover(&s.trigger))
+	hovered := !p.Disabled && (s.hover || open || env.previewHover(&s.trigger))
 	fm := fieldMotion{
 		hover:  followState(env, &s.hoverF, hovered),
 		focus:  followState(env, &s.focusF, focused),
 		swap:   followState(env, &s.swapF, errored),
 		linePx: followSmooth(env, &s.lineF, fieldLineHeight(env, gtx, p.Helper, p.Error, errored, w)),
 	}
-	return fm, followState(env, &s.chevronF, s.menu.IsOpen())
+	return fm, followState(env, &s.chevronF, open)
 }
 
 func (s *SelectState) input(gtx *layout.Context, box image.Rectangle, disabled bool) bool {

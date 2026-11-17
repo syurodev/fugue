@@ -281,7 +281,11 @@ func tooltipSize(env *Env, gtx *layout.Context, p TooltipProps) (image.Point, er
 	padY := gtx.Dp(theme.SpaceXS)
 	txtSz := measureLabel(env, gtx, theme.TypeSmall(), p.Text)
 	w := 2*padX + txtSz.X
-	h := txtSz.Y
+	baseKbd, err := KbdSize(env, gtx, Shortcut{Key: Char('A')})
+	if err != nil {
+		return image.Point{}, fmt.Errorf("tooltip height: %w", err)
+	}
+	h := max(txtSz.Y, baseKbd.Y)
 	if p.Shortcut.Key != "" {
 		ksz, err := KbdSize(env, gtx, p.Shortcut)
 		if err != nil {

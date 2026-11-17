@@ -62,6 +62,7 @@ func TestComboboxArrowsEnterAndEscapeTwice(t *testing.T) {
 	comboboxFrame(t, h, cb, p)
 
 	assertComboboxFilterAndEscape(t, h, cb, p)
+	assertComboboxTabAndDisabledOpen(t, h, cb, p)
 
 	// Re-open with Down, then Enter chooses the highlighted item.
 	h.tap(key.NameDownArrow, 0)
@@ -74,6 +75,44 @@ func TestComboboxArrowsEnterAndEscapeTwice(t *testing.T) {
 	if res.Chosen != "alpha" || cb.IsOpen() {
 		t.Fatalf("Enter chose %q (open=%v), want alpha (closed)", res.Chosen, cb.IsOpen())
 	}
+}
+
+func assertComboboxTabAndDisabledOpen(t *testing.T, h *harness, cb *ComboboxState, p *ComboboxProps) {
+	t.Helper()
+	// Typing "a" opens list at 0 without userMoved; Tab must NOT choose.
+	h.router.Queue(key.EditEvent{Text: "a"})
+	comboboxFrame(t, h, cb, p)
+	h.tap(key.NameTab, 0)
+	if res := comboboxFrame(t, h, cb, p); res.Chosen != "" {
+		t.Fatalf("Tab without arrow move chose %q", res.Chosen)
+	}
+	// Moving with Down enables Tab choice.
+	h.tap(key.NameDownArrow, 0)
+	comboboxFrame(t, h, cb, p)
+	h.tap(key.NameTab, 0)
+	if res := comboboxFrame(t, h, cb, p); res.Chosen != "doi" {
+		t.Fatalf("Tab after Down chose %q, want doi", res.Chosen)
+	}
+	cb.SetText("")
+	comboboxFrame(t, h, cb, p)
+
+	// Open() when item 0 is disabled highlights first enabled (1), or -1 if none.
+	disFirst := &ComboboxProps{Items: []SuggestItem{{ID: "x", Label: "X", Disabled: true}, {ID: "y", Label: "Y"}}}
+	cb.Open()
+	comboboxFrame(t, h, cb, disFirst)
+	if got := cb.Highlight(); got != 1 {
+		t.Fatalf("Open with disabled first highlighted %d, want 1", got)
+	}
+	cb.Close()
+	comboboxFrame(t, h, cb, disFirst)
+	allDis := &ComboboxProps{Items: []SuggestItem{{ID: "x", Label: "X", Disabled: true}}}
+	cb.Open()
+	comboboxFrame(t, h, cb, allDis)
+	if got := cb.Highlight(); got != -1 {
+		t.Fatalf("Open with all disabled highlighted %d, want -1", got)
+	}
+	cb.Close()
+	comboboxFrame(t, h, cb, allDis)
 }
 
 func assertComboboxFilterAndEscape(t *testing.T, h *harness, cb *ComboboxState, p *ComboboxProps) {
@@ -181,24 +220,23 @@ func TestComboboxFiltersFoldedDiacriticsAndNeverChoosesWhileComposing(t *testing
 	})
 	comboboxFrame(t, h, cb, p)
 
-	// Start IME composition with "d": text includes composing text, so list
-	// opens and filters, but Enter must NOT choose while composing.
+	// Start IME composition with "d": text includes composing text and
+	// filters the suggestion list in place (on macOS, interpretKeyEvents +
+	// convertCommandKey consumes Return/Tab before Gio delivers key.Event).
 	h.router.Queue(key.CompositionEvent{Start: 0, End: 1}, key.EditEvent{Text: "d"})
 	comboboxFrame(t, h, cb, p)
 	if cb.Text() != "d" || !cb.IsOpen() {
 		t.Fatalf("composing text=%q open=%v, want 'd' and open", cb.Text(), cb.IsOpen())
 	}
-	h.tap(key.NameReturn, 0)
-	res := comboboxFrame(t, h, cb, p)
-	if res.Chosen != "" {
-		t.Fatalf("chose %q while IME was composing", res.Chosen)
+	if cb.Highlight() != 0 {
+		t.Fatalf("highlight while composing = %d, want 0", cb.Highlight())
 	}
 
 	// Commit composition, then Enter chooses.
 	h.router.Queue(key.CompositionEvent{Start: -1, End: -1}, key.EditEvent{Text: "đ", Range: key.Range{Start: 0, End: 1}})
 	comboboxFrame(t, h, cb, p)
 	h.tap(key.NameReturn, 0)
-	res = comboboxFrame(t, h, cb, p)
+	res := comboboxFrame(t, h, cb, p)
 	if res.Chosen != prefID {
 		t.Fatalf("after commit Enter chose %q, want %s", res.Chosen, prefID)
 	}
@@ -301,15 +339,28 @@ func TestSelectOpensAMenuAndKeepsAnUnselectedState(t *testing.T) {
 
 func assertSelectOpenAndEscape(t *testing.T, h *harness, sel *SelectState, lay func() SelectResult) {
 	t.Helper()
+	if got := sel.chevronF.Value(); got != 0 {
+		t.Fatalf("rest chevron = %v, want 0", got)
+	}
 	h.tap(key.NameSpace, 0)
-	lay()
+	for range 60 {
+		lay()
+	}
 	if !sel.IsOpen() {
 		t.Fatal("Space did not open Select")
 	}
+	if got := sel.chevronF.Value(); got < 0.99 {
+		t.Fatalf("open chevron = %v, want 1 (180 deg)", got)
+	}
 	h.tap(key.NameEscape, 0)
-	lay()
+	for range 60 {
+		lay()
+	}
 	if sel.IsOpen() || !h.gtx.Focused(sel.Tag()) {
 		t.Fatalf("Escape open=%v focused=%v, want closed and focused", sel.IsOpen(), h.gtx.Focused(sel.Tag()))
+	}
+	if got := sel.chevronF.Value(); got > 0.01 {
+		t.Fatalf("closed chevron = %v, want 0", got)
 	}
 	h.tap(key.NameDownArrow, 0)
 	lay()

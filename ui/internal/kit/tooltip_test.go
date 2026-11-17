@@ -220,3 +220,55 @@ func TestTooltipTextContrastOnSurface(t *testing.T) {
 		})
 	}
 }
+
+// TestTooltipEscapeDoesNotStealFromFocusedCombobox ensures a visible hover
+// tooltip never steals the first Escape from a focused open Combobox.
+func TestTooltipEscapeDoesNotStealFromFocusedCombobox(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	cb := NewComboboxState()
+	p := &ComboboxProps{Label: "Target", Items: []SuggestItem{{ID: "a", Label: "Alpha"}}}
+	var tipTag int
+	anchor := image.Rect(400, 200, 440, 232)
+
+	lay := func(focusCB bool) {
+		runFrame(t, h, func(gtx *layout.Context) {
+			if _, err := cb.Layout(h.env, gtx, p); err != nil {
+				t.Fatal(err)
+			}
+			h.env.TooltipAnchor(&tipTag, anchor, true, false, false, image.Point{}, TooltipProps{Text: "Hover tip"})
+			if focusCB {
+				gtx.Execute(key.FocusCmd{Tag: cb.Tag()})
+			}
+		})
+	}
+
+	lay(false)
+	lay(true)
+	h.now = h.now.Add(500 * time.Millisecond)
+	lay(false)
+	cb.Open()
+	lay(false)
+	if !cb.IsOpen() || h.env.TooltipRect().Empty() {
+		t.Fatalf("setup failed: cbOpen=%v tipRect=%v", cb.IsOpen(), h.env.TooltipRect())
+	}
+
+	h.tap(key.NameEscape, 0)
+	lay(false)
+	if cb.IsOpen() {
+		t.Fatal("first Escape was stolen by Tooltip: Combobox list is still open")
+	}
+
+	// Also verify text-only and Kbd tooltips share the same height.
+	szPlain, err := tooltipSize(h.env, &h.gtx, TooltipProps{Text: "Plain"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	szKbd, err := tooltipSize(h.env, &h.gtx, TooltipProps{Text: "With key", Shortcut: Shortcut{Mods: ModPrimary, Key: Char('k')}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if szPlain.Y != szKbd.Y {
+		t.Fatalf("tooltip heights differ: plain=%d, kbd=%d", szPlain.Y, szKbd.Y)
+	}
+}

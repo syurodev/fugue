@@ -5,7 +5,6 @@ import (
 	"image/color"
 
 	"gioui.org/io/event"
-	"gioui.org/io/input"
 	"gioui.org/io/key"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -111,12 +110,6 @@ type fieldCore struct {
 	// maskedCaret is where the caret of a masked field last rested while
 	// its selection was collapsed; a forced collapse restores it.
 	maskedCaret int
-	// composing tracks whether an IME composition is active on ed, observed
-	// by peeking FocusFilter events before forwarding them through subRouter.
-	composing bool
-	subReady  bool
-	subRouter input.Router
-	subOps    op.Ops
 }
 
 // Tag is the field's input tag — its editor — for focus scripting and
@@ -162,20 +155,6 @@ func (f *fieldCore) begin(gtx *layout.Context, box image.Rectangle, o fieldOpts,
 	if o.escapeClears && f.escape(gtx) {
 		ev.Changed = true
 	}
-	f.drainIME(gtx, o, &ev)
-	f.drainEditor(gtx, o, &ev)
-	if o.masked {
-		f.collapseMasked()
-	}
-	if f.hadFocus && !gtx.Focused(&f.ed) {
-		ev.FocusLost = true
-		f.composing = false
-	}
-	f.hadFocus = gtx.Focused(&f.ed)
-	return ev
-}
-
-func (f *fieldCore) drainEditor(gtx *layout.Context, o fieldOpts, ev *FieldEvents) {
 	for {
 		e, ok := f.ed.Update(*gtx)
 		if !ok {
@@ -191,6 +170,14 @@ func (f *fieldCore) drainEditor(gtx *layout.Context, o fieldOpts, ev *FieldEvent
 			f.collapseMasked()
 		}
 	}
+	if o.masked {
+		f.collapseMasked()
+	}
+	if f.hadFocus && !gtx.Focused(&f.ed) {
+		ev.FocusLost = true
+	}
+	f.hadFocus = gtx.Focused(&f.ed)
+	return ev
 }
 
 // trackBox registers the box's pointer area and reads it: the fill lifts

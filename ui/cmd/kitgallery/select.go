@@ -89,14 +89,8 @@ func (p *pages) selectRow(gtx *layout.Context, vi int) []cellDraw {
 			Value:       val,
 			Disabled:    st == stDisabled,
 		}
-		tag := sel.Tag()
-		if st == selOpen {
-			// Preview hover/focus look for the open cell; the inline menu
-			// specimen below shows the open dropdown surface.
-			tag = nil
-		}
 		row = append(row, cellDraw{
-			col: ci, key: cell{compSelect, vi, 0, st}, tag: tag,
+			col: ci, key: cell{compSelect, vi, 0, st}, tag: sel.Tag(),
 			box: measure(gtx, func(gtx *layout.Context) image.Point { return sel.Measure(p.env, gtx, pr).Size }),
 			lay: func(gtx *layout.Context) {
 				if _, err := sel.Layout(p.env, gtx, pr); err != nil {
