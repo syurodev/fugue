@@ -210,7 +210,7 @@ func TestTextAreaGrowsToItsMaxThenScrolls(t *testing.T) {
 
 	// Scrolling the viewport moves the content inside the unchanged box:
 	// one line further down, same box height.
-	st.list.Position.Offset = bodyLine
+	st.scroll.SetOffset(bodyLine)
 	after := areaShot(t, h, st, p)
 	if !imagesDiffer(before, after) {
 		t.Fatal("scrolling the viewport left the visible text unchanged")
@@ -357,7 +357,7 @@ func checkAreaPadding(t *testing.T, px float32, text string, maxLines int) {
 	// Past the cap, scroll the viewport one line: the box stays put and the
 	// padding band stays clear of the scrolled text.
 	if lines > maxLines {
-		st.list.Position.Offset = bodyLine
+		st.scroll.SetOffset(bodyLine)
 		img = areaShot(t, h, st, p)
 		box, _, _, _ = scan(img, img.Rect, isBody)
 		checkBandClean(t, img, box, padY, padX, radius, fill)

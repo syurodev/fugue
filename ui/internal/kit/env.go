@@ -93,6 +93,10 @@ type Env struct {
 	// is the tag, so it must not move.
 	inputTag event.Tag
 
+	// scrollAxes guards against two nested ScrollAreas on the same axis
+	// (§6.29).
+	scrollAxes [2]bool
+
 	// dt and now are the current frame's step and clock, from Begin.
 	dt  time.Duration
 	now time.Time
