@@ -81,9 +81,14 @@ type Env struct {
 	win, origin image.Point
 	// overlay is the menu that holds the window's one overlay.
 	overlay event.Tag
+	// tip is the window's tooltip manager (UK-07, §6.7).
+	tip tooltipManager
 
 	// modality is true while focus moves come from the keyboard.
 	modality bool
+	// tabPress records an unmodified Tab press seen by TrackInput this frame
+	// so a focused Combobox with keyboard-moved highlight can consume it.
+	tabPress bool
 	// inputTag backs the window-level listeners of TrackInput; its address
 	// is the tag, so it must not move.
 	inputTag event.Tag
@@ -117,6 +122,8 @@ type Preview struct {
 	// Focus renders the named control with its keyboard focus ring, even
 	// though no window focus event moved it.
 	Focus event.Tag
+	// Open renders a Select control in its open state (rotated chevron).
+	Open event.Tag
 }
 
 // Metric returns the window metric with the UI scale of §3.0 applied: both
@@ -180,6 +187,7 @@ func (e *Env) Keep() { e.Driver.Keep() }
 // FrameEnd schedules the next frame if anything asked for one. The window
 // calls it after layout.
 func (e *Env) FrameEnd(gtx *layout.Context) {
+	e.tip.endFrame(e, gtx)
 	if at, ok := e.Driver.Next(); ok {
 		gtx.Execute(op.InvalidateCmd{At: at})
 	}
@@ -193,6 +201,8 @@ func (e *Env) FrameEnd(gtx *layout.Context) {
 // under the pointer, so this hides nothing).
 func (e *Env) TrackInput(gtx *layout.Context) {
 	e.win, e.origin = gtx.Constraints.Max, image.Point{}
+	e.tabPress = false
+	e.tip.beginFrame()
 	if e.KeyboardOnly {
 		// The gallery's keyboard-only mode: every focus move came from the
 		// keyboard as far as the controls are concerned, so the rings stay
@@ -202,18 +212,7 @@ func (e *Env) TrackInput(gtx *layout.Context) {
 	}
 	// Tab turns the keyboard modality on. Naming Tab explicitly receives it
 	// even though the window also consumes it for focus movement.
-	for {
-		ev, ok := gtx.Event(key.Filter{
-			Name:     key.NameTab,
-			Optional: key.ModShift | key.ModCtrl | key.ModAlt | key.ModCommand,
-		})
-		if !ok {
-			break
-		}
-		if ke, isKey := ev.(key.Event); isKey && ke.State == key.Press {
-			e.modality = true
-		}
-	}
+	e.trackTab(gtx)
 	// A pointer press anywhere turns it off again.
 	defer clip.Rect(image.Rectangle{Max: gtx.Constraints.Max}).Push(gtx.Ops).Pop()
 	event.Op(gtx.Ops, &e.inputTag)
@@ -226,6 +225,33 @@ func (e *Env) TrackInput(gtx *layout.Context) {
 			e.modality = false
 		}
 	}
+}
+
+func (e *Env) trackTab(gtx *layout.Context) {
+	for {
+		ev, ok := gtx.Event(key.Filter{
+			Name:     key.NameTab,
+			Optional: key.ModShift | key.ModCtrl | key.ModAlt | key.ModCommand,
+		})
+		if !ok {
+			return
+		}
+		if ke, isKey := ev.(key.Event); isKey && ke.State == key.Press {
+			e.modality = true
+			if ke.Modifiers == 0 {
+				e.tabPress = true
+			}
+		}
+	}
+}
+
+// takeTab consumes a pending unmodified Tab press recorded by TrackInput.
+func (e *Env) takeTab() bool {
+	if !e.tabPress {
+		return false
+	}
+	e.tabPress = false
+	return true
 }
 
 // FocusVisible reports whether tag is focused and focus came from the
@@ -248,4 +274,9 @@ func (e *Env) previewPress(tag event.Tag) bool {
 // previewFocus reports whether the gallery frame forces tag's focus ring.
 func (e *Env) previewFocus(tag event.Tag) bool {
 	return tag != nil && e.Preview.Focus == tag
+}
+
+// previewOpen reports whether the gallery frame forces tag's open state.
+func (e *Env) previewOpen(tag event.Tag) bool {
+	return tag != nil && e.Preview.Open == tag
 }
