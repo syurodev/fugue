@@ -1,11 +1,12 @@
 package cheapvault
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
-	"testing"
 	"time"
 
 	"github.com/syurodev/fugue/internal/config"
@@ -17,77 +18,96 @@ import (
 	"github.com/syurodev/fugue/internal/vault"
 )
 
+// tb is the part of testing.TB the helpers use; a narrow interface lets the
+// failure paths be tested with a recording stand-in. After a failure the helper
+// returns, so a stand-in that does not stop the goroutine is safe.
+type tb interface {
+	Helper()
+	Fatal(args ...any)
+	Context() context.Context
+	TempDir() string
+}
+
 // MasterPassword opens the fixture keyring.
 const MasterPassword = "master-pw"
 
 // Keyring returns the minimum-cost keyring, read from the vault's golden
 // vector so there is exactly one copy of it.
-func Keyring(tb testing.TB) *crypto.Keyring {
-	tb.Helper()
-	_, here, _, ok := runtime.Caller(0)
-	if !ok {
-		tb.Fatal("cannot locate the cheap keyring fixture")
-	}
-	raw, err := os.ReadFile(filepath.Join(filepath.Dir(here), "..", "..", "vault", "testdata", "keyring-cheap.json"))
+func Keyring(t tb) *crypto.Keyring {
+	t.Helper()
+	// A failed Caller yields an empty path, which readKeyring then reports.
+	_, here, _, _ := runtime.Caller(0)
+	ring, err := readKeyring(filepath.Join(filepath.Dir(here), "..", "..", "vault", "testdata", "keyring-cheap.json"))
 	if err != nil {
-		tb.Fatal(err)
+		t.Fatal(err)
+		return nil
+	}
+	return ring
+}
+
+func readKeyring(path string) (*crypto.Keyring, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read the cheap keyring: %w", err)
 	}
 	var ring crypto.Keyring
 	if err = json.Unmarshal(raw, &ring); err != nil {
-		tb.Fatal(err)
+		return nil, fmt.Errorf("decode the cheap keyring: %w", err)
 	}
-	return &ring
+	return &ring, nil
 }
 
 // Save writes the minimum-cost keyring into store, for a fixture that builds
 // its own vault.Service on a database store.
-func Save(tb testing.TB, store vault.KeyringStore) {
-	tb.Helper()
-	if err := store.Save(tb.Context(), Keyring(tb)); err != nil {
-		tb.Fatal(err)
+func Save(t tb, store vault.KeyringStore) {
+	t.Helper()
+	if err := store.Save(t.Context(), Keyring(t)); err != nil {
+		t.Fatal(err)
 	}
 }
 
 // Unlock opens svc with MasterPassword.
-func Unlock(tb testing.TB, svc *vault.Service) {
-	tb.Helper()
-	if err := svc.Unlock(tb.Context(), redact.NewSecret(MasterPassword)); err != nil {
-		tb.Fatal(err)
+func Unlock(t tb, svc *vault.Service) {
+	t.Helper()
+	if err := svc.Unlock(t.Context(), redact.NewSecret(MasterPassword)); err != nil {
+		t.Fatal(err)
 	}
 }
 
 // Unlocked returns a vault on an in-memory store holding the keyring, already
 // unlocked with MasterPassword.
-func Unlocked(tb testing.TB) *vault.Service {
-	tb.Helper()
-	svc, err := vault.NewService(tb.Context(), vault.NewMemoryKeyringStore(Keyring(tb)), ids.NewSequence("cheap-vault-"))
+func Unlocked(t tb) *vault.Service {
+	t.Helper()
+	svc, err := vault.NewService(t.Context(), vault.NewMemoryKeyringStore(Keyring(t)), ids.NewSequence("cheap-vault-"))
 	if err != nil {
-		tb.Fatal(err)
+		t.Fatal(err)
+		return nil
 	}
-	Unlock(tb, svc)
+	Unlock(t, svc)
 	return svc
 }
 
 // DataDir returns a fresh data directory that already holds the keyring, so a
 // host started on it comes up with a locked vault that Unlock opens.
-func DataDir(tb testing.TB) string {
-	tb.Helper()
-	dir := tb.TempDir()
-	SeedDataDir(tb, dir)
+func DataDir(t tb) string {
+	t.Helper()
+	dir := t.TempDir()
+	SeedDataDir(t, dir)
 	return dir
 }
 
 // SeedDataDir saves the keyring into the store of an existing data directory
 // and closes the store, so a host can take the directory lock afterwards.
-func SeedDataDir(tb testing.TB, dir string) {
-	tb.Helper()
+func SeedDataDir(t tb, dir string) {
+	t.Helper()
 	clk := clock.NewFake(time.Unix(0, 0))
-	store, err := storage.OpenStore(tb.Context(), config.Config{DataDir: dir}, clk, ids.NewSequence("cheap-vault"))
+	store, err := storage.OpenStore(t.Context(), config.Config{DataDir: dir}, clk, ids.NewSequence("cheap-vault"))
 	if err != nil {
-		tb.Fatal(err)
+		t.Fatal(err)
+		return
 	}
-	Save(tb, vault.NewSQLKeyringStore(store.DB()))
+	Save(t, vault.NewSQLKeyringStore(store.DB()))
 	if err = store.Close(); err != nil {
-		tb.Fatal(err)
+		t.Fatal(err)
 	}
 }
