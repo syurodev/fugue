@@ -327,6 +327,9 @@ func TestAgyShellCommandGoesThroughRequestPermissionAndRunsWhenAllowed(t *testin
 	if resp.Error != nil || string(resp.Result) != `{"outcome":"selected","optionId":"allow"}` {
 		t.Fatalf("permission RPC response = %+v, want selected allow", resp)
 	}
+	// An earlier ready event (the session start) must not stand in for the end
+	// of this turn: wait for the turn to run, then for it to finish.
+	awaitSessionState(t, sessSub, f.session.ID, "running")
 	awaitSessionState(t, sessSub, f.session.ID, "ready")
 
 	gotBytes, readErr := os.ReadFile(filepath.Clean(markerPath))
