@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 )
 
@@ -24,7 +25,12 @@ func writeScript(t *testing.T, dir, body string) string {
 		}
 	}()
 
-	if err := dirRoot.WriteFile("git", []byte("#!/bin/sh\n"+body), 0o750); err != nil {
+	// Hold the fork lock so a concurrent fork cannot inherit the open write
+	// descriptor and make the later exec fail with ETXTBSY.
+	syscall.ForkLock.RLock()
+	err = dirRoot.WriteFile("git", []byte("#!/bin/sh\n"+body), 0o750)
+	syscall.ForkLock.RUnlock()
+	if err != nil {
 		t.Fatal(err)
 	}
 	return filepath.Join(dir, "git")

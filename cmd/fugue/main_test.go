@@ -27,7 +27,14 @@ import (
 	"github.com/syurodev/fugue/internal/storage"
 )
 
-func TestMain(m *testing.M) { goleak.VerifyTestMain(m) }
+func TestMain(m *testing.M) {
+	cleanup, err := buildMigratedTemplate()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	goleak.VerifyTestMain(m, goleak.Cleanup(cleanup))
+}
 
 // testVersion is the host version the tests serve; the real binary takes it
 // from the ldflags-injectable variable.
@@ -83,15 +90,59 @@ func serveDir(t *testing.T) string {
 	t.Helper()
 	sum := sha256.Sum256([]byte(t.Name()))
 	dir := filepath.Join(os.TempDir(), fmt.Sprintf("fugue-cmd-%x", sum[:4]))
-	if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
-		t.Fatal(err)
-	}
 	t.Cleanup(func() {
 		if err := os.RemoveAll(dir); err != nil {
 			return
 		}
 	})
+	// The directory name derives from the test name, so a repeated call (or a
+	// run that left the directory behind) finds files already there.
+	if err := os.RemoveAll(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	// A host started on an empty directory runs every migration. Under the
+	// race detector that CPU work, multiplied by the parallel hosts on a
+	// loaded runner, outlasted the readiness deadline. Starting from a
+	// migrated database keeps the real open-and-verify path and drops the
+	// repeated schema build; the storage tests own migration coverage.
+	if err := os.CopyFS(dir, os.DirFS(templateDir(os.Getpid()))); err != nil {
+		t.Fatal(err)
+	}
 	return dir
+}
+
+// templateDir is where TestMain keeps the migrated database template of the
+// test process pid; deriving it from the pid needs no package-level state.
+func templateDir(pid int) string {
+	return filepath.Join(os.TempDir(), fmt.Sprintf("fugue-cmd-template-%d", pid))
+}
+
+// buildMigratedTemplate migrates a fresh database once for the whole test
+// process and returns a cleanup for the directory holding it.
+func buildMigratedTemplate() (cleanup func(int), err error) {
+	dir := templateDir(os.Getpid())
+	if err = os.Mkdir(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("template dir: %w", err)
+	}
+	cleanup = func(int) {
+		if rmErr := os.RemoveAll(dir); rmErr != nil {
+			return
+		}
+	}
+	clk := clock.NewFake(time.Unix(0, 0))
+	store, err := storage.OpenStore(context.Background(), config.Config{DataDir: dir}, clk, ids.NewSequence("template"))
+	if err != nil {
+		cleanup(0)
+		return nil, fmt.Errorf("migrate template: %w", err)
+	}
+	if err = store.Close(); err != nil {
+		cleanup(0)
+		return nil, fmt.Errorf("close template: %w", err)
+	}
+	return cleanup, nil
 }
 
 func socketPath(dir string) string { return filepath.Join(dir, hostapi.SocketFileName) }
