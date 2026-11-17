@@ -24,7 +24,7 @@ func TestPRStressRerunsChangedTestPackages(t *testing.T) {
 	task := readRepoFile(t, "Taskfile.yml")
 	for _, want := range []string{
 		"\n  stress:\n", "needs: changes", "needs.changes.outputs.test_pkgs",
-		osUbuntu, osMacOS, "needs.changes.outputs.platform", "task test-pkg PKG=\"$PACKAGES\" COUNT=10",
+		"needs.changes.outputs.test_run", osUbuntu, osMacOS, "needs.changes.outputs.platform", "task test-pkg PKG=\"$PACKAGES\" RUN=\"$TESTS\" COUNT=10",
 	} {
 		if !strings.Contains(pr, want) {
 			t.Errorf("pr.yml lacks %q", want)
@@ -35,6 +35,12 @@ func TestPRStressRerunsChangedTestPackages(t *testing.T) {
 		if !strings.Contains(task, want) {
 			t.Errorf("Taskfile.yml test-pkg lacks %q", want)
 		}
+	}
+	// Ten counts of a whole heavy package (internal/app takes minutes per
+	// count) pass the timeout, so the job reruns only the changed tests: the
+	// -run pattern is required, and a PR with no changed test function skips.
+	if !strings.Contains(pr, `[ -n "$TESTS" ]`) {
+		t.Error("stress must skip when no changed test function is known, never rerun whole packages")
 	}
 	_, afterTestPkg, _ := strings.Cut(task, "\n  test-pkg:\n")
 	testPkg, _, _ := strings.Cut(afterTestPkg, "\n  coverage:")

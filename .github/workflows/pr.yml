@@ -26,6 +26,7 @@ jobs:
       platform: ${{ steps.scope.outputs.platform }}
       ui: ${{ steps.scope.outputs.ui }}
       test_pkgs: ${{ steps.scope.outputs.test_pkgs }}
+      test_run: ${{ steps.scope.outputs.test_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -121,11 +122,13 @@ jobs:
           path: cover.out
           retention-days: 1
 
-  # A PR that changes test files reruns those packages ten times with the race
-  # detector and a fresh shuffle each time, so a test that fails one run in ten
-  # fails here and not on a later unrelated PR (quality-gates section 6). The
-  # package list comes from fuguegate changes; Linux always, macOS when the
-  # change is platform-specific, like the test job.
+  # A PR that changes test files reruns the test functions those files declare
+  # ten times with the race detector and a fresh shuffle each time, so a test
+  # that fails one run in ten fails here and not on a later unrelated PR
+  # (quality-gates section 6). Only those functions rerun, never the whole
+  # package: ten counts of a heavy package would pass the 10-minute timeout.
+  # The package and test lists come from fuguegate changes; Linux always, macOS
+  # when the change is platform-specific, like the test job.
   stress:
     name: stress (${{ matrix.os }})
     needs: changes
@@ -138,14 +141,15 @@ jobs:
       - id: decide
         env:
           PACKAGES: ${{ needs.changes.outputs.test_pkgs }}
+          TESTS: ${{ needs.changes.outputs.test_run }}
           PLATFORM: ${{ needs.changes.outputs.platform }}
           OS: ${{ matrix.os }}
         run: |
-          if [ -n "$PACKAGES" ] && { [ "$OS" = "ubuntu-latest" ] || [ "$PLATFORM" = "true" ]; }; then
+          if [ -n "$PACKAGES" ] && [ -n "$TESTS" ] && { [ "$OS" = "ubuntu-latest" ] || [ "$PLATFORM" = "true" ]; }; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::stress skipped on $OS: no changed test packages that need it (fuguegate changes)"
+            echo "::notice::stress skipped on $OS: no changed test functions that need it (fuguegate changes)"
           fi
       - if: steps.decide.outputs.run == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -156,7 +160,8 @@ jobs:
       - if: steps.decide.outputs.run == 'true'
         env:
           PACKAGES: ${{ needs.changes.outputs.test_pkgs }}
-        run: go tool task test-pkg PKG="$PACKAGES" COUNT=10
+          TESTS: ${{ needs.changes.outputs.test_run }}
+        run: go tool task test-pkg PKG="$PACKAGES" RUN="$TESTS" COUNT=10
 
   coverage:
     needs: [changes, test]

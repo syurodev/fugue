@@ -104,7 +104,7 @@ Ordinary Go tests that read the package graph with `go list -deps -json` and the
 | A flaky test is a bug: no quarantine, no automatic retry, no `t.Skip` | PR stress and nightly repeats (below); the policy below |
 | Tests do not measure time: the fake clock drives time, a hang-only deadline is a generous fixed `testutil.Await` or `testutil.Poll`, and a speed or speed-ratio assertion lives in `internal/perf` | `realclock` (§4) |
 | Speed budgets run only in the nightly `perf` job, as the median of several measurements against each budget with every number in the log; PR CI checks correctness only | Tests under the `perf` build tag (`internal/perf`, and the ui layout budgets); `TestPerfBudgetsRunOnlyInNightly` |
-| A PR that changes test files reruns those packages with `-race -shuffle=on -count=10` on ubuntu, and on macOS when the platform filter is true | `stress` job; `fuguegate changes` prints `test_pkgs`; `TestPRStressRerunsChangedTestPackages` |
+| A PR that changes test files reruns the test functions those files declare, in their packages, with `-race -shuffle=on -count=10` on ubuntu, and on macOS when the platform filter is true | `stress` job; `fuguegate changes` prints `test_pkgs` and `test_run`; `TestPRStressRerunsChangedTestPackages` |
 | Nightly: every package, `-race -shuffle=on`, twenty repetitions on ubuntu and macOS; each test that both passed and failed is reported | `repeat-tests` job, `task nightly-test`, `fuguegate flaky`; `TestNightlyStressRunsTwentyCountsOnUbuntuAndMacOS` |
 | Fixtures use the cheap vault and the shared helpers (`internal/testutil`), never production-cost vault setup or an unsafe fake-executable writer | `TestEveryFixtureUsesTheCheapVault`, `TestFakeExecutableWriterHoldsTheForkLock` |
 | OS-specific tests (sandbox) run on the right OS | CI matrix of macOS and Linux |
@@ -220,9 +220,16 @@ and title edits, so applying a label reruns only those two. A `changes` job
 - every push to `main` runs the macOS tests (`main.yml`);
 - the `ui/` Go module has its own workflow (`ui.yml`, ADR 0002): build, vet, lint and tests with `-race` on ubuntu-latest (Wayland/X11 dev packages) and macos-latest, triggered when the change set touches `ui/`, `pkg/` or `proto/` (the `changes` job prints `ui=` alongside `code=` and `platform=`).
 
-**Stress (PR, new 2026-11-16):** the `stress` job reruns the packages whose test files changed
-with `-race -shuffle=on -count=10`, on ubuntu and, when `platform` is true, on macOS. It reports
-success when no test file changed, like the other conditional jobs. The stress jobs report only: they are
+**Stress (PR, new 2026-11-16):** the `stress` job reruns the `Test` and `Fuzz` functions declared in
+the test files that changed (`-run '^(A|B)$'`, built by `fuguegate changes` as `test_run`) in their
+packages with `-race -shuffle=on -count=10`, on ubuntu and, when `platform` is true, on macOS. It
+reports success when no test file with a test function changed, like the other conditional jobs.
+Why not the whole package: the 10-minute package timeout covers all ten counts, and `internal/app`
+alone takes 200 to 390 seconds per count, so a PR touching its tests always timed out (PR #152's own
+run). Rerunning only the changed functions keeps a run short by construction, and a flaky test the PR
+adds or edits is exactly what the job exists to catch. A helper-only change (a test file with no test
+function) is not stressed; the regular test job still runs the package once, and the nightly run
+repeats everything. The timeout stays at 10 minutes. The stress jobs report only: they are
 not required status checks (owner decision, 2026-11-16). The `ui/` module is not stress-run (known gap).
 
 **Nightly:** long fuzzing, full mutation, every test repeated twenty times on ubuntu and macOS

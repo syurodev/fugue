@@ -95,14 +95,14 @@ func TestChangesCommandPrintsStepOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff := cmp.Diff("code=false\nplatform=false\nui=false\ntest_pkgs=\n", out); diff != "" {
+	if diff := cmp.Diff("code=false\nplatform=false\nui=false\ntest_pkgs=\ntest_run=\n", out); diff != "" {
 		t.Errorf("output (-want +got):\n%s", diff)
 	}
 	out, err = execute(t, "changes", "-files", "cmd/fugue/serve.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff := cmp.Diff("code=true\nplatform=true\nui=false\ntest_pkgs=\n", out); diff != "" {
+	if diff := cmp.Diff("code=true\nplatform=true\nui=false\ntest_pkgs=\ntest_run=\n", out); diff != "" {
 		t.Errorf("output (-want +got):\n%s", diff)
 	}
 }
@@ -120,5 +120,29 @@ func TestChangesFailsSafeOnABrokenDiff(t *testing.T) {
 	}
 	if _, err := execute(t, "changes"); !errors.Is(err, ErrUsage) {
 		t.Errorf("no input: err = %v, want ErrUsage", err)
+	}
+}
+
+// The stress job reruns ten counts under one 10-minute package timeout, so it
+// gets the changed test functions, never the whole package.
+func TestChangesPrintsTheChangedTestFunctionsForStress(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	body := "package heavy\n\nimport \"testing\"\n\n" +
+		"func TestOne(t *testing.T) {}\nfunc FuzzTwo(f *testing.F) {}\n" +
+		"func TestMain(m *testing.M) {}\nfunc Testing() {}\nfunc helper() {}\n" +
+		"func (s *suite) TestMethod() {}\n"
+	if err := os.MkdirAll(filepath.Join(dir, "internal", "heavy"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "internal", "heavy", "heavy_test.go"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := execute(t, "changes", "-dir", dir, "-files", "internal/heavy/heavy_test.go,internal/heavy/gone_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "test_pkgs=./internal/heavy\ntest_run=^(FuzzTwo|TestOne)$\n") {
+		t.Errorf("output lacks the heavy package and its test functions:\n%s", out)
 	}
 }
