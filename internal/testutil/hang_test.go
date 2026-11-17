@@ -58,7 +58,7 @@ func TestAwaitFailsWhenNothingArrives(t *testing.T) {
 	}
 }
 
-func TestHangGuardFiresAndStops(t *testing.T) {
+func TestHangTimerFiresAndStops(t *testing.T) {
 	t.Parallel()
 	r := &recorder{context: t.Context}
 	<-hangGuard(r, time.Millisecond)

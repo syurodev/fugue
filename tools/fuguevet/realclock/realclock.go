@@ -23,7 +23,7 @@ const (
 // New returns the analyzer. A test that reads the wall clock or times
 // something compares a number a loaded runner changes, so it fails at random;
 // tests use the fake clock, and a hang-only deadline goes through
-// testutil.HangGuard, which never measures speed.
+// testutil.Await or testutil.Poll, which never measure speed.
 func New() *analysis.Analyzer {
 	return &analysis.Analyzer{
 		Name:       "realclock",
@@ -47,7 +47,7 @@ func run(pass *analysis.Pass) (any, error) {
 		ast.Inspect(file, func(n ast.Node) bool {
 			if id, ok := n.(*ast.Ident); ok {
 				if what := wallClock(pass.TypesInfo.Uses[id]); what != "" {
-					pass.Reportf(id.Pos(), "%s reads or measures the wall clock in a test: use the fake clock, testutil.HangGuard for a hang-only deadline, or move the speed budget to internal/perf", what)
+					pass.Reportf(id.Pos(), "%s reads or measures the wall clock in a test: use the fake clock, testutil.Await or testutil.Poll for a hang-only wait, or move the speed budget to internal/perf", what)
 				}
 			}
 			return true

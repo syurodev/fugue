@@ -25,12 +25,6 @@ type tb interface {
 	Context() context.Context
 }
 
-// HangGuard returns a channel that fires once after HangTimeout. Select on it
-// next to the awaited signal and fail on it: it never measures speed.
-func HangGuard(t tb) <-chan time.Time {
-	return hangGuard(t, HangTimeout)
-}
-
 func hangGuard(t tb, d time.Duration) <-chan time.Time {
 	t.Helper()
 	timer := clock.Real{}.NewTimer(d)
