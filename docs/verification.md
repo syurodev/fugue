@@ -41,7 +41,7 @@ exists on `main` (`V-05`).
 | `TR-E02` | `transcript §9` | `release` | `pr` | `TestUnsupportedEventBecomesNoticeWithRawRef` | `Done` |
 | `TR-E03` | `transcript §9` | `release` | `pr` | `TestTranscriptReconnectAfterLostDeltaGetsOpenItemsAndFinalDurableState` | `Done` |
 | `TR-E04` | `transcript §9` | `release` | `pr` | `TestTranscriptAndRawPayloadNeverAppearInVendorColumns`, `TestMetadataTypesHoldNoContentStrings` | `Done` |
-| `TR-E05` | `transcript §9` | `release` | `pr` | `TestTranscriptPageOver10000ItemsIsStableWithoutDuplicatesOrGaps` | `Done` |
+| `TR-E05` | `transcript §9` | `release` | `pr` | `TestTranscriptPageIsStableAcrossPagesWithoutDuplicatesOrGaps` | `Done` |
 | `TR-E06` | `transcript §9` | `release` | `pr` | `TestOversizedItemsShowTruncatedViewsAndKeepFullContent` | `Done` |
 | `TR-E07` | `transcript §9` | `release` | `pr` | `TestStorageFitKeepsHeadAndTailWithinLimit`, `TestOversizedContentAndRawAreStoredHeadAndTailWithFlags` | `Done` |
 | `TR-E08` | `transcript §9` | `release` | `pr` | `TestViewsRedactBeforeTruncating`, `TestSecretsAreMaskedInPageItemSnapshotAndDeltaAndStoredPayloadIsOriginal` | `Done` |

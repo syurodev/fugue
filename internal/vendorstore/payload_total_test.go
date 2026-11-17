@@ -86,12 +86,23 @@ func TestPayloadTotalSurvivesRecovery(t *testing.T) {
 	assertPayloadTotal(t, reopened)
 }
 
-func TestAppend10000PayloadsKeepsTotalConsistent(t *testing.T) {
+// manyPayloads is how many single-event appends the PR run makes. Each append
+// is a durable commit, which costs tens of milliseconds under -race; the total
+// is kept per event, so the property does not depend on a count in the
+// thousands. The 10,000 variant runs in the nightly perf job.
+const manyPayloads = 500
+
+func TestAppendManyPayloadsKeepsTotalConsistent(t *testing.T) {
 	t.Parallel()
+	appendPayloadsAndCheckTotal(t, manyPayloads)
+}
+
+func appendPayloadsAndCheckTotal(t *testing.T, count int64) {
+	t.Helper()
 	s, _, _ := protectedStore(t)
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
-	for i := int64(1); i <= 10000; i++ {
+	for i := int64(1); i <= count; i++ {
 		_, err := s.Append(ctx, "s", i, &Event{Type: UsageObserved, Payload: []byte("x")})
 		requireNoError(t, err)
 	}
