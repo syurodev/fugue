@@ -41,7 +41,7 @@ pairs; the bridge inherits agy's environment) and prompts the model to call `fug
 - Permission answer: agy 1.5.10 refuses the flat `{"outcome":"selected","optionId":...}` form with
   `cannot unmarshal string into ... outcome of type AllowedOutcome` and fails the tool call before it
   reaches the bridge, so the recorder answers the nested `{"outcome":{"outcome":"selected","optionId":"allow"}}`.
-  The agy adapter still sends the flat form (measured on 1.5.9).
+  The agy adapter sends the same nested form (the ACP v1 `RequestPermissionResponse`).
 - Generate the golden with `go test -run TestVRE03AgyFixturesReplayToGoldenTranscript ./internal/vendoradapter/agy -update`.
 
 ## Redaction (applied before commit; verified by `TestAgyFixturesContainNoHostIdentity`)
