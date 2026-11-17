@@ -9,6 +9,9 @@ import (
 	"github.com/syurodev/fugue/internal/vendor"
 )
 
+// unsupportedEventCode is the notice code every unhandled event takes.
+const unsupportedEventCode = "unsupported_event"
+
 func feed(t *testing.T, n *Normalizer, line string) Observation {
 	t.Helper()
 	obs, err := n.Normalize([]byte(line))
@@ -65,7 +68,7 @@ func TestCodexUnknownNotificationsBecomeUnsupportedNoticesWithRawRef(t *testing.
 			t.Fatalf("line %s: kind = %s, want notice", line, item.Kind)
 		}
 		meta := metaOf[transcript.NoticeMetadata](t, item.Metadata)
-		if meta.Code != "unsupported_event" || meta.Level != "info" {
+		if meta.Code != unsupportedEventCode || meta.Level != "info" {
 			t.Fatalf("line %s: metadata = %+v, want unsupported_event/info", line, meta)
 		}
 		if item.RawRef == "" {
@@ -251,7 +254,7 @@ func assertExecpolicyAndSecretUserInputNormalize(t *testing.T, n *Normalizer) {
 	noticeItem := oneRecord(t, &secretObs)
 	noticeMeta := metaOf[transcript.NoticeMetadata](t, noticeItem.Metadata)
 	noticeBody, ok := noticeItem.Content.(transcript.NoticeContent)
-	if !ok || noticeMeta.Code != "unsupported_event" || noticeBody.Text != secretInputUnsupportedMessage {
+	if !ok || noticeMeta.Code != unsupportedEventCode || noticeBody.Text != secretInputUnsupportedMessage {
 		t.Fatalf("secret question notice = (%+v, %+v)", noticeMeta, noticeBody)
 	}
 	if strings.Contains(noticeItem.RawRef, "SECRET") || strings.Contains(noticeBody.Text, "API-TOKEN-HDR") || strings.Contains(noticeBody.Text, "SECRET-TOKEN-PROMPT") {

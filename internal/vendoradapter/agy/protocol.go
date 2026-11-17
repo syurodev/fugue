@@ -153,17 +153,27 @@ func (r *InitializeResult) CapabilitiesSummary() HandshakeCapabilities {
 }
 
 type (
+	// McpServer is one entry of the mcpServers list of session/new and
+	// session/load. The struct has no env field on purpose: the entry must
+	// never carry a token value over the pipe, and the bridge token reaches
+	// the server process by inheritance (bridge.go).
+	McpServer struct {
+		Name    string   `json:"name"`
+		Command string   `json:"command"`
+		Args    []string `json:"args,omitempty"`
+	}
+
 	// SessionNewParams is the params payload for session/new.
 	SessionNewParams struct {
-		Cwd        string `json:"cwd"`
-		McpServers []any  `json:"mcpServers"`
+		Cwd        string      `json:"cwd"`
+		McpServers []McpServer `json:"mcpServers"`
 	}
 
 	// SessionLoadParams is the params payload for session/load.
 	SessionLoadParams struct {
-		SessionID  string `json:"sessionId"`
-		Cwd        string `json:"cwd"`
-		McpServers []any  `json:"mcpServers"`
+		SessionID  string      `json:"sessionId"`
+		Cwd        string      `json:"cwd"`
+		McpServers []McpServer `json:"mcpServers"`
 	}
 
 	// SessionModel describes one selectable model returned by session/new or session/load.

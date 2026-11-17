@@ -42,6 +42,7 @@ import (
 const (
 	sessionTokenSeed = "hostapi-session-tokens"
 	testEchoTool     = "fugue_test_echo"
+	testProposeTool  = "fugue_team_propose"
 )
 
 // echoTool is registered only by tests, through HostDeps.TestFugueTools. It

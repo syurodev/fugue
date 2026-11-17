@@ -117,34 +117,49 @@ func (s *SessionToolService) Attach(token string) (SessionBinding, error) {
 	return binding, nil
 }
 
-// List returns the tools of the binding's role, by name. A tool whose
-// Available gate fails for this session is not listed.
+// callBuiltinApprove serves the approve relay to the sessions that may see
+// it; every other session gets the same refusal an unknown tool gets.
+func (s *SessionToolService) callBuiltinApprove(ctx context.Context, binding SessionBinding, args []byte) (FugueToolResult, error) {
+	if !approveServed(s.sessionVendor(ctx, binding)) {
+		return FugueToolResult{}, errcode.New(errcode.NotFound, "the tool is not available to this session")
+	}
+	return s.callApprove(ctx, binding, args)
+}
+
+// sessionVendor reads the vendor of the binding's session; a snapshot that
+// fails has no vendor, which serves nothing vendor-specific.
+func (s *SessionToolService) sessionVendor(ctx context.Context, binding SessionBinding) string {
+	info, err := s.sessions.Snapshot(ctx, binding.SessionID)
+	if err != nil {
+		return ""
+	}
+	return info.Vendor
+}
+
+// approveServed reports whether the binding's session sees the approve relay
+// tool: only Claude sessions, whose approval requests arrive as MCP
+// permission prompts (vendor-runtime VR-05). Codex and agy relays arrive as
+// protocol server requests through their adapters, so their bridge serves no
+// approve tool — a model calling it could answer its own request.
+func approveServed(vendor string) bool {
+	return vendor == VendorClaude
+}
+
+// List returns the tools of the binding's role, by name. The approve relay
+// is listed to Claude sessions only, and a tool whose Available gate fails
+// for this session is not listed.
 func (s *SessionToolService) List(ctx context.Context, binding SessionBinding) ([]FugueToolView, error) {
 	if !s.tokens.live(binding) {
 		return nil, errSessionEnded()
 	}
-	var info *vendorstore.Session
-	sessionInfo := func() (vendorstore.Session, bool) {
-		if info == nil {
-			snapshot, err := s.sessions.Snapshot(ctx, binding.SessionID)
-			if err != nil {
-				return vendorstore.Session{}, false
-			}
-			info = &snapshot
-		}
-		return *info, true
-	}
+	info := s.lazySnapshot(ctx, binding.SessionID)
 	out := make([]FugueToolView, 0, len(s.tools)+1)
-	out = append(out, approveToolView())
+	if approveServed(s.sessionVendor(ctx, binding)) {
+		out = append(out, approveToolView())
+	}
 	for _, tool := range s.tools {
-		if !servesRole(tool, binding.Role) {
+		if !servesRole(tool, binding.Role) || !toolAvailable(ctx, tool, info) {
 			continue
-		}
-		if tool.Available != nil {
-			snapshot, ok := sessionInfo()
-			if !ok || !tool.Available(ctx, snapshot) {
-				continue
-			}
 		}
 		out = append(out, FugueToolView{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
 	}
@@ -152,16 +167,43 @@ func (s *SessionToolService) List(ctx context.Context, binding SessionBinding) (
 	return out, nil
 }
 
+// lazySnapshot reads the session record at most once, and only when a tool's
+// Available gate asks for it.
+func (s *SessionToolService) lazySnapshot(ctx context.Context, sessionID string) func() (vendorstore.Session, bool) {
+	var info *vendorstore.Session
+	return func() (vendorstore.Session, bool) {
+		if info == nil {
+			snapshot, err := s.sessions.Snapshot(ctx, sessionID)
+			if err != nil {
+				return vendorstore.Session{}, false
+			}
+			info = &snapshot
+		}
+		return *info, true
+	}
+}
+
+// toolAvailable applies the tool's Available gate; a session that cannot be
+// read fails closed.
+func toolAvailable(ctx context.Context, tool *FugueTool, info func() (vendorstore.Session, bool)) bool {
+	if tool.Available == nil {
+		return true
+	}
+	snapshot, ok := info()
+	return ok && tool.Available(ctx, snapshot)
+}
+
 // Call runs one tool call of the binding's session through Decide: the
 // session's approval mode, the env-tag hard rule (I-03), grants and the
 // tool's own facts decide whether it runs, asks the user or is refused.
-// The built-in approve relay bypasses Decide completely (vendor-runtime VR-05).
+// The built-in approve relay bypasses Decide completely (vendor-runtime VR-05)
+// and is served to Claude sessions only.
 func (s *SessionToolService) Call(ctx context.Context, binding SessionBinding, name string, args []byte) (FugueToolResult, error) {
 	if !s.tokens.live(binding) {
 		return FugueToolResult{}, errSessionEnded()
 	}
 	if name == approveToolName {
-		return s.callApprove(ctx, binding, args)
+		return s.callBuiltinApprove(ctx, binding, args)
 	}
 	tool, ok := s.lookupTool(ctx, binding, name)
 	if !ok {

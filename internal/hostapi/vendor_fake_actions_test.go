@@ -166,7 +166,7 @@ func fakeRunBridge() fakeBridgeRun {
 	stdin, inErr := cmd.StdinPipe()
 	stdout, outErr := cmd.StdoutPipe()
 	if inErr != nil || outErr != nil {
-		return fakeBridgeRun{Exit: -1, Error: "bridge pipes"}
+		return fakeBridgeRun{Exit: -1, Error: bridgePipesError}
 	}
 	if err := cmd.Start(); err != nil {
 		return fakeBridgeRun{Exit: -1, Error: "start the bridge: " + err.Error()}

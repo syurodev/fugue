@@ -86,6 +86,10 @@ func buildModePermissionFrames(modes []string) []string {
 	return frames
 }
 
+// agyAllowDecisionBody is the exact answer body the relay delivers for the
+// allow option.
+const agyAllowDecisionBody = `{"outcome":"selected","optionId":"allow"}`
+
 func assertOneAgyModePromptAnsweredByUser(
 	t *testing.T, f *agyRelayFixture, sub *Subscription, mode string, prompt *PendingInteractionView,
 ) {
