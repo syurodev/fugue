@@ -130,10 +130,18 @@ func (n *Normalizer) normalizeServerRequest(frame *Frame) Observation {
 
 // normalizeElicitationRequest relays Codex's MCP tool-call gate verbatim
 // (VR-05): the message and params reach the user as they came, and the user
-// chooses accept or decline.
+// chooses how to allow it. `mcpServer/elicitation/request` is also Codex's
+// general channel for forwarded MCP server elicitations — form schemas with
+// required input, url mode — and those are refused with the unsupported
+// path: Fugue never answers a forwarded elicitation for the MCP server, and
+// an accept without the content the schema asks for would be a Fugue-made
+// decision.
 func (n *Normalizer) normalizeElicitationRequest(frame *Frame) Observation {
 	var params ElicitationRequestParams
 	if json.Unmarshal(frame.Params, &params) != nil || params.TurnID == "" || params.Message == "" {
+		return n.unsupported(n.frameRef(frame), frame.Method)
+	}
+	if !isMcpToolCallGate(&params) {
 		return n.unsupported(n.frameRef(frame), frame.Method)
 	}
 	return Observation{
@@ -145,9 +153,48 @@ func (n *Normalizer) normalizeElicitationRequest(frame *Frame) Observation {
 			Kind:      vendor.ServerRequestConfirm,
 			Summary:   boundSummary(params.Message),
 			Detail:    compactJSON(frame.Params),
-			Options:   []string{ElicitationActionAccept, ElicitationActionDecline},
+			Options:   elicitationGateOptions(params.Meta),
 		},
 	}
+}
+
+// isMcpToolCallGate reports whether the elicitation is Codex's MCP tool-call
+// approval gate: a form whose `_meta` marks the privileged
+// `mcp_tool_call` approval kind and whose requested schema asks for no
+// input. Any other shape is a forwarded MCP elicitation or another
+// privileged gate, not a tool-call approval.
+func isMcpToolCallGate(params *ElicitationRequestParams) bool {
+	if params.Mode != ElicitationModeForm {
+		return false
+	}
+	if params.Meta == nil || params.Meta.ApprovalKind != ElicitationApprovalKindMcpToolCall {
+		return false
+	}
+	var schema struct {
+		Properties map[string]json.RawMessage `json:"properties"`
+		Required   []string                   `json:"required"`
+	}
+	if len(params.RequestedSchema) == 0 || json.Unmarshal(params.RequestedSchema, &schema) != nil {
+		return false
+	}
+	return len(schema.Properties) == 0 && len(schema.Required) == 0
+}
+
+// elicitationGateOptions lists the answers the gate's own `_meta` offers:
+// one-time accept, each persistence scope the request lists, and decline.
+func elicitationGateOptions(meta *ElicitationGateMeta) []string {
+	options := []string{ElicitationOptionAccept}
+	if meta != nil {
+		for _, persist := range meta.Persist {
+			switch persist {
+			case ElicitationPersistSession:
+				options = append(options, ElicitationOptionAcceptSession)
+			case ElicitationPersistAlways:
+				options = append(options, ElicitationOptionAcceptAlways)
+			}
+		}
+	}
+	return append(options, ElicitationOptionDecline)
 }
 
 func (n *Normalizer) normalizeCommandApproval(frame *Frame) Observation {

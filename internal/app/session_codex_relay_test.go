@@ -436,14 +436,17 @@ func TestCodexTurnInterruptAnswersRelayedRequestWithAnError(t *testing.T) {
 
 // TestCodexElicitationRelaysVerbatimAndIsAnsweredOnce (F9.11, VR-05): Codex
 // gates an MCP tool call with `mcpServer/elicitation/request`; the request
-// reaches the user verbatim, the answer goes back once as the elicitation
-// action, and a retried request replays the same bytes.
+// reaches the user verbatim with every persistence scope the gate lists, an
+// accept-for-session answer carries the measured `_meta`, and a retried
+// request replays the same bytes.
 func TestCodexElicitationRelaysVerbatimAndIsAnsweredOnce(t *testing.T) {
 	t.Parallel()
 	f := newCodexRelayFixture(t)
 	sub := f.subscribeInteractions(t)
-	frame := fmt.Sprintf(`{"id":403,"method":%q,"params":{"threadId":%q,"turnId":"t-1","serverName":"fugue","mode":"form","message":%q,"requestedSchema":{"type":"object","properties":{}}}}`,
-		codex.MethodElicitationRequest, fakeCodexThreadID, `Allow the fugue MCP server to run tool "fugue_test_echo"?`)
+	frame := fmt.Sprintf(`{"id":403,"method":%q,"params":{"threadId":%q,"turnId":"t-1","serverName":"fugue","mode":"form","message":%q,"requestedSchema":{"type":"object","properties":{}},"_meta":{"codex_approval_kind":%q,"persist":[%q,%q],"tool_name":"fugue_test_echo","tool_params":{"msg":"hi"}}}}`,
+		codex.MethodElicitationRequest, fakeCodexThreadID,
+		`Allow the fugue MCP server to run tool "fugue_test_echo"?`,
+		codex.ElicitationApprovalKindMcpToolCall, codex.ElicitationPersistSession, codex.ElicitationPersistAlways)
 	f.sendServerRequestTurn(t, "codex-elicit-turn", frame)
 	prompt := awaitRequested(t, sub)
 	if prompt.Kind != string(interaction.KindConfirm) ||
@@ -451,20 +454,45 @@ func TestCodexElicitationRelaysVerbatimAndIsAnsweredOnce(t *testing.T) {
 		!strings.Contains(prompt.Detail, `"serverName":"fugue"`) {
 		t.Fatalf("elicitation prompt = %+v, want the message and params verbatim", prompt)
 	}
+	optionIDs := make([]string, 0, len(prompt.Options))
+	for _, option := range prompt.Options {
+		optionIDs = append(optionIDs, option.ID)
+	}
+	if diff := cmp.Diff([]string{codex.ElicitationOptionAccept, codex.ElicitationOptionAcceptSession, codex.ElicitationOptionAcceptAlways, codex.ElicitationOptionDecline}, optionIDs); diff != "" {
+		t.Fatalf("elicitation options (-want +got):\n%s", diff)
+	}
 	for _, resp := range f.readRPCResponses(t) {
 		if string(resp.ID) == "403" {
 			t.Fatalf("codex was answered without the user: %+v", resp)
 		}
 	}
-	f.answerOption(t, "codex-elicit-ans", prompt.RequestID, codex.ElicitationActionAccept)
-	resp := f.awaitRPCResponse(t, "403")
-	if resp.Error != nil || string(resp.Result) != `{"action":"accept"}` {
-		t.Fatalf("elicitation answer = %+v, want {\"action\":\"accept\"}", resp)
-	}
+	f.answerOption(t, "codex-elicit-ans", prompt.RequestID, codex.ElicitationOptionAcceptSession)
+	assertElicitationAnswerWithPersistSession(t, f)
 	// The same request ID again (a codex in-flight retry) replays the
 	// recorded decision, never a second ask.
 	f.steerServerRequest(t, "codex-elicit-retry", frame)
+	assertElicitationRetryReplays(t, f)
+}
+
+// assertElicitationAnswerWithPersistSession checks the answer bytes: accept
+// with the measured persist-session meta.
+func assertElicitationAnswerWithPersistSession(t *testing.T, f *codexRelayFixture) {
+	t.Helper()
+	resp := f.awaitRPCResponse(t, "403")
+	if resp.Error != nil || string(resp.Result) != `{"action":"accept","_meta":{"persist":"session"}}` {
+		t.Fatalf("elicitation answer = %+v, want accept with persist session", resp)
+	}
+}
+
+// assertElicitationRetryReplays checks the retry left nothing pending and
+// replayed the recorded accept.
+func assertElicitationRetryReplays(t *testing.T, f *codexRelayFixture) {
+	t.Helper()
 	if pending, _, pErr := f.inter.ListPending(t.Context(), testAppPrincipal); pErr != nil || len(pending) != 0 {
 		t.Fatalf("pending after retry = (%+v, %v), want 0", pending, pErr)
+	}
+	retried := f.awaitRPCResponse(t, "403")
+	if retried.Error != nil || strings.Contains(string(retried.Result), "decline") {
+		t.Fatalf("retried elicitation = %+v, want the replayed accept", retried)
 	}
 }

@@ -124,13 +124,23 @@ func (s *Session) encodeCommandApprovalResponse(pending pendingServerRequest, d 
 }
 
 // encodeElicitationResponse answers the MCP tool-call gate with the user's
-// choice: the actions Codex reads are accept and decline.
+// choice. The chosen persistence scope rides the response `_meta` as the
+// string codex-rs core reads (rust-v0.167.0): persist "session" remembers
+// the approval for the session, "always" persists it across sessions; an
+// accept without `_meta` approves this call only.
 func (s *Session) encodeElicitationResponse(pending pendingServerRequest, d vendor.Decision) ([]byte, error) {
 	action := ElicitationActionDecline
+	var meta *ElicitationAnswerMeta
 	if d.Allow {
 		action = ElicitationActionAccept
+		switch d.Message {
+		case ElicitationOptionAcceptSession:
+			meta = &ElicitationAnswerMeta{Persist: ElicitationPersistSession}
+		case ElicitationOptionAcceptAlways:
+			meta = &ElicitationAnswerMeta{Persist: ElicitationPersistAlways}
+		}
 	}
-	return s.codec.EncodeResponse(pending.rawID, ElicitationRequestResponse{Action: action}, nil)
+	return s.codec.EncodeResponse(pending.rawID, ElicitationRequestResponse{Action: action, Meta: meta}, nil)
 }
 
 func resolveChoice(d vendor.Decision) string {

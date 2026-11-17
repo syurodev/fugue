@@ -23,8 +23,8 @@ CI needs no account and no installed CLI.
 
 
 4. `codex-0.167.0-session4-fugue-tool.jsonl` (and `.turns.json`, F9.11):
-   - `initialize`, `thread/start`, and Turn 1 prompted to call the fugue MCP server's `fugue_test_echo` tool through the real `fugue mcp-bridge` attached by the F9.11 `-c mcp_servers.fugue.*` overrides (`env_vars` pass-through carried the session token).
-   - `item/started` and `item/completed` of the `mcpToolCall` (`server: "fugue"`), the server request `mcpServer/elicitation/request` (`id: 0`, Codex's gate for MCP tool calls; during recording answered `{"action":"accept"}` by hand), `item/completed` with the tool result, `turn/completed`.
+   - `initialize`, `thread/start`, and Turn 1 prompted to call the fugue MCP server's `fugue_test_echo` tool **twice** through the real `fugue mcp-bridge` attached by the F9.11 `-c mcp_servers.fugue.*` overrides (`env_vars` pass-through carried the session token).
+   - The server request `mcpServer/elicitation/request` (`id: 0`) is Codex's gate for MCP tool calls. During recording the FIRST gate was answered by hand with the measured persist shape `{"action":"accept","_meta":{"persist":"session"}}`; the second `mcpToolCall` (`item/started` + `item/completed`, `exec-…`) then ran WITHOUT a second gate — the live confirmation that the answer shape grants session persistence (codex-rs core `parse_mcp_tool_approval_elicitation_response`, rust-v0.167.0).
    - Recorded with `go test -tags fugue_record -run TestRecordF911Fixtures ./internal/hostapi/` against a live host serving the echo tool; redacted by the recorder before commit.
 
 ## Redaction (applied before commit; verified by `TestCodexFixturesContainNoHostIdentity`)

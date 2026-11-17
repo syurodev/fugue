@@ -2,7 +2,7 @@
  "session": "session-1",
  "vendor": "codex",
  "summary": {
-  "partials": 10,
+  "partials": 1,
   "notices": 28,
   "server_requests": 1
  },
@@ -40,21 +40,21 @@
    }
   },
   {
-   "line": 4,
+   "line": 5,
    "op": "record",
    "item": {
     "content": {
      "text": "mcpServer/startupStatus/updated"
     },
-    "id": "notice-line-4",
+    "id": "notice-line-5",
     "kind": "notice",
     "metadata": {
      "code": "unsupported_event",
      "level": "info"
     },
-    "raw": "line-4",
+    "raw": "line-5",
     "revision": 0,
-    "turn": ""
+    "turn": "turn-1"
    }
   },
   {
@@ -491,7 +491,7 @@
    "item": {
     "content": {
      "attachments": [],
-     "text": "Call the fugue_test_echo tool exactly once with the arguments {\"msg\":\"hi\"}. Then reply with only the word DONE."
+     "text": "Call the fugue_test_echo tool exactly twice with the arguments {\"msg\":\"hi\"} (two separate tool calls, waiting for each result). Then reply with only the word DONE."
     },
     "id": "uuid-0005",
     "kind": "user_message",
@@ -510,12 +510,12 @@
     "content": {
      "text": ""
     },
-    "id": "rs_0bc963255759a3e4016afb46d5e18c87d0a806ce85c42ba181",
+    "id": "rs_0a9a67f5c35d52e7016afbae18652c87d0ba9b4ec0af575cb7",
     "kind": "reasoning",
     "metadata": {
      "status": "summary"
     },
-    "raw": "rs_0bc963255759a3e4016afb46d5e18c87d0a806ce85c42ba181",
+    "raw": "rs_0a9a67f5c35d52e7016afbae18652c87d0ba9b4ec0af575cb7",
     "revision": 0,
     "turn": "turn-1"
    }
@@ -527,12 +527,12 @@
     "content": {
      "text": ""
     },
-    "id": "rs_0bc963255759a3e4016afb46d5e18c87d0a806ce85c42ba181",
+    "id": "rs_0a9a67f5c35d52e7016afbae18652c87d0ba9b4ec0af575cb7",
     "kind": "reasoning",
     "metadata": {
      "status": "summary"
     },
-    "raw": "rs_0bc963255759a3e4016afb46d5e18c87d0a806ce85c42ba181",
+    "raw": "rs_0a9a67f5c35d52e7016afbae18652c87d0ba9b4ec0af575cb7",
     "revision": 0,
     "turn": "turn-1"
    },
@@ -540,12 +540,12 @@
     "content": {
      "text": ""
     },
-    "id": "rs_0bc963255759a3e4016afb46d5e18c87d0a806ce85c42ba181",
+    "id": "rs_0a9a67f5c35d52e7016afbae18652c87d0ba9b4ec0af575cb7",
     "kind": "reasoning",
     "metadata": {
      "status": "summary"
     },
-    "raw": "rs_0bc963255759a3e4016afb46d5e18c87d0a806ce85c42ba181",
+    "raw": "rs_0a9a67f5c35d52e7016afbae18652c87d0ba9b4ec0af575cb7",
     "revision": 1,
     "turn": "turn-1"
    }
@@ -554,129 +554,82 @@
    "line": 37,
    "op": "record",
    "item": {
-    "content": {
-     "text": ""
-    },
-    "id": "msg_0bc963255759a3e4016afb46d6065887d08a2bf4aeb649abda",
-    "kind": "assistant_message",
-    "metadata": {
-     "model": "gpt-6-luna"
-    },
-    "raw": "msg_0bc963255759a3e4016afb46d6065887d08a2bf4aeb649abda",
-    "revision": 0,
-    "turn": "turn-1"
-   }
-  },
-  {
-   "line": 47,
-   "op": "update",
-   "before": {
-    "content": {
-     "text": ""
-    },
-    "id": "msg_0bc963255759a3e4016afb46d6065887d08a2bf4aeb649abda",
-    "kind": "assistant_message",
-    "metadata": {
-     "model": "gpt-6-luna"
-    },
-    "raw": "msg_0bc963255759a3e4016afb46d6065887d08a2bf4aeb649abda",
-    "revision": 0,
-    "turn": "turn-1"
-   },
-   "after": {
-    "content": {
-     "text": "I’m calling the requested echo tool once."
-    },
-    "id": "msg_0bc963255759a3e4016afb46d6065887d08a2bf4aeb649abda",
-    "kind": "assistant_message",
-    "metadata": {
-     "model": "gpt-6-luna"
-    },
-    "raw": "msg_0bc963255759a3e4016afb46d6065887d08a2bf4aeb649abda",
-    "revision": 1,
-    "turn": "turn-1"
-   }
-  },
-  {
-   "line": 48,
-   "op": "record",
-   "item": {
     "content": {},
     "id": "turn-1-usage",
     "kind": "usage",
     "metadata": {
      "cache_tokens": 7168,
      "cost": 0,
-     "input_tokens": 16299,
-     "output_tokens": 106
+     "input_tokens": 16311,
+     "output_tokens": 79
     },
-    "raw": "line-48",
+    "raw": "line-37",
     "revision": 0,
     "turn": "turn-1"
    }
   },
   {
-   "line": 49,
+   "line": 38,
    "op": "quota",
    "quota": {
     "Windows": [
      {
       "Name": "primary",
       "Utilization": 0.01,
-      "ResetsAt": "2026-12-16T16:37:27Z",
+      "ResetsAt": "2026-12-16T16:37:26Z",
       "Status": ""
      }
     ]
    }
   },
   {
-   "line": 49,
+   "line": 38,
    "op": "record",
    "item": {
     "content": {},
-    "id": "quota-line-49-primary",
+    "id": "quota-line-38-primary",
     "kind": "quota",
     "metadata": {
      "account": "",
-     "resets_at": "2026-12-16T16:37:27Z",
+     "resets_at": "2026-12-16T16:37:26Z",
      "used": 0.01,
      "window": "primary"
     },
-    "raw": "line-49",
+    "raw": "line-38",
     "revision": 0,
     "turn": "turn-1"
    }
   },
   {
-   "line": 50,
+   "line": 39,
    "op": "record",
    "item": {
     "content": {
      "text": ""
     },
-    "id": "rs_0bc963255759a3e4016afb46d7dc4c87d0a175a7ba8e728c71",
+    "id": "rs_0a9a67f5c35d52e7016afbae1b8b0c87d0a4ae6b301754e5e6",
     "kind": "reasoning",
     "metadata": {
      "status": "summary"
     },
-    "raw": "rs_0bc963255759a3e4016afb46d7dc4c87d0a175a7ba8e728c71",
+    "raw": "rs_0a9a67f5c35d52e7016afbae1b8b0c87d0a4ae6b301754e5e6",
     "revision": 0,
     "turn": "turn-1"
    }
   },
   {
-   "line": 51,
+   "line": 40,
    "op": "update",
    "before": {
     "content": {
      "text": ""
     },
-    "id": "rs_0bc963255759a3e4016afb46d7dc4c87d0a175a7ba8e728c71",
+    "id": "rs_0a9a67f5c35d52e7016afbae1b8b0c87d0a4ae6b301754e5e6",
     "kind": "reasoning",
     "metadata": {
      "status": "summary"
     },
-    "raw": "rs_0bc963255759a3e4016afb46d7dc4c87d0a175a7ba8e728c71",
+    "raw": "rs_0a9a67f5c35d52e7016afbae1b8b0c87d0a4ae6b301754e5e6",
     "revision": 0,
     "turn": "turn-1"
    },
@@ -684,18 +637,18 @@
     "content": {
      "text": ""
     },
-    "id": "rs_0bc963255759a3e4016afb46d7dc4c87d0a175a7ba8e728c71",
+    "id": "rs_0a9a67f5c35d52e7016afbae1b8b0c87d0a4ae6b301754e5e6",
     "kind": "reasoning",
     "metadata": {
      "status": "summary"
     },
-    "raw": "rs_0bc963255759a3e4016afb46d7dc4c87d0a175a7ba8e728c71",
+    "raw": "rs_0a9a67f5c35d52e7016afbae1b8b0c87d0a4ae6b301754e5e6",
     "revision": 1,
     "turn": "turn-1"
    }
   },
   {
-   "line": 52,
+   "line": 41,
    "op": "record",
    "item": {
     "content": {
@@ -716,25 +669,25 @@
    }
   },
   {
-   "line": 53,
+   "line": 42,
    "op": "record",
    "item": {
     "content": {
      "text": "thread/status/changed"
     },
-    "id": "notice-line-53",
+    "id": "notice-line-42",
     "kind": "notice",
     "metadata": {
      "code": "unsupported_event",
      "level": "info"
     },
-    "raw": "line-53",
+    "raw": "line-42",
     "revision": 0,
     "turn": "turn-1"
    }
   },
   {
-   "line": 54,
+   "line": 43,
    "op": "server_request",
    "server_request": {
     "RequestID": "0",
@@ -746,6 +699,8 @@
     "Detail": "{\"threadId\":\"uuid-0002\",\"turnId\":\"uuid-0003\",\"serverName\":\"fugue\",\"mode\":\"form\",\"_meta\":{\"codex_approval_kind\":\"mcp_tool_call\",\"persist\":[\"session\",\"always\"],\"tool_name\":\"fugue_test_echo\",\"tool_description\":\"echo for tests\",\"tool_params\":{\"msg\":\"hi\"},\"tool_params_display\":[{\"name\":\"msg\",\"value\":\"hi\",\"display_name\":\"msg\"}]},\"message\":\"Allow the fugue MCP server to run tool \\\"fugue_test_echo\\\"?\",\"requestedSchema\":{\"type\":\"object\",\"properties\":{}}}",
     "Options": [
      "accept",
+     "accept_session",
+     "accept_always",
      "decline"
     ],
     "QuestionOptions": null,
@@ -754,25 +709,25 @@
    }
   },
   {
-   "line": 56,
+   "line": 45,
    "op": "record",
    "item": {
     "content": {
      "text": "thread/status/changed"
     },
-    "id": "notice-line-56",
+    "id": "notice-line-45",
     "kind": "notice",
     "metadata": {
      "code": "unsupported_event",
      "level": "info"
     },
-    "raw": "line-56",
+    "raw": "line-45",
     "revision": 0,
     "turn": "turn-1"
    }
   },
   {
-   "line": 57,
+   "line": 46,
    "op": "update",
    "before": {
     "content": {
@@ -800,7 +755,7 @@
     "id": "exec-uuid-0006",
     "kind": "tool_call",
     "metadata": {
-     "duration_ms": 3,
+     "duration_ms": 2,
      "status": "succeeded",
      "tool": "fugue/fugue_test_echo"
     },
@@ -810,7 +765,66 @@
    }
   },
   {
-   "line": 58,
+   "line": 47,
+   "op": "record",
+   "item": {
+    "content": {
+     "input": "{\"msg\":\"hi\"}",
+     "output": "",
+     "title": "fugue/fugue_test_echo"
+    },
+    "id": "exec-uuid-0008",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "running",
+     "tool": "fugue/fugue_test_echo"
+    },
+    "raw": "exec-uuid-0008",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 48,
+   "op": "update",
+   "before": {
+    "content": {
+     "input": "{\"msg\":\"hi\"}",
+     "output": "",
+     "title": "fugue/fugue_test_echo"
+    },
+    "id": "exec-uuid-0008",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "running",
+     "tool": "fugue/fugue_test_echo"
+    },
+    "raw": "exec-uuid-0008",
+    "revision": 0,
+    "turn": "turn-1"
+   },
+   "after": {
+    "content": {
+     "input": "{\"msg\":\"hi\"}",
+     "output": "{\"content\":[{\"type\":\"text\",\"text\":\"echo:uuid-0007:{\\\"msg\\\":\\\"hi\\\"}\"}],\"structuredContent\":null,\"_meta\":null}",
+     "title": "fugue/fugue_test_echo"
+    },
+    "id": "exec-uuid-0008",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "succeeded",
+     "tool": "fugue/fugue_test_echo"
+    },
+    "raw": "exec-uuid-0008",
+    "revision": 1,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 49,
    "op": "update",
    "before": {
     "content": {},
@@ -819,10 +833,10 @@
     "metadata": {
      "cache_tokens": 7168,
      "cost": 0,
-     "input_tokens": 16299,
-     "output_tokens": 106
+     "input_tokens": 16311,
+     "output_tokens": 79
     },
-    "raw": "line-48",
+    "raw": "line-37",
     "revision": 0,
     "turn": "turn-1"
    },
@@ -833,16 +847,16 @@
     "metadata": {
      "cache_tokens": 16128,
      "cost": 0,
-     "input_tokens": 16498,
-     "output_tokens": 47
+     "input_tokens": 16483,
+     "output_tokens": 76
     },
-    "raw": "line-48",
+    "raw": "line-37",
     "revision": 1,
     "turn": "turn-1"
    }
   },
   {
-   "line": 59,
+   "line": 50,
    "op": "quota",
    "quota": {
     "Windows": [
@@ -856,11 +870,11 @@
    }
   },
   {
-   "line": 59,
+   "line": 50,
    "op": "record",
    "item": {
     "content": {},
-    "id": "quota-line-59-primary",
+    "id": "quota-line-50-primary",
     "kind": "quota",
     "metadata": {
      "account": "",
@@ -868,41 +882,41 @@
      "used": 0.01,
      "window": "primary"
     },
-    "raw": "line-59",
+    "raw": "line-50",
     "revision": 0,
     "turn": "turn-1"
    }
   },
   {
-   "line": 60,
+   "line": 51,
    "op": "record",
    "item": {
     "content": {
      "text": ""
     },
-    "id": "msg_0bc963255759a3e4016afb46d9536087d0bec3835395904491",
+    "id": "msg_0a9a67f5c35d52e7016afbae1df12087d0b15ad85aa0843228",
     "kind": "assistant_message",
     "metadata": {
      "model": "gpt-6-luna"
     },
-    "raw": "msg_0bc963255759a3e4016afb46d9536087d0bec3835395904491",
+    "raw": "msg_0a9a67f5c35d52e7016afbae1df12087d0b15ad85aa0843228",
     "revision": 0,
     "turn": "turn-1"
    }
   },
   {
-   "line": 62,
+   "line": 53,
    "op": "update",
    "before": {
     "content": {
      "text": ""
     },
-    "id": "msg_0bc963255759a3e4016afb46d9536087d0bec3835395904491",
+    "id": "msg_0a9a67f5c35d52e7016afbae1df12087d0b15ad85aa0843228",
     "kind": "assistant_message",
     "metadata": {
      "model": "gpt-6-luna"
     },
-    "raw": "msg_0bc963255759a3e4016afb46d9536087d0bec3835395904491",
+    "raw": "msg_0a9a67f5c35d52e7016afbae1df12087d0b15ad85aa0843228",
     "revision": 0,
     "turn": "turn-1"
    },
@@ -910,18 +924,18 @@
     "content": {
      "text": "DONE"
     },
-    "id": "msg_0bc963255759a3e4016afb46d9536087d0bec3835395904491",
+    "id": "msg_0a9a67f5c35d52e7016afbae1df12087d0b15ad85aa0843228",
     "kind": "assistant_message",
     "metadata": {
      "model": "gpt-6-luna"
     },
-    "raw": "msg_0bc963255759a3e4016afb46d9536087d0bec3835395904491",
+    "raw": "msg_0a9a67f5c35d52e7016afbae1df12087d0b15ad85aa0843228",
     "revision": 1,
     "turn": "turn-1"
    }
   },
   {
-   "line": 63,
+   "line": 54,
    "op": "update",
    "before": {
     "content": {},
@@ -930,10 +944,10 @@
     "metadata": {
      "cache_tokens": 16128,
      "cost": 0,
-     "input_tokens": 16498,
-     "output_tokens": 47
+     "input_tokens": 16483,
+     "output_tokens": 76
     },
-    "raw": "line-48",
+    "raw": "line-37",
     "revision": 1,
     "turn": "turn-1"
    },
@@ -944,16 +958,16 @@
     "metadata": {
      "cache_tokens": 16256,
      "cost": 0,
-     "input_tokens": 16619,
+     "input_tokens": 16682,
      "output_tokens": 5
     },
-    "raw": "line-48",
+    "raw": "line-37",
     "revision": 2,
     "turn": "turn-1"
    }
   },
   {
-   "line": 64,
+   "line": 55,
    "op": "quota",
    "quota": {
     "Windows": [
@@ -967,11 +981,11 @@
    }
   },
   {
-   "line": 64,
+   "line": 55,
    "op": "record",
    "item": {
     "content": {},
-    "id": "quota-line-64-primary",
+    "id": "quota-line-55-primary",
     "kind": "quota",
     "metadata": {
      "account": "",
@@ -979,38 +993,38 @@
      "used": 0.01,
      "window": "primary"
     },
-    "raw": "line-64",
+    "raw": "line-55",
     "revision": 0,
     "turn": "turn-1"
    }
   },
   {
-   "line": 65,
+   "line": 56,
    "op": "record",
    "item": {
     "content": {
      "text": "thread/status/changed"
     },
-    "id": "notice-line-65",
+    "id": "notice-line-56",
     "kind": "notice",
     "metadata": {
      "code": "unsupported_event",
      "level": "info"
     },
-    "raw": "line-65",
+    "raw": "line-56",
     "revision": 0,
     "turn": "turn-1"
    }
   },
   {
-   "line": 66,
+   "line": 57,
    "op": "turn_end",
    "turn_end": {
     "TurnID": "turn-1",
     "Outcome": "completed",
     "FailureCode": "",
     "Usage": {
-     "InputTokens": 16619,
+     "InputTokens": 16682,
      "OutputTokens": 5,
      "CacheTokens": 16256,
      "Cost": 0

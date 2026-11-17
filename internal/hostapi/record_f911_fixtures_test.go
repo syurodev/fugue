@@ -39,7 +39,7 @@ import (
 	vendorsv1 "github.com/syurodev/fugue/pkg/pb/fugue/vendors/v1"
 )
 
-const recordPrompt = "Call the fugue_test_echo tool exactly once with the arguments {\"msg\":\"hi\"}. Then reply with only the word DONE."
+const recordPrompt = "Call the fugue_test_echo tool exactly twice with the arguments {\"msg\":\"hi\"} (two separate tool calls, waiting for each result). Then reply with only the word DONE."
 
 func TestRecordF911Fixtures(t *testing.T) {
 	codexBin, err := exec.LookPath("codex")
@@ -133,17 +133,27 @@ func recordCodex(t *testing.T, v *vendorHost, codexBin string) {
 	var lines []string
 	turnLine := 0
 	turnSent := false
+	gateAnswers := 0
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64<<10), 8<<20)
 	for scanner.Scan() {
 		line := scanner.Text()
 		lines = append(lines, line)
 		// Codex keeps its own approval policy (VR-04): the recording grants
-		// the one call the prompt asks for.
+		// the calls the prompt asks for. The FIRST tool-call gate is answered
+		// with the measured persist-session meta, so a second gate for the
+		// same tool must never arrive; any later gate gets a one-time accept.
 		if requestID := approvalRequestID(line); requestID != "" {
-			result := map[string]string{"decision": "accept"}
+			var result any = map[string]string{"decision": "accept"}
 			if strings.Contains(line, "elicitation") {
-				result = map[string]string{"action": "accept"}
+				result = map[string]any{"action": "accept"}
+				if gateAnswers == 0 {
+					gateAnswers++
+					result = map[string]any{
+						"action": "accept",
+						"_meta":  map[string]string{"persist": "session"},
+					}
+				}
 			}
 			decision, err := json.Marshal(map[string]any{
 				"jsonrpc": "2.0", "id": json.RawMessage(requestID),
