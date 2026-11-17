@@ -41,6 +41,7 @@ const (
 type IconButtonProps struct {
 	Icon     IconName
 	Label    string
+	Shortcut Shortcut
 	Variant  IconButtonVariant
 	Size     ButtonSize
 	Toggled  bool
@@ -56,7 +57,7 @@ func NewIconButtonState() *IconButtonState { return &IconButtonState{pressable: 
 
 // Measure returns the box: the square of the size token, at least
 // size.hit.min (§6.3). It draws nothing and touches no input source.
-func (s *IconButtonState) Measure(_ *Env, gtx *layout.Context, p IconButtonProps) layout.Dimensions {
+func (s *IconButtonState) Measure(_ *Env, gtx *layout.Context, p *IconButtonProps) layout.Dimensions {
 	side := max(controlHeight(gtx, p.Size), gtx.Dp(theme.HitMin))
 	return layout.Dimensions{Size: image.Pt(side, side)}
 }
@@ -68,7 +69,7 @@ var errIconButtonName = errors.New("an IconButton needs a Label: it is the acces
 // activated this frame (UK-06), with Button's keyboard behavior. An empty
 // Label or an unknown icon is a programming error and comes back as an
 // error.
-func (s *IconButtonState) Layout(env *Env, gtx *layout.Context, p IconButtonProps) (bool, error) {
+func (s *IconButtonState) Layout(env *Env, gtx *layout.Context, p *IconButtonProps) (bool, error) {
 	if p.Label == "" {
 		return false, errIconButtonName
 	}
@@ -83,6 +84,17 @@ func (s *IconButtonState) Layout(env *Env, gtx *layout.Context, p IconButtonProp
 		})
 	if err != nil {
 		return false, fmt.Errorf("draw the icon button: %w", err)
+	}
+	if !p.Disabled && env.Preview == (Preview{}) {
+		env.TooltipAnchor(
+			s.Tag(),
+			image.Rectangle{Max: side},
+			s.click.Hovered(),
+			env.FocusVisible(gtx, s.Tag()),
+			false,
+			image.Point{},
+			TooltipProps{Text: p.Label, Shortcut: p.Shortcut},
+		)
 	}
 	return clicked, nil
 }

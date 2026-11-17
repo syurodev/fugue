@@ -54,6 +54,9 @@ const (
 	compTextArea
 	compMenu
 	compKbd
+	compCombobox
+	compSelect
+	compTooltip
 )
 
 // cell identifies one matrix cell of the inventory (UK-E03).
@@ -80,14 +83,17 @@ func iconVariantNames() []string { return []string{"ghost (default)", "secondary
 
 // pages owns the components, the nav and the per-frame recordings.
 type pages struct {
-	env   *kit.Env
-	btns  [numVariants][numSizes][numStates]*kit.ButtonState
-	icon  [numVariants][2]*kit.ButtonState
-	icons [numIconVariants][numStates]*kit.IconButtonState
-	text  [numFieldVariants][numFieldStates]*kit.TextFieldState
-	area  [numAreaStates]*kit.TextAreaState
-	menu  menuPage
-	nav   []*kit.ButtonState
+	env      *kit.Env
+	btns     [numVariants][numSizes][numStates]*kit.ButtonState
+	icon     [numVariants][2]*kit.ButtonState
+	icons    [numIconVariants][numStates]*kit.IconButtonState
+	text     [numFieldVariants][numFieldStates]*kit.TextFieldState
+	area     [numAreaStates]*kit.TextAreaState
+	menu     menuPage
+	combobox comboboxPage
+	sel      selectPage
+	tip      tooltipPage
+	nav      []*kit.ButtonState
 	// runs are the page-level text runs and ctl the control boxes of the
 	// frame, in window coordinates; ctlRuns are the runs drawn inside a
 	// control — labels, placeholders, helper and error lines — which the
@@ -111,6 +117,9 @@ func newPages(env *kit.Env) *pages {
 	p.newButtonStates()
 	p.newFieldStates()
 	p.menu = newMenuPage()
+	p.combobox = newComboboxPage()
+	p.sel = newSelectPage()
+	p.tip = newTooltipPage()
 	for range pageNames() {
 		p.nav = append(p.nav, kit.NewButtonState())
 	}
@@ -231,6 +240,8 @@ func (p *pages) force(st string, tag event.Tag) {
 		p.env.Preview.Press = tag
 	case stFocus:
 		p.env.Preview.Focus = tag
+	case selOpen:
+		p.env.Preview.Open = tag
 	}
 }
 
@@ -388,7 +399,7 @@ func (p *pages) iconRow(gtx *layout.Context, vi int) []cellDraw {
 	row := make([]cellDraw, 0, numStates)
 	for ci, st := range iconStates() {
 		s := p.icons[vi][ci]
-		pr := kit.IconButtonProps{
+		pr := &kit.IconButtonProps{
 			Icon: icons[ci], Label: "Demo " + st, Variant: kit.IconButtonVariant(vi),
 			Disabled: st == stDisabled, Toggled: st == stToggled,
 		}

@@ -9,8 +9,9 @@
 // the motion tokens), the text fields (F10.10), and the menu on the window
 // overlay (F10.11: one overlay owned by the window and drawn last, anchors,
 // flips at the edges, submenus, a window-wide absorbing area under the root
-// menu). The rest of kit v1 lands in F10.12; every component's doc comment
-// points at its ui-kit § section.
+// menu). Combobox, Select, SuggestList and Tooltip (with IconButton
+// wiring) land in F10.16; the rest of kit v1/v2 lands in F10.12–F10.19;
+// every component's doc comment points at its ui-kit § section.
 //
 // The kit knows nothing about the Host API, vendors or modules (UK-10): it
 // takes colors and sizes from ui/internal/theme and reports what happened
