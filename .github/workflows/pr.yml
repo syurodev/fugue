@@ -126,7 +126,7 @@ jobs:
   # ten times with the race detector and a fresh shuffle each time, so a test
   # that fails one run in ten fails here and not on a later unrelated PR
   # (quality-gates section 6). Only those functions rerun, never the whole
-  # package: ten counts of a heavy package would pass the 10-minute timeout.
+  # package, and each of the ten repetitions is its own go test run.
   # The package and test lists come from fuguegate changes; Linux always, macOS
   # when the change is platform-specific, like the test job.
   stress:
@@ -161,7 +161,13 @@ jobs:
         env:
           PACKAGES: ${{ needs.changes.outputs.test_pkgs }}
           TESTS: ${{ needs.changes.outputs.test_run }}
-        run: go tool task test-pkg PKG="$PACKAGES" RUN="$TESTS" COUNT=10
+        # Ten separate -count=1 runs, not one -count=10: the package timeout
+        # covers every count of a binary, and a PR that edits many tests of a
+        # heavy package (internal/app) still has to fit it, like the nightly.
+        run: |
+          for i in $(seq 1 10); do
+            go tool task test-pkg PKG="$PACKAGES" RUN="$TESTS" COUNT=1
+          done
 
   coverage:
     needs: [changes, test]

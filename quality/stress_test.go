@@ -24,7 +24,7 @@ func TestPRStressRerunsChangedTestPackages(t *testing.T) {
 	task := readRepoFile(t, "Taskfile.yml")
 	for _, want := range []string{
 		"\n  stress:\n", "needs: changes", "needs.changes.outputs.test_pkgs",
-		"needs.changes.outputs.test_run", osUbuntu, osMacOS, "needs.changes.outputs.platform", "task test-pkg PKG=\"$PACKAGES\" RUN=\"$TESTS\" COUNT=10",
+		"needs.changes.outputs.test_run", osUbuntu, osMacOS, "needs.changes.outputs.platform", "task test-pkg PKG=\"$PACKAGES\" RUN=\"$TESTS\" COUNT=1", "seq 1 10",
 	} {
 		if !strings.Contains(pr, want) {
 			t.Errorf("pr.yml lacks %q", want)
@@ -35,6 +35,11 @@ func TestPRStressRerunsChangedTestPackages(t *testing.T) {
 		if !strings.Contains(task, want) {
 			t.Errorf("Taskfile.yml test-pkg lacks %q", want)
 		}
+	}
+	// One -count=10 run shares one 10-minute timeout across all counts, so a PR
+	// that edits many tests of a heavy package would still time out.
+	if strings.Contains(pr, "COUNT=10") {
+		t.Error("stress repeats with ten separate -count=1 runs, never one -count=10 run")
 	}
 	// Ten counts of a whole heavy package (internal/app takes minutes per
 	// count) pass the timeout, so the job reruns only the changed tests: the
