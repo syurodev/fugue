@@ -18,6 +18,7 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"github.com/google/go-cmp/cmp"
 
 	"github.com/syurodev/fugue/internal/app"
 	"github.com/syurodev/fugue/internal/platform/ids"
@@ -163,8 +164,14 @@ func assertBridgeToolList(t *testing.T, run fakeVendorBridgeOutcome, sessionID s
 	if err := json.Unmarshal(run.Replies[1], &list); err != nil {
 		t.Fatal(err)
 	}
-	if len(list.Result.Tools) != 1 || list.Result.Tools[0].Name != testEchoTool {
-		t.Fatalf("tools/list = %s, want only the echo tool", run.Replies[1])
+	// Teams default on (F11.2a), so the propose tool is listed; the approve
+	// relay never is for Codex and agy (VR-05).
+	names := make([]string, 0, len(list.Result.Tools))
+	for _, tool := range list.Result.Tools {
+		names = append(names, tool.Name)
+	}
+	if diff := cmp.Diff([]string{testProposeTool, testEchoTool}, names); diff != "" {
+		t.Fatalf("tools/list names (-want +got):\n%s", diff)
 	}
 	var call struct {
 		Result struct {

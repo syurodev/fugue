@@ -152,10 +152,28 @@ func (s *SessionToolService) List(ctx context.Context, binding SessionBinding) (
 	if !s.tokens.live(binding) {
 		return nil, errSessionEnded()
 	}
+	info := s.lazySnapshot(ctx, binding.SessionID)
+	out := make([]FugueToolView, 0, len(s.tools)+1)
+	if approveServed(s.sessionVendor(ctx, binding)) {
+		out = append(out, approveToolView())
+	}
+	for _, tool := range s.tools {
+		if !servesRole(tool, binding.Role) || !toolAvailable(ctx, tool, info) {
+			continue
+		}
+		out = append(out, FugueToolView{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
+	}
+	slices.SortFunc(out, func(a, b FugueToolView) int { return strings.Compare(a.Name, b.Name) })
+	return out, nil
+}
+
+// lazySnapshot reads the session record at most once, and only when a tool's
+// Available gate asks for it.
+func (s *SessionToolService) lazySnapshot(ctx context.Context, sessionID string) func() (vendorstore.Session, bool) {
 	var info *vendorstore.Session
-	sessionInfo := func() (vendorstore.Session, bool) {
+	return func() (vendorstore.Session, bool) {
 		if info == nil {
-			snapshot, err := s.sessions.Snapshot(ctx, binding.SessionID)
+			snapshot, err := s.sessions.Snapshot(ctx, sessionID)
 			if err != nil {
 				return vendorstore.Session{}, false
 			}
@@ -163,24 +181,16 @@ func (s *SessionToolService) List(ctx context.Context, binding SessionBinding) (
 		}
 		return *info, true
 	}
-	out := make([]FugueToolView, 0, len(s.tools)+1)
-	if approveServed(s.sessionVendor(ctx, binding)) {
-		out = append(out, approveToolView())
+}
+
+// toolAvailable applies the tool's Available gate; a session that cannot be
+// read fails closed.
+func toolAvailable(ctx context.Context, tool *FugueTool, info func() (vendorstore.Session, bool)) bool {
+	if tool.Available == nil {
+		return true
 	}
-	for _, tool := range s.tools {
-		if !servesRole(tool, binding.Role) {
-			continue
-		}
-		if tool.Available != nil {
-			snapshot, ok := sessionInfo()
-			if !ok || !tool.Available(ctx, snapshot) {
-				continue
-			}
-		}
-		out = append(out, FugueToolView{Name: tool.Name, Description: tool.Description, InputSchema: tool.InputSchema})
-	}
-	slices.SortFunc(out, func(a, b FugueToolView) int { return strings.Compare(a.Name, b.Name) })
-	return out, nil
+	snapshot, ok := info()
+	return ok && tool.Available(ctx, snapshot)
 }
 
 // Call runs one tool call of the binding's session through Decide: the
