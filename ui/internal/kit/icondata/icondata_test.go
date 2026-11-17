@@ -83,6 +83,7 @@ func packagedIcons() []packagedIcon {
 		{"copy", "Copy"},
 		{"rotate-ccw", "RotateCCW"},
 		{"circle-help", "CircleHelp"},
+		{"pin", "Pin"},
 	}
 }
 

@@ -213,7 +213,7 @@ func (m *MenuState) Layout(env *Env, gtx *layout.Context, p MenuProps) (MenuResu
 			m.openerInput(gtx, m.opener)
 		}
 		if !m.lv[0].open.Visible() {
-			env.releaseOverlay(m)
+			env.releaseMenu(m)
 			return res, nil
 		}
 	}
@@ -241,10 +241,10 @@ func (m *MenuState) Layout(env *Env, gtx *layout.Context, p MenuProps) (MenuResu
 // and closes one that another menu has taken it from (UK-07).
 func (m *MenuState) syncOverlay(env *Env) {
 	if m.claim {
-		env.claimOverlay(m)
+		env.claimMenu(m)
 		m.claim = false
 	}
-	if !env.holdsOverlay(m) {
+	if !env.holdsMenu(m) {
 		m.Close()
 	}
 }

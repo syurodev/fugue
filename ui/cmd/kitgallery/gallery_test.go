@@ -67,6 +67,9 @@ func expectedCells(cur int) map[cell]bool {
 		"ListRow":       listRowCells,
 		"SectionHeader": sectionHeaderCells,
 		"ScrollArea":    scrollAreaCells,
+		"Popover":       popoverCells,
+		"Dialog":        dialogCells,
+		"Toast":         toastCells,
 	}
 	if fn := builders[pageNames()[cur]]; fn != nil {
 		fn(want)
@@ -188,6 +191,33 @@ func scrollAreaCells(want map[cell]bool) {
 	want[cell{compScrollArea, 1, 0, stRest}] = true
 	want[cell{compScrollArea, 1, 0, stHover}] = true
 	want[cell{compScrollArea, 2, 0, stRest}] = true
+}
+
+// popoverCells are the Popover cells: the three specimens and the live
+// trigger.
+func popoverCells(want map[cell]bool) {
+	for _, st := range popoverStates() {
+		if st == povLive {
+			want[cell{compPopover, 1, 0, st}] = true
+			continue
+		}
+		want[cell{compPopover, 0, 0, st}] = true
+	}
+}
+
+// dialogCells are the Dialog cells: the four specimens and the live trigger.
+func dialogCells(want map[cell]bool) {
+	for _, st := range []string{dlgForm, dlgFormFocus, dlgConfirm, dlgSafeFocus} {
+		want[cell{compDialog, 0, 0, st}] = true
+	}
+	want[cell{compDialog, 1, 0, dlgLive}] = true
+}
+
+// toastCells are the Toast cells: the push triggers of every variant.
+func toastCells(want map[cell]bool) {
+	for _, st := range toastStates() {
+		want[cell{compToast, 0, 0, st}] = true
+	}
 }
 
 // TestGalleryPagesCoverEveryVariantAndState covers UK-E03: every page
