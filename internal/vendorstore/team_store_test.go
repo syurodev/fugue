@@ -392,9 +392,9 @@ func reopenStoreLocked(t *testing.T, s *Store, v *vault.Service, path string) *S
 
 func assertRecoveredTaskStates(t *testing.T, s2 *Store) TeamRecord {
 	t.Helper()
-	teamAfter, tasksAfter, err := s2.TeamSnapshot(t.Context(), "team-recover")
-	if err != nil {
-		t.Fatalf("TeamSnapshot: %v", err)
+	teamAfter, tasksAfter, snapErr := s2.TeamSnapshot(t.Context(), "team-recover")
+	if snapErr != nil {
+		t.Fatalf("TeamSnapshot: %v", snapErr)
 	}
 	byID := make(map[string]TaskState, len(tasksAfter))
 	for i := range tasksAfter {
@@ -706,4 +706,38 @@ func scanTeamNonEnvelopeColumns(t *testing.T, s *Store, table, skipCol string, m
 		}
 	}
 	requireNoError(t, rows.Err())
+}
+
+func TestPendingTeamForSessionReturnsOnlyTheProposedTeam(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, _, _ := protectedStore(t)
+	spec := mustMarshalProtectedSpec(t, []string{"g1", "c1", "s1", "k1", "p1", "q1", "r1", "u1"})
+	if _, _, err := s.CreateTeam(ctx, &NewTeamInput{
+		TeamID: "team-pending", WorkspaceID: testWorkspaceID, SessionID: "sess-propose", ProposedEventID: testEvProposed,
+		Tasks: []NewTaskInput{{
+			TaskID: testTaskLeadID, HierarchyRole: RoleLead, CatalogRole: testRoleResearch,
+			Deliverable: DeliverableReport, CreatedEventID: testEvLead, ProtectedSpec: spec,
+		}},
+	}); err != nil {
+		t.Fatalf("CreateTeam: %v", err)
+	}
+	pending, ok, err := s.PendingTeamForSession(ctx, "sess-propose")
+	if err != nil || !ok || pending.TeamID != "team-pending" || pending.State != TeamStateProposed {
+		t.Fatalf("pending = (%+v, %v, %v), want team-pending proposed", pending, ok, err)
+	}
+	if _, otherOK, otherErr := s.PendingTeamForSession(ctx, "sess-other"); otherErr != nil || otherOK {
+		t.Fatalf("pending for session without a team = (%v, %v), want none", otherOK, otherErr)
+	}
+	rec, _, snapErr := s.TeamSnapshot(ctx, "team-pending")
+	if snapErr != nil {
+		t.Fatalf("TeamSnapshot: %v", snapErr)
+	}
+	appendSeq(t, s, "team-pending", rec.LastSeq, []AppendTeamEventInput{
+		{EventID: "tp-cancel", TaskID: testTaskLeadID, EventType: EventTaskEnded, Outcome: outcomeCancelled},
+		{EventID: "tp-end", EventType: EventTeamEnded, Outcome: outcomeCancelled},
+	})
+	if _, ok, err := s.PendingTeamForSession(ctx, "sess-propose"); err != nil || ok {
+		t.Fatalf("pending after cancel = (%v, %v), want none", ok, err)
+	}
 }

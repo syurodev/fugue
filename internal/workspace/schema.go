@@ -76,8 +76,16 @@ type ProfileConfig struct {
 	Effort string `toml:"effort,omitempty"`
 }
 
-// SessionConfig holds session-scoped settings.
-type SessionConfig struct{ ScratchDir, Model, Effort string }
+// SessionConfig holds session-scoped settings. Teams controls whether the
+// workspace's sessions are offered fugue_team_propose (F11.2a, Q-105); every
+// proposal still waits for the user, and an out-of-band change of the key
+// waits for confirmation like every policy key (Q-64).
+type SessionConfig struct {
+	ScratchDir string
+	Model      string
+	Effort     string
+	Teams      bool
+}
 
 // HostConfig holds host-wide settings valid only in Tier 2 (<FugueHome>/config.toml).
 type HostConfig struct{ WorkspacesDir, OutputRetentionTotal, SeenVersionsPerSession, SnapshotDisk string }
@@ -111,14 +119,14 @@ func DefaultConfig(fugueHome, workspaceID string) EffectiveConfig {
 	if workspaceID != "" {
 		scratchDir = filepath.Join(wsDir, workspaceID, "scratch")
 	}
-	for _, k := range []string{keyPolicyApprovalMode, "policy.sandbox_profile", "policy.shell_ask", "policy.shell_allow", "policy.env_tags", "env.keep", "env.override_allow", "redact.allow_keys", "redact.allow_paths", "roles", "profiles", "session.scratch_dir", "host.workspaces_dir", "host.output_retention_total", "host.seen_versions_per_session", "host.snapshot_disk"} {
+	for _, k := range []string{keyPolicyApprovalMode, "policy.sandbox_profile", "policy.shell_ask", "policy.shell_allow", "policy.env_tags", "env.keep", "env.override_allow", "redact.allow_keys", "redact.allow_paths", "roles", "profiles", "session.scratch_dir", "session.teams", "host.workspaces_dir", "host.output_retention_total", "host.seen_versions_per_session", "host.snapshot_disk"} {
 		prov[k] = TierDefault
 	}
 	return EffectiveConfig{
 		Roots: []Root{}, Env: Env{Keep: []string{}, OverrideAllow: []string{}},
 		Policy: PolicyConfig{ApprovalMode: "auto", SandboxProfile: "workspace-write", ShellAsk: []string{}, ShellAllow: []string{}, EnvTags: []EnvTagRule{}},
 		Redact: RedactConfig{AllowKeys: []string{}, AllowPaths: []string{}}, Roles: []RoleConfig{}, Profiles: map[string]ProfileConfig{},
-		Session: SessionConfig{ScratchDir: scratchDir}, Provenance: prov,
+		Session: SessionConfig{ScratchDir: scratchDir, Teams: true}, Provenance: prov,
 		Host: HostConfig{WorkspacesDir: wsDir, OutputRetentionTotal: "64 MiB", SeenVersionsPerSession: "8 MiB", SnapshotDisk: "1 GiB"},
 	}
 }
@@ -218,6 +226,9 @@ func applyCommonTier(
 	applyProfiles(dst, tier, profiles)
 	if sess != nil {
 		setPathScalar(&dst.Session.ScratchDir, dst.Provenance, "session.scratch_dir", tier, sess.ScratchDir, homeDir)
+		if sess.Teams != nil {
+			dst.Session.Teams, dst.Provenance["session.teams"] = *sess.Teams, tier
+		}
 	}
 }
 
@@ -277,6 +288,7 @@ func diffPolicy(accepted, candidate *EffectiveConfig) []PolicyDiffEntry {
 	add("redact.allow_paths", fmtStrs(accepted.Redact.AllowPaths), fmtStrs(candidate.Redact.AllowPaths))
 	add("roots", fmt.Sprint(accepted.Roots), fmt.Sprint(candidate.Roots))
 	add("roles", formatRolesForDiff(accepted.Roles), formatRolesForDiff(candidate.Roles))
+	add("session.teams", strconv.FormatBool(accepted.Session.Teams), strconv.FormatBool(candidate.Session.Teams))
 	return diffs
 }
 

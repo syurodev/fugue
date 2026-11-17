@@ -50,6 +50,11 @@ message PendingRequest {
   // request (docs: interaction v0.16, §8, §9). Content only: never written to
   // audit, logs, errors, or journal metadata.
   string detail = 13;
+  // body carries the optional text shown alongside the questions of a
+  // question-kind request (docs: interaction §4.1, F11.2a team proposal
+  // cards). Content only: never written to audit, logs, errors, or journal
+  // metadata.
+  string body = 14;
 }
 
 // ListPendingRequest asks for the current snapshot of pending interaction

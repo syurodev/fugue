@@ -46,6 +46,11 @@ type VendorSessionDeps struct {
 	// OnSessionEnded runs once when a session's actor stops, however it
 	// stopped; the host revokes the session token there.
 	OnSessionEnded func(sessionID string)
+	// SessionEndSettled returns a channel that closes when the work started
+	// by OnSessionEnded has finished, or nil when none is running. The actor
+	// holds its close until then, still serving commands, so that work can
+	// write to the session's transcript before the store closes it.
+	SessionEndSettled func(sessionID string) <-chan struct{}
 	// TestDelaySpawnRegistration runs inside OnSpawned before owner registration.
 	TestDelaySpawnRegistration func(context.Context)
 	// TestOnWaitInflightSpawn runs when OwnsPeer begins waiting on in-flight spawns.
