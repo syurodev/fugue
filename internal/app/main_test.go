@@ -51,7 +51,7 @@ func TestMain(m *testing.M) {
 const (
 	fakeCLIVersion     = "2.1.319"
 	fakeCodexVersion   = "codex-cli 0.167.0"
-	fakeAgyVersion     = "1.5.9"
+	fakeAgyVersion     = "1.5.10"
 	fakeCLIHold        = "hold-turn"
 	fakeCLISession     = `"session_id":"9b2e4f10-5c1d-4e8a-9f3b-2d7c6a1e0b55"`
 	fakeCodexThreadID  = "9b2e4f10-5c1d-4e8a-9f3b-2d7c6a1e0b55"
@@ -219,8 +219,10 @@ type fakeACPInbound struct {
 		} `json:"prompt"`
 	} `json:"params"`
 	Result struct {
-		Outcome  string `json:"outcome"`
-		OptionID string `json:"optionId"`
+		Outcome struct {
+			Outcome  string `json:"outcome"`
+			OptionID string `json:"optionId"`
+		} `json:"outcome"`
 	} `json:"result"`
 	Error *struct {
 		Code    int    `json:"code"`
@@ -267,7 +269,7 @@ func extractFakeACPPrompt(msg *fakeACPInbound) string {
 func handleFakeACPMethod(st *fakeACPLoopState, id, method, prompt string) {
 	switch method {
 	case "initialize":
-		writeFakeCLI(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"audio":false,"embeddedContext":true},"sessionCapabilities":{"resume":{},"close":{},"load":{},"list":{},"additionalDirectories":{}}},"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.9"}}}`+"\n", id))
+		writeFakeCLI(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"audio":false,"embeddedContext":true},"sessionCapabilities":{"resume":{},"close":{},"load":{},"list":{},"additionalDirectories":{}}},"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.10"}}}`+"\n", id))
 	case "session/new", "session/load":
 		writeFakeCLI(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"sessionId":%q,"models":{"availableModels":[{"modelId":"gemini-3.8-flash","name":"Gemini 3.8 Flash"}],"currentModelId":"gemini-3.8-flash"},"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Default"}]}}}`+"\n", id, fakeCodexThreadID))
 		writeFakeCLI(fmt.Sprintf(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":%q,"update":{"sessionUpdate":"available_commands_update","availableCommands":[{"name":"goal"},{"name":"compact"},{"name":"schedule"},{"name":"browser"},{"name":"plan"},{"name":"grill-me"},{"name":"teamwork"},{"name":"learn"},{"name":"boost"},{"name":"agy-customizations"},{"name":"antigravity-guide"},{"name":"run-workflow"},{"name":"swarm"}]}}}`+"\n", fakeCodexThreadID))
@@ -325,7 +327,7 @@ func handleFakeACPResponse(st *fakeACPLoopState, msg *fakeACPInbound) {
 	marker := st.shellMarker
 	st.heldPromptID = ""
 	st.shellMarker = ""
-	if msg.Error == nil && msg.Result.Outcome == "selected" && (msg.Result.OptionID == approveOptionAllow || msg.Result.OptionID == agyOptionAllowAlways) {
+	if msg.Error == nil && msg.Result.Outcome.Outcome == "selected" && (msg.Result.Outcome.OptionID == approveOptionAllow || msg.Result.Outcome.OptionID == agyOptionAllowAlways) {
 		if marker != "" {
 			if err := os.WriteFile(filepath.Clean(marker), []byte("ran-after-permission\n"), 0o600); err != nil {
 				os.Exit(1)
