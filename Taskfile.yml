@@ -1,5 +1,5 @@
 # Gate definition: docs/quality-gates.md sections 1-9. Changes need the gate-change-approved label.
-# `check` runs exactly the PR gates; long jobs (full mutation, long fuzzing, -count=5) are nightly.
+# `check` runs exactly the PR gates; long jobs (full mutation, long fuzzing, twenty repetitions of every test, perf budgets) are nightly.
 version: "3"
 
 # Keep local Go tools responsive; CI retains its runner defaults. Explicit shell
@@ -29,6 +29,8 @@ vars:
   # reads this value so the tests run the same linter version as `task lint`.
   GOLANGCI_LINT_VERSION: v2.15.0
   GOLANGCI_LINT: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@{{.GOLANGCI_LINT_VERSION}}
+  # Repetitions of the nightly stress run (quality-gates §6).
+  NIGHTLY_REPEATS: 20
   ALLOWED_LICENSES: MIT,BSD-2-Clause,BSD-3-Clause,Apache-2.0,ISC
 
 tasks:
@@ -82,9 +84,25 @@ tasks:
       - git config core.hooksPath .githooks
 
   nightly-test:
-    desc: Repeat every test five times to find flaky ones (nightly)
+    desc: Repeat every test twenty times with a fresh shuffle each time (nightly)
+    # One invocation per repetition, not -count=20: the 10-minute test timeout
+    # covers all counts of one package binary, and internal/app alone needs
+    # minutes per count. Each repetition keeps the PR timeout; the JSON log
+    # feeds `fuguegate flaky`. The loop finishes before it reports a failure.
     cmds:
-      - go test -race -shuffle=on -count=5 ./...
+      - rm -f nightly-test.json
+      - |
+        failed=0
+        for i in $(seq 1 {{.NIGHTLY_REPEATS}}); do
+          go test -race -shuffle=on -count=1 -timeout=10m -json ./... >> nightly-test.json || failed=1
+        done
+        exit $failed
+
+  perf:
+    desc: Speed budgets, the median of several measurements, without the race detector (nightly)
+    cmds:
+      - go test -tags perf -count=1 -timeout=10m -v ./internal/perf/...
+      - cd ui && go test -tags perf -count=1 -timeout=10m -v ./internal/mdview/... ./internal/transcriptview/...
 
   windows-build:
     desc: The module must still build for Windows (nightly)
@@ -140,9 +158,12 @@ tasks:
       - go tool go-licenses check ./... --allowed_licenses={{.ALLOWED_LICENSES}} --ignore=modernc.org/mathutil
 
   proto:
-    desc: buf lint, format, breaking changes against main, generated code up to date
+    desc: buf lint, format, breaking changes against main, generated code up to date (Go only without CI)
+    # The TypeScript plugin is remote, so the full template needs the network.
+    # A local run checks the Go output with proto/buf.gen.local.yaml and no
+    # network; CI runs the full template.
     cmds:
-      - go run ./cmd/fuguegate proto -base origin/main
+      - go run ./cmd/fuguegate proto -base origin/main{{if not (env "CI")}} -template proto/buf.gen.local.yaml -generated pkg/pb{{end}}
 
   generate:
     desc: Regenerate Go and TypeScript code from proto/ (run after changing a .proto file)

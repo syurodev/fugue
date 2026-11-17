@@ -17,6 +17,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
+	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vendoradapter/codex"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -43,7 +44,7 @@ func newCodexRelayFixture(t *testing.T) *codexRelayFixture {
 	}
 	clk := clock.NewFake(time.Unix(200, 0))
 	hp, err := StartHost(t.Context(), &HostDeps{
-		DataDir: cheapVaultDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
+		DataDir: cheapvault.DataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("codex-relay")),
 		Transport: newScriptedTransport(), VendorBinary: exe, CodexBinary: codexLink,
 	})

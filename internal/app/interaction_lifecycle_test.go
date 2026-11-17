@@ -16,6 +16,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/internal/testutil"
 )
 
 const (
@@ -88,7 +89,7 @@ func (c cycleCost) perCycleAllocs() float64 {
 // the minimum is the closest to the real cost.
 func measureWindows(t *testing.T, svc *InteractionService, start uint64) (cheapest, fastest cycleCost) {
 	t.Helper()
-	realClock := clock.Real{}
+	realClock := testutil.OSClock()
 	for w := range uint64(memoryWindows) {
 		from := start + w*memoryWindowCycles
 		var before, after runtime.MemStats

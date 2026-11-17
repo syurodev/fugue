@@ -10,10 +10,9 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
-// TestChangeScope pins which pull requests skip which test jobs. Every case
-// that could hide a regression must land on the side that runs more.
-func TestChangeScope(t *testing.T) {
-	t.Parallel()
+// scopeFixture writes the files the change-scope cases read from disk.
+func scopeFixture(t *testing.T) string {
+	t.Helper()
 	dir := t.TempDir()
 	write := func(rel, body string) {
 		t.Helper()
@@ -28,9 +27,22 @@ func TestChangeScope(t *testing.T) {
 	write("internal/kernel/decide.go", "// Package kernel.\npackage kernel\n")
 	write("ui/internal/hostconn/hostconn.go", "package hostconn\n")
 	write("pkg/client/client.go", "package client\n")
+	write("internal/kernel/decide_test.go", "package kernel\n")
+	write("internal/kernel/testdata/decide_test.go", "package kernel\n")
+	write("internal/vendor/a_test.go", "package vendor\n")
+	write("internal/vendor/b_test.go", "package vendor\n")
+	write("ui/internal/hostconn/hostconn_test.go", "package hostconn\n")
 	write("pkg/pb/x/x.pb.go", "package x\n")
 	write("internal/vendor/proc.go", "//go:build unix\n\npackage vendor\n")
 	write("internal/vendor/after.go", "package vendor\n\n//go:build unix\n")
+	return dir
+}
+
+// TestChangeScope pins which pull requests skip which test jobs. Every case
+// that could hide a regression must land on the side that runs more.
+func TestChangeScope(t *testing.T) {
+	t.Parallel()
+	dir := scopeFixture(t)
 
 	cases := []struct {
 		name    string
@@ -62,6 +74,10 @@ func TestChangeScope(t *testing.T) {
 		{"workflow", []string{".github/workflows/pr.yml"}, changeScope{code: true, platform: true}},
 		{"module", []string{"go.sum"}, changeScope{code: true, platform: true}},
 		{"task file", []string{"Taskfile.yml"}, changeScope{code: true, platform: true}},
+		{"changed tests name their packages once, sorted", []string{"internal/vendor/b_test.go", "internal/kernel/decide_test.go", "internal/vendor/a_test.go", "internal/kernel/decide.go"}, changeScope{code: true, platform: false, testPkgs: []string{"./internal/kernel", "./internal/vendor"}}},
+		{"ui tests have their own workflow", []string{"ui/internal/hostconn/hostconn_test.go"}, changeScope{code: true, ui: true}},
+		{"test fixtures are not packages", []string{"internal/kernel/testdata/decide_test.go"}, changeScope{code: true}},
+		{"a deleted test leaves nothing to rerun", []string{"internal/gone/gone_test.go"}, changeScope{code: true, platform: true}},
 		{"empty change set runs everything", nil, everything()},
 		{"blank entries only", []string{"", " "}, everything()},
 	}
@@ -79,14 +95,14 @@ func TestChangesCommandPrintsStepOutputs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff := cmp.Diff("code=false\nplatform=false\nui=false\n", out); diff != "" {
+	if diff := cmp.Diff("code=false\nplatform=false\nui=false\ntest_pkgs=\ntest_run=\n", out); diff != "" {
 		t.Errorf("output (-want +got):\n%s", diff)
 	}
 	out, err = execute(t, "changes", "-files", "cmd/fugue/serve.go")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if diff := cmp.Diff("code=true\nplatform=true\nui=false\n", out); diff != "" {
+	if diff := cmp.Diff("code=true\nplatform=true\nui=false\ntest_pkgs=\ntest_run=\n", out); diff != "" {
 		t.Errorf("output (-want +got):\n%s", diff)
 	}
 }
@@ -104,5 +120,29 @@ func TestChangesFailsSafeOnABrokenDiff(t *testing.T) {
 	}
 	if _, err := execute(t, "changes"); !errors.Is(err, ErrUsage) {
 		t.Errorf("no input: err = %v, want ErrUsage", err)
+	}
+}
+
+// The stress job reruns ten counts under one 10-minute package timeout, so it
+// gets the changed test functions, never the whole package.
+func TestChangesPrintsTheChangedTestFunctionsForStress(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	body := "package heavy\n\nimport \"testing\"\n\n" +
+		"func TestOne(t *testing.T) {}\nfunc FuzzTwo(f *testing.F) {}\n" +
+		"func TestMain(m *testing.M) {}\nfunc Testing() {}\nfunc helper() {}\n" +
+		"func (s *suite) TestMethod() {}\n"
+	if err := os.MkdirAll(filepath.Join(dir, "internal", "heavy"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "internal", "heavy", "heavy_test.go"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out, err := execute(t, "changes", "-dir", dir, "-files", "internal/heavy/heavy_test.go,internal/heavy/gone_test.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "test_pkgs=./internal/heavy\ntest_run=^(FuzzTwo|TestOne)$\n") {
+		t.Errorf("output lacks the heavy package and its test functions:\n%s", out)
 	}
 }

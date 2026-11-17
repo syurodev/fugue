@@ -179,8 +179,10 @@ func isSnapshot(topic string) func(Update) bool {
 // returns with a new incarnation. It runs against a real `fugue serve`.
 func TestAppReconnectsAndCatchesUpFromSequence(t *testing.T) {
 	t.Parallel()
-	ctx := testCtx(t)
+	// The cold build comes first: the 60 s deadline is for the reconnect
+	// behavior, and must not also pay for `go install`.
 	bin := buildFugue(t)
+	ctx := testCtx(t)
 	host := startServe(t, ctx, bin)
 	clock := newFakeClock()
 	m, upd := newTestManager(t, host.dataDir, clock, "host")

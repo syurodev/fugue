@@ -12,7 +12,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/process"
+	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/vendor"
 )
 
@@ -132,15 +132,7 @@ func TestProbeBinaryNotFoundFailsTyped(t *testing.T) {
 // writeExecutable writes a shell-script fixture that the OS may execute.
 func writeExecutable(t *testing.T, path, content string) {
 	t.Helper()
-	mode := os.FileMode(0o700)
-	// The fork lock keeps a concurrent fork from inheriting the open write
-	// descriptor, which would make the later exec fail with ETXTBSY.
-	syscall.ForkLock.RLock()
-	err := os.WriteFile(path, []byte(content), mode)
-	syscall.ForkLock.RUnlock()
-	if err != nil {
-		t.Fatal(err)
-	}
+	testutil.WriteExecutable(t, path, []byte(content))
 }
 
 func TestProbeRunsThePATHBinaryNotTheWorkingDirectoryOne(t *testing.T) {

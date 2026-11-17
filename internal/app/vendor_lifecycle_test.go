@@ -25,6 +25,8 @@ import (
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/storage"
+	"github.com/syurodev/fugue/internal/testutil"
+	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -47,7 +49,7 @@ var errUnclassifiedVendor = errors.New("unclassified vendor failure")
 // kill leaves it, and closes the store so StartHost can take the lock.
 func seedCrashedVendorSession(t *testing.T, dir string) string {
 	t.Helper()
-	clk := clock.Real{}
+	clk := testutil.OSClock()
 	store, err := storage.OpenStore(t.Context(), config.Config{DataDir: dir}, clk,
 		ids.NewUUIDv7(clk, ids.NewDeterministic("vendor-seed")))
 	if err != nil {
@@ -85,7 +87,7 @@ func startLifecycleHost(t *testing.T, dir string) *HostProcess {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedCheapVaultDir(t, dir)
+	cheapvault.SeedDataDir(t, dir)
 	clk := clock.NewFake(time.Unix(0, 0))
 	hp, err := StartHost(t.Context(), &HostDeps{
 		DataDir: dir, Config: testHostConfig(), Clock: clk,
@@ -246,7 +248,7 @@ type vendorStopResult struct {
 // every session recorded during the drain.
 func readStopResults(t *testing.T, dir string) map[string]vendorStopResult {
 	t.Helper()
-	clk := clock.Real{}
+	clk := testutil.OSClock()
 	store, err := storage.OpenStore(t.Context(), config.Config{DataDir: dir}, clk,
 		ids.NewUUIDv7(clk, ids.NewDeterministic("vendor-stop-read")))
 	if err != nil {

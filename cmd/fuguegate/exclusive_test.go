@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/syurodev/fugue/internal/platform/clock"
+	"github.com/syurodev/fugue/internal/testutil"
 )
 
 // errTryFailed is the error the waitForFree unit test's try function reports.
@@ -406,7 +406,7 @@ func TestExclusiveRefusesTaskCommands(t *testing.T) {
 // interrupted wait as the shell's SIGINT code.
 func TestWaitForFree(t *testing.T) {
 	t.Parallel()
-	clk := clock.Real{}
+	clk := testutil.OSClock()
 
 	tries := 0
 	if err := waitForFree(t.Context(), clk, func() (bool, error) {

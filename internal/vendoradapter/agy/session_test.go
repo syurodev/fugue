@@ -19,6 +19,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/transcript"
 	"github.com/syurodev/fugue/internal/vendor"
 )
@@ -452,16 +453,11 @@ func TestAgyStopKillsTheProcessTree(t *testing.T) {
 		}
 	})
 
-	realClk := clock.Real{}
-	deadline := realClk.Now().Add(2 * time.Second)
-	for realClk.Now().Before(deadline) {
+	testutil.Poll(t, "the session to own the grandchild", func() bool {
 		clk.Advance(100 * time.Millisecond)
 		owned, oErr := sess.OwnsPID(pid)
-		if oErr == nil && owned {
-			break
-		}
-		sleepReal(10 * time.Millisecond)
-	}
+		return oErr == nil && owned
+	})
 
 	closeErrCh := make(chan error, 1)
 	_ = supervise.Go(ctx, "test.agy_setsid_close", func(taskCtx context.Context) error {
@@ -473,14 +469,9 @@ func TestAgyStopKillsTheProcessTree(t *testing.T) {
 		t.Fatalf("Close: %v", err)
 	}
 
-	waitDeadline := realClk.Now().Add(2 * time.Second)
-	for realClk.Now().Before(waitDeadline) {
-		if kErr := syscall.Kill(pid, 0); errors.Is(kErr, syscall.ESRCH) {
-			return
-		}
-		sleepReal(20 * time.Millisecond)
-	}
-	t.Fatalf("setsid grandchild %d survived session Close", pid)
+	testutil.Poll(t, "the setsid child to be killed on Close", func() bool {
+		return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
+	})
 }
 
 func TestAgySessionHandshakeTimeoutAndOversizedFrame(t *testing.T) {
@@ -506,9 +497,9 @@ func TestAgySessionHandshakeTimeoutAndOversizedFrame(t *testing.T) {
 	}
 
 	// Oversized stdio frame fails typed (ErrFrameTooLarge).
-	// Use clock.Real so process.Stop's 1s pipe-settle timeout fires cleanly
+	// Use the OS clock so process.Stop's 1s pipe-settle timeout fires cleanly
 	// without racing the handshake timeout on an unadvanced fake clock.
-	adapter2 := newTestAdapter(t, clock.Real{})
+	adapter2 := newTestAdapter(t, testutil.OSClock())
 	_, frameErr := adapter2.Start(ctx, &vendor.StartSpec{
 		SessionID: "frame-1",
 		Cwd:       t.TempDir(),
@@ -588,18 +579,17 @@ func verifyInterruptTimeoutEscalation(t *testing.T) {
 
 func waitForPIDFile(t *testing.T, pidFile string) int {
 	t.Helper()
-	realClk := clock.Real{}
-	deadline := realClk.Now().Add(2 * time.Second)
-	for realClk.Now().Before(deadline) {
-		if raw, err := os.ReadFile(filepath.Clean(pidFile)); err == nil && len(strings.TrimSpace(string(raw))) > 0 {
-			if pid, pErr := strconv.Atoi(strings.TrimSpace(string(raw))); pErr == nil && pid > 0 {
-				return pid
-			}
+	pid := 0
+	testutil.Poll(t, "the pid file", func() bool {
+		raw, err := os.ReadFile(filepath.Clean(pidFile))
+		if err != nil {
+			return false
 		}
-		sleepReal(15 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for pid file %s", pidFile)
-	return 0
+		n, pErr := strconv.Atoi(strings.TrimSpace(string(raw)))
+		pid = n
+		return pErr == nil && n > 0
+	})
+	return pid
 }
 
 func driveFakeClock(ctx context.Context, clk *clock.Fake, errCh <-chan error) error {
@@ -621,7 +611,7 @@ func driveFakeClock(ctx context.Context, clk *clock.Fake, errCh <-chan error) er
 }
 
 func sleepReal(d time.Duration) {
-	tm := clock.Real{}.NewTimer(d)
+	tm := testutil.OSClock().NewTimer(d)
 	<-tm.C()
 	tm.Stop()
 }

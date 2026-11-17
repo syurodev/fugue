@@ -113,6 +113,14 @@ func packageProblems(rows []layerRow, p *goPackage) []string {
 		if !ok || irel == rel {
 			continue
 		}
+		if target, known := findRow(rows, irel); known && target.layer == "support" {
+			// Test support packages are free for any package's tests and
+			// never for production code.
+			if slices.Contains(p.Imports, imp) {
+				out = append(out, fmt.Sprintf("%s imports %s: a test support package is imported from test files only", rel, irel))
+			}
+			continue
+		}
 		out = append(out, importProblem(row, declared, internal, rel, irel)...)
 	}
 	return out
@@ -186,6 +194,7 @@ func TestLayerGraph(t *testing.T) {
 			"tools/vet imports internal/kernel: tools and quality tests do not depend on internal packages",
 			"internal/platform/clock (layer 0) may import internal/kernel (layer 1)",
 			"internal/arch is a test-only package and may import nothing",
+			"internal/kernel imports internal/testutil: a test support package is imported from test files only",
 			"internal/app may import internal/ghost, which has no row",
 			"package internal/kernel has two layer rows",
 			"pkg/client imports internal/platform/clock: packages under pkg/ never import internal packages",

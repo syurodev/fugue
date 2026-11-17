@@ -18,6 +18,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/storage"
+	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vault"
 )
 
@@ -53,7 +54,7 @@ func newAdapterStore(t *testing.T, unlocked bool) *execstore.Store {
 		t.Fatal("migrate database")
 	}
 	if unlocked {
-		saveCheapKeyring(t, vault.NewSQLKeyringStore(db))
+		cheapvault.Save(t, vault.NewSQLKeyringStore(db))
 	}
 	v, err := vault.NewService(ctx, vault.NewSQLKeyringStore(db), ids.NewSequence("vault"))
 	if err != nil {
