@@ -111,7 +111,9 @@ func validateProfile(spec *vendor.StartSpec) error {
 
 // BuildArgv constructs the vetted spawn argv for a Codex app-server session.
 // It carries no permission-widening flag, and Codex's own approval policy stays
-// at its default (VR-04, vendor-runtime §5.2).
+// at its default (VR-04, vendor-runtime §5.2). The Fugue MCP overrides are
+// appended after the denylist check: they are Fugue's own, and no profile can
+// set them.
 func BuildArgv(binary string, spec *vendor.StartSpec) ([]string, error) {
 	if binary == "" {
 		return nil, errcode.New(errcode.InvalidArgument, "codex binary path is empty")
@@ -128,7 +130,16 @@ func BuildArgv(binary string, spec *vendor.StartSpec) ([]string, error) {
 			return nil, errcode.New(errcode.InvalidArgument, "codex: invalid argument")
 		}
 	}
-	return argv, nil
+	if spec.Bridge.Binary == "" {
+		return argv, nil
+	}
+	overrides, err := bridgeConfigOverrides(spec.Bridge)
+	if err != nil {
+		return nil, err
+	}
+	grown := make([]string, len(argv), len(argv)+len(overrides))
+	copy(grown, argv)
+	return append(grown, overrides...), nil
 }
 
 // SessionEnv is the environment of a Codex session process: the §8 allowlist

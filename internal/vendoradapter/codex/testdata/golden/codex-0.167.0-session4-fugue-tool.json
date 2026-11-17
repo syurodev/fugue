@@ -1,0 +1,1022 @@
+{
+ "session": "session-1",
+ "vendor": "codex",
+ "summary": {
+  "partials": 10,
+  "notices": 28,
+  "server_requests": 1
+ },
+ "steps": [
+  {
+   "line": 2,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "remoteControl/status/changed"
+    },
+    "id": "notice-line-2",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-2",
+    "revision": 0,
+    "turn": ""
+   }
+  },
+  {
+   "line": 3,
+   "op": "init",
+   "init": {
+    "Version": "0.167.0",
+    "SessionID": "uuid-0002",
+    "Model": "gpt-6-luna",
+    "PermissionMode": "on-request",
+    "SlashCommands": [
+     "/compact",
+     "/review"
+    ]
+   }
+  },
+  {
+   "line": 4,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-4",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-4",
+    "revision": 0,
+    "turn": ""
+   }
+  },
+  {
+   "line": 6,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-6",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-6",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 7,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-7",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-7",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 8,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-8",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-8",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 10,
+   "op": "init",
+   "init": {
+    "Version": "0.167.0",
+    "SessionID": "uuid-0004",
+    "Model": "gpt-6-luna",
+    "PermissionMode": "on-request",
+    "SlashCommands": [
+     "/compact",
+     "/review"
+    ]
+   }
+  },
+  {
+   "line": 12,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-12",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-12",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 13,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-13",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-13",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 14,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-14",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-14",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 15,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-15",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-15",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 16,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "thread/status/changed"
+    },
+    "id": "notice-line-16",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-16",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 18,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-18",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-18",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 19,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-19",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-19",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 20,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-20",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-20",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 21,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-21",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-21",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 22,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-22",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-22",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 23,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-23",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-23",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 24,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "account/updated"
+    },
+    "id": "notice-line-24",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-24",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 25,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-25",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-25",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 26,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-26",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-26",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 27,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-27",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-27",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 28,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-28",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-28",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 29,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-29",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-29",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 30,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-30",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-30",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 31,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-31",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-31",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 32,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "mcpServer/startupStatus/updated"
+    },
+    "id": "notice-line-32",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-32",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 33,
+   "op": "record",
+   "item": {
+    "content": {
+     "attachments": [],
+     "text": "Call the fugue_test_echo tool exactly once with the arguments {\"msg\":\"hi\"}. Then reply with only the word DONE."
+    },
+    "id": "uuid-0005",
+    "kind": "user_message",
+    "metadata": {
+     "origin": "user"
+    },
+    "raw": "uuid-0005",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 35,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": ""
+    },
+    "id": "rs_0bc963255759a3e4016afb46d5e18c87d0a806ce85c42ba181",
+    "kind": "reasoning",
+    "metadata": {
+     "status": "summary"
+    },
+    "raw": "rs_0bc963255759a3e4016afb46d5e18c87d0a806ce85c42ba181",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 36,
+   "op": "update",
+   "before": {
+    "content": {
+     "text": ""
+    },
+    "id": "rs_0bc963255759a3e4016afb46d5e18c87d0a806ce85c42ba181",
+    "kind": "reasoning",
+    "metadata": {
+     "status": "summary"
+    },
+    "raw": "rs_0bc963255759a3e4016afb46d5e18c87d0a806ce85c42ba181",
+    "revision": 0,
+    "turn": "turn-1"
+   },
+   "after": {
+    "content": {
+     "text": ""
+    },
+    "id": "rs_0bc963255759a3e4016afb46d5e18c87d0a806ce85c42ba181",
+    "kind": "reasoning",
+    "metadata": {
+     "status": "summary"
+    },
+    "raw": "rs_0bc963255759a3e4016afb46d5e18c87d0a806ce85c42ba181",
+    "revision": 1,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 37,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": ""
+    },
+    "id": "msg_0bc963255759a3e4016afb46d6065887d08a2bf4aeb649abda",
+    "kind": "assistant_message",
+    "metadata": {
+     "model": "gpt-6-luna"
+    },
+    "raw": "msg_0bc963255759a3e4016afb46d6065887d08a2bf4aeb649abda",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 47,
+   "op": "update",
+   "before": {
+    "content": {
+     "text": ""
+    },
+    "id": "msg_0bc963255759a3e4016afb46d6065887d08a2bf4aeb649abda",
+    "kind": "assistant_message",
+    "metadata": {
+     "model": "gpt-6-luna"
+    },
+    "raw": "msg_0bc963255759a3e4016afb46d6065887d08a2bf4aeb649abda",
+    "revision": 0,
+    "turn": "turn-1"
+   },
+   "after": {
+    "content": {
+     "text": "I’m calling the requested echo tool once."
+    },
+    "id": "msg_0bc963255759a3e4016afb46d6065887d08a2bf4aeb649abda",
+    "kind": "assistant_message",
+    "metadata": {
+     "model": "gpt-6-luna"
+    },
+    "raw": "msg_0bc963255759a3e4016afb46d6065887d08a2bf4aeb649abda",
+    "revision": 1,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 48,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "turn-1-usage",
+    "kind": "usage",
+    "metadata": {
+     "cache_tokens": 7168,
+     "cost": 0,
+     "input_tokens": 16299,
+     "output_tokens": 106
+    },
+    "raw": "line-48",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 49,
+   "op": "quota",
+   "quota": {
+    "Windows": [
+     {
+      "Name": "primary",
+      "Utilization": 0.01,
+      "ResetsAt": "2026-12-16T16:37:27Z",
+      "Status": ""
+     }
+    ]
+   }
+  },
+  {
+   "line": 49,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "quota-line-49-primary",
+    "kind": "quota",
+    "metadata": {
+     "account": "",
+     "resets_at": "2026-12-16T16:37:27Z",
+     "used": 0.01,
+     "window": "primary"
+    },
+    "raw": "line-49",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 50,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": ""
+    },
+    "id": "rs_0bc963255759a3e4016afb46d7dc4c87d0a175a7ba8e728c71",
+    "kind": "reasoning",
+    "metadata": {
+     "status": "summary"
+    },
+    "raw": "rs_0bc963255759a3e4016afb46d7dc4c87d0a175a7ba8e728c71",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 51,
+   "op": "update",
+   "before": {
+    "content": {
+     "text": ""
+    },
+    "id": "rs_0bc963255759a3e4016afb46d7dc4c87d0a175a7ba8e728c71",
+    "kind": "reasoning",
+    "metadata": {
+     "status": "summary"
+    },
+    "raw": "rs_0bc963255759a3e4016afb46d7dc4c87d0a175a7ba8e728c71",
+    "revision": 0,
+    "turn": "turn-1"
+   },
+   "after": {
+    "content": {
+     "text": ""
+    },
+    "id": "rs_0bc963255759a3e4016afb46d7dc4c87d0a175a7ba8e728c71",
+    "kind": "reasoning",
+    "metadata": {
+     "status": "summary"
+    },
+    "raw": "rs_0bc963255759a3e4016afb46d7dc4c87d0a175a7ba8e728c71",
+    "revision": 1,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 52,
+   "op": "record",
+   "item": {
+    "content": {
+     "input": "{\"msg\":\"hi\"}",
+     "output": "",
+     "title": "fugue/fugue_test_echo"
+    },
+    "id": "exec-uuid-0006",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "running",
+     "tool": "fugue/fugue_test_echo"
+    },
+    "raw": "exec-uuid-0006",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 53,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "thread/status/changed"
+    },
+    "id": "notice-line-53",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-53",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 54,
+   "op": "server_request",
+   "server_request": {
+    "RequestID": "0",
+    "TurnID": "turn-1",
+    "ItemID": "fugue",
+    "Method": "mcpServer/elicitation/request",
+    "Kind": "confirm",
+    "Summary": "Allow the fugue MCP server to run tool \"fugue_test_echo\"?",
+    "Detail": "{\"threadId\":\"uuid-0002\",\"turnId\":\"uuid-0003\",\"serverName\":\"fugue\",\"mode\":\"form\",\"_meta\":{\"codex_approval_kind\":\"mcp_tool_call\",\"persist\":[\"session\",\"always\"],\"tool_name\":\"fugue_test_echo\",\"tool_description\":\"echo for tests\",\"tool_params\":{\"msg\":\"hi\"},\"tool_params_display\":[{\"name\":\"msg\",\"value\":\"hi\",\"display_name\":\"msg\"}]},\"message\":\"Allow the fugue MCP server to run tool \\\"fugue_test_echo\\\"?\",\"requestedSchema\":{\"type\":\"object\",\"properties\":{}}}",
+    "Options": [
+     "accept",
+     "decline"
+    ],
+    "QuestionOptions": null,
+    "AllowFreeText": false,
+    "ExpiresAt": "0001-01-01T00:00:00Z"
+   }
+  },
+  {
+   "line": 56,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "thread/status/changed"
+    },
+    "id": "notice-line-56",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-56",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 57,
+   "op": "update",
+   "before": {
+    "content": {
+     "input": "{\"msg\":\"hi\"}",
+     "output": "",
+     "title": "fugue/fugue_test_echo"
+    },
+    "id": "exec-uuid-0006",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 0,
+     "status": "running",
+     "tool": "fugue/fugue_test_echo"
+    },
+    "raw": "exec-uuid-0006",
+    "revision": 0,
+    "turn": "turn-1"
+   },
+   "after": {
+    "content": {
+     "input": "{\"msg\":\"hi\"}",
+     "output": "{\"content\":[{\"type\":\"text\",\"text\":\"echo:uuid-0007:{\\\"msg\\\":\\\"hi\\\"}\"}],\"structuredContent\":null,\"_meta\":null}",
+     "title": "fugue/fugue_test_echo"
+    },
+    "id": "exec-uuid-0006",
+    "kind": "tool_call",
+    "metadata": {
+     "duration_ms": 3,
+     "status": "succeeded",
+     "tool": "fugue/fugue_test_echo"
+    },
+    "raw": "exec-uuid-0006",
+    "revision": 1,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 58,
+   "op": "update",
+   "before": {
+    "content": {},
+    "id": "turn-1-usage",
+    "kind": "usage",
+    "metadata": {
+     "cache_tokens": 7168,
+     "cost": 0,
+     "input_tokens": 16299,
+     "output_tokens": 106
+    },
+    "raw": "line-48",
+    "revision": 0,
+    "turn": "turn-1"
+   },
+   "after": {
+    "content": {},
+    "id": "turn-1-usage",
+    "kind": "usage",
+    "metadata": {
+     "cache_tokens": 16128,
+     "cost": 0,
+     "input_tokens": 16498,
+     "output_tokens": 47
+    },
+    "raw": "line-48",
+    "revision": 1,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 59,
+   "op": "quota",
+   "quota": {
+    "Windows": [
+     {
+      "Name": "primary",
+      "Utilization": 0.01,
+      "ResetsAt": "2026-12-16T16:37:26Z",
+      "Status": ""
+     }
+    ]
+   }
+  },
+  {
+   "line": 59,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "quota-line-59-primary",
+    "kind": "quota",
+    "metadata": {
+     "account": "",
+     "resets_at": "2026-12-16T16:37:26Z",
+     "used": 0.01,
+     "window": "primary"
+    },
+    "raw": "line-59",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 60,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": ""
+    },
+    "id": "msg_0bc963255759a3e4016afb46d9536087d0bec3835395904491",
+    "kind": "assistant_message",
+    "metadata": {
+     "model": "gpt-6-luna"
+    },
+    "raw": "msg_0bc963255759a3e4016afb46d9536087d0bec3835395904491",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 62,
+   "op": "update",
+   "before": {
+    "content": {
+     "text": ""
+    },
+    "id": "msg_0bc963255759a3e4016afb46d9536087d0bec3835395904491",
+    "kind": "assistant_message",
+    "metadata": {
+     "model": "gpt-6-luna"
+    },
+    "raw": "msg_0bc963255759a3e4016afb46d9536087d0bec3835395904491",
+    "revision": 0,
+    "turn": "turn-1"
+   },
+   "after": {
+    "content": {
+     "text": "DONE"
+    },
+    "id": "msg_0bc963255759a3e4016afb46d9536087d0bec3835395904491",
+    "kind": "assistant_message",
+    "metadata": {
+     "model": "gpt-6-luna"
+    },
+    "raw": "msg_0bc963255759a3e4016afb46d9536087d0bec3835395904491",
+    "revision": 1,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 63,
+   "op": "update",
+   "before": {
+    "content": {},
+    "id": "turn-1-usage",
+    "kind": "usage",
+    "metadata": {
+     "cache_tokens": 16128,
+     "cost": 0,
+     "input_tokens": 16498,
+     "output_tokens": 47
+    },
+    "raw": "line-48",
+    "revision": 1,
+    "turn": "turn-1"
+   },
+   "after": {
+    "content": {},
+    "id": "turn-1-usage",
+    "kind": "usage",
+    "metadata": {
+     "cache_tokens": 16256,
+     "cost": 0,
+     "input_tokens": 16619,
+     "output_tokens": 5
+    },
+    "raw": "line-48",
+    "revision": 2,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 64,
+   "op": "quota",
+   "quota": {
+    "Windows": [
+     {
+      "Name": "primary",
+      "Utilization": 0.01,
+      "ResetsAt": "2026-12-16T16:37:26Z",
+      "Status": ""
+     }
+    ]
+   }
+  },
+  {
+   "line": 64,
+   "op": "record",
+   "item": {
+    "content": {},
+    "id": "quota-line-64-primary",
+    "kind": "quota",
+    "metadata": {
+     "account": "",
+     "resets_at": "2026-12-16T16:37:26Z",
+     "used": 0.01,
+     "window": "primary"
+    },
+    "raw": "line-64",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 65,
+   "op": "record",
+   "item": {
+    "content": {
+     "text": "thread/status/changed"
+    },
+    "id": "notice-line-65",
+    "kind": "notice",
+    "metadata": {
+     "code": "unsupported_event",
+     "level": "info"
+    },
+    "raw": "line-65",
+    "revision": 0,
+    "turn": "turn-1"
+   }
+  },
+  {
+   "line": 66,
+   "op": "turn_end",
+   "turn_end": {
+    "TurnID": "turn-1",
+    "Outcome": "completed",
+    "FailureCode": "",
+    "Usage": {
+     "InputTokens": 16619,
+     "OutputTokens": 5,
+     "CacheTokens": 16256,
+     "Cost": 0
+    },
+    "CredentialExpiresAt": null
+   }
+  }
+ ]
+}

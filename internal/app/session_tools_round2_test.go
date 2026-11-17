@@ -44,7 +44,7 @@ func newVaultLockFixture(t *testing.T) *vaultLockFixture {
 			f.runsMu.Lock()
 			defer f.runsMu.Unlock()
 			f.runs++
-			return "deployed-ok", nil
+			return deployedOKText, nil
 		},
 	}
 	exe, err := os.Executable()
@@ -169,7 +169,7 @@ func TestSessionToolConfirmationFailsClosedWhileVaultLocked(t *testing.T) {
 	}); ansErr != nil {
 		t.Fatal(ansErr)
 	}
-	if got := <-callCh; got.IsError || got.Text != "deployed-ok" {
+	if got := <-callCh; got.IsError || got.Text != deployedOKText {
 		t.Fatalf("call after unlock = %+v, want deployed-ok", got)
 	}
 	f.runsMu.Lock()

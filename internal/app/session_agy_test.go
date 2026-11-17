@@ -324,7 +324,7 @@ func TestAgyShellCommandGoesThroughRequestPermissionAndRunsWhenAllowed(t *testin
 	_, _ = interSub.Next(t.Context())
 
 	resp := f.awaitRPCResponse(t, "perm-shell-1")
-	if resp.Error != nil || string(resp.Result) != `{"outcome":"selected","optionId":"allow"}` {
+	if resp.Error != nil || string(resp.Result) != agyAllowDecisionBody {
 		t.Fatalf("permission RPC response = %+v, want selected allow", resp)
 	}
 	awaitSessionState(t, sessSub, f.session.ID, "ready")
@@ -581,7 +581,7 @@ func answerFirstAgyPair(t *testing.T, f *agyRelayFixture, sub *Subscription) {
 		}
 	}
 	resp301 := f.awaitRPCResponse(t, "301")
-	if resp301.Error != nil || string(resp301.Result) != `{"outcome":"selected","optionId":"allow"}` {
+	if resp301.Error != nil || string(resp301.Result) != agyAllowDecisionBody {
 		t.Fatalf("RPC 301 = %+v, want selected allow", resp301)
 	}
 	resp302 := f.awaitRPCResponse(t, "302")

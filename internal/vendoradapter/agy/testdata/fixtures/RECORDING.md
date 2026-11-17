@@ -24,6 +24,15 @@ no installed CLI.
 6. `agy-1.5.9-session6-permission-cancel.jsonl` (and `.turns.json`):
    - `initialize`, `session/new`, `available_commands_update`, and Turn 1 emitting `session/request_permission` (`id: "1"`). Cancelled via `session/cancel` (`{"outcome":"cancelled"}`), returning `stopReason: "cancelled"`.
 
+## Recording a Fugue tool-call fixture (F9.11, pending)
+
+`go test -tags fugue_record -run TestRecordF911Fixtures ./internal/hostapi/` records a real
+`agy acp` session whose `session/new` carries the fugue bridge in `mcpServers` (no env pairs;
+the bridge inherits agy's environment) and prompts the model to call `fugue_test_echo` through
+the real `fugue mcp-bridge`. The 2026-11-16 recording attempt hit the account's model quota
+("Individual quota reached") before any tool call, so the fixture is pending: run the recorder
+with `FUGUE_RECORD_AGY=1` when the quota window resets and commit the fixture the same way.
+
 ## Redaction (applied before commit; verified by `TestAgyFixturesContainNoHostIdentity`)
 
 1. Every UUID becomes `session-uuid-NNNN` in order of first appearance within the file.

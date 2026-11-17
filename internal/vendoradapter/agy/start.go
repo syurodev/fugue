@@ -363,16 +363,20 @@ func (s *Session) openACPSession(
 	readerErrCh <-chan error,
 	spec *vendor.StartSpec,
 ) (Frame, error) {
+	servers, err := bridgeServers(spec.Bridge)
+	if err != nil {
+		return Frame{}, err
+	}
 	if spec.ResumeSessionID != "" {
 		return s.callHandshakeRPC(ctx, timer, readerErrCh, MethodSessionLoad, SessionLoadParams{
 			SessionID:  spec.ResumeSessionID,
 			Cwd:        spec.Cwd,
-			McpServers: []any{},
+			McpServers: servers,
 		})
 	}
 	return s.callHandshakeRPC(ctx, timer, readerErrCh, MethodSessionNew, SessionNewParams{
 		Cwd:        spec.Cwd,
-		McpServers: []any{},
+		McpServers: servers,
 	})
 }
 

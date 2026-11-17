@@ -51,6 +51,9 @@ func playFakeVendor(args []string) bool {
 	case "acp":
 		runHostFakeAgyACP()
 		return true
+	case "app-server":
+		runHostFakeCodexAppServer()
+		return true
 	case "-p":
 		fakePreInitHook()
 		fakeOut(`{"type":"system","subtype":"init","session_id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","tools":["Read"],"claude_code_version":"` +
@@ -133,19 +136,31 @@ func runHostFakeAgyACP() {
 		if json.Unmarshal(scanner.Bytes(), &msg) != nil || msg.Method == "" {
 			continue
 		}
-		heldPromptID = handleHostFakeACPMessage(&msg, heldPromptID)
+		var raw struct {
+			Params json.RawMessage `json:"params"`
+		}
+		if json.Unmarshal(scanner.Bytes(), &raw) != nil {
+			continue
+		}
+		heldPromptID = handleHostFakeACPMessage(&msg, raw.Params, heldPromptID)
 	}
 }
 
-func handleHostFakeACPMessage(msg *fakeHostACPInbound, heldPromptID string) string {
+func handleHostFakeACPMessage(msg *fakeHostACPInbound, rawParams json.RawMessage, heldPromptID string) string {
 	const sid = "3f2504e0-4f89-41d3-9a0c-0305e82c3301"
 	id := string(msg.ID)
 	switch msg.Method {
 	case "initialize":
 		fakeOut(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"audio":false,"embeddedContext":true},"sessionCapabilities":{"resume":{},"close":{},"load":{},"list":{},"additionalDirectories":{}}},"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.9"}}}`+"\n", id))
-	case "session/new":
+	case "session/new", "session/load":
+		fakeRecordAgyBridge(rawParams)
 		fakeOut(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"sessionId":%q,"models":{"availableModels":[{"modelId":"gemini-3.8-flash","name":"Gemini 3.8 Flash"}],"currentModelId":"gemini-3.8-flash"},"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Default"}]}}}`+"\n", id, sid))
 	case "session/prompt":
+		if len(msg.Params.Prompt) > 0 && fakeVendorPromptAction(msg.Params.Prompt[0].Text) {
+			fakeOut(fmt.Sprintf(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":%q,"update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"ACTED"}}}}`+"\n", sid))
+			fakeOut(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}`+"\n", id))
+			return heldPromptID
+		}
 		if len(msg.Params.Prompt) > 0 && strings.Contains(msg.Params.Prompt[0].Text, fakeHoldTurn) {
 			fakeOut(fmt.Sprintf(`{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":%q,"update":{"sessionUpdate":"agent_thought_chunk","content":{"type":"text","text":"working"}}}}`+"\n", sid))
 			return id

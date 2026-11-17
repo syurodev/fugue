@@ -228,6 +228,7 @@ func assertMethodsExistInSchema(t *testing.T, defs map[string]schemaNode) {
 	for _, m := range []string{
 		MethodCommandApproval, MethodFileChangeApproval,
 		MethodPermissionsApproval, MethodRequestUserInput,
+		MethodElicitationRequest,
 	} {
 		if _, ok := serverReqs[m]; !ok {
 			t.Errorf("server request %q missing from ServerRequest in pinned schema", m)
@@ -381,6 +382,10 @@ func assertServerRequestFieldsMatchSchema(t *testing.T, defs map[string]schemaNo
 		"ToolRequestUserInputParams.itemId:string",
 		"ToolRequestUserInputParams.questions:array",
 		"ToolRequestUserInputResponse.answers:object",
+		"McpServerElicitationRequestParams.threadId:string",
+		"McpServerElicitationRequestParams.turnId:string",
+		"McpServerElicitationRequestParams.serverName:string",
+		"McpServerElicitationRequestResponse.action:string",
 	})
 
 	for _, defName := range []string{"FileChangeApprovalDecision", "CommandExecutionApprovalDecision"} {

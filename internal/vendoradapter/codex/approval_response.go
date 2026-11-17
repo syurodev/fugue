@@ -95,6 +95,8 @@ func (s *Session) encodeServerRequestResponse(pending pendingServerRequest, d ve
 		return s.encodePermissionsResponse(pending, d)
 	case MethodRequestUserInput:
 		return s.encodeUserInputResponse(pending, d)
+	case MethodElicitationRequest:
+		return s.encodeElicitationResponse(pending, d)
 	default:
 		return s.codec.EncodeResponse(pending.rawID, nil, &RPCError{
 			Code:    jsonRPCServerErrorCode,
@@ -119,6 +121,16 @@ func (s *Session) encodeCommandApprovalResponse(pending pendingServerRequest, d 
 		}, nil)
 	}
 	return s.codec.EncodeResponse(pending.rawID, CommandApprovalResponse{Decision: choice}, nil)
+}
+
+// encodeElicitationResponse answers the MCP tool-call gate with the user's
+// choice: the actions Codex reads are accept and decline.
+func (s *Session) encodeElicitationResponse(pending pendingServerRequest, d vendor.Decision) ([]byte, error) {
+	action := ElicitationActionDecline
+	if d.Allow {
+		action = ElicitationActionAccept
+	}
+	return s.codec.EncodeResponse(pending.rawID, ElicitationRequestResponse{Action: action}, nil)
 }
 
 func resolveChoice(d vendor.Decision) string {

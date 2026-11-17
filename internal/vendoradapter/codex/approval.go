@@ -121,8 +121,32 @@ func (n *Normalizer) normalizeServerRequest(frame *Frame) Observation {
 		return n.normalizePermissionsApproval(frame)
 	case MethodRequestUserInput:
 		return n.normalizeUserInputRequest(frame)
+	case MethodElicitationRequest:
+		return n.normalizeElicitationRequest(frame)
 	default:
 		return n.unsupported(n.frameRef(frame), frame.Method)
+	}
+}
+
+// normalizeElicitationRequest relays Codex's MCP tool-call gate verbatim
+// (VR-05): the message and params reach the user as they came, and the user
+// chooses accept or decline.
+func (n *Normalizer) normalizeElicitationRequest(frame *Frame) Observation {
+	var params ElicitationRequestParams
+	if json.Unmarshal(frame.Params, &params) != nil || params.TurnID == "" || params.Message == "" {
+		return n.unsupported(n.frameRef(frame), frame.Method)
+	}
+	return Observation{
+		ServerRequest: &ServerRequest{
+			RequestID: frame.CanonicalID,
+			TurnID:    n.resolveTurnID(params.TurnID),
+			ItemID:    params.ServerName,
+			Method:    frame.Method,
+			Kind:      vendor.ServerRequestConfirm,
+			Summary:   boundSummary(params.Message),
+			Detail:    compactJSON(frame.Params),
+			Options:   []string{ElicitationActionAccept, ElicitationActionDecline},
+		},
 	}
 }
 

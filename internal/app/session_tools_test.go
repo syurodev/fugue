@@ -25,6 +25,7 @@ const (
 	testWorkspaceID = "ws-1"
 	toolEcho        = "fugue_test_echo"
 	toolDeploy      = "fugue_test_deploy"
+	deployedOKText  = "deployed-ok"
 	toolLeadOnly    = "fugue_test_lead_only"
 	roleLead        = "lead"
 	roleWorker      = "worker"
@@ -106,8 +107,8 @@ func newToolFixture(t *testing.T) *toolFixture {
 	clk := clock.NewFake(time.Unix(100, 0))
 	gen := ids.NewUUIDv7(clk, ids.NewDeterministic("tool-fixture"))
 	f := &toolFixture{tags: environments.New(), records: &fakeSessionRecords{sessions: map[string]vendorstore.Session{
-		sessionLead: {ID: sessionLead, Role: roleLead, State: vendorstore.StateStarting, ApprovalMode: vendorstore.ApprovalAuto, WorkspaceID: testWorkspaceID},
-		sessionWork: {ID: sessionWork, Role: roleWorker, State: vendorstore.StateStarting, ApprovalMode: vendorstore.ApprovalAuto, WorkspaceID: testWorkspaceID},
+		sessionLead: {ID: sessionLead, Vendor: VendorClaude, Role: roleLead, State: vendorstore.StateStarting, ApprovalMode: vendorstore.ApprovalAuto, WorkspaceID: testWorkspaceID},
+		sessionWork: {ID: sessionWork, Vendor: VendorClaude, Role: roleWorker, State: vendorstore.StateStarting, ApprovalMode: vendorstore.ApprovalAuto, WorkspaceID: testWorkspaceID},
 	}}}
 	owner, err := interaction.NewOwner(&interaction.Config{Clock: clk, IDs: gen, TagPolicy: f.tags})
 	if err != nil {

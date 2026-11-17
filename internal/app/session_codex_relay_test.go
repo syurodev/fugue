@@ -433,3 +433,38 @@ func TestCodexTurnInterruptAnswersRelayedRequestWithAnError(t *testing.T) {
 		t.Fatalf("interrupt recorded %d ApprovalDecided events, want 0", got)
 	}
 }
+
+// TestCodexElicitationRelaysVerbatimAndIsAnsweredOnce (F9.11, VR-05): Codex
+// gates an MCP tool call with `mcpServer/elicitation/request`; the request
+// reaches the user verbatim, the answer goes back once as the elicitation
+// action, and a retried request replays the same bytes.
+func TestCodexElicitationRelaysVerbatimAndIsAnsweredOnce(t *testing.T) {
+	t.Parallel()
+	f := newCodexRelayFixture(t)
+	sub := f.subscribeInteractions(t)
+	frame := fmt.Sprintf(`{"id":403,"method":%q,"params":{"threadId":%q,"turnId":"t-1","serverName":"fugue","mode":"form","message":%q,"requestedSchema":{"type":"object","properties":{}}}}`,
+		codex.MethodElicitationRequest, fakeCodexThreadID, `Allow the fugue MCP server to run tool "fugue_test_echo"?`)
+	f.sendServerRequestTurn(t, "codex-elicit-turn", frame)
+	prompt := awaitRequested(t, sub)
+	if prompt.Kind != string(interaction.KindConfirm) ||
+		!strings.Contains(prompt.Summary, `Allow the fugue MCP server to run tool "fugue_test_echo"?`) ||
+		!strings.Contains(prompt.Detail, `"serverName":"fugue"`) {
+		t.Fatalf("elicitation prompt = %+v, want the message and params verbatim", prompt)
+	}
+	for _, resp := range f.readRPCResponses(t) {
+		if string(resp.ID) == "403" {
+			t.Fatalf("codex was answered without the user: %+v", resp)
+		}
+	}
+	f.answerOption(t, "codex-elicit-ans", prompt.RequestID, codex.ElicitationActionAccept)
+	resp := f.awaitRPCResponse(t, "403")
+	if resp.Error != nil || string(resp.Result) != `{"action":"accept"}` {
+		t.Fatalf("elicitation answer = %+v, want {\"action\":\"accept\"}", resp)
+	}
+	// The same request ID again (a codex in-flight retry) replays the
+	// recorded decision, never a second ask.
+	f.steerServerRequest(t, "codex-elicit-retry", frame)
+	if pending, _, pErr := f.inter.ListPending(t.Context(), testAppPrincipal); pErr != nil || len(pending) != 0 {
+		t.Fatalf("pending after retry = (%+v, %v), want 0", pending, pErr)
+	}
+}

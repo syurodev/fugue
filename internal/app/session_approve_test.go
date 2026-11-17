@@ -594,7 +594,7 @@ func TestApproveWithoutAnUnambiguousTurnIsAToolError(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer interSub.Close()
-	svcWithAmbiguous := newSessionToolService(tools.tokens, nil, nil, rt.Interactions(), rt.tags, ids.NewSequence("amb"), ambiguousTurnRecorder{})
+	svcWithAmbiguous := newSessionToolService(tools.tokens, nil, ambiguousTurnRecorder{}, rt.Interactions(), rt.tags, ids.NewSequence("amb"), nil)
 	ambRes, ambErr := svcWithAmbiguous.Call(t.Context(), binding, approveToolName, []byte(`{"tool_name":"Bash","input":{"command":"ls"},"tool_use_id":"tu-ambig-turn"}`))
 	if ambErr != nil {
 		t.Fatalf("ambiguous turn Call error = %v, want generic tool error", ambErr)
@@ -682,6 +682,12 @@ func startReadySessionWithoutTurn(t *testing.T) (*HostRuntime, *SessionToolServi
 }
 
 type ambiguousTurnRecorder struct{}
+
+// Snapshot keeps the approve tool served: the ambiguity is the refusal
+// reason, not the vendor.
+func (ambiguousTurnRecorder) Snapshot(context.Context, string) (vendorstore.Session, error) {
+	return vendorstore.Session{Vendor: VendorClaude}, nil
+}
 
 func (ambiguousTurnRecorder) ActiveTurnID(context.Context, string) (string, error) {
 	return "", errcode.New(errcode.FailedPrecondition, "no unambiguous active vendor turn")
