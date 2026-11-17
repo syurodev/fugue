@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +13,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/internal/testutil"
 )
 
 type recordedEvent struct {
@@ -156,36 +156,38 @@ func answerViews(ctx context.Context, svc *InteractionService, views []PendingIn
 	}
 }
 
-func runPendingAnswerWorker(ctx context.Context, svc *InteractionService, startCh <-chan struct{}) error {
+func runPendingAnswerWorker(t *testing.T, ctx context.Context, svc *InteractionService, startCh <-chan struct{}) error {
+	t.Helper()
 	<-startCh
 	answered := make(map[string]bool)
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
+	var listErr error
+	testutil.Spin(t, "the test to stop the answerer", func() bool {
+		if ctx.Err() != nil {
+			return true
 		}
 		views, _, perr := svc.ListPending(ctx, string(KindCLI))
 		if perr != nil {
-			return fmt.Errorf("list pending: %w", perr)
+			listErr = fmt.Errorf("list pending: %w", perr)
+			return true
 		}
 		answerViews(ctx, svc, views, answered)
-		runtime.Gosched()
-	}
+		return false
+	})
+	return listErr
 }
 
-func runExpirerWorker(ctx context.Context, clk *clock.Fake, svc *InteractionService, startCh <-chan struct{}) error {
+func runExpirerWorker(t *testing.T, ctx context.Context, clk *clock.Fake, svc *InteractionService, startCh <-chan struct{}) error {
+	t.Helper()
 	<-startCh
-	for {
-		select {
-		case <-ctx.Done():
-			return nil
-		default:
-			clk.Advance(2 * time.Second)
-			svc.ExpireExpired()
-			runtime.Gosched()
+	testutil.Spin(t, "the test to stop the expirer", func() bool {
+		if ctx.Err() != nil {
+			return true
 		}
-	}
+		clk.Advance(2 * time.Second)
+		svc.ExpireExpired()
+		return false
+	})
+	return nil
 }
 
 func drainRemainingPending(ctx context.Context, clk *clock.Fake, svc *InteractionService) {
@@ -211,7 +213,6 @@ func drainRemainingPending(ctx context.Context, clk *clock.Fake, svc *Interactio
 		}
 		clk.Advance(10 * time.Second)
 		svc.ExpireExpired()
-		runtime.Gosched()
 	}
 }
 
@@ -286,6 +287,7 @@ func setupOrderingService(t *testing.T) (*clock.Fake, *EventHub, *InteractionSer
 }
 
 func spawnOrderingWorkers(
+	t *testing.T,
 	ctx context.Context,
 	svc *InteractionService,
 	clk *clock.Fake,
@@ -295,6 +297,7 @@ func spawnOrderingWorkers(
 	pregranted map[string]bool,
 	ensurerWg, workersWg *sync.WaitGroup,
 ) {
+	t.Helper()
 	ensurerWg.Add(1)
 	supervise.Go(ctx, "test.ensurer", func(_ context.Context) error {
 		defer ensurerWg.Done()
@@ -306,14 +309,14 @@ func spawnOrderingWorkers(
 		workersWg.Add(1)
 		supervise.Go(ctx, fmt.Sprintf("test.answerer-%d", aIdx), func(_ context.Context) error {
 			defer workersWg.Done()
-			return runPendingAnswerWorker(ctx, svc, startCh)
+			return runPendingAnswerWorker(t, ctx, svc, startCh)
 		})
 	}
 
 	workersWg.Add(1)
 	supervise.Go(ctx, "test.expirer", func(_ context.Context) error {
 		defer workersWg.Done()
-		return runExpirerWorker(ctx, clk, svc, startCh)
+		return runExpirerWorker(t, ctx, clk, svc, startCh)
 	})
 }
 
@@ -344,7 +347,7 @@ func TestInteractionOrderingRequestedBeforeResolvedUnderRace(t *testing.T) {
 	workerCtx, cancelWorkers := context.WithCancel(t.Context())
 	defer cancelWorkers()
 
-	spawnOrderingWorkers(workerCtx, svc, clk, startCh, totalRequests, &pregrantedMu, pregranted, &ensurerWg, &workersWg)
+	spawnOrderingWorkers(t, workerCtx, svc, clk, startCh, totalRequests, &pregrantedMu, pregranted, &ensurerWg, &workersWg)
 
 	close(startCh)
 	ensurerWg.Wait()

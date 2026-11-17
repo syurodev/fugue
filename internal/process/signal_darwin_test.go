@@ -4,13 +4,15 @@ package process
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os/exec"
-	"runtime"
 	"syscall"
 	"testing"
 
 	"golang.org/x/sys/unix"
+
+	"github.com/syurodev/fugue/internal/testutil"
 )
 
 func TestSignalTreeTreatsZombieOnlyGroupEPERMAsGone(t *testing.T) {
@@ -99,7 +101,7 @@ func TestSignalTreeKeepsEPERMWhenLiveMemberRemains(t *testing.T) {
 
 func waitForZombieGroup(t *testing.T, pgid int) (zombies, live int) {
 	t.Helper()
-	for range 10000 {
+	testutil.Poll(t, fmt.Sprintf("process group %d to reach the zombie state", pgid), func() bool {
 		kprocs, err := unix.SysctlKinfoProcSlice("kern.proc.all")
 		if err != nil {
 			t.Fatal(err)
@@ -116,13 +118,9 @@ func waitForZombieGroup(t *testing.T, pgid int) (zombies, live int) {
 				live++
 			}
 		}
-		if zombies > 0 {
-			return zombies, live
-		}
-		runtime.Gosched()
-	}
-	t.Fatalf("process group %d did not reach zombie state", pgid)
-	return 0, 0
+		return zombies > 0
+	})
+	return zombies, live
 }
 
 // TestSignalErrorsForAMemberMidExitAreGone reproduces the window after

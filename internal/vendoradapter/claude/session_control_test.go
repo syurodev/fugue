@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -15,6 +14,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/process"
+	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/transcript"
 	"github.com/syurodev/fugue/internal/vendor"
 )
@@ -47,17 +47,19 @@ func getSessionState(s *Session) sessionState {
 	return s.state
 }
 
-func waitForRunningTurn(s *Session) vendor.TurnRef {
-	for {
+func waitForRunningTurn(t *testing.T, s *Session) vendor.TurnRef {
+	t.Helper()
+	var turn vendor.TurnRef
+	testutil.Spin(t, "the session to run a turn", func() bool {
 		s.mu.Lock()
-		running := s.state == stateRunning
-		currTurn := s.currentTurn
-		s.mu.Unlock()
-		if running && currTurn != "" {
-			return vendor.TurnRef{ID: currTurn}
+		defer s.mu.Unlock()
+		if s.state != stateRunning || s.currentTurn == "" {
+			return false
 		}
-		runtime.Gosched()
-	}
+		turn = vendor.TurnRef{ID: s.currentTurn}
+		return true
+	})
+	return turn
 }
 
 func TestSessionSteerThenSubsequentSendWorks(t *testing.T) {
@@ -189,7 +191,7 @@ func TestSessionInterruptEscalatesWhenWriteIsWedged(t *testing.T) {
 		return nil
 	})
 
-	turn := waitForRunningTurn(claudeSess)
+	turn := waitForRunningTurn(t, claudeSess)
 
 	initialPending := clk.Pending()
 	intErrCh := make(chan error, 1)
@@ -200,7 +202,7 @@ func TestSessionInterruptEscalatesWhenWriteIsWedged(t *testing.T) {
 
 	waitAndAdvance(t, clk, initialPending+1, 10*time.Second)
 
-	intErr := driveUntilErr(ctx, clk, intErrCh)
+	intErr := driveUntilErr(t, clk, intErrCh)
 	if errcode.CodeOf(intErr) != errcode.DeadlineExceeded {
 		t.Fatalf("expected DeadlineExceeded from Interrupt, got %v", intErr)
 	}
@@ -433,7 +435,7 @@ func closeWithFakeClock(t *testing.T, ctx context.Context, clk *clock.Fake, sess
 		closeDone <- cErr
 		return nil
 	})
-	return driveUntilErr(ctx, clk, closeDone)
+	return driveUntilErr(t, clk, closeDone)
 }
 
 func TestInterruptWithStaleTurnWhileWriteWedgedDoesNotCloseSession(t *testing.T) {
@@ -467,7 +469,7 @@ func TestInterruptWithStaleTurnWhileWriteWedgedDoesNotCloseSession(t *testing.T)
 		return nil
 	})
 
-	_ = waitForRunningTurn(claudeSess)
+	_ = waitForRunningTurn(t, claudeSess)
 
 	staleTurn := vendor.TurnRef{ID: "stale-turn-id"}
 	intErr := sess.Interrupt(ctx, staleTurn)

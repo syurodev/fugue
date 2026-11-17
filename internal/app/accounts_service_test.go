@@ -6,7 +6,6 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
-	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -17,6 +16,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/transcript"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/claude"
@@ -258,12 +258,11 @@ func TestConcurrentListAccountsShareOneRefresh(t *testing.T) {
 		tasks = append(tasks, supervise.Go(t.Context(), "test.list_accounts", call))
 	}
 	// Release the status command only once every other call waits on it.
-	for waiting := 0; waiting < callers-1; {
-		runtime.Gosched()
+	testutil.Spin(t, "every other call waiting on the status command", func() bool {
 		svc.flightMu.Lock()
-		waiting = svc.flight.waiters
-		svc.flightMu.Unlock()
-	}
+		defer svc.flightMu.Unlock()
+		return svc.flight.waiters >= callers-1
+	})
 	close(adapter.release)
 	for _, task := range tasks {
 		if err := task.Wait(); err != nil {

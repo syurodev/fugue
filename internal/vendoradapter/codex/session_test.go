@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -235,7 +234,7 @@ func TestCodexStopKillsASetsidChildTree(t *testing.T) {
 		closeErrCh <- cErr
 		return nil
 	})
-	if err := driveFakeClock(ctx, clk, closeErrCh); err != nil {
+	if err := driveFakeClock(t, clk, closeErrCh); err != nil {
 		t.Fatalf("Close failed: %v", err)
 	}
 
@@ -282,7 +281,7 @@ func TestCodexSessionInterruptEscalatesAndHandshakeTimeoutStops(t *testing.T) {
 		startErrCh <- err
 		return nil
 	})
-	startErr := driveFakeClock(ctx, clk, startErrCh)
+	startErr := driveFakeClock(t, clk, startErrCh)
 	if !errors.Is(startErr, vendor.ErrHandshakeTimeout) {
 		t.Fatalf("expected ErrHandshakeTimeout, got %v", startErr)
 	}
@@ -479,21 +478,21 @@ func TestCodexSessionClosedAndBuildArgvGuards(t *testing.T) {
 	}
 }
 
-func driveFakeClock(ctx context.Context, clk *clock.Fake, errCh <-chan error) error {
-	for {
+func driveFakeClock(t *testing.T, clk *clock.Fake, errCh <-chan error) error {
+	t.Helper()
+	var result error
+	testutil.Spin(t, "the driven call to return", func() bool {
 		select {
-		case err := <-errCh:
-			return err
-		case <-ctx.Done():
-			return errcode.Wrap(errcode.Canceled, "drive fake clock canceled", ctx.Err())
+		case result = <-errCh:
+			return true
 		default:
 		}
 		if clk.Pending() > 0 {
 			clk.Advance(100 * time.Millisecond)
 			// Yield real wall time between fake ticks so subprocess signal handlers settle under -race.
 			sleepReal(5 * time.Millisecond)
-		} else {
-			runtime.Gosched()
 		}
-	}
+		return false
+	})
+	return result
 }

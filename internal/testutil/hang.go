@@ -2,6 +2,9 @@ package testutil
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"runtime"
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
@@ -12,6 +15,9 @@ import (
 // package timeout, never to measure speed. A test that needs a tighter bound
 // is asserting performance and belongs in internal/perf.
 const HangTimeout = time.Minute
+
+// errHang marks a wait that outlived its hang timeout.
+var errHang = errors.New("hang")
 
 // pollEvery is the real interval between checks of state outside the process.
 const pollEvery = 10 * time.Millisecond
@@ -62,6 +68,45 @@ func Poll(t tb, what string, cond func() bool) {
 
 func poll(t tb, what string, d time.Duration, cond func() bool) {
 	t.Helper()
+	if err := waitFor(t.Context(), what, d, cond); err != nil {
+		t.Fatalf("%v", err)
+	}
+}
+
+// WaitFor is Poll for code with no testing.T, such as the helper process a
+// test re-executes: it returns an error instead of failing a test.
+func WaitFor(ctx context.Context, what string, cond func() bool) error {
+	return waitFor(ctx, what, HangTimeout, cond)
+}
+
+func waitFor(ctx context.Context, what string, d time.Duration, cond func() bool) error {
+	timer := clock.Real{}.NewTimer(d)
+	defer timer.Stop()
+	for !cond() {
+		select {
+		case <-timer.C():
+			return fmt.Errorf("%w: %s did not happen within %v", errHang, what, d)
+		default:
+		}
+		if err := clock.Sleep(ctx, clock.Real{}, pollEvery); err != nil {
+			return fmt.Errorf("poll %s: %w", what, err)
+		}
+	}
+	return nil
+}
+
+// Spin calls cond until it reports true, yielding to other goroutines between
+// calls, and fails the test after HangTimeout. Use it for state inside the
+// process that sends no signal, such as a timer armed on a fake clock that the
+// test must advance, where Poll's real 10 ms pause would slow every round.
+// cond may do work (advance the clock, drain a queue) as well as check.
+func Spin(t tb, what string, cond func() bool) {
+	t.Helper()
+	spin(t, what, HangTimeout, cond)
+}
+
+func spin(t tb, what string, d time.Duration, cond func() bool) {
+	t.Helper()
 	guard := hangGuard(t, d)
 	for !cond() {
 		select {
@@ -70,10 +115,7 @@ func poll(t tb, what string, d time.Duration, cond func() bool) {
 			return
 		default:
 		}
-		if err := clock.Sleep(t.Context(), clock.Real{}, pollEvery); err != nil {
-			t.Fatalf("poll %s: %v", what, err)
-			return
-		}
+		runtime.Gosched()
 	}
 }
 

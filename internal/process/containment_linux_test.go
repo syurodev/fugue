@@ -156,7 +156,7 @@ func runRealSystemdFallbackBranch(
 		close(stopDone)
 		return nil
 	})
-	waitPidGone(t, grandchild)
+	waitPidGone(ctx, t, grandchild)
 	<-proc.exitCh
 	<-proc.stderrTask.Done()
 	<-proc.stdoutPipe.ended

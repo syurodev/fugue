@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -20,6 +19,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/internal/testutil"
 )
 
 const fakeXDGRuntimeDir = "/run/user/1000"
@@ -127,21 +127,24 @@ func spawnFakeContained(ctx context.Context, t *testing.T, clk *clock.Fake, proc
 		return nil
 	})
 
-	waitForFile(t, procRoot, "stage-parent-ready")
-	for clk.Pending() == 0 {
+	waitForFile(ctx, t, procRoot, "stage-parent-ready")
+	finished := false
+	testutil.Spin(t, "verifyCgroupScope to arm its poll timer", func() bool {
 		select {
 		case <-done:
-			return proc, err
-		case <-ctx.Done():
-			t.Fatal("context canceled waiting for verifyCgroupScope poll timer")
+			finished = true
+			return true
 		default:
-			runtime.Gosched()
 		}
+		return clk.Pending() > 0
+	})
+	if finished {
+		return proc, err
 	}
 	if werr := writeRootFile(procRoot, "allow-scope-move", []byte("1")); werr != nil {
 		t.Fatal(werr)
 	}
-	waitForFile(t, procRoot, "stage-scope-moved")
+	waitForFile(ctx, t, procRoot, "stage-scope-moved")
 	driveClockUntil(t, clk, done)
 	return proc, err
 }
@@ -156,21 +159,19 @@ func spawnFakeFallback(ctx context.Context, t *testing.T, clk *clock.Fake, procR
 		close(done)
 		return nil
 	})
-	waitForFile(t, procRoot, "stat-ready")
+	waitForFile(ctx, t, procRoot, "stat-ready")
 	driveClockUntil(t, clk, done)
 	return proc, err
 }
 
-func waitForFile(t *testing.T, dir, rel string) {
+func waitForFile(ctx context.Context, t *testing.T, dir, rel string) {
 	t.Helper()
-	for {
-		if _, err := readRootFile(dir, rel); err == nil {
-			return
-		}
-		if t.Context().Err() != nil {
-			t.Fatalf("timed out waiting for %s/%s", dir, rel)
-		}
-		runtime.Gosched()
+	err := testutil.WaitFor(ctx, "file "+rel, func() bool {
+		_, err := readRootFile(dir, rel)
+		return err == nil
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -542,7 +543,7 @@ func TestStopCleansAllDescendantsIncludingSetsidGrandchild(t *testing.T) {
 	})
 
 	expectEscalationStep(t, stepCh, escalationSigint)
-	waitPidGone(t, grandchild)
+	waitPidGone(ctx, t, grandchild)
 	<-proc.exitCh
 	<-proc.stderrTask.Done()
 	<-proc.stdoutPipe.ended

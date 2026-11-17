@@ -15,6 +15,7 @@ import (
 
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/internal/testutil"
 )
 
 const (
@@ -302,7 +303,7 @@ func TestStopKillsGroupMembersAfterLeaderExits(t *testing.T) {
 	expectEscalationStep(t, stepCh, escalationSigkill)
 	// The killed child is reparented and reaped by init; wait for that real
 	// event, then drive the clock so Stop's next group probe sees it.
-	waitPidGone(t, childPid)
+	waitPidGone(ctx, t, childPid)
 	driveClockOncePipesSettle(t, clk, proc, stopDone)
 
 	if stopErr != nil {
@@ -440,20 +441,17 @@ func TestStopInterruptErrorReturnedSeparately(t *testing.T) {
 // event Stop depends on, so fake time does not outrun it.
 func driveClockUntil(t *testing.T, clk *clock.Fake, done <-chan struct{}) {
 	t.Helper()
-	for {
+	testutil.Spin(t, "Stop to return", func() bool {
 		select {
 		case <-done:
-			return
-		case <-t.Context().Done():
-			t.Fatal("Stop did not return")
+			return true
 		default:
 		}
 		if clk.Pending() > 0 {
 			clk.Advance(reapPollInterval)
-		} else {
-			runtime.Gosched()
 		}
-	}
+		return false
+	})
 }
 
 func TestStopReturnsWhenEscapedGrandchildHoldsPipes(t *testing.T) {
@@ -621,12 +619,12 @@ func drainToEOF(lr *LineReader) {
 
 // waitPidGone yields until pid no longer exists. The pid belongs to a
 // process another parent reaps, so there is nothing to wait on but the probe.
-func waitPidGone(t *testing.T, pid int) {
+func waitPidGone(ctx context.Context, t *testing.T, pid int) {
 	t.Helper()
-	for !errors.Is(syscall.Kill(pid, 0), syscall.ESRCH) {
-		if t.Context().Err() != nil {
-			t.Fatalf("pid %d still alive", pid)
-		}
-		runtime.Gosched()
+	err := testutil.WaitFor(ctx, fmt.Sprintf("pid %d to exit", pid), func() bool {
+		return errors.Is(syscall.Kill(pid, 0), syscall.ESRCH)
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
