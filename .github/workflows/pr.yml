@@ -165,7 +165,7 @@ jobs:
         # covers every count of a binary, and a PR that edits many tests of a
         # heavy package (internal/app) still has to fit it, like the nightly.
         run: |
-          for i in $(seq 1 10); do
+          for _ in $(seq 1 10); do
             go tool task test-pkg PKG="$PACKAGES" RUN="$TESTS" COUNT=1
           done
 
