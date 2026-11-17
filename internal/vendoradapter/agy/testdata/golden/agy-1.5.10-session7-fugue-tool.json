@@ -1,0 +1,559 @@
+{
+ "session": "session-1",
+ "vendor": "agy",
+ "summary": {
+  "partials": 1,
+  "notices": 6,
+  "server_requests": 2
+ },
+ "steps": [
+  {
+   "line": 2,
+   "op": "init",
+   "init": {
+    "Version": "1.5.10",
+    "SessionID": "session-uuid-0001",
+    "Model": "gemini-4-argon-medium",
+    "PermissionMode": "default",
+    "SlashCommands": null
+   }
+  },
+  {
+   "line": 4,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": ""
+    },
+    "id": "agy-notice-line-4",
+    "kind": "notice",
+    "meta": {
+     "Level": "info",
+     "Code": "unsupported_event"
+    },
+    "rawRef": "acp:config_option_update",
+    "revision": 0,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 5,
+   "op": "init",
+   "init": {
+    "Version": "1.5.10",
+    "SessionID": "session-uuid-0001",
+    "Model": "gemini-4-argon-medium",
+    "PermissionMode": "default",
+    "SlashCommands": [
+     "goal",
+     "schedule",
+     "browser",
+     "plan",
+     "grill-me",
+     "teamwork",
+     "learn",
+     "boost",
+     "agy-customizations",
+     "antigravity-guide",
+     "run-workflow",
+     "swarm"
+    ]
+   }
+  },
+  {
+   "line": 6,
+   "op": "init",
+   "init": {
+    "Version": "1.5.10",
+    "SessionID": "session-uuid-0001",
+    "Model": "gemini-4-argon-medium",
+    "PermissionMode": "default",
+    "SlashCommands": [
+     "goal",
+     "schedule",
+     "browser",
+     "plan",
+     "grill-me",
+     "teamwork",
+     "learn",
+     "boost",
+     "agy-customizations",
+     "antigravity-guide",
+     "run-workflow",
+     "swarm"
+    ]
+   }
+  },
+  {
+   "line": 7,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": ""
+    },
+    "id": "agy-notice-line-7",
+    "kind": "notice",
+    "meta": {
+     "Level": "info",
+     "Code": "unsupported_event"
+    },
+    "rawRef": "acp:usage_update",
+    "revision": 0,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 8,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": ""
+    },
+    "id": "agy-notice-line-8",
+    "kind": "notice",
+    "meta": {
+     "Level": "info",
+     "Code": "unsupported_event"
+    },
+    "rawRef": "acp:session_info_update",
+    "revision": 0,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 9,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": ""
+    },
+    "id": "agy-notice-line-9",
+    "kind": "notice",
+    "meta": {
+     "Level": "info",
+     "Code": "unsupported_event"
+    },
+    "rawRef": "acp:usage_update",
+    "revision": 0,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 10,
+   "op": "record",
+   "item": {
+    "content": {
+     "Title": "Run mcp_fugue_fugue_test_echo",
+     "Input": "{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 1\"}",
+     "Output": ""
+    },
+    "id": "call-0001",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "mcp_fugue_fugue_test_echo",
+     "Status": "running",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 0,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 11,
+   "op": "update",
+   "before": {
+    "content": {
+     "Title": "Run mcp_fugue_fugue_test_echo",
+     "Input": "{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 1\"}",
+     "Output": ""
+    },
+    "id": "call-0001",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "mcp_fugue_fugue_test_echo",
+     "Status": "running",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 0,
+    "turnId": "turn-1"
+   },
+   "after": {
+    "content": {
+     "Title": "Run mcp_fugue_fugue_test_echo",
+     "Input": "{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 1\"}",
+     "Output": ""
+    },
+    "id": "call-0001",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "mcp_fugue_fugue_test_echo",
+     "Status": "pending",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 1,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 12,
+   "op": "server_request",
+   "server_request": {
+    "RequestID": "1",
+    "TurnID": "turn-1",
+    "ItemID": "call-0001",
+    "Method": "session/request_permission",
+    "Kind": "confirm",
+    "Summary": "Run mcp_fugue_fugue_test_echo",
+    "Detail": "{\"sessionUpdate\":\"tool_call\",\"toolCallId\":\"call-0001\",\"name\":\"mcp_fugue_fugue_test_echo\",\"args\":{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 1\"},\"status\":\"pending\",\"kind\":\"other\",\"title\":\"Run mcp_fugue_fugue_test_echo\",\"rawInput\":{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 1\"}}",
+    "Options": [
+     "allow",
+     "deny"
+    ],
+    "OptionDetails": [
+     {
+      "id": "allow",
+      "name": "Allow",
+      "kind": "allow_once"
+     },
+     {
+      "id": "deny",
+      "name": "Deny",
+      "kind": "reject_once"
+     }
+    ],
+    "QuestionOptions": null,
+    "AllowFreeText": false,
+    "ExpiresAt": "0001-01-01T00:00:00Z"
+   }
+  },
+  {
+   "line": 13,
+   "op": "update",
+   "before": {
+    "content": {
+     "Title": "Run mcp_fugue_fugue_test_echo",
+     "Input": "{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 1\"}",
+     "Output": ""
+    },
+    "id": "call-0001",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "mcp_fugue_fugue_test_echo",
+     "Status": "pending",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 1,
+    "turnId": "turn-1"
+   },
+   "after": {
+    "content": {
+     "Title": "Run mcp_fugue_fugue_test_echo",
+     "Input": "{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 1\"}",
+     "Output": ""
+    },
+    "id": "call-0001",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "mcp_fugue_fugue_test_echo",
+     "Status": "running",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 2,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 14,
+   "op": "update",
+   "before": {
+    "content": {
+     "Title": "Run mcp_fugue_fugue_test_echo",
+     "Input": "{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 1\"}",
+     "Output": ""
+    },
+    "id": "call-0001",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "mcp_fugue_fugue_test_echo",
+     "Status": "running",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 2,
+    "turnId": "turn-1"
+   },
+   "after": {
+    "content": {
+     "Title": "Run mcp_fugue_fugue_test_echo",
+     "Input": "{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 1\"}",
+     "Output": ""
+    },
+    "id": "call-0001",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "mcp_fugue_fugue_test_echo",
+     "Status": "succeeded",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 3,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 15,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": ""
+    },
+    "id": "agy-notice-line-15",
+    "kind": "notice",
+    "meta": {
+     "Level": "info",
+     "Code": "unsupported_event"
+    },
+    "rawRef": "acp:usage_update",
+    "revision": 0,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 16,
+   "op": "record",
+   "item": {
+    "content": {
+     "Title": "Run mcp_fugue_fugue_test_echo",
+     "Input": "{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 2\"}",
+     "Output": ""
+    },
+    "id": "call-0002",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "mcp_fugue_fugue_test_echo",
+     "Status": "running",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 0,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 17,
+   "op": "update",
+   "before": {
+    "content": {
+     "Title": "Run mcp_fugue_fugue_test_echo",
+     "Input": "{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 2\"}",
+     "Output": ""
+    },
+    "id": "call-0002",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "mcp_fugue_fugue_test_echo",
+     "Status": "running",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 0,
+    "turnId": "turn-1"
+   },
+   "after": {
+    "content": {
+     "Title": "Run mcp_fugue_fugue_test_echo",
+     "Input": "{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 2\"}",
+     "Output": ""
+    },
+    "id": "call-0002",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "mcp_fugue_fugue_test_echo",
+     "Status": "pending",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 1,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 18,
+   "op": "server_request",
+   "server_request": {
+    "RequestID": "2",
+    "TurnID": "turn-1",
+    "ItemID": "call-0002",
+    "Method": "session/request_permission",
+    "Kind": "confirm",
+    "Summary": "Run mcp_fugue_fugue_test_echo",
+    "Detail": "{\"sessionUpdate\":\"tool_call\",\"toolCallId\":\"call-0002\",\"name\":\"mcp_fugue_fugue_test_echo\",\"args\":{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 2\"},\"status\":\"pending\",\"kind\":\"other\",\"title\":\"Run mcp_fugue_fugue_test_echo\",\"rawInput\":{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 2\"}}",
+    "Options": [
+     "allow",
+     "deny"
+    ],
+    "OptionDetails": [
+     {
+      "id": "allow",
+      "name": "Allow",
+      "kind": "allow_once"
+     },
+     {
+      "id": "deny",
+      "name": "Deny",
+      "kind": "reject_once"
+     }
+    ],
+    "QuestionOptions": null,
+    "AllowFreeText": false,
+    "ExpiresAt": "0001-01-01T00:00:00Z"
+   }
+  },
+  {
+   "line": 19,
+   "op": "update",
+   "before": {
+    "content": {
+     "Title": "Run mcp_fugue_fugue_test_echo",
+     "Input": "{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 2\"}",
+     "Output": ""
+    },
+    "id": "call-0002",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "mcp_fugue_fugue_test_echo",
+     "Status": "pending",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 1,
+    "turnId": "turn-1"
+   },
+   "after": {
+    "content": {
+     "Title": "Run mcp_fugue_fugue_test_echo",
+     "Input": "{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 2\"}",
+     "Output": ""
+    },
+    "id": "call-0002",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "mcp_fugue_fugue_test_echo",
+     "Status": "running",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 2,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 20,
+   "op": "update",
+   "before": {
+    "content": {
+     "Title": "Run mcp_fugue_fugue_test_echo",
+     "Input": "{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 2\"}",
+     "Output": ""
+    },
+    "id": "call-0002",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "mcp_fugue_fugue_test_echo",
+     "Status": "running",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 2,
+    "turnId": "turn-1"
+   },
+   "after": {
+    "content": {
+     "Title": "Run mcp_fugue_fugue_test_echo",
+     "Input": "{\"msg\":\"hi\",\"toolSummary\":\"Echo test call 2\"}",
+     "Output": ""
+    },
+    "id": "call-0002",
+    "kind": "tool_call",
+    "meta": {
+     "ToolName": "mcp_fugue_fugue_test_echo",
+     "Status": "succeeded",
+     "ExitCode": null,
+     "Duration": 0
+    },
+    "rawRef": "",
+    "revision": 3,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 21,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": "DONE"
+    },
+    "id": "agy-msg-turn-1:msg",
+    "kind": "assistant_message",
+    "meta": {
+     "ModelID": "gemini-4-argon-medium"
+    },
+    "rawRef": "",
+    "revision": 0,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 22,
+   "op": "record",
+   "item": {
+    "content": {
+     "Text": ""
+    },
+    "id": "agy-notice-line-22",
+    "kind": "notice",
+    "meta": {
+     "Level": "info",
+     "Code": "unsupported_event"
+    },
+    "rawRef": "acp:usage_update",
+    "revision": 0,
+    "turnId": "turn-1"
+   }
+  },
+  {
+   "line": 23,
+   "op": "turn_end",
+   "turn_end": {
+    "TurnID": "turn-1",
+    "Outcome": "completed",
+    "FailureCode": "",
+    "Usage": {
+     "InputTokens": 15181,
+     "OutputTokens": 182,
+     "CacheTokens": 17466,
+     "Cost": 0
+    },
+    "CredentialExpiresAt": null
+   }
+  }
+ ]
+}

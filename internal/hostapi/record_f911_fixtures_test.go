@@ -62,6 +62,31 @@ func TestRecordF911Fixtures(t *testing.T) {
 	})
 
 	recordCodex(t, v, codexBin)
+	if os.Getenv("FUGUE_RECORD_AGY") == "1" {
+		recordAgy(t, v, agyBin)
+	}
+}
+
+// recordAgyModelEnv names the agy model the recording selects through ACP
+// `session/set_config_option` (`configId: "model"`, the same call Fugue's own
+// agy adapter makes). The default is a model with quota on the recording
+// account; the exhausted "Argon" family is refused so a quota error is never
+// recorded as a fixture.
+const (
+	recordAgyModelEnv     = "FUGUE_RECORD_AGY_MODEL"
+	recordAgyDefaultModel = "gemini-4-hydrogen"
+)
+
+func recordAgyModel(t *testing.T) string {
+	t.Helper()
+	model := os.Getenv(recordAgyModelEnv)
+	if model == "" {
+		model = recordAgyDefaultModel
+	}
+	if strings.Contains(strings.ToLower(model), "argon") {
+		t.Fatalf("%s=%q: the Argon models are out of quota on the recording account", recordAgyModelEnv, model)
+	}
+	return model
 }
 
 // recordTokenSeed derives the tokens of the host: the first spawn's token is
@@ -212,6 +237,18 @@ func recordCodex(t *testing.T, v *vendorHost, codexBin string) {
 	writeCodexFixture(t, lines, root, turnLine)
 }
 
+// agyResponseID returns the id of a JSON-RPC response line, or "".
+func agyResponseID(line string) string {
+	var resp struct {
+		ID     json.RawMessage `json:"id"`
+		Method string          `json:"method"`
+	}
+	if json.Unmarshal([]byte(line), &resp) != nil || resp.Method != "" {
+		return ""
+	}
+	return strings.Trim(string(resp.ID), `"`)
+}
+
 // jsonString encodes one string as a JSON string literal.
 func jsonString(value string) string {
 	raw, err := json.Marshal(value)
@@ -313,21 +350,26 @@ func recordAgy(t *testing.T, v *vendorHost, agyBin string) {
 	if _, wErr := fmt.Fprint(stdin, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,"clientCapabilities":{}}}`+"\n"); wErr != nil {
 		t.Fatal(wErr)
 	}
+	model := recordAgyModel(t)
 	var lines []string
 	promptSent := false
 	promptLine := 0
 	handshook := false
+	acpSessionID := ""
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64<<10), 8<<20)
 	for scanner.Scan() {
 		line := scanner.Text()
 		lines = append(lines, line)
 		// agy keeps its own permission flow (VR-05): the recording allows
-		// the one call the prompt asks for.
+		// the one call the prompt asks for. agy 1.5.10 rejects the flat
+		// `{"outcome":"selected",...}` form ("cannot unmarshal string into
+		// ... outcome of type AllowedOutcome") and needs the ACP-spec nested
+		// `{"outcome":{"outcome":"selected","optionId":...}}`.
 		if requestID := approvalRequestID(line); requestID != "" {
 			decision, err := json.Marshal(map[string]any{
 				"jsonrpc": "2.0", "id": json.RawMessage(requestID),
-				"result": map[string]string{"outcome": "selected", "optionId": "allow"},
+				"result": map[string]any{"outcome": map[string]string{"outcome": "selected", "optionId": "allow"}},
 			})
 			if err != nil {
 				t.Fatal(err)
@@ -343,12 +385,28 @@ func recordAgy(t *testing.T, v *vendorHost, agyBin string) {
 			}
 			continue
 		}
-		if handshook && !promptSent && strings.Contains(line, `"result"`) && strings.Contains(line, `"sessionId"`) {
-			sid := extractJSON(line, "result", "sessionId")
+		if handshook && acpSessionID == "" && agyResponseID(line) == "2" {
+			acpSessionID = extractJSON(line, "result", "sessionId")
+			setModel, err := json.Marshal(map[string]any{
+				"jsonrpc": "2.0", "id": 4, "method": agy.MethodSessionSetConfigOption,
+				"params": map[string]string{"sessionId": strings.Trim(acpSessionID, `"`), "configId": "model", "value": model},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, wErr := fmt.Fprint(stdin, string(setModel)+"\n"); wErr != nil {
+				t.Fatal(wErr)
+			}
+			continue
+		}
+		if acpSessionID != "" && !promptSent && agyResponseID(line) == "4" {
+			if strings.Contains(line, `"error"`) {
+				t.Fatalf("agy refused the model %q: %s", model, line)
+			}
 			prompt, err := json.Marshal(map[string]any{
 				"jsonrpc": "2.0", "id": 3, "method": "session/prompt",
 				"params": map[string]any{
-					"sessionId": json.RawMessage(sid),
+					"sessionId": json.RawMessage(acpSessionID),
 					"prompt":    []map[string]string{{"type": "text", "text": recordPrompt}},
 				},
 			})
@@ -374,10 +432,10 @@ func recordAgy(t *testing.T, v *vendorHost, agyBin string) {
 	if len(lines) == 0 {
 		t.Fatalf("the agy recording captured nothing (close %v, wait %v)", closeErr, waitErr)
 	}
-	if !containsFugueToolCall(lines) {
-		t.Fatalf("the agy recording has no fugue tool call: %d lines", len(lines))
+	if !containsFugueToolCall(lines) || strings.Contains(strings.Join(lines, "\n"), "quota") {
+		t.Fatalf("the agy recording has no fugue tool call or hit a quota error (model %s): %d lines", model, len(lines))
 	}
-	writeAgyFixture(t, lines, root, promptLine)
+	writeAgyFixture(t, lines, root, promptLine, agyBin)
 }
 
 // writeCodexFixture redacts and writes the recorded codex stream.
@@ -393,15 +451,32 @@ func writeCodexFixture(t *testing.T, lines []string, root string, turnLine int) 
 	writeFixtureFiles(t, "../../internal/vendoradapter/codex/testdata/fixtures", "codex-0.167.0-session4-fugue-tool", red.applyAll(lines), turnLine)
 }
 
-func writeAgyFixture(t *testing.T, lines []string, root string, turnLine int) {
+func writeAgyFixture(t *testing.T, lines []string, root string, turnLine int, agyBin string) {
 	t.Helper()
 	red := newRecorder()
+	red.uuidPrefix = "session-uuid-"
+	red.callSeen = map[string]string{}
 	red.rule(root, "/home/REDACTED/agy-fixture")
 	red.rule(filepath.Dir(root), "/home/REDACTED")
 	home, _ := os.UserHomeDir()
 	red.rule(home, "/home/REDACTED")
 	red.ruleRE(`[A-Za-z0-9-]+\.local`, "host.example")
-	writeFixtureFiles(t, "../../internal/vendoradapter/agy/testdata/fixtures", "agy-1.5.9-session7-fugue-tool", red.applyAll(lines), turnLine)
+	writeFixtureFiles(t, "../../internal/vendoradapter/agy/testdata/fixtures", "agy-"+agyVersion(t, agyBin)+"-session7-fugue-tool", red.applyAll(lines), turnLine)
+}
+
+// agyVersion reads the installed agy's version so the fixture name carries
+// the CLI that was recorded.
+func agyVersion(t *testing.T, agyBin string) string {
+	t.Helper()
+	out, err := exec.Command(agyBin, "--version").Output()
+	if err != nil {
+		t.Fatalf("agy --version: %v", err)
+	}
+	fields := strings.Fields(string(out))
+	if len(fields) == 0 {
+		t.Fatal("agy --version printed nothing")
+	}
+	return fields[len(fields)-1]
 }
 
 // writeFixtureFiles writes the fixture and its turn sidecar.
@@ -427,6 +502,8 @@ type recorder struct {
 	regexps      []struct{ re, to *regexp.Regexp }
 	uuidSeq      int
 	seen         map[string]string
+	uuidPrefix   string
+	callSeen     map[string]string
 }
 
 func newRecorder() *recorder {
@@ -452,6 +529,16 @@ func (r *recorder) applyAll(lines []string) []string {
 }
 
 func (r *recorder) apply(line string) string {
+	if r.callSeen != nil {
+		line = regexp.MustCompile(`call_[0-9]+`).ReplaceAllStringFunc(line, func(m string) string {
+			if name, ok := r.callSeen[m]; ok {
+				return name
+			}
+			name := fmt.Sprintf("call-%04d", len(r.callSeen)+1)
+			r.callSeen[m] = name
+			return name
+		})
+	}
 	for _, rule := range r.replacements {
 		line = strings.ReplaceAll(line, rule.from, rule.to)
 	}
@@ -463,7 +550,11 @@ func (r *recorder) apply(line string) string {
 			return name
 		}
 		r.uuidSeq++
-		name := fmt.Sprintf("uuid-%04d", r.uuidSeq)
+		prefix := r.uuidPrefix
+		if prefix == "" {
+			prefix = "uuid-"
+		}
+		name := fmt.Sprintf("%s%04d", prefix, r.uuidSeq)
 		r.seen[m] = name
 		return name
 	})
