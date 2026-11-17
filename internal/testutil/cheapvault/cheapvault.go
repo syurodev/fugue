@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -46,7 +47,7 @@ func Keyring(t tb) *crypto.Keyring {
 }
 
 func readKeyring(path string) (*crypto.Keyring, error) {
-	raw, err := os.ReadFile(path)
+	raw, err := fs.ReadFile(os.DirFS(filepath.Dir(path)), filepath.Base(path))
 	if err != nil {
 		return nil, fmt.Errorf("read the cheap keyring: %w", err)
 	}

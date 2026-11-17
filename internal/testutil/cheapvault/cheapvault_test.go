@@ -32,19 +32,19 @@ func TestDataDirHoldsALockedVault(t *testing.T) {
 
 // recorder stands in for a test and notes the failures a helper reports.
 type recorder struct {
-	ctx    context.Context
+	ctx    func() context.Context
 	dir    string
 	failed []any
 }
 
 func (r *recorder) Helper()                  {}
 func (r *recorder) Fatal(args ...any)        { r.failed = append(r.failed, args...) }
-func (r *recorder) Context() context.Context { return r.ctx }
+func (r *recorder) Context() context.Context { return r.ctx() }
 func (r *recorder) TempDir() string          { return r.dir }
 
 func newRecorder(t *testing.T) *recorder {
 	t.Helper()
-	return &recorder{ctx: t.Context(), dir: t.TempDir()}
+	return &recorder{ctx: t.Context, dir: t.TempDir()}
 }
 
 type failingStore struct{ vault.KeyringStore }
