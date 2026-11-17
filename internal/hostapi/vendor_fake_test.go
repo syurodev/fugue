@@ -36,7 +36,7 @@ func playFakeVendor(args []string) bool {
 	switch args[1] {
 	case "--version":
 		if strings.Contains(filepath.Base(args[0]), "agy") {
-			fakeOut("1.5.9\n")
+			fakeOut("1.5.10\n")
 			return true
 		}
 		fakeOut(fakeVendorVersion + " (Claude Code)\n")
@@ -151,7 +151,7 @@ func handleHostFakeACPMessage(msg *fakeHostACPInbound, rawParams json.RawMessage
 	id := string(msg.ID)
 	switch msg.Method {
 	case "initialize":
-		fakeOut(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"audio":false,"embeddedContext":true},"sessionCapabilities":{"resume":{},"close":{},"load":{},"list":{},"additionalDirectories":{}}},"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.9"}}}`+"\n", id))
+		fakeOut(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"audio":false,"embeddedContext":true},"sessionCapabilities":{"resume":{},"close":{},"load":{},"list":{},"additionalDirectories":{}}},"agentInfo":{"name":"Antigravity ACP Server","version":"1.5.10"}}}`+"\n", id))
 	case "session/new", "session/load":
 		fakeRecordAgyBridge(rawParams)
 		fakeOut(fmt.Sprintf(`{"jsonrpc":"2.0","id":%s,"result":{"sessionId":%q,"models":{"availableModels":[{"modelId":"gemini-3.8-flash","name":"Gemini 3.8 Flash"}],"currentModelId":"gemini-3.8-flash"},"modes":{"currentModeId":"default","availableModes":[{"id":"default","name":"Default"}]}}}`+"\n", id, sid))

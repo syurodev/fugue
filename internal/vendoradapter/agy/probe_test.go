@@ -99,17 +99,15 @@ func assertProbeCapabilities(t *testing.T, cap vendor.Capability) {
 
 func TestAgyVersionOutsideTheTestedRangeWarnsButRuns(t *testing.T) {
 	t.Parallel()
-	for _, ver := range []string{"1.5.8", "1.5.11", "1.6.0", "2.0.0"} {
+	for _, ver := range []string{"1.5.8", "1.5.9", "1.5.11", "1.6.0", "2.0.0"} {
 		parsed, ok := ParseVersion(ver)
 		if !ok || VersionTested(parsed) {
-			t.Fatalf("ParseVersion(%q) = %v, %v; want outside tested 1.5.9-1.5.10 range", ver, parsed, ok)
+			t.Fatalf("ParseVersion(%q) = %v, %v; want outside tested 1.5.10 range", ver, parsed, ok)
 		}
 	}
-	for _, ver := range []string{"1.5.9", "1.5.10"} {
-		tested, ok := ParseVersion(ver)
-		if !ok || !VersionTested(tested) {
-			t.Fatalf("%s must be in tested range", ver)
-		}
+	tested, ok := ParseVersion("1.5.10")
+	if !ok || !VersionTested(tested) {
+		t.Fatalf("1.5.10 must be in tested range")
 	}
 	a := &Adapter{Binary: fakeAgyBinary(t)}
 	report, err := a.Probe(t.Context(), vendor.AccountHome{ConfigDir: fakeUntestedVersionConfigDir})

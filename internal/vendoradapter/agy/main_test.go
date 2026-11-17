@@ -33,7 +33,7 @@ const (
 	fakeOtherRequestsConfigDir   = "/session/other-requests"
 	fakeCancelWaitConfigDir      = "/session/cancel-wait"
 	fakeRecordRPCsConfigDir      = "/session/record-rpcs"
-	fixtureCLI                   = "1.5.9"
+	fixtureCLI                   = "1.5.10"
 	untestedCLI                  = "1.6.0"
 	acpArg                       = "acp"
 )

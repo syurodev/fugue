@@ -2,7 +2,7 @@ package agy
 
 // The adapter entry point and the probe: run `agy --version` once under the
 // §8 environment allowlist, resolve from PATH only (never inside cwd), classify
-// the version against pinned 1.5.9-1.5.10, and declare the F9.8a capability contract.
+// the version against pinned 1.5.10, and declare the F9.8a capability contract.
 // Quota stays "unknown" (OR-09) and credentials are never read (VR-E09).
 
 import (
