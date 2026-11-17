@@ -35,7 +35,7 @@ const (
 
 // pageNames are the nav labels, one page per component (UK-09).
 func pageNames() []string {
-	return []string{"Button", "IconButton", "TextField", "TextArea", "Menu", "Kbd", "Combobox", "Select", "Tooltip"}
+	return []string{"Button", "IconButton", "TextField", "TextArea", "Menu", "Kbd", "Combobox", "Select", "Tooltip", "ListRow", "SectionHeader", "ScrollArea"}
 }
 
 // pageW is the content width of the page column: the window minus the nav
@@ -128,25 +128,22 @@ func (g *gallery) layout(gtx *layout.Context) error {
 
 // layoutPage draws page cur in the column.
 func (p *pages) layoutPage(col *layout.Context, cur int) {
-	switch cur {
-	case 0:
-		p.layoutButtons(col)
-	case 1:
-		p.layoutIcons(col)
-	case 2:
-		p.layoutTextFields(col)
-	case 3:
-		p.layoutTextArea(col)
-	case 4:
-		p.layoutMenus(col)
-	case 5:
-		p.layoutKbd(col)
-	case 6:
-		p.layoutComboboxes(col)
-	case 7:
-		p.layoutSelects(col)
-	case 8:
-		p.layoutTooltips(col)
+	layouts := []func(*layout.Context){
+		p.layoutButtons,
+		p.layoutIcons,
+		p.layoutTextFields,
+		p.layoutTextArea,
+		p.layoutMenus,
+		p.layoutKbd,
+		p.layoutComboboxes,
+		p.layoutSelects,
+		p.layoutTooltips,
+		p.layoutListRows,
+		p.layoutSectionHeaders,
+		p.layoutScrollAreas,
+	}
+	if cur >= 0 && cur < len(layouts) {
+		layouts[cur](col)
 	}
 }
 
