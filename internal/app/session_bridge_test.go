@@ -27,6 +27,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/transcript"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/agy"
@@ -69,7 +70,7 @@ func startBridgedVendorHost(t *testing.T, ran *int, mu *sync.Mutex) (*HostProces
 	}
 	clk := clock.NewFake(time.Unix(300, 0))
 	hp, err := StartHost(t.Context(), &HostDeps{
-		DataDir: cheapVaultDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
+		DataDir: cheapvault.DataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("bridge-host")),
 		Random:    ids.NewDeterministic(bridgeTokenSeed),
 		Transport: newScriptedTransport(), VendorBinary: exe,
@@ -621,4 +622,54 @@ func replayAgyFugueToolCall(t *testing.T) []toolCallShape {
 		obs.Updates = append(obs.Updates, o.Updates...)
 	}
 	return collectToolCalls(t, obs.Records, obs.Updates)
+}
+
+// TestToolListFollowsVendorAndTeamsFlag (F9.11): the approve relay is listed
+// to Claude sessions only (VR-05) and fugue_team_propose only where the
+// workspace's [session].teams flag is on (F11.2a); the two gates compose, so
+// each vendor sees exactly its own set.
+func TestToolListFollowsVendorAndTeamsFlag(t *testing.T) {
+	t.Parallel()
+	const (
+		teamsOn      = "ws-teams-on"
+		teamsOff     = "ws-teams-off"
+		claudeTeams  = "session-claude-teams"
+		codexTeams   = "session-codex-teams"
+		agyNoTeams   = "session-agy-no-teams"
+		proposeTitle = "propose a team"
+	)
+	f := newToolFixture(t)
+	propose := &FugueTool{
+		Name: teamProposeToolName, Description: proposeTitle, InputSchema: json.RawMessage(`{"type":"object"}`),
+		Descriptor: interaction.Descriptor{Risk: interaction.RiskRead, Confirm: interaction.ConfirmNever},
+		Available:  func(_ context.Context, info vendorstore.Session) bool { return info.WorkspaceID == teamsOn },
+		Plan:       noFacts, Run: f.record(teamProposeToolName),
+	}
+	f.svc.tools[propose.Name] = propose
+	session := func(id, vendor, workspace string) vendorstore.Session {
+		return vendorstore.Session{ID: id, Vendor: vendor, Role: roleWorker, State: vendorstore.StateStarting, ApprovalMode: vendorstore.ApprovalAuto, WorkspaceID: workspace}
+	}
+	f.records.mu.Lock()
+	f.records.sessions[claudeTeams] = session(claudeTeams, VendorClaude, teamsOn)
+	f.records.sessions[codexTeams] = session(codexTeams, VendorCodex, teamsOn)
+	f.records.sessions[agyNoTeams] = session(agyNoTeams, VendorAGY, teamsOff)
+	f.records.mu.Unlock()
+
+	for _, tc := range []struct {
+		label, session string
+		want           []string
+	}{
+		{"claude, teams on", claudeTeams, []string{approveToolName, teamProposeToolName, toolDeploy, toolEcho}},
+		{"codex, teams on", codexTeams, []string{teamProposeToolName, toolDeploy, toolEcho}},
+		{"agy, teams off", agyNoTeams, []string{toolDeploy, toolEcho}},
+	} {
+		binding := attachBridgeSession(t, f, tc.session)
+		if diff := cmp.Diff(tc.want, toolNames(t, f.svc, binding)); diff != "" {
+			t.Errorf("%s tools (-want +got):\n%s", tc.label, diff)
+		}
+	}
+	agyBinding := attachBridgeSession(t, f, agyNoTeams)
+	if _, err := f.svc.Call(t.Context(), agyBinding, teamProposeToolName, []byte("{}")); errcode.CodeOf(err) != errcode.NotFound {
+		t.Errorf("agy call of a gated-off tool error = %v, want not found", err)
+	}
 }
