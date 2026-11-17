@@ -145,7 +145,7 @@ func (f *toolFixture) attach(t *testing.T, sessionID, role string) (SessionBindi
 
 func toolNames(t *testing.T, svc *SessionToolService, binding SessionBinding) []string {
 	t.Helper()
-	views, err := svc.List(binding)
+	views, err := svc.List(t.Context(), binding)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,7 +183,7 @@ func TestSessionTokenOpensOnlyItsSessionAndRole(t *testing.T) {
 	if _, err := f.svc.Attach(leadToken); errcode.CodeOf(err) != errcode.PermissionDenied {
 		t.Errorf("a replaced token = %v, want permission_denied", err)
 	}
-	if _, err := f.svc.List(lead); errcode.CodeOf(err) != errcode.PermissionDenied {
+	if _, err := f.svc.List(t.Context(), lead); errcode.CodeOf(err) != errcode.PermissionDenied {
 		t.Errorf("a binding of a replaced token = %v, want permission_denied", err)
 	}
 }
@@ -229,7 +229,7 @@ func assertForgedBindingsOpenNothing(t *testing.T, f *toolFixture, lead SessionB
 	forged[1].Role = roleWorker
 	forged[2].SessionID = sessionWork
 	for _, binding := range forged {
-		if _, err := f.svc.List(binding); errcode.CodeOf(err) != errcode.PermissionDenied {
+		if _, err := f.svc.List(t.Context(), binding); errcode.CodeOf(err) != errcode.PermissionDenied {
 			t.Errorf("List(%+v) = %v, want permission_denied", binding, err)
 		}
 		if _, err := f.svc.Call(t.Context(), binding, toolEcho, nil); errcode.CodeOf(err) != errcode.PermissionDenied {
@@ -462,9 +462,7 @@ func TestSessionTokenDiesWithItsSessionAndItsPurge(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tools.tools) != 0 {
-		t.Fatal("a normal host serves tools")
-	}
+	assertProductionToolsOnly(t, tools)
 	session := f.start(t, "token-1")
 	tools.tokens.mu.Lock()
 	binding, minted := tools.tokens.bySession[session.ID]
@@ -589,5 +587,15 @@ func awaitRequested(t *testing.T, sub *Subscription) PendingInteractionView {
 			t.Fatal(err)
 		}
 		return view
+	}
+}
+
+// assertProductionToolsOnly asserts a normal host serves exactly the
+// production Fugue tools: the team proposal tool (F11.2a); tests add theirs
+// through HostDeps.
+func assertProductionToolsOnly(t *testing.T, tools *SessionToolService) {
+	t.Helper()
+	if len(tools.tools) != 1 || tools.tools[teamProposeToolName] == nil {
+		t.Fatal("a normal host serves only the production Fugue tools")
 	}
 }

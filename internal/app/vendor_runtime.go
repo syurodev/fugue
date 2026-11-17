@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"slices"
 	"strings"
 
 	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/storage"
 	"github.com/syurodev/fugue/internal/vault"
@@ -102,20 +104,29 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 		if hp.rt.interactions != nil && hp.rt.interactions.owner != nil {
 			hp.rt.interactions.owner.ResetSession(sessionID)
 		}
+		hp.cancelTeamProposalOnEnd(base, sessionID)
+	}
+	sessionEndSettled := func(sessionID string) <-chan struct{} {
+		if hp.rt.teamProposals == nil {
+			return nil
+		}
+		return hp.rt.teamProposals.SessionEndSettled(sessionID)
 	}
 	transcripts.onPurge = endSession
 	hp.vendorAdapter = adapter
 	sessions, err := NewVendorSessions(base, &VendorSessionDeps{
 		Store: topicNotifyingStore{Store: vs, topic: topic}, Transcripts: transcripts,
 		Adapter: adapter, Adapters: adapters, Accounts: accounts,
-		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: endSession,
+		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: endSession, SessionEndSettled: sessionEndSettled,
 		TestDelaySpawnRegistration: deps.TestDelaySpawnRegistration,
 		TestOnWaitInflightSpawn:    deps.TestOnWaitInflightSpawn,
 	})
 	if err != nil {
 		return nil, err
 	}
-	hp.rt.sessionTools = newSessionToolService(tokens, deps.TestFugueTools, vs, hp.rt.interactions, hp.rt.tags, deps.IDs, sessions)
+	hp.rt.teamProposals = newTeamProposalService(vs, sessions, hp.rt.workspaces.domain, hp.rt.interactions, nopUsageHistory{}, deps.IDs, tokens.liveSession)
+	tools := append(slices.Clone(deps.TestFugueTools), teamProposeTool(hp.rt.teamProposals))
+	hp.rt.sessionTools = newSessionToolService(tokens, tools, vs, hp.rt.interactions, hp.rt.tags, deps.IDs, sessions)
 	sessions.SetRelay(hp.rt.sessionTools)
 	hp.rt.vendors = &VendorService{
 		sessions: sessions, store: vs, adapter: adapter, adapters: adapters, vault: v, workspaces: hp.rt.workspaces.domain,
@@ -249,4 +260,27 @@ func (rt *HostRuntime) TranscriptService() (*Transcripts, error) {
 		return nil, errcode.New(errcode.Unavailable, "the transcript service is unavailable")
 	}
 	return rt.transcripts, nil
+}
+
+// cancelTeamProposalOnEnd cancels the session's pending proposal when its
+// session ends (Q-104). The cancel runs off the close path on its own
+// goroutine, on the host's base context so a shutdown stops it: a stopped
+// cancel leaves the proposal pending, the fail-closed side. endSession fires
+// inside requestClose while the actor and the close sequence still write, and
+// the single SQLite connection serializes writers; the session's actor holds
+// its final close writes until the cancel settles (SessionEndSettled),
+// because the store refuses the item flip once the session row is closed.
+func (hp *HostProcess) cancelTeamProposalOnEnd(base context.Context, sessionID string) {
+	if hp.rt.teamProposals == nil {
+		return
+	}
+	settled := hp.rt.teamProposals.BeginSessionEnd(sessionID)
+	supervise.Go(base, "team-cancel-"+sessionID, func(taskCtx context.Context) error {
+		defer settled()
+		if cancelErr := hp.rt.teamProposals.CancelForSession(taskCtx, sessionID); cancelErr != nil && taskCtx.Err() == nil {
+			slog.WarnContext(taskCtx, "cancelling the pending team proposal failed",
+				"session_id", sessionID, "error_code", string(errcode.CodeOf(cancelErr)))
+		}
+		return nil
+	})
 }

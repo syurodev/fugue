@@ -114,6 +114,54 @@ func scanTaskRow(rows *sql.Rows) (TaskRecord, error) {
 	return t, nil
 }
 
+// ProposalItemID returns the transcript item ID of the session's
+// team_proposal item for proposalID, newest first. The lookup goes through
+// the idx_vendor_transcript_items_proposal expression index (0011), so it
+// does not depend on how many items the session recorded since the proposal
+// (F11.2a review: a pending proposal must stay reachable for the whole life
+// of a long session). ok is false when no item was recorded yet.
+func (s *Store) ProposalItemID(ctx context.Context, sessionID, proposalID string) (string, bool, error) {
+	var itemID string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT item_id FROM vendor_transcript_items
+		WHERE session_id = ? AND kind = ?
+		  AND json_extract(metadata, '$.proposal_id') = ?
+		ORDER BY sequence DESC LIMIT 1`,
+		sessionID, string(KindTeamProposal), proposalID,
+	).Scan(&itemID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("%w: query the proposal item: %w", ErrUnavailable, err)
+	}
+	return itemID, true, nil
+}
+
+// PendingTeamForSession returns the still-proposed team a session owns, if any
+// (F11.2a, Q-103: one pending proposal per session). A session can own at most
+// one because proposing supersedes the previous pending team first.
+func (s *Store) PendingTeamForSession(ctx context.Context, sessionID string) (TeamRecord, bool, error) {
+	var teamID, stateStr string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT team_id, state FROM team_records
+		WHERE session_id = ? AND state = ?
+		ORDER BY created_at DESC, team_id DESC LIMIT 1`,
+		sessionID, string(TeamStateProposed),
+	).Scan(&teamID, &stateStr)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TeamRecord{}, false, nil
+	}
+	if err != nil {
+		return TeamRecord{}, false, fmt.Errorf("%w: query pending team: %w", ErrUnavailable, err)
+	}
+	rec, err := queryTeamRecord(ctx, s.db, teamID)
+	if err != nil {
+		return TeamRecord{}, false, err
+	}
+	return rec, true, nil
+}
+
 // TeamEventsSince reads metadata-only event records with sequence > afterSeq.
 func (s *Store) TeamEventsSince(ctx context.Context, teamID string, afterSeq int64, limit int) ([]RecordedTeamEvent, error) {
 	if limit <= 0 {
