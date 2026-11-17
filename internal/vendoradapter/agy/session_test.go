@@ -6,7 +6,6 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
-	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -465,7 +464,7 @@ func TestAgyStopKillsTheProcessTree(t *testing.T) {
 		closeErrCh <- cErr
 		return nil
 	})
-	if err := driveFakeClock(ctx, clk, closeErrCh); err != nil {
+	if err := driveFakeClock(t, clk, closeErrCh); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
@@ -492,7 +491,7 @@ func TestAgySessionHandshakeTimeoutAndOversizedFrame(t *testing.T) {
 		errCh <- sErr
 		return nil
 	})
-	if err := driveFakeClock(ctx, clk, errCh); !errors.Is(err, vendor.ErrHandshakeTimeout) {
+	if err := driveFakeClock(t, clk, errCh); !errors.Is(err, vendor.ErrHandshakeTimeout) {
 		t.Fatalf("handshake timeout err = %v, want ErrHandshakeTimeout", err)
 	}
 
@@ -572,7 +571,7 @@ func verifyInterruptTimeoutEscalation(t *testing.T) {
 		errCh <- sess.Interrupt(taskCtx, turn)
 		return nil
 	})
-	if iErr := driveFakeClock(ctx, clk, errCh); errcode.CodeOf(iErr) != errcode.DeadlineExceeded {
+	if iErr := driveFakeClock(t, clk, errCh); errcode.CodeOf(iErr) != errcode.DeadlineExceeded {
 		t.Fatalf("escalated Interrupt = %v, want deadline_exceeded", iErr)
 	}
 }
@@ -592,22 +591,22 @@ func waitForPIDFile(t *testing.T, pidFile string) int {
 	return pid
 }
 
-func driveFakeClock(ctx context.Context, clk *clock.Fake, errCh <-chan error) error {
-	for {
+func driveFakeClock(t *testing.T, clk *clock.Fake, errCh <-chan error) error {
+	t.Helper()
+	var result error
+	testutil.Spin(t, "the driven call to return", func() bool {
 		select {
-		case err := <-errCh:
-			return err
-		case <-ctx.Done():
-			return errcode.Wrap(errcode.Canceled, "drive fake clock canceled", ctx.Err())
+		case result = <-errCh:
+			return true
 		default:
 		}
 		if clk.Pending() > 0 {
 			clk.Advance(500 * time.Millisecond)
 			sleepReal(5 * time.Millisecond)
-		} else {
-			runtime.Gosched()
 		}
-	}
+		return false
+	})
+	return result
 }
 
 func sleepReal(d time.Duration) {

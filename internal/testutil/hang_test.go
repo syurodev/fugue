@@ -2,6 +2,7 @@ package testutil
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -17,10 +18,12 @@ type recorder struct {
 	cleanup []func()
 }
 
-func (r *recorder) Helper()                           {}
-func (r *recorder) Context() context.Context          { return r.context() }
-func (r *recorder) Cleanup(fn func())                 { r.cleanup = append(r.cleanup, fn) }
-func (r *recorder) Fatalf(format string, args ...any) { panic(failed{msg: format}) }
+func (r *recorder) Helper()                  {}
+func (r *recorder) Context() context.Context { return r.context() }
+func (r *recorder) Cleanup(fn func())        { r.cleanup = append(r.cleanup, fn) }
+func (r *recorder) Fatalf(format string, args ...any) {
+	panic(failed{msg: fmt.Sprintf(format, args...)})
+}
 
 func fatalMessage(t *testing.T, fn func()) (msg string) {
 	t.Helper()
@@ -106,4 +109,25 @@ func TestOSClockHasRealTimers(t *testing.T) {
 	t.Parallel()
 	timer := OSClock().NewTimer(time.Millisecond)
 	Await(t, timer.C())
+}
+
+func TestSpinReturnsOnceTheConditionHolds(t *testing.T) {
+	t.Parallel()
+	calls := 0
+	Spin(t, "third call", func() bool {
+		calls++
+		return calls == 3
+	})
+	if calls != 3 {
+		t.Fatalf("calls = %d, want 3", calls)
+	}
+}
+
+func TestSpinFailsAfterTheGuard(t *testing.T) {
+	t.Parallel()
+	r := &recorder{context: t.Context}
+	msg := fatalMessage(t, func() { spin(r, "never", time.Millisecond, func() bool { return false }) })
+	if !strings.Contains(msg, "hang") {
+		t.Fatalf("message = %q, want a hang report", msg)
+	}
 }

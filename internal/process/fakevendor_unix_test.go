@@ -3,13 +3,15 @@
 package process
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"os/signal"
-	"runtime"
 	"strconv"
 	"syscall"
+
+	"github.com/syurodev/fugue/internal/testutil"
 )
 
 const (
@@ -276,11 +278,12 @@ func waitFakeScopeMoveGate(procRoot string) {
 	if _, err := readRootFile(procRoot, "wait-for-poll"); err != nil {
 		return
 	}
-	for {
-		if _, err := readRootFile(procRoot, "allow-scope-move"); err == nil {
-			return
-		}
-		runtime.Gosched()
+	err := testutil.WaitFor(context.Background(), "allow-scope-move", func() bool {
+		_, err := readRootFile(procRoot, "allow-scope-move")
+		return err == nil
+	})
+	if err != nil {
+		os.Exit(1)
 	}
 }
 

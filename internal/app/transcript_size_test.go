@@ -21,28 +21,37 @@ import (
 
 const (
 	oversizedMarker = "oversized"
-	// totalPageItems is the TR-E05 item count; session start and turn start
-	// precede the items in the sequence.
-	totalPageItems    = 10000
-	firstItemSequence = uint64(totalPageItems) + 2
+	// pagedItems is the PR item count: three full pages and a partial one, so
+	// the page boundaries and the last short page are exercised. Every item is
+	// a durable write, which costs 11 ms under -race; TR-E05's 10,000 items run
+	// in the nightly perf job (TestTranscriptPageOver10000Items...).
+	pagedItems = 3*defaultPageLimit + 37
 )
 
-func TestTranscriptPageOver10000ItemsIsStableWithoutDuplicatesOrGaps(t *testing.T) {
+func TestTranscriptPageIsStableAcrossPagesWithoutDuplicatesOrGaps(t *testing.T) {
 	t.Parallel()
+	assertStablePagingOver(t, pagedItems, pagedItems+2)
+}
+
+// assertStablePagingOver records total items, updates the first, and pages the
+// whole transcript. Session start and turn start precede the items in the
+// sequence.
+func assertStablePagingOver(t *testing.T, total int, newest uint64) {
+	t.Helper()
 	f := newTranscriptFixture(t, nil)
 
-	updated := recordPageItems(t, f, totalPageItems)
+	updated := recordPageItems(t, f, total)
 
 	// An update must not move the item's position: revision advances, sequence
 	// stays.
 	next := *updated
 	next.Revision = 1
-	if err := f.service.UpdateItem(t.Context(), testSession, totalPageItems+2, updated, &next, nil); err != nil {
+	if err := f.service.UpdateItem(t.Context(), testSession, int64(total)+2, updated, &next, nil); err != nil {
 		t.Fatal(err)
 	}
 
 	entries := collectAllPages(t, f)
-	assertPagedTranscript(t, entries, totalPageItems)
+	assertPagedTranscript(t, entries, total, newest)
 }
 
 // recordPageItems records the first item through the service write path, then
@@ -114,7 +123,7 @@ func collectAllPages(t *testing.T, f *transcriptFixture) []TranscriptEntry {
 
 // assertPagedTranscript checks the paged output: every sequence exactly once,
 // newest first with no gaps, and the updated item at its original position.
-func assertPagedTranscript(t *testing.T, entries []TranscriptEntry, total int) {
+func assertPagedTranscript(t *testing.T, entries []TranscriptEntry, total int, newest uint64) {
 	t.Helper()
 	seen := make(map[uint64]string, total)
 	for i := range entries {
@@ -127,8 +136,8 @@ func assertPagedTranscript(t *testing.T, entries []TranscriptEntry, total int) {
 	if len(entries) != total || len(seen) != total {
 		t.Fatalf("paged %d entries with %d distinct sequences, want %d", len(entries), len(seen), total)
 	}
-	if entries[0].Sequence != firstItemSequence {
-		t.Fatalf("newest entry sequence = %d, want %d", entries[0].Sequence, firstItemSequence)
+	if entries[0].Sequence != newest {
+		t.Fatalf("newest entry sequence = %d, want %d", entries[0].Sequence, newest)
 	}
 	for i := 1; i < len(entries); i++ {
 		if entries[i].Sequence != entries[i-1].Sequence-1 {

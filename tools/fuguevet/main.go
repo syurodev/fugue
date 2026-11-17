@@ -3,6 +3,7 @@ package main
 import (
 	"golang.org/x/tools/go/analysis/unitchecker"
 
+	"github.com/syurodev/fugue/tools/fuguevet/boundedwait"
 	"github.com/syurodev/fugue/tools/fuguevet/cheapvault"
 	"github.com/syurodev/fugue/tools/fuguevet/kernelpure"
 	"github.com/syurodev/fugue/tools/fuguevet/nobarego"
@@ -21,5 +22,6 @@ func main() {
 		noprotoleak.New(),
 		realclock.New(),
 		cheapvault.New(),
+		boundedwait.New(),
 	)
 }

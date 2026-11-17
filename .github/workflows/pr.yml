@@ -112,8 +112,17 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
+      # -json gives every test's elapsed time to the slowtests step; jq prints the
+      # plain log, so the run reads as it did before. pipefail keeps a failing
+      # test failing the step.
       - if: steps.decide.outputs.run == 'true'
-        run: go tool task test
+        shell: bash
+        run: go tool task test -- -json | tee test.json | jq -j 'select(.Action == "output") | .Output'
+      # Report only: the per-test budget of quality-gates section 6 is not a
+      # required failure yet, so the step never fails the job.
+      - name: Report tests above the time budget
+        if: ${{ !cancelled() && steps.decide.outputs.run == 'true' }}
+        run: go run ./cmd/fuguegate slowtests -json test.json -max 30s || echo "::warning::tests above the 30s per-test budget (report only, quality-gates section 6)"
       - name: Keep the coverage profile for the coverage job
         if: matrix.os == 'ubuntu-latest' && steps.decide.outputs.run == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

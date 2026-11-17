@@ -102,6 +102,9 @@ tasks:
     desc: Speed budgets, the median of several measurements, without the race detector (nightly)
     cmds:
       - go test -tags perf -count=1 -timeout=10m -v ./internal/perf/...
+      # The full-size variants of tests that run smaller under -race on a PR.
+      - go test -tags perf -count=1 -timeout=10m -v -run 'Over10000ItemsIsStable' ./internal/app
+      - go test -tags perf -count=1 -timeout=10m -v -run 'Append10000Payloads' ./internal/vendorstore
       - cd ui && go test -tags perf -count=1 -timeout=10m -v ./internal/mdview/... ./internal/transcriptview/...
 
   windows-build:
@@ -128,9 +131,9 @@ tasks:
       - "{{.HEAVY_WRAP}} {{.HEAVY_LOCK}} go vet -vettool={{.ROOT_DIR}}/bin/fuguevet ./..."
 
   test:
-    desc: All tests with the race detector, shuffled, uncached
+    desc: All tests with the race detector, shuffled, uncached (extra go test flags after `--`, for example -json)
     cmds:
-      - '{{.HEAVY_WRAP}} {{.HEAVY_LOCK}} go test -race -shuffle=on -count=1 -covermode=atomic -coverprofile=cover.out ./...'
+      - '{{.HEAVY_WRAP}} {{.HEAVY_LOCK}} go test -race -shuffle=on -count=1 -covermode=atomic -coverprofile=cover.out {{.CLI_ARGS}} ./...'
 
   test-pkg:
     desc: Targeted tests with the flags of `task test` (no cover profile)

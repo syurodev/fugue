@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -13,6 +12,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/process"
+	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/transcript"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/claude"
@@ -738,11 +738,5 @@ func (s *failAppendVendorStore) Append(ctx context.Context, session string, sequ
 
 func awaitActor(t *testing.T, condition func() bool) {
 	t.Helper()
-	for range 1000000 {
-		if condition() {
-			return
-		}
-		runtime.Gosched()
-	}
-	t.Fatal("session actor did not reach the expected durable state")
+	testutil.Spin(t, "session actor reaching the expected durable state", condition)
 }

@@ -2,7 +2,6 @@ package transcript
 
 import (
 	"context"
-	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -11,6 +10,7 @@ import (
 
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/internal/testutil"
 )
 
 type deltaSink struct {
@@ -35,16 +35,15 @@ func (s *deltaSink) snapshot() []Delta {
 
 func awaitDelta(t *testing.T, c *clock.Fake, sink *deltaSink, count int) {
 	t.Helper()
-	for range 100000 {
+	testutil.Spin(t, "the delta to be published", func() bool {
 		if len(sink.snapshot()) >= count {
-			return
+			return true
 		}
 		if c.Pending() > 0 {
 			c.Advance(time.Second/30 + 1)
 		}
-		runtime.Gosched()
-	}
-	t.Fatal("delta was not published")
+		return false
+	})
 }
 
 func TestDeltaCoalescerCapsAt30PerSecondAndKeepsLatest(t *testing.T) {

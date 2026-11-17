@@ -21,6 +21,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/secrets"
 	"github.com/syurodev/fugue/internal/storage"
+	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/transcript"
 	"github.com/syurodev/fugue/internal/vault"
@@ -114,13 +115,9 @@ func (f *transcriptFixture) mustCreateSession(session string) {
 // a known value is masked as soon as the test proceeds.
 func (f *transcriptFixture) awaitKnownValues() {
 	f.t.Helper()
-	for range 100000 {
-		if f.service.redactor.Redact(knownAPIToken) != knownAPIToken {
-			return
-		}
-		runtime.Gosched()
-	}
-	f.t.Fatal("the redactor never rebuilt its detector with the known values")
+	testutil.Spin(f.t, "the redactor rebuilding its detector with the known values", func() bool {
+		return f.service.redactor.Redact(knownAPIToken) != knownAPIToken
+	})
 }
 
 // streamAndAwait streams one update and blocks until the coalescer has
@@ -141,16 +138,16 @@ func (f *transcriptFixture) streamAndAwait(item string, base uint64, kind transc
 // a delta still on its way to the coalescer's pending set, so a test that
 // expects a delta to be published uses streamAndAwait instead.
 func (f *transcriptFixture) pumpDelta() {
-	for range 100000 {
+	testutil.Spin(f.t, "the coalescer to run out of timers", func() bool {
 		if f.clock.Pending() == 0 {
 			runtime.Gosched()
 			if f.clock.Pending() == 0 {
-				return
+				return true
 			}
 		}
 		f.clock.Advance(time.Second/30 + 1)
-		runtime.Gosched()
-	}
+		return false
+	})
 }
 
 func subscribe(t *testing.T, hub *EventHub, topic string) *Subscription {

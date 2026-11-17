@@ -3,7 +3,6 @@ package claude
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -15,6 +14,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/process"
+	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/vendor"
 )
 
@@ -32,21 +32,21 @@ func waitAndAdvance(t *testing.T, clk *clock.Fake, minPending int, d time.Durati
 	clk.Advance(d)
 }
 
-func driveUntilErr(ctx context.Context, clk *clock.Fake, errCh <-chan error) error {
-	for {
+func driveUntilErr(t *testing.T, clk *clock.Fake, errCh <-chan error) error {
+	t.Helper()
+	var result error
+	testutil.Spin(t, "the driven call to return", func() bool {
 		select {
-		case err := <-errCh:
-			return err
-		case <-ctx.Done():
-			return fmt.Errorf("context done: %w", ctx.Err())
+		case result = <-errCh:
+			return true
 		default:
 		}
 		if clk.Pending() > 0 {
 			clk.Advance(10 * time.Millisecond)
-		} else {
-			runtime.Gosched()
 		}
-	}
+		return false
+	})
+	return result
 }
 
 func asClaudeSession(t *testing.T, s vendor.Session) *Session {
@@ -297,7 +297,7 @@ func TestSessionInterruptEscalatesToStopWhenCLIHangs(t *testing.T) {
 		t.Fatalf("expected sigint step, got %q", step)
 	}
 
-	intErr := driveUntilErr(ctx, clk, interruptErrCh)
+	intErr := driveUntilErr(t, clk, interruptErrCh)
 	if errcode.CodeOf(intErr) != errcode.DeadlineExceeded {
 		t.Fatalf("expected DeadlineExceeded on interrupt escalation, got %v", intErr)
 	}
@@ -350,7 +350,7 @@ func TestSessionHandshakeTimeoutStopsProcess(t *testing.T) {
 		t.Fatalf("expected sigint step, got %q", step)
 	}
 
-	startErr := driveUntilErr(ctx, clk, startErrCh)
+	startErr := driveUntilErr(t, clk, startErrCh)
 	if !errors.Is(startErr, vendor.ErrHandshakeTimeout) {
 		t.Fatalf("expected ErrHandshakeTimeout, got %v", startErr)
 	}
@@ -505,16 +505,13 @@ func TestSessionStartBinaryNotFoundFailsTyped(t *testing.T) {
 	}
 }
 
-func waitForRunningState(s *Session) {
-	for {
+func waitForRunningState(t *testing.T, s *Session) {
+	t.Helper()
+	testutil.Spin(t, "the session to be running", func() bool {
 		s.mu.Lock()
-		running := s.state == stateRunning
-		s.mu.Unlock()
-		if running {
-			return
-		}
-		runtime.Gosched()
-	}
+		defer s.mu.Unlock()
+		return s.state == stateRunning
+	})
 }
 
 func TestSessionCloseUnblocksWhenSendBlocked(t *testing.T) {
@@ -545,7 +542,7 @@ func TestSessionCloseUnblocksWhenSendBlocked(t *testing.T) {
 		return nil
 	})
 
-	waitForRunningState(asClaudeSession(t, sess))
+	waitForRunningState(t, asClaudeSession(t, sess))
 
 	closeDone := make(chan error, 1)
 	supervise.Go(ctx, "test.close_session", func(taskCtx context.Context) error {
@@ -554,7 +551,7 @@ func TestSessionCloseUnblocksWhenSendBlocked(t *testing.T) {
 		return nil
 	})
 
-	if err := driveUntilErr(ctx, clk, closeDone); err != nil {
+	if err := driveUntilErr(t, clk, closeDone); err != nil {
 		t.Fatalf("Close failed: %v", err)
 	}
 

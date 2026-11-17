@@ -20,6 +20,7 @@ type testEvent struct {
 	Action  string
 	Package string
 	Test    string
+	Elapsed *float64
 }
 
 type outcomes struct{ passed, failed int }
@@ -59,16 +60,12 @@ func runFlaky(_ context.Context, args []string, stdout io.Writer) error {
 	return say(stdout, "no test both passed and failed")
 }
 
-// tallyOutcomes counts the final pass and fail of every test. Lines that are
-// not JSON events (build output) are ignored.
+// tallyOutcomes counts the final pass and fail of every test.
 func tallyOutcomes(r io.Reader) (map[string]outcomes, error) {
 	tally := map[string]outcomes{}
-	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 0, 64<<10), 16<<20)
-	for sc.Scan() {
-		var ev testEvent
-		if json.Unmarshal(sc.Bytes(), &ev) != nil || ev.Test == "" {
-			continue
+	err := eachEvent(r, func(ev testEvent) {
+		if ev.Test == "" {
+			return
 		}
 		name := ev.Package + "." + ev.Test
 		o := tally[name]
@@ -79,9 +76,23 @@ func tallyOutcomes(r io.Reader) (map[string]outcomes, error) {
 			o.failed++
 		}
 		tally[name] = o
+	})
+	return tally, err
+}
+
+// eachEvent calls fn for every `go test -json` event in r. Lines that are not
+// JSON events (build output) are ignored.
+func eachEvent(r io.Reader, fn func(testEvent)) error {
+	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64<<10), 16<<20)
+	for sc.Scan() {
+		var ev testEvent
+		if json.Unmarshal(sc.Bytes(), &ev) == nil {
+			fn(ev)
+		}
 	}
 	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("scan test log: %w", err)
+		return fmt.Errorf("scan test log: %w", err)
 	}
-	return tally, nil
+	return nil
 }
