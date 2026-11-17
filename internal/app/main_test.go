@@ -219,8 +219,10 @@ type fakeACPInbound struct {
 		} `json:"prompt"`
 	} `json:"params"`
 	Result struct {
-		Outcome  string `json:"outcome"`
-		OptionID string `json:"optionId"`
+		Outcome struct {
+			Outcome  string `json:"outcome"`
+			OptionID string `json:"optionId"`
+		} `json:"outcome"`
 	} `json:"result"`
 	Error *struct {
 		Code    int    `json:"code"`
@@ -325,7 +327,7 @@ func handleFakeACPResponse(st *fakeACPLoopState, msg *fakeACPInbound) {
 	marker := st.shellMarker
 	st.heldPromptID = ""
 	st.shellMarker = ""
-	if msg.Error == nil && msg.Result.Outcome == "selected" && (msg.Result.OptionID == approveOptionAllow || msg.Result.OptionID == agyOptionAllowAlways) {
+	if msg.Error == nil && msg.Result.Outcome.Outcome == "selected" && (msg.Result.Outcome.OptionID == approveOptionAllow || msg.Result.Outcome.OptionID == agyOptionAllowAlways) {
 		if marker != "" {
 			if err := os.WriteFile(filepath.Clean(marker), []byte("ran-after-permission\n"), 0o600); err != nil {
 				os.Exit(1)

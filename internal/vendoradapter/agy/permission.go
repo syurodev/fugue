@@ -8,8 +8,8 @@ package agy
 // and a `toolCall` object (`title`, `kind`, `rawInput`, `locations`, `content`).
 // The normalizer emits a `vendor.ServerRequest` with verbatim option order and
 // compact `toolCall` JSON detail. `Session.Resolve` answers at most once with:
-//   - `{"outcome":"selected","optionId":<user choice>}` when a user selects an option,
-//   - `{"outcome":"cancelled"}` when the turn was cancelled via `session/cancel`, or
+//   - `{"outcome":{"outcome":"selected","optionId":<user choice>}}` when a user selects an option,
+//   - `{"outcome":{"outcome":"cancelled"}}` when the turn was cancelled via `session/cancel`, or
 //   - a JSON-RPC error (`-32000`) on every failure path (never a synthesized option).
 
 import (
@@ -216,6 +216,11 @@ func (s *Session) rejectUnrelayedServerRequest(ctx context.Context, id, message 
 
 // Resolve sends the user's permission choice, a turn-cancel outcome, or a
 // JSON-RPC error response back to `agy` for req.ID, at most once.
+//
+// The result is the ACP v1 `RequestPermissionResponse`, whose `outcome` is the
+// tagged union object. agy 1.5.9 also accepted a flat `outcome` string, but
+// 1.5.10 rejects it ("cannot unmarshal string into ... AllowedOutcome") and
+// fails the tool call, so the spec form is the only one sent.
 func (s *Session) Resolve(ctx context.Context, req vendor.ApprovalRef, d vendor.Decision) error {
 	if req.ID == "" {
 		return errcode.New(errcode.InvalidArgument, "approval request id is required")
@@ -251,7 +256,7 @@ func (s *Session) encodePermissionResponse(pending pendingServerRequest, d vendo
 	}
 	if d.Cancelled {
 		return s.codec.EncodeResponseResult(pending.rawID, RequestPermissionResult{
-			Outcome: PermissionOutcomeCancelled,
+			Outcome: RequestPermissionOutcome{Outcome: PermissionOutcomeCancelled},
 		})
 	}
 	optionID := strings.TrimSpace(d.Message)
@@ -259,8 +264,7 @@ func (s *Session) encodePermissionResponse(pending pendingServerRequest, d vendo
 		return s.codec.EncodeResponseError(pending.rawID, RPCErrorServerError, RPCErrorPermissionNotRelayed)
 	}
 	return s.codec.EncodeResponseResult(pending.rawID, RequestPermissionResult{
-		Outcome:  PermissionOutcomeSelected,
-		OptionID: optionID,
+		Outcome: RequestPermissionOutcome{Outcome: PermissionOutcomeSelected, OptionID: optionID},
 	})
 }
 

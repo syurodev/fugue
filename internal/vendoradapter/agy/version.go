@@ -1,7 +1,9 @@
 package agy
 
-// The tested version range (VR-08): F9.8a verified agy 1.5.9 and pins the
-// tested range to 1.5.9 (vendor-runtime §5.3, §11). A version outside the
+// The tested version range (VR-08): F9.8a verified agy 1.5.9; the permission
+// answer fix re-measured agy 1.5.10 (the ACP v1 nested permission outcome,
+// handshake, session, prompt and tool-call updates) and widened the tested
+// range to 1.5.9 through 1.5.10 (vendor-runtime §5.3, §11). A version outside the
 // range still runs, with an untested-version warning; widening the range needs
 // new conformance evidence, never a silent edit.
 
@@ -13,14 +15,14 @@ type Version = vendor.Version
 // versionRange is an inclusive numeric range.
 type versionRange = vendor.VersionRange
 
-// PinnedVersion is the exact Antigravity CLI version pinned for F9.8a.
-const PinnedVersion = "1.5.9"
+// PinnedVersion is the label of the Antigravity CLI range verified so far.
+const PinnedVersion = "1.5.9-1.5.10"
 
 // checkedRange reports the versions this adapter was verified against.
 func checkedRange() versionRange {
 	return versionRange{
 		Min:   Version{Major: 1, Minor: 5, Patch: 9},
-		Max:   Version{Major: 1, Minor: 5, Patch: 9},
+		Max:   Version{Major: 1, Minor: 5, Patch: 10},
 		Label: PinnedVersion,
 	}
 }

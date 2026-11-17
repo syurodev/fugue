@@ -336,10 +336,15 @@ type (
 		Meta      json.RawMessage    `json:"_meta,omitempty"`
 	}
 
-	// RequestPermissionResult is the ACP JSON-RPC result payload for
-	// session/request_permission: `{"outcome":"selected","optionId":...}` or
-	// `{"outcome":"cancelled"}`.
+	// RequestPermissionResult is the ACP v1 `RequestPermissionResponse`: the
+	// JSON-RPC result of session/request_permission is `{"outcome":<outcome>}`.
 	RequestPermissionResult struct {
+		Outcome RequestPermissionOutcome `json:"outcome"`
+	}
+
+	// RequestPermissionOutcome is the ACP v1 `RequestPermissionOutcome` tagged
+	// union: `{"outcome":"selected","optionId":...}` or `{"outcome":"cancelled"}`.
+	RequestPermissionOutcome struct {
 		Outcome  string `json:"outcome"`
 		OptionID string `json:"optionId,omitempty"`
 	}

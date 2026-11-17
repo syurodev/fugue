@@ -270,8 +270,7 @@ func awaitPermServerRequest(t *testing.T, sess *Session) *vendor.ServerRequest {
 func assertPermSelectedWirePayload(t *testing.T, rawRPCs string) {
 	t.Helper()
 	wantBytes, err := NewCodec().EncodeResponseResult(json.RawMessage(`"perm-1"`), RequestPermissionResult{
-		Outcome:  PermissionOutcomeSelected,
-		OptionID: testPermOptionAllow,
+		Outcome: RequestPermissionOutcome{Outcome: PermissionOutcomeSelected, OptionID: testPermOptionAllow},
 	})
 	if err != nil {
 		t.Fatal(err)

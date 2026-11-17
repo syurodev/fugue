@@ -396,7 +396,7 @@ func assertAgyPermissionAnsweredOnce(
 		t.Fatalf("resolved event = (%+v, %v)", resolvedEv, ok)
 	}
 	resp := f.awaitRPCResponse(t, "101")
-	if resp.Error != nil || string(resp.Result) != `{"outcome":"selected","optionId":"allow_always"}` {
+	if resp.Error != nil || string(resp.Result) != `{"outcome":{"outcome":"selected","optionId":"allow_always"}}` {
 		t.Fatalf("RPC 101 response = %+v, want selected allow_always", resp)
 	}
 	_, dupErr := f.inter.Answer(t.Context(), &AnswerInteractionCommand{
@@ -469,8 +469,8 @@ func TestAgyTurnCancelAnswersCancelledAndClosesItsTickets(t *testing.T) {
 
 	for _, id := range []string{"cancel-1", "cancel-2"} {
 		resp := f.awaitRPCResponse(t, id)
-		if resp.Error != nil || string(resp.Result) != `{"outcome":"cancelled"}` {
-			t.Fatalf("RPC %s response = %+v, want {\"outcome\":\"cancelled\"}", id, resp)
+		if resp.Error != nil || string(resp.Result) != `{"outcome":{"outcome":"cancelled"}}` {
+			t.Fatalf("RPC %s response = %+v, want {\"outcome\":{\"outcome\":\"cancelled\"}}", id, resp)
 		}
 	}
 	awaitSessionState(t, sessSub, f.session.ID, "ready")
@@ -516,8 +516,8 @@ func TestAgyPermissionAfterTurnCancelIsAnsweredCancelled(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp := f.awaitRPCResponse(t, "late-1")
-	if resp.Error != nil || string(resp.Result) != `{"outcome":"cancelled"}` {
-		t.Fatalf("late permission response = %+v, want {\"outcome\":\"cancelled\"}", resp)
+	if resp.Error != nil || string(resp.Result) != `{"outcome":{"outcome":"cancelled"}}` {
+		t.Fatalf("late permission response = %+v, want {\"outcome\":{\"outcome\":\"cancelled\"}}", resp)
 	}
 	awaitSessionState(t, sessSub, f.session.ID, "ready")
 	assertNoPendingOrRecordedAgyDecisions(t, f, interSub)
@@ -585,7 +585,7 @@ func answerFirstAgyPair(t *testing.T, f *agyRelayFixture, sub *Subscription) {
 		t.Fatalf("RPC 301 = %+v, want selected allow", resp301)
 	}
 	resp302 := f.awaitRPCResponse(t, "302")
-	if resp302.Error != nil || string(resp302.Result) != `{"outcome":"selected","optionId":"deny"}` {
+	if resp302.Error != nil || string(resp302.Result) != `{"outcome":{"outcome":"selected","optionId":"deny"}}` {
 		t.Fatalf("RPC 302 = %+v, want selected deny", resp302)
 	}
 }
@@ -603,7 +603,7 @@ func seedAndResolveCancelledAgyPermission(t *testing.T, f *agyRelayFixture, turn
 		t.Fatalf("first cancelled Resolve: %v", rErr)
 	}
 	raw := readRawAgyResponseLine(t, dir, id)
-	if !bytes.Contains(raw, []byte(`"result":{"outcome":"cancelled"}`)) {
+	if !bytes.Contains(raw, []byte(`"result":{"outcome":{"outcome":"cancelled"}}`)) {
 		t.Fatalf("unexpected first cancelled JSON-RPC bytes: %s", raw)
 	}
 	return raw

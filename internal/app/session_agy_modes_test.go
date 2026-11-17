@@ -88,7 +88,7 @@ func buildModePermissionFrames(modes []string) []string {
 
 // agyAllowDecisionBody is the exact answer body the relay delivers for the
 // allow option.
-const agyAllowDecisionBody = `{"outcome":"selected","optionId":"allow"}`
+const agyAllowDecisionBody = `{"outcome":{"outcome":"selected","optionId":"allow"}}`
 
 func assertOneAgyModePromptAnsweredByUser(
 	t *testing.T, f *agyRelayFixture, sub *Subscription, mode string, prompt *PendingInteractionView,
@@ -103,7 +103,7 @@ func assertOneAgyModePromptAnsweredByUser(
 	f.answerOption(t, "agy-mode-ans-"+id, prompt.RequestID, agyOptionAllowAlways)
 	_, _ = sub.Next(t.Context())
 	resp := f.awaitRPCResponse(t, id)
-	if resp.Error != nil || string(resp.Result) != `{"outcome":"selected","optionId":"allow_always"}` {
+	if resp.Error != nil || string(resp.Result) != `{"outcome":{"outcome":"selected","optionId":"allow_always"}}` {
 		t.Fatalf("mode %s answer failed: %+v", mode, resp)
 	}
 }
