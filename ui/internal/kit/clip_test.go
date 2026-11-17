@@ -23,7 +23,7 @@ type clipRig struct {
 // tag themselves at their own origin or at more than the box they draw would
 // show here.
 func clipRigNames() []string {
-	return []string{"Button", "IconButton", "TextField", "TextArea", "search clear button", "secret reveal button", "Select", "Combobox", "ListRow", "SectionHeader"}
+	return []string{"Button", "IconButton", "TextField", "TextArea", "search clear button", "secret reveal button", "Select", "Combobox", "ListRow", "SectionHeader", "SplitPane handle"}
 }
 
 // freeGtx is gtx without a minimum size, so a field lays out at its own width.
@@ -115,6 +115,25 @@ func clipRigs(t *testing.T, h *harness, name string) clipRig {
 		return listRowClipRig(h)
 	case "SectionHeader":
 		return sectionHeaderClipRig(h)
+	case "SplitPane handle":
+		s := NewSplitPaneState()
+		ratio := float32(0.5)
+		return clipRig{
+			lay: func(gtx *layout.Context) (image.Rectangle, image.Rectangle) {
+				g := *gtx
+				g.Constraints = layout.Exact(image.Pt(160, 80))
+				box := image.Rectangle{Max: g.Constraints.Max}
+				part := splitHandleRect(&g, Horizontal, 80, 160, 80)
+				if r, ok, _ := s.Layout(h.env, &g, SplitPaneProps{
+					Orientation: Horizontal,
+					Ratio:       ratio,
+				}, nil, nil); ok {
+					ratio = r
+				}
+				return box, part
+			},
+			got: func() bool { return s.pressing || !s.lastClickTime.IsZero() },
+		}
 	}
 	s := NewTextFieldState()
 	return fieldRig(h, s, TextFieldText, false, func() bool { return h.gtx.Focused(&s.core.ed) })
