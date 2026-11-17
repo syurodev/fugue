@@ -15,10 +15,6 @@ import (
 	"github.com/syurodev/fugue/internal/workspace"
 )
 
-// teamItemScanLimit is the newest-page scan bound of findProposalItem; it
-// matches the Host API page ceiling (Q-56).
-const teamItemScanLimit = 500
-
 // cardTruncationMarker ends a card field that outgrew its §9 limit. The full
 // content always stays in the transcript item.
 const cardTruncationMarker = "\n…(truncated; the full plan is in the transcript)"

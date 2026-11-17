@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"sync"
 
 	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -40,14 +41,48 @@ type TeamProposalService struct {
 	interactions *InteractionService
 	usage        usageHistory
 	ids          ids.Generator
+	// sessionLive reports whether the session still holds its token; it
+	// turns false inside endSession before the pending-proposal cancel
+	// runs, which is what closes the propose-versus-session-end race
+	// (Q-104).
+	sessionLive func(sessionID string) bool
+	// locks serializes propose and session-end cancel per session, so
+	// Q-103's one-pending invariant holds when two tool calls race. No
+	// goroutines and no package state: the map lives on this service and
+	// each session keeps one small mutex for its lifetime.
+	locks sessionLocks
+}
+
+// sessionLocks is a keyed mutex: one lock per session ID, created on first
+// use, never contended across sessions.
+type sessionLocks struct {
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
+}
+
+// lock locks the session's mutex and returns its unlock.
+func (l *sessionLocks) lock(sessionID string) func() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.locks == nil {
+		l.locks = make(map[string]*sync.Mutex)
+	}
+	mu, ok := l.locks[sessionID]
+	if !ok {
+		mu = &sync.Mutex{}
+		l.locks[sessionID] = mu
+	}
+	mu.Lock()
+	return mu.Unlock
 }
 
 func newTeamProposalService(store *vendorstore.Store, recorder approvalRecorder,
-	workspaces *workspace.Service, interactions *InteractionService, usage usageHistory, gen ids.Generator,
+	workspaces *workspace.Service, interactions *InteractionService, usage usageHistory,
+	gen ids.Generator, sessionLive func(sessionID string) bool,
 ) *TeamProposalService {
 	return &TeamProposalService{
 		store: store, recorder: recorder, workspaces: workspaces,
-		interactions: interactions, usage: usage, ids: gen,
+		interactions: interactions, usage: usage, ids: gen, sessionLive: sessionLive,
 	}
 }
 
@@ -59,7 +94,12 @@ func (s *TeamProposalService) resolveProposingSession(ctx context.Context, sessi
 	if err != nil {
 		return workspace.EffectiveConfig{}, vendorstore.Session{}, boundaryError("read the proposing session", err)
 	}
-	if snap.State == vendorstore.StateClosed {
+	// The row may still read open while the session is ending (the close
+	// journals after endSession), so the revoked token is the
+	// authoritative ending signal here; the caller holds the session
+	// lock, and the session-end cancel waits for it, so a proposal either
+	// never exists or is cancelled by that cancel (Q-104).
+	if snap.State == vendorstore.StateClosed || s.sessionLive != nil && !s.sessionLive(sessionID) {
 		return workspace.EffectiveConfig{}, vendorstore.Session{}, errSessionEnded()
 	}
 	eff, _, err := s.workspaces.GetEffectiveConfig(ctx, snap.WorkspaceID, nil)
@@ -111,6 +151,8 @@ func (s *TeamProposalService) Propose(ctx context.Context, sessionID string, arg
 	if args == nil {
 		return "", errcode.New(errcode.InvalidArgument, "proposal arguments are required")
 	}
+	unlock := s.locks.lock(sessionID)
+	defer unlock()
 	eff, snap, err := s.resolveProposingSession(ctx, sessionID)
 	if err != nil {
 		return "", err
@@ -163,6 +205,11 @@ func (s *TeamProposalService) supersedePending(ctx context.Context, sessionID st
 // leaves the item pending, because the durable team state stays
 // authoritative and expiry or closing is never an approval.
 func (s *TeamProposalService) CancelForSession(ctx context.Context, sessionID string) error {
+	// The same per-session lock as Propose (Q-103, Q-104): whichever runs
+	// first, a proposal the cancel misses is refused by the liveness
+	// re-check, and one it sees is cancelled.
+	unlock := s.locks.lock(sessionID)
+	defer unlock()
 	pending, ok, err := s.store.PendingTeamForSession(ctx, sessionID)
 	if err != nil {
 		return boundaryError("read the pending proposal", err)
@@ -288,26 +335,18 @@ func (s *TeamProposalService) markItemRejected(ctx context.Context, sessionID, t
 	return boundaryError("record the rejected proposal item", recordErr)
 }
 
-// findProposalItem scans the newest transcript pages for the proposal item of
-// teamID; the item of a pending proposal is always among the most recent.
+// findProposalItem looks the proposal item up by its proposal ID through the
+// transcript metadata index (0011), so a proposal stays flippable for the
+// whole life of a long session (F11.2a review).
 func (s *TeamProposalService) findProposalItem(ctx context.Context, sessionID, teamID string) (string, error) {
-	before := int64(0)
-	for range 2 {
-		items, err := s.store.Transcript(ctx, sessionID, before, teamItemScanLimit)
-		if err != nil {
-			return "", boundaryError("read the session transcript", err)
-		}
-		if len(items) == 0 {
-			return "", nil
-		}
-		for i := len(items) - 1; i >= 0; i-- {
-			if items[i].Kind == vendorstore.KindTeamProposal && items[i].Metadata.ProposalID == teamID {
-				return items[i].ID, nil
-			}
-		}
-		before = items[0].Sequence
+	itemID, ok, err := s.store.ProposalItemID(ctx, sessionID, teamID)
+	if err != nil {
+		return "", boundaryError("look up the proposal item", err)
 	}
-	return "", nil
+	if !ok {
+		return "", nil
+	}
+	return itemID, nil
 }
 
 // catalogRoles converts the workspace catalog to the teams domain.

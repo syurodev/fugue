@@ -159,6 +159,24 @@ func (t *sessionTokens) verify(token string) (SessionBinding, bool) {
 	return found, matched == 1
 }
 
+// liveSession reports whether the session still holds a live token. A
+// session that is ending loses its token in endSession before the
+// pending-proposal cancel runs (Q-104), so this is the visible signal a
+// propose can re-check under its own lock even before the session row closes.
+func (t *sessionTokens) liveSession(sessionID string) bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if current, ok := t.bySession[sessionID]; ok {
+		return t.liveLocked(current)
+	}
+	for _, b := range t.pending {
+		if b.SessionID == sessionID {
+			return t.liveLocked(b)
+		}
+	}
+	return false
+}
+
 // live reports whether the binding's token is still the session's token.
 func (t *sessionTokens) live(binding SessionBinding) bool {
 	if binding.SessionID == "" || binding.Role == "" {

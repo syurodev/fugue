@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -8,6 +9,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -17,6 +19,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/redact"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -180,17 +183,18 @@ func (f *teamProposalFixture) teamSnapshot(t *testing.T, teamID string) (vendors
 
 func (f *teamProposalFixture) proposalItem(t *testing.T, teamID string) vendorstore.StoredItem {
 	t.Helper()
-	items, err := f.hp.vendorStore.Transcript(t.Context(), f.session.ID, 0, teamItemScanLimit)
+	itemID, ok, err := f.hp.vendorStore.ProposalItemID(t.Context(), f.session.ID, teamID)
 	if err != nil {
-		t.Fatalf("Transcript: %v", err)
+		t.Fatalf("ProposalItemID: %v", err)
 	}
-	for i := len(items) - 1; i >= 0; i-- {
-		if items[i].Kind == vendorstore.KindTeamProposal && items[i].Metadata.ProposalID == teamID {
-			return items[i]
-		}
+	if !ok {
+		t.Fatalf("no team_proposal item for %s", teamID)
 	}
-	t.Fatalf("no team_proposal item for %s", teamID)
-	return vendorstore.StoredItem{}
+	item, err := f.hp.vendorStore.StoredItemMeta(t.Context(), f.session.ID, itemID)
+	if err != nil {
+		t.Fatalf("StoredItemMeta: %v", err)
+	}
+	return item
 }
 
 // TestNoTaskStartsBeforeApproval pins OR-E13's state half: the stored team is
@@ -513,4 +517,172 @@ func awaitCancelledProposal(t *testing.T, f *teamProposalFixture, teamID string)
 		runtime.Gosched()
 	}
 	return rec, tasks, item
+}
+
+// TestConcurrentProposalsLeaveOnePending pins Q-103 under concurrency: N
+// parallel proposes from one session are serialized by the service, so
+// exactly one team stays proposed, every earlier one is cancelled, and
+// exactly one card is live.
+func TestConcurrentProposalsLeaveOnePending(t *testing.T) {
+	t.Parallel()
+	f := newTeamProposalFixture(t, "")
+	const proposals = 6
+	ids := make([]string, proposals)
+	var wg sync.WaitGroup
+	for i := range proposals {
+		wg.Add(1)
+		supervise.Go(t.Context(), "test.concurrent-propose", func(ctx context.Context) error {
+			defer wg.Done()
+			id, err := f.rt.teamProposals.Propose(ctx, f.session.ID, validTeamProposalArgs())
+			if err != nil {
+				t.Errorf("Propose %d: %v", i, err)
+				return nil
+			}
+			ids[i] = id
+			return nil
+		})
+	}
+	wg.Wait()
+	distinct := make(map[string]struct{}, proposals)
+	for i := range ids {
+		if ids[i] == "" {
+			t.Fatal("a concurrent propose failed")
+		}
+		distinct[ids[i]] = struct{}{}
+	}
+	if len(distinct) != proposals {
+		t.Fatalf("distinct proposal IDs = %d, want %d", len(distinct), proposals)
+	}
+	pending := 0
+	for id := range distinct {
+		rec, _ := f.teamSnapshot(t, id)
+		switch rec.State {
+		case vendorstore.TeamStateProposed:
+			pending++
+		case vendorstore.TeamStateCancelled:
+		default:
+			t.Fatalf("proposal %s state = %s, want proposed or cancelled", id, rec.State)
+		}
+	}
+	if pending != 1 {
+		t.Fatalf("proposed teams = %d, want exactly one (Q-103)", pending)
+	}
+	if _, ok, err := f.hp.vendorStore.PendingTeamForSession(t.Context(), f.session.ID); err != nil || !ok {
+		t.Fatalf("no pending proposal left = (%v, %v), want one", ok, err)
+	}
+	assertSingleProposalCard(t, f)
+}
+
+// TestProposalRacingSessionEndNeverStaysPending pins Q-104 under the race:
+// propose and session close run concurrently, and afterwards the session has
+// no pending proposal — a refused propose never created one, and a created
+// one was cancelled by the session-end cancel.
+func TestProposalRacingSessionEndNeverStaysPending(t *testing.T) {
+	t.Parallel()
+	for round := range 4 {
+		f := newTeamProposalFixture(t, "")
+		sub, err := f.rt.Subscribe(t.Context(), SubscribeParams{Principal: testAppPrincipal, Topic: TopicVendorSessions})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var wg sync.WaitGroup
+		var proposalID string
+		var proposeErr error
+		wg.Add(2)
+		supervise.Go(t.Context(), "test.race-propose", func(ctx context.Context) error {
+			defer wg.Done()
+			proposalID, proposeErr = f.rt.teamProposals.Propose(ctx, f.session.ID, validTeamProposalArgs())
+			return nil
+		})
+		supervise.Go(t.Context(), "test.race-close", func(ctx context.Context) error {
+			defer wg.Done()
+			if _, closeErr := f.svc.Close(ctx, testAppPrincipal, VendorStop{CommandID: "team-race-close", SessionID: f.session.ID}); closeErr != nil {
+				t.Errorf("round %d Close: %v", round, closeErr)
+			}
+			return nil
+		})
+		wg.Wait()
+		awaitSessionState(t, sub, f.session.ID, "closed")
+		sub.Close()
+		if proposalID != "" {
+			rec, _, item := awaitCancelledProposal(t, f, proposalID)
+			if rec.State != vendorstore.TeamStateCancelled {
+				t.Fatalf("round %d: proposal %s state = %s, want cancelled", round, proposalID, rec.State)
+			}
+			if item.Metadata.Decision != teamTestRejected {
+				t.Fatalf("round %d: item decision = %s, want rejected", round, item.Metadata.Decision)
+			}
+		} else if proposeErr != nil && errcode.CodeOf(proposeErr) != errcode.PermissionDenied {
+			t.Fatalf("round %d: propose error = %v, want permission denied", round, proposeErr)
+		}
+		for range 20000 {
+			if _, ok, _ := f.hp.vendorStore.PendingTeamForSession(t.Context(), f.session.ID); !ok {
+				break
+			}
+			runtime.Gosched()
+		}
+		if _, ok, err := f.hp.vendorStore.PendingTeamForSession(t.Context(), f.session.ID); err != nil || ok {
+			t.Fatalf("round %d: pending proposal survived its session = (%v, %v)", round, ok, err)
+		}
+	}
+}
+
+// TestProposalStillFlipsAfterMoreThanAThousandItems pins the indexed item
+// lookup (F11.2a review): a proposal followed by more than 1,000 other items
+// is still flipped to rejected, on supersede and on session end.
+func TestProposalStillFlipsAfterMoreThanAThousandItems(t *testing.T) {
+	t.Parallel()
+	f := newTeamProposalFixture(t, "")
+	first, err := f.rt.teamProposals.Propose(t.Context(), f.session.ID, validTeamProposalArgs())
+	if err != nil {
+		t.Fatalf("Propose 1: %v", err)
+	}
+	appendNoticeItems(t, f, 1001)
+	second, err := f.rt.teamProposals.Propose(t.Context(), f.session.ID, validTeamProposalArgs())
+	if err != nil {
+		t.Fatalf("Propose 2: %v", err)
+	}
+	if item := f.proposalItem(t, first); item.Metadata.Decision != teamTestRejected {
+		t.Fatalf("superseded item decision after deep transcript = %s, want rejected", item.Metadata.Decision)
+	}
+	appendNoticeItems(t, f, 1001)
+	sub, err := f.rt.Subscribe(t.Context(), SubscribeParams{Principal: testAppPrincipal, Topic: TopicVendorSessions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	if _, closeErr := f.svc.Close(t.Context(), testAppPrincipal, VendorStop{CommandID: "team-deep-close", SessionID: f.session.ID}); closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
+	}
+	awaitSessionState(t, sub, f.session.ID, "closed")
+	rec, _, item := awaitCancelledProposal(t, f, second)
+	if rec.State != vendorstore.TeamStateCancelled || item.Metadata.Decision != teamTestRejected {
+		t.Fatalf("session-end cancel after deep transcript = (%s, %s), want cancelled/rejected", rec.State, item.Metadata.Decision)
+	}
+}
+
+// appendNoticeItems records n harmless notice items through the session's
+// actor, the way vendor observations do.
+func appendNoticeItems(t *testing.T, f *teamProposalFixture, n int) {
+	t.Helper()
+	turnID, err := f.rt.teamProposals.recorder.ActiveTurnID(t.Context(), f.session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range n {
+		itemID, idErr := f.rt.teamProposals.ids.NewID()
+		if idErr != nil {
+			t.Fatal(idErr)
+		}
+		recordErr := f.rt.teamProposals.recorder.RecordEvent(t.Context(), f.session.ID, &vendorstore.Event{
+			Type: vendorstore.TranscriptItemRecorded, TurnID: turnID,
+			Item: &vendorstore.Item{
+				ID: itemID, TurnID: turnID, Kind: vendorstore.KindNotice,
+				Metadata: vendorstore.ItemMetadata{Level: "info", Code: "team_test_note"},
+			},
+		})
+		if recordErr != nil {
+			t.Fatalf("append notice item %d: %v", i, recordErr)
+		}
+	}
 }

@@ -111,10 +111,13 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 			// actor and the close sequence still write, and the single
 			// SQLite connection serializes writers. Best-effort: a failure
 			// keeps the proposal pending rather than blocking the close.
-			cancelCtx := context.WithoutCancel(base)
-			supervise.Go(cancelCtx, "team-cancel-"+sessionID, func(taskCtx context.Context) error {
+			// The cancel runs on the host's base context so a shutdown
+			// stops it (F11.2a review): a stopped cancel leaves the
+			// proposal pending, which is the fail-closed side.
+			supervise.Go(base, "team-cancel-"+sessionID, func(taskCtx context.Context) error {
 				if cancelErr := hp.rt.teamProposals.CancelForSession(taskCtx, sessionID); cancelErr != nil {
-					slog.WarnContext(taskCtx, "cancelling the pending team proposal failed", "session_id", sessionID)
+					slog.WarnContext(taskCtx, "cancelling the pending team proposal failed",
+						"session_id", sessionID, "error_code", string(errcode.CodeOf(cancelErr)))
 				}
 				return nil
 			})
@@ -132,7 +135,7 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	if err != nil {
 		return nil, err
 	}
-	hp.rt.teamProposals = newTeamProposalService(vs, sessions, hp.rt.workspaces.domain, hp.rt.interactions, nopUsageHistory{}, deps.IDs)
+	hp.rt.teamProposals = newTeamProposalService(vs, sessions, hp.rt.workspaces.domain, hp.rt.interactions, nopUsageHistory{}, deps.IDs, tokens.liveSession)
 	tools := append(slices.Clone(deps.TestFugueTools), teamProposeTool(hp.rt.teamProposals))
 	hp.rt.sessionTools = newSessionToolService(tokens, tools, vs, hp.rt.interactions, hp.rt.tags, deps.IDs, sessions)
 	sessions.SetRelay(hp.rt.sessionTools)
