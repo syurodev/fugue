@@ -2,7 +2,6 @@ package vendorstore
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -11,13 +10,11 @@ import (
 
 	"github.com/google/go-cmp/cmp"
 
-	"github.com/syurodev/fugue/internal/crypto"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
-	"github.com/syurodev/fugue/internal/platform/ids"
-	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/sealing"
 	"github.com/syurodev/fugue/internal/storage"
+	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vault"
 )
 
@@ -76,23 +73,7 @@ func protectedStore(tb testing.TB) (*Store, *vault.Service, string) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	fixture, err := os.ReadFile("../vault/testdata/keyring-cheap.json")
-	if err != nil {
-		tb.Fatal(err)
-	}
-	var ring crypto.Keyring
-	err = json.Unmarshal(fixture, &ring)
-	if err != nil {
-		tb.Fatal(err)
-	}
-	v, err := vault.NewService(tb.Context(), vault.NewMemoryKeyringStore(&ring), ids.NewSequence("v-"))
-	if err != nil {
-		tb.Fatal(err)
-	}
-	err = v.Unlock(tb.Context(), redact.NewSecret("master-pw"))
-	if err != nil {
-		tb.Fatal(err)
-	}
+	v := cheapvault.Unlocked(tb)
 	s, err := New(tb.Context(), db, v, clk, nil)
 	if err != nil {
 		tb.Fatal(err)

@@ -20,6 +20,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/storage"
+	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vault"
 )
 
@@ -33,7 +34,7 @@ func openCoordinatorHost(t *testing.T, dir string) (*execstore.Store, *clock.Fak
 	if exists, existsErr := vault.NewSQLKeyringStore(host.DB()).Exists(t.Context()); existsErr != nil {
 		t.Fatal("check host keyring")
 	} else if !exists {
-		saveCheapKeyring(t, vault.NewSQLKeyringStore(host.DB()))
+		cheapvault.Save(t, vault.NewSQLKeyringStore(host.DB()))
 	}
 	v, err := vault.NewService(t.Context(), vault.NewSQLKeyringStore(host.DB()), ids.NewSequence("vault"))
 	if err != nil {

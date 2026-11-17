@@ -36,7 +36,7 @@ func vet(ctx context.Context, t *testing.T, bin, dir string) (string, bool) {
 }
 
 // The analyzer tests prove each rule in isolation; this one proves the binary
-// that `task vet` runs registers all five.
+// that `task vet` runs registers every analyzer.
 func TestVettoolRunsEveryAnalyzer(t *testing.T) {
 	t.Parallel()
 	bin := filepath.Join(t.TempDir(), "fuguevet")
@@ -54,6 +54,8 @@ func TestVettoolRunsEveryAnalyzer(t *testing.T) {
 		"nobarego":    "bare go statement",
 		"secretlog":   "token looks like a secret",
 		"todoref":     "must read",
+		"cheapvault":  "pays the production Argon2id cost",
+		"realclock":   "clock.Real reads or measures the wall clock",
 		"noprotoleak": "proto-generated and Connect code is importable only by internal/hostapi, pkg/client and cmd",
 	} {
 		if !strings.Contains(out, message) {

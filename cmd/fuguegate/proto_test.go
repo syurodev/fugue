@@ -2,6 +2,9 @@ package main
 
 import (
 	"errors"
+	"io/fs"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -46,5 +49,46 @@ func TestProtoBreakingIsSkippedOnlyWhenBaseHasNoProto(t *testing.T) {
 	out, err := execute(t, protoArgs("proto-fresh", "-base", "origin/does-not-exist")...)
 	if err != nil || !strings.Contains(out, "breaking check skipped") {
 		t.Fatalf("out = %q, err = %v", out, err)
+	}
+}
+
+// A local `task proto` must work without the network: the template it runs
+// names no remote plugin, repeats the local plugins of the full template, and
+// the gate passes with it on the repository's own proto/.
+func TestProtoGateNeedsNoNetwork(t *testing.T) {
+	t.Parallel()
+	repo := os.DirFS(filepath.Join("..", ".."))
+	read := func(name string) string {
+		t.Helper()
+		data, err := fs.ReadFile(repo, name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(data)
+	}
+	checkLocalTemplate(t, read("proto/buf.gen.local.yaml"), read("proto/buf.gen.yaml"))
+	if !strings.Contains(read("Taskfile.yml"), `{{if not (env "CI")}} -template proto/buf.gen.local.yaml -generated pkg/pb{{end}}`) {
+		t.Error("task proto does not use the local template outside CI")
+	}
+	out, err := execute(t, "proto", "-root", "../..", "-template", "proto/buf.gen.local.yaml",
+		"-generated", "pkg/pb", "-against", "../../proto")
+	if err != nil || !strings.Contains(out, "proto ok") {
+		t.Fatalf("local gate: %q, %v", out, err)
+	}
+}
+
+func checkLocalTemplate(t *testing.T, local, full string) {
+	t.Helper()
+	if strings.Contains(local, "remote:") {
+		t.Error("buf.gen.local.yaml names a remote plugin, which needs the network")
+	}
+	if !strings.Contains(full, "remote:") {
+		t.Error("buf.gen.yaml no longer has a remote plugin; drop the local template")
+	}
+	for line := range strings.Lines(local) {
+		line = strings.TrimRight(line, "\n")
+		if trimmed := strings.TrimSpace(line); trimmed != "" && !strings.HasPrefix(trimmed, "#") && !strings.Contains(full, line) {
+			t.Errorf("buf.gen.local.yaml line %q is not in buf.gen.yaml", line)
+		}
 	}
 }

@@ -1,7 +1,6 @@
 package secrets
 
 import (
-	"slices"
 	"strings"
 	"testing"
 
@@ -109,34 +108,12 @@ func mixedText(size int) string {
 	return strings.Repeat(line, size/len(line)+1)[:size]
 }
 
-func TestFindOneMiBLinearBound(t *testing.T) {
+// TestFindOneMiBMasksEverything keeps the correctness of a large scan. The
+// linear-time and allocation budgets are performance assertions and live in
+// internal/perf (nightly).
+func TestFindOneMiBMasksEverything(t *testing.T) {
 	t.Parallel()
 	d := New([]KnownValue{{Value: redact.NewSecret("abcd1234"), Kind: KindVault}}, Options{})
-	measure := func(size int) ([]int64, testing.BenchmarkResult) {
-		text := mixedText(size)
-		samples := make([]int64, 0, 5)
-		result := testing.Benchmark(func(b *testing.B) {
-			b.Helper()
-			b.ReportAllocs()
-			b.ResetTimer()
-			for b.Loop() {
-				for len(samples) < 5 {
-					start := b.Elapsed()
-					d.Find(text)
-					samples = append(samples, (b.Elapsed() - start).Nanoseconds())
-				}
-				d.Find(text)
-			}
-		})
-		slices.Sort(samples)
-		return samples, result
-	}
-	short, _ := measure(256 << 10)
-	long, result := measure(1 << 20)
-	enforceScanRatio(t, short[2], long[2])
-	if result.AllocedBytesPerOp() > 256<<20 {
-		t.Fatal("1 MiB scan exceeded allocation bound")
-	}
 	text := mixedText(1 << 20)
 	got := d.Find(text)
 	if len(got) == 0 || strings.Contains(Mask(text, got), "abcd1234") {

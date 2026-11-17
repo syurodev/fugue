@@ -14,7 +14,7 @@ import (
 )
 
 // ErrUsage reports a malformed command line.
-var ErrUsage = errors.New("usage: fuguegate coverage|fuzz|mutation|deadcode|proto|commitlint|commitmsg|gateguard|changes|exclusive [flags]")
+var ErrUsage = errors.New("usage: fuguegate coverage|fuzz|mutation|deadcode|proto|commitlint|commitmsg|gateguard|changes|flaky|exclusive [flags]")
 
 func main() {
 	ctx, stop := signalContext()
@@ -89,6 +89,7 @@ func commands() map[string]func(context.Context, []string, io.Writer) error {
 		"commitmsg":  runCommitMsg,
 		"gateguard":  runGateGuard,
 		"changes":    runChanges,
+		"flaky":      runFlaky,
 	}
 }
 

@@ -25,6 +25,8 @@ jobs:
       code: ${{ steps.scope.outputs.code }}
       platform: ${{ steps.scope.outputs.platform }}
       ui: ${{ steps.scope.outputs.ui }}
+      test_pkgs: ${{ steps.scope.outputs.test_pkgs }}
+      test_run: ${{ steps.scope.outputs.test_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -119,6 +121,53 @@ jobs:
           name: cover-profile
           path: cover.out
           retention-days: 1
+
+  # A PR that changes test files reruns the test functions those files declare
+  # ten times with the race detector and a fresh shuffle each time, so a test
+  # that fails one run in ten fails here and not on a later unrelated PR
+  # (quality-gates section 6). Only those functions rerun, never the whole
+  # package, and each of the ten repetitions is its own go test run.
+  # The package and test lists come from fuguegate changes; Linux always, macOS
+  # when the change is platform-specific, like the test job.
+  stress:
+    name: stress (${{ matrix.os }})
+    needs: changes
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - id: decide
+        env:
+          PACKAGES: ${{ needs.changes.outputs.test_pkgs }}
+          TESTS: ${{ needs.changes.outputs.test_run }}
+          PLATFORM: ${{ needs.changes.outputs.platform }}
+          OS: ${{ matrix.os }}
+        run: |
+          if [ -n "$PACKAGES" ] && [ -n "$TESTS" ] && { [ "$OS" = "ubuntu-latest" ] || [ "$PLATFORM" = "true" ]; }; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::stress skipped on $OS: no changed test functions that need it (fuguegate changes)"
+          fi
+      - if: steps.decide.outputs.run == 'true'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - if: steps.decide.outputs.run == 'true'
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - if: steps.decide.outputs.run == 'true'
+        env:
+          PACKAGES: ${{ needs.changes.outputs.test_pkgs }}
+          TESTS: ${{ needs.changes.outputs.test_run }}
+        # Ten separate -count=1 runs, not one -count=10: the package timeout
+        # covers every count of a binary, and a PR that edits many tests of a
+        # heavy package (internal/app) still has to fit it, like the nightly.
+        run: |
+          for _ in $(seq 1 10); do
+            go tool task test-pkg PKG="$PACKAGES" RUN="$TESTS" COUNT=1
+          done
 
   coverage:
     needs: [changes, test]

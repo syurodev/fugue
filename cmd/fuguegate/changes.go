@@ -3,22 +3,34 @@ package main
 import (
 	"context"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"strings"
 )
 
 // changeScope is what a pull request's changed files require of the CI test
 // jobs (quality-gates §9): code changes run the Linux tests, coverage and
 // short fuzzing; platform changes also run the macOS tests; a ui change also
-// runs the ui/ module's own workflow. The client, generated code and proto
+// runs the ui/ module's own workflow; a changed test file adds its package to
+// the stress rerun. The client, generated code and proto
 // sources count as ui changes because the app builds against all three.
 type changeScope struct {
 	code     bool
 	platform bool
 	ui       bool
+	// testPkgs are the core packages whose test files changed, as go package
+	// patterns, for the PR stress job (quality-gates §6).
+	testPkgs []string
+	// testRuns are the Test and Fuzz functions declared in those changed test
+	// files, for the stress job's -run: rerunning a whole heavy package ten
+	// times cannot fit the 10-minute package timeout.
+	testRuns []string
 }
 
 // everything is the fail-safe scope: when the change set cannot be read, every
@@ -146,6 +158,7 @@ func classifyChanges(dir string, changed []string) changeScope {
 			continue
 		}
 		scope.code = true
+		scope.addTestFile(dir, file)
 		if strings.HasPrefix(file, "ui/") {
 			// A ui change never makes the core platform-specific: ui/ is its
 			// own module and its workflow runs it on both OSes.
@@ -158,7 +171,87 @@ func classifyChanges(dir string, changed []string) changeScope {
 	if !seen {
 		return everything()
 	}
+	slices.Sort(scope.testPkgs)
+	slices.Sort(scope.testRuns)
 	return scope
+}
+
+// isCoreTestFile reports whether a changed file is a core test file the
+// stress job can rerun.
+func isCoreTestFile(file string) bool {
+	return strings.HasSuffix(file, "_test.go") && !strings.HasPrefix(file, "ui/") &&
+		file != "testdata" && !strings.Contains(file, "testdata/")
+}
+
+// addTestFile records a changed core test file for the stress rerun.
+func (s *changeScope) addTestFile(dir, file string) {
+	s.testPkgs = addTestPackage(dir, s.testPkgs, file)
+	if isCoreTestFile(file) {
+		s.testRuns = addTestNames(dir, s.testRuns, file)
+	}
+}
+
+// addTestPackage appends the package pattern of a changed core test file. The
+// ui/ module has its own workflow, testdata trees are fixtures and a deleted
+// file leaves nothing to rerun.
+func addTestPackage(dir string, pkgs []string, file string) []string {
+	if !isCoreTestFile(file) {
+		return pkgs
+	}
+	pkg := "./" + path.Dir(file)
+	if _, err := os.Stat(filepath.Join(dir, filepath.FromSlash(path.Dir(file)))); err != nil || slices.Contains(pkgs, pkg) {
+		return pkgs
+	}
+	return append(pkgs, pkg)
+}
+
+// addTestNames appends the Test and Fuzz functions a changed test file
+// declares. A file that cannot be read or parsed (deleted, or broken) adds
+// nothing: the stress job then has nothing to rerun, and the regular test job
+// still runs the package once.
+func addTestNames(dir string, names []string, file string) []string {
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return names
+	}
+	data, readErr := root.ReadFile(filepath.FromSlash(file))
+	if closeErr := root.Close(); readErr != nil || closeErr != nil {
+		return names
+	}
+	parsed, err := parser.ParseFile(token.NewFileSet(), file, data, parser.SkipObjectResolution)
+	if err != nil {
+		return names
+	}
+	for _, decl := range parsed.Decls {
+		fn, ok := decl.(*ast.FuncDecl)
+		if !ok || fn.Recv != nil || !isTestName(fn.Name.Name) || slices.Contains(names, fn.Name.Name) {
+			continue
+		}
+		names = append(names, fn.Name.Name)
+	}
+	return names
+}
+
+// isTestName reports whether a function name is one go test runs by itself:
+// Test or Fuzz followed by a non-lowercase rune. TestMain is the package
+// entry point, not a test.
+func isTestName(name string) bool {
+	for _, prefix := range []string{"Test", "Fuzz"} {
+		rest, ok := strings.CutPrefix(name, prefix)
+		if !ok || name == "TestMain" {
+			continue
+		}
+		return rest == "" || rest[0] < 'a' || rest[0] > 'z'
+	}
+	return false
+}
+
+// runPattern is the anchored -run regexp for the given test names.
+func runPattern(names []string) string {
+	if len(names) == 0 {
+		return ""
+	}
+	return "^(" + strings.Join(names, "|") + ")$"
 }
 
 // runChanges prints the change scope as GitHub Actions step outputs. It never
@@ -190,5 +283,11 @@ func runChanges(ctx context.Context, args []string, stdout io.Writer) error {
 	if err := say(stdout, "platform=%t", scope.platform); err != nil {
 		return err
 	}
-	return say(stdout, "ui=%t", scope.ui)
+	if err := say(stdout, "ui=%t", scope.ui); err != nil {
+		return err
+	}
+	if err := say(stdout, "test_pkgs=%s", strings.Join(scope.testPkgs, " ")); err != nil {
+		return err
+	}
+	return say(stdout, "test_run=%s", runPattern(scope.testRuns))
 }

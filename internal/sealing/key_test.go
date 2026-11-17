@@ -2,15 +2,12 @@ package sealing
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
-	"os"
 	"testing"
 
-	"github.com/syurodev/fugue/internal/crypto"
 	"github.com/syurodev/fugue/internal/platform/ids"
-	"github.com/syurodev/fugue/internal/platform/redact"
 
+	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vault"
 )
 
@@ -26,21 +23,7 @@ func TestSessionKeyOperationsRejectLockedVault(t *testing.T) {
 
 func TestSessionKeyWrapRoundTripAndBinding(t *testing.T) {
 	t.Parallel()
-	data, err := os.ReadFile("../vault/testdata/keyring-cheap.json")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var keyring crypto.Keyring
-	if unmarshalErr := json.Unmarshal(data, &keyring); unmarshalErr != nil {
-		t.Fatal(unmarshalErr)
-	}
-	v, err := vault.NewService(t.Context(), vault.NewMemoryKeyringStore(&keyring), ids.NewSequence("test-"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if unlockErr := v.Unlock(t.Context(), redact.NewSecret("master-pw")); unlockErr != nil {
-		t.Fatal(unlockErr)
-	}
+	v := cheapvault.Unlocked(t)
 	raw, wrapped, err := GenerateSessionKey(v, ids.CryptoRandom{}, "exec.session_key", "s", "v1")
 	if err != nil {
 		t.Fatal(err)

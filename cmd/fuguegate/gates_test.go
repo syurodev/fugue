@@ -11,7 +11,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"go.uber.org/goleak"
 
-	"github.com/syurodev/fugue/internal/platform/clock"
+	"github.com/syurodev/fugue/internal/testutil"
 )
 
 func TestMain(m *testing.M) {
@@ -23,7 +23,7 @@ func TestMain(m *testing.M) {
 		switch os.Args[1] {
 		case exclusiveCommand:
 			ctx, stop := signalContext()
-			code := run(ctx, clock.Real{}, os.Args[1:], os.Stdout, os.Stderr)
+			code := run(ctx, testutil.OSClock(), os.Args[1:], os.Stdout, os.Stderr)
 			stop()
 			os.Exit(code)
 		case "hold":
@@ -42,7 +42,7 @@ func TestMain(m *testing.M) {
 func execute(t *testing.T, args ...string) (string, error) {
 	t.Helper()
 	var out bytes.Buffer
-	err := dispatch(t.Context(), clock.Real{}, args, &out)
+	err := dispatch(t.Context(), testutil.OSClock(), args, &out)
 	return out.String(), err
 }
 

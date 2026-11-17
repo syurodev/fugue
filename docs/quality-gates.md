@@ -66,6 +66,8 @@ has `analysistest` cases with valid and violating fixtures.
 | `nobarego` | `go` statements are allowed only in `internal/platform/supervise`; everything else calls `supervise.Go(ctx, name, fn)` so every goroutine has an owner, a name and a stop path |
 | `secretlog` | Values of type `redact.Secret`, `[]byte` key material, or fields and variables whose names match `(?i)token\|secret\|password\|apikey\|credential\|privatekey` must not reach `slog`, `fmt`, `errors` or error messages directly; only through `redact` |
 | `todoref` | `TODO`, `FIXME`, `HACK`, `XXX` are allowed only as `TODO(F<phase>.<n>): ...` with an ID present in `docs/roadmap.md` and not yet `Done` |
+| `realclock` | Test files read no wall clock and time nothing: no `clock.Real`, `time.Now`, `time.Since`, `time.Until`, `testing.Benchmark` or `testing.B.Elapsed` outside `internal/perf` (the speed budgets, §6) and the `clock` package that tests its own real clock. A hang-only deadline goes through `testutil.Await` or `testutil.Poll`; a test that drives a real process gets real timers from `testutil.OSClock()`. No allowlist |
+| `cheapvault` | Test files outside `internal/vault` and `internal/crypto` call neither `vault.Service.Setup` nor `crypto.NewKeyring` (three Argon2id derivations at 64 MiB and three passes each, which dominate run time under `-race`); a fixture takes the minimum-cost keyring from `internal/testutil/cheapvault`. No allowlist |
 | `noprotoleak` | Packages outside `internal/hostapi`, `pkg/client` and `cmd/*` do not import code generated from proto, the protobuf runtime or Connect (ADR 0002, Q-31 3A) |
 
 ## 5. Architecture (`internal/arch`)
@@ -99,9 +101,30 @@ Ordinary Go tests that read the package graph with `go list -deps -json` and the
 | Fuzzing for every decoder and parser: codec, payload envelope, provider stream converters, path validation | PR: 20 s per target; nightly: 10 minutes; the `testdata/fuzz` corpus runs as ordinary tests |
 | Golden files for traces and provider streams, updated with `-update`; a golden change needs a reason in the PR | Review; the `generate` job blocks stale golden files |
 | Fault injection: the store has named, injectable crash points | F3 tests |
-| A flaky test is a bug: no quarantine, no automatic retry | Nightly `-count=5`; an unstable test is fixed or the commit that caused it is reverted |
+| A flaky test is a bug: no quarantine, no automatic retry, no `t.Skip` | PR stress and nightly repeats (below); the policy below |
+| Tests do not measure time: the fake clock drives time, a hang-only deadline is a generous fixed `testutil.Await` or `testutil.Poll`, and a speed or speed-ratio assertion lives in `internal/perf` | `realclock` (§4) |
+| Speed budgets run only in the nightly `perf` job, as the median of several measurements against each budget with every number in the log; PR CI checks correctness only | Tests under the `perf` build tag (`internal/perf`, and the ui layout budgets); `TestPerfBudgetsRunOnlyInNightly` |
+| A PR that changes test files reruns the test functions those files declare, in their packages, with `-race -shuffle=on`, ten separate `-count=1` runs, on ubuntu, and on macOS when the platform filter is true | `stress` job; `fuguegate changes` prints `test_pkgs` and `test_run`; `TestPRStressRerunsChangedTestPackages` |
+| Nightly: every package, `-race -shuffle=on`, twenty repetitions on ubuntu and macOS; each test that both passed and failed is reported | `repeat-tests` job, `task nightly-test`, `fuguegate flaky`; `TestNightlyStressRunsTwentyCountsOnUbuntuAndMacOS` |
+| Fixtures use the cheap vault and the shared helpers (`internal/testutil`), never production-cost vault setup or an unsafe fake-executable writer | `TestEveryFixtureUsesTheCheapVault`, `TestFakeExecutableWriterHoldsTheForkLock` |
 | OS-specific tests (sandbox) run on the right OS | CI matrix of macOS and Linux |
 | Only stdlib `testing` and `github.com/google/go-cmp` for comparisons | `depguard` |
+
+### Flaky tests
+
+A flaky test is a bug in the test or in the code, not a property of the runner.
+
+- A test that needed a CI rerun is fixed within a week of the first failure, or the commit that
+  made it flaky is reverted. The first failure is logged in the "known flaky" list in
+  [§11](#known-flaky-tests) the day it is seen, and the entry stays until the fix merges.
+- Still no `t.Skip`, no quarantine and no automatic retry: a rerun is how a human learns that a
+  test is flaky, never a way to turn a red check green.
+- The nightly stress run keeps the PR package timeout of 10 minutes. The timeout covers all
+  counts of one package binary, so the nightly repeats `go test -count=1` twenty times (a fresh
+  shuffle each time) instead of one `-count=20`; a package that needs more than 10 minutes for
+  one repetition is made faster or split, and the timeout is never raised.
+- A local gate needs no network. `task proto` reaches the buf schema registry for the pinned
+  remote TypeScript plugin; see [§11](#11-gate-change-log) (2026-11-16) for what runs offline.
 
 The mutation gate's `-budget` (default 20 minutes) applies separately to discovery/tool
 preparation and each selected package. Packages run sequentially and every package must
@@ -197,7 +220,24 @@ and title edits, so applying a label reruns only those two. A `changes` job
 - every push to `main` runs the macOS tests (`main.yml`);
 - the `ui/` Go module has its own workflow (`ui.yml`, ADR 0002): build, vet, lint and tests with `-race` on ubuntu-latest (Wayland/X11 dev packages) and macos-latest, triggered when the change set touches `ui/`, `pkg/` or `proto/` (the `changes` job prints `ui=` alongside `code=` and `platform=`).
 
-**Nightly:** long fuzzing, full mutation, tests with `-count=5`, Windows build.
+**Stress (PR, new 2026-11-16):** the `stress` job reruns the `Test` and `Fuzz` functions declared in
+the test files that changed (`-run '^(A|B)$'`, built by `fuguegate changes` as `test_run`) in their
+packages with `-race -shuffle=on`, as ten separate `-count=1` runs (a fresh shuffle each), on ubuntu and, when `platform` is true, on macOS. It
+reports success when no test file with a test function changed, like the other conditional jobs.
+Why not the whole package: the 10-minute package timeout covers all ten counts, and `internal/app`
+alone takes 200 to 390 seconds per count, so a PR touching its tests always timed out (PR #152's own
+run). Rerunning only the changed functions is not enough alone: a PR that rewrites many `internal/app`
+tests still passed the timeout on macOS with one `-count=10` run. So each repetition is its own `go test`
+invocation under its own 10-minute timeout, like the nightly: a run exceeds the ceiling only if one
+count of the selected tests does. A flaky test the PR
+adds or edits is exactly what the job exists to catch. A helper-only change (a test file with no test
+function) is not stressed; the regular test job still runs the package once, and the nightly run
+repeats everything. The timeout stays at 10 minutes. The stress jobs report only: they are
+not required status checks (owner decision, 2026-11-16). The `ui/` module is not stress-run (known gap).
+
+**Nightly:** long fuzzing, full mutation, every test repeated twenty times on ubuntu and macOS
+(`repeat-tests`, with a report of every test that both passed and failed), the `perf` speed
+budgets, Windows build.
 
 `main` has branch protection: the checks above are required, squash merge only, no direct push
 and no force push.
@@ -231,3 +271,12 @@ Gate-defining files: `.golangci.yml`, `tools/fuguevet/**`, `internal/arch/**`, `
 | 2026-11-08 | F10.2a (core side): `noprotoleak` allows `pkg/client` and `cmd/*` to import the generated code (now `pkg/pb`), protobuf and Connect, and still guards every other `internal/` package; `nobarego` exempts the test files of `pkg/`; `TestLayerGraph` treats `pkg/` rows as ordinary rows (edges via the May import column, `pkg/` never imports `internal/`); the coverage floor extended to `pkg/*` (generated `pkg/pb` excluded, 80% default floor, baseline entry for `pkg/client`); `fuguegate changes` gains the `ui` scope | Generated code must be importable by the public client and the UI module (Q-31 3A); `pkg/client` is shipped API and gets the same floor as internal packages. Guards: `TestLeaks`, `TestAllowedImporters`, `TestNoProtoLeak`, `TestLayerGraph`, `TestChangeScope` | user (`gate-change-approved` on this PR) |
 | 2026-11-15 | `ui.yml`: the ubuntu test step installs `xvfb` and runs under `xvfb-run -a` with `LIBGL_ALWAYS_SOFTWARE=1` (macOS runs unchanged on Metal) | The F10.8 icon evidence test renders through gio's headless window, which needs an EGL context; the GPU-less ubuntu runner failed with `eglInitialize failed: 0x3001`. No threshold moved and no gate changed; guards: `TestUIWorkflowRunsTheModuleGates`, `TestActionsArePinnedToCommits` | user (`gate-change-approved` on PR #135) |
 | 2026-11-08 | F10.2a (ui module): the two DA-E06 tests `TestCoreNeverImportsUI` and `TestAppWritesOnlyThroughHostAPI` added; `ui.yml` workflow runs the `ui/` module gates (§9); `gioui.org` and `golang.org/x/image` added to `docs/dependencies.md` | Core never imports UI and UI only imports pkg/client and pkg/pb (ADR 0002, DA-E06); the UI module needs its own CI workflow for its cgo build. Guards: `TestCoreNeverImportsUI`, `TestAppWritesOnlyThroughHostAPI`, `TestUIWorkflowRunsTheModuleGates`, `TestActionsArePinnedToCommits` | user (`gate-change-approved` on this PR) |
+| 2026-11-16 | F0.9 flake hardening: new `realclock` analyzer (§4); `internal/testutil` and `internal/perf` packages with a `support` and a `perf` layer row (ADR 0001) and `TestLayerGraph` rejecting production imports of a `support` package; `cmd/fuguegate` tests may import `internal/testutil`; `stress` PR job and a twenty-repeat nightly on ubuntu and macOS with `fuguegate flaky` (§6, §9); speed budgets move to the nightly `perf` job; flaky-test policy (§6). The nightly repeats `go test -count=1` twenty times, not `-count=20`, because the 10-minute timeout covers all counts of one package binary and `internal/app` alone takes minutes per count; the timeout is unchanged | Five classes of flaky tests failed CI on a different test on each rerun on 2026-11-15 and 2026-11-16: wall-clock timing assertions, expensive setup under `-race`, OS races on a fake binary and `killpg`, parallel contention near the package timeout, network in a local gate. No threshold moved, no ratchet baseline changed and nothing was loosened: tests that asserted speed in PR runs are now checked as a median in the nightly `perf` job, and the PR gains the stress job. Guards: `TestRealclockAnalyzerFlagsWallClockInTests`, `TestPRStressRerunsChangedTestPackages`, `TestNightlyStressRunsTwentyCountsOnUbuntuAndMacOS`, `TestPerfBudgetsRunOnlyInNightly`, `TestLayerGraph` | user (chat request; `gate-change-approved` on this PR) |
+
+### Known flaky tests
+
+A test that needed a CI rerun is listed here the day it fails and removed by the PR that fixes
+it; the fix is due within a week (§6).
+
+| First failed | Test | Failure | Fix |
+| --- | --- | --- | --- |

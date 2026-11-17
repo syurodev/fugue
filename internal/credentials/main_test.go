@@ -11,8 +11,8 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
-	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/storage"
+	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vault"
 )
 
@@ -47,13 +47,13 @@ func newFixture(t *testing.T) *fixture {
 	if err = storage.Migrate(ctx, db, clk); err != nil {
 		t.Fatal(err)
 	}
-	v, err := vault.NewService(ctx, vault.NewSQLKeyringStore(db), ids.NewSequence("inc-"))
+	store := vault.NewSQLKeyringStore(db)
+	cheapvault.Save(t, store)
+	v, err := vault.NewService(ctx, store, ids.NewSequence("inc-"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = v.Setup(ctx, redact.NewSecret("a long master password")); err != nil {
-		t.Fatal(err)
-	}
+	cheapvault.Unlock(t, v)
 	return &fixture{book: NewBook(db, v, clk, ids.NewSequence("acct")), vault: v, clock: clk, db: db, dbPath: dbPath}
 }
 

@@ -1,0 +1,18 @@
+# The Go half of buf.gen.yaml, for local `task proto`: it names no remote plugin,
+# so the gate runs without a network. CI keeps the full buf.gen.yaml, which also
+# generates the TypeScript through the pinned remote plugin. Keep the local
+# plugins and options identical to buf.gen.yaml; TestProtoGateNeedsNoNetwork
+# compares them.
+version: v2
+managed:
+  enabled: true
+  override:
+    - file_option: go_package_prefix
+      value: github.com/syurodev/fugue/pkg/pb
+plugins:
+  - local: [go, tool, protoc-gen-go]
+    out: pkg/pb
+    opt: paths=source_relative
+  - local: [go, tool, protoc-gen-connect-go]
+    out: pkg/pb
+    opt: paths=source_relative
