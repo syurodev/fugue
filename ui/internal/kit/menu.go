@@ -466,17 +466,7 @@ func (m *MenuState) drawLevel(env *Env, gtx *layout.Context, k int, inline bool)
 	defer scaleAbout(gtx, f32.Pt(float32(lv.from.X), float32(lv.from.Y)), 0.96+0.04*p).Pop()
 	defer paint.PushOpacity(gtx.Ops, unit01(p)).Pop()
 
-	c := env.Th.Chrome()
-	radius := gtx.Dp(theme.RadiusXL)
-	DrawFloatShadow(gtx, lv.rect, radius)
-	fillRRect(gtx.Ops, lv.rect, radius, c.SurfaceRaised)
-	strokeRRect(gtx.Ops, lv.rect, radius, float32(gtx.Dp(theme.Hairline)), c.BorderSubtle)
-	inner := lv.rect.Inset(lv.pad)
-	if lv.hiAv > 0 {
-		top := inner.Min.Y + int(lv.hiYv+0.5)
-		hiRect := image.Rect(inner.Min.X, top, inner.Max.X, top+gtx.Dp(theme.Row))
-		fillRRect(gtx.Ops, hiRect, gtx.Dp(theme.RadiusMD), fade(c.HoverWash, lv.hiAv))
-	}
+	inner := drawMenuPanelSurface(env, gtx, lv.rect, lv.pad, lv.hiYv, lv.hiAv)
 	for j := range lv.items {
 		row := image.Rect(inner.Min.X, inner.Min.Y+lv.rows[j].y, inner.Max.X, inner.Min.Y+lv.rows[j].y+lv.rows[j].h)
 		if err := drawMenuItem(env, gtx, &lv.items[j], row, lv.cols); err != nil {
