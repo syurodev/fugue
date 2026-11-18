@@ -592,11 +592,11 @@ func awaitRequested(t *testing.T, sub *Subscription) PendingInteractionView {
 }
 
 // assertProductionToolsOnly asserts a normal host serves exactly the
-// production Fugue tools: the team proposal tool (F11.2a); tests add theirs
-// through HostDeps.
+// production Fugue tools: the team proposal and team amend tools (F11.2a,
+// F11.2b); tests add theirs through HostDeps.
 func assertProductionToolsOnly(t *testing.T, tools *SessionToolService) {
 	t.Helper()
-	if len(tools.tools) != 1 || tools.tools[teamProposeToolName] == nil {
+	if len(tools.tools) != 2 || tools.tools[teamProposeToolName] == nil || tools.tools[teamAmendToolName] == nil {
 		t.Fatal("a normal host serves only the production Fugue tools")
 	}
 }

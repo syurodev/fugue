@@ -59,15 +59,23 @@ func TestSessionTeamsDefaultsTrueAndMergesAcrossTiers(t *testing.T) {
 // user confirmation.
 func TestSessionTeamsIsPolicyProtected(t *testing.T) {
 	t.Parallel()
-	old := DefaultConfig(t.TempDir(), "ws-teams")
+	assertSessionBoolPolicyProtected(t, "session.teams", func(c *EffectiveConfig) { c.Session.Teams = false })
+}
+
+// assertSessionBoolPolicyProtected pins the Q-64 shape of a session boolean
+// policy key: an unchanged candidate diffs nothing and a changed candidate
+// names the key in the policy diff.
+func assertSessionBoolPolicyProtected(t *testing.T, key string, widen func(*EffectiveConfig)) {
+	t.Helper()
+	old := DefaultConfig(t.TempDir(), "ws-policy")
 	candidate := old
-	if keys := diffPolicy(&old, &candidate); slices.ContainsFunc(keys, func(e PolicyDiffEntry) bool { return e.Key == "session.teams" }) {
-		t.Fatalf("unchanged teams diffed: %+v", keys)
+	if keys := diffPolicy(&old, &candidate); slices.ContainsFunc(keys, func(e PolicyDiffEntry) bool { return e.Key == key }) {
+		t.Fatalf("unchanged %s diffed: %+v", key, keys)
 	}
-	candidate.Session.Teams = false
+	widen(&candidate)
 	keys := diffPolicy(&old, &candidate)
-	if !slices.ContainsFunc(keys, func(e PolicyDiffEntry) bool { return e.Key == "session.teams" }) {
-		t.Fatalf("teams change not in the policy diff: %+v", keys)
+	if !slices.ContainsFunc(keys, func(e PolicyDiffEntry) bool { return e.Key == key }) {
+		t.Fatalf("%s change not in the policy diff: %+v", key, keys)
 	}
 }
 

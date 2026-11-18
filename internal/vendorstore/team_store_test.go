@@ -55,7 +55,7 @@ func TestTeamStoreKeepsContentOutOfMetadataColumns(t *testing.T) {
 	}
 	specPayload := mustMarshalProtectedSpec(t, markers)
 	rec, tasks, err := s.CreateTeam(ctx, &NewTeamInput{
-		TeamID: "team-inv09", WorkspaceID: testWorkspaceID, SessionID: "sess-1", ProposedEventID: "ev-propose",
+		TeamID: "team-inv09", WorkspaceID: testWorkspaceID, SessionID: decideTestSession, ProposedEventID: "ev-propose",
 		Tasks: []NewTaskInput{{
 			TaskID: "task-lead-inv", HierarchyRole: RoleLead, CatalogRole: testRoleResearch,
 			Deliverable: DeliverableReport, CreatedEventID: "ev-task-lead", ProtectedSpec: specPayload,

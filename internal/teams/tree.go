@@ -79,7 +79,7 @@ func indexTaskNodes(nodes []TaskNode) (map[string]TaskNode, error) {
 	for i := range nodes {
 		n := nodes[i]
 		if n.ID == "" {
-			return nil, &ValidationError{Field: fieldTaskID, Detail: "task ID is required", Reason: ErrInvalidSpec}
+			return nil, &ValidationError{Field: fieldTaskID, Detail: detailTaskIDRequired, Reason: ErrInvalidSpec}
 		}
 		if _, exists := byID[n.ID]; exists {
 			return nil, &ValidationError{Field: fieldTaskID, Detail: "duplicate task ID " + n.ID, Reason: ErrInvalidSpec}

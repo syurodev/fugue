@@ -129,7 +129,7 @@ func validTeamProposalArgs() *ProposeArgs {
 		Brief: "Two independent read streams reported to the lead.",
 		Tasks: []teams.ProposedTask{
 			{ID: teamTestLeadTask, TeamRole: teams.RoleLead, Role: teamTestRole, Goal: "Coordinate the streams", WriteScope: []string{}, Deliverable: teams.DeliverableReport},
-			{ID: "t-a", ParentTaskID: teamTestLeadTask, TeamRole: teams.RoleMember, Role: teamTestRole, Goal: "Read the lexer", WriteScope: []string{"docs/lexer.md"}, Deliverable: teams.DeliverableReport},
+			{ID: teamTestTaskA, ParentTaskID: teamTestLeadTask, TeamRole: teams.RoleMember, Role: teamTestRole, Goal: "Read the lexer", WriteScope: []string{"docs/lexer.md"}, Deliverable: teams.DeliverableReport},
 			{ID: "t-b", ParentTaskID: teamTestLeadTask, TeamRole: teams.RoleMember, Role: teamTestRole, Goal: "Read the parser", WriteScope: []string{"docs/parser.md"}, Deliverable: teams.DeliverableReport},
 		},
 	}
@@ -158,13 +158,20 @@ func (f *teamProposalFixture) proposeThroughTool(t *testing.T, args *ProposeArgs
 
 func (f *teamProposalFixture) pendingCards(t *testing.T) []PendingInteractionView {
 	t.Helper()
+	return f.pendingCardsTool(t, teamProposeToolName)
+}
+
+// pendingCardsTool lists the session's pending cards of one Fugue tool
+// (the proposal card, or the amend card from F11.2b).
+func (f *teamProposalFixture) pendingCardsTool(t *testing.T, tool string) []PendingInteractionView {
+	t.Helper()
 	views, _, err := f.rt.ListPendingInteractions(t.Context(), testAppPrincipal)
 	if err != nil {
 		t.Fatal(err)
 	}
 	cards := make([]PendingInteractionView, 0, len(views))
 	for i := range views {
-		if views[i].SessionID == f.session.ID && views[i].Kind == string(interaction.KindQuestion) && views[i].Tool == teamProposeToolName {
+		if views[i].SessionID == f.session.ID && views[i].Kind == string(interaction.KindQuestion) && views[i].Tool == tool {
 			cards = append(cards, views[i])
 		}
 	}
@@ -226,7 +233,7 @@ func TestNoTaskStartsBeforeApproval(t *testing.T) {
 
 // assertProposedTeam asserts the team is proposed with every task still
 // queued (OR-E13's state half).
-func assertProposedTeam(t *testing.T, f *teamProposalFixture, teamID string, wantTasks int) (vendorstore.TeamRecord, []vendorstore.TaskRecord) {
+func assertProposedTeam(t *testing.T, f *teamProposalFixture, teamID string, wantTasks int) {
 	t.Helper()
 	rec, tasks := f.teamSnapshot(t, teamID)
 	if rec.State != vendorstore.TeamStateProposed {
@@ -240,7 +247,6 @@ func assertProposedTeam(t *testing.T, f *teamProposalFixture, teamID string, wan
 			t.Fatalf("task %s state = %s, want queued", tasks[i].TaskID, tasks[i].State)
 		}
 	}
-	return rec, tasks
 }
 
 // assertSingleProposalCard asserts exactly one proposal card with the four

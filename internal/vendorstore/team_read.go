@@ -162,6 +162,31 @@ func (s *Store) PendingTeamForSession(ctx context.Context, sessionID string) (Te
 	return rec, true, nil
 }
 
+// ActiveTeamForSession returns one active team the session owns, if any
+// (F11.2b: fugue_team_amend is offered only to the lead of an active team).
+// A session can own several active teams, so the amend call carries the team
+// ID; this query only gates whether the tool is offered at all.
+func (s *Store) ActiveTeamForSession(ctx context.Context, sessionID string) (TeamRecord, bool, error) {
+	var teamID string
+	err := s.db.QueryRowContext(ctx, `
+		SELECT team_id FROM team_records
+		WHERE session_id = ? AND state = ?
+		ORDER BY created_at DESC, team_id DESC LIMIT 1`,
+		sessionID, string(TeamStateActive),
+	).Scan(&teamID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TeamRecord{}, false, nil
+	}
+	if err != nil {
+		return TeamRecord{}, false, fmt.Errorf("%w: query the active team: %w", ErrUnavailable, err)
+	}
+	rec, err := queryTeamRecord(ctx, s.db, teamID)
+	if err != nil {
+		return TeamRecord{}, false, err
+	}
+	return rec, true, nil
+}
+
 // TeamEventsSince reads metadata-only event records with sequence > afterSeq.
 func (s *Store) TeamEventsSince(ctx context.Context, teamID string, afterSeq int64, limit int) ([]RecordedTeamEvent, error) {
 	if limit <= 0 {

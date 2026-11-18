@@ -22,6 +22,9 @@ var (
 	ErrTeamTerminal = errcode.New(errcode.FailedPrecondition, "team is terminal")
 	// ErrTeamInvalidInput indicates malformed team creation or event input.
 	ErrTeamInvalidInput = errcode.New(errcode.InvalidArgument, "invalid team or task input")
+	// ErrTaskExists indicates an insertion named a task ID the team already
+	// has (F11.2b: approved amendments really create their queued tasks).
+	ErrTaskExists = errcode.New(errcode.AlreadyExists, "team task already exists")
 )
 
 // TeamState represents the durable lifecycle state of a team (§3.2).
@@ -85,10 +88,8 @@ const (
 	EventTeamProposed    TeamEventType = "TeamProposed"
 	EventTeamStarted     TeamEventType = "TeamStarted"
 	EventTeamFinalReview TeamEventType = "TeamFinalReview"
-	// EventTeamAmended is reserved in the migration's event-type CHECK for
-	// orchestration §3.2; F11.2 owns its transition, so the store defines no
-	// domain transition for it yet. SQLite cannot alter a CHECK constraint,
-	// so the name must be admitted while the table is still empty.
+	// EventTeamAmended carries a §5.4 amendment of an active team in its
+	// sealed payload; the transition (active → active) landed with F11.2b.
 	EventTeamAmended TeamEventType = "TeamAmended"
 	EventTeamDecided TeamEventType = "TeamDecided"
 	EventTeamEnded   TeamEventType = "TeamEnded"
@@ -141,11 +142,14 @@ type TaskRecord struct {
 }
 
 // NewTeamInput specifies a new team and its initial tasks created atomically.
+// ProposedPayload, when present, is the sealed proposal plan the decide path
+// re-validates edits against (F11.2b).
 type NewTeamInput struct {
 	TeamID          string
 	WorkspaceID     string
 	SessionID       string
 	ProposedEventID string
+	ProposedPayload []byte
 	Tasks           []NewTaskInput
 }
 

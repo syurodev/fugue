@@ -61,13 +61,17 @@ type TaskSpec struct {
 }
 
 // ProtectedTaskContent extracts only the content fields of TaskSpec that must stay
-// outside SQL metadata columns and error messages.
+// outside SQL metadata columns and error messages. Profile and Budget are
+// sealed too: an approved edit (OR-E13) or a user-approved amend decides the
+// model a task runs, and that decision is part of the sealed spec.
 type ProtectedTaskContent struct {
-	Goal         string          `json:"goal"`
-	Context      string          `json:"context,omitempty"`
-	WriteScope   []string        `json:"write_scope"`
-	Checks       []string        `json:"checks,omitempty"`
-	OutputSchema json.RawMessage `json:"output_schema,omitempty"`
+	Goal         string           `json:"goal"`
+	Context      string           `json:"context,omitempty"`
+	WriteScope   []string         `json:"write_scope"`
+	Checks       []string         `json:"checks,omitempty"`
+	OutputSchema json.RawMessage  `json:"output_schema,omitempty"`
+	Profile      *ProfileOverride `json:"profile,omitempty"`
+	Budget       *TaskBudget      `json:"budget,omitempty"`
 }
 
 // ProtectedContent returns the protected content view of spec for envelope sealing.
@@ -82,6 +86,14 @@ func (s *TaskSpec) ProtectedContent() ProtectedTaskContent {
 	}
 	if len(s.OutputSchema) > 0 {
 		out.OutputSchema = append(json.RawMessage(nil), s.OutputSchema...)
+	}
+	if s.Profile != nil {
+		p := *s.Profile
+		out.Profile = &p
+	}
+	if s.Budget != nil {
+		b := *s.Budget
+		out.Budget = &b
 	}
 	return out
 }
@@ -127,10 +139,17 @@ func validateProfileAndBudget(p *ProfileOverride, b *TaskBudget) error {
 			return err
 		}
 	}
-	if b != nil {
-		if b.MaxTurns < 0 || b.MaxTokens < 0 || b.MaxDurationSeconds < 0 {
-			return &ValidationError{Field: "spec.budget", Detail: "budget values must be non-negative", Reason: ErrInvalidSpec}
-		}
+	return ValidateBudget(b)
+}
+
+// ValidateBudget validates a §11 budget: every present value is non-negative.
+// The amend path uses it for budget-only edits.
+func ValidateBudget(b *TaskBudget) error {
+	if b == nil {
+		return nil
+	}
+	if b.MaxTurns < 0 || b.MaxTokens < 0 || b.MaxDurationSeconds < 0 {
+		return &ValidationError{Field: "spec.budget", Detail: "budget values must be non-negative", Reason: ErrInvalidSpec}
 	}
 	return nil
 }
@@ -166,7 +185,7 @@ func ValidateTeamTaskSpecs(tasks []TeamTaskSpec) error {
 	for i := range tasks {
 		t := &tasks[i]
 		if t.ID == "" {
-			return &ValidationError{Field: fieldSpecTaskID, Detail: "task ID is required", Reason: ErrInvalidSpec}
+			return &ValidationError{Field: fieldSpecTaskID, Detail: detailTaskIDRequired, Reason: ErrInvalidSpec}
 		}
 		if _, dup := index[t.ID]; dup {
 			return &ValidationError{Field: fieldSpecTaskID, Detail: "duplicate task ID " + t.ID, Reason: ErrInvalidSpec}

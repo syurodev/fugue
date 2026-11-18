@@ -41,8 +41,9 @@ type rawRedact struct {
 }
 
 type rawSession struct {
-	ScratchDir *string `toml:"scratch_dir,omitempty"`
-	Teams      *bool   `toml:"teams,omitempty"`
+	ScratchDir       *string `toml:"scratch_dir,omitempty"`
+	Teams            *bool   `toml:"teams,omitempty"`
+	TeamsAutoApprove *bool   `toml:"teams_auto_approve,omitempty"`
 }
 
 type rawHost struct {
