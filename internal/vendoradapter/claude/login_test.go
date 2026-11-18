@@ -92,7 +92,7 @@ func TestClassifyLoginRequiresTheDocumentToSayLoggedIn(t *testing.T) {
 func TestLoginProcessEnvCarriesNoHostSecret(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "fake-login")
-	testutil.WriteExecutable(t, path, []byte("#!/bin/sh\nexec /usr/bin/env\n"))
+	testutil.WriteExecutable(t, path, []byte("#!/bin/sh\n/bin/sleep 0.5\nexec /usr/bin/env\n"))
 	a := &Adapter{
 		Binary: path,
 		HostEnv: []string{
