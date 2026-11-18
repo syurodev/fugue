@@ -46,9 +46,11 @@ type HostDeps struct {
 	// use; empty locates git on the machine, and a missing git fails team
 	// tasks that need a worktree closed (F11.3a).
 	GitBinary string
-	// TestNoTeamDispatch, set by tests only, keeps approved teams queued so a
-	// decision test sees the decide path without the F11.3a start path.
-	TestNoTeamDispatch bool
+	// TeamAdmitter decides when a queued team task may start. Nil uses the
+	// local admitter (host capacity and the direct-child cap); the F11.6
+	// scheduler plugs in here, and a test that wants the decide path alone
+	// injects one that admits nothing.
+	TeamAdmitter Admitter
 	// TestFugueTools registers Fugue MCP tools for tests only. The fugue
 	// binary never sets it, so a normal host serves none of them.
 	TestFugueTools []*FugueTool

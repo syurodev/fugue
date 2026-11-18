@@ -55,14 +55,16 @@ func (hp *HostProcess) logDispatch(ctx context.Context, err error) {
 	}
 }
 
-// wireTeamDispatch builds the dispatcher and, unless a test turned the start
-// path off, hands every newly active team to it.
+// wireTeamDispatch builds the dispatcher and hands every newly active team
+// to it.
 func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorstore.Store, sessions *VendorSessions, v *vault.Service, deps *HostDeps) {
+	admit := deps.TeamAdmitter
+	if admit == nil {
+		admit = localAdmitter{capacity: sessions}
+	}
 	hp.rt.teamDispatch = newTeamDispatcher(&teamDispatcherDeps{
-		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Admit: localAdmitter{capacity: sessions},
+		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Admit: admit,
 		Roots: hp.rt.workspaces.domain, Git: locateTeamGit(ctx, deps), DataDir: deps.DataDir, IDs: deps.IDs, Vault: v,
 	})
-	if !deps.TestNoTeamDispatch {
-		hp.rt.teamProposals.SetOnTeamActive(func(teamID string) { hp.dispatchTeamAsync(base, teamID) })
-	}
+	hp.rt.teamProposals.SetOnTeamActive(func(teamID string) { hp.dispatchTeamAsync(base, teamID) })
 }

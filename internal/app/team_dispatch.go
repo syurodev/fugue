@@ -155,15 +155,15 @@ func startable(t *vendorstore.TaskRecord, byID map[string]*vendorstore.TaskRecor
 // start starts one task and reports whether it left the queue. A task that
 // is not admitted stays queued; one that fails to start is ended failed.
 func (d *teamDispatcher) start(ctx context.Context, rec *vendorstore.TeamRecord, task *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord) (bool, error) {
-	if task.HierarchyRole == vendorstore.RoleLead {
-		return d.bindLead(ctx, rec, task)
-	}
 	admitted, err := d.deps.Admit.Admit(ctx, task, tasks)
 	if err != nil {
 		return false, boundaryError("admit the task", err)
 	}
 	if !admitted {
 		return false, nil
+	}
+	if task.HierarchyRole == vendorstore.RoleLead {
+		return d.bindLead(ctx, rec, task)
 	}
 	return true, d.startChild(ctx, rec, task, tasks)
 }

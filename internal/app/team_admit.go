@@ -31,6 +31,10 @@ type localAdmitter struct{ capacity capacityReader }
 // Admit admits a task while the host has session capacity and its delegator
 // has fewer than maxRunningDirectChildren children working.
 func (a localAdmitter) Admit(ctx context.Context, task *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord) (bool, error) {
+	// Binding the lead spawns no session, so host capacity never holds it.
+	if task.HierarchyRole == vendorstore.RoleLead {
+		return true, nil
+	}
 	working := 0
 	for i := range tasks {
 		if tasks[i].ParentTaskID != task.ParentTaskID || tasks[i].TaskID == task.TaskID {

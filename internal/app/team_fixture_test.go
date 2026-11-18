@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/testutil/cheapvault"
+	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
 // teamProposalFixture is the F11.2a fixture: a host with the fake vendor CLI,
@@ -46,7 +48,7 @@ func newTeamFixture(t *testing.T, extraTOML string, noDispatch bool) *teamPropos
 		DataDir: cheapvault.DataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("team-test")),
 		Transport: newScriptedTransport(), VendorBinary: exe,
-		Bridge: VendorBridge{Binary: exe, Socket: filepath.Join(t.TempDir(), "host.sock")}, TestNoTeamDispatch: noDispatch,
+		Bridge: VendorBridge{Binary: exe, Socket: filepath.Join(t.TempDir(), "host.sock")}, TeamAdmitter: admitterFor(noDispatch),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -116,4 +118,21 @@ func teamWorkspaceTOMLAt(t *testing.T, extra, dir string) []byte {
 		"[[roots]]\nname = \"main\"\npath = \"" + root + "\"\naccess = \"rw\"\n" +
 		"[[roles]]\nname = \"" + teamTestRole + "\"\nvendor = \"claude\"\npermission = \"read\"\n"
 	return []byte(raw)
+}
+
+// admitNothing is the Admitter of the decide-path tests: it admits no task,
+// so an approved team stays queued (Q-98).
+type admitNothing struct{}
+
+func (admitNothing) Admit(context.Context, *vendorstore.TaskRecord, []vendorstore.TaskRecord) (bool, error) {
+	return false, nil
+}
+
+// admitterFor returns the nothing-admitter for the decide-path fixtures and
+// nil, the host's own, otherwise.
+func admitterFor(noDispatch bool) Admitter {
+	if noDispatch {
+		return admitNothing{}
+	}
+	return nil
 }

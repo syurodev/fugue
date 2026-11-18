@@ -65,7 +65,7 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 		unregisterVaultGuard = v.RegisterLockGuard(func(snap vault.Snapshot) {
 			owner.SetVaultLocked(snap.State != vault.StateUnlocked)
 			// Queued tasks wait while the vault is locked; the unlock starts them.
-			if snap.State == vault.StateUnlocked && hp.rt.teamDispatch != nil && !deps.TestNoTeamDispatch {
+			if snap.State == vault.StateUnlocked && hp.rt.teamDispatch != nil {
 				hp.dispatchAllAsync(base)
 			}
 		})
