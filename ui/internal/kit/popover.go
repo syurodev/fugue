@@ -150,21 +150,7 @@ func (p *PopoverState) Layout(env *Env, gtx *layout.Context, props *PopoverProps
 		env.releasePopover(p)
 		return res, nil
 	}
-	if !props.Inline {
-		if p.claim {
-			env.claimPopover(p)
-			p.claim = false
-		}
-		if !env.holdsPopover(p) {
-			p.Close()
-		}
-		if p.focusOnOpen {
-			if props.FocusOnOpen != nil {
-				gtx.Execute(key.FocusCmd{Tag: props.FocusOnOpen})
-			}
-			p.focusOnOpen = false
-		}
-	}
+	p.claimLayer(env, gtx, props)
 	p.input(env, gtx, props, &res)
 	p.advance(env, props.Inline)
 	p.place(env, gtx, props)
@@ -173,6 +159,27 @@ func (p *PopoverState) Layout(env *Env, gtx *layout.Context, props *PopoverProps
 		return res, fmt.Errorf("draw the popover: %w", err)
 	}
 	return res, nil
+}
+
+// claimLayer takes the popover slot, closes a popover another layer pushed
+// out, and applies the open focus.
+func (p *PopoverState) claimLayer(env *Env, gtx *layout.Context, props *PopoverProps) {
+	if props.Inline {
+		return
+	}
+	if p.claim {
+		env.claimPopover(p)
+		p.claim = false
+	}
+	if !env.holdsPopover(p) {
+		p.Close()
+	}
+	if p.focusOnOpen {
+		if props.FocusOnOpen != nil {
+			gtx.Execute(key.FocusCmd{Tag: props.FocusOnOpen})
+		}
+		p.focusOnOpen = false
+	}
 }
 
 // input reads the frame's Escape and outside presses, against the areas the

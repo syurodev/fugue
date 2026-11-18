@@ -125,7 +125,7 @@ func (p *pages) dialogFormCell(gtx *layout.Context, i, col int, st string) cellD
 	if st == dlgFormFocus {
 		tag = field.Tag()
 	}
-	return p.dialogCell(gtx, sp, props, cell{compDialog, 0, 0, st}, st, tag, col, func(box image.Point) {
+	return p.dialogCell(gtx, sp, props, cell{compDialog, 0, 0, st}, tag, col, func(box image.Point) {
 		if st == dlgFormScrim {
 			// The dim extends around the frame but under nothing painted
 			// after it: the column gap to the sides, a sliver up toward the
@@ -169,7 +169,7 @@ func (p *pages) dialogConfirmRow(gtx *layout.Context) []cellDraw {
 		if st == dlgSafeFocus {
 			tag = cancel.Tag()
 		}
-		row = append(row, p.dialogCell(gtx, sp, props, cell{compDialog, 0, 0, st}, st, tag, i, nil))
+		row = append(row, p.dialogCell(gtx, sp, props, cell{compDialog, 0, 0, st}, tag, i, nil))
 	}
 	return row
 }
@@ -178,7 +178,7 @@ func (p *pages) dialogConfirmRow(gtx *layout.Context) []cellDraw {
 // specimen a stray click dismissed re-opens, so the matrix stays complete.
 // After measuring, the cell expands the specimen's scrim rect around the
 // measured frame, so an on-scrim specimen dims its own surroundings.
-func (p *pages) dialogCell(gtx *layout.Context, sp *kit.DialogState, props func() *kit.DialogProps, key cell, st string, tag event.Tag, col int, onMeasured func(image.Point)) cellDraw {
+func (p *pages) dialogCell(gtx *layout.Context, sp *kit.DialogState, props func() *kit.DialogProps, key cell, tag event.Tag, col int, onMeasured func(image.Point)) cellDraw {
 	box := measure(gtx, func(gtx *layout.Context) image.Point {
 		res, err := sp.Layout(p.env, gtx, props())
 		if err != nil {

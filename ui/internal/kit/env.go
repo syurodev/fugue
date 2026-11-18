@@ -210,6 +210,14 @@ func (e *Env) FrameEnd(gtx *layout.Context) {
 	}
 }
 
+// noteToastError keeps the first pending toast draw error only: a persistent
+// error would otherwise add one entry per frame when nobody drains it.
+func (e *Env) noteToastError(err error) {
+	if len(e.toastErrors) == 0 {
+		e.toastErrors = append(e.toastErrors, err)
+	}
+}
+
 // ToastError drains the first draw error the frame's toasts hit, if any: the
 // manager runs at the frame end, where a Layout return cannot carry it.
 func (e *Env) ToastError() error {

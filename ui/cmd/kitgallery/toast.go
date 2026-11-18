@@ -41,6 +41,9 @@ func toastPushStates() []string {
 
 // Shared specimen copy, so no literal repeats (goconst).
 const (
+	toastObjInfo   = "gallery-info"
+	toastObjAction = "gallery-action"
+	toastObjWarn   = "gallery-warn"
 	tstInfoTitle   = "Query finished"
 	tstInfoDetail  = "12 rows in 1.2 s"
 	tstActionTitle = "Snapshot stored"
@@ -64,17 +67,17 @@ type toastPage struct {
 func newToastPage() toastPage {
 	var tp toastPage
 	specs := []kit.Toast{
-		{Object: "gallery-info", Icon: kit.IconCheck, Title: tstInfoTitle, Detail: tstInfoDetail},
-		{Object: "gallery-action", Icon: kit.IconCopy, Title: tstActionTitle, Detail: tstActionDet, Action: toastOpenLbl},
-		{Object: "gallery-warn", Icon: kit.IconHelp, Title: tstWarnTitle, Detail: tstWarnDetail, Warning: true},
+		{Object: toastObjInfo, Icon: kit.IconCheck, Title: tstInfoTitle, Detail: tstInfoDetail},
+		{Object: toastObjAction, Icon: kit.IconCopy, Title: tstActionTitle, Detail: tstActionDet, Action: toastOpenLbl},
+		{Object: toastObjWarn, Icon: kit.IconHelp, Title: tstWarnTitle, Detail: tstWarnDetail, Warning: true},
 		{Object: "gallery-merge", Icon: kit.IconRestart, Title: tstMergeTitle},
-		{Object: "gallery-info", Icon: kit.IconCheck, Title: tstInfoTitle, Detail: tstInfoDetail},
-		{Object: "gallery-info", Icon: kit.IconCheck, Title: tstInfoTitle, Detail: tstInfoDetail},
-		{Object: "gallery-action", Icon: kit.IconCopy, Title: tstActionTitle, Detail: tstActionDet, Action: toastOpenLbl},
-		{Object: "gallery-warn", Icon: kit.IconHelp, Title: tstWarnTitle, Detail: tstWarnDetail, Warning: true},
+		{Object: toastObjInfo, Icon: kit.IconCheck, Title: tstInfoTitle, Detail: tstInfoDetail},
+		{Object: toastObjInfo, Icon: kit.IconCheck, Title: tstInfoTitle, Detail: tstInfoDetail},
+		{Object: toastObjAction, Icon: kit.IconCopy, Title: tstActionTitle, Detail: tstActionDet, Action: toastOpenLbl},
+		{Object: toastObjWarn, Icon: kit.IconHelp, Title: tstWarnTitle, Detail: tstWarnDetail, Warning: true},
 	}
 	for i := range tp.specimens {
-		tp.specimens[i] = kit.NewToastSpecimen(specs[i])
+		tp.specimens[i] = kit.NewToastSpecimen(&specs[i])
 	}
 	tp.specimens[3].SetCount(2)
 	for i := range tp.triggers {
@@ -88,18 +91,25 @@ func (p *pages) layoutToasts(gtx *layout.Context) {
 	y := p.paragraph(gtx, gtx.Constraints.Max.X, "Toast §6.18: at the window's bottom-right corner, above the floating layers. At most three; the same object merges with a count badge; 4 s, or 6 s with an action or a warning; the timer pauses under the pointer; a toast never takes focus. Push some and watch the corner — slow motion (S) shows the slide.") + gtx.Dp(theme.SpaceXL)
 	blocks := []block{
 		func(gtx *layout.Context, dry bool) image.Point {
-			return p.matrix(gtx, "specimens", []string{tstInfo, tstAction, tstWarning},
-				[][]cellDraw{p.toastSpecimenRow(gtx, 0, 3)}, dry)
+			return p.matrix(gtx, "specimens", []string{tstInfo, tstAction},
+				[][]cellDraw{p.toastSpecimenRow(gtx, 0, 2)}, dry)
 		},
 		func(gtx *layout.Context, dry bool) image.Point {
-			return p.matrix(gtx, "merged and paused", []string{tstMerged, tstPaused},
-				[][]cellDraw{p.toastSpecimenRow(gtx, 3, 5)}, dry)
+			return p.matrix(gtx, "warning and merged", []string{tstWarning, tstMerged},
+				[][]cellDraw{p.toastSpecimenRow(gtx, 2, 4)}, dry)
+		},
+		func(gtx *layout.Context, dry bool) image.Point {
+			return p.matrix(gtx, "paused", []string{tstPaused},
+				[][]cellDraw{p.toastSpecimenRow(gtx, 4, 5)}, dry)
 		},
 		func(gtx *layout.Context, dry bool) image.Point {
 			return p.matrix(gtx, "the corner stack", []string{tstStack}, [][]cellDraw{{p.toastStackCell(gtx)}}, dry)
 		},
 		func(gtx *layout.Context, dry bool) image.Point {
-			return p.matrix(gtx, "live", []string{tstLive}, [][]cellDraw{p.toastLiveRow(gtx)}, dry)
+			return p.matrix(gtx, "live", toastPushStates()[:3], [][]cellDraw{p.toastLiveRow(gtx, 0, 3)}, dry)
+		},
+		func(gtx *layout.Context, dry bool) image.Point {
+			return p.matrix(gtx, "live, merge and overflow", toastPushStates()[3:], [][]cellDraw{p.toastLiveRow(gtx, 3, 5)}, dry)
 		},
 	}
 	p.flow(gtx, y, blocks)
@@ -148,32 +158,42 @@ func (p *pages) toastStackCell(gtx *layout.Context) cellDraw {
 	}
 }
 
-// toastLiveRow is the row of push triggers. Each push is a live event of the
-// window's toast manager; the outcomes land in ToastEvents.
-func (p *pages) toastLiveRow(gtx *layout.Context) []cellDraw {
+// toastLiveRow is the row of push triggers from index a to b. Each push is a
+// live event of the window's toast manager; the outcomes land in ToastEvents.
+func (p *pages) toastLiveRow(gtx *layout.Context, a, b int) []cellDraw {
 	pushes := []struct {
 		label string
 		varnt kit.ButtonVariant
 		toast kit.Toast
 	}{
-		{tstLiveInfo, kit.Secondary,
-			kit.Toast{Object: "gallery-info", Icon: kit.IconCheck, Title: tstInfoTitle, Detail: tstInfoDetail}},
-		{tstLiveAct, kit.Secondary,
-			kit.Toast{Object: "gallery-action", Icon: kit.IconCopy, Title: tstActionTitle, Detail: tstActionDet, Action: toastOpenLbl}},
-		{tstLiveWarn, kit.Danger,
-			kit.Toast{Object: "gallery-warn", Icon: kit.IconHelp, Title: tstWarnTitle, Detail: tstWarnDetail, Warning: true}},
-		{tstLiveMrg, kit.Secondary,
-			kit.Toast{Object: "gallery-merge", Icon: kit.IconRestart, Title: tstMergeTitle}},
-		{tstLiveOvr, kit.Bordered,
-			kit.Toast{Object: "gallery-overflow", Icon: kit.IconEye, Title: tstOvrTitle}},
+		{
+			tstLiveInfo, kit.Secondary,
+			kit.Toast{Object: toastObjInfo, Icon: kit.IconCheck, Title: tstInfoTitle, Detail: tstInfoDetail},
+		},
+		{
+			tstLiveAct, kit.Secondary,
+			kit.Toast{Object: toastObjAction, Icon: kit.IconCopy, Title: tstActionTitle, Detail: tstActionDet, Action: toastOpenLbl},
+		},
+		{
+			tstLiveWarn, kit.Danger,
+			kit.Toast{Object: toastObjWarn, Icon: kit.IconHelp, Title: tstWarnTitle, Detail: tstWarnDetail, Warning: true},
+		},
+		{
+			tstLiveMrg, kit.Secondary,
+			kit.Toast{Object: "gallery-merge", Icon: kit.IconRestart, Title: tstMergeTitle},
+		},
+		{
+			tstLiveOvr, kit.Bordered,
+			kit.Toast{Object: "gallery-overflow", Icon: kit.IconEye, Title: tstOvrTitle},
+		},
 	}
-	row := make([]cellDraw, 0, len(pushes))
-	for ci := range pushes {
-		push := &pushes[ci]
-		btn := p.tst.triggers[ci]
+	row := make([]cellDraw, 0, b-a)
+	for i := a; i < b; i++ {
+		push := &pushes[i]
+		btn := p.tst.triggers[i]
 		pr := kit.ButtonProps{Text: push.label, Variant: push.varnt}
 		row = append(row, cellDraw{
-			col: ci, key: cell{compToast, 1, 0, push.label}, tag: btn.Tag(),
+			col: i - a, key: cell{compToast, 1, 0, push.label}, tag: btn.Tag(),
 			box: measure(gtx, func(gtx *layout.Context) image.Point { return btn.Measure(p.env, gtx, pr).Size }),
 			lay: func(gtx *layout.Context) {
 				clicked, err := btn.Layout(p.env, gtx, pr)

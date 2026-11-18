@@ -105,7 +105,7 @@ func (d *DialogState) drawFrame(env *Env, gtx *layout.Context, props *DialogProp
 // paintFrame does the frame's drawing for one frame, at the current
 // transform.
 func (d *DialogState) paintFrame(env *Env, gtx *layout.Context, props *DialogProps, res *DialogResult, m dialogMetrics) error {
-	bodyH, bodyOps, bands, scrollMax := d.runBody(env, gtx, props, m)
+	bodyH, bodyOps, bands, scrollMax := d.runBody(gtx, props, m)
 	if scrollMax > 0 {
 		d.scroll.SetOffset(min(d.scroll.Offset(), scrollMax))
 	}
@@ -140,7 +140,7 @@ func (d *DialogState) paintFrame(env *Env, gtx *layout.Context, props *DialogPro
 // ops, the bands it declared and the scroll maximum. The body's content
 // takes the inner width minus the ring allowance, and a frame on its way out
 // runs it disabled, so it takes no input (§3.7).
-func (d *DialogState) runBody(env *Env, gtx *layout.Context, props *DialogProps, m dialogMetrics) (bodyH int, bodyOps op.CallOp, bands []dialogBand, scrollMax int) {
+func (d *DialogState) runBody(gtx *layout.Context, props *DialogProps, m dialogMetrics) (bodyH int, bodyOps op.CallOp, bands []dialogBand, scrollMax int) {
 	if props.Body == nil {
 		return 0, op.CallOp{}, nil, 0
 	}

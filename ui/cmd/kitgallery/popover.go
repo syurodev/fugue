@@ -145,28 +145,8 @@ func (p *pages) popoverSpecimenCell(gtx *layout.Context, i int, st string) cellD
 // close button returns focus here.
 func (p *pages) popoverLiveCell(gtx *layout.Context, col int) cellDraw {
 	btn, po := p.pop.trigger, p.pop.live
-	field := p.pop.liveField
 	pr := kit.ButtonProps{Text: povTriggerLbl, Icon: kit.IconChevronDown, Variant: kit.Bordered}
-	fp := &kit.TextFieldProps{Label: povFieldLbl, Placeholder: povFieldHint}
-	props := &kit.PopoverProps{
-		Title:       povLiveTitle,
-		Width:       240,
-		Pinned:      p.pop.livePinned,
-		FocusOnOpen: field.Tag(),
-		Pin:         p.pop.livePin,
-		Measure: func(gtx *layout.Context) image.Point {
-			return field.Measure(p.env, gtx, fp).Size
-		},
-		Content: func(gtx *layout.Context) {
-			ev, err := field.Layout(p.env, gtx, fp)
-			if err != nil {
-				p.err = err
-			}
-			if ev.Changed {
-				p.pop.liveVal = field.Text()
-			}
-		},
-	}
+	props := p.popoverLiveProps()
 	box := measure(gtx, func(gtx *layout.Context) image.Point { return btn.Measure(p.env, gtx, pr).Size })
 	return cellDraw{
 		col: col, key: cell{compPopover, 1, 0, povLive}, tag: btn.Tag(), box: box,
@@ -192,6 +172,32 @@ func (p *pages) popoverLiveCell(gtx *layout.Context, col int) cellDraw {
 			}
 			if res.PinClicked {
 				p.pop.livePinned = !p.pop.livePinned
+			}
+		},
+	}
+}
+
+// popoverLiveProps are the live popover's props: its field content and the
+// pin state, shared by the measure and the overlay layout.
+func (p *pages) popoverLiveProps() *kit.PopoverProps {
+	field := p.pop.liveField
+	fp := &kit.TextFieldProps{Label: povFieldLbl, Placeholder: povFieldHint}
+	return &kit.PopoverProps{
+		Title:       povLiveTitle,
+		Width:       240,
+		Pinned:      p.pop.livePinned,
+		FocusOnOpen: field.Tag(),
+		Pin:         p.pop.livePin,
+		Measure: func(gtx *layout.Context) image.Point {
+			return field.Measure(p.env, gtx, fp).Size
+		},
+		Content: func(gtx *layout.Context) {
+			ev, err := field.Layout(p.env, gtx, fp)
+			if err != nil {
+				p.err = err
+			}
+			if ev.Changed {
+				p.pop.liveVal = field.Text()
 			}
 		},
 	}

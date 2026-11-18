@@ -198,7 +198,7 @@ func (d *DialogState) Layout(env *Env, gtx *layout.Context, props *DialogProps) 
 		env.releaseDialog(d)
 		return res, nil
 	}
-	if err := d.claimLayer(env, gtx, props); err != nil {
+	if err := d.claimLayer(env, props); err != nil {
 		return res, err
 	}
 	if d.open.Shown() {
@@ -208,6 +208,7 @@ func (d *DialogState) Layout(env *Env, gtx *layout.Context, props *DialogProps) 
 	if err := d.place(env, gtx, props, &res); err != nil {
 		return res, fmt.Errorf("lay the dialog out: %w", err)
 	}
+	d.focusOpen(gtx, props)
 	// Submit is consumed here, after the body drew: a field's Enter in this
 	// frame reports in this frame (UK-06), and the dialog closes on it.
 	d.consumeSubmit(props, &res)
@@ -219,10 +220,8 @@ func (d *DialogState) Layout(env *Env, gtx *layout.Context, props *DialogProps) 
 	return res, nil
 }
 
-// claimLayer takes the window's one dialog slot (§6.17) and applies the
-// open focus of §6.17: a confirm's safe choice — its Cancel — or the body's
-// first band.
-func (d *DialogState) claimLayer(env *Env, gtx *layout.Context, props *DialogProps) error {
+// claimLayer takes the window's one dialog slot (§6.17).
+func (d *DialogState) claimLayer(env *Env, props *DialogProps) error {
 	if props.Inline {
 		return nil
 	}
@@ -233,8 +232,15 @@ func (d *DialogState) claimLayer(env *Env, gtx *layout.Context, props *DialogPro
 		}
 		d.claim = false
 	}
-	if !d.focusOnOpen {
-		return nil
+	return nil
+}
+
+// focusOpen applies the open focus once the frame's body drew, because the
+// body declares its bands while it draws: a confirm's safe choice — its
+// Cancel — or the body's first band, else Cancel (§6.17).
+func (d *DialogState) focusOpen(gtx *layout.Context, props *DialogProps) {
+	if !d.focusOnOpen || props.Inline {
+		return
 	}
 	first := props.Safe
 	if first == nil && props.Variant == DialogConfirm && props.Cancel != nil {
@@ -244,11 +250,13 @@ func (d *DialogState) claimLayer(env *Env, gtx *layout.Context, props *DialogPro
 	if first == nil && len(d.bands) > 0 {
 		first = d.bands[0].tag
 	}
+	if first == nil && props.Cancel != nil {
+		first = props.Cancel.Tag()
+	}
 	if first != nil {
 		gtx.Execute(key.FocusCmd{Tag: first})
 	}
 	d.focusOnOpen = false
-	return nil
 }
 
 // consumeSubmit turns a pending Submit into the result, unless the form is

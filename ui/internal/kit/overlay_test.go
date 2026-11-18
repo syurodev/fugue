@@ -1,14 +1,11 @@
 package kit
 
 import (
-	"errors"
 	"image"
 	"image/color"
 	"testing"
-	"time"
 
 	"gioui.org/f32"
-	"gioui.org/io/event"
 	"gioui.org/io/key"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -71,310 +68,6 @@ func popoverProps(env *Env, field *TextFieldState, contentErr *error) *PopoverPr
 	}
 }
 
-// dialogFixture is the shared shape of the dialog tests: one dialog with a
-// one-field form body, its footer buttons and a laid-out trigger.
-type dialogFixture struct {
-	t       *testing.T
-	h       *harness
-	d       *DialogState
-	field   *TextFieldState
-	cancel  *ButtonState
-	primary *ButtonState
-	trigger *ButtonState
-	tpr     ButtonProps
-	props   *DialogProps
-	bodyErr error
-	dirty   bool
-	// tall, when set, lays a tall spacer above the field, so the body
-	// scrolls and the field can sit at a visible edge.
-	tall bool
-}
-
-// newDialogFixture builds the fixture; dirty gates the props per frame.
-func newDialogFixture(t *testing.T) *dialogFixture {
-	h := newHarness(t)
-	f := &dialogFixture{
-		t:       t,
-		h:       h,
-		d:       NewDialogState(),
-		field:   NewTextFieldState(),
-		cancel:  NewButtonState(),
-		primary: NewButtonState(),
-		trigger: NewButtonState(),
-		tpr:     ButtonProps{Text: testTriggerLabel, Variant: Bordered},
-	}
-	f.props = &DialogProps{
-		Variant:     DialogForm,
-		Title:       "Edit connection",
-		Description: "Changes apply to new sessions.",
-		Cancel:      f.cancel, Primary: f.primary, PrimaryLabel: labelSave,
-		Body: func(gtx *layout.Context, bands *DialogBands) image.Point {
-			return f.body(gtx, bands)
-		},
-	}
-	f.d.SetOpener(f.trigger.Tag())
-	return f
-}
-
-// body lays the fixture's field at the full body width, declaring its band
-// (below the tall spacer when there is one); a draw error surfaces to the
-// frame check.
-func (f *dialogFixture) body(gtx *layout.Context, bands *DialogBands) image.Point {
-	p := &TextFieldProps{Label: testFieldLabel}
-	dims := f.field.Measure(f.h.env, gtx, p)
-	y := 0
-	if f.tall {
-		// Tall enough that the body scrolls in the harness window: the
-		// spacer alone passes the slot's height.
-		y = f.h.gtx.Dp(theme.SpaceXL) * 40
-	}
-	if _, err := f.field.Layout(f.h.env, gtx, p); err != nil && f.bodyErr == nil {
-		f.bodyErr = err
-	}
-	bands.Focusable(f.field.Tag(), y, y+dims.Size.Y)
-	return image.Point{X: gtx.Constraints.Max.X, Y: y + dims.Size.Y}
-}
-
-// frame lays one frame out — the trigger with it, so focus survives (Gio
-// clears the focus of a tag whose key handler is absent from a frame) — and
-// reports the dialog's result.
-func (f *dialogFixture) frame() DialogResult {
-	f.props.Dirty = f.dirty
-	var res DialogResult
-	runFrame(f.t, f.h, func(gtx *layout.Context) {
-		if _, err := f.trigger.Layout(f.h.env, gtx, f.tpr); err != nil {
-			f.t.Fatalf("lay the trigger out: %v", err)
-		}
-		var err error
-		res, err = f.d.Layout(f.h.env, gtx, f.props)
-		if err != nil {
-			f.t.Fatalf("lay the dialog out: %v", err)
-		}
-	})
-	if f.bodyErr != nil {
-		f.t.Fatalf("lay the dialog body out: %v", f.bodyErr)
-	}
-	f.bodyErr = nil
-	return res
-}
-
-// settle lays one more frame out, so a FocusCmd of the previous frame is
-// visible.
-func (f *dialogFixture) settle() { f.frame() }
-
-// focusField forces the gallery preview's focus ring on the fixture's field.
-func (f *dialogFixture) focusField() {
-	f.h.env.Preview = Preview{Focus: f.field.Tag()}
-}
-
-// TestDialogTrapsFocusAndReturnsItToTheOpener covers §6.17: Tab and
-// Shift+Tab cycle inside the dialog — the body's field, then the footer —
-// and never leave it; Escape closes a clean form and focus returns to the
-// opener; Escape with unsaved input is refused.
-func TestDialogTrapsFocusAndReturnsItToTheOpener(t *testing.T) {
-	f := newDialogFixture(t)
-	f.d.Open()
-	f.frame()
-	f.settle()
-	if f.d.rect.Empty() {
-		t.Fatal("the dialog did not open")
-	}
-	if !f.h.gtx.Focused(f.field.Tag()) {
-		t.Fatal("the dialog did not focus its first field")
-	}
-
-	// Tab cycles inside: the footer, then back to the field (wrap);
-	// Shift+Tab goes back.
-	focusAfterTab(t, f, 0, f.cancel.Tag(), "Tab did not move to Cancel")
-	focusAfterTab(t, f, 0, f.primary.Tag(), "Tab did not move to the primary button")
-	focusAfterTab(t, f, 0, f.field.Tag(), "Tab did not wrap back inside the dialog")
-	focusAfterTab(t, f, key.ModShift, f.primary.Tag(), "Shift+Tab did not move back to the primary button")
-
-	// Escape on a clean form closes and returns focus to the opener.
-	f.h.tap(key.NameEscape, 0)
-	res := f.frame()
-	if !res.Cancelled || !res.Closed || f.d.IsOpen() {
-		t.Fatalf("Escape did not close a clean form: %+v, open %v", res, f.d.IsOpen())
-	}
-	f.settle()
-	if !f.h.gtx.Focused(f.trigger.Tag()) {
-		t.Fatal("focus did not return to the opener")
-	}
-
-	// Escape with unsaved input is refused: the dialog stays open.
-	f.dirty = true
-	f.d.Open()
-	f.frame()
-	f.h.tap(key.NameEscape, 0)
-	res = f.frame()
-	if !res.EscapeRefused || !f.d.IsOpen() {
-		t.Fatalf("Escape closed a form with unsaved input: %+v, open %v", res, f.d.IsOpen())
-	}
-}
-
-// focusAfterTab taps Tab (with mod) and asserts the tag took focus two
-// frames later: the FocusCmd lands in the router at its frame's end.
-func focusAfterTab(t *testing.T, f *dialogFixture, mod key.Modifiers, want event.Tag, what string) {
-	t.Helper()
-	f.h.tap(key.NameTab, mod)
-	f.frame()
-	f.settle()
-	if !f.h.gtx.Focused(want) {
-		t.Fatal(what)
-	}
-}
-
-// TestEnterInATextAreaNeverSubmitsTheDialog covers §6.17: Enter submits a
-// form through the field core's submit translation, never from a multi-line
-// TextArea, where Enter is a newline.
-func TestEnterInATextAreaNeverSubmitsTheDialog(t *testing.T) {
-	h := newHarness(t)
-	d := NewDialogState()
-	area := NewTextAreaState()
-	cancel, primary := NewButtonState(), NewButtonState()
-	props := &DialogProps{
-		Variant: DialogForm,
-		Title:   "Compose",
-		Cancel:  cancel, Primary: primary, PrimaryLabel: "Send",
-		Body: func(gtx *layout.Context, bands *DialogBands) image.Point {
-			p := &TextAreaProps{Label: "Message"}
-			ev := area.Layout(h.env, gtx, p)
-			if ev.Submitted {
-				d.Submit()
-			}
-			bands.Focusable(area.Tag(), 0, labelLine(h.env, gtx, theme.TypeBody()))
-			return image.Point{X: gtx.Constraints.Max.X, Y: 3 * labelLine(h.env, gtx, theme.TypeBody())}
-		},
-	}
-	d.SetOpener(&cancel.click)
-	dialogFrames(t, h, d, props, 2)
-	if !h.gtx.Focused(area.Tag()) {
-		t.Fatal("the dialog did not focus the TextArea")
-	}
-	h.tap(key.NameEnter, 0)
-	res := dialogFrames(t, h, d, props, 1)
-	if res.Submitted || res.Closed || !d.IsOpen() {
-		t.Fatalf("Enter in a TextArea submitted the dialog: %+v, open %v", res, d.IsOpen())
-	}
-	if area.Text() == "" {
-		t.Fatal("the TextArea did not receive the Enter as a newline")
-	}
-}
-
-// TestDialogFieldEnterSubmitsTheForm is the other half of §6.17: Enter in a
-// single-line TextField submits the form, through the field's own submit
-// translation — the caller relays the field event, the dialog closes.
-func TestDialogFieldEnterSubmitsTheForm(t *testing.T) {
-	h := newHarness(t)
-	d := NewDialogState()
-	f1 := NewTextFieldState()
-	cancel, primary := NewButtonState(), NewButtonState()
-	props := &DialogProps{
-		Variant: DialogForm,
-		Title:   "Rename",
-		Cancel:  cancel, Primary: primary, PrimaryLabel: labelSave,
-		Body: func(gtx *layout.Context, bands *DialogBands) image.Point {
-			p := &TextFieldProps{Label: testFieldLabel}
-			ev, err := f1.Layout(h.env, gtx, p)
-			if err != nil {
-				t.Errorf("lay the field out: %v", err)
-			}
-			if ev.Submitted {
-				d.Submit()
-			}
-			bands.Focusable(f1.Tag(), 0, labelLine(h.env, gtx, theme.TypeBody()))
-			return image.Point{X: gtx.Constraints.Max.X, Y: labelLine(h.env, gtx, theme.TypeBody())}
-		},
-	}
-	d.SetOpener(&cancel.click)
-	dialogFrames(t, h, d, props, 2)
-	if !h.gtx.Focused(f1.Tag()) {
-		t.Fatal("the dialog did not focus the field")
-	}
-	h.tap(key.NameEnter, 0)
-	res := dialogFrames(t, h, d, props, 1)
-	if !res.Submitted || !res.Closed || d.IsOpen() {
-		t.Fatalf("Enter in a field did not submit: %+v, open %v", res, d.IsOpen())
-	}
-}
-
-// dialogFrames lays n frames of one dialog out (the body's field is laid out
-// every frame, so its focus survives) and returns the last result.
-func dialogFrames(t *testing.T, h *harness, d *DialogState, props *DialogProps, n int) DialogResult {
-	t.Helper()
-	var res DialogResult
-	for range n {
-		runFrame(t, h, func(gtx *layout.Context) {
-			var err error
-			res, err = d.Layout(h.env, gtx, props)
-			if err != nil {
-				t.Fatalf("lay the dialog out: %v", err)
-			}
-		})
-	}
-	return res
-}
-
-// TestConfirmDialogFocusesTheSafeChoice covers §6.17: a confirm focuses the
-// safe choice — the Cancel button, here — on open, and Escape closes it as
-// a cancellation.
-func TestConfirmDialogFocusesTheSafeChoice(t *testing.T) {
-	h := newHarness(t)
-	d := NewDialogState()
-	cancel, primary := NewButtonState(), NewButtonState()
-	props := &DialogProps{
-		Variant:     DialogConfirm,
-		Title:       testConfirmTitle,
-		Description: testConfirmDesc,
-		Cancel:      cancel, Primary: primary, PrimaryLabel: testDeleteLabel,
-		PrimaryVariant: Danger,
-	}
-	d.SetOpener(&cancel.click)
-	dialogFrames(t, h, d, props, 2)
-	if !h.gtx.Focused(cancel.Tag()) {
-		t.Fatal("the confirm did not focus the safe choice")
-	}
-	h.tap(key.NameEscape, 0)
-	res := dialogFrames(t, h, d, props, 1)
-	if !res.Cancelled || !res.Closed || d.IsOpen() {
-		t.Fatalf("Escape did not close the confirm: %+v, open %v", res, d.IsOpen())
-	}
-}
-
-// TestNoDialogOnADialog covers §6.17: a dialog opened while one is open is
-// refused with ErrDialogAlreadyOpen, and the first dialog stays.
-func TestNoDialogOnADialog(t *testing.T) {
-	h := newHarness(t)
-	first, second := NewDialogState(), NewDialogState()
-	c1, p1 := NewButtonState(), NewButtonState()
-	c2, p2 := NewButtonState(), NewButtonState()
-	propsFor := func(cancel, primary *ButtonState) *DialogProps {
-		return &DialogProps{
-			Variant: DialogForm, Title: "Edit",
-			Cancel: cancel, Primary: primary, PrimaryLabel: labelSave,
-		}
-	}
-	frame := func(d *DialogState, cancel, primary *ButtonState) (DialogResult, error) {
-		var res DialogResult
-		var err error
-		runFrame(t, h, func(gtx *layout.Context) {
-			res, err = d.Layout(h.env, gtx, propsFor(cancel, primary))
-		})
-		return res, err
-	}
-	first.Open()
-	if _, err := frame(first, c1, p1); err != nil {
-		t.Fatalf("the first dialog failed to open: %v", err)
-	}
-	second.Open()
-	if _, err := frame(second, c2, p2); !errors.Is(err, ErrDialogAlreadyOpen) {
-		t.Fatalf("the second dialog was not refused with ErrDialogAlreadyOpen: %v", err)
-	}
-	if !first.IsOpen() || second.IsOpen() {
-		t.Fatalf("after the refusal: first open %v, second open %v, want only the first", first.IsOpen(), second.IsOpen())
-	}
-}
-
 // popoverFixture is the popover tests' shape: one popover with a field, the
 // trigger that opens it, and the draw error out of the content.
 type popoverFixture struct {
@@ -389,6 +82,7 @@ type popoverFixture struct {
 }
 
 func newPopoverFixture(t *testing.T) *popoverFixture {
+	t.Helper()
 	h := newHarness(t)
 	f := &popoverFixture{
 		t:       t,
@@ -411,7 +105,9 @@ func (f *popoverFixture) frame(setup func(*layout.Context)) PopoverResult {
 		if _, err := f.trigger.Layout(f.h.env, gtx, f.tpr); err != nil {
 			f.t.Fatalf("lay the trigger out: %v", err)
 		}
-		setup(gtx)
+		if setup != nil {
+			setup(gtx)
+		}
 		var err error
 		res, err = f.po.Layout(f.h.env, gtx, f.props)
 		if err != nil {
@@ -435,6 +131,7 @@ func (f *popoverFixture) focusField() {
 // the opener; a click outside closes; a pinned popover ignores the click
 // outside but still closes on Escape.
 func TestPopoverClosesOnEscapeAndOutsideClick(t *testing.T) {
+	t.Parallel()
 	f := newPopoverFixture(t)
 
 	// Focus the trigger, then open from the keyboard: focus moves into the
@@ -517,6 +214,7 @@ func assertPopoverPinned(t *testing.T, f *popoverFixture) {
 // allows; but a second menu replaces the menu layer and a second popover
 // would replace the popover, so no third floating layer stacks.
 func TestOnlyTwoFloatingLayersAtOnce(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	pop := NewPopoverState()
 	field := NewTextFieldState()
@@ -598,149 +296,12 @@ func assertDialogOverLayers(t *testing.T, h *harness, pop *PopoverState, menu *M
 	}
 }
 
-// TestToastPausesOnHoverAndNeverTakesFocus covers §6.18: the timer stops
-// while the pointer hovers the toast and resumes after; the toast never
-// takes focus — whatever is focused stays focused for the toast's whole
-// life.
-func TestToastPausesOnHoverAndNeverTakesFocus(t *testing.T) {
-	h := newHarness(t)
-	steady := NewButtonState()
-	spr := ButtonProps{Text: testTriggerLabel, Variant: Bordered}
-	laySteady := func(gtx *layout.Context) {
-		if _, err := steady.Layout(h.env, gtx, spr); err != nil {
-			t.Fatalf("lay the button out: %v", err)
-		}
-	}
-	h.env.ToastPush(&Toast{Object: testToastObject, Icon: IconCheck, Title: testToastTitle, Detail: testToastDetail})
-	runFrame(t, h, func(gtx *layout.Context) {
-		laySteady(gtx)
-		gtx.Execute(key.FocusCmd{Tag: steady.Tag()})
-	})
-	runFrame(t, h, laySteady)
-	if !h.gtx.Focused(steady.Tag()) {
-		t.Fatal("the focus anchor did not take focus")
-	}
-	rect := assertToastShown(t, h)
-
-	// Two of its four seconds pass; the toast is still there, and the
-	// driver holds a wake for its expiry.
-	h.now = h.now.Add(2 * time.Second)
-	runFrame(t, h, laySteady)
-	if !h.env.toast.list[0].open.Shown() {
-		t.Fatal("the toast expired early")
-	}
-	if _, ok := h.env.Driver.Next(); !ok {
-		t.Fatal("the toast scheduled no wake for its expiry")
-	}
-	assertToastHoverPause(t, h, laySteady, rect)
-	assertToastExpiry(t, h, laySteady, steady.Tag())
-}
-
-// assertToastShown fails when the pushed toast is not visible and returns
-// its rect.
-func assertToastShown(t *testing.T, h *harness) image.Rectangle {
-	t.Helper()
-	if n := len(h.env.toast.list); n != 1 || !h.env.toast.list[0].open.Shown() {
-		t.Fatalf("the toast did not show: %d entries", n)
-	}
-	rect := h.env.toast.list[0].rect
-	if rect.Empty() {
-		t.Fatal("the toast has no place")
-	}
-	return rect
-}
-
-// assertToastHoverPause moves the pointer onto the toast, expects the hover
-// and that four more seconds do not expire it.
-func assertToastHoverPause(t *testing.T, h *harness, laySteady func(*layout.Context), rect image.Rectangle) {
-	t.Helper()
-	centre := image.Pt((rect.Min.X+rect.Max.X)/2, (rect.Min.Y+rect.Max.Y)/2)
-	h.router.Queue(pointer.Event{Kind: pointer.Move, Position: f32.Pt(float32(centre.X), float32(centre.Y))})
-	runFrame(t, h, laySteady)
-	if !h.env.toast.list[0].hover {
-		t.Fatal("the toast did not see the hover")
-	}
-	h.now = h.now.Add(4 * time.Second)
-	runFrame(t, h, laySteady)
-	if !h.env.toast.list[0].open.Shown() {
-		t.Fatal("the toast expired while hovered")
-	}
-}
-
-// assertToastExpiry moves the pointer away, expects the remaining time to
-// run out with one ToastClosed event, and that the anchor kept focus all
-// along.
-func assertToastExpiry(t *testing.T, h *harness, laySteady func(*layout.Context), anchor event.Tag) {
-	t.Helper()
-	h.router.Queue(pointer.Event{Kind: pointer.Move, Position: f32.Pt(50, 50)})
-	runFrame(t, h, laySteady)
-	h.now = h.now.Add(3 * time.Second)
-	runFrame(t, h, laySteady)
-	if h.env.toast.list[0].open.Shown() {
-		t.Fatal("the toast did not expire after the pointer left")
-	}
-	evs := h.env.ToastEvents()
-	if len(evs) != 1 || evs[0].Kind != ToastClosed || evs[0].Object != testToastObject {
-		t.Fatalf("the expiry came back as %+v, want one ToastClosed for %s", evs, testToastObject)
-	}
-	if !h.gtx.Focused(anchor) {
-		t.Fatal("the toast took focus")
-	}
-}
-
-// TestToastsForOneObjectMerge covers §6.18: a second event of the same
-// object merges into the visible toast with a count, not a second toast;
-// other objects stack; a fourth push exits the oldest so at most three are
-// visible.
-func TestToastsForOneObjectMerge(t *testing.T) {
-	h := newHarness(t)
-	runFrame(t, h, func(gtx *layout.Context) {
-		h.env.ToastPush(&Toast{Object: testToastObject, Title: testToastTitle})
-		h.env.ToastPush(&Toast{Object: testToastObject, Title: testToastTitle})
-	})
-	ens := h.env.toast.list
-	if len(ens) != 1 || ens[0].count != 2 {
-		t.Fatalf("two pushes of one object: %d entries, count %d, want one merged with count 2", len(ens), ens[0].count)
-	}
-	runFrame(t, h, func(gtx *layout.Context) {
-		h.env.ToastPush(&Toast{Object: "job-2", Title: "Index rebuilt"})
-	})
-	if n := h.env.toast.visibleCount(); n != 2 {
-		t.Fatalf("a second object did not stack: %d visible", n)
-	}
-	pushOverflow(t, h)
-}
-
-// pushOverflow pushes three more objects: at most three toasts stay visible
-// and the oldest exits with its event.
-func pushOverflow(t *testing.T, h *harness) {
-	t.Helper()
-	for _, obj := range []string{"job-3", "job-4", "job-5"} {
-		h.env.ToastPush(&Toast{Object: obj, Title: "Background work " + obj})
-	}
-	runFrame(t, h, func(gtx *layout.Context) {})
-	if n := h.env.toast.visibleCount(); n > toastMax {
-		t.Fatalf("%d toasts visible, want at most %d", n, toastMax)
-	}
-	if h.env.toast.findIndex(testToastObject) >= 0 {
-		t.Fatal("the oldest toast was not exited by the fourth push")
-	}
-	closed := 0
-	for _, ev := range h.env.ToastEvents() {
-		if ev.Kind == ToastClosed {
-			closed++
-		}
-	}
-	if closed == 0 {
-		t.Fatal("no ToastClosed event for the dismissed oldest")
-	}
-}
-
 // TestOverlayMotionSettlesAndRetargets covers UK-E11 for the overlay
 // components: each motion reaches its target and stops asking for frames,
 // and retargeting mid-flight — closing while still entering — continues from
 // where it was instead of jumping.
 func TestOverlayMotionSettlesAndRetargets(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	pop := NewPopoverState()
 	d := NewDialogState()
@@ -769,6 +330,13 @@ func TestOverlayMotionSettlesAndRetargets(t *testing.T) {
 			}
 		})
 	}
+	pop.Open()
+	d.Open()
+	frame()
+	settleQuiet(t, busy, frame)
+	pop.Close()
+	d.Close()
+	frame()
 	settleQuiet(t, busy, frame)
 
 	// Retarget: close the freshly opened popover mid-flight — the presence
@@ -813,6 +381,7 @@ func settleQuiet(t *testing.T, busy func() bool, frame func()) {
 // wake is a scheduled frame at the expiry, not motion asking for the next
 // one.
 func TestOverlayReducedMotionOpensAtOnceAndStaysQuiet(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.env.ReducedMotion = true
 	pop := NewPopoverState()
@@ -863,6 +432,7 @@ func assertNoImmediateFrame(t *testing.T, h *harness) {
 // pointer just outside a toast's box neither enters it — so the timer is not
 // paused by a near miss — nor reaches its buttons.
 func TestToastEventAreaIsClippedToItsBox(t *testing.T) {
+	t.Parallel()
 	h := newHarness(t)
 	h.env.ToastPush(&Toast{Object: testToastObject, Title: testToastTitle, Action: testToastAction})
 	runFrame(t, h, func(gtx *layout.Context) {})
@@ -930,7 +500,9 @@ func TestOverlayTextContrastOnSurfaceRaisedAndScrim(t *testing.T) {
 // unclipped — focus the body's control and assert the ring's ink survives at
 // the control's edges, of a scrolled body included.
 func TestDialogAndPopoverNeverClipAFocusRing(t *testing.T) {
+	t.Parallel()
 	t.Run("dialog", func(t *testing.T) {
+		t.Parallel()
 		f := newDialogFixture(t)
 		f.d.Open()
 		f.frame()
@@ -940,6 +512,7 @@ func TestDialogAndPopoverNeverClipAFocusRing(t *testing.T) {
 		assertRingSurvives(t, f.h, dialogFieldBox(f), func() { f.frame() })
 	})
 	t.Run("dialog scrolled", func(t *testing.T) {
+		t.Parallel()
 		f := newDialogFixture(t)
 		f.tall = true
 		f.d.Open()
@@ -953,6 +526,7 @@ func TestDialogAndPopoverNeverClipAFocusRing(t *testing.T) {
 		assertRingSurvives(t, f.h, dialogFieldBox(f), func() { f.frame() })
 	})
 	t.Run("popover", func(t *testing.T) {
+		t.Parallel()
 		f := newPopoverFixture(t)
 		f.po.OpenKeyboard()
 		f.frame(nil)
