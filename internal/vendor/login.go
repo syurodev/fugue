@@ -6,6 +6,7 @@ import (
 	"io"
 	"os/exec"
 	"sync"
+	"time"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -87,6 +88,10 @@ type LoginOptions struct {
 // first moments of a login.
 const loginLineBuffer = 64
 
+// loginReadStopLimit bounds the stop of a login whose stdout turned
+// unreadable, so the child cannot block forever on a full pipe.
+const loginReadStopLimit = 10 * time.Second
+
 // StartLoginProcess runs one vendor CLI login command through the process
 // supervisor (vendor-runtime §8): its own process group, the filtered
 // environment, stdout streamed line by line and the §8 stop order on Stop.
@@ -122,7 +127,7 @@ func StartLoginProcess(ctx context.Context, opts *LoginOptions) (*LoginProcess, 
 		proc:  proc,
 	}
 	supervise.Go(context.WithoutCancel(ctx), opts.Name+".login-stdout", func(taskCtx context.Context) error {
-		p.pump()
+		p.pump(taskCtx)
 		return nil
 	})
 	supervise.Go(context.WithoutCancel(ctx), opts.Name+".login-wait", func(taskCtx context.Context) error {
@@ -174,7 +179,7 @@ func (p *LoginProcess) Stop(ctx context.Context) (process.StopProof, error) {
 // pump streams complete stdout lines verbatim until the stream ends or a
 // line grows past the frame limit; a line no consumer has room for is
 // dropped, because the relay is live progress, not a transcript.
-func (p *LoginProcess) pump() {
+func (p *LoginProcess) pump(taskCtx context.Context) {
 	defer close(p.lines)
 	reader := p.stdout()
 	for {
@@ -183,7 +188,18 @@ func (p *LoginProcess) pump() {
 			if !errors.Is(err, io.EOF) {
 				p.mu.Lock()
 				p.readErr = err
+				proc := p.proc
 				p.mu.Unlock()
+				// The stream is unreadable (a line past the frame cap, an
+				// I/O error): the relay ends, and the child must not block
+				// forever on a pipe nobody reads.
+				stopCtx, cancel := context.WithTimeout(taskCtx, loginReadStopLimit)
+				defer cancel()
+				if _, stopErr := proc.Stop(stopCtx); stopErr != nil {
+					p.mu.Lock()
+					p.readErr = errors.Join(p.readErr, stopErr)
+					p.mu.Unlock()
+				}
 			}
 			return
 		}
