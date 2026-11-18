@@ -299,7 +299,11 @@ func controlsCells(want map[cell]bool) {
 func tabsFeedbackCells(want map[cell]bool) {
 	want[cell{compTabs, 0, 0, stRest}] = true
 	want[cell{compTabs, 1, 0, stRest}] = true
-	want[cell{compTabs, 2, 0, "overflow"}] = true
+	want[cell{compTabs, 1, 0, tabModeFocus}] = true
+	want[cell{compTabs, 2, 0, tabDocOverflow}] = true
+	for _, st := range docTabSpecimenStates() {
+		want[cell{compTabs, 3, 0, st}] = true
+	}
 	for i := range 3 {
 		want[cell{compBanner, i, 0, stRest}] = true
 	}

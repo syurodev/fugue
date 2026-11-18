@@ -38,7 +38,8 @@ type TabsProps struct {
 	Variant         TabsVariant
 	Items           []TabItem
 	ActiveID        string
-	GlobalShortcuts bool // allow Ctrl+Tab / Ctrl+Shift+Tab without tab-bar focus
+	GlobalShortcuts bool   // allow Ctrl+Tab / Ctrl+Shift+Tab without tab-bar focus
+	DraggingID      string // optional caller/preview dragging tab ID
 }
 
 // TabsEvents reports interactions on a Tabs strip in the current frame.
@@ -53,15 +54,17 @@ type TabsEvents struct {
 }
 
 type tabSlot struct {
-	id       string
-	x        motion.Follower
-	width    motion.Follower
-	presence motion.Presence
-	closeBtn *IconButtonState
-	targetX  int
-	targetW  int
-	rect     image.Rectangle
-	visible  bool
+	id        string
+	tag       bool
+	x         motion.Follower
+	width     motion.Follower
+	closeF    motion.Follower
+	presence  motion.Presence
+	targetX   int
+	targetW   int
+	rect      image.Rectangle
+	closeRect image.Rectangle
+	visible   bool
 }
 
 // TabsState holds the long-lived motion, MRU, scroll, drag and overflow-menu
@@ -76,10 +79,11 @@ type TabsState struct {
 	scrollX     int
 	hoverID     string
 	pressID     string
+	pressClose  string
 	dragID      string
 	dragStartX  int
 	dragActive  bool
-	overflowBtn *IconButtonState
+	overflowBtn *ButtonState
 	overflow    *MenuState
 	hiddenIDs   []string
 	stripRect   image.Rectangle
@@ -93,7 +97,7 @@ func NewTabsState() *TabsState {
 		indicator:   newSlidingPill(),
 		focusF:      motion.NewFollower(motion.Snappy()),
 		slots:       map[string]*tabSlot{},
-		overflowBtn: NewIconButtonState(),
+		overflowBtn: NewButtonState(),
 		overflow:    NewMenuState(),
 	}
 }
@@ -101,7 +105,13 @@ func NewTabsState() *TabsState {
 // Tag returns the Tabs strip's single tab-stop input tag (§6.22).
 func (s *TabsState) Tag() event.Tag { return &s.tag }
 
-// IndicatorRect returns the current sliding indicator rectangle, for motion
+// TabTag returns the per-tab tag for Env.Preview targeting in the gallery.
+func (s *TabsState) TabTag(id string) event.Tag {
+	sl := s.ensureSlot(id)
+	return &sl.tag
+}
+
+// IndicatorRect returns the current sliding pill rectangle, for motion
 // evidence tests.
 func (s *TabsState) IndicatorRect() image.Rectangle { return s.indicator.rect }
 
@@ -143,26 +153,49 @@ func (s *TabsState) touchMRU(id string) {
 	s.mru = append(s.mru, id)
 }
 
+func (s *TabsState) ensureSlot(id string) *tabSlot {
+	sl, ok := s.slots[id]
+	if !ok {
+		sl = &tabSlot{
+			id:       id,
+			x:        motion.NewFollower(motion.Smooth()),
+			width:    motion.NewFollower(motion.Smooth()),
+			closeF:   motion.NewFollower(motion.Snappy()),
+			presence: motion.NewPresence(motion.Smooth(), motion.Exit()),
+		}
+		if !s.inited {
+			sl.presence.Snap(true)
+		}
+		s.slots[id] = sl
+	}
+	return sl
+}
+
+func orderedTabItems(v TabsVariant, items []TabItem) []TabItem {
+	if v != TabsDocument {
+		return items
+	}
+	out := make([]TabItem, 0, len(items))
+	for _, it := range items {
+		if it.Pinned {
+			out = append(out, it)
+		}
+	}
+	for _, it := range items {
+		if !it.Pinned {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
 func (s *TabsState) syncSlots(items []TabItem) {
 	seen := make(map[string]bool, len(items))
 	s.order = s.order[:0]
 	for _, it := range items {
 		seen[it.ID] = true
 		s.order = append(s.order, it.ID)
-		sl, ok := s.slots[it.ID]
-		if !ok {
-			sl = &tabSlot{
-				id:       it.ID,
-				x:        motion.NewFollower(motion.Smooth()),
-				width:    motion.NewFollower(motion.Smooth()),
-				presence: motion.NewPresence(motion.Smooth(), motion.Exit()),
-				closeBtn: NewIconButtonState(),
-			}
-			if !s.inited {
-				sl.presence.Snap(true)
-			}
-			s.slots[it.ID] = sl
-		}
+		sl := s.ensureSlot(it.ID)
 		sl.presence.Show(true)
 	}
 	s.inited = true
@@ -182,12 +215,11 @@ func (s *TabsState) Layout(env *Env, gtx *layout.Context, pr TabsProps) (layout.
 		s.lastActive = pr.ActiveID
 		s.touchMRU(pr.ActiveID)
 	}
-	s.syncSlots(pr.Items)
+	ordered := orderedTabItems(pr.Variant, pr.Items)
+	pr.Items = ordered
+	s.syncSlots(ordered)
 
-	h := gtx.Dp(theme.Tab)
-	if pr.Variant == TabsMode {
-		h = gtx.Dp(theme.ControlMD)
-	}
+	h := gtx.Dp(theme.ControlMD)
 	maxW := gtx.Constraints.Max.X
 	if maxW <= 0 {
 		maxW = gtx.Dp(theme.DialogWidth)
@@ -195,9 +227,9 @@ func (s *TabsState) Layout(env *Env, gtx *layout.Context, pr TabsProps) (layout.
 
 	s.readInput(env, gtx, pr, &ev)
 	s.layoutGeometry(env, gtx, pr, maxW, h)
-	s.stepIndicator(env, gtx, pr)
+	s.stepIndicator(env, pr)
 
-	if err := s.draw(env, gtx, pr, maxW, h, &ev); err != nil {
+	if err := s.draw(env, gtx, pr, h, &ev); err != nil {
 		ev.Err = err
 	}
 	return layout.Dimensions{Size: image.Pt(maxW, h)}, ev
@@ -285,7 +317,7 @@ func (s *TabsState) handlePointer(env *Env, gtx *layout.Context, pr TabsProps, p
 	case pointer.Scroll:
 		s.scrollBy(pe)
 	case pointer.Press:
-		s.beginPress(gtx, pt)
+		s.beginPress(gtx, pr, pt)
 	case pointer.Drag:
 		s.dragTab(gtx, pr, pt, ev)
 	case pointer.Release:
@@ -298,6 +330,7 @@ func (s *TabsState) handlePointer(env *Env, gtx *layout.Context, pr TabsProps, p
 func (s *TabsState) resetPointer() {
 	s.hoverID = ""
 	s.pressID = ""
+	s.pressClose = ""
 	s.dragID = ""
 	s.dragActive = false
 }
@@ -310,14 +343,23 @@ func (s *TabsState) scrollBy(pe pointer.Event) {
 	s.scrollX = max(s.scrollX+delta, 0)
 }
 
-func (s *TabsState) beginPress(gtx *layout.Context, pt image.Point) {
-	if id := s.tabAt(pt); id != "" {
-		s.pressID = id
-		s.dragID = id
-		s.dragStartX = pt.X
-		s.dragActive = false
-		gtx.Execute(key.FocusCmd{Tag: s.Tag()})
+func (s *TabsState) beginPress(gtx *layout.Context, pr TabsProps, pt image.Point) {
+	id := s.tabAt(pt)
+	if id == "" {
+		return
 	}
+	gtx.Execute(key.FocusCmd{Tag: s.Tag()})
+	if pr.Variant == TabsDocument {
+		sl := s.slots[id]
+		if sl != nil && !sl.closeRect.Empty() && pt.In(sl.closeRect) {
+			s.pressClose = id
+			return
+		}
+	}
+	s.pressID = id
+	s.dragID = id
+	s.dragStartX = pt.X
+	s.dragActive = false
 }
 
 func (s *TabsState) dragTab(gtx *layout.Context, pr TabsProps, pt image.Point, ev *TabsEvents) {
@@ -333,6 +375,14 @@ func (s *TabsState) dragTab(gtx *layout.Context, pr TabsProps, pt image.Point, e
 }
 
 func (s *TabsState) finishPress(pr TabsProps, pt image.Point, ev *TabsEvents) {
+	if s.pressClose != "" {
+		sl := s.slots[s.pressClose]
+		if sl != nil && pt.In(sl.closeRect) && !isTabDisabled(pr.Items, s.pressClose) {
+			ev.Closed = s.pressClose
+		}
+		s.resetPointer()
+		return
+	}
 	if !s.dragActive && s.pressID != "" && s.tabAt(pt) == s.pressID {
 		if !isTabDisabled(pr.Items, s.pressID) && s.pressID != pr.ActiveID {
 			ev.Selected = s.pressID

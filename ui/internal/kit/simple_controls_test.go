@@ -391,11 +391,18 @@ func TestSimpleControlsEventAreasAndContrast(t *testing.T) {
 		t.Fatal("clickable Card did not fire on interior click")
 	}
 
-	// Verify Card SurfaceRaised text contrast and FocusBorder 3:1 in both modes.
+	// Verify Card/Tabs active pill Fg on SurfaceRaised, FgMuted on CanvasBg/FillSoft,
+	// and FocusBorder 3:1 in both modes (UK-E04).
 	for _, th := range []theme.Theme{theme.Light(h.env.Sh), theme.Dark(h.env.Sh)} {
 		c := th.Chrome()
 		if r := contrastRatio(c.Fg, composite(c.SurfaceRaised, c.AppBg)); r < 4.5 {
-			t.Errorf("Card Fg on SurfaceRaised contrast %0.2f < 4.5", r)
+			t.Errorf("active pill/Card Fg on SurfaceRaised contrast %0.2f < 4.5", r)
+		}
+		if r := contrastRatio(c.FgMuted, c.CanvasBg); r < 4.5 {
+			t.Errorf("Tabs FgMuted on CanvasBg contrast %0.2f < 4.5", r)
+		}
+		if r := contrastRatio(c.FgMuted, composite(c.FillSoft, c.CanvasBg)); r < 4.5 {
+			t.Errorf("Tabs FgMuted on FillSoft hover contrast %0.2f < 4.5", r)
 		}
 		if r := contrastRatio(c.FocusBorder, c.CanvasBg); r < 3.0 {
 			t.Errorf("FocusBorder contrast %0.2f < 3.0", r)

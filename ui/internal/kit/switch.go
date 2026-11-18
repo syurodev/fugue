@@ -5,7 +5,6 @@ import (
 
 	"gioui.org/io/event"
 	"gioui.org/layout"
-	"gioui.org/unit"
 	"gioui.org/widget"
 
 	"github.com/syurodev/fugue/ui/internal/motion"
@@ -66,12 +65,6 @@ func (s *SwitchState) Tag() event.Tag { return &s.click }
 // overshoot under Bouncy), exposed for motion/pending evidence tests.
 func (s *SwitchState) ThumbProgress() float32 { return s.thumbF.Value() }
 
-const (
-	switchTrackW = unit.Dp(36)
-	switchTrackH = unit.Dp(20)
-	switchThumbD = unit.Dp(16)
-)
-
 // Measure returns the Switch's layout dimensions without drawing or reading
 // input.
 func (s *SwitchState) Measure(env *Env, gtx *layout.Context, pr SwitchProps) layout.Dimensions {
@@ -79,8 +72,8 @@ func (s *SwitchState) Measure(env *Env, gtx *layout.Context, pr SwitchProps) lay
 }
 
 func (s *SwitchState) measureSize(env *Env, gtx *layout.Context, pr SwitchProps) image.Point {
-	tw := gtx.Dp(switchTrackW)
-	th := gtx.Dp(switchTrackH)
+	tw := gtx.Dp(theme.SwitchTrackW)
+	th := gtx.Dp(theme.SwitchTrackH)
 	h := max(th, gtx.Dp(theme.HitMin))
 	w := tw
 	if pr.Label != "" {
@@ -129,8 +122,8 @@ func (s *SwitchState) draw(env *Env, gtx *layout.Context, size image.Point, pr S
 	if pr.Disabled {
 		opScale = theme.DisabledOpacity
 	}
-	tw := gtx.Dp(switchTrackW)
-	th := gtx.Dp(switchTrackH)
+	tw := gtx.Dp(theme.SwitchTrackW)
+	th := gtx.Dp(theme.SwitchTrackH)
 	ty := (size.Y - th) / 2
 	trackR := image.Rect(0, ty, tw, ty+th)
 	rad := th / 2
@@ -171,7 +164,7 @@ func (s *SwitchState) drawTrackAndThumb(env *Env, gtx *layout.Context, r image.R
 	}
 
 	// Thumb: Bouncy travel + horizontal stretch on press (§6.11).
-	d := gtx.Dp(switchThumbD)
+	d := gtx.Dp(theme.SwitchThumbD)
 	pad := (r.Dy() - d) / 2
 	extraW := int(float32(gtx.Dp(theme.SpaceXS))*max(stretch, 0) + 0.5)
 	if env.ReducedMotion {

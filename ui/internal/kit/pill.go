@@ -96,6 +96,13 @@ func (p *slidingPill) draw(gtx *layout.Context, radius int, c color.NRGBA) {
 	fillLayer(gtx, p.rect, radius, c, p.alpha)
 }
 
+func (p *slidingPill) drawBordered(gtx *layout.Context, radius int, fill, border color.NRGBA) {
+	fillLayer(gtx, p.rect, radius, fill, p.alpha)
+	if border.A != 0 && p.alpha > 0 {
+		strokeRRect(gtx.Ops, p.rect, radius, float32(gtx.Dp(theme.Hairline)), fade(border, p.alpha))
+	}
+}
+
 func boolFloat(b bool) float32 {
 	if b {
 		return 1

@@ -54,6 +54,14 @@ const DialogWidth = unit.Dp(420)
 // type.small, never a banner.
 const ToastWidth = unit.Dp(320)
 
+// Switch and Tab control dimensions (§6.11, §6.22).
+const (
+	SwitchTrackW = unit.Dp(36)
+	SwitchTrackH = unit.Dp(20)
+	SwitchThumbD = unit.Dp(16)
+	TabCloseHit  = unit.Dp(20)
+)
+
 // Icon sizes (§3.4).
 const (
 	IconXS = unit.Dp(12)
