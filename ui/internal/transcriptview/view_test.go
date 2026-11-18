@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"image"
 	"testing"
+	"time"
 
 	"gioui.org/f32"
 	"gioui.org/io/input"
@@ -16,6 +17,7 @@ import (
 	"github.com/syurodev/fugue/pkg/client"
 
 	"github.com/syurodev/fugue/ui/internal/fonts"
+	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
@@ -24,18 +26,20 @@ func TestMain(m *testing.M) {
 	goleak.VerifyTestMain(m)
 }
 
-// harness is a headless transcript pane: a router for input, one theme, one
-// State over its own cache, and the items it renders.
+// harness is a headless transcript pane: a router for input, one kit.Env
+// over one theme, one State, and the items it renders.
 type harness struct {
 	t      *testing.T
 	router input.Router
 	ops    op.Ops
+	env    *kit.Env
 	th     theme.Theme
-	cache  *Cache
 	st     *State
 	items  []*session.Item
 	width  int
 	height int
+	// now is the fake frame clock the env begins every frame at.
+	now time.Time
 }
 
 // newHarness builds the harness at the given viewport size.
@@ -45,8 +49,12 @@ func newHarness(t *testing.T, width, height int, items []*session.Item) *harness
 	if err != nil {
 		t.Fatal(err)
 	}
-	cache := NewCache()
-	return &harness{t: t, th: theme.Light(shaper), cache: cache, st: NewState(cache), items: items, width: width, height: height}
+	th := theme.Light(shaper)
+	return &harness{
+		t: t, env: &kit.Env{Th: &th, Sh: shaper}, th: th, st: NewState(),
+		items: items, width: width, height: height,
+		now: time.Unix(1_700_000_000, 0),
+	}
 }
 
 // context builds this frame's layout context over the router.
@@ -62,7 +70,8 @@ func (h *harness) context() *layout.Context {
 // frame lays the pane out once and hands the ops to the router.
 func (h *harness) frame() layout.Dimensions {
 	h.ops.Reset()
-	dims := Layout(h.context(), &h.th, h.st, h.items)
+	h.env.Begin(h.now)
+	dims := Layout(h.env, h.context(), h.st, h.items)
 	h.router.Frame(&h.ops)
 	return dims
 }
@@ -85,92 +94,43 @@ func message(itemID string, seq uint64, text string) *session.Item {
 	}}
 }
 
-// windowOf replicates the layout's window arithmetic over the state's current
-// heights and the offset the next frame will have after a scroll of delta, so
-// tests pin exactly how many cards a frame must lay out.
-func (h *harness) windowOf(delta int) (w0, w1 int) {
-	prefix := h.st.prefix(h.items)
-	offset := min(max(h.st.scrollOffset+delta, 0), max(0, prefix[len(h.items)]-h.height))
-	first, last := visibleRange(prefix, offset, h.height)
-	w0, w1 = max(0, first-aboveWindow), min(len(h.items)-1, last+belowWindow)
-	return w0, w1
-}
-
-// TestVirtualListLaysOutVisiblePlusFiftyEachSide pins the virtualization
-// window: a frame lays out exactly the visible cards plus fifty on each side,
-// never the whole list, at the edges and mid-list.
-func TestVirtualListLaysOutVisiblePlusFiftyEachSide(t *testing.T) {
+// TestTranscriptLaysOutOnlyAWindowAroundTheViewport pins the move onto the
+// kit's VirtualList: a frame lays out the visible cards plus the kit's render
+// window around them, never the whole list, at the pinned bottom and
+// mid-list.
+func TestTranscriptLaysOutOnlyAWindowAroundTheViewport(t *testing.T) {
 	t.Parallel()
 	items := make([]*session.Item, 2000)
 	for i := range items {
 		items[i] = message(fmt.Sprintf("i%d", i), uint64(i+1), "paragraph")
 	}
 	h := newHarness(t, 600, 400, items)
-	// This test pins the window arithmetic, not the follow: read from a
-	// fixed offset instead of the pinned bottom.
-	h.st.follow = false
+	// This test pins the window, not the follow: read from a fixed offset
+	// instead of the pinned bottom.
+	h.st.FollowOff()
 
-	w0, w1 := h.windowOf(0)
 	dims := h.frame()
-	if got := h.st.rendered; got != w1-w0+1 {
-		t.Fatalf("first frame laid out %d cards, want the window %d..%d (%d cards)", got, w0, w1, w1-w0+1)
+	// The viewport holds some rows and the kit renders its window around
+	// them; the far ends of the 2,000 items stay unlaid out.
+	if got := h.st.Rendered(); got <= 0 || got > 120 {
+		t.Fatalf("first frame laid out %d cards, want the bounded render window", got)
+	}
+	if h.st.list.CacheLen() >= len(items) {
+		t.Fatalf("cache holds %d of %d items, want the far ends unlaid out", h.st.list.CacheLen(), len(items))
 	}
 	if dims.Size.X != 600 || dims.Size.Y != 400 {
 		t.Fatalf("pane size = %v, want the viewport", dims.Size)
 	}
 
-	// Scroll into the middle: the first wheel up ends the follow, then the
-	// window follows the offset — still the visible items plus fifty on each
-	// side, and the far ends stay unlaid out.
+	// Scrolled into the middle: still the bounded window, and the edges
+	// stay unlaid out.
 	h.scroll(-1)
-	w0, w1 = h.windowOf(1000 * estimateH)
 	h.scroll(1000 * estimateH)
-	if got := h.st.rendered; got != w1-w0+1 {
-		t.Fatalf("scrolled frame laid out %d cards, want the window %d..%d (%d cards)", got, w0, w1, w1-w0+1)
+	if got := h.st.Rendered(); got <= 0 || got > 120 {
+		t.Fatalf("scrolled frame laid out %d cards, want the bounded render window", got)
 	}
-	if w0 == 0 || w1 == len(items)-1 {
-		t.Fatalf("window %d..%d never left the edges", w0, w1)
-	}
-}
-
-// TestLayoutCacheIsBoundedAndKeyedByItemAndRevision pins the cache: the bound
-// evicts the least recently used, and one item at two revisions holds two
-// entries while a repeat of the same revision holds one.
-func TestLayoutCacheIsBoundedAndKeyedByItemAndRevision(t *testing.T) {
-	t.Parallel()
-	c := newCardCache(3)
-	c.put(cardKey{"a", 1}, &card{})
-	c.put(cardKey{"b", 1}, &card{})
-	c.put(cardKey{"c", 1}, &card{})
-	if _, ok := c.get(cardKey{"a", 1}); !ok {
-		t.Fatal("a just-put card was not found")
-	}
-	c.put(cardKey{"d", 1}, &card{})
-	if _, ok := c.get(cardKey{"b", 1}); ok {
-		t.Fatal("the least recently used card survived the bound")
-	}
-	if _, ok := c.get(cardKey{"a", 1}); !ok {
-		t.Fatal("the most recently used card was evicted")
-	}
-	if c.len() != 3 {
-		t.Fatalf("cache holds %d cards, want 3", c.len())
-	}
-	// Re-putting a key updates it instead of duplicating it.
-	same := &card{height: 7}
-	c.put(cardKey{"a", 1}, same)
-	if got, ok := c.get(cardKey{"a", 1}); !ok || got != same || c.len() != 3 {
-		t.Fatalf("re-put duplicated or replaced the wrong entry: %v %v", got, ok)
-	}
-
-	// Through the layout: one item at two revisions is two cache entries.
-	items := []*session.Item{message("i1", 1, "one")}
-	h := newHarness(t, 400, 800, items)
-	h.st.follow = false
-	h.frame()
-	h.items[0].Revision = 2
-	h.frame()
-	if got := h.cache.Len(); got != 2 {
-		t.Fatalf("cache holds %d cards for two revisions, want 2", got)
+	if h.st.list.CacheLen() >= len(items) {
+		t.Fatalf("cache holds %d of %d items after the scroll, want the edges unlaid out", h.st.list.CacheLen(), len(items))
 	}
 }
 
@@ -197,19 +157,19 @@ func TestToolCallAndReasoningCardsStartCollapsed(t *testing.T) {
 	}
 	h := newHarness(t, 600, 900, items)
 	h.frame()
+	if got := h.st.Rendered(); got != 3 {
+		t.Fatalf("laid out %d cards, want the three items", got)
+	}
 	for _, item := range items {
-		if _, ok := h.cache.cards.get(cardKey{itemID: item.ItemID, revision: item.Revision}); !ok {
-			t.Fatalf("%s card was not laid out", item.Kind)
-		}
-		if h.st.expanded[item.ItemID] {
+		if h.st.list.Expanded(item.ItemID) {
 			t.Fatalf("%s card started expanded", item.Kind)
 		}
 	}
 	// Expanding a card grows it: the body renders only then.
-	before := h.st.heightOf(items[0])
-	h.st.expanded["t1"] = true
+	before := h.st.list.ItemState("t1").MeasuredHeight
+	h.st.list.SetExpanded("t1", true)
 	h.frame()
-	if after := h.st.heightOf(items[0]); after <= before {
+	if after := h.st.list.ItemState("t1").MeasuredHeight; after <= before {
 		t.Fatalf("expanded tool card height = %d, want more than the collapsed %d", after, before)
 	}
 }
@@ -229,8 +189,8 @@ func TestUnknownItemKindRendersAGenericCard(t *testing.T) {
 	}}}
 	h := newHarness(t, 600, 900, items)
 	dims := h.frame()
-	if h.st.rendered != 1 {
-		t.Fatalf("laid out %d cards, want the one unknown item", h.st.rendered)
+	if h.st.Rendered() != 1 {
+		t.Fatalf("laid out %d cards, want the one unknown item", h.st.Rendered())
 	}
 	if dims.Size.Y <= 0 {
 		t.Fatal("the unknown card rendered nothing")

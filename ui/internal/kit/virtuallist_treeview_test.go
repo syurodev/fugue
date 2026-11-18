@@ -146,6 +146,49 @@ func TestVirtualListDoesNotStickToBottomUnlessAsked(t *testing.T) {
 	}
 }
 
+func TestVirtualListPayloadSurvivesFramesAndEvictsWithTheHeights(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	vl := NewVirtualListState()
+	builds := 0
+	row := func(_ *Env, _ *layout.Context, _ int, item VirtualItem, _ *VirtualItemState) layout.Dimensions {
+		got := PayloadOf(vl, item.Key, func() string { builds++; return item.Key })
+		if got != item.Key {
+			t.Fatalf("payload = %v, want %v", got, item.Key)
+		}
+		return layout.Dimensions{Size: image.Pt(300, 24)}
+	}
+	items := []VirtualItem{{Key: "k", Revision: 1, Estimate: theme.RowDense}}
+	layVirtualFrames(t, h, vl, VirtualListProps{}, items, 120, 3, row)
+	if builds != 1 {
+		t.Fatalf("payload built %d times over 3 frames, want 1", builds)
+	}
+
+	// A revision bump re-measures but keeps the payload: it belongs to the
+	// key, not the revision.
+	items[0].Revision = 2
+	layVirtualFrames(t, h, vl, VirtualListProps{}, items, 120, 1, row)
+	if builds != 1 {
+		t.Fatalf("payload rebuilt across revision, want 1 build, got %d", builds)
+	}
+
+	// Eviction: filling the cache past its bound drops the oldest key's
+	// payload with its latest height, while fresh keys keep theirs.
+	for i := range maxVirtualHeights + 1 {
+		vl.cache.put(virtualHeightKey{key: fmt.Sprintf("old-%d", i), revision: 1}, 24)
+		vl.cache.payload(fmt.Sprintf("old-%d", i), func() any { return true })
+	}
+	if vl.CacheLen() > maxVirtualHeights {
+		t.Fatalf("cache len %d exceeds bound %d", vl.CacheLen(), maxVirtualHeights)
+	}
+	if vl.cache.payload("old-0", func() any { return false }) != false {
+		t.Fatal("oldest key's payload survived eviction")
+	}
+	if vl.cache.payload("old-2000", func() any { return false }) != true {
+		t.Fatal("newest key's payload lost")
+	}
+}
+
 func TestTreeViewArrowsOpenCloseAndMoveToParent(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"image/color"
+	"runtime"
 	"sync"
 
 	"gioui.org/app"
@@ -12,13 +13,14 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/paint"
+	"gioui.org/text"
 	"gioui.org/unit"
-	"gioui.org/widget/material"
 
 	"github.com/syurodev/fugue/pkg/client"
 
 	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
+	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
@@ -98,7 +100,29 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("build the text shaper: %w", err)
 	}
 	light, dark := theme.Light(shaper), theme.Dark(shaper)
-	return eventLoop(w, newScreens(m, fetcher), q, light, dark)
+	env := newEnv(shaper, &light)
+	attach(env, w)
+	return eventLoop(w, env, newScreens(m, fetcher), q, &light, &dark)
+}
+
+// newEnv builds the window's kit.Env over the theme it starts in (F10.13):
+// everything a kit piece draws with lives here, and the window owns it. The
+// keyboard notation follows the platform (kitgallery does the same); the UI
+// scale starts at the default — the interface-size setting and its source
+// are F10.5's — and the motion driver rides in the zero value of the Env.
+func newEnv(sh *text.Shaper, light *theme.Theme) *kit.Env {
+	env := &kit.Env{Th: light, Sh: sh}
+	if runtime.GOOS == "darwin" {
+		env.Platform = kit.PlatformMac
+	}
+	return env
+}
+
+// attach wires the env to the window: kit pieces ask for redraws from any
+// goroutine through Invalidate — TreeView's async loads and the future async
+// kit pieces need it (F10.17b) — and only the window can grant them.
+func attach(env *kit.Env, w *app.Window) {
+	env.Invalidate = w.Invalidate
 }
 
 // startFeeder runs the update feeder: it moves deliveries into the queue and
@@ -142,13 +166,12 @@ func stopSideGoroutines(cancel context.CancelFunc, feederDone, closerDone <-chan
 	<-closerDone
 }
 
-// eventLoop is the window's event loop until it is destroyed.
-func eventLoop(w *app.Window, sc *screens, q *updateQueue, light, dark theme.Theme) error {
+// eventLoop is the window's event loop until it is destroyed. Every frame
+// drives the env the way kitgallery's window does (F10.13): the UI scale on
+// the metric, the driver's frame step, the modality and the overlay's window
+// size before layout, and the frame-end invalidations after.
+func eventLoop(w *app.Window, env *kit.Env, sc *screens, q *updateQueue, light, dark *theme.Theme) error {
 	var ops op.Ops
-	// The window starts light: Gio v0.10.3 exposes no OS light/dark
-	// preference to follow (F10.2c plan), so light is the default and
-	// Ctrl+D toggles (DA-08).
-	darkMode := false
 	for {
 		switch e := w.Event().(type) {
 		case app.DestroyEvent:
@@ -156,16 +179,19 @@ func eventLoop(w *app.Window, sc *screens, q *updateQueue, light, dark theme.The
 			return e.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
-			darkMode = frame(gtx, sc, q, light, dark, darkMode)
+			gtx.Metric = env.Metric(gtx.Metric)
+			env.Begin(gtx.Now)
+			env.TrackInput(&gtx)
+			frame(&gtx, env, sc, q, light, dark)
+			env.FrameEnd(&gtx)
 			e.Frame(gtx.Ops)
 		}
 	}
 }
 
 // frame drains the deliveries and read results into UI state on the window
-// goroutine, handles the theme toggle, and lays the window out; it returns
-// whether dark mode is on for the next frame.
-func frame(gtx layout.Context, sc *screens, q *updateQueue, light, dark theme.Theme, darkMode bool) bool {
+// goroutine, handles the theme toggle, and lays the window out.
+func frame(gtx *layout.Context, env *kit.Env, sc *screens, q *updateQueue, light, dark *theme.Theme) {
 	// Deliveries and read results become UI state here, on the window
 	// goroutine.
 	results := make([]session.Result, 0, 8)
@@ -187,43 +213,43 @@ drain:
 			break
 		}
 		if k, isKey := ke.(key.Event); isKey && k.State == key.Press {
-			darkMode = !darkMode
+			// The window starts light: Gio v0.10.3 exposes no OS light/dark
+			// preference to follow (F10.2c plan), so light is the default
+			// and Ctrl+D toggles (DA-08).
+			if env.Th == light {
+				env.Th = dark
+			} else {
+				env.Th = light
+			}
 		}
 	}
-	th := light
-	if darkMode {
-		th = dark
-	}
-	drawWindow(gtx, th, sc)
-	return darkMode
+	drawWindow(gtx, env, sc)
 }
 
 // drawWindow lays out the screens — the sidebar and the read-only transcript
 // pane (F10.4a) — and the status bar with the connection state (F10.2a).
 // Every color comes from the theme tokens (F10.2c); appwin defines none of
 // its own.
-func drawWindow(gtx layout.Context, th theme.Theme, sc *screens) {
-	paint.Fill(gtx.Ops, th.Chrome().AppBg)
+func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
+	paint.Fill(gtx.Ops, env.Th.Chrome().AppBg)
 	state, reason := sc.m.State()
 	status := statusLine(state, reason)
-	mt := th.Material()
-	layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+	layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			inset := layout.Inset{
-				Top: unit.Dp(8), Left: unit.Dp(12), Right: unit.Dp(12),
-			}
-			return inset.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				sc.layout(gtx, th)
+			return layout.Inset{
+				Top: theme.SpaceMD, Left: theme.SpaceLG, Right: theme.SpaceLG,
+			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				local := gtx
+				sc.layout(&local, env)
 				return layout.Dimensions{Size: gtx.Constraints.Max}
 			})
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{
-				Left: unit.Dp(12), Right: unit.Dp(12), Bottom: unit.Dp(8),
+				Left: theme.SpaceLG, Right: theme.SpaceLG, Bottom: theme.SpaceMD,
 			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				bar := material.Label(mt, unit.Sp(13), status)
-				bar.Color = statusColor(th, state)
-				return bar.Layout(gtx)
+				local := gtx
+				return kit.Label(env, &local, theme.TypeSmall(), statusColor(env.Th, state), status)
 			})
 		}),
 	)
@@ -233,7 +259,7 @@ func drawWindow(gtx layout.Context, th theme.Theme, sc *screens) {
 // (F10.2c): connected is success, connecting is quiet, disconnected is
 // danger and an incompatible host is a warning only the version flow can
 // resolve.
-func statusColor(th theme.Theme, state hostconn.State) color.NRGBA {
+func statusColor(th *theme.Theme, state hostconn.State) color.NRGBA {
 	switch state {
 	case hostconn.StateConnected:
 		return th.Status().Success

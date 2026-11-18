@@ -2,6 +2,7 @@ package transcriptview
 
 import (
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/syurodev/fugue/pkg/client"
@@ -21,8 +22,7 @@ func uniformItems(n int, prefix string) []*session.Item {
 // visibleIDs returns the ids of the items the current offset renders first
 // and last.
 func (h *harness) visibleIDs() (string, string) {
-	prefix := h.st.prefix(h.items)
-	first, last := visibleRange(prefix, h.st.scrollOffset, h.height)
+	first, last := h.st.list.Visible(h.context(), virtualItems(h.items), h.height)
 	return h.items[first].ItemID, h.items[last].ItemID
 }
 
@@ -100,20 +100,21 @@ func TestNewItemsAreFollowedOnlyAtTheBottom(t *testing.T) {
 	}
 }
 
-// TestPrependingOlderItemsKeepsTheReaderAnchor pins the anchor rule: when an
-// older page is prepended and its height accounted for, the item the reader
-// was looking at stays in place instead of jumping by the page's height.
-func TestPrependingOlderItemsKeepsTheReaderAnchor(t *testing.T) {
+// TestTranscriptAnchorSurvivesTheMoveToVirtualList pins the anchor rule
+// across the F10.13 move onto the kit's VirtualList: when an older page is
+// prepended and its height accounted for, the item the reader was looking at
+// stays in place instead of jumping by the page's height.
+func TestTranscriptAnchorSurvivesTheMoveToVirtualList(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t, 600, 400, uniformItems(60, "i"))
-	h.st.follow = false
+	h.st.FollowOff()
 	h.frame()
 	h.scroll(20 * estimateH)
 	before, _ := h.visibleIDs()
 
 	// An older page prepends ten items above everything held.
 	prepended := uniformItems(10, "p")
-	h.items = append(append([]*session.Item{}, prepended...), h.items...)
+	h.items = append(prepended, h.items...)
 	h.st.AccountForPrepended(len(prepended))
 	// The first frame corrects from the prepended heights' estimate, the
 	// second from the measured heights; the anchor survives both.
@@ -123,17 +124,11 @@ func TestPrependingOlderItemsKeepsTheReaderAnchor(t *testing.T) {
 	// The anchored item stays in view: its exact pixel position is only as
 	// good as the prepended heights' estimate, but the reader must not lose
 	// their place.
-	anchored := -1
-	for i, item := range h.items {
-		if item.ItemID == before {
-			anchored = i
-		}
-	}
+	anchored := slices.IndexFunc(h.items, func(item *session.Item) bool { return item.ItemID == before })
 	if anchored < 0 {
 		t.Fatalf("the anchored item %q vanished", before)
 	}
-	prefix := h.st.prefix(h.items)
-	first, last := visibleRange(prefix, h.st.scrollOffset, h.height)
+	first, last := h.st.list.Visible(h.context(), virtualItems(h.items), h.height)
 	if anchored < first || anchored > last {
 		t.Fatalf("after the prepend the reader sees items %d..%d, want the anchored %d in view",
 			first, last, anchored)
@@ -155,28 +150,27 @@ func TestExpansionSurvivesANewRevision(t *testing.T) {
 		View:     client.TranscriptView{Text: "tool output"},
 	}}
 	h := newHarness(t, 600, 900, []*session.Item{tool})
-	h.st.follow = false
+	h.st.FollowOff()
 	h.frame()
-	collapsed := h.st.heightOf(tool)
+	collapsed := h.st.list.ItemState("t1").MeasuredHeight
 
 	// The reader expands the card while the tool runs.
-	h.st.expanded["t1"] = true
+	h.st.list.SetExpanded("t1", true)
 	h.frame()
-	expanded := h.st.heightOf(tool)
+	expanded := h.st.list.ItemState("t1").MeasuredHeight
 	if expanded <= collapsed {
 		t.Fatalf("expanded height = %d, want more than the collapsed %d", expanded, collapsed)
 	}
 
-	// The tool completes: a new revision, same reader intent.
+	// The tool completes: a new revision, same reader intent. The kit's
+	// cache seeds the new revision from the old height, so the layout lands
+	// on the expanded height again, not back at the estimate.
 	tool.Revision = 2
-	if got := h.st.heightOf(tool); got != expanded {
-		t.Fatalf("new revision height = %d, want the seeded %d", got, expanded)
-	}
 	h.frame()
-	if !h.st.expanded["t1"] {
+	if !h.st.list.Expanded("t1") {
 		t.Fatal("the card collapsed when the item's revision changed")
 	}
-	if got := h.st.heightOf(tool); got <= collapsed {
-		t.Fatalf("height after the revision = %d, want the expanded layout above %d", got, collapsed)
+	if got := h.st.list.ItemState("t1").MeasuredHeight; got != expanded {
+		t.Fatalf("height after the revision = %d, want the expanded layout %d", got, expanded)
 	}
 }

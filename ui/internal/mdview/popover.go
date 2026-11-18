@@ -20,6 +20,7 @@ import (
 
 	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/markdown"
+	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
 // linkState is the popover state of one link: whether the pointer is over
@@ -229,7 +230,7 @@ func (v *view) button(c *widget.Clickable, label string, primary bool) layout.Wi
 func (v *view) linkIcon(gtx *layout.Context) layout.Dimensions {
 	size := gtx.Dp(16)
 	h := size * 3 / 8
-	w := float32(max(gtx.Dp(unit.Dp(1.5)), 1))
+	w := float32(max(gtx.Dp(theme.HairlineMedium), 1))
 	for _, x := range []int{0, size * 6 / 16} {
 		box := image.Rect(x, (size-h)/2, x+size*10/16, (size+h)/2)
 		paint.FillShape(gtx.Ops, v.th.Chrome().IconMuted, clip.Stroke{Path: clip.UniformRRect(box, h/2).Path(gtx.Ops), Width: w}.Op())
