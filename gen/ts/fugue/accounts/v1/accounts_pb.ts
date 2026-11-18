@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fugue/accounts/v1/accounts.proto.
  */
 export const file_fugue_accounts_v1_accounts: GenFile = /*@__PURE__*/
-  fileDesc("CiBmdWd1ZS9hY2NvdW50cy92MS9hY2NvdW50cy5wcm90bxIRZnVndWUuYWNjb3VudHMudjEiUwoLUXVvdGFXaW5kb3cSDAoEbmFtZRgBIAEoCRITCgt1dGlsaXphdGlvbhgCIAEoARIRCglyZXNldHNfYXQYAyABKAkSDgoGc3RhdHVzGAQgASgJIsEBCgdBY2NvdW50EigKBnZlbmRvchgBIAEoDjIYLmZ1Z3VlLnZlbmRvcnMudjEuVmVuZG9yEg0KBXN0YXRlGAIgASgJEhQKDHBhdXNlZF91bnRpbBgDIAEoCRINCgVsb2dpbhgEIAEoCRITCgtxdW90YV9rbm93bhgFIAEoCBIvCgd3aW5kb3dzGAYgAygLMh4uZnVndWUuYWNjb3VudHMudjEuUXVvdGFXaW5kb3cSEgoKdXBkYXRlZF9hdBgHIAEoCSIVChNMaXN0QWNjb3VudHNSZXF1ZXN0IkQKFExpc3RBY2NvdW50c1Jlc3BvbnNlEiwKCGFjY291bnRzGAEgAygLMhouZnVndWUuYWNjb3VudHMudjEuQWNjb3VudDJxCg5BY2NvdW50U2VydmljZRJfCgxMaXN0QWNjb3VudHMSJi5mdWd1ZS5hY2NvdW50cy52MS5MaXN0QWNjb3VudHNSZXF1ZXN0GicuZnVndWUuYWNjb3VudHMudjEuTGlzdEFjY291bnRzUmVzcG9uc2VCywEKFWNvbS5mdWd1ZS5hY2NvdW50cy52MUINQWNjb3VudHNQcm90b1ABWj1naXRodWIuY29tL3N5dXJvZGV2L2Z1Z3VlL3BrZy9wYi9mdWd1ZS9hY2NvdW50cy92MTthY2NvdW50c3YxogIDRkFYqgIRRnVndWUuQWNjb3VudHMuVjHKAhFGdWd1ZVxBY2NvdW50c1xWMeICHUZ1Z3VlXEFjY291bnRzXFYxXEdQQk1ldGFkYXRh6gITRnVndWU6OkFjY291bnRzOjpWMWIGcHJvdG8z", [file_fugue_vendors_v1_vendors]);
+  fileDesc("CiBmdWd1ZS9hY2NvdW50cy92MS9hY2NvdW50cy5wcm90bxIRZnVndWUuYWNjb3VudHMudjEiUwoLUXVvdGFXaW5kb3cSDAoEbmFtZRgBIAEoCRITCgt1dGlsaXphdGlvbhgCIAEoARIRCglyZXNldHNfYXQYAyABKAkSDgoGc3RhdHVzGAQgASgJIsEBCgdBY2NvdW50EigKBnZlbmRvchgBIAEoDjIYLmZ1Z3VlLnZlbmRvcnMudjEuVmVuZG9yEg0KBXN0YXRlGAIgASgJEhQKDHBhdXNlZF91bnRpbBgDIAEoCRINCgVsb2dpbhgEIAEoCRITCgtxdW90YV9rbm93bhgFIAEoCBIvCgd3aW5kb3dzGAYgAygLMh4uZnVndWUuYWNjb3VudHMudjEuUXVvdGFXaW5kb3cSEgoKdXBkYXRlZF9hdBgHIAEoCSIVChNMaXN0QWNjb3VudHNSZXF1ZXN0IkQKFExpc3RBY2NvdW50c1Jlc3BvbnNlEiwKCGFjY291bnRzGAEgAygLMhouZnVndWUuYWNjb3VudHMudjEuQWNjb3VudCI9ChFTdGFydExvZ2luUmVxdWVzdBIoCgZ2ZW5kb3IYASABKA4yGC5mdWd1ZS52ZW5kb3JzLnYxLlZlbmRvciImChJTdGFydExvZ2luUmVzcG9uc2USEAoIbG9naW5faWQYASABKAkiPgoSQ2FuY2VsTG9naW5SZXF1ZXN0EigKBnZlbmRvchgBIAEoDjIYLmZ1Z3VlLnZlbmRvcnMudjEuVmVuZG9yIhUKE0NhbmNlbExvZ2luUmVzcG9uc2UyqgIKDkFjY291bnRTZXJ2aWNlEl8KDExpc3RBY2NvdW50cxImLmZ1Z3VlLmFjY291bnRzLnYxLkxpc3RBY2NvdW50c1JlcXVlc3QaJy5mdWd1ZS5hY2NvdW50cy52MS5MaXN0QWNjb3VudHNSZXNwb25zZRJZCgpTdGFydExvZ2luEiQuZnVndWUuYWNjb3VudHMudjEuU3RhcnRMb2dpblJlcXVlc3QaJS5mdWd1ZS5hY2NvdW50cy52MS5TdGFydExvZ2luUmVzcG9uc2USXAoLQ2FuY2VsTG9naW4SJS5mdWd1ZS5hY2NvdW50cy52MS5DYW5jZWxMb2dpblJlcXVlc3QaJi5mdWd1ZS5hY2NvdW50cy52MS5DYW5jZWxMb2dpblJlc3BvbnNlQssBChVjb20uZnVndWUuYWNjb3VudHMudjFCDUFjY291bnRzUHJvdG9QAVo9Z2l0aHViLmNvbS9zeXVyb2Rldi9mdWd1ZS9wa2cvcGIvZnVndWUvYWNjb3VudHMvdjE7YWNjb3VudHN2MaICA0ZBWKoCEUZ1Z3VlLkFjY291bnRzLlYxygIRRnVndWVcQWNjb3VudHNcVjHiAh1GdWd1ZVxBY2NvdW50c1xWMVxHUEJNZXRhZGF0YeoCE0Z1Z3VlOjpBY2NvdW50czo6VjFiBnByb3RvMw", [file_fugue_vendors_v1_vendors]);
 
 /**
  * QuotaWindow is one quota window a vendor reports. utilization is a fraction
@@ -144,9 +144,83 @@ export const ListAccountsResponseSchema: GenMessage<ListAccountsResponse> = /*@_
   messageDesc(file_fugue_accounts_v1_accounts, 3);
 
 /**
- * AccountService reports the vendor accounts (F9.10a). The `quota` topic
- * carries the same account shape as JSON: a snapshot {"accounts": [...]} and
- * one event per changed account.
+ * @generated from message fugue.accounts.v1.StartLoginRequest
+ */
+export type StartLoginRequest = Message<"fugue.accounts.v1.StartLoginRequest"> & {
+  /**
+   * Vendor is the vendor whose CLI's own login command runs (VR-03). A vendor
+   * CLI with no login command answers the typed login.unsupported error.
+   *
+   * @generated from field: fugue.vendors.v1.Vendor vendor = 1;
+   */
+  vendor: Vendor;
+};
+
+/**
+ * Describes the message fugue.accounts.v1.StartLoginRequest.
+ * Use `create(StartLoginRequestSchema)` to create a new message.
+ */
+export const StartLoginRequestSchema: GenMessage<StartLoginRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_accounts_v1_accounts, 4);
+
+/**
+ * @generated from message fugue.accounts.v1.StartLoginResponse
+ */
+export type StartLoginResponse = Message<"fugue.accounts.v1.StartLoginResponse"> & {
+  /**
+   * login_id identifies this attempt in the `login` topic events. The login
+   * itself is followed on the topic, never in this RPC: it runs long after
+   * the call returns.
+   *
+   * @generated from field: string login_id = 1;
+   */
+  loginId: string;
+};
+
+/**
+ * Describes the message fugue.accounts.v1.StartLoginResponse.
+ * Use `create(StartLoginResponseSchema)` to create a new message.
+ */
+export const StartLoginResponseSchema: GenMessage<StartLoginResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_accounts_v1_accounts, 5);
+
+/**
+ * @generated from message fugue.accounts.v1.CancelLoginRequest
+ */
+export type CancelLoginRequest = Message<"fugue.accounts.v1.CancelLoginRequest"> & {
+  /**
+   * @generated from field: fugue.vendors.v1.Vendor vendor = 1;
+   */
+  vendor: Vendor;
+};
+
+/**
+ * Describes the message fugue.accounts.v1.CancelLoginRequest.
+ * Use `create(CancelLoginRequestSchema)` to create a new message.
+ */
+export const CancelLoginRequestSchema: GenMessage<CancelLoginRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_accounts_v1_accounts, 6);
+
+/**
+ * @generated from message fugue.accounts.v1.CancelLoginResponse
+ */
+export type CancelLoginResponse = Message<"fugue.accounts.v1.CancelLoginResponse"> & {
+};
+
+/**
+ * Describes the message fugue.accounts.v1.CancelLoginResponse.
+ * Use `create(CancelLoginResponseSchema)` to create a new message.
+ */
+export const CancelLoginResponseSchema: GenMessage<CancelLoginResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_accounts_v1_accounts, 7);
+
+/**
+ * AccountService reports the vendor accounts (F9.10a) and starts the vendor
+ * CLIs' own login commands (F9.10b). The `quota` topic carries the same
+ * account shape as JSON: a snapshot {"accounts": [...]} and one event per
+ * changed account. The `login` topic carries the login progress as JSON: a
+ * snapshot {"logins": [...]} of the running logins and one event per change,
+ * with the URL and code the CLI printed relayed verbatim as untrusted data.
  *
  * @generated from service fugue.accounts.v1.AccountService
  */
@@ -161,6 +235,29 @@ export const AccountService: GenService<{
     methodKind: "unary";
     input: typeof ListAccountsRequestSchema;
     output: typeof ListAccountsResponseSchema;
+  },
+  /**
+   * StartLogin runs the vendor CLI's own login command as a supervised
+   * process and returns at once; the progress streams on the `login` topic.
+   * At most one login per vendor runs at a time. Fugue never opens a browser
+   * and never touches vendor credentials.
+   *
+   * @generated from rpc fugue.accounts.v1.AccountService.StartLogin
+   */
+  startLogin: {
+    methodKind: "unary";
+    input: typeof StartLoginRequestSchema;
+    output: typeof StartLoginResponseSchema;
+  },
+  /**
+   * CancelLogin stops the running login process of one vendor.
+   *
+   * @generated from rpc fugue.accounts.v1.AccountService.CancelLogin
+   */
+  cancelLogin: {
+    methodKind: "unary";
+    input: typeof CancelLoginRequestSchema;
+    output: typeof CancelLoginResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fugue_accounts_v1_accounts, 0);

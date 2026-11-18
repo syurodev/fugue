@@ -36,6 +36,12 @@ const (
 	// AccountServiceListAccountsProcedure is the fully-qualified name of the AccountService's
 	// ListAccounts RPC.
 	AccountServiceListAccountsProcedure = "/fugue.accounts.v1.AccountService/ListAccounts"
+	// AccountServiceStartLoginProcedure is the fully-qualified name of the AccountService's StartLogin
+	// RPC.
+	AccountServiceStartLoginProcedure = "/fugue.accounts.v1.AccountService/StartLogin"
+	// AccountServiceCancelLoginProcedure is the fully-qualified name of the AccountService's
+	// CancelLogin RPC.
+	AccountServiceCancelLoginProcedure = "/fugue.accounts.v1.AccountService/CancelLogin"
 )
 
 // AccountServiceClient is a client for the fugue.accounts.v1.AccountService service.
@@ -43,6 +49,13 @@ type AccountServiceClient interface {
 	// ListAccounts refreshes each vendor's login state through the CLI's own
 	// status command, then lists the accounts.
 	ListAccounts(context.Context, *connect.Request[v1.ListAccountsRequest]) (*connect.Response[v1.ListAccountsResponse], error)
+	// StartLogin runs the vendor CLI's own login command as a supervised
+	// process and returns at once; the progress streams on the `login` topic.
+	// At most one login per vendor runs at a time. Fugue never opens a browser
+	// and never touches vendor credentials.
+	StartLogin(context.Context, *connect.Request[v1.StartLoginRequest]) (*connect.Response[v1.StartLoginResponse], error)
+	// CancelLogin stops the running login process of one vendor.
+	CancelLogin(context.Context, *connect.Request[v1.CancelLoginRequest]) (*connect.Response[v1.CancelLoginResponse], error)
 }
 
 // NewAccountServiceClient constructs a client for the fugue.accounts.v1.AccountService service. By
@@ -62,12 +75,26 @@ func NewAccountServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(accountServiceMethods.ByName("ListAccounts")),
 			connect.WithClientOptions(opts...),
 		),
+		startLogin: connect.NewClient[v1.StartLoginRequest, v1.StartLoginResponse](
+			httpClient,
+			baseURL+AccountServiceStartLoginProcedure,
+			connect.WithSchema(accountServiceMethods.ByName("StartLogin")),
+			connect.WithClientOptions(opts...),
+		),
+		cancelLogin: connect.NewClient[v1.CancelLoginRequest, v1.CancelLoginResponse](
+			httpClient,
+			baseURL+AccountServiceCancelLoginProcedure,
+			connect.WithSchema(accountServiceMethods.ByName("CancelLogin")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // accountServiceClient implements AccountServiceClient.
 type accountServiceClient struct {
 	listAccounts *connect.Client[v1.ListAccountsRequest, v1.ListAccountsResponse]
+	startLogin   *connect.Client[v1.StartLoginRequest, v1.StartLoginResponse]
+	cancelLogin  *connect.Client[v1.CancelLoginRequest, v1.CancelLoginResponse]
 }
 
 // ListAccounts calls fugue.accounts.v1.AccountService.ListAccounts.
@@ -75,11 +102,28 @@ func (c *accountServiceClient) ListAccounts(ctx context.Context, req *connect.Re
 	return c.listAccounts.CallUnary(ctx, req)
 }
 
+// StartLogin calls fugue.accounts.v1.AccountService.StartLogin.
+func (c *accountServiceClient) StartLogin(ctx context.Context, req *connect.Request[v1.StartLoginRequest]) (*connect.Response[v1.StartLoginResponse], error) {
+	return c.startLogin.CallUnary(ctx, req)
+}
+
+// CancelLogin calls fugue.accounts.v1.AccountService.CancelLogin.
+func (c *accountServiceClient) CancelLogin(ctx context.Context, req *connect.Request[v1.CancelLoginRequest]) (*connect.Response[v1.CancelLoginResponse], error) {
+	return c.cancelLogin.CallUnary(ctx, req)
+}
+
 // AccountServiceHandler is an implementation of the fugue.accounts.v1.AccountService service.
 type AccountServiceHandler interface {
 	// ListAccounts refreshes each vendor's login state through the CLI's own
 	// status command, then lists the accounts.
 	ListAccounts(context.Context, *connect.Request[v1.ListAccountsRequest]) (*connect.Response[v1.ListAccountsResponse], error)
+	// StartLogin runs the vendor CLI's own login command as a supervised
+	// process and returns at once; the progress streams on the `login` topic.
+	// At most one login per vendor runs at a time. Fugue never opens a browser
+	// and never touches vendor credentials.
+	StartLogin(context.Context, *connect.Request[v1.StartLoginRequest]) (*connect.Response[v1.StartLoginResponse], error)
+	// CancelLogin stops the running login process of one vendor.
+	CancelLogin(context.Context, *connect.Request[v1.CancelLoginRequest]) (*connect.Response[v1.CancelLoginResponse], error)
 }
 
 // NewAccountServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -95,10 +139,26 @@ func NewAccountServiceHandler(svc AccountServiceHandler, opts ...connect.Handler
 		connect.WithSchema(accountServiceMethods.ByName("ListAccounts")),
 		connect.WithHandlerOptions(opts...),
 	)
+	accountServiceStartLoginHandler := connect.NewUnaryHandler(
+		AccountServiceStartLoginProcedure,
+		svc.StartLogin,
+		connect.WithSchema(accountServiceMethods.ByName("StartLogin")),
+		connect.WithHandlerOptions(opts...),
+	)
+	accountServiceCancelLoginHandler := connect.NewUnaryHandler(
+		AccountServiceCancelLoginProcedure,
+		svc.CancelLogin,
+		connect.WithSchema(accountServiceMethods.ByName("CancelLogin")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fugue.accounts.v1.AccountService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AccountServiceListAccountsProcedure:
 			accountServiceListAccountsHandler.ServeHTTP(w, r)
+		case AccountServiceStartLoginProcedure:
+			accountServiceStartLoginHandler.ServeHTTP(w, r)
+		case AccountServiceCancelLoginProcedure:
+			accountServiceCancelLoginHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -110,4 +170,12 @@ type UnimplementedAccountServiceHandler struct{}
 
 func (UnimplementedAccountServiceHandler) ListAccounts(context.Context, *connect.Request[v1.ListAccountsRequest]) (*connect.Response[v1.ListAccountsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.accounts.v1.AccountService.ListAccounts is not implemented"))
+}
+
+func (UnimplementedAccountServiceHandler) StartLogin(context.Context, *connect.Request[v1.StartLoginRequest]) (*connect.Response[v1.StartLoginResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.accounts.v1.AccountService.StartLogin is not implemented"))
+}
+
+func (UnimplementedAccountServiceHandler) CancelLogin(context.Context, *connect.Request[v1.CancelLoginRequest]) (*connect.Response[v1.CancelLoginResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.accounts.v1.AccountService.CancelLogin is not implemented"))
 }

@@ -40,11 +40,40 @@ message ListAccountsResponse {
   repeated Account accounts = 1;
 }
 
-// AccountService reports the vendor accounts (F9.10a). The `quota` topic
-// carries the same account shape as JSON: a snapshot {"accounts": [...]} and
-// one event per changed account.
+message StartLoginRequest {
+  // Vendor is the vendor whose CLI's own login command runs (VR-03). A vendor
+  // CLI with no login command answers the typed login.unsupported error.
+  fugue.vendors.v1.Vendor vendor = 1;
+}
+
+message StartLoginResponse {
+  // login_id identifies this attempt in the `login` topic events. The login
+  // itself is followed on the topic, never in this RPC: it runs long after
+  // the call returns.
+  string login_id = 1;
+}
+
+message CancelLoginRequest {
+  fugue.vendors.v1.Vendor vendor = 1;
+}
+
+message CancelLoginResponse {}
+
+// AccountService reports the vendor accounts (F9.10a) and starts the vendor
+// CLIs' own login commands (F9.10b). The `quota` topic carries the same
+// account shape as JSON: a snapshot {"accounts": [...]} and one event per
+// changed account. The `login` topic carries the login progress as JSON: a
+// snapshot {"logins": [...]} of the running logins and one event per change,
+// with the URL and code the CLI printed relayed verbatim as untrusted data.
 service AccountService {
   // ListAccounts refreshes each vendor's login state through the CLI's own
   // status command, then lists the accounts.
   rpc ListAccounts(ListAccountsRequest) returns (ListAccountsResponse);
+  // StartLogin runs the vendor CLI's own login command as a supervised
+  // process and returns at once; the progress streams on the `login` topic.
+  // At most one login per vendor runs at a time. Fugue never opens a browser
+  // and never touches vendor credentials.
+  rpc StartLogin(StartLoginRequest) returns (StartLoginResponse);
+  // CancelLogin stops the running login process of one vendor.
+  rpc CancelLogin(CancelLoginRequest) returns (CancelLoginResponse);
 }

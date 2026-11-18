@@ -275,6 +275,179 @@ func (x *ListAccountsResponse) GetAccounts() []*Account {
 	return nil
 }
 
+type StartLoginRequest struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Vendor is the vendor whose CLI's own login command runs (VR-03). A vendor
+	// CLI with no login command answers the typed login.unsupported error.
+	Vendor        v1.Vendor `protobuf:"varint,1,opt,name=vendor,proto3,enum=fugue.vendors.v1.Vendor" json:"vendor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartLoginRequest) Reset() {
+	*x = StartLoginRequest{}
+	mi := &file_fugue_accounts_v1_accounts_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartLoginRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartLoginRequest) ProtoMessage() {}
+
+func (x *StartLoginRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_accounts_v1_accounts_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartLoginRequest.ProtoReflect.Descriptor instead.
+func (*StartLoginRequest) Descriptor() ([]byte, []int) {
+	return file_fugue_accounts_v1_accounts_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *StartLoginRequest) GetVendor() v1.Vendor {
+	if x != nil {
+		return x.Vendor
+	}
+	return v1.Vendor(0)
+}
+
+type StartLoginResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// login_id identifies this attempt in the `login` topic events. The login
+	// itself is followed on the topic, never in this RPC: it runs long after
+	// the call returns.
+	LoginId       string `protobuf:"bytes,1,opt,name=login_id,json=loginId,proto3" json:"login_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *StartLoginResponse) Reset() {
+	*x = StartLoginResponse{}
+	mi := &file_fugue_accounts_v1_accounts_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *StartLoginResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*StartLoginResponse) ProtoMessage() {}
+
+func (x *StartLoginResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_accounts_v1_accounts_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use StartLoginResponse.ProtoReflect.Descriptor instead.
+func (*StartLoginResponse) Descriptor() ([]byte, []int) {
+	return file_fugue_accounts_v1_accounts_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *StartLoginResponse) GetLoginId() string {
+	if x != nil {
+		return x.LoginId
+	}
+	return ""
+}
+
+type CancelLoginRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Vendor        v1.Vendor              `protobuf:"varint,1,opt,name=vendor,proto3,enum=fugue.vendors.v1.Vendor" json:"vendor,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CancelLoginRequest) Reset() {
+	*x = CancelLoginRequest{}
+	mi := &file_fugue_accounts_v1_accounts_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CancelLoginRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CancelLoginRequest) ProtoMessage() {}
+
+func (x *CancelLoginRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_accounts_v1_accounts_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CancelLoginRequest.ProtoReflect.Descriptor instead.
+func (*CancelLoginRequest) Descriptor() ([]byte, []int) {
+	return file_fugue_accounts_v1_accounts_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *CancelLoginRequest) GetVendor() v1.Vendor {
+	if x != nil {
+		return x.Vendor
+	}
+	return v1.Vendor(0)
+}
+
+type CancelLoginResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CancelLoginResponse) Reset() {
+	*x = CancelLoginResponse{}
+	mi := &file_fugue_accounts_v1_accounts_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CancelLoginResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CancelLoginResponse) ProtoMessage() {}
+
+func (x *CancelLoginResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_accounts_v1_accounts_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CancelLoginResponse.ProtoReflect.Descriptor instead.
+func (*CancelLoginResponse) Descriptor() ([]byte, []int) {
+	return file_fugue_accounts_v1_accounts_proto_rawDescGZIP(), []int{7}
+}
+
 var File_fugue_accounts_v1_accounts_proto protoreflect.FileDescriptor
 
 const file_fugue_accounts_v1_accounts_proto_rawDesc = "" +
@@ -297,9 +470,19 @@ const file_fugue_accounts_v1_accounts_proto_rawDesc = "" +
 	"updated_at\x18\a \x01(\tR\tupdatedAt\"\x15\n" +
 	"\x13ListAccountsRequest\"N\n" +
 	"\x14ListAccountsResponse\x126\n" +
-	"\baccounts\x18\x01 \x03(\v2\x1a.fugue.accounts.v1.AccountR\baccounts2q\n" +
+	"\baccounts\x18\x01 \x03(\v2\x1a.fugue.accounts.v1.AccountR\baccounts\"E\n" +
+	"\x11StartLoginRequest\x120\n" +
+	"\x06vendor\x18\x01 \x01(\x0e2\x18.fugue.vendors.v1.VendorR\x06vendor\"/\n" +
+	"\x12StartLoginResponse\x12\x19\n" +
+	"\blogin_id\x18\x01 \x01(\tR\aloginId\"F\n" +
+	"\x12CancelLoginRequest\x120\n" +
+	"\x06vendor\x18\x01 \x01(\x0e2\x18.fugue.vendors.v1.VendorR\x06vendor\"\x15\n" +
+	"\x13CancelLoginResponse2\xaa\x02\n" +
 	"\x0eAccountService\x12_\n" +
-	"\fListAccounts\x12&.fugue.accounts.v1.ListAccountsRequest\x1a'.fugue.accounts.v1.ListAccountsResponseB\xcb\x01\n" +
+	"\fListAccounts\x12&.fugue.accounts.v1.ListAccountsRequest\x1a'.fugue.accounts.v1.ListAccountsResponse\x12Y\n" +
+	"\n" +
+	"StartLogin\x12$.fugue.accounts.v1.StartLoginRequest\x1a%.fugue.accounts.v1.StartLoginResponse\x12\\\n" +
+	"\vCancelLogin\x12%.fugue.accounts.v1.CancelLoginRequest\x1a&.fugue.accounts.v1.CancelLoginResponseB\xcb\x01\n" +
 	"\x15com.fugue.accounts.v1B\rAccountsProtoP\x01Z=github.com/syurodev/fugue/pkg/pb/fugue/accounts/v1;accountsv1\xa2\x02\x03FAX\xaa\x02\x11Fugue.Accounts.V1\xca\x02\x11Fugue\\Accounts\\V1\xe2\x02\x1dFugue\\Accounts\\V1\\GPBMetadata\xea\x02\x13Fugue::Accounts::V1b\x06proto3"
 
 var (
@@ -314,25 +497,35 @@ func file_fugue_accounts_v1_accounts_proto_rawDescGZIP() []byte {
 	return file_fugue_accounts_v1_accounts_proto_rawDescData
 }
 
-var file_fugue_accounts_v1_accounts_proto_msgTypes = make([]protoimpl.MessageInfo, 4)
+var file_fugue_accounts_v1_accounts_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
 var file_fugue_accounts_v1_accounts_proto_goTypes = []any{
 	(*QuotaWindow)(nil),          // 0: fugue.accounts.v1.QuotaWindow
 	(*Account)(nil),              // 1: fugue.accounts.v1.Account
 	(*ListAccountsRequest)(nil),  // 2: fugue.accounts.v1.ListAccountsRequest
 	(*ListAccountsResponse)(nil), // 3: fugue.accounts.v1.ListAccountsResponse
-	(v1.Vendor)(0),               // 4: fugue.vendors.v1.Vendor
+	(*StartLoginRequest)(nil),    // 4: fugue.accounts.v1.StartLoginRequest
+	(*StartLoginResponse)(nil),   // 5: fugue.accounts.v1.StartLoginResponse
+	(*CancelLoginRequest)(nil),   // 6: fugue.accounts.v1.CancelLoginRequest
+	(*CancelLoginResponse)(nil),  // 7: fugue.accounts.v1.CancelLoginResponse
+	(v1.Vendor)(0),               // 8: fugue.vendors.v1.Vendor
 }
 var file_fugue_accounts_v1_accounts_proto_depIdxs = []int32{
-	4, // 0: fugue.accounts.v1.Account.vendor:type_name -> fugue.vendors.v1.Vendor
+	8, // 0: fugue.accounts.v1.Account.vendor:type_name -> fugue.vendors.v1.Vendor
 	0, // 1: fugue.accounts.v1.Account.windows:type_name -> fugue.accounts.v1.QuotaWindow
 	1, // 2: fugue.accounts.v1.ListAccountsResponse.accounts:type_name -> fugue.accounts.v1.Account
-	2, // 3: fugue.accounts.v1.AccountService.ListAccounts:input_type -> fugue.accounts.v1.ListAccountsRequest
-	3, // 4: fugue.accounts.v1.AccountService.ListAccounts:output_type -> fugue.accounts.v1.ListAccountsResponse
-	4, // [4:5] is the sub-list for method output_type
-	3, // [3:4] is the sub-list for method input_type
-	3, // [3:3] is the sub-list for extension type_name
-	3, // [3:3] is the sub-list for extension extendee
-	0, // [0:3] is the sub-list for field type_name
+	8, // 3: fugue.accounts.v1.StartLoginRequest.vendor:type_name -> fugue.vendors.v1.Vendor
+	8, // 4: fugue.accounts.v1.CancelLoginRequest.vendor:type_name -> fugue.vendors.v1.Vendor
+	2, // 5: fugue.accounts.v1.AccountService.ListAccounts:input_type -> fugue.accounts.v1.ListAccountsRequest
+	4, // 6: fugue.accounts.v1.AccountService.StartLogin:input_type -> fugue.accounts.v1.StartLoginRequest
+	6, // 7: fugue.accounts.v1.AccountService.CancelLogin:input_type -> fugue.accounts.v1.CancelLoginRequest
+	3, // 8: fugue.accounts.v1.AccountService.ListAccounts:output_type -> fugue.accounts.v1.ListAccountsResponse
+	5, // 9: fugue.accounts.v1.AccountService.StartLogin:output_type -> fugue.accounts.v1.StartLoginResponse
+	7, // 10: fugue.accounts.v1.AccountService.CancelLogin:output_type -> fugue.accounts.v1.CancelLoginResponse
+	8, // [8:11] is the sub-list for method output_type
+	5, // [5:8] is the sub-list for method input_type
+	5, // [5:5] is the sub-list for extension type_name
+	5, // [5:5] is the sub-list for extension extendee
+	0, // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_fugue_accounts_v1_accounts_proto_init() }
@@ -346,7 +539,7 @@ func file_fugue_accounts_v1_accounts_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fugue_accounts_v1_accounts_proto_rawDesc), len(file_fugue_accounts_v1_accounts_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   4,
+			NumMessages:   8,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
