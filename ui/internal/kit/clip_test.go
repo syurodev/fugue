@@ -23,7 +23,7 @@ type clipRig struct {
 // tag themselves at their own origin or at more than the box they draw would
 // show here.
 func clipRigNames() []string {
-	return []string{"Button", "IconButton", "TextField", "TextArea", "search clear button", "secret reveal button", "Select", "Combobox", "ListRow", "SectionHeader", "SplitPane handle"}
+	return []string{"Button", "IconButton", "TextField", "TextArea", "search clear button", "secret reveal button", "Select", "Combobox", "ListRow", "SectionHeader", "TreeView", "SplitPane handle"}
 }
 
 // freeGtx is gtx without a minimum size, so a field lays out at its own width.
@@ -115,6 +115,8 @@ func clipRigs(t *testing.T, h *harness, name string) clipRig {
 		return listRowClipRig(h)
 	case "SectionHeader":
 		return sectionHeaderClipRig(h)
+	case "TreeView":
+		return treeViewClipRig(h)
 	case "SplitPane handle":
 		return splitPaneClipRig(h)
 	}
@@ -205,6 +207,20 @@ func sectionHeaderClipRig(h *harness) clipRig {
 			return wholeBox(dims.Size)
 		},
 		got: func() bool { return toggled || h.gtx.Focused(s.Tag()) },
+	}
+}
+
+func treeViewClipRig(h *harness) clipRig {
+	tv := NewTreeViewState()
+	roots := []TreeNode{{Key: "n", Label: "Node", HasChildren: true}}
+	return clipRig{
+		lay: func(gtx *layout.Context) (image.Rectangle, image.Rectangle) {
+			g := *gtx
+			g.Constraints = layout.Exact(image.Pt(200, gtx.Dp(theme.RowDense)))
+			dims, _ := tv.Layout(h.env, &g, TreeViewProps{Roots: roots})
+			return wholeBox(dims.Size)
+		},
+		got: func() bool { return tv.Selected() == "n" || h.gtx.Focused(tv.NodeTag("n")) },
 	}
 }
 

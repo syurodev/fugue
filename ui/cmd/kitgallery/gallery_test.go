@@ -67,6 +67,8 @@ func expectedCells(cur int) map[cell]bool {
 		"ListRow":       listRowCells,
 		"SectionHeader": sectionHeaderCells,
 		"ScrollArea":    scrollAreaCells,
+		"VirtualList":   virtualListCells,
+		"TreeView":      treeViewCells,
 		"Tag":           tagCells,
 		"Progress":      progressAndDividerCells,
 		"SplitPane":     splitPaneCells,
@@ -179,6 +181,20 @@ func listRowCells(want map[cell]bool) {
 		want[cell{compListRow, 0, 0, st}] = true
 	}
 	want[cell{compListRow, 1, 0, lrLive}] = true
+}
+
+func virtualListCells(want map[cell]bool) {
+	want[cell{compVirtualList, 0, 0, vlDefault}] = true
+	want[cell{compVirtualList, 1, 0, vlFollow}] = true
+	want[cell{compVirtualList, 2, 0, stHover}] = true
+	want[cell{compVirtualList, 3, 0, vlLive}] = true
+}
+
+func treeViewCells(want map[cell]bool) {
+	for _, st := range treeViewStates() {
+		want[cell{compTreeView, 0, 0, st}] = true
+	}
+	want[cell{compTreeView, 1, 0, tvLive}] = true
 }
 
 func sectionHeaderCells(want map[cell]bool) {
