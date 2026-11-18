@@ -6,6 +6,7 @@ package vendor_test
 
 import (
 	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -19,11 +20,29 @@ import (
 	"github.com/syurodev/fugue/internal/vendor"
 )
 
+const fakeVendor = "fake"
+
 func writeLoginCLI(t *testing.T, body string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "fake-cli")
 	testutil.WriteExecutable(t, path, []byte("#!/bin/sh\n"+body))
 	return path
+}
+
+// advanceUntil advances the fake clock while a timer is pending until the
+// condition holds: the stop order waits on the clock between its signals, and
+// nothing else would ever fire those timers. testutil.Spin bounds a hang.
+func advanceUntil(t *testing.T, clk *clock.Fake, what string, cond func() bool) {
+	t.Helper()
+	testutil.Spin(t, what, func() bool {
+		if cond() {
+			return true
+		}
+		if clk.Pending() > 0 {
+			clk.Advance(time.Minute)
+		}
+		return false
+	})
 }
 
 func drainLoginLines(t *testing.T, run vendor.LoginRun) string {
@@ -39,10 +58,15 @@ func drainLoginLines(t *testing.T, run vendor.LoginRun) string {
 
 func startFakeLogin(t *testing.T, path string) *vendor.LoginProcess {
 	t.Helper()
+	return startFakeLoginOn(t, path, clock.NewFake(time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC)))
+}
+
+func startFakeLoginOn(t *testing.T, path string, clk clock.Clock) *vendor.LoginProcess {
+	t.Helper()
 	run, err := vendor.StartLoginProcess(t.Context(), &vendor.LoginOptions{
-		Name: "fake", Path: path,
+		Name: fakeVendor, Path: path,
 		Env:   []string{"HOME=/home/REDACTED", "TERM=dumb"},
-		Clock: clock.Real{},
+		Clock: clk,
 		Probe: process.NewSystemdProbe(),
 	})
 	if err != nil {
@@ -70,13 +94,13 @@ func TestStartLoginProcessRelaysLinesAndExits(t *testing.T) {
 func TestStartLoginProcessSpawnFailuresAreTyped(t *testing.T) {
 	t.Parallel()
 	missing := filepath.Join(t.TempDir(), "not-there")
-	if _, err := vendor.StartLoginProcess(t.Context(), &vendor.LoginOptions{Name: "fake", Path: missing}); errcode.CodeOf(err) != errcode.NotFound {
+	if _, err := vendor.StartLoginProcess(t.Context(), &vendor.LoginOptions{Name: fakeVendor, Path: missing}); errcode.CodeOf(err) != errcode.NotFound {
 		t.Fatalf("missing binary error = %v, want not found", err)
 	}
 	if _, err := vendor.StartLoginProcess(t.Context(), &vendor.LoginOptions{Path: missing}); errcode.CodeOf(err) != errcode.InvalidArgument {
 		t.Fatalf("empty name error = %v, want invalid argument", err)
 	}
-	if _, err := vendor.StartLoginProcess(t.Context(), &vendor.LoginOptions{Name: "fake"}); errcode.CodeOf(err) != errcode.InvalidArgument {
+	if _, err := vendor.StartLoginProcess(t.Context(), &vendor.LoginOptions{Name: fakeVendor}); errcode.CodeOf(err) != errcode.InvalidArgument {
 		t.Fatalf("empty path error = %v, want invalid argument", err)
 	}
 }
@@ -104,21 +128,25 @@ func TestStartLoginProcessStopsACLIThatIgnoresSIGINT(t *testing.T) {
 	// A CLI that traps SIGINT must still end: the stop order escalates to
 	// SIGTERM and SIGKILL, and Stop returns once the group is empty.
 	path := writeLoginCLI(t, "printf '%s\\n' 'ready'\ntrap '' INT\nexec /bin/sleep 300\n")
-	run := startFakeLogin(t, path)
+	clk := clock.NewFake(time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC))
+	run := startFakeLoginOn(t, path, clk)
 	if line := <-run.Lines(); line != "ready" {
 		t.Fatalf("first line = %q, want ready", line)
 	}
-	stopped := make(chan struct{})
-	task := supervise.Go(t.Context(), "test.login-stop", func(context.Context) error {
-		_, err := run.Stop(t.Context())
-		close(stopped)
-		return err
+	task := supervise.Go(t.Context(), "test.login-stop", func(ctx context.Context) error {
+		if _, err := run.Stop(ctx); err != nil {
+			return fmt.Errorf("stop the login: %w", err)
+		}
+		return nil
 	})
-	select {
-	case <-stopped:
-	case <-time.After(30 * time.Second):
-		t.Fatal("Stop did not return within the stop-order budget")
-	}
+	advanceUntil(t, clk, "the stop order to end the process group", func() bool {
+		select {
+		case <-task.Done():
+			return true
+		default:
+			return false
+		}
+	})
 	drainLoginLines(t, run)
 	if end := run.End(); end.Ran {
 		t.Fatalf("login end = %+v, want a signal-ended process without an exit code", end)
@@ -133,8 +161,18 @@ func TestStartLoginProcessFrameTooLargeFailsTheRun(t *testing.T) {
 	// One 9 MiB line: past the 8 MiB frame cap the stream is unreadable and
 	// the host must not treat whatever follows as relayed output.
 	path := writeLoginCLI(t, "dd if=/dev/zero bs=1000000 count=9 2>/dev/null | tr '\\0' 'a'\nexit 0\n")
-	run := startFakeLogin(t, path)
-	drainLoginLines(t, run)
+	clk := clock.NewFake(time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC))
+	run := startFakeLoginOn(t, path, clk)
+	lines := run.Lines()
+	advanceUntil(t, clk, "the unreadable stream to end the relay", func() bool {
+		select {
+		case _, open := <-lines:
+			return !open
+		default:
+			return false
+		}
+	})
+	<-run.Done()
 	if end := run.End(); end.Ran {
 		t.Fatalf("login end = %+v, want an unreadable run without an exit code", end)
 	}

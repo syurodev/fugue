@@ -186,20 +186,7 @@ func (p *LoginProcess) pump(taskCtx context.Context) {
 		line, err := reader.ReadLine()
 		if err != nil {
 			if !errors.Is(err, io.EOF) {
-				p.mu.Lock()
-				p.readErr = err
-				proc := p.proc
-				p.mu.Unlock()
-				// The stream is unreadable (a line past the frame cap, an
-				// I/O error): the relay ends, and the child must not block
-				// forever on a pipe nobody reads.
-				stopCtx, cancel := context.WithTimeout(taskCtx, loginReadStopLimit)
-				defer cancel()
-				if _, stopErr := proc.Stop(stopCtx); stopErr != nil {
-					p.mu.Lock()
-					p.readErr = errors.Join(p.readErr, stopErr)
-					p.mu.Unlock()
-				}
+				p.stopUnreadable(taskCtx, err)
 			}
 			return
 		}
@@ -207,6 +194,23 @@ func (p *LoginProcess) pump(taskCtx context.Context) {
 		case p.lines <- string(line):
 		default:
 		}
+	}
+}
+
+// stopUnreadable ends the relay of a stream that cannot be read (a line past
+// the frame cap, an I/O error): the child must not block forever on a pipe
+// nobody reads.
+func (p *LoginProcess) stopUnreadable(taskCtx context.Context, readErr error) {
+	p.mu.Lock()
+	p.readErr = readErr
+	proc := p.proc
+	p.mu.Unlock()
+	stopCtx, cancel := context.WithTimeout(taskCtx, loginReadStopLimit)
+	defer cancel()
+	if _, stopErr := proc.Stop(stopCtx); stopErr != nil {
+		p.mu.Lock()
+		p.readErr = errors.Join(p.readErr, stopErr)
+		p.mu.Unlock()
 	}
 }
 
