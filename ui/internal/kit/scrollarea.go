@@ -28,23 +28,79 @@ type ScrollAreaProps struct {
 	FollowBottom bool
 }
 
+// scrollBar holds the shared idle timer and bar motion for ScrollArea and
+// VirtualList (§6.26, §6.29).
+type scrollBar struct {
+	hovered  bool
+	lastAct  time.Time
+	barA     motion.Follower
+	barAlpha float32
+}
+
+func newScrollBar() scrollBar {
+	return scrollBar{barA: motion.NewFollower(motion.Snappy())}
+}
+
+func (b *scrollBar) idleRemaining(env *Env, scrolled bool) time.Duration {
+	if scrolled {
+		b.lastAct = env.Now()
+	}
+	if b.lastAct.IsZero() {
+		return 0
+	}
+	rem := b.lastAct.Add(scrollIdleDelay).Sub(env.Now())
+	if rem < 0 {
+		return 0
+	}
+	return rem
+}
+
+func (b *scrollBar) stepAndDraw(env *Env, gtx *layout.Context, tag event.Tag, outSize image.Point, contentLen, viewLen, offset, maxOffset int, axis layout.Axis, scrolled bool) {
+	canScroll := maxOffset > 0
+	active := canScroll && (b.hovered || env.previewHover(tag) || b.idleRemaining(env, scrolled) > 0)
+	if active && !b.hovered && !b.lastAct.IsZero() {
+		env.Driver.WakeAt(b.lastAct.Add(scrollIdleDelay))
+	}
+	b.barAlpha = followSmooth(env, &b.barA, boolFloat(active))
+	if canScroll && b.barAlpha > 0 {
+		drawScrollBar(env, gtx, outSize, contentLen, viewLen, offset, maxOffset, axis, b.barAlpha)
+	}
+}
+
+func drawScrollBar(env *Env, gtx *layout.Context, outSize image.Point, contentLen, viewLen, offset, maxOffset int, axis layout.Axis, alpha float32) {
+	thick := gtx.Dp(theme.SpaceXS)
+	margin := gtx.Dp(theme.SpaceXXS)
+	minThumb := gtx.Dp(theme.SpaceXXL)
+	c := fade(env.Th.Chrome().FgSubtle, alpha)
+	if axis == layout.Vertical {
+		track := max(outSize.Y-2*margin, thick)
+		thumbH := min(track, max(minThumb, track*viewLen/max(contentLen, 1)))
+		y := margin + thumbOffset(offset, maxOffset, track-thumbH)
+		r := image.Rect(outSize.X-margin-thick, y, outSize.X-margin, y+thumbH)
+		paint.FillShape(gtx.Ops, c, clip.UniformRRect(r, thick/2).Op(gtx.Ops))
+		return
+	}
+	track := max(outSize.X-2*margin, thick)
+	thumbW := min(track, max(minThumb, track*viewLen/max(contentLen, 1)))
+	x := margin + thumbOffset(offset, maxOffset, track-thumbW)
+	r := image.Rect(x, outSize.Y-margin-thick, x+thumbW, outSize.Y-margin)
+	paint.FillShape(gtx.Ops, c, clip.UniformRRect(r, thick/2).Op(gtx.Ops))
+}
+
 // ScrollAreaState holds the scroll offset, idle timer and bar motion of one
 // ScrollArea.
 type ScrollAreaState struct {
 	tag       bool
 	offset    int
 	maxOffset int
-	hovered   bool
 	following bool
 	followSet bool
-	lastAct   time.Time
-	barA      motion.Follower
-	barAlpha  float32
+	bar       scrollBar
 }
 
 // NewScrollAreaState builds a ScrollAreaState at offset 0.
 func NewScrollAreaState() *ScrollAreaState {
-	return &ScrollAreaState{barA: motion.NewFollower(motion.Snappy())}
+	return &ScrollAreaState{bar: newScrollBar()}
 }
 
 // Tag returns the scroll area's event tag.
@@ -64,7 +120,7 @@ func (s *ScrollAreaState) SetOffset(v int) {
 func (s *ScrollAreaState) Following() bool { return s.following }
 
 // BarAlpha reports the current scrollbar opacity in [0, 1].
-func (s *ScrollAreaState) BarAlpha() float32 { return s.barAlpha }
+func (s *ScrollAreaState) BarAlpha() float32 { return s.bar.barAlpha }
 
 // Layout lays out content inside a clipped viewport on p.Axis, handles scroll
 // and hover events (unless an enclosing ScrollArea already owns p.Axis), and
@@ -143,15 +199,7 @@ func (s *ScrollAreaState) drawClipped(env *Env, gtx *layout.Context, call op.Cal
 	call.Add(gtx.Ops)
 	off.Pop()
 
-	canScroll := s.maxOffset > 0
-	active := canScroll && (s.hovered || env.previewHover(&s.tag) || s.idleRemaining(env, scrolled) > 0)
-	if active && !s.hovered && !s.lastAct.IsZero() {
-		env.Driver.WakeAt(s.lastAct.Add(scrollIdleDelay))
-	}
-	s.barAlpha = followSmooth(env, &s.barA, boolFloat(active))
-	if canScroll && s.barAlpha > 0 {
-		s.drawBar(env, gtx, outSize, contentLen, viewLen, axis)
-	}
+	s.bar.stepAndDraw(env, gtx, &s.tag, outSize, contentLen, viewLen, s.offset, s.maxOffset, axis, scrolled)
 	area.Pop()
 }
 
@@ -187,11 +235,11 @@ func scrollFilter(tag event.Tag, axis layout.Axis) pointer.Filter {
 
 func (s *ScrollAreaState) handlePointer(env *Env, pe pointer.Event, axis layout.Axis) bool {
 	if pe.Kind == pointer.Enter {
-		s.hovered = true
+		s.bar.hovered = true
 		return false
 	}
 	if pe.Kind == pointer.Leave || pe.Kind == pointer.Cancel {
-		s.hovered = false
+		s.bar.hovered = false
 		return false
 	}
 	if pe.Kind != pointer.Scroll {
@@ -208,42 +256,8 @@ func (s *ScrollAreaState) handlePointer(env *Env, pe pointer.Event, axis layout.
 		s.following = false
 	}
 	s.offset += delta
-	s.lastAct = env.Now()
+	s.bar.lastAct = env.Now()
 	return true
-}
-
-func (s *ScrollAreaState) idleRemaining(env *Env, scrolled bool) time.Duration {
-	if scrolled {
-		s.lastAct = env.Now()
-	}
-	if s.lastAct.IsZero() {
-		return 0
-	}
-	rem := s.lastAct.Add(scrollIdleDelay).Sub(env.Now())
-	if rem < 0 {
-		return 0
-	}
-	return rem
-}
-
-func (s *ScrollAreaState) drawBar(env *Env, gtx *layout.Context, outSize image.Point, contentLen, viewLen int, axis layout.Axis) {
-	thick := gtx.Dp(theme.SpaceXS)
-	margin := gtx.Dp(theme.SpaceXXS)
-	minThumb := gtx.Dp(theme.SpaceXXL)
-	c := fade(env.Th.Chrome().FgSubtle, s.barAlpha)
-	if axis == layout.Vertical {
-		track := max(outSize.Y-2*margin, thick)
-		thumbH := min(track, max(minThumb, track*viewLen/max(contentLen, 1)))
-		y := margin + thumbOffset(s.offset, s.maxOffset, track-thumbH)
-		r := image.Rect(outSize.X-margin-thick, y, outSize.X-margin, y+thumbH)
-		paint.FillShape(gtx.Ops, c, clip.UniformRRect(r, thick/2).Op(gtx.Ops))
-		return
-	}
-	track := max(outSize.X-2*margin, thick)
-	thumbW := min(track, max(minThumb, track*viewLen/max(contentLen, 1)))
-	x := margin + thumbOffset(s.offset, s.maxOffset, track-thumbW)
-	r := image.Rect(x, outSize.Y-margin-thick, x+thumbW, outSize.Y-margin)
-	paint.FillShape(gtx.Ops, c, clip.UniformRRect(r, thick/2).Op(gtx.Ops))
 }
 
 func thumbOffset(offset, maxOffset, slack int) int {
