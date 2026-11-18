@@ -49,3 +49,4 @@ node_modules/
 # OS
 .DS_Store
 /nightly-test.json
+/ui/kitgallery

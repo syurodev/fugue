@@ -30,17 +30,78 @@ func (e *Env) windowRect() image.Rectangle {
 	return image.Rectangle{Max: e.win}.Sub(e.origin)
 }
 
-// claimOverlay gives the window's one overlay to owner: whoever opened last
-// holds it, and a holder that sees another one close itself (holdsOverlay).
-func (e *Env) claimOverlay(owner event.Tag) { e.overlay = owner }
+// The floating layers (UK-07): at most two at once — a menu open from a
+// popover — one slot per kind, and the window's one dialog layer above them
+// (§6.17: never a dialog on a dialog). A claim of a kind replaces that
+// kind's holder, which closes itself when it finds itself out; a third
+// floating layer can only be a dialog.
 
-// holdsOverlay reports whether owner still has the overlay.
-func (e *Env) holdsOverlay(owner event.Tag) bool { return e.overlay == owner }
+// claimMenu gives owner the window's one menu layer.
+func (e *Env) claimMenu(owner event.Tag) {
+	if e.menuLayer == owner {
+		return
+	}
+	e.menuLayer = owner
+	e.menuSeq++
+}
 
-// releaseOverlay frees the overlay if owner holds it.
-func (e *Env) releaseOverlay(owner event.Tag) {
-	if e.overlay == owner {
-		e.overlay = nil
+// holdsMenu reports whether owner still holds the menu layer.
+func (e *Env) holdsMenu(owner event.Tag) bool {
+	return owner != nil && e.menuLayer == owner
+}
+
+// releaseMenu frees the menu layer if owner holds it.
+func (e *Env) releaseMenu(owner event.Tag) {
+	if e.menuLayer == owner {
+		e.menuLayer = nil
+	}
+}
+
+// claimPopover gives owner the window's one popover layer.
+func (e *Env) claimPopover(owner event.Tag) {
+	if e.popLayer == owner {
+		return
+	}
+	e.popLayer = owner
+	e.popSeq++
+}
+
+// holdsPopover reports whether owner still holds the popover layer.
+func (e *Env) holdsPopover(owner event.Tag) bool {
+	return owner != nil && e.popLayer == owner
+}
+
+// releasePopover frees the popover layer if owner holds it.
+func (e *Env) releasePopover(owner event.Tag) {
+	if e.popLayer == owner {
+		e.popLayer = nil
+	}
+}
+
+// topPopover reports whether the popover owns Escape (§7): no dialog above
+// it and no newer menu over it. A menu owns Escape through its own focused
+// filter, so only the popover asks.
+func (e *Env) topPopover(owner event.Tag) bool {
+	if e.dialog != nil || e.menuLayer != nil && e.menuSeq > e.popSeq {
+		return false
+	}
+	return e.popLayer == owner
+}
+
+// claimDialog gives owner the window's one dialog layer (§6.17): it reports
+// false while another dialog holds it — a dialog never opens over a dialog.
+func (e *Env) claimDialog(owner event.Tag) bool {
+	if e.dialog != nil && e.dialog != owner {
+		return false
+	}
+	e.dialog = owner
+	return true
+}
+
+// releaseDialog frees the dialog layer if owner holds it.
+func (e *Env) releaseDialog(owner event.Tag) {
+	if e.dialog == owner {
+		e.dialog = nil
 	}
 }
 

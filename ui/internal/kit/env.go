@@ -79,16 +79,28 @@ type Env struct {
 	// layout cursor: Gio cannot read the current transform, so the overlay
 	// learns where an anchor is from TrackInput and Offset (UK-07).
 	win, origin image.Point
-	// overlay is the menu that holds the window's one overlay.
-	overlay event.Tag
+	// menuLayer and popLayer are the window's floating layers (UK-07): at
+	// most one of each, so a menu may open from a popover; the seqs order
+	// them for Escape. dialog is the window's one dialog layer (§6.17).
+	menuLayer, popLayer event.Tag
+	menuSeq, popSeq     int
+	dialog              event.Tag
+	// toast is the window's toast manager (UK-07, §6.18).
+	toast toastManager
+	// toastErrors carry a toast's draw errors from the frame end, where the
+	// manager runs, out to ToastError.
+	toastErrors []error
 	// tip is the window's tooltip manager (UK-07, §6.7).
 	tip tooltipManager
 
 	// modality is true while focus moves come from the keyboard.
 	modality bool
-	// tabPress records an unmodified Tab press seen by TrackInput this frame
-	// so a focused Combobox with keyboard-moved highlight can consume it.
-	tabPress bool
+	// tabPress and shiftTabPress record an unmodified, resp. Shift+Tab,
+	// press seen by TrackInput this frame, so the components that act on
+	// Tab (a Combobox with a keyboard-moved highlight, the Dialog's focus
+	// trap) consume it without racing TrackInput, the sole raw reader:
+	// key events go to the first matching gtx.Event caller.
+	tabPress, shiftTabPress bool
 	// inputTag backs the window-level listeners of TrackInput; its address
 	// is the tag, so it must not move.
 	inputTag event.Tag
@@ -192,9 +204,29 @@ func (e *Env) Keep() { e.Driver.Keep() }
 // calls it after layout.
 func (e *Env) FrameEnd(gtx *layout.Context) {
 	e.tip.endFrame(e, gtx)
+	e.toast.endFrame(e, gtx)
 	if at, ok := e.Driver.Next(); ok {
 		gtx.Execute(op.InvalidateCmd{At: at})
 	}
+}
+
+// noteToastError keeps the first pending toast draw error only: a persistent
+// error would otherwise add one entry per frame when nobody drains it.
+func (e *Env) noteToastError(err error) {
+	if len(e.toastErrors) == 0 {
+		e.toastErrors = append(e.toastErrors, err)
+	}
+}
+
+// ToastError drains the first draw error the frame's toasts hit, if any: the
+// manager runs at the frame end, where a Layout return cannot carry it.
+func (e *Env) ToastError() error {
+	if len(e.toastErrors) == 0 {
+		return nil
+	}
+	err := e.toastErrors[0]
+	e.toastErrors = e.toastErrors[:0]
+	return err
 }
 
 // TrackInput registers the window-level listeners that maintain the
@@ -205,7 +237,7 @@ func (e *Env) FrameEnd(gtx *layout.Context) {
 // under the pointer, so this hides nothing).
 func (e *Env) TrackInput(gtx *layout.Context) {
 	e.win, e.origin = gtx.Constraints.Max, image.Point{}
-	e.tabPress = false
+	e.tabPress, e.shiftTabPress = false, false
 	e.tip.beginFrame()
 	if e.KeyboardOnly {
 		// The gallery's keyboard-only mode: every focus move came from the
@@ -242,8 +274,13 @@ func (e *Env) trackTab(gtx *layout.Context) {
 		}
 		if ke, isKey := ev.(key.Event); isKey && ke.State == key.Press {
 			e.modality = true
+			// Only the exact unmodified and Shift+Tab presses are recorded;
+			// every other chord belongs to the control that named it.
 			if ke.Modifiers == 0 {
 				e.tabPress = true
+			}
+			if ke.Modifiers == key.ModShift {
+				e.shiftTabPress = true
 			}
 		}
 	}
@@ -255,6 +292,15 @@ func (e *Env) takeTab() bool {
 		return false
 	}
 	e.tabPress = false
+	return true
+}
+
+// takeShiftTab consumes a pending Shift+Tab press recorded by TrackInput.
+func (e *Env) takeShiftTab() bool {
+	if !e.shiftTabPress {
+		return false
+	}
+	e.shiftTabPress = false
 	return true
 }
 

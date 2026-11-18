@@ -64,6 +64,9 @@ const (
 	compProgress
 	compDivider
 	compSplitPane
+	compPopover
+	compDialog
+	compToast
 )
 
 // cell identifies one matrix cell of the inventory (UK-E03).
@@ -104,6 +107,9 @@ type pages struct {
 	section  sectionHeaderPage
 	scroll   scrollAreaPage
 	f1012    f1012Pages
+	pop      popoverPage
+	dlg      dialogPage
+	tst      toastPage
 	nav      []*kit.ButtonState
 	// runs are the page-level text runs and ctl the control boxes of the
 	// frame, in window coordinates; ctlRuns are the runs drawn inside a
@@ -135,6 +141,9 @@ func newPages(env *kit.Env) *pages {
 	p.section = newSectionHeaderPage()
 	p.scroll = newScrollAreaPage()
 	p.f1012 = newF1012Pages()
+	p.pop = newPopoverPage()
+	p.dlg = newDialogPage()
+	p.tst = newToastPage()
 	for range pageNames() {
 		p.nav = append(p.nav, kit.NewButtonState())
 	}
@@ -253,7 +262,7 @@ func (p *pages) force(st string, tag event.Tag) {
 		p.env.Preview.Hover = tag
 	case stPressed:
 		p.env.Preview.Press = tag
-	case stFocus:
+	case stFocus, dlgFormFocus, dlgSafeFocus:
 		p.env.Preview.Focus = tag
 	case selOpen:
 		p.env.Preview.Open = tag

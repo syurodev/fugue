@@ -46,6 +46,14 @@ const (
 // of short labels does not shrink to a sliver around its widest item.
 const MenuMinWidth = unit.Dp(160)
 
+// DialogWidth is the width of a dialog frame (§6.17): wide enough for a
+// form of fields at the §3.1 spacing, never so wide the body reads as a page.
+const DialogWidth = unit.Dp(420)
+
+// ToastWidth is the width of a toast (§6.18): room for a two-line detail at
+// type.small, never a banner.
+const ToastWidth = unit.Dp(320)
+
 // Icon sizes (§3.4).
 const (
 	IconXS = unit.Dp(12)

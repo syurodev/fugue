@@ -42,6 +42,7 @@ const (
 	IconCopy         IconName = "copy"
 	IconRestart      IconName = "rotate-ccw"
 	IconHelp         IconName = "circle-help"
+	IconPin          IconName = "pin"
 )
 
 // iconGrid is the Lucide coordinate grid in dp: paths are authored on it.
@@ -73,6 +74,8 @@ func pathOf(n IconName) (string, error) {
 		return icondata.RotateCCW, nil
 	case IconHelp:
 		return icondata.CircleHelp, nil
+	case IconPin:
+		return icondata.Pin, nil
 	}
 	return "", fmt.Errorf("%w: %q", errIconUnknown, string(n))
 }

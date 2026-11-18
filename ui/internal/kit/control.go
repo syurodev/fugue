@@ -290,3 +290,11 @@ func drawIconScaled(env *Env, gtx *layout.Context, p image.Point, name IconName,
 	defer scaleAbout(gtx, f32.Pt(float32(p.X)+half, float32(p.Y)+half), s).Pop()
 	return drawIconAt(env, gtx, p, name, size, c)
 }
+
+// labelClose and labelPin are the accessible names of the kit's own chrome
+// controls: the header close button of a popover and its pin toggle (§6.16),
+// the toast's close button (§6.18).
+const (
+	labelClose = "Close"
+	labelPin   = "Pin"
+)

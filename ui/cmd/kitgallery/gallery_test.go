@@ -70,6 +70,9 @@ func expectedCells(cur int) map[cell]bool {
 		"Tag":           tagCells,
 		"Progress":      progressAndDividerCells,
 		"SplitPane":     splitPaneCells,
+		"Popover":       popoverCells,
+		"Dialog":        dialogCells,
+		"Toast":         toastCells,
 	}
 	if fn := builders[pageNames()[cur]]; fn != nil {
 		fn(want)
@@ -214,6 +217,37 @@ func splitPaneCells(want map[cell]bool) {
 		for _, st := range splitStateNames() {
 			want[cell{compSplitPane, oi, 0, st}] = true
 		}
+	}
+}
+
+// popoverCells are the Popover cells: the three specimens and the live
+// trigger.
+func popoverCells(want map[cell]bool) {
+	for _, st := range popoverStates() {
+		if st == povLive {
+			want[cell{compPopover, 1, 0, st}] = true
+			continue
+		}
+		want[cell{compPopover, 0, 0, st}] = true
+	}
+}
+
+// dialogCells are the Dialog cells: the six specimens and the live trigger.
+func dialogCells(want map[cell]bool) {
+	for _, st := range []string{dlgForm, dlgFormFocus, dlgFormBusy, dlgFormScrim, dlgConfirm, dlgSafeFocus} {
+		want[cell{compDialog, 0, 0, st}] = true
+	}
+	want[cell{compDialog, 1, 0, dlgLive}] = true
+}
+
+// toastCells are the Toast cells: the one-toast specimens, the corner
+// three-stack, and the live push triggers.
+func toastCells(want map[cell]bool) {
+	for _, st := range []string{tstInfo, tstAction, tstWarning, tstMerged, tstPaused, tstStack} {
+		want[cell{compToast, 0, 0, st}] = true
+	}
+	for _, st := range toastPushStates() {
+		want[cell{compToast, 1, 0, st}] = true
 	}
 }
 
