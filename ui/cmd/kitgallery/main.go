@@ -76,6 +76,7 @@ func runWindow(light, keyboard, reduced, slow bool, uiscale float32) error {
 	g.setSlow(slow)
 	w := new(app.Window)
 	w.Option(app.Title("Fugue kit gallery"), app.Size(windowW, windowH))
+	env.Invalidate = w.Invalidate
 	var ops op.Ops
 	for {
 		switch e := w.Event().(type) {

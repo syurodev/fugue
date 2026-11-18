@@ -60,6 +60,8 @@ const (
 	compListRow
 	compSectionHeader
 	compScrollArea
+	compVirtualList
+	compTreeView
 	compTag
 	compProgress
 	compDivider
@@ -106,6 +108,8 @@ type pages struct {
 	list     listRowPage
 	section  sectionHeaderPage
 	scroll   scrollAreaPage
+	vl       virtualListPage
+	tree     treeViewPage
 	f1012    f1012Pages
 	pop      popoverPage
 	dlg      dialogPage
@@ -140,6 +144,8 @@ func newPages(env *kit.Env) *pages {
 	p.list = newListRowPage()
 	p.section = newSectionHeaderPage()
 	p.scroll = newScrollAreaPage()
+	p.vl = newVirtualListPage()
+	p.tree = newTreeViewPage()
 	p.f1012 = newF1012Pages()
 	p.pop = newPopoverPage()
 	p.dlg = newDialogPage()
