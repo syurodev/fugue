@@ -103,21 +103,21 @@ func (s *Store) applyTeamMutation(
 	}
 	defer clear(rawKey)
 
-	nextSeq, err := s.appendTeamEventAndRemovals(ctx, tx, teamID, ev, meta, rawKey, removed, expectedSeq)
+	lastSeq, err := s.appendTeamEventAndRemovals(ctx, tx, teamID, ev, meta, rawKey, removed, expectedSeq)
 	if err != nil {
 		return 0, err
 	}
-	if err := s.resealAndInsertTasks(ctx, tx, teamID, meta, rawKey, reseals, added, &nextSeq); err != nil {
+	if err := s.resealAndInsertTasks(ctx, tx, teamID, meta, rawKey, reseals, added, &lastSeq); err != nil {
 		return 0, err
 	}
 	if err := s.commitTeamTx(snap, true, tx.Commit); err != nil {
 		return 0, err
 	}
-	return nextSeq, nil
+	return lastSeq, nil
 }
 
 // appendTeamEventAndRemovals appends the mutation's team event and cancels
-// the removed tasks, returning the team's next sequence.
+// the removed tasks, returning the team's last sequence.
 func (s *Store) appendTeamEventAndRemovals(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -128,9 +128,9 @@ func (s *Store) appendTeamEventAndRemovals(
 	removed []string,
 	expectedSeq int64,
 ) (int64, error) {
-	nextSeq := expectedSeq + 1
+	lastSeq := expectedSeq + 1
 	now := s.clock.Now().UnixMilli()
-	fromState, toState, err := applyTeamProjection(ctx, tx, teamID, meta.State, nextSeq, now, ev)
+	fromState, toState, err := applyTeamProjection(ctx, tx, teamID, meta.State, lastSeq, now, ev)
 	if err != nil {
 		return 0, err
 	}
@@ -138,20 +138,20 @@ func (s *Store) appendTeamEventAndRemovals(
 	if err != nil {
 		return 0, fmt.Errorf("seal the team event payload: %w", err)
 	}
-	if insertErr := insertAppendedTeamEvent(ctx, tx, teamID, nextSeq, ev, fromState, toState, envelope, now); insertErr != nil {
+	if insertErr := insertAppendedTeamEvent(ctx, tx, teamID, lastSeq, ev, fromState, toState, envelope, now); insertErr != nil {
 		return 0, insertErr
 	}
-	nextSeq++
 	for _, taskID := range removed {
-		if nextSeq, err = s.appendTaskCancellation(ctx, tx, teamID, taskID, nextSeq, now); err != nil {
+		if lastSeq, err = s.appendTaskCancellation(ctx, tx, teamID, taskID, lastSeq+1, now); err != nil {
 			return 0, err
 		}
 	}
-	return nextSeq, nil
+	return lastSeq, nil
 }
 
 // resealAndInsertTasks replaces the sealed specs of the edited tasks and
-// inserts the added ones, advancing lastSeq past every appended event.
+// inserts the added ones after the team's last sequence, advancing lastSeq
+// past their TaskCreated events.
 func (s *Store) resealAndInsertTasks(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -179,7 +179,7 @@ func (s *Store) resealAndInsertTasks(
 	if err != nil {
 		return err
 	}
-	records, err := s.insertTasksAt(ctx, tx, teamID, added, depths, *lastSeq, meta.KeyID, rawKey, now)
+	records, err := s.insertTasksAt(ctx, tx, teamID, added, depths, *lastSeq+1, meta.KeyID, rawKey, now)
 	if err != nil {
 		return err
 	}
