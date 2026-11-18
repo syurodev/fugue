@@ -42,6 +42,15 @@ type HostDeps struct {
 	// Bridge locates `fugue mcp-bridge` for vendor sessions: the fugue binary
 	// and the host socket. Empty runs sessions without Fugue's MCP tools.
 	Bridge VendorBridge
+	// GitBinary overrides the git binary (absolute path) the team worktrees
+	// use; empty locates git on the machine, and a missing git fails team
+	// tasks that need a worktree closed (F11.3a).
+	GitBinary string
+	// TeamAdmitter decides when a queued team task may start. Nil uses the
+	// local admitter (host capacity and the direct-child cap); the F11.6
+	// scheduler plugs in here, and a test that wants the decide path alone
+	// injects one that admits nothing.
+	TeamAdmitter Admitter
 	// TestFugueTools registers Fugue MCP tools for tests only. The fugue
 	// binary never sets it, so a normal host serves none of them.
 	TestFugueTools []*FugueTool

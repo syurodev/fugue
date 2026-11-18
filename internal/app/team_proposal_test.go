@@ -5,23 +5,16 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
-	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/interaction"
-	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
-	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/testutil"
-	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
@@ -32,96 +25,6 @@ const (
 	teamTestPending   = "pending"
 	teamTestRejected  = "rejected"
 )
-
-// teamProposalFixture is the F11.2a fixture: a host with the fake vendor CLI,
-// a workspace whose catalog carries one read role, and a live Claude session
-// holding a turn, so the propose path runs against a real actor.
-type teamProposalFixture struct {
-	hp      *HostProcess
-	rt      *HostRuntime
-	svc     *VendorService
-	tools   *SessionToolService
-	session VendorSessionView
-	binding SessionBinding
-	wsID    string
-}
-
-func newTeamProposalFixture(t *testing.T, extraTOML string) *teamProposalFixture {
-	t.Helper()
-	exe, err := os.Executable()
-	if err != nil {
-		t.Fatal(err)
-	}
-	clk := clock.NewFake(time.Unix(200, 0))
-	hp, err := StartHost(t.Context(), &HostDeps{
-		DataDir: cheapvault.DataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
-		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("team-test")),
-		Transport: newScriptedTransport(), VendorBinary: exe,
-		Bridge: VendorBridge{Binary: exe, Socket: filepath.Join(t.TempDir(), "host.sock")},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if closeErr := hp.Close(); closeErr != nil {
-			t.Errorf("close host: %v", closeErr)
-		}
-	})
-	unlockCheapVault(t, hp)
-	rt := hp.Runtime()
-	svc, err := rt.VendorService()
-	if err != nil {
-		t.Fatal(err)
-	}
-	tools, err := rt.SessionTools()
-	if err != nil {
-		t.Fatal(err)
-	}
-	ws, err := rt.CreateWorkspace(t.Context(), testAppPrincipal, teamTestWorkspace)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, cfgErr := rt.UpdateWorkspaceConfig(t.Context(), testAppPrincipal, ws.ID, teamWorkspaceTOML(t, extraTOML), ws.ConfigHash); cfgErr != nil {
-		t.Fatal(cfgErr)
-	}
-	session, binding := startTeamFixtureSession(t, rt, svc, tools, ws.ID)
-	return &teamProposalFixture{hp: hp, rt: rt, svc: svc, tools: tools, session: session, binding: binding, wsID: ws.ID}
-}
-
-// startTeamFixtureSession starts one Claude session in the workspace and
-// holds its turn, so the propose path runs against a live actor.
-func startTeamFixtureSession(t *testing.T, rt *HostRuntime, svc *VendorService, tools *SessionToolService, workspaceID string) (VendorSessionView, SessionBinding) {
-	t.Helper()
-	sub, err := rt.Subscribe(t.Context(), SubscribeParams{Principal: testAppPrincipal, Topic: TopicVendorSessions})
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer sub.Close()
-	session, err := svc.Start(t.Context(), testAppPrincipal, &StartVendorSession{CommandID: "team-start", Vendor: VendorClaude, WorkspaceID: workspaceID})
-	if err != nil {
-		t.Fatal(err)
-	}
-	awaitSessionState(t, sub, session.ID, "ready")
-	if sendErr := svc.Send(t.Context(), testAppPrincipal, VendorInput{CommandID: "team-turn", SessionID: session.ID, Text: fakeCLIHold}); sendErr != nil {
-		t.Fatal(sendErr)
-	}
-	tools.tokens.mu.Lock()
-	binding, ok := tools.tokens.bySession[session.ID]
-	tools.tokens.mu.Unlock()
-	if !ok {
-		t.Fatalf("missing live session binding for %s", session.ID)
-	}
-	return session, binding
-}
-
-func teamWorkspaceTOML(t *testing.T, extra string) []byte {
-	t.Helper()
-	root := filepath.ToSlash(t.TempDir())
-	raw := "name = \"" + teamTestWorkspace + "\"\n" + extra +
-		"[[roots]]\nname = \"main\"\npath = \"" + root + "\"\naccess = \"rw\"\n" +
-		"[[roles]]\nname = \"" + teamTestRole + "\"\nvendor = \"claude\"\npermission = \"read\"\n"
-	return []byte(raw)
-}
 
 func validTeamProposalArgs() *ProposeArgs {
 	return &ProposeArgs{

@@ -214,8 +214,9 @@ func (s *TeamProposalService) applyDecisionLocked(ctx context.Context, sessionID
 
 // approvePlan activates the team (Q-98): TeamStarted with the sealed decision
 // payload, the edited specs re-sealed, removed tasks cancelled and added
-// tasks inserted as queued tasks. Nothing starts — the start path is F11.3
-// and the scheduler is F11.6. The item flip is best-effort afterwards: the
+// tasks inserted as queued tasks. The decision itself starts nothing: the
+// onTeamActive hook hands the team to the F11.3a dispatcher, and the
+// scheduler is F11.6. The item flip is best-effort afterwards: the
 // durable decision is authoritative, and a failed flip is warned with its
 // error code only (OR-13).
 // decideSoloOrReject ends the still-proposed team with the user's decision
@@ -273,6 +274,9 @@ func (s *TeamProposalService) approvePlan(ctx context.Context, rec *vendorstore.
 	if flipErr := s.flipItemDecision(ctx, rec.SessionID, rec.TeamID, itemDecision); flipErr != nil {
 		slog.WarnContext(ctx, "recording the decided proposal item failed",
 			"session_id", rec.SessionID, "error_code", string(errcode.CodeOf(flipErr)))
+	}
+	if s.onTeamActive != nil {
+		s.onTeamActive(rec.TeamID)
 	}
 	return nil
 }

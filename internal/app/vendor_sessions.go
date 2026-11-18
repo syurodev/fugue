@@ -28,6 +28,10 @@ var (
 // a scheduler-owned value (orchestration §7) that has no scheduler yet, so it
 // is the fixed pre-scheduler default of two active processes (Q-55 A). A start
 // beyond the cap fails typed with ErrVendorSessionCapacity (vendor.capacity).
+//
+// TODO(F11.6): this is a placeholder. F11.6 replaces it with the orchestration
+// §7 tiers: 6 sessions per account, min(8, (RAM − 4 GiB) / 400 MiB) machine
+// wide, max(1, cores/4) heavy commands, all configurable in the workspace.
 const maxVendorSessionsPerHost = 2
 
 // VendorSessionDeps contains the runtime dependencies for vendor sessions.
@@ -242,16 +246,10 @@ func (m *VendorSessions) reserveSlot(ctx context.Context, sessionID string) (fun
 		m.startReservations--
 		m.mu.Unlock()
 	}
-	sessions, err := m.deps.Store.ListSessions(ctx)
+	active, err := m.activeSessions(ctx)
 	if err != nil {
 		release()
-		return nil, safeActorError(err)
-	}
-	active := 0
-	for i := range sessions {
-		if sessions[i].State != vendorstore.StateClosed && sessions[i].State != vendorstore.StateDetached {
-			active++
-		}
+		return nil, err
 	}
 	m.mu.RLock()
 	reserved := m.startReservations
