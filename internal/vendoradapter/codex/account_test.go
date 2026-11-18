@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
+	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/vendor"
 )
 
@@ -64,6 +65,43 @@ func TestLoginProbeEnvCarriesNoHostSecret(t *testing.T) {
 	}
 	if report.Login != vendor.LoginActive {
 		t.Fatalf("login = %s: the status command saw a Fugue secret in its environment", report.Login)
+	}
+}
+
+// TestLoginProcessEnvCarriesNoHostSecret is VR-E09 for the login process
+// (F9.10b): the CLI's own login command runs with the §8 allowlist the probe
+// uses, so no Fugue secret and no other host variable reaches it.
+func TestLoginProcessEnvCarriesNoHostSecret(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "fake-login")
+	testutil.WriteExecutable(t, path, []byte("#!/bin/sh\nexec /usr/bin/env\n"))
+	a := &Adapter{
+		Binary: path,
+		HostEnv: []string{
+			"HOME=" + fakeHome,
+			"FUGUE_VAULT_KEY=secret", "OPENAI_API_KEY=secret", "FUGUE_TEST_OUTER_SECRET=secret",
+		},
+	}
+	run, err := a.StartLogin(t.Context(), vendor.AccountHome{ConfigDir: fakeLoginLoggedInConfigDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out strings.Builder
+	for line := range run.Lines() {
+		out.WriteString(line)
+		out.WriteByte('\n')
+	}
+	<-run.Done()
+	env := out.String()
+	for _, want := range []string{"HOME=" + fakeHome, "TERM=dumb", "CODEX_HOME=" + fakeLoginLoggedInConfigDir} {
+		if !strings.Contains(env, want) {
+			t.Errorf("login process environment lost %s: %q", want, env)
+		}
+	}
+	for _, banned := range []string{"FUGUE_VAULT_KEY", "OPENAI_API_KEY", "FUGUE_TEST_OUTER_SECRET", "secret"} {
+		if strings.Contains(env, banned) {
+			t.Errorf("login process environment carries %s: %q", banned, env)
+		}
 	}
 }
 

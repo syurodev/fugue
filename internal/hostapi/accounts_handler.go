@@ -43,6 +43,49 @@ func (h *accountsHandler) ListAccounts(ctx context.Context, _ *connect.Request[a
 	return connect.NewResponse(out), nil
 }
 
+// StartLogin runs the vendor CLI's own login command (F9.10b) and returns at
+// once; the progress streams on the `login` topic, so the response carries
+// only the login identity.
+func (h *accountsHandler) StartLogin(ctx context.Context, req *connect.Request[accountsv1.StartLoginRequest]) (*connect.Response[accountsv1.StartLoginResponse], error) {
+	principal, authErr := localSessionPrincipal(ctx, h.backend, "accounts")
+	if authErr != nil {
+		return nil, authErr
+	}
+	provider, ok := h.backend.(accountsProvider)
+	if !ok {
+		return nil, toConnectError(ctx, h.backend, errcode.New(errcode.Unavailable, "the accounts service is unavailable"))
+	}
+	svc, err := provider.AccountsService()
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	view, err := svc.StartLogin(ctx, principal, vendorName(req.Msg.Vendor))
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	return connect.NewResponse(&accountsv1.StartLoginResponse{LoginId: view.LoginID}), nil
+}
+
+// CancelLogin stops the running login process of one vendor.
+func (h *accountsHandler) CancelLogin(ctx context.Context, req *connect.Request[accountsv1.CancelLoginRequest]) (*connect.Response[accountsv1.CancelLoginResponse], error) {
+	principal, authErr := localSessionPrincipal(ctx, h.backend, "accounts")
+	if authErr != nil {
+		return nil, authErr
+	}
+	provider, ok := h.backend.(accountsProvider)
+	if !ok {
+		return nil, toConnectError(ctx, h.backend, errcode.New(errcode.Unavailable, "the accounts service is unavailable"))
+	}
+	svc, err := provider.AccountsService()
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	if err := svc.CancelLogin(ctx, principal, vendorName(req.Msg.Vendor)); err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	return connect.NewResponse(&accountsv1.CancelLoginResponse{}), nil
+}
+
 func protoAccount(v *app.AccountView) *accountsv1.Account {
 	acc := &accountsv1.Account{
 		Vendor: protoVendor(v.Vendor), State: v.State, PausedUntil: v.PausedUntil, Login: v.Login,

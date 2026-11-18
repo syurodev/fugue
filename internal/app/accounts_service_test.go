@@ -75,8 +75,15 @@ func TestStoredFailureCodeKeepsOnlyAccountRelevantClasses(t *testing.T) {
 
 func newTestAccountsService(t *testing.T, f *transcriptFixture) (*AccountsService, *vendor.Accounts) {
 	t.Helper()
+	return newTestAccountsServiceDeps(t, f, accountsServiceDeps{})
+}
+
+// newTestAccountsServiceDeps builds the accounts service with one claude
+// account and the given login seams.
+func newTestAccountsServiceDeps(t *testing.T, f *transcriptFixture, deps accountsServiceDeps) (*AccountsService, *vendor.Accounts) {
+	t.Helper()
 	accounts := claudeOnlyAccounts(f)
-	svc, err := newAccountsService(accounts, &VendorService{accounts: accounts, adapters: map[string]vendor.Adapter{}}, f.hub)
+	svc, err := newAccountsService(accounts, &VendorService{accounts: accounts, adapters: map[string]vendor.Adapter{}}, f.hub, deps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,13 +246,15 @@ func TestConcurrentListAccountsShareOneRefresh(t *testing.T) {
 	accounts := claudeOnlyAccounts(f)
 	adapter := quotaProbeAdapter{probes: new(atomic.Int32), entered: make(chan struct{}), release: make(chan struct{})}
 	vendors := &VendorService{accounts: accounts, adapters: map[string]vendor.Adapter{testVendorName: adapter}}
-	svc, err := newAccountsService(accounts, vendors, f.hub)
+	svc, err := newAccountsService(accounts, vendors, f.hub, accountsServiceDeps{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	const callers = 8
+	var entered atomic.Int32
 	tasks := make([]*supervise.Task, 0, callers)
 	call := func(ctx context.Context) error {
+		entered.Add(1)
 		views, err := svc.List(ctx, string(KindApp))
 		if err == nil && (len(views) != 1 || views[0].Login != "logged_in") {
 			err = errcode.New(errcode.Internal, "unexpected list result")
@@ -257,12 +266,19 @@ func TestConcurrentListAccountsShareOneRefresh(t *testing.T) {
 	for range callers - 1 {
 		tasks = append(tasks, supervise.Go(t.Context(), "test.list_accounts", call))
 	}
-	// Release the status command only once every other call waits on it.
-	testutil.Spin(t, "every other call waiting on the status command", func() bool {
+	// Release the status command only once every call has entered List while
+	// a refresh is in flight: the owner is blocked inside the probe, so every
+	// later call must have joined its flight rather than starting a new one.
+	testutil.Spin(t, "the refresh in flight", func() bool {
 		svc.flightMu.Lock()
 		defer svc.flightMu.Unlock()
-		return svc.flight.waiters >= callers-1
+		return svc.flight != nil
 	})
+	if err := testutil.WaitFor(t.Context(), "every call entered List", func() bool {
+		return entered.Load() == callers
+	}); err != nil {
+		t.Fatal(err)
+	}
 	close(adapter.release)
 	for _, task := range tasks {
 		if err := task.Wait(); err != nil {
@@ -282,7 +298,7 @@ func TestQuotaTopicNeverEndsOnAStaleView(t *testing.T) {
 	accounts := vendor.NewAccounts(f.clock, []vendor.AccountVendor{
 		{Name: names[0], DirectQuota: true}, {Name: names[1], DirectQuota: true}, {Name: sentinel, DirectQuota: true},
 	})
-	svc, err := newAccountsService(accounts, &VendorService{accounts: accounts, adapters: map[string]vendor.Adapter{}}, f.hub)
+	svc, err := newAccountsService(accounts, &VendorService{accounts: accounts, adapters: map[string]vendor.Adapter{}}, f.hub, accountsServiceDeps{})
 	if err != nil {
 		t.Fatal(err)
 	}
