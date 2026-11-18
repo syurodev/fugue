@@ -208,6 +208,7 @@ func (s *TabsState) deferDraggedTab(env *Env, gtx *layout.Context, pr TabsProps,
 	strokeRRect(gtx.Ops, r, rad, float32(gtx.Dp(theme.Hairline)), c.BorderSubtle)
 	saved := sl.rect
 	sl.rect = r
+	registerDocTabArea(gtx, pr.Variant, it.Disabled, sl)
 	err := s.drawRegularTab(env, gtx, pr.Variant, it, sl, c.Fg, true, false, false, 1, stripR.Max.X, true)
 	sl.rect = saved
 	op.Defer(gtx.Ops, m.Stop())

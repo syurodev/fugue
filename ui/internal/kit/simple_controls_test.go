@@ -220,6 +220,7 @@ func TestTabsCtrlTabCyclesDocumentTabsAndOverflowListsHidden(t *testing.T) {
 
 	step := func(w int, extra ...func()) TabsEvents {
 		h.frameSize(t, w, 40)
+		h.env.TrackInput(&h.gtx)
 		_, ev := st.Layout(h.env, &h.gtx, TabsProps{Variant: TabsDocument, Items: items, ActiveID: act})
 		if ev.Err != nil {
 			t.Fatalf("Tabs.Layout: %v", ev.Err)
