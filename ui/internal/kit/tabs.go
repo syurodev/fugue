@@ -87,6 +87,7 @@ type TabsState struct {
 	overflow    *MenuState
 	hiddenIDs   []string
 	stripRect   image.Rectangle
+	focusRingR  image.Rectangle
 	lastActive  string
 	inited      bool
 }
@@ -114,6 +115,17 @@ func (s *TabsState) TabTag(id string) event.Tag {
 // IndicatorRect returns the current sliding pill rectangle, for motion
 // evidence tests.
 func (s *TabsState) IndicatorRect() image.Rectangle { return s.indicator.rect }
+
+// TabRect returns the laid-out rectangle of tab id, for focus-ring tests.
+func (s *TabsState) TabRect(id string) image.Rectangle {
+	if sl := s.slots[id]; sl != nil {
+		return sl.rect
+	}
+	return image.Rectangle{}
+}
+
+// FocusRingRect returns the rectangle where the inset focus ring was last drawn.
+func (s *TabsState) FocusRingRect() image.Rectangle { return s.focusRingR }
 
 // HiddenIDs returns the IDs of tabs currently overflowing the visible strip,
 // which are listed in the overflow Menu (§6.22).
@@ -240,15 +252,11 @@ func (s *TabsState) readInput(env *Env, gtx *layout.Context, pr TabsProps, ev *T
 		return
 	}
 	var filters []event.Filter
-	filters = append(filters, key.FocusFilter{Target: s.Tag()})
 	if pr.Variant == TabsDocument {
-		var focus event.Tag
-		if !pr.GlobalShortcuts {
-			focus = s.Tag()
-		}
-		filters = append(filters, key.Filter{Focus: focus, Name: key.NameTab, Required: key.ModCtrl, Optional: key.ModShift})
+		filters = s.docFilters(pr)
 	} else {
 		filters = append(filters,
+			key.FocusFilter{Target: s.Tag()},
 			key.Filter{Focus: s.Tag(), Name: key.NameLeftArrow},
 			key.Filter{Focus: s.Tag(), Name: key.NameRightArrow},
 		)
@@ -348,13 +356,15 @@ func (s *TabsState) beginPress(gtx *layout.Context, pr TabsProps, pt image.Point
 	if id == "" {
 		return
 	}
-	gtx.Execute(key.FocusCmd{Tag: s.Tag()})
-	if pr.Variant == TabsDocument {
-		sl := s.slots[id]
-		if sl != nil && !sl.closeRect.Empty() && pt.In(sl.closeRect) {
-			s.pressClose = id
-			return
-		}
+	sl := s.slots[id]
+	if pr.Variant == TabsDocument && sl != nil {
+		gtx.Execute(key.FocusCmd{Tag: &sl.tag})
+	} else {
+		gtx.Execute(key.FocusCmd{Tag: s.Tag()})
+	}
+	if pr.Variant == TabsDocument && sl != nil && !sl.closeRect.Empty() && pt.In(sl.closeRect) {
+		s.pressClose = id
+		return
 	}
 	s.pressID = id
 	s.dragID = id

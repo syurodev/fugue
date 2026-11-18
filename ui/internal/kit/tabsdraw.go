@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"gioui.org/io/event"
+	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 
@@ -94,9 +95,10 @@ func (s *TabsState) stepIndicator(env *Env, pr TabsProps) {
 }
 
 func (s *TabsState) draw(env *Env, gtx *layout.Context, pr TabsProps, h int, ev *TabsEvents) error {
+	s.focusRingR = image.Rectangle{}
 	c := env.Th.Chrome()
 	stripR := s.stripRect
-	focused := env.FocusVisible(gtx, s.Tag()) || env.previewFocus(s.Tag())
+	focused := pr.Variant == TabsMode && (env.FocusVisible(gtx, s.Tag()) || env.previewFocus(s.Tag()))
 	focus := followState(env, &s.focusF, focused)
 
 	func() {
@@ -139,7 +141,8 @@ func (s *TabsState) drawStripTabs(env *Env, gtx *layout.Context, pr TabsProps, s
 			return err
 		}
 	}
-	if focus > 0 {
+	if pr.Variant == TabsMode && focus > 0 {
+		s.focusRingR = stripR
 		insetFocusRing(gtx, stripR, rad, c.FocusBorder, focus)
 	}
 	return nil
@@ -162,15 +165,18 @@ func (s *TabsState) drawTabItem(env *Env, gtx *layout.Context, pr TabsProps, it 
 	c := env.Th.Chrome()
 	active := it.ID == pr.ActiveID
 	hov := s.hoverID == it.ID || env.previewHover(&sl.tag)
-	foc := env.previewFocus(&sl.tag) || (active && env.FocusVisible(gtx, s.Tag()))
+	tabFoc, foc := tabFocused(env, gtx, pr.Variant, it.Disabled, sl, s.Tag(), active)
 	dragging := (s.dragActive && s.dragID == it.ID) || pr.DraggingID == it.ID
+
+	registerDocTabArea(gtx, pr.Variant, it.Disabled, sl)
 
 	alpha := tabEdgeAlpha(sl.rect, stripMaxX)
 	if dragging {
 		fillLayer(gtx, sl.rect, gtx.Dp(theme.RadiusMD), c.SurfaceRaised, alpha)
 		strokeRRect(gtx.Ops, sl.rect, gtx.Dp(theme.RadiusMD), float32(gtx.Dp(theme.Hairline)), fade(c.FocusBorder, alpha))
 	}
-	if env.previewFocus(&sl.tag) {
+	if tabFoc {
+		s.focusRingR = sl.rect
 		insetFocusRing(gtx, sl.rect, gtx.Dp(theme.RadiusMD), c.FocusBorder, alpha)
 	}
 
@@ -179,6 +185,22 @@ func (s *TabsState) drawTabItem(env *Env, gtx *layout.Context, pr TabsProps, it 
 		return s.drawPinnedTab(env, gtx, it, sl, ink, hov, foc)
 	}
 	return s.drawRegularTab(env, gtx, pr.Variant, it, sl, ink, active, hov, foc, alpha, stripMaxX)
+}
+
+func tabFocused(env *Env, gtx *layout.Context, v TabsVariant, disabled bool, sl *tabSlot, stripTag event.Tag, active bool) (tabFoc, foc bool) {
+	if v == TabsDocument {
+		tabFoc = !disabled && (env.FocusVisible(gtx, &sl.tag) || env.previewFocus(&sl.tag))
+		return tabFoc, tabFoc
+	}
+	return false, active && env.FocusVisible(gtx, stripTag)
+}
+
+func registerDocTabArea(gtx *layout.Context, v TabsVariant, disabled bool, sl *tabSlot) {
+	if v != TabsDocument || disabled {
+		return
+	}
+	defer clip.Rect(sl.rect).Push(gtx.Ops).Pop()
+	event.Op(gtx.Ops, &sl.tag)
 }
 
 func (s *TabsState) drawPinnedTab(env *Env, gtx *layout.Context, it TabItem, sl *tabSlot, ink color.NRGBA, hov, foc bool) error {
@@ -331,4 +353,22 @@ func tabInk(c *theme.Chrome, active, disabled bool) color.NRGBA {
 		return c.Fg
 	}
 	return c.FgMuted
+}
+
+func (s *TabsState) docFilters(pr TabsProps) []event.Filter {
+	var filters []event.Filter
+	for _, it := range pr.Items {
+		sl := s.slots[it.ID]
+		if sl == nil || it.Disabled {
+			continue
+		}
+		filters = append(filters, key.FocusFilter{Target: &sl.tag})
+		if !pr.GlobalShortcuts {
+			filters = append(filters, key.Filter{Focus: &sl.tag, Name: key.NameTab, Required: key.ModCtrl, Optional: key.ModShift})
+		}
+	}
+	if pr.GlobalShortcuts {
+		filters = append(filters, key.Filter{Name: key.NameTab, Required: key.ModCtrl, Optional: key.ModShift})
+	}
+	return filters
 }

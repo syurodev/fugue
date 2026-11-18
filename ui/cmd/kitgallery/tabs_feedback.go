@@ -128,7 +128,7 @@ func (p *pages) placeDocSpecimens(gtx *layout.Context, w, h, y, gap int) int {
 			{ID: othID, Label: "other.go", Closable: true},
 		},
 		ActiveID: "foc",
-	}, s1.Tag(), stFocus, []string{tabDocFocus})
+	}, s1.TabTag("foc"), stFocus, []string{tabDocFocus})
 	y += h + gap
 
 	// 3. dragging

@@ -237,7 +237,12 @@ func TestTabsCtrlTabCyclesDocumentTabsAndOverflowListsHidden(t *testing.T) {
 		t.Fatal("expected HiddenIDs on narrow tab strip")
 	}
 
-	focusTag(t, h, st.Tag(), func(fn func()) { step(400, fn) })
+	h.env.KeyboardOnly = true
+	focusTag(t, h, st.TabTag(act), func(fn func()) { step(400, fn) })
+	step(400)
+	if got, want := st.FocusRingRect(), st.TabRect(act); got != want || want.Empty() {
+		t.Fatalf("document tab focus ring rect = %v, want focused tab rect %v", got, want)
+	}
 
 	// Ctrl+Tab -> b, Ctrl+Tab -> c, Ctrl+Shift+Tab -> b.
 	h.tap(key.NameTab, key.ModCtrl)
