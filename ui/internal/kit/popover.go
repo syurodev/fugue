@@ -144,7 +144,7 @@ func (p *PopoverState) Rect() image.Rectangle {
 // Layout runs the popover's frame. A closed popover does nothing and asks
 // for nothing; one that another layer has pushed out of the floating slots
 // closes on Exit.
-func (p *PopoverState) Layout(env *Env, gtx *layout.Context, props PopoverProps) (PopoverResult, error) {
+func (p *PopoverState) Layout(env *Env, gtx *layout.Context, props *PopoverProps) (PopoverResult, error) {
 	var res PopoverResult
 	if !p.open.Visible() {
 		env.releasePopover(p)
@@ -167,9 +167,7 @@ func (p *PopoverState) Layout(env *Env, gtx *layout.Context, props PopoverProps)
 	}
 	p.input(env, gtx, props, &res)
 	p.advance(env, props.Inline)
-	if err := p.place(env, gtx, props); err != nil {
-		return res, fmt.Errorf("measure the popover: %w", err)
-	}
+	p.place(env, gtx, props)
 	res.Size = p.rect.Size()
 	if err := p.draw(env, gtx, props, &res); err != nil {
 		return res, fmt.Errorf("draw the popover: %w", err)
@@ -180,35 +178,44 @@ func (p *PopoverState) Layout(env *Env, gtx *layout.Context, props PopoverProps)
 // input reads the frame's Escape and outside presses, against the areas the
 // last frame drew — the menu's order (menuinput.go). A panel on its way out
 // takes no input (§3.7).
-func (p *PopoverState) input(env *Env, gtx *layout.Context, props PopoverProps, res *PopoverResult) {
+func (p *PopoverState) input(env *Env, gtx *layout.Context, props *PopoverProps, res *PopoverResult) {
 	if !p.open.Shown() || props.Inline {
 		return
 	}
-	// Escape is the topmost layer's (§7): a dialog, or a newer float layer
-	// over this popover, owns it first.
-	if env.topPopover(p) {
-		for {
-			ev, ok := gtx.Event(key.Filter{Name: key.NameEscape})
-			if !ok {
-				break
-			}
-			if ke, is := ev.(key.Event); is && ke.State == key.Press {
-				p.escape(gtx, res)
-				return
-			}
+	p.escapeInput(env, gtx, res)
+	p.absorbPress(env, gtx, props, res)
+}
+
+// escapeInput applies the topmost-layer Escape rule (§7): a dialog, or a
+// newer float layer over this popover, owns Escape first.
+func (p *PopoverState) escapeInput(env *Env, gtx *layout.Context, res *PopoverResult) {
+	if !env.topPopover(p) {
+		return
+	}
+	for {
+		ev, ok := gtx.Event(key.Filter{Name: key.NameEscape})
+		if !ok {
+			return
+		}
+		if ke, is := ev.(key.Event); is && ke.State == key.Press {
+			p.escape(gtx, res)
+			return
 		}
 	}
-	// The absorbing area takes every press that lands on no panel; a
-	// pinned popover registers none, so a click outside falls through
-	// (§6.16).
+}
+
+// absorbPress reads the window-wide absorbing area under the panel; a
+// pinned popover registers none, so a click outside falls through (§6.16).
+func (p *PopoverState) absorbPress(env *Env, gtx *layout.Context, props *PopoverProps, res *PopoverResult) {
 	if !props.Pinned {
-		defer clip.Rect(env.windowRect()).Push(gtx.Ops).Pop()
+		a := clip.Rect(env.windowRect()).Push(gtx.Ops)
 		event.Op(gtx.Ops, &p.abs)
+		a.Pop()
 	}
 	for {
 		ev, ok := gtx.Event(pointer.Filter{Target: &p.abs, Kinds: pointer.Press})
 		if !ok {
-			break
+			return
 		}
 		if pe, is := ev.(pointer.Event); is && pe.Kind == pointer.Press {
 			p.Close()
@@ -243,7 +250,7 @@ func (p *PopoverState) advance(env *Env, inline bool) {
 // contentBox measures the content once per frame into a throwaway macro,
 // dead events included: Measure draws nothing and must touch no input
 // source, and the macro discards whatever it recorded.
-func (p *PopoverState) contentBox(gtx *layout.Context, props PopoverProps) image.Point {
+func (p *PopoverState) contentBox(gtx *layout.Context, props *PopoverProps) image.Point {
 	var box image.Point
 	at(gtx, image.Point{}, func(gtx *layout.Context) {
 		m := op.Record(gtx.Ops)
@@ -266,7 +273,7 @@ func (p *PopoverState) contentBox(gtx *layout.Context, props PopoverProps) image
 // below the anchor, flipping above where the window runs out: the menu's
 // placement (§6.16 takes §6.15's shape). A panel on its way out keeps the
 // place it had.
-func (p *PopoverState) place(env *Env, gtx *layout.Context, props PopoverProps) error {
+func (p *PopoverState) place(env *Env, gtx *layout.Context, props *PopoverProps) {
 	p.origin = env.origin
 	win := env.windowRect()
 	if props.Inline {
@@ -277,7 +284,7 @@ func (p *PopoverState) place(env *Env, gtx *layout.Context, props PopoverProps) 
 	head := popoverHeader(env, gtx, props)
 	size := image.Pt(box.X+2*p.pad, 2*p.pad+head+gtx.Dp(theme.SpaceSM)+box.Y)
 	if !p.open.Shown() {
-		return nil
+		return
 	}
 	pos, up := placeBelow(props.Anchor, size, win, gtx.Dp(theme.SpaceXS))
 	p.rect = image.Rectangle{Min: pos, Max: pos.Add(size)}
@@ -286,12 +293,11 @@ func (p *PopoverState) place(env *Env, gtx *layout.Context, props PopoverProps) 
 	if up {
 		p.from.Y = p.rect.Max.Y
 	}
-	return nil
 }
 
 // popoverHeader is the header's height: the header buttons' square over the
 // title line.
-func popoverHeader(env *Env, gtx *layout.Context, props PopoverProps) int {
+func popoverHeader(env *Env, gtx *layout.Context, props *PopoverProps) int {
 	line := 0
 	if props.Title != "" {
 		line = labelLine(env, gtx, theme.TypeTitle())
@@ -302,17 +308,10 @@ func popoverHeader(env *Env, gtx *layout.Context, props PopoverProps) int {
 // draw records the panel — and, on the overlay, the absorbing area under it —
 // and hands them to op.Defer (UK-07); an inline popover is placed in the
 // flow instead.
-func (p *PopoverState) draw(env *Env, gtx *layout.Context, props PopoverProps, res *PopoverResult) error {
+func (p *PopoverState) draw(env *Env, gtx *layout.Context, props *PopoverProps, res *PopoverResult) error {
 	macro := op.Record(gtx.Ops)
 	if !props.Inline && p.open.Shown() {
-		if !props.Pinned {
-			a := clip.Rect(env.windowRect()).Push(gtx.Ops)
-			event.Op(gtx.Ops, &p.abs)
-			a.Pop()
-		}
-		area := clip.Rect(p.rect).Push(gtx.Ops)
-		event.Op(gtx.Ops, &p.panel)
-		area.Pop()
+		p.registerAreas(env, gtx, props)
 	}
 	prog := float32(1)
 	if !props.Inline {
@@ -339,10 +338,24 @@ func (p *PopoverState) draw(env *Env, gtx *layout.Context, props PopoverProps, r
 	return nil
 }
 
+// registerAreas puts the absorbing area — under the panel, so the panel
+// stays on top — and the panel's own hit area into the frame's ops. A
+// pinned popover registers no absorbing area (§6.16).
+func (p *PopoverState) registerAreas(env *Env, gtx *layout.Context, props *PopoverProps) {
+	if !props.Pinned {
+		a := clip.Rect(env.windowRect()).Push(gtx.Ops)
+		event.Op(gtx.Ops, &p.abs)
+		a.Pop()
+	}
+	area := clip.Rect(p.rect).Push(gtx.Ops)
+	event.Op(gtx.Ops, &p.panel)
+	area.Pop()
+}
+
 // drawPanel draws the surface, the header — title, pin toggle, close — and
 // the content. The header buttons lay out here, where they draw, so their
 // hit areas sit at their boxes (UK-E10).
-func (p *PopoverState) drawPanel(env *Env, gtx *layout.Context, props PopoverProps, res *PopoverResult) error {
+func (p *PopoverState) drawPanel(env *Env, gtx *layout.Context, props *PopoverProps, res *PopoverResult) error {
 	head := popoverHeader(env, gtx, props)
 	drawMenuPanelSurface(env, gtx, p.rect, p.pad, 0, 0)
 	inner := p.rect.Inset(p.pad)
@@ -351,7 +364,7 @@ func (p *PopoverState) drawPanel(env *Env, gtx *layout.Context, props PopoverPro
 	btn := max(gtx.Dp(theme.ControlSM), gtx.Dp(theme.HitMin))
 	at(gtx, image.Pt(inner.Max.X-btn, inner.Min.Y), func(gtx *layout.Context) {
 		clicked, err := p.closeB.Layout(env, gtx, &IconButtonProps{
-			Icon: IconClose, Label: "Close", Variant: IconButtonGhost, Size: SizeSM,
+			Icon: IconClose, Label: labelClose, Variant: IconButtonGhost, Size: SizeSM,
 		})
 		if err != nil {
 			headErr = fmt.Errorf("draw the close button: %w", err)
@@ -370,7 +383,7 @@ func (p *PopoverState) drawPanel(env *Env, gtx *layout.Context, props PopoverPro
 		x -= btn + gtx.Dp(theme.SpaceXS)
 		at(gtx, image.Pt(x, inner.Min.Y), func(gtx *layout.Context) {
 			clicked, err := props.Pin.Layout(env, gtx, &IconButtonProps{
-				Icon: IconPin, Label: "Pin", Variant: IconButtonGhost, Size: SizeSM, Toggled: props.Pinned,
+				Icon: IconPin, Label: labelPin, Variant: IconButtonGhost, Size: SizeSM, Toggled: props.Pinned,
 			})
 			if err != nil {
 				headErr = fmt.Errorf("draw the pin toggle: %w", err)

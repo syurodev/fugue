@@ -24,6 +24,17 @@ const (
 
 func popoverStates() []string { return []string{povPlain, povPin, povPinned, povLive} }
 
+// Shared specimen copy, so no literal repeats (goconst).
+const (
+	povTitle      = "Filter"
+	povLiveTitle  = "Popover on the overlay"
+	povFieldLbl   = "Session name"
+	povFieldHint  = "e.g. refactor-auth"
+	povSpecLabel  = "Name"
+	povSpecHint   = dlgFieldHint
+	povTriggerLbl = "Open popover"
+)
+
 type popoverPage struct {
 	specimens  [3]*kit.PopoverState
 	pins       [3]*kit.IconButtonState
@@ -73,54 +84,60 @@ func (p *pages) popoverRow(gtx *layout.Context) []cellDraw {
 			row = append(row, p.popoverLiveCell(gtx, ci))
 			continue
 		}
-		i := ci
-		po := p.pop.specimens[i]
-		pinned := st == povPinned || p.pop.pinned[i]
-		withPin := st != povPlain
-		field := p.pop.fields[i]
-		props := kit.PopoverProps{
-			Anchor: image.Rectangle{},
-			Title:  "Filter",
-			Width:  200,
-			Pinned: pinned,
-			Inline: true,
-			Pin: func() *kit.IconButtonState {
-				if withPin {
-					return p.pop.pins[i]
-				}
-				return nil
-			}(),
-			Measure: func(gtx *layout.Context) image.Point {
-				return field.Measure(p.env, gtx, &kit.TextFieldProps{Label: "Name", Placeholder: "e.g. dev-pg"}).Size
-			},
-			Content: func(gtx *layout.Context) {
-				_, _ = field.Layout(p.env, gtx, &kit.TextFieldProps{Label: "Name", Placeholder: "e.g. dev-pg"})
-			},
-		}
-		row = append(row, cellDraw{
-			col: ci, key: cell{compPopover, 0, 0, st}, tag: po,
-			box: measure(gtx, func(gtx *layout.Context) image.Point {
-				res, err := po.Layout(p.env, gtx, props)
-				if err != nil {
-					p.err = err
-				}
-				return res.Size
-			}),
-			lay: func(gtx *layout.Context) {
-				res, err := po.Layout(p.env, gtx, props)
-				if err != nil {
-					p.err = err
-				}
-				if res.PinClicked {
-					p.pop.pinned[i] = !p.pop.pinned[i]
-				}
-				if !po.IsOpen() {
-					po.Open()
-				}
-			},
-		})
+		row = append(row, p.popoverSpecimenCell(gtx, ci, st))
 	}
 	return row
+}
+
+// popoverSpecimenCell is one inline specimen: plain, with the pin toggle, or
+// pinned.
+func (p *pages) popoverSpecimenCell(gtx *layout.Context, i int, st string) cellDraw {
+	po := p.pop.specimens[i]
+	pinned := st == povPinned || p.pop.pinned[i]
+	withPin := st != povPlain
+	field := p.pop.fields[i]
+	var pin *kit.IconButtonState
+	if withPin {
+		pin = p.pop.pins[i]
+	}
+	fp := &kit.TextFieldProps{Label: povSpecLabel, Placeholder: povSpecHint}
+	props := &kit.PopoverProps{
+		Title:  povTitle,
+		Width:  200,
+		Pinned: pinned,
+		Inline: true,
+		Pin:    pin,
+		Measure: func(gtx *layout.Context) image.Point {
+			return field.Measure(p.env, gtx, fp).Size
+		},
+		Content: func(gtx *layout.Context) {
+			if _, err := field.Layout(p.env, gtx, fp); err != nil {
+				p.err = err
+			}
+		},
+	}
+	return cellDraw{
+		col: i, key: cell{compPopover, 0, 0, st}, tag: po,
+		box: measure(gtx, func(gtx *layout.Context) image.Point {
+			res, err := po.Layout(p.env, gtx, props)
+			if err != nil {
+				p.err = err
+			}
+			return res.Size
+		}),
+		lay: func(gtx *layout.Context) {
+			res, err := po.Layout(p.env, gtx, props)
+			if err != nil {
+				p.err = err
+			}
+			if res.PinClicked {
+				p.pop.pinned[i] = !p.pop.pinned[i]
+			}
+			if !po.IsOpen() {
+				po.Open()
+			}
+		},
+	}
 }
 
 // popoverLiveCell is the live trigger: the button opens the real popover on
@@ -129,11 +146,10 @@ func (p *pages) popoverRow(gtx *layout.Context) []cellDraw {
 func (p *pages) popoverLiveCell(gtx *layout.Context, col int) cellDraw {
 	btn, po := p.pop.trigger, p.pop.live
 	field := p.pop.liveField
-	pr := kit.ButtonProps{Text: "Open popover", Icon: kit.IconChevronDown, Variant: kit.Bordered}
-	fp := &kit.TextFieldProps{Label: "Session name", Placeholder: "e.g. refactor-auth"}
-	props := kit.PopoverProps{
-		Anchor:      image.Rectangle{},
-		Title:       "Popover on the overlay",
+	pr := kit.ButtonProps{Text: povTriggerLbl, Icon: kit.IconChevronDown, Variant: kit.Bordered}
+	fp := &kit.TextFieldProps{Label: povFieldLbl, Placeholder: povFieldHint}
+	props := &kit.PopoverProps{
+		Title:       povLiveTitle,
 		Width:       240,
 		Pinned:      p.pop.livePinned,
 		FocusOnOpen: field.Tag(),
@@ -142,7 +158,10 @@ func (p *pages) popoverLiveCell(gtx *layout.Context, col int) cellDraw {
 			return field.Measure(p.env, gtx, fp).Size
 		},
 		Content: func(gtx *layout.Context) {
-			ev, _ := field.Layout(p.env, gtx, fp)
+			ev, err := field.Layout(p.env, gtx, fp)
+			if err != nil {
+				p.err = err
+			}
 			if ev.Changed {
 				p.pop.liveVal = field.Text()
 			}
@@ -164,16 +183,10 @@ func (p *pages) popoverLiveCell(gtx *layout.Context, col int) cellDraw {
 				}
 			}
 			po.SetOpener(btn.Tag())
-			res, err := po.Layout(p.env, gtx, kit.PopoverProps{
-				Anchor:      image.Rectangle{Max: box},
-				Title:       props.Title,
-				Width:       props.Width,
-				Pinned:      props.Pinned,
-				FocusOnOpen: props.FocusOnOpen,
-				Pin:         props.Pin,
-				Measure:     props.Measure,
-				Content:     props.Content,
-			})
+			overlayProps := *props
+			overlayProps.Anchor = image.Rectangle{Max: box}
+			overlayProps.Inline = false
+			res, err := po.Layout(p.env, gtx, &overlayProps)
 			if err != nil {
 				p.err = err
 			}

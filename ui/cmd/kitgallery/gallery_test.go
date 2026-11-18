@@ -205,18 +205,22 @@ func popoverCells(want map[cell]bool) {
 	}
 }
 
-// dialogCells are the Dialog cells: the four specimens and the live trigger.
+// dialogCells are the Dialog cells: the six specimens and the live trigger.
 func dialogCells(want map[cell]bool) {
-	for _, st := range []string{dlgForm, dlgFormFocus, dlgConfirm, dlgSafeFocus} {
+	for _, st := range []string{dlgForm, dlgFormFocus, dlgFormBusy, dlgFormScrim, dlgConfirm, dlgSafeFocus} {
 		want[cell{compDialog, 0, 0, st}] = true
 	}
 	want[cell{compDialog, 1, 0, dlgLive}] = true
 }
 
-// toastCells are the Toast cells: the push triggers of every variant.
+// toastCells are the Toast cells: the one-toast specimens, the corner
+// three-stack, and the live push triggers.
 func toastCells(want map[cell]bool) {
-	for _, st := range toastStates() {
+	for _, st := range []string{tstInfo, tstAction, tstWarning, tstMerged, tstPaused, tstStack} {
 		want[cell{compToast, 0, 0, st}] = true
+	}
+	for _, st := range toastPushStates() {
+		want[cell{compToast, 1, 0, st}] = true
 	}
 }
 

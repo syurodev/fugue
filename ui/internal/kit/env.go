@@ -266,10 +266,12 @@ func (e *Env) trackTab(gtx *layout.Context) {
 		}
 		if ke, isKey := ev.(key.Event); isKey && ke.State == key.Press {
 			e.modality = true
-			switch ke.Modifiers {
-			case 0:
+			// Only the exact unmodified and Shift+Tab presses are recorded;
+			// every other chord belongs to the control that named it.
+			if ke.Modifiers == 0 {
 				e.tabPress = true
-			case key.ModShift:
+			}
+			if ke.Modifiers == key.ModShift {
 				e.shiftTabPress = true
 			}
 		}

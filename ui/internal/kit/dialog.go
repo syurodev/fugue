@@ -10,19 +10,24 @@ import (
 	"gioui.org/layout"
 
 	"github.com/syurodev/fugue/ui/internal/motion"
+	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
 // Dialog, ui-kit §6.17: a `form` (create or edit one object) or `confirm`
 // (the decision before a destructive or security-relevant action) on a
 // scrim. The frame is radius.xl, type.title with a description, a scrollable
-// body and a footer of Cancel and one primary button. It is the window's one
-// dialog layer (UK-07): a dialog never opens over a dialog — a second Open
-// while one is up is refused with ErrDialogAlreadyOpen — and ordinary
-// success never opens one (§6.17).
+// body on the kit's ScrollArea (§6.29, thin fading bar, no yank) and a
+// footer of Cancel and one primary button. It is the window's one dialog
+// layer (UK-07): a dialog never opens over a dialog — a second Open while
+// one is up is refused with ErrDialogAlreadyOpen — and ordinary success
+// never opens one (§6.17).
 //
 // Keyboard (§6.17, §7): focus is trapped — Tab and Shift+Tab cycle through
-// the body controls the caller lists in FocusOrder and the two footer
-// buttons — and returns to the opener on close. Escape closes only when safe
+// the body controls the Body declared (DialogBands) and the two footer
+// buttons — and returns to the opener on close. The scroll follows focus: a
+// focused control scrolled out of the body is brought back in, with room for
+// its §3.4 ring, which is why the body's clip grows by the ring allowance
+// and the content takes the width that remains. Escape closes only when safe
 // (a form with unsaved input refuses it; a confirm closes, the safe choice),
 // and Enter submits a form through the kit fields' own submit translation:
 // the caller calls Submit when a field reports Submitted, so Enter inside a
@@ -64,11 +69,9 @@ type DialogProps struct {
 	Description string
 	// Body draws the dialog's scrollable content — the form's kit fields,
 	// a confirm's message — at the frame's inner width and returns the box
-	// it used. It runs once per frame, here: its fields keep state.
-	Body func(gtx *layout.Context) image.Point
-	// FocusOrder are the body's focusable tags in Tab order; the focus
-	// trap cycles them before the footer buttons (§6.17).
-	FocusOrder []event.Tag
+	// it used. It declares each focusable control's band on bands (see
+	// DialogBands). It runs once per frame, here: its fields keep state.
+	Body func(gtx *layout.Context, bands *DialogBands) image.Point
 	// Cancel and Primary are the footer buttons. The dialog lays them out
 	// and reports their clicks in the result; PrimaryLabel names the
 	// primary (a specific verb, §4.5) and PrimaryVariant is its variant —
@@ -85,8 +88,11 @@ type DialogProps struct {
 	// focuses when it opens (§6.17); nil focuses the Cancel button.
 	Safe event.Tag
 	// Inline draws the frame where the cursor is, without the scrim or the
-	// dialog slot: the gallery's specimens.
-	Inline bool
+	// dialog slot: the gallery's specimens. ScrimRect, when non-empty,
+	// paints the scrim over that rectangle first, so a specimen can show
+	// the dialog against its dimmed page (§6.17).
+	Inline    bool
+	ScrimRect image.Rectangle
 }
 
 // DialogResult is what happened in the frame. The dialog closes itself on
@@ -105,6 +111,28 @@ type DialogResult struct {
 	Size image.Point
 }
 
+// DialogBands is the handle a dialog Body draws with: it declares each
+// focusable control's band — its y range in the body's own coordinates — so
+// the focus trap cycles them in draw order and the scroll keeps the focused
+// one in view (§6.17). The footer's two buttons are bands the dialog adds
+// itself.
+type DialogBands struct {
+	bands []dialogBand
+}
+
+// dialogBand is one focusable control's y range in body coordinates.
+type dialogBand struct {
+	tag    event.Tag
+	y0, y1 int
+}
+
+// Focusable declares the band of one focusable body control: the control's
+// tag and its y range in the body's own coordinates, as the Body laid it
+// out.
+func (b *DialogBands) Focusable(tag event.Tag, y0, y1 int) {
+	b.bands = append(b.bands, dialogBand{tag: tag, y0: y0, y1: y1})
+}
+
 // DialogState is the long-lived state of one dialog (UK-02).
 type DialogState struct {
 	open   motion.Presence
@@ -115,19 +143,24 @@ type DialogState struct {
 	focusOnOpen bool
 	// submit is set by Submit and consumed by the next Layout.
 	submit bool
-	// scroll is the body's scroll offset; body the scroll area's tag. They
-	// are pointers, so the state must not move in memory.
-	scroll int
-	body   struct{}
-	rect   image.Rectangle
-	origin image.Point
+	// scroll is the body's ScrollArea (§6.29): the thin fading bar, the
+	// no-yank rule, and the offset the focus reveal drives.
+	scroll *ScrollAreaState
+	// bands are the last frame's focusable bands, in draw order; the trap
+	// and the reveal read them (the areas the pointer acts on are also the
+	// ones the last frame drew). viewLenPx is the last frame's visible body
+	// height in content pixels, for the reveal.
+	bands     []dialogBand
+	viewLenPx int
+	rect      image.Rectangle
 }
 
 // NewDialogState builds the state of one dialog.
 func NewDialogState() *DialogState {
 	return &DialogState{
-		open:  motion.NewPresence(motion.Snappy(), motion.Exit()),
-		scrim: motion.NewFollower(motion.Smooth()),
+		open:   motion.NewPresence(motion.Snappy(), motion.Exit()),
+		scrim:  motion.NewFollower(motion.Smooth()),
+		scroll: NewScrollAreaState(),
 	}
 }
 
@@ -136,7 +169,7 @@ func (d *DialogState) Open() {
 	d.open.Show(true)
 	d.claim = true
 	d.focusOnOpen = true
-	d.scroll = 0
+	d.scroll.SetOffset(0)
 	d.submit = false
 }
 
@@ -159,34 +192,14 @@ func (d *DialogState) Submit() { d.submit = true }
 // Layout runs the dialog's frame. A closed dialog does nothing; one opened
 // while another holds the dialog slot is refused with ErrDialogAlreadyOpen
 // (§6.17).
-func (d *DialogState) Layout(env *Env, gtx *layout.Context, props DialogProps) (DialogResult, error) {
+func (d *DialogState) Layout(env *Env, gtx *layout.Context, props *DialogProps) (DialogResult, error) {
 	var res DialogResult
 	if !d.open.Visible() {
 		env.releaseDialog(d)
 		return res, nil
 	}
-	if !props.Inline {
-		if d.claim {
-			if !env.claimDialog(d) {
-				d.Close()
-				return res, ErrDialogAlreadyOpen
-			}
-			d.claim = false
-		}
-		if d.focusOnOpen {
-			first := props.Safe
-			if first == nil && props.Variant == DialogConfirm && props.Cancel != nil {
-				// A confirm's safe choice is its Cancel (§6.17).
-				first = props.Cancel.Tag()
-			}
-			if first == nil && len(props.FocusOrder) > 0 {
-				first = props.FocusOrder[0]
-			}
-			if first != nil {
-				gtx.Execute(key.FocusCmd{Tag: first})
-			}
-			d.focusOnOpen = false
-		}
+	if err := d.claimLayer(env, gtx, props); err != nil {
+		return res, err
 	}
 	if d.open.Shown() {
 		d.input(env, gtx, props, &res)
@@ -206,10 +219,42 @@ func (d *DialogState) Layout(env *Env, gtx *layout.Context, props DialogProps) (
 	return res, nil
 }
 
+// claimLayer takes the window's one dialog slot (§6.17) and applies the
+// open focus of §6.17: a confirm's safe choice — its Cancel — or the body's
+// first band.
+func (d *DialogState) claimLayer(env *Env, gtx *layout.Context, props *DialogProps) error {
+	if props.Inline {
+		return nil
+	}
+	if d.claim {
+		if !env.claimDialog(d) {
+			d.Close()
+			return ErrDialogAlreadyOpen
+		}
+		d.claim = false
+	}
+	if !d.focusOnOpen {
+		return nil
+	}
+	first := props.Safe
+	if first == nil && props.Variant == DialogConfirm && props.Cancel != nil {
+		// A confirm's safe choice is its Cancel (§6.17).
+		first = props.Cancel.Tag()
+	}
+	if first == nil && len(d.bands) > 0 {
+		first = d.bands[0].tag
+	}
+	if first != nil {
+		gtx.Execute(key.FocusCmd{Tag: first})
+	}
+	d.focusOnOpen = false
+	return nil
+}
+
 // consumeSubmit turns a pending Submit into the result, unless the form is
 // busy — a submitting dialog blocks a repeat submit (§6.17) — or the frame
 // already closed the dialog.
-func (d *DialogState) consumeSubmit(props DialogProps, res *DialogResult) {
+func (d *DialogState) consumeSubmit(props *DialogProps, res *DialogResult) {
 	if !d.submit {
 		return
 	}
@@ -223,7 +268,7 @@ func (d *DialogState) consumeSubmit(props DialogProps, res *DialogResult) {
 // input reads the frame's keyboard: the focus trap and Escape. The dialog
 // owns Escape only while no floating layer sits above the scrim (§7); a
 // popover over the dialog gets it first.
-func (d *DialogState) input(env *Env, gtx *layout.Context, props DialogProps, res *DialogResult) {
+func (d *DialogState) input(env *Env, gtx *layout.Context, props *DialogProps, res *DialogResult) {
 	if !d.open.Shown() || props.Inline {
 		return
 	}
@@ -233,11 +278,11 @@ func (d *DialogState) input(env *Env, gtx *layout.Context, props DialogProps, re
 	}
 }
 
-// trapFocus cycles Tab and Shift+Tab through the body tags and the two
+// trapFocus cycles Tab and Shift+Tab through the body's bands and the two
 // footer buttons, so focus never leaves the dialog (§6.17). The presses come
 // from the Env's recorded flags, not raw key events: TrackInput is the sole
 // raw Tab reader, and key events go to the first matching gtx.Event caller.
-func (d *DialogState) trapFocus(env *Env, gtx *layout.Context, props DialogProps) {
+func (d *DialogState) trapFocus(env *Env, gtx *layout.Context, props *DialogProps) {
 	tab, shiftTab := env.takeTab(), env.takeShiftTab()
 	if !tab && !shiftTab {
 		return
@@ -246,13 +291,7 @@ func (d *DialogState) trapFocus(env *Env, gtx *layout.Context, props DialogProps
 	if len(tags) == 0 {
 		return
 	}
-	cur := -1
-	for i, tag := range tags {
-		if gtx.Focused(tag) {
-			cur = i
-			break
-		}
-	}
+	cur := d.focusedBand(gtx, tags)
 	step := 1
 	if shiftTab {
 		step = -1
@@ -264,13 +303,16 @@ func (d *DialogState) trapFocus(env *Env, gtx *layout.Context, props DialogProps
 		next = len(tags) - 1
 	}
 	gtx.Execute(key.FocusCmd{Tag: tags[next]})
+	d.reveal(next, dialogRing(gtx))
 }
 
-// trapTags is the dialog's tab order: the body's, then Cancel, then the
-// primary (§6.17).
-func (d *DialogState) trapTags(props DialogProps) []event.Tag {
-	tags := make([]event.Tag, 0, len(props.FocusOrder)+2)
-	tags = append(tags, props.FocusOrder...)
+// trapTags is the dialog's tab order: the body's bands in draw order, then
+// Cancel, then the primary (§6.17).
+func (d *DialogState) trapTags(props *DialogProps) []event.Tag {
+	tags := make([]event.Tag, 0, len(d.bands)+2)
+	for _, band := range d.bands {
+		tags = append(tags, band.tag)
+	}
 	if props.Cancel != nil {
 		tags = append(tags, props.Cancel.Tag())
 	}
@@ -280,9 +322,37 @@ func (d *DialogState) trapTags(props DialogProps) []event.Tag {
 	return tags
 }
 
+// focusedBand is the index of the focused tag in tags, or -1.
+func (d *DialogState) focusedBand(gtx *layout.Context, tags []event.Tag) int {
+	for i, tag := range tags {
+		if gtx.Focused(tag) {
+			return i
+		}
+	}
+	return -1
+}
+
+// reveal scrolls the band at index i into the body's visible slot, with
+// room for its §3.4 ring on both edges. It runs when focus moved to the
+// band, against the last frame's geometry (the geometry focus acts on):
+// viewLenPx is the visible body height in content pixels and ring the px
+// ring allowance the clip grew by.
+func (d *DialogState) reveal(i, ring int) {
+	if i < 0 || i >= len(d.bands) || d.viewLenPx <= 0 {
+		return
+	}
+	band := d.bands[i]
+	if band.y1+ring > d.scroll.Offset()+d.viewLenPx {
+		d.scroll.SetOffset(band.y1 + ring - d.viewLenPx)
+	}
+	if band.y0-ring < d.scroll.Offset() {
+		d.scroll.SetOffset(band.y0 - ring)
+	}
+}
+
 // escapeInput applies the Escape rule (§6.17): a form with unsaved input
 // refuses it; everything else closes as a cancellation.
-func (d *DialogState) escapeInput(gtx *layout.Context, props DialogProps, res *DialogResult) {
+func (d *DialogState) escapeInput(gtx *layout.Context, props *DialogProps, res *DialogResult) {
 	for {
 		ev, ok := gtx.Event(key.Filter{Name: key.NameEscape})
 		if !ok {
@@ -337,4 +407,11 @@ func (d *DialogState) advance(env *Env, inline bool) {
 	if moved || d.scrim.Moving() {
 		env.Keep()
 	}
+}
+
+// dialogRing is the px room a §3.4 focus ring needs outside a control: the
+// stroke and its offset. The body's clip grows by it, so no control's ring
+// is ever cut.
+func dialogRing(gtx *layout.Context) int {
+	return gtx.Dp(theme.FocusStroke) + gtx.Dp(theme.FocusOffset)
 }

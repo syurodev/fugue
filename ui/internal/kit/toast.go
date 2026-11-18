@@ -3,6 +3,7 @@ package kit
 import (
 	"fmt"
 	"image"
+	"strconv"
 	"time"
 
 	"gioui.org/io/event"
@@ -36,7 +37,9 @@ import (
 // pushes toasts when its own events produce them and drains the frame's
 // outcomes through ToastEvents. Push must come from the frame loop, the way
 // every other UI state change does (UK-06: the kit stores no callback, and
-// the caller reacts to the frame's events).
+// the caller reacts to the frame's events). The one panel painter
+// (drawToastPanel) serves both the manager and the gallery's inline
+// specimens, so a specimen is the manager's pixels.
 
 const (
 	// toastLife is the §6.18 time; a toast with an action or a warning
@@ -83,7 +86,7 @@ type ToastEvent struct {
 // ToastPush pushes a toast, merging into the visible toast of the same
 // object (§6.18). A fourth visible toast exits the oldest. Call it from the
 // frame loop.
-func (e *Env) ToastPush(t Toast) {
+func (e *Env) ToastPush(t *Toast) {
 	e.toast.ensureInit()
 	if e.toast.visibleCount() >= toastMax {
 		e.toast.dismissOldest(t.Object)
@@ -100,7 +103,7 @@ func (e *Env) ToastPush(t Toast) {
 		life = toastLifeLong
 	}
 	en := &toastEntry{
-		t: t, count: 1, life: life, remaining: life,
+		t: *t, count: 1, life: life, remaining: life,
 		open:   motion.NewPresence(motion.Snappy(), motion.Exit()),
 		posX:   motion.NewFollower(motion.Smooth()),
 		posY:   motion.NewFollower(motion.Smooth()),
@@ -266,11 +269,11 @@ func (m *toastManager) sweep() {
 
 // toastHeight is one toast's box: icon, title, a detail of at most two
 // lines, and the paddings; never under a control's height.
-func toastHeight(env *Env, gtx *layout.Context, en *toastEntry, w int) int {
+func toastHeight(env *Env, gtx *layout.Context, t *Toast, w int) int {
 	line := labelLine(env, gtx, theme.TypeLabel())
 	h := 2*gtx.Dp(theme.SpaceLG) + line
-	if en.t.Detail != "" {
-		dh := wrappedTextHeight(env, gtx, en.t.Detail, detailWidth(gtx, w))
+	if t.Detail != "" {
+		dh := wrappedTextHeight(env, gtx, t.Detail, detailWidth(gtx, w))
 		h += gtx.Dp(theme.SpaceXS) + min(dh, 2*labelLine(env, gtx, theme.TypeSmall()))
 	}
 	return max(h, gtx.Dp(theme.ControlMD)+2*gtx.Dp(theme.SpaceLG))
@@ -301,7 +304,7 @@ func (m *toastManager) place(env *Env, gtx *layout.Context) {
 			bottom = en.rect.Min.Y - gap
 			continue
 		}
-		h := toastHeight(env, gtx, en, w)
+		h := toastHeight(env, gtx, &en.t, w)
 		x := win.Max.X - margin - w
 		rect := image.Rectangle{Min: image.Pt(x, bottom-h), Max: image.Pt(x+w, bottom)}
 		bottom = rect.Min.Y - gap
@@ -334,29 +337,64 @@ func (m *toastManager) draw(env *Env, gtx *layout.Context) {
 	op.Defer(gtx.Ops, macro.Stop())
 }
 
-// drawToast draws one toast — hit area and hover, surface, icon, title,
-// detail, count badge, action and close. Entering slides up from the bottom
-// edge while fading in; leaving slides right while fading out (§3.7).
+// toastClick is what the panel's controls reported in one frame.
+type toastClick int
+
+const (
+	toastNoClick toastClick = iota
+	toastActionClick
+	toastCloseClick
+)
+
+// drawToast draws one toast — hit area and hover, motion offsets, the shared
+// panel painter, and the outcome of its controls. Entering slides up from
+// the bottom edge while fading in; leaving slides right while fading out
+// (§3.7).
 func (m *toastManager) drawToast(env *Env, gtx *layout.Context, en *toastEntry) {
 	prog := en.open.Progress()
+	rect := en.motionRect(gtx, prog)
+
+	// The hit area and the hover that pauses the timer (§6.18).
+	m.hoverArea(gtx, en, rect)
+	defer paint.PushOpacity(gtx.Ops, unit01(prog)).Pop()
+	click, err := drawToastPanel(env, gtx, rect, &en.t, en.count, en.open.Shown(), en.action, en.close)
+	if err != nil {
+		env.toastErrors = append(env.toastErrors, err)
+		return
+	}
+	switch click {
+	case toastActionClick:
+		en.open.Show(false)
+		m.events = append(m.events, ToastEvent{Object: en.t.Object, Kind: ToastAction, Count: en.count})
+	case toastCloseClick:
+		en.open.Show(false)
+		m.events = append(m.events, ToastEvent{Object: en.t.Object, Kind: ToastClosed, Count: en.count})
+	case toastNoClick:
+	}
+}
+
+// motionRect is the box one toast paints in: its slot, slid up by what is
+// still missing while entering and right by what is already gone while
+// leaving (§3.7).
+func (en *toastEntry) motionRect(gtx *layout.Context, prog float32) image.Rectangle {
 	rect := image.Rect(int(en.posX.Value()+0.5), int(en.posY.Value()+0.5),
 		int(en.posX.Value()+0.5)+en.rect.Dx(), int(en.posY.Value()+0.5)+en.rect.Dy())
 	if en.open.Shown() {
-		dy := int((1 - prog) * float32(gtx.Dp(theme.SpaceXXL)))
-		rect = rect.Add(image.Pt(0, dy))
-	} else {
-		dx := int((1 - prog) * float32(rect.Dx()))
-		rect = rect.Add(image.Pt(dx, 0))
+		return rect.Add(image.Pt(0, int((1-prog)*float32(gtx.Dp(theme.SpaceXXL)))))
 	}
+	return rect.Add(image.Pt(int((1-prog)*float32(rect.Dx())), 0))
+}
 
-	// The hit area and the hover that pauses the timer (§6.18).
+// hoverArea registers the toast's hit area and reads the Enter/Leave that
+// pause its timer.
+func (m *toastManager) hoverArea(gtx *layout.Context, en *toastEntry, rect image.Rectangle) {
 	area := clip.Rect(rect).Push(gtx.Ops)
 	event.Op(gtx.Ops, &en.area)
 	area.Pop()
 	for {
 		ev, ok := gtx.Event(pointer.Filter{Target: &en.area, Kinds: pointer.Enter | pointer.Leave})
 		if !ok {
-			break
+			return
 		}
 		if pe, is := ev.(pointer.Event); is {
 			switch pe.Kind {
@@ -368,8 +406,15 @@ func (m *toastManager) drawToast(env *Env, gtx *layout.Context, en *toastEntry) 
 			}
 		}
 	}
+}
 
-	defer paint.PushOpacity(gtx.Ops, unit01(prog)).Pop()
+// drawToastPanel paints one toast into rect: surface, icon, title, detail of
+// at most two lines, merge badge, and the action and close buttons laid out
+// where they draw (UK-E10). A toast on its way out (active false) draws its
+// controls disabled, so it takes no input (§3.7). The manager and the inline
+// specimens share this painter, so a specimen is the manager's pixels; the
+// click comes back instead of a callback (UK-06).
+func drawToastPanel(env *Env, gtx *layout.Context, rect image.Rectangle, t *Toast, count int, active bool, action *ButtonState, close *IconButtonState) (toastClick, error) {
 	c := env.Th.Chrome()
 	radius := gtx.Dp(theme.RadiusXL)
 	DrawFloatShadow(gtx, rect, radius)
@@ -377,83 +422,131 @@ func (m *toastManager) drawToast(env *Env, gtx *layout.Context, en *toastEntry) 
 	strokeRRect(gtx.Ops, rect, radius, float32(gtx.Dp(theme.Hairline)), c.BorderSubtle)
 	inner := rect.Inset(gtx.Dp(theme.SpaceLG))
 
-	x, y := inner.Min.X, inner.Min.Y
 	line := labelLine(env, gtx, theme.TypeLabel())
-	if en.t.Icon != "" {
+	if err := drawToastHeader(env, gtx, rect, inner, t, count, line); err != nil {
+		return toastNoClick, err
+	}
+	drawToastDetail(env, gtx, rect, inner, t, line)
+	click, err := drawToastControls(env, gtx, rect, t, active, action, close)
+	if err != nil {
+		return toastNoClick, fmt.Errorf("draw the toast controls: %w", err)
+	}
+	return click, nil
+}
+
+// drawToastHeader paints the status icon, the title and the merge badge.
+func drawToastHeader(env *Env, gtx *layout.Context, rect, inner image.Rectangle, t *Toast, count int, line int) error {
+	c := env.Th.Chrome()
+	x, y := inner.Min.X, inner.Min.Y
+	if t.Icon != "" {
 		iconPx := gtx.Dp(theme.IconMD)
-		if err := drawIconAt(env, gtx, image.Pt(x, y+(line-iconPx)/2), en.t.Icon, theme.IconMD, c.IconMuted); err != nil {
-			env.toastErrors = append(env.toastErrors, fmt.Errorf("draw the toast icon: %w", err))
-			return
+		if err := drawIconAt(env, gtx, image.Pt(x, y+(line-iconPx)/2), t.Icon, theme.IconMD, c.IconMuted); err != nil {
+			return fmt.Errorf("draw the toast icon: %w", err)
 		}
 		x += iconPx + gtx.Dp(theme.SpaceSM)
 	}
-	drawMenuText(env, gtx, theme.TypeLabel(), c.Fg, en.t.Title, image.Pt(x, y), line)
-	if en.count > 1 {
-		badge := "×" + fmt.Sprint(en.count)
+	drawMenuText(env, gtx, theme.TypeLabel(), c.Fg, t.Title, image.Pt(x, y), line)
+	if count > 1 {
+		badge := "×" + strconv.Itoa(count)
 		bx := rect.Max.X - 2*gtx.Dp(theme.SpaceLG) - measureLabel(env, gtx, theme.TypeSmall(), badge).X
 		drawMenuText(env, gtx, theme.TypeSmall(), c.FgMuted, badge, image.Pt(bx, y), line)
 	}
-	if en.t.Detail != "" {
-		dw := detailWidth(gtx, rect.Dx())
-		dy := gtx.Dp(theme.SpaceXS)
-		at(gtx, image.Pt(x, y+line+dy), func(gtx *layout.Context) {
-			g := *gtx
-			g.Constraints.Max.X = dw
-			two := 2 * labelLine(env, gtx, theme.TypeSmall())
-			defer clip.Rect(image.Rect(0, 0, dw, two)).Push(gtx.Ops).Pop()
-			dims := drawText(env, gtx, theme.TypeSmall(), c.FgMuted, en.t.Detail, true)
-			recordRun(env, image.Rectangle{Max: image.Pt(min(dims.Size.X, dw), min(dims.Size.Y, two))}.Add(image.Pt(x, y+line+dy)))
-		})
-	}
+	return nil
+}
 
-	// The close and the action, laid out where they draw (UK-E10); a toast
-	// on its way out draws them disabled, so it takes no input (§3.7).
+// drawToastDetail paints the detail, wrapped at detailWidth and clipped to
+// two lines (§6.18).
+func drawToastDetail(env *Env, gtx *layout.Context, rect, inner image.Rectangle, t *Toast, line int) {
+	if t.Detail == "" {
+		return
+	}
+	c := env.Th.Chrome()
+	dw := detailWidth(gtx, rect.Dx())
+	dy := gtx.Dp(theme.SpaceXS)
+	at(gtx, image.Pt(inner.Min.X, inner.Min.Y+line+dy), func(gtx *layout.Context) {
+		g := *gtx
+		g.Constraints.Max.X = dw
+		two := 2 * labelLine(env, gtx, theme.TypeSmall())
+		defer clip.Rect(image.Rect(0, 0, dw, two)).Push(gtx.Ops).Pop()
+		dims := drawText(env, gtx, theme.TypeSmall(), c.FgMuted, t.Detail, true)
+		recordRun(env, image.Rectangle{Max: image.Pt(min(dims.Size.X, dw), min(dims.Size.Y, two))}.Add(image.Pt(inner.Min.X, inner.Min.Y+line+dy)))
+	})
+}
+
+// drawToastControls lays the close and action buttons out at their boxes and
+// reports the click; a toast on its way out (active false) draws them
+// disabled (§3.7).
+func drawToastControls(env *Env, gtx *layout.Context, rect image.Rectangle, t *Toast, active bool, action *ButtonState, close *IconButtonState) (toastClick, error) {
 	btn := max(gtx.Dp(theme.ControlSM), gtx.Dp(theme.HitMin))
 	cy := rect.Min.Y + (rect.Dy()-btn)/2
 	cx := rect.Max.X - gtx.Dp(theme.SpaceLG) - btn
-	if m.closeClick(env, gtx, en, image.Pt(cx, cy), btn) {
-		en.open.Show(false)
-		m.events = append(m.events, ToastEvent{Object: en.t.Object, Kind: ToastClosed, Count: en.count})
-	}
-	if en.t.Action != "" {
-		pr := ButtonProps{Text: en.t.Action, Variant: Secondary, Size: SizeSM}
-		aw := en.action.Measure(env, gtx, pr).Size.X
-		ax := cx - gtx.Dp(theme.SpaceSM) - aw
-		ay := rect.Min.Y + (rect.Dy()-gtx.Dp(theme.ControlSM))/2
-		var clicked bool
-		var err error
-		at(gtx, image.Pt(ax, ay), func(gtx *layout.Context) {
-			ig := *gtx
-			if !en.open.Shown() {
-				ig = gtx.Disabled()
-			}
-			clicked, err = en.action.Layout(env, &ig, pr)
-		})
-		if err != nil {
-			env.toastErrors = append(env.toastErrors, fmt.Errorf("draw the toast action: %w", err))
-			return
-		}
-		if clicked {
-			en.open.Show(false)
-			m.events = append(m.events, ToastEvent{Object: en.t.Object, Kind: ToastAction, Count: en.count})
-		}
-	}
-}
-
-// closeClick lays the toast's close button out at p and reports the click; a
-// toast on its way out draws it disabled (§3.7).
-func (m *toastManager) closeClick(env *Env, gtx *layout.Context, en *toastEntry, p image.Point, side int) bool {
 	var clicked bool
 	var err error
-	at(gtx, p, func(gtx *layout.Context) {
-		clicked, err = en.close.Layout(env, gtx, &IconButtonProps{
-			Icon: IconClose, Label: "Close", Variant: IconButtonGhost, Size: SizeSM,
-			Disabled: !en.open.Shown(),
+	at(gtx, image.Pt(cx, cy), func(gtx *layout.Context) {
+		clicked, err = close.Layout(env, gtx, &IconButtonProps{
+			Icon: IconClose, Label: labelClose, Variant: IconButtonGhost, Size: SizeSM,
+			Disabled: !active,
 		})
 	})
 	if err != nil {
-		env.toastErrors = append(env.toastErrors, fmt.Errorf("draw the toast close button: %w", err))
-		return false
+		return toastNoClick, fmt.Errorf("draw the toast close button: %w", err)
 	}
-	return clicked
+	if clicked {
+		return toastCloseClick, nil
+	}
+	if t.Action == "" {
+		return toastNoClick, nil
+	}
+	pr := ButtonProps{Text: t.Action, Variant: Secondary, Size: SizeSM}
+	aw := action.Measure(env, gtx, pr).Size.X
+	ax := cx - gtx.Dp(theme.SpaceSM) - aw
+	ay := rect.Min.Y + (rect.Dy()-gtx.Dp(theme.ControlSM))/2
+	var actionClicked bool
+	at(gtx, image.Pt(ax, ay), func(gtx *layout.Context) {
+		ig := *gtx
+		if !active {
+			ig = gtx.Disabled()
+		}
+		actionClicked, err = action.Layout(env, &ig, pr)
+	})
+	if err != nil {
+		return toastNoClick, fmt.Errorf("draw the toast action: %w", err)
+	}
+	if actionClicked {
+		return toastActionClick, nil
+	}
+	return toastNoClick, nil
+}
+
+// ToastSpecimen is the state of one inline toast specimen — the gallery's
+// matrices (UK-E03) — of the same pixels the manager draws: its own two
+// controls, the merged count it shows, and no timer.
+type ToastSpecimen struct {
+	t      Toast
+	count  int
+	action ButtonState
+	close  IconButtonState
+}
+
+// NewToastSpecimen builds a specimen of t showing one event.
+func NewToastSpecimen(t Toast) *ToastSpecimen {
+	return &ToastSpecimen{t: t, count: 1}
+}
+
+// SetCount sets the merged count the specimen's badge shows.
+func (s *ToastSpecimen) SetCount(n int) { s.count = n }
+
+// Measure is the specimen's box at the full ToastWidth.
+func (s *ToastSpecimen) Measure(env *Env, gtx *layout.Context) image.Point {
+	return image.Pt(gtx.Dp(theme.ToastWidth), toastHeight(env, gtx, &s.t, gtx.Dp(theme.ToastWidth)))
+}
+
+// Layout draws the specimen at the current cursor, taking no input (a
+// specimen is not a live toast).
+func (s *ToastSpecimen) Layout(env *Env, gtx *layout.Context) image.Point {
+	size := s.Measure(env, gtx)
+	if _, err := drawToastPanel(env, gtx, image.Rectangle{Max: size}, &s.t, s.count, false, &s.action, &s.close); err != nil {
+		env.toastErrors = append(env.toastErrors, err)
+	}
+	return size
 }
