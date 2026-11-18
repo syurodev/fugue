@@ -14,6 +14,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/vendor"
 )
@@ -42,6 +43,7 @@ func startFakeLogin(t *testing.T, path string) *vendor.LoginProcess {
 		Name: "fake", Path: path,
 		Env:   []string{"HOME=/home/REDACTED", "TERM=dumb"},
 		Clock: clock.Real{},
+		Probe: process.NewSystemdProbe(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -51,7 +53,9 @@ func startFakeLogin(t *testing.T, path string) *vendor.LoginProcess {
 
 func TestStartLoginProcessRelaysLinesAndExits(t *testing.T) {
 	t.Parallel()
-	path := writeLoginCLI(t, "printf '%s\\n' 'line one'\nprintf '%s\\n' 'line two'\nexit 3\n")
+	// The CLI lingers briefly: the supervisor needs the process alive to read
+	// its start token, so a CLI that exits at once is not a valid spawn.
+	path := writeLoginCLI(t, "/bin/sleep 0.5\nprintf '%s\\n' 'line one'\nprintf '%s\\n' 'line two'\nexit 3\n")
 	run := startFakeLogin(t, path)
 	out := drainLoginLines(t, run)
 	if out != "line one\nline two\n" {
@@ -138,7 +142,7 @@ func TestStartLoginProcessFrameTooLargeFailsTheRun(t *testing.T) {
 
 func TestStartLoginProcessEnvIsPassedUnchanged(t *testing.T) {
 	t.Parallel()
-	path := writeLoginCLI(t, "exec /usr/bin/env\n")
+	path := writeLoginCLI(t, "/bin/sleep 0.5\nexec /usr/bin/env\n")
 	run := startFakeLogin(t, path)
 	env := drainLoginLines(t, run)
 	for _, want := range []string{"HOME=/home/REDACTED\n", "TERM=dumb\n"} {

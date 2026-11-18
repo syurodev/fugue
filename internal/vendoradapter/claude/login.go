@@ -12,6 +12,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
+	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/vendor"
 )
 
@@ -75,6 +76,10 @@ func (a *Adapter) StartLogin(ctx context.Context, home vendor.AccountHome) (vend
 	if err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "allocate a claude login identity", err)
 	}
+	probe := a.SystemdProbe
+	if probe == nil {
+		probe = process.NewSystemdProbe()
+	}
 	run, err := vendor.StartLoginProcess(ctx, &vendor.LoginOptions{
 		Name:          DefaultBinary,
 		Path:          path,
@@ -82,7 +87,7 @@ func (a *Adapter) StartLogin(ctx context.Context, home vendor.AccountHome) (vend
 		Env:           ProbeEnv(a.HostEnv, home),
 		SessionID:     scope,
 		XDGRuntimeDir: a.XDGRuntimeDir,
-		Probe:         a.SystemdProbe,
+		Probe:         probe,
 		Clock:         clk,
 	})
 	if err != nil {

@@ -89,7 +89,14 @@ func (s *AccountsService) StartLogin(ctx context.Context, principal, vendorName 
 	if !ok {
 		return LoginView{}, errcode.New(errcode.FailedPrecondition, vendorName+" has no login command; sign in from the "+vendorName+" app")
 	}
+	// The identity is allocated before anything spawns, so a failed allocation
+	// can never leave a login process running.
+	id, err := s.ids.NewID()
+	if err != nil {
+		return LoginView{}, errcode.Wrap(errcode.Internal, "allocate a login identity", err)
+	}
 	slot := &loginRun{
+		id:            id,
 		vendor:        vendorName,
 		needsTerminal: starter.LoginCommand().NeedsTerminal,
 		cancel:        make(chan struct{}),
@@ -113,16 +120,8 @@ func (s *AccountsService) StartLogin(ctx context.Context, principal, vendorName 
 		close(slot.done)
 		return LoginView{}, errcode.Wrap(errcode.CodeOf(err), "start the "+vendorName+" login", err)
 	}
-	id, err := s.ids.NewID()
-	if err != nil {
-		s.loginsMu.Lock()
-		delete(s.logins, vendorName)
-		s.loginsMu.Unlock()
-		close(slot.done)
-		return LoginView{}, errcode.Wrap(errcode.Internal, "allocate a login identity", err)
-	}
 	slot.mu.Lock()
-	slot.id, slot.run = id, run
+	slot.run = run
 	slot.mu.Unlock()
 	s.publishLogin(slot.progress(LoginStarted), true)
 	s.goTask("app.login."+vendorName, func(taskCtx context.Context) error {
@@ -160,17 +159,25 @@ func (slot *loginRun) requestCancel() {
 	slot.cancelOnce.Do(func() { close(slot.cancel) })
 }
 
-// appendPrompt relays one printed line verbatim into the bounded prompt.
-func (slot *loginRun) appendPrompt(line string) {
+// appendPrompt relays one printed line verbatim into the bounded prompt and
+// reports whether the prompt changed. The limit is checked before anything
+// is written (separator included), so a flooding CLI can neither grow the
+// prompt nor make the host publish an event for a dropped line.
+func (slot *loginRun) appendPrompt(line string) bool {
 	slot.mu.Lock()
 	defer slot.mu.Unlock()
+	need := len(line)
+	if slot.prompt.Len() > 0 {
+		need++
+	}
+	if slot.prompt.Len()+need > LoginPromptLimit {
+		return false
+	}
 	if slot.prompt.Len() > 0 {
 		slot.prompt.WriteByte('\n')
 	}
-	if slot.prompt.Len()+len(line) > LoginPromptLimit {
-		return
-	}
 	slot.prompt.WriteString(line)
+	return true
 }
 
 func (slot *loginRun) promptText() string {
@@ -210,8 +217,9 @@ func (s *AccountsService) monitorLogin(ctx context.Context, slot *loginRun) {
 				lines = nil
 				continue
 			}
-			slot.appendPrompt(line)
-			s.publishLogin(slot.progress(LoginWaiting), true)
+			if slot.appendPrompt(line) {
+				s.publishLogin(slot.progress(LoginWaiting), true)
+			}
 		case <-slot.run.Done():
 			outcome = s.loginOutcome(ctx, slot)
 		case <-timer.C():

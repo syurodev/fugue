@@ -21,6 +21,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/agy"
@@ -51,7 +52,7 @@ func lingerCLI(t *testing.T) string {
 // exitCLI prints the prompt and ends with the given code.
 func exitCLI(t *testing.T, code int) string {
 	t.Helper()
-	return writeLoginFakeCLI(t, "printf '%s\\n' '"+fakeLoginPrompt+"'\nexit "+strconv.Itoa(code)+"\n")
+	return writeLoginFakeCLI(t, "/bin/sleep 0.3\nprintf '%s\\n' '"+fakeLoginPrompt+"'\nexit "+strconv.Itoa(code)+"\n")
 }
 
 // fakeLoginAdapter is a vendor.Adapter for the login tests: its login spawns
@@ -106,6 +107,7 @@ func (a *fakeLoginAdapter) StartLogin(ctx context.Context, _ vendor.AccountHome)
 		Path:  a.cliPath,
 		Env:   nil,
 		Clock: a.clk,
+		Probe: process.NewSystemdProbe(),
 	})
 	a.runMu.Lock()
 	a.run = run
@@ -137,6 +139,18 @@ func (a *fakeLoginAdapter) processEnded() bool {
 // to the test's context.
 func newLoginService(t *testing.T, f *transcriptFixture, adapters map[string]vendor.Adapter) (*AccountsService, *vendor.Accounts, *clock.Fake) {
 	t.Helper()
+	return newLoginServiceWithIDs(t, f, adapters, nil)
+}
+
+// failingIDs is an ID generator whose allocation always fails.
+type failingIDs struct{}
+
+func (failingIDs) NewID() (string, error) {
+	return "", errcode.New(errcode.Internal, "no ids left")
+}
+
+func newLoginServiceWithIDs(t *testing.T, f *transcriptFixture, adapters map[string]vendor.Adapter, idGen ids.Generator) (*AccountsService, *vendor.Accounts, *clock.Fake) {
+	t.Helper()
 	names := make([]string, 0, len(adapters))
 	for name := range adapters {
 		names = append(names, name)
@@ -151,9 +165,12 @@ func newLoginService(t *testing.T, f *transcriptFixture, adapters map[string]ven
 	// timers on it, so BlockUntilPending(1) waits for the login timeout
 	// itself and Advance fires exactly that timer.
 	loginClk := clock.NewFake(time.Date(2026, 11, 18, 0, 0, 0, 0, time.UTC))
+	if idGen == nil {
+		idGen = ids.NewUUIDv7(loginClk, ids.CryptoRandom{})
+	}
 	svc, err := newAccountsService(accounts, &VendorService{accounts: accounts, adapters: adapters}, f.hub, accountsServiceDeps{
 		Clock: loginClk,
-		IDs:   ids.NewUUIDv7(loginClk, ids.CryptoRandom{}),
+		IDs:   idGen,
 		GoTask: func(name string, fn func(context.Context) error) *supervise.Task {
 			return supervise.Go(t.Context(), name, fn)
 		},
@@ -433,4 +450,71 @@ func TestClaudeLoginWithoutCallbackEndsNeedsTerminal(t *testing.T) {
 	loginClk.Advance(LoginTimeout)
 	waitForProcessEnd(t, ad)
 	drainUntilOutcome(t, sub, LoginNeedsTerminal)
+}
+
+func TestStartLoginAllocatesTheIdentityBeforeSpawning(t *testing.T) {
+	t.Parallel()
+	f := newTranscriptFixture(t, nil)
+	ad := newFakeLoginAdapter(t, f.clock, lingerCLI(t), false)
+	svc, _, _ := newLoginServiceWithIDs(t, f, map[string]vendor.Adapter{VendorClaude: ad}, failingIDs{})
+	_, err := svc.StartLogin(t.Context(), string(KindApp), VendorClaude)
+	if errcode.CodeOf(err) != errcode.Internal {
+		t.Fatalf("StartLogin with a failing ID generator error = %v, want internal", err)
+	}
+	if ad.loginRun() != nil {
+		t.Fatal("a login process was spawned although the identity allocation failed")
+	}
+	// The slot is free again: a later start is not refused as already running.
+	if _, err := svc.StartLogin(t.Context(), string(KindApp), VendorClaude); errcode.CodeOf(err) == errcode.AlreadyExists {
+		t.Fatalf("StartLogin after the failed allocation error = %v, want the slot released", err)
+	}
+}
+
+func TestLoginPromptStaysBoundedUnderALineFlood(t *testing.T) {
+	t.Parallel()
+	slot := &loginRun{}
+	changed := 0
+	for range 100_000 {
+		if slot.appendPrompt("x") {
+			changed++
+		}
+	}
+	if got := len(slot.promptText()); got > LoginPromptLimit {
+		t.Fatalf("prompt length = %d, want at most %d", got, LoginPromptLimit)
+	}
+	if changed > LoginPromptLimit {
+		t.Fatalf("%d lines changed the prompt, want at most %d", changed, LoginPromptLimit)
+	}
+	// A dropped line never changes the prompt, so no event is published for it.
+	if slot.appendPrompt("x") {
+		t.Fatal("a line past the limit reported a change")
+	}
+}
+
+func TestLoginFloodPublishesBoundedEvents(t *testing.T) {
+	t.Parallel()
+	f := newTranscriptFixture(t, nil)
+	cli := writeLoginFakeCLI(t, "i=0\nwhile [ $i -lt 100000 ]; do echo x; i=$((i+1)); done\nexit 1\n")
+	ad := newFakeLoginAdapter(t, f.clock, cli, false)
+	svc, _, _ := newLoginService(t, f, map[string]vendor.Adapter{VendorClaude: ad})
+	sub := subscribeLoginTopic(t, f)
+	if _, err := svc.StartLogin(t.Context(), string(KindApp), VendorClaude); err != nil {
+		t.Fatal(err)
+	}
+	events := 0
+	longest := 0
+	for {
+		p := nextLoginProgress(t, sub)
+		events++
+		longest = max(longest, len(p.Prompt))
+		if p.State == LoginFailed {
+			break
+		}
+	}
+	if longest > LoginPromptLimit {
+		t.Fatalf("a published prompt had %d bytes, want at most %d", longest, LoginPromptLimit)
+	}
+	if events > LoginPromptLimit+2 {
+		t.Fatalf("%d login events for a 100k-line flood, want a bounded count", events)
+	}
 }
