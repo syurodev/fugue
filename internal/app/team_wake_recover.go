@@ -1,0 +1,215 @@
+package app
+
+// The recovery and message building of the team mailbox (F11.3b). Recovery
+// resolves every `delivering` batch a crash left behind against the session
+// transcript (Q-122): found means delivered, absent means resend with the
+// same batch ID, an unreadable transcript means hold — never guess. The
+// message payload types and their rendering belong with the recovery, so the
+// sealed shapes and their turn text stay in one place.
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log/slog"
+	"strings"
+
+	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/supervise"
+	"github.com/syurodev/fugue/internal/teams"
+	"github.com/syurodev/fugue/internal/vault"
+	"github.com/syurodev/fugue/internal/vendorstore"
+)
+
+// mailboxDigestItem is the sealed payload of one digest row. Summary stays
+// empty until the task tools report one (F11.3c); the state is Fugue's own.
+type mailboxDigestItem struct {
+	TaskID      string `json:"task_id"`
+	State       string `json:"state"`
+	FailureCode string `json:"failure_code,omitempty"`
+	Summary     string `json:"summary,omitempty"`
+	Question    bool   `json:"question,omitempty"`
+}
+
+// mailboxDecision is the sealed payload of the OR-E13 delivery to the
+// proposing session: the decision, the change list Fugue wrote, and the
+// approved plan whose task text is model output.
+type mailboxDecision struct {
+	Decision  string               `json:"decision"`
+	DecidedBy string               `json:"decided_by,omitempty"`
+	Note      string               `json:"note,omitempty"`
+	Changes   []string             `json:"changes,omitempty"`
+	Plan      *teams.ProposalInput `json:"plan,omitempty"`
+}
+
+func (w *teamWake) recoverAsync(base context.Context) {
+	supervise.Go(base, "team-wake-recover", func(ctx context.Context) error {
+		w.logWake(ctx, w.RecoverBatches(ctx))
+		return nil
+	})
+}
+
+func (w *teamWake) pumpAsync(base context.Context) {
+	supervise.Go(base, "team-wake-pump", func(ctx context.Context) error {
+		w.logWake(ctx, w.Pump(ctx))
+		return nil
+	})
+}
+
+func (w *teamWake) logWake(ctx context.Context, err error) {
+	if err != nil && ctx.Err() == nil {
+		slog.WarnContext(ctx, "delivering the team mailbox failed", "error_code", string(errcode.CodeOf(err)))
+	}
+}
+
+// RecoverBatches resolves every `delivering` batch a crash left behind
+// (Q-122). A locked vault or an unreadable transcript holds the batch; a
+// found marker means delivered; an absent marker queues the resend with the
+// same batch ID.
+func (w *teamWake) RecoverBatches(ctx context.Context) error {
+	if w.deps.Vault.Snapshot().State != vault.StateUnlocked {
+		return nil
+	}
+	batches, err := w.deps.Store.DeliveringMailboxBatches(ctx)
+	if err != nil {
+		return boundaryError("list the delivering mailbox batches", err)
+	}
+	for _, b := range batches {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if err := w.resolveBatch(ctx, b); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// resolveBatch resolves one delivering batch: a found marker means delivered,
+// an absent marker queues the resend with the same batch ID (Q-122), and an
+// unreadable transcript holds the batch for the next trigger.
+func (w *teamWake) resolveBatch(ctx context.Context, b vendorstore.MailboxBatchRef) error {
+	sessionID, err := w.recipientSession(ctx, b.TeamID, b.RecipientTaskID)
+	if err != nil || sessionID == "" {
+		return err
+	}
+	found, readable, err := w.transcriptHasMarker(ctx, sessionID, mailboxBatchPrefix(b.BatchID))
+	if err != nil {
+		return boundaryError("scan the session transcript", err)
+	}
+	if !readable {
+		return nil
+	}
+	if found {
+		return w.deps.Store.MarkMailboxBatchDelivered(ctx, b.BatchID)
+	}
+	return w.deps.Store.ReleaseMailboxBatch(ctx, b.BatchID)
+}
+
+// batchText opens the sealed payloads of a claim and renders one turn: the
+// batch marker first (Q-122), then the §6.1 digest format (Q-124).
+func (w *teamWake) batchText(ctx context.Context, claimed []vendorstore.MailboxMessage) (string, error) {
+	var (
+		header   string
+		entries  []teams.DigestEntry
+		decision mailboxDecision
+	)
+	for i := range claimed {
+		raw, err := w.deps.Store.OpenMailboxPayload(ctx, claimed[i].TeamID, claimed[i].MessageID)
+		if err != nil {
+			return "", boundaryError("open the sealed mailbox payload", err)
+		}
+		switch claimed[i].Kind {
+		case vendorstore.MailboxKindDecision:
+			if err := json.Unmarshal(raw, &decision); err != nil {
+				return "", errcode.New(errcode.FailedPrecondition, "the decision message is not readable")
+			}
+		default:
+			var item mailboxDigestItem
+			if err := json.Unmarshal(raw, &item); err != nil {
+				return "", errcode.New(errcode.FailedPrecondition, "the digest item is not readable")
+			}
+			state := item.State
+			if item.FailureCode != "" {
+				state = item.State + "(" + item.FailureCode + ")"
+			}
+			entries = append(entries, teams.DigestEntry{TaskID: item.TaskID, State: state, Summary: item.Summary, Question: item.Question})
+		}
+	}
+	header, entries = decisionTurnText(&decision, entries)
+	text := teams.BuildDigest(header, entries, teams.MaxDigestBytes)
+	return mailboxBatchPrefix(claimed[0].BatchID) + "\n\n" + text, nil
+}
+
+// decisionTurnText folds a decision message into the digest input: the
+// decision and the user's note are Fugue text (the user typed the note), the
+// change list is Fugue's own, and the approved plan's task text is model
+// output rendered as data blocks (OR-E13).
+func decisionTurnText(decision *mailboxDecision, entries []teams.DigestEntry) (string, []teams.DigestEntry) {
+	if decision.Decision == "" {
+		return headerOf(entries), entries
+	}
+	var lines []string
+	lines = append(lines, "The user decided \""+decision.Decision+"\" on your team proposal.")
+	if decision.DecidedBy != "" {
+		lines = append(lines, "Decided by: "+decision.DecidedBy+".")
+	}
+	if decision.Note != "" {
+		lines = append(lines, "The user's note:", decision.Note)
+	}
+	lines = append(lines, decision.Changes...)
+	if decision.Plan != nil {
+		for i := range decision.Plan.Tasks {
+			t := &decision.Plan.Tasks[i]
+			entries = append(entries, teams.DigestEntry{TaskID: t.ID, State: "queued", Summary: t.Goal})
+		}
+	}
+	return strings.Join(lines, "\n"), entries
+}
+
+// headerOf builds the digest header line when the claim has no decision.
+func headerOf(entries []teams.DigestEntry) string {
+	if len(entries) == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Team update: %d task item(s).", len(entries))
+}
+
+// transcriptHasMarker pages the session transcript for the batch marker in a
+// Fugue-origin user message. readable is false while the vault is locked or
+// the scan ran out of budget: the caller holds instead of guessing (Q-122).
+func (w *teamWake) transcriptHasMarker(ctx context.Context, sessionID, marker string) (found, readable bool, err error) {
+	before := int64(0)
+	scanned := 0
+	for {
+		page, err := w.deps.Store.Transcript(ctx, sessionID, before, mailboxScanPage)
+		if err != nil {
+			return false, false, err
+		}
+		if len(page) == 0 {
+			return false, true, nil
+		}
+		for i := range page {
+			item := &page[i]
+			if item.Kind != vendorstore.KindUserMessage {
+				continue
+			}
+			scanned++
+			if scanned > mailboxScanCap {
+				return false, false, nil
+			}
+			_, content, err := w.deps.Store.ReadItem(ctx, sessionID, item.ID)
+			if err != nil {
+				if errors.Is(err, vault.ErrLocked) {
+					return false, false, nil
+				}
+				return false, false, boundaryError("read the transcript item", err)
+			}
+			if strings.Contains(string(content), marker) {
+				return true, true, nil
+			}
+		}
+		before = page[0].Sequence
+	}
+}

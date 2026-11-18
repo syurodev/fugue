@@ -18,8 +18,10 @@ import (
 // a workspace whose catalog carries one read role, and a live Claude session
 // holding a turn, so the propose path runs against a real actor.
 type teamProposalFixture struct {
-	hp      *HostProcess
-	rt      *HostRuntime
+	hp *HostProcess
+	rt *HostRuntime
+	// clk is the fixture's fake clock; the wake tests advance it.
+	clk     *clock.Fake
 	svc     *VendorService
 	tools   *SessionToolService
 	session VendorSessionView
@@ -77,7 +79,7 @@ func newTeamFixture(t *testing.T, extraTOML string, noDispatch bool) *teamPropos
 		t.Fatal(cfgErr)
 	}
 	session, binding := startTeamFixtureSession(t, rt, svc, tools, ws.ID)
-	return &teamProposalFixture{hp: hp, rt: rt, svc: svc, tools: tools, session: session, binding: binding, wsID: ws.ID, root: root}
+	return &teamProposalFixture{hp: hp, rt: rt, svc: svc, tools: tools, session: session, binding: binding, wsID: ws.ID, root: root, clk: clk}
 }
 
 // startTeamFixtureSession starts one Claude session in the workspace and

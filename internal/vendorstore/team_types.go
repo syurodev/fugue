@@ -186,6 +186,9 @@ type AppendTeamEventInput struct {
 	// SessionID names the session of a TaskAssigned event; the projection
 	// records it on the task row. It is empty for every other event.
 	SessionID string
+	// Mailbox rows are written in the same transaction as this event, keyed to
+	// its sequence (Q-122); nil for events that produce no mail.
+	Mailbox []MailboxEnqueueInput
 }
 
 // RecordedTeamEvent is a metadata view of one team_task_events row (INV-09).

@@ -302,6 +302,7 @@ func (a *vendorSessionActor) endInterruptedTurn(ctx context.Context, turnID, out
 	}
 	a.state, a.turnID, a.userInterruptTurnID = next, "", ""
 	delete(a.turns, turnID)
+	a.manager.notifyWake(a.info.ID)
 	return nil
 }
 

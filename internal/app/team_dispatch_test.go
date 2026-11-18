@@ -28,9 +28,15 @@ type fakeTaskSessions struct {
 	mu       sync.Mutex
 	starts   []taskSessionRequest
 	sends    map[string][]string
+	resumes  []fakeResume
 	closed   []string
 	noRoom   bool
 	startErr error
+}
+
+// fakeResume is one recorded wake resume of a detached session (Q-123).
+type fakeResume struct {
+	SessionID, Cwd string
 }
 
 func (f *fakeTaskSessions) HasCapacity(context.Context) (bool, error) {
@@ -64,6 +70,20 @@ func (f *fakeTaskSessions) Close(_ context.Context, sessionID string, _ vendor.C
 	defer f.mu.Unlock()
 	f.closed = append(f.closed, sessionID)
 	return nil
+}
+
+func (f *fakeTaskSessions) ResumeTaskSession(_ context.Context, sessionID, cwd string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resumes = append(f.resumes, fakeResume{SessionID: sessionID, Cwd: cwd})
+	return nil
+}
+
+// resumeCount reports how many wake resumes the fake recorded.
+func (f *fakeTaskSessions) resumeCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.resumes)
 }
 
 func (f *fakeTaskSessions) setNoRoom(v bool) {

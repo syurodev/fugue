@@ -182,7 +182,7 @@ func (s *TeamProposalService) applyProposalAnswer(ctx context.Context, ticket *i
 // answer that lost the race against supersede or the session-end cancel
 // fails typed and flips nothing.
 func (s *TeamProposalService) applyDecisionLocked(ctx context.Context, sessionID, teamID, option, text, decidedBy string, eff *workspace.EffectiveConfig) error {
-	rec, _, err := s.store.TeamSnapshot(ctx, teamID)
+	rec, tasks, err := s.store.TeamSnapshot(ctx, teamID)
 	if err != nil {
 		return boundaryError("read the proposed team", err)
 	}
@@ -204,9 +204,9 @@ func (s *TeamProposalService) applyDecisionLocked(ctx context.Context, sessionID
 				return err
 			}
 		}
-		return s.approvePlan(ctx, &rec, input, edited, decidedBy, eff)
+		return s.approvePlan(ctx, &rec, leadTaskOf(tasks), input, edited, decidedBy, eff)
 	case decisionSolo, decisionReject:
-		return s.decideSoloOrReject(ctx, sessionID, teamID, option, text, decidedBy)
+		return s.decideSoloOrReject(ctx, sessionID, teamID, leadTaskOf(tasks), option, text, decidedBy)
 	default:
 		return errcode.New(errcode.InvalidArgument, "the decision option was not offered")
 	}
@@ -222,9 +222,10 @@ func (s *TeamProposalService) applyDecisionLocked(ctx context.Context, sessionID
 // decideSoloOrReject ends the still-proposed team with the user's decision
 // (Q-84): the item flip comes first, like every cancel — a failed flip
 // leaves the proposal fully pending instead of a settled team behind a
-// pending-looking item — then every non-terminal task cancels and TeamEnded
-// appends with the decision in the sealed payload.
-func (s *TeamProposalService) decideSoloOrReject(ctx context.Context, sessionID, teamID, option, text, decidedBy string) error {
+// pending-looking item — then every non-terminal task cancels, TeamEnded
+// appends with the decision in the sealed payload, and the user's note is
+// enqueued to the proposing session in the same transaction (OR-E13, Q-122).
+func (s *TeamProposalService) decideSoloOrReject(ctx context.Context, sessionID, teamID, leadTaskID, option, text, decidedBy string) error {
 	decisionValue := itemDecisionSolo
 	payloadDecision := decisionSolo
 	if option == decisionReject {
@@ -241,10 +242,21 @@ func (s *TeamProposalService) decideSoloOrReject(ctx context.Context, sessionID,
 	if err != nil {
 		return boundaryError("read the proposed team", err)
 	}
-	return s.settleTeamDecision(ctx, &rec, payload)
+	endID, endErr := s.ids.NewID()
+	if endErr != nil {
+		return errcode.Wrap(errcode.Internal, "generate the team end event ID", endErr)
+	}
+	if _, err := s.store.SettleTeam(ctx, teamID, &vendorstore.TeamSettleInput{
+		ExpectedSeq: rec.LastSeq, EndEventID: endID, EndPayload: payload,
+		Mailbox: soloDecisionMailbox(leadTaskID, payloadDecision, decidedBy, text),
+	}); err != nil {
+		return boundaryError("end the decided proposal", err)
+	}
+	s.notifyMailbox()
+	return nil
 }
 
-func (s *TeamProposalService) approvePlan(ctx context.Context, rec *vendorstore.TeamRecord, input, edited *teams.ProposalInput, decidedBy string, eff *workspace.EffectiveConfig) error {
+func (s *TeamProposalService) approvePlan(ctx context.Context, rec *vendorstore.TeamRecord, leadTaskID string, input, edited *teams.ProposalInput, decidedBy string, eff *workspace.EffectiveConfig) error {
 	plan := input
 	itemDecision := itemDecisionApproved
 	payloadDecision := decisionApprove
@@ -268,6 +280,7 @@ func (s *TeamProposalService) approvePlan(ctx context.Context, rec *vendorstore.
 	if _, err := s.store.DecideTeam(ctx, rec.TeamID, &vendorstore.TeamDecisionInput{
 		ExpectedSeq: rec.LastSeq, DecisionEventID: eventID, StartedPayload: payload,
 		RemovedTaskIDs: mutations.removed, ResealedSpecs: mutations.reseals, AddedTasks: mutations.added,
+		Mailbox: decisionMailboxRows(leadTaskID, payloadDecision, decidedBy, "", input, edited, mutations),
 	}); err != nil {
 		return boundaryError("apply the decision", err)
 	}
@@ -275,6 +288,7 @@ func (s *TeamProposalService) approvePlan(ctx context.Context, rec *vendorstore.
 		slog.WarnContext(ctx, "recording the decided proposal item failed",
 			"session_id", rec.SessionID, "error_code", string(errcode.CodeOf(flipErr)))
 	}
+	s.notifyMailbox()
 	if s.onTeamActive != nil {
 		s.onTeamActive(rec.TeamID)
 	}

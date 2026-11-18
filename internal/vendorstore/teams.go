@@ -220,6 +220,12 @@ func (s *Store) AppendTeamEvent(ctx context.Context, teamID string, expectedSeq 
 	if err != nil {
 		return 0, err
 	}
+	if !needVault && len(ev.Mailbox) > 0 {
+		if snap, err = s.requireUnlockedVault(); err != nil {
+			return 0, err
+		}
+		needVault = true
+	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return 0, fmt.Errorf("begin append team event tx: %w", err)
@@ -243,10 +249,27 @@ func (s *Store) AppendTeamEvent(ctx context.Context, teamID string, expectedSeq 
 	if err := insertAppendedTeamEvent(ctx, tx, teamID, nextSeq, ev, fromState, toState, envelope, now); err != nil {
 		return 0, err
 	}
+	if err := s.appendMailboxForEvent(ctx, tx, teamID, nextSeq, ev, meta, now); err != nil {
+		return 0, err
+	}
 	if err := s.commitTeamTx(snap, needVault, tx.Commit); err != nil {
 		return 0, err
 	}
 	return nextSeq, nil
+}
+
+// appendMailboxForEvent seals and inserts the mailbox rows of one appended
+// event inside its transaction (Q-122).
+func (s *Store) appendMailboxForEvent(ctx context.Context, tx *sql.Tx, teamID string, seq int64, ev *AppendTeamEventInput, meta teamMetaRow, now int64) error {
+	if len(ev.Mailbox) == 0 {
+		return nil
+	}
+	rawKey, err := s.unwrapTeamKey(teamID, meta.KeyID, meta.WrappedKey)
+	if err != nil {
+		return err
+	}
+	defer clear(rawKey)
+	return s.insertMailboxRows(ctx, tx, teamID, seq, ev.Mailbox, meta.KeyID, rawKey, now)
 }
 
 type teamMetaRow struct {

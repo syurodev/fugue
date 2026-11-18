@@ -49,6 +49,9 @@ type TeamProposalService struct {
 	// onTeamActive runs after an approved decision made a team active; nil
 	// leaves the tasks queued (the decide-path tests).
 	onTeamActive func(teamID string)
+	// onMailbox asks the F11.3b wake pump for a delivery pass after a
+	// decision enqueued mail; nil leaves it to the next trigger.
+	onMailbox func()
 	// sessionLive reports whether the session still holds its token; it
 	// turns false inside endSession before the pending-proposal cancel
 	// runs, which is what closes the propose-versus-session-end race
@@ -133,6 +136,12 @@ func (s *TeamProposalService) SetAccounts(accounts *AccountsService) {
 // the start path of F11.3a hangs on it. It is called once during startup.
 func (s *TeamProposalService) SetOnTeamActive(fn func(teamID string)) {
 	s.onTeamActive = fn
+}
+
+// SetOnMailbox installs the wake trigger of the mailbox delivery (F11.3b).
+// It is called once during startup.
+func (s *TeamProposalService) SetOnMailbox(fn func()) {
+	s.onMailbox = fn
 }
 
 // SessionEndSettled is nil when no cancel is in flight for the session, else

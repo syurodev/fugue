@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 
+	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -23,11 +24,15 @@ type taskSessionRequest struct {
 }
 
 // taskSessions is the port the dispatcher starts and feeds task sessions
-// through. The vendor layer implements it for the host; tests use a fake.
+// through, and the wake delivers mail with (Q-123). The vendor layer
+// implements it for the host; tests use a fake.
 type taskSessions interface {
 	HasCapacity(ctx context.Context) (bool, error)
 	StartTaskSession(ctx context.Context, req *taskSessionRequest) error
 	Send(ctx context.Context, sessionID string, input vendor.Input) error
+	// ResumeTaskSession attaches a fresh process to a detached session
+	// through its stored handle; the wake resumes before it delivers (Q-123).
+	ResumeTaskSession(ctx context.Context, sessionID, cwd string) error
 	Close(ctx context.Context, sessionID string, reason vendor.CloseReason) error
 }
 
@@ -46,8 +51,28 @@ func (v vendorTaskSessions) Send(ctx context.Context, sessionID string, input ve
 	return v.svc.sessions.Send(ctx, sessionID, input)
 }
 
+func (v vendorTaskSessions) ResumeTaskSession(ctx context.Context, sessionID, cwd string) error {
+	return v.svc.resumeTaskSession(ctx, sessionID, cwd)
+}
+
 func (v vendorTaskSessions) Close(ctx context.Context, sessionID string, reason vendor.CloseReason) error {
 	return v.svc.sessions.Close(ctx, sessionID, reason)
+}
+
+// resumeTaskSession attaches a fresh process to a detached session through
+// its stored handle (Q-123). The profile stays empty: the vendor resumes with
+// the configuration its session already carries, so a wake never changes a
+// task's model or vendor. The caller derives the working directory host-side.
+func (s *VendorService) resumeTaskSession(ctx context.Context, sessionID, cwd string) error {
+	info, err := s.store.Snapshot(ctx, sessionID)
+	if err != nil {
+		return safeActorError(err)
+	}
+	if info.State != vendorstore.StateDetached {
+		return errcode.New(errcode.FailedPrecondition, "vendor session is not resumable")
+	}
+	spec := &vendor.StartSpec{SessionID: sessionID, Cwd: cwd, HostEnv: s.hostEnv, Bridge: s.bridge}
+	return s.spawn(spec, info.Role, func() error { return s.sessions.Resume(ctx, sessionID, spec) })
 }
 
 // startTaskSession spawns the session of a team task. It is a host-internal

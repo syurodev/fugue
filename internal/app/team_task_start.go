@@ -127,6 +127,13 @@ func overlayProfile(role *decidedRole, p *teams.ProfileOverride) {
 	}
 }
 
+// repoIDFor derives the stable repository identifier from the root directory;
+// the wake re-derives a detached session's worktree path with it (Q-119).
+func repoIDFor(repoDir string) string {
+	sum := sha256.Sum256([]byte(repoDir))
+	return "r" + hex.EncodeToString(sum[:8])
+}
+
 // approvalModeFor maps a role's permission to the Fugue approval mode of its
 // session (Q-120): read roles plan, write roles ask; never allow-always.
 func approvalModeFor(permission string) string {
@@ -152,8 +159,7 @@ func (d *teamDispatcher) resolveRepo(ctx context.Context, launch *taskLaunch, le
 		return worktreeFailure(ctx, err)
 	}
 	launch.repoDir, launch.headCommit = dir, head
-	sum := sha256.Sum256([]byte(dir))
-	launch.repoID = "r" + hex.EncodeToString(sum[:8])
+	launch.repoID = repoIDFor(dir)
 	parent, err := parentBranch(task, tasks)
 	if err != nil {
 		return worktreeFailure(ctx, err)
@@ -217,15 +223,45 @@ func (d *teamDispatcher) closeTaskSession(ctx context.Context, sessionID string)
 	}
 }
 
-// failTask ends a task failed with a stable code. It reads the team's last
-// sequence itself, because earlier appends moved it.
+// failTask ends a task failed with a stable code and enqueues the digest
+// item its delegator receives (§6.2: final failures go to the delegator
+// directly). It reads the team's last sequence itself, because earlier
+// appends moved it.
 func (d *teamDispatcher) failTask(ctx context.Context, teamID, taskID, code string) error {
-	rec, _, err := d.deps.Store.TeamSnapshot(ctx, teamID)
+	rec, tasks, err := d.deps.Store.TeamSnapshot(ctx, teamID)
 	if err != nil {
 		return boundaryError("read the team", err)
 	}
 	_, err = d.appendTaskEvent(ctx, teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
 		TaskID: taskID, EventType: vendorstore.EventTaskEnded, Outcome: vendorstore.TaskOutcomeFailed, FailureCode: code,
+		Mailbox: digestItemRows(taskID, delegatorOf(taskID, tasks), code),
 	})
+	if err == nil {
+		d.notifyMailbox()
+	}
 	return err
+}
+
+// delegatorOf returns the recipient of a task's failure digest: its parent
+// task. A lead task has no delegator; the user sees its failure on the board.
+func delegatorOf(taskID string, tasks []vendorstore.TaskRecord) string {
+	for i := range tasks {
+		if tasks[i].TaskID == taskID {
+			return tasks[i].ParentTaskID
+		}
+	}
+	return ""
+}
+
+// digestItemRows seals one digest item (Q-122); the state is Fugue's own and
+// the summary stays empty until the task tools report one (F11.3c).
+func digestItemRows(taskID, recipientTaskID, code string) []vendorstore.MailboxEnqueueInput {
+	if recipientTaskID == "" {
+		return nil
+	}
+	payload, err := json.Marshal(mailboxDigestItem{TaskID: taskID, State: string(vendorstore.TaskStateFailed), FailureCode: code})
+	if err != nil {
+		return nil
+	}
+	return []vendorstore.MailboxEnqueueInput{{RecipientTaskID: recipientTaskID, Kind: vendorstore.MailboxKindDigest, Payload: payload}}
 }

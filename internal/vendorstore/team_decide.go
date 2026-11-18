@@ -32,6 +32,9 @@ type TeamDecisionInput struct {
 	RemovedTaskIDs  []string
 	ResealedSpecs   []ResealedTaskSpec
 	AddedTasks      []NewTaskInput
+	// Mailbox rows are written in the same transaction as the TeamStarted
+	// event, keyed to its sequence (Q-122, OR-E13 delivery).
+	Mailbox []MailboxEnqueueInput
 }
 
 // TeamAmendInput applies one user-approved amend (§5.4): TeamAmended keeps the
@@ -53,6 +56,7 @@ func (s *Store) DecideTeam(ctx context.Context, teamID string, in *TeamDecisionI
 	}
 	return s.applyTeamMutation(ctx, teamID, &AppendTeamEventInput{
 		EventID: in.DecisionEventID, EventType: EventTeamStarted, ProtectedPayload: in.StartedPayload,
+		Mailbox: in.Mailbox,
 	}, in.ExpectedSeq, in.RemovedTaskIDs, in.ResealedSpecs, in.AddedTasks)
 }
 
@@ -146,6 +150,11 @@ func (s *Store) appendTeamEventAndRemovals(
 	}
 	if insertErr := insertAppendedTeamEvent(ctx, tx, teamID, lastSeq, ev, fromState, toState, envelope, now); insertErr != nil {
 		return 0, insertErr
+	}
+	if len(ev.Mailbox) > 0 {
+		if err := s.insertMailboxRows(ctx, tx, teamID, lastSeq, ev.Mailbox, meta.KeyID, rawKey, now); err != nil {
+			return 0, err
+		}
 	}
 	for _, taskID := range removed {
 		if lastSeq, err = s.appendTaskCancellation(ctx, tx, teamID, taskID, cancelEventID(ev.EventID, taskID), lastSeq+1, now); err != nil {
