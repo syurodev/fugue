@@ -74,6 +74,9 @@ type Env struct {
 	// the draw sites that know their own offsets. Production windows leave
 	// it nil and nothing is recorded.
 	RunRecorder func(image.Rectangle)
+	// Invalidate requests a redraw from any goroutine (set by the window
+	// owner to Gio's Window.Invalidate; nil is a no-op in tests).
+	Invalidate func()
 
 	// win is the window size in px and origin the window position of the
 	// layout cursor: Gio cannot read the current transform, so the overlay

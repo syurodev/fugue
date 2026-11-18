@@ -300,9 +300,6 @@ func (s *TreeViewState) appendSubBranch(env *Env, n *TreeNode, ns *treeNodeState
 			env.Driver.WakeAt(ns.loadSince.Add(treeSpinnerDelay))
 			return
 		}
-		if ns.expanded {
-			env.Keep()
-		}
 		*out = append(*out, flatTreeRow{
 			key:       treeLoadingPrefix + n.Key,
 			parentKey: n.Key,
@@ -333,10 +330,14 @@ func (s *TreeViewState) startBranchLoad(env *Env, nodeKey string, ns *treeNodeSt
 	ns.loadErr = nil
 	ns.loadSince = env.Now()
 	env.Driver.WakeAt(ns.loadSince.Add(treeSpinnerDelay))
+	invalidate := env.Invalidate
 	loader(nodeKey, func(children []TreeNode, err error) {
 		s.mu.Lock()
 		s.pending = append(s.pending, treeLoadResult{key: nodeKey, children: children, err: err})
 		s.mu.Unlock()
+		if invalidate != nil {
+			invalidate()
+		}
 	})
 }
 

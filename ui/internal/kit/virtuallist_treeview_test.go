@@ -273,6 +273,53 @@ func TestTreeViewLoadsABranchOnlyWhenOpened(t *testing.T) {
 	}
 }
 
+func TestTreeViewDrawsALoadThatFinishesWithoutInput(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.env.ReducedMotion = true
+	invalidated := make(chan struct{}, 1)
+	h.env.Invalidate = func() {
+		select {
+		case invalidated <- struct{}{}:
+		default:
+		}
+	}
+
+	tv := NewTreeViewState()
+	var pendingDone func([]TreeNode, error)
+	p := TreeViewProps{
+		Roots: []TreeNode{{Key: "lazy", Label: "Lazy", HasChildren: true}},
+		Loader: func(_ string, done func([]TreeNode, error)) {
+			pendingDone = done
+		},
+	}
+
+	layTreeFrames(t, h, tv, p, 120, 2)
+	h.click(18, 12)
+	layTreeFrames(t, h, tv, p, 120, 2)
+
+	// Past 150 ms under ReducedMotion: static spinner row, no continuous frames.
+	h.now = h.now.Add(160 * time.Millisecond)
+	layTreeFrames(t, h, tv, p, 120, 1)
+	if _, moving := h.env.Driver.Next(); moving {
+		t.Fatal("expected idle driver under ReducedMotion while waiting for async load")
+	}
+
+	// Complete on another goroutine: Invalidate fires, next frame shows children with no input.
+	go func() {
+		pendingDone([]TreeNode{{Key: "k1", Label: "Child 1"}, {Key: "k2", Label: "Child 2"}}, nil)
+	}()
+	<-invalidated
+
+	layTreeFrames(t, h, tv, p, 120, 1)
+	if tv.node("lazy").loading {
+		t.Fatal("branch still loading after async completion")
+	}
+	if tv.List().Rendered() != 3 {
+		t.Fatalf("rendered %d rows after async completion, want 3", tv.List().Rendered())
+	}
+}
+
 func TestTreeViewStateIsKeyedByNode(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
