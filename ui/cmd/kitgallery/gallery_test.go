@@ -54,25 +54,25 @@ func layFrame(t *testing.T, g *gallery, cur int, px float32) (gtx layout.Context
 // × size × state its page presents.
 func expectedCells(cur int) map[cell]bool {
 	want := map[cell]bool{}
-	switch pageNames()[cur] {
-	case "Button":
-		buttonCells(want)
-	case "IconButton":
-		iconButtonCells(want)
-	case "TextField":
-		textFieldCells(want)
-	case "TextArea":
-		textAreaCells(want)
-	case "Menu":
-		menuCells(want)
-	case "Kbd":
-		kbdCells(want)
-	case "Combobox":
-		comboboxCells(want)
-	case "Select":
-		selectCells(want)
-	case "Tooltip":
-		tooltipCells(want)
+	builders := map[string]func(map[cell]bool){
+		"Button":        buttonCells,
+		"IconButton":    iconButtonCells,
+		"TextField":     textFieldCells,
+		"TextArea":      textAreaCells,
+		"Menu":          menuCells,
+		"Kbd":           kbdCells,
+		"Combobox":      comboboxCells,
+		"Select":        selectCells,
+		"Tooltip":       tooltipCells,
+		"ListRow":       listRowCells,
+		"SectionHeader": sectionHeaderCells,
+		"ScrollArea":    scrollAreaCells,
+		"Tag":           tagCells,
+		"Progress":      progressAndDividerCells,
+		"SplitPane":     splitPaneCells,
+	}
+	if fn := builders[pageNames()[cur]]; fn != nil {
+		fn(want)
 	}
 	return want
 }
@@ -168,6 +168,52 @@ func tooltipCells(want map[cell]bool) {
 	}
 	for _, st := range []string{tipLiveA, tipLiveB} {
 		want[cell{compTooltip, 1, 0, st}] = true
+	}
+}
+
+func listRowCells(want map[cell]bool) {
+	for _, st := range listRowStates() {
+		want[cell{compListRow, 0, 0, st}] = true
+	}
+	want[cell{compListRow, 1, 0, lrLive}] = true
+}
+
+func sectionHeaderCells(want map[cell]bool) {
+	for _, st := range sectionHeaderStates() {
+		want[cell{compSectionHeader, 0, 0, st}] = true
+	}
+	want[cell{compSectionHeader, 1, 0, shLive}] = true
+}
+
+func scrollAreaCells(want map[cell]bool) {
+	want[cell{compScrollArea, 0, 0, stRest}] = true
+	want[cell{compScrollArea, 0, 0, stHover}] = true
+	want[cell{compScrollArea, 1, 0, stRest}] = true
+	want[cell{compScrollArea, 1, 0, stHover}] = true
+	want[cell{compScrollArea, 2, 0, stRest}] = true
+}
+
+func tagCells(want map[cell]bool) {
+	specs := tagSpecimens()
+	groupIdx := map[string]int{"neutral": 0, "status": 1, "hue": 2, "env": 3}
+	for i, sp := range specs {
+		want[cell{compTag, groupIdx[sp.group], i, sp.props.Text}] = true
+	}
+}
+
+func progressAndDividerCells(want map[cell]bool) {
+	for i := range progressSpecs() {
+		want[cell{compProgress, i, 0, "determinate"}] = true
+	}
+	want[cell{compDivider, 0, 0, "horizontal"}] = true
+	want[cell{compDivider, 1, 0, "vertical"}] = true
+}
+
+func splitPaneCells(want map[cell]bool) {
+	for oi := range 2 {
+		for _, st := range splitStateNames() {
+			want[cell{compSplitPane, oi, 0, st}] = true
+		}
 	}
 }
 

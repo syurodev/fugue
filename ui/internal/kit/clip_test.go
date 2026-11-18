@@ -6,6 +6,8 @@ import (
 
 	"gioui.org/layout"
 	"gioui.org/widget"
+
+	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
 // clipRig is one control of TestEveryControlEventAreaIsClippedToItsBounds:
@@ -21,7 +23,7 @@ type clipRig struct {
 // tag themselves at their own origin or at more than the box they draw would
 // show here.
 func clipRigNames() []string {
-	return []string{"Button", "IconButton", "TextField", "TextArea", "search clear button", "secret reveal button", "Select", "Combobox"}
+	return []string{"Button", "IconButton", "TextField", "TextArea", "search clear button", "secret reveal button", "Select", "Combobox", "ListRow", "SectionHeader", "SplitPane handle"}
 }
 
 // freeGtx is gtx without a minimum size, so a field lays out at its own width.
@@ -106,36 +108,104 @@ func clipRigs(t *testing.T, h *harness, name string) clipRig {
 		s.SetText("s3cret")
 		return fieldRig(h, s, TextFieldSecret, true, func() bool { return s.revealed })
 	case "Select":
-		s := NewSelectState()
-		p := &SelectProps{Label: "Engine", Placeholder: "Choose", Options: []SelectOption{{ID: "a", Label: "First"}}}
-		return clipRig{
-			lay: func(gtx *layout.Context) (image.Rectangle, image.Rectangle) {
-				g := freeGtx(gtx)
-				box := image.Rectangle{Max: s.Measure(h.env, g, p).Size}
-				if _, err := s.Layout(h.env, g, p); err != nil {
-					t.Fatal(err)
-				}
-				return box, box
-			},
-			got: func() bool { return h.gtx.Focused(s.Tag()) || s.IsOpen() },
-		}
+		return selectClipRig(t, h)
 	case "Combobox":
-		s := NewComboboxState()
-		p := &ComboboxProps{Label: "Engine", Placeholder: "Filter"}
-		return clipRig{
-			lay: func(gtx *layout.Context) (image.Rectangle, image.Rectangle) {
-				g := freeGtx(gtx)
-				box := image.Rectangle{Max: s.Measure(h.env, g, p).Size}
-				if _, err := s.Layout(h.env, g, p); err != nil {
-					t.Fatal(err)
-				}
-				return box, box
-			},
-			got: func() bool { return h.gtx.Focused(s.Tag()) },
-		}
+		return comboboxClipRig(t, h)
+	case "ListRow":
+		return listRowClipRig(h)
+	case "SectionHeader":
+		return sectionHeaderClipRig(h)
+	case "SplitPane handle":
+		return splitPaneClipRig(h)
 	}
 	s := NewTextFieldState()
 	return fieldRig(h, s, TextFieldText, false, func() bool { return h.gtx.Focused(&s.core.ed) })
+}
+
+func splitPaneClipRig(h *harness) clipRig {
+	s := NewSplitPaneState()
+	ratio := float32(0.5)
+	return clipRig{
+		lay: func(gtx *layout.Context) (image.Rectangle, image.Rectangle) {
+			g := *gtx
+			g.Constraints = layout.Exact(image.Pt(160, 80))
+			box := image.Rectangle{Max: g.Constraints.Max}
+			part := splitHandleRect(&g, Horizontal, 80, 160, 80)
+			if r, ok, _ := s.Layout(h.env, &g, SplitPaneProps{
+				Orientation: Horizontal,
+				Ratio:       ratio,
+			}, nil, nil); ok {
+				ratio = r
+			}
+			return box, part
+		},
+		got: func() bool { return s.pressing || !s.lastClickTime.IsZero() },
+	}
+}
+
+func selectClipRig(t *testing.T, h *harness) clipRig {
+	t.Helper()
+	s := NewSelectState()
+	p := &SelectProps{Label: "Engine", Placeholder: "Choose", Options: []SelectOption{{ID: "a", Label: "First"}}}
+	return clipRig{
+		lay: func(gtx *layout.Context) (image.Rectangle, image.Rectangle) {
+			g := freeGtx(gtx)
+			box := image.Rectangle{Max: s.Measure(h.env, g, p).Size}
+			if _, err := s.Layout(h.env, g, p); err != nil {
+				t.Fatal(err)
+			}
+			return box, box
+		},
+		got: func() bool { return h.gtx.Focused(s.Tag()) || s.IsOpen() },
+	}
+}
+
+func comboboxClipRig(t *testing.T, h *harness) clipRig {
+	t.Helper()
+	s := NewComboboxState()
+	p := &ComboboxProps{Label: "Engine", Placeholder: "Filter"}
+	return clipRig{
+		lay: func(gtx *layout.Context) (image.Rectangle, image.Rectangle) {
+			g := freeGtx(gtx)
+			box := image.Rectangle{Max: s.Measure(h.env, g, p).Size}
+			if _, err := s.Layout(h.env, g, p); err != nil {
+				t.Fatal(err)
+			}
+			return box, box
+		},
+		got: func() bool { return h.gtx.Focused(s.Tag()) },
+	}
+}
+
+func listRowClipRig(h *harness) clipRig {
+	s := NewListRowState()
+	clicked := false
+	return clipRig{
+		lay: func(gtx *layout.Context) (image.Rectangle, image.Rectangle) {
+			g := *gtx
+			g.Constraints = layout.Exact(image.Pt(200, gtx.Dp(theme.Row)))
+			dims, ev := s.Layout(h.env, &g, &ListRowProps{Label: "Item"})
+			clicked = clicked || ev.Clicked
+			pill := pillRect(gtx, image.Rectangle{Max: dims.Size})
+			return pill, pill
+		},
+		got: func() bool { return clicked || h.gtx.Focused(s.Tag()) },
+	}
+}
+
+func sectionHeaderClipRig(h *harness) clipRig {
+	s := NewSectionHeaderState(true)
+	toggled := false
+	return clipRig{
+		lay: func(gtx *layout.Context) (image.Rectangle, image.Rectangle) {
+			g := *gtx
+			g.Constraints = layout.Exact(image.Pt(200, gtx.Dp(theme.HitMin)))
+			dims, ev := s.Layout(h.env, &g, &SectionHeaderProps{Label: "Group", Collapsible: true}, nil)
+			toggled = toggled || ev.Toggled
+			return wholeBox(dims.Size)
+		},
+		got: func() bool { return toggled || h.gtx.Focused(s.Tag()) },
+	}
 }
 
 // clipRun is one control's run: a frame loop with a backdrop laid out under

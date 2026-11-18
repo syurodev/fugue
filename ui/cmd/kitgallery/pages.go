@@ -57,6 +57,13 @@ const (
 	compCombobox
 	compSelect
 	compTooltip
+	compListRow
+	compSectionHeader
+	compScrollArea
+	compTag
+	compProgress
+	compDivider
+	compSplitPane
 )
 
 // cell identifies one matrix cell of the inventory (UK-E03).
@@ -93,6 +100,10 @@ type pages struct {
 	combobox comboboxPage
 	sel      selectPage
 	tip      tooltipPage
+	list     listRowPage
+	section  sectionHeaderPage
+	scroll   scrollAreaPage
+	f1012    f1012Pages
 	nav      []*kit.ButtonState
 	// runs are the page-level text runs and ctl the control boxes of the
 	// frame, in window coordinates; ctlRuns are the runs drawn inside a
@@ -120,6 +131,10 @@ func newPages(env *kit.Env) *pages {
 	p.combobox = newComboboxPage()
 	p.sel = newSelectPage()
 	p.tip = newTooltipPage()
+	p.list = newListRowPage()
+	p.section = newSectionHeaderPage()
+	p.scroll = newScrollAreaPage()
+	p.f1012 = newF1012Pages()
 	for range pageNames() {
 		p.nav = append(p.nav, kit.NewButtonState())
 	}

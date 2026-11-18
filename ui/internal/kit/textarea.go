@@ -39,16 +39,15 @@ type TextAreaProps struct {
 type TextAreaState struct {
 	core fieldCore
 	err  fieldErrorState
-	// boxF follows the content height on Smooth (§6.9); list is the
-	// in-box scroller, active past the cap.
-	boxF motion.Follower
-	list layout.List
+	// boxF follows the content height on Smooth (§6.9); scroll is the
+	// in-box ScrollArea, active past the cap.
+	boxF   motion.Follower
+	scroll *ScrollAreaState
 }
 
 // NewTextAreaState builds the state for one area.
 func NewTextAreaState() *TextAreaState {
-	l := layout.List{Axis: layout.Vertical}
-	return &TextAreaState{core: newFieldCore(false), boxF: motion.NewFollower(motion.Smooth()), list: l}
+	return &TextAreaState{core: newFieldCore(false), boxF: motion.NewFollower(motion.Smooth()), scroll: NewScrollAreaState()}
 }
 
 // Text returns the area's value.
@@ -162,14 +161,13 @@ func (s *TextAreaState) draw(env *Env, gtx *layout.Context, p *TextAreaProps, sz
 		textW := inner.Dx()
 		if scrolls {
 			// Past the cap the editor flows at its full height inside the
-			// scrolling viewport of the inner rect; the list owns the
-			// wheel, and nothing draws under the padding.
+			// ScrollArea viewport of the inner rect; ScrollArea owns the
+			// wheel and draws the §6.29 indicator bar.
 			at(gtx, inner.Min, func(gtx *layout.Context) {
 				g := *gtx
 				g.Constraints = layout.Constraints{Max: image.Pt(textW, inner.Dy())}
-				s.list.Layout(g, 1, func(gtx layout.Context, _ int) layout.Dimensions {
-					g.Constraints = layout.Constraints{Max: image.Pt(textW, 1<<20)}
-					return drawEditor(env, &g, &s.core.ed, look.fg, fade(c.SelectedWash, dimOf(p.Disabled)))
+				s.scroll.Layout(env, &g, ScrollAreaProps{Axis: layout.Vertical}, func(gtx *layout.Context) layout.Dimensions {
+					return drawEditor(env, gtx, &s.core.ed, look.fg, fade(c.SelectedWash, dimOf(p.Disabled)))
 				})
 			})
 		} else {

@@ -5,12 +5,10 @@ import (
 	"image"
 	"math"
 
-	"gioui.org/f32"
 	"gioui.org/io/event"
 	"gioui.org/io/key"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
-	"gioui.org/op"
 	"gioui.org/op/clip"
 
 	"github.com/syurodev/fugue/ui/internal/motion"
@@ -252,11 +250,7 @@ func (s *SelectState) draw(env *Env, gtx *layout.Context, p *SelectProps, w int,
 	chevPx := gtx.Dp(theme.IconMD)
 	cx := w - gtx.Dp(theme.SpaceMD) - chevPx
 	cy := sz.labelH + (sz.boxH-chevPx)/2
-	center := f32.Pt(float32(cx)+float32(chevPx)/2, float32(cy)+float32(chevPx)/2)
-	rot := op.Affine(f32.AffineId().Rotate(center, chev*math.Pi)).Push(gtx.Ops)
-	err := drawIconAt(env, gtx, image.Pt(cx, cy), IconChevronDown, theme.IconMD, fade(c.IconMuted, dimOf(p.Disabled)))
-	rot.Pop()
-	if err != nil {
+	if err := drawRotatedIcon(env, gtx, image.Pt(cx, cy), IconChevronDown, theme.IconMD, fade(c.IconMuted, dimOf(p.Disabled)), chev*math.Pi); err != nil {
 		return fmt.Errorf("draw select chevron: %w", err)
 	}
 
