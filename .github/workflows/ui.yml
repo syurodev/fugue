@@ -36,15 +36,15 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: go run ./cmd/fuguegate changes -base "$BASE_SHA" -head "$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
+  # The macOS entry is a separate job gated by `if`, not a matrix entry: when
+  # the change set needs no ui run, no runner is requested on either OS, and
+  # each skipped job reports under its literal name instead of the matrix
+  # template (`ui (${{ matrix.os }})`).
   ui:
-    name: ui (${{ matrix.os }})
+    name: ui (ubuntu-latest)
     needs: changes
     if: needs.changes.outputs.ui == 'true'
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -52,8 +52,7 @@ jobs:
           go-version-file: go.mod
       # The Gio build requirements on Ubuntu: desktop-app §8 plus the three
       # packages the F10.1 probe found missing (ui/README.md lists them all).
-      - if: matrix.os == 'ubuntu-latest'
-        run: |
+      - run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev \
@@ -69,19 +68,37 @@ jobs:
       - name: lint
         working-directory: ui
         run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run ./...
-      # The evidence test builds fugue from the core module's cmd/fugue, so
-      # the whole repository must be present; it is.
-      #
       # The kit's icon evidence test renders through gio's headless window,
       # which needs an EGL context; the runner has no GPU, so the test step
       # runs under Xvfb with Mesa's software GL.
-      - name: test
-        working-directory: ui
-        run: go test -race -shuffle=on -count=1 ./...
-        if: matrix.os == 'macos-latest'
       - name: test (under Xvfb, software GL)
         working-directory: ui
         env:
           LIBGL_ALWAYS_SOFTWARE: "1"
         run: xvfb-run -a go test -race -shuffle=on -count=1 ./...
-        if: matrix.os == 'ubuntu-latest'
+
+  ui-macos:
+    name: ui (macos-latest)
+    needs: changes
+    if: needs.changes.outputs.ui == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - name: build
+        working-directory: ui
+        run: go build ./...
+      - name: vet
+        working-directory: ui
+        run: go vet ./...
+      # Keep the version in sync with GOLANGCI_LINT_VERSION in Taskfile.yml.
+      - name: lint
+        working-directory: ui
+        run: go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run ./...
+      # The evidence test builds fugue from the core module's cmd/fugue, so
+      # the whole repository must be present; it is.
+      - name: test
+        working-directory: ui
+        run: go test -race -shuffle=on -count=1 ./...
