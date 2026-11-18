@@ -32,19 +32,22 @@ func pillRect(gtx *layout.Context, r image.Rectangle) image.Rectangle {
 	return image.Rect(r.Min.X+dx, r.Min.Y, max(r.Max.X-dx, r.Min.X+dx), r.Max.Y)
 }
 
-// slidingPill animates a rounded selection or highlight pill's vertical position
-// and height on Smooth while fading its opacity on Snappy.
+// slidingPill animates a rounded selection or highlight pill's position and
+// size on Smooth while fading its opacity on Snappy.
 type slidingPill struct {
-	y, h, a motion.Follower
-	rect    image.Rectangle
-	alpha   float32
-	seeded  bool
+	x, y, w, h, a motion.Follower
+	rect          image.Rectangle
+	alpha         float32
+	seeded        bool
 }
 
 func newSlidingPill() slidingPill {
+	sm := motion.Smooth()
 	return slidingPill{
-		y: motion.NewFollower(motion.Smooth()),
-		h: motion.NewFollower(motion.Smooth()),
+		x: motion.NewFollower(sm),
+		y: motion.NewFollower(sm),
+		w: motion.NewFollower(sm),
+		h: motion.NewFollower(sm),
 		a: motion.NewFollower(motion.Snappy()),
 	}
 }
@@ -54,7 +57,9 @@ func (p *slidingPill) step(env *Env, target image.Rectangle, active bool) {
 		if active {
 			p.rect = target
 			p.alpha = 1
+			p.x.Snap(float32(target.Min.X))
 			p.y.Snap(float32(target.Min.Y))
+			p.w.Snap(float32(target.Dx()))
 			p.h.Snap(float32(target.Dy()))
 			p.a.Snap(1)
 			p.seeded = true
@@ -67,13 +72,17 @@ func (p *slidingPill) step(env *Env, target image.Rectangle, active bool) {
 	}
 	if active {
 		if !p.seeded || p.alpha == 0 {
+			p.x.Snap(float32(target.Min.X))
 			p.y.Snap(float32(target.Min.Y))
+			p.w.Snap(float32(target.Dx()))
 			p.h.Snap(float32(target.Dy()))
 			p.seeded = true
 		}
+		x := int(followSmooth(env, &p.x, float32(target.Min.X)) + 0.5)
 		y := int(followSmooth(env, &p.y, float32(target.Min.Y)) + 0.5)
+		w := int(followSmooth(env, &p.w, float32(target.Dx())) + 0.5)
 		h := int(followSmooth(env, &p.h, float32(target.Dy())) + 0.5)
-		p.rect = image.Rect(target.Min.X, y, target.Max.X, y+max(h, 0))
+		p.rect = image.Rect(x, y, x+max(w, 0), y+max(h, 0))
 		p.alpha = followSmooth(env, &p.a, 1)
 		return
 	}

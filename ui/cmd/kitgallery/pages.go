@@ -69,6 +69,13 @@ const (
 	compPopover
 	compDialog
 	compToast
+	compCheckbox
+	compSwitch
+	compSegmented
+	compCard
+	compTabs
+	compBanner
+	compEmptyState
 )
 
 // cell identifies one matrix cell of the inventory (UK-E03).
@@ -114,6 +121,8 @@ type pages struct {
 	pop      popoverPage
 	dlg      dialogPage
 	tst      toastPage
+	ctrl     controlsPage
+	tf       tabsFeedbackPage
 	nav      []*kit.ButtonState
 	// runs are the page-level text runs and ctl the control boxes of the
 	// frame, in window coordinates; ctlRuns are the runs drawn inside a
@@ -150,6 +159,8 @@ func newPages(env *kit.Env) *pages {
 	p.pop = newPopoverPage()
 	p.dlg = newDialogPage()
 	p.tst = newToastPage()
+	p.ctrl = newControlsPage()
+	p.tf = newTabsFeedbackPage()
 	for range pageNames() {
 		p.nav = append(p.nav, kit.NewButtonState())
 	}
