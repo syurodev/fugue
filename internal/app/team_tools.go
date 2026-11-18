@@ -78,7 +78,13 @@ func teamProposeTool(svc *TeamProposalService) *FugueTool {
 		Descriptor:  interaction.Descriptor{Risk: interaction.RiskRead, Confirm: interaction.ConfirmNever},
 		Available: func(ctx context.Context, info vendorstore.Session) bool {
 			enabled, err := svc.teamsEnabled(ctx, info.WorkspaceID)
-			return err == nil && enabled
+			if err != nil || !enabled {
+				return false
+			}
+			// §6.6: a manager or a member never proposes a team; the role
+			// comes from the store (Q-117). A lookup that fails offers nothing.
+			role, roleErr := sessionTeamRole(ctx, svc.store, info.ID)
+			return roleErr == nil && role != vendorstore.RoleTeamManager && role != vendorstore.RoleMember
 		},
 		Plan: func(json.RawMessage) (FugueToolPlan, error) { return FugueToolPlan{}, nil },
 		Run: func(ctx context.Context, sessionID string, args json.RawMessage) (string, error) {

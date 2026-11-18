@@ -46,6 +46,9 @@ type TeamProposalService struct {
 	// accounts renders the §5.3 card account line (F11.2b moved it here from
 	// F11.2a); nil until the runtime wires it, which reads as unknown.
 	accounts *AccountsService
+	// onTeamActive runs after an approved decision made a team active; nil
+	// leaves the tasks queued (the decide-path tests).
+	onTeamActive func(teamID string)
 	// sessionLive reports whether the session still holds its token; it
 	// turns false inside endSession before the pending-proposal cancel
 	// runs, which is what closes the propose-versus-session-end race
@@ -124,6 +127,12 @@ func (s *TeamProposalService) BeginSessionEnd(sessionID string) func() {
 // It is called once during startup, after the accounts service exists.
 func (s *TeamProposalService) SetAccounts(accounts *AccountsService) {
 	s.accounts = accounts
+}
+
+// SetOnTeamActive installs the hook run after an approved team became active;
+// the start path of F11.3a hangs on it. It is called once during startup.
+func (s *TeamProposalService) SetOnTeamActive(fn func(teamID string)) {
+	s.onTeamActive = fn
 }
 
 // SessionEndSettled is nil when no cancel is in flight for the session, else

@@ -242,16 +242,10 @@ func (m *VendorSessions) reserveSlot(ctx context.Context, sessionID string) (fun
 		m.startReservations--
 		m.mu.Unlock()
 	}
-	sessions, err := m.deps.Store.ListSessions(ctx)
+	active, err := m.activeSessions(ctx)
 	if err != nil {
 		release()
-		return nil, safeActorError(err)
-	}
-	active := 0
-	for i := range sessions {
-		if sessions[i].State != vendorstore.StateClosed && sessions[i].State != vendorstore.StateDetached {
-			active++
-		}
+		return nil, err
 	}
 	m.mu.RLock()
 	reserved := m.startReservations
