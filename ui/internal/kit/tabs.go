@@ -82,12 +82,14 @@ type TabsState struct {
 	pressClose  string
 	dragID      string
 	dragStartX  int
+	dragPtrX    int
 	dragActive  bool
 	overflowBtn *ButtonState
 	overflow    *MenuState
 	hiddenIDs   []string
 	stripRect   image.Rectangle
 	focusRingR  image.Rectangle
+	dragDefer   bool
 	lastActive  string
 	inited      bool
 }
@@ -356,19 +358,17 @@ func (s *TabsState) beginPress(gtx *layout.Context, pr TabsProps, pt image.Point
 	if id == "" {
 		return
 	}
-	sl := s.slots[id]
-	if pr.Variant == TabsDocument && sl != nil {
-		gtx.Execute(key.FocusCmd{Tag: &sl.tag})
-	} else {
-		gtx.Execute(key.FocusCmd{Tag: s.Tag()})
-	}
-	if pr.Variant == TabsDocument && sl != nil && !sl.closeRect.Empty() && pt.In(sl.closeRect) {
-		s.pressClose = id
-		return
+	gtx.Execute(key.FocusCmd{Tag: s.tabFocusTag(pr.Variant, id)})
+	if pr.Variant == TabsDocument {
+		if sl := s.slots[id]; sl != nil && !sl.closeRect.Empty() && pt.In(sl.closeRect) {
+			s.pressClose = id
+			return
+		}
 	}
 	s.pressID = id
 	s.dragID = id
 	s.dragStartX = pt.X
+	s.dragPtrX = pt.X
 	s.dragActive = false
 }
 
@@ -376,6 +376,7 @@ func (s *TabsState) dragTab(gtx *layout.Context, pr TabsProps, pt image.Point, e
 	if pr.Variant != TabsDocument || s.dragID == "" {
 		return
 	}
+	s.dragPtrX = pt.X
 	if !s.dragActive && absInt(pt.X-s.dragStartX) >= gtx.Dp(theme.SpaceXS) {
 		s.dragActive = true
 	}

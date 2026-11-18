@@ -240,9 +240,7 @@ func TestTabsCtrlTabCyclesDocumentTabsAndOverflowListsHidden(t *testing.T) {
 	h.env.KeyboardOnly = true
 	focusTag(t, h, st.TabTag(act), func(fn func()) { step(400, fn) })
 	step(400)
-	if got, want := st.FocusRingRect(), st.TabRect(act); got != want || want.Empty() {
-		t.Fatalf("document tab focus ring rect = %v, want focused tab rect %v", got, want)
-	}
+	checkDocTabBoundsAndDrag(t, h, st, items, act)
 
 	// Ctrl+Tab -> b, Ctrl+Tab -> c, Ctrl+Shift+Tab -> b.
 	h.tap(key.NameTab, key.ModCtrl)
@@ -271,6 +269,34 @@ func TestTabsCtrlTabCyclesDocumentTabsAndOverflowListsHidden(t *testing.T) {
 	}
 
 	checkModeTabs(t, h)
+}
+
+func checkDocTabBoundsAndDrag(t *testing.T, h *harness, st *TabsState, items []TabItem, act string) {
+	t.Helper()
+	if got, want := st.FocusRingRect(), st.TabRect(act); got != want || want.Empty() {
+		t.Fatalf("document tab focus ring rect = %v, want focused tab rect %v", got, want)
+	}
+	if !st.FocusRingRect().In(st.StripRect()) {
+		t.Fatalf("focused tab ring %v escapes strip clip %v", st.FocusRingRect(), st.StripRect())
+	}
+	firstR := st.TabRect(items[0].ID)
+	pad := h.gtx.Dp(theme.FocusOffset) + h.gtx.Dp(theme.FocusStroke)
+	if firstR.Min.X < st.StripRect().Min.X+pad {
+		t.Fatalf("first tab %v lacks %d px room inside strip %v", firstR, pad, st.StripRect())
+	}
+	normalW := firstR.Dx()
+	h.frameSize(t, 400, 40)
+	_, dev := st.Layout(h.env, &h.gtx, TabsProps{Variant: TabsDocument, Items: items, ActiveID: act, DraggingID: act})
+	if dev.Err != nil {
+		t.Fatalf("Tabs.Layout dragging: %v", dev.Err)
+	}
+	h.end()
+	if !st.DraggedDeferred() {
+		t.Fatal("dragged tab must be deferred above the strip clip")
+	}
+	if dw := st.TabRect(act).Dx(); dw >= normalW {
+		t.Fatalf("dragged tab width %d did not collapse close slot (normal %d)", dw, normalW)
+	}
 }
 
 func checkModeTabs(t *testing.T, h *harness) {
