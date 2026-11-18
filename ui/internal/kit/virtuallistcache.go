@@ -25,6 +25,9 @@ type virtualHeightEntry struct {
 	self   *list.Element
 }
 
+// VirtualHeightCache is the bounded LRU of one VirtualList: heights keyed by
+// (key, revision), each key's latest measured height, and the callers'
+// payloads, all evicting together (§6.26).
 type VirtualHeightCache struct {
 	max     int
 	entries map[virtualHeightKey]*virtualHeightEntry
