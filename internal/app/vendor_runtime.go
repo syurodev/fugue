@@ -125,7 +125,10 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 		return nil, err
 	}
 	hp.rt.teamProposals = newTeamProposalService(vs, sessions, hp.rt.workspaces.domain, hp.rt.interactions, nopUsageHistory{}, deps.IDs, tokens.liveSession)
-	tools := append(slices.Clone(deps.TestFugueTools), teamProposeTool(hp.rt.teamProposals))
+	// The interaction service consumes the answers of the team proposal and
+	// amend cards; the wiring happens before any client can answer (F11.2b).
+	hp.rt.interactions.SetTeamCardResolver(hp.rt.teamProposals)
+	tools := append(slices.Clone(deps.TestFugueTools), teamProposeTool(hp.rt.teamProposals), teamAmendTool(hp.rt.teamProposals))
 	hp.rt.sessionTools = newSessionToolService(tokens, tools, vs, hp.rt.interactions, hp.rt.tags, deps.IDs, sessions)
 	sessions.SetRelay(hp.rt.sessionTools)
 	hp.rt.vendors = &VendorService{
@@ -137,6 +140,9 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	if err != nil {
 		return nil, err
 	}
+	// The proposal card's account line reads the accounts service (F11.2b
+	// moved it here from F11.2a).
+	hp.rt.teamProposals.SetAccounts(hp.rt.accountsService)
 	return sessions, nil
 }
 

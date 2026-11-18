@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"sync"
 
-	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/teams"
@@ -44,6 +43,9 @@ type TeamProposalService struct {
 	interactions *InteractionService
 	usage        usageHistory
 	ids          ids.Generator
+	// accounts renders the §5.3 card account line (F11.2b moved it here from
+	// F11.2a); nil until the runtime wires it, which reads as unknown.
+	accounts *AccountsService
 	// sessionLive reports whether the session still holds its token; it
 	// turns false inside endSession before the pending-proposal cancel
 	// runs, which is what closes the propose-versus-session-end race
@@ -59,6 +61,10 @@ type TeamProposalService struct {
 	// store refuses writes to a closed session, and a flip that loses that
 	// race could never land.
 	settling sessionSettles
+	// pendingAmends tracks the team amend cards waiting for the user
+	// (F11.2b), so a new amend supersedes the old and the session-end
+	// cancel invalidates them.
+	pendingAmends amendCards
 }
 
 // sessionSettles counts in-flight session-end cancels per session and hands
@@ -114,6 +120,12 @@ func (s *TeamProposalService) BeginSessionEnd(sessionID string) func() {
 	return s.settling.begin(sessionID)
 }
 
+// SetAccounts wires the accounts service for the §5.3 card account line.
+// It is called once during startup, after the accounts service exists.
+func (s *TeamProposalService) SetAccounts(accounts *AccountsService) {
+	s.accounts = accounts
+}
+
 // SessionEndSettled is nil when no cancel is in flight for the session, else
 // a channel that closes when it is.
 func (s *TeamProposalService) SessionEndSettled(sessionID string) <-chan struct{} {
@@ -153,10 +165,10 @@ func newTeamProposalService(store *vendorstore.Store, recorder approvalRecorder,
 	}
 }
 
-// resolveProposingSession reads the session snapshot and its workspace's
+// resolveTeamsSession reads the session snapshot and its workspace's
 // effective configuration, failing typed when the session is gone or the
-// workspace has teams disabled (Q-105).
-func (s *TeamProposalService) resolveProposingSession(ctx context.Context, sessionID string) (workspace.EffectiveConfig, vendorstore.Session, error) {
+// workspace has teams disabled (Q-105). The propose and amend paths share it.
+func (s *TeamProposalService) resolveTeamsSession(ctx context.Context, sessionID string) (workspace.EffectiveConfig, vendorstore.Session, error) {
 	snap, err := s.store.Snapshot(ctx, sessionID)
 	if err != nil {
 		return workspace.EffectiveConfig{}, vendorstore.Session{}, boundaryError("read the proposing session", err)
@@ -220,7 +232,7 @@ func (s *TeamProposalService) Propose(ctx context.Context, sessionID string, arg
 	}
 	unlock := s.locks.lock(sessionID)
 	defer unlock()
-	eff, snap, err := s.resolveProposingSession(ctx, sessionID)
+	eff, snap, err := s.resolveTeamsSession(ctx, sessionID)
 	if err != nil {
 		return "", err
 	}
@@ -246,183 +258,20 @@ func (s *TeamProposalService) Propose(ctx context.Context, sessionID string, arg
 	if itemErr := s.recordProposalItem(ctx, sessionID, teamID, input); itemErr != nil {
 		return "", itemErr
 	}
+	// Auto-approve (Q-102, Q-111): only when the workspace setting is on and
+	// the proposal is at most three agents of catalog read roles. The
+	// decision is recorded as decided by "auto" and leaves no pending card;
+	// a failure falls back to the user's card, so nothing is decided
+	// silently and nothing else waits for the user (§5.3).
+	if s.autoApprovable(&eff, input) {
+		if err := s.applyDecisionLocked(ctx, sessionID, teamID, decisionApprove, "", decidedByAuto, &eff); err == nil {
+			return teamID, nil
+		}
+	}
 	if err := s.ensureCard(ctx, &snap, teamID, input, warnings, &eff); err != nil {
 		return "", err
 	}
 	return teamID, nil
-}
-
-// supersedePending rejects the session's pending proposal before a new one is
-// created (Q-103).
-func (s *TeamProposalService) supersedePending(ctx context.Context, sessionID string) error {
-	pending, ok, err := s.store.PendingTeamForSession(ctx, sessionID)
-	if err != nil {
-		return boundaryError("read the pending proposal", err)
-	}
-	if !ok {
-		return nil
-	}
-	return s.cancelPendingProposal(ctx, &pending, "superseded")
-}
-
-// CancelForSession cancels the session's pending proposal because its session
-// ended (Q-104). It is idempotent: a proposal that is already decided or
-// cancelled is left alone, and only non-terminal tasks are cancelled. The
-// item flip goes through the actor, which holds its close until this cancel
-// settles; a failed flip leaves the whole proposal pending, because expiry or
-// closing is never an approval.
-func (s *TeamProposalService) CancelForSession(ctx context.Context, sessionID string) error {
-	// The same per-session lock as Propose (Q-103, Q-104): whichever runs
-	// first, a proposal the cancel misses is refused by the liveness
-	// re-check, and one it sees is cancelled.
-	unlock := s.locks.lock(sessionID)
-	defer unlock()
-	pending, ok, err := s.store.PendingTeamForSession(ctx, sessionID)
-	if err != nil {
-		return boundaryError("read the pending proposal", err)
-	}
-	if !ok {
-		return nil
-	}
-	// Fail closed: the item flip comes first and a failure leaves the
-	// proposal fully pending (team, tasks and card untouched), never a
-	// cancelled team behind a still-actionable card. Only a transient
-	// unavailable is retried; the flip is idempotent.
-	var markErr error
-	for range sessionEndFlipAttempts {
-		if markErr = s.markItemRejected(ctx, pending.SessionID, pending.TeamID); markErr == nil || errcode.CodeOf(markErr) != errcode.Unavailable {
-			break
-		}
-	}
-	if markErr != nil {
-		return markErr
-	}
-	return s.cancelPendingTeam(ctx, &pending, "session ended")
-}
-
-// cancelPendingProposal settles tasks first, then appends TeamEnded (Q-84).
-// Supersede updates the transcript item synchronously before any store
-// append, so a failure there leaves the durable state untouched; the steps
-// after it are each idempotent, so a retried cancel finishes a partially
-// cancelled proposal.
-func (s *TeamProposalService) cancelPendingProposal(ctx context.Context, pending *vendorstore.TeamRecord, note string) error {
-	if pending.State != vendorstore.TeamStateProposed {
-		return nil
-	}
-	if markErr := s.markItemRejected(ctx, pending.SessionID, pending.TeamID); markErr != nil {
-		return markErr
-	}
-	return s.cancelPendingTeam(ctx, pending, note)
-}
-
-// cancelPendingTeam invalidates the card and settles the durable team: the
-// card first, so supersede's own card finds the session's single pending
-// slot free (Q-103), then each non-terminal task, then TeamEnded.
-func (s *TeamProposalService) cancelPendingTeam(ctx context.Context, pending *vendorstore.TeamRecord, note string) error {
-	// The card goes first: a cancelled proposal must not leave a pending
-	// card behind.
-	operation, err := interaction.NativeOperationKey(pending.TeamID, pending.TeamID, 1)
-	if err != nil {
-		return errcode.Wrap(errcode.Internal, "key the proposal card", err)
-	}
-	if _, invalErr := s.interactions.owner.InvalidateOperation(operation); invalErr != nil {
-		return boundaryError("invalidate the proposal card", invalErr)
-	}
-	_, tasks, err := s.store.TeamSnapshot(ctx, pending.TeamID)
-	if err != nil {
-		return boundaryError("read the proposal's tasks", err)
-	}
-	next := pending.LastSeq
-	for i := range tasks {
-		if taskStateTerminal(tasks[i].State) {
-			continue
-		}
-		eventID, idErr := s.ids.NewID()
-		if idErr != nil {
-			return errcode.Wrap(errcode.Internal, "generate the task cancel event ID", idErr)
-		}
-		if next, err = s.store.AppendTeamEvent(ctx, pending.TeamID, next, &vendorstore.AppendTeamEventInput{
-			EventID: eventID, TaskID: tasks[i].TaskID, EventType: vendorstore.EventTaskEnded,
-			Outcome: string(vendorstore.TeamStateCancelled),
-		}); err != nil {
-			return boundaryError("cancel a proposal task", err)
-		}
-	}
-	endID, err := s.ids.NewID()
-	if err != nil {
-		return errcode.Wrap(errcode.Internal, "generate the team end event ID", err)
-	}
-	payload, err := json.Marshal(cancelDecisionPayload{Decision: decisionRejectedItem, Note: note})
-	if err != nil {
-		return errcode.Wrap(errcode.Internal, "marshal the cancel decision", err)
-	}
-	_, err = s.store.AppendTeamEvent(ctx, pending.TeamID, next, &vendorstore.AppendTeamEventInput{
-		EventID: endID, EventType: vendorstore.EventTeamEnded,
-		Outcome: string(vendorstore.TeamStateCancelled), ProtectedPayload: payload,
-	})
-	return boundaryError("end the cancelled proposal", err)
-}
-
-// cancelDecisionPayload is the sealed payload of a TeamEnded append that
-// cancels a still-proposed team (F11.2a). F11.2b extends the vocabulary with
-// the user decisions.
-type cancelDecisionPayload struct {
-	Decision string `json:"decision"`
-	Note     string `json:"note,omitempty"`
-}
-
-// taskStateTerminal reports the terminal task states (§3.1); unknown is not
-// terminal (Q-84).
-func taskStateTerminal(state vendorstore.TaskState) bool {
-	switch state {
-	case vendorstore.TaskStateDone, vendorstore.TaskStateFailed,
-		vendorstore.TaskStateStopped, vendorstore.TaskStateCancelled:
-		return true
-	case vendorstore.TaskStateQueued, vendorstore.TaskStateStarting,
-		vendorstore.TaskStateRunning, vendorstore.TaskStateAsking,
-		vendorstore.TaskStateChecking, vendorstore.TaskStateReview,
-		vendorstore.TaskStateIntegrating, vendorstore.TaskStateUnknown:
-		return false
-	}
-	return false
-}
-
-// markItemRejected flips the session's team_proposal item to rejected
-// through the actor's single-writer journal. A missing item is skipped: the
-// durable team state stays authoritative.
-func (s *TeamProposalService) markItemRejected(ctx context.Context, sessionID, teamID string) error {
-	itemID, itemErr := s.findProposalItem(ctx, sessionID, teamID)
-	if itemErr != nil || itemID == "" {
-		return itemErr
-	}
-	stored, content, readErr := s.store.ReadItem(ctx, sessionID, itemID)
-	if readErr != nil {
-		return boundaryError("read the proposal item", readErr)
-	}
-	metadata := stored.Metadata
-	metadata.Decision = decisionRejectedItem
-	recordErr := s.recorder.RecordEvent(ctx, sessionID, &vendorstore.Event{
-		Type: vendorstore.TranscriptItemUpdated, TurnID: stored.TurnID,
-		Item: &vendorstore.Item{
-			ID: stored.ID, TurnID: stored.TurnID, Kind: stored.Kind,
-			Revision: stored.Revision, Metadata: metadata, Content: content,
-		},
-	})
-	return boundaryError("record the rejected proposal item", recordErr)
-}
-
-// findProposalItem looks the proposal item up by its proposal ID through the
-// transcript metadata index (0011), so a proposal stays flippable for the
-// whole life of a long session (F11.2a review).
-func (s *TeamProposalService) findProposalItem(ctx context.Context, sessionID, teamID string) (string, error) {
-	itemID, ok, err := s.store.ProposalItemID(ctx, sessionID, teamID)
-	if err != nil {
-		return "", boundaryError("look up the proposal item", err)
-	}
-	if !ok {
-		return "", nil
-	}
-	return itemID, nil
 }
 
 // catalogRoles converts the workspace catalog to the teams domain.
@@ -444,39 +293,56 @@ func catalogRoles(eff *workspace.EffectiveConfig) []teams.Role {
 // proposal's untrusted task IDs are namespaced under the proposal ID; the
 // mapping is deterministic, and every in-team reference (parent and
 // depends_on) uses the namespaced key. Goals, contexts, scopes and checks
-// travel only in the sealed spec (INV-09).
+// travel only in the sealed spec (INV-09), and the plan itself travels in
+// the sealed TeamProposed payload so the decide path re-validates edits
+// against exactly what was proposed (F11.2b).
 func newTeamInput(teamID, sessionID, workspaceID string, input *teams.ProposalInput, gen ids.Generator) (*vendorstore.NewTeamInput, error) {
 	proposedID, err := gen.NewID()
 	if err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "generate the propose event ID", err)
 	}
+	proposedPayload, err := json.Marshal(input)
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "marshal the sealed proposal plan", err)
+	}
 	out := &vendorstore.NewTeamInput{
-		TeamID: teamID, WorkspaceID: workspaceID, SessionID: sessionID, ProposedEventID: proposedID,
+		TeamID: teamID, WorkspaceID: workspaceID, SessionID: sessionID,
+		ProposedEventID: proposedID, ProposedPayload: proposedPayload,
 		Tasks: make([]vendorstore.NewTaskInput, 0, len(input.Tasks)),
 	}
 	for i := range input.Tasks {
-		t := &input.Tasks[i]
-		eventID, idErr := gen.NewID()
-		if idErr != nil {
-			return nil, errcode.Wrap(errcode.Internal, "generate a task event ID", idErr)
+		taskInput, taskErr := newTaskInputOf(teamID, &input.Tasks[i], gen)
+		if taskErr != nil {
+			return nil, taskErr
 		}
-		spec := t.TaskSpec()
-		specJSON, marshalErr := json.Marshal(spec.ProtectedContent())
-		if marshalErr != nil {
-			return nil, errcode.Wrap(errcode.Internal, "marshal the protected task spec", marshalErr)
-		}
-		dependsOn := make([]string, 0, len(t.DependsOn))
-		for _, dep := range t.DependsOn {
-			dependsOn = append(dependsOn, durableTaskID(teamID, dep))
-		}
-		out.Tasks = append(out.Tasks, vendorstore.NewTaskInput{
-			TaskID:       durableTaskID(teamID, t.ID),
-			ParentTaskID: durableTaskID(teamID, t.ParentTaskID), HierarchyRole: vendorstore.TeamRole(t.TeamRole),
-			CatalogRole: t.Role, Deliverable: vendorstore.TeamDeliverable(t.Deliverable),
-			DependsOn: dependsOn, CreatedEventID: eventID, ProtectedSpec: specJSON,
-		})
+		out.Tasks = append(out.Tasks, *taskInput)
 	}
 	return out, nil
+}
+
+// newTaskInputOf maps one proposal task onto the store's create and insert
+// input, namespacing its ID and every in-team reference under the team.
+// Goals, contexts, scopes and checks travel only in the sealed spec (INV-09).
+func newTaskInputOf(teamID string, t *teams.ProposedTask, gen ids.Generator) (*vendorstore.NewTaskInput, error) {
+	eventID, err := gen.NewID()
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "generate a task event ID", err)
+	}
+	spec := t.TaskSpec()
+	specJSON, marshalErr := json.Marshal(spec.ProtectedContent())
+	if marshalErr != nil {
+		return nil, errcode.Wrap(errcode.Internal, "marshal the protected task spec", marshalErr)
+	}
+	dependsOn := make([]string, 0, len(t.DependsOn))
+	for _, dep := range t.DependsOn {
+		dependsOn = append(dependsOn, durableTaskID(teamID, dep))
+	}
+	return &vendorstore.NewTaskInput{
+		TaskID:       durableTaskID(teamID, t.ID),
+		ParentTaskID: durableTaskID(teamID, t.ParentTaskID), HierarchyRole: vendorstore.TeamRole(t.TeamRole),
+		CatalogRole: t.Role, Deliverable: vendorstore.TeamDeliverable(t.Deliverable),
+		DependsOn: dependsOn, CreatedEventID: eventID, ProtectedSpec: specJSON,
+	}, nil
 }
 
 // durableTaskID namespaces a proposal task ID under its team.

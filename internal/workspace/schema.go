@@ -77,14 +77,18 @@ type ProfileConfig struct {
 }
 
 // SessionConfig holds session-scoped settings. Teams controls whether the
-// workspace's sessions are offered fugue_team_propose (F11.2a, Q-105); every
-// proposal still waits for the user, and an out-of-band change of the key
+// workspace's sessions are offered fugue_team_propose (F11.2a, Q-105);
+// TeamsAutoApprove controls whether Fugue auto-approves a proposal that uses
+// only catalog read roles and at most three agents (F11.2b, Q-102, Q-111).
+// TeamsAutoApprove defaults to false: every proposal waits for the user
+// unless the workspace turns it on, and an out-of-band change of either key
 // waits for confirmation like every policy key (Q-64).
 type SessionConfig struct {
-	ScratchDir string
-	Model      string
-	Effort     string
-	Teams      bool
+	ScratchDir       string
+	Model            string
+	Effort           string
+	Teams            bool
+	TeamsAutoApprove bool
 }
 
 // HostConfig holds host-wide settings valid only in Tier 2 (<FugueHome>/config.toml).
@@ -119,7 +123,7 @@ func DefaultConfig(fugueHome, workspaceID string) EffectiveConfig {
 	if workspaceID != "" {
 		scratchDir = filepath.Join(wsDir, workspaceID, "scratch")
 	}
-	for _, k := range []string{keyPolicyApprovalMode, "policy.sandbox_profile", "policy.shell_ask", "policy.shell_allow", "policy.env_tags", "env.keep", "env.override_allow", "redact.allow_keys", "redact.allow_paths", "roles", "profiles", "session.scratch_dir", "session.teams", "host.workspaces_dir", "host.output_retention_total", "host.seen_versions_per_session", "host.snapshot_disk"} {
+	for _, k := range []string{keyPolicyApprovalMode, "policy.sandbox_profile", "policy.shell_ask", "policy.shell_allow", "policy.env_tags", "env.keep", "env.override_allow", "redact.allow_keys", "redact.allow_paths", "roles", "profiles", "session.scratch_dir", "session.teams", "session.teams_auto_approve", "host.workspaces_dir", "host.output_retention_total", "host.seen_versions_per_session", "host.snapshot_disk"} {
 		prov[k] = TierDefault
 	}
 	return EffectiveConfig{
@@ -229,6 +233,9 @@ func applyCommonTier(
 		if sess.Teams != nil {
 			dst.Session.Teams, dst.Provenance["session.teams"] = *sess.Teams, tier
 		}
+		if sess.TeamsAutoApprove != nil {
+			dst.Session.TeamsAutoApprove, dst.Provenance["session.teams_auto_approve"] = *sess.TeamsAutoApprove, tier
+		}
 	}
 }
 
@@ -289,6 +296,7 @@ func diffPolicy(accepted, candidate *EffectiveConfig) []PolicyDiffEntry {
 	add("roots", fmt.Sprint(accepted.Roots), fmt.Sprint(candidate.Roots))
 	add("roles", formatRolesForDiff(accepted.Roles), formatRolesForDiff(candidate.Roles))
 	add("session.teams", strconv.FormatBool(accepted.Session.Teams), strconv.FormatBool(candidate.Session.Teams))
+	add("session.teams_auto_approve", strconv.FormatBool(accepted.Session.TeamsAutoApprove), strconv.FormatBool(candidate.Session.TeamsAutoApprove))
 	return diffs
 }
 

@@ -75,7 +75,7 @@ func (s *Store) commitNewTeam(
 	if insErr := insertTeamRecordRow(ctx, tx, &rec, wrapped); insErr != nil {
 		return TeamRecord{}, nil, insErr
 	}
-	if propErr := insertTeamProposedEvent(ctx, tx, in, now); propErr != nil {
+	if propErr := s.insertTeamProposedEvent(ctx, tx, in, wrapped.KeyID, rawKey, now); propErr != nil {
 		return TeamRecord{}, nil, propErr
 	}
 	tasks, err := s.insertInitialTasks(ctx, tx, in, depths, rawKey, wrapped.KeyID, now)
@@ -112,13 +112,21 @@ func insertTeamRecordRow(ctx context.Context, tx *sql.Tx, rec *TeamRecord, wrapp
 	return nil
 }
 
-func insertTeamProposedEvent(ctx context.Context, tx *sql.Tx, in *NewTeamInput, now int64) error {
+func (s *Store) insertTeamProposedEvent(ctx context.Context, tx *sql.Tx, in *NewTeamInput, keyID string, rawKey []byte, now int64) error {
+	var envelope any
+	if len(in.ProposedPayload) > 0 {
+		env, err := sealing.SealPayload(randomReader{s.random}, teamEventRecordType, in.TeamID, in.ProposedEventID, string(EventTeamProposed), keyID, rawKey, in.ProposedPayload)
+		if err != nil {
+			return fmt.Errorf("seal TeamProposed payload: %w", err)
+		}
+		envelope = env
+	}
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO team_task_events (
 			team_id, sequence, event_id, task_id, event_type, outcome,
 			from_state, to_state, failure_code, payload_envelope, created_at
-		) VALUES (?, 1, ?, '', ?, '', '', ?, '', NULL, ?)`,
-		in.TeamID, in.ProposedEventID, string(EventTeamProposed), string(TeamStateProposed), now,
+		) VALUES (?, 1, ?, '', ?, '', '', ?, '', ?, ?)`,
+		in.TeamID, in.ProposedEventID, string(EventTeamProposed), string(TeamStateProposed), envelope, now,
 	)
 	if err != nil {
 		return fmt.Errorf("insert TeamProposed event: %w", err)

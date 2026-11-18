@@ -29,7 +29,19 @@ var (
 	// ErrUnknownRole indicates a proposal task named a role that is neither
 	// in the workspace catalog nor proposed by the proposal itself.
 	ErrUnknownRole = errors.New("teams: unknown role")
+	// ErrAccountsUnassigned indicates an edit assigned accounts to roles:
+	// stage A assigns no accounts to roles, so the edit has nothing to
+	// attach to (F11.2b step-0 deviation, accepted by the owner).
+	ErrAccountsUnassigned = errors.New("teams: accounts are not assigned to roles yet")
+	// ErrPermissionImmutable indicates an edit tried to change a resolved
+	// role's permission: §5.3's approve-with-edits changes model, effort,
+	// vendor, tasks and budget, never the permission of a role the plan
+	// already resolved.
+	ErrPermissionImmutable = errors.New("teams: role permission is not editable")
 )
+
+// detailTaskIDRequired is the shared detail of a missing task ID.
+const detailTaskIDRequired = "task ID is required"
 
 // TransitionError describes a rejected state transition for a task or team.
 type TransitionError struct {
