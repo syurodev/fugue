@@ -6,6 +6,7 @@ package app
 
 import (
 	"encoding/json"
+	"slices"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/teams"
@@ -82,6 +83,30 @@ func changedTaskSpecs(teamID string, input, edited *teams.ProposalInput) ([]vend
 		reseals = append(reseals, vendorstore.ResealedTaskSpec{TaskID: durableTaskID(teamID, t.ID), ProtectedSpec: specJSON})
 	}
 	return reseals, nil
+}
+
+// refuseTaskIdentityChanges refuses an edit that keeps a task's ID but
+// changes the metadata its durable row carries (catalog role, team role,
+// parent, dependencies). Only the sealed spec is re-sealed, so such an edit
+// would leave the row stale; the user removes the task and adds a new ID.
+// It runs before the card resolves, so the proposal stays answerable.
+func refuseTaskIdentityChanges(input, edited *teams.ProposalInput) error {
+	original := make(map[string]*teams.ProposedTask, len(input.Tasks))
+	for i := range input.Tasks {
+		original[input.Tasks[i].ID] = &input.Tasks[i]
+	}
+	for i := range edited.Tasks {
+		after := &edited.Tasks[i]
+		before, existed := original[after.ID]
+		if !existed {
+			continue
+		}
+		if before.Role != after.Role || before.TeamRole != after.TeamRole ||
+			before.ParentTaskID != after.ParentTaskID || !slices.Equal(before.DependsOn, after.DependsOn) {
+			return errcode.New(errcode.InvalidArgument, "an edit cannot change a kept task's role, team role, parent or dependencies; use a new task ID")
+		}
+	}
+	return nil
 }
 
 // addedTaskInputs maps the tasks the edited plan introduced onto store

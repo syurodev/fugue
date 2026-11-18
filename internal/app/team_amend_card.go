@@ -80,6 +80,14 @@ func (s *TeamProposalService) requestAmendCard(ctx context.Context, sessionID st
 	if err := s.validateAmendAdditions(ctx, rec, args); err != nil {
 		return "", err
 	}
+	// A mixed amendment's role and budget edits fail now, not at approval.
+	decided, err := s.decidedRoles(ctx, rec.TeamID)
+	if err != nil {
+		return "", err
+	}
+	if _, planErr := s.planProfileEdits(ctx, rec, args, decided); planErr != nil {
+		return "", planErr
+	}
 	amendID, err := s.ids.NewID()
 	if err != nil {
 		return "", errcode.Wrap(errcode.Internal, "generate the amend ID", err)
@@ -152,16 +160,9 @@ func (s *TeamProposalService) validateAmendAdditions(ctx context.Context, rec *v
 	if err != nil {
 		return err
 	}
-	resolved := make(map[string]struct{}, len(decided)+len(args.AddRoles))
-	for i := range decided {
-		resolved[decided[i].Name] = struct{}{}
-	}
-	for i := range args.AddRoles {
-		role := &args.AddRoles[i]
-		if roleErr := teams.ValidateRole(&teams.Role{Name: role.Name, Vendor: role.Vendor, Model: role.Model, Effort: role.Effort, Permission: role.Permission}); roleErr != nil {
-			return errcode.Wrap(errcode.CodeOf(roleErr), "the added role is invalid", roleErr)
-		}
-		resolved[role.Name] = struct{}{}
+	resolved, err := resolveAmendRoles(decided, args.AddRoles)
+	if err != nil {
+		return err
 	}
 	if len(args.AddTasks) == 0 {
 		return nil
@@ -192,6 +193,26 @@ func (s *TeamProposalService) validateAmendAdditions(ctx context.Context, rec *v
 		return errcode.Wrap(errcode.CodeOf(err), "the amended team does not satisfy the team rules", err)
 	}
 	return validateAmendDependencies(rec, teamTasks, args)
+}
+
+// resolveAmendRoles returns the role names an amend may reference: the
+// decided roles plus the valid, not yet decided roles it adds.
+func resolveAmendRoles(decided []decidedRole, added []teams.ProposedRole) (map[string]struct{}, error) {
+	resolved := make(map[string]struct{}, len(decided)+len(added))
+	for i := range decided {
+		resolved[decided[i].Name] = struct{}{}
+	}
+	for i := range added {
+		role := &added[i]
+		if roleErr := teams.ValidateRole(&teams.Role{Name: role.Name, Vendor: role.Vendor, Model: role.Model, Effort: role.Effort, Permission: role.Permission}); roleErr != nil {
+			return nil, errcode.Wrap(errcode.CodeOf(roleErr), "the added role is invalid", roleErr)
+		}
+		if _, dup := resolved[role.Name]; dup {
+			return nil, errcode.New(errcode.InvalidArgument, "the added role is already in the team")
+		}
+		resolved[role.Name] = struct{}{}
+	}
+	return resolved, nil
 }
 
 // validateAmendDependencies checks the added tasks' depends_on against the

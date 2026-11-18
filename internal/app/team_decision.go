@@ -293,6 +293,9 @@ func (s *TeamProposalService) applyEditSet(editsText string, input *teams.Propos
 	if _, err := teams.ValidateProposal(edited, catalogRoles(eff)); err != nil {
 		return nil, errcode.Wrap(errcode.InvalidArgument, "the edited plan does not satisfy the team rules", err)
 	}
+	if err := refuseTaskIdentityChanges(input, edited); err != nil {
+		return nil, err
+	}
 	return edited, nil
 }
 

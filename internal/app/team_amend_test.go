@@ -90,7 +90,7 @@ func amendDirectProfile(t *testing.T, f *teamProposalFixture, teamID string) {
 	if text == "" {
 		t.Fatal("the direct amend returned no result text")
 	}
-	assertTeamTasks(t, f, teamID, vendorstore.TeamStateActive, 3)
+	assertActiveTeamTasks(t, f, teamID, 3)
 	raw, specErr := f.hp.vendorStore.OpenTaskSpec(t.Context(), teamID, durableTaskID(teamID, teamTestTaskA))
 	if specErr != nil {
 		t.Fatalf("OpenTaskSpec: %v", specErr)
@@ -122,15 +122,15 @@ func requestCardAmend(t *testing.T, f *teamProposalFixture, teamID string) {
 	if cards := f.pendingCardsTool(t, teamAmendToolName); len(cards) != 1 {
 		t.Fatalf("pending amend cards = %d, want 1", len(cards))
 	}
-	assertTeamTasks(t, f, teamID, vendorstore.TeamStateActive, 3)
+	assertActiveTeamTasks(t, f, teamID, 3)
 }
 
-// assertTeamTasks asserts the team's state and task count.
-func assertTeamTasks(t *testing.T, f *teamProposalFixture, teamID string, state vendorstore.TeamState, wantTasks int) {
+// assertActiveTeamTasks asserts the team is active with the task count.
+func assertActiveTeamTasks(t *testing.T, f *teamProposalFixture, teamID string, wantTasks int) {
 	t.Helper()
 	rec, tasks := f.teamSnapshot(t, teamID)
-	if rec.State != state || len(tasks) != wantTasks {
-		t.Fatalf("team = %s with %d tasks, want %s with %d", rec.State, len(tasks), state, wantTasks)
+	if rec.State != vendorstore.TeamStateActive || len(tasks) != wantTasks {
+		t.Fatalf("team = %s with %d tasks, want active with %d", rec.State, len(tasks), wantTasks)
 	}
 }
 

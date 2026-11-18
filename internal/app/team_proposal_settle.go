@@ -103,37 +103,17 @@ func (s *TeamProposalService) cancelPendingTeam(ctx context.Context, pending *ve
 	return s.settleTeamDecision(ctx, pending, payload)
 }
 
-// settleTeamDecision settles the durable team of a decision (Q-84): every
-// non-terminal task cancels first, then TeamEnded appends with the decision
-// in the sealed payload. The caller flipped or resolves the card separately.
+// settleTeamDecision settles the durable team of a decision (Q-84) in one
+// store transaction: every non-terminal task cancels first, then TeamEnded
+// appends with the decision in the sealed payload, or nothing changes. The
+// caller flipped or resolves the card separately.
 func (s *TeamProposalService) settleTeamDecision(ctx context.Context, pending *vendorstore.TeamRecord, payload []byte) error {
-	_, tasks, err := s.store.TeamSnapshot(ctx, pending.TeamID)
-	if err != nil {
-		return boundaryError("read the proposal's tasks", err)
-	}
-	next := pending.LastSeq
-	for i := range tasks {
-		if taskStateTerminal(tasks[i].State) {
-			continue
-		}
-		eventID, idErr := s.ids.NewID()
-		if idErr != nil {
-			return errcode.Wrap(errcode.Internal, "generate the task cancel event ID", idErr)
-		}
-		if next, err = s.store.AppendTeamEvent(ctx, pending.TeamID, next, &vendorstore.AppendTeamEventInput{
-			EventID: eventID, TaskID: tasks[i].TaskID, EventType: vendorstore.EventTaskEnded,
-			Outcome: string(vendorstore.TeamStateCancelled),
-		}); err != nil {
-			return boundaryError("cancel a proposal task", err)
-		}
-	}
 	endID, err := s.ids.NewID()
 	if err != nil {
 		return errcode.Wrap(errcode.Internal, "generate the team end event ID", err)
 	}
-	_, err = s.store.AppendTeamEvent(ctx, pending.TeamID, next, &vendorstore.AppendTeamEventInput{
-		EventID: endID, EventType: vendorstore.EventTeamEnded,
-		Outcome: string(vendorstore.TeamStateCancelled), ProtectedPayload: payload,
+	_, err = s.store.SettleTeam(ctx, pending.TeamID, &vendorstore.TeamSettleInput{
+		ExpectedSeq: pending.LastSeq, EndEventID: endID, EndPayload: payload,
 	})
 	return boundaryError("end the decided proposal", err)
 }
@@ -145,22 +125,6 @@ type cancelDecisionPayload struct {
 	Decision  string `json:"decision"`
 	DecidedBy string `json:"decided_by,omitempty"`
 	Note      string `json:"note,omitempty"`
-}
-
-// taskStateTerminal reports the terminal task states (§3.1); unknown is not
-// terminal (Q-84).
-func taskStateTerminal(state vendorstore.TaskState) bool {
-	switch state {
-	case vendorstore.TaskStateDone, vendorstore.TaskStateFailed,
-		vendorstore.TaskStateStopped, vendorstore.TaskStateCancelled:
-		return true
-	case vendorstore.TaskStateQueued, vendorstore.TaskStateStarting,
-		vendorstore.TaskStateRunning, vendorstore.TaskStateAsking,
-		vendorstore.TaskStateChecking, vendorstore.TaskStateReview,
-		vendorstore.TaskStateIntegrating, vendorstore.TaskStateUnknown:
-		return false
-	}
-	return false
 }
 
 // markItemRejected flips the session's team_proposal item to rejected

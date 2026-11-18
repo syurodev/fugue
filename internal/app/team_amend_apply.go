@@ -8,6 +8,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"slices"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/teams"
@@ -19,6 +20,32 @@ import (
 // lands in one TeamAmended transaction. A role edit that names a role the
 // decided plan does not have is refused: a new role needs the user.
 func (s *TeamProposalService) applyDirectAmend(ctx context.Context, rec *vendorstore.TeamRecord, args *AmendArgs, decided []decidedRole) (string, error) {
+	edits, err := s.planProfileEdits(ctx, rec, args, decided)
+	if err != nil {
+		return "", err
+	}
+	if _, err := s.store.AmendTeam(ctx, rec.TeamID, &vendorstore.TeamAmendInput{
+		ExpectedSeq: rec.LastSeq, AmendEventID: edits.eventID, AmendPayload: edits.payload, ResealedSpecs: edits.reseals,
+	}); err != nil {
+		return "", boundaryError("apply the amendment", err)
+	}
+	return "the amendment is applied; the team keeps running with the changed profiles", nil
+}
+
+// profileEdits is the validated, ready-to-append form of an amendment's role
+// profile and budget edits.
+type profileEdits struct {
+	eventID string
+	payload []byte
+	reseals []vendorstore.ResealedTaskSpec
+}
+
+// planProfileEdits validates the role and budget edits of an amendment
+// against the decided plan (OR-E13) and builds the sealed payload and the
+// re-sealed specs. Roles the same amendment adds are recorded in the payload
+// too, so the baseline of the next amend sees them. addedTaskIDs rides along
+// for the card path.
+func (s *TeamProposalService) planProfileEdits(ctx context.Context, rec *vendorstore.TeamRecord, args *AmendArgs, decided []decidedRole, addedTaskIDs ...string) (*profileEdits, error) {
 	resolved := make(map[string]teams.Role, len(decided))
 	for i := range decided {
 		r := &decided[i]
@@ -26,32 +53,34 @@ func (s *TeamProposalService) applyDirectAmend(ctx context.Context, rec *vendors
 	}
 	overrides, newRoles, editErr := teams.ValidateRoleEdits(args.Roles, resolved)
 	if editErr != nil {
-		return "", errcode.Wrap(errcode.CodeOf(editErr), "the amendment does not apply", editErr)
+		return nil, errcode.Wrap(errcode.CodeOf(editErr), "the amendment does not apply", editErr)
 	}
 	if len(newRoles) > 0 {
-		return "", errcode.New(errcode.InvalidArgument, "a new role waits for the user's approval")
+		return nil, errcode.New(errcode.InvalidArgument, "a new role waits for the user's approval")
 	}
 	if budgetErr := s.validateBudgetEdits(ctx, args.TaskBudgets, rec); budgetErr != nil {
-		return "", budgetErr
+		return nil, budgetErr
 	}
 	reseals, err := s.amendedSpecs(ctx, rec, overrides, args.TaskBudgets)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
-	payload, err := json.Marshal(teamAmendPayload{RoleEdits: amendedRolePayloads(args.Roles, resolved)})
+	roleEdits := amendedRolePayloads(args.Roles, resolved)
+	for i := range args.AddRoles {
+		r := &args.AddRoles[i]
+		roleEdits = append(roleEdits, decidedRole{
+			Name: r.Name, Vendor: string(r.Vendor), Model: r.Model, Effort: string(r.Effort), Permission: string(r.Permission),
+		})
+	}
+	payload, err := json.Marshal(teamAmendPayload{RoleEdits: roleEdits, AddedTaskIDs: addedTaskIDs})
 	if err != nil {
-		return "", errcode.Wrap(errcode.Internal, "marshal the amendment payload", err)
+		return nil, errcode.Wrap(errcode.Internal, "marshal the amendment payload", err)
 	}
 	eventID, err := s.ids.NewID()
 	if err != nil {
-		return "", errcode.Wrap(errcode.Internal, "generate the amend event ID", err)
+		return nil, errcode.Wrap(errcode.Internal, "generate the amend event ID", err)
 	}
-	if _, err := s.store.AmendTeam(ctx, rec.TeamID, &vendorstore.TeamAmendInput{
-		ExpectedSeq: rec.LastSeq, AmendEventID: eventID, AmendPayload: payload, ResealedSpecs: reseals,
-	}); err != nil {
-		return "", boundaryError("apply the amendment", err)
-	}
-	return "the amendment is applied; the team keeps running with the changed profiles", nil
+	return &profileEdits{eventID: eventID, payload: payload, reseals: reseals}, nil
 }
 
 // amendedRolePayloads records the amended profile of every edited role in the
@@ -193,25 +222,83 @@ func (s *TeamProposalService) teamTasks(ctx context.Context, teamID string) ([]v
 	return tasks, nil
 }
 
-// decidedRoles reads the decided plan's role profiles from the sealed
-// TeamStarted payload (OR-E13), so an amend validates against exactly what
-// the user approved.
+// decidedRoles reads the decided plan's role profiles: the sealed TeamStarted
+// roles with every TeamAmended payload's role edits applied in sequence order
+// (OR-E13), so an amend validates and re-seals against what is in force now,
+// not against the original approval.
 func (s *TeamProposalService) decidedRoles(ctx context.Context, teamID string) ([]decidedRole, error) {
-	events, err := s.store.TeamEventsSince(ctx, teamID, 0, 200)
+	events, err := s.decisionEvents(ctx, teamID)
 	if err != nil {
-		return nil, boundaryError("read the team's events", err)
+		return nil, err
 	}
-	started := int64(-1)
+	var roles []decidedRole
+	started := false
 	for i := range events {
 		if events[i].EventType == vendorstore.EventTeamStarted {
-			started = events[i].Sequence
-			break
+			decision, readErr := s.openDecisionPayload(ctx, teamID, events[i].Sequence)
+			if readErr != nil {
+				return nil, readErr
+			}
+			roles, started = decision.Roles, true
+			continue
 		}
+		if !started {
+			return nil, errcode.New(errcode.FailedPrecondition, "the decided plan is not readable")
+		}
+		edits, readErr := s.openAmendEdits(ctx, teamID, events[i].Sequence)
+		if readErr != nil {
+			return nil, readErr
+		}
+		roles = mergeRoleEdits(roles, edits)
 	}
-	if started < 0 {
+	if !started {
 		return nil, errcode.New(errcode.FailedPrecondition, "the decided plan is not readable")
 	}
-	payload, err := s.store.OpenTeamEventPayload(ctx, teamID, started)
+	return roles, nil
+}
+
+// decisionEvents pages through the team's events and keeps the ones that
+// carry the decided roles, in sequence order. Paging matters: a long-running
+// team's task events can outnumber one page.
+func (s *TeamProposalService) decisionEvents(ctx context.Context, teamID string) ([]vendorstore.RecordedTeamEvent, error) {
+	const page = 200
+	var out []vendorstore.RecordedTeamEvent
+	after := int64(0)
+	for {
+		events, err := s.store.TeamEventsSince(ctx, teamID, after, page)
+		if err != nil {
+			return nil, boundaryError("read the team's events", err)
+		}
+		for i := range events {
+			if t := events[i].EventType; t == vendorstore.EventTeamStarted || t == vendorstore.EventTeamAmended {
+				out = append(out, events[i])
+			}
+		}
+		if len(events) < page {
+			return out, nil
+		}
+		after = events[len(events)-1].Sequence
+	}
+}
+
+// mergeRoleEdits applies amended role profiles over the baseline by name: a
+// known role is replaced, a role an approved amend added is appended.
+func mergeRoleEdits(base, edits []decidedRole) []decidedRole {
+	out := slices.Clone(base)
+	for i := range edits {
+		at := slices.IndexFunc(out, func(r decidedRole) bool { return r.Name == edits[i].Name })
+		if at < 0 {
+			out = append(out, edits[i])
+			continue
+		}
+		out[at] = edits[i]
+	}
+	return out
+}
+
+// openDecisionPayload opens the sealed TeamStarted payload.
+func (s *TeamProposalService) openDecisionPayload(ctx context.Context, teamID string, seq int64) (*teamDecisionPayload, error) {
+	payload, err := s.store.OpenTeamEventPayload(ctx, teamID, seq)
 	if err != nil {
 		return nil, boundaryError("open the decided plan", err)
 	}
@@ -219,5 +306,18 @@ func (s *TeamProposalService) decidedRoles(ctx context.Context, teamID string) (
 	if unmarshalErr := json.Unmarshal(payload, &decision); unmarshalErr != nil {
 		return nil, errcode.New(errcode.FailedPrecondition, "the decided plan is not readable")
 	}
-	return decision.Roles, nil
+	return &decision, nil
+}
+
+// openAmendEdits opens one sealed TeamAmended payload's role edits.
+func (s *TeamProposalService) openAmendEdits(ctx context.Context, teamID string, seq int64) ([]decidedRole, error) {
+	payload, err := s.store.OpenTeamEventPayload(ctx, teamID, seq)
+	if err != nil {
+		return nil, boundaryError("open the amendment", err)
+	}
+	var amend teamAmendPayload
+	if unmarshalErr := json.Unmarshal(payload, &amend); unmarshalErr != nil {
+		return nil, errcode.New(errcode.FailedPrecondition, "the amendment is not readable")
+	}
+	return amend.RoleEdits, nil
 }

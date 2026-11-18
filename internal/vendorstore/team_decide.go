@@ -142,7 +142,7 @@ func (s *Store) appendTeamEventAndRemovals(
 		return 0, insertErr
 	}
 	for _, taskID := range removed {
-		if lastSeq, err = s.appendTaskCancellation(ctx, tx, teamID, taskID, lastSeq+1, now); err != nil {
+		if lastSeq, err = s.appendTaskCancellation(ctx, tx, teamID, taskID, cancelEventID(ev.EventID, taskID), lastSeq+1, now); err != nil {
 			return 0, err
 		}
 	}
@@ -189,9 +189,10 @@ func (s *Store) resealAndInsertTasks(
 
 // appendTaskCancellation cancels one still-queued task through its task
 // transition (Q-84: an unknown task is not settled, but a decision removes
-// only tasks a proposal created, which are queued).
-func (s *Store) appendTaskCancellation(ctx context.Context, tx *sql.Tx, teamID, taskID string, seq, now int64) (int64, error) {
-	ev := &AppendTeamEventInput{TaskID: taskID, EventType: EventTaskEnded, Outcome: outcomeCancelled}
+// only tasks a proposal created, which are queued). It returns the sequence
+// the cancellation used.
+func (s *Store) appendTaskCancellation(ctx context.Context, tx *sql.Tx, teamID, taskID, eventID string, seq, now int64) (int64, error) {
+	ev := &AppendTeamEventInput{EventID: eventID, TaskID: taskID, EventType: EventTaskEnded, Outcome: outcomeCancelled}
 	fromState, toState, err := applyTaskProjection(ctx, tx, teamID, seq, now, ev)
 	if err != nil {
 		return 0, err
@@ -199,7 +200,14 @@ func (s *Store) appendTaskCancellation(ctx context.Context, tx *sql.Tx, teamID, 
 	if err := insertAppendedTeamEvent(ctx, tx, teamID, seq, ev, fromState, toState, nil, now); err != nil {
 		return 0, err
 	}
-	return seq + 1, nil
+	return seq, nil
+}
+
+// cancelEventID derives the event ID of one task cancellation from the
+// mutation's own event ID: event IDs are unique per team, so removing two
+// tasks in one transaction needs distinct IDs.
+func cancelEventID(parentEventID, taskID string) string {
+	return parentEventID + ".cancel." + taskID
 }
 
 // resealTaskSpec replaces one task's sealed spec; a task that does not exist

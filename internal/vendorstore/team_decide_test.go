@@ -8,6 +8,7 @@ import (
 // Shared literals of the decide and amend store tests.
 const (
 	decideTestLeadTask  = "d-lead"
+	decideTestSession   = "sess-1"
 	decideTestSpecAmend = `{"goal":"amended"}`
 	decideTestSpecNew   = `{"goal":"new"}`
 )
@@ -22,7 +23,7 @@ func decideTestTasks() []NewTaskInput {
 func createDecideTeam(t *testing.T, s *Store, teamID string) (TeamRecord, []TaskRecord) {
 	t.Helper()
 	rec, tasks, err := s.CreateTeam(t.Context(), &NewTeamInput{
-		TeamID: teamID, WorkspaceID: testWorkspaceID, SessionID: "sess-1", ProposedEventID: "ev-dp",
+		TeamID: teamID, WorkspaceID: testWorkspaceID, SessionID: decideTestSession, ProposedEventID: "ev-dp",
 		Tasks: decideTestTasks(),
 	})
 	if err != nil {
@@ -258,7 +259,7 @@ func TestActiveTeamForSession(t *testing.T) {
 	t.Parallel()
 	s, _, _ := protectedStore(t)
 	rec, _ := createDecideTeam(t, s, "team-active")
-	if _, ok, err := s.ActiveTeamForSession(t.Context(), "sess-1"); err != nil || ok {
+	if _, ok, err := s.ActiveTeamForSession(t.Context(), decideTestSession); err != nil || ok {
 		t.Fatalf("before the decision ok = %v err = %v, want no active team", ok, err)
 	}
 	if _, err := s.DecideTeam(t.Context(), rec.TeamID, &TeamDecisionInput{
@@ -266,7 +267,7 @@ func TestActiveTeamForSession(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("DecideTeam: %v", err)
 	}
-	got, ok, err := s.ActiveTeamForSession(t.Context(), "sess-1")
+	got, ok, err := s.ActiveTeamForSession(t.Context(), decideTestSession)
 	if err != nil || !ok || got.TeamID != rec.TeamID {
 		t.Fatalf("active team = %v ok = %v err = %v, want %s", got, ok, err, rec.TeamID)
 	}

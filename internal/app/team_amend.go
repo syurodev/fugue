@@ -253,8 +253,12 @@ func (s *TeamProposalService) applyAmendAnswer(ctx context.Context, ticket *inte
 
 // approveAmendment applies a user-approved amend under the session's keyed
 // lock: the additions re-validate against the current team, and the added
-// tasks insert with their TeamCreated events in the AmendTeam transaction.
+// roles, role and budget edits and added tasks all land in the one AmendTeam
+// transaction. A session that has ended never applies it (fail closed).
 func (s *TeamProposalService) approveAmendment(ctx context.Context, sessionID, teamID string, args *AmendArgs) error {
+	if _, _, err := s.resolveTeamsSession(ctx, sessionID); err != nil {
+		return err
+	}
 	rec, _, err := s.store.TeamSnapshot(ctx, teamID)
 	if err != nil {
 		return boundaryError("read the amended team", err)
@@ -262,8 +266,8 @@ func (s *TeamProposalService) approveAmendment(ctx context.Context, sessionID, t
 	if rec.SessionID != sessionID || rec.State != vendorstore.TeamStateActive {
 		return errcode.New(errcode.FailedPrecondition, "the amendment is no longer pending")
 	}
-	if err := s.validateAmendAdditions(ctx, &rec, args); err != nil {
-		return err
+	if validErr := s.validateAmendAdditions(ctx, &rec, args); validErr != nil {
+		return validErr
 	}
 	added := make([]vendorstore.NewTaskInput, 0, len(args.AddTasks))
 	addedIDs := make([]string, 0, len(args.AddTasks))
@@ -275,16 +279,17 @@ func (s *TeamProposalService) approveAmendment(ctx context.Context, sessionID, t
 		added = append(added, *taskInput)
 		addedIDs = append(addedIDs, taskInput.TaskID)
 	}
-	payload, marshalErr := json.Marshal(teamAmendPayload{AddedTaskIDs: addedIDs})
-	if marshalErr != nil {
-		return errcode.Wrap(errcode.Internal, "marshal the amendment payload", marshalErr)
+	decided, err := s.decidedRoles(ctx, teamID)
+	if err != nil {
+		return err
 	}
-	eventID, idErr := s.ids.NewID()
-	if idErr != nil {
-		return errcode.Wrap(errcode.Internal, "generate the amend event ID", idErr)
+	edits, err := s.planProfileEdits(ctx, &rec, args, decided, addedIDs...)
+	if err != nil {
+		return err
 	}
 	if _, amendErr := s.store.AmendTeam(ctx, teamID, &vendorstore.TeamAmendInput{
-		ExpectedSeq: rec.LastSeq, AmendEventID: eventID, AmendPayload: payload, AddedTasks: added,
+		ExpectedSeq: rec.LastSeq, AmendEventID: edits.eventID, AmendPayload: edits.payload,
+		ResealedSpecs: edits.reseals, AddedTasks: added,
 	}); amendErr != nil {
 		return boundaryError("apply the amendment", amendErr)
 	}
