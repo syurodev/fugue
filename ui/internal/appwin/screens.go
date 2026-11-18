@@ -41,8 +41,10 @@ type screens struct {
 	sidebar     *session.Sidebar
 	transcripts map[string]*session.Transcript
 	// views holds one scroll state per session, so session A's offset never
-	// leaks into session B.
-	views map[string]*transcriptview.State
+	// leaks into session B; viewCache is the window's one shared layout
+	// cache every session's list rides (F10.4a, desktop-app §7).
+	views     map[string]*transcriptview.State
+	viewCache *kit.VirtualHeightCache
 	// open is the open session's id, empty when none is.
 	open string
 
@@ -67,6 +69,7 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher) *screens {
 		sidebar:     session.NewSidebar(),
 		transcripts: map[string]*session.Transcript{},
 		views:       map[string]*transcriptview.State{},
+		viewCache:   kit.NewVirtualHeightCache(),
 		header:      kit.NewSectionHeaderState(true),
 		rows:        map[string]*kit.ListRowState{},
 		pendingPage: map[string]bool{}, pendingOlder: map[string]bool{},
@@ -78,7 +81,7 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher) *screens {
 func (s *screens) viewFor(id string) *transcriptview.State {
 	view, ok := s.views[id]
 	if !ok {
-		view = transcriptview.NewState()
+		view = transcriptview.NewState(s.viewCache)
 		s.views[id] = view
 	}
 	return view
@@ -310,8 +313,9 @@ func (s *screens) sessionRows(env *kit.Env) []layout.FlexChild {
 		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
 			dims, ev := row.Layout(env, &local, &kit.ListRowProps{
-				Label:    sessionLabel(sess),
-				Selected: selected,
+				Label:     sessionName(sess),
+				Secondary: sessionState(sess),
+				Selected:  selected,
 			})
 			if ev.Clicked {
 				s.openSession(sess.ID)
@@ -322,18 +326,23 @@ func (s *screens) sessionRows(env *kit.Env) []layout.FlexChild {
 	return rows
 }
 
-// sessionLabel names a session row: the vendor, or "session" when the list
-// read has not named one yet, with the state and the wait reason.
-func sessionLabel(sess session.Session) string {
-	label := sess.Vendor
-	if label == "" {
-		label = "session"
+// sessionName names a session row: the vendor, or "session" when the list
+// read has not named one yet.
+func sessionName(sess session.Session) string {
+	if sess.Vendor == "" {
+		return "session"
 	}
-	label += " · " + sess.State
+	return sess.Vendor
+}
+
+// sessionState is the row's secondary text: the state and the wait reason,
+// in FgMuted like every kit row's secondary text.
+func sessionState(sess session.Session) string {
+	state := sess.State
 	if sess.WaitingReason != "" {
-		label += " · " + sess.WaitingReason
+		state += " · " + sess.WaitingReason
 	}
-	return label
+	return state
 }
 
 // layoutTranscript draws the open session's transcript, read-only.

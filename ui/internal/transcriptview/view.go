@@ -15,17 +15,22 @@ import (
 const estimateH = 96
 
 // State is one session's view state (F10.13): the kit's VirtualList owns the
-// height cache, the scroll offset, the follow pin and the anchor, and the
-// State maps the session model's items onto it — the private list and its
-// cache of F10.4a became kit.VirtualList in F10.17b. It changes only on the
-// window goroutine.
+// scroll offset, the follow pin and the anchor, and the State maps the
+// session model's items onto it — the private list of F10.4a became
+// kit.VirtualList in F10.17b, over the window's one shared height cache
+// (desktop-app §7, F10.4a round 3). It changes only on the window
+// goroutine.
 type State struct {
 	list *kit.VirtualListState
 }
 
-// NewState builds a session's view state, following the newest item until
-// the reader scrolls up.
-func NewState() *State { return &State{list: kit.NewVirtualListState()} }
+// NewState builds a session's view state over the window's shared height
+// cache, following the newest item until the reader scrolls up. Every
+// session of a window passes the same cache, so the bound covers them
+// together.
+func NewState(cache *kit.VirtualHeightCache) *State {
+	return &State{list: kit.NewVirtualListStateShared(cache)}
+}
 
 // Following reports whether the view pins the newest item on screen.
 func (s *State) Following() bool { return s.list.Following() }

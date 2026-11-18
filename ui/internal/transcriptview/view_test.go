@@ -34,12 +34,15 @@ type harness struct {
 	ops    op.Ops
 	env    *kit.Env
 	th     theme.Theme
-	st     *State
-	items  []*session.Item
-	width  int
+	// cache is the harness's own shared height cache, the one st rides.
+	cache *kit.VirtualHeightCache
+	st    *State
+	items []*session.Item
+	width int
+	// height is the viewport height and now the fake frame clock the env
+	// begins every frame at.
 	height int
-	// now is the fake frame clock the env begins every frame at.
-	now time.Time
+	now    time.Time
 }
 
 // newHarness builds the harness at the given viewport size.
@@ -50,8 +53,9 @@ func newHarness(t *testing.T, width, height int, items []*session.Item) *harness
 		t.Fatal(err)
 	}
 	th := theme.Light(shaper)
+	cache := kit.NewVirtualHeightCache()
 	return &harness{
-		t: t, env: &kit.Env{Th: &th, Sh: shaper}, th: th, st: NewState(),
+		t: t, env: &kit.Env{Th: &th, Sh: shaper}, th: th, cache: cache, st: NewState(cache),
 		items: items, width: width, height: height,
 		now: time.Unix(1_700_000_000, 0),
 	}

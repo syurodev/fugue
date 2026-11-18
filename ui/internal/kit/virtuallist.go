@@ -52,7 +52,7 @@ type VirtualListProps struct {
 // state of one VirtualList (§6.26).
 type VirtualListState struct {
 	tag           bool
-	cache         *virtualHeightCache
+	cache         *VirtualHeightCache
 	itemStates    map[string]*VirtualItemState
 	bar           scrollBar
 	scrollOffset  int
@@ -67,10 +67,23 @@ type VirtualListState struct {
 	rendered      int
 }
 
-// NewVirtualListState builds a VirtualListState with a bounded LRU height cache.
+// NewVirtualListState builds a VirtualListState with a bounded LRU height
+// cache of its own.
 func NewVirtualListState() *VirtualListState {
+	return newListState(newVirtualHeightCache(maxVirtualHeights))
+}
+
+// NewVirtualListStateShared builds a VirtualListState over an injected
+// height cache, so the lists of one window — one transcript session per
+// list — share a single bound (desktop-app §7). The cache outlives no list:
+// the caller drops it when the window's last list is gone.
+func NewVirtualListStateShared(cache *VirtualHeightCache) *VirtualListState {
+	return newListState(cache)
+}
+
+func newListState(cache *VirtualHeightCache) *VirtualListState {
 	return &VirtualListState{
-		cache:      newVirtualHeightCache(maxVirtualHeights),
+		cache:      cache,
 		itemStates: map[string]*VirtualItemState{},
 		bar:        newScrollBar(),
 	}

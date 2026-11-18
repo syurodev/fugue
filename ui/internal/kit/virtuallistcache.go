@@ -5,6 +5,9 @@ import "container/list"
 // The height cache of one VirtualList (§6.26): a bounded LRU keyed by
 // (key, revision) that also remembers each key's latest measured height, so
 // a new revision seeds from the old one, and the callers' per-key payloads.
+// The type is exported so one window can inject a single shared cache into
+// every list it hosts — the sessions of a transcript window share one bound
+// (desktop-app §7); a list that injects none owns its own.
 
 type virtualHeightKey struct {
 	key      string
@@ -22,7 +25,7 @@ type virtualHeightEntry struct {
 	self   *list.Element
 }
 
-type virtualHeightCache struct {
+type VirtualHeightCache struct {
 	max     int
 	entries map[virtualHeightKey]*virtualHeightEntry
 	heights map[string]virtualLatestHeight
@@ -34,8 +37,8 @@ type virtualHeightCache struct {
 	order    *list.List
 }
 
-func newVirtualHeightCache(maxEntries int) *virtualHeightCache {
-	return &virtualHeightCache{
+func newVirtualHeightCache(maxEntries int) *VirtualHeightCache {
+	return &VirtualHeightCache{
 		max:      maxEntries,
 		entries:  map[virtualHeightKey]*virtualHeightEntry{},
 		heights:  map[string]virtualLatestHeight{},
@@ -44,11 +47,18 @@ func newVirtualHeightCache(maxEntries int) *virtualHeightCache {
 	}
 }
 
+// NewVirtualHeightCache builds a shared height cache bounded at the §6.26
+// entry bound.
+func NewVirtualHeightCache() *VirtualHeightCache { return newVirtualHeightCache(maxVirtualHeights) }
+
+// Len reports the number of cached entries, heights and payloads together.
+func (c *VirtualHeightCache) Len() int { return len(c.entries) }
+
 // payload returns the key's caller payload, building it with build when the
 // cache holds none. The payload lives as long as the key's latest height:
 // when the LRU evicts the key's newest revision, the payload goes with it,
 // so the caller's view state stays bounded with the heights (§6.26).
-func (c *virtualHeightCache) payload(key string, build func() any) any {
+func (c *VirtualHeightCache) payload(key string, build func() any) any {
 	if p, ok := c.payloads[key]; ok {
 		return p
 	}
@@ -57,7 +67,7 @@ func (c *virtualHeightCache) payload(key string, build func() any) any {
 	return p
 }
 
-func (c *virtualHeightCache) get(k virtualHeightKey) (int, bool) {
+func (c *VirtualHeightCache) get(k virtualHeightKey) (int, bool) {
 	e, ok := c.entries[k]
 	if !ok {
 		return 0, false
@@ -66,12 +76,12 @@ func (c *virtualHeightCache) get(k virtualHeightKey) (int, bool) {
 	return e.height, true
 }
 
-func (c *virtualHeightCache) latest(key string) (int, bool) {
+func (c *VirtualHeightCache) latest(key string) (int, bool) {
 	h, ok := c.heights[key]
 	return h.height, ok
 }
 
-func (c *virtualHeightCache) put(k virtualHeightKey, height int) {
+func (c *VirtualHeightCache) put(k virtualHeightKey, height int) {
 	c.heights[k.key] = virtualLatestHeight{revision: k.revision, height: height}
 	if e, ok := c.entries[k]; ok {
 		e.height = height
@@ -83,7 +93,7 @@ func (c *virtualHeightCache) put(k virtualHeightKey, height int) {
 	c.evict()
 }
 
-func (c *virtualHeightCache) evict() {
+func (c *VirtualHeightCache) evict() {
 	for c.order.Len() > c.max {
 		last := c.order.Back()
 		if last == nil {
