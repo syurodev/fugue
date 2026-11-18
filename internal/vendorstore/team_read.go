@@ -69,7 +69,7 @@ func queryTeamTasks(ctx context.Context, db teamQueryer, teamID string) ([]TaskR
 	rows, err := db.QueryContext(ctx, `
 		SELECT task_id, team_id, parent_task_id, hierarchy_role, catalog_role,
 		       deliverable, depends_on_json, depth, state, failure_code,
-		       last_event_seq, created_at, updated_at, ended_at
+		       last_event_seq, created_at, updated_at, ended_at, session_id, explicit_start
 		FROM team_tasks WHERE team_id = ? ORDER BY created_at ASC, task_id ASC`, teamID,
 	)
 	if err != nil {
@@ -98,7 +98,7 @@ func scanTaskRow(rows *sql.Rows) (TaskRecord, error) {
 	if err := rows.Scan(
 		&t.TaskID, &t.TeamID, &t.ParentTaskID, &roleStr, &t.CatalogRole,
 		&delivStr, &depsJSON, &t.Depth, &stateStr, &t.FailureCode,
-		&t.LastEventSeq, &t.CreatedAt, &t.UpdatedAt, &endedAt,
+		&t.LastEventSeq, &t.CreatedAt, &t.UpdatedAt, &endedAt, &t.SessionID, &t.ExplicitStart,
 	); err != nil {
 		return TaskRecord{}, fmt.Errorf("scan team task: %w", err)
 	}
@@ -304,4 +304,56 @@ func (s *Store) openTeamCiphertext(
 		return nil, fmt.Errorf("open team payload: %w", err)
 	}
 	return plaintext, nil
+}
+
+// ActiveTeamIDs lists the teams in the active state, oldest first. The
+// dispatcher walks them when the vault unlocks (F11.3a).
+func (s *Store) ActiveTeamIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT team_id FROM team_records WHERE state = ? ORDER BY created_at ASC, team_id ASC`, string(TeamStateActive))
+	if err != nil {
+		return nil, fmt.Errorf("%w: query active teams: %w", ErrUnavailable, err)
+	}
+	defer closeRows(ctx, rows)
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan active team: %w", err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate active teams: %w", err)
+	}
+	return out, nil
+}
+
+// TaskForSession returns the team task a session runs, if any. It reads the
+// store, never the caller's claims: a session's team role is what its task
+// row says (Q-117, authorization in Go).
+func (s *Store) TaskForSession(ctx context.Context, sessionID string) (TaskRecord, bool, error) {
+	if sessionID == "" {
+		return TaskRecord{}, false, nil
+	}
+	var teamID, taskID string
+	err := s.db.QueryRowContext(ctx,
+		`SELECT team_id, task_id FROM team_tasks WHERE session_id = ? ORDER BY created_at DESC, task_id DESC LIMIT 1`,
+		sessionID).Scan(&teamID, &taskID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return TaskRecord{}, false, nil
+	}
+	if err != nil {
+		return TaskRecord{}, false, fmt.Errorf("%w: query the session task: %w", ErrUnavailable, err)
+	}
+	_, tasks, err := s.TeamSnapshot(ctx, teamID)
+	if err != nil {
+		return TaskRecord{}, false, err
+	}
+	for i := range tasks {
+		if tasks[i].TaskID == taskID {
+			return tasks[i], true, nil
+		}
+	}
+	return TaskRecord{}, false, nil
 }

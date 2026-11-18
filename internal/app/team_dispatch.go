@@ -1,0 +1,209 @@
+package app
+
+// The F11.3a start path: the dispatcher turns queued tasks of an active team
+// into running ones (Q-98, Q-116–Q-119). Approve only queued them (F11.2b);
+// the scheduler, quota gate and budgets stay F11.6, behind Admitter.
+//
+// Every state change is an appended team event, recorded before the effect it
+// announces: a crash between the assignment and the session leaves the task
+// `starting`, which recovery turns into `unknown` — a task whose start outcome
+// is unknown is never started again (AGENTS: no replay of an unknown effect).
+
+import (
+	"context"
+	"errors"
+	"sync"
+
+	"github.com/syurodev/fugue/internal/gitops"
+	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/ids"
+	"github.com/syurodev/fugue/internal/vault"
+	"github.com/syurodev/fugue/internal/vendorstore"
+)
+
+// Stable failure codes of a task that could not start (§3.1 failed(code)).
+const (
+	failSpecUnreadable = "spec_unreadable"
+	failProfile        = "profile_invalid"
+	failWorktree       = "worktree"
+	failSessionStart   = "session_start"
+	failIntro          = "intro"
+)
+
+// rootResolver resolves a workspace root name to its directory; the
+// workspace service implements it.
+type rootResolver interface {
+	SelectSessionCwd(ctx context.Context, workspaceID, rootName string) (string, error)
+}
+
+// teamDispatcherDeps are the ports of the dispatcher.
+type teamDispatcherDeps struct {
+	Store    *vendorstore.Store
+	Sessions taskSessions
+	Admit    Admitter
+	Roots    rootResolver
+	// Git is nil when no usable git binary was found; a task that needs a
+	// worktree then fails closed instead of running in a shared directory.
+	Git     *gitops.Manager
+	DataDir string
+	IDs     ids.Generator
+	Vault   *vault.Service
+}
+
+// teamDispatcher starts the queued tasks of active teams. One run at a time:
+// the mutex serializes runs, so two triggers never start the same task twice.
+type teamDispatcher struct {
+	deps teamDispatcherDeps
+	mu   sync.Mutex
+}
+
+func newTeamDispatcher(deps *teamDispatcherDeps) *teamDispatcher {
+	return &teamDispatcher{deps: *deps}
+}
+
+// Dispatch starts every startable queued task of the team. A task the
+// admitter holds back stays queued for the next trigger. It fails closed
+// while the vault is locked: nothing is read or recorded then.
+func (d *teamDispatcher) Dispatch(ctx context.Context, teamID string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.deps.Vault.Snapshot().State != vault.StateUnlocked {
+		return errcode.New(errcode.VendorVaultLocked, "the vault is locked")
+	}
+	held := make(map[string]bool)
+	_, tasks, err := d.deps.Store.TeamSnapshot(ctx, teamID)
+	if err != nil {
+		return boundaryError("read the team", err)
+	}
+	// Each pass leaves its task out of the queued set or marks it held, so
+	// len(tasks)+1 passes always reach a fixed point.
+	for range len(tasks) + 1 {
+		rec, current, err := d.deps.Store.TeamSnapshot(ctx, teamID)
+		if err != nil {
+			return boundaryError("read the team", err)
+		}
+		if rec.State != vendorstore.TeamStateActive {
+			return nil
+		}
+		next := nextStartable(current, held)
+		if next == nil {
+			return nil
+		}
+		started, startErr := d.start(ctx, &rec, next, current)
+		if startErr != nil {
+			return startErr
+		}
+		if !started {
+			held[next.TaskID] = true
+		}
+	}
+	return nil
+}
+
+// DispatchAll dispatches every active team; the vault unlock and a host start
+// trigger it. The first failure stops the walk and is returned.
+func (d *teamDispatcher) DispatchAll(ctx context.Context) error {
+	teamIDs, err := d.deps.Store.ActiveTeamIDs(ctx)
+	if err != nil {
+		return boundaryError("list the active teams", err)
+	}
+	for _, id := range teamIDs {
+		if err := d.Dispatch(ctx, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// nextStartable picks the first queued task the plan starts on its own
+// (Q-116): its parent is working and every dependency is done. A task of an
+// amend starts only through its delegator, and a root starts only when it is
+// the lead.
+func nextStartable(tasks []vendorstore.TaskRecord, held map[string]bool) *vendorstore.TaskRecord {
+	byID := make(map[string]*vendorstore.TaskRecord, len(tasks))
+	for i := range tasks {
+		byID[tasks[i].TaskID] = &tasks[i]
+	}
+	for i := range tasks {
+		t := &tasks[i]
+		if t.State != vendorstore.TaskStateQueued || t.ExplicitStart || held[t.TaskID] {
+			continue
+		}
+		if startable(t, byID) {
+			return t
+		}
+	}
+	return nil
+}
+
+func startable(t *vendorstore.TaskRecord, byID map[string]*vendorstore.TaskRecord) bool {
+	if t.ParentTaskID == "" {
+		return t.HierarchyRole == vendorstore.RoleLead
+	}
+	parent := byID[t.ParentTaskID]
+	if parent == nil || (parent.State != vendorstore.TaskStateRunning && parent.State != vendorstore.TaskStateAsking) {
+		return false
+	}
+	for _, dep := range t.DependsOn {
+		if d := byID[dep]; d == nil || d.State != vendorstore.TaskStateDone {
+			return false
+		}
+	}
+	return true
+}
+
+// start starts one task and reports whether it left the queue. A task that
+// is not admitted stays queued; one that fails to start is ended failed.
+func (d *teamDispatcher) start(ctx context.Context, rec *vendorstore.TeamRecord, task *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord) (bool, error) {
+	admitted, err := d.deps.Admit.Admit(ctx, task, tasks)
+	if err != nil {
+		return false, boundaryError("admit the task", err)
+	}
+	if !admitted {
+		return false, nil
+	}
+	if task.HierarchyRole == vendorstore.RoleLead {
+		return d.bindLead(ctx, rec, task)
+	}
+	return true, d.startChild(ctx, rec, task, tasks)
+}
+
+// appendTaskEvent appends one task event after the team's last sequence and
+// returns the new last sequence.
+func (d *teamDispatcher) appendTaskEvent(ctx context.Context, teamID string, seq int64, ev *vendorstore.AppendTeamEventInput) (int64, error) {
+	id, err := d.deps.IDs.NewID()
+	if err != nil {
+		return 0, errcode.Wrap(errcode.Internal, "generate the task event ID", err)
+	}
+	ev.EventID = id
+	next, err := d.deps.Store.AppendTeamEvent(ctx, teamID, seq, ev)
+	if err != nil {
+		return 0, boundaryError("record the task event", err)
+	}
+	return next, nil
+}
+
+// bindLead binds the proposing session to the lead task (Q-117): no process
+// starts and no worktree is made, the session keeps its working directory. A
+// session that is gone leaves the task queued.
+func (d *teamDispatcher) bindLead(ctx context.Context, rec *vendorstore.TeamRecord, task *vendorstore.TaskRecord) (bool, error) {
+	info, err := d.deps.Store.Snapshot(ctx, rec.SessionID)
+	if errors.Is(err, vendorstore.ErrSessionNotFound) || (err == nil && info.State == vendorstore.StateClosed) {
+		return false, nil
+	}
+	if err != nil {
+		return false, boundaryError("read the lead session", err)
+	}
+	seq, err := d.appendTaskEvent(ctx, rec.TeamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
+		TaskID: task.TaskID, EventType: vendorstore.EventTaskAssigned, SessionID: rec.SessionID,
+	})
+	if err != nil {
+		return false, err
+	}
+	if _, err := d.appendTaskEvent(ctx, rec.TeamID, seq, &vendorstore.AppendTeamEventInput{
+		TaskID: task.TaskID, EventType: vendorstore.EventTaskStarted,
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
+}

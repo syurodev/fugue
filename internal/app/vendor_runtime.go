@@ -64,6 +64,10 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 		owner := hp.rt.interactions.owner
 		unregisterVaultGuard = v.RegisterLockGuard(func(snap vault.Snapshot) {
 			owner.SetVaultLocked(snap.State != vault.StateUnlocked)
+			// Queued tasks wait while the vault is locked; the unlock starts them.
+			if snap.State == vault.StateUnlocked && hp.rt.teamDispatch != nil {
+				hp.dispatchAllAsync(base)
+			}
 		})
 	}
 	hp.rt.transcripts = transcripts
@@ -136,6 +140,7 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 		ids: deps.IDs, hostEnv: deps.VendorHostEnv, ops: newVendorOps(deps.Clock, hp.rt.goTask),
 		tokens: tokens, bridge: deps.Bridge, accounts: accounts,
 	}
+	hp.wireTeamDispatch(ctx, base, vs, sessions, v, deps)
 	hp.rt.accountsService, err = newAccountsService(accounts, hp.rt.vendors, hp.rt.hub, accountsServiceDeps{Clock: deps.Clock, IDs: deps.IDs, GoTask: hp.rt.goTask})
 	if err != nil {
 		return nil, err

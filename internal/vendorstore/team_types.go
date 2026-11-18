@@ -135,6 +135,12 @@ type TaskRecord struct {
 	Depth         int
 	State         TaskState
 	FailureCode   string
+	// SessionID is the vendor session the task runs in, set by TaskAssigned
+	// (F11.3a); empty while the task is queued.
+	SessionID string
+	// ExplicitStart marks a task the dispatcher never starts on its own: it
+	// starts only through its delegator's call (Q-116, tasks of an amend).
+	ExplicitStart bool
 	LastEventSeq  int64
 	CreatedAt     int64
 	UpdatedAt     int64
@@ -165,6 +171,8 @@ type NewTaskInput struct {
 	DependsOn      []string
 	CreatedEventID string
 	ProtectedSpec  []byte
+	// ExplicitStart is set by the amend path (Q-116).
+	ExplicitStart bool
 }
 
 // AppendTeamEventInput describes a single event to append to a team's sequence.
@@ -175,6 +183,9 @@ type AppendTeamEventInput struct {
 	Outcome          string
 	FailureCode      string
 	ProtectedPayload []byte
+	// SessionID names the session of a TaskAssigned event; the projection
+	// records it on the task row. It is empty for every other event.
+	SessionID string
 }
 
 // RecordedTeamEvent is a metadata view of one team_task_events row (INV-09).
@@ -199,3 +210,7 @@ type RecoveredTask struct {
 	PreviousState TaskState
 	Sequence      int64
 }
+
+// TaskOutcomeFailed is the TaskEnded outcome of a task that failed; the event
+// carries the stable failure code (§3.1 failed(code)).
+const TaskOutcomeFailed = outcomeFailed

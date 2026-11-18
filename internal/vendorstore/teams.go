@@ -187,11 +187,11 @@ func insertTaskAndCreatedEvent(
 		INSERT INTO team_tasks (
 			task_id, team_id, parent_task_id, hierarchy_role, catalog_role,
 			deliverable, depends_on_json, depth, state, failure_code,
-			spec_envelope, last_event_seq, created_at, updated_at, ended_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, NULL)`,
+			spec_envelope, last_event_seq, created_at, updated_at, ended_at, explicit_start
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, ?, ?, NULL, ?)`,
 		t.TaskID, teamID, t.ParentTaskID, string(t.HierarchyRole), t.CatalogRole,
 		string(t.Deliverable), string(depsJSON), depth, string(TaskStateQueued),
-		specEnv, seq, now, now,
+		specEnv, seq, now, now, t.ExplicitStart,
 	)
 	if err != nil {
 		return fmt.Errorf("insert team task %s: %w", t.TaskID, err)
@@ -377,6 +377,12 @@ func applyTaskProjection(
 	}
 	if err := updateTaskAndTeamSeq(ctx, tx, teamID, ev.TaskID, nextState, nextSeq, ev.FailureCode, now); err != nil {
 		return "", "", err
+	}
+	if ev.EventType == EventTaskAssigned && ev.SessionID != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE team_tasks SET session_id = ? WHERE team_id = ? AND task_id = ?`,
+			ev.SessionID, teamID, ev.TaskID); err != nil {
+			return "", "", fmt.Errorf("record the task session: %w", err)
+		}
 	}
 	return curStateStr, string(nextState), nil
 }

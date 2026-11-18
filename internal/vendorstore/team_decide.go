@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"slices"
 
 	"github.com/syurodev/fugue/internal/sealing"
 )
@@ -61,9 +62,14 @@ func (s *Store) AmendTeam(ctx context.Context, teamID string, in *TeamAmendInput
 	if in == nil || in.AmendEventID == "" || len(in.AmendPayload) == 0 {
 		return 0, fmt.Errorf("%w: an amend requires an event ID and a sealed payload", ErrTeamInvalidInput)
 	}
+	// Q-116: a task an amend inserts starts only through its delegator.
+	added := slices.Clone(in.AddedTasks)
+	for i := range added {
+		added[i].ExplicitStart = true
+	}
 	return s.applyTeamMutation(ctx, teamID, &AppendTeamEventInput{
 		EventID: in.AmendEventID, EventType: EventTeamAmended, ProtectedPayload: in.AmendPayload,
-	}, in.ExpectedSeq, nil, in.ResealedSpecs, in.AddedTasks)
+	}, in.ExpectedSeq, nil, in.ResealedSpecs, added)
 }
 
 // applyTeamMutation runs one team mutation transaction: the team event, the
