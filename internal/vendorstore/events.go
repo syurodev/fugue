@@ -13,6 +13,14 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
+const (
+	advanceSequenceQuery = `UPDATE vendor_sessions SET last_sequence = last_sequence + 1, updated_at = ?
+		WHERE session_id = ? AND last_sequence = ? AND state <> 'closed'`
+	rejectPurgedQuery = "SELECT EXISTS(SELECT 1 FROM vendor_purges WHERE session_id=?)"
+	insertEventQuery  = `INSERT INTO vendor_events(session_id,sequence,event_type,recorded_at,payload_id,metadata)
+		VALUES (?,?,?,?,?,?)`
+)
+
 // CreateSession creates the session and its first event atomically.
 func (s *Store) CreateSession(ctx context.Context, session *Session) error {
 	normalized, validationErr := normalizeSession(session)
@@ -30,7 +38,8 @@ func (s *Store) CreateSession(ctx context.Context, session *Session) error {
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	defer rollback(ctx, tx)
-	if purgeErr := rejectPurged(ctx, tx, session.ID); purgeErr != nil {
+	stmts := newTxStatements(tx)
+	if purgeErr := rejectPurged(ctx, stmts, session.ID); purgeErr != nil {
 		return purgeErr
 	}
 	now := s.clock.Now().UTC().Format(time.RFC3339Nano)
@@ -54,7 +63,7 @@ func (s *Store) CreateSession(ctx context.Context, session *Session) error {
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	if err = recordChange(ctx, tx, session.ID, ChangeCreated, session.State, session.WaitingReason, now, s.changeRetention); err != nil {
+	if err = recordChange(ctx, stmts, session.ID, ChangeCreated, session.State, session.WaitingReason, now, s.changeRetention); err != nil {
 		return err
 	}
 	if err = tx.Commit(); err != nil {
@@ -92,15 +101,9 @@ func (s *Store) AppendBatch(ctx context.Context, sessionID string, expected int6
 	}
 	defer rollback(ctx, tx)
 	now := s.clock.Now().UTC().Format(time.RFC3339Nano)
-	sequence := expected
-	for _, event := range normalized {
-		if sequenceErr := advanceSequence(ctx, tx, sessionID, sequence, now); sequenceErr != nil {
-			return 0, sequenceErr
-		}
-		sequence++
-		if writeErr := s.appendRows(ctx, tx, sessionID, sequence, event, now); writeErr != nil {
-			return 0, writeErr
-		}
+	sequence, err := s.appendBatchTx(ctx, tx, sessionID, expected, normalized, now)
+	if err != nil {
+		return 0, err
 	}
 	if s.beforeCommit != nil {
 		return 0, fmt.Errorf("%w: %w", ErrUnavailable, s.beforeCommit)
@@ -113,6 +116,28 @@ func (s *Store) AppendBatch(ctx context.Context, sessionID string, expected int6
 		return 0, fmt.Errorf("%w: commit event: %w", ErrUnavailable, err)
 	}
 	return sequence, nil
+}
+
+func (s *Store) appendBatchTx(ctx context.Context, tx *sql.Tx, sessionID string, expected int64, normalized []*Event, now string) (int64, error) {
+	stmts := newTxStatements(tx)
+	var queries []string
+	if len(normalized) > 1 {
+		queries = batchQueries(normalized)
+	}
+	sequence := expected
+	err := prepareAndRun(ctx, tx, stmts, queries, func() error {
+		for _, event := range normalized {
+			if sequenceErr := advanceSequence(ctx, stmts, sessionID, sequence, now); sequenceErr != nil {
+				return sequenceErr
+			}
+			sequence++
+			if writeErr := s.appendRows(ctx, stmts, sessionID, sequence, event, now); writeErr != nil {
+				return writeErr
+			}
+		}
+		return nil
+	})
+	return sequence, err
 }
 
 func normalizeEvents(events []*Event) ([]*Event, error) {
@@ -177,7 +202,7 @@ func (s *Store) payloadGate(event *Event) (vault.Snapshot, bool, error) {
 	return epoch, true, nil
 }
 
-func (s *Store) appendRows(ctx context.Context, tx *sql.Tx, sessionID string, sequence int64, event *Event, now string) error {
+func (s *Store) appendRows(ctx context.Context, tx *txStatements, sessionID string, sequence int64, event *Event, now string) error {
 	if err := rejectPurged(ctx, tx, sessionID); err != nil {
 		return err
 	}
@@ -199,9 +224,7 @@ func (s *Store) appendRows(ctx context.Context, tx *sql.Tx, sessionID string, se
 	if marshalErr != nil {
 		return fmt.Errorf("%w: %w", ErrUnavailable, marshalErr)
 	}
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO vendor_events(session_id,sequence,event_type,recorded_at,payload_id,metadata)
-		VALUES (?,?,?,?,?,?)`,
+	_, err = tx.ExecContext(ctx, insertEventQuery,
 		sessionID, sequence, event.Type, now, nullable(payloadID), string(metadata))
 	if err != nil {
 		return fmt.Errorf("%w: append event: %w", ErrUnavailable, err)
@@ -382,11 +405,8 @@ func validateSessionIdentity(session *Session) error {
 	return nil
 }
 
-func advanceSequence(ctx context.Context, tx *sql.Tx, sessionID string, expected int64, now string) error {
-	result, err := tx.ExecContext(ctx,
-		`UPDATE vendor_sessions SET last_sequence = last_sequence + 1, updated_at = ?
-		WHERE session_id = ? AND last_sequence = ? AND state <> 'closed'`,
-		now, sessionID, expected)
+func advanceSequence(ctx context.Context, tx *txStatements, sessionID string, expected int64, now string) error {
+	result, err := tx.ExecContext(ctx, advanceSequenceQuery, now, sessionID, expected)
 	if err != nil {
 		return fmt.Errorf("%w: advance sequence: %w", ErrUnavailable, err)
 	}
@@ -404,9 +424,9 @@ func advanceSequence(ctx context.Context, tx *sql.Tx, sessionID string, expected
 	return nil
 }
 
-func rejectPurged(ctx context.Context, tx *sql.Tx, session string) error {
+func rejectPurged(ctx context.Context, tx *txStatements, session string) error {
 	var purged int
-	if err := tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM vendor_purges WHERE session_id=?)", session).Scan(&purged); err != nil {
+	if err := tx.QueryRowContext(ctx, rejectPurgedQuery, session).Scan(&purged); err != nil {
 		return fmt.Errorf("%w: purge barrier: %w", ErrUnavailable, err)
 	}
 	if purged != 0 {
