@@ -73,3 +73,51 @@ func placeholderOf(muted, fg color.NRGBA) color.NRGBA {
 	}
 	return color.NRGBA{R: ch(muted.R, fg.R), G: ch(muted.G, fg.G), B: ch(muted.B, fg.B), A: muted.A}
 }
+
+// softTone derives a tinted fill (hue at 14% perceived over CanvasBg, like
+// DangerSoft) and a foreground color shifted from hue toward Fg until it
+// reaches at least 4.5:1 contrast over the rendered fill on every chrome
+// background of the mode (UK-E04).
+func softTone(c *Chrome, hue color.NRGBA) Tone {
+	fill := perceived(c.CanvasBg, hue, 0.14)
+	bgs := [5]color.NRGBA{c.AppBg, c.CanvasBg, c.SurfaceBase, c.SurfaceRaised, c.SurfaceTinted}
+	var blended [5]color.NRGBA
+	alpha := float64(fill.A) / 255
+	for i, bg := range bgs {
+		blend := func(b, f uint8) uint8 {
+			return fromLinear(toLinearF(b) + alpha*(toLinearF(f)-toLinearF(b)))
+		}
+		blended[i] = color.NRGBA{R: blend(bg.R, fill.R), G: blend(bg.G, fill.G), B: blend(bg.B, fill.B), A: 0xff}
+	}
+	fg := hue
+	for step := range 101 {
+		t := float64(step) / 100
+		cand := color.NRGBA{
+			R: uint8(math.Round(float64(hue.R) + t*(float64(c.Fg.R)-float64(hue.R)))),
+			G: uint8(math.Round(float64(hue.G) + t*(float64(c.Fg.G)-float64(hue.G)))),
+			B: uint8(math.Round(float64(hue.B) + t*(float64(c.Fg.B)-float64(hue.B)))),
+			A: 0xff,
+		}
+		ok := true
+		for _, bg := range blended {
+			if wcagContrast(cand, bg) < 4.5 {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			fg = cand
+			break
+		}
+	}
+	return Tone{Fill: fill, Fg: fg}
+}
+
+func wcagContrast(a, b color.NRGBA) float64 {
+	lum := func(c color.NRGBA) float64 {
+		return 0.2126*toLinearF(c.R) + 0.7152*toLinearF(c.G) + 0.0722*toLinearF(c.B)
+	}
+	la, lb := lum(a), lum(b)
+	hi, lo := math.Max(la, lb), math.Min(la, lb)
+	return (hi + 0.05) / (lo + 0.05)
+}

@@ -157,17 +157,52 @@ type Status struct {
 	Danger  color.NRGBA
 }
 
+// Tone is a tinted surface fill and its ≥4.5:1 foreground text/icon color
+// (§3.5, §6.4).
+type Tone struct {
+	Fill color.NRGBA
+	Fg   color.NRGBA
+}
+
+// Hue names one of the eight palette hues (§6.4).
+type Hue uint8
+
+// The eight palette hues (§6.4).
+const (
+	HueRed Hue = iota
+	HueOrange
+	HueYellow
+	HueGreen
+	HueTeal
+	HueBlue
+	HueViolet
+	HuePink
+	numHues
+)
+
+// StatusKind names one of the four status tones (§3.5, §6.4).
+type StatusKind uint8
+
+// The four status kinds (§3.5, §6.4).
+const (
+	StatusInfo StatusKind = iota
+	StatusSuccess
+	StatusWarning
+	StatusDanger
+)
+
 // Theme is one immutable mode: every token plus the derived status, link and
 // syntax colors, the shaper its Material() hands to widgets, and the one
 // material theme those tokens seed — built once here, never per frame.
 type Theme struct {
-	chrome  Chrome
-	palette Palette
-	status  Status
-	link    color.NRGBA
-	syntax  map[SyntaxRole]SyntaxStyle
-	shaper  *text.Shaper
-	mat     *material.Theme
+	chrome   Chrome
+	palette  Palette
+	status   Status
+	hueTones [numHues]Tone
+	link     color.NRGBA
+	syntax   map[SyntaxRole]SyntaxStyle
+	shaper   *text.Shaper
+	mat      *material.Theme
 }
 
 // Light builds the light mode over shaper.
@@ -222,13 +257,24 @@ func newTheme(c *Chrome, p Palette, shaper *text.Shaper) Theme {
 		RoleMeta:       {Color: c.FgSubtle, Weight: defaultWeight},
 		RoleInvalid:    {Color: status.Danger, Weight: defaultWeight},
 	}
+	hueTones := [numHues]Tone{
+		HueRed:    {Fill: c.DangerSoft, Fg: c.DangerFg},
+		HueOrange: softTone(c, p.Orange),
+		HueYellow: softTone(c, p.Yellow),
+		HueGreen:  softTone(c, p.Green),
+		HueTeal:   softTone(c, p.Teal),
+		HueBlue:   softTone(c, p.Blue),
+		HueViolet: softTone(c, p.Violet),
+		HuePink:   softTone(c, p.Pink),
+	}
 	t := Theme{
-		chrome:  *c,
-		palette: p,
-		status:  status,
-		link:    p.Blue,
-		syntax:  syntax,
-		shaper:  shaper,
+		chrome:   *c,
+		palette:  p,
+		status:   status,
+		hueTones: hueTones,
+		link:     p.Blue,
+		syntax:   syntax,
+		shaper:   shaper,
 	}
 	t.mat = t.newMaterialTheme()
 	return t
@@ -242,6 +288,35 @@ func (t *Theme) Palette() Palette { return t.palette }
 
 // Status returns the derived status colors of this mode.
 func (t *Theme) Status() Status { return t.status }
+
+// NeutralTone returns the FillSoft + Fg pair of a neutral tag (§3.5, §6.4).
+func (t *Theme) NeutralTone() Tone { return Tone{Fill: t.chrome.FillSoft, Fg: t.chrome.Fg} }
+
+// HueTone returns the soft fill and ≥4.5:1 foreground color of hue h (§6.4).
+// Out-of-range hues fall back to NeutralTone.
+func (t *Theme) HueTone(h Hue) Tone {
+	if h >= numHues {
+		return t.NeutralTone()
+	}
+	return t.hueTones[h]
+}
+
+// StatusTone returns the soft fill and ≥4.5:1 foreground color of status s
+// (§3.5, §6.4).
+func (t *Theme) StatusTone(s StatusKind) Tone {
+	switch s {
+	case StatusInfo:
+		return t.hueTones[HueBlue]
+	case StatusSuccess:
+		return t.hueTones[HueGreen]
+	case StatusWarning:
+		return t.hueTones[HueOrange]
+	case StatusDanger:
+		return t.hueTones[HueRed]
+	default:
+		return t.NeutralTone()
+	}
+}
 
 // Link returns the hyperlink color, derived from the palette (blue).
 func (t *Theme) Link() color.NRGBA { return t.link }
