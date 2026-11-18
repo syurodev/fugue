@@ -37,7 +37,8 @@ type ProposedRole struct {
 }
 
 // ProposedTask is one task of a proposal tree (§5.3). TeamRole carries the
-// OR-01 hierarchy position; Role names a catalog or proposed role.
+// OR-01 hierarchy position; Role names a catalog or proposed role. Budget is
+// set by an approved edit or amend (§11); the propose tool does not offer it.
 type ProposedTask struct {
 	ID           string           `json:"id"`
 	ParentTaskID string           `json:"parent_task_id,omitempty"`
@@ -50,15 +51,18 @@ type ProposedTask struct {
 	DependsOn    []string         `json:"depends_on,omitempty"`
 	Checks       []string         `json:"checks,omitempty"`
 	Profile      *ProfileOverride `json:"profile,omitempty"`
+	Budget       *TaskBudget      `json:"budget,omitempty"`
 }
 
 // ProposalInput is a team proposal as the proposing model wrote it. It is
 // untrusted data: nothing in it becomes an instruction to Fugue (OR-13, §13).
+// The JSON shape is also the sealed TeamProposed payload, so the decide path
+// (F11.2b) can re-validate edits against exactly what was proposed.
 type ProposalInput struct {
-	Title string
-	Brief string
-	Roles []ProposedRole
-	Tasks []ProposedTask
+	Title string         `json:"title"`
+	Brief string         `json:"brief"`
+	Roles []ProposedRole `json:"roles,omitempty"`
+	Tasks []ProposedTask `json:"tasks"`
 }
 
 // Warning is one §5.3 finding shown on the proposal card. Codes are stable
@@ -162,6 +166,7 @@ func taskSpecOf(t *ProposedTask) TaskSpec {
 	return TaskSpec{
 		Role: t.Role, Goal: t.Goal, Context: t.Context, WriteScope: t.WriteScope,
 		Deliverable: t.Deliverable, DependsOn: t.DependsOn, Checks: t.Checks, Profile: t.Profile,
+		Budget: t.Budget,
 	}
 }
 

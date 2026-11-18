@@ -177,6 +177,13 @@ func (s *AccountsService) List(ctx context.Context, principal string) ([]Account
 	return accountViews(s.accounts.Snapshot()), nil
 }
 
+// snapshotViews returns the current account views without a refresh. The
+// team proposal card uses it: the card shows what is known now, and a vendor
+// with no known account reads as unknown (F11.2b).
+func (s *AccountsService) snapshotViews() []AccountView {
+	return accountViews(s.accounts.Snapshot())
+}
+
 // refresh runs one login refresh, or waits for the one already running. A
 // waiter whose context ends first returns and leaves the refresh to its owner.
 func (s *AccountsService) refresh(ctx context.Context) {

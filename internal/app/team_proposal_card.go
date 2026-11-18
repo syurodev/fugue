@@ -20,13 +20,14 @@ import (
 const cardTruncationMarker = "\n…(truncated; the full plan is in the transcript)"
 
 // proposalDecisionOptions are the fixed choices of the proposal card (§5.3).
-// Labels are Fugue's own words, never model content.
+// Labels are Fugue's own words, never model content; the IDs are the
+// decision options the decide path consumes.
 func proposalDecisionOptions() []interaction.Option {
 	return []interaction.Option{
-		{ID: "approve", Label: "Approve", Description: "Activate the team and queue its root tasks (F11.2b applies the decision)"},
-		{ID: "approve_edited", Label: "Approve with edits", Description: "Apply your edits and activate the team"},
-		{ID: "solo", Label: "Work solo", Description: "Keep the session solo"},
-		{ID: "reject", Label: "Reject", Description: "Reject the proposal"},
+		{ID: decisionApprove, Label: "Approve", Description: "Activate the team and queue its root tasks (F11.2b applies the decision)"},
+		{ID: decisionApproveEdited, Label: "Approve with edits", Description: "Apply your edits and activate the team"},
+		{ID: decisionSolo, Label: "Work solo", Description: "Keep the session solo"},
+		{ID: decisionReject, Label: "Reject", Description: "Reject the proposal"},
 	}
 }
 
@@ -104,7 +105,7 @@ func (s *TeamProposalService) proposalCardLines(ctx context.Context, input *team
 	profiles := proposalRoleProfiles(input, eff)
 	lines := []string{
 		input.Title,
-		"agents: " + strconv.Itoa(teams.AgentCount(input)) + "; accounts: unknown (the account service is not wired yet)",
+		"agents: " + strconv.Itoa(teams.AgentCount(input)) + "; " + s.accountLine(input, profiles),
 		"roles:",
 	}
 	seen := make(map[string]struct{}, len(profiles))
@@ -128,6 +129,78 @@ func (s *TeamProposalService) proposalCardLines(ctx context.Context, input *team
 		}
 	}
 	return lines, nil
+}
+
+// accountLine renders the §5.3 account line from the accounts service
+// (F11.2b moved it here from F11.2a): the accounts each role's vendor would
+// use, with their quota when it is known. A vendor with no known account
+// reads as unknown, and so does the whole line before the runtime wires the
+// service.
+func (s *TeamProposalService) accountLine(input *teams.ProposalInput, profiles map[string]roleProfile) string {
+	if s.accounts == nil {
+		return "accounts: unknown"
+	}
+	vendors := distinctRoleVendors(input, profiles)
+	if len(vendors) == 0 {
+		return "accounts: unknown"
+	}
+	byVendor := make(map[string][]AccountView, len(vendors))
+	views := s.accounts.snapshotViews()
+	for i := range views {
+		byVendor[views[i].Vendor] = append(byVendor[views[i].Vendor], views[i])
+	}
+	parts := make([]string, 0, len(vendors))
+	for _, vendor := range vendors {
+		accounts := byVendor[vendor]
+		if len(accounts) == 0 {
+			parts = append(parts, vendor+": unknown")
+			continue
+		}
+		descriptions := make([]string, 0, len(accounts))
+		for i := range accounts {
+			descriptions = append(descriptions, accountCardDescription(&accounts[i]))
+		}
+		parts = append(parts, vendor+": "+strings.Join(descriptions, ", "))
+	}
+	return "accounts: " + strings.Join(parts, "; ")
+}
+
+// distinctRoleVendors lists the vendors of the plan's roles in first-use
+// order.
+func distinctRoleVendors(input *teams.ProposalInput, profiles map[string]roleProfile) []string {
+	var out []string
+	seen := make(map[string]struct{}, len(input.Tasks))
+	for i := range input.Tasks {
+		p, ok := profiles[input.Tasks[i].Role]
+		if !ok {
+			continue
+		}
+		if _, dup := seen[p.vendor]; dup {
+			continue
+		}
+		seen[p.vendor] = struct{}{}
+		out = append(out, p.vendor)
+	}
+	return out
+}
+
+// accountCardDescription renders one account for the card: the display label
+// and its quota when known, otherwise unknown.
+func accountCardDescription(view *AccountView) string {
+	label := view.Login
+	if label == "" {
+		label = "unknown"
+	}
+	if !view.QuotaKnown || len(view.Windows) == 0 {
+		return label + " (quota unknown)"
+	}
+	worst := view.Windows[0].Utilization
+	for i := 1; i < len(view.Windows); i++ {
+		if view.Windows[i].Utilization > worst {
+			worst = view.Windows[i].Utilization
+		}
+	}
+	return label + " (" + strconv.FormatFloat(worst*100, 'f', 0, 64) + "% quota used)"
 }
 
 // proposalRoleProfiles resolves each task role's vendor and model: catalog
