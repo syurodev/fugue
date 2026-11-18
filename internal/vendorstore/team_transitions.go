@@ -23,9 +23,12 @@ type taskTransKey struct {
 
 func teamTransitions() map[teamTransKey]TeamState {
 	return map[teamTransKey]TeamState{
-		{TeamStateProposed, EventTeamStarted, ""}:                TeamStateActive,
-		{TeamStateProposed, EventTeamEnded, outcomeCancelled}:    TeamStateCancelled,
-		{TeamStateActive, EventTeamFinalReview, ""}:              TeamStateFinalReview,
+		{TeamStateProposed, EventTeamStarted, ""}:             TeamStateActive,
+		{TeamStateProposed, EventTeamEnded, outcomeCancelled}: TeamStateCancelled,
+		{TeamStateActive, EventTeamFinalReview, ""}:           TeamStateFinalReview,
+		// F11.2b: an amendment keeps an active team active; the change itself
+		// travels in the event's sealed payload (§5.4).
+		{TeamStateActive, EventTeamAmended, ""}:                  TeamStateActive,
 		{TeamStateActive, EventTeamEnded, outcomeCancelled}:      TeamStateCancelled,
 		{TeamStateActive, EventTeamEnded, outcomeFailed}:         TeamStateFailed,
 		{TeamStateFinalReview, EventTeamDecided, "revision"}:     TeamStateActive,
@@ -105,6 +108,7 @@ func isTeamEventType(ev TeamEventType) bool {
 	return ev == EventTeamProposed ||
 		ev == EventTeamStarted ||
 		ev == EventTeamFinalReview ||
+		ev == EventTeamAmended ||
 		ev == EventTeamDecided ||
 		ev == EventTeamEnded
 }
