@@ -25,6 +25,7 @@ import (
 // ProgressTone selects the indicator color from theme tokens (§3.5, §6.5).
 type ProgressTone uint8
 
+// Progress tone variants (§3.5, §6.5).
 const (
 	ProgressDefault ProgressTone = iota
 	ProgressInfo
@@ -54,6 +55,8 @@ func NewProgressState() *ProgressState {
 func ResolveProgressColor(th *theme.Theme, tone ProgressTone) color.NRGBA {
 	st := th.Status()
 	switch tone {
+	case ProgressDefault:
+		return th.Chrome().Action
 	case ProgressInfo:
 		return st.Info
 	case ProgressSuccess:

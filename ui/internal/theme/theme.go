@@ -167,6 +167,7 @@ type Tone struct {
 // Hue names one of the eight palette hues (§6.4).
 type Hue uint8
 
+// The eight palette hues (§6.4).
 const (
 	HueRed Hue = iota
 	HueOrange
@@ -182,6 +183,7 @@ const (
 // StatusKind names one of the four status tones (§3.5, §6.4).
 type StatusKind uint8
 
+// The four status kinds (§3.5, §6.4).
 const (
 	StatusInfo StatusKind = iota
 	StatusSuccess

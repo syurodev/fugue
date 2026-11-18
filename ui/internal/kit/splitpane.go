@@ -154,61 +154,81 @@ func (s *SplitPaneState) pointerInput(gtx *layout.Context, p SplitPaneProps, fir
 		if !is {
 			continue
 		}
-		switch pe.Kind {
-		case pointer.Enter:
-			s.hovered = true
-		case pointer.Leave:
-			s.hovered = false
-		case pointer.Press:
-			if pe.Buttons.Contain(pointer.ButtonPrimary) {
-				s.pressing = true
-				s.dragged = false
-				s.pressPos = pe.Position
-				s.pressOffset = axisCoord(pe.Position, p.Orientation) - float32(firstPx)
-			}
-		case pointer.Drag:
-			if !s.pressing {
-				continue
-			}
-			dist := math.Hypot(float64(pe.Position.X-s.pressPos.X), float64(pe.Position.Y-s.pressPos.Y))
-			if !s.dragged && dist > dragThresh {
-				s.dragged = true
-			}
-			if s.dragged {
-				targetPx := int(math.Round(float64(axisCoord(pe.Position, p.Orientation) - s.pressOffset)))
-				clamped := clampSplit(targetPx, total, minFirst, minSecond)
-				newRatio = float32(clamped) / float32(total)
-				changed = true
-			}
-		case pointer.Release:
-			if !s.pressing {
-				continue
-			}
-			if s.dragged {
-				// A drag release must not count toward a double-click (§6.27).
-				s.lastClickTime = time.Time{}
-			} else if !s.lastClickTime.IsZero() &&
-				gtx.Now.Sub(s.lastClickTime) <= doubleClickWindow &&
-				math.Hypot(float64(pe.Position.X-s.lastClickPos.X), float64(pe.Position.Y-s.lastClickPos.Y)) <= dragThresh {
-				def := p.DefaultRatio
-				if def <= 0 || def >= 1 {
-					def = 0.5
-				}
-				clamped := clampSplit(int(math.Round(float64(def)*float64(total))), total, minFirst, minSecond)
-				newRatio = float32(clamped) / float32(total)
-				changed = true
-				s.lastClickTime = time.Time{}
-			} else {
-				s.lastClickTime = gtx.Now
-				s.lastClickPos = pe.Position
-			}
-			s.pressing = false
-			s.dragged = false
-		case pointer.Cancel:
-			s.pressing = false
-			s.dragged = false
+		if r, ok := s.handlePointerEvent(gtx, pe, p, firstPx, total, minFirst, minSecond, dragThresh); ok {
+			newRatio = r
+			changed = true
 		}
 	}
+}
+
+func (s *SplitPaneState) handlePointerEvent(gtx *layout.Context, pe pointer.Event, p SplitPaneProps, firstPx, total, minFirst, minSecond int, dragThresh float64) (float32, bool) {
+	switch pe.Kind {
+	case pointer.Enter:
+		s.hovered = true
+	case pointer.Leave:
+		s.hovered = false
+	case pointer.Press:
+		if pe.Buttons.Contain(pointer.ButtonPrimary) {
+			s.pressing = true
+			s.dragged = false
+			s.pressPos = pe.Position
+			s.pressOffset = axisCoord(pe.Position, p.Orientation) - float32(firstPx)
+		}
+	case pointer.Drag:
+		return s.handlePointerDrag(pe, p, total, minFirst, minSecond, dragThresh)
+	case pointer.Release:
+		return s.handlePointerRelease(gtx, pe, p, total, minFirst, minSecond, dragThresh)
+	case pointer.Cancel:
+		s.pressing = false
+		s.dragged = false
+	case pointer.Move, pointer.Scroll:
+	}
+	return 0, false
+}
+
+func (s *SplitPaneState) handlePointerDrag(pe pointer.Event, p SplitPaneProps, total, minFirst, minSecond int, dragThresh float64) (float32, bool) {
+	if !s.pressing {
+		return 0, false
+	}
+	dist := math.Hypot(float64(pe.Position.X-s.pressPos.X), float64(pe.Position.Y-s.pressPos.Y))
+	if !s.dragged && dist > dragThresh {
+		s.dragged = true
+	}
+	if !s.dragged {
+		return 0, false
+	}
+	targetPx := int(math.Round(float64(axisCoord(pe.Position, p.Orientation) - s.pressOffset)))
+	clamped := clampSplit(targetPx, total, minFirst, minSecond)
+	return float32(clamped) / float32(total), true
+}
+
+func (s *SplitPaneState) handlePointerRelease(gtx *layout.Context, pe pointer.Event, p SplitPaneProps, total, minFirst, minSecond int, dragThresh float64) (float32, bool) {
+	if !s.pressing {
+		return 0, false
+	}
+	wasDragged := s.dragged
+	s.pressing = false
+	s.dragged = false
+	if wasDragged {
+		// A drag release must not count toward a double-click (§6.27).
+		s.lastClickTime = time.Time{}
+		return 0, false
+	}
+	isDoubleClick := !s.lastClickTime.IsZero() &&
+		gtx.Now.Sub(s.lastClickTime) <= doubleClickWindow &&
+		math.Hypot(float64(pe.Position.X-s.lastClickPos.X), float64(pe.Position.Y-s.lastClickPos.Y)) <= dragThresh
+	if !isDoubleClick {
+		s.lastClickTime = gtx.Now
+		s.lastClickPos = pe.Position
+		return 0, false
+	}
+	s.lastClickTime = time.Time{}
+	def := p.DefaultRatio
+	if def <= 0 || def >= 1 {
+		def = 0.5
+	}
+	clamped := clampSplit(int(math.Round(float64(def)*float64(total))), total, minFirst, minSecond)
+	return float32(clamped) / float32(total), true
 }
 
 func (s *SplitPaneState) keyInput(gtx *layout.Context, p SplitPaneProps, firstPx, total, minFirst, minSecond int) (float32, bool) {
@@ -242,21 +262,30 @@ func (s *SplitPaneState) keyInput(gtx *layout.Context, p SplitPaneProps, firstPx
 			step = gtx.Dp(4 * theme.SpaceXL) // 64 dp (§6.27)
 		}
 		lo, hi := splitLimits(total, minFirst, minSecond)
-		switch ke.Name {
-		case decKey:
-			curPx = clampSplit(curPx-step, total, minFirst, minSecond)
-		case incKey:
-			curPx = clampSplit(curPx+step, total, minFirst, minSecond)
-		case key.NameHome:
-			curPx = lo
-		case key.NameEnd:
-			curPx = hi
-		default:
+		nextPx, ok := applySplitKey(ke.Name, decKey, incKey, curPx, step, lo, hi, total, minFirst, minSecond)
+		if !ok {
 			continue
 		}
+		curPx = nextPx
 		newRatio = float32(curPx) / float32(total)
 		changed = true
 	}
+}
+
+func applySplitKey(name, decKey, incKey key.Name, curPx, step, lo, hi, total, minFirst, minSecond int) (int, bool) {
+	if name == decKey {
+		return clampSplit(curPx-step, total, minFirst, minSecond), true
+	}
+	if name == incKey {
+		return clampSplit(curPx+step, total, minFirst, minSecond), true
+	}
+	if name == key.NameHome {
+		return lo, true
+	}
+	if name == key.NameEnd {
+		return hi, true
+	}
+	return curPx, false
 }
 
 func (s *SplitPaneState) drawHandle(env *Env, gtx *layout.Context, orient Orientation, firstPx, total, cross int) {

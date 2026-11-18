@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gioui.org/f32"
+	"gioui.org/gpu/headless"
 	"gioui.org/io/key"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -18,11 +19,11 @@ import (
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
-func splitFrame(t *testing.T, h *harness, s *SplitPaneState, p *SplitPaneProps, w, hgt int, first, second layout.Widget) (float32, bool) {
+func splitFrame(t *testing.T, h *harness, s *SplitPaneState, p *SplitPaneProps) (float32, bool) {
 	t.Helper()
-	h.frameSize(t, w, hgt)
+	h.frameSize(t, 400, 200)
 	h.env.TrackInput(&h.gtx)
-	ratio, changed, _ := s.Layout(h.env, &h.gtx, *p, first, second)
+	ratio, changed, _ := s.Layout(h.env, &h.gtx, *p, nil, nil)
 	if changed {
 		p.Ratio = ratio
 	}
@@ -46,14 +47,14 @@ func TestSplitPaneDragFollowsThePointerAndClampsToMinimums(t *testing.T) {
 	}
 
 	// Prime the handle at x = 200 in a 400×200 box.
-	splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	splitFrame(t, h, s, &p)
 
 	// Press at the handle (x=200, y=100), then drag to x=260 (+60 px -> ratio 0.65).
 	h.router.Queue(pointer.Event{Kind: pointer.Press, Position: f32.Pt(200, 100), Buttons: pointer.ButtonPrimary})
-	splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	splitFrame(t, h, s, &p)
 
 	h.router.Queue(pointer.Event{Kind: pointer.Move, Position: f32.Pt(260, 100), Buttons: pointer.ButtonPrimary})
-	ratio, changed := splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	ratio, changed := splitFrame(t, h, s, &p)
 	if !changed || math.Abs(float64(ratio-0.65)) > 0.01 {
 		t.Fatalf("after drag to x=260: ratio=%v changed=%v, want ~0.65, true", ratio, changed)
 	}
@@ -63,20 +64,20 @@ func TestSplitPaneDragFollowsThePointerAndClampsToMinimums(t *testing.T) {
 
 	// Drag past MinSecond (400 - 100 = 300 -> max ratio 0.75).
 	h.router.Queue(pointer.Event{Kind: pointer.Move, Position: f32.Pt(380, 100), Buttons: pointer.ButtonPrimary})
-	ratio, _ = splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	ratio, _ = splitFrame(t, h, s, &p)
 	if math.Abs(float64(ratio-0.75)) > 0.01 {
 		t.Fatalf("drag past max clamped to %v, want 0.75", ratio)
 	}
 
 	// Drag past MinFirst (80 -> min ratio 0.20).
 	h.router.Queue(pointer.Event{Kind: pointer.Move, Position: f32.Pt(10, 100), Buttons: pointer.ButtonPrimary})
-	ratio, _ = splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	ratio, _ = splitFrame(t, h, s, &p)
 	if math.Abs(float64(ratio-0.20)) > 0.01 {
 		t.Fatalf("drag past min clamped to %v, want 0.20", ratio)
 	}
 
 	h.router.Queue(pointer.Event{Kind: pointer.Release, Position: f32.Pt(10, 100)})
-	splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	splitFrame(t, h, s, &p)
 	if s.Dragging() {
 		t.Fatal("expected Dragging() to be false after release")
 	}
@@ -98,42 +99,42 @@ func TestSplitPaneDoubleClickIsNotADrag(t *testing.T) {
 	}
 
 	// Prime at x = 280 in 400×200.
-	splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	splitFrame(t, h, s, &p)
 
 	// 1. Small jitter <= 4 dp is a click, not a drag; a second click resets.
 	h.router.Queue(pointer.Event{Kind: pointer.Press, Position: f32.Pt(280, 100), Buttons: pointer.ButtonPrimary})
-	splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	splitFrame(t, h, s, &p)
 	h.router.Queue(pointer.Event{Kind: pointer.Move, Position: f32.Pt(282, 100), Buttons: pointer.ButtonPrimary})
-	splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	splitFrame(t, h, s, &p)
 	if s.Dragging() {
 		t.Fatal("2 dp move should not start a drag")
 	}
 	h.router.Queue(pointer.Event{Kind: pointer.Release, Position: f32.Pt(282, 100)})
-	splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	splitFrame(t, h, s, &p)
 
 	// Advance 100 ms on fake clock and click again -> double-click resets to 0.4.
 	h.now = h.now.Add(100 * time.Millisecond)
 	h.click(280, 100)
-	ratio, changed := splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	ratio, changed := splitFrame(t, h, s, &p)
 	if !changed || math.Abs(float64(ratio-0.4)) > 0.01 {
 		t.Fatalf("double-click reset ratio=%v changed=%v, want 0.4, true", ratio, changed)
 	}
 	// Lay out one frame at the new 0.4 ratio so the router's handle hit area
 	// moves to x=160 before the drag starts.
-	splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	splitFrame(t, h, s, &p)
 
 	// 2. Drag > 4 dp and release, followed immediately by a single click, must
 	// NOT trigger double-click reset (drag release does not count as click 1).
 	h.router.Queue(pointer.Event{Kind: pointer.Press, Position: f32.Pt(160, 100), Buttons: pointer.ButtonPrimary})
-	splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	splitFrame(t, h, s, &p)
 	h.router.Queue(pointer.Event{Kind: pointer.Move, Position: f32.Pt(260, 100), Buttons: pointer.ButtonPrimary})
-	splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	splitFrame(t, h, s, &p)
 	h.router.Queue(pointer.Event{Kind: pointer.Release, Position: f32.Pt(260, 100)})
-	splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	splitFrame(t, h, s, &p)
 
 	h.now = h.now.Add(50 * time.Millisecond)
 	h.click(260, 100)
-	ratio, changed = splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	ratio, changed = splitFrame(t, h, s, &p)
 	if changed || math.Abs(float64(ratio-0.65)) > 0.01 {
 		t.Fatalf("single click after drag release must not reset: ratio=%v changed=%v", ratio, changed)
 	}
@@ -153,14 +154,14 @@ func TestSplitPaneHandleMovesWithArrowKeys(t *testing.T) {
 		MinSecond:   unit.Dp(60),
 	}
 
-	splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	splitFrame(t, h, s, &p)
 
 	// Tab turns on keyboard modality; the headless router does not synthesize
 	// FocusCmd from Tab, so issue FocusCmd as a real window would (env_test.go).
 	h.tap(key.NameTab, 0)
-	splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	splitFrame(t, h, s, &p)
 	h.gtx.Execute(key.FocusCmd{Tag: s.Tag()})
-	splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	splitFrame(t, h, s, &p)
 	if !h.gtx.Focused(s.Tag()) {
 		t.Fatal("expected SplitPane handle to receive focus on Tab")
 	}
@@ -170,28 +171,28 @@ func TestSplitPaneHandleMovesWithArrowKeys(t *testing.T) {
 
 	// Right arrow moves by 16 dp: 200 -> 216 (ratio 0.54).
 	h.tap(key.NameRightArrow, 0)
-	ratio, changed := splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	ratio, changed := splitFrame(t, h, s, &p)
 	if !changed || math.Abs(float64(ratio-0.54)) > 0.005 {
 		t.Fatalf("RightArrow: ratio=%v changed=%v, want 0.54", ratio, changed)
 	}
 
 	// Shift+Left arrow moves by 64 dp: 216 -> 152 (ratio 0.38).
 	h.tap(key.NameLeftArrow, key.ModShift)
-	ratio, changed = splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	ratio, changed = splitFrame(t, h, s, &p)
 	if !changed || math.Abs(float64(ratio-0.38)) > 0.005 {
 		t.Fatalf("Shift+LeftArrow: ratio=%v changed=%v, want 0.38", ratio, changed)
 	}
 
 	// Home jumps to MinFirst (60/400 = 0.15).
 	h.tap(key.NameHome, 0)
-	ratio, changed = splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	ratio, changed = splitFrame(t, h, s, &p)
 	if !changed || math.Abs(float64(ratio-0.15)) > 0.005 {
 		t.Fatalf("Home: ratio=%v changed=%v, want 0.15", ratio, changed)
 	}
 
 	// End jumps to 400 - MinSecond (340/400 = 0.85).
 	h.tap(key.NameEnd, 0)
-	ratio, changed = splitFrame(t, h, s, &p, 400, 200, nil, nil)
+	ratio, changed = splitFrame(t, h, s, &p)
 	if !changed || math.Abs(float64(ratio-0.85)) > 0.005 {
 		t.Fatalf("End: ratio=%v changed=%v, want 0.85", ratio, changed)
 	}
@@ -267,71 +268,64 @@ func TestSplitPaneSplitsInBothDirections(t *testing.T) {
 // TestTagAndProgressUseStatusTokens covers F10.12, §6.4, §6.5, UK-E04, and UK-E11:
 // Tag resolves status/env/hue tokens and requires text; Tag text achieves >=4.5:1
 // contrast on every status fill over every chrome background in light & dark
-// modes (rendered via glwin.Open); Progress uses status tokens, settles in
-// determinate mode, and stops indeterminate motion under ReducedMotion.
+// modes (rendered via glwin.Open); Progress uses status tokens and settles in
+// determinate mode.
 func TestTagAndProgressUseStatusTokens(t *testing.T) {
 	t.Parallel()
+	verifyTagStatusContrast(t)
+	verifyTagEnvAndProgressTokens(t)
+}
+
+func verifyTagStatusContrast(t *testing.T) {
+	t.Helper()
 	sh := newHarness(t).env.Sh
 	win, err := glwin.Open(120, 40)
 	if err != nil {
 		t.Fatalf("open headless window: %v", err)
 	}
-
 	statuses := []theme.StatusKind{theme.StatusInfo, theme.StatusSuccess, theme.StatusWarning, theme.StatusDanger}
-	modes := []struct {
-		name string
-		th   theme.Theme
-	}{
-		{"light", theme.Light(sh)},
-		{"dark", theme.Dark(sh)},
-	}
-
-	// UK-E04: verify rendered contrast of Tag text over every status fill on all 5 chrome backgrounds.
-	for _, m := range modes {
-		c := m.th.Chrome()
-		bgs := []struct {
-			name string
-			bg   color.NRGBA
-		}{
-			{"AppBg", c.AppBg},
-			{"CanvasBg", c.CanvasBg},
-			{"SurfaceBase", c.SurfaceBase},
-			{"SurfaceRaised", c.SurfaceRaised},
-			{"SurfaceTinted", c.SurfaceTinted},
-		}
+	themes := [2]theme.Theme{theme.Light(sh), theme.Dark(sh)}
+	for mi := range themes {
+		c := themes[mi].Chrome()
+		bgs := [5]color.NRGBA{c.AppBg, c.CanvasBg, c.SurfaceBase, c.SurfaceRaised, c.SurfaceTinted}
 		for _, sk := range statuses {
-			tone := m.th.StatusTone(sk)
-			for _, bg := range bgs {
-				h := newHarness(t)
-				h.env.Th = &m.th
-				h.frameSize(t, 120, 40)
-				paint.Fill(h.gtx.Ops, bg.bg)
-				paint.Fill(h.gtx.Ops, tone.Fill)
-				if err := win.Frame(&h.ops); err != nil {
-					t.Fatalf("render %s/%s: %v", m.name, bg.name, err)
-				}
-				img := image.NewRGBA(image.Rect(0, 0, 120, 40))
-				if err := win.Screenshot(img); err != nil {
-					t.Fatalf("screenshot: %v", err)
-				}
-				px := img.RGBAAt(60, 20)
-				actualBg := color.NRGBA{R: px.R, G: px.G, B: px.B, A: 0xff}
-				if ratio := wcagRatio(tone.Fg, actualBg); ratio < 4.5 {
-					t.Errorf("%s status %d on %s: contrast %.2f:1 < 4.5:1", m.name, sk, bg.name, ratio)
-				}
+			tone := themes[mi].StatusTone(sk)
+			for bi, bg := range bgs {
+				checkToneContrastOnBg(t, win, &themes[mi], mi, sk, bi, bg, tone)
 			}
 		}
 	}
+}
 
-	// Tag requires non-empty text (never color alone).
+func checkToneContrastOnBg(t *testing.T, win *headless.Window, th *theme.Theme, mi int, sk theme.StatusKind, bi int, bg color.NRGBA, tone theme.Tone) {
+	t.Helper()
+	h := newHarness(t)
+	h.env.Th = th
+	h.frameSize(t, 120, 40)
+	paint.Fill(h.gtx.Ops, bg)
+	paint.Fill(h.gtx.Ops, tone.Fill)
+	if err := win.Frame(&h.ops); err != nil {
+		t.Fatalf("render mode=%d bg=%d: %v", mi, bi, err)
+	}
+	img := image.NewRGBA(image.Rect(0, 0, 120, 40))
+	if err := win.Screenshot(img); err != nil {
+		t.Fatalf("screenshot: %v", err)
+	}
+	px := img.RGBAAt(60, 20)
+	actualBg := color.NRGBA{R: px.R, G: px.G, B: px.B, A: 0xff}
+	if ratio := wcagRatio(tone.Fg, actualBg); ratio < 4.5 {
+		t.Errorf("mode=%d status=%d bg=%d: contrast %.2f:1 < 4.5:1", mi, sk, bi, ratio)
+	}
+}
+
+func verifyTagEnvAndProgressTokens(t *testing.T) {
+	t.Helper()
 	h := newHarness(t)
 	tag := NewTagState()
 	h.frameSize(t, 200, 60)
 	if _, err := tag.Layout(h.env, &h.gtx, TagProps{Variant: TagStatus, Status: theme.StatusDanger}); err == nil {
 		t.Fatal("expected error when Tag has empty text")
 	}
-
-	// Env tags map prod->danger, dev->neutral, stg/unknown->warning.
 	if ResolveTagTone(h.env.Th, TagProps{Variant: TagEnv, Env: "prod"}) != h.env.Th.StatusTone(theme.StatusDanger) {
 		t.Error("prod env tag should use danger tone")
 	}
@@ -342,7 +336,6 @@ func TestTagAndProgressUseStatusTokens(t *testing.T) {
 		t.Error("unknown env tag should use warning tone")
 	}
 
-	// Progress uses status tokens and stops indeterminate motion under ReducedMotion (UK-E11).
 	st := h.env.Th.Status()
 	if ResolveProgressColor(h.env.Th, ProgressInfo) != st.Info ||
 		ResolveProgressColor(h.env.Th, ProgressSuccess) != st.Success ||
@@ -351,32 +344,23 @@ func TestTagAndProgressUseStatusTokens(t *testing.T) {
 		t.Error("ProgressTone did not resolve to Theme.Status() tokens")
 	}
 
-	// Determinate Progress settles and stops requesting frames (UK-E11).
 	det := NewProgressState()
-	h.frameSize(t, 200, 20)
-	det.Layout(h.env, &h.gtx, ProgressProps{Value: 0.2, Tone: ProgressSuccess})
-	h.env.FrameEnd(&h.gtx)
-	h.end()
-
-	h.frameSize(t, 200, 20)
-	det.Layout(h.env, &h.gtx, ProgressProps{Value: 0.9, Tone: ProgressSuccess})
-	h.env.FrameEnd(&h.gtx)
-	h.end()
-
-	settled := false
-	for range 120 {
+	stepProgress := func(val float32) bool {
 		h.frameSize(t, 200, 20)
-		det.Layout(h.env, &h.gtx, ProgressProps{Value: 0.9, Tone: ProgressSuccess})
+		det.Layout(h.env, &h.gtx, ProgressProps{Value: val, Tone: ProgressSuccess})
 		h.env.FrameEnd(&h.gtx)
 		h.end()
-		if _, moving := h.env.Driver.Next(); !moving {
-			settled = true
-			break
+		_, moving := h.env.Driver.Next()
+		return moving
+	}
+	stepProgress(0.2)
+	stepProgress(0.9)
+	for range 120 {
+		if !stepProgress(0.9) {
+			return
 		}
 	}
-	if !settled {
-		t.Fatal("determinate Progress did not settle and stop requesting frames")
-	}
+	t.Fatal("determinate Progress did not settle and stop requesting frames")
 }
 
 // TestTagAppearsScaledAndCollapsesOnRemove covers UK-E11 and §6.4:
@@ -395,58 +379,50 @@ func TestTagAppearsScaledAndCollapsesOnRemove(t *testing.T) {
 		t.Fatalf("measure tag: %v", err)
 	}
 
-	// Enter: starts at scale 0.9 and settles at rest.
 	tag.Enter()
 	_, scaleStart, wStart := tag.presenceVisuals(fullDims.Size.X)
 	if math.Abs(float64(scaleStart-0.9)) > 0.01 || wStart != fullDims.Size.X {
 		t.Fatalf("at Enter start: scale=%v width=%d, want 0.9 and %d", scaleStart, wStart, fullDims.Size.X)
 	}
-
-	entered := false
-	for range 120 {
-		h.frameSize(t, 200, 40)
-		if _, err := tag.Layout(h.env, &h.gtx, props); err != nil {
-			t.Fatalf("tag layout: %v", err)
-		}
-		h.env.FrameEnd(&h.gtx)
-		h.end()
-		if _, moving := h.env.Driver.Next(); !moving {
-			entered = true
-			break
-		}
-	}
-	if !entered || !tag.Visible() {
-		t.Fatalf("tag did not settle after Enter: entered=%v visible=%v", entered, tag.Visible())
+	if _, entered := stepTagUntilSettled(t, h, tag, props); !entered || !tag.Visible() {
+		t.Fatalf("tag did not settle after Enter: visible=%v", tag.Visible())
 	}
 
-	// Remove: fades first while keeping width, then collapses width to 0.
 	tag.Remove()
-	sawShrinkingWidth := false
-	removed := false
-	for range 120 {
-		h.frameSize(t, 200, 40)
-		dims, err := tag.Layout(h.env, &h.gtx, props)
-		if err != nil {
-			t.Fatalf("tag layout on remove: %v", err)
-		}
-		if dims.Size.X > 0 && dims.Size.X < fullDims.Size.X {
-			sawShrinkingWidth = true
-		}
-		h.env.FrameEnd(&h.gtx)
-		h.end()
-		if _, moving := h.env.Driver.Next(); !moving {
-			removed = true
-			break
-		}
-	}
-	if !sawShrinkingWidth {
-		t.Fatal("expected Tag width to collapse during Exit")
+	minW, removed := stepTagUntilSettled(t, h, tag, props)
+	if minW >= fullDims.Size.X {
+		t.Fatalf("expected Tag width to collapse during Exit (minW=%d full=%d)", minW, fullDims.Size.X)
 	}
 	if !removed || tag.Visible() {
 		t.Fatalf("expected Tag to finish removing and stop requesting frames: removed=%v visible=%v", removed, tag.Visible())
 	}
 
-	// ReducedMotion: Enter and Remove snap immediately without requesting frames.
+	verifyTagReducedMotion(t, h, tag, props, fullDims.Size)
+}
+
+func stepTagUntilSettled(t *testing.T, h *harness, tag *TagState, props TagProps) (minObservedW int, settled bool) {
+	t.Helper()
+	minObservedW = math.MaxInt
+	for range 120 {
+		h.frameSize(t, 200, 40)
+		dims, err := tag.Layout(h.env, &h.gtx, props)
+		if err != nil {
+			t.Fatalf("tag layout: %v", err)
+		}
+		if dims.Size.X > 0 && dims.Size.X < minObservedW {
+			minObservedW = dims.Size.X
+		}
+		h.env.FrameEnd(&h.gtx)
+		h.end()
+		if _, moving := h.env.Driver.Next(); !moving {
+			return minObservedW, true
+		}
+	}
+	return minObservedW, false
+}
+
+func verifyTagReducedMotion(t *testing.T, h *harness, tag *TagState, props TagProps, fullSize image.Point) {
+	t.Helper()
 	h.env.ReducedMotion = true
 	tag.Enter()
 	h.frameSize(t, 200, 40)
@@ -456,8 +432,8 @@ func TestTagAppearsScaledAndCollapsesOnRemove(t *testing.T) {
 	}
 	h.env.FrameEnd(&h.gtx)
 	h.end()
-	if dims.Size != fullDims.Size {
-		t.Fatalf("reduced-motion enter size=%v, want %v", dims.Size, fullDims.Size)
+	if dims.Size != fullSize {
+		t.Fatalf("reduced-motion enter size=%v, want %v", dims.Size, fullSize)
 	}
 	if _, moving := h.env.Driver.Next(); moving {
 		t.Fatal("reduced-motion enter must not request frames")

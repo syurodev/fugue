@@ -61,11 +61,9 @@ type tagSpecimen struct {
 	props kit.TagProps
 }
 
+const tagGroupNeutral = "neutral"
+
 func tagSpecimens() []tagSpecimen {
-	out := []tagSpecimen{
-		{"neutral", kit.TagProps{Variant: kit.TagNeutral, Text: "Neutral"}},
-		{"neutral", kit.TagProps{Variant: kit.TagNeutral, Icon: kit.IconCheck, Text: "With icon"}},
-	}
 	statuses := []struct {
 		s    theme.StatusKind
 		name string
@@ -75,14 +73,20 @@ func tagSpecimens() []tagSpecimen {
 		{theme.StatusWarning, "Warning"},
 		{theme.StatusDanger, "Danger"},
 	}
+	hueNames := [numTagHues]string{"Red", "Orange", "Yellow", "Green", "Teal", "Blue", "Violet", "Pink"}
+	envs := []string{"prod", "stg", "dev", "preview"}
+	out := make([]tagSpecimen, 0, 2+len(statuses)+len(hueNames)+len(envs))
+	out = append(out,
+		tagSpecimen{tagGroupNeutral, kit.TagProps{Variant: kit.TagNeutral, Text: "Neutral"}},
+		tagSpecimen{tagGroupNeutral, kit.TagProps{Variant: kit.TagNeutral, Icon: kit.IconCheck, Text: "With icon"}},
+	)
 	for _, st := range statuses {
 		out = append(out, tagSpecimen{"status", kit.TagProps{Variant: kit.TagStatus, Status: st.s, Text: st.name}})
 	}
-	hueNames := [numTagHues]string{"Red", "Orange", "Yellow", "Green", "Teal", "Blue", "Violet", "Pink"}
 	for i, name := range hueNames {
 		out = append(out, tagSpecimen{"hue", kit.TagProps{Variant: kit.TagHue, Hue: theme.Hue(i), Text: name}})
 	}
-	for _, env := range []string{"prod", "stg", "dev", "preview"} {
+	for _, env := range envs {
 		out = append(out, tagSpecimen{"env", kit.TagProps{Variant: kit.TagEnv, Env: env, Text: env}})
 	}
 	return out
@@ -99,7 +103,7 @@ func (p *pages) layoutTags(gtx *layout.Context) {
 		key   string
 		title string
 	}{
-		{"neutral", "neutral (FillSoft)"},
+		{tagGroupNeutral, "neutral (FillSoft)"},
 		{"status", "status tokens"},
 		{"hue", "palette hues"},
 		{"env", "env tags (prod=danger, dev=neutral, stg/unknown=warning)"},
@@ -127,29 +131,38 @@ func (p *pages) tagGroupBlock(gtx *layout.Context, gi int, title, groupKey strin
 		if sp.group != groupKey {
 			continue
 		}
-		dims, err := p.f1012.tags[i].Measure(p.env, gtx, sp.props)
-		if err != nil && p.err == nil {
-			p.err = err
-		}
-		if x > 0 && x+dims.Size.X > wrap {
+		size := p.measureTagSpecimen(gtx, i, sp.props)
+		if x > 0 && x+size.X > wrap {
 			x = 0
 			y += rowH + gap
 			rowH = 0
 		}
 		if !dry {
-			at(gtx, image.Pt(x, y), func(cg *layout.Context) {
-				if _, err := p.f1012.tags[i].Layout(p.env, cg, sp.props); err != nil && p.err == nil {
-					p.err = err
-				}
-			})
-			p.runs = append(p.runs, image.Rectangle{Min: image.Pt(x, y), Max: image.Pt(x+dims.Size.X, y+dims.Size.Y)}.Add(p.base))
-			p.cells[cell{compTag, gi, i, sp.props.Text}] = true
+			p.drawTagSpecimen(gtx, gi, i, image.Pt(x, y), size, sp.props)
 		}
-		x += dims.Size.X + gap
-		rowH = max(rowH, dims.Size.Y)
+		x += size.X + gap
+		rowH = max(rowH, size.Y)
 		w = max(w, x-gap)
 	}
 	return image.Pt(w, y+rowH)
+}
+
+func (p *pages) measureTagSpecimen(gtx *layout.Context, i int, props kit.TagProps) image.Point {
+	dims, err := p.f1012.tags[i].Measure(p.env, gtx, props)
+	if err != nil && p.err == nil {
+		p.err = err
+	}
+	return dims.Size
+}
+
+func (p *pages) drawTagSpecimen(gtx *layout.Context, gi, i int, pos, size image.Point, props kit.TagProps) {
+	at(gtx, pos, func(cg *layout.Context) {
+		if _, err := p.f1012.tags[i].Layout(p.env, cg, props); err != nil && p.err == nil {
+			p.err = err
+		}
+	})
+	p.runs = append(p.runs, image.Rectangle{Min: pos, Max: pos.Add(size)}.Add(p.base))
+	p.cells[cell{compTag, gi, i, props.Text}] = true
 }
 
 func progressSpecs() []struct {
@@ -229,7 +242,29 @@ func (p *pages) layoutSplitPane(gtx *layout.Context) {
 
 	boxW := min(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(520)))
 	boxH := gtx.Dp(unit.Dp(200))
+	p.layoutLiveNestedSplit(gtx, y, boxW, boxH)
 
+	y += boxH + gtx.Dp(theme.SpaceXL)
+	orients := []struct {
+		name   string
+		orient kit.Orientation
+	}{
+		{"Horizontal", kit.Horizontal},
+		{"Vertical", kit.Vertical},
+	}
+	blocks := make([]block, 0, len(orients)*numSplitStates)
+	for oi, o := range orients {
+		for si, st := range splitStateNames() {
+			blocks = append(blocks, func(g *layout.Context, dry bool) image.Point {
+				return p.splitStateSpecimen(g, oi, o.name, o.orient, si, st, dry)
+			})
+		}
+	}
+	p.flow(gtx, y, blocks)
+}
+
+func (p *pages) layoutLiveNestedSplit(gtx *layout.Context, y, boxW, boxH int) {
+	c := p.env.Th.Chrome()
 	baseTop := p.origin.Add(image.Pt(0, y))
 	at(gtx, image.Pt(0, y), func(g *layout.Context) {
 		cg := *g
@@ -273,24 +308,6 @@ func (p *pages) layoutSplitPane(gtx *layout.Context) {
 			p.f1012.outerRatio = r
 		}
 	})
-
-	y += boxH + gtx.Dp(theme.SpaceXL)
-	orients := []struct {
-		name   string
-		orient kit.Orientation
-	}{
-		{"Horizontal", kit.Horizontal},
-		{"Vertical", kit.Vertical},
-	}
-	blocks := make([]block, 0, len(orients)*numSplitStates)
-	for oi, o := range orients {
-		for si, st := range splitStateNames() {
-			blocks = append(blocks, func(g *layout.Context, dry bool) image.Point {
-				return p.splitStateSpecimen(g, oi, o.name, o.orient, si, st, dry)
-			})
-		}
-	}
-	p.flow(gtx, y, blocks)
 }
 
 func (p *pages) splitStateSpecimen(gtx *layout.Context, oi int, orientName string, orient kit.Orientation, si int, stateName string, dry bool) image.Point {

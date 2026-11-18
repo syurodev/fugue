@@ -29,6 +29,7 @@ import (
 // TagVariant selects the color family of a Tag (§6.4).
 type TagVariant uint8
 
+// Tag color families (§6.4).
 const (
 	TagNeutral TagVariant = iota
 	TagStatus
@@ -92,6 +93,8 @@ func tagLabel(p TagProps) string {
 // ResolveTagTone returns the target theme.Tone for p on th (§6.4).
 func ResolveTagTone(th *theme.Theme, p TagProps) theme.Tone {
 	switch p.Variant {
+	case TagNeutral:
+		return th.NeutralTone()
 	case TagStatus:
 		return th.StatusTone(p.Status)
 	case TagHue:
