@@ -51,6 +51,10 @@ func roleAvailable(svc *teamTaskService, allowed ...vendorstore.TeamRole) func(c
 	}
 }
 
+// readTool builds a Fugue-internal team coordination tool. Following
+// fugue_team_propose and fugue_team_amend, these tools use RiskRead and
+// ConfirmNever because they mutate only Fugue's team state machine (not host
+// files or shell processes) and enforce role/subtree authorization in Go.
 func readTool(name, desc, schema string, avail func(context.Context, vendorstore.Session) bool, run func(context.Context, string, json.RawMessage) (string, error)) *FugueTool {
 	return &FugueTool{
 		Name: name, Description: desc, InputSchema: json.RawMessage(schema),

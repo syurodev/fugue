@@ -4,14 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/syurodev/fugue/internal/gitops"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/teams"
-	"github.com/syurodev/fugue/internal/transcript"
-	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
@@ -111,63 +108,87 @@ func hasNonTerminalChild(parentID string, tasks []vendorstore.TaskRecord) bool {
 
 func (s *teamTaskService) recordTaskFailedReport(ctx context.Context, c *callerTeamContext, summary string, truncated bool, output json.RawMessage) (string, error) {
 	payload, err := json.Marshal(taskReportPayload{
-		Status: "failed", Summary: summary, SummaryTruncated: truncated, Output: output, SchemaValid: true,
+		Status: taskStatusFailed, Summary: summary, SummaryTruncated: truncated, Output: output, SchemaValid: true,
 	})
 	if err != nil {
 		return "", errcode.Wrap(errcode.Internal, "encode failed report", err)
 	}
-	evID, err := s.ids.NewID()
-	if err != nil {
-		return "", errcode.Wrap(errcode.Internal, "generate report event ID", err)
-	}
-	if _, err := s.store.AppendTeamEvent(ctx, c.team.TeamID, c.team.LastSeq, &vendorstore.AppendTeamEventInput{
-		EventID: evID, TaskID: c.caller.TaskID, EventType: vendorstore.EventTaskEnded,
-		Outcome: string(vendorstore.TaskStateFailed), FailureCode: "task_failed", ProtectedPayload: payload,
-		Mailbox: digestSummaryRows(c.caller.TaskID, c.caller.ParentTaskID, string(vendorstore.TaskStateFailed), "", summary, false),
-	}); err != nil {
-		return "", boundaryError("record failed task report", err)
-	}
-	if s.wake != nil {
-		s.wake.Notify()
-	}
-	return fmt.Sprintf("task %s recorded as failed", c.caller.TaskID), nil
-}
-
-func (s *teamTaskService) recordTaskSucceededReport(ctx context.Context, c *callerTeamContext, summary string, truncated bool, output json.RawMessage) (string, error) {
-	var commitSHA string
-	if c.caller.Deliverable == vendorstore.DeliverableDiff || c.caller.Deliverable == vendorstore.DeliverableBoth {
-		sha, commitErr := s.commitTaskWorktree(ctx, c)
-		if commitErr != nil {
-			return "", commitErr
+	taskID := c.caller.TaskID
+	if err := s.appendTeamWithRetry(ctx, c.sessionID, func(_ context.Context, cur *callerTeamContext) (*vendorstore.AppendTeamEventInput, error) {
+		if cur.caller == nil || cur.caller.State != vendorstore.TaskStateRunning {
+			return nil, errcode.New(errcode.FailedPrecondition, "task is not running")
 		}
-		commitSHA = sha
-	}
-	schemaValid, schemaErr := s.validateTaskOutput(ctx, c.team.TeamID, c.caller.TaskID, output)
-	payload, err := json.Marshal(taskReportPayload{
-		Status: "succeeded", Summary: summary, SummaryTruncated: truncated, Output: output,
-		SchemaValid: schemaValid, SchemaError: schemaErr, CommitSHA: commitSHA,
-	})
-	if err != nil {
-		return "", errcode.Wrap(errcode.Internal, "encode task report", err)
-	}
-	evID, err := s.ids.NewID()
-	if err != nil {
-		return "", errcode.Wrap(errcode.Internal, "generate report event ID", err)
-	}
-	seq, err := s.store.AppendTeamEvent(ctx, c.team.TeamID, c.team.LastSeq, &vendorstore.AppendTeamEventInput{
-		EventID: evID, TaskID: c.caller.TaskID, EventType: vendorstore.EventTaskReported, ProtectedPayload: payload,
-		Mailbox: digestSummaryRows(c.caller.TaskID, c.caller.ParentTaskID, string(vendorstore.TaskStateChecking), "", summary, false),
-	})
-	if err != nil {
-		return "", boundaryError("record task report", err)
-	}
-	if err := s.applyResultGate(ctx, c.team.TeamID, c.caller.TaskID, c.caller.ParentTaskID, seq); err != nil {
+		if cur.role == vendorstore.RoleTeamManager && hasNonTerminalChild(cur.caller.TaskID, cur.tasks) {
+			return nil, errcode.New(errcode.FailedPrecondition, "team manager children are not terminal")
+		}
+		evID, idErr := s.ids.NewID()
+		if idErr != nil {
+			return nil, errcode.Wrap(errcode.Internal, "generate report event ID", idErr)
+		}
+		return &vendorstore.AppendTeamEventInput{
+			EventID: evID, TaskID: cur.caller.TaskID, EventType: vendorstore.EventTaskEnded,
+			Outcome: string(vendorstore.TaskStateFailed), FailureCode: "task_failed", ProtectedPayload: payload,
+			Mailbox: digestSummaryRows(cur.caller.TaskID, cur.caller.ParentTaskID, string(vendorstore.TaskStateFailed), "", summary, false),
+		}, nil
+	}); err != nil {
 		return "", err
 	}
 	if s.wake != nil {
 		s.wake.Notify()
 	}
-	return fmt.Sprintf("task %s reported (schema_valid=%t)", c.caller.TaskID, schemaValid), nil
+	return fmt.Sprintf("task %s recorded as failed", taskID), nil
+}
+
+func (s *teamTaskService) recordTaskSucceededReport(ctx context.Context, c *callerTeamContext, summary string, truncated bool, output json.RawMessage) (string, error) {
+	commitSHA, err := s.maybeCommitWorktree(ctx, c)
+	if err != nil {
+		return "", err
+	}
+	schemaValid, schemaErr := s.validateTaskOutput(ctx, c.team.TeamID, c.caller.TaskID, output)
+	payload, err := json.Marshal(taskReportPayload{
+		Status: taskStatusSucceeded, Summary: summary, SummaryTruncated: truncated, Output: output,
+		SchemaValid: schemaValid, SchemaError: schemaErr, CommitSHA: commitSHA,
+	})
+	if err != nil {
+		return "", errcode.Wrap(errcode.Internal, "encode task report", err)
+	}
+	taskID, teamID, parentID := c.caller.TaskID, c.team.TeamID, c.caller.ParentTaskID
+	if err := s.appendTeamWithRetry(ctx, c.sessionID, func(_ context.Context, cur *callerTeamContext) (*vendorstore.AppendTeamEventInput, error) {
+		return s.buildReportEvent(cur, summary, payload)
+	}); err != nil {
+		return "", err
+	}
+	if err := s.applyResultGate(ctx, teamID, taskID, parentID); err != nil {
+		return "", err
+	}
+	if s.wake != nil {
+		s.wake.Notify()
+	}
+	return fmt.Sprintf("task %s reported (schema_valid=%t)", taskID, schemaValid), nil
+}
+
+func (s *teamTaskService) maybeCommitWorktree(ctx context.Context, c *callerTeamContext) (string, error) {
+	if c.caller.Deliverable != vendorstore.DeliverableDiff && c.caller.Deliverable != vendorstore.DeliverableBoth {
+		return "", nil
+	}
+	return s.commitTaskWorktree(ctx, c)
+}
+
+func (s *teamTaskService) buildReportEvent(cur *callerTeamContext, summary string, payload []byte) (*vendorstore.AppendTeamEventInput, error) {
+	if cur.caller == nil || cur.caller.State != vendorstore.TaskStateRunning {
+		return nil, errcode.New(errcode.FailedPrecondition, "task is not running")
+	}
+	if cur.role == vendorstore.RoleTeamManager && hasNonTerminalChild(cur.caller.TaskID, cur.tasks) {
+		return nil, errcode.New(errcode.FailedPrecondition, "team manager children are not terminal")
+	}
+	evID, idErr := s.ids.NewID()
+	if idErr != nil {
+		return nil, errcode.Wrap(errcode.Internal, "generate report event ID", idErr)
+	}
+	return &vendorstore.AppendTeamEventInput{
+		EventID: evID, TaskID: cur.caller.TaskID, EventType: vendorstore.EventTaskReported, ProtectedPayload: payload,
+		Mailbox: digestSummaryRows(cur.caller.TaskID, cur.caller.ParentTaskID, string(vendorstore.TaskStateChecking), "", summary, false),
+	}, nil
 }
 
 func (s *teamTaskService) commitTaskWorktree(ctx context.Context, c *callerTeamContext) (string, error) {
@@ -190,7 +211,14 @@ func (s *teamTaskService) commitTaskWorktree(ctx context.Context, c *callerTeamC
 	if err != nil {
 		return "", boundaryError("commit task worktree", err)
 	}
-	return res.SHA, nil
+	if res.SHA != "" {
+		return res.SHA, nil
+	}
+	sha, err := s.git.WorktreeHead(ctx, wt)
+	if err != nil {
+		return "", boundaryError("read worktree head", err)
+	}
+	return sha, nil
 }
 
 func (s *teamTaskService) validateTaskOutput(ctx context.Context, teamID, taskID string, output json.RawMessage) (bool, string) {
@@ -205,7 +233,7 @@ func (s *teamTaskService) validateTaskOutput(ctx context.Context, teamID, taskID
 	return teams.ValidateOutputAgainstSchema(spec.OutputSchema, output)
 }
 
-func (s *teamTaskService) applyResultGate(ctx context.Context, teamID, taskID, parentTaskID string, seq int64) error {
+func (s *teamTaskService) applyResultGate(ctx context.Context, teamID, taskID, parentTaskID string) error {
 	verdict, err := s.resultGate.Evaluate(ctx, teamID, taskID)
 	if err != nil {
 		return boundaryError("evaluate result gate", err)
@@ -213,33 +241,32 @@ func (s *teamTaskService) applyResultGate(ctx context.Context, teamID, taskID, p
 	if !verdict.Ready {
 		return nil
 	}
-	evID, idErr := s.ids.NewID()
-	if idErr != nil {
-		return errcode.Wrap(errcode.Internal, "generate check event ID", idErr)
-	}
-	ev := &vendorstore.AppendTeamEventInput{
-		EventID: evID, TaskID: taskID, EventType: vendorstore.EventTaskCheckCompleted, Outcome: "passed",
-	}
-	if !verdict.Passed {
-		ev.Outcome = string(vendorstore.TaskStateFailed)
-		ev.FailureCode = verdict.FailureCode
-		if ev.FailureCode == "" {
-			ev.FailureCode = "checks_failed"
+	return s.appendTaskEventWithRetry(ctx, teamID, func(_ *vendorstore.TeamRecord, tasks []vendorstore.TaskRecord) (*vendorstore.AppendTeamEventInput, error) {
+		cur, ok := findTask(tasks, taskID)
+		if !ok || cur.State != vendorstore.TaskStateChecking {
+			return nil, errcode.New(errcode.FailedPrecondition, "task is not in checking")
 		}
-		ev.Mailbox = digestSummaryRows(taskID, parentTaskID, string(vendorstore.TaskStateFailed), ev.FailureCode, "", false)
-	}
-	if _, err := s.store.AppendTeamEvent(ctx, teamID, seq, ev); err != nil {
-		return boundaryError("record check result", err)
-	}
-	return nil
+		evID, idErr := s.ids.NewID()
+		if idErr != nil {
+			return nil, errcode.Wrap(errcode.Internal, "generate check event ID", idErr)
+		}
+		ev := &vendorstore.AppendTeamEventInput{
+			EventID: evID, TaskID: taskID, EventType: vendorstore.EventTaskCheckCompleted, Outcome: "passed",
+		}
+		if !verdict.Passed {
+			ev.Outcome = string(vendorstore.TaskStateFailed)
+			ev.FailureCode = verdict.FailureCode
+			if ev.FailureCode == "" {
+				ev.FailureCode = "checks_failed"
+			}
+			ev.Mailbox = digestSummaryRows(taskID, parentTaskID, string(vendorstore.TaskStateFailed), ev.FailureCode, "", false)
+		}
+		return ev, nil
+	})
 }
 
 // Ask transitions a running task to asking and enqueues a question digest (Q-129).
 func (s *teamTaskService) Ask(ctx context.Context, sessionID, question, to string) (string, error) {
-	c, err := s.resolveReporter(ctx, sessionID, "fugue_task_ask")
-	if err != nil {
-		return "", err
-	}
 	q, target, err := validateAskArgs(question, to)
 	if err != nil {
 		return "", err
@@ -248,24 +275,36 @@ func (s *teamTaskService) Ask(ctx context.Context, sessionID, question, to strin
 	if err != nil {
 		return "", errcode.Wrap(errcode.Internal, "encode question payload", err)
 	}
-	evID, err := s.ids.NewID()
-	if err != nil {
-		return "", errcode.Wrap(errcode.Internal, "generate ask event ID", err)
-	}
-	var mail []vendorstore.MailboxEnqueueInput
-	if target == askTargetParent {
-		mail = digestSummaryRows(c.caller.TaskID, c.caller.ParentTaskID, string(vendorstore.TaskStateAsking), "", q, true)
-	}
-	if _, err := s.store.AppendTeamEvent(ctx, c.team.TeamID, c.team.LastSeq, &vendorstore.AppendTeamEventInput{
-		EventID: evID, TaskID: c.caller.TaskID, EventType: vendorstore.EventTaskQuestionAsked,
-		ProtectedPayload: payload, Mailbox: mail,
+	var taskID string
+	var hasMail bool
+	if err := s.appendTeamWithRetry(ctx, sessionID, func(_ context.Context, cur *callerTeamContext) (*vendorstore.AppendTeamEventInput, error) {
+		if cur.role != vendorstore.RoleTeamManager && cur.role != vendorstore.RoleMember {
+			return nil, errcode.New(errcode.PermissionDenied, "only a team manager or member may call fugue_task_ask")
+		}
+		if cur.caller == nil || cur.caller.State != vendorstore.TaskStateRunning {
+			return nil, errcode.New(errcode.FailedPrecondition, "task is not running")
+		}
+		taskID = cur.caller.TaskID
+		evID, idErr := s.ids.NewID()
+		if idErr != nil {
+			return nil, errcode.Wrap(errcode.Internal, "generate ask event ID", idErr)
+		}
+		var mail []vendorstore.MailboxEnqueueInput
+		if target == askTargetParent {
+			mail = digestSummaryRows(cur.caller.TaskID, cur.caller.ParentTaskID, string(vendorstore.TaskStateAsking), "", q, true)
+		}
+		hasMail = len(mail) > 0
+		return &vendorstore.AppendTeamEventInput{
+			EventID: evID, TaskID: cur.caller.TaskID, EventType: vendorstore.EventTaskQuestionAsked,
+			ProtectedPayload: payload, Mailbox: mail,
+		}, nil
 	}); err != nil {
-		return "", boundaryError("record task question", err)
+		return "", err
 	}
-	if s.wake != nil && len(mail) > 0 {
+	if s.wake != nil && hasMail {
 		s.wake.Notify()
 	}
-	return fmt.Sprintf("task %s is waiting for an answer from %s", c.caller.TaskID, target), nil
+	return fmt.Sprintf("task %s is waiting for an answer from %s", taskID, target), nil
 }
 
 func validateAskArgs(question, to string) (string, string, error) {
@@ -367,86 +406,16 @@ func (s *teamTaskService) readTaskReportPart(ctx context.Context, teamID, taskID
 	case "output":
 		text = string(rep.Output)
 	}
-	if offset < len(text) {
-		text = text[offset:min(offset+limit, len(text))]
-	} else {
-		text = ""
-	}
+	text = sliceUTF8(text, offset, limit)
 	nonce, err := s.ids.NewID()
 	if err != nil {
 		return "", errcode.Wrap(errcode.Internal, "generate report nonce", err)
 	}
 	header := fmt.Sprintf("part=%s schema_valid=%t", part, rep.SchemaValid)
 	if rep.SchemaError != "" {
-		header += " schema_error=" + rep.SchemaError
+		header += " schema_error=" + teams.EscapeDigestText(rep.SchemaError)
 	}
 	return teams.BuildDigest(header, []teams.DigestEntry{{TaskID: taskID, State: rep.Status, Summary: text}}, nonce, maxResultLimit), nil
-}
-
-// OnTurnCompleted enforces the Q-131 no-report rule when a task session
-// completes a turn while still in TaskStateRunning.
-func (s *teamTaskService) OnTurnCompleted(ctx context.Context, sessionID string) {
-	task, found, err := s.store.TaskForSession(ctx, sessionID)
-	if err != nil || !found || task.State != vendorstore.TaskStateRunning ||
-		task.HierarchyRole == vendorstore.RoleLead || task.HierarchyRole == vendorstore.RoleSolo {
-		return
-	}
-	firstMiss, err := s.store.MarkTaskNoReportNudged(ctx, task.TeamID, task.TaskID)
-	if err != nil {
-		return
-	}
-	if firstMiss {
-		if sendErr := s.sessions.Send(ctx, sessionID, vendor.Input{
-			Text: "Your turn ended without calling fugue_task_done. Call fugue_task_done now with your summary, status, and any output.",
-		}); sendErr != nil {
-			slog.WarnContext(ctx, "sending no-report nudge failed", "session_id", sessionID, "error_code", string(errcode.CodeOf(sendErr)))
-		}
-		return
-	}
-	s.failTaskNoReport(ctx, &task, sessionID)
-}
-
-func (s *teamTaskService) failTaskNoReport(ctx context.Context, task *vendorstore.TaskRecord, sessionID string) {
-	rec, _, err := s.store.TeamSnapshot(ctx, task.TeamID)
-	if err != nil || rec.State != vendorstore.TeamStateActive {
-		return
-	}
-	summary, _ := truncateUTF8(s.lastAssistantText(ctx, sessionID), teams.MaxReportSummaryBytes)
-	evID, err := s.ids.NewID()
-	if err != nil {
-		return
-	}
-	if _, err := s.store.AppendTeamEvent(ctx, task.TeamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
-		EventID: evID, TaskID: task.TaskID, EventType: vendorstore.EventTaskEnded,
-		Outcome: string(vendorstore.TaskStateFailed), FailureCode: "no_report",
-		Mailbox: digestSummaryRows(task.TaskID, task.ParentTaskID, string(vendorstore.TaskStateFailed), "no_report", summary, false),
-	}); err == nil && s.wake != nil {
-		s.wake.Notify()
-	}
-}
-
-func (s *teamTaskService) lastAssistantText(ctx context.Context, sessionID string) string {
-	items, err := s.store.Transcript(ctx, sessionID, 0, 100)
-	if err != nil {
-		return ""
-	}
-	for i := len(items) - 1; i >= 0; i-- {
-		if items[i].Kind != string(transcript.AssistantMessage) {
-			continue
-		}
-		_, content, readErr := s.store.ReadItem(ctx, sessionID, items[i].ID)
-		if readErr != nil || len(content) == 0 {
-			continue
-		}
-		var msg struct {
-			Text string `json:"Text"`
-		}
-		if json.Unmarshal(content, &msg) == nil && msg.Text != "" {
-			return msg.Text
-		}
-		return string(content)
-	}
-	return ""
 }
 
 func digestSummaryRows(taskID, recipientTaskID, state, failureCode, summary string, question bool) []vendorstore.MailboxEnqueueInput {

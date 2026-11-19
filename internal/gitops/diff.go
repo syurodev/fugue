@@ -42,7 +42,7 @@ func (m *Manager) DiffAgainstParent(ctx context.Context, dataDir, repoID, taskID
 	if limit > maxDiffPageBytes {
 		limit = maxDiffPageBytes
 	}
-	raw, err := m.run(ctx, worktreeDir, "diff", "--no-ext-diff", "--no-color", parentRef+"...HEAD")
+	raw, err := m.run(ctx, worktreeDir, "diff", "--no-ext-diff", "--no-textconv", "--no-color", parentRef+"...HEAD")
 	if err != nil {
 		return DiffResult{}, err
 	}

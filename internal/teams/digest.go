@@ -55,7 +55,7 @@ func BuildDigest(header string, entries []DigestEntry, nonce string, limit int) 
 	safeNonce := EscapeDigestText(nonce)
 	for _, e := range orderQuestionsFirst(entries) {
 		safeID := EscapeDigestText(e.TaskID)
-		line := fmt.Sprintf(digestStateLine, safeID, e.State)
+		line := fmt.Sprintf(digestStateLine, safeID, EscapeDigestText(e.State))
 		block := digestBlock(safeID, safeNonce, e.Summary)
 		fits := e.Summary != "" && !omitted && b.Len()+len(block)+2 <= limit
 		if fits {

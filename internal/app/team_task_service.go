@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/syurodev/fugue/internal/gitops"
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -19,12 +18,15 @@ import (
 )
 
 const (
-	maxTeamNoteBytes   = 2 << 10
-	maxTeamNotesCount  = 100
-	maxTeamBriefBytes  = 16 << 10
-	maxTaskSendBytes   = 16 << 10
-	defaultResultLimit = 16 << 10
-	maxResultLimit     = 64 << 10
+	maxTeamNoteBytes     = 2 << 10
+	maxTeamNotesCount    = 100
+	maxTeamBriefBytes    = 16 << 10
+	maxTaskSendBytes     = 16 << 10
+	maxCancelReasonBytes = 512
+	cancelFailureCode    = "cancelled_by_delegator"
+	maxAppendRetries     = 3
+	defaultResultLimit   = 16 << 10
+	maxResultLimit       = 64 << 10
 )
 
 type teamNotePayload struct {
@@ -238,35 +240,122 @@ func (s *teamTaskService) Send(ctx context.Context, sessionID, taskID, message s
 	return "message queued for task " + target.TaskID, nil
 }
 
-// Cancel cancels a non-terminal direct child task and closes its session if active.
+// Cancel cancels a non-terminal direct child task (and any non-terminal
+// descendants in its subtree) and closes their active sessions.
 func (s *teamTaskService) Cancel(ctx context.Context, sessionID, taskID, reason string) (string, error) {
-	c, err := s.resolveCaller(ctx, sessionID)
+	cutReason, _ := truncateUTF8(strings.TrimSpace(reason), maxCancelReasonBytes)
+	payload, err := json.Marshal(struct {
+		Reason string `json:"reason,omitempty"`
+	}{Reason: cutReason})
 	if err != nil {
+		return "", errcode.Wrap(errcode.Internal, "encode cancel reason", err)
+	}
+	sessions := make([]string, 0, 1)
+	var rootID string
+	if err := s.appendTeamWithRetry(ctx, sessionID, func(_ context.Context, c *callerTeamContext) (*vendorstore.AppendTeamEventInput, error) {
+		ev, sid, buildErr := s.buildCancelEvent(c, taskID, payload)
+		if buildErr != nil {
+			return nil, buildErr
+		}
+		rootID = ev.TaskID
+		if sid != "" {
+			sessions = append(sessions, sid)
+		}
+		return ev, nil
+	}); err != nil {
 		return "", err
 	}
-	target, err := c.requireDelegator(taskID)
-	if err != nil {
-		return "", err
+	sessions = append(sessions, s.cancelSubtreeDescendants(ctx, sessionID, rootID, payload)...)
+	s.closeCancelledSessions(ctx, sessions)
+	return "task " + rootID + " cancelled", nil
+}
+
+func (s *teamTaskService) buildCancelEvent(c *callerTeamContext, taskID string, payload []byte) (*vendorstore.AppendTeamEventInput, string, error) {
+	target, delErr := c.requireDelegator(taskID)
+	if delErr != nil {
+		return nil, "", delErr
 	}
 	if teamTaskTerminal(target.State) {
-		return "", errcode.New(errcode.FailedPrecondition, "task is already terminal")
+		return nil, "", errcode.New(errcode.FailedPrecondition, "task is already terminal")
 	}
-	evID, err := s.ids.NewID()
-	if err != nil {
-		return "", errcode.Wrap(errcode.Internal, "generate cancel event ID", err)
+	evID, idErr := s.ids.NewID()
+	if idErr != nil {
+		return nil, "", errcode.Wrap(errcode.Internal, "generate cancel event ID", idErr)
 	}
-	if _, err := s.store.AppendTeamEvent(ctx, c.team.TeamID, c.team.LastSeq, &vendorstore.AppendTeamEventInput{
+	return &vendorstore.AppendTeamEventInput{
 		EventID: evID, TaskID: target.TaskID, EventType: vendorstore.EventTaskEnded,
-		Outcome: string(vendorstore.TaskStateCancelled), FailureCode: strings.TrimSpace(reason),
-	}); err != nil {
-		return "", boundaryError("cancel task", err)
+		Outcome: string(vendorstore.TaskStateCancelled), FailureCode: cancelFailureCode,
+		ProtectedPayload: payload,
+	}, target.SessionID, nil
+}
+
+func (s *teamTaskService) closeCancelledSessions(ctx context.Context, sessions []string) {
+	if s.sessions == nil {
+		return
 	}
-	if target.SessionID != "" && s.sessions != nil {
-		if closeErr := s.sessions.Close(ctx, target.SessionID, vendor.CloseHostStop); closeErr != nil {
-			slog.WarnContext(ctx, "closing cancelled task session failed", "session_id", target.SessionID, "error_code", string(errcode.CodeOf(closeErr)))
+	for _, sid := range sessions {
+		if closeErr := s.sessions.Close(ctx, sid, vendor.CloseHostStop); closeErr != nil {
+			slog.WarnContext(ctx, "closing cancelled task session failed", "session_id", sid, "error_code", string(errcode.CodeOf(closeErr)))
 		}
 	}
-	return fmt.Sprintf("task %s cancelled", target.TaskID), nil
+}
+
+func (s *teamTaskService) cancelSubtreeDescendants(ctx context.Context, sessionID, rootID string, payload []byte) []string {
+	c, err := s.resolveCaller(ctx, sessionID)
+	if err != nil {
+		return nil
+	}
+	desc := collectSubtreeTasks(c.tasks, rootID)
+	sessions := make([]string, 0, len(desc))
+	for i := range desc {
+		if teamTaskTerminal(desc[i].State) {
+			continue
+		}
+		if sid := s.cancelDescendant(ctx, c.team.TeamID, desc[i].TaskID, payload); sid != "" {
+			sessions = append(sessions, sid)
+		}
+	}
+	return sessions
+}
+
+func (s *teamTaskService) cancelDescendant(ctx context.Context, teamID, taskID string, payload []byte) string {
+	var sid string
+	if err := s.appendTaskEventWithRetry(ctx, teamID, func(_ *vendorstore.TeamRecord, tasks []vendorstore.TaskRecord) (*vendorstore.AppendTeamEventInput, error) {
+		cur, ok := findTask(tasks, taskID)
+		if !ok || teamTaskTerminal(cur.State) {
+			return nil, errcode.New(errcode.FailedPrecondition, "descendant already terminal")
+		}
+		evID, idErr := s.ids.NewID()
+		if idErr != nil {
+			return nil, errcode.Wrap(errcode.Internal, "generate cancel event ID", idErr)
+		}
+		sid = cur.SessionID
+		return &vendorstore.AppendTeamEventInput{
+			EventID: evID, TaskID: taskID, EventType: vendorstore.EventTaskEnded,
+			Outcome: string(vendorstore.TaskStateCancelled), FailureCode: cancelFailureCode,
+			ProtectedPayload: payload,
+		}, nil
+	}); err != nil {
+		slog.WarnContext(ctx, "cancelling subtree descendant failed", "task_id", taskID, "error_code", string(errcode.CodeOf(err)))
+		return ""
+	}
+	return sid
+}
+
+func collectSubtreeTasks(tasks []vendorstore.TaskRecord, rootID string) []vendorstore.TaskRecord {
+	queue := []string{rootID}
+	var out []vendorstore.TaskRecord
+	for len(queue) > 0 {
+		parent := queue[0]
+		queue = queue[1:]
+		for i := range tasks {
+			if tasks[i].ParentTaskID == parent {
+				out = append(out, tasks[i])
+				queue = append(queue, tasks[i].TaskID)
+			}
+		}
+	}
+	return out
 }
 
 // Status returns metadata status for a readable task (§6.3).
@@ -313,42 +402,44 @@ func (s *teamTaskService) Status(ctx context.Context, sessionID, taskID string) 
 
 // Note appends a sealed team note (Q-130: lead or team_manager only, <= 2 KiB, <= 100 notes).
 func (s *teamTaskService) Note(ctx context.Context, sessionID, note string) (string, error) {
-	c, err := s.resolveCaller(ctx, sessionID)
-	if err != nil {
-		return "", err
-	}
-	if c.role != vendorstore.RoleLead && c.role != vendorstore.RoleTeamManager {
-		return "", errcode.New(errcode.PermissionDenied, "only a lead or team manager may write team notes")
-	}
 	trimmed := strings.TrimSpace(note)
 	if trimmed == "" || len(trimmed) > maxTeamNoteBytes {
 		return "", errcode.New(errcode.InvalidArgument, "note must be 1..2048 bytes")
 	}
-	count, err := s.store.CountTeamNotes(ctx, c.team.TeamID)
-	if err != nil {
-		return "", boundaryError("count team notes", err)
+	if err := s.appendTeamWithRetry(ctx, sessionID, func(ctx context.Context, c *callerTeamContext) (*vendorstore.AppendTeamEventInput, error) {
+		return s.buildNoteEvent(ctx, c, trimmed)
+	}); err != nil {
+		return "", err
+	}
+	return "team note recorded", nil
+}
+
+func (s *teamTaskService) buildNoteEvent(ctx context.Context, c *callerTeamContext, trimmed string) (*vendorstore.AppendTeamEventInput, error) {
+	if c.role != vendorstore.RoleLead && c.role != vendorstore.RoleTeamManager {
+		return nil, errcode.New(errcode.PermissionDenied, "only a lead or team manager may write team notes")
+	}
+	count, countErr := s.store.CountTeamNotes(ctx, c.team.TeamID)
+	if countErr != nil {
+		return nil, boundaryError("count team notes", countErr)
 	}
 	if count >= maxTeamNotesCount {
-		return "", errcode.New(errcode.FailedPrecondition, "team note limit reached")
+		return nil, errcode.New(errcode.FailedPrecondition, "team note limit reached")
 	}
 	authorID := ""
 	if c.caller != nil {
 		authorID = c.caller.TaskID
 	}
-	payload, err := json.Marshal(teamNotePayload{AuthorTaskID: authorID, Note: trimmed})
-	if err != nil {
-		return "", errcode.Wrap(errcode.Internal, "encode team note", err)
+	payload, encErr := json.Marshal(teamNotePayload{AuthorTaskID: authorID, Note: trimmed})
+	if encErr != nil {
+		return nil, errcode.Wrap(errcode.Internal, "encode team note", encErr)
 	}
-	evID, err := s.ids.NewID()
-	if err != nil {
-		return "", errcode.Wrap(errcode.Internal, "generate note event ID", err)
+	evID, idErr := s.ids.NewID()
+	if idErr != nil {
+		return nil, errcode.Wrap(errcode.Internal, "generate note event ID", idErr)
 	}
-	if _, err := s.store.AppendTeamEvent(ctx, c.team.TeamID, c.team.LastSeq, &vendorstore.AppendTeamEventInput{
+	return &vendorstore.AppendTeamEventInput{
 		EventID: evID, EventType: vendorstore.EventTeamNoted, ProtectedPayload: payload,
-	}); err != nil {
-		return "", boundaryError("record team note", err)
-	}
-	return "team note recorded", nil
+	}, nil
 }
 
 // Brief reads the team brief and notes in order, rendered via nonce-bound untrusted blocks (Q-130).
@@ -404,15 +495,4 @@ func (s *teamTaskService) readProposalBrief(ctx context.Context, teamID string) 
 		return ""
 	}
 	return p.Brief
-}
-
-func truncateUTF8(s string, maxBytes int) (string, bool) {
-	if len(s) <= maxBytes {
-		return s, false
-	}
-	cut := s[:maxBytes]
-	for len(cut) > 0 && !utf8.ValidString(cut) {
-		cut = cut[:len(cut)-1]
-	}
-	return cut, true
 }

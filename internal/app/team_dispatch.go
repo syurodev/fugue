@@ -228,6 +228,20 @@ func (d *teamDispatcher) StartTask(ctx context.Context, teamID, taskID string) e
 	if d.deps.Vault.Snapshot().State != vault.StateUnlocked {
 		return errcode.New(errcode.VendorVaultLocked, "the vault is locked")
 	}
+	for attempt := range maxAppendRetries {
+		err := d.startTaskAttempt(ctx, teamID, taskID)
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, vendorstore.ErrSequenceConflict) && attempt+1 < maxAppendRetries {
+			continue
+		}
+		return err
+	}
+	return errcode.New(errcode.FailedPrecondition, "team event sequence conflict")
+}
+
+func (d *teamDispatcher) startTaskAttempt(ctx context.Context, teamID, taskID string) error {
 	rec, tasks, err := d.deps.Store.TeamSnapshot(ctx, teamID)
 	if err != nil {
 		return boundaryError("read the team", err)
