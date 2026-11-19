@@ -103,7 +103,7 @@ func TestListSessionsCarriesTheSessionFields(t *testing.T) {
 		Sessions: []*vendorsv1.VendorSession{
 			{SessionId: "s1", Vendor: vendorsv1.Vendor_VENDOR_CLAUDE, State: testStateRunning, CreatedAt: "t1", UpdatedAt: "t1"},
 			{SessionId: "s2", Vendor: vendorsv1.Vendor_VENDOR_CODEX, State: "waiting_input", WaitingReason: "approval"},
-			{SessionId: "s3", Vendor: vendorsv1.Vendor_VENDOR_AGY, State: "starting"},
+			{SessionId: "s3", Vendor: vendorsv1.Vendor_VENDOR_AGY, State: testStateStarting},
 			{SessionId: "s4", Vendor: vendorsv1.Vendor_VENDOR_UNSPECIFIED, State: "closed"},
 		},
 		Sequence: 9,
@@ -116,7 +116,7 @@ func TestListSessionsCarriesTheSessionFields(t *testing.T) {
 	want := []client.Session{
 		{ID: "s1", Vendor: "claude", State: testStateRunning, CreatedAt: "t1", UpdatedAt: "t1"},
 		{ID: "s2", Vendor: "codex", State: "waiting_input", WaitingReason: "approval"},
-		{ID: "s3", Vendor: "agy", State: "starting"},
+		{ID: "s3", Vendor: "agy", State: testStateStarting},
 		{ID: "s4", Vendor: "", State: "closed"},
 	}
 	if len(list.Sessions) != len(want) {
