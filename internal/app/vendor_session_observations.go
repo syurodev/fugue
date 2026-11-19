@@ -184,6 +184,7 @@ func (a *vendorSessionActor) persistVendorTurnEnd(ctx context.Context, turnID, o
 		return err
 	}
 	delete(a.turns, turnID)
+	a.manager.notifyWake(a.info.ID)
 	return nil
 }
 
@@ -208,6 +209,7 @@ func (a *vendorSessionActor) persistFugueTurnEnd(ctx context.Context, observedTu
 	a.state = next
 	delete(a.turns, turnID)
 	a.turnID = ""
+	a.manager.notifyWake(a.info.ID)
 	return nil
 }
 
@@ -236,6 +238,10 @@ func (a *vendorSessionActor) transition(ctx context.Context, fact vendor.Fact) e
 		return err
 	}
 	a.state = next
+	// A process that just turned ready may take its mailbox turn (F11.3b).
+	if fact.Kind == vendor.FactReady {
+		a.manager.notifyWake(a.info.ID)
+	}
 	return nil
 }
 

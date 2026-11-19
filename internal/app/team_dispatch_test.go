@@ -25,12 +25,26 @@ import (
 // fakeTaskSessions is the vendor layer of the dispatcher tests: it records
 // what the dispatcher starts and sends, and starts nothing.
 type fakeTaskSessions struct {
-	mu       sync.Mutex
-	starts   []taskSessionRequest
-	sends    map[string][]string
-	closed   []string
-	noRoom   bool
-	startErr error
+	mu        sync.Mutex
+	starts    []taskSessionRequest
+	sends     map[string][]string
+	resumes   []fakeResume
+	closed    []string
+	noRoom    bool
+	startErr  error
+	resumeErr error
+	// sendErr fails every send after the text was recorded; holdSend blocks
+	// the send inside the fake, so a test can hold the pump mid-send and
+	// observe what a concurrent trigger does.
+	sendErr     error
+	holdSend    <-chan struct{}
+	sendStarted chan struct{}
+	release     <-chan struct{}
+}
+
+// fakeResume is one recorded wake resume of a detached session (Q-123).
+type fakeResume struct {
+	SessionID, Cwd string
 }
 
 func (f *fakeTaskSessions) HasCapacity(context.Context) (bool, error) {
@@ -51,12 +65,25 @@ func (f *fakeTaskSessions) StartTaskSession(_ context.Context, req *taskSessionR
 
 func (f *fakeTaskSessions) Send(_ context.Context, sessionID string, input vendor.Input) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if f.sends == nil {
 		f.sends = make(map[string][]string)
 	}
 	f.sends[sessionID] = append(f.sends[sessionID], input.Text)
-	return nil
+	err, hold, started, release := f.sendErr, f.holdSend, f.sendStarted, f.release
+	f.mu.Unlock()
+	if started != nil {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+	}
+	if hold != nil {
+		<-hold
+	}
+	if release != nil {
+		<-release
+	}
+	return err
 }
 
 func (f *fakeTaskSessions) Close(_ context.Context, sessionID string, _ vendor.CloseReason) error {
@@ -64,6 +91,20 @@ func (f *fakeTaskSessions) Close(_ context.Context, sessionID string, _ vendor.C
 	defer f.mu.Unlock()
 	f.closed = append(f.closed, sessionID)
 	return nil
+}
+
+func (f *fakeTaskSessions) ResumeTaskSession(_ context.Context, sessionID, cwd string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.resumes = append(f.resumes, fakeResume{SessionID: sessionID, Cwd: cwd})
+	return f.resumeErr
+}
+
+// resumeCount reports how many wake resumes the fake recorded.
+func (f *fakeTaskSessions) resumeCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.resumes)
 }
 
 func (f *fakeTaskSessions) setNoRoom(v bool) {

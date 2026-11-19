@@ -17,6 +17,9 @@ type TeamSettleInput struct {
 	ExpectedSeq int64
 	EndEventID  string
 	EndPayload  []byte
+	// Mailbox rows are written in the same transaction as the TeamEnded
+	// event, keyed to its sequence (Q-122, OR-E13 delivery).
+	Mailbox []MailboxEnqueueInput
 }
 
 // SettleTeam cancels the team's non-terminal tasks and appends TeamEnded
@@ -67,7 +70,18 @@ func (s *Store) appendSettleEnd(ctx context.Context, tx *sql.Tx, teamID string, 
 	if err != nil {
 		return err
 	}
-	return insertAppendedTeamEvent(ctx, tx, teamID, seq, end, fromState, toState, envelope, now)
+	if err := insertAppendedTeamEvent(ctx, tx, teamID, seq, end, fromState, toState, envelope, now); err != nil {
+		return err
+	}
+	if len(in.Mailbox) == 0 {
+		return nil
+	}
+	rawKey, unwrapErr := s.unwrapTeamKey(teamID, meta.KeyID, meta.WrappedKey)
+	if unwrapErr != nil {
+		return unwrapErr
+	}
+	defer clear(rawKey)
+	return s.insertMailboxRows(ctx, tx, teamID, seq, in.Mailbox, meta.KeyID, rawKey, now)
 }
 
 // cancelOpenTasks cancels every non-terminal task of the team inside the

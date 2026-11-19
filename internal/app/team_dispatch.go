@@ -48,6 +48,9 @@ type teamDispatcherDeps struct {
 	DataDir string
 	IDs     ids.Generator
 	Vault   *vault.Service
+	// Wake is the F11.3b mailbox pump; nil leaves the digest for the next
+	// trigger (the decide-path tests admit nothing, so they enqueue none).
+	Wake *teamWake
 }
 
 // teamDispatcher starts the queued tasks of active teams. One run at a time:
@@ -59,6 +62,14 @@ type teamDispatcher struct {
 
 func newTeamDispatcher(deps *teamDispatcherDeps) *teamDispatcher {
 	return &teamDispatcher{deps: *deps}
+}
+
+// notifyMailbox asks the wake pump for a delivery pass after an append
+// enqueued mail; nil leaves it to the next trigger.
+func (d *teamDispatcher) notifyMailbox() {
+	if d.deps.Wake != nil {
+		d.deps.Wake.Notify()
+	}
 }
 
 // Dispatch starts every startable queued task of the team. A task the

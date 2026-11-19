@@ -187,6 +187,9 @@ func ValidateTeamTaskSpecs(tasks []TeamTaskSpec) error {
 		if t.ID == "" {
 			return &ValidationError{Field: fieldSpecTaskID, Detail: detailTaskIDRequired, Reason: ErrInvalidSpec}
 		}
+		if err := validateTaskIdentifier(fieldSpecTaskID, t.ID); err != nil {
+			return err
+		}
 		if _, dup := index[t.ID]; dup {
 			return &ValidationError{Field: fieldSpecTaskID, Detail: "duplicate task ID " + t.ID, Reason: ErrInvalidSpec}
 		}

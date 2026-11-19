@@ -138,6 +138,7 @@ type HostRuntime struct {
 	sessionTools    *SessionToolService
 	teamProposals   *TeamProposalService
 	teamDispatch    *teamDispatcher
+	teamWake        *teamWake
 	tags            *environments.Registry
 
 	// goTask spawns a supervised goroutine on the host's base context; it is

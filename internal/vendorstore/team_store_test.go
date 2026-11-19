@@ -88,17 +88,18 @@ func mustMarshalProtectedSpec(t *testing.T, markers []string) []byte {
 func appendPlantedTeamEvents(t *testing.T, s *Store, seq int64, teamID, taskID, question, report string) int64 {
 	t.Helper()
 	ctx := t.Context()
-	for _, ev := range []AppendTeamEventInput{
+	events := []AppendTeamEventInput{
 		{EventID: "ev-start-team", EventType: EventTeamStarted},
 		{EventID: "ev-assign", TaskID: taskID, EventType: EventTaskAssigned},
 		{EventID: "ev-start", TaskID: taskID, EventType: EventTaskStarted},
 		{EventID: "ev-ask", TaskID: taskID, EventType: EventTaskQuestionAsked, ProtectedPayload: []byte(question)},
 		{EventID: "ev-ans", TaskID: taskID, EventType: EventTaskQuestionAnswered, ProtectedPayload: []byte("yes")},
 		{EventID: "ev-rep", TaskID: taskID, EventType: EventTaskReported, ProtectedPayload: []byte(report)},
-	} {
+	}
+	for i := range events {
+		ev := &events[i]
 		var err error
-		evCopy := ev
-		seq, err = s.AppendTeamEvent(ctx, teamID, seq, &evCopy)
+		seq, err = s.AppendTeamEvent(ctx, teamID, seq, ev)
 		if err != nil {
 			t.Fatalf("AppendTeamEvent(%s): %v", ev.EventType, err)
 		}
@@ -244,14 +245,15 @@ func assertOptimisticAndAtomicGuards(t *testing.T, s *Store) {
 func appendManagerTerminalWorkflow(t *testing.T, s *Store, seq int64) {
 	t.Helper()
 	ctx := t.Context()
-	for _, ev := range []AppendTeamEventInput{
+	events := []AppendTeamEventInput{
 		{EventID: "ev-1", EventType: EventTeamStarted},
 		{EventID: "ev-2", TaskID: testTaskMgrID, EventType: EventTaskAssigned},
 		{EventID: "ev-3", TaskID: testTaskMgrID, EventType: EventTaskStarted},
-	} {
+	}
+	for i := range events {
+		ev := &events[i]
 		var err error
-		evCopy := ev
-		seq, err = s.AppendTeamEvent(ctx, "team-atomic", seq, &evCopy)
+		seq, err = s.AppendTeamEvent(ctx, "team-atomic", seq, ev)
 		if err != nil {
 			t.Fatalf("AppendTeamEvent(%s): %v", ev.EventType, err)
 		}
@@ -261,17 +263,18 @@ func appendManagerTerminalWorkflow(t *testing.T, s *Store, seq int64) {
 	}); !errors.Is(repErr, ErrTeamChildrenNotTerminal) {
 		t.Fatalf("manager report with non-terminal child err = %v, want ErrTeamChildrenNotTerminal", repErr)
 	}
-	for _, ev := range []AppendTeamEventInput{
+	events = []AppendTeamEventInput{
 		{EventID: "ev-4", TaskID: testTaskChildID, EventType: EventTaskAssigned},
 		{EventID: "ev-5", TaskID: testTaskChildID, EventType: EventTaskStarted},
 		{EventID: "ev-6", TaskID: testTaskChildID, EventType: EventTaskReported},
 		{EventID: "ev-7", TaskID: testTaskChildID, EventType: EventTaskCheckCompleted, Outcome: testOutcomePassed},
 		{EventID: "ev-8", TaskID: testTaskChildID, EventType: EventTaskReviewed, Outcome: "complete_no_diff"},
 		{EventID: "ev-9", TaskID: testTaskMgrID, EventType: EventTaskReported},
-	} {
+	}
+	for i := range events {
+		ev := &events[i]
 		var err error
-		evCopy := ev
-		seq, err = s.AppendTeamEvent(ctx, "team-atomic", seq, &evCopy)
+		seq, err = s.AppendTeamEvent(ctx, "team-atomic", seq, ev)
 		if err != nil {
 			t.Fatalf("AppendTeamEvent(%s): %v", ev.EventType, err)
 		}
@@ -350,7 +353,7 @@ func setupMixedStateTeamForRecovery(t *testing.T, s *Store) {
 		t.Fatalf("CreateTeam: %v", err)
 	}
 	seq := rec.LastSeq
-	for _, ev := range []AppendTeamEventInput{
+	events := []AppendTeamEventInput{
 		{EventID: "s1", EventType: EventTeamStarted},
 		{EventID: "s2", TaskID: testTaskStartID, EventType: EventTaskAssigned},
 		{EventID: "s3", TaskID: testTaskRunID, EventType: EventTaskAssigned},
@@ -365,9 +368,10 @@ func setupMixedStateTeamForRecovery(t *testing.T, s *Store) {
 		{EventID: "s12", TaskID: testTaskReviewID, EventType: EventTaskStarted},
 		{EventID: "s13", TaskID: testTaskReviewID, EventType: EventTaskReported},
 		{EventID: "s14", TaskID: testTaskReviewID, EventType: EventTaskCheckCompleted, Outcome: testOutcomePassed},
-	} {
-		evCopy := ev
-		seq, err = s.AppendTeamEvent(ctx, "team-recover", seq, &evCopy)
+	}
+	for i := range events {
+		ev := &events[i]
+		seq, err = s.AppendTeamEvent(ctx, "team-recover", seq, ev)
 		if err != nil {
 			t.Fatalf("setup %s: %v", ev.EventID, err)
 		}
@@ -423,14 +427,15 @@ func assertUnknownDecisionsOnlyLeaveUnknown(t *testing.T, s2 *Store, seq int64) 
 	}); !errors.Is(badErr, ErrTeamTransition) {
 		t.Fatalf("non-decision transition from unknown err = %v, want ErrTeamTransition", badErr)
 	}
-	for _, ev := range []AppendTeamEventInput{
+	events := []AppendTeamEventInput{
 		{EventID: "dec-keep", TaskID: testTaskRunID, EventType: EventTaskRecoveryDecided, Outcome: "keep_diff"},
 		{EventID: "dec-resume", TaskID: testTaskStartID, EventType: EventTaskRecoveryDecided, Outcome: "resume"},
 		{EventID: "dec-cancel", TaskID: testTaskAskID, EventType: EventTaskRecoveryDecided, Outcome: "cancel"},
-	} {
+	}
+	for i := range events {
+		ev := &events[i]
 		var err error
-		evCopy := ev
-		seq, err = s2.AppendTeamEvent(ctx, "team-recover", seq, &evCopy)
+		seq, err = s2.AppendTeamEvent(ctx, "team-recover", seq, ev)
 		if err != nil {
 			t.Fatalf("decision %s: %v", ev.EventID, err)
 		}
@@ -536,12 +541,11 @@ func TestTaskEventOnTerminalTeamIsRejected(t *testing.T) {
 func appendSeq(t *testing.T, s *Store, teamID string, seq int64, events []AppendTeamEventInput) int64 {
 	t.Helper()
 	ctx := t.Context()
-	for _, ev := range events {
-		evCopy := ev
+	for i := range events {
 		var err error
-		seq, err = s.AppendTeamEvent(ctx, teamID, seq, &evCopy)
+		seq, err = s.AppendTeamEvent(ctx, teamID, seq, &events[i])
 		if err != nil {
-			t.Fatalf("AppendTeamEvent(%s): %v", ev.EventID, err)
+			t.Fatalf("AppendTeamEvent(%s): %v", events[i].EventID, err)
 		}
 	}
 	return seq
@@ -638,7 +642,7 @@ func assertTeamLifecycleAndErrors(t *testing.T, s *Store) {
 		t.Fatalf("duplicate team err = %v, want ErrTeamExists", dupErr)
 	}
 	seq := rec.LastSeq
-	for _, ev := range []AppendTeamEventInput{
+	events := []AppendTeamEventInput{
 		{EventID: "tl-1", EventType: EventTeamStarted},
 		{EventID: "tl-2", EventType: EventTeamFinalReview},
 		{EventID: "tl-3", EventType: EventTeamDecided, Outcome: "revision"},
@@ -650,9 +654,10 @@ func assertTeamLifecycleAndErrors(t *testing.T, s *Store) {
 		{EventID: "tl-9", TaskID: testTaskLeadID, EventType: EventTaskReviewed, Outcome: "approved"},
 		{EventID: "tl-10", TaskID: testTaskLeadID, EventType: EventTaskIntegrated},
 		{EventID: "tl-11", EventType: EventTeamEnded, Outcome: "done"},
-	} {
-		evCopy := ev
-		seq, err = s.AppendTeamEvent(ctx, "team-life", seq, &evCopy)
+	}
+	for i := range events {
+		ev := &events[i]
+		seq, err = s.AppendTeamEvent(ctx, "team-life", seq, ev)
 		if err != nil {
 			t.Fatalf("AppendTeamEvent(%s): %v", ev.EventType, err)
 		}

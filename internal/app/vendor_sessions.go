@@ -84,6 +84,7 @@ type VendorSessions struct {
 	actors            map[string]*vendorSessionActor
 	pendingOwners     map[*pendingOwner]struct{}
 	retainedOwners    map[*retainedOwner]struct{}
+	wakeHook          func(sessionID string)
 	closed            bool
 	startReservations int
 	inflightSpawns    int
@@ -121,6 +122,19 @@ func NewVendorSessions(ctx context.Context, deps *VendorSessionDeps) (*VendorSes
 // SetRelay binds the server-request relay after SessionToolService is constructed.
 func (m *VendorSessions) SetRelay(relay serverRequestRelayer) {
 	m.deps.Relay = relay
+}
+
+// SetWakeHook binds the team wake trigger (F11.3b): the hook runs when a
+// session may have become able to take a Fugue-origin turn — after its
+// process turned ready and after any turn ended.
+func (m *VendorSessions) SetWakeHook(hook func(sessionID string)) {
+	m.wakeHook = hook
+}
+
+func (m *VendorSessions) notifyWake(sessionID string) {
+	if m.wakeHook != nil {
+		m.wakeHook(sessionID)
+	}
 }
 
 // Start creates a vendor process and hands its observations to a single actor.

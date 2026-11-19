@@ -216,7 +216,7 @@ func (s *Store) AppendTeamEvent(ctx context.Context, teamID string, expectedSeq 
 	if ev == nil || teamID == "" || ev.EventID == "" || expectedSeq < 1 {
 		return 0, fmt.Errorf("%w: team_id, event_id, and positive expected_seq are required", ErrTeamInvalidInput)
 	}
-	snap, needVault, err := s.teamPayloadGate(ev.ProtectedPayload)
+	snap, needVault, err := s.appendEventGate(ev)
 	if err != nil {
 		return 0, err
 	}
@@ -232,21 +232,58 @@ func (s *Store) AppendTeamEvent(ctx context.Context, teamID string, expectedSeq 
 	}
 	nextSeq := expectedSeq + 1
 	now := s.clock.Now().UnixMilli()
-	fromState, toState, err := applyTeamOrTaskProjection(ctx, tx, teamID, meta.State, nextSeq, now, ev)
-	if err != nil {
-		return 0, err
-	}
-	envelope, err := s.sealEventPayloadIfPresent(teamID, meta.KeyID, meta.WrappedKey, ev)
-	if err != nil {
-		return 0, err
-	}
-	if err := insertAppendedTeamEvent(ctx, tx, teamID, nextSeq, ev, fromState, toState, envelope, now); err != nil {
+	if err := s.writeAppendedEvent(ctx, tx, teamID, nextSeq, ev, meta, now); err != nil {
 		return 0, err
 	}
 	if err := s.commitTeamTx(snap, needVault, tx.Commit); err != nil {
 		return 0, err
 	}
 	return nextSeq, nil
+}
+
+// writeAppendedEvent projects, seals and writes one appended event and its
+// mailbox rows inside the open transaction (Q-122).
+func (s *Store) writeAppendedEvent(ctx context.Context, tx *sql.Tx, teamID string, seq int64, ev *AppendTeamEventInput, meta teamMetaRow, now int64) error {
+	fromState, toState, err := applyTeamOrTaskProjection(ctx, tx, teamID, meta.State, seq, now, ev)
+	if err != nil {
+		return err
+	}
+	envelope, err := s.sealEventPayloadIfPresent(teamID, meta.KeyID, meta.WrappedKey, ev)
+	if err != nil {
+		return err
+	}
+	if err := insertAppendedTeamEvent(ctx, tx, teamID, seq, ev, fromState, toState, envelope, now); err != nil {
+		return err
+	}
+	return s.appendMailboxForEvent(ctx, tx, teamID, seq, ev, meta, now)
+}
+
+// appendEventGate decides the vault stance of one append: an event payload or
+// a mailbox row both seal under the team key, so either needs the vault.
+func (s *Store) appendEventGate(ev *AppendTeamEventInput) (vault.Snapshot, bool, error) {
+	snap, needVault, err := s.teamPayloadGate(ev.ProtectedPayload)
+	if err != nil {
+		return vault.Snapshot{}, false, err
+	}
+	if needVault || len(ev.Mailbox) == 0 {
+		return snap, needVault, nil
+	}
+	snap, err = s.requireUnlockedVault()
+	return snap, true, err
+}
+
+// appendMailboxForEvent seals and inserts the mailbox rows of one appended
+// event inside its transaction (Q-122).
+func (s *Store) appendMailboxForEvent(ctx context.Context, tx *sql.Tx, teamID string, seq int64, ev *AppendTeamEventInput, meta teamMetaRow, now int64) error {
+	if len(ev.Mailbox) == 0 {
+		return nil
+	}
+	rawKey, err := s.unwrapTeamKey(teamID, meta.KeyID, meta.WrappedKey)
+	if err != nil {
+		return err
+	}
+	defer clear(rawKey)
+	return s.insertMailboxRows(ctx, tx, teamID, seq, ev.Mailbox, meta.KeyID, rawKey, now)
 }
 
 type teamMetaRow struct {
@@ -440,34 +477,6 @@ func updateTaskAndTeamSeq(ctx context.Context, tx *sql.Tx, teamID, taskID string
 		seq, now, teamID,
 	); err != nil {
 		return fmt.Errorf("advance team last_seq: %w", err)
-	}
-	return nil
-}
-
-func insertAppendedTeamEvent(
-	ctx context.Context,
-	tx *sql.Tx,
-	teamID string,
-	seq int64,
-	ev *AppendTeamEventInput,
-	fromState, toState string,
-	envelope []byte,
-	now int64,
-) error {
-	var envParam any
-	if len(envelope) > 0 {
-		envParam = envelope
-	}
-	_, err := tx.ExecContext(ctx, `
-		INSERT INTO team_task_events (
-			team_id, sequence, event_id, task_id, event_type, outcome,
-			from_state, to_state, failure_code, payload_envelope, created_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		teamID, seq, ev.EventID, ev.TaskID, string(ev.EventType), ev.Outcome,
-		fromState, toState, ev.FailureCode, envParam, now,
-	)
-	if err != nil {
-		return fmt.Errorf("insert team_task_event: %w", err)
 	}
 	return nil
 }

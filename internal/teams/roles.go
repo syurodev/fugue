@@ -105,15 +105,23 @@ func isRoleIDChar(c byte) bool {
 }
 
 func validateRoleIdentifier(field, name string) error {
+	return validateIdentifier(field, name, ErrInvalidCatalog)
+}
+
+func validateTaskIdentifier(field, name string) error {
+	return validateIdentifier(field, name, ErrInvalidSpec)
+}
+
+func validateIdentifier(field, name string, reason error) error {
 	if len(name) == 0 || len(name) > 64 {
-		return &ValidationError{Field: field, Detail: "must be 1..64 ASCII characters", Reason: ErrInvalidCatalog}
+		return &ValidationError{Field: field, Detail: "must be 1..64 ASCII characters", Reason: reason}
 	}
 	if name[0] == '-' || name[0] == '_' {
-		return &ValidationError{Field: field, Detail: "must match [a-z0-9][a-z0-9_-]*", Reason: ErrInvalidCatalog}
+		return &ValidationError{Field: field, Detail: "must match [a-z0-9][a-z0-9_-]*", Reason: reason}
 	}
 	for i := range len(name) {
 		if !isRoleIDChar(name[i]) {
-			return &ValidationError{Field: field, Detail: "must match [a-z0-9][a-z0-9_-]*", Reason: ErrInvalidCatalog}
+			return &ValidationError{Field: field, Detail: "must match [a-z0-9][a-z0-9_-]*", Reason: reason}
 		}
 	}
 	return nil

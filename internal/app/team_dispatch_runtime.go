@@ -5,12 +5,30 @@ import (
 	"log/slog"
 
 	"github.com/syurodev/fugue/internal/gitops"
+	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/snapshot"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
+
+// onVaultLockState mirrors the vault state into the services that gate on it,
+// and on an unlock starts the queued tasks and delivers the mail the lock
+// held (Q-123).
+func (hp *HostProcess) onVaultLockState(base context.Context, owner *interaction.Owner, snap vault.Snapshot) {
+	unlocked := snap.State == vault.StateUnlocked
+	owner.SetVaultLocked(!unlocked)
+	if !unlocked {
+		return
+	}
+	if hp.rt.teamDispatch != nil {
+		hp.dispatchAllAsync(base)
+	}
+	if hp.rt.teamWake != nil {
+		hp.rt.teamWake.Notify()
+	}
+}
 
 // locateTeamGit builds the git manager of the team worktrees. A machine
 // without a usable git, or a data directory the manager refuses, yields nil:
@@ -55,16 +73,24 @@ func (hp *HostProcess) logDispatch(ctx context.Context, err error) {
 	}
 }
 
-// wireTeamDispatch builds the dispatcher and hands every newly active team
-// to it.
+// wireTeamDispatch builds the dispatcher and the wake pump and hands every
+// newly active team to the former and every mailbox turn to the latter.
 func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorstore.Store, sessions *VendorSessions, v *vault.Service, deps *HostDeps) {
 	admit := deps.TeamAdmitter
 	if admit == nil {
 		admit = localAdmitter{capacity: sessions}
 	}
+	sessions.SetWakeHook(func(string) { hp.rt.teamWake.Notify() })
+	hp.rt.teamWake = newTeamWake(&teamWakeDeps{
+		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Roots: hp.rt.workspaces.domain,
+		Clock: deps.Clock, IDs: deps.IDs, Vault: v, DataDir: deps.DataDir,
+	})
+	hp.rt.teamWake.Start(base)
 	hp.rt.teamDispatch = newTeamDispatcher(&teamDispatcherDeps{
 		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Admit: admit,
 		Roots: hp.rt.workspaces.domain, Git: locateTeamGit(ctx, deps), DataDir: deps.DataDir, IDs: deps.IDs, Vault: v,
+		Wake: hp.rt.teamWake,
 	})
 	hp.rt.teamProposals.SetOnTeamActive(func(teamID string) { hp.dispatchTeamAsync(base, teamID) })
+	hp.rt.teamProposals.SetOnMailbox(func() { hp.rt.teamWake.Notify() })
 }
