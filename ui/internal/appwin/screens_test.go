@@ -13,7 +13,8 @@ import (
 // fakeFetcher records the reads the screens request and never answers, so a
 // test drives the results by hand.
 type fakeFetcher struct {
-	pages []pageRequest
+	pages    []pageRequest
+	commands []string
 }
 
 // pageRequest is one recorded page read.
@@ -22,7 +23,15 @@ type pageRequest struct {
 	before  int64
 }
 
-func (f *fakeFetcher) RequestSessions() {}
+func (f *fakeFetcher) RequestSessions()        {}
+func (f *fakeFetcher) RequestProbe()           {}
+func (f *fakeFetcher) RequestWorkspaces()      {}
+func (f *fakeFetcher) RequestWorkspace(string) {}
+
+func (f *fakeFetcher) RequestCommands(session string) {
+	f.commands = append(f.commands, session)
+}
+
 func (f *fakeFetcher) RequestPage(sessionID string, before int64) {
 	f.pages = append(f.pages, pageRequest{session: sessionID, before: before})
 }
@@ -33,7 +42,7 @@ func newTestScreens(t *testing.T) (*screens, *fakeFetcher) {
 	t.Helper()
 	fake := &fakeFetcher{}
 	m := hostconn.NewManager(&hostconn.Config{})
-	return newScreens(m, fake), fake
+	return newScreens(m, fake, session.NewPoster(m.Client)), fake
 }
 
 // itemsFrom builds count items with ascending sequences starting at start.

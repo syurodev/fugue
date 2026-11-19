@@ -68,7 +68,7 @@ func applyCreateFixture(t *testing.T, s *Sidebar) {
 		t.Fatal(err)
 	}
 	list := s.List()
-	if len(list) != 3 || list[2].ID != "s3" || list[2].State != "starting" {
+	if len(list) != 3 || list[2].ID != "s3" || list[2].State != sessionStarted {
 		t.Fatalf("list after create = %+v", list)
 	}
 }
