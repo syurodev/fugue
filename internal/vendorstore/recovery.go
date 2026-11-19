@@ -82,7 +82,7 @@ func (s *Store) detachUnfinished(ctx context.Context, tx *sql.Tx) error {
 	}
 	// The bulk insert bypasses recordChange, so it prunes here: recovery must
 	// not leave the journal above its retention bound.
-	if err = pruneChanges(ctx, tx, s.changeRetention); err != nil {
+	if err = pruneChanges(ctx, newTxStatements(tx), s.changeRetention); err != nil {
 		return err
 	}
 	_, err = tx.ExecContext(ctx,

@@ -9,21 +9,16 @@ import (
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
-	"gioui.org/text"
-	"gioui.org/unit"
-	"gioui.org/widget/material"
+	"gioui.org/widget"
 
 	"github.com/syurodev/fugue/pkg/client"
 
-	"github.com/syurodev/fugue/ui/internal/fonts"
+	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/markdown"
 	"github.com/syurodev/fugue/ui/internal/mdview"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
-
-// mdState is one message card's mdview state.
-type mdState = mdview.State
 
 // The item kinds the transcript defines (transcript §3).
 const (
@@ -41,84 +36,88 @@ const (
 	kindNotice           = "notice"
 )
 
-// layoutCard lays one item out, updating its cached state. Every kind renders
+// cardState is one item's view state the row func needs across frames: its
+// parsed markdown when it is a message, the source it was parsed from, the
+// mdview state and the click on its header. It lives in the VirtualList's
+// payload slot, so the list's bound evicts it with the item's heights; the
+// expansion lives per item_id in the list, so it survives a new revision.
+type cardState struct {
+	doc    *markdown.Doc
+	docSrc string
+	md     mdview.State
+	click  widget.Clickable
+}
+
+// cardOf returns the item's payload card, building it on first use.
+func cardOf(st *State, itemID string) *cardState {
+	return kit.PayloadOf(st.list, itemID, func() *cardState { return &cardState{} })
+}
+
+// layoutCard lays one item out (transcript §3). Every kind renders
 // something: an unknown kind renders as a generic card, never a crash or a
-// drop.
-func layoutCard(gtx *layout.Context, th *theme.Theme, st *State, item *session.Item) layout.Dimensions {
-	key := cardKey{itemID: item.ItemID, revision: item.Revision}
-	c, ok := st.cache.cards.get(key)
-	if !ok {
-		c = &card{}
-		// Seed the new revision's height from the previous one, so the
-		// list does not jump back to the estimate when an item completes.
-		if height, held := st.cache.cards.heightOf(item.ItemID); held {
-			c.height = height
-		}
-		st.cache.cards.put(key, c)
-	}
+// drop. The height the list records comes from the returned dimensions, so
+// a new revision's entry is seeded from the old one by the kit's cache and
+// the list does not jump.
+func layoutCard(env *kit.Env, gtx *layout.Context, st *State, item *session.Item) layout.Dimensions {
+	c := cardOf(st, item.ItemID)
 	if c.click.Clicked(*gtx) {
-		st.expanded[item.ItemID] = !st.expanded[item.ItemID]
+		st.list.ToggleExpanded(item.ItemID)
 	}
-	st.rendered++
-	gap := layout.Inset{Bottom: unit.Dp(6)}
+	gap := layout.Inset{Bottom: theme.SpaceSM}
 	return gap.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
 		local := gtx
-		dims := surface(&local, th, func(gtx *layout.Context) layout.Dimensions {
-			return cardBody(gtx, th, st, c, item)
+		return surface(&local, env, func(gtx *layout.Context) layout.Dimensions {
+			return cardBody(env, gtx, st, c, item)
 		})
-		c.height = dims.Size.Y
-		st.cache.cards.recordHeight(item.ItemID, item.Revision, c.height)
-		return dims
 	})
 }
 
 // cardBody renders the item's kind onto the card surface.
-func cardBody(gtx *layout.Context, th *theme.Theme, st *State, c *card, item *session.Item) layout.Dimensions {
+func cardBody(env *kit.Env, gtx *layout.Context, st *State, c *cardState, item *session.Item) layout.Dimensions {
 	switch item.Kind {
 	case kindUserMessage, kindAssistantMessage:
-		return messageBody(gtx, th, c, item.Display().Text)
+		return messageBody(gtx, env, c, item.Display().Text)
 	case kindReasoning, kindToolCall, kindFileChange:
-		return collapsibleBody(gtx, th, c, headerFor(item), item, st.expanded[item.ItemID])
+		return collapsibleBody(env, gtx, c, headerFor(item), item, st.list.Expanded(item.ItemID))
 	default:
-		return plainBody(gtx, th, c, headerFor(item), item, st.expanded[item.ItemID])
+		return plainBody(env, gtx, c, headerFor(item), item, st.list.Expanded(item.ItemID))
 	}
 }
 
-// messageBody parses and renders a message's markdown, re-parsing when the
-// display text changes — a streaming delta grows the text under the same
-// revision.
-func messageBody(gtx *layout.Context, th *theme.Theme, c *card, src string) layout.Dimensions {
+// messageBody re-parses a message's markdown when the display text changes —
+// a streaming delta grows the text under the same revision — and renders it.
+func messageBody(gtx *layout.Context, env *kit.Env, c *cardState, src string) layout.Dimensions {
 	if c.doc == nil || c.docSrc != src {
 		c.doc = markdown.Parse(src)
 		c.docSrc = src
 	}
-	return mdview.Layout(gtx, th, c.doc, &c.md)
+	return mdview.Layout(gtx, env.Th, c.doc, &c.md)
 }
 
 // collapsibleBody renders the collapsed-by-default cards: reasoning, tool
 // calls and file changes show their header; the text or diff expands on
 // click.
-func collapsibleBody(gtx *layout.Context, th *theme.Theme, c *card, header string, item *session.Item, expanded bool) layout.Dimensions {
-	return flexBody(gtx, th, c, header, func(gtx *layout.Context) layout.Dimensions {
-		return monoText(gtx, th, item.Display().Text)
+func collapsibleBody(env *kit.Env, gtx *layout.Context, c *cardState, header string, item *session.Item, expanded bool) layout.Dimensions {
+	return flexBody(env, gtx, c, header, func(gtx *layout.Context) layout.Dimensions {
+		return monoText(env, gtx, item.Display().Text)
 	}, expanded)
 }
 
 // plainBody renders the compact cards and the generic card: a header line,
 // and, for an unknown kind, the view text underneath so no item is dropped.
-func plainBody(gtx *layout.Context, th *theme.Theme, c *card, header string, item *session.Item, expanded bool) layout.Dimensions {
-	return flexBody(gtx, th, c, header, func(gtx *layout.Context) layout.Dimensions {
-		return wrappedText(gtx, th, item.Display().Text, colorFor(th, item.Metadata.Level))
+func plainBody(env *kit.Env, gtx *layout.Context, c *cardState, header string, item *session.Item, expanded bool) layout.Dimensions {
+	return flexBody(env, gtx, c, header, func(gtx *layout.Context) layout.Dimensions {
+		return kit.Paragraph(env, gtx, theme.TypeBody(), colorFor(env.Th, item.Metadata.Level), item.Display().Text)
 	}, expanded || !knownKind(item.Kind))
 }
 
 // flexBody stacks the clickable header and, when expanded, the body.
-func flexBody(gtx *layout.Context, th *theme.Theme, c *card, header string, body func(*layout.Context) layout.Dimensions, expanded bool) layout.Dimensions {
+func flexBody(env *kit.Env, gtx *layout.Context, c *cardState, header string, body func(*layout.Context) layout.Dimensions, expanded bool) layout.Dimensions {
 	head := func() layout.Dimensions {
 		return c.click.Layout(*gtx, func(layout.Context) layout.Dimensions {
 			// Clickable calls its widget with the same context, so the
 			// pointer form and the value form are the same frame here.
-			return headerRow(gtx, th, header, expanded)
+			return headerRow(env, gtx, header, expanded)
 		})
 	}
 	if !expanded {
@@ -127,7 +126,7 @@ func flexBody(gtx *layout.Context, th *theme.Theme, c *card, header string, body
 	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		layout.Rigid(func(layout.Context) layout.Dimensions { return head() }),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: unit.Dp(6)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Top: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				local := gtx
 				return body(&local)
 			})
@@ -137,68 +136,54 @@ func flexBody(gtx *layout.Context, th *theme.Theme, c *card, header string, body
 
 // surface paints the card's raised background and lays the body inside its
 // padding; the background is recorded first so the text paints over it.
-func surface(gtx *layout.Context, th *theme.Theme, body func(*layout.Context) layout.Dimensions) layout.Dimensions {
+func surface(gtx *layout.Context, env *kit.Env, body func(*layout.Context) layout.Dimensions) layout.Dimensions {
 	macro := op.Record(gtx.Ops)
-	pad := layout.UniformInset(unit.Dp(8))
+	pad := layout.UniformInset(theme.SpaceMD)
 	dims := pad.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
 		local := gtx
 		return body(&local)
 	})
 	call := macro.Stop()
-	paint.FillShape(gtx.Ops, th.Chrome().SurfaceBase,
-		clip.UniformRRect(image.Rectangle{Max: dims.Size}, gtx.Dp(unit.Dp(4))).Op(gtx.Ops))
+	paint.FillShape(gtx.Ops, env.Th.Chrome().SurfaceBase,
+		clip.UniformRRect(image.Rectangle{Max: dims.Size}, gtx.Dp(theme.RadiusXS)).Op(gtx.Ops))
 	call.Add(gtx.Ops)
 	return dims
 }
 
-// headerRow renders the header text; expansion is told by the caret.
-func headerRow(gtx *layout.Context, th *theme.Theme, header string, expanded bool) layout.Dimensions {
-	mt := th.Material()
-	caret := "▸"
+// headerRow renders the header text; expansion is told by the chevron.
+func headerRow(env *kit.Env, gtx *layout.Context, header string, expanded bool) layout.Dimensions {
+	caret := kit.IconChevronRight
 	if expanded {
-		caret = "▾"
+		caret = kit.IconChevronDown
 	}
-	return layout.Flex{Axis: layout.Horizontal}.Layout(*gtx,
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return label(mt, unit.Sp(12), caret+" ", th.Chrome().FgMuted).Layout(gtx)
+			local := gtx
+			icon, err := env.Icon(&local, caret, theme.IconXS, env.Th.Chrome().FgMuted)
+			if err != nil {
+				return layout.Dimensions{}
+			}
+			return icon
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			l := label(mt, unit.Sp(12), header, th.Chrome().FgMuted)
-			l.WrapPolicy = text.WrapWords
-			return l.Layout(gtx)
+			return layout.Inset{Left: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				local := gtx
+				return kit.Label(env, &local, theme.TypeSmall(), env.Th.Chrome().FgMuted, header)
+			})
 		}),
 	)
 }
 
 // monoText renders text in the code face on the code surface, for tool
 // output and diffs.
-func monoText(gtx *layout.Context, th *theme.Theme, s string) layout.Dimensions {
-	mt := th.Material()
+func monoText(env *kit.Env, gtx *layout.Context, s string) layout.Dimensions {
 	macro := op.Record(gtx.Ops)
-	l := label(mt, unit.Sp(12), s, th.Chrome().Fg)
-	l.Font.Typeface = fonts.Mono
-	l.WrapPolicy = text.WrapWords
-	dims := l.Layout(*gtx)
+	dims := kit.Paragraph(env, gtx, theme.TypeCodeSmall(), env.Th.Chrome().Fg, s)
 	call := macro.Stop()
-	paint.FillShape(gtx.Ops, th.CodeSurface(),
-		clip.UniformRRect(image.Rectangle{Max: dims.Size}, gtx.Dp(unit.Dp(3))).Op(gtx.Ops))
+	paint.FillShape(gtx.Ops, env.Th.CodeSurface(),
+		clip.UniformRRect(image.Rectangle{Max: dims.Size}, gtx.Dp(theme.RadiusXS)).Op(gtx.Ops))
 	call.Add(gtx.Ops)
 	return dims
-}
-
-// wrappedText renders plain wrapping text.
-func wrappedText(gtx *layout.Context, th *theme.Theme, s string, c color.NRGBA) layout.Dimensions {
-	mt := th.Material()
-	l := label(mt, unit.Sp(13), s, c)
-	l.WrapPolicy = text.WrapWords
-	return l.Layout(*gtx)
-}
-
-// label builds a styled material label.
-func label(mt *material.Theme, sp unit.Sp, s string, c color.NRGBA) material.LabelStyle {
-	l := material.Label(mt, sp, s)
-	l.Color = c
-	return l
 }
 
 // colorFor maps a notice level onto the status tokens; anything else is main

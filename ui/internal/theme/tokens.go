@@ -62,6 +62,22 @@ const (
 	TabCloseHit  = unit.Dp(20)
 )
 
+// ProseMeasure caps the reading column of a prose window: long lines tire
+// before the column fills a frame, so the markdown preview holds the
+// document at this width and centers it in the rest.
+const ProseMeasure = unit.Dp(780)
+
+// SidebarWidth is the session list's column width in the app window: wide
+// enough for a vendor name, state and wait reason at type.body, never a
+// second pane. F10.20's slot grid owns the shell chrome; until then the
+// window's screens use this directly.
+const SidebarWidth = unit.Dp(240)
+
+// CardEstimate is the height assumed for a transcript card its list has
+// never measured: the first frame that renders it replaces the estimate
+// with the measured height (VirtualList §6.26 Estimate).
+const CardEstimate = unit.Dp(96)
+
 // Icon sizes (§3.4).
 const (
 	IconXS = unit.Dp(12)
@@ -74,6 +90,9 @@ const (
 const (
 	// Hairline is the width of borders and dividers.
 	Hairline = unit.Dp(1)
+	// HairlineMedium is the width of the emphasis strokes that read too
+	// faint at Hairline: mdview's link underlines and outlines.
+	HairlineMedium = unit.Dp(1.5)
 	// FocusStroke is the keyboard focus ring width; the ring is drawn
 	// FocusOffset outside the control's edge (§3.4, v0.3), so a standalone
 	// control needs FocusStroke+FocusOffset of room around it.

@@ -6,11 +6,9 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
-	"gioui.org/unit"
-	"gioui.org/widget"
-	"gioui.org/widget/material"
 
 	"github.com/syurodev/fugue/ui/internal/hostconn"
+	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/transcriptview"
@@ -43,14 +41,15 @@ type screens struct {
 	sidebar     *session.Sidebar
 	transcripts map[string]*session.Transcript
 	// views holds one scroll state per session, so session A's offset never
-	// leaks into session B; the cards themselves live in the one shared
-	// window cache.
+	// leaks into session B; viewCache is the window's one shared layout
+	// cache every session's list rides (F10.4a, desktop-app §7).
 	views     map[string]*transcriptview.State
-	viewCache *transcriptview.Cache
+	viewCache *kit.VirtualHeightCache
 	// open is the open session's id, empty when none is.
 	open string
 
-	clicks map[string]*widget.Clickable
+	header *kit.SectionHeaderState
+	rows   map[string]*kit.ListRowState
 	// pendingPage and pendingOlder guard one read per trigger, and scrolled
 	// makes paging older a user-driven act: it arms after the first scroll
 	// and resets when the session changes.
@@ -65,15 +64,15 @@ type screens struct {
 // newScreens builds the screens over the manager and its fetcher.
 func newScreens(m *hostconn.Manager, fetcher pageFetcher) *screens {
 	return &screens{
-		m:            m,
-		fetcher:      fetcher,
-		sidebar:      session.NewSidebar(),
-		transcripts:  map[string]*session.Transcript{},
-		views:        map[string]*transcriptview.State{},
-		viewCache:    transcriptview.NewCache(),
-		clicks:       map[string]*widget.Clickable{},
-		pendingPage:  map[string]bool{},
-		pendingOlder: map[string]bool{},
+		m:           m,
+		fetcher:     fetcher,
+		sidebar:     session.NewSidebar(),
+		transcripts: map[string]*session.Transcript{},
+		views:       map[string]*transcriptview.State{},
+		viewCache:   kit.NewVirtualHeightCache(),
+		header:      kit.NewSectionHeaderState(true),
+		rows:        map[string]*kit.ListRowState{},
+		pendingPage: map[string]bool{}, pendingOlder: map[string]bool{},
 	}
 }
 
@@ -99,7 +98,7 @@ func (s *screens) prune() {
 	pruneKnown(s.transcripts, known)
 	pruneKnown(s.pendingPage, known)
 	pruneKnown(s.pendingOlder, known)
-	pruneKnown(s.clicks, known)
+	pruneKnown(s.rows, known)
 }
 
 // pruneKnown deletes every key of m the known set does not name.
@@ -273,93 +272,108 @@ func (s *screens) fail(err error) {
 }
 
 // layout draws the sidebar and the transcript pane.
-func (s *screens) layout(gtx layout.Context, th theme.Theme) {
-	layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
+	layout.Flex{Axis: layout.Horizontal}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Right: unit.Dp(8)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return s.layoutSidebar(gtx, th)
+			return layout.Inset{Right: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				local := gtx
+				return s.layoutSidebar(&local, env)
 			})
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return s.layoutTranscript(gtx, th)
+			local := gtx
+			return s.layoutTranscript(&local, env)
 		}),
 	)
 }
 
-// layoutSidebar draws the session list; a row click opens the session.
-func (s *screens) layoutSidebar(gtx layout.Context, th theme.Theme) layout.Dimensions {
-	mt := th.Material()
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			l := material.Label(mt, unit.Sp(14), "Sessions")
-			l.Color = th.Chrome().FgMuted
-			return l.Layout(gtx)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, s.sessionRows(gtx, th, mt)...)
-		}),
-	)
+// layoutSidebar draws the session list; a row click opens the session. The
+// column holds the SidebarWidth token: kit rows fill the width they are
+// given, so the list must not swallow the transcript's half of the window.
+func (s *screens) layoutSidebar(gtx *layout.Context, env *kit.Env) layout.Dimensions {
+	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(theme.SidebarWidth))
+	header, _ := s.header.Layout(env, gtx, &kit.SectionHeaderProps{Label: "Sessions"},
+		func(gtx *layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, s.sessionRows(env)...)
+		})
+	return header
 }
 
-// sessionRows builds one clickable row per session.
-func (s *screens) sessionRows(gtx layout.Context, th theme.Theme, mt *material.Theme) []layout.FlexChild {
+// sessionRows builds one kit row per session; the row's click opens it.
+func (s *screens) sessionRows(env *kit.Env) []layout.FlexChild {
 	rows := make([]layout.FlexChild, 0, len(s.sidebar.List()))
 	for _, sess := range s.sidebar.List() {
-		click, ok := s.clicks[sess.ID]
+		row, ok := s.rows[sess.ID]
 		if !ok {
-			click = new(widget.Clickable)
-			s.clicks[sess.ID] = click
+			row = kit.NewListRowState()
+			row.Enter()
+			s.rows[sess.ID] = row
 		}
-		if click.Clicked(gtx) {
-			s.openSession(sess.ID)
-		}
+		selected := s.open == sess.ID
 		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				label := sess.Vendor
-				if label == "" {
-					label = "session"
-				}
-				label += " · " + sess.State
-				if sess.WaitingReason != "" {
-					label += " · " + sess.WaitingReason
-				}
-				l := material.Label(mt, unit.Sp(13), label)
-				l.Color = th.Chrome().Fg
-				return layout.Inset{Top: unit.Dp(4)}.Layout(gtx, l.Layout)
+			local := gtx
+			dims, ev := row.Layout(env, &local, &kit.ListRowProps{
+				Label:     sessionName(sess),
+				Secondary: sessionState(sess),
+				Selected:  selected,
 			})
+			if ev.Clicked {
+				s.openSession(sess.ID)
+			}
+			return dims
 		}))
 	}
 	return rows
 }
 
+// sessionName names a session row: the vendor, or "session" when the list
+// read has not named one yet.
+func sessionName(sess session.Session) string {
+	if sess.Vendor == "" {
+		return "session"
+	}
+	return sess.Vendor
+}
+
+// sessionState is the row's secondary text: the state and the wait reason,
+// in FgMuted like every kit row's secondary text.
+func sessionState(sess session.Session) string {
+	state := sess.State
+	if sess.WaitingReason != "" {
+		state += " · " + sess.WaitingReason
+	}
+	return state
+}
+
 // layoutTranscript draws the open session's transcript, read-only.
-func (s *screens) layoutTranscript(gtx layout.Context, th theme.Theme) layout.Dimensions {
-	mt := th.Material()
+func (s *screens) layoutTranscript(gtx *layout.Context, env *kit.Env) layout.Dimensions {
 	var items []*session.Item
 	if t := s.transcripts[s.open]; t != nil {
 		items = t.Items()
 	}
 	view := s.viewFor(s.open)
-	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			paint.FillShape(gtx.Ops, th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
+			local := gtx
+			paint.FillShape(local.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: local.Constraints.Max}.Op())
 			if len(items) == 0 && s.open == "" {
-				l := material.Label(mt, unit.Sp(14), "Select a session")
-				l.Color = th.Chrome().FgMuted
-				return layout.Center.Layout(gtx, l.Layout)
+				// TODO(F10.19): Move the empty state onto the kit's EmptyState (§6.25).
+				return layout.Center.Layout(local, func(gtx layout.Context) layout.Dimensions {
+					l := gtx
+					return kit.Label(env, &l, theme.TypeSmall(), env.Th.Chrome().FgMuted, "Select a session")
+				})
 			}
-			dims := transcriptview.Layout(&gtx, &th, view, items)
+			dims := transcriptview.Layout(env, &local, view, items)
 			s.trackScroll(view)
 			s.maybePageOlder()
 			return dims
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			local := gtx
 			if s.lastErr == "" {
 				return layout.Dimensions{}
 			}
-			l := material.Label(mt, unit.Sp(12), s.lastErr)
-			l.Color = th.Status().Danger
-			return l.Layout(gtx)
+			return kit.Label(env, &local, theme.TypeSmall(), env.Th.Status().Danger, s.lastErr)
 		}),
 	)
 }
