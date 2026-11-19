@@ -270,7 +270,7 @@ func (e *Env) trackTab(gtx *layout.Context) {
 	for {
 		ev, ok := gtx.Event(key.Filter{
 			Name:     key.NameTab,
-			Optional: key.ModShift | key.ModCtrl | key.ModAlt | key.ModCommand,
+			Optional: key.ModShift,
 		})
 		if !ok {
 			return
