@@ -109,9 +109,31 @@ func ValidateRoleIdentifier(field, name string) error {
 	return validateRoleIdentifier(field, name)
 }
 
-// ValidateTaskIdentifier validates a task identifier against [a-z0-9][a-z0-9_-]*.
-func ValidateTaskIdentifier(field, name string) error {
-	return validateTaskIdentifier(field, name)
+// ValidateDurableTaskID validates a persisted team task identifier, which may
+// include a team namespace dot and a retry suffix (~r<n>), without allowing path
+// traversal, git ref-lock suffixes, or control characters.
+func ValidateDurableTaskID(field, name string) error {
+	if len(name) == 0 || len(name) > 128 {
+		return &ValidationError{Field: field, Detail: "must be 1..128 ASCII characters", Reason: ErrInvalidSpec}
+	}
+	if !isAlphaNum(name[0]) || strings.Contains(name, "..") ||
+		strings.HasSuffix(name, ".") || strings.HasSuffix(name, ".lock") || strings.HasSuffix(name, "~") {
+		return &ValidationError{Field: field, Detail: "invalid durable task ID", Reason: ErrInvalidSpec}
+	}
+	for i := 1; i < len(name); i++ {
+		if !isDurableTaskIDChar(name[i]) {
+			return &ValidationError{Field: field, Detail: "invalid durable task ID", Reason: ErrInvalidSpec}
+		}
+	}
+	return nil
+}
+
+func isAlphaNum(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
+
+func isDurableTaskIDChar(c byte) bool {
+	return isAlphaNum(c) || c == '-' || c == '_' || c == '.' || c == '~'
 }
 
 func validateRoleIdentifier(field, name string) error {

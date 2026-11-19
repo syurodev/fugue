@@ -52,6 +52,7 @@ func expectedTaskTransitions() map[teams.TaskTransitionKey]teams.TaskState {
 		{From: teams.TaskStateIntegrating, Event: teams.TaskEventIntegrate}:  teams.TaskStateDone,
 		{From: teams.TaskStateIntegrating, Event: teams.TaskEventFail}:       teams.TaskStateFailed,
 		{From: teams.TaskStateIntegrating, Event: teams.TaskEventCancel}:     teams.TaskStateCancelled,
+		{From: teams.TaskStateFailed, Event: teams.TaskEventSupersede}:       teams.TaskStateStopped,
 		{From: teams.TaskStateUnknown, Event: teams.TaskEventDecisionResume}: teams.TaskStateStarting,
 		{From: teams.TaskStateUnknown, Event: teams.TaskEventDecisionKeep}:   teams.TaskStateReview,
 		{From: teams.TaskStateUnknown, Event: teams.TaskEventDecisionCancel}: teams.TaskStateCancelled,

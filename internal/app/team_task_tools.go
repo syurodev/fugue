@@ -18,6 +18,10 @@ const (
 	taskResultToolName = "fugue_task_result"
 	taskDoneToolName   = "fugue_task_done"
 	taskAskToolName    = "fugue_task_ask"
+	taskAnswerToolName = "fugue_task_answer"
+	taskRetryToolName  = "fugue_task_retry"
+	taskAcceptToolName = "fugue_task_accept"
+	taskRejectToolName = "fugue_task_reject"
 	teamNoteToolName   = "fugue_team_note"
 	teamBriefToolName  = "fugue_team_brief"
 )
@@ -31,6 +35,10 @@ func teamTaskTools(svc *teamTaskService) []*FugueTool {
 		taskResultTool(svc),
 		taskDoneTool(svc),
 		taskAskTool(svc),
+		taskAnswerTool(svc),
+		taskRetryTool(svc),
+		taskAcceptTool(svc),
+		taskRejectTool(svc),
 		teamNoteTool(svc),
 		teamBriefTool(svc),
 	}
@@ -215,5 +223,67 @@ func teamBriefTool(svc *teamTaskService) *FugueTool {
 				return "", err
 			}
 			return svc.Brief(ctx, sessionID, a.Offset, a.Limit)
+		})
+}
+
+func delegatorJSONTool[A any](svc *teamTaskService, name, desc, schema string, fn func(context.Context, string, A) (string, error)) *FugueTool {
+	avail := roleAvailable(svc, vendorstore.RoleLead, vendorstore.RoleTeamManager)
+	return readTool(name, desc, schema, avail,
+		func(ctx context.Context, sessionID string, raw json.RawMessage) (string, error) {
+			var a A
+			if err := decodeStrictArgs(raw, &a); err != nil {
+				return "", err
+			}
+			return fn(ctx, sessionID, a)
+		})
+}
+
+func taskAnswerTool(svc *teamTaskService) *FugueTool {
+	const schema = `{"type":"object","properties":{"task_id":{"type":"string"},"answer":{"type":"string","maxLength":16384},"forward_to":{"type":"string","enum":["parent","user"]}},"required":["task_id"]}`
+	type args struct {
+		TaskID    string `json:"task_id"`
+		Answer    string `json:"answer"`
+		ForwardTo string `json:"forward_to"`
+	}
+	return delegatorJSONTool(svc, taskAnswerToolName, "Answer an asking direct child task or forward its question to your parent or the user.", schema,
+		func(ctx context.Context, sessionID string, a args) (string, error) {
+			return svc.Answer(ctx, sessionID, a.TaskID, a.Answer, a.ForwardTo)
+		})
+}
+
+func taskRetryTool(svc *teamTaskService) *FugueTool {
+	const schema = `{"type":"object","properties":{"task_id":{"type":"string"},"role":{"type":"string"},"model":{"type":"string"}},"required":["task_id"]}`
+	type args struct {
+		TaskID string `json:"task_id"`
+		Role   string `json:"role"`
+		Model  string `json:"model"`
+	}
+	return delegatorJSONTool(svc, taskRetryToolName, "Retry a failed direct child task with the same role and model (up to 2 retries).", schema,
+		func(ctx context.Context, sessionID string, a args) (string, error) {
+			return svc.Retry(ctx, sessionID, a.TaskID, a.Role, a.Model)
+		})
+}
+
+func taskAcceptTool(svc *teamTaskService) *FugueTool {
+	const schema = `{"type":"object","properties":{"task_id":{"type":"string"},"note":{"type":"string","maxLength":4096}},"required":["task_id"]}`
+	type args struct {
+		TaskID string `json:"task_id"`
+		Note   string `json:"note"`
+	}
+	return delegatorJSONTool(svc, taskAcceptToolName, "Accept a direct child task in review state.", schema,
+		func(ctx context.Context, sessionID string, a args) (string, error) {
+			return svc.Accept(ctx, sessionID, a.TaskID, a.Note)
+		})
+}
+
+func taskRejectTool(svc *teamTaskService) *FugueTool {
+	const schema = `{"type":"object","properties":{"task_id":{"type":"string"},"reason":{"type":"string","maxLength":16384}},"required":["task_id","reason"]}`
+	type args struct {
+		TaskID string `json:"task_id"`
+		Reason string `json:"reason"`
+	}
+	return delegatorJSONTool(svc, taskRejectToolName, "Reject a direct child task in review state and request changes.", schema,
+		func(ctx context.Context, sessionID string, a args) (string, error) {
+			return svc.Reject(ctx, sessionID, a.TaskID, a.Reason)
 		})
 }

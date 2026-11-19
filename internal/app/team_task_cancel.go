@@ -67,10 +67,13 @@ func (s *teamTaskService) buildCancelEvent(c *callerTeamContext, taskID string, 
 }
 
 func (s *teamTaskService) closeCancelledSessions(ctx context.Context, sessions []string) {
-	if s.sessions == nil {
-		return
-	}
 	for _, sid := range sessions {
+		if s.interactions != nil && s.interactions.owner != nil {
+			s.interactions.owner.ResetSession(sid)
+		}
+		if s.sessions == nil {
+			continue
+		}
 		if closeErr := s.sessions.Close(ctx, sid, vendor.CloseHostStop); closeErr != nil {
 			slog.WarnContext(ctx, "closing cancelled task session failed", "session_id", sid, "error_code", string(errcode.CodeOf(closeErr)))
 		}

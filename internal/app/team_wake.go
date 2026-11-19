@@ -343,7 +343,7 @@ func (w *teamWake) sessionCwd(ctx context.Context, session *vendorstore.Session)
 		return root, nil
 	}
 	repoID := repoIDFor(root)
-	path, err := gitops.TaskWorktreePath(w.deps.DataDir, repoID, session.TaskID)
+	path, err := gitops.TaskWorktreePath(w.deps.DataDir, repoID, gitTaskID(session.TaskID))
 	if err != nil {
 		return "", boundaryError("derive the resumed session worktree path", err)
 	}

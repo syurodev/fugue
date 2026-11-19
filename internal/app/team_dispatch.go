@@ -131,23 +131,50 @@ func (d *teamDispatcher) DispatchAll(ctx context.Context) error {
 // amend starts only through its delegator, and a root starts only when it is
 // the lead.
 func nextStartable(tasks []vendorstore.TaskRecord, held map[string]bool) *vendorstore.TaskRecord {
-	byID := make(map[string]*vendorstore.TaskRecord, len(tasks))
-	for i := range tasks {
-		byID[tasks[i].TaskID] = &tasks[i]
-	}
+	byID, retryChild := resolveTaskChain(tasks)
 	for i := range tasks {
 		t := &tasks[i]
 		if t.State != vendorstore.TaskStateQueued || t.ExplicitStart || held[t.TaskID] {
 			continue
 		}
-		if startable(t, byID) {
+		if startable(t, byID, retryChild) {
 			return t
 		}
 	}
 	return nil
 }
 
-func startable(t *vendorstore.TaskRecord, byID map[string]*vendorstore.TaskRecord) bool {
+// resolveTaskChain indexes tasks by ID and maps each superseded task to its
+// immediate retry child so dependency resolution follows retries without
+// mutating depends_on (Q-126).
+func resolveTaskChain(tasks []vendorstore.TaskRecord) (map[string]*vendorstore.TaskRecord, map[string]string) {
+	byID := make(map[string]*vendorstore.TaskRecord, len(tasks))
+	retryChild := make(map[string]string)
+	for i := range tasks {
+		t := &tasks[i]
+		byID[t.TaskID] = t
+		if t.RetryOf != "" {
+			retryChild[t.RetryOf] = t.TaskID
+		}
+	}
+	return byID, retryChild
+}
+
+// latestAttempt walks the retry chain forward from taskID and returns the
+// latest attempt record, or nil when taskID does not exist.
+func latestAttempt(taskID string, byID map[string]*vendorstore.TaskRecord, retryChild map[string]string) *vendorstore.TaskRecord {
+	cur := taskID
+	for range len(byID) + 1 {
+		next, ok := retryChild[cur]
+		if !ok || next == "" {
+			break
+		}
+		cur = next
+	}
+	return byID[cur]
+}
+
+func startable(t *vendorstore.TaskRecord, byID map[string]*vendorstore.TaskRecord, retryChild map[string]string) bool {
 	if t.ParentTaskID == "" {
 		return t.HierarchyRole == vendorstore.RoleLead
 	}
@@ -156,7 +183,7 @@ func startable(t *vendorstore.TaskRecord, byID map[string]*vendorstore.TaskRecor
 		return false
 	}
 	for _, dep := range t.DependsOn {
-		if d := byID[dep]; d == nil || d.State != vendorstore.TaskStateDone {
+		if d := latestAttempt(dep, byID, retryChild); d == nil || d.State != vendorstore.TaskStateDone {
 			return false
 		}
 	}
@@ -210,6 +237,9 @@ func (d *teamDispatcher) bindLead(ctx context.Context, rec *vendorstore.TeamReco
 		return false, err
 	}
 	if err := d.appendTaskStartedWithRetry(ctx, rec.TeamID, task.TaskID, rec.SessionID); err != nil {
+		if failErr := d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateStarting, rec.SessionID, failSessionStart); failErr != nil {
+			return false, failErr
+		}
 		return false, err
 	}
 	return true, nil
@@ -281,10 +311,7 @@ func (d *teamDispatcher) startTaskAttempt(ctx context.Context, teamID, taskID st
 	if rec.State != vendorstore.TeamStateActive {
 		return errcode.New(errcode.FailedPrecondition, "the team is not active")
 	}
-	byID := make(map[string]*vendorstore.TaskRecord, len(tasks))
-	for i := range tasks {
-		byID[tasks[i].TaskID] = &tasks[i]
-	}
+	byID, retryChild := resolveTaskChain(tasks)
 	task := byID[taskID]
 	if task == nil {
 		return errcode.New(errcode.NotFound, "team task not found")
@@ -292,7 +319,7 @@ func (d *teamDispatcher) startTaskAttempt(ctx context.Context, teamID, taskID st
 	if task.State != vendorstore.TaskStateQueued {
 		return errcode.New(errcode.FailedPrecondition, "the task is not queued")
 	}
-	if !startable(task, byID) {
+	if !startable(task, byID, retryChild) {
 		return errcode.New(errcode.FailedPrecondition, "the task dependencies are not satisfied")
 	}
 	started, err := d.start(ctx, &rec, task, tasks)
