@@ -95,18 +95,19 @@ func TestPagingOlderLoadsOnePagePerScrollToTheTop(t *testing.T) {
 }
 
 // TestScrollStateIsPerSession pins that each session keeps its own scroll
-// state: session B starts fresh at its newest item and session A's offset is
-// intact when the reader returns.
+// state: session B starts fresh at offset zero and session A's offset is
+// intact when the reader returns. A fresh state follows the newest item; the
+// first layout pins that (transcriptview's TestOpeningASessionShowsTheNewestItem).
 func TestScrollStateIsPerSession(t *testing.T) {
 	t.Parallel()
 	s, _ := newTestScreens(t)
 	s.openSession("a")
 	s.openSession("b")
 
-	// Session B starts fresh, following its newest item.
+	// Session B starts fresh, at the top of its own state.
 	b := s.viewFor("b")
-	if !b.Following() || b.Offset() != 0 {
-		t.Fatalf("session b state = follow %v offset %d, want fresh", b.Following(), b.Offset())
+	if b.Offset() != 0 {
+		t.Fatalf("session b offset = %d, want a fresh 0", b.Offset())
 	}
 
 	// Session a keeps its scroll state across the round trip.
@@ -120,8 +121,8 @@ func TestScrollStateIsPerSession(t *testing.T) {
 	if got := s.viewFor("a").Offset(); got != 500 {
 		t.Fatalf("session a offset = %d after the round trip, want 500", got)
 	}
-	if !s.viewFor("b").Following() {
-		t.Fatal("session b lost its own follow state")
+	if got := s.viewFor("b").Offset(); got != 0 {
+		t.Fatalf("session b offset = %d after the round trip, want its own 0", got)
 	}
 
 	// When a session leaves the list, its scroll and expansion state goes

@@ -13,7 +13,6 @@ import (
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/text"
-	"gioui.org/unit"
 
 	"github.com/syurodev/fugue/ui/internal/markdown"
 	"github.com/syurodev/fugue/ui/internal/theme"
@@ -150,7 +149,7 @@ func (v *view) drawAtom(gtx *layout.Context, a *atom, x, base int) {
 
 // outline strokes a rounded box in c.
 func (v *view) outline(gtx *layout.Context, box image.Rectangle, c color.NRGBA) {
-	w := float32(max(gtx.Dp(unit.Dp(1.5)), 1))
+	w := float32(max(gtx.Dp(theme.HairlineMedium), 1))
 	paint.FillShape(gtx.Ops, c, clip.Stroke{Path: clip.UniformRRect(box, gtx.Dp(3)).Path(gtx.Ops), Width: w}.Op())
 }
 

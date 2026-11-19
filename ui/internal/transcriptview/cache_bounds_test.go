@@ -1,39 +1,54 @@
 package transcriptview
 
 import (
-	"fmt"
 	"testing"
 
+	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
 )
 
+// maxCacheEntries is the shared cache's bound (desktop-app §7): heights,
+// payloads and the recency order all live within it.
+const maxCacheEntries = 2000
+
 // TestLayoutCacheStaysBoundedAcrossRevisions pins the whole bound: pushing
-// more than maxCards items and revisions through the cache leaves the
-// entries, the remembered heights and the recency list all within maxCards —
-// no card, doc or height outlives the bound of desktop-app §7.
+// more than the bound's worth of items and revisions through the shared
+// cache leaves the entries within it — no height, doc or payload outlives
+// the bound of desktop-app §7 (F10.4a round 3, now over the kit's cache).
 func TestLayoutCacheStaysBoundedAcrossRevisions(t *testing.T) {
 	t.Parallel()
-	c := NewCache()
 	// Three revisions of each of 1,200 items: 3,600 cards through a
-	// 2,000-card cache.
-	for rev := uint64(1); rev <= 3; rev++ {
-		for i := range 1200 {
-			c.cards.put(cardKey{itemID: fmt.Sprintf("i%d", i), revision: rev}, &card{height: int(rev)})
+	// 2,000-entry cache. Only the laid-out rows enter the cache, so the
+	// pane scrolls across the whole history once per revision.
+	const items = 1200
+	h := newHarness(t, 600, 800, uniformItems(items, "i"))
+	h.st.FollowOff()
+	h.frame()
+	scrollAcross(t, h, items)
+	for rev := uint64(2); rev <= 3; rev++ {
+		for _, item := range h.items {
+			item.Revision = rev
 		}
+		scrollAcross(t, h, items)
 	}
-	if got := c.Len(); got > maxCards {
-		t.Fatalf("entries = %d, want at most %d", got, maxCards)
+	if got := h.cache.Len(); got > maxCacheEntries {
+		t.Fatalf("entries = %d, want at most %d", got, maxCacheEntries)
 	}
-	if got := len(c.cards.heights); got > maxCards {
-		t.Fatalf("remembered heights = %d, want at most %d", got, maxCards)
-	}
-	if got := c.cards.order.Len(); got > maxCards {
-		t.Fatalf("recency list = %d, want at most %d", got, maxCards)
+}
+
+// scrollAcross walks the reader over the whole history one step at a time,
+// so every item is laid out once and enters the cache.
+func scrollAcross(t *testing.T, h *harness, items int) {
+	t.Helper()
+	const step = 400
+	for offset := 0; offset <= items*estimateH; offset += step {
+		h.st.ScrollTo(offset)
+		h.frame()
 	}
 }
 
 // newHarnessWith builds a harness over the given shared cache.
-func newHarnessWith(t *testing.T, cache *Cache, width, height int, items []*session.Item) *harness {
+func newHarnessWith(t *testing.T, cache *kit.VirtualHeightCache, width, height int, items []*session.Item) *harness {
 	t.Helper()
 	h := newHarness(t, width, height, items)
 	h.cache = cache
@@ -43,14 +58,15 @@ func newHarnessWith(t *testing.T, cache *Cache, width, height int, items []*sess
 
 // TestLayoutCacheIsSharedAcrossSessions pins that the window's one cache
 // serves every session: two views lay their items into the same cache, whose
-// bound covers the sessions together.
+// bound covers the sessions together (F10.4a round 3, now over the kit's
+// cache).
 func TestLayoutCacheIsSharedAcrossSessions(t *testing.T) {
 	t.Parallel()
-	cache := NewCache()
+	cache := kit.NewVirtualHeightCache()
 	ha := newHarnessWith(t, cache, 400, 800, uniformItems(3, "a"))
 	hb := newHarnessWith(t, cache, 400, 800, uniformItems(2, "b"))
-	ha.st.follow = false
-	hb.st.follow = false
+	ha.st.FollowOff()
+	hb.st.FollowOff()
 	ha.frame()
 	hb.frame()
 
@@ -60,11 +76,19 @@ func TestLayoutCacheIsSharedAcrossSessions(t *testing.T) {
 		t.Fatalf("shared cache holds %d cards, want the 5 laid-out cards", got)
 	}
 
-	// And the bound holds with both sessions' items interleaved.
-	for i := range 2500 {
-		cache.cards.put(cardKey{itemID: fmt.Sprintf("s%d", i), revision: 1}, &card{height: 1})
+	// And the bound holds with both sessions' items interleaved: one
+	// session scrolling through 1,800 more items, three revisions' worth of
+	// pushes through the shared bound.
+	hc := newHarnessWith(t, cache, 400, 800, uniformItems(600, "c"))
+	hc.st.FollowOff()
+	hc.frame()
+	for rev := uint64(2); rev <= 3; rev++ {
+		for _, item := range hc.items {
+			item.Revision = rev
+		}
+		scrollAcross(t, hc, 600)
 	}
-	if got := cache.Len(); got > maxCards {
-		t.Fatalf("shared cache grew to %d cards, want at most %d", got, maxCards)
+	if got := cache.Len(); got > maxCacheEntries {
+		t.Fatalf("shared cache grew to %d entries, want at most %d", got, maxCacheEntries)
 	}
 }

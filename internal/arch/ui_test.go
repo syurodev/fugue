@@ -186,10 +186,10 @@ func TestAppWritesOnlyThroughHostAPI(t *testing.T) {
 		target     repo
 		violations []string
 	}{
-		{name: "repository", target: repo{root: repoRoot}},
-		{name: "clean fixture", target: fixture("ui-writes-good")},
+		{name: caseRepository, target: repo{root: repoRoot}},
+		{name: caseClean, target: fixture("ui-writes-good")},
 		{
-			name:   "violations",
+			name:   caseViolations,
 			target: fixture("ui-writes-bad"),
 			violations: []string{
 				"ui/internal/hostconn/hostconn.go imports net: the app opens no socket or database itself, only pkg/client does",

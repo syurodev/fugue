@@ -217,8 +217,8 @@ func TestRoadmapIntegrity(t *testing.T) {
 		repo repo
 		want []string
 	}{
-		{name: "repository", repo: repo{root: repoRoot}},
-		{name: "clean fixture", repo: fixture("roadmap-integrity-good")},
+		{name: caseRepository, repo: repo{root: repoRoot}},
+		{name: caseClean, repo: fixture("roadmap-integrity-good")},
 		{name: "violations", repo: fixture("roadmap-integrity-bad"), want: []string{
 			"F9.6 appears on 2 rows",
 			"F1.1 depends on missing F99.1",

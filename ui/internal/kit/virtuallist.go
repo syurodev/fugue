@@ -1,7 +1,6 @@
 package kit
 
 import (
-	"container/list"
 	"image"
 	"sort"
 
@@ -48,87 +47,12 @@ type VirtualListProps struct {
 	FollowBottom bool
 }
 
-type virtualHeightKey struct {
-	key      string
-	revision uint64
-}
-
-type virtualLatestHeight struct {
-	revision uint64
-	height   int
-}
-
-type virtualHeightEntry struct {
-	key    virtualHeightKey
-	height int
-	self   *list.Element
-}
-
-type virtualHeightCache struct {
-	max     int
-	entries map[virtualHeightKey]*virtualHeightEntry
-	heights map[string]virtualLatestHeight
-	order   *list.List
-}
-
-func newVirtualHeightCache(maxEntries int) *virtualHeightCache {
-	return &virtualHeightCache{
-		max:     maxEntries,
-		entries: map[virtualHeightKey]*virtualHeightEntry{},
-		heights: map[string]virtualLatestHeight{},
-		order:   list.New(),
-	}
-}
-
-func (c *virtualHeightCache) get(k virtualHeightKey) (int, bool) {
-	e, ok := c.entries[k]
-	if !ok {
-		return 0, false
-	}
-	c.order.MoveToFront(e.self)
-	return e.height, true
-}
-
-func (c *virtualHeightCache) latest(key string) (int, bool) {
-	h, ok := c.heights[key]
-	return h.height, ok
-}
-
-func (c *virtualHeightCache) put(k virtualHeightKey, height int) {
-	c.heights[k.key] = virtualLatestHeight{revision: k.revision, height: height}
-	if e, ok := c.entries[k]; ok {
-		e.height = height
-		c.order.MoveToFront(e.self)
-		return
-	}
-	el := c.order.PushFront(k)
-	c.entries[k] = &virtualHeightEntry{key: k, height: height, self: el}
-	c.evict()
-}
-
-func (c *virtualHeightCache) evict() {
-	for c.order.Len() > c.max {
-		last := c.order.Back()
-		if last == nil {
-			return
-		}
-		c.order.Remove(last)
-		k, ok := last.Value.(virtualHeightKey)
-		if !ok {
-			return
-		}
-		delete(c.entries, k)
-		if h, held := c.heights[k.key]; held && h.revision == k.revision {
-			delete(c.heights, k.key)
-		}
-	}
-}
-
-// VirtualListState holds the bounded LRU height cache, per-key persistent
-// state, scroll offset, anchor, and scrollbar state of one VirtualList (§6.26).
+// VirtualListState holds the bounded LRU height cache with the callers'
+// payloads, per-key persistent state, scroll offset, anchor, and scrollbar
+// state of one VirtualList (§6.26).
 type VirtualListState struct {
 	tag           bool
-	cache         *virtualHeightCache
+	cache         *VirtualHeightCache
 	itemStates    map[string]*VirtualItemState
 	bar           scrollBar
 	scrollOffset  int
@@ -143,10 +67,23 @@ type VirtualListState struct {
 	rendered      int
 }
 
-// NewVirtualListState builds a VirtualListState with a bounded LRU height cache.
+// NewVirtualListState builds a VirtualListState with a bounded LRU height
+// cache of its own.
 func NewVirtualListState() *VirtualListState {
+	return newListState(newVirtualHeightCache(maxVirtualHeights))
+}
+
+// NewVirtualListStateShared builds a VirtualListState over an injected
+// height cache, so the lists of one window — one transcript session per
+// list — share a single bound (desktop-app §7). The cache outlives no list:
+// the caller drops it when the window's last list is gone.
+func NewVirtualListStateShared(cache *VirtualHeightCache) *VirtualListState {
+	return newListState(cache)
+}
+
+func newListState(cache *VirtualHeightCache) *VirtualListState {
 	return &VirtualListState{
-		cache:      newVirtualHeightCache(maxVirtualHeights),
+		cache:      cache,
 		itemStates: map[string]*VirtualItemState{},
 		bar:        newScrollBar(),
 	}
@@ -180,6 +117,19 @@ func (s *VirtualListState) SetOffset(v int) {
 	s.following = s.maxOffset > 0 && s.scrollOffset >= s.maxOffset
 }
 
+// BreakFollow unpins the list from the bottom until the reader scrolls back
+// to it: the caller moves the reader or hands control over to them, and the
+// next frames must not drag the view down (§6.26). The follow prop itself
+// stays as it is, so landing at the bottom resumes the pin.
+func (s *VirtualListState) BreakFollow() { s.following = false }
+
+// Visible returns the indexes of the items intersecting the viewport at the
+// current offset, over the cache's heights: what the reader is looking at,
+// for callers that page, anchor or test against the visible items (§6.26).
+func (s *VirtualListState) Visible(gtx *layout.Context, items []VirtualItem, viewport int) (first, last int) {
+	return visibleRange(s.prefix(gtx, items), s.scrollOffset, viewport)
+}
+
 // ItemState returns the persistent per-key state, creating it on first use.
 func (s *VirtualListState) ItemState(key string) *VirtualItemState {
 	st, ok := s.itemStates[key]
@@ -209,6 +159,25 @@ func (s *VirtualListState) ToggleExpanded(key string) bool {
 	st := s.ItemState(key)
 	st.Expanded = !st.Expanded
 	return st.Expanded
+}
+
+// PayloadOf returns the caller's per-key payload of type T, building it with
+// build when the list holds none. This is where a row func keeps the heavy
+// state a VirtualItemState cannot carry — a parsed document, a per-item
+// widget state — within the list's bound: the payload evicts with the key's
+// latest measured height (§6.26). Every call for one key must name the same
+// type; the builder decides it:
+//
+//	st := kit.PayloadOf(s, item.Key, func() *cardState { return &cardState{} })
+func PayloadOf[T any](s *VirtualListState, key string, build func() T) T {
+	if p, ok := s.cache.payload(key, func() any { return build() }).(T); ok {
+		return p
+	}
+	// The payload is only ever of the builder's type; a mismatch means two
+	// call sites disagree about it, and the zero value fails the caller
+	// loudly on use.
+	var zero T
+	return zero
 }
 
 // EnsureVisible requests scrolling just enough on the next frame to keep key
