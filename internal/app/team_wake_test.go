@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/vendor"
@@ -324,7 +325,10 @@ func TestRecoveryNeverResendsABatchThatIsBeingDelivered(t *testing.T) {
 	// The first pump is blocked inside Send: the claim is `delivering` and
 	// the marker is not in the transcript yet.
 	pumpDone := make(chan error, 1)
-	go func() { pumpDone <- f.wake.Pump(t.Context()) }()
+	supervise.Go(t.Context(), "test.wake-pump", func(context.Context) error {
+		pumpDone <- f.wake.Pump(t.Context())
+		return nil
+	})
 	<-started
 
 	// Concurrent triggers — a wake burst and a second pump — must neither
@@ -333,7 +337,10 @@ func TestRecoveryNeverResendsABatchThatIsBeingDelivered(t *testing.T) {
 		f.wake.Notify()
 	}
 	second := make(chan error, 1)
-	go func() { second <- f.wake.Pump(t.Context()) }()
+	supervise.Go(t.Context(), "test.wake-pump-second", func(context.Context) error {
+		second <- f.wake.Pump(t.Context())
+		return nil
+	})
 
 	close(release)
 	if err := <-pumpDone; err != nil {
