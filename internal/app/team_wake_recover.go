@@ -149,8 +149,9 @@ func (w *teamWake) batchText(ctx context.Context, claimed []vendorstore.MailboxM
 	if err != nil {
 		return "", errcode.Wrap(errcode.Internal, "generate the digest nonce", err)
 	}
-	text := teams.BuildDigest(header, entries, nonce, teams.MaxDigestBytes)
-	return mailboxBatchPrefix(claimed[0].BatchID) + "\n\n" + text, nil
+	prefix := mailboxBatchPrefix(claimed[0].BatchID) + "\n\n"
+	text := teams.BuildDigest(header, entries, nonce, teams.MaxDigestBytes-len(prefix))
+	return prefix + text, nil
 }
 
 // decisionTurnText folds a decision message into the digest input: the

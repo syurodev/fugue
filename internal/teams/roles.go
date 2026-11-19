@@ -1,6 +1,9 @@
 package teams
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // Permission defines a catalog role's execution permission level (§5.2).
 type Permission string
@@ -109,22 +112,47 @@ func ValidateRoleIdentifier(field, name string) error {
 	return validateRoleIdentifier(field, name)
 }
 
-// ValidateTaskIdentifier validates a task identifier against [a-z0-9][a-z0-9_-]*.
-func ValidateTaskIdentifier(field, name string) error {
-	return validateTaskIdentifier(field, name)
+// ValidateDurableTaskID validates a persisted team task identifier, which may
+// include a team namespace dot and a retry suffix (~r<n>), within gitops's
+// 100-byte idMaxLength without allowing path traversal, ref-lock suffixes, or
+// control characters.
+func ValidateDurableTaskID(field, name string) error {
+	if len(name) == 0 || len(name) > 100 {
+		return &ValidationError{Field: field, Detail: "must be 1..100 ASCII characters", Reason: ErrInvalidSpec}
+	}
+	if !isAlphaNum(name[0]) || strings.Contains(name, "..") ||
+		strings.HasSuffix(name, ".") || strings.HasSuffix(name, ".lock") || strings.HasSuffix(name, "~") {
+		return &ValidationError{Field: field, Detail: "invalid durable task ID", Reason: ErrInvalidSpec}
+	}
+	for i := 1; i < len(name); i++ {
+		if !isDurableTaskIDChar(name[i]) {
+			return &ValidationError{Field: field, Detail: "invalid durable task ID", Reason: ErrInvalidSpec}
+		}
+	}
+	return nil
+}
+
+func isAlphaNum(c byte) bool {
+	return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
+
+func isDurableTaskIDChar(c byte) bool {
+	return isAlphaNum(c) || c == '-' || c == '_' || c == '.' || c == '~'
 }
 
 func validateRoleIdentifier(field, name string) error {
-	return validateIdentifier(field, name, ErrInvalidCatalog)
+	return validateIdentifier(field, name, 64, ErrInvalidCatalog)
 }
 
 func validateTaskIdentifier(field, name string) error {
-	return validateIdentifier(field, name, ErrInvalidSpec)
+	// Bounded to 56 bytes so "<uuidv7-teamID>.<taskID>~r2" stays within
+	// gitops's 100-byte idMaxLength (36 + 1 + 56 + 3 = 96).
+	return validateIdentifier(field, name, 56, ErrInvalidSpec)
 }
 
-func validateIdentifier(field, name string, reason error) error {
-	if len(name) == 0 || len(name) > 64 {
-		return &ValidationError{Field: field, Detail: "must be 1..64 ASCII characters", Reason: reason}
+func validateIdentifier(field, name string, maxLen int, reason error) error {
+	if len(name) == 0 || len(name) > maxLen {
+		return &ValidationError{Field: field, Detail: fmt.Sprintf("must be 1..%d ASCII characters", maxLen), Reason: reason}
 	}
 	if name[0] == '-' || name[0] == '_' {
 		return &ValidationError{Field: field, Detail: "must match [a-z0-9][a-z0-9_-]*", Reason: reason}

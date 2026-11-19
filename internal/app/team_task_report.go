@@ -128,7 +128,7 @@ func (s *teamTaskService) recordTaskFailedReport(ctx context.Context, c *callerT
 		return &vendorstore.AppendTeamEventInput{
 			EventID: evID, TaskID: cur.caller.TaskID, EventType: vendorstore.EventTaskEnded,
 			Outcome: string(vendorstore.TaskStateFailed), FailureCode: "task_failed", ProtectedPayload: payload,
-			Mailbox: digestSummaryRows(cur.caller.TaskID, cur.caller.ParentTaskID, string(vendorstore.TaskStateFailed), "", summary, false),
+			Mailbox: digestSummaryRows(cur.caller.TaskID, resolvedParentID(cur.caller.ParentTaskID, cur.tasks), string(vendorstore.TaskStateFailed), "", summary, false),
 		}, nil
 	}); err != nil {
 		return "", err
@@ -187,7 +187,7 @@ func (s *teamTaskService) buildReportEvent(cur *callerTeamContext, summary strin
 	}
 	return &vendorstore.AppendTeamEventInput{
 		EventID: evID, TaskID: cur.caller.TaskID, EventType: vendorstore.EventTaskReported, ProtectedPayload: payload,
-		Mailbox: digestSummaryRows(cur.caller.TaskID, cur.caller.ParentTaskID, string(vendorstore.TaskStateChecking), "", summary, false),
+		Mailbox: digestSummaryRows(cur.caller.TaskID, resolvedParentID(cur.caller.ParentTaskID, cur.tasks), string(vendorstore.TaskStateChecking), "", summary, false),
 	}, nil
 }
 
@@ -203,7 +203,7 @@ func (s *teamTaskService) commitTaskWorktree(ctx context.Context, c *callerTeamC
 	if err != nil {
 		return "", boundaryError("resolve workspace root", err)
 	}
-	wt, err := gitops.TaskWorktreePath(s.dataDir, repoIDFor(root), c.caller.TaskID)
+	wt, err := gitops.TaskWorktreePath(s.dataDir, repoIDFor(root), gitTaskID(c.caller.TaskID))
 	if err != nil {
 		return "", boundaryError("derive task worktree", err)
 	}
@@ -259,52 +259,75 @@ func (s *teamTaskService) applyResultGate(ctx context.Context, teamID, taskID, p
 			if ev.FailureCode == "" {
 				ev.FailureCode = "checks_failed"
 			}
-			ev.Mailbox = digestSummaryRows(taskID, parentTaskID, string(vendorstore.TaskStateFailed), ev.FailureCode, "", false)
+			ev.Mailbox = digestSummaryRows(taskID, resolvedParentID(parentTaskID, tasks), string(vendorstore.TaskStateFailed), ev.FailureCode, "", false)
 		}
 		return ev, nil
 	})
 }
 
-// Ask transitions a running task to asking and enqueues a question digest (Q-129).
+// Ask transitions a running task to asking and routes the question either to
+// the direct parent mailbox or to the user question card with a one-line
+// notice to the direct parent (§6.2, Q-129).
 func (s *teamTaskService) Ask(ctx context.Context, sessionID, question, to string) (string, error) {
 	q, target, err := validateAskArgs(question, to)
 	if err != nil {
 		return "", err
 	}
+	if target == askTargetUser && (s.interactions == nil || s.interactions.owner == nil) {
+		return "", errcode.New(errcode.FailedPrecondition, "interaction service is not configured")
+	}
 	payload, err := json.Marshal(taskQuestionPayload{Question: q, To: target})
 	if err != nil {
 		return "", errcode.Wrap(errcode.Internal, "encode question payload", err)
 	}
-	var taskID string
-	var hasMail bool
-	if err := s.appendTeamWithRetry(ctx, sessionID, func(_ context.Context, cur *callerTeamContext) (*vendorstore.AppendTeamEventInput, error) {
+	teamID, workspaceID, askingTask, seq, hasMail, err := s.appendAskEvent(ctx, sessionID, q, target, payload)
+	if err != nil {
+		return "", err
+	}
+	if s.wake != nil && hasMail {
+		s.wake.Notify()
+	}
+	if target == askTargetUser {
+		if cardErr := s.ensureUserQuestionCard(teamID, workspaceID, &askingTask, seq, q); cardErr != nil {
+			return "", cardErr
+		}
+	}
+	return fmt.Sprintf("task %s is waiting for an answer from %s", askingTask.TaskID, target), nil
+}
+
+func (s *teamTaskService) appendAskEvent(
+	ctx context.Context,
+	sessionID, q, target string,
+	payload []byte,
+) (teamID, workspaceID string, asking vendorstore.TaskRecord, seq int64, hasMail bool, err error) {
+	seq, err = s.appendTeamSeqWithRetry(ctx, sessionID, func(_ context.Context, cur *callerTeamContext) (*vendorstore.AppendTeamEventInput, error) {
 		if cur.role != vendorstore.RoleTeamManager && cur.role != vendorstore.RoleMember {
 			return nil, errcode.New(errcode.PermissionDenied, "only a team manager or member may call fugue_task_ask")
 		}
 		if cur.caller == nil || cur.caller.State != vendorstore.TaskStateRunning {
 			return nil, errcode.New(errcode.FailedPrecondition, "task is not running")
 		}
-		taskID = cur.caller.TaskID
+		teamID, workspaceID, asking = cur.team.TeamID, cur.team.WorkspaceID, *cur.caller
 		evID, idErr := s.ids.NewID()
 		if idErr != nil {
 			return nil, errcode.Wrap(errcode.Internal, "generate ask event ID", idErr)
 		}
-		var mail []vendorstore.MailboxEnqueueInput
-		if target == askTargetParent {
-			mail = digestSummaryRows(cur.caller.TaskID, cur.caller.ParentTaskID, string(vendorstore.TaskStateAsking), "", q, true)
-		}
+		parentID := resolvedParentID(cur.caller.ParentTaskID, cur.tasks)
+		mail := askMailboxRows(cur.caller, parentID, q, target)
 		hasMail = len(mail) > 0
 		return &vendorstore.AppendTeamEventInput{
 			EventID: evID, TaskID: cur.caller.TaskID, EventType: vendorstore.EventTaskQuestionAsked,
 			ProtectedPayload: payload, Mailbox: mail,
 		}, nil
-	}); err != nil {
-		return "", err
+	})
+	return teamID, workspaceID, asking, seq, hasMail, err
+}
+
+func askMailboxRows(caller *vendorstore.TaskRecord, parentID, q, target string) []vendorstore.MailboxEnqueueInput {
+	if target == askTargetParent {
+		return digestSummaryRows(caller.TaskID, parentID, string(vendorstore.TaskStateAsking), "", q, true)
 	}
-	if s.wake != nil && hasMail {
-		s.wake.Notify()
-	}
-	return fmt.Sprintf("task %s is waiting for an answer from %s", taskID, target), nil
+	return digestSummaryRows(caller.TaskID, parentID, string(vendorstore.TaskStateAsking), "", "question sent to user (needs you)", false)
 }
 
 func validateAskArgs(question, to string) (string, string, error) {
@@ -323,6 +346,12 @@ func validateAskArgs(question, to string) (string, string, error) {
 
 // Result returns one paged part (summary, output, report, checks, diff) of a readable task (§6.3, Q-127).
 func (s *teamTaskService) Result(ctx context.Context, sessionID, taskID, part string, offset, limit int) (string, error) {
+	if offset < 0 {
+		return "", errcode.New(errcode.InvalidArgument, "offset must be non-negative")
+	}
+	if limit <= 0 || limit > maxResultLimit {
+		limit = defaultResultLimit
+	}
 	c, err := s.resolveCaller(ctx, sessionID)
 	if err != nil {
 		return "", err
@@ -331,22 +360,10 @@ func (s *teamTaskService) Result(ctx context.Context, sessionID, taskID, part st
 	if err != nil {
 		return "", err
 	}
-	if offset < 0 {
-		return "", errcode.New(errcode.InvalidArgument, "offset must be non-negative")
-	}
-	if limit <= 0 || limit > maxResultLimit {
-		limit = defaultResultLimit
-	}
+	target = resolveLatestTarget(target, c.tasks)
 	switch part {
 	case "checks":
-		verdict, gateErr := s.resultGate.Evaluate(ctx, c.team.TeamID, target.TaskID)
-		if gateErr != nil {
-			return "", boundaryError("evaluate checks", gateErr)
-		}
-		if !verdict.Ready {
-			return "not_run", nil
-		}
-		return fmt.Sprintf("passed=%t summary=%s", verdict.Passed, verdict.Summary), nil
+		return s.readTaskChecks(ctx, c.team.TeamID, target.TaskID)
 	case "diff":
 		return s.readTaskDiff(ctx, c, target, offset, limit)
 	case "summary", "output", "report":
@@ -354,6 +371,28 @@ func (s *teamTaskService) Result(ctx context.Context, sessionID, taskID, part st
 	default:
 		return "", errcode.New(errcode.InvalidArgument, "part must be summary, output, report, checks, or diff")
 	}
+}
+
+func resolveLatestTarget(target *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord) *vendorstore.TaskRecord {
+	if target.State != vendorstore.TaskStateStopped {
+		return target
+	}
+	byID, retryChild := resolveTaskChain(tasks)
+	if latest := latestAttempt(target.TaskID, byID, retryChild); latest != nil {
+		return latest
+	}
+	return target
+}
+
+func (s *teamTaskService) readTaskChecks(ctx context.Context, teamID, taskID string) (string, error) {
+	verdict, gateErr := s.resultGate.Evaluate(ctx, teamID, taskID)
+	if gateErr != nil {
+		return "", boundaryError("evaluate checks", gateErr)
+	}
+	if !verdict.Ready {
+		return "not_run", nil
+	}
+	return fmt.Sprintf("passed=%t summary=%s", verdict.Passed, verdict.Summary), nil
 }
 
 func (s *teamTaskService) readTaskDiff(ctx context.Context, c *callerTeamContext, target *vendorstore.TaskRecord, offset, limit int) (string, error) {
@@ -375,7 +414,7 @@ func (s *teamTaskService) readTaskDiff(ctx context.Context, c *callerTeamContext
 	if err != nil {
 		return "", err
 	}
-	res, err := s.git.DiffAgainstParent(ctx, s.dataDir, repoIDFor(root), target.TaskID, parentRef, offset, limit)
+	res, err := s.git.DiffAgainstParent(ctx, s.dataDir, repoIDFor(root), gitTaskID(target.TaskID), parentRef, offset, limit)
 	if err != nil {
 		return "", boundaryError("read task diff", err)
 	}

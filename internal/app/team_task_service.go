@@ -16,14 +16,26 @@ import (
 )
 
 const (
-	maxTeamNoteBytes   = 2 << 10
-	maxTeamNotesCount  = 100
-	maxTeamBriefBytes  = 16 << 10
-	maxTaskSendBytes   = 16 << 10
-	maxAppendRetries   = 3
-	defaultResultLimit = 16 << 10
-	maxResultLimit     = 64 << 10
+	maxTeamNoteBytes             = 2 << 10
+	maxTeamNotesCount            = 100
+	maxTeamBriefBytes            = 16 << 10
+	maxTaskSendBytes             = 4 << 10
+	maxEscapedDigestMessageBytes = 6 << 10
+	maxAppendRetries             = 3
+	defaultResultLimit           = 16 << 10
+	maxResultLimit               = 64 << 10
 )
+
+func validateDigestMessage(field, text string) (string, error) {
+	trimmed := strings.TrimSpace(text)
+	if trimmed == "" || len(trimmed) > maxTaskSendBytes {
+		return "", errcode.New(errcode.InvalidArgument, fmt.Sprintf("%s must be 1..%d bytes", field, maxTaskSendBytes))
+	}
+	if len(teams.EscapeDigestText(trimmed)) > maxEscapedDigestMessageBytes {
+		return "", errcode.New(errcode.InvalidArgument, field+" exceeds escaped digest budget")
+	}
+	return trimmed, nil
+}
 
 type teamNotePayload struct {
 	AuthorTaskID string `json:"author_task_id"`
@@ -31,21 +43,23 @@ type teamNotePayload struct {
 }
 
 type taskQuestionPayload struct {
-	Question string `json:"question"`
-	To       string `json:"to"`
+	Question            string `json:"question"`
+	To                  string `json:"to"`
+	ForwardedFromTaskID string `json:"forwarded_from_task_id,omitempty"`
 }
 
 type teamTaskService struct {
-	store      *vendorstore.Store
-	sessions   taskSessions
-	roots      rootResolver
-	git        *gitops.Manager
-	dataDir    string
-	ids        ids.Generator
-	vault      *vault.Service
-	resultGate ResultGate
-	dispatch   *teamDispatcher
-	wake       *teamWake
+	store        *vendorstore.Store
+	sessions     taskSessions
+	roots        rootResolver
+	git          *gitops.Manager
+	dataDir      string
+	ids          ids.Generator
+	vault        *vault.Service
+	resultGate   ResultGate
+	dispatch     *teamDispatcher
+	wake         *teamWake
+	interactions *InteractionService
 }
 
 func newTeamTaskService(store *vendorstore.Store, sessions taskSessions, roots rootResolver,
@@ -63,6 +77,10 @@ func newTeamTaskService(store *vendorstore.Store, sessions taskSessions, roots r
 func (s *teamTaskService) SetRuntime(dispatch *teamDispatcher, wake *teamWake) {
 	s.dispatch = dispatch
 	s.wake = wake
+}
+
+func (s *teamTaskService) SetInteractions(inter *InteractionService) {
+	s.interactions = inter
 }
 
 type callerTeamContext struct {
@@ -145,7 +163,7 @@ func (c *callerTeamContext) requireDelegator(taskID string) (*vendorstore.TaskRe
 	if c.caller != nil && c.caller.State != vendorstore.TaskStateRunning {
 		return nil, errcode.New(errcode.FailedPrecondition, "caller task is not running")
 	}
-	if err := teams.ValidateTaskIdentifier("task_id", taskID); err != nil {
+	if err := teams.ValidateDurableTaskID("task_id", taskID); err != nil {
 		return nil, errcode.New(errcode.InvalidArgument, err.Error())
 	}
 	target, ok := findTask(c.tasks, taskID)
@@ -155,14 +173,15 @@ func (c *callerTeamContext) requireDelegator(taskID string) (*vendorstore.TaskRe
 	if err := teams.ValidateRoleIdentifier("role", target.CatalogRole); err != nil {
 		return nil, errcode.New(errcode.InvalidArgument, err.Error())
 	}
-	if c.caller == nil || target.ParentTaskID != c.caller.TaskID {
+	byID, retryChild := resolveTaskChain(c.tasks)
+	if c.caller == nil || !sameAttemptChain(target.ParentTaskID, c.caller.TaskID, byID, retryChild) {
 		return nil, errcode.New(errcode.PermissionDenied, "cannot act on a task outside your delegation subtree")
 	}
 	return target, nil
 }
 
 func (c *callerTeamContext) requireReadableTask(taskID string) (*vendorstore.TaskRecord, error) {
-	if err := teams.ValidateTaskIdentifier("task_id", taskID); err != nil {
+	if err := teams.ValidateDurableTaskID("task_id", taskID); err != nil {
 		return nil, errcode.New(errcode.InvalidArgument, err.Error())
 	}
 	target, ok := findTask(c.tasks, taskID)
@@ -172,18 +191,43 @@ func (c *callerTeamContext) requireReadableTask(taskID string) (*vendorstore.Tas
 	if err := teams.ValidateRoleIdentifier("role", target.CatalogRole); err != nil {
 		return nil, errcode.New(errcode.InvalidArgument, err.Error())
 	}
-	switch c.role {
-	case vendorstore.RoleLead, vendorstore.RoleTeamManager:
-		if c.caller != nil && target.ParentTaskID == c.caller.TaskID {
-			return target, nil
-		}
-	case vendorstore.RoleMember:
-		if c.caller != nil && slices.Contains(c.caller.DependsOn, target.TaskID) {
-			return target, nil
-		}
-	case vendorstore.RoleSolo:
+	if c.canInspectTask(target) {
+		return target, nil
 	}
 	return nil, errcode.New(errcode.PermissionDenied, "cannot inspect a task outside your scope")
+}
+
+func (c *callerTeamContext) canInspectTask(target *vendorstore.TaskRecord) bool {
+	if c.caller == nil {
+		return false
+	}
+	byID, retryChild := resolveTaskChain(c.tasks)
+	switch c.role {
+	case vendorstore.RoleLead, vendorstore.RoleTeamManager:
+		return sameAttemptChain(target.ParentTaskID, c.caller.TaskID, byID, retryChild) || dependsOnTask(c.caller, c.tasks, target.TaskID)
+	case vendorstore.RoleMember:
+		return dependsOnTask(c.caller, c.tasks, target.TaskID)
+	case vendorstore.RoleSolo:
+		return false
+	default:
+		return false
+	}
+}
+
+// dependsOnTask reports whether targetID is either listed directly in
+// caller.DependsOn or is an attempt in the retry chain of a listed dependency
+// (Q-126, OR-E18).
+func dependsOnTask(caller *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord, targetID string) bool {
+	if slices.Contains(caller.DependsOn, targetID) {
+		return true
+	}
+	byID, retryChild := resolveTaskChain(tasks)
+	for _, dep := range caller.DependsOn {
+		if latest := latestAttempt(dep, byID, retryChild); latest != nil && latest.TaskID == targetID {
+			return true
+		}
+	}
+	return false
 }
 
 // Start starts a queued child task immediately without waiting for completion.
@@ -218,9 +262,9 @@ func (s *teamTaskService) Send(ctx context.Context, sessionID, taskID, message s
 	if target.State != vendorstore.TaskStateRunning && target.State != vendorstore.TaskStateAsking {
 		return "", errcode.New(errcode.FailedPrecondition, "task is not accepting messages in its current state")
 	}
-	trimmed := strings.TrimSpace(message)
-	if trimmed == "" || len(trimmed) > maxTaskSendBytes {
-		return "", errcode.New(errcode.InvalidArgument, "message must be 1..16384 bytes")
+	trimmed, err := validateDigestMessage("message", message)
+	if err != nil {
+		return "", err
 	}
 	payload, err := json.Marshal(mailboxDigestItem{TaskID: c.caller.TaskID, State: "message", Summary: trimmed})
 	if err != nil {
@@ -249,9 +293,10 @@ func (s *teamTaskService) Status(ctx context.Context, sessionID, taskID string) 
 	if err != nil {
 		return "", err
 	}
+	byID, retryChild := resolveTaskChain(c.tasks)
 	var children []string
 	for i := range c.tasks {
-		if c.tasks[i].ParentTaskID == target.TaskID {
+		if sameAttemptChain(c.tasks[i].ParentTaskID, target.TaskID, byID, retryChild) {
 			children = append(children, fmt.Sprintf("%s:%s", c.tasks[i].TaskID, c.tasks[i].State))
 		}
 	}

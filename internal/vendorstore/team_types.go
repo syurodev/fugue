@@ -25,6 +25,9 @@ var (
 	// ErrTaskExists indicates an insertion named a task ID the team already
 	// has (F11.2b: approved amendments really create their queued tasks).
 	ErrTaskExists = errcode.New(errcode.AlreadyExists, "team task already exists")
+	// ErrRetryLimitReached indicates a failed task already reached the two-retry
+	// ceiling without user-approved amend (Q-126, OR-E16).
+	ErrRetryLimitReached = errcode.New(errcode.FailedPrecondition, "task retry limit reached")
 )
 
 // TeamState represents the durable lifecycle state of a team (§3.2).
@@ -107,6 +110,7 @@ const (
 	EventTaskIntegrated       TeamEventType = "TaskIntegrated"
 	EventTaskMarkedUnknown    TeamEventType = "TaskMarkedUnknown"
 	EventTaskRecoveryDecided  TeamEventType = "TaskRecoveryDecided"
+	EventTaskSuperseded       TeamEventType = "TaskSuperseded"
 	EventTaskEnded            TeamEventType = "TaskEnded"
 )
 
@@ -146,10 +150,14 @@ type TaskRecord struct {
 	// NoReportNudged records whether a completed turn without fugue_task_done
 	// already triggered the one-time nudge (Q-131).
 	NoReportNudged bool
-	LastEventSeq   int64
-	CreatedAt      int64
-	UpdatedAt      int64
-	EndedAt        int64
+	// Attempt is the 1-based attempt number in a retry chain (Q-126).
+	Attempt int
+	// RetryOf identifies the immediately superseded failed task ID, if any (Q-126).
+	RetryOf      string
+	LastEventSeq int64
+	CreatedAt    int64
+	UpdatedAt    int64
+	EndedAt      int64
 }
 
 // NewTeamInput specifies a new team and its initial tasks created atomically.

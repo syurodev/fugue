@@ -73,6 +73,9 @@ type InteractionService struct {
 	// teamCards consumes the answers of team proposal and amend cards. It is
 	// wired once during startup, before the transport serves (F11.2b).
 	teamCards teamCardResolver
+	// taskQuestions consumes the answers of user question cards opened by
+	// fugue_task_ask or fugue_task_answer(forward_to=user) (F11.3d).
+	taskQuestions taskQuestionResolver
 
 	// betweenListReads is a test seam: ListPending calls it between reading
 	// the topic sequence and reading the pending views. Always nil in
