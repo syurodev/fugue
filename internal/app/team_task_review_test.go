@@ -56,18 +56,22 @@ const diffTaskID = "diff-mem"
 func setupDiffTeam(t *testing.T, f *activeTeamFixture) string {
 	t.Helper()
 	ctx := t.Context()
-	head, err := f.rt.teamTasks.git.WorktreeHead(ctx, f.root)
+	root, err := f.rt.workspaces.domain.SelectSessionCwd(ctx, f.wsID, teamTestRootName)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if branchErr := f.rt.teamTasks.git.CreateTeamBranch(ctx, f.root, "diff-team", head); branchErr != nil {
+	head, err := f.rt.teamTasks.git.WorktreeHead(ctx, root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if branchErr := f.rt.teamTasks.git.CreateTeamBranch(ctx, root, "diff-team", head); branchErr != nil {
 		t.Fatal(branchErr)
 	}
 	teamBranch, err := gitops.TeamBranchName("diff-team")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, wtErr := f.rt.teamTasks.git.CreateTaskWorktree(ctx, f.rt.teamTasks.dataDir, f.root, repoIDFor(f.root), diffTaskID, teamBranch); wtErr != nil {
+	if _, wtErr := f.rt.teamTasks.git.CreateTaskWorktree(ctx, f.rt.teamTasks.dataDir, root, repoIDFor(root), diffTaskID, teamBranch); wtErr != nil {
 		t.Fatal(wtErr)
 	}
 	spec := mustMarshalJSON(t, teams.ProtectedTaskContent{Goal: "diff"})
