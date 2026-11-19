@@ -55,26 +55,28 @@ func layFrame(t *testing.T, g *gallery, cur int, px float32) (gtx layout.Context
 func expectedCells(cur int) map[cell]bool {
 	want := map[cell]bool{}
 	builders := map[string]func(map[cell]bool){
-		"Button":        buttonCells,
-		"IconButton":    iconButtonCells,
-		"TextField":     textFieldCells,
-		"TextArea":      textAreaCells,
-		"Menu":          menuCells,
-		"Kbd":           kbdCells,
-		"Combobox":      comboboxCells,
-		"Select":        selectCells,
-		"Tooltip":       tooltipCells,
-		"ListRow":       listRowCells,
-		"SectionHeader": sectionHeaderCells,
-		"ScrollArea":    scrollAreaCells,
-		"VirtualList":   virtualListCells,
-		"TreeView":      treeViewCells,
-		"Tag":           tagCells,
-		"Progress":      progressAndDividerCells,
-		"SplitPane":     splitPaneCells,
-		"Popover":       popoverCells,
-		"Dialog":        dialogCells,
-		"Toast":         toastCells,
+		"Button":          buttonCells,
+		"IconButton":      iconButtonCells,
+		"TextField":       textFieldCells,
+		"TextArea":        textAreaCells,
+		"Menu":            menuCells,
+		"Kbd":             kbdCells,
+		"Combobox":        comboboxCells,
+		"Select":          selectCells,
+		"Tooltip":         tooltipCells,
+		"ListRow":         listRowCells,
+		"SectionHeader":   sectionHeaderCells,
+		"ScrollArea":      scrollAreaCells,
+		"VirtualList":     virtualListCells,
+		"TreeView":        treeViewCells,
+		"Tag":             tagCells,
+		"Progress":        progressAndDividerCells,
+		"SplitPane":       splitPaneCells,
+		"Popover":         popoverCells,
+		"Dialog":          dialogCells,
+		"Toast":           toastCells,
+		"Controls":        controlsCells,
+		"Tabs & Feedback": tabsFeedbackCells,
 	}
 	if fn := builders[pageNames()[cur]]; fn != nil {
 		fn(want)
@@ -270,6 +272,46 @@ func toastCells(want map[cell]bool) {
 // TestGalleryPagesCoverEveryVariantAndState covers UK-E03: every page
 // presents its full variant × size × state matrix — and nothing else — in
 // light and in dark.
+// TestGalleryPagesCoverEveryVariantAndState covers UK-E03: every cell of
+// the gallery matrix is laid out on its page.
+func controlsCells(want map[cell]bool) {
+	for vi := range 3 {
+		for _, st := range checkboxStates() {
+			want[cell{compCheckbox, vi, 0, st}] = true
+		}
+	}
+	want[cell{compCheckbox, 3, 0, cbLive}] = true
+	for vi := range 2 {
+		for _, st := range switchStates() {
+			want[cell{compSwitch, vi, 0, st}] = true
+		}
+	}
+	want[cell{compSwitch, 2, 0, cbLive}] = true
+	for _, st := range segmentedStates() {
+		want[cell{compSegmented, 0, 0, st}] = true
+	}
+	want[cell{compSegmented, 1, 0, cbLive}] = true
+	for _, st := range cardStates() {
+		want[cell{compCard, 0, 0, st}] = true
+	}
+}
+
+func tabsFeedbackCells(want map[cell]bool) {
+	want[cell{compTabs, 0, 0, stRest}] = true
+	want[cell{compTabs, 1, 0, stRest}] = true
+	want[cell{compTabs, 1, 0, tabModeFocus}] = true
+	want[cell{compTabs, 2, 0, tabDocOverflow}] = true
+	for _, st := range docTabSpecimenStates() {
+		want[cell{compTabs, 3, 0, st}] = true
+	}
+	for i := range 3 {
+		want[cell{compBanner, i, 0, stRest}] = true
+	}
+	for i := range 2 {
+		want[cell{compEmptyState, i, 0, stRest}] = true
+	}
+}
+
 func TestGalleryPagesCoverEveryVariantAndState(t *testing.T) {
 	t.Parallel()
 	for _, mode := range []struct {

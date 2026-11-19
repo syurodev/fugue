@@ -54,6 +54,14 @@ const DialogWidth = unit.Dp(420)
 // type.small, never a banner.
 const ToastWidth = unit.Dp(320)
 
+// Switch and Tab control dimensions (§6.11, §6.22).
+const (
+	SwitchTrackW = unit.Dp(36)
+	SwitchTrackH = unit.Dp(20)
+	SwitchThumbD = unit.Dp(16)
+	TabCloseHit  = unit.Dp(20)
+)
+
 // ProseMeasure caps the reading column of a prose window: long lines tire
 // before the column fills a frame, so the markdown preview holds the
 // document at this width and centers it in the rest.

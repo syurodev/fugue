@@ -26,7 +26,7 @@ import (
 // sideways (UK-E09).
 const (
 	windowW = unit.Dp(1360)
-	windowH = unit.Dp(1100)
+	windowH = unit.Dp(1200)
 	navRail = unit.Dp(140)
 	chrome  = unit.Dp(24)
 	// slowFactor is the slow-motion mode's time scale.
@@ -35,7 +35,7 @@ const (
 
 // pageNames are the nav labels, one page per component (UK-09).
 func pageNames() []string {
-	return []string{"Button", "IconButton", "TextField", "TextArea", "Menu", "Kbd", "Combobox", "Select", "Tooltip", "ListRow", "SectionHeader", "ScrollArea", "VirtualList", "TreeView", "Tag", "Progress", "SplitPane", "Popover", "Dialog", "Toast"}
+	return []string{"Button", "IconButton", "TextField", "TextArea", "Menu", "Kbd", "Combobox", "Select", "Tooltip", "ListRow", "SectionHeader", "ScrollArea", "VirtualList", "TreeView", "Tag", "Progress", "SplitPane", "Popover", "Dialog", "Toast", "Controls", "Tabs & Feedback"}
 }
 
 // pageW is the content width of the page column: the window minus the nav
@@ -149,6 +149,8 @@ func (p *pages) layoutPage(col *layout.Context, cur int) {
 		p.layoutPopovers,
 		p.layoutDialogs,
 		p.layoutToasts,
+		p.layoutControls,
+		p.layoutTabsFeedback,
 	}
 	if cur >= 0 && cur < len(layouts) {
 		layouts[cur](col)
