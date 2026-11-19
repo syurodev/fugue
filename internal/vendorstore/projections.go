@@ -102,16 +102,36 @@ func nullable(value string) any {
 	return value
 }
 
-func (s *Store) project(ctx context.Context, tx *sql.Tx, session string, sequence int64, e *Event, now string) error {
+const (
+	insertTurnQuery = `INSERT INTO vendor_turns(session_id,turn_id,origin,created_at) VALUES (?,?,?,?)`
+	endTurnQuery    = `UPDATE vendor_turns SET outcome=?,failure_code=?,ended_at=?
+		WHERE session_id=? AND turn_id=? AND outcome=''`
+	insertItemQuery = `INSERT INTO vendor_transcript_items(
+			session_id,item_id,turn_id,kind,sequence,revision,created_at,updated_at,
+			payload_id,raw_payload_id,metadata)
+		VALUES (?,?,?,?,?,1,?,?,?,?,?)`
+	updateItemQuery = `UPDATE vendor_transcript_items
+		SET metadata=?,revision=revision+1,updated_at=?,
+			payload_id=COALESCE(?,payload_id),raw_payload_id=COALESCE(?,raw_payload_id)
+		WHERE session_id=? AND item_id=? AND kind=? AND revision=? AND revision<9223372036854775807`
+	updateSessionProcessQuery = `UPDATE vendor_sessions SET
+				process_pid=CASE WHEN ?>0 THEN ? ELSE process_pid END,
+				process_start_token=CASE WHEN ?>0 THEN ? ELSE process_start_token END,
+				process_scope_unit=CASE WHEN ?>0 THEN ? ELSE process_scope_unit END,
+				resume_handle=CASE WHEN ?<>'' THEN ? ELSE resume_handle END,
+				close_reason=CASE WHEN ?<>'' THEN ? ELSE close_reason END
+			WHERE session_id=?`
+	updateSessionStateQuery = `UPDATE vendor_sessions SET state=?,waiting_reason=?,stop_proof=? WHERE session_id=?`
+)
+
+func (s *Store) project(ctx context.Context, tx *txStatements, session string, sequence int64, e *Event, now string) error {
 	if err := s.projectSession(ctx, tx, session, e, now); err != nil {
 		return err
 	}
 	var err error
 	switch e.Type {
 	case VendorTurnStarted:
-		_, err = tx.ExecContext(ctx,
-			`INSERT INTO vendor_turns(session_id,turn_id,origin,created_at) VALUES (?,?,?,?)`,
-			session, e.TurnID, turnOrigin(e.TurnOrigin), now)
+		_, err = tx.ExecContext(ctx, insertTurnQuery, session, e.TurnID, turnOrigin(e.TurnOrigin), now)
 	case VendorTurnEnded:
 		return endTurn(ctx, tx, session, e, now)
 	case TranscriptItemRecorded, TranscriptItemUpdated:
@@ -133,11 +153,8 @@ func turnOrigin(origin string) string {
 	return origin
 }
 
-func endTurn(ctx context.Context, tx *sql.Tx, session string, e *Event, now string) error {
-	result, err := tx.ExecContext(ctx,
-		`UPDATE vendor_turns SET outcome=?,failure_code=?,ended_at=?
-		WHERE session_id=? AND turn_id=? AND outcome=''`,
-		e.Outcome, e.FailureCode, now, session, e.TurnID)
+func endTurn(ctx context.Context, tx *txStatements, session string, e *Event, now string) error {
+	result, err := tx.ExecContext(ctx, endTurnQuery, e.Outcome, e.FailureCode, now, session, e.TurnID)
 	if err != nil {
 		return fmt.Errorf("%w: end turn: %w", ErrUnavailable, err)
 	}
@@ -151,7 +168,7 @@ func endTurn(ctx context.Context, tx *sql.Tx, session string, e *Event, now stri
 	return nil
 }
 
-func (s *Store) projectItem(ctx context.Context, tx *sql.Tx, session string, sequence int64, e *Event, now string) error {
+func (s *Store) projectItem(ctx context.Context, tx *txStatements, session string, sequence int64, e *Event, now string) error {
 	item := e.Item
 	metadata, marshalErr := json.Marshal(item.Metadata)
 	if marshalErr != nil {
@@ -162,11 +179,7 @@ func (s *Store) projectItem(ctx context.Context, tx *sql.Tx, session string, seq
 	if e.Type != TranscriptItemRecorded {
 		return updateItem(ctx, tx, session, item, now, content, raw)
 	}
-	_, err = tx.ExecContext(ctx,
-		`INSERT INTO vendor_transcript_items(
-			session_id,item_id,turn_id,kind,sequence,revision,created_at,updated_at,
-			payload_id,raw_payload_id,metadata)
-		VALUES (?,?,?,?,?,1,?,?,?,?,?)`,
+	_, err = tx.ExecContext(ctx, insertItemQuery,
 		session, item.ID, item.TurnID, item.Kind, sequence, now, now,
 		nullable(content), nullable(raw), string(metadata))
 	if err != nil {
@@ -175,16 +188,12 @@ func (s *Store) projectItem(ctx context.Context, tx *sql.Tx, session string, seq
 	return nil
 }
 
-func updateItem(ctx context.Context, tx *sql.Tx, session string, item *Item, now, content, raw string) error {
+func updateItem(ctx context.Context, tx *txStatements, session string, item *Item, now, content, raw string) error {
 	metadata, marshalErr := json.Marshal(item.Metadata)
 	if marshalErr != nil {
 		return fmt.Errorf("%w: %w", ErrUnavailable, marshalErr)
 	}
-	result, err := tx.ExecContext(ctx,
-		`UPDATE vendor_transcript_items
-		SET metadata=?,revision=revision+1,updated_at=?,
-			payload_id=COALESCE(?,payload_id),raw_payload_id=COALESCE(?,raw_payload_id)
-		WHERE session_id=? AND item_id=? AND kind=? AND revision=? AND revision<9223372036854775807`,
+	result, err := tx.ExecContext(ctx, updateItemQuery,
 		string(metadata), now, nullable(content), nullable(raw),
 		session, item.ID, item.Kind, item.Revision)
 	if err != nil {
@@ -217,7 +226,7 @@ func classifyMissedItemUpdate(row *sql.Row) error {
 	}
 }
 
-func (s *Store) projectSession(ctx context.Context, tx *sql.Tx, session string, e *Event, now string) error {
+func (s *Store) projectSession(ctx context.Context, tx *txStatements, session string, e *Event, now string) error {
 	var err error
 	if e.Type == VendorSessionClosed {
 		e.State = StateClosed
@@ -226,14 +235,7 @@ func (s *Store) projectSession(ctx context.Context, tx *sql.Tx, session string, 
 		return errcode.New(errcode.InvalidArgument, "closure requires session close event")
 	}
 	if e.ProcessPID != 0 || e.ResumeHandle != "" || e.CloseReason != "" {
-		_, err = tx.ExecContext(ctx,
-			`UPDATE vendor_sessions SET
-				process_pid=CASE WHEN ?>0 THEN ? ELSE process_pid END,
-				process_start_token=CASE WHEN ?>0 THEN ? ELSE process_start_token END,
-				process_scope_unit=CASE WHEN ?>0 THEN ? ELSE process_scope_unit END,
-				resume_handle=CASE WHEN ?<>'' THEN ? ELSE resume_handle END,
-				close_reason=CASE WHEN ?<>'' THEN ? ELSE close_reason END
-			WHERE session_id=?`,
+		_, err = tx.ExecContext(ctx, updateSessionProcessQuery,
 			e.ProcessPID, e.ProcessPID,
 			e.ProcessPID, e.ProcessStartToken,
 			e.ProcessPID, e.ProcessScopeUnit,
@@ -245,9 +247,7 @@ func (s *Store) projectSession(ctx context.Context, tx *sql.Tx, session string, 
 		}
 	}
 	if e.State != "" {
-		_, err = tx.ExecContext(ctx,
-			`UPDATE vendor_sessions SET state=?,waiting_reason=?,stop_proof=? WHERE session_id=?`,
-			e.State, e.WaitingReason, e.StopProof, session)
+		_, err = tx.ExecContext(ctx, updateSessionStateQuery, e.State, e.WaitingReason, e.StopProof, session)
 		if err != nil {
 			return fmt.Errorf("%w: project session: %w", ErrUnavailable, err)
 		}
