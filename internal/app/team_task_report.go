@@ -128,7 +128,7 @@ func (s *teamTaskService) recordTaskFailedReport(ctx context.Context, c *callerT
 		return &vendorstore.AppendTeamEventInput{
 			EventID: evID, TaskID: cur.caller.TaskID, EventType: vendorstore.EventTaskEnded,
 			Outcome: string(vendorstore.TaskStateFailed), FailureCode: "task_failed", ProtectedPayload: payload,
-			Mailbox: digestSummaryRows(cur.caller.TaskID, cur.caller.ParentTaskID, string(vendorstore.TaskStateFailed), "", summary, false),
+			Mailbox: digestSummaryRows(cur.caller.TaskID, resolvedParentID(cur.caller.ParentTaskID, cur.tasks), string(vendorstore.TaskStateFailed), "", summary, false),
 		}, nil
 	}); err != nil {
 		return "", err
@@ -187,7 +187,7 @@ func (s *teamTaskService) buildReportEvent(cur *callerTeamContext, summary strin
 	}
 	return &vendorstore.AppendTeamEventInput{
 		EventID: evID, TaskID: cur.caller.TaskID, EventType: vendorstore.EventTaskReported, ProtectedPayload: payload,
-		Mailbox: digestSummaryRows(cur.caller.TaskID, cur.caller.ParentTaskID, string(vendorstore.TaskStateChecking), "", summary, false),
+		Mailbox: digestSummaryRows(cur.caller.TaskID, resolvedParentID(cur.caller.ParentTaskID, cur.tasks), string(vendorstore.TaskStateChecking), "", summary, false),
 	}, nil
 }
 
@@ -259,7 +259,7 @@ func (s *teamTaskService) applyResultGate(ctx context.Context, teamID, taskID, p
 			if ev.FailureCode == "" {
 				ev.FailureCode = "checks_failed"
 			}
-			ev.Mailbox = digestSummaryRows(taskID, parentTaskID, string(vendorstore.TaskStateFailed), ev.FailureCode, "", false)
+			ev.Mailbox = digestSummaryRows(taskID, resolvedParentID(parentTaskID, tasks), string(vendorstore.TaskStateFailed), ev.FailureCode, "", false)
 		}
 		return ev, nil
 	})
@@ -273,6 +273,9 @@ func (s *teamTaskService) Ask(ctx context.Context, sessionID, question, to strin
 	if err != nil {
 		return "", err
 	}
+	if target == askTargetUser && (s.interactions == nil || s.interactions.owner == nil) {
+		return "", errcode.New(errcode.FailedPrecondition, "interaction service is not configured")
+	}
 	payload, err := json.Marshal(taskQuestionPayload{Question: q, To: target})
 	if err != nil {
 		return "", errcode.Wrap(errcode.Internal, "encode question payload", err)
@@ -281,13 +284,13 @@ func (s *teamTaskService) Ask(ctx context.Context, sessionID, question, to strin
 	if err != nil {
 		return "", err
 	}
+	if s.wake != nil && hasMail {
+		s.wake.Notify()
+	}
 	if target == askTargetUser {
 		if cardErr := s.ensureUserQuestionCard(teamID, workspaceID, &askingTask, seq, q); cardErr != nil {
 			return "", cardErr
 		}
-	}
-	if s.wake != nil && hasMail {
-		s.wake.Notify()
 	}
 	return fmt.Sprintf("task %s is waiting for an answer from %s", askingTask.TaskID, target), nil
 }
@@ -309,7 +312,8 @@ func (s *teamTaskService) appendAskEvent(
 		if idErr != nil {
 			return nil, errcode.Wrap(errcode.Internal, "generate ask event ID", idErr)
 		}
-		mail := askMailboxRows(cur.caller, q, target)
+		parentID := resolvedParentID(cur.caller.ParentTaskID, cur.tasks)
+		mail := askMailboxRows(cur.caller, parentID, q, target)
 		hasMail = len(mail) > 0
 		return &vendorstore.AppendTeamEventInput{
 			EventID: evID, TaskID: cur.caller.TaskID, EventType: vendorstore.EventTaskQuestionAsked,
@@ -319,11 +323,11 @@ func (s *teamTaskService) appendAskEvent(
 	return teamID, workspaceID, asking, seq, hasMail, err
 }
 
-func askMailboxRows(caller *vendorstore.TaskRecord, q, target string) []vendorstore.MailboxEnqueueInput {
+func askMailboxRows(caller *vendorstore.TaskRecord, parentID, q, target string) []vendorstore.MailboxEnqueueInput {
 	if target == askTargetParent {
-		return digestSummaryRows(caller.TaskID, caller.ParentTaskID, string(vendorstore.TaskStateAsking), "", q, true)
+		return digestSummaryRows(caller.TaskID, parentID, string(vendorstore.TaskStateAsking), "", q, true)
 	}
-	return digestSummaryRows(caller.TaskID, caller.ParentTaskID, string(vendorstore.TaskStateAsking), "", "question sent to user (needs you)", false)
+	return digestSummaryRows(caller.TaskID, parentID, string(vendorstore.TaskStateAsking), "", "question sent to user (needs you)", false)
 }
 
 func validateAskArgs(question, to string) (string, string, error) {

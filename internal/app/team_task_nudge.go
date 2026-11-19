@@ -155,7 +155,7 @@ func (s *teamTaskService) failTaskNoReport(ctx context.Context, task *vendorstor
 		return &vendorstore.AppendTeamEventInput{
 			EventID: evID, TaskID: cur.TaskID, EventType: vendorstore.EventTaskEnded,
 			Outcome: string(vendorstore.TaskStateFailed), FailureCode: "no_report",
-			Mailbox: digestSummaryRows(cur.TaskID, cur.ParentTaskID, string(vendorstore.TaskStateFailed), "no_report", summary, false),
+			Mailbox: digestSummaryRows(cur.TaskID, resolvedParentID(cur.ParentTaskID, tasks), string(vendorstore.TaskStateFailed), "no_report", summary, false),
 		}, nil
 	}); err != nil {
 		slog.WarnContext(ctx, "recording no_report failure failed", "team_id", task.TeamID, "task_id", task.TaskID, "error_code", string(errcode.CodeOf(err)))

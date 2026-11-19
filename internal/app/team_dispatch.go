@@ -178,11 +178,35 @@ func latestAttempt(taskID string, byID map[string]*vendorstore.TaskRecord, retry
 	return byID[cur]
 }
 
+func activeAttemptID(taskID string, byID map[string]*vendorstore.TaskRecord, retryChild map[string]string) string {
+	if taskID == "" {
+		return ""
+	}
+	if latest := latestAttempt(taskID, byID, retryChild); latest != nil {
+		return latest.TaskID
+	}
+	return taskID
+}
+
+func sameAttemptChain(a, b string, byID map[string]*vendorstore.TaskRecord, retryChild map[string]string) bool {
+	ra := activeAttemptID(a, byID, retryChild)
+	rb := activeAttemptID(b, byID, retryChild)
+	return ra != "" && ra == rb
+}
+
+func resolvedParentID(parentTaskID string, tasks []vendorstore.TaskRecord) string {
+	if parentTaskID == "" {
+		return ""
+	}
+	byID, retryChild := resolveTaskChain(tasks)
+	return activeAttemptID(parentTaskID, byID, retryChild)
+}
+
 func startable(t *vendorstore.TaskRecord, byID map[string]*vendorstore.TaskRecord, retryChild map[string]string) bool {
 	if t.ParentTaskID == "" {
 		return t.HierarchyRole == vendorstore.RoleLead
 	}
-	parent := byID[t.ParentTaskID]
+	parent := latestAttempt(t.ParentTaskID, byID, retryChild)
 	if parent == nil || (parent.State != vendorstore.TaskStateRunning && parent.State != vendorstore.TaskStateAsking) {
 		return false
 	}

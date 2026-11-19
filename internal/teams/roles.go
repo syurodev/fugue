@@ -1,6 +1,9 @@
 package teams
 
-import "strings"
+import (
+	"fmt"
+	"strings"
+)
 
 // Permission defines a catalog role's execution permission level (§5.2).
 type Permission string
@@ -110,11 +113,12 @@ func ValidateRoleIdentifier(field, name string) error {
 }
 
 // ValidateDurableTaskID validates a persisted team task identifier, which may
-// include a team namespace dot and a retry suffix (~r<n>), without allowing path
-// traversal, git ref-lock suffixes, or control characters.
+// include a team namespace dot and a retry suffix (~r<n>), within gitops's
+// 100-byte idMaxLength without allowing path traversal, ref-lock suffixes, or
+// control characters.
 func ValidateDurableTaskID(field, name string) error {
-	if len(name) == 0 || len(name) > 128 {
-		return &ValidationError{Field: field, Detail: "must be 1..128 ASCII characters", Reason: ErrInvalidSpec}
+	if len(name) == 0 || len(name) > 100 {
+		return &ValidationError{Field: field, Detail: "must be 1..100 ASCII characters", Reason: ErrInvalidSpec}
 	}
 	if !isAlphaNum(name[0]) || strings.Contains(name, "..") ||
 		strings.HasSuffix(name, ".") || strings.HasSuffix(name, ".lock") || strings.HasSuffix(name, "~") {
@@ -137,16 +141,18 @@ func isDurableTaskIDChar(c byte) bool {
 }
 
 func validateRoleIdentifier(field, name string) error {
-	return validateIdentifier(field, name, ErrInvalidCatalog)
+	return validateIdentifier(field, name, 64, ErrInvalidCatalog)
 }
 
 func validateTaskIdentifier(field, name string) error {
-	return validateIdentifier(field, name, ErrInvalidSpec)
+	// Bounded to 56 bytes so "<uuidv7-teamID>.<taskID>~r2" stays within
+	// gitops's 100-byte idMaxLength (36 + 1 + 56 + 3 = 96).
+	return validateIdentifier(field, name, 56, ErrInvalidSpec)
 }
 
-func validateIdentifier(field, name string, reason error) error {
-	if len(name) == 0 || len(name) > 64 {
-		return &ValidationError{Field: field, Detail: "must be 1..64 ASCII characters", Reason: reason}
+func validateIdentifier(field, name string, maxLen int, reason error) error {
+	if len(name) == 0 || len(name) > maxLen {
+		return &ValidationError{Field: field, Detail: fmt.Sprintf("must be 1..%d ASCII characters", maxLen), Reason: reason}
 	}
 	if name[0] == '-' || name[0] == '_' {
 		return &ValidationError{Field: field, Detail: "must match [a-z0-9][a-z0-9_-]*", Reason: reason}

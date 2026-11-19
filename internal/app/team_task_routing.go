@@ -70,13 +70,13 @@ func validateAnswerInput(answer, forwardTo string) (string, error) {
 	if (trimmed == "" && forwardTo == "") || (trimmed != "" && forwardTo != "") {
 		return "", errcode.New(errcode.InvalidArgument, "provide either answer or forward_to, not both or neither")
 	}
-	if len(trimmed) > maxTaskSendBytes {
-		return "", errcode.New(errcode.InvalidArgument, "answer exceeds 16 KiB limit")
+	if forwardTo == "" {
+		return validateDigestMessage("answer", answer)
 	}
-	if forwardTo != "" && forwardTo != askTargetParent && forwardTo != askTargetUser {
+	if forwardTo != askTargetParent && forwardTo != askTargetUser {
 		return "", errcode.New(errcode.InvalidArgument, "forward_to must be parent or user")
 	}
-	return trimmed, nil
+	return "", nil
 }
 
 func (s *teamTaskService) forwardQuestionToParent(ctx context.Context, sessionID string, c *callerTeamContext, target *vendorstore.TaskRecord) (string, error) {
@@ -110,7 +110,7 @@ func (s *teamTaskService) forwardQuestionToParent(ctx context.Context, sessionID
 		return &vendorstore.AppendTeamEventInput{
 			EventID: evID, TaskID: cur.caller.TaskID, EventType: vendorstore.EventTaskQuestionAsked,
 			ProtectedPayload: payload,
-			Mailbox:          digestSummaryRows(cur.caller.TaskID, cur.caller.ParentTaskID, string(vendorstore.TaskStateAsking), "", q, true),
+			Mailbox:          digestSummaryRows(cur.caller.TaskID, resolvedParentID(cur.caller.ParentTaskID, cur.tasks), string(vendorstore.TaskStateAsking), "", q, true),
 		}, nil
 	}); err != nil {
 		return "", err
@@ -216,7 +216,14 @@ func (s *teamTaskService) applyTaskQuestionAnswer(ctx context.Context, ticket *i
 		}
 		answerText = text
 	}
-	return s.resolveQuestionChain(ctx, ticket.Binding.InvocationID, ticket.Binding.AttemptID, answerText, "user")
+	var applyErr error
+	for range decisionApplyAttempts {
+		applyErr = s.resolveQuestionChain(ctx, ticket.Binding.InvocationID, ticket.Binding.AttemptID, answerText, decidedByUser)
+		if applyErr == nil || errcode.CodeOf(applyErr) != errcode.Unavailable {
+			break
+		}
+	}
+	return applyErr
 }
 
 func taskQuestionAnswerText(decision *interaction.Decision) (string, error) {
@@ -228,26 +235,18 @@ func taskQuestionAnswerText(decision *interaction.Decision) (string, error) {
 		if len(a.OptionIDs) > 0 {
 			return "", errcode.New(errcode.InvalidArgument, "task question answer takes free text only")
 		}
-		trimmed := strings.TrimSpace(a.Text)
-		if trimmed == "" {
-			return "", errcode.New(errcode.InvalidArgument, "task question answer text is required")
-		}
-		return trimmed, nil
+		return validateDigestMessage("task question answer", a.Text)
 	}
 	return "", errcode.New(errcode.InvalidArgument, "answer for task question is required")
 }
 
 func (s *teamTaskService) resolveQuestionChain(ctx context.Context, teamID, topTaskID, answerText, answeredBy string) error {
 	for attempt := range maxAppendRetries {
-		evs, err := s.buildQuestionResolutionEvents(ctx, teamID, topTaskID, answerText, answeredBy)
+		evs, expectedSeq, err := s.buildQuestionResolutionEvents(ctx, teamID, topTaskID, answerText, answeredBy)
 		if err != nil {
 			return err
 		}
-		rec, _, snapErr := s.store.TeamSnapshot(ctx, teamID)
-		if snapErr != nil {
-			return boundaryError("read the team", snapErr)
-		}
-		if _, appendErr := s.store.AppendTeamEvents(ctx, teamID, rec.LastSeq, evs); appendErr == nil {
+		if _, appendErr := s.store.AppendTeamEvents(ctx, teamID, expectedSeq, evs); appendErr == nil {
 			s.invalidateResolvedCards(ctx, teamID, evs, answeredBy)
 			if s.wake != nil {
 				s.wake.Notify()
@@ -260,30 +259,34 @@ func (s *teamTaskService) resolveQuestionChain(ctx context.Context, teamID, topT
 	return errcode.New(errcode.FailedPrecondition, "team event sequence conflict")
 }
 
-func (s *teamTaskService) buildQuestionResolutionEvents(ctx context.Context, teamID, topTaskID, answerText, answeredBy string) ([]*vendorstore.AppendTeamEventInput, error) {
+func (s *teamTaskService) buildQuestionResolutionEvents(ctx context.Context, teamID, topTaskID, answerText, answeredBy string) ([]*vendorstore.AppendTeamEventInput, int64, error) {
 	rec, tasks, err := s.store.TeamSnapshot(ctx, teamID)
 	if err != nil {
-		return nil, boundaryError("read the team", err)
+		return nil, 0, boundaryError("read the team", err)
 	}
 	if rec.State != vendorstore.TeamStateActive {
-		return nil, errcode.New(errcode.FailedPrecondition, "the team is not active")
+		return nil, 0, errcode.New(errcode.FailedPrecondition, "the team is not active")
 	}
 	top, ok := findTask(tasks, topTaskID)
 	if !ok || top.State != vendorstore.TaskStateAsking {
-		return nil, errcode.New(errcode.FailedPrecondition, "task is not waiting for an answer")
+		return nil, 0, errcode.New(errcode.FailedPrecondition, "task is not waiting for an answer")
 	}
 	payload, err := json.Marshal(struct {
 		Answer     string `json:"answer"`
 		AnsweredBy string `json:"answered_by"`
 	}{Answer: answerText, AnsweredBy: answeredBy})
 	if err != nil {
-		return nil, errcode.Wrap(errcode.Internal, "encode answer payload", err)
+		return nil, 0, errcode.Wrap(errcode.Internal, "encode answer payload", err)
 	}
 	mailPayload, err := json.Marshal(mailboxDigestItem{TaskID: answeredBy, State: "answer", Summary: answerText})
 	if err != nil {
-		return nil, errcode.Wrap(errcode.Internal, "encode answer mailbox payload", err)
+		return nil, 0, errcode.Wrap(errcode.Internal, "encode answer mailbox payload", err)
 	}
-	return s.collectChainAnswerEvents(ctx, teamID, topTaskID, tasks, payload, mailPayload)
+	evs, err := s.collectChainAnswerEvents(ctx, teamID, topTaskID, tasks, payload, mailPayload)
+	if err != nil {
+		return nil, 0, err
+	}
+	return evs, rec.LastSeq, nil
 }
 
 func (s *teamTaskService) collectChainAnswerEvents(
@@ -316,21 +319,28 @@ func (s *teamTaskService) collectChainAnswerEvents(
 				Payload:         mailPayload,
 			}},
 		})
-		curID = s.forwardedFromTaskID(ctx, teamID, curID)
+		nextID, fwdErr := s.forwardedFromTaskID(ctx, teamID, curID)
+		if fwdErr != nil {
+			return nil, fwdErr
+		}
+		curID = nextID
 	}
 	return evs, nil
 }
 
-func (s *teamTaskService) forwardedFromTaskID(ctx context.Context, teamID, taskID string) string {
+func (s *teamTaskService) forwardedFromTaskID(ctx context.Context, teamID, taskID string) (string, error) {
 	raw, _, found, err := s.store.OpenLatestTaskEventPayloadWithSeq(ctx, teamID, taskID, vendorstore.EventTaskQuestionAsked)
-	if err != nil || !found {
-		return ""
+	if err != nil {
+		return "", boundaryError("read forwarded task question", err)
+	}
+	if !found {
+		return "", errcode.New(errcode.NotFound, "asked task question payload not found")
 	}
 	var qp taskQuestionPayload
-	if json.Unmarshal(raw, &qp) != nil {
-		return ""
+	if unmErr := json.Unmarshal(raw, &qp); unmErr != nil {
+		return "", errcode.Wrap(errcode.FailedPrecondition, "decode forwarded task question", unmErr)
 	}
-	return qp.ForwardedFromTaskID
+	return qp.ForwardedFromTaskID, nil
 }
 
 func (s *teamTaskService) invalidateResolvedCards(ctx context.Context, teamID string, evs []*vendorstore.AppendTeamEventInput, answeredBy string) {

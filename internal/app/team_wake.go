@@ -360,9 +360,10 @@ func (w *teamWake) digestReady(ctx context.Context, r vendorstore.MailboxRecipie
 	if err != nil {
 		return false, boundaryError("read the dependency group", err)
 	}
+	byID, retryChild := resolveTaskChain(tasks)
 	for i := range tasks {
 		c := &tasks[i]
-		if c.ParentTaskID != task.TaskID || teamTaskTerminal(c.State) {
+		if !sameAttemptChain(c.ParentTaskID, task.TaskID, byID, retryChild) || teamTaskTerminal(c.State) {
 			continue
 		}
 		return false, nil

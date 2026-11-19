@@ -221,7 +221,34 @@ func loadRetrySource(ctx context.Context, tx *sql.Tx, teamID, taskID string) (re
 	if existingChild > 0 {
 		return retrySourceRow{}, fmt.Errorf("%w: task %s already retried", ErrTaskExists, taskID)
 	}
+	if row.role == RoleTeamManager {
+		if err := ensureManagerChainChildrenTerminal(ctx, tx, teamID, taskID); err != nil {
+			return retrySourceRow{}, err
+		}
+	}
 	return row, nil
+}
+
+func ensureManagerChainChildrenTerminal(ctx context.Context, tx *sql.Tx, teamID, taskID string) error {
+	cur := taskID
+	for range 16 {
+		if err := ensureManagerChildrenTerminal(ctx, tx, teamID, cur); err != nil {
+			return err
+		}
+		var prev string
+		err := tx.QueryRowContext(ctx,
+			`SELECT retry_of FROM team_tasks WHERE team_id = ? AND task_id = ?`,
+			teamID, cur,
+		).Scan(&prev)
+		if err != nil {
+			return fmt.Errorf("walk manager retry chain for %s: %w", cur, err)
+		}
+		if prev == "" {
+			return nil
+		}
+		cur = prev
+	}
+	return fmt.Errorf("%w: retry chain exceeds bound", ErrTeamInvalidInput)
 }
 
 func resolveRetryRoot(ctx context.Context, tx *sql.Tx, teamID, taskID string) (string, error) {
@@ -263,8 +290,25 @@ func (s *Store) AppendTeamEvents(ctx context.Context, teamID string, expectedSeq
 	if err != nil {
 		return 0, err
 	}
-	seq := expectedSeq
-	now := s.clock.Now().UnixMilli()
+	seq, err := s.writeTeamEventBatch(ctx, tx, teamID, expectedSeq, meta, evs, s.clock.Now().UnixMilli())
+	if err != nil {
+		return 0, err
+	}
+	if err := s.commitTeamTx(snap, needVault, tx.Commit); err != nil {
+		return 0, err
+	}
+	return seq, nil
+}
+
+func (s *Store) writeTeamEventBatch(
+	ctx context.Context,
+	tx *sql.Tx,
+	teamID string,
+	seq int64,
+	meta teamMetaRow,
+	evs []*AppendTeamEventInput,
+	now int64,
+) (int64, error) {
 	for _, ev := range evs {
 		if ev == nil || ev.EventID == "" {
 			return 0, fmt.Errorf("%w: each appended event requires an event_id", ErrTeamInvalidInput)
@@ -273,9 +317,13 @@ func (s *Store) AppendTeamEvents(ctx context.Context, teamID string, expectedSeq
 		if writeErr := s.writeAppendedEvent(ctx, tx, teamID, seq, ev, meta, now); writeErr != nil {
 			return 0, writeErr
 		}
-	}
-	if err := s.commitTeamTx(snap, needVault, tx.Commit); err != nil {
-		return 0, err
+		if ev.TaskID == "" {
+			var nextState string
+			if qErr := tx.QueryRowContext(ctx, `SELECT state FROM team_records WHERE team_id = ?`, teamID).Scan(&nextState); qErr != nil {
+				return 0, fmt.Errorf("reload team state in batch: %w", qErr)
+			}
+			meta.State = TeamState(nextState)
+		}
 	}
 	return seq, nil
 }

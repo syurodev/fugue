@@ -208,10 +208,9 @@ func gitTaskID(taskID string) string {
 // direct child of the lead, the manager's task branch for a member of a
 // manager (§9).
 func parentBranch(task *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord) (string, error) {
-	for i := range tasks {
-		if tasks[i].TaskID == task.ParentTaskID && tasks[i].HierarchyRole == vendorstore.RoleTeamManager {
-			return wrapGit(gitops.TaskBranchName(gitTaskID(tasks[i].TaskID)))
-		}
+	byID, retryChild := resolveTaskChain(tasks)
+	if parent := latestAttempt(task.ParentTaskID, byID, retryChild); parent != nil && parent.HierarchyRole == vendorstore.RoleTeamManager {
+		return wrapGit(gitops.TaskBranchName(gitTaskID(parent.TaskID)))
 	}
 	return wrapGit(gitops.TeamBranchName(task.TeamID))
 }
@@ -298,7 +297,7 @@ func (d *teamDispatcher) failTaskAttempt(
 	}
 	return d.appendTaskEvent(ctx, teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
 		TaskID: taskID, EventType: vendorstore.EventTaskEnded, Outcome: vendorstore.TaskOutcomeFailed, FailureCode: code,
-		Mailbox: digestItemRows(taskID, delegatorOf(taskID, tasks), code),
+		Mailbox: digestItemRows(taskID, resolvedParentID(delegatorOf(taskID, tasks), tasks), code),
 	})
 }
 

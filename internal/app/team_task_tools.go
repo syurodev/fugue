@@ -98,7 +98,7 @@ func taskStartTool(svc *teamTaskService) *FugueTool {
 }
 
 func taskSendTool(svc *teamTaskService) *FugueTool {
-	const schema = `{"type":"object","properties":{"task_id":{"type":"string"},"message":{"type":"string","maxLength":16384}},"required":["task_id","message"]}`
+	const schema = `{"type":"object","properties":{"task_id":{"type":"string"},"message":{"type":"string","maxLength":4096}},"required":["task_id","message"]}`
 	avail := roleAvailable(svc, vendorstore.RoleLead, vendorstore.RoleTeamManager)
 	return readTool(taskSendToolName, "Send a follow-up message to a running or asking direct child task.", schema, avail,
 		func(ctx context.Context, sessionID string, raw json.RawMessage) (string, error) {
@@ -239,7 +239,7 @@ func delegatorJSONTool[A any](svc *teamTaskService, name, desc, schema string, f
 }
 
 func taskAnswerTool(svc *teamTaskService) *FugueTool {
-	const schema = `{"type":"object","properties":{"task_id":{"type":"string"},"answer":{"type":"string","maxLength":16384},"forward_to":{"type":"string","enum":["parent","user"]}},"required":["task_id"]}`
+	const schema = `{"type":"object","properties":{"task_id":{"type":"string"},"answer":{"type":"string","maxLength":4096},"forward_to":{"type":"string","enum":["parent","user"]}},"required":["task_id"]}`
 	type args struct {
 		TaskID    string `json:"task_id"`
 		Answer    string `json:"answer"`
@@ -277,7 +277,7 @@ func taskAcceptTool(svc *teamTaskService) *FugueTool {
 }
 
 func taskRejectTool(svc *teamTaskService) *FugueTool {
-	const schema = `{"type":"object","properties":{"task_id":{"type":"string"},"reason":{"type":"string","maxLength":16384}},"required":["task_id","reason"]}`
+	const schema = `{"type":"object","properties":{"task_id":{"type":"string"},"reason":{"type":"string","maxLength":4096}},"required":["task_id","reason"]}`
 	type args struct {
 		TaskID string `json:"task_id"`
 		Reason string `json:"reason"`

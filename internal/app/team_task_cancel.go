@@ -123,16 +123,20 @@ func (s *teamTaskService) cancelDescendant(ctx context.Context, teamID, taskID s
 }
 
 func collectSubtreeTasks(tasks []vendorstore.TaskRecord, rootID string) []vendorstore.TaskRecord {
+	byID, retryChild := resolveTaskChain(tasks)
 	queue := []string{rootID}
+	seen := map[string]bool{rootID: true}
 	var out []vendorstore.TaskRecord
 	for len(queue) > 0 {
 		parent := queue[0]
 		queue = queue[1:]
 		for i := range tasks {
-			if tasks[i].ParentTaskID == parent {
-				out = append(out, tasks[i])
-				queue = append(queue, tasks[i].TaskID)
+			if seen[tasks[i].TaskID] || !sameAttemptChain(tasks[i].ParentTaskID, parent, byID, retryChild) {
+				continue
 			}
+			seen[tasks[i].TaskID] = true
+			out = append(out, tasks[i])
+			queue = append(queue, tasks[i].TaskID)
 		}
 	}
 	return out

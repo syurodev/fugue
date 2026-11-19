@@ -137,4 +137,81 @@ func TestAppendTeamEventsAtomicBatch(t *testing.T) {
 			t.Fatalf("lead state = %s, want running (rolled back)", afterTasks[i].State)
 		}
 	}
+	// Task event after TeamEnded in the same batch must see updated meta.State and fail.
+	assertTaskAfterTeamEndedRollsBack(t, s, rec.TeamID, seq, leadID, afterTasks)
+}
+
+func assertTaskAfterTeamEndedRollsBack(t *testing.T, s *Store, teamID string, seq int64, leadID string, tasks []TaskRecord) {
+	t.Helper()
+	ctx := t.Context()
+	// First settle all non-terminal tasks except lead so TeamEnded is valid in isolation,
+	// or test TeamEnded -> task event after settling tasks in batch.
+	var batch []*AppendTeamEventInput
+	for i := range tasks {
+		if tasks[i].TaskID == leadID || isTaskTerminal(tasks[i].State) {
+			continue
+		}
+		batch = append(batch, &AppendTeamEventInput{
+			EventID: "settle-" + tasks[i].TaskID, TaskID: tasks[i].TaskID,
+			EventType: EventTaskEnded, Outcome: outcomeCancelled, FailureCode: "x",
+		})
+	}
+	batch = append(batch,
+		&AppendTeamEventInput{EventID: "settle-lead", TaskID: leadID, EventType: EventTaskEnded, Outcome: outcomeCancelled, FailureCode: "x"},
+		&AppendTeamEventInput{EventID: "end-team", EventType: EventTeamEnded, Outcome: outcomeCancelled},
+		&AppendTeamEventInput{EventID: "post-end-task", TaskID: leadID, EventType: EventTaskStarted},
+	)
+	if _, err := s.AppendTeamEvents(ctx, teamID, seq, batch); !errors.Is(err, ErrTeamTerminal) {
+		t.Fatalf("task event after TeamEnded in batch = %v, want ErrTeamTerminal", err)
+	}
+	after, _, err := s.TeamSnapshot(ctx, teamID)
+	if err != nil || after.State != TeamStateActive || after.LastSeq != seq {
+		t.Fatalf("after TeamEnded rollback = (%s, %d, %v), want (active, %d)", after.State, after.LastSeq, err, seq)
+	}
+}
+
+func TestRetryTaskRejectsManagerWithNonTerminalChildren(t *testing.T) {
+	t.Parallel()
+	s, _, _ := protectedStore(t)
+	ctx := t.Context()
+	rec, seq := seedManagerTeamForRetry(t, s)
+
+	// Child is still queued (non-terminal): retrying the failed manager is refused.
+	if _, err := s.RetryTask(ctx, rec.TeamID, "mgr-team.mgr", &TaskRetryInput{
+		ExpectedSeq: seq, SupersededEventID: "sm0", CreatedEventID: "cm0",
+	}); !errors.Is(err, ErrTeamChildrenNotTerminal) {
+		t.Fatalf("RetryTask(manager with queued child) = %v, want ErrTeamChildrenNotTerminal", err)
+	}
+
+	// Once child ends, manager retry succeeds cleanly.
+	seq = failTaskEvent(t, s, rec.TeamID, "mgr-team.child", seq, "fc1")
+	res, err := s.RetryTask(ctx, rec.TeamID, "mgr-team.mgr", &TaskRetryInput{
+		ExpectedSeq: seq, SupersededEventID: "sm1", CreatedEventID: "cm1",
+	})
+	if err != nil || res.NewTask.TaskID != "mgr-team.mgr~r1" {
+		t.Fatalf("RetryTask(manager after child terminal) = (%+v, %v)", res, err)
+	}
+}
+
+func seedManagerTeamForRetry(t *testing.T, s *Store) (TeamRecord, int64) {
+	t.Helper()
+	ctx := t.Context()
+	rec, _, err := s.CreateTeam(ctx, &NewTeamInput{
+		TeamID: "mgr-team", WorkspaceID: "ws-m", SessionID: "sess-lead-m",
+		ProposedEventID: "pm", ProposedPayload: []byte(`{"brief":"b"}`),
+		Tasks: []NewTaskInput{
+			{TaskID: "mgr-team.lead", HierarchyRole: RoleLead, CatalogRole: "r", Deliverable: DeliverableReport, CreatedEventID: "cl", ProtectedSpec: []byte(`{"goal":"g"}`)},
+			{TaskID: "mgr-team.mgr", ParentTaskID: "mgr-team.lead", HierarchyRole: RoleTeamManager, CatalogRole: "r", Deliverable: DeliverableReport, CreatedEventID: "cm", ProtectedSpec: []byte(`{"goal":"g"}`)},
+			{TaskID: "mgr-team.child", ParentTaskID: "mgr-team.mgr", HierarchyRole: RoleMember, CatalogRole: "r", Deliverable: DeliverableReport, CreatedEventID: "cc", ProtectedSpec: []byte(`{"goal":"g"}`)},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq, err := s.AppendTeamEvent(ctx, rec.TeamID, rec.LastSeq, &AppendTeamEventInput{EventID: "stm", EventType: EventTeamStarted})
+	if err != nil {
+		t.Fatal(err)
+	}
+	seq = failTaskEvent(t, s, rec.TeamID, "mgr-team.mgr", seq, "fm0")
+	return rec, seq
 }

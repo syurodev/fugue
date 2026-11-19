@@ -61,18 +61,7 @@ func mustTestGit(t *testing.T, dataDir string) *gitops.Manager {
 
 func bindingForTask(t *testing.T, f *activeTeamFixture, teamID, taskID string) SessionBinding {
 	t.Helper()
-	_, tasks, err := f.hp.vendorStore.TeamSnapshot(t.Context(), teamID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	task, ok := findTask(tasks, taskID)
-	if !ok || task.SessionID == "" {
-		t.Fatalf("task %s missing session: %+v", taskID, task)
-	}
-	if _, sessErr := f.hp.vendorStore.Snapshot(t.Context(), task.SessionID); sessErr != nil {
-		seedTeamSessions(t, f.teamProposalFixture, teamID, [][3]string{{task.SessionID, task.TaskID, string(vendorstore.RoleMember)}})
-	}
-	return mustAttachRole(t, f.teamProposalFixture, task.SessionID, vendorstore.RoleMember)
+	return bindingForTaskWithRole(t, f, teamID, taskID, vendorstore.RoleMember)
 }
 
 func TestDependentTaskStartsOnlyAfterItsDependenciesAreDone(t *testing.T) {
@@ -408,4 +397,74 @@ func TestStartChildClosesSessionAndRecordsFailureOnExhaustedStartRetries(t *test
 	if afterSib.State != vendorstore.TaskStateFailed || afterSib.FailureCode != failSessionStart {
 		t.Fatalf("sibling state = (%s, %s), want (failed, %s)", afterSib.State, afterSib.FailureCode, failSessionStart)
 	}
+}
+
+func TestRetriedManagerResolvesChildrenAndMailbox(t *testing.T) {
+	t.Parallel()
+	f := &activeTeamFixture{teamProposalFixture: newTeamProposalFixture(t, "")}
+	initRepo(t, f.root)
+	ctx := t.Context()
+	f.rt.teamTasks.resultGate = passingResultGate{}
+	fakeSess := &fakeTaskSessions{}
+	f.rt.teamDispatch.deps.Sessions = fakeSess
+	f.rt.teamDispatch.deps.Admit = localAdmitter{capacity: fakeSess}
+	f.rt.teamDispatch.deps.Git = mustTestGit(t, f.rt.teamTasks.dataDir)
+	f.rt.teamTasks.SetRuntime(f.rt.teamDispatch, f.rt.teamWake)
+
+	args := &ProposeArgs{
+		Title: "Mgr retry", Brief: "Manager chain",
+		Tasks: []teams.ProposedTask{
+			{ID: teamTestLeadTask, TeamRole: teams.RoleLead, Role: teamTestRole, Goal: "Lead", WriteScope: []string{}, Deliverable: teams.DeliverableReport},
+			{ID: "mgr", ParentTaskID: teamTestLeadTask, TeamRole: teams.RoleTeamManager, Role: teamTestRole, Goal: "Manage", WriteScope: []string{}, Deliverable: teams.DeliverableReport},
+			{ID: "child", ParentTaskID: "mgr", TeamRole: teams.RoleMember, Role: teamTestRole, Goal: "Work", WriteScope: []string{}, Deliverable: teams.DeliverableReport},
+		},
+	}
+	teamID, err := f.rt.teamProposals.Propose(ctx, f.session.ID, args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ansErr := f.answerCard(t, "mgr-prop", teamProposeToolName, teamDecisionQuestionID, decisionApprove, ""); ansErr != nil {
+		t.Fatal(ansErr)
+	}
+	if dispErr := f.rt.teamDispatch.Dispatch(ctx, teamID); dispErr != nil {
+		t.Fatal(dispErr)
+	}
+
+	mgrID, childID := teamID+".mgr", teamID+".child"
+	mustCallTool(t, f, bindingForTask(t, f, teamID, childID), taskDoneToolName, `{"summary":"c failed","status":"failed"}`)
+	mustCallTool(t, f, bindingForTaskWithRole(t, f, teamID, mgrID, vendorstore.RoleTeamManager), taskDoneToolName, `{"summary":"m failed","status":"failed"}`)
+
+	// Retry manager -> mgr~r1, then retry child -> child~r1 (ParentTaskID stays mgr).
+	mustCallTool(t, f, f.binding, taskRetryToolName, `{"task_id":"`+mgrID+`"}`)
+	mgrR1 := mgrID + "~r1"
+	mgrR1Bind := bindingForTaskWithRole(t, f, teamID, mgrR1, vendorstore.RoleTeamManager)
+	mustCallTool(t, f, mgrR1Bind, taskRetryToolName, `{"task_id":"`+childID+`"}`)
+
+	childR1 := childID + "~r1"
+	if _, started := fakeSess.startFor(childR1); !started {
+		t.Fatalf("child retry %s did not start under retried manager %s", childR1, mgrR1)
+	}
+	mustCallTool(t, f, bindingForTask(t, f, teamID, childR1), taskDoneToolName, `{"summary":"c ok","status":"succeeded"}`)
+	mustCallTool(t, f, mgrR1Bind, taskAcceptToolName, `{"task_id":"`+childR1+`"}`)
+
+	statusRes := mustCallTool(t, f, mgrR1Bind, taskStatusToolName, `{"task_id":"`+childR1+`"}`)
+	if !strings.Contains(statusRes.Text, `"state":"done"`) {
+		t.Fatalf("child~r1 status = %s, want done", statusRes.Text)
+	}
+}
+
+func bindingForTaskWithRole(t *testing.T, f *activeTeamFixture, teamID, taskID string, role vendorstore.TeamRole) SessionBinding {
+	t.Helper()
+	_, tasks, err := f.hp.vendorStore.TeamSnapshot(t.Context(), teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	task, ok := findTask(tasks, taskID)
+	if !ok || task.SessionID == "" {
+		t.Fatalf("task %s missing session: %+v", taskID, task)
+	}
+	if _, sessErr := f.hp.vendorStore.Snapshot(t.Context(), task.SessionID); sessErr != nil {
+		seedTeamSessions(t, f.teamProposalFixture, teamID, [][3]string{{task.SessionID, task.TaskID, string(role)}})
+	}
+	return mustAttachRole(t, f.teamProposalFixture, task.SessionID, role)
 }

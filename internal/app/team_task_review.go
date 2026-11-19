@@ -65,9 +65,9 @@ func (s *teamTaskService) Accept(ctx context.Context, sessionID, taskID, note st
 // Reject transitions a direct child task from review back to running with
 // requested changes delivered immediately through the mailbox (§4, §6.6).
 func (s *teamTaskService) Reject(ctx context.Context, sessionID, taskID, reason string) (string, error) {
-	trimmed := strings.TrimSpace(reason)
-	if trimmed == "" || len(trimmed) > maxTaskSendBytes {
-		return "", errcode.New(errcode.InvalidArgument, "reason must be 1..16384 bytes")
+	trimmed, err := validateDigestMessage("reason", reason)
+	if err != nil {
+		return "", err
 	}
 	payload, err := json.Marshal(struct {
 		Reason string `json:"reason"`

@@ -441,3 +441,43 @@ func assertORE15TasksDone(t *testing.T, f *activeTeamFixture, teamID string, tas
 		}
 	}
 }
+
+func TestDigestMessageCapRejectsOversizeAndDelimiterSpam(t *testing.T) {
+	t.Parallel()
+	f := newActiveTeamFixture(t, nil)
+	ctx := t.Context()
+
+	oversize := strings.Repeat("a", maxTaskSendBytes+1)
+	if _, err := f.rt.teamTasks.Send(ctx, f.leadBinding.SessionID, f.managerTaskID, oversize); errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("Send(oversize) err = %v, want InvalidArgument", err)
+	}
+	delimSpam := strings.Repeat("⟪", 1100) // > 6 KiB after EscapeDigestText
+	if _, err := f.rt.teamTasks.Send(ctx, f.leadBinding.SessionID, f.managerTaskID, delimSpam); errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("Send(delimiter spam) err = %v, want InvalidArgument", err)
+	}
+	if _, err := f.rt.teamTasks.Reject(ctx, f.leadBinding.SessionID, f.managerTaskID, delimSpam); errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("Reject(delimiter spam) err = %v, want InvalidArgument", err)
+	}
+	if _, err := f.rt.teamTasks.Answer(ctx, f.leadBinding.SessionID, f.managerTaskID, delimSpam, ""); errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("Answer(delimiter spam) err = %v, want InvalidArgument", err)
+	}
+}
+
+func TestAskToUserRequiresConfiguredInteractionsBeforeTransition(t *testing.T) {
+	t.Parallel()
+	f := newActiveTeamFixture(t, nil)
+	ctx := t.Context()
+
+	f.rt.teamTasks.SetInteractions(nil)
+	if _, err := f.rt.teamTasks.Ask(ctx, f.memberBinding.SessionID, "need user?", askTargetUser); errcode.CodeOf(err) != errcode.FailedPrecondition {
+		t.Fatalf("Ask(to=user, nil interactions) err = %v, want FailedPrecondition", err)
+	}
+	_, tasks, err := f.hp.vendorStore.TeamSnapshot(ctx, f.teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mem, _ := findTask(tasks, f.memberTaskID)
+	if mem.State != vendorstore.TaskStateRunning {
+		t.Fatalf("member state after failed Ask(to=user) = %s, want running (not stuck asking)", mem.State)
+	}
+}
