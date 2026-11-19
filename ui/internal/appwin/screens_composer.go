@@ -29,6 +29,7 @@ func (s *screens) applyComposerResult(r session.Result) {
 			s.fail(fmt.Errorf("read the commands: %w", r.Err))
 		}
 	case session.ResultProbe:
+		s.pendingProbe = false
 		s.composer.applyProbes(r.Probes)
 		if r.Err != nil {
 			s.fail(fmt.Errorf("probe the vendors: %w", r.Err))
@@ -128,4 +129,23 @@ func (s *screens) requestWorkspaces() {
 // requestWorkspace reads one workspace's roots.
 func (s *screens) requestWorkspace(id string) {
 	s.fetcher.RequestWorkspace(id)
+}
+
+// probeMissingVendors re-probes when the session list names a vendor the
+// composer has no capability for: a vendor joined the list under a
+// connection that already probed, and the composer gates Steer and stop on
+// the probed capability. One probe is in flight at a time; a failed probe
+// (a vendor CLI the host cannot resolve, say) retries on the next list
+// change rather than on every frame.
+func (s *screens) probeMissingVendors() {
+	if s.pendingProbe {
+		return
+	}
+	for _, sess := range s.sidebar.List() {
+		if sess.Vendor != "" && !s.composer.knowsVendor(sess.Vendor) {
+			s.pendingProbe = true
+			s.fetcher.RequestProbe()
+			return
+		}
+	}
 }

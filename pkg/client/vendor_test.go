@@ -130,3 +130,26 @@ func TestWorkspaceAgainstARealHost(t *testing.T) {
 		t.Fatalf("error = %v, want the not-found code the host maps workspace.workspace_not_found to", err)
 	}
 }
+
+// TestProbeVendorsAgainstARealHost probes on a real host and pins the
+// mapping either way the environment answers: a host that cannot resolve the
+// vendor CLI answers typed not-found, and one that can reports the probed
+// vendor with its capability. The composer's Steer and stop gating reads
+// exactly this answer.
+func TestProbeVendorsAgainstARealHost(t *testing.T) {
+	t.Parallel()
+	c := startRealHost(t)
+	probes, err := c.ProbeVendors(testCtx(t))
+	if err != nil {
+		if connect.CodeOf(err) != connect.CodeNotFound {
+			t.Fatalf("error = %v, want the typed not-found the host maps a missing vendor binary to", err)
+		}
+		return
+	}
+	if len(probes) == 0 {
+		t.Fatal("the host answered no probes")
+	}
+	if probes[0].Vendor != client.VendorClaude {
+		t.Fatalf("probe vendor = %q, want claude", probes[0].Vendor)
+	}
+}

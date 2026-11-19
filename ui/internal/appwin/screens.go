@@ -57,8 +57,10 @@ type screens struct {
 	// refreshed when the session's commands revision advances (§9).
 	commands        map[string]*session.Commands
 	pendingCommands map[string]bool
-	// pendingWorkspaces marks the start flow's workspace list read.
+	// pendingWorkspaces marks the start flow's workspace list read, and
+	// pendingProbe the capability probe a changed vendor list armed.
 	pendingWorkspaces bool
+	pendingProbe      bool
 	// lastStarted is the session the composer last asked to start, opened
 	// as soon as the topic announces it.
 	lastStarted string
@@ -110,11 +112,19 @@ func (s *screens) viewFor(id string) *transcriptview.State {
 }
 
 // prune drops the state of sessions that left the sidebar list, so a closed
-// session's scroll, expansion and composer state does not outlive it.
+// session's scroll, expansion and composer state does not outlive it. The
+// open session leaving the list closes it cleanly: its topics leave the
+// connection, the pane falls back to the empty state, and clicking the
+// session again reopens it.
 func (s *screens) prune() {
 	known := map[string]bool{}
 	for _, sess := range s.sidebar.List() {
 		known[sess.ID] = true
+	}
+	if s.open != "" && !known[s.open] {
+		s.m.RemoveTopic(topicTranscript + s.open)
+		s.m.RemoveTopic(topicTranscriptDlt + s.open)
+		s.open, s.scrolled = "", false
 	}
 	pruneKnown(s.views, known)
 	pruneKnown(s.transcripts, known)
@@ -245,6 +255,7 @@ func (s *screens) applyResult(r session.Result) {
 		}
 		s.sidebar.ApplyList(r.Sessions)
 		s.prune()
+		s.probeMissingVendors()
 	case session.ResultPage:
 		t := s.transcripts[r.Session]
 		if t == nil {
@@ -418,7 +429,7 @@ func (s *screens) layoutTranscript(gtx *layout.Context, env *kit.Env) layout.Dim
 	env.Offset(gtx, image.Pt(0, pane.Y), func(gtx *layout.Context) {
 		local := *gtx
 		local.Constraints = layout.Constraints{Min: image.Pt(w, rowH), Max: image.Pt(w, rowH)}
-		s.composer.layout(env, gtx, s, connected)
+		s.composer.layout(env, &local, s, connected)
 	})
 	return layout.Dimensions{Size: gtx.Constraints.Max}
 }

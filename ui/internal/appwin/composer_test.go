@@ -277,7 +277,7 @@ func (fx *composerFixture) awaitWrite() []vendorCall {
 func TestComposerActionFollowsTheSessionState(t *testing.T) {
 	t.Parallel()
 	c := newComposer(nil)
-	c.applyProbes([]client.VendorProbe{{Vendor: "claude", Capability: client.Capability{Steer: true, Interrupt: true}}})
+	c.applyProbes([]client.VendorProbe{{Vendor: client.VendorClaude, Capability: client.Capability{Steer: true, Interrupt: true}}})
 	c.applyProbes([]client.VendorProbe{{Vendor: "agy", Capability: client.Capability{Interrupt: true}}})
 	for tc, want := range map[string]struct {
 		kind session.PostKind
@@ -292,7 +292,7 @@ func TestComposerActionFollowsTheSessionState(t *testing.T) {
 		stateDetached:         {0, false, false},
 		stateClosed:           {0, false, false},
 	} {
-		kind, ok := c.action(session.Session{Vendor: "claude", State: tc})
+		kind, ok := c.action(session.Session{Vendor: client.VendorClaude, State: tc})
 		if kind != want.kind || ok != want.ok || turnActive(tc) != want.stop {
 			t.Fatalf("state %s action = %d, %v, stop %v; want %d, %v, %v", tc, kind, ok, turnActive(tc), want.kind, want.ok, want.stop)
 		}
@@ -503,5 +503,40 @@ func TestStartFlowRefusesASubmitWithoutAWorkspace(t *testing.T) {
 	}
 	if calls := fx.fake.taken(); len(calls) != 0 {
 		t.Fatalf("calls = %+v, want none", calls)
+	}
+}
+
+// TestComposerLaysOutWithinItsRowHeight pins the row contract the transcript
+// pane's split relies on: the composer laid out under the row's constraints
+// fills exactly the height the pane measured for it, even when the content
+// shrinks between the measure and the draw (here: the write-failure line
+// clears). The call site passes the constrained context (govet's unusedwrite
+// guard pins that); this pins what the constraints are for.
+func TestComposerLaysOutWithinItsRowHeight(t *testing.T) {
+	t.Parallel()
+	fx := newComposerFixture(t, stateReady, client.Capability{})
+	h := newFrameRunner(t)
+	st := fx.state()
+	const width = 600
+	var rowH int
+	h.frame(t, image.Pt(width, 400), func(gtx *layout.Context) {
+		st.lastErr = "the host refused the send"
+		rowH = fx.c.measure(h.env, gtx, fx.sc)
+	})
+
+	var row layout.Dimensions
+	h.frame(t, image.Pt(width, 400), func(gtx *layout.Context) {
+		st.lastErr = ""
+		local := *gtx
+		local.Constraints = layout.Constraints{
+			Min: image.Pt(width, rowH), Max: image.Pt(width, rowH),
+		}
+		row = fx.c.layout(h.env, &local, fx.sc, true)
+	})
+	if row.Size.Y != rowH {
+		t.Fatalf("composer row = %d px, want the row height %d the pane allotted", row.Size.Y, rowH)
+	}
+	if row.Size.Y > rowH {
+		t.Fatalf("composer row = %d px overflows its row height %d", row.Size.Y, rowH)
 	}
 }

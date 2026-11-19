@@ -121,6 +121,14 @@ func (c *composer) applyProbes(probes []client.VendorProbe) {
 	}
 }
 
+// knowsVendor reports a probed answer for the vendor, success or not: the
+// composer offers a vendor without a probe nothing beyond the base actions,
+// so re-probing it on every list change would only repeat the failure.
+func (c *composer) knowsVendor(vendor string) bool {
+	_, ok := c.caps[vendor]
+	return ok
+}
+
 // steerOK reports whether the vendor accepts input mid-turn (§6).
 func (c *composer) steerOK(vendor string) bool { return c.caps[vendor].Steer }
 
@@ -222,18 +230,20 @@ func measureLabel(env *kit.Env, gtx *layout.Context, t theme.Type, c color.NRGBA
 }
 
 // layout draws the composer row: the start row when no session is open, the
-// input and its actions otherwise. The caller lays it out inside Env.Offset,
-// so the slash menu's anchor knows its place in the window, and passes
-// whether the host is reachable, which disables the composer while it is not.
-func (c *composer) layout(env *kit.Env, gtx *layout.Context, sc *screens, connected bool) {
+// input and its actions otherwise. It returns the row it laid out — the row
+// height the caller allotted is the row's own (§5: the transcript pane gives
+// the composer everything above the measured row). The caller lays it out
+// inside Env.Offset, so the slash menu's anchor knows its place in the
+// window, and passes whether the host is reachable, which disables the
+// composer while it is not.
+func (c *composer) layout(env *kit.Env, gtx *layout.Context, sc *screens, connected bool) layout.Dimensions {
 	if sc.open == "" {
-		c.start.row(env, gtx, sc)
-		return
+		return c.start.row(env, gtx, sc)
 	}
 	st := c.stateFor(sc.open)
 	sess, known := sc.sidebar.Lookup(sc.open)
 	if !known {
-		return
+		return layout.Dimensions{}
 	}
 	disabled := !connected || sess.State == stateStarting || sess.State == stateWaiting ||
 		sess.State == stateDetached || sess.State == stateClosed
@@ -246,7 +256,7 @@ func (c *composer) layout(env *kit.Env, gtx *layout.Context, sc *screens, connec
 	items, chosen, ateReturn := c.syncMenu(gtx, sc, st, draft, query, isSlash, disabled)
 
 	var rowDims layout.Dimensions
-	layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
+	row := layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
 			rowDims = c.layoutInput(env, &local, sc, st, sess, disabled, ateReturn)
@@ -258,6 +268,7 @@ func (c *composer) layout(env *kit.Env, gtx *layout.Context, sc *screens, connec
 		}),
 	)
 	c.layoutMenu(env, gtx, sc, st, draft, query, chosen, items, rowDims)
+	return row
 }
 
 // syncMenu opens the slash menu while the draft names a command the composer

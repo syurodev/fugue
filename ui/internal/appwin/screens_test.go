@@ -148,3 +148,41 @@ func TestScrollStateIsPerSession(t *testing.T) {
 		t.Fatal("session b's state was pruned with session a")
 	}
 }
+
+// TestPruneClosesTheOpenSessionWhenItLeavesTheList pins the #132 carry-over:
+// when the OPEN session leaves the sidebar list, prune closes it cleanly —
+// the pane falls back to the empty state, the session's state is dropped,
+// and clicking the session again reopens it instead of being refused by the
+// unchanged open id.
+func TestPruneClosesTheOpenSessionWhenItLeavesTheList(t *testing.T) {
+	t.Parallel()
+	s, fake := newTestScreens(t)
+	s.openSession("s1")
+
+	// The list read no longer names the open session: the host reports it
+	// gone.
+	s.sidebar.ApplyList(client.SessionList{Sessions: []client.Session{
+		{ID: "s2", Vendor: client.VendorClaude, State: "ready"},
+	}})
+	s.prune()
+	if s.open != "" {
+		t.Fatalf("open = %q after the open session left the list, want it closed", s.open)
+	}
+	if _, ok := s.transcripts["s1"]; ok {
+		t.Fatal("the closed session's transcript outlived it")
+	}
+	if _, ok := s.views["s1"]; ok {
+		t.Fatal("the closed session's scroll state outlived it")
+	}
+
+	// The empty state shows for no open session, and the session reopens on
+	// a fresh click — openSession no longer refuses the same id.
+	before := len(fake.pages)
+	s.openSession("s1")
+	if s.open != "s1" {
+		t.Fatalf("open = %q after the fresh click, want the session reopened", s.open)
+	}
+	if len(fake.pages) <= before {
+		t.Fatal("the reopened session did not request its newest page")
+	}
+}
