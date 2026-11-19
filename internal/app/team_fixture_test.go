@@ -4,12 +4,14 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/ids"
+	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -56,6 +58,25 @@ func newTeamFixture(t *testing.T, extraTOML string, noDispatch bool) *teamPropos
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
+		// process.Stop waits on HostDeps.Clock for pipes/interrupts; advance
+		// the fake clock while Close runs so it cannot deadlock on a frozen clock.
+		done := make(chan struct{})
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			testutil.Spin(t, "close host", func() bool {
+				select {
+				case <-done:
+					return true
+				default:
+					clk.Advance(time.Millisecond)
+					return false
+				}
+			})
+		})
+		defer func() {
+			close(done)
+			wg.Wait()
+		}()
 		if closeErr := hp.Close(); closeErr != nil {
 			t.Errorf("close host: %v", closeErr)
 		}
