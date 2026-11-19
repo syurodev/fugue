@@ -146,6 +146,9 @@ func (c *callerTeamContext) requireDelegator(taskID string) (*vendorstore.TaskRe
 	if c.role != vendorstore.RoleLead && c.role != vendorstore.RoleTeamManager {
 		return nil, errcode.New(errcode.PermissionDenied, "only a lead or team manager may delegate tasks")
 	}
+	if c.caller != nil && c.caller.State != vendorstore.TaskStateRunning {
+		return nil, errcode.New(errcode.FailedPrecondition, "caller task is not running")
+	}
 	if err := teams.ValidateTaskIdentifier("task_id", taskID); err != nil {
 		return nil, errcode.New(errcode.InvalidArgument, err.Error())
 	}
@@ -250,22 +253,23 @@ func (s *teamTaskService) Cancel(ctx context.Context, sessionID, taskID, reason 
 	if err != nil {
 		return "", errcode.Wrap(errcode.Internal, "encode cancel reason", err)
 	}
-	sessions := make([]string, 0, 1)
-	var rootID string
+	var rootID, rootSessionID string
 	if err := s.appendTeamWithRetry(ctx, sessionID, func(_ context.Context, c *callerTeamContext) (*vendorstore.AppendTeamEventInput, error) {
 		ev, sid, buildErr := s.buildCancelEvent(c, taskID, payload)
 		if buildErr != nil {
 			return nil, buildErr
 		}
-		rootID = ev.TaskID
-		if sid != "" {
-			sessions = append(sessions, sid)
-		}
+		rootID, rootSessionID = ev.TaskID, sid
 		return ev, nil
 	}); err != nil {
 		return "", err
 	}
-	sessions = append(sessions, s.cancelSubtreeDescendants(ctx, sessionID, rootID, payload)...)
+	descSessions := s.cancelSubtreeDescendants(ctx, sessionID, rootID, payload)
+	sessions := make([]string, 0, 1+len(descSessions))
+	if rootSessionID != "" {
+		sessions = append(sessions, rootSessionID)
+	}
+	sessions = append(sessions, descSessions...)
 	s.closeCancelledSessions(ctx, sessions)
 	return "task " + rootID + " cancelled", nil
 }

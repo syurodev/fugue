@@ -38,11 +38,10 @@ func (d *teamDispatcher) startChild(ctx context.Context, rec *vendorstore.TeamRe
 	if code != "" {
 		return d.failTask(ctx, rec.TeamID, task.TaskID, code)
 	}
-	seq, err := d.appendTaskEvent(ctx, rec.TeamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
+	if appErr := d.appendTaskEvent(ctx, rec.TeamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
 		TaskID: task.TaskID, EventType: vendorstore.EventTaskAssigned, SessionID: launch.req.SessionID,
-	})
-	if err != nil {
-		return err
+	}); appErr != nil {
+		return appErr
 	}
 	cwd, err := d.createWorktree(ctx, rec.TeamID, task, launch)
 	if err != nil {
@@ -55,9 +54,7 @@ func (d *teamDispatcher) startChild(ctx context.Context, rec *vendorstore.TeamRe
 		d.removeWorktree(ctx, launch, task.TaskID)
 		return d.failTask(ctx, rec.TeamID, task.TaskID, failSessionStart)
 	}
-	if _, err := d.appendTaskEvent(ctx, rec.TeamID, seq, &vendorstore.AppendTeamEventInput{
-		TaskID: task.TaskID, EventType: vendorstore.EventTaskStarted,
-	}); err != nil {
+	if err := d.appendTaskStartedWithRetry(ctx, rec.TeamID, task.TaskID, launch.req.SessionID); err != nil {
 		d.closeTaskSession(ctx, launch.req.SessionID)
 		return err
 	}
@@ -243,7 +240,7 @@ func (d *teamDispatcher) failTask(ctx context.Context, teamID, taskID, code stri
 	if err != nil {
 		return boundaryError("read the team", err)
 	}
-	_, err = d.appendTaskEvent(ctx, teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
+	err = d.appendTaskEvent(ctx, teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
 		TaskID: taskID, EventType: vendorstore.EventTaskEnded, Outcome: vendorstore.TaskOutcomeFailed, FailureCode: code,
 		Mailbox: digestItemRows(taskID, delegatorOf(taskID, tasks), code),
 	})

@@ -181,17 +181,16 @@ func (d *teamDispatcher) start(ctx context.Context, rec *vendorstore.TeamRecord,
 
 // appendTaskEvent appends one task event after the team's last sequence and
 // returns the new last sequence.
-func (d *teamDispatcher) appendTaskEvent(ctx context.Context, teamID string, seq int64, ev *vendorstore.AppendTeamEventInput) (int64, error) {
+func (d *teamDispatcher) appendTaskEvent(ctx context.Context, teamID string, seq int64, ev *vendorstore.AppendTeamEventInput) error {
 	id, err := d.deps.IDs.NewID()
 	if err != nil {
-		return 0, errcode.Wrap(errcode.Internal, "generate the task event ID", err)
+		return errcode.Wrap(errcode.Internal, "generate the task event ID", err)
 	}
 	ev.EventID = id
-	next, err := d.deps.Store.AppendTeamEvent(ctx, teamID, seq, ev)
-	if err != nil {
-		return 0, boundaryError("record the task event", err)
+	if _, err := d.deps.Store.AppendTeamEvent(ctx, teamID, seq, ev); err != nil {
+		return boundaryError("record the task event", err)
 	}
-	return next, nil
+	return nil
 }
 
 // bindLead binds the proposing session to the lead task (Q-117): no process
@@ -205,18 +204,51 @@ func (d *teamDispatcher) bindLead(ctx context.Context, rec *vendorstore.TeamReco
 	if err != nil {
 		return false, boundaryError("read the lead session", err)
 	}
-	seq, err := d.appendTaskEvent(ctx, rec.TeamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
+	if err := d.appendTaskEvent(ctx, rec.TeamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
 		TaskID: task.TaskID, EventType: vendorstore.EventTaskAssigned, SessionID: rec.SessionID,
-	})
-	if err != nil {
-		return false, err
-	}
-	if _, err := d.appendTaskEvent(ctx, rec.TeamID, seq, &vendorstore.AppendTeamEventInput{
-		TaskID: task.TaskID, EventType: vendorstore.EventTaskStarted,
 	}); err != nil {
 		return false, err
 	}
+	if err := d.appendTaskStartedWithRetry(ctx, rec.TeamID, task.TaskID, rec.SessionID); err != nil {
+		return false, err
+	}
 	return true, nil
+}
+
+// appendTaskStartedWithRetry records EventTaskStarted after verifying the task
+// is still in TaskStateStarting with the expected sessionID, retrying only
+// this append on ErrSequenceConflict without repeating worktree or spawn.
+func (d *teamDispatcher) appendTaskStartedWithRetry(ctx context.Context, teamID, taskID, sessionID string) error {
+	for attempt := range maxAppendRetries {
+		err := d.appendTaskStartedAttempt(ctx, teamID, taskID, sessionID)
+		if err == nil {
+			return nil
+		}
+		if !errors.Is(err, vendorstore.ErrSequenceConflict) {
+			return err
+		}
+		if attempt+1 == maxAppendRetries {
+			return errcode.New(errcode.FailedPrecondition, "task start sequence conflict")
+		}
+	}
+	return errcode.New(errcode.FailedPrecondition, "task start sequence conflict")
+}
+
+func (d *teamDispatcher) appendTaskStartedAttempt(ctx context.Context, teamID, taskID, sessionID string) error {
+	rec, tasks, err := d.deps.Store.TeamSnapshot(ctx, teamID)
+	if err != nil {
+		return boundaryError("read the team", err)
+	}
+	if rec.State != vendorstore.TeamStateActive {
+		return errcode.New(errcode.FailedPrecondition, "the team is not active")
+	}
+	task, found := findTask(tasks, taskID)
+	if !found || task.State != vendorstore.TaskStateStarting || task.SessionID != sessionID {
+		return errcode.New(errcode.FailedPrecondition, "task is no longer starting for its spawned session")
+	}
+	return d.appendTaskEvent(ctx, teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
+		TaskID: taskID, EventType: vendorstore.EventTaskStarted,
+	})
 }
 
 // StartTask starts one explicitly-named queued task of an active team

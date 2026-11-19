@@ -1,12 +1,14 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
 
 	"github.com/syurodev/fugue/internal/gitops"
+	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -184,5 +186,83 @@ func TestCancelCascadesSubtreeAndSealsReason(t *testing.T) {
 	raw, found, err := f.hp.vendorStore.OpenLatestTaskEventPayload(ctx, f.teamID, f.managerTaskID, vendorstore.EventTaskEnded)
 	if err != nil || !found || !strings.Contains(string(raw), "scope changed") {
 		t.Fatalf("sealed cancel payload = (%q, %v, %v), want reason", raw, found, err)
+	}
+}
+
+type seqBumpingSessions struct {
+	*fakeTaskSessions
+	onStart func(context.Context) error
+}
+
+func (s *seqBumpingSessions) StartTaskSession(ctx context.Context, req *taskSessionRequest) error {
+	if err := s.fakeTaskSessions.StartTaskSession(ctx, req); err != nil {
+		return err
+	}
+	if s.onStart != nil {
+		return s.onStart(ctx)
+	}
+	return nil
+}
+
+func TestStartChildRetriesTaskStartedOnSequenceConflictWithoutRespawning(t *testing.T) {
+	t.Parallel()
+	f := newActiveTeamFixture(t, nil)
+	initRepo(t, f.root)
+	ctx := t.Context()
+
+	fakeSess := &fakeTaskSessions{}
+	bumper := &seqBumpingSessions{
+		fakeTaskSessions: fakeSess,
+		onStart: func(c context.Context) error {
+			rec, _, err := f.hp.vendorStore.TeamSnapshot(c, f.teamID)
+			if err != nil {
+				return fmt.Errorf("snapshot: %w", err)
+			}
+			_, err = f.hp.vendorStore.AppendTeamEvent(c, f.teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
+				EventID: "mid-note", EventType: vendorstore.EventTeamNoted, ProtectedPayload: []byte(`{"note":"mid"}`),
+			})
+			if err != nil {
+				return fmt.Errorf("append mid-note: %w", err)
+			}
+			return nil
+		},
+	}
+	f.rt.teamDispatch.deps.Sessions = bumper
+	f.rt.teamDispatch.deps.Admit = localAdmitter{capacity: fakeSess}
+
+	mustCallTool(t, f, f.leadBinding, taskStartToolName, `{"task_id":"`+f.siblingTaskID+`"}`)
+	if fakeSess.startCount() != 1 {
+		t.Fatalf("started sessions = %d, want 1", fakeSess.startCount())
+	}
+	_, tasks, err := f.hp.vendorStore.TeamSnapshot(ctx, f.teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sib, _ := findTask(tasks, f.siblingTaskID)
+	if sib.State != vendorstore.TaskStateRunning {
+		t.Fatalf("sibling state = %s, want running", sib.State)
+	}
+}
+
+func TestCancelledManagerCannotDelegateWithOpenSession(t *testing.T) {
+	t.Parallel()
+	f := newActiveTeamFixture(t, nil)
+	ctx := t.Context()
+
+	// Add a queued child under manager, then cancel manager while its session token remains live.
+	spec := mustMarshalJSON(t, teams.ProtectedTaskContent{Goal: "sub"})
+	rec, _, err := f.hp.vendorStore.TeamSnapshot(ctx, f.teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.hp.vendorStore.AppendTeamEvent(ctx, f.teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
+		EventID: "add-sub", EventType: vendorstore.EventTeamAmended, ProtectedPayload: spec,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	mustCallTool(t, f, f.leadBinding, taskCancelToolName, `{"task_id":"`+f.managerTaskID+`","reason":"stop"}`)
+
+	if _, startErr := f.rt.teamTasks.Start(ctx, f.managerBinding.SessionID, f.memberTaskID); errcode.CodeOf(startErr) != errcode.FailedPrecondition {
+		t.Fatalf("cancelled manager Start err = %v, want FailedPrecondition", startErr)
 	}
 }
