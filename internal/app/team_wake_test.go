@@ -325,8 +325,9 @@ func TestRecoveryNeverResendsABatchThatIsBeingDelivered(t *testing.T) {
 	// The first pump is blocked inside Send: the claim is `delivering` and
 	// the marker is not in the transcript yet.
 	pumpDone := make(chan error, 1)
-	supervise.Go(t.Context(), "test.wake-pump", func(context.Context) error {
-		pumpDone <- f.wake.Pump(t.Context())
+	pumpCtx := t.Context()
+	supervise.Go(pumpCtx, "test.wake-pump", func(context.Context) error {
+		pumpDone <- f.wake.Pump(pumpCtx)
 		return nil
 	})
 	<-started
@@ -337,8 +338,9 @@ func TestRecoveryNeverResendsABatchThatIsBeingDelivered(t *testing.T) {
 		f.wake.Notify()
 	}
 	second := make(chan error, 1)
-	supervise.Go(t.Context(), "test.wake-pump-second", func(context.Context) error {
-		second <- f.wake.Pump(t.Context())
+	secondCtx := t.Context()
+	supervise.Go(secondCtx, "test.wake-pump-second", func(context.Context) error {
+		second <- f.wake.Pump(secondCtx)
 		return nil
 	})
 
