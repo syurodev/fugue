@@ -144,7 +144,11 @@ func (w *teamWake) batchText(ctx context.Context, claimed []vendorstore.MailboxM
 		}
 	}
 	header, entries = decisionTurnText(&decision, entries)
-	text := teams.BuildDigest(header, entries, teams.MaxDigestBytes)
+	nonce, err := w.deps.IDs.NewID()
+	if err != nil {
+		return "", errcode.Wrap(errcode.Internal, "generate the digest nonce", err)
+	}
+	text := teams.BuildDigest(header, entries, nonce, teams.MaxDigestBytes)
 	return mailboxBatchPrefix(claimed[0].BatchID) + "\n\n" + text, nil
 }
 
@@ -223,7 +227,7 @@ const (
 func (w *teamWake) scanForMarker(ctx context.Context, sessionID string, page []vendorstore.StoredItem, marker string, scanned *int) (scanOutcome, error) {
 	for i := range page {
 		item := &page[i]
-		if item.Kind != vendorstore.KindUserMessage {
+		if item.Kind != vendorstore.KindUserMessage || item.TurnOrigin != vendorstore.TurnOriginFugue {
 			continue
 		}
 		*scanned++
@@ -237,9 +241,19 @@ func (w *teamWake) scanForMarker(ctx context.Context, sessionID string, page []v
 			}
 			return scanHold, boundaryError("read the transcript item", err)
 		}
-		if strings.Contains(string(content), marker) {
+		if hasBatchPrefix(content, marker) {
 			return scanFound, nil
 		}
 	}
 	return scanContinue, nil
+}
+
+func hasBatchPrefix(content []byte, marker string) bool {
+	var msg struct {
+		Text string `json:"Text"`
+	}
+	if json.Unmarshal(content, &msg) == nil && msg.Text != "" {
+		return strings.HasPrefix(msg.Text, marker)
+	}
+	return strings.HasPrefix(string(content), marker)
 }

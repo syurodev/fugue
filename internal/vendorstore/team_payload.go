@@ -5,6 +5,8 @@ package vendorstore
 // lock cannot leave it behind.
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 
 	"github.com/syurodev/fugue/internal/sealing"
@@ -73,6 +75,34 @@ func (s *Store) commitTeamTx(snap vault.Snapshot, needVault bool, commitFn func(
 	}
 	if err := commitFn(); err != nil {
 		return fmt.Errorf("commit team tx: %w", err)
+	}
+	return nil
+}
+
+func insertAppendedTeamEvent(
+	ctx context.Context,
+	tx *sql.Tx,
+	teamID string,
+	seq int64,
+	ev *AppendTeamEventInput,
+	fromState, toState string,
+	envelope []byte,
+	now int64,
+) error {
+	var envParam any
+	if len(envelope) > 0 {
+		envParam = envelope
+	}
+	_, err := tx.ExecContext(ctx, `
+		INSERT INTO team_task_events (
+			team_id, sequence, event_id, task_id, event_type, outcome,
+			from_state, to_state, failure_code, payload_envelope, created_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		teamID, seq, ev.EventID, ev.TaskID, string(ev.EventType), ev.Outcome,
+		fromState, toState, ev.FailureCode, envParam, now,
+	)
+	if err != nil {
+		return fmt.Errorf("insert team_task_event: %w", err)
 	}
 	return nil
 }

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/testutil"
@@ -45,7 +46,7 @@ func newWakeFixture(t *testing.T) *wakeFixture {
 	dataDir := t.TempDir()
 	wake := newTeamWake(&teamWakeDeps{
 		Store: f.hp.vendorStore, Sessions: fake, Roots: f.rt.workspaces.domain,
-		Clock: f.clk, Vault: f.hp.vault, DataDir: dataDir,
+		Clock: f.clk, IDs: ids.NewSequence("wake-nonce-"), Vault: f.hp.vault, DataDir: dataDir,
 	})
 	return &wakeFixture{teamProposalFixture: f, sessions: fake, wake: wake, dataDir: dataDir}
 }
@@ -136,19 +137,19 @@ func (f *wakeFixture) endMember(t *testing.T, team *wakeTeam, member, code strin
 	})
 }
 
-// enqueueMailbox appends a cancelled queued task carrying one mailbox row of
-// the given kind, so a test can place mail without the task tools.
-func (f *wakeFixture) enqueueMailbox(t *testing.T, team *wakeTeam, recipient, kind string, payload []byte) {
+// enqueueMailbox appends a cancelled queued task carrying one answer mailbox
+// row, so a test can place immediate mail without the task tools.
+func (f *wakeFixture) enqueueMailbox(t *testing.T, team *wakeTeam, recipient string, payload []byte) {
 	t.Helper()
 	f.appendTeamEvent(t, team.teamID, &vendorstore.AppendTeamEventInput{
 		TaskID: team.b, EventType: vendorstore.EventTaskEnded, Outcome: string(vendorstore.TaskStateCancelled),
-		Mailbox: []vendorstore.MailboxEnqueueInput{{RecipientTaskID: recipient, Kind: kind, Payload: payload}},
+		Mailbox: []vendorstore.MailboxEnqueueInput{{RecipientTaskID: recipient, Kind: vendorstore.MailboxKindAnswer, Payload: payload}},
 	})
 }
 
-func digestItemPayload(t *testing.T, taskID, state string, question bool) []byte {
+func digestItemPayload(t *testing.T, taskID string) []byte {
 	t.Helper()
-	raw, err := json.Marshal(mailboxDigestItem{TaskID: taskID, State: state, Summary: "summary of " + taskID, Question: question})
+	raw, err := json.Marshal(mailboxDigestItem{TaskID: taskID, State: "running", Summary: "summary of " + taskID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -233,7 +234,7 @@ func TestMemberKindIsDeliveredAtOnce(t *testing.T) {
 	t.Parallel()
 	f := newWakeFixture(t)
 	team := f.newWakeTeam(t, vendorstore.StateReady)
-	f.enqueueMailbox(t, team, team.a, vendorstore.MailboxKindAnswer, digestItemPayload(t, team.a, "running", false))
+	f.enqueueMailbox(t, team, team.a, digestItemPayload(t, team.a))
 	if err := f.wake.Pump(t.Context()); err != nil {
 		t.Fatalf("Pump: %v", err)
 	}
@@ -450,7 +451,7 @@ func TestDetachedSessionIsResumedBeforeTheWake(t *testing.T) {
 	t.Parallel()
 	f := newWakeFixture(t)
 	team := f.newWakeTeam(t, vendorstore.StateDetached)
-	f.enqueueMailbox(t, team, team.a, vendorstore.MailboxKindAnswer, digestItemPayload(t, team.a, "running", false))
+	f.enqueueMailbox(t, team, team.a, digestItemPayload(t, team.a))
 	if err := f.wake.Pump(t.Context()); err != nil {
 		t.Fatalf("Pump: %v", err)
 	}

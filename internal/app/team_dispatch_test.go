@@ -25,13 +25,14 @@ import (
 // fakeTaskSessions is the vendor layer of the dispatcher tests: it records
 // what the dispatcher starts and sends, and starts nothing.
 type fakeTaskSessions struct {
-	mu       sync.Mutex
-	starts   []taskSessionRequest
-	sends    map[string][]string
-	resumes  []fakeResume
-	closed   []string
-	noRoom   bool
-	startErr error
+	mu        sync.Mutex
+	starts    []taskSessionRequest
+	sends     map[string][]string
+	resumes   []fakeResume
+	closed    []string
+	noRoom    bool
+	startErr  error
+	resumeErr error
 	// sendErr fails every send after the text was recorded; holdSend blocks
 	// the send inside the fake, so a test can hold the pump mid-send and
 	// observe what a concurrent trigger does.
@@ -96,7 +97,7 @@ func (f *fakeTaskSessions) ResumeTaskSession(_ context.Context, sessionID, cwd s
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.resumes = append(f.resumes, fakeResume{SessionID: sessionID, Cwd: cwd})
-	return nil
+	return f.resumeErr
 }
 
 // resumeCount reports how many wake resumes the fake recorded.

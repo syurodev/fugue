@@ -19,6 +19,7 @@ import (
 	"github.com/syurodev/fugue/internal/gitops"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
@@ -26,7 +27,11 @@ import (
 )
 
 // digestWait is the §6.1 batching window of a lead or manager digest.
-const digestWait = 30 * time.Second
+// resumeBackoff bounds how often a failed detached resume is retried.
+const (
+	digestWait    = 30 * time.Second
+	resumeBackoff = 5 * time.Minute
+)
 
 // mailboxScanCap bounds the transcript scan of a recovery: beyond it the
 // transcript counts as unreadable and the batch is held (Q-122).
@@ -48,6 +53,7 @@ type teamWakeDeps struct {
 	Sessions taskSessions
 	Roots    rootResolver
 	Clock    clock.Clock
+	IDs      ids.Generator
 	Vault    *vault.Service
 	// DataDir roots the task worktrees of a detached session's cwd (Q-119).
 	DataDir string
@@ -56,13 +62,18 @@ type teamWakeDeps struct {
 // teamWake delivers the team mailbox. One run at a time: the mutex serializes
 // pumps so two triggers never claim one recipient twice.
 type teamWake struct {
-	deps teamWakeDeps
-	mu   sync.Mutex
-	wake chan struct{}
+	deps          teamWakeDeps
+	mu            sync.Mutex
+	wake          chan struct{}
+	resumeRetryAt map[string]time.Time
 }
 
 func newTeamWake(deps *teamWakeDeps) *teamWake {
-	return &teamWake{deps: *deps, wake: make(chan struct{}, 1)}
+	return &teamWake{
+		deps:          *deps,
+		wake:          make(chan struct{}, 1),
+		resumeRetryAt: make(map[string]time.Time),
+	}
 }
 
 // Notify asks for one delivery pass; the mailbox may have new rows or a
@@ -219,15 +230,23 @@ func (w *teamWake) resolveRecipient(ctx context.Context, r vendorstore.MailboxRe
 
 // prepareSession reports whether the recipient session can take its turn
 // now (Q-123): a detached session is resumed first and delivers on the next
-// trigger; starting, busy, waiting and closed sessions hold their mail.
+// trigger; starting, busy, waiting, closed and unmeasured agy sessions hold
+// their mail.
 func (w *teamWake) prepareSession(ctx context.Context, session *vendorstore.Session) (bool, error) {
+	if session.Vendor == VendorAGY {
+		return false, nil
+	}
 	if session.State == vendorstore.StateDetached {
 		if err := w.resumeDetached(ctx, session); err != nil {
 			return false, err
 		}
 		return false, nil
 	}
-	return session.State == vendorstore.StateReady, nil
+	if session.State == vendorstore.StateReady {
+		delete(w.resumeRetryAt, session.ID)
+		return true, nil
+	}
+	return false, nil
 }
 
 // recipientSessionID resolves the session a recipient task delivers to: its
@@ -250,13 +269,22 @@ func (w *teamWake) recipientSessionID(ctx context.Context, teamID string, task *
 // session/load resume with a logged-in agy, then enable; until measured the
 // fail-closed hold covers an unmeasured resume (Q-123).
 func (w *teamWake) resumeDetached(ctx context.Context, session *vendorstore.Session) error {
+	if session.Vendor == VendorAGY {
+		return nil
+	}
+	if until, ok := w.resumeRetryAt[session.ID]; ok && w.deps.Clock.Now().Before(until) {
+		return nil
+	}
 	cwd, err := w.sessionCwd(ctx, session)
 	if err != nil {
 		return err
 	}
 	if err := w.deps.Sessions.ResumeTaskSession(ctx, session.ID, cwd); err != nil {
+		w.resumeRetryAt[session.ID] = w.deps.Clock.Now().Add(resumeBackoff)
 		slog.WarnContext(ctx, "resuming a detached session failed", "session_id", session.ID, "error_code", string(errcode.CodeOf(err)))
+		return nil
 	}
+	delete(w.resumeRetryAt, session.ID)
 	return nil
 }
 

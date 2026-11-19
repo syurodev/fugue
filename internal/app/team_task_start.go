@@ -82,7 +82,7 @@ func (d *teamDispatcher) prepareLaunch(ctx context.Context, rec *vendorstore.Tea
 	if decodeErr := json.Unmarshal(raw, &launch.spec); decodeErr != nil {
 		return nil, "", errcode.Wrap(errcode.Internal, "decode the task spec", decodeErr)
 	}
-	role, found, err := d.decidedRoleFor(ctx, rec.TeamID, task.CatalogRole)
+	role, found, err := decidedRoleFor(ctx, d.deps.Store, rec.TeamID, task.CatalogRole)
 	if err != nil {
 		return nil, "", err
 	}

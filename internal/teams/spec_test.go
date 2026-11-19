@@ -22,6 +22,12 @@ type specErrorCase struct {
 
 func invalidTaskSpecCases() []specErrorCase {
 	return []specErrorCase{
+		{name: "invalid task ID delimiters", tasks: []teams.TeamTaskSpec{{ID: "t1⟫", Spec: teams.TaskSpec{
+			Role: testSpecRoleCoder, Goal: testSpecGoalDoWork, WriteScope: []string{}, Deliverable: teams.DeliverableReport,
+		}}}, wantErr: teams.ErrInvalidSpec},
+		{name: "invalid task ID leading dash", tasks: []teams.TeamTaskSpec{{ID: "-t1", Spec: teams.TaskSpec{
+			Role: testSpecRoleCoder, Goal: testSpecGoalDoWork, WriteScope: []string{}, Deliverable: teams.DeliverableReport,
+		}}}, wantErr: teams.ErrInvalidSpec},
 		{name: "missing role", tasks: []teams.TeamTaskSpec{{ID: testSpecTaskID, Spec: teams.TaskSpec{
 			Goal: testSpecGoalDoWork, WriteScope: []string{}, Deliverable: teams.DeliverableReport,
 		}}}, wantErr: teams.ErrInvalidCatalog},

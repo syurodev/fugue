@@ -13,8 +13,8 @@ import (
 // decidedRoleFor returns the profile the user decided for a catalog role: the
 // roles recorded by the sealed TeamStarted payload, which already hold the
 // edited model of an approve-with-edits decision (OR-E13).
-func (d *teamDispatcher) decidedRoleFor(ctx context.Context, teamID, roleName string) (decidedRole, bool, error) {
-	events, err := d.deps.Store.TeamEventsSince(ctx, teamID, 0, teamEventScanLimit)
+func decidedRoleFor(ctx context.Context, store *vendorstore.Store, teamID, roleName string) (decidedRole, bool, error) {
+	events, err := store.TeamEventsSince(ctx, teamID, 0, teamEventScanLimit)
 	if err != nil {
 		return decidedRole{}, false, boundaryError("read the team events", err)
 	}
@@ -27,7 +27,7 @@ func (d *teamDispatcher) decidedRoleFor(ctx context.Context, teamID, roleName st
 	if startedSeq == 0 {
 		return decidedRole{}, false, nil
 	}
-	raw, err := d.deps.Store.OpenTeamEventPayload(ctx, teamID, startedSeq)
+	raw, err := store.OpenTeamEventPayload(ctx, teamID, startedSeq)
 	if err != nil {
 		return decidedRole{}, false, boundaryError("open the decision payload", err)
 	}

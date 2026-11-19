@@ -83,7 +83,7 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 	sessions.SetWakeHook(func(string) { hp.rt.teamWake.Notify() })
 	hp.rt.teamWake = newTeamWake(&teamWakeDeps{
 		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Roots: hp.rt.workspaces.domain,
-		Clock: deps.Clock, Vault: v, DataDir: deps.DataDir,
+		Clock: deps.Clock, IDs: deps.IDs, Vault: v, DataDir: deps.DataDir,
 	})
 	hp.rt.teamWake.Start(base)
 	hp.rt.teamDispatch = newTeamDispatcher(&teamDispatcherDeps{
