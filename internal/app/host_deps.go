@@ -51,6 +51,9 @@ type HostDeps struct {
 	// scheduler plugs in here, and a test that wants the decide path alone
 	// injects one that admits nothing.
 	TeamAdmitter Admitter
+	// TeamResultGate evaluates checks after fugue_task_done (Q-125). Nil fails
+	// closed in F11.3 and leaves the task in checking until F11.5 wires checks.
+	TeamResultGate ResultGate
 	// TestFugueTools registers Fugue MCP tools for tests only. The fugue
 	// binary never sets it, so a normal host serves none of them.
 	TestFugueTools []*FugueTool

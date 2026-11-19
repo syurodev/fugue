@@ -137,6 +137,7 @@ type HostRuntime struct {
 	transcripts     *Transcripts
 	sessionTools    *SessionToolService
 	teamProposals   *TeamProposalService
+	teamTasks       *teamTaskService
 	teamDispatch    *teamDispatcher
 	teamWake        *teamWake
 	tags            *environments.Registry

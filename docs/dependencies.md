@@ -24,6 +24,7 @@ checks it against `go.mod`.
 | `golang.org/x/sys` | BSD-3-Clause | `flock` for `internal/storage`, `internal/process` and `pkg/client` host logs; `statfs`, peer credentials and landlock for `internal/sandbox` and `internal/hostapi` | user, ADR 0001 | F1.3 |
 | `github.com/pelletier/go-toml/v2` | MIT | TOML encoding and decoding with DisallowUnknownFields for `internal/workspace` (WS-06) | user, Q-66 | F5.6a |
 | `pgregory.net/rapid` | MPL-2.0 (approved: Q-06, tests only) | F2.2 property tests only; excluded from production imports; [license and provenance](third-party-licenses/rapid/README.md) | user, Q-06, 2026-11-02 | F2.2 |
+| `github.com/santhosh-tekuri/jsonschema/v6` | Apache-2.0 | JSON Schema validation of task `output` against `output_schema` in `internal/teams` (OR-E03, Q-128) | owner, Q-128 | F11.3c |
 
 ## Dev tools (`tool` directives, not linked into the binary)
 

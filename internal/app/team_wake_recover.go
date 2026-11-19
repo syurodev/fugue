@@ -13,6 +13,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -256,4 +257,65 @@ func hasBatchPrefix(content []byte, marker string) bool {
 		return strings.HasPrefix(msg.Text, marker)
 	}
 	return strings.HasPrefix(string(content), marker)
+}
+
+// HeldRecipients returns a snapshot of mailbox recipients currently held.
+func (w *teamWake) HeldRecipients() []HeldMailboxEntry {
+	w.heldMu.RLock()
+	defer w.heldMu.RUnlock()
+	out := make([]HeldMailboxEntry, 0, len(w.held))
+	for _, entry := range w.held {
+		out = append(out, entry)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].SessionID < out[j].SessionID })
+	return out
+}
+
+func (w *teamWake) heldSnapshot(context.Context) ([]byte, error) {
+	data, err := json.Marshal(struct {
+		Held []HeldMailboxEntry `json:"held"`
+	}{Held: w.HeldRecipients()})
+	if err != nil {
+		return nil, fmt.Errorf("marshal held mailbox snapshot: %w", err)
+	}
+	return data, nil
+}
+
+func (w *teamWake) markHeld(ctx context.Context, entry *HeldMailboxEntry) {
+	w.heldMu.Lock()
+	prev, exists := w.held[entry.SessionID]
+	changed := !exists || prev != *entry
+	w.held[entry.SessionID] = *entry
+	w.heldMu.Unlock()
+	if !changed {
+		return
+	}
+	slog.WarnContext(ctx, "holding team mailbox for unmeasured vendor", "team_id", entry.TeamID, "task_id", entry.TaskID, "session_id", entry.SessionID, "vendor", entry.Vendor, "reason", entry.Reason)
+	w.publishHeld(ctx)
+}
+
+func (w *teamWake) clearHeld(ctx context.Context, sessionID string) {
+	w.heldMu.Lock()
+	_, exists := w.held[sessionID]
+	if exists {
+		delete(w.held, sessionID)
+	}
+	w.heldMu.Unlock()
+	if exists {
+		w.publishHeld(ctx)
+	}
+}
+
+func (w *teamWake) publishHeld(ctx context.Context) {
+	if w.deps.Hub == nil {
+		return
+	}
+	data, err := w.heldSnapshot(ctx)
+	if err != nil {
+		slog.WarnContext(ctx, "marshal held mailbox failed", "error_code", string(errcode.CodeOf(err)))
+		return
+	}
+	if _, pubErr := w.deps.Hub.Publish(TopicTeamMailbox, Event{Type: "team.mailbox.held", Key: "held", Payload: data, LatestForKey: true}); pubErr != nil {
+		slog.WarnContext(ctx, "publish held mailbox failed", "error_code", string(errcode.CodeOf(pubErr)))
+	}
 }

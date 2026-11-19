@@ -596,7 +596,18 @@ func awaitRequested(t *testing.T, sub *Subscription) PendingInteractionView {
 // F11.2b); tests add theirs through HostDeps.
 func assertProductionToolsOnly(t *testing.T, tools *SessionToolService) {
 	t.Helper()
-	if len(tools.tools) != 2 || tools.tools[teamProposeToolName] == nil || tools.tools[teamAmendToolName] == nil {
-		t.Fatal("a normal host serves only the production Fugue tools")
+	want := []string{
+		teamProposeToolName, teamAmendToolName,
+		taskStartToolName, taskSendToolName, taskCancelToolName,
+		taskStatusToolName, taskResultToolName, taskDoneToolName,
+		taskAskToolName, teamNoteToolName, teamBriefToolName,
+	}
+	if len(tools.tools) != len(want) {
+		t.Fatalf("production tool count = %d, want %d", len(tools.tools), len(want))
+	}
+	for _, name := range want {
+		if tools.tools[name] == nil {
+			t.Fatalf("missing production tool %q", name)
+		}
 	}
 }

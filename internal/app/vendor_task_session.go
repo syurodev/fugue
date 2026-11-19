@@ -2,10 +2,8 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
-	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -87,6 +85,9 @@ func (s *VendorService) resumeProfile(ctx context.Context, info *vendorstore.Ses
 	if info.TeamID != "" && info.TaskID != "" {
 		return s.taskResumeProfile(ctx, info.TeamID, info.TaskID)
 	}
+	if info.Model != "" || info.Effort != "" {
+		return info.Model, info.Effort, nil
+	}
 	items, err := s.store.Transcript(ctx, info.ID, 0, 100)
 	if err != nil {
 		return "", "", safeActorError(err)
@@ -114,26 +115,15 @@ func (s *VendorService) taskResumeProfile(ctx context.Context, teamID, taskID st
 	if task == nil {
 		return "", "", errcode.New(errcode.FailedPrecondition, "team task not found")
 	}
-	raw, err := s.store.OpenTaskSpec(ctx, teamID, taskID)
-	if err != nil {
-		return "", "", boundaryError("open the task spec", err)
-	}
-	if !json.Valid(raw) {
-		return "", "", errcode.New(errcode.FailedPrecondition, "the task spec is not readable")
-	}
-	var taskSpec teams.ProtectedTaskContent
-	if decodeErr := json.Unmarshal(raw, &taskSpec); decodeErr != nil {
-		return "", "", errcode.Wrap(errcode.Internal, "decode the task spec", decodeErr)
-	}
-	role, found, err := decidedRoleFor(ctx, s.store, teamID, task.CatalogRole)
+	_, role, failCode, err := resolveTaskProfile(ctx, s.store, teamID, taskID, task.CatalogRole)
 	if err != nil {
 		return "", "", err
 	}
-	if !found {
+	switch failCode {
+	case failSpecUnreadable:
+		return "", "", errcode.New(errcode.FailedPrecondition, "the task spec is not readable")
+	case failProfile:
 		return "", "", errcode.New(errcode.FailedPrecondition, "task role decision not found")
-	}
-	if taskSpec.Profile != nil {
-		overlayProfile(&role, taskSpec.Profile)
 	}
 	return role.Model, role.Effort, nil
 }

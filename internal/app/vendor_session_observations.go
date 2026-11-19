@@ -185,6 +185,9 @@ func (a *vendorSessionActor) persistVendorTurnEnd(ctx context.Context, turnID, o
 	}
 	delete(a.turns, turnID)
 	a.manager.notifyWake(a.info.ID)
+	if outcome == vendorstore.OutcomeCompleted {
+		a.manager.notifyTurnCompleted(a.info.ID)
+	}
 	return nil
 }
 
@@ -210,6 +213,9 @@ func (a *vendorSessionActor) persistFugueTurnEnd(ctx context.Context, observedTu
 	delete(a.turns, turnID)
 	a.turnID = ""
 	a.manager.notifyWake(a.info.ID)
+	if outcome == vendorstore.OutcomeCompleted {
+		a.manager.notifyTurnCompleted(a.info.ID)
+	}
 	return nil
 }
 
@@ -258,4 +264,29 @@ func (a *vendorSessionActor) append(ctx context.Context, event *vendorstore.Even
 	}
 	a.sequence = next
 	return nil
+}
+
+// SetWakeHook binds the team wake trigger (F11.3b): the hook runs when a
+// session may have become able to take a Fugue-origin turn — after its
+// process turned ready and after any turn ended.
+func (m *VendorSessions) SetWakeHook(hook func(sessionID string)) {
+	m.wakeHook = hook
+}
+
+func (m *VendorSessions) notifyWake(sessionID string) {
+	if m.wakeHook != nil {
+		m.wakeHook(sessionID)
+	}
+}
+
+// SetTurnCompletedHook binds the no-report nudge check (Q-131): runs only
+// when a turn ends with OutcomeCompleted.
+func (m *VendorSessions) SetTurnCompletedHook(hook func(sessionID string)) {
+	m.turnCompletedHook = hook
+}
+
+func (m *VendorSessions) notifyTurnCompleted(sessionID string) {
+	if m.turnCompletedHook != nil {
+		m.turnCompletedHook(sessionID)
+	}
 }

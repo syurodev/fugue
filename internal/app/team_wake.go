@@ -45,8 +45,18 @@ func mailboxBatchPrefix(batchID string) string {
 	return "[fugue-batch " + batchID + "]"
 }
 
-// mailboxDigestItem is the sealed payload of one digest row. Summary stays
-// empty until the task tools report one (F11.3c); the state is Fugue's own.
+// TopicTeamMailbox is the ephemeral topic reporting mailbox hold status (F11.3c).
+const TopicTeamMailbox = "team-mailbox"
+
+// HeldMailboxEntry describes a recipient whose mailbox delivery is held.
+type HeldMailboxEntry struct {
+	TeamID    string `json:"team_id"`
+	TaskID    string `json:"task_id"`
+	SessionID string `json:"session_id"`
+	Vendor    string `json:"vendor"`
+	Reason    string `json:"reason"`
+}
+
 // teamWakeDeps are the ports of the wake pump.
 type teamWakeDeps struct {
 	Store    *vendorstore.Store
@@ -55,6 +65,7 @@ type teamWakeDeps struct {
 	Clock    clock.Clock
 	IDs      ids.Generator
 	Vault    *vault.Service
+	Hub      *EventHub
 	// DataDir roots the task worktrees of a detached session's cwd (Q-119).
 	DataDir string
 }
@@ -62,18 +73,29 @@ type teamWakeDeps struct {
 // teamWake delivers the team mailbox. One run at a time: the mutex serializes
 // pumps so two triggers never claim one recipient twice.
 type teamWake struct {
-	deps          teamWakeDeps
-	mu            sync.Mutex
-	wake          chan struct{}
-	resumeRetryAt map[string]time.Time
+	deps           teamWakeDeps
+	mu             sync.Mutex
+	wake           chan struct{}
+	resumeRetryAt  map[string]time.Time
+	resumeAttempts map[string]int
+	heldMu         sync.RWMutex
+	held           map[string]HeldMailboxEntry
 }
 
 func newTeamWake(deps *teamWakeDeps) *teamWake {
-	return &teamWake{
-		deps:          *deps,
-		wake:          make(chan struct{}, 1),
-		resumeRetryAt: make(map[string]time.Time),
+	w := &teamWake{
+		deps:           *deps,
+		wake:           make(chan struct{}, 1),
+		resumeRetryAt:  make(map[string]time.Time),
+		resumeAttempts: make(map[string]int),
+		held:           make(map[string]HeldMailboxEntry),
 	}
+	if deps.Hub != nil {
+		if err := deps.Hub.RegisterEphemeral(TopicTeamMailbox, w.heldSnapshot, defaultEphemeralBufferCap); err != nil {
+			slog.Warn("registering team mailbox topic failed", "error_code", string(errcode.CodeOf(err)))
+		}
+	}
+	return w
 }
 
 // Notify asks for one delivery pass; the mailbox may have new rows or a
@@ -188,15 +210,17 @@ func (w *teamWake) deliverRecipient(ctx context.Context, r vendorstore.MailboxRe
 	}
 	session, err := w.deps.Store.Snapshot(ctx, sessionID)
 	if errors.Is(err, vendorstore.ErrSessionNotFound) {
+		w.pruneSession(ctx, sessionID)
 		return nil
 	}
 	if err != nil {
 		return boundaryError("read the recipient session", err)
 	}
-	sendable, err := w.prepareSession(ctx, &session)
-	if err != nil {
-		return err
+	if session.State == vendorstore.StateClosed {
+		w.pruneSession(ctx, sessionID)
+		return nil
 	}
+	sendable := w.prepareSession(ctx, r, &session)
 	if !sendable {
 		return nil
 	}
@@ -232,21 +256,25 @@ func (w *teamWake) resolveRecipient(ctx context.Context, r vendorstore.MailboxRe
 // now (Q-123): a detached session is resumed first and delivers on the next
 // trigger; starting, busy, waiting, closed and unmeasured agy sessions hold
 // their mail.
-func (w *teamWake) prepareSession(ctx context.Context, session *vendorstore.Session) (bool, error) {
+func (w *teamWake) prepareSession(ctx context.Context, r vendorstore.MailboxRecipient, session *vendorstore.Session) bool {
 	if session.Vendor == VendorAGY {
-		return false, nil
+		w.markHeld(ctx, &HeldMailboxEntry{
+			TeamID: r.TeamID, TaskID: r.RecipientTaskID, SessionID: session.ID,
+			Vendor: session.Vendor, Reason: "agy_wake_unmeasured_until_f11_6",
+		})
+		return false
 	}
+	w.clearHeld(ctx, session.ID)
 	if session.State == vendorstore.StateDetached {
-		if err := w.resumeDetached(ctx, session); err != nil {
-			return false, err
-		}
-		return false, nil
+		w.resumeDetached(ctx, session)
+		return false
 	}
 	if session.State == vendorstore.StateReady {
 		delete(w.resumeRetryAt, session.ID)
-		return true, nil
+		delete(w.resumeAttempts, session.ID)
+		return true
 	}
-	return false, nil
+	return false
 }
 
 // recipientSessionID resolves the session a recipient task delivers to: its
@@ -268,24 +296,40 @@ func (w *teamWake) recipientSessionID(ctx context.Context, teamID string, task *
 // retried by the next trigger. TODO(F11.6): measure agy idle-send and
 // session/load resume with a logged-in agy, then enable; until measured the
 // fail-closed hold covers an unmeasured resume (Q-123).
-func (w *teamWake) resumeDetached(ctx context.Context, session *vendorstore.Session) error {
+func (w *teamWake) resumeDetached(ctx context.Context, session *vendorstore.Session) {
 	if session.Vendor == VendorAGY {
-		return nil
+		return
 	}
 	if until, ok := w.resumeRetryAt[session.ID]; ok && w.deps.Clock.Now().Before(until) {
-		return nil
+		return
 	}
 	cwd, err := w.sessionCwd(ctx, session)
 	if err != nil {
-		return err
+		w.backoffResume(session.ID)
+		slog.WarnContext(ctx, "deriving a detached session cwd failed", "session_id", session.ID, "error_code", string(errcode.CodeOf(err)))
+		return
 	}
 	if err := w.deps.Sessions.ResumeTaskSession(ctx, session.ID, cwd); err != nil {
-		w.resumeRetryAt[session.ID] = w.deps.Clock.Now().Add(resumeBackoff)
+		w.backoffResume(session.ID)
 		slog.WarnContext(ctx, "resuming a detached session failed", "session_id", session.ID, "error_code", string(errcode.CodeOf(err)))
-		return nil
+		return
 	}
-	delete(w.resumeRetryAt, session.ID)
-	return nil
+	// Arm backoff on resume too so a session that immediately falls back to
+	// detached is not retried on every trigger; reaching StateReady clears it.
+	w.backoffResume(session.ID)
+}
+
+func (w *teamWake) backoffResume(sessionID string) {
+	attempts := w.resumeAttempts[sessionID]
+	delay := resumeBackoff << min(attempts, 4)
+	w.resumeRetryAt[sessionID] = w.deps.Clock.Now().Add(delay)
+	w.resumeAttempts[sessionID] = attempts + 1
+}
+
+func (w *teamWake) pruneSession(ctx context.Context, sessionID string) {
+	delete(w.resumeRetryAt, sessionID)
+	delete(w.resumeAttempts, sessionID)
+	w.clearHeld(ctx, sessionID)
 }
 
 // sessionCwd derives the working directory of a detached session host-side

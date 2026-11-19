@@ -128,7 +128,9 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	// The interaction service consumes the answers of the team proposal and
 	// amend cards; the wiring happens before any client can answer (F11.2b).
 	hp.rt.interactions.SetTeamCardResolver(hp.rt.teamProposals)
+	hp.rt.teamTasks = newTeamTaskService(vs, vendorTaskSessions{svc: &VendorService{sessions: sessions, store: vs}}, hp.rt.workspaces.domain, locateTeamGit(ctx, deps), deps.DataDir, deps.IDs, v, deps.TeamResultGate)
 	tools := append(slices.Clone(deps.TestFugueTools), teamProposeTool(hp.rt.teamProposals), teamAmendTool(hp.rt.teamProposals))
+	tools = append(tools, teamTaskTools(hp.rt.teamTasks)...)
 	hp.rt.sessionTools = newSessionToolService(tokens, tools, vs, hp.rt.interactions, hp.rt.tags, deps.IDs, sessions)
 	sessions.SetRelay(hp.rt.sessionTools)
 	hp.rt.vendors = &VendorService{

@@ -83,7 +83,7 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 	sessions.SetWakeHook(func(string) { hp.rt.teamWake.Notify() })
 	hp.rt.teamWake = newTeamWake(&teamWakeDeps{
 		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Roots: hp.rt.workspaces.domain,
-		Clock: deps.Clock, IDs: deps.IDs, Vault: v, DataDir: deps.DataDir,
+		Clock: deps.Clock, IDs: deps.IDs, Vault: v, Hub: hp.rt.hub, DataDir: deps.DataDir,
 	})
 	hp.rt.teamWake.Start(base)
 	hp.rt.teamDispatch = newTeamDispatcher(&teamDispatcherDeps{
@@ -91,6 +91,15 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 		Roots: hp.rt.workspaces.domain, Git: locateTeamGit(ctx, deps), DataDir: deps.DataDir, IDs: deps.IDs, Vault: v,
 		Wake: hp.rt.teamWake,
 	})
+	if hp.rt.teamTasks != nil {
+		hp.rt.teamTasks.SetRuntime(hp.rt.teamDispatch, hp.rt.teamWake)
+		sessions.SetTurnCompletedHook(func(sessionID string) {
+			hp.rt.goTask("team.no-report-check", func(checkCtx context.Context) error {
+				hp.rt.teamTasks.OnTurnCompleted(checkCtx, sessionID)
+				return nil
+			})
+		})
+	}
 	hp.rt.teamProposals.SetOnTeamActive(func(teamID string) { hp.dispatchTeamAsync(base, teamID) })
 	hp.rt.teamProposals.SetOnMailbox(func() { hp.rt.teamWake.Notify() })
 }
