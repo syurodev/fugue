@@ -154,8 +154,8 @@ func (w *teamWake) Pump(ctx context.Context) error {
 		return boundaryError("list the pending mailbox", err)
 	}
 	for _, r := range recipients {
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if err := ctx.Err(); err != nil {
+			return errcode.Wrap(errcode.Canceled, "the wake pass was interrupted", err)
 		}
 		if err := w.deliverRecipient(ctx, r); err != nil {
 			return err
@@ -167,12 +167,8 @@ func (w *teamWake) Pump(ctx context.Context) error {
 // deliverRecipient delivers one recipient's mail when its session can take a
 // turn and the batching rule allows it.
 func (w *teamWake) deliverRecipient(ctx context.Context, r vendorstore.MailboxRecipient) error {
-	task, err := w.recipientTask(ctx, r.TeamID, r.RecipientTaskID)
+	sessionID, task, err := w.resolveRecipient(ctx, r)
 	if err != nil || task == nil {
-		return err
-	}
-	sessionID, err := w.recipientSessionID(ctx, r.TeamID, task)
-	if err != nil || sessionID == "" {
 		return err
 	}
 	session, err := w.deps.Store.Snapshot(ctx, sessionID)
@@ -182,16 +178,12 @@ func (w *teamWake) deliverRecipient(ctx context.Context, r vendorstore.MailboxRe
 	if err != nil {
 		return boundaryError("read the recipient session", err)
 	}
-	switch session.State {
-	case vendorstore.StateReady:
-		// sendable below
-	case vendorstore.StateDetached:
-		if err := w.resumeDetached(ctx, &session); err != nil {
-			return err
-		}
-		return nil // the resumed session takes its mail on the next trigger
-	default:
-		return nil // starting, busy, waiting, closed: hold (Q-123)
+	sendable, err := w.prepareSession(ctx, &session)
+	if err != nil {
+		return err
+	}
+	if !sendable {
+		return nil
 	}
 	if !r.HasImmediate && task.HierarchyRole != vendorstore.RoleMember {
 		ready, err := w.digestReady(ctx, r, task)
@@ -203,6 +195,35 @@ func (w *teamWake) deliverRecipient(ctx context.Context, r vendorstore.MailboxRe
 		}
 	}
 	return w.deliverBatch(ctx, r, sessionID)
+}
+
+// resolveRecipient returns the session and task row a recipient delivers to.
+func (w *teamWake) resolveRecipient(ctx context.Context, r vendorstore.MailboxRecipient) (string, *vendorstore.TaskRecord, error) {
+	task, err := w.recipientTask(ctx, r.TeamID, r.RecipientTaskID)
+	if err != nil {
+		return "", nil, err
+	}
+	if task == nil {
+		return "", nil, nil
+	}
+	sessionID, err := w.recipientSessionID(ctx, r.TeamID, task)
+	if err != nil {
+		return "", nil, err
+	}
+	return sessionID, task, nil
+}
+
+// prepareSession reports whether the recipient session can take its turn
+// now (Q-123): a detached session is resumed first and delivers on the next
+// trigger; starting, busy, waiting and closed sessions hold their mail.
+func (w *teamWake) prepareSession(ctx context.Context, session *vendorstore.Session) (bool, error) {
+	if session.State == vendorstore.StateDetached {
+		if err := w.resumeDetached(ctx, session); err != nil {
+			return false, err
+		}
+		return false, nil
+	}
+	return session.State == vendorstore.StateReady, nil
 }
 
 // recipientSessionID resolves the session a recipient task delivers to: its
@@ -244,7 +265,11 @@ func (w *teamWake) sessionCwd(ctx context.Context, session *vendorstore.Session)
 		return root, nil
 	}
 	repoID := repoIDFor(root)
-	return gitops.TaskWorktreePath(w.deps.DataDir, repoID, session.TaskID)
+	path, err := gitops.TaskWorktreePath(w.deps.DataDir, repoID, session.TaskID)
+	if err != nil {
+		return "", boundaryError("derive the resumed session worktree path", err)
+	}
+	return path, nil
 }
 
 // digestReady reports whether a lead or manager digest may go out: the 30 s
@@ -272,12 +297,8 @@ func (w *teamWake) digestReady(ctx context.Context, r vendorstore.MailboxRecipie
 // teamTaskTerminal reports a terminal task state (§3.1); unknown is not
 // terminal.
 func teamTaskTerminal(state vendorstore.TaskState) bool {
-	switch state {
-	case vendorstore.TaskStateDone, vendorstore.TaskStateFailed,
-		vendorstore.TaskStateStopped, vendorstore.TaskStateCancelled:
-		return true
-	}
-	return false
+	return state == vendorstore.TaskStateDone || state == vendorstore.TaskStateFailed ||
+		state == vendorstore.TaskStateStopped || state == vendorstore.TaskStateCancelled
 }
 
 // deliverBatch claims the recipient's pending rows and sends them as one
@@ -295,18 +316,21 @@ func (w *teamWake) deliverBatch(ctx context.Context, r vendorstore.MailboxRecipi
 	text, err := w.batchText(ctx, claimed)
 	if err != nil {
 		if releaseErr := w.deps.Store.ReleaseMailboxBatch(ctx, batchID); releaseErr != nil {
-			return releaseErr
+			return boundaryError("release the mailbox batch", releaseErr)
 		}
 		return err
 	}
 	if err := w.deps.Sessions.Send(ctx, sessionID, vendor.Input{Text: text}); err != nil {
 		if releaseErr := w.deps.Store.ReleaseMailboxBatch(ctx, batchID); releaseErr != nil {
-			return releaseErr
+			return boundaryError("release the mailbox batch", releaseErr)
 		}
 		slog.WarnContext(ctx, "sending the mailbox turn failed", "team_id", r.TeamID, "batch_id", batchID, "error_code", string(errcode.CodeOf(err)))
 		return nil
 	}
-	return w.deps.Store.MarkMailboxBatchDelivered(ctx, batchID)
+	if err := w.deps.Store.MarkMailboxBatchDelivered(ctx, batchID); err != nil {
+		return boundaryError("mark the mailbox batch delivered", err)
+	}
+	return nil
 }
 
 // recipientSession resolves the session a mailbox recipient delivers to.
@@ -318,7 +342,11 @@ func (w *teamWake) recipientSession(ctx context.Context, teamID, recipientTaskID
 	return w.recipientSessionID(ctx, teamID, task)
 }
 
-// recipientTask reads one task row of the team; a missing task yields nil.
+// errRecipientTaskGone holds the delivery when the recipient task no longer
+// exists: the team moved on, and there is nobody to deliver to.
+var errRecipientTaskGone = errcode.New(errcode.FailedPrecondition, "the mailbox recipient task no longer exists")
+
+// recipientTask reads one task row of the team; a missing task fails typed.
 func (w *teamWake) recipientTask(ctx context.Context, teamID, recipientTaskID string) (*vendorstore.TaskRecord, error) {
 	_, tasks, err := w.deps.Store.TeamSnapshot(ctx, teamID)
 	if err != nil {
@@ -329,5 +357,5 @@ func (w *teamWake) recipientTask(ctx context.Context, teamID, recipientTaskID st
 			return &tasks[i], nil
 		}
 	}
-	return nil, nil
+	return nil, errRecipientTaskGone
 }

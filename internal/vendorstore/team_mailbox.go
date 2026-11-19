@@ -114,6 +114,11 @@ func (s *Store) insertMailboxRows(ctx context.Context, tx *sql.Tx, teamID string
 	return nil
 }
 
+// claimBatchID derives a fresh batch ID for a claim with no resend leftover.
+func claimBatchID(teamID, recipientTaskID string, sourceSeq int64) string {
+	return mailboxMessageID(teamID, sourceSeq, recipientTaskID) + ":b"
+}
+
 // PendingMailbox lists the recipients that hold pending mail, metadata only
 // and readable while the vault is locked (INV-09).
 func (s *Store) PendingMailbox(ctx context.Context) ([]MailboxRecipient, error) {
@@ -134,7 +139,10 @@ func (s *Store) PendingMailbox(ctx context.Context) ([]MailboxRecipient, error) 
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("%w: iterate the pending mailbox: %w", ErrUnavailable, err)
+	}
+	return out, nil
 }
 
 // ClaimMailbox moves every pending row of one recipient into the delivering
@@ -164,7 +172,7 @@ func (s *Store) ClaimMailbox(ctx context.Context, teamID, recipientTaskID string
 			closeRows(ctx, rows)
 			return nil, fmt.Errorf("%w: scan the mailbox claim: %w", ErrUnavailable, err)
 		}
-		if m.BatchID != "" && batchID == "" {
+		if batchID == "" {
 			batchID = m.BatchID
 		}
 		claimed = append(claimed, m)
@@ -178,7 +186,7 @@ func (s *Store) ClaimMailbox(ctx context.Context, teamID, recipientTaskID string
 		return nil, nil
 	}
 	if batchID == "" {
-		batchID = mailboxMessageID(teamID, claimed[0].SourceSeq, recipientTaskID) + ":b"
+		batchID = claimBatchID(teamID, recipientTaskID, claimed[0].SourceSeq)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE team_mailbox_messages SET state = ?, batch_id = ?, updated_at = ?
@@ -245,7 +253,10 @@ func (s *Store) DeliveringMailboxBatches(ctx context.Context) ([]MailboxBatchRef
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("%w: iterate the delivering mailbox batches: %w", ErrUnavailable, err)
+	}
+	return out, nil
 }
 
 // OpenMailboxPayload decrypts one sealed message while requiring an unlocked

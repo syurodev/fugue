@@ -76,8 +76,8 @@ func (w *teamWake) RecoverBatches(ctx context.Context) error {
 		return boundaryError("list the delivering mailbox batches", err)
 	}
 	for _, b := range batches {
-		if ctx.Err() != nil {
-			return ctx.Err()
+		if err := ctx.Err(); err != nil {
+			return errcode.Wrap(errcode.Canceled, "the recovery pass was interrupted", err)
 		}
 		if err := w.resolveBatch(ctx, b); err != nil {
 			return err
@@ -102,9 +102,15 @@ func (w *teamWake) resolveBatch(ctx context.Context, b vendorstore.MailboxBatchR
 		return nil
 	}
 	if found {
-		return w.deps.Store.MarkMailboxBatchDelivered(ctx, b.BatchID)
+		if err := w.deps.Store.MarkMailboxBatchDelivered(ctx, b.BatchID); err != nil {
+			return boundaryError("mark the mailbox batch delivered", err)
+		}
+		return nil
 	}
-	return w.deps.Store.ReleaseMailboxBatch(ctx, b.BatchID)
+	if err := w.deps.Store.ReleaseMailboxBatch(ctx, b.BatchID); err != nil {
+		return boundaryError("release the mailbox batch", err)
+	}
+	return nil
 }
 
 // batchText opens the sealed payloads of a claim and renders one turn: the
@@ -180,36 +186,60 @@ func headerOf(entries []teams.DigestEntry) string {
 // Fugue-origin user message. readable is false while the vault is locked or
 // the scan ran out of budget: the caller holds instead of guessing (Q-122).
 func (w *teamWake) transcriptHasMarker(ctx context.Context, sessionID, marker string) (found, readable bool, err error) {
-	before := int64(0)
 	scanned := 0
-	for {
+	for before := int64(0); ; {
 		page, err := w.deps.Store.Transcript(ctx, sessionID, before, mailboxScanPage)
 		if err != nil {
-			return false, false, err
+			return false, false, boundaryError("page the session transcript", err)
 		}
 		if len(page) == 0 {
 			return false, true, nil
 		}
-		for i := range page {
-			item := &page[i]
-			if item.Kind != vendorstore.KindUserMessage {
-				continue
-			}
-			scanned++
-			if scanned > mailboxScanCap {
-				return false, false, nil
-			}
-			_, content, err := w.deps.Store.ReadItem(ctx, sessionID, item.ID)
-			if err != nil {
-				if errors.Is(err, vault.ErrLocked) {
-					return false, false, nil
-				}
-				return false, false, boundaryError("read the transcript item", err)
-			}
-			if strings.Contains(string(content), marker) {
-				return true, true, nil
-			}
+		result, scanErr := w.scanForMarker(ctx, sessionID, page, marker, &scanned)
+		if scanErr != nil {
+			return false, false, scanErr
+		}
+		if result == scanFound {
+			return true, true, nil
+		}
+		if result == scanHold {
+			return false, false, nil
 		}
 		before = page[0].Sequence
 	}
+}
+
+// scanOutcome is what one transcript page told the marker scan.
+type scanOutcome int
+
+const (
+	scanContinue scanOutcome = iota
+	scanFound
+	scanHold
+)
+
+// scanForMarker scans one page's Fugue-origin user messages for the marker
+// and reports whether the scan continues, found it, or must hold (Q-122).
+func (w *teamWake) scanForMarker(ctx context.Context, sessionID string, page []vendorstore.StoredItem, marker string, scanned *int) (scanOutcome, error) {
+	for i := range page {
+		item := &page[i]
+		if item.Kind != vendorstore.KindUserMessage {
+			continue
+		}
+		*scanned++
+		if *scanned > mailboxScanCap {
+			return scanHold, nil
+		}
+		_, content, err := w.deps.Store.ReadItem(ctx, sessionID, item.ID)
+		if err != nil {
+			if errors.Is(err, vault.ErrLocked) {
+				return scanHold, nil
+			}
+			return scanHold, boundaryError("read the transcript item", err)
+		}
+		if strings.Contains(string(content), marker) {
+			return scanFound, nil
+		}
+	}
+	return scanContinue, nil
 }

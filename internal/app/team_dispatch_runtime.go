@@ -5,12 +5,30 @@ import (
 	"log/slog"
 
 	"github.com/syurodev/fugue/internal/gitops"
+	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/snapshot"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
+
+// onVaultLockState mirrors the vault state into the services that gate on it,
+// and on an unlock starts the queued tasks and delivers the mail the lock
+// held (Q-123).
+func (hp *HostProcess) onVaultLockState(base context.Context, owner *interaction.Owner, snap vault.Snapshot) {
+	unlocked := snap.State == vault.StateUnlocked
+	owner.SetVaultLocked(!unlocked)
+	if !unlocked {
+		return
+	}
+	if hp.rt.teamDispatch != nil {
+		hp.dispatchAllAsync(base)
+	}
+	if hp.rt.teamWake != nil {
+		hp.rt.teamWake.Notify()
+	}
+}
 
 // locateTeamGit builds the git manager of the team worktrees. A machine
 // without a usable git, or a data directory the manager refuses, yields nil:

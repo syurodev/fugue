@@ -76,9 +76,9 @@ func (s *Store) appendSettleEnd(ctx context.Context, tx *sql.Tx, teamID string, 
 	if len(in.Mailbox) == 0 {
 		return nil
 	}
-	rawKey, err := s.unwrapTeamKey(teamID, meta.KeyID, meta.WrappedKey)
-	if err != nil {
-		return err
+	rawKey, unwrapErr := s.unwrapTeamKey(teamID, meta.KeyID, meta.WrappedKey)
+	if unwrapErr != nil {
+		return unwrapErr
 	}
 	defer clear(rawKey)
 	return s.insertMailboxRows(ctx, tx, teamID, seq, in.Mailbox, meta.KeyID, rawKey, now)

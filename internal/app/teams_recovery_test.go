@@ -68,13 +68,14 @@ func setupTeamForHostRestart(t *testing.T, dir string, clk *clock.Fake) {
 		t.Fatalf("CreateTeam: %v", err)
 	}
 	seq := rec.LastSeq
-	for _, ev := range []vendorstore.AppendTeamEventInput{
+	events := []vendorstore.AppendTeamEventInput{
 		{EventID: "ev-start-team", EventType: vendorstore.EventTeamStarted},
 		{EventID: "ev-assign", TaskID: testHostLeadTaskID, EventType: vendorstore.EventTaskAssigned},
 		{EventID: "ev-start", TaskID: testHostLeadTaskID, EventType: vendorstore.EventTaskStarted},
-	} {
-		evCopy := ev
-		seq, err = hp1.vendorStore.AppendTeamEvent(ctx, "team-host-restart", seq, &evCopy)
+	}
+	for i := range events {
+		ev := &events[i]
+		seq, err = hp1.vendorStore.AppendTeamEvent(ctx, "team-host-restart", seq, ev)
 		if err != nil {
 			t.Fatalf("AppendTeamEvent(%s): %v", ev.EventType, err)
 		}

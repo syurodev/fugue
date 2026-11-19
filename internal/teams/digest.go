@@ -54,16 +54,13 @@ func BuildDigest(header string, entries []DigestEntry, limit int) string {
 	omitted := false
 	for _, e := range orderQuestionsFirst(entries) {
 		line := fmt.Sprintf(digestStateLine, e.TaskID, e.State)
-		if e.Summary != "" && !omitted {
-			block := digestBlock(e)
-			if b.Len()+len(block)+1 > limit {
-				omitted = true
-			} else {
-				addLine(&b, "")
-				addLine(&b, block)
-				continue
-			}
+		fits := e.Summary != "" && !omitted && b.Len()+len(digestBlock(e))+1 <= limit
+		if fits {
+			addLine(&b, "")
+			addLine(&b, digestBlock(e))
+			continue
 		}
+		omitted = omitted || e.Summary != ""
 		if b.Len()+len(line)+1 > limit {
 			break
 		}
@@ -85,16 +82,6 @@ func digestBlock(e DigestEntry) string {
 // EscapeDigestText escapes the block delimiters and the control characters of
 // a model-authored text, so the text cannot close or forge a block (Q-124).
 func EscapeDigestText(text string) string {
-	plain := true
-	for _, r := range text {
-		if r == '⟪' || r == '⟫' || (r < 0x20 && r != '\n' && r != '\t') || r == 0x7f {
-			plain = false
-			break
-		}
-	}
-	if plain {
-		return text
-	}
 	var b strings.Builder
 	for _, r := range text {
 		switch {

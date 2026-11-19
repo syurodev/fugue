@@ -152,8 +152,8 @@ func (s *Store) appendTeamEventAndRemovals(
 		return 0, insertErr
 	}
 	if len(ev.Mailbox) > 0 {
-		if err := s.insertMailboxRows(ctx, tx, teamID, lastSeq, ev.Mailbox, meta.KeyID, rawKey, now); err != nil {
-			return 0, err
+		if mailboxErr := s.insertMailboxRows(ctx, tx, teamID, lastSeq, ev.Mailbox, meta.KeyID, rawKey, now); mailboxErr != nil {
+			return 0, mailboxErr
 		}
 	}
 	for _, taskID := range removed {

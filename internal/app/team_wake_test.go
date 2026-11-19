@@ -6,7 +6,9 @@ package app
 // delivery through the real decide path.
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +18,12 @@ import (
 	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
+
+// wakeTestTurnID is the transcript turn the marker test records.
+const wakeTestTurnID = "wake-turn"
+
+// teamTestRootName is the workspace root name the fixture TOML defines.
+const teamTestRootName = "main"
 
 // wakeFixture is the mailbox pump fixture: a real store and vault with a fake
 // vendor layer. The host's own wake keeps running (it is wired at startup),
@@ -48,7 +56,7 @@ type wakeTeam struct {
 
 // newWakeTeam stores a lead with two running members, each bound to a fake
 // session row in the given states.
-func (f *wakeFixture) newWakeTeam(t *testing.T, leadState, aState, bState string) *wakeTeam {
+func (f *wakeFixture) newWakeTeam(t *testing.T, aState string) *wakeTeam {
 	t.Helper()
 	ctx := t.Context()
 	store := f.hp.vendorStore
@@ -81,71 +89,59 @@ func (f *wakeFixture) newWakeTeam(t *testing.T, leadState, aState, bState string
 		id, state string
 		taskID    string
 	}{
-		{team.leadSession, leadState, team.lead},
+		{team.leadSession, vendorstore.StateReady, team.lead},
 		{team.aSession, aState, team.a},
-		{team.bSession, bState, team.b},
+		{team.bSession, vendorstore.StateReady, team.b},
 	}
 	for _, s := range sessions {
 		if err := store.CreateSession(ctx, &vendorstore.Session{
-			ID: s.id, Vendor: VendorClaude, AccountID: vendorDefaultAccount, Role: "assistant", State: s.state,
-			WorkspaceID: f.wsID, WorkspaceRoot: teamTestWorkspace, TeamID: team.teamID, TaskID: s.taskID,
+			ID: s.id, Vendor: VendorClaude, AccountID: vendorDefaultAccount, Role: vendorSessionRole, State: s.state,
+			WorkspaceID: f.wsID, WorkspaceRoot: teamTestRootName, TeamID: team.teamID, TaskID: s.taskID,
 		}); err != nil {
 			t.Fatalf("CreateSession %s: %v", s.id, err)
 		}
 		for _, eventType := range []vendorstore.TeamEventType{vendorstore.EventTaskAssigned, vendorstore.EventTaskStarted} {
-			if _, _, snapErr := f.appendTeamEvent(t, team.teamID, &vendorstore.AppendTeamEventInput{
+			f.appendTeamEvent(t, team.teamID, &vendorstore.AppendTeamEventInput{
 				TaskID: s.taskID, EventType: eventType, SessionID: s.id,
-			}); snapErr != nil {
-				t.Fatalf("append %s for %s: %v", eventType, s.taskID, snapErr)
-			}
+			})
 		}
 	}
 	return team
 }
 
 // appendTeamEvent appends one task event at the team's current sequence.
-func (f *wakeFixture) appendTeamEvent(t *testing.T, teamID string, ev *vendorstore.AppendTeamEventInput) (int64, vendorstore.TaskRecord, error) {
+func (f *wakeFixture) appendTeamEvent(t *testing.T, teamID string, ev *vendorstore.AppendTeamEventInput) {
 	t.Helper()
-	rec, tasks, err := f.hp.vendorStore.TeamSnapshot(t.Context(), teamID)
+	rec, _, err := f.hp.vendorStore.TeamSnapshot(t.Context(), teamID)
 	if err != nil {
 		t.Fatalf("TeamSnapshot: %v", err)
 	}
-	seq, err := f.hp.vendorStore.AppendTeamEvent(t.Context(), teamID, rec.LastSeq, ev)
-	if err != nil {
-		return 0, vendorstore.TaskRecord{}, err
+	if ev.EventID == "" {
+		ev.EventID = fmt.Sprintf("%s:%s:%d", teamID, ev.EventType, rec.LastSeq+1)
 	}
-	for i := range tasks {
-		if tasks[i].TaskID == ev.TaskID {
-			return seq, tasks[i], nil
-		}
+	if _, err := f.hp.vendorStore.AppendTeamEvent(t.Context(), teamID, rec.LastSeq, ev); err != nil {
+		t.Fatalf("AppendTeamEvent(%s): %v", ev.TaskID, err)
 	}
-	return seq, vendorstore.TaskRecord{}, nil
 }
 
 // endMember ends one member task and enqueues the digest item its lead
 // receives (§6.2: final failures go to the delegator directly).
-func (f *wakeFixture) endMember(t *testing.T, team *wakeTeam, member, outcome, code string) {
+func (f *wakeFixture) endMember(t *testing.T, team *wakeTeam, member, code string) {
 	t.Helper()
-	_, _, err := f.appendTeamEvent(t, team.teamID, &vendorstore.AppendTeamEventInput{
-		TaskID: member, EventType: vendorstore.EventTaskEnded, Outcome: outcome, FailureCode: code,
+	f.appendTeamEvent(t, team.teamID, &vendorstore.AppendTeamEventInput{
+		TaskID: member, EventType: vendorstore.EventTaskEnded, Outcome: vendorstore.TaskOutcomeFailed, FailureCode: code,
 		Mailbox: digestItemRows(member, team.lead, code),
 	})
-	if err != nil {
-		t.Fatalf("end %s: %v", member, err)
-	}
 }
 
 // enqueueMailbox appends a cancelled queued task carrying one mailbox row of
 // the given kind, so a test can place mail without the task tools.
 func (f *wakeFixture) enqueueMailbox(t *testing.T, team *wakeTeam, recipient, kind string, payload []byte) {
 	t.Helper()
-	_, _, err := f.appendTeamEvent(t, team.teamID, &vendorstore.AppendTeamEventInput{
+	f.appendTeamEvent(t, team.teamID, &vendorstore.AppendTeamEventInput{
 		TaskID: team.b, EventType: vendorstore.EventTaskEnded, Outcome: string(vendorstore.TaskStateCancelled),
 		Mailbox: []vendorstore.MailboxEnqueueInput{{RecipientTaskID: recipient, Kind: kind, Payload: payload}},
 	})
-	if err != nil {
-		t.Fatalf("enqueue %s mail: %v", kind, err)
-	}
 }
 
 func digestItemPayload(t *testing.T, taskID, state string, question bool) []byte {
@@ -170,8 +166,8 @@ func (f *wakeFixture) sentTexts(sessionID string) []string {
 func TestDigestWaitsThirtySecondsOrTheWholeDependencyGroup(t *testing.T) {
 	t.Parallel()
 	f := newWakeFixture(t)
-	team := f.newWakeTeam(t, vendorstore.StateReady, vendorstore.StateReady, vendorstore.StateReady)
-	f.endMember(t, team, team.a, vendorstore.TaskOutcomeFailed, failWorktree)
+	team := f.newWakeTeam(t, vendorstore.StateReady)
+	f.endMember(t, team, team.a, failWorktree)
 	if err := f.wake.Pump(t.Context()); err != nil {
 		t.Fatalf("Pump: %v", err)
 	}
@@ -196,9 +192,9 @@ func TestDigestWaitsThirtySecondsOrTheWholeDependencyGroup(t *testing.T) {
 func TestOneDigestForAGroupOfTasks(t *testing.T) {
 	t.Parallel()
 	f := newWakeFixture(t)
-	team := f.newWakeTeam(t, vendorstore.StateReady, vendorstore.StateReady, vendorstore.StateReady)
-	f.endMember(t, team, team.a, vendorstore.TaskOutcomeFailed, failWorktree)
-	f.endMember(t, team, team.b, string(vendorstore.TaskStateDone), "")
+	team := f.newWakeTeam(t, vendorstore.StateReady)
+	f.endMember(t, team, team.a, failWorktree)
+	f.endMember(t, team, team.b, failSessionStart)
 	if err := f.wake.Pump(t.Context()); err != nil {
 		t.Fatalf("Pump: %v", err)
 	}
@@ -216,8 +212,8 @@ func TestOneDigestForAGroupOfTasks(t *testing.T) {
 func TestDeliveredMessageIsNeverResent(t *testing.T) {
 	t.Parallel()
 	f := newWakeFixture(t)
-	team := f.newWakeTeam(t, vendorstore.StateReady, vendorstore.StateReady, vendorstore.StateReady)
-	f.endMember(t, team, team.a, vendorstore.TaskOutcomeFailed, failWorktree)
+	team := f.newWakeTeam(t, vendorstore.StateReady)
+	f.endMember(t, team, team.a, failWorktree)
 	f.clk.Advance(digestWait + time.Second)
 	for range 3 {
 		if err := f.wake.Pump(t.Context()); err != nil {
@@ -234,7 +230,7 @@ func TestDeliveredMessageIsNeverResent(t *testing.T) {
 func TestMemberKindIsDeliveredAtOnce(t *testing.T) {
 	t.Parallel()
 	f := newWakeFixture(t)
-	team := f.newWakeTeam(t, vendorstore.StateReady, vendorstore.StateReady, vendorstore.StateReady)
+	team := f.newWakeTeam(t, vendorstore.StateReady)
 	f.enqueueMailbox(t, team, team.a, vendorstore.MailboxKindAnswer, digestItemPayload(t, team.a, "running", false))
 	if err := f.wake.Pump(t.Context()); err != nil {
 		t.Fatalf("Pump: %v", err)
@@ -246,26 +242,23 @@ func TestMemberKindIsDeliveredAtOnce(t *testing.T) {
 }
 
 // TestCrashAfterSendRedeliversOnlyWhenTheTranscriptLacksTheBatch pins the
-// recovery of a `delivering` batch (Q-122): an unreadable transcript holds,
-// an absent marker resends with the same batch ID, a found marker means
-// delivered.
+// recovery of a `delivering` batch whose transcript lacks the marker (Q-122):
+// the send never landed, so the rows resend with the same batch ID.
 func TestCrashAfterSendRedeliversOnlyWhenTheTranscriptLacksTheBatch(t *testing.T) {
 	t.Parallel()
 	f := newWakeFixture(t)
-	team := f.newWakeTeam(t, vendorstore.StateReady, vendorstore.StateReady, vendorstore.StateReady)
-	f.endMember(t, team, team.a, vendorstore.TaskOutcomeFailed, failWorktree)
+	team := f.newWakeTeam(t, vendorstore.StateReady)
+	f.endMember(t, team, team.a, failWorktree)
 	f.clk.Advance(digestWait + time.Second)
 
 	// A crash after the send recorded nothing: the claim is left delivering.
-	claimed, err := f.hp.vendorStore.ClaimMailbox(t.Context(), team.teamID, team.lead)
-	if err != nil || len(claimed) != 1 {
-		t.Fatalf("ClaimMailbox: %v, %d rows", err, len(claimed))
+	claimed, claimErr := f.hp.vendorStore.ClaimMailbox(t.Context(), team.teamID, team.lead)
+	if claimErr != nil || len(claimed) != 1 {
+		t.Fatalf("ClaimMailbox: %v, %d rows", claimErr, len(claimed))
 	}
 	batchID := claimed[0].BatchID
 
-	// The transcript cannot be read (here: no such session transcript items
-	// were ever recorded for the fake session, so the scan reads an empty
-	// transcript): the marker is absent and the resend keeps the batch ID.
+	// The fake session's transcript holds no marker: absent means resend.
 	if err := f.wake.RecoverBatches(t.Context()); err != nil {
 		t.Fatalf("RecoverBatches: %v", err)
 	}
@@ -276,28 +269,35 @@ func TestCrashAfterSendRedeliversOnlyWhenTheTranscriptLacksTheBatch(t *testing.T
 	if len(sent) != 1 || !strings.HasPrefix(sent[0], mailboxBatchPrefix(batchID)) {
 		t.Fatalf("redelivery = %v, want one resend of batch %s", sent, batchID)
 	}
+}
 
-	// A second crash with the marker already in the transcript resolves to
-	// delivered without a resend.
-	claimed, err = f.hp.vendorStore.ClaimMailbox(t.Context(), team.teamID, team.lead)
-	if err != nil || len(claimed) != 0 {
-		t.Fatalf("the delivered rows came back: %v, %d rows", err, len(claimed))
-	}
-	f.endMember(t, team, team.b, vendorstore.TaskOutcomeFailed, failSessionStart)
-	claimed, err = f.hp.vendorStore.ClaimMailbox(t.Context(), team.teamID, team.lead)
-	if err != nil || len(claimed) != 1 {
-		t.Fatalf("ClaimMailbox: %v, %d rows", err, len(claimed))
+// TestCrashAfterSendWithTheMarkerRecordedDeliversWithoutResend pins the other
+// half of Q-122: the transcript holds the marker, so the crash happened after
+// the send landed and the batch is delivered without a resend.
+func TestCrashAfterSendWithTheMarkerRecordedDeliversWithoutResend(t *testing.T) {
+	t.Parallel()
+	f := newWakeFixture(t)
+	team := f.newWakeTeam(t, vendorstore.StateReady)
+	f.endMember(t, team, team.a, failWorktree)
+	f.clk.Advance(digestWait + time.Second)
+	claimed, claimErr := f.hp.vendorStore.ClaimMailbox(t.Context(), team.teamID, team.lead)
+	if claimErr != nil || len(claimed) != 1 {
+		t.Fatalf("ClaimMailbox: %v, %d rows", claimErr, len(claimed))
 	}
 	f.recordTranscriptMarker(t, team.leadSession, claimed[0].BatchID)
 	if err := f.wake.RecoverBatches(t.Context()); err != nil {
 		t.Fatalf("RecoverBatches: %v", err)
 	}
-	if got := len(f.sentTexts(team.leadSession)); got != 1 {
-		t.Fatalf("sends = %d, want no resend when the transcript holds the marker", got)
+	if got := f.sentTexts(team.leadSession); len(got) != 0 {
+		t.Fatalf("sends = %v, want no resend when the transcript holds the marker", got)
 	}
-	pending, err := f.hp.vendorStore.PendingMailbox(t.Context())
-	if err != nil || len(pending) != 0 {
-		t.Fatalf("pending mailbox = %v, %d rows, want empty", err, len(pending))
+	pending, pendErr := f.hp.vendorStore.PendingMailbox(t.Context())
+	if pendErr != nil || len(pending) != 0 {
+		t.Fatalf("pending mailbox = %v, %d rows, want empty", pendErr, len(pending))
+	}
+	delivering, delErr := f.hp.vendorStore.DeliveringMailboxBatches(t.Context())
+	if delErr != nil || len(delivering) != 0 {
+		t.Fatalf("delivering batches = %v, %d, want empty", delErr, len(delivering))
 	}
 }
 
@@ -306,8 +306,12 @@ func TestCrashAfterSendRedeliversOnlyWhenTheTranscriptLacksTheBatch(t *testing.T
 func (f *wakeFixture) recordTranscriptMarker(t *testing.T, sessionID, batchID string) {
 	t.Helper()
 	store := f.hp.vendorStore
-	seq, err := store.Append(t.Context(), sessionID, 0, &vendorstore.Event{
-		Type: vendorstore.VendorTurnStarted, TurnID: "wake-turn", TurnOrigin: vendorstore.TurnOriginFugue,
+	info, err := store.Snapshot(t.Context(), sessionID)
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	seq, err := store.Append(t.Context(), sessionID, info.LastSequence, &vendorstore.Event{
+		Type: vendorstore.VendorTurnStarted, TurnID: wakeTestTurnID, TurnOrigin: vendorstore.TurnOriginFugue,
 		State: vendorstore.StateReady,
 	})
 	if err != nil {
@@ -318,9 +322,9 @@ func (f *wakeFixture) recordTranscriptMarker(t *testing.T, sessionID, batchID st
 		t.Fatal(err)
 	}
 	if _, err := store.Append(t.Context(), sessionID, seq, &vendorstore.Event{
-		Type: vendorstore.TranscriptItemRecorded, TurnID: "wake-turn",
+		Type: vendorstore.TranscriptItemRecorded, TurnID: wakeTestTurnID,
 		Item: &vendorstore.Item{
-			ID: "wake-item", TurnID: "wake-turn", Kind: vendorstore.KindUserMessage,
+			ID: "wake-item", TurnID: wakeTestTurnID, Kind: vendorstore.KindUserMessage,
 			Metadata: vendorstore.ItemMetadata{Origin: "fugue"},
 			Content:  content,
 		},
@@ -335,7 +339,7 @@ func (f *wakeFixture) recordTranscriptMarker(t *testing.T, sessionID, batchID st
 func TestDetachedSessionIsResumedBeforeTheWake(t *testing.T) {
 	t.Parallel()
 	f := newWakeFixture(t)
-	team := f.newWakeTeam(t, vendorstore.StateReady, vendorstore.StateDetached, vendorstore.StateReady)
+	team := f.newWakeTeam(t, vendorstore.StateDetached)
 	f.enqueueMailbox(t, team, team.a, vendorstore.MailboxKindAnswer, digestItemPayload(t, team.a, "running", false))
 	if err := f.wake.Pump(t.Context()); err != nil {
 		t.Fatalf("Pump: %v", err)
@@ -378,8 +382,8 @@ func (f *wakeFixture) setSessionState(t *testing.T, sessionID, state string) {
 func TestWakeHoldsWhileTheVaultIsLocked(t *testing.T) {
 	t.Parallel()
 	f := newWakeFixture(t)
-	team := f.newWakeTeam(t, vendorstore.StateReady, vendorstore.StateReady, vendorstore.StateReady)
-	f.endMember(t, team, team.a, vendorstore.TaskOutcomeFailed, failWorktree)
+	team := f.newWakeTeam(t, vendorstore.StateReady)
+	f.endMember(t, team, team.a, failWorktree)
 	f.clk.Advance(digestWait + time.Second)
 	f.hp.vault.Lock()
 	err := f.wake.Pump(t.Context())
@@ -456,29 +460,41 @@ func (f *teamProposalFixture) awaitMailboxTurn(t *testing.T, sessionID string) s
 	t.Helper()
 	var text string
 	testutil.Poll(t, "the mailbox turn", func() bool {
-		items, err := f.hp.vendorStore.Transcript(t.Context(), sessionID, 0, 100)
-		if err != nil {
+		found, ok := f.mailboxTurnText(t.Context(), sessionID)
+		if !ok {
 			return false
 		}
-		for i := len(items) - 1; i >= 0; i-- {
-			item := &items[i]
-			if item.Kind != vendorstore.KindUserMessage || item.Metadata.Origin != "fugue" {
-				continue
-			}
-			_, content, readErr := f.hp.vendorStore.ReadItem(t.Context(), sessionID, item.ID)
-			if readErr != nil || !strings.Contains(string(content), "[fugue-batch ") {
-				continue
-			}
-			var msg transcriptUserMessageText
-			if json.Unmarshal(content, &msg) == nil && msg.Text != "" {
-				text = msg.Text
-				return true
-			}
-		}
-		return false
+		text = found
+		return true
 	})
 	return text
 }
+
+// mailboxTurnText reads the newest Fugue-origin batch turn of the session.
+func (f *teamProposalFixture) mailboxTurnText(ctx context.Context, sessionID string) (string, bool) {
+	items, err := f.hp.vendorStore.Transcript(ctx, sessionID, 0, 100)
+	if err != nil {
+		return "", false
+	}
+	for i := len(items) - 1; i >= 0; i-- {
+		item := &items[i]
+		if item.Kind != vendorstore.KindUserMessage || item.Metadata.Origin != vendorstore.TurnOriginFugue {
+			continue
+		}
+		_, content, readErr := f.hp.vendorStore.ReadItem(ctx, sessionID, item.ID)
+		if readErr != nil || !strings.Contains(string(content), mailboxBatchMarker) {
+			continue
+		}
+		var msg transcriptUserMessageText
+		if json.Unmarshal(content, &msg) == nil && msg.Text != "" {
+			return msg.Text, true
+		}
+	}
+	return "", false
+}
+
+// mailboxBatchMarker identifies a delivered batch turn in the transcript.
+const mailboxBatchMarker = "[fugue-batch "
 
 // transcriptUserMessageText is the transcript content of a Fugue user message
 // (transcript.UserMessageContent).

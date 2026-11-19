@@ -63,15 +63,7 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 	if hp.rt.interactions != nil {
 		owner := hp.rt.interactions.owner
 		unregisterVaultGuard = v.RegisterLockGuard(func(snap vault.Snapshot) {
-			owner.SetVaultLocked(snap.State != vault.StateUnlocked)
-			// Queued tasks wait while the vault is locked; the unlock starts
-			// them and delivers the mail the lock held (F11.3b).
-			if snap.State == vault.StateUnlocked && hp.rt.teamDispatch != nil {
-				hp.dispatchAllAsync(base)
-			}
-			if snap.State == vault.StateUnlocked && hp.rt.teamWake != nil {
-				hp.rt.teamWake.Notify()
-			}
+			hp.onVaultLockState(base, owner, snap)
 		})
 	}
 	hp.rt.transcripts = transcripts
