@@ -18,7 +18,14 @@ var ErrUnavailable = errcode.New(errcode.Unavailable, "vendor store unavailable"
 // ErrPurged prevents resurrection after crypto-shred.
 var ErrPurged = errcode.New(errcode.FailedPrecondition, "vendor session purged")
 
-func (s *Store) writePayload(ctx context.Context, tx *sql.Tx, session, kind string, data []byte, now string) (string, error) {
+const (
+	selectSessionKeyQuery = "SELECT wrapped_key FROM vendor_session_keys WHERE session_id=?"
+	insertPayloadQuery    = "INSERT INTO vendor_payloads(payload_id,session_id,kind,key_id,size,envelope) VALUES (?,?,?,'v1',?,?)"
+	reservePayloadQuery   = `UPDATE vendor_sessions SET payload_bytes=payload_bytes+?
+  WHERE session_id=? AND payload_bytes <= ?`
+)
+
+func (s *Store) writePayload(ctx context.Context, tx *txStatements, session, kind string, data []byte, now string) (string, error) {
 	if data == nil {
 		return "", nil
 	}
@@ -30,8 +37,7 @@ func (s *Store) writePayload(ctx context.Context, tx *sql.Tx, session, kind stri
 	}
 	var err error
 	var wrapped []byte
-	err = tx.QueryRowContext(ctx,
-		"SELECT wrapped_key FROM vendor_session_keys WHERE session_id=?", session).Scan(&wrapped)
+	err = tx.QueryRowContext(ctx, selectSessionKeyQuery, session).Scan(&wrapped)
 	var key []byte
 	defer func() { clear(key) }()
 	if errors.Is(err, sql.ErrNoRows) {
@@ -57,22 +63,19 @@ func (s *Store) writePayload(ctx context.Context, tx *sql.Tx, session, kind stri
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
-	_, err = tx.ExecContext(ctx,
-		"INSERT INTO vendor_payloads(payload_id,session_id,kind,key_id,size,envelope) VALUES (?,?,?,'v1',?,?)",
-		id, session, kind, len(data), envelope)
+	_, err = tx.ExecContext(ctx, insertPayloadQuery, id, session, kind, len(data), envelope)
 	if err != nil {
 		return "", fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	return id, nil
 }
 
-func reservePayload(ctx context.Context, tx *sql.Tx, session string, size int64) error {
+func reservePayload(ctx context.Context, tx *txStatements, session string, size int64) error {
 	if size < 0 {
 		return errcode.New(errcode.InvalidArgument, "payload limit exceeded")
 	}
 	// Subtraction keeps the guarded addition within the signed integer range.
-	result, err := tx.ExecContext(ctx, `UPDATE vendor_sessions SET payload_bytes=payload_bytes+?
-  WHERE session_id=? AND payload_bytes <= ?`, size, session, int64(sealing.MaxSessionPayloadTotal)-size)
+	result, err := tx.ExecContext(ctx, reservePayloadQuery, size, session, int64(sealing.MaxSessionPayloadTotal)-size)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
