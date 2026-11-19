@@ -293,6 +293,9 @@ func (d *teamDispatcher) failTaskAttempt(
 	if !ok || cur.State != expectedState || (expectedSessionID != "" && cur.SessionID != expectedSessionID) {
 		return errcode.New(errcode.FailedPrecondition, "task is no longer in expected state")
 	}
+	if d.deps.TestBeforeFailAppend != nil {
+		d.deps.TestBeforeFailAppend(ctx)
+	}
 	return d.appendTaskEvent(ctx, teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
 		TaskID: taskID, EventType: vendorstore.EventTaskEnded, Outcome: vendorstore.TaskOutcomeFailed, FailureCode: code,
 		Mailbox: digestItemRows(taskID, delegatorOf(taskID, tasks), code),

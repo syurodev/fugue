@@ -3,7 +3,9 @@ package app
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -305,18 +307,17 @@ func TestThirdRetryNeedsAmend(t *testing.T) {
 	}
 }
 
-type failingWorktreeSessions struct {
-	*fakeTaskSessions
-	onStart func(context.Context) error
-}
-
-func (s *failingWorktreeSessions) StartTaskSession(ctx context.Context, req *taskSessionRequest) error {
-	if s.onStart != nil {
-		if err := s.onStart(ctx); err != nil {
-			return err
-		}
+func bumpTeamSeqForTest(t *testing.T, ctx context.Context, f *activeTeamFixture, evID string) {
+	t.Helper()
+	rec, _, err := f.hp.vendorStore.TeamSnapshot(ctx, f.teamID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	return s.fakeTaskSessions.StartTaskSession(ctx, req)
+	if _, appErr := f.hp.vendorStore.AppendTeamEvent(ctx, f.teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
+		EventID: evID, EventType: vendorstore.EventTeamNoted, ProtectedPayload: []byte(`{"note":"bump"}`),
+	}); appErr != nil {
+		t.Fatal(appErr)
+	}
 }
 
 func TestStartChildFailsTaskWhenTaskStartedRetriesExhaustConflict(t *testing.T) {
@@ -325,50 +326,28 @@ func TestStartChildFailsTaskWhenTaskStartedRetriesExhaustConflict(t *testing.T) 
 	initRepo(t, f.root)
 	ctx := t.Context()
 
-	// Bump team sequence on every appendTaskStartedAttempt (via TeamSnapshot? Instead bump inside
-	// seqBumpingSessions on StartTaskSession AND wrap store? Even cleaner: hook a store fault or
-	// run StartTaskSession + bump, wait: appendTaskStartedWithRetry reads TeamSnapshot per attempt!
-	// We can verify exhaust by wrapping Store or using a concurrent bumper on TeamSnapshot?
-	// Let's test directly via a tiny custom taskSessions/store or failTaskInState + startChild).
-	// Wait: in unit tests of package app, we can trigger 3 conflicts by running a helper goroutine
-	// or bumping sequence via a wrapper! Since Store is a struct, let's test BOTH:
-	// 1. Exhaustion path: startChild closes spawned session and ends the starting task failed when
-	//    appendTaskStartedWithRetry exhausts retries.
-	// 2. failTask conflict path: failTaskInState retries on ErrSequenceConflict and ends starting task failed.
-	fakeSess := &fakeTaskSessions{}
+	fakeSess := &fakeTaskSessions{startErr: errcode.New(errcode.Unavailable, "spawn failed")}
 	dataDir := filepath.Join(t.TempDir(), "data")
+	failAttempts := 0
 	disp := newTeamDispatcher(&teamDispatcherDeps{
 		Store: f.hp.vendorStore, Sessions: fakeSess, Admit: localAdmitter{capacity: fakeSess},
 		Roots: f.rt.workspaces.domain, Git: mustTestGit(t, dataDir), DataDir: dataDir,
 		IDs: ids.NewSequence("carry-"), Vault: f.hp.vault,
+		TestBeforeFailAppend: func(hookCtx context.Context) {
+			failAttempts++
+			if failAttempts == 1 {
+				bumpTeamSeqForTest(t, hookCtx, f, "mid-fail-conflict")
+			}
+		},
 	})
 
-	// Test failTaskInState conflict retry after StartTaskSession fails and worktree was removed:
-	// first bump the team sequence inside StartTaskSession (simulating a concurrent TeamNoted),
-	// while StartTaskSession returns an error, so failTaskInState hits ErrSequenceConflict if using stale seq.
-	bumped := false
-	errBoom := errcode.New(errcode.Unavailable, "spawn failed")
-	disp.deps.Sessions = &failingWorktreeSessions{
-		fakeTaskSessions: fakeSess,
-		onStart: func(c context.Context) error {
-			if !bumped {
-				bumped = true
-				rec, _, err := f.hp.vendorStore.TeamSnapshot(c, f.teamID)
-				if err != nil {
-					return fmt.Errorf("snap: %w", err)
-				}
-				if _, err := f.hp.vendorStore.AppendTeamEvent(c, f.teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
-					EventID: "mid-fail-bump", EventType: vendorstore.EventTeamNoted, ProtectedPayload: []byte(`{"note":"x"}`),
-				}); err != nil {
-					return fmt.Errorf("bump: %w", err)
-				}
-			}
-			return errBoom
-		},
-	}
-
+	// StartTaskSession fails after worktree removal; failTaskAttempt hits ErrSequenceConflict on
+	// attempt 1, then retries on attempt 2 (re-reading snapshot & matching starting+session).
 	if err := disp.StartTask(ctx, f.teamID, f.siblingTaskID); err != nil {
 		t.Fatalf("StartTask err = %v, want nil (failure recorded on task)", err)
+	}
+	if failAttempts != 2 {
+		t.Fatalf("failAttempts = %d, want 2 (1 conflict + 1 retry)", failAttempts)
 	}
 	_, tasks, err := f.hp.vendorStore.TeamSnapshot(ctx, f.teamID)
 	if err != nil {
@@ -388,47 +367,38 @@ func TestStartChildClosesSessionAndRecordsFailureOnExhaustedStartRetries(t *test
 
 	fakeSess := &fakeTaskSessions{}
 	dataDir := filepath.Join(t.TempDir(), "data")
+	startAttempts := 0
 	disp := newTeamDispatcher(&teamDispatcherDeps{
 		Store: f.hp.vendorStore, Sessions: fakeSess, Admit: localAdmitter{capacity: fakeSess},
 		Roots: f.rt.workspaces.domain, Git: mustTestGit(t, dataDir), DataDir: dataDir,
 		IDs: ids.NewSequence("exh-"), Vault: f.hp.vault,
+		TestBeforeStartAppend: func(hookCtx context.Context) {
+			startAttempts++
+			bumpTeamSeqForTest(t, hookCtx, f, fmt.Sprintf("start-conflict-%d", startAttempts))
+		},
 	})
 
-	// Put sibling in starting with a spawned session, then simulate appendTaskStartedWithRetry exhausting retries
-	// by verifying the recovery path: close session, remove worktree, and failStartingTask records failed(session_start).
-	rec, tasks, err := f.hp.vendorStore.TeamSnapshot(ctx, f.teamID)
-	if err != nil {
-		t.Fatal(err)
+	// Every appendTaskStartedAttempt hits ErrSequenceConflict (3 attempts); startChild must close
+	// the spawned session, remove its worktree, and fail the starting task (never leaving it stuck starting).
+	if err := disp.StartTask(ctx, f.teamID, f.siblingTaskID); err != nil {
+		t.Fatalf("StartTask err = %v, want nil (recovery records task failure)", err)
 	}
-	sib, _ := findTask(tasks, f.siblingTaskID)
-	launch, code, prepErr := disp.prepareLaunch(ctx, &rec, sib, tasks)
-	if prepErr != nil || code != "" {
-		t.Fatalf("prepareLaunch = (%q, %v)", code, prepErr)
+	if startAttempts != maxAppendRetries {
+		t.Fatalf("startAttempts = %d, want %d", startAttempts, maxAppendRetries)
 	}
-	if appErr := disp.appendTaskEvent(ctx, f.teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
-		TaskID: f.siblingTaskID, EventType: vendorstore.EventTaskAssigned, SessionID: launch.req.SessionID,
-	}); appErr != nil {
-		t.Fatal(appErr)
+	startedReq, ok := fakeSess.startFor(f.siblingTaskID)
+	if !ok {
+		t.Fatalf("expected spawned session request for %s", f.siblingTaskID)
 	}
-	// Trigger a sequence conflict across all 3 attempts of failTaskInState? No: verify that after
-	// appendTaskStartedWithRetry fails (e.g. non-active or exhausted conflict), failTaskInState requires
-	// starting + matching session and transitions starting -> failed.
-	// First verify mismatched sessionID refuses to fail the task.
+	if !slices.Contains(fakeSess.closed, startedReq.SessionID) {
+		t.Fatalf("closed sessions = %v, want %s", fakeSess.closed, startedReq.SessionID)
+	}
+	if _, statErr := os.Stat(startedReq.Cwd); !os.IsNotExist(statErr) {
+		t.Fatalf("worktree %s still exists after failure recovery (stat err=%v)", startedReq.Cwd, statErr)
+	}
+	// Mismatched session ID still refuses to fail a starting task.
 	if mismatchErr := disp.failTaskInState(ctx, f.teamID, f.siblingTaskID, vendorstore.TaskStateStarting, "wrong-session", failSessionStart); mismatchErr == nil {
 		t.Fatal("failTaskInState(wrong session) = nil, want FailedPrecondition")
-	}
-	// Now verify failTaskInState with matching session transitions starting -> failed even after a concurrent sequence bump.
-	snap2, _, err := f.hp.vendorStore.TeamSnapshot(ctx, f.teamID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, bumpErr := f.hp.vendorStore.AppendTeamEvent(ctx, f.teamID, snap2.LastSeq, &vendorstore.AppendTeamEventInput{
-		EventID: "bump-before-fail", EventType: vendorstore.EventTeamNoted, ProtectedPayload: []byte(`{"note":"b"}`),
-	}); bumpErr != nil {
-		t.Fatal(bumpErr)
-	}
-	if failErr := disp.failTaskInState(ctx, f.teamID, f.siblingTaskID, vendorstore.TaskStateStarting, launch.req.SessionID, failSessionStart); failErr != nil {
-		t.Fatalf("failTaskInState = %v", failErr)
 	}
 	_, afterTasks, err := f.hp.vendorStore.TeamSnapshot(ctx, f.teamID)
 	if err != nil {

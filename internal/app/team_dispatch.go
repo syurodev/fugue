@@ -51,6 +51,10 @@ type teamDispatcherDeps struct {
 	// Wake is the F11.3b mailbox pump; nil leaves the digest for the next
 	// trigger (the decide-path tests admit nothing, so they enqueue none).
 	Wake *teamWake
+	// Test hooks, nil in production, invoked between TeamSnapshot and
+	// appendTaskEvent so tests can inject real ErrSequenceConflict races.
+	TestBeforeStartAppend func(context.Context)
+	TestBeforeFailAppend  func(context.Context)
 }
 
 // teamDispatcher starts the queued tasks of active teams. One run at a time:
@@ -275,6 +279,9 @@ func (d *teamDispatcher) appendTaskStartedAttempt(ctx context.Context, teamID, t
 	task, found := findTask(tasks, taskID)
 	if !found || task.State != vendorstore.TaskStateStarting || task.SessionID != sessionID {
 		return errcode.New(errcode.FailedPrecondition, "task is no longer starting for its spawned session")
+	}
+	if d.deps.TestBeforeStartAppend != nil {
+		d.deps.TestBeforeStartAppend(ctx)
 	}
 	return d.appendTaskEvent(ctx, teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
 		TaskID: taskID, EventType: vendorstore.EventTaskStarted,
