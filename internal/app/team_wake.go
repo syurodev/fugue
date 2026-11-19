@@ -81,8 +81,13 @@ func (w *teamWake) Start(base context.Context) *supervise.Task {
 }
 
 func (w *teamWake) loop(ctx context.Context) error {
-	w.recoverAsync(ctx)
-	w.pumpAsync(ctx)
+	// Recovery runs ONCE, before the first pump: a crash leftover resolves
+	// before the pump claims its recipient (Q-122). The pump runs
+	// single-flight in this goroutine — a wake that arrives during a pump
+	// stays in the channel and causes exactly one more pump afterwards, so a
+	// recovery can never race a send that is still in flight.
+	w.logWake(ctx, w.RecoverBatches(ctx))
+	w.logWake(ctx, w.Pump(ctx))
 	var (
 		timer   clock.Timer
 		timerCh <-chan time.Time
@@ -113,8 +118,7 @@ func (w *teamWake) loop(ctx context.Context) error {
 		case <-w.wake:
 		case <-timerCh:
 		}
-		w.recoverAsync(ctx)
-		w.pumpAsync(ctx)
+		w.logWake(ctx, w.Pump(ctx))
 		rearm()
 	}
 }
@@ -242,7 +246,9 @@ func (w *teamWake) recipientSessionID(ctx context.Context, teamID string, task *
 
 // resumeDetached attaches a fresh process to a detached recipient session
 // (Q-123). A locked vault holds the mail; a failed resume holds it too and is
-// retried by the next trigger.
+// retried by the next trigger. TODO(F11.6): measure agy idle-send and
+// session/load resume with a logged-in agy, then enable; until measured the
+// fail-closed hold covers an unmeasured resume (Q-123).
 func (w *teamWake) resumeDetached(ctx context.Context, session *vendorstore.Session) error {
 	cwd, err := w.sessionCwd(ctx, session)
 	if err != nil {
@@ -321,10 +327,17 @@ func (w *teamWake) deliverBatch(ctx context.Context, r vendorstore.MailboxRecipi
 		return err
 	}
 	if err := w.deps.Sessions.Send(ctx, sessionID, vendor.Input{Text: text}); err != nil {
+		if !refusedSend(err) {
+			// The outcome is unknown: the turn may have reached the vendor.
+			// The claim stays `delivering` and only the transcript recovery
+			// resolves it — never re-send an unknown effect (Q-122).
+			slog.WarnContext(ctx, "the mailbox send outcome is unknown", "team_id", r.TeamID, "batch_id", batchID, "error_code", string(errcode.CodeOf(err)))
+			return nil
+		}
 		if releaseErr := w.deps.Store.ReleaseMailboxBatch(ctx, batchID); releaseErr != nil {
 			return boundaryError("release the mailbox batch", releaseErr)
 		}
-		slog.WarnContext(ctx, "sending the mailbox turn failed", "team_id", r.TeamID, "batch_id", batchID, "error_code", string(errcode.CodeOf(err)))
+		slog.WarnContext(ctx, "sending the mailbox turn was refused", "team_id", r.TeamID, "batch_id", batchID, "error_code", string(errcode.CodeOf(err)))
 		return nil
 	}
 	if err := w.deps.Store.MarkMailboxBatchDelivered(ctx, batchID); err != nil {

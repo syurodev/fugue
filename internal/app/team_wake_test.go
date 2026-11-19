@@ -16,6 +16,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/testutil"
+	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
@@ -298,6 +299,106 @@ func TestCrashAfterSendWithTheMarkerRecordedDeliversWithoutResend(t *testing.T) 
 	delivering, delErr := f.hp.vendorStore.DeliveringMailboxBatches(t.Context())
 	if delErr != nil || len(delivering) != 0 {
 		t.Fatalf("delivering batches = %v, %d, want empty", delErr, len(delivering))
+	}
+}
+
+// TestRecoveryNeverResendsABatchThatIsBeingDelivered pins the single-flight
+// rule: while a pump is blocked inside Send (the claim is `delivering`, the
+// marker is not in the transcript yet), a wake triggers no second Send for
+// the batch — recovery runs once at start and the pump runs single-flight in
+// the loop goroutine.
+func TestRecoveryNeverResendsABatchThatIsBeingDelivered(t *testing.T) {
+	t.Parallel()
+	f := newWakeFixture(t)
+	team := f.newWakeTeam(t, vendorstore.StateReady)
+	f.endMember(t, team, team.a, failWorktree)
+	f.clk.Advance(digestWait + time.Second)
+
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	f.sessions.mu.Lock()
+	f.sessions.sendStarted = started
+	f.sessions.release = release
+	f.sessions.mu.Unlock()
+
+	// The first pump is blocked inside Send: the claim is `delivering` and
+	// the marker is not in the transcript yet.
+	pumpDone := make(chan error, 1)
+	go func() { pumpDone <- f.wake.Pump(t.Context()) }()
+	<-started
+
+	// Concurrent triggers — a wake burst and a second pump — must neither
+	// resend the batch nor claim it again while the send is in flight.
+	for range 3 {
+		f.wake.Notify()
+	}
+	second := make(chan error, 1)
+	go func() { second <- f.wake.Pump(t.Context()) }()
+
+	close(release)
+	if err := <-pumpDone; err != nil {
+		t.Fatalf("first Pump: %v", err)
+	}
+	if err := <-second; err != nil {
+		t.Fatalf("second Pump: %v", err)
+	}
+	// One in-flight delivery, no resend of the batch it was sending.
+	if got := f.sentTexts(team.leadSession); len(got) != 1 {
+		t.Fatalf("sends = %d, want exactly one delivery with no resend: %v", len(got), got)
+	}
+	claims, err := f.hp.vendorStore.DeliveringMailboxBatches(t.Context())
+	if err != nil || len(claims) != 0 {
+		t.Fatalf("delivering batches = %v, %d, want the batch delivered", err, len(claims))
+	}
+}
+
+// TestSendWithUnknownOutcomeKeepsTheBatchDelivering pins the refused-only
+// release (Q-122). A generic failure after the write keeps the claim
+// `delivering` — the outcome is unknown and only the transcript recovery may
+// resolve it. A refused send (busy) releases the claim back to pending, so
+// the next pump may take it again.
+func TestSendWithUnknownOutcomeKeepsTheBatchDelivering(t *testing.T) {
+	t.Parallel()
+	f := newWakeFixture(t)
+	team := f.newWakeTeam(t, vendorstore.StateReady)
+	f.endMember(t, team, team.a, failWorktree)
+	f.clk.Advance(digestWait + time.Second)
+
+	f.sessions.mu.Lock()
+	f.sessions.sendErr = errcode.New(errcode.Internal, "injected send failure")
+	f.sessions.mu.Unlock()
+	if err := f.wake.Pump(t.Context()); err != nil {
+		t.Fatalf("Pump: %v", err)
+	}
+	f.assertBatches(t, 1, 0, "the claim is kept for recovery: an unknown outcome is never re-queued by the pump")
+	// The transcript has no marker, so the recovery resolves the claim as
+	// undelivered and queues the resend with the same batch ID.
+	if err := f.wake.RecoverBatches(t.Context()); err != nil {
+		t.Fatalf("RecoverBatches: %v", err)
+	}
+	f.assertBatches(t, 0, 1, "the claim resolved by the transcript check")
+
+	// A refused send releases the claim back to pending: the turn was never
+	// recorded, so the next trigger may take it again.
+	f.sessions.mu.Lock()
+	f.sessions.sendErr = vendor.ErrBusy
+	f.sessions.mu.Unlock()
+	if err := f.wake.Pump(t.Context()); err != nil {
+		t.Fatalf("Pump after refused send: %v", err)
+	}
+	f.assertBatches(t, 0, 1, "the refused claim released back to pending")
+}
+
+// assertBatches asserts the delivering and pending mailbox row counts.
+func (f *wakeFixture) assertBatches(t *testing.T, delivering, pending int, what string) {
+	t.Helper()
+	claims, err := f.hp.vendorStore.DeliveringMailboxBatches(t.Context())
+	if err != nil || len(claims) != delivering {
+		t.Fatalf("%s: delivering batches = %v, %d, want %d", what, err, len(claims), delivering)
+	}
+	rows, err := f.hp.vendorStore.PendingMailbox(t.Context())
+	if err != nil || len(rows) != pending {
+		t.Fatalf("%s: pending mailbox = %v, %d, want %d", what, err, len(rows), pending)
 	}
 }
 

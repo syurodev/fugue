@@ -32,6 +32,13 @@ type fakeTaskSessions struct {
 	closed   []string
 	noRoom   bool
 	startErr error
+	// sendErr fails every send after the text was recorded; holdSend blocks
+	// the send inside the fake, so a test can hold the pump mid-send and
+	// observe what a concurrent trigger does.
+	sendErr     error
+	holdSend    <-chan struct{}
+	sendStarted chan struct{}
+	release     <-chan struct{}
 }
 
 // fakeResume is one recorded wake resume of a detached session (Q-123).
@@ -57,12 +64,25 @@ func (f *fakeTaskSessions) StartTaskSession(_ context.Context, req *taskSessionR
 
 func (f *fakeTaskSessions) Send(_ context.Context, sessionID string, input vendor.Input) error {
 	f.mu.Lock()
-	defer f.mu.Unlock()
 	if f.sends == nil {
 		f.sends = make(map[string][]string)
 	}
 	f.sends[sessionID] = append(f.sends[sessionID], input.Text)
-	return nil
+	err, hold, started, release := f.sendErr, f.holdSend, f.sendStarted, f.release
+	f.mu.Unlock()
+	if started != nil {
+		select {
+		case started <- struct{}{}:
+		default:
+		}
+	}
+	if hold != nil {
+		<-hold
+	}
+	if release != nil {
+		<-release
+	}
+	return err
 }
 
 func (f *fakeTaskSessions) Close(_ context.Context, sessionID string, _ vendor.CloseReason) error {

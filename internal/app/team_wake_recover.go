@@ -16,9 +16,9 @@ import (
 	"strings"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
-	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/vault"
+	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
@@ -41,20 +41,6 @@ type mailboxDecision struct {
 	Note      string               `json:"note,omitempty"`
 	Changes   []string             `json:"changes,omitempty"`
 	Plan      *teams.ProposalInput `json:"plan,omitempty"`
-}
-
-func (w *teamWake) recoverAsync(base context.Context) {
-	supervise.Go(base, "team-wake-recover", func(ctx context.Context) error {
-		w.logWake(ctx, w.RecoverBatches(ctx))
-		return nil
-	})
-}
-
-func (w *teamWake) pumpAsync(base context.Context) {
-	supervise.Go(base, "team-wake-pump", func(ctx context.Context) error {
-		w.logWake(ctx, w.Pump(ctx))
-		return nil
-	})
 }
 
 func (w *teamWake) logWake(ctx context.Context, err error) {
@@ -111,6 +97,20 @@ func (w *teamWake) resolveBatch(ctx context.Context, b vendorstore.MailboxBatchR
 		return boundaryError("release the mailbox batch", err)
 	}
 	return nil
+}
+
+// refusedSend reports a send the session refused before anything reached the
+// vendor: busy, closed, not resumable, gone, out of capacity or behind a
+// locked vault. The turn was not recorded, so the claim returns to pending
+// (Q-122). Any other failure — a timeout after the write, a context cancel,
+// a storage failure — leaves the outcome unknown and the claim `delivering`.
+func refusedSend(err error) bool {
+	return errors.Is(err, vendor.ErrBusy) ||
+		errors.Is(err, vendor.ErrSessionClosed) ||
+		errors.Is(err, vendorstore.ErrSessionNotFound) ||
+		errcode.CodeOf(err) == errcode.VendorSessionState ||
+		errcode.CodeOf(err) == errcode.VendorCapacity ||
+		errcode.CodeOf(err) == errcode.VendorVaultLocked
 }
 
 // batchText opens the sealed payloads of a claim and renders one turn: the
