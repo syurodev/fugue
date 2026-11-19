@@ -126,6 +126,7 @@ func (s *teamTaskService) forwardQuestionToUser(ctx context.Context, c *callerTe
 	if err != nil {
 		return "", err
 	}
+	// TODO(F11.6): rebuild user question cards for asking tasks on host start.
 	if err := s.ensureUserQuestionCard(c.team.TeamID, c.team.WorkspaceID, target, askedSeq, q); err != nil {
 		return "", err
 	}
