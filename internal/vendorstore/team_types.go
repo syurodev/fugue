@@ -91,6 +91,8 @@ const (
 	// EventTeamAmended carries a §5.4 amendment of an active team in its
 	// sealed payload; the transition (active → active) landed with F11.2b.
 	EventTeamAmended TeamEventType = "TeamAmended"
+	// EventTeamNoted records an append-only team note in its sealed payload (Q-130).
+	EventTeamNoted   TeamEventType = "TeamNoted"
 	EventTeamDecided TeamEventType = "TeamDecided"
 	EventTeamEnded   TeamEventType = "TeamEnded"
 
@@ -141,10 +143,13 @@ type TaskRecord struct {
 	// ExplicitStart marks a task the dispatcher never starts on its own: it
 	// starts only through its delegator's call (Q-116, tasks of an amend).
 	ExplicitStart bool
-	LastEventSeq  int64
-	CreatedAt     int64
-	UpdatedAt     int64
-	EndedAt       int64
+	// NoReportNudged records whether a completed turn without fugue_task_done
+	// already triggered the one-time nudge (Q-131).
+	NoReportNudged bool
+	LastEventSeq   int64
+	CreatedAt      int64
+	UpdatedAt      int64
+	EndedAt        int64
 }
 
 // NewTeamInput specifies a new team and its initial tasks created atomically.

@@ -104,6 +104,16 @@ func isRoleIDChar(c byte) bool {
 	return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_'
 }
 
+// ValidateRoleIdentifier validates a role identifier against [a-z0-9][a-z0-9_-]*.
+func ValidateRoleIdentifier(field, name string) error {
+	return validateRoleIdentifier(field, name)
+}
+
+// ValidateTaskIdentifier validates a task identifier against [a-z0-9][a-z0-9_-]*.
+func ValidateTaskIdentifier(field, name string) error {
+	return validateTaskIdentifier(field, name)
+}
+
 func validateRoleIdentifier(field, name string) error {
 	return validateIdentifier(field, name, ErrInvalidCatalog)
 }

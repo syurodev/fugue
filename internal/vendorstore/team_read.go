@@ -69,7 +69,8 @@ func queryTeamTasks(ctx context.Context, db teamQueryer, teamID string) ([]TaskR
 	rows, err := db.QueryContext(ctx, `
 		SELECT task_id, team_id, parent_task_id, hierarchy_role, catalog_role,
 		       deliverable, depends_on_json, depth, state, failure_code,
-		       last_event_seq, created_at, updated_at, ended_at, session_id, explicit_start
+		       last_event_seq, created_at, updated_at, ended_at, session_id, explicit_start,
+		       no_report_nudged
 		FROM team_tasks WHERE team_id = ? ORDER BY created_at ASC, task_id ASC`, teamID,
 	)
 	if err != nil {
@@ -99,6 +100,7 @@ func scanTaskRow(rows *sql.Rows) (TaskRecord, error) {
 		&t.TaskID, &t.TeamID, &t.ParentTaskID, &roleStr, &t.CatalogRole,
 		&delivStr, &depsJSON, &t.Depth, &stateStr, &t.FailureCode,
 		&t.LastEventSeq, &t.CreatedAt, &t.UpdatedAt, &endedAt, &t.SessionID, &t.ExplicitStart,
+		&t.NoReportNudged,
 	); err != nil {
 		return TaskRecord{}, fmt.Errorf("scan team task: %w", err)
 	}
@@ -356,4 +358,102 @@ func (s *Store) TaskForSession(ctx context.Context, sessionID string) (TaskRecor
 		}
 	}
 	return TaskRecord{}, false, nil
+}
+
+// MarkTaskNoReportNudged atomically records the one-time no-report nudge on a
+// task row, returning true when this call flipped it from false to true.
+func (s *Store) MarkTaskNoReportNudged(ctx context.Context, teamID, taskID string) (bool, error) {
+	res, err := s.db.ExecContext(ctx,
+		`UPDATE team_tasks SET no_report_nudged = 1 WHERE team_id = ? AND task_id = ? AND no_report_nudged = 0`,
+		teamID, taskID)
+	if err != nil {
+		return false, fmt.Errorf("%w: mark task no_report_nudged: %w", ErrUnavailable, err)
+	}
+	rows, err := res.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("%w: count task no_report_nudged: %w", ErrUnavailable, err)
+	}
+	return rows > 0, nil
+}
+
+// CountTeamNotes returns how many TeamNoted events the team has recorded.
+func (s *Store) CountTeamNotes(ctx context.Context, teamID string) (int, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT COUNT(*) FROM team_task_events WHERE team_id = ? AND event_type = ?`,
+		teamID, string(EventTeamNoted)).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("%w: count team notes: %w", ErrUnavailable, err)
+	}
+	return count, nil
+}
+
+// OpenTeamNotePayloads opens the sealed TeamNoted payloads of teamID in
+// append order, returning the requested page and the total note count.
+func (s *Store) OpenTeamNotePayloads(ctx context.Context, teamID string, offset, limit int) ([][]byte, int, error) {
+	total, err := s.CountTeamNotes(ctx, teamID)
+	if err != nil {
+		return nil, 0, err
+	}
+	if limit <= 0 || offset >= total {
+		return nil, total, nil
+	}
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT sequence FROM team_task_events
+		 WHERE team_id = ? AND event_type = ?
+		 ORDER BY sequence ASC LIMIT ? OFFSET ?`,
+		teamID, string(EventTeamNoted), limit, offset)
+	if err != nil {
+		return nil, 0, fmt.Errorf("%w: query team notes: %w", ErrUnavailable, err)
+	}
+	var seqs []int64
+	for rows.Next() {
+		var seq int64
+		if scanErr := rows.Scan(&seq); scanErr != nil {
+			closeRows(ctx, rows)
+			return nil, 0, fmt.Errorf("scan team note: %w", scanErr)
+		}
+		seqs = append(seqs, seq)
+	}
+	if err := rows.Err(); err != nil {
+		closeRows(ctx, rows)
+		return nil, 0, fmt.Errorf("iterate team notes: %w", err)
+	}
+	closeRows(ctx, rows)
+
+	out := make([][]byte, 0, len(seqs))
+	for _, seq := range seqs {
+		plain, openErr := s.OpenTeamEventPayload(ctx, teamID, seq)
+		if openErr != nil {
+			return nil, 0, openErr
+		}
+		out = append(out, plain)
+	}
+	return out, total, nil
+}
+
+// OpenLatestTaskEventPayload opens the latest sealed payload of eventType for
+// a task in teamID, or returns found=false when none exists.
+func (s *Store) OpenLatestTaskEventPayload(ctx context.Context, teamID, taskID string, eventType TeamEventType) ([]byte, bool, error) {
+	var seq int64
+	var hasPayload int
+	err := s.db.QueryRowContext(ctx,
+		`SELECT sequence, (payload_envelope IS NOT NULL) FROM team_task_events
+		 WHERE team_id = ? AND task_id = ? AND event_type = ?
+		 ORDER BY sequence DESC LIMIT 1`,
+		teamID, taskID, string(eventType)).Scan(&seq, &hasPayload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("%w: query latest task event: %w", ErrUnavailable, err)
+	}
+	if hasPayload == 0 {
+		return nil, false, nil
+	}
+	plain, err := s.OpenTeamEventPayload(ctx, teamID, seq)
+	if err != nil {
+		return nil, false, err
+	}
+	return plain, true, nil
 }

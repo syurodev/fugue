@@ -114,6 +114,55 @@ func (s *Store) insertMailboxRows(ctx context.Context, tx *sql.Tx, teamID string
 	return nil
 }
 
+// EnqueueDirectMailbox seals and enqueues an immediate mailbox message (such
+// as fugue_task_send) without appending a team state event.
+func (s *Store) EnqueueDirectMailbox(ctx context.Context, teamID, recipientTaskID, kind, uniqueID string, payload []byte) error {
+	if _, err := s.requireUnlockedVault(); err != nil {
+		return err
+	}
+	if recipientTaskID == "" || uniqueID == "" || len(payload) == 0 {
+		return fmt.Errorf("%w: direct mailbox requires recipient, unique id, and payload", ErrTeamInvalidInput)
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("%w: begin direct mailbox tx: %w", ErrUnavailable, err)
+	}
+	defer rollback(ctx, tx)
+	var keyID string
+	var wrapped []byte
+	var lastSeq int64
+	if scanErr := tx.QueryRowContext(ctx, `SELECT key_id, wrapped_key, last_seq FROM team_records WHERE team_id = ?`, teamID).Scan(&keyID, &wrapped, &lastSeq); scanErr != nil {
+		if errors.Is(scanErr, sql.ErrNoRows) {
+			return fmt.Errorf("%w: %s", ErrTeamNotFound, teamID)
+		}
+		return fmt.Errorf("%w: query team for mailbox: %w", ErrUnavailable, scanErr)
+	}
+	rawKey, err := s.unwrapTeamKey(teamID, keyID, wrapped)
+	if err != nil {
+		return err
+	}
+	defer clear(rawKey)
+	id := teamID + ":" + uniqueID + ":" + recipientTaskID
+	envelope, err := sealing.SealPayload(randomReader{s.random}, teamMailboxRecordType, teamID, id, kind, keyID, rawKey, payload)
+	if err != nil {
+		return fmt.Errorf("seal the direct mailbox payload: %w", err)
+	}
+	now := s.clock.Now().UnixMilli()
+	seq := max(lastSeq, 1)
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO team_mailbox_messages
+			(message_id, team_id, recipient_task_id, batch_id, kind, state, payload_envelope, source_seq, created_at, updated_at)
+		VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?)`,
+		id, teamID, recipientTaskID, kind, MailboxPending, envelope, seq, now, now,
+	); err != nil {
+		return fmt.Errorf("insert direct mailbox message: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("%w: commit direct mailbox: %w", ErrUnavailable, err)
+	}
+	return nil
+}
+
 // claimBatchID derives a fresh batch ID for a claim with no resend leftover.
 func claimBatchID(teamID, recipientTaskID string, sourceSeq int64) string {
 	return mailboxMessageID(teamID, sourceSeq, recipientTaskID) + ":b"

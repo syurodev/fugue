@@ -19,6 +19,7 @@ require (
 	connectrpc.com/connect v1.21.1
 	github.com/google/go-cmp v0.7.0
 	github.com/pelletier/go-toml/v2 v2.4.3
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	go.uber.org/goleak v1.3.0
 	golang.org/x/crypto v0.58.0
 	golang.org/x/sys v0.49.0

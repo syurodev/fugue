@@ -47,13 +47,14 @@ func (s *Store) CreateSession(ctx context.Context, session *Session) error {
 		`INSERT INTO vendor_sessions(
 			session_id,vendor,account_id,role,state,created_at,updated_at,team_id,task_id,
 			resume_handle,process_pid,process_start_token,process_scope_unit,last_sequence,
-			approval_mode,waiting_reason,stop_proof,close_reason,workspace_id,workspace_root)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?)`,
+			approval_mode,waiting_reason,stop_proof,close_reason,workspace_id,workspace_root,
+			model,effort)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,?,?,?,?,?,?,?)`,
 		session.ID, session.Vendor, session.AccountID, session.Role, session.State, now, now,
 		nullable(session.TeamID), nullable(session.TaskID), session.ResumeHandle,
 		session.ProcessPID, session.ProcessStartToken, session.ProcessScopeUnit,
 		session.ApprovalMode, session.WaitingReason, session.StopProof, session.CloseReason,
-		session.WorkspaceID, session.WorkspaceRoot)
+		session.WorkspaceID, session.WorkspaceRoot, session.Model, session.Effort)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}

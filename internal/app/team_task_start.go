@@ -71,27 +71,11 @@ func (d *teamDispatcher) startChild(ctx context.Context, rec *vendorstore.TeamRe
 // prepareLaunch reads the sealed spec, the decided profile and the repository
 // of the task. A non-empty code means the task cannot start and must fail.
 func (d *teamDispatcher) prepareLaunch(ctx context.Context, rec *vendorstore.TeamRecord, task *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord) (*taskLaunch, string, error) {
-	launch := &taskLaunch{}
-	raw, err := d.deps.Store.OpenTaskSpec(ctx, rec.TeamID, task.TaskID)
-	if err != nil {
-		return nil, "", boundaryError("open the task spec", err)
+	spec, role, code, err := resolveTaskProfile(ctx, d.deps.Store, rec.TeamID, task.TaskID, task.CatalogRole)
+	if err != nil || code != "" {
+		return nil, code, err
 	}
-	if !json.Valid(raw) {
-		return nil, failSpecUnreadable, nil
-	}
-	if decodeErr := json.Unmarshal(raw, &launch.spec); decodeErr != nil {
-		return nil, "", errcode.Wrap(errcode.Internal, "decode the task spec", decodeErr)
-	}
-	role, found, err := decidedRoleFor(ctx, d.deps.Store, rec.TeamID, task.CatalogRole)
-	if err != nil {
-		return nil, "", err
-	}
-	if !found {
-		return nil, failProfile, nil
-	}
-	if p := launch.spec.Profile; p != nil {
-		overlayProfile(&role, p)
-	}
+	launch := &taskLaunch{spec: spec}
 	lead, err := d.deps.Store.Snapshot(ctx, rec.SessionID)
 	if err != nil {
 		return nil, "", boundaryError("read the lead session", err)
@@ -112,6 +96,33 @@ func (d *teamDispatcher) prepareLaunch(ctx context.Context, rec *vendorstore.Tea
 		Role: task.HierarchyRole, ApprovalMode: approvalModeFor(role.Permission),
 	}
 	return launch, "", nil
+}
+
+// resolveTaskProfile decodes a task's sealed spec, looks up its decided catalog
+// role, and applies any task-level profile overlay (OR-E13).
+func resolveTaskProfile(ctx context.Context, store *vendorstore.Store, teamID, taskID, catalogRole string) (teams.ProtectedTaskContent, decidedRole, string, error) {
+	raw, err := store.OpenTaskSpec(ctx, teamID, taskID)
+	if err != nil {
+		return teams.ProtectedTaskContent{}, decidedRole{}, "", boundaryError("open the task spec", err)
+	}
+	if !json.Valid(raw) {
+		return teams.ProtectedTaskContent{}, decidedRole{}, failSpecUnreadable, nil
+	}
+	var spec teams.ProtectedTaskContent
+	if decodeErr := json.Unmarshal(raw, &spec); decodeErr != nil {
+		return teams.ProtectedTaskContent{}, decidedRole{}, "", errcode.Wrap(errcode.Internal, "decode the task spec", decodeErr)
+	}
+	role, found, err := decidedRoleFor(ctx, store, teamID, catalogRole)
+	if err != nil {
+		return teams.ProtectedTaskContent{}, decidedRole{}, "", err
+	}
+	if !found {
+		return teams.ProtectedTaskContent{}, decidedRole{}, failProfile, nil
+	}
+	if spec.Profile != nil {
+		overlayProfile(&role, spec.Profile)
+	}
+	return spec, role, "", nil
 }
 
 // overlayProfile applies a task's profile override over its decided role.

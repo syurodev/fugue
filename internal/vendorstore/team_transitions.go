@@ -29,6 +29,7 @@ func teamTransitions() map[teamTransKey]TeamState {
 		// F11.2b: an amendment keeps an active team active; the change itself
 		// travels in the event's sealed payload (§5.4).
 		{TeamStateActive, EventTeamAmended, ""}:                  TeamStateActive,
+		{TeamStateActive, EventTeamNoted, ""}:                    TeamStateActive,
 		{TeamStateActive, EventTeamEnded, outcomeCancelled}:      TeamStateCancelled,
 		{TeamStateActive, EventTeamEnded, outcomeFailed}:         TeamStateFailed,
 		{TeamStateFinalReview, EventTeamDecided, "revision"}:     TeamStateActive,
@@ -109,6 +110,7 @@ func isTeamEventType(ev TeamEventType) bool {
 		ev == EventTeamStarted ||
 		ev == EventTeamFinalReview ||
 		ev == EventTeamAmended ||
+		ev == EventTeamNoted ||
 		ev == EventTeamDecided ||
 		ev == EventTeamEnded
 }

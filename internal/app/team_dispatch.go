@@ -218,3 +218,43 @@ func (d *teamDispatcher) bindLead(ctx context.Context, rec *vendorstore.TeamReco
 	}
 	return true, nil
 }
+
+// StartTask starts one explicitly-named queued task of an active team
+// (fugue_task_start). It returns as soon as the task session is spawned and
+// its intro turn is sent, without waiting for the task to finish.
+func (d *teamDispatcher) StartTask(ctx context.Context, teamID, taskID string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.deps.Vault.Snapshot().State != vault.StateUnlocked {
+		return errcode.New(errcode.VendorVaultLocked, "the vault is locked")
+	}
+	rec, tasks, err := d.deps.Store.TeamSnapshot(ctx, teamID)
+	if err != nil {
+		return boundaryError("read the team", err)
+	}
+	if rec.State != vendorstore.TeamStateActive {
+		return errcode.New(errcode.FailedPrecondition, "the team is not active")
+	}
+	byID := make(map[string]*vendorstore.TaskRecord, len(tasks))
+	for i := range tasks {
+		byID[tasks[i].TaskID] = &tasks[i]
+	}
+	task := byID[taskID]
+	if task == nil {
+		return errcode.New(errcode.NotFound, "team task not found")
+	}
+	if task.State != vendorstore.TaskStateQueued {
+		return errcode.New(errcode.FailedPrecondition, "the task is not queued")
+	}
+	if !startable(task, byID) {
+		return errcode.New(errcode.FailedPrecondition, "the task dependencies are not satisfied")
+	}
+	started, err := d.start(ctx, &rec, task, tasks)
+	if err != nil {
+		return err
+	}
+	if !started {
+		return errcode.New(errcode.FailedPrecondition, "no capacity to start the task")
+	}
+	return nil
+}

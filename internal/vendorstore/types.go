@@ -28,6 +28,9 @@ type Session struct {
 	// it was created in (F9.9c); empty for sessions created before.
 	WorkspaceID   string
 	WorkspaceRoot string
+	// Model and Effort record the decided profile at session start (F11.3c).
+	Model  string
+	Effort string
 }
 
 // TurnState is the read-only turn grouping exposed by an atomic transcript overview.
