@@ -40,6 +40,29 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: go run ./cmd/fuguegate changes -base "$BASE_SHA" -head "$HEAD_SHA" >> "$GITHUB_OUTPUT"
 
+      # The macOS gates are gated at the job level, not by a step, so a change
+      # that needs no macOS run never requests a runner at all. GitHub cancels
+      # a job that queues without acquiring a hosted runner after roughly 15
+      # minutes with zero steps (PRs #155, #160 and #161), so deciding inside
+      # the job wasted the request every time the answer was "skip". A skipped
+      # job without a matrix reports under this literal name and counts as
+      # success for the required status checks (ruleset main).
+      - name: Report what the macOS gates will not run
+        env:
+          CODE: ${{ steps.scope.outputs.code }}
+          PLATFORM: ${{ steps.scope.outputs.platform }}
+          TEST_PKGS: ${{ steps.scope.outputs.test_pkgs }}
+          TEST_RUN: ${{ steps.scope.outputs.test_run }}
+        run: |
+          if [ "$CODE" != "true" ]; then
+            echo "::notice::macOS tests skipped: documentation-only change (fuguegate changes)"
+          elif [ "$PLATFORM" != "true" ]; then
+            echo "::notice::macOS tests skipped: no platform-specific change (fuguegate changes)"
+          fi
+          if [ -z "$TEST_PKGS" ] || [ -z "$TEST_RUN" ]; then
+            echo "::notice::macOS stress skipped: no changed test functions that need it (fuguegate changes)"
+          fi
+
   fmt:
     runs-on: ubuntu-latest
     steps:
@@ -85,26 +108,24 @@ jobs:
 
   # Linux tests run for every code change; macOS tests run when the change is
   # platform-specific (fuguegate changes) and after every merge (main.yml).
+  # The macOS entry is a separate job gated by `if`, not a matrix entry decided
+  # by a step, so it requests no runner when it has nothing to do (see the
+  # notice step of the changes job for why). Linux keeps the in-step decision:
+  # the job runs on every PR, so the required check reports success as before.
   test:
-    name: test (${{ matrix.os }})
+    name: test (ubuntu-latest)
     needs: changes
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    runs-on: ubuntu-latest
     steps:
       - id: decide
         env:
           CODE: ${{ needs.changes.outputs.code }}
-          PLATFORM: ${{ needs.changes.outputs.platform }}
-          OS: ${{ matrix.os }}
         run: |
-          if [ "$CODE" = "true" ] && { [ "$OS" = "ubuntu-latest" ] || [ "$PLATFORM" = "true" ]; }; then
+          if [ "$CODE" = "true" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::tests skipped on $OS: no code change that needs them (fuguegate changes)"
+            echo "::notice::tests skipped on ubuntu-latest: no code change that needs them (fuguegate changes)"
           fi
       - if: steps.decide.outputs.run == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -124,12 +145,32 @@ jobs:
         if: ${{ !cancelled() && steps.decide.outputs.run == 'true' }}
         run: go run ./cmd/fuguegate slowtests -json test.json -max 30s || echo "::warning::tests above the 30s per-test budget (report only, quality-gates section 6)"
       - name: Keep the coverage profile for the coverage job
-        if: matrix.os == 'ubuntu-latest' && steps.decide.outputs.run == 'true'
+        if: steps.decide.outputs.run == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: cover-profile
           path: cover.out
           retention-days: 1
+
+  # The macOS tests as their own job: skipped by `if` before a runner is ever
+  # requested, and reporting under this literal name when skipped so the
+  # required status check of the same name still reports (a skipped check
+  # counts as success for branch protection and rulesets).
+  test-macos:
+    name: test (macos-latest)
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.platform == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - shell: bash
+        run: go tool task test -- -json | tee test.json | jq -j 'select(.Action == "output") | .Output'
+      - name: Report tests above the time budget
+        if: ${{ !cancelled() }}
+        run: go run ./cmd/fuguegate slowtests -json test.json -max 30s || echo "::warning::tests above the 30s per-test budget (report only, quality-gates section 6)"
 
   # A PR that changes test files reruns the test functions those files declare
   # ten times with the race detector and a fresh shuffle each time, so a test
@@ -137,28 +178,22 @@ jobs:
   # (quality-gates section 6). Only those functions rerun, never the whole
   # package, and each of the ten repetitions is its own go test run.
   # The package and test lists come from fuguegate changes; Linux always, macOS
-  # when the change is platform-specific, like the test job.
+  # as a separate job gated by `if`, like the test job.
   stress:
-    name: stress (${{ matrix.os }})
+    name: stress (ubuntu-latest)
     needs: changes
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    runs-on: ubuntu-latest
     steps:
       - id: decide
         env:
           PACKAGES: ${{ needs.changes.outputs.test_pkgs }}
           TESTS: ${{ needs.changes.outputs.test_run }}
-          PLATFORM: ${{ needs.changes.outputs.platform }}
-          OS: ${{ matrix.os }}
         run: |
-          if [ -n "$PACKAGES" ] && [ -n "$TESTS" ] && { [ "$OS" = "ubuntu-latest" ] || [ "$PLATFORM" = "true" ]; }; then
+          if [ -n "$PACKAGES" ] && [ -n "$TESTS" ]; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::stress skipped on $OS: no changed test functions that need it (fuguegate changes)"
+            echo "::notice::stress skipped on ubuntu-latest: no changed test functions that need it (fuguegate changes)"
           fi
       - if: steps.decide.outputs.run == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -173,6 +208,27 @@ jobs:
         # Ten separate -count=1 runs, not one -count=10: the package timeout
         # covers every count of a binary, and a PR that edits many tests of a
         # heavy package (internal/app) still has to fit it, like the nightly.
+        run: |
+          for _ in $(seq 1 10); do
+            go tool task test-pkg PKG="$PACKAGES" RUN="$TESTS" COUNT=1
+          done
+
+  # The macOS stress as its own job, gated by `if` like test-macos, so it
+  # requests no runner when no changed test function needs a rerun. It is not
+  # a required status check (owner decision, 2026-11-16).
+  stress-macos:
+    name: stress (macos-latest)
+    needs: changes
+    if: needs.changes.outputs.test_pkgs != '' && needs.changes.outputs.test_run != '' && needs.changes.outputs.platform == 'true'
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - env:
+          PACKAGES: ${{ needs.changes.outputs.test_pkgs }}
+          TESTS: ${{ needs.changes.outputs.test_run }}
         run: |
           for _ in $(seq 1 10); do
             go tool task test-pkg PKG="$PACKAGES" RUN="$TESTS" COUNT=1
