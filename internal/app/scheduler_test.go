@@ -1,12 +1,15 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -14,6 +17,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/storage"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/testutil/cheapvault"
@@ -338,14 +342,95 @@ func TestDirectChildCapOfFourStillHoldsWithScheduler(t *testing.T) {
 	}
 }
 
+const testPriorityLeadGoal = "Coordinate priority tasks"
+
 func priorityProposalArgs(prefix string) *ProposeArgs {
 	args := validTeamProposalArgs()
 	args.Brief = "Priority test " + prefix
 	args.Tasks = []teams.ProposedTask{
-		{ID: teamTestLeadTask, TeamRole: teams.RoleLead, Role: teamTestRole, Goal: "Lead", WriteScope: []string{}, Deliverable: teams.DeliverableReport},
+		{ID: teamTestLeadTask, TeamRole: teams.RoleLead, Role: teamTestRole, Goal: testPriorityLeadGoal, WriteScope: []string{}, Deliverable: teams.DeliverableReport},
 		{ID: "d1", ParentTaskID: teamTestLeadTask, TeamRole: teams.RoleMember, Role: teamTestRole, Goal: "Depth 1", WriteScope: []string{}, Deliverable: teams.DeliverableReport},
 		{ID: "team-mgr", ParentTaskID: teamTestLeadTask, TeamRole: teams.RoleTeamManager, Role: teamTestRole, Goal: "Manager", WriteScope: []string{}, Deliverable: teams.DeliverableReport},
 		{ID: "d2", ParentTaskID: "team-mgr", TeamRole: teams.RoleMember, Role: teamTestRole, Goal: "Depth 2", WriteScope: []string{}, Deliverable: teams.DeliverableReport},
 	}
 	return args
+}
+
+func TestHeavySlotHoldLimitClosesLeaseAndGrantsWaiter(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC))
+	var logBuf bytes.Buffer
+	sem, spawn := newTestHoldSemaphore(t, clk, &logBuf, 60)
+
+	rel1, done1, err := sem.Acquire(t.Context())
+	if err != nil {
+		t.Fatalf("Acquire 1: %v", err)
+	}
+	defer rel1()
+
+	waiterGranted := make(chan func(), 1)
+	spawn("test.heavy-waiter", func(ctx context.Context) error {
+		rel2, _, acqErr := sem.Acquire(ctx)
+		if acqErr == nil {
+			waiterGranted <- rel2
+		}
+		return acqErr
+	})
+
+	clk.Advance(59 * time.Second)
+	select {
+	case <-done1:
+		t.Fatal("lease closed before hold limit elapsed")
+	case <-waiterGranted:
+		t.Fatal("waiter granted before hold limit elapsed")
+	default:
+	}
+
+	clk.Advance(2 * time.Second)
+	select {
+	case <-done1:
+	case <-t.Context().Done():
+		t.Fatal("timed out waiting for lease loss on hold limit")
+	}
+	select {
+	case rel2 := <-waiterGranted:
+		rel2()
+	case <-t.Context().Done():
+		t.Fatal("timed out waiting for waiter to receive released slot")
+	}
+	if logged := logBuf.String(); !strings.Contains(logged, "error_code="+string(errcode.DeadlineExceeded)) {
+		t.Fatalf("expected deadline_exceeded in log, got %q", logged)
+	}
+}
+
+func newTestHoldSemaphore(t *testing.T, clk clock.Clock, logBuf *bytes.Buffer, maxHoldSec int) (*heavySemaphore, func(string, func(context.Context) error) *supervise.Task) {
+	t.Helper()
+	var tasks []*supervise.Task
+	var tasksMu sync.Mutex
+	spawn := func(name string, fn func(context.Context) error) *supervise.Task {
+		task := supervise.Go(t.Context(), name, fn)
+		tasksMu.Lock()
+		tasks = append(tasks, task)
+		tasksMu.Unlock()
+		return task
+	}
+	t.Cleanup(func() {
+		tasksMu.Lock()
+		all := slices.Clone(tasks)
+		tasksMu.Unlock()
+		for _, task := range all {
+			if err := task.Wait(); err != nil {
+				t.Errorf("wait task: %v", err)
+			}
+		}
+	})
+	sem := newHeavySemaphore(
+		fakeHostResources{cores: 4},
+		func(context.Context) (workspace.HostConfig, error) {
+			return workspace.HostConfig{HeavyCommands: 1, HeavySlotMaxHoldSeconds: maxHoldSec}, nil
+		},
+		clk, slog.New(slog.NewTextHandler(logBuf, nil)), spawn,
+	)
+	t.Cleanup(sem.Close)
+	return sem, spawn
 }

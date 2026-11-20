@@ -3,11 +3,17 @@ package app
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
+	"time"
 
+	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/workspace"
 )
+
+const defaultHeavySlotMaxHoldSeconds = 3600
 
 const (
 	defaultPerAccountSessions = 6
@@ -51,11 +57,7 @@ func ComputeSchedulerTiers(res HostResources, cfg *workspace.HostConfig) (Schedu
 	if heavy <= 0 {
 		heavy = max(1, resolved.CPUCores()/4)
 	}
-	return SchedulerTiers{
-		PerAccount:    perAccount,
-		MachineWide:   machineWide,
-		HeavyCommands: heavy,
-	}, nil
+	return SchedulerTiers{PerAccount: perAccount, MachineWide: machineWide, HeavyCommands: heavy}, nil
 }
 
 func machineSessionCapForRAM(totalBytes uint64) int {
@@ -90,8 +92,7 @@ func globalOrWorkspaceTeamsConfigReader(ws *WorkspaceService) func(context.Conte
 	}
 	return func(ctx context.Context, workspaceID string) (workspace.TeamsConfig, error) {
 		if workspaceID != "" {
-			eff, _, err := ws.domain.GetEffectiveConfig(ctx, workspaceID, nil)
-			if err == nil {
+			if eff, _, err := ws.domain.GetEffectiveConfig(ctx, workspaceID, nil); err == nil {
 				return eff.Teams, nil
 			}
 		}
@@ -104,30 +105,54 @@ func globalOrWorkspaceTeamsConfigReader(ws *WorkspaceService) func(context.Conte
 }
 
 type heavySemaphore struct {
-	limit  func(context.Context) (int, error)
-	mu     sync.Mutex
-	inUse  int
-	closed bool
-	wait   chan struct{}
-	done   chan struct{}
+	limit   func(context.Context) (int, error)
+	maxHold func(context.Context) (time.Duration, error)
+	clk     clock.Clock
+	logger  *slog.Logger
+	goTask  func(string, func(context.Context) error) *supervise.Task
+	mu      sync.Mutex
+	inUse   int
+	closed  bool
+	wait    chan struct{}
+	done    chan struct{}
 }
 
-func newHeavySemaphore(res HostResources, read HostConfigReader) *heavySemaphore {
+func newHeavySemaphore(res HostResources, read HostConfigReader, clk clock.Clock, logger *slog.Logger, goTask func(string, func(context.Context) error) *supervise.Task) *heavySemaphore {
 	resolved := resolveHostResources(res)
+	if clk == nil {
+		clk = clock.Real{}
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &heavySemaphore{
-		done: make(chan struct{}),
-		limit: func(ctx context.Context) (int, error) {
-			if read != nil {
-				cfg, err := read(ctx)
-				if err != nil {
-					return 0, err
-				}
-				if cfg.HeavyCommands > 0 {
-					return cfg.HeavyCommands, nil
-				}
+		clk: clk, logger: logger, goTask: goTask, done: make(chan struct{}),
+		limit: heavyLimitReader(resolved, read), maxHold: heavyHoldReader(read),
+	}
+}
+
+func heavyLimitReader(resolved HostResources, read HostConfigReader) func(context.Context) (int, error) {
+	return func(ctx context.Context) (int, error) {
+		if read != nil {
+			cfg, err := read(ctx)
+			if err != nil || cfg.HeavyCommands > 0 {
+				return cfg.HeavyCommands, err
 			}
-			return max(1, resolved.CPUCores()/4), nil
-		},
+		}
+		return max(1, resolved.CPUCores()/4), nil
+	}
+}
+
+func heavyHoldReader(read HostConfigReader) func(context.Context) (time.Duration, error) {
+	return func(ctx context.Context) (time.Duration, error) {
+		if read == nil {
+			return defaultHeavySlotMaxHoldSeconds * time.Second, nil
+		}
+		cfg, err := read(ctx)
+		if err != nil || cfg.HeavySlotMaxHoldSeconds <= 0 {
+			return 0, err
+		}
+		return time.Duration(cfg.HeavySlotMaxHoldSeconds) * time.Second, nil
 	}
 }
 
@@ -146,13 +171,17 @@ func (s *heavySemaphore) Close() {
 }
 
 // Acquire blocks until a heavy-command slot is available or ctx is cancelled,
-// returning an idempotent release callback and a host-shutdown done channel.
+// returning an idempotent release callback and a lease-loss/shutdown channel.
 func (s *heavySemaphore) Acquire(ctx context.Context) (func(), <-chan struct{}, error) {
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, fmt.Errorf("wait for heavy command slot: %w", err)
 		}
 		limit, err := s.limit(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		holdLimit, err := s.maxHold(ctx)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -165,8 +194,8 @@ func (s *heavySemaphore) Acquire(ctx context.Context) (func(), <-chan struct{}, 
 			s.inUse++
 			done := s.done
 			s.mu.Unlock()
-			var once sync.Once
-			return func() { once.Do(s.release) }, done, nil
+			rel, leaseDone := s.newLease(done, holdLimit)
+			return rel, leaseDone, nil
 		}
 		if s.wait == nil {
 			s.wait = make(chan struct{})
@@ -179,6 +208,40 @@ func (s *heavySemaphore) Acquire(ctx context.Context) (func(), <-chan struct{}, 
 		case <-ch:
 		}
 	}
+}
+
+func (s *heavySemaphore) newLease(done chan struct{}, holdLimit time.Duration) (func(), <-chan struct{}) {
+	var once sync.Once
+	if holdLimit <= 0 || s.goTask == nil {
+		return func() { once.Do(s.release) }, done
+	}
+	leaseDone := make(chan struct{})
+	released := make(chan struct{})
+	var leaseOnce, slotOnce sync.Once
+	closeLease := func() { leaseOnce.Do(func() { close(leaseDone) }) }
+	releaseSlot := func() { slotOnce.Do(s.release) }
+	timer := s.clk.NewTimer(holdLimit)
+	s.goTask("app.heavy-slot-hold-watchdog", func(watchCtx context.Context) error {
+		select {
+		case <-released:
+			timer.Stop()
+			return nil
+		case <-done:
+			timer.Stop()
+			closeLease()
+			return nil
+		case <-watchCtx.Done():
+			timer.Stop()
+			closeLease()
+			return nil
+		case <-timer.C():
+			s.logger.WarnContext(watchCtx, "heavy command slot hold limit exceeded", "error_code", string(errcode.DeadlineExceeded), "max_hold_seconds", int(holdLimit.Seconds()))
+			releaseSlot()
+			closeLease()
+			return nil
+		}
+	})
+	return func() { once.Do(func() { timer.Stop(); close(released); releaseSlot() }) }, leaseDone
 }
 
 func (s *heavySemaphore) release() {

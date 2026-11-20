@@ -29,6 +29,7 @@ type fakeTaskSessions struct {
 	starts     []taskSessionRequest
 	sends      map[string][]string
 	resumes    []fakeResume
+	interrupts []string
 	closed     []string
 	noRoom     bool
 	reserveErr error
@@ -124,6 +125,13 @@ func (f *fakeTaskSessions) ResumeTaskSession(_ context.Context, sessionID, cwd s
 	defer f.mu.Unlock()
 	f.resumes = append(f.resumes, fakeResume{SessionID: sessionID, Cwd: cwd})
 	return f.resumeErr
+}
+
+func (f *fakeTaskSessions) Interrupt(_ context.Context, sessionID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.interrupts = append(f.interrupts, sessionID)
+	return nil
 }
 
 // resumeCount reports how many wake resumes the fake recorded.

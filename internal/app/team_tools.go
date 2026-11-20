@@ -58,6 +58,14 @@ const teamProposeInputSchema = `{
         },
         "required": ["id", "team_role", "role", "goal", "write_scope", "deliverable"]
       }
+    },
+    "budget": {
+      "type": "object",
+      "properties": {
+        "max_agents": {"type": "integer", "minimum": 0, "maximum": 64},
+        "max_duration_seconds": {"type": "integer", "minimum": 0, "maximum": 604800}
+      },
+      "additionalProperties": false
     }
   },
   "required": ["title", "brief", "tasks"]

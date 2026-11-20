@@ -96,6 +96,18 @@ type TeamsConfig struct {
 	// IdleDetachSeconds detaches idle team_manager/member sessions after this
 	// many seconds (default 300; 0 disables).
 	IdleDetachSeconds int
+	// TaskDeadlineSeconds bounds a child task's wall-clock deadline (default 3600).
+	TaskDeadlineSeconds int
+	// TaskMaxTurns bounds how many vendor turns a child task may start (default 50).
+	TaskMaxTurns int
+	// SilenceTimeoutSeconds triggers a non-lethal stall escalation when a
+	// starting/running child task emits no observation or task event (default 600; 0 disables).
+	SilenceTimeoutSeconds int
+	// TeamDeadlineSeconds bounds an active team's dispatch window (default 14400).
+	TeamDeadlineSeconds int
+	// TeamMaxAgents caps total non-lead tasks (including retries) in a team without
+	// user-approved amendment (default 12).
+	TeamMaxAgents int
 }
 
 // HostConfig holds host-wide settings valid only in Tier 2 (<FugueHome>/config.toml).
@@ -110,6 +122,9 @@ type HostConfig struct {
 	MaxSessions int
 	// HeavyCommands overrides the §7 heavy-command semaphore cap (0 = max(1, cores/4)).
 	HeavyCommands int
+	// HeavySlotMaxHoldSeconds bounds how long one caller may retain a
+	// heavy-command semaphore slot before the host closes its stream (default 3600; 0 disables).
+	HeavySlotMaxHoldSeconds int
 	// PromptPacingMinSeconds and PromptPacingMaxSeconds bound the §6.1
 	// per-vendor jitter delay (seconds) for origin=fugue prompts (defaults 10..15).
 	PromptPacingMinSeconds int
@@ -154,10 +169,13 @@ func DefaultConfig(fugueHome, workspaceID string) EffectiveConfig {
 		Policy: PolicyConfig{ApprovalMode: "auto", SandboxProfile: "workspace-write", ShellAsk: []string{}, ShellAllow: []string{}, EnvTags: []EnvTagRule{}},
 		Redact: RedactConfig{AllowKeys: []string{}, AllowPaths: []string{}}, Roles: []RoleConfig{}, Profiles: map[string]ProfileConfig{},
 		Session: SessionConfig{ScratchDir: scratchDir, Teams: true}, Provenance: prov,
-		Teams: TeamsConfig{IdleDetachSeconds: 300},
+		Teams: TeamsConfig{
+			IdleDetachSeconds: 300, TaskDeadlineSeconds: 3600, TaskMaxTurns: 50,
+			SilenceTimeoutSeconds: 600, TeamDeadlineSeconds: 14400, TeamMaxAgents: 12,
+		},
 		Host: HostConfig{
 			WorkspacesDir: wsDir, OutputRetentionTotal: "64 MiB", SeenVersionsPerSession: "8 MiB", SnapshotDisk: "1 GiB",
-			PerAccountSessions: 6, PromptPacingMinSeconds: 10, PromptPacingMaxSeconds: 15,
+			PerAccountSessions: 6, HeavySlotMaxHoldSeconds: 3600, PromptPacingMinSeconds: 10, PromptPacingMaxSeconds: 15,
 		},
 	}
 }
@@ -167,9 +185,10 @@ func defaultProvenanceKeys() []string {
 		keyPolicyApprovalMode, "policy.sandbox_profile", "policy.shell_ask", "policy.shell_allow", "policy.env_tags",
 		"env.keep", "env.override_allow", "redact.allow_keys", "redact.allow_paths", "roles", "profiles",
 		"session.scratch_dir", "session.teams", "session.teams_auto_approve",
-		"teams.idle_detach_seconds",
+		"teams.idle_detach_seconds", "teams.task_deadline_seconds", "teams.task_max_turns",
+		"teams.silence_timeout_seconds", "teams.team_deadline_seconds", "teams.team_max_agents",
 		"host.workspaces_dir", "host.output_retention_total", "host.seen_versions_per_session", "host.snapshot_disk",
-		"host.per_account_sessions", "host.max_sessions", "host.heavy_commands",
+		"host.per_account_sessions", "host.max_sessions", "host.heavy_commands", "host.heavy_slot_max_hold_seconds",
 		"host.prompt_pacing_min_seconds", "host.prompt_pacing_max_seconds",
 	}
 }
@@ -277,6 +296,7 @@ func applyHostTier(dst *EffectiveConfig, host *rawHost, homeDir string) {
 	setIntScalar(&dst.Host.PerAccountSessions, dst.Provenance, "host.per_account_sessions", TierGlobal, host.PerAccountSessions)
 	setIntScalar(&dst.Host.MaxSessions, dst.Provenance, "host.max_sessions", TierGlobal, host.MaxSessions)
 	setIntScalar(&dst.Host.HeavyCommands, dst.Provenance, "host.heavy_commands", TierGlobal, host.HeavyCommands)
+	setIntScalar(&dst.Host.HeavySlotMaxHoldSeconds, dst.Provenance, "host.heavy_slot_max_hold_seconds", TierGlobal, host.HeavySlotMaxHoldSeconds)
 	setIntScalar(&dst.Host.PromptPacingMinSeconds, dst.Provenance, "host.prompt_pacing_min_seconds", TierGlobal, host.PromptPacingMinSeconds)
 	setIntScalar(&dst.Host.PromptPacingMaxSeconds, dst.Provenance, "host.prompt_pacing_max_seconds", TierGlobal, host.PromptPacingMaxSeconds)
 }
@@ -286,6 +306,11 @@ func applyTeamsTier(dst *EffectiveConfig, tier Tier, teamsCfg *rawTeams) {
 		return
 	}
 	setIntScalar(&dst.Teams.IdleDetachSeconds, dst.Provenance, "teams.idle_detach_seconds", tier, teamsCfg.IdleDetachSeconds)
+	setIntScalar(&dst.Teams.TaskDeadlineSeconds, dst.Provenance, "teams.task_deadline_seconds", tier, teamsCfg.TaskDeadlineSeconds)
+	setIntScalar(&dst.Teams.TaskMaxTurns, dst.Provenance, "teams.task_max_turns", tier, teamsCfg.TaskMaxTurns)
+	setIntScalar(&dst.Teams.SilenceTimeoutSeconds, dst.Provenance, "teams.silence_timeout_seconds", tier, teamsCfg.SilenceTimeoutSeconds)
+	setIntScalar(&dst.Teams.TeamDeadlineSeconds, dst.Provenance, "teams.team_deadline_seconds", tier, teamsCfg.TeamDeadlineSeconds)
+	setIntScalar(&dst.Teams.TeamMaxAgents, dst.Provenance, "teams.team_max_agents", tier, teamsCfg.TeamMaxAgents)
 }
 
 func applySessionTier(dst *EffectiveConfig, tier Tier, sess *rawSession, homeDir string) {

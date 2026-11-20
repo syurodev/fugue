@@ -35,6 +35,9 @@ type TeamDecisionInput struct {
 	// Mailbox rows are written in the same transaction as the TeamStarted
 	// event, keyed to its sequence (Q-122, OR-E13 delivery).
 	Mailbox []MailboxEnqueueInput
+	// ArmTimers arms durable team timers (e.g. team_deadline) in the same
+	// transaction as TeamStarted.
+	ArmTimers []TeamTimerArmInput
 }
 
 // TeamAmendInput applies one user-approved amend (§5.4): TeamAmended keeps the
@@ -56,7 +59,7 @@ func (s *Store) DecideTeam(ctx context.Context, teamID string, in *TeamDecisionI
 	}
 	return s.applyTeamMutation(ctx, teamID, &AppendTeamEventInput{
 		EventID: in.DecisionEventID, EventType: EventTeamStarted, ProtectedPayload: in.StartedPayload,
-		Mailbox: in.Mailbox,
+		Mailbox: in.Mailbox, ArmTimers: in.ArmTimers,
 	}, in.ExpectedSeq, in.RemovedTaskIDs, in.ResealedSpecs, in.AddedTasks)
 }
 
@@ -156,6 +159,11 @@ func (s *Store) appendTeamEventAndRemovals(
 			return 0, mailboxErr
 		}
 	}
+	if len(ev.ArmTimers) > 0 {
+		if timerErr := armTeamTimersTx(ctx, tx, teamID, ev.ArmTimers, now); timerErr != nil {
+			return 0, timerErr
+		}
+	}
 	for _, taskID := range removed {
 		if lastSeq, err = s.appendTaskCancellation(ctx, tx, teamID, taskID, cancelEventID(ev.EventID, taskID), lastSeq+1, now); err != nil {
 			return 0, err
@@ -208,14 +216,21 @@ func (s *Store) resealAndInsertTasks(
 // the cancellation used.
 func (s *Store) appendTaskCancellation(ctx context.Context, tx *sql.Tx, teamID, taskID, eventID string, seq, now int64) (int64, error) {
 	ev := &AppendTeamEventInput{EventID: eventID, TaskID: taskID, EventType: EventTaskEnded, Outcome: outcomeCancelled}
-	fromState, toState, err := applyTaskProjection(ctx, tx, teamID, seq, now, ev)
-	if err != nil {
-		return 0, err
-	}
-	if err := insertAppendedTeamEvent(ctx, tx, teamID, seq, ev, fromState, toState, nil, now); err != nil {
+	if err := s.appendTaskEventAndCancel(ctx, tx, teamID, taskID, ev, seq, now); err != nil {
 		return 0, err
 	}
 	return seq, nil
+}
+
+func (s *Store) appendTaskEventAndCancel(ctx context.Context, tx *sql.Tx, teamID, taskID string, ev *AppendTeamEventInput, seq, now int64) error {
+	fromState, toState, err := applyTaskProjection(ctx, tx, teamID, seq, now, ev)
+	if err != nil {
+		return err
+	}
+	if err := insertAppendedTeamEvent(ctx, tx, teamID, seq, ev, fromState, toState, nil, now); err != nil {
+		return err
+	}
+	return cancelTaskTimersTx(ctx, tx, teamID, taskID, now)
 }
 
 // cancelEventID derives the event ID of one task cancellation from the

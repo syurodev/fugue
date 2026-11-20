@@ -140,6 +140,7 @@ type HostRuntime struct {
 	teamTasks       *teamTaskService
 	teamDispatch    *teamDispatcher
 	teamWake        *teamWake
+	teamBudgets     *teamBudgets
 	tags            *environments.Registry
 	hostResources   HostResources
 	heavy           *heavySemaphore

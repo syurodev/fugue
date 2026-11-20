@@ -296,19 +296,17 @@ func assertContiguousAndAppendOnly(t *testing.T, s *Store) {
 	if _, updErr := s.db.ExecContext(ctx, `UPDATE team_task_events SET outcome = 'x' WHERE team_id = 'team-atomic' AND sequence = 1`); updErr == nil {
 		t.Fatal("expected append-only trigger to reject UPDATE on team_task_events")
 	}
-	// TeamAmended (§3.2) is admitted by the migration's CHECK ahead of F11.2,
-	// which owns its transition: SQLite cannot alter a CHECK on this
-	// append-only table, so the name must be accepted while it is empty.
-	next := events[len(events)-1].Sequence + 1
-	if _, amendErr := s.db.ExecContext(ctx, `
-		INSERT INTO team_task_events (team_id, sequence, event_id, event_type, created_at)
-		VALUES ('team-atomic', ?, 'ev-amend', 'TeamAmended', 100)`, next); amendErr != nil {
-		t.Fatalf("insert TeamAmended event: %v", amendErr)
+	// Unknown event types are rejected in Go at the append boundary rather than
+	// by a SQL CHECK constraint (migration 0016), while SQLite triggers keep
+	// enforcing contiguous sequences and append-only rows.
+	next := events[len(events)-1].Sequence
+	if _, badErr := s.AppendTeamEvent(ctx, "team-atomic", next, &AppendTeamEventInput{
+		EventID: "ev-unknown", EventType: TeamEventType("TeamHatched"),
+	}); !errors.Is(badErr, ErrTeamInvalidInput) {
+		t.Fatalf("unknown event type err = %v, want ErrTeamInvalidInput", badErr)
 	}
-	if _, badErr := s.db.ExecContext(ctx, `
-		INSERT INTO team_task_events (team_id, sequence, event_id, event_type, created_at)
-		VALUES ('team-atomic', ?, 'ev-unknown', 'TeamHatched', 100)`, next+1); badErr == nil || !strings.Contains(badErr.Error(), "CHECK") {
-		t.Fatalf("unknown event type err = %v, want a CHECK violation", badErr)
+	if _, delErr := s.db.ExecContext(ctx, `DELETE FROM team_task_events WHERE team_id = 'team-atomic' AND sequence = 1`); delErr == nil {
+		t.Fatal("expected append-only trigger to reject DELETE on team_task_events")
 	}
 }
 

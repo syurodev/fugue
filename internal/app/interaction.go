@@ -76,6 +76,9 @@ type InteractionService struct {
 	// taskQuestions consumes the answers of user question cards opened by
 	// fugue_task_ask or fugue_task_answer(forward_to=user) (F11.3d).
 	taskQuestions taskQuestionResolver
+	// teamDeadlines consumes the answers of team deadline extension/cancel
+	// cards (F11.6c).
+	teamDeadlines teamDeadlineResolver
 
 	// betweenListReads is a test seam: ListPending calls it between reading
 	// the topic sequence and reading the pending views. Always nil in

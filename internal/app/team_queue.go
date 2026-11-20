@@ -73,7 +73,7 @@ func (d *teamDispatcher) nextGlobalCandidate(ctx context.Context, held map[queue
 		if err != nil {
 			return nil, false, boundaryError("read the team", err)
 		}
-		if rec.State != vendorstore.TeamStateActive {
+		if rec.State != vendorstore.TeamStateActive || rec.WaitingReason != "" {
 			continue
 		}
 		cand := pickTeamCandidate(tasks, func(taskID string) bool {
@@ -109,12 +109,12 @@ func (d *teamDispatcher) QueueSnapshot(ctx context.Context) ([]QueuedTaskPositio
 		if rec.State != vendorstore.TeamStateActive {
 			continue
 		}
-		queued = appendTeamQueuePositions(queued, tasks)
+		queued = appendTeamQueuePositions(queued, tasks, rec.WaitingReason != "")
 	}
 	return sortAndNumberQueue(queued), nil
 }
 
-func appendTeamQueuePositions(dst []QueuedTaskPosition, tasks []vendorstore.TaskRecord) []QueuedTaskPosition {
+func appendTeamQueuePositions(dst []QueuedTaskPosition, tasks []vendorstore.TaskRecord, teamWaiting bool) []QueuedTaskPosition {
 	byID, retryChild := resolveTaskChain(tasks)
 	for i := range tasks {
 		t := &tasks[i]
@@ -123,7 +123,7 @@ func appendTeamQueuePositions(dst []QueuedTaskPosition, tasks []vendorstore.Task
 		}
 		dst = append(dst, QueuedTaskPosition{
 			TeamID: t.TeamID, TaskID: t.TaskID, HierarchyRole: t.HierarchyRole,
-			Depth: t.Depth, CreatedAt: t.CreatedAt, Blocked: !startable(t, byID, retryChild),
+			Depth: t.Depth, CreatedAt: t.CreatedAt, Blocked: teamWaiting || !startable(t, byID, retryChild),
 		})
 	}
 	return dst

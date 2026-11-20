@@ -13,12 +13,15 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/syurodev/fugue/internal/gitops"
+	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendorstore"
+	"github.com/syurodev/fugue/internal/workspace"
 )
 
 // Stable failure codes of a task that could not start (§3.1 failed(code)).
@@ -50,7 +53,10 @@ type teamDispatcherDeps struct {
 	Vault   *vault.Service
 	// Wake is the F11.3b mailbox pump; nil leaves the digest for the next
 	// trigger (the decide-path tests admit nothing, so they enqueue none).
-	Wake *teamWake
+	Wake        *teamWake
+	Clock       clock.Clock
+	TeamsConfig func(context.Context, string) (workspace.TeamsConfig, error)
+	Budgets     *teamBudgets
 	// Test hooks, nil in production, invoked between TeamSnapshot and
 	// appendTaskEvent so tests can inject real races.
 	TestBeforeStartAppend func(context.Context)
@@ -97,7 +103,7 @@ func (d *teamDispatcher) Dispatch(ctx context.Context, teamID string) error {
 		if err != nil {
 			return boundaryError("read the team", err)
 		}
-		if rec.State != vendorstore.TeamStateActive {
+		if rec.State != vendorstore.TeamStateActive || rec.WaitingReason != "" {
 			return nil
 		}
 		next := nextStartable(current, held)
@@ -267,6 +273,9 @@ func (d *teamDispatcher) appendTaskStartedAttempt(ctx context.Context, teamID, t
 	if rec.State != vendorstore.TeamStateActive {
 		return errcode.New(errcode.FailedPrecondition, "the team is not active")
 	}
+	if rec.WaitingReason != "" {
+		return errcode.New(errcode.FailedPrecondition, "team deadline reached; waiting for user decision")
+	}
 	task, found := findTask(tasks, taskID)
 	if !found || task.State != vendorstore.TaskStateStarting || task.SessionID != sessionID {
 		return errcode.New(errcode.FailedPrecondition, "task is no longer starting for its spawned session")
@@ -274,9 +283,37 @@ func (d *teamDispatcher) appendTaskStartedAttempt(ctx context.Context, teamID, t
 	if d.deps.TestBeforeStartAppend != nil {
 		d.deps.TestBeforeStartAppend(ctx)
 	}
-	return d.appendTaskEvent(ctx, teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
-		TaskID: taskID, EventType: vendorstore.EventTaskStarted,
-	})
+	armTimers := d.taskDeadlineTimers(ctx, &rec, task)
+	if err := d.appendTaskEvent(ctx, teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
+		TaskID: taskID, EventType: vendorstore.EventTaskStarted, ArmTimers: armTimers,
+	}); err != nil {
+		return err
+	}
+	if d.deps.Budgets != nil {
+		d.deps.Budgets.Notify()
+	}
+	return nil
+}
+
+func (d *teamDispatcher) taskDeadlineTimers(ctx context.Context, rec *vendorstore.TeamRecord, task *vendorstore.TaskRecord) []vendorstore.TeamTimerArmInput {
+	if task.HierarchyRole == vendorstore.RoleLead || task.HierarchyRole == vendorstore.RoleSolo {
+		return nil
+	}
+	deadlineSec := resolveTaskDeadlineSeconds(ctx, d.deps.Store, d.deps.TeamsConfig, rec, task)
+	if deadlineSec <= 0 {
+		return nil
+	}
+	return []vendorstore.TeamTimerArmInput{{
+		TeamID: rec.TeamID, TaskID: task.TaskID, Kind: vendorstore.TimerKindTaskDeadline,
+		DeadlineMs: d.now().Add(time.Duration(deadlineSec) * time.Second).UnixMilli(),
+	}}
+}
+
+func (d *teamDispatcher) now() time.Time {
+	if d.deps.Clock != nil {
+		return d.deps.Clock.Now()
+	}
+	return (clock.Real{}).Now()
 }
 
 // StartTask starts one explicitly-named queued task of an active team
@@ -308,6 +345,9 @@ func (d *teamDispatcher) startTaskAttempt(ctx context.Context, teamID, taskID st
 	}
 	if rec.State != vendorstore.TeamStateActive {
 		return errcode.New(errcode.FailedPrecondition, "the team is not active")
+	}
+	if rec.WaitingReason != "" {
+		return errcode.New(errcode.FailedPrecondition, "team deadline reached; waiting for user decision")
 	}
 	byID, retryChild := resolveTaskChain(tasks)
 	task := byID[taskID]
