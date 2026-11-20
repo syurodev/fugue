@@ -350,10 +350,18 @@ func TestSessionTokenIsRevokedOnCloseAndNeverLeaks(t *testing.T) {
 	slog.SetDefault(slog.New(redact.NewJSONHandler(logs, slog.LevelDebug)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
 
+	token := sessionTokens(t, 1)[0]
+	// Registered before the host starts, so it runs after the host's drain
+	// and close: no background goroutine writes to logs while it is read.
+	t.Cleanup(func() {
+		if strings.Contains(logs.String(), token) {
+			t.Error("the session token leaked into the host log")
+		}
+	})
+
 	v := startTokenHost(t, "", echoTool())
 	root := t.TempDir()
 	sessionID := v.readySession(t, "leak-start", "", root)
-	token := sessionTokens(t, 1)[0]
 	v.assertTokenOnlyInTheEnvironment(t, sessionID, root, token)
 
 	client, _, err := attachSession(t, v.sockPath, token)
@@ -379,7 +387,7 @@ func TestSessionTokenIsRevokedOnCloseAndNeverLeaks(t *testing.T) {
 	_, _, attachErr := attachSession(t, v.sockPath, token)
 	assertConnectCode(t, attachErr, connect.CodePermissionDenied, errcode.PermissionDenied)
 
-	for _, shown := range []string{logs.String(), wrongErr.Error(), callErr.Error(), attachErr.Error()} {
+	for _, shown := range []string{wrongErr.Error(), callErr.Error(), attachErr.Error()} {
 		if strings.Contains(shown, token) {
 			t.Fatalf("the session token leaked into a log or an error: %q", shown)
 		}
