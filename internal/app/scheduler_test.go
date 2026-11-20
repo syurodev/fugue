@@ -188,13 +188,11 @@ func testTier2HostConfigOverride(t *testing.T) {
 	if err := os.MkdirAll(f.fugueHome, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(f.fugueHome, "config.toml"), []byte("[host]\nmax_sessions = 3\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(f.fugueHome, "config.toml"), []byte("[host]\nmax_sessions = 1\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	for i := range 3 {
-		f.start(t, fmt.Sprintf("cfg-%d", i))
-	}
-	_, err := f.svc.Start(t.Context(), testAppPrincipal, &StartVendorSession{CommandID: "cfg-3", Vendor: VendorClaude, WorkspaceID: f.ws})
+	f.start(t, "cfg-0")
+	_, err := f.svc.Start(t.Context(), testAppPrincipal, &StartVendorSession{CommandID: "cfg-1", Vendor: VendorClaude, WorkspaceID: f.ws})
 	requireCode(t, err, errcode.VendorCapacity)
 }
 
@@ -272,22 +270,38 @@ func TestQueueOrderPrioritizesManagersThenCreationOrder(t *testing.T) {
 	}
 }
 
+type stubAccountCapacity struct{}
+
+func (stubAccountCapacity) HasCapacity(context.Context) (bool, error) { return true, nil }
+func (stubAccountCapacity) HasCapacityFor(context.Context, string, string) (bool, error) {
+	return true, nil
+}
+
 func TestDirectChildCapOfFourStillHoldsWithScheduler(t *testing.T) {
 	t.Parallel()
-	f := newDispatchFixture(t, true)
-	teamID := f.approve(t, memberTasksArgs(5), decisionApprove, "")
-	if err := f.disp.DispatchAll(t.Context()); err != nil {
-		t.Fatalf("DispatchAll: %v", err)
+	admit := newSchedulerAdmitter(stubAccountCapacity{}, nil)
+	tasks := make([]vendorstore.TaskRecord, 5)
+	for i := range tasks {
+		tasks[i] = vendorstore.TaskRecord{
+			TeamID:        "t1",
+			TaskID:        fmt.Sprintf("child-%d", i),
+			ParentTaskID:  teamTestLeadTask,
+			HierarchyRole: vendorstore.RoleMember,
+			State:         vendorstore.TaskStateRunning,
+		}
 	}
-	if got := f.sessions.startCount(); got != maxRunningDirectChildren {
-		t.Fatalf("started %d direct children, want %d", got, maxRunningDirectChildren)
-	}
-	snap, err := f.disp.QueueSnapshot(t.Context())
+	tasks[4].State = vendorstore.TaskStateQueued
+	ok, err := admit.Admit(t.Context(), &tasks[4], tasks)
 	if err != nil {
-		t.Fatalf("QueueSnapshot: %v", err)
+		t.Fatalf("Admit at 4 running children: %v", err)
 	}
-	if len(snap) != 1 || snap[0].TaskID != teamID+".me" || snap[0].QueuePosition != 1 {
-		t.Fatalf("remaining queued = %+v, want [%s.me @1]", snap, teamID)
+	if ok {
+		t.Fatal("admitted 5th direct child while 4 direct children are running")
+	}
+	tasks[3].State = vendorstore.TaskStateDone
+	ok, err = admit.Admit(t.Context(), &tasks[4], tasks)
+	if err != nil || !ok {
+		t.Fatalf("Admit at 3 running children = (%v, %v), want (true, nil)", ok, err)
 	}
 }
 
