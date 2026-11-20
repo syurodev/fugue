@@ -126,7 +126,6 @@ func (s *teamTaskService) forwardQuestionToUser(ctx context.Context, c *callerTe
 	if err != nil {
 		return "", err
 	}
-	// TODO(F11.6): rebuild user question cards for asking tasks on host start.
 	if err := s.ensureUserQuestionCard(c.team.TeamID, c.team.WorkspaceID, target, askedSeq, q); err != nil {
 		return "", err
 	}
@@ -149,21 +148,30 @@ func (s *teamTaskService) readTaskQuestion(ctx context.Context, teamID, taskID s
 }
 
 func (s *teamTaskService) ensureUserQuestionCard(teamID, workspaceID string, target *vendorstore.TaskRecord, askedSeq int64, question string) error {
+	spec, err := s.userQuestionCardSpec(teamID, workspaceID, target, askedSeq, question)
+	if err != nil {
+		return err
+	}
+	_, err = s.interactions.Ensure(spec)
+	return err
+}
+
+func (s *teamTaskService) userQuestionCardSpec(teamID, workspaceID string, target *vendorstore.TaskRecord, askedSeq int64, question string) (*interaction.Spec, error) {
 	if s.interactions == nil {
-		return errcode.New(errcode.FailedPrecondition, "interaction service is not configured")
+		return nil, errcode.New(errcode.FailedPrecondition, "interaction service is not configured")
 	}
 	if askedSeq <= 0 {
-		return errcode.New(errcode.InvalidArgument, "question sequence must be positive")
+		return nil, errcode.New(errcode.InvalidArgument, "question sequence must be positive")
 	}
 	opID, err := interaction.NativeOperationKey(teamID, target.TaskID, uint64(askedSeq))
 	if err != nil {
-		return errcode.Wrap(errcode.Internal, "key user question card", err)
+		return nil, errcode.Wrap(errcode.Internal, "key user question card", err)
 	}
 	sessID := target.SessionID
 	if sessID == "" {
 		sessID = target.TaskID
 	}
-	spec := &interaction.Spec{
+	return &interaction.Spec{
 		OperationID: opID,
 		Kind:        interaction.KindQuestion,
 		Summary:     truncateCardText("Task "+target.TaskID+" needs your input", interaction.MaxSummaryBytes),
@@ -181,11 +189,7 @@ func (s *teamTaskService) ensureUserQuestionCard(teamID, workspaceID string, tar
 			CheckGeneration: uint64(askedSeq),
 			ToolName:        taskAskToolName,
 		},
-	}
-	if _, err := s.interactions.Ensure(spec); err != nil {
-		return err
-	}
-	return nil
+	}, nil
 }
 
 func (s *teamTaskService) validateTaskQuestionAnswer(ctx context.Context, ticket *interaction.Ticket, decision *interaction.Decision) error {
@@ -202,10 +206,21 @@ func (s *teamTaskService) validateTaskQuestionAnswer(ctx context.Context, ticket
 		return errcode.New(errcode.FailedPrecondition, "the team is no longer active")
 	}
 	task, ok := findTask(tasks, ticket.Binding.AttemptID)
-	if !ok || task.State != vendorstore.TaskStateAsking {
+	if !ok || !s.taskAcceptsQuestionAnswer(ctx, rec.TeamID, task) {
 		return errcode.New(errcode.FailedPrecondition, "the asking task is no longer waiting for an answer")
 	}
 	return nil
+}
+
+func (s *teamTaskService) taskAcceptsQuestionAnswer(ctx context.Context, teamID string, task *vendorstore.TaskRecord) bool {
+	if task.State == vendorstore.TaskStateAsking {
+		return true
+	}
+	if task.State != vendorstore.TaskStateUnknown {
+		return false
+	}
+	fromAsking, _, err := s.unknownTaskMarkedFromAsking(ctx, teamID, task.TaskID)
+	return err == nil && fromAsking
 }
 
 func (s *teamTaskService) applyTaskQuestionAnswer(ctx context.Context, ticket *interaction.Ticket, decision *interaction.Decision) error {
@@ -243,90 +258,125 @@ func taskQuestionAnswerText(decision *interaction.Decision) (string, error) {
 
 func (s *teamTaskService) resolveQuestionChain(ctx context.Context, teamID, topTaskID, answerText, answeredBy string) error {
 	for attempt := range maxAppendRetries {
-		evs, expectedSeq, err := s.buildQuestionResolutionEvents(ctx, teamID, topTaskID, answerText, answeredBy)
+		evs, spawnedSessions, expectedSeq, err := s.buildQuestionResolutionEvents(ctx, teamID, topTaskID, answerText, answeredBy)
 		if err != nil {
 			return err
 		}
-		if _, appendErr := s.store.AppendTeamEvents(ctx, teamID, expectedSeq, evs); appendErr == nil {
+		_, appendErr := s.store.AppendTeamEvents(ctx, teamID, expectedSeq, evs)
+		if appendErr == nil {
+			s.trackAnsweredWatches(ctx, teamID, evs)
 			s.invalidateResolvedCards(ctx, teamID, evs, answeredBy)
 			if s.wake != nil {
 				s.wake.Notify()
 			}
 			return nil
-		} else if !errors.Is(appendErr, vendorstore.ErrSequenceConflict) || attempt+1 == maxAppendRetries {
+		}
+		s.closeCancelledSessions(ctx, spawnedSessions)
+		if !errors.Is(appendErr, vendorstore.ErrSequenceConflict) || attempt+1 == maxAppendRetries {
 			return boundaryError("record task answer", appendErr)
 		}
 	}
 	return errcode.New(errcode.FailedPrecondition, "team event sequence conflict")
 }
 
-func (s *teamTaskService) buildQuestionResolutionEvents(ctx context.Context, teamID, topTaskID, answerText, answeredBy string) ([]*vendorstore.AppendTeamEventInput, int64, error) {
+func (s *teamTaskService) buildQuestionResolutionEvents(ctx context.Context, teamID, topTaskID, answerText, answeredBy string) ([]*vendorstore.AppendTeamEventInput, []string, int64, error) {
 	rec, tasks, err := s.store.TeamSnapshot(ctx, teamID)
 	if err != nil {
-		return nil, 0, boundaryError("read the team", err)
+		return nil, nil, 0, boundaryError("read the team", err)
 	}
 	if rec.State != vendorstore.TeamStateActive {
-		return nil, 0, errcode.New(errcode.FailedPrecondition, "the team is not active")
+		return nil, nil, 0, errcode.New(errcode.FailedPrecondition, "the team is not active")
 	}
 	top, ok := findTask(tasks, topTaskID)
-	if !ok || top.State != vendorstore.TaskStateAsking {
-		return nil, 0, errcode.New(errcode.FailedPrecondition, "task is not waiting for an answer")
+	if !ok || !s.taskAcceptsQuestionAnswer(ctx, teamID, top) {
+		return nil, nil, 0, errcode.New(errcode.FailedPrecondition, "task is not waiting for an answer")
 	}
 	payload, err := json.Marshal(struct {
 		Answer     string `json:"answer"`
 		AnsweredBy string `json:"answered_by"`
 	}{Answer: answerText, AnsweredBy: answeredBy})
 	if err != nil {
-		return nil, 0, errcode.Wrap(errcode.Internal, "encode answer payload", err)
+		return nil, nil, 0, errcode.Wrap(errcode.Internal, "encode answer payload", err)
 	}
 	mailPayload, err := json.Marshal(mailboxDigestItem{TaskID: answeredBy, State: "answer", Summary: answerText})
 	if err != nil {
-		return nil, 0, errcode.Wrap(errcode.Internal, "encode answer mailbox payload", err)
+		return nil, nil, 0, errcode.Wrap(errcode.Internal, "encode answer mailbox payload", err)
 	}
-	evs, err := s.collectChainAnswerEvents(ctx, teamID, topTaskID, tasks, payload, mailPayload)
+	evs, spawnedSessions, err := s.collectChainAnswerEvents(ctx, &rec, topTaskID, tasks, payload, mailPayload)
 	if err != nil {
-		return nil, 0, err
+		s.closeCancelledSessions(ctx, spawnedSessions)
+		return nil, nil, 0, err
 	}
-	return evs, rec.LastSeq, nil
+	return evs, spawnedSessions, rec.LastSeq, nil
 }
 
 func (s *teamTaskService) collectChainAnswerEvents(
 	ctx context.Context,
-	teamID, topTaskID string,
+	rec *vendorstore.TeamRecord,
+	topTaskID string,
 	tasks []vendorstore.TaskRecord,
 	payload, mailPayload []byte,
-) ([]*vendorstore.AppendTeamEventInput, error) {
+) ([]*vendorstore.AppendTeamEventInput, []string, error) {
 	seen := make(map[string]bool, 4)
 	var evs []*vendorstore.AppendTeamEventInput
+	var spawnedSessions []string
 	curID := topTaskID
 	for curID != "" && !seen[curID] {
 		seen[curID] = true
 		cur, ok := findTask(tasks, curID)
-		if !ok || cur.State != vendorstore.TaskStateAsking {
+		if !ok || !s.taskAcceptsQuestionAnswer(ctx, rec.TeamID, cur) {
 			break
 		}
-		evID, idErr := s.ids.NewID()
-		if idErr != nil {
-			return nil, errcode.Wrap(errcode.Internal, "generate answer event ID", idErr)
+		ev, spawnedSID, err := s.nextChainAnswerEvent(ctx, rec, cur, tasks, payload, mailPayload)
+		if err != nil {
+			return nil, spawnedSessions, err
 		}
-		evs = append(evs, &vendorstore.AppendTeamEventInput{
-			EventID:          evID,
-			TaskID:           curID,
-			EventType:        vendorstore.EventTaskQuestionAnswered,
-			ProtectedPayload: payload,
-			Mailbox: []vendorstore.MailboxEnqueueInput{{
-				RecipientTaskID: curID,
-				Kind:            vendorstore.MailboxKindAnswer,
-				Payload:         mailPayload,
-			}},
-		})
-		nextID, fwdErr := s.forwardedFromTaskID(ctx, teamID, curID)
+		if spawnedSID != "" {
+			spawnedSessions = append(spawnedSessions, spawnedSID)
+		}
+		evs = append(evs, ev)
+		nextID, fwdErr := s.forwardedFromTaskID(ctx, rec.TeamID, curID)
 		if fwdErr != nil {
-			return nil, fwdErr
+			return nil, spawnedSessions, fwdErr
 		}
 		curID = nextID
 	}
-	return evs, nil
+	return evs, spawnedSessions, nil
+}
+
+func (s *teamTaskService) nextChainAnswerEvent(
+	ctx context.Context,
+	rec *vendorstore.TeamRecord,
+	cur *vendorstore.TaskRecord,
+	tasks []vendorstore.TaskRecord,
+	payload, mailPayload []byte,
+) (*vendorstore.AppendTeamEventInput, string, error) {
+	evID, idErr := s.ids.NewID()
+	if idErr != nil {
+		return nil, "", errcode.Wrap(errcode.Internal, "generate answer event ID", idErr)
+	}
+	var newSessionID string
+	if cur.State == vendorstore.TaskStateUnknown {
+		sid, spawned, prepErr := s.ensureAnswerTaskSession(ctx, rec, cur, tasks)
+		if prepErr != nil {
+			return nil, "", prepErr
+		}
+		if spawned {
+			newSessionID = sid
+		}
+	}
+	return &vendorstore.AppendTeamEventInput{
+		EventID:          evID,
+		TaskID:           cur.TaskID,
+		EventType:        vendorstore.EventTaskQuestionAnswered,
+		SessionID:        newSessionID,
+		ProtectedPayload: payload,
+		Mailbox: []vendorstore.MailboxEnqueueInput{{
+			RecipientTaskID: cur.TaskID,
+			Kind:            vendorstore.MailboxKindAnswer,
+			Payload:         mailPayload,
+		}},
+	}, newSessionID, nil
 }
 
 func (s *teamTaskService) forwardedFromTaskID(ctx context.Context, teamID, taskID string) (string, error) {

@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"log/slog"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -68,15 +70,26 @@ func (s *TeamProposalService) recordProposalItem(ctx context.Context, sessionID 
 func (s *TeamProposalService) ensureCard(ctx context.Context, snap *vendorstore.Session, teamID string,
 	input *teams.ProposalInput, warnings []teams.Warning, eff *workspace.EffectiveConfig,
 ) error {
-	lines, err := s.proposalCardLines(ctx, input, warnings, eff)
+	spec, err := s.proposalCardSpec(ctx, snap, teamID, input, warnings, eff)
 	if err != nil {
 		return err
 	}
+	_, err = s.interactions.Ensure(spec)
+	return err
+}
+
+func (s *TeamProposalService) proposalCardSpec(ctx context.Context, snap *vendorstore.Session, teamID string,
+	input *teams.ProposalInput, warnings []teams.Warning, eff *workspace.EffectiveConfig,
+) (*interaction.Spec, error) {
+	lines, err := s.proposalCardLines(ctx, input, warnings, eff)
+	if err != nil {
+		return nil, err
+	}
 	operation, err := interaction.NativeOperationKey(teamID, teamID, 1)
 	if err != nil {
-		return errcode.Wrap(errcode.Internal, "key the proposal card", err)
+		return nil, errcode.Wrap(errcode.Internal, "key the proposal card", err)
 	}
-	spec := &interaction.Spec{
+	return &interaction.Spec{
 		OperationID: operation, Kind: interaction.KindQuestion,
 		Summary: truncateCardText(input.Title, interaction.MaxSummaryBytes),
 		Body:    truncateCardText(strings.Join(lines, "\n"), interaction.MaxPromptBytes),
@@ -89,9 +102,19 @@ func (s *TeamProposalService) ensureCard(ctx context.Context, snap *vendorstore.
 			InvocationID: teamID, AttemptID: teamID, CheckGeneration: 1,
 			ToolName: teamProposeToolName,
 		},
-	}
-	if _, err := s.interactions.Ensure(spec); err != nil {
+	}, nil
+}
+
+func ensureRebuildableCard(inter *InteractionService, spec *interaction.Spec) error {
+	ticket, err := inter.Ensure(spec)
+	if err != nil {
 		return err
+	}
+	if ticket.Resolved && ticket.Outcome == interaction.OutcomeCancelled && inter.owner != nil {
+		if _, invErr := inter.owner.InvalidateOperation(spec.OperationID); invErr == nil {
+			_, err = inter.Ensure(spec)
+			return err
+		}
 	}
 	return nil
 }
@@ -270,4 +293,61 @@ func formatTeamBudgetLine(b *teams.TeamBudget) string {
 		parts = append(parts, "max_duration_seconds="+strconv.FormatInt(b.MaxDurationSeconds, 10))
 	}
 	return "budget: " + strings.Join(parts, ", ")
+}
+
+// RebuildPendingProposalCards ensures one inbox card for every proposed team
+// whose proposing session is not closed (Q-143 A). Calling it on repeated
+// vault unlocks is idempotent via InteractionService.Ensure.
+func (s *TeamProposalService) RebuildPendingProposalCards(ctx context.Context) error {
+	if s.interactions == nil {
+		return nil
+	}
+	teamIDs, err := s.store.TeamIDsByState(ctx, vendorstore.TeamStateProposed)
+	if err != nil {
+		return boundaryError("list proposed teams", err)
+	}
+	for _, teamID := range teamIDs {
+		if err := s.rebuildProposalCard(ctx, teamID); err != nil {
+			slog.WarnContext(ctx, "rebuilding pending proposal card failed", "team_id", teamID, "error_code", string(errcode.CodeOf(err)))
+		}
+	}
+	return nil
+}
+
+func (s *TeamProposalService) rebuildProposalCard(ctx context.Context, teamID string) error {
+	rec, _, err := s.store.TeamSnapshot(ctx, teamID)
+	if err != nil {
+		return boundaryError("read proposed team", err)
+	}
+	if rec.State != vendorstore.TeamStateProposed {
+		return nil
+	}
+	snap, err := s.store.Snapshot(ctx, rec.SessionID)
+	if errors.Is(err, vendorstore.ErrSessionNotFound) || (err == nil && snap.State == vendorstore.StateClosed) {
+		return nil
+	}
+	if err != nil {
+		return boundaryError("read proposing session", err)
+	}
+	raw, err := s.store.OpenTeamEventPayload(ctx, teamID, teamProposedSequence)
+	if err != nil {
+		return boundaryError("open proposal payload", err)
+	}
+	var input teams.ProposalInput
+	if decErr := json.Unmarshal(raw, &input); decErr != nil {
+		return errcode.Wrap(errcode.FailedPrecondition, "decode proposal payload", decErr)
+	}
+	eff, _, err := s.workspaces.GetEffectiveConfig(ctx, rec.WorkspaceID, nil)
+	if err != nil {
+		return boundaryError("read workspace config", err)
+	}
+	warnings, valErr := teams.ValidateProposal(&input, catalogRoles(&eff))
+	if valErr != nil {
+		return errcode.Wrap(errcode.FailedPrecondition, "validate proposal for card rebuild", valErr)
+	}
+	spec, err := s.proposalCardSpec(ctx, &snap, teamID, &input, warnings, &eff)
+	if err != nil {
+		return err
+	}
+	return ensureRebuildableCard(s.interactions, spec)
 }

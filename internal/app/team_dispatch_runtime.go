@@ -26,12 +26,31 @@ func (hp *HostProcess) onVaultLockState(base context.Context, owner *interaction
 	if hp.rt.teamBudgets != nil {
 		hp.rt.teamBudgets.Notify()
 	}
+	if hp.rt.teamProposals != nil || hp.rt.teamTasks != nil {
+		hp.recoverOnUnlockAsync(base)
+	}
 	if hp.rt.teamDispatch != nil {
 		hp.dispatchAllAsync(base)
 	}
 	if hp.rt.teamWake != nil {
 		hp.rt.teamWake.Notify()
 	}
+}
+
+func (hp *HostProcess) recoverOnUnlockAsync(base context.Context) {
+	supervise.Go(base, "team-unlock-recovery", func(ctx context.Context) error {
+		if hp.rt.teamProposals != nil {
+			if err := hp.rt.teamProposals.RebuildPendingProposalCards(ctx); err != nil && ctx.Err() == nil {
+				slog.WarnContext(ctx, "rebuilding pending proposal cards failed", "error_code", string(errcode.CodeOf(err)))
+			}
+		}
+		if hp.rt.teamTasks != nil {
+			if err := hp.rt.teamTasks.RecoverOnUnlock(ctx); err != nil && ctx.Err() == nil {
+				slog.WarnContext(ctx, "recovering unknown team tasks on unlock failed", "error_code", string(errcode.CodeOf(err)))
+			}
+		}
+		return nil
+	})
 }
 
 // locateTeamGit builds the git manager of the team worktrees. A machine
@@ -115,21 +134,7 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 		Wake: hp.rt.teamWake, Clock: deps.Clock, TeamsConfig: teamsCfg, Budgets: hp.rt.teamBudgets,
 	})
 	if hp.rt.teamTasks != nil {
-		hp.rt.teamTasks.SetRuntime(hp.rt.teamDispatch, hp.rt.teamWake)
-		hp.rt.teamTasks.SetTeamsConfig(teamsCfg)
-		hp.rt.teamTasks.SetBudgets(hp.rt.teamBudgets)
-		sessions.SetTurnCompletedHook(func(sessionID string) {
-			hp.rt.goTask("team.no-report-check", func(checkCtx context.Context) error {
-				hp.rt.teamTasks.OnTurnCompleted(checkCtx, sessionID)
-				return nil
-			})
-		})
-		sessions.SetTurnFailedHook(func(sessionID, failureCode string) {
-			hp.rt.goTask("team.turn-failure-check", func(checkCtx context.Context) error {
-				hp.rt.teamTasks.OnTurnFailed(checkCtx, sessionID, failureCode)
-				return nil
-			})
-		})
+		hp.wireTeamTaskHooks(sessions, deps)
 	}
 	hp.rt.teamProposals.SetClock(deps.Clock)
 	hp.rt.teamProposals.SetOnTimerArmed(func() { hp.rt.teamBudgets.Notify() })
@@ -138,4 +143,27 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 		hp.dispatchTeamAsync(base, teamID)
 	})
 	hp.rt.teamProposals.SetOnMailbox(func() { hp.rt.teamWake.Notify() })
+}
+
+func (hp *HostProcess) wireTeamTaskHooks(sessions *VendorSessions, deps *HostDeps) {
+	hp.rt.teamTasks.SetRuntime(hp.rt.teamDispatch, hp.rt.teamWake)
+	hp.rt.teamTasks.SetSessions(vendorTaskSessions{svc: hp.rt.vendors})
+	hp.rt.teamTasks.SetTeamsConfig(globalOrWorkspaceTeamsConfigReader(hp.rt.workspaces))
+	hp.rt.teamTasks.SetBudgets(hp.rt.teamBudgets)
+	hp.rt.teamTasks.SetClock(deps.Clock)
+	hp.rt.vendors.SetOnSessionResumed(func(resCtx context.Context, sessionID string) error {
+		return hp.rt.teamTasks.OnSessionResumed(resCtx, sessionID)
+	})
+	sessions.SetTurnCompletedHook(func(sessionID string) {
+		hp.rt.goTask("team.no-report-check", func(checkCtx context.Context) error {
+			hp.rt.teamTasks.OnTurnCompleted(checkCtx, sessionID)
+			return nil
+		})
+	})
+	sessions.SetTurnFailedHook(func(sessionID, failureCode string) {
+		hp.rt.goTask("team.turn-failure-check", func(checkCtx context.Context) error {
+			hp.rt.teamTasks.OnTurnFailed(checkCtx, sessionID, failureCode)
+			return nil
+		})
+	})
 }

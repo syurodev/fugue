@@ -115,8 +115,13 @@ func (t *Transcripts) locked(snap vault.Snapshot) {
 		return
 	}
 	t.mu.Lock()
-	pending := t.sessions
-	t.sessions = map[string]*sessionTopics{}
+	pending := make([]*sessionTopics, 0, len(t.sessions))
+	for session, st := range t.sessions {
+		pending = append(pending, st)
+		// Preserve the session registration with empty views and nil coalescer so
+		// post-unlock resumes do not try to re-register still-live EventHub topics.
+		t.sessions[session] = &sessionTopics{views: map[string]transcript.View{}, revisions: map[string]uint64{}}
+	}
 	t.mu.Unlock()
 	if len(pending) == 0 {
 		return

@@ -292,7 +292,7 @@ func (w *teamWake) markHeld(ctx context.Context, entry *HeldMailboxEntry) {
 	if !changed {
 		return
 	}
-	slog.WarnContext(ctx, "holding team mailbox for unmeasured vendor", "team_id", entry.TeamID, "task_id", entry.TaskID, "session_id", entry.SessionID, "vendor", entry.Vendor, "reason", entry.Reason)
+	slog.WarnContext(ctx, "holding team mailbox", "team_id", entry.TeamID, "task_id", entry.TaskID, "session_id", entry.SessionID, "vendor", entry.Vendor, "reason", entry.Reason)
 	w.publishHeld(ctx)
 }
 

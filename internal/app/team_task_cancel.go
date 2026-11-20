@@ -110,6 +110,12 @@ func (s *teamTaskService) cancelDescendant(ctx context.Context, teamID, taskID s
 			return nil, errcode.Wrap(errcode.Internal, "generate cancel event ID", idErr)
 		}
 		sid = cur.SessionID
+		if cur.State == vendorstore.TaskStateUnknown {
+			return &vendorstore.AppendTeamEventInput{
+				EventID: evID, TaskID: taskID, EventType: vendorstore.EventTaskRecoveryDecided,
+				Outcome: "cancel", ProtectedPayload: payload,
+			}, nil
+		}
 		return &vendorstore.AppendTeamEventInput{
 			EventID: evID, TaskID: taskID, EventType: vendorstore.EventTaskEnded,
 			Outcome: string(vendorstore.TaskStateCancelled), FailureCode: cancelFailureCode,

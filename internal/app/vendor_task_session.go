@@ -77,6 +77,12 @@ func (v vendorTaskSessions) Close(ctx context.Context, sessionID string, reason 
 	return v.svc.sessions.Close(ctx, sessionID, reason)
 }
 
+// SetOnSessionResumed registers a hook invoked after a detached session
+// resumes successfully (used to recover an unknown lead task).
+func (s *VendorService) SetOnSessionResumed(fn func(context.Context, string) error) {
+	s.onSessionResumed = fn
+}
+
 // resumeTaskSession attaches a fresh process to a detached session through
 // its stored handle (Q-123). Task sessions restore the decided role profile
 // and task override from the sealed spec (OR-E13); non-task sessions (such as
@@ -96,7 +102,13 @@ func (s *VendorService) resumeTaskSession(ctx context.Context, sessionID, cwd st
 	spec := &vendor.StartSpec{
 		SessionID: sessionID, Cwd: cwd, HostEnv: s.hostEnv, Model: model, Effort: effort, Bridge: s.bridge,
 	}
-	return s.spawn(spec, info.Role, func() error { return s.sessions.Resume(ctx, sessionID, spec) })
+	if err := s.spawn(spec, info.Role, func() error { return s.sessions.Resume(ctx, sessionID, spec) }); err != nil {
+		return err
+	}
+	if s.onSessionResumed != nil {
+		return s.onSessionResumed(ctx, sessionID)
+	}
+	return nil
 }
 
 func (s *VendorService) resumeProfile(ctx context.Context, info *vendorstore.Session) (model, effort string, err error) {

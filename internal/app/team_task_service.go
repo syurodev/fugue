@@ -6,8 +6,11 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/syurodev/fugue/internal/gitops"
+	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/teams"
@@ -63,6 +66,8 @@ type teamTaskService struct {
 	interactions *InteractionService
 	teamsCfg     func(context.Context, string) (workspace.TeamsConfig, error)
 	budgets      *teamBudgets
+	clk          clock.Clock
+	unlockMu     sync.Mutex
 }
 
 func newTeamTaskService(store *vendorstore.Store, sessions taskSessions, roots rootResolver,
@@ -82,6 +87,10 @@ func (s *teamTaskService) SetRuntime(dispatch *teamDispatcher, wake *teamWake) {
 	s.wake = wake
 }
 
+func (s *teamTaskService) SetSessions(sess taskSessions) {
+	s.sessions = sess
+}
+
 func (s *teamTaskService) SetInteractions(inter *InteractionService) {
 	s.interactions = inter
 }
@@ -92,6 +101,17 @@ func (s *teamTaskService) SetTeamsConfig(fn func(context.Context, string) (works
 
 func (s *teamTaskService) SetBudgets(b *teamBudgets) {
 	s.budgets = b
+}
+
+func (s *teamTaskService) SetClock(clk clock.Clock) {
+	s.clk = clk
+}
+
+func (s *teamTaskService) now() time.Time {
+	if s.clk != nil {
+		return s.clk.Now()
+	}
+	return (clock.Real{}).Now()
 }
 
 type callerTeamContext struct {

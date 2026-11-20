@@ -430,13 +430,24 @@ func applyTaskProjection(
 	if err := updateTaskAndTeamSeq(ctx, tx, teamID, ev.TaskID, nextState, nextSeq, ev.FailureCode, now); err != nil {
 		return "", "", err
 	}
-	if ev.EventType == EventTaskAssigned && ev.SessionID != "" {
-		if _, err := tx.ExecContext(ctx, `UPDATE team_tasks SET session_id = ? WHERE team_id = ? AND task_id = ?`,
-			ev.SessionID, teamID, ev.TaskID); err != nil {
-			return "", "", fmt.Errorf("record the task session: %w", err)
-		}
+	if err := updateTaskSessionOnEvent(ctx, tx, teamID, ev); err != nil {
+		return "", "", err
 	}
 	return curStateStr, string(nextState), nil
+}
+
+func updateTaskSessionOnEvent(ctx context.Context, tx *sql.Tx, teamID string, ev *AppendTeamEventInput) error {
+	if ev.SessionID == "" {
+		return nil
+	}
+	if ev.EventType != EventTaskAssigned && ev.EventType != EventTaskRecoveryDecided && ev.EventType != EventTaskQuestionAnswered {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE team_tasks SET session_id = ? WHERE team_id = ? AND task_id = ?`,
+		ev.SessionID, teamID, ev.TaskID); err != nil {
+		return fmt.Errorf("record the task session: %w", err)
+	}
+	return nil
 }
 
 func ensureManagerChildrenTerminal(ctx context.Context, tx *sql.Tx, teamID, parentTaskID string) error {

@@ -127,10 +127,6 @@ func (a *vendorSessionActor) autoDetachEligible(ctx context.Context) bool {
 	if a.info.Role != string(vendorstore.RoleTeamManager) && a.info.Role != string(vendorstore.RoleMember) {
 		return false
 	}
-	// TODO(F11.6): F11.6d will allow agy auto-detach after measuring agy idle-send and session/load.
-	if a.info.Vendor == VendorAGY {
-		return false
-	}
 	if a.info.ResumeHandle == "" {
 		return false
 	}

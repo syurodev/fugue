@@ -612,7 +612,7 @@ func startDetachSessions(t *testing.T, h *pdDetachHarness) {
 
 func verifyIdleResetAndDetachThreshold(ctx context.Context, t *testing.T, h *pdDetachHarness) {
 	t.Helper()
-	if err := h.f.clock.BlockUntilPending(ctx, 3); err != nil {
+	if err := h.f.clock.BlockUntilPending(ctx, 4); err != nil {
 		t.Fatalf("wait initial idle timers: %v", err)
 	}
 	h.f.clock.Advance(200 * time.Second)
@@ -622,7 +622,7 @@ func verifyIdleResetAndDetachThreshold(ctx context.Context, t *testing.T, h *pdD
 	}
 	completePDTurn(h.ad.session(pdSessDetach), "pd-turn-m-detach-1")
 	awaitPDReady(ctx, t, h.f.store, pdSessDetach, 5)
-	if blockErr := h.f.clock.BlockUntilPending(ctx, 3); blockErr != nil {
+	if blockErr := h.f.clock.BlockUntilPending(ctx, 4); blockErr != nil {
 		t.Fatalf("wait re-armed idle timers: %v", blockErr)
 	}
 	h.f.clock.Advance(299 * time.Second)
@@ -633,6 +633,10 @@ func verifyIdleResetAndDetachThreshold(ctx context.Context, t *testing.T, h *pdD
 	testutil.Spin(t, "m-detach auto-detached", func() bool {
 		snap, snapErr := h.f.store.Snapshot(ctx, pdSessDetach)
 		return snapErr == nil && snap.State == vendorstore.StateDetached && snap.ResumeHandle == pdResumeHandle
+	})
+	testutil.Spin(t, "agy-1 auto-detached", func() bool {
+		snap, snapErr := h.f.store.Snapshot(ctx, "agy-1")
+		return snapErr == nil && snap.State == vendorstore.StateDetached
 	})
 	assertDetachExitedAndSlotFreed(ctx, t, h.f.store, h.m)
 }
@@ -653,8 +657,8 @@ func assertDetachExitedAndSlotFreed(ctx context.Context, t *testing.T, store *ve
 		t.Fatal("missing VendorProcessExited with StopProofProved on detach")
 	}
 	totalAfter, _, err := m.slotUsage(ctx)
-	if err != nil || totalAfter != 6 {
-		t.Fatalf("slotUsage after detach = %d (err=%v), want 6", totalAfter, err)
+	if err != nil || totalAfter != 5 {
+		t.Fatalf("slotUsage after detach = %d (err=%v), want 5", totalAfter, err)
 	}
 }
 
@@ -664,7 +668,7 @@ func verifyNonDetachableSessionsKept(ctx context.Context, t *testing.T, h *pdDet
 	for _, kept := range []struct{ id, want string }{
 		{"lead-1", vendorstore.StateReady},
 		{"solo-1", vendorstore.StateReady},
-		{"agy-1", vendorstore.StateReady},
+		{"agy-1", vendorstore.StateDetached},
 		{"m-approval", vendorstore.StateReady},
 		{pdSessAsking, vendorstore.StateReady},
 		{"m-busy", vendorstore.StateRunning},
