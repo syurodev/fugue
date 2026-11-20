@@ -13,6 +13,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/transcriptview"
+	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
 // The topic name pieces the screens route on; the constants mirror the
@@ -21,6 +22,7 @@ const (
 	topicVendorSessions = "vendor-sessions"
 	topicTranscript     = "transcript:"
 	topicTranscriptDlt  = "transcript-delta:"
+	topicWorkspaces     = "workspaces"
 )
 
 // pageFetcher is the read side the screens drive: the session.Fetcher, and a
@@ -30,7 +32,7 @@ type pageFetcher interface {
 	RequestPage(session string, before int64)
 	RequestCommands(session string)
 	RequestWorkspaces()
-	RequestWorkspace(workspace string)
+	RequestWorkspace(workspace string, gen uint64)
 	RequestProbe()
 	Results() <-chan session.Result
 }
@@ -78,11 +80,25 @@ type screens struct {
 	// lastErr is the last read or payload failure the screens could not act
 	// on, shown under the transcript.
 	lastErr string
+
+	// The workspace side (F10.14): the workspaces the topic reports, the
+	// reads that fill their details, the mutations the dialogs post, and
+	// the sidebar's own state per workspace.
+	workspaces   *workspace.Model
+	wsMut        *workspace.Mutator
+	wsReads      wsReader
+	wsDetailReq  map[string]uint64
+	wsHeaders    map[string]*kit.SectionHeaderState
+	wsMenu       *kit.MenuState
+	wsMenuFor    string
+	policyBanner *kit.BannerState
+	otherHeader  *kit.SectionHeaderState
+	dlg          *workspaceDialogs
 }
 
-// newScreens builds the screens over the manager, its fetcher and the
-// composer's poster.
-func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster) *screens {
+// newScreens builds the screens over the manager, its fetcher, the composer's
+// poster and the workspace mutator.
+func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster, wsMut *workspace.Mutator) *screens {
 	return &screens{
 		m:               m,
 		fetcher:         fetcher,
@@ -97,6 +113,15 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 		header:          kit.NewSectionHeaderState(true),
 		rows:            map[string]*kit.ListRowState{},
 		pendingPage:     map[string]bool{}, pendingOlder: map[string]bool{},
+		workspaces:   workspace.NewModel(),
+		wsMut:        wsMut,
+		wsReads:      fetcher,
+		wsDetailReq:  map[string]uint64{},
+		wsHeaders:    map[string]*kit.SectionHeaderState{},
+		wsMenu:       kit.NewMenuState(),
+		policyBanner: kit.NewBannerState(),
+		otherHeader:  kit.NewSectionHeaderState(false),
+		dlg:          newWorkspaceDialogs(),
 	}
 }
 
@@ -148,7 +173,7 @@ func pruneKnown[T any](m map[string]T, known map[string]bool) {
 // update folds one frame's deliveries into the screens. The loops index
 // rather than copy: the delivery and result structs are wide, and the
 // window's hot path pays the copy every frame.
-func (s *screens) update(updates []hostconn.Update, results []session.Result, posts []session.PostResult) {
+func (s *screens) update(updates []hostconn.Update, results []session.Result, posts []session.PostResult, muts []workspace.MutResult) {
 	for i := range updates {
 		s.applyUpdate(updates[i])
 	}
@@ -158,6 +183,10 @@ func (s *screens) update(updates []hostconn.Update, results []session.Result, po
 	for i := range posts {
 		s.applyPostResult(posts[i])
 	}
+	for i := range muts {
+		s.dlg.apply(&muts[i])
+	}
+	s.armWorkspaceReads()
 }
 
 // applyUpdate routes one topic delivery or connection-state change.
@@ -170,6 +199,8 @@ func (s *screens) applyUpdate(u hostconn.Update) {
 		s.prune()
 	case u.Topic == topicVendorSessions && u.Event != nil:
 		s.applySessionEvent(u.Event.Type, u.Event.Payload)
+	case u.Topic == topicWorkspaces:
+		s.applyWorkspaceDelivery(u)
 	case u.Topic == topicTranscriptDlt+s.open && u.Event != nil:
 		s.applyDelta(u.Event.Payload)
 	case u.Topic == topicTranscript+s.open:
@@ -178,12 +209,15 @@ func (s *screens) applyUpdate(u hostconn.Update) {
 }
 
 // reconnected arms the reads a fresh connection carries: the session list,
-// the vendors' capabilities, the open session's topics, its newest page and
-// its commands. A request dropped while the host was down re-arms here.
+// the workspace list, the vendors' capabilities, the open session's topics,
+// its newest page and its commands. A request dropped while the host was
+// down re-arms here.
 func (s *screens) reconnected() {
 	delete(s.pendingPage, s.open)
 	delete(s.pendingOlder, s.open)
+	s.wsDetailReq = map[string]uint64{}
 	s.fetcher.RequestSessions()
+	s.wsReads.RequestWorkspaces()
 	s.fetcher.RequestProbe()
 	if s.open != "" {
 		s.m.AddTopic(topicTranscript + s.open)
@@ -348,64 +382,6 @@ func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 			return s.layoutTranscript(&local, env)
 		}),
 	)
-}
-
-// layoutSidebar draws the session list; a row click opens the session. The
-// column holds the SidebarWidth token: kit rows fill the width they are
-// given, so the list must not swallow the transcript's half of the window.
-func (s *screens) layoutSidebar(gtx *layout.Context, env *kit.Env) layout.Dimensions {
-	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(theme.SidebarWidth))
-	header, _ := s.header.Layout(env, gtx, &kit.SectionHeaderProps{Label: "Sessions"},
-		func(gtx *layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, s.sessionRows(env)...)
-		})
-	return header
-}
-
-// sessionRows builds one kit row per session; the row's click opens it.
-func (s *screens) sessionRows(env *kit.Env) []layout.FlexChild {
-	rows := make([]layout.FlexChild, 0, len(s.sidebar.List()))
-	for _, sess := range s.sidebar.List() {
-		row, ok := s.rows[sess.ID]
-		if !ok {
-			row = kit.NewListRowState()
-			row.Enter()
-			s.rows[sess.ID] = row
-		}
-		selected := s.open == sess.ID
-		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			dims, ev := row.Layout(env, &local, &kit.ListRowProps{
-				Label:     sessionName(sess),
-				Secondary: sessionState(sess),
-				Selected:  selected,
-			})
-			if ev.Clicked {
-				s.openSession(sess.ID)
-			}
-			return dims
-		}))
-	}
-	return rows
-}
-
-// sessionName names a session row: the vendor, or "session" when the list
-// read has not named one yet.
-func sessionName(sess session.Session) string {
-	if sess.Vendor == "" {
-		return "session"
-	}
-	return sess.Vendor
-}
-
-// sessionState is the row's secondary text: the state and the wait reason,
-// in FgMuted like every kit row's secondary text.
-func sessionState(sess session.Session) string {
-	state := sess.State
-	if sess.WaitingReason != "" {
-		state += " · " + sess.WaitingReason
-	}
-	return state
 }
 
 // layoutTranscript draws the transcript pane and, under it, the composer

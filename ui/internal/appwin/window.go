@@ -23,6 +23,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
+	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
 // Options are the window's inputs: what to connect to and how it looks.
@@ -88,15 +89,19 @@ func Run(ctx context.Context, opts Options) error {
 	w.Option(app.Size(unit.Dp(initW), unit.Dp(initH)))
 
 	q := &updateQueue{}
-	// The fetcher owns the read side's one goroutine and the poster the
-	// composer's write side: both run the blocking calls off the window
-	// goroutine and hand their results back (F10.4a, F10.4b).
+	// The fetcher owns the read side's one goroutine, the poster the
+	// composer's write side and the mutator the workspace mutations: all run
+	// blocking calls off the window goroutine and hand their results back
+	// (F10.4a, F10.4b, F10.14).
 	fetcher := session.NewFetcher(m.Client)
 	fetcher.Start(runCtx)
 	defer fetcher.Stop()
 	poster := session.NewPoster(m.Client)
 	poster.Start(runCtx)
 	defer poster.Stop()
+	wsMut := workspace.NewMutator(func() workspace.MutatorClient { return m.Client() })
+	wsMut.Start(runCtx)
+	defer wsMut.Stop()
 	defer stopSideGoroutines(cancel, startFeeder(runCtx, w, updates, q), startCloser(runCtx, w))
 
 	shaper, err := fonts.Shaper()
@@ -106,7 +111,7 @@ func Run(ctx context.Context, opts Options) error {
 	light, dark := theme.Light(shaper), theme.Dark(shaper)
 	env := newEnv(shaper, &light)
 	attach(env, w)
-	return eventLoop(w, env, newScreens(m, fetcher, poster), q, &light, &dark)
+	return eventLoop(w, env, newScreens(m, fetcher, poster, wsMut), q, &light, &dark)
 }
 
 // newEnv builds the window's kit.Env over the theme it starts in (F10.13):
@@ -218,7 +223,7 @@ drainPosts:
 			break drainPosts
 		}
 	}
-	sc.update(q.drain(), results, posts)
+	sc.update(q.drain(), results, posts, drainMutResults(sc.wsMut))
 	toggleTheme(gtx, env, light, dark)
 	drawWindow(gtx, env, sc)
 }
@@ -243,9 +248,25 @@ func toggleTheme(gtx *layout.Context, env *kit.Env, light, dark *theme.Theme) {
 	}
 }
 
+// drainMutResults takes every mutation result the mutator delivered this
+// frame; the window goroutine folds them into the dialogs.
+func drainMutResults(m *workspace.Mutator) []workspace.MutResult {
+	muts := make([]workspace.MutResult, 0, 4)
+drain:
+	for {
+		select {
+		case res := <-m.Results():
+			muts = append(muts, res)
+		default:
+			break drain
+		}
+	}
+	return muts
+}
+
 // drawWindow lays out the screens — the sidebar, the transcript pane and the
-// composer (F10.4a, F10.4b) — and the status bar with the connection state
-// (F10.2a). The start dialog draws last, over everything (UK-07). Every
+// composer (F10.4a, F10.4b, F10.14) — and the status bar with the connection
+// state (F10.2a). The open dialog draws last, over everything (UK-07). Every
 // color comes from the theme tokens (F10.2c); appwin defines none of its own.
 func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 	paint.Fill(gtx.Ops, env.Th.Chrome().AppBg)
@@ -270,9 +291,11 @@ func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 			})
 		}),
 	)
-	// The start dialog is the window's dialog layer, drawn over everything
-	// (UK-07); closed, it lays nothing out.
+	// The start and workspace dialogs (F10.4b, F10.14) draw over the whole
+	// window, last, with the full frame's gtx: the scrim dims everything
+	// beneath whichever dialog is open.
 	sc.composer.start.layout(env, gtx, sc, sc.composer)
+	sc.dlg.layout(env, gtx, sc)
 }
 
 // statusColor maps the connection state onto the theme's status tokens

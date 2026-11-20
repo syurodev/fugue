@@ -27,6 +27,9 @@ type Session struct {
 	WaitingReason string
 	// CreatedAt and UpdatedAt are the host's timestamps.
 	CreatedAt, UpdatedAt string
+	// WorkspaceID names the workspace the session is bound to at creation
+	// (Q-57); a caller groups sessions under their workspaces with it.
+	WorkspaceID string
 }
 
 // SessionList is the answer to ListSessions: every session and the
@@ -50,6 +53,7 @@ func (c *Client) ListSessions(ctx context.Context) (SessionList, error) {
 		out.Sessions = append(out.Sessions, Session{
 			ID: s.GetSessionId(), Vendor: vendorString(s.GetVendor()), State: s.GetState(),
 			WaitingReason: s.GetWaitingReason(), CreatedAt: s.GetCreatedAt(), UpdatedAt: s.GetUpdatedAt(),
+			WorkspaceID: s.GetWorkspaceId(),
 		})
 	}
 	return out, nil

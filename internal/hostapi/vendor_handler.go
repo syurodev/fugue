@@ -241,7 +241,7 @@ func protoVendor(name string) vendorsv1.Vendor {
 func protoVendorSession(v *app.VendorSessionView) *vendorsv1.VendorSession {
 	return &vendorsv1.VendorSession{
 		SessionId: v.ID, Vendor: protoVendor(v.Vendor), State: v.State, WaitingReason: v.WaitingReason,
-		CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
+		CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt, WorkspaceId: v.WorkspaceID,
 	}
 }
 

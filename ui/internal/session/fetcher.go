@@ -32,9 +32,11 @@ type Result struct {
 	Items    []client.TranscriptItem
 	Commands client.Commands
 	// Workspaces lists the workspaces; Workspace is the one workspace read
-	// with its roots. Probes reports what each vendor supports.
+	// with its roots. Generation echoes the RequestWorkspace generation so
+	// late reads are dropped. Probes reports what each vendor supports.
 	Workspaces []client.WorkspaceSummary
 	Workspace  client.Workspace
+	Generation uint64
 	Probes     []client.VendorProbe
 	// Older reports whether the page was an older page (before > 0).
 	Older bool
@@ -48,6 +50,7 @@ type request struct {
 	kind      ResultKind
 	before    int64
 	workspace string
+	gen       uint64
 }
 
 // requestBuffer bounds the request queue. A request dropped because the queue
@@ -120,10 +123,10 @@ func (f *Fetcher) RequestWorkspaces() {
 	f.queue(request{kind: ResultWorkspaces})
 }
 
-// RequestWorkspace queues one workspace's read, whose roots the start flow
-// names to StartSession.
-func (f *Fetcher) RequestWorkspace(workspace string) {
-	f.queue(request{kind: ResultWorkspace, workspace: workspace})
+// RequestWorkspace queues one workspace's read, tagging it with the model's
+// current generation so late answers are ignored.
+func (f *Fetcher) RequestWorkspace(workspace string, gen uint64) {
+	f.queue(request{kind: ResultWorkspace, workspace: workspace, gen: gen})
 }
 
 // RequestProbe queues the vendors' probe read, whose capabilities decide
@@ -182,7 +185,7 @@ func (f *Fetcher) deliver(ctx context.Context, c *client.Client, r request) bool
 		res = Result{Kind: ResultWorkspaces, Workspaces: workspaces, Err: err}
 	case ResultWorkspace:
 		ws, err := c.Workspace(ctx, r.workspace)
-		res = Result{Kind: ResultWorkspace, Workspace: ws, Err: err}
+		res = Result{Kind: ResultWorkspace, Workspace: ws, Generation: r.gen, Err: err}
 	case ResultProbe:
 		probes, err := c.ProbeVendors(ctx)
 		res = Result{Kind: ResultProbe, Probes: probes, Err: err}

@@ -24,6 +24,7 @@ type sessionView struct {
 	WaitingReason string `json:"waiting_reason,omitempty"`
 	CreatedAt     string `json:"created_at"`
 	UpdatedAt     string `json:"updated_at"`
+	WorkspaceID   string `json:"workspace_id,omitempty"`
 }
 
 // sessionsSnapshot is the topic's snapshot payload.
@@ -47,6 +48,9 @@ var errUnknownSessionEvent = errors.New("unknown session event type")
 // Session is one sidebar row: a vendor session's identity and state.
 type Session struct {
 	ID, Vendor, State, WaitingReason, CreatedAt, UpdatedAt string
+	// WorkspaceID names the workspace the session is bound to (Q-57); a
+	// created event does not carry it, the list and snapshot reads do.
+	WorkspaceID string
 	// CommandsRevision is the session's slash-command revision the last
 	// state change carried; the composer re-reads the commands when it
 	// advances (vendor-runtime §9). The snapshot and list reads carry none.
@@ -79,6 +83,7 @@ func (s *Sidebar) ApplySnapshot(payload []byte) error {
 		byID[v.SessionID] = &Session{
 			ID: v.SessionID, Vendor: v.Vendor, State: v.State,
 			WaitingReason: v.WaitingReason, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
+			WorkspaceID: v.WorkspaceID,
 		}
 		order = append(order, v.SessionID)
 	}
@@ -96,6 +101,7 @@ func (s *Sidebar) ApplyList(list client.SessionList) {
 		byID[v.ID] = &Session{
 			ID: v.ID, Vendor: v.Vendor, State: v.State,
 			WaitingReason: v.WaitingReason, CreatedAt: v.CreatedAt, UpdatedAt: v.UpdatedAt,
+			WorkspaceID: v.WorkspaceID,
 		}
 		order = append(order, v.ID)
 	}

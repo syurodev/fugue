@@ -91,15 +91,24 @@ type WorkspaceRoot struct {
 	Missing            bool
 }
 
+// PolicyDiffEntry describes one pending out-of-band policy change (Q-64).
+type PolicyDiffEntry struct {
+	Key, OldValue, NewValue string
+}
+
 // Workspace is one workspace and its roots. StartSession resolves the
 // working directory from a root of this workspace, so the composer reads the
 // roots to name one (root_name stays empty when the workspace has exactly
-// one).
+// one). Workspace management reads ConfigHash and PolicyDiff for CAS
+// mutations and the Q-64 confirmation card.
 type Workspace struct {
 	ID, Name                           string
+	ConfigHash                         string
+	ConfigRevision                     int64
 	Roots                              []WorkspaceRoot
 	MissingRoots                       []string
 	PendingPolicyConfirmation          bool
+	PolicyDiff                         []PolicyDiffEntry
 	ConfigErrorKey                     string
 	ConfigErrorLine, ConfigErrorColumn int64
 }
@@ -108,6 +117,7 @@ type Workspace struct {
 type WorkspaceSummary struct {
 	ID, Name                  string
 	MissingRoots              []string
+	ConfigRevision            int64
 	PendingPolicyConfirmation bool
 }
 
@@ -237,6 +247,7 @@ func (c *Client) ListWorkspaces(ctx context.Context) ([]WorkspaceSummary, error)
 	for _, w := range res.Msg.GetWorkspaces() {
 		out = append(out, WorkspaceSummary{
 			ID: w.GetId(), Name: w.GetName(), MissingRoots: w.GetMissingRoots(),
+			ConfigRevision:            w.GetConfigRevision(),
 			PendingPolicyConfirmation: w.GetPendingPolicyConfirmation(),
 		})
 	}
@@ -252,13 +263,17 @@ func (c *Client) Workspace(ctx context.Context, id string) (Workspace, error) {
 	}
 	w := res.Msg.GetWorkspace()
 	out := Workspace{
-		ID: w.GetId(), Name: w.GetName(), MissingRoots: w.GetMissingRoots(),
+		ID: w.GetId(), Name: w.GetName(), ConfigHash: w.GetConfigHash(), ConfigRevision: w.GetConfigRevision(),
+		MissingRoots:              w.GetMissingRoots(),
 		PendingPolicyConfirmation: w.GetPendingPolicyConfirmation(),
 		ConfigErrorKey:            w.GetConfigErrorKey(), ConfigErrorLine: w.GetConfigErrorLine(),
 		ConfigErrorColumn: w.GetConfigErrorColumn(),
 	}
 	for _, r := range w.GetRoots() {
 		out.Roots = append(out.Roots, WorkspaceRoot{Name: r.GetName(), Path: r.GetPath(), Access: r.GetAccess(), Missing: r.GetMissing()})
+	}
+	for _, d := range w.GetPolicyDiff() {
+		out.PolicyDiff = append(out.PolicyDiff, PolicyDiffEntry{Key: d.GetKey(), OldValue: d.GetOldValue(), NewValue: d.GetNewValue()})
 	}
 	return out, nil
 }

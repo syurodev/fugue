@@ -56,6 +56,9 @@ type VendorSessionView struct {
 	WaitingReason string `json:"waiting_reason,omitempty"`
 	CreatedAt     string `json:"created_at"`
 	UpdatedAt     string `json:"updated_at"`
+	// WorkspaceID names the workspace the session is bound to at creation
+	// (Q-57), which the app's sidebar groups sessions by (F10.14).
+	WorkspaceID string `json:"workspace_id,omitempty"`
 }
 
 // VendorProbeView is one probe result without path or credential material.
@@ -455,7 +458,7 @@ func validateVendorProfileFor(vendorName string, profile VendorProfile) error {
 func vendorSessionView(info *vendorstore.Session) VendorSessionView {
 	return VendorSessionView{
 		ID: info.ID, Vendor: info.Vendor, State: info.State, WaitingReason: info.WaitingReason,
-		CreatedAt: info.CreatedAt, UpdatedAt: info.UpdatedAt,
+		CreatedAt: info.CreatedAt, UpdatedAt: info.UpdatedAt, WorkspaceID: info.WorkspaceID,
 	}
 }
 

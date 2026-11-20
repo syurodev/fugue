@@ -43,6 +43,8 @@ const (
 	IconRestart      IconName = "rotate-ccw"
 	IconHelp         IconName = "circle-help"
 	IconPin          IconName = "pin"
+	IconPlus         IconName = "plus"
+	IconEllipsis     IconName = "ellipsis"
 )
 
 // iconGrid is the Lucide coordinate grid in dp: paths are authored on it.
@@ -51,31 +53,27 @@ const iconGrid = 24
 // errIconUnknown reports a name outside the packaged set.
 var errIconUnknown = errors.New("unknown icon")
 
-// pathOf returns the generated path data of one icon.
+// pathOf returns the generated path data of one icon. The lookup map is
+// built per call: pathOf runs on an Env's first draw of an icon only, the
+// parsed subpaths being cached on the Env.
 func pathOf(n IconName) (string, error) {
-	switch n {
-	case IconCheck:
-		return icondata.Check, nil
-	case IconChevronDown:
-		return icondata.ChevronDown, nil
-	case IconChevronRight:
-		return icondata.ChevronRight, nil
-	case IconSearch:
-		return icondata.Search, nil
-	case IconClose:
-		return icondata.X, nil
-	case IconEye:
-		return icondata.Eye, nil
-	case IconEyeOff:
-		return icondata.EyeOff, nil
-	case IconCopy:
-		return icondata.Copy, nil
-	case IconRestart:
-		return icondata.RotateCCW, nil
-	case IconHelp:
-		return icondata.CircleHelp, nil
-	case IconPin:
-		return icondata.Pin, nil
+	paths := map[IconName]string{
+		IconCheck:        icondata.Check,
+		IconChevronDown:  icondata.ChevronDown,
+		IconChevronRight: icondata.ChevronRight,
+		IconSearch:       icondata.Search,
+		IconClose:        icondata.X,
+		IconEye:          icondata.Eye,
+		IconEyeOff:       icondata.EyeOff,
+		IconCopy:         icondata.Copy,
+		IconRestart:      icondata.RotateCCW,
+		IconHelp:         icondata.CircleHelp,
+		IconPin:          icondata.Pin,
+		IconPlus:         icondata.Plus,
+		IconEllipsis:     icondata.Ellipsis,
+	}
+	if p, ok := paths[n]; ok {
+		return p, nil
 	}
 	return "", fmt.Errorf("%w: %q", errIconUnknown, string(n))
 }

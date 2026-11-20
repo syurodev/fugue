@@ -339,18 +339,22 @@ func TestWorkspaceReadsMapTheRootsAndTheFlags(t *testing.T) {
 	fake := &vendorFake{
 		workspaces: &workspacev1.ListWorkspacesResponse{
 			Workspaces: []*workspacev1.WorkspaceSummary{
-				{Id: testWorkspaceID, Name: testWorkspaceName, MissingRoots: []string{testMissingRoot}, PendingPolicyConfirmation: true},
+				{Id: testWorkspaceID, Name: testWorkspaceName, ConfigRevision: 3, MissingRoots: []string{testMissingRoot}, PendingPolicyConfirmation: true},
 			},
 		},
 		workspace: &workspacev1.GetWorkspaceResponse{
 			Workspace: &workspacev1.Workspace{
 				Id: testWorkspaceID, Name: testWorkspaceName,
+				ConfigHash: "hash-ws-1", ConfigRevision: 3,
 				Roots: []*workspacev1.Root{
 					{Name: "main", Path: "/repo", Access: "rw"},
 					{Name: testMissingRoot, Path: "/gone", Missing: true},
 				},
 				PendingPolicyConfirmation: true,
-				ConfigErrorKey:            "session", ConfigErrorLine: 3, ConfigErrorColumn: 7,
+				PolicyDiff: []*workspacev1.PolicyDiffEntry{
+					{Key: "policy.approval_mode", OldValue: "ask", NewValue: "auto"},
+				},
+				ConfigErrorKey: "session", ConfigErrorLine: 3, ConfigErrorColumn: 7,
 			},
 		},
 	}
@@ -360,7 +364,7 @@ func TestWorkspaceReadsMapTheRootsAndTheFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantList := []client.WorkspaceSummary{{
-		ID: testWorkspaceID, Name: testWorkspaceName,
+		ID: testWorkspaceID, Name: testWorkspaceName, ConfigRevision: 3,
 		MissingRoots: []string{testMissingRoot}, PendingPolicyConfirmation: true,
 	}}
 	if diff := cmp.Diff(wantList, list); diff != "" {
@@ -371,13 +375,16 @@ func TestWorkspaceReadsMapTheRootsAndTheFlags(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantWS := client.Workspace{
-		ID: testWorkspaceID, Name: testWorkspaceName,
+		ID: testWorkspaceID, Name: testWorkspaceName, ConfigHash: "hash-ws-1", ConfigRevision: 3,
 		Roots: []client.WorkspaceRoot{
 			{Name: testRoot, Path: "/repo", Access: "rw"},
 			{Name: testMissingRoot, Path: "/gone", Missing: true},
 		},
 		PendingPolicyConfirmation: true,
-		ConfigErrorKey:            "session", ConfigErrorLine: 3, ConfigErrorColumn: 7,
+		PolicyDiff: []client.PolicyDiffEntry{
+			{Key: "policy.approval_mode", OldValue: "ask", NewValue: "auto"},
+		},
+		ConfigErrorKey: "session", ConfigErrorLine: 3, ConfigErrorColumn: 7,
 	}
 	if diff := cmp.Diff(wantWS, ws); diff != "" {
 		t.Fatalf("workspace (-want +got):\n%s", diff)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/theme"
+	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
 // The start flow (F10.4b): the composer's start-session dialog. Q-53 A
@@ -38,8 +39,8 @@ func effortOptions() []kit.SelectOption {
 // newSessionLabel names the composer's start row button.
 const newSessionLabel = "New session"
 
-// startFlow is the start-session dialog's state: the fields, the reads they
-// drive, and the start post's busy mark.
+// startFlow is the start-session dialog's state: the fields, the workspace
+// choice read directly from screens.workspaces, and the start post's busy mark.
 type startFlow struct {
 	dialog        *kit.DialogState
 	cancel, start *kit.ButtonState
@@ -49,9 +50,6 @@ type startFlow struct {
 	vendor        *kit.SelectState
 	model         *kit.ComboboxState
 	effort        *kit.SelectState
-	// workspaces is the list read; detail the chosen workspace's roots.
-	workspaces []client.WorkspaceSummary
-	detail     client.Workspace
 	// rootSel, vendorSel and effortSel are the selects' chosen values, which
 	// the caller owns (UK-02): the kit Select keeps none.
 	rootSel, vendorSel, effortSel string
@@ -86,18 +84,52 @@ func (f *startFlow) open(sc *screens) {
 	sc.requestWorkspaces()
 }
 
-// applyWorkspaces folds a workspace list read into the flow.
-func (f *startFlow) applyWorkspaces(list []client.WorkspaceSummary) {
-	f.workspaces = list
+// reconcile clears a workspace selection that left the shared workspace model
+// and updates the root selection only once the workspace's detail has arrived:
+// while detail is reloading, any chosen rootSel is preserved.
+func (f *startFlow) reconcile(sc *screens) {
+	if f.wsID == "" {
+		return
+	}
+	if _, ok := sc.workspaces.Lookup(f.wsID); !ok {
+		f.wsID, f.rootSel = "", ""
+		return
+	}
+	if _, hasDet := sc.workspaces.DetailFor(f.wsID); !hasDet {
+		return
+	}
+	roots := f.usableRoots(sc)
+	if f.rootSel != "" {
+		found := false
+		for _, r := range roots {
+			if r.Name == f.rootSel {
+				found = true
+				break
+			}
+		}
+		if !found {
+			f.rootSel = ""
+		}
+	}
+	if f.rootSel == "" && len(roots) > 1 {
+		f.rootSel = roots[0].Name
+	}
 }
 
-// applyDetail folds a workspace read into the flow: the roots the root
-// select chooses from, defaulting to the first.
-func (f *startFlow) applyDetail(ws client.Workspace) {
-	f.detail = ws
-	if f.rootSel == "" && len(f.usableRoots()) > 1 {
-		f.rootSel = f.usableRoots()[0].Name
+// detailLoading reports whether a chosen workspace is currently waiting on its
+// detail read (for example after an initial selection or a topic drop).
+func (f *startFlow) detailLoading(sc *screens) bool {
+	if f.wsID == "" {
+		return false
 	}
+	_, ok := sc.workspaces.DetailFor(f.wsID)
+	return !ok
+}
+
+// canStart reports whether a workspace is chosen and its current detail is
+// loaded so Start can submit safely.
+func (f *startFlow) canStart(sc *screens) bool {
+	return f.wsID != "" && !f.detailLoading(sc)
 }
 
 // startPosted folds a start post's result in: the busy mark clears, a
@@ -128,18 +160,27 @@ func (f *startFlow) vendorName() string {
 
 // rootName is the chosen root, empty when the workspace has exactly one —
 // the host resolves a single root itself.
-func (f *startFlow) rootName() string {
-	if len(f.usableRoots()) <= 1 {
+func (f *startFlow) rootName(sc *screens) string {
+	roots := f.usableRoots(sc)
+	if len(roots) <= 1 {
 		return ""
+	}
+	if f.rootSel == "" {
+		return roots[0].Name
 	}
 	return f.rootSel
 }
 
-// usableRoots are the workspace's roots a session can start in: the ones the
-// filesystem still has. A missing root would fail the host's own check.
-func (f *startFlow) usableRoots() []client.WorkspaceRoot {
-	var roots []client.WorkspaceRoot
-	for _, r := range f.detail.Roots {
+// usableRoots are the chosen workspace's roots a session can start in: the
+// ones the filesystem still has. A missing root would fail the host's own
+// check.
+func (f *startFlow) usableRoots(sc *screens) []workspace.Root {
+	det, ok := sc.workspaces.DetailFor(f.wsID)
+	if !ok {
+		return nil
+	}
+	var roots []workspace.Root
+	for _, r := range det.Roots {
 		if !r.Missing {
 			roots = append(roots, r)
 		}
@@ -178,17 +219,18 @@ func (f *startFlow) row(env *kit.Env, gtx *layout.Context, sc *screens) layout.D
 }
 
 // layout runs the dialog's frame, drawing it over the window while open.
-func (f *startFlow) layout(env *kit.Env, gtx *layout.Context, sc *screens, c *composer) layout.Dimensions {
+func (f *startFlow) layout(env *kit.Env, gtx *layout.Context, sc *screens, c *composer) {
 	res, err := f.dialog.Layout(env, gtx, &kit.DialogProps{
-		Variant:        kit.DialogForm,
-		Title:          "New session",
-		Description:    "Starts a vendor session in a workspace root.",
-		Cancel:         f.cancel,
-		Primary:        f.start,
-		PrimaryLabel:   "Start",
-		PrimaryVariant: kit.Primary,
-		Dirty:          f.dirty(),
-		Busy:           f.busy,
+		Variant:         kit.DialogForm,
+		Title:           "New session",
+		Description:     "Starts a vendor session in a workspace root.",
+		Cancel:          f.cancel,
+		Primary:         f.start,
+		PrimaryLabel:    "Start",
+		PrimaryVariant:  kit.Primary,
+		PrimaryDisabled: !f.canStart(sc),
+		Dirty:           f.dirty(),
+		Busy:            f.busy,
 		Body: func(gtx *layout.Context, bands *kit.DialogBands) image.Point {
 			return f.body(env, gtx, bands, sc, c)
 		},
@@ -197,22 +239,25 @@ func (f *startFlow) layout(env *kit.Env, gtx *layout.Context, sc *screens, c *co
 		sc.fail(err)
 	}
 	if res.Submitted {
-		f.submit(c)
+		f.submit(sc, c)
 	}
-	return layout.Dimensions{Size: res.Size}
 }
 
 // submit posts the start with the chosen values; the new session arrives on
 // the vendor-sessions topic and the screens open it.
-func (f *startFlow) submit(c *composer) {
-	if f.busy || f.wsID == "" {
-		if f.wsID == "" {
+func (f *startFlow) submit(sc *screens, c *composer) {
+	if f.busy || !f.canStart(sc) {
+		switch {
+		case f.busy:
+		case f.wsID == "":
 			f.lastErr = "choose a workspace"
+		default:
+			f.lastErr = "loading workspace details"
 		}
 		return
 	}
 	profile := client.SessionProfile{Model: strings.TrimSpace(f.model.Text()), Effort: f.effortValue()}
-	c.poster.StartSession(f.vendorName(), f.wsID, f.rootName(), profile)
+	c.poster.StartSession(f.vendorName(), f.wsID, f.rootName(sc), profile)
 	f.busy = true
 	f.lastErr = ""
 }
@@ -241,7 +286,7 @@ func (f *startFlow) body(env *kit.Env, gtx *layout.Context, bands *kit.DialogBan
 		y += dims.Size.Y + gap
 	}
 	f.layWorkspace(env, sc, lay)
-	f.layRoot(env, lay)
+	f.layRoot(env, sc, lay)
 	f.layVendor(env, c, lay)
 	f.layModel(env, lay)
 	f.layEffort(env, lay)
@@ -249,14 +294,14 @@ func (f *startFlow) body(env *kit.Env, gtx *layout.Context, bands *kit.DialogBan
 	return image.Pt(w, max(y-gap, 0))
 }
 
-// layWorkspace draws the workspace picker and arms the roots read on a
-// choice.
+// layWorkspace draws the workspace picker from the shared workspace model
+// and arms the detail read on a choice when the model holds none yet.
 func (f *startFlow) layWorkspace(env *kit.Env, sc *screens, lay fieldLay) {
 	lay(f.workspace.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
 		props := &kit.ComboboxProps{
 			Label:       "Workspace",
 			Placeholder: "Pick a workspace",
-			Items:       workspaceItems(f.workspaces),
+			Items:       workspaceItems(sc.workspaces.List()),
 			Loading:     sc.workspacesPending(),
 			EmptyText:   "No workspaces",
 			NoResText:   "No matching workspace",
@@ -269,17 +314,29 @@ func (f *startFlow) layWorkspace(env *kit.Env, sc *screens, lay fieldLay) {
 	})
 }
 
-// layRoot draws the root picker only for a workspace with several roots: a
-// single root is the host's to resolve.
-func (f *startFlow) layRoot(env *kit.Env, lay fieldLay) {
-	if len(f.usableRoots()) <= 1 {
+// layRoot draws the root picker only for a workspace with several roots (a
+// single root is the host's to resolve), or a loading hint while the chosen
+// workspace's detail is reloading.
+func (f *startFlow) layRoot(env *kit.Env, sc *screens, lay fieldLay) {
+	if f.detailLoading(sc) {
+		lay(nil, func(gtx *layout.Context) (layout.Dimensions, error) {
+			dims := kit.Paragraph(env, gtx, theme.TypeSmall(), env.Th.Chrome().FgMuted, "Loading workspace details…")
+			return layout.Dimensions{Size: dims.Size}, nil
+		})
 		return
+	}
+	roots := f.usableRoots(sc)
+	if len(roots) <= 1 {
+		return
+	}
+	if f.rootSel == "" {
+		f.rootSel = roots[0].Name
 	}
 	lay(f.root.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
 		props := &kit.SelectProps{
 			Label:       "Root",
 			Placeholder: "Pick a root",
-			Options:     rootOptions(f.usableRoots()),
+			Options:     rootOptions(roots),
 			Value:       f.rootSel,
 		}
 		res, err := f.root.Layout(env, gtx, props)
@@ -351,18 +408,22 @@ func (f *startFlow) layError(env *kit.Env, w int, lay fieldLay) {
 	})
 }
 
-// chooseWorkspace records the choice and arms the roots read.
+// chooseWorkspace records the choice and arms the detail read if needed.
 func (f *startFlow) chooseWorkspace(id string, sc *screens) {
 	if f.wsID == id {
 		return
 	}
 	f.wsID = id
-	f.detail = client.Workspace{}
-	sc.requestWorkspace(id)
+	f.rootSel = ""
+	if _, ok := sc.workspaces.DetailFor(id); !ok {
+		sc.requestWorkspace(id)
+	} else {
+		f.reconcile(sc)
+	}
 }
 
-// workspaceItems maps the workspace list onto the combobox's rows.
-func workspaceItems(list []client.WorkspaceSummary) []kit.SuggestItem {
+// workspaceItems maps the shared workspace model onto the combobox's rows.
+func workspaceItems(list []workspace.Summary) []kit.SuggestItem {
 	items := make([]kit.SuggestItem, 0, len(list))
 	for _, ws := range list {
 		items = append(items, kit.SuggestItem{ID: ws.ID, Label: ws.Name})
@@ -371,7 +432,7 @@ func workspaceItems(list []client.WorkspaceSummary) []kit.SuggestItem {
 }
 
 // rootOptions maps the workspace's usable roots onto the select's options.
-func rootOptions(roots []client.WorkspaceRoot) []kit.SelectOption {
+func rootOptions(roots []workspace.Root) []kit.SelectOption {
 	opts := make([]kit.SelectOption, 0, len(roots))
 	for _, r := range roots {
 		opts = append(opts, kit.SelectOption{ID: r.Name, Label: r.Name})

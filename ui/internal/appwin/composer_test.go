@@ -33,6 +33,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
+	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
 // The strings the tests assert on, which goconst counts across the package.
@@ -42,6 +43,8 @@ const (
 	callStart     = "start"
 	startedID     = "started-1"
 	testWorkspace = "ws1"
+	testBackend   = "backend"
+	testMainRoot  = "main"
 )
 
 // vendorCall is one state-changing vendor RPC the fake host recorded.
@@ -249,7 +252,7 @@ func newComposerFixture(t *testing.T, state string, capability client.Capability
 	t.Cleanup(poster.Stop)
 	fake2 := &fakeFetcher{}
 	m := hostconn.NewManager(&hostconn.Config{})
-	sc := newScreens(m, fake2, poster)
+	sc := newScreens(m, fake2, poster, workspace.NewMutator(func() workspace.MutatorClient { return nil }))
 	sc.sidebar.ApplyList(client.SessionList{Sessions: []client.Session{
 		{ID: "s1", Vendor: client.VendorClaude, State: state},
 	}})
@@ -452,21 +455,30 @@ func TestComposerRestoresAFailedSend(t *testing.T) {
 	}
 }
 
-// TestStartFlowPostsTheChosenSession pins the start dialog: the chosen
-// workspace, root and profile reach the start command, a single-root
-// workspace leaves the root name empty for the host to resolve, and the
-// dialog's busy mark clears when the post answers.
+// TestStartFlowPostsTheChosenSession pins the start dialog: it reads from the
+// shared workspace model (fed by ResultWorkspaces and ResultWorkspace), posts
+// the chosen workspace, root and profile, leaves a single-root workspace's
+// root empty for the host to resolve, and clears its busy mark on result.
 func TestStartFlowPostsTheChosenSession(t *testing.T) {
 	t.Parallel()
 	fx := newComposerFixture(t, stateReady, client.Capability{})
 	f := fx.c.start
-	f.applyWorkspaces([]client.WorkspaceSummary{{ID: "ws1", Name: "backend"}})
+	fx.sc.applyResult(session.Result{
+		Kind:       session.ResultWorkspaces,
+		Workspaces: []client.WorkspaceSummary{{ID: testWorkspace, Name: testBackend, ConfigRevision: 1}},
+	})
 	f.chooseWorkspace(testWorkspace, fx.sc)
-	f.applyDetail(client.Workspace{ID: "ws1", Roots: []client.WorkspaceRoot{{Name: "main"}}})
+	fx.sc.applyResult(session.Result{
+		Kind: session.ResultWorkspace,
+		Workspace: client.Workspace{
+			ID: testWorkspace, Name: testBackend, ConfigHash: "hash-ws1", ConfigRevision: 1,
+			Roots: []client.WorkspaceRoot{{Name: testMainRoot, Path: "/repo", Access: "rw"}},
+		},
+	})
 	f.model.SetText("sonnet")
 	f.effortSel = "high"
 
-	f.submit(fx.c)
+	f.submit(fx.sc, fx.c)
 	if !f.busy {
 		t.Fatal("the start post did not mark the dialog busy")
 	}
@@ -494,7 +506,7 @@ func TestStartFlowRefusesASubmitWithoutAWorkspace(t *testing.T) {
 	fx := newComposerFixture(t, stateReady, client.Capability{})
 	f := fx.c.start
 	f.model.SetText("sonnet")
-	f.submit(fx.c)
+	f.submit(fx.sc, fx.c)
 	if f.busy {
 		t.Fatal("a start without a workspace posted")
 	}
@@ -503,6 +515,99 @@ func TestStartFlowRefusesASubmitWithoutAWorkspace(t *testing.T) {
 	}
 	if calls := fx.fake.taken(); len(calls) != 0 {
 		t.Fatalf("calls = %+v, want none", calls)
+	}
+}
+
+// twoRootDetail feeds ResultWorkspaces and ResultWorkspace for testWorkspace
+// with main (rw) and web (ro) roots at the given hash and revision.
+func twoRootDetail(fx *composerFixture, hash string, rev int64, gen uint64) {
+	fx.sc.applyResult(session.Result{
+		Kind:       session.ResultWorkspace,
+		Generation: gen,
+		Workspace: client.Workspace{
+			ID: testWorkspace, Name: testBackend, ConfigHash: hash, ConfigRevision: rev,
+			Roots: []client.WorkspaceRoot{
+				{Name: testMainRoot, Path: testRootMainPath, Access: "rw"},
+				{Name: testRootWeb, Path: testRootWebPath, Access: "ro"},
+			},
+		},
+	})
+}
+
+// TestStartFlowPreservesRootAndBlocksStartWhileDetailReloads pins that a
+// mid-dialog detail drop preserves the user's chosen root and blocks Start
+// until the refreshed detail arrives.
+func TestStartFlowPreservesRootAndBlocksStartWhileDetailReloads(t *testing.T) {
+	t.Parallel()
+	fx := newComposerFixture(t, stateReady, client.Capability{})
+	reads := &recordingReader{}
+	fx.sc.wsReads = reads
+	f := fx.c.start
+
+	fx.sc.applyResult(session.Result{
+		Kind:       session.ResultWorkspaces,
+		Workspaces: []client.WorkspaceSummary{{ID: testWorkspace, Name: testBackend, ConfigRevision: 1}},
+	})
+	f.chooseWorkspace(testWorkspace, fx.sc)
+	twoRootDetail(fx, "h1", 1, reads.gens[0])
+	f.rootSel = testRootWeb
+
+	feedEvent(fx.sc, workspace.EventConfigChanged, topicSummary(t, workspace.Summary{
+		ID: testWorkspace, Name: testBackend, ConfigRevision: 2,
+	}))
+	if f.rootSel != testRootWeb || f.canStart(fx.sc) || !f.detailLoading(fx.sc) {
+		t.Fatalf("during reload: rootSel=%q canStart=%v loading=%v", f.rootSel, f.canStart(fx.sc), f.detailLoading(fx.sc))
+	}
+	h := newFrameRunner(t)
+	f.dialog.Open()
+	h.frame(t, image.Pt(800, 600), func(gtx *layout.Context) { f.layout(h.env, gtx, fx.sc, fx.c) })
+	f.dialog.Submit()
+	h.frame(t, image.Pt(800, 600), func(gtx *layout.Context) { f.layout(h.env, gtx, fx.sc, fx.c) })
+	f.submit(fx.sc, fx.c)
+	if f.busy || f.lastErr == "" || len(fx.fake.taken()) != 0 {
+		t.Fatalf("blocked submit posted or hid status: busy=%v err=%q calls=%+v", f.busy, f.lastErr, fx.fake.taken())
+	}
+
+	twoRootDetail(fx, "h2", 2, reads.gens[len(reads.gens)-1])
+	if !f.canStart(fx.sc) || f.rootSel != testRootWeb {
+		t.Fatalf("after reload: rootSel=%q canStart=%v", f.rootSel, f.canStart(fx.sc))
+	}
+	f.submit(fx.sc, fx.c)
+	if calls := fx.awaitWrite(); len(calls) != 1 || calls[0].root != testRootWeb {
+		t.Fatalf("calls = %+v, want StartSession with preserved root web", calls)
+	}
+}
+
+// TestStartFlowClearsMissingRootWhenDetailArrives pins that rootSel is cleared
+// once a refreshed detail confirms the chosen root was removed.
+func TestStartFlowClearsMissingRootWhenDetailArrives(t *testing.T) {
+	t.Parallel()
+	fx := newComposerFixture(t, stateReady, client.Capability{})
+	reads := &recordingReader{}
+	fx.sc.wsReads = reads
+	f := fx.c.start
+
+	fx.sc.applyResult(session.Result{
+		Kind:       session.ResultWorkspaces,
+		Workspaces: []client.WorkspaceSummary{{ID: testWorkspace, Name: testBackend, ConfigRevision: 1}},
+	})
+	f.chooseWorkspace(testWorkspace, fx.sc)
+	twoRootDetail(fx, "h1", 1, reads.gens[0])
+	f.rootSel = testRootWeb
+
+	feedEvent(fx.sc, workspace.EventRootRemoved, topicSummary(t, workspace.Summary{
+		ID: testWorkspace, Name: testBackend, ConfigRevision: 2,
+	}))
+	fx.sc.applyResult(session.Result{
+		Kind:       session.ResultWorkspace,
+		Generation: reads.gens[len(reads.gens)-1],
+		Workspace: client.Workspace{
+			ID: testWorkspace, Name: testBackend, ConfigHash: "h2", ConfigRevision: 2,
+			Roots: []client.WorkspaceRoot{{Name: testMainRoot, Path: testRootMainPath, Access: "rw"}},
+		},
+	})
+	if f.rootSel != "" {
+		t.Fatalf("rootSel after removed-root detail = %q, want cleared", f.rootSel)
 	}
 }
 

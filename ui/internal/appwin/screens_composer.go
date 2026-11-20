@@ -3,8 +3,11 @@ package appwin
 import (
 	"fmt"
 
+	"github.com/syurodev/fugue/pkg/client"
+
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/session"
+	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
 // The screens' composer glue (F10.4b): the reads the composer and the start
@@ -13,8 +16,8 @@ import (
 // layout — live in screens.go; both files are one screens type.
 
 // applyComposerResult folds one composer read into the screens: the open
-// session's slash commands, the vendors' capabilities, and the start flow's
-// workspace reads.
+// session's slash commands, the vendors' capabilities, and the workspace model
+// reads that feed both the sidebar and the start dialog.
 func (s *screens) applyComposerResult(r session.Result) {
 	switch r.Kind {
 	case session.ResultCommands:
@@ -36,18 +39,66 @@ func (s *screens) applyComposerResult(r session.Result) {
 		}
 	case session.ResultWorkspaces:
 		s.pendingWorkspaces = false
-		s.composer.start.applyWorkspaces(r.Workspaces)
 		if r.Err != nil {
 			s.fail(fmt.Errorf("list the workspaces: %w", r.Err))
+			return
 		}
+		s.workspaces.ApplyList(workspaceSummariesFromClient(r.Workspaces))
+		s.pruneWorkspaceHeaders()
+		s.reconcileWorkspaceDialogs()
 	case session.ResultWorkspace:
-		s.composer.start.applyDetail(r.Workspace)
 		if r.Err != nil {
 			s.fail(fmt.Errorf("read the workspace: %w", r.Err))
+			return
 		}
+		det := workspaceDetailFromClient(&r.Workspace)
+		det.Generation = r.Generation
+		s.workspaces.ApplyDetail(det)
+		if s.workspaces.Generation(det.ID) == r.Generation {
+			delete(s.wsDetailReq, det.ID)
+		}
+		s.composer.start.reconcile(s)
 	case session.ResultSessions, session.ResultPage:
 		// The list and page reads fold in applyResult.
 	}
+}
+
+// workspaceSummariesFromClient maps pkg/client workspace summaries into the
+// workspace model's summary slice.
+func workspaceSummariesFromClient(list []client.WorkspaceSummary) []workspace.Summary {
+	out := make([]workspace.Summary, 0, len(list))
+	for _, w := range list {
+		out = append(out, workspace.Summary{
+			ID:                        w.ID,
+			Name:                      w.Name,
+			MissingRoots:              w.MissingRoots,
+			ConfigRevision:            w.ConfigRevision,
+			PendingPolicyConfirmation: w.PendingPolicyConfirmation,
+		})
+	}
+	return out
+}
+
+// workspaceDetailFromClient maps pkg/client's Workspace into the workspace
+// model's Detail, carrying ConfigHash, ConfigRevision, Roots and PolicyDiff.
+func workspaceDetailFromClient(w *client.Workspace) *workspace.Detail {
+	det := &workspace.Detail{
+		ID:             w.ID,
+		Name:           w.Name,
+		ConfigHash:     w.ConfigHash,
+		ConfigRevision: w.ConfigRevision,
+		MissingRoots:   w.MissingRoots,
+		Pending:        w.PendingPolicyConfirmation,
+		Roots:          make([]workspace.Root, 0, len(w.Roots)),
+		Diff:           make([]workspace.DiffEntry, 0, len(w.PolicyDiff)),
+	}
+	for _, r := range w.Roots {
+		det.Roots = append(det.Roots, workspace.Root{Name: r.Name, Path: r.Path, Access: r.Access, Missing: r.Missing})
+	}
+	for _, d := range w.PolicyDiff {
+		det.Diff = append(det.Diff, workspace.DiffEntry{Key: d.Key, OldValue: d.OldValue, NewValue: d.NewValue})
+	}
+	return det
 }
 
 // applyPostResult folds one finished write into the screens. A failed send
@@ -123,12 +174,18 @@ func (s *screens) requestWorkspaces() {
 		return
 	}
 	s.pendingWorkspaces = true
-	s.fetcher.RequestWorkspaces()
+	s.wsReads.RequestWorkspaces()
 }
 
-// requestWorkspace reads one workspace's roots.
+// requestWorkspace reads one workspace's detail if no read at the current
+// generation is already in flight.
 func (s *screens) requestWorkspace(id string) {
-	s.fetcher.RequestWorkspace(id)
+	gen := s.workspaces.Generation(id)
+	if armedGen, armed := s.wsDetailReq[id]; armed && armedGen == gen {
+		return
+	}
+	s.wsDetailReq[id] = gen
+	s.wsReads.RequestWorkspace(id, gen)
 }
 
 // probeMissingVendors re-probes when the session list names a vendor the
