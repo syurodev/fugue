@@ -25,14 +25,15 @@ import (
 // fakeTaskSessions is the vendor layer of the dispatcher tests: it records
 // what the dispatcher starts and sends, and starts nothing.
 type fakeTaskSessions struct {
-	mu        sync.Mutex
-	starts    []taskSessionRequest
-	sends     map[string][]string
-	resumes   []fakeResume
-	closed    []string
-	noRoom    bool
-	startErr  error
-	resumeErr error
+	mu         sync.Mutex
+	starts     []taskSessionRequest
+	sends      map[string][]string
+	resumes    []fakeResume
+	closed     []string
+	noRoom     bool
+	reserveErr error
+	startErr   error
+	resumeErr  error
 	// sendErr fails every send after the text was recorded; holdSend blocks
 	// the send inside the fake, so a test can hold the pump mid-send and
 	// observe what a concurrent trigger does.
@@ -53,10 +54,17 @@ func (f *fakeTaskSessions) HasCapacity(context.Context) (bool, error) {
 	return !f.noRoom, nil
 }
 
+func (f *fakeTaskSessions) HasCapacityFor(ctx context.Context, _, _ string) (bool, error) {
+	return f.HasCapacity(ctx)
+}
+
 func (f *fakeTaskSessions) ReserveSlot(context.Context, string, string, string) (func(), error) {
 	f.mu.Lock()
-	noRoom := f.noRoom
+	noRoom, reserveErr := f.noRoom, f.reserveErr
 	f.mu.Unlock()
+	if reserveErr != nil {
+		return nil, reserveErr
+	}
 	if noRoom {
 		return nil, ErrVendorSessionCapacity
 	}

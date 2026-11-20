@@ -127,7 +127,7 @@ func (a *vendorSessionActor) autoDetachEligible(ctx context.Context) bool {
 	if a.info.Role != string(vendorstore.RoleTeamManager) && a.info.Role != string(vendorstore.RoleMember) {
 		return false
 	}
-	// TODO(F11.6d): allow agy auto-detach after F11.6d measures agy idle-send and session/load.
+	// TODO(F11.6): F11.6d will allow agy auto-detach after measuring agy idle-send and session/load.
 	if a.info.Vendor == VendorAGY {
 		return false
 	}
@@ -206,19 +206,19 @@ func (a *vendorSessionActor) startDetach() error {
 }
 
 func (a *vendorSessionActor) persistDetach(ctx context.Context, proof process.StopProof, closeErr error) error {
+	if proof.Status != process.StopProofProved || closeErr != nil {
+		a.attached = false
+		return a.persistClose(ctx, vendor.CloseHostStop, proof, closeErr)
+	}
 	if err := a.awaitSessionEndWork(ctx); err != nil {
 		return err
-	}
-	status := string(proof.Status)
-	if status != string(process.StopProofProved) || closeErr != nil {
-		status = string(process.StopProofUnknown)
 	}
 	next, _, err := vendor.Transition(a.state, vendor.Fact{Kind: vendor.FactDetach})
 	if err != nil {
 		return fmt.Errorf("record detach vendor session state: %w", err)
 	}
 	writeCtx := context.WithoutCancel(ctx)
-	if err := a.append(writeCtx, &vendorstore.Event{Type: vendorstore.VendorProcessExited, StopProof: status}); err != nil {
+	if err := a.append(writeCtx, &vendorstore.Event{Type: vendorstore.VendorProcessExited, StopProof: string(process.StopProofProved)}); err != nil {
 		return err
 	}
 	if err := a.append(writeCtx, &vendorstore.Event{Type: vendorstore.VendorSessionStateChanged, State: vendorstore.StateDetached}); err != nil {

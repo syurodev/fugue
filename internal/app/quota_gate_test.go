@@ -4,12 +4,12 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/syurodev/fugue/internal/gitops"
+	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/testutil"
@@ -57,7 +57,7 @@ func setupQuotaTeamAndTasks(ctx context.Context, t *testing.T, f *transcriptFixt
 	}
 }
 
-func newQuotaDispatchHarness(t *testing.T, accounts *vendor.Accounts, ramBytes uint64, beforeReserve func(context.Context)) (*transcriptFixture, *VendorSessions, *VendorService, *teamDispatcher) {
+func newQuotaDispatchHarness(t *testing.T, accounts *vendor.Accounts, ramBytes uint64) (*transcriptFixture, *VendorSessions, *VendorService, *teamDispatcher) {
 	t.Helper()
 	ctx := t.Context()
 	f := newEmptySessionsFixture(t)
@@ -84,7 +84,7 @@ func newQuotaDispatchHarness(t *testing.T, accounts *vendor.Accounts, ramBytes u
 	disp := newTeamDispatcher(&teamDispatcherDeps{
 		Store: f.store, Sessions: vendorTaskSessions{svc: svc}, Admit: newSchedulerAdmitter(m, f.store, accounts),
 		Roots: pdRootResolver{dir: repoDir}, Git: gm, DataDir: filepath.Join(t.TempDir(), "data"),
-		IDs: ids.NewSequence("qgd-"), Vault: f.vault, TestBeforeReserveSlot: beforeReserve,
+		IDs: ids.NewSequence("qgd-"), Vault: f.vault,
 	})
 	return f, m, svc, disp
 }
@@ -92,7 +92,7 @@ func newQuotaDispatchHarness(t *testing.T, accounts *vendor.Accounts, ramBytes u
 func TestQuotaGateBlocksTasksAboveEightyFivePercent(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	f, m, _, disp := newQuotaDispatchHarness(t, nil, 16<<30, nil)
+	f, m, _, disp := newQuotaDispatchHarness(t, nil, 16<<30)
 	now := f.clock.Now()
 	accounts := vendor.NewAccounts(f.clock, []vendor.AccountVendor{{Name: VendorClaude, DirectQuota: true}})
 	disp.deps.Admit = newSchedulerAdmitter(m, f.store, accounts)
@@ -134,7 +134,7 @@ func TestQuotaGateBlocksTasksAboveEightyFivePercent(t *testing.T) {
 func TestPausedAccountReopensAtResetsAtAndDispatchesQueuedTasks(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	f, m, svc, disp := newQuotaDispatchHarness(t, nil, 16<<30, nil)
+	f, m, svc, disp := newQuotaDispatchHarness(t, nil, 16<<30)
 	accounts := vendor.NewAccounts(f.clock, []vendor.AccountVendor{{Name: VendorClaude, DirectQuota: true}})
 	disp.deps.Admit = newSchedulerAdmitter(m, f.store, accounts)
 	resetAt := f.clock.Now().Add(5 * time.Minute)
@@ -182,19 +182,20 @@ func TestPausedAccountReopensAtResetsAtAndDispatchesQueuedTasks(t *testing.T) {
 
 func verifyHostStartQuotaResetRecalculation(ctx context.Context, t *testing.T, f *transcriptFixture, m *VendorSessions, svc *VendorService) {
 	t.Helper()
-	accounts2 := vendor.NewAccounts(f.clock, []vendor.AccountVendor{{Name: VendorClaude, DirectQuota: true}})
-	accounts2.ObserveQuota(VendorClaude, &vendor.RateLimit{Windows: []vendor.Window{{Name: "5h", Utilization: 0.90, ResetsAt: f.clock.Now().Add(2 * time.Minute)}}})
+	clk2 := clock.NewFake(f.clock.Now())
+	accounts2 := vendor.NewAccounts(clk2, []vendor.AccountVendor{{Name: VendorClaude, DirectQuota: true}})
+	accounts2.ObserveQuota(VendorClaude, &vendor.RateLimit{Windows: []vendor.Window{{Name: "5h", Utilization: 0.90, ResetsAt: clk2.Now().Add(2 * time.Minute)}}})
 	var startReopened atomic.Bool
 	if _, err := newAccountsService(accounts2, svc, NewEventHub("restart-inc"), accountsServiceDeps{
-		Clock: f.clock, IDs: ids.NewSequence("asvc2-"), GoTask: m.spawn,
+		Clock: clk2, IDs: ids.NewSequence("asvc2-"), GoTask: m.spawn,
 		OnQuotaReopen: func() { startReopened.Store(true) },
 	}); err != nil {
 		t.Fatalf("newAccountsService restart: %v", err)
 	}
-	if err := f.clock.BlockUntilPending(ctx, 1); err != nil {
+	if err := clk2.BlockUntilPending(ctx, 1); err != nil {
 		t.Fatalf("wait restarted quota timer: %v", err)
 	}
-	f.clock.Advance(2 * time.Minute)
+	clk2.Advance(2 * time.Minute)
 	testutil.Spin(t, "restarted host quota timer fires", startReopened.Load)
 }
 
@@ -266,28 +267,26 @@ func runTaskTurnFailureCase(t *testing.T, name string, failure vendor.FailureCla
 func TestAdmitToReserveSlotRaceKeepsTaskQueuedWithoutTaskAssigned(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	var mRef atomic.Pointer[VendorSessions]
-	var stealOnce sync.Once
-	var stole atomic.Bool
-	var stealErr error
-	beforeReserve := func(c context.Context) {
-		stealOnce.Do(func() {
-			stole.Store(true)
-			stealErr = mRef.Load().Start(c, &vendorstore.Session{
-				ID: "slot-2", Vendor: VendorClaude, AccountID: vendorDefaultAccount, Role: string(vendorstore.RoleSolo),
-			}, &vendor.StartSpec{SessionID: "slot-2"})
-		})
+	f := newEmptySessionsFixture(t)
+	repoDir := t.TempDir()
+	initRepo(t, repoDir)
+	gm, err := gitops.NewManager(gitBinary(t), filepath.Join(t.TempDir(), "gitdata"), f.clock)
+	if err != nil {
+		t.Fatal(err)
 	}
-	f, m, _, disp := newQuotaDispatchHarness(t, nil, 4<<30+3*(400<<20), beforeReserve)
-	mRef.Store(m)
+	fake := &fakeTaskSessions{reserveErr: ErrVendorSessionCapacity}
+	disp := newTeamDispatcher(&teamDispatcherDeps{
+		Store: f.store, Sessions: fake, Admit: newSchedulerAdmitter(fake, f.store, nil),
+		Roots: pdRootResolver{dir: repoDir}, Git: gm, DataDir: filepath.Join(t.TempDir(), "data"),
+		IDs: ids.NewSequence("raced-"), Vault: f.vault,
+	})
 	setupQuotaTeamAndTasks(ctx, t, f, "race-team", []string{"race-team.m1"})
-	startPDSession(t, m, "slot-1", VendorClaude, vendorstore.RoleLead, "race-team", "", "")
 
 	if dispErr := disp.Dispatch(ctx, "race-team"); dispErr != nil {
 		t.Fatalf("Dispatch during slot race: %v", dispErr)
 	}
-	if !stole.Load() || stealErr != nil {
-		t.Fatalf("TestBeforeReserveSlot stole=%v err=%v, want true/nil", stole.Load(), stealErr)
+	if fake.startCount() != 0 {
+		t.Fatalf("StartTaskSession called %d times, want 0", fake.startCount())
 	}
 	_, tasks, err := f.store.TeamSnapshot(ctx, "race-team")
 	if err != nil {
@@ -305,5 +304,4 @@ func TestAdmitToReserveSlotRaceKeepsTaskQueuedWithoutTaskAssigned(t *testing.T) 
 			t.Fatalf("unexpected EventTaskAssigned recorded for m1 when slot was lost: %+v", evs[i])
 		}
 	}
-	mustCloseActorSessions(t, m)
 }

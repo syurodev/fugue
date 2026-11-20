@@ -43,9 +43,6 @@ func (d *teamDispatcher) startChild(ctx context.Context, rec *vendorstore.TeamRe
 	if code != "" {
 		return true, d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateQueued, "", code)
 	}
-	if d.deps.TestBeforeReserveSlot != nil {
-		d.deps.TestBeforeReserveSlot(ctx)
-	}
 	releaseSlot, capErr := d.deps.Sessions.ReserveSlot(ctx, launch.req.SessionID, launch.req.Vendor, vendorDefaultAccount)
 	if capErr != nil {
 		if errors.Is(capErr, ErrVendorSessionCapacity) || errcode.CodeOf(capErr) == errcode.VendorCapacity {

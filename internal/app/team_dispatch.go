@@ -52,10 +52,9 @@ type teamDispatcherDeps struct {
 	// trigger (the decide-path tests admit nothing, so they enqueue none).
 	Wake *teamWake
 	// Test hooks, nil in production, invoked between TeamSnapshot and
-	// appendTaskEvent / ReserveSlot so tests can inject real races.
+	// appendTaskEvent so tests can inject real races.
 	TestBeforeStartAppend func(context.Context)
 	TestBeforeFailAppend  func(context.Context)
-	TestBeforeReserveSlot func(context.Context)
 }
 
 // teamDispatcher starts the queued tasks of active teams. One run at a time:

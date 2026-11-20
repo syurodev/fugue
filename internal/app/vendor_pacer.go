@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
@@ -19,6 +20,7 @@ const (
 	defaultPromptPacingMinSeconds = 10
 	defaultPromptPacingMaxSeconds = 15
 	maxPacedQueuePerVendor        = 64
+	pacedSendTimeout              = 30 * time.Second
 )
 
 // ErrPacingQueueFull reports that a vendor's bounded fugue-prompt queue is full.
@@ -208,7 +210,7 @@ func (p *vendorPacer) deliverItem(ctx context.Context, vq *vendorPacerQueue, ite
 		return ErrHostStopping
 	}
 	item.actor.touch()
-	err := item.actor.call(ctx, actorCommand{kind: commandSend, input: item.input})
+	err := p.callSendWithTimeout(ctx, item.actor, item.input)
 	if err == nil {
 		interval := p.pacingInterval(ctx)
 		if interval > 0 {
@@ -216,6 +218,35 @@ func (p *vendorPacer) deliverItem(ctx context.Context, vq *vendorPacerQueue, ite
 			vq.nextAllowed = p.clk.Now().Add(interval)
 			p.mu.Unlock()
 		}
+	}
+	return err
+}
+
+func (p *vendorPacer) callSendWithTimeout(ctx context.Context, actor *vendorSessionActor, input vendor.Input) error {
+	sendCtx, cancelSend := context.WithCancel(ctx)
+	defer cancelSend()
+	timer := p.clk.NewTimer(pacedSendTimeout)
+	defer timer.Stop()
+	stopWatch := make(chan struct{})
+	doneWatch := make(chan struct{})
+	var timedOut atomic.Bool
+	p.spawn("vendor-pacer-timeout-"+actor.info.ID, func(watchCtx context.Context) error {
+		defer close(doneWatch)
+		select {
+		case <-timer.C():
+			timedOut.Store(true)
+			cancelSend()
+		case <-stopWatch:
+		case <-watchCtx.Done():
+		}
+		return nil
+	})
+	err := actor.call(sendCtx, actorCommand{kind: commandSend, input: input})
+	close(stopWatch)
+	cancelSend()
+	<-doneWatch
+	if timedOut.Load() {
+		return errcode.New(errcode.DeadlineExceeded, "timed out waiting for vendor session send")
 	}
 	return err
 }
