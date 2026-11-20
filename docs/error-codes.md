@@ -49,6 +49,10 @@ Changing this file needs a review of what clients can rely on; hiding a code nee
 | `vendor.workspace_mismatch` | The session is bound to the workspace root it was created in; resume cannot move it. |
 | `transcript.session_not_found` | The transcript session does not exist. |
 | `transcript.item_not_found` | The transcript item does not exist in this session. |
+| `vault.invalid_passphrase` | The vault passphrase or recovery key is invalid. |
+| `vault.rate_limited` | Too many failed vault unlock attempts; wait before retrying. |
+| `vault.not_configured` | The vault is not configured yet. |
+| `vault.already_configured` | The vault is already configured. |
 
 ## Hidden on purpose
 

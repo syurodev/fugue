@@ -152,6 +152,12 @@ func (f *fieldCore) begin(gtx *layout.Context, box image.Rectangle, o fieldOpts,
 	if disabled {
 		return ev
 	}
+	if o.masked {
+		f.ed.InputHint = key.HintPassword
+		f.drainUndo(gtx)
+	} else {
+		f.ed.InputHint = key.HintAny
+	}
 	f.ed.Submit = o.submit
 	if o.escapeClears && f.escape(gtx) {
 		ev.Changed = true
@@ -179,6 +185,17 @@ func (f *fieldCore) begin(gtx *layout.Context, box image.Rectangle, o fieldOpts,
 	}
 	f.hadFocus = gtx.Focused(&f.ed)
 	return ev
+}
+
+func (f *fieldCore) drainUndo(gtx *layout.Context) {
+	for {
+		if _, ok := gtx.Event(
+			key.Filter{Focus: &f.ed, Required: key.ModShortcut, Optional: key.ModShift, Name: key.Name("Z")},
+			key.Filter{Focus: &f.ed, Required: key.ModCtrl, Optional: key.ModShift, Name: key.Name("Z")},
+		); !ok {
+			return
+		}
+	}
 }
 
 // drainEditor applies the frame's editor events to ev and returns how many

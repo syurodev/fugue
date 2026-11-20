@@ -33,12 +33,13 @@ import (
 // respawned and no turn is replayed; a client brings a detached session back
 // through Resume.
 func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store, deps *HostDeps) error {
-	v, err := vault.NewService(ctx, vault.NewSQLKeyringStore(store.DB()), deps.IDs)
+	v, vaultSvc, err := newHostVault(ctx, hp, store, deps)
 	if err != nil {
-		return errcode.Wrap(errcode.Internal, "create the host vault", err)
+		return err
 	}
 	vs, err := vendorstore.New(ctx, store.DB(), v, deps.Clock, nil)
 	if err != nil {
+		vaultSvc.Close()
 		return errcode.Wrap(errcode.Internal, "open the vendor store", err)
 	}
 	if _, recErr := vs.RecoverTeams(ctx); recErr != nil {
@@ -69,6 +70,7 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 	hp.rt.transcripts = transcripts
 	hp.vendorStore = vs
 	hp.closeVendor = func() error {
+		vaultSvc.Close()
 		if unregisterVaultGuard != nil {
 			unregisterVaultGuard()
 		}
@@ -84,6 +86,22 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 		return err
 	}
 	return nil
+}
+
+// newHostVault opens the host vault and the Host API vault service over it;
+// the service is published on hp before any later step can fail, so the
+// caller's error paths own closing it.
+func newHostVault(ctx context.Context, hp *HostProcess, store *storage.Store, deps *HostDeps) (*vault.Service, *VaultService, error) {
+	v, err := vault.NewService(ctx, vault.NewSQLKeyringStore(store.DB()), deps.IDs)
+	if err != nil {
+		return nil, nil, errcode.Wrap(errcode.Internal, "create the host vault", err)
+	}
+	vaultSvc, err := newVaultService(v, hp.rt.hub, deps.Clock)
+	if err != nil {
+		return nil, nil, errcode.Wrap(errcode.Internal, "create the host vault service", err)
+	}
+	hp.rt.vaultService = vaultSvc
+	return v, vaultSvc, nil
 }
 
 func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendorstore.Store, transcripts *Transcripts, v *vault.Service, deps *HostDeps) (*VendorSessions, error) {
@@ -291,6 +309,14 @@ func rawXDGRuntimeDir(env []string) string {
 // Vault returns the host's vault. Clients cannot unlock it before F10.5; the
 // composition root and tests hold it.
 func (hp *HostProcess) Vault() *vault.Service { return hp.vault }
+
+// VaultService returns the host vault service the Host API serves.
+func (rt *HostRuntime) VaultService() (*VaultService, error) {
+	if rt.vaultService == nil {
+		return nil, errcode.New(errcode.Unavailable, "the vault service is unavailable")
+	}
+	return rt.vaultService, nil
+}
 
 // VendorService returns the vendor session service the Host API serves.
 func (rt *HostRuntime) VendorService() (*VendorService, error) {

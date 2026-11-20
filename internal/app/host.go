@@ -134,6 +134,7 @@ type HostRuntime struct {
 	workspaces      *WorkspaceService
 	vendors         *VendorService
 	accountsService *AccountsService
+	vaultService    *VaultService
 	transcripts     *Transcripts
 	sessionTools    *SessionToolService
 	teamProposals   *TeamProposalService

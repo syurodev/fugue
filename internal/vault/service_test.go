@@ -277,3 +277,47 @@ func TestEachServiceHasItsOwnIncarnation(t *testing.T) {
 		t.Error("incarnations must be set and differ between services")
 	}
 }
+
+func TestBytesMethodsClearCallerSlices(t *testing.T) {
+	t.Parallel()
+	s, err := NewService(t.Context(), NewMemoryKeyringStore(nil), ids.NewSequence("inc-"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pw := []byte(longPassword)
+	rec, err := s.SetupBytes(t.Context(), pw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(pw, make([]byte, len(pw))) {
+		t.Fatal("SetupBytes did not clear caller password slice")
+	}
+	s.Lock()
+	pw2 := []byte(longPassword)
+	if uerr := s.UnlockBytes(t.Context(), pw2); uerr != nil {
+		t.Fatal(uerr)
+	}
+	if !bytes.Equal(pw2, make([]byte, len(pw2))) {
+		t.Fatal("UnlockBytes did not clear caller password slice")
+	}
+	s.Lock()
+	recCopy := bytes.Clone(rec)
+	if rerr := s.UnlockWithRecoveryBytes(t.Context(), recCopy); rerr != nil {
+		t.Fatal(rerr)
+	}
+	if !bytes.Equal(recCopy, make([]byte, len(recCopy))) {
+		t.Fatal("UnlockWithRecoveryBytes did not clear caller recovery slice")
+	}
+	clear(rec)
+	flakySvc, err := NewService(t.Context(), &flakyStore{inner: NewMemoryKeyringStore(nil), existsErr: errStore}, ids.NewSequence("inc-"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pwFail := []byte(longPassword)
+	if _, serr := flakySvc.SetupBytes(t.Context(), pwFail); errcode.CodeOf(serr) != errcode.Internal {
+		t.Fatalf("SetupBytes on failing store = %v, want internal", serr)
+	}
+	if !bytes.Equal(pwFail, make([]byte, len(pwFail))) {
+		t.Fatal("SetupBytes did not clear caller password slice on error")
+	}
+}

@@ -125,9 +125,17 @@ func (c *Client) RejectWorkspaceConfig(ctx context.Context, workspaceID, expecte
 // carries one. The code rides the connect error detail (host-api §4); a
 // hidden or uncoded failure carries no detail and reports none.
 func WorkspaceCodeOf(err error) (string, bool) {
+	detail, ok := errorDetailOf(err)
+	if !ok {
+		return "", false
+	}
+	return detail.GetCode(), true
+}
+
+func errorDetailOf(err error) (*hostv1.ErrorDetail, bool) {
 	var cerr *connect.Error
 	if !errors.As(err, &cerr) {
-		return "", false
+		return nil, false
 	}
 	for _, d := range cerr.Details() {
 		msg, derr := d.Value()
@@ -138,7 +146,7 @@ func WorkspaceCodeOf(err error) (string, bool) {
 		if !ok {
 			continue
 		}
-		return detail.GetCode(), true
+		return detail, true
 	}
-	return "", false
+	return nil, false
 }

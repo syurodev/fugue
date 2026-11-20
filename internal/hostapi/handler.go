@@ -2,6 +2,7 @@ package hostapi
 
 import (
 	"context"
+	"errors"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -39,14 +40,14 @@ func connectCode(c errcode.Code) connect.Code {
 		return connect.CodeInvalidArgument
 	case errcode.NotFound, errcode.InteractionNotFound, errcode.WorkspaceNotFound, errcode.WorkspaceRootMissing, errcode.VendorSessionNotFound, errcode.TranscriptSessionNotFound, errcode.TranscriptItemNotFound:
 		return connect.CodeNotFound
-	case errcode.AlreadyExists, errcode.WorkspaceAlreadyExists:
+	case errcode.AlreadyExists, errcode.WorkspaceAlreadyExists, errcode.VaultAlreadyConfigured:
 		return connect.CodeAlreadyExists
 	case errcode.FailedPrecondition, errcode.UnsupportedVersion, errcode.InteractionAlreadyAnswered, errcode.InteractionStaleIncarnation, errcode.WorkspaceConfigChanged, errcode.WorkspaceConfigUnconfirmed,
-		errcode.VendorUnsupported, errcode.VendorSessionState, errcode.VendorTurnNotActive, errcode.VendorVaultLocked:
+		errcode.VendorUnsupported, errcode.VendorSessionState, errcode.VendorTurnNotActive, errcode.VendorVaultLocked, errcode.VaultNotConfigured:
 		return connect.CodeFailedPrecondition
-	case errcode.FrameTooLarge, errcode.InteractionTextTooLarge, errcode.WorkspaceConfigTooLarge, errcode.VendorCapacity:
+	case errcode.FrameTooLarge, errcode.InteractionTextTooLarge, errcode.WorkspaceConfigTooLarge, errcode.VendorCapacity, errcode.VaultRateLimited:
 		return connect.CodeResourceExhausted
-	case errcode.PermissionDenied, errcode.WorkspacePathDenied, errcode.WorkspaceOwnershipInvalid:
+	case errcode.PermissionDenied, errcode.WorkspacePathDenied, errcode.WorkspaceOwnershipInvalid, errcode.VaultInvalidPassphrase:
 		return connect.CodePermissionDenied
 	case errcode.Unavailable:
 		return connect.CodeUnavailable
@@ -82,6 +83,10 @@ func toConnectError(ctx context.Context, backend app.Backend, err error) error {
 		if st, serr := backend.Status(ctx); serr == nil {
 			detail.SupportedApiVersions = st.SupportedAPIVersions
 		}
+	}
+	var raErr interface{ RetryAfterSeconds() int64 }
+	if errors.As(err, &raErr) {
+		detail.RetryAfterSeconds = raErr.RetryAfterSeconds()
 	}
 	d, derr := connect.NewErrorDetail(detail)
 	if derr != nil {

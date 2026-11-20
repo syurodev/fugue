@@ -64,13 +64,20 @@ func newKDFParams(random io.Reader) (KDFParams, error) {
 
 // DeriveKey derives a key of params.KeyLength bytes from the password.
 func DeriveKey(password string, params KDFParams) ([]byte, error) {
-	if password == "" {
+	buf := []byte(password)
+	defer clear(buf)
+	return DeriveKeyBytes(buf, params)
+}
+
+// DeriveKeyBytes derives a key of params.KeyLength bytes from password bytes.
+func DeriveKeyBytes(password []byte, params KDFParams) ([]byte, error) {
+	if len(password) == 0 {
 		return nil, errcode.New(errcode.InvalidArgument, "password is required")
 	}
 	if err := params.validate(); err != nil {
 		return nil, err
 	}
-	return argon2.IDKey([]byte(password), params.Salt, params.Iterations, params.Memory, params.Parallelism, params.KeyLength), nil
+	return argon2.IDKey(password, params.Salt, params.Iterations, params.Memory, params.Parallelism, params.KeyLength), nil
 }
 
 func (p KDFParams) validate() error {

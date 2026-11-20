@@ -1,0 +1,59 @@
+syntax = "proto3";
+
+package fugue.vault.v1;
+
+// VaultStatus describes the vault lifecycle state without revealing secrets.
+message VaultStatus {
+  // state is "not_configured", "locked", or "unlocked".
+  string state = 1;
+  uint64 revision = 2;
+  string incarnation = 3;
+  int64 retry_after_seconds = 4;
+}
+
+message GetStatusRequest {}
+
+message GetStatusResponse {
+  VaultStatus status = 1;
+}
+
+message SetupRequest {
+  bytes passphrase = 1 [debug_redact = true];
+}
+
+message SetupResponse {
+  VaultStatus status = 1;
+  bytes recovery_key = 2 [debug_redact = true];
+}
+
+message UnlockRequest {
+  bytes passphrase = 1 [debug_redact = true];
+}
+
+message UnlockResponse {
+  VaultStatus status = 1;
+}
+
+message UnlockWithRecoveryRequest {
+  bytes recovery_key = 1 [debug_redact = true];
+}
+
+message UnlockWithRecoveryResponse {
+  VaultStatus status = 1;
+}
+
+message LockRequest {}
+
+message LockResponse {
+  VaultStatus status = 1;
+}
+
+// VaultService manages host-side vault setup, unlock, and lock over the
+// local-principal Host API (desktop-app §5, docs/security.md, Q-140).
+service VaultService {
+  rpc GetStatus(GetStatusRequest) returns (GetStatusResponse);
+  rpc Setup(SetupRequest) returns (SetupResponse);
+  rpc Unlock(UnlockRequest) returns (UnlockResponse);
+  rpc UnlockWithRecovery(UnlockWithRecoveryRequest) returns (UnlockWithRecoveryResponse);
+  rpc Lock(LockRequest) returns (LockResponse);
+}

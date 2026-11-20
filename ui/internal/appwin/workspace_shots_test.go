@@ -120,10 +120,18 @@ func renderWorkspaceShot(t *testing.T, win *headless.Window, spec shotSpec) *ima
 	}
 	env := &kit.Env{Th: &th, Sh: sh, UIScale: spec.uiScale, ReducedMotion: true}
 	sc := buildShotScreens(t, spec.scene)
+	img := renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), spec.name)
+	if sc.lastErr != "" {
+		t.Fatalf("shot %s recorded screen error: %s", spec.name, sc.lastErr)
+	}
+	return img
+}
+
+func renderShotFrames(t *testing.T, win *headless.Window, env *kit.Env, sc *screens, size image.Point, name string) *image.RGBA {
+	t.Helper()
 	router := new(input.Router)
 	var ops op.Ops
 	now := time.Unix(1_700_000_000, 0)
-	size := image.Pt(shotWindowW, shotWindowH)
 	for range 3 {
 		ops.Reset()
 		device := unit.Metric{PxPerDp: 1, PxPerSp: 1}
@@ -139,17 +147,14 @@ func renderWorkspaceShot(t *testing.T, win *headless.Window, spec shotSpec) *ima
 		drawWindow(&gtx, env, sc)
 		env.FrameEnd(&gtx)
 		if err := win.Frame(&ops); err != nil {
-			t.Fatalf("render shot %s: %v", spec.name, err)
+			t.Fatalf("render shot %s: %v", name, err)
 		}
 		router.Frame(&ops)
 		now = now.Add(time.Second / 60)
 	}
-	if sc.lastErr != "" {
-		t.Fatalf("shot %s recorded screen error: %s", spec.name, sc.lastErr)
-	}
 	img := image.NewRGBA(image.Rectangle{Max: size})
 	if err := win.Screenshot(img); err != nil {
-		t.Fatalf("screenshot %s: %v", spec.name, err)
+		t.Fatalf("screenshot %s: %v", name, err)
 	}
 	return img
 }

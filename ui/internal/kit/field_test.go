@@ -583,3 +583,24 @@ func checkFieldContrastOnSurface(t *testing.T, env *Env, surface contrastSurface
 		t.Errorf("error text on %s: contrast %.2f below 4.5", surface.name, got)
 	}
 }
+
+// TestSecretFieldNoRevealAndNoUndo verifies vault passphrase fields cannot be
+// revealed and ignore shortcut undo operations.
+func TestSecretFieldNoRevealAndNoUndo(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	st := NewTextFieldState()
+	st.SetRevealed(true)
+	p := &TextFieldProps{Label: "Passphrase", Variant: TextFieldSecret, NoReveal: true}
+
+	secretFreshIsEmpty(t, h, st, p)
+	secretTypedMasked(t, h, st, p)
+	if st.core.ed.Mask == 0 {
+		t.Fatal("NoReveal secret field cleared mask after SetRevealed(true)")
+	}
+	h.tap("Z", key.ModShortcut)
+	fieldFrame(t, h, st, p)
+	if got := st.Text(); got != secretValue {
+		t.Fatalf("undo modified masked secret field to %q, want %q", got, secretValue)
+	}
+}

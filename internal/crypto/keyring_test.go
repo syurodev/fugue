@@ -111,15 +111,17 @@ func TestKeyringRequiresAMasterPassword(t *testing.T) {
 
 func TestRecoveryKeysAreFreshAndURLSafe(t *testing.T) {
 	t.Parallel()
-	first, err := newRecoveryKey(rand.Reader)
+	first, err := newRecoveryKeyBytes(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := newRecoveryKey(rand.Reader)
+	defer clear(first)
+	second, err := newRecoveryKeyBytes(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if first == second || len(first) != 32 {
+	defer clear(second)
+	if bytes.Equal(first, second) || len(first) != 32 {
 		t.Errorf("recovery keys must differ and be 32 characters long, got lengths %d and %d", len(first), len(second))
 	}
 }
@@ -191,5 +193,29 @@ func TestChangePasswordFailsWithoutChangingTheKeyring(t *testing.T) {
 				t.Errorf("the original password stopped working: %v", err)
 			}
 		})
+	}
+}
+
+func TestBytesEntryPointsAndZeroing(t *testing.T) {
+	t.Parallel()
+	pass := []byte(primaryPhrase)
+	kr, rec, err := NewKeyringBytes(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dek1, err := kr.UnlockWithPasswordBytes(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dek2, err := kr.UnlockWithRecoveryBytes(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(dek1, dek2) {
+		t.Fatal("password and recovery DEK mismatch")
+	}
+	// Trigger error path on second wrapDEKBytes inside newKeyringBytes (limit 95 -> fails recovery wrap).
+	if _, _, err := newKeyringBytes(io.LimitReader(newStream(), 95), pass); err == nil {
+		t.Fatal("expected error when random fails during recovery wrap")
 	}
 }
