@@ -155,7 +155,7 @@ func initHostTopics(hp *HostProcess, store *storage.Store, deps *HostDeps) error
 	}
 	hp.rt.workspaces = workspaces
 	hp.rt.hostResources = resolveHostResources(deps.HostResources)
-	hp.rt.heavy = newHeavySemaphore(hp.rt.hostResources, globalHostConfigReader(workspaces))
+	hp.rt.heavy = newHeavySemaphore(hp.rt.hostResources, globalHostConfigReader(workspaces), deps.Clock, nil, hp.rt.goTask)
 	return nil
 }
 

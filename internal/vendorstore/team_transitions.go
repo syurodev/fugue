@@ -30,6 +30,8 @@ func teamTransitions() map[teamTransKey]TeamState {
 		// travels in the event's sealed payload (§5.4).
 		{TeamStateActive, EventTeamAmended, ""}:                  TeamStateActive,
 		{TeamStateActive, EventTeamNoted, ""}:                    TeamStateActive,
+		{TeamStateActive, EventTeamDeadlineReached, ""}:          TeamStateActive,
+		{TeamStateActive, EventTeamDeadlineExtended, ""}:         TeamStateActive,
 		{TeamStateActive, EventTeamEnded, outcomeCancelled}:      TeamStateCancelled,
 		{TeamStateActive, EventTeamEnded, outcomeFailed}:         TeamStateFailed,
 		{TeamStateFinalReview, EventTeamDecided, "revision"}:     TeamStateActive,
@@ -46,12 +48,14 @@ func taskTransitions() map[taskTransKey]TaskState {
 		{TaskStateQueued, EventTaskEnded, outcomeFailed}:            TaskStateFailed,
 		{TaskStateQueued, EventTaskEnded, outcomeCancelled}:         TaskStateCancelled,
 		{TaskStateStarting, EventTaskStarted, ""}:                   TaskStateRunning,
+		{TaskStateStarting, EventTaskStalled, ""}:                   TaskStateStarting,
 		{TaskStateStarting, EventTaskEnded, outcomeStopped}:         TaskStateStopped,
 		{TaskStateStarting, EventTaskEnded, outcomeFailed}:          TaskStateFailed,
 		{TaskStateStarting, EventTaskEnded, outcomeCancelled}:       TaskStateCancelled,
 		{TaskStateStarting, EventTaskMarkedUnknown, ""}:             TaskStateUnknown,
 		{TaskStateRunning, EventTaskQuestionAsked, ""}:              TaskStateAsking,
 		{TaskStateRunning, EventTaskReported, ""}:                   TaskStateChecking,
+		{TaskStateRunning, EventTaskStalled, ""}:                    TaskStateRunning,
 		{TaskStateRunning, EventTaskEnded, outcomeStopped}:          TaskStateStopped,
 		{TaskStateRunning, EventTaskEnded, outcomeFailed}:           TaskStateFailed,
 		{TaskStateRunning, EventTaskEnded, outcomeCancelled}:        TaskStateCancelled,
@@ -106,14 +110,46 @@ func nextTaskState(from TaskState, ev TeamEventType, outcome, failureCode string
 	return next, nil
 }
 
+// AllTeamEventTypes returns every supported TeamEventType in canonical order.
+func AllTeamEventTypes() []TeamEventType {
+	return []TeamEventType{
+		EventTeamProposed, EventTeamStarted, EventTeamFinalReview, EventTeamAmended,
+		EventTeamNoted, EventTeamDeadlineReached, EventTeamDeadlineExtended,
+		EventTeamDecided, EventTeamEnded,
+		EventTaskCreated, EventTaskAssigned, EventTaskStarted,
+		EventTaskQuestionAsked, EventTaskQuestionAnswered, EventTaskReported,
+		EventTaskCheckCompleted, EventTaskReviewed, EventTaskIntegrated,
+		EventTaskMarkedUnknown, EventTaskRecoveryDecided, EventTaskSuperseded,
+		EventTaskStalled, EventTaskEnded,
+	}
+}
+
+// IsValidTeamEventType reports whether ev is a recognized team or task event type.
+func IsValidTeamEventType(ev TeamEventType) bool {
+	return isTeamEventType(ev) || isTaskEventType(ev)
+}
+
 func isTeamEventType(ev TeamEventType) bool {
-	return ev == EventTeamProposed ||
-		ev == EventTeamStarted ||
-		ev == EventTeamFinalReview ||
-		ev == EventTeamAmended ||
-		ev == EventTeamNoted ||
-		ev == EventTeamDecided ||
-		ev == EventTeamEnded
+	return ev == EventTeamProposed || ev == EventTeamStarted || ev == EventTeamFinalReview ||
+		ev == EventTeamAmended || ev == EventTeamNoted || ev == EventTeamDeadlineReached ||
+		ev == EventTeamDeadlineExtended || ev == EventTeamDecided || ev == EventTeamEnded
+}
+
+func isTaskEventType(ev TeamEventType) bool {
+	switch ev {
+	case EventTaskCreated, EventTaskAssigned, EventTaskStarted,
+		EventTaskQuestionAsked, EventTaskQuestionAnswered, EventTaskReported,
+		EventTaskCheckCompleted, EventTaskReviewed, EventTaskIntegrated,
+		EventTaskMarkedUnknown, EventTaskRecoveryDecided, EventTaskSuperseded,
+		EventTaskStalled, EventTaskEnded:
+		return true
+	case EventTeamProposed, EventTeamStarted, EventTeamFinalReview,
+		EventTeamAmended, EventTeamNoted, EventTeamDeadlineReached,
+		EventTeamDeadlineExtended, EventTeamDecided, EventTeamEnded:
+		return false
+	default:
+		return false
+	}
 }
 
 func isTeamTerminal(s TeamState) bool {
@@ -196,13 +232,8 @@ func validateTaskHierarchy(tasks []NewTaskInput, byID map[string]NewTaskInput, h
 }
 
 func validParentRolePair(parent, child TeamRole, depth int) bool {
-	if parent == RoleLead {
-		return depth == 1 && (child == RoleTeamManager || child == RoleMember)
-	}
-	if parent == RoleTeamManager {
-		return depth == 2 && child == RoleMember
-	}
-	return false
+	return (parent == RoleLead && depth == 1 && (child == RoleTeamManager || child == RoleMember)) ||
+		(parent == RoleTeamManager && depth == 2 && child == RoleMember)
 }
 
 func computeTaskDepth(t *NewTaskInput, byID map[string]NewTaskInput) (int, error) {

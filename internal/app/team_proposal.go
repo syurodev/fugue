@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"sync"
+	"time"
 
+	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/teams"
@@ -71,6 +73,8 @@ type TeamProposalService struct {
 	// (F11.2b), so a new amend supersedes the old and the session-end
 	// cancel invalidates them.
 	pendingAmends amendCards
+	clk           clock.Clock
+	onTimerArmed  func()
 }
 
 // sessionSettles counts in-flight session-end cancels per session and hands
@@ -144,6 +148,19 @@ func (s *TeamProposalService) SetOnMailbox(fn func()) {
 	s.onMailbox = fn
 }
 
+// SetClock binds the injected clock for arming team deadline timers (F11.6c).
+func (s *TeamProposalService) SetClock(clk clock.Clock) { s.clk = clk }
+
+// SetOnTimerArmed installs the notification fired after a durable timer is armed.
+func (s *TeamProposalService) SetOnTimerArmed(fn func()) { s.onTimerArmed = fn }
+
+func (s *TeamProposalService) now() time.Time {
+	if s.clk != nil {
+		return s.clk.Now()
+	}
+	return (clock.Real{}).Now()
+}
+
 // SessionEndSettled is nil when no cancel is in flight for the session, else
 // a channel that closes when it is.
 func (s *TeamProposalService) SessionEndSettled(sessionID string) <-chan struct{} {
@@ -212,10 +229,20 @@ func (s *TeamProposalService) resolveTeamsSession(ctx context.Context, sessionID
 // validateProposal runs the domain validation and maps a rejection to its
 // boundary code; the wrap keeps the typed reason for errors.Is.
 func (s *TeamProposalService) validateProposal(input *teams.ProposalInput, eff *workspace.EffectiveConfig) ([]teams.Warning, error) {
+	if err := teams.ValidateTeamBudget(input.Budget); err != nil {
+		return nil, errcode.Wrap(errcode.InvalidArgument, "the proposal budget is invalid", err)
+	}
 	warnings, err := teams.ValidateProposal(input, catalogRoles(eff))
 	if err != nil {
 		// Domain rejections carry stable codes only across the boundary.
 		return nil, errcode.Wrap(errcode.InvalidArgument, "the proposal does not satisfy the team rules", err)
+	}
+	maxAgents := workspaceMaxTeamAgents(eff)
+	if teams.AgentCount(input) > maxAgents {
+		return nil, errcode.New(errcode.InvalidArgument, "the proposal exceeds the team max_agents budget")
+	}
+	if input.Budget != nil && input.Budget.MaxAgents > 0 && teams.AgentCount(input) > input.Budget.MaxAgents {
+		return nil, errcode.New(errcode.InvalidArgument, "the proposal exceeds its team budget max_agents")
 	}
 	return warnings, nil
 }
@@ -254,7 +281,9 @@ func (s *TeamProposalService) Propose(ctx context.Context, sessionID string, arg
 	if err != nil {
 		return "", err
 	}
-	input := &teams.ProposalInput{Title: args.Title, Brief: args.Brief, Roles: args.Roles, Tasks: args.Tasks}
+	input := &teams.ProposalInput{
+		Title: args.Title, Brief: args.Brief, Roles: args.Roles, Tasks: args.Tasks, Budget: args.Budget,
+	}
 	warnings, warnErr := s.validateProposal(input, &eff)
 	if warnErr != nil {
 		return "", warnErr
@@ -373,8 +402,9 @@ func durableTaskID(teamID, taskID string) string {
 
 // ProposeArgs is the fugue_team_propose input after decoding.
 type ProposeArgs struct {
-	Title string               `json:"title"`
-	Brief string               `json:"brief"`
-	Roles []teams.ProposedRole `json:"roles,omitempty"`
-	Tasks []teams.ProposedTask `json:"tasks"`
+	Title  string               `json:"title"`
+	Brief  string               `json:"brief"`
+	Roles  []teams.ProposedRole `json:"roles,omitempty"`
+	Tasks  []teams.ProposedTask `json:"tasks"`
+	Budget *teams.TeamBudget    `json:"budget,omitempty"`
 }

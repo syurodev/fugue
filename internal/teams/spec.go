@@ -44,6 +44,38 @@ type TaskBudget struct {
 	MaxDurationSeconds int64 `json:"max_duration_seconds,omitempty"`
 }
 
+const (
+	// MaxTeamBudgetAgents bounds optional team_budget.max_agents overrides.
+	MaxTeamBudgetAgents = MaxProposalTasks
+	// MaxTeamBudgetDurationSeconds bounds optional team_budget.max_duration_seconds (7 days).
+	MaxTeamBudgetDurationSeconds = 7 * 24 * 3600
+	// MaxTaskBudgetTurns bounds optional task_budget.max_turns overrides.
+	MaxTaskBudgetTurns = 1000
+	// MaxTaskBudgetDurationSeconds bounds optional task_budget.max_duration_seconds (7 days).
+	MaxTaskBudgetDurationSeconds = 7 * 24 * 3600
+)
+
+// TeamBudget constrains optional team-wide §11 limits on proposal, edit, and
+// amend. Zero fields inherit the workspace/host configuration defaults.
+type TeamBudget struct {
+	MaxAgents          int   `json:"max_agents,omitempty"`
+	MaxDurationSeconds int64 `json:"max_duration_seconds,omitempty"`
+}
+
+// ValidateTeamBudget checks optional team-level §11 budget bounds.
+func ValidateTeamBudget(b *TeamBudget) error {
+	if b == nil {
+		return nil
+	}
+	if b.MaxAgents < 0 || b.MaxAgents > MaxTeamBudgetAgents {
+		return &ValidationError{Field: "team.budget.max_agents", Detail: "max_agents must be between 0 and 64", Reason: ErrInvalidSpec}
+	}
+	if b.MaxDurationSeconds < 0 || b.MaxDurationSeconds > MaxTeamBudgetDurationSeconds {
+		return &ValidationError{Field: "team.budget.max_duration_seconds", Detail: "max_duration_seconds must be between 0 and 604800", Reason: ErrInvalidSpec}
+	}
+	return nil
+}
+
 // TaskSpec defines the full orchestration task contract (§4).
 // Content fields (Goal, Context, WriteScope globs, Checks, OutputSchema) are
 // protected payloads under INV-09 and must be stored sealed rather than in metadata columns.
@@ -142,14 +174,20 @@ func validateProfileAndBudget(p *ProfileOverride, b *TaskBudget) error {
 	return ValidateBudget(b)
 }
 
-// ValidateBudget validates a §11 budget: every present value is non-negative.
-// The amend path uses it for budget-only edits.
+// ValidateBudget validates a §11 budget: every present value is non-negative
+// and within upper bounds. The amend path uses it for budget-only edits.
 func ValidateBudget(b *TaskBudget) error {
 	if b == nil {
 		return nil
 	}
 	if b.MaxTurns < 0 || b.MaxTokens < 0 || b.MaxDurationSeconds < 0 {
 		return &ValidationError{Field: "spec.budget", Detail: "budget values must be non-negative", Reason: ErrInvalidSpec}
+	}
+	if b.MaxTurns > MaxTaskBudgetTurns {
+		return &ValidationError{Field: "spec.budget.max_turns", Detail: "max_turns must be at most 1000", Reason: ErrInvalidSpec}
+	}
+	if b.MaxDurationSeconds > MaxTaskBudgetDurationSeconds {
+		return &ValidationError{Field: "spec.budget.max_duration_seconds", Detail: "max_duration_seconds must be at most 604800", Reason: ErrInvalidSpec}
 	}
 	return nil
 }

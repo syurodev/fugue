@@ -207,6 +207,9 @@ func (s *InteractionService) validateBeforeAnswer(ctx context.Context, ticket *i
 	if s.taskQuestions != nil && isTaskQuestionCard(ticket) {
 		return s.taskQuestions.validateTaskQuestionAnswer(ctx, ticket, decision)
 	}
+	if s.teamDeadlines != nil && isTeamDeadlineCard(ticket) {
+		return s.teamDeadlines.validateTeamDeadlineAnswer(ctx, ticket, decision)
+	}
 	return nil
 }
 
@@ -216,6 +219,9 @@ func (s *InteractionService) applyAfterAnswer(ctx context.Context, ticket *inter
 	}
 	if s.taskQuestions != nil && isTaskQuestionCard(ticket) {
 		return s.taskQuestions.applyTaskQuestionAnswer(ctx, ticket, decision)
+	}
+	if s.teamDeadlines != nil && isTeamDeadlineCard(ticket) {
+		return s.teamDeadlines.applyTeamDeadlineAnswer(ctx, ticket, decision)
 	}
 	return nil
 }

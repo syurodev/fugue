@@ -21,6 +21,9 @@ type TaskRetryInput struct {
 	SupersededEventID string
 	CreatedEventID    string
 	SupersededPayload []byte
+	// MaxTeamAgents, when positive, enforces the §11 non-lead task ceiling
+	// (including retry attempts) inside the retry transaction.
+	MaxTeamAgents int
 }
 
 // TaskRetryResult returns the newly created queued retry attempt and new team sequence.
@@ -86,6 +89,18 @@ func (s *Store) executeRetryTx(ctx context.Context, tx *sql.Tx, teamID, taskID s
 	}
 	if src.attempt >= 1+MaxTaskRetries {
 		return TaskRetryResult{}, ErrRetryLimitReached
+	}
+	if in.MaxTeamAgents > 0 {
+		var nonLead int
+		if qErr := tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM team_tasks WHERE team_id = ? AND hierarchy_role NOT IN ('lead', 'solo')`,
+			teamID,
+		).Scan(&nonLead); qErr != nil {
+			return TaskRetryResult{}, fmt.Errorf("count team non-lead tasks: %w", qErr)
+		}
+		if nonLead >= in.MaxTeamAgents {
+			return TaskRetryResult{}, fmt.Errorf("%w: %d >= %d", ErrTeamAgentCapReached, nonLead, in.MaxTeamAgents)
+		}
 	}
 	rootID, err := resolveRetryRoot(ctx, tx, teamID, taskID)
 	if err != nil {
@@ -312,6 +327,9 @@ func (s *Store) writeTeamEventBatch(
 	for _, ev := range evs {
 		if ev == nil || ev.EventID == "" {
 			return 0, fmt.Errorf("%w: each appended event requires an event_id", ErrTeamInvalidInput)
+		}
+		if !IsValidTeamEventType(ev.EventType) {
+			return 0, fmt.Errorf("%w: unknown team event type %q", ErrTeamInvalidInput, ev.EventType)
 		}
 		seq++
 		if writeErr := s.writeAppendedEvent(ctx, tx, teamID, seq, ev, meta, now); writeErr != nil {

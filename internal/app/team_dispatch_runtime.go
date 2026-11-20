@@ -23,6 +23,9 @@ func (hp *HostProcess) onVaultLockState(base context.Context, owner *interaction
 	if !unlocked {
 		return
 	}
+	if hp.rt.teamBudgets != nil {
+		hp.rt.teamBudgets.Notify()
+	}
 	if hp.rt.teamDispatch != nil {
 		hp.dispatchAllAsync(base)
 	}
@@ -81,19 +84,40 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 	if admit == nil {
 		admit = newSchedulerAdmitter(sessions, vs, accounts)
 	}
+	teamsCfg := globalOrWorkspaceTeamsConfigReader(hp.rt.workspaces)
 	sessions.SetWakeHook(func(string) { hp.rt.teamWake.Notify() })
 	hp.rt.teamWake = newTeamWake(&teamWakeDeps{
 		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Roots: hp.rt.workspaces.domain,
 		Clock: deps.Clock, IDs: deps.IDs, Vault: v, Hub: hp.rt.hub, DataDir: deps.DataDir,
 	})
 	hp.rt.teamWake.Start(base)
+	hp.rt.teamBudgets = newTeamBudgets(&teamBudgetsDeps{
+		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Interactions: hp.rt.interactions,
+		TeamsConfig: teamsCfg, Vault: v, Clock: deps.Clock, IDs: deps.IDs, Wake: hp.rt.teamWake,
+		OnTeamResume: func(teamID string) { hp.dispatchTeamAsync(base, teamID) },
+	})
+	if hp.rt.interactions != nil {
+		hp.rt.interactions.SetTeamDeadlineResolver(hp.rt.teamBudgets)
+	}
+	hp.rt.teamBudgets.Start(base)
+	sessions.SetObservationHook(func(sessionID string) {
+		hp.rt.teamBudgets.ObserveSession(sessionID)
+	})
+	sessions.SetTurnStartedHook(func(sessionID string) {
+		hp.rt.goTask("team.turn-budget-check", func(checkCtx context.Context) error {
+			hp.rt.teamBudgets.OnTurnStarted(checkCtx, sessionID)
+			return nil
+		})
+	})
 	hp.rt.teamDispatch = newTeamDispatcher(&teamDispatcherDeps{
 		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Admit: admit,
 		Roots: hp.rt.workspaces.domain, Git: locateTeamGit(ctx, deps), DataDir: deps.DataDir, IDs: deps.IDs, Vault: v,
-		Wake: hp.rt.teamWake,
+		Wake: hp.rt.teamWake, Clock: deps.Clock, TeamsConfig: teamsCfg, Budgets: hp.rt.teamBudgets,
 	})
 	if hp.rt.teamTasks != nil {
 		hp.rt.teamTasks.SetRuntime(hp.rt.teamDispatch, hp.rt.teamWake)
+		hp.rt.teamTasks.SetTeamsConfig(teamsCfg)
+		hp.rt.teamTasks.SetBudgets(hp.rt.teamBudgets)
 		sessions.SetTurnCompletedHook(func(sessionID string) {
 			hp.rt.goTask("team.no-report-check", func(checkCtx context.Context) error {
 				hp.rt.teamTasks.OnTurnCompleted(checkCtx, sessionID)
@@ -107,6 +131,11 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 			})
 		})
 	}
-	hp.rt.teamProposals.SetOnTeamActive(func(teamID string) { hp.dispatchTeamAsync(base, teamID) })
+	hp.rt.teamProposals.SetClock(deps.Clock)
+	hp.rt.teamProposals.SetOnTimerArmed(func() { hp.rt.teamBudgets.Notify() })
+	hp.rt.teamProposals.SetOnTeamActive(func(teamID string) {
+		hp.rt.teamBudgets.Notify()
+		hp.dispatchTeamAsync(base, teamID)
+	})
 	hp.rt.teamProposals.SetOnMailbox(func() { hp.rt.teamWake.Notify() })
 }

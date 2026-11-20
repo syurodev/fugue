@@ -52,6 +52,7 @@ type EditSet struct {
 	RemoveTasks []string         `json:"remove_tasks,omitempty"`
 	AddTasks    []ProposedTask   `json:"add_tasks,omitempty"`
 	TaskBudgets []TaskBudgetEdit `json:"task_budgets,omitempty"`
+	TeamBudget  *TeamBudget      `json:"team_budget,omitempty"`
 	Accounts    []AccountEdit    `json:"accounts,omitempty"`
 }
 
@@ -107,6 +108,13 @@ func ApplyEdits(edit *EditSet, input *ProposalInput, catalog []Role) (*ProposalI
 		return nil, err
 	}
 	edited.Roles = append(edited.Roles, newRoles...)
+	if edit.TeamBudget != nil {
+		if err := ValidateTeamBudget(edit.TeamBudget); err != nil {
+			return nil, err
+		}
+		b := *edit.TeamBudget
+		edited.Budget = &b
+	}
 	if err := applyBudgetEdits(edit.TaskBudgets, edited); err != nil {
 		return nil, err
 	}
@@ -256,6 +264,10 @@ func applyProfileOverrides(profiles map[string]ProfileOverride, edited *Proposal
 
 func cloneProposalInput(in *ProposalInput) *ProposalInput {
 	out := &ProposalInput{Title: in.Title, Brief: in.Brief, Roles: cloneRoles(in.Roles), Tasks: cloneTasks(in.Tasks)}
+	if in.Budget != nil {
+		b := *in.Budget
+		out.Budget = &b
+	}
 	return out
 }
 

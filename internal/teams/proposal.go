@@ -59,10 +59,11 @@ type ProposedTask struct {
 // The JSON shape is also the sealed TeamProposed payload, so the decide path
 // (F11.2b) can re-validate edits against exactly what was proposed.
 type ProposalInput struct {
-	Title string         `json:"title"`
-	Brief string         `json:"brief"`
-	Roles []ProposedRole `json:"roles,omitempty"`
-	Tasks []ProposedTask `json:"tasks"`
+	Title  string         `json:"title"`
+	Brief  string         `json:"brief"`
+	Roles  []ProposedRole `json:"roles,omitempty"`
+	Tasks  []ProposedTask `json:"tasks"`
+	Budget *TeamBudget    `json:"budget,omitempty"`
 }
 
 // Warning is one §5.3 finding shown on the proposal card. Codes are stable
@@ -120,7 +121,7 @@ func validateProposalBounds(in *ProposalInput) error {
 	if len(in.Roles) > MaxProposalRoles {
 		return &ValidationError{Field: "proposal.roles", Detail: "a proposal carries at most 24 roles", Reason: ErrInvalidSpec}
 	}
-	return nil
+	return ValidateTeamBudget(in.Budget)
 }
 
 // validateProposalRoles checks every proposed entry and returns the resolved

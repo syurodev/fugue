@@ -86,6 +86,8 @@ type VendorSessions struct {
 	pendingOwners     map[*pendingOwner]struct{}
 	retainedOwners    map[*retainedOwner]struct{}
 	wakeHook          func(sessionID string)
+	turnStartedHook   func(sessionID string)
+	observationHook   func(sessionID string)
 	turnCompletedHook func(sessionID string)
 	turnFailedHook    func(sessionID, failureCode string)
 	closed            bool

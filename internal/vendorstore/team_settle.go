@@ -25,7 +25,7 @@ type TeamSettleInput struct {
 // SettleTeam cancels the team's non-terminal tasks and appends TeamEnded
 // atomically, returning the team's new last sequence.
 func (s *Store) SettleTeam(ctx context.Context, teamID string, in *TeamSettleInput) (int64, error) {
-	if in == nil || teamID == "" || in.EndEventID == "" || in.ExpectedSeq < 1 || len(in.EndPayload) == 0 {
+	if !validSettleInput(teamID, in) {
 		return 0, fmt.Errorf("%w: a settlement requires a team, an event ID, a sequence and a sealed payload", ErrTeamInvalidInput)
 	}
 	snap, err := s.requireUnlockedVault()
@@ -51,10 +51,17 @@ func (s *Store) SettleTeam(ctx context.Context, teamID string, in *TeamSettleInp
 	if err := s.appendSettleEnd(ctx, tx, teamID, &meta, in, lastSeq, now); err != nil {
 		return 0, err
 	}
+	if err := cancelTeamTimersTx(ctx, tx, teamID, now); err != nil {
+		return 0, err
+	}
 	if err := s.commitTeamTx(snap, true, tx.Commit); err != nil {
 		return 0, err
 	}
 	return lastSeq, nil
+}
+
+func validSettleInput(teamID string, in *TeamSettleInput) bool {
+	return in != nil && teamID != "" && in.EndEventID != "" && in.ExpectedSeq >= 1 && len(in.EndPayload) > 0
 }
 
 // appendSettleEnd appends the TeamEnded event after the task cancels.

@@ -44,11 +44,11 @@ func queryTeamRecord(ctx context.Context, db teamQueryer, teamID string) (TeamRe
 	var stateStr string
 	var endedAt sql.NullInt64
 	err := db.QueryRowContext(ctx, `
-		SELECT team_id, workspace_id, session_id, state, last_seq, task_count,
+		SELECT team_id, workspace_id, session_id, state, waiting_reason, last_seq, task_count,
 		       failure_code, created_at, updated_at, ended_at
 		FROM team_records WHERE team_id = ?`, teamID,
 	).Scan(
-		&rec.TeamID, &rec.WorkspaceID, &rec.SessionID, &stateStr,
+		&rec.TeamID, &rec.WorkspaceID, &rec.SessionID, &stateStr, &rec.WaitingReason,
 		&rec.LastSeq, &rec.TaskCount, &rec.FailureCode,
 		&rec.CreatedAt, &rec.UpdatedAt, &endedAt,
 	)
@@ -463,4 +463,17 @@ func (s *Store) OpenLatestTaskEventPayloadWithSeq(ctx context.Context, teamID, t
 		return nil, 0, false, err
 	}
 	return plain, seq, true, nil
+}
+
+// CountSessionTurns returns the total number of vendor turns started on sessionID.
+func (s *Store) CountSessionTurns(ctx context.Context, sessionID string) (int, error) {
+	if sessionID == "" {
+		return 0, nil
+	}
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM vendor_turns WHERE session_id = ?`, sessionID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("%w: count session turns: %w", ErrUnavailable, err)
+	}
+	return count, nil
 }

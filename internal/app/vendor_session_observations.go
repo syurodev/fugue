@@ -17,6 +17,7 @@ const vendorFailureCode = "vendor_failure"
 
 func (a *vendorSessionActor) handleObservation(ctx context.Context, observation *vendor.Observation) error {
 	a.observeAccount(observation)
+	a.manager.notifyObservation(a.info.ID)
 	if observation.Init != nil {
 		commands := slices.Clone(observation.Init.SlashCommands)
 		if !slices.Equal(commands, a.slashCommands) {
@@ -89,6 +90,7 @@ func (a *vendorSessionActor) ensureVendorTurnStarted(ctx context.Context, turnID
 	if _, _, err := vendor.Transition(a.state, vendor.Fact{Kind: vendor.FactVendorTurn}); err != nil {
 		return fmt.Errorf("record vendor-origin turn: %w", err)
 	}
+	a.manager.notifyTurnStarted(a.info.ID)
 	return nil
 }
 
@@ -308,5 +310,27 @@ func (m *VendorSessions) SetTurnFailedHook(hook func(sessionID, failureCode stri
 func (m *VendorSessions) notifyTurnFailed(sessionID, failureCode string) {
 	if m.turnFailedHook != nil {
 		m.turnFailedHook(sessionID, failureCode)
+	}
+}
+
+// SetTurnStartedHook binds the task turn budget handler (F11.6c, Q-149).
+func (m *VendorSessions) SetTurnStartedHook(hook func(sessionID string)) {
+	m.turnStartedHook = hook
+}
+
+func (m *VendorSessions) notifyTurnStarted(sessionID string) {
+	if m.turnStartedHook != nil {
+		m.turnStartedHook(sessionID)
+	}
+}
+
+// SetObservationHook binds the task watchdog silence reset hook (F11.6c, Q-150).
+func (m *VendorSessions) SetObservationHook(hook func(sessionID string)) {
+	m.observationHook = hook
+}
+
+func (m *VendorSessions) notifyObservation(sessionID string) {
+	if m.observationHook != nil {
+		m.observationHook(sessionID)
 	}
 }

@@ -72,9 +72,13 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 		if unregisterVaultGuard != nil {
 			unregisterVaultGuard()
 		}
+		var budgetErr error
+		if hp.rt.teamBudgets != nil {
+			budgetErr = hp.rt.teamBudgets.Stop()
+		}
 		// Stops run on the host's lifetime context without its cancellation,
 		// so a host close never skips the F9.2 stop order.
-		err := errors.Join(sessions.CloseAll(context.WithoutCancel(base)), transcripts.Close(), vs.Close())
+		err := errors.Join(budgetErr, sessions.CloseAll(context.WithoutCancel(base)), transcripts.Close(), vs.Close())
 		hp.rt.sessionTools.tokens.revokeAll()
 		hp.rt.sessionTools.endAllSessions()
 		return err

@@ -216,6 +216,9 @@ func (s *Store) AppendTeamEvent(ctx context.Context, teamID string, expectedSeq 
 	if ev == nil || teamID == "" || ev.EventID == "" || expectedSeq < 1 {
 		return 0, fmt.Errorf("%w: team_id, event_id, and positive expected_seq are required", ErrTeamInvalidInput)
 	}
+	if !IsValidTeamEventType(ev.EventType) {
+		return 0, fmt.Errorf("%w: unknown team event type %q", ErrTeamInvalidInput, ev.EventType)
+	}
 	snap, needVault, err := s.appendEventGate(ev)
 	if err != nil {
 		return 0, err
@@ -242,7 +245,7 @@ func (s *Store) AppendTeamEvent(ctx context.Context, teamID string, expectedSeq 
 }
 
 // writeAppendedEvent projects, seals and writes one appended event and its
-// mailbox rows inside the open transaction (Q-122).
+// mailbox rows and timer transitions inside the open transaction (Q-122).
 func (s *Store) writeAppendedEvent(ctx context.Context, tx *sql.Tx, teamID string, seq int64, ev *AppendTeamEventInput, meta teamMetaRow, now int64) error {
 	fromState, toState, err := applyTeamOrTaskProjection(ctx, tx, teamID, meta.State, seq, now, ev)
 	if err != nil {
@@ -255,7 +258,16 @@ func (s *Store) writeAppendedEvent(ctx context.Context, tx *sql.Tx, teamID strin
 	if err := insertAppendedTeamEvent(ctx, tx, teamID, seq, ev, fromState, toState, envelope, now); err != nil {
 		return err
 	}
-	return s.appendMailboxForEvent(ctx, tx, teamID, seq, ev, meta, now)
+	if err := s.appendMailboxForEvent(ctx, tx, teamID, seq, ev, meta, now); err != nil {
+		return err
+	}
+	if err := fireTeamTimerTx(ctx, tx, ev.FireTimer, now); err != nil {
+		return err
+	}
+	if err := armTeamTimersTx(ctx, tx, teamID, ev.ArmTimers, now); err != nil {
+		return err
+	}
+	return cancelTimersOnTerminalEvent(ctx, tx, teamID, ev.TaskID, ev.EventType, toState, now)
 }
 
 // appendEventGate decides the vault stance of one append: an event payload or
@@ -321,6 +333,9 @@ func applyTeamOrTaskProjection(
 	nextSeq, now int64,
 	ev *AppendTeamEventInput,
 ) (string, string, error) {
+	if !IsValidTeamEventType(ev.EventType) {
+		return "", "", fmt.Errorf("%w: unknown team event type %q", ErrTeamInvalidInput, ev.EventType)
+	}
 	if isTeamEventType(ev.EventType) {
 		return applyTeamProjection(ctx, tx, teamID, curTeamState, nextSeq, now, ev)
 	}
@@ -359,7 +374,7 @@ func applyTeamProjection(
 			return "", "", err
 		}
 	}
-	if err := updateTeamProjection(ctx, tx, teamID, nextState, nextSeq, ev.FailureCode, now); err != nil {
+	if err := updateTeamProjection(ctx, tx, teamID, nextState, nextSeq, ev.EventType, ev.FailureCode, now); err != nil {
 		return "", "", err
 	}
 	return string(curTeamState), string(nextState), nil
@@ -441,42 +456,27 @@ func ensureManagerChildrenTerminal(ctx context.Context, tx *sql.Tx, teamID, pare
 	return nil
 }
 
-func updateTeamProjection(ctx context.Context, tx *sql.Tx, teamID string, state TeamState, seq int64, failureCode string, now int64) error {
+func updateTeamProjection(ctx context.Context, tx *sql.Tx, teamID string, state TeamState, seq int64, evType TeamEventType, failureCode string, now int64) error {
 	var endedAt any
 	if isTeamTerminal(state) {
 		endedAt = now
 	}
+	waitingOp, waitingVal := 0, ""
+	switch {
+	case evType == EventTeamDeadlineReached:
+		waitingOp, waitingVal = 1, TeamWaitingDeadline
+	case evType == EventTeamDeadlineExtended || isTeamTerminal(state):
+		waitingOp, waitingVal = 1, ""
+	}
 	_, err := tx.ExecContext(ctx, `
 		UPDATE team_records
-		SET state = ?, last_seq = ?, failure_code = ?, updated_at = ?, ended_at = COALESCE(?, ended_at)
+		SET state = ?, last_seq = ?, failure_code = ?, updated_at = ?, ended_at = COALESCE(?, ended_at),
+		    waiting_reason = CASE WHEN ? = 1 THEN ? ELSE waiting_reason END
 		WHERE team_id = ?`,
-		string(state), seq, failureCode, now, endedAt, teamID,
+		string(state), seq, failureCode, now, endedAt, waitingOp, waitingVal, teamID,
 	)
 	if err != nil {
 		return fmt.Errorf("update team projection: %w", err)
-	}
-	return nil
-}
-
-func updateTaskAndTeamSeq(ctx context.Context, tx *sql.Tx, teamID, taskID string, state TaskState, seq int64, failureCode string, now int64) error {
-	var endedAt any
-	if isTaskTerminal(state) {
-		endedAt = now
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE team_tasks
-		SET state = ?, last_event_seq = ?, failure_code = CASE WHEN ? != '' THEN ? ELSE failure_code END,
-		    updated_at = ?, ended_at = COALESCE(?, ended_at)
-		WHERE team_id = ? AND task_id = ?`,
-		string(state), seq, failureCode, failureCode, now, endedAt, teamID, taskID,
-	); err != nil {
-		return fmt.Errorf("update task projection: %w", err)
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE team_records SET last_seq = ?, updated_at = ? WHERE team_id = ?`,
-		seq, now, teamID,
-	); err != nil {
-		return fmt.Errorf("advance team last_seq: %w", err)
 	}
 	return nil
 }
