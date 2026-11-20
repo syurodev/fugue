@@ -12,7 +12,6 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/testutil"
-	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
@@ -49,7 +48,7 @@ func newTeamFixture(t *testing.T, extraTOML string, noDispatch bool) *teamPropos
 	}
 	clk := clock.NewFake(time.Unix(200, 0))
 	hp, err := StartHost(t.Context(), &HostDeps{
-		DataDir: cheapvault.DataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
+		DataDir: cheapVaultDataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("team-test")),
 		Transport: newScriptedTransport(), VendorBinary: exe,
 		Bridge: VendorBridge{Binary: exe, Socket: filepath.Join(t.TempDir(), "host.sock")}, TeamAdmitter: admitterFor(noDispatch),
@@ -158,4 +157,17 @@ func admitterFor(noDispatch bool) Admitter {
 		return admitNothing{}
 	}
 	return nil
+}
+
+// setExtraTOML reconfigures the fixture's workspace with extraTOML so a test
+// can check another workspace flag without starting a second host process.
+func (f *teamProposalFixture) setExtraTOML(t *testing.T, extraTOML string) {
+	t.Helper()
+	ws, _, err := f.rt.GetWorkspace(t.Context(), testAppPrincipal, f.wsID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, cfgErr := f.rt.UpdateWorkspaceConfig(t.Context(), testAppPrincipal, f.wsID, teamWorkspaceTOMLAt(t, extraTOML, f.root), ws.ConfigHash); cfgErr != nil {
+		t.Fatal(cfgErr)
+	}
 }

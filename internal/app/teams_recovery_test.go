@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
-	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
@@ -43,7 +42,7 @@ const testHostLeadTaskID = "task-host-lead"
 func setupTeamForHostRestart(t *testing.T, dir string, clk *clock.Fake) {
 	t.Helper()
 	ctx := t.Context()
-	cheapvault.SeedDataDir(t, dir)
+	seedCheapVaultDataDir(t, dir)
 	hp1, err := StartHost(ctx, testHostDeps(dir, clk, newScriptedTransport()))
 	if err != nil {
 		t.Fatalf("StartHost 1: %v", err)

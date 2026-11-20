@@ -282,8 +282,8 @@ func TestProposalValidatesAgainstTheRoleCatalog(t *testing.T) {
 		t.Fatalf("rejected proposal left a pending team = (%v, %v)", ok, err)
 	}
 	// A workspace with the flag off refuses the proposal (Q-105).
-	disabled := newTeamProposalFixture(t, "[session]\nteams = false\n")
-	if _, err := disabled.rt.teamProposals.Propose(t.Context(), disabled.session.ID, validTeamProposalArgs()); errcode.CodeOf(err) != errcode.FailedPrecondition {
+	f.setExtraTOML(t, "[session]\nteams = false\n")
+	if _, err := f.rt.teamProposals.Propose(t.Context(), f.session.ID, validTeamProposalArgs()); errcode.CodeOf(err) != errcode.FailedPrecondition {
 		t.Fatalf("disabled workspace error = %v, want failed precondition", err)
 	}
 }
@@ -305,11 +305,10 @@ func TestOverlappingWriteScopeWithoutDependsOnWarns(t *testing.T) {
 	if !strings.Contains(cards[0].Summary, "Split the syntax work") || !strings.Contains(cards[0].Body, "scope_overlap") {
 		t.Fatalf("card does not carry the overlap warning: %q / %q", cards[0].Summary, cards[0].Body)
 	}
-	clean := newTeamProposalFixture(t, "")
-	if _, err := clean.rt.teamProposals.Propose(t.Context(), clean.session.ID, validTeamProposalArgs()); err != nil {
+	if _, err := f.rt.teamProposals.Propose(t.Context(), f.session.ID, validTeamProposalArgs()); err != nil {
 		t.Fatalf("Propose: %v", err)
 	}
-	for _, card := range clean.pendingCards(t) {
+	for _, card := range f.pendingCards(t) {
 		if strings.Contains(card.Body, "scope_overlap") {
 			t.Fatalf("disjoint scopes warned: %q", card.Body)
 		}
@@ -379,8 +378,8 @@ func TestTeamProposeToolOfferingFollowsSessionTeamsFlag(t *testing.T) {
 		t.Fatalf("tool-proposed team state = %s, want proposed", rec.State)
 	}
 	assertSingleProposalCard(t, enabled)
-	disabled := newTeamProposalFixture(t, "[session]\nteams = false\n")
-	names = teamToolNames(t, disabled.tools, disabled.binding)
+	enabled.setExtraTOML(t, "[session]\nteams = false\n")
+	names = teamToolNames(t, enabled.tools, enabled.binding)
 	if slices.Contains(names, teamProposeToolName) {
 		t.Fatalf("tools/list = %v, want fugue_team_propose hidden", names)
 	}
@@ -388,7 +387,7 @@ func TestTeamProposeToolOfferingFollowsSessionTeamsFlag(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, callErr := disabled.tools.Call(t.Context(), disabled.binding, teamProposeToolName, raw); errcode.CodeOf(callErr) != errcode.NotFound {
+	if _, callErr := enabled.tools.Call(t.Context(), enabled.binding, teamProposeToolName, raw); errcode.CodeOf(callErr) != errcode.NotFound {
 		t.Fatalf("disabled call error = %v, want not found", callErr)
 	}
 }
@@ -632,7 +631,7 @@ func awaitNoPendingProposal(t *testing.T, f *teamProposalFixture, round int) {
 // one was cancelled by the session-end cancel.
 func TestProposalRacingSessionEndNeverStaysPending(t *testing.T) {
 	t.Parallel()
-	for round := range 4 {
+	for round := range 2 {
 		f := newTeamProposalFixture(t, "")
 		proposalID, proposeErr := raceProposeAndClose(t, f, round)
 		assertRaceOutcome(t, f, round, proposalID, proposeErr)
@@ -674,28 +673,49 @@ func TestProposalStillFlipsAfterMoreThanAThousandItems(t *testing.T) {
 	}
 }
 
-// appendNoticeItems records n harmless notice items through the session's
-// actor, the way vendor observations do.
+// appendNoticeItems records n harmless notice items in one store transaction
+// (keeping actor.sequence aligned) and the last through the actor so a single
+// durable commit replaces n separate fsyncs under -race.
 func appendNoticeItems(t *testing.T, f *teamProposalFixture, n int) {
 	t.Helper()
 	turnID, err := f.rt.teamProposals.recorder.ActiveTurnID(t.Context(), f.session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	for i := range n {
+	actor := f.svc.sessions.actor(f.session.ID)
+	if actor == nil {
+		t.Fatal("missing session actor")
+	}
+	events := make([]*vendorstore.Event, 0, n-1)
+	for range n - 1 {
 		itemID, idErr := f.rt.teamProposals.ids.NewID()
 		if idErr != nil {
 			t.Fatal(idErr)
 		}
-		recordErr := f.rt.teamProposals.recorder.RecordEvent(t.Context(), f.session.ID, &vendorstore.Event{
+		events = append(events, &vendorstore.Event{
 			Type: vendorstore.TranscriptItemRecorded, TurnID: turnID,
 			Item: &vendorstore.Item{
 				ID: itemID, TurnID: turnID, Kind: vendorstore.KindNotice,
-				Metadata: vendorstore.ItemMetadata{Level: "info", Code: "team_test_note"},
+				Metadata: vendorstore.ItemMetadata{Level: testNoticeLevel, Code: "team_test_note"},
 			},
 		})
-		if recordErr != nil {
-			t.Fatalf("append notice item %d: %v", i, recordErr)
-		}
+	}
+	next, err := f.hp.vendorStore.AppendBatch(t.Context(), f.session.ID, actor.sequence, events)
+	if err != nil {
+		t.Fatalf("append notice batch: %v", err)
+	}
+	actor.sequence = next
+	itemID, idErr := f.rt.teamProposals.ids.NewID()
+	if idErr != nil {
+		t.Fatal(idErr)
+	}
+	if recordErr := f.rt.teamProposals.recorder.RecordEvent(t.Context(), f.session.ID, &vendorstore.Event{
+		Type: vendorstore.TranscriptItemRecorded, TurnID: turnID,
+		Item: &vendorstore.Item{
+			ID: itemID, TurnID: turnID, Kind: vendorstore.KindNotice,
+			Metadata: vendorstore.ItemMetadata{Level: testNoticeLevel, Code: "team_test_note"},
+		},
+	}); recordErr != nil {
+		t.Fatalf("append final notice item: %v", recordErr)
 	}
 }

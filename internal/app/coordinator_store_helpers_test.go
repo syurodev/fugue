@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -26,6 +27,11 @@ import (
 
 func openCoordinatorHost(t *testing.T, dir string) (*execstore.Store, *clock.Fake, func()) {
 	t.Helper()
+	if _, statErr := os.Stat(storage.DBPath(dir)); statErr != nil {
+		if copyErr := copyTemplateFile(appTemplateDir(os.Getpid()), migratedTemplateFile, storage.DBPath(dir)); copyErr != nil {
+			t.Fatal(copyErr)
+		}
+	}
 	clk := clock.NewFake(time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC))
 	host, err := storage.OpenStore(t.Context(), config.Config{DataDir: dir}, clk, ids.NewSequence("host"))
 	if err != nil {

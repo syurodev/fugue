@@ -24,13 +24,6 @@ const (
 
 func TestFugueNeverAnswersACodexRequestInAnyMode(t *testing.T) {
 	t.Parallel()
-	t.Run("vault_lock", func(t *testing.T) {
-		t.Parallel()
-		fVault := newCodexRelayFixture(t)
-		subVault := fVault.subscribeInteractions(t)
-		assertCodexAbortOnFixture(t, fVault, subVault, codexAbortVault, "604")
-	})
-
 	f := newCodexRelayFixture(t)
 	f.seedPermissiveCodexPolicy(t)
 	sub := f.subscribeInteractions(t)
@@ -39,13 +32,13 @@ func TestFugueNeverAnswersACodexRequestInAnyMode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Token revoke, session close, and expiry leave the host healthy; drain (which sets
-	// owner.draining permanently) runs last on this host.
-	for i, kind := range []string{codexAbortToken, codexAbortClose} {
+	// Token revoke, session close, vault lock, and expiry leave the host healthy;
+	// drain (which sets owner.draining permanently) runs last on this host.
+	for i, kind := range []string{codexAbortToken, codexAbortClose, codexAbortVault} {
 		assertCodexAbortReturnsRPCError(t, f, sub, kind, strconv.Itoa(601+i))
 	}
 	assertCodexExpiryReturnsRPCError(t, f, sub)
-	assertCodexAbortReturnsRPCError(t, f, sub, codexAbortDrain, "603")
+	assertCodexAbortReturnsRPCError(t, f, sub, codexAbortDrain, "604")
 }
 
 func assertCodexRelayInEveryApprovalMode(t *testing.T, f *codexRelayFixture, sub *Subscription) {
@@ -143,7 +136,10 @@ func assertCodexAbortOnFixture(t *testing.T, f *codexRelayFixture, sub *Subscrip
 	if got := len(f.recordedDecisions(t)); got != 0 {
 		t.Fatalf("%s recorded %d ApprovalDecided events, want 0", kind, got)
 	}
-	if kind != codexAbortClose && kind != codexAbortVault {
+	if kind != codexAbortClose {
+		if kind == codexAbortVault {
+			unlockCheapVault(t, f.hp)
+		}
 		if _, cErr := f.svc.Close(t.Context(), testAppPrincipal, VendorStop{CommandID: "close-after-" + kind, SessionID: f.session.ID}); cErr != nil {
 			t.Fatalf("close after %s: %v", kind, cErr)
 		}

@@ -105,7 +105,9 @@ func killExclusiveProcessGroup(proc *os.Process) {
 	if proc == nil || proc.Pid <= 0 {
 		return
 	}
-	if err := syscall.Kill(-proc.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
+	if err := syscall.Kill(-proc.Pid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) && !errors.Is(err, syscall.EPERM) {
+		// ESRCH: the group is gone. EPERM: darwin refuses to signal a group
+		// that only holds zombies; either way nothing is left to kill.
 		slog.Error("kill exclusive child process group", "pid", proc.Pid, "err", err)
 	}
 }
