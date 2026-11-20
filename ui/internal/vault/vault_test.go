@@ -32,6 +32,9 @@ type fakeVaultClient struct {
 	status  client.VaultStatus
 	setup   client.VaultSetupResult
 	blockCh chan struct{}
+	// blocked receives once per UnlockVault call that is about to wait on
+	// blockCh, so a test knows the worker has dequeued that request.
+	blocked chan struct{}
 }
 
 func newFakeVaultClient() *fakeVaultClient {
@@ -62,6 +65,12 @@ func (f *fakeVaultClient) SetupVault(_ context.Context, passphrase []byte) (clie
 func (f *fakeVaultClient) UnlockVault(ctx context.Context, passphrase []byte) (client.VaultStatus, error) {
 	f.record("unlock")
 	if f.blockCh != nil {
+		if f.blocked != nil {
+			select {
+			case f.blocked <- struct{}{}:
+			default:
+			}
+		}
 		select {
 		case <-f.blockCh:
 		case <-ctx.Done():
@@ -236,11 +245,20 @@ func TestVaultWorkerQueueFullAndCancelClearSecrets(t *testing.T) {
 	t.Parallel()
 	fc := newFakeVaultClient()
 	fc.blockCh = make(chan struct{})
+	fc.blocked = make(chan struct{}, 1)
 	w := NewWorker(func() Client { return fc })
 	w.Start(t.Context())
 
 	first := Request{Kind: OpUnlock, Secret: []byte("blocked-secret")}
 	w.Do(&first)
+	// Wait until the worker has dequeued first and is blocked inside the
+	// client: only then does the queue hold exactly workerBuffer free slots,
+	// so the overflow request below is the one that cannot be queued.
+	select {
+	case <-fc.blocked:
+	case <-t.Context().Done():
+		t.Fatal("worker never picked up the first request")
+	}
 	for range workerBuffer {
 		queued := Request{Kind: OpUnlock, Secret: []byte("queued-secret")}
 		w.Do(&queued)
