@@ -54,6 +54,9 @@ message VendorSession {
   string waiting_reason = 4;
   string created_at = 5;
   string updated_at = 6;
+  // workspace_id names the workspace the session is bound to at creation
+  // (Q-57); the sidebar groups sessions under their workspaces with it.
+  string workspace_id = 7;
 }
 
 message ProbeVendorsRequest {

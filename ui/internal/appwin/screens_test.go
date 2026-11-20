@@ -8,10 +8,12 @@ import (
 
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/session"
+	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
 // fakeFetcher records the reads the screens request and never answers, so a
-// test drives the results by hand.
+// test drives the results by hand. It also arms the workspace reads, which
+// the recording wsReads of the workspace tests watch.
 type fakeFetcher struct {
 	pages []pageRequest
 }
@@ -28,12 +30,15 @@ func (f *fakeFetcher) RequestPage(sessionID string, before int64) {
 }
 func (f *fakeFetcher) Results() <-chan session.Result { return make(chan session.Result) }
 
-// newTestScreens builds screens over an idle manager and a recording fetcher.
+// newTestScreens builds screens over an idle manager and a recording fetcher,
+// with a mutator whose connection is nil: a test that posts a mutation
+// builds its own over a recording fake client.
 func newTestScreens(t *testing.T) (*screens, *fakeFetcher) {
 	t.Helper()
 	fake := &fakeFetcher{}
 	m := hostconn.NewManager(&hostconn.Config{})
-	return newScreens(m, fake), fake
+	sc := newScreens(m, fake, workspace.NewMutator(func() workspace.MutatorClient { return nil }))
+	return sc, fake
 }
 
 // itemsFrom builds count items with ascending sequences starting at start.

@@ -12,6 +12,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/transcriptview"
+	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
 // The topic name pieces the screens route on; the constants mirror the
@@ -20,6 +21,7 @@ const (
 	topicVendorSessions = "vendor-sessions"
 	topicTranscript     = "transcript:"
 	topicTranscriptDlt  = "transcript-delta:"
+	topicWorkspaces     = "workspaces"
 )
 
 // pageFetcher is the read side the screens drive: the session.Fetcher, and a
@@ -59,10 +61,25 @@ type screens struct {
 	// lastErr is the last read or payload failure the screens could not act
 	// on, shown under the transcript.
 	lastErr string
+
+	// The workspace side (F10.14): the workspaces the topic reports, the
+	// reads that fill their details, the mutations the dialogs post, and
+	// the sidebar's own state per workspace.
+	workspaces   *workspace.Model
+	wsMut        *workspace.Mutator
+	wsReads      wsReader
+	wsDetailReq  map[string]bool
+	wsHeaders    map[string]*kit.SectionHeaderState
+	wsMenu       *kit.MenuState
+	wsMenuFor    string
+	policyBanner *kit.BannerState
+	otherHeader  *kit.SectionHeaderState
+	dlg          *workspaceDialogs
 }
 
-// newScreens builds the screens over the manager and its fetcher.
-func newScreens(m *hostconn.Manager, fetcher pageFetcher) *screens {
+// newScreens builds the screens over the manager, its fetcher and the
+// workspace mutator.
+func newScreens(m *hostconn.Manager, fetcher pageFetcher, wsMut *workspace.Mutator) *screens {
 	return &screens{
 		m:           m,
 		fetcher:     fetcher,
@@ -73,6 +90,14 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher) *screens {
 		header:      kit.NewSectionHeaderState(true),
 		rows:        map[string]*kit.ListRowState{},
 		pendingPage: map[string]bool{}, pendingOlder: map[string]bool{},
+		workspaces:   workspace.NewModel(),
+		wsMut:        wsMut,
+		wsDetailReq:  map[string]bool{},
+		wsHeaders:    map[string]*kit.SectionHeaderState{},
+		wsMenu:       kit.NewMenuState(),
+		policyBanner: kit.NewBannerState(),
+		otherHeader:  kit.NewSectionHeaderState(false),
+		dlg:          newWorkspaceDialogs(),
 	}
 }
 
@@ -111,13 +136,17 @@ func pruneKnown[T any](m map[string]T, known map[string]bool) {
 }
 
 // update folds one frame's deliveries into the screens.
-func (s *screens) update(updates []hostconn.Update, results []session.Result) {
+func (s *screens) update(updates []hostconn.Update, results []session.Result, muts []workspace.MutResult) {
 	for _, u := range updates {
 		s.applyUpdate(u)
 	}
 	for _, r := range results {
 		s.applyResult(r)
 	}
+	for i := range muts {
+		s.dlg.apply(&muts[i])
+	}
+	s.armWorkspaceReads()
 }
 
 // applyUpdate routes one topic delivery or connection-state change.
@@ -130,10 +159,72 @@ func (s *screens) applyUpdate(u hostconn.Update) {
 		s.prune()
 	case u.Topic == topicVendorSessions && u.Event != nil:
 		s.applySessionEvent(u.Event.Type, u.Event.Payload)
+	case u.Topic == topicWorkspaces:
+		s.applyWorkspaceDelivery(u)
 	case u.Topic == topicTranscriptDlt+s.open && u.Event != nil:
 		s.applyDelta(u.Event.Payload)
 	case u.Topic == topicTranscript+s.open:
 		s.applyTranscriptDelivery(u)
+	}
+}
+
+// applyWorkspaceDelivery routes one workspaces-topic delivery into the
+// model: a snapshot replaces the list, an event folds in.
+func (s *screens) applyWorkspaceDelivery(u hostconn.Update) {
+	switch {
+	case u.Snapshot != nil:
+		s.fail(s.workspaces.ApplySnapshot(u.Snapshot.State))
+		s.pruneWorkspaceHeaders()
+		s.closeDialogsOfGoneWorkspaces()
+	case u.Event != nil:
+		s.applyWorkspaceEvent(u.Event.Type, u.Event.Payload)
+	}
+}
+
+// applyWorkspaceEvent folds one workspaces-topic event into the model. A
+// deleted workspace closes its dialogs and prunes the sidebar's state for it.
+func (s *screens) applyWorkspaceEvent(eventType string, payload []byte) {
+	if err := s.workspaces.ApplyEvent(eventType, payload); err != nil {
+		s.fail(err)
+		return
+	}
+	if eventType == workspace.EventDeleted {
+		s.pruneWorkspaceHeaders()
+		s.closeDialogsOfGoneWorkspaces()
+	}
+}
+
+// closeDialogsOfGoneWorkspaces closes a dialog whose workspace left the list,
+// so no dialog stays open on a mutation target that no longer exists.
+func (s *screens) closeDialogsOfGoneWorkspaces() {
+	live := func(id string) bool {
+		_, ok := s.workspaces.Lookup(id)
+		return ok
+	}
+	if !live(s.dlg.root.wsID) || !live(s.dlg.del.wsID) || !live(s.dlg.rmRoot.wsID) || !live(s.dlg.policy.wsID) {
+		s.dlg.closeWorkspaceDialogs()
+	}
+}
+
+// armWorkspaceReads arms one workspace detail read per workspace the model
+// holds no detail for, once per trigger, and drops the guards of the reads
+// whose detail has landed. TODO(F10.14): the nil guard goes when #169's
+// fetcher is wired in as wsReads.
+func (s *screens) armWorkspaceReads() {
+	if s.wsReads == nil {
+		return
+	}
+	for _, id := range s.workspaces.NeedsDetail() {
+		if s.wsDetailReq[id] {
+			continue
+		}
+		s.wsDetailReq[id] = true
+		s.wsReads.RequestWorkspace(id)
+	}
+	for id := range s.wsDetailReq {
+		if _, ok := s.workspaces.DetailFor(id); ok {
+			delete(s.wsDetailReq, id)
+		}
 	}
 }
 
@@ -144,6 +235,9 @@ func (s *screens) reconnected() {
 	delete(s.pendingPage, s.open)
 	delete(s.pendingOlder, s.open)
 	s.fetcher.RequestSessions()
+	if s.wsReads != nil {
+		s.wsReads.RequestWorkspaces()
+	}
 	if s.open != "" {
 		s.m.AddTopic(topicTranscript + s.open)
 		s.m.AddTopic(topicTranscriptDlt + s.open)
@@ -287,22 +381,43 @@ func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 	)
 }
 
-// layoutSidebar draws the session list; a row click opens the session. The
-// column holds the SidebarWidth token: kit rows fill the width they are
-// given, so the list must not swallow the transcript's half of the window.
+// layoutSidebar draws the workspace groups and their sessions (F10.14,
+// desktop-app §5.3): the top header carries the create-workspace action, a
+// warning banner rides above the list while a policy change waits, and a row
+// click opens the session. The column holds the SidebarWidth token: kit rows
+// fill the width they are given, so the list must not swallow the
+// transcript's half of the window.
 func (s *screens) layoutSidebar(gtx *layout.Context, env *kit.Env) layout.Dimensions {
 	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(theme.SidebarWidth))
-	header, _ := s.header.Layout(env, gtx, &kit.SectionHeaderProps{Label: "Sessions"},
-		func(gtx *layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, s.sessionRows(env)...)
-		})
-	return header
+	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			local := gtx
+			return s.layoutPolicyBanner(env, &local)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			local := gtx
+			header, ev := s.header.Layout(env, &local, &kit.SectionHeaderProps{
+				Label:  "Workspaces",
+				Action: &kit.IconButtonProps{Icon: kit.IconPlus, Label: "New workspace"},
+			}, func(gtx *layout.Context) layout.Dimensions {
+				return s.layoutSidebarContent(env, gtx)
+			})
+			if ev.ActionClick {
+				s.dlg.create.open()
+			}
+			if ev.Err != nil {
+				s.fail(ev.Err)
+			}
+			return header
+		}),
+	)
 }
 
-// sessionRows builds one kit row per session; the row's click opens it.
-func (s *screens) sessionRows(env *kit.Env) []layout.FlexChild {
-	rows := make([]layout.FlexChild, 0, len(s.sidebar.List()))
-	for _, sess := range s.sidebar.List() {
+// sessionRows builds one kit row per session of the given list; the row's
+// click opens it.
+func (s *screens) sessionRows(env *kit.Env, sessions []session.Session) []layout.FlexChild {
+	rows := make([]layout.FlexChild, 0, len(sessions))
+	for _, sess := range sessions {
 		row, ok := s.rows[sess.ID]
 		if !ok {
 			row = kit.NewListRowState()

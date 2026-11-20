@@ -396,6 +396,9 @@ type VendorSession struct {
 	WaitingReason string                 `protobuf:"bytes,4,opt,name=waiting_reason,json=waitingReason,proto3" json:"waiting_reason,omitempty"`
 	CreatedAt     string                 `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
 	UpdatedAt     string                 `protobuf:"bytes,6,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	// workspace_id names the workspace the session is bound to at creation
+	// (Q-57); the sidebar groups sessions under their workspaces with it.
+	WorkspaceId   string `protobuf:"bytes,7,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -468,6 +471,13 @@ func (x *VendorSession) GetCreatedAt() string {
 func (x *VendorSession) GetUpdatedAt() string {
 	if x != nil {
 		return x.UpdatedAt
+	}
+	return ""
+}
+
+func (x *VendorSession) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
 	}
 	return ""
 }
@@ -1567,7 +1577,7 @@ const file_fugue_vendors_v1_vendors_proto_rawDesc = "" +
 	"\x0eSessionProfile\x12\x14\n" +
 	"\x05model\x18\x01 \x01(\tR\x05model\x12\x16\n" +
 	"\x06effort\x18\x02 \x01(\tR\x06effort\x12*\n" +
-	"\x11resume_session_id\x18\x03 \x01(\tR\x0fresumeSessionId\"\xdb\x01\n" +
+	"\x11resume_session_id\x18\x03 \x01(\tR\x0fresumeSessionId\"\xfe\x01\n" +
 	"\rVendorSession\x12\x1d\n" +
 	"\n" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x120\n" +
@@ -1577,7 +1587,8 @@ const file_fugue_vendors_v1_vendors_proto_rawDesc = "" +
 	"\n" +
 	"created_at\x18\x05 \x01(\tR\tcreatedAt\x12\x1d\n" +
 	"\n" +
-	"updated_at\x18\x06 \x01(\tR\tupdatedAt\"I\n" +
+	"updated_at\x18\x06 \x01(\tR\tupdatedAt\x12!\n" +
+	"\fworkspace_id\x18\a \x01(\tR\vworkspaceId\"I\n" +
 	"\x13ProbeVendorsRequest\x122\n" +
 	"\avendors\x18\x01 \x03(\x0e2\x18.fugue.vendors.v1.VendorR\avendors\"M\n" +
 	"\x14ProbeVendorsResponse\x125\n" +

@@ -23,6 +23,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
+	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
 // Options are the window's inputs: what to connect to and how it looks.
@@ -93,6 +94,11 @@ func Run(ctx context.Context, opts Options) error {
 	fetcher := session.NewFetcher(m.Client)
 	fetcher.Start(runCtx)
 	defer fetcher.Stop()
+	// The mutator owns the workspace mutations' goroutine (F10.14): the same
+	// off-window shape as the fetcher, for the dialogs' posts.
+	wsMut := workspace.NewMutator(func() workspace.MutatorClient { return m.Client() })
+	wsMut.Start(runCtx)
+	defer wsMut.Stop()
 	defer stopSideGoroutines(cancel, startFeeder(runCtx, w, updates, q), startCloser(runCtx, w))
 
 	shaper, err := fonts.Shaper()
@@ -102,7 +108,7 @@ func Run(ctx context.Context, opts Options) error {
 	light, dark := theme.Light(shaper), theme.Dark(shaper)
 	env := newEnv(shaper, &light)
 	attach(env, w)
-	return eventLoop(w, env, newScreens(m, fetcher), q, &light, &dark)
+	return eventLoop(w, env, newScreens(m, fetcher, wsMut), q, &light, &dark)
 }
 
 // newEnv builds the window's kit.Env over the theme it starts in (F10.13):
@@ -204,7 +210,7 @@ drain:
 			break drain
 		}
 	}
-	sc.update(q.drain(), results)
+	sc.update(q.drain(), results, drainMutResults(sc.wsMut))
 	for {
 		// Letters arrive as their upper-case name on every platform Gio
 		// supports.
@@ -224,6 +230,22 @@ drain:
 		}
 	}
 	drawWindow(gtx, env, sc)
+}
+
+// drainMutResults takes every mutation result the mutator delivered this
+// frame; the window goroutine folds them into the dialogs.
+func drainMutResults(m *workspace.Mutator) []workspace.MutResult {
+	muts := make([]workspace.MutResult, 0, 4)
+drain:
+	for {
+		select {
+		case res := <-m.Results():
+			muts = append(muts, res)
+		default:
+			break drain
+		}
+	}
+	return muts
 }
 
 // drawWindow lays out the screens — the sidebar and the read-only transcript
@@ -253,6 +275,9 @@ func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 			})
 		}),
 	)
+	// The workspace dialogs (F10.14) draw over the whole window, last, with
+	// the full frame's gtx: the scrim dims everything beneath them.
+	sc.dlg.layout(env, gtx, sc)
 }
 
 // statusColor maps the connection state onto the theme's status tokens
