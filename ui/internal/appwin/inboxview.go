@@ -22,7 +22,7 @@ const codeStaleIncarnation = "interaction.stale_incarnation"
 
 // inboxView owns the approvals inbox pane (F10.5b, desktop-app §5).
 // Until F10.20's slot grid lands, it occupies the right pane when selected
-// from the sidebar or toggled with Ctrl+Shift+I.
+// from the sidebar or toggled with Ctrl/Cmd+Shift+I.
 type inboxView struct {
 	active, focusedPin inbox.Pin
 	forms              map[inbox.Pin]*cardFormState
@@ -130,7 +130,7 @@ func (s *screens) applyInboxResults(results []inbox.Result) {
 
 func (s *screens) toggleInboxShortcut(gtx *layout.Context) {
 	for {
-		ke, ok := gtx.Event(key.Filter{Required: key.ModCtrl | key.ModShift, Name: key.Name("I")})
+		ke, ok := gtx.Event(key.Filter{Required: key.ModShortcut | key.ModShift, Name: key.Name("I")})
 		if !ok {
 			return
 		}
