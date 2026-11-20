@@ -90,12 +90,17 @@ func (e *VaultRateLimitError) RetryAfterSeconds() int64 { return e.retryAfter }
 
 // VaultService exposes host-side vault operations to local principals with
 // exponential backoff on failed unlock attempts and zero secret retention.
+// Unlock attempts serialize via attemptMu.TryLock() across the entire
+// checkBackoff -> KDF -> recordFailure/resetBackoff sequence so concurrent calls
+// never bypass backoff and overlapping attempts fail immediately with
+// VaultRateLimited without queuing behind Argon2.
 type VaultService struct {
 	vault           *vault.Service
 	hub             *EventHub
 	clk             clock.Clock
 	unregisterGuard func()
 
+	attemptMu    sync.Mutex
 	mu           sync.Mutex
 	failures     int
 	blockedUntil time.Time
@@ -208,6 +213,13 @@ func (s *VaultService) unlockWith(ctx context.Context, principal string, raw []b
 	if !IsLocalPrincipal(principal) {
 		return VaultStatusView{}, errcode.New(errcode.PermissionDenied, "only local principals may use the vault")
 	}
+	if !s.attemptMu.TryLock() {
+		return VaultStatusView{}, &VaultRateLimitError{
+			err:        errcode.New(errcode.VaultRateLimited, "too many failed vault unlock attempts; wait before retrying"),
+			retryAfter: 1,
+		}
+	}
+	defer s.attemptMu.Unlock()
 	if err := s.checkBackoff(); err != nil {
 		return VaultStatusView{}, err
 	}

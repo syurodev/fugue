@@ -21,6 +21,9 @@ type taskSessionRequest struct {
 	// ApprovalMode is the Fugue approval mode of the role's permission
 	// (Q-120): plan for read, ask for write, never allow-always.
 	ApprovalMode string
+	// SlotReserved reports that the dispatcher already reserved a scheduler slot
+	// for SessionID before recording TaskAssigned.
+	SlotReserved bool
 }
 
 // taskSessions is the port the dispatcher starts and feeds task sessions
@@ -28,8 +31,10 @@ type taskSessionRequest struct {
 // implements it for the host; tests use a fake.
 type taskSessions interface {
 	HasCapacity(ctx context.Context) (bool, error)
+	ReserveSlot(ctx context.Context, sessionID, vendorName, accountID string) (func(), error)
 	StartTaskSession(ctx context.Context, req *taskSessionRequest) error
 	Send(ctx context.Context, sessionID string, input vendor.Input) error
+	SendAsync(ctx context.Context, sessionID string, input vendor.Input, onDone func(error)) error
 	// ResumeTaskSession attaches a fresh process to a detached session
 	// through its stored handle; the wake resumes before it delivers (Q-123).
 	ResumeTaskSession(ctx context.Context, sessionID, cwd string) error
@@ -43,12 +48,20 @@ func (v vendorTaskSessions) HasCapacity(ctx context.Context) (bool, error) {
 	return v.svc.sessions.HasCapacity(ctx)
 }
 
+func (v vendorTaskSessions) ReserveSlot(ctx context.Context, sessionID, vendorName, accountID string) (func(), error) {
+	return v.svc.sessions.ReserveSlot(ctx, sessionID, vendorName, accountID)
+}
+
 func (v vendorTaskSessions) StartTaskSession(ctx context.Context, req *taskSessionRequest) error {
 	return v.svc.startTaskSession(ctx, req)
 }
 
 func (v vendorTaskSessions) Send(ctx context.Context, sessionID string, input vendor.Input) error {
 	return v.svc.sessions.Send(ctx, sessionID, input)
+}
+
+func (v vendorTaskSessions) SendAsync(_ context.Context, sessionID string, input vendor.Input, onDone func(error)) error {
+	return v.svc.sessions.SendAsync(sessionID, input, onDone)
 }
 
 func (v vendorTaskSessions) ResumeTaskSession(ctx context.Context, sessionID, cwd string) error {
@@ -149,7 +162,11 @@ func (s *VendorService) startTaskSession(ctx context.Context, req *taskSessionRe
 		TeamID: req.TeamID, TaskID: req.TaskID, ApprovalMode: req.ApprovalMode,
 		WorkspaceID: req.WorkspaceID, WorkspaceRoot: req.RootName,
 	}
-	if err := s.spawn(spec, info.Role, func() error { return s.sessions.Start(ctx, info, spec) }); err != nil {
+	start := func() error { return s.sessions.Start(ctx, info, spec) }
+	if req.SlotReserved {
+		start = func() error { return s.sessions.StartWithReservation(ctx, info, spec) }
+	}
+	if err := s.spawn(spec, info.Role, start); err != nil {
 		return publicVendorError(err)
 	}
 	return nil

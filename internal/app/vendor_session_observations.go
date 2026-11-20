@@ -40,7 +40,11 @@ func (a *vendorSessionActor) handleObservation(ctx context.Context, observation 
 	if err := a.handleServerRequest(ctx, observation.ServerRequest); err != nil {
 		return err
 	}
-	return a.persistTurnEnd(ctx, observation.TurnEnd)
+	if err := a.persistTurnEnd(ctx, observation.TurnEnd); err != nil {
+		return err
+	}
+	a.resetIdleTimer(ctx)
+	return nil
 }
 
 func (a *vendorSessionActor) persistInit(ctx context.Context, init *vendor.Init) error {
@@ -80,6 +84,7 @@ func (a *vendorSessionActor) ensureVendorTurnStarted(ctx context.Context, turnID
 	if err := a.append(ctx, &vendorstore.Event{Type: vendorstore.VendorTurnStarted, TurnID: turnID, TurnOrigin: vendorstore.TurnOriginVendor}); err != nil {
 		return err
 	}
+	a.stopIdleTimer()
 	a.turns[turnID] = true
 	if _, _, err := vendor.Transition(a.state, vendor.Fact{Kind: vendor.FactVendorTurn}); err != nil {
 		return fmt.Errorf("record vendor-origin turn: %w", err)
@@ -187,6 +192,8 @@ func (a *vendorSessionActor) persistVendorTurnEnd(ctx context.Context, turnID, o
 	a.manager.notifyWake(a.info.ID)
 	if outcome == vendorstore.OutcomeCompleted {
 		a.manager.notifyTurnCompleted(a.info.ID)
+	} else if outcome == vendorstore.OutcomeFailed && (failure == string(vendor.FailureQuota) || failure == string(vendor.FailureAuth)) {
+		a.manager.notifyTurnFailed(a.info.ID, failure)
 	}
 	return nil
 }
@@ -215,6 +222,8 @@ func (a *vendorSessionActor) persistFugueTurnEnd(ctx context.Context, observedTu
 	a.manager.notifyWake(a.info.ID)
 	if outcome == vendorstore.OutcomeCompleted {
 		a.manager.notifyTurnCompleted(a.info.ID)
+	} else if outcome == vendorstore.OutcomeFailed && (failure == string(vendor.FailureQuota) || failure == string(vendor.FailureAuth)) {
+		a.manager.notifyTurnFailed(a.info.ID, failure)
 	}
 	return nil
 }
@@ -288,5 +297,16 @@ func (m *VendorSessions) SetTurnCompletedHook(hook func(sessionID string)) {
 func (m *VendorSessions) notifyTurnCompleted(sessionID string) {
 	if m.turnCompletedHook != nil {
 		m.turnCompletedHook(sessionID)
+	}
+}
+
+// SetTurnFailedHook binds the quota/auth turn failure handler (F11.6b, Q-149).
+func (m *VendorSessions) SetTurnFailedHook(hook func(sessionID, failureCode string)) {
+	m.turnFailedHook = hook
+}
+
+func (m *VendorSessions) notifyTurnFailed(sessionID, failureCode string) {
+	if m.turnFailedHook != nil {
+		m.turnFailedHook(sessionID, failureCode)
 	}
 }

@@ -91,6 +91,13 @@ type SessionConfig struct {
 	TeamsAutoApprove bool
 }
 
+// TeamsConfig holds non-policy team execution settings valid in Tiers 1–3.
+type TeamsConfig struct {
+	// IdleDetachSeconds detaches idle team_manager/member sessions after this
+	// many seconds (default 300; 0 disables).
+	IdleDetachSeconds int
+}
+
 // HostConfig holds host-wide settings valid only in Tier 2 (<FugueHome>/config.toml).
 type HostConfig struct {
 	WorkspacesDir          string
@@ -103,6 +110,10 @@ type HostConfig struct {
 	MaxSessions int
 	// HeavyCommands overrides the §7 heavy-command semaphore cap (0 = max(1, cores/4)).
 	HeavyCommands int
+	// PromptPacingMinSeconds and PromptPacingMaxSeconds bound the §6.1
+	// per-vendor jitter delay (seconds) for origin=fugue prompts (defaults 10..15).
+	PromptPacingMinSeconds int
+	PromptPacingMaxSeconds int
 }
 
 // SessionOverride holds Tier 4 per-session overrides (Q-53 A: model and effort only).
@@ -121,6 +132,7 @@ type EffectiveConfig struct {
 	Roles      []RoleConfig
 	Profiles   map[string]ProfileConfig
 	Session    SessionConfig
+	Teams      TeamsConfig
 	Host       HostConfig
 	Provenance map[string]Tier
 }
@@ -130,7 +142,7 @@ type PolicyDiffEntry struct{ Key, OldValue, NewValue string }
 
 // DefaultConfig returns the Tier 1 embedded default configuration (workspace §5.2).
 func DefaultConfig(fugueHome, workspaceID string) EffectiveConfig {
-	wsDir, scratchDir, prov := filepath.Join(fugueHome, "workspaces"), "", make(map[string]Tier, 21)
+	wsDir, scratchDir, prov := filepath.Join(fugueHome, "workspaces"), "", make(map[string]Tier, 24)
 	if workspaceID != "" {
 		scratchDir = filepath.Join(wsDir, workspaceID, "scratch")
 	}
@@ -142,9 +154,10 @@ func DefaultConfig(fugueHome, workspaceID string) EffectiveConfig {
 		Policy: PolicyConfig{ApprovalMode: "auto", SandboxProfile: "workspace-write", ShellAsk: []string{}, ShellAllow: []string{}, EnvTags: []EnvTagRule{}},
 		Redact: RedactConfig{AllowKeys: []string{}, AllowPaths: []string{}}, Roles: []RoleConfig{}, Profiles: map[string]ProfileConfig{},
 		Session: SessionConfig{ScratchDir: scratchDir, Teams: true}, Provenance: prov,
+		Teams: TeamsConfig{IdleDetachSeconds: 300},
 		Host: HostConfig{
 			WorkspacesDir: wsDir, OutputRetentionTotal: "64 MiB", SeenVersionsPerSession: "8 MiB", SnapshotDisk: "1 GiB",
-			PerAccountSessions: 6,
+			PerAccountSessions: 6, PromptPacingMinSeconds: 10, PromptPacingMaxSeconds: 15,
 		},
 	}
 }
@@ -154,8 +167,10 @@ func defaultProvenanceKeys() []string {
 		keyPolicyApprovalMode, "policy.sandbox_profile", "policy.shell_ask", "policy.shell_allow", "policy.env_tags",
 		"env.keep", "env.override_allow", "redact.allow_keys", "redact.allow_paths", "roles", "profiles",
 		"session.scratch_dir", "session.teams", "session.teams_auto_approve",
+		"teams.idle_detach_seconds",
 		"host.workspaces_dir", "host.output_retention_total", "host.seen_versions_per_session", "host.snapshot_disk",
 		"host.per_account_sessions", "host.max_sessions", "host.heavy_commands",
+		"host.prompt_pacing_min_seconds", "host.prompt_pacing_max_seconds",
 	}
 }
 
@@ -204,7 +219,7 @@ func mergeConfigs(base *EffectiveConfig, t2 *tier2RawConfig, t3 *tier3RawConfig,
 	out := *base
 	out.Provenance, out.Profiles = maps.Clone(base.Provenance), maps.Clone(base.Profiles)
 	if t2 != nil {
-		applyCommonTier(&out, TierGlobal, nil, nil, nil, t2.Roles, t2.Profiles, t2.Session, homeDir)
+		applyCommonTier(&out, TierGlobal, nil, nil, nil, t2.Roles, t2.Profiles, t2.Session, t2.Teams, homeDir)
 		applyHostTier(&out, t2.Host, homeDir)
 	}
 	if t3 != nil {
@@ -212,7 +227,7 @@ func mergeConfigs(base *EffectiveConfig, t2 *tier2RawConfig, t3 *tier3RawConfig,
 		if t3.Roots != nil {
 			out.Roots, out.Provenance["roots"] = slices.Clone(*t3.Roots), TierWorkspace
 		}
-		applyCommonTier(&out, TierWorkspace, t3.Policy, t3.Env, t3.Redact, t3.Roles, t3.Profiles, t3.Session, homeDir)
+		applyCommonTier(&out, TierWorkspace, t3.Policy, t3.Env, t3.Redact, t3.Roles, t3.Profiles, t3.Session, t3.Teams, homeDir)
 	}
 	if t4 != nil {
 		setNonEmpty(&out.Session.Model, out.Provenance, "session.model", TierSession, t4.Model)
@@ -224,7 +239,7 @@ func mergeConfigs(base *EffectiveConfig, t2 *tier2RawConfig, t3 *tier3RawConfig,
 func applyCommonTier(
 	dst *EffectiveConfig, tier Tier, pol *rawPolicy, env *rawEnv,
 	red *rawRedact, roles *[]RoleConfig, profiles map[string]ProfileConfig,
-	sess *rawSession, homeDir string,
+	sess *rawSession, teamsCfg *rawTeams, homeDir string,
 ) {
 	if pol != nil {
 		setScalar(&dst.Policy.ApprovalMode, dst.Provenance, keyPolicyApprovalMode, tier, pol.ApprovalMode)
@@ -248,6 +263,7 @@ func applyCommonTier(
 	}
 	applyProfiles(dst, tier, profiles)
 	applySessionTier(dst, tier, sess, homeDir)
+	applyTeamsTier(dst, tier, teamsCfg)
 }
 
 func applyHostTier(dst *EffectiveConfig, host *rawHost, homeDir string) {
@@ -261,6 +277,15 @@ func applyHostTier(dst *EffectiveConfig, host *rawHost, homeDir string) {
 	setIntScalar(&dst.Host.PerAccountSessions, dst.Provenance, "host.per_account_sessions", TierGlobal, host.PerAccountSessions)
 	setIntScalar(&dst.Host.MaxSessions, dst.Provenance, "host.max_sessions", TierGlobal, host.MaxSessions)
 	setIntScalar(&dst.Host.HeavyCommands, dst.Provenance, "host.heavy_commands", TierGlobal, host.HeavyCommands)
+	setIntScalar(&dst.Host.PromptPacingMinSeconds, dst.Provenance, "host.prompt_pacing_min_seconds", TierGlobal, host.PromptPacingMinSeconds)
+	setIntScalar(&dst.Host.PromptPacingMaxSeconds, dst.Provenance, "host.prompt_pacing_max_seconds", TierGlobal, host.PromptPacingMaxSeconds)
+}
+
+func applyTeamsTier(dst *EffectiveConfig, tier Tier, teamsCfg *rawTeams) {
+	if teamsCfg == nil {
+		return
+	}
+	setIntScalar(&dst.Teams.IdleDetachSeconds, dst.Provenance, "teams.idle_detach_seconds", tier, teamsCfg.IdleDetachSeconds)
 }
 
 func applySessionTier(dst *EffectiveConfig, tier Tier, sess *rawSession, homeDir string) {

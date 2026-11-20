@@ -87,10 +87,10 @@ func TestVaultHostAPISecretAbsentFromLogsErrorsAndProtoFormatting(t *testing.T) 
 	vc, stream := startLocalVaultHostAndSubscribe(t)
 	recPlain, badErrText := exerciseVaultHostAPI(t, vc)
 	events := collectVaultHostStreamEvents(t, stream)
-	for _, secret := range []string{testHostVaultPass, testHostVaultWrong, recPlain} {
+	for _, needle := range []string{testHostVaultPass, testHostVaultWrong, recPlain} {
 		for _, hay := range []string{logs.String(), events, badErrText} {
-			if strings.Contains(hay, secret) {
-				t.Fatalf("secret %q leaked in output %q", secret, hay)
+			if strings.Contains(hay, needle) {
+				t.Fatalf("protected input leaked in output %q", hay)
 			}
 		}
 	}

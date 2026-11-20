@@ -78,6 +78,8 @@ type teamWake struct {
 	wake           chan struct{}
 	resumeRetryAt  map[string]time.Time
 	resumeAttempts map[string]int
+	inflightMu     sync.Mutex
+	inflight       map[string]bool
 	heldMu         sync.RWMutex
 	held           map[string]HeldMailboxEntry
 }
@@ -88,6 +90,7 @@ func newTeamWake(deps *teamWakeDeps) *teamWake {
 		wake:           make(chan struct{}, 1),
 		resumeRetryAt:  make(map[string]time.Time),
 		resumeAttempts: make(map[string]int),
+		inflight:       make(map[string]bool),
 		held:           make(map[string]HeldMailboxEntry),
 	}
 	if deps.Hub != nil {
@@ -218,6 +221,9 @@ func (w *teamWake) deliverRecipient(ctx context.Context, r vendorstore.MailboxRe
 	}
 	if session.State == vendorstore.StateClosed {
 		w.pruneSession(ctx, sessionID)
+		return nil
+	}
+	if w.isInflight(sessionID) {
 		return nil
 	}
 	sendable := w.prepareSession(ctx, r, &session)
@@ -380,9 +386,24 @@ func teamTaskTerminal(state vendorstore.TaskState) bool {
 		state == vendorstore.TaskStateStopped || state == vendorstore.TaskStateCancelled
 }
 
-// deliverBatch claims the recipient's pending rows and sends them as one
-// Fugue-origin turn (Q-122). A refused send releases the claim and waits for
-// the next trigger.
+func (w *teamWake) isInflight(sessionID string) bool {
+	w.inflightMu.Lock()
+	defer w.inflightMu.Unlock()
+	return w.inflight[sessionID]
+}
+
+func (w *teamWake) setInflight(sessionID string, active bool) {
+	w.inflightMu.Lock()
+	if active {
+		w.inflight[sessionID] = true
+	} else {
+		delete(w.inflight, sessionID)
+	}
+	w.inflightMu.Unlock()
+}
+
+// deliverBatch claims the recipient's pending rows and enqueues them as one
+// paced Fugue-origin turn (Q-122, Q-147) without holding teamWake.mu across the wait.
 func (w *teamWake) deliverBatch(ctx context.Context, r vendorstore.MailboxRecipient, sessionID string) error {
 	claimed, err := w.deps.Store.ClaimMailbox(ctx, r.TeamID, r.RecipientTaskID)
 	if err != nil {
@@ -399,23 +420,39 @@ func (w *teamWake) deliverBatch(ctx context.Context, r vendorstore.MailboxRecipi
 		}
 		return err
 	}
-	if err := w.deps.Sessions.Send(ctx, sessionID, vendor.Input{Text: text}); err != nil {
-		if !refusedSend(err) {
+	opCtx := context.WithoutCancel(ctx)
+	w.setInflight(sessionID, true)
+	if err := w.deps.Sessions.SendAsync(ctx, sessionID, vendor.Input{Text: text, Origin: vendor.OriginFugue}, func(sendErr error) {
+		defer w.setInflight(sessionID, false)
+		if handleErr := w.handleBatchSendOutcome(opCtx, r.TeamID, batchID, sendErr); handleErr != nil {
+			slog.WarnContext(opCtx, "handling mailbox send outcome failed", "team_id", r.TeamID, "batch_id", batchID, "error_code", string(errcode.CodeOf(handleErr)))
+		}
+	}); err != nil {
+		w.setInflight(sessionID, false)
+		return w.handleBatchSendOutcome(ctx, r.TeamID, batchID, err)
+	}
+	return nil
+}
+
+func (w *teamWake) handleBatchSendOutcome(ctx context.Context, teamID, batchID string, sendErr error) error {
+	if sendErr != nil {
+		if !refusedSend(sendErr) {
 			// The outcome is unknown: the turn may have reached the vendor.
-			// The claim stays `delivering` and only the transcript recovery
+			// The claim stays `delivering` and only transcript recovery
 			// resolves it — never re-send an unknown effect (Q-122).
-			slog.WarnContext(ctx, "the mailbox send outcome is unknown", "team_id", r.TeamID, "batch_id", batchID, "error_code", string(errcode.CodeOf(err)))
+			slog.WarnContext(ctx, "the mailbox send outcome is unknown", "team_id", teamID, "batch_id", batchID, "error_code", string(errcode.CodeOf(sendErr)))
 			return nil
 		}
 		if releaseErr := w.deps.Store.ReleaseMailboxBatch(ctx, batchID); releaseErr != nil {
 			return boundaryError("release the mailbox batch", releaseErr)
 		}
-		slog.WarnContext(ctx, "sending the mailbox turn was refused", "team_id", r.TeamID, "batch_id", batchID, "error_code", string(errcode.CodeOf(err)))
+		slog.WarnContext(ctx, "sending the mailbox turn was refused", "team_id", teamID, "batch_id", batchID, "error_code", string(errcode.CodeOf(sendErr)))
 		return nil
 	}
 	if err := w.deps.Store.MarkMailboxBatchDelivered(ctx, batchID); err != nil {
 		return boundaryError("mark the mailbox batch delivered", err)
 	}
+	w.Notify()
 	return nil
 }
 

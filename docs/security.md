@@ -58,3 +58,16 @@ stage A. Related limits of the same mechanism:
   without a verifiable empty tree, they stay retained for the host's lifetime).
 - A continuous stream of spawns can make the local peer check wait up to the 5 s cap and deny
   (fail closed); affected local clients retry `Hello`.
+
+## 4. Vault unlock backoff and recovery key display
+
+- **Unlock backoff.** After three free failed unlock attempts (`Unlock` or `UnlockWithRecovery`),
+  the host imposes an exponential backoff (`2 s` doubling up to a `60 s` cap) computed against its
+  injected `clock.Clock`. The failure count and deadline live in memory (`VaultService`) and reset
+  when the host restarts; Argon2id key derivation remains the primary brute-force slowdown layer.
+  Concurrent unlock attempts do not bypass backoff or queue behind Argon2: `attemptMu.TryLock()`
+  holds the sequence across `checkBackoff → KDF → record/reset`, immediately rejecting overlapping
+  attempts with `vault.rate_limited`.
+- **UI recovery key copy.** The desktop app holds the one-time recovery key in `[]byte` and zeroes
+  that buffer when acknowledged, but rendering the key through Gio's text widget requires passing an
+  immutable Go `string`, leaving a short-lived string copy in memory until garbage collection.

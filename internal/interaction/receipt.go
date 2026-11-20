@@ -171,6 +171,17 @@ func (o *Owner) cancelOperationTicketLocked(ticket *Ticket, now time.Time) *Audi
 	return &ev
 }
 
+// HasPendingForSession reports whether sessionID currently has any unresolved
+// interaction request.
+func (o *Owner) HasPendingForSession(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.pendingBySession[sessionID] > 0
+}
+
 // ResetSession drops all session grants, cancels all pending requests and
 // invalidates all unconsumed receipts belonging to sessionID.
 func (o *Owner) ResetSession(sessionID string) {

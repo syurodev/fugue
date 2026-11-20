@@ -231,3 +231,45 @@ func TestAccountWindowsStayBoundedAcrossObservations(t *testing.T) {
 		}
 	}
 }
+
+func TestAccountQuotaAllowsAndNextReset(t *testing.T) {
+	t.Parallel()
+	now := accountEpoch()
+	clk := clock.NewFake(now)
+	a := newTestAccounts(clk)
+
+	if !a.QuotaAllows("claude") || !a.QuotaAllows("agy") || !a.QuotaAllows("unknown") {
+		t.Fatal("fresh accounts must be allowed")
+	}
+
+	reset1 := now.Add(2 * time.Hour)
+	a.ObserveQuota("claude", &RateLimit{Windows: []Window{{Name: fiveHour, Utilization: 0.84, ResetsAt: reset1}}})
+	if !a.QuotaAllows("claude") {
+		t.Fatal("0.84 utilization must still be allowed")
+	}
+
+	a.ObserveQuota("claude", &RateLimit{Windows: []Window{{Name: fiveHour, Utilization: 0.85, ResetsAt: reset1}}})
+	if a.QuotaAllows("claude") {
+		t.Fatal("0.85 utilization must be blocked by quota gate")
+	}
+	if got := NextQuotaReset(a.Snapshot(), clk.Now()); !got.Equal(reset1) {
+		t.Fatalf("NextQuotaReset = %v, want %v", got, reset1)
+	}
+
+	clk.Advance(2 * time.Hour)
+	if !a.QuotaAllows("claude") {
+		t.Fatal("account must reopen once resetsAt is reached")
+	}
+	if got := NextQuotaReset(a.Snapshot(), clk.Now()); !got.IsZero() {
+		t.Fatalf("NextQuotaReset after reset = %v, want zero", got)
+	}
+
+	// Missing resetsAt never auto-reopens.
+	a.ObserveQuota("codex", &RateLimit{Windows: []Window{{Name: fiveHour, Utilization: 0.90}}})
+	if a.QuotaAllows("codex") {
+		t.Fatal("0.90 without resetsAt must be blocked")
+	}
+	if got := NextQuotaReset(a.Snapshot(), clk.Now()); !got.IsZero() {
+		t.Fatalf("NextQuotaReset without resetsAt = %v, want zero", got)
+	}
+}

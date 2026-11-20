@@ -93,42 +93,15 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	if err := transcripts.RegisterStoredSessions(ctx); err != nil {
 		return nil, err
 	}
-	topic, err := newVendorSessionsTopic(ctx, vs, hp.rt.hub)
-	if err != nil {
-		return nil, err
-	}
 	adapter, adapters := buildVendorAdapters(deps)
 	accounts := vendor.NewAccounts(deps.Clock, []vendor.AccountVendor{
 		{Name: VendorClaude, DirectQuota: true}, {Name: VendorCodex, DirectQuota: true}, {Name: VendorAGY},
 	})
-	// A session's token, tombstones and relayed interactions die with its actor, with a purge and with the host.
 	tokens := newSessionTokens(deps.Random)
-	endSession := func(sessionID string) {
-		tokens.revoke(sessionID)
-		if hp.rt.sessionTools != nil {
-			hp.rt.sessionTools.endSession(sessionID)
-		}
-		if hp.rt.interactions != nil && hp.rt.interactions.owner != nil {
-			hp.rt.interactions.owner.ResetSession(sessionID)
-		}
-		hp.cancelTeamProposalOnEnd(base, sessionID)
-	}
-	sessionEndSettled := func(sessionID string) <-chan struct{} {
-		if hp.rt.teamProposals == nil {
-			return nil
-		}
-		return hp.rt.teamProposals.SessionEndSettled(sessionID)
-	}
+	endSession := newSessionEndedHook(base, hp, tokens)
 	transcripts.onPurge = endSession
 	hp.vendorAdapter = adapter
-	sessions, err := NewVendorSessions(base, &VendorSessionDeps{
-		Store: topicNotifyingStore{Store: vs, topic: topic}, Transcripts: transcripts,
-		Adapter: adapter, Adapters: adapters, Accounts: accounts,
-		HostResources: hp.rt.hostResources, HostConfig: globalHostConfigReader(hp.rt.workspaces),
-		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: endSession, SessionEndSettled: sessionEndSettled,
-		TestDelaySpawnRegistration: deps.TestDelaySpawnRegistration,
-		TestOnWaitInflightSpawn:    deps.TestOnWaitInflightSpawn,
-	})
+	sessions, err := composeVendorSessionManager(ctx, base, hp, vs, transcripts, v, adapter, adapters, accounts, deps, endSession)
 	if err != nil {
 		return nil, err
 	}
@@ -138,8 +111,11 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 		ids: deps.IDs, hostEnv: deps.VendorHostEnv, ops: newVendorOps(deps.Clock, hp.rt.goTask),
 		tokens: tokens, bridge: deps.Bridge, accounts: accounts,
 	}
-	hp.wireTeamDispatch(ctx, base, vs, sessions, v, deps)
-	hp.rt.accountsService, err = newAccountsService(accounts, hp.rt.vendors, hp.rt.hub, accountsServiceDeps{Clock: deps.Clock, IDs: deps.IDs, GoTask: hp.rt.goTask})
+	hp.wireTeamDispatch(ctx, base, vs, sessions, accounts, v, deps)
+	hp.rt.accountsService, err = newAccountsService(accounts, hp.rt.vendors, hp.rt.hub, accountsServiceDeps{
+		Clock: deps.Clock, IDs: deps.IDs, GoTask: hp.rt.goTask,
+		OnQuotaReopen: func() { hp.dispatchAllAsync(base) },
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -147,6 +123,56 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	// moved it here from F11.2a).
 	hp.rt.teamProposals.SetAccounts(hp.rt.accountsService)
 	return sessions, nil
+}
+
+func newSessionEndedHook(base context.Context, hp *HostProcess, tokens *sessionTokens) func(string) {
+	// A session's token, tombstones and relayed interactions die with its actor, with a purge and with the host.
+	return func(sessionID string) {
+		tokens.revoke(sessionID)
+		if hp.rt.sessionTools != nil {
+			hp.rt.sessionTools.endSession(sessionID)
+		}
+		if hp.rt.interactions != nil && hp.rt.interactions.owner != nil {
+			hp.rt.interactions.owner.ResetSession(sessionID)
+		}
+		hp.cancelTeamProposalOnEnd(base, sessionID)
+	}
+}
+
+func composeVendorSessionManager(
+	ctx, base context.Context,
+	hp *HostProcess,
+	vs *vendorstore.Store,
+	transcripts *Transcripts,
+	v *vault.Service,
+	adapter vendor.Adapter,
+	adapters map[string]vendor.Adapter,
+	accounts *vendor.Accounts,
+	deps *HostDeps,
+	endSession func(string),
+) (*VendorSessions, error) {
+	topic, err := newVendorSessionsTopic(ctx, vs, hp.rt.hub)
+	if err != nil {
+		return nil, err
+	}
+	sessionEndSettled := func(sessionID string) <-chan struct{} {
+		if hp.rt.teamProposals == nil {
+			return nil
+		}
+		return hp.rt.teamProposals.SessionEndSettled(sessionID)
+	}
+	return NewVendorSessions(base, &VendorSessionDeps{
+		Store: topicNotifyingStore{Store: vs, topic: topic}, Transcripts: transcripts,
+		Adapter: adapter, Adapters: adapters, Accounts: accounts,
+		HostResources: hp.rt.hostResources, HostConfig: globalHostConfigReader(hp.rt.workspaces),
+		TeamsConfig: globalOrWorkspaceTeamsConfigReader(hp.rt.workspaces),
+		HasPendingApproval: func(sessionID string) bool {
+			return hp.rt.interactions != nil && hp.rt.interactions.owner.HasPendingForSession(sessionID)
+		},
+		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: endSession, SessionEndSettled: sessionEndSettled,
+		TestDelaySpawnRegistration: deps.TestDelaySpawnRegistration,
+		TestOnWaitInflightSpawn:    deps.TestOnWaitInflightSpawn,
+	})
 }
 
 func wireTeamServices(

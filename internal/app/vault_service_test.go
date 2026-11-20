@@ -2,11 +2,14 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -311,5 +314,63 @@ func assertNoSecretsInOutputs(t *testing.T, secretsList, outputs []string) {
 				t.Fatalf("secret %q leaked in output %q", s, hay)
 			}
 		}
+	}
+}
+
+func TestVaultConcurrentUnlockAttemptsCannotBypassBackoff(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Unix(1_700_000_000, 0))
+	_, svc, _ := newTestVaultAppService(t, clk)
+	res, err := svc.Setup(t.Context(), testVaultLocal, []byte(testVaultPassphrase))
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Clear()
+	if _, lerr := svc.Lock(t.Context(), testVaultLocal); lerr != nil {
+		t.Fatal(lerr)
+	}
+
+	const attempts = 20
+	var kdfCalls atomic.Int32
+	start := make(chan struct{})
+	errs := make(chan error, attempts)
+	var wg sync.WaitGroup
+	countingFn := func(context.Context, []byte) error {
+		kdfCalls.Add(1)
+		return errcode.New(errcode.PermissionDenied, "wrong")
+	}
+	for range attempts {
+		wg.Go(func() {
+			<-start
+			_, uerr := svc.unlockWith(t.Context(), testVaultLocal, []byte(testVaultWrongPass), countingFn)
+			errs <- uerr
+		})
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	assertConcurrentUnlockOutcomes(t, errs, int(kdfCalls.Load()), attempts)
+}
+
+func assertConcurrentUnlockOutcomes(t *testing.T, errs <-chan error, kdfCalls, attempts int) {
+	t.Helper()
+	if kdfCalls < 1 || kdfCalls > vaultFreeAttempts {
+		t.Fatalf("concurrent KDF calls = %d, want in [1..%d]", kdfCalls, vaultFreeAttempts)
+	}
+	var invalidCount, rateCount int
+	for uerr := range errs {
+		code := errcode.CodeOf(uerr)
+		if code == errcode.VaultInvalidPassphrase {
+			invalidCount++
+			continue
+		}
+		if code == errcode.VaultRateLimited {
+			rateCount++
+			continue
+		}
+		t.Fatalf("unexpected concurrent unlock error: %v", uerr)
+	}
+	if invalidCount != kdfCalls || invalidCount+rateCount != attempts {
+		t.Fatalf("results invalid=%d rateLimited=%d kdfCalls=%d", invalidCount, rateCount, kdfCalls)
 	}
 }
