@@ -228,7 +228,7 @@ func TestVaultLockClearsKeyAndTriggersVaultLocked(t *testing.T) {
 }
 
 func TestVaultSecretAbsentFromLogsErrorsTopicsAndFormatting(t *testing.T) {
-	// Not parallel: the process-wide default logger is swapped for this test.
+	t.Parallel()
 	logs := &vaultLogBuffer{}
 	oldLogger := slog.Default()
 	slog.SetDefault(slog.New(redact.NewJSONHandler(logs, slog.LevelDebug)))
@@ -384,7 +384,11 @@ type vaultLogBuffer struct {
 func (b *vaultLogBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.buf.Write(p)
+	n, err := b.buf.Write(p)
+	if err != nil {
+		return n, fmt.Errorf("buffer the log: %w", err)
+	}
+	return n, nil
 }
 
 func (b *vaultLogBuffer) String() string {

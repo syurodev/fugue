@@ -76,8 +76,10 @@ func assertAllVaultRPCsDenied(t *testing.T, vc vaultv1connect.VaultServiceClient
 }
 
 func TestVaultHostAPISecretAbsentFromLogsErrorsAndProtoFormatting(t *testing.T) {
-	// Not parallel: HostDeps has no logger seam, so the process-wide default
-	// logger is swapped for the duration of the test.
+	t.Parallel()
+	// HostDeps has no logger seam, so the default logger is swapped (same
+	// pattern as the session tests). The sink is locked and the host is
+	// drained before the buffer is read.
 	assertVaultProtoDebugRedact(t)
 
 	logs := &lockedBuffer{}
@@ -86,24 +88,25 @@ func TestVaultHostAPISecretAbsentFromLogsErrorsAndProtoFormatting(t *testing.T) 
 	t.Cleanup(func() { slog.SetDefault(previous) })
 
 	var recPlain, badErrText, events string
-	// The subtest's cleanups (host drain + close) run before t.Run returns,
-	// so no background goroutine writes to logs once we read it below.
-	t.Run("host", func(t *testing.T) {
-		vc, stream := startLocalVaultHostAndSubscribe(t)
-		recPlain, badErrText = exerciseVaultHostAPI(t, vc)
-		events = collectVaultHostStreamEvents(t, stream)
-	})
-	if t.Failed() {
-		return
-	}
-	logOut := logs.String()
-	for _, needle := range []string{testHostVaultPass, testHostVaultWrong, recPlain} {
-		for _, hay := range []string{logOut, events, badErrText} {
-			if strings.Contains(hay, needle) {
-				t.Fatalf("protected input leaked in output %q", hay)
+	// Registered before the host starts, so (LIFO) it runs after the host's
+	// drain and close: no background goroutine writes to logs while we read.
+	t.Cleanup(func() {
+		if t.Failed() {
+			return
+		}
+		logOut := logs.String()
+		for _, needle := range []string{testHostVaultPass, testHostVaultWrong, recPlain} {
+			for _, hay := range []string{logOut, events, badErrText} {
+				if strings.Contains(hay, needle) {
+					t.Errorf("protected input leaked in output %q", hay)
+				}
 			}
 		}
-	}
+	})
+
+	vc, stream := startLocalVaultHostAndSubscribe(t)
+	recPlain, badErrText = exerciseVaultHostAPI(t, vc)
+	events = collectVaultHostStreamEvents(t, stream)
 }
 
 func assertVaultProtoDebugRedact(t *testing.T) {
