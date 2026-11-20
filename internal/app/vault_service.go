@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
@@ -264,7 +263,10 @@ func (s *VaultService) resetBackoff() {
 func (s *VaultService) handleUnlockError(err error) error {
 	code := errcode.CodeOf(err)
 	switch {
-	case code == errcode.FailedPrecondition || errors.Is(err, vault.ErrLocked):
+	case code == errcode.FailedPrecondition && s.vault.Snapshot().State == vault.StateNotConfigured:
+		// Only a vault that really has no keyring maps to not_configured: the
+		// UI answers that code with the setup screen, so any other precondition
+		// failure (an unreadable keyring) must keep its own code.
 		return errcode.New(errcode.VaultNotConfigured, "the vault is not configured yet")
 	case code == errcode.PermissionDenied:
 		s.recordFailure()

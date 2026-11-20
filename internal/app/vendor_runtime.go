@@ -33,15 +33,10 @@ import (
 // respawned and no turn is replayed; a client brings a detached session back
 // through Resume.
 func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store, deps *HostDeps) error {
-	v, err := vault.NewService(ctx, vault.NewSQLKeyringStore(store.DB()), deps.IDs)
+	v, vaultSvc, err := newHostVault(ctx, hp, store, deps)
 	if err != nil {
-		return errcode.Wrap(errcode.Internal, "create the host vault", err)
+		return err
 	}
-	vaultSvc, err := newVaultService(v, hp.rt.hub, deps.Clock)
-	if err != nil {
-		return errcode.Wrap(errcode.Internal, "create the host vault service", err)
-	}
-	hp.rt.vaultService = vaultSvc
 	vs, err := vendorstore.New(ctx, store.DB(), v, deps.Clock, nil)
 	if err != nil {
 		vaultSvc.Close()
@@ -91,6 +86,22 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 		return err
 	}
 	return nil
+}
+
+// newHostVault opens the host vault and the Host API vault service over it;
+// the service is published on hp before any later step can fail, so the
+// caller's error paths own closing it.
+func newHostVault(ctx context.Context, hp *HostProcess, store *storage.Store, deps *HostDeps) (*vault.Service, *VaultService, error) {
+	v, err := vault.NewService(ctx, vault.NewSQLKeyringStore(store.DB()), deps.IDs)
+	if err != nil {
+		return nil, nil, errcode.Wrap(errcode.Internal, "create the host vault", err)
+	}
+	vaultSvc, err := newVaultService(v, hp.rt.hub, deps.Clock)
+	if err != nil {
+		return nil, nil, errcode.Wrap(errcode.Internal, "create the host vault service", err)
+	}
+	hp.rt.vaultService = vaultSvc
+	return v, vaultSvc, nil
 }
 
 func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendorstore.Store, transcripts *Transcripts, v *vault.Service, deps *HostDeps) (*VendorSessions, error) {
