@@ -296,6 +296,8 @@ func (a *Adapter) spawnSessionProcess(
 		Interrupt:     makeProtocolInterrupt(sess),
 		SessionID:     spec.SessionID,
 		XDGRuntimeDir: a.XDGRuntimeDir,
+		MemoryMax:     spec.MemoryMax,
+		CPUWeight:     spec.CPUWeight,
 		Probe:         probe,
 		OnEscalation:  a.OnEscalation,
 	}

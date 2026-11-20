@@ -72,6 +72,21 @@ func (s *stubHost) CallTool(ctx context.Context, req *connect.Request[sessiontoo
 	return connect.NewResponse(&sessiontoolsv1.CallToolResponse{Text: req.Msg.Name + ":" + string(req.Msg.Arguments)}), nil
 }
 
+func (s *stubHost) AcquireHeavySlot(ctx context.Context, _ *connect.Request[sessiontoolsv1.AcquireHeavySlotRequest], stream *connect.ServerStream[sessiontoolsv1.AcquireHeavySlotResponse]) error {
+	if s.hold != nil {
+		select {
+		case <-s.hold:
+		case <-ctx.Done():
+			return connect.NewError(connect.CodeCanceled, ctx.Err())
+		}
+	}
+	if err := stream.Send(&sessiontoolsv1.AcquireHeavySlotResponse{Acquired: true}); err != nil {
+		return fmt.Errorf("send stub heavy slot: %w", err)
+	}
+	<-ctx.Done()
+	return nil
+}
+
 // serveStub serves the stub over a unix socket with unencrypted HTTP/2, as
 // the host does, and returns the socket path.
 func serveStub(t *testing.T, stub *stubHost) string {

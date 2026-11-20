@@ -42,6 +42,9 @@ const (
 	// SessionToolServiceCallToolProcedure is the fully-qualified name of the SessionToolService's
 	// CallTool RPC.
 	SessionToolServiceCallToolProcedure = "/fugue.sessiontools.v1.SessionToolService/CallTool"
+	// SessionToolServiceAcquireHeavySlotProcedure is the fully-qualified name of the
+	// SessionToolService's AcquireHeavySlot RPC.
+	SessionToolServiceAcquireHeavySlotProcedure = "/fugue.sessiontools.v1.SessionToolService/AcquireHeavySlot"
 )
 
 // SessionToolServiceClient is a client for the fugue.sessiontools.v1.SessionToolService service.
@@ -56,6 +59,9 @@ type SessionToolServiceClient interface {
 	// attached session (vendor-runtime VR-13). It waits while the user is
 	// asked.
 	CallTool(context.Context, *connect.Request[v1.CallToolRequest]) (*connect.Response[v1.CallToolResponse], error)
+	// AcquireHeavySlot waits for one heavy-command semaphore slot and holds it
+	// until the session client cancels or disconnects (orchestration §7).
+	AcquireHeavySlot(context.Context, *connect.Request[v1.AcquireHeavySlotRequest]) (*connect.ServerStreamForClient[v1.AcquireHeavySlotResponse], error)
 }
 
 // NewSessionToolServiceClient constructs a client for the fugue.sessiontools.v1.SessionToolService
@@ -87,14 +93,21 @@ func NewSessionToolServiceClient(httpClient connect.HTTPClient, baseURL string, 
 			connect.WithSchema(sessionToolServiceMethods.ByName("CallTool")),
 			connect.WithClientOptions(opts...),
 		),
+		acquireHeavySlot: connect.NewClient[v1.AcquireHeavySlotRequest, v1.AcquireHeavySlotResponse](
+			httpClient,
+			baseURL+SessionToolServiceAcquireHeavySlotProcedure,
+			connect.WithSchema(sessionToolServiceMethods.ByName("AcquireHeavySlot")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // sessionToolServiceClient implements SessionToolServiceClient.
 type sessionToolServiceClient struct {
-	attach    *connect.Client[v1.AttachRequest, v1.AttachResponse]
-	listTools *connect.Client[v1.ListToolsRequest, v1.ListToolsResponse]
-	callTool  *connect.Client[v1.CallToolRequest, v1.CallToolResponse]
+	attach           *connect.Client[v1.AttachRequest, v1.AttachResponse]
+	listTools        *connect.Client[v1.ListToolsRequest, v1.ListToolsResponse]
+	callTool         *connect.Client[v1.CallToolRequest, v1.CallToolResponse]
+	acquireHeavySlot *connect.Client[v1.AcquireHeavySlotRequest, v1.AcquireHeavySlotResponse]
 }
 
 // Attach calls fugue.sessiontools.v1.SessionToolService.Attach.
@@ -112,6 +125,11 @@ func (c *sessionToolServiceClient) CallTool(ctx context.Context, req *connect.Re
 	return c.callTool.CallUnary(ctx, req)
 }
 
+// AcquireHeavySlot calls fugue.sessiontools.v1.SessionToolService.AcquireHeavySlot.
+func (c *sessionToolServiceClient) AcquireHeavySlot(ctx context.Context, req *connect.Request[v1.AcquireHeavySlotRequest]) (*connect.ServerStreamForClient[v1.AcquireHeavySlotResponse], error) {
+	return c.acquireHeavySlot.CallServerStream(ctx, req)
+}
+
 // SessionToolServiceHandler is an implementation of the fugue.sessiontools.v1.SessionToolService
 // service.
 type SessionToolServiceHandler interface {
@@ -125,6 +143,9 @@ type SessionToolServiceHandler interface {
 	// attached session (vendor-runtime VR-13). It waits while the user is
 	// asked.
 	CallTool(context.Context, *connect.Request[v1.CallToolRequest]) (*connect.Response[v1.CallToolResponse], error)
+	// AcquireHeavySlot waits for one heavy-command semaphore slot and holds it
+	// until the session client cancels or disconnects (orchestration §7).
+	AcquireHeavySlot(context.Context, *connect.Request[v1.AcquireHeavySlotRequest], *connect.ServerStream[v1.AcquireHeavySlotResponse]) error
 }
 
 // NewSessionToolServiceHandler builds an HTTP handler from the service implementation. It returns
@@ -152,6 +173,12 @@ func NewSessionToolServiceHandler(svc SessionToolServiceHandler, opts ...connect
 		connect.WithSchema(sessionToolServiceMethods.ByName("CallTool")),
 		connect.WithHandlerOptions(opts...),
 	)
+	sessionToolServiceAcquireHeavySlotHandler := connect.NewServerStreamHandler(
+		SessionToolServiceAcquireHeavySlotProcedure,
+		svc.AcquireHeavySlot,
+		connect.WithSchema(sessionToolServiceMethods.ByName("AcquireHeavySlot")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fugue.sessiontools.v1.SessionToolService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case SessionToolServiceAttachProcedure:
@@ -160,6 +187,8 @@ func NewSessionToolServiceHandler(svc SessionToolServiceHandler, opts ...connect
 			sessionToolServiceListToolsHandler.ServeHTTP(w, r)
 		case SessionToolServiceCallToolProcedure:
 			sessionToolServiceCallToolHandler.ServeHTTP(w, r)
+		case SessionToolServiceAcquireHeavySlotProcedure:
+			sessionToolServiceAcquireHeavySlotHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -179,4 +208,8 @@ func (UnimplementedSessionToolServiceHandler) ListTools(context.Context, *connec
 
 func (UnimplementedSessionToolServiceHandler) CallTool(context.Context, *connect.Request[v1.CallToolRequest]) (*connect.Response[v1.CallToolResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.sessiontools.v1.SessionToolService.CallTool is not implemented"))
+}
+
+func (UnimplementedSessionToolServiceHandler) AcquireHeavySlot(context.Context, *connect.Request[v1.AcquireHeavySlotRequest], *connect.ServerStream[v1.AcquireHeavySlotResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("fugue.sessiontools.v1.SessionToolService.AcquireHeavySlot is not implemented"))
 }

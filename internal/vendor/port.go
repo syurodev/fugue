@@ -86,6 +86,10 @@ type StartSpec struct {
 	SessionToken redact.Secret
 	// Bridge names the MCP bridge the vendor CLI spawns for Fugue's tools.
 	Bridge Bridge
+	// MemoryMax and CPUWeight pass scheduler containment limits to the Linux
+	// systemd scope (vendor-runtime §8, orchestration §7); empty/zero uses defaults.
+	MemoryMax string
+	CPUWeight int
 	// OnSpawned, when set, runs as soon as the session process has spawned (PID
 	// and start token known) and before the adapter waits for the handshake.
 	OnSpawned func(PeerOwner)

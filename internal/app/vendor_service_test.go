@@ -27,10 +27,11 @@ const (
 )
 
 type vendorServiceFixture struct {
-	svc *VendorService
-	rt  *HostRuntime
-	hp  *HostProcess
-	ws  string
+	svc       *VendorService
+	rt        *HostRuntime
+	hp        *HostProcess
+	ws        string
+	fugueHome string
 }
 
 func newVendorServiceFixture(t *testing.T) *vendorServiceFixture {
@@ -38,20 +39,32 @@ func newVendorServiceFixture(t *testing.T) *vendorServiceFixture {
 	return newVendorServiceFixtureWith(t, nil)
 }
 
-// newVendorServiceFixtureWith starts the production host wiring with the
-// given test tools registered.
 func newVendorServiceFixtureWith(t *testing.T, tools []*FugueTool) *vendorServiceFixture {
+	t.Helper()
+	return newVendorServiceFixtureCustom(t, func(deps *HostDeps) {
+		deps.TestFugueTools = tools
+	})
+}
+
+// newVendorServiceFixtureCustom starts the production host wiring with optional
+// HostDeps customization for tests.
+func newVendorServiceFixtureCustom(t *testing.T, customize func(*HostDeps)) *vendorServiceFixture {
 	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
 	clk := testutil.OSClock()
-	hp, err := StartHost(t.Context(), &HostDeps{
-		DataDir: cheapvault.DataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
+	fugueHome := filepath.Join(t.TempDir(), "Fugue")
+	deps := &HostDeps{
+		DataDir: cheapvault.DataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: fugueHome},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("vendor-svc")),
-		Transport: newScriptedTransport(), VendorBinary: exe, TestFugueTools: tools,
-	})
+		Transport: newScriptedTransport(), VendorBinary: exe,
+	}
+	if customize != nil {
+		customize(deps)
+	}
+	hp, err := StartHost(t.Context(), deps)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +79,7 @@ func newVendorServiceFixtureWith(t *testing.T, tools []*FugueTool) *vendorServic
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := &vendorServiceFixture{svc: svc, rt: rt, hp: hp}
+	f := &vendorServiceFixture{svc: svc, rt: rt, hp: hp, fugueHome: fugueHome}
 	f.ws = f.addWorkspace(t, "svc-ws")
 	return f
 }
@@ -189,7 +202,9 @@ func assertCatchUpFrom(t *testing.T, rt *HostRuntime, after EventSeq, sessionID 
 // the capacity cap and every typed rejection hold at the service boundary.
 func TestVendorServiceLimitsAndTypedRejections(t *testing.T) {
 	t.Parallel()
-	f := newVendorServiceFixture(t)
+	f := newVendorServiceFixtureCustom(t, func(deps *HostDeps) {
+		deps.HostResources = fakeHostResources{ramBytes: 4<<30 + 800<<20, cores: 4}
+	})
 	first := f.start(t, "lim-1")
 	f.start(t, "lim-2")
 	_, err := f.svc.Start(t.Context(), testAppPrincipal, &StartVendorSession{CommandID: "lim-3", Vendor: VendorClaude, WorkspaceID: f.ws})

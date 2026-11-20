@@ -6,6 +6,21 @@ import (
 	"slices"
 )
 
+// GlobalEffectiveConfig merges Tier 1 defaults with Tier 2 config.toml so
+// host-wide scheduler defaults apply even when no workspace is selected.
+func (s *Service) GlobalEffectiveConfig(ctx context.Context) (EffectiveConfig, error) {
+	homeDir, err := s.userHome("")
+	if err != nil {
+		return EffectiveConfig{}, err
+	}
+	t2Cfg, err := s.loadTier2Config(ctx, homeDir)
+	if err != nil {
+		return EffectiveConfig{}, err
+	}
+	base := DefaultConfig(s.paths.FugueHome, "")
+	return mergeConfigs(&base, &t2Cfg, nil, nil, homeDir), nil
+}
+
 // GetEffectiveConfig merges all four configuration tiers for workspace id (WS-05, Q-64).
 func (s *Service) GetEffectiveConfig(ctx context.Context, id string, override *SessionOverride) (EffectiveConfig, *Workspace, error) {
 	if override != nil {

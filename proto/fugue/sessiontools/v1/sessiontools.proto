@@ -18,6 +18,16 @@ service SessionToolService {
   // attached session (vendor-runtime VR-13). It waits while the user is
   // asked.
   rpc CallTool(CallToolRequest) returns (CallToolResponse);
+
+  // AcquireHeavySlot waits for one heavy-command semaphore slot and holds it
+  // until the session client cancels or disconnects (orchestration §7).
+  rpc AcquireHeavySlot(AcquireHeavySlotRequest) returns (stream AcquireHeavySlotResponse);
+}
+
+message AcquireHeavySlotRequest {}
+
+message AcquireHeavySlotResponse {
+  bool acquired = 1;
 }
 
 message AttachRequest {

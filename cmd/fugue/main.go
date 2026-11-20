@@ -31,6 +31,16 @@ func runMain(ctx context.Context, args []string, out, errOut io.Writer) int {
 		slog.SetDefault(slog.New(redact.NewJSONHandler(os.Stderr, slog.LevelWarn)))
 		return RunBridge(ctx, os.Stdin, out, config.ProcessEnv{}, socket, version)
 	}
+	if socket, cmdArgs, matched, valid := parseExclusiveArgs(args); matched {
+		if !valid {
+			if uerr := usage(out); uerr != nil {
+				slog.Error("write usage", "err", uerr)
+			}
+			return exitUsage
+		}
+		slog.SetDefault(slog.New(redact.NewJSONHandler(os.Stderr, slog.LevelWarn)))
+		return RunExclusive(ctx, os.Stdin, out, errOut, config.ProcessEnv{}, socket, cmdArgs, version)
+	}
 	grace, valid := serveArguments(args)
 	if !valid {
 		if uerr := usage(out); uerr != nil {
@@ -79,7 +89,13 @@ func usage(out io.Writer) error {
 	if err := say(out, "usage: fugue mcp-bridge --socket <path>"); err != nil {
 		return err
 	}
-	return say(out, "  serves Fugue's MCP tools to a vendor session; started by the host, not by hand")
+	if err := say(out, "  serves Fugue's MCP tools to a vendor session; started by the host, not by hand"); err != nil {
+		return err
+	}
+	if err := say(out, "usage: fugue exclusive [--socket <path>] -- <command> [args...]"); err != nil {
+		return err
+	}
+	return say(out, "  runs a heavy command holding one slot of the host's §7 heavy-command semaphore")
 }
 
 // say writes one formatted line of user output.

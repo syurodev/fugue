@@ -155,30 +155,32 @@ func (s *VendorService) startTaskSession(ctx context.Context, req *taskSessionRe
 	return nil
 }
 
-// activeSessions counts the sessions that hold a process slot.
-func (m *VendorSessions) activeSessions(ctx context.Context) (int, error) {
-	sessions, err := m.deps.Store.ListSessions(ctx)
-	if err != nil {
-		return 0, safeActorError(err)
-	}
-	active := 0
-	for i := range sessions {
-		if sessions[i].State != vendorstore.StateClosed && sessions[i].State != vendorstore.StateDetached {
-			active++
-		}
-	}
-	return active, nil
-}
-
-// HasCapacity reports whether one more session fits under the host limit,
+// HasCapacity reports whether one more session fits under the machine-wide limit,
 // counting the starts in flight. The team dispatcher asks before it records
 // an assignment, because a started task cannot go back to queued (F11.3a).
 func (m *VendorSessions) HasCapacity(ctx context.Context) (bool, error) {
-	active, err := m.activeSessions(ctx)
+	tiers, err := m.schedulerTiers(ctx)
 	if err != nil {
 		return false, err
 	}
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return active+m.startReservations < maxVendorSessionsPerHost, nil
+	total, _, err := m.slotUsage(ctx)
+	if err != nil {
+		return false, err
+	}
+	return total < tiers.MachineWide, nil
+}
+
+// HasCapacityFor reports whether one more session for vendorName/accountID fits
+// under both the machine-wide and per-account §7 tiers.
+func (m *VendorSessions) HasCapacityFor(ctx context.Context, vendorName, accountID string) (bool, error) {
+	tiers, err := m.schedulerTiers(ctx)
+	if err != nil {
+		return false, err
+	}
+	total, byAccount, err := m.slotUsage(ctx)
+	if err != nil {
+		return false, err
+	}
+	key := normalizeSlotKey(vendorName, accountID)
+	return total < tiers.MachineWide && byAccount[key] < tiers.PerAccount, nil
 }
