@@ -84,6 +84,25 @@ func globalHostConfigReader(ws *WorkspaceService) HostConfigReader {
 	}
 }
 
+func globalOrWorkspaceTeamsConfigReader(ws *WorkspaceService) func(context.Context, string) (workspace.TeamsConfig, error) {
+	if ws == nil {
+		return nil
+	}
+	return func(ctx context.Context, workspaceID string) (workspace.TeamsConfig, error) {
+		if workspaceID != "" {
+			eff, _, err := ws.domain.GetEffectiveConfig(ctx, workspaceID, nil)
+			if err == nil {
+				return eff.Teams, nil
+			}
+		}
+		eff, err := ws.domain.GlobalEffectiveConfig(ctx)
+		if err != nil {
+			return workspace.TeamsConfig{}, publicWorkspaceError(err)
+		}
+		return eff.Teams, nil
+	}
+}
+
 type heavySemaphore struct {
 	limit  func(context.Context) (int, error)
 	mu     sync.Mutex

@@ -2,11 +2,18 @@ package app
 
 import (
 	"context"
+	"sync"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/vendorstore"
 	"github.com/syurodev/fugue/internal/workspace"
 )
+
+// ReserveSlot atomically reserves one scheduler slot across the machine-wide
+// and per-account tiers before a task assignment is persisted.
+func (m *VendorSessions) ReserveSlot(ctx context.Context, sessionID, vendorName, accountID string) (func(), error) {
+	return m.reserveSlot(ctx, sessionID, vendorName, accountID)
+}
 
 func (m *VendorSessions) reserveSlot(ctx context.Context, sessionID, vendorName, accountID string) (func(), error) {
 	m.slotMu.Lock()
@@ -33,11 +40,20 @@ func (m *VendorSessions) reserveSlot(ctx context.Context, sessionID, vendorName,
 	}
 	m.reservations[sessionID] = key
 	m.mu.Unlock()
+	var once sync.Once
 	return func() {
-		m.mu.Lock()
-		delete(m.reservations, sessionID)
-		m.mu.Unlock()
+		once.Do(func() {
+			m.mu.Lock()
+			delete(m.reservations, sessionID)
+			m.mu.Unlock()
+		})
 	}, nil
+}
+
+func (m *VendorSessions) hasReservation(sessionID string) bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.hasReservationLocked(sessionID)
 }
 
 func (m *VendorSessions) checkSlotEligibility(sessionID string) error {

@@ -46,6 +46,17 @@ type rawSession struct {
 	TeamsAutoApprove *bool   `toml:"teams_auto_approve,omitempty"`
 }
 
+const (
+	defaultPromptPacingMinSeconds = 10
+	defaultPromptPacingMaxSeconds = 15
+	maxPromptPacingSeconds        = 300
+	maxIdleDetachSeconds          = 86400
+)
+
+type rawTeams struct {
+	IdleDetachSeconds *int `toml:"idle_detach_seconds,omitempty"`
+}
+
 type rawHost struct {
 	WorkspacesDir          *string `toml:"workspaces_dir,omitempty"`
 	OutputRetentionTotal   *string `toml:"output_retention_total,omitempty"`
@@ -54,6 +65,8 @@ type rawHost struct {
 	PerAccountSessions     *int    `toml:"per_account_sessions,omitempty"`
 	MaxSessions            *int    `toml:"max_sessions,omitempty"`
 	HeavyCommands          *int    `toml:"heavy_commands,omitempty"`
+	PromptPacingMinSeconds *int    `toml:"prompt_pacing_min_seconds,omitempty"`
+	PromptPacingMaxSeconds *int    `toml:"prompt_pacing_max_seconds,omitempty"`
 }
 
 // tier2RawConfig deliberately omits policy, env and redact (Q-72): tier 2 has no accepted copy,
@@ -62,6 +75,7 @@ type tier2RawConfig struct {
 	Roles    *[]RoleConfig            `toml:"roles,omitempty"`
 	Profiles map[string]ProfileConfig `toml:"profiles,omitempty"`
 	Session  *rawSession              `toml:"session,omitempty"`
+	Teams    *rawTeams                `toml:"teams,omitempty"`
 	Host     *rawHost                 `toml:"host,omitempty"`
 }
 
@@ -74,6 +88,7 @@ type tier3RawConfig struct {
 	Roles    *[]RoleConfig            `toml:"roles,omitempty"`
 	Profiles map[string]ProfileConfig `toml:"profiles,omitempty"`
 	Session  *rawSession              `toml:"session,omitempty"`
+	Teams    *rawTeams                `toml:"teams,omitempty"`
 }
 
 type tier4RawConfig struct {
@@ -194,7 +209,7 @@ func ValidateConfig(tier Tier, rawTOML []byte) error {
 
 func validateTier2(file string, cfg *tier2RawConfig, homeDir string) error {
 	return firstErr(
-		validateCommon(file, nil, nil, nil, cfg.Roles, cfg.Profiles, cfg.Session, homeDir),
+		validateCommon(file, nil, nil, nil, cfg.Roles, cfg.Profiles, cfg.Session, cfg.Teams, homeDir),
 		validateTier2Roles(file, cfg.Roles),
 		validateHost(file, cfg.Host, homeDir),
 	)
@@ -218,12 +233,12 @@ func validateTier3(file string, cfg *tier3RawConfig, homeDir string) error {
 			return err
 		}
 	}
-	return validateCommon(file, cfg.Policy, cfg.Env, cfg.Redact, cfg.Roles, cfg.Profiles, cfg.Session, homeDir)
+	return validateCommon(file, cfg.Policy, cfg.Env, cfg.Redact, cfg.Roles, cfg.Profiles, cfg.Session, cfg.Teams, homeDir)
 }
 
 func validateCommon(
 	file string, pol *rawPolicy, env *rawEnv, red *rawRedact,
-	roles *[]RoleConfig, profiles map[string]ProfileConfig, sess *rawSession, homeDir string,
+	roles *[]RoleConfig, profiles map[string]ProfileConfig, sess *rawSession, teamsCfg *rawTeams, homeDir string,
 ) error {
 	var scratch *string
 	if sess != nil {
@@ -237,6 +252,7 @@ func validateCommon(
 		validatePolicy(file, pol), validateEnv(file, env), redErr,
 		validateRoles(file, roles), validateProfiles(file, profiles),
 		validatePathField(file, "session.scratch_dir", scratch, homeDir),
+		validateTeams(file, teamsCfg),
 	)
 }
 
@@ -383,7 +399,41 @@ func validateHost(file string, host *rawHost, homeDir string) error {
 		validateIntMin(file, "host.per_account_sessions", host.PerAccountSessions, 1),
 		validateIntMin(file, "host.max_sessions", host.MaxSessions, 1),
 		validateIntMin(file, "host.heavy_commands", host.HeavyCommands, 1),
+		validateIntRange(file, "host.prompt_pacing_min_seconds", host.PromptPacingMinSeconds, 0, maxPromptPacingSeconds),
+		validateIntRange(file, "host.prompt_pacing_max_seconds", host.PromptPacingMaxSeconds, 0, maxPromptPacingSeconds),
+		validatePacingBounds(file, host.PromptPacingMinSeconds, host.PromptPacingMaxSeconds),
 	)
+}
+
+func validateTeams(file string, teamsCfg *rawTeams) error {
+	if teamsCfg == nil {
+		return nil
+	}
+	return validateIntRange(file, "teams.idle_detach_seconds", teamsCfg.IdleDetachSeconds, 0, maxIdleDetachSeconds)
+}
+
+func validatePacingBounds(file string, minPtr, maxPtr *int) error {
+	if minPtr == nil && maxPtr == nil {
+		return nil
+	}
+	minVal, maxVal := defaultPromptPacingMinSeconds, defaultPromptPacingMaxSeconds
+	if minPtr != nil {
+		minVal = *minPtr
+	}
+	if maxPtr != nil {
+		maxVal = *maxPtr
+	}
+	if minVal > maxVal {
+		return cfgErr(file, "host.prompt_pacing_min_seconds", "prompt_pacing_min_seconds must not exceed prompt_pacing_max_seconds")
+	}
+	return nil
+}
+
+func validateIntRange(file, key string, val *int, minVal, maxVal int) error {
+	if val == nil || (*val >= minVal && *val <= maxVal) {
+		return nil
+	}
+	return cfgErr(file, key, key+" must be between "+strconv.Itoa(minVal)+" and "+strconv.Itoa(maxVal))
 }
 
 func validateIntMin(file, key string, val *int, minVal int) error {

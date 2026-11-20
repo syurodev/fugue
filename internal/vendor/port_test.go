@@ -50,3 +50,15 @@ func TestEmptyVendorInputIsRejected(t *testing.T) {
 		}
 	}
 }
+
+func TestInputOriginValidation(t *testing.T) {
+	t.Parallel()
+	for _, origin := range []InputOrigin{"", OriginUser, OriginFugue} {
+		if err := ValidateInput(Input{Text: "hello", Origin: origin}); err != nil {
+			t.Fatalf("ValidateInput(origin=%q) = %v, want nil", origin, err)
+		}
+	}
+	if err := ValidateInput(Input{Text: "hello", Origin: "bogus"}); errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("ValidateInput(bogus) = %v, want invalid_argument", err)
+	}
+}
