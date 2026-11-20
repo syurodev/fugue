@@ -290,6 +290,7 @@ func (d *teamDispatcher) appendTaskStartedAttempt(ctx context.Context, teamID, t
 		return err
 	}
 	if d.deps.Budgets != nil {
+		d.deps.Budgets.trackTaskWatch(teamID, task, vendorstore.TaskStateRunning, sessionID, rec.LastSeq+1, d.now().UnixMilli())
 		d.deps.Budgets.Notify()
 	}
 	return nil

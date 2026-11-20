@@ -57,6 +57,7 @@ func (d *teamDispatcher) startChild(ctx context.Context, rec *vendorstore.TeamRe
 	}); appErr != nil {
 		return true, appErr
 	}
+	d.deps.Budgets.trackTaskWatch(rec.TeamID, task, vendorstore.TaskStateStarting, launch.req.SessionID, rec.LastSeq+1, d.now().UnixMilli())
 	cwd, err := d.createWorktree(ctx, rec.TeamID, task, launch)
 	if err != nil {
 		slog.WarnContext(ctx, "creating the task worktree failed", "team_id", rec.TeamID, "task_id", task.TaskID, "error_code", string(errcode.CodeOf(err)))

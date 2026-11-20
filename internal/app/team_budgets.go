@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/syurodev/fugue/internal/interaction"
@@ -89,7 +88,6 @@ type teamBudgets struct {
 	stopOnce        sync.Once
 	taskMu, mu      sync.Mutex
 	loopTask        *supervise.Task
-	steps           atomic.Int64
 	watches         map[teamTaskKey]*silenceWatch
 	bySession       map[string]*silenceWatch
 	sessionActivity map[string]time.Time
@@ -100,11 +98,7 @@ func newTeamBudgets(deps *teamBudgetsDeps) *teamBudgets {
 	if cp.Clock == nil {
 		cp.Clock = clock.Real{}
 	}
-	return &teamBudgets{
-		deps: cp, wakeCh: make(chan struct{}, 1), stopCh: make(chan struct{}),
-		watches: make(map[teamTaskKey]*silenceWatch), bySession: make(map[string]*silenceWatch),
-		sessionActivity: make(map[string]time.Time),
-	}
+	return &teamBudgets{deps: cp, wakeCh: make(chan struct{}, 1), stopCh: make(chan struct{}), watches: make(map[teamTaskKey]*silenceWatch), bySession: make(map[string]*silenceWatch), sessionActivity: make(map[string]time.Time)}
 }
 
 func (b *teamBudgets) now() time.Time { return b.deps.Clock.Now() }
@@ -138,17 +132,21 @@ func (b *teamBudgets) Notify() {
 	}
 }
 
+// ObserveSession records vendor session activity for the §6.7 silence watchdog.
+// To prevent unbounded growth from non-team user chats, sessionActivity is only
+// written when the session has an indexed watch in bySession (pre-registered via
+// trackTaskWatch on TaskAssigned/TaskStarted or synced in Step), and unreferenced
+// entries are swept in pruneInactiveWatches. It never calls Notify().
 func (b *teamBudgets) ObserveSession(sessionID string) {
-	if sessionID == "" {
-		return
+	if sessionID != "" {
+		now := b.now()
+		b.mu.Lock()
+		if w := b.bySession[sessionID]; w != nil {
+			b.sessionActivity[sessionID] = now
+			w.lastActivity, w.escalated = now, false
+		}
+		b.mu.Unlock()
 	}
-	now := b.now()
-	b.mu.Lock()
-	b.sessionActivity[sessionID] = now
-	if w := b.bySession[sessionID]; w != nil {
-		w.lastActivity, w.escalated = now, false
-	}
-	b.mu.Unlock()
 }
 
 // OnTurnStarted enforces the §11 per-task turn budget and resets silence.
@@ -219,7 +217,6 @@ func (b *teamBudgets) Step(ctx context.Context) (time.Time, bool) {
 	if !b.vaultUnlocked() {
 		return time.Time{}, false
 	}
-	b.steps.Add(1)
 	now := b.now()
 	t1, ok1 := b.processDurableTimers(ctx, now)
 	t2, ok2 := b.processSilenceWatches(ctx, now)
@@ -308,16 +305,11 @@ func (b *teamBudgets) buildBudgetFailureEvent(taskID, failureCode string, timerR
 	if err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "generate budget failure event ID", err)
 	}
-	mail, err := buildSendMailbox(resolvedParentID(cur.ParentTaskID, tasks), mailboxDigestItem{
-		TaskID: cur.TaskID, State: string(vendorstore.TaskStateFailed), FailureCode: failureCode, Summary: "task failed: " + failureCode,
-	})
+	mail, err := buildSendMailbox(resolvedParentID(cur.ParentTaskID, tasks), mailboxDigestItem{TaskID: cur.TaskID, State: string(vendorstore.TaskStateFailed), FailureCode: failureCode, Summary: "task failed: " + failureCode})
 	if err != nil {
 		return nil, err
 	}
-	return &vendorstore.AppendTeamEventInput{
-		EventID: evID, TaskID: cur.TaskID, EventType: vendorstore.EventTaskEnded,
-		Outcome: vendorstore.TaskOutcomeFailed, FailureCode: failureCode, Mailbox: mail, FireTimer: timerRef,
-	}, nil
+	return &vendorstore.AppendTeamEventInput{EventID: evID, TaskID: cur.TaskID, EventType: vendorstore.EventTaskEnded, Outcome: vendorstore.TaskOutcomeFailed, FailureCode: failureCode, Mailbox: mail, FireTimer: timerRef}, nil
 }
 
 func buildSendMailbox(recipientTaskID string, item mailboxDigestItem) ([]vendorstore.MailboxEnqueueInput, error) {
@@ -365,18 +357,21 @@ func (b *teamBudgets) pruneInactiveWatches(activeKeys map[teamTaskKey]struct{}) 
 			b.deleteWatchLocked(k)
 		}
 	}
+	for sid := range b.sessionActivity {
+		if b.bySession[sid] == nil {
+			delete(b.sessionActivity, sid)
+		}
+	}
 	b.mu.Unlock()
 }
 
 func (b *teamBudgets) deleteWatchLocked(key teamTaskKey) {
 	if w, ok := b.watches[key]; ok {
 		delete(b.watches, key)
-		if w.sessionID != "" {
-			if b.bySession[w.sessionID] == w {
-				delete(b.bySession, w.sessionID)
-			}
-			delete(b.sessionActivity, w.sessionID)
+		if w.sessionID != "" && b.bySession[w.sessionID] == w {
+			delete(b.bySession, w.sessionID)
 		}
+		delete(b.sessionActivity, w.sessionID)
 	}
 }
 
@@ -410,6 +405,15 @@ func allWatchesSilent(watched []*silenceWatch, now time.Time, timeout time.Durat
 		}
 	}
 	return len(watched) > 0
+}
+
+func (b *teamBudgets) trackTaskWatch(teamID string, task *vendorstore.TaskRecord, state vendorstore.TaskState, sessionID string, seq, updatedAt int64) {
+	if b == nil || task.HierarchyRole == vendorstore.RoleLead || task.HierarchyRole == vendorstore.RoleSolo {
+		return
+	}
+	cp := *task
+	cp.State, cp.SessionID, cp.LastEventSeq, cp.UpdatedAt = state, sessionID, seq, updatedAt
+	b.syncTaskWatch(teamTaskKey{teamID: teamID, taskID: task.TaskID}, &cp)
 }
 
 func (b *teamBudgets) syncTaskWatch(key teamTaskKey, t *vendorstore.TaskRecord) *silenceWatch {
@@ -451,19 +455,17 @@ func (b *teamBudgets) indexWatchSessionLocked(w *silenceWatch, sessionID string)
 
 func (b *teamBudgets) recordTaskStalled(ctx context.Context, teamID string, w *silenceWatch, silentSeconds int64, teamWide bool, now time.Time) {
 	var recordedSeq int64
-	err := b.appendTeamEventWithRetry(ctx, teamID, func(_ *vendorstore.TeamRecord, tasks []vendorstore.TaskRecord) (*vendorstore.AppendTeamEventInput, error) {
+	if err := b.appendTeamEventWithRetry(ctx, teamID, func(_ *vendorstore.TeamRecord, tasks []vendorstore.TaskRecord) (*vendorstore.AppendTeamEventInput, error) {
 		return b.buildTaskStalledInput(tasks, w.taskID, silentSeconds, teamWide, &recordedSeq)
-	})
-	if err != nil {
-		return
-	}
-	b.mu.Lock()
-	if cur, ok := b.watches[teamTaskKey{teamID: teamID, taskID: w.taskID}]; ok {
-		cur.lastStallSeq, cur.escalated, cur.lastEscalatedAt = recordedSeq, true, now
-	}
-	b.mu.Unlock()
-	if b.deps.Wake != nil {
-		b.deps.Wake.Notify()
+	}); err == nil {
+		b.mu.Lock()
+		if cur, ok := b.watches[teamTaskKey{teamID: teamID, taskID: w.taskID}]; ok {
+			cur.lastStallSeq, cur.escalated, cur.lastEscalatedAt = recordedSeq, true, now
+		}
+		b.mu.Unlock()
+		if b.deps.Wake != nil {
+			b.deps.Wake.Notify()
+		}
 	}
 }
 
@@ -484,9 +486,7 @@ func (b *teamBudgets) buildTaskStalledInput(tasks []vendorstore.TaskRecord, task
 	if idErr != nil {
 		return nil, errcode.Wrap(errcode.Internal, "generate task stalled event ID", idErr)
 	}
-	mail, mErr := buildSendMailbox(resolvedParentID(cur.ParentTaskID, tasks), mailboxDigestItem{
-		TaskID: cur.TaskID, State: "stalled", Summary: fmt.Sprintf("task silent for %ds (waiting_on=%s)", silentSeconds, waitingOn),
-	})
+	mail, mErr := buildSendMailbox(resolvedParentID(cur.ParentTaskID, tasks), mailboxDigestItem{TaskID: cur.TaskID, State: "stalled", Summary: fmt.Sprintf("task silent for %ds (waiting_on=%s)", silentSeconds, waitingOn)})
 	if mErr != nil {
 		return nil, mErr
 	}

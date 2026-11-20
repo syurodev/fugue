@@ -6,7 +6,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -15,14 +17,16 @@ import (
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/vendorstore"
+	"github.com/syurodev/fugue/internal/workspace"
 )
 
 const testBudgetLeadGoal = "Coordinate budget test tasks"
 
 type budgetsTestFixture struct {
 	*dispatchFixture
-	budgets *teamBudgets
-	tasks   *teamTaskService
+	budgets  *teamBudgets
+	tasks    *teamTaskService
+	cfgReads atomic.Int64
 }
 
 type budgetsPassGate struct{}
@@ -41,19 +45,15 @@ func newBudgetsTestFixture(t *testing.T, tomlExtra string) *budgetsTestFixture {
 		t.Fatal(err)
 	}
 	fake := &fakeTaskSessions{}
-	teamsCfg := globalOrWorkspaceTeamsConfigReader(f.rt.workspaces)
-	b := newTeamBudgets(&teamBudgetsDeps{
-		Store: f.hp.vendorStore, Sessions: fake, Interactions: f.rt.interactions,
-		TeamsConfig: teamsCfg, Vault: f.hp.vault, Clock: f.clk,
-		IDs: ids.NewSequence("bgt-"), Wake: f.rt.teamWake,
-	})
+	baseCfg := globalOrWorkspaceTeamsConfigReader(f.rt.workspaces)
+	bf := &budgetsTestFixture{dispatchFixture: &dispatchFixture{teamProposalFixture: f, sessions: fake, dataDir: dataDir}}
+	teamsCfg := func(ctx context.Context, wsID string) (workspace.TeamsConfig, error) {
+		bf.cfgReads.Add(1)
+		return baseCfg(ctx, wsID)
+	}
+	b := newTeamBudgets(&teamBudgetsDeps{Store: f.hp.vendorStore, Sessions: fake, Interactions: f.rt.interactions, TeamsConfig: teamsCfg, Vault: f.hp.vault, Clock: f.clk, IDs: ids.NewSequence("bgt-"), Wake: f.rt.teamWake})
 	f.rt.interactions.SetTeamDeadlineResolver(b)
-	disp := newTeamDispatcher(&teamDispatcherDeps{
-		Store: f.hp.vendorStore, Sessions: fake, Admit: localAdmitter{capacity: fake},
-		Roots: f.rt.workspaces.domain, Git: gitMgr, DataDir: dataDir,
-		IDs: ids.NewSequence("disp-"), Vault: f.hp.vault, Clock: f.clk,
-		TeamsConfig: teamsCfg, Budgets: b,
-	})
+	disp := newTeamDispatcher(&teamDispatcherDeps{Store: f.hp.vendorStore, Sessions: fake, Admit: localAdmitter{capacity: fake}, Roots: f.rt.workspaces.domain, Git: gitMgr, DataDir: dataDir, IDs: ids.NewSequence("disp-"), Vault: f.hp.vault, Clock: f.clk, TeamsConfig: teamsCfg, Budgets: b})
 	b.deps.OnTeamResume = func(teamID string) {
 		if dispErr := disp.Dispatch(t.Context(), teamID); dispErr != nil {
 			t.Errorf("OnTeamResume dispatch: %v", dispErr)
@@ -65,19 +65,13 @@ func newBudgetsTestFixture(t *testing.T, tomlExtra string) *budgetsTestFixture {
 	tt.SetRuntime(disp, f.rt.teamWake)
 	tt.SetTeamsConfig(teamsCfg)
 	tt.SetBudgets(b)
-	return &budgetsTestFixture{
-		dispatchFixture: &dispatchFixture{teamProposalFixture: f, sessions: fake, disp: disp, dataDir: dataDir},
-		budgets:         b, tasks: tt,
-	}
+	bf.disp, bf.budgets, bf.tasks = disp, b, tt
+	return bf
 }
 
 func createFakeSessionTurns(t *testing.T, store *vendorstore.Store, sessionID, teamID, taskID string, count int) {
 	t.Helper()
-	if err := store.CreateSession(t.Context(), &vendorstore.Session{
-		ID: sessionID, Vendor: VendorClaude, AccountID: vendorDefaultAccount,
-		Role: string(vendorstore.RoleMember), State: vendorstore.StateReady,
-		TeamID: teamID, TaskID: taskID,
-	}); err != nil {
+	if err := store.CreateSession(t.Context(), &vendorstore.Session{ID: sessionID, Vendor: VendorClaude, AccountID: vendorDefaultAccount, Role: string(vendorstore.RoleMember), State: vendorstore.StateReady, TeamID: teamID, TaskID: taskID}); err != nil {
 		t.Fatalf("CreateSession(%s): %v", sessionID, err)
 	}
 	snap, err := store.Snapshot(t.Context(), sessionID)
@@ -86,10 +80,7 @@ func createFakeSessionTurns(t *testing.T, store *vendorstore.Store, sessionID, t
 	}
 	seq := snap.LastSequence
 	for i := 1; i <= count; i++ {
-		next, appErr := store.Append(t.Context(), sessionID, seq, &vendorstore.Event{
-			Type: vendorstore.VendorTurnStarted, TurnID: sessionID + "-t-" + string(rune('0'+i)),
-			TurnOrigin: vendorstore.TurnOriginFugue, State: vendorstore.StateRunning,
-		})
+		next, appErr := store.Append(t.Context(), sessionID, seq, &vendorstore.Event{Type: vendorstore.VendorTurnStarted, TurnID: sessionID + "-t-" + string(rune('0'+i)), TurnOrigin: vendorstore.TurnOriginFugue, State: vendorstore.StateRunning})
 		if appErr != nil {
 			t.Fatalf("Append turn %d: %v", i, appErr)
 		}
@@ -125,17 +116,16 @@ func (f *budgetsTestFixture) mustTask(t *testing.T, teamID, taskID string) *vend
 	if err != nil {
 		t.Fatal(err)
 	}
-	cur, ok := findTask(tasks, taskID)
-	if !ok {
-		t.Fatalf("task %s not found", taskID)
+	if cur, ok := findTask(tasks, taskID); ok {
+		return cur
 	}
-	return cur
+	t.Fatalf("task %s not found", taskID)
+	return nil
 }
 
 func (f *budgetsTestFixture) assertTimerState(t *testing.T, teamID, taskID string, kind vendorstore.TeamTimerKind, want vendorstore.TeamTimerState) {
 	t.Helper()
-	tm, found, err := f.hp.vendorStore.GetTeamTimer(t.Context(), teamID, taskID, kind)
-	if err != nil || !found || tm.State != want {
+	if tm, found, err := f.hp.vendorStore.GetTeamTimer(t.Context(), teamID, taskID, kind); err != nil || !found || tm.State != want {
 		t.Fatalf("timer (%s, %s, %s) = (%+v, %v, %v), want %s", teamID, taskID, kind, tm, found, err, want)
 	}
 }
@@ -161,9 +151,7 @@ func verifyTurnBudgetEnforcement(t *testing.T, f *budgetsTestFixture, teamID, tu
 		t.Fatal(appErr)
 	}
 	f.budgets.OnTurnStarted(t.Context(), turnsStart.SessionID)
-
-	turnsTask := f.mustTask(t, teamID, turnsTaskID)
-	if turnsTask.State != vendorstore.TaskStateFailed || turnsTask.FailureCode != taskFailureTurnBudgetExceeded {
+	if turnsTask := f.mustTask(t, teamID, turnsTaskID); turnsTask.State != vendorstore.TaskStateFailed || turnsTask.FailureCode != taskFailureTurnBudgetExceeded {
 		t.Fatalf("turns-worker = (%s, %s), want (failed, %s)", turnsTask.State, turnsTask.FailureCode, taskFailureTurnBudgetExceeded)
 	}
 	if _, statErr := os.Stat(turnsStart.Cwd); statErr != nil {
@@ -181,9 +169,7 @@ func verifyTaskDeadlineEnforcement(t *testing.T, f *budgetsTestFixture, teamID, 
 	f.assertTimerState(t, teamID, deadlineTaskID, vendorstore.TimerKindTaskDeadline, vendorstore.TimerStateArmed)
 	f.clk.Advance(121 * time.Second)
 	f.budgets.Step(t.Context())
-
-	dlTask := f.mustTask(t, teamID, deadlineTaskID)
-	if dlTask.State != vendorstore.TaskStateFailed || dlTask.FailureCode != taskFailureDeadlineExceeded {
+	if dlTask := f.mustTask(t, teamID, deadlineTaskID); dlTask.State != vendorstore.TaskStateFailed || dlTask.FailureCode != taskFailureDeadlineExceeded {
 		t.Fatalf("deadline-worker = (%s, %s), want (failed, %s)", dlTask.State, dlTask.FailureCode, taskFailureDeadlineExceeded)
 	}
 	if _, statErr := os.Stat(deadlineStart.Cwd); statErr != nil {
@@ -208,12 +194,10 @@ func verifyBudgetInterruptsAndMailbox(t *testing.T, f *budgetsTestFixture, teamI
 	}
 	var gotCodes []string
 	for i := range mail {
-		raw, openErr := f.hp.vendorStore.OpenMailboxPayload(t.Context(), teamID, mail[i].MessageID)
-		if openErr != nil {
-			t.Fatal(openErr)
-		}
 		var item mailboxDigestItem
-		if json.Unmarshal(raw, &item) == nil && item.FailureCode != "" {
+		if raw, openErr := f.hp.vendorStore.OpenMailboxPayload(t.Context(), teamID, mail[i].MessageID); openErr != nil {
+			t.Fatal(openErr)
+		} else if json.Unmarshal(raw, &item) == nil && item.FailureCode != "" {
 			gotCodes = append(gotCodes, item.FailureCode)
 		}
 	}
@@ -389,18 +373,28 @@ func TestWatchdogEscalatesSilenceWithoutKillingAndRecordsStallEvent(t *testing.T
 func verifyObservationBurstDoesNotTriggerSteps(t *testing.T, f *budgetsTestFixture, silentID string) {
 	t.Helper()
 	silentStart, _ := f.sessions.startFor(silentID)
+	for i := range 1000 {
+		f.budgets.ObserveSession("non-team-chat-" + strconv.Itoa(i))
+	}
+	f.budgets.mu.Lock()
+	_, activePresent := f.budgets.sessionActivity[silentStart.SessionID]
+	actLen := len(f.budgets.sessionActivity)
+	f.budgets.mu.Unlock()
+	if actLen != 1 || !activePresent {
+		t.Fatalf("sessionActivity after 1,000 non-team observations = (len=%d, activePresent=%v), want (1, true)", actLen, activePresent)
+	}
 	f.budgets.Start(t.Context())
 	t.Cleanup(func() {
 		if err := f.budgets.Stop(); err != nil {
 			t.Errorf("Stop: %v", err)
 		}
 	})
-	baseSteps := f.budgets.steps.Load()
+	baseReads := f.cfgReads.Load()
 	for range 10000 {
 		f.budgets.ObserveSession(silentStart.SessionID)
 	}
-	if got := f.budgets.steps.Load() - baseSteps; got > 1 {
-		t.Fatalf("10,000 ObserveSession calls triggered %d extra Step/ListArmedTeamTimers passes, want <= 1", got)
+	if got := f.cfgReads.Load() - baseReads; got > 1 {
+		t.Fatalf("10,000 ObserveSession calls triggered %d extra Step passes, want <= 1", got)
 	}
 }
 
