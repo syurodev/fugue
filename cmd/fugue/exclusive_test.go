@@ -5,8 +5,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/syurodev/fugue/internal/app"
@@ -111,34 +113,26 @@ func TestRunExclusiveSharesSemaphoreAndForwardsExitCode(t *testing.T) {
 		t.Fatalf("stdout = %q, want hello-excl", out.String())
 	}
 	var wg sync.WaitGroup
-	var active, maxOverlap int
-	var mu sync.Mutex
+	var active atomic.Int32
 	for range 2 {
 		wg.Add(1)
 		supervise.Go(t.Context(), "test.exclusive-waiter", func(ctx context.Context) error {
 			defer wg.Done()
-			rel, err := acquireExclusiveSlot(ctx, config.MapEnv{}, sockPath, testVersion)
-			if err != nil {
-				t.Errorf("acquireExclusiveSlot: %v", err)
-				return err
+			rel, slotErr := acquireExclusiveSlot(ctx, config.MapEnv{}, sockPath, testVersion)
+			if slotErr != nil {
+				t.Errorf("acquireExclusiveSlot: %v", slotErr)
+				return slotErr
 			}
-			mu.Lock()
-			active++
-			if active > maxOverlap {
-				maxOverlap = active
+			if cur := active.Add(1); cur > 1 {
+				t.Errorf("concurrent overlap = %d, want <= 1", cur)
 			}
-			mu.Unlock()
+			runtime.Gosched()
+			active.Add(-1)
 			rel()
-			mu.Lock()
-			active--
-			mu.Unlock()
 			return nil
 		})
 	}
 	wg.Wait()
-	if maxOverlap > 1 {
-		t.Fatalf("concurrent overlap = %d, want <= 1", maxOverlap)
-	}
 }
 
 func TestRunExclusiveSessionPrincipalUsesSessionService(t *testing.T) {

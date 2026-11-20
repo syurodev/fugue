@@ -4,11 +4,14 @@ package app
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"strconv"
 	"strings"
 )
+
+var errMemTotalNotFound = errors.New("MemTotal not found in /proc/meminfo")
 
 func hostTotalMemoryBytes() (uint64, error) {
 	data, err := os.ReadFile("/proc/meminfo")
@@ -29,5 +32,5 @@ func hostTotalMemoryBytes() (uint64, error) {
 		}
 		return kib * 1024, nil
 	}
-	return 0, fmt.Errorf("MemTotal not found in /proc/meminfo")
+	return 0, errMemTotalNotFound
 }
