@@ -157,18 +157,22 @@ func TestRunExclusiveContextCancelAndSignalExitCode(t *testing.T) {
 	}
 }
 
-func assertProcAttr(t *testing.T, name string, attr *syscall.SysProcAttr, wantFG bool, wantCtty int) {
+func assertProcessSpec(t *testing.T, name string, spec exclusiveProcessSpec, wantFG bool, wantCtty, wantRestorePgrp int) {
 	t.Helper()
-	if attr == nil || !attr.Setpgid || attr.Foreground != wantFG || attr.Ctty != wantCtty {
-		t.Fatalf("%s = %+v, want Setpgid=true Foreground=%v Ctty=%d", name, attr, wantFG, wantCtty)
+	attr := spec.sysProcAttr
+	if attr == nil || !attr.Setpgid || attr.Foreground != wantFG || attr.Ctty != wantCtty ||
+		spec.hasForeground != wantFG || spec.restorePgrp != wantRestorePgrp {
+		t.Fatalf("%s = spec%+v attr%+v, want Setpgid=true Foreground=%v Ctty=%d restorePgrp=%d",
+			name, spec, attr, wantFG, wantCtty, wantRestorePgrp)
 	}
 }
 
 func TestExclusiveProcAttrTTYSelection(t *testing.T) {
 	t.Parallel()
-	assertProcAttr(t, "buildExclusiveProcAttr(false, 9)", buildExclusiveProcAttr(false, 9), false, 0)
-	assertProcAttr(t, "buildExclusiveProcAttr(true, 9)", buildExclusiveProcAttr(true, 9), true, 9)
-	assertProcAttr(t, "exclusiveProcAttr(bytes.Buffer)", exclusiveProcAttr(bytes.NewBuffer(nil)), false, 0)
+	assertProcessSpec(t, "non-tty", selectExclusiveProcessSpec(exclusiveTTYProbe{isTTY: false}, 100), false, 0, 0)
+	assertProcessSpec(t, "tty fg==pgrp", selectExclusiveProcessSpec(exclusiveTTYProbe{fd: 9, isTTY: true, fgPgrp: 100}, 100), true, 9, 100)
+	assertProcessSpec(t, "tty fg!=pgrp", selectExclusiveProcessSpec(exclusiveTTYProbe{fd: 9, isTTY: true, fgPgrp: 200}, 100), false, 0, 0)
+	assertProcessSpec(t, "bytes.Buffer", prepareExclusiveProcess(bytes.NewBuffer(nil)), false, 0, 0)
 
 	pr, pw, err := os.Pipe()
 	if err != nil {
@@ -182,35 +186,31 @@ func TestExclusiveProcAttrTTYSelection(t *testing.T) {
 			t.Errorf("close pipe writer: %v", cerr)
 		}
 	})
-	assertProcAttr(t, "exclusiveProcAttr(os.Pipe)", exclusiveProcAttr(pr), false, 0)
+	assertProcessSpec(t, "os.Pipe", prepareExclusiveProcess(pr), false, 0, 0)
 }
 
-func newFakeTTYRestoreHooks(t *testing.T, fakeFD, fakePgrp int) (exclusiveHooks, *[][2]int) {
+func newFakeTTYRestoreHooks(t *testing.T, fakeFD, fgPgrp, selfPgrp int) (exclusiveHooks, *[][2]int) {
 	t.Helper()
 	var calls [][2]int
-	ttyAttr := buildExclusiveProcAttr(true, fakeFD)
-	if !ttyAttr.Setpgid || !ttyAttr.Foreground || ttyAttr.Ctty != fakeFD {
-		t.Fatalf("ttyAttr = %+v, want Setpgid=true Foreground=true Ctty=%d", ttyAttr, fakeFD)
-	}
+	selected := selectExclusiveProcessSpec(exclusiveTTYProbe{fd: fakeFD, isTTY: true, fgPgrp: fgPgrp}, selfPgrp)
 	hooks := exclusiveHooks{
-		prepareProcess: func(io.Reader) *syscall.SysProcAttr {
-			return &syscall.SysProcAttr{Setpgid: true}
+		prepareProcess: func(io.Reader) exclusiveProcessSpec {
+			// Run the real child without a kernel-bound controlling TTY fd, while keeping selected's restore state.
+			execSpec := selected
+			execSpec.sysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+			return execSpec
 		},
-		restoreForeground: func(*syscall.SysProcAttr) {
-			if ttyAttr.Foreground {
-				restoreForegroundPgrp(ttyAttr.Ctty, func(fd, pgrp int) error {
-					calls = append(calls, [2]int{fd, pgrp})
-					return nil
-				}, func() int {
-					return fakePgrp
-				})
-			}
+		restoreForeground: func(spec exclusiveProcessSpec) {
+			restoreForegroundPgrp(spec, func(fd, pgrp int) error {
+				calls = append(calls, [2]int{fd, pgrp})
+				return nil
+			})
 		},
 	}
 	return hooks, &calls
 }
 
-func assertLeaseLostRestoresForeground(t *testing.T, fakeFD, fakePgrp int) {
+func assertLeaseLostRestoresForeground(t *testing.T, fakeFD, fakeFG int) {
 	t.Helper()
 	stub := &stubHost{dropStream: make(chan struct{})}
 	sockPath := serveStub(t, stub)
@@ -220,7 +220,7 @@ func assertLeaseLostRestoresForeground(t *testing.T, fakeFD, fakePgrp int) {
 	}
 	defer slot.release()
 
-	hooksLost, callsLost := newFakeTTYRestoreHooks(t, fakeFD, fakePgrp)
+	hooksLost, callsLost := newFakeTTYRestoreHooks(t, fakeFD, fakeFG, fakeFG)
 	pr, pw := io.Pipe()
 	readTask, readyCh := startReadyReader(t, t.Context(), pr)
 	codeCh := make(chan int, 1)
@@ -251,23 +251,32 @@ func assertLeaseLostRestoresForeground(t *testing.T, fakeFD, fakePgrp int) {
 	if lostCode != exitSignaled+int(syscall.SIGKILL) {
 		t.Fatalf("lease lost exit = %d, want %d", lostCode, exitSignaled+int(syscall.SIGKILL))
 	}
-	if len(*callsLost) != 1 || (*callsLost)[0] != [2]int{fakeFD, fakePgrp} {
-		t.Fatalf("lease lost tcsetpgrp calls = %v, want [[%d %d]]", *callsLost, fakeFD, fakePgrp)
+	if len(*callsLost) != 1 || (*callsLost)[0] != [2]int{fakeFD, fakeFG} {
+		t.Fatalf("lease lost tcsetpgrp calls = %v, want [[%d %d]]", *callsLost, fakeFD, fakeFG)
 	}
 }
 
 func TestRunExclusiveRestoresForegroundOnSuccessAndLeaseLost(t *testing.T) {
 	t.Parallel()
-	const fakeFD, fakePgrp = 77, 4242
+	const fakeFD, fakeFG = 77, 4242
 
-	hooksSuccess, callsSuccess := newFakeTTYRestoreHooks(t, fakeFD, fakePgrp)
+	hooksSuccess, callsSuccess := newFakeTTYRestoreHooks(t, fakeFD, fakeFG, fakeFG)
 	var out, errOut bytes.Buffer
 	code := runExclusiveCommandWithHooks(t.Context(), bytes.NewBuffer(nil), &out, &errOut, []string{"sh", "-c", "true"}, nil, hooksSuccess)
 	if code != exitOK {
 		t.Fatalf("success path exit = %d (stderr=%q), want 0", code, errOut.String())
 	}
-	if len(*callsSuccess) != 1 || (*callsSuccess)[0] != [2]int{fakeFD, fakePgrp} {
-		t.Fatalf("success path tcsetpgrp calls = %v, want [[%d %d]]", *callsSuccess, fakeFD, fakePgrp)
+	if len(*callsSuccess) != 1 || (*callsSuccess)[0] != [2]int{fakeFD, fakeFG} {
+		t.Fatalf("success path tcsetpgrp calls = %v, want [[%d %d]]", *callsSuccess, fakeFD, fakeFG)
 	}
-	assertLeaseLostRestoresForeground(t, fakeFD, fakePgrp)
+
+	hooksBG, callsBG := newFakeTTYRestoreHooks(t, fakeFD, fakeFG, fakeFG+1)
+	if bgCode := runExclusiveCommandWithHooks(t.Context(), bytes.NewBuffer(nil), &out, &errOut, []string{"sh", "-c", "true"}, nil, hooksBG); bgCode != exitOK {
+		t.Fatalf("background tty exit = %d, want 0", bgCode)
+	}
+	if len(*callsBG) != 0 {
+		t.Fatalf("background tty should not restore foreground, got calls %v", *callsBG)
+	}
+
+	assertLeaseLostRestoresForeground(t, fakeFD, fakeFG)
 }

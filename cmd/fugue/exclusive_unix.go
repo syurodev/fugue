@@ -16,57 +16,69 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func exclusiveProcAttr(stdin io.Reader) *syscall.SysProcAttr {
-	fd, isTTY := probeExclusiveTTY(stdin)
-	return buildExclusiveProcAttr(isTTY, fd)
+type exclusiveTTYProbe struct {
+	fd     int
+	isTTY  bool
+	fgPgrp int
 }
 
-func buildExclusiveProcAttr(isTTY bool, fd int) *syscall.SysProcAttr {
-	if isTTY {
-		return &syscall.SysProcAttr{
-			Setpgid:    true,
-			Foreground: true,
-			Ctty:       fd,
+func prepareExclusiveProcess(stdin io.Reader) exclusiveProcessSpec {
+	return selectExclusiveProcessSpec(probeExclusiveTTY(stdin), unix.Getpgrp())
+}
+
+func selectExclusiveProcessSpec(probe exclusiveTTYProbe, selfPgrp int) exclusiveProcessSpec {
+	if probe.isTTY && probe.fgPgrp == selfPgrp {
+		return exclusiveProcessSpec{
+			sysProcAttr: &syscall.SysProcAttr{
+				Setpgid:    true,
+				Foreground: true,
+				Ctty:       probe.fd,
+			},
+			ttyFD:         probe.fd,
+			restorePgrp:   probe.fgPgrp,
+			hasForeground: true,
 		}
 	}
-	return &syscall.SysProcAttr{Setpgid: true}
+	return exclusiveProcessSpec{
+		sysProcAttr: &syscall.SysProcAttr{Setpgid: true},
+	}
 }
 
-func probeExclusiveTTY(stdin io.Reader) (int, bool) {
+func probeExclusiveTTY(stdin io.Reader) exclusiveTTYProbe {
 	f, ok := stdin.(*os.File)
 	if !ok || f == nil {
-		return 0, false
+		return exclusiveTTYProbe{}
 	}
 	conn, err := f.SyscallConn()
 	if err != nil {
-		return 0, false
+		return exclusiveTTYProbe{}
 	}
-	var fd int
-	var isTTY bool
+	var res exclusiveTTYProbe
 	cerr := conn.Control(func(rawFD uintptr) {
 		if rawFD > math.MaxInt {
 			return
 		}
-		candidate := int(rawFD)
-		if _, ioctlErr := unix.IoctlGetInt(candidate, unix.TIOCGPGRP); ioctlErr == nil {
-			fd = candidate
-			isTTY = true
+		fd := int(rawFD)
+		if _, terr := unix.IoctlGetTermios(fd, ioctlReadTermios); terr != nil {
+			return
 		}
+		fg, gerr := unix.IoctlGetInt(fd, unix.TIOCGPGRP)
+		if gerr != nil {
+			return
+		}
+		res = exclusiveTTYProbe{fd: fd, isTTY: true, fgPgrp: fg}
 	})
-	if cerr != nil || !isTTY {
-		return 0, false
+	if cerr != nil || !res.isTTY {
+		return exclusiveTTYProbe{}
 	}
-	return fd, true
+	return res
 }
 
 func defaultExclusiveHooks() exclusiveHooks {
 	return exclusiveHooks{
-		prepareProcess: exclusiveProcAttr,
-		restoreForeground: func(attr *syscall.SysProcAttr) {
-			if attr == nil || !attr.Foreground {
-				return
-			}
-			restoreForegroundPgrp(attr.Ctty, setForegroundPgrp, unix.Getpgrp)
+		prepareProcess: prepareExclusiveProcess,
+		restoreForeground: func(spec exclusiveProcessSpec) {
+			restoreForegroundPgrp(spec, setForegroundPgrp)
 		},
 	}
 }
@@ -78,11 +90,14 @@ func setForegroundPgrp(fd, pgrp int) error {
 	return nil
 }
 
-func restoreForegroundPgrp(fd int, setPgrp func(fd, pgrp int) error, getPgrp func() int) {
+func restoreForegroundPgrp(spec exclusiveProcessSpec, setPgrp func(fd, pgrp int) error) {
+	if !spec.hasForeground {
+		return
+	}
 	signal.Ignore(unix.SIGTTOU)
 	defer signal.Reset(unix.SIGTTOU)
-	if err := setPgrp(fd, getPgrp()); err != nil && !errors.Is(err, unix.ENOTTY) {
-		slog.Error("restore exclusive foreground process group", "fd", fd, "err", err)
+	if err := setPgrp(spec.ttyFD, spec.restorePgrp); err != nil && !errors.Is(err, unix.ENOTTY) {
+		slog.Error("restore exclusive foreground process group", "fd", spec.ttyFD, "err", err)
 	}
 }
 

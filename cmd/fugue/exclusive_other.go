@@ -17,9 +17,13 @@ func exclusiveProcAttr(io.Reader) *syscall.SysProcAttr {
 	return nil
 }
 
+func prepareExclusiveProcess(in io.Reader) exclusiveProcessSpec {
+	return exclusiveProcessSpec{sysProcAttr: exclusiveProcAttr(in)}
+}
+
 func defaultExclusiveHooks() exclusiveHooks {
 	return exclusiveHooks{
-		prepareProcess: exclusiveProcAttr,
+		prepareProcess: prepareExclusiveProcess,
 	}
 }
 

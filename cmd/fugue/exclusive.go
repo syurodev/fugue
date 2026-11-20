@@ -169,9 +169,16 @@ func acquireExclusiveSlot(ctx context.Context, env config.Env, socket, ver strin
 	return startExclusiveSlot(ctx, lease, cli.Close), nil
 }
 
+type exclusiveProcessSpec struct {
+	sysProcAttr   *syscall.SysProcAttr
+	ttyFD         int
+	restorePgrp   int
+	hasForeground bool
+}
+
 type exclusiveHooks struct {
-	prepareProcess    func(io.Reader) *syscall.SysProcAttr
-	restoreForeground func(*syscall.SysProcAttr)
+	prepareProcess    func(io.Reader) exclusiveProcessSpec
+	restoreForeground func(exclusiveProcessSpec)
 }
 
 func runExclusiveCommand(ctx context.Context, in io.Reader, out, errOut io.Writer, cmdArgs []string, slot *exclusiveSlot) int {
@@ -188,20 +195,21 @@ func runExclusiveCommandWithHooks(ctx context.Context, in io.Reader, out, errOut
 		writeCommandErr(errOut, fmt.Errorf("locate %s: %w", cmdArgs[0], err))
 		return exitFailure
 	}
-	attr := exclusiveProcAttr(in)
-	if hooks.prepareProcess != nil {
-		attr = hooks.prepareProcess(in)
+	prepare := hooks.prepareProcess
+	if prepare == nil {
+		prepare = prepareExclusiveProcess
 	}
+	spec := prepare(in)
 	cmd := &exec.Cmd{
 		Path:        bin,
 		Args:        cmdArgs,
 		Stdin:       in,
 		Stdout:      out,
 		Stderr:      errOut,
-		SysProcAttr: attr,
+		SysProcAttr: spec.sysProcAttr,
 	}
 	if hooks.restoreForeground != nil {
-		defer hooks.restoreForeground(attr)
+		defer hooks.restoreForeground(spec)
 	}
 	if err = cmd.Start(); err != nil {
 		writeCommandErr(errOut, fmt.Errorf("start %s: %w", cmdArgs[0], err))
