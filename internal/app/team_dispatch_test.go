@@ -188,7 +188,8 @@ func gitBinary(t *testing.T) string {
 	return abs
 }
 
-// initRepo makes dir a git repository with one commit.
+// initRepo makes dir a git repository with one commit and a local git identity
+// so worktree commits do not depend on a host or CI runner's global config.
 func initRepo(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("fixture\n"), 0o600); err != nil {
@@ -196,8 +197,11 @@ func initRepo(t *testing.T, dir string) {
 	}
 	for _, args := range [][]string{
 		{"init", "-q", "-b", "main"},
+		{"config", "user.name", "Fugue Test"},
+		{"config", "user.email", "fugue@example.invalid"},
+		{"config", "commit.gpgsign", "false"},
 		{"add", "."},
-		{"-c", "user.name=fixture", "-c", "user.email=fixture@example.invalid", "commit", "-q", "-m", "init"},
+		{"commit", "-q", "-m", "init"},
 	} {
 		cmd := exec.CommandContext(t.Context(), "git")
 		cmd.Path = gitBinary(t)
