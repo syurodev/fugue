@@ -20,27 +20,24 @@ import (
 var (
 	// ErrVendorActorFailed reports a safe, public actor failure.
 	ErrVendorActorFailed = errcode.New(errcode.Internal, "vendor session actor failed")
-	// ErrVendorSessionCapacity reports exhaustion of the pre-scheduler cap.
+	// ErrVendorSessionCapacity reports exhaustion of the per-account or machine-wide session tier.
 	ErrVendorSessionCapacity = errcode.New(errcode.FailedPrecondition, "vendor session capacity reached")
 )
 
-// maxVendorSessionsPerHost is the vendor-runtime §13 concurrent-session cap:
-// a scheduler-owned value (orchestration §7) that has no scheduler yet, so it
-// is the fixed pre-scheduler default of two active processes (Q-55 A). A start
-// beyond the cap fails typed with ErrVendorSessionCapacity (vendor.capacity).
-//
-// TODO(F11.6): this is a placeholder. F11.6 replaces it with the orchestration
-// §7 tiers: 6 sessions per account, min(8, (RAM − 4 GiB) / 400 MiB) machine
-// wide, max(1, cores/4) heavy commands, all configurable in the workspace.
-const maxVendorSessionsPerHost = 2
+type slotAccountKey struct {
+	vendor  string
+	account string
+}
 
 // VendorSessionDeps contains the runtime dependencies for vendor sessions.
 type VendorSessionDeps struct {
-	Store       vendorSessionStore
-	Transcripts *Transcripts
-	Adapter     vendor.Adapter
-	Adapters    map[string]vendor.Adapter
-	Relay       serverRequestRelayer
+	Store         vendorSessionStore
+	Transcripts   *Transcripts
+	Adapter       vendor.Adapter
+	Adapters      map[string]vendor.Adapter
+	Relay         serverRequestRelayer
+	HostResources HostResources
+	HostConfig    HostConfigReader
 	// Accounts receives each session's quota windows and classified failures.
 	Accounts *vendor.Accounts
 	Vault    vendorVaultObserver
@@ -87,7 +84,8 @@ type VendorSessions struct {
 	wakeHook          func(sessionID string)
 	turnCompletedHook func(sessionID string)
 	closed            bool
-	startReservations int
+	slotMu            sync.Mutex
+	reservations      map[string]slotAccountKey
 	inflightSpawns    int
 	spawnSettled      chan struct{}
 }
@@ -117,6 +115,7 @@ func NewVendorSessions(ctx context.Context, deps *VendorSessionDeps) (*VendorSes
 		actors:         make(map[string]*vendorSessionActor),
 		pendingOwners:  make(map[*pendingOwner]struct{}),
 		retainedOwners: make(map[*retainedOwner]struct{}),
+		reservations:   make(map[string]slotAccountKey),
 	}, nil
 }
 
@@ -134,7 +133,7 @@ func (m *VendorSessions) Start(ctx context.Context, session *vendorstore.Session
 	if m.deps.Vault.Snapshot().State != vault.StateUnlocked {
 		return errcode.New(errcode.FailedPrecondition, "vault must be unlocked to start a vendor session")
 	}
-	release, capacityErr := m.reserveSlot(ctx, session.ID)
+	release, capacityErr := m.reserveSlot(ctx, session.ID, session.Vendor, session.AccountID)
 	if capacityErr != nil {
 		return capacityErr
 	}
@@ -207,11 +206,6 @@ func (m *VendorSessions) Resume(ctx context.Context, sessionID string, spec *ven
 	if m.deps.Vault.Snapshot().State != vault.StateUnlocked {
 		return errcode.New(errcode.FailedPrecondition, "vault must be unlocked to resume a vendor session")
 	}
-	release, capacityErr := m.reserveSlot(ctx, sessionID)
-	if capacityErr != nil {
-		return capacityErr
-	}
-	defer release()
 	info, err := m.deps.Store.Snapshot(ctx, sessionID)
 	if err != nil {
 		return safeActorError(err)
@@ -219,6 +213,11 @@ func (m *VendorSessions) Resume(ctx context.Context, sessionID string, spec *ven
 	if info.State != vendorstore.StateDetached || info.ResumeHandle == "" {
 		return errcode.New(errcode.FailedPrecondition, "vendor session is not resumable")
 	}
+	release, capacityErr := m.reserveSlot(ctx, sessionID, info.Vendor, info.AccountID)
+	if capacityErr != nil {
+		return capacityErr
+	}
+	defer release()
 	resumeSpec := *spec
 	resumeSpec.ResumeSessionID = info.ResumeHandle
 	started, observations, pending, err := m.startAdapter(ctx, info.Vendor, &resumeSpec)
@@ -235,34 +234,6 @@ func (m *VendorSessions) Resume(ctx context.Context, sessionID string, spec *ven
 		return err
 	}
 	return actor.call(ctx, actorCommand{kind: commandReady})
-}
-
-func (m *VendorSessions) reserveSlot(ctx context.Context, sessionID string) (func(), error) {
-	m.mu.Lock()
-	if m.closed || m.actors[sessionID] != nil {
-		m.mu.Unlock()
-		return nil, errcode.New(errcode.FailedPrecondition, "vendor session is already active or manager is closed")
-	}
-	m.startReservations++
-	m.mu.Unlock()
-	release := func() {
-		m.mu.Lock()
-		m.startReservations--
-		m.mu.Unlock()
-	}
-	active, err := m.activeSessions(ctx)
-	if err != nil {
-		release()
-		return nil, err
-	}
-	m.mu.RLock()
-	reserved := m.startReservations
-	m.mu.RUnlock()
-	if active+reserved > maxVendorSessionsPerHost {
-		release()
-		return nil, ErrVendorSessionCapacity
-	}
-	return release, nil
 }
 
 func (m *VendorSessions) adapterFor(vendorName string) (vendor.Adapter, error) {

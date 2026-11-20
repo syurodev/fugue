@@ -501,9 +501,19 @@ func TestVendorRetrySameCommandIDReturnsTheSameSession(t *testing.T) {
 	}
 }
 
+type fixedHostResources struct {
+	ramBytes uint64
+	cores    int
+}
+
+func (f fixedHostResources) TotalMemoryBytes() (uint64, error) { return f.ramBytes, nil }
+func (f fixedHostResources) CPUCores() int                     { return f.cores }
+
 func TestVendorCapacityRejectsThirdStart(t *testing.T) {
 	t.Parallel()
-	v := startVendorHost(t, true)
+	v := startVendorHostWith(t, true, func(deps *app.HostDeps, _ string) {
+		deps.HostResources = fixedHostResources{ramBytes: 4<<30 + 800<<20, cores: 4}
+	})
 	wsID := v.workspaceWithRoot(t, t.TempDir())
 	v.start(t, "cap-1", wsID)
 	v.start(t, "cap-2", wsID)

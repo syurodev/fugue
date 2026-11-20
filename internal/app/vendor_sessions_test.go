@@ -603,7 +603,8 @@ func TestVendorSessionCapacityRejectsThirdActiveProcess(t *testing.T) {
 	session := newActorTestSession()
 	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
 		Store: f.store, Transcripts: f.service, Adapter: actorTestAdapter{session: session}, Vault: f.vault,
-		Clock: f.clock, IDs: ids.NewSequence("actor-item-"),
+		HostResources: fakeHostResources{ramBytes: 4<<30 + 800<<20, cores: 4},
+		Clock:         f.clock, IDs: ids.NewSequence("actor-item-"),
 	})
 	mustStartActorSession(t, manager)
 	err := manager.Start(t.Context(), &vendorstore.Session{ID: "over-capacity", Vendor: testVendorName, AccountID: testAccountID, Role: testActorRole}, &vendor.StartSpec{SessionID: "over-capacity"})

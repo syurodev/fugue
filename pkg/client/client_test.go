@@ -104,6 +104,7 @@ type fakeHandler struct {
 	hello     func(context.Context, *connect.Request[hostv1.HelloRequest]) (*connect.Response[hostv1.HelloResponse], error)
 	status    func(context.Context, *connect.Request[hostv1.HostStatusRequest]) (*connect.Response[hostv1.HostStatusResponse], error)
 	subscribe func(context.Context, *connect.Request[hostv1.SubscribeRequest], *connect.ServerStream[hostv1.SubscribeResponse]) error
+	heavy     func(context.Context, *connect.Request[hostv1.AcquireHeavySlotRequest], *connect.ServerStream[hostv1.AcquireHeavySlotResponse]) error
 	helloed   chan<- *hostv1.HelloRequest
 }
 
@@ -129,6 +130,13 @@ func (h *fakeHandler) Subscribe(ctx context.Context, req *connect.Request[hostv1
 		return connect.NewError(connect.CodePermissionDenied, errNoSubscriptionScripted)
 	}
 	return h.subscribe(ctx, req, stream)
+}
+
+func (h *fakeHandler) AcquireHeavySlot(ctx context.Context, req *connect.Request[hostv1.AcquireHeavySlotRequest], stream *connect.ServerStream[hostv1.AcquireHeavySlotResponse]) error {
+	if h.heavy == nil {
+		return connect.NewError(connect.CodePermissionDenied, errNoSubscriptionScripted)
+	}
+	return h.heavy(ctx, req, stream)
 }
 
 // sendEvent sends one scripted event on the stream.

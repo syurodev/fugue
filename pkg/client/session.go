@@ -124,6 +124,19 @@ func (s *SessionClient) CallTool(ctx context.Context, name string, arguments []b
 	return ToolResult{Text: res.Msg.Text, IsError: res.Msg.IsError}, nil
 }
 
+// AcquireHeavySlot waits for a §7 heavy-command semaphore slot on the session
+// principal connection and holds it until the returned HeavyLease is released
+// or the host ends the stream.
+func (s *SessionClient) AcquireHeavySlot(ctx context.Context) (*HeavyLease, error) {
+	stream, err := s.tools.AcquireHeavySlot(ctx, connect.NewRequest(&sessiontoolsv1.AcquireHeavySlotRequest{}))
+	if err != nil {
+		return nil, fmt.Errorf("open heavy command slot stream: %w", err)
+	}
+	return waitHeavyGrant(stream, func(m *sessiontoolsv1.AcquireHeavySlotResponse) bool {
+		return m.GetAcquired()
+	})
+}
+
 // Close releases the connection.
 func (s *SessionClient) Close() { s.hc.CloseIdleConnections() }
 

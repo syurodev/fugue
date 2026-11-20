@@ -97,4 +97,19 @@ func (h *sessionToolHandler) CallTool(ctx context.Context, req *connect.Request[
 	return connect.NewResponse(&sessiontoolsv1.CallToolResponse{Text: res.Text, IsError: res.IsError}), nil
 }
 
+// AcquireHeavySlot waits for a §7 heavy-command semaphore slot on behalf of
+// an attached vendor session and holds it until the stream closes.
+func (h *sessionToolHandler) AcquireHeavySlot(
+	ctx context.Context,
+	_ *connect.Request[sessiontoolsv1.AcquireHeavySlotRequest],
+	stream *connect.ServerStream[sessiontoolsv1.AcquireHeavySlotResponse],
+) error {
+	if _, _, err := h.attached(ctx); err != nil {
+		return toConnectError(ctx, h.backend, err)
+	}
+	return acquireAndHoldHeavySlot(ctx, h.backend, func() error {
+		return stream.Send(&sessiontoolsv1.AcquireHeavySlotResponse{Acquired: true})
+	})
+}
+
 var _ sessiontoolsv1connect.SessionToolServiceHandler = (*sessionToolHandler)(nil)

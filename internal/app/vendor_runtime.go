@@ -117,6 +117,7 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	sessions, err := NewVendorSessions(base, &VendorSessionDeps{
 		Store: topicNotifyingStore{Store: vs, topic: topic}, Transcripts: transcripts,
 		Adapter: adapter, Adapters: adapters, Accounts: accounts,
+		HostResources: hp.rt.hostResources, HostConfig: globalHostConfigReader(hp.rt.workspaces),
 		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: endSession, SessionEndSettled: sessionEndSettled,
 		TestDelaySpawnRegistration: deps.TestDelaySpawnRegistration,
 		TestOnWaitInflightSpawn:    deps.TestOnWaitInflightSpawn,

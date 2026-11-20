@@ -234,6 +234,9 @@ func (s *VendorService) Resume(ctx context.Context, principal string, cmd *Resum
 // only the token this call minted is discarded, leaving any existing live
 // session's token untouched.
 func (s *VendorService) spawn(spec *vendor.StartSpec, role string, start func() error) error {
+	if isTeamSubTaskRole(role) && spec.CPUWeight == 0 {
+		spec.CPUWeight = teamTaskCPUWeight
+	}
 	token, binding, err := s.tokens.mintPending(spec.SessionID, role)
 	if err != nil {
 		return err
@@ -393,6 +396,10 @@ func (s *VendorService) spawnSpec(ctx context.Context, workspaceID, rootName str
 		Cwd: cwd, HostEnv: s.hostEnv, Model: profile.Model, Effort: profile.Effort, ResumeSessionID: profile.ResumeSessionID,
 		Bridge: s.bridge,
 	}, rootName, nil
+}
+
+func isTeamSubTaskRole(role string) bool {
+	return role == string(vendorstore.RoleTeamManager) || role == string(vendorstore.RoleMember)
 }
 
 func (s *VendorService) requireUnlocked() error {

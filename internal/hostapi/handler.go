@@ -305,6 +305,21 @@ func (h *serviceHandler) sendTopicEvent(ctx context.Context, topic string, event
 	return nil
 }
 
+// AcquireHeavySlot waits for a §7 heavy-command semaphore slot and holds it
+// until the caller closes the stream or the host begins draining.
+func (h *serviceHandler) AcquireHeavySlot(
+	ctx context.Context,
+	_ *connect.Request[hostv1.AcquireHeavySlotRequest],
+	stream *connect.ServerStream[hostv1.AcquireHeavySlotResponse],
+) error {
+	if err := requireHelloed(ctx); err != nil {
+		return h.connectError(ctx, err)
+	}
+	return acquireAndHoldHeavySlot(ctx, h.backend, func() error {
+		return stream.Send(&hostv1.AcquireHeavySlotResponse{Acquired: true})
+	})
+}
+
 // kindFromProto maps the proto client kind to the domain kind; an
 // unspecified or unknown kind is invalid_argument, never a guess.
 func kindFromProto(k hostv1.ClientKind) (app.ClientKind, error) {

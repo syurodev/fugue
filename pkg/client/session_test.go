@@ -32,6 +32,7 @@ func (m hostText) Error() string { return string(m) }
 type sessionHost struct {
 	sessiontoolsv1connect.UnimplementedSessionToolServiceHandler
 	attached chan string
+	heavy    func(context.Context, *connect.Request[sessiontoolsv1.AcquireHeavySlotRequest], *connect.ServerStream[sessiontoolsv1.AcquireHeavySlotResponse]) error
 }
 
 func (h *sessionHost) Attach(_ context.Context, req *connect.Request[sessiontoolsv1.AttachRequest]) (*connect.Response[sessiontoolsv1.AttachResponse], error) {
@@ -53,6 +54,13 @@ func (*sessionHost) CallTool(_ context.Context, req *connect.Request[sessiontool
 		return nil, connect.NewError(connect.CodeNotFound, hostText("the tool is not available to this session"))
 	}
 	return connect.NewResponse(&sessiontoolsv1.CallToolResponse{Text: req.Msg.Name + ":" + string(req.Msg.Arguments), IsError: req.Msg.Name == "failing"}), nil
+}
+
+func (h *sessionHost) AcquireHeavySlot(ctx context.Context, req *connect.Request[sessiontoolsv1.AcquireHeavySlotRequest], stream *connect.ServerStream[sessiontoolsv1.AcquireHeavySlotResponse]) error {
+	if h.heavy == nil {
+		return connect.NewError(connect.CodePermissionDenied, hostText("not scripted"))
+	}
+	return h.heavy(ctx, req, stream)
 }
 
 func serveSessionHost(t *testing.T, h *sessionHost) string {

@@ -51,6 +51,9 @@ type rawHost struct {
 	OutputRetentionTotal   *string `toml:"output_retention_total,omitempty"`
 	SeenVersionsPerSession *string `toml:"seen_versions_per_session,omitempty"`
 	SnapshotDisk           *string `toml:"snapshot_disk,omitempty"`
+	PerAccountSessions     *int    `toml:"per_account_sessions,omitempty"`
+	MaxSessions            *int    `toml:"max_sessions,omitempty"`
+	HeavyCommands          *int    `toml:"heavy_commands,omitempty"`
 }
 
 // tier2RawConfig deliberately omits policy, env and redact (Q-72): tier 2 has no accepted copy,
@@ -232,7 +235,8 @@ func validateCommon(
 	}
 	return firstErr(
 		validatePolicy(file, pol), validateEnv(file, env), redErr,
-		validateRoles(file, roles), validateProfiles(file, profiles), validatePathField(file, "session.scratch_dir", scratch, homeDir),
+		validateRoles(file, roles), validateProfiles(file, profiles),
+		validatePathField(file, "session.scratch_dir", scratch, homeDir),
 	)
 }
 
@@ -376,7 +380,17 @@ func validateHost(file string, host *rawHost, homeDir string) error {
 		validateByteSizeField(file, "host.output_retention_total", host.OutputRetentionTotal),
 		validateByteSizeField(file, "host.seen_versions_per_session", host.SeenVersionsPerSession),
 		validateByteSizeField(file, "host.snapshot_disk", host.SnapshotDisk),
+		validateIntMin(file, "host.per_account_sessions", host.PerAccountSessions, 1),
+		validateIntMin(file, "host.max_sessions", host.MaxSessions, 1),
+		validateIntMin(file, "host.heavy_commands", host.HeavyCommands, 1),
 	)
+}
+
+func validateIntMin(file, key string, val *int, minVal int) error {
+	if val == nil || *val >= minVal {
+		return nil
+	}
+	return cfgErr(file, key, key+" must be at least "+strconv.Itoa(minVal))
 }
 
 func validatePathField(file, key string, val *string, homeDir string) error {
