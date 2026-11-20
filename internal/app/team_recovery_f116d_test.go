@@ -1,10 +1,13 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -42,7 +45,7 @@ func TestHostRestartLeavesRunningTasksUnknownAndNotifiesDelegator(t *testing.T) 
 	fugueHome := filepath.Join(t.TempDir(), "Fugue")
 	clk := clock.NewFake(time.Date(2026, 11, 20, 10, 0, 0, 0, time.UTC))
 
-	wsID, headSHA := setupOR09Host1(t, dataDir, fugueHome, clk)
+	headSHA := setupOR09Host1(t, dataDir, fugueHome, clk)
 
 	clk.Advance(time.Minute)
 	hp2 := startRecoveryHost(t, dataDir, fugueHome, clk)
@@ -50,18 +53,61 @@ func TestHostRestartLeavesRunningTasksUnknownAndNotifiesDelegator(t *testing.T) 
 
 	verifyOR09LockedState(t, hp2)
 	verifyOR09UnlockedNotice(t, hp2, headSHA)
-	verifyLeadResumeTransitionsUnknownToRunning(t, hp2, wsID)
+	verifyLeadResumeTransitionsUnknownToRunning(t, hp2)
 }
 
-func setupOR09Host1(t *testing.T, dataDir, fugueHome string, clk *clock.Fake) (wsID, headSHA string) {
+// TestResumeSucceedsAndRetriesLeadRecoveryWhenHookFails verifies that a
+// transient OnSessionResumed hook failure after a successful resume logs
+// without marking the live session held, and a subsequent wake trigger retries
+// lead recovery so the lead task reaches running.
+func TestResumeSucceedsAndRetriesLeadRecoveryWhenHookFails(t *testing.T) {
+	t.Parallel()
+	dataDir := cheapVaultDataDir(t)
+	fugueHome := filepath.Join(t.TempDir(), "Fugue")
+	clk := clock.NewFake(time.Date(2026, 11, 20, 10, 30, 0, 0, time.UTC))
+
+	_ = setupOR09Host1(t, dataDir, fugueHome, clk)
+
+	clk.Advance(time.Minute)
+	hp2 := startRecoveryHost(t, dataDir, fugueHome, clk)
+	defer closeHostAdvanceClock(t, hp2, clk)
+
+	var hookCalls atomic.Int32
+	hp2.rt.vendors.SetOnSessionResumed(func(resCtx context.Context, sid string) error {
+		if hookCalls.Add(1) == 1 {
+			return errcode.New(errcode.Unavailable, "transient sequence conflict")
+		}
+		return hp2.rt.teamTasks.OnSessionResumed(resCtx, sid)
+	})
+	unlockCheapVault(t, hp2)
+
+	testutil.Spin(t, "resumed lead stays unheld and retries to running", func() bool {
+		if hookCalls.Load() < 1 {
+			return false
+		}
+		snap, snapErr := hp2.vendorStore.Snapshot(t.Context(), recOR09LeadSess)
+		if snapErr != nil || snap.State != vendorstore.StateReady {
+			return false
+		}
+		_, tasks, teamErr := hp2.vendorStore.TeamSnapshot(t.Context(), recOR09TeamID)
+		lead, ok := findTask(tasks, recOR09LeadTask)
+		return teamErr == nil && ok && lead.State == vendorstore.TaskStateRunning
+	})
+	if held := hp2.rt.teamWake.HeldRecipients(); len(held) != 0 {
+		t.Fatalf("HeldRecipients after hook failure = %+v, want empty", held)
+	}
+}
+
+func setupOR09Host1(t *testing.T, dataDir, fugueHome string, clk *clock.Fake) string {
 	t.Helper()
 	hp1 := startRecoveryHost(t, dataDir, fugueHome, clk)
 	unlockCheapVault(t, hp1)
 	wsID, repoDir := createTestRepoWorkspace(t, hp1)
+	var headSHA string
 	seedOR09SessionsAndWorktree(t, hp1, dataDir, wsID, repoDir, &headSHA)
 	seedOR09TeamAndEvents(t, hp1, wsID)
 	closeHostAdvanceClock(t, hp1, clk)
-	return wsID, headSHA
+	return headSHA
 }
 
 func seedOR09SessionsAndWorktree(t *testing.T, hp1 *HostProcess, dataDir, wsID, repoDir string, headSHA *string) {
@@ -155,29 +201,32 @@ func verifyOR09UnlockedNotice(t *testing.T, hp2 *HostProcess, headSHA string) {
 	t.Helper()
 	ctx := t.Context()
 	unlockCheapVault(t, hp2)
-	testutil.Spin(t, "delegator recovery notice enqueued", func() bool {
-		pending, pendErr := hp2.vendorStore.PendingMailbox(ctx)
-		return pendErr == nil && len(pending) == 1 && pending[0].RecipientTaskID == recOR09LeadTask
+	var markedSeq int64
+	testutil.Spin(t, "member marked unknown event recorded", func() bool {
+		evs, evErr := hp2.vendorStore.TeamEventsSince(ctx, recOR09TeamID, 0, 100)
+		if evErr != nil {
+			return false
+		}
+		for i := range evs {
+			if evs[i].TaskID == recOR09MemTask && evs[i].EventType == vendorstore.EventTaskMarkedUnknown {
+				markedSeq = evs[i].Sequence
+				return true
+			}
+		}
+		return false
 	})
-	claimed, err := hp2.vendorStore.ClaimMailbox(ctx, recOR09TeamID, recOR09LeadTask)
-	if err != nil || len(claimed) != 1 {
-		t.Fatalf("ClaimMailbox: (%+v, %v)", claimed, err)
-	}
-	assertOR09NoticePayload(t, hp2, &claimed[0], headSHA)
-	if _, tasksAfter, snapErr := hp2.vendorStore.TeamSnapshot(ctx, recOR09TeamID); snapErr != nil {
-		t.Fatal(snapErr)
-	} else if mem, _ := findTask(tasksAfter, recOR09MemTask); mem.State != vendorstore.TaskStateUnknown {
-		t.Fatalf("member task must never rerun automatically, got %s", mem.State)
-	}
+	msgID := fmt.Sprintf("%s:unknown-notice:%s:%d:%s", recOR09TeamID, recOR09MemTask, markedSeq, recOR09LeadTask)
+	var rawMsg []byte
+	testutil.Spin(t, "delegator recovery notice enqueued", func() bool {
+		var openErr error
+		rawMsg, openErr = hp2.vendorStore.OpenMailboxPayload(ctx, recOR09TeamID, msgID)
+		return openErr == nil
+	})
+	assertOR09NoticeBytes(t, hp2, rawMsg, headSHA)
 }
 
-func assertOR09NoticePayload(t *testing.T, hp2 *HostProcess, msg *vendorstore.MailboxMessage, headSHA string) {
+func assertOR09NoticeBytes(t *testing.T, hp2 *HostProcess, rawMsg []byte, headSHA string) {
 	t.Helper()
-	ctx := t.Context()
-	rawMsg, err := hp2.vendorStore.OpenMailboxPayload(ctx, recOR09TeamID, msg.MessageID)
-	if err != nil {
-		t.Fatal(err)
-	}
 	var notice mailboxDigestItem
 	if unmErr := json.Unmarshal(rawMsg, &notice); unmErr != nil {
 		t.Fatal(unmErr)
@@ -186,30 +235,32 @@ func assertOR09NoticePayload(t *testing.T, hp2 *HostProcess, msg *vendorstore.Ma
 		!strings.Contains(notice.Summary, headSHA) || !strings.Contains(notice.Summary, "dirty (1 changed)") {
 		t.Fatalf("unexpected recovery notice: %+v", notice)
 	}
-	if relErr := hp2.vendorStore.ReleaseMailboxBatch(ctx, msg.BatchID); relErr != nil {
-		t.Fatal(relErr)
+	if _, tasksAfter, snapErr := hp2.vendorStore.TeamSnapshot(t.Context(), recOR09TeamID); snapErr != nil {
+		t.Fatal(snapErr)
+	} else if mem, _ := findTask(tasksAfter, recOR09MemTask); mem.State != vendorstore.TaskStateUnknown {
+		t.Fatalf("member task must never rerun automatically, got %s", mem.State)
 	}
 }
 
-func verifyLeadResumeTransitionsUnknownToRunning(t *testing.T, hp2 *HostProcess, wsID string) {
+func verifyLeadResumeTransitionsUnknownToRunning(t *testing.T, hp2 *HostProcess) {
 	t.Helper()
 	ctx := t.Context()
-	svc2, err := hp2.Runtime().VendorService()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if snap, snapErr := hp2.vendorStore.Snapshot(ctx, recOR09LeadSess); snapErr == nil && snap.State == vendorstore.StateDetached {
-		if _, resErr := svc2.Resume(ctx, testAppPrincipal, &ResumeVendorSession{
-			CommandID: "res-lead", SessionID: recOR09LeadSess, WorkspaceID: wsID, RootName: teamTestRootName,
-		}); resErr != nil && errcode.CodeOf(resErr) != errcode.VendorSessionState {
-			t.Fatalf("Resume detached lead: %v", resErr)
+	testutil.Spin(t, "wake resumes lead task and delivers notice", func() bool {
+		snap, snapErr := hp2.vendorStore.Snapshot(ctx, recOR09LeadSess)
+		if snapErr != nil || snap.State != vendorstore.StateReady {
+			return false
 		}
-	}
-	testutil.Spin(t, "lead task moved back to running", func() bool {
-		_, tasksResumed, snapErr := hp2.vendorStore.TeamSnapshot(ctx, recOR09TeamID)
+		_, tasksResumed, teamErr := hp2.vendorStore.TeamSnapshot(ctx, recOR09TeamID)
 		lead, ok := findTask(tasksResumed, recOR09LeadTask)
-		return snapErr == nil && ok && lead.State == vendorstore.TaskStateRunning
+		if teamErr != nil || !ok || lead.State != vendorstore.TaskStateRunning {
+			return false
+		}
+		pending, pendErr := hp2.vendorStore.PendingMailbox(ctx)
+		return pendErr == nil && len(pending) == 0
 	})
+	if held := hp2.rt.teamWake.HeldRecipients(); len(held) != 0 {
+		t.Fatalf("HeldRecipients after wake resume = %+v, want empty", held)
+	}
 	evs, err := hp2.vendorStore.TeamEventsSince(ctx, recOR09TeamID, 0, 100)
 	if err != nil {
 		t.Fatal(err)
