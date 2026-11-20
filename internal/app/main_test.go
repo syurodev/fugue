@@ -18,34 +18,48 @@ import (
 
 func TestMain(m *testing.M) {
 	// The vendor service tests run this test binary as the Claude or Codex CLI.
-	if len(os.Args) > 1 && os.Args[1] == "--version" {
-		if strings.Contains(filepath.Base(os.Args[0]), "codex") {
+	if playFakeVendorCLI(os.Args) {
+		os.Exit(0)
+	}
+	cleanup, err := buildTestTemplates()
+	if err != nil {
+		writeFakeCLI(err.Error() + "\n")
+		os.Exit(1)
+	}
+	goleak.VerifyTestMain(m, goleak.Cleanup(cleanup))
+}
+
+func playFakeVendorCLI(args []string) bool {
+	if len(args) > 1 && args[1] == "--version" {
+		switch {
+		case strings.Contains(filepath.Base(args[0]), "codex"):
 			writeFakeCLI(fakeCodexVersion + "\n")
-			os.Exit(0)
-		}
-		if strings.Contains(filepath.Base(os.Args[0]), "agy") {
+		case strings.Contains(filepath.Base(args[0]), "agy"):
 			writeFakeCLI(fakeAgyVersion + "\n")
-			os.Exit(0)
+		default:
+			writeFakeCLI(fakeCLIVersion + " (Claude Code)\n")
 		}
-		writeFakeCLI(fakeCLIVersion + " (Claude Code)\n")
-		os.Exit(0)
+		return true
 	}
-	if playFakeLoginStatus(os.Args) {
-		os.Exit(0)
+	if playFakeLoginStatus(args) {
+		return true
 	}
-	if len(os.Args) > 1 && os.Args[1] == "-p" {
+	if len(args) <= 1 {
+		return false
+	}
+	switch args[1] {
+	case "-p":
 		runFakeCLISession()
-		os.Exit(0)
-	}
-	if len(os.Args) > 1 && os.Args[1] == "app-server" {
+		return true
+	case "app-server":
 		runFakeCodexAppServer()
-		os.Exit(0)
-	}
-	if len(os.Args) > 1 && os.Args[1] == "acp" {
+		return true
+	case "acp":
 		runFakeAgyACP()
-		os.Exit(0)
+		return true
+	default:
+		return false
 	}
-	goleak.VerifyTestMain(m)
 }
 
 const (
