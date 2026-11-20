@@ -45,8 +45,8 @@ func (s *Store) PurgeSession(ctx context.Context, session string) error {
 	if writeErr := s.purgeRows(ctx, tx, session); writeErr != nil {
 		return writeErr
 	}
-	if s.beforeCommit != nil {
-		return fmt.Errorf("%w: %w", ErrUnavailable, s.beforeCommit)
+	if fault := s.commitFault(); fault != nil {
+		return fmt.Errorf("%w: %w", ErrUnavailable, fault)
 	}
 	if err = tx.Commit(); err != nil {
 		permanent = true

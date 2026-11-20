@@ -141,6 +141,8 @@ type HostRuntime struct {
 	teamDispatch    *teamDispatcher
 	teamWake        *teamWake
 	tags            *environments.Registry
+	hostResources   HostResources
+	heavy           *heavySemaphore
 
 	// goTask spawns a supervised goroutine on the host's base context; it is
 	// installed by StartHost because the base context is never stored.
@@ -190,6 +192,9 @@ func (rt *HostRuntime) Subscribe(ctx context.Context, p SubscribeParams) (*Subsc
 // EndStreams ends every open event stream and cancels pending approval waits;
 // the transport calls it at the start of a graceful drain.
 func (rt *HostRuntime) EndStreams() {
+	if rt.heavy != nil {
+		rt.heavy.Close()
+	}
 	if rt.interactions != nil {
 		rt.interactions.CancelPending()
 	}

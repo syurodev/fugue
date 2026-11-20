@@ -386,7 +386,9 @@ func TestSupervisorUsesRawXDGRuntimeDir(t *testing.T) {
 // session cap at the service, the handshake and frame limits in the adapter.
 func TestVendorSessionLimitsReturnTypedErrors(t *testing.T) {
 	t.Parallel()
-	f := newVendorServiceFixture(t)
+	f := newVendorServiceFixtureCustom(t, func(deps *HostDeps) {
+		deps.HostResources = fakeHostResources{ramBytes: 4<<30 + 800<<20, cores: 4}
+	})
 	f.start(t, "limit-1")
 	f.start(t, "limit-2")
 	_, err := f.svc.Start(t.Context(), testAppPrincipal, &StartVendorSession{

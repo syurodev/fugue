@@ -41,6 +41,9 @@ const (
 	HostServiceShutdownProcedure = "/fugue.host.v1.HostService/Shutdown"
 	// HostServiceSubscribeProcedure is the fully-qualified name of the HostService's Subscribe RPC.
 	HostServiceSubscribeProcedure = "/fugue.host.v1.HostService/Subscribe"
+	// HostServiceAcquireHeavySlotProcedure is the fully-qualified name of the HostService's
+	// AcquireHeavySlot RPC.
+	HostServiceAcquireHeavySlotProcedure = "/fugue.host.v1.HostService/AcquireHeavySlot"
 )
 
 // HostServiceClient is a client for the fugue.host.v1.HostService service.
@@ -51,6 +54,9 @@ type HostServiceClient interface {
 	// Subscribe streams one topic's events after an optional snapshot or
 	// catch-up from a cursor (docs: host-api §6).
 	Subscribe(context.Context, *connect.Request[v1.SubscribeRequest]) (*connect.ServerStreamForClient[v1.SubscribeResponse], error)
+	// AcquireHeavySlot waits for one heavy-command semaphore slot and holds it
+	// until the client cancels or disconnects (orchestration §7).
+	AcquireHeavySlot(context.Context, *connect.Request[v1.AcquireHeavySlotRequest]) (*connect.ServerStreamForClient[v1.AcquireHeavySlotResponse], error)
 }
 
 // NewHostServiceClient constructs a client for the fugue.host.v1.HostService service. By default,
@@ -88,15 +94,22 @@ func NewHostServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(hostServiceMethods.ByName("Subscribe")),
 			connect.WithClientOptions(opts...),
 		),
+		acquireHeavySlot: connect.NewClient[v1.AcquireHeavySlotRequest, v1.AcquireHeavySlotResponse](
+			httpClient,
+			baseURL+HostServiceAcquireHeavySlotProcedure,
+			connect.WithSchema(hostServiceMethods.ByName("AcquireHeavySlot")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // hostServiceClient implements HostServiceClient.
 type hostServiceClient struct {
-	hello      *connect.Client[v1.HelloRequest, v1.HelloResponse]
-	hostStatus *connect.Client[v1.HostStatusRequest, v1.HostStatusResponse]
-	shutdown   *connect.Client[v1.ShutdownRequest, v1.ShutdownResponse]
-	subscribe  *connect.Client[v1.SubscribeRequest, v1.SubscribeResponse]
+	hello            *connect.Client[v1.HelloRequest, v1.HelloResponse]
+	hostStatus       *connect.Client[v1.HostStatusRequest, v1.HostStatusResponse]
+	shutdown         *connect.Client[v1.ShutdownRequest, v1.ShutdownResponse]
+	subscribe        *connect.Client[v1.SubscribeRequest, v1.SubscribeResponse]
+	acquireHeavySlot *connect.Client[v1.AcquireHeavySlotRequest, v1.AcquireHeavySlotResponse]
 }
 
 // Hello calls fugue.host.v1.HostService.Hello.
@@ -119,6 +132,11 @@ func (c *hostServiceClient) Subscribe(ctx context.Context, req *connect.Request[
 	return c.subscribe.CallServerStream(ctx, req)
 }
 
+// AcquireHeavySlot calls fugue.host.v1.HostService.AcquireHeavySlot.
+func (c *hostServiceClient) AcquireHeavySlot(ctx context.Context, req *connect.Request[v1.AcquireHeavySlotRequest]) (*connect.ServerStreamForClient[v1.AcquireHeavySlotResponse], error) {
+	return c.acquireHeavySlot.CallServerStream(ctx, req)
+}
+
 // HostServiceHandler is an implementation of the fugue.host.v1.HostService service.
 type HostServiceHandler interface {
 	Hello(context.Context, *connect.Request[v1.HelloRequest]) (*connect.Response[v1.HelloResponse], error)
@@ -127,6 +145,9 @@ type HostServiceHandler interface {
 	// Subscribe streams one topic's events after an optional snapshot or
 	// catch-up from a cursor (docs: host-api §6).
 	Subscribe(context.Context, *connect.Request[v1.SubscribeRequest], *connect.ServerStream[v1.SubscribeResponse]) error
+	// AcquireHeavySlot waits for one heavy-command semaphore slot and holds it
+	// until the client cancels or disconnects (orchestration §7).
+	AcquireHeavySlot(context.Context, *connect.Request[v1.AcquireHeavySlotRequest], *connect.ServerStream[v1.AcquireHeavySlotResponse]) error
 }
 
 // NewHostServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -160,6 +181,12 @@ func NewHostServiceHandler(svc HostServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(hostServiceMethods.ByName("Subscribe")),
 		connect.WithHandlerOptions(opts...),
 	)
+	hostServiceAcquireHeavySlotHandler := connect.NewServerStreamHandler(
+		HostServiceAcquireHeavySlotProcedure,
+		svc.AcquireHeavySlot,
+		connect.WithSchema(hostServiceMethods.ByName("AcquireHeavySlot")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fugue.host.v1.HostService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case HostServiceHelloProcedure:
@@ -170,6 +197,8 @@ func NewHostServiceHandler(svc HostServiceHandler, opts ...connect.HandlerOption
 			hostServiceShutdownHandler.ServeHTTP(w, r)
 		case HostServiceSubscribeProcedure:
 			hostServiceSubscribeHandler.ServeHTTP(w, r)
+		case HostServiceAcquireHeavySlotProcedure:
+			hostServiceAcquireHeavySlotHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -193,4 +222,8 @@ func (UnimplementedHostServiceHandler) Shutdown(context.Context, *connect.Reques
 
 func (UnimplementedHostServiceHandler) Subscribe(context.Context, *connect.Request[v1.SubscribeRequest], *connect.ServerStream[v1.SubscribeResponse]) error {
 	return connect.NewError(connect.CodeUnimplemented, errors.New("fugue.host.v1.HostService.Subscribe is not implemented"))
+}
+
+func (UnimplementedHostServiceHandler) AcquireHeavySlot(context.Context, *connect.Request[v1.AcquireHeavySlotRequest], *connect.ServerStream[v1.AcquireHeavySlotResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("fugue.host.v1.HostService.AcquireHeavySlot is not implemented"))
 }

@@ -18,12 +18,13 @@ type VendorBridge = vendor.Bridge
 
 // HostDeps are the ports StartHost needs.
 type HostDeps struct {
-	DataDir      string
-	WorkspaceEnv config.Env
-	Config       HostConfig
-	Clock        clock.Clock
-	IDs          ids.Generator
-	Transport    HostTransport
+	DataDir       string
+	WorkspaceEnv  config.Env
+	Config        HostConfig
+	Clock         clock.Clock
+	IDs           ids.Generator
+	HostResources HostResources
+	Transport     HostTransport
 	// VendorBinary overrides the Claude binary (absolute path); empty
 	// resolves claude on PATH at probe time.
 	VendorBinary string

@@ -10,6 +10,7 @@ import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
+	sync "sync"
 	unsafe "unsafe"
 )
 
@@ -20,40 +21,141 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type AcquireHeavySlotRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcquireHeavySlotRequest) Reset() {
+	*x = AcquireHeavySlotRequest{}
+	mi := &file_fugue_host_v1_host_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcquireHeavySlotRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcquireHeavySlotRequest) ProtoMessage() {}
+
+func (x *AcquireHeavySlotRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_host_v1_host_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcquireHeavySlotRequest.ProtoReflect.Descriptor instead.
+func (*AcquireHeavySlotRequest) Descriptor() ([]byte, []int) {
+	return file_fugue_host_v1_host_proto_rawDescGZIP(), []int{0}
+}
+
+type AcquireHeavySlotResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Acquired      bool                   `protobuf:"varint,1,opt,name=acquired,proto3" json:"acquired,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AcquireHeavySlotResponse) Reset() {
+	*x = AcquireHeavySlotResponse{}
+	mi := &file_fugue_host_v1_host_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AcquireHeavySlotResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AcquireHeavySlotResponse) ProtoMessage() {}
+
+func (x *AcquireHeavySlotResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_host_v1_host_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AcquireHeavySlotResponse.ProtoReflect.Descriptor instead.
+func (*AcquireHeavySlotResponse) Descriptor() ([]byte, []int) {
+	return file_fugue_host_v1_host_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *AcquireHeavySlotResponse) GetAcquired() bool {
+	if x != nil {
+		return x.Acquired
+	}
+	return false
+}
+
 var File_fugue_host_v1_host_proto protoreflect.FileDescriptor
 
 const file_fugue_host_v1_host_proto_rawDesc = "" +
 	"\n" +
-	"\x18fugue/host/v1/host.proto\x12\rfugue.host.v1\x1a\x19fugue/host/v1/event.proto\x1a\x19fugue/host/v1/hello.proto\x1a\x1cfugue/host/v1/shutdown.proto\x1a\x1afugue/host/v1/status.proto2\xc3\x02\n" +
+	"\x18fugue/host/v1/host.proto\x12\rfugue.host.v1\x1a\x19fugue/host/v1/event.proto\x1a\x19fugue/host/v1/hello.proto\x1a\x1cfugue/host/v1/shutdown.proto\x1a\x1afugue/host/v1/status.proto\"\x19\n" +
+	"\x17AcquireHeavySlotRequest\"6\n" +
+	"\x18AcquireHeavySlotResponse\x12\x1a\n" +
+	"\bacquired\x18\x01 \x01(\bR\bacquired2\xaa\x03\n" +
 	"\vHostService\x12B\n" +
 	"\x05Hello\x12\x1b.fugue.host.v1.HelloRequest\x1a\x1c.fugue.host.v1.HelloResponse\x12Q\n" +
 	"\n" +
 	"HostStatus\x12 .fugue.host.v1.HostStatusRequest\x1a!.fugue.host.v1.HostStatusResponse\x12K\n" +
 	"\bShutdown\x12\x1e.fugue.host.v1.ShutdownRequest\x1a\x1f.fugue.host.v1.ShutdownResponse\x12P\n" +
-	"\tSubscribe\x12\x1f.fugue.host.v1.SubscribeRequest\x1a .fugue.host.v1.SubscribeResponse0\x01B\xab\x01\n" +
+	"\tSubscribe\x12\x1f.fugue.host.v1.SubscribeRequest\x1a .fugue.host.v1.SubscribeResponse0\x01\x12e\n" +
+	"\x10AcquireHeavySlot\x12&.fugue.host.v1.AcquireHeavySlotRequest\x1a'.fugue.host.v1.AcquireHeavySlotResponse0\x01B\xab\x01\n" +
 	"\x11com.fugue.host.v1B\tHostProtoP\x01Z5github.com/syurodev/fugue/pkg/pb/fugue/host/v1;hostv1\xa2\x02\x03FHX\xaa\x02\rFugue.Host.V1\xca\x02\rFugue\\Host\\V1\xe2\x02\x19Fugue\\Host\\V1\\GPBMetadata\xea\x02\x0fFugue::Host::V1b\x06proto3"
 
+var (
+	file_fugue_host_v1_host_proto_rawDescOnce sync.Once
+	file_fugue_host_v1_host_proto_rawDescData []byte
+)
+
+func file_fugue_host_v1_host_proto_rawDescGZIP() []byte {
+	file_fugue_host_v1_host_proto_rawDescOnce.Do(func() {
+		file_fugue_host_v1_host_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_fugue_host_v1_host_proto_rawDesc), len(file_fugue_host_v1_host_proto_rawDesc)))
+	})
+	return file_fugue_host_v1_host_proto_rawDescData
+}
+
+var file_fugue_host_v1_host_proto_msgTypes = make([]protoimpl.MessageInfo, 2)
 var file_fugue_host_v1_host_proto_goTypes = []any{
-	(*HelloRequest)(nil),       // 0: fugue.host.v1.HelloRequest
-	(*HostStatusRequest)(nil),  // 1: fugue.host.v1.HostStatusRequest
-	(*ShutdownRequest)(nil),    // 2: fugue.host.v1.ShutdownRequest
-	(*SubscribeRequest)(nil),   // 3: fugue.host.v1.SubscribeRequest
-	(*HelloResponse)(nil),      // 4: fugue.host.v1.HelloResponse
-	(*HostStatusResponse)(nil), // 5: fugue.host.v1.HostStatusResponse
-	(*ShutdownResponse)(nil),   // 6: fugue.host.v1.ShutdownResponse
-	(*SubscribeResponse)(nil),  // 7: fugue.host.v1.SubscribeResponse
+	(*AcquireHeavySlotRequest)(nil),  // 0: fugue.host.v1.AcquireHeavySlotRequest
+	(*AcquireHeavySlotResponse)(nil), // 1: fugue.host.v1.AcquireHeavySlotResponse
+	(*HelloRequest)(nil),             // 2: fugue.host.v1.HelloRequest
+	(*HostStatusRequest)(nil),        // 3: fugue.host.v1.HostStatusRequest
+	(*ShutdownRequest)(nil),          // 4: fugue.host.v1.ShutdownRequest
+	(*SubscribeRequest)(nil),         // 5: fugue.host.v1.SubscribeRequest
+	(*HelloResponse)(nil),            // 6: fugue.host.v1.HelloResponse
+	(*HostStatusResponse)(nil),       // 7: fugue.host.v1.HostStatusResponse
+	(*ShutdownResponse)(nil),         // 8: fugue.host.v1.ShutdownResponse
+	(*SubscribeResponse)(nil),        // 9: fugue.host.v1.SubscribeResponse
 }
 var file_fugue_host_v1_host_proto_depIdxs = []int32{
-	0, // 0: fugue.host.v1.HostService.Hello:input_type -> fugue.host.v1.HelloRequest
-	1, // 1: fugue.host.v1.HostService.HostStatus:input_type -> fugue.host.v1.HostStatusRequest
-	2, // 2: fugue.host.v1.HostService.Shutdown:input_type -> fugue.host.v1.ShutdownRequest
-	3, // 3: fugue.host.v1.HostService.Subscribe:input_type -> fugue.host.v1.SubscribeRequest
-	4, // 4: fugue.host.v1.HostService.Hello:output_type -> fugue.host.v1.HelloResponse
-	5, // 5: fugue.host.v1.HostService.HostStatus:output_type -> fugue.host.v1.HostStatusResponse
-	6, // 6: fugue.host.v1.HostService.Shutdown:output_type -> fugue.host.v1.ShutdownResponse
-	7, // 7: fugue.host.v1.HostService.Subscribe:output_type -> fugue.host.v1.SubscribeResponse
-	4, // [4:8] is the sub-list for method output_type
-	0, // [0:4] is the sub-list for method input_type
+	2, // 0: fugue.host.v1.HostService.Hello:input_type -> fugue.host.v1.HelloRequest
+	3, // 1: fugue.host.v1.HostService.HostStatus:input_type -> fugue.host.v1.HostStatusRequest
+	4, // 2: fugue.host.v1.HostService.Shutdown:input_type -> fugue.host.v1.ShutdownRequest
+	5, // 3: fugue.host.v1.HostService.Subscribe:input_type -> fugue.host.v1.SubscribeRequest
+	0, // 4: fugue.host.v1.HostService.AcquireHeavySlot:input_type -> fugue.host.v1.AcquireHeavySlotRequest
+	6, // 5: fugue.host.v1.HostService.Hello:output_type -> fugue.host.v1.HelloResponse
+	7, // 6: fugue.host.v1.HostService.HostStatus:output_type -> fugue.host.v1.HostStatusResponse
+	8, // 7: fugue.host.v1.HostService.Shutdown:output_type -> fugue.host.v1.ShutdownResponse
+	9, // 8: fugue.host.v1.HostService.Subscribe:output_type -> fugue.host.v1.SubscribeResponse
+	1, // 9: fugue.host.v1.HostService.AcquireHeavySlot:output_type -> fugue.host.v1.AcquireHeavySlotResponse
+	5, // [5:10] is the sub-list for method output_type
+	0, // [0:5] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -74,12 +176,13 @@ func file_fugue_host_v1_host_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fugue_host_v1_host_proto_rawDesc), len(file_fugue_host_v1_host_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   0,
+			NumMessages:   2,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_fugue_host_v1_host_proto_goTypes,
 		DependencyIndexes: file_fugue_host_v1_host_proto_depIdxs,
+		MessageInfos:      file_fugue_host_v1_host_proto_msgTypes,
 	}.Build()
 	File_fugue_host_v1_host_proto = out.File
 	file_fugue_host_v1_host_proto_goTypes = nil

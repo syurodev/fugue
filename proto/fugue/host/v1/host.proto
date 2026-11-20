@@ -16,4 +16,13 @@ service HostService {
   // Subscribe streams one topic's events after an optional snapshot or
   // catch-up from a cursor (docs: host-api §6).
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
+  // AcquireHeavySlot waits for one heavy-command semaphore slot and holds it
+  // until the client cancels or disconnects (orchestration §7).
+  rpc AcquireHeavySlot(AcquireHeavySlotRequest) returns (stream AcquireHeavySlotResponse);
+}
+
+message AcquireHeavySlotRequest {}
+
+message AcquireHeavySlotResponse {
+  bool acquired = 1;
 }

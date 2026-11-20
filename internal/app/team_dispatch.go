@@ -115,39 +115,6 @@ func (d *teamDispatcher) Dispatch(ctx context.Context, teamID string) error {
 	return nil
 }
 
-// DispatchAll dispatches every active team; the vault unlock and a host start
-// trigger it. The first failure stops the walk and is returned.
-func (d *teamDispatcher) DispatchAll(ctx context.Context) error {
-	teamIDs, err := d.deps.Store.ActiveTeamIDs(ctx)
-	if err != nil {
-		return boundaryError("list the active teams", err)
-	}
-	for _, id := range teamIDs {
-		if err := d.Dispatch(ctx, id); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// nextStartable picks the first queued task the plan starts on its own
-// (Q-116): its parent is working and every dependency is done. A task of an
-// amend starts only through its delegator, and a root starts only when it is
-// the lead.
-func nextStartable(tasks []vendorstore.TaskRecord, held map[string]bool) *vendorstore.TaskRecord {
-	byID, retryChild := resolveTaskChain(tasks)
-	for i := range tasks {
-		t := &tasks[i]
-		if t.State != vendorstore.TaskStateQueued || t.ExplicitStart || held[t.TaskID] {
-			continue
-		}
-		if startable(t, byID, retryChild) {
-			return t
-		}
-	}
-	return nil
-}
-
 // resolveTaskChain indexes tasks by ID and maps each superseded task to its
 // immediate retry child so dependency resolution follows retries without
 // mutating depends_on (Q-126).

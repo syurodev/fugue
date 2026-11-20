@@ -60,11 +60,15 @@ func (s *Store) teamPayloadGate(payload []byte) (vault.Snapshot, bool, error) {
 	return snap, true, err
 }
 
-func (s *Store) commitTeamTx(snap vault.Snapshot, needVault bool, commitFn func() error) error {
-	s.prepare.Lock()
+func (s *Store) commitFault() error {
+	s.faultMu.Lock()
 	fault := s.beforeCommit
-	s.prepare.Unlock()
-	if fault != nil {
+	s.faultMu.Unlock()
+	return fault
+}
+
+func (s *Store) commitTeamTx(snap vault.Snapshot, needVault bool, commitFn func() error) error {
+	if fault := s.commitFault(); fault != nil {
 		return fmt.Errorf("%w: %w", ErrUnavailable, fault)
 	}
 	if needVault {

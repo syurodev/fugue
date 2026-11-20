@@ -78,7 +78,7 @@ func (hp *HostProcess) logDispatch(ctx context.Context, err error) {
 func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorstore.Store, sessions *VendorSessions, v *vault.Service, deps *HostDeps) {
 	admit := deps.TeamAdmitter
 	if admit == nil {
-		admit = localAdmitter{capacity: sessions}
+		admit = newSchedulerAdmitter(sessions, vs)
 	}
 	sessions.SetWakeHook(func(string) { hp.rt.teamWake.Notify() })
 	hp.rt.teamWake = newTeamWake(&teamWakeDeps{

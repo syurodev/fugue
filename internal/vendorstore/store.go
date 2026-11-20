@@ -39,6 +39,7 @@ type Store struct {
 	cache      *sealing.KeyCache
 	unregister func()
 	prepare    sync.Mutex
+	faultMu    sync.Mutex
 	random     ids.Random
 	// beforeCommit is a test seam set through export_test.go; production code
 	// never sets it.

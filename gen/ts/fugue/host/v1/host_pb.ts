@@ -2,8 +2,8 @@
 // @generated from file fugue/host/v1/host.proto (package fugue.host.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
 import type { SubscribeRequestSchema, SubscribeResponseSchema } from "./event_pb";
 import { file_fugue_host_v1_event } from "./event_pb";
 import type { HelloRequestSchema, HelloResponseSchema } from "./hello_pb";
@@ -12,12 +12,43 @@ import type { ShutdownRequestSchema, ShutdownResponseSchema } from "./shutdown_p
 import { file_fugue_host_v1_shutdown } from "./shutdown_pb";
 import type { HostStatusRequestSchema, HostStatusResponseSchema } from "./status_pb";
 import { file_fugue_host_v1_status } from "./status_pb";
+import type { Message } from "@bufbuild/protobuf";
 
 /**
  * Describes the file fugue/host/v1/host.proto.
  */
 export const file_fugue_host_v1_host: GenFile = /*@__PURE__*/
-  fileDesc("ChhmdWd1ZS9ob3N0L3YxL2hvc3QucHJvdG8SDWZ1Z3VlLmhvc3QudjEywwIKC0hvc3RTZXJ2aWNlEkIKBUhlbGxvEhsuZnVndWUuaG9zdC52MS5IZWxsb1JlcXVlc3QaHC5mdWd1ZS5ob3N0LnYxLkhlbGxvUmVzcG9uc2USUQoKSG9zdFN0YXR1cxIgLmZ1Z3VlLmhvc3QudjEuSG9zdFN0YXR1c1JlcXVlc3QaIS5mdWd1ZS5ob3N0LnYxLkhvc3RTdGF0dXNSZXNwb25zZRJLCghTaHV0ZG93bhIeLmZ1Z3VlLmhvc3QudjEuU2h1dGRvd25SZXF1ZXN0Gh8uZnVndWUuaG9zdC52MS5TaHV0ZG93blJlc3BvbnNlElAKCVN1YnNjcmliZRIfLmZ1Z3VlLmhvc3QudjEuU3Vic2NyaWJlUmVxdWVzdBogLmZ1Z3VlLmhvc3QudjEuU3Vic2NyaWJlUmVzcG9uc2UwAUKrAQoRY29tLmZ1Z3VlLmhvc3QudjFCCUhvc3RQcm90b1ABWjVnaXRodWIuY29tL3N5dXJvZGV2L2Z1Z3VlL3BrZy9wYi9mdWd1ZS9ob3N0L3YxO2hvc3R2MaICA0ZIWKoCDUZ1Z3VlLkhvc3QuVjHKAg1GdWd1ZVxIb3N0XFYx4gIZRnVndWVcSG9zdFxWMVxHUEJNZXRhZGF0YeoCD0Z1Z3VlOjpIb3N0OjpWMWIGcHJvdG8z", [file_fugue_host_v1_event, file_fugue_host_v1_hello, file_fugue_host_v1_shutdown, file_fugue_host_v1_status]);
+  fileDesc("ChhmdWd1ZS9ob3N0L3YxL2hvc3QucHJvdG8SDWZ1Z3VlLmhvc3QudjEiGQoXQWNxdWlyZUhlYXZ5U2xvdFJlcXVlc3QiLAoYQWNxdWlyZUhlYXZ5U2xvdFJlc3BvbnNlEhAKCGFjcXVpcmVkGAEgASgIMqoDCgtIb3N0U2VydmljZRJCCgVIZWxsbxIbLmZ1Z3VlLmhvc3QudjEuSGVsbG9SZXF1ZXN0GhwuZnVndWUuaG9zdC52MS5IZWxsb1Jlc3BvbnNlElEKCkhvc3RTdGF0dXMSIC5mdWd1ZS5ob3N0LnYxLkhvc3RTdGF0dXNSZXF1ZXN0GiEuZnVndWUuaG9zdC52MS5Ib3N0U3RhdHVzUmVzcG9uc2USSwoIU2h1dGRvd24SHi5mdWd1ZS5ob3N0LnYxLlNodXRkb3duUmVxdWVzdBofLmZ1Z3VlLmhvc3QudjEuU2h1dGRvd25SZXNwb25zZRJQCglTdWJzY3JpYmUSHy5mdWd1ZS5ob3N0LnYxLlN1YnNjcmliZVJlcXVlc3QaIC5mdWd1ZS5ob3N0LnYxLlN1YnNjcmliZVJlc3BvbnNlMAESZQoQQWNxdWlyZUhlYXZ5U2xvdBImLmZ1Z3VlLmhvc3QudjEuQWNxdWlyZUhlYXZ5U2xvdFJlcXVlc3QaJy5mdWd1ZS5ob3N0LnYxLkFjcXVpcmVIZWF2eVNsb3RSZXNwb25zZTABQqsBChFjb20uZnVndWUuaG9zdC52MUIJSG9zdFByb3RvUAFaNWdpdGh1Yi5jb20vc3l1cm9kZXYvZnVndWUvcGtnL3BiL2Z1Z3VlL2hvc3QvdjE7aG9zdHYxogIDRkhYqgINRnVndWUuSG9zdC5WMcoCDUZ1Z3VlXEhvc3RcVjHiAhlGdWd1ZVxIb3N0XFYxXEdQQk1ldGFkYXRh6gIPRnVndWU6Okhvc3Q6OlYxYgZwcm90bzM", [file_fugue_host_v1_event, file_fugue_host_v1_hello, file_fugue_host_v1_shutdown, file_fugue_host_v1_status]);
+
+/**
+ * @generated from message fugue.host.v1.AcquireHeavySlotRequest
+ */
+export type AcquireHeavySlotRequest = Message<"fugue.host.v1.AcquireHeavySlotRequest"> & {
+};
+
+/**
+ * Describes the message fugue.host.v1.AcquireHeavySlotRequest.
+ * Use `create(AcquireHeavySlotRequestSchema)` to create a new message.
+ */
+export const AcquireHeavySlotRequestSchema: GenMessage<AcquireHeavySlotRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_host_v1_host, 0);
+
+/**
+ * @generated from message fugue.host.v1.AcquireHeavySlotResponse
+ */
+export type AcquireHeavySlotResponse = Message<"fugue.host.v1.AcquireHeavySlotResponse"> & {
+  /**
+   * @generated from field: bool acquired = 1;
+   */
+  acquired: boolean;
+};
+
+/**
+ * Describes the message fugue.host.v1.AcquireHeavySlotResponse.
+ * Use `create(AcquireHeavySlotResponseSchema)` to create a new message.
+ */
+export const AcquireHeavySlotResponseSchema: GenMessage<AcquireHeavySlotResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_host_v1_host, 1);
 
 /**
  * HostService is the connection and lifecycle service every client speaks
@@ -60,6 +91,17 @@ export const HostService: GenService<{
     methodKind: "server_streaming";
     input: typeof SubscribeRequestSchema;
     output: typeof SubscribeResponseSchema;
+  },
+  /**
+   * AcquireHeavySlot waits for one heavy-command semaphore slot and holds it
+   * until the client cancels or disconnects (orchestration §7).
+   *
+   * @generated from rpc fugue.host.v1.HostService.AcquireHeavySlot
+   */
+  acquireHeavySlot: {
+    methodKind: "server_streaming";
+    input: typeof AcquireHeavySlotRequestSchema;
+    output: typeof AcquireHeavySlotResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fugue_host_v1_host, 0);

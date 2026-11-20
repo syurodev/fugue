@@ -7,14 +7,11 @@ import (
 )
 
 // maxRunningDirectChildren is the §11 limit of direct child tasks one
-// delegator may have working at once, kept as a fixed safety cap until the
-// F11.6 scheduler reads it from the workspace configuration (Q-118).
+// delegator may have working at once (Q-118).
 const maxRunningDirectChildren = 4
 
-// Admitter decides whether the dispatcher may start one more task now. It is
-// the boundary F11.6 replaces with the three slot tiers, the quota gate and
-// the budgets; F11.3 admits on host capacity and the direct-child cap only
-// (Q-118). A refusal leaves the task queued, never failed.
+// Admitter decides whether the dispatcher may start one more task now. A
+// refusal leaves the task queued, never failed.
 type Admitter interface {
 	Admit(ctx context.Context, task *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord) (bool, error)
 }
@@ -25,7 +22,12 @@ type capacityReader interface {
 	HasCapacity(ctx context.Context) (bool, error)
 }
 
-// localAdmitter is the F11.3 Admitter.
+type accountCapacityReader interface {
+	capacityReader
+	HasCapacityFor(ctx context.Context, vendorName, accountID string) (bool, error)
+}
+
+// localAdmitter checks the direct-child cap and host capacity.
 type localAdmitter struct{ capacity capacityReader }
 
 // Admit admits a task while the host has session capacity and its delegator
@@ -35,6 +37,62 @@ func (a localAdmitter) Admit(ctx context.Context, task *vendorstore.TaskRecord, 
 	if task.HierarchyRole == vendorstore.RoleLead {
 		return true, nil
 	}
+	if workingDirectChildren(task, tasks) >= maxRunningDirectChildren {
+		return false, nil
+	}
+	room, err := a.capacity.HasCapacity(ctx)
+	if err != nil {
+		return false, boundaryError("read the session capacity", err)
+	}
+	return room, nil
+}
+
+type schedulerAdmitter struct {
+	capacity accountCapacityReader
+	store    *vendorstore.Store
+}
+
+func newSchedulerAdmitter(capacity accountCapacityReader, store *vendorstore.Store) Admitter {
+	return schedulerAdmitter{capacity: capacity, store: store}
+}
+
+// Admit checks the §11 4-child cap (Q-118) and the §7 per-account and
+// machine-wide session tiers for the task's resolved vendor.
+func (a schedulerAdmitter) Admit(ctx context.Context, task *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord) (bool, error) {
+	if task.HierarchyRole == vendorstore.RoleLead {
+		return true, nil
+	}
+	if workingDirectChildren(task, tasks) >= maxRunningDirectChildren {
+		return false, nil
+	}
+	vendorName := ""
+	if a.store != nil {
+		_, role, code, err := resolveTaskProfile(ctx, a.store, task.TeamID, task.TaskID, task.CatalogRole)
+		if err != nil {
+			return false, err
+		}
+		if code != "" {
+			// Let startChild fail the invalid task with its stable failure code.
+			return true, nil
+		}
+		vendorName = role.Vendor
+	}
+	var (
+		room bool
+		err  error
+	)
+	if vendorName != "" {
+		room, err = a.capacity.HasCapacityFor(ctx, vendorName, vendorDefaultAccount)
+	} else {
+		room, err = a.capacity.HasCapacity(ctx)
+	}
+	if err != nil {
+		return false, boundaryError("read the session capacity", err)
+	}
+	return room, nil
+}
+
+func workingDirectChildren(task *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord) int {
 	working := 0
 	for i := range tasks {
 		if tasks[i].ParentTaskID != task.ParentTaskID || tasks[i].TaskID == task.TaskID {
@@ -47,12 +105,5 @@ func (a localAdmitter) Admit(ctx context.Context, task *vendorstore.TaskRecord, 
 			vendorstore.TaskStateFailed, vendorstore.TaskStateStopped, vendorstore.TaskStateCancelled, vendorstore.TaskStateUnknown:
 		}
 	}
-	if working >= maxRunningDirectChildren {
-		return false, nil
-	}
-	room, err := a.capacity.HasCapacity(ctx)
-	if err != nil {
-		return false, boundaryError("read the session capacity", err)
-	}
-	return room, nil
+	return working
 }

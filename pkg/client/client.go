@@ -172,6 +172,21 @@ func (c *Client) Shutdown(ctx context.Context, commandID string) error {
 	return nil
 }
 
+// AcquireHeavySlot waits for a §7 heavy-command semaphore slot and holds it
+// until the returned HeavyLease is released or the host ends the stream.
+func (c *Client) AcquireHeavySlot(ctx context.Context) (*HeavyLease, error) {
+	stream, err := hostv1connect.NewHostServiceClient(c.hc, c.base).AcquireHeavySlot(
+		ctx,
+		connect.NewRequest(&hostv1.AcquireHeavySlotRequest{}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("open heavy command slot stream: %w", err)
+	}
+	return waitHeavyGrant(stream, func(m *hostv1.AcquireHeavySlotResponse) bool {
+		return m.GetAcquired()
+	})
+}
+
 // Close releases the connection's idle transport state. It does not end open
 // streams: close them first, or the lease outlives the Client.
 func (c *Client) Close() {

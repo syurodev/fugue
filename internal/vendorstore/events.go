@@ -106,8 +106,8 @@ func (s *Store) AppendBatch(ctx context.Context, sessionID string, expected int6
 	if err != nil {
 		return 0, err
 	}
-	if s.beforeCommit != nil {
-		return 0, fmt.Errorf("%w: %w", ErrUnavailable, s.beforeCommit)
+	if fault := s.commitFault(); fault != nil {
+		return 0, fmt.Errorf("%w: %w", ErrUnavailable, fault)
 	}
 	commit := tx.Commit
 	if protected {
