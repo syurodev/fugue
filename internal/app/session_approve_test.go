@@ -20,7 +20,6 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
-	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/claude"
 	"github.com/syurodev/fugue/internal/vendorstore"
@@ -45,7 +44,7 @@ func newApproveFixture(t *testing.T) *approveFixture {
 	}
 	clk := clock.NewFake(time.Unix(100, 0))
 	hp, err := StartHost(t.Context(), &HostDeps{
-		DataDir: cheapvault.DataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
+		DataDir: cheapVaultDataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("approve-test")),
 		Transport: newScriptedTransport(), VendorBinary: exe,
 		Bridge: VendorBridge{Binary: exe, Socket: filepath.Join(t.TempDir(), "host.sock")},
@@ -333,7 +332,8 @@ func TestFugueNeverAnswersAVendorRequestInAnyMode(t *testing.T) {
 	}
 
 	assertAbortWaitToolError(t, "revoke", f, sub, func() { f.tools.tokens.revoke(f.session.ID) })
-	assertAbortWaitToolError(t, "vault lock", newApproveFixture(t), nil, nil)
+	rebindApproveSession(t, f)
+	assertAbortWaitToolError(t, "vault lock", f, sub, nil)
 	assertAbortWaitToolError(t, "drain", newApproveFixture(t), nil, nil)
 }
 
@@ -634,7 +634,7 @@ func startReadySessionWithoutTurn(t *testing.T) (*HostRuntime, *SessionToolServi
 	t.Helper()
 	clk := clock.NewFake(time.Unix(100, 0))
 	hp, err := StartHost(t.Context(), &HostDeps{
-		DataDir: cheapvault.DataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
+		DataDir: cheapVaultDataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("approve-noturn")),
 		Transport: newScriptedTransport(), VendorBinary: mustExe(t),
 		Bridge: VendorBridge{Binary: mustExe(t), Socket: filepath.Join(t.TempDir(), "host.sock")},
@@ -704,4 +704,17 @@ func mustExe(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return exe
+}
+
+func rebindApproveSession(t *testing.T, f *approveFixture) {
+	t.Helper()
+	secret, err := f.tools.tokens.mint(f.session.ID, vendorSessionRole)
+	if err != nil {
+		t.Fatal(err)
+	}
+	binding, err := f.tools.Attach(secret.Reveal())
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.binding = binding
 }

@@ -383,18 +383,22 @@ func verifyObservationBurstDoesNotTriggerSteps(t *testing.T, f *budgetsTestFixtu
 	if actLen != 1 || !activePresent {
 		t.Fatalf("sessionActivity after 1,000 non-team observations = (len=%d, activePresent=%v), want (1, true)", actLen, activePresent)
 	}
-	f.budgets.Start(t.Context())
-	t.Cleanup(func() {
-		if err := f.budgets.Stop(); err != nil {
-			t.Errorf("Stop: %v", err)
-		}
-	})
+	// Drain any earlier Notify queued by Dispatch before measuring ObserveSession.
+	select {
+	case <-f.budgets.wakeCh:
+	default:
+	}
 	baseReads := f.cfgReads.Load()
 	for range 10000 {
 		f.budgets.ObserveSession(silentStart.SessionID)
 	}
-	if got := f.cfgReads.Load() - baseReads; got > 1 {
-		t.Fatalf("10,000 ObserveSession calls triggered %d extra Step passes, want <= 1", got)
+	select {
+	case <-f.budgets.wakeCh:
+		t.Fatal("ObserveSession enqueued unexpected wakeup on wakeCh")
+	default:
+	}
+	if got := f.cfgReads.Load() - baseReads; got != 0 {
+		t.Fatalf("10,000 ObserveSession calls triggered %d cfgReads, want 0", got)
 	}
 }
 

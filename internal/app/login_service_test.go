@@ -238,6 +238,16 @@ func waitForLoginSpawn(t *testing.T, ad *fakeLoginAdapter) vendor.LoginRun {
 	return ad.loginRun()
 }
 
+func awaitLoginSlotCleared(t *testing.T, svc *AccountsService, vendorName string) {
+	t.Helper()
+	testutil.Spin(t, "the login slot to clear after outcome", func() bool {
+		svc.loginsMu.Lock()
+		_, running := svc.logins[vendorName]
+		svc.loginsMu.Unlock()
+		return !running
+	})
+}
+
 func waitForProcessEnd(t *testing.T, ad *fakeLoginAdapter) {
 	t.Helper()
 	if err := testutil.WaitFor(t.Context(), "the login process to end", ad.processEnded); err != nil {
@@ -258,14 +268,27 @@ func TestStartLoginRelaysTheCLIPromptVerbatim(t *testing.T) {
 	if view.State != LoginStarted || view.Vendor != VendorClaude || view.LoginID == "" {
 		t.Fatalf("StartLogin view = %+v, want a started login with an identity", view)
 	}
-	started := nextLoginProgress(t, sub)
-	if started.State != LoginStarted || started.LoginID != view.LoginID {
-		t.Fatalf("first login event = %+v, want started for %s", started, view.LoginID)
+	assertLoginPromptRelayedVerbatim(t, sub, view.LoginID)
+}
+
+func assertLoginPromptRelayedVerbatim(t *testing.T, sub *Subscription, loginID string) {
+	t.Helper()
+	first := nextLoginProgress(t, sub)
+	// Non-terminal progress events are published as LatestForKey and may
+	// coalesce, so the first read can see either started or waiting.
+	if (first.State != LoginStarted && first.State != LoginWaiting) || first.LoginID != loginID {
+		t.Fatalf("first login event = %+v, want started or waiting for %s", first, loginID)
+	}
+	if first.State == LoginWaiting && first.Prompt == fakeLoginPrompt {
+		return
 	}
 	// Every line the CLI printed is relayed exactly as printed, never
 	// rewritten, truncated or redacted.
 	for range 8 {
 		p := nextLoginProgress(t, sub)
+		if p.LoginID != loginID {
+			t.Fatalf("login event = %+v, want login_id %s", p, loginID)
+		}
 		if p.State == LoginWaiting && p.Prompt == fakeLoginPrompt {
 			return
 		}
@@ -315,6 +338,7 @@ func TestLoginTimesOutAndStops(t *testing.T) {
 	loginClk.Advance(LoginTimeout)
 	waitForProcessEnd(t, ad)
 	drainUntilOutcome(t, sub, LoginTimedOut)
+	awaitLoginSlotCleared(t, svc, VendorCodex)
 	if err := svc.CancelLogin(t.Context(), string(KindApp), VendorCodex); errcode.CodeOf(err) != errcode.NotFound {
 		t.Fatalf("CancelLogin after the timeout error = %v, want not found", err)
 	}

@@ -63,9 +63,17 @@ func TestBridgeTokenNeverInArgvFilesOrLogs(t *testing.T) {
 			slog.SetDefault(slog.New(redact.NewJSONHandler(logs, slog.LevelDebug)))
 			t.Cleanup(func() { slog.SetDefault(previous) })
 
+			token := sessionTokens(t, 1)[0]
+			// Registered before the host starts, so it runs after the host's
+			// drain and close: nothing writes to logs while it is read.
+			t.Cleanup(func() {
+				if strings.Contains(logs.String(), token) {
+					t.Error("the session token leaked into the host log")
+				}
+			})
+
 			h := startBridgeTokenHost(t, buildFugue(t))
 			sessionID, root := startBridgedTokenSession(t, h, tc.name)
-			token := sessionTokens(t, 1)[0]
 
 			assertVendorStartup(t, h, sessionID, root, token)
 			assertBridgeConversation(t, h, sessionID, root)
@@ -75,9 +83,6 @@ func TestBridgeTokenNeverInArgvFilesOrLogs(t *testing.T) {
 			// wrote, its own data files included.
 			if hits := filesContaining(t, token, h.dataDir, h.fugueHome, root); len(hits) != 0 {
 				t.Fatalf("the session token is on disk in %v", hits)
-			}
-			if strings.Contains(logs.String(), token) {
-				t.Fatal("the session token leaked into the host log")
 			}
 		})
 	}

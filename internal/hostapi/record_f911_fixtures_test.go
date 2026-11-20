@@ -50,8 +50,19 @@ func TestRecordF911Fixtures(t *testing.T) {
 	if err != nil {
 		t.Skipf("agy not installed: %v", err)
 	}
-	logs, _ := os.Create("/tmp/record-host.log")
+	logs, err := os.Create(filepath.Join(t.TempDir(), "record-host.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := slog.Default()
 	slog.SetDefault(slog.New(redact.NewJSONHandler(logs, slog.LevelDebug)))
+	// Registered before the host starts: it runs after the host is closed.
+	t.Cleanup(func() {
+		slog.SetDefault(previous)
+		if cerr := logs.Close(); cerr != nil {
+			t.Errorf("close host log: %v", cerr)
+		}
+	})
 	v := startVendorHostWith(t, true, func(deps *app.HostDeps, sockPath string) {
 		deps.Random = ids.NewDeterministic(recordTokenSeed)
 		deps.Bridge = app.VendorBridge{Binary: buildFugue(t), Socket: sockPath}

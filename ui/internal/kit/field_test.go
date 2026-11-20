@@ -2,8 +2,10 @@ package kit
 
 import (
 	"bytes"
+	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"testing"
 
 	"gioui.org/io/event"
@@ -195,13 +197,35 @@ func TestSearchFieldEscapeClears(t *testing.T) {
 
 // captureLogs swaps the default logger for one that writes into the
 // returned buffer, so a test can assert a value never reached it.
-func captureLogs(t *testing.T) *bytes.Buffer {
+func captureLogs(t *testing.T) *lockedLogs {
 	t.Helper()
-	var buf bytes.Buffer
+	buf := &lockedLogs{}
 	old := slog.Default()
-	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	slog.SetDefault(slog.New(slog.NewTextHandler(buf, nil)))
 	t.Cleanup(func() { slog.SetDefault(old) })
-	return &buf
+	return buf
+}
+
+// lockedLogs is a log sink safe for writes from any goroutine.
+type lockedLogs struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (l *lockedLogs) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	n, err := l.buf.Write(p)
+	if err != nil {
+		return n, fmt.Errorf("buffer the log: %w", err)
+	}
+	return n, nil
+}
+
+func (l *lockedLogs) String() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.buf.String()
 }
 
 // TestSecretFieldIsMaskedAndNeverPrefilled covers §6.8: a fresh secret

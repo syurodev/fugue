@@ -18,12 +18,6 @@ import (
 
 func TestFugueNeverAnswersAnAgyPermissionRequestInAnyMode(t *testing.T) {
 	t.Parallel()
-	t.Run("vault_lock", func(t *testing.T) {
-		t.Parallel()
-		fVault := newAgyRelayFixture(t)
-		assertAgyAbortOnFixture(t, fVault, fVault.subscribeInteractions(t), codexAbortVault, "604")
-	})
-
 	f := newAgyRelayFixture(t)
 	f.seedPermissiveAgyPolicy(t)
 	sub := f.subscribeInteractions(t)
@@ -32,6 +26,8 @@ func TestFugueNeverAnswersAnAgyPermissionRequestInAnyMode(t *testing.T) {
 
 	assertAgyAbortReturnsRPCError(t, f, sub, codexAbortToken, "601")
 	assertAgyAbortReturnsRPCError(t, f, sub, codexAbortClose, "602")
+	assertAgyAbortReturnsRPCError(t, f, sub, codexAbortVault, "604")
+	unlockCheapVault(t, f.hp)
 	assertAgyExpiryReturnsRPCError(t, f, sub)
 	assertAgyAbortReturnsRPCError(t, f, sub, codexAbortDrain, "603")
 }
@@ -151,7 +147,10 @@ func assertAgyAbortOnFixture(t *testing.T, f *agyRelayFixture, sub *Subscription
 	if got := len(f.recordedDecisions(t)); got != 0 {
 		t.Fatalf("%s recorded %d ApprovalDecided events, want 0", kind, got)
 	}
-	if kind != codexAbortClose && kind != codexAbortVault {
+	if kind != codexAbortClose {
+		if kind == codexAbortVault {
+			unlockCheapVault(t, f.hp)
+		}
 		closeAgySession(t, f, "agy-close-after-"+kind)
 	}
 }

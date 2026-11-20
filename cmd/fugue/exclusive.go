@@ -12,8 +12,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	"github.com/syurodev/fugue/internal/config"
+	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/pkg/client"
 )
@@ -22,6 +24,15 @@ const (
 	exclusiveCommand    = "exclusive"
 	exclusiveSocketFlag = "--socket"
 	exitSignaled        = 128
+)
+
+const (
+	// exclusiveWaitDelay bounds cmd.Wait after the child exits while a
+	// descendant still holds an output pipe.
+	exclusiveWaitDelay = 5 * time.Second
+	// exclusiveSweepInterval is how often the process group is re-killed
+	// after a lease loss until Wait returns.
+	exclusiveSweepInterval = 25 * time.Millisecond
 )
 
 var errHeavyLeaseLost = errors.New("heavy command slot lease lost; child command terminated")
@@ -207,6 +218,9 @@ func runExclusiveCommandWithHooks(ctx context.Context, in io.Reader, out, errOut
 		Stdout:      out,
 		Stderr:      errOut,
 		SysProcAttr: spec.sysProcAttr,
+		// Bound Wait: a descendant that escaped the group kill and still holds
+		// the stdout/stderr pipe must not block the exit for its own lifetime.
+		WaitDelay: exclusiveWaitDelay,
 	}
 	if hooks.restoreForeground != nil {
 		defer hooks.restoreForeground(spec)
@@ -218,7 +232,7 @@ func runExclusiveCommandWithHooks(ctx context.Context, in io.Reader, out, errOut
 	err, leaseLost := waitExclusiveCommand(ctx, cmd, slot)
 	if leaseLost {
 		writeCommandErr(errOut, formatLeaseLostErr(slot.lossError()))
-		return exclusiveExitCode(err, true)
+		return leaseLostExitCode(err)
 	}
 	if err == nil {
 		return exitOK
@@ -245,7 +259,7 @@ func waitExclusiveCommand(ctx context.Context, cmd *exec.Cmd, slot *exclusiveSlo
 			}
 		case <-lostCh:
 			leaseLost.Store(true)
-			killExclusiveProcessGroup(cmd.Process)
+			sweepExclusiveProcessGroup(wCtx, cmd.Process)
 		}
 		return nil
 	})
@@ -256,6 +270,20 @@ func waitExclusiveCommand(ctx context.Context, cmd *exec.Cmd, slot *exclusiveSlo
 		return fmt.Errorf("wait %s: %w", cmd.Path, waitErr), leaseLost.Load()
 	}
 	return nil, leaseLost.Load()
+}
+
+// sweepExclusiveProcessGroup SIGKILLs the group and keeps doing so until ctx
+// ends (Wait returned). One kill is not enough: a member forked while the
+// signal was being delivered (the shell forking its last command right after
+// printing ready) is not yet in the group when the kill enumerates it, and it
+// would survive holding the output pipes.
+func sweepExclusiveProcessGroup(ctx context.Context, proc *os.Process) {
+	for {
+		killExclusiveProcessGroup(proc)
+		if clock.Sleep(ctx, clock.Real{}, exclusiveSweepInterval) != nil {
+			return
+		}
+	}
 }
 
 func isLeaseLost(slot *exclusiveSlot) bool {
@@ -291,17 +319,16 @@ func exclusiveProcessExitCode(err error) (int, bool) {
 	return exitFailure, true
 }
 
-func exclusiveExitCode(err error, forceNonZero bool) int {
+// leaseLostExitCode is the exit status after the host revoked the slot and the
+// process group was SIGKILLed. A non-zero outcome is attributed to that kill
+// even when the child won the race and exited by itself: a group kill is not
+// atomic (on darwin a shell can see its last child die and exit 1 before its
+// own SIGKILL lands), and the exit status must not depend on that ordering.
+func leaseLostExitCode(err error) int {
 	if err == nil {
-		if forceNonZero {
-			return exitFailure
-		}
-		return exitOK
+		return exitFailure
 	}
-	if code, ok := exclusiveProcessExitCode(err); ok {
-		return code
-	}
-	return exitFailure
+	return exitSignaled + int(syscall.SIGKILL)
 }
 
 func writeCommandErr(errOut io.Writer, err error) {

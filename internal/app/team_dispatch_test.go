@@ -372,7 +372,7 @@ func TestLeadTaskBindsTheProposingSessionAndCreatesNoWorktree(t *testing.T) {
 // every task queued and records nothing.
 func TestStartFailsClosedWhileTheVaultIsLocked(t *testing.T) {
 	t.Parallel()
-	f := newDispatchFixture(t, true)
+	f := newDispatchFixture(t, false)
 	teamID := f.approve(t, validTeamProposalArgs(), decisionApprove, "")
 	before, _ := f.teamSnapshot(t, teamID)
 	f.hp.vault.Lock()

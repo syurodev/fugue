@@ -40,7 +40,7 @@ var errAdapterFault = errors.New("adapter fault")
 func newAdapterStore(t *testing.T, unlocked bool) *execstore.Store {
 	t.Helper()
 	ctx := t.Context()
-	db, err := storage.Open(ctx, storage.DBPath(t.TempDir()))
+	db, err := storage.Open(ctx, copyMigratedTestDB(t, storage.DBPath(t.TempDir())))
 	if err != nil {
 		t.Fatal("open database")
 	}
@@ -50,9 +50,6 @@ func newAdapterStore(t *testing.T, unlocked bool) *execstore.Store {
 		}
 	})
 	clk := clock.NewFake(time.Date(2026, 11, 6, 10, 0, 0, 0, time.UTC))
-	if err = storage.Migrate(ctx, db, clk); err != nil {
-		t.Fatal("migrate database")
-	}
 	if unlocked {
 		cheapvault.Save(t, vault.NewSQLKeyringStore(db))
 	}

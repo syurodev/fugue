@@ -95,7 +95,7 @@ func TestVendorSessionCapComesFromTheSchedulerTiers(t *testing.T) {
 func newEmptySessionsFixture(t *testing.T) *transcriptFixture {
 	t.Helper()
 	clk := clock.NewFake(time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC))
-	db, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "sched.db"))
+	db, err := storage.Open(t.Context(), copyMigratedTestDB(t, filepath.Join(t.TempDir(), "sched.db")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,9 +104,6 @@ func newEmptySessionsFixture(t *testing.T) *transcriptFixture {
 			t.Error(cerr)
 		}
 	})
-	if migErr := storage.Migrate(t.Context(), db, clk); migErr != nil {
-		t.Fatal(migErr)
-	}
 	v := cheapvault.Unlocked(t)
 	s, err := vendorstore.New(t.Context(), db, v, clk, nil)
 	if err != nil {
