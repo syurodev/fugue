@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
@@ -200,11 +201,12 @@ func TestWakeSurfacesAGYHeldMailState(t *testing.T) {
 
 	if err := f.hp.vendorStore.CreateSession(ctx, &vendorstore.Session{
 		ID: carryoverAGYSess, Vendor: VendorAGY, AccountID: vendorDefaultAccount,
-		Role: string(vendorstore.RoleMember), State: vendorstore.StateReady,
+		Role: string(vendorstore.RoleMember), State: vendorstore.StateDetached, ResumeHandle: "h-agy-co",
 		ApprovalMode: vendorstore.ApprovalPlan, WorkspaceID: f.wsID, WorkspaceRoot: teamTestRootName,
 	}); err != nil {
 		t.Fatal(err)
 	}
+	f.sessions.resumeErr = errcode.New(errcode.Unavailable, "session/load failed")
 	spec := mustMarshalJSON(t, teams.ProtectedTaskContent{Goal: "agy"})
 	rec, _, err := f.hp.vendorStore.CreateTeam(ctx, &vendorstore.NewTeamInput{
 		TeamID: "agy-team-co", WorkspaceID: f.wsID, SessionID: carryoverAGYSess,

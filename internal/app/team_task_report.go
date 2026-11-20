@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/syurodev/fugue/internal/gitops"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/vendorstore"
@@ -192,20 +191,12 @@ func (s *teamTaskService) buildReportEvent(cur *callerTeamContext, summary strin
 }
 
 func (s *teamTaskService) commitTaskWorktree(ctx context.Context, c *callerTeamContext) (string, error) {
-	if s.git == nil || s.roots == nil {
+	if s.git == nil {
 		return "", errcode.New(errcode.FailedPrecondition, "gitops is not configured")
 	}
-	lead, err := s.store.Snapshot(ctx, c.team.SessionID)
+	wt, err := s.taskWorktreeDir(ctx, &c.team, c.caller.TaskID)
 	if err != nil {
-		return "", boundaryError("read lead session", err)
-	}
-	root, err := s.roots.SelectSessionCwd(ctx, lead.WorkspaceID, lead.WorkspaceRoot)
-	if err != nil {
-		return "", boundaryError("resolve workspace root", err)
-	}
-	wt, err := gitops.TaskWorktreePath(s.dataDir, repoIDFor(root), gitTaskID(c.caller.TaskID))
-	if err != nil {
-		return "", boundaryError("derive task worktree", err)
+		return "", err
 	}
 	res, err := s.git.CommitWorktree(ctx, wt, "fugue: "+c.caller.TaskID)
 	if err != nil {

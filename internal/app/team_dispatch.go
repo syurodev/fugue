@@ -297,16 +297,27 @@ func (d *teamDispatcher) appendTaskStartedAttempt(ctx context.Context, teamID, t
 }
 
 func (d *teamDispatcher) taskDeadlineTimers(ctx context.Context, rec *vendorstore.TeamRecord, task *vendorstore.TaskRecord) []vendorstore.TeamTimerArmInput {
+	return buildTaskDeadlineTimers(ctx, d.deps.Store, d.deps.TeamsConfig, d.now(), rec, task)
+}
+
+func buildTaskDeadlineTimers(
+	ctx context.Context,
+	store *vendorstore.Store,
+	teamsCfg func(context.Context, string) (workspace.TeamsConfig, error),
+	now time.Time,
+	rec *vendorstore.TeamRecord,
+	task *vendorstore.TaskRecord,
+) []vendorstore.TeamTimerArmInput {
 	if task.HierarchyRole == vendorstore.RoleLead || task.HierarchyRole == vendorstore.RoleSolo {
 		return nil
 	}
-	deadlineSec := resolveTaskDeadlineSeconds(ctx, d.deps.Store, d.deps.TeamsConfig, rec, task)
+	deadlineSec := resolveTaskDeadlineSeconds(ctx, store, teamsCfg, rec, task)
 	if deadlineSec <= 0 {
 		return nil
 	}
 	return []vendorstore.TeamTimerArmInput{{
 		TeamID: rec.TeamID, TaskID: task.TaskID, Kind: vendorstore.TimerKindTaskDeadline,
-		DeadlineMs: d.now().Add(time.Duration(deadlineSec) * time.Second).UnixMilli(),
+		DeadlineMs: now.Add(time.Duration(deadlineSec) * time.Second).UnixMilli(),
 	}}
 }
 

@@ -68,6 +68,8 @@ type teamWakeDeps struct {
 	Hub      *EventHub
 	// DataDir roots the task worktrees of a detached session's cwd (Q-119).
 	DataDir string
+	// RecoverLead retries OnSessionResumed when a resumed lead task stays unknown.
+	RecoverLead func(context.Context, string) error
 }
 
 // teamWake delivers the team mailbox. One run at a time: the mutex serializes
@@ -80,6 +82,8 @@ type teamWake struct {
 	resumeAttempts map[string]int
 	inflightMu     sync.Mutex
 	inflight       map[string]bool
+	readyMu        sync.Mutex
+	readySessions  map[string]struct{}
 	heldMu         sync.RWMutex
 	held           map[string]HeldMailboxEntry
 }
@@ -189,6 +193,7 @@ func (w *teamWake) Pump(ctx context.Context) error {
 	if w.deps.Vault.Snapshot().State != vault.StateUnlocked {
 		return errcode.New(errcode.VendorVaultLocked, "the vault is locked")
 	}
+	w.retryPendingLeadRecoveries(ctx)
 	recipients, err := w.deps.Store.PendingMailbox(ctx)
 	if err != nil {
 		return boundaryError("list the pending mailbox", err)
@@ -260,24 +265,20 @@ func (w *teamWake) resolveRecipient(ctx context.Context, r vendorstore.MailboxRe
 
 // prepareSession reports whether the recipient session can take its turn
 // now (Q-123): a detached session is resumed first and delivers on the next
-// trigger; starting, busy, waiting, closed and unmeasured agy sessions hold
+// trigger; starting, busy, waiting, closed, and failed-resume sessions hold
 // their mail.
 func (w *teamWake) prepareSession(ctx context.Context, r vendorstore.MailboxRecipient, session *vendorstore.Session) bool {
-	if session.Vendor == VendorAGY {
-		w.markHeld(ctx, &HeldMailboxEntry{
-			TeamID: r.TeamID, TaskID: r.RecipientTaskID, SessionID: session.ID,
-			Vendor: session.Vendor, Reason: "agy_wake_unmeasured_until_f11_6",
-		})
+	if session.State == vendorstore.StateDetached {
+		w.resumeDetached(ctx, r, session)
 		return false
 	}
 	w.clearHeld(ctx, session.ID)
-	if session.State == vendorstore.StateDetached {
-		w.resumeDetached(ctx, session)
-		return false
-	}
 	if session.State == vendorstore.StateReady {
 		delete(w.resumeRetryAt, session.ID)
 		delete(w.resumeAttempts, session.ID)
+		if session.Role == string(vendorstore.RoleLead) {
+			w.recoverReadyLead(ctx, session.ID)
+		}
 		return true
 	}
 	return false
@@ -298,31 +299,39 @@ func (w *teamWake) recipientSessionID(ctx context.Context, teamID string, task *
 }
 
 // resumeDetached attaches a fresh process to a detached recipient session
-// (Q-123). A locked vault holds the mail; a failed resume holds it too and is
-// retried by the next trigger. TODO(F11.6): measure agy idle-send and
-// session/load resume with a logged-in agy, then enable; until measured the
-// fail-closed hold covers an unmeasured resume (Q-123).
-func (w *teamWake) resumeDetached(ctx context.Context, session *vendorstore.Session) {
-	if session.Vendor == VendorAGY {
-		return
-	}
+// (Q-123). A locked vault holds the mail; a failed resume marks the recipient
+// held (fail-closed) and backs off until the next trigger.
+func (w *teamWake) resumeDetached(ctx context.Context, r vendorstore.MailboxRecipient, session *vendorstore.Session) {
 	if until, ok := w.resumeRetryAt[session.ID]; ok && w.deps.Clock.Now().Before(until) {
 		return
 	}
 	cwd, err := w.sessionCwd(ctx, session)
 	if err != nil {
-		w.backoffResume(session.ID)
+		w.markResumeFailed(ctx, r, session, "resume_cwd_failed", err)
 		slog.WarnContext(ctx, "deriving a detached session cwd failed", "session_id", session.ID, "error_code", string(errcode.CodeOf(err)))
 		return
 	}
 	if err := w.deps.Sessions.ResumeTaskSession(ctx, session.ID, cwd); err != nil {
-		w.backoffResume(session.ID)
+		w.markResumeFailed(ctx, r, session, "resume_failed", err)
 		slog.WarnContext(ctx, "resuming a detached session failed", "session_id", session.ID, "error_code", string(errcode.CodeOf(err)))
 		return
 	}
+	w.clearHeld(ctx, session.ID)
 	// Arm backoff on resume too so a session that immediately falls back to
 	// detached is not retried on every trigger; reaching StateReady clears it.
 	w.backoffResume(session.ID)
+}
+
+func (w *teamWake) markResumeFailed(ctx context.Context, r vendorstore.MailboxRecipient, session *vendorstore.Session, fallback string, err error) {
+	w.backoffResume(session.ID)
+	reason := string(errcode.CodeOf(err))
+	if reason == "" {
+		reason = fallback
+	}
+	w.markHeld(ctx, &HeldMailboxEntry{
+		TeamID: r.TeamID, TaskID: r.RecipientTaskID, SessionID: session.ID,
+		Vendor: session.Vendor, Reason: reason,
+	})
 }
 
 func (w *teamWake) backoffResume(sessionID string) {
@@ -345,7 +354,7 @@ func (w *teamWake) sessionCwd(ctx context.Context, session *vendorstore.Session)
 	if err != nil {
 		return "", boundaryError("resolve the session workspace root", err)
 	}
-	if session.TaskID == "" {
+	if session.TaskID == "" || session.Role == string(vendorstore.RoleLead) || session.Role == string(vendorstore.RoleSolo) {
 		return root, nil
 	}
 	repoID := repoIDFor(root)

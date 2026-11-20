@@ -61,6 +61,7 @@ func taskTransitions() map[taskTransKey]TaskState {
 		{TaskStateRunning, EventTaskEnded, outcomeCancelled}:        TaskStateCancelled,
 		{TaskStateRunning, EventTaskMarkedUnknown, ""}:              TaskStateUnknown,
 		{TaskStateAsking, EventTaskQuestionAnswered, ""}:            TaskStateRunning,
+		{TaskStateUnknown, EventTaskQuestionAnswered, ""}:           TaskStateRunning,
 		{TaskStateAsking, EventTaskEnded, outcomeStopped}:           TaskStateStopped,
 		{TaskStateAsking, EventTaskEnded, outcomeFailed}:            TaskStateFailed,
 		{TaskStateAsking, EventTaskEnded, outcomeCancelled}:         TaskStateCancelled,

@@ -120,6 +120,13 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	if err != nil {
 		return nil, err
 	}
+	if tiers, tierErr := sessions.schedulerTiers(ctx); tierErr == nil {
+		slog.InfoContext(ctx, "scheduler tiers initialized",
+			"max_sessions", tiers.MachineWide,
+			"per_account_sessions", tiers.PerAccount,
+			"heavy_commands", tiers.HeavyCommands,
+		)
+	}
 	wireTeamServices(ctx, hp, vs, sessions, v, tokens, deps)
 	hp.rt.vendors = &VendorService{
 		sessions: sessions, store: vs, adapter: adapter, adapters: adapters, vault: v, workspaces: hp.rt.workspaces.domain,

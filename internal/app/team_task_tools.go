@@ -11,19 +11,20 @@ import (
 )
 
 const (
-	taskStartToolName  = "fugue_task_start"
-	taskSendToolName   = "fugue_task_send"
-	taskCancelToolName = "fugue_task_cancel"
-	taskStatusToolName = "fugue_task_status"
-	taskResultToolName = "fugue_task_result"
-	taskDoneToolName   = "fugue_task_done"
-	taskAskToolName    = "fugue_task_ask"
-	taskAnswerToolName = "fugue_task_answer"
-	taskRetryToolName  = "fugue_task_retry"
-	taskAcceptToolName = "fugue_task_accept"
-	taskRejectToolName = "fugue_task_reject"
-	teamNoteToolName   = "fugue_team_note"
-	teamBriefToolName  = "fugue_team_brief"
+	taskStartToolName   = "fugue_task_start"
+	taskSendToolName    = "fugue_task_send"
+	taskCancelToolName  = "fugue_task_cancel"
+	taskStatusToolName  = "fugue_task_status"
+	taskResultToolName  = "fugue_task_result"
+	taskDoneToolName    = "fugue_task_done"
+	taskAskToolName     = "fugue_task_ask"
+	taskAnswerToolName  = "fugue_task_answer"
+	taskRetryToolName   = "fugue_task_retry"
+	taskAcceptToolName  = "fugue_task_accept"
+	taskRejectToolName  = "fugue_task_reject"
+	taskRecoverToolName = "fugue_task_recover"
+	teamNoteToolName    = "fugue_team_note"
+	teamBriefToolName   = "fugue_team_brief"
 )
 
 func teamTaskTools(svc *teamTaskService) []*FugueTool {
@@ -39,6 +40,7 @@ func teamTaskTools(svc *teamTaskService) []*FugueTool {
 		taskRetryTool(svc),
 		taskAcceptTool(svc),
 		taskRejectTool(svc),
+		taskRecoverTool(svc),
 		teamNoteTool(svc),
 		teamBriefTool(svc),
 	}
@@ -285,5 +287,18 @@ func taskRejectTool(svc *teamTaskService) *FugueTool {
 	return delegatorJSONTool(svc, taskRejectToolName, "Reject a direct child task in review state and request changes.", schema,
 		func(ctx context.Context, sessionID string, a args) (string, error) {
 			return svc.Reject(ctx, sessionID, a.TaskID, a.Reason)
+		})
+}
+
+func taskRecoverTool(svc *teamTaskService) *FugueTool {
+	const schema = `{"type":"object","properties":{"task_id":{"type":"string"},"decision":{"type":"string","enum":["resume","keep_diff","cancel"]},"reason":{"type":"string","maxLength":512}},"required":["task_id","decision"]}`
+	type args struct {
+		TaskID   string `json:"task_id"`
+		Decision string `json:"decision"`
+		Reason   string `json:"reason"`
+	}
+	return delegatorJSONTool(svc, taskRecoverToolName, "Decide recovery (resume, keep_diff, or cancel) for a direct child task in unknown state.", schema,
+		func(ctx context.Context, sessionID string, a args) (string, error) {
+			return svc.Recover(ctx, sessionID, a.TaskID, a.Decision, a.Reason)
 		})
 }

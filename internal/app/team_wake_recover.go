@@ -292,7 +292,7 @@ func (w *teamWake) markHeld(ctx context.Context, entry *HeldMailboxEntry) {
 	if !changed {
 		return
 	}
-	slog.WarnContext(ctx, "holding team mailbox for unmeasured vendor", "team_id", entry.TeamID, "task_id", entry.TaskID, "session_id", entry.SessionID, "vendor", entry.Vendor, "reason", entry.Reason)
+	slog.WarnContext(ctx, "holding team mailbox", "team_id", entry.TeamID, "task_id", entry.TaskID, "session_id", entry.SessionID, "vendor", entry.Vendor, "reason", entry.Reason)
 	w.publishHeld(ctx)
 }
 
@@ -319,5 +319,47 @@ func (w *teamWake) publishHeld(ctx context.Context) {
 	}
 	if _, pubErr := w.deps.Hub.Publish(TopicTeamMailbox, Event{Type: "team.mailbox.held", Key: "held", Payload: data, LatestForKey: true}); pubErr != nil {
 		slog.WarnContext(ctx, "publish held mailbox failed", "error_code", string(errcode.CodeOf(pubErr)))
+	}
+}
+
+// NotifySessionReady records a session that reached StateReady (or finished a
+// turn) and triggers a wake pass so any pending unknown lead-task recovery is
+// retried even after a transient post-resume hook error.
+func (w *teamWake) NotifySessionReady(sessionID string) {
+	if sessionID != "" {
+		w.requeueLeadRecovery(sessionID)
+	}
+	w.Notify()
+}
+
+func (w *teamWake) requeueLeadRecovery(sessionID string) {
+	w.readyMu.Lock()
+	if w.readySessions == nil {
+		w.readySessions = make(map[string]struct{})
+	}
+	w.readySessions[sessionID] = struct{}{}
+	w.readyMu.Unlock()
+}
+
+func (w *teamWake) retryPendingLeadRecoveries(ctx context.Context) {
+	if w.deps.RecoverLead == nil {
+		return
+	}
+	w.readyMu.Lock()
+	pending := w.readySessions
+	w.readySessions = nil
+	w.readyMu.Unlock()
+	for sessionID := range pending {
+		w.recoverReadyLead(ctx, sessionID)
+	}
+}
+
+func (w *teamWake) recoverReadyLead(ctx context.Context, sessionID string) {
+	if w.deps.RecoverLead == nil || sessionID == "" {
+		return
+	}
+	if err := w.deps.RecoverLead(ctx, sessionID); err != nil {
+		w.requeueLeadRecovery(sessionID)
+		slog.WarnContext(ctx, "retrying resumed lead task recovery failed", "session_id", sessionID, "error_code", string(errcode.CodeOf(err)))
 	}
 }

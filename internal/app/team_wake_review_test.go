@@ -124,24 +124,22 @@ func TestResumeNonTaskSessionRestoresLastModel(t *testing.T) {
 	}
 }
 
-// TestWakeHoldsAGYMailWithoutResuming pins the Q-123 vendor gate: until agy
-// idle-send and resume are measured, agy sessions hold mail without resuming
-// or sending.
+// TestWakeHoldsAGYMailWithoutResuming pins the fail-closed hold when a detached
+// agy session fails to resume.
 func TestWakeHoldsAGYMailWithoutResuming(t *testing.T) {
 	t.Parallel()
-	for _, state := range []string{vendorstore.StateDetached, vendorstore.StateReady} {
-		t.Run(state, func(t *testing.T) {
-			t.Parallel()
-			f := newWakeFixture(t)
-			team := createAGYWakeTeam(t, f, state)
-			f.enqueueMailbox(t, team, team.a, digestItemPayload(t, team.a))
-			if err := f.wake.Pump(t.Context()); err != nil {
-				t.Fatalf("Pump: %v", err)
-			}
-			if f.sessions.resumeCount() != 0 || len(f.sentTexts(team.aSession)) != 0 {
-				t.Fatalf("agy session must hold mail: resumes=%d sends=%v", f.sessions.resumeCount(), f.sentTexts(team.aSession))
-			}
-		})
+	f := newWakeFixture(t)
+	team := createAGYWakeTeam(t, f, vendorstore.StateDetached)
+	f.sessions.resumeErr = errcode.New(errcode.Unavailable, "session/load failed")
+	f.enqueueMailbox(t, team, team.a, digestItemPayload(t, team.a))
+	if err := f.wake.Pump(t.Context()); err != nil {
+		t.Fatalf("Pump: %v", err)
+	}
+	if f.sessions.resumeCount() != 1 || len(f.sentTexts(team.aSession)) != 0 {
+		t.Fatalf("failed agy resume must hold mail: resumes=%d sends=%v", f.sessions.resumeCount(), f.sentTexts(team.aSession))
+	}
+	if held := f.wake.HeldRecipients(); len(held) != 1 || held[0].SessionID != team.aSession {
+		t.Fatalf("HeldRecipients = %+v, want held agy session", held)
 	}
 }
 

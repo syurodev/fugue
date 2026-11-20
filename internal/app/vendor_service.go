@@ -92,18 +92,19 @@ type VendorStop struct{ CommandID, SessionID string }
 // maps internal failures to typed public codes whose messages never carry
 // vendor output, prompts or paths.
 type VendorService struct {
-	sessions   *VendorSessions
-	store      *vendorstore.Store
-	adapter    vendor.Adapter
-	adapters   map[string]vendor.Adapter
-	vault      *vault.Service
-	workspaces *workspace.Service
-	ids        ids.Generator
-	hostEnv    []string
-	ops        *vendorOps
-	tokens     *sessionTokens
-	bridge     vendor.Bridge
-	accounts   *vendor.Accounts
+	sessions         *VendorSessions
+	store            *vendorstore.Store
+	adapter          vendor.Adapter
+	adapters         map[string]vendor.Adapter
+	vault            *vault.Service
+	workspaces       *workspace.Service
+	ids              ids.Generator
+	hostEnv          []string
+	ops              *vendorOps
+	tokens           *sessionTokens
+	bridge           vendor.Bridge
+	accounts         *vendor.Accounts
+	onSessionResumed func(context.Context, string) error
 }
 
 func (s *VendorService) adapterFor(name string) (vendor.Adapter, error) {
@@ -228,6 +229,7 @@ func (s *VendorService) Resume(ctx context.Context, principal string, cmd *Resum
 		if err := s.spawn(spec, info.Role, func() error { return s.sessions.Resume(opCtx, cmd.SessionID, spec) }); err != nil {
 			return VendorSessionView{}, publicVendorError(err)
 		}
+		s.notifySessionResumed(opCtx, cmd.SessionID)
 		return s.view(opCtx, cmd.SessionID)
 	})
 }

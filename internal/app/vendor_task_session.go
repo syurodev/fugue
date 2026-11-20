@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/vendor"
@@ -77,6 +78,12 @@ func (v vendorTaskSessions) Close(ctx context.Context, sessionID string, reason 
 	return v.svc.sessions.Close(ctx, sessionID, reason)
 }
 
+// SetOnSessionResumed registers a hook invoked after a detached session
+// resumes successfully (used to recover an unknown lead task).
+func (s *VendorService) SetOnSessionResumed(fn func(context.Context, string) error) {
+	s.onSessionResumed = fn
+}
+
 // resumeTaskSession attaches a fresh process to a detached session through
 // its stored handle (Q-123). Task sessions restore the decided role profile
 // and task override from the sealed spec (OR-E13); non-task sessions (such as
@@ -96,7 +103,22 @@ func (s *VendorService) resumeTaskSession(ctx context.Context, sessionID, cwd st
 	spec := &vendor.StartSpec{
 		SessionID: sessionID, Cwd: cwd, HostEnv: s.hostEnv, Model: model, Effort: effort, Bridge: s.bridge,
 	}
-	return s.spawn(spec, info.Role, func() error { return s.sessions.Resume(ctx, sessionID, spec) })
+	if err := s.spawn(spec, info.Role, func() error { return s.sessions.Resume(ctx, sessionID, spec) }); err != nil {
+		return err
+	}
+	s.notifySessionResumed(ctx, sessionID)
+	return nil
+}
+
+// notifySessionResumed runs the post-resume lead recovery hook without failing a
+// live resume if recording the team transition transiently errors.
+func (s *VendorService) notifySessionResumed(ctx context.Context, sessionID string) {
+	if s.onSessionResumed == nil {
+		return
+	}
+	if err := s.onSessionResumed(ctx, sessionID); err != nil {
+		slog.WarnContext(ctx, "recovering resumed lead task failed", "session_id", sessionID, "error_code", string(errcode.CodeOf(err)))
+	}
 }
 
 func (s *VendorService) resumeProfile(ctx context.Context, info *vendorstore.Session) (model, effort string, err error) {

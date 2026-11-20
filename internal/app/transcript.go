@@ -61,13 +61,15 @@ type sessionTopics struct {
 // Transcripts is the vendor transcript read model. Its context is captured in
 // the constructor closures and never stored.
 type Transcripts struct {
-	deps      TranscriptDeps
-	redactor  *SecretRedactor
-	spawn     func(name string, fn func(context.Context) error) *supervise.Task
-	coalescer func(session string) *transcript.DeltaCoalescer
+	deps               TranscriptDeps
+	redactor           *SecretRedactor
+	spawn              func(name string, fn func(context.Context) error) *supervise.Task
+	coalescer          func(session string) *transcript.DeltaCoalescer
+	beforeSessionEntry func()
 
 	mu              sync.Mutex
 	sessions        map[string]*sessionTopics
+	vaultLocked     bool
 	closing         bool
 	cancel          context.CancelFunc
 	tasksMu         sync.Mutex
@@ -111,12 +113,20 @@ func NewTranscripts(ctx context.Context, deps TranscriptDeps) (*Transcripts, err
 // The coalescers close on one supervised task because Close flushes at delta
 // rate and a guard must be quick.
 func (t *Transcripts) locked(snap vault.Snapshot) {
-	if snap.State == vault.StateUnlocked {
+	unlocked := snap.State == vault.StateUnlocked
+	t.mu.Lock()
+	t.vaultLocked = !unlocked
+	if unlocked {
+		t.mu.Unlock()
 		return
 	}
-	t.mu.Lock()
-	pending := t.sessions
-	t.sessions = map[string]*sessionTopics{}
+	pending := make([]*sessionTopics, 0, len(t.sessions))
+	for session, st := range t.sessions {
+		pending = append(pending, st)
+		// Preserve the session registration with empty views and nil coalescer so
+		// post-unlock resumes do not try to re-register still-live EventHub topics.
+		t.sessions[session] = &sessionTopics{views: map[string]transcript.View{}, revisions: map[string]uint64{}}
+	}
 	t.mu.Unlock()
 	if len(pending) == 0 {
 		return
@@ -228,14 +238,17 @@ func (t *Transcripts) dropSessionEntry(session string) {
 }
 
 // sessionEntry returns the session's entry, creating its coalescer when it is
-// the first streaming update. Creation stays under the service mutex so a
-// concurrent lock can never orphan a coalescer: an entry the guard collected
-// is already out of the map and accepts no new coalescer.
+// the first streaming update. Checking the lock state and creating the
+// coalescer share t.mu with locked(): locked keeps a placeholder entry without
+// a coalescer so EventHub topics stay registered across lock/unlock, so a
+// StreamItem that passed unlocked() just before Lock sees vaultLocked or
+// !unlocked() under t.mu and returns nil without creating a coalescer on the
+// placeholder.
 func (t *Transcripts) sessionEntry(session string) *sessionTopics {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	st, ok := t.sessions[session]
-	if !ok || t.closing {
+	if !ok || t.closing || t.vaultLocked || !t.unlocked() {
 		return nil
 	}
 	if st.coalescer == nil {

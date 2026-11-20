@@ -311,22 +311,27 @@ func (s *Store) openTeamCiphertext(
 // ActiveTeamIDs lists the teams in the active state, oldest first. The
 // dispatcher walks them when the vault unlocks (F11.3a).
 func (s *Store) ActiveTeamIDs(ctx context.Context) ([]string, error) {
+	return s.TeamIDsByState(ctx, TeamStateActive)
+}
+
+// TeamIDsByState lists the team IDs currently in state, oldest first.
+func (s *Store) TeamIDsByState(ctx context.Context, state TeamState) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx,
-		`SELECT team_id FROM team_records WHERE state = ? ORDER BY created_at ASC, team_id ASC`, string(TeamStateActive))
+		`SELECT team_id FROM team_records WHERE state = ? ORDER BY created_at ASC, team_id ASC`, string(state))
 	if err != nil {
-		return nil, fmt.Errorf("%w: query active teams: %w", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: query teams by state: %w", ErrUnavailable, err)
 	}
 	defer closeRows(ctx, rows)
 	var out []string
 	for rows.Next() {
 		var id string
 		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("scan active team: %w", err)
+			return nil, fmt.Errorf("scan team by state: %w", err)
 		}
 		out = append(out, id)
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate active teams: %w", err)
+		return nil, fmt.Errorf("iterate teams by state: %w", err)
 	}
 	return out, nil
 }

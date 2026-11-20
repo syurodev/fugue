@@ -117,6 +117,17 @@ func (s *Store) insertMailboxRows(ctx context.Context, tx *sql.Tx, teamID string
 // EnqueueDirectMailbox seals and enqueues an immediate mailbox message (such
 // as fugue_task_send) without appending a team state event.
 func (s *Store) EnqueueDirectMailbox(ctx context.Context, teamID, recipientTaskID, kind, uniqueID string, payload []byte) error {
+	return s.enqueueDirectMailbox(ctx, teamID, recipientTaskID, kind, uniqueID, payload, false)
+}
+
+// EnqueueDirectMailboxIdempotent seals and enqueues a direct mailbox message,
+// ignoring duplicate (teamID, uniqueID, recipientTaskID) keys so unlock/restart
+// retries never emit duplicate notices.
+func (s *Store) EnqueueDirectMailboxIdempotent(ctx context.Context, teamID, recipientTaskID, kind, uniqueID string, payload []byte) error {
+	return s.enqueueDirectMailbox(ctx, teamID, recipientTaskID, kind, uniqueID, payload, true)
+}
+
+func (s *Store) enqueueDirectMailbox(ctx context.Context, teamID, recipientTaskID, kind, uniqueID string, payload []byte, ignoreDup bool) error {
 	if _, err := s.requireUnlockedVault(); err != nil {
 		return err
 	}
@@ -149,18 +160,24 @@ func (s *Store) EnqueueDirectMailbox(ctx context.Context, teamID, recipientTaskI
 	}
 	now := s.clock.Now().UnixMilli()
 	seq := max(lastSeq, 1)
-	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO team_mailbox_messages
-			(message_id, team_id, recipient_task_id, batch_id, kind, state, payload_envelope, source_seq, created_at, updated_at)
-		VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?)`,
-		id, teamID, recipientTaskID, kind, MailboxPending, envelope, seq, now, now,
-	); err != nil {
+	if _, err := tx.ExecContext(ctx, directMailboxInsertSQL(ignoreDup), id, teamID, recipientTaskID, kind, MailboxPending, envelope, seq, now, now); err != nil {
 		return fmt.Errorf("insert direct mailbox message: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("%w: commit direct mailbox: %w", ErrUnavailable, err)
 	}
 	return nil
+}
+
+func directMailboxInsertSQL(ignoreDup bool) string {
+	if ignoreDup {
+		return `INSERT OR IGNORE INTO team_mailbox_messages
+			(message_id, team_id, recipient_task_id, batch_id, kind, state, payload_envelope, source_seq, created_at, updated_at)
+		VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?)`
+	}
+	return `INSERT INTO team_mailbox_messages
+			(message_id, team_id, recipient_task_id, batch_id, kind, state, payload_envelope, source_seq, created_at, updated_at)
+		VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?)`
 }
 
 // claimBatchID derives a fresh batch ID for a claim with no resend leftover.
