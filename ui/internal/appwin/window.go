@@ -18,6 +18,7 @@ import (
 
 	"github.com/syurodev/fugue/pkg/client"
 
+	"github.com/syurodev/fugue/ui/internal/accounts"
 	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/inbox"
@@ -91,37 +92,8 @@ func Run(ctx context.Context, opts Options) error {
 	w.Option(app.Size(unit.Dp(initW), unit.Dp(initH)))
 
 	q := &updateQueue{}
-	// The fetcher owns the read side's one goroutine, the poster the
-	// composer's write side and the mutator the workspace mutations: all run
-	// blocking calls off the window goroutine and hand their results back
-	// (F10.4a, F10.4b, F10.14).
-	fetcher := session.NewFetcher(m.Client)
-	fetcher.Start(runCtx)
-	defer fetcher.Stop()
-	poster := session.NewPoster(m.Client)
-	poster.Start(runCtx)
-	defer poster.Stop()
-	wsMut := workspace.NewMutator(func() workspace.MutatorClient { return m.Client() })
-	wsMut.Start(runCtx)
-	defer wsMut.Stop()
-	vaultW := vault.NewWorker(func() vault.Client {
-		c := m.Client()
-		if c == nil {
-			return nil
-		}
-		return c
-	})
-	vaultW.Start(runCtx)
-	defer vaultW.Stop()
-	inboxW := inbox.NewWorker(func() inbox.Client {
-		c := m.Client()
-		if c == nil {
-			return nil
-		}
-		return c
-	}, w.Invalidate)
-	inboxW.Start(runCtx)
-	defer inboxW.Stop()
+	workers := startAppWorkers(runCtx, m, w)
+	defer workers.stop()
 	defer stopSideGoroutines(cancel, startFeeder(runCtx, w, updates, q), startCloser(runCtx, w))
 
 	shaper, err := fonts.Shaper()
@@ -131,10 +103,60 @@ func Run(ctx context.Context, opts Options) error {
 	light, dark := theme.Light(shaper), theme.Dark(shaper)
 	env := newEnv(shaper, &light)
 	attach(env, w)
-	sc := newScreens(m, fetcher, poster, wsMut)
-	sc.vaultWorker = vaultW
-	sc.inboxWorker = inboxW
+	sc := newScreens(m, workers.fetcher, workers.poster, workers.wsMut)
+	sc.vaultWorker = workers.vaultW
+	sc.inboxWorker = workers.inboxW
+	sc.accountsWorker = workers.accountsW
 	return eventLoop(w, env, sc, q, &light, &dark)
+}
+
+type appWorkers struct {
+	fetcher   *session.Fetcher
+	poster    *session.Poster
+	wsMut     *workspace.Mutator
+	vaultW    *vault.Worker
+	inboxW    *inbox.Worker
+	accountsW *accounts.Worker
+}
+
+func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) appWorkers {
+	fetcher := session.NewFetcher(m.Client)
+	fetcher.Start(ctx)
+	poster := session.NewPoster(m.Client)
+	poster.Start(ctx)
+	wsMut := workspace.NewMutator(func() workspace.MutatorClient { return m.Client() })
+	wsMut.Start(ctx)
+	vaultW := vault.NewWorker(func() vault.Client {
+		if c := m.Client(); c != nil {
+			return c
+		}
+		return nil
+	})
+	vaultW.Start(ctx)
+	inboxW := inbox.NewWorker(func() inbox.Client {
+		if c := m.Client(); c != nil {
+			return c
+		}
+		return nil
+	}, w.Invalidate)
+	inboxW.Start(ctx)
+	accountsW := accounts.NewWorker(func() accounts.Client {
+		if c := m.Client(); c != nil {
+			return c
+		}
+		return nil
+	}, w.Invalidate)
+	accountsW.Start(ctx)
+	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW}
+}
+
+func (a appWorkers) stop() {
+	a.accountsW.Stop()
+	a.inboxW.Stop()
+	a.vaultW.Stop()
+	a.wsMut.Stop()
+	a.poster.Stop()
+	a.fetcher.Stop()
 }
 
 // newEnv builds the window's kit.Env over the theme it starts in (F10.13):
@@ -253,6 +275,9 @@ drainPosts:
 	if sc.inboxWorker != nil {
 		sc.applyInboxResults(drainInboxResults(sc.inboxWorker))
 	}
+	if sc.accountsWorker != nil {
+		sc.applyAccountsResults(drainAccountsResults(sc.accountsWorker))
+	}
 	toggleTheme(gtx, env, light, dark)
 	drawWindow(gtx, env, sc)
 }
@@ -309,6 +334,20 @@ drain:
 
 func drainInboxResults(w *inbox.Worker) []inbox.Result {
 	out := make([]inbox.Result, 0, 4)
+drain:
+	for {
+		select {
+		case res := <-w.Results():
+			out = append(out, res)
+		default:
+			break drain
+		}
+	}
+	return out
+}
+
+func drainAccountsResults(w *accounts.Worker) []accounts.Result {
+	out := make([]accounts.Result, 0, 4)
 drain:
 	for {
 		select {

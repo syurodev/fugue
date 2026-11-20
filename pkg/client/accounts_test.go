@@ -102,15 +102,15 @@ func scriptedAccountsError(cc connect.Code, code string) error {
 
 func serveAccountsFake(t *testing.T, fake *accountsFake) *client.Client {
 	t.Helper()
+	mux := http.NewServeMux()
+	mux.Handle(hostv1connect.NewHostServiceHandler(fake))
+	mux.Handle(accountsv1connect.NewAccountServiceHandler(fake))
 	socket := filepath.Join(shortDir(t), "accounts.sock")
 	var lc net.ListenConfig
 	ln, err := lc.Listen(t.Context(), "unix", socket)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mux := http.NewServeMux()
-	mux.Handle(hostv1connect.NewHostServiceHandler(fake))
-	mux.Handle(accountsv1connect.NewAccountServiceHandler(fake))
 	var protos http.Protocols
 	protos.SetHTTP2(true)
 	protos.SetUnencryptedHTTP2(true)
@@ -128,9 +128,8 @@ func serveAccountsFake(t *testing.T, fake *accountsFake) *client.Client {
 	return c
 }
 
-func seedAccountsFake(t *testing.T) (*accountsFake, []client.Account) {
-	t.Helper()
-	want := []client.Account{
+func seedAccountsFixtures() (want []client.Account, protoAccs []*accountsv1.Account) {
+	want = []client.Account{
 		{
 			Vendor: client.VendorClaude, State: client.AccountStateOK, Login: client.AccountLoginLoggedIn,
 			QuotaKnown: true, UpdatedAt: testAccUpdatedTime,
@@ -151,6 +150,32 @@ func seedAccountsFake(t *testing.T) (*accountsFake, []client.Account) {
 			Login: client.AccountLoginUnknown, QuotaKnown: false, Windows: []client.QuotaWindow{},
 		},
 	}
+	protoAccs = []*accountsv1.Account{
+		{
+			Vendor: vendorsv1.Vendor_VENDOR_CLAUDE, State: want[0].State, Login: want[0].Login,
+			QuotaKnown: true, UpdatedAt: testAccUpdatedTime,
+			Windows: []*accountsv1.QuotaWindow{
+				{Name: "five_hour", Utilization: 0.42, ResetsAt: testAccResetTime, Status: client.QuotaStatusAllowed},
+				{Name: "seven_day", Utilization: 0.90, ResetsAt: testAccResetTime, Status: client.QuotaStatusAllowedWarning},
+			},
+		},
+		{
+			Vendor: vendorsv1.Vendor_VENDOR_CODEX, State: want[1].State, PausedUntil: testAccResetTime,
+			Login: want[1].Login, QuotaKnown: true, UpdatedAt: testAccUpdatedTime,
+			Windows: []*accountsv1.QuotaWindow{
+				{Name: "300m", Utilization: 1.0, ResetsAt: testAccResetTime, Status: client.QuotaStatusRejected},
+			},
+		},
+		{
+			Vendor: vendorsv1.Vendor_VENDOR_AGY, State: want[2].State, Login: want[2].Login, QuotaKnown: false,
+		},
+	}
+	return want, protoAccs
+}
+
+func seedAccountsFake(t *testing.T) (*accountsFake, []client.Account) {
+	t.Helper()
+	want, protoAccs := seedAccountsFixtures()
 	pausedUpdate := want[1]
 	pausedUpdate.State = client.AccountStateOK
 	pausedUpdate.PausedUntil = ""
@@ -159,26 +184,7 @@ func seedAccountsFake(t *testing.T) (*accountsFake, []client.Account) {
 	loginWait := client.LoginProgress{Vendor: client.VendorCodex, LoginID: testAccLoginID, State: client.LoginStateWaiting, Prompt: testAccPromptRaw}
 
 	fake := &accountsFake{
-		accounts: []*accountsv1.Account{
-			{
-				Vendor: vendorsv1.Vendor_VENDOR_CLAUDE, State: want[0].State, Login: want[0].Login,
-				QuotaKnown: true, UpdatedAt: testAccUpdatedTime,
-				Windows: []*accountsv1.QuotaWindow{
-					{Name: "five_hour", Utilization: 0.42, ResetsAt: testAccResetTime, Status: client.QuotaStatusAllowed},
-					{Name: "seven_day", Utilization: 0.90, ResetsAt: testAccResetTime, Status: client.QuotaStatusAllowedWarning},
-				},
-			},
-			{
-				Vendor: vendorsv1.Vendor_VENDOR_CODEX, State: want[1].State, PausedUntil: testAccResetTime,
-				Login: want[1].Login, QuotaKnown: true, UpdatedAt: testAccUpdatedTime,
-				Windows: []*accountsv1.QuotaWindow{
-					{Name: "300m", Utilization: 1.0, ResetsAt: testAccResetTime, Status: client.QuotaStatusRejected},
-				},
-			},
-			{
-				Vendor: vendorsv1.Vendor_VENDOR_AGY, State: want[2].State, Login: want[2].Login, QuotaKnown: false,
-			},
-		},
+		accounts: protoAccs,
 		topics: map[string][]*hostv1.SubscribeResponse{
 			client.TopicQuota: {
 				{Kind: &hostv1.SubscribeResponse_Snapshot{Snapshot: &hostv1.SnapshotEvent{
