@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/syurodev/fugue/internal/interaction"
@@ -88,7 +89,9 @@ type teamBudgets struct {
 	stopOnce        sync.Once
 	taskMu, mu      sync.Mutex
 	loopTask        *supervise.Task
+	steps           atomic.Int64
 	watches         map[teamTaskKey]*silenceWatch
+	bySession       map[string]*silenceWatch
 	sessionActivity map[string]time.Time
 }
 
@@ -97,7 +100,11 @@ func newTeamBudgets(deps *teamBudgetsDeps) *teamBudgets {
 	if cp.Clock == nil {
 		cp.Clock = clock.Real{}
 	}
-	return &teamBudgets{deps: cp, wakeCh: make(chan struct{}, 1), stopCh: make(chan struct{}), watches: make(map[teamTaskKey]*silenceWatch), sessionActivity: make(map[string]time.Time)}
+	return &teamBudgets{
+		deps: cp, wakeCh: make(chan struct{}, 1), stopCh: make(chan struct{}),
+		watches: make(map[teamTaskKey]*silenceWatch), bySession: make(map[string]*silenceWatch),
+		sessionActivity: make(map[string]time.Time),
+	}
 }
 
 func (b *teamBudgets) now() time.Time { return b.deps.Clock.Now() }
@@ -138,13 +145,10 @@ func (b *teamBudgets) ObserveSession(sessionID string) {
 	now := b.now()
 	b.mu.Lock()
 	b.sessionActivity[sessionID] = now
-	for _, w := range b.watches {
-		if w.sessionID == sessionID {
-			w.lastActivity, w.escalated = now, false
-		}
+	if w := b.bySession[sessionID]; w != nil {
+		w.lastActivity, w.escalated = now, false
 	}
 	b.mu.Unlock()
-	b.Notify()
 }
 
 // OnTurnStarted enforces the §11 per-task turn budget and resets silence.
@@ -215,6 +219,7 @@ func (b *teamBudgets) Step(ctx context.Context) (time.Time, bool) {
 	if !b.vaultUnlocked() {
 		return time.Time{}, false
 	}
+	b.steps.Add(1)
 	now := b.now()
 	t1, ok1 := b.processDurableTimers(ctx, now)
 	t2, ok2 := b.processSilenceWatches(ctx, now)
@@ -268,7 +273,7 @@ func (b *teamBudgets) failTaskForBudget(ctx context.Context, task *vendorstore.T
 		return
 	}
 	b.mu.Lock()
-	delete(b.watches, teamTaskKey{teamID: task.TeamID, taskID: task.TaskID})
+	b.deleteWatchLocked(teamTaskKey{teamID: task.TeamID, taskID: task.TaskID})
 	b.mu.Unlock()
 	b.closeTaskSessionPreservingWorktree(ctx, task)
 	if b.deps.Wake != nil {
@@ -357,10 +362,22 @@ func (b *teamBudgets) pruneInactiveWatches(activeKeys map[teamTaskKey]struct{}) 
 	b.mu.Lock()
 	for k := range b.watches {
 		if _, ok := activeKeys[k]; !ok {
-			delete(b.watches, k)
+			b.deleteWatchLocked(k)
 		}
 	}
 	b.mu.Unlock()
+}
+
+func (b *teamBudgets) deleteWatchLocked(key teamTaskKey) {
+	if w, ok := b.watches[key]; ok {
+		delete(b.watches, key)
+		if w.sessionID != "" {
+			if b.bySession[w.sessionID] == w {
+				delete(b.bySession, w.sessionID)
+			}
+			delete(b.sessionActivity, w.sessionID)
+		}
+	}
 }
 
 func (b *teamBudgets) evalTeamSilenceWatches(ctx context.Context, rec *vendorstore.TeamRecord, tasks []vendorstore.TaskRecord, now time.Time, timeout time.Duration, activeKeys map[teamTaskKey]struct{}) time.Time {
@@ -406,9 +423,10 @@ func (b *teamBudgets) syncTaskWatch(key teamTaskKey, t *vendorstore.TaskRecord) 
 	if !ok {
 		w = &silenceWatch{teamID: key.teamID, taskID: key.taskID, sessionID: t.SessionID, lastNonStallSeq: t.LastEventSeq, lastActivity: eventTime}
 		b.watches[key] = w
+		b.indexWatchSessionLocked(w, t.SessionID)
 		return w
 	}
-	w.sessionID = t.SessionID
+	b.indexWatchSessionLocked(w, t.SessionID)
 	if t.LastEventSeq != w.lastNonStallSeq && t.LastEventSeq != w.lastStallSeq {
 		w.lastNonStallSeq, w.escalated = t.LastEventSeq, false
 		if eventTime.After(w.lastActivity) {
@@ -419,6 +437,16 @@ func (b *teamBudgets) syncTaskWatch(key teamTaskKey, t *vendorstore.TaskRecord) 
 		w.lastActivity, w.escalated = obsTime, false
 	}
 	return w
+}
+
+func (b *teamBudgets) indexWatchSessionLocked(w *silenceWatch, sessionID string) {
+	if w.sessionID != sessionID && w.sessionID != "" && b.bySession[w.sessionID] == w {
+		delete(b.bySession, w.sessionID)
+	}
+	w.sessionID = sessionID
+	if sessionID != "" {
+		b.bySession[sessionID] = w
+	}
 }
 
 func (b *teamBudgets) recordTaskStalled(ctx context.Context, teamID string, w *silenceWatch, silentSeconds int64, teamWide bool, now time.Time) {

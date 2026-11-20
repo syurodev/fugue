@@ -73,12 +73,11 @@ func newBudgetsTestFixture(t *testing.T, tomlExtra string) *budgetsTestFixture {
 
 func createFakeSessionTurns(t *testing.T, store *vendorstore.Store, sessionID, teamID, taskID string, count int) {
 	t.Helper()
-	err := store.CreateSession(t.Context(), &vendorstore.Session{
+	if err := store.CreateSession(t.Context(), &vendorstore.Session{
 		ID: sessionID, Vendor: VendorClaude, AccountID: vendorDefaultAccount,
 		Role: string(vendorstore.RoleMember), State: vendorstore.StateReady,
 		TeamID: teamID, TaskID: taskID,
-	})
-	if err != nil {
+	}); err != nil {
 		t.Fatalf("CreateSession(%s): %v", sessionID, err)
 	}
 	snap, err := store.Snapshot(t.Context(), sessionID)
@@ -98,12 +97,10 @@ func createFakeSessionTurns(t *testing.T, store *vendorstore.Store, sessionID, t
 	}
 }
 
-// TestTaskDeadlineAndTurnBudgetsInterruptAndFailKeepingWorktree verifies §11
-// task deadline and turn budget enforcement (Q-149 A).
+// TestTaskDeadlineAndTurnBudgetsInterruptAndFailKeepingWorktree verifies §11 task budgets.
 func TestTaskDeadlineAndTurnBudgetsInterruptAndFailKeepingWorktree(t *testing.T) {
 	t.Parallel()
 	f := newBudgetsTestFixture(t, "[teams]\ntask_deadline_seconds = 120\ntask_max_turns = 2\n")
-
 	args := validTeamProposalArgs()
 	args.Tasks = []teams.ProposedTask{
 		{ID: teamTestLeadTask, TeamRole: teams.RoleLead, Role: teamTestRole, Goal: testBudgetLeadGoal, WriteScope: []string{}, Deliverable: teams.DeliverableReport},
@@ -117,7 +114,6 @@ func TestTaskDeadlineAndTurnBudgetsInterruptAndFailKeepingWorktree(t *testing.T)
 	deadlineTaskID := durableTaskID(teamID, "deadline-worker")
 	turnsTaskID := durableTaskID(teamID, "turns-worker")
 	leadTaskID := durableTaskID(teamID, teamTestLeadTask)
-
 	verifyTurnBudgetEnforcement(t, f, teamID, turnsTaskID)
 	verifyTaskDeadlineEnforcement(t, f, teamID, deadlineTaskID)
 	verifyBudgetInterruptsAndMailbox(t, f, teamID, leadTaskID, turnsTaskID, deadlineTaskID)
@@ -226,13 +222,11 @@ func verifyBudgetInterruptsAndMailbox(t *testing.T, f *budgetsTestFixture, teamI
 	}
 }
 
-// TestTeamAgentCapAndDeadlineStopNewDispatches verifies §11 team agent cap
-// (counting retries), optional TeamBudget on propose/amend, and team deadline
-// pausing new dispatches without killing running tasks (Q-149 A).
+// TestTeamAgentCapAndDeadlineStopNewDispatches verifies §11 team agent cap,
+// optional TeamBudget on propose/amend, and team deadline pausing new dispatches.
 func TestTeamAgentCapAndDeadlineStopNewDispatches(t *testing.T) {
 	t.Parallel()
 	f := newBudgetsTestFixture(t, "")
-
 	verifyProposeRejectsOverAgentCap(t, f)
 	teamID, w1RetryID, w2ID := verifyAgentCapRetryAndAmend(t, f)
 	verifyTeamDeadlinePauseExtendAndCancel(t, f, teamID, w1RetryID, w2ID)
@@ -368,12 +362,10 @@ func (f *budgetsTestFixture) answerDeadlineCard(t *testing.T, teamID, optionID, 
 	}
 }
 
-// TestWatchdogEscalatesSilenceWithoutKillingAndRecordsStallEvent verifies §6.7
-// watchdog silence tracking (Q-150 A).
+// TestWatchdogEscalatesSilenceWithoutKillingAndRecordsStallEvent verifies §6.7 watchdog silence tracking.
 func TestWatchdogEscalatesSilenceWithoutKillingAndRecordsStallEvent(t *testing.T) {
 	t.Parallel()
 	f := newBudgetsTestFixture(t, "")
-
 	args := validTeamProposalArgs()
 	args.Tasks = []teams.ProposedTask{
 		{ID: teamTestLeadTask, TeamRole: teams.RoleLead, Role: teamTestRole, Goal: testBudgetLeadGoal, WriteScope: []string{}, Deliverable: teams.DeliverableReport},
@@ -389,9 +381,27 @@ func TestWatchdogEscalatesSilenceWithoutKillingAndRecordsStallEvent(t *testing.T
 	askingID := durableTaskID(teamID, "asking-worker")
 	queuedID := durableTaskID(teamID, "queued-worker")
 	leadID := durableTaskID(teamID, teamTestLeadTask)
-
 	verifyWatchdogSilenceResetAndStall(t, f, teamID, silentID, askingID, queuedID)
 	verifyWatchdogNoKillAndCooldown(t, f, teamID, silentID, leadID)
+	verifyObservationBurstDoesNotTriggerSteps(t, f, silentID)
+}
+
+func verifyObservationBurstDoesNotTriggerSteps(t *testing.T, f *budgetsTestFixture, silentID string) {
+	t.Helper()
+	silentStart, _ := f.sessions.startFor(silentID)
+	f.budgets.Start(t.Context())
+	t.Cleanup(func() {
+		if err := f.budgets.Stop(); err != nil {
+			t.Errorf("Stop: %v", err)
+		}
+	})
+	baseSteps := f.budgets.steps.Load()
+	for range 10000 {
+		f.budgets.ObserveSession(silentStart.SessionID)
+	}
+	if got := f.budgets.steps.Load() - baseSteps; got > 1 {
+		t.Fatalf("10,000 ObserveSession calls triggered %d extra Step/ListArmedTeamTimers passes, want <= 1", got)
+	}
 }
 
 func verifyWatchdogSilenceResetAndStall(t *testing.T, f *budgetsTestFixture, teamID, silentID, askingID, queuedID string) {
@@ -404,11 +414,9 @@ func verifyWatchdogSilenceResetAndStall(t *testing.T, f *budgetsTestFixture, tea
 	f.clk.Advance(400 * time.Second)
 	f.budgets.Step(t.Context())
 	f.budgets.ObserveSession(silentStart.SessionID)
-
 	f.clk.Advance(400 * time.Second)
 	f.budgets.Step(t.Context())
 	f.assertNoStallEvent(t, teamID, silentID)
-
 	f.clk.Advance(200 * time.Second)
 	f.budgets.Step(t.Context())
 
