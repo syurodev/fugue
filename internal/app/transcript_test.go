@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -499,5 +500,41 @@ func TestRedactionMasksOneMiB(t *testing.T) {
 	token := githubToken()
 	if masked := f.service.redactor.Redact(secretText(1<<20, token)); strings.Contains(masked, knownAPIToken) || strings.Contains(masked, token) {
 		t.Fatal("1 MiB masking failed")
+	}
+}
+
+func TestLockBetweenUnlockedCheckAndSessionEntryCreatesNoCoalescer(t *testing.T) {
+	t.Parallel()
+	f := newTranscriptFixture(t, nil)
+
+	var lockOnce sync.Once
+	f.service.beforeSessionEntry = func() {
+		lockOnce.Do(f.vault.Lock)
+	}
+	f.service.StreamItem(testSession, testItem, 1, transcript.ViewText, "raced across lock")
+	f.service.beforeSessionEntry = nil
+
+	f.service.mu.Lock()
+	st := f.service.sessions[testSession]
+	f.service.mu.Unlock()
+	if st == nil {
+		t.Fatalf("placeholder entry missing after lock for %s", testSession)
+	}
+	if co := f.service.coalescerOf(st); co != nil {
+		t.Fatalf("coalescer created while vault locked: %+v", co)
+	}
+	deltaSnap := decodeDeltaSnapshot(t, subscribe(t, f.hub, TopicTranscriptDelta+testSession))
+	if !deltaSnap.ContentLocked || len(deltaSnap.Items) != 0 {
+		t.Fatalf("locked delta snapshot = %+v, want empty and locked", deltaSnap)
+	}
+
+	cheapvault.Unlock(t, f.vault)
+	if err := f.service.RegisterSession(testSession); err != nil {
+		t.Fatalf("RegisterSession after unlock: %v", err)
+	}
+	f.streamAndAwait(testItem, 2, transcript.ViewText, "resumed after unlock")
+	resumedSnap := decodeDeltaSnapshot(t, subscribe(t, f.hub, TopicTranscriptDelta+testSession))
+	if resumedSnap.ContentLocked || len(resumedSnap.Items) != 1 || resumedSnap.Items[0].View.Text != "resumed after unlock" {
+		t.Fatalf("resumed delta snapshot = %+v, want resumed item", resumedSnap)
 	}
 }

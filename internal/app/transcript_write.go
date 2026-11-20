@@ -34,6 +34,9 @@ func (t *Transcripts) StreamItem(session, itemID string, baseRevision uint64, ki
 	if !t.unlocked() {
 		return
 	}
+	if t.beforeSessionEntry != nil {
+		t.beforeSessionEntry()
+	}
 	st := t.sessionEntry(session)
 	if st == nil {
 		return
