@@ -205,10 +205,23 @@ func (c *callerTeamContext) requireDelegator(taskID string) (*vendorstore.TaskRe
 		return nil, errcode.New(errcode.InvalidArgument, err.Error())
 	}
 	byID, retryChild := resolveTaskChain(c.tasks)
-	if c.caller == nil || !sameAttemptChain(target.ParentTaskID, c.caller.TaskID, byID, retryChild) {
+	if c.caller == nil || (!sameAttemptChain(target.ParentTaskID, c.caller.TaskID, byID, retryChild) && !c.leadTakeoverOf(target, byID, retryChild)) {
 		return nil, errcode.New(errcode.PermissionDenied, "cannot act on a task outside your delegation subtree")
 	}
 	return target, nil
+}
+
+// leadTakeoverOf reports the §12 takeover (Q-159 A): while a team_manager
+// task is unknown, the lead may act as delegator for that manager's direct
+// children — status, result, cancel, accept/reject, send and
+// fugue_task_recover. The check re-reads the manager's state on every call,
+// so the grant ends as soon as the manager leaves unknown.
+func (c *callerTeamContext) leadTakeoverOf(target *vendorstore.TaskRecord, byID map[string]*vendorstore.TaskRecord, retryChild map[string]string) bool {
+	if c.role != vendorstore.RoleLead || c.caller == nil {
+		return false
+	}
+	parent := latestAttempt(target.ParentTaskID, byID, retryChild)
+	return parent != nil && parent.HierarchyRole == vendorstore.RoleTeamManager && parent.State == vendorstore.TaskStateUnknown
 }
 
 func (c *callerTeamContext) requireReadableTask(taskID string) (*vendorstore.TaskRecord, error) {
@@ -235,7 +248,9 @@ func (c *callerTeamContext) canInspectTask(target *vendorstore.TaskRecord) bool 
 	byID, retryChild := resolveTaskChain(c.tasks)
 	switch c.role {
 	case vendorstore.RoleLead, vendorstore.RoleTeamManager:
-		return sameAttemptChain(target.ParentTaskID, c.caller.TaskID, byID, retryChild) || dependsOnTask(c.caller, c.tasks, target.TaskID)
+		return sameAttemptChain(target.ParentTaskID, c.caller.TaskID, byID, retryChild) ||
+			dependsOnTask(c.caller, c.tasks, target.TaskID) ||
+			c.leadTakeoverOf(target, byID, retryChild)
 	case vendorstore.RoleMember:
 		return dependsOnTask(c.caller, c.tasks, target.TaskID)
 	case vendorstore.RoleSolo:

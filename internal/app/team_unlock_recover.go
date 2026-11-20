@@ -122,7 +122,7 @@ func (s *teamTaskService) recoverTeamOnUnlock(ctx context.Context, teamID string
 			s.rebuildUserQuestionCard(ctx, &rec, t)
 		}
 		if t.HierarchyRole != vendorstore.RoleLead {
-			if parentID := resolvedParentID(t.ParentTaskID, tasks); parentID != "" && s.notifyDelegatorUnknown(ctx, &rec, t, parentID, orig.seq) {
+			if parentID := resolvedParentID(t.ParentTaskID, tasks); parentID != "" && s.notifyDelegatorUnknown(ctx, &rec, t, tasks, parentID, orig.seq) {
 				enqueued = true
 			}
 		}
@@ -185,11 +185,11 @@ func (s *teamTaskService) rebuildUserQuestionCard(ctx context.Context, rec *vend
 	}
 }
 
-func (s *teamTaskService) notifyDelegatorUnknown(ctx context.Context, rec *vendorstore.TeamRecord, task *vendorstore.TaskRecord, parentID string, markedSeq int64) bool {
+func (s *teamTaskService) notifyDelegatorUnknown(ctx context.Context, rec *vendorstore.TeamRecord, task *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord, parentID string, markedSeq int64) bool {
 	if markedSeq <= 0 {
 		markedSeq = max(task.LastEventSeq, 1)
 	}
-	summary := s.inspectRecoveredWorktreeSummary(ctx, rec, task.TaskID)
+	summary := s.exitUnknownSummary(ctx, rec, task, tasks)
 	payload, err := json.Marshal(mailboxDigestItem{TaskID: task.TaskID, State: string(vendorstore.TaskStateUnknown), Summary: summary})
 	if err != nil {
 		return false

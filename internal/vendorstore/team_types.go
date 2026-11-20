@@ -219,6 +219,11 @@ type AppendTeamEventInput struct {
 	// SessionID names the session of a TaskAssigned event; the projection
 	// records it on the task row. It is empty for every other event.
 	SessionID string
+	// ReparentTo names the task that adopts the non-terminal children of the
+	// TaskRecoveryDecided(cancel) target (§12: the lead takes over an unknown
+	// team manager's running members, Q-159 A). Only that event on a
+	// team_manager accepts it; every other event must leave it empty.
+	ReparentTo string
 	// Mailbox rows are written in the same transaction as this event, keyed to
 	// its sequence (Q-122); nil for events that produce no mail.
 	Mailbox []MailboxEnqueueInput

@@ -105,7 +105,8 @@ func (a *vendorSessionActor) processExited(ctx context.Context) error {
 		}
 		a.turnID = ""
 	}
-	reason := a.requestedCloseReason()
+	requested := a.requestedCloseReason()
+	reason := requested
 	if reason == "" {
 		reason = vendor.CloseHostStop
 	}
@@ -123,6 +124,13 @@ func (a *vendorSessionActor) processExited(ctx context.Context) error {
 	}
 	a.finished = true
 	a.state = next
+	// §12 (F11.9): the process exited with no requested stop, so the turn's
+	// outcome is unknown and a bound team task must go unknown. A clean stop,
+	// close, detach, idle detach, task end and host shutdown all set a close
+	// reason first and never reach this.
+	if requested == "" {
+		a.manager.notifySessionDied(a.info.ID)
+	}
 	return nil
 }
 

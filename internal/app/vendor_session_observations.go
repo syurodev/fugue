@@ -334,3 +334,15 @@ func (m *VendorSessions) notifyObservation(sessionID string) {
 		m.observationHook(sessionID)
 	}
 }
+
+// SetSessionDiedHook binds the §12 mid-turn exit handler (F11.9): the hook
+// runs once when a session's vendor process exited without a requested stop.
+func (m *VendorSessions) SetSessionDiedHook(hook func(sessionID string)) {
+	m.sessionDiedHook = hook
+}
+
+func (m *VendorSessions) notifySessionDied(sessionID string) {
+	if m.sessionDiedHook != nil {
+		m.sessionDiedHook(sessionID)
+	}
+}

@@ -27,12 +27,14 @@ const (
 	failureRefLock
 	// failureMissingRef means the named branch or commit does not exist.
 	failureMissingRef
+	// failureDiskFull means the write hit ENOSPC (§12: the disk is full).
+	failureDiskFull
 )
 
 // code returns the public error code for the kind.
 func (k failureKind) code() errcode.Code {
 	switch k {
-	case failureGit, failureRefLock:
+	case failureGit, failureRefLock, failureDiskFull:
 		return errcode.Unavailable
 	case failureIdentity, failureSigning:
 		return errcode.FailedPrecondition
@@ -56,6 +58,8 @@ func (k failureKind) message(op string) string {
 		return fmt.Sprintf("gitops: %s failed: %v", op, ErrRefLockExhausted)
 	case failureMissingRef:
 		return fmt.Sprintf("gitops: %s failed: unknown branch or commit", op)
+	case failureDiskFull:
+		return fmt.Sprintf("gitops: %s failed: %v", op, ErrDiskFull)
 	default:
 		return fmt.Sprintf("gitops: %s failed", op)
 	}
@@ -63,10 +67,14 @@ func (k failureKind) message(op string) string {
 
 // sentinel returns the error kind callers can match with errors.Is.
 func (k failureKind) sentinel() error {
-	if k == failureRefLock {
+	switch k {
+	case failureRefLock:
 		return ErrRefLockExhausted
+	case failureDiskFull:
+		return ErrDiskFull
+	default:
+		return nil
 	}
-	return nil
 }
 
 // Sentinel errors callers can match with errors.Is.
@@ -75,6 +83,9 @@ var (
 	ErrRefLockExhausted = errors.New("gitops: ref lock stayed busy after retries")
 	// ErrNoCommit is returned by CommitWorktree when the worktree had nothing to commit.
 	ErrNoCommit = errors.New("gitops: no changes to commit")
+	// ErrDiskFull is returned when a git operation hit ENOSPC (§12). The
+	// scheduler pauses worktree creation until space is free again.
+	ErrDiskFull = errors.New("gitops: no space left on device")
 )
 
 // GitError reports a failed git operation. Error names only the operation and
@@ -121,6 +132,8 @@ func (m *Manager) gitFailure(op string, res gitResult) *GitError {
 func classify(stderr string) failureKind {
 	lower := strings.ToLower(stderr)
 	switch {
+	case containsAny(lower, "no space left on device", "disk quota exceeded"):
+		return failureDiskFull
 	case containsAny(lower, "please tell me who you are", "committer identity unknown", "author identity unknown", "unable to auto-detect email address", "empty ident name"):
 		return failureIdentity
 	case containsAny(lower, "gpg failed to sign", "error: gpg", "cannot sign the commit", "ssh-keygen"):
