@@ -125,8 +125,9 @@ func (s *SessionClient) CallTool(ctx context.Context, name string, arguments []b
 }
 
 // AcquireHeavySlot waits for a §7 heavy-command semaphore slot on the session
-// principal connection and holds it until the returned release callback is called.
-func (s *SessionClient) AcquireHeavySlot(ctx context.Context) (func(), error) {
+// principal connection and holds it until the returned HeavyLease is released
+// or the host ends the stream.
+func (s *SessionClient) AcquireHeavySlot(ctx context.Context) (*HeavyLease, error) {
 	stream, err := s.tools.AcquireHeavySlot(ctx, connect.NewRequest(&sessiontoolsv1.AcquireHeavySlotRequest{}))
 	if err != nil {
 		return nil, fmt.Errorf("open heavy command slot stream: %w", err)

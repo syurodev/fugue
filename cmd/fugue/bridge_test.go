@@ -36,9 +36,10 @@ func (m hostText) Error() string { return string(m) }
 // stubHost is the session tool service as the bridge sees it: one token, one
 // tool, and a call that can be held to prove the bridge keeps serving.
 type stubHost struct {
-	mu       sync.Mutex
-	attached []string
-	hold     chan struct{}
+	mu         sync.Mutex
+	attached   []string
+	hold       chan struct{}
+	dropStream chan struct{}
 }
 
 func (s *stubHost) Attach(_ context.Context, req *connect.Request[sessiontoolsv1.AttachRequest]) (*connect.Response[sessiontoolsv1.AttachResponse], error) {
@@ -82,6 +83,14 @@ func (s *stubHost) AcquireHeavySlot(ctx context.Context, _ *connect.Request[sess
 	}
 	if err := stream.Send(&sessiontoolsv1.AcquireHeavySlotResponse{Acquired: true}); err != nil {
 		return fmt.Errorf("send stub heavy slot: %w", err)
+	}
+	if s.dropStream != nil {
+		select {
+		case <-s.dropStream:
+			return nil
+		case <-ctx.Done():
+			return nil
+		}
 	}
 	<-ctx.Done()
 	return nil

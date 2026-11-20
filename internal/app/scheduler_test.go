@@ -218,6 +218,29 @@ func TestTeamSubTasksGetLowerCPUWeight(t *testing.T) {
 	}
 }
 
+func formatQueueSnapshot(snap []QueuedTaskPosition) []string {
+	out := make([]string, 0, len(snap))
+	for _, q := range snap {
+		if q.Blocked {
+			out = append(out, fmt.Sprintf("%s@blocked:%d", q.TaskID, q.QueuePosition))
+		} else {
+			out = append(out, fmt.Sprintf("%s@%d", q.TaskID, q.QueuePosition))
+		}
+	}
+	return out
+}
+
+func assertQueueSnapshotOrder(t *testing.T, disp *teamDispatcher, want []string) {
+	t.Helper()
+	snap, err := disp.QueueSnapshot(t.Context())
+	if err != nil {
+		t.Fatalf("QueueSnapshot: %v", err)
+	}
+	if got := formatQueueSnapshot(snap); !slices.Equal(got, want) {
+		t.Fatalf("queue order = %v, want %v", got, want)
+	}
+}
+
 func TestQueueOrderPrioritizesManagersThenCreationOrder(t *testing.T) {
 	t.Parallel()
 	f := newDispatchFixture(t, true)
@@ -225,28 +248,38 @@ func TestQueueOrderPrioritizesManagersThenCreationOrder(t *testing.T) {
 	f.clk.Advance(time.Second)
 	team2 := f.approve(t, priorityProposalArgs("m2"), decisionApprove, "")
 
-	snap, err := f.disp.QueueSnapshot(t.Context())
-	if err != nil {
-		t.Fatalf("QueueSnapshot: %v", err)
-	}
-	gotOrder := make([]string, 0, len(snap))
-	for _, q := range snap {
-		gotOrder = append(gotOrder, fmt.Sprintf("%s@%d", q.TaskID, q.QueuePosition))
-	}
-	wantOrder := []string{
+	// Before leads bind, only the two leads are startable; children are blocked with position 0.
+	assertQueueSnapshotOrder(t, f.disp, []string{
 		team1 + "." + teamTestLeadTask + "@1",
 		team2 + "." + teamTestLeadTask + "@2",
-		team1 + ".team-mgr@3",
-		team2 + ".team-mgr@4",
-		team1 + ".d1@5",
-		team2 + ".d1@6",
-		team1 + ".d2@7",
-		team2 + ".d2@8",
-	}
-	if !slices.Equal(gotOrder, wantOrder) {
-		t.Fatalf("queue order = %v, want %v", gotOrder, wantOrder)
-	}
+		team1 + ".team-mgr@blocked:0",
+		team2 + ".team-mgr@blocked:0",
+		team1 + ".d1@blocked:0",
+		team2 + ".d1@blocked:0",
+		team1 + ".d2@blocked:0",
+		team2 + ".d2@blocked:0",
+	})
 
+	// Bind leads while child capacity is full: managers and depth-1 members become startable
+	// and get 1-based positions, while depth-2 members remain blocked behind their managers.
+	f.sessions.mu.Lock()
+	f.sessions.noRoom = true
+	f.sessions.mu.Unlock()
+	if err := f.disp.DispatchAll(t.Context()); err != nil {
+		t.Fatalf("DispatchAll bind leads: %v", err)
+	}
+	assertQueueSnapshotOrder(t, f.disp, []string{
+		team1 + ".team-mgr@1",
+		team2 + ".team-mgr@2",
+		team1 + ".d1@3",
+		team2 + ".d1@4",
+		team1 + ".d2@blocked:0",
+		team2 + ".d2@blocked:0",
+	})
+
+	f.sessions.mu.Lock()
+	f.sessions.noRoom = false
+	f.sessions.mu.Unlock()
 	if err := f.disp.DispatchAll(t.Context()); err != nil {
 		t.Fatalf("DispatchAll: %v", err)
 	}
@@ -256,7 +289,7 @@ func TestQueueOrderPrioritizesManagersThenCreationOrder(t *testing.T) {
 		started = append(started, f.sessions.starts[i].TaskID)
 	}
 	f.sessions.mu.Unlock()
-	// Both leads bind first, then managers (tier 1) + depth-1 members (tier 2) before depth-2 members (tier 3).
+	// Managers (tier 1) + depth-1 members (tier 2) start before depth-2 members (tier 3).
 	wantStarted := []string{
 		team1 + ".team-mgr",
 		team2 + ".team-mgr",

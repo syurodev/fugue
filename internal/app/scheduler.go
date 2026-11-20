@@ -197,8 +197,9 @@ func (rt *HostRuntime) AcquireHeavySlot(ctx context.Context) (func(), <-chan str
 	return rt.heavy.Acquire(ctx)
 }
 
-// TeamQueueSnapshot returns queued auto-startable tasks in global dispatch
-// priority order with 1-based queue positions.
+// TeamQueueSnapshot returns queued non-explicit-start tasks in global dispatch
+// priority order; startable tasks carry 1-based QueuePosition values and
+// blocked tasks are returned after them with Blocked=true and QueuePosition=0.
 func (rt *HostRuntime) TeamQueueSnapshot(ctx context.Context) ([]QueuedTaskPosition, error) {
 	if rt.teamDispatch == nil {
 		return nil, nil

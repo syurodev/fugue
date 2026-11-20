@@ -118,7 +118,7 @@ func TestRunExclusiveSharesSemaphoreAndForwardsExitCode(t *testing.T) {
 		wg.Add(1)
 		supervise.Go(t.Context(), "test.exclusive-waiter", func(ctx context.Context) error {
 			defer wg.Done()
-			rel, slotErr := acquireExclusiveSlot(ctx, config.MapEnv{}, sockPath, testVersion)
+			slot, slotErr := acquireExclusiveSlot(ctx, config.MapEnv{}, sockPath, testVersion)
 			if slotErr != nil {
 				t.Errorf("acquireExclusiveSlot: %v", slotErr)
 				return slotErr
@@ -128,7 +128,7 @@ func TestRunExclusiveSharesSemaphoreAndForwardsExitCode(t *testing.T) {
 			}
 			runtime.Gosched()
 			active.Add(-1)
-			rel()
+			slot.release()
 			return nil
 		})
 	}

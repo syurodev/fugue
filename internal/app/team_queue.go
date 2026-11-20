@@ -11,8 +11,11 @@ import (
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
-// QueuedTaskPosition describes a queued task's 1-based position in the global
-// dispatch order (§7, Q-144).
+// QueuedTaskPosition describes a queued non-explicit-start task in the global
+// dispatch queue (§7, Q-144). Startable tasks (checked via resolveTaskChain
+// and startable, matching pickTeamCandidate) receive 1-based QueuePosition
+// values; queued tasks that are currently blocked (parent not running/asking or
+// unmet dependencies) are returned with Blocked=true and QueuePosition=0.
 type QueuedTaskPosition struct {
 	TeamID        string
 	TaskID        string
@@ -20,6 +23,7 @@ type QueuedTaskPosition struct {
 	Depth         int
 	CreatedAt     int64
 	QueuePosition int
+	Blocked       bool
 }
 
 type queuedTaskKey struct{ teamID, taskID string }
@@ -85,8 +89,12 @@ func (d *teamDispatcher) nextGlobalCandidate(ctx context.Context, held map[queue
 	return best, best != nil, nil
 }
 
-// QueueSnapshot returns queued auto-startable tasks across all active teams in
-// global §7 dispatch priority order with 1-based QueuePosition values.
+// QueueSnapshot returns queued non-explicit-start tasks across all active teams
+// in global §7 dispatch priority order. Startable tasks (determined by the same
+// resolveTaskChain and startable checks as pickTeamCandidate) are listed first
+// with 1-based QueuePosition values; blocked queued tasks (parent not
+// running/asking or unmet dependencies) follow with Blocked=true and
+// QueuePosition=0.
 func (d *teamDispatcher) QueueSnapshot(ctx context.Context) ([]QueuedTaskPosition, error) {
 	teamIDs, err := d.deps.Store.ActiveTeamIDs(ctx)
 	if err != nil {
@@ -101,29 +109,60 @@ func (d *teamDispatcher) QueueSnapshot(ctx context.Context) ([]QueuedTaskPositio
 		if rec.State != vendorstore.TeamStateActive {
 			continue
 		}
-		for i := range tasks {
-			t := &tasks[i]
-			if t.State != vendorstore.TaskStateQueued || t.ExplicitStart {
-				continue
-			}
-			queued = append(queued, QueuedTaskPosition{
-				TeamID: t.TeamID, TaskID: t.TaskID, HierarchyRole: t.HierarchyRole,
-				Depth: t.Depth, CreatedAt: t.CreatedAt,
-			})
+		queued = appendTeamQueuePositions(queued, tasks)
+	}
+	return sortAndNumberQueue(queued), nil
+}
+
+func appendTeamQueuePositions(dst []QueuedTaskPosition, tasks []vendorstore.TaskRecord) []QueuedTaskPosition {
+	byID, retryChild := resolveTaskChain(tasks)
+	for i := range tasks {
+		t := &tasks[i]
+		if t.State != vendorstore.TaskStateQueued || t.ExplicitStart {
+			continue
 		}
+		dst = append(dst, QueuedTaskPosition{
+			TeamID: t.TeamID, TaskID: t.TaskID, HierarchyRole: t.HierarchyRole,
+			Depth: t.Depth, CreatedAt: t.CreatedAt, Blocked: !startable(t, byID, retryChild),
+		})
 	}
-	slices.SortFunc(queued, func(a, b QueuedTaskPosition) int {
-		return cmp.Or(
-			cmp.Compare(rolePriorityTier(a.HierarchyRole, a.Depth), rolePriorityTier(b.HierarchyRole, b.Depth)),
-			cmp.Compare(a.CreatedAt, b.CreatedAt),
-			cmp.Compare(a.TaskID, b.TaskID),
-			cmp.Compare(a.TeamID, b.TeamID),
-		)
-	})
+	return dst
+}
+
+func sortAndNumberQueue(queued []QueuedTaskPosition) []QueuedTaskPosition {
+	order := make([]*QueuedTaskPosition, len(queued))
 	for i := range queued {
-		queued[i].QueuePosition = i + 1
+		order[i] = &queued[i]
 	}
-	return queued, nil
+	slices.SortFunc(order, compareQueuedTaskPositions)
+	sorted := make([]QueuedTaskPosition, len(order))
+	pos := 0
+	for i, item := range order {
+		sorted[i] = *item
+		if sorted[i].Blocked {
+			continue
+		}
+		pos++
+		sorted[i].QueuePosition = pos
+	}
+	return sorted
+}
+
+func compareQueuedTaskPositions(a, b *QueuedTaskPosition) int {
+	return cmp.Or(
+		cmp.Compare(boolSortOrder(a.Blocked), boolSortOrder(b.Blocked)),
+		cmp.Compare(rolePriorityTier(a.HierarchyRole, a.Depth), rolePriorityTier(b.HierarchyRole, b.Depth)),
+		cmp.Compare(a.CreatedAt, b.CreatedAt),
+		cmp.Compare(a.TaskID, b.TaskID),
+		cmp.Compare(a.TeamID, b.TeamID),
+	)
+}
+
+func boolSortOrder(v bool) int {
+	if v {
+		return 1
+	}
+	return 0
 }
 
 // nextStartable picks the highest-priority queued task the plan starts on its

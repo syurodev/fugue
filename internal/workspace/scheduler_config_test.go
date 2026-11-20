@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-func TestHostAndTeamsConfigKeysAndValidation(t *testing.T) {
+func TestHostSchedulerConfigKeysAndValidation(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
 	home := filepath.Join(dir, "home")
@@ -19,16 +19,6 @@ func TestHostAndTeamsConfigKeysAndValidation(t *testing.T) {
 per_account_sessions = 4
 max_sessions = 6
 heavy_commands = 3
-prompt_pacing_min_seconds = 8
-prompt_pacing_max_seconds = 12
-
-[teams]
-task_deadline_seconds = 600
-task_max_turns = 20
-silence_timeout_seconds = 90
-team_deadline_seconds = 1800
-team_max_agents = 8
-idle_detach_seconds = 180
 `)
 	globalPath := filepath.Join(fugueHome, "config.toml")
 	t2, err := decodeTier2TOML(globalPath, raw, home)
@@ -36,40 +26,41 @@ idle_detach_seconds = 180
 		t.Fatalf("decodeTier2TOML: %v", err)
 	}
 	base := DefaultConfig(fugueHome, "")
+	if base.Provenance["host.per_account_sessions"] != TierDefault ||
+		base.Provenance["host.max_sessions"] != TierDefault ||
+		base.Provenance["host.heavy_commands"] != TierDefault {
+		t.Fatalf("default host scheduler provenance = %+v", base.Provenance)
+	}
 	eff := mergeConfigs(&base, &t2, nil, nil, home)
 	if eff.Host.PerAccountSessions != 4 || eff.Host.MaxSessions != 6 || eff.Host.HeavyCommands != 3 {
 		t.Fatalf("Host = %+v", eff.Host)
 	}
-	if eff.Host.PromptPacingMinSeconds != 8 || eff.Host.PromptPacingMaxSeconds != 12 {
-		t.Fatalf("PromptPacing = %+v", eff.Host)
-	}
-	if eff.Teams.TaskDeadlineSeconds != 600 || eff.Teams.TaskMaxTurns != 20 || eff.Teams.IdleDetachSeconds != 180 {
-		t.Fatalf("Teams = %+v", eff.Teams)
+	if eff.Provenance["host.per_account_sessions"] != TierGlobal ||
+		eff.Provenance["host.max_sessions"] != TierGlobal ||
+		eff.Provenance["host.heavy_commands"] != TierGlobal {
+		t.Fatalf("merged host scheduler provenance = %+v", eff.Provenance)
 	}
 }
 
-func TestTier3RejectsHostSectionAndInvalidTeamsValues(t *testing.T) {
+func TestTier3RejectsHostSectionAndTier2RejectsInvalidHostValues(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
+	if _, err := decodeTier3TOML(filepath.Join(dir, "fugue.toml"), []byte("[host]\nmax_sessions = 4\n"), dir); CodeOf(err) != ErrConfigInvalid {
+		t.Fatalf("decodeTier3TOML host section = %v, want ErrConfigInvalid", err)
+	}
 	for _, tc := range []struct {
 		name string
 		toml string
 	}{
-		{"host section in tier 3", "[host]\nmax_sessions = 4\n"},
-		{"negative task deadline", "[teams]\ntask_deadline_seconds = -1\n"},
-		{"zero idle detach", "[teams]\nidle_detach_seconds = 0\n"},
+		{"zero per_account_sessions", "[host]\nper_account_sessions = 0\n"},
+		{"zero max_sessions", "[host]\nmax_sessions = 0\n"},
+		{"zero heavy_commands", "[host]\nheavy_commands = 0\n"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if _, err := decodeTier3TOML(filepath.Join(dir, "fugue.toml"), []byte(tc.toml), dir); CodeOf(err) != ErrConfigInvalid {
-				t.Fatalf("decodeTier3TOML(%s) = %v, want ErrConfigInvalid", tc.name, err)
+			if _, err := decodeTier2TOML(filepath.Join(dir, "config.toml"), []byte(tc.toml), dir); CodeOf(err) != ErrConfigInvalid {
+				t.Fatalf("decodeTier2TOML(%s) = %v, want ErrConfigInvalid", tc.name, err)
 			}
 		})
-	}
-	if _, err := decodeTier2TOML(filepath.Join(dir, "config.toml"), []byte("[host]\nper_account_sessions = 0\n"), dir); CodeOf(err) != ErrConfigInvalid {
-		t.Fatalf("decodeTier2TOML invalid per_account_sessions = %v, want ErrConfigInvalid", err)
-	}
-	if _, err := decodeTier2TOML(filepath.Join(dir, "config.toml"), []byte("[host]\nprompt_pacing_min_seconds = 20\nprompt_pacing_max_seconds = 10\n"), dir); CodeOf(err) != ErrConfigInvalid {
-		t.Fatalf("decodeTier2TOML inverted pacing = %v, want ErrConfigInvalid", err)
 	}
 }

@@ -173,8 +173,8 @@ func (c *Client) Shutdown(ctx context.Context, commandID string) error {
 }
 
 // AcquireHeavySlot waits for a §7 heavy-command semaphore slot and holds it
-// until the returned release callback is invoked.
-func (c *Client) AcquireHeavySlot(ctx context.Context) (func(), error) {
+// until the returned HeavyLease is released or the host ends the stream.
+func (c *Client) AcquireHeavySlot(ctx context.Context) (*HeavyLease, error) {
 	stream, err := hostv1connect.NewHostServiceClient(c.hc, c.base).AcquireHeavySlot(
 		ctx,
 		connect.NewRequest(&hostv1.AcquireHeavySlotRequest{}),
