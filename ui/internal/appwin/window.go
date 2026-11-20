@@ -88,11 +88,15 @@ func Run(ctx context.Context, opts Options) error {
 	w.Option(app.Size(unit.Dp(initW), unit.Dp(initH)))
 
 	q := &updateQueue{}
-	// The fetcher owns the read side's one goroutine: it runs the blocking
-	// reads off the window goroutine and hands the results back (F10.4a).
+	// The fetcher owns the read side's one goroutine and the poster the
+	// composer's write side: both run the blocking calls off the window
+	// goroutine and hand their results back (F10.4a, F10.4b).
 	fetcher := session.NewFetcher(m.Client)
 	fetcher.Start(runCtx)
 	defer fetcher.Stop()
+	poster := session.NewPoster(m.Client)
+	poster.Start(runCtx)
+	defer poster.Stop()
 	defer stopSideGoroutines(cancel, startFeeder(runCtx, w, updates, q), startCloser(runCtx, w))
 
 	shaper, err := fonts.Shaper()
@@ -102,7 +106,7 @@ func Run(ctx context.Context, opts Options) error {
 	light, dark := theme.Light(shaper), theme.Dark(shaper)
 	env := newEnv(shaper, &light)
 	attach(env, w)
-	return eventLoop(w, env, newScreens(m, fetcher), q, &light, &dark)
+	return eventLoop(w, env, newScreens(m, fetcher, poster), q, &light, &dark)
 }
 
 // newEnv builds the window's kit.Env over the theme it starts in (F10.13):
@@ -189,11 +193,11 @@ func eventLoop(w *app.Window, env *kit.Env, sc *screens, q *updateQueue, light, 
 	}
 }
 
-// frame drains the deliveries and read results into UI state on the window
-// goroutine, handles the theme toggle, and lays the window out.
+// frame drains the deliveries, read results and write results into UI state
+// on the window goroutine, handles the theme toggle, and lays the window out.
 func frame(gtx *layout.Context, env *kit.Env, sc *screens, q *updateQueue, light, dark *theme.Theme) {
-	// Deliveries and read results become UI state here, on the window
-	// goroutine.
+	// Deliveries, read results and write results become UI state here, on
+	// the window goroutine.
 	results := make([]session.Result, 0, 8)
 drain:
 	for {
@@ -204,18 +208,32 @@ drain:
 			break drain
 		}
 	}
-	sc.update(q.drain(), results)
+	posts := make([]session.PostResult, 0, 4)
+drainPosts:
 	for {
-		// Letters arrive as their upper-case name on every platform Gio
-		// supports.
+		select {
+		case p := <-sc.poster.Results():
+			posts = append(posts, p)
+		default:
+			break drainPosts
+		}
+	}
+	sc.update(q.drain(), results, posts)
+	toggleTheme(gtx, env, light, dark)
+	drawWindow(gtx, env, sc)
+}
+
+// toggleTheme handles the window's Ctrl+D theme toggle (DA-08). Letters
+// arrive as their upper-case name on every platform Gio supports, and the
+// window starts light: Gio v0.10.3 exposes no OS light/dark preference to
+// follow (F10.2c plan), so light is the default.
+func toggleTheme(gtx *layout.Context, env *kit.Env, light, dark *theme.Theme) {
+	for {
 		ke, ok := gtx.Event(key.Filter{Required: key.ModCtrl, Name: key.Name("D")})
 		if !ok {
-			break
+			return
 		}
 		if k, isKey := ke.(key.Event); isKey && k.State == key.Press {
-			// The window starts light: Gio v0.10.3 exposes no OS light/dark
-			// preference to follow (F10.2c plan), so light is the default
-			// and Ctrl+D toggles (DA-08).
 			if env.Th == light {
 				env.Th = dark
 			} else {
@@ -223,13 +241,12 @@ drain:
 			}
 		}
 	}
-	drawWindow(gtx, env, sc)
 }
 
-// drawWindow lays out the screens — the sidebar and the read-only transcript
-// pane (F10.4a) — and the status bar with the connection state (F10.2a).
-// Every color comes from the theme tokens (F10.2c); appwin defines none of
-// its own.
+// drawWindow lays out the screens — the sidebar, the transcript pane and the
+// composer (F10.4a, F10.4b) — and the status bar with the connection state
+// (F10.2a). The start dialog draws last, over everything (UK-07). Every
+// color comes from the theme tokens (F10.2c); appwin defines none of its own.
 func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 	paint.Fill(gtx.Ops, env.Th.Chrome().AppBg)
 	state, reason := sc.m.State()
@@ -253,6 +270,9 @@ func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 			})
 		}),
 	)
+	// The start dialog is the window's dialog layer, drawn over everything
+	// (UK-07); closed, it lays nothing out.
+	sc.composer.start.layout(env, gtx, sc, sc.composer)
 }
 
 // statusColor maps the connection state onto the theme's status tokens

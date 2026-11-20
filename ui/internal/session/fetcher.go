@@ -10,20 +10,32 @@ import (
 // ResultKind names what a fetcher result carries.
 type ResultKind uint8
 
-// The result kinds.
+// The result kinds: the session list, one transcript page, one session's
+// slash commands, and the workspace reads the composer's start flow drives.
 const (
 	ResultSessions ResultKind = iota
 	ResultPage
+	ResultCommands
+	ResultWorkspaces
+	ResultWorkspace
+	ResultProbe
 )
 
 // Result is one completed read, delivered to the window goroutine.
 type Result struct {
 	Kind ResultKind
-	// Session names the session a page was read for.
+	// Session names the session a page or command list was read for.
 	Session string
-	// Sessions is the list read; Items is the page read.
+	// Sessions is the list read; Items is the page read; Commands the
+	// session's slash commands.
 	Sessions client.SessionList
 	Items    []client.TranscriptItem
+	Commands client.Commands
+	// Workspaces lists the workspaces; Workspace is the one workspace read
+	// with its roots. Probes reports what each vendor supports.
+	Workspaces []client.WorkspaceSummary
+	Workspace  client.Workspace
+	Probes     []client.VendorProbe
 	// Older reports whether the page was an older page (before > 0).
 	Older bool
 	// Err is the read's failure, if any; the caller decides what it shows.
@@ -32,9 +44,10 @@ type Result struct {
 
 // request is one queued read.
 type request struct {
-	session string
-	kind    ResultKind
-	before  int64
+	session   string
+	kind      ResultKind
+	before    int64
+	workspace string
 }
 
 // requestBuffer bounds the request queue. A request dropped because the queue
@@ -94,6 +107,31 @@ func (f *Fetcher) RequestPage(session string, before int64) {
 	f.queue(request{kind: ResultPage, session: session, before: before})
 }
 
+// RequestCommands queues one session's slash-command read (vendor-runtime
+// §9), which the composer's slash menu suggests from.
+func (f *Fetcher) RequestCommands(session string) {
+	f.queue(request{kind: ResultCommands, session: session})
+}
+
+// RequestWorkspaces queues the workspace list read, which the composer's
+// start flow chooses a session's workspace from (workspace management itself
+// is F10.14).
+func (f *Fetcher) RequestWorkspaces() {
+	f.queue(request{kind: ResultWorkspaces})
+}
+
+// RequestWorkspace queues one workspace's read, whose roots the start flow
+// names to StartSession.
+func (f *Fetcher) RequestWorkspace(workspace string) {
+	f.queue(request{kind: ResultWorkspace, workspace: workspace})
+}
+
+// RequestProbe queues the vendors' probe read, whose capabilities decide
+// what the composer offers (steer, interrupt).
+func (f *Fetcher) RequestProbe() {
+	f.queue(request{kind: ResultProbe})
+}
+
 // Results receives the completed reads. The window goroutine drains it every
 // frame.
 func (f *Fetcher) Results() <-chan Result { return f.results }
@@ -136,6 +174,18 @@ func (f *Fetcher) deliver(ctx context.Context, c *client.Client, r request) bool
 	case ResultPage:
 		items, err := c.TranscriptPage(ctx, r.session, r.before, PageLimit)
 		res = Result{Kind: ResultPage, Session: r.session, Items: items, Older: r.before > 0, Err: err}
+	case ResultCommands:
+		commands, err := c.ListCommands(ctx, r.session)
+		res = Result{Kind: ResultCommands, Session: r.session, Commands: commands, Err: err}
+	case ResultWorkspaces:
+		workspaces, err := c.ListWorkspaces(ctx)
+		res = Result{Kind: ResultWorkspaces, Workspaces: workspaces, Err: err}
+	case ResultWorkspace:
+		ws, err := c.Workspace(ctx, r.workspace)
+		res = Result{Kind: ResultWorkspace, Workspace: ws, Err: err}
+	case ResultProbe:
+		probes, err := c.ProbeVendors(ctx)
+		res = Result{Kind: ResultProbe, Probes: probes, Err: err}
 	}
 	select {
 	case f.results <- res:

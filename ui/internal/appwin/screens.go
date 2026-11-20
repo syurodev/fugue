@@ -2,6 +2,7 @@ package appwin
 
 import (
 	"fmt"
+	"image"
 
 	"gioui.org/layout"
 	"gioui.org/op/clip"
@@ -27,16 +28,23 @@ const (
 type pageFetcher interface {
 	RequestSessions()
 	RequestPage(session string, before int64)
+	RequestCommands(session string)
+	RequestWorkspaces()
+	RequestWorkspace(workspace string)
+	RequestProbe()
 	Results() <-chan session.Result
 }
 
-// screens is the app's read side (F10.4a): the sidebar's session list, the
-// open session's transcript model, and each session's transcript view state.
-// It changes only on the window goroutine, which applies every delivered
-// update here.
+// screens is the app's read and write sides (F10.4a, F10.4b): the sidebar's
+// session list, the open session's transcript model, each session's
+// transcript view state, and the composer. It changes only on the window
+// goroutine, which applies every delivered update here.
 type screens struct {
 	m       *hostconn.Manager
 	fetcher pageFetcher
+	// poster is the composer's write side; composer holds its view state.
+	poster   *session.Poster
+	composer *composer
 
 	sidebar     *session.Sidebar
 	transcripts map[string]*session.Transcript
@@ -45,6 +53,17 @@ type screens struct {
 	// cache every session's list rides (F10.4a, desktop-app §7).
 	views     map[string]*transcriptview.State
 	viewCache *kit.VirtualHeightCache
+	// commands holds one command model per session for the slash menu,
+	// refreshed when the session's commands revision advances (§9).
+	commands        map[string]*session.Commands
+	pendingCommands map[string]bool
+	// pendingWorkspaces marks the start flow's workspace list read, and
+	// pendingProbe the capability probe a changed vendor list armed.
+	pendingWorkspaces bool
+	pendingProbe      bool
+	// lastStarted is the session the composer last asked to start, opened
+	// as soon as the topic announces it.
+	lastStarted string
 	// open is the open session's id, empty when none is.
 	open string
 
@@ -61,18 +80,23 @@ type screens struct {
 	lastErr string
 }
 
-// newScreens builds the screens over the manager and its fetcher.
-func newScreens(m *hostconn.Manager, fetcher pageFetcher) *screens {
+// newScreens builds the screens over the manager, its fetcher and the
+// composer's poster.
+func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster) *screens {
 	return &screens{
-		m:           m,
-		fetcher:     fetcher,
-		sidebar:     session.NewSidebar(),
-		transcripts: map[string]*session.Transcript{},
-		views:       map[string]*transcriptview.State{},
-		viewCache:   kit.NewVirtualHeightCache(),
-		header:      kit.NewSectionHeaderState(true),
-		rows:        map[string]*kit.ListRowState{},
-		pendingPage: map[string]bool{}, pendingOlder: map[string]bool{},
+		m:               m,
+		fetcher:         fetcher,
+		poster:          poster,
+		composer:        newComposer(poster),
+		sidebar:         session.NewSidebar(),
+		transcripts:     map[string]*session.Transcript{},
+		views:           map[string]*transcriptview.State{},
+		viewCache:       kit.NewVirtualHeightCache(),
+		commands:        map[string]*session.Commands{},
+		pendingCommands: map[string]bool{},
+		header:          kit.NewSectionHeaderState(true),
+		rows:            map[string]*kit.ListRowState{},
+		pendingPage:     map[string]bool{}, pendingOlder: map[string]bool{},
 	}
 }
 
@@ -88,17 +112,28 @@ func (s *screens) viewFor(id string) *transcriptview.State {
 }
 
 // prune drops the state of sessions that left the sidebar list, so a closed
-// session's scroll and expansion state does not outlive it.
+// session's scroll, expansion and composer state does not outlive it. The
+// open session leaving the list closes it cleanly: its topics leave the
+// connection, the pane falls back to the empty state, and clicking the
+// session again reopens it.
 func (s *screens) prune() {
 	known := map[string]bool{}
 	for _, sess := range s.sidebar.List() {
 		known[sess.ID] = true
+	}
+	if s.open != "" && !known[s.open] {
+		s.m.RemoveTopic(topicTranscript + s.open)
+		s.m.RemoveTopic(topicTranscriptDlt + s.open)
+		s.open, s.scrolled = "", false
 	}
 	pruneKnown(s.views, known)
 	pruneKnown(s.transcripts, known)
 	pruneKnown(s.pendingPage, known)
 	pruneKnown(s.pendingOlder, known)
 	pruneKnown(s.rows, known)
+	pruneKnown(s.commands, known)
+	pruneKnown(s.pendingCommands, known)
+	s.composer.prune(known)
 }
 
 // pruneKnown deletes every key of m the known set does not name.
@@ -110,13 +145,18 @@ func pruneKnown[T any](m map[string]T, known map[string]bool) {
 	}
 }
 
-// update folds one frame's deliveries into the screens.
-func (s *screens) update(updates []hostconn.Update, results []session.Result) {
-	for _, u := range updates {
-		s.applyUpdate(u)
+// update folds one frame's deliveries into the screens. The loops index
+// rather than copy: the delivery and result structs are wide, and the
+// window's hot path pays the copy every frame.
+func (s *screens) update(updates []hostconn.Update, results []session.Result, posts []session.PostResult) {
+	for i := range updates {
+		s.applyUpdate(updates[i])
 	}
-	for _, r := range results {
-		s.applyResult(r)
+	for i := range results {
+		s.applyResult(results[i])
+	}
+	for i := range posts {
+		s.applyPostResult(posts[i])
 	}
 }
 
@@ -138,28 +178,46 @@ func (s *screens) applyUpdate(u hostconn.Update) {
 }
 
 // reconnected arms the reads a fresh connection carries: the session list,
-// the open session's topics, and its newest page. A request dropped while the
-// host was down re-arms here.
+// the vendors' capabilities, the open session's topics, its newest page and
+// its commands. A request dropped while the host was down re-arms here.
 func (s *screens) reconnected() {
 	delete(s.pendingPage, s.open)
 	delete(s.pendingOlder, s.open)
 	s.fetcher.RequestSessions()
+	s.fetcher.RequestProbe()
 	if s.open != "" {
 		s.m.AddTopic(topicTranscript + s.open)
 		s.m.AddTopic(topicTranscriptDlt + s.open)
 		s.requestNewestPage(s.open)
+		s.requestCommands(s.open)
 	}
 }
 
 // applySessionEvent applies one vendor-sessions event. A created event
-// carries no vendor or timestamps; the list read names them.
+// carries no vendor or timestamps; the list read names them. The session the
+// composer just started opens as soon as its created event names it.
 func (s *screens) applySessionEvent(eventType string, payload []byte) {
 	if err := s.sidebar.ApplyEvent(eventType, payload); err != nil {
 		s.fail(err)
 		return
 	}
-	if eventType == session.EventSessionCreated {
+	switch eventType {
+	case session.EventSessionCreated:
 		s.fetcher.RequestSessions()
+		if s.lastStarted != "" {
+			if _, ok := s.sidebar.Lookup(s.lastStarted); ok {
+				s.openSession(s.lastStarted)
+				s.lastStarted = ""
+			}
+		}
+	case session.EventSessionStateChanged:
+		// The state change carries the commands revision; a list older than
+		// what the topic announces is re-read for the open session (§9).
+		if sess, ok := s.sidebar.Lookup(s.open); ok {
+			if cmds := s.commands[s.open]; cmds == nil || sess.CommandsRevision > cmds.Revision {
+				s.requestCommands(s.open)
+			}
+		}
 	}
 }
 
@@ -186,7 +244,8 @@ func (s *screens) applyTranscriptDelivery(u hostconn.Update) {
 	}
 }
 
-// applyResult folds one fetcher read into the screens.
+// applyResult folds one fetcher read into the screens: the session list and
+// transcript pages here, the composer's reads in applyComposerResult.
 func (s *screens) applyResult(r session.Result) {
 	switch r.Kind {
 	case session.ResultSessions:
@@ -196,6 +255,7 @@ func (s *screens) applyResult(r session.Result) {
 		}
 		s.sidebar.ApplyList(r.Sessions)
 		s.prune()
+		s.probeMissingVendors()
 	case session.ResultPage:
 		t := s.transcripts[r.Session]
 		if t == nil {
@@ -216,11 +276,13 @@ func (s *screens) applyResult(r session.Result) {
 			t.ApplyNewestPage(r.Items)
 			s.pendingPage[r.Session] = false
 		}
+	case session.ResultCommands, session.ResultProbe, session.ResultWorkspaces, session.ResultWorkspace:
+		s.applyComposerResult(r)
 	}
 }
 
 // openSession opens a session's transcript: its topics join the connection,
-// and its newest page is read if the model has none.
+// and its newest page and commands are read if the model has none.
 func (s *screens) openSession(id string) {
 	if s.open == id {
 		return
@@ -237,6 +299,7 @@ func (s *screens) openSession(id string) {
 		s.transcripts[id] = session.NewTranscript(id)
 	}
 	s.requestNewestPage(id)
+	s.requestCommands(id)
 }
 
 // requestNewestPage reads the newest page once per trigger.
@@ -345,37 +408,57 @@ func sessionState(sess session.Session) string {
 	return state
 }
 
-// layoutTranscript draws the open session's transcript, read-only.
+// layoutTranscript draws the transcript pane and, under it, the composer
+// row. The split is manual — the transcript takes everything above the
+// measured row — so the row's origin is known and Env.Offset can record it
+// for the slash menu's anchor (UK-07).
 func (s *screens) layoutTranscript(gtx *layout.Context, env *kit.Env) layout.Dimensions {
+	w, h := gtx.Constraints.Max.X, gtx.Constraints.Max.Y
+	rowH := s.composer.measure(env, gtx, s)
+	pane := image.Pt(w, max(h-rowH, 0))
+
 	var items []*session.Item
 	if t := s.transcripts[s.open]; t != nil {
 		items = t.Items()
 	}
 	view := s.viewFor(s.open)
-	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			paint.FillShape(local.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: local.Constraints.Max}.Op())
-			if len(items) == 0 && s.open == "" {
-				// TODO(F10.19): Move the empty state onto the kit's EmptyState (§6.25).
-				return layout.Center.Layout(local, func(gtx layout.Context) layout.Dimensions {
-					l := gtx
-					return kit.Label(env, &l, theme.TypeSmall(), env.Th.Chrome().FgMuted, "Select a session")
-				})
-			}
-			dims := transcriptview.Layout(env, &local, view, items)
-			s.trackScroll(view)
-			s.maybePageOlder()
-			return dims
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			if s.lastErr == "" {
-				return layout.Dimensions{}
-			}
-			return kit.Label(env, &local, theme.TypeSmall(), env.Th.Status().Danger, s.lastErr)
-		}),
-	)
+	local := *gtx
+	local.Constraints = layout.Constraints{Min: image.Pt(w, 0), Max: pane}
+	s.layoutTranscriptPane(&local, env, view, items)
+	_, connected := s.connected()
+	env.Offset(gtx, image.Pt(0, pane.Y), func(gtx *layout.Context) {
+		local := *gtx
+		local.Constraints = layout.Constraints{Min: image.Pt(w, rowH), Max: image.Pt(w, rowH)}
+		s.composer.layout(env, &local, s, connected)
+	})
+	return layout.Dimensions{Size: gtx.Constraints.Max}
+}
+
+// layoutTranscriptPane draws the transcript itself: the canvas, the empty
+// state, the transcript list and the read failure line.
+func (s *screens) layoutTranscriptPane(gtx *layout.Context, env *kit.Env, view *transcriptview.State, items []*session.Item) {
+	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
+	if len(items) == 0 && s.open == "" {
+		// TODO(F10.19): Move the empty state onto the kit's EmptyState (§6.25).
+		layout.Center.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+			l := gtx
+			return kit.Label(env, &l, theme.TypeSmall(), env.Th.Chrome().FgMuted, "Select a session")
+		})
+		return
+	}
+	transcriptview.Layout(env, gtx, view, items)
+	s.trackScroll(view)
+	s.maybePageOlder()
+	if s.lastErr == "" {
+		return
+	}
+	local := *gtx
+	inset := layout.Inset{Left: theme.SpaceLG, Right: theme.SpaceLG, Top: theme.SpaceXS}
+	inset.Layout(local, func(gtx layout.Context) layout.Dimensions {
+		l := gtx
+		l.Constraints.Min.X = 0
+		return kit.Label(env, &l, theme.TypeSmall(), env.Th.Status().Danger, s.lastErr)
+	})
 }
 
 // trackScroll marks that the reader has scrolled, which arms paging older.

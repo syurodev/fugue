@@ -14,14 +14,15 @@ import (
 )
 
 // TextAreaProps is TextFieldProps's flowing sibling on the same editing
-// core, ui-kit §6.9 (UK-08). Enter inserts a newline; the submit key
-// belongs to the caller — the core never reports Submitted here (the
-// composer wires its own key, F10.4b). The box grows with its content to
-// MaxLines lines and then scrolls inside: past the cap the editor flows at
-// its full height inside a list viewport of the inner rect — the box inset
-// by its padding, the mdview code-surface pattern — so the box stays put,
-// the padding stays clear, and the content moves inside the viewport while
-// the box's height follows the content on Smooth (§3.7).
+// core, ui-kit §6.9 (UK-08). Without EnterSubmits, Enter inserts a newline
+// and the submit key belongs to the caller — the core never reports
+// Submitted. With it, the composer's rule applies (§6.9, F10.4b): Enter
+// reports Submitted and Shift+Enter inserts the newline. The box grows with
+// its content to MaxLines lines and then scrolls inside: past the cap the
+// editor flows at its full height inside a list viewport of the inner rect —
+// the box inset by its padding, the mdview code-surface pattern — so the box
+// stays put, the padding stays clear, and the content moves inside the
+// viewport while the box's height follows the content on Smooth (§3.7).
 type TextAreaProps struct {
 	Label       string
 	Placeholder string
@@ -31,7 +32,10 @@ type TextAreaProps struct {
 	// rest scrolls inside (§6.9). Zero means uncapped — the box grows with
 	// its content.
 	MaxLines int
-	Disabled bool
+	// EnterSubmits turns Enter into the composer's submit key (§6.9):
+	// Submitted reports a plain Enter and Shift+Enter inserts the newline.
+	EnterSubmits bool
+	Disabled     bool
 }
 
 // TextAreaState is the long-lived state the caller keeps per logical
@@ -43,6 +47,12 @@ type TextAreaState struct {
 	// in-box ScrollArea, active past the cap.
 	boxF   motion.Follower
 	scroll *ScrollAreaState
+	// viewport and linePx are last frame's in-box viewport height and one
+	// text line's height while the box scrolls, the numbers ScrollToCaret
+	// aligns to; caret is the caret position it last aligned, so a wheel
+	// scroll away from the caret is not fought until the caret moves again.
+	viewport, linePx, caret int
+	caretSeen               bool
 }
 
 // NewTextAreaState builds the state for one area.
@@ -58,6 +68,11 @@ func (s *TextAreaState) SetText(v string) { s.core.setText(v) }
 
 // Tag is the area's input tag, for focus scripting and gallery previews.
 func (s *TextAreaState) Tag() event.Tag { return s.core.Tag() }
+
+// MoveCaretToEnd moves the caret after the value, as the caller does when it
+// replaced the value and the user goes on typing at the end (the composer's
+// command choice and draft restore, F10.4b).
+func (s *TextAreaState) MoveCaretToEnd() { s.core.caretToEnd() }
 
 // MarkSubmitted marks the area submitted, as the caller does when the
 // form around it is sent: the §6.8 error gate opens from then on.
@@ -79,8 +94,8 @@ func (s *TextAreaState) Measure(env *Env, gtx *layout.Context, p *TextAreaProps)
 }
 
 // Layout draws the area at the current offset and reports the events of
-// the frame (UK-06). Submitted is never set: Enter inserts a newline and
-// the submit key belongs to the caller (§6.9).
+// the frame (UK-06). Submitted reports only when the caller turned the
+// submit key on with EnterSubmits (§6.9).
 func (s *TextAreaState) Layout(env *Env, gtx *layout.Context, p *TextAreaProps) FieldEvents {
 	pre := fieldMetrics(env, gtx, p.Label)
 	w := textAreaWidth(env, gtx, p)
@@ -91,11 +106,39 @@ func (s *TextAreaState) Layout(env *Env, gtx *layout.Context, p *TextAreaProps) 
 	boxH := int(followSmooth(env, &s.boxF, float32(content+2*pre.boxPadY)) + 0.5)
 	box := image.Rect(0, pre.labelH, w, pre.labelH+boxH)
 
-	ev := s.core.begin(gtx, box, fieldOpts{}, p.Disabled)
+	opts := fieldOpts{submit: p.EnterSubmits}
+	ev := s.core.begin(gtx, box, opts, p.Disabled)
+	if !scrolls {
+		s.viewport, s.caretSeen = 0, false
+	}
 	errored := s.err.visible(p.Error, false, ev)
 	fm := s.core.advance(env, s.core.hovered(env) && !p.Disabled, s.core.focused(env, gtx) && !p.Disabled, errored, fieldLineHeight(env, gtx, p.Helper, p.Error, errored, w))
 	s.draw(env, gtx, p, pre, boxH, maxBody, scrolls, errored, fm)
 	return ev
+}
+
+// ScrollToCaret keeps the caret visible while typing below the fold (§6.9,
+// F10.4b): past the cap the caller calls it after Layout while the field is
+// focused, and the in-box viewport moves only when the caret moved since the
+// last alignment, so a wheel scroll away from the caret is left alone. It
+// does nothing while the box does not scroll.
+func (s *TextAreaState) ScrollToCaret() {
+	if s.viewport <= 0 || s.linePx <= 0 {
+		return
+	}
+	_, caret := s.core.ed.Selection()
+	if s.caretSeen && caret == s.caret {
+		return
+	}
+	s.caret, s.caretSeen = caret, true
+	caretY := int(s.core.ed.CaretCoords().Y)
+	off := s.scroll.Offset()
+	switch {
+	case caretY < off:
+		s.scroll.SetOffset(caretY)
+	case caretY+s.linePx > off+s.viewport:
+		s.scroll.SetOffset(caretY + s.linePx - s.viewport)
+	}
 }
 
 // maxBody is the px height the editor's text may occupy: MaxLines lines,
@@ -162,7 +205,10 @@ func (s *TextAreaState) draw(env *Env, gtx *layout.Context, p *TextAreaProps, sz
 		if scrolls {
 			// Past the cap the editor flows at its full height inside the
 			// ScrollArea viewport of the inner rect; ScrollArea owns the
-			// wheel and draws the §6.29 indicator bar.
+			// wheel and draws the §6.29 indicator bar. The viewport and the
+			// line height are what ScrollToCaret aligns the caret to.
+			_, line := env.Content(editorType())
+			s.viewport, s.linePx = inner.Dy(), gtx.Sp(line)
 			at(gtx, inner.Min, func(gtx *layout.Context) {
 				g := *gtx
 				g.Constraints = layout.Constraints{Max: image.Pt(textW, inner.Dy())}
