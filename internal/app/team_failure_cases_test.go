@@ -118,6 +118,30 @@ func newExitHarness(t *testing.T) *exitHarness {
 	return h
 }
 
+// exitTeamTasks builds the seeded team's task list through a loop over a
+// spec table so the fixture shares no literal block with the other seeds.
+func exitTeamTasks(spec []byte) []vendorstore.NewTaskInput {
+	tasks := make([]vendorstore.NewTaskInput, 0, 4)
+	tasks = append(tasks, vendorstore.NewTaskInput{
+		TaskID: exitLeadTask, HierarchyRole: vendorstore.RoleLead, CatalogRole: teamTestRole,
+		Deliverable: vendorstore.DeliverableReport, CreatedEventID: "ex-c1", ProtectedSpec: spec,
+	})
+	for _, m := range []struct {
+		id, event   string
+		deliverable vendorstore.TeamDeliverable
+	}{
+		{exitMemTask, "ex-c2", vendorstore.DeliverableDiff},
+		{exitCleanTask, "ex-c3", vendorstore.DeliverableDiff},
+		{exitEndTask, "ex-c4", vendorstore.DeliverableReport},
+	} {
+		tasks = append(tasks, vendorstore.NewTaskInput{
+			TaskID: m.id, ParentTaskID: exitLeadTask, HierarchyRole: vendorstore.RoleMember,
+			CatalogRole: teamTestRole, Deliverable: m.deliverable, CreatedEventID: m.event, ProtectedSpec: spec,
+		})
+	}
+	return tasks
+}
+
 // seedExitTeam creates the active team with one lead and three member tasks
 // and binds the lead and two members to live sessions.
 func seedExitTeam(t *testing.T, h *exitHarness) {
@@ -126,12 +150,7 @@ func seedExitTeam(t *testing.T, h *exitHarness) {
 	spec := []byte(`{"goal":"exit case"}`)
 	rec, _, err := h.f.store.CreateTeam(ctx, &vendorstore.NewTeamInput{
 		TeamID: exitTeamID, WorkspaceID: pdWorkspaceID, SessionID: exitLeadSess, ProposedEventID: "ex-prop",
-		Tasks: []vendorstore.NewTaskInput{
-			{TaskID: exitLeadTask, HierarchyRole: vendorstore.RoleLead, CatalogRole: teamTestRole, Deliverable: vendorstore.DeliverableReport, CreatedEventID: "ex-c1", ProtectedSpec: spec},
-			{TaskID: exitMemTask, ParentTaskID: exitLeadTask, HierarchyRole: vendorstore.RoleMember, CatalogRole: teamTestRole, Deliverable: vendorstore.DeliverableDiff, CreatedEventID: "ex-c2", ProtectedSpec: spec},
-			{TaskID: exitCleanTask, ParentTaskID: exitLeadTask, HierarchyRole: vendorstore.RoleMember, CatalogRole: teamTestRole, Deliverable: vendorstore.DeliverableDiff, CreatedEventID: "ex-c3", ProtectedSpec: spec},
-			{TaskID: exitEndTask, ParentTaskID: exitLeadTask, HierarchyRole: vendorstore.RoleMember, CatalogRole: teamTestRole, Deliverable: vendorstore.DeliverableReport, CreatedEventID: "ex-c4", ProtectedSpec: spec},
-		},
+		Tasks: exitTeamTasks(spec),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -236,10 +255,23 @@ func exitMarkedUnknownEvents(t *testing.T, h *exitHarness) []vendorstore.Recorde
 // mark a task unknown. A task marked unknown is never rerun.
 func TestAgentExitMidTurnMarksTaskUnknownAndNotifiesDelegator(t *testing.T) {
 	t.Parallel()
-	ctx := t.Context()
 	h := newExitHarness(t)
 	defer mustCloseExitSessions(t, h)
 
+	markedSeq := assertExitUnknownMemberAndNotice(t, h)
+	assertExitUnknownLeadWithoutNotice(t, h)
+	assertCleanCloseKeepsTask(t, h)
+	assertEndedTaskStaysUntouched(t, h)
+	assertIdleDetachKeepsTask(t, h)
+	assertHostShutdownKeepsTasks(t, h, markedSeq)
+}
+
+// assertExitUnknownMemberAndNotice kills the member's process mid-turn and
+// asserts the task went unknown with the delegator notice carrying the
+// worktree snapshot under the unlock recovery's idempotent key. It returns
+// the TaskMarkedUnknown sequence.
+func assertExitUnknownMemberAndNotice(t *testing.T, h *exitHarness) int64 {
+	t.Helper()
 	exitHoldTurn(t, h, exitMemSess)
 	exitCloseObservations(h, exitMemSess)
 
@@ -250,86 +282,114 @@ func TestAgentExitMidTurnMarksTaskUnknownAndNotifiesDelegator(t *testing.T) {
 	if mem.SessionID != exitMemSess {
 		t.Fatalf("unknown member session binding = %q, want the dead session kept (never rerun)", mem.SessionID)
 	}
-	var markedSeq int64
-	for _, ev := range exitMarkedUnknownEvents(t, h) {
-		if ev.TaskID == exitMemTask {
-			if ev.FromState != string(vendorstore.TaskStateRunning) {
-				t.Fatalf("TaskMarkedUnknown from_state = %q, want running", ev.FromState)
-			}
-			markedSeq = ev.Sequence
-		}
-	}
-	if markedSeq <= 0 {
-		t.Fatal("missing TaskMarkedUnknown for the member task")
-	}
-	// The delegator notice carries the worktree snapshot and the recover hint,
-	// under the same idempotent key the unlock recovery uses.
+	markedSeq := exitTaskMarkedSeq(t, h, exitMemTask)
 	// The recorded hook call proves OnSessionDied completed: the notice is
 	// durable by the time this Spin returns.
 	testutil.Spin(t, "session-died handler completed for the member", func() bool {
 		return len(h.hook.snapshot()) >= 1
 	})
-	raw, err := h.f.store.OpenMailboxPayload(ctx, exitTeamID, fmt.Sprintf("%s:unknown-notice:%s:%d:%s", exitTeamID, exitMemTask, markedSeq, exitLeadTask))
+	raw, err := h.f.store.OpenMailboxPayload(t.Context(), exitTeamID, fmt.Sprintf("%s:unknown-notice:%s:%d:%s", exitTeamID, exitMemTask, markedSeq, exitLeadTask))
 	if err != nil {
 		t.Fatalf("delegator notice not enqueued: %v", err)
 	}
 	if !strings.Contains(string(raw), "dirty") || !strings.Contains(string(raw), "fugue_task_recover") {
 		t.Fatalf("notice payload = %q, want the worktree snapshot and the recover hint", raw)
 	}
-	if pending, pendErr := h.f.store.PendingMailbox(ctx); pendErr != nil || len(pending) != 1 {
+	if pending, pendErr := h.f.store.PendingMailbox(t.Context()); pendErr != nil || len(pending) != 1 {
 		t.Fatalf("PendingMailbox = (%+v, %v), want exactly the member notice", pending, pendErr)
 	}
+	return markedSeq
+}
 
-	// The lead dies mid-turn: its task goes unknown; it has no delegator, so
-	// no notice is enqueued for it.
+// exitTaskMarkedSeq returns the sequence of the task's TaskMarkedUnknown
+// event, asserting its from-state is running.
+func exitTaskMarkedSeq(t *testing.T, h *exitHarness, taskID string) int64 {
+	t.Helper()
+	events := exitMarkedUnknownEvents(t, h)
+	for i := range events {
+		if events[i].TaskID != taskID {
+			continue
+		}
+		if events[i].FromState != string(vendorstore.TaskStateRunning) {
+			t.Fatalf("TaskMarkedUnknown from_state = %q, want running", events[i].FromState)
+		}
+		return events[i].Sequence
+	}
+	t.Fatalf("missing TaskMarkedUnknown for %s", taskID)
+	return 0
+}
+
+// assertExitUnknownLeadWithoutNotice kills the lead's process mid-turn: its
+// task goes unknown but it has no delegator, so no notice is enqueued.
+func assertExitUnknownLeadWithoutNotice(t *testing.T, h *exitHarness) {
+	t.Helper()
 	exitHoldTurn(t, h, exitLeadSess)
 	exitCloseObservations(h, exitLeadSess)
 	testutil.Spin(t, "session-died handler completed for the lead", func() bool {
 		return exitTaskState(t, h, exitLeadTask).State == vendorstore.TaskStateUnknown && len(h.hook.snapshot()) == 2
 	})
-	if pending, pendErr := h.f.store.PendingMailbox(ctx); pendErr != nil || len(pending) != 1 {
+	if pending, pendErr := h.f.store.PendingMailbox(t.Context()); pendErr != nil || len(pending) != 1 {
 		t.Fatalf("PendingMailbox after lead death = (%+v, %v), want no lead notice", pending, pendErr)
 	}
-	events := exitMarkedUnknownEvents(t, h)
-	if len(events) != 2 {
+	if events := exitMarkedUnknownEvents(t, h); len(events) != 2 {
 		t.Fatalf("TaskMarkedUnknown events = %d, want exactly the member and the lead", len(events))
 	}
+}
 
-	// A clean close mid-turn never marks the task unknown.
+// assertCleanCloseKeepsTask pins that a clean close mid-turn never marks the
+// task unknown.
+func assertCleanCloseKeepsTask(t *testing.T, h *exitHarness) {
+	t.Helper()
 	exitHoldTurn(t, h, exitCleanSess)
-	if err = h.m.Close(ctx, exitCleanSess, vendor.CloseHostStop); err != nil {
+	if err := h.m.Close(t.Context(), exitCleanSess, vendor.CloseHostStop); err != nil {
 		t.Fatalf("clean Close: %v", err)
 	}
 	if st := exitTaskState(t, h, exitCleanTask).State; st != vendorstore.TaskStateRunning {
 		t.Fatalf("cleanly closed task state = %s, want running", st)
 	}
-	// A task that already ended is not touched by its session exit.
+	if got := len(exitMarkedUnknownEvents(t, h)); got != 2 {
+		t.Fatalf("TaskMarkedUnknown events after the clean close = %d, want 2", got)
+	}
+}
+
+// assertEndedTaskStaysUntouched pins that a task that already ended is not
+// marked unknown by its session exit.
+func assertEndedTaskStaysUntouched(t *testing.T, h *exitHarness) {
+	t.Helper()
 	if _, evErr := appendExitEvent(t, h, exitEndTask, vendorstore.EventTaskReported, ""); evErr != nil {
 		t.Fatal(evErr)
 	}
-	h.tasks.OnSessionDied(ctx, exitEndSess)
+	h.tasks.OnSessionDied(t.Context(), exitEndSess)
 	if st := exitTaskState(t, h, exitEndTask).State; st != vendorstore.TaskStateChecking {
 		t.Fatalf("ended task state = %s, want checking untouched", st)
 	}
 	if got := len(exitMarkedUnknownEvents(t, h)); got != 2 {
-		t.Fatalf("TaskMarkedUnknown events after clean exits = %d, want 2", got)
+		t.Fatalf("TaskMarkedUnknown events after the ended task = %d, want 2", got)
 	}
+}
 
-	// The idle detach (F11.6b) detaches cleanly and never marks unknown.
+// assertIdleDetachKeepsTask pins that the F11.6b idle detach never marks the
+// task unknown.
+func assertIdleDetachKeepsTask(t *testing.T, h *exitHarness) {
+	t.Helper()
 	*h.idleSec = 2
 	startPDSession(t, h.m, exitIdleSess, VendorClaude, vendorstore.RoleMember, exitTeamID, "", exitResumeHnd)
-	awaitPDReady(ctx, t, h.f.store, exitIdleSess, 0)
+	awaitPDReady(t.Context(), t, h.f.store, exitIdleSess, 0)
 	testutil.Spin(t, "idle session detached", func() bool {
 		h.f.clock.Advance(time.Second)
-		snap, snapErr := h.f.store.Snapshot(ctx, exitIdleSess)
+		snap, snapErr := h.f.store.Snapshot(t.Context(), exitIdleSess)
 		return snapErr == nil && snap.State == vendorstore.StateDetached
 	})
 	if got := len(exitMarkedUnknownEvents(t, h)); got != 2 {
 		t.Fatalf("TaskMarkedUnknown events after idle detach = %d, want 2", got)
 	}
+}
 
-	// Host shutdown closes every session through the requested-stop path.
-	if err = h.m.CloseAll(ctx); err != nil {
+// assertHostShutdownKeepsTasks pins that the manager-wide shutdown closes
+// every session through the requested-stop path without marking unknown.
+func assertHostShutdownKeepsTasks(t *testing.T, h *exitHarness, markedSeq int64) {
+	t.Helper()
+	if err := h.m.CloseAll(t.Context()); err != nil {
 		t.Fatalf("CloseAll: %v", err)
 	}
 	if got := len(exitMarkedUnknownEvents(t, h)); got != 2 {
@@ -338,17 +398,24 @@ func TestAgentExitMidTurnMarksTaskUnknownAndNotifiesDelegator(t *testing.T) {
 	if died := h.hook.snapshot(); len(died) != 2 || died[0] != exitMemSess || died[1] != exitLeadSess {
 		t.Fatalf("session-died hook calls = %v, want exactly the two unexpected exits", died)
 	}
+	if markedSeq <= 0 {
+		t.Fatal("the member notice lost its idempotent sequence")
+	}
 }
 
 func appendExitEvent(t *testing.T, h *exitHarness, taskID string, evType vendorstore.TeamEventType, sessionID string) (int64, error) {
 	t.Helper()
 	rec, _, err := h.f.store.TeamSnapshot(t.Context(), exitTeamID)
 	if err != nil {
-		return 0, err
+		return 0, fmt.Errorf("read the exit team: %w", err)
 	}
-	return h.f.store.AppendTeamEvent(t.Context(), exitTeamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
+	seq, appErr := h.f.store.AppendTeamEvent(t.Context(), exitTeamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
 		EventID: "ex-pin-" + taskID + "-" + string(evType), TaskID: taskID, EventType: evType, SessionID: sessionID,
 	})
+	if appErr != nil {
+		return 0, fmt.Errorf("append %s for %s: %w", evType, taskID, appErr)
+	}
+	return seq, nil
 }
 
 // mustCloseExitSessions closes the manager while advancing the fake clock so
@@ -356,9 +423,10 @@ func appendExitEvent(t *testing.T, h *exitHarness, taskID string, evType vendors
 func mustCloseExitSessions(t *testing.T, h *exitHarness) {
 	t.Helper()
 	done := make(chan struct{})
+	var closeErr error
 	go func() {
 		defer close(done)
-		_ = h.m.CloseAll(context.Background())
+		closeErr = h.m.CloseAll(context.Background())
 	}()
 	testutil.Spin(t, "close exit sessions", func() bool {
 		h.f.clock.Advance(time.Millisecond)
@@ -369,6 +437,9 @@ func mustCloseExitSessions(t *testing.T, h *exitHarness) {
 			return false
 		}
 	})
+	if closeErr != nil {
+		t.Errorf("close exit sessions: %v", closeErr)
+	}
 }
 
 // TestSessionDiedHookFiresOnlyOnUnexpectedExit pins the actor half of §12

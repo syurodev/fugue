@@ -66,7 +66,7 @@ func (d *teamDispatcher) diskRoomForWorktree(ctx context.Context) bool {
 	if err == nil {
 		slog.WarnContext(ctx, "pausing worktree creation: free disk space under the data directory is low", "free_bytes", free, "threshold_bytes", diskFreeThresholdBytes)
 	}
-	d.setDiskPaused(ctx, true)
+	d.setDiskPaused(true)
 	return false
 }
 
@@ -74,7 +74,7 @@ func (d *teamDispatcher) diskRoomForWorktree(ctx context.Context) bool {
 // disk-full failure (§12): the task itself ends failed(disk).
 func (d *teamDispatcher) noteDiskFullFailure(ctx context.Context, err error) {
 	slog.WarnContext(ctx, "pausing worktree creation after a disk-full failure", "error_code", string(errcode.CodeOf(err)))
-	d.setDiskPaused(ctx, true)
+	d.setDiskPaused(true)
 }
 
 func (d *teamDispatcher) diskPaused() bool {
@@ -83,7 +83,7 @@ func (d *teamDispatcher) diskPaused() bool {
 	return d.diskWait
 }
 
-func (d *teamDispatcher) setDiskPaused(ctx context.Context, paused bool) {
+func (d *teamDispatcher) setDiskPaused(paused bool) {
 	d.diskMu.Lock()
 	changed := d.diskWait != paused
 	d.diskWait = paused
@@ -124,7 +124,7 @@ func (d *teamDispatcher) diskLoop(ctx context.Context) error {
 			timer.Stop()
 		case <-timer.C():
 		}
-		if d.recheckDisk(ctx) {
+		if d.recheckDisk() {
 			if err := d.DispatchAll(ctx); err != nil && ctx.Err() == nil {
 				slog.WarnContext(ctx, "resuming dispatch after the disk pause failed", "error_code", string(errcode.CodeOf(err)))
 			}
@@ -135,16 +135,16 @@ func (d *teamDispatcher) diskLoop(ctx context.Context) error {
 // recheckDisk clears the pause when the injected port reports at least the
 // threshold free; a port error keeps the pause (fail closed after real
 // evidence of a full disk).
-func (d *teamDispatcher) recheckDisk(ctx context.Context) bool {
+func (d *teamDispatcher) recheckDisk() bool {
 	if d.deps.Disk == nil {
-		d.setDiskPaused(ctx, false)
+		d.setDiskPaused(false)
 		return true
 	}
 	free, err := d.deps.Disk.FreeDiskBytes(d.deps.DataDir)
 	if err != nil || free < diskFreeThresholdBytes {
 		return false
 	}
-	d.setDiskPaused(ctx, false)
+	d.setDiskPaused(false)
 	return true
 }
 

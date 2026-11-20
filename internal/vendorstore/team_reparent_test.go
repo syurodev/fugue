@@ -26,9 +26,9 @@ func reparentTestTasks() []NewTaskInput {
 	}
 }
 
-func createReparentTeam(t *testing.T, s *Store) (TeamRecord, []TaskRecord) {
+func createReparentTeam(t *testing.T, s *Store) TeamRecord {
 	t.Helper()
-	rec, tasks, err := s.CreateTeam(t.Context(), &NewTeamInput{
+	rec, _, err := s.CreateTeam(t.Context(), &NewTeamInput{
 		TeamID: reparentTeamID, WorkspaceID: testWorkspaceID, SessionID: reparentLeadSess, ProposedEventID: "ev-rp",
 		Tasks: reparentTestTasks(),
 	})
@@ -56,11 +56,11 @@ func createReparentTeam(t *testing.T, s *Store) (TeamRecord, []TaskRecord) {
 			t.Fatalf("AppendTeamEvent(%s): %v", evs[i].EventID, err)
 		}
 	}
-	rec, tasks, err = s.TeamSnapshot(t.Context(), reparentTeamID)
+	rec, _, err = s.TeamSnapshot(t.Context(), reparentTeamID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	return rec, tasks
+	return rec
 }
 
 func reparentTaskState(t *testing.T, s *Store, taskID string) TaskRecord {
@@ -86,7 +86,7 @@ func reparentTaskState(t *testing.T, s *Store, taskID string) TaskRecord {
 func TestManagerCancelRecoversByReparentingLiveChildren(t *testing.T) {
 	t.Parallel()
 	s, _, _ := protectedStore(t)
-	rec, _ := createReparentTeam(t, s)
+	rec := createReparentTeam(t, s)
 
 	seq, err := s.AppendTeamEvent(t.Context(), reparentTeamID, rec.LastSeq, &AppendTeamEventInput{
 		EventID: "ev-r-cancel", TaskID: reparentMgrTask, EventType: EventTaskRecoveryDecided,
@@ -109,8 +109,8 @@ func TestManagerCancelRecoversByReparentingLiveChildren(t *testing.T) {
 
 	// The moved child is now the lead's direct child: its session is bound
 	// and a lead-delegator check resolves through the normal chain.
-	if task, found, err := s.TaskForSession(t.Context(), reparentMemSess); err != nil || !found || task.ParentTaskID != reparentLeadTask {
-		t.Fatalf("TaskForSession after re-parent = (%+v, %v, %v)", task, found, err)
+	if task, found, lookupErr := s.TaskForSession(t.Context(), reparentMemSess); lookupErr != nil || !found || task.ParentTaskID != reparentLeadTask {
+		t.Fatalf("TaskForSession after re-parent = (%+v, %v, %v)", task, found, lookupErr)
 	}
 	if _, err = s.AppendTeamEvent(t.Context(), reparentTeamID, seq, &AppendTeamEventInput{
 		EventID: "ev-r-cancel-2", TaskID: reparentMgrTask, EventType: EventTaskRecoveryDecided, Outcome: outcomeCancelled, ReparentTo: reparentLeadTask,
@@ -125,7 +125,7 @@ func TestManagerCancelRecoversByReparentingLiveChildren(t *testing.T) {
 func TestReparentToIsRejectedOutsideManagerCancel(t *testing.T) {
 	t.Parallel()
 	s, _, _ := protectedStore(t)
-	rec, _ := createReparentTeam(t, s)
+	rec := createReparentTeam(t, s)
 
 	cases := []struct {
 		name string

@@ -72,6 +72,8 @@ func (k failureKind) sentinel() error {
 		return ErrRefLockExhausted
 	case failureDiskFull:
 		return ErrDiskFull
+	case failureGit, failureIdentity, failureSigning, failureMissingRef:
+		return nil
 	default:
 		return nil
 	}

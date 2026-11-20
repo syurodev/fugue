@@ -26,15 +26,23 @@ import (
 // the remaining children until space is free again.
 func TestDiskFullFailsTaskAndPausesWorktreeCreation(t *testing.T) {
 	t.Parallel()
-	ctx := t.Context()
 	f := newDispatchFixture(t, true)
-	f.disp.Start(ctx)
+	f.disp.Start(t.Context())
 
-	// Phase A: the port reports no space, so the pause holds every child.
+	teamID := assertDiskPauseHoldsChildren(t, f)
+	assertDiskRecheckResumes(t, f, teamID)
+	team2 := assertDiskFullFailureFailsTaskAndPauses(t, f)
+	assertFailurePauseClearsAndStarts(t, f, team2)
+}
+
+// assertDiskPauseHoldsChildren dispatches a team with the injected port below
+// the threshold and asserts the lead binds while the children wait.
+func assertDiskPauseHoldsChildren(t *testing.T, f *dispatchFixture) string {
+	t.Helper()
 	f.disk.setFree(0)
 	teamID := f.approve(t, validTeamProposalArgs(), decisionApprove, "")
-	if err := f.disp.Dispatch(ctx, teamID); err != nil {
-		t.Fatalf("Dispatch under the disk pause: %v", err)
+	if dispErr := f.disp.Dispatch(t.Context(), teamID); dispErr != nil {
+		t.Fatalf("Dispatch under the disk pause: %v", dispErr)
 	}
 	tasks := f.tasks(t, teamID)
 	lead := tasks[teamID+"."+teamTestLeadTask]
@@ -44,7 +52,15 @@ func TestDiskFullFailsTaskAndPausesWorktreeCreation(t *testing.T) {
 	if f.sessions.startCount() != 0 {
 		t.Fatalf("sessions started under the disk pause = %d, want 0", f.sessions.startCount())
 	}
-	queue, err := f.disp.QueueSnapshot(ctx)
+	assertChildrenWaitOnDisk(t, f, teamID)
+	return teamID
+}
+
+// assertChildrenWaitOnDisk reads the queue snapshot and asserts the two
+// members are blocked with the visible waiting(disk) reason.
+func assertChildrenWaitOnDisk(t *testing.T, f *dispatchFixture, teamID string) {
+	t.Helper()
+	queue, err := f.disp.QueueSnapshot(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,9 +77,12 @@ func TestDiskFullFailsTaskAndPausesWorktreeCreation(t *testing.T) {
 	if waiting != 2 {
 		t.Fatalf("waiting children = %d, want the two members", waiting)
 	}
+}
 
-	// Phase B: space is free again; the re-check loop clears the pause on the
-	// fake clock and dispatches.
+// assertDiskRecheckResumes restores free space and spins until the re-check
+// loop cleared the pause and dispatched the children.
+func assertDiskRecheckResumes(t *testing.T, f *dispatchFixture, teamID string) {
+	t.Helper()
 	f.disk.setFree(2 << 30)
 	testutil.Spin(t, "disk pause clears and dispatches the children", func() bool {
 		f.clk.Advance(time.Second)
@@ -71,7 +90,7 @@ func TestDiskFullFailsTaskAndPausesWorktreeCreation(t *testing.T) {
 		return snap[teamID+"."+teamTestTaskA].State == vendorstore.TaskStateRunning &&
 			snap[teamID+"."+teamTestTaskB].State == vendorstore.TaskStateRunning
 	})
-	queue, err = f.disp.QueueSnapshot(ctx)
+	queue, err := f.disp.QueueSnapshot(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,73 +99,107 @@ func TestDiskFullFailsTaskAndPausesWorktreeCreation(t *testing.T) {
 			t.Fatalf("queued task after resume = %+v, want no disk wait reason", q)
 		}
 	}
+}
 
-	// Phase C: a real disk-full worktree failure fails that task failed(disk)
-	// with its delegator digest and pauses the rest.
+// assertDiskFullFailureFailsTaskAndPauses injects a classified disk-full
+// worktree error into the second team's start: the first child ends
+// failed(disk) with its delegator digest and the second stays queued behind
+// the pause. It returns the second team's ID.
+func assertDiskFullFailureFailsTaskAndPauses(t *testing.T, f *dispatchFixture) string {
+	t.Helper()
 	team2 := f.approve(t, memberTasksArgs(2), decisionApprove, "")
 	f.disp.deps.TestWorktreeErr = fmt.Errorf("worktree add: %w", gitops.ErrDiskFull)
-	if err := f.disp.Dispatch(ctx, team2); err != nil {
-		t.Fatalf("Dispatch with a disk-full worktree failure: %v", err)
+	if dispErr := f.disp.Dispatch(t.Context(), team2); dispErr != nil {
+		t.Fatalf("Dispatch with a disk-full worktree failure: %v", dispErr)
 	}
-	tasks2 := f.tasks(t, team2)
-	first, ok := tasks2[team2+".ma"]
+	assertDiskFailedTask(t, f, team2)
+	assertSecondChildWaits(t, f, team2)
+	assertLeadDigestRecipient(t, f, team2)
+	assertClaimedDigestFailsDisk(t, f, team2)
+	return team2
+}
+
+// assertDiskFailedTask asserts the first child of team2 ended failed(disk).
+func assertDiskFailedTask(t *testing.T, f *dispatchFixture, teamID string) {
+	t.Helper()
+	first, ok := f.tasks(t, teamID)[teamID+".ma"]
 	if !ok || first.State != vendorstore.TaskStateFailed || first.FailureCode != failDisk {
 		t.Fatalf("first child after disk-full = %+v, want failed(disk)", first)
 	}
-	second := tasks2[team2+".mb"]
-	if second.State != vendorstore.TaskStateQueued {
+}
+
+// assertSecondChildWaits asserts the second child is queued behind the pause
+// with the visible waiting(disk) reason.
+func assertSecondChildWaits(t *testing.T, f *dispatchFixture, teamID string) {
+	t.Helper()
+	if second := f.tasks(t, teamID)[teamID+".mb"]; second.State != vendorstore.TaskStateQueued {
 		t.Fatalf("second child after disk-full = %s, want queued under the pause", second.State)
 	}
-	queue, err = f.disp.QueueSnapshot(ctx)
+	queue, err := f.disp.QueueSnapshot(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	var sawWait bool
 	for _, q := range queue {
-		if q.TeamID == team2 && q.TaskID == team2+".mb" {
-			sawWait = q.Blocked && q.WaitReason == waitDisk
+		if q.TeamID == teamID && q.TaskID == teamID+".mb" && (!q.Blocked || q.WaitReason != waitDisk) {
+			t.Fatalf("queue snapshot after the failure = %+v, want a waiting(%s) child", q, waitDisk)
 		}
 	}
-	if !sawWait {
-		t.Fatalf("queue snapshot after the failure holds no waiting(%s) child: %+v", waitDisk, queue)
-	}
-	pending, err := f.hp.vendorStore.PendingMailbox(ctx)
+}
+
+// assertLeadDigestRecipient asserts the lead holds pending mail after the
+// disk-full failure.
+func assertLeadDigestRecipient(t *testing.T, f *dispatchFixture, teamID string) {
+	t.Helper()
+	pending, err := f.hp.vendorStore.PendingMailbox(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
-	var leadRecipient bool
 	for _, r := range pending {
-		if r.TeamID == team2 && r.RecipientTaskID == team2+"."+teamTestLeadTask {
-			leadRecipient = true
+		if r.TeamID == teamID && r.RecipientTaskID == teamID+"."+teamTestLeadTask {
+			return
 		}
 	}
-	if !leadRecipient {
-		t.Fatalf("PendingMailbox = %+v, want the failed(disk) digest for the lead", pending)
-	}
-	mail, err := f.hp.vendorStore.ClaimMailbox(ctx, team2, team2+"."+teamTestLeadTask)
+	t.Fatalf("PendingMailbox = %+v, want the failed(disk) digest for the lead", pending)
+}
+
+// assertClaimedDigestFailsDisk opens the lead's claimed digest and asserts
+// one failed(disk) item reached it.
+func assertClaimedDigestFailsDisk(t *testing.T, f *dispatchFixture, teamID string) {
+	t.Helper()
+	mail, err := f.hp.vendorStore.ClaimMailbox(t.Context(), teamID, teamID+"."+teamTestLeadTask)
 	if err != nil {
 		t.Fatal(err)
 	}
-	digestSeen := false
+	if digestItemWithCode(t, f, mail, failDisk) {
+		return
+	}
+	t.Fatalf("delegator digest rows = %+v, want a failed(disk) item", mail)
+}
+
+// digestItemWithCode reports whether one claimed row is a failed item with
+// the given failure code.
+func digestItemWithCode(t *testing.T, f *dispatchFixture, mail []vendorstore.MailboxMessage, code string) bool {
+	t.Helper()
 	for i := range mail {
 		var item mailboxDigestItem
-		raw, openErr := f.hp.vendorStore.OpenMailboxPayload(ctx, team2, mail[i].MessageID)
+		raw, openErr := f.hp.vendorStore.OpenMailboxPayload(t.Context(), mail[i].TeamID, mail[i].MessageID)
 		if openErr != nil {
 			t.Fatal(openErr)
 		}
-		if json.Unmarshal(raw, &item) == nil && item.State == string(vendorstore.TaskStateFailed) && item.FailureCode == failDisk {
-			digestSeen = true
+		if json.Unmarshal(raw, &item) == nil && item.State == string(vendorstore.TaskStateFailed) && item.FailureCode == code {
+			return true
 		}
 	}
-	if !digestSeen {
-		t.Fatalf("delegator digest rows = %+v, want a failed(disk) item", mail)
-	}
+	return false
+}
 
-	// Phase D: the failure pause also clears on the re-check once the error
-	// is gone, and the remaining child starts.
+// assertFailurePauseClearsAndStarts removes the injected error and spins until
+// the re-check loop cleared the failure pause and the remaining child starts.
+func assertFailurePauseClearsAndStarts(t *testing.T, f *dispatchFixture, teamID string) {
+	t.Helper()
 	f.disp.deps.TestWorktreeErr = nil
 	testutil.Spin(t, "failure pause clears and the second child starts", func() bool {
 		f.clk.Advance(time.Second)
-		return f.tasks(t, team2)[team2+".mb"].State == vendorstore.TaskStateRunning
+		return f.tasks(t, teamID)[teamID+".mb"].State == vendorstore.TaskStateRunning
 	})
 }
