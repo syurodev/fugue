@@ -25,10 +25,10 @@ type pageRequest struct {
 	before  int64
 }
 
-func (f *fakeFetcher) RequestSessions()        {}
-func (f *fakeFetcher) RequestProbe()           {}
-func (f *fakeFetcher) RequestWorkspaces()      {}
-func (f *fakeFetcher) RequestWorkspace(string) {}
+func (f *fakeFetcher) RequestSessions()                {}
+func (f *fakeFetcher) RequestProbe()                   {}
+func (f *fakeFetcher) RequestWorkspaces()              {}
+func (f *fakeFetcher) RequestWorkspace(string, uint64) {}
 
 func (f *fakeFetcher) RequestCommands(session string) {
 	f.commands = append(f.commands, session)

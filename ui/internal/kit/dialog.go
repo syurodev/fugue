@@ -79,6 +79,9 @@ type DialogProps struct {
 	Cancel, Primary *ButtonState
 	PrimaryLabel    string
 	PrimaryVariant  ButtonVariant
+	// PrimaryDisabled disables the primary button and blocks Submit until the
+	// caller clears it (for example while required workspace detail reloads).
+	PrimaryDisabled bool
 	// Dirty reports a form with unsaved input: Escape then refuses to
 	// close (§6.17).
 	Dirty bool
@@ -267,7 +270,7 @@ func (d *DialogState) consumeSubmit(props *DialogProps, res *DialogResult) {
 		return
 	}
 	d.submit = false
-	if props.Busy || res.Submitted || res.Closed {
+	if props.Busy || props.PrimaryDisabled || res.Submitted || res.Closed {
 		return
 	}
 	res.Submitted = true

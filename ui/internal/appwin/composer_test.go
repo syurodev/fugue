@@ -518,6 +518,99 @@ func TestStartFlowRefusesASubmitWithoutAWorkspace(t *testing.T) {
 	}
 }
 
+// twoRootDetail feeds ResultWorkspaces and ResultWorkspace for testWorkspace
+// with main (rw) and web (ro) roots at the given hash and revision.
+func twoRootDetail(fx *composerFixture, hash string, rev int64, gen uint64) {
+	fx.sc.applyResult(session.Result{
+		Kind:       session.ResultWorkspace,
+		Generation: gen,
+		Workspace: client.Workspace{
+			ID: testWorkspace, Name: testBackend, ConfigHash: hash, ConfigRevision: rev,
+			Roots: []client.WorkspaceRoot{
+				{Name: testMainRoot, Path: testRootMainPath, Access: "rw"},
+				{Name: testRootWeb, Path: testRootWebPath, Access: "ro"},
+			},
+		},
+	})
+}
+
+// TestStartFlowPreservesRootAndBlocksStartWhileDetailReloads pins that a
+// mid-dialog detail drop preserves the user's chosen root and blocks Start
+// until the refreshed detail arrives.
+func TestStartFlowPreservesRootAndBlocksStartWhileDetailReloads(t *testing.T) {
+	t.Parallel()
+	fx := newComposerFixture(t, stateReady, client.Capability{})
+	reads := &recordingReader{}
+	fx.sc.wsReads = reads
+	f := fx.c.start
+
+	fx.sc.applyResult(session.Result{
+		Kind:       session.ResultWorkspaces,
+		Workspaces: []client.WorkspaceSummary{{ID: testWorkspace, Name: testBackend, ConfigRevision: 1}},
+	})
+	f.chooseWorkspace(testWorkspace, fx.sc)
+	twoRootDetail(fx, "h1", 1, reads.gens[0])
+	f.rootSel = testRootWeb
+
+	feedEvent(fx.sc, workspace.EventConfigChanged, topicSummary(t, workspace.Summary{
+		ID: testWorkspace, Name: testBackend, ConfigRevision: 2,
+	}))
+	if f.rootSel != testRootWeb || f.canStart(fx.sc) || !f.detailLoading(fx.sc) {
+		t.Fatalf("during reload: rootSel=%q canStart=%v loading=%v", f.rootSel, f.canStart(fx.sc), f.detailLoading(fx.sc))
+	}
+	h := newFrameRunner(t)
+	f.dialog.Open()
+	h.frame(t, image.Pt(800, 600), func(gtx *layout.Context) { f.layout(h.env, gtx, fx.sc, fx.c) })
+	f.dialog.Submit()
+	h.frame(t, image.Pt(800, 600), func(gtx *layout.Context) { f.layout(h.env, gtx, fx.sc, fx.c) })
+	f.submit(fx.sc, fx.c)
+	if f.busy || f.lastErr == "" || len(fx.fake.taken()) != 0 {
+		t.Fatalf("blocked submit posted or hid status: busy=%v err=%q calls=%+v", f.busy, f.lastErr, fx.fake.taken())
+	}
+
+	twoRootDetail(fx, "h2", 2, reads.gens[len(reads.gens)-1])
+	if !f.canStart(fx.sc) || f.rootSel != testRootWeb {
+		t.Fatalf("after reload: rootSel=%q canStart=%v", f.rootSel, f.canStart(fx.sc))
+	}
+	f.submit(fx.sc, fx.c)
+	if calls := fx.awaitWrite(); len(calls) != 1 || calls[0].root != testRootWeb {
+		t.Fatalf("calls = %+v, want StartSession with preserved root web", calls)
+	}
+}
+
+// TestStartFlowClearsMissingRootWhenDetailArrives pins that rootSel is cleared
+// once a refreshed detail confirms the chosen root was removed.
+func TestStartFlowClearsMissingRootWhenDetailArrives(t *testing.T) {
+	t.Parallel()
+	fx := newComposerFixture(t, stateReady, client.Capability{})
+	reads := &recordingReader{}
+	fx.sc.wsReads = reads
+	f := fx.c.start
+
+	fx.sc.applyResult(session.Result{
+		Kind:       session.ResultWorkspaces,
+		Workspaces: []client.WorkspaceSummary{{ID: testWorkspace, Name: testBackend, ConfigRevision: 1}},
+	})
+	f.chooseWorkspace(testWorkspace, fx.sc)
+	twoRootDetail(fx, "h1", 1, reads.gens[0])
+	f.rootSel = testRootWeb
+
+	feedEvent(fx.sc, workspace.EventRootRemoved, topicSummary(t, workspace.Summary{
+		ID: testWorkspace, Name: testBackend, ConfigRevision: 2,
+	}))
+	fx.sc.applyResult(session.Result{
+		Kind:       session.ResultWorkspace,
+		Generation: reads.gens[len(reads.gens)-1],
+		Workspace: client.Workspace{
+			ID: testWorkspace, Name: testBackend, ConfigHash: "h2", ConfigRevision: 2,
+			Roots: []client.WorkspaceRoot{{Name: testMainRoot, Path: testRootMainPath, Access: "rw"}},
+		},
+	})
+	if f.rootSel != "" {
+		t.Fatalf("rootSel after removed-root detail = %q, want cleared", f.rootSel)
+	}
+}
+
 // TestComposerLaysOutWithinItsRowHeight pins the row contract the transcript
 // pane's split relies on: the composer laid out under the row's constraints
 // fills exactly the height the pane measured for it, even when the content

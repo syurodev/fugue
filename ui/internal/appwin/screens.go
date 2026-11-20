@@ -32,7 +32,7 @@ type pageFetcher interface {
 	RequestPage(session string, before int64)
 	RequestCommands(session string)
 	RequestWorkspaces()
-	RequestWorkspace(workspace string)
+	RequestWorkspace(workspace string, gen uint64)
 	RequestProbe()
 	Results() <-chan session.Result
 }
@@ -87,7 +87,7 @@ type screens struct {
 	workspaces   *workspace.Model
 	wsMut        *workspace.Mutator
 	wsReads      wsReader
-	wsDetailReq  map[string]bool
+	wsDetailReq  map[string]uint64
 	wsHeaders    map[string]*kit.SectionHeaderState
 	wsMenu       *kit.MenuState
 	wsMenuFor    string
@@ -116,7 +116,7 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 		workspaces:   workspace.NewModel(),
 		wsMut:        wsMut,
 		wsReads:      fetcher,
-		wsDetailReq:  map[string]bool{},
+		wsDetailReq:  map[string]uint64{},
 		wsHeaders:    map[string]*kit.SectionHeaderState{},
 		wsMenu:       kit.NewMenuState(),
 		policyBanner: kit.NewBannerState(),
@@ -215,7 +215,7 @@ func (s *screens) applyUpdate(u hostconn.Update) {
 func (s *screens) reconnected() {
 	delete(s.pendingPage, s.open)
 	delete(s.pendingOlder, s.open)
-	s.wsDetailReq = map[string]bool{}
+	s.wsDetailReq = map[string]uint64{}
 	s.fetcher.RequestSessions()
 	s.wsReads.RequestWorkspaces()
 	s.fetcher.RequestProbe()

@@ -56,6 +56,10 @@ type Detail struct {
 	MissingRoots         []string
 	Pending              bool
 	Diff                 []DiffEntry
+	// Generation matches Model.Generation(ID) at the time the detail read was
+	// armed so stale reads finished after an out-of-band edit or delete are
+	// dropped.
+	Generation uint64
 }
 
 // Model is the app's workspace state: the summaries the topic reports and
@@ -64,19 +68,25 @@ type Model struct {
 	byID   map[string]Summary
 	order  []string
 	detail map[string]Detail
+	gen    map[string]uint64
 }
 
 // NewModel builds an empty workspace model.
 func NewModel() *Model {
-	return &Model{byID: map[string]Summary{}, detail: map[string]Detail{}}
+	return &Model{byID: map[string]Summary{}, detail: map[string]Detail{}, gen: map[string]uint64{}}
 }
 
 // ApplySnapshot replaces the list with the topic snapshot's summaries and
-// drops the details: a fresh connection's state starts from the snapshot.
+// drops the details: a fresh connection's state starts from the snapshot. Any
+// already-known workspace advances its generation so pre-reconnect reads land
+// stale and are dropped.
 func (m *Model) ApplySnapshot(payload []byte) error {
 	var summaries []Summary
 	if err := json.Unmarshal(payload, &summaries); err != nil {
 		return fmt.Errorf("decode the workspace snapshot: %w", err)
+	}
+	for id := range m.byID {
+		m.bumpGen(id)
 	}
 	byID := make(map[string]Summary, len(summaries))
 	order := make([]string, 0, len(summaries))
@@ -91,8 +101,9 @@ func (m *Model) ApplySnapshot(payload []byte) error {
 
 // ApplyEvent applies one topic event, whose payload is the workspace's
 // refreshed summary. An event that changes the roots, the configuration or
-// the pending policy change drops the workspace's detail, so the next read
-// rebuilds it; a deleted event drops the workspace whole.
+// the pending policy change drops the workspace's detail and advances its
+// generation so earlier reads are ignored; a deleted event drops the workspace
+// whole.
 func (m *Model) ApplyEvent(eventType string, payload []byte) error {
 	var summary Summary
 	if err := json.Unmarshal(payload, &summary); err != nil {
@@ -111,9 +122,11 @@ func (m *Model) ApplyEvent(eventType string, payload []byte) error {
 		}
 		m.byID[summary.ID] = summary
 		delete(m.detail, summary.ID)
+		m.bumpGen(summary.ID)
 	case EventDeleted:
 		delete(m.byID, summary.ID)
 		delete(m.detail, summary.ID)
+		m.bumpGen(summary.ID)
 		for i, id := range m.order {
 			if id == summary.ID {
 				m.order = append(m.order[:i], m.order[i+1:]...)
@@ -127,7 +140,8 @@ func (m *Model) ApplyEvent(eventType string, payload []byte) error {
 }
 
 // ApplyList replaces the list with a ListWorkspaces read, keeping cached
-// details whose revision and pending flag still match.
+// details whose revision and pending flag still match, and advancing generation
+// whenever a workspace leaves or has its detail dropped or invalidated.
 func (m *Model) ApplyList(summaries []Summary) {
 	byID := make(map[string]Summary, len(summaries))
 	order := make([]string, 0, len(summaries))
@@ -137,21 +151,36 @@ func (m *Model) ApplyList(summaries []Summary) {
 		order = append(order, s.ID)
 		if det, ok := m.detail[s.ID]; ok && det.ConfigRevision >= s.ConfigRevision && det.Pending == s.PendingPolicyConfirmation {
 			detail[s.ID] = det
+			continue
+		}
+		if prev, existed := m.byID[s.ID]; existed {
+			if _, hadDet := m.detail[s.ID]; hadDet || prev.ConfigRevision != s.ConfigRevision || prev.PendingPolicyConfirmation != s.PendingPolicyConfirmation {
+				m.bumpGen(s.ID)
+			}
+		}
+	}
+	for id := range m.byID {
+		if _, ok := byID[id]; !ok {
+			m.bumpGen(id)
 		}
 	}
 	m.byID, m.order, m.detail = byID, order, detail
 }
 
 // ApplyDetail folds one workspace read into the model. A late detail for a
-// workspace no longer in byID (for example, deleted while the read was in
-// flight) or older than the current ConfigRevision is ignored so it never
-// resurrects a deleted workspace or overwrites a newer hash.
+// workspace no longer in byID (deleted while in flight), whose armed
+// generation no longer matches (for example after an out-of-band edit
+// event that kept ConfigRevision unchanged), or older than the current
+// ConfigRevision is ignored.
 func (m *Model) ApplyDetail(d *Detail) {
 	if d == nil {
 		return
 	}
 	s, ok := m.byID[d.ID]
 	if !ok {
+		return
+	}
+	if d.Generation != m.gen[d.ID] {
 		return
 	}
 	if d.ConfigRevision < s.ConfigRevision {
@@ -167,6 +196,17 @@ func (m *Model) ApplyDetail(d *Detail) {
 	}
 	m.byID[d.ID] = s
 	m.detail[d.ID] = *d
+}
+
+// Generation returns the workspace's current detail-read generation, bumped on
+// every event or list refresh that invalidates an earlier detail read.
+func (m *Model) Generation(id string) uint64 {
+	return m.gen[id]
+}
+
+// bumpGen advances the workspace's generation counter.
+func (m *Model) bumpGen(id string) {
+	m.gen[id]++
 }
 
 // List returns the summaries in list order.

@@ -234,12 +234,15 @@ func (d *DialogState) drawFooter(env *Env, gtx *layout.Context, props *DialogPro
 	}
 	footTop := d.rect.Max.Y - m.pad - m.footH
 	cancelPr := ButtonProps{Text: "Cancel", Variant: Secondary, Size: SizeLG}
-	primaryPr := ButtonProps{Text: props.PrimaryLabel, Variant: props.PrimaryVariant, Size: SizeLG, Busy: props.Busy}
+	primaryPr := ButtonProps{
+		Text: props.PrimaryLabel, Variant: props.PrimaryVariant, Size: SizeLG,
+		Busy: props.Busy, Disabled: props.PrimaryDisabled,
+	}
 	gap := gtx.Dp(theme.SpaceMD)
 	inner := d.rect.Inset(m.pad)
 
 	x := inner.Max.X - props.Primary.Measure(env, gtx, primaryPr).Size.X
-	if d.footButton(env, gtx, props.Primary, primaryPr, image.Pt(x, footTop), active) {
+	if d.footButton(env, gtx, props.Primary, primaryPr, image.Pt(x, footTop), active && !props.PrimaryDisabled) {
 		res.Submitted, res.Closed = true, true
 		d.close(gtx)
 		return nil

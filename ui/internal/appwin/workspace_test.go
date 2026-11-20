@@ -22,16 +22,23 @@ const (
 	testApprovalAsk  = "ask"
 	testApprovalFull = "full"
 	testRootAPI      = "api"
+	testRootWeb      = "web"
+	testRootMainPath = "/repo/main"
+	testRootWebPath  = "/repo/web"
 )
 
 // recordingReader records the workspace reads the screens arm.
 type recordingReader struct {
 	lists   int
 	details []string
+	gens    []uint64
 }
 
-func (r *recordingReader) RequestWorkspaces()         { r.lists++ }
-func (r *recordingReader) RequestWorkspace(id string) { r.details = append(r.details, id) }
+func (r *recordingReader) RequestWorkspaces() { r.lists++ }
+func (r *recordingReader) RequestWorkspace(id string, gen uint64) {
+	r.details = append(r.details, id)
+	r.gens = append(r.gens, gen)
+}
 
 // recordingMutatorClient records the workspace calls the mutator reaches.
 type recordingMutatorClient struct {
@@ -83,9 +90,9 @@ func feedSnapshot(sc *screens, payload []byte) {
 	sc.update([]hostconn.Update{{Topic: topicWorkspaces, Snapshot: &client.Snapshot{State: payload}}}, nil, nil, nil)
 }
 
-// feedEvent feeds one topic event into the screens.
-func feedEvent(sc *screens, topic, eventType string, payload []byte) {
-	sc.update([]hostconn.Update{{Topic: topic, Event: &client.Event{Type: eventType, Payload: payload}}}, nil, nil, nil)
+// feedEvent feeds one workspaces-topic event into the screens.
+func feedEvent(sc *screens, eventType string, payload []byte) {
+	sc.update([]hostconn.Update{{Topic: topicWorkspaces, Event: &client.Event{Type: eventType, Payload: payload}}}, nil, nil, nil)
 }
 
 // topicSnapshot marshals the summaries the workspaces snapshot carries.
@@ -183,7 +190,7 @@ func TestWorkspaceDetailReadsArmOncePerMissingDetail(t *testing.T) {
 	}
 
 	// A root change drops w1's detail, and exactly one read re-arms.
-	feedEvent(sc, topicWorkspaces, workspace.EventRootAdded, topicSummary(t, workspace.Summary{ID: "w1", Name: "A"}))
+	feedEvent(sc, workspace.EventRootAdded, topicSummary(t, workspace.Summary{ID: "w1", Name: "A"}))
 	if len(reads.details) != 3 {
 		t.Fatalf("detail reads after the root change = %v, want one re-arm", reads.details)
 	}
@@ -203,7 +210,7 @@ func TestDeletedWorkspaceClosesItsDialogs(t *testing.T) {
 	if !sc.dlg.del.dialog.IsOpen() {
 		t.Fatal("the delete dialog did not open")
 	}
-	feedEvent(sc, topicWorkspaces, workspace.EventDeleted, topicSummary(t, workspace.Summary{ID: "w1", Name: "A"}))
+	feedEvent(sc, workspace.EventDeleted, topicSummary(t, workspace.Summary{ID: "w1", Name: "A"}))
 	if sc.dlg.del.dialog.IsOpen() {
 		t.Fatal("the delete dialog outlived its workspace")
 	}
@@ -360,7 +367,7 @@ func TestDetailDropClosesOpenWorkspaceDialogAndRearmsRead(t *testing.T) {
 		t.Fatal("the root dialog did not open")
 	}
 	beforeReads := len(reads.details)
-	feedEvent(sc, topicWorkspaces, workspace.EventConfigChanged, topicSummary(t, workspace.Summary{ID: "w1", Name: "A", ConfigRevision: 2}))
+	feedEvent(sc, workspace.EventConfigChanged, topicSummary(t, workspace.Summary{ID: "w1", Name: "A", ConfigRevision: 2}))
 	if sc.dlg.root.dialog.IsOpen() {
 		t.Fatal("the root dialog stayed open after its detail was dropped")
 	}
@@ -425,7 +432,7 @@ func TestResultWorkspacesAndWorkspaceFeedModelAndStartDialog(t *testing.T) {
 			PolicyDiff:                []client.PolicyDiffEntry{{Key: testPolicyKey, OldValue: testApprovalAsk, NewValue: testApprovalFull}},
 			Roots: []client.WorkspaceRoot{
 				{Name: testRootAPI, Path: "/repo/api", Access: "rw"},
-				{Name: "web", Path: "/repo/web", Access: "ro"},
+				{Name: testRootWeb, Path: testRootWebPath, Access: "ro"},
 			},
 		},
 	}}, nil, nil)
@@ -437,6 +444,60 @@ func TestResultWorkspacesAndWorkspaceFeedModelAndStartDialog(t *testing.T) {
 	sc.composer.start.chooseWorkspace("w1", sc)
 	if got := sc.composer.start.rootName(sc); got != testRootAPI {
 		t.Fatalf("start dialog default root = %q, want api from shared model", got)
+	}
+}
+
+// TestScreensDropsLateDetailArmedBeforePendingConfirmation pins that screens
+// tracks armed read generations across topic drops: a read armed before
+// EventPendingConfirm returns late and is ignored, a fresh read at the new
+// generation re-arms automatically and lands with Pending true.
+func TestScreensDropsLateDetailArmedBeforePendingConfirmation(t *testing.T) {
+	t.Parallel()
+	sc, _ := newTestScreens(t)
+	reads := &recordingReader{}
+	sc.wsReads = reads
+
+	feedSnapshot(sc, topicSnapshot(t, []workspace.Summary{{ID: "w1", Name: "A", ConfigRevision: 1}}))
+	if len(reads.details) != 1 || reads.gens[0] != 0 {
+		t.Fatalf("initial armed reads = (%v, %v), want ([w1], [0])", reads.details, reads.gens)
+	}
+
+	// An out-of-band edit arrives before the initial read returns, keeping
+	// ConfigRevision at 1 while flipping PendingPolicyConfirmation to true.
+	feedEvent(sc, workspace.EventPendingConfirm, topicSummary(t, workspace.Summary{
+		ID: "w1", Name: "A", ConfigRevision: 1, PendingPolicyConfirmation: true,
+	}))
+	if len(reads.details) != 2 || reads.gens[1] != 1 {
+		t.Fatalf("re-armed reads = (%v, %v), want second w1 read at gen 1", reads.details, reads.gens)
+	}
+
+	// Late initial read (gen 0) arrives: ignored.
+	sc.update(nil, []session.Result{{
+		Kind:       session.ResultWorkspace,
+		Generation: reads.gens[0],
+		Workspace: client.Workspace{
+			ID: "w1", Name: "A", ConfigHash: "hash-stale", ConfigRevision: 1,
+		},
+	}}, nil, nil)
+	if _, ok := sc.workspaces.DetailFor("w1"); ok {
+		t.Fatal("stale gen-0 ResultWorkspace populated DetailFor")
+	}
+	if sum, ok := sc.workspaces.Lookup("w1"); !ok || !sum.PendingPolicyConfirmation {
+		t.Fatalf("summary = %+v, %v; want PendingPolicyConfirmation true", sum, ok)
+	}
+
+	// Fresh read (gen 1) arrives and lands.
+	sc.update(nil, []session.Result{{
+		Kind:       session.ResultWorkspace,
+		Generation: reads.gens[1],
+		Workspace: client.Workspace{
+			ID: "w1", Name: "A", ConfigHash: "hash-pending", ConfigRevision: 1,
+			PendingPolicyConfirmation: true,
+		},
+	}}, nil, nil)
+	det, ok := sc.workspaces.DetailFor("w1")
+	if !ok || det.ConfigHash != "hash-pending" || !det.Pending {
+		t.Fatalf("fresh detail = %+v, %v; want hash-pending and Pending true", det, ok)
 	}
 }
 

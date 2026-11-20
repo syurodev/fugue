@@ -84,14 +84,18 @@ func (f *startFlow) open(sc *screens) {
 	sc.requestWorkspaces()
 }
 
-// reconcile clears a workspace or root selection that left the shared
-// workspace model and defaults the root picker when multiple roots arrive.
+// reconcile clears a workspace selection that left the shared workspace model
+// and updates the root selection only once the workspace's detail has arrived:
+// while detail is reloading, any chosen rootSel is preserved.
 func (f *startFlow) reconcile(sc *screens) {
 	if f.wsID == "" {
 		return
 	}
 	if _, ok := sc.workspaces.Lookup(f.wsID); !ok {
 		f.wsID, f.rootSel = "", ""
+		return
+	}
+	if _, hasDet := sc.workspaces.DetailFor(f.wsID); !hasDet {
 		return
 	}
 	roots := f.usableRoots(sc)
@@ -110,6 +114,22 @@ func (f *startFlow) reconcile(sc *screens) {
 	if f.rootSel == "" && len(roots) > 1 {
 		f.rootSel = roots[0].Name
 	}
+}
+
+// detailLoading reports whether a chosen workspace is currently waiting on its
+// detail read (for example after an initial selection or a topic drop).
+func (f *startFlow) detailLoading(sc *screens) bool {
+	if f.wsID == "" {
+		return false
+	}
+	_, ok := sc.workspaces.DetailFor(f.wsID)
+	return !ok
+}
+
+// canStart reports whether a workspace is chosen and its current detail is
+// loaded so Start can submit safely.
+func (f *startFlow) canStart(sc *screens) bool {
+	return f.wsID != "" && !f.detailLoading(sc)
 }
 
 // startPosted folds a start post's result in: the busy mark clears, a
@@ -199,17 +219,18 @@ func (f *startFlow) row(env *kit.Env, gtx *layout.Context, sc *screens) layout.D
 }
 
 // layout runs the dialog's frame, drawing it over the window while open.
-func (f *startFlow) layout(env *kit.Env, gtx *layout.Context, sc *screens, c *composer) layout.Dimensions {
+func (f *startFlow) layout(env *kit.Env, gtx *layout.Context, sc *screens, c *composer) {
 	res, err := f.dialog.Layout(env, gtx, &kit.DialogProps{
-		Variant:        kit.DialogForm,
-		Title:          "New session",
-		Description:    "Starts a vendor session in a workspace root.",
-		Cancel:         f.cancel,
-		Primary:        f.start,
-		PrimaryLabel:   "Start",
-		PrimaryVariant: kit.Primary,
-		Dirty:          f.dirty(),
-		Busy:           f.busy,
+		Variant:         kit.DialogForm,
+		Title:           "New session",
+		Description:     "Starts a vendor session in a workspace root.",
+		Cancel:          f.cancel,
+		Primary:         f.start,
+		PrimaryLabel:    "Start",
+		PrimaryVariant:  kit.Primary,
+		PrimaryDisabled: !f.canStart(sc),
+		Dirty:           f.dirty(),
+		Busy:            f.busy,
 		Body: func(gtx *layout.Context, bands *kit.DialogBands) image.Point {
 			return f.body(env, gtx, bands, sc, c)
 		},
@@ -220,15 +241,18 @@ func (f *startFlow) layout(env *kit.Env, gtx *layout.Context, sc *screens, c *co
 	if res.Submitted {
 		f.submit(sc, c)
 	}
-	return layout.Dimensions{Size: res.Size}
 }
 
 // submit posts the start with the chosen values; the new session arrives on
 // the vendor-sessions topic and the screens open it.
 func (f *startFlow) submit(sc *screens, c *composer) {
-	if f.busy || f.wsID == "" {
-		if f.wsID == "" {
+	if f.busy || !f.canStart(sc) {
+		switch {
+		case f.busy:
+		case f.wsID == "":
 			f.lastErr = "choose a workspace"
+		default:
+			f.lastErr = "loading workspace details"
 		}
 		return
 	}
@@ -290,9 +314,17 @@ func (f *startFlow) layWorkspace(env *kit.Env, sc *screens, lay fieldLay) {
 	})
 }
 
-// layRoot draws the root picker only for a workspace with several roots: a
-// single root is the host's to resolve.
+// layRoot draws the root picker only for a workspace with several roots (a
+// single root is the host's to resolve), or a loading hint while the chosen
+// workspace's detail is reloading.
 func (f *startFlow) layRoot(env *kit.Env, sc *screens, lay fieldLay) {
+	if f.detailLoading(sc) {
+		lay(nil, func(gtx *layout.Context) (layout.Dimensions, error) {
+			dims := kit.Paragraph(env, gtx, theme.TypeSmall(), env.Th.Chrome().FgMuted, "Loading workspace details…")
+			return layout.Dimensions{Size: dims.Size}, nil
+		})
+		return
+	}
 	roots := f.usableRoots(sc)
 	if len(roots) <= 1 {
 		return

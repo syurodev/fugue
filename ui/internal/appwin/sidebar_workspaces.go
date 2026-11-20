@@ -24,7 +24,7 @@ import (
 // per-workspace detail reads, satisfied by session.Fetcher.
 type wsReader interface {
 	RequestWorkspaces()
-	RequestWorkspace(id string)
+	RequestWorkspace(id string, gen uint64)
 }
 
 // applyWorkspaceDelivery routes one workspaces-topic delivery into the
@@ -80,20 +80,21 @@ func (s *screens) reconcileWorkspaceDialogs() {
 }
 
 // armWorkspaceReads arms one workspace detail read per workspace the model
-// holds no detail for, once per trigger, and drops the guards of the reads
+// holds no detail for, once per generation, and drops the guards of the reads
 // whose detail has landed.
 func (s *screens) armWorkspaceReads() {
-	for _, id := range s.workspaces.NeedsDetail() {
-		if s.wsDetailReq[id] {
-			continue
-		}
-		s.wsDetailReq[id] = true
-		s.wsReads.RequestWorkspace(id)
-	}
 	for id := range s.wsDetailReq {
 		if _, ok := s.workspaces.DetailFor(id); ok {
 			delete(s.wsDetailReq, id)
 		}
+	}
+	for _, id := range s.workspaces.NeedsDetail() {
+		gen := s.workspaces.Generation(id)
+		if armedGen, armed := s.wsDetailReq[id]; armed && armedGen == gen {
+			continue
+		}
+		s.wsDetailReq[id] = gen
+		s.wsReads.RequestWorkspace(id, gen)
 	}
 }
 

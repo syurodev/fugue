@@ -51,7 +51,12 @@ func (s *screens) applyComposerResult(r session.Result) {
 			s.fail(fmt.Errorf("read the workspace: %w", r.Err))
 			return
 		}
-		s.workspaces.ApplyDetail(workspaceDetailFromClient(&r.Workspace))
+		det := workspaceDetailFromClient(&r.Workspace)
+		det.Generation = r.Generation
+		s.workspaces.ApplyDetail(det)
+		if s.workspaces.Generation(det.ID) == r.Generation {
+			delete(s.wsDetailReq, det.ID)
+		}
 		s.composer.start.reconcile(s)
 	case session.ResultSessions, session.ResultPage:
 		// The list and page reads fold in applyResult.
@@ -172,13 +177,15 @@ func (s *screens) requestWorkspaces() {
 	s.wsReads.RequestWorkspaces()
 }
 
-// requestWorkspace reads one workspace's detail if no read is already in flight.
+// requestWorkspace reads one workspace's detail if no read at the current
+// generation is already in flight.
 func (s *screens) requestWorkspace(id string) {
-	if s.wsDetailReq[id] {
+	gen := s.workspaces.Generation(id)
+	if armedGen, armed := s.wsDetailReq[id]; armed && armedGen == gen {
 		return
 	}
-	s.wsDetailReq[id] = true
-	s.wsReads.RequestWorkspace(id)
+	s.wsDetailReq[id] = gen
+	s.wsReads.RequestWorkspace(id, gen)
 }
 
 // probeMissingVendors re-probes when the session list names a vendor the

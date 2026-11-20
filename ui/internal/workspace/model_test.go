@@ -261,11 +261,60 @@ func TestApplyDetailOlderRevisionDoesNotOverwriteNewerHash(t *testing.T) {
 
 	// Revision 2's read lands with the new hash, then another rev 1 read arrives:
 	// the newer hash stays intact.
-	m.ApplyDetail(&Detail{ID: "a", Name: "A", ConfigHash: "hash-rev2", ConfigRevision: 2})
+	m.ApplyDetail(&Detail{ID: "a", Name: "A", ConfigHash: "hash-rev2", ConfigRevision: 2, Generation: m.Generation("a")})
 	m.ApplyDetail(&Detail{ID: "a", Name: "A", ConfigHash: "hash-rev1", ConfigRevision: 1})
 	det, ok := m.DetailFor("a")
 	if !ok || det.ConfigHash != "hash-rev2" || det.ConfigRevision != 2 {
 		t.Fatalf("detail after stale read = %+v, %v; want hash-rev2 at rev 2", det, ok)
+	}
+}
+
+// TestApplyDetailDropsReadArmedBeforePendingConfirmation pins the per-workspace
+// generation guard: an out-of-band edit publishes EventPendingConfirm without
+// bumping ConfigRevision, so a read armed before the event lands late, is
+// dropped, keeps PendingPolicyConfirmation true and leaves the workspace in
+// NeedsDetail.
+func TestApplyDetailDropsReadArmedBeforePendingConfirmation(t *testing.T) {
+	t.Parallel()
+	m := NewModel()
+	if err := m.ApplySnapshot(mustJSON(t, []Summary{{ID: "a", Name: "A", ConfigRevision: 1}})); err != nil {
+		t.Fatal(err)
+	}
+	armedGen := m.Generation("a")
+
+	if err := m.ApplyEvent(EventPendingConfirm, summaryJSON(t, Summary{
+		ID: "a", Name: "A", ConfigRevision: 1, PendingPolicyConfirmation: true,
+	})); err != nil {
+		t.Fatal(err)
+	}
+
+	// Late read armed before pending_confirmation arrives with the same
+	// ConfigRevision and Pending: false, but an outdated generation.
+	m.ApplyDetail(&Detail{
+		ID: "a", Name: "A", ConfigHash: "hash-old", ConfigRevision: 1, Pending: false, Generation: armedGen,
+	})
+	if _, ok := m.DetailFor("a"); ok {
+		t.Fatal("stale pre-pending read populated DetailFor")
+	}
+	s, ok := m.Lookup("a")
+	if !ok || !s.PendingPolicyConfirmation {
+		t.Fatalf("summary after stale read = %+v, %v; want PendingPolicyConfirmation true", s, ok)
+	}
+	if got := m.NeedsDetail(); !slices.Equal(got, []string{"a"}) {
+		t.Fatalf("NeedsDetail after dropped read = %v, want [a]", got)
+	}
+
+	// A fresh read armed at the bumped generation lands cleanly.
+	freshGen := m.Generation("a")
+	m.ApplyDetail(&Detail{
+		ID: "a", Name: "A", ConfigHash: "hash-pending", ConfigRevision: 1, Pending: true, Generation: freshGen,
+	})
+	det, ok := m.DetailFor("a")
+	if !ok || det.ConfigHash != "hash-pending" || !det.Pending {
+		t.Fatalf("fresh detail = %+v, %v; want hash-pending and Pending true", det, ok)
+	}
+	if got := m.NeedsDetail(); len(got) != 0 {
+		t.Fatalf("NeedsDetail after fresh read = %v, want none", got)
 	}
 }
 
