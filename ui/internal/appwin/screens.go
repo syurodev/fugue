@@ -93,29 +93,30 @@ type screens struct {
 	// The workspace side (F10.14): the workspaces the topic reports, the
 	// reads that fill their details, the mutations the dialogs post, and
 	// the sidebar's own state per workspace.
-	workspaces     *workspace.Model
-	wsMut          *workspace.Mutator
-	wsReads        wsReader
-	wsDetailReq    map[string]uint64
-	wsHeaders      map[string]*kit.SectionHeaderState
-	wsMenu         *kit.MenuState
-	wsMenuFor      string
-	policyBanner   *kit.BannerState
-	otherHeader    *kit.SectionHeaderState
-	dlg            *workspaceDialogs
-	vault          *vault.Model
-	vaultWorker    *vault.Worker
-	vaultGate      *vaultGate
-	inbox          *inbox.Model
-	inboxWorker    *inbox.Worker
-	inboxView      *inboxView
-	inboxRow       *kit.ListRowState
-	inboxOpen      bool
-	accounts       *accounts.Model
-	accountsWorker *accounts.Worker
-	accountsView   *accountsView
-	accountsRow    *kit.ListRowState
-	accountsOpen   bool
+	workspaces      *workspace.Model
+	wsMut           *workspace.Mutator
+	wsReads         wsReader
+	wsDetailReq     map[string]uint64
+	wsHeaders       map[string]*kit.SectionHeaderState
+	wsMenu          *kit.MenuState
+	wsMenuFor       string
+	policyBanner    *kit.BannerState
+	otherHeader     *kit.SectionHeaderState
+	dlg             *workspaceDialogs
+	vault           *vault.Model
+	vaultWorker     *vault.Worker
+	vaultGate       *vaultGate
+	inbox           *inbox.Model
+	inboxWorker     *inbox.Worker
+	inboxView       *inboxView
+	inboxRow        *kit.ListRowState
+	inboxOpen       bool
+	accounts        *accounts.Model
+	accountsWorker  *accounts.Worker
+	accountsView    *accountsView
+	accountsRow     *kit.ListRowState
+	accountsOpen    bool
+	emptyTranscript *kit.EmptyStateState
 }
 
 // newScreens builds the screens over the manager, its fetcher, the composer's
@@ -139,23 +140,24 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 		header:          kit.NewSectionHeaderState(true),
 		rows:            map[string]*kit.ListRowState{},
 		pendingPage:     map[string]bool{}, pendingOlder: map[string]bool{},
-		workspaces:   workspace.NewModel(),
-		wsMut:        wsMut,
-		wsReads:      fetcher,
-		wsDetailReq:  map[string]uint64{},
-		wsHeaders:    map[string]*kit.SectionHeaderState{},
-		wsMenu:       kit.NewMenuState(),
-		policyBanner: kit.NewBannerState(),
-		otherHeader:  kit.NewSectionHeaderState(false),
-		dlg:          newWorkspaceDialogs(),
-		vault:        vault.NewModel(),
-		vaultGate:    newVaultGate(),
-		inbox:        inbox.NewModel(),
-		inboxView:    newInboxView(),
-		inboxRow:     inboxRow,
-		accounts:     accounts.NewModel(),
-		accountsView: newAccountsView(),
-		accountsRow:  accountsRow,
+		workspaces:      workspace.NewModel(),
+		wsMut:           wsMut,
+		wsReads:         fetcher,
+		wsDetailReq:     map[string]uint64{},
+		wsHeaders:       map[string]*kit.SectionHeaderState{},
+		wsMenu:          kit.NewMenuState(),
+		policyBanner:    kit.NewBannerState(),
+		otherHeader:     kit.NewSectionHeaderState(false),
+		dlg:             newWorkspaceDialogs(),
+		vault:           vault.NewModel(),
+		vaultGate:       newVaultGate(),
+		inbox:           inbox.NewModel(),
+		inboxView:       newInboxView(),
+		inboxRow:        inboxRow,
+		accounts:        accounts.NewModel(),
+		accountsView:    newAccountsView(),
+		accountsRow:     accountsRow,
+		emptyTranscript: kit.NewEmptyStateState(),
 	}
 }
 
@@ -460,10 +462,14 @@ func (s *screens) layoutTranscript(gtx *layout.Context, env *kit.Env) layout.Dim
 func (s *screens) layoutTranscriptPane(gtx *layout.Context, env *kit.Env, view *transcriptview.State, items []*session.Item) {
 	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
 	if len(items) == 0 && s.open == "" {
-		// TODO(F10.19): Move the empty state onto the kit's EmptyState (§6.25).
 		layout.Center.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
-			l := gtx
-			return kit.Label(env, &l, theme.TypeSmall(), env.Th.Chrome().FgMuted, "Select a session")
+			local := gtx
+			dims, _, err := s.emptyTranscript.Layout(env, &local, &kit.EmptyStateProps{
+				Title:       "Select a session",
+				Description: "Choose a session from the sidebar or start a new one below.",
+			})
+			s.fail(err)
+			return dims
 		})
 		return
 	}

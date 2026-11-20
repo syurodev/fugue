@@ -229,7 +229,7 @@ func eventLoop(w *app.Window, env *kit.Env, sc *screens, q *updateQueue, light, 
 	for {
 		switch e := w.Event().(type) {
 		case app.DestroyEvent:
-			// TODO(F9.9): Ask before closing when active-session counts are available (F10.5).
+			// TODO(F10.5e): Ask before closing when active-session counts are available.
 			return e.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
