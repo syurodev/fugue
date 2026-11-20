@@ -51,6 +51,7 @@ type DiffEntry struct{ Key, OldValue, NewValue string }
 // it, and the next read rebuilds it.
 type Detail struct {
 	ID, Name, ConfigHash string
+	ConfigRevision       int64
 	Roots                []Root
 	MissingRoots         []string
 	Pending              bool
@@ -125,16 +126,45 @@ func (m *Model) ApplyEvent(eventType string, payload []byte) error {
 	return nil
 }
 
-// ApplyDetail folds one workspace read into the model. The summary keeps the
-// fields a topic event carries that a detail read does not, and takes the
-// read's name, missing roots and pending flag, which are the read's to name.
-func (m *Model) ApplyDetail(d *Detail) {
-	if _, ok := m.byID[d.ID]; !ok {
-		m.order = append(m.order, d.ID)
+// ApplyList replaces the list with a ListWorkspaces read, keeping cached
+// details whose revision and pending flag still match.
+func (m *Model) ApplyList(summaries []Summary) {
+	byID := make(map[string]Summary, len(summaries))
+	order := make([]string, 0, len(summaries))
+	detail := make(map[string]Detail, len(summaries))
+	for _, s := range summaries {
+		byID[s.ID] = s
+		order = append(order, s.ID)
+		if det, ok := m.detail[s.ID]; ok && det.ConfigRevision >= s.ConfigRevision && det.Pending == s.PendingPolicyConfirmation {
+			detail[s.ID] = det
+		}
 	}
-	s := m.byID[d.ID]
+	m.byID, m.order, m.detail = byID, order, detail
+}
+
+// ApplyDetail folds one workspace read into the model. A late detail for a
+// workspace no longer in byID (for example, deleted while the read was in
+// flight) or older than the current ConfigRevision is ignored so it never
+// resurrects a deleted workspace or overwrites a newer hash.
+func (m *Model) ApplyDetail(d *Detail) {
+	if d == nil {
+		return
+	}
+	s, ok := m.byID[d.ID]
+	if !ok {
+		return
+	}
+	if d.ConfigRevision < s.ConfigRevision {
+		return
+	}
+	if prev, hasPrev := m.detail[d.ID]; hasPrev && d.ConfigRevision < prev.ConfigRevision {
+		return
+	}
 	s.ID, s.Name = d.ID, d.Name
 	s.MissingRoots, s.PendingPolicyConfirmation = d.MissingRoots, d.Pending
+	if d.ConfigRevision > s.ConfigRevision {
+		s.ConfigRevision = d.ConfigRevision
+	}
 	m.byID[d.ID] = s
 	m.detail[d.ID] = *d
 }

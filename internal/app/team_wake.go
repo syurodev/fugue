@@ -343,7 +343,7 @@ func (w *teamWake) sessionCwd(ctx context.Context, session *vendorstore.Session)
 		return root, nil
 	}
 	repoID := repoIDFor(root)
-	path, err := gitops.TaskWorktreePath(w.deps.DataDir, repoID, session.TaskID)
+	path, err := gitops.TaskWorktreePath(w.deps.DataDir, repoID, gitTaskID(session.TaskID))
 	if err != nil {
 		return "", boundaryError("derive the resumed session worktree path", err)
 	}
@@ -360,9 +360,10 @@ func (w *teamWake) digestReady(ctx context.Context, r vendorstore.MailboxRecipie
 	if err != nil {
 		return false, boundaryError("read the dependency group", err)
 	}
+	byID, retryChild := resolveTaskChain(tasks)
 	for i := range tasks {
 		c := &tasks[i]
-		if c.ParentTaskID != task.TaskID || teamTaskTerminal(c.State) {
+		if !sameAttemptChain(c.ParentTaskID, task.TaskID, byID, retryChild) || teamTaskTerminal(c.State) {
 			continue
 		}
 		return false, nil

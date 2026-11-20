@@ -173,6 +173,11 @@ func (s *TeamProposalService) validateAmendAdditions(ctx context.Context, rec *v
 	}
 	nodes := make([]teams.TaskNode, 0, len(teamTasks)+len(args.AddTasks))
 	for i := range teamTasks {
+		// Retry attempts share their root task's tree position and use ~r<n>
+		// IDs outside the proposal identifier alphabet; keep the root node only.
+		if teamTasks[i].RetryOf != "" {
+			continue
+		}
 		nodes = append(nodes, teams.TaskNode{
 			ID: proposalTaskID(rec.TeamID, teamTasks[i].TaskID), ParentTaskID: proposalTaskID(rec.TeamID, teamTasks[i].ParentTaskID),
 			Role: teams.TeamRole(teamTasks[i].HierarchyRole),

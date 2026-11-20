@@ -4,14 +4,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 )
 
-// The static causes behind a dropped request and an unknown kind; they are
-// wrapped, never constructed, at the call site.
+// The static causes behind a dropped request, an unknown kind and a missing
+// compare-and-swap hash; they are wrapped, never constructed, at the call site.
 var (
-	errMutatorQueueFull = errors.New("the mutation queue is full")
-	errUnknownMutation  = errors.New("unknown mutation kind")
+	errMutatorQueueFull  = errors.New("the mutation queue is full")
+	errUnknownMutation   = errors.New("unknown mutation kind")
+	errEmptyExpectedHash = errors.New("expected hash is required")
 )
 
 // MutKind names what one mutation request does.
@@ -152,9 +154,14 @@ func (m *Mutator) deliver(ctx context.Context, c MutatorClient, mut *Mutation) {
 	}
 }
 
-// post runs the mutation's host call. The client's typed answer is wrapped
-// once here, so the dialog shows one message no matter which kind failed.
+// post runs the mutation's host call. Every mutation except Create requires a
+// non-empty compare-and-swap hash from the workspace detail. The client's
+// typed answer is wrapped once here, so the dialog shows one message no
+// matter which kind failed.
 func (mut *Mutation) post(ctx context.Context, c MutatorClient) error {
+	if mut.Kind != MutCreate && strings.TrimSpace(mut.ExpectedHash) == "" {
+		return fmt.Errorf("the workspace change failed: %w", errEmptyExpectedHash)
+	}
 	var err error
 	switch mut.Kind {
 	case MutCreate:

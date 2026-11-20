@@ -209,6 +209,66 @@ func TestApplySnapshotGarbageIsAnError(t *testing.T) {
 	}
 }
 
+// TestApplyDetailAfterDeletedDoesNotResurrectWorkspace pins that a detail read
+// returning after a deleted event is ignored and never brings the workspace
+// back into byID, the list order, or NeedsDetail.
+func TestApplyDetailAfterDeletedDoesNotResurrectWorkspace(t *testing.T) {
+	t.Parallel()
+	m := NewModel()
+	if err := m.ApplySnapshot(mustJSON(t, []Summary{{ID: "a", Name: "A", ConfigRevision: 1}})); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ApplyEvent(EventDeleted, summaryJSON(t, Summary{ID: "a", Name: "A", ConfigRevision: 2})); err != nil {
+		t.Fatal(err)
+	}
+
+	m.ApplyDetail(&Detail{ID: "a", Name: "A", ConfigHash: "hash-a", ConfigRevision: 1})
+	if _, ok := m.Lookup("a"); ok {
+		t.Fatal("late detail resurrected deleted workspace a")
+	}
+	if got := m.List(); len(got) != 0 {
+		t.Fatalf("list after late detail = %+v, want empty", got)
+	}
+	if _, ok := m.DetailFor("a"); ok {
+		t.Fatal("late detail populated DetailFor after delete")
+	}
+	if got := m.NeedsDetail(); len(got) != 0 {
+		t.Fatalf("NeedsDetail after late detail = %v, want empty", got)
+	}
+}
+
+// TestApplyDetailOlderRevisionDoesNotOverwriteNewerHash pins that a late
+// detail read from an older ConfigRevision never populates a stale hash or
+// overwrites a newer revision's detail.
+func TestApplyDetailOlderRevisionDoesNotOverwriteNewerHash(t *testing.T) {
+	t.Parallel()
+	m := NewModel()
+	if err := m.ApplySnapshot(mustJSON(t, []Summary{{ID: "a", Name: "A", ConfigRevision: 1}})); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.ApplyEvent(EventRootAdded, summaryJSON(t, Summary{ID: "a", Name: "A", ConfigRevision: 2})); err != nil {
+		t.Fatal(err)
+	}
+
+	// Stale read from revision 1 arrives before revision 2's read: ignored.
+	m.ApplyDetail(&Detail{ID: "a", Name: "A", ConfigHash: "hash-rev1", ConfigRevision: 1})
+	if _, ok := m.DetailFor("a"); ok {
+		t.Fatal("stale rev 1 detail populated DetailFor when model is at rev 2")
+	}
+	if got := m.NeedsDetail(); !slices.Equal(got, []string{"a"}) {
+		t.Fatalf("NeedsDetail = %v, want [a] still pending rev 2 read", got)
+	}
+
+	// Revision 2's read lands with the new hash, then another rev 1 read arrives:
+	// the newer hash stays intact.
+	m.ApplyDetail(&Detail{ID: "a", Name: "A", ConfigHash: "hash-rev2", ConfigRevision: 2})
+	m.ApplyDetail(&Detail{ID: "a", Name: "A", ConfigHash: "hash-rev1", ConfigRevision: 1})
+	det, ok := m.DetailFor("a")
+	if !ok || det.ConfigHash != "hash-rev2" || det.ConfigRevision != 2 {
+		t.Fatalf("detail after stale read = %+v, %v; want hash-rev2 at rev 2", det, ok)
+	}
+}
+
 // mustJSON marshals v for a test fixture.
 func mustJSON(t *testing.T, v any) []byte {
 	t.Helper()

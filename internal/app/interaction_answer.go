@@ -176,12 +176,10 @@ func (s *InteractionService) executeAnswer(ctx context.Context, cmd *AnswerInter
 		Answers:     domainAnswers,
 	}
 
-	// A team card validates before it resolves: an invalid decision must
-	// leave the proposal pending with its card still answerable (F11.2b).
-	if s.teamCards != nil && isTeamCard(ticket) {
-		if verr := s.teamCards.validateTeamCardAnswer(ctx, ticket, decision); verr != nil {
-			return AnswerInteractionResult{}, verr
-		}
+	// A team card or task question card validates before it resolves: an
+	// invalid decision must leave it pending with its card still answerable.
+	if verr := s.validateBeforeAnswer(ctx, ticket, decision); verr != nil {
+		return AnswerInteractionResult{}, verr
 	}
 
 	resolvedTicket, err := s.owner.Answer(decision)
@@ -192,16 +190,34 @@ func (s *InteractionService) executeAnswer(ctx context.Context, cmd *AnswerInter
 	// The card is resolved, so the decision now applies; a transient store
 	// failure is retried, and a permanent one fails the RPC truthfully while
 	// the durable state stays pending (fail closed, F11.2b).
-	if s.teamCards != nil && isTeamCard(ticket) {
-		if aerr := s.teamCards.applyTeamCardAnswer(ctx, resolvedTicket, decision); aerr != nil {
-			return AnswerInteractionResult{}, aerr
-		}
+	if aerr := s.applyAfterAnswer(ctx, resolvedTicket, decision); aerr != nil {
+		return AnswerInteractionResult{}, aerr
 	}
 
 	return AnswerInteractionResult{
 		RequestID: resolvedTicket.RequestID,
 		Outcome:   string(resolvedTicket.Outcome),
 	}, nil
+}
+
+func (s *InteractionService) validateBeforeAnswer(ctx context.Context, ticket *interaction.Ticket, decision *interaction.Decision) error {
+	if s.teamCards != nil && isTeamCard(ticket) {
+		return s.teamCards.validateTeamCardAnswer(ctx, ticket, decision)
+	}
+	if s.taskQuestions != nil && isTaskQuestionCard(ticket) {
+		return s.taskQuestions.validateTaskQuestionAnswer(ctx, ticket, decision)
+	}
+	return nil
+}
+
+func (s *InteractionService) applyAfterAnswer(ctx context.Context, ticket *interaction.Ticket, decision *interaction.Decision) error {
+	if s.teamCards != nil && isTeamCard(ticket) {
+		return s.teamCards.applyTeamCardAnswer(ctx, ticket, decision)
+	}
+	if s.taskQuestions != nil && isTaskQuestionCard(ticket) {
+		return s.taskQuestions.applyTaskQuestionAnswer(ctx, ticket, decision)
+	}
+	return nil
 }
 
 // ExpireExpired resolves any overdue pending requests and emits resolved events.

@@ -78,6 +78,7 @@ const (
 	TaskEventCompleteNoDiff TaskEvent = "complete_no_diff"
 	TaskEventIntegrate      TaskEvent = "integrate"
 	TaskEventStop           TaskEvent = "stop"
+	TaskEventSupersede      TaskEvent = "supersede"
 	TaskEventFail           TaskEvent = "fail"
 	TaskEventCancel         TaskEvent = "cancel"
 	TaskEventHostRestart    TaskEvent = "host_restart"
@@ -101,6 +102,7 @@ func AllTaskEvents() []TaskEvent {
 		TaskEventCompleteNoDiff,
 		TaskEventIntegrate,
 		TaskEventStop,
+		TaskEventSupersede,
 		TaskEventFail,
 		TaskEventCancel,
 		TaskEventHostRestart,
@@ -161,6 +163,7 @@ func TaskTransitionTable() map[TaskTransitionKey]TaskState {
 		{TaskStateIntegrating, TaskEventIntegrate}:  TaskStateDone,
 		{TaskStateIntegrating, TaskEventFail}:       TaskStateFailed,
 		{TaskStateIntegrating, TaskEventCancel}:     TaskStateCancelled,
+		{TaskStateFailed, TaskEventSupersede}:       TaskStateStopped,
 		{TaskStateUnknown, TaskEventDecisionResume}: TaskStateStarting,
 		{TaskStateUnknown, TaskEventDecisionKeep}:   TaskStateReview,
 		{TaskStateUnknown, TaskEventDecisionCancel}: TaskStateCancelled,

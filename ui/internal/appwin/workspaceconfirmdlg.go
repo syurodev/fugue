@@ -105,6 +105,10 @@ func (d *deleteDialog) submit(sc *screens) {
 	if d.busy {
 		return
 	}
+	if strings.TrimSpace(d.hash) == "" {
+		d.lastErr = errDialogNeedsDetail.Error()
+		return
+	}
 	typed := strings.TrimSpace(d.name.Text())
 	if typed == "" {
 		d.name.MarkSubmitted()
@@ -217,6 +221,10 @@ func (d *policyDialog) submit(sc *screens) {
 	if d.busy {
 		return
 	}
+	if strings.TrimSpace(d.hash) == "" {
+		d.lastErr = errDialogNeedsDetail.Error()
+		return
+	}
 	sc.wsMut.Do(&workspace.Mutation{Kind: workspace.MutConfirmPolicy, WorkspaceID: d.wsID, ExpectedHash: d.hash})
 	d.busy = true
 	d.lastErr = ""
@@ -226,6 +234,10 @@ func (d *policyDialog) submit(sc *screens) {
 // carrying the reviewed hash the detail read delivered.
 func (d *policyDialog) reject(sc *screens) {
 	if d.busy {
+		return
+	}
+	if strings.TrimSpace(d.hash) == "" {
+		d.lastErr = errDialogNeedsDetail.Error()
 		return
 	}
 	sc.wsMut.Do(&workspace.Mutation{Kind: workspace.MutRejectPolicy, WorkspaceID: d.wsID, ExpectedHash: d.hash})
@@ -296,8 +308,19 @@ func (d *removeRootDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens
 		sc.fail(err)
 	}
 	if res.Submitted {
-		sc.wsMut.Do(&workspace.Mutation{Kind: workspace.MutRemoveRoot, WorkspaceID: d.wsID, Name: d.root, ExpectedHash: d.hash})
-		d.busy = true
-		d.lastErr = ""
+		d.submit(sc)
 	}
+}
+
+func (d *removeRootDialog) submit(sc *screens) {
+	if d.busy {
+		return
+	}
+	if strings.TrimSpace(d.hash) == "" {
+		d.lastErr = errDialogNeedsDetail.Error()
+		return
+	}
+	sc.wsMut.Do(&workspace.Mutation{Kind: workspace.MutRemoveRoot, WorkspaceID: d.wsID, Name: d.root, ExpectedHash: d.hash})
+	d.busy = true
+	d.lastErr = ""
 }

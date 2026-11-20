@@ -51,6 +51,10 @@ type Session struct {
 	// WorkspaceID names the workspace the session is bound to (Q-57); a
 	// created event does not carry it, the list and snapshot reads do.
 	WorkspaceID string
+	// CommandsRevision is the session's slash-command revision the last
+	// state change carried; the composer re-reads the commands when it
+	// advances (vendor-runtime §9). The snapshot and list reads carry none.
+	CommandsRevision uint64
 }
 
 // Sidebar is the session-list model: the sessions the vendor-sessions topic
@@ -124,6 +128,7 @@ func (s *Sidebar) ApplyEvent(eventType string, payload []byte) error {
 		if existing, ok := s.byID[change.SessionID]; ok {
 			existing.State = change.State
 			existing.WaitingReason = change.WaitingReason
+			existing.CommandsRevision = uint64(max(change.CommandsRevision, 0))
 		}
 	default:
 		return fmt.Errorf("%w: %q", errUnknownSessionEvent, eventType)

@@ -49,15 +49,6 @@ func newWorkspaceDialogs() *workspaceDialogs {
 	}
 }
 
-// closeWorkspaceDialogs closes every dialog, as a workspace's deletion does.
-func (d *workspaceDialogs) closeWorkspaceDialogs() {
-	d.create.dialog.Close()
-	d.root.dialog.Close()
-	d.del.dialog.Close()
-	d.rmRoot.dialog.Close()
-	d.policy.dialog.Close()
-}
-
 // layout draws the open dialog over the window; every dialog lays itself out
 // only while open, so exactly one frame carries a dialog.
 func (d *workspaceDialogs) layout(env *kit.Env, gtx *layout.Context, sc *screens) {
@@ -376,6 +367,10 @@ func (d *rootDialog) layAccess(env *kit.Env, body *wsBody) {
 
 func (d *rootDialog) submit(sc *screens) {
 	if d.busy {
+		return
+	}
+	if strings.TrimSpace(d.hash) == "" {
+		d.lastErr = errDialogNeedsDetail.Error()
 		return
 	}
 	name, path := strings.TrimSpace(d.name.Text()), strings.TrimSpace(d.path.Text())

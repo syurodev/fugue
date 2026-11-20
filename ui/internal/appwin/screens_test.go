@@ -15,7 +15,8 @@ import (
 // test drives the results by hand. It also arms the workspace reads, which
 // the recording wsReads of the workspace tests watch.
 type fakeFetcher struct {
-	pages []pageRequest
+	pages    []pageRequest
+	commands []string
 }
 
 // pageRequest is one recorded page read.
@@ -24,20 +25,28 @@ type pageRequest struct {
 	before  int64
 }
 
-func (f *fakeFetcher) RequestSessions() {}
+func (f *fakeFetcher) RequestSessions()        {}
+func (f *fakeFetcher) RequestProbe()           {}
+func (f *fakeFetcher) RequestWorkspaces()      {}
+func (f *fakeFetcher) RequestWorkspace(string) {}
+
+func (f *fakeFetcher) RequestCommands(session string) {
+	f.commands = append(f.commands, session)
+}
+
 func (f *fakeFetcher) RequestPage(sessionID string, before int64) {
 	f.pages = append(f.pages, pageRequest{session: sessionID, before: before})
 }
 func (f *fakeFetcher) Results() <-chan session.Result { return make(chan session.Result) }
 
-// newTestScreens builds screens over an idle manager and a recording fetcher,
-// with a mutator whose connection is nil: a test that posts a mutation
-// builds its own over a recording fake client.
+// newTestScreens builds screens over an idle manager, a recording fetcher, a
+// poster and a mutator whose connections are nil: a test that posts a write or
+// mutation builds its own over a recording fake client.
 func newTestScreens(t *testing.T) (*screens, *fakeFetcher) {
 	t.Helper()
 	fake := &fakeFetcher{}
 	m := hostconn.NewManager(&hostconn.Config{})
-	sc := newScreens(m, fake, workspace.NewMutator(func() workspace.MutatorClient { return nil }))
+	sc := newScreens(m, fake, session.NewPoster(m.Client), workspace.NewMutator(func() workspace.MutatorClient { return nil }))
 	return sc, fake
 }
 
@@ -142,5 +151,43 @@ func TestScrollStateIsPerSession(t *testing.T) {
 	}
 	if _, ok := s.views["b"]; !ok {
 		t.Fatal("session b's state was pruned with session a")
+	}
+}
+
+// TestPruneClosesTheOpenSessionWhenItLeavesTheList pins the #132 carry-over:
+// when the OPEN session leaves the sidebar list, prune closes it cleanly —
+// the pane falls back to the empty state, the session's state is dropped,
+// and clicking the session again reopens it instead of being refused by the
+// unchanged open id.
+func TestPruneClosesTheOpenSessionWhenItLeavesTheList(t *testing.T) {
+	t.Parallel()
+	s, fake := newTestScreens(t)
+	s.openSession("s1")
+
+	// The list read no longer names the open session: the host reports it
+	// gone.
+	s.sidebar.ApplyList(client.SessionList{Sessions: []client.Session{
+		{ID: "s2", Vendor: client.VendorClaude, State: "ready"},
+	}})
+	s.prune()
+	if s.open != "" {
+		t.Fatalf("open = %q after the open session left the list, want it closed", s.open)
+	}
+	if _, ok := s.transcripts["s1"]; ok {
+		t.Fatal("the closed session's transcript outlived it")
+	}
+	if _, ok := s.views["s1"]; ok {
+		t.Fatal("the closed session's scroll state outlived it")
+	}
+
+	// The empty state shows for no open session, and the session reopens on
+	// a fresh click — openSession no longer refuses the same id.
+	before := len(fake.pages)
+	s.openSession("s1")
+	if s.open != "s1" {
+		t.Fatalf("open = %q after the fresh click, want the session reopened", s.open)
+	}
+	if len(fake.pages) <= before {
+		t.Fatal("the reopened session did not request its newest page")
 	}
 }

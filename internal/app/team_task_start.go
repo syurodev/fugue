@@ -5,7 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"strings"
 
 	"github.com/syurodev/fugue/internal/gitops"
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -19,6 +21,8 @@ import (
 type taskLaunch struct {
 	spec       teams.ProtectedTaskContent
 	brief      string
+	deps       []depSummary
+	nonce      string
 	req        taskSessionRequest
 	repoDir    string
 	repoID     string
@@ -36,7 +40,7 @@ func (d *teamDispatcher) startChild(ctx context.Context, rec *vendorstore.TeamRe
 		return err
 	}
 	if code != "" {
-		return d.failTask(ctx, rec.TeamID, task.TaskID, code)
+		return d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateQueued, "", code)
 	}
 	if appErr := d.appendTaskEvent(ctx, rec.TeamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
 		TaskID: task.TaskID, EventType: vendorstore.EventTaskAssigned, SessionID: launch.req.SessionID,
@@ -46,21 +50,23 @@ func (d *teamDispatcher) startChild(ctx context.Context, rec *vendorstore.TeamRe
 	cwd, err := d.createWorktree(ctx, rec.TeamID, task, launch)
 	if err != nil {
 		slog.WarnContext(ctx, "creating the task worktree failed", "team_id", rec.TeamID, "task_id", task.TaskID, "error_code", string(errcode.CodeOf(err)))
-		return d.failTask(ctx, rec.TeamID, task.TaskID, failWorktree)
+		return d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateStarting, launch.req.SessionID, failWorktree)
 	}
 	launch.req.Cwd = cwd
 	if err := d.deps.Sessions.StartTaskSession(ctx, &launch.req); err != nil {
 		slog.WarnContext(ctx, "starting the task session failed", "team_id", rec.TeamID, "task_id", task.TaskID, "error_code", string(errcode.CodeOf(err)))
 		d.removeWorktree(ctx, launch, task.TaskID)
-		return d.failTask(ctx, rec.TeamID, task.TaskID, failSessionStart)
+		return d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateStarting, launch.req.SessionID, failSessionStart)
 	}
 	if err := d.appendTaskStartedWithRetry(ctx, rec.TeamID, task.TaskID, launch.req.SessionID); err != nil {
 		d.closeTaskSession(ctx, launch.req.SessionID)
-		return err
+		d.removeWorktree(ctx, launch, task.TaskID)
+		return d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateStarting, launch.req.SessionID, failSessionStart)
 	}
-	if err := d.deps.Sessions.Send(ctx, launch.req.SessionID, vendor.Input{Text: taskIntro(task, &launch.spec, launch.brief)}); err != nil {
+	intro := taskIntro(task, &launch.spec, launch.brief, launch.deps, launch.nonce)
+	if err := d.deps.Sessions.Send(ctx, launch.req.SessionID, vendor.Input{Text: intro}); err != nil {
 		d.closeTaskSession(ctx, launch.req.SessionID)
-		return d.failTask(ctx, rec.TeamID, task.TaskID, failIntro)
+		return d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateRunning, launch.req.SessionID, failIntro)
 	}
 	return nil
 }
@@ -86,6 +92,14 @@ func (d *teamDispatcher) prepareLaunch(ctx context.Context, rec *vendorstore.Tea
 	}
 	if brief, ok := d.proposalBrief(ctx, rec.TeamID); ok {
 		launch.brief = brief
+	}
+	launch.deps = d.dependencySummaries(ctx, rec.TeamID, task, tasks)
+	if len(launch.deps) > 0 {
+		nonce, nErr := d.deps.IDs.NewID()
+		if nErr != nil {
+			return nil, "", errcode.Wrap(errcode.Internal, "allocate the intro nonce", nErr)
+		}
+		launch.nonce = nonce
 	}
 	launch.req = taskSessionRequest{
 		SessionID: sessionID, Vendor: role.Vendor, Model: role.Model, Effort: role.Effort,
@@ -183,14 +197,20 @@ func worktreeFailure(ctx context.Context, err error) string {
 	return failWorktree
 }
 
+// gitTaskID maps durable task IDs (which may include ~r<n> for retry attempts)
+// to git-check-ref-format safe identifiers; user proposal task IDs never
+// contain '.', so replacing '~' with '.' cannot collide.
+func gitTaskID(taskID string) string {
+	return strings.ReplaceAll(taskID, "~", ".")
+}
+
 // parentBranch names the branch a task starts from: the team branch for a
 // direct child of the lead, the manager's task branch for a member of a
 // manager (§9).
 func parentBranch(task *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord) (string, error) {
-	for i := range tasks {
-		if tasks[i].TaskID == task.ParentTaskID && tasks[i].HierarchyRole == vendorstore.RoleTeamManager {
-			return wrapGit(gitops.TaskBranchName(tasks[i].TaskID))
-		}
+	byID, retryChild := resolveTaskChain(tasks)
+	if parent := latestAttempt(task.ParentTaskID, byID, retryChild); parent != nil && parent.HierarchyRole == vendorstore.RoleTeamManager {
+		return wrapGit(gitops.TaskBranchName(gitTaskID(parent.TaskID)))
 	}
 	return wrapGit(gitops.TeamBranchName(task.TeamID))
 }
@@ -210,7 +230,7 @@ func (d *teamDispatcher) createWorktree(ctx context.Context, teamID string, task
 	if err := git.CreateTeamBranch(ctx, launch.repoDir, teamID, launch.headCommit); err != nil && errcode.CodeOf(err) != errcode.AlreadyExists {
 		return "", boundaryError("create the team branch", err)
 	}
-	path, err := git.CreateTaskWorktree(ctx, d.deps.DataDir, launch.repoDir, launch.repoID, task.TaskID, launch.parentRef)
+	path, err := git.CreateTaskWorktree(ctx, d.deps.DataDir, launch.repoDir, launch.repoID, gitTaskID(task.TaskID), launch.parentRef)
 	if err != nil {
 		return "", boundaryError("create the task worktree", err)
 	}
@@ -219,7 +239,7 @@ func (d *teamDispatcher) createWorktree(ctx context.Context, teamID string, task
 
 // removeWorktree drops the worktree of a task that never got a session.
 func (d *teamDispatcher) removeWorktree(ctx context.Context, launch *taskLaunch, taskID string) {
-	if err := d.deps.Git.RemoveTaskWorktree(ctx, launch.repoDir, d.deps.DataDir, launch.repoID, taskID); err != nil {
+	if err := d.deps.Git.RemoveTaskWorktree(ctx, launch.repoDir, d.deps.DataDir, launch.repoID, gitTaskID(taskID)); err != nil {
 		slog.WarnContext(ctx, "removing the task worktree failed", "task_id", taskID, "error_code", string(errcode.CodeOf(err)))
 	}
 }
@@ -231,23 +251,54 @@ func (d *teamDispatcher) closeTaskSession(ctx context.Context, sessionID string)
 	}
 }
 
-// failTask ends a task failed with a stable code and enqueues the digest
-// item its delegator receives (§6.2: final failures go to the delegator
-// directly). It reads the team's last sequence itself, because earlier
-// appends moved it.
-func (d *teamDispatcher) failTask(ctx context.Context, teamID, taskID, code string) error {
+// failTaskInState ends a task failed with a stable code after re-reading the
+// snapshot and verifying expectedState (and expectedSessionID when non-empty),
+// retrying on ErrSequenceConflict so a concurrent append never leaves a task
+// stuck in `starting` with no owner.
+func (d *teamDispatcher) failTaskInState(
+	ctx context.Context,
+	teamID, taskID string,
+	expectedState vendorstore.TaskState,
+	expectedSessionID, code string,
+) error {
+	for attempt := range maxAppendRetries {
+		err := d.failTaskAttempt(ctx, teamID, taskID, expectedState, expectedSessionID, code)
+		if err == nil {
+			d.notifyMailbox()
+			return nil
+		}
+		if errors.Is(err, vendorstore.ErrSequenceConflict) && attempt+1 < maxAppendRetries {
+			continue
+		}
+		return err
+	}
+	return errcode.New(errcode.FailedPrecondition, "task failure sequence conflict")
+}
+
+func (d *teamDispatcher) failTaskAttempt(
+	ctx context.Context,
+	teamID, taskID string,
+	expectedState vendorstore.TaskState,
+	expectedSessionID, code string,
+) error {
 	rec, tasks, err := d.deps.Store.TeamSnapshot(ctx, teamID)
 	if err != nil {
 		return boundaryError("read the team", err)
 	}
-	err = d.appendTaskEvent(ctx, teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
-		TaskID: taskID, EventType: vendorstore.EventTaskEnded, Outcome: vendorstore.TaskOutcomeFailed, FailureCode: code,
-		Mailbox: digestItemRows(taskID, delegatorOf(taskID, tasks), code),
-	})
-	if err == nil {
-		d.notifyMailbox()
+	if rec.State != vendorstore.TeamStateActive {
+		return errcode.New(errcode.FailedPrecondition, "the team is not active")
 	}
-	return err
+	cur, ok := findTask(tasks, taskID)
+	if !ok || cur.State != expectedState || (expectedSessionID != "" && cur.SessionID != expectedSessionID) {
+		return errcode.New(errcode.FailedPrecondition, "task is no longer in expected state")
+	}
+	if d.deps.TestBeforeFailAppend != nil {
+		d.deps.TestBeforeFailAppend(ctx)
+	}
+	return d.appendTaskEvent(ctx, teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
+		TaskID: taskID, EventType: vendorstore.EventTaskEnded, Outcome: vendorstore.TaskOutcomeFailed, FailureCode: code,
+		Mailbox: digestItemRows(taskID, resolvedParentID(delegatorOf(taskID, tasks), tasks), code),
+	})
 }
 
 // delegatorOf returns the recipient of a task's failure digest: its parent

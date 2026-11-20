@@ -49,6 +49,44 @@ func (r *recordingClient) RejectWorkspaceConfig(context.Context, string, string)
 	return r.err
 }
 
+// TestMutatorRejectsEmptyExpectedHash pins that every compare-and-swap
+// mutation refuses to send an empty hash to the host client.
+func TestMutatorRejectsEmptyExpectedHash(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		kind MutKind
+	}{
+		{"empty-add-root", MutAddRoot},
+		{"empty-remove-root", MutRemoveRoot},
+		{"empty-update-root", MutUpdateRoot},
+		{"empty-delete", MutDelete},
+		{"empty-confirm", MutConfirmPolicy},
+		{"empty-reject", MutRejectPolicy},
+	} {
+		for _, hash := range []string{"", "   "} {
+			t.Run(tc.name+"-"+hash, func(t *testing.T) {
+				t.Parallel()
+				rec := &recordingClient{}
+				m := NewMutator(func() MutatorClient { return rec })
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				m.Start(ctx)
+				defer m.Stop()
+
+				m.Do(&Mutation{Kind: tc.kind, WorkspaceID: "w", Name: "r", Path: "/p", Access: "rw", ConfirmName: "ws", ExpectedHash: hash})
+				res := waitResult(t, m)
+				if !errors.Is(res.Err, errEmptyExpectedHash) {
+					t.Fatalf("empty-hash error = %v, want errEmptyExpectedHash", res.Err)
+				}
+				if len(rec.calls) != 0 {
+					t.Fatalf("client calls = %v, want none when hash is empty", rec.calls)
+				}
+			})
+		}
+	}
+}
+
 // waitResult takes the mutator's next result. The receive blocks: Start, Do
 // and deliver are deterministic, and the package timeout catches a stuck
 // goroutine, so no wall-clock wait is needed.

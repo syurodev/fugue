@@ -6,6 +6,7 @@ import (
 
 	"gioui.org/layout"
 
+	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
@@ -20,13 +21,80 @@ import (
 // common workspace switcher: the user works in several workspaces at once.
 
 // wsReader is the workspace-read side the screens arm: the list and the
-// per-workspace detail reads. The session fetcher satisfies it once its
-// workspace reads land.
-// TODO(F10.14): wire session.Fetcher here and drop the nil guards when
-// #169's fetcher carries ResultWorkspaces and ResultWorkspace.
+// per-workspace detail reads, satisfied by session.Fetcher.
 type wsReader interface {
 	RequestWorkspaces()
 	RequestWorkspace(id string)
+}
+
+// applyWorkspaceDelivery routes one workspaces-topic delivery into the
+// model: a snapshot replaces the list, an event folds in.
+func (s *screens) applyWorkspaceDelivery(u hostconn.Update) {
+	switch {
+	case u.Snapshot != nil:
+		s.fail(s.workspaces.ApplySnapshot(u.Snapshot.State))
+		s.pruneWorkspaceHeaders()
+		s.reconcileWorkspaceDialogs()
+	case u.Event != nil:
+		s.applyWorkspaceEvent(u.Event.Type, u.Event.Payload)
+	}
+}
+
+// applyWorkspaceEvent folds one workspaces-topic event into the model. Any
+// event that deletes a workspace or drops its detail closes open dialogs that
+// targeted that stale detail, and armWorkspaceReads queues the fresh read.
+func (s *screens) applyWorkspaceEvent(eventType string, payload []byte) {
+	if err := s.workspaces.ApplyEvent(eventType, payload); err != nil {
+		s.fail(err)
+		return
+	}
+	s.pruneWorkspaceHeaders()
+	s.reconcileWorkspaceDialogs()
+}
+
+// reconcileWorkspaceDialogs closes any open workspace-targeted dialog whose
+// workspace or detail was dropped (for example, deleted or invalidated by a
+// config/root/policy event), so no dialog stays open on a stale hash. The
+// create dialog targets no existing workspace and stays open, and the start
+// dialog clears a gone workspace selection.
+func (s *screens) reconcileWorkspaceDialogs() {
+	hasDetail := func(id string) bool {
+		_, ok := s.workspaces.DetailFor(id)
+		return ok
+	}
+	if s.dlg.root.dialog.IsOpen() && !hasDetail(s.dlg.root.wsID) {
+		s.dlg.root.dialog.Close()
+	}
+	if s.dlg.del.dialog.IsOpen() && !hasDetail(s.dlg.del.wsID) {
+		s.dlg.del.dialog.Close()
+	}
+	if s.dlg.rmRoot.dialog.IsOpen() && !hasDetail(s.dlg.rmRoot.wsID) {
+		s.dlg.rmRoot.dialog.Close()
+	}
+	if s.dlg.policy.dialog.IsOpen() && !hasDetail(s.dlg.policy.wsID) {
+		s.dlg.policy.dialog.Close()
+	}
+	if s.composer != nil {
+		s.composer.start.reconcile(s)
+	}
+}
+
+// armWorkspaceReads arms one workspace detail read per workspace the model
+// holds no detail for, once per trigger, and drops the guards of the reads
+// whose detail has landed.
+func (s *screens) armWorkspaceReads() {
+	for _, id := range s.workspaces.NeedsDetail() {
+		if s.wsDetailReq[id] {
+			continue
+		}
+		s.wsDetailReq[id] = true
+		s.wsReads.RequestWorkspace(id)
+	}
+	for id := range s.wsDetailReq {
+		if _, ok := s.workspaces.DetailFor(id); ok {
+			delete(s.wsDetailReq, id)
+		}
+	}
 }
 
 // wsGroup is one workspace's slice of the sidebar: the workspace and the
@@ -156,12 +224,13 @@ func (s *screens) pruneWorkspaceHeaders() {
 // compare-and-swap against.
 func (s *screens) manageItems(ws workspace.Summary) []kit.MenuItem {
 	items := make([]kit.MenuItem, 0, 4)
-	if ws.PendingPolicyConfirmation {
-		items = append(items, kit.MenuItem{ID: "review", Label: "Review policy change…"})
-	}
 	det, hasDetail := s.workspaces.DetailFor(ws.ID)
-	items = append(items, kit.MenuItem{ID: "add-root", Label: "Add root…", Disabled: !hasDetail})
-	if hasDetail && len(det.Roots) > 0 {
+	ready := hasDetail && det.ConfigHash != ""
+	if ws.PendingPolicyConfirmation {
+		items = append(items, kit.MenuItem{ID: "review", Label: "Review policy change…", Disabled: !ready})
+	}
+	items = append(items, kit.MenuItem{ID: "add-root", Label: "Add root…", Disabled: !ready})
+	if ready && len(det.Roots) > 0 {
 		sub := make([]kit.MenuItem, 0, 2*len(det.Roots))
 		for _, r := range det.Roots {
 			sub = append(sub, kit.MenuItem{ID: "edit:" + r.Name, Label: "Edit " + r.Name + "…"})
@@ -169,7 +238,7 @@ func (s *screens) manageItems(ws workspace.Summary) []kit.MenuItem {
 		}
 		items = append(items, kit.MenuItem{ID: "roots", Label: "Roots", Sub: sub})
 	}
-	items = append(items, kit.MenuItem{ID: "delete", Label: "Delete workspace…"})
+	items = append(items, kit.MenuItem{ID: "delete", Label: "Delete workspace…", Disabled: !ready})
 	return items
 }
 
@@ -181,29 +250,30 @@ func (s *screens) chooseManage(ws workspace.Summary, chosen string) {
 	}
 	s.wsMenuFor = ""
 	det, hasDetail := s.workspaces.DetailFor(ws.ID)
+	ready := hasDetail && det.ConfigHash != ""
 	switch {
 	case chosen == "review":
-		if !hasDetail {
+		if !ready {
 			s.fail(errDialogNeedsDetail)
 			return
 		}
 		s.dlg.policy.openFor(&det)
 	case chosen == "add-root":
-		if !hasDetail {
+		if !ready {
 			s.fail(errDialogNeedsDetail)
 			return
 		}
 		s.dlg.root.openAdd(&det)
 	case chosen == "delete":
-		if !hasDetail {
+		if !ready {
 			s.fail(errDialogNeedsDetail)
 			return
 		}
 		s.dlg.del.openFor(&det)
 	case strings.HasPrefix(chosen, "edit:"):
-		s.openRootEdit(det, hasDetail, strings.TrimPrefix(chosen, "edit:"))
+		s.openRootEdit(det, ready, strings.TrimPrefix(chosen, "edit:"))
 	case strings.HasPrefix(chosen, "remove:"):
-		s.openRootRemove(det, hasDetail, strings.TrimPrefix(chosen, "remove:"))
+		s.openRootRemove(det, ready, strings.TrimPrefix(chosen, "remove:"))
 	}
 }
 
@@ -258,11 +328,90 @@ func (s *screens) layoutPolicyBanner(env *kit.Env, gtx *layout.Context) layout.D
 		s.fail(err)
 	}
 	if ev.ActionClicked && pending != "" {
-		if det, ok := s.workspaces.DetailFor(pending); ok {
+		if det, ok := s.workspaces.DetailFor(pending); ok && det.ConfigHash != "" {
 			s.dlg.policy.openFor(&det)
 		} else {
 			s.fail(errDialogNeedsDetail)
 		}
 	}
 	return dims
+}
+
+// layoutSidebar draws the workspace groups and their sessions (F10.14,
+// desktop-app §5.3): the top header carries the create-workspace action, a
+// warning banner rides above the list while a policy change waits, and a row
+// click opens the session. The column holds the SidebarWidth token: kit rows
+// fill the width they are given, so the list must not swallow the
+// transcript's half of the window.
+func (s *screens) layoutSidebar(gtx *layout.Context, env *kit.Env) layout.Dimensions {
+	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(theme.SidebarWidth))
+	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			local := gtx
+			return s.layoutPolicyBanner(env, &local)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			local := gtx
+			header, ev := s.header.Layout(env, &local, &kit.SectionHeaderProps{
+				Label:  "Workspaces",
+				Action: &kit.IconButtonProps{Icon: kit.IconPlus, Label: "New workspace"},
+			}, func(gtx *layout.Context) layout.Dimensions {
+				return s.layoutSidebarContent(env, gtx)
+			})
+			if ev.ActionClick {
+				s.dlg.create.open()
+			}
+			if ev.Err != nil {
+				s.fail(ev.Err)
+			}
+			return header
+		}),
+	)
+}
+
+// sessionRows builds one kit row per session of the given list; the row's
+// click opens it.
+func (s *screens) sessionRows(env *kit.Env, sessions []session.Session) []layout.FlexChild {
+	rows := make([]layout.FlexChild, 0, len(sessions))
+	for _, sess := range sessions {
+		row, ok := s.rows[sess.ID]
+		if !ok {
+			row = kit.NewListRowState()
+			row.Enter()
+			s.rows[sess.ID] = row
+		}
+		selected := s.open == sess.ID
+		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			local := gtx
+			dims, ev := row.Layout(env, &local, &kit.ListRowProps{
+				Label:     sessionName(sess),
+				Secondary: sessionState(sess),
+				Selected:  selected,
+			})
+			if ev.Clicked {
+				s.openSession(sess.ID)
+			}
+			return dims
+		}))
+	}
+	return rows
+}
+
+// sessionName names a session row: the vendor, or "session" when the list
+// read has not named one yet.
+func sessionName(sess session.Session) string {
+	if sess.Vendor == "" {
+		return "session"
+	}
+	return sess.Vendor
+}
+
+// sessionState is the row's secondary text: the state and the wait reason,
+// in FgMuted like every kit row's secondary text.
+func sessionState(sess session.Session) string {
+	state := sess.State
+	if sess.WaitingReason != "" {
+		state += " · " + sess.WaitingReason
+	}
+	return state
 }

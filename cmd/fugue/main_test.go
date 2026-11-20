@@ -28,6 +28,9 @@ import (
 )
 
 func TestMain(m *testing.M) {
+	if playFakeVendor(os.Args) {
+		os.Exit(0)
+	}
 	cleanup, err := buildMigratedTemplate()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err)
