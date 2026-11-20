@@ -203,6 +203,15 @@ func TestInboxReconcilesEventsAndDisappearsOnExternalResolve(t *testing.T) {
 		t.Fatalf("resolved ticket remained in inbox: count=%d sess1=%d", m.PendingCount(), m.PendingCountForSession(testSess1))
 	}
 
+	// Q-161: external cancellation (turn end / vendor abort) drops the ticket.
+	cancelledPayload := mustJSON(t, client.InteractionResolvedEvent{RequestID: testReqC, Outcome: client.InteractionOutcomeCancelled})
+	if err := m.ApplyTopicEvent(14, client.EventInteractionResolved, cancelledPayload); err != nil {
+		t.Fatal(err)
+	}
+	if m.CanAnswer(Pin{RequestID: testReqC, Incarnation: testInc1}) || m.PendingCountForSession(testSess2) != 0 {
+		t.Fatalf("cancelled ticket remained in inbox: count=%d sess2=%d", m.PendingCount(), m.PendingCountForSession(testSess2))
+	}
+
 	m.ApplyListPending(testInc2, client.PendingInteractionList{Sequence: 0})
 	if m.PendingCount() != 0 || m.Incarnation() != testInc2 {
 		t.Fatalf("after empty new incarnation: count=%d inc=%q", m.PendingCount(), m.Incarnation())
