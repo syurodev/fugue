@@ -12,7 +12,6 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/testutil"
-	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
@@ -57,7 +56,7 @@ func newVendorServiceFixtureCustom(t *testing.T, customize func(*HostDeps)) *ven
 	clk := testutil.OSClock()
 	fugueHome := filepath.Join(t.TempDir(), "Fugue")
 	deps := &HostDeps{
-		DataDir: cheapvault.DataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: fugueHome},
+		DataDir: cheapVaultDataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: fugueHome},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("vendor-svc")),
 		Transport: newScriptedTransport(), VendorBinary: exe,
 	}

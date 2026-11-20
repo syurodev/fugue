@@ -16,7 +16,6 @@ import (
 	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/testutil"
-	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -53,7 +52,7 @@ func newVaultLockFixture(t *testing.T) *vaultLockFixture {
 	}
 	clk := testutil.OSClock()
 	hp, err := StartHost(t.Context(), &HostDeps{
-		DataDir: cheapvault.DataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
+		DataDir: cheapVaultDataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("vault-lock-test")),
 		Transport: newScriptedTransport(), VendorBinary: exe, TestFugueTools: []*FugueTool{deploy},
 	})

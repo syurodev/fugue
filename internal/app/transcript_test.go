@@ -53,7 +53,7 @@ func newTranscriptFixture(t *testing.T, known KnownValues) *transcriptFixture {
 	t.Helper()
 	clk := clock.NewFake(time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC))
 	path := filepath.Join(t.TempDir(), "transcript.db")
-	db, dbErr := storage.Open(t.Context(), path)
+	db, dbErr := storage.Open(t.Context(), copyMigratedTestDB(t, path))
 	if dbErr != nil {
 		t.Fatal(dbErr)
 	}
@@ -62,9 +62,6 @@ func newTranscriptFixture(t *testing.T, known KnownValues) *transcriptFixture {
 			t.Error(cerr)
 		}
 	})
-	if err := storage.Migrate(t.Context(), db, clk); err != nil {
-		t.Fatal(err)
-	}
 	v := cheapvault.Unlocked(t)
 	s, storeErr := vendorstore.New(t.Context(), db, v, clk, nil)
 	if storeErr != nil {

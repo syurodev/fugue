@@ -692,8 +692,12 @@ func TestCloseRPCDeadlineDoesNotSkipStopOrder(t *testing.T) {
 		snap, snapErr := f.store.Snapshot(t.Context(), testActorSessionID)
 		return snapErr == nil && snap.State == vendorstore.StateClosed
 	})
-	if err := manager.Close(t.Context(), testActorSessionID, vendor.CloseUserRequest); err != nil {
-		t.Fatalf("retry after close = %v", err)
+	// The store reads closed before the actor leaves the registry, and a retry
+	// in that window is accepted (nil) while one after it is not_found. Wait
+	// for the registry condition so the retry's outcome is a fixed one.
+	awaitActor(t, func() bool { return manager.actor(testActorSessionID) == nil })
+	if err := manager.Close(t.Context(), testActorSessionID, vendor.CloseUserRequest); !errors.Is(err, vendorstore.ErrSessionNotFound) {
+		t.Fatalf("retry after the session ended = %v, want session not found", err)
 	}
 	if session.closeCalls.Load() != 1 {
 		t.Fatalf("process stop calls = %d, want one completed stop order", session.closeCalls.Load())

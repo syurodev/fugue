@@ -26,7 +26,6 @@ import (
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/storage"
 	"github.com/syurodev/fugue/internal/testutil"
-	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -87,7 +86,7 @@ func startLifecycleHost(t *testing.T, dir string) *HostProcess {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cheapvault.SeedDataDir(t, dir)
+	seedCheapVaultDataDir(t, dir)
 	clk := clock.NewFake(time.Unix(0, 0))
 	hp, err := StartHost(t.Context(), &HostDeps{
 		DataDir: dir, Config: testHostConfig(), Clock: clk,
@@ -499,7 +498,7 @@ func TestSessionChangesRetentionAndResyncRequired(t *testing.T) {
 func newJournalStore(t *testing.T) *vendorstore.Store {
 	t.Helper()
 	clk := clock.NewFake(time.Date(2026, 11, 14, 0, 0, 0, 0, time.UTC))
-	db, err := storage.Open(t.Context(), filepath.Join(t.TempDir(), "vendor-changes.db"))
+	db, err := storage.Open(t.Context(), copyMigratedTestDB(t, filepath.Join(t.TempDir(), "vendor-changes.db")))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -508,9 +507,6 @@ func newJournalStore(t *testing.T) *vendorstore.Store {
 			t.Error(closeErr)
 		}
 	})
-	if err = storage.Migrate(t.Context(), db, clk); err != nil {
-		t.Fatal(err)
-	}
 	vs, err := vendorstore.New(t.Context(), db, nil, clk, nil, vendorstore.WithChangeJournalRetention(3))
 	if err != nil {
 		t.Fatal(err)
