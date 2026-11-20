@@ -1,6 +1,7 @@
 package appwin
 
 import (
+	"fmt"
 	"image"
 	"strings"
 
@@ -353,6 +354,10 @@ func (s *screens) layoutSidebar(gtx *layout.Context, env *kit.Env) layout.Dimens
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
+			return s.layoutInboxRow(env, &local)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			local := gtx
 			header, ev := s.header.Layout(env, &local, &kit.SectionHeaderProps{
 				Label:  "Workspaces",
 				Action: &kit.IconButtonProps{Icon: kit.IconPlus, Label: "New workspace"},
@@ -370,6 +375,24 @@ func (s *screens) layoutSidebar(gtx *layout.Context, env *kit.Env) layout.Dimens
 	)
 }
 
+func (s *screens) layoutInboxRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
+	props := &kit.ListRowProps{
+		Label:    "Approvals",
+		Selected: s.inboxOpen,
+	}
+	if count := s.inbox.PendingCount(); count > 0 {
+		props.StateLabel = fmt.Sprintf("%d pending", count)
+		props.StateTone = kit.ToneWarning
+	} else {
+		props.Trailing = "0"
+	}
+	dims, ev := s.inboxRow.Layout(env, gtx, props)
+	if ev.Clicked || ev.Opened {
+		s.inboxOpen = true
+	}
+	return dims
+}
+
 // sessionRows builds one kit row per session of the given list; the row's
 // click opens it.
 func (s *screens) sessionRows(env *kit.Env, sessions []session.Session) []layout.FlexChild {
@@ -381,14 +404,20 @@ func (s *screens) sessionRows(env *kit.Env, sessions []session.Session) []layout
 			row.Enter()
 			s.rows[sess.ID] = row
 		}
-		selected := s.open == sess.ID
+		selected := !s.inboxOpen && s.open == sess.ID
+		pending := s.inbox.PendingCountForSession(sess.ID)
 		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
-			dims, ev := row.Layout(env, &local, &kit.ListRowProps{
+			props := &kit.ListRowProps{
 				Label:     sessionName(sess),
 				Secondary: sessionState(sess),
 				Selected:  selected,
-			})
+			}
+			if pending > 0 {
+				props.StateLabel = fmt.Sprintf("%d pending", pending)
+				props.StateTone = kit.ToneWarning
+			}
+			dims, ev := row.Layout(env, &local, props)
 			if ev.Clicked {
 				s.openSession(sess.ID)
 			}

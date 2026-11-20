@@ -29,15 +29,14 @@ const (
 	OpAnswer
 )
 
-// Request carries one inbox operation. Answer requests always carry the pinned
-// (RequestID, Incarnation) pair.
+// Request carries one inbox operation pinned to (RequestID, Incarnation).
 type Request struct {
 	Kind   OpKind
 	Pin    Pin
 	Answer client.AnswerInteractionInput
 }
 
-// Result delivers the completed inbox operation to the window goroutine.
+// Result delivers one completed inbox operation to the window goroutine.
 type Result struct {
 	Kind        OpKind
 	Pin         Pin
@@ -67,16 +66,11 @@ type Worker struct {
 	stopOnce sync.Once
 }
 
-// NewWorker builds an inbox worker using clientOf to obtain the active client.
-// onResult is optional and runs after a result is queued (e.g. window Invalidate).
+// NewWorker builds an inbox worker using clientOf and optional onResult notifier.
 func NewWorker(clientOf func() Client, onResult func()) *Worker {
 	return &Worker{
-		clientOf: clientOf,
-		onResult: onResult,
-		newID:    newCommandIDs(),
-		reqs:     make(chan Request, workerBuffer),
-		results:  make(chan Result, workerBuffer),
-		done:     make(chan struct{}),
+		clientOf: clientOf, onResult: onResult, newID: newCommandIDs(),
+		reqs: make(chan Request, workerBuffer), results: make(chan Result, workerBuffer), done: make(chan struct{}),
 	}
 }
 
@@ -97,8 +91,7 @@ func (w *Worker) Stop() {
 	<-w.done
 }
 
-// Do queues req for off-thread execution. OpAnswer enforces the pinned
-// (RequestID, Incarnation) pair and mints a unique command ID.
+// Do queues req for off-thread execution, enforcing Pin and minting CommandID.
 func (w *Worker) Do(req *Request) {
 	q := *req
 	if q.Kind == OpAnswer {
@@ -106,8 +99,7 @@ func (w *Worker) Do(req *Request) {
 			w.deliver(&Result{Kind: q.Kind, Pin: q.Pin, Err: errMissingPin})
 			return
 		}
-		q.Answer.RequestID = q.Pin.RequestID
-		q.Answer.Incarnation = q.Pin.Incarnation
+		q.Answer.RequestID, q.Answer.Incarnation = q.Pin.RequestID, q.Pin.Incarnation
 		if q.Answer.CommandID == "" {
 			q.Answer.CommandID = w.newID()
 		}
@@ -167,20 +159,16 @@ func (w *Worker) execute(ctx context.Context, c Client, req *Request) Result {
 	res := Result{Kind: req.Kind, Pin: req.Pin}
 	switch req.Kind {
 	case OpListPending:
-		list, err := c.ListPendingInteractions(ctx)
-		res.List = list
-		res.Err = err
-		if err == nil {
-			if len(list.Requests) > 0 {
-				res.Incarnation = list.Requests[0].Incarnation
+		res.List, res.Err = c.ListPendingInteractions(ctx)
+		if res.Err == nil {
+			if len(res.List.Requests) > 0 {
+				res.Incarnation = res.List.Requests[0].Incarnation
 			} else if st, stErr := c.HostStatus(ctx); stErr == nil {
 				res.Incarnation = st.Incarnation
 			}
 		}
 	case OpAnswer:
-		ans, err := c.AnswerInteraction(ctx, &req.Answer)
-		res.Answer = ans
-		res.Err = err
+		res.Answer, res.Err = c.AnswerInteraction(ctx, &req.Answer)
 	}
 	if res.Err != nil {
 		res.Code, _ = client.InteractionCodeOf(res.Err)

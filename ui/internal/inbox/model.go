@@ -12,23 +12,15 @@ var errUnknownInteractionEvent = errors.New("unknown interaction topic event")
 
 // Pin uniquely identifies one pending interaction ticket by (RequestID, Incarnation).
 // An answer is dispatched only for an exact matching pair.
-type Pin struct {
-	RequestID   string
-	Incarnation string
-}
+type Pin struct{ RequestID, Incarnation string }
 
 // Valid reports whether both parts of the pin are non-empty.
-func (p Pin) Valid() bool {
-	return p.RequestID != "" && p.Incarnation != ""
-}
+func (p Pin) Valid() bool { return p.RequestID != "" && p.Incarnation != "" }
 
-// String formats the pin for map keys and diagnostics without content.
-func (p Pin) String() string {
-	return p.Incarnation + "/" + p.RequestID
-}
+// String formats the pin for diagnostics without content.
+func (p Pin) String() string { return p.Incarnation + "/" + p.RequestID }
 
-// Model holds the pending interaction tickets for the current host incarnation
-// on the window goroutine.
+// Model holds pending interaction tickets for the current host incarnation.
 type Model struct {
 	incarnation string
 	seq         uint64
@@ -38,11 +30,7 @@ type Model struct {
 }
 
 // NewModel builds an empty inbox model.
-func NewModel() *Model {
-	return &Model{
-		items: map[Pin]client.PendingInteraction{},
-	}
-}
+func NewModel() *Model { return &Model{items: map[Pin]client.PendingInteraction{}} }
 
 // Incarnation returns the host incarnation this model currently tracks.
 func (m *Model) Incarnation() string { return m.incarnation }
@@ -91,8 +79,7 @@ func (m *Model) CanAnswer(pin Pin) bool {
 	return ok
 }
 
-// Remove deletes pin from the model when an answer succeeded or the host
-// reported it resolved or stale.
+// Remove deletes pin from the model when resolved or stale.
 func (m *Model) Remove(pin Pin) {
 	if _, ok := m.items[pin]; !ok {
 		return
@@ -121,41 +108,29 @@ func (m *Model) reconcileSnapshot(incarnation string, seq uint64, reqs []client.
 		incarnation = reqs[0].Incarnation
 	}
 	if incarnation != "" && incarnation != m.incarnation {
-		m.resetIncarnation(incarnation)
+		m.incarnation, m.seq, m.hasSnapshot = incarnation, 0, false
+		clear(m.items)
+		m.order = nil
 	}
 	if m.hasSnapshot && seq < m.seq {
 		return
 	}
-	m.hasSnapshot = true
-	m.seq = seq
+	m.hasSnapshot, m.seq = true, seq
 	m.items = make(map[Pin]client.PendingInteraction, len(reqs))
 	m.order = make([]Pin, 0, len(reqs))
 	for i := range reqs {
-		r := reqs[i]
-		pin := Pin{RequestID: r.RequestID, Incarnation: r.Incarnation}
-		if !pin.Valid() {
-			continue
-		}
-		if m.incarnation != "" && pin.Incarnation != m.incarnation {
+		pin := Pin{RequestID: reqs[i].RequestID, Incarnation: reqs[i].Incarnation}
+		if !pin.Valid() || (m.incarnation != "" && pin.Incarnation != m.incarnation) {
 			continue
 		}
 		if _, dup := m.items[pin]; !dup {
 			m.order = append(m.order, pin)
 		}
-		m.items[pin] = r
+		m.items[pin] = reqs[i]
 	}
 }
 
-func (m *Model) resetIncarnation(incarnation string) {
-	m.incarnation = incarnation
-	m.seq = 0
-	m.hasSnapshot = false
-	clear(m.items)
-	m.order = nil
-}
-
-// ApplyTopicEvent folds one `interaction` topic event (`requested` or `resolved`)
-// into the model, ignoring events from older sequences or mismatched incarnations.
+// ApplyTopicEvent folds one `interaction` topic event (`requested` or `resolved`).
 func (m *Model) ApplyTopicEvent(seq uint64, eventType string, payload []byte) error {
 	if m.hasSnapshot && seq > 0 && seq <= m.seq {
 		return nil

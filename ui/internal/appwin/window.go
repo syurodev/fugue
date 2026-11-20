@@ -20,6 +20,7 @@ import (
 
 	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
+	"github.com/syurodev/fugue/ui/internal/inbox"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
@@ -112,6 +113,15 @@ func Run(ctx context.Context, opts Options) error {
 	})
 	vaultW.Start(runCtx)
 	defer vaultW.Stop()
+	inboxW := inbox.NewWorker(func() inbox.Client {
+		c := m.Client()
+		if c == nil {
+			return nil
+		}
+		return c
+	}, w.Invalidate)
+	inboxW.Start(runCtx)
+	defer inboxW.Stop()
 	defer stopSideGoroutines(cancel, startFeeder(runCtx, w, updates, q), startCloser(runCtx, w))
 
 	shaper, err := fonts.Shaper()
@@ -123,6 +133,7 @@ func Run(ctx context.Context, opts Options) error {
 	attach(env, w)
 	sc := newScreens(m, fetcher, poster, wsMut)
 	sc.vaultWorker = vaultW
+	sc.inboxWorker = inboxW
 	return eventLoop(w, env, sc, q, &light, &dark)
 }
 
@@ -239,6 +250,9 @@ drainPosts:
 	if sc.vaultWorker != nil {
 		sc.applyVaultResults(drainVaultResults(sc.vaultWorker))
 	}
+	if sc.inboxWorker != nil {
+		sc.applyInboxResults(drainInboxResults(sc.inboxWorker))
+	}
 	toggleTheme(gtx, env, light, dark)
 	drawWindow(gtx, env, sc)
 }
@@ -281,6 +295,20 @@ drain:
 
 func drainVaultResults(w *vault.Worker) []vault.Result {
 	out := make([]vault.Result, 0, 4)
+drain:
+	for {
+		select {
+		case res := <-w.Results():
+			out = append(out, res)
+		default:
+			break drain
+		}
+	}
+	return out
+}
+
+func drainInboxResults(w *inbox.Worker) []inbox.Result {
+	out := make([]inbox.Result, 0, 4)
 drain:
 	for {
 		select {

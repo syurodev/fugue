@@ -20,8 +20,7 @@ const (
 	EventInteractionResolved  = "resolved"
 )
 
-// Supported interaction request kinds and user-visible outcomes (interaction
-// §4.1, §8).
+// Supported interaction request kinds and outcomes (interaction §4.1, §8).
 const (
 	InteractionKindConfirm  = "confirm"
 	InteractionKindSelect   = "select"
@@ -73,15 +72,13 @@ type PendingInteraction struct {
 	Questions       []InteractionQuestion `json:"questions,omitempty"`
 }
 
-// PendingInteractionList is the Answer to ListPendingInteractions: every pending
-// request of the current host incarnation and the interaction topic sequence.
+// PendingInteractionList is the reply to ListPendingInteractions.
 type PendingInteractionList struct {
 	Requests []PendingInteraction
 	Sequence uint64
 }
 
-// InteractionQuestionAnswer carries the user's reply to one question of a
-// question-kind interaction request.
+// InteractionQuestionAnswer carries the user's reply to one question.
 type InteractionQuestionAnswer struct {
 	QuestionID string
 	OptionIDs  []string
@@ -91,23 +88,14 @@ type InteractionQuestionAnswer struct {
 // AnswerInteractionInput carries one human decision for a pinned
 // (RequestID, Incarnation) request.
 type AnswerInteractionInput struct {
-	CommandID   string
-	Incarnation string
-	RequestID   string
-	Outcome     string
-	OptionID    string
-	Text        string
-	Answers     []InteractionQuestionAnswer
+	CommandID, Incarnation, RequestID, Outcome, OptionID, Text string
+	Answers                                                    []InteractionQuestionAnswer
 }
 
 // InteractionAnswerResult confirms the outcome recorded by the host.
-type InteractionAnswerResult struct {
-	RequestID string
-	Outcome   string
-}
+type InteractionAnswerResult struct{ RequestID, Outcome string }
 
-// InteractionResolvedEvent is the payload of an `interaction` topic `resolved`
-// event (metadata only, no content).
+// InteractionResolvedEvent is the payload of an `interaction` topic `resolved` event.
 type InteractionResolvedEvent struct {
 	RequestID string `json:"request_id"`
 	Outcome   string `json:"outcome"`
@@ -122,25 +110,18 @@ func (c *Client) ListPendingInteractions(ctx context.Context) (PendingInteractio
 		return PendingInteractionList{}, fmt.Errorf("list pending interactions: %w", err)
 	}
 	reqs := res.Msg.GetRequests()
-	out := PendingInteractionList{
-		Requests: make([]PendingInteraction, 0, len(reqs)),
-		Sequence: res.Msg.GetSequence(),
-	}
+	out := PendingInteractionList{Requests: make([]PendingInteraction, 0, len(reqs)), Sequence: res.Msg.GetSequence()}
 	for _, r := range reqs {
 		out.Requests = append(out.Requests, pendingInteractionFromProto(r))
 	}
 	return out, nil
 }
 
-// AnswerInteraction submits a human decision for the pinned
-// (RequestID, Incarnation) pair.
+// AnswerInteraction submits a human decision for the pinned (RequestID, Incarnation) pair.
 func (c *Client) AnswerInteraction(ctx context.Context, in *AnswerInteractionInput) (InteractionAnswerResult, error) {
 	req := &interactionv1.AnswerRequest{
-		CommandId:   in.CommandID,
-		Incarnation: in.Incarnation,
-		RequestId:   in.RequestID,
-		Outcome:     in.Outcome,
-		Answers:     protoQuestionAnswers(in.Answers),
+		CommandId: in.CommandID, Incarnation: in.Incarnation, RequestId: in.RequestID, Outcome: in.Outcome,
+		Answers: protoQuestionAnswers(in.Answers),
 	}
 	if in.OptionID != "" {
 		opt := in.OptionID
@@ -154,14 +135,10 @@ func (c *Client) AnswerInteraction(ctx context.Context, in *AnswerInteractionInp
 	if err != nil {
 		return InteractionAnswerResult{}, fmt.Errorf("answer interaction: %w", err)
 	}
-	return InteractionAnswerResult{
-		RequestID: res.Msg.GetRequestId(),
-		Outcome:   res.Msg.GetOutcome(),
-	}, nil
+	return InteractionAnswerResult{RequestID: res.Msg.GetRequestId(), Outcome: res.Msg.GetOutcome()}, nil
 }
 
-// InteractionCodeOf returns the public error code carried by a failed
-// interaction RPC error, for example interaction.stale_incarnation.
+// InteractionCodeOf returns the public error code carried by a failed interaction RPC error.
 func InteractionCodeOf(err error) (string, bool) {
 	detail, ok := errorDetailOf(err)
 	if !ok {
@@ -172,27 +149,23 @@ func InteractionCodeOf(err error) (string, bool) {
 
 // DecodeInteractionSnapshot decodes the `interaction` topic snapshot payload.
 func DecodeInteractionSnapshot(payload []byte) ([]PendingInteraction, error) {
-	var out []PendingInteraction
-	if err := json.Unmarshal(payload, &out); err != nil {
-		return nil, fmt.Errorf("decode interaction snapshot: %w", err)
-	}
-	return out, nil
+	return decodeJSON[[]PendingInteraction](payload, "interaction snapshot")
 }
 
 // DecodeInteractionRequested decodes an `interaction` topic `requested` event.
 func DecodeInteractionRequested(payload []byte) (PendingInteraction, error) {
-	var out PendingInteraction
-	if err := json.Unmarshal(payload, &out); err != nil {
-		return PendingInteraction{}, fmt.Errorf("decode interaction requested event: %w", err)
-	}
-	return out, nil
+	return decodeJSON[PendingInteraction](payload, "interaction requested event")
 }
 
 // DecodeInteractionResolved decodes an `interaction` topic `resolved` event.
 func DecodeInteractionResolved(payload []byte) (InteractionResolvedEvent, error) {
-	var out InteractionResolvedEvent
+	return decodeJSON[InteractionResolvedEvent](payload, "interaction resolved event")
+}
+
+func decodeJSON[T any](payload []byte, what string) (T, error) {
+	var out T
 	if err := json.Unmarshal(payload, &out); err != nil {
-		return InteractionResolvedEvent{}, fmt.Errorf("decode interaction resolved event: %w", err)
+		return out, fmt.Errorf("decode %s: %w", what, err)
 	}
 	return out, nil
 }
@@ -202,20 +175,11 @@ func pendingInteractionFromProto(r *interactionv1.PendingRequest) PendingInterac
 		return PendingInteraction{}
 	}
 	return PendingInteraction{
-		RequestID:       r.GetRequestId(),
-		Incarnation:     r.GetIncarnation(),
-		SessionID:       r.GetSessionId(),
-		Tool:            r.GetTool(),
-		Kind:            r.GetKind(),
-		Risk:            r.GetRisk(),
-		EnvTag:          r.GetEnvTag(),
-		Summary:         r.GetSummary(),
-		Detail:          r.GetDetail(),
-		Body:            r.GetBody(),
-		OfferedOutcomes: slices.Clone(r.GetOfferedOutcomes()),
-		Options:         interactionOptionsFromProto(r.GetOptions()),
-		GrantScopeLabel: r.GetGrantScopeLabel(),
-		Questions:       interactionQuestionsFromProto(r.GetQuestions()),
+		RequestID: r.GetRequestId(), Incarnation: r.GetIncarnation(), SessionID: r.GetSessionId(),
+		Tool: r.GetTool(), Kind: r.GetKind(), Risk: r.GetRisk(), EnvTag: r.GetEnvTag(),
+		Summary: r.GetSummary(), Detail: r.GetDetail(), Body: r.GetBody(),
+		OfferedOutcomes: slices.Clone(r.GetOfferedOutcomes()), Options: interactionOptionsFromProto(r.GetOptions()),
+		GrantScopeLabel: r.GetGrantScopeLabel(), Questions: interactionQuestionsFromProto(r.GetQuestions()),
 	}
 }
 
@@ -223,13 +187,9 @@ func interactionOptionsFromProto(opts []*interactionv1.Option) []InteractionOpti
 	if len(opts) == 0 {
 		return nil
 	}
-	out := make([]InteractionOption, 0, len(opts))
-	for _, o := range opts {
-		out = append(out, InteractionOption{
-			ID:          o.GetId(),
-			Label:       o.GetLabel(),
-			Description: o.GetDescription(),
-		})
+	out := make([]InteractionOption, len(opts))
+	for i, o := range opts {
+		out[i] = InteractionOption{ID: o.GetId(), Label: o.GetLabel(), Description: o.GetDescription()}
 	}
 	return out
 }
@@ -238,15 +198,12 @@ func interactionQuestionsFromProto(qs []*interactionv1.Question) []InteractionQu
 	if len(qs) == 0 {
 		return nil
 	}
-	out := make([]InteractionQuestion, 0, len(qs))
-	for _, q := range qs {
-		out = append(out, InteractionQuestion{
-			QuestionID:  q.GetQuestionId(),
-			Prompt:      q.GetPrompt(),
-			Options:     interactionOptionsFromProto(q.GetOptions()),
-			MultiSelect: q.GetMultiSelect(),
-			AllowText:   q.GetAllowText(),
-		})
+	out := make([]InteractionQuestion, len(qs))
+	for i, q := range qs {
+		out[i] = InteractionQuestion{
+			QuestionID: q.GetQuestionId(), Prompt: q.GetPrompt(),
+			Options: interactionOptionsFromProto(q.GetOptions()), MultiSelect: q.GetMultiSelect(), AllowText: q.GetAllowText(),
+		}
 	}
 	return out
 }
@@ -255,13 +212,9 @@ func protoQuestionAnswers(answers []InteractionQuestionAnswer) []*interactionv1.
 	if len(answers) == 0 {
 		return nil
 	}
-	out := make([]*interactionv1.QuestionAnswer, 0, len(answers))
-	for _, a := range answers {
-		out = append(out, &interactionv1.QuestionAnswer{
-			QuestionId: a.QuestionID,
-			OptionIds:  slices.Clone(a.OptionIDs),
-			Text:       a.Text,
-		})
+	out := make([]*interactionv1.QuestionAnswer, len(answers))
+	for i, a := range answers {
+		out[i] = &interactionv1.QuestionAnswer{QuestionId: a.QuestionID, OptionIds: slices.Clone(a.OptionIDs), Text: a.Text}
 	}
 	return out
 }
