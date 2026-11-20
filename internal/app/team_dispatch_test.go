@@ -195,11 +195,12 @@ func initRepo(t *testing.T, dir string) {
 	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("fixture\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	const gitConfig = "config"
 	for _, args := range [][]string{
 		{"init", "-q", "-b", "main"},
-		{"config", "user.name", "Fugue Test"},
-		{"config", "user.email", "fugue@example.invalid"},
-		{"config", "commit.gpgsign", "false"},
+		{gitConfig, "user.name", "Fugue Test"},
+		{gitConfig, "user.email", "fugue@example.invalid"},
+		{gitConfig, "commit.gpgsign", "false"},
 		{"add", "."},
 		{"commit", "-q", "-m", "init"},
 	} {
