@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"log/slog"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/vendor"
@@ -105,10 +106,19 @@ func (s *VendorService) resumeTaskSession(ctx context.Context, sessionID, cwd st
 	if err := s.spawn(spec, info.Role, func() error { return s.sessions.Resume(ctx, sessionID, spec) }); err != nil {
 		return err
 	}
-	if s.onSessionResumed != nil {
-		return s.onSessionResumed(ctx, sessionID)
-	}
+	s.notifySessionResumed(ctx, sessionID)
 	return nil
+}
+
+// notifySessionResumed runs the post-resume lead recovery hook without failing a
+// live resume if recording the team transition transiently errors.
+func (s *VendorService) notifySessionResumed(ctx context.Context, sessionID string) {
+	if s.onSessionResumed == nil {
+		return
+	}
+	if err := s.onSessionResumed(ctx, sessionID); err != nil {
+		slog.WarnContext(ctx, "recovering resumed lead task failed", "session_id", sessionID, "error_code", string(errcode.CodeOf(err)))
+	}
 }
 
 func (s *VendorService) resumeProfile(ctx context.Context, info *vendorstore.Session) (model, effort string, err error) {

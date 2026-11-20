@@ -104,10 +104,15 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 		admit = newSchedulerAdmitter(sessions, vs, accounts)
 	}
 	teamsCfg := globalOrWorkspaceTeamsConfigReader(hp.rt.workspaces)
-	sessions.SetWakeHook(func(string) { hp.rt.teamWake.Notify() })
+	sessions.SetWakeHook(func(sessionID string) { hp.rt.teamWake.NotifySessionReady(sessionID) })
+	var recoverLead func(context.Context, string) error
+	if hp.rt.teamTasks != nil {
+		recoverLead = hp.rt.teamTasks.OnSessionResumed
+	}
 	hp.rt.teamWake = newTeamWake(&teamWakeDeps{
 		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Roots: hp.rt.workspaces.domain,
 		Clock: deps.Clock, IDs: deps.IDs, Vault: v, Hub: hp.rt.hub, DataDir: deps.DataDir,
+		RecoverLead: recoverLead,
 	})
 	hp.rt.teamWake.Start(base)
 	hp.rt.teamBudgets = newTeamBudgets(&teamBudgetsDeps{

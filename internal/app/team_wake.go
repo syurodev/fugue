@@ -68,6 +68,8 @@ type teamWakeDeps struct {
 	Hub      *EventHub
 	// DataDir roots the task worktrees of a detached session's cwd (Q-119).
 	DataDir string
+	// RecoverLead retries OnSessionResumed when a resumed lead task stays unknown.
+	RecoverLead func(context.Context, string) error
 }
 
 // teamWake delivers the team mailbox. One run at a time: the mutex serializes
@@ -80,6 +82,8 @@ type teamWake struct {
 	resumeAttempts map[string]int
 	inflightMu     sync.Mutex
 	inflight       map[string]bool
+	readyMu        sync.Mutex
+	readySessions  map[string]struct{}
 	heldMu         sync.RWMutex
 	held           map[string]HeldMailboxEntry
 }
@@ -189,6 +193,7 @@ func (w *teamWake) Pump(ctx context.Context) error {
 	if w.deps.Vault.Snapshot().State != vault.StateUnlocked {
 		return errcode.New(errcode.VendorVaultLocked, "the vault is locked")
 	}
+	w.retryPendingLeadRecoveries(ctx)
 	recipients, err := w.deps.Store.PendingMailbox(ctx)
 	if err != nil {
 		return boundaryError("list the pending mailbox", err)
@@ -271,6 +276,9 @@ func (w *teamWake) prepareSession(ctx context.Context, r vendorstore.MailboxReci
 	if session.State == vendorstore.StateReady {
 		delete(w.resumeRetryAt, session.ID)
 		delete(w.resumeAttempts, session.ID)
+		if session.Role == string(vendorstore.RoleLead) {
+			w.recoverReadyLead(ctx, session.ID)
+		}
 		return true
 	}
 	return false
@@ -346,7 +354,7 @@ func (w *teamWake) sessionCwd(ctx context.Context, session *vendorstore.Session)
 	if err != nil {
 		return "", boundaryError("resolve the session workspace root", err)
 	}
-	if session.TaskID == "" {
+	if session.TaskID == "" || session.Role == string(vendorstore.RoleLead) || session.Role == string(vendorstore.RoleSolo) {
 		return root, nil
 	}
 	repoID := repoIDFor(root)

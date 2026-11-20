@@ -229,18 +229,9 @@ func (s *VendorService) Resume(ctx context.Context, principal string, cmd *Resum
 		if err := s.spawn(spec, info.Role, func() error { return s.sessions.Resume(opCtx, cmd.SessionID, spec) }); err != nil {
 			return VendorSessionView{}, publicVendorError(err)
 		}
-		if err := s.notifySessionResumed(opCtx, cmd.SessionID); err != nil {
-			return VendorSessionView{}, err
-		}
+		s.notifySessionResumed(opCtx, cmd.SessionID)
 		return s.view(opCtx, cmd.SessionID)
 	})
-}
-
-func (s *VendorService) notifySessionResumed(ctx context.Context, sessionID string) error {
-	if s.onSessionResumed == nil {
-		return nil
-	}
-	return s.onSessionResumed(ctx, sessionID)
 }
 
 // spawn mints a pending session token (host-api §7), hands it to the process
