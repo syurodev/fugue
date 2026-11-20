@@ -88,7 +88,13 @@ type AccountsService struct {
 	// notifyMu orders publication: the view is re-read under it, so the last
 	// event of a vendor is never older than the registry. It is never held
 	// while the registry lock is, and the registry never calls into it.
-	notifyMu sync.Mutex
+	notifyMu      sync.Mutex
+	blockedMu     sync.Mutex
+	lastBlocked   map[string]bool
+	reopenMu      sync.Mutex
+	reopenRunning bool
+	reopenWake    chan struct{}
+	onQuotaReopen func()
 
 	flightMu sync.Mutex
 	flight   *refreshFlight
@@ -113,6 +119,9 @@ type accountsServiceDeps struct {
 	// GoTask spawns a supervised goroutine on the host's base context; the
 	// login monitor outlives the StartLogin RPC that started it.
 	GoTask func(name string, fn func(context.Context) error) *supervise.Task
+	// OnQuotaReopen runs on the host lifetime when a paused or quota-gated
+	// account reaches its resetsAt boundary.
+	OnQuotaReopen func()
 }
 
 // newAccountsService registers the quota and login topics and publishes every
@@ -129,7 +138,10 @@ func newAccountsService(accounts *vendor.Accounts, vendors *VendorService, hub *
 	s := &AccountsService{
 		accounts: accounts, vendors: vendors, hub: hub,
 		clk: clk, ids: idGen, goTask: deps.GoTask,
-		logins: make(map[string]*loginRun),
+		lastBlocked:   make(map[string]bool),
+		reopenWake:    make(chan struct{}, 1),
+		onQuotaReopen: deps.OnQuotaReopen,
+		logins:        make(map[string]*loginRun),
 	}
 	snapshot := func(context.Context) ([]byte, error) {
 		return json.Marshal(quotaSnapshot{Accounts: accountViews(accounts.Snapshot())})
@@ -140,27 +152,129 @@ func newAccountsService(accounts *vendor.Accounts, vendors *VendorService, hub *
 	if err := hub.RegisterEphemeral(TopicLogin, s.loginSnapshot, quotaTopicBuffer); err != nil {
 		return nil, err
 	}
+	s.seedBlockedSnapshot()
 	accounts.SetOnChange(s.publish)
+	s.ensureReopenLoop()
 	return s, nil
+}
+
+func (s *AccountsService) seedBlockedSnapshot() {
+	s.blockedMu.Lock()
+	defer s.blockedMu.Unlock()
+	snap := s.accounts.Snapshot()
+	for i := range snap {
+		acc := &snap[i]
+		s.lastBlocked[acc.Vendor] = !s.accounts.QuotaAllows(acc.Vendor)
+	}
 }
 
 // publish sends the current view of the changed vendor. It ignores the
 // callback's copy, which a concurrent observation may already have outdated.
 func (s *AccountsService) publish(changed *vendor.Account) {
 	s.notifyMu.Lock()
-	defer s.notifyMu.Unlock()
 	account, ok := s.accounts.Account(changed.Vendor)
-	if !ok {
+	if ok {
+		s.blockedMu.Lock()
+		s.lastBlocked[account.Vendor] = !s.accounts.QuotaAllows(account.Vendor)
+		s.blockedMu.Unlock()
+		view := accountView(&account)
+		payload, err := json.Marshal(view)
+		if err != nil {
+			slog.Warn("marshal a quota event", "code", errcode.CodeOf(err))
+		} else if _, err := s.hub.Publish(TopicQuota, Event{Type: EventQuotaAccountChanged, Key: view.Vendor, Payload: payload, LatestForKey: true}); err != nil {
+			slog.Warn("publish a quota event", "code", errcode.CodeOf(err))
+		}
+	}
+	s.notifyMu.Unlock()
+	if ok {
+		s.ensureReopenLoop()
+	}
+}
+
+func (s *AccountsService) ensureReopenLoop() {
+	if s.goTask == nil || s.onQuotaReopen == nil {
 		return
 	}
-	view := accountView(&account)
-	payload, err := json.Marshal(view)
-	if err != nil {
-		slog.Warn("marshal a quota event", "code", errcode.CodeOf(err))
+	s.reopenMu.Lock()
+	nextReset := vendor.NextQuotaReset(s.accounts.Snapshot(), s.clk.Now())
+	if nextReset.IsZero() {
+		s.reopenMu.Unlock()
 		return
 	}
-	if _, err := s.hub.Publish(TopicQuota, Event{Type: EventQuotaAccountChanged, Key: view.Vendor, Payload: payload, LatestForKey: true}); err != nil {
-		slog.Warn("publish a quota event", "code", errcode.CodeOf(err))
+	already := s.reopenRunning
+	if !already {
+		s.reopenRunning = true
+	}
+	s.reopenMu.Unlock()
+	if already {
+		s.wakeReopenLoop()
+		return
+	}
+	s.goTask("accounts-quota-reopen", s.quotaReopenLoop)
+}
+
+func (s *AccountsService) wakeReopenLoop() {
+	if s.reopenWake == nil {
+		return
+	}
+	select {
+	case s.reopenWake <- struct{}{}:
+	default:
+	}
+}
+
+func (s *AccountsService) quotaReopenLoop(ctx context.Context) error {
+	defer func() {
+		s.reopenMu.Lock()
+		s.reopenRunning = false
+		s.reopenMu.Unlock()
+	}()
+	for {
+		s.reopenMu.Lock()
+		now := s.clk.Now()
+		nextReset := vendor.NextQuotaReset(s.accounts.Snapshot(), now)
+		if nextReset.IsZero() {
+			s.reopenRunning = false
+			s.reopenMu.Unlock()
+			return nil
+		}
+		s.reopenMu.Unlock()
+		timer := s.clk.NewTimer(nextReset.Sub(now))
+		var fired bool
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return nil
+		case <-s.reopenWake:
+			timer.Stop()
+		case <-timer.C():
+			timer.Stop()
+			fired = true
+		}
+		if fired {
+			s.handleQuotaResetTick()
+		}
+	}
+}
+
+func (s *AccountsService) handleQuotaResetTick() {
+	var reopened []vendor.Account
+	s.blockedMu.Lock()
+	snap := s.accounts.Snapshot()
+	for i := range snap {
+		acc := &snap[i]
+		wasBlocked := s.lastBlocked[acc.Vendor]
+		allowed := s.accounts.QuotaAllows(acc.Vendor)
+		if wasBlocked && allowed {
+			reopened = append(reopened, *acc)
+		}
+	}
+	s.blockedMu.Unlock()
+	for i := range reopened {
+		s.publish(&reopened[i])
+	}
+	if s.onQuotaReopen != nil {
+		s.onQuotaReopen()
 	}
 }
 

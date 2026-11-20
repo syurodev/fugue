@@ -65,6 +65,7 @@ const (
 	FactUnlocked          FactKind = "unlocked"
 	FactProcessExited     FactKind = "process_exited"
 	FactHostRestarted     FactKind = "host_restarted"
+	FactDetach            FactKind = "detach"
 	FactResume            FactKind = "resume"
 	FactClose             FactKind = "close"
 )
@@ -85,6 +86,7 @@ const (
 	EffectEndTurn       EffectKind = "end_turn"
 	EffectInterruptTurn EffectKind = "interrupt_turn"
 	EffectWait          EffectKind = "wait"
+	EffectDetach        EffectKind = "detach"
 	EffectResume        EffectKind = "resume"
 	EffectClose         EffectKind = "close"
 )
@@ -113,7 +115,7 @@ func Transition(current State, fact Fact) (State, []Effect, error) {
 		FactApprovalDenied: transitionApprovalResolved, FactTurnCompleted: transitionTurnEnded,
 		FactTurnInterrupted: transitionTurnEnded, FactTurnFailed: transitionTurnEnded, FactTurnUnknown: transitionTurnUnknown,
 		FactWait: transitionWait, FactUnlocked: transitionUnlocked, FactProcessExited: transitionProcessExited,
-		FactHostRestarted: transitionHostRestarted, FactResume: transitionResume, FactClose: transitionClose,
+		FactHostRestarted: transitionHostRestarted, FactDetach: transitionDetach, FactResume: transitionResume, FactClose: transitionClose,
 	}
 	apply, ok := handlers[fact.Kind]
 	if !ok {
@@ -203,6 +205,10 @@ func transitionHostRestarted(current State, fact Fact) (State, []Effect, error) 
 	return State{Kind: StateDetached}, endUnknownTurn(current.Kind), nil
 }
 
+func transitionDetach(current State, fact Fact) (State, []Effect, error) {
+	return stateFrom(current, fact, StateReady, State{Kind: StateDetached}, Effect{Kind: EffectDetach})
+}
+
 func transitionResume(current State, fact Fact) (State, []Effect, error) {
 	return stateFrom(current, fact, StateDetached, State{Kind: StateStarting}, Effect{Kind: EffectResume})
 }
@@ -257,7 +263,7 @@ func validFact(fact Fact) bool {
 		return fact.Code == "" && (fact.Reason == WaitingVaultLocked || fact.Reason == WaitingQuota || fact.Reason == WaitingCapacity)
 	case FactReady, FactFugueSend, FactVendorTurn, FactApprovalRequested, FactApprovalGranted,
 		FactApprovalDenied, FactTurnCompleted, FactTurnInterrupted, FactUnlocked,
-		FactProcessExited, FactHostRestarted, FactResume, FactClose:
+		FactProcessExited, FactHostRestarted, FactDetach, FactResume, FactClose:
 		return noFactDetails(fact)
 	}
 	return false

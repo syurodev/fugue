@@ -52,9 +52,10 @@ type teamDispatcherDeps struct {
 	// trigger (the decide-path tests admit nothing, so they enqueue none).
 	Wake *teamWake
 	// Test hooks, nil in production, invoked between TeamSnapshot and
-	// appendTaskEvent so tests can inject real ErrSequenceConflict races.
+	// appendTaskEvent / ReserveSlot so tests can inject real races.
 	TestBeforeStartAppend func(context.Context)
 	TestBeforeFailAppend  func(context.Context)
+	TestBeforeReserveSlot func(context.Context)
 }
 
 // teamDispatcher starts the queued tasks of active teams. One run at a time:
@@ -198,7 +199,7 @@ func (d *teamDispatcher) start(ctx context.Context, rec *vendorstore.TeamRecord,
 	if task.HierarchyRole == vendorstore.RoleLead {
 		return d.bindLead(ctx, rec, task)
 	}
-	return true, d.startChild(ctx, rec, task, tasks)
+	return d.startChild(ctx, rec, task, tasks)
 }
 
 // appendTaskEvent appends one task event after the team's last sequence and

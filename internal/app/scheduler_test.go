@@ -312,7 +312,7 @@ func (stubAccountCapacity) HasCapacityFor(context.Context, string, string) (bool
 
 func TestDirectChildCapOfFourStillHoldsWithScheduler(t *testing.T) {
 	t.Parallel()
-	admit := newSchedulerAdmitter(stubAccountCapacity{}, nil)
+	admit := newSchedulerAdmitter(stubAccountCapacity{}, nil, nil)
 	tasks := make([]vendorstore.TaskRecord, 5)
 	for i := range tasks {
 		tasks[i] = vendorstore.TaskRecord{

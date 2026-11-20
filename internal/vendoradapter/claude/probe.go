@@ -132,6 +132,9 @@ func filteredEnv(hostEnv []string, home vendor.AccountHome, extras []string) []s
 	return process.FilterEnv(hostEnv, process.DefaultAllowlist(), vendorHome, extras)
 }
 
+// Capability returns the adapter's declared capability contract.
+func (*Adapter) Capability() vendor.Capability { return Capability() }
+
 // Capability is what the Claude Code adapter declares (vendor-runtime §6).
 // Blocking every tool call is the stage-B strict profile; the CLI offers no
 // model list.

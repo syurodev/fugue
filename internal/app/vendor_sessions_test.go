@@ -546,9 +546,10 @@ func TestVendorSessionResumeUsesStoredHandleAndStartsNewProcess(t *testing.T) {
 		snap, snapErr := f.store.Snapshot(t.Context(), testActorSessionID)
 		return snapErr == nil && snap.ResumeHandle == resumeHandle
 	})
+	actor := firstManager.actor(testActorSessionID)
 	cancelActor()
 	<-firstSession.closeStarted
-	if err := firstManager.actors[testActorSessionID].task.Wait(); err != nil {
+	if err := actor.task.Wait(); err != nil {
 		t.Fatalf("stopped actor = %v", err)
 	}
 	if _, err := f.store.Recover(t.Context()); err != nil {

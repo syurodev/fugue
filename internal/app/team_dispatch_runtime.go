@@ -10,6 +10,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/snapshot"
 	"github.com/syurodev/fugue/internal/vault"
+	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
@@ -75,10 +76,10 @@ func (hp *HostProcess) logDispatch(ctx context.Context, err error) {
 
 // wireTeamDispatch builds the dispatcher and the wake pump and hands every
 // newly active team to the former and every mailbox turn to the latter.
-func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorstore.Store, sessions *VendorSessions, v *vault.Service, deps *HostDeps) {
+func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorstore.Store, sessions *VendorSessions, accounts *vendor.Accounts, v *vault.Service, deps *HostDeps) {
 	admit := deps.TeamAdmitter
 	if admit == nil {
-		admit = newSchedulerAdmitter(sessions, vs)
+		admit = newSchedulerAdmitter(sessions, vs, accounts)
 	}
 	sessions.SetWakeHook(func(string) { hp.rt.teamWake.Notify() })
 	hp.rt.teamWake = newTeamWake(&teamWakeDeps{
@@ -96,6 +97,12 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 		sessions.SetTurnCompletedHook(func(sessionID string) {
 			hp.rt.goTask("team.no-report-check", func(checkCtx context.Context) error {
 				hp.rt.teamTasks.OnTurnCompleted(checkCtx, sessionID)
+				return nil
+			})
+		})
+		sessions.SetTurnFailedHook(func(sessionID, failureCode string) {
+			hp.rt.goTask("team.turn-failure-check", func(checkCtx context.Context) error {
+				hp.rt.teamTasks.OnTurnFailed(checkCtx, sessionID, failureCode)
 				return nil
 			})
 		})

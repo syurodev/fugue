@@ -108,6 +108,7 @@ func (w *teamWake) resolveBatch(ctx context.Context, b vendorstore.MailboxBatchR
 func refusedSend(err error) bool {
 	return errors.Is(err, vendor.ErrBusy) ||
 		errors.Is(err, vendor.ErrSessionClosed) ||
+		errors.Is(err, ErrPacingQueueFull) ||
 		errors.Is(err, vendorstore.ErrSessionNotFound) ||
 		errcode.CodeOf(err) == errcode.VendorSessionState ||
 		errcode.CodeOf(err) == errcode.VendorCapacity ||

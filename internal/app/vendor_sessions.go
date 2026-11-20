@@ -2,10 +2,10 @@ package app
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -15,6 +15,7 @@ import (
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
+	"github.com/syurodev/fugue/internal/workspace"
 )
 
 var (
@@ -31,13 +32,16 @@ type slotAccountKey struct {
 
 // VendorSessionDeps contains the runtime dependencies for vendor sessions.
 type VendorSessionDeps struct {
-	Store         vendorSessionStore
-	Transcripts   *Transcripts
-	Adapter       vendor.Adapter
-	Adapters      map[string]vendor.Adapter
-	Relay         serverRequestRelayer
-	HostResources HostResources
-	HostConfig    HostConfigReader
+	Store              vendorSessionStore
+	Transcripts        *Transcripts
+	Adapter            vendor.Adapter
+	Adapters           map[string]vendor.Adapter
+	Relay              serverRequestRelayer
+	HostResources      HostResources
+	HostConfig         HostConfigReader
+	TeamsConfig        func(ctx context.Context, workspaceID string) (workspace.TeamsConfig, error)
+	HasPendingApproval func(sessionID string) bool
+	PromptPacingJitter func(span time.Duration) time.Duration
 	// Accounts receives each session's quota windows and classified failures.
 	Accounts *vendor.Accounts
 	Vault    vendorVaultObserver
@@ -83,7 +87,11 @@ type VendorSessions struct {
 	retainedOwners    map[*retainedOwner]struct{}
 	wakeHook          func(sessionID string)
 	turnCompletedHook func(sessionID string)
+	turnFailedHook    func(sessionID, failureCode string)
 	closed            bool
+	pacer             *vendorPacer
+	capMu             sync.Mutex
+	capabilities      map[string]vendor.Capability
 	slotMu            sync.Mutex
 	reservations      map[string]slotAccountKey
 	inflightSpawns    int
@@ -107,15 +115,18 @@ func NewVendorSessions(ctx context.Context, deps *VendorSessionDeps) (*VendorSes
 	if copyDeps.Logger == nil {
 		copyDeps.Logger = slog.Default()
 	}
+	spawn := func(name string, fn func(context.Context) error) *supervise.Task {
+		return supervise.Go(ctx, name, fn)
+	}
 	return &VendorSessions{
-		deps: copyDeps,
-		spawn: func(name string, fn func(context.Context) error) *supervise.Task {
-			return supervise.Go(ctx, name, fn)
-		},
+		deps:           copyDeps,
+		spawn:          spawn,
 		actors:         make(map[string]*vendorSessionActor),
 		pendingOwners:  make(map[*pendingOwner]struct{}),
 		retainedOwners: make(map[*retainedOwner]struct{}),
+		capabilities:   make(map[string]vendor.Capability),
 		reservations:   make(map[string]slotAccountKey),
+		pacer:          newVendorPacer(copyDeps.Clock, spawn, copyDeps.HostConfig, copyDeps.PromptPacingJitter),
 	}, nil
 }
 
@@ -127,17 +138,31 @@ func (m *VendorSessions) SetRelay(relay serverRequestRelayer) {
 // Start creates a vendor process and hands its observations to a single actor.
 // The supplied session ID is also the adapter StartSpec session ID.
 func (m *VendorSessions) Start(ctx context.Context, session *vendorstore.Session, spec *vendor.StartSpec) error {
+	return m.startSession(ctx, session, spec, false)
+}
+
+// StartWithReservation starts a vendor session using a slot already reserved
+// via ReserveSlot; the caller's release callback cleans up the reservation.
+func (m *VendorSessions) StartWithReservation(ctx context.Context, session *vendorstore.Session, spec *vendor.StartSpec) error {
+	return m.startSession(ctx, session, spec, true)
+}
+
+func (m *VendorSessions) startSession(ctx context.Context, session *vendorstore.Session, spec *vendor.StartSpec, preReserved bool) error {
 	if session == nil || spec == nil || session.ID == "" || spec.SessionID != session.ID {
 		return errcode.New(errcode.InvalidArgument, "session identity is required")
 	}
 	if m.deps.Vault.Snapshot().State != vault.StateUnlocked {
 		return errcode.New(errcode.FailedPrecondition, "vault must be unlocked to start a vendor session")
 	}
-	release, capacityErr := m.reserveSlot(ctx, session.ID, session.Vendor, session.AccountID)
-	if capacityErr != nil {
-		return capacityErr
+	if !preReserved {
+		release, capacityErr := m.reserveSlot(ctx, session.ID, session.Vendor, session.AccountID)
+		if capacityErr != nil {
+			return capacityErr
+		}
+		defer release()
+	} else if !m.hasReservation(session.ID) {
+		return errcode.New(errcode.FailedPrecondition, "missing slot reservation for vendor session")
 	}
-	defer release()
 	started, observations, pending, err := m.startAdapter(ctx, session.Vendor, spec)
 	if err != nil {
 		return err
@@ -158,12 +183,20 @@ func (m *VendorSessions) Start(ctx context.Context, session *vendorstore.Session
 	return actor.call(ctx, actorCommand{kind: commandReady})
 }
 
-// Send starts a Fugue-origin vendor turn.
+// Send starts a vendor turn, pacing origin=fugue prompts per vendor while
+// letting origin=user prompts bypass immediately.
 func (m *VendorSessions) Send(ctx context.Context, sessionID string, input vendor.Input) error {
 	if err := vendor.ValidateInput(input); err != nil {
 		return fmt.Errorf("validate vendor input: %w", err)
 	}
-	return m.call(ctx, sessionID, actorCommand{kind: commandSend, input: input})
+	actor := m.actor(sessionID)
+	if actor == nil {
+		return vendorstore.ErrSessionNotFound
+	}
+	if input.Origin == vendor.OriginFugue {
+		return m.sendPacedSync(ctx, actor, input)
+	}
+	return actor.call(ctx, actorCommand{kind: commandSend, input: input})
 }
 
 // Steer adds input to the active vendor turn.
@@ -433,29 +466,4 @@ func (m *VendorSessions) actor(sessionID string) *vendorSessionActor {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.actors[sessionID]
-}
-
-// CloseAll asks every live actor to stop during host shutdown.
-func (m *VendorSessions) CloseAll(ctx context.Context) error {
-	m.mu.Lock()
-	m.closed = true
-	actors := make([]*vendorSessionActor, 0, len(m.actors))
-	for _, actor := range m.actors {
-		actors = append(actors, actor)
-	}
-	m.mu.Unlock()
-	for _, actor := range actors {
-		if err := actor.requestClose(vendor.CloseHostStop); err != nil {
-			return err
-		}
-	}
-	var failures []error
-	for _, actor := range actors {
-		select {
-		case <-actor.done:
-		case <-ctx.Done():
-			failures = append(failures, ctx.Err())
-		}
-	}
-	return errors.Join(failures...)
 }

@@ -31,44 +31,72 @@ type taskLaunch struct {
 }
 
 // startChild starts the vendor session of one child task in its own worktree
-// (Q-119). Reading comes first and fails the still-queued task; once the
-// assignment is recorded every failure ends the task failed with a stable
-// code, and a crash leaves it `starting` for recovery (never re-run).
-func (d *teamDispatcher) startChild(ctx context.Context, rec *vendorstore.TeamRecord, task *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord) error {
+// (Q-119). Reading and slot reservation come before TaskAssigned so capacity
+// lost between Admit and reservation leaves the task queued rather than failed.
+// Once the assignment is recorded every failure ends the task failed with a
+// stable code, and a crash leaves it `starting` for recovery (never re-run).
+func (d *teamDispatcher) startChild(ctx context.Context, rec *vendorstore.TeamRecord, task *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord) (bool, error) {
 	launch, code, err := d.prepareLaunch(ctx, rec, task, tasks)
 	if err != nil {
-		return err
+		return true, err
 	}
 	if code != "" {
-		return d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateQueued, "", code)
+		return true, d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateQueued, "", code)
 	}
+	if d.deps.TestBeforeReserveSlot != nil {
+		d.deps.TestBeforeReserveSlot(ctx)
+	}
+	releaseSlot, capErr := d.deps.Sessions.ReserveSlot(ctx, launch.req.SessionID, launch.req.Vendor, vendorDefaultAccount)
+	if capErr != nil {
+		if errors.Is(capErr, ErrVendorSessionCapacity) || errcode.CodeOf(capErr) == errcode.VendorCapacity {
+			return false, nil
+		}
+		return false, boundaryError("reserve task slot", capErr)
+	}
+	defer releaseSlot()
+	launch.req.SlotReserved = true
 	if appErr := d.appendTaskEvent(ctx, rec.TeamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
 		TaskID: task.TaskID, EventType: vendorstore.EventTaskAssigned, SessionID: launch.req.SessionID,
 	}); appErr != nil {
-		return appErr
+		return true, appErr
 	}
 	cwd, err := d.createWorktree(ctx, rec.TeamID, task, launch)
 	if err != nil {
 		slog.WarnContext(ctx, "creating the task worktree failed", "team_id", rec.TeamID, "task_id", task.TaskID, "error_code", string(errcode.CodeOf(err)))
-		return d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateStarting, launch.req.SessionID, failWorktree)
+		return true, d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateStarting, launch.req.SessionID, failWorktree)
 	}
 	launch.req.Cwd = cwd
 	if err := d.deps.Sessions.StartTaskSession(ctx, &launch.req); err != nil {
 		slog.WarnContext(ctx, "starting the task session failed", "team_id", rec.TeamID, "task_id", task.TaskID, "error_code", string(errcode.CodeOf(err)))
 		d.removeWorktree(ctx, launch, task.TaskID)
-		return d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateStarting, launch.req.SessionID, failSessionStart)
+		return true, d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateStarting, launch.req.SessionID, failSessionStart)
 	}
 	if err := d.appendTaskStartedWithRetry(ctx, rec.TeamID, task.TaskID, launch.req.SessionID); err != nil {
 		d.closeTaskSession(ctx, launch.req.SessionID)
 		d.removeWorktree(ctx, launch, task.TaskID)
-		return d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateStarting, launch.req.SessionID, failSessionStart)
+		return true, d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateStarting, launch.req.SessionID, failSessionStart)
 	}
+	return d.sendTaskIntro(ctx, rec.TeamID, task, launch)
+}
+
+func (d *teamDispatcher) sendTaskIntro(ctx context.Context, teamID string, task *vendorstore.TaskRecord, launch *taskLaunch) (bool, error) {
 	intro := taskIntro(task, &launch.spec, launch.brief, launch.deps, launch.nonce)
-	if err := d.deps.Sessions.Send(ctx, launch.req.SessionID, vendor.Input{Text: intro}); err != nil {
-		d.closeTaskSession(ctx, launch.req.SessionID)
-		return d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateRunning, launch.req.SessionID, failIntro)
+	opCtx := context.WithoutCancel(ctx)
+	taskID, sessionID := task.TaskID, launch.req.SessionID
+	err := d.deps.Sessions.SendAsync(ctx, sessionID, vendor.Input{Text: intro, Origin: vendor.OriginFugue}, func(sendErr error) {
+		if sendErr == nil || errors.Is(sendErr, ErrHostStopping) {
+			return
+		}
+		d.closeTaskSession(opCtx, sessionID)
+		if failErr := d.failTaskInState(opCtx, teamID, taskID, vendorstore.TaskStateRunning, sessionID, failIntro); failErr != nil {
+			slog.WarnContext(opCtx, "failing task after paced intro error failed", "team_id", teamID, "task_id", taskID, "error_code", string(errcode.CodeOf(failErr)))
+		}
+	})
+	if err != nil {
+		d.closeTaskSession(ctx, sessionID)
+		return true, d.failTaskInState(ctx, teamID, taskID, vendorstore.TaskStateRunning, sessionID, failIntro)
 	}
-	return nil
+	return true, nil
 }
 
 // prepareLaunch reads the sealed spec, the decided profile and the repository

@@ -193,6 +193,12 @@ func toolAvailable(ctx context.Context, tool *FugueTool, info func() (vendorstor
 	return ok && tool.Available(ctx, snapshot)
 }
 
+func (s *SessionToolService) recordActivity(sessionID string) {
+	if tracker, ok := s.recorder.(interface{ TouchSession(string) }); ok {
+		tracker.TouchSession(sessionID)
+	}
+}
+
 // Call runs one tool call of the binding's session through Decide: the
 // session's approval mode, the env-tag hard rule (I-03), grants and the
 // tool's own facts decide whether it runs, asks the user or is refused.
@@ -202,6 +208,8 @@ func (s *SessionToolService) Call(ctx context.Context, binding SessionBinding, n
 	if !s.tokens.live(binding) {
 		return FugueToolResult{}, errSessionEnded()
 	}
+	s.recordActivity(binding.SessionID)
+	defer s.recordActivity(binding.SessionID)
 	if name == approveToolName {
 		return s.callBuiltinApprove(ctx, binding, args)
 	}

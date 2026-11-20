@@ -53,6 +53,16 @@ func (f *fakeTaskSessions) HasCapacity(context.Context) (bool, error) {
 	return !f.noRoom, nil
 }
 
+func (f *fakeTaskSessions) ReserveSlot(context.Context, string, string, string) (func(), error) {
+	f.mu.Lock()
+	noRoom := f.noRoom
+	f.mu.Unlock()
+	if noRoom {
+		return nil, ErrVendorSessionCapacity
+	}
+	return func() {}, nil
+}
+
 func (f *fakeTaskSessions) StartTaskSession(_ context.Context, req *taskSessionRequest) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -84,6 +94,14 @@ func (f *fakeTaskSessions) Send(_ context.Context, sessionID string, input vendo
 		<-release
 	}
 	return err
+}
+
+func (f *fakeTaskSessions) SendAsync(ctx context.Context, sessionID string, input vendor.Input, onDone func(error)) error {
+	err := f.Send(ctx, sessionID, input)
+	if onDone != nil {
+		onDone(err)
+	}
+	return nil
 }
 
 func (f *fakeTaskSessions) Close(_ context.Context, sessionID string, _ vendor.CloseReason) error {

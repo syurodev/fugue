@@ -131,14 +131,85 @@ func (s *teamTaskService) OnTurnCompleted(ctx context.Context, sessionID string)
 		return
 	}
 	if firstMiss {
-		if sendErr := s.sessions.Send(ctx, sessionID, vendor.Input{
-			Text: "Your turn ended without calling fugue_task_done. Call fugue_task_done now with your summary, status, and any output.",
-		}); sendErr != nil {
-			slog.WarnContext(ctx, "sending no-report nudge failed", "session_id", sessionID, "error_code", string(errcode.CodeOf(sendErr)))
-		}
+		s.sendNoReportNudge(ctx, sessionID)
 		return
 	}
 	s.failTaskNoReport(ctx, &task, sessionID)
+}
+
+func (s *teamTaskService) sendNoReportNudge(ctx context.Context, sessionID string) {
+	opCtx := context.WithoutCancel(ctx)
+	err := s.sessions.SendAsync(ctx, sessionID, vendor.Input{
+		Text:   "Your turn ended without calling fugue_task_done. Call fugue_task_done now with your summary, status, and any output.",
+		Origin: vendor.OriginFugue,
+	}, func(sendErr error) {
+		if sendErr != nil && !errors.Is(sendErr, ErrHostStopping) {
+			slog.WarnContext(opCtx, "sending no-report nudge failed", "session_id", sessionID, "error_code", string(errcode.CodeOf(sendErr)))
+		}
+	})
+	if err != nil {
+		slog.WarnContext(ctx, "sending no-report nudge failed", "session_id", sessionID, "error_code", string(errcode.CodeOf(err)))
+	}
+}
+
+// OnTurnFailed handles quota and auth turn failures on a task session (§8,
+// Q-149): it moves the task to failed(quota)/failed(auth) and notifies the
+// direct delegator in the same transaction.
+func (s *teamTaskService) OnTurnFailed(ctx context.Context, sessionID, failureCode string) {
+	if failureCode != string(vendor.FailureQuota) && failureCode != string(vendor.FailureAuth) {
+		return
+	}
+	task, found, err := s.store.TaskForSession(ctx, sessionID)
+	if err != nil {
+		slog.WarnContext(ctx, "turn-failure check failed to read task", "session_id", sessionID, "error_code", string(errcode.CodeOf(err)))
+		return
+	}
+	if !found || !canFailTaskOnTurn(&task) {
+		return
+	}
+	if err := s.recordTaskQuotaAuthFailure(ctx, task.TeamID, task.TaskID, failureCode); err != nil {
+		slog.WarnContext(ctx, "recording task quota/auth failure failed", "team_id", task.TeamID, "task_id", task.TaskID, "error_code", string(errcode.CodeOf(err)))
+		return
+	}
+	if s.wake != nil {
+		s.wake.Notify()
+	}
+	s.closeFailedTaskSession(ctx, sessionID)
+}
+
+func canFailTaskOnTurn(task *vendorstore.TaskRecord) bool {
+	if task.HierarchyRole == vendorstore.RoleLead || task.HierarchyRole == vendorstore.RoleSolo {
+		return false
+	}
+	return task.State == vendorstore.TaskStateRunning || task.State == vendorstore.TaskStateAsking
+}
+
+func (s *teamTaskService) recordTaskQuotaAuthFailure(ctx context.Context, teamID, taskID, failureCode string) error {
+	return s.appendTaskEventWithRetry(ctx, teamID, func(_ *vendorstore.TeamRecord, tasks []vendorstore.TaskRecord) (*vendorstore.AppendTeamEventInput, error) {
+		cur, ok := findTask(tasks, taskID)
+		if !ok || !canFailTaskOnTurn(cur) {
+			return nil, errcode.New(errcode.FailedPrecondition, "task is no longer running or asking")
+		}
+		evID, idErr := s.ids.NewID()
+		if idErr != nil {
+			return nil, errcode.Wrap(errcode.Internal, "generate turn failure event ID", idErr)
+		}
+		return &vendorstore.AppendTeamEventInput{
+			EventID: evID, TaskID: cur.TaskID, EventType: vendorstore.EventTaskEnded,
+			Outcome: vendorstore.TaskOutcomeFailed, FailureCode: failureCode,
+			Mailbox: digestSummaryRows(cur.TaskID, resolvedParentID(cur.ParentTaskID, tasks), string(vendorstore.TaskStateFailed), failureCode, "", false),
+		}, nil
+	})
+}
+
+func (s *teamTaskService) closeFailedTaskSession(ctx context.Context, sessionID string) {
+	if s.sessions == nil {
+		return
+	}
+	err := s.sessions.Close(ctx, sessionID, vendor.CloseHostStop)
+	if err != nil && !errors.Is(err, vendorstore.ErrSessionNotFound) && !errors.Is(err, vendor.ErrSessionClosed) {
+		slog.WarnContext(ctx, "closing task session after quota/auth failure failed", "session_id", sessionID, "error_code", string(errcode.CodeOf(err)))
+	}
 }
 
 func (s *teamTaskService) failTaskNoReport(ctx context.Context, task *vendorstore.TaskRecord, sessionID string) {

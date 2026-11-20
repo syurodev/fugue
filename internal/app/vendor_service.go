@@ -302,7 +302,7 @@ func (s *VendorService) input(ctx context.Context, principal, kind string, cmd V
 		if err := s.requireUnlocked(); err != nil {
 			return VendorSessionView{}, err
 		}
-		return VendorSessionView{}, publicVendorError(deliver(opCtx, cmd.SessionID, vendor.Input{Text: cmd.Text}))
+		return VendorSessionView{}, publicVendorError(deliver(opCtx, cmd.SessionID, vendor.Input{Text: cmd.Text, Origin: vendor.OriginUser}))
 	})
 	return err
 }

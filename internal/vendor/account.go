@@ -34,9 +34,11 @@ const (
 
 // Bounds on vendor-reported quota data, which is untrusted input.
 const (
-	maxQuotaWindows  = 8
-	maxWindowNameLen = 32
-	maxResetHorizon  = 400 * 24 * time.Hour
+	maxQuotaWindows     = 8
+	maxWindowNameLen    = 32
+	maxResetHorizon     = 400 * 24 * time.Hour
+	QuotaGateThreshold  = 0.85
+	quotaStatusRejected = "rejected"
 )
 
 // Account is one vendor's default account as the host reports it. Windows is
@@ -170,6 +172,60 @@ func (a *Accounts) Account(vendor string) (Account, bool) {
 		return Account{}, false
 	}
 	return r.view(now), true
+}
+
+// QuotaAllows reports whether vendor's account may accept new team tasks under
+// the §8 (OR-09) 85% quota gate and account health rules.
+func (a *Accounts) QuotaAllows(vendor string) bool {
+	now := a.clk.Now()
+	acc, ok := a.Account(vendor)
+	if !ok {
+		return true
+	}
+	if acc.State == AccountPaused || acc.State == AccountNeedsLogin {
+		return false
+	}
+	for _, w := range acc.Windows {
+		if (w.Utilization >= QuotaGateThreshold || w.Status == quotaStatusRejected) &&
+			(w.ResetsAt.IsZero() || w.ResetsAt.After(now)) {
+			return false
+		}
+	}
+	return true
+}
+
+// NextQuotaReset returns the earliest future reset timestamp across paused or
+// gate-blocked accounts, or zero when no bounded reset is known (OR-09).
+func NextQuotaReset(accounts []Account, now time.Time) time.Time {
+	var earliest time.Time
+	for i := range accounts {
+		candidate := nextAccountQuotaReset(&accounts[i], now)
+		if !candidate.IsZero() && (earliest.IsZero() || candidate.Before(earliest)) {
+			earliest = candidate
+		}
+	}
+	return earliest
+}
+
+func nextAccountQuotaReset(acc *Account, now time.Time) time.Time {
+	if acc.State == AccountNeedsLogin {
+		return time.Time{}
+	}
+	var earliest time.Time
+	consider := func(t time.Time) {
+		if t.After(now) && (earliest.IsZero() || t.Before(earliest)) {
+			earliest = t
+		}
+	}
+	if acc.State == AccountPaused {
+		consider(acc.PausedUntil)
+	}
+	for _, w := range acc.Windows {
+		if (w.Utilization >= QuotaGateThreshold || w.Status == quotaStatusRejected) && w.ResetsAt.After(now) {
+			consider(w.ResetsAt)
+		}
+	}
+	return earliest
 }
 
 func (a *Accounts) observe(vendor string, apply func(*accountRecord)) {

@@ -113,10 +113,21 @@ type Bridge struct {
 	Socket string
 }
 
+// InputOrigin identifies who initiated a prompt sent to a vendor session.
+type InputOrigin string
+
+const (
+	// OriginUser identifies a prompt submitted by a human user via the Host API.
+	OriginUser InputOrigin = "user"
+	// OriginFugue identifies an automated prompt submitted by Fugue.
+	OriginFugue InputOrigin = "fugue"
+)
+
 // Input is one user input: a message text, or a slash command as the whole
 // prompt when it starts with "/" (vendor-runtime §9).
 type Input struct {
-	Text string
+	Text   string
+	Origin InputOrigin
 }
 
 // TurnRef identifies a running turn of one session.
@@ -213,6 +224,9 @@ func IsFugueCommand(text string) bool {
 // error because Fugue commands run on the host (vendor-runtime §9). Every
 // Session.Send and Steer calls it before anything reaches a vendor process.
 func ValidateInput(in Input) error {
+	if in.Origin != "" && in.Origin != OriginUser && in.Origin != OriginFugue {
+		return errcode.New(errcode.InvalidArgument, "vendor input origin is invalid")
+	}
 	if IsFugueCommand(in.Text) {
 		return ErrFugueCommand
 	}

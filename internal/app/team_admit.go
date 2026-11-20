@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 
+	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
@@ -50,14 +51,15 @@ func (a localAdmitter) Admit(ctx context.Context, task *vendorstore.TaskRecord, 
 type schedulerAdmitter struct {
 	capacity accountCapacityReader
 	store    *vendorstore.Store
+	accounts *vendor.Accounts
 }
 
-func newSchedulerAdmitter(capacity accountCapacityReader, store *vendorstore.Store) Admitter {
-	return schedulerAdmitter{capacity: capacity, store: store}
+func newSchedulerAdmitter(capacity accountCapacityReader, store *vendorstore.Store, accounts *vendor.Accounts) Admitter {
+	return schedulerAdmitter{capacity: capacity, store: store, accounts: accounts}
 }
 
-// Admit checks the §11 4-child cap (Q-118) and the §7 per-account and
-// machine-wide session tiers for the task's resolved vendor.
+// Admit checks the §11 4-child cap (Q-118), the §8 85% quota gate (OR-09),
+// and the §7 per-account and machine-wide session tiers for the task's resolved vendor.
 func (a schedulerAdmitter) Admit(ctx context.Context, task *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord) (bool, error) {
 	if task.HierarchyRole == vendorstore.RoleLead {
 		return true, nil
@@ -82,6 +84,9 @@ func (a schedulerAdmitter) Admit(ctx context.Context, task *vendorstore.TaskReco
 		err  error
 	)
 	if vendorName != "" {
+		if a.accounts != nil && !a.accounts.QuotaAllows(vendorName) {
+			return false, nil
+		}
 		room, err = a.capacity.HasCapacityFor(ctx, vendorName, vendorDefaultAccount)
 	} else {
 		room, err = a.capacity.HasCapacity(ctx)
