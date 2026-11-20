@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 
 	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/platform/supervise"
@@ -168,7 +169,16 @@ func acquireExclusiveSlot(ctx context.Context, env config.Env, socket, ver strin
 	return startExclusiveSlot(ctx, lease, cli.Close), nil
 }
 
+type exclusiveHooks struct {
+	prepareProcess    func(io.Reader) *syscall.SysProcAttr
+	restoreForeground func(*syscall.SysProcAttr)
+}
+
 func runExclusiveCommand(ctx context.Context, in io.Reader, out, errOut io.Writer, cmdArgs []string, slot *exclusiveSlot) int {
+	return runExclusiveCommandWithHooks(ctx, in, out, errOut, cmdArgs, slot, defaultExclusiveHooks())
+}
+
+func runExclusiveCommandWithHooks(ctx context.Context, in io.Reader, out, errOut io.Writer, cmdArgs []string, slot *exclusiveSlot, hooks exclusiveHooks) int {
 	if isLeaseLost(slot) {
 		writeCommandErr(errOut, formatLeaseLostErr(slot.lossError()))
 		return exitFailure
@@ -178,14 +188,21 @@ func runExclusiveCommand(ctx context.Context, in io.Reader, out, errOut io.Write
 		writeCommandErr(errOut, fmt.Errorf("locate %s: %w", cmdArgs[0], err))
 		return exitFailure
 	}
-	cmd := &exec.Cmd{
-		Path:   bin,
-		Args:   cmdArgs,
-		Stdin:  in,
-		Stdout: out,
-		Stderr: errOut,
+	attr := exclusiveProcAttr(in)
+	if hooks.prepareProcess != nil {
+		attr = hooks.prepareProcess(in)
 	}
-	configureExclusiveCmd(cmd)
+	cmd := &exec.Cmd{
+		Path:        bin,
+		Args:        cmdArgs,
+		Stdin:       in,
+		Stdout:      out,
+		Stderr:      errOut,
+		SysProcAttr: attr,
+	}
+	if hooks.restoreForeground != nil {
+		defer hooks.restoreForeground(attr)
+	}
 	if err = cmd.Start(); err != nil {
 		writeCommandErr(errOut, fmt.Errorf("start %s: %w", cmdArgs[0], err))
 		return exitFailure

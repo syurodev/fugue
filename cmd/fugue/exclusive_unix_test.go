@@ -156,3 +156,118 @@ func TestRunExclusiveContextCancelAndSignalExitCode(t *testing.T) {
 		t.Fatalf("signaled child exit code = %d, want %d (stderr=%q)", sigCode, wantTerm, errOut.String())
 	}
 }
+
+func assertProcAttr(t *testing.T, name string, attr *syscall.SysProcAttr, wantFG bool, wantCtty int) {
+	t.Helper()
+	if attr == nil || !attr.Setpgid || attr.Foreground != wantFG || attr.Ctty != wantCtty {
+		t.Fatalf("%s = %+v, want Setpgid=true Foreground=%v Ctty=%d", name, attr, wantFG, wantCtty)
+	}
+}
+
+func TestExclusiveProcAttrTTYSelection(t *testing.T) {
+	t.Parallel()
+	assertProcAttr(t, "buildExclusiveProcAttr(false, 9)", buildExclusiveProcAttr(false, 9), false, 0)
+	assertProcAttr(t, "buildExclusiveProcAttr(true, 9)", buildExclusiveProcAttr(true, 9), true, 9)
+	assertProcAttr(t, "exclusiveProcAttr(bytes.Buffer)", exclusiveProcAttr(bytes.NewBuffer(nil)), false, 0)
+
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if cerr := pr.Close(); cerr != nil {
+			t.Errorf("close pipe reader: %v", cerr)
+		}
+		if cerr := pw.Close(); cerr != nil {
+			t.Errorf("close pipe writer: %v", cerr)
+		}
+	})
+	assertProcAttr(t, "exclusiveProcAttr(os.Pipe)", exclusiveProcAttr(pr), false, 0)
+}
+
+func newFakeTTYRestoreHooks(t *testing.T, fakeFD, fakePgrp int) (exclusiveHooks, *[][2]int) {
+	t.Helper()
+	var calls [][2]int
+	ttyAttr := buildExclusiveProcAttr(true, fakeFD)
+	if !ttyAttr.Setpgid || !ttyAttr.Foreground || ttyAttr.Ctty != fakeFD {
+		t.Fatalf("ttyAttr = %+v, want Setpgid=true Foreground=true Ctty=%d", ttyAttr, fakeFD)
+	}
+	hooks := exclusiveHooks{
+		prepareProcess: func(io.Reader) *syscall.SysProcAttr {
+			return &syscall.SysProcAttr{Setpgid: true}
+		},
+		restoreForeground: func(*syscall.SysProcAttr) {
+			if ttyAttr.Foreground {
+				restoreForegroundPgrp(ttyAttr.Ctty, func(fd, pgrp int) error {
+					calls = append(calls, [2]int{fd, pgrp})
+					return nil
+				}, func() int {
+					return fakePgrp
+				})
+			}
+		},
+	}
+	return hooks, &calls
+}
+
+func assertLeaseLostRestoresForeground(t *testing.T, fakeFD, fakePgrp int) {
+	t.Helper()
+	stub := &stubHost{dropStream: make(chan struct{})}
+	sockPath := serveStub(t, stub)
+	slot, err := acquireExclusiveSlot(t.Context(), config.MapEnv{app.SessionTokenEnv: bridgeTestToken}, sockPath, testVersion)
+	if err != nil {
+		t.Fatalf("acquireExclusiveSlot: %v", err)
+	}
+	defer slot.release()
+
+	hooksLost, callsLost := newFakeTTYRestoreHooks(t, fakeFD, fakePgrp)
+	pr, pw := io.Pipe()
+	readTask, readyCh := startReadyReader(t, t.Context(), pr)
+	codeCh := make(chan int, 1)
+	var errLost bytes.Buffer
+	runTask := supervise.Go(t.Context(), "test.exclusive-tty-lost", func(ctx context.Context) error {
+		c := runExclusiveCommandWithHooks(ctx, bytes.NewBuffer(nil), pw, &errLost, []string{"sh", "-c", "printf 'ready\\n'; sleep 60"}, slot, hooksLost)
+		if cerr := pw.Close(); cerr != nil {
+			t.Errorf("close pipe writer: %v", cerr)
+		}
+		codeCh <- c
+		return nil
+	})
+	t.Cleanup(func() {
+		if cerr := pr.Close(); cerr != nil && !errors.Is(cerr, io.ErrClosedPipe) {
+			t.Errorf("close pipe reader: %v", cerr)
+		}
+		<-readTask.Done()
+		<-runTask.Done()
+	})
+
+	if rerr := testutil.Await(t, readyCh); rerr != nil {
+		t.Fatalf("wait ready: %v", rerr)
+	}
+	close(stub.dropStream)
+	lostCode := testutil.Await(t, codeCh)
+	<-runTask.Done()
+
+	if lostCode != exitSignaled+int(syscall.SIGKILL) {
+		t.Fatalf("lease lost exit = %d, want %d", lostCode, exitSignaled+int(syscall.SIGKILL))
+	}
+	if len(*callsLost) != 1 || (*callsLost)[0] != [2]int{fakeFD, fakePgrp} {
+		t.Fatalf("lease lost tcsetpgrp calls = %v, want [[%d %d]]", *callsLost, fakeFD, fakePgrp)
+	}
+}
+
+func TestRunExclusiveRestoresForegroundOnSuccessAndLeaseLost(t *testing.T) {
+	t.Parallel()
+	const fakeFD, fakePgrp = 77, 4242
+
+	hooksSuccess, callsSuccess := newFakeTTYRestoreHooks(t, fakeFD, fakePgrp)
+	var out, errOut bytes.Buffer
+	code := runExclusiveCommandWithHooks(t.Context(), bytes.NewBuffer(nil), &out, &errOut, []string{"sh", "-c", "true"}, nil, hooksSuccess)
+	if code != exitOK {
+		t.Fatalf("success path exit = %d (stderr=%q), want 0", code, errOut.String())
+	}
+	if len(*callsSuccess) != 1 || (*callsSuccess)[0] != [2]int{fakeFD, fakePgrp} {
+		t.Fatalf("success path tcsetpgrp calls = %v, want [[%d %d]]", *callsSuccess, fakeFD, fakePgrp)
+	}
+	assertLeaseLostRestoresForeground(t, fakeFD, fakePgrp)
+}
