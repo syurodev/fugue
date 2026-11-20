@@ -9,6 +9,7 @@ import (
 	"gioui.org/op/paint"
 
 	"github.com/syurodev/fugue/ui/internal/hostconn"
+	"github.com/syurodev/fugue/ui/internal/inbox"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
@@ -25,6 +26,7 @@ const (
 	topicTranscriptDlt  = "transcript-delta:"
 	topicWorkspaces     = "workspaces"
 	topicVault          = "vault"
+	topicInteraction    = "interaction"
 )
 
 // pageFetcher is the read side the screens drive: the session.Fetcher, and a
@@ -99,11 +101,18 @@ type screens struct {
 	vault        *vault.Model
 	vaultWorker  *vault.Worker
 	vaultGate    *vaultGate
+	inbox        *inbox.Model
+	inboxWorker  *inbox.Worker
+	inboxView    *inboxView
+	inboxRow     *kit.ListRowState
+	inboxOpen    bool
 }
 
 // newScreens builds the screens over the manager, its fetcher, the composer's
 // poster and the workspace mutator.
 func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster, wsMut *workspace.Mutator) *screens {
+	inboxRow := kit.NewListRowState()
+	inboxRow.Enter()
 	return &screens{
 		m:               m,
 		fetcher:         fetcher,
@@ -129,6 +138,9 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 		dlg:          newWorkspaceDialogs(),
 		vault:        vault.NewModel(),
 		vaultGate:    newVaultGate(),
+		inbox:        inbox.NewModel(),
+		inboxView:    newInboxView(),
+		inboxRow:     inboxRow,
 	}
 }
 
@@ -210,6 +222,8 @@ func (s *screens) applyUpdate(u hostconn.Update) {
 		s.applyWorkspaceDelivery(u)
 	case u.Topic == topicVault:
 		s.applyVaultDelivery(u)
+	case u.Topic == topicInteraction:
+		s.applyInteractionDelivery(u)
 	case u.Topic == topicTranscriptDlt+s.open && u.Event != nil:
 		s.applyDelta(u.Event.Payload)
 	case u.Topic == topicTranscript+s.open:
@@ -231,6 +245,10 @@ func (s *screens) reconnected() {
 	if s.vaultWorker != nil {
 		req := vault.Request{Kind: vault.OpStatus}
 		s.vaultWorker.Do(&req)
+	}
+	if s.inboxWorker != nil {
+		req := inbox.Request{Kind: inbox.OpListPending}
+		s.inboxWorker.Do(&req)
 	}
 	if s.open != "" {
 		s.m.AddTopic(topicTranscript + s.open)
@@ -331,6 +349,7 @@ func (s *screens) applyResult(r session.Result) {
 // openSession opens a session's transcript: its topics join the connection,
 // and its newest page and commands are read if the model has none.
 func (s *screens) openSession(id string) {
+	s.inboxOpen = false
 	if s.open == id {
 		return
 	}
@@ -387,6 +406,7 @@ func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 		s.vaultGate.layout(gtx, env, s)
 		return
 	}
+	s.toggleInboxShortcut(gtx)
 	layout.Flex{Axis: layout.Horizontal}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Right: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -396,16 +416,19 @@ func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			local := gtx
+			// TODO(F10.20): move the inbox into a slot
+			if s.inboxOpen {
+				return s.inboxView.layout(&local, env, s)
+			}
 			return s.layoutTranscript(&local, env)
 		}),
 	)
 }
 
 func (s *screens) applyVaultDelivery(u hostconn.Update) {
-	switch {
-	case u.Snapshot != nil:
+	if u.Snapshot != nil {
 		s.fail(s.vault.ApplySnapshot(u.Snapshot.State))
-	case u.Event != nil:
+	} else if u.Event != nil {
 		s.fail(s.vault.ApplyEvent(u.Event.Type, u.Event.Payload))
 	}
 }
