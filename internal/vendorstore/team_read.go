@@ -70,7 +70,7 @@ func queryTeamTasks(ctx context.Context, db teamQueryer, teamID string) ([]TaskR
 		SELECT task_id, team_id, parent_task_id, hierarchy_role, catalog_role,
 		       deliverable, depends_on_json, depth, state, failure_code,
 		       last_event_seq, created_at, updated_at, ended_at, session_id, explicit_start,
-		       no_report_nudged
+		       no_report_nudged, attempt, retry_of
 		FROM team_tasks WHERE team_id = ? ORDER BY created_at ASC, task_id ASC`, teamID,
 	)
 	if err != nil {
@@ -100,7 +100,7 @@ func scanTaskRow(rows *sql.Rows) (TaskRecord, error) {
 		&t.TaskID, &t.TeamID, &t.ParentTaskID, &roleStr, &t.CatalogRole,
 		&delivStr, &depsJSON, &t.Depth, &stateStr, &t.FailureCode,
 		&t.LastEventSeq, &t.CreatedAt, &t.UpdatedAt, &endedAt, &t.SessionID, &t.ExplicitStart,
-		&t.NoReportNudged,
+		&t.NoReportNudged, &t.Attempt, &t.RetryOf,
 	); err != nil {
 		return TaskRecord{}, fmt.Errorf("scan team task: %w", err)
 	}
@@ -435,6 +435,13 @@ func (s *Store) OpenTeamNotePayloads(ctx context.Context, teamID string, offset,
 // OpenLatestTaskEventPayload opens the latest sealed payload of eventType for
 // a task in teamID, or returns found=false when none exists.
 func (s *Store) OpenLatestTaskEventPayload(ctx context.Context, teamID, taskID string, eventType TeamEventType) ([]byte, bool, error) {
+	plain, _, found, err := s.OpenLatestTaskEventPayloadWithSeq(ctx, teamID, taskID, eventType)
+	return plain, found, err
+}
+
+// OpenLatestTaskEventPayloadWithSeq opens the latest sealed payload of
+// eventType for a task in teamID and also returns the event sequence.
+func (s *Store) OpenLatestTaskEventPayloadWithSeq(ctx context.Context, teamID, taskID string, eventType TeamEventType) ([]byte, int64, bool, error) {
 	var seq int64
 	var hasPayload int
 	err := s.db.QueryRowContext(ctx,
@@ -443,17 +450,17 @@ func (s *Store) OpenLatestTaskEventPayload(ctx context.Context, teamID, taskID s
 		 ORDER BY sequence DESC LIMIT 1`,
 		teamID, taskID, string(eventType)).Scan(&seq, &hasPayload)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, false, nil
+		return nil, 0, false, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("%w: query latest task event: %w", ErrUnavailable, err)
+		return nil, 0, false, fmt.Errorf("%w: query latest task event: %w", ErrUnavailable, err)
 	}
 	if hasPayload == 0 {
-		return nil, false, nil
+		return nil, seq, false, nil
 	}
 	plain, err := s.OpenTeamEventPayload(ctx, teamID, seq)
 	if err != nil {
-		return nil, false, err
+		return nil, 0, false, err
 	}
-	return plain, true, nil
+	return plain, seq, true, nil
 }

@@ -124,15 +124,7 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	if err != nil {
 		return nil, err
 	}
-	hp.rt.teamProposals = newTeamProposalService(vs, sessions, hp.rt.workspaces.domain, hp.rt.interactions, nopUsageHistory{}, deps.IDs, tokens.liveSession)
-	// The interaction service consumes the answers of the team proposal and
-	// amend cards; the wiring happens before any client can answer (F11.2b).
-	hp.rt.interactions.SetTeamCardResolver(hp.rt.teamProposals)
-	hp.rt.teamTasks = newTeamTaskService(vs, vendorTaskSessions{svc: &VendorService{sessions: sessions, store: vs}}, hp.rt.workspaces.domain, locateTeamGit(ctx, deps), deps.DataDir, deps.IDs, v, deps.TeamResultGate)
-	tools := append(slices.Clone(deps.TestFugueTools), teamProposeTool(hp.rt.teamProposals), teamAmendTool(hp.rt.teamProposals))
-	tools = append(tools, teamTaskTools(hp.rt.teamTasks)...)
-	hp.rt.sessionTools = newSessionToolService(tokens, tools, vs, hp.rt.interactions, hp.rt.tags, deps.IDs, sessions)
-	sessions.SetRelay(hp.rt.sessionTools)
+	wireTeamServices(ctx, hp, vs, sessions, v, tokens, deps)
 	hp.rt.vendors = &VendorService{
 		sessions: sessions, store: vs, adapter: adapter, adapters: adapters, vault: v, workspaces: hp.rt.workspaces.domain,
 		ids: deps.IDs, hostEnv: deps.VendorHostEnv, ops: newVendorOps(deps.Clock, hp.rt.goTask),
@@ -147,6 +139,28 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	// moved it here from F11.2a).
 	hp.rt.teamProposals.SetAccounts(hp.rt.accountsService)
 	return sessions, nil
+}
+
+func wireTeamServices(
+	ctx context.Context,
+	hp *HostProcess,
+	vs *vendorstore.Store,
+	sessions *VendorSessions,
+	v *vault.Service,
+	tokens *sessionTokens,
+	deps *HostDeps,
+) {
+	hp.rt.teamProposals = newTeamProposalService(vs, sessions, hp.rt.workspaces.domain, hp.rt.interactions, nopUsageHistory{}, deps.IDs, tokens.liveSession)
+	// The interaction service consumes the answers of the team proposal, amend,
+	// and task-question cards; wiring happens before any client can answer.
+	hp.rt.interactions.SetTeamCardResolver(hp.rt.teamProposals)
+	hp.rt.teamTasks = newTeamTaskService(vs, vendorTaskSessions{svc: &VendorService{sessions: sessions, store: vs}}, hp.rt.workspaces.domain, locateTeamGit(ctx, deps), deps.DataDir, deps.IDs, v, deps.TeamResultGate)
+	hp.rt.teamTasks.SetInteractions(hp.rt.interactions)
+	hp.rt.interactions.SetTaskQuestionResolver(hp.rt.teamTasks)
+	tools := append(slices.Clone(deps.TestFugueTools), teamProposeTool(hp.rt.teamProposals), teamAmendTool(hp.rt.teamProposals))
+	tools = append(tools, teamTaskTools(hp.rt.teamTasks)...)
+	hp.rt.sessionTools = newSessionToolService(tokens, tools, vs, hp.rt.interactions, hp.rt.tags, deps.IDs, sessions)
+	sessions.SetRelay(hp.rt.sessionTools)
 }
 
 func buildVendorAdapters(deps *HostDeps) (*claude.Adapter, map[string]vendor.Adapter) {

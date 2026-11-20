@@ -44,24 +44,34 @@ func (s *teamTaskService) appendTeamWithRetry(
 	sessionID string,
 	build func(ctx context.Context, c *callerTeamContext) (*vendorstore.AppendTeamEventInput, error),
 ) error {
+	_, err := s.appendTeamSeqWithRetry(ctx, sessionID, build)
+	return err
+}
+
+func (s *teamTaskService) appendTeamSeqWithRetry(
+	ctx context.Context,
+	sessionID string,
+	build func(ctx context.Context, c *callerTeamContext) (*vendorstore.AppendTeamEventInput, error),
+) (int64, error) {
 	for attempt := range maxAppendRetries {
 		c, err := s.resolveCaller(ctx, sessionID)
 		if err != nil {
-			return err
+			return 0, err
 		}
 		ev, err := build(ctx, c)
 		if err != nil {
-			return err
+			return 0, err
 		}
-		if _, err = s.store.AppendTeamEvent(ctx, c.team.TeamID, c.team.LastSeq, ev); err == nil {
-			return nil
+		seq, err := s.store.AppendTeamEvent(ctx, c.team.TeamID, c.team.LastSeq, ev)
+		if err == nil {
+			return seq, nil
 		}
 		if errors.Is(err, vendorstore.ErrSequenceConflict) && attempt+1 < maxAppendRetries {
 			continue
 		}
-		return boundaryError("record team event", err)
+		return 0, boundaryError("record team event", err)
 	}
-	return errcode.New(errcode.FailedPrecondition, "team event sequence conflict")
+	return 0, errcode.New(errcode.FailedPrecondition, "team event sequence conflict")
 }
 
 func (s *teamTaskService) appendTaskEventWithRetry(
@@ -145,7 +155,7 @@ func (s *teamTaskService) failTaskNoReport(ctx context.Context, task *vendorstor
 		return &vendorstore.AppendTeamEventInput{
 			EventID: evID, TaskID: cur.TaskID, EventType: vendorstore.EventTaskEnded,
 			Outcome: string(vendorstore.TaskStateFailed), FailureCode: "no_report",
-			Mailbox: digestSummaryRows(cur.TaskID, cur.ParentTaskID, string(vendorstore.TaskStateFailed), "no_report", summary, false),
+			Mailbox: digestSummaryRows(cur.TaskID, resolvedParentID(cur.ParentTaskID, tasks), string(vendorstore.TaskStateFailed), "no_report", summary, false),
 		}, nil
 	}); err != nil {
 		slog.WarnContext(ctx, "recording no_report failure failed", "team_id", task.TeamID, "task_id", task.TaskID, "error_code", string(errcode.CodeOf(err)))
