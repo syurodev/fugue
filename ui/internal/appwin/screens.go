@@ -13,6 +13,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/transcriptview"
+	"github.com/syurodev/fugue/ui/internal/vault"
 	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
@@ -23,6 +24,7 @@ const (
 	topicTranscript     = "transcript:"
 	topicTranscriptDlt  = "transcript-delta:"
 	topicWorkspaces     = "workspaces"
+	topicVault          = "vault"
 )
 
 // pageFetcher is the read side the screens drive: the session.Fetcher, and a
@@ -94,6 +96,9 @@ type screens struct {
 	policyBanner *kit.BannerState
 	otherHeader  *kit.SectionHeaderState
 	dlg          *workspaceDialogs
+	vault        *vault.Model
+	vaultWorker  *vault.Worker
+	vaultGate    *vaultGate
 }
 
 // newScreens builds the screens over the manager, its fetcher, the composer's
@@ -122,6 +127,8 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 		policyBanner: kit.NewBannerState(),
 		otherHeader:  kit.NewSectionHeaderState(false),
 		dlg:          newWorkspaceDialogs(),
+		vault:        vault.NewModel(),
+		vaultGate:    newVaultGate(),
 	}
 }
 
@@ -201,6 +208,8 @@ func (s *screens) applyUpdate(u hostconn.Update) {
 		s.applySessionEvent(u.Event.Type, u.Event.Payload)
 	case u.Topic == topicWorkspaces:
 		s.applyWorkspaceDelivery(u)
+	case u.Topic == topicVault:
+		s.applyVaultDelivery(u)
 	case u.Topic == topicTranscriptDlt+s.open && u.Event != nil:
 		s.applyDelta(u.Event.Payload)
 	case u.Topic == topicTranscript+s.open:
@@ -219,6 +228,10 @@ func (s *screens) reconnected() {
 	s.fetcher.RequestSessions()
 	s.wsReads.RequestWorkspaces()
 	s.fetcher.RequestProbe()
+	if s.vaultWorker != nil {
+		req := vault.Request{Kind: vault.OpStatus}
+		s.vaultWorker.Do(&req)
+	}
 	if s.open != "" {
 		s.m.AddTopic(topicTranscript + s.open)
 		s.m.AddTopic(topicTranscriptDlt + s.open)
@@ -368,8 +381,12 @@ func (s *screens) fail(err error) {
 	}
 }
 
-// layout draws the sidebar and the transcript pane.
+// layout draws the VaultGate while locked, or the sidebar and transcript pane.
 func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
+	if s.vaultGate.active(s.vault) {
+		s.vaultGate.layout(gtx, env, s)
+		return
+	}
 	layout.Flex{Axis: layout.Horizontal}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Right: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -382,6 +399,21 @@ func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 			return s.layoutTranscript(&local, env)
 		}),
 	)
+}
+
+func (s *screens) applyVaultDelivery(u hostconn.Update) {
+	switch {
+	case u.Snapshot != nil:
+		s.fail(s.vault.ApplySnapshot(u.Snapshot.State))
+	case u.Event != nil:
+		s.fail(s.vault.ApplyEvent(u.Event.Type, u.Event.Payload))
+	}
+}
+
+func (s *screens) applyVaultResults(results []vault.Result) {
+	for i := range results {
+		s.vaultGate.applied(&results[i], s.vault)
+	}
 }
 
 // layoutTranscript draws the transcript pane and, under it, the composer

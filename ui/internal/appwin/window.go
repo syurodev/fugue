@@ -23,6 +23,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
+	"github.com/syurodev/fugue/ui/internal/vault"
 	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
@@ -102,6 +103,15 @@ func Run(ctx context.Context, opts Options) error {
 	wsMut := workspace.NewMutator(func() workspace.MutatorClient { return m.Client() })
 	wsMut.Start(runCtx)
 	defer wsMut.Stop()
+	vaultW := vault.NewWorker(func() vault.Client {
+		c := m.Client()
+		if c == nil {
+			return nil
+		}
+		return c
+	})
+	vaultW.Start(runCtx)
+	defer vaultW.Stop()
 	defer stopSideGoroutines(cancel, startFeeder(runCtx, w, updates, q), startCloser(runCtx, w))
 
 	shaper, err := fonts.Shaper()
@@ -111,7 +121,9 @@ func Run(ctx context.Context, opts Options) error {
 	light, dark := theme.Light(shaper), theme.Dark(shaper)
 	env := newEnv(shaper, &light)
 	attach(env, w)
-	return eventLoop(w, env, newScreens(m, fetcher, poster, wsMut), q, &light, &dark)
+	sc := newScreens(m, fetcher, poster, wsMut)
+	sc.vaultWorker = vaultW
+	return eventLoop(w, env, sc, q, &light, &dark)
 }
 
 // newEnv builds the window's kit.Env over the theme it starts in (F10.13):
@@ -224,6 +236,9 @@ drainPosts:
 		}
 	}
 	sc.update(q.drain(), results, posts, drainMutResults(sc.wsMut))
+	if sc.vaultWorker != nil {
+		sc.applyVaultResults(drainVaultResults(sc.vaultWorker))
+	}
 	toggleTheme(gtx, env, light, dark)
 	drawWindow(gtx, env, sc)
 }
@@ -264,6 +279,20 @@ drain:
 	return muts
 }
 
+func drainVaultResults(w *vault.Worker) []vault.Result {
+	out := make([]vault.Result, 0, 4)
+drain:
+	for {
+		select {
+		case res := <-w.Results():
+			out = append(out, res)
+		default:
+			break drain
+		}
+	}
+	return out
+}
+
 // drawWindow lays out the screens — the sidebar, the transcript pane and the
 // composer (F10.4a, F10.4b, F10.14) — and the status bar with the connection
 // state (F10.2a). The open dialog draws last, over everything (UK-07). Every
@@ -286,8 +315,16 @@ func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 			return layout.Inset{
 				Left: theme.SpaceLG, Right: theme.SpaceLG, Bottom: theme.SpaceMD,
 			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				return kit.Label(env, &local, theme.TypeSmall(), statusColor(env.Th, state), status)
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						local := gtx
+						return kit.Label(env, &local, theme.TypeSmall(), statusColor(env.Th, state), status)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						local := gtx
+						return sc.vaultGate.layoutLockButton(&local, env, sc)
+					}),
+				)
 			})
 		}),
 	)

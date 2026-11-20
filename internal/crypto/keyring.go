@@ -44,45 +44,73 @@ func NewKeyring(masterPassword string) (*Keyring, string, error) {
 	return newKeyring(rand.Reader, masterPassword)
 }
 
+// NewKeyringBytes generates a random DEK and wraps it under masterPassword bytes
+// and under a freshly generated recovery key.
+func NewKeyringBytes(masterPassword []byte) (*Keyring, []byte, error) {
+	return newKeyringBytes(rand.Reader, masterPassword)
+}
+
 func newKeyring(random io.Reader, masterPassword string) (*Keyring, string, error) {
-	if masterPassword == "" {
-		return nil, "", errcode.New(errcode.InvalidArgument, "master password is required")
+	buf := []byte(masterPassword)
+	defer clear(buf)
+	kr, rec, err := newKeyringBytes(random, buf)
+	if err != nil {
+		return nil, "", err
+	}
+	defer clear(rec)
+	return kr, string(rec), nil
+}
+
+func newKeyringBytes(random io.Reader, masterPassword []byte) (*Keyring, []byte, error) {
+	if len(masterPassword) == 0 {
+		return nil, nil, errcode.New(errcode.InvalidArgument, "master password is required")
 	}
 	dek := make([]byte, dekLength)
+	defer clear(dek)
 	if _, err := io.ReadFull(random, dek); err != nil {
-		return nil, "", errcode.Wrap(errcode.Internal, "random source failed", err)
+		return nil, nil, errcode.Wrap(errcode.Internal, "random source failed", err)
 	}
-	masterKDF, masterWrapped, err := wrapDEK(random, keyringMasterAssociatedData(), masterPassword, dek)
+	masterKDF, masterWrapped, err := wrapDEKBytes(random, keyringMasterAssociatedData(), masterPassword, dek)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
-	recoveryKey, err := newRecoveryKey(random)
+	recoveryKey, err := newRecoveryKeyBytes(random)
 	if err != nil {
-		return nil, "", err
+		return nil, nil, err
 	}
-	recoveryKDF, recoveryWrapped, err := wrapDEK(random, keyringRecoveryAssociatedData(), recoveryKey, dek)
+	recoveryKDF, recoveryWrapped, err := wrapDEKBytes(random, keyringRecoveryAssociatedData(), recoveryKey, dek)
 	if err != nil {
-		return nil, "", err
+		clear(recoveryKey)
+		return nil, nil, err
 	}
 	return &Keyring{
-		Version:         keyringVersion,
-		MasterKDF:       masterKDF,
-		MasterWrapped:   masterWrapped,
-		RecoveryKDF:     recoveryKDF,
-		RecoveryWrapped: recoveryWrapped,
+		Version: keyringVersion, MasterKDF: masterKDF, MasterWrapped: masterWrapped,
+		RecoveryKDF: recoveryKDF, RecoveryWrapped: recoveryWrapped,
 	}, recoveryKey, nil
 }
 
 // UnlockWithPassword returns the plaintext DEK when masterPassword is correct.
-// A wrong password fails with errcode.PermissionDenied.
 func (k *Keyring) UnlockWithPassword(masterPassword string) ([]byte, error) {
-	return unwrapDEK(k.MasterKDF, &k.MasterWrapped, keyringMasterAssociatedData(), masterPassword, "invalid master password")
+	buf := []byte(masterPassword)
+	defer clear(buf)
+	return k.UnlockWithPasswordBytes(buf)
+}
+
+// UnlockWithPasswordBytes returns the plaintext DEK when masterPassword bytes are correct.
+func (k *Keyring) UnlockWithPasswordBytes(masterPassword []byte) ([]byte, error) {
+	return unwrapDEKBytes(k.MasterKDF, &k.MasterWrapped, keyringMasterAssociatedData(), masterPassword, "invalid master password")
 }
 
 // UnlockWithRecovery returns the plaintext DEK when recoveryKey is correct.
-// A wrong key fails with errcode.PermissionDenied.
 func (k *Keyring) UnlockWithRecovery(recoveryKey string) ([]byte, error) {
-	return unwrapDEK(k.RecoveryKDF, &k.RecoveryWrapped, keyringRecoveryAssociatedData(), recoveryKey, "invalid recovery key")
+	buf := []byte(recoveryKey)
+	defer clear(buf)
+	return k.UnlockWithRecoveryBytes(buf)
+}
+
+// UnlockWithRecoveryBytes returns the plaintext DEK when recoveryKey bytes are correct.
+func (k *Keyring) UnlockWithRecoveryBytes(recoveryKey []byte) ([]byte, error) {
+	return unwrapDEKBytes(k.RecoveryKDF, &k.RecoveryWrapped, keyringRecoveryAssociatedData(), recoveryKey, "invalid recovery key")
 }
 
 // ChangePassword rewraps the existing DEK under a new master password, with a
@@ -108,16 +136,17 @@ func (k *Keyring) changePassword(random io.Reader, oldPassword, newPassword stri
 	return nil
 }
 
-// wrapDEK draws a salt, derives a key from secret and seals the DEK under it.
-func wrapDEK(random io.Reader, associatedData AssociatedData, secret string, dek []byte) (KDFParams, Envelope, error) {
+// wrapDEKBytes draws a salt, derives a key from secret bytes and seals the DEK under it.
+func wrapDEKBytes(random io.Reader, associatedData AssociatedData, secret, dek []byte) (KDFParams, Envelope, error) {
 	params, err := newKDFParams(random)
 	if err != nil {
 		return KDFParams{}, Envelope{}, err
 	}
-	key, err := DeriveKey(secret, params)
+	key, err := DeriveKeyBytes(secret, params)
 	if err != nil {
 		return KDFParams{}, Envelope{}, err
 	}
+	defer clear(key)
 	wrapped, err := sealV2(random, associatedData, key, dek)
 	if err != nil {
 		return KDFParams{}, Envelope{}, err
@@ -125,11 +154,19 @@ func wrapDEK(random io.Reader, associatedData AssociatedData, secret string, dek
 	return params, wrapped, nil
 }
 
-func unwrapDEK(params KDFParams, wrapped *Envelope, associatedData AssociatedData, secret, failure string) ([]byte, error) {
-	key, err := DeriveKey(secret, params)
+// wrapDEK draws a salt, derives a key from secret and seals the DEK under it.
+func wrapDEK(random io.Reader, associatedData AssociatedData, secret string, dek []byte) (KDFParams, Envelope, error) {
+	buf := []byte(secret)
+	defer clear(buf)
+	return wrapDEKBytes(random, associatedData, buf, dek)
+}
+
+func unwrapDEKBytes(params KDFParams, wrapped *Envelope, associatedData AssociatedData, secret []byte, failure string) ([]byte, error) {
+	key, err := DeriveKeyBytes(secret, params)
 	if err != nil {
 		return nil, err
 	}
+	defer clear(key)
 	dek, err := OpenWithAD(key, wrapped, associatedData)
 	if err != nil {
 		// One message for every cause: the caller must not learn whether the
@@ -139,10 +176,13 @@ func unwrapDEK(params KDFParams, wrapped *Envelope, associatedData AssociatedDat
 	return dek, nil
 }
 
-func newRecoveryKey(random io.Reader) (string, error) {
+func newRecoveryKeyBytes(random io.Reader) ([]byte, error) {
 	raw := make([]byte, recoveryKeyLength)
+	defer clear(raw)
 	if _, err := io.ReadFull(random, raw); err != nil {
-		return "", errcode.Wrap(errcode.Internal, "random source failed", err)
+		return nil, errcode.Wrap(errcode.Internal, "random source failed", err)
 	}
-	return base64.RawURLEncoding.EncodeToString(raw), nil
+	out := make([]byte, base64.RawURLEncoding.EncodedLen(len(raw)))
+	base64.RawURLEncoding.Encode(out, raw)
+	return out, nil
 }

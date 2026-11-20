@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fugue/host/v1/error_detail.proto.
  */
 export const file_fugue_host_v1_error_detail: GenFile = /*@__PURE__*/
-  fileDesc("CiBmdWd1ZS9ob3N0L3YxL2Vycm9yX2RldGFpbC5wcm90bxINZnVndWUuaG9zdC52MSI7CgtFcnJvckRldGFpbBIMCgRjb2RlGAEgASgJEh4KFnN1cHBvcnRlZF9hcGlfdmVyc2lvbnMYAiADKAlCsgEKEWNvbS5mdWd1ZS5ob3N0LnYxQhBFcnJvckRldGFpbFByb3RvUAFaNWdpdGh1Yi5jb20vc3l1cm9kZXYvZnVndWUvcGtnL3BiL2Z1Z3VlL2hvc3QvdjE7aG9zdHYxogIDRkhYqgINRnVndWUuSG9zdC5WMcoCDUZ1Z3VlXEhvc3RcVjHiAhlGdWd1ZVxIb3N0XFYxXEdQQk1ldGFkYXRh6gIPRnVndWU6Okhvc3Q6OlYxYgZwcm90bzM");
+  fileDesc("CiBmdWd1ZS9ob3N0L3YxL2Vycm9yX2RldGFpbC5wcm90bxINZnVndWUuaG9zdC52MSJYCgtFcnJvckRldGFpbBIMCgRjb2RlGAEgASgJEh4KFnN1cHBvcnRlZF9hcGlfdmVyc2lvbnMYAiADKAkSGwoTcmV0cnlfYWZ0ZXJfc2Vjb25kcxgDIAEoA0KyAQoRY29tLmZ1Z3VlLmhvc3QudjFCEEVycm9yRGV0YWlsUHJvdG9QAVo1Z2l0aHViLmNvbS9zeXVyb2Rldi9mdWd1ZS9wa2cvcGIvZnVndWUvaG9zdC92MTtob3N0djGiAgNGSFiqAg1GdWd1ZS5Ib3N0LlYxygINRnVndWVcSG9zdFxWMeICGUZ1Z3VlXEhvc3RcVjFcR1BCTWV0YWRhdGHqAg9GdWd1ZTo6SG9zdDo6VjFiBnByb3RvMw");
 
 /**
  * ErrorDetail is attached to every Connect error (docs: host-api §4). code is
@@ -33,6 +33,13 @@ export type ErrorDetail = Message<"fugue.host.v1.ErrorDetail"> & {
    * @generated from field: repeated string supported_api_versions = 2;
    */
   supportedApiVersions: string[];
+
+  /**
+   * retry_after_seconds is present when code is vault.rate_limited.
+   *
+   * @generated from field: int64 retry_after_seconds = 3;
+   */
+  retryAfterSeconds: bigint;
 };
 
 /**

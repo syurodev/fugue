@@ -55,6 +55,7 @@ type TextFieldProps struct {
 	Helper      string
 	Error       string
 	Variant     TextFieldVariant
+	NoReveal    bool     // Secret: hides the reveal button so plaintext is never shown
 	Icon        IconName // a leading icon; Search always shows the magnifier
 	Unit        string   // Number: the suffix drawn inside the box
 	Min         *float64 // Number: the smallest valid value
@@ -147,32 +148,17 @@ func (s *TextFieldState) Layout(env *Env, gtx *layout.Context, p *TextFieldProps
 	w := textFieldWidth(env, gtx, p)
 	box := image.Rect(0, pre.labelH, w, pre.labelH+pre.boxH)
 
-	masked := p.Variant == TextFieldSecret && !s.revealed
+	masked := p.Variant == TextFieldSecret && (p.NoReveal || !s.revealed)
+	if p.Variant == TextFieldSecret && p.NoReveal {
+		s.revealed = false
+	}
 	s.core.ed.Mask = maskOf(masked)
 	ev := s.core.begin(gtx, box, fieldOpts{
 		masked:       masked,
 		submit:       true,
 		escapeClears: p.Variant == TextFieldSearch,
 	}, p.Disabled)
-	if p.Variant == TextFieldSearch {
-		cf := followState(env, &s.core.clearF, s.core.text() != "")
-		if cf > 0 {
-			var clicked bool
-			clicked, s.clearMv = trailingBegin(env, gtx, &s.clear, trailingRect(gtx, w, pre), pressOpts{disabled: p.Disabled})
-			if clicked {
-				s.core.setText("")
-				ev.Changed = true
-			}
-		}
-	}
-	if p.Variant == TextFieldSecret {
-		followState(env, &s.core.revealF, s.revealed)
-		var clicked bool
-		clicked, s.revealMv = trailingBegin(env, gtx, &s.reveal, trailingRect(gtx, w, pre), pressOpts{disabled: p.Disabled, toggled: s.revealed})
-		if clicked {
-			s.revealed = !s.revealed
-		}
-	}
+	s.layoutTrailingAction(env, gtx, p, w, pre, &ev)
 
 	errored := s.err.visible(p.Error, s.outOfRange(p), ev)
 	fm := s.core.advance(env, s.core.hovered(env) && !p.Disabled, s.core.focused(env, gtx) && !p.Disabled, errored, fieldLineHeight(env, gtx, p.Helper, p.Error, errored, w))
@@ -180,6 +166,27 @@ func (s *TextFieldState) Layout(env *Env, gtx *layout.Context, p *TextFieldProps
 		return FieldEvents{}, fmt.Errorf("draw the text field: %w", err)
 	}
 	return ev, nil
+}
+
+func (s *TextFieldState) layoutTrailingAction(env *Env, gtx *layout.Context, p *TextFieldProps, w int, pre fieldSizes, ev *FieldEvents) {
+	switch {
+	case p.Variant == TextFieldSearch:
+		if followState(env, &s.core.clearF, s.core.text() != "") > 0 {
+			var clicked bool
+			clicked, s.clearMv = trailingBegin(env, gtx, &s.clear, trailingRect(gtx, w, pre), pressOpts{disabled: p.Disabled})
+			if clicked {
+				s.core.setText("")
+				ev.Changed = true
+			}
+		}
+	case p.Variant == TextFieldSecret && !p.NoReveal:
+		followState(env, &s.core.revealF, s.revealed)
+		var clicked bool
+		clicked, s.revealMv = trailingBegin(env, gtx, &s.reveal, trailingRect(gtx, w, pre), pressOpts{disabled: p.Disabled, toggled: s.revealed})
+		if clicked {
+			s.revealed = !s.revealed
+		}
+	}
 }
 
 // Measure-independent layout width: the natural box of the §6.8 content
@@ -203,8 +210,14 @@ func textFieldSlots(env *Env, gtx *layout.Context, p *TextFieldProps) (lead, rig
 	}
 	btn := trailingButtonSize(gtx)
 	switch p.Variant {
-	case TextFieldSearch, TextFieldSecret:
+	case TextFieldSearch:
 		right = gtx.Dp(theme.SpaceXS) + btn + gtx.Dp(theme.SpaceSM)
+	case TextFieldSecret:
+		if p.NoReveal {
+			right = gtx.Dp(theme.SpaceLG)
+		} else {
+			right = gtx.Dp(theme.SpaceXS) + btn + gtx.Dp(theme.SpaceSM)
+		}
 	case TextFieldNumber:
 		if p.Unit != "" {
 			right = gtx.Dp(theme.SpaceXS) + measureLabel(env, gtx, theme.TypeSmall(), p.Unit).X + gtx.Dp(theme.SpaceSM)
@@ -346,6 +359,9 @@ func (s *TextFieldState) drawTrailing(env *Env, gtx *layout.Context, p *TextFiel
 			})
 		}
 	case TextFieldSecret:
+		if p.NoReveal {
+			return nil
+		}
 		l := iconButtonLookOf(env, IconButtonGhost, s.revealed, disabled)
 		rv := s.core.revealF.Value()
 		at(gtx, r.Min, func(gtx *layout.Context) {

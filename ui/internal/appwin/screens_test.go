@@ -8,6 +8,7 @@ import (
 
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/session"
+	"github.com/syurodev/fugue/ui/internal/vault"
 	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
@@ -47,6 +48,7 @@ func newTestScreens(t *testing.T) (*screens, *fakeFetcher) {
 	fake := &fakeFetcher{}
 	m := hostconn.NewManager(&hostconn.Config{})
 	sc := newScreens(m, fake, session.NewPoster(m.Client), workspace.NewMutator(func() workspace.MutatorClient { return nil }))
+	sc.vault.ApplyStatus(vault.Status{State: client.VaultStateUnlocked, Revision: 1, Incarnation: "test"})
 	return sc, fake
 }
 

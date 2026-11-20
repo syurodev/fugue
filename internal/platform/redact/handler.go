@@ -6,7 +6,7 @@ import (
 	"regexp"
 )
 
-var secretKey = regexp.MustCompile(`(?i)token|secret|password|apikey|credential|privatekey`)
+var secretKey = regexp.MustCompile(`(?i)token|secret|password|passphrase|recovery_?key|apikey|credential|privatekey`)
 
 // SecretKey reports whether an attribute key looks like it names a secret.
 func SecretKey(key string) bool { return secretKey.MatchString(key) }

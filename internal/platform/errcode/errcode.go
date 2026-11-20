@@ -53,6 +53,10 @@ const (
 	VendorWorkspaceMismatch     Code = "vendor.workspace_mismatch"
 	TranscriptSessionNotFound   Code = "transcript.session_not_found"
 	TranscriptItemNotFound      Code = "transcript.item_not_found"
+	VaultInvalidPassphrase      Code = "vault.invalid_passphrase"
+	VaultRateLimited            Code = "vault.rate_limited"
+	VaultNotConfigured          Code = "vault.not_configured"
+	VaultAlreadyConfigured      Code = "vault.already_configured"
 )
 
 // Entry classifies one code. Hidden codes are never shown to a client; the
@@ -105,6 +109,10 @@ func Registry() []Entry {
 		{VendorWorkspaceMismatch, true, "the session is bound to the workspace root it was created in"},
 		{TranscriptSessionNotFound, true, "the transcript session does not exist"},
 		{TranscriptItemNotFound, true, "the transcript item does not exist in this session"},
+		{VaultInvalidPassphrase, true, "the vault passphrase or recovery key is invalid"},
+		{VaultRateLimited, true, "too many failed vault unlock attempts; wait before retrying"},
+		{VaultNotConfigured, true, "the vault is not configured yet"},
+		{VaultAlreadyConfigured, true, "the vault is already configured"},
 	}
 }
 

@@ -37,8 +37,14 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 	if err != nil {
 		return errcode.Wrap(errcode.Internal, "create the host vault", err)
 	}
+	vaultSvc, err := newVaultService(v, hp.rt.hub, deps.Clock)
+	if err != nil {
+		return errcode.Wrap(errcode.Internal, "create the host vault service", err)
+	}
+	hp.rt.vaultService = vaultSvc
 	vs, err := vendorstore.New(ctx, store.DB(), v, deps.Clock, nil)
 	if err != nil {
+		vaultSvc.Close()
 		return errcode.Wrap(errcode.Internal, "open the vendor store", err)
 	}
 	if _, recErr := vs.RecoverTeams(ctx); recErr != nil {
@@ -69,6 +75,7 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 	hp.rt.transcripts = transcripts
 	hp.vendorStore = vs
 	hp.closeVendor = func() error {
+		vaultSvc.Close()
 		if unregisterVaultGuard != nil {
 			unregisterVaultGuard()
 		}
@@ -261,6 +268,14 @@ func rawXDGRuntimeDir(env []string) string {
 // Vault returns the host's vault. Clients cannot unlock it before F10.5; the
 // composition root and tests hold it.
 func (hp *HostProcess) Vault() *vault.Service { return hp.vault }
+
+// VaultService returns the host vault service the Host API serves.
+func (rt *HostRuntime) VaultService() (*VaultService, error) {
+	if rt.vaultService == nil {
+		return nil, errcode.New(errcode.Unavailable, "the vault service is unavailable")
+	}
+	return rt.vaultService, nil
+}
 
 // VendorService returns the vendor session service the Host API serves.
 func (rt *HostRuntime) VendorService() (*VendorService, error) {

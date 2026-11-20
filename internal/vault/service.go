@@ -81,45 +81,93 @@ func NewService(ctx context.Context, store KeyringStore, generator ids.Generator
 // keyring already exists, so a Master Password is chosen exactly once. The
 // returned recovery key must be shown to the user and is never stored.
 func (s *Service) Setup(ctx context.Context, masterPassword redact.Secret) (redact.Secret, error) {
-	if len(masterPassword.Reveal()) < MinMasterPasswordLength {
-		return redact.Secret{}, errcode.New(errcode.InvalidArgument, "master password is too short")
+	buf := []byte(masterPassword.Reveal())
+	defer clear(buf)
+	recovery, err := s.SetupBytes(ctx, buf)
+	if err != nil {
+		return redact.Secret{}, err
+	}
+	defer clear(recovery)
+	return redact.NewSecret(string(recovery)), nil
+}
+
+// SetupBytes creates the vault on first run from masterPassword bytes, clearing
+// the caller's slice before returning, and returns the recovery key bytes.
+func (s *Service) SetupBytes(ctx context.Context, masterPassword []byte) ([]byte, error) {
+	secret := make([]byte, len(masterPassword))
+	copy(secret, masterPassword)
+	clear(masterPassword)
+	defer clear(secret)
+	if len(secret) < MinMasterPasswordLength {
+		return nil, errcode.New(errcode.InvalidArgument, "master password is too short")
 	}
 	s.lifecycle.Lock()
 	defer s.lifecycle.Unlock()
 	exists, err := s.store.Exists(ctx)
 	if err != nil {
-		return redact.Secret{}, fail("check the keyring", err)
+		return nil, fail("check the keyring", err)
 	}
 	if exists {
-		return redact.Secret{}, errcode.New(errcode.AlreadyExists, "vault is already configured")
+		return nil, errcode.New(errcode.AlreadyExists, "vault is already configured")
 	}
-	keyring, recoveryKey, err := crypto.NewKeyring(masterPassword.Reveal())
+	keyring, recoveryKey, err := crypto.NewKeyringBytes(secret)
 	if err != nil {
-		return redact.Secret{}, fail("create the keyring", err)
+		return nil, fail("create the keyring", err)
 	}
+	ok := false
+	defer func() {
+		if !ok {
+			clear(recoveryKey)
+		}
+	}()
 	if err = s.store.Save(ctx, keyring); err != nil {
-		return redact.Secret{}, fail("save the keyring", err)
+		return nil, fail("save the keyring", err)
 	}
-	dek, err := keyring.UnlockWithPassword(masterPassword.Reveal())
+	dek, err := keyring.UnlockWithPasswordBytes(secret)
 	if err != nil {
-		return redact.Secret{}, fail("unlock the new keyring", err)
+		return nil, fail("unlock the new keyring", err)
 	}
 	s.install(dek)
-	return redact.NewSecret(recoveryKey), nil
+	ok = true
+	return recoveryKey, nil
 }
 
 // Unlock decrypts the data key with the Master Password.
 func (s *Service) Unlock(ctx context.Context, masterPassword redact.Secret) error {
+	buf := []byte(masterPassword.Reveal())
+	defer clear(buf)
+	return s.UnlockBytes(ctx, buf)
+}
+
+// UnlockBytes decrypts the data key with masterPassword bytes and clears the
+// caller's slice before returning.
+func (s *Service) UnlockBytes(ctx context.Context, masterPassword []byte) error {
+	secret := make([]byte, len(masterPassword))
+	copy(secret, masterPassword)
+	clear(masterPassword)
+	defer clear(secret)
 	return s.unlock(ctx, func(keyring *crypto.Keyring) ([]byte, error) {
-		return keyring.UnlockWithPassword(masterPassword.Reveal())
+		return keyring.UnlockWithPasswordBytes(secret)
 	})
 }
 
 // UnlockWithRecovery decrypts the data key with the recovery key. It opens the
 // same data key as the Master Password, so nothing is re-wrapped.
 func (s *Service) UnlockWithRecovery(ctx context.Context, recoveryKey redact.Secret) error {
+	buf := []byte(recoveryKey.Reveal())
+	defer clear(buf)
+	return s.UnlockWithRecoveryBytes(ctx, buf)
+}
+
+// UnlockWithRecoveryBytes decrypts the data key with recoveryKey bytes and
+// clears the caller's slice before returning.
+func (s *Service) UnlockWithRecoveryBytes(ctx context.Context, recoveryKey []byte) error {
+	secret := make([]byte, len(recoveryKey))
+	copy(secret, recoveryKey)
+	clear(recoveryKey)
+	defer clear(secret)
 	return s.unlock(ctx, func(keyring *crypto.Keyring) ([]byte, error) {
-		return keyring.UnlockWithRecovery(recoveryKey.Reveal())
+		return keyring.UnlockWithRecoveryBytes(secret)
 	})
 }
 
