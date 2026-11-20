@@ -106,8 +106,11 @@ func (s *TeamProposalService) proposalCardLines(ctx context.Context, input *team
 	lines := []string{
 		input.Title,
 		"agents: " + strconv.Itoa(teams.AgentCount(input)) + "; " + s.accountLine(input, profiles),
-		"roles:",
 	}
+	if line := formatTeamBudgetLine(input.Budget); line != "" {
+		lines = append(lines, line)
+	}
+	lines = append(lines, "roles:")
 	seen := make(map[string]struct{}, len(profiles))
 	for i := range input.Tasks {
 		name := input.Tasks[i].Role
@@ -253,4 +256,18 @@ func truncateCardText(content string, limit int) string {
 		cut--
 	}
 	return content[:cut] + cardTruncationMarker
+}
+
+func formatTeamBudgetLine(b *teams.TeamBudget) string {
+	if b == nil || (b.MaxAgents == 0 && b.MaxDurationSeconds == 0) {
+		return ""
+	}
+	var parts []string
+	if b.MaxAgents > 0 {
+		parts = append(parts, "max_agents="+strconv.Itoa(b.MaxAgents))
+	}
+	if b.MaxDurationSeconds > 0 {
+		parts = append(parts, "max_duration_seconds="+strconv.FormatInt(b.MaxDurationSeconds, 10))
+	}
+	return "budget: " + strings.Join(parts, ", ")
 }

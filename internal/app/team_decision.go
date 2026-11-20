@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"slices"
+	"time"
 
 	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -59,9 +60,10 @@ const (
 // carries the decided profile of every role, so F11.3 starts tasks with
 // exactly what the user decided (OR-E13).
 type teamDecisionPayload struct {
-	Decision  string        `json:"decision"`
-	DecidedBy string        `json:"decided_by"`
-	Roles     []decidedRole `json:"roles,omitempty"`
+	Decision  string            `json:"decision"`
+	DecidedBy string            `json:"decided_by"`
+	Roles     []decidedRole     `json:"roles,omitempty"`
+	Budget    *teams.TeamBudget `json:"budget,omitempty"`
 }
 
 // decidedRole is one role profile as decided on the card.
@@ -264,7 +266,7 @@ func (s *TeamProposalService) approvePlan(ctx context.Context, rec *vendorstore.
 		plan, itemDecision, payloadDecision = edited, itemDecisionApprovedEdited, decisionApproveEdited
 	}
 	payload, err := json.Marshal(teamDecisionPayload{
-		Decision: payloadDecision, DecidedBy: decidedBy, Roles: decidedRolesOf(plan, eff),
+		Decision: payloadDecision, DecidedBy: decidedBy, Roles: decidedRolesOf(plan, eff), Budget: plan.Budget,
 	})
 	if err != nil {
 		return errcode.Wrap(errcode.Internal, "marshal the decision payload", err)
@@ -277,12 +279,25 @@ func (s *TeamProposalService) approvePlan(ctx context.Context, rec *vendorstore.
 	if err != nil {
 		return errcode.Wrap(errcode.Internal, "generate the decision event ID", err)
 	}
+	deadlineSec := effectiveProposalTeamDeadlineSeconds(eff, plan.Budget)
+	var armTimers []vendorstore.TeamTimerArmInput
+	if deadlineSec > 0 {
+		armTimers = []vendorstore.TeamTimerArmInput{{
+			TeamID:     rec.TeamID,
+			Kind:       vendorstore.TimerKindTeamDeadline,
+			DeadlineMs: s.now().Add(time.Duration(deadlineSec) * time.Second).UnixMilli(),
+		}}
+	}
 	if _, err := s.store.DecideTeam(ctx, rec.TeamID, &vendorstore.TeamDecisionInput{
 		ExpectedSeq: rec.LastSeq, DecisionEventID: eventID, StartedPayload: payload,
 		RemovedTaskIDs: mutations.removed, ResealedSpecs: mutations.reseals, AddedTasks: mutations.added,
-		Mailbox: decisionMailboxRows(leadTaskID, payloadDecision, decidedBy, "", input, edited, mutations),
+		Mailbox:   decisionMailboxRows(leadTaskID, payloadDecision, decidedBy, "", input, edited, mutations),
+		ArmTimers: armTimers,
 	}); err != nil {
 		return boundaryError("apply the decision", err)
+	}
+	if s.onTimerArmed != nil && len(armTimers) > 0 {
+		s.onTimerArmed()
 	}
 	if flipErr := s.flipItemDecision(ctx, rec.SessionID, rec.TeamID, itemDecision); flipErr != nil {
 		slog.WarnContext(ctx, "recording the decided proposal item failed",
@@ -310,6 +325,9 @@ func (s *TeamProposalService) applyEditSet(editsText string, input *teams.Propos
 	}
 	if _, err := teams.ValidateProposal(edited, catalogRoles(eff)); err != nil {
 		return nil, errcode.Wrap(errcode.InvalidArgument, "the edited plan does not satisfy the team rules", err)
+	}
+	if teams.AgentCount(edited) > effectiveProposalAgentCap(eff, edited.Budget) {
+		return nil, errcode.New(errcode.InvalidArgument, "the edited plan exceeds the team max_agents budget")
 	}
 	if err := refuseTaskIdentityChanges(input, edited); err != nil {
 		return nil, err
@@ -357,6 +375,9 @@ func (s *TeamProposalService) autoApprovable(eff *workspace.EffectiveConfig, inp
 		return false
 	}
 	if teams.AgentCount(input) > autoApproveAgentLimit {
+		return false
+	}
+	if input.Budget != nil && (input.Budget.MaxAgents > workspaceMaxTeamAgents(eff) || int(input.Budget.MaxDurationSeconds) > workspaceTeamDeadlineSeconds(eff)) {
 		return false
 	}
 	catalog := make(map[string]teams.Role, len(eff.Roles))

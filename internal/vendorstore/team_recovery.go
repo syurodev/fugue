@@ -122,5 +122,5 @@ func applyRecoveredTaskRow(ctx context.Context, tx *sql.Tx, c recoveryCandidate,
 	); err != nil {
 		return fmt.Errorf("mark task unknown: %w", err)
 	}
-	return nil
+	return cancelTaskTimersTx(ctx, tx, c.TeamID, c.TaskID, now)
 }

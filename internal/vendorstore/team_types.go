@@ -28,6 +28,12 @@ var (
 	// ErrRetryLimitReached indicates a failed task already reached the two-retry
 	// ceiling without user-approved amend (Q-126, OR-E16).
 	ErrRetryLimitReached = errcode.New(errcode.FailedPrecondition, "task retry limit reached")
+	// ErrTeamAgentCapReached indicates a team reached its non-lead agent limit
+	// without user-approved amend (Q-149).
+	ErrTeamAgentCapReached = errcode.New(errcode.FailedPrecondition, "team agent cap reached")
+	// ErrTimerNotArmed indicates an expected armed durable timer was already
+	// fired, cancelled, or replaced by a newer generation.
+	ErrTimerNotArmed = errcode.New(errcode.FailedPrecondition, "team timer is not armed")
 )
 
 // TeamState represents the durable lifecycle state of a team (§3.2).
@@ -95,9 +101,15 @@ const (
 	// sealed payload; the transition (active → active) landed with F11.2b.
 	EventTeamAmended TeamEventType = "TeamAmended"
 	// EventTeamNoted records an append-only team note in its sealed payload (Q-130).
-	EventTeamNoted   TeamEventType = "TeamNoted"
-	EventTeamDecided TeamEventType = "TeamDecided"
-	EventTeamEnded   TeamEventType = "TeamEnded"
+	EventTeamNoted TeamEventType = "TeamNoted"
+	// EventTeamDeadlineReached records that the team deadline elapsed and new
+	// dispatches are paused in waiting(team_deadline) (Q-149).
+	EventTeamDeadlineReached TeamEventType = "TeamDeadlineReached"
+	// EventTeamDeadlineExtended records a user-approved team deadline extension
+	// clearing waiting(team_deadline) (Q-149).
+	EventTeamDeadlineExtended TeamEventType = "TeamDeadlineExtended"
+	EventTeamDecided          TeamEventType = "TeamDecided"
+	EventTeamEnded            TeamEventType = "TeamEnded"
 
 	EventTaskCreated          TeamEventType = "TaskCreated"
 	EventTaskAssigned         TeamEventType = "TaskAssigned"
@@ -111,21 +123,29 @@ const (
 	EventTaskMarkedUnknown    TeamEventType = "TaskMarkedUnknown"
 	EventTaskRecoveryDecided  TeamEventType = "TaskRecoveryDecided"
 	EventTaskSuperseded       TeamEventType = "TaskSuperseded"
-	EventTaskEnded            TeamEventType = "TaskEnded"
+	// EventTaskStalled records a watchdog silence escalation without changing
+	// the task's state (Q-150).
+	EventTaskStalled TeamEventType = "TaskStalled"
+	EventTaskEnded   TeamEventType = "TaskEnded"
 )
+
+// TeamWaitingDeadline is the waiting_reason recorded when an active team's
+// deadline expires and new task dispatches are paused (Q-149).
+const TeamWaitingDeadline = "team_deadline"
 
 // TeamRecord is the metadata-only projection of a team_records row (INV-09).
 type TeamRecord struct {
-	TeamID      string
-	WorkspaceID string
-	SessionID   string
-	State       TeamState
-	LastSeq     int64
-	TaskCount   int
-	FailureCode string
-	CreatedAt   int64
-	UpdatedAt   int64
-	EndedAt     int64
+	TeamID        string
+	WorkspaceID   string
+	SessionID     string
+	State         TeamState
+	WaitingReason string
+	LastSeq       int64
+	TaskCount     int
+	FailureCode   string
+	CreatedAt     int64
+	UpdatedAt     int64
+	EndedAt       int64
 }
 
 // TaskRecord is the metadata-only projection of a team_tasks row (INV-09).
@@ -202,6 +222,11 @@ type AppendTeamEventInput struct {
 	// Mailbox rows are written in the same transaction as this event, keyed to
 	// its sequence (Q-122); nil for events that produce no mail.
 	Mailbox []MailboxEnqueueInput
+	// ArmTimers arms durable team_timers rows in the same transaction as this event.
+	ArmTimers []TeamTimerArmInput
+	// FireTimer, when set, marks the matching armed timer as fired in the same
+	// transaction as this event, failing with ErrTimerNotArmed if not armed.
+	FireTimer *TeamTimerRef
 }
 
 // RecordedTeamEvent is a metadata view of one team_task_events row (INV-09).

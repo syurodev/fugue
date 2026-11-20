@@ -126,7 +126,7 @@ func (s *teamTaskService) Retry(ctx context.Context, sessionID, taskID, role, mo
 
 func (s *teamTaskService) retryWithConflictLoop(ctx context.Context, sessionID, taskID, role, model string) (vendorstore.TaskRetryResult, string, string, error) {
 	for attempt := range maxAppendRetries {
-		c, target, err := s.validateRetryTarget(ctx, sessionID, taskID, role, model)
+		c, target, maxAgents, err := s.validateRetryTarget(ctx, sessionID, taskID, role, model)
 		if err != nil {
 			return vendorstore.TaskRetryResult{}, "", "", err
 		}
@@ -140,9 +140,13 @@ func (s *teamTaskService) retryWithConflictLoop(ctx context.Context, sessionID, 
 		}
 		res, retryErr := s.store.RetryTask(ctx, c.team.TeamID, target.TaskID, &vendorstore.TaskRetryInput{
 			ExpectedSeq: c.team.LastSeq, SupersededEventID: supID, CreatedEventID: creID,
+			MaxTeamAgents: maxAgents,
 		})
 		if retryErr == nil {
 			return res, c.team.TeamID, target.SessionID, nil
+		}
+		if errors.Is(retryErr, vendorstore.ErrTeamAgentCapReached) {
+			return vendorstore.TaskRetryResult{}, "", "", errcode.New(errcode.FailedPrecondition, "team agent cap reached; only the delegator may raise capacity via fugue_team_amend")
 		}
 		if errors.Is(retryErr, vendorstore.ErrSequenceConflict) && attempt+1 < maxAppendRetries {
 			continue
@@ -152,34 +156,38 @@ func (s *teamTaskService) retryWithConflictLoop(ctx context.Context, sessionID, 
 	return vendorstore.TaskRetryResult{}, "", "", errcode.New(errcode.FailedPrecondition, "team event sequence conflict")
 }
 
-func (s *teamTaskService) validateRetryTarget(ctx context.Context, sessionID, taskID, role, model string) (*callerTeamContext, *vendorstore.TaskRecord, error) {
+func (s *teamTaskService) validateRetryTarget(ctx context.Context, sessionID, taskID, role, model string) (*callerTeamContext, *vendorstore.TaskRecord, int, error) {
 	c, err := s.resolveCaller(ctx, sessionID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	target, err := c.requireDelegator(taskID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, 0, err
 	}
 	if role != "" && role != target.CatalogRole {
-		return nil, nil, errcode.New(errcode.FailedPrecondition, "changing role requires fugue_team_amend")
+		return nil, nil, 0, errcode.New(errcode.FailedPrecondition, "changing role requires fugue_team_amend")
 	}
 	if model != "" {
 		_, resolved, failCode, profErr := resolveTaskProfile(ctx, s.store, c.team.TeamID, target.TaskID, target.CatalogRole)
 		if profErr != nil {
-			return nil, nil, profErr
+			return nil, nil, 0, profErr
 		}
 		if failCode == "" && model != resolved.Model {
-			return nil, nil, errcode.New(errcode.FailedPrecondition, "changing model requires fugue_team_amend")
+			return nil, nil, 0, errcode.New(errcode.FailedPrecondition, "changing model requires fugue_team_amend")
 		}
 	}
 	if target.State != vendorstore.TaskStateFailed {
-		return nil, nil, errcode.New(errcode.FailedPrecondition, "only failed tasks can be retried")
+		return nil, nil, 0, errcode.New(errcode.FailedPrecondition, "only failed tasks can be retried")
 	}
 	if target.Attempt >= 1+vendorstore.MaxTaskRetries {
-		return nil, nil, errcode.New(errcode.FailedPrecondition, "retry limit reached; use fugue_team_amend to add another attempt")
+		return nil, nil, 0, errcode.New(errcode.FailedPrecondition, "retry limit reached; use fugue_team_amend to add another attempt")
 	}
-	return c, target, nil
+	maxAgents := resolveTeamAgentCap(ctx, s.store, s.teamsCfg, &c.team)
+	if countNonLeadTasks(c.tasks) >= maxAgents {
+		return nil, nil, 0, errcode.New(errcode.FailedPrecondition, "team agent cap reached; only the delegator may raise capacity via fugue_team_amend")
+	}
+	return c, target, maxAgents, nil
 }
 
 func (s *teamTaskService) closeTaskSession(ctx context.Context, sessionID string) {

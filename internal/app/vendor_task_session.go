@@ -38,6 +38,7 @@ type taskSessions interface {
 	// ResumeTaskSession attaches a fresh process to a detached session
 	// through its stored handle; the wake resumes before it delivers (Q-123).
 	ResumeTaskSession(ctx context.Context, sessionID, cwd string) error
+	Interrupt(ctx context.Context, sessionID string) error
 	Close(ctx context.Context, sessionID string, reason vendor.CloseReason) error
 }
 
@@ -66,6 +67,10 @@ func (v vendorTaskSessions) SendAsync(_ context.Context, sessionID string, input
 
 func (v vendorTaskSessions) ResumeTaskSession(ctx context.Context, sessionID, cwd string) error {
 	return v.svc.resumeTaskSession(ctx, sessionID, cwd)
+}
+
+func (v vendorTaskSessions) Interrupt(ctx context.Context, sessionID string) error {
+	return v.svc.sessions.Interrupt(ctx, sessionID)
 }
 
 func (v vendorTaskSessions) Close(ctx context.Context, sessionID string, reason vendor.CloseReason) error {

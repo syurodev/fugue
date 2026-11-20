@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"time"
 
 	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -29,19 +30,22 @@ const teamAmendTaskLimit = 64
 
 // teamAmendPayload is the sealed payload of a TeamAmended append.
 type teamAmendPayload struct {
-	RoleEdits    []decidedRole `json:"role_edits,omitempty"`
-	AddedTaskIDs []string      `json:"added_task_ids,omitempty"`
+	RoleEdits    []decidedRole     `json:"role_edits,omitempty"`
+	AddedTaskIDs []string          `json:"added_task_ids,omitempty"`
+	Budget       *teams.TeamBudget `json:"budget,omitempty"`
 }
 
 // AmendArgs is the fugue_team_amend input after decoding. Roles and
 // task_budgets amend within the decided roles and agent count and apply at
-// once; add_roles and add_tasks need the user (OR-E16) and go to a card.
+// once; add_roles, add_tasks and team budget changes need the user (OR-E16)
+// and go to a card.
 type AmendArgs struct {
 	TeamID      string                 `json:"team_id"`
 	Roles       []teams.RoleEdit       `json:"roles,omitempty"`
 	TaskBudgets []teams.TaskBudgetEdit `json:"task_budgets,omitempty"`
 	AddRoles    []teams.ProposedRole   `json:"add_roles,omitempty"`
 	AddTasks    []teams.ProposedTask   `json:"add_tasks,omitempty"`
+	Budget      *teams.TeamBudget      `json:"budget,omitempty"`
 }
 
 // teamAmendInputSchema is the JSON Schema of fugue_team_amend shown to the
@@ -115,6 +119,14 @@ const teamAmendInputSchema = `{
         },
         "required": ["id", "team_role", "role", "goal", "write_scope", "deliverable"]
       }
+    },
+    "budget": {
+      "type": "object",
+      "properties": {
+        "max_agents": {"type": "integer", "minimum": 0, "maximum": 64},
+        "max_duration_seconds": {"type": "integer", "minimum": 0, "maximum": 604800}
+      },
+      "additionalProperties": false
     }
   },
   "required": ["team_id"]
@@ -165,11 +177,8 @@ func decodeAmendArgs(raw json.RawMessage) (*AmendArgs, error) {
 
 // Amend applies the session's amendments to one of its active teams (§5.4).
 func (s *TeamProposalService) Amend(ctx context.Context, sessionID string, args *AmendArgs) (string, error) {
-	if args == nil || args.TeamID == "" {
-		return "", errcode.New(errcode.InvalidArgument, "the amendment names a team")
-	}
-	if len(args.AddTasks) > teamAmendTaskLimit {
-		return "", errcode.New(errcode.InvalidArgument, "an amendment carries at most 64 tasks")
+	if err := validateAmendRequest(args); err != nil {
+		return "", err
 	}
 	unlock := s.locks.lock(sessionID)
 	defer unlock()
@@ -190,10 +199,27 @@ func (s *TeamProposalService) Amend(ctx context.Context, sessionID string, args 
 	if err != nil {
 		return "", err
 	}
-	if len(args.AddRoles) == 0 && len(args.AddTasks) == 0 {
+	if isDirectAmend(args) {
 		return s.applyDirectAmend(ctx, &rec, args, decided)
 	}
 	return s.requestAmendCard(ctx, sessionID, &rec, args)
+}
+
+func validateAmendRequest(args *AmendArgs) error {
+	if args == nil || args.TeamID == "" {
+		return errcode.New(errcode.InvalidArgument, "the amendment names a team")
+	}
+	if len(args.AddTasks) > teamAmendTaskLimit {
+		return errcode.New(errcode.InvalidArgument, "an amendment carries at most 64 tasks")
+	}
+	if err := teams.ValidateTeamBudget(args.Budget); err != nil {
+		return errcode.Wrap(errcode.InvalidArgument, "the amendment budget is invalid", err)
+	}
+	return nil
+}
+
+func isDirectAmend(args *AmendArgs) bool {
+	return len(args.AddRoles) == 0 && len(args.AddTasks) == 0 && args.Budget == nil
 }
 
 // validateAmendAnswer pre-validates one amend card answer before the card
@@ -293,6 +319,19 @@ func (s *TeamProposalService) approveAmendment(ctx context.Context, sessionID, t
 	}); amendErr != nil {
 		return boundaryError("apply the amendment", amendErr)
 	}
+	s.rearmTeamDeadlineOnAmend(ctx, teamID, args.Budget)
 	s.pendingAmends.clear(teamID)
 	return nil
+}
+
+func (s *TeamProposalService) rearmTeamDeadlineOnAmend(ctx context.Context, teamID string, budget *teams.TeamBudget) {
+	if budget == nil || budget.MaxDurationSeconds <= 0 {
+		return
+	}
+	deadlineMs := s.now().Add(time.Duration(budget.MaxDurationSeconds) * time.Second).UnixMilli()
+	if err := s.store.ArmTeamTimer(ctx, &vendorstore.TeamTimerArmInput{
+		TeamID: teamID, Kind: vendorstore.TimerKindTeamDeadline, DeadlineMs: deadlineMs,
+	}); err == nil && s.onTimerArmed != nil {
+		s.onTimerArmed()
+	}
 }

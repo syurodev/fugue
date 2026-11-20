@@ -13,6 +13,7 @@ import (
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendorstore"
+	"github.com/syurodev/fugue/internal/workspace"
 )
 
 const (
@@ -60,6 +61,8 @@ type teamTaskService struct {
 	dispatch     *teamDispatcher
 	wake         *teamWake
 	interactions *InteractionService
+	teamsCfg     func(context.Context, string) (workspace.TeamsConfig, error)
+	budgets      *teamBudgets
 }
 
 func newTeamTaskService(store *vendorstore.Store, sessions taskSessions, roots rootResolver,
@@ -81,6 +84,14 @@ func (s *teamTaskService) SetRuntime(dispatch *teamDispatcher, wake *teamWake) {
 
 func (s *teamTaskService) SetInteractions(inter *InteractionService) {
 	s.interactions = inter
+}
+
+func (s *teamTaskService) SetTeamsConfig(fn func(context.Context, string) (workspace.TeamsConfig, error)) {
+	s.teamsCfg = fn
+}
+
+func (s *teamTaskService) SetBudgets(b *teamBudgets) {
+	s.budgets = b
 }
 
 type callerTeamContext struct {

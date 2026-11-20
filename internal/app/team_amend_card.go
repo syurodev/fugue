@@ -149,6 +149,9 @@ func amendCardLines(args *AmendArgs) []string {
 		lines = append(lines, line)
 	}
 	lines = append(lines, "agents: +"+strconv.Itoa(len(args.AddTasks)))
+	if line := formatTeamBudgetLine(args.Budget); line != "" {
+		lines = append(lines, line)
+	}
 	return lines
 }
 
@@ -164,40 +167,62 @@ func (s *TeamProposalService) validateAmendAdditions(ctx context.Context, rec *v
 	if err != nil {
 		return err
 	}
-	if len(args.AddTasks) == 0 {
+	if budgetErr := teams.ValidateTeamBudget(args.Budget); budgetErr != nil {
+		return errcode.Wrap(errcode.InvalidArgument, "the amendment budget is invalid", budgetErr)
+	}
+	if len(args.AddTasks) == 0 && args.Budget == nil {
 		return nil
 	}
 	teamTasks, err := s.teamTasks(ctx, rec.TeamID)
 	if err != nil {
 		return err
 	}
-	nodes := make([]teams.TaskNode, 0, len(teamTasks)+len(args.AddTasks))
+	if capErr := checkAmendAgentBudget(teamTasks, args); capErr != nil {
+		return capErr
+	}
+	if len(args.AddTasks) == 0 {
+		return nil
+	}
+	nodes, err := buildAmendedTreeNodes(rec.TeamID, teamTasks, args.AddTasks, resolved)
+	if err != nil {
+		return err
+	}
+	if treeErr := teams.ValidateTeamTree(nodes); treeErr != nil {
+		return errcode.Wrap(errcode.CodeOf(treeErr), "the amended team does not satisfy the team rules", treeErr)
+	}
+	return validateAmendDependencies(rec, teamTasks, args)
+}
+
+func checkAmendAgentBudget(teamTasks []vendorstore.TaskRecord, args *AmendArgs) error {
+	if args.Budget != nil && args.Budget.MaxAgents > 0 && countNonLeadTasks(teamTasks)+countProposedNonLeadTasks(args.AddTasks) > args.Budget.MaxAgents {
+		return errcode.New(errcode.InvalidArgument, "the amended team exceeds its budget max_agents")
+	}
+	return nil
+}
+
+func buildAmendedTreeNodes(teamID string, teamTasks []vendorstore.TaskRecord, added []teams.ProposedTask, resolved map[string]struct{}) ([]teams.TaskNode, error) {
+	nodes := make([]teams.TaskNode, 0, len(teamTasks)+len(added))
 	for i := range teamTasks {
-		// Retry attempts share their root task's tree position and use ~r<n>
-		// IDs outside the proposal identifier alphabet; keep the root node only.
 		if teamTasks[i].RetryOf != "" {
 			continue
 		}
 		nodes = append(nodes, teams.TaskNode{
-			ID: proposalTaskID(rec.TeamID, teamTasks[i].TaskID), ParentTaskID: proposalTaskID(rec.TeamID, teamTasks[i].ParentTaskID),
+			ID: proposalTaskID(teamID, teamTasks[i].TaskID), ParentTaskID: proposalTaskID(teamID, teamTasks[i].ParentTaskID),
 			Role: teams.TeamRole(teamTasks[i].HierarchyRole),
 		})
 	}
-	for i := range args.AddTasks {
-		t := &args.AddTasks[i]
+	for i := range added {
+		t := &added[i]
 		if _, known := resolved[t.Role]; !known {
-			return errcode.New(errcode.InvalidArgument, "the added task names a role the team does not have")
+			return nil, errcode.New(errcode.InvalidArgument, "the added task names a role the team does not have")
 		}
 		spec := t.TaskSpec()
 		if err := teams.ValidateTaskSpec(&spec); err != nil {
-			return errcode.Wrap(errcode.CodeOf(err), "the added task does not satisfy the team rules", err)
+			return nil, errcode.Wrap(errcode.CodeOf(err), "the added task does not satisfy the team rules", err)
 		}
 		nodes = append(nodes, teams.TaskNode{ID: t.ID, ParentTaskID: t.ParentTaskID, Role: t.TeamRole})
 	}
-	if err := teams.ValidateTeamTree(nodes); err != nil {
-		return errcode.Wrap(errcode.CodeOf(err), "the amended team does not satisfy the team rules", err)
-	}
-	return validateAmendDependencies(rec, teamTasks, args)
+	return nodes, nil
 }
 
 // resolveAmendRoles returns the role names an amend may reference: the

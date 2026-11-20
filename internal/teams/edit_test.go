@@ -174,7 +174,7 @@ func TestApplyEditsNewRoleEntry(t *testing.T) {
 }
 
 // TestValidateBudgetErrors covers the shared budget validation: nil is fine,
-// negative values are refused.
+// negative and above-ceiling values are refused.
 func TestValidateBudgetErrors(t *testing.T) {
 	t.Parallel()
 	if err := ValidateBudget(nil); err != nil {
@@ -182,5 +182,20 @@ func TestValidateBudgetErrors(t *testing.T) {
 	}
 	if err := ValidateBudget(&TaskBudget{MaxTurns: -1}); !errors.Is(err, ErrInvalidSpec) {
 		t.Fatalf("negative budget error = %v, want ErrInvalidSpec", err)
+	}
+	edit := &EditSet{
+		Version:    EditSetVersion,
+		TeamBudget: &TeamBudget{MaxAgents: 18, MaxDurationSeconds: 7200},
+	}
+	edited, err := ApplyEdits(edit, editTestPlan(), editTestCatalog())
+	if err != nil {
+		t.Fatalf("ApplyEdits(TeamBudget): %v", err)
+	}
+	if edited.Budget == nil || edited.Budget.MaxAgents != 18 || edited.Budget.MaxDurationSeconds != 7200 {
+		t.Fatalf("edited budget = %+v", edited.Budget)
+	}
+	bad := &EditSet{Version: EditSetVersion, TeamBudget: &TeamBudget{MaxAgents: MaxTeamBudgetAgents + 1}}
+	if _, err := ApplyEdits(bad, editTestPlan(), editTestCatalog()); !errors.Is(err, ErrInvalidSpec) {
+		t.Fatalf("bad TeamBudget error = %v, want ErrInvalidSpec", err)
 	}
 }

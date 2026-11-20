@@ -367,6 +367,7 @@ func (a *vendorSessionActor) send(ctx context.Context, input vendor.Input) error
 	a.stopIdleTimer()
 	a.turnID, a.turns[turn.ID] = turn.ID, true
 	a.state = next
+	a.manager.notifyTurnStarted(a.info.ID)
 	itemID, err := a.manager.deps.IDs.NewID()
 	if err != nil {
 		return errcode.New(errcode.Internal, "could not allocate transcript item identity")

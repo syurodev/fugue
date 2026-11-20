@@ -51,22 +51,33 @@ const (
 	defaultPromptPacingMaxSeconds = 15
 	maxPromptPacingSeconds        = 300
 	maxIdleDetachSeconds          = 86400
+	maxTeamDeadlineSeconds        = 7 * 24 * 3600
+	maxTaskTurns                  = 1000
+	maxTeamAgents                 = 64
+	maxSilenceTimeoutSeconds      = 86400
+	maxHeavySlotHoldSeconds       = 86400
 )
 
 type rawTeams struct {
-	IdleDetachSeconds *int `toml:"idle_detach_seconds,omitempty"`
+	IdleDetachSeconds     *int `toml:"idle_detach_seconds,omitempty"`
+	TaskDeadlineSeconds   *int `toml:"task_deadline_seconds,omitempty"`
+	TaskMaxTurns          *int `toml:"task_max_turns,omitempty"`
+	SilenceTimeoutSeconds *int `toml:"silence_timeout_seconds,omitempty"`
+	TeamDeadlineSeconds   *int `toml:"team_deadline_seconds,omitempty"`
+	TeamMaxAgents         *int `toml:"team_max_agents,omitempty"`
 }
 
 type rawHost struct {
-	WorkspacesDir          *string `toml:"workspaces_dir,omitempty"`
-	OutputRetentionTotal   *string `toml:"output_retention_total,omitempty"`
-	SeenVersionsPerSession *string `toml:"seen_versions_per_session,omitempty"`
-	SnapshotDisk           *string `toml:"snapshot_disk,omitempty"`
-	PerAccountSessions     *int    `toml:"per_account_sessions,omitempty"`
-	MaxSessions            *int    `toml:"max_sessions,omitempty"`
-	HeavyCommands          *int    `toml:"heavy_commands,omitempty"`
-	PromptPacingMinSeconds *int    `toml:"prompt_pacing_min_seconds,omitempty"`
-	PromptPacingMaxSeconds *int    `toml:"prompt_pacing_max_seconds,omitempty"`
+	WorkspacesDir           *string `toml:"workspaces_dir,omitempty"`
+	OutputRetentionTotal    *string `toml:"output_retention_total,omitempty"`
+	SeenVersionsPerSession  *string `toml:"seen_versions_per_session,omitempty"`
+	SnapshotDisk            *string `toml:"snapshot_disk,omitempty"`
+	PerAccountSessions      *int    `toml:"per_account_sessions,omitempty"`
+	MaxSessions             *int    `toml:"max_sessions,omitempty"`
+	HeavyCommands           *int    `toml:"heavy_commands,omitempty"`
+	HeavySlotMaxHoldSeconds *int    `toml:"heavy_slot_max_hold_seconds,omitempty"`
+	PromptPacingMinSeconds  *int    `toml:"prompt_pacing_min_seconds,omitempty"`
+	PromptPacingMaxSeconds  *int    `toml:"prompt_pacing_max_seconds,omitempty"`
 }
 
 // tier2RawConfig deliberately omits policy, env and redact (Q-72): tier 2 has no accepted copy,
@@ -361,15 +372,7 @@ func validateRoleModel(file, key, model string) error {
 }
 
 func isRoleModelChar(b byte) bool {
-	if (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') {
-		return true
-	}
-	switch b {
-	case '-', '_', '.', ':', '/', '@':
-		return true
-	default:
-		return false
-	}
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || strings.IndexByte("-_.:/@", b) >= 0
 }
 
 func validateProfiles(file string, profiles map[string]ProfileConfig) error {
@@ -399,6 +402,7 @@ func validateHost(file string, host *rawHost, homeDir string) error {
 		validateIntMin(file, "host.per_account_sessions", host.PerAccountSessions, 1),
 		validateIntMin(file, "host.max_sessions", host.MaxSessions, 1),
 		validateIntMin(file, "host.heavy_commands", host.HeavyCommands, 1),
+		validateIntRange(file, "host.heavy_slot_max_hold_seconds", host.HeavySlotMaxHoldSeconds, 0, maxHeavySlotHoldSeconds),
 		validateIntRange(file, "host.prompt_pacing_min_seconds", host.PromptPacingMinSeconds, 0, maxPromptPacingSeconds),
 		validateIntRange(file, "host.prompt_pacing_max_seconds", host.PromptPacingMaxSeconds, 0, maxPromptPacingSeconds),
 		validatePacingBounds(file, host.PromptPacingMinSeconds, host.PromptPacingMaxSeconds),
@@ -409,7 +413,14 @@ func validateTeams(file string, teamsCfg *rawTeams) error {
 	if teamsCfg == nil {
 		return nil
 	}
-	return validateIntRange(file, "teams.idle_detach_seconds", teamsCfg.IdleDetachSeconds, 0, maxIdleDetachSeconds)
+	return firstErr(
+		validateIntRange(file, "teams.idle_detach_seconds", teamsCfg.IdleDetachSeconds, 0, maxIdleDetachSeconds),
+		validateIntRange(file, "teams.task_deadline_seconds", teamsCfg.TaskDeadlineSeconds, 1, maxTeamDeadlineSeconds),
+		validateIntRange(file, "teams.task_max_turns", teamsCfg.TaskMaxTurns, 1, maxTaskTurns),
+		validateIntRange(file, "teams.silence_timeout_seconds", teamsCfg.SilenceTimeoutSeconds, 0, maxSilenceTimeoutSeconds),
+		validateIntRange(file, "teams.team_deadline_seconds", teamsCfg.TeamDeadlineSeconds, 1, maxTeamDeadlineSeconds),
+		validateIntRange(file, "teams.team_max_agents", teamsCfg.TeamMaxAgents, 1, maxTeamAgents),
+	)
 }
 
 func validatePacingBounds(file string, minPtr, maxPtr *int) error {
@@ -423,24 +434,15 @@ func validatePacingBounds(file string, minPtr, maxPtr *int) error {
 	if maxPtr != nil {
 		maxVal = *maxPtr
 	}
-	if minVal > maxVal {
-		return cfgErr(file, "host.prompt_pacing_min_seconds", "prompt_pacing_min_seconds must not exceed prompt_pacing_max_seconds")
-	}
-	return nil
+	return errIf(minVal > maxVal, file, "host.prompt_pacing_min_seconds", "prompt_pacing_min_seconds must not exceed prompt_pacing_max_seconds")
 }
 
 func validateIntRange(file, key string, val *int, minVal, maxVal int) error {
-	if val == nil || (*val >= minVal && *val <= maxVal) {
-		return nil
-	}
-	return cfgErr(file, key, key+" must be between "+strconv.Itoa(minVal)+" and "+strconv.Itoa(maxVal))
+	return errIf(val != nil && (*val < minVal || *val > maxVal), file, key, key+" must be between "+strconv.Itoa(minVal)+" and "+strconv.Itoa(maxVal))
 }
 
 func validateIntMin(file, key string, val *int, minVal int) error {
-	if val == nil || *val >= minVal {
-		return nil
-	}
-	return cfgErr(file, key, key+" must be at least "+strconv.Itoa(minVal))
+	return errIf(val != nil && *val < minVal, file, key, key+" must be at least "+strconv.Itoa(minVal))
 }
 
 func validatePathField(file, key string, val *string, homeDir string) error {

@@ -97,3 +97,29 @@ func TestTaskSpecValidationAndDependsOnCycles(t *testing.T) {
 		})
 	}
 }
+
+func TestValidateTeamBudget(t *testing.T) {
+	t.Parallel()
+	if err := teams.ValidateTeamBudget(nil); err != nil {
+		t.Fatalf("ValidateTeamBudget(nil) = %v", err)
+	}
+	if err := teams.ValidateTeamBudget(&teams.TeamBudget{MaxAgents: 20, MaxDurationSeconds: 28800}); err != nil {
+		t.Fatalf("ValidateTeamBudget(valid) = %v", err)
+	}
+	for _, tc := range []struct {
+		name string
+		b    teams.TeamBudget
+	}{
+		{"negative agents", teams.TeamBudget{MaxAgents: -1}},
+		{"agents over ceiling", teams.TeamBudget{MaxAgents: teams.MaxTeamBudgetAgents + 1}},
+		{"negative duration", teams.TeamBudget{MaxDurationSeconds: -5}},
+		{"duration over ceiling", teams.TeamBudget{MaxDurationSeconds: teams.MaxTeamBudgetDurationSeconds + 1}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if err := teams.ValidateTeamBudget(&tc.b); !errors.Is(err, teams.ErrInvalidSpec) {
+				t.Fatalf("ValidateTeamBudget(%+v) = %v, want ErrInvalidSpec", tc.b, err)
+			}
+		})
+	}
+}

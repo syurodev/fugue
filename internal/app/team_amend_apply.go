@@ -72,7 +72,7 @@ func (s *TeamProposalService) planProfileEdits(ctx context.Context, rec *vendors
 			Name: r.Name, Vendor: string(r.Vendor), Model: r.Model, Effort: string(r.Effort), Permission: string(r.Permission),
 		})
 	}
-	payload, err := json.Marshal(teamAmendPayload{RoleEdits: roleEdits, AddedTaskIDs: addedTaskIDs})
+	payload, err := json.Marshal(teamAmendPayload{RoleEdits: roleEdits, AddedTaskIDs: addedTaskIDs, Budget: args.Budget})
 	if err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "marshal the amendment payload", err)
 	}
