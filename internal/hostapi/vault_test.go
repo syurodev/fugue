@@ -76,19 +76,29 @@ func assertAllVaultRPCsDenied(t *testing.T, vc vaultv1connect.VaultServiceClient
 }
 
 func TestVaultHostAPISecretAbsentFromLogsErrorsAndProtoFormatting(t *testing.T) {
-	t.Parallel()
+	// Not parallel: HostDeps has no logger seam, so the process-wide default
+	// logger is swapped for the duration of the test.
 	assertVaultProtoDebugRedact(t)
 
-	var logs bytes.Buffer
-	oldLogger := slog.Default()
-	slog.SetDefault(slog.New(redact.NewJSONHandler(&logs, slog.LevelDebug)))
-	t.Cleanup(func() { slog.SetDefault(oldLogger) })
+	logs := &lockedBuffer{}
+	previous := slog.Default()
+	slog.SetDefault(slog.New(redact.NewJSONHandler(logs, slog.LevelDebug)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
 
-	vc, stream := startLocalVaultHostAndSubscribe(t)
-	recPlain, badErrText := exerciseVaultHostAPI(t, vc)
-	events := collectVaultHostStreamEvents(t, stream)
+	var recPlain, badErrText, events string
+	// The subtest's cleanups (host drain + close) run before t.Run returns,
+	// so no background goroutine writes to logs once we read it below.
+	t.Run("host", func(t *testing.T) {
+		vc, stream := startLocalVaultHostAndSubscribe(t)
+		recPlain, badErrText = exerciseVaultHostAPI(t, vc)
+		events = collectVaultHostStreamEvents(t, stream)
+	})
+	if t.Failed() {
+		return
+	}
+	logOut := logs.String()
 	for _, needle := range []string{testHostVaultPass, testHostVaultWrong, recPlain} {
-		for _, hay := range []string{logs.String(), events, badErrText} {
+		for _, hay := range []string{logOut, events, badErrText} {
 			if strings.Contains(hay, needle) {
 				t.Fatalf("protected input leaked in output %q", hay)
 			}

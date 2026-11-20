@@ -228,10 +228,10 @@ func TestVaultLockClearsKeyAndTriggersVaultLocked(t *testing.T) {
 }
 
 func TestVaultSecretAbsentFromLogsErrorsTopicsAndFormatting(t *testing.T) {
-	t.Parallel()
-	var logs bytes.Buffer
+	// Not parallel: the process-wide default logger is swapped for this test.
+	logs := &vaultLogBuffer{}
 	oldLogger := slog.Default()
-	slog.SetDefault(slog.New(redact.NewJSONHandler(&logs, slog.LevelDebug)))
+	slog.SetDefault(slog.New(redact.NewJSONHandler(logs, slog.LevelDebug)))
 	t.Cleanup(func() { slog.SetDefault(oldLogger) })
 
 	clk := clock.NewFake(time.Unix(1_700_000_000, 0))
@@ -240,7 +240,7 @@ func TestVaultSecretAbsentFromLogsErrorsTopicsAndFormatting(t *testing.T) {
 	res := mustSetupCleared(t, svc)
 	recPlain := string(res.RecoveryKey)
 	defer res.Clear()
-	assertSetupResultRedacted(t, res, recPlain, &logs)
+	assertSetupResultRedacted(t, res, recPlain, logs)
 
 	sub, err := hub.Subscribe(t.Context(), SubscribeParams{Topic: TopicVault, Principal: testVaultLocal})
 	if err != nil {
@@ -266,7 +266,7 @@ func mustSetupCleared(t *testing.T, svc *VaultService) VaultSetupResult {
 	return res
 }
 
-func assertSetupResultRedacted(t *testing.T, res VaultSetupResult, recPlain string, logs *bytes.Buffer) {
+func assertSetupResultRedacted(t *testing.T, res VaultSetupResult, recPlain string, logs *vaultLogBuffer) {
 	t.Helper()
 	formatted := fmt.Sprintf("%v|%#v|%+v|%s", res, res, res, res)
 	slog.Info("vault setup test", "res", res)
@@ -373,4 +373,22 @@ func assertConcurrentUnlockOutcomes(t *testing.T, errs <-chan error, kdfCalls, a
 	if invalidCount != kdfCalls || invalidCount+rateCount != attempts {
 		t.Fatalf("results invalid=%d rateLimited=%d kdfCalls=%d", invalidCount, rateCount, kdfCalls)
 	}
+}
+
+// vaultLogBuffer is a goroutine-safe log sink.
+type vaultLogBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *vaultLogBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *vaultLogBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
