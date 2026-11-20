@@ -133,6 +133,15 @@ const (
 // deadline expires and new task dispatches are paused (Q-149).
 const TeamWaitingDeadline = "team_deadline"
 
+// The TaskRecoveryDecided outcomes of §12 (Q-151). The cancel outcome on an
+// unknown team_manager re-parents its live children to the lead when the
+// event carries ReparentTo (Q-159 A).
+const (
+	RecoveryOutcomeResume   = "resume"
+	RecoveryOutcomeKeepDiff = "keep_diff"
+	RecoveryOutcomeCancel   = "cancel"
+)
+
 // TeamRecord is the metadata-only projection of a team_records row (INV-09).
 type TeamRecord struct {
 	TeamID        string

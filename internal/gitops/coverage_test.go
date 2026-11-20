@@ -116,6 +116,7 @@ func TestGitErrorKindMapping(t *testing.T) {
 		{failureSigning, errcode.FailedPrecondition, "signature creation failed", nil},
 		{failureRefLock, errcode.Unavailable, "ref lock stayed busy", ErrRefLockExhausted},
 		{failureMissingRef, errcode.NotFound, "unknown branch or commit", nil},
+		{failureDiskFull, errcode.Unavailable, "no space left on device", ErrDiskFull},
 	}
 	for _, tc := range cases {
 		e := newGitError(gitName, tc.kind, "detail kept for logs")
@@ -135,6 +136,25 @@ func TestGitErrorKindMapping(t *testing.T) {
 		if tc.unwrap != nil && !errors.Is(e, tc.unwrap) {
 			t.Fatalf("kind %d does not match its sentinel %v", tc.kind, tc.unwrap)
 		}
+	}
+}
+
+// TestClassifyDiskFullStderr pins §12 (F11.9): git's ENOSPC wording and the
+// disk-quota wording classify as the disk-full kind, and unrelated errors
+// keep their kinds.
+func TestClassifyDiskFullStderr(t *testing.T) {
+	t.Parallel()
+	for _, stderr := range []string{
+		"fatal: unable to write file objects: No space left on device",
+		"error: could not write ref: no space left on device",
+		"fatal: unable to create ...: Disk quota exceeded",
+	} {
+		if got := classify(stderr); got != failureDiskFull {
+			t.Fatalf("classify(%q) = %d, want failureDiskFull", stderr, got)
+		}
+	}
+	if got := classify("fatal: not a git repository"); got == failureDiskFull {
+		t.Fatal("an unrelated stderr classified as disk full")
 	}
 }
 

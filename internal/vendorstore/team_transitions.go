@@ -83,9 +83,9 @@ func taskTransitions() map[taskTransKey]TaskState {
 		{TaskStateIntegrating, EventTaskEnded, outcomeFailed}:       TaskStateFailed,
 		{TaskStateIntegrating, EventTaskEnded, outcomeCancelled}:    TaskStateCancelled,
 		{TaskStateFailed, EventTaskSuperseded, ""}:                  TaskStateStopped,
-		{TaskStateUnknown, EventTaskRecoveryDecided, "resume"}:      TaskStateStarting,
-		{TaskStateUnknown, EventTaskRecoveryDecided, "keep_diff"}:   TaskStateReview,
-		{TaskStateUnknown, EventTaskRecoveryDecided, "cancel"}:      TaskStateCancelled,
+		{TaskStateUnknown, EventTaskRecoveryDecided, RecoveryOutcomeResume}:      TaskStateStarting,
+		{TaskStateUnknown, EventTaskRecoveryDecided, RecoveryOutcomeKeepDiff}:    TaskStateReview,
+		{TaskStateUnknown, EventTaskRecoveryDecided, RecoveryOutcomeCancel}:      TaskStateCancelled,
 	}
 }
 
