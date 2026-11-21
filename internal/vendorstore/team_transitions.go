@@ -3,10 +3,11 @@ package vendorstore
 import "fmt"
 
 const (
-	outcomeDone      = string(TeamStateDone)
-	outcomeFailed    = string(TeamStateFailed)
-	outcomeStopped   = string(TaskStateStopped)
-	outcomeCancelled = string(TeamStateCancelled)
+	outcomeDone        = string(TeamStateDone)
+	outcomeFailed      = string(TeamStateFailed)
+	outcomeStopped     = string(TaskStateStopped)
+	outcomeCancelled   = string(TeamStateCancelled)
+	outcomeScopeBounce = "scope_bounce"
 )
 
 type teamTransKey struct {
@@ -88,7 +89,7 @@ func taskTransitions() map[taskTransKey]TaskState {
 		{TaskStateAsking, EventTaskEnded, outcomeCancelled}:                   TaskStateCancelled,
 		{TaskStateAsking, EventTaskMarkedUnknown, ""}:                         TaskStateUnknown,
 		{TaskStateChecking, EventTaskCheckCompleted, "passed"}:                TaskStateReview,
-		{TaskStateChecking, EventTaskCheckCompleted, "scope_bounce"}:          TaskStateRunning,
+		{TaskStateChecking, EventTaskCheckCompleted, outcomeScopeBounce}:      TaskStateRunning,
 		{TaskStateChecking, EventTaskCheckCompleted, outcomeFailed}:           TaskStateFailed,
 		{TaskStateChecking, EventTaskEnded, outcomeStopped}:                   TaskStateStopped,
 		{TaskStateChecking, EventTaskEnded, outcomeFailed}:                    TaskStateFailed,
@@ -100,15 +101,21 @@ func taskTransitions() map[taskTransKey]TaskState {
 		{TaskStateReview, EventTaskEnded, outcomeDone}:                        TaskStateDone,
 		{TaskStateReview, EventTaskEnded, outcomeFailed}:                      TaskStateFailed,
 		{TaskStateReview, EventTaskEnded, outcomeCancelled}:                   TaskStateCancelled,
-		{TaskStateIntegrating, EventTaskIntegrated, ""}:                       TaskStateDone,
-		{TaskStateIntegrating, EventTaskEnded, outcomeDone}:                   TaskStateDone,
-		{TaskStateIntegrating, EventTaskEnded, outcomeFailed}:                 TaskStateFailed,
-		{TaskStateIntegrating, EventTaskEnded, outcomeCancelled}:              TaskStateCancelled,
 		{TaskStateFailed, EventTaskSuperseded, ""}:                            TaskStateStopped,
 		{TaskStateUnknown, EventTaskRecoveryDecided, RecoveryOutcomeResume}:   TaskStateStarting,
 		{TaskStateUnknown, EventTaskRecoveryDecided, RecoveryOutcomeKeepDiff}: TaskStateReview,
 		{TaskStateUnknown, EventTaskRecoveryDecided, RecoveryOutcomeCancel}:   TaskStateCancelled,
 	}
+}
+
+func addIntegratingTransitions(table map[taskTransKey]TaskState) {
+	table[taskTransKey{TaskStateIntegrating, EventTaskIntegrated, ""}] = TaskStateDone
+	table[taskTransKey{TaskStateIntegrating, EventTaskIntegrated, "conflict"}] = TaskStateReview
+	table[taskTransKey{TaskStateIntegrating, EventTaskCheckCompleted, outcomeScopeBounce}] = TaskStateRunning
+	table[taskTransKey{TaskStateIntegrating, EventTaskCheckCompleted, outcomeFailed}] = TaskStateFailed
+	table[taskTransKey{TaskStateIntegrating, EventTaskEnded, outcomeDone}] = TaskStateDone
+	table[taskTransKey{TaskStateIntegrating, EventTaskEnded, outcomeFailed}] = TaskStateFailed
+	table[taskTransKey{TaskStateIntegrating, EventTaskEnded, outcomeCancelled}] = TaskStateCancelled
 }
 
 func nextTeamState(from TeamState, ev TeamEventType, outcome, failureCode string) (TeamState, error) {
@@ -123,7 +130,9 @@ func nextTeamState(from TeamState, ev TeamEventType, outcome, failureCode string
 }
 
 func nextTaskState(from TaskState, ev TeamEventType, outcome, failureCode string) (TaskState, error) {
-	next, ok := taskTransitions()[taskTransKey{From: from, Event: ev, Outcome: outcome}]
+	table := taskTransitions()
+	addIntegratingTransitions(table)
+	next, ok := table[taskTransKey{From: from, Event: ev, Outcome: outcome}]
 	if !ok {
 		return "", fmt.Errorf("%w: task cannot apply %s(%s) from %s", ErrTeamTransition, ev, outcome, from)
 	}

@@ -22,6 +22,9 @@ import (
 // moves to unknown; a task still starting fails through its intro path, and
 // checking or later states do not depend on the vendor process.
 func (s *teamTaskService) OnSessionDied(ctx context.Context, sessionID string) {
+	if s.mergeQueue != nil {
+		s.mergeQueue.Notify()
+	}
 	task, found, err := s.store.TaskForSession(ctx, sessionID)
 	if err != nil {
 		slog.WarnContext(ctx, "session-exit check failed to read task", "session_id", sessionID, "error_code", string(errcode.CodeOf(err)))

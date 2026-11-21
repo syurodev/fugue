@@ -135,10 +135,13 @@ func TestAcceptRefusesDiffTaskUntilF115AndRejectWakesTask(t *testing.T) {
 	diffBind := mustAttachRole(t, f.teamProposalFixture, "diff-sess", vendorstore.RoleMember)
 	mustCallTool(t, f, diffBind, taskDoneToolName, `{"summary":"diff ready","status":"succeeded"}`)
 
-	// Lead of diff-team is f.session.ID; Accept on diff deliverable must refuse typed (Q-125).
+	// Lead of diff-team is f.session.ID; Accept on diff deliverable refuses when merge queue is unconfigured (Q-125).
+	savedMQ := f.rt.teamTasks.mergeQueue
+	f.rt.teamTasks.mergeQueue = nil
 	if _, accErr := f.rt.teamTasks.Accept(ctx, f.session.ID, diffTaskID, ""); errcode.CodeOf(accErr) != errcode.FailedPrecondition {
 		t.Fatalf("Accept(diff task) err = %v, want FailedPrecondition", accErr)
 	}
+	f.rt.teamTasks.mergeQueue = savedMQ
 
 	// Reject on diff task transitions review -> running and enqueues feedback mailbox row.
 	if _, rejErr := f.rt.teamTasks.Reject(ctx, f.session.ID, diffTaskID, "fix edge case"); rejErr != nil {

@@ -140,7 +140,7 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 	})
 	hp.rt.teamDispatch.Start(base)
 	if hp.rt.teamTasks != nil {
-		hp.wireTeamTaskHooks(sessions, deps)
+		hp.wireTeamTaskHooks(base, sessions, deps)
 	}
 	hp.rt.teamProposals.SetClock(deps.Clock)
 	hp.rt.teamProposals.SetOnTimerArmed(func() { hp.rt.teamBudgets.Notify() })
@@ -151,12 +151,16 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 	hp.rt.teamProposals.SetOnMailbox(func() { hp.rt.teamWake.Notify() })
 }
 
-func (hp *HostProcess) wireTeamTaskHooks(sessions *VendorSessions, deps *HostDeps) {
+func (hp *HostProcess) wireTeamTaskHooks(base context.Context, sessions *VendorSessions, deps *HostDeps) {
 	hp.rt.teamTasks.SetRuntime(hp.rt.teamDispatch, hp.rt.teamWake)
 	hp.rt.teamTasks.SetSessions(vendorTaskSessions{svc: hp.rt.vendors})
 	hp.rt.teamTasks.SetTeamsConfig(globalOrWorkspaceTeamsConfigReader(hp.rt.workspaces))
 	hp.rt.teamTasks.SetBudgets(hp.rt.teamBudgets)
 	hp.rt.teamTasks.SetClock(deps.Clock)
+	// TODO(F11.5): wire fugue task prune over gitops.Manager.Prune (team end + 24 h retention, F11.5c).
+	mq := newTeamMergeQueue(hp.rt.teamTasks)
+	hp.rt.teamTasks.SetIntegration(hp.rt.workspaces.domain, mq)
+	mq.Start(base)
 	hp.rt.vendors.SetOnSessionResumed(func(resCtx context.Context, sessionID string) error {
 		return hp.rt.teamTasks.OnSessionResumed(resCtx, sessionID)
 	})

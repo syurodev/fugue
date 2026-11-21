@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 
+	"github.com/syurodev/fugue/internal/gitops"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -114,20 +115,74 @@ func (s *teamTaskService) recoverTeamOnUnlock(ctx context.Context, teamID string
 	var enqueued bool
 	for i := range tasks {
 		t := &tasks[i]
-		if t.State != vendorstore.TaskStateUnknown {
-			continue
-		}
-		orig := origins[t.TaskID]
-		if orig.fromAsking {
-			s.rebuildUserQuestionCard(ctx, &rec, t)
-		}
-		if t.HierarchyRole != vendorstore.RoleLead {
-			if parentID := resolvedParentID(t.ParentTaskID, tasks); parentID != "" && s.notifyDelegatorUnknown(ctx, &rec, t, tasks, parentID, orig.seq) {
+		if t.State == vendorstore.TaskStateUnknown {
+			if s.recoverUnknownTask(ctx, &rec, tasks, origins, t) {
 				enqueued = true
 			}
+			continue
+		}
+		if t.State == vendorstore.TaskStateIntegrating && s.reconcileIntegratingTask(ctx, &rec, tasks, t) {
+			enqueued = true
 		}
 	}
 	return enqueued, nil
+}
+
+func (s *teamTaskService) recoverUnknownTask(
+	ctx context.Context,
+	rec *vendorstore.TeamRecord,
+	tasks []vendorstore.TaskRecord,
+	origins map[string]taskUnknownOrigin,
+	t *vendorstore.TaskRecord,
+) bool {
+	orig := origins[t.TaskID]
+	if orig.fromAsking {
+		s.rebuildUserQuestionCard(ctx, rec, t)
+	}
+	if t.HierarchyRole == vendorstore.RoleLead {
+		return false
+	}
+	parentID := resolvedParentID(t.ParentTaskID, tasks)
+	return parentID != "" && s.notifyDelegatorUnknown(ctx, rec, t, tasks, parentID, orig.seq)
+}
+
+func (s *teamTaskService) reconcileIntegratingTask(
+	ctx context.Context,
+	rec *vendorstore.TeamRecord,
+	tasks []vendorstore.TaskRecord,
+	t *vendorstore.TaskRecord,
+) bool {
+	if s.git == nil {
+		return false
+	}
+	repoDir, repoID := resolveTeamRepo(ctx, s.workspaces, rec)
+	if repoDir == "" {
+		return false
+	}
+	targetBranch, err := parentBranch(t, tasks)
+	if err != nil {
+		return false
+	}
+	wtDir, err := gitops.TaskWorktreePath(s.dataDir, repoID, gitTaskID(t.TaskID))
+	if err != nil {
+		return false
+	}
+	headSHA, err := s.git.WorktreeHead(ctx, wtDir)
+	if err == nil && headSHA != "" {
+		contained, contErr := s.git.BranchContainsCommit(ctx, repoDir, targetBranch, headSHA)
+		if contErr == nil && contained {
+			if s.mergeQueue != nil {
+				s.mergeQueue.recordIntegrated(ctx, rec.TeamID, t.TaskID, t.SessionID, resolvedParentID(t.ParentTaskID, tasks), targetBranch, headSHA)
+				return true
+			}
+		}
+	}
+	if s.mergeQueue != nil {
+		if enqErr := s.mergeQueue.Enqueue(ctx, rec.TeamID, t.TaskID); enqErr != nil {
+			slog.WarnContext(ctx, "re-enqueue integrating task failed", "team_id", rec.TeamID, "task_id", t.TaskID, "error_code", string(errcode.CodeOf(enqErr)))
+		}
+	}
+	return false
 }
 
 type taskUnknownOrigin struct {

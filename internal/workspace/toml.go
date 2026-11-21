@@ -59,12 +59,13 @@ const (
 )
 
 type rawTeams struct {
-	IdleDetachSeconds     *int `toml:"idle_detach_seconds,omitempty"`
-	TaskDeadlineSeconds   *int `toml:"task_deadline_seconds,omitempty"`
-	TaskMaxTurns          *int `toml:"task_max_turns,omitempty"`
-	SilenceTimeoutSeconds *int `toml:"silence_timeout_seconds,omitempty"`
-	TeamDeadlineSeconds   *int `toml:"team_deadline_seconds,omitempty"`
-	TeamMaxAgents         *int `toml:"team_max_agents,omitempty"`
+	IdleDetachSeconds     *int  `toml:"idle_detach_seconds,omitempty"`
+	TaskDeadlineSeconds   *int  `toml:"task_deadline_seconds,omitempty"`
+	TaskMaxTurns          *int  `toml:"task_max_turns,omitempty"`
+	SilenceTimeoutSeconds *int  `toml:"silence_timeout_seconds,omitempty"`
+	TeamDeadlineSeconds   *int  `toml:"team_deadline_seconds,omitempty"`
+	TeamMaxAgents         *int  `toml:"team_max_agents,omitempty"`
+	ApproveEveryDiffStep  *bool `toml:"approve_every_diff_step,omitempty"`
 }
 
 type rawHost struct {
