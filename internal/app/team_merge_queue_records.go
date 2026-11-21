@@ -109,6 +109,7 @@ func (q *teamMergeQueue) recordPostRebaseGateFailure(
 	if !verdict.Bounce {
 		q.svc.closeTaskSession(ctx, sessionID)
 		q.svc.dispatchAfterChange(ctx, teamID)
+		q.svc.maybeTriggerFinalReview(ctx, teamID)
 	}
 	if q.svc.wake != nil {
 		q.svc.wake.Notify()
@@ -149,6 +150,7 @@ func (q *teamMergeQueue) recordIntegrated(
 	}
 	q.svc.closeTaskSession(ctx, sessionID)
 	q.svc.dispatchAfterChange(ctx, teamID)
+	q.svc.maybeTriggerFinalReview(ctx, teamID)
 	if q.svc.wake != nil {
 		q.svc.wake.Notify()
 	}

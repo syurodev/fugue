@@ -45,6 +45,7 @@ func (s *teamTaskService) Accept(ctx context.Context, sessionID, taskID, note st
 	}
 	s.closeTaskSession(ctx, targetSessionID)
 	s.dispatchAfterChange(ctx, teamID)
+	s.maybeTriggerFinalReview(ctx, teamID)
 	return "task " + targetID + " accepted and done", nil
 }
 

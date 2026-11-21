@@ -1,0 +1,219 @@
+package app
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/syurodev/fugue/internal/interaction"
+	"github.com/syurodev/fugue/internal/testutil"
+	"github.com/syurodev/fugue/internal/vendorstore"
+)
+
+func runSingleDiffTaskToTeamBranch(t *testing.T, teamID, file, content string) *integrationFixture {
+	t.Helper()
+	fx := newLeadMembersFixture(t, teamID, "sess-"+teamID+"-lead", []string{"t-work"}, [][]string{{"*"}})
+	wt := fx.createWorktree(t, "t-work", fx.teamBr)
+	fx.writeAndCommit(t, wt, file, content)
+	fx.doneAndAccept(t, "t-work")
+	fx.waitMergeIdle(t)
+	return fx
+}
+
+func findPendingFinalReviewCard(t *testing.T, fx *integrationFixture) PendingInteractionView {
+	t.Helper()
+	list, _, err := fx.rt.interactions.ListPending(t.Context(), testAppPrincipal)
+	if err != nil {
+		t.Fatalf("ListPending: %v", err)
+	}
+	for i := range list {
+		if list[i].Tool == teamFinalReviewToolName {
+			return list[i]
+		}
+	}
+	t.Fatalf("no pending final review card in %+v", list)
+	return PendingInteractionView{}
+}
+
+func answerFinalReviewCard(t *testing.T, fx *integrationFixture, card *PendingInteractionView, optionID, text string) {
+	t.Helper()
+	if _, err := fx.rt.interactions.Answer(t.Context(), &AnswerInteractionCommand{
+		CommandID:   "cmd-fr-" + card.RequestID,
+		Incarnation: card.Incarnation,
+		RequestID:   card.RequestID,
+		Principal:   testAppPrincipal,
+		Outcome:     string(interaction.OutcomeAnswered),
+		Answers: []InteractionAnswer{{
+			QuestionID: teamDecisionQuestionID,
+			OptionIDs:  []string{optionID},
+			Text:       text,
+		}},
+	}); err != nil {
+		t.Fatalf("Answer(%s): %v", optionID, err)
+	}
+}
+
+func commitFileOnMain(t *testing.T, fx *integrationFixture, rel, content, msg string) string {
+	t.Helper()
+	if wErr := os.WriteFile(filepath.Join(fx.repoDir, rel), []byte(content), 0o600); wErr != nil {
+		t.Fatal(wErr)
+	}
+	if _, addErr := fx.rt.teamTasks.git.CommitWorktree(t.Context(), fx.repoDir, msg); addErr != nil {
+		t.Fatal(addErr)
+	}
+	head, err := fx.rt.teamTasks.git.BranchHead(t.Context(), fx.repoDir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return head
+}
+
+func TestFinalReviewMergesTeamBranchOnlyAfterUserApproval(t *testing.T) {
+	t.Parallel()
+	t.Run("approve_rebases_and_fast_forwards", func(t *testing.T) {
+		t.Parallel()
+		testFinalReviewApproveRebasesAndFastForwards(t)
+	})
+	t.Run("conflict_goes_to_lead", func(t *testing.T) {
+		t.Parallel()
+		testFinalReviewConflictGoesToLead(t)
+	})
+}
+
+func testFinalReviewApproveRebasesAndFastForwards(t *testing.T) {
+	t.Helper()
+	ctx := t.Context()
+	fx := runSingleDiffTaskToTeamBranch(t, "team-fr-ok", "feature.txt", "from team\n")
+
+	headBefore, err := fx.rt.teamTasks.git.BranchHead(ctx, fx.repoDir, "main")
+	if err != nil || headBefore != fx.baseHead {
+		t.Fatalf("main moved before approval: (%s != %s, %v)", headBefore, fx.baseHead, err)
+	}
+	rec, _, err := fx.hp.vendorStore.TeamSnapshot(ctx, fx.teamID)
+	if err != nil || rec.State != vendorstore.TeamStateFinalReview {
+		t.Fatalf("team state = (%s, %v), want final_review", rec.State, err)
+	}
+	card := findPendingFinalReviewCard(t, fx)
+	if !strings.Contains(card.Body, "feature.txt") || !strings.Contains(card.Body, "t-work") {
+		t.Fatalf("unexpected final review card body:\n%s", card.Body)
+	}
+
+	outsideHead := commitFileOnMain(t, fx, "outside.txt", "outside\n", "outside commit")
+	answerFinalReviewCard(t, fx, &card, decisionApprove, "")
+	fx.waitMergeIdle(t)
+	assertMainMergedOutsideAndTeamDone(t, fx, outsideHead)
+}
+
+func assertMainMergedOutsideAndTeamDone(t *testing.T, fx *integrationFixture, outsideHead string) {
+	t.Helper()
+	ctx := t.Context()
+	rec, _, err := fx.hp.vendorStore.TeamSnapshot(ctx, fx.teamID)
+	if err != nil || rec.State != vendorstore.TeamStateDone {
+		t.Fatalf("team state after approve = (%s, %v), want done", rec.State, err)
+	}
+	newHead, err := fx.rt.teamTasks.git.BranchHead(ctx, fx.repoDir, "main")
+	if err != nil || newHead == outsideHead {
+		t.Fatalf("expected main to advance with rebased team branch: %s (%v)", newHead, err)
+	}
+	hasOutside, err := fx.rt.teamTasks.git.BranchContainsCommit(ctx, fx.repoDir, "main", outsideHead)
+	if err != nil || !hasOutside {
+		t.Fatalf("main lost outside commit: (%t, %v)", hasOutside, err)
+	}
+}
+
+func testFinalReviewConflictGoesToLead(t *testing.T) {
+	t.Helper()
+	ctx := t.Context()
+	fx := runSingleDiffTaskToTeamBranch(t, "team-fr-conflict", "shared.txt", "team version\n")
+
+	mainBefore := commitFileOnMain(t, fx, "shared.txt", "main version\n", "conflicting main commit")
+	card := findPendingFinalReviewCard(t, fx)
+	answerFinalReviewCard(t, fx, &card, decisionApprove, "")
+	fx.waitMergeIdle(t)
+
+	mainAfter, err := fx.rt.teamTasks.git.BranchHead(ctx, fx.repoDir, "main")
+	if err != nil || mainAfter != mainBefore {
+		t.Fatalf("main changed on conflict: %s != %s", mainAfter, mainBefore)
+	}
+	rec, _, err := fx.hp.vendorStore.TeamSnapshot(ctx, fx.teamID)
+	if err != nil || rec.State != vendorstore.TeamStateActive {
+		t.Fatalf("team state on conflict = (%s, %v), want active", rec.State, err)
+	}
+	mail, err := fx.hp.vendorStore.PendingMailboxRows(ctx, fx.teamID, intLeadTaskID)
+	if err != nil || len(mail) == 0 {
+		t.Fatalf("lead mailbox = (%d, %v), want conflict notice", len(mail), err)
+	}
+}
+
+func TestFinalReviewRejectWakesTheLead(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	fx := runSingleDiffTaskToTeamBranch(t, "team-fr-reject", "rej.txt", "draft\n")
+
+	card := findPendingFinalReviewCard(t, fx)
+	answerFinalReviewCard(t, fx, &card, decisionReject, "please add unit tests")
+
+	headAfter, err := fx.rt.teamTasks.git.BranchHead(ctx, fx.repoDir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if headAfter != fx.baseHead {
+		t.Fatalf("main changed on reject: %s != %s", headAfter, fx.baseHead)
+	}
+	rec, _, err := fx.hp.vendorStore.TeamSnapshot(ctx, fx.teamID)
+	if err != nil || rec.State != vendorstore.TeamStateActive {
+		t.Fatalf("team state after reject = (%s, %v), want active", rec.State, err)
+	}
+	testutil.Spin(t, "lead mailbox has rejection reason", func() bool {
+		mail, mErr := fx.hp.vendorStore.PendingMailboxRows(ctx, fx.teamID, intLeadTaskID)
+		if mErr != nil {
+			return false
+		}
+		for _, m := range mail {
+			payload, openErr := fx.hp.vendorStore.OpenMailboxPayload(ctx, fx.teamID, m.MessageID)
+			if openErr != nil {
+				continue
+			}
+			var item mailboxDigestItem
+			if json.Unmarshal(payload, &item) == nil && strings.Contains(item.Summary, "please add unit tests") {
+				return true
+			}
+		}
+		return false
+	})
+}
+
+func TestFinalReviewCardRebuildsOnUnlockAndInFlightReconciles(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	fx := runSingleDiffTaskToTeamBranch(t, "team-fr-rec", "rec.txt", "rebuild\n")
+	card := findPendingFinalReviewCard(t, fx)
+	opID, err := interaction.NativeOperationKey(fx.teamID, fx.teamID, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, invErr := fx.rt.interactions.owner.InvalidateOperation(opID); invErr != nil {
+		t.Fatal(invErr)
+	}
+	if recErr := fx.rt.teamTasks.RecoverOnUnlock(ctx); recErr != nil {
+		t.Fatalf("RecoverOnUnlock(rebuild): %v", recErr)
+	}
+	rebuilt := findPendingFinalReviewCard(t, fx)
+	if rebuilt.Summary != card.Summary {
+		t.Fatalf("rebuilt summary = %q, want %q", rebuilt.Summary, card.Summary)
+	}
+
+	if _, ffErr := fx.rt.teamTasks.git.FastForwardBranch(ctx, fx.repoDir, "main", fx.teamBr); ffErr != nil {
+		t.Fatalf("FastForwardBranch: %v", ffErr)
+	}
+	if recErr := fx.rt.teamTasks.RecoverOnUnlock(ctx); recErr != nil {
+		t.Fatalf("RecoverOnUnlock(reconcile): %v", recErr)
+	}
+	rec, _, err := fx.hp.vendorStore.TeamSnapshot(ctx, fx.teamID)
+	if err != nil || rec.State != vendorstore.TeamStateDone {
+		t.Fatalf("team state after reconcile = (%s, %v), want done", rec.State, err)
+	}
+}

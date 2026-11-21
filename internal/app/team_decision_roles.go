@@ -87,5 +87,6 @@ func decidedRoleOf(name string, role *teams.Role, override teams.ProfileOverride
 	return decidedRole{
 		Name: name, Vendor: string(vendor), Model: model,
 		Effort: string(effort), Permission: string(role.Permission),
+		CrossReview: role.CrossReview,
 	}
 }

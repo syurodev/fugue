@@ -97,7 +97,61 @@ func (s *teamTaskService) RecoverOnUnlock(ctx context.Context) error {
 	if enqueued && s.wake != nil {
 		s.wake.Notify()
 	}
+	if frErr := s.recoverFinalReviewTeams(ctx); frErr != nil {
+		slog.WarnContext(ctx, "unlock recovery failed for final review teams", "error_code", string(errcode.CodeOf(frErr)))
+	}
 	return nil
+}
+
+func (s *teamTaskService) recoverFinalReviewTeams(ctx context.Context) error {
+	if s.git == nil {
+		return nil
+	}
+	teamIDs, err := s.store.TeamIDsByState(ctx, vendorstore.TeamStateFinalReview)
+	if err != nil {
+		return boundaryError("list final review teams for unlock recovery", err)
+	}
+	for _, teamID := range teamIDs {
+		s.recoverOneFinalReviewTeam(ctx, teamID)
+	}
+	return nil
+}
+
+func (s *teamTaskService) recoverOneFinalReviewTeam(ctx context.Context, teamID string) {
+	rec, tasks, snapErr := s.store.TeamSnapshot(ctx, teamID)
+	if snapErr != nil || rec.State != vendorstore.TeamStateFinalReview {
+		return
+	}
+	repoDir, targetBranch, teamBranch, ok := s.resolveFinalReviewBranches(ctx, &rec)
+	if !ok {
+		// Check if target already contains teamHead in case HasUnmergedCommits was false.
+		s.reconcileMergedFinalReview(ctx, &rec)
+		return
+	}
+	if cardErr := s.ensureFinalReviewCard(ctx, &rec, tasks, repoDir, targetBranch, teamBranch); cardErr != nil {
+		slog.WarnContext(ctx, "rebuilding final review card failed", "team_id", teamID, "error_code", string(errcode.CodeOf(cardErr)))
+	}
+}
+
+func (s *teamTaskService) reconcileMergedFinalReview(ctx context.Context, rec *vendorstore.TeamRecord) {
+	repoDir, _ := resolveTeamRepo(ctx, s.workspaces, rec)
+	if repoDir == "" {
+		return
+	}
+	targetBranch, brErr := s.git.CurrentBranch(ctx, repoDir)
+	teamBranch, tbErr := gitops.TeamBranchName(rec.TeamID)
+	if brErr != nil || tbErr != nil || targetBranch == "" {
+		return
+	}
+	teamHead, headErr := s.git.BranchHead(ctx, repoDir, teamBranch)
+	if headErr != nil || teamHead == "" {
+		return
+	}
+	if merged, contErr := s.git.BranchContainsCommit(ctx, repoDir, targetBranch, teamHead); contErr == nil && merged {
+		if compErr := s.completeFinalReview(ctx, rec.TeamID, targetBranch, teamHead); compErr != nil {
+			slog.WarnContext(ctx, "reconciling final review completion failed", "team_id", rec.TeamID, "error_code", string(errcode.CodeOf(compErr)))
+		}
+	}
 }
 
 func (s *teamTaskService) recoverTeamOnUnlock(ctx context.Context, teamID string) (bool, error) {

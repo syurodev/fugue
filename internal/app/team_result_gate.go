@@ -13,6 +13,7 @@ import (
 
 	"github.com/syurodev/fugue/internal/gitops"
 	"github.com/syurodev/fugue/internal/interaction"
+	"github.com/syurodev/fugue/internal/ocr"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/secrets"
@@ -39,6 +40,8 @@ type hostResultGate struct {
 	tags         interaction.TagPolicy
 	heavy        *heavySemaphore
 	sessions     *VendorSessions
+	vendorSvc    *VendorService
+	ocrProbe     ocr.ProbeResult
 	ids          ids.Generator
 	runCheck     checkCmdRunner
 }
@@ -52,6 +55,8 @@ func newHostResultGate(
 	tags interaction.TagPolicy,
 	heavy *heavySemaphore,
 	sessions *VendorSessions,
+	vendorSvc *VendorService,
+	ocrProbe ocr.ProbeResult,
 	gen ids.Generator,
 ) *hostResultGate {
 	return &hostResultGate{
@@ -63,6 +68,8 @@ func newHostResultGate(
 		tags:         tags,
 		heavy:        heavy,
 		sessions:     sessions,
+		vendorSvc:    vendorSvc,
+		ocrProbe:     ocrProbe,
 		ids:          gen,
 		runCheck:     execCheckCommand,
 	}

@@ -157,7 +157,7 @@ func (hp *HostProcess) wireTeamTaskHooks(base context.Context, sessions *VendorS
 	hp.rt.teamTasks.SetTeamsConfig(globalOrWorkspaceTeamsConfigReader(hp.rt.workspaces))
 	hp.rt.teamTasks.SetBudgets(hp.rt.teamBudgets)
 	hp.rt.teamTasks.SetClock(deps.Clock)
-	// TODO(F11.5c): wire fugue task prune over gitops.Manager.Prune (team end + 24 h retention).
+	// TODO(F11.5): wire fugue task prune over gitops.Manager.Prune (team end + 24 h retention, F11.5c).
 	mq := newTeamMergeQueue(hp.rt.teamTasks)
 	hp.rt.teamTasks.SetIntegration(hp.rt.workspaces.domain, mq)
 	mq.Start(base)
