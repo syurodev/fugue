@@ -83,14 +83,14 @@ type teamBudgetsDeps struct {
 }
 
 type teamBudgets struct {
-	deps            teamBudgetsDeps
-	wakeCh, stopCh  chan struct{}
-	stopOnce        sync.Once
-	taskMu, mu      sync.Mutex
-	loopTask        *supervise.Task
-	watches         map[teamTaskKey]*silenceWatch
-	bySession       map[string]*silenceWatch
-	sessionActivity map[string]time.Time
+	deps               teamBudgetsDeps
+	wakeCh, stopCh     chan struct{}
+	stopOnce           sync.Once
+	taskMu, stepMu, mu sync.Mutex
+	loopTask           *supervise.Task
+	watches            map[teamTaskKey]*silenceWatch
+	bySession          map[string]*silenceWatch
+	sessionActivity    map[string]time.Time
 }
 
 func newTeamBudgets(deps *teamBudgetsDeps) *teamBudgets {
@@ -217,6 +217,8 @@ func (b *teamBudgets) Step(ctx context.Context) (time.Time, bool) {
 	if !b.vaultUnlocked() {
 		return time.Time{}, false
 	}
+	b.stepMu.Lock()
+	defer b.stepMu.Unlock()
 	now := b.now()
 	t1, ok1 := b.processDurableTimers(ctx, now)
 	t2, ok2 := b.processSilenceWatches(ctx, now)
@@ -455,8 +457,8 @@ func (b *teamBudgets) indexWatchSessionLocked(w *silenceWatch, sessionID string)
 
 func (b *teamBudgets) recordTaskStalled(ctx context.Context, teamID string, w *silenceWatch, silentSeconds int64, teamWide bool, now time.Time) {
 	var recordedSeq int64
-	if err := b.appendTeamEventWithRetry(ctx, teamID, func(_ *vendorstore.TeamRecord, tasks []vendorstore.TaskRecord) (*vendorstore.AppendTeamEventInput, error) {
-		return b.buildTaskStalledInput(tasks, w.taskID, silentSeconds, teamWide, &recordedSeq)
+	if err := b.appendTeamEventWithRetry(ctx, teamID, func(rec *vendorstore.TeamRecord, tasks []vendorstore.TaskRecord) (*vendorstore.AppendTeamEventInput, error) {
+		return b.buildTaskStalledInput(tasks, w.taskID, silentSeconds, teamWide, rec.LastSeq+1, &recordedSeq)
 	}); err == nil {
 		b.mu.Lock()
 		if cur, ok := b.watches[teamTaskKey{teamID: teamID, taskID: w.taskID}]; ok {
@@ -469,7 +471,7 @@ func (b *teamBudgets) recordTaskStalled(ctx context.Context, teamID string, w *s
 	}
 }
 
-func (b *teamBudgets) buildTaskStalledInput(tasks []vendorstore.TaskRecord, taskID string, silentSeconds int64, teamWide bool, recordedSeq *int64) (*vendorstore.AppendTeamEventInput, error) {
+func (b *teamBudgets) buildTaskStalledInput(tasks []vendorstore.TaskRecord, taskID string, silentSeconds int64, teamWide bool, stallSeq int64, recordedSeq *int64) (*vendorstore.AppendTeamEventInput, error) {
 	cur, ok := findTask(tasks, taskID)
 	if !ok || !isWatchedTask(cur) {
 		return nil, errcode.New(errcode.FailedPrecondition, "task is no longer starting or running")
@@ -490,6 +492,10 @@ func (b *teamBudgets) buildTaskStalledInput(tasks []vendorstore.TaskRecord, task
 	if mErr != nil {
 		return nil, mErr
 	}
-	*recordedSeq = cur.LastEventSeq + 1
+	// Event sequences are per team: the stall lands at the team's next
+	// sequence, which is what the task's LastEventSeq becomes. Using the
+	// task's own last seq + 1 would look like a new event to the watch and
+	// re-arm it, recording a second stall for the same silent stretch.
+	*recordedSeq = stallSeq
 	return &vendorstore.AppendTeamEventInput{EventID: evID, TaskID: cur.TaskID, EventType: vendorstore.EventTaskStalled, ProtectedPayload: payload, Mailbox: mail}, nil
 }

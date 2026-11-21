@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -15,12 +16,15 @@ import (
 	"github.com/syurodev/fugue/internal/gitops"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/vendorstore"
 	"github.com/syurodev/fugue/internal/workspace"
 )
 
 const testBudgetLeadGoal = "Coordinate budget test tasks"
+
+const testSilentWorkerID = "silent-worker"
 
 type budgetsTestFixture struct {
 	*dispatchFixture
@@ -50,6 +54,9 @@ func newBudgetsTestFixture(t *testing.T, tomlExtra string) *budgetsTestFixture {
 	teamsCfg := func(ctx context.Context, wsID string) (workspace.TeamsConfig, error) {
 		bf.cfgReads.Add(1)
 		return baseCfg(ctx, wsID)
+	}
+	if stopErr := f.rt.teamBudgets.Stop(); stopErr != nil {
+		t.Fatalf("stop host teamBudgets: %v", stopErr)
 	}
 	b := newTeamBudgets(&teamBudgetsDeps{Store: f.hp.vendorStore, Sessions: fake, Interactions: f.rt.interactions, TeamsConfig: teamsCfg, Vault: f.hp.vault, Clock: f.clk, IDs: ids.NewSequence("bgt-"), Wake: f.rt.teamWake})
 	f.rt.interactions.SetTeamDeadlineResolver(b)
@@ -353,15 +360,15 @@ func TestWatchdogEscalatesSilenceWithoutKillingAndRecordsStallEvent(t *testing.T
 	args := validTeamProposalArgs()
 	args.Tasks = []teams.ProposedTask{
 		{ID: teamTestLeadTask, TeamRole: teams.RoleLead, Role: teamTestRole, Goal: testBudgetLeadGoal, WriteScope: []string{}, Deliverable: teams.DeliverableReport},
-		{ID: "silent-worker", ParentTaskID: teamTestLeadTask, TeamRole: teams.RoleMember, Role: teamTestRole, Goal: "Stays silent", WriteScope: []string{}, Deliverable: teams.DeliverableReport},
+		{ID: testSilentWorkerID, ParentTaskID: teamTestLeadTask, TeamRole: teams.RoleMember, Role: teamTestRole, Goal: "Stays silent", WriteScope: []string{}, Deliverable: teams.DeliverableReport},
 		{ID: "asking-worker", ParentTaskID: teamTestLeadTask, TeamRole: teams.RoleMember, Role: teamTestRole, Goal: "Asks question", WriteScope: []string{}, Deliverable: teams.DeliverableReport},
-		{ID: "queued-worker", ParentTaskID: teamTestLeadTask, TeamRole: teams.RoleMember, Role: teamTestRole, Goal: "Queued behind silent", WriteScope: []string{}, Deliverable: teams.DeliverableReport, DependsOn: []string{"silent-worker"}},
+		{ID: "queued-worker", ParentTaskID: teamTestLeadTask, TeamRole: teams.RoleMember, Role: teamTestRole, Goal: "Queued behind silent", WriteScope: []string{}, Deliverable: teams.DeliverableReport, DependsOn: []string{testSilentWorkerID}},
 	}
 	teamID := f.approve(t, args, decisionApprove, "")
 	if err := f.disp.Dispatch(t.Context(), teamID); err != nil {
 		t.Fatalf("Dispatch: %v", err)
 	}
-	silentID := durableTaskID(teamID, "silent-worker")
+	silentID := durableTaskID(teamID, testSilentWorkerID)
 	askingID := durableTaskID(teamID, "asking-worker")
 	queuedID := durableTaskID(teamID, "queued-worker")
 	leadID := durableTaskID(teamID, teamTestLeadTask)
@@ -467,6 +474,56 @@ func verifyWatchdogNoKillAndCooldown(t *testing.T, f *budgetsTestFixture, teamID
 	}
 	if stallCount != 1 {
 		t.Fatalf("EventTaskStalled count = %d, want 1 in the same silent stretch", stallCount)
+	}
+	assertSingleStallMailbox(t, f, teamID, silentID, leadID)
+}
+
+// TestConcurrentStepsRecordOneStallPerStretch pins that overlapping Step
+// calls (e.g. runLoop timer wake + direct Step) record exactly one
+// EventTaskStalled and one delegator escalation per silent stretch.
+func TestConcurrentStepsRecordOneStallPerStretch(t *testing.T) {
+	t.Parallel()
+	f := newBudgetsTestFixture(t, "")
+	args := validTeamProposalArgs()
+	args.Tasks = []teams.ProposedTask{
+		{ID: teamTestLeadTask, TeamRole: teams.RoleLead, Role: teamTestRole, Goal: testBudgetLeadGoal, WriteScope: []string{}, Deliverable: teams.DeliverableReport},
+		{ID: testSilentWorkerID, ParentTaskID: teamTestLeadTask, TeamRole: teams.RoleMember, Role: teamTestRole, Goal: "Stays silent", WriteScope: []string{}, Deliverable: teams.DeliverableReport},
+	}
+	teamID := f.approve(t, args, decisionApprove, "")
+	if err := f.disp.Dispatch(t.Context(), teamID); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	silentID := durableTaskID(teamID, testSilentWorkerID)
+	leadID := durableTaskID(teamID, teamTestLeadTask)
+
+	f.clk.Advance(601 * time.Second)
+	const workers = 8
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := range workers {
+		supervise.Go(t.Context(), "concurrent-budget-step-"+strconv.Itoa(i), func(stepCtx context.Context) error {
+			defer wg.Done()
+			<-start
+			f.budgets.Step(stepCtx)
+			return nil
+		})
+	}
+	close(start)
+	wg.Wait()
+
+	events, err := f.hp.vendorStore.TeamEventsSince(t.Context(), teamID, 0, 200)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stallCount := 0
+	for i := range events {
+		if events[i].EventType == vendorstore.EventTaskStalled {
+			stallCount++
+		}
+	}
+	if stallCount != 1 {
+		t.Fatalf("EventTaskStalled count = %d, want 1 across %d concurrent Step calls", stallCount, workers)
 	}
 	assertSingleStallMailbox(t, f, teamID, silentID, leadID)
 }
