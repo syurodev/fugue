@@ -7,15 +7,10 @@ package vendorstore
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 )
-
-// placeholders builds one `?, ?, ...` fragment for an IN clause.
-func placeholders(n int) string {
-	return strings.TrimSuffix(strings.Repeat("?, ", n), ", ")
-}
 
 // reparentChildrenOnManagerCancel projects the §12 takeover (Q-159 A): the
 // cancel recovery decision on an unknown team_manager hands its non-terminal
@@ -71,17 +66,24 @@ func readdressManagerMailboxTx(ctx context.Context, tx *sql.Tx, teamID string, e
 	if ev.ReaddressMailboxFrom != ev.TaskID {
 		return fmt.Errorf("%w: readdress_mailbox_from must be the cancel target", ErrTeamInvalidInput)
 	}
-	query := `
-		UPDATE team_mailbox_messages SET recipient_task_id = ?, updated_at = ?
-		WHERE team_id = ? AND recipient_task_id = ? AND state = ?`
-	args := []any{ev.ReparentTo, now, teamID, ev.ReaddressMailboxFrom, MailboxPending}
-	if len(ev.ReaddressMailboxKeep) > 0 {
-		query += ` AND message_id NOT IN (` + placeholders(len(ev.ReaddressMailboxKeep)) + `)`
-		for _, id := range ev.ReaddressMailboxKeep {
-			args = append(args, id)
-		}
+	// The keep list travels as one JSON array parameter filtered through
+	// json_each, so the query string never depends on the list's length. An
+	// absent list marshals as an empty array: a bare "null" would feed
+	// json_each one NULL value, and NOT IN (NULL) never matches.
+	keep := ev.ReaddressMailboxKeep
+	if len(keep) == 0 {
+		keep = []string{}
 	}
-	if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+	keepJSON, err := json.Marshal(keep)
+	if err != nil {
+		return fmt.Errorf("encode the readdress keep list: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE team_mailbox_messages SET recipient_task_id = ?, updated_at = ?
+		WHERE team_id = ? AND recipient_task_id = ? AND state = ?
+		  AND message_id NOT IN (SELECT value FROM json_each(?))`,
+		ev.ReparentTo, now, teamID, ev.ReaddressMailboxFrom, MailboxPending, string(keepJSON),
+	); err != nil {
 		return fmt.Errorf("readdress manager mailbox: %w", err)
 	}
 	return nil
