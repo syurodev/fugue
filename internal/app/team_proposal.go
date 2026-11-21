@@ -54,6 +54,9 @@ type TeamProposalService struct {
 	// onMailbox asks the F11.3b wake pump for a delivery pass after a
 	// decision enqueued mail; nil leaves it to the next trigger.
 	onMailbox func()
+	// teamChannels registers the team:<id> channel topic of every proposal
+	// (F11.10b); nil in tests that build the service directly.
+	teamChannels *teamChannelTopics
 	// sessionLive reports whether the session still holds its token; it
 	// turns false inside endSession before the pending-proposal cancel
 	// runs, which is what closes the propose-versus-session-end race
@@ -190,6 +193,11 @@ func (l *sessionLocks) lock(sessionID string) func() {
 	return mu.Unlock
 }
 
+// SetTeamChannels binds the channel topic registry; called once at startup.
+func (s *TeamProposalService) SetTeamChannels(t *teamChannelTopics) {
+	s.teamChannels = t
+}
+
 func newTeamProposalService(store *vendorstore.Store, recorder approvalRecorder,
 	workspaces *workspace.Service, interactions *InteractionService, usage usageHistory,
 	gen ids.Generator, sessionLive func(sessionID string) bool,
@@ -301,6 +309,11 @@ func (s *TeamProposalService) Propose(ctx context.Context, sessionID string, arg
 	}
 	if _, _, createErr := s.store.CreateTeam(ctx, teamInput); createErr != nil {
 		return "", boundaryError("store the proposal", createErr)
+	}
+	if s.teamChannels != nil {
+		// F11.10b: the channel topic exists from the proposal onward, so a
+		// subscriber never needs to know when the team appeared.
+		s.teamChannels.RegisterTeam(teamID)
 	}
 	if itemErr := s.recordProposalItem(ctx, sessionID, teamID, input); itemErr != nil {
 		return "", itemErr

@@ -133,6 +133,8 @@ type HostRuntime struct {
 	interactions    *InteractionService
 	workspaces      *WorkspaceService
 	appStates       *StateService
+	tasksService    *TasksService
+	teamChannels    *teamChannelTopics
 	vendors         *VendorService
 	accountsService *AccountsService
 	vaultService    *VaultService
