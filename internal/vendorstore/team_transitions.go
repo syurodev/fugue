@@ -23,6 +23,11 @@ type taskTransKey struct {
 
 func teamTransitions() map[teamTransKey]TeamState {
 	return map[teamTransKey]TeamState{
+		// F11.10b: a user post into the team channel changes no state; the
+		// channel is live from the proposal onward and read-only once terminal.
+		{TeamStateProposed, EventTeamUserPosted, ""}:          TeamStateProposed,
+		{TeamStateActive, EventTeamUserPosted, ""}:            TeamStateActive,
+		{TeamStateFinalReview, EventTeamUserPosted, ""}:       TeamStateFinalReview,
 		{TeamStateProposed, EventTeamStarted, ""}:             TeamStateActive,
 		{TeamStateProposed, EventTeamEnded, outcomeCancelled}: TeamStateCancelled,
 		{TeamStateActive, EventTeamFinalReview, ""}:           TeamStateFinalReview,
@@ -57,8 +62,21 @@ func taskTransitions() map[taskTransKey]TaskState {
 		{TaskStateRunning, EventTaskReported, ""}:             TaskStateChecking,
 		{TaskStateRunning, EventTaskStalled, ""}:              TaskStateRunning,
 		// F11.10a: a sibling send (§6.7) is informational; it changes no state.
-		{TaskStateRunning, EventTaskMessaged, ""}:                             TaskStateRunning,
-		{TaskStateAsking, EventTaskMessaged, ""}:                              TaskStateAsking,
+		{TaskStateRunning, EventTaskMessaged, ""}: TaskStateRunning,
+		{TaskStateAsking, EventTaskMessaged, ""}:  TaskStateAsking,
+		// F11.10b: approval reference lines change no state.
+		{TaskStateStarting, EventTaskApprovalRequested, ""}:                   TaskStateStarting,
+		{TaskStateRunning, EventTaskApprovalRequested, ""}:                    TaskStateRunning,
+		{TaskStateAsking, EventTaskApprovalRequested, ""}:                     TaskStateAsking,
+		{TaskStateChecking, EventTaskApprovalRequested, ""}:                   TaskStateChecking,
+		{TaskStateReview, EventTaskApprovalRequested, ""}:                     TaskStateReview,
+		{TaskStateIntegrating, EventTaskApprovalRequested, ""}:                TaskStateIntegrating,
+		{TaskStateStarting, EventTaskApprovalResolved, ""}:                    TaskStateStarting,
+		{TaskStateRunning, EventTaskApprovalResolved, ""}:                     TaskStateRunning,
+		{TaskStateAsking, EventTaskApprovalResolved, ""}:                      TaskStateAsking,
+		{TaskStateChecking, EventTaskApprovalResolved, ""}:                    TaskStateChecking,
+		{TaskStateReview, EventTaskApprovalResolved, ""}:                      TaskStateReview,
+		{TaskStateIntegrating, EventTaskApprovalResolved, ""}:                 TaskStateIntegrating,
 		{TaskStateRunning, EventTaskEnded, outcomeStopped}:                    TaskStateStopped,
 		{TaskStateRunning, EventTaskEnded, outcomeFailed}:                     TaskStateFailed,
 		{TaskStateRunning, EventTaskEnded, outcomeCancelled}:                  TaskStateCancelled,
@@ -119,12 +137,13 @@ func AllTeamEventTypes() []TeamEventType {
 	return []TeamEventType{
 		EventTeamProposed, EventTeamStarted, EventTeamFinalReview, EventTeamAmended,
 		EventTeamNoted, EventTeamDeadlineReached, EventTeamDeadlineExtended,
-		EventTeamDecided, EventTeamEnded,
+		EventTeamUserPosted, EventTeamDecided, EventTeamEnded,
 		EventTaskCreated, EventTaskAssigned, EventTaskStarted,
 		EventTaskQuestionAsked, EventTaskQuestionAnswered, EventTaskReported,
 		EventTaskCheckCompleted, EventTaskReviewed, EventTaskIntegrated,
 		EventTaskMarkedUnknown, EventTaskRecoveryDecided, EventTaskSuperseded,
-		EventTaskStalled, EventTaskMessaged, EventTaskEnded,
+		EventTaskStalled, EventTaskMessaged, EventTaskApprovalRequested,
+		EventTaskApprovalResolved, EventTaskEnded,
 	}
 }
 
@@ -136,7 +155,8 @@ func IsValidTeamEventType(ev TeamEventType) bool {
 func isTeamEventType(ev TeamEventType) bool {
 	return ev == EventTeamProposed || ev == EventTeamStarted || ev == EventTeamFinalReview ||
 		ev == EventTeamAmended || ev == EventTeamNoted || ev == EventTeamDeadlineReached ||
-		ev == EventTeamDeadlineExtended || ev == EventTeamDecided || ev == EventTeamEnded
+		ev == EventTeamDeadlineExtended || ev == EventTeamUserPosted || ev == EventTeamDecided ||
+		ev == EventTeamEnded
 }
 
 func isTaskEventType(ev TeamEventType) bool {
@@ -145,11 +165,13 @@ func isTaskEventType(ev TeamEventType) bool {
 		EventTaskQuestionAsked, EventTaskQuestionAnswered, EventTaskReported,
 		EventTaskCheckCompleted, EventTaskReviewed, EventTaskIntegrated,
 		EventTaskMarkedUnknown, EventTaskRecoveryDecided, EventTaskSuperseded,
-		EventTaskStalled, EventTaskMessaged, EventTaskEnded:
+		EventTaskStalled, EventTaskMessaged, EventTaskApprovalRequested,
+		EventTaskApprovalResolved, EventTaskEnded:
 		return true
 	case EventTeamProposed, EventTeamStarted, EventTeamFinalReview,
 		EventTeamAmended, EventTeamNoted, EventTeamDeadlineReached,
-		EventTeamDeadlineExtended, EventTeamDecided, EventTeamEnded:
+		EventTeamDeadlineExtended, EventTeamUserPosted, EventTeamDecided,
+		EventTeamEnded:
 		return false
 	default:
 		return false

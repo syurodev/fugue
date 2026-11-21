@@ -87,12 +87,17 @@ func channelTeamEventLines(ev *AppendTeamEventInput, facts channelPayloadFacts) 
 		return []channelLine{{kind: ChannelKindDecision, senderKind: ChannelSenderUser}}
 	case EventTeamNoted:
 		return []channelLine{{kind: ChannelKindNote, senderKind: ChannelSenderAgent, senderTask: facts.Author}}
+	case EventTeamUserPosted:
+		// §6.7: the user's post renders with the sender "user"; the routing
+		// target is the recipient (Q-178 A).
+		return []channelLine{{kind: ChannelKindSend, senderKind: ChannelSenderUser, recipient: facts.ToTaskID}}
 	case EventTeamFinalReview, EventTeamDeadlineReached, EventTeamDeadlineExtended, EventTeamEnded:
 		return nil
 	case EventTaskCreated, EventTaskAssigned, EventTaskStarted, EventTaskQuestionAsked,
 		EventTaskQuestionAnswered, EventTaskReported, EventTaskCheckCompleted, EventTaskReviewed,
 		EventTaskIntegrated, EventTaskMarkedUnknown, EventTaskRecoveryDecided, EventTaskSuperseded,
-		EventTaskStalled, EventTaskMessaged, EventTaskEnded:
+		EventTaskStalled, EventTaskMessaged, EventTaskApprovalRequested, EventTaskApprovalResolved,
+		EventTaskEnded:
 		return nil
 	default:
 		return nil
@@ -105,13 +110,12 @@ func channelTeamEventLines(ev *AppendTeamEventInput, facts channelPayloadFacts) 
 func channelTaskEventLines(ev *AppendTeamEventInput, facts channelPayloadFacts) []channelLine {
 	root := ThreadRootTaskID(ev.TaskID)
 	switch ev.EventType {
-	case EventTaskAssigned:
-		return []channelLine{{kind: ChannelKindTask, threadRoot: root, senderKind: ChannelSenderFugue}}
-	case EventTaskSuperseded:
-		// The retry chain's attempt-open line (§5.4, §6.7): the supersede and
-		// the queued next attempt commit in the same transaction, so this is
-		// the moment the new attempt opens; the rendered text names the
-		// attempt and the failure code.
+	case EventTaskAssigned, EventTaskSuperseded:
+		// The assignment opens the task's thread; the supersede is the retry
+		// chain's attempt-open line (§5.4, §6.7): the supersede and the queued
+		// next attempt commit in the same transaction, so this is the moment
+		// the new attempt opens; the rendered text names the attempt and the
+		// failure code.
 		return []channelLine{{kind: ChannelKindTask, threadRoot: root, senderKind: ChannelSenderFugue}}
 	case EventTaskQuestionAsked:
 		return []channelLine{{kind: ChannelKindQuestion, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID}}
@@ -121,6 +125,8 @@ func channelTaskEventLines(ev *AppendTeamEventInput, facts channelPayloadFacts) 
 		return []channelLine{{kind: ChannelKindResult, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID}}
 	case EventTaskMessaged:
 		return []channelLine{{kind: ChannelKindSend, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID, recipient: facts.ToTaskID}}
+	case EventTaskApprovalRequested, EventTaskApprovalResolved:
+		return channelApprovalLines(ev, root)
 	case EventTaskStalled:
 		return channelStallLines(facts, root)
 	case EventTaskEnded:
@@ -129,7 +135,8 @@ func channelTaskEventLines(ev *AppendTeamEventInput, facts channelPayloadFacts) 
 		EventTaskIntegrated, EventTaskMarkedUnknown, EventTaskRecoveryDecided:
 		return nil
 	case EventTeamProposed, EventTeamStarted, EventTeamFinalReview, EventTeamAmended,
-		EventTeamNoted, EventTeamDeadlineReached, EventTeamDeadlineExtended, EventTeamDecided, EventTeamEnded:
+		EventTeamNoted, EventTeamDeadlineReached, EventTeamDeadlineExtended, EventTeamUserPosted,
+		EventTeamDecided, EventTeamEnded:
 		return nil
 	default:
 		return nil
@@ -152,6 +159,12 @@ func channelEndLines(ev *AppendTeamEventInput, root string) []channelLine {
 		return []channelLine{{kind: ChannelKindFailed, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID}}
 	}
 	return nil
+}
+
+// channelApprovalLines projects the §6.7 approval reference lines; the
+// content stays in the inbox (interaction §7, VR-05).
+func channelApprovalLines(ev *AppendTeamEventInput, root string) []channelLine {
+	return []channelLine{{kind: ChannelKindApproval, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID}}
 }
 
 // channelStallLines projects a stall into the task's thread and, when the
@@ -318,3 +331,29 @@ func (s *Store) CountTaskMessages(ctx context.Context, teamID, senderTaskID stri
 	}
 	return byAgent, team, nil
 }
+
+// AllTeamIDs lists every team ID, oldest first (F11.10b: the host registers a
+// `team:<id>` channel topic for each team at startup, ended teams included —
+// their channel stays readable).
+func (s *Store) AllTeamIDs(ctx context.Context) ([]string, error) {
+	rows, err := s.db.QueryContext(ctx,
+		`SELECT team_id FROM team_records ORDER BY created_at ASC, team_id ASC`)
+	if err != nil {
+		return nil, fmt.Errorf("%w: query all teams: %w", ErrUnavailable, err)
+	}
+	defer closeRows(ctx, rows)
+	var out []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("%w: scan the team ids: %w", ErrUnavailable, err)
+		}
+		out = append(out, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("%w: iterate the team ids: %w", ErrUnavailable, err)
+	}
+	return out, nil
+}
+
+// TeamIDsByState lists the team IDs currently in state, oldest first.

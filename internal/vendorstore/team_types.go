@@ -108,8 +108,13 @@ const (
 	// EventTeamDeadlineExtended records a user-approved team deadline extension
 	// clearing waiting(team_deadline) (Q-149).
 	EventTeamDeadlineExtended TeamEventType = "TeamDeadlineExtended"
-	EventTeamDecided          TeamEventType = "TeamDecided"
-	EventTeamEnded            TeamEventType = "TeamEnded"
+	// EventTeamUserPosted records one §6.7 user post (F11.10b, Q-178 A): the
+	// sealed payload carries the target task and the text; the producing
+	// transaction projects the channel line and enqueues the delegator's
+	// informational mention. It changes no team state.
+	EventTeamUserPosted TeamEventType = "TeamUserPosted"
+	EventTeamDecided    TeamEventType = "TeamDecided"
+	EventTeamEnded      TeamEventType = "TeamEnded"
 
 	EventTaskCreated          TeamEventType = "TaskCreated"
 	EventTaskAssigned         TeamEventType = "TaskAssigned"
@@ -131,7 +136,14 @@ const (
 	// and the producing transaction enqueues the mailbox rows that deliver it.
 	// It changes no task state, so the channel can project it as a `send` line.
 	EventTaskMessaged TeamEventType = "TaskMessaged"
-	EventTaskEnded    TeamEventType = "TaskEnded"
+	// EventTaskApprovalRequested and EventTaskApprovalResolved record the
+	// §6.7 approval reference lines (F11.10b, Q-178 A): the sealed payload
+	// carries only the reference — request_id, tool name and, for resolved,
+	// the outcome — never the request or answer content (interaction §7,
+	// VR-05). They change no task state.
+	EventTaskApprovalRequested TeamEventType = "TaskApprovalRequested"
+	EventTaskApprovalResolved  TeamEventType = "TaskApprovalResolved"
+	EventTaskEnded             TeamEventType = "TaskEnded"
 )
 
 // Channel line kinds of §6.7 (F11.10a). Each tag names the kind of thing the

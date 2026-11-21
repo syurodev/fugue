@@ -15,6 +15,8 @@ import (
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
+const mailboxStateMessage = "message"
+
 // taskMessagePayload is the sealed payload of EventTaskMessaged (§6.7,
 // Q-177 A): the sibling send's target and its informational message.
 type taskMessagePayload struct {
@@ -56,11 +58,11 @@ func (s *teamTaskService) sendToChild(ctx context.Context, c *callerTeamContext,
 	if target.State != vendorstore.TaskStateRunning && target.State != vendorstore.TaskStateAsking {
 		return "", errcode.New(errcode.FailedPrecondition, "task is not accepting messages in its current state")
 	}
-	trimmed, err := validateDigestMessage("message", message)
+	trimmed, err := validateDigestMessage(mailboxStateMessage, message)
 	if err != nil {
 		return "", err
 	}
-	payload, err := json.Marshal(mailboxDigestItem{TaskID: c.caller.TaskID, State: "message", Summary: trimmed})
+	payload, err := json.Marshal(mailboxDigestItem{TaskID: c.caller.TaskID, State: mailboxStateMessage, Summary: trimmed})
 	if err != nil {
 		return "", errcode.Wrap(errcode.Internal, "encode task send payload", err)
 	}
@@ -98,7 +100,7 @@ func (s *teamTaskService) sendToSibling(ctx context.Context, c *callerTeamContex
 	if target.State != vendorstore.TaskStateRunning && target.State != vendorstore.TaskStateAsking {
 		return "", errcode.New(errcode.FailedPrecondition, "task is not accepting messages in its current state")
 	}
-	trimmed, err := validateDigestMessage("message", message)
+	trimmed, err := validateDigestMessage(mailboxStateMessage, message)
 	if err != nil {
 		return "", err
 	}
@@ -135,7 +137,7 @@ func (s *teamTaskService) buildSiblingSendEvent(ctx context.Context, c *callerTe
 	if err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "encode sibling send payload", err)
 	}
-	item, err := json.Marshal(mailboxDigestItem{TaskID: c.caller.TaskID, State: "message", Summary: trimmed})
+	item, err := json.Marshal(mailboxDigestItem{TaskID: c.caller.TaskID, State: mailboxStateMessage, Summary: trimmed})
 	if err != nil {
 		return nil, errcode.Wrap(errcode.Internal, "encode sibling send mail", err)
 	}

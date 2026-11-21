@@ -123,7 +123,7 @@ func (s *Store) applyTeamMutation(
 	if err := s.resealAndInsertTasks(ctx, tx, teamID, meta, rawKey, reseals, added, &lastSeq); err != nil {
 		return 0, err
 	}
-	if err := s.commitTeamTx(snap, true, tx.Commit); err != nil {
+	if err := s.commitTeamTx(ctx, teamID, lastSeq, snap, true, tx.Commit); err != nil {
 		return 0, err
 	}
 	return lastSeq, nil

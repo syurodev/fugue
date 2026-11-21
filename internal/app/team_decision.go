@@ -412,6 +412,14 @@ type teamCardResolver interface {
 	applyTeamCardAnswer(ctx context.Context, ticket *interaction.Ticket, decision *interaction.Decision) error
 }
 
+// SetTeamApprovalObserver binds the F11.10b approval reference recorder. The
+// observer runs off the owner's goroutine (the lifecycle hook must never
+// block it); it appends the TaskApprovalRequested/Resolved reference lines of
+// team-task sessions and ignores everything else.
+func (s *InteractionService) SetTeamApprovalObserver(fn func(interaction.LifecycleEvent)) {
+	s.teamApprovalHook = fn
+}
+
 // SetTeamCardResolver wires the team card consumer. It is called once during
 // startup, before any client can answer a card.
 func (s *InteractionService) SetTeamCardResolver(r teamCardResolver) {

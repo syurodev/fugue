@@ -314,7 +314,7 @@ func (s *Store) ActiveTeamIDs(ctx context.Context) ([]string, error) {
 	return s.TeamIDsByState(ctx, TeamStateActive)
 }
 
-// TeamIDsByState lists the team IDs currently in state, oldest first.
+// TeamIDsByState lists the teams in the given state, oldest first.
 func (s *Store) TeamIDsByState(ctx context.Context, state TeamState) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT team_id FROM team_records WHERE state = ? ORDER BY created_at ASC, team_id ASC`, string(state))

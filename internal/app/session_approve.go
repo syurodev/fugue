@@ -333,7 +333,7 @@ func (s *SessionToolService) recordApprovalDecided(ctx context.Context, binding 
 			Metadata: vendorstore.ItemMetadata{
 				RequestKind: approveToolName,
 				Decision:    decision,
-				Decider:     "user",
+				Decider:     decidedByUser,
 			},
 		},
 	}); recErr != nil {

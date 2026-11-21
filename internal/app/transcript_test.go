@@ -218,7 +218,7 @@ func pageCursor(t *testing.T, page []TranscriptEntry) int64 {
 func pendingToolCall(id, output string) transcript.Item {
 	return transcript.Item{
 		ID: id, SessionID: testSession, TurnID: testTurn, Kind: transcript.ToolCall, Revision: 0,
-		Metadata: transcript.ToolCallMetadata{ToolName: "shell", Status: "pending"},
+		Metadata: transcript.ToolCallMetadata{ToolName: testToolShell, Status: "pending"},
 		Content:  transcript.ToolCallContent{Title: "run", Output: output},
 	}
 }
@@ -227,7 +227,7 @@ func pendingToolCall(id, output string) transcript.Item {
 func completeToolCall(pending *transcript.Item, output string) *transcript.Item {
 	done := *pending
 	done.Revision = 1
-	done.Metadata = transcript.ToolCallMetadata{ToolName: "shell", Status: "succeeded"}
+	done.Metadata = transcript.ToolCallMetadata{ToolName: testToolShell, Status: "succeeded"}
 	done.Content = transcript.ToolCallContent{Title: "run", Output: output}
 	return &done
 }

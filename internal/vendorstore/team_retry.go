@@ -66,7 +66,7 @@ func (s *Store) RetryTask(ctx context.Context, teamID, taskID string, in *TaskRe
 	if err != nil {
 		return TaskRetryResult{}, err
 	}
-	if err := s.commitTeamTx(snap, true, tx.Commit); err != nil {
+	if err := s.commitTeamTx(ctx, teamID, res.LastSeq, snap, true, tx.Commit); err != nil {
 		return TaskRetryResult{}, err
 	}
 	return res, nil
@@ -309,7 +309,7 @@ func (s *Store) AppendTeamEvents(ctx context.Context, teamID string, expectedSeq
 	if err != nil {
 		return 0, err
 	}
-	if err := s.commitTeamTx(snap, needVault, tx.Commit); err != nil {
+	if err := s.commitTeamTx(ctx, teamID, seq, snap, needVault, tx.Commit); err != nil {
 		return 0, err
 	}
 	return seq, nil

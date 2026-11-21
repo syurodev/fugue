@@ -73,6 +73,9 @@ type InteractionService struct {
 	// teamCards consumes the answers of team proposal and amend cards. It is
 	// wired once during startup, before the transport serves (F11.2b).
 	teamCards teamCardResolver
+	// teamApprovalHook records the F11.10b approval reference lines; set once
+	// at startup and called for every lifecycle event.
+	teamApprovalHook func(interaction.LifecycleEvent)
 	// taskQuestions consumes the answers of user question cards opened by
 	// fugue_task_ask or fugue_task_answer(forward_to=user) (F11.3d).
 	taskQuestions taskQuestionResolver
@@ -117,6 +120,9 @@ func NewInteractionService(owner *interaction.Owner, hub *EventHub, clk clock.Cl
 }
 
 func (s *InteractionService) handleLifecycle(ev interaction.LifecycleEvent) {
+	if s.teamApprovalHook != nil {
+		s.teamApprovalHook(ev)
+	}
 	if s.hub != nil {
 		switch ev.Kind {
 		case interaction.EventRequested:
@@ -218,6 +224,17 @@ func (s *InteractionService) nudgeExpiry() {
 	case s.wakeExpiry <- struct{}{}:
 	default:
 	}
+}
+
+// TicketOf returns the current ticket of one request, resolved or pending
+// (F11.10b: the approval reference lines need the binding a resolved
+// lifecycle event does not carry).
+func (s *InteractionService) TicketOf(requestID string) (*interaction.Ticket, error) {
+	ticket, err := s.owner.LookupRequest(requestID)
+	if err != nil {
+		return nil, errcode.Wrap(errcode.NotFound, "the interaction request does not exist", err)
+	}
+	return ticket, nil
 }
 
 // Incarnation returns the host incarnation ID this service belongs to.
