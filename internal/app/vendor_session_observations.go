@@ -191,6 +191,7 @@ func (a *vendorSessionActor) persistVendorTurnEnd(ctx context.Context, turnID, o
 		return err
 	}
 	delete(a.turns, turnID)
+	a.cancelTurnInteractions(turnID)
 	a.manager.notifyWake(a.info.ID)
 	if outcome == vendorstore.OutcomeCompleted {
 		a.manager.notifyTurnCompleted(a.info.ID)
@@ -221,6 +222,7 @@ func (a *vendorSessionActor) persistFugueTurnEnd(ctx context.Context, observedTu
 	a.state = next
 	delete(a.turns, turnID)
 	a.turnID = ""
+	a.cancelTurnInteractions(turnID)
 	a.manager.notifyWake(a.info.ID)
 	if outcome == vendorstore.OutcomeCompleted {
 		a.manager.notifyTurnCompleted(a.info.ID)
@@ -228,6 +230,12 @@ func (a *vendorSessionActor) persistFugueTurnEnd(ctx context.Context, observedTu
 		a.manager.notifyTurnFailed(a.info.ID, failure)
 	}
 	return nil
+}
+
+func (a *vendorSessionActor) cancelTurnInteractions(turnID string) {
+	if a.manager.deps.Relay != nil && turnID != "" {
+		a.manager.deps.Relay.CancelTurn(a.info.ID, turnID)
+	}
 }
 
 func (a *vendorSessionActor) recordItem(ctx context.Context, item *transcript.Item) error {

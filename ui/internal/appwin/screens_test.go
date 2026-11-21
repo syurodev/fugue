@@ -2,7 +2,10 @@ package appwin
 
 import (
 	"fmt"
+	"image"
 	"testing"
+
+	"gioui.org/io/input"
 
 	"github.com/syurodev/fugue/pkg/client"
 
@@ -191,5 +194,19 @@ func TestPruneClosesTheOpenSessionWhenItLeavesTheList(t *testing.T) {
 	}
 	if len(fake.pages) <= before {
 		t.Fatal("the reopened session did not request its newest page")
+	}
+}
+
+func TestEmptyTranscriptUsesKitEmptyState(t *testing.T) {
+	t.Parallel()
+	sc, _ := newTestScreens(t)
+	env := newInboxTestEnv(t)
+	router := new(input.Router)
+	runAppFrame(env, sc, router, image.Pt(shotWindowW, shotWindowH))
+	if sc.lastErr != "" {
+		t.Fatalf("empty transcript state recorded error: %s", sc.lastErr)
+	}
+	if sc.emptyTranscript.Presence() <= 0 {
+		t.Fatalf("emptyTranscript presence = %v, want > 0 after render", sc.emptyTranscript.Presence())
 	}
 }

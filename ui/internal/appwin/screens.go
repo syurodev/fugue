@@ -8,6 +8,9 @@ import (
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 
+	"github.com/syurodev/fugue/pkg/client"
+
+	"github.com/syurodev/fugue/ui/internal/accounts"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/inbox"
 	"github.com/syurodev/fugue/ui/internal/kit"
@@ -27,6 +30,8 @@ const (
 	topicWorkspaces     = "workspaces"
 	topicVault          = "vault"
 	topicInteraction    = "interaction"
+	topicQuota          = client.TopicQuota
+	topicLogin          = client.TopicLogin
 )
 
 // pageFetcher is the read side the screens drive: the session.Fetcher, and a
@@ -88,24 +93,30 @@ type screens struct {
 	// The workspace side (F10.14): the workspaces the topic reports, the
 	// reads that fill their details, the mutations the dialogs post, and
 	// the sidebar's own state per workspace.
-	workspaces   *workspace.Model
-	wsMut        *workspace.Mutator
-	wsReads      wsReader
-	wsDetailReq  map[string]uint64
-	wsHeaders    map[string]*kit.SectionHeaderState
-	wsMenu       *kit.MenuState
-	wsMenuFor    string
-	policyBanner *kit.BannerState
-	otherHeader  *kit.SectionHeaderState
-	dlg          *workspaceDialogs
-	vault        *vault.Model
-	vaultWorker  *vault.Worker
-	vaultGate    *vaultGate
-	inbox        *inbox.Model
-	inboxWorker  *inbox.Worker
-	inboxView    *inboxView
-	inboxRow     *kit.ListRowState
-	inboxOpen    bool
+	workspaces      *workspace.Model
+	wsMut           *workspace.Mutator
+	wsReads         wsReader
+	wsDetailReq     map[string]uint64
+	wsHeaders       map[string]*kit.SectionHeaderState
+	wsMenu          *kit.MenuState
+	wsMenuFor       string
+	policyBanner    *kit.BannerState
+	otherHeader     *kit.SectionHeaderState
+	dlg             *workspaceDialogs
+	vault           *vault.Model
+	vaultWorker     *vault.Worker
+	vaultGate       *vaultGate
+	inbox           *inbox.Model
+	inboxWorker     *inbox.Worker
+	inboxView       *inboxView
+	inboxRow        *kit.ListRowState
+	inboxOpen       bool
+	accounts        *accounts.Model
+	accountsWorker  *accounts.Worker
+	accountsView    *accountsView
+	accountsRow     *kit.ListRowState
+	accountsOpen    bool
+	emptyTranscript *kit.EmptyStateState
 }
 
 // newScreens builds the screens over the manager, its fetcher, the composer's
@@ -113,6 +124,8 @@ type screens struct {
 func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster, wsMut *workspace.Mutator) *screens {
 	inboxRow := kit.NewListRowState()
 	inboxRow.Enter()
+	accountsRow := kit.NewListRowState()
+	accountsRow.Enter()
 	return &screens{
 		m:               m,
 		fetcher:         fetcher,
@@ -127,20 +140,24 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 		header:          kit.NewSectionHeaderState(true),
 		rows:            map[string]*kit.ListRowState{},
 		pendingPage:     map[string]bool{}, pendingOlder: map[string]bool{},
-		workspaces:   workspace.NewModel(),
-		wsMut:        wsMut,
-		wsReads:      fetcher,
-		wsDetailReq:  map[string]uint64{},
-		wsHeaders:    map[string]*kit.SectionHeaderState{},
-		wsMenu:       kit.NewMenuState(),
-		policyBanner: kit.NewBannerState(),
-		otherHeader:  kit.NewSectionHeaderState(false),
-		dlg:          newWorkspaceDialogs(),
-		vault:        vault.NewModel(),
-		vaultGate:    newVaultGate(),
-		inbox:        inbox.NewModel(),
-		inboxView:    newInboxView(),
-		inboxRow:     inboxRow,
+		workspaces:      workspace.NewModel(),
+		wsMut:           wsMut,
+		wsReads:         fetcher,
+		wsDetailReq:     map[string]uint64{},
+		wsHeaders:       map[string]*kit.SectionHeaderState{},
+		wsMenu:          kit.NewMenuState(),
+		policyBanner:    kit.NewBannerState(),
+		otherHeader:     kit.NewSectionHeaderState(false),
+		dlg:             newWorkspaceDialogs(),
+		vault:           vault.NewModel(),
+		vaultGate:       newVaultGate(),
+		inbox:           inbox.NewModel(),
+		inboxView:       newInboxView(),
+		inboxRow:        inboxRow,
+		accounts:        accounts.NewModel(),
+		accountsView:    newAccountsView(),
+		accountsRow:     accountsRow,
+		emptyTranscript: kit.NewEmptyStateState(),
 	}
 }
 
@@ -153,40 +170,6 @@ func (s *screens) viewFor(id string) *transcriptview.State {
 		s.views[id] = view
 	}
 	return view
-}
-
-// prune drops the state of sessions that left the sidebar list, so a closed
-// session's scroll, expansion and composer state does not outlive it. The
-// open session leaving the list closes it cleanly: its topics leave the
-// connection, the pane falls back to the empty state, and clicking the
-// session again reopens it.
-func (s *screens) prune() {
-	known := map[string]bool{}
-	for _, sess := range s.sidebar.List() {
-		known[sess.ID] = true
-	}
-	if s.open != "" && !known[s.open] {
-		s.m.RemoveTopic(topicTranscript + s.open)
-		s.m.RemoveTopic(topicTranscriptDlt + s.open)
-		s.open, s.scrolled = "", false
-	}
-	pruneKnown(s.views, known)
-	pruneKnown(s.transcripts, known)
-	pruneKnown(s.pendingPage, known)
-	pruneKnown(s.pendingOlder, known)
-	pruneKnown(s.rows, known)
-	pruneKnown(s.commands, known)
-	pruneKnown(s.pendingCommands, known)
-	s.composer.prune(known)
-}
-
-// pruneKnown deletes every key of m the known set does not name.
-func pruneKnown[T any](m map[string]T, known map[string]bool) {
-	for id := range m {
-		if !known[id] {
-			delete(m, id)
-		}
-	}
 }
 
 // update folds one frame's deliveries into the screens. The loops index
@@ -210,24 +193,38 @@ func (s *screens) update(updates []hostconn.Update, results []session.Result, po
 
 // applyUpdate routes one topic delivery or connection-state change.
 func (s *screens) applyUpdate(u hostconn.Update) {
-	switch {
-	case u.State == hostconn.StateConnected:
+	if u.State == hostconn.StateConnected {
 		s.reconnected()
-	case u.Topic == topicVendorSessions && u.Snapshot != nil:
+		return
+	}
+	switch u.Topic {
+	case topicVendorSessions:
+		s.applyVendorSessionsDelivery(u)
+	case topicWorkspaces:
+		s.applyWorkspaceDelivery(u)
+	case topicVault:
+		s.applyVaultDelivery(u)
+	case topicInteraction:
+		s.applyInteractionDelivery(u)
+	case topicQuota:
+		s.applyQuotaDelivery(u)
+	case topicLogin:
+		s.applyLoginDelivery(u)
+	case topicTranscriptDlt + s.open:
+		if u.Event != nil {
+			s.applyDelta(u.Event.Payload)
+		}
+	case topicTranscript + s.open:
+		s.applyTranscriptDelivery(u)
+	}
+}
+
+func (s *screens) applyVendorSessionsDelivery(u hostconn.Update) {
+	if u.Snapshot != nil {
 		s.fail(s.sidebar.ApplySnapshot(u.Snapshot.State))
 		s.prune()
-	case u.Topic == topicVendorSessions && u.Event != nil:
+	} else if u.Event != nil {
 		s.applySessionEvent(u.Event.Type, u.Event.Payload)
-	case u.Topic == topicWorkspaces:
-		s.applyWorkspaceDelivery(u)
-	case u.Topic == topicVault:
-		s.applyVaultDelivery(u)
-	case u.Topic == topicInteraction:
-		s.applyInteractionDelivery(u)
-	case u.Topic == topicTranscriptDlt+s.open && u.Event != nil:
-		s.applyDelta(u.Event.Payload)
-	case u.Topic == topicTranscript+s.open:
-		s.applyTranscriptDelivery(u)
 	}
 }
 
@@ -249,6 +246,10 @@ func (s *screens) reconnected() {
 	if s.inboxWorker != nil {
 		req := inbox.Request{Kind: inbox.OpListPending}
 		s.inboxWorker.Do(&req)
+	}
+	if s.accountsWorker != nil {
+		req := accounts.Request{Kind: accounts.OpListAccounts}
+		s.accountsWorker.Do(&req)
 	}
 	if s.open != "" {
 		s.m.AddTopic(topicTranscript + s.open)
@@ -350,6 +351,7 @@ func (s *screens) applyResult(r session.Result) {
 // and its newest page and commands are read if the model has none.
 func (s *screens) openSession(id string) {
 	s.inboxOpen = false
+	s.accountsOpen = false
 	if s.open == id {
 		return
 	}
@@ -407,6 +409,7 @@ func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 		return
 	}
 	s.toggleInboxShortcut(gtx)
+	s.toggleAccountsShortcut(gtx)
 	layout.Flex{Axis: layout.Horizontal}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Right: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -416,27 +419,16 @@ func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			local := gtx
-			// TODO(F10.20): move the inbox into a slot
+			// TODO(F10.20): move the inbox and accounts views into slots
 			if s.inboxOpen {
 				return s.inboxView.layout(&local, env, s)
+			}
+			if s.accountsOpen {
+				return s.accountsView.layout(&local, env, s)
 			}
 			return s.layoutTranscript(&local, env)
 		}),
 	)
-}
-
-func (s *screens) applyVaultDelivery(u hostconn.Update) {
-	if u.Snapshot != nil {
-		s.fail(s.vault.ApplySnapshot(u.Snapshot.State))
-	} else if u.Event != nil {
-		s.fail(s.vault.ApplyEvent(u.Event.Type, u.Event.Payload))
-	}
-}
-
-func (s *screens) applyVaultResults(results []vault.Result) {
-	for i := range results {
-		s.vaultGate.applied(&results[i], s.vault)
-	}
 }
 
 // layoutTranscript draws the transcript pane and, under it, the composer
@@ -470,10 +462,14 @@ func (s *screens) layoutTranscript(gtx *layout.Context, env *kit.Env) layout.Dim
 func (s *screens) layoutTranscriptPane(gtx *layout.Context, env *kit.Env, view *transcriptview.State, items []*session.Item) {
 	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
 	if len(items) == 0 && s.open == "" {
-		// TODO(F10.19): Move the empty state onto the kit's EmptyState (§6.25).
 		layout.Center.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
-			l := gtx
-			return kit.Label(env, &l, theme.TypeSmall(), env.Th.Chrome().FgMuted, "Select a session")
+			local := gtx
+			dims, _, err := s.emptyTranscript.Layout(env, &local, &kit.EmptyStateProps{
+				Title:       "Select a session",
+				Description: "Choose a session from the sidebar or start a new one below.",
+			})
+			s.fail(err)
+			return dims
 		})
 		return
 	}

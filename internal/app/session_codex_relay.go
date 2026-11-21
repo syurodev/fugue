@@ -284,10 +284,8 @@ func (s *SessionToolService) awaitAndTakeCodexRelayed(
 	}
 	resolved, err := s.interactions.awaitResolvedUntil(ctx, ticket.RequestID, s.tokens.watch(binding))
 	if err != nil || resolved == nil || !resolved.Resolved {
-		if !s.tokens.live(binding) {
-			if _, invErr := s.interactions.owner.InvalidateOperation(opID); invErr != nil {
-				return codexRelayChoice{}, false
-			}
+		if _, invErr := s.interactions.owner.InvalidateOperation(opID); invErr != nil {
+			return codexRelayChoice{}, false
 		}
 		return codexRelayChoice{}, false
 	}

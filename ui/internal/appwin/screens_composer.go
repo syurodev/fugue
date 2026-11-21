@@ -206,3 +206,37 @@ func (s *screens) probeMissingVendors() {
 		}
 	}
 }
+
+// prune drops the state of sessions that left the sidebar list, so a closed
+// session's scroll, expansion and composer state does not outlive it. The
+// open session leaving the list closes it cleanly: its topics leave the
+// connection, the pane falls back to the empty state, and clicking the
+// session again reopens it.
+func (s *screens) prune() {
+	known := map[string]bool{}
+	for _, sess := range s.sidebar.List() {
+		known[sess.ID] = true
+	}
+	if s.open != "" && !known[s.open] {
+		s.m.RemoveTopic(topicTranscript + s.open)
+		s.m.RemoveTopic(topicTranscriptDlt + s.open)
+		s.open, s.scrolled = "", false
+	}
+	pruneKnown(s.views, known)
+	pruneKnown(s.transcripts, known)
+	pruneKnown(s.pendingPage, known)
+	pruneKnown(s.pendingOlder, known)
+	pruneKnown(s.rows, known)
+	pruneKnown(s.commands, known)
+	pruneKnown(s.pendingCommands, known)
+	s.composer.prune(known)
+}
+
+// pruneKnown deletes every key of m the known set does not name.
+func pruneKnown[T any](m map[string]T, known map[string]bool) {
+	for id := range m {
+		if !known[id] {
+			delete(m, id)
+		}
+	}
+}

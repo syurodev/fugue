@@ -12,6 +12,7 @@ import (
 
 	"github.com/syurodev/fugue/pkg/client"
 
+	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/vault"
@@ -309,4 +310,18 @@ func layoutVaultButton(env *kit.Env, gtx *layout.Context, btn *kit.ButtonState, 
 		onErr(err)
 	}
 	return btn.Measure(env, gtx, props), clicked
+}
+
+func (s *screens) applyVaultDelivery(u hostconn.Update) {
+	if u.Snapshot != nil {
+		s.fail(s.vault.ApplySnapshot(u.Snapshot.State))
+	} else if u.Event != nil {
+		s.fail(s.vault.ApplyEvent(u.Event.Type, u.Event.Payload))
+	}
+}
+
+func (s *screens) applyVaultResults(results []vault.Result) {
+	for i := range results {
+		s.vaultGate.applied(&results[i], s.vault)
+	}
 }
