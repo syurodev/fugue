@@ -47,6 +47,11 @@ func validateDocument(raw []byte, limit int, tooLarge error) error {
 	if len(probe.SchemaVersion) == 0 {
 		return errcode.Wrap(errcode.AppStateInvalidDocument, "schema_version is missing", ErrInvalidDocument)
 	}
+	// encoding/json would take a numeric JSON string such as "1" into a
+	// json.Number; a quoted value is not a number, so it is rejected before.
+	if probe.SchemaVersion[0] == '"' {
+		return errcode.Wrap(errcode.AppStateInvalidDocument, "schema_version is not a number", ErrInvalidDocument)
+	}
 	var version json.Number
 	if err := json.Unmarshal(probe.SchemaVersion, &version); err != nil {
 		return errcode.Wrap(errcode.AppStateInvalidDocument, "schema_version is not a number", ErrInvalidDocument)
