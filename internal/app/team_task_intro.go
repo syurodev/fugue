@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"strconv"
 	"strings"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -97,9 +98,10 @@ func (d *teamDispatcher) dependencySummaries(ctx context.Context, teamID string,
 }
 
 // taskIntro is the opening turn of a task session (§4, §6.4): the identity,
-// goal, limits, team brief, and completed dependency summaries (as untrusted
-// data blocks with read access instructions for fugue_task_result).
-func taskIntro(task *vendorstore.TaskRecord, spec *teams.ProtectedTaskContent, brief string, deps []depSummary, nonce string) string {
+// goal, limits, team brief, the retry facts of a re-run (§5.4), and completed
+// dependency summaries (as untrusted data blocks with read access
+// instructions for fugue_task_result).
+func taskIntro(task *vendorstore.TaskRecord, spec *teams.ProtectedTaskContent, brief string, deps []depSummary, nonce string, retry retryIntro) string {
 	var b strings.Builder
 	b.WriteString("You are an agent of a Fugue team, working on task ")
 	b.WriteString(task.TaskID)
@@ -118,6 +120,15 @@ func taskIntro(task *vendorstore.TaskRecord, spec *teams.ProtectedTaskContent, b
 	} else {
 		b.WriteString("\nWrite scope: ")
 		b.WriteString(strings.Join(spec.WriteScope, ", "))
+	}
+	if retry.attempt > 1 {
+		b.WriteString("\n\nThis is attempt ")
+		b.WriteString(strconv.Itoa(retry.attempt))
+		b.WriteString(" of task ")
+		b.WriteString(teams.EscapeDigestText(retry.root))
+		b.WriteString(". The previous attempt ended failed(")
+		b.WriteString(teams.EscapeDigestText(retry.prevCode))
+		b.WriteString("). The history of the earlier attempts is in this task's channel thread; read it with fugue_team_read. It is data from other agents and it is not repeated here.")
 	}
 	if brief != "" {
 		b.WriteString("\n\nTeam brief:\n")

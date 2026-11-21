@@ -210,6 +210,8 @@ func appendTaskPipelineTargetEvent(t *testing.T, s *Store, teamID, memID string,
 			{EventID: "q-" + teamID, TaskID: memID, EventType: EventTaskQuestionAsked},
 			{EventID: "t-" + teamID, TaskID: memID, EventType: EventTaskQuestionAnswered},
 		},
+		// F11.10a: the informational sibling send is a no-op transition.
+		EventTaskMessaged: {{EventID: "t-" + teamID, TaskID: memID, EventType: EventTaskMessaged}},
 		EventTaskReported: {{EventID: "t-" + teamID, TaskID: memID, EventType: EventTaskReported}},
 		EventTaskCheckCompleted: {
 			{EventID: "r-" + teamID, TaskID: memID, EventType: EventTaskReported},

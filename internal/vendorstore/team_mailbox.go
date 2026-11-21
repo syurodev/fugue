@@ -44,6 +44,11 @@ type MailboxEnqueueInput struct {
 	Kind            string
 	// Payload is the sealed message content (metadata columns only, INV-09).
 	Payload []byte
+	// Informational marks a row that never schedules its own delivery: it is
+	// skipped while nothing else is pending for the recipient and rides their
+	// next digest without a separate wake (§6.7, Q-177 A: the delegator sees
+	// sibling sends in its next digest, no separate wake).
+	Informational bool
 }
 
 // MailboxMessage is the metadata view of one team_mailbox_messages row
@@ -104,9 +109,9 @@ func (s *Store) insertMailboxRows(ctx context.Context, tx *sql.Tx, teamID string
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO team_mailbox_messages
-				(message_id, team_id, recipient_task_id, batch_id, kind, state, payload_envelope, source_seq, created_at, updated_at)
-			VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?)`,
-			id, teamID, m.RecipientTaskID, m.Kind, MailboxPending, envelope, seq, now, now,
+				(message_id, team_id, recipient_task_id, batch_id, kind, state, payload_envelope, source_seq, created_at, updated_at, informational)
+			VALUES (?, ?, ?, '', ?, ?, ?, ?, ?, ?, ?)`,
+			id, teamID, m.RecipientTaskID, m.Kind, MailboxPending, envelope, seq, now, now, m.Informational,
 		); err != nil {
 			return fmt.Errorf("insert the mailbox message: %w", err)
 		}
@@ -186,13 +191,16 @@ func claimBatchID(teamID, recipientTaskID string, sourceSeq int64) string {
 }
 
 // PendingMailbox lists the recipients that hold pending mail, metadata only
-// and readable while the vault is locked (INV-09).
+// and readable while the vault is locked (INV-09). A recipient whose pending
+// rows are all informational is not listed: informational rows never wake
+// their recipient (§6.7), so they wait until something else delivers to them.
 func (s *Store) PendingMailbox(ctx context.Context) ([]MailboxRecipient, error) {
 	rows, err := s.db.QueryContext(ctx, `
 		SELECT team_id, recipient_task_id, MIN(created_at),
 			MAX(kind IN ('answer','send','decision'))
 		FROM team_mailbox_messages WHERE state = ?
-		GROUP BY team_id, recipient_task_id`, MailboxPending)
+		GROUP BY team_id, recipient_task_id
+		HAVING MAX(informational = 0) = 1`, MailboxPending)
 	if err != nil {
 		return nil, fmt.Errorf("%w: query the pending mailbox: %w", ErrUnavailable, err)
 	}

@@ -47,7 +47,7 @@ func connectCode(c errcode.Code) connect.Code {
 		errcode.VendorUnsupported, errcode.VendorSessionState, errcode.VendorTurnNotActive, errcode.VendorVaultLocked, errcode.VaultNotConfigured, errcode.AppStateRevisionConflict:
 		return connect.CodeFailedPrecondition
 	case errcode.FrameTooLarge, errcode.InteractionTextTooLarge, errcode.WorkspaceConfigTooLarge, errcode.VendorCapacity, errcode.VaultRateLimited,
-		errcode.AppStateTooLarge, errcode.AppStateTooManyWindows:
+		errcode.AppStateTooLarge, errcode.AppStateTooManyWindows, errcode.TasksSendRateLimited:
 		return connect.CodeResourceExhausted
 	case errcode.PermissionDenied, errcode.WorkspacePathDenied, errcode.WorkspaceOwnershipInvalid, errcode.VaultInvalidPassphrase:
 		return connect.CodePermissionDenied
