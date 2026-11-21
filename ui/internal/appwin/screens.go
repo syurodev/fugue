@@ -5,8 +5,6 @@ import (
 	"image"
 
 	"gioui.org/layout"
-	"gioui.org/op/clip"
-	"gioui.org/op/paint"
 
 	"github.com/syurodev/fugue/pkg/client"
 
@@ -39,6 +37,7 @@ const (
 type pageFetcher interface {
 	RequestSessions()
 	RequestPage(session string, before int64)
+	RequestItem(session, itemID string)
 	RequestCommands(session string)
 	RequestWorkspaces()
 	RequestWorkspace(workspace string, gen uint64)
@@ -85,6 +84,7 @@ type screens struct {
 	// and resets when the session changes.
 	pendingPage  map[string]bool
 	pendingOlder map[string]bool
+	pendingItem  map[string]bool
 	scrolled     bool
 	// lastErr is the last read or payload failure the screens could not act
 	// on, shown under the transcript.
@@ -139,7 +139,7 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 		pendingCommands: map[string]bool{},
 		header:          kit.NewSectionHeaderState(true),
 		rows:            map[string]*kit.ListRowState{},
-		pendingPage:     map[string]bool{}, pendingOlder: map[string]bool{},
+		pendingPage:     map[string]bool{}, pendingOlder: map[string]bool{}, pendingItem: map[string]bool{},
 		workspaces:      workspace.NewModel(),
 		wsMut:           wsMut,
 		wsReads:         fetcher,
@@ -235,6 +235,7 @@ func (s *screens) applyVendorSessionsDelivery(u hostconn.Update) {
 func (s *screens) reconnected() {
 	delete(s.pendingPage, s.open)
 	delete(s.pendingOlder, s.open)
+	s.pendingItem = map[string]bool{}
 	s.wsDetailReq = map[string]uint64{}
 	s.fetcher.RequestSessions()
 	s.wsReads.RequestWorkspaces()
@@ -323,28 +324,41 @@ func (s *screens) applyResult(r session.Result) {
 		s.prune()
 		s.probeMissingVendors()
 	case session.ResultPage:
-		t := s.transcripts[r.Session]
-		if t == nil {
-			return
-		}
+		s.applyPageResult(&r)
+	case session.ResultItem:
+		delete(s.pendingItem, r.Session+":"+r.Detail.Item.ItemID)
 		if r.Err != nil {
-			s.fail(fmt.Errorf("read the transcript page: %w", r.Err))
+			s.fail(fmt.Errorf("read the transcript item: %w", r.Err))
 			return
 		}
-		if r.Older {
-			// Keep the reader's anchor: the prepended items shift the
-			// content under the scroll offset by their height.
-			if prepended := t.ApplyOlderPage(r.Items); prepended > 0 {
-				s.viewFor(r.Session).AccountForPrepended(prepended)
-			}
-			s.pendingOlder[r.Session] = false
-		} else {
-			t.ApplyNewestPage(r.Items)
-			s.pendingPage[r.Session] = false
+		if t := s.transcripts[r.Session]; t != nil {
+			t.ApplyItemDetail(&r.Detail)
 		}
 	case session.ResultCommands, session.ResultProbe, session.ResultWorkspaces, session.ResultWorkspace:
 		s.applyComposerResult(r)
 	}
+}
+
+func (s *screens) applyPageResult(r *session.Result) {
+	t := s.transcripts[r.Session]
+	if t == nil {
+		return
+	}
+	if r.Err != nil {
+		s.fail(fmt.Errorf("read the transcript page: %w", r.Err))
+		return
+	}
+	if r.Older {
+		// Keep the reader's anchor: the prepended items shift the
+		// content under the scroll offset by their height.
+		if prepended := t.ApplyOlderPage(r.Items); prepended > 0 {
+			s.viewFor(r.Session).AccountForPrepended(prepended)
+		}
+		s.pendingOlder[r.Session] = false
+		return
+	}
+	t.ApplyNewestPage(r.Items)
+	s.pendingPage[r.Session] = false
 }
 
 // openSession opens a session's transcript: its topics join the connection,
@@ -455,42 +469,4 @@ func (s *screens) layoutTranscript(gtx *layout.Context, env *kit.Env) layout.Dim
 		s.composer.layout(env, &local, s, connected)
 	})
 	return layout.Dimensions{Size: gtx.Constraints.Max}
-}
-
-// layoutTranscriptPane draws the transcript itself: the canvas, the empty
-// state, the transcript list and the read failure line.
-func (s *screens) layoutTranscriptPane(gtx *layout.Context, env *kit.Env, view *transcriptview.State, items []*session.Item) {
-	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
-	if len(items) == 0 && s.open == "" {
-		layout.Center.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			dims, _, err := s.emptyTranscript.Layout(env, &local, &kit.EmptyStateProps{
-				Title:       "Select a session",
-				Description: "Choose a session from the sidebar or start a new one below.",
-			})
-			s.fail(err)
-			return dims
-		})
-		return
-	}
-	transcriptview.Layout(env, gtx, view, items)
-	s.trackScroll(view)
-	s.maybePageOlder()
-	if s.lastErr == "" {
-		return
-	}
-	local := *gtx
-	inset := layout.Inset{Left: theme.SpaceLG, Right: theme.SpaceLG, Top: theme.SpaceXS}
-	inset.Layout(local, func(gtx layout.Context) layout.Dimensions {
-		l := gtx
-		l.Constraints.Min.X = 0
-		return kit.Label(env, &l, theme.TypeSmall(), env.Th.Status().Danger, s.lastErr)
-	})
-}
-
-// trackScroll marks that the reader has scrolled, which arms paging older.
-func (s *screens) trackScroll(view *transcriptview.State) {
-	if view.Offset() > 0 {
-		s.scrolled = true
-	}
 }

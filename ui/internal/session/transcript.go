@@ -2,9 +2,11 @@ package session
 
 import (
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 
 	"github.com/syurodev/fugue/pkg/client"
 )
@@ -158,8 +160,85 @@ func (t *Transcript) ApplyDelta(payload []byte) error {
 		return nil
 	}
 	view := delta.View
+	if view.Title == "" {
+		view.Title = item.View.Title
+	}
+	if view.Input == "" {
+		view.Input = item.View.Input
+	}
+	if len(view.Steps) == 0 {
+		view.Steps = item.View.Steps
+	}
 	item.Streaming = &view
 	return nil
+}
+
+// ApplyItemDetail folds a TranscriptItem RPC answer into the held item so
+// truncated tool outputs or diffs expand to their full redacted text.
+func (t *Transcript) ApplyItemDetail(detail *client.TranscriptDetail) {
+	item, ok := t.byID[detail.Item.ItemID]
+	if !ok || detail.Item.Revision < item.Revision {
+		return
+	}
+	view := detail.Item.View
+	applyContentDetail(detail.Item.Kind, detail.Content, &view)
+	next := Item{TranscriptItem: detail.Item}
+	next.View = view
+	*item = next
+}
+
+func applyContentDetail(kind string, raw []byte, view *client.TranscriptView) {
+	if len(raw) == 0 {
+		return
+	}
+	var payload struct {
+		Text    string   `json:"Text"`
+		Title   string   `json:"Title"`
+		Input   string   `json:"Input"`
+		Output  string   `json:"Output"`
+		Path    string   `json:"Path"`
+		OldPath string   `json:"OldPath"`
+		Diff    string   `json:"Diff"`
+		Steps   []string `json:"Steps"`
+	}
+	if json.Unmarshal(raw, &payload) != nil {
+		return
+	}
+	expand := func(s string) string { return strings.ReplaceAll(s, "\t", "    ") }
+	switch kind {
+	case "tool_call":
+		setExpanded(&view.Text, &view.Truncated, payload.Output, expand)
+		setIfNonEmpty(&view.Title, payload.Title, expand)
+		setIfNonEmpty(&view.Input, payload.Input, expand)
+	case "file_change":
+		setExpanded(&view.Text, &view.Truncated, payload.Diff, expand)
+		setIfNonEmpty(&view.Title, payload.Path, expand)
+		setIfNonEmpty(&view.Input, payload.OldPath, expand)
+	case "plan":
+		if len(payload.Steps) > 0 {
+			view.Steps = make([]string, len(payload.Steps))
+			for i, s := range payload.Steps {
+				view.Steps[i] = expand(s)
+			}
+			view.Text = strings.Join(view.Steps, "\n")
+			view.Truncated = false
+		}
+	default:
+		setExpanded(&view.Text, &view.Truncated, payload.Text, expand)
+	}
+}
+
+func setExpanded(dst *string, trunc *bool, val string, expand func(string) string) {
+	if val != "" {
+		*dst = expand(val)
+		*trunc = false
+	}
+}
+
+func setIfNonEmpty(dst *string, val string, expand func(string) string) {
+	if val != "" {
+		*dst = expand(val)
+	}
 }
 
 // ApplyNewestPage applies the newest history page, oldest item last as the

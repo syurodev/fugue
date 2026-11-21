@@ -158,6 +158,6 @@ func transcriptEntryFromTopicItem(item *app.TranscriptTopicItemEvent) (*app.Tran
 
 func protoTranscriptDelta(delta *app.TranscriptTopicDelta) *transcriptv1.TranscriptDelta {
 	return &transcriptv1.TranscriptDelta{
-		ItemId: delta.ItemID, BaseRevision: delta.BaseRevision, View: protoTranscriptView(delta.View),
+		ItemId: delta.ItemID, BaseRevision: delta.BaseRevision, View: protoTranscriptView(&delta.View),
 	}
 }

@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -91,6 +92,12 @@ type TranscriptView struct {
 	CutAt, OmittedBytes uint32
 	// Files summarizes a file_change diff per file.
 	Files []TranscriptFileSummary
+	// Title is the item's short summary or path (tool title, file path, subagent name, command).
+	Title string
+	// Input is the item's secondary summary (tool input, old path on rename, subagent task, command args).
+	Input string
+	// Steps carries plan step texts.
+	Steps []string
 }
 
 // TranscriptMetadata is the item's allowlisted metadata (transcript §3). Only
@@ -215,6 +222,7 @@ func metadataFromProto(m *transcriptv1.TranscriptMetadata) TranscriptMetadata {
 func viewFromProto(v *transcriptv1.TranscriptView) TranscriptView {
 	out := TranscriptView{
 		Text: v.GetText(), Truncated: v.GetTruncated(), CutAt: v.GetCutAt(), OmittedBytes: v.GetOmittedBytes(),
+		Title: v.GetTitle(), Input: v.GetInput(), Steps: slices.Clone(v.GetSteps()),
 	}
 	for _, f := range v.GetFiles() {
 		out.Files = append(out.Files, TranscriptFileSummary{Header: f.GetHeader(), Added: f.GetAdded(), Removed: f.GetRemoved()})

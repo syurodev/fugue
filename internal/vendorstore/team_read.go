@@ -314,31 +314,6 @@ func (s *Store) ActiveTeamIDs(ctx context.Context) ([]string, error) {
 	return s.TeamIDsByState(ctx, TeamStateActive)
 }
 
-// AllTeamIDs lists every team ID, oldest first (F11.10b: the host registers a
-// `team:<id>` channel topic for each team at startup, ended teams included —
-// their channel stays readable).
-func (s *Store) AllTeamIDs(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx,
-		`SELECT team_id FROM team_records ORDER BY created_at ASC, team_id ASC`)
-	if err != nil {
-		return nil, fmt.Errorf("%w: query all teams: %w", ErrUnavailable, err)
-	}
-	defer closeRows(ctx, rows)
-	var out []string
-	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
-			return nil, fmt.Errorf("%w: scan the team ids: %w", ErrUnavailable, err)
-		}
-		out = append(out, id)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("%w: iterate the team ids: %w", ErrUnavailable, err)
-	}
-	return out, nil
-}
-
-// TeamIDsByState lists the team IDs currently in state, oldest first.
 func (s *Store) TeamIDsByState(ctx context.Context, state TeamState) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx,
 		`SELECT team_id FROM team_records WHERE state = ? ORDER BY created_at ASC, team_id ASC`, string(state))

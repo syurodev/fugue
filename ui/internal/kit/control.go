@@ -105,6 +105,9 @@ func newPressable() pressable {
 // Tag is the control's input tag, for focus scripting and previews.
 func (c *pressable) Tag() event.Tag { return &c.click }
 
+// Hovered reports whether the pointer is currently over the control.
+func (c *pressable) Hovered() bool { return c.click.Hovered() }
+
 // KeyClicked reports whether the last Layout activation came from Enter or
 // Space rather than a pointer click (a pointer click records a Press end).
 func (c *pressable) KeyClicked() bool { return c.keyClicked }

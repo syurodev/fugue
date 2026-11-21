@@ -86,6 +86,9 @@ message TranscriptView {
   uint32 cut_at = 3;
   uint32 omitted_bytes = 4;
   repeated TranscriptFileSummary files = 5;
+  string title = 6;
+  string input = 7;
+  repeated string steps = 8;
 }
 message TranscriptEntry {
   string item_id = 1;

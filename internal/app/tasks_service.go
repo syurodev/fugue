@@ -16,14 +16,12 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"strconv"
 	"strings"
 	"sync"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
-	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
@@ -111,6 +109,15 @@ func NewTasksService(store *vendorstore.Store, sessions taskSessions, v *vault.S
 	return &TasksService{
 		store: store, sessions: sessions, vault: v, clk: clk, ids: gen,
 		dedup: make(map[string]tasksDedupEntry, 16),
+	}
+}
+
+// RegisterTeamChannel registers one team's channel topic from outside the
+// startup enumeration (F11.10b tests; a team created outside the decide path
+// would otherwise have no topic to subscribe to).
+func (rt *HostRuntime) RegisterTeamChannel(teamID string) {
+	if rt.teamChannels != nil {
+		rt.teamChannels.RegisterTeam(teamID)
 	}
 }
 
@@ -211,99 +218,6 @@ func (s *TasksService) teamReadError(err error) error {
 	return boundaryError("read the team", err)
 }
 
-// channelAttemptOf derives the attempt a line belongs to: the attempt of the
-// task its source event names (Q-126: <root> is attempt 1, <root>~r<k> k+1).
-func channelAttemptOf(row *vendorstore.TeamChannelMessage, src *vendorstore.RecordedTeamEvent) int {
-	taskID := row.ThreadRoot
-	if src != nil && src.TaskID != "" {
-		taskID = src.TaskID
-	}
-	root := vendorstore.ThreadRootTaskID(taskID)
-	if rest := taskID[len(root):]; strings.HasPrefix(rest, "~r") {
-		if n, err := strconv.Atoi(rest[2:]); err == nil {
-			return n + 1
-		}
-	}
-	return 1
-}
-
-// channelContentText extracts one line's content from its sealed source
-// payload: the primary text of the kind, host metadata for the lifecycle
-// kinds, and nothing for a payload-less event.
-func channelContentText(row *vendorstore.TeamChannelMessage, src *vendorstore.RecordedTeamEvent, raw []byte) string {
-	if len(raw) == 0 {
-		if row.Kind == vendorstore.ChannelKindFailed && src != nil && src.FailureCode != "" {
-			return "failed(" + src.FailureCode + ")"
-		}
-		if row.Kind == vendorstore.ChannelKindTask && src != nil && src.EventType == vendorstore.EventTaskSuperseded {
-			return fmt.Sprintf("attempt %d begins after failed(%s)", retryAttemptAfter(src.TaskID), src.FailureCode)
-		}
-		return ""
-	}
-	switch row.Kind {
-	case vendorstore.ChannelKindPlan:
-		var p teams.ProposalInput
-		if json.Unmarshal(raw, &p) == nil {
-			return p.Brief
-		}
-	case vendorstore.ChannelKindDecision:
-		var d teamDecisionPayload
-		if json.Unmarshal(raw, &d) == nil && d.Decision != "" {
-			return d.Decision
-		}
-		var a teamAmendPayload
-		if json.Unmarshal(raw, &a) == nil {
-			return "the team was amended"
-		}
-	case vendorstore.ChannelKindNote:
-		var p teamNotePayload
-		if json.Unmarshal(raw, &p) == nil {
-			return p.Note
-		}
-	case vendorstore.ChannelKindQuestion:
-		var p taskQuestionPayload
-		if json.Unmarshal(raw, &p) == nil {
-			return p.Question
-		}
-	case vendorstore.ChannelKindAnswer:
-		var p struct {
-			Answer string `json:"answer"`
-		}
-		if json.Unmarshal(raw, &p) == nil {
-			return p.Answer
-		}
-	case vendorstore.ChannelKindResult:
-		var p taskReportPayload
-		if json.Unmarshal(raw, &p) == nil {
-			return p.Summary
-		}
-	case vendorstore.ChannelKindSend:
-		var m taskMessagePayload
-		if json.Unmarshal(raw, &m) == nil {
-			return m.Message
-		}
-		var u teamUserPostedPayload
-		if json.Unmarshal(raw, &u) == nil {
-			return u.Message
-		}
-	case vendorstore.ChannelKindStall:
-		var p taskStalledPayload
-		if json.Unmarshal(raw, &p) == nil {
-			return fmt.Sprintf("silent for %ds waiting_on=%s", p.SilentSeconds, p.WaitingOn)
-		}
-	case vendorstore.ChannelKindApproval:
-		var p taskApprovalRefPayload
-		if json.Unmarshal(raw, &p) == nil {
-			ref := "approval request " + p.RequestID + " (" + p.Tool + ")"
-			if p.Outcome != "" {
-				ref += ": " + p.Outcome
-			}
-			return ref
-		}
-	}
-	return string(raw)
-}
-
 // PostChannelMessage records one §6.7 user post and delivers it to the routed
 // agent (§5.3). The channel line and the delegator's informational mention
 // commit with the event; the delivery is an immediate origin=user turn.
@@ -325,6 +239,11 @@ func (s *TasksService) PostChannelMessage(ctx context.Context, cmd PostChannelCo
 	if seq, cached := s.cachedPost(cmd.CommandID, fingerprint); cached {
 		return PostChannelResult{ChannelSeq: seq}, nil
 	}
+	if s.commandKnown(cmd.CommandID) {
+		// The command_id was already used for different arguments (appstate
+		// pattern): the replay must not attach to the original operation.
+		return PostChannelResult{}, errcode.New(errcode.InvalidArgument, "command_id was already used for a different command")
+	}
 
 	rec, tasks, err := s.store.TeamSnapshot(ctx, cmd.TeamID)
 	if err != nil {
@@ -341,7 +260,7 @@ func (s *TasksService) PostChannelMessage(ctx context.Context, cmd PostChannelCo
 		return PostChannelResult{}, errcode.New(errcode.FailedPrecondition, "the task has no live session yet")
 	}
 	info, err := s.store.Snapshot(ctx, target.SessionID)
-	if err != nil || info.State != vendorstore.StateReady {
+	if err != nil || (info.State != vendorstore.StateReady && info.State != vendorstore.StateRunning) {
 		return PostChannelResult{}, errcode.New(errcode.FailedPrecondition, "the task session is not taking input")
 	}
 
@@ -368,7 +287,7 @@ func (s *TasksService) PostChannelMessage(ctx context.Context, cmd PostChannelCo
 
 	// §6.2: the delegator's mention rides the next digest (informational);
 	// the routed agent gets the text at once, origin user, no pacing.
-	s.deliverUserPost(ctx, target.SessionID, trimmed)
+	s.deliverUserPost(ctx, target.SessionID, trimmed, info.State == vendorstore.StateRunning)
 
 	lines, err := s.store.TeamChannelLinesForSources(ctx, cmd.TeamID, []int64{evSeq})
 	if err != nil {
@@ -429,12 +348,19 @@ func userPostMentionRows(rec *vendorstore.TeamRecord, tasks []vendorstore.TaskRe
 }
 
 // deliverUserPost sends the text as one origin=user turn: the pacer only
-// queues fugue-origin prompts, so this goes immediately (§6.1, §5.3).
-func (s *TasksService) deliverUserPost(ctx context.Context, sessionID, text string) {
+// queues fugue-origin prompts, so this goes immediately (§6.1, §5.3). A busy
+// session takes the prompt into its running turn (steer, §6.2).
+func (s *TasksService) deliverUserPost(ctx context.Context, sessionID, text string, running bool) {
 	if s.sessions == nil {
 		return
 	}
-	err := s.sessions.Send(ctx, sessionID, vendor.Input{Text: text, Origin: vendor.OriginUser})
+	input := vendor.Input{Text: text, Origin: vendor.OriginUser}
+	var err error
+	if running {
+		err = s.sessions.Steer(ctx, sessionID, input)
+	} else {
+		err = s.sessions.Send(ctx, sessionID, input)
+	}
 	if err != nil {
 		// The post is committed; the delivery failure surfaces to the caller
 		// through the channel only. Never log the text.
@@ -468,6 +394,15 @@ func (s *TasksService) cachedPost(commandID, fingerprint string) (int64, bool) {
 		return 0, false
 	}
 	return entry.seq, entry.seq > 0
+}
+
+// commandKnown reports a command_id the service already recorded, whatever
+// its fingerprint was.
+func (s *TasksService) commandKnown(commandID string) bool {
+	s.dedupMu.Lock()
+	defer s.dedupMu.Unlock()
+	_, ok := s.dedup[commandID]
+	return ok
 }
 
 // rememberPost records a command_id with its fingerprint and result, evicting

@@ -25,17 +25,25 @@ func (s *teamTaskService) ObserveApproval(ctx context.Context, ev interaction.Li
 	if s.interactions == nil {
 		return
 	}
-	teamID, taskID, ok := s.teamTaskOfApproval(ctx, ev)
+	ticket := ev.Ticket
+	if ticket == nil {
+		// A resolved event carries only the request ID; the binding comes
+		// from the ticket the owner still holds.
+		lookedUp, lookupErr := s.interactions.TicketOf(ev.RequestID)
+		if lookupErr != nil {
+			slog.WarnContext(ctx, "looking up the resolved interaction failed", "error_code", string(errcode.CodeOf(lookupErr)))
+			return
+		}
+		ticket = lookedUp
+	}
+	teamID, taskID, ok := s.teamTaskOfTicket(ctx, ticket)
 	if !ok {
 		return
 	}
-	tool := ""
+	tool := ticket.Binding.ToolName
 	requestID := ev.RequestID
-	if ev.Ticket != nil {
-		tool = ev.Ticket.Binding.ToolName
-		if requestID == "" {
-			requestID = ev.Ticket.RequestID
-		}
+	if requestID == "" {
+		requestID = ticket.RequestID
 	}
 	outcome := ""
 	if ev.Kind == interaction.EventResolved {
@@ -62,14 +70,13 @@ func (s *teamTaskService) ObserveApproval(ctx context.Context, ev interaction.Li
 	}
 }
 
-// teamTaskOfApproval resolves the team task a lifecycle event belongs to: a
-// relayed vendor approval binds the session that raised it. Non-team sessions
-// record nothing.
-func (s *teamTaskService) teamTaskOfApproval(ctx context.Context, ev interaction.LifecycleEvent) (string, string, bool) {
-	if ev.Ticket == nil || ev.Ticket.Binding.SessionID == "" {
+// teamTaskOfTicket resolves the team task a ticket belongs to: the binding
+// names the session that raised it. Non-team sessions record nothing.
+func (s *teamTaskService) teamTaskOfTicket(ctx context.Context, ticket *interaction.Ticket) (string, string, bool) {
+	if ticket == nil || ticket.Binding.SessionID == "" {
 		return "", "", false
 	}
-	task, found, err := s.store.TaskForSession(ctx, ev.Ticket.Binding.SessionID)
+	task, found, err := s.store.TaskForSession(ctx, ticket.Binding.SessionID)
 	if err != nil || !found {
 		return "", "", false
 	}

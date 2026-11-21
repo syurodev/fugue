@@ -227,6 +227,13 @@ func (s *InteractionService) nudgeExpiry() {
 }
 
 // Incarnation returns the host incarnation ID this service belongs to.
+// TicketOf returns the current ticket of one request, resolved or pending
+// (F11.10b: the approval reference lines need the binding a resolved
+// lifecycle event does not carry).
+func (s *InteractionService) TicketOf(requestID string) (*interaction.Ticket, error) {
+	return s.owner.LookupRequest(requestID)
+}
+
 func (s *InteractionService) Incarnation() string {
 	return s.inc
 }

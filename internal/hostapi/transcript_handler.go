@@ -80,14 +80,15 @@ func protoTranscriptEntry(entry *app.TranscriptEntry) *transcriptv1.TranscriptEn
 	return &transcriptv1.TranscriptEntry{
 		ItemId: entry.ID, TurnId: entry.TurnID, Kind: protoTranscriptKind(entry.Kind),
 		Sequence: entry.Sequence, Revision: entry.Revision, CreatedAt: entry.CreatedAt, UpdatedAt: entry.UpdatedAt,
-		Metadata: protoTranscriptMetadata(&entry.Metadata), View: protoTranscriptView(entry.View),
+		Metadata: protoTranscriptMetadata(&entry.Metadata), View: protoTranscriptView(&entry.View),
 		ContentLocked: entry.ContentLocked, TurnOrigin: entry.TurnOrigin,
 	}
 }
 
-func protoTranscriptView(view app.TranscriptView) *transcriptv1.TranscriptView {
+func protoTranscriptView(view *app.TranscriptView) *transcriptv1.TranscriptView {
 	out := &transcriptv1.TranscriptView{
 		Text: view.Text, Truncated: view.Truncated, CutAt: safeUint32(view.CutAt), OmittedBytes: safeUint32(view.OmittedBytes),
+		Title: view.Title, Input: view.Input, Steps: append([]string(nil), view.Steps...),
 	}
 	for i := range view.Files {
 		file := &view.Files[i]

@@ -301,141 +301,6 @@ func retryAttemptAfter(taskID string) int {
 	return 2
 }
 
-// channelPayloadParts renders the sealed payload of one line kind as data.
-// Unknown payload shapes degrade to one escaped raw block.
-func channelPayloadParts(kind string, raw []byte, label string) []string {
-	switch kind {
-	case vendorstore.ChannelKindPlan:
-		return channelPlanParts(raw, label)
-	case vendorstore.ChannelKindDecision:
-		return channelDecisionParts(raw, label)
-	case vendorstore.ChannelKindNote:
-		return unmarshalOrRaw(channelNoteParts)(raw, label)
-	case vendorstore.ChannelKindQuestion:
-		return unmarshalOrRaw(channelQuestionParts)(raw, label)
-	case vendorstore.ChannelKindAnswer:
-		return unmarshalOrRaw(channelAnswerParts)(raw, label)
-	case vendorstore.ChannelKindResult:
-		return unmarshalOrRaw(channelResultParts)(raw, label)
-	case vendorstore.ChannelKindSend:
-		return unmarshalOrRaw(channelSendParts)(raw, label)
-	case vendorstore.ChannelKindStall:
-		return unmarshalOrRaw(channelStallParts)(raw, label)
-	case vendorstore.ChannelKindFailed, vendorstore.ChannelKindTask, vendorstore.ChannelKindApproval:
-		return rawBlockParts(raw, label)
-	default:
-		return rawBlockParts(raw, label)
-	}
-}
-
-// unmarshalOrRaw wraps a payload renderer: an unparseable payload renders as
-// one escaped raw block instead of structured parts.
-func unmarshalOrRaw(render func(raw []byte, label string) (parts []string, ok bool)) func([]byte, string) []string {
-	return func(raw []byte, label string) []string {
-		if parts, ok := render(raw, label); ok {
-			return parts
-		}
-		return rawBlockParts(raw, label)
-	}
-}
-
-// rawBlockParts renders an unreadable payload as one escaped block.
-func rawBlockParts(raw []byte, label string) []string {
-	return []string{channelBlock(label, string(raw))}
-}
-
-func channelPlanParts(raw []byte, label string) []string {
-	var p teams.ProposalInput
-	if json.Unmarshal(raw, &p) != nil {
-		return rawBlockParts(raw, label)
-	}
-	parts := []string{"Plan proposal: " + p.Title}
-	if p.Brief != "" {
-		parts = append(parts, channelBlock(label, p.Brief))
-	}
-	for i := range p.Tasks {
-		t := &p.Tasks[i]
-		parts = append(parts, "task "+teams.EscapeDigestText(t.ID)+":")
-		parts = append(parts, channelBlock(label, t.Goal))
-	}
-	return parts
-}
-
-func channelDecisionParts(raw []byte, label string) []string {
-	var d teamDecisionPayload
-	if err := json.Unmarshal(raw, &d); err == nil && d.Decision != "" {
-		parts := []string{"The user decided \"" + d.Decision + "\"."}
-		if d.DecidedBy != "" {
-			parts = append(parts, "Decided by: "+d.DecidedBy+".")
-		}
-		return parts
-	}
-	var a teamAmendPayload
-	if err := json.Unmarshal(raw, &a); err == nil && (len(a.RoleEdits) > 0 || len(a.AddedTaskIDs) > 0 || a.Budget != nil) {
-		return []string{"The user amended the team."}
-	}
-	return rawBlockParts(raw, label)
-}
-
-func channelNoteParts(raw []byte, label string) ([]string, bool) {
-	var p teamNotePayload
-	if json.Unmarshal(raw, &p) != nil {
-		return nil, false
-	}
-	return []string{channelBlock(label, p.Note)}, true
-}
-
-func channelQuestionParts(raw []byte, label string) ([]string, bool) {
-	var p taskQuestionPayload
-	if json.Unmarshal(raw, &p) != nil {
-		return nil, false
-	}
-	return []string{"to " + p.To, channelBlock(label, p.Question)}, true
-}
-
-func channelAnswerParts(raw []byte, label string) ([]string, bool) {
-	var p struct {
-		Answer     string `json:"answer"`
-		AnsweredBy string `json:"answered_by"`
-	}
-	if json.Unmarshal(raw, &p) != nil {
-		return nil, false
-	}
-	return []string{channelBlock(label, p.Answer)}, true
-}
-
-func channelResultParts(raw []byte, label string) ([]string, bool) {
-	var p taskReportPayload
-	if json.Unmarshal(raw, &p) != nil {
-		return nil, false
-	}
-	parts := []string{"status " + p.Status}
-	if p.Summary != "" {
-		parts = append(parts, channelBlock(label, p.Summary))
-	}
-	return parts, true
-}
-
-func channelSendParts(raw []byte, label string) ([]string, bool) {
-	var p taskMessagePayload
-	if json.Unmarshal(raw, &p) != nil {
-		return nil, false
-	}
-	return []string{"to task " + teams.EscapeDigestText(p.ToTaskID), channelBlock(label, p.Message)}, true
-}
-
-func channelStallParts(raw []byte, label string) ([]string, bool) {
-	var p taskStalledPayload
-	if json.Unmarshal(raw, &p) != nil {
-		return nil, false
-	}
-	parts := []string{fmt.Sprintf("silent for %ds waiting_on=%s", p.SilentSeconds, p.WaitingOn)}
-	if p.TeamWide {
-		parts = append(parts, "team-wide: every task is waiting")
-	}
-	return parts, true
-}
-
 // channelBlock renders one piece of untrusted content as an escaped block
 // bound by the read's nonce (OR-13, CS-06).
 func channelBlock(label, text string) string {
@@ -444,4 +309,97 @@ func channelBlock(label, text string) string {
 	b.WriteString(teams.EscapeDigestText(text))
 	b.WriteString("\n⟪/untrusted " + label + "⟫")
 	return b.String()
+}
+
+// channelAttemptOf derives the attempt a line belongs to: the attempt of the
+// task its source event names (Q-126: <root> is attempt 1, <root>~r<k> k+1).
+func channelAttemptOf(row *vendorstore.TeamChannelMessage, src *vendorstore.RecordedTeamEvent) int {
+	taskID := row.ThreadRoot
+	if src != nil && src.TaskID != "" {
+		taskID = src.TaskID
+	}
+	root := vendorstore.ThreadRootTaskID(taskID)
+	if rest := taskID[len(root):]; strings.HasPrefix(rest, "~r") {
+		if n, err := strconv.Atoi(rest[2:]); err == nil {
+			return n + 1
+		}
+	}
+	return 1
+}
+
+// channelContentText extracts one line's content from its sealed source
+// payload: the primary text of the kind, host metadata for the lifecycle
+// kinds, and nothing for a payload-less event.
+func channelContentText(row *vendorstore.TeamChannelMessage, src *vendorstore.RecordedTeamEvent, raw []byte) string {
+	if len(raw) == 0 {
+		if row.Kind == vendorstore.ChannelKindFailed && src != nil && src.FailureCode != "" {
+			return "failed(" + src.FailureCode + ")"
+		}
+		if row.Kind == vendorstore.ChannelKindTask && src != nil && src.EventType == vendorstore.EventTaskSuperseded {
+			return fmt.Sprintf("attempt %d begins after failed(%s)", retryAttemptAfter(src.TaskID), src.FailureCode)
+		}
+		return ""
+	}
+	switch row.Kind {
+	case vendorstore.ChannelKindPlan:
+		var p teams.ProposalInput
+		if json.Unmarshal(raw, &p) == nil {
+			return p.Brief
+		}
+	case vendorstore.ChannelKindDecision:
+		var d teamDecisionPayload
+		if json.Unmarshal(raw, &d) == nil && d.Decision != "" {
+			return d.Decision
+		}
+		var a teamAmendPayload
+		if json.Unmarshal(raw, &a) == nil {
+			return "the team was amended"
+		}
+	case vendorstore.ChannelKindNote:
+		var p teamNotePayload
+		if json.Unmarshal(raw, &p) == nil {
+			return p.Note
+		}
+	case vendorstore.ChannelKindQuestion:
+		var p taskQuestionPayload
+		if json.Unmarshal(raw, &p) == nil {
+			return p.Question
+		}
+	case vendorstore.ChannelKindAnswer:
+		var p struct {
+			Answer string `json:"answer"`
+		}
+		if json.Unmarshal(raw, &p) == nil {
+			return p.Answer
+		}
+	case vendorstore.ChannelKindResult:
+		var p taskReportPayload
+		if json.Unmarshal(raw, &p) == nil {
+			return p.Summary
+		}
+	case vendorstore.ChannelKindSend:
+		var m taskMessagePayload
+		if json.Unmarshal(raw, &m) == nil {
+			return m.Message
+		}
+		var u teamUserPostedPayload
+		if json.Unmarshal(raw, &u) == nil {
+			return u.Message
+		}
+	case vendorstore.ChannelKindStall:
+		var p taskStalledPayload
+		if json.Unmarshal(raw, &p) == nil {
+			return fmt.Sprintf("silent for %ds waiting_on=%s", p.SilentSeconds, p.WaitingOn)
+		}
+	case vendorstore.ChannelKindApproval:
+		var p taskApprovalRefPayload
+		if json.Unmarshal(raw, &p) == nil {
+			ref := "approval request " + p.RequestID + " (" + p.Tool + ")"
+			if p.Outcome != "" {
+				ref += ": " + p.Outcome
+			}
+			return ref
+		}
+	}
+	return string(raw)
 }
