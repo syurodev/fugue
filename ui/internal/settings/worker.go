@@ -4,11 +4,18 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"time"
 
 	"github.com/syurodev/fugue/pkg/client"
+	"github.com/syurodev/fugue/ui/internal/hostconn"
 )
 
-const workerBuffer = 16
+const (
+	workerBuffer = 16
+	// ValidateDebounce is the quiet period after raw TOML typing stops before
+	// ValidateConfig runs on the injected clock.
+	ValidateDebounce = 300 * time.Millisecond
+)
 
 var errWorkerQueueFull = errors.New("the settings request queue is full")
 
@@ -21,6 +28,9 @@ const (
 	OpSavePrefs
 	OpLoadWorkspace
 	OpSaveWorkspace
+	OpValidateWorkspace
+	OpConfirmPolicy
+	OpRejectPolicy
 )
 
 // Request carries one settings operation for the worker goroutine.
@@ -28,6 +38,7 @@ type Request struct {
 	Kind          OpKind
 	WorkspaceID   string
 	RawTOML       []byte
+	RawRevision   uint64
 	ExpectedHash  string
 	CommandID     string
 	PrefsRevision uint64
@@ -40,6 +51,8 @@ type Result struct {
 	WorkspaceID   string
 	Workspace     *client.Workspace
 	Effective     *client.EffectiveWorkspaceConfig
+	Issues        []client.WorkspaceConfigIssue
+	RawRevision   uint64
 	CASConflict   bool
 	PrefsRevision uint64
 	PrefsRaw      []byte
@@ -51,7 +64,10 @@ type Result struct {
 type Client interface {
 	Workspace(ctx context.Context, id string) (client.Workspace, error)
 	GetEffectiveConfig(ctx context.Context, workspaceID string) (client.EffectiveWorkspaceConfig, error)
+	ValidateConfig(ctx context.Context, workspaceID string, rawTOML []byte) ([]client.WorkspaceConfigIssue, error)
 	UpdateWorkspaceConfig(ctx context.Context, workspaceID string, rawTOML []byte, expectedHash string) (client.Workspace, error)
+	ConfirmWorkspaceConfig(ctx context.Context, workspaceID, expectedHash string) error
+	RejectWorkspaceConfig(ctx context.Context, workspaceID, expectedHash string) error
 	GetAppStatePreferences(ctx context.Context) (client.AppStatePreferences, error)
 	PutAppStatePreferences(ctx context.Context, in *client.PutAppStatePreferencesInput) (uint64, error)
 }
@@ -60,11 +76,22 @@ type Client interface {
 type Worker struct {
 	clientOf func() Client
 	onResult func()
+	clock    hostconn.Clock
 	reqs     chan Request
 	results  chan Result
 	cancel   context.CancelFunc
 	done     chan struct{}
 	stopOnce sync.Once
+}
+
+// SetClock injects the clock used for live-validation debouncing before Start.
+func (w *Worker) SetClock(clk hostconn.Clock) { w.clock = clk }
+
+func (w *Worker) clockOrReal() hostconn.Clock {
+	if w.clock != nil {
+		return w.clock
+	}
+	return hostconn.RealClock{}
 }
 
 // NewWorker builds a settings worker using clientOf and an optional onResult notifier.
@@ -109,12 +136,40 @@ func (w *Worker) Results() <-chan Result { return w.results }
 
 func (w *Worker) run(ctx context.Context) {
 	defer close(w.done)
+	var pendingVal *Request
+	var valTimer hostconn.Timer
+	var valTimerCh <-chan time.Time
+	stopTimer := func() {
+		if valTimer != nil {
+			valTimer.Stop()
+			valTimer = nil
+			valTimerCh = nil
+		}
+	}
+	defer stopTimer()
+
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case req := <-w.reqs:
+			if req.Kind == OpValidateWorkspace {
+				stopTimer()
+				copyReq := req
+				pendingVal = &copyReq
+				valTimer = w.clockOrReal().NewTimer(ValidateDebounce)
+				valTimerCh = valTimer.C()
+				continue
+			}
 			w.handle(ctx, &req)
+		case <-valTimerCh:
+			req := pendingVal
+			pendingVal = nil
+			valTimer = nil
+			valTimerCh = nil
+			if req != nil {
+				w.handle(ctx, req)
+			}
 		}
 	}
 }
@@ -158,6 +213,12 @@ func (w *Worker) execute(ctx context.Context, c Client, req *Request) Result {
 		return executeLoadWorkspace(ctx, c, req.WorkspaceID)
 	case OpSaveWorkspace:
 		return executeSaveWorkspace(ctx, c, req)
+	case OpValidateWorkspace:
+		return executeValidateWorkspace(ctx, c, req)
+	case OpConfirmPolicy:
+		return executePolicyDecision(ctx, c, req, true)
+	case OpRejectPolicy:
+		return executePolicyDecision(ctx, c, req, false)
 	default:
 		return Result{Kind: req.Kind, WorkspaceID: req.WorkspaceID}
 	}
@@ -243,6 +304,53 @@ func executeSaveWorkspace(ctx context.Context, c Client, req *Request) Result {
 	res.Err = err
 	res.Code, _ = client.WorkspaceCodeOf(err)
 	if errors.Is(err, client.ErrWorkspaceConfigChanged) {
+		res.CASConflict = true
+		reload := executeLoadWorkspace(ctx, c, req.WorkspaceID)
+		res.Workspace = reload.Workspace
+		res.Effective = reload.Effective
+	}
+	return res
+}
+
+func executeValidateWorkspace(ctx context.Context, c Client, req *Request) Result {
+	res := Result{
+		Kind:        OpValidateWorkspace,
+		WorkspaceID: req.WorkspaceID,
+		RawRevision: req.RawRevision,
+	}
+	issues, err := c.ValidateConfig(ctx, req.WorkspaceID, req.RawTOML)
+	if err != nil {
+		res.Err = err
+		res.Code, _ = client.WorkspaceCodeOf(err)
+		return res
+	}
+	res.Issues = issues
+	return res
+}
+
+func executePolicyDecision(ctx context.Context, c Client, req *Request, confirm bool) Result {
+	kind := OpRejectPolicy
+	if confirm {
+		kind = OpConfirmPolicy
+	}
+	res := Result{Kind: kind, WorkspaceID: req.WorkspaceID}
+	var err error
+	if confirm {
+		err = c.ConfirmWorkspaceConfig(ctx, req.WorkspaceID, req.ExpectedHash)
+	} else {
+		err = c.RejectWorkspaceConfig(ctx, req.WorkspaceID, req.ExpectedHash)
+	}
+	if err == nil {
+		reload := executeLoadWorkspace(ctx, c, req.WorkspaceID)
+		res.Workspace = reload.Workspace
+		res.Effective = reload.Effective
+		res.Err = reload.Err
+		res.Code = reload.Code
+		return res
+	}
+	res.Err = err
+	res.Code, _ = client.WorkspaceCodeOf(err)
+	if res.Code == client.WorkspaceCodeConfigChanged || errors.Is(err, client.ErrWorkspaceConfigChanged) {
 		res.CASConflict = true
 		reload := executeLoadWorkspace(ctx, c, req.WorkspaceID)
 		res.Workspace = reload.Workspace

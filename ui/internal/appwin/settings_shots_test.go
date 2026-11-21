@@ -17,13 +17,18 @@ import (
 )
 
 const (
-	shotSettings       = "settings"
-	shotSettingsStates = "settings-states"
-	testSettingsInc    = "inc-settings-shot"
-	testSettingsWSID   = "ws-1"
-	testApprovalAuto   = "auto"
-	testThemeLight     = "light"
-	testThemeDark      = "dark"
+	shotSettings              = "settings"
+	shotSettingsStates        = "settings-states"
+	shotSettingsRawClean      = "settings-raw-clean"
+	shotSettingsRawErrors     = "settings-raw-errors"
+	shotSettingsRawConflict   = "settings-raw-conflict"
+	shotSettingsPendingPolicy = "settings-pending-policy"
+	testSettingsInc           = "inc-settings-shot"
+	testSettingsWSID          = "ws-1"
+	testApprovalAuto          = "auto"
+	testSandboxWrite          = "workspace-write"
+	testThemeLight            = "light"
+	testThemeDark             = "dark"
 )
 
 func buildShotMatrix(scenes ...string) []shotSpec {
@@ -52,7 +57,14 @@ func buildShotMatrix(scenes ...string) []shotSpec {
 }
 
 func settingsShotSpecs() []shotSpec {
-	return buildShotMatrix(shotSettings, shotSettingsStates)
+	return buildShotMatrix(
+		shotSettings,
+		shotSettingsStates,
+		shotSettingsRawClean,
+		shotSettingsRawErrors,
+		shotSettingsRawConflict,
+		shotSettingsPendingPolicy,
+	)
 }
 
 func buildSettingsShotScreens(t *testing.T, scene string) *screens {
@@ -81,7 +93,7 @@ func buildSettingsShotScreens(t *testing.T, scene string) *screens {
 		},
 		Settings: client.WorkspaceSettings{
 			ApprovalMode:          testApprovalAuto,
-			SandboxProfile:        "workspace-write",
+			SandboxProfile:        testSandboxWrite,
 			ShellAllow:            []string{"git status", "go test"},
 			EnvTags:               []client.EnvTagRule{{Match: "*.prod", Tag: "prod"}},
 			SessionTeams:          true,
@@ -98,17 +110,45 @@ func buildSettingsShotScreens(t *testing.T, scene string) *screens {
 	sc.settings.Prefs.Current = settings.Preferences{ThemeMode: settings.ThemeLight, UIScale: settings.Scale100}
 	sc.settings.SelectWorkspace(ws.ID, ws.Name)
 	sc.settings.ApplyWorkspaceLoaded(&ws, &eff)
-	if scene == shotSettingsStates {
+	applySettingsShotScene(sc, scene)
+	sc.settingsView.syncFromModel(sc.settings)
+	sc.showPane(paneSettings)
+	return sc
+}
+
+func applySettingsShotScene(sc *screens, scene string) {
+	switch scene {
+	case shotSettingsStates:
 		sc.settings.Draft.IdleDetachSeconds = 120
 		sc.settings.Draft.ApprovalMode = testApprovalAsk
 		sc.settings.PolicyConfirmArmed = true
 		sc.settings.ChangedUnderneath = []settings.FieldChange{
 			{ID: settings.FieldTeamMaxAgents, Label: settings.FieldLabel(settings.FieldTeamMaxAgents), OldValue: "12", NewValue: "8"},
 		}
+	case shotSettingsRawClean:
+		sc.settingsView.activeTab = tabRaw
+		sc.settings.RawDraft = "[policy]\napproval_mode = \"auto\"\nsandbox_profile = \"workspace-write\"\n\n[teams]\nidle_detach_seconds = 180\n"
+	case shotSettingsRawErrors:
+		sc.settingsView.activeTab = tabRaw
+		sc.settings.RawDraft = "[policy]\napproval_mode = \"invalid\"\nbogus_key = true\n"
+		sc.settings.ValidationIssues = []client.WorkspaceConfigIssue{
+			{Key: testPolicyKey, Line: 2, Column: 17, Message: "must be ask, auto, or never"},
+			{Key: "policy.bogus_key", Line: 3, Column: 1, Message: "unknown key"},
+		}
+	case shotSettingsRawConflict:
+		sc.settingsView.activeTab = tabRaw
+		sc.settings.RawTOML = []byte("[policy]\napproval_mode = \"ask\"\n")
+		sc.settings.RawDraft = "[policy]\napproval_mode = \"never\"\n"
+		sc.settings.RawConflict = true
+		sc.settings.ConflictHash = "hash-external-9f2a"
+		sc.settings.ShowConflictDiff = true
+	case shotSettingsPendingPolicy:
+		sc.settings.PendingPolicyConfirmation = true
+		sc.settings.PendingPolicyDiff = []client.PolicyDiffEntry{
+			{Key: testPolicyKey, OldValue: testApprovalAuto, NewValue: "never"},
+			{Key: "policy.shell_allow", OldValue: "[git status]", NewValue: "[git status, rm -rf]"},
+		}
 	}
-	sc.settingsView.syncFromModel(sc.settings)
-	sc.showPane(paneSettings)
-	return sc
 }
 
 func renderSettingsShot(t *testing.T, win *headless.Window, spec shotSpec) *image.RGBA {
@@ -145,7 +185,14 @@ func TestSettingsShotsRender(t *testing.T) {
 		}
 		rendered[spec.name] = img
 	}
-	for _, scene := range []string{shotSettings, shotSettingsStates} {
+	for _, scene := range []string{
+		shotSettings,
+		shotSettingsStates,
+		shotSettingsRawClean,
+		shotSettingsRawErrors,
+		shotSettingsRawConflict,
+		shotSettingsPendingPolicy,
+	} {
 		if !imagesDifferRGBA(rendered[scene+"-light-ui100"], rendered[scene+"-dark-ui100"]) {
 			t.Fatalf("%s light and dark shots are identical", scene)
 		}

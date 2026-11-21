@@ -8,6 +8,7 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 
 	"github.com/syurodev/fugue/ui/internal/motion"
 	"github.com/syurodev/fugue/ui/internal/theme"
@@ -35,7 +36,18 @@ type TextAreaProps struct {
 	// EnterSubmits turns Enter into the composer's submit key (§6.9):
 	// Submitted reports a plain Enter and Shift+Enter inserts the newline.
 	EnterSubmits bool
-	Disabled     bool
+	// Monospace renders the editor in theme.TypeCode for code/TOML editing.
+	Monospace bool
+	// ErrorLines lists 1-based line numbers to mark with a danger indicator.
+	ErrorLines []int
+	Disabled   bool
+}
+
+func (p *TextAreaProps) editorType() theme.Type {
+	if p != nil && p.Monospace {
+		return theme.TypeCode()
+	}
+	return editorType()
 }
 
 // TextAreaState is the long-lived state the caller keeps per logical
@@ -74,6 +86,9 @@ func (s *TextAreaState) Tag() event.Tag { return s.core.Tag() }
 // command choice and draft restore, F10.4b).
 func (s *TextAreaState) MoveCaretToEnd() { s.core.caretToEnd() }
 
+// SetCaret sets the selection/caret range in rune offsets.
+func (s *TextAreaState) SetCaret(start, end int) { s.core.ed.SetCaret(start, end) }
+
 // MarkSubmitted marks the area submitted, as the caller does when the
 // form around it is sent: the §6.8 error gate opens from then on.
 func (s *TextAreaState) MarkSubmitted() { s.err.submitted = true }
@@ -87,9 +102,10 @@ func (s *TextAreaState) Measure(env *Env, gtx *layout.Context, p *TextAreaProps)
 	sz := fieldMetrics(env, gtx, p.Label)
 	w := textAreaWidth(env, gtx, p)
 	line := fieldLineHeight(env, gtx, p.Helper, p.Error, p.Error != "", w)
+	edType := p.editorType()
 	return layout.Dimensions{
-		Size:     image.Pt(w, sz.labelH+min(s.bodyHeight(env, gtx, w), s.maxBody(env, gtx, p))+2*sz.boxPadY+int(sz.lineGapPx+line+0.5)),
-		Baseline: sz.labelH + sz.boxPadY + labelLine(env, gtx, editorType())/2,
+		Size:     image.Pt(w, sz.labelH+min(s.bodyHeight(env, gtx, w, edType), s.maxBody(env, gtx, p))+2*sz.boxPadY+int(sz.lineGapPx+line+0.5)),
+		Baseline: sz.labelH + sz.boxPadY + labelLine(env, gtx, edType)/2,
 	}
 }
 
@@ -100,7 +116,7 @@ func (s *TextAreaState) Layout(env *Env, gtx *layout.Context, p *TextAreaProps) 
 	pre := fieldMetrics(env, gtx, p.Label)
 	w := textAreaWidth(env, gtx, p)
 	maxBody := s.maxBody(env, gtx, p)
-	full := s.bodyHeight(env, gtx, w)
+	full := s.bodyHeight(env, gtx, w, p.editorType())
 	content := min(full, maxBody)
 	scrolls := full > maxBody
 	boxH := int(followSmooth(env, &s.boxF, float32(content+2*pre.boxPadY)) + 0.5)
@@ -147,7 +163,7 @@ func (s *TextAreaState) maxBody(env *Env, gtx *layout.Context, p *TextAreaProps)
 	if p.MaxLines <= 0 {
 		return 1 << 20
 	}
-	_, line := env.Content(editorType())
+	_, line := env.Content(p.editorType())
 	return p.MaxLines * gtx.Sp(line)
 }
 
@@ -155,14 +171,14 @@ func (s *TextAreaState) maxBody(env *Env, gtx *layout.Context, p *TextAreaProps)
 // source and returns its full text height: the number the box grows
 // around, capped by the caller at the point of use, and the number that
 // says whether the in-box scroller is needed at all.
-func (s *TextAreaState) bodyHeight(env *Env, gtx *layout.Context, w int) int {
+func (s *TextAreaState) bodyHeight(env *Env, gtx *layout.Context, w int, edType theme.Type) int {
 	textW := max(w-2*gtx.Dp(theme.SpaceLG), 0)
 	m := op.Record(gtx.Ops)
 	g := *gtx
 	var dead input.Source
 	g.Source = dead
 	g.Constraints = layout.Constraints{Max: image.Pt(textW, 1<<20)}
-	dims := drawEditor(env, &g, &s.core.ed, env.Th.Chrome().Fg, env.Th.Chrome().SelectedWash)
+	dims := drawEditorWithType(env, &g, &s.core.ed, edType, env.Th.Chrome().Fg, env.Th.Chrome().SelectedWash)
 	m.Stop()
 	return dims.Size.Y
 }
@@ -199,36 +215,43 @@ func (s *TextAreaState) draw(env *Env, gtx *layout.Context, p *TextAreaProps, sz
 		ig = gtx.Disabled()
 	}
 	at(&ig, box.Min, func(gtx *layout.Context) {
+		edType := p.editorType()
+		_, line := env.Content(edType)
+		linePx := gtx.Sp(line)
 		inner := image.Rect(sz.padX, sz.boxPadY, max(w-sz.padX, sz.padX), max(boxH-sz.boxPadY, sz.boxPadY))
-		defer clip.Rect(inner).Push(gtx.Ops).Pop()
 		textW := inner.Dx()
-		if scrolls {
-			// Past the cap the editor flows at its full height inside the
-			// ScrollArea viewport of the inner rect; ScrollArea owns the
-			// wheel and draws the §6.29 indicator bar. The viewport and the
-			// line height are what ScrollToCaret aligns the caret to.
-			_, line := env.Content(editorType())
-			s.viewport, s.linePx = inner.Dy(), gtx.Sp(line)
-			at(gtx, inner.Min, func(gtx *layout.Context) {
-				g := *gtx
-				g.Constraints = layout.Constraints{Max: image.Pt(textW, inner.Dy())}
-				s.scroll.Layout(env, &g, ScrollAreaProps{Axis: layout.Vertical}, func(gtx *layout.Context) layout.Dimensions {
-					return drawEditor(env, gtx, &s.core.ed, look.fg, fade(c.SelectedWash, dimOf(p.Disabled)))
-				})
-			})
-		} else {
-			if s.core.text() == "" && p.Placeholder != "" {
+		scrollOff := 0
+		func() {
+			defer clip.Rect(inner).Push(gtx.Ops).Pop()
+			if scrolls {
+				// Past the cap the editor flows at its full height inside the
+				// ScrollArea viewport of the inner rect; ScrollArea owns the
+				// wheel and draws the §6.29 indicator bar. The viewport and the
+				// line height are what ScrollToCaret aligns the caret to.
+				s.viewport, s.linePx = inner.Dy(), linePx
+				scrollOff = s.scroll.Offset()
 				at(gtx, inner.Min, func(gtx *layout.Context) {
-					dims := drawText(env, gtx, editorType(), fade(c.Placeholder, dimOf(p.Disabled)), p.Placeholder, false)
-					recordRun(env, image.Rectangle{Max: dims.Size}.Add(inner.Min))
+					g := *gtx
+					g.Constraints = layout.Constraints{Max: image.Pt(textW, inner.Dy())}
+					s.scroll.Layout(env, &g, ScrollAreaProps{Axis: layout.Vertical}, func(gtx *layout.Context) layout.Dimensions {
+						return drawEditorWithType(env, gtx, &s.core.ed, edType, look.fg, fade(c.SelectedWash, dimOf(p.Disabled)))
+					})
+				})
+			} else {
+				if s.core.text() == "" && p.Placeholder != "" {
+					at(gtx, inner.Min, func(gtx *layout.Context) {
+						dims := drawText(env, gtx, edType, fade(c.Placeholder, dimOf(p.Disabled)), p.Placeholder, false)
+						recordRun(env, image.Rectangle{Max: dims.Size}.Add(inner.Min))
+					})
+				}
+				at(gtx, inner.Min, func(gtx *layout.Context) {
+					g := *gtx
+					g.Constraints = layout.Constraints{Max: image.Pt(textW, maxBody)}
+					drawEditorWithType(env, &g, &s.core.ed, edType, look.fg, fade(c.SelectedWash, dimOf(p.Disabled)))
 				})
 			}
-			at(gtx, inner.Min, func(gtx *layout.Context) {
-				g := *gtx
-				g.Constraints = layout.Constraints{Max: image.Pt(textW, maxBody)}
-				drawEditor(env, &g, &s.core.ed, look.fg, fade(c.SelectedWash, dimOf(p.Disabled)))
-			})
-		}
+		}()
+		drawTextAreaErrorMarkers(env, gtx, inner, linePx, scrollOff, p.ErrorLines)
 	})
 	lineY := sz.labelH + boxH + int(sz.lineGapPx+0.5)
 	var lineBounds image.Rectangle
@@ -236,4 +259,24 @@ func (s *TextAreaState) draw(env *Env, gtx *layout.Context, p *TextAreaProps, sz
 		lineBounds = belowLine(env, gtx, w, p.Helper, p.Error, c.FgSubtle, env.Th.Status().Danger, fm)
 	})
 	recordRun(env, lineBounds.Add(image.Pt(0, lineY)))
+}
+
+func drawTextAreaErrorMarkers(env *Env, gtx *layout.Context, inner image.Rectangle, linePx, scrollOff int, errorLines []int) {
+	if len(errorLines) == 0 || linePx <= 0 {
+		return
+	}
+	barW := max(gtx.Dp(3), 2)
+	barX := max(inner.Min.X-barW-gtx.Dp(theme.SpaceXXS), 0)
+	for _, ln := range errorLines {
+		if ln < 1 {
+			continue
+		}
+		y0 := inner.Min.Y + (ln-1)*linePx - scrollOff
+		y1 := y0 + linePx
+		if y1 <= inner.Min.Y || y0 >= inner.Max.Y {
+			continue
+		}
+		r := image.Rect(barX, max(y0, inner.Min.Y), barX+barW, min(y1, inner.Max.Y))
+		paint.FillShape(gtx.Ops, env.Th.Status().Danger, clip.Rect(r).Op())
+	}
 }
