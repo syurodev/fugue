@@ -66,11 +66,14 @@ type Params struct {
 
 // Client is one leased connection to the host: Dial opened the dedicated
 // HTTP/2 connection and said Hello on it. Its methods block; streams are
-// driven by the caller. Close releases the transport once the caller has
-// closed every stream it holds.
+// driven by the caller. Close releases the transport and closes the underlying
+// connection, ending the client lease even if a just-canceled stream is still
+// draining in the transport.
 type Client struct {
 	hc   *http.Client
 	base string
+	mu   sync.Mutex
+	conn net.Conn
 }
 
 // Dial connects to the host socket and says Hello, acquiring the lease.
@@ -93,9 +96,13 @@ func dial(ctx context.Context, socket string, p Params, trusted bool) (*Client, 
 		return nil, err
 	}
 	c := &Client{
-		hc:   &http.Client{Transport: newTransport(socket, trusted)},
 		base: "http://fugue",
 	}
+	c.hc = &http.Client{Transport: newTransport(socket, trusted, func(conn net.Conn) {
+		c.mu.Lock()
+		c.conn = conn
+		c.mu.Unlock()
+	})}
 	svc := hostv1connect.NewHostServiceClient(c.hc, c.base)
 	_, err = svc.Hello(ctx, connect.NewRequest(&hostv1.HelloRequest{
 		ClientName:           p.Name,
@@ -187,10 +194,20 @@ func (c *Client) AcquireHeavySlot(ctx context.Context) (*HeavyLease, error) {
 	})
 }
 
-// Close releases the connection's idle transport state. It does not end open
-// streams: close them first, or the lease outlives the Client.
+// Close releases the transport state and closes the leased socket connection.
+// Calling Close after closing canceled streams guarantees the socket does not
+// linger idle while HTTP/2 finishes tearing down stream state.
 func (c *Client) Close() {
 	c.hc.CloseIdleConnections()
+	c.mu.Lock()
+	conn := c.conn
+	c.conn = nil
+	c.mu.Unlock()
+	if conn != nil {
+		if err := conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			return
+		}
+	}
 }
 
 // newTransport builds the dedicated connection's transport: unencrypted
@@ -201,7 +218,7 @@ func (c *Client) Close() {
 // ErrDisconnected without touching the socket, so a dropped lease surfaces as
 // "disconnected" and never as a silent new connection the host has not
 // helloed.
-func newTransport(socket string, trusted bool) *http.Transport {
+func newTransport(socket string, trusted bool, onConn func(net.Conn)) *http.Transport {
 	var protos http.Protocols
 	protos.SetUnencryptedHTTP2(true)
 	var dialMu sync.Mutex
@@ -224,6 +241,9 @@ func newTransport(socket string, trusted bool) *http.Transport {
 				return nil, fmt.Errorf("dial the host socket: %w", err)
 			}
 			dialed = true
+			if onConn != nil {
+				onConn(conn)
+			}
 			return conn, nil
 		},
 		Protocols:       &protos,

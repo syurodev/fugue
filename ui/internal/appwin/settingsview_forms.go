@@ -117,12 +117,11 @@ func (v *settingsView) layoutTeamIntField(gtx *layout.Context, env *kit.Env, sc 
 	minF, maxF := float64(spec.min), float64(spec.max)
 	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			return v.layoutFieldMetaRow(gtx, env, sc, spec.id, "")
+			return v.layoutFieldHeaderRow(gtx, env, sc, spec.label, spec.id, "")
 		}),
-		spacerH(theme.SpaceXXS),
+		spacerH(theme.SpaceXS),
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 			props := &kit.TextFieldProps{
-				Label:    spec.label,
 				Helper:   spec.helper,
 				Error:    w.err,
 				Variant:  kit.TextFieldNumber,
@@ -203,12 +202,11 @@ func (v *settingsView) layoutPolicySelect(
 ) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			return v.layoutFieldMetaRow(gtx, env, sc, fieldID, "policy")
+			return v.layoutFieldHeaderRow(gtx, env, sc, label, fieldID, "policy")
 		}),
-		spacerH(theme.SpaceXXS),
+		spacerH(theme.SpaceXS),
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 			props := &kit.SelectProps{
-				Label:    label,
 				Helper:   helper,
 				Options:  opts,
 				Value:    value,
@@ -229,12 +227,11 @@ func (v *settingsView) layoutPolicySelect(
 func (v *settingsView) layoutShellAllowField(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			return v.layoutFieldMetaRow(gtx, env, sc, settings.FieldShellAllow, "policy")
+			return v.layoutFieldHeaderRow(gtx, env, sc, "Shell allow prefixes", settings.FieldShellAllow, "policy")
 		}),
-		spacerH(theme.SpaceXXS),
+		spacerH(theme.SpaceXS),
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 			props := &kit.TextFieldProps{
-				Label:       "Shell allow prefixes",
 				Placeholder: "git status, go test",
 				Helper:      "Comma-separated command prefixes permitted without confirmation.",
 				Variant:     kit.TextFieldText,
@@ -258,12 +255,11 @@ func (v *settingsView) layoutShellAllowField(gtx *layout.Context, env *kit.Env, 
 func (v *settingsView) layoutEnvTagsField(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
 	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			return v.layoutFieldMetaRow(gtx, env, sc, settings.FieldEnvTags, "policy")
+			return v.layoutFieldHeaderRow(gtx, env, sc, "Environment tags", settings.FieldEnvTags, "policy")
 		}),
-		spacerH(theme.SpaceXXS),
+		spacerH(theme.SpaceXS),
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 			props := &kit.TextFieldProps{
-				Label:       "Environment tags",
 				Placeholder: "*.prod=prod",
 				Helper:      "Comma-separated match=tag rules.",
 				Error:       v.envTagsErr,
@@ -296,11 +292,7 @@ func (v *settingsView) layoutPolicySwitch(
 	fieldID, label string, sw *kit.SwitchState,
 	checked bool, onToggle func(bool),
 ) layout.Dimensions {
-	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
-		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			return v.layoutFieldMetaRow(gtx, env, sc, fieldID, "policy")
-		}),
-		spacerH(theme.SpaceXXS),
+	children := []layout.FlexChild{
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 			props := kit.SwitchProps{
 				Label:    label,
@@ -316,10 +308,28 @@ func (v *settingsView) layoutPolicySwitch(
 			}
 			return sw.Measure(env, gtx, props)
 		}),
-	)
+		spacerW(theme.SpaceSM),
+	}
+	children = append(children, v.fieldMetaTagChildren(env, sc, fieldID, "policy")...)
+	children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+		return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
+	}))
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx, children...)
 }
 
-func (v *settingsView) layoutFieldMetaRow(gtx *layout.Context, env *kit.Env, sc *screens, fieldID, kindBadge string) layout.Dimensions {
+func (v *settingsView) layoutFieldHeaderRow(gtx *layout.Context, env *kit.Env, sc *screens, label, fieldID, kindBadge string) layout.Dimensions {
+	children := []layout.FlexChild{
+		rigidLabel(env, theme.TypeLabel(), env.Th.Chrome().Fg, label),
+		spacerW(theme.SpaceSM),
+	}
+	children = append(children, v.fieldMetaTagChildren(env, sc, fieldID, kindBadge)...)
+	children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+		return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
+	}))
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx, children...)
+}
+
+func (v *settingsView) fieldMetaTagChildren(env *kit.Env, sc *screens, fieldID, kindBadge string) []layout.FlexChild {
 	tier := sc.settings.TierFor(fieldID)
 	tierTag := ensureTagState(v.tierTags, fieldID)
 	children := []layout.FlexChild{
@@ -345,10 +355,7 @@ func (v *settingsView) layoutFieldMetaRow(gtx *layout.Context, env *kit.Env, sc 
 			Status:  theme.StatusInfo,
 		}))
 	}
-	children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-		return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
-	}))
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx, children...)
+	return children
 }
 
 func tierTagVariant(tier int64) kit.TagVariant {
