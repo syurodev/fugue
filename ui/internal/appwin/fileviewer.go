@@ -17,6 +17,7 @@ import (
 	"github.com/syurodev/fugue/pkg/client"
 
 	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/kit/icondata"
 	"github.com/syurodev/fugue/ui/internal/mdview"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
@@ -289,7 +290,7 @@ func (v *fileViewer) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens
 	ch := env.Th.Chrome()
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			name, icon := kit.FileIconData(v.displayPath())
+			name, icon := v.headerSymbol()
 			d, err := env.DrawSymbol(gtx, name, &icon, theme.IconSM, env.Th.FileColor(theme.FileColorName(icon.Color)))
 			sc.fail(err)
 			return d
@@ -318,6 +319,20 @@ func (v *fileViewer) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens
 			v.setOpen(false)
 		}),
 	)
+}
+
+// headerSymbol resolves the header glyph from the pure target path, never
+// the display string: the root prefix and the ":96-103" line suffix would
+// defeat the extension lookup, and a folder must use the folder glyph.
+func (v *fileViewer) headerSymbol() (string, icondata.FileIcon) {
+	if v.mode == fileViewFolder {
+		return kit.FolderIconData(v.path)
+	}
+	if v.mode == fileViewDiff {
+		// A generic "diff" title degrades to the generic document glyph.
+		return kit.FileIconData(v.diffTitle)
+	}
+	return kit.FileIconData(v.path)
 }
 
 func (v *fileViewer) displayPath() string {
@@ -386,7 +401,7 @@ func (v *fileViewer) layoutFile(env *kit.Env, gtx *layout.Context) layout.Dimens
 	end := max(v.endLine, v.line)
 	local := *gtx
 	dims, _ := mdview.LayoutCodeBlock(env, &local, v.code, &mdview.CodeBlockProps{
-		Title: path.Base(v.path), Format: v.file.Language, Icon: kit.IconFileCode,
+		Title: path.Base(v.path), Format: v.file.Language,
 		ShowLineNumbers: true, MaxLines: -1,
 		Raw:              v.file.Content,
 		HighlightLine:    v.line,
@@ -414,7 +429,7 @@ func viewerViewportLines(gtx *layout.Context) int {
 func (v *fileViewer) layoutDiff(env *kit.Env, gtx *layout.Context) layout.Dimensions {
 	local := *gtx
 	dims, _ := mdview.LayoutCodeBlock(env, &local, v.diff, &mdview.CodeBlockProps{
-		Title: v.diffTitle, Icon: kit.IconPencil, IsDiff: true,
+		Title: v.diffTitle, IsDiff: true,
 		ShowLineNumbers: true, MaxLines: -1,
 		Raw: v.diffRaw,
 	})

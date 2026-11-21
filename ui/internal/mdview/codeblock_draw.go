@@ -19,6 +19,7 @@ import (
 
 	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/kit/icondata"
 	"github.com/syurodev/fugue/ui/internal/markdown"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
@@ -84,40 +85,72 @@ func diffLineSpans(dl *DiffLine) []markdown.Span {
 	return []markdown.Span{{Text: dl.Text}}
 }
 
-func resolvedHeader(p *CodeBlockProps) (icon kit.IconName, title, fmtLabel string) {
+// codeBlockHeaderIcon is the resolved header icon: either a Lucide icon, or
+// a Symbols glyph (F10.23) resolved from the file path the language came
+// from.
+type codeBlockHeaderIcon struct {
+	icon       kit.IconName
+	symbolName string
+	symbol     icondata.FileIcon
+	title      string
+	fmtLabel   string
+}
+
+func resolvedHeader(p *CodeBlockProps) codeBlockHeaderIcon {
 	switch {
 	case p.Command != "":
-		icon = kit.IconTerminal
+		icon := kit.IconTerminal
 		if p.Icon != "" {
 			icon = p.Icon
 		}
-		return icon, "shell", ""
+		return codeBlockHeaderIcon{icon: icon, title: "shell"}
 	case p.IsDiff:
-		title = p.Title
+		title := p.Title
 		if title == "" {
 			title = "diff"
 		}
-		icon = p.Icon
-		if icon == "" {
-			icon = FileIcon(p.Title)
-			if p.Title == "" {
-				icon = kit.IconPencil
-			}
+		if p.Icon != "" {
+			return codeBlockHeaderIcon{icon: p.Icon, title: title}
 		}
-		return icon, title, ""
+		if p.Title != "" {
+			name, symbol := kit.FileIconData(p.Title)
+			return codeBlockHeaderIcon{symbolName: name, symbol: symbol, title: title}
+		}
+		return codeBlockHeaderIcon{icon: kit.IconPencil, title: title}
 	case p.IsOutputCard:
-		icon = p.Icon
+		icon := p.Icon
 		if icon == "" {
 			icon = kit.IconFileCode
 		}
-		return icon, "output", p.Format
+		return codeBlockHeaderIcon{icon: icon, title: "output", fmtLabel: p.Format}
 	default:
-		title = p.Format
+		title := p.Format
 		if title == "" {
 			title = "code"
 		}
-		return kit.IconFileCode, title, ""
+		// A titled block's language comes from a file path: the header
+		// carries that file's Symbols icon (F10.4e follow-up).
+		if p.Title != "" {
+			name, symbol := kit.FileIconData(p.Title)
+			return codeBlockHeaderIcon{symbolName: name, symbol: symbol, title: title}
+		}
+		return codeBlockHeaderIcon{icon: kit.IconFileCode, title: title}
 	}
+}
+
+// drawHeaderIcon paints the header glyph: a Symbols icon tinted by its
+// theme file color when the language came from a file path, the Lucide
+// icon otherwise.
+func drawHeaderIcon(env *kit.Env, gtx *layout.Context, head *codeBlockHeaderIcon, fallback color.NRGBA) layout.Dimensions {
+	if head.symbolName != "" {
+		col := env.Th.FileColor(theme.FileColorName(head.symbol.Color))
+		d, err := env.DrawSymbol(gtx, head.symbolName, &head.symbol, theme.IconSM, col)
+		logMDViewErr(err)
+		return d
+	}
+	d, err := env.Icon(gtx, head.icon, theme.IconSM, fallback)
+	logMDViewErr(err)
+	return d
 }
 
 func (v *view) drawBlockHeader(
@@ -130,7 +163,8 @@ func (v *view) drawBlockHeader(
 	res *CodeBlockResult,
 ) int {
 	c := v.th.Chrome()
-	icon, title, fmtLabel := resolvedHeader(p)
+	head := resolvedHeader(p)
+	title, fmtLabel := head.title, head.fmtLabel
 	rowH := gtx.Dp(theme.ControlSM) + 2*gtx.Dp(theme.SpaceXS)
 	off := op.Offset(image.Pt(pad, gtx.Dp(theme.SpaceXS))).Push(gtx.Ops)
 	inner := *gtx
@@ -138,9 +172,7 @@ func (v *view) drawBlockHeader(
 	layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(inner,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
-			d, err := env.Icon(&local, icon, theme.IconSM, c.IconMuted)
-			logMDViewErr(err)
-			return d
+			return drawHeaderIcon(env, &local, &head, c.IconMuted)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Dimensions{Size: image.Pt(gtx.Dp(theme.SpaceSM), 0)}
