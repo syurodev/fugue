@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"image"
+	"image/color"
 	"strings"
 	"sync"
 	"testing"
@@ -35,6 +36,8 @@ const (
 	shotAccounts       = "accounts"
 	shotAccountsStates = "accounts-states"
 	testAccInc         = "inc-accounts-shot"
+	testWinFiveHour    = "five_hour"
+	testWinOpus        = "opus"
 )
 
 var errTestUnsupportedLogin = errors.New("agy has no login command; sign in from the agy app")
@@ -129,7 +132,7 @@ func accountsShotFixtures(scene, resetAt string) []client.Account {
 				Vendor: client.VendorCodex, State: client.AccountStateNeedsLogin, Login: client.AccountLoginLoggedOut,
 				QuotaKnown: true, QuotaGate: 0.85,
 				Windows: []client.QuotaWindow{
-					{Name: "five_hour", Utilization: 0.42, ResetsAt: resetAt, Status: client.QuotaStatusAllowed},
+					{Name: testWinFiveHour, Utilization: 0.42, ResetsAt: resetAt, Status: client.QuotaStatusAllowed},
 				},
 			},
 		}
@@ -139,9 +142,9 @@ func accountsShotFixtures(scene, resetAt string) []client.Account {
 			Vendor: client.VendorClaude, State: client.AccountStateOK, Login: client.AccountLoginLoggedIn,
 			QuotaKnown: true, QuotaGate: 0.85,
 			Windows: []client.QuotaWindow{
-				{Name: "five_hour", Utilization: 0.42, ResetsAt: resetAt, Status: client.QuotaStatusAllowed},
+				{Name: testWinFiveHour, Utilization: 0.42, ResetsAt: resetAt, Status: client.QuotaStatusAllowed},
 				{Name: "seven_day", Utilization: 0.78, ResetsAt: resetAt, Status: client.QuotaStatusAllowedWarning},
-				{Name: "opus", Utilization: 0.88, ResetsAt: resetAt, Status: client.QuotaStatusAllowed},
+				{Name: testWinOpus, Utilization: 0.88, ResetsAt: resetAt, Status: client.QuotaStatusAllowed},
 			},
 		},
 		{
@@ -226,8 +229,37 @@ func TestAccountCardShowsChipOnlyWhenNotOK(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 	resetAt := now.Add(95 * time.Minute).UTC().Format(time.RFC3339)
 	assertAccountStatusChips(t, now, resetAt)
+	assertAccountCardTypography(t)
 	assertWindowLabelsTonesAndTooltip(t, now, resetAt)
 	assertAccountCardTextsAndTooltip(t)
+}
+
+func assertAccountCardTypography(t *testing.T) {
+	t.Helper()
+	th := theme.Light(nil)
+	c := th.Chrome()
+	for _, tc := range []struct {
+		part string
+		got  theme.Type
+		col  color.NRGBA
+		want theme.Type
+		wCol color.NRGBA
+	}{
+		{"pane title", func() theme.Type { tok, _ := accountPaneTitleStyle(&th); return tok }(), func() color.NRGBA { _, col := accountPaneTitleStyle(&th); return col }(), theme.TypeHeading(), c.Fg},
+		{"vendor name", func() theme.Type { tok, _ := accountVendorNameStyle(&th); return tok }(), func() color.NRGBA { _, col := accountVendorNameStyle(&th); return col }(), theme.TypeTitle(), c.Fg},
+		{"percent", func() theme.Type { tok, _ := accountPercentStyle(&th, false); return tok }(), func() color.NRGBA { _, col := accountPercentStyle(&th, false); return col }(), theme.TypeLabel(), c.Fg},
+		{"limit", func() theme.Type { tok, _ := accountPercentStyle(&th, true); return tok }(), func() color.NRGBA { _, col := accountPercentStyle(&th, true); return col }(), theme.TypeLabel(), th.Status().Danger},
+		{"window label", func() theme.Type { tok, _ := accountWindowLabelStyle(&th); return tok }(), func() color.NRGBA { _, col := accountWindowLabelStyle(&th); return col }(), theme.TypeSmall(), c.FgMuted},
+		{"login section label", func() theme.Type { tok, _ := accountLoginSectionLabelStyle(&th); return tok }(), func() color.NRGBA { _, col := accountLoginSectionLabelStyle(&th); return col }(), theme.TypeCaption(), c.FgSubtle},
+		{"login cli text", func() theme.Type { tok, _ := accountLoginCLITextStyle(&th); return tok }(), func() color.NRGBA { _, col := accountLoginCLITextStyle(&th); return col }(), theme.TypeCodeSmall(), c.Fg},
+	} {
+		if tc.got != tc.want || tc.col != tc.wCol {
+			t.Errorf("%s = (%+v, %v), want (%+v, %v)", tc.part, tc.got, tc.col, tc.want, tc.wCol)
+		}
+	}
+	if formatAlertCount(1) != "1 alert" || formatAlertCount(2) != "2 alerts" {
+		t.Fatalf("unexpected alert pluralization: 1=%q 2=%q", formatAlertCount(1), formatAlertCount(2))
+	}
 }
 
 func assertAccountStatusChips(t *testing.T, now time.Time, resetAt string) {
@@ -256,8 +288,26 @@ func assertAccountStatusChips(t *testing.T, now time.Time, resetAt string) {
 
 func assertWindowLabelsTonesAndTooltip(t *testing.T, now time.Time, resetAt string) {
 	t.Helper()
-	if shortWindowLabel("five_hour") != "5h" || shortWindowLabel("seven_day") != "7d" || shortWindowLabel("300m") != "300m" {
-		t.Fatal("unexpected shortWindowLabel mapping")
+	for _, tc := range []struct {
+		in, want string
+	}{
+		{testWinFiveHour, "5h"},
+		{"seven_day", "7d"},
+		{"300m", "5h"},
+		{"60m", "1h"},
+		{"90m", "1h30m"},
+		{"45m", "45m"},
+		{"120s", "2m"},
+		{"168h", "7d"},
+		{"1440m", "1d"},
+		{"25h", "1d1h"},
+		{testWinOpus, testWinOpus},
+		{"7d", "7d"},
+		{"0m", "0m"},
+	} {
+		if got := shortWindowLabel(tc.in); got != tc.want {
+			t.Errorf("shortWindowLabel(%q) = %q, want %q", tc.in, got, tc.want)
+		}
 	}
 	for _, tc := range []struct {
 		status string
@@ -296,11 +346,11 @@ func assertAccountCardTextsAndTooltip(t *testing.T) {
 	// Simulate pointer hover inside the claude five_hour row region and advance
 	// past tooltipHoverDelay (500 ms) so Tooltip opens.
 	w := sc.accountsView.widgetsFor(client.VendorClaude)
-	rh := w.rowHover["five_hour"]
+	rh := w.rowHover[testWinFiveHour]
 	if rh == nil {
 		t.Fatal("missing five_hour rowHover state")
 	}
-	router.Queue(pointer.Event{Kind: pointer.Move, Position: f32.Pt(400, 84)})
+	router.Queue(pointer.Event{Kind: pointer.Move, Position: f32.Pt(400, 90)})
 	var ops op.Ops
 	now := time.Unix(1_700_000_000, 0)
 	for _, dt := range []time.Duration{0, 16 * time.Millisecond, 600 * time.Millisecond} {

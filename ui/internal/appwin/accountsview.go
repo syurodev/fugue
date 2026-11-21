@@ -164,8 +164,9 @@ func (v *accountsView) layout(gtx *layout.Context, env *kit.Env, sc *screens) la
 }
 
 func (v *accountsView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
+	titleTok, titleCol := accountPaneTitleStyle(env.Th)
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
-		rigidLabel(env, theme.TypeTitle(), env.Th.Chrome().Fg, "Accounts & quota"),
+		rigidLabel(env, titleTok, titleCol, "Accounts & quota"),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
 		}),
@@ -265,7 +266,7 @@ func (v *accountsView) layoutAccountCard(gtx *layout.Context, env *kit.Env, sc *
 	dims, _, err := w.card.Layout(env, gtx, kit.CardProps{}, func(gtx layout.Context) layout.Dimensions {
 		children := []layout.FlexChild{
 			rigidWidget(func(gtx *layout.Context) layout.Dimensions { return v.layoutCardHeader(gtx, env, sc, w, acc) }),
-			spacerH(theme.SpaceSM),
+			spacerH(theme.SpaceMD),
 		}
 		children = append(children, layoutQuotaWindows(env, w, acc, gtx.Now)...)
 		if login, ok := sc.accounts.Login(acc.Vendor); ok && login.Active() {
@@ -278,11 +279,11 @@ func (v *accountsView) layoutAccountCard(gtx *layout.Context, env *kit.Env, sc *
 }
 
 func (v *accountsView) layoutCardHeader(gtx *layout.Context, env *kit.Env, sc *screens, w *accountCardWidgets, acc *client.Account) layout.Dimensions {
-	c := env.Th.Chrome()
+	vendorTok, vendorCol := accountVendorNameStyle(env.Th)
 	login, hasLogin := sc.accounts.Login(acc.Vendor)
 	running := hasLogin && login.Active()
 	children := []layout.FlexChild{
-		rigidLabel(env, theme.TypeLabel(), c.Fg, acc.Vendor),
+		rigidLabel(env, vendorTok, vendorCol, acc.Vendor),
 	}
 	if tagProps, showChip := accountStatusChipProps(acc, gtx.Now); showChip {
 		children = append(children, spacerW(theme.SpaceSM), rigidTag(env, sc.fail, w.stateTag, tagProps))

@@ -3,6 +3,7 @@ package appwin
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"time"
 
 	"gioui.org/io/event"
@@ -16,6 +17,33 @@ import (
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
+
+func accountPaneTitleStyle(th *theme.Theme) (theme.Type, color.NRGBA) {
+	return theme.TypeHeading(), th.Chrome().Fg
+}
+
+func accountVendorNameStyle(th *theme.Theme) (theme.Type, color.NRGBA) {
+	return theme.TypeTitle(), th.Chrome().Fg
+}
+
+func accountPercentStyle(th *theme.Theme, rejected bool) (theme.Type, color.NRGBA) {
+	if rejected {
+		return theme.TypeLabel(), th.Status().Danger
+	}
+	return theme.TypeLabel(), th.Chrome().Fg
+}
+
+func accountWindowLabelStyle(th *theme.Theme) (theme.Type, color.NRGBA) {
+	return theme.TypeSmall(), th.Chrome().FgMuted
+}
+
+func accountLoginSectionLabelStyle(th *theme.Theme) (theme.Type, color.NRGBA) {
+	return theme.TypeCaption(), th.Chrome().FgSubtle
+}
+
+func accountLoginCLITextStyle(th *theme.Theme) (theme.Type, color.NRGBA) {
+	return theme.TypeCodeSmall(), th.Chrome().Fg
+}
 
 type windowRowHover struct {
 	tag     int
@@ -44,7 +72,7 @@ func layoutQuotaWindows(env *kit.Env, w *accountCardWidgets, acc *client.Account
 			return layoutWindowRow(env, gtx, prog, rh, acc.Windows, &win, acc.QuotaGate, now)
 		}))
 		if i < len(acc.Windows)-1 {
-			children = append(children, spacerH(theme.SpaceXS))
+			children = append(children, spacerH(theme.SpaceSM))
 		}
 	}
 	return children
@@ -52,41 +80,41 @@ func layoutQuotaWindows(env *kit.Env, w *accountCardWidgets, acc *client.Account
 
 func layoutUnknownQuotaRow(env *kit.Env, gtx *layout.Context, rightLabel string) layout.Dimensions {
 	c := env.Th.Chrome()
+	winTok, winCol := accountWindowLabelStyle(env.Th)
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return kit.LineRow(env, &gtx, kit.LineRowProps{Size: kit.LineMD, Fallback: c.LineRest})
 		}),
 		spacerW(theme.SpaceMD),
-		rigidLabel(env, theme.TypeSmall(), c.FgMuted, rightLabel),
+		rigidLabel(env, winTok, winCol, rightLabel),
 	)
 }
 
 func layoutWindowRow(env *kit.Env, gtx *layout.Context, prog *kit.ProgressState, rh *windowRowHover, all []client.QuotaWindow, win *client.QuotaWindow, gate float64, now time.Time) layout.Dimensions {
-	c := env.Th.Chrome()
 	util := clampUnit(win.Utilization)
 	gateFrac := clampUnit(gate)
 	tone := windowProgressTone(win.Status)
 	label := shortWindowLabel(win.Name)
-
+	rejected := win.Status == client.QuotaStatusRejected
 	rightTxt := fmt.Sprintf("%.0f%%", util*100)
-	rightCol := c.FgMuted
-	if win.Status == client.QuotaStatusRejected {
+	if rejected {
 		rightTxt = "Limit"
-		rightCol = env.Th.Status().Danger
 	}
-	labelW := measureLabelWidth(env, gtx, theme.TypeSmall(), "7d")
+	winTok, winCol := accountWindowLabelStyle(env.Th)
+	pctTok, pctCol := accountPercentStyle(env.Th, rejected)
+	labelW := measureLabelWidth(env, gtx, winTok, "7d")
 	for i := range all {
-		if lw := measureLabelWidth(env, gtx, theme.TypeSmall(), shortWindowLabel(all[i].Name)); lw > labelW {
+		if lw := measureLabelWidth(env, gtx, winTok, shortWindowLabel(all[i].Name)); lw > labelW {
 			labelW = lw
 		}
 	}
-	rightW := max(measureLabelWidth(env, gtx, theme.TypeCodeSmall(), "100%"), measureLabelWidth(env, gtx, theme.TypeCodeSmall(), "Limit"))
+	rightW := max(measureLabelWidth(env, gtx, pctTok, "100%"), measureLabelWidth(env, gtx, pctTok, "Limit"))
 
 	dims := layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 			local := *gtx
 			local.Constraints.Min.X = labelW
-			d := kit.Label(env, &local, theme.TypeSmall(), c.FgMuted, label)
+			d := kit.Label(env, &local, winTok, winCol, label)
 			return layout.Dimensions{Size: image.Pt(max(d.Size.X, labelW), d.Size.Y), Baseline: d.Baseline}
 		}),
 		spacerW(theme.SpaceMD),
@@ -103,7 +131,7 @@ func layoutWindowRow(env *kit.Env, gtx *layout.Context, prog *kit.ProgressState,
 			local := *gtx
 			local.Constraints.Min.X = 0
 			rec := op.Record(local.Ops)
-			d := kit.Label(env, &local, theme.TypeCodeSmall(), rightCol, rightTxt)
+			d := kit.Label(env, &local, pctTok, pctCol, rightTxt)
 			call := rec.Stop()
 			x := max(rightW-d.Size.X, 0)
 			off := op.Offset(image.Pt(x, 0)).Push(gtx.Ops)
@@ -194,9 +222,29 @@ func shortWindowLabel(name string) string {
 		return "5h"
 	case "seven_day":
 		return "7d"
-	default:
+	}
+	d, err := time.ParseDuration(name)
+	if err != nil || d < time.Minute {
 		return name
 	}
+	return formatWindowDuration(d)
+}
+
+func formatWindowDuration(d time.Duration) string {
+	const day = 24 * time.Hour
+	if d >= day {
+		if d%day == 0 {
+			return fmt.Sprintf("%dd", int(d/day))
+		}
+		return formatShortDuration(d)
+	}
+	if d >= time.Hour && d%time.Hour == 0 {
+		return fmt.Sprintf("%dh", int(d/time.Hour))
+	}
+	if d < time.Hour && d%time.Minute == 0 {
+		return fmt.Sprintf("%dm", int(d/time.Minute))
+	}
+	return formatShortDuration(d)
 }
 
 func windowProgressTone(status string) kit.ProgressTone {

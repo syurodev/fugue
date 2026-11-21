@@ -407,7 +407,7 @@ func (s *screens) layoutAccountsRow(env *kit.Env, gtx *layout.Context) layout.Di
 	case !s.accounts.HasSnapshot():
 		props.Trailing = "unknown"
 	case s.accounts.NeedsAttentionCount() > 0:
-		props.StateLabel = fmt.Sprintf("%d alert", s.accounts.NeedsAttentionCount())
+		props.StateLabel = formatAlertCount(s.accounts.NeedsAttentionCount())
 		props.StateTone = kit.ToneWarning
 	default:
 		props.Trailing = "ok"
@@ -456,6 +456,13 @@ func (s *screens) sessionRows(env *kit.Env, sessions []session.Session) []layout
 
 // sessionName names a session row: the vendor, or "session" when the list
 // read has not named one yet.
+func formatAlertCount(n int) string {
+	if n == 1 {
+		return "1 alert"
+	}
+	return fmt.Sprintf("%d alerts", n)
+}
+
 func sessionName(sess session.Session) string {
 	if sess.Vendor == "" {
 		return "session"
