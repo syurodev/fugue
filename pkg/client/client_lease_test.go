@@ -235,28 +235,21 @@ func serveConnTracking(t *testing.T, onEvent func(*connect.ServerStream[hostv1.S
 	var protos http.Protocols
 	protos.SetHTTP2(true)
 	protos.SetUnencryptedHTTP2(true)
-	srv := &http.Server{
-		Handler:   mux,
-		Protocols: &protos,
-		ConnState: func(_ net.Conn, st http.ConnState) {
-			if st == http.StateClosed {
-				select {
-				case connClosed <- struct{}{}:
-				default:
-				}
+	// httptest starts and stops the serve loop itself, so the test needs no bare
+	// goroutine (fuguevet) and Close waits for it.
+	srv := httptest.NewUnstartedServer(mux)
+	srv.Listener = ln
+	srv.Config.Protocols = &protos
+	srv.Config.ConnState = func(_ net.Conn, st http.ConnState) {
+		if st == http.StateClosed {
+			select {
+			case connClosed <- struct{}{}:
+			default:
 			}
-		},
-		ReadHeaderTimeout: 0,
-	}
-	go func() {
-		if serr := srv.Serve(ln); serr != nil && !errors.Is(serr, http.ErrServerClosed) {
-			return
 		}
-	}()
-	t.Cleanup(func() {
-		closeQuietly(srv)
-		closeQuietly(ln)
-	})
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
 	return socket, connClosed
 }
 
