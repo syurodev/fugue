@@ -56,16 +56,30 @@ type channelPayloadFacts struct {
 // and the sealed payload's allowlisted fields. It is the rebuild function:
 // replaying the log through it reproduces every row (§6.7, Q-178 A).
 func channelLinesForEvent(ev *AppendTeamEventInput) []channelLine {
-	root := ""
-	if ev.TaskID != "" {
-		root = ThreadRootTaskID(ev.TaskID)
+	facts := readChannelPayloadFacts(ev)
+	if isTeamEventType(ev.EventType) {
+		return channelTeamEventLines(ev, facts)
 	}
-	facts := channelPayloadFacts{}
-	if len(ev.ProtectedPayload) > 0 {
-		// A payload that does not parse leaves the facts zero; the line keeps
-		// its metadata and renders from it.
-		_ = json.Unmarshal(ev.ProtectedPayload, &facts)
+	return channelTaskEventLines(ev, facts)
+}
+
+// channelPayloadFacts parses the allowlisted fields the mapping needs. A
+// payload that does not parse leaves the facts zero; the line keeps its
+// metadata and renders from it.
+func readChannelPayloadFacts(ev *AppendTeamEventInput) channelPayloadFacts {
+	var facts channelPayloadFacts
+	if len(ev.ProtectedPayload) == 0 {
+		return facts
 	}
+	if err := json.Unmarshal(ev.ProtectedPayload, &facts); err != nil {
+		return channelPayloadFacts{}
+	}
+	return facts
+}
+
+// channelTeamEventLines maps the team-level events to their general-channel
+// lines (§6.7). Events outside the §6.7 list make no line.
+func channelTeamEventLines(ev *AppendTeamEventInput, facts channelPayloadFacts) []channelLine {
 	switch ev.EventType {
 	case EventTeamProposed:
 		return []channelLine{{kind: ChannelKindPlan, senderKind: ChannelSenderAgent}}
@@ -73,6 +87,24 @@ func channelLinesForEvent(ev *AppendTeamEventInput) []channelLine {
 		return []channelLine{{kind: ChannelKindDecision, senderKind: ChannelSenderUser}}
 	case EventTeamNoted:
 		return []channelLine{{kind: ChannelKindNote, senderKind: ChannelSenderAgent, senderTask: facts.Author}}
+	case EventTeamFinalReview, EventTeamDeadlineReached, EventTeamDeadlineExtended, EventTeamEnded:
+		return nil
+	case EventTaskCreated, EventTaskAssigned, EventTaskStarted, EventTaskQuestionAsked,
+		EventTaskQuestionAnswered, EventTaskReported, EventTaskCheckCompleted, EventTaskReviewed,
+		EventTaskIntegrated, EventTaskMarkedUnknown, EventTaskRecoveryDecided, EventTaskSuperseded,
+		EventTaskStalled, EventTaskMessaged, EventTaskEnded:
+		return nil
+	default:
+		return nil
+	}
+}
+
+// channelTaskEventLines maps the task-level events to their thread lines.
+// TaskCreated and TaskStarted make no line: the assignment and, for a retry
+// chain, the supersede cover them (§6.7).
+func channelTaskEventLines(ev *AppendTeamEventInput, facts channelPayloadFacts) []channelLine {
+	root := ThreadRootTaskID(ev.TaskID)
+	switch ev.EventType {
 	case EventTaskAssigned:
 		return []channelLine{{kind: ChannelKindTask, threadRoot: root, senderKind: ChannelSenderFugue}}
 	case EventTaskSuperseded:
@@ -84,33 +116,52 @@ func channelLinesForEvent(ev *AppendTeamEventInput) []channelLine {
 	case EventTaskQuestionAsked:
 		return []channelLine{{kind: ChannelKindQuestion, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID}}
 	case EventTaskQuestionAnswered:
-		sender := ChannelSenderUser
-		senderTask := ""
-		if facts.AnswerBy != "" {
-			sender = ChannelSenderAgent
-			senderTask = facts.AnswerBy
-		}
-		return []channelLine{{kind: ChannelKindAnswer, threadRoot: root, senderKind: sender, senderTask: senderTask}}
+		return []channelLine{channelAnswerLine(facts, root)}
 	case EventTaskReported:
 		return []channelLine{{kind: ChannelKindResult, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID}}
 	case EventTaskMessaged:
 		return []channelLine{{kind: ChannelKindSend, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID, recipient: facts.ToTaskID}}
 	case EventTaskStalled:
-		lines := []channelLine{{kind: ChannelKindStall, threadRoot: root, senderKind: ChannelSenderWatchdog}}
-		if facts.TeamWide {
-			// §6.7: the same stall also shows in the general channel when the
-			// whole team is waiting.
-			lines = append(lines, channelLine{kind: ChannelKindStall, senderKind: ChannelSenderWatchdog})
-		}
-		return lines
+		return channelStallLines(facts, root)
 	case EventTaskEnded:
-		if ev.Outcome == outcomeFailed {
-			return []channelLine{{kind: ChannelKindFailed, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID}}
-		}
+		return channelEndLines(ev, root)
+	case EventTaskCreated, EventTaskStarted, EventTaskCheckCompleted, EventTaskReviewed,
+		EventTaskIntegrated, EventTaskMarkedUnknown, EventTaskRecoveryDecided:
+		return nil
+	case EventTeamProposed, EventTeamStarted, EventTeamFinalReview, EventTeamAmended,
+		EventTeamNoted, EventTeamDeadlineReached, EventTeamDeadlineExtended, EventTeamDecided, EventTeamEnded:
 		return nil
 	default:
 		return nil
 	}
+}
+
+// channelAnswerLine attributes an answer to its answerer when the payload
+// names one, and to the user otherwise.
+func channelAnswerLine(facts channelPayloadFacts, root string) channelLine {
+	if facts.AnswerBy != "" {
+		return channelLine{kind: ChannelKindAnswer, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: facts.AnswerBy}
+	}
+	return channelLine{kind: ChannelKindAnswer, threadRoot: root, senderKind: ChannelSenderUser}
+}
+
+// channelEndLines projects a failed task end; the other outcomes make no
+// §6.7 line (the report carries the result, the supersede opens the retry).
+func channelEndLines(ev *AppendTeamEventInput, root string) []channelLine {
+	if ev.Outcome == outcomeFailed {
+		return []channelLine{{kind: ChannelKindFailed, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID}}
+	}
+	return nil
+}
+
+// channelStallLines projects a stall into the task's thread and, when the
+// whole team is waiting (§6.7), into the general channel too.
+func channelStallLines(facts channelPayloadFacts, root string) []channelLine {
+	lines := []channelLine{{kind: ChannelKindStall, threadRoot: root, senderKind: ChannelSenderWatchdog}}
+	if facts.TeamWide {
+		lines = append(lines, channelLine{kind: ChannelKindStall, senderKind: ChannelSenderWatchdog})
+	}
+	return lines
 }
 
 // appendChannelForEvent numbers and writes the lines of one appended event
@@ -154,6 +205,18 @@ func (s *Store) TeamChannelMessages(ctx context.Context, teamID string, q TeamCh
 	if q.Limit <= 0 || q.Limit > 500 {
 		q.Limit = 500
 	}
+	query, args := channelPageQuery(teamID, q)
+	rows, err := s.db.QueryContext(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("%w: query the channel: %w", ErrUnavailable, err)
+	}
+	defer closeRows(ctx, rows)
+	return scanChannelMessages(rows)
+}
+
+// channelPageQuery builds the paged channel read: the caller's team, the
+// thread scope, the exclusive cursors and the newest-first limit.
+func channelPageQuery(teamID string, q TeamChannelPageQuery) (string, []any) {
 	var b strings.Builder
 	b.WriteString(`SELECT team_id, channel_seq, kind, thread_root_task_id, sender_kind,
 		sender_task_id, recipient_task_id, source_seq, bytes, created_at
@@ -178,11 +241,11 @@ func (s *Store) TeamChannelMessages(ctx context.Context, teamID string, q TeamCh
 	}
 	b.WriteString(" ORDER BY channel_seq DESC LIMIT ?")
 	args = append(args, q.Limit)
-	rows, err := s.db.QueryContext(ctx, b.String(), args...)
-	if err != nil {
-		return nil, fmt.Errorf("%w: query the channel: %w", ErrUnavailable, err)
-	}
-	defer closeRows(ctx, rows)
+	return b.String(), args
+}
+
+// scanChannelMessages drains one channel metadata result set (INV-09).
+func scanChannelMessages(rows *sql.Rows) ([]TeamChannelMessage, error) {
 	var out []TeamChannelMessage
 	for rows.Next() {
 		var m TeamChannelMessage

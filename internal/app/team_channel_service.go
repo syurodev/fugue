@@ -11,6 +11,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -42,26 +43,42 @@ func (c *callerTeamContext) channelScope() channelScope {
 	case vendorstore.RoleLead:
 		return channelScope{all: true, general: true, roots: map[string]struct{}{}}
 	case vendorstore.RoleTeamManager:
-		byID, retryChild := resolveTaskChain(c.tasks)
-		roots := map[string]struct{}{vendorstore.ThreadRootTaskID(c.caller.TaskID): {}}
-		for i := range c.tasks {
-			if sameAttemptChain(c.tasks[i].ParentTaskID, c.caller.TaskID, byID, retryChild) {
-				roots[vendorstore.ThreadRootTaskID(c.tasks[i].TaskID)] = struct{}{}
-			}
-		}
-		return channelScope{general: true, roots: roots}
+		return channelScope{general: true, roots: delegationRoots(c)}
 	case vendorstore.RoleMember:
-		byID, retryChild := resolveTaskChain(c.tasks)
-		roots := map[string]struct{}{}
-		for i := range c.tasks {
-			if sameAttemptChain(c.tasks[i].ParentTaskID, c.caller.ParentTaskID, byID, retryChild) {
-				roots[vendorstore.ThreadRootTaskID(c.tasks[i].TaskID)] = struct{}{}
-			}
-		}
-		return channelScope{general: true, roots: roots}
+		return channelScope{general: true, roots: siblingRoots(c)}
+	case vendorstore.RoleSolo:
+		// A solo team has one task and no channel partners (§6.6 lists lead,
+		// manager and member scopes only).
+		return channelScope{roots: map[string]struct{}{}}
 	default:
 		return channelScope{roots: map[string]struct{}{}}
 	}
+}
+
+// delegationRoots resolves the manager's part: its own thread and its direct
+// children's threads across their retry chains.
+func delegationRoots(c *callerTeamContext) map[string]struct{} {
+	byID, retryChild := resolveTaskChain(c.tasks)
+	roots := map[string]struct{}{vendorstore.ThreadRootTaskID(c.caller.TaskID): {}}
+	for i := range c.tasks {
+		if sameAttemptChain(c.tasks[i].ParentTaskID, c.caller.TaskID, byID, retryChild) {
+			roots[vendorstore.ThreadRootTaskID(c.tasks[i].TaskID)] = struct{}{}
+		}
+	}
+	return roots
+}
+
+// siblingRoots resolves the member's scope: every task sharing its direct
+// delegator, itself included (§6.6).
+func siblingRoots(c *callerTeamContext) map[string]struct{} {
+	byID, retryChild := resolveTaskChain(c.tasks)
+	roots := map[string]struct{}{}
+	for i := range c.tasks {
+		if sameAttemptChain(c.tasks[i].ParentTaskID, c.caller.ParentTaskID, byID, retryChild) {
+			roots[vendorstore.ThreadRootTaskID(c.tasks[i].TaskID)] = struct{}{}
+		}
+	}
+	return roots
 }
 
 // inScope reports whether a thread root is readable.
@@ -73,63 +90,85 @@ func (sc channelScope) inScope(root string) bool {
 	return ok
 }
 
+// validateTeamReadArgs checks the paging arguments against the §6.7 read.
+func validateTeamReadArgs(role vendorstore.TeamRole, before, since int64, limit int) error {
+	switch role {
+	case vendorstore.RoleLead, vendorstore.RoleTeamManager, vendorstore.RoleMember:
+	case vendorstore.RoleSolo:
+		return errcode.New(errcode.PermissionDenied, "fugue_team_read is a team role tool (§6.6)")
+	default:
+		return errcode.New(errcode.PermissionDenied, "fugue_team_read is a team role tool (§6.6)")
+	}
+	if before < 0 || since < 0 {
+		return errcode.New(errcode.InvalidArgument, "before and since must be non-negative")
+	}
+	if before > 0 && since > 0 && since >= before {
+		return errcode.New(errcode.InvalidArgument, "since must be below before")
+	}
+	if limit > maxTeamReadLines {
+		return errcode.New(errcode.InvalidArgument, "limit exceeds 200")
+	}
+	return nil
+}
+
+// teamReadQuery scopes the query to the requested selector: the caller's own
+// thread by default, the general channel, the whole team (lead only), or one
+// in-scope task thread.
+func teamReadQuery(c *callerTeamContext, thread string) (vendorstore.TeamChannelPageQuery, error) {
+	scope := c.channelScope()
+	q := vendorstore.TeamChannelPageQuery{}
+	switch thread {
+	case "":
+		if c.caller == nil {
+			return q, errcode.New(errcode.PermissionDenied, "the caller task is not in the team")
+		}
+		root := vendorstore.ThreadRootTaskID(c.caller.TaskID)
+		if !scope.inScope(root) {
+			return q, errcode.New(errcode.PermissionDenied, "thread is outside your read scope")
+		}
+		q.ThreadRoots = []string{root}
+	case teamReadGeneralSelector:
+		if !scope.general {
+			return q, errcode.New(errcode.PermissionDenied, "thread is outside your read scope")
+		}
+		q.GeneralOnly = true
+	case teamReadAllSelector:
+		if !scope.all {
+			return q, errcode.New(errcode.PermissionDenied, "only the lead may read the whole team channel")
+		}
+	default:
+		if err := teams.ValidateDurableTaskID("thread", thread); err != nil {
+			return q, errcode.New(errcode.InvalidArgument, err.Error())
+		}
+		if _, ok := findTask(c.tasks, thread); !ok {
+			return q, errcode.New(errcode.NotFound, "team task not found")
+		}
+		root := vendorstore.ThreadRootTaskID(thread)
+		if !scope.inScope(root) {
+			return q, errcode.New(errcode.PermissionDenied, "thread is outside your read scope")
+		}
+		q.ThreadRoots = []string{root}
+	}
+	return q, nil
+}
+
 // TeamRead pages the channel lines of one scope (§6.7 fugue_team_read).
 func (s *teamTaskService) TeamRead(ctx context.Context, sessionID, thread string, before, since int64, limit int) (string, error) {
 	c, err := s.resolveCaller(ctx, sessionID)
 	if err != nil {
 		return "", err
 	}
-	switch c.role {
-	case vendorstore.RoleLead, vendorstore.RoleTeamManager, vendorstore.RoleMember:
-	default:
-		return "", errcode.New(errcode.PermissionDenied, "fugue_team_read is a team role tool (§6.6)")
-	}
-	if before < 0 || since < 0 {
-		return "", errcode.New(errcode.InvalidArgument, "before and since must be non-negative")
-	}
-	if before > 0 && since > 0 && since >= before {
-		return "", errcode.New(errcode.InvalidArgument, "since must be below before")
+	if argErr := validateTeamReadArgs(c.role, before, since, limit); argErr != nil {
+		return "", argErr
 	}
 	if limit <= 0 {
 		limit = defaultTeamReadLines
 	}
-	if limit > maxTeamReadLines {
-		limit = maxTeamReadLines
+	q, err := teamReadQuery(c, thread)
+	if err != nil {
+		return "", err
 	}
-	scope := c.channelScope()
-	q := vendorstore.TeamChannelPageQuery{Before: before, Since: since, Limit: limit}
-	switch {
-	case thread == "":
-		if c.caller == nil {
-			return "", errcode.New(errcode.PermissionDenied, "the caller task is not in the team")
-		}
-		root := vendorstore.ThreadRootTaskID(c.caller.TaskID)
-		if !scope.inScope(root) {
-			return "", errcode.New(errcode.PermissionDenied, "thread is outside your read scope")
-		}
-		q.ThreadRoots = []string{root}
-	case thread == teamReadGeneralSelector:
-		if !scope.general {
-			return "", errcode.New(errcode.PermissionDenied, "thread is outside your read scope")
-		}
-		q.GeneralOnly = true
-	case thread == teamReadAllSelector:
-		if !scope.all {
-			return "", errcode.New(errcode.PermissionDenied, "only the lead may read the whole team channel")
-		}
-	default:
-		if err := teams.ValidateDurableTaskID("thread", thread); err != nil {
-			return "", errcode.New(errcode.InvalidArgument, err.Error())
-		}
-		if _, ok := findTask(c.tasks, thread); !ok {
-			return "", errcode.New(errcode.NotFound, "team task not found")
-		}
-		root := vendorstore.ThreadRootTaskID(thread)
-		if !scope.inScope(root) {
-			return "", errcode.New(errcode.PermissionDenied, "thread is outside your read scope")
-		}
-		q.ThreadRoots = []string{root}
-	}
+	q.Before, q.Since, q.Limit = before, since, limit
 	lines, err := s.store.TeamChannelMessages(ctx, c.team.TeamID, q)
 	if err != nil {
 		return "", boundaryError("read the team channel", err)
@@ -149,9 +188,9 @@ func (s *teamTaskService) renderChannelLines(ctx context.Context, c *callerTeamC
 	if err != nil {
 		return "", boundaryError("read the team events", err)
 	}
-	bySeq := make(map[int64]vendorstore.RecordedTeamEvent, len(events))
+	bySeq := make(map[int64]*vendorstore.RecordedTeamEvent, len(events))
 	for i := range events {
-		bySeq[events[i].Sequence] = events[i]
+		bySeq[events[i].Sequence] = &events[i]
 	}
 	safeNonce := teams.EscapeDigestText(nonce)
 	var b strings.Builder
@@ -176,9 +215,43 @@ func (s *teamTaskService) renderChannelLines(ctx context.Context, c *callerTeamC
 	return b.String(), nil
 }
 
-// channelLineText renders one line: host metadata, then the payload content
-// of its source event as data.
-func (s *teamTaskService) channelLineText(ctx context.Context, c *callerTeamContext, line *vendorstore.TeamChannelMessage, src vendorstore.RecordedTeamEvent, safeNonce string) (string, error) {
+// channelLineText renders one line: the host metadata parts, then the payload
+// content of its source event as data.
+func (s *teamTaskService) channelLineText(ctx context.Context, c *callerTeamContext, line *vendorstore.TeamChannelMessage, src *vendorstore.RecordedTeamEvent, safeNonce string) (string, error) {
+	parts := channelHeadParts(line, src)
+	raw, err := s.store.OpenTeamEventPayload(ctx, c.team.TeamID, line.SourceSeq)
+	if err != nil {
+		// §6.7 content is sealed; a locked vault fails closed (Q-175 A).
+		return "", boundaryError("open the channel payload", err)
+	}
+	if len(raw) == 0 {
+		// The source event carries no payload: the line renders from its
+		// metadata alone (assignment, failure, attempt-open lines).
+		return strings.Join(parts, "\n"), nil
+	}
+	label := fmt.Sprintf("kind=%s nonce=%s", line.Kind, safeNonce)
+	parts = append(parts, channelPayloadParts(line.Kind, raw, label)...)
+	return strings.Join(parts, "\n"), nil
+}
+
+// channelHeadParts renders the metadata of one line: the number, kind, sender
+// and recipient header, the failure code, and the task lifecycle text
+// (delegation, attempt-open). All of it is Fugue's own.
+func channelHeadParts(line *vendorstore.TeamChannelMessage, src *vendorstore.RecordedTeamEvent) []string {
+	parts := []string{channelHeadText(line)}
+	switch line.Kind {
+	case vendorstore.ChannelKindFailed:
+		if src != nil && src.FailureCode != "" {
+			parts = append(parts, "failed("+src.FailureCode+")")
+		}
+	case vendorstore.ChannelKindTask:
+		parts = append(parts, channelTaskLineParts(line, src)...)
+	}
+	return parts
+}
+
+// channelHeadText renders the header of one line.
+func channelHeadText(line *vendorstore.TeamChannelMessage) string {
 	var head strings.Builder
 	fmt.Fprintf(&head, "#%d %s", line.ChannelSeq, line.Kind)
 	switch line.SenderKind {
@@ -194,102 +267,87 @@ func (s *teamTaskService) channelLineText(ctx context.Context, c *callerTeamCont
 	if line.RecipientTaskID != "" {
 		fmt.Fprintf(&head, " to task %s", teams.EscapeDigestText(line.RecipientTaskID))
 	}
-	parts := []string{head.String()}
-	// Metadata-only parts come first: the failure code and the task
-	// lifecycle lines (delegation, attempt-open) are Fugue's own and render
-	// even when their source event carries no payload.
-	switch line.Kind {
-	case vendorstore.ChannelKindFailed:
-		if src.FailureCode != "" {
-			parts = append(parts, "failed("+src.FailureCode+")")
-		}
-	case vendorstore.ChannelKindTask:
-		parts = append(parts, channelTaskLineText(c, src)...)
-	}
-
-	raw, err := s.store.OpenTeamEventPayload(ctx, c.team.TeamID, line.SourceSeq)
-	if err != nil {
-		// §6.7 content is sealed; a locked vault fails closed (Q-175 A).
-		return "", boundaryError("open the channel payload", err)
-	}
-	if len(raw) == 0 {
-		// The source event carries no payload: the line renders from its
-		// metadata alone (assignment, failure, attempt-open lines).
-		return strings.Join(parts, "\n"), nil
-	}
-	label := fmt.Sprintf("kind=%s nonce=%s", line.Kind, safeNonce)
-	switch line.Kind {
-	case vendorstore.ChannelKindPlan:
-		parts = append(parts, channelPlanText(raw, label, safeNonce)...)
-	case vendorstore.ChannelKindDecision:
-		parts = append(parts, channelDecisionText(raw, label)...)
-	case vendorstore.ChannelKindNote:
-		var p teamNotePayload
-		if json.Unmarshal(raw, &p) == nil {
-			parts = append(parts, channelBlock(label, p.Note))
-		} else {
-			parts = append(parts, channelBlock(label, string(raw)))
-		}
-	case vendorstore.ChannelKindQuestion:
-		var p taskQuestionPayload
-		if json.Unmarshal(raw, &p) == nil {
-			parts = append(parts, "to "+p.To)
-			parts = append(parts, channelBlock(label, p.Question))
-		} else {
-			parts = append(parts, channelBlock(label, string(raw)))
-		}
-	case vendorstore.ChannelKindAnswer:
-		var p struct {
-			Answer     string `json:"answer"`
-			AnsweredBy string `json:"answered_by"`
-		}
-		if json.Unmarshal(raw, &p) == nil {
-			parts = append(parts, channelBlock(label, p.Answer))
-		} else {
-			parts = append(parts, channelBlock(label, string(raw)))
-		}
-	case vendorstore.ChannelKindResult:
-		var p taskReportPayload
-		if json.Unmarshal(raw, &p) == nil {
-			parts = append(parts, "status "+p.Status)
-			if p.Summary != "" {
-				parts = append(parts, channelBlock(label, p.Summary))
-			}
-		} else {
-			parts = append(parts, channelBlock(label, string(raw)))
-		}
-	case vendorstore.ChannelKindSend:
-		var p taskMessagePayload
-		if json.Unmarshal(raw, &p) == nil {
-			parts = append(parts, "to task "+teams.EscapeDigestText(p.ToTaskID))
-			parts = append(parts, channelBlock(label, p.Message))
-		} else {
-			parts = append(parts, channelBlock(label, string(raw)))
-		}
-	case vendorstore.ChannelKindStall:
-		var p taskStalledPayload
-		if json.Unmarshal(raw, &p) == nil {
-			parts = append(parts, fmt.Sprintf("silent for %ds waiting_on=%s", p.SilentSeconds, p.WaitingOn))
-			if p.TeamWide {
-				parts = append(parts, "team-wide: every task is waiting")
-			}
-		} else {
-			parts = append(parts, channelBlock(label, string(raw)))
-		}
-	case vendorstore.ChannelKindApproval:
-		// F11.10b adds the approval events; the reference line renders from
-		// its event metadata alone.
-		parts = append(parts, channelBlock(label, string(raw)))
-	}
-	return strings.Join(parts, "\n"), nil
+	return head.String()
 }
 
-// channelPlanText renders the proposal plan: the title is host metadata, the
-// brief and every task goal are model output in blocks.
-func channelPlanText(raw []byte, label, safeNonce string) []string {
+// channelTaskLineParts renders the `task` kind: a delegation line for
+// TaskAssigned, the attempt-open line for TaskSuperseded (§5.4, §6.7: every
+// new attempt opens its shared thread with the attempt number and the
+// previous failure code).
+func channelTaskLineParts(line *vendorstore.TeamChannelMessage, src *vendorstore.RecordedTeamEvent) []string {
+	if src == nil {
+		return []string{"task " + teams.EscapeDigestText(line.ThreadRoot) + " delegated"}
+	}
+	if src.EventType == vendorstore.EventTaskSuperseded {
+		text := fmt.Sprintf("attempt %d begins after failed(%s)", retryAttemptAfter(src.TaskID), src.FailureCode)
+		return []string{"task " + teams.EscapeDigestText(src.TaskID) + ":", text}
+	}
+	id := src.TaskID
+	if id == "" {
+		id = line.ThreadRoot
+	}
+	return []string{"task " + teams.EscapeDigestText(id) + " delegated"}
+}
+
+// retryAttemptAfter derives the attempt number that opens when taskID's
+// chain supersedes: `<root>` is attempt 1, `<root>~r<k>` attempt k+1 (Q-126).
+func retryAttemptAfter(taskID string) int {
+	root := vendorstore.ThreadRootTaskID(taskID)
+	if rest := taskID[len(root):]; strings.HasPrefix(rest, "~r") {
+		if n, err := strconv.Atoi(rest[2:]); err == nil {
+			return n + 2
+		}
+	}
+	return 2
+}
+
+// channelPayloadParts renders the sealed payload of one line kind as data.
+// Unknown payload shapes degrade to one escaped raw block.
+func channelPayloadParts(kind string, raw []byte, label string) []string {
+	switch kind {
+	case vendorstore.ChannelKindPlan:
+		return channelPlanParts(raw, label)
+	case vendorstore.ChannelKindDecision:
+		return channelDecisionParts(raw, label)
+	case vendorstore.ChannelKindNote:
+		return unmarshalOrRaw(channelNoteParts)(raw, label)
+	case vendorstore.ChannelKindQuestion:
+		return unmarshalOrRaw(channelQuestionParts)(raw, label)
+	case vendorstore.ChannelKindAnswer:
+		return unmarshalOrRaw(channelAnswerParts)(raw, label)
+	case vendorstore.ChannelKindResult:
+		return unmarshalOrRaw(channelResultParts)(raw, label)
+	case vendorstore.ChannelKindSend:
+		return unmarshalOrRaw(channelSendParts)(raw, label)
+	case vendorstore.ChannelKindStall:
+		return unmarshalOrRaw(channelStallParts)(raw, label)
+	case vendorstore.ChannelKindFailed, vendorstore.ChannelKindTask, vendorstore.ChannelKindApproval:
+		return rawBlockParts(raw, label)
+	default:
+		return rawBlockParts(raw, label)
+	}
+}
+
+// unmarshalOrRaw wraps a payload renderer: an unparseable payload renders as
+// one escaped raw block instead of structured parts.
+func unmarshalOrRaw(render func(raw []byte, label string) (parts []string, ok bool)) func([]byte, string) []string {
+	return func(raw []byte, label string) []string {
+		if parts, ok := render(raw, label); ok {
+			return parts
+		}
+		return rawBlockParts(raw, label)
+	}
+}
+
+// rawBlockParts renders an unreadable payload as one escaped block.
+func rawBlockParts(raw []byte, label string) []string {
+	return []string{channelBlock(label, string(raw))}
+}
+
+func channelPlanParts(raw []byte, label string) []string {
 	var p teams.ProposalInput
 	if json.Unmarshal(raw, &p) != nil {
-		return []string{channelBlock(label, string(raw))}
+		return rawBlockParts(raw, label)
 	}
 	parts := []string{"Plan proposal: " + p.Title}
 	if p.Brief != "" {
@@ -303,10 +361,7 @@ func channelPlanText(raw []byte, label, safeNonce string) []string {
 	return parts
 }
 
-// channelDecisionText renders a decision line: the decision text is the
-// user's own, role edits are host-applied, and unknown payloads render as one
-// escaped block.
-func channelDecisionText(raw []byte, label string) []string {
+func channelDecisionParts(raw []byte, label string) []string {
 	var d teamDecisionPayload
 	if err := json.Unmarshal(raw, &d); err == nil && d.Decision != "" {
 		parts := []string{"The user decided \"" + d.Decision + "\"."}
@@ -319,23 +374,66 @@ func channelDecisionText(raw []byte, label string) []string {
 	if err := json.Unmarshal(raw, &a); err == nil && (len(a.RoleEdits) > 0 || len(a.AddedTaskIDs) > 0 || a.Budget != nil) {
 		return []string{"The user amended the team."}
 	}
-	return []string{channelBlock(label, string(raw))}
+	return rawBlockParts(raw, label)
 }
 
-// channelTaskLineText renders the `task` kind: a delegation line for
-// TaskAssigned, the attempt-open line for TaskSuperseded (§5.4, §6.7: every
-// new attempt opens its shared thread with the attempt number and the
-// previous failure code).
-func channelTaskLineText(c *callerTeamContext, src vendorstore.RecordedTeamEvent) []string {
-	if src.EventType == vendorstore.EventTaskSuperseded {
-		next := 2
-		if row, ok := findTask(c.tasks, src.TaskID); ok {
-			next = row.Attempt + 1
-		}
-		text := fmt.Sprintf("attempt %d begins after failed(%s)", next, src.FailureCode)
-		return []string{"task " + teams.EscapeDigestText(src.TaskID) + ":", text}
+func channelNoteParts(raw []byte, label string) ([]string, bool) {
+	var p teamNotePayload
+	if json.Unmarshal(raw, &p) != nil {
+		return nil, false
 	}
-	return []string{"task " + teams.EscapeDigestText(src.TaskID) + " delegated"}
+	return []string{channelBlock(label, p.Note)}, true
+}
+
+func channelQuestionParts(raw []byte, label string) ([]string, bool) {
+	var p taskQuestionPayload
+	if json.Unmarshal(raw, &p) != nil {
+		return nil, false
+	}
+	return []string{"to " + p.To, channelBlock(label, p.Question)}, true
+}
+
+func channelAnswerParts(raw []byte, label string) ([]string, bool) {
+	var p struct {
+		Answer     string `json:"answer"`
+		AnsweredBy string `json:"answered_by"`
+	}
+	if json.Unmarshal(raw, &p) != nil {
+		return nil, false
+	}
+	return []string{channelBlock(label, p.Answer)}, true
+}
+
+func channelResultParts(raw []byte, label string) ([]string, bool) {
+	var p taskReportPayload
+	if json.Unmarshal(raw, &p) != nil {
+		return nil, false
+	}
+	parts := []string{"status " + p.Status}
+	if p.Summary != "" {
+		parts = append(parts, channelBlock(label, p.Summary))
+	}
+	return parts, true
+}
+
+func channelSendParts(raw []byte, label string) ([]string, bool) {
+	var p taskMessagePayload
+	if json.Unmarshal(raw, &p) != nil {
+		return nil, false
+	}
+	return []string{"to task " + teams.EscapeDigestText(p.ToTaskID), channelBlock(label, p.Message)}, true
+}
+
+func channelStallParts(raw []byte, label string) ([]string, bool) {
+	var p taskStalledPayload
+	if json.Unmarshal(raw, &p) != nil {
+		return nil, false
+	}
+	parts := []string{fmt.Sprintf("silent for %ds waiting_on=%s", p.SilentSeconds, p.WaitingOn)}
+	if p.TeamWide {
+		parts = append(parts, "team-wide: every task is waiting")
+	}
+	return parts, true
 }
 
 // channelBlock renders one piece of untrusted content as an escaped block

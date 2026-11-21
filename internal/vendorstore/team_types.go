@@ -306,14 +306,6 @@ type RecoveredTask struct {
 	Sequence      int64
 }
 
-// taskMessagePayload is the sealed payload of EventTaskMessaged (Q-177 A):
-// the sibling send's target and its message. The message is agent output and
-// stays sealed; only the channel line metadata is public.
-type taskMessagePayload struct {
-	ToTaskID string `json:"to_task_id"`
-	Message  string `json:"message"`
-}
-
 // TeamChannelMessage is the metadata view of one team_channel_messages row
 // (INV-09, §6.7): the line's number, kind, thread, sender, recipient and the
 // source event it projects. The content is only reachable by opening the

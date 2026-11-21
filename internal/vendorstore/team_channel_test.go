@@ -61,6 +61,77 @@ func channelRows(t *testing.T, s *Store, teamID string) []TeamChannelMessage {
 
 // findChannelLine returns the chronologically first line of a kind: the read
 // is newest first, so the search walks from the end.
+// assertGeneralLines checks the general-channel lines: the plan opens the
+// channel at #1, the decision is a user line, and the note names its author.
+func assertGeneralLines(t *testing.T, rows []TeamChannelMessage, mgr string) {
+	t.Helper()
+	plan := rows[len(rows)-1] // the read is newest first
+	if plan.Kind != ChannelKindPlan || plan.ChannelSeq != 1 {
+		t.Fatalf("first line = %+v, want plan at #1", plan)
+	}
+	if plan.SourceSeq != 1 || plan.SenderKind != ChannelSenderAgent {
+		t.Fatalf("plan line metadata = %+v", plan)
+	}
+	decision := findChannelLine(rows, ChannelKindDecision)
+	if decision == nil || decision.SenderKind != ChannelSenderUser || decision.ThreadRoot != "" {
+		t.Fatalf("decision line = %+v, want a general-channel user line", decision)
+	}
+	noteLine := findChannelLine(rows, ChannelKindNote)
+	if noteLine == nil || noteLine.SenderTaskID != mgr || noteLine.ThreadRoot != "" {
+		t.Fatalf("note line = %+v, want the manager's note in the general channel", noteLine)
+	}
+}
+
+// assertThreadLines checks the per-thread lines: the lead's fugue
+// assignment, a's question and the manager's answer in the asker's thread,
+// and b's report in its own.
+func assertThreadLines(t *testing.T, rows []TeamChannelMessage, lead, mgr, a, b string) {
+	t.Helper()
+	assertTaskLine(t, rows, []string{lead, mgr, a, b})
+	assertThreadLine(t, rows, ChannelKindQuestion, a, a)
+	assertThreadLine(t, rows, ChannelKindAnswer, mgr, a)
+	assertThreadLine(t, rows, ChannelKindResult, b, b)
+}
+
+// assertTaskLine checks that a fugue assignment line exists in the thread of
+// one of the named tasks.
+func assertTaskLine(t *testing.T, rows []TeamChannelMessage, tasks []string) {
+	t.Helper()
+	taskLine := findChannelLine(rows, ChannelKindTask)
+	if taskLine == nil || taskLine.SenderKind != ChannelSenderFugue {
+		t.Fatalf("task line = %+v, want a fugue line", taskLine)
+	}
+	for _, id := range tasks {
+		if taskLine.ThreadRoot == ThreadRootTaskID(id) {
+			return
+		}
+	}
+	t.Fatalf("task line thread = %q, want an assigned task's thread", taskLine.ThreadRoot)
+}
+
+// assertThreadLine checks one agent-authored line: its sender, and the
+// thread it belongs to.
+func assertThreadLine(t *testing.T, rows []TeamChannelMessage, kind, sender, threadTask string) {
+	t.Helper()
+	line := findChannelLine(rows, kind)
+	if line == nil || line.SenderTaskID != sender || line.ThreadRoot != ThreadRootTaskID(threadTask) {
+		t.Fatalf("%s line = %+v, want %s in task %s's thread", kind, line, sender, threadTask)
+	}
+}
+
+// assertPayloadsStaySealed opens every payload a byte count points at: the
+// row holds metadata only, the content stays in the source event.
+func assertPayloadsStaySealed(t *testing.T, s *Store, team string, rows []TeamChannelMessage) {
+	t.Helper()
+	for i := range rows {
+		if rows[i].Bytes > 0 {
+			if _, err := s.OpenTeamEventPayload(t.Context(), team, rows[i].SourceSeq); err != nil {
+				t.Fatalf("line #%d payload does not open: %v", rows[i].ChannelSeq, err)
+			}
+		}
+	}
+}
+
 func findChannelLine(rows []TeamChannelMessage, kind string) *TeamChannelMessage {
 	for i := len(rows) - 1; i >= 0; i-- {
 		if rows[i].Kind == kind {
@@ -73,7 +144,6 @@ func findChannelLine(rows []TeamChannelMessage, kind string) *TeamChannelMessage
 func TestChannelProjectsTeamEventsIntoNumberedThreads(t *testing.T) {
 	t.Parallel()
 	s, _, _ := protectedStore(t)
-	ctx := t.Context()
 	team := "chan-proj"
 	lead, mgr, a, b := team+"-lead", team+"-mgr", team+"-a", team+"-b"
 	seq := seedChannelTeam(t, s, team, map[string]bool{lead: true, mgr: true, a: true, b: true})
@@ -89,37 +159,8 @@ func TestChannelProjectsTeamEventsIntoNumberedThreads(t *testing.T) {
 	})
 
 	rows := channelRows(t, s, team)
-	plan := rows[len(rows)-1] // the read is newest first
-	if plan.Kind != ChannelKindPlan || plan.ChannelSeq != 1 {
-		t.Fatalf("first line = %+v, want plan at #1", plan)
-	}
-	if plan.SourceSeq != 1 || plan.SenderKind != ChannelSenderAgent {
-		t.Fatalf("plan line metadata = %+v", plan)
-	}
-	decision := findChannelLine(rows, ChannelKindDecision)
-	if decision == nil || decision.SenderKind != ChannelSenderUser || decision.ThreadRoot != "" {
-		t.Fatalf("decision line = %+v, want a general-channel user line", decision)
-	}
-	taskLine := findChannelLine(rows, ChannelKindTask)
-	if taskLine == nil || taskLine.ThreadRoot != ThreadRootTaskID(lead) || taskLine.SenderKind != ChannelSenderFugue {
-		t.Fatalf("task line = %+v, want a fugue line in the lead thread", taskLine)
-	}
-	noteLine := findChannelLine(rows, ChannelKindNote)
-	if noteLine == nil || noteLine.SenderTaskID != mgr || noteLine.ThreadRoot != "" {
-		t.Fatalf("note line = %+v, want the manager's note in the general channel", noteLine)
-	}
-	questionLine := findChannelLine(rows, ChannelKindQuestion)
-	if questionLine == nil || questionLine.SenderTaskID != a || questionLine.ThreadRoot != ThreadRootTaskID(a) {
-		t.Fatalf("question line = %+v, want member a's question in its own thread", questionLine)
-	}
-	answerLine := findChannelLine(rows, ChannelKindAnswer)
-	if answerLine == nil || answerLine.SenderTaskID != mgr || answerLine.ThreadRoot != ThreadRootTaskID(a) {
-		t.Fatalf("answer line = %+v, want the manager's answer in the asker's thread", answerLine)
-	}
-	resultLine := findChannelLine(rows, ChannelKindResult)
-	if resultLine == nil || resultLine.SenderTaskID != b || resultLine.ThreadRoot != ThreadRootTaskID(b) {
-		t.Fatalf("result line = %+v, want member b's report in its own thread", resultLine)
-	}
+	assertGeneralLines(t, rows, mgr)
+	assertThreadLines(t, rows, lead, mgr, a, b)
 	sendLine := findChannelLine(rows, ChannelKindSend)
 	if sendLine == nil || sendLine.SenderTaskID != a || sendLine.RecipientTaskID != b || sendLine.ThreadRoot != ThreadRootTaskID(a) {
 		t.Fatalf("send line = %+v, want a to b in a's thread", sendLine)
@@ -127,35 +168,31 @@ func TestChannelProjectsTeamEventsIntoNumberedThreads(t *testing.T) {
 
 	// The content is never duplicated: the row holds metadata and a byte
 	// count, the payload stays sealed in the source event.
-	for i := range rows {
-		if rows[i].Bytes > 0 {
-			if _, err := s.OpenTeamEventPayload(ctx, team, rows[i].SourceSeq); err != nil {
-				t.Fatalf("line #%d payload does not open: %v", rows[i].ChannelSeq, err)
-			}
-		}
-	}
+	assertPayloadsStaySealed(t, s, team, rows)
 	if sendLine.Bytes != int64(len(`{"to_task_id":"`+b+`","message":"diff is up"}`)) {
 		t.Fatalf("send line bytes = %d, want the sealed payload length", sendLine.Bytes)
 	}
 
-	// A failed task end projects a failed line; a cancelled one none.
-	seq = appendSeq(t, s, team, seq, []AppendTeamEventInput{
+	assertChannelEndLines(t, s, team, seq, a, b)
+}
+
+// assertChannelEndLines checks the §6.7 end-of-task lines: a failed task end
+// projects a failed line into its thread; a cancelled one makes none.
+func assertChannelEndLines(t *testing.T, s *Store, team string, seq int64, a, b string) {
+	t.Helper()
+	appendSeq(t, s, team, seq, []AppendTeamEventInput{
 		{EventID: "fail-1", TaskID: b, EventType: EventTaskEnded, Outcome: outcomeFailed, FailureCode: "budget"},
 		{EventID: "cancel-1", TaskID: a, EventType: EventTaskEnded, Outcome: outcomeCancelled},
 	})
-	rows = channelRows(t, s, team)
+	rows := channelRows(t, s, team)
 	failed := findChannelLine(rows, ChannelKindFailed)
 	if failed == nil || failed.ThreadRoot != ThreadRootTaskID(b) {
 		t.Fatalf("failed line = %+v, want b's failure in its thread", failed)
 	}
-	count := 0
 	for i := range rows {
 		if rows[i].Kind == ChannelKindTask && rows[i].SourceSeq > failed.SourceSeq {
-			count++
+			t.Fatalf("a cancelled task end projected a line: %+v", rows[i])
 		}
-	}
-	if count != 0 {
-		t.Fatalf("a cancelled task end projected %d line(s), want none", count)
 	}
 }
 
@@ -173,7 +210,7 @@ func TestChannelRetryAttemptsShareOneThread(t *testing.T) {
 		t.Fatalf("RetryTask: %v", err)
 	}
 	seq = res.LastSeq
-	seq = appendSeq(t, s, team, seq, []AppendTeamEventInput{
+	appendSeq(t, s, team, seq, []AppendTeamEventInput{
 		{EventID: "as-retry-" + team, TaskID: a + "~r1", EventType: EventTaskAssigned},
 		{EventID: "st-retry-" + team, TaskID: a + "~r1", EventType: EventTaskStarted},
 		{EventID: "q-retry-" + team, TaskID: a + "~r1", EventType: EventTaskQuestionAsked, ProtectedPayload: []byte(`{"question":"retry scope?","to":"parent"}`)},
@@ -225,7 +262,7 @@ func TestChannelRebuildsFromTheTeamEventLog(t *testing.T) {
 		t.Fatalf("RetryTask: %v", err)
 	}
 	seq = res.LastSeq
-	seq = appendSeq(t, s, team, seq, []AppendTeamEventInput{
+	appendSeq(t, s, team, seq, []AppendTeamEventInput{
 		{EventID: "as-r-" + team, TaskID: a + "~r1", EventType: EventTaskAssigned},
 	})
 
@@ -291,9 +328,9 @@ func TestStallEventPostsIntoTheTaskThread(t *testing.T) {
 
 	// §6.7: the same stall also shows in the general channel when the whole
 	// team is waiting.
-	seq = appendSeq(t, s, team, seq, []AppendTeamEventInput{
+	appendSeq(t, s, team, seq, []AppendTeamEventInput{
 		{EventID: "stall-team-" + team, TaskID: b, EventType: EventTaskStalled, ProtectedPayload: []byte(`{"task_id":"` + b + `","waiting_on":"vendor","silent_seconds":900,"team_wide":true}`)},
-	})
+	}) // seq not needed: the stall test reads rows back
 	rows = channelRows(t, s, team)
 	stalls = 0
 	for i := range rows {

@@ -21,6 +21,31 @@ import (
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
+// channelFixturePayloads marshals the decided role profile, the proposal and
+// the task spec the channel fixture's team is created with.
+func channelFixturePayloads(t *testing.T) (roleBytes, propBytes, spec []byte) {
+	t.Helper()
+	roleBytes, err := json.Marshal(teamDecisionPayload{
+		Decision: decisionApprove,
+		Roles:    []decidedRole{{Name: teamTestRole, Vendor: VendorClaude, Permission: string(teams.PermissionRead)}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	propBytes, err = json.Marshal(teams.ProposalInput{
+		Title: "Channel", Brief: "Shared team brief.",
+		Roles: []teams.ProposedRole{{Name: teamTestRole, Vendor: VendorClaude, Permission: teams.PermissionRead}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err = json.Marshal(teams.ProtectedTaskContent{Goal: "Channel fixture work."})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return roleBytes, propBytes, spec
+}
+
 type channelFixture struct {
 	*wakeFixture
 	teamID                                                string
@@ -39,24 +64,7 @@ func newChannelFixture(t *testing.T) *channelFixture {
 	ctx := t.Context()
 	store := f.hp.vendorStore
 
-	roleBytes, err := json.Marshal(teamDecisionPayload{
-		Decision: decisionApprove,
-		Roles:    []decidedRole{{Name: teamTestRole, Vendor: VendorClaude, Permission: string(teams.PermissionRead)}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	propBytes, err := json.Marshal(teams.ProposalInput{
-		Title: "Channel", Brief: "Shared team brief.",
-		Roles: []teams.ProposedRole{{Name: teamTestRole, Vendor: VendorClaude, Permission: teams.PermissionRead}},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	spec, err := json.Marshal(teams.ProtectedTaskContent{Goal: "Channel fixture work."})
-	if err != nil {
-		t.Fatal(err)
-	}
+	roleBytes, propBytes, spec := channelFixturePayloads(t)
 
 	teamID := "chan-team"
 	L, M, A, B, C := teamID+"-lead", teamID+"-mgr", teamID+"-a", teamID+"-b", teamID+"-c"
@@ -66,7 +74,7 @@ func newChannelFixture(t *testing.T) *channelFixture {
 		{"chan-b", B, string(vendorstore.RoleMember)},
 		{"chan-c", C, string(vendorstore.RoleMember)},
 	})
-	_, _, err = store.CreateTeam(ctx, &vendorstore.NewTeamInput{
+	if _, _, createErr := store.CreateTeam(ctx, &vendorstore.NewTeamInput{
 		TeamID: teamID, WorkspaceID: f.wsID, SessionID: f.session.ID,
 		ProposedEventID: "chan-prop", ProposedPayload: propBytes,
 		Tasks: []vendorstore.NewTaskInput{
@@ -76,9 +84,8 @@ func newChannelFixture(t *testing.T) *channelFixture {
 			{TaskID: B, ParentTaskID: M, HierarchyRole: vendorstore.RoleMember, CatalogRole: teamTestRole, Deliverable: vendorstore.DeliverableReport, CreatedEventID: "chan-c4", ProtectedSpec: spec},
 			{TaskID: C, ParentTaskID: L, HierarchyRole: vendorstore.RoleMember, CatalogRole: teamTestRole, Deliverable: vendorstore.DeliverableReport, CreatedEventID: "chan-c5", ProtectedSpec: spec, ExplicitStart: true},
 		},
-	})
-	if err != nil {
-		t.Fatal(err)
+	}); createErr != nil {
+		t.Fatal(createErr)
 	}
 	f.appendTeamEvent(t, teamID, &vendorstore.AppendTeamEventInput{EventID: "chan-start", EventType: vendorstore.EventTeamStarted, ProtectedPayload: roleBytes})
 	for _, bind := range [][2]string{
@@ -146,19 +153,26 @@ func firstChannelNumber(text string) int64 {
 func TestSiblingSendOnlyToSameDelegatorAndCapped(t *testing.T) {
 	t.Parallel()
 	f := newChannelFixture(t)
-	ctx := t.Context()
-	svc := f.rt.teamTasks
 
 	// OR-E20: the sibling send is delivered, in a's thread, and the
 	// delegator's mention never schedules its own delivery.
 	f.siblingSend(t, f.aBinding, f.memBID, "diff is up")
-	line := f.sendChannelLine(t)
-	if line == 0 {
-		t.Fatal("sibling send projected no channel line")
-	}
-	pending, err := f.hp.vendorStore.PendingMailbox(ctx)
-	if err != nil {
-		t.Fatal(err)
+	f.sendChannelLine(t)
+	f.assertPendingOnlyTarget(t)
+	f.assertSendRejections(t)
+	// A manager may send to a sibling under the same delegator.
+	f.siblingSend(t, f.mgrBinding, f.memCID, "heads up")
+	f.assertAgentCap(t)
+	f.assertTeamCap(t)
+}
+
+// assertPendingOnlyTarget checks the target's mail is pending while the
+// delegator's informational mention never schedules a wake.
+func (f *channelFixture) assertPendingOnlyTarget(t *testing.T) {
+	t.Helper()
+	pending, pendingErr := f.hp.vendorStore.PendingMailbox(t.Context())
+	if pendingErr != nil {
+		t.Fatal(pendingErr)
 	}
 	sawTarget, sawDelegator := false, false
 	for _, r := range pending {
@@ -172,42 +186,53 @@ func TestSiblingSendOnlyToSameDelegatorAndCapped(t *testing.T) {
 	if !sawTarget || sawDelegator {
 		t.Fatalf("pending = %+v, want the target only (the informational mention must not wake the delegator)", pending)
 	}
+}
 
-	// Other delegators, other teams, the caller itself, and the lead's
-	// non-child targets are rejected with typed codes.
-	if _, err := svc.Send(ctx, f.aBinding.SessionID, f.memCID, "hi"); errcode.CodeOf(err) != errcode.PermissionDenied {
-		t.Fatalf("send across delegators code = %v, want permission_denied", errcode.CodeOf(err))
+// assertSendRejections checks the typed codes of sends that must not go out:
+// other delegators, other teams, the caller itself, and the lead's non-child
+// targets (§6.7, OR-E20).
+func (f *channelFixture) assertSendRejections(t *testing.T) {
+	t.Helper()
+	svc := f.rt.teamTasks
+	for _, tc := range []struct {
+		session, taskID string
+		want            errcode.Code
+	}{
+		{f.aBinding.SessionID, f.memCID, errcode.PermissionDenied},
+		{f.aBinding.SessionID, "chan-other-o", errcode.NotFound},
+		{f.aBinding.SessionID, f.memAID, errcode.FailedPrecondition},
+		{f.leadBinding.SessionID, f.memAID, errcode.PermissionDenied},
+	} {
+		if _, sendErr := svc.Send(t.Context(), tc.session, tc.taskID, "hi"); errcode.CodeOf(sendErr) != tc.want {
+			t.Fatalf("send(%s -> %s) code = %v, want %v", tc.session, tc.taskID, errcode.CodeOf(sendErr), tc.want)
+		}
 	}
-	if _, err := svc.Send(ctx, f.aBinding.SessionID, "chan-other-o", "hi"); errcode.CodeOf(err) != errcode.NotFound {
-		t.Fatalf("send to another team's task code = %v, want not_found", errcode.CodeOf(err))
-	}
-	if _, err := svc.Send(ctx, f.aBinding.SessionID, f.memAID, "hi"); errcode.CodeOf(err) != errcode.FailedPrecondition {
-		t.Fatalf("send to self code = %v, want failed_precondition", errcode.CodeOf(err))
-	}
-	if _, err := svc.Send(ctx, f.leadBinding.SessionID, f.memAID, "hi"); errcode.CodeOf(err) != errcode.PermissionDenied {
-		t.Fatalf("lead sibling send code = %v, want permission_denied", errcode.CodeOf(err))
-	}
-	// A manager may send to a sibling under the same delegator.
-	f.siblingSend(t, f.mgrBinding, f.memCID, "heads up")
+}
 
-	// The agent cap: six sends pass, the seventh is rejected typed.
+// assertAgentCap fills member a's sliding window to the cap: the sixth send
+// passes, the seventh is rejected typed (§6.7).
+func (f *channelFixture) assertAgentCap(t *testing.T) {
+	t.Helper()
 	for range 5 {
 		f.siblingSend(t, f.aBinding, f.memBID, "more")
 	}
-	if _, err := svc.Send(ctx, f.aBinding.SessionID, f.memBID, "one too many"); errcode.CodeOf(err) != errcode.TasksSendRateLimited {
-		t.Fatalf("seventh sibling send code = %v, want tasks.send_rate_limited", errcode.CodeOf(err))
+	if _, sendErr := f.rt.teamTasks.Send(t.Context(), f.aBinding.SessionID, f.memBID, "one too many"); errcode.CodeOf(sendErr) != errcode.TasksSendRateLimited {
+		t.Fatalf("seventh sibling send code = %v, want tasks.send_rate_limited", errcode.CodeOf(sendErr))
 	}
+}
 
-	// The team cap counts every agent's sends: fill the window to 30 with
-	// direct store appends from the manager, then member b (whose own count
-	// is zero) is rejected by the team cap on a valid sibling target.
-	rec, _, err := f.hp.vendorStore.TeamSnapshot(ctx, f.teamID)
-	if err != nil {
-		t.Fatal(err)
+// assertTeamCap fills the team's sliding window to 30 with direct store
+// appends from the manager, then member b — whose own count is zero — is
+// rejected by the team cap on a valid sibling target (§6.7).
+func (f *channelFixture) assertTeamCap(t *testing.T) {
+	t.Helper()
+	rec, _, snapErr := f.hp.vendorStore.TeamSnapshot(t.Context(), f.teamID)
+	if snapErr != nil {
+		t.Fatal(snapErr)
 	}
 	for i := range 24 {
-		seq, appendErr := f.hp.vendorStore.AppendTeamEvent(ctx, f.teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
-			EventID: "cap-" + strconv.Itoa(i), TaskID: f.memBID, EventType: vendorstore.EventTaskMessaged,
+		seq, appendErr := f.hp.vendorStore.AppendTeamEvent(t.Context(), f.teamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
+			EventID: "cap-" + strconv.Itoa(i), TaskID: f.mgrID, EventType: vendorstore.EventTaskMessaged,
 			ProtectedPayload: []byte(`{"to_task_id":"` + f.memAID + `","message":"filler"}`),
 		})
 		if appendErr != nil {
@@ -215,8 +240,8 @@ func TestSiblingSendOnlyToSameDelegatorAndCapped(t *testing.T) {
 		}
 		rec.LastSeq = seq
 	}
-	if _, err := svc.Send(ctx, f.bBinding.SessionID, f.memAID, "fresh agent"); errcode.CodeOf(err) != errcode.TasksSendRateLimited {
-		t.Fatalf("send over the team cap code = %v, want tasks.send_rate_limited", errcode.CodeOf(err))
+	if _, sendErr := f.rt.teamTasks.Send(t.Context(), f.bBinding.SessionID, f.memAID, "fresh agent"); errcode.CodeOf(sendErr) != errcode.TasksSendRateLimited {
+		t.Fatalf("send over the team cap code = %v, want tasks.send_rate_limited", errcode.CodeOf(sendErr))
 	}
 }
 
@@ -264,15 +289,21 @@ func TestTeamReadScopesByRoleAndPagesBothWays(t *testing.T) {
 	t.Parallel()
 	f := newChannelFixture(t)
 	ctx := t.Context()
-	svc := f.rt.teamTasks
 
 	f.siblingSend(t, f.aBinding, f.memBID, "diff is up")
-	if _, err := svc.Note(ctx, f.leadBinding.SessionID, "pin the v2 API"); err != nil {
-		t.Fatalf("note: %v", err)
+	if _, noteErr := f.rt.teamTasks.Note(ctx, f.leadBinding.SessionID, "pin the v2 API"); noteErr != nil {
+		t.Fatalf("note: %v", noteErr)
 	}
+	f.assertMemberReadScope(t)
+	f.assertManagerReadScope(t)
+	f.assertLeadReadScope(t)
+	f.assertReadPaging(t)
+}
 
-	// A member reads its own thread by default, the general channel and a
-	// sibling thread on request; nothing else.
+// assertMemberReadScope checks the §6.6 member scope: its own thread by
+// default, the general channel and sibling threads on request, nothing else.
+func (f *channelFixture) assertMemberReadScope(t *testing.T) {
+	t.Helper()
 	own := f.readChannel(t, f.aBinding, `{}`)
 	if !strings.Contains(own, "untrusted source=team-channel") || !strings.Contains(own, "diff is up") {
 		t.Fatalf("own-thread read = %q, want the send line and its data block", own)
@@ -288,38 +319,58 @@ func TestTeamReadScopesByRoleAndPagesBothWays(t *testing.T) {
 	if !strings.Contains(sibling, "task "+f.memBID+" delegated") {
 		t.Fatalf("sibling-thread read = %q, want b's assignment", sibling)
 	}
-	if _, err := svc.TeamRead(ctx, f.aBinding.SessionID, "all", 0, 0, 0); errcode.CodeOf(err) != errcode.PermissionDenied {
-		t.Fatalf("member whole-team read code = %v, want permission_denied", errcode.CodeOf(err))
-	}
-	if _, err := svc.TeamRead(ctx, f.aBinding.SessionID, f.mgrID, 0, 0, 0); errcode.CodeOf(err) != errcode.PermissionDenied {
-		t.Fatalf("member manager-thread read code = %v, want permission_denied", errcode.CodeOf(err))
-	}
-
-	// The manager reads its part and the general channel, not the lead's
-	// other part.
-	for _, target := range []string{f.memAID, f.memBID, "general"} {
-		if _, err := svc.TeamRead(ctx, f.mgrBinding.SessionID, target, 0, 0, 0); err != nil {
-			t.Fatalf("manager read of %s: %v", target, err)
+	for _, tc := range []struct {
+		thread string
+		want   errcode.Code
+	}{
+		{teamReadAllSelector, errcode.PermissionDenied},
+		{f.mgrID, errcode.PermissionDenied},
+	} {
+		if _, readErr := f.rt.teamTasks.TeamRead(t.Context(), f.aBinding.SessionID, tc.thread, 0, 0, 0); errcode.CodeOf(readErr) != tc.want {
+			t.Fatalf("member read(%s) code = %v, want %v", tc.thread, errcode.CodeOf(readErr), tc.want)
 		}
 	}
-	if _, err := svc.TeamRead(ctx, f.mgrBinding.SessionID, f.memCID, 0, 0, 0); errcode.CodeOf(err) != errcode.PermissionDenied {
-		t.Fatalf("manager read outside its part code = %v, want permission_denied", errcode.CodeOf(err))
-	}
-	if _, err := svc.TeamRead(ctx, f.mgrBinding.SessionID, "all", 0, 0, 0); errcode.CodeOf(err) != errcode.PermissionDenied {
-		t.Fatalf("manager whole-team read code = %v, want permission_denied", errcode.CodeOf(err))
-	}
+}
 
-	// The lead reads everything.
-	all, err := svc.TeamRead(ctx, f.leadBinding.SessionID, "all", 0, 0, 0)
-	if err != nil {
-		t.Fatalf("lead whole-team read: %v", err)
+// assertManagerReadScope checks the §6.6 manager scope: its part and the
+// general channel, never the lead's other part.
+func (f *channelFixture) assertManagerReadScope(t *testing.T) {
+	t.Helper()
+	for _, target := range []string{f.memAID, f.memBID, "general"} {
+		if _, readErr := f.rt.teamTasks.TeamRead(t.Context(), f.mgrBinding.SessionID, target, 0, 0, 0); readErr != nil {
+			t.Fatalf("manager read of %s: %v", target, readErr)
+		}
+	}
+	for _, tc := range []struct {
+		thread string
+		want   errcode.Code
+	}{
+		{f.memCID, errcode.PermissionDenied},
+		{teamReadAllSelector, errcode.PermissionDenied},
+	} {
+		if _, readErr := f.rt.teamTasks.TeamRead(t.Context(), f.mgrBinding.SessionID, tc.thread, 0, 0, 0); errcode.CodeOf(readErr) != tc.want {
+			t.Fatalf("manager read(%s) code = %v, want %v", tc.thread, errcode.CodeOf(readErr), tc.want)
+		}
+	}
+}
+
+// assertLeadReadScope checks that the lead reads every thread and the
+// general channel.
+func (f *channelFixture) assertLeadReadScope(t *testing.T) {
+	t.Helper()
+	all, readErr := f.rt.teamTasks.TeamRead(t.Context(), f.leadBinding.SessionID, "all", 0, 0, 0)
+	if readErr != nil {
+		t.Fatalf("lead whole-team read: %v", readErr)
 	}
 	if !strings.Contains(all, "task "+f.memCID+" delegated") || !strings.Contains(all, "pin the v2 API") {
 		t.Fatalf("lead whole-team read = %q, want every thread and the general channel", all)
 	}
+}
 
-	// Paging both ways on a's own thread: limit 1 gives the newest line,
-	// `before` steps back, `since` steps forward.
+// assertReadPaging checks backward and forward paging on a's own thread:
+// limit 1 gives the newest line, `before` steps back, `since` steps forward.
+func (f *channelFixture) assertReadPaging(t *testing.T) {
+	t.Helper()
 	page1 := f.readChannel(t, f.aBinding, `{"limit":1}`)
 	top := firstChannelNumber(page1)
 	if top == 0 {
@@ -344,10 +395,10 @@ func TestAgentsNeverReceiveTheChannelStream(t *testing.T) {
 	// No channel topic exists to subscribe to: registration is the
 	// authorization registry, so `team:<id>` is denied for every principal,
 	// including the session principal a vendor tool would hold.
-	for _, principal := range []string{"session", "app"} {
-		_, err := f.rt.Subscribe(ctx, SubscribeParams{Principal: principal, Topic: "team:" + f.teamID})
-		if !errors.Is(err, ErrSubscriptionDenied) {
-			t.Fatalf("subscribe(%s, team:<id>) err = %v, want ErrSubscriptionDenied", principal, err)
+	for _, principal := range []string{PrincipalSession, "app"} {
+		_, subErr := f.rt.Subscribe(ctx, SubscribeParams{Principal: principal, Topic: "team:" + f.teamID})
+		if !errors.Is(subErr, ErrSubscriptionDenied) {
+			t.Fatalf("subscribe(%s, team:<id>) err = %v, want ErrSubscriptionDenied", principal, subErr)
 		}
 	}
 
@@ -358,8 +409,8 @@ func TestAgentsNeverReceiveTheChannelStream(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.rt.teamTasks.TeamRead(ctx, f.bBinding.SessionID, "", 0, 0, 0); err != nil {
-		t.Fatalf("read: %v", err)
+	if _, readErr := f.rt.teamTasks.TeamRead(ctx, f.bBinding.SessionID, "", 0, 0, 0); readErr != nil {
+		t.Fatalf("read: %v", readErr)
 	}
 	after, err := f.hp.vendorStore.PendingMailbox(ctx)
 	if err != nil {
