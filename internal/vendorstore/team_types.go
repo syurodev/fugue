@@ -224,7 +224,9 @@ type TaskRecord struct {
 	// Attempt is the 1-based attempt number in a retry chain (Q-126).
 	Attempt int
 	// RetryOf identifies the immediately superseded failed task ID, if any (Q-126).
-	RetryOf      string
+	RetryOf string
+	// ScopeBounces counts how many times write_scope bounced the task back to running (F11.5a).
+	ScopeBounces int
 	LastEventSeq int64
 	CreatedAt    int64
 	UpdatedAt    int64

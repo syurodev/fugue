@@ -20,7 +20,7 @@ func (m *VendorSessions) Detach(ctx context.Context, sessionID string) error {
 	if actor == nil {
 		return vendorstore.ErrSessionNotFound
 	}
-	if err := actor.call(ctx, actorCommand{kind: commandDetach}); err != nil {
+	if err := actor.call(ctx, &actorCommand{kind: commandDetach}); err != nil {
 		return err
 	}
 	select {

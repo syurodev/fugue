@@ -241,7 +241,7 @@ func (p *vendorPacer) callSendWithTimeout(ctx context.Context, actor *vendorSess
 		}
 		return nil
 	})
-	err := actor.call(sendCtx, actorCommand{kind: commandSend, input: input})
+	err := actor.call(sendCtx, &actorCommand{kind: commandSend, input: input})
 	close(stopWatch)
 	cancelSend()
 	<-doneWatch
@@ -359,7 +359,7 @@ func (m *VendorSessions) SendAsync(sessionID string, input vendor.Input, onDone 
 	}
 	if input.Origin != vendor.OriginFugue {
 		m.spawn("vendor-send-"+sessionID, func(ctx context.Context) error {
-			err := actor.call(ctx, actorCommand{kind: commandSend, input: input})
+			err := actor.call(ctx, &actorCommand{kind: commandSend, input: input})
 			if onDone != nil {
 				onDone(err)
 			}
