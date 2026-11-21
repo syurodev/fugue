@@ -433,6 +433,9 @@ func applyTaskProjection(
 	if err := updateTaskSessionOnEvent(ctx, tx, teamID, ev); err != nil {
 		return "", "", err
 	}
+	if err := reparentChildrenOnManagerCancel(ctx, tx, teamID, ev, TeamRole(roleStr), now); err != nil {
+		return "", "", err
+	}
 	return curStateStr, string(nextState), nil
 }
 

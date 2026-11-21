@@ -164,6 +164,25 @@ func (f *fakeTaskSessions) startFor(taskID string) (taskSessionRequest, bool) {
 	return taskSessionRequest{}, false
 }
 
+// fakeDiskSpace is the injected disk port of the dispatcher tests (F11.9).
+type fakeDiskSpace struct {
+	mu   sync.Mutex
+	free uint64
+	err  error
+}
+
+func (f *fakeDiskSpace) FreeDiskBytes(string) (uint64, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.free, f.err
+}
+
+func (f *fakeDiskSpace) setFree(v uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.free = v
+}
+
 // dispatchFixture is a team fixture with the host's own start path off and a
 // dispatcher of the test's over a fake vendor layer, a real store and a real
 // git manager.
@@ -171,6 +190,7 @@ type dispatchFixture struct {
 	*teamProposalFixture
 	sessions *fakeTaskSessions
 	disp     *teamDispatcher
+	disk     *fakeDiskSpace
 	dataDir  string
 }
 
@@ -226,11 +246,13 @@ func newDispatchFixture(t *testing.T, withGit bool) *dispatchFixture {
 		t.Fatal(err)
 	}
 	fake := &fakeTaskSessions{}
+	disk := &fakeDiskSpace{free: 1 << 40}
 	disp := newTeamDispatcher(&teamDispatcherDeps{
 		Store: f.hp.vendorStore, Sessions: fake, Admit: localAdmitter{capacity: fake},
 		Roots: f.rt.workspaces.domain, Git: manager, DataDir: dataDir, IDs: ids.NewSequence("disp"), Vault: f.hp.vault,
+		Disk: disk, Clock: f.clk,
 	})
-	return &dispatchFixture{teamProposalFixture: f, sessions: fake, disp: disp, dataDir: dataDir}
+	return &dispatchFixture{teamProposalFixture: f, sessions: fake, disp: disp, disk: disk, dataDir: dataDir}
 }
 
 // approve proposes args and approves the proposal, returning the team ID.

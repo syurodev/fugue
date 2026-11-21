@@ -133,6 +133,15 @@ const (
 // deadline expires and new task dispatches are paused (Q-149).
 const TeamWaitingDeadline = "team_deadline"
 
+// The TaskRecoveryDecided outcomes of §12 (Q-151). The cancel outcome on an
+// unknown team_manager re-parents its live children to the lead when the
+// event carries ReparentTo (Q-159 A).
+const (
+	RecoveryOutcomeResume   = "resume"
+	RecoveryOutcomeKeepDiff = "keep_diff"
+	RecoveryOutcomeCancel   = "cancel"
+)
+
 // TeamRecord is the metadata-only projection of a team_records row (INV-09).
 type TeamRecord struct {
 	TeamID        string
@@ -219,6 +228,21 @@ type AppendTeamEventInput struct {
 	// SessionID names the session of a TaskAssigned event; the projection
 	// records it on the task row. It is empty for every other event.
 	SessionID string
+	// ReparentTo names the task that adopts the non-terminal children of the
+	// TaskRecoveryDecided(cancel) target (§12: the lead takes over an unknown
+	// team manager's running members, Q-159 A). Only that event on a
+	// team_manager accepts it; every other event must leave it empty.
+	ReparentTo string
+	// ReaddressMailboxFrom names the recipient whose pending, unclaimed
+	// mailbox rows move to the ReparentTo task in the same transaction
+	// (F11.9: a cancelled manager's queued mail must reach the lead that
+	// adopts its children). It must be the cancel target itself; rows a
+	// batch already claimed are left alone so a delivery never duplicates.
+	ReaddressMailboxFrom string
+	// ReaddressMailboxKeep holds the message IDs that stay with
+	// ReaddressMailboxFrom: rows the lead itself sent to the manager, judged
+	// from their opened payloads before the append.
+	ReaddressMailboxKeep []string
 	// Mailbox rows are written in the same transaction as this event, keyed to
 	// its sequence (Q-122); nil for events that produce no mail.
 	Mailbox []MailboxEnqueueInput
