@@ -689,6 +689,9 @@ type TranscriptView struct {
 	CutAt         uint32                   `protobuf:"varint,3,opt,name=cut_at,json=cutAt,proto3" json:"cut_at,omitempty"`
 	OmittedBytes  uint32                   `protobuf:"varint,4,opt,name=omitted_bytes,json=omittedBytes,proto3" json:"omitted_bytes,omitempty"`
 	Files         []*TranscriptFileSummary `protobuf:"bytes,5,rep,name=files,proto3" json:"files,omitempty"`
+	Title         string                   `protobuf:"bytes,6,opt,name=title,proto3" json:"title,omitempty"`
+	Input         string                   `protobuf:"bytes,7,opt,name=input,proto3" json:"input,omitempty"`
+	Steps         []string                 `protobuf:"bytes,8,rep,name=steps,proto3" json:"steps,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -754,6 +757,27 @@ func (x *TranscriptView) GetOmittedBytes() uint32 {
 func (x *TranscriptView) GetFiles() []*TranscriptFileSummary {
 	if x != nil {
 		return x.Files
+	}
+	return nil
+}
+
+func (x *TranscriptView) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *TranscriptView) GetInput() string {
+	if x != nil {
+		return x.Input
+	}
+	return ""
+}
+
+func (x *TranscriptView) GetSteps() []string {
+	if x != nil {
+		return x.Steps
 	}
 	return nil
 }
@@ -1549,13 +1573,16 @@ const file_fugue_transcript_v1_transcript_proto_rawDesc = "" +
 	"\x15TranscriptFileSummary\x12\x16\n" +
 	"\x06header\x18\x01 \x01(\tR\x06header\x12\x14\n" +
 	"\x05added\x18\x02 \x01(\rR\x05added\x12\x18\n" +
-	"\aremoved\x18\x03 \x01(\rR\aremoved\"\xc0\x01\n" +
+	"\aremoved\x18\x03 \x01(\rR\aremoved\"\x82\x02\n" +
 	"\x0eTranscriptView\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x1c\n" +
 	"\ttruncated\x18\x02 \x01(\bR\ttruncated\x12\x15\n" +
 	"\x06cut_at\x18\x03 \x01(\rR\x05cutAt\x12#\n" +
 	"\romitted_bytes\x18\x04 \x01(\rR\fomittedBytes\x12@\n" +
-	"\x05files\x18\x05 \x03(\v2*.fugue.transcript.v1.TranscriptFileSummaryR\x05files\"\xb8\x03\n" +
+	"\x05files\x18\x05 \x03(\v2*.fugue.transcript.v1.TranscriptFileSummaryR\x05files\x12\x14\n" +
+	"\x05title\x18\x06 \x01(\tR\x05title\x12\x14\n" +
+	"\x05input\x18\a \x01(\tR\x05input\x12\x14\n" +
+	"\x05steps\x18\b \x03(\tR\x05steps\"\xb8\x03\n" +
 	"\x0fTranscriptEntry\x12\x17\n" +
 	"\aitem_id\x18\x01 \x01(\tR\x06itemId\x12\x17\n" +
 	"\aturn_id\x18\x02 \x01(\tR\x06turnId\x127\n" +

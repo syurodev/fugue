@@ -3,6 +3,7 @@ package kit
 import (
 	"image"
 	"image/color"
+	"strings"
 
 	"gioui.org/font"
 	"gioui.org/layout"
@@ -25,6 +26,89 @@ import (
 // names, metadata. It honors the constraints' width but never wraps.
 func Label(env *Env, gtx *layout.Context, t theme.Type, c color.NRGBA, txt string) layout.Dimensions {
 	return drawText(env, gtx, t, c, txt, false)
+}
+
+// EllipsisLabel draws a single line of txt in token t and color c, truncated
+// with an ellipsis ("…") to fit within gtx.Constraints.Max.X.
+func EllipsisLabel(env *Env, gtx *layout.Context, t theme.Type, c color.NRGBA, txt string) layout.Dimensions {
+	if gtx.Constraints.Max.X <= 0 || txt == "" {
+		return layout.Dimensions{}
+	}
+	size, line := env.Content(t)
+	g := *gtx
+	g.Constraints.Min = image.Point{}
+	g.Constraints.Max.Y = 1 << 20
+	m := op.Record(gtx.Ops)
+	paint.ColorOp{Color: c}.Add(gtx.Ops)
+	l := widget.Label{
+		Alignment:  text.Start,
+		MaxLines:   1,
+		Truncator:  "…",
+		WrapPolicy: text.WrapGraphemes,
+	}
+	if t.Line != 0 {
+		l.LineHeight = line
+		l.LineHeightScale = 1
+	}
+	return l.Layout(g, env.Sh, fontOf(t), size, txt, m.Stop())
+}
+
+// MiddleEllipsisLabel draws a single line of txt in token t and color c,
+// ellipsizing in the middle (keeping any trailing "/name" segment when space
+// allows) so the text fits within gtx.Constraints.Max.X.
+func MiddleEllipsisLabel(env *Env, gtx *layout.Context, t theme.Type, c color.NRGBA, txt string) layout.Dimensions {
+	maxW := gtx.Constraints.Max.X
+	if maxW <= 0 || txt == "" {
+		return layout.Dimensions{}
+	}
+	if measureLabel(env, gtx, t, txt).X <= maxW {
+		return Label(env, gtx, t, c, txt)
+	}
+	return EllipsisLabel(env, gtx, t, c, fitMiddleEllipsis(env, gtx, t, txt, maxW))
+}
+
+// MeasureLabel returns the unconstrained single-line size of txt in token t.
+func MeasureLabel(env *Env, gtx *layout.Context, t theme.Type, txt string) image.Point {
+	return measureLabel(env, gtx, t, txt)
+}
+
+func fitMiddleEllipsis(env *Env, gtx *layout.Context, t theme.Type, txt string, maxW int) string {
+	if slash := strings.LastIndexByte(txt, '/'); slash > 0 {
+		tail := txt[slash:]
+		if measureLabel(env, gtx, t, "…"+tail).X <= maxW {
+			prefix := []rune(txt[:slash])
+			best := binarySearchFit(0, len(prefix), func(n int) bool {
+				return measureLabel(env, gtx, t, string(prefix[:n])+"…"+tail).X <= maxW
+			})
+			return string(prefix[:best]) + "…" + tail
+		}
+	}
+	runes := []rune(txt)
+	best := binarySearchFit(1, len(runes)-1, func(n int) bool {
+		tail := (n + 1) / 2
+		head := n - tail
+		return measureLabel(env, gtx, t, string(runes[:head])+"…"+string(runes[len(runes)-tail:])).X <= maxW
+	})
+	if best <= 0 {
+		return txt
+	}
+	tail := (best + 1) / 2
+	head := best - tail
+	return string(runes[:head]) + "…" + string(runes[len(runes)-tail:])
+}
+
+func binarySearchFit(lo, hi int, fits func(int) bool) int {
+	best := -1
+	for lo <= hi {
+		mid := lo + (hi-lo)/2
+		if fits(mid) {
+			best = mid
+			lo = mid + 1
+		} else {
+			hi = mid - 1
+		}
+	}
+	return best
 }
 
 // Paragraph draws txt in token t and color c, wrapped at the constraints'

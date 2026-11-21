@@ -165,7 +165,7 @@ func TestTranscriptItemCarriesTheDetail(t *testing.T) {
 		t.Fatalf("item flags = %+v", item)
 	}
 	wantDetailMetadata(t, &item.Metadata)
-	wantDetailView(t, item.View)
+	wantDetailView(t, &item.View)
 	if string(detail.Content) != `{"full":"content"}` {
 		t.Fatalf("content = %s", detail.Content)
 	}
@@ -259,7 +259,7 @@ func wantDetailMetadata(t *testing.T, m *client.TranscriptMetadata) {
 }
 
 // wantDetailView asserts the mapped view and its file summaries.
-func wantDetailView(t *testing.T, v client.TranscriptView) {
+func wantDetailView(t *testing.T, v *client.TranscriptView) {
 	t.Helper()
 	if v.Text != "output" || !v.Truncated || v.CutAt != 5 || v.OmittedBytes != 7 {
 		t.Fatalf("view = %+v", v)

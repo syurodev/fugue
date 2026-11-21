@@ -1,21 +1,21 @@
 package transcriptview
 
 import (
-	"fmt"
 	"image"
 	"image/color"
+	"time"
 
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/unit"
 	"gioui.org/widget"
-
-	"github.com/syurodev/fugue/pkg/client"
 
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/markdown"
 	"github.com/syurodev/fugue/ui/internal/mdview"
+	"github.com/syurodev/fugue/ui/internal/motion"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
@@ -31,164 +31,255 @@ const (
 	kindPlan             = "plan"
 	kindSubagent         = "subagent"
 	kindCommand          = "command"
+	kindTeamProposal     = "team_proposal"
+	kindTaskLink         = "task_link"
 	kindUsage            = "usage"
 	kindQuota            = "quota"
 	kindNotice           = "notice"
 )
 
-// cardState is one item's view state the row func needs across frames: its
-// parsed markdown when it is a message, the source it was parsed from, the
-// mdview state and the click on its header. It lives in the VirtualList's
-// payload slot, so the list's bound evicts it with the item's heights; the
-// expansion lives per item_id in the list, so it survives a new revision.
-type cardState struct {
-	doc    *markdown.Doc
-	docSrc string
-	md     mdview.State
-	click  widget.Clickable
+type expandAnim struct {
+	pres   motion.Presence
+	inited bool
+	last   bool
 }
 
-// cardOf returns the item's payload card, building it on first use.
-func cardOf(st *State, itemID string) *cardState {
-	return kit.PayloadOf(st.list, itemID, func() *cardState { return &cardState{} })
+func newExpandAnim() expandAnim {
+	return expandAnim{pres: motion.NewPresence(motion.Smooth(), motion.Exit())}
 }
 
-// layoutCard lays one item out (transcript §3). Every kind renders
-// something: an unknown kind renders as a generic card, never a crash or a
-// drop. The height the list records comes from the returned dimensions, so
-// a new revision's entry is seeded from the old one by the kit's cache and
-// the list does not jump.
-func layoutCard(env *kit.Env, gtx *layout.Context, st *State, item *session.Item) layout.Dimensions {
-	c := cardOf(st, item.ItemID)
-	if c.click.Clicked(*gtx) {
-		st.list.ToggleExpanded(item.ItemID)
+func (a *expandAnim) step(env *kit.Env, expanded, fromClick bool) (visible bool, progress float32) {
+	if !a.inited {
+		a.inited = true
+		a.last = expanded
+		a.pres.Snap(expanded)
+	} else if expanded != a.last {
+		a.last = expanded
+		if fromClick && !env.ReducedMotion {
+			a.pres.Show(expanded)
+		} else {
+			a.pres.Snap(expanded)
+		}
 	}
-	gap := layout.Inset{Bottom: theme.SpaceSM}
+	if env.ReducedMotion {
+		a.pres.Snap(a.last)
+	} else if a.pres.Advance(env.DT()) {
+		env.Keep()
+	}
+	return a.pres.Visible(), min(max(a.pres.Progress(), 0), 1)
+}
+
+type cardState struct {
+	doc       *markdown.Doc
+	docSrc    string
+	md        mdview.State
+	click     widget.Clickable
+	code      *mdview.CodeBlockState
+	inputCode *mdview.CodeBlockState
+	planCard  *kit.CardState
+	viewDiff  *kit.ButtonState
+	inboxBtn  *kit.ButtonState
+	anim      expandAnim
+	chips     map[string]*widget.Clickable
+}
+
+func cardOf(st *State, key string) *cardState {
+	return kit.PayloadOf(st.list, key, func() *cardState {
+		return &cardState{
+			code:      mdview.NewCodeBlockState(),
+			inputCode: mdview.NewCodeBlockState(),
+			planCard:  kit.NewCardState(),
+			viewDiff:  kit.NewButtonState(),
+			inboxBtn:  kit.NewButtonState(),
+			anim:      newExpandAnim(),
+			chips:     map[string]*widget.Clickable{},
+		}
+	})
+}
+
+func (c *cardState) chipClick(key string) *widget.Clickable {
+	if c.chips == nil {
+		c.chips = map[string]*widget.Clickable{}
+	}
+	cl, ok := c.chips[key]
+	if !ok {
+		cl = &widget.Clickable{}
+		c.chips[key] = cl
+	}
+	return cl
+}
+
+func layoutRow(env *kit.Env, gtx *layout.Context, st *State, row *displayRow, bottomGap unit.Dp, cb Callbacks) layout.Dimensions {
+	gap := layout.Inset{Bottom: bottomGap}
 	return gap.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
 		local := gtx
-		return surface(&local, env, func(gtx *layout.Context) layout.Dimensions {
-			return cardBody(env, gtx, st, c, item)
-		})
+		if row.group != nil {
+			return layoutWorkGroup(env, &local, st, row.group, cb)
+		}
+		return layoutItem(env, &local, st, row.item, cb)
 	})
 }
 
-// cardBody renders the item's kind onto the card surface.
-func cardBody(env *kit.Env, gtx *layout.Context, st *State, c *cardState, item *session.Item) layout.Dimensions {
+func layoutItem(env *kit.Env, gtx *layout.Context, st *State, item *session.Item, cb Callbacks) layout.Dimensions {
+	c := cardOf(st, item.ItemID)
 	switch item.Kind {
-	case kindUserMessage, kindAssistantMessage:
-		return messageBody(gtx, env, c, item.Display().Text)
-	case kindReasoning, kindToolCall, kindFileChange:
-		return collapsibleBody(env, gtx, c, headerFor(item), item, st.list.Expanded(item.ItemID))
+	case kindAssistantMessage:
+		// assistant_message: document page at type.prose; no bubble, no avatar, no border.
+		return layoutMarkdownBody(env, gtx, c, item.Display().Text, cb)
+	case kindUserMessage:
+		return layoutUserPill(env, gtx, c, item, cb)
+	case kindReasoning:
+		return layoutReasoning(env, gtx, st, c, item)
+	case kindToolCall, kindApproval, kindCommand:
+		return layoutToolCall(env, gtx, st, c, item, cb)
+	case kindFileChange:
+		return layoutFileChange(env, gtx, st, c, item, cb)
+	case kindPlan:
+		return layoutPlanCard(env, gtx, c, item)
+	case kindSubagent:
+		return layoutSubagentLine(env, gtx, st, c, item)
 	default:
-		return plainBody(env, gtx, c, headerFor(item), item, st.list.Expanded(item.ItemID))
+		return layoutCompactCard(env, gtx, st, c, item)
 	}
 }
 
-// messageBody re-parses a message's markdown when the display text changes —
-// a streaming delta grows the text under the same revision — and renders it.
-func messageBody(gtx *layout.Context, env *kit.Env, c *cardState, src string) layout.Dimensions {
+type envClock struct{ env *kit.Env }
+
+func (c envClock) Now() time.Time {
+	if c.env != nil {
+		return c.env.Now()
+	}
+	return time.Time{}
+}
+
+func layoutMarkdownBody(env *kit.Env, gtx *layout.Context, c *cardState, src string, cb Callbacks) layout.Dimensions {
 	if c.doc == nil || c.docSrc != src {
-		c.doc = markdown.Parse(src)
+		c.doc = markdown.Parse(src, markdown.WithClock(envClock{env: env}))
 		c.docSrc = src
 	}
-	return mdview.Layout(gtx, env.Th, c.doc, &c.md)
-}
-
-// collapsibleBody renders the collapsed-by-default cards: reasoning, tool
-// calls and file changes show their header; the text or diff expands on
-// click.
-func collapsibleBody(env *kit.Env, gtx *layout.Context, c *cardState, header string, item *session.Item, expanded bool) layout.Dimensions {
-	return flexBody(env, gtx, c, header, func(gtx *layout.Context) layout.Dimensions {
-		return monoText(env, gtx, item.Display().Text)
-	}, expanded)
-}
-
-// plainBody renders the compact cards and the generic card: a header line,
-// and, for an unknown kind, the view text underneath so no item is dropped.
-func plainBody(env *kit.Env, gtx *layout.Context, c *cardState, header string, item *session.Item, expanded bool) layout.Dimensions {
-	return flexBody(env, gtx, c, header, func(gtx *layout.Context) layout.Dimensions {
-		return kit.Paragraph(env, gtx, theme.TypeBody(), colorFor(env.Th, item.Metadata.Level), item.Display().Text)
-	}, expanded || !knownKind(item.Kind))
-}
-
-// flexBody stacks the clickable header and, when expanded, the body.
-func flexBody(env *kit.Env, gtx *layout.Context, c *cardState, header string, body func(*layout.Context) layout.Dimensions, expanded bool) layout.Dimensions {
-	head := func() layout.Dimensions {
-		return c.click.Layout(*gtx, func(layout.Context) layout.Dimensions {
-			// Clickable calls its widget with the same context, so the
-			// pointer form and the value form are the same frame here.
-			return headerRow(env, gtx, header, expanded)
-		})
-	}
-	if !expanded {
-		return head()
-	}
-	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
-		layout.Rigid(func(layout.Context) layout.Dimensions { return head() }),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				return body(&local)
-			})
-		}),
-	)
-}
-
-// surface paints the card's raised background and lays the body inside its
-// padding; the background is recorded first so the text paints over it.
-func surface(gtx *layout.Context, env *kit.Env, body func(*layout.Context) layout.Dimensions) layout.Dimensions {
-	macro := op.Record(gtx.Ops)
-	pad := layout.UniformInset(theme.SpaceMD)
-	dims := pad.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
-		local := gtx
-		return body(&local)
-	})
-	call := macro.Stop()
-	paint.FillShape(gtx.Ops, env.Th.Chrome().SurfaceBase,
-		clip.UniformRRect(image.Rectangle{Max: dims.Size}, gtx.Dp(theme.RadiusXS)).Op(gtx.Ops))
-	call.Add(gtx.Ops)
+	dims := mdview.LayoutEnv(env, gtx, c.doc, &c.md)
+	drainMarkdownEvents(gtx, &c.md, cb)
 	return dims
 }
 
-// headerRow renders the header text; expansion is told by the chevron.
-func headerRow(env *kit.Env, gtx *layout.Context, header string, expanded bool) layout.Dimensions {
-	caret := kit.IconChevronRight
-	if expanded {
-		caret = kit.IconChevronDown
+func drainMarkdownEvents(gtx *layout.Context, md *mdview.State, cb Callbacks) {
+	drainLinkAndFileEvents(md, cb)
+	drainChipClickEvents(gtx, md, cb)
+}
+
+func drainLinkAndFileEvents(md *mdview.State, cb Callbacks) {
+	for {
+		opn, ok := md.PollOpen()
+		if !ok {
+			break
+		}
+		if cb.OnOpenLink != nil {
+			cb.OnOpenLink(opn.URL)
+		}
 	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
+	for {
+		fc, ok := md.PollFileClick()
+		if !ok {
+			break
+		}
+		openFile(cb, fc.Ref)
+	}
+}
+
+func drainChipClickEvents(gtx *layout.Context, md *mdview.State, cb Callbacks) {
+	reg := gitRegistryFor(cb)
+	for {
+		gc, ok := md.PollGitRefClick()
+		if !ok {
+			break
+		}
+		mdview.RunGitRefAction(gtx, reg, gc.Ref)
+	}
+	for {
+		ic, ok := md.PollIDClick()
+		if !ok {
+			break
+		}
+		if cb.OnIDChip != nil {
+			cb.OnIDChip(ic.ID)
+		}
+	}
+}
+
+func layoutUserPill(env *kit.Env, gtx *layout.Context, c *cardState, item *session.Item, cb Callbacks) layout.Dimensions {
+	colW := gtx.Constraints.Max.X
+	maxPillW := max(colW*3/4, gtx.Dp(theme.SpaceXXL))
+	padX := gtx.Dp(theme.SpaceLG)
+	padY := gtx.Dp(theme.SpaceMD)
+
+	inner := *gtx
+	inner.Constraints.Min = image.Point{}
+	inner.Constraints.Max.X = max(maxPillW-2*padX, 0)
+	rec := op.Record(gtx.Ops)
+	bodyDims := layoutMarkdownBody(env, &inner, c, item.Display().Text, cb)
+	call := rec.Stop()
+
+	pillSize := image.Pt(min(maxPillW, bodyDims.Size.X+2*padX), bodyDims.Size.Y+2*padY)
+	originLabel := originLabelFor(item.Metadata.Origin)
+
+	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			icon, err := env.Icon(&local, caret, theme.IconXS, env.Th.Chrome().FgMuted)
-			if err != nil {
+			if originLabel == "" {
 				return layout.Dimensions{}
 			}
-			return icon
+			lbl := op.Record(gtx.Ops)
+			local := gtx
+			local.Constraints.Min = image.Point{}
+			ld := kit.Label(env, &local, theme.TypeSmall(), env.Th.Chrome().FgSubtle, originLabel)
+			lCall := lbl.Stop()
+			off := op.Offset(image.Pt(max(colW-ld.Size.X, 0), 0)).Push(gtx.Ops)
+			lCall.Add(gtx.Ops)
+			off.Pop()
+			return layout.Dimensions{Size: image.Pt(colW, ld.Size.Y+gtx.Dp(theme.SpaceXXS))}
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Left: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				return kit.Label(env, &local, theme.TypeSmall(), env.Th.Chrome().FgMuted, header)
-			})
+			x := max(colW-pillSize.X, 0)
+			off := op.Offset(image.Pt(x, 0)).Push(gtx.Ops)
+			paint.FillShape(gtx.Ops, env.Th.Chrome().FillSoft,
+				clip.UniformRRect(image.Rectangle{Max: pillSize}, gtx.Dp(theme.RadiusLG)).Op(gtx.Ops))
+			boff := op.Offset(image.Pt(padX, padY)).Push(gtx.Ops)
+			call.Add(gtx.Ops)
+			boff.Pop()
+			off.Pop()
+			return layout.Dimensions{Size: image.Pt(colW, pillSize.Y)}
 		}),
 	)
 }
 
-// monoText renders text in the code face on the code surface, for tool
-// output and diffs.
-func monoText(env *kit.Env, gtx *layout.Context, s string) layout.Dimensions {
-	macro := op.Record(gtx.Ops)
-	dims := kit.Paragraph(env, gtx, theme.TypeCodeSmall(), env.Th.Chrome().Fg, s)
-	call := macro.Stop()
-	paint.FillShape(gtx.Ops, env.Th.CodeSurface(),
-		clip.UniformRRect(image.Rectangle{Max: dims.Size}, gtx.Dp(theme.RadiusXS)).Op(gtx.Ops))
-	call.Add(gtx.Ops)
-	return dims
+func originLabelFor(origin string) string {
+	switch origin {
+	case "lead":
+		return "From lead"
+	case "fugue":
+		return "Fugue"
+	default:
+		return ""
+	}
 }
 
-// colorFor maps a notice level onto the status tokens; anything else is main
-// text.
-func colorFor(th *theme.Theme, level string) color.NRGBA {
+func layoutAnimatedCollapse(gtx *layout.Context, visible bool, progress float32, body func(*layout.Context) layout.Dimensions) layout.Dimensions {
+	if !visible || progress <= 0 {
+		return layout.Dimensions{}
+	}
+	rec := op.Record(gtx.Ops)
+	dims := body(gtx)
+	call := rec.Stop()
+	h := int(float32(dims.Size.Y) * progress)
+	if h <= 0 {
+		return layout.Dimensions{Size: image.Pt(dims.Size.X, 0)}
+	}
+	clipped := clip.Rect(image.Rectangle{Max: image.Pt(dims.Size.X, h)}).Push(gtx.Ops)
+	call.Add(gtx.Ops)
+	clipped.Pop()
+	return layout.Dimensions{Size: image.Pt(dims.Size.X, h)}
+}
+
+func colorForNotice(th *theme.Theme, level string) color.NRGBA {
 	switch level {
 	case "warning":
 		return th.Status().Warning
@@ -199,86 +290,4 @@ func colorFor(th *theme.Theme, level string) color.NRGBA {
 	default:
 		return th.Chrome().Fg
 	}
-}
-
-// knownKind reports whether the kind is one transcript §3 names.
-func knownKind(kind string) bool {
-	switch kind {
-	case kindApproval, kindPlan, kindSubagent, kindCommand, kindUsage, kindQuota, kindNotice:
-		return true
-	default:
-		return false
-	}
-}
-
-// headerFor builds the compact header line of one item from its metadata
-// only: identifiers and numbers, never content-derived strings.
-func headerFor(item *session.Item) string {
-	m := item.Metadata
-	switch item.Kind {
-	case kindReasoning:
-		return "reasoning · " + m.ReasoningState
-	case kindToolCall:
-		h := m.Tool + " · " + m.Status
-		if m.ExitCode != nil {
-			h += fmt.Sprintf(" · exit %d", *m.ExitCode)
-		}
-		if m.DurationMillis > 0 {
-			h += fmt.Sprintf(" · %dms", m.DurationMillis)
-		}
-		return h
-	case kindFileChange:
-		return fmt.Sprintf("%s · +%d −%d", m.ChangeKind, m.LinesAdded, m.LinesRemoved)
-	default:
-		return compactHeader(item)
-	}
-}
-
-// compactHeader builds the header of the compact cards: approval, plan,
-// subagent, command, usage, quota and notice.
-func compactHeader(item *session.Item) string {
-	m := item.Metadata
-	switch item.Kind {
-	case kindApproval:
-		return fmt.Sprintf("approval · %s · %s", m.RequestKind, decisionOf(&m))
-	case kindPlan:
-		return fmt.Sprintf("plan · step %d of %d", m.CurrentStep, m.StepCount)
-	case kindSubagent:
-		return "subagent · " + m.Status
-	case kindCommand:
-		return "command · " + m.Source
-	case kindUsage:
-		return fmt.Sprintf("usage · in %d · out %d · cache %d", m.InputTokens, m.OutputTokens, m.CacheTokens)
-	case kindQuota:
-		return fmt.Sprintf("quota · %s · %s · %.0f%%", m.Account, m.Window, m.Used*100)
-	case kindNotice:
-		return "notice · " + m.Level + " · " + m.Code
-	default:
-		// The client carries a kind its proto does not name as the decimal
-		// wire value; the generic card says so instead of dropping the item.
-		if !knownKindName(item.Kind) {
-			return "Unknown item (kind " + item.Kind + ")"
-		}
-		return item.Kind
-	}
-}
-
-// knownKindName reports whether the string is a kind name transcript §3
-// defines; anything else arrived from the wire unnamed.
-func knownKindName(kind string) bool {
-	switch kind {
-	case kindUserMessage, kindAssistantMessage, kindReasoning, kindToolCall, kindFileChange,
-		kindApproval, kindPlan, kindSubagent, kindCommand, kindUsage, kindQuota, kindNotice:
-		return true
-	default:
-		return false
-	}
-}
-
-// decisionOf names the approval's decision, or "pending".
-func decisionOf(m *client.TranscriptMetadata) string {
-	if m.Decision == "" {
-		return "pending"
-	}
-	return m.Decision + " by " + m.Decider
 }

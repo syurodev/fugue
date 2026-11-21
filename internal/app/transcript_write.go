@@ -68,7 +68,7 @@ func (t *Transcripts) UpdateItem(ctx context.Context, session string, expectedSe
 
 // storeItem is the shared record and update path.
 func (t *Transcripts) storeItem(ctx context.Context, session string, expectedSeq int64, item *transcript.Item, raw []byte, eventType string, newRevision uint64) error {
-	content, truncated, originalSize, display, err := fitContent(item.Content, sealing.MaxPayloadPlaintext)
+	content, truncated, originalSize, fitted, err := fitContentBoxed(item.Content, sealing.MaxPayloadPlaintext)
 	if err != nil {
 		return err
 	}
@@ -120,7 +120,7 @@ func (t *Transcripts) storeItem(ctx context.Context, session string, expectedSeq
 		Sequence:   seq,
 		Revision:   newRevision,
 		Metadata:   stored.Metadata,
-		View:       t.itemView(display, string(item.Kind)),
+		View:       t.itemView(fitted, item.Kind),
 		TurnOrigin: projection.TurnOrigin,
 	})
 
@@ -153,15 +153,17 @@ func withTruncation(metadata *vendorstore.ItemMetadata, truncated bool, original
 	metadata.OriginalRawBytes = int64(rawOriginal)
 }
 
-// itemView renders the durable event's redacted view from the fitted display
-// field; while the vault is locked the event carries metadata only (TR-10,
+// itemView renders the durable event's redacted view from the fitted typed
+// content; while the vault is locked the event carries metadata only (TR-10,
 // transcript §6).
-func (t *Transcripts) itemView(display, kind string) *TranscriptView {
-	if !t.unlocked() || display == "" {
+func (t *Transcripts) itemView(fitted transcript.Content, kind transcript.Kind) *TranscriptView {
+	if !t.unlocked() || fitted == nil {
 		return nil
 	}
-	view := transcript.BuildView(viewKindFor(transcript.Kind(kind)), display, t.redactor)
-	payload := viewFromTranscript(view)
+	payload := buildItemView(fitted, kind, t.redactor)
+	if payload.Text == "" && payload.Title == "" && payload.Input == "" && len(payload.Steps) == 0 && len(payload.Files) == 0 {
+		return nil
+	}
 	return &payload
 }
 
