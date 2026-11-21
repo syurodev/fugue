@@ -19,7 +19,6 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
-	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendorstore"
 	"github.com/syurodev/fugue/internal/workspace"
@@ -64,7 +63,6 @@ type teamDispatcherDeps struct {
 	Clock       clock.Clock
 	TeamsConfig func(context.Context, string) (workspace.TeamsConfig, error)
 	Budgets     *teamBudgets
-	GoTask      func(string, func(context.Context) error) *supervise.Task
 	// Test hooks, nil in production, invoked between TeamSnapshot and
 	// appendTaskEvent so tests can inject real races.
 	TestBeforeStartAppend func(context.Context)

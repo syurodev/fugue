@@ -111,7 +111,7 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 	hp.rt.teamWake = newTeamWake(&teamWakeDeps{
 		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Roots: hp.rt.workspaces.domain,
 		Clock: deps.Clock, IDs: deps.IDs, Vault: v, Hub: hp.rt.hub, DataDir: deps.DataDir,
-		RecoverLead: recoverLead, GoTask: hp.rt.goTask,
+		RecoverLead: recoverLead,
 	})
 	hp.rt.teamWake.Start(base)
 	hp.rt.teamBudgets = newTeamBudgets(&teamBudgetsDeps{
@@ -136,7 +136,7 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Admit: admit,
 		Roots: hp.rt.workspaces.domain, Git: locateTeamGit(ctx, deps), DataDir: deps.DataDir, IDs: deps.IDs, Vault: v,
 		Wake: hp.rt.teamWake, Clock: deps.Clock, TeamsConfig: teamsCfg, Budgets: hp.rt.teamBudgets,
-		Disk: resolveDiskSpace(deps.DiskSpace), GoTask: hp.rt.goTask,
+		Disk: resolveDiskSpace(deps.DiskSpace),
 	})
 	hp.rt.teamDispatch.Start(base)
 	if hp.rt.teamTasks != nil {
