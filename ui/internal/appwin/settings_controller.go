@@ -156,6 +156,10 @@ func (s *screens) applySettingsResults(results []settings.Result) {
 			s.settingsView.syncFromModel(s.settings)
 		case settings.OpSaveWorkspace:
 			s.applyWorkspaceSaveResult(res)
+		case settings.OpValidateWorkspace:
+			s.settings.ApplyValidationResult(res.WorkspaceID, res.RawRevision, res.Issues, res.Err)
+		case settings.OpConfirmPolicy, settings.OpRejectPolicy:
+			s.applyPolicyDecisionResult(res)
 		}
 	}
 }
@@ -169,6 +173,22 @@ func (s *screens) applyWorkspaceSaveResult(res *settings.Result) {
 	if res.Err != nil {
 		s.settings.SaveErr = res.Err.Error()
 		s.settings.PolicyConfirmArmed = false
+		s.settings.PendingRawPolicyDiff = nil
+		return
+	}
+	s.settings.SaveErr = ""
+	s.settings.ApplyWorkspaceLoaded(res.Workspace, res.Effective)
+	s.settingsView.syncFromModel(s.settings)
+}
+
+func (s *screens) applyPolicyDecisionResult(res *settings.Result) {
+	s.settings.PolicyDecisionBusy = false
+	if res.CASConflict {
+		s.settings.ApplyCASConflictReload(res.Workspace, res.Effective, res.Err)
+		return
+	}
+	if res.Err != nil {
+		s.settings.SaveErr = res.Err.Error()
 		return
 	}
 	s.settings.SaveErr = ""
@@ -232,6 +252,77 @@ func (s *screens) submitWorkspaceSettings(confirmPolicy bool) {
 		ExpectedHash: s.settings.ConfigHash,
 	}
 	s.settingsWorker.Do(&req)
+}
+
+func (s *screens) onRawTOMLChanged(text string) {
+	changed, rev := s.settings.ApplyRawEdit(text)
+	if !changed || s.settingsWorker == nil || !s.settings.Loaded {
+		return
+	}
+	req := settings.Request{
+		Kind:        settings.OpValidateWorkspace,
+		WorkspaceID: s.settings.WorkspaceID,
+		RawTOML:     []byte(text),
+		RawRevision: rev,
+	}
+	s.settingsWorker.Do(&req)
+}
+
+func (s *screens) submitRawTOML(confirmPolicy bool) {
+	if s.settingsWorker == nil || !s.settings.Loaded || s.settings.Saving || !s.settings.RawDirty() {
+		return
+	}
+	if !confirmPolicy {
+		if diffs, err := s.settings.RawPolicyDiff(); err == nil && len(diffs) > 0 {
+			s.settings.PolicyConfirmArmed = true
+			s.settings.PendingRawPolicyDiff = diffs
+			return
+		}
+	}
+	s.settings.Saving = true
+	s.settings.SaveErr = ""
+	s.settings.PolicyConfirmArmed = false
+	s.settings.PendingRawPolicyDiff = nil
+	req := settings.Request{
+		Kind:         settings.OpSaveWorkspace,
+		WorkspaceID:  s.settings.WorkspaceID,
+		RawTOML:      []byte(s.settings.RawDraft),
+		ExpectedHash: s.settings.ConfigHash,
+	}
+	s.settingsWorker.Do(&req)
+}
+
+func (s *screens) confirmPendingPolicy() {
+	if s.settingsWorker == nil || !s.settings.Loaded || s.settings.PolicyDecisionBusy {
+		return
+	}
+	s.settings.PolicyDecisionBusy = true
+	s.settings.SaveErr = ""
+	req := settings.Request{
+		Kind:         settings.OpConfirmPolicy,
+		WorkspaceID:  s.settings.WorkspaceID,
+		ExpectedHash: s.settings.ConfigHash,
+	}
+	s.settingsWorker.Do(&req)
+}
+
+func (s *screens) rejectPendingPolicy() {
+	if s.settingsWorker == nil || !s.settings.Loaded || s.settings.PolicyDecisionBusy {
+		return
+	}
+	s.settings.PolicyDecisionBusy = true
+	s.settings.SaveErr = ""
+	req := settings.Request{
+		Kind:         settings.OpRejectPolicy,
+		WorkspaceID:  s.settings.WorkspaceID,
+		ExpectedHash: s.settings.ConfigHash,
+	}
+	s.settingsWorker.Do(&req)
+}
+
+func (s *screens) reloadRawFromHost() {
+	s.settings.DiscardRawDraft()
+	s.settingsView.syncRawFromModel(s.settings)
 }
 
 func (s *screens) applyLivePreferences(env *kit.Env, light, dark *theme.Theme) {

@@ -12,33 +12,48 @@ import (
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
+const (
+	tabForms = "forms"
+	tabRaw   = "raw"
+)
+
 type intFieldWidgets struct {
 	field *kit.TextFieldState
 	err   string
 }
 
-// settingsView owns the F10.5d1 settings pane: app preferences (theme mode and
-// UI scale persisted via fugue.appstate.v1) and structured workspace settings
-// forms with provenance badges, CAS conflict retention, and explicit policy
-// confirmation. Until F10.20b's slot grid lands, it occupies the right pane.
+// settingsView owns the F10.5d1/F10.5d2 settings pane: app preferences,
+// structured workspace settings forms, and the Q-62 raw TOML editor tab with
+// live validation, CAS conflict diffing, and Q-64 policy confirmation routing.
+// Until F10.20b's slot grid lands, it occupies the right pane.
 type settingsView struct {
-	refreshBtn       *kit.IconButtonState
-	backBtn          *kit.ButtonState
-	saveBtn          *kit.ButtonState
-	discardBtn       *kit.ButtonState
-	confirmPolicyBtn *kit.ButtonState
-	cancelPolicyBtn  *kit.ButtonState
+	refreshBtn        *kit.IconButtonState
+	backBtn           *kit.ButtonState
+	saveBtn           *kit.ButtonState
+	discardBtn        *kit.ButtonState
+	confirmPolicyBtn  *kit.ButtonState
+	cancelPolicyBtn   *kit.ButtonState
+	pendingConfirmBtn *kit.ButtonState
+	pendingRejectBtn  *kit.ButtonState
+	toggleDiffBtn     *kit.ButtonState
 
-	prefsCard  *kit.CardState
-	wsCard     *kit.CardState
-	policyCard *kit.CardState
-	scroll     *kit.ScrollAreaState
-	empty      *kit.EmptyStateState
+	tabs              *kit.TabsState
+	activeTab         string
+	pendingTabSwitch  string
+	prefsCard         *kit.CardState
+	wsCard            *kit.CardState
+	policyCard        *kit.CardState
+	pendingPolicyCard *kit.CardState
+	scroll            *kit.ScrollAreaState
+	empty             *kit.EmptyStateState
 
-	errBanner      *kit.BannerState
-	conflictBanner *kit.BannerState
-	pendingBanner  *kit.BannerState
-	policyBanner   *kit.BannerState
+	errBanner       *kit.BannerState
+	conflictBanner  *kit.BannerState
+	configErrBanner *kit.BannerState
+	policyBanner    *kit.BannerState
+	tabSwitchBanner *kit.BannerState
+
+	rawView *rawTOMLView
 
 	themeSeg *kit.SegmentedState
 	scaleSeg *kit.SegmentedState
@@ -66,15 +81,23 @@ func newSettingsView() *settingsView {
 		discardBtn:        kit.NewButtonState(),
 		confirmPolicyBtn:  kit.NewButtonState(),
 		cancelPolicyBtn:   kit.NewButtonState(),
+		pendingConfirmBtn: kit.NewButtonState(),
+		pendingRejectBtn:  kit.NewButtonState(),
+		toggleDiffBtn:     kit.NewButtonState(),
+		tabs:              kit.NewTabsState(),
+		activeTab:         tabForms,
 		prefsCard:         kit.NewCardState(),
 		wsCard:            kit.NewCardState(),
 		policyCard:        kit.NewCardState(),
+		pendingPolicyCard: kit.NewCardState(),
 		scroll:            kit.NewScrollAreaState(),
 		empty:             kit.NewEmptyStateState(),
 		errBanner:         kit.NewBannerState(),
 		conflictBanner:    kit.NewBannerState(),
-		pendingBanner:     kit.NewBannerState(),
+		configErrBanner:   kit.NewBannerState(),
 		policyBanner:      kit.NewBannerState(),
+		tabSwitchBanner:   kit.NewBannerState(),
+		rawView:           newRawTOMLView(),
 		themeSeg:          kit.NewSegmentedState(),
 		scaleSeg:          kit.NewSegmentedState(),
 		wsSelect:          kit.NewSelectState(),
@@ -256,12 +279,22 @@ func (v *settingsView) workspaceSectionChildren(env *kit.Env, sc *screens) []lay
 		opts = append(opts, kit.SelectOption{ID: ws.ID, Label: ws.Name})
 	}
 	banners := v.workspaceBannerChildren(env, sc)
-	children := make([]layout.FlexChild, 0, 7+len(banners))
+	children := make([]layout.FlexChild, 0, 10+len(banners))
 	children = append(children,
 		v.workspaceSelectChild(env, sc, opts),
 		spacerH(theme.SpaceMD),
 	)
 	children = append(children, banners...)
+	children = append(children, v.workspaceTabsChild(env, sc), spacerH(theme.SpaceMD))
+	if v.pendingTabSwitch != "" {
+		children = append(children, v.tabSwitchBannerChild(env, sc), spacerH(theme.SpaceMD))
+	}
+	if v.activeTab == tabRaw {
+		children = append(children, rigidWidget(func(gtx *layout.Context) layout.Dimensions {
+			return v.rawView.layout(gtx, env, sc)
+		}))
+		return children
+	}
 	children = append(children,
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions { return v.layoutTeamsCard(gtx, env, sc) }),
 		spacerH(theme.SpaceMD),
@@ -270,6 +303,67 @@ func (v *settingsView) workspaceSectionChildren(env *kit.Env, sc *screens) []lay
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions { return v.layoutSaveBar(gtx, env, sc) }),
 	)
 	return children
+}
+
+func (v *settingsView) currentTabDirty(m *settings.Model) bool {
+	if v.activeTab == tabRaw {
+		return m.RawDirty()
+	}
+	return len(m.DirtyFields()) > 0
+}
+
+func (v *settingsView) workspaceTabsChild(env *kit.Env, sc *screens) layout.FlexChild {
+	return rigidWidget(func(gtx *layout.Context) layout.Dimensions {
+		if v.activeTab == "" {
+			v.activeTab = tabForms
+		}
+		pr := kit.TabsProps{
+			Variant: kit.TabsMode,
+			Items: []kit.TabItem{
+				{ID: tabForms, Label: "Forms", Dirty: len(sc.settings.DirtyFields()) > 0},
+				{ID: tabRaw, Label: "Raw TOML", Dirty: sc.settings.RawDirty()},
+			},
+			ActiveID: v.activeTab,
+		}
+		dims, ev := v.tabs.Layout(env, gtx, pr)
+		sc.fail(ev.Err)
+		if ev.Selected != "" && ev.Selected != v.activeTab {
+			if v.currentTabDirty(sc.settings) {
+				v.pendingTabSwitch = ev.Selected
+			} else {
+				v.activeTab = ev.Selected
+				v.pendingTabSwitch = ""
+			}
+		}
+		return dims
+	})
+}
+
+func (v *settingsView) tabSwitchBannerChild(env *kit.Env, sc *screens) layout.FlexChild {
+	return rigidWidget(func(gtx *layout.Context) layout.Dimensions {
+		dims, ev, err := v.tabSwitchBanner.Layout(env, gtx, kit.BannerProps{
+			Kind:        kit.BannerWarning,
+			Title:       "Unsaved changes",
+			Message:     "Discard unsaved edits on this tab before switching?",
+			ActionLabel: "Switch & discard",
+			Dismissible: true,
+			Visible:     v.pendingTabSwitch != "",
+		})
+		sc.fail(err)
+		if ev.ActionClicked && v.pendingTabSwitch != "" {
+			if v.activeTab == tabRaw {
+				sc.reloadRawFromHost()
+			} else {
+				sc.settings.DiscardDraft()
+				v.syncFromModel(sc.settings)
+			}
+			v.activeTab = v.pendingTabSwitch
+			v.pendingTabSwitch = ""
+		} else if ev.Dismissed {
+			v.pendingTabSwitch = ""
+		}
+		return dims
+	})
 }
 
 func (v *settingsView) workspaceSelectChild(env *kit.Env, sc *screens, opts []kit.SelectOption) layout.FlexChild {
@@ -296,33 +390,27 @@ func (v *settingsView) workspaceSelectChild(env *kit.Env, sc *screens, opts []ki
 
 func (v *settingsView) workspaceBannerChildren(env *kit.Env, sc *screens) []layout.FlexChild {
 	var children []layout.FlexChild
-	if sc.settings.PendingPolicyConfirmation {
+	if sc.settings.ConfigErrorKey != "" || sc.settings.ConfigErrorLine > 0 {
+		msg := fmt.Sprintf("Line %d:%d (%s) — host is keeping the last accepted policy.",
+			max(sc.settings.ConfigErrorLine, 1), max(sc.settings.ConfigErrorColumn, 1), sc.settings.ConfigErrorKey)
 		children = append(children, rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			dims, _, err := v.pendingBanner.Layout(env, gtx, kit.BannerProps{
-				Kind:    kit.BannerWarning,
-				Title:   "Out-of-band policy change waiting",
-				Message: "Review or reject the external policy edit from the sidebar before saving new settings.",
+			dims, _, err := v.configErrBanner.Layout(env, gtx, kit.BannerProps{
+				Kind:    kit.BannerDanger,
+				Title:   "Workspace configuration file has an error",
+				Message: msg,
 				Visible: true,
 			})
 			sc.fail(err)
 			return dims
 		}), spacerH(theme.SpaceMD))
 	}
-	if len(sc.settings.ChangedUnderneath) > 0 {
-		parts := make([]string, 0, len(sc.settings.ChangedUnderneath))
-		for _, ch := range sc.settings.ChangedUnderneath {
-			parts = append(parts, fmt.Sprintf("%s: %s → %s", ch.Label, ch.OldValue, ch.NewValue))
-		}
+	if sc.settings.PendingPolicyConfirmation {
 		children = append(children, rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			dims, _, err := v.conflictBanner.Layout(env, gtx, kit.BannerProps{
-				Kind:    kit.BannerWarning,
-				Title:   "Reloaded after configuration conflict",
-				Message: "Your unsaved edits were kept. Changed underneath: " + strings.Join(parts, "; "),
-				Visible: true,
-			})
-			sc.fail(err)
-			return dims
+			return v.layoutPendingPolicyCard(gtx, env, sc)
 		}), spacerH(theme.SpaceMD))
+	}
+	if sc.settings.RawConflict || len(sc.settings.ChangedUnderneath) > 0 {
+		children = append(children, v.layoutConflictBannerChild(env, sc), spacerH(theme.SpaceMD))
 	}
 	if errMsg := firstNonEmpty(sc.settings.SaveErr, sc.settings.LoadErr); errMsg != "" {
 		children = append(children, rigidWidget(func(gtx *layout.Context) layout.Dimensions {

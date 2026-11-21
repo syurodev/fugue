@@ -62,12 +62,26 @@ type Model struct {
 	Saving                    bool
 	PendingPolicyConfirmation bool
 	PolicyConfirmArmed        bool
+	PolicyDecisionBusy        bool
 
-	ConfigHash string
-	RawTOML    []byte
-	Baseline   client.WorkspaceSettings
-	Draft      client.WorkspaceSettings
-	Provenance map[string]int64
+	ConfigHash           string
+	RawTOML              []byte
+	RawDraft             string
+	RawRevision          uint64
+	RawConflict          bool
+	ConflictHash         string
+	ShowConflictDiff     bool
+	Validating           bool
+	ValidationIssues     []client.WorkspaceConfigIssue
+	ValidationErr        string
+	PendingPolicyDiff    []client.PolicyDiffEntry
+	PendingRawPolicyDiff []client.PolicyDiffEntry
+	ConfigErrorKey       string
+	ConfigErrorLine      int64
+	ConfigErrorColumn    int64
+	Baseline             client.WorkspaceSettings
+	Draft                client.WorkspaceSettings
+	Provenance           map[string]int64
 
 	ChangedUnderneath []FieldChange
 	LoadErr           string
@@ -154,8 +168,23 @@ func (m *Model) SelectWorkspace(id, name string) {
 	m.Loading = false
 	m.Saving = false
 	m.PolicyConfirmArmed = false
+	m.PolicyDecisionBusy = false
+	m.PendingPolicyConfirmation = false
 	m.ConfigHash = ""
 	m.RawTOML = nil
+	m.RawDraft = ""
+	m.RawRevision++
+	m.RawConflict = false
+	m.ConflictHash = ""
+	m.ShowConflictDiff = false
+	m.Validating = false
+	m.ValidationIssues = nil
+	m.ValidationErr = ""
+	m.PendingPolicyDiff = nil
+	m.PendingRawPolicyDiff = nil
+	m.ConfigErrorKey = ""
+	m.ConfigErrorLine = 0
+	m.ConfigErrorColumn = 0
 	m.Baseline = client.WorkspaceSettings{}
 	m.Draft = client.WorkspaceSettings{}
 	m.Provenance = map[string]int64{}
@@ -177,7 +206,21 @@ func (m *Model) ApplyWorkspaceLoaded(ws *client.Workspace, eff *client.Effective
 	m.LoadErr = ""
 	m.ConfigHash = ws.ConfigHash
 	m.RawTOML = slices.Clone(ws.RawTOML)
+	m.RawDraft = string(ws.RawTOML)
+	m.RawRevision++
+	m.RawConflict = false
+	m.ConflictHash = ""
+	m.ShowConflictDiff = false
+	m.Validating = false
+	m.ValidationIssues = nil
+	m.ValidationErr = ""
 	m.PendingPolicyConfirmation = ws.PendingPolicyConfirmation
+	m.PendingPolicyDiff = slices.Clone(ws.PolicyDiff)
+	m.PendingRawPolicyDiff = nil
+	m.ConfigErrorKey = ws.ConfigErrorKey
+	m.ConfigErrorLine = ws.ConfigErrorLine
+	m.ConfigErrorColumn = ws.ConfigErrorColumn
+	m.PolicyDecisionBusy = false
 	m.Baseline = cloneWorkspaceSettings(&eff.Settings)
 	m.Draft = cloneWorkspaceSettings(&eff.Settings)
 	m.Provenance = maps.Clone(eff.Provenance)
@@ -189,11 +232,12 @@ func (m *Model) ApplyWorkspaceLoaded(ws *client.Workspace, eff *client.Effective
 }
 
 // ApplyCASConflictReload updates the baseline, hash, raw TOML, and provenance
-// after a CAS conflict while preserving the user's unsaved Draft edits and
-// recording which fields changed underneath.
+// after a CAS conflict while preserving the user's unsaved Draft and RawDraft
+// edits and recording which fields changed underneath.
 func (m *Model) ApplyCASConflictReload(ws *client.Workspace, eff *client.EffectiveWorkspaceConfig, conflictErr error) {
 	m.Saving = false
 	m.PolicyConfirmArmed = false
+	m.PendingRawPolicyDiff = nil
 	if conflictErr != nil {
 		m.SaveErr = conflictErr.Error()
 	}
@@ -203,7 +247,13 @@ func (m *Model) ApplyCASConflictReload(ws *client.Workspace, eff *client.Effecti
 	m.ChangedUnderneath = diffSettings(&m.Baseline, &eff.Settings)
 	m.ConfigHash = ws.ConfigHash
 	m.RawTOML = slices.Clone(ws.RawTOML)
+	m.RawConflict = true
+	m.ConflictHash = ws.ConfigHash
 	m.PendingPolicyConfirmation = ws.PendingPolicyConfirmation
+	m.PendingPolicyDiff = slices.Clone(ws.PolicyDiff)
+	m.ConfigErrorKey = ws.ConfigErrorKey
+	m.ConfigErrorLine = ws.ConfigErrorLine
+	m.ConfigErrorColumn = ws.ConfigErrorColumn
 	m.Baseline = cloneWorkspaceSettings(&eff.Settings)
 	m.Provenance = maps.Clone(eff.Provenance)
 	if m.Provenance == nil {
