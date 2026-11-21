@@ -148,7 +148,7 @@ func scriptedConfigError(connectCode connect.Code, cause error, publicCode strin
 func (f *workspaceConfigFake) UpdateWorkspaceConfig(_ context.Context, req *connect.Request[workspacev1.UpdateWorkspaceConfigRequest]) (*connect.Response[workspacev1.UpdateWorkspaceConfigResponse], error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if req.Msg.GetId() == "missing" {
+	if req.Msg.GetId() == "missing-ws" {
 		return nil, connect.NewError(connect.CodeNotFound, errScriptedConfigChanged)
 	}
 	if f.updateErr != nil {
@@ -349,7 +349,7 @@ func TestWorkspaceConfigErrorsAndEmptyResponses(t *testing.T) {
 	if err != nil || emptyWS.ID != "" {
 		t.Fatalf("empty UpdateWorkspaceConfig = (%+v, %v)", emptyWS, err)
 	}
-	if _, err := c.UpdateWorkspaceConfig(ctx, "missing", nil, ""); err == nil || errors.Is(err, client.ErrWorkspaceConfigChanged) {
+	if _, err := c.UpdateWorkspaceConfig(ctx, "missing-ws", nil, ""); err == nil || errors.Is(err, client.ErrWorkspaceConfigChanged) {
 		t.Fatalf("missing err = %v", err)
 	}
 
