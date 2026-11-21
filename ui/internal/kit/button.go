@@ -133,7 +133,11 @@ func (s *ButtonState) Layout(env *Env, gtx *layout.Context, p ButtonProps) (bool
 func (s *ButtonState) content(env *Env, gtx *layout.Context, p ButtonProps, fg color.NRGBA, w, h, cw int, swap float32) error {
 	_, iconGap := buttonMetrics(p.Size)
 	x := (w - cw) / 2
-	labelAt := image.Pt(x, centerLabelY(env, gtx, theme.TypeLabel(), h))
+	// Center the label's actual ascent+descent line box rather than theme.Type.Line
+	// so the button label shares a vertical text center with a sibling kit.Label
+	// in a layout.Middle row.
+	labelH := measureLabel(env, gtx, theme.TypeLabel(), p.Text).Y
+	labelAt := image.Pt(x, (h-labelH)/2)
 	drawLabel := func(a float32) {
 		at(gtx, labelAt, func(gtx *layout.Context) {
 			dims := drawText(env, gtx, theme.TypeLabel(), fade(fg, a), p.Text, false)
