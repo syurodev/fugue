@@ -27,12 +27,15 @@ const (
 
 // DigestEntry is one item of a mailbox turn. TaskID and State are Fugue
 // metadata; Summary, when present, is model output and always rendered as
-// untrusted data (OR-13).
+// untrusted data (OR-13). Ref, when positive, is the `#n` of the entry's
+// source channel line (§6.7): the digest cites the number so the reader can
+// say "see #14" instead of copying content.
 type DigestEntry struct {
 	TaskID   string
 	State    string
 	Summary  string
 	Question bool
+	Ref      int64
 }
 
 // BuildDigest renders one mailbox turn of at most limit bytes: the header and
@@ -51,26 +54,48 @@ func BuildDigest(header string, entries []DigestEntry, nonce string, limit int) 
 		addLine(&b, "")
 		addLine(&b, header)
 	}
-	omitted := false
 	safeNonce := EscapeDigestText(nonce)
+	omitted := false
 	for _, e := range orderQuestionsFirst(entries) {
-		safeID := EscapeDigestText(e.TaskID)
-		line := fmt.Sprintf(digestStateLine, safeID, EscapeDigestText(e.State))
-		block := digestBlock(safeID, safeNonce, e.Summary)
-		fits := e.Summary != "" && !omitted && b.Len()+len(block)+2 <= limit
-		if fits {
-			addLine(&b, "")
-			addLine(&b, block)
-			continue
-		}
-		omitted = omitted || e.Summary != ""
-		if b.Len()+len(line)+2 > limit {
+		var stop bool
+		stop, omitted = appendDigestEntry(&b, e, safeNonce, limit, omitted)
+		if stop {
 			break
 		}
-		addLine(&b, "")
-		addLine(&b, line)
 	}
 	return b.String()
+}
+
+// appendDigestEntry renders one entry: the cited state line and, when it
+// fits, the escaped summary block. The return reports whether the turn must
+// stop (nothing further fits) and whether a block was omitted, degrading
+// later entries to their state lines (§6.1).
+func appendDigestEntry(b *strings.Builder, e DigestEntry, safeNonce string, limit int, omitted bool) (stop, omittedOut bool) {
+	safeID := EscapeDigestText(e.TaskID)
+	line := fmt.Sprintf(digestStateLine, safeID, EscapeDigestText(e.State))
+	if e.Ref > 0 {
+		line = fmt.Sprintf("%s (see #%d)", line, e.Ref)
+	}
+	block := digestBlock(safeID, safeNonce, e.Summary)
+	budget := len(block) + 2
+	if e.Ref > 0 {
+		budget += len(line) + 2
+	}
+	if e.Summary != "" && !omitted && b.Len()+budget <= limit {
+		addLine(b, "")
+		if e.Ref > 0 {
+			addLine(b, line)
+		}
+		addLine(b, block)
+		return false, omitted
+	}
+	omitted = omitted || e.Summary != ""
+	if b.Len()+len(line)+2 > limit {
+		return true, omitted
+	}
+	addLine(b, "")
+	addLine(b, line)
+	return false, omitted
 }
 
 // digestBlock renders one summary as an escaped untrusted block.

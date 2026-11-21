@@ -210,7 +210,6 @@ func TestMemberCannotCallDelegationTools(t *testing.T) {
 		args string
 	}{
 		{taskStartToolName, `{"task_id":"t-sib"}`},
-		{taskSendToolName, `{"task_id":"t-sib","message":"hi"}`},
 		{taskCancelToolName, `{"task_id":"t-sib"}`},
 		{teamNoteToolName, `{"note":"member note"}`},
 		{teamProposeToolName, `{"title":"x","brief":"y","tasks":[]}`},
@@ -219,6 +218,19 @@ func TestMemberCannotCallDelegationTools(t *testing.T) {
 		if _, err := f.tools.Call(ctx, f.memberBinding, call.name, []byte(call.args)); errcode.CodeOf(err) != errcode.NotFound {
 			t.Fatalf("member Call(%s) code = %v, want NotFound", call.name, errcode.CodeOf(err))
 		}
+	}
+	// fugue_task_send is offered to members for sibling sends (§6.7), so a
+	// cross-delegator target is a service-level typed failure, not a missing
+	// tool (TestSiblingSendOnlyToSameDelegatorAndCapped covers the scope).
+	views, err := f.tools.List(ctx, f.memberBinding)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(views, func(v FugueToolView) bool { return v.Name == taskSendToolName }) {
+		t.Fatal("member token does not list fugue_task_send for sibling sends")
+	}
+	if _, err := f.rt.teamTasks.Send(ctx, f.memberBinding.SessionID, "t-sib", "hi"); errcode.CodeOf(err) != errcode.PermissionDenied {
+		t.Fatalf("member cross-delegator send code = %v, want permission_denied", errcode.CodeOf(err))
 	}
 }
 

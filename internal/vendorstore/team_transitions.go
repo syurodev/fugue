@@ -44,18 +44,21 @@ func teamTransitions() map[teamTransKey]TeamState {
 
 func taskTransitions() map[taskTransKey]TaskState {
 	return map[taskTransKey]TaskState{
-		{TaskStateQueued, EventTaskAssigned, ""}:                              TaskStateStarting,
-		{TaskStateQueued, EventTaskEnded, outcomeFailed}:                      TaskStateFailed,
-		{TaskStateQueued, EventTaskEnded, outcomeCancelled}:                   TaskStateCancelled,
-		{TaskStateStarting, EventTaskStarted, ""}:                             TaskStateRunning,
-		{TaskStateStarting, EventTaskStalled, ""}:                             TaskStateStarting,
-		{TaskStateStarting, EventTaskEnded, outcomeStopped}:                   TaskStateStopped,
-		{TaskStateStarting, EventTaskEnded, outcomeFailed}:                    TaskStateFailed,
-		{TaskStateStarting, EventTaskEnded, outcomeCancelled}:                 TaskStateCancelled,
-		{TaskStateStarting, EventTaskMarkedUnknown, ""}:                       TaskStateUnknown,
-		{TaskStateRunning, EventTaskQuestionAsked, ""}:                        TaskStateAsking,
-		{TaskStateRunning, EventTaskReported, ""}:                             TaskStateChecking,
-		{TaskStateRunning, EventTaskStalled, ""}:                              TaskStateRunning,
+		{TaskStateQueued, EventTaskAssigned, ""}:              TaskStateStarting,
+		{TaskStateQueued, EventTaskEnded, outcomeFailed}:      TaskStateFailed,
+		{TaskStateQueued, EventTaskEnded, outcomeCancelled}:   TaskStateCancelled,
+		{TaskStateStarting, EventTaskStarted, ""}:             TaskStateRunning,
+		{TaskStateStarting, EventTaskStalled, ""}:             TaskStateStarting,
+		{TaskStateStarting, EventTaskEnded, outcomeStopped}:   TaskStateStopped,
+		{TaskStateStarting, EventTaskEnded, outcomeFailed}:    TaskStateFailed,
+		{TaskStateStarting, EventTaskEnded, outcomeCancelled}: TaskStateCancelled,
+		{TaskStateStarting, EventTaskMarkedUnknown, ""}:       TaskStateUnknown,
+		{TaskStateRunning, EventTaskQuestionAsked, ""}:        TaskStateAsking,
+		{TaskStateRunning, EventTaskReported, ""}:             TaskStateChecking,
+		{TaskStateRunning, EventTaskStalled, ""}:              TaskStateRunning,
+		// F11.10a: a sibling send (§6.7) is informational; it changes no state.
+		{TaskStateRunning, EventTaskMessaged, ""}:                             TaskStateRunning,
+		{TaskStateAsking, EventTaskMessaged, ""}:                              TaskStateAsking,
 		{TaskStateRunning, EventTaskEnded, outcomeStopped}:                    TaskStateStopped,
 		{TaskStateRunning, EventTaskEnded, outcomeFailed}:                     TaskStateFailed,
 		{TaskStateRunning, EventTaskEnded, outcomeCancelled}:                  TaskStateCancelled,
@@ -121,7 +124,7 @@ func AllTeamEventTypes() []TeamEventType {
 		EventTaskQuestionAsked, EventTaskQuestionAnswered, EventTaskReported,
 		EventTaskCheckCompleted, EventTaskReviewed, EventTaskIntegrated,
 		EventTaskMarkedUnknown, EventTaskRecoveryDecided, EventTaskSuperseded,
-		EventTaskStalled, EventTaskEnded,
+		EventTaskStalled, EventTaskMessaged, EventTaskEnded,
 	}
 }
 
@@ -142,7 +145,7 @@ func isTaskEventType(ev TeamEventType) bool {
 		EventTaskQuestionAsked, EventTaskQuestionAnswered, EventTaskReported,
 		EventTaskCheckCompleted, EventTaskReviewed, EventTaskIntegrated,
 		EventTaskMarkedUnknown, EventTaskRecoveryDecided, EventTaskSuperseded,
-		EventTaskStalled, EventTaskEnded:
+		EventTaskStalled, EventTaskMessaged, EventTaskEnded:
 		return true
 	case EventTeamProposed, EventTeamStarted, EventTeamFinalReview,
 		EventTeamAmended, EventTeamNoted, EventTeamDeadlineReached,

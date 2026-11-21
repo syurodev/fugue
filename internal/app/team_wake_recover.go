@@ -116,36 +116,17 @@ func refusedSend(err error) bool {
 }
 
 // batchText opens the sealed payloads of a claim and renders one turn: the
-// batch marker first (Q-122), then the §6.1 digest format (Q-124).
+// batch marker first (Q-122), then the §6.1 digest format (Q-124) with each
+// entry citing the `#n` of its source channel line (§6.7).
 func (w *teamWake) batchText(ctx context.Context, claimed []vendorstore.MailboxMessage) (string, error) {
-	var (
-		header   string
-		entries  []teams.DigestEntry
-		decision mailboxDecision
-	)
-	for i := range claimed {
-		raw, err := w.deps.Store.OpenMailboxPayload(ctx, claimed[i].TeamID, claimed[i].MessageID)
-		if err != nil {
-			return "", boundaryError("open the sealed mailbox payload", err)
-		}
-		switch claimed[i].Kind {
-		case vendorstore.MailboxKindDecision:
-			if err := json.Unmarshal(raw, &decision); err != nil {
-				return "", errcode.New(errcode.FailedPrecondition, "the decision message is not readable")
-			}
-		default:
-			var item mailboxDigestItem
-			if err := json.Unmarshal(raw, &item); err != nil {
-				return "", errcode.New(errcode.FailedPrecondition, "the digest item is not readable")
-			}
-			state := item.State
-			if item.FailureCode != "" {
-				state = item.State + "(" + item.FailureCode + ")"
-			}
-			entries = append(entries, teams.DigestEntry{TaskID: item.TaskID, State: state, Summary: item.Summary, Question: item.Question})
-		}
+	entries, sources, decision, err := w.digestEntries(ctx, claimed)
+	if err != nil {
+		return "", err
 	}
-	header, entries = decisionTurnText(&decision, entries)
+	if citeErr := w.citeChannelLines(ctx, claimed[0].TeamID, entries, sources); citeErr != nil {
+		return "", citeErr
+	}
+	header, entries := decisionTurnText(&decision, entries)
 	nonce, err := w.deps.IDs.NewID()
 	if err != nil {
 		return "", errcode.Wrap(errcode.Internal, "generate the digest nonce", err)
@@ -153,6 +134,83 @@ func (w *teamWake) batchText(ctx context.Context, claimed []vendorstore.MailboxM
 	prefix := mailboxBatchPrefix(claimed[0].BatchID) + "\n\n"
 	text := teams.BuildDigest(header, entries, nonce, teams.MaxDigestBytes-len(prefix))
 	return prefix + text, nil
+}
+
+// digestEntries opens the sealed payloads of a claim and folds them into
+// digest entries, their source references, and an optional decision (Q-122).
+func (w *teamWake) digestEntries(ctx context.Context, claimed []vendorstore.MailboxMessage) ([]teams.DigestEntry, []sourceRef, mailboxDecision, error) {
+	var (
+		entries  []teams.DigestEntry
+		sources  []sourceRef
+		decision mailboxDecision
+	)
+	for i := range claimed {
+		raw, err := w.deps.Store.OpenMailboxPayload(ctx, claimed[i].TeamID, claimed[i].MessageID)
+		if err != nil {
+			return nil, nil, decision, boundaryError("open the sealed mailbox payload", err)
+		}
+		if claimed[i].Kind == vendorstore.MailboxKindDecision {
+			if err := json.Unmarshal(raw, &decision); err != nil {
+				return nil, nil, decision, errcode.New(errcode.FailedPrecondition, "the decision message is not readable")
+			}
+			continue
+		}
+		var item mailboxDigestItem
+		if err := json.Unmarshal(raw, &item); err != nil {
+			return nil, nil, decision, errcode.New(errcode.FailedPrecondition, "the digest item is not readable")
+		}
+		state := item.State
+		if item.FailureCode != "" {
+			state = item.State + "(" + item.FailureCode + ")"
+		}
+		entries = append(entries, teams.DigestEntry{TaskID: item.TaskID, State: state, Summary: item.Summary, Question: item.Question})
+		if claimed[i].SourceSeq > 0 {
+			sources = append(sources, sourceRef{seq: claimed[i].SourceSeq, taskID: item.TaskID, entry: len(entries) - 1})
+		}
+	}
+	return entries, sources, decision, nil
+}
+
+// sourceRef links one digest entry to the event that produced it.
+type sourceRef struct {
+	seq    int64
+	taskID string
+	entry  int
+}
+
+// citeChannelLines records the `#n` of each entry's source channel line on
+// the entry (§6.7: the digest records the number so the reader can say
+// "see #14" instead of copying content). The line in the entry task's thread
+// is preferred; a team-wide duplicate falls back to the first line.
+func (w *teamWake) citeChannelLines(ctx context.Context, teamID string, entries []teams.DigestEntry, sources []sourceRef) error {
+	if len(sources) == 0 {
+		return nil
+	}
+	seqs := make([]int64, 0, len(sources))
+	for i := range sources {
+		seqs = append(seqs, sources[i].seq)
+	}
+	bySource, err := w.deps.Store.TeamChannelLinesForSources(ctx, teamID, seqs)
+	if err != nil {
+		return boundaryError("resolve the channel citations", err)
+	}
+	for i := range sources {
+		ref := &sources[i]
+		lines := bySource[ref.seq]
+		if len(lines) == 0 || ref.entry >= len(entries) || ref.entry < 0 {
+			continue
+		}
+		chosen := lines[0].ChannelSeq
+		root := vendorstore.ThreadRootTaskID(ref.taskID)
+		for j := range lines {
+			if lines[j].ThreadRoot == root {
+				chosen = lines[j].ChannelSeq
+				break
+			}
+		}
+		entries[ref.entry].Ref = chosen
+	}
+	return nil
 }
 
 // decisionTurnText folds a decision message into the digest input: the

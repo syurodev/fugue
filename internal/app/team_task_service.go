@@ -28,6 +28,13 @@ const (
 	maxAppendRetries             = 3
 	defaultResultLimit           = 16 << 10
 	maxResultLimit               = 64 << 10
+
+	// §6.7 sibling-send caps (Q-177 A): 6 per agent and 30 per team inside a
+	// sliding 10-minute window, counted from the TaskMessaged events on the
+	// injected clock.
+	siblingSendsPerAgent = 6
+	siblingSendsPerTeam  = 30
+	siblingSendWindow    = 10 * time.Minute
 )
 
 func validateDigestMessage(field, text string) (string, error) {
@@ -293,40 +300,6 @@ func (s *teamTaskService) Start(ctx context.Context, sessionID, taskID string) (
 		return "", err
 	}
 	return fmt.Sprintf("task %s started", target.TaskID), nil
-}
-
-// Send delivers a follow-up message to a running/asking direct child task via the mailbox.
-func (s *teamTaskService) Send(ctx context.Context, sessionID, taskID, message string) (string, error) {
-	c, err := s.resolveCaller(ctx, sessionID)
-	if err != nil {
-		return "", err
-	}
-	target, err := c.requireDelegator(taskID)
-	if err != nil {
-		return "", err
-	}
-	if target.State != vendorstore.TaskStateRunning && target.State != vendorstore.TaskStateAsking {
-		return "", errcode.New(errcode.FailedPrecondition, "task is not accepting messages in its current state")
-	}
-	trimmed, err := validateDigestMessage("message", message)
-	if err != nil {
-		return "", err
-	}
-	payload, err := json.Marshal(mailboxDigestItem{TaskID: c.caller.TaskID, State: "message", Summary: trimmed})
-	if err != nil {
-		return "", errcode.Wrap(errcode.Internal, "encode task send payload", err)
-	}
-	uid, err := s.ids.NewID()
-	if err != nil {
-		return "", errcode.Wrap(errcode.Internal, "generate message ID", err)
-	}
-	if err := s.store.EnqueueDirectMailbox(ctx, c.team.TeamID, target.TaskID, vendorstore.MailboxKindSend, uid, payload); err != nil {
-		return "", boundaryError("enqueue task message", err)
-	}
-	if s.wake != nil {
-		s.wake.Notify()
-	}
-	return "message queued for task " + target.TaskID, nil
 }
 
 // Status returns metadata status for a readable task (§6.3).
