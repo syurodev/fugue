@@ -8,6 +8,8 @@ package app
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -187,31 +189,44 @@ const maxFitRounds = 64
 // original size of the largest field when it was, and the fitted display
 // field the views are built from.
 func fitContent(content transcript.Content, limit int) (data []byte, truncated bool, originalSize int, display string, err error) {
+	var fitted transcript.Content
+	data, truncated, originalSize, fitted, err = fitContentBoxed(content, limit)
+	if err != nil || fitted == nil {
+		return data, truncated, originalSize, "", err
+	}
+	fields, _ := contentStrings(fitted)
+	return data, truncated, originalSize, fittedDisplay(fields), nil
+}
+
+// fitContentBoxed fits content to limit and returns the fitted typed content
+// so callers can build the multi-field display view without re-decoding.
+func fitContentBoxed(content transcript.Content, limit int) (data []byte, truncated bool, originalSize int, fitted transcript.Content, err error) {
 	if content == nil {
-		return nil, false, 0, "", nil
+		return nil, false, 0, nil, nil
 	}
 	fields, box := contentStrings(content)
 	for _, p := range fields {
 		originalSize = max(originalSize, len(*p))
 	}
 	for range maxFitRounds {
-		if data, err = json.Marshal(box()); err != nil {
-			return nil, false, 0, "", errcode.Wrap(errcode.Internal, "encode transcript content", err)
+		boxed := box()
+		if data, err = json.Marshal(boxed); err != nil {
+			return nil, false, 0, nil, errcode.Wrap(errcode.Internal, "encode transcript content", err)
 		}
 		if string(data) == "{}" {
 			// A content that encodes to an empty object carries nothing
 			// protected: no payload row, and the event stays metadata-only.
-			return nil, false, 0, "", nil
+			return nil, false, 0, nil, nil
 		}
 		if len(data) <= limit {
-			return data, truncated, sizeWhen(truncated, originalSize), fittedDisplay(fields), nil
+			return data, truncated, sizeWhen(truncated, originalSize), boxed, nil
 		}
 		if !shrinkLargest(fields, len(data), limit) {
 			break
 		}
 		truncated = true
 	}
-	return nil, false, 0, "", errcode.New(errcode.InvalidArgument, "transcript content cannot fit the payload limit")
+	return nil, false, 0, nil, errcode.New(errcode.InvalidArgument, "transcript content cannot fit the payload limit")
 }
 
 // shrinkLargest fits the largest remaining field tighter by the overshoot
@@ -271,5 +286,90 @@ func redactContent(content transcript.Content, redactor transcript.Redactor) tra
 	for _, p := range fields {
 		*p = redactor.Redact(*p)
 	}
-	return box()
+	redacted := box()
+	switch v := redacted.(type) {
+	case transcript.UserMessageContent:
+		v.Attachments = redactSlice(v.Attachments, redactor)
+		return v
+	case transcript.PlanContent:
+		v.Steps = redactSlice(v.Steps, redactor)
+		return v
+	case transcript.CommandContent:
+		v.Name = redactor.Redact(v.Name)
+		v.Args = redactSlice(v.Args, redactor)
+		return v
+	default:
+		return redacted
+	}
+}
+
+func redactSlice(in []string, redactor transcript.Redactor) []string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]string, len(in))
+	for i, s := range in {
+		out[i] = redactor.Redact(s)
+	}
+	return out
+}
+
+const maxViewSummaryBytes = 4096
+
+func cleanViewSummary(s string, redactor transcript.Redactor) string {
+	s = strings.ReplaceAll(redactor.Redact(s), "\t", "    ")
+	if len(s) <= maxViewSummaryBytes {
+		return s
+	}
+	fitted, _, _ := transcript.FitStorage([]byte(s), maxViewSummaryBytes)
+	return string(fitted)
+}
+
+// buildItemView builds the host-redacted TranscriptView from typed content
+// (TR-10, desktop-app §5.4). Structured kinds carry their title/input/steps so
+// transcript pages render tool titles, commands, edited paths and plan steps
+// without per-row TranscriptItem fetches.
+func buildItemView(content transcript.Content, kind transcript.Kind, redactor transcript.Redactor) TranscriptView {
+	if content == nil {
+		return TranscriptView{}
+	}
+	redacted := redactContent(content, redactor)
+	switch v := redacted.(type) {
+	case transcript.ToolCallContent:
+		out := viewFromTranscript(transcript.BuildView(transcript.ViewToolOutput, v.Output, redactor))
+		out.Title = cleanViewSummary(v.Title, redactor)
+		out.Input = cleanViewSummary(v.Input, redactor)
+		return out
+	case transcript.FileChangeContent:
+		out := viewFromTranscript(transcript.BuildView(transcript.ViewDiff, v.Diff, redactor))
+		out.Title = cleanViewSummary(v.Path, redactor)
+		out.Input = cleanViewSummary(v.OldPath, redactor)
+		return out
+	case transcript.PlanContent:
+		steps := make([]string, len(v.Steps))
+		for i, st := range v.Steps {
+			steps[i] = cleanViewSummary(st, redactor)
+		}
+		out := viewFromTranscript(transcript.BuildView(transcript.ViewText, strings.Join(steps, "\n"), redactor))
+		out.Steps = slices.Clip(steps)
+		return out
+	case transcript.SubagentContent:
+		out := viewFromTranscript(transcript.BuildView(transcript.ViewText, v.Result, redactor))
+		out.Title = cleanViewSummary(v.Name, redactor)
+		out.Input = cleanViewSummary(v.Description, redactor)
+		return out
+	case transcript.CommandContent:
+		args := strings.Join(v.Args, " ")
+		joined := strings.TrimSpace(v.Name + " " + args)
+		out := viewFromTranscript(transcript.BuildView(transcript.ViewText, joined, redactor))
+		out.Title = cleanViewSummary(v.Name, redactor)
+		out.Input = cleanViewSummary(args, redactor)
+		return out
+	default:
+		fields, _ := contentStrings(redacted)
+		if d := largest(fields); d != nil {
+			return viewFromTranscript(transcript.BuildView(viewKindFor(kind), *d, redactor))
+		}
+		return TranscriptView{}
+	}
 }

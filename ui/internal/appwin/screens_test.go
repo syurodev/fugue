@@ -33,6 +33,7 @@ func (f *fakeFetcher) RequestSessions()                {}
 func (f *fakeFetcher) RequestProbe()                   {}
 func (f *fakeFetcher) RequestWorkspaces()              {}
 func (f *fakeFetcher) RequestWorkspace(string, uint64) {}
+func (f *fakeFetcher) RequestItem(string, string)      {}
 
 func (f *fakeFetcher) RequestCommands(session string) {
 	f.commands = append(f.commands, session)

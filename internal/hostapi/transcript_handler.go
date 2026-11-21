@@ -88,6 +88,7 @@ func protoTranscriptEntry(entry *app.TranscriptEntry) *transcriptv1.TranscriptEn
 func protoTranscriptView(view app.TranscriptView) *transcriptv1.TranscriptView {
 	out := &transcriptv1.TranscriptView{
 		Text: view.Text, Truncated: view.Truncated, CutAt: safeUint32(view.CutAt), OmittedBytes: safeUint32(view.OmittedBytes),
+		Title: view.Title, Input: view.Input, Steps: append([]string(nil), view.Steps...),
 	}
 	for i := range view.Files {
 		file := &view.Files[i]

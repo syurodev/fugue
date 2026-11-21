@@ -86,6 +86,14 @@ func packagedIcons() []packagedIcon {
 		{"pin", "Pin"},
 		{"plus", "Plus"},
 		{"ellipsis", "Ellipsis"},
+		{"terminal", "Terminal"},
+		{"pencil", "Pencil"},
+		{"file-text", "FileText"},
+		{"file-code", "FileCode"},
+		{"globe", "Globe"},
+		{"wrench", "Wrench"},
+		{"git-commit", "GitCommit"},
+		{"wrap-text", "WrapText"},
 	}
 }
 

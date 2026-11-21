@@ -2,9 +2,11 @@ package session
 
 import (
 	"cmp"
+	"encoding/json"
 	"fmt"
 	"math"
 	"slices"
+	"strings"
 
 	"github.com/syurodev/fugue/pkg/client"
 )
@@ -158,8 +160,82 @@ func (t *Transcript) ApplyDelta(payload []byte) error {
 		return nil
 	}
 	view := delta.View
+	if view.Title == "" {
+		view.Title = item.View.Title
+	}
+	if view.Input == "" {
+		view.Input = item.View.Input
+	}
+	if len(view.Steps) == 0 {
+		view.Steps = item.View.Steps
+	}
 	item.Streaming = &view
 	return nil
+}
+
+// ApplyItemDetail folds a TranscriptItem RPC answer into the held item so
+// truncated tool outputs or diffs expand to their full redacted text.
+func (t *Transcript) ApplyItemDetail(detail client.TranscriptDetail) {
+	item, ok := t.byID[detail.Item.ItemID]
+	if !ok || detail.Item.Revision < item.Revision {
+		return
+	}
+	view := detail.Item.View
+	if len(detail.Content) > 0 {
+		var payload struct {
+			Text    string   `json:"Text"`
+			Title   string   `json:"Title"`
+			Input   string   `json:"Input"`
+			Output  string   `json:"Output"`
+			Path    string   `json:"Path"`
+			OldPath string   `json:"OldPath"`
+			Diff    string   `json:"Diff"`
+			Steps   []string `json:"Steps"`
+		}
+		if json.Unmarshal(detail.Content, &payload) == nil {
+			switch detail.Item.Kind {
+			case "tool_call":
+				if payload.Output != "" {
+					view.Text = strings.ReplaceAll(payload.Output, "\t", "    ")
+					view.Truncated = false
+				}
+				if payload.Title != "" {
+					view.Title = strings.ReplaceAll(payload.Title, "\t", "    ")
+				}
+				if payload.Input != "" {
+					view.Input = strings.ReplaceAll(payload.Input, "\t", "    ")
+				}
+			case "file_change":
+				if payload.Diff != "" {
+					view.Text = strings.ReplaceAll(payload.Diff, "\t", "    ")
+					view.Truncated = false
+				}
+				if payload.Path != "" {
+					view.Title = strings.ReplaceAll(payload.Path, "\t", "    ")
+				}
+				if payload.OldPath != "" {
+					view.Input = strings.ReplaceAll(payload.OldPath, "\t", "    ")
+				}
+			case "plan":
+				if len(payload.Steps) > 0 {
+					view.Steps = make([]string, len(payload.Steps))
+					for i, s := range payload.Steps {
+						view.Steps[i] = strings.ReplaceAll(s, "\t", "    ")
+					}
+					view.Text = strings.Join(view.Steps, "\n")
+					view.Truncated = false
+				}
+			default:
+				if payload.Text != "" {
+					view.Text = strings.ReplaceAll(payload.Text, "\t", "    ")
+					view.Truncated = false
+				}
+			}
+		}
+	}
+	next := Item{TranscriptItem: detail.Item}
+	next.View = view
+	*item = next
 }
 
 // ApplyNewestPage applies the newest history page, oldest item last as the

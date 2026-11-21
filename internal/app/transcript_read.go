@@ -141,17 +141,14 @@ func (t *Transcripts) TranscriptItem(ctx context.Context, session, id string) (T
 	if err != nil {
 		return TranscriptDetail{}, fmt.Errorf("open the transcript content: %w", err)
 	}
-	content, err := decodeContent(transcript.Kind(stored.Kind), data)
+	kind := transcript.Kind(stored.Kind)
+	content, err := decodeContent(kind, data)
 	if err != nil {
 		return TranscriptDetail{}, err
 	}
-	// The view is built first: it redacts the full field itself, and the
-	// detail content is masked separately per field (TR-10).
-	fields, _ := contentStrings(content)
-	if display := largest(fields); display != nil {
-		view := transcript.BuildView(viewKindFor(transcript.Kind(stored.Kind)), *display, t.redactor)
-		detail.View = viewFromTranscript(view)
-	}
+	// The view is built first: it redacts the full fields before shortening,
+	// and the detail content is masked separately per field (TR-10).
+	detail.View = buildItemView(content, kind, t.redactor)
 	encoded, err := json.Marshal(redactContent(content, t.redactor))
 	if err != nil {
 		return TranscriptDetail{}, errcode.Wrap(errcode.Internal, "encode the transcript item", err)

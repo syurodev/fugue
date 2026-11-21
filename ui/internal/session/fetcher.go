@@ -15,6 +15,7 @@ type ResultKind uint8
 const (
 	ResultSessions ResultKind = iota
 	ResultPage
+	ResultItem
 	ResultCommands
 	ResultWorkspaces
 	ResultWorkspace
@@ -26,10 +27,11 @@ type Result struct {
 	Kind ResultKind
 	// Session names the session a page or command list was read for.
 	Session string
-	// Sessions is the list read; Items is the page read; Commands the
-	// session's slash commands.
+	// Sessions is the list read; Items is the page read; Detail is the full
+	// item read; Commands the session's slash commands.
 	Sessions client.SessionList
 	Items    []client.TranscriptItem
+	Detail   client.TranscriptDetail
 	Commands client.Commands
 	// Workspaces lists the workspaces; Workspace is the one workspace read
 	// with its roots. Generation echoes the RequestWorkspace generation so
@@ -47,6 +49,7 @@ type Result struct {
 // request is one queued read.
 type request struct {
 	session   string
+	itemID    string
 	kind      ResultKind
 	before    int64
 	workspace string
@@ -108,6 +111,12 @@ func (f *Fetcher) RequestSessions() {
 // zero, the page strictly older than it otherwise.
 func (f *Fetcher) RequestPage(session string, before int64) {
 	f.queue(request{kind: ResultPage, session: session, before: before})
+}
+
+// RequestItem queues a full TranscriptItem read for an item whose display view
+// was truncated on the page.
+func (f *Fetcher) RequestItem(session, itemID string) {
+	f.queue(request{kind: ResultItem, session: session, itemID: itemID})
 }
 
 // RequestCommands queues one session's slash-command read (vendor-runtime
@@ -177,6 +186,9 @@ func (f *Fetcher) deliver(ctx context.Context, c *client.Client, r request) bool
 	case ResultPage:
 		items, err := c.TranscriptPage(ctx, r.session, r.before, PageLimit)
 		res = Result{Kind: ResultPage, Session: r.session, Items: items, Older: r.before > 0, Err: err}
+	case ResultItem:
+		detail, err := c.TranscriptItem(ctx, r.session, r.itemID)
+		res = Result{Kind: ResultItem, Session: r.session, Detail: detail, Err: err}
 	case ResultCommands:
 		commands, err := c.ListCommands(ctx, r.session)
 		res = Result{Kind: ResultCommands, Session: r.session, Commands: commands, Err: err}

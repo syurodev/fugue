@@ -11,6 +11,7 @@ import (
 	"golang.org/x/image/math/fixed"
 
 	"github.com/syurodev/fugue/ui/internal/fonts"
+	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/markdown"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
@@ -61,6 +62,8 @@ type atom struct {
 	asc, desc int
 	lh        int
 	arrow     bool
+	chip      *ChipRun
+	chipIcon  kit.IconName
 }
 
 // token is one item of the stream wrapping consumes.
@@ -82,12 +85,13 @@ type line struct {
 type flow struct {
 	lines         []line
 	height, width int
-	// rec, call and links are filled by the first draw: the run's static
+	// rec, call, links and chips are filled by the first draw: the run's static
 	// drawing recorded into its own ops, replayed on every later frame, and
-	// the links in it with their pointer boxes.
+	// the links and inline chips in it with their pointer boxes.
 	rec   *op.Ops
 	call  op.CallOp
 	links []linkAnchor
+	chips []chipAnchor
 }
 
 // face resolves the font and size of one span: code is JetBrains Mono at
@@ -168,18 +172,16 @@ func (v *view) tokens(spans []markdown.Span, fs flowStyle) []token {
 	for i := range spans {
 		sp := &spans[i]
 		f, px := v.face(sp, fs)
-		for _, r := range runs(sp.Text, fs.whole) {
-			if !r.space {
-				a := v.shape(r.text, f, px)
-				a.span = sp
-				out = append(out, token{a: a})
+		if !fs.whole && sp.Link == nil && sp.Image == nil {
+			if added, handled := v.chipTokens(sp, fs, &out); handled {
+				_ = added
+				if sp.HardBreak {
+					out = append(out, token{hard: true})
+				}
 				continue
 			}
-			a := v.shape(" ", f, px)
-			a.glyphs, a.span = nil, sp
-			a.w *= utf8.RuneCountInString(r.text)
-			out = append(out, token{a: a, gap: true})
 		}
+		v.appendRunTokens(sp, sp.Text, f, px, fs.whole, nil, &out)
 		if sp.Link != nil && sp.Link.Openable && (i+1 == len(spans) || spans[i+1].Link != sp.Link) {
 			a := v.shape(arrowGlyph, f, px*4/5)
 			a.span, a.arrow = sp, true
@@ -190,6 +192,60 @@ func (v *view) tokens(spans []markdown.Span, fs flowStyle) []token {
 		}
 	}
 	return out
+}
+
+func (v *view) chipTokens(sp *markdown.Span, fs flowStyle, out *[]token) (int, bool) {
+	parsed := ParseChips(sp.Text)
+	hasChip := false
+	for _, run := range parsed {
+		if run.Kind != ChipNone {
+			hasChip = true
+			break
+		}
+	}
+	if !hasChip {
+		return 0, false
+	}
+	f, px := v.face(sp, fs)
+	monoF := font.Font{Typeface: fonts.Mono, Weight: f.Weight}
+	monoPx := fs.px * 9 / 10
+	for idx := range parsed {
+		cr := parsed[idx]
+		if cr.Kind == ChipNone {
+			v.appendRunTokens(sp, cr.Text, f, px, false, nil, out)
+			continue
+		}
+		cp := cr
+		var iconName kit.IconName
+		if cp.Kind == ChipFile {
+			iconName = FileIcon(cp.File.Path)
+		}
+		a := v.shape(cp.Text, monoF, monoPx)
+		a.span = sp
+		a.chip = &cp
+		a.chipIcon = iconName
+		if iconName != "" {
+			a.w += a.lh + 2 // space for leading file icon + gap inside the chip pill
+		}
+		*out = append(*out, token{a: a})
+	}
+	return len(parsed), true
+}
+
+func (v *view) appendRunTokens(sp *markdown.Span, txt string, f font.Font, px fixed.Int26_6, whole bool, chip *ChipRun, out *[]token) {
+	for _, r := range runs(txt, whole) {
+		if !r.space {
+			a := v.shape(r.text, f, px)
+			a.span = sp
+			a.chip = chip
+			*out = append(*out, token{a: a})
+			continue
+		}
+		a := v.shape(" ", f, px)
+		a.glyphs, a.span = nil, sp
+		a.w *= utf8.RuneCountInString(r.text)
+		*out = append(*out, token{a: a, gap: true})
+	}
 }
 
 // placer greedily fills lines from tokens.
@@ -286,6 +342,9 @@ func wrap(toks []token, width, emptyH int) *flow {
 func (v *view) flowFor(spans []markdown.Span, width int, fs flowStyle) *flow {
 	if len(spans) == 0 {
 		return &flow{height: fs.lineHeight()}
+	}
+	if v.st.flows == nil {
+		v.st.flows = map[flowKey]*flow{}
 	}
 	key := flowKey{first: &spans[0], width: width}
 	if f, ok := v.st.flows[key]; ok {

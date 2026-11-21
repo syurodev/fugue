@@ -3,6 +3,7 @@ package mdview
 import (
 	"image"
 	"strconv"
+	"strings"
 
 	"gioui.org/f32"
 	"gioui.org/layout"
@@ -13,18 +14,18 @@ import (
 	"gioui.org/widget/material"
 	"golang.org/x/image/math/fixed"
 
+	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/markdown"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
 const (
-	bodySize     unit.Sp = 15
+	bodySize     unit.Sp = 14
 	blockGap     unit.Dp = 10
 	itemGap      unit.Dp = 4
 	listIndent   unit.Dp = 26
 	quoteIndent  unit.Dp = 14
 	quoteBar     unit.Dp = 3
-	codePad      unit.Dp = 10
 	cellPadX     unit.Dp = 8
 	cellPadY     unit.Dp = 4
 	minColumn    unit.Dp = 48
@@ -33,15 +34,21 @@ const (
 
 // headingSize is the text size of a heading level, 1 to 6.
 func headingSize(level int) unit.Sp {
-	return [...]unit.Sp{28, 22, 18, 16, 15, 14}[min(max(level, 1), 6)-1]
+	return [...]unit.Sp{24, 20, 16, 15, 14, 13}[min(max(level, 1), 6)-1]
 }
 
 // Layout draws doc at the width of gtx.Constraints.Max.X and returns the size
-// it took; the caller scrolls it. State holds everything that outlives a
-// frame: laid-out text, popover and scroll state, and the queue of open
-// requests (State.PollOpen).
+// it took; the caller scrolls it.
 func Layout(gtx *layout.Context, th *theme.Theme, doc *markdown.Doc, st *State) layout.Dimensions {
-	v := &view{th: th, st: st, shaper: th.Shaper(), locale: gtx.Locale}
+	env := &kit.Env{Th: th, Sh: th.Shaper()}
+	return LayoutEnv(env, gtx, doc, st)
+}
+
+// LayoutEnv draws doc using the kit Env (for motion driver, icons, content
+// scaling, and interactive code blocks).
+func LayoutEnv(env *kit.Env, gtx *layout.Context, doc *markdown.Doc, st *State) layout.Dimensions {
+	th := env.Th
+	v := &view{env: env, th: th, st: st, shaper: th.Shaper(), locale: gtx.Locale}
 	chrome := th.Chrome()
 	st.sync(doc, v.shaper, gtx.Metric, &chrome)
 	dims := v.blocks(gtx, doc.Blocks)
@@ -188,50 +195,30 @@ func (v *view) checkbox(gtx *layout.Context, checked bool, line int) {
 	paint.FillShape(gtx.Ops, c.ActionFg, clip.Stroke{Path: p.End(), Width: float32(max(gtx.Dp(2), 1))}.Op())
 }
 
-// code draws a code block on its own rounded surface; long lines scroll
-// sideways and never wrap, so no token is ever broken. A block that fits
-// draws without the scroll widget.
+// code draws a markdown code block with the v0.9 code-block rules:
+// unwrapped horizontal scroll + wrap toggle, Copy without line numbers or diff
+// markers, diff marker column when language is "diff", height cap with "Show
+// full output", and keyboard scroll on focus.
 func (v *view) code(gtx *layout.Context, b *markdown.Block) layout.Dimensions {
-	pad := gtx.Dp(codePad)
-	fs := flowStyle{px: fixed.I(gtx.Sp(bodySize)), mono: true, whole: true}
-	inner := *gtx
-	inner.Constraints.Max.X = max(gtx.Constraints.Max.X-2*pad, 0)
-	inner.Constraints.Min = image.Point{X: inner.Constraints.Max.X}
-	flows, widest := make([]*flow, len(b.Lines)), 0
-	for i, spans := range b.Lines {
-		flows[i] = v.flowFor(spans, unbounded, fs)
-		widest = max(widest, flows[i].width)
-	}
-	rec := op.Record(gtx.Ops)
-	var d layout.Dimensions
-	if widest <= inner.Constraints.Max.X {
-		d = v.codeLines(&inner, flows)
-	} else {
-		list := material.List(v.th.Material(), v.st.codeList(b))
-		d = list.Layout(inner, 1, func(gtx layout.Context, _ int) layout.Dimensions {
-			return v.codeLines(&gtx, flows)
-		})
-	}
-	call := rec.Stop()
-	size := image.Pt(gtx.Constraints.Max.X, d.Size.Y+2*pad)
-	paint.FillShape(gtx.Ops, v.th.CodeSurface(), clip.UniformRRect(image.Rectangle{Max: size}, gtx.Dp(6)).Op(gtx.Ops))
-	off := op.Offset(image.Pt(pad, pad)).Push(gtx.Ops)
-	call.Add(gtx.Ops)
-	off.Pop()
-	return layout.Dimensions{Size: size}
+	dims, _ := v.layoutCodeBlock(v.env, gtx, v.st.codeBlock(b), CodeBlockProps{
+		Format: b.Language,
+		IsDiff: strings.EqualFold(b.Language, "diff"),
+		Raw:    joinCodeSpans(b.Lines),
+		Lines:  b.Lines,
+	})
+	return dims
 }
 
-// codeLines draws a code block's lines, one flow each, top to bottom.
-func (v *view) codeLines(gtx *layout.Context, flows []*flow) layout.Dimensions {
-	y, w := 0, 0
-	for _, f := range flows {
-		off := op.Offset(image.Pt(0, y)).Push(gtx.Ops)
-		v.drawFlow(gtx, f, markdown.AlignNone, unbounded)
-		off.Pop()
-		y += f.height
-		w = max(w, f.width)
+func joinCodeSpans(lines [][]markdown.Span) string {
+	parts := make([]string, len(lines))
+	for i, spans := range lines {
+		var sb strings.Builder
+		for j := range spans {
+			sb.WriteString(spans[j].Text)
+		}
+		parts[i] = sb.String()
 	}
-	return layout.Dimensions{Size: image.Pt(w, y)}
+	return strings.Join(parts, "\n")
 }
 
 // table draws a GFM table: columns as wide as their widest cell, shrunk

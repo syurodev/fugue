@@ -3,10 +3,17 @@ package appwin
 import (
 	"fmt"
 
+	"gioui.org/layout"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
+
 	"github.com/syurodev/fugue/pkg/client"
 
 	"github.com/syurodev/fugue/ui/internal/hostconn"
+	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
+	"github.com/syurodev/fugue/ui/internal/theme"
+	"github.com/syurodev/fugue/ui/internal/transcriptview"
 	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
@@ -238,5 +245,63 @@ func pruneKnown[T any](m map[string]T, known map[string]bool) {
 		if !known[id] {
 			delete(m, id)
 		}
+	}
+}
+
+func (s *screens) transcriptCallbacks() transcriptview.Callbacks {
+	return transcriptview.Callbacks{
+		OnOpenLink: func(u string) {
+			s.fail(openHTTPSURL(u))
+		},
+		OnFullOutput: func(itemID string) {
+			if s.open == "" || itemID == "" {
+				return
+			}
+			key := s.open + ":" + itemID
+			if s.pendingItem[key] {
+				return
+			}
+			s.pendingItem[key] = true
+			s.fetcher.RequestItem(s.open, itemID)
+		},
+		// TODO(F10.20): wire OnFileChip once Q-179 / slot grid is answered.
+	}
+}
+
+// layoutTranscriptPane draws the transcript itself: the canvas, the empty
+// state, the transcript list and the read failure line.
+func (s *screens) layoutTranscriptPane(gtx *layout.Context, env *kit.Env, view *transcriptview.State, items []*session.Item) {
+	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
+	if len(items) == 0 && s.open == "" {
+		layout.Center.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+			local := gtx
+			dims, _, err := s.emptyTranscript.Layout(env, &local, &kit.EmptyStateProps{
+				Title:       "Select a session",
+				Description: "Choose a session from the sidebar or start a new one below.",
+			})
+			s.fail(err)
+			return dims
+		})
+		return
+	}
+	transcriptview.LayoutWithCallbacks(env, gtx, view, items, s.transcriptCallbacks())
+	s.trackScroll(view)
+	s.maybePageOlder()
+	if s.lastErr == "" {
+		return
+	}
+	local := *gtx
+	inset := layout.Inset{Left: theme.SpaceLG, Right: theme.SpaceLG, Top: theme.SpaceXS}
+	inset.Layout(local, func(gtx layout.Context) layout.Dimensions {
+		l := gtx
+		l.Constraints.Min.X = 0
+		return kit.Label(env, &l, theme.TypeSmall(), env.Th.Status().Danger, s.lastErr)
+	})
+}
+
+// trackScroll marks that the reader has scrolled, which arms paging older.
+func (s *screens) trackScroll(view *transcriptview.State) {
+	if view.Offset() > 0 {
+		s.scrolled = true
 	}
 }

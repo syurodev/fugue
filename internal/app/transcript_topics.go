@@ -25,6 +25,9 @@ type TranscriptView struct {
 	CutAt        int                      `json:"cut_at,omitempty"`
 	OmittedBytes int                      `json:"omitted_bytes,omitempty"`
 	Files        []transcript.FileSummary `json:"files,omitempty"`
+	Title        string                   `json:"title,omitempty"`
+	Input        string                   `json:"input,omitempty"`
+	Steps        []string                 `json:"steps,omitempty"`
 }
 
 // TranscriptTopicItemEvent is the durable item payload. A nil View means the
@@ -253,17 +256,12 @@ func (t *Transcripts) storedView(ctx context.Context, session string, stored *ve
 	if err != nil {
 		return TranscriptView{}, fmt.Errorf("open the transcript content: %w", err)
 	}
-	content, err := decodeContent(transcript.Kind(stored.Kind), data)
+	kind := transcript.Kind(stored.Kind)
+	content, err := decodeContent(kind, data)
 	if err != nil {
 		return TranscriptView{}, err
 	}
-	fields, _ := contentStrings(content)
-	display := largest(fields)
-	if display == nil {
-		return TranscriptView{}, nil
-	}
-	view := transcript.BuildView(viewKindFor(transcript.Kind(stored.Kind)), *display, t.redactor)
-	return viewFromTranscript(view), nil
+	return buildItemView(content, kind, t.redactor), nil
 }
 
 func viewFromTranscript(view transcript.View) TranscriptView {
