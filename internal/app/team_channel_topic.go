@@ -97,28 +97,38 @@ func (t *teamChannelTopics) RegisterTeam(teamID string) {
 // Observe publishes the channel lines one just-committed team event
 // projected. Best-effort: a publish failure is logged and every subscriber
 // still catches up through Since, because the rows are already committed.
-func (t *teamChannelTopics) Observe(teamID string, seq int64) {
+// The context comes from the wiring (host base context, never cancelled
+// before drain); WithoutCancel keeps the publish alive through the drain.
+func (t *teamChannelTopics) Observe(ctx context.Context, teamID string, seq int64) {
+	// The publish must outlive the request that committed the event, so the
+	// appending context is detached; every subscriber still catches up
+	// through Since, because the rows are already committed.
+	t.observe(context.WithoutCancel(ctx), teamID, seq)
+}
+
+// observe reads and publishes the lines of one committed event.
+func (t *teamChannelTopics) observe(ctx context.Context, teamID string, seq int64) {
 	t.mu.Lock()
 	registered := t.registered[teamID]
 	t.mu.Unlock()
 	if !registered {
 		return
 	}
-	lines, err := t.store.TeamChannelLinesForSources(context.WithoutCancel(context.Background()), teamID, []int64{seq})
+	lines, err := t.store.TeamChannelLinesForSources(ctx, teamID, []int64{seq})
 	if err != nil {
 		slog.Warn("reading the channel lines for publish failed", "team_id", teamID, "error_code", string(errcode.CodeOf(err)))
 		return
 	}
 	for _, sourceLines := range lines {
 		for i := range sourceLines {
-			t.publish(teamID, &sourceLines[i])
+			t.publish(ctx, teamID, &sourceLines[i])
 		}
 	}
 }
 
 // publish pushes one line's event to the topic.
-func (t *teamChannelTopics) publish(teamID string, row *vendorstore.TeamChannelMessage) {
-	payload, err := json.Marshal(t.lineWire(row))
+func (t *teamChannelTopics) publish(ctx context.Context, teamID string, row *vendorstore.TeamChannelMessage) {
+	payload, err := json.Marshal(t.lineWire(ctx, row))
 	if err != nil {
 		slog.Warn("marshalling the channel event failed", "team_id", teamID, "error_code", string(errcode.CodeOf(err)))
 		return
@@ -138,7 +148,7 @@ func (t *teamChannelTopics) unlocked() bool {
 
 // lineWire converts one row to its wire shape, opening the sealed source
 // payload only while the vault is unlocked.
-func (t *teamChannelTopics) lineWire(row *vendorstore.TeamChannelMessage) channelLineWire {
+func (t *teamChannelTopics) lineWire(ctx context.Context, row *vendorstore.TeamChannelMessage) channelLineWire {
 	wire := channelLineWire{
 		ChannelSeq:      row.ChannelSeq,
 		Kind:            row.Kind,
@@ -152,7 +162,7 @@ func (t *teamChannelTopics) lineWire(row *vendorstore.TeamChannelMessage) channe
 	if !t.unlocked() {
 		return wire
 	}
-	raw, err := t.store.OpenTeamEventPayload(context.Background(), row.TeamID, row.SourceSeq)
+	raw, err := t.store.OpenTeamEventPayload(ctx, row.TeamID, row.SourceSeq)
 	if err != nil {
 		// §5.3: a locked vault never carries content; an unreadable payload
 		// degrades the same way instead of failing the stream.
@@ -179,7 +189,7 @@ func (t *teamChannelTopic) Snapshot(ctx context.Context) ([]byte, EventSeq, erro
 	seq := EventSeq(0)
 	for i := range rows {
 		row := &rows[i]
-		wire.Lines = append(wire.Lines, t.topics.lineWire(row))
+		wire.Lines = append(wire.Lines, t.topics.lineWire(ctx, row))
 		if uint64(row.ChannelSeq) > seq {
 			seq = uint64(row.ChannelSeq)
 		}
@@ -202,7 +212,7 @@ func (t *teamChannelTopic) Since(ctx context.Context, seq EventSeq) ([]Event, er
 	// TeamChannelMessages is newest first; the hub replays oldest first.
 	for i := len(rows) - 1; i >= 0; i-- {
 		row := &rows[i]
-		payload, err := json.Marshal(t.topics.lineWire(row))
+		payload, err := json.Marshal(t.topics.lineWire(ctx, row))
 		if err != nil {
 			return nil, errcode.Wrap(errcode.Unavailable, "marshal the team channel event", err)
 		}

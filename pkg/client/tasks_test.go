@@ -74,10 +74,14 @@ func (f *tasksFake) PostChannelMessage(_ context.Context, req *connect.Request[t
 	return connect.NewResponse(&tasksv1.PostChannelMessageResponse{ChannelSeq: seq}), nil
 }
 
+// errTasksScripted is the static cause behind a scripted fake failure; it is
+// wrapped, never constructed, at the call site.
+var errTasksScripted = errors.New("scripted tasks error")
+
 // errTasksDetail builds the coded failure of one mapped Connect code with
 // the typed public-code detail, the way the host's handler maps its codes.
 func errTasksDetail(code string, transport connect.Code) error {
-	cerr := connect.NewError(transport, errors.New("scripted"))
+	cerr := connect.NewError(transport, errTasksScripted)
 	if detail, derr := connect.NewErrorDetail(&hostv1.ErrorDetail{Code: code}); derr == nil {
 		cerr.AddDetail(detail)
 	}
@@ -118,7 +122,20 @@ func TestTasksClientMethodsOverRealSocket(t *testing.T) {
 	fake := &tasksFake{posted: map[string]int64{}}
 	c := serveTasksFake(t, fake)
 
-	// An empty channel pages nothing.
+	assertEmptyChannelPage(ctx, t, c)
+	seq := assertTaskPost(ctx, t, c, &client.PostChannelMessageInput{
+		CommandID: "post-1", TeamID: "chan-1", ToTaskID: "task-a", Text: "hello from the app",
+	}, 1)
+	assertTaskPost(ctx, t, c, &client.PostChannelMessageInput{
+		CommandID: "post-1", TeamID: "chan-1", ToTaskID: "task-a", Text: "hello from the app",
+	}, seq)
+	assertTaskPagedLine(ctx, t, c, "hello from the app", "task-a")
+	assertTaskCodedFailures(ctx, t, c)
+}
+
+// assertEmptyChannelPage pages a team with no lines.
+func assertEmptyChannelPage(ctx context.Context, t *testing.T, c *client.Client) {
+	t.Helper()
 	lines, err := c.PageChannel(ctx, &client.PageChannelInput{TeamID: "chan-1"})
 	if err != nil {
 		t.Fatalf("PageChannel: %v", err)
@@ -126,90 +143,109 @@ func TestTasksClientMethodsOverRealSocket(t *testing.T) {
 	if len(lines) != 0 {
 		t.Fatalf("PageChannel on an empty channel = %+v", lines)
 	}
+}
 
-	// A post returns the new `#n`, and the line round-trips through the page.
-	seq, err := c.PostChannelMessage(ctx, &client.PostChannelMessageInput{
-		CommandID: "post-1", TeamID: "chan-1", ToTaskID: "task-a", Text: "hello from the app",
-	})
-	if err != nil || seq != 1 {
-		t.Fatalf("PostChannelMessage = (%d, %v), want (1, nil)", seq, err)
+// assertTaskPost posts one message and expects the given `#n`.
+func assertTaskPost(ctx context.Context, t *testing.T, c *client.Client, in *client.PostChannelMessageInput, want int64) int64 {
+	t.Helper()
+	seq, err := c.PostChannelMessage(ctx, in)
+	if err != nil || seq != want {
+		t.Fatalf("PostChannelMessage %s = (%d, %v), want (%d, nil)", in.CommandID, seq, err, want)
 	}
-	if _, err := c.PostChannelMessage(ctx, &client.PostChannelMessageInput{
-		CommandID: "post-1", TeamID: "chan-1", ToTaskID: "task-a", Text: "hello from the app",
-	}); err != nil {
-		t.Fatalf("replayed PostChannelMessage: %v", err)
-	}
-	lines, err = c.PageChannel(ctx, &client.PageChannelInput{TeamID: "chan-1"})
+	return seq
+}
+
+// assertTaskPagedLine pages the channel and expects one round-tripped line.
+func assertTaskPagedLine(ctx context.Context, t *testing.T, c *client.Client, text, toTask string) {
+	t.Helper()
+	lines, err := c.PageChannel(ctx, &client.PageChannelInput{TeamID: "chan-1"})
 	if err != nil || len(lines) != 1 {
 		t.Fatalf("PageChannel = (%+v, %v), want the one posted line", lines, err)
 	}
-	if lines[0].ChannelSeq != 1 || lines[0].SenderKind != "user" || lines[0].RecipientTaskID != "task-a" || lines[0].Content != "hello from the app" {
+	if lines[0].ChannelSeq != 1 || lines[0].SenderKind != "user" || lines[0].RecipientTaskID != toTask || lines[0].Content != text {
 		t.Fatalf("posted line = %+v, want the round-tripped content", lines[0])
 	}
+}
 
-	// The typed codes surface through the detail.
+// assertTaskCodedFailures checks the typed codes of the failing calls.
+func assertTaskCodedFailures(ctx context.Context, t *testing.T, c *client.Client) {
+	t.Helper()
+	for _, tc := range []struct {
+		input *client.PostChannelMessageInput
+		code  string
+	}{
+		{&client.PostChannelMessageInput{CommandID: "post-ended", TeamID: "ended", Text: "too late"}, "tasks.team_ended"},
+		{&client.PostChannelMessageInput{CommandID: "post-too-large", TeamID: "chan-1", Text: "x"}, "tasks.post_too_large"},
+	} {
+		if _, err := c.PostChannelMessage(ctx, tc.input); err == nil {
+			t.Fatalf("post %s succeeded, want a coded failure", tc.input.CommandID)
+		} else if code, ok := client.TasksCodeOf(err); !ok || code != tc.code {
+			t.Fatalf("post %s code = (%q, %v), want %q", tc.input.CommandID, code, ok, tc.code)
+		}
+	}
 	if _, err := c.PageChannel(ctx, &client.PageChannelInput{TeamID: "missing"}); err == nil {
 		t.Fatal("PageChannel on a missing team succeeded")
 	} else if code, ok := client.TasksCodeOf(err); !ok || code != "tasks.team_not_found" {
 		t.Fatalf("missing team code = (%q, %v), want tasks.team_not_found", code, ok)
 	}
-	if _, err := c.PostChannelMessage(ctx, &client.PostChannelMessageInput{
-		CommandID: "post-ended", TeamID: "ended", Text: "too late",
-	}); err == nil {
-		t.Fatal("a post to an ended team succeeded")
-	} else if code, ok := client.TasksCodeOf(err); !ok || code != "tasks.team_ended" {
-		t.Fatalf("ended team code = (%q, %v), want tasks.team_ended", code, ok)
-	}
-	if _, err := c.PostChannelMessage(ctx, &client.PostChannelMessageInput{
-		CommandID: "post-too-large", TeamID: "chan-1", Text: "x",
-	}); err == nil {
-		t.Fatal("an oversized post succeeded")
-	} else if code, ok := client.TasksCodeOf(err); !ok || code != "tasks.post_too_large" {
-		t.Fatalf("oversized post code = (%q, %v), want tasks.post_too_large", code, ok)
-	}
 }
 
 func TestTeamChannelTopicDecoders(t *testing.T) {
 	t.Parallel()
+	assertUnlockedDecode(t)
+	assertLockedDecode(t)
+	assertDecodeRejections(t)
+}
 
-	// The unlocked shape: metadata plus content.
-	unlocked := []byte(`{"lines":[{"channel_seq":3,"kind":"send","sender_kind":"user","recipient_task_id":"task-a","thread_root_task_id":"","source_seq":9,"created_at":1700000000000,"content":"hello"}]}`)
-	snap, err := client.DecodeTeamChannelSnapshot(unlocked)
+// assertUnlockedDecode checks the unlocked snapshot and event decode with
+// their content.
+func assertUnlockedDecode(t *testing.T) {
+	t.Helper()
+	taskUnlockedSnapshot := []byte(`{"lines":[{"channel_seq":3,"kind":"send","sender_kind":"user","recipient_task_id":"task-a","thread_root_task_id":"","source_seq":9,"created_at":1700000000000,"content":"hello"}]}`)
+	taskUnlockedLine := []byte(`{"channel_seq":3,"kind":"send","sender_kind":"user","recipient_task_id":"task-a","thread_root_task_id":"","source_seq":9,"created_at":1700000000000,"content":"hello"}`)
+	snap, err := client.DecodeTeamChannelSnapshot(taskUnlockedSnapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if snap.Sequence != 3 || len(snap.Lines) != 1 || snap.Lines[0].Content != "hello" {
 		t.Fatalf("snapshot = %+v, want the line with its content at sequence 3", snap)
 	}
-	lineWire := []byte(`{"channel_seq":3,"kind":"send","sender_kind":"user","recipient_task_id":"task-a","thread_root_task_id":"","source_seq":9,"created_at":1700000000000,"content":"hello"}`)
-	ev, err := client.DecodeTeamChannelEvent(client.EventTeamChannelAppended, lineWire)
+	ev, err := client.DecodeTeamChannelEvent(client.EventTeamChannelAppended, taskUnlockedLine)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if ev.Locked || ev.Line.Content != "hello" || ev.Line.CreatedAt.IsZero() {
 		t.Fatalf("event = %+v, want the unlocked line", ev)
 	}
+}
 
-	// The locked shape: metadata only, no content anywhere.
-	locked := []byte(`{"lines":[{"channel_seq":3,"kind":"stall","sender_kind":"watchdog","thread_root_task_id":"task-a","source_seq":9,"created_at":1700000000000}]}`)
-	lockedSnap, err := client.DecodeTeamChannelSnapshot(locked)
+// assertLockedDecode checks the metadata-only shapes.
+func assertLockedDecode(t *testing.T) {
+	t.Helper()
+	taskLockedSnapshot := []byte(`{"lines":[{"channel_seq":3,"kind":"stall","sender_kind":"watchdog","thread_root_task_id":"task-a","source_seq":9,"created_at":1700000000000}]}`)
+	taskLockedLine := []byte(`{"channel_seq":3,"kind":"stall","sender_kind":"watchdog","thread_root_task_id":"task-a","source_seq":9,"created_at":1700000000000}`)
+	lockedSnap, err := client.DecodeTeamChannelSnapshot(taskLockedSnapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if lockedSnap.Lines[0].Content != "" {
 		t.Fatalf("locked snapshot line = %+v, want metadata only", lockedSnap.Lines[0])
 	}
-	lockedWire := []byte(`{"channel_seq":3,"kind":"stall","sender_kind":"watchdog","thread_root_task_id":"task-a","source_seq":9,"created_at":1700000000000}`)
-	lockedEvent, err := client.DecodeTeamChannelEvent(client.EventTeamChannelAppended, lockedWire)
+	lockedEvent, err := client.DecodeTeamChannelEvent(client.EventTeamChannelAppended, taskLockedLine)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !lockedEvent.Locked || lockedEvent.Line.Content != "" || lockedEvent.Line.Kind != "stall" {
 		t.Fatalf("locked event = %+v, want metadata only", lockedEvent)
 	}
+}
 
-	// Unknown event types and non-object payloads fail typed.
-	if _, err := client.DecodeTeamChannelEvent("something.else", unlocked); err == nil {
+// assertDecodeRejections checks the unknown event types and non-object
+// payloads fail typed.
+func assertDecodeRejections(t *testing.T) {
+	t.Helper()
+	taskUnlockedSnapshot := []byte(`{"lines":[{"channel_seq":3,"kind":"send","sender_kind":"user","recipient_task_id":"task-a","thread_root_task_id":"","source_seq":9,"created_at":1700000000000,"content":"hello"}]}`)
+	if _, err := client.DecodeTeamChannelEvent("something.else", taskUnlockedSnapshot); err == nil {
 		t.Fatal("an unknown event type decoded")
 	}
 	if _, err := client.DecodeTeamChannelEvent(client.EventTeamChannelAppended, []byte("null")); err == nil {

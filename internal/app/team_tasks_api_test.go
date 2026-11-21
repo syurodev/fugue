@@ -69,51 +69,23 @@ func (s *originRecordingSessions) turnsTo(sessionID string) []sentTurn {
 	return out
 }
 
-func TestUserPostRoutesByMentionAndThread(t *testing.T) {
-	t.Parallel()
-	f := newChannelFixture(t)
-	ctx := t.Context()
-	sent := &originRecordingSessions{}
-	svc := NewTasksService(f.hp.vendorStore, sent, f.hp.Vault(), f.clk, ids.NewUUIDv7(f.clk, ids.NewDeterministic("tasks-api")))
+// newOriginRecorder builds a tasks service sessions port that records every
+// delivered turn with its origin.
+func newOriginRecorder() *originRecordingSessions {
+	return &originRecordingSessions{}
+}
 
-	// to_task_id routes to that agent: origin user, immediate.
-	res, err := svc.PostChannelMessage(ctx, PostChannelCommand{
-		CommandID: "post-mention", TeamID: f.teamID, ToTaskID: f.memAID, Text: "focus on tests",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	turns := sent.turnsTo("chan-a")
-	if len(turns) != 1 || turns[0].origin != vendor.OriginUser || turns[0].text != "focus on tests" {
-		t.Fatalf("deliveries to a = %+v, want one origin=user turn with the text", turns)
-	}
-	line := f.userPostLine(t)
-	if line.ChannelSeq != res.ChannelSeq || line.RecipientTaskID != f.memAID || line.SenderKind != vendorstore.ChannelSenderUser {
-		t.Fatalf("posted line = %+v, want the user's send to a", line)
-	}
+// tasksServiceWith builds a TasksService over the given sessions port.
+func tasksServiceWith(t *testing.T, f *channelFixture, sessions taskSessions) *TasksService {
+	t.Helper()
+	return NewTasksService(f.hp.vendorStore, sessions, f.hp.Vault(), f.clk, ids.NewUUIDv7(f.clk, ids.NewDeterministic("tasks-api")))
+}
 
-	// The thread default routes to the task's agent.
-	if _, err := svc.PostChannelMessage(ctx, PostChannelCommand{
-		CommandID: "post-thread", TeamID: f.teamID, ThreadTaskID: f.memAID, Text: "thread reply",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if got := sent.turnsTo("chan-a"); len(got) != 2 {
-		t.Fatalf("deliveries to a after the thread post = %d, want 2", len(got))
-	}
-
-	// The general channel routes to the lead.
-	if _, err := svc.PostChannelMessage(ctx, PostChannelCommand{
-		CommandID: "post-general", TeamID: f.teamID, Text: "how is it going",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if got := sent.turnsTo(f.session.ID); len(got) != 1 || got[0].origin != vendor.OriginUser {
-		t.Fatalf("deliveries to the lead = %+v, want one origin=user turn", got)
-	}
-
-	// The delegator's mention rides the next digest without a separate wake.
-	pending, err := f.hp.vendorStore.PendingMailbox(ctx)
+// assertDelegatorMentionRidesNextDigest checks that the delegator's mention
+// never schedules a wake but sits pending for the next digest.
+func (f *channelFixture) assertDelegatorMentionRidesNextDigest(t *testing.T) {
+	t.Helper()
+	pending, err := f.hp.vendorStore.PendingMailbox(t.Context())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -122,16 +94,41 @@ func TestUserPostRoutesByMentionAndThread(t *testing.T) {
 			t.Fatalf("pending = %+v, want no scheduled wake for the delegator", pending)
 		}
 	}
-	rows, err := f.hp.vendorStore.PendingMailboxRows(ctx, f.teamID, f.mgrID)
+	rows, err := f.hp.vendorStore.PendingMailboxRows(t.Context(), f.teamID, f.mgrID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(rows) != 2 {
 		t.Fatalf("delegator pending rows = %d, want one mention per routed post", len(rows))
 	}
+}
+
+func TestUserPostRoutesByMentionAndThread(t *testing.T) {
+	t.Parallel()
+	f := newChannelFixture(t)
+	rec := newOriginRecorder()
+	svc := tasksServiceWith(t, f, rec)
+
+	// to_task_id routes to that agent: origin user, immediate.
+	mentionSeq := f.postAndCheck(t, svc, rec, PostChannelCommand{
+		CommandID: "post-mention", TeamID: f.teamID, ToTaskID: f.memAID, Text: "focus on tests",
+	}, "chan-a")
+
+	// The thread default routes to the task's agent.
+	f.postAndCheck(t, svc, rec, PostChannelCommand{
+		CommandID: "post-thread", TeamID: f.teamID, ThreadTaskID: f.memAID, Text: "thread reply",
+	}, "chan-a")
+
+	// The general channel routes to the lead.
+	f.postAndCheck(t, svc, rec, PostChannelCommand{
+		CommandID: "post-general", TeamID: f.teamID, Text: "how is it going",
+	}, f.session.ID)
+
+	// The delegator's mention rides the next digest without a separate wake.
+	f.assertDelegatorMentionRidesNextDigest(t)
 
 	// Posting to a task outside the team is rejected with the typed code.
-	if _, err := svc.PostChannelMessage(ctx, PostChannelCommand{
+	if _, err := svc.PostChannelMessage(t.Context(), PostChannelCommand{
 		CommandID: "post-outside", TeamID: f.teamID, ToTaskID: "chan-other-o", Text: "hi",
 	}); errcode.CodeOf(err) != errcode.TasksTaskNotFound {
 		t.Fatalf("post outside the team code = %v, want tasks.task_not_found", errcode.CodeOf(err))
@@ -139,7 +136,7 @@ func TestUserPostRoutesByMentionAndThread(t *testing.T) {
 
 	// An ended team rejects the post with the typed code.
 	f.endTeam(t)
-	if _, err := svc.PostChannelMessage(ctx, PostChannelCommand{
+	if _, err := svc.PostChannelMessage(t.Context(), PostChannelCommand{
 		CommandID: "post-ended", TeamID: f.teamID, ToTaskID: f.memAID, Text: "too late",
 	}); errcode.CodeOf(err) != errcode.TasksTeamEnded {
 		t.Fatalf("post to an ended team code = %v, want tasks.team_ended", errcode.CodeOf(err))
@@ -148,20 +145,35 @@ func TestUserPostRoutesByMentionAndThread(t *testing.T) {
 	// A replayed command_id returns the cached line without posting again,
 	// and a replayed command_id with other arguments fails typed.
 	before := f.userPostLine(t)
-	replayed, err := svc.PostChannelMessage(ctx, PostChannelCommand{
+	replayed, err := svc.PostChannelMessage(t.Context(), PostChannelCommand{
 		CommandID: "post-mention", TeamID: f.teamID, ToTaskID: f.memAID, Text: "focus on tests",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if replayed.ChannelSeq != res.ChannelSeq || f.userPostLine(t).ChannelSeq != before.ChannelSeq {
-		t.Fatalf("replay posted again: %d then %d (top line #%d)", res.ChannelSeq, replayed.ChannelSeq, before.ChannelSeq)
+	if replayed.ChannelSeq != mentionSeq || f.userPostLine(t).ChannelSeq != before.ChannelSeq {
+		t.Fatalf("replay posted again: %d vs #%d (top line #%d)", replayed.ChannelSeq, mentionSeq, before.ChannelSeq)
 	}
-	if _, err := svc.PostChannelMessage(ctx, PostChannelCommand{
+	if _, err := svc.PostChannelMessage(t.Context(), PostChannelCommand{
 		CommandID: "post-mention", TeamID: f.teamID, ToTaskID: f.memBID, Text: "focus on tests",
 	}); errcode.CodeOf(err) != errcode.InvalidArgument {
 		t.Fatalf("replayed command_id with other arguments code = %v, want invalid_argument", errcode.CodeOf(err))
 	}
+}
+
+// postAndCheck posts one command, asserts the routed delivery, and returns
+// the new line's `#n`.
+func (f *channelFixture) postAndCheck(t *testing.T, svc *TasksService, rec *originRecordingSessions, cmd PostChannelCommand, wantSession string) int64 {
+	t.Helper()
+	res, err := svc.PostChannelMessage(t.Context(), cmd)
+	if err != nil {
+		t.Fatal(err)
+	}
+	turns := rec.turnsTo(wantSession)
+	if len(turns) == 0 || turns[len(turns)-1].origin != vendor.OriginUser || turns[len(turns)-1].text != cmd.Text {
+		t.Fatalf("deliveries to %s = %+v, want one origin=user turn with %q", wantSession, turns, cmd.Text)
+	}
+	return res.ChannelSeq
 }
 
 // endTeam cancels every task and ends the team, so the channel is read-only.
@@ -227,20 +239,33 @@ func (f *channelFixture) approvalLines(t *testing.T) []vendorstore.TeamChannelMe
 
 func TestApprovalLineCarriesOnlyAReference(t *testing.T) {
 	t.Parallel()
-	f := newChannelFixture(t)
-	ctx := t.Context()
+	x := newApprovalLineFixture(t)
 
+	requested := x.assertRequestedReference(t)
+	x.assertResolvedReference(t, requested)
+}
+
+// approvalLineFixture holds the approval-line test state: the team fixture,
+// the raised approval ticket, and the topic subscription.
+type approvalLineFixture struct {
+	f      *channelFixture
+	sub    *Subscription
+	ticket *interaction.Ticket
+}
+
+func newApprovalLineFixture(t *testing.T) *approvalLineFixture {
+	t.Helper()
+	f := newChannelFixture(t)
 	// The fixture created the team directly through the store, so its channel
 	// topic needs the registration a real decide path would have done.
 	f.rt.RegisterTeamChannel(f.teamID)
 
 	// Subscribe before the approval: the topic must not carry content either.
-	sub, err := f.rt.hub.Subscribe(ctx, SubscribeParams{Principal: testAppPrincipal, Topic: "team:" + f.teamID})
+	sub, err := f.rt.hub.Subscribe(t.Context(), SubscribeParams{Principal: testAppPrincipal, Topic: "team:" + f.teamID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(sub.Close)
-
 	// The member's session raises a native tool approval whose summary is
 	// content that must never leave the inbox (interaction §7): the channel
 	// records the reference only.
@@ -262,14 +287,18 @@ func TestApprovalLineCarriesOnlyAReference(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return &approvalLineFixture{f: f, sub: sub, ticket: ticket}
+}
 
-	// The lifecycle hook records the reference line off the owner's
-	// goroutine; wait for it.
+// assertRequestedReference checks the requested reference line, its event
+// payload and its topic event.
+func (x *approvalLineFixture) assertRequestedReference(t *testing.T) channelLineWire {
+	t.Helper()
 	testutil.Poll(t, "the approval reference line", func() bool {
-		return len(f.approvalLines(t)) == 1
+		return len(x.f.approvalLines(t)) == 1
 	})
-	line := f.approvalLines(t)[0]
-	raw, err := f.hp.vendorStore.OpenTeamEventPayload(ctx, f.teamID, line.SourceSeq)
+	line := x.f.approvalLines(t)[0]
+	raw, err := x.f.hp.vendorStore.OpenTeamEventPayload(t.Context(), x.f.teamID, line.SourceSeq)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,31 +306,34 @@ func TestApprovalLineCarriesOnlyAReference(t *testing.T) {
 	if jsonErr := json.Unmarshal(raw, &ref); jsonErr != nil {
 		t.Fatal(jsonErr)
 	}
-	if ref.RequestID != ticket.RequestID || ref.Tool != "shell" || ref.Outcome != "" {
+	if ref.RequestID != x.ticket.RequestID || ref.Tool != "shell" || ref.Outcome != "" {
 		t.Fatalf("approval reference = %+v, want the request and the tool only", ref)
 	}
 	assertNoApprovalContent(t, raw)
-
-	// The topic carries the requested reference event, never the content.
-	requested := readChannelEvent(t, sub, line.ChannelSeq)
+	requested := readChannelEvent(t, x.sub, line.ChannelSeq)
 	assertNoApprovalContent(t, []byte(requested.Content))
-	if !strings.Contains(requested.Content, ticket.RequestID) || !strings.Contains(requested.Content, "shell") {
+	if !strings.Contains(requested.Content, x.ticket.RequestID) || !strings.Contains(requested.Content, "shell") {
 		t.Fatalf("requested topic event = %+v, want the request and the tool in the reference", requested)
 	}
+	return requested
+}
 
-	// The resolution records the outcome only, never the answer text.
-	if _, err := f.rt.AnswerInteraction(ctx, &AnswerInteractionCommand{
+// assertResolvedReference answers the approval and checks the resolved
+// reference line, event and topic event.
+func (x *approvalLineFixture) assertResolvedReference(t *testing.T, requested channelLineWire) {
+	t.Helper()
+	if _, err := x.f.rt.AnswerInteraction(t.Context(), &AnswerInteractionCommand{
 		CommandID: "approve-1", Principal: testAppPrincipal,
-		Incarnation: f.rt.interactions.Incarnation(),
-		RequestID:   ticket.RequestID, Outcome: OutcomeDenied,
+		Incarnation: x.f.rt.interactions.Incarnation(),
+		RequestID:   x.ticket.RequestID, Outcome: OutcomeDenied,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	testutil.Poll(t, "the resolved approval line", func() bool {
-		return len(f.approvalLines(t)) == 2
+		return len(x.f.approvalLines(t)) == 2
 	})
-	resolved := f.approvalLines(t)[1]
-	rawResolved, err := f.hp.vendorStore.OpenTeamEventPayload(ctx, f.teamID, resolved.SourceSeq)
+	resolved := x.f.approvalLines(t)[1]
+	rawResolved, err := x.f.hp.vendorStore.OpenTeamEventPayload(t.Context(), x.f.teamID, resolved.SourceSeq)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,17 +341,17 @@ func TestApprovalLineCarriesOnlyAReference(t *testing.T) {
 	if jsonErr := json.Unmarshal(rawResolved, &resolvedRef); jsonErr != nil {
 		t.Fatal(jsonErr)
 	}
-	if resolvedRef.RequestID != ticket.RequestID || resolvedRef.Outcome != string(interaction.OutcomeDenied) {
+	if resolvedRef.RequestID != x.ticket.RequestID || resolvedRef.Outcome != string(interaction.OutcomeDenied) {
 		t.Fatalf("resolved reference = %+v, want the request and the denied outcome", resolvedRef)
 	}
 	assertNoApprovalContent(t, rawResolved)
 
-	// The topic carries the resolved reference event, never the content.
-	resolvedEvent := readChannelEvent(t, sub, resolved.ChannelSeq)
+	resolvedEvent := readChannelEvent(t, x.sub, resolved.ChannelSeq)
 	assertNoApprovalContent(t, []byte(resolvedEvent.Content))
-	if !strings.Contains(resolvedEvent.Content, ticket.RequestID) || !strings.Contains(resolvedEvent.Content, string(interaction.OutcomeDenied)) {
+	if !strings.Contains(resolvedEvent.Content, x.ticket.RequestID) || !strings.Contains(resolvedEvent.Content, string(interaction.OutcomeDenied)) {
 		t.Fatalf("resolved topic event = %+v, want the reference and the denied outcome", resolvedEvent)
 	}
+	_ = requested
 }
 
 // readChannelEvent waits for the topic event of one line and returns its

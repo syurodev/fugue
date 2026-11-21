@@ -134,35 +134,12 @@ func (rt *HostRuntime) TasksService() (*TasksService, error) {
 // general channel, with it that task's thread; newest first, before/since as
 // exclusive cursors. Fails closed while the vault is locked.
 func (s *TasksService) PageChannel(ctx context.Context, teamID, threadTaskID string, before, since int64, limit int) ([]ChannelLineView, error) {
-	if s.vault == nil || s.vault.Snapshot().State != vault.StateUnlocked {
-		return nil, errcode.New(errcode.Unavailable, "the vault is locked; channel content is unavailable")
+	if err := s.pageChannelGate(); err != nil {
+		return nil, err
 	}
-	if teamID == "" {
-		return nil, errcode.New(errcode.TasksTeamNotFound, "team_id is required")
-	}
-	if before < 0 || since < 0 {
-		return nil, errcode.New(errcode.InvalidArgument, "before and since must be non-negative")
-	}
-	if before > 0 && since > 0 && since >= before {
-		return nil, errcode.New(errcode.InvalidArgument, "since must be below before")
-	}
-	if limit <= 0 {
-		limit = 100
-	}
-	if limit > 500 {
-		limit = 500
-	}
-	q := vendorstore.TeamChannelPageQuery{Before: before, Since: since, Limit: limit}
-	if threadTaskID != "" {
-		rec, tasks, err := s.store.TeamSnapshot(ctx, teamID)
-		if err != nil {
-			return nil, s.teamReadError(err)
-		}
-		if _, ok := findTask(tasks, threadTaskID); !ok {
-			return nil, errcode.New(errcode.TasksTaskNotFound, "the team task does not exist in this team")
-		}
-		_ = rec
-		q.ThreadRoots = []string{vendorstore.ThreadRootTaskID(threadTaskID)}
+	q, err := s.pageChannelQuery(ctx, teamID, threadTaskID, before, since, limit)
+	if err != nil {
+		return nil, err
 	}
 	rows, err := s.store.TeamChannelMessages(ctx, teamID, q)
 	if err != nil {
@@ -196,6 +173,48 @@ func (s *TasksService) PageChannel(ctx context.Context, teamID, threadTaskID str
 	return out, nil
 }
 
+// pageChannelGate fails the page closed while the vault is locked (§5.3).
+func (s *TasksService) pageChannelGate() error {
+	if s.vault == nil || s.vault.Snapshot().State != vault.StateUnlocked {
+		return errcode.New(errcode.Unavailable, "the vault is locked; channel content is unavailable")
+	}
+	return nil
+}
+
+// pageChannelQuery validates the paging arguments and resolves the thread
+// scope: without thread_task_id the general channel, with it that task's
+// thread (§5.3).
+func (s *TasksService) pageChannelQuery(ctx context.Context, teamID, threadTaskID string, before, since int64, limit int) (vendorstore.TeamChannelPageQuery, error) {
+	if teamID == "" {
+		return vendorstore.TeamChannelPageQuery{}, errcode.New(errcode.TasksTeamNotFound, "team_id is required")
+	}
+	if before < 0 || since < 0 {
+		return vendorstore.TeamChannelPageQuery{}, errcode.New(errcode.InvalidArgument, "before and since must be non-negative")
+	}
+	if before > 0 && since > 0 && since >= before {
+		return vendorstore.TeamChannelPageQuery{}, errcode.New(errcode.InvalidArgument, "since must be below before")
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	if limit > 500 {
+		limit = 500
+	}
+	q := vendorstore.TeamChannelPageQuery{Before: before, Since: since, Limit: limit}
+	if threadTaskID == "" {
+		return q, nil
+	}
+	_, tasks, err := s.store.TeamSnapshot(ctx, teamID)
+	if err != nil {
+		return vendorstore.TeamChannelPageQuery{}, s.teamReadError(err)
+	}
+	if _, ok := findTask(tasks, threadTaskID); !ok {
+		return vendorstore.TeamChannelPageQuery{}, errcode.New(errcode.TasksTaskNotFound, "the team task does not exist in this team")
+	}
+	q.ThreadRoots = []string{vendorstore.ThreadRootTaskID(threadTaskID)}
+	return q, nil
+}
+
 // sourceEvents maps the team's event sequences to their metadata, so a page
 // can name the attempt and the failure code of its lines.
 func (s *TasksService) sourceEvents(ctx context.Context, teamID string) (map[int64]*vendorstore.RecordedTeamEvent, error) {
@@ -222,20 +241,10 @@ func (s *TasksService) teamReadError(err error) error {
 // agent (§5.3). The channel line and the delegator's informational mention
 // commit with the event; the delivery is an immediate origin=user turn.
 func (s *TasksService) PostChannelMessage(ctx context.Context, cmd PostChannelCommand) (PostChannelResult, error) {
-	if cmd.CommandID == "" {
-		return PostChannelResult{}, errcode.New(errcode.InvalidArgument, "command_id is required")
+	trimmed, fingerprint, err := s.validatePost(cmd)
+	if err != nil {
+		return PostChannelResult{}, err
 	}
-	if cmd.TeamID == "" {
-		return PostChannelResult{}, errcode.New(errcode.TasksTeamNotFound, "team_id is required")
-	}
-	trimmed := strings.TrimSpace(cmd.Text)
-	if trimmed == "" {
-		return PostChannelResult{}, errcode.New(errcode.InvalidArgument, "text must not be empty")
-	}
-	if len(trimmed) > maxChannelPostBytes {
-		return PostChannelResult{}, errcode.New(errcode.TasksPostTooLarge, "text exceeds the 4 KiB limit")
-	}
-	fingerprint := channelPostFingerprint(cmd.TeamID, cmd.ThreadTaskID, cmd.ToTaskID, trimmed)
 	if seq, cached := s.cachedPost(cmd.CommandID, fingerprint); cached {
 		return PostChannelResult{ChannelSeq: seq}, nil
 	}
@@ -244,26 +253,78 @@ func (s *TasksService) PostChannelMessage(ctx context.Context, cmd PostChannelCo
 		// pattern): the replay must not attach to the original operation.
 		return PostChannelResult{}, errcode.New(errcode.InvalidArgument, "command_id was already used for a different command")
 	}
-
-	rec, tasks, err := s.store.TeamSnapshot(ctx, cmd.TeamID)
+	rec, tasks, err := s.postTeamGate(ctx, cmd.TeamID)
 	if err != nil {
-		return PostChannelResult{}, s.teamReadError(err)
-	}
-	if isHostTeamTerminal(rec.State) {
-		return PostChannelResult{}, errcode.New(errcode.TasksTeamEnded, "the team has ended; its channel is read-only")
+		return PostChannelResult{}, err
 	}
 	target, err := s.routeUserPost(&rec, tasks, cmd.ThreadTaskID, cmd.ToTaskID)
 	if err != nil {
 		return PostChannelResult{}, err
 	}
+	info, err := s.postSessionGate(ctx, target)
+	if err != nil {
+		return PostChannelResult{}, err
+	}
+	result, err := s.appendUserPost(ctx, cmd.CommandID, fingerprint, &rec, tasks, target, trimmed)
+	if err != nil {
+		return PostChannelResult{}, err
+	}
+	// §6.2: the delegator's mention rides the next digest (informational);
+	// the routed agent gets the text at once, origin user, no pacing.
+	s.deliverUserPost(ctx, target.SessionID, trimmed, info.State == vendorstore.StateRunning)
+	return result, nil
+}
+
+// validatePost checks the command shape and the §5.3 text cap, and computes
+// the command fingerprint for the dedup.
+func (s *TasksService) validatePost(cmd PostChannelCommand) (string, string, error) {
+	if cmd.CommandID == "" {
+		return "", "", errcode.New(errcode.InvalidArgument, "command_id is required")
+	}
+	if cmd.TeamID == "" {
+		return "", "", errcode.New(errcode.TasksTeamNotFound, "team_id is required")
+	}
+	trimmed := strings.TrimSpace(cmd.Text)
+	if trimmed == "" {
+		return "", "", errcode.New(errcode.InvalidArgument, "text must not be empty")
+	}
+	if len(trimmed) > maxChannelPostBytes {
+		return "", "", errcode.New(errcode.TasksPostTooLarge, "text exceeds the 4 KiB limit")
+	}
+	return trimmed, channelPostFingerprint(cmd.TeamID, cmd.ThreadTaskID, cmd.ToTaskID, trimmed), nil
+}
+
+// postTeamGate reads the team and rejects posting once it ended (§5.3).
+func (s *TasksService) postTeamGate(ctx context.Context, teamID string) (vendorstore.TeamRecord, []vendorstore.TaskRecord, error) {
+	rec, tasks, err := s.store.TeamSnapshot(ctx, teamID)
+	if err != nil {
+		if errors.Is(err, vendorstore.ErrTeamNotFound) {
+			return vendorstore.TeamRecord{}, nil, errcode.New(errcode.TasksTeamNotFound, "the team does not exist")
+		}
+		return vendorstore.TeamRecord{}, nil, boundaryError("read the team", err)
+	}
+	if isHostTeamTerminal(rec.State) {
+		return vendorstore.TeamRecord{}, nil, errcode.New(errcode.TasksTeamEnded, "the team has ended; its channel is read-only")
+	}
+	return rec, tasks, nil
+}
+
+// postSessionGate refuses a post whose target cannot take input yet, and
+// reports whether the session is mid-turn (steer instead of send).
+func (s *TasksService) postSessionGate(ctx context.Context, target *vendorstore.TaskRecord) (vendorstore.Session, error) {
 	if target.SessionID == "" {
-		return PostChannelResult{}, errcode.New(errcode.FailedPrecondition, "the task has no live session yet")
+		return vendorstore.Session{}, errcode.New(errcode.FailedPrecondition, "the task has no live session yet")
 	}
 	info, err := s.store.Snapshot(ctx, target.SessionID)
 	if err != nil || (info.State != vendorstore.StateReady && info.State != vendorstore.StateRunning) {
-		return PostChannelResult{}, errcode.New(errcode.FailedPrecondition, "the task session is not taking input")
+		return vendorstore.Session{}, errcode.New(errcode.FailedPrecondition, "the task session is not taking input")
 	}
+	return info, nil
+}
 
+// appendUserPost records the TeamUserPosted event with its delegator mention,
+// caches the command result and resolves the new line's `#n`.
+func (s *TasksService) appendUserPost(ctx context.Context, commandID, fingerprint string, rec *vendorstore.TeamRecord, tasks []vendorstore.TaskRecord, target *vendorstore.TaskRecord, trimmed string) (PostChannelResult, error) {
 	payload, encErr := json.Marshal(teamUserPostedPayload{ToTaskID: target.TaskID, Message: trimmed})
 	if encErr != nil {
 		return PostChannelResult{}, errcode.Wrap(errcode.Internal, "encode the user post", encErr)
@@ -272,24 +333,18 @@ func (s *TasksService) PostChannelMessage(ctx context.Context, cmd PostChannelCo
 	if idErr != nil {
 		return PostChannelResult{}, errcode.Wrap(errcode.Internal, "generate the user post event ID", idErr)
 	}
-	in := &vendorstore.AppendTeamEventInput{
+	evSeq, appendErr := s.store.AppendTeamEvent(ctx, rec.TeamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
 		EventID: evID, EventType: vendorstore.EventTeamUserPosted, ProtectedPayload: payload,
-		Mailbox: userPostMentionRows(&rec, tasks, target, trimmed),
-	}
-	evSeq, appendErr := s.store.AppendTeamEvent(ctx, cmd.TeamID, rec.LastSeq, in)
+		Mailbox: userPostMentionRows(rec, tasks, target, trimmed),
+	})
 	if appendErr != nil {
 		if errors.Is(appendErr, vendorstore.ErrTeamNotFound) {
 			return PostChannelResult{}, errcode.New(errcode.TasksTeamNotFound, "the team does not exist")
 		}
 		return PostChannelResult{}, boundaryError("record the user post", appendErr)
 	}
-	s.rememberPost(cmd.CommandID, fingerprint, 0)
-
-	// §6.2: the delegator's mention rides the next digest (informational);
-	// the routed agent gets the text at once, origin user, no pacing.
-	s.deliverUserPost(ctx, target.SessionID, trimmed, info.State == vendorstore.StateRunning)
-
-	lines, err := s.store.TeamChannelLinesForSources(ctx, cmd.TeamID, []int64{evSeq})
+	s.rememberPost(commandID, fingerprint, 0)
+	lines, err := s.store.TeamChannelLinesForSources(ctx, rec.TeamID, []int64{evSeq})
 	if err != nil {
 		return PostChannelResult{}, boundaryError("read the posted line", err)
 	}
@@ -301,7 +356,7 @@ func (s *TasksService) PostChannelMessage(ctx context.Context, cmd PostChannelCo
 			}
 		}
 	}
-	s.rememberPost(cmd.CommandID, fingerprint, seq)
+	s.rememberPost(commandID, fingerprint, seq)
 	return PostChannelResult{ChannelSeq: seq}, nil
 }
 
@@ -374,7 +429,9 @@ func (s *TasksService) deliverUserPost(ctx context.Context, sessionID, text stri
 func channelPostFingerprint(teamID, threadTaskID, toTaskID, text string) string {
 	h := sha256.New()
 	for _, part := range []string{teamID, threadTaskID, toTaskID, text} {
-		fmt.Fprintf(h, "%d:%s\n", len(part), part)
+		// sha256.Hash.Write never fails; the length prefix keeps the parts
+		// distinct, so no separator can collide with the text.
+		_, _ = h.Write([]byte(fmt.Sprintf("%d:%s\n", len(part), part)))
 	}
 	return fmt.Sprintf("%x", h.Sum(nil))
 }

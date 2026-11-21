@@ -9,7 +9,6 @@ package app
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -330,76 +329,12 @@ func channelAttemptOf(row *vendorstore.TeamChannelMessage, src *vendorstore.Reco
 // channelContentText extracts one line's content from its sealed source
 // payload: the primary text of the kind, host metadata for the lifecycle
 // kinds, and nothing for a payload-less event.
+// channelContentText extracts one line's content from its sealed source
+// payload: the primary text of the kind, host metadata for the lifecycle
+// kinds, and nothing for a payload-less event.
 func channelContentText(row *vendorstore.TeamChannelMessage, src *vendorstore.RecordedTeamEvent, raw []byte) string {
 	if len(raw) == 0 {
-		if row.Kind == vendorstore.ChannelKindFailed && src != nil && src.FailureCode != "" {
-			return "failed(" + src.FailureCode + ")"
-		}
-		if row.Kind == vendorstore.ChannelKindTask && src != nil && src.EventType == vendorstore.EventTaskSuperseded {
-			return fmt.Sprintf("attempt %d begins after failed(%s)", retryAttemptAfter(src.TaskID), src.FailureCode)
-		}
-		return ""
+		return channelLifecycleContent(row, src)
 	}
-	switch row.Kind {
-	case vendorstore.ChannelKindPlan:
-		var p teams.ProposalInput
-		if json.Unmarshal(raw, &p) == nil {
-			return p.Brief
-		}
-	case vendorstore.ChannelKindDecision:
-		var d teamDecisionPayload
-		if json.Unmarshal(raw, &d) == nil && d.Decision != "" {
-			return d.Decision
-		}
-		var a teamAmendPayload
-		if json.Unmarshal(raw, &a) == nil {
-			return "the team was amended"
-		}
-	case vendorstore.ChannelKindNote:
-		var p teamNotePayload
-		if json.Unmarshal(raw, &p) == nil {
-			return p.Note
-		}
-	case vendorstore.ChannelKindQuestion:
-		var p taskQuestionPayload
-		if json.Unmarshal(raw, &p) == nil {
-			return p.Question
-		}
-	case vendorstore.ChannelKindAnswer:
-		var p struct {
-			Answer string `json:"answer"`
-		}
-		if json.Unmarshal(raw, &p) == nil {
-			return p.Answer
-		}
-	case vendorstore.ChannelKindResult:
-		var p taskReportPayload
-		if json.Unmarshal(raw, &p) == nil {
-			return p.Summary
-		}
-	case vendorstore.ChannelKindSend:
-		var m taskMessagePayload
-		if json.Unmarshal(raw, &m) == nil {
-			return m.Message
-		}
-		var u teamUserPostedPayload
-		if json.Unmarshal(raw, &u) == nil {
-			return u.Message
-		}
-	case vendorstore.ChannelKindStall:
-		var p taskStalledPayload
-		if json.Unmarshal(raw, &p) == nil {
-			return fmt.Sprintf("silent for %ds waiting_on=%s", p.SilentSeconds, p.WaitingOn)
-		}
-	case vendorstore.ChannelKindApproval:
-		var p taskApprovalRefPayload
-		if json.Unmarshal(raw, &p) == nil {
-			ref := "approval request " + p.RequestID + " (" + p.Tool + ")"
-			if p.Outcome != "" {
-				ref += ": " + p.Outcome
-			}
-			return ref
-		}
-	}
-	return string(raw)
+	return channelPayloadContent(row, src, raw)
 }

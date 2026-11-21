@@ -40,7 +40,7 @@ type Store struct {
 	unregister     func()
 	prepare        sync.Mutex
 	faultMu        sync.Mutex
-	teamAppended   func(teamID string, seq int64)
+	teamAppended   func(ctx context.Context, teamID string, seq int64)
 	teamAppendedMu sync.Mutex
 	random         ids.Random
 	// beforeCommit is a test seam set through export_test.go; production code

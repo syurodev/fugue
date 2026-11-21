@@ -72,22 +72,22 @@ func (s *Store) commitFault() error {
 // publish the channel lines the event projects. Nil until the host wires it;
 // a nil observer makes appends silent, and catch-up still covers every
 // subscriber (the rows are committed before the observer runs).
-func (s *Store) SetTeamAppendedObserver(fn func(teamID string, seq int64)) {
+func (s *Store) SetTeamAppendedObserver(fn func(ctx context.Context, teamID string, seq int64)) {
 	s.teamAppendedMu.Lock()
 	defer s.teamAppendedMu.Unlock()
 	s.teamAppended = fn
 }
 
-func (s *Store) notifyTeamAppended(teamID string, seq int64) {
+func (s *Store) notifyTeamAppended(ctx context.Context, teamID string, seq int64) {
 	s.teamAppendedMu.Lock()
 	fn := s.teamAppended
 	s.teamAppendedMu.Unlock()
 	if fn != nil {
-		fn(teamID, seq)
+		fn(ctx, teamID, seq)
 	}
 }
 
-func (s *Store) commitTeamTx(teamID string, seq int64, snap vault.Snapshot, needVault bool, commitFn func() error) error {
+func (s *Store) commitTeamTx(ctx context.Context, teamID string, seq int64, snap vault.Snapshot, needVault bool, commitFn func() error) error {
 	if fault := s.commitFault(); fault != nil {
 		return fmt.Errorf("%w: %w", ErrUnavailable, fault)
 	}
@@ -95,13 +95,13 @@ func (s *Store) commitTeamTx(teamID string, seq int64, snap vault.Snapshot, need
 		if err := s.vault.WithUnlocked(snap, commitFn); err != nil {
 			return fmt.Errorf("commit sealed team tx: %w", err)
 		}
-		s.notifyTeamAppended(teamID, seq)
+		s.notifyTeamAppended(ctx, teamID, seq)
 		return nil
 	}
 	if err := commitFn(); err != nil {
 		return fmt.Errorf("commit team tx: %w", err)
 	}
-	s.notifyTeamAppended(teamID, seq)
+	s.notifyTeamAppended(ctx, teamID, seq)
 	return nil
 }
 

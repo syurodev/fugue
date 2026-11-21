@@ -44,7 +44,7 @@ func (s *Store) AppendTeamEvent(ctx context.Context, teamID string, expectedSeq 
 	if err := s.writeAppendedEvent(ctx, tx, teamID, nextSeq, ev, meta, now); err != nil {
 		return 0, err
 	}
-	if err := s.commitTeamTx(teamID, nextSeq, snap, needVault, tx.Commit); err != nil {
+	if err := s.commitTeamTx(ctx, teamID, nextSeq, snap, needVault, tx.Commit); err != nil {
 		return 0, err
 	}
 	return nextSeq, nil

@@ -231,7 +231,11 @@ func (s *InteractionService) nudgeExpiry() {
 // (F11.10b: the approval reference lines need the binding a resolved
 // lifecycle event does not carry).
 func (s *InteractionService) TicketOf(requestID string) (*interaction.Ticket, error) {
-	return s.owner.LookupRequest(requestID)
+	ticket, err := s.owner.LookupRequest(requestID)
+	if err != nil {
+		return nil, errcode.Wrap(errcode.NotFound, "the interaction request does not exist", err)
+	}
+	return ticket, nil
 }
 
 func (s *InteractionService) Incarnation() string {

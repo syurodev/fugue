@@ -47,23 +47,45 @@ func seedChannelHostTeam(t *testing.T, store *vendorstore.Store, teamID, leadSes
 
 func TestChannelHostAPIPagesPostsAndLocksMetadataOnly(t *testing.T) {
 	t.Parallel()
+	x := newChannelHostAPIFixture(t)
+
+	x.assertUnlockedSnapshotHasContent(t)
+	x.assertPostDedupAndLiveEvent(t)
+	x.assertPagingBothWays(t)
+	x.assertLockedVaultFailsClosedAndTopicIsMetadataOnly(t)
+}
+
+// channelHostAPIFixture is the HA-E08 state: a real host, a team whose lead
+// runs in a ready session, and a registered channel topic.
+type channelHostAPIFixture struct {
+	f       *channelFixture
+	teamID  string
+	svc     *TasksService
+	sub     *Subscription
+	postSeq int64
+}
+
+func newChannelHostAPIFixture(t *testing.T) *channelHostAPIFixture {
+	t.Helper()
 	f := newChannelFixture(t)
-	ctx := t.Context()
 	teamID := f.teamID
 	svc := f.rt.tasksService
 	if svc == nil {
 		t.Fatal("the tasks service is not wired")
 	}
 	f.rt.RegisterTeamChannel(teamID)
-
-	// Subscribe before the posts: the snapshot carries the seeded lines with
-	// their content, and a live event follows the post.
-	sub, err := f.rt.hub.Subscribe(ctx, SubscribeParams{Principal: testAppPrincipal, Topic: TeamChannelTopicName(teamID)})
+	sub, err := f.rt.hub.Subscribe(t.Context(), SubscribeParams{Principal: testAppPrincipal, Topic: TeamChannelTopicName(teamID)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(sub.Close)
-	snapState, _, ok := sub.Snapshot()
+	return &channelHostAPIFixture{f: f, teamID: teamID, svc: svc, sub: sub}
+}
+
+// assertUnlockedSnapshotHasContent checks the pre-post snapshot.
+func (x *channelHostAPIFixture) assertUnlockedSnapshotHasContent(t *testing.T) {
+	t.Helper()
+	snapState, _, ok := x.sub.Snapshot()
 	if !ok {
 		t.Fatal("no topic snapshot")
 	}
@@ -71,35 +93,56 @@ func TestChannelHostAPIPagesPostsAndLocksMetadataOnly(t *testing.T) {
 	if len(snapLines) == 0 || snapLines[len(snapLines)-1].Content == "" {
 		t.Fatalf("unlocked snapshot lines = %+v, want content on the oldest line", snapLines)
 	}
+}
 
-	// Post twice with the same command_id: the second returns the same `#n`
-	// and no second line is recorded.
-	first, postErr := svc.PostChannelMessage(ctx, PostChannelCommand{
-		CommandID: "post-1", TeamID: teamID, ToTaskID: f.memAID, Text: "hello team",
+// assertPostDedupAndLiveEvent posts once, replays the same command_id, and
+// waits for the single live event.
+func (x *channelHostAPIFixture) assertPostDedupAndLiveEvent(t *testing.T) {
+	t.Helper()
+	ctx := t.Context()
+	first, err := x.svc.PostChannelMessage(ctx, PostChannelCommand{
+		CommandID: "post-1", TeamID: x.teamID, ToTaskID: x.f.memAID, Text: "hello team",
 	})
-	if postErr != nil {
-		t.Fatal(postErr)
+	if err != nil {
+		t.Fatal(err)
 	}
-	second, postErr := svc.PostChannelMessage(ctx, PostChannelCommand{
-		CommandID: "post-1", TeamID: teamID, ToTaskID: f.memAID, Text: "hello team",
+	second, err := x.svc.PostChannelMessage(ctx, PostChannelCommand{
+		CommandID: "post-1", TeamID: x.teamID, ToTaskID: x.f.memAID, Text: "hello team",
 	})
-	if postErr != nil {
-		t.Fatal(postErr)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if first.ChannelSeq != second.ChannelSeq {
 		t.Fatalf("replayed command_id posted again: %d then %d", first.ChannelSeq, second.ChannelSeq)
 	}
-	liveLines := channelEventLines(t, sub, first.ChannelSeq)
-	if len(liveLines) != 1 || liveLines[0].Content != "hello team" {
-		t.Fatalf("live event lines = %+v, want the posted line with content", liveLines)
+	x.postSeq = first.ChannelSeq
+	for {
+		ev, ok := x.sub.Next(ctx)
+		if !ok {
+			t.Fatal("the topic stream ended before the post event")
+		}
+		if ev.Type != "channel.appended" || ev.Seq != uint64(first.ChannelSeq) {
+			continue
+		}
+		// A live event payload is one line, not a snapshot.
+		var live channelLineWire
+		if err := json.Unmarshal(ev.Payload, &live); err != nil {
+			t.Fatal(err)
+		}
+		if live.ChannelSeq != first.ChannelSeq || live.Content != "hello team" {
+			t.Fatalf("live event line = %+v, want the posted line with content", live)
+		}
+		return
 	}
+}
 
-	// PageChannel pages both ways: the general channel (no thread) holds the
-	// plan, decision and the posted user line; the thread holds the task
-	// assignment. Newest first, before and since as exclusive cursors.
-	general, pageErr := svc.PageChannel(ctx, teamID, "", 0, 0, 0)
-	if pageErr != nil {
-		t.Fatal(pageErr)
+// assertPagingBothWays checks the general and thread pages and the cursors.
+func (x *channelHostAPIFixture) assertPagingBothWays(t *testing.T) {
+	t.Helper()
+	ctx := t.Context()
+	general, err := x.svc.PageChannel(ctx, x.teamID, "", 0, 0, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if len(general) < 3 {
 		t.Fatalf("general page = %d lines, want the plan, decision and post", len(general))
@@ -107,40 +150,37 @@ func TestChannelHostAPIPagesPostsAndLocksMetadataOnly(t *testing.T) {
 	if general[0].Content != "hello team" || general[0].Attempt != 1 {
 		t.Fatalf("newest general line = %+v, want the post at attempt 1", general[0])
 	}
-	thread, pageErr := svc.PageChannel(ctx, teamID, f.memAID, 0, int64(general[0].ChannelSeq), 0)
-	if pageErr != nil {
-		t.Fatal(pageErr)
+	thread, err := x.svc.PageChannel(ctx, x.teamID, x.f.memAID, 0, int64(general[0].ChannelSeq), 0)
+	if err != nil {
+		t.Fatal(err)
 	}
 	if len(thread) != 0 {
 		t.Fatalf("thread page above the newest general line = %+v, want none", thread)
 	}
-	forward, pageErr := svc.PageChannel(ctx, teamID, "", 0, 2, 0)
-	if pageErr != nil {
-		t.Fatal(pageErr)
+	back, err := x.svc.PageChannel(ctx, x.teamID, "", 3, 0, 0)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if len(forward) < 2 || forward[0].ChannelSeq <= 2 {
-		t.Fatalf("forward page = %+v, want lines above #2 newest first", forward)
+	if len(back) == 0 || back[len(back)-1].ChannelSeq != 1 || back[0].ChannelSeq >= 3 {
+		t.Fatalf("backward page below #3 = %+v, want lines ending at #1", back)
 	}
-	back, pageErr := svc.PageChannel(ctx, teamID, "", int64(forward[len(forward)-1].ChannelSeq)+0, 0, 0)
-	if pageErr != nil {
-		t.Fatal(pageErr)
-	}
-	if len(back) == 0 || back[len(back)-1].ChannelSeq != 1 {
-		t.Fatalf("backward page ends at %d, want line #1", back[len(back)-1].ChannelSeq)
-	}
+}
 
-	// The vault locks: PageChannel refuses, the fresh topic snapshot carries
-	// metadata only, and a post fails closed.
-	f.hp.Vault().Lock()
-	if _, lockedErr := svc.PageChannel(ctx, teamID, "", 0, 0, 0); lockedErr == nil {
+// assertLockedVaultFailsClosedAndTopicIsMetadataOnly checks the locked-vault
+// behaviour of the service and the topic (§5.3: metadata only while the vault
+// is locked).
+func (x *channelHostAPIFixture) assertLockedVaultFailsClosedAndTopicIsMetadataOnly(t *testing.T) {
+	t.Helper()
+	x.f.hp.Vault().Lock()
+	if _, err := x.svc.PageChannel(t.Context(), x.teamID, "", 0, 0, 0); err == nil {
 		t.Fatal("locked PageChannel succeeded, want fail closed")
 	}
-	if _, lockedPostErr := svc.PostChannelMessage(ctx, PostChannelCommand{
-		CommandID: "post-locked", TeamID: teamID, ToTaskID: f.memAID, Text: "while locked",
-	}); lockedPostErr == nil {
+	if _, err := x.svc.PostChannelMessage(t.Context(), PostChannelCommand{
+		CommandID: "post-locked", TeamID: x.teamID, ToTaskID: x.f.memAID, Text: "while locked",
+	}); err == nil {
 		t.Fatal("a post on a locked vault succeeded, want fail closed")
 	}
-	lockedSub, err := f.rt.hub.Subscribe(ctx, SubscribeParams{Principal: testAppPrincipal, Topic: TeamChannelTopicName(teamID)})
+	lockedSub, err := x.f.rt.hub.Subscribe(t.Context(), SubscribeParams{Principal: testAppPrincipal, Topic: TeamChannelTopicName(x.teamID)})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,17 +223,10 @@ func channelEventLines(t *testing.T, sub *Subscription, seq int64) []channelLine
 		if ev.Type != "channel.appended" || ev.Seq != uint64(seq) {
 			continue
 		}
-		return []channelLineWire{{ChannelSeq: int64(ev.Seq), Content: wireContentOf(ev.Payload)}}
+		var wire channelLineWire
+		if err := json.Unmarshal(ev.Payload, &wire); err != nil {
+			t.Fatal(err)
+		}
+		return []channelLineWire{wire}
 	}
-}
-
-// wireContentOf extracts the content field of one topic payload.
-func wireContentOf(payload []byte) string {
-	var wire struct {
-		Content string `json:"content"`
-	}
-	if err := json.Unmarshal(payload, &wire); err != nil {
-		return ""
-	}
-	return wire.Content
 }

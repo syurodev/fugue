@@ -96,7 +96,8 @@ func channelTeamEventLines(ev *AppendTeamEventInput, facts channelPayloadFacts) 
 	case EventTaskCreated, EventTaskAssigned, EventTaskStarted, EventTaskQuestionAsked,
 		EventTaskQuestionAnswered, EventTaskReported, EventTaskCheckCompleted, EventTaskReviewed,
 		EventTaskIntegrated, EventTaskMarkedUnknown, EventTaskRecoveryDecided, EventTaskSuperseded,
-		EventTaskStalled, EventTaskMessaged, EventTaskEnded:
+		EventTaskStalled, EventTaskMessaged, EventTaskApprovalRequested, EventTaskApprovalResolved,
+		EventTaskEnded:
 		return nil
 	default:
 		return nil
@@ -109,13 +110,12 @@ func channelTeamEventLines(ev *AppendTeamEventInput, facts channelPayloadFacts) 
 func channelTaskEventLines(ev *AppendTeamEventInput, facts channelPayloadFacts) []channelLine {
 	root := ThreadRootTaskID(ev.TaskID)
 	switch ev.EventType {
-	case EventTaskAssigned:
-		return []channelLine{{kind: ChannelKindTask, threadRoot: root, senderKind: ChannelSenderFugue}}
-	case EventTaskSuperseded:
-		// The retry chain's attempt-open line (§5.4, §6.7): the supersede and
-		// the queued next attempt commit in the same transaction, so this is
-		// the moment the new attempt opens; the rendered text names the
-		// attempt and the failure code.
+	case EventTaskAssigned, EventTaskSuperseded:
+		// The assignment opens the task's thread; the supersede is the retry
+		// chain's attempt-open line (§5.4, §6.7): the supersede and the queued
+		// next attempt commit in the same transaction, so this is the moment
+		// the new attempt opens; the rendered text names the attempt and the
+		// failure code.
 		return []channelLine{{kind: ChannelKindTask, threadRoot: root, senderKind: ChannelSenderFugue}}
 	case EventTaskQuestionAsked:
 		return []channelLine{{kind: ChannelKindQuestion, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID}}
@@ -126,9 +126,7 @@ func channelTaskEventLines(ev *AppendTeamEventInput, facts channelPayloadFacts) 
 	case EventTaskMessaged:
 		return []channelLine{{kind: ChannelKindSend, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID, recipient: facts.ToTaskID}}
 	case EventTaskApprovalRequested, EventTaskApprovalResolved:
-		// §6.7: one reference line leading to the approvals inbox; the
-		// content stays in the inbox (interaction §7, VR-05).
-		return []channelLine{{kind: ChannelKindApproval, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID}}
+		return channelApprovalLines(ev, root)
 	case EventTaskStalled:
 		return channelStallLines(facts, root)
 	case EventTaskEnded:
@@ -137,7 +135,8 @@ func channelTaskEventLines(ev *AppendTeamEventInput, facts channelPayloadFacts) 
 		EventTaskIntegrated, EventTaskMarkedUnknown, EventTaskRecoveryDecided:
 		return nil
 	case EventTeamProposed, EventTeamStarted, EventTeamFinalReview, EventTeamAmended,
-		EventTeamNoted, EventTeamDeadlineReached, EventTeamDeadlineExtended, EventTeamDecided, EventTeamEnded:
+		EventTeamNoted, EventTeamDeadlineReached, EventTeamDeadlineExtended, EventTeamUserPosted,
+		EventTeamDecided, EventTeamEnded:
 		return nil
 	default:
 		return nil
@@ -160,6 +159,12 @@ func channelEndLines(ev *AppendTeamEventInput, root string) []channelLine {
 		return []channelLine{{kind: ChannelKindFailed, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID}}
 	}
 	return nil
+}
+
+// channelApprovalLines projects the §6.7 approval reference lines; the
+// content stays in the inbox (interaction §7, VR-05).
+func channelApprovalLines(ev *AppendTeamEventInput, root string) []channelLine {
+	return []channelLine{{kind: ChannelKindApproval, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID}}
 }
 
 // channelStallLines projects a stall into the task's thread and, when the

@@ -170,7 +170,8 @@ func isTaskEventType(ev TeamEventType) bool {
 		return true
 	case EventTeamProposed, EventTeamStarted, EventTeamFinalReview,
 		EventTeamAmended, EventTeamNoted, EventTeamDeadlineReached,
-		EventTeamDeadlineExtended, EventTeamDecided, EventTeamEnded:
+		EventTeamDeadlineExtended, EventTeamUserPosted, EventTeamDecided,
+		EventTeamEnded:
 		return false
 	default:
 		return false
