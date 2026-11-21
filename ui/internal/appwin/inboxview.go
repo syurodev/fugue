@@ -135,9 +135,10 @@ func (s *screens) toggleInboxShortcut(gtx *layout.Context) {
 			return
 		}
 		if k, isKey := ke.(key.Event); isKey && k.State == key.Press {
-			s.inboxOpen = !s.inboxOpen
 			if s.inboxOpen {
-				s.accountsOpen = false
+				s.showPane(paneTranscript)
+			} else {
+				s.showPane(paneInbox)
 			}
 		}
 	}
@@ -170,7 +171,7 @@ func (v *inboxView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
 		}),
-		rigidInboxButton(env, sc.fail, v.backBtn, kit.ButtonProps{Text: "Back to chat", Variant: kit.Ghost, Size: kit.SizeSM, Disabled: sc.open == ""}, func() {
+		rigidInboxButton(env, sc.fail, v.backBtn, kit.ButtonProps{Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM, Disabled: sc.open == ""}, func() {
 			sc.inboxOpen = false
 		}),
 	)

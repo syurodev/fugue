@@ -77,29 +77,7 @@ func (f *fakeAppAccountsClient) CancelLogin(_ context.Context, vendor string) er
 }
 
 func accountsShotSpecs() []shotSpec {
-	scenes := []string{shotAccounts, shotAccountsStates}
-	themes := []struct {
-		name  string
-		light bool
-	}{{"light", true}, {"dark", false}}
-	scales := []struct {
-		suffix string
-		scale  float32
-	}{{"ui090", 0.9}, {"ui100", 1.0}, {"ui125", 1.25}}
-	specs := make([]shotSpec, 0, len(scenes)*len(themes)*len(scales))
-	for _, s := range scenes {
-		for _, sc := range scales {
-			for _, th := range themes {
-				specs = append(specs, shotSpec{
-					name:    s + "-" + th.name + "-" + sc.suffix,
-					scene:   s,
-					light:   th.light,
-					uiScale: sc.scale,
-				})
-			}
-		}
-	}
-	return specs
+	return buildShotMatrix(shotAccounts, shotAccountsStates)
 }
 
 func buildAccountsShotScreens(t *testing.T, ac accounts.Client, scene string) (*screens, *[]string) {
