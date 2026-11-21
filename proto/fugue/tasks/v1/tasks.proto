@@ -1,0 +1,57 @@
+syntax = "proto3";
+
+package fugue.tasks.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// ChannelLine is one line of a team's channel (host-api §5.3, orchestration
+// §6.7). It carries the metadata of the projection and the content opened
+// from the sealed source payload; a locked vault never serves content, so
+// PageChannel refuses instead. attempt is the retry attempt of the task the
+// line's source event names.
+message ChannelLine {
+  int64 channel_seq = 1;
+  string kind = 2;
+  string sender_kind = 3;
+  string sender_task_id = 4;
+  string recipient_task_id = 5;
+  string thread_root_task_id = 6;
+  uint32 attempt = 7;
+  int64 source_seq = 8;
+  google.protobuf.Timestamp created_at = 9;
+  string content = 10;
+}
+
+message PageChannelRequest {
+  string team_id = 1;
+  string thread_task_id = 2;
+  int64 before = 3;
+  int64 since = 4;
+  uint32 limit = 5;
+}
+
+message PageChannelResponse {
+  repeated ChannelLine lines = 1;
+}
+
+message PostChannelMessageRequest {
+  string command_id = 1;
+  string team_id = 2;
+  string thread_task_id = 3;
+  string to_task_id = 4;
+  string text = 5;
+}
+
+message PostChannelMessageResponse {
+  int64 channel_seq = 1;
+}
+
+// TaskService serves the team channel of host-api v0.17 §5.3: local
+// principals only — vendor session principals never read, post or subscribe.
+// PageChannel without thread_task_id is the general channel; the durable
+// topic `team:<id>` streams one event per appended line, with a snapshot of
+// the newest 100.
+service TaskService {
+  rpc PageChannel(PageChannelRequest) returns (PageChannelResponse);
+  rpc PostChannelMessage(PostChannelMessageRequest) returns (PostChannelMessageResponse);
+}

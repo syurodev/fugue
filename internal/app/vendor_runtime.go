@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/syurodev/fugue/internal/config"
+	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/process"
@@ -213,6 +214,22 @@ func wireTeamServices(
 	hp.rt.teamTasks = newTeamTaskService(vs, vendorTaskSessions{svc: &VendorService{sessions: sessions, store: vs}}, hp.rt.workspaces.domain, locateTeamGit(ctx, deps), deps.DataDir, deps.IDs, v, deps.TeamResultGate)
 	hp.rt.teamTasks.SetInteractions(hp.rt.interactions)
 	hp.rt.interactions.SetTaskQuestionResolver(hp.rt.teamTasks)
+	// F11.10b: the team channel topics and the tasks service share the store
+	// and the sessions port with the team services. The topics register at
+	// startup (ended teams included — their channel stays readable) and on
+	// team creation; the store's post-commit observer publishes each line.
+	topics := newTeamChannelTopics(vs, hp.rt.hub, v)
+	topics.RegisterStoredTeams(ctx)
+	vs.SetTeamAppendedObserver(topics.Observe)
+	hp.rt.teamChannels = topics
+	hp.rt.teamProposals.SetTeamChannels(topics)
+	hp.rt.tasksService = NewTasksService(vs, vendorTaskSessions{svc: &VendorService{sessions: sessions, store: vs}}, v, deps.Clock, deps.IDs)
+	hp.rt.interactions.SetTeamApprovalObserver(func(ev interaction.LifecycleEvent) {
+		hp.rt.goTask("team.approval-line", func(lineCtx context.Context) error {
+			hp.rt.teamTasks.ObserveApproval(lineCtx, ev)
+			return nil
+		})
+	})
 	tools := append(slices.Clone(deps.TestFugueTools), teamProposeTool(hp.rt.teamProposals), teamAmendTool(hp.rt.teamProposals))
 	tools = append(tools, teamTaskTools(hp.rt.teamTasks)...)
 	hp.rt.sessionTools = newSessionToolService(tokens, tools, vs, hp.rt.interactions, hp.rt.tags, deps.IDs, sessions)

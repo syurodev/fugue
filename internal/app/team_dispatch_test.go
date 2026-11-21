@@ -113,6 +113,10 @@ func (f *fakeTaskSessions) SendAsync(ctx context.Context, sessionID string, inpu
 	return nil
 }
 
+func (f *fakeTaskSessions) Steer(ctx context.Context, sessionID string, input vendor.Input) error {
+	return f.Send(ctx, sessionID, input)
+}
+
 func (f *fakeTaskSessions) Close(_ context.Context, sessionID string, _ vendor.CloseReason) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()

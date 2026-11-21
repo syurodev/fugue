@@ -484,7 +484,7 @@ func (s *SessionToolService) recordCodexApprovalDecided(ctx context.Context, bin
 			Metadata: vendorstore.ItemMetadata{
 				RequestKind: req.Method,
 				Decision:    choice.decisionLabel,
-				Decider:     "user",
+				Decider:     decidedByUser,
 			},
 		},
 	}); recErr != nil {

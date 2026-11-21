@@ -36,6 +36,9 @@ type taskSessions interface {
 	StartTaskSession(ctx context.Context, req *taskSessionRequest) error
 	Send(ctx context.Context, sessionID string, input vendor.Input) error
 	SendAsync(ctx context.Context, sessionID string, input vendor.Input, onDone func(error)) error
+	// Steer delivers a prompt into the session's running turn (§6.2: the
+	// user's own text reaches the agent immediately, busy or not).
+	Steer(ctx context.Context, sessionID string, input vendor.Input) error
 	// ResumeTaskSession attaches a fresh process to a detached session
 	// through its stored handle; the wake resumes before it delivers (Q-123).
 	ResumeTaskSession(ctx context.Context, sessionID, cwd string) error
@@ -60,6 +63,10 @@ func (v vendorTaskSessions) StartTaskSession(ctx context.Context, req *taskSessi
 
 func (v vendorTaskSessions) Send(ctx context.Context, sessionID string, input vendor.Input) error {
 	return v.svc.sessions.Send(ctx, sessionID, input)
+}
+
+func (v vendorTaskSessions) Steer(ctx context.Context, sessionID string, input vendor.Input) error {
+	return v.svc.sessions.Steer(ctx, sessionID, input)
 }
 
 func (v vendorTaskSessions) SendAsync(_ context.Context, sessionID string, input vendor.Input, onDone func(error)) error {

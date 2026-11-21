@@ -25,6 +25,7 @@ const (
 	testSessionID      = "sess-1"
 	testEnvDev         = "dev"
 	testAllow          = "allow"
+	testRiskWrite      = "write"
 )
 
 func newTestInteractionService(t *testing.T, clk clock.Clock) (*InteractionService, *EventHub) {
@@ -59,7 +60,7 @@ func ensureTestConfirm(t *testing.T, svc *InteractionService, opID, summary stri
 	ticket, err := svc.Ensure(&interaction.Spec{
 		OperationID: opID,
 		Kind:        interaction.KindConfirm,
-		Risk:        "write",
+		Risk:        testRiskWrite,
 		Summary:     summary,
 		Offers:      []interaction.Outcome{interaction.OutcomeAllowedOnce, interaction.OutcomeAllowedSession},
 		Binding: interaction.Binding{
@@ -110,7 +111,7 @@ func testSpec(opID, summary string) *interaction.Spec {
 	return &interaction.Spec{
 		OperationID: opID,
 		Kind:        interaction.KindConfirm,
-		Risk:        "write",
+		Risk:        testRiskWrite,
 		Summary:     summary,
 		Offers:      []interaction.Outcome{interaction.OutcomeAllowedOnce},
 		Binding: interaction.Binding{

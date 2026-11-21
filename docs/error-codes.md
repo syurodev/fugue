@@ -58,6 +58,10 @@ Changing this file needs a review of what clients can rely on; hiding a code nee
 | `appstate.too_large` | The layout or preferences document exceeds its size limit. |
 | `appstate.too_many_windows` | At most 16 windows can be saved. |
 | `tasks.send_rate_limited` | The sibling send limit is reached (6 per agent and 30 per team per 10 minutes). |
+| `tasks.team_not_found` | The team does not exist. |
+| `tasks.task_not_found` | The team task does not exist in this team. |
+| `tasks.team_ended` | The team has ended; its channel is read-only. |
+| `tasks.post_too_large` | The channel post exceeds the 4 KiB limit. |
 
 ## Hidden on purpose
 

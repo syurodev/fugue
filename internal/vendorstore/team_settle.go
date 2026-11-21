@@ -54,7 +54,7 @@ func (s *Store) SettleTeam(ctx context.Context, teamID string, in *TeamSettleInp
 	if err := cancelTeamTimersTx(ctx, tx, teamID, now); err != nil {
 		return 0, err
 	}
-	if err := s.commitTeamTx(snap, true, tx.Commit); err != nil {
+	if err := s.commitTeamTx(ctx, teamID, lastSeq, snap, true, tx.Commit); err != nil {
 		return 0, err
 	}
 	return lastSeq, nil
