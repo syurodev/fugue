@@ -10,7 +10,6 @@ import (
 	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
-	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/storage"
 	"github.com/syurodev/fugue/internal/vault"
@@ -65,7 +64,7 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 	if hp.rt.interactions != nil {
 		owner := hp.rt.interactions.owner
 		unregisterVaultGuard = v.RegisterLockGuard(func(snap vault.Snapshot) {
-			hp.onVaultLockState(base, owner, snap)
+			hp.onVaultLockState(owner, snap)
 		})
 	}
 	hp.rt.transcripts = transcripts
@@ -114,7 +113,7 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 		{Name: VendorClaude, DirectQuota: true}, {Name: VendorCodex, DirectQuota: true}, {Name: VendorAGY},
 	})
 	tokens := newSessionTokens(deps.Random)
-	endSession := newSessionEndedHook(base, hp, tokens)
+	endSession := newSessionEndedHook(hp, tokens)
 	transcripts.onPurge = endSession
 	hp.vendorAdapter = adapter
 	sessions, err := composeVendorSessionManager(ctx, base, hp, vs, transcripts, v, adapter, adapters, accounts, deps, endSession)
@@ -137,7 +136,7 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	hp.wireTeamDispatch(ctx, base, vs, sessions, accounts, v, deps)
 	hp.rt.accountsService, err = newAccountsService(accounts, hp.rt.vendors, hp.rt.hub, accountsServiceDeps{
 		Clock: deps.Clock, IDs: deps.IDs, GoTask: hp.rt.goTask,
-		OnQuotaReopen: func() { hp.dispatchAllAsync(base) },
+		OnQuotaReopen: func() { hp.dispatchAllAsync() },
 	})
 	if err != nil {
 		return nil, err
@@ -148,7 +147,7 @@ func composeVendorSessions(ctx, base context.Context, hp *HostProcess, vs *vendo
 	return sessions, nil
 }
 
-func newSessionEndedHook(base context.Context, hp *HostProcess, tokens *sessionTokens) func(string) {
+func newSessionEndedHook(hp *HostProcess, tokens *sessionTokens) func(string) {
 	// A session's token, tombstones and relayed interactions die with its actor, with a purge and with the host.
 	return func(sessionID string) {
 		tokens.revoke(sessionID)
@@ -158,7 +157,7 @@ func newSessionEndedHook(base context.Context, hp *HostProcess, tokens *sessionT
 		if hp.rt.interactions != nil && hp.rt.interactions.owner != nil {
 			hp.rt.interactions.owner.ResetSession(sessionID)
 		}
-		hp.cancelTeamProposalOnEnd(base, sessionID)
+		hp.cancelTeamProposalOnEnd(sessionID)
 	}
 }
 
@@ -374,12 +373,12 @@ func (rt *HostRuntime) TranscriptService() (*Transcripts, error) {
 // the single SQLite connection serializes writers; the session's actor holds
 // its final close writes until the cancel settles (SessionEndSettled),
 // because the store refuses the item flip once the session row is closed.
-func (hp *HostProcess) cancelTeamProposalOnEnd(base context.Context, sessionID string) {
+func (hp *HostProcess) cancelTeamProposalOnEnd(sessionID string) {
 	if hp.rt.teamProposals == nil {
 		return
 	}
 	settled := hp.rt.teamProposals.BeginSessionEnd(sessionID)
-	supervise.Go(base, "team-cancel-"+sessionID, func(taskCtx context.Context) error {
+	hp.rt.goTask("team-cancel-"+sessionID, func(taskCtx context.Context) error {
 		defer settled()
 		if cancelErr := hp.rt.teamProposals.CancelForSession(taskCtx, sessionID); cancelErr != nil && taskCtx.Err() == nil {
 			slog.WarnContext(taskCtx, "cancelling the pending team proposal failed",

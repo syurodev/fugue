@@ -7,9 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
 )
+
+// undoWorktreeTimeout bounds best-effort cleanup after a failed or canceled
+// worktree add so a wedged git invocation cannot block shutdown indefinitely.
+const undoWorktreeTimeout = 5 * time.Second
 
 // CreateTeamBranch creates the team branch fugue/team/<team-id> at base in the
 // repository behind repoDir (orchestration §9). The branch is created without
@@ -95,18 +100,23 @@ func (m *Manager) addTaskWorktree(ctx context.Context, repoDir, wtPath, branch, 
 
 // undoFailedWorktreeAdd removes the worktree and branch a failed worktree add
 // may have left behind. The branch was verified absent under the repo lock
-// before the add, so deleting it never touches a pre-existing one. Every step
-// is best effort: the caller reports the original add failure alongside.
+// before the add, so deleting it never touches a pre-existing one. Cleanup runs
+// with WithoutCancel and a short timeout so canceling the add mid-flight still
+// removes any half-made worktree or branch. Every step is best effort: the
+// caller reports the original add failure alongside.
 func (m *Manager) undoFailedWorktreeAdd(ctx context.Context, repoDir, wtPath, branch string) error {
+	cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), undoWorktreeTimeout)
+	defer cancel()
+
 	var undoErrs []error
-	if _, removeErr := m.run(ctx, repoDir, "worktree", "remove", "--force", wtPath); removeErr != nil {
+	if _, removeErr := m.run(cleanupCtx, repoDir, "worktree", "remove", "--force", wtPath); removeErr != nil {
 		// The worktree directory may be missing or half-built; the admin
 		// entry prune is what clears it either way.
-		if _, pruneErr := m.run(ctx, repoDir, "worktree", "prune"); pruneErr != nil {
+		if _, pruneErr := m.run(cleanupCtx, repoDir, "worktree", "prune"); pruneErr != nil {
 			undoErrs = append(undoErrs, pruneErr)
 		}
 	}
-	if deleteErr := m.deleteBranch(ctx, repoDir, branch); deleteErr != nil {
+	if deleteErr := m.deleteBranch(cleanupCtx, repoDir, branch); deleteErr != nil {
 		undoErrs = append(undoErrs, deleteErr)
 	}
 	return errors.Join(undoErrs...)
