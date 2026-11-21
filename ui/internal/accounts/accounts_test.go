@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -93,38 +94,56 @@ func TestAccountsModelAppliesQuotaAndLoginTopics(t *testing.T) {
 	if m.HasSnapshot() || len(m.Accounts()) != 0 {
 		t.Fatalf("fresh model should be empty without guessed states: %+v", m.Accounts())
 	}
+	assertInitialAccountsSnapshot(t, m)
+	assertQuotaAndLoginEvents(t, m)
+	assertIncarnationResetAndReconnect(t, m)
+	assertWorkerExecutesOffThread(t)
+}
 
+func assertInitialAccountsSnapshot(t *testing.T, m *Model) {
+	t.Helper()
 	snapAccounts := []client.Account{
 		{
 			Vendor: client.VendorClaude, State: client.AccountStateOK, Login: client.AccountLoginLoggedIn, QuotaKnown: true,
-			Windows: []client.QuotaWindow{{Name: "five_hour", Utilization: 0.35, ResetsAt: testResetAt, Status: client.QuotaStatusAllowed}},
+			QuotaGate: 0.78,
+			Windows:   []client.QuotaWindow{{Name: "five_hour", Utilization: 0.35, ResetsAt: testResetAt, Status: client.QuotaStatusAllowed}},
 		},
-		{Vendor: client.VendorCodex, State: client.AccountStateNeedsLogin, Login: client.AccountLoginLoggedOut, QuotaKnown: true},
-		{Vendor: client.VendorAGY, State: "weird_future_state", Login: client.AccountLoginUnknown, QuotaKnown: false},
+		{Vendor: client.VendorCodex, State: client.AccountStateNeedsLogin, Login: client.AccountLoginLoggedOut, QuotaKnown: true, QuotaGate: 0},
+		{Vendor: client.VendorAGY, State: "weird_future_state", Login: client.AccountLoginUnknown, QuotaKnown: false, QuotaGate: -0.5},
 	}
 	m.ApplyListAccounts(testInc1, snapAccounts)
 	if !m.HasSnapshot() || m.Incarnation() != testInc1 {
 		t.Fatalf("after ApplyListAccounts: hasSnapshot=%v inc=%q", m.HasSnapshot(), m.Incarnation())
 	}
-	if agyAcc, ok := m.Account(client.VendorAGY); !ok || agyAcc.State != AccountStateUnknown || agyAcc.QuotaKnown {
-		t.Fatalf("unknown state must stay unknown without guessing: %+v", agyAcc)
+	if claudeAcc, ok := m.Account(client.VendorClaude); !ok || claudeAcc.QuotaGate != 0.78 {
+		t.Fatalf("claude quota_gate = %+v, want 0.78", claudeAcc)
 	}
-
-	assertQuotaAndLoginEvents(t, m)
-	assertIncarnationResetAndReconnect(t, m)
-	assertWorkerExecutesOffThread(t)
+	if agyAcc, ok := m.Account(client.VendorAGY); !ok || agyAcc.State != AccountStateUnknown || agyAcc.QuotaKnown || agyAcc.QuotaGate != 0 {
+		t.Fatalf("unknown state must stay unknown without guessing and clamp negative gate: %+v", agyAcc)
+	}
+	if sanitizeQuotaGate(math.NaN()) != 0 || sanitizeQuotaGate(1.5) != 1 {
+		t.Fatal("sanitizeQuotaGate did not bound NaN and >1")
+	}
 }
 
 func assertQuotaAndLoginEvents(t *testing.T, m *Model) {
 	t.Helper()
 	pausedCodex := client.Account{
 		Vendor: client.VendorCodex, State: client.AccountStatePaused, PausedUntil: testResetAt,
-		Login: client.AccountLoginLoggedIn, QuotaKnown: true,
+		Login: client.AccountLoginLoggedIn, QuotaKnown: true, QuotaGate: 0.80,
 		Windows: []client.QuotaWindow{{Name: "300m", Utilization: 1.0, ResetsAt: testResetAt, Status: client.QuotaStatusRejected}},
 	}
 	if err := m.ApplyQuotaEvent(client.EventQuotaAccountChanged, mustJSON(t, pausedCodex)); err != nil {
 		t.Fatal(err)
 	}
+	if got, ok := m.Account(client.VendorCodex); !ok || got.QuotaGate != 0.80 {
+		t.Fatalf("codex quota_gate after event = %+v, want 0.80", got)
+	}
+	assertLoginEventSequence(t, m)
+}
+
+func assertLoginEventSequence(t *testing.T, m *Model) {
+	t.Helper()
 	if err := m.ApplyLoginEvent(client.EventLoginProgress, mustJSON(t, client.LoginProgress{
 		Vendor: client.VendorCodex, LoginID: "l-1", State: client.LoginStateWaiting, Prompt: testPrompt,
 	})); err != nil {

@@ -21,7 +21,7 @@ const (
 	numTagStatuses = 4
 	numTagHues     = 8
 	numTagEnvs     = 4
-	numProgTones   = 5
+	numProgTones   = 7
 	numSplitStates = 4
 )
 
@@ -165,47 +165,80 @@ func (p *pages) drawTagSpecimen(gtx *layout.Context, gi, i int, pos, size image.
 	p.cells[cell{compTag, gi, i, props.Text}] = true
 }
 
-func progressSpecs() []struct {
-	name  string
-	tone  kit.ProgressTone
-	value float32
-} {
-	return []struct {
-		name  string
-		tone  kit.ProgressTone
-		value float32
-	}{
-		{"default (Action)", kit.ProgressDefault, 0.35},
-		{"info", kit.ProgressInfo, 0.55},
-		{"success", kit.ProgressSuccess, 1.00},
-		{"warning", kit.ProgressWarning, 0.70},
-		{"danger", kit.ProgressDanger, 0.25},
+type progressGallerySpec struct {
+	name      string
+	tone      kit.ProgressTone
+	value     float32
+	secondary float32
+	size      kit.LineSize
+}
+
+func progressSpecs() []progressGallerySpec {
+	return []progressGallerySpec{
+		{"one-tier · level < 70% (success)", kit.ProgressDefault, 0.35, 0, kit.LineMD},
+		{"one-tier · info", kit.ProgressInfo, 0.55, 0, kit.LineMD},
+		{"two-tier · 42% / gate 85% (success)", kit.ProgressDefault, 0.42, 0.85, kit.LineMD},
+		{"two-tier · 78% / gate 85% (warning)", kit.ProgressDefault, 0.78, 0.85, kit.LineMD},
+		{"over gate · 88% / gate 85% (danger)", kit.ProgressDefault, 0.88, 0.85, kit.LineMD},
+		{"raised floor · 42% raised to warning", kit.ProgressWarning, 0.42, 0.85, kit.LineMD},
+		{"compact sm (10 dp) · 60% / gate 85%", kit.ProgressDefault, 0.60, 0.85, kit.LineSM},
 	}
 }
 
 func (p *pages) layoutProgressAndDivider(gtx *layout.Context) {
 	p.base = p.origin
 	y := p.paragraph(gtx, gtx.Constraints.Max.X,
-		"Progress (§6.5) and Divider (§6.6): determinate Smooth bars for real totals, and hairline rules in Border.") +
+		"LineRow (§3.9), Progress (§6.5) and Divider (§6.6): rounded vertical lines anchored left with level tones, optional second tier, and hairline rules.") +
 		gtx.Dp(theme.SpaceXL)
 
-	c := p.env.Th.Chrome()
 	barW := min(gtx.Constraints.Max.X, gtx.Dp(unit.Dp(320)))
 	gap := gtx.Dp(theme.SpaceMD)
-	y += p.caption(gtx, image.Pt(0, y), "Progress — determinate", c.FgMuted).Dy() + gap
+	y = p.layoutLineRowAndProgress(gtx, y, barW, gap)
+	p.layoutDividerSamples(gtx, y+gtx.Dp(theme.SpaceSM), barW, gap)
+}
 
+func (p *pages) layoutLineRowAndProgress(gtx *layout.Context, y, barW, gap int) int {
+	c := p.env.Th.Chrome()
+	y += p.caption(gtx, image.Pt(0, y), "LineRow — custom colors (no track)", c.FgMuted).Dy() + gtx.Dp(theme.SpaceXS)
+	at(gtx, image.Pt(0, y), func(g *layout.Context) {
+		cg := *g
+		cg.Constraints = layout.Exact(image.Pt(barW, gtx.Dp(theme.LineHeight)))
+		dims := kit.LineRow(p.env, &cg, kit.LineRowProps{
+			Size:     kit.LineMD,
+			Fallback: c.LineRest,
+			ColorAt: func(i, _ int) color.NRGBA {
+				if i%2 == 0 {
+					return p.env.Th.Status().Info
+				}
+				return c.LineRest
+			},
+		})
+		y += dims.Size.Y + gap
+	})
+	p.cells[cell{compLineRow, 0, 0, stRest}] = true
+
+	y += p.caption(gtx, image.Pt(0, y), "Progress — one-tier & two-tier line rows", c.FgMuted).Dy() + gap
 	for i, ps := range progressSpecs() {
-		y += p.caption(gtx, image.Pt(0, y), fmt.Sprintf("%s (%.0f%%)", ps.name, ps.value*100), c.FgSubtle).Dy() + gtx.Dp(theme.SpaceXS)
+		y += p.caption(gtx, image.Pt(0, y), ps.name, c.FgSubtle).Dy() + gtx.Dp(theme.SpaceXS)
 		at(gtx, image.Pt(0, y), func(g *layout.Context) {
 			cg := *g
-			cg.Constraints = layout.Exact(image.Pt(barW, gtx.Dp(theme.SpaceSM)))
-			dims := p.f1012.progDet[i].Layout(p.env, &cg, kit.ProgressProps{Value: ps.value, Tone: ps.tone})
+			h := theme.LineHeight
+			if ps.size == kit.LineSM {
+				h = theme.LineHeightSM
+			}
+			cg.Constraints = layout.Exact(image.Pt(barW, gtx.Dp(h)))
+			dims := p.f1012.progDet[i].Layout(p.env, &cg, kit.ProgressProps{
+				Value: ps.value, Secondary: ps.secondary, Tone: ps.tone, Size: ps.size,
+			})
 			y += dims.Size.Y + gap
 		})
 		p.cells[cell{compProgress, i, 0, "determinate"}] = true
 	}
+	return y
+}
 
-	y += gtx.Dp(theme.SpaceSM)
+func (p *pages) layoutDividerSamples(gtx *layout.Context, y, barW, gap int) {
+	c := p.env.Th.Chrome()
 	y += p.caption(gtx, image.Pt(0, y), "Divider — Horizontal and Vertical (Border)", c.FgMuted).Dy() + gap
 	at(gtx, image.Pt(0, y), func(g *layout.Context) {
 		cg := *g

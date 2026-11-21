@@ -44,16 +44,18 @@ func (v *accountsView) layoutLoginSection(env *kit.Env, sc *screens, w *accountC
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx, headerChildren...)
 		}),
 	}
+	secTok, secCol := accountLoginSectionLabelStyle(env.Th)
+	cliTok, cliCol := accountLoginCLITextStyle(env.Th)
 	if login.State == client.LoginStateNeedsTerminal {
 		children = append(children, spacerH(theme.SpaceXS),
-			rigidLabel(env, theme.TypeCode(), c.Fg, "Terminal command: "+terminalLoginCommand(vendor)))
+			rigidLabel(env, cliTok, cliCol, "Terminal command: "+terminalLoginCommand(vendor)))
 	}
 	if login.Prompt != "" {
 		children = append(children,
 			spacerH(theme.SpaceSM),
-			rigidLabel(env, theme.TypeCaption(), c.FgMuted, "CLI output (untrusted plain text):"),
+			rigidLabel(env, secTok, secCol, "CLI output (untrusted plain text):"),
 			spacerH(theme.SpaceXXS),
-			rigidParagraph(env, theme.TypeCode(), c.Fg, login.Prompt),
+			rigidParagraph(env, cliTok, cliCol, login.Prompt),
 		)
 		children = append(children, v.layoutHTTPSLinks(env, sc, w, login.Prompt)...)
 	}
@@ -112,10 +114,11 @@ func (v *accountsView) layoutHTTPSLinks(env *kit.Env, sc *screens, w *accountCar
 	if len(urls) == 0 {
 		return nil
 	}
-	c := env.Th.Chrome()
+	secTok, secCol := accountLoginSectionLabelStyle(env.Th)
+	cliTok, cliCol := accountLoginCLITextStyle(env.Th)
 	children := []layout.FlexChild{
 		spacerH(theme.SpaceSM),
-		rigidLabel(env, theme.TypeCaption(), c.FgMuted, "HTTPS URLs (click to open):"),
+		rigidLabel(env, secTok, secCol, "HTTPS URLs (click to open):"),
 	}
 	for _, raw := range urls {
 		btn := ensureLinkButton(w.linkButtons, raw)
@@ -125,7 +128,7 @@ func (v *accountsView) layoutHTTPSLinks(env *kit.Env, sc *screens, w *accountCar
 				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
 					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 						local := gtx
-						return kit.Paragraph(env, &local, theme.TypeCode(), c.Fg, u)
+						return kit.Paragraph(env, &local, cliTok, cliCol, u)
 					}),
 					spacerW(theme.SpaceSM),
 					rigidInboxButton(env, sc.fail, btn, kit.ButtonProps{

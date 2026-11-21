@@ -50,6 +50,8 @@ const (
 	// prompt lines arrive in the first moments of a login, so anything past
 	// the cap is flood, not prompt.
 	LoginPromptLimit = 4 << 10
+	// QuotaGateThreshold is the host's team quota gate fraction.
+	QuotaGateThreshold = vendor.QuotaGateThreshold
 )
 
 // QuotaWindowView is one quota window as the Host API shows it.
@@ -67,6 +69,7 @@ type AccountView struct {
 	PausedUntil string            `json:"paused_until,omitempty"`
 	Login       string            `json:"login"`
 	QuotaKnown  bool              `json:"quota_known"`
+	QuotaGate   float64           `json:"quota_gate,omitempty"`
 	Windows     []QuotaWindowView `json:"windows"`
 	UpdatedAt   string            `json:"updated_at,omitempty"`
 }
@@ -339,7 +342,7 @@ func accountViews(accounts []vendor.Account) []AccountView {
 func accountView(a *vendor.Account) AccountView {
 	view := AccountView{
 		Vendor: a.Vendor, State: string(a.State), Login: string(a.Login), QuotaKnown: a.QuotaKnown,
-		Windows: make([]QuotaWindowView, 0, len(a.Windows)),
+		QuotaGate: vendor.QuotaGateThreshold, Windows: make([]QuotaWindowView, 0, len(a.Windows)),
 	}
 	if a.State == vendor.AccountPaused {
 		view.PausedUntil = a.PausedUntil.UTC().Format(time.RFC3339)
