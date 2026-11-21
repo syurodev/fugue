@@ -62,7 +62,6 @@ type toolRowSpec struct {
 }
 
 func openFile(cb Callbacks, ref mdview.FileRef) {
-	// TODO(F10.4e): wire OnOpenFile to the right-pane read-only file/diff viewer.
 	if cb.OnOpenFile != nil {
 		cb.OnOpenFile(ref)
 		return

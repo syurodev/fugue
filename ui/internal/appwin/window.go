@@ -109,6 +109,7 @@ func Run(ctx context.Context, opts Options) error {
 	sc.inboxWorker = workers.inboxW
 	sc.accountsWorker = workers.accountsW
 	sc.settingsWorker = workers.settingsW
+	sc.viewerWorker = workers.viewerW
 	return eventLoop(w, env, sc, q, &light, &dark)
 }
 
@@ -120,6 +121,7 @@ type appWorkers struct {
 	inboxW    *inbox.Worker
 	accountsW *accounts.Worker
 	settingsW *settings.Worker
+	viewerW   *fileViewWorker
 }
 
 func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) appWorkers {
@@ -157,10 +159,18 @@ func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) ap
 		return nil
 	}, w.Invalidate)
 	settingsW.Start(ctx)
-	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW, settingsW: settingsW}
+	viewerW := newFileViewWorker(func() fileViewClient {
+		if c := m.Client(); c != nil {
+			return c
+		}
+		return nil
+	})
+	viewerW.Start(ctx)
+	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW, settingsW: settingsW, viewerW: viewerW}
 }
 
 func (a appWorkers) stop() {
+	a.viewerW.Stop()
 	a.settingsW.Stop()
 	a.accountsW.Stop()
 	a.inboxW.Stop()
@@ -292,6 +302,7 @@ drainPosts:
 	if sc.settingsWorker != nil {
 		sc.applySettingsResults(drainSettingsResults(sc.settingsWorker))
 	}
+	sc.applyFileViewResults(drainFileViewResults(sc.viewerWorker))
 	sc.applyLivePreferences(env, light, dark)
 	toggleTheme(gtx, env, sc, light, dark)
 	drawWindow(gtx, env, sc)
@@ -379,6 +390,20 @@ drain:
 
 func drainSettingsResults(w *settings.Worker) []settings.Result {
 	out := make([]settings.Result, 0, 4)
+drain:
+	for {
+		select {
+		case res := <-w.Results():
+			out = append(out, res)
+		default:
+			break drain
+		}
+	}
+	return out
+}
+
+func drainFileViewResults(w *fileViewWorker) []fileResult {
+	out := make([]fileResult, 0, 4)
 drain:
 	for {
 		select {

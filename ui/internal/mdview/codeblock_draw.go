@@ -15,11 +15,11 @@ import (
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
-	"gioui.org/unit"
 	"golang.org/x/image/math/fixed"
 
 	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/kit/icondata"
 	"github.com/syurodev/fugue/ui/internal/markdown"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
@@ -85,40 +85,72 @@ func diffLineSpans(dl *DiffLine) []markdown.Span {
 	return []markdown.Span{{Text: dl.Text}}
 }
 
-func resolvedHeader(p *CodeBlockProps) (icon kit.IconName, title, fmtLabel string) {
+// codeBlockHeaderIcon is the resolved header icon: either a Lucide icon, or
+// a Symbols glyph (F10.23) resolved from the file path the language came
+// from.
+type codeBlockHeaderIcon struct {
+	icon       kit.IconName
+	symbolName string
+	symbol     icondata.FileIcon
+	title      string
+	fmtLabel   string
+}
+
+func resolvedHeader(p *CodeBlockProps) codeBlockHeaderIcon {
 	switch {
 	case p.Command != "":
-		icon = kit.IconTerminal
+		icon := kit.IconTerminal
 		if p.Icon != "" {
 			icon = p.Icon
 		}
-		return icon, "shell", ""
+		return codeBlockHeaderIcon{icon: icon, title: "shell"}
 	case p.IsDiff:
-		title = p.Title
+		title := p.Title
 		if title == "" {
 			title = "diff"
 		}
-		icon = p.Icon
-		if icon == "" {
-			icon = FileIcon(p.Title)
-			if p.Title == "" {
-				icon = kit.IconPencil
-			}
+		if p.Icon != "" {
+			return codeBlockHeaderIcon{icon: p.Icon, title: title}
 		}
-		return icon, title, ""
+		if p.Title != "" {
+			name, symbol := kit.FileIconData(p.Title)
+			return codeBlockHeaderIcon{symbolName: name, symbol: symbol, title: title}
+		}
+		return codeBlockHeaderIcon{icon: kit.IconPencil, title: title}
 	case p.IsOutputCard:
-		icon = p.Icon
+		icon := p.Icon
 		if icon == "" {
 			icon = kit.IconFileCode
 		}
-		return icon, "output", p.Format
+		return codeBlockHeaderIcon{icon: icon, title: "output", fmtLabel: p.Format}
 	default:
-		title = p.Format
+		title := p.Format
 		if title == "" {
 			title = "code"
 		}
-		return kit.IconFileCode, title, ""
+		// A titled block's language comes from a file path: the header
+		// carries that file's Symbols icon (F10.4e follow-up).
+		if p.Title != "" {
+			name, symbol := kit.FileIconData(p.Title)
+			return codeBlockHeaderIcon{symbolName: name, symbol: symbol, title: title}
+		}
+		return codeBlockHeaderIcon{icon: kit.IconFileCode, title: title}
 	}
+}
+
+// drawHeaderIcon paints the header glyph: a Symbols icon tinted by its
+// theme file color when the language came from a file path, the Lucide
+// icon otherwise.
+func drawHeaderIcon(env *kit.Env, gtx *layout.Context, head *codeBlockHeaderIcon, fallback color.NRGBA) layout.Dimensions {
+	if head.symbolName != "" {
+		col := env.Th.FileColor(theme.FileColorName(head.symbol.Color))
+		d, err := env.DrawSymbol(gtx, head.symbolName, &head.symbol, theme.IconSM, col)
+		logMDViewErr(err)
+		return d
+	}
+	d, err := env.Icon(gtx, head.icon, theme.IconSM, fallback)
+	logMDViewErr(err)
+	return d
 }
 
 func (v *view) drawBlockHeader(
@@ -131,7 +163,8 @@ func (v *view) drawBlockHeader(
 	res *CodeBlockResult,
 ) int {
 	c := v.th.Chrome()
-	icon, title, fmtLabel := resolvedHeader(p)
+	head := resolvedHeader(p)
+	title, fmtLabel := head.title, head.fmtLabel
 	rowH := gtx.Dp(theme.ControlSM) + 2*gtx.Dp(theme.SpaceXS)
 	off := op.Offset(image.Pt(pad, gtx.Dp(theme.SpaceXS))).Push(gtx.Ops)
 	inner := *gtx
@@ -139,9 +172,7 @@ func (v *view) drawBlockHeader(
 	layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(inner,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
-			d, err := env.Icon(&local, icon, theme.IconSM, c.IconMuted)
-			logMDViewErr(err)
-			return d
+			return drawHeaderIcon(env, &local, &head, c.IconMuted)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Dimensions{Size: image.Pt(gtx.Dp(theme.SpaceSM), 0)}
@@ -257,80 +288,6 @@ func (v *view) drawActionButtons(env *kit.Env, gtx *layout.Context, st *CodeBloc
 	)
 }
 
-// ConcentricRadius returns the corner radius concentric with an outer rounded
-// frame of radius outerDp inset by pad pixels, clamped to at least RadiusSM.
-// Code blocks and the read-only file viewer share this helper.
-func ConcentricRadius(gtx *layout.Context, outerDp unit.Dp, pad int) int {
-	return max(gtx.Dp(outerDp)-pad, gtx.Dp(theme.RadiusSM))
-}
-
-type diffHunk struct {
-	kind  DiffKind
-	start int
-	end   int
-	rect  image.Rectangle
-}
-
-func collectDiffHunks(
-	diffLines []DiffLine, flows []*flow, visCount, pad, bodyTop, bodyW, scrollY, lineH, gap int,
-) []diffHunk {
-	n := min(visCount, len(diffLines), len(flows))
-	var hunks []diffHunk
-	y := bodyTop - scrollY
-	for i := range n {
-		rowH := max(flows[i].height, lineH)
-		kind := diffLines[i].Kind
-		if kind == DiffAdd || kind == DiffDel {
-			if m := len(hunks); m > 0 && hunks[m-1].kind == kind && hunks[m-1].end == i {
-				hunks[m-1].end = i + 1
-				hunks[m-1].rect.Max.Y = y + rowH
-			} else {
-				hunks = append(hunks, diffHunk{
-					kind:  kind,
-					start: i,
-					end:   i + 1,
-					rect:  image.Rect(pad, y, pad+bodyW, y+rowH),
-				})
-			}
-		}
-		y += rowH
-	}
-	applyHunkBoundaryGaps(hunks, gap)
-	return hunks
-}
-
-func applyHunkBoundaryGaps(hunks []diffHunk, gap int) {
-	if gap <= 0 {
-		return
-	}
-	topShrink := gap / 2
-	botShrink := gap - topShrink
-	for i := 0; i+1 < len(hunks); i++ {
-		if hunks[i].end == hunks[i+1].start {
-			hunks[i].rect.Max.Y -= topShrink
-			hunks[i+1].rect.Min.Y += botShrink
-		}
-	}
-}
-
-func (v *view) paintDiffHunks(gtx *layout.Context, hunks []diffHunk, bodyTop, viewH, radius int) {
-	bodyBot := bodyTop + viewH
-	for i := range hunks {
-		r := hunks[i].rect
-		if r.Max.Y <= r.Min.Y || r.Max.Y <= bodyTop || r.Min.Y >= bodyBot {
-			continue
-		}
-		paint.FillShape(gtx.Ops, diffHunkColor(v.th, hunks[i].kind), clip.UniformRRect(r, radius).Op(gtx.Ops))
-	}
-}
-
-func diffHunkColor(th *theme.Theme, kind DiffKind) color.NRGBA {
-	if kind == DiffAdd {
-		return th.StatusTone(theme.StatusSuccess).Fill
-	}
-	return th.StatusTone(theme.StatusDanger).Fill
-}
-
 func (v *view) drawCodeBody(
 	gtx *layout.Context,
 	st *CodeBlockState,
@@ -345,6 +302,9 @@ func (v *view) drawCodeBody(
 	if p.IsDiff && len(diffLines) > 0 {
 		hunks := collectDiffHunks(diffLines, flows, visCount, pad, bodyTop, bodyW, st.ScrollY, lineH, gtx.Dp(theme.SpaceXXS))
 		v.paintDiffHunks(gtx, hunks, bodyTop, viewH, ConcentricRadius(gtx, theme.RadiusLG, pad))
+	}
+	if hl := collectHighlightRect(p, flows, visCount, pad, bodyTop, st.ScrollY, lineH); hl != nil {
+		paint.FillShape(gtx.Ops, v.th.Chrome().SelectedWash, clip.UniformRRect(*hl, max(ConcentricRadius(gtx, theme.RadiusLG, pad)/2, 2)).Op(gtx.Ops))
 	}
 	y := bodyTop - st.ScrollY
 	codeX := pad + gutterW + markerW
@@ -368,6 +328,49 @@ func (v *view) drawCodeBody(
 	clipped.Pop()
 }
 
+// collectHighlightRect builds the tinted rectangle behind the requested row
+// range (F10.4e), or nil when no range is set or it falls outside the
+// rendered rows.
+func collectHighlightRect(
+	p *CodeBlockProps, flows []*flow, visCount, pad, bodyTop, scrollY, lineH int,
+) *image.Rectangle {
+	first, last := p.HighlightLine, p.HighlightEndLine
+	if first <= 0 {
+		return nil
+	}
+	if last < first {
+		last = first
+	}
+	if first > visCount {
+		return nil
+	}
+	rect := image.Rectangle{}
+	y := bodyTop - scrollY
+	for i := range visCount {
+		rowH := max(flows[i].height, lineH)
+		if i+1 == first {
+			rect.Min.X, rect.Min.Y = pad, y
+		}
+		if i+1 == min(last, visCount) {
+			rect.Max.X, rect.Max.Y = pad+gutterlessWidth(flows, pad), y+rowH
+			return &rect
+		}
+		y += rowH
+	}
+	return nil
+}
+
+// gutterlessWidth names the full body width the highlight spans: the widest
+// rendered row plus the pad, so a short highlighted line still reads as one
+// full-width band.
+func gutterlessWidth(flows []*flow, pad int) int {
+	w := 0
+	for _, f := range flows {
+		w = max(w, f.width)
+	}
+	return max(w, 1) + pad
+}
+
 func (v *view) drawCodeRowChrome(
 	gtx *layout.Context, p *CodeBlockProps, diffLines []DiffLine, idx, pad, y, gutterW, markerW, rowH int,
 ) {
@@ -376,7 +379,11 @@ func (v *view) drawCodeRowChrome(
 	pxSmall := fixed.I(gtx.Sp(theme.TypeCodeSmall().Size))
 	if !p.IsDiff || idx >= len(diffLines) {
 		if gutterW > 0 {
-			v.drawMonoGlyph(gtx, strconv.Itoa(idx+1), monoSmall, pxSmall, c.FgSubtle, pad+gtx.Dp(theme.SpaceSM), y, rowH)
+			numCol := c.FgSubtle
+			if inHighlightRange(p, idx) {
+				numCol = c.Fg
+			}
+			v.drawMonoGlyph(gtx, strconv.Itoa(idx+1), monoSmall, pxSmall, numCol, pad+gtx.Dp(theme.SpaceSM), y, rowH)
 		}
 		return
 	}
@@ -390,6 +397,16 @@ func (v *view) drawCodeRowChrome(
 		glyphW := v.shape(dl.Marker, monoSmall, pxSmall).w
 		v.drawMonoGlyph(gtx, dl.Marker, monoSmall, pxSmall, diffMarkerColor(v.th, dl.Kind), pad+gutterW+(markerW-glyphW)/2, y, rowH)
 	}
+}
+
+// inHighlightRange reports whether displayed row idx (0-based) sits inside
+// the props' requested highlight range.
+func inHighlightRange(p *CodeBlockProps, idx int) bool {
+	if p.HighlightLine <= 0 {
+		return false
+	}
+	last := max(p.HighlightEndLine, p.HighlightLine)
+	return idx+1 >= p.HighlightLine && idx+1 <= last
 }
 
 func diffMarkerColor(th *theme.Theme, kind DiffKind) color.NRGBA {

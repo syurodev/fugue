@@ -63,3 +63,13 @@ func (rt *HostRuntime) UpdateWorkspaceRoot(ctx context.Context, principal, id, n
 func (rt *HostRuntime) DeleteWorkspace(ctx context.Context, principal, id, hash, confirmName string) error {
 	return rt.workspaces.Delete(ctx, principal, id, hash, confirmName)
 }
+
+// ReadWorkspaceFile serves the ReadWorkspaceFile Host API RPC (F10.4e).
+func (rt *HostRuntime) ReadWorkspaceFile(ctx context.Context, principal, id, rootName, path string, startLine, endLine int64) (*WorkspaceFileView, error) {
+	return rt.workspaces.ReadFile(ctx, principal, id, rootName, path, startLine, endLine)
+}
+
+// ListWorkspaceDir serves the ListWorkspaceDir Host API RPC (F10.4e).
+func (rt *HostRuntime) ListWorkspaceDir(ctx context.Context, principal, id, rootName, path string) ([]WorkspaceDirEntryView, error) {
+	return rt.workspaces.ListDir(ctx, principal, id, rootName, path)
+}

@@ -35,11 +35,11 @@ const genericInternalMessage = "internal error"
 // public code and the host's versions in the typed detail.
 func connectCode(c errcode.Code) connect.Code {
 	switch c {
-	case errcode.InvalidArgument, errcode.InteractionOptionNotOffered, errcode.WorkspaceConfigInvalid, errcode.WorkspaceRootInvalid,
+	case errcode.InvalidArgument, errcode.InteractionOptionNotOffered, errcode.WorkspaceConfigInvalid, errcode.WorkspaceRootInvalid, errcode.WorkspaceNotText,
 		errcode.VendorInvalidProfile, errcode.VendorUnknownCommand, errcode.VendorCommandUnavailable, errcode.VendorCommandConflict, errcode.VendorWorkspaceMismatch,
 		errcode.AppStateInvalidDocument:
 		return connect.CodeInvalidArgument
-	case errcode.NotFound, errcode.InteractionNotFound, errcode.WorkspaceNotFound, errcode.WorkspaceRootMissing, errcode.VendorSessionNotFound, errcode.TranscriptSessionNotFound, errcode.TranscriptItemNotFound,
+	case errcode.NotFound, errcode.InteractionNotFound, errcode.WorkspaceNotFound, errcode.WorkspaceRootMissing, errcode.WorkspaceFileNotFound, errcode.VendorSessionNotFound, errcode.TranscriptSessionNotFound, errcode.TranscriptItemNotFound,
 		errcode.TasksTeamNotFound, errcode.TasksTaskNotFound:
 		return connect.CodeNotFound
 	case errcode.AlreadyExists, errcode.WorkspaceAlreadyExists, errcode.VaultAlreadyConfigured:
@@ -47,10 +47,10 @@ func connectCode(c errcode.Code) connect.Code {
 	case errcode.FailedPrecondition, errcode.UnsupportedVersion, errcode.InteractionAlreadyAnswered, errcode.InteractionStaleIncarnation, errcode.WorkspaceConfigChanged, errcode.WorkspaceConfigUnconfirmed,
 		errcode.VendorUnsupported, errcode.VendorSessionState, errcode.VendorTurnNotActive, errcode.VendorVaultLocked, errcode.VaultNotConfigured, errcode.AppStateRevisionConflict, errcode.TasksTeamEnded:
 		return connect.CodeFailedPrecondition
-	case errcode.FrameTooLarge, errcode.InteractionTextTooLarge, errcode.WorkspaceConfigTooLarge, errcode.VendorCapacity, errcode.VaultRateLimited,
+	case errcode.FrameTooLarge, errcode.InteractionTextTooLarge, errcode.WorkspaceConfigTooLarge, errcode.WorkspaceFileTooLarge, errcode.VendorCapacity, errcode.VaultRateLimited,
 		errcode.AppStateTooLarge, errcode.AppStateTooManyWindows, errcode.TasksSendRateLimited, errcode.TasksPostTooLarge:
 		return connect.CodeResourceExhausted
-	case errcode.PermissionDenied, errcode.WorkspacePathDenied, errcode.WorkspaceOwnershipInvalid, errcode.VaultInvalidPassphrase:
+	case errcode.PermissionDenied, errcode.WorkspacePathDenied, errcode.WorkspacePathOutsideRoot, errcode.WorkspaceOwnershipInvalid, errcode.VaultInvalidPassphrase:
 		return connect.CodePermissionDenied
 	case errcode.Unavailable:
 		return connect.CodeUnavailable

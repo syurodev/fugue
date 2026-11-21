@@ -81,6 +81,13 @@ func (t *Transcript) ContentLocked() bool { return t.contentLocked }
 // Items returns the held items, oldest first.
 func (t *Transcript) Items() []*Item { return t.items }
 
+// ItemByID returns one item the transcript holds by ID, for callers that
+// act on an item's own payload (the Edited row's full diff, F10.4e).
+func (t *Transcript) ItemByID(id string) (*Item, bool) {
+	it, ok := t.byID[id]
+	return it, ok
+}
+
 // LastSequence is the newest durable topic sequence the model applied.
 func (t *Transcript) LastSequence() uint64 { return t.lastSeq }
 
