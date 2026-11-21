@@ -13,4 +13,8 @@ message ErrorDetail {
   repeated string supported_api_versions = 2;
   // retry_after_seconds is present when code is vault.rate_limited.
   int64 retry_after_seconds = 3;
+  // current_revision is present when code is appstate.revision_conflict: the
+  // revision the stored document carries now, so the caller can retry its CAS
+  // against it (host-api §5.2).
+  uint64 current_revision = 4;
 }

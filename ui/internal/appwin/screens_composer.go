@@ -264,7 +264,7 @@ func (s *screens) transcriptCallbacks() transcriptview.Callbacks {
 			s.pendingItem[key] = true
 			s.fetcher.RequestItem(s.open, itemID)
 		},
-		// TODO(F10.20): wire OnFileChip once Q-179 / slot grid is answered.
+		// TODO(F10.20b): wire OnFileChip once Q-179 / slot grid is answered.
 	}
 }
 
