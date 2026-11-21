@@ -121,7 +121,7 @@ func (s *CodeBlockState) ActionsVisible(env *kit.Env, gtx *layout.Context) bool 
 // diffs, Copy excluding line numbers and diff markers with in-place "Copied"
 // confirmation, height cap with "Show full output", keyboard scroll on focus,
 // and Copy/wrap visible on hover or focus.
-func LayoutCodeBlock(env *kit.Env, gtx *layout.Context, st *CodeBlockState, p CodeBlockProps) (layout.Dimensions, CodeBlockResult) {
+func LayoutCodeBlock(env *kit.Env, gtx *layout.Context, st *CodeBlockState, p *CodeBlockProps) (layout.Dimensions, CodeBlockResult) {
 	var mdSt State
 	ch := env.Th.Chrome()
 	mdSt.sync(nil, env.Sh, gtx.Metric, &ch)
@@ -129,101 +129,132 @@ func LayoutCodeBlock(env *kit.Env, gtx *layout.Context, st *CodeBlockState, p Co
 	return v.layoutCodeBlock(env, gtx, st, p)
 }
 
-func (v *view) layoutCodeBlock(env *kit.Env, gtx *layout.Context, st *CodeBlockState, p CodeBlockProps) (layout.Dimensions, CodeBlockResult) {
+type codeBlockMetrics struct {
+	w, pad     int
+	codeAvailW int
+	viewH      int
+	gutterW    int
+	markerW    int
+	lineH      int
+	visCount   int
+	capped     bool
+	flows      []*flow
+	diffLines  []DiffLine
+}
+
+func (v *view) layoutCodeBlock(env *kit.Env, gtx *layout.Context, st *CodeBlockState, p *CodeBlockProps) (layout.Dimensions, CodeBlockResult) {
 	st.ensureButtons()
 	var res CodeBlockResult
 	st.syncCache(p)
-	v.pollBlockEvents(env, gtx, st, p, &res)
+	v.pollBlockEvents(env, gtx, st)
+	m := v.measureCodeBlock(gtx, st, p)
 
+	rec := op.Record(gtx.Ops)
+	y := v.drawCodeBlockContents(env, gtx, st, p, &m, &res)
+	call := rec.Stop()
+
+	box := image.Rectangle{Max: image.Pt(m.w, y)}
+	v.paintCodeBlockFrame(gtx, st, p, box, func() {
+		v.registerBlockInput(gtx, st, box)
+		call.Add(gtx.Ops)
+	})
+	return layout.Dimensions{Size: image.Pt(m.w, y)}, res
+}
+
+func (v *view) measureCodeBlock(gtx *layout.Context, st *CodeBlockState, p *CodeBlockProps) codeBlockMetrics {
 	w := gtx.Constraints.Max.X
 	pad := gtx.Dp(theme.SpaceMD)
 	bodyMaxW := max(w-2*pad, 0)
-
 	lines := st.resolvedLines(p)
 	diffLines := st.cachedDiff
 	totalLines := len(lines)
 	if p.IsDiff {
 		totalLines = len(diffLines)
 	}
-
-	capLines := p.MaxLines
-	if capLines == 0 {
-		capLines = defaultMaxCodeLines
-	}
-	capped := capLines > 0 && !st.Expanded && (totalLines > capLines || p.Truncated)
-	visCount := totalLines
-	if capped && totalLines > capLines {
-		visCount = capLines
-	}
-
+	capped, visCount := capLineCount(p.MaxLines, st.Expanded, p.Truncated, totalLines)
 	fs := flowStyle{px: fixed.I(gtx.Sp(theme.TypeCode().Size)), mono: true, whole: !st.Wrapped}
 	lineH := max(gtx.Sp(theme.TypeCode().Line), fs.lineHeight())
 	gutterW, markerW := v.gutterWidths(gtx, totalLines, p.IsDiff, p.ShowLineNumbers || p.IsDiff)
 	codeAvailW := max(bodyMaxW-gutterW-markerW, 0)
-
 	flows, contentW, contentH := v.measureCodeRows(lines, diffLines, visCount, codeAvailW, fs, p.IsDiff, st.Wrapped, lineH)
 	viewH := contentH
 	if st.Expanded && visCount > maxExpandedViewportLines {
 		viewH = min(contentH, maxExpandedViewportLines*lineH)
 	}
-	st.viewW = codeAvailW
-	st.viewH = viewH
-	st.maxScrollX = 0
-	if !st.Wrapped && contentW > codeAvailW {
-		st.maxScrollX = contentW - codeAvailW
+	st.updateScrollBounds(codeAvailW, contentW, viewH, contentH)
+	return codeBlockMetrics{
+		w: w, pad: pad, codeAvailW: codeAvailW, viewH: viewH,
+		gutterW: gutterW, markerW: markerW, lineH: lineH,
+		visCount: visCount, capped: capped, flows: flows, diffLines: diffLines,
 	}
-	st.maxScrollY = max(contentH-viewH, 0)
-	st.ScrollX = min(max(st.ScrollX, 0), st.maxScrollX)
-	st.ScrollY = min(max(st.ScrollY, 0), st.maxScrollY)
+}
 
+func capLineCount(maxLines int, expanded, truncated bool, totalLines int) (capped bool, visCount int) {
+	if maxLines == 0 {
+		maxLines = defaultMaxCodeLines
+	}
+	capped = maxLines > 0 && !expanded && (totalLines > maxLines || truncated)
+	visCount = totalLines
+	if capped && totalLines > maxLines {
+		visCount = maxLines
+	}
+	return capped, visCount
+}
+
+func (s *CodeBlockState) updateScrollBounds(codeAvailW, contentW, viewH, contentH int) {
+	s.viewW = codeAvailW
+	s.viewH = viewH
+	s.maxScrollX = 0
+	if !s.Wrapped && contentW > codeAvailW {
+		s.maxScrollX = contentW - codeAvailW
+	}
+	s.maxScrollY = max(contentH-viewH, 0)
+	s.ScrollX = min(max(s.ScrollX, 0), s.maxScrollX)
+	s.ScrollY = min(max(s.ScrollY, 0), s.maxScrollY)
+}
+
+func (v *view) drawCodeBlockContents(
+	env *kit.Env, gtx *layout.Context, st *CodeBlockState, p *CodeBlockProps, m *codeBlockMetrics, res *CodeBlockResult,
+) int {
 	showActions := st.ActionsVisible(env, gtx)
-	hasHeader := p.IsOutputCard
+	y := 0
+	if p.IsOutputCard {
+		y += v.drawBlockHeader(env, gtx, st, p, m.w, m.pad, showActions, res)
+		y += v.drawDividerAt(env, gtx, m.w, y)
+	}
+	bodyTop := y + m.pad
+	v.drawCodeBody(gtx, st, p, m.flows, m.diffLines, m.visCount, m.pad, bodyTop, m.codeAvailW, m.viewH, m.gutterW, m.markerW, m.lineH)
+	y = bodyTop + m.viewH + m.pad
+	if !p.IsOutputCard && showActions {
+		v.drawFloatingActions(env, gtx, st, p, m.w, m.pad, res)
+	}
+	if m.capped {
+		y += v.drawDividerAt(env, gtx, m.w, y)
+		y += v.drawExpandFooter(env, gtx, st, m.w, m.pad, y, res, p.Truncated)
+	}
+	return y
+}
+
+func (v *view) paintCodeBlockFrame(gtx *layout.Context, st *CodeBlockState, p *CodeBlockProps, box image.Rectangle, drawInner func()) {
 	surf, radius := v.th.CodeSurface(), gtx.Dp(theme.RadiusSM)
 	if p.IsOutputCard {
 		surf, radius = v.th.Chrome().SurfaceRaised, gtx.Dp(theme.RadiusLG)
 	}
-
-	rec := op.Record(gtx.Ops)
-	y := 0
-	if hasHeader {
-		y += v.drawBlockHeader(env, gtx, st, p, w, pad, showActions, &res)
-		y += v.drawDividerAt(env, gtx, w, y)
-	}
-
-	bodyTop := y + pad
-	v.drawCodeBody(gtx, st, p, flows, diffLines, visCount, pad, bodyTop, codeAvailW, viewH, gutterW, markerW, lineH)
-	y = bodyTop + viewH + pad
-
-	if !hasHeader && showActions {
-		v.drawFloatingActions(env, gtx, st, p, w, pad, &res)
-	}
-	if capped {
-		y += v.drawDividerAt(env, gtx, w, y)
-		y += v.drawExpandFooter(env, gtx, st, w, pad, y, &res, p.Truncated)
-	}
-	call := rec.Stop()
-
-	box := image.Rectangle{Max: image.Pt(w, y)}
 	paint.FillShape(gtx.Ops, surf, clip.UniformRRect(box, radius).Op(gtx.Ops))
-	strokeWidth := float32(max(gtx.Dp(theme.Hairline), 1))
 	paint.FillShape(gtx.Ops, v.th.Chrome().BorderSubtle, clip.Stroke{
 		Path:  clip.UniformRRect(box, radius).Path(gtx.Ops),
-		Width: strokeWidth,
+		Width: float32(max(gtx.Dp(theme.Hairline), 1)),
 	}.Op())
-
-	v.registerBlockInput(gtx, st, box)
-	call.Add(gtx.Ops)
+	drawInner()
 	if gtx.Focused(&st.focusTag) {
-		fw := float32(max(gtx.Dp(theme.FocusStroke), 1))
 		paint.FillShape(gtx.Ops, v.th.Chrome().FocusBorder, clip.Stroke{
 			Path:  clip.UniformRRect(box, radius).Path(gtx.Ops),
-			Width: fw,
+			Width: float32(max(gtx.Dp(theme.FocusStroke), 1)),
 		}.Op())
 	}
-	return layout.Dimensions{Size: image.Pt(w, y)}, res
 }
 
-func (s *CodeBlockState) syncCache(p CodeBlockProps) {
+func (s *CodeBlockState) syncCache(p *CodeBlockProps) {
 	if s.cachedRaw == p.Raw && s.cachedFormat == p.Format && (len(s.cachedLines) > 0 || len(s.cachedDiff) > 0 || p.Raw == "") {
 		return
 	}
@@ -241,7 +272,7 @@ func (s *CodeBlockState) syncCache(p CodeBlockProps) {
 	s.cachedLines = plainCodeLines(p.Raw)
 }
 
-func (s *CodeBlockState) resolvedLines(p CodeBlockProps) [][]markdown.Span {
+func (s *CodeBlockState) resolvedLines(p *CodeBlockProps) [][]markdown.Span {
 	if len(p.Lines) > 0 {
 		return p.Lines
 	}
@@ -263,7 +294,7 @@ func plainCodeLines(raw string) [][]markdown.Span {
 	return out
 }
 
-func (v *view) pollBlockEvents(env *kit.Env, gtx *layout.Context, st *CodeBlockState, p CodeBlockProps, res *CodeBlockResult) {
+func (v *view) pollBlockEvents(env *kit.Env, gtx *layout.Context, st *CodeBlockState) {
 	if !st.CopiedUntil.IsZero() {
 		if env.Now().Before(st.CopiedUntil) {
 			env.Driver.WakeAt(st.CopiedUntil)
@@ -296,8 +327,6 @@ func (v *view) pollBlockEvents(env *kit.Env, gtx *layout.Context, st *CodeBlockS
 			}
 		}
 	}
-	_ = p
-	_ = res
 }
 
 func (v *view) handleBlockPointer(gtx *layout.Context, st *CodeBlockState, e pointer.Event) {
@@ -324,22 +353,22 @@ func (v *view) handleBlockPointer(gtx *layout.Context, st *CodeBlockState, e poi
 func (v *view) handleBlockKey(gtx *layout.Context, st *CodeBlockState, e key.Event) {
 	stepX := max(gtx.Dp(theme.SpaceXXL), 1)
 	stepY := max(gtx.Sp(theme.TypeCode().Line), 1)
-	switch e.Name {
-	case key.NameLeftArrow:
+	switch string(e.Name) {
+	case string(key.NameLeftArrow):
 		st.ScrollX = max(st.ScrollX-stepX, 0)
-	case key.NameRightArrow:
+	case string(key.NameRightArrow):
 		st.ScrollX = min(st.ScrollX+stepX, st.maxScrollX)
-	case key.NameUpArrow:
+	case string(key.NameUpArrow):
 		st.ScrollY = max(st.ScrollY-stepY, 0)
-	case key.NameDownArrow:
+	case string(key.NameDownArrow):
 		st.ScrollY = min(st.ScrollY+stepY, st.maxScrollY)
-	case key.NamePageUp:
+	case string(key.NamePageUp):
 		st.ScrollY = max(st.ScrollY-max(st.viewH, stepY), 0)
-	case key.NamePageDown:
+	case string(key.NamePageDown):
 		st.ScrollY = min(st.ScrollY+max(st.viewH, stepY), st.maxScrollY)
-	case key.NameHome:
+	case string(key.NameHome):
 		st.ScrollX = 0
-	case key.NameEnd:
+	case string(key.NameEnd):
 		st.ScrollX = st.maxScrollX
 	}
 }

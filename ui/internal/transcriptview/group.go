@@ -29,6 +29,15 @@ const (
 	CatNetwork
 )
 
+const (
+	statusPending = "pending"
+	statusRunning = "running"
+	statusDone    = "done"
+	statusFailed  = "failed"
+	statusDenied  = "denied"
+	formatDiff    = "diff"
+)
+
 // displayRow is one VirtualList entry: either a standalone transcript item or a
 // folded work group of consecutive work items in one turn.
 type displayRow struct {
@@ -116,6 +125,15 @@ func makeWorkGroup(items []*session.Item) *workGroup {
 		turnID: items[0].TurnID,
 		items:  items,
 	}
+	accumulateWorkGroup(g, items)
+	if g.currentTitle == "" {
+		g.currentTitle = workItemStepTitle(items[len(items)-1])
+	}
+	g.subGroups = buildSubGroups(items)
+	return g
+}
+
+func accumulateWorkGroup(g *workGroup, items []*session.Item) {
 	var firstCreated, lastUpdated time.Time
 	for _, it := range items {
 		if isItemRunning(it) {
@@ -126,21 +144,21 @@ func makeWorkGroup(items []*session.Item) *workGroup {
 			g.hasFailure = true
 		}
 		g.durationMs += it.Metadata.DurationMillis
-		if ts, ok := parseTS(it.CreatedAt); ok && (firstCreated.IsZero() || ts.Before(firstCreated)) {
-			firstCreated = ts
-		}
-		if ts, ok := parseTS(it.UpdatedAt); ok && ts.After(lastUpdated) {
-			lastUpdated = ts
-		}
+		firstCreated, lastUpdated = expandTSBounds(firstCreated, lastUpdated, it)
 	}
 	if g.durationMs == 0 && !firstCreated.IsZero() && lastUpdated.After(firstCreated) {
 		g.durationMs = lastUpdated.Sub(firstCreated).Milliseconds()
 	}
-	if g.currentTitle == "" {
-		g.currentTitle = workItemStepTitle(items[len(items)-1])
+}
+
+func expandTSBounds(firstCreated, lastUpdated time.Time, it *session.Item) (time.Time, time.Time) {
+	if ts, ok := parseTS(it.CreatedAt); ok && (firstCreated.IsZero() || ts.Before(firstCreated)) {
+		firstCreated = ts
 	}
-	g.subGroups = buildSubGroups(items)
-	return g
+	if ts, ok := parseTS(it.UpdatedAt); ok && ts.After(lastUpdated) {
+		lastUpdated = ts
+	}
+	return firstCreated, lastUpdated
 }
 
 func buildSubGroups(items []*session.Item) []subGroup {
@@ -194,9 +212,10 @@ func subGroupSummary(cat ToolCategory, items []*session.Item) string {
 		return fmt.Sprintf("Ran %d searches", n)
 	case CatNetwork:
 		return fmt.Sprintf("Fetched %d resources", n)
-	default:
+	case CatOther:
 		return fmt.Sprintf("Used %d tools", n)
 	}
+	return fmt.Sprintf("Used %d tools", n)
 }
 
 func workItemStepTitle(it *session.Item) string {
@@ -244,9 +263,10 @@ func iconForCategory(cat ToolCategory) kit.IconName {
 		return kit.IconSearch
 	case CatNetwork:
 		return kit.IconGlobe
-	default:
+	case CatOther:
 		return kit.IconWrench
 	}
+	return kit.IconWrench
 }
 
 func toolShortTitle(it *session.Item) string {
@@ -256,28 +276,8 @@ func toolShortTitle(it *session.Item) string {
 	if fields.Description != "" {
 		return fields.Description
 	}
-	if cat == CatTerminal {
-		if fields.Command != "" {
-			return fields.Command
-		}
-		if view.Title != "" && view.Title != it.Metadata.Tool {
-			return view.Title
-		}
-	}
-	if fields.FilePath != "" {
-		base := filepath.Base(fields.FilePath)
-		switch cat {
-		case CatRead:
-			return "Read " + base
-		case CatEdit:
-			return "Edit " + base
-		}
-	}
-	if fields.Pattern != "" && cat == CatSearch {
-		return "Search " + fields.Pattern
-	}
-	if fields.URL != "" && cat == CatNetwork {
-		return "Fetch " + fields.URL
+	if title := toolTitleFromFields(cat, &fields, view.Title, it.Metadata.Tool); title != "" {
+		return title
 	}
 	if view.Title != "" {
 		return view.Title
@@ -286,6 +286,50 @@ func toolShortTitle(it *session.Item) string {
 		return it.Metadata.Tool
 	}
 	return "Tool call"
+}
+
+func toolTitleFromFields(cat ToolCategory, fields *toolInputFields, viewTitle, metaTool string) string {
+	switch cat {
+	case CatTerminal:
+		return terminalToolTitle(fields, viewTitle, metaTool)
+	case CatRead, CatEdit:
+		return fileToolTitle(cat, fields.FilePath)
+	case CatSearch:
+		return prefixIfNonEmpty("Search ", fields.Pattern)
+	case CatNetwork:
+		return prefixIfNonEmpty("Fetch ", fields.URL)
+	case CatOther:
+		return ""
+	}
+	return ""
+}
+
+func terminalToolTitle(fields *toolInputFields, viewTitle, metaTool string) string {
+	if fields.Command != "" {
+		return fields.Command
+	}
+	if viewTitle != "" && viewTitle != metaTool {
+		return viewTitle
+	}
+	return ""
+}
+
+func fileToolTitle(cat ToolCategory, path string) string {
+	if path == "" {
+		return ""
+	}
+	base := filepath.Base(path)
+	if cat == CatRead {
+		return "Read " + base
+	}
+	return "Edit " + base
+}
+
+func prefixIfNonEmpty(prefix, s string) string {
+	if s == "" {
+		return ""
+	}
+	return prefix + s
 }
 
 type toolInputFields struct {
@@ -372,14 +416,14 @@ func commandTitle(it *session.Item) string {
 }
 
 func isItemRunning(it *session.Item) bool {
-	return it.Metadata.Status == "pending" || it.Metadata.Status == "running"
+	return it.Metadata.Status == statusPending || it.Metadata.Status == statusRunning
 }
 
 func isToolFailed(it *session.Item) bool {
 	if it.Kind != kindToolCall {
 		return false
 	}
-	if it.Metadata.Status == "failed" || it.Metadata.Status == "denied" {
+	if it.Metadata.Status == statusFailed || it.Metadata.Status == statusDenied {
 		return true
 	}
 	return it.Metadata.ExitCode != nil && *it.Metadata.ExitCode != 0

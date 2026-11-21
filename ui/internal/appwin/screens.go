@@ -324,25 +324,7 @@ func (s *screens) applyResult(r session.Result) {
 		s.prune()
 		s.probeMissingVendors()
 	case session.ResultPage:
-		t := s.transcripts[r.Session]
-		if t == nil {
-			return
-		}
-		if r.Err != nil {
-			s.fail(fmt.Errorf("read the transcript page: %w", r.Err))
-			return
-		}
-		if r.Older {
-			// Keep the reader's anchor: the prepended items shift the
-			// content under the scroll offset by their height.
-			if prepended := t.ApplyOlderPage(r.Items); prepended > 0 {
-				s.viewFor(r.Session).AccountForPrepended(prepended)
-			}
-			s.pendingOlder[r.Session] = false
-		} else {
-			t.ApplyNewestPage(r.Items)
-			s.pendingPage[r.Session] = false
-		}
+		s.applyPageResult(&r)
 	case session.ResultItem:
 		delete(s.pendingItem, r.Session+":"+r.Detail.Item.ItemID)
 		if r.Err != nil {
@@ -350,11 +332,33 @@ func (s *screens) applyResult(r session.Result) {
 			return
 		}
 		if t := s.transcripts[r.Session]; t != nil {
-			t.ApplyItemDetail(r.Detail)
+			t.ApplyItemDetail(&r.Detail)
 		}
 	case session.ResultCommands, session.ResultProbe, session.ResultWorkspaces, session.ResultWorkspace:
 		s.applyComposerResult(r)
 	}
+}
+
+func (s *screens) applyPageResult(r *session.Result) {
+	t := s.transcripts[r.Session]
+	if t == nil {
+		return
+	}
+	if r.Err != nil {
+		s.fail(fmt.Errorf("read the transcript page: %w", r.Err))
+		return
+	}
+	if r.Older {
+		// Keep the reader's anchor: the prepended items shift the
+		// content under the scroll offset by their height.
+		if prepended := t.ApplyOlderPage(r.Items); prepended > 0 {
+			s.viewFor(r.Session).AccountForPrepended(prepended)
+		}
+		s.pendingOlder[r.Session] = false
+		return
+	}
+	t.ApplyNewestPage(r.Items)
+	s.pendingPage[r.Session] = false
 }
 
 // openSession opens a session's transcript: its topics join the connection,

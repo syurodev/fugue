@@ -170,41 +170,35 @@ func runs(s string, whole bool) []run {
 func (v *view) tokens(spans []markdown.Span, fs flowStyle) []token {
 	var out []token
 	for i := range spans {
-		sp := &spans[i]
-		f, px := v.face(sp, fs)
-		if !fs.whole && sp.Link == nil && sp.Image == nil {
-			if added, handled := v.chipTokens(sp, fs, &out); handled {
-				_ = added
-				if sp.HardBreak {
-					out = append(out, token{hard: true})
-				}
-				continue
-			}
-		}
-		v.appendRunTokens(sp, sp.Text, f, px, fs.whole, nil, &out)
-		if sp.Link != nil && sp.Link.Openable && (i+1 == len(spans) || spans[i+1].Link != sp.Link) {
-			a := v.shape(arrowGlyph, f, px*4/5)
-			a.span, a.arrow = sp, true
-			out = append(out, token{a: a})
-		}
-		if sp.HardBreak {
-			out = append(out, token{hard: true})
-		}
+		v.appendSpanTokens(spans, i, fs, &out)
 	}
 	return out
 }
 
-func (v *view) chipTokens(sp *markdown.Span, fs flowStyle, out *[]token) (int, bool) {
-	parsed := ParseChips(sp.Text)
-	hasChip := false
-	for _, run := range parsed {
-		if run.Kind != ChipNone {
-			hasChip = true
-			break
+func (v *view) appendSpanTokens(spans []markdown.Span, i int, fs flowStyle, out *[]token) {
+	sp := &spans[i]
+	f, px := v.face(sp, fs)
+	if !fs.whole && sp.Link == nil && sp.Image == nil && v.chipTokens(sp, fs, out) {
+		if sp.HardBreak {
+			*out = append(*out, token{hard: true})
 		}
+		return
 	}
-	if !hasChip {
-		return 0, false
+	v.appendRunTokens(sp, sp.Text, f, px, fs.whole, nil, out)
+	if sp.Link != nil && sp.Link.Openable && (i+1 == len(spans) || spans[i+1].Link != sp.Link) {
+		a := v.shape(arrowGlyph, f, px*4/5)
+		a.span, a.arrow = sp, true
+		*out = append(*out, token{a: a})
+	}
+	if sp.HardBreak {
+		*out = append(*out, token{hard: true})
+	}
+}
+
+func (v *view) chipTokens(sp *markdown.Span, fs flowStyle, out *[]token) bool {
+	parsed := ParseChips(sp.Text)
+	if !containsNonPlainChip(parsed) {
+		return false
 	}
 	f, px := v.face(sp, fs)
 	monoF := font.Font{Typeface: fonts.Mono, Weight: f.Weight}
@@ -229,7 +223,16 @@ func (v *view) chipTokens(sp *markdown.Span, fs flowStyle, out *[]token) (int, b
 		}
 		*out = append(*out, token{a: a})
 	}
-	return len(parsed), true
+	return true
+}
+
+func containsNonPlainChip(runs []ChipRun) bool {
+	for i := range runs {
+		if runs[i].Kind != ChipNone {
+			return true
+		}
+	}
+	return false
 }
 
 func (v *view) appendRunTokens(sp *markdown.Span, txt string, f font.Font, px fixed.Int26_6, whole bool, chip *ChipRun, out *[]token) {

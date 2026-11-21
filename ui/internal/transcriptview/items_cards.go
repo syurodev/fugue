@@ -23,11 +23,12 @@ import (
 
 func layoutCommitCard(env *kit.Env, gtx *layout.Context, c *cardState, item *session.Item, eff commitEffect, cb Callbacks) layout.Dimensions {
 	ch := env.Th.Chrome()
-	dims, _, _ := c.commitCard.Layout(env, gtx, kit.CardProps{Padding: theme.SpaceMD}, func(gtx layout.Context) layout.Dimensions {
+	dims, _, err := c.commitCard.Layout(env, gtx, kit.CardProps{Padding: theme.SpaceMD}, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				l := gtx
-				d, _ := env.Icon(&l, kit.IconGitCommit, theme.IconSM, env.Th.Status().Success)
+				d, iconErr := env.Icon(&l, kit.IconGitCommit, theme.IconSM, env.Th.Status().Success)
+				logTVErr(iconErr)
 				return d
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -51,7 +52,8 @@ func layoutCommitCard(env *kit.Env, gtx *layout.Context, c *cardState, item *ses
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				l := gtx
 				bp := kit.ButtonProps{Text: "View diff ↗", Variant: kit.Ghost, Size: kit.SizeSM}
-				clicked, _ := c.viewDiff.Layout(env, &l, bp)
+				clicked, btnErr := c.viewDiff.Layout(env, &l, bp)
+				logTVErr(btnErr)
 				if clicked && cb.OnViewDiff != nil {
 					cb.OnViewDiff(item.ItemID)
 				}
@@ -59,6 +61,7 @@ func layoutCommitCard(env *kit.Env, gtx *layout.Context, c *cardState, item *ses
 			}),
 		)
 	})
+	logTVErr(err)
 	return dims
 }
 
@@ -69,83 +72,92 @@ func layoutFileChange(env *kit.Env, gtx *layout.Context, st *State, c *cardState
 	}
 	expanded := st.list.Expanded(item.ItemID)
 	vis, prog := c.anim.step(env, expanded, clicked)
+	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return c.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				local := gtx
+				return layoutFileChangeHeader(env, &local, c, item, expanded, cb)
+			})
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			local := gtx
+			return layoutFileChangeBody(env, &local, c, item, vis, prog, cb)
+		}),
+	)
+}
+
+func layoutFileChangeHeader(env *kit.Env, gtx *layout.Context, c *cardState, item *session.Item, expanded bool, cb Callbacks) layout.Dimensions {
 	ch := env.Th.Chrome()
 	m := item.Metadata
-	path := fileChangePath(item)
 	caret := kit.IconChevronRight
 	if expanded {
 		caret = kit.IconChevronDown
 	}
-
-	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return c.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						l := gtx
-						d, _ := env.Icon(&l, kit.IconPencil, theme.IconSM, ch.FgMuted)
-						return d
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Dimensions{Size: image.Pt(gtx.Dp(theme.SpaceSM), 0)}
-					}),
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						l := gtx
-						return drawInlineTitleWithChips(env, &l, c, "Edited "+path, ch.Fg, cb)
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Left: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							l := gtx
-							return kit.Label(env, &l, theme.TypeCodeSmall(), env.Th.Status().Success, fmt.Sprintf("+%d", m.LinesAdded))
-						})
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Left: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							l := gtx
-							return kit.Label(env, &l, theme.TypeCodeSmall(), env.Th.Status().Danger, fmt.Sprintf("−%d", m.LinesRemoved))
-						})
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Left: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							l := gtx
-							d, _ := env.Icon(&l, caret, theme.IconXS, ch.FgMuted)
-							return d
-						})
-					}),
-				)
+			l := gtx
+			d, err := env.Icon(&l, kit.IconPencil, theme.IconSM, ch.FgMuted)
+			logTVErr(err)
+			return d
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Dimensions{Size: image.Pt(gtx.Dp(theme.SpaceSM), 0)}
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			l := gtx
+			return drawInlineTitleWithChips(env, &l, c, "Edited "+fileChangePath(item), ch.Fg, cb)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := gtx
+				return kit.Label(env, &l, theme.TypeCodeSmall(), env.Th.Status().Success, fmt.Sprintf("+%d", m.LinesAdded))
 			})
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			diffText := item.Display().Text
-			if diffText == "" {
-				return layout.Dimensions{}
-			}
-			local := gtx
-			return layoutAnimatedCollapse(&local, vis, prog, func(gtx *layout.Context) layout.Dimensions {
-				return layout.Inset{Top: theme.SpaceSM}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
-					l := gtx
-					dims, res := mdview.LayoutCodeBlock(env, &l, c.code, mdview.CodeBlockProps{
-						Format:          "diff",
-						IsDiff:          true,
-						ShowLineNumbers: true,
-						Raw:             diffText,
-						Truncated:       item.Display().Truncated,
-					})
-					if res.RequestFull && cb.OnFullOutput != nil {
-						cb.OnFullOutput(item.ItemID)
-					}
-					return dims
-				})
+			return layout.Inset{Left: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := gtx
+				return kit.Label(env, &l, theme.TypeCodeSmall(), env.Th.Status().Danger, fmt.Sprintf("−%d", m.LinesRemoved))
+			})
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := gtx
+				d, err := env.Icon(&l, caret, theme.IconXS, ch.FgMuted)
+				logTVErr(err)
+				return d
 			})
 		}),
 	)
+}
+
+func layoutFileChangeBody(env *kit.Env, gtx *layout.Context, c *cardState, item *session.Item, vis bool, prog float32, cb Callbacks) layout.Dimensions {
+	diffText := item.Display().Text
+	if diffText == "" {
+		return layout.Dimensions{}
+	}
+	return layoutAnimatedCollapse(gtx, vis, prog, func(gtx *layout.Context) layout.Dimensions {
+		return layout.Inset{Top: theme.SpaceSM}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+			l := gtx
+			dims, res := mdview.LayoutCodeBlock(env, &l, c.code, &mdview.CodeBlockProps{
+				Format:          formatDiff,
+				IsDiff:          true,
+				ShowLineNumbers: true,
+				Raw:             diffText,
+				Truncated:       item.Display().Truncated,
+			})
+			if res.RequestFull && cb.OnFullOutput != nil {
+				cb.OnFullOutput(item.ItemID)
+			}
+			return dims
+		})
+	})
 }
 
 func layoutPlanCard(env *kit.Env, gtx *layout.Context, c *cardState, item *session.Item) layout.Dimensions {
 	ch := env.Th.Chrome()
 	steps := planSteps(item)
 	cur := int(item.Metadata.CurrentStep)
-	dims, _, _ := c.planCard.Layout(env, gtx, kit.CardProps{Padding: theme.SpaceMD}, func(gtx layout.Context) layout.Dimensions {
+	dims, _, err := c.planCard.Layout(env, gtx, kit.CardProps{Padding: theme.SpaceMD}, func(gtx layout.Context) layout.Dimensions {
 		children := make([]layout.FlexChild, 0, len(steps)+1)
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Bottom: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -164,6 +176,7 @@ func layoutPlanCard(env *kit.Env, gtx *layout.Context, c *cardState, item *sessi
 		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
 	})
+	logTVErr(err)
 	return dims
 }
 
@@ -181,10 +194,10 @@ func planSteps(item *session.Item) []string {
 func parsePlanStep(raw string, idx1, cur int) (status, label string) {
 	label = strings.TrimSpace(raw)
 	for _, p := range []struct{ prefix, status string }{
-		{"[completed] ", "done"},
-		{"[done] ", "done"},
-		{"[in_progress] ", "running"},
-		{"[pending] ", "pending"},
+		{"[completed] ", statusDone},
+		{"[done] ", statusDone},
+		{"[in_progress] ", statusRunning},
+		{"[pending] ", statusPending},
 	} {
 		if after, ok := strings.CutPrefix(label, p.prefix); ok {
 			return p.status, after
@@ -192,11 +205,11 @@ func parsePlanStep(raw string, idx1, cur int) (status, label string) {
 	}
 	switch {
 	case cur > 0 && idx1 < cur:
-		return "done", label
+		return statusDone, label
 	case cur > 0 && idx1 == cur:
-		return "running", label
+		return statusRunning, label
 	default:
-		return "pending", label
+		return statusPending, label
 	}
 }
 
@@ -204,10 +217,11 @@ func layoutPlanStepRow(env *kit.Env, gtx *layout.Context, status, label string) 
 	ch := env.Th.Chrome()
 	tp := theme.TypeBody()
 	textCol := ch.FgMuted
-	if status == "running" {
+	switch status {
+	case statusRunning:
 		tp = theme.TypeLabel()
 		textCol = ch.Fg
-	} else if status == "done" {
+	case statusDone:
 		textCol = ch.Fg
 	}
 	dotSize := gtx.Dp(theme.SpaceMD)
@@ -215,9 +229,9 @@ func layoutPlanStepRow(env *kit.Env, gtx *layout.Context, status, label string) 
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			box := image.Rect(0, 0, dotSize, dotSize)
 			switch status {
-			case "done":
+			case statusDone:
 				paint.FillShape(gtx.Ops, env.Th.Status().Success, clip.Ellipse(box).Op(gtx.Ops))
-			case "running":
+			case statusRunning:
 				paint.FillShape(gtx.Ops, ch.Action, clip.Ellipse(box).Op(gtx.Ops))
 			default:
 				inset := max(gtx.Dp(theme.Hairline), 1)
@@ -350,7 +364,7 @@ func headerFor(item *session.Item) string {
 
 func decisionOf(m *client.TranscriptMetadata) string {
 	if m.Decision == "" {
-		return "pending"
+		return statusPending
 	}
 	return m.Decision + " by " + m.Decider
 }
@@ -436,7 +450,7 @@ func failedReasonLine(it *session.Item) string {
 		first, _, _ := strings.Cut(txt, "\n")
 		return strings.TrimSpace(first)
 	}
-	if it.Metadata.Status == "denied" {
+	if it.Metadata.Status == statusDenied {
 		return "Permission denied"
 	}
 	if it.Metadata.ExitCode != nil && *it.Metadata.ExitCode != 0 {
@@ -453,11 +467,11 @@ func toolRightSlot(it *session.Item) (text string, danger bool) {
 	if m.ExitCode != nil && *m.ExitCode != 0 {
 		return fmt.Sprintf("exit %d", *m.ExitCode), true
 	}
-	if m.Status == "denied" {
-		return "denied", true
+	if m.Status == statusDenied {
+		return statusDenied, true
 	}
-	if m.Status == "failed" {
-		return "failed", true
+	if m.Status == statusFailed {
+		return statusFailed, true
 	}
 	if m.DurationMillis > 0 {
 		return formatDuration(m.DurationMillis), false
@@ -476,7 +490,7 @@ func detectOutputFormat(it *session.Item) string {
 		}
 	}
 	if strings.HasPrefix(txt, "diff --git ") || (strings.Contains(txt, "\n--- ") && strings.Contains(txt, "\n+++ ")) {
-		return "diff"
+		return formatDiff
 	}
 	return "text"
 }

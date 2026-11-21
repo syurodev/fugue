@@ -65,8 +65,8 @@ func (s *screens) applyComposerResult(r session.Result) {
 			delete(s.wsDetailReq, det.ID)
 		}
 		s.composer.start.reconcile(s)
-	case session.ResultSessions, session.ResultPage:
-		// The list and page reads fold in applyResult.
+	case session.ResultSessions, session.ResultPage, session.ResultItem:
+		// The list, page, and item-detail reads fold in applyResult.
 	}
 }
 

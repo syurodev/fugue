@@ -2,6 +2,7 @@ package transcriptview
 
 import (
 	"image"
+	"log/slog"
 
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -16,6 +17,12 @@ import (
 // cards cause before any measurement: a fixed px guess the next frame's
 // anchor refines to the measured heights, as in F10.4a.
 const estimateH = 96
+
+func logTVErr(err error) {
+	if err != nil {
+		slog.Default().Warn("transcriptview layout error", "err", err)
+	}
+}
 
 // Callbacks forwards transcript interactions to the enclosing window without
 // coupling transcriptview to host writes or OS openers.
@@ -64,6 +71,9 @@ func (s *State) AtTop() bool { return s.Offset() == 0 }
 
 // Rendered reports how many display rows the last frame laid out.
 func (s *State) Rendered() int { return s.list.Rendered() }
+
+// SetExpanded sets the expansion state of a display row or item ID.
+func (s *State) SetExpanded(key string, open bool) { s.list.SetExpanded(key, open) }
 
 func virtualItems(items []*session.Item) []kit.VirtualItem {
 	return virtualDisplayItems(buildDisplayRows(items))

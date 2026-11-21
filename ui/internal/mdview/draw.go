@@ -150,42 +150,59 @@ func (v *view) drawAtom(gtx *layout.Context, a *atom, x, base int) {
 		box := image.Rect(x, base-a.asc-1, x+a.w, base+a.desc+1)
 		paint.FillShape(gtx.Ops, v.th.Chrome().FillSoft, clip.UniformRRect(box, gtx.Dp(theme.RadiusXS)).Op(gtx.Ops))
 	}
-	textX := x
-	if isFileChip && a.chipIcon != "" {
-		iconPx := gtx.Dp(theme.IconXS)
-		iconY := base - a.asc + max((a.asc+a.desc-iconPx)/2, 0)
-		if v.env != nil {
-			off := op.Offset(image.Pt(x+gtx.Dp(theme.SpaceXXS), iconY)).Push(gtx.Ops)
-			_, _ = v.env.Icon(gtx, a.chipIcon, theme.IconXS, v.th.Chrome().FgMuted)
-			off.Pop()
-		}
-		textX += a.lh + 2
-	}
+	textX := v.drawChipLeadingIcon(gtx, a, x, base, isFileChip)
 	ink := v.ink(sp)
-	if len(a.glyphs) > 0 {
-		off := op.Offset(image.Pt(textX, base)).Push(gtx.Ops)
-		outline := clip.Outline{Path: v.shaper.Shape(a.glyphs)}.Op().Push(gtx.Ops)
-		paint.ColorOp{Color: ink}.Add(gtx.Ops)
-		paint.PaintOp{}.Add(gtx.Ops)
-		outline.Pop()
-		if call := v.shaper.Bitmaps(a.glyphs); call != (op.CallOp{}) {
-			call.Add(gtx.Ops)
+	v.drawAtomGlyphs(gtx, a.glyphs, textX, base, ink)
+	v.drawAtomDecorations(gtx, a, x, textX, base, ink, isHashChip)
+}
+
+func (v *view) drawChipLeadingIcon(gtx *layout.Context, a *atom, x, base int, isFileChip bool) int {
+	if !isFileChip || a.chipIcon == "" {
+		return x
+	}
+	iconPx := gtx.Dp(theme.IconXS)
+	iconY := base - a.asc + max((a.asc+a.desc-iconPx)/2, 0)
+	if v.env != nil {
+		off := op.Offset(image.Pt(x+gtx.Dp(theme.SpaceXXS), iconY)).Push(gtx.Ops)
+		if _, err := v.env.Icon(gtx, a.chipIcon, theme.IconXS, v.th.Chrome().FgMuted); err != nil {
+			logMDViewErr(err)
 		}
 		off.Pop()
 	}
+	return x + a.lh + 2
+}
+
+func (v *view) drawAtomGlyphs(gtx *layout.Context, glyphs []text.Glyph, x, base int, ink color.NRGBA) {
+	if len(glyphs) == 0 {
+		return
+	}
+	off := op.Offset(image.Pt(x, base)).Push(gtx.Ops)
+	outline := clip.Outline{Path: v.shaper.Shape(glyphs)}.Op().Push(gtx.Ops)
+	paint.ColorOp{Color: ink}.Add(gtx.Ops)
+	paint.PaintOp{}.Add(gtx.Ops)
+	outline.Pop()
+	if call := v.shaper.Bitmaps(glyphs); call != (op.CallOp{}) {
+		call.Add(gtx.Ops)
+	}
+	off.Pop()
+}
+
+func (v *view) drawAtomDecorations(gtx *layout.Context, a *atom, x, textX, base int, ink color.NRGBA, isHashChip bool) {
 	thin := max(gtx.Dp(theme.Hairline), 1)
-	if sp.Style&markdown.StyleStrike != 0 {
+	if a.span.Style&markdown.StyleStrike != 0 {
 		fill(gtx, ink, image.Rect(textX, base-a.asc/3, x+a.w, base-a.asc/3+thin))
 	}
-	if (sp.Link != nil && sp.Link.Openable && !a.arrow) || isHashChip {
-		dotCol := ink
-		if isHashChip {
-			dotCol = v.th.Chrome().FgMuted
-		}
-		for dx := 0; dx < a.w; dx += 3 * thin {
-			dot := image.Rect(x+dx, base+gtx.Dp(theme.SpaceXXS), min(x+dx+thin, x+a.w), base+gtx.Dp(theme.SpaceXXS)+thin)
-			fill(gtx, dotCol, dot)
-		}
+	hasDotted := (a.span.Link != nil && a.span.Link.Openable && !a.arrow) || isHashChip
+	if !hasDotted {
+		return
+	}
+	dotCol := ink
+	if isHashChip {
+		dotCol = v.th.Chrome().FgMuted
+	}
+	for dx := 0; dx < a.w; dx += 3 * thin {
+		dot := image.Rect(x+dx, base+gtx.Dp(theme.SpaceXXS), min(x+dx+thin, x+a.w), base+gtx.Dp(theme.SpaceXXS)+thin)
+		fill(gtx, dotCol, dot)
 	}
 }
 
@@ -295,6 +312,7 @@ func (v *view) pollChip(gtx *layout.Context, ch *chipAnchor, cs *chipState) {
 		v.st.fileClicks = append(v.st.fileClicks, FileClick{Ref: ch.chip.File})
 	case ChipHash:
 		v.st.idClicks = append(v.st.idClicks, IDClick{ID: ch.chip.Text})
+	case ChipNone:
 	}
 }
 

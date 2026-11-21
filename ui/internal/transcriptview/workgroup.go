@@ -156,7 +156,8 @@ func layoutWorkGroupHeader(env *kit.Env, gtx *layout.Context, title string, runn
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Left: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				l := gtx
-				d, _ := env.Icon(&l, caret, theme.IconXS, ch.FgSubtle)
+				d, err := env.Icon(&l, caret, theme.IconXS, ch.FgSubtle)
+				logTVErr(err)
 				return d
 			})
 		}),
@@ -191,58 +192,68 @@ func layoutOneSubGroup(env *kit.Env, gtx *layout.Context, st *State, gs *workGro
 	}
 	expanded := gs.subExpanded[sg.key]
 	vis, prog := gs.subAnim(sg.key).step(env, expanded, clicked)
-	ch := env.Th.Chrome()
-	caret := kit.IconChevronRight
-	if expanded {
-		caret = kit.IconChevronDown
-	}
-	icon := iconForCategory(sg.category)
-
 	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return cl.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						l := gtx
-						d, _ := env.Icon(&l, icon, theme.IconXS, ch.FgSubtle)
-						return d
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Dimensions{Size: image.Pt(gtx.Dp(theme.SpaceSM), 0)}
-					}),
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						l := gtx
-						return kit.Label(env, &l, theme.TypeSmall(), ch.FgMuted, sg.title)
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Inset{Left: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							l := gtx
-							d, _ := env.Icon(&l, caret, theme.IconXS, ch.FgSubtle)
-							return d
-						})
-					}),
-				)
+				local := gtx
+				return layoutSubGroupHeader(env, &local, sg, expanded)
 			})
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
 			return layoutAnimatedCollapse(&local, vis, prog, func(gtx *layout.Context) layout.Dimensions {
 				return layout.Inset{Top: theme.SpaceXS, Left: theme.SpaceLG}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
-					rows := make([]layout.FlexChild, 0, len(sg.items))
-					for k := range sg.items {
-						it := sg.items[k]
-						rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return layout.Inset{Bottom: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								l := gtx
-								return layoutWorkMember(env, &l, st, it, cb)
-							})
-						}))
-					}
-					return layout.Flex{Axis: layout.Vertical}.Layout(gtx, rows...)
+					l := gtx
+					return layoutSubGroupMembers(env, &l, st, sg.items, cb)
 				})
 			})
 		}),
 	)
+}
+
+func layoutSubGroupHeader(env *kit.Env, gtx *layout.Context, sg *subGroup, expanded bool) layout.Dimensions {
+	ch := env.Th.Chrome()
+	caret := kit.IconChevronRight
+	if expanded {
+		caret = kit.IconChevronDown
+	}
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := gtx
+			d, err := env.Icon(&l, iconForCategory(sg.category), theme.IconXS, ch.FgSubtle)
+			logTVErr(err)
+			return d
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Dimensions{Size: image.Pt(gtx.Dp(theme.SpaceSM), 0)}
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			l := gtx
+			return kit.Label(env, &l, theme.TypeSmall(), ch.FgMuted, sg.title)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := gtx
+				d, err := env.Icon(&l, caret, theme.IconXS, ch.FgSubtle)
+				logTVErr(err)
+				return d
+			})
+		}),
+	)
+}
+
+func layoutSubGroupMembers(env *kit.Env, gtx *layout.Context, st *State, items []*session.Item, cb Callbacks) layout.Dimensions {
+	rows := make([]layout.FlexChild, 0, len(items))
+	for k := range items {
+		it := items[k]
+		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Bottom: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := gtx
+				return layoutWorkMember(env, &l, st, it, cb)
+			})
+		}))
+	}
+	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, rows...)
 }
 
 func layoutWorkMember(env *kit.Env, gtx *layout.Context, st *State, it *session.Item, cb Callbacks) layout.Dimensions {
