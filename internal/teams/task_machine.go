@@ -73,6 +73,7 @@ const (
 	TaskEventReport         TaskEvent = "report"
 	TaskEventChecksPassed   TaskEvent = "checks_passed"
 	TaskEventChecksFailed   TaskEvent = "checks_failed"
+	TaskEventScopeBounced   TaskEvent = "scope_bounced"
 	TaskEventApprove        TaskEvent = "approve"
 	TaskEventRequestChanges TaskEvent = "request_changes"
 	TaskEventCompleteNoDiff TaskEvent = "complete_no_diff"
@@ -97,6 +98,7 @@ func AllTaskEvents() []TaskEvent {
 		TaskEventReport,
 		TaskEventChecksPassed,
 		TaskEventChecksFailed,
+		TaskEventScopeBounced,
 		TaskEventApprove,
 		TaskEventRequestChanges,
 		TaskEventCompleteNoDiff,
@@ -151,6 +153,7 @@ func TaskTransitionTable() map[TaskTransitionKey]TaskState {
 		{TaskStateAsking, TaskEventHostRestart}:     TaskStateUnknown,
 		{TaskStateChecking, TaskEventChecksPassed}:  TaskStateReview,
 		{TaskStateChecking, TaskEventChecksFailed}:  TaskStateFailed,
+		{TaskStateChecking, TaskEventScopeBounced}:  TaskStateRunning,
 		{TaskStateChecking, TaskEventStop}:          TaskStateStopped,
 		{TaskStateChecking, TaskEventFail}:          TaskStateFailed,
 		{TaskStateChecking, TaskEventCancel}:        TaskStateCancelled,

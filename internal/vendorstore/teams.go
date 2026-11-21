@@ -242,10 +242,24 @@ func applyTaskProjection(
 	if err := updateTaskSessionOnEvent(ctx, tx, teamID, ev); err != nil {
 		return "", "", err
 	}
+	if err := updateTaskScopeBouncesOnEvent(ctx, tx, teamID, ev); err != nil {
+		return "", "", err
+	}
 	if err := reparentChildrenOnManagerCancel(ctx, tx, teamID, ev, TeamRole(roleStr), now); err != nil {
 		return "", "", err
 	}
 	return curStateStr, string(nextState), nil
+}
+
+func updateTaskScopeBouncesOnEvent(ctx context.Context, tx *sql.Tx, teamID string, ev *AppendTeamEventInput) error {
+	if ev.EventType != EventTaskCheckCompleted || ev.Outcome != "scope_bounce" {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE team_tasks SET scope_bounces = scope_bounces + 1 WHERE team_id = ? AND task_id = ?`,
+		teamID, ev.TaskID); err != nil {
+		return fmt.Errorf("increment task scope bounces: %w", err)
+	}
+	return nil
 }
 
 func updateTaskSessionOnEvent(ctx context.Context, tx *sql.Tx, teamID string, ev *AppendTeamEventInput) error {

@@ -131,14 +131,9 @@ func TestAcceptRefusesDiffTaskUntilF115AndRejectWakesTask(t *testing.T) {
 	}); startErr != nil {
 		t.Fatal(startErr)
 	}
+	f.rt.teamTasks.resultGate = passingResultGate{}
 	diffBind := mustAttachRole(t, f.teamProposalFixture, "diff-sess", vendorstore.RoleMember)
 	mustCallTool(t, f, diffBind, taskDoneToolName, `{"summary":"diff ready","status":"succeeded"}`)
-
-	// Move diff-mem checking -> review using passing result gate.
-	f.rt.teamTasks.resultGate = passingResultGate{}
-	if gateErr := f.rt.teamTasks.applyResultGate(ctx, "diff-team", diffTaskID, diffLeadTaskID); gateErr != nil {
-		t.Fatal(gateErr)
-	}
 
 	// Lead of diff-team is f.session.ID; Accept on diff deliverable must refuse typed (Q-125).
 	if _, accErr := f.rt.teamTasks.Accept(ctx, f.session.ID, diffTaskID, ""); errcode.CodeOf(accErr) != errcode.FailedPrecondition {

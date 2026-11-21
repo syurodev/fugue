@@ -187,8 +187,8 @@ func TestWrongOutputSchemaKeepsTheResultWithSchemaValidFalse(t *testing.T) {
 		t.Fatal(err)
 	}
 	mem, _ := findTask(tasks, f.memberTaskID)
-	if mem.State != vendorstore.TaskStateChecking {
-		t.Fatalf("member state = %s, want checking", mem.State)
+	if mem.State != vendorstore.TaskStateReview {
+		t.Fatalf("member state = %s, want review", mem.State)
 	}
 
 	pulled, err := f.tools.Call(ctx, f.managerBinding, taskResultToolName, []byte(`{"task_id":"`+f.memberTaskID+`","part":"output"}`))

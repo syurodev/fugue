@@ -210,7 +210,12 @@ func wireTeamServices(
 	// The interaction service consumes the answers of the team proposal, amend,
 	// and task-question cards; wiring happens before any client can answer.
 	hp.rt.interactions.SetTeamCardResolver(hp.rt.teamProposals)
-	hp.rt.teamTasks = newTeamTaskService(vs, vendorTaskSessions{svc: &VendorService{sessions: sessions, store: vs}}, hp.rt.workspaces.domain, locateTeamGit(ctx, deps), deps.DataDir, deps.IDs, v, deps.TeamResultGate)
+	teamGit := locateTeamGit(ctx, deps)
+	gate := deps.TeamResultGate
+	if gate == nil {
+		gate = newHostResultGate(vs, teamGit, deps.DataDir, hp.rt.workspaces.domain, hp.rt.interactions, hp.rt.tags, hp.rt.heavy, sessions, deps.IDs)
+	}
+	hp.rt.teamTasks = newTeamTaskService(vs, vendorTaskSessions{svc: &VendorService{sessions: sessions, store: vs}}, hp.rt.workspaces.domain, teamGit, deps.DataDir, deps.IDs, v, gate)
 	hp.rt.teamTasks.SetInteractions(hp.rt.interactions)
 	hp.rt.interactions.SetTaskQuestionResolver(hp.rt.teamTasks)
 	// F11.10b: the team channel topics and the tasks service share the store

@@ -30,7 +30,13 @@ const (
 	commandResume
 	commandActiveTurn
 	commandRecordEvent
+	commandRecordItem
 )
+
+type transcriptItemOp struct {
+	prev *transcript.Item
+	next *transcript.Item
+}
 
 type actorCommand struct {
 	kind    commandKind
@@ -38,6 +44,7 @@ type actorCommand struct {
 	reason  vendor.CloseReason
 	turnOut *string
 	event   *vendorstore.Event
+	itemOp  *transcriptItemOp
 }
 
 type actorRequest struct {
@@ -106,7 +113,7 @@ func newVendorSessionActor(manager *VendorSessions, info *vendorstore.Session, s
 	}
 }
 
-func (a *vendorSessionActor) call(ctx context.Context, command actorCommand) error {
+func (a *vendorSessionActor) call(ctx context.Context, command *actorCommand) error {
 	select {
 	case <-a.done:
 		if command.kind == commandClose {
@@ -117,7 +124,7 @@ func (a *vendorSessionActor) call(ctx context.Context, command actorCommand) err
 	}
 	result := make(chan error, 1)
 	select {
-	case a.commands <- actorRequest{command: command, result: result}:
+	case a.commands <- actorRequest{command: *command, result: result}:
 	case <-a.done:
 		if command.kind == commandClose {
 			return nil
@@ -270,13 +277,24 @@ func (a *vendorSessionActor) handleCommand(ctx context.Context, command *actorCo
 		return a.startDetach()
 	case commandClose:
 		return a.requestClose(command.reason)
-	case commandActiveTurn:
-		return a.readActiveTurn(command.turnOut)
-	case commandRecordEvent:
-		return a.append(ctx, command.event)
+	case commandActiveTurn, commandRecordEvent, commandRecordItem:
+		return a.handleRecordCommand(ctx, command)
 	default:
 		return errcode.New(errcode.InvalidArgument, "unknown vendor session command")
 	}
+}
+
+func (a *vendorSessionActor) handleRecordCommand(ctx context.Context, command *actorCommand) error {
+	if command.kind == commandActiveTurn {
+		return a.readActiveTurn(command.turnOut)
+	}
+	if command.kind == commandRecordEvent {
+		return a.append(ctx, command.event)
+	}
+	if command.itemOp.prev != nil {
+		return a.updateItem(ctx, command.itemOp.prev, command.itemOp.next)
+	}
+	return a.recordItem(ctx, command.itemOp.next)
 }
 
 func (a *vendorSessionActor) markReady(ctx context.Context) error {

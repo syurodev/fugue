@@ -42,8 +42,8 @@ func assertMemberDigestQueuedForManager(t *testing.T, f *activeTeamFixture, ctx 
 	if err != nil || doneRes.IsError {
 		t.Fatalf("fugue_task_done = (%+v, %v), want success", doneRes, err)
 	}
-	if mem := takeoverTaskState(t, f, ctx, f.memberTaskID); mem.State != vendorstore.TaskStateChecking {
-		t.Fatalf("member after the report = %s, want checking", mem.State)
+	if mem := takeoverTaskState(t, f, ctx, f.memberTaskID); mem.State != vendorstore.TaskStateReview {
+		t.Fatalf("member after the report = %s, want review", mem.State)
 	}
 	testutil.Spin(t, "member digest queued for the manager", func() bool {
 		rows, rowErr := f.hp.vendorStore.PendingMailboxRows(ctx, f.teamID, f.managerTaskID)

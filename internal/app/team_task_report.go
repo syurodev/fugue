@@ -22,6 +22,8 @@ type ResultGate interface {
 type ResultGateVerdict struct {
 	Ready       bool
 	Passed      bool
+	Bounce      bool
+	BounceFiles []string
 	FailureCode string
 	Summary     string
 }
@@ -233,27 +235,46 @@ func (s *teamTaskService) applyResultGate(ctx context.Context, teamID, taskID, p
 		return nil
 	}
 	return s.appendTaskEventWithRetry(ctx, teamID, func(_ *vendorstore.TeamRecord, tasks []vendorstore.TaskRecord) (*vendorstore.AppendTeamEventInput, error) {
-		cur, ok := findTask(tasks, taskID)
-		if !ok || cur.State != vendorstore.TaskStateChecking {
-			return nil, errcode.New(errcode.FailedPrecondition, "task is not in checking")
-		}
-		evID, idErr := s.ids.NewID()
-		if idErr != nil {
-			return nil, errcode.Wrap(errcode.Internal, "generate check event ID", idErr)
-		}
-		ev := &vendorstore.AppendTeamEventInput{
-			EventID: evID, TaskID: taskID, EventType: vendorstore.EventTaskCheckCompleted, Outcome: "passed",
-		}
-		if !verdict.Passed {
-			ev.Outcome = string(vendorstore.TaskStateFailed)
-			ev.FailureCode = verdict.FailureCode
-			if ev.FailureCode == "" {
-				ev.FailureCode = "checks_failed"
-			}
-			ev.Mailbox = digestSummaryRows(taskID, resolvedParentID(parentTaskID, tasks), string(vendorstore.TaskStateFailed), ev.FailureCode, "", false)
-		}
-		return ev, nil
+		return s.buildCheckEvent(tasks, taskID, parentTaskID, verdict)
 	})
+}
+
+func (s *teamTaskService) buildCheckEvent(tasks []vendorstore.TaskRecord, taskID, parentTaskID string, verdict ResultGateVerdict) (*vendorstore.AppendTeamEventInput, error) {
+	cur, ok := findTask(tasks, taskID)
+	if !ok || cur.State != vendorstore.TaskStateChecking {
+		return nil, errcode.New(errcode.FailedPrecondition, "task is not in checking")
+	}
+	evID, idErr := s.ids.NewID()
+	if idErr != nil {
+		return nil, errcode.Wrap(errcode.Internal, "generate check event ID", idErr)
+	}
+	ev := &vendorstore.AppendTeamEventInput{
+		EventID: evID, TaskID: taskID, EventType: vendorstore.EventTaskCheckCompleted, Outcome: "passed",
+	}
+	if verdict.Bounce {
+		ev.Outcome = "scope_bounce"
+		msgPayload, mErr := json.Marshal(mailboxDigestItem{
+			TaskID:  taskID,
+			State:   "scope_bounce",
+			Summary: "out-of-scope files: " + strings.Join(verdict.BounceFiles, ", "),
+		})
+		if mErr != nil {
+			return nil, errcode.Wrap(errcode.Internal, "encode scope bounce payload", mErr)
+		}
+		ev.Mailbox = []vendorstore.MailboxEnqueueInput{{
+			RecipientTaskID: taskID, Kind: vendorstore.MailboxKindSend, Payload: msgPayload,
+		}}
+		return ev, nil
+	}
+	if !verdict.Passed {
+		ev.Outcome = string(vendorstore.TaskStateFailed)
+		ev.FailureCode = verdict.FailureCode
+		if ev.FailureCode == "" {
+			ev.FailureCode = "checks_failed"
+		}
+		ev.Mailbox = digestSummaryRows(taskID, resolvedParentID(parentTaskID, tasks), string(vendorstore.TaskStateFailed), ev.FailureCode, "", false)
+	}
+	return ev, nil
 }
 
 // Ask transitions a running task to asking and routes the question either to

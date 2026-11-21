@@ -70,7 +70,7 @@ func queryTeamTasks(ctx context.Context, db teamQueryer, teamID string) ([]TaskR
 		SELECT task_id, team_id, parent_task_id, hierarchy_role, catalog_role,
 		       deliverable, depends_on_json, depth, state, failure_code,
 		       last_event_seq, created_at, updated_at, ended_at, session_id, explicit_start,
-		       no_report_nudged, attempt, retry_of
+		       no_report_nudged, attempt, retry_of, scope_bounces
 		FROM team_tasks WHERE team_id = ? ORDER BY created_at ASC, task_id ASC`, teamID,
 	)
 	if err != nil {
@@ -100,7 +100,7 @@ func scanTaskRow(rows *sql.Rows) (TaskRecord, error) {
 		&t.TaskID, &t.TeamID, &t.ParentTaskID, &roleStr, &t.CatalogRole,
 		&delivStr, &depsJSON, &t.Depth, &stateStr, &t.FailureCode,
 		&t.LastEventSeq, &t.CreatedAt, &t.UpdatedAt, &endedAt, &t.SessionID, &t.ExplicitStart,
-		&t.NoReportNudged, &t.Attempt, &t.RetryOf,
+		&t.NoReportNudged, &t.Attempt, &t.RetryOf, &t.ScopeBounces,
 	); err != nil {
 		return TaskRecord{}, fmt.Errorf("scan team task: %w", err)
 	}

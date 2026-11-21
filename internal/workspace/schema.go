@@ -220,18 +220,7 @@ func IsShellAllowed(cfg *EffectiveConfig, tags TagPolicy, command, target string
 	if target != "" {
 		tag = ResolveEnvTag(cfg.Policy.EnvTags, target)
 	}
-	roots := make([]string, 0, len(cfg.Roots))
-	for _, r := range cfg.Roots {
-		roots = append(roots, r.Path)
-	}
-	return shellrules.IsAllowed(command, &shellrules.Options{
-		WorkspaceRoots: roots,
-		ShellAsk:       cfg.Policy.ShellAsk,
-		ShellAllow:     cfg.Policy.ShellAllow,
-		Target:         target,
-		EnvTag:         tag,
-		TagPolicy:      tags,
-	})
+	return shellrules.IsAllowed(command, shellOptionsFor(cfg, tags, target, tag))
 }
 
 func mergeConfigs(base *EffectiveConfig, t2 *tier2RawConfig, t3 *tier3RawConfig, t4 *SessionOverride, homeDir string) EffectiveConfig {

@@ -253,6 +253,21 @@ func (a *vendorSessionActor) recordItem(ctx context.Context, item *transcript.It
 	return nil
 }
 
+func (a *vendorSessionActor) updateItem(ctx context.Context, prev, next *transcript.Item) error {
+	if a.manager.deps.Vault.Snapshot().State != vault.StateUnlocked {
+		next.Content = nil
+		next.ContentTruncated = false
+		next.ContentOriginalSize = 0
+		next.RawTruncated = false
+		next.RawOriginalSize = 0
+	}
+	if err := a.manager.deps.Transcripts.UpdateItem(ctx, a.info.ID, a.sequence, prev, next, nil); err != nil {
+		return fmt.Errorf("%w: %w", ErrVendorActorFailed, safeActorError(err))
+	}
+	a.sequence++
+	return nil
+}
+
 func (a *vendorSessionActor) transition(ctx context.Context, fact vendor.Fact) error {
 	next, _, err := vendor.Transition(a.state, fact)
 	if err != nil {

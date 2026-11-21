@@ -180,10 +180,10 @@ func (m *VendorSessions) startSession(ctx context.Context, session *vendorstore.
 		m.closeAndSettlePending(ctx, started, pending)
 		return err
 	}
-	if err := actor.call(ctx, actorCommand{kind: commandCreate}); err != nil {
+	if err := actor.call(ctx, &actorCommand{kind: commandCreate}); err != nil {
 		return err
 	}
-	return actor.call(ctx, actorCommand{kind: commandReady})
+	return actor.call(ctx, &actorCommand{kind: commandReady})
 }
 
 // Send starts a vendor turn, pacing origin=fugue prompts per vendor while
@@ -199,7 +199,7 @@ func (m *VendorSessions) Send(ctx context.Context, sessionID string, input vendo
 	if input.Origin == vendor.OriginFugue {
 		return m.sendPacedSync(ctx, actor, input)
 	}
-	return actor.call(ctx, actorCommand{kind: commandSend, input: input})
+	return actor.call(ctx, &actorCommand{kind: commandSend, input: input})
 }
 
 // Steer adds input to the active vendor turn.
@@ -207,12 +207,12 @@ func (m *VendorSessions) Steer(ctx context.Context, sessionID string, input vend
 	if err := vendor.ValidateInput(input); err != nil {
 		return fmt.Errorf("validate vendor input: %w", err)
 	}
-	return m.call(ctx, sessionID, actorCommand{kind: commandSteer, input: input})
+	return m.call(ctx, sessionID, &actorCommand{kind: commandSteer, input: input})
 }
 
 // Interrupt asks the active vendor turn to stop.
 func (m *VendorSessions) Interrupt(ctx context.Context, sessionID string) error {
-	return m.call(ctx, sessionID, actorCommand{kind: commandInterrupt})
+	return m.call(ctx, sessionID, &actorCommand{kind: commandInterrupt})
 }
 
 // Close stops a vendor session and persists its stop proof.
@@ -266,10 +266,10 @@ func (m *VendorSessions) Resume(ctx context.Context, sessionID string, spec *ven
 		m.closeAndSettlePending(ctx, started, pending)
 		return err
 	}
-	if err := actor.call(ctx, actorCommand{kind: commandResume}); err != nil {
+	if err := actor.call(ctx, &actorCommand{kind: commandResume}); err != nil {
 		return err
 	}
-	return actor.call(ctx, actorCommand{kind: commandReady})
+	return actor.call(ctx, &actorCommand{kind: commandReady})
 }
 
 func (m *VendorSessions) adapterFor(vendorName string) (vendor.Adapter, error) {
@@ -446,7 +446,7 @@ func (m *VendorSessions) SlashCommands(ctx context.Context, sessionID string) ([
 // ActiveTurnID returns the session actor's active turn ID.
 func (m *VendorSessions) ActiveTurnID(ctx context.Context, sessionID string) (string, error) {
 	var turnID string
-	if err := m.call(ctx, sessionID, actorCommand{kind: commandActiveTurn, turnOut: &turnID}); err != nil {
+	if err := m.call(ctx, sessionID, &actorCommand{kind: commandActiveTurn, turnOut: &turnID}); err != nil {
 		return "", err
 	}
 	return turnID, nil
@@ -454,10 +454,10 @@ func (m *VendorSessions) ActiveTurnID(ctx context.Context, sessionID string) (st
 
 // RecordEvent appends a domain event through the session's single-writer actor.
 func (m *VendorSessions) RecordEvent(ctx context.Context, sessionID string, event *vendorstore.Event) error {
-	return m.call(ctx, sessionID, actorCommand{kind: commandRecordEvent, event: event})
+	return m.call(ctx, sessionID, &actorCommand{kind: commandRecordEvent, event: event})
 }
 
-func (m *VendorSessions) call(ctx context.Context, sessionID string, cmd actorCommand) error {
+func (m *VendorSessions) call(ctx context.Context, sessionID string, cmd *actorCommand) error {
 	actor := m.actor(sessionID)
 	if actor == nil {
 		return vendorstore.ErrSessionNotFound
