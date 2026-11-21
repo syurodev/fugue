@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fugue/host/v1/error_detail.proto.
  */
 export const file_fugue_host_v1_error_detail: GenFile = /*@__PURE__*/
-  fileDesc("CiBmdWd1ZS9ob3N0L3YxL2Vycm9yX2RldGFpbC5wcm90bxINZnVndWUuaG9zdC52MSJYCgtFcnJvckRldGFpbBIMCgRjb2RlGAEgASgJEh4KFnN1cHBvcnRlZF9hcGlfdmVyc2lvbnMYAiADKAkSGwoTcmV0cnlfYWZ0ZXJfc2Vjb25kcxgDIAEoA0KyAQoRY29tLmZ1Z3VlLmhvc3QudjFCEEVycm9yRGV0YWlsUHJvdG9QAVo1Z2l0aHViLmNvbS9zeXVyb2Rldi9mdWd1ZS9wa2cvcGIvZnVndWUvaG9zdC92MTtob3N0djGiAgNGSFiqAg1GdWd1ZS5Ib3N0LlYxygINRnVndWVcSG9zdFxWMeICGUZ1Z3VlXEhvc3RcVjFcR1BCTWV0YWRhdGHqAg9GdWd1ZTo6SG9zdDo6VjFiBnByb3RvMw");
+  fileDesc("CiBmdWd1ZS9ob3N0L3YxL2Vycm9yX2RldGFpbC5wcm90bxINZnVndWUuaG9zdC52MSJyCgtFcnJvckRldGFpbBIMCgRjb2RlGAEgASgJEh4KFnN1cHBvcnRlZF9hcGlfdmVyc2lvbnMYAiADKAkSGwoTcmV0cnlfYWZ0ZXJfc2Vjb25kcxgDIAEoAxIYChBjdXJyZW50X3JldmlzaW9uGAQgASgEQrIBChFjb20uZnVndWUuaG9zdC52MUIQRXJyb3JEZXRhaWxQcm90b1ABWjVnaXRodWIuY29tL3N5dXJvZGV2L2Z1Z3VlL3BrZy9wYi9mdWd1ZS9ob3N0L3YxO2hvc3R2MaICA0ZIWKoCDUZ1Z3VlLkhvc3QuVjHKAg1GdWd1ZVxIb3N0XFYx4gIZRnVndWVcSG9zdFxWMVxHUEJNZXRhZGF0YeoCD0Z1Z3VlOjpIb3N0OjpWMWIGcHJvdG8z");
 
 /**
  * ErrorDetail is attached to every Connect error (docs: host-api §4). code is
@@ -40,6 +40,15 @@ export type ErrorDetail = Message<"fugue.host.v1.ErrorDetail"> & {
    * @generated from field: int64 retry_after_seconds = 3;
    */
   retryAfterSeconds: bigint;
+
+  /**
+   * current_revision is present when code is appstate.revision_conflict: the
+   * revision the stored document carries now, so the caller can retry its CAS
+   * against it (host-api §5.2).
+   *
+   * @generated from field: uint64 current_revision = 4;
+   */
+  currentRevision: bigint;
 };
 
 /**

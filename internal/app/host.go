@@ -132,6 +132,7 @@ type HostRuntime struct {
 	hub             *EventHub
 	interactions    *InteractionService
 	workspaces      *WorkspaceService
+	appStates       *StateService
 	vendors         *VendorService
 	accountsService *AccountsService
 	vaultService    *VaultService

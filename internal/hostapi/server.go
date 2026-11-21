@@ -17,6 +17,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/pkg/pb/fugue/accounts/v1/accountsv1connect"
+	appstatev1connect "github.com/syurodev/fugue/pkg/pb/fugue/appstate/v1/appstatev1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/interaction/v1/interactionv1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/sessiontools/v1/sessiontoolsv1connect"
@@ -218,6 +219,10 @@ func newServiceMux(backend app.Backend) *http.ServeMux {
 	handler.Handle(vaultv1connect.NewVaultServiceHandler(
 		&vaultHandler{backend: backend},
 		connect.WithReadMaxBytes(app.VaultRequestMaxBytes),
+	))
+	handler.Handle(appstatev1connect.NewAppStateServiceHandler(
+		&appstateHandler{backend: backend},
+		connect.WithReadMaxBytes(app.AppStateRequestMaxBytes),
 	))
 	handler.Handle(sessiontoolsv1connect.NewSessionToolServiceHandler(
 		&sessionToolHandler{backend: backend},
