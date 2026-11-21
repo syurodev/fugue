@@ -429,7 +429,10 @@ func drawDiffStatCounts(env *kit.Env, gtx *layout.Context, added, removed int64)
 
 func wrapSurfaceTone(_ *kit.Env, gtx *layout.Context, fill color.NRGBA, draw func(*layout.Context) layout.Dimensions) layout.Dimensions {
 	rec := op.Record(gtx.Ops)
-	dims := layout.Inset{Left: theme.SpaceMD, Right: theme.SpaceMD}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+	// A tinted row (waiting on the user, or failed) keeps the shared row height
+	// for its line and gets SpaceXS above and below inside the tint, so the
+	// action button does not touch the tint's edge.
+	dims := layout.Inset{Top: theme.SpaceXS, Bottom: theme.SpaceXS, Left: theme.SpaceMD, Right: theme.SpaceMD}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
 		l := gtx
 		return draw(&l)
 	})

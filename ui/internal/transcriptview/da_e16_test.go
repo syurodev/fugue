@@ -399,9 +399,12 @@ func assertToolRowsHeightAtScale(t *testing.T, th *theme.Theme, scale float32) {
 		return layoutSubGroupHeader(env, gtx, &sg, false)
 	})
 
-	if plainH != wantH || badgeH != wantH || warnH != wantH || failLineH != wantH || summaryH != wantH {
-		t.Fatalf("scale %.2f heights: plain=%d badge=%d warn=%d failedLine=%d summary=%d, want all %d",
-			scale, plainH, badgeH, warnH, failLineH, summaryH, wantH)
+	// A tinted row keeps the shared line height and adds SpaceXS above and below
+	// inside its tint.
+	pad := int(float32(theme.SpaceXS) * scale)
+	if plainH != wantH || badgeH != wantH || warnH != wantH+2*pad || failLineH != wantH || summaryH != wantH {
+		t.Fatalf("scale %.2f heights: plain=%d badge=%d warn=%d failedLine=%d summary=%d, want %d (warn %d)",
+			scale, plainH, badgeH, warnH, failLineH, summaryH, wantH, wantH+2*pad)
 	}
 }
 
