@@ -33,8 +33,12 @@ type ErrorDetail struct {
 	SupportedApiVersions []string `protobuf:"bytes,2,rep,name=supported_api_versions,json=supportedApiVersions,proto3" json:"supported_api_versions,omitempty"`
 	// retry_after_seconds is present when code is vault.rate_limited.
 	RetryAfterSeconds int64 `protobuf:"varint,3,opt,name=retry_after_seconds,json=retryAfterSeconds,proto3" json:"retry_after_seconds,omitempty"`
-	unknownFields     protoimpl.UnknownFields
-	sizeCache         protoimpl.SizeCache
+	// current_revision is present when code is appstate.revision_conflict: the
+	// revision the stored document carries now, so the caller can retry its CAS
+	// against it (host-api §5.2).
+	CurrentRevision uint64 `protobuf:"varint,4,opt,name=current_revision,json=currentRevision,proto3" json:"current_revision,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *ErrorDetail) Reset() {
@@ -88,15 +92,23 @@ func (x *ErrorDetail) GetRetryAfterSeconds() int64 {
 	return 0
 }
 
+func (x *ErrorDetail) GetCurrentRevision() uint64 {
+	if x != nil {
+		return x.CurrentRevision
+	}
+	return 0
+}
+
 var File_fugue_host_v1_error_detail_proto protoreflect.FileDescriptor
 
 const file_fugue_host_v1_error_detail_proto_rawDesc = "" +
 	"\n" +
-	" fugue/host/v1/error_detail.proto\x12\rfugue.host.v1\"\x87\x01\n" +
+	" fugue/host/v1/error_detail.proto\x12\rfugue.host.v1\"\xb2\x01\n" +
 	"\vErrorDetail\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x124\n" +
 	"\x16supported_api_versions\x18\x02 \x03(\tR\x14supportedApiVersions\x12.\n" +
-	"\x13retry_after_seconds\x18\x03 \x01(\x03R\x11retryAfterSecondsB\xb2\x01\n" +
+	"\x13retry_after_seconds\x18\x03 \x01(\x03R\x11retryAfterSeconds\x12)\n" +
+	"\x10current_revision\x18\x04 \x01(\x04R\x0fcurrentRevisionB\xb2\x01\n" +
 	"\x11com.fugue.host.v1B\x10ErrorDetailProtoP\x01Z5github.com/syurodev/fugue/pkg/pb/fugue/host/v1;hostv1\xa2\x02\x03FHX\xaa\x02\rFugue.Host.V1\xca\x02\rFugue\\Host\\V1\xe2\x02\x19Fugue\\Host\\V1\\GPBMetadata\xea\x02\x0fFugue::Host::V1b\x06proto3"
 
 var (
