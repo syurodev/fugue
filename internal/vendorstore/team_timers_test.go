@@ -155,8 +155,10 @@ func setupTeamForEventTypeTest(t *testing.T, s *Store, teamID string, target Tea
 func appendSpecificTargetEvent(t *testing.T, s *Store, teamID, memID string, seq int64, target TeamEventType) int64 {
 	t.Helper()
 	steps := map[TeamEventType][]AppendTeamEventInput{
-		EventTeamAmended:         {{EventID: "t-" + teamID, EventType: target}},
-		EventTeamNoted:           {{EventID: "t-" + teamID, EventType: target}},
+		EventTeamAmended: {{EventID: "t-" + teamID, EventType: target}},
+		EventTeamNoted:   {{EventID: "t-" + teamID, EventType: target}},
+		// F11.10b: the user post changes no state from active.
+		EventTeamUserPosted:      {{EventID: "t-" + teamID, EventType: target}},
 		EventTeamDeadlineReached: {{EventID: "t-" + teamID, EventType: target}},
 		EventTeamFinalReview:     {{EventID: "t-" + teamID, EventType: target}},
 		EventTeamDeadlineExtended: {
@@ -212,6 +214,12 @@ func appendTaskPipelineTargetEvent(t *testing.T, s *Store, teamID, memID string,
 		},
 		// F11.10a: the informational sibling send is a no-op transition.
 		EventTaskMessaged: {{EventID: "t-" + teamID, TaskID: memID, EventType: EventTaskMessaged}},
+		// F11.10b: approval reference lines are no-op transitions.
+		EventTaskApprovalRequested: {{EventID: "t-" + teamID, TaskID: memID, EventType: EventTaskApprovalRequested}},
+		EventTaskApprovalResolved: {
+			{EventID: "ar-" + teamID, TaskID: memID, EventType: EventTaskApprovalRequested},
+			{EventID: "t-" + teamID, TaskID: memID, EventType: EventTaskApprovalResolved},
+		},
 		EventTaskReported: {{EventID: "t-" + teamID, TaskID: memID, EventType: EventTaskReported}},
 		EventTaskCheckCompleted: {
 			{EventID: "r-" + teamID, TaskID: memID, EventType: EventTaskReported},

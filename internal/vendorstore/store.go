@@ -33,14 +33,16 @@ var ErrItemNotFound = errcode.New(errcode.NotFound, "transcript item not found")
 
 // Store owns persistence and cached session keys for vendor sessions.
 type Store struct {
-	db         *sql.DB
-	vault      *vault.Service
-	clock      clock.Clock
-	cache      *sealing.KeyCache
-	unregister func()
-	prepare    sync.Mutex
-	faultMu    sync.Mutex
-	random     ids.Random
+	db             *sql.DB
+	vault          *vault.Service
+	clock          clock.Clock
+	cache          *sealing.KeyCache
+	unregister     func()
+	prepare        sync.Mutex
+	faultMu        sync.Mutex
+	teamAppended   func(teamID string, seq int64)
+	teamAppendedMu sync.Mutex
+	random         ids.Random
 	// beforeCommit is a test seam set through export_test.go; production code
 	// never sets it.
 	beforeCommit error

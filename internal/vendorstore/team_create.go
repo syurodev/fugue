@@ -80,7 +80,7 @@ func (s *Store) commitNewTeam(
 	if err != nil {
 		return TeamRecord{}, nil, err
 	}
-	if err := s.commitTeamTx(snap, true, tx.Commit); err != nil {
+	if err := s.commitTeamTx(in.TeamID, lastSeq, snap, true, tx.Commit); err != nil {
 		return TeamRecord{}, nil, err
 	}
 	return rec, tasks, nil

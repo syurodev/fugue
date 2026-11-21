@@ -62,6 +62,10 @@ const (
 	AppStateTooLarge            Code = "appstate.too_large"
 	AppStateTooManyWindows      Code = "appstate.too_many_windows"
 	TasksSendRateLimited        Code = "tasks.send_rate_limited"
+	TasksTeamNotFound           Code = "tasks.team_not_found"
+	TasksTaskNotFound           Code = "tasks.task_not_found"
+	TasksTeamEnded              Code = "tasks.team_ended"
+	TasksPostTooLarge           Code = "tasks.post_too_large"
 )
 
 // Entry classifies one code. Hidden codes are never shown to a client; the
@@ -123,6 +127,10 @@ func Registry() []Entry {
 		{AppStateTooLarge, true, "the layout or preferences document exceeds its size limit"},
 		{AppStateTooManyWindows, true, "at most 16 windows can be saved"},
 		{TasksSendRateLimited, true, "the sibling send limit is reached (6 per agent and 30 per team per 10 minutes)"},
+		{TasksTeamNotFound, true, "the team does not exist"},
+		{TasksTaskNotFound, true, "the team task does not exist in this team"},
+		{TasksTeamEnded, true, "the team has ended; its channel is read-only"},
+		{TasksPostTooLarge, true, "the channel post exceeds the 4 KiB limit"},
 	}
 }
 

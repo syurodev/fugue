@@ -87,6 +87,10 @@ func channelTeamEventLines(ev *AppendTeamEventInput, facts channelPayloadFacts) 
 		return []channelLine{{kind: ChannelKindDecision, senderKind: ChannelSenderUser}}
 	case EventTeamNoted:
 		return []channelLine{{kind: ChannelKindNote, senderKind: ChannelSenderAgent, senderTask: facts.Author}}
+	case EventTeamUserPosted:
+		// §6.7: the user's post renders with the sender "user"; the routing
+		// target is the recipient (Q-178 A).
+		return []channelLine{{kind: ChannelKindSend, senderKind: ChannelSenderUser, recipient: facts.ToTaskID}}
 	case EventTeamFinalReview, EventTeamDeadlineReached, EventTeamDeadlineExtended, EventTeamEnded:
 		return nil
 	case EventTaskCreated, EventTaskAssigned, EventTaskStarted, EventTaskQuestionAsked,
@@ -121,6 +125,10 @@ func channelTaskEventLines(ev *AppendTeamEventInput, facts channelPayloadFacts) 
 		return []channelLine{{kind: ChannelKindResult, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID}}
 	case EventTaskMessaged:
 		return []channelLine{{kind: ChannelKindSend, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID, recipient: facts.ToTaskID}}
+	case EventTaskApprovalRequested, EventTaskApprovalResolved:
+		// §6.7: one reference line leading to the approvals inbox; the
+		// content stays in the inbox (interaction §7, VR-05).
+		return []channelLine{{kind: ChannelKindApproval, threadRoot: root, senderKind: ChannelSenderAgent, senderTask: ev.TaskID}}
 	case EventTaskStalled:
 		return channelStallLines(facts, root)
 	case EventTaskEnded:
