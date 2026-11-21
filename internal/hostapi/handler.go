@@ -36,16 +36,18 @@ const genericInternalMessage = "internal error"
 func connectCode(c errcode.Code) connect.Code {
 	switch c {
 	case errcode.InvalidArgument, errcode.InteractionOptionNotOffered, errcode.WorkspaceConfigInvalid, errcode.WorkspaceRootInvalid,
-		errcode.VendorInvalidProfile, errcode.VendorUnknownCommand, errcode.VendorCommandUnavailable, errcode.VendorCommandConflict, errcode.VendorWorkspaceMismatch:
+		errcode.VendorInvalidProfile, errcode.VendorUnknownCommand, errcode.VendorCommandUnavailable, errcode.VendorCommandConflict, errcode.VendorWorkspaceMismatch,
+		errcode.AppStateInvalidDocument:
 		return connect.CodeInvalidArgument
 	case errcode.NotFound, errcode.InteractionNotFound, errcode.WorkspaceNotFound, errcode.WorkspaceRootMissing, errcode.VendorSessionNotFound, errcode.TranscriptSessionNotFound, errcode.TranscriptItemNotFound:
 		return connect.CodeNotFound
 	case errcode.AlreadyExists, errcode.WorkspaceAlreadyExists, errcode.VaultAlreadyConfigured:
 		return connect.CodeAlreadyExists
 	case errcode.FailedPrecondition, errcode.UnsupportedVersion, errcode.InteractionAlreadyAnswered, errcode.InteractionStaleIncarnation, errcode.WorkspaceConfigChanged, errcode.WorkspaceConfigUnconfirmed,
-		errcode.VendorUnsupported, errcode.VendorSessionState, errcode.VendorTurnNotActive, errcode.VendorVaultLocked, errcode.VaultNotConfigured:
+		errcode.VendorUnsupported, errcode.VendorSessionState, errcode.VendorTurnNotActive, errcode.VendorVaultLocked, errcode.VaultNotConfigured, errcode.AppStateRevisionConflict:
 		return connect.CodeFailedPrecondition
-	case errcode.FrameTooLarge, errcode.InteractionTextTooLarge, errcode.WorkspaceConfigTooLarge, errcode.VendorCapacity, errcode.VaultRateLimited:
+	case errcode.FrameTooLarge, errcode.InteractionTextTooLarge, errcode.WorkspaceConfigTooLarge, errcode.VendorCapacity, errcode.VaultRateLimited,
+		errcode.AppStateTooLarge, errcode.AppStateTooManyWindows:
 		return connect.CodeResourceExhausted
 	case errcode.PermissionDenied, errcode.WorkspacePathDenied, errcode.WorkspaceOwnershipInvalid, errcode.VaultInvalidPassphrase:
 		return connect.CodePermissionDenied
@@ -87,6 +89,10 @@ func toConnectError(ctx context.Context, backend app.Backend, err error) error {
 	var raErr interface{ RetryAfterSeconds() int64 }
 	if errors.As(err, &raErr) {
 		detail.RetryAfterSeconds = raErr.RetryAfterSeconds()
+	}
+	var crErr interface{ CurrentRevision() uint64 }
+	if errors.As(err, &crErr) {
+		detail.CurrentRevision = crErr.CurrentRevision()
 	}
 	d, derr := connect.NewErrorDetail(detail)
 	if derr != nil {

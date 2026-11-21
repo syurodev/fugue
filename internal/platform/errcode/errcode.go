@@ -57,6 +57,10 @@ const (
 	VaultRateLimited            Code = "vault.rate_limited"
 	VaultNotConfigured          Code = "vault.not_configured"
 	VaultAlreadyConfigured      Code = "vault.already_configured"
+	AppStateRevisionConflict    Code = "appstate.revision_conflict"
+	AppStateInvalidDocument     Code = "appstate.invalid_document"
+	AppStateTooLarge            Code = "appstate.too_large"
+	AppStateTooManyWindows      Code = "appstate.too_many_windows"
 	TasksSendRateLimited        Code = "tasks.send_rate_limited"
 )
 
@@ -114,6 +118,10 @@ func Registry() []Entry {
 		{VaultRateLimited, true, "too many failed vault unlock attempts; wait before retrying"},
 		{VaultNotConfigured, true, "the vault is not configured yet"},
 		{VaultAlreadyConfigured, true, "the vault is already configured"},
+		{AppStateRevisionConflict, true, "the app-state document changed under the caller's expected revision; the typed detail names the current one"},
+		{AppStateInvalidDocument, true, "the layout or preferences document is not valid JSON with an integer schema_version >= 1"},
+		{AppStateTooLarge, true, "the layout or preferences document exceeds its size limit"},
+		{AppStateTooManyWindows, true, "at most 16 windows can be saved"},
 		{TasksSendRateLimited, true, "the sibling send limit is reached (6 per agent and 30 per team per 10 minutes)"},
 	}
 }

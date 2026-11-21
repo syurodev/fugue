@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package fugue.appstate.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// SavedWindow is one window layout the host stores for the app (host-api
+// §5.2). layout is the app's versioned JSON document, passed through
+// verbatim: the host validates its envelope and never interprets slot
+// contents. revision is the CAS token PutWindow and DeleteWindow expect.
+message SavedWindow {
+  string window_id = 1;
+  uint64 revision = 2;
+  bytes layout = 3;
+  google.protobuf.Timestamp updated_at = 4;
+}
+
+message ListWindowsRequest {}
+
+message ListWindowsResponse {
+  repeated SavedWindow windows = 1;
+}
+
+message PutWindowRequest {
+  string command_id = 1;
+  string window_id = 2;
+  uint64 expected_revision = 3;
+  bytes layout = 4;
+}
+
+message PutWindowResponse {
+  uint64 revision = 1;
+}
+
+message DeleteWindowRequest {
+  string command_id = 1;
+  string window_id = 2;
+  uint64 expected_revision = 3;
+}
+
+message DeleteWindowResponse {}
+
+// AppPreferences is the one preferences document the whole app shares
+// (theme, text size, the choices of desktop-app §5). preferences is the
+// app's versioned JSON document, passed through verbatim like layout.
+message GetPreferencesRequest {}
+
+message GetPreferencesResponse {
+  uint64 revision = 1;
+  bytes preferences = 2;
+}
+
+message PutPreferencesRequest {
+  string command_id = 1;
+  uint64 expected_revision = 2;
+  bytes preferences = 3;
+}
+
+message PutPreferencesResponse {
+  uint64 revision = 1;
+}
+
+// AppStateService stores the app's window layouts and preferences outside
+// the vault, so the app rebuilds every window before the vault unlocks.
+// Only the local principal with client kind app may call it (host-api §5.2,
+// §7).
+service AppStateService {
+  rpc ListWindows(ListWindowsRequest) returns (ListWindowsResponse);
+  rpc PutWindow(PutWindowRequest) returns (PutWindowResponse);
+  rpc DeleteWindow(DeleteWindowRequest) returns (DeleteWindowResponse);
+  rpc GetPreferences(GetPreferencesRequest) returns (GetPreferencesResponse);
+  rpc PutPreferences(PutPreferencesRequest) returns (PutPreferencesResponse);
+}

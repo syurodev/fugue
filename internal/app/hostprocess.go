@@ -8,6 +8,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/syurodev/fugue/internal/appstate"
 	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/environments"
 	"github.com/syurodev/fugue/internal/interaction"
@@ -154,8 +155,28 @@ func initHostTopics(hp *HostProcess, store *storage.Store, deps *HostDeps) error
 		return werr
 	}
 	hp.rt.workspaces = workspaces
+	// The app state works while the vault is locked, so it wires with the
+	// rest of the topics, before any vendor or vault service starts.
+	if aerr := initAppState(hp, store, deps); aerr != nil {
+		return aerr
+	}
 	hp.rt.hostResources = resolveHostResources(deps.HostResources)
 	hp.rt.heavy = newHeavySemaphore(hp.rt.hostResources, globalHostConfigReader(workspaces), deps.Clock, nil, hp.rt.goTask)
+	return nil
+}
+
+// initAppState wires the app-state service, whose documents must work while
+// the vault is locked, so it joins the topics before any vault-dependent
+// service starts (host-api §5.2).
+func initAppState(hp *HostProcess, store *storage.Store, deps *HostDeps) error {
+	appStates, err := NewStateService(appstate.NewStore(store.DB()), hp.rt.hub, deps.Clock)
+	if err != nil {
+		if serr := store.Close(); serr != nil {
+			return errcode.Wrap(errcode.Internal, "create app state service", errors.Join(err, serr))
+		}
+		return err
+	}
+	hp.rt.appStates = appStates
 	return nil
 }
 

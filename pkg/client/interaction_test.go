@@ -5,10 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net"
 	"net/http"
-	"net/http/httptest"
-	"path/filepath"
 	"sync"
 	"testing"
 
@@ -103,30 +100,10 @@ func scriptedInteractionError(code string) error {
 
 func serveInteractionFake(t *testing.T, fake *interactionFake) *client.Client {
 	t.Helper()
-	socket := filepath.Join(shortDir(t), "interaction.sock")
-	var lc net.ListenConfig
-	ln, err := lc.Listen(t.Context(), "unix", socket)
-	if err != nil {
-		t.Fatal(err)
-	}
 	mux := http.NewServeMux()
 	mux.Handle(hostv1connect.NewHostServiceHandler(fake))
 	mux.Handle(interactionv1connect.NewInteractionServiceHandler(fake))
-	var protos http.Protocols
-	protos.SetHTTP2(true)
-	protos.SetUnencryptedHTTP2(true)
-	srv := httptest.NewUnstartedServer(mux)
-	srv.Listener = ln
-	srv.Config.Protocols = &protos
-	srv.Start()
-	t.Cleanup(srv.Close)
-
-	c, err := client.Dial(t.Context(), socket, appParams())
-	if err != nil {
-		t.Fatalf("dial scripted interaction host: %v", err)
-	}
-	t.Cleanup(func() { c.Close() })
-	return c
+	return serveFakeOnUnixSocket(t, mux)
 }
 
 func mustJSONBytes(t *testing.T, v any) []byte {
