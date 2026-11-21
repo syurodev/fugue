@@ -201,10 +201,11 @@ func (v *view) checkbox(gtx *layout.Context, checked bool, line int) {
 // full output", and keyboard scroll on focus.
 func (v *view) code(gtx *layout.Context, b *markdown.Block) layout.Dimensions {
 	dims, _ := v.layoutCodeBlock(v.env, gtx, v.st.codeBlock(b), &CodeBlockProps{
-		Format: b.Language,
-		IsDiff: strings.EqualFold(b.Language, "diff"),
-		Raw:    joinCodeSpans(b.Lines),
-		Lines:  b.Lines,
+		Format:          b.Language,
+		IsDiff:          strings.EqualFold(b.Language, "diff"),
+		ShowLineNumbers: len(b.Lines) >= 2,
+		Raw:             joinCodeSpans(b.Lines),
+		Lines:           b.Lines,
 	})
 	return dims
 }

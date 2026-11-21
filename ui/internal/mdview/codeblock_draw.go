@@ -15,6 +15,7 @@ import (
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/unit"
 	"golang.org/x/image/math/fixed"
 
 	"github.com/syurodev/fugue/ui/internal/fonts"
@@ -256,6 +257,80 @@ func (v *view) drawActionButtons(env *kit.Env, gtx *layout.Context, st *CodeBloc
 	)
 }
 
+// ConcentricRadius returns the corner radius concentric with an outer rounded
+// frame of radius outerDp inset by pad pixels, clamped to at least RadiusSM.
+// Code blocks and the read-only file viewer share this helper.
+func ConcentricRadius(gtx *layout.Context, outerDp unit.Dp, pad int) int {
+	return max(gtx.Dp(outerDp)-pad, gtx.Dp(theme.RadiusSM))
+}
+
+type diffHunk struct {
+	kind  DiffKind
+	start int
+	end   int
+	rect  image.Rectangle
+}
+
+func collectDiffHunks(
+	diffLines []DiffLine, flows []*flow, visCount, pad, bodyTop, bodyW, scrollY, lineH, gap int,
+) []diffHunk {
+	n := min(visCount, len(diffLines), len(flows))
+	var hunks []diffHunk
+	y := bodyTop - scrollY
+	for i := range n {
+		rowH := max(flows[i].height, lineH)
+		kind := diffLines[i].Kind
+		if kind == DiffAdd || kind == DiffDel {
+			if m := len(hunks); m > 0 && hunks[m-1].kind == kind && hunks[m-1].end == i {
+				hunks[m-1].end = i + 1
+				hunks[m-1].rect.Max.Y = y + rowH
+			} else {
+				hunks = append(hunks, diffHunk{
+					kind:  kind,
+					start: i,
+					end:   i + 1,
+					rect:  image.Rect(pad, y, pad+bodyW, y+rowH),
+				})
+			}
+		}
+		y += rowH
+	}
+	applyHunkBoundaryGaps(hunks, gap)
+	return hunks
+}
+
+func applyHunkBoundaryGaps(hunks []diffHunk, gap int) {
+	if gap <= 0 {
+		return
+	}
+	topShrink := gap / 2
+	botShrink := gap - topShrink
+	for i := 0; i+1 < len(hunks); i++ {
+		if hunks[i].end == hunks[i+1].start {
+			hunks[i].rect.Max.Y -= topShrink
+			hunks[i+1].rect.Min.Y += botShrink
+		}
+	}
+}
+
+func (v *view) paintDiffHunks(gtx *layout.Context, hunks []diffHunk, bodyTop, viewH, radius int) {
+	bodyBot := bodyTop + viewH
+	for i := range hunks {
+		r := hunks[i].rect
+		if r.Max.Y <= r.Min.Y || r.Max.Y <= bodyTop || r.Min.Y >= bodyBot {
+			continue
+		}
+		paint.FillShape(gtx.Ops, diffHunkColor(v.th, hunks[i].kind), clip.UniformRRect(r, radius).Op(gtx.Ops))
+	}
+}
+
+func diffHunkColor(th *theme.Theme, kind DiffKind) color.NRGBA {
+	if kind == DiffAdd {
+		return th.StatusTone(theme.StatusSuccess).Fill
+	}
+	return th.StatusTone(theme.StatusDanger).Fill
+}
+
 func (v *view) drawCodeBody(
 	gtx *layout.Context,
 	st *CodeBlockState,
@@ -267,6 +342,10 @@ func (v *view) drawCodeBody(
 	bodyW := gutterW + markerW + codeAvailW
 	bodyRect := image.Rect(pad, bodyTop, pad+bodyW, bodyTop+viewH)
 	clipped := clip.Rect(bodyRect).Push(gtx.Ops)
+	if p.IsDiff && len(diffLines) > 0 {
+		hunks := collectDiffHunks(diffLines, flows, visCount, pad, bodyTop, bodyW, st.ScrollY, lineH, gtx.Dp(theme.SpaceXXS))
+		v.paintDiffHunks(gtx, hunks, bodyTop, viewH, ConcentricRadius(gtx, theme.RadiusLG, pad))
+	}
 	y := bodyTop - st.ScrollY
 	codeX := pad + gutterW + markerW
 
@@ -276,7 +355,7 @@ func (v *view) drawCodeBody(
 			y += rowH
 			continue
 		}
-		v.drawCodeRowChrome(gtx, p, diffLines, i, pad, y, bodyW, gutterW, markerW, rowH)
+		v.drawCodeRowChrome(gtx, p, diffLines, i, pad, y, gutterW, markerW, rowH)
 		codeClip := clip.Rect(image.Rect(codeX, y, codeX+codeAvailW, y+rowH)).Push(gtx.Ops)
 		off := op.Offset(image.Pt(codeX-st.ScrollX, y)).Push(gtx.Ops)
 		v.drawFlow(gtx, flows[i], markdown.AlignNone, codeAvailW)
@@ -290,26 +369,18 @@ func (v *view) drawCodeBody(
 }
 
 func (v *view) drawCodeRowChrome(
-	gtx *layout.Context, p *CodeBlockProps, diffLines []DiffLine, idx, pad, y, bodyW, gutterW, markerW, rowH int,
+	gtx *layout.Context, p *CodeBlockProps, diffLines []DiffLine, idx, pad, y, gutterW, markerW, rowH int,
 ) {
 	c := v.th.Chrome()
 	monoSmall := font.Font{Typeface: fonts.Mono}
 	pxSmall := fixed.I(gtx.Sp(theme.TypeCodeSmall().Size))
 	if !p.IsDiff || idx >= len(diffLines) {
-		if p.ShowLineNumbers && gutterW > 0 {
+		if gutterW > 0 {
 			v.drawMonoGlyph(gtx, strconv.Itoa(idx+1), monoSmall, pxSmall, c.FgSubtle, pad+gtx.Dp(theme.SpaceSM), y, rowH)
 		}
 		return
 	}
 	dl := diffLines[idx]
-	rowBox := image.Rect(pad, y, pad+bodyW, y+rowH)
-	switch dl.Kind {
-	case DiffAdd:
-		paint.FillShape(gtx.Ops, v.th.StatusTone(theme.StatusSuccess).Fill, clip.Rect(rowBox).Op())
-	case DiffDel:
-		paint.FillShape(gtx.Ops, v.th.StatusTone(theme.StatusDanger).Fill, clip.Rect(rowBox).Op())
-	case DiffContext, DiffMeta:
-	}
 	if dl.LineNo > 0 && gutterW > 0 {
 		v.drawMonoGlyph(gtx, strconv.Itoa(dl.LineNo), monoSmall, pxSmall, c.FgSubtle, pad+gtx.Dp(theme.SpaceSM), y, rowH)
 	}

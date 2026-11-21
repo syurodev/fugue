@@ -183,7 +183,8 @@ func (v *view) measureCodeBlock(gtx *layout.Context, st *CodeBlockState, p *Code
 	capped, visCount := capLineCount(p.MaxLines, st.Expanded, p.Truncated, totalLines)
 	fs := flowStyle{px: fixed.I(gtx.Sp(theme.TypeCode().Size)), mono: true, whole: !st.Wrapped, muted: p.Command != ""}
 	lineH := max(gtx.Sp(theme.TypeCode().Line), fs.lineHeight())
-	gutterW, markerW := v.gutterWidths(gtx, totalLines, p.IsDiff, p.ShowLineNumbers || p.IsDiff)
+	showNums := showCodeLineNumbers(p, totalLines)
+	gutterW, markerW := v.gutterWidths(gtx, maxCodeLineNumber(p, diffLines, totalLines), p.IsDiff, showNums)
 	codeAvailW := max(bodyMaxW-gutterW-markerW, 0)
 	flows, contentW, contentH := v.measureCodeRows(lines, diffLines, visCount, codeAvailW, fs, p.IsDiff, st.Wrapped, lineH)
 	viewH := contentH
@@ -435,6 +436,32 @@ func (v *view) registerBlockInput(gtx *layout.Context, st *CodeBlockState, box i
 	area := clip.Rect(box).Push(gtx.Ops)
 	event.Op(gtx.Ops, &st.focusTag)
 	area.Pop()
+}
+
+func showCodeLineNumbers(p *CodeBlockProps, totalLines int) bool {
+	if p.Command != "" {
+		return false
+	}
+	if p.IsDiff {
+		return true
+	}
+	if p.IsOutputCard {
+		return p.ShowLineNumbers
+	}
+	return p.ShowLineNumbers || totalLines >= 2
+}
+
+func maxCodeLineNumber(p *CodeBlockProps, diffLines []DiffLine, totalLines int) int {
+	n := max(totalLines, 1)
+	if !p.IsDiff {
+		return n
+	}
+	for i := range diffLines {
+		if diffLines[i].LineNo > n {
+			n = diffLines[i].LineNo
+		}
+	}
+	return n
 }
 
 func (v *view) gutterWidths(gtx *layout.Context, totalLines int, isDiff, showLineNums bool) (gutterW, markerW int) {
