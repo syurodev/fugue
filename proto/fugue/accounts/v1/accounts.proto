@@ -32,6 +32,9 @@ message Account {
   bool quota_known = 5;
   repeated QuotaWindow windows = 6;
   string updated_at = 7;
+  // quota_gate is the host's team quota gate threshold as a fraction in
+  // (0, 1]; 0 means no gate applies.
+  double quota_gate = 8;
 }
 
 message ListAccountsRequest {}

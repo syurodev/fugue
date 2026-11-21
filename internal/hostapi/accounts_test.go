@@ -1,6 +1,7 @@
 package hostapi
 
 import (
+	"encoding/json"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -27,14 +28,28 @@ func TestListAccountsRefreshesLoginAndStreamsTheQuotaTopic(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertListedAccounts(t, resp.Msg.Accounts)
+	assertQuotaStreamEventGate(t, stream)
+}
+
+func assertQuotaStreamEventGate(t *testing.T, stream *connect.ServerStreamForClient[hostv1.SubscribeResponse]) {
+	t.Helper()
 	// The refresh changed claude's login, so the topic carries that change.
 	for stream.Receive() {
-		if ev := stream.Msg().GetEvent(); ev != nil {
-			if ev.Type != app.EventQuotaAccountChanged {
-				t.Fatalf("event type = %q", ev.Type)
-			}
-			return
+		ev := stream.Msg().GetEvent()
+		if ev == nil {
+			continue
 		}
+		if ev.Type != app.EventQuotaAccountChanged {
+			t.Fatalf("event type = %q", ev.Type)
+		}
+		var changed app.AccountView
+		if err := json.Unmarshal(ev.Payload, &changed); err != nil {
+			t.Fatalf("unmarshal quota event: %v", err)
+		}
+		if changed.QuotaGate != app.QuotaGateThreshold {
+			t.Fatalf("quota event quota_gate = %v, want %v", changed.QuotaGate, app.QuotaGateThreshold)
+		}
+		return
 	}
 	t.Fatalf("no quota event after the login refresh: %v", stream.Err())
 }
@@ -46,8 +61,8 @@ func assertListedAccounts(t *testing.T, accounts []*accountsv1.Account) {
 		byVendor[a.Vendor] = a
 	}
 	claude := byVendor[vendorsv1.Vendor_VENDOR_CLAUDE]
-	if len(accounts) != 3 || claude == nil || claude.Login != "logged_in" || claude.State != "ok" || !claude.QuotaKnown {
-		t.Fatalf("accounts = %v, want claude logged in and ok", accounts)
+	if len(accounts) != 3 || claude == nil || claude.Login != "logged_in" || claude.State != "ok" || !claude.QuotaKnown || claude.QuotaGate != app.QuotaGateThreshold {
+		t.Fatalf("accounts = %v, want claude logged in, ok, and quota_gate=%v", accounts, app.QuotaGateThreshold)
 	}
 	if agy := byVendor[vendorsv1.Vendor_VENDOR_AGY]; agy == nil || agy.QuotaKnown || len(agy.Windows) != 0 {
 		t.Fatalf("agy account = %v, want quota unknown", agy)

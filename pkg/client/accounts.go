@@ -58,6 +58,7 @@ type Account struct {
 	PausedUntil string        `json:"paused_until,omitempty"`
 	Login       string        `json:"login"`
 	QuotaKnown  bool          `json:"quota_known"`
+	QuotaGate   float64       `json:"quota_gate,omitempty"`
 	Windows     []QuotaWindow `json:"windows"`
 	UpdatedAt   string        `json:"updated_at,omitempty"`
 }
@@ -179,6 +180,7 @@ func accountFromProto(a *accountsv1.Account) Account {
 		PausedUntil: a.GetPausedUntil(),
 		Login:       a.GetLogin(),
 		QuotaKnown:  a.GetQuotaKnown(),
+		QuotaGate:   a.GetQuotaGate(),
 		Windows:     windows,
 		UpdatedAt:   a.GetUpdatedAt(),
 	}

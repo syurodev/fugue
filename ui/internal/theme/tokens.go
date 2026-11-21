@@ -62,6 +62,14 @@ const (
 	TabCloseHit  = unit.Dp(20)
 )
 
+// Line row dimensions (ui-kit §3.9).
+const (
+	LineWidth    = unit.Dp(3)
+	LineGap      = unit.Dp(2)
+	LineHeight   = unit.Dp(14)
+	LineHeightSM = unit.Dp(10)
+)
+
 // ProseMeasure caps the reading column of a prose window: long lines tire
 // before the column fills a frame, so the markdown preview holds the
 // document at this width and centers it in the rest.

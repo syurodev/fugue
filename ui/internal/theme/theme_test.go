@@ -231,6 +231,46 @@ func TestLightAndDarkAreDistinctModes(t *testing.T) {
 	}
 }
 
+// TestProgressLineContrastLightAndDark pins the §6.5 and UK-E04 contrast
+// budgets for two-tier Progress (Q-173): used lines reach at least 3:1 and
+// rest lines (LineRest, Fg at 22% perceived over CanvasBg) plus secondary
+// tiers reach at least 1.5:1 against all five chrome backgrounds in both light
+// and dark modes.
+func TestProgressLineContrastLightAndDark(t *testing.T) {
+	t.Parallel()
+	for _, m := range bothModes() {
+		checkModeProgressLineContrast(t, &m)
+	}
+}
+
+func checkModeProgressLineContrast(t *testing.T, m *mode) {
+	t.Helper()
+	c := m.theme.Chrome()
+	tones := []struct {
+		name string
+		lt   theme.LineTone
+	}{
+		{"info", m.theme.StatusLineTone(theme.StatusInfo)},
+		{"success", m.theme.StatusLineTone(theme.StatusSuccess)},
+		{"warning", m.theme.StatusLineTone(theme.StatusWarning)},
+		{"danger", m.theme.StatusLineTone(theme.StatusDanger)},
+		{"action", m.theme.ActionLineTone()},
+	}
+	for _, bg := range backgroundTokens(&c) {
+		for _, tn := range tones {
+			if r := contrastRatio(linearBlend(bg.color, tn.lt.Used), bg.color); r < 3.0 {
+				t.Errorf("%s %s used line on %s contrasts %.2f:1, want >= 3.0:1", m.name, tn.name, bg.name, r)
+			}
+			if r := contrastRatio(linearBlend(bg.color, tn.lt.Secondary), bg.color); r < 1.5 {
+				t.Errorf("%s %s secondary line on %s contrasts %.2f:1, want >= 1.5:1", m.name, tn.name, bg.name, r)
+			}
+		}
+		if r := contrastRatio(linearBlend(bg.color, c.LineRest), bg.color); r < 1.5 {
+			t.Errorf("%s rest line (LineRest) on %s contrasts %.2f:1, want >= 1.5:1", m.name, bg.name, r)
+		}
+	}
+}
+
 // contrastRatio is the WCAG 2.x contrast ratio of two colors, computed here
 // so the test adds no dependency.
 func contrastRatio(a, b color.NRGBA) float64 {

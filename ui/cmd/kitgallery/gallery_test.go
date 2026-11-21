@@ -223,6 +223,7 @@ func tagCells(want map[cell]bool) {
 }
 
 func progressAndDividerCells(want map[cell]bool) {
+	want[cell{compLineRow, 0, 0, stRest}] = true
 	for i := range progressSpecs() {
 		want[cell{compProgress, i, 0, "determinate"}] = true
 	}

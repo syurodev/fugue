@@ -3,6 +3,7 @@ package accounts
 import (
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 
 	"github.com/syurodev/fugue/pkg/client"
@@ -152,6 +153,7 @@ func (m *Model) reconcileAccounts(incarnation string, accounts []client.Account)
 		if acc.Vendor == "" {
 			continue
 		}
+		acc.QuotaGate = sanitizeQuotaGate(acc.QuotaGate)
 		acc.Windows = slices.Clone(acc.Windows)
 		if _, dup := m.accounts[acc.Vendor]; !dup {
 			m.order = append(m.order, acc.Vendor)
@@ -172,6 +174,7 @@ func (m *Model) ApplyQuotaEvent(eventType string, payload []byte) error {
 	if acc.Vendor == "" {
 		return nil
 	}
+	acc.QuotaGate = sanitizeQuotaGate(acc.QuotaGate)
 	acc.Windows = slices.Clone(acc.Windows)
 	if _, exists := m.accounts[acc.Vendor]; !exists {
 		m.order = append(m.order, acc.Vendor)
@@ -179,6 +182,16 @@ func (m *Model) ApplyQuotaEvent(eventType string, payload []byte) error {
 	m.accounts[acc.Vendor] = acc
 	m.hasSnapshot = true
 	return nil
+}
+
+func sanitizeQuotaGate(v float64) float64 {
+	if math.IsNaN(v) || math.IsInf(v, 0) || v <= 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
 }
 
 // ApplyLoginSnapshot reconciles running logins with a `login` topic snapshot.

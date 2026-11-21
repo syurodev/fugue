@@ -89,7 +89,7 @@ func (h *accountsHandler) CancelLogin(ctx context.Context, req *connect.Request[
 func protoAccount(v *app.AccountView) *accountsv1.Account {
 	acc := &accountsv1.Account{
 		Vendor: protoVendor(v.Vendor), State: v.State, PausedUntil: v.PausedUntil, Login: v.Login,
-		QuotaKnown: v.QuotaKnown, UpdatedAt: v.UpdatedAt, Windows: make([]*accountsv1.QuotaWindow, 0, len(v.Windows)),
+		QuotaKnown: v.QuotaKnown, QuotaGate: v.QuotaGate, UpdatedAt: v.UpdatedAt, Windows: make([]*accountsv1.QuotaWindow, 0, len(v.Windows)),
 	}
 	for _, w := range v.Windows {
 		acc.Windows = append(acc.Windows, &accountsv1.QuotaWindow{Name: w.Name, Utilization: w.Utilization, ResetsAt: w.ResetsAt, Status: w.Status})

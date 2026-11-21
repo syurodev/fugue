@@ -89,6 +89,10 @@ func testIconTokens(t *testing.T) {
 		{"stroke.focus", theme.FocusStroke, 2},
 		{"focus.offset", theme.FocusOffset, 2},
 		{"size.hit.min", theme.HitMin, 24},
+		{"line.width", theme.LineWidth, 3},
+		{"line.gap", theme.LineGap, 2},
+		{"line.height", theme.LineHeight, 14},
+		{"line.height.sm", theme.LineHeightSM, 10},
 	})
 	for _, tc := range []struct {
 		size unit.Dp
@@ -153,6 +157,7 @@ type washTarget struct {
 // listed separately, over Action.
 func washTargets(m *mode) (onSurface []washTarget, onAction washTarget) {
 	c := m.theme.Chrome()
+	s := m.theme.Status()
 	red := m.theme.Palette().Red
 	return []washTarget{
 			{"HoverWash", c.HoverWash, c.Fg, 0.07},
@@ -165,6 +170,11 @@ func washTargets(m *mode) (onSurface []washTarget, onAction washTarget) {
 			{"DangerSoftHover", c.DangerSoftHover, red, 0.22},
 			{"DangerSoftPressed", c.DangerSoftPressed, red, 0.30},
 			{"RippleWash", c.RippleWash, c.Fg, 0.11},
+			{"LineRest", c.LineRest, c.Fg, 0.22},
+			{"LineInfoSecondary", m.theme.StatusLineTone(theme.StatusInfo).Secondary, s.Info, 0.40},
+			{"LineSuccessSecondary", m.theme.StatusLineTone(theme.StatusSuccess).Secondary, s.Success, 0.40},
+			{"LineWarningSecondary", m.theme.StatusLineTone(theme.StatusWarning).Secondary, s.Warning, 0.40},
+			{"LineDangerSecondary", m.theme.StatusLineTone(theme.StatusDanger).Secondary, s.Danger, 0.40},
 		},
 		washTarget{"RippleOnAction", c.RippleOnAction, c.ActionFg, 0.11}
 }
