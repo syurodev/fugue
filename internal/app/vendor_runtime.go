@@ -334,10 +334,6 @@ func rawXDGRuntimeDir(env []string) string {
 // composition root and tests hold it.
 func (hp *HostProcess) Vault() *vault.Service { return hp.vault }
 
-// VendorStore accessor for the host API tests and the future CLI tools; the
-// store is the team event log the channel reads.
-func (hp *HostProcess) VendorStore() *vendorstore.Store { return hp.vendorStore }
-
 // VaultService returns the host vault service the Host API serves.
 func (rt *HostRuntime) VaultService() (*VaultService, error) {
 	if rt.vaultService == nil {
