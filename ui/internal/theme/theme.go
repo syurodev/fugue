@@ -132,6 +132,10 @@ type Chrome struct {
 	// of the whole-body pressed fill (§3.7).
 	RippleWash     color.NRGBA
 	RippleOnAction color.NRGBA
+	// LineRest is the rest-segment color of a line row (ui-kit §6.5, Q-173):
+	// Fg at 22% perceived over CanvasBg, keeping at least 1.5:1 contrast on
+	// every chrome surface in both light and dark modes.
+	LineRest color.NRGBA
 }
 
 // Palette is the eight-hue tier for syntax, status and accents. Hues are
@@ -162,6 +166,13 @@ type Status struct {
 type Tone struct {
 	Fill color.NRGBA
 	Fg   color.NRGBA
+}
+
+// LineTone holds the solid used color and its 40% perceived secondary-tier
+// color for two-tier Progress (ui-kit §6.5).
+type LineTone struct {
+	Used      color.NRGBA
+	Secondary color.NRGBA
 }
 
 // Hue names one of the eight palette hues (§6.4).
@@ -195,14 +206,16 @@ const (
 // syntax colors, the shaper its Material() hands to widgets, and the one
 // material theme those tokens seed — built once here, never per frame.
 type Theme struct {
-	chrome   Chrome
-	palette  Palette
-	status   Status
-	hueTones [numHues]Tone
-	link     color.NRGBA
-	syntax   map[SyntaxRole]SyntaxStyle
-	shaper   *text.Shaper
-	mat      *material.Theme
+	chrome     Chrome
+	palette    Palette
+	status     Status
+	hueTones   [numHues]Tone
+	lineTones  [4]LineTone
+	lineAction LineTone
+	link       color.NRGBA
+	syntax     map[SyntaxRole]SyntaxStyle
+	shaper     *text.Shaper
+	mat        *material.Theme
 }
 
 // Light builds the light mode over shaper.
@@ -238,12 +251,14 @@ func newTheme(c *Chrome, p Palette, shaper *text.Shaper) Theme {
 	c.DangerSoftPressed = perceived(surface, p.Red, 0.30)
 	c.RippleWash = perceived(surface, c.Fg, 0.11)
 	c.RippleOnAction = perceived(c.Action, c.ActionFg, 0.11)
+	c.LineRest = perceived(surface, c.Fg, 0.22)
 	status := Status{
 		Info:    p.Blue,
 		Success: p.Green,
 		Warning: p.Orange,
 		Danger:  p.Red,
 	}
+	lineTones, lineAction := buildLineTones(surface, c, status)
 	syntax := map[SyntaxRole]SyntaxStyle{
 		RoleKeyword:    {Color: p.Violet, Weight: defaultWeight},
 		RoleString:     {Color: p.Green, Weight: defaultWeight},
@@ -268,16 +283,28 @@ func newTheme(c *Chrome, p Palette, shaper *text.Shaper) Theme {
 		HuePink:   softTone(c, p.Pink),
 	}
 	t := Theme{
-		chrome:   *c,
-		palette:  p,
-		status:   status,
-		hueTones: hueTones,
-		link:     p.Blue,
-		syntax:   syntax,
-		shaper:   shaper,
+		chrome:     *c,
+		palette:    p,
+		status:     status,
+		hueTones:   hueTones,
+		lineTones:  lineTones,
+		lineAction: lineAction,
+		link:       p.Blue,
+		syntax:     syntax,
+		shaper:     shaper,
 	}
 	t.mat = t.newMaterialTheme()
 	return t
+}
+
+func buildLineTones(surface color.NRGBA, c *Chrome, status Status) ([4]LineTone, LineTone) {
+	tones := [4]LineTone{
+		StatusInfo:    {Used: status.Info, Secondary: perceived(surface, status.Info, 0.40)},
+		StatusSuccess: {Used: status.Success, Secondary: perceived(surface, status.Success, 0.40)},
+		StatusWarning: {Used: status.Warning, Secondary: perceived(surface, status.Warning, 0.40)},
+		StatusDanger:  {Used: status.Danger, Secondary: perceived(surface, status.Danger, 0.40)},
+	}
+	return tones, LineTone{Used: c.Action, Secondary: perceived(surface, c.Action, 0.40)}
 }
 
 // Chrome returns the neutral token set of this mode.
@@ -317,6 +344,18 @@ func (t *Theme) StatusTone(s StatusKind) Tone {
 		return t.NeutralTone()
 	}
 }
+
+// StatusLineTone returns the used and 40% secondary colors of status s for
+// two-tier Progress (ui-kit §6.5). Out-of-range kinds fall back to ActionLineTone.
+func (t *Theme) StatusLineTone(s StatusKind) LineTone {
+	if int(s) >= 0 && int(s) < len(t.lineTones) {
+		return t.lineTones[s]
+	}
+	return t.lineAction
+}
+
+// ActionLineTone returns the used and 40% secondary colors of Chrome.Action.
+func (t *Theme) ActionLineTone() LineTone { return t.lineAction }
 
 // Link returns the hyperlink color, derived from the palette (blue).
 func (t *Theme) Link() color.NRGBA { return t.link }

@@ -1,7 +1,6 @@
 package appwin
 
 import (
-	"fmt"
 	"image"
 	"time"
 
@@ -26,20 +25,21 @@ type accountCardWidgets struct {
 	dismissBtn  *kit.ButtonState
 	loginTag    *kit.TagState
 	progress    map[string]*kit.ProgressState
+	rowHover    map[string]*windowRowHover
 	linkButtons map[string]*kit.ButtonState
 }
 
 // accountsView owns the vendor accounts, F9.10 quota windows, and CLI login
-// flow pane (F10.5c, desktop-app §5, Q-112). Until F10.20's slot grid lands,
-// it occupies the right pane when selected from the sidebar or toggled with
-// Ctrl/Cmd+Shift+A.
+// flow pane (F10.5c, F10.22, desktop-app v0.8 §5.5). Until F10.20's slot grid
+// lands, it occupies the right pane when selected from the sidebar or toggled
+// with Ctrl/Cmd+Shift+A.
 type accountsView struct {
 	refreshing bool
 	listErr    string
 	openErr    string
 	openURL    func(string) error
 
-	refreshBtn *kit.ButtonState
+	refreshBtn *kit.IconButtonState
 	backBtn    *kit.ButtonState
 	empty      *kit.EmptyStateState
 	errBanner  *kit.BannerState
@@ -50,7 +50,7 @@ type accountsView struct {
 func newAccountsView() *accountsView {
 	return &accountsView{
 		openURL:    openHTTPSURL,
-		refreshBtn: kit.NewButtonState(),
+		refreshBtn: kit.NewIconButtonState(),
 		backBtn:    kit.NewButtonState(),
 		empty:      kit.NewEmptyStateState(),
 		errBanner:  kit.NewBannerState(),
@@ -71,6 +71,7 @@ func (v *accountsView) widgetsFor(vendor string) *accountCardWidgets {
 		dismissBtn:  kit.NewButtonState(),
 		loginTag:    kit.NewTagState(),
 		progress:    map[string]*kit.ProgressState{},
+		rowHover:    map[string]*windowRowHover{},
 		linkButtons: map[string]*kit.ButtonState{},
 	}
 	v.cards[vendor] = w
@@ -168,9 +169,25 @@ func (v *accountsView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *scree
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
 		}),
-		rigidInboxButton(env, sc.fail, v.refreshBtn, kit.ButtonProps{
-			Text: "Refresh", Variant: kit.Secondary, Size: kit.SizeSM, Busy: v.refreshing, Disabled: sc.accountsWorker == nil,
-		}, sc.requestRefreshAccounts),
+		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
+			clicked, err := v.refreshBtn.Layout(env, gtx, &kit.IconButtonProps{
+				Icon:     kit.IconRestart,
+				Label:    "Refresh accounts",
+				Variant:  kit.IconButtonGhost,
+				Size:     kit.SizeSM,
+				Disabled: sc.accountsWorker == nil || v.refreshing,
+			})
+			sc.fail(err)
+			if clicked {
+				sc.requestRefreshAccounts()
+			}
+			return v.refreshBtn.Measure(env, gtx, &kit.IconButtonProps{
+				Icon:    kit.IconRestart,
+				Label:   "Refresh accounts",
+				Variant: kit.IconButtonGhost,
+				Size:    kit.SizeSM,
+			})
+		}),
 		spacerW(theme.SpaceSM),
 		rigidInboxButton(env, sc.fail, v.backBtn, kit.ButtonProps{
 			Text: "Back to chat", Variant: kit.Ghost, Size: kit.SizeSM, Disabled: sc.open == "",
@@ -248,19 +265,10 @@ func (v *accountsView) layoutAccountCard(gtx *layout.Context, env *kit.Env, sc *
 	dims, _, err := w.card.Layout(env, gtx, kit.CardProps{}, func(gtx layout.Context) layout.Dimensions {
 		children := []layout.FlexChild{
 			rigidWidget(func(gtx *layout.Context) layout.Dimensions { return v.layoutCardHeader(gtx, env, sc, w, acc) }),
-		}
-		if acc.State == client.AccountStatePaused {
-			children = append(children, spacerH(theme.SpaceXS),
-				rigidLabel(env, theme.TypeSmall(), env.Th.Status().Warning, formatPausedSummary(acc.PausedUntil, gtx.Now)))
-		}
-		children = append(children, spacerH(theme.SpaceSM),
-			rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-				return kit.Divider(env, gtx, kit.DividerProps{Orientation: kit.Horizontal})
-			}),
 			spacerH(theme.SpaceSM),
-		)
+		}
 		children = append(children, layoutQuotaWindows(env, w, acc, gtx.Now)...)
-		if login, ok := sc.accounts.Login(acc.Vendor); ok {
+		if login, ok := sc.accounts.Login(acc.Vendor); ok && login.Active() {
 			children = append(children, v.layoutLoginSection(env, sc, w, acc.Vendor, &login)...)
 		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
@@ -271,13 +279,20 @@ func (v *accountsView) layoutAccountCard(gtx *layout.Context, env *kit.Env, sc *
 
 func (v *accountsView) layoutCardHeader(gtx *layout.Context, env *kit.Env, sc *screens, w *accountCardWidgets, acc *client.Account) layout.Dimensions {
 	c := env.Th.Chrome()
-	tagProps := accountStateTagProps(acc.State)
 	login, hasLogin := sc.accounts.Login(acc.Vendor)
 	running := hasLogin && login.Active()
-	var actionChild layout.FlexChild
+	children := []layout.FlexChild{
+		rigidLabel(env, theme.TypeLabel(), c.Fg, acc.Vendor),
+	}
+	if tagProps, showChip := accountStatusChipProps(acc, gtx.Now); showChip {
+		children = append(children, spacerW(theme.SpaceSM), rigidTag(env, sc.fail, w.stateTag, tagProps))
+	}
+	children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+		return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
+	}))
 	if running {
-		actionChild = rigidInboxButton(env, sc.fail, w.cancelBtn, kit.ButtonProps{
-			Text: "Cancel login", Variant: kit.Danger, Size: kit.SizeSM, Busy: login.Cancelling, Disabled: sc.accountsWorker == nil,
+		children = append(children, rigidInboxButton(env, sc.fail, w.cancelBtn, kit.ButtonProps{
+			Text: "Cancel", Variant: kit.Danger, Size: kit.SizeSM, Busy: login.Cancelling, Disabled: sc.accountsWorker == nil,
 		}, func() {
 			if sc.accountsWorker == nil {
 				return
@@ -285,9 +300,9 @@ func (v *accountsView) layoutCardHeader(gtx *layout.Context, env *kit.Env, sc *s
 			sc.accounts.BeginCancelLogin(acc.Vendor)
 			req := accounts.Request{Kind: accounts.OpCancelLogin, Vendor: acc.Vendor}
 			sc.accountsWorker.Do(&req)
-		})
-	} else {
-		actionChild = rigidInboxButton(env, sc.fail, w.loginBtn, kit.ButtonProps{
+		}))
+	} else if acc.State == client.AccountStateNeedsLogin {
+		children = append(children, rigidInboxButton(env, sc.fail, w.loginBtn, kit.ButtonProps{
 			Text: "Sign in", Variant: kit.Secondary, Size: kit.SizeSM, Disabled: sc.accountsWorker == nil,
 		}, func() {
 			if sc.accountsWorker == nil || sc.accounts.IsLoginRunning(acc.Vendor) {
@@ -296,160 +311,20 @@ func (v *accountsView) layoutCardHeader(gtx *layout.Context, env *kit.Env, sc *s
 			sc.accounts.BeginStartLogin(acc.Vendor)
 			req := accounts.Request{Kind: accounts.OpStartLogin, Vendor: acc.Vendor}
 			sc.accountsWorker.Do(&req)
-		})
+		}))
 	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
-		rigidLabel(env, theme.TypeLabel(), c.Fg, acc.Vendor),
-		spacerW(theme.SpaceSM),
-		rigidTag(env, sc.fail, w.stateTag, tagProps),
-		spacerW(theme.SpaceSM),
-		rigidLabel(env, theme.TypeCaption(), c.FgMuted, "CLI login: "+displayLoginStatus(acc.Login)),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
-		}),
-		actionChild,
-	)
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx, children...)
 }
 
-func accountStateTagProps(state string) kit.TagProps {
-	switch state {
+func accountStatusChipProps(acc *client.Account, now time.Time) (kit.TagProps, bool) {
+	switch accounts.NormalizeState(acc.State) {
 	case client.AccountStateOK:
-		return kit.TagProps{Text: client.AccountStateOK, Variant: kit.TagStatus, Status: theme.StatusSuccess}
+		return kit.TagProps{}, false
 	case client.AccountStatePaused:
-		return kit.TagProps{Text: client.AccountStatePaused, Variant: kit.TagStatus, Status: theme.StatusWarning}
+		return kit.TagProps{Text: formatPausedChip(acc.PausedUntil, now), Variant: kit.TagStatus, Status: theme.StatusWarning}, true
 	case client.AccountStateNeedsLogin:
-		return kit.TagProps{Text: client.AccountStateNeedsLogin, Variant: kit.TagStatus, Status: theme.StatusDanger}
+		return kit.TagProps{Text: "Needs sign-in", Variant: kit.TagStatus, Status: theme.StatusDanger}, true
 	default:
-		return kit.TagProps{Text: accounts.AccountStateUnknown, Variant: kit.TagNeutral}
+		return kit.TagProps{Text: "Unknown", Variant: kit.TagNeutral}, true
 	}
-}
-
-func displayLoginStatus(login string) string {
-	switch login {
-	case client.AccountLoginLoggedIn, client.AccountLoginLoggedOut, client.AccountLoginUnknown:
-		return login
-	default:
-		return accounts.AccountStateUnknown
-	}
-}
-
-func layoutQuotaWindows(env *kit.Env, w *accountCardWidgets, acc *client.Account, now time.Time) []layout.FlexChild {
-	c := env.Th.Chrome()
-	if !acc.QuotaKnown {
-		return []layout.FlexChild{rigidLabel(env, theme.TypeSmall(), c.FgMuted, "Quota: unknown")}
-	}
-	if len(acc.Windows) == 0 {
-		return []layout.FlexChild{rigidLabel(env, theme.TypeSmall(), c.FgMuted, "Quota: no usage windows reported")}
-	}
-	children := make([]layout.FlexChild, 0, len(acc.Windows)*3)
-	for i := range acc.Windows {
-		win := acc.Windows[i]
-		prog := ensureProgress(w.progress, win.Name)
-		util := clampUnit(win.Utilization)
-		tone := progressTone(win.Status, util)
-		header := fmt.Sprintf("%s · %.0f%% (%s) · %s", win.Name, util*100, windowStatusLabel(win.Status), formatWindowReset(win.ResetsAt, now))
-		children = append(children,
-			rigidLabel(env, theme.TypeSmall(), c.Fg, header),
-			spacerH(theme.SpaceXXS),
-			rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-				return prog.Layout(env, gtx, kit.ProgressProps{Value: float32(util), Tone: tone})
-			}),
-		)
-		if i < len(acc.Windows)-1 {
-			children = append(children, spacerH(theme.SpaceSM))
-		}
-	}
-	return children
-}
-
-func ensureProgress(m map[string]*kit.ProgressState, name string) *kit.ProgressState {
-	if p, ok := m[name]; ok {
-		return p
-	}
-	p := kit.NewProgressState()
-	m[name] = p
-	return p
-}
-
-func clampUnit(v float64) float64 {
-	if v < 0 {
-		return 0
-	}
-	if v > 1 {
-		return 1
-	}
-	return v
-}
-
-func progressTone(status string, util float64) kit.ProgressTone {
-	if status == client.QuotaStatusRejected || util >= 1.0 {
-		return kit.ProgressDanger
-	}
-	if status == client.QuotaStatusAllowedWarning {
-		return kit.ProgressWarning
-	}
-	return kit.ProgressDefault
-}
-
-func windowStatusLabel(status string) string {
-	switch status {
-	case client.QuotaStatusAllowed, client.QuotaStatusAllowedWarning, client.QuotaStatusRejected:
-		return status
-	default:
-		return accounts.AccountStateUnknown
-	}
-}
-
-func formatPausedSummary(pausedUntil string, now time.Time) string {
-	if pausedUntil == "" {
-		return "Paused · reset time unknown"
-	}
-	t, err := time.Parse(time.RFC3339Nano, pausedUntil)
-	if err != nil {
-		return "Paused · reset time unknown"
-	}
-	localStr := t.Local().Format("15:04")
-	if now.IsZero() {
-		return "Paused until " + localStr
-	}
-	if d := t.Sub(now); d > 0 {
-		return fmt.Sprintf("Paused · resets in %s (%s)", formatShortDuration(d), localStr)
-	}
-	return fmt.Sprintf("Paused · reset passed (%s)", localStr)
-}
-
-func formatWindowReset(resetsAt string, now time.Time) string {
-	if resetsAt == "" {
-		return "reset unknown"
-	}
-	t, err := time.Parse(time.RFC3339Nano, resetsAt)
-	if err != nil {
-		return "reset unknown"
-	}
-	localStr := t.Local().Format("15:04")
-	if now.IsZero() {
-		return "resets " + localStr
-	}
-	if d := t.Sub(now); d > 0 {
-		return fmt.Sprintf("resets in %s (%s)", formatShortDuration(d), localStr)
-	}
-	return fmt.Sprintf("reset passed (%s)", localStr)
-}
-
-func formatShortDuration(d time.Duration) string {
-	d = d.Round(time.Minute)
-	if d < time.Minute {
-		return "<1m"
-	}
-	hours := int(d / time.Hour)
-	mins := int((d % time.Hour) / time.Minute)
-	if hours >= 24 {
-		days := hours / 24
-		remH := hours % 24
-		return fmt.Sprintf("%dd %dh", days, remH)
-	}
-	if hours > 0 {
-		return fmt.Sprintf("%dh %dm", hours, mins)
-	}
-	return fmt.Sprintf("%dm", mins)
 }

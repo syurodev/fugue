@@ -109,9 +109,12 @@ type Account struct {
 	Login string `protobuf:"bytes,4,opt,name=login,proto3" json:"login,omitempty"`
 	// quota_known is false for a vendor with no quota signal: its usage is
 	// unknown, never unlimited.
-	QuotaKnown    bool           `protobuf:"varint,5,opt,name=quota_known,json=quotaKnown,proto3" json:"quota_known,omitempty"`
-	Windows       []*QuotaWindow `protobuf:"bytes,6,rep,name=windows,proto3" json:"windows,omitempty"`
-	UpdatedAt     string         `protobuf:"bytes,7,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	QuotaKnown bool           `protobuf:"varint,5,opt,name=quota_known,json=quotaKnown,proto3" json:"quota_known,omitempty"`
+	Windows    []*QuotaWindow `protobuf:"bytes,6,rep,name=windows,proto3" json:"windows,omitempty"`
+	UpdatedAt  string         `protobuf:"bytes,7,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	// quota_gate is the host's team quota gate threshold as a fraction in
+	// (0, 1]; 0 means no gate applies.
+	QuotaGate     float64 `protobuf:"fixed64,8,opt,name=quota_gate,json=quotaGate,proto3" json:"quota_gate,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -193,6 +196,13 @@ func (x *Account) GetUpdatedAt() string {
 		return x.UpdatedAt
 	}
 	return ""
+}
+
+func (x *Account) GetQuotaGate() float64 {
+	if x != nil {
+		return x.QuotaGate
+	}
+	return 0
 }
 
 type ListAccountsRequest struct {
@@ -457,7 +467,7 @@ const file_fugue_accounts_v1_accounts_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vutilization\x18\x02 \x01(\x01R\vutilization\x12\x1b\n" +
 	"\tresets_at\x18\x03 \x01(\tR\bresetsAt\x12\x16\n" +
-	"\x06status\x18\x04 \x01(\tR\x06status\"\x84\x02\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\"\xa3\x02\n" +
 	"\aAccount\x120\n" +
 	"\x06vendor\x18\x01 \x01(\x0e2\x18.fugue.vendors.v1.VendorR\x06vendor\x12\x14\n" +
 	"\x05state\x18\x02 \x01(\tR\x05state\x12!\n" +
@@ -467,7 +477,9 @@ const file_fugue_accounts_v1_accounts_proto_rawDesc = "" +
 	"quotaKnown\x128\n" +
 	"\awindows\x18\x06 \x03(\v2\x1e.fugue.accounts.v1.QuotaWindowR\awindows\x12\x1d\n" +
 	"\n" +
-	"updated_at\x18\a \x01(\tR\tupdatedAt\"\x15\n" +
+	"updated_at\x18\a \x01(\tR\tupdatedAt\x12\x1d\n" +
+	"\n" +
+	"quota_gate\x18\b \x01(\x01R\tquotaGate\"\x15\n" +
 	"\x13ListAccountsRequest\"N\n" +
 	"\x14ListAccountsResponse\x126\n" +
 	"\baccounts\x18\x01 \x03(\v2\x1a.fugue.accounts.v1.AccountR\baccounts\"E\n" +

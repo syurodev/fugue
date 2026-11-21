@@ -62,6 +62,66 @@ func (f *accountsFake) Subscribe(_ context.Context, req *connect.Request[hostv1.
 	return nil
 }
 
+// TestAccountsQuotaGateComesFromTheHost verifies that Account.quota_gate
+// travels from the Host API proto and topic JSON payloads into client.Account
+// (and 0 means no gate).
+func TestAccountsQuotaGateComesFromTheHost(t *testing.T) {
+	t.Parallel()
+	const customGate = 0.78
+	want, protoAccs := seedAccountsFixtures()
+	want[0].QuotaGate = customGate
+	want[1].QuotaGate = 0
+	protoAccs[0].QuotaGate = customGate
+	protoAccs[1].QuotaGate = 0
+
+	fake := &accountsFake{
+		accounts: protoAccs,
+		topics: map[string][]*hostv1.SubscribeResponse{
+			client.TopicQuota: {
+				{Kind: &hostv1.SubscribeResponse_Snapshot{Snapshot: &hostv1.SnapshotEvent{
+					Sequence: 1, IncarnationId: testAccInc,
+					State: mustJSONBytes(t, map[string]any{"accounts": want}),
+				}}},
+				{Kind: &hostv1.SubscribeResponse_Event{Event: &hostv1.HostEvent{
+					Sequence: 2, Type: client.EventQuotaAccountChanged, Payload: mustJSONBytes(t, want[0]),
+				}}},
+				{Kind: &hostv1.SubscribeResponse_End{End: &hostv1.StreamEnd{}}},
+			},
+		},
+	}
+	c := serveAccountsFake(t, fake)
+
+	got, err := c.ListAccounts(t.Context())
+	if err != nil {
+		t.Fatalf("ListAccounts: %v", err)
+	}
+	if diff := cmp.Diff(want, got); diff != "" {
+		t.Fatalf("ListAccounts quota_gate mismatch (-want +got):\n%s", diff)
+	}
+	stream, err := c.Subscribe(t.Context(), client.TopicQuota, nil)
+	if err != nil {
+		t.Fatalf("Subscribe quota: %v", err)
+	}
+	defer func() {
+		if cerr := stream.Close(); cerr != nil {
+			t.Errorf("close quota stream: %v", cerr)
+		}
+	}()
+	snapMsg := recvMsg(t, stream)
+	snap, err := client.DecodeQuotaSnapshot(snapMsg.Snapshot.State)
+	if err != nil {
+		t.Fatalf("DecodeQuotaSnapshot: %v", err)
+	}
+	if diff := cmp.Diff(want, snap); diff != "" {
+		t.Fatalf("quota snapshot mismatch (-want +got):\n%s", diff)
+	}
+	evMsg := recvMsg(t, stream)
+	changed, err := client.DecodeQuotaAccountChanged(evMsg.Event.Payload)
+	if err != nil || changed.QuotaGate != customGate {
+		t.Fatalf("DecodeQuotaAccountChanged = (%+v, %v), want QuotaGate=%v", changed, err, customGate)
+	}
+}
+
 func (f *accountsFake) ListAccounts(_ context.Context, _ *connect.Request[accountsv1.ListAccountsRequest]) (*connect.Response[accountsv1.ListAccountsResponse], error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
