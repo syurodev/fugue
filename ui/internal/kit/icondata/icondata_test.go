@@ -481,28 +481,28 @@ func quantize(v float32) float32 {
 func arcCenter(from, to rawPoint, rx, ry, phi float64, large, sweep bool) (cx, cy, theta1, dTheta float64) {
 	cosPhi, sinPhi := math.Cos(phi), math.Sin(phi)
 	dx, dy := float64(from.X-to.X)/2, float64(from.Y-to.Y)/2
-	x1 := cosPhi*dx + sinPhi*dy
-	y1 := -sinPhi*dx + cosPhi*dy
-	if lambda := x1*x1/(rx*rx) + y1*y1/(ry*ry); lambda > 1 {
+	x1 := float64(cosPhi*dx) + float64(sinPhi*dy)
+	y1 := float64(-sinPhi*dx) + float64(cosPhi*dy)
+	if lambda := float64(x1*x1/(rx*rx)) + float64(y1*y1/(ry*ry)); lambda > 1 {
 		s := math.Sqrt(lambda)
 		rx, ry = rx*s, ry*s
 	}
-	num := rx*rx*ry*ry - rx*rx*y1*y1 - ry*ry*x1*x1
+	num := float64(rx*rx*ry*ry) - float64(rx*rx*y1*y1) - float64(ry*ry*x1*x1)
 	if num < 0 {
 		num = 0
 	}
-	co := math.Sqrt(num / (rx*rx*y1*y1 + ry*ry*x1*x1))
+	co := math.Sqrt(num / (float64(rx*rx*y1*y1) + float64(ry*ry*x1*x1)))
 	if large == sweep {
 		co = -co
 	}
 	cx1 := co * rx * y1 / ry
 	cy1 := -co * ry * x1 / rx
-	cx = cosPhi*cx1 - sinPhi*cy1 + float64(from.X+to.X)/2
-	cy = sinPhi*cx1 + cosPhi*cy1 + float64(from.Y+to.Y)/2
+	cx = float64(cosPhi*cx1) - float64(sinPhi*cy1) + float64(from.X+to.X)/2
+	cy = float64(sinPhi*cx1) + float64(cosPhi*cy1) + float64(from.Y+to.Y)/2
 	angle := func(ux, uy, vx, vy float64) float64 {
-		dot, l := ux*vx+uy*vy, math.Hypot(ux, uy)*math.Hypot(vx, vy)
+		dot, l := float64(ux*vx)+float64(uy*vy), math.Hypot(ux, uy)*math.Hypot(vx, vy)
 		a := math.Acos(min(max(dot/l, -1), 1))
-		if ux*vy-uy*vx < 0 {
+		if float64(ux*vy)-float64(uy*vx) < 0 {
 			return -a
 		}
 		return a
@@ -524,16 +524,16 @@ func arcCenter(from, to rawPoint, rx, ry, phi float64, large, sweep bool) (cx, c
 func arcPoint(cx, cy, rx, ry, phi, t float64) rawPoint {
 	cosT, sinT := math.Cos(t), math.Sin(t)
 	return rawPoint{
-		X: quantize(float32(cx + rx*cosT*math.Cos(phi) - ry*sinT*math.Sin(phi))),
-		Y: quantize(float32(cy + rx*cosT*math.Sin(phi) + ry*sinT*math.Cos(phi))),
+		X: quantize(float32(cx + float64(rx*cosT*math.Cos(phi)) - float64(ry*sinT*math.Sin(phi)))),
+		Y: quantize(float32(cy + float64(rx*cosT*math.Sin(phi)) + float64(ry*sinT*math.Cos(phi)))),
 	}
 }
 
 // arcDeriv is the derivative of the same ellipse at t.
 func arcDeriv(rx, ry, phi, t float64) (float64, float64) {
 	cosT, sinT := math.Cos(t), math.Sin(t)
-	return -rx*sinT*math.Cos(phi) - ry*cosT*math.Sin(phi),
-		-rx*sinT*math.Sin(phi) + ry*cosT*math.Cos(phi)
+	return float64(-rx*sinT*math.Cos(phi)) - float64(ry*cosT*math.Sin(phi)),
+		float64(-rx*sinT*math.Sin(phi)) + float64(ry*cosT*math.Cos(phi))
 }
 
 // encode renders parsed subpaths as absolute M/L/C/Z path data, the
