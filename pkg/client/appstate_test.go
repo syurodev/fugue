@@ -18,6 +18,8 @@ import (
 	"github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
 )
 
+const AppStateConflictCode = "appstate.revision_conflict"
+
 // appStateFake is a scripted app-state host: in-memory CAS with the typed
 // conflict detail, so the client's revision_conflict handling is exercised
 // against the real wire shapes.
@@ -41,7 +43,7 @@ func (f *appStateFake) Hello(context.Context, *connect.Request[hostv1.HelloReque
 
 func (f *appStateFake) conflict(current uint64) error {
 	cerr := connect.NewError(connect.CodeFailedPrecondition, errClientInterScripted)
-	detail, derr := connect.NewErrorDetail(&hostv1.ErrorDetail{Code: "appstate.revision_conflict", CurrentRevision: current})
+	detail, derr := connect.NewErrorDetail(&hostv1.ErrorDetail{Code: AppStateConflictCode, CurrentRevision: current})
 	if derr != nil {
 		return cerr
 	}
@@ -49,7 +51,7 @@ func (f *appStateFake) conflict(current uint64) error {
 	return cerr
 }
 
-func (f *appStateFake) ListWindows(_ context.Context, _ *connect.Request[appstatev1.ListWindowsRequest]) (*connect.Response[appstatev1.ListWindowsResponse], error) {
+func (f *appStateFake) ListWindows(context.Context, *connect.Request[appstatev1.ListWindowsRequest]) (*connect.Response[appstatev1.ListWindowsResponse], error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	out := make([]*appstatev1.SavedWindow, 0, len(f.windows))
@@ -93,7 +95,7 @@ func (f *appStateFake) DeleteWindow(_ context.Context, req *connect.Request[apps
 	return connect.NewResponse(&appstatev1.DeleteWindowResponse{}), nil
 }
 
-func (f *appStateFake) GetPreferences(_ context.Context, _ *connect.Request[appstatev1.GetPreferencesRequest]) (*connect.Response[appstatev1.GetPreferencesResponse], error) {
+func (f *appStateFake) GetPreferences(context.Context, *connect.Request[appstatev1.GetPreferencesRequest]) (*connect.Response[appstatev1.GetPreferencesResponse], error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return connect.NewResponse(&appstatev1.GetPreferencesResponse{Revision: f.prefsRev, Preferences: f.prefsDoc}), nil
@@ -102,11 +104,7 @@ func (f *appStateFake) GetPreferences(_ context.Context, _ *connect.Request[apps
 func (f *appStateFake) PutPreferences(_ context.Context, req *connect.Request[appstatev1.PutPreferencesRequest]) (*connect.Response[appstatev1.PutPreferencesResponse], error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if f.prefsRev == 0 {
-		if req.Msg.GetExpectedRevision() != 0 {
-			return nil, f.conflict(0)
-		}
-	} else if f.prefsRev != req.Msg.GetExpectedRevision() {
+	if f.prefsRev != req.Msg.GetExpectedRevision() {
 		return nil, f.conflict(f.prefsRev)
 	}
 	f.prefsRev++
@@ -114,19 +112,16 @@ func (f *appStateFake) PutPreferences(_ context.Context, req *connect.Request[ap
 	return connect.NewResponse(&appstatev1.PutPreferencesResponse{Revision: f.prefsRev}), nil
 }
 
-// serveAppStateFake serves the fake over a real unix socket and dials it as
-// the app client.
-func serveAppStateFake(t *testing.T, fake *appStateFake) *client.Client {
+// serveFakeOnUnixSocket serves mux over a real unix socket and dials it as
+// the app client (host-api §7).
+func serveFakeOnUnixSocket(t *testing.T, mux *http.ServeMux) *client.Client {
 	t.Helper()
-	socket := filepath.Join(shortDir(t), "appstate.sock")
+	socket := filepath.Join(shortDir(t), "fake.sock")
 	var lc net.ListenConfig
 	ln, err := lc.Listen(t.Context(), "unix", socket)
 	if err != nil {
 		t.Fatal(err)
 	}
-	mux := http.NewServeMux()
-	mux.Handle(hostv1connect.NewHostServiceHandler(fake))
-	mux.Handle(appstatev1connect.NewAppStateServiceHandler(fake))
 	var protos http.Protocols
 	protos.SetHTTP2(true)
 	protos.SetUnencryptedHTTP2(true)
@@ -138,11 +133,21 @@ func serveAppStateFake(t *testing.T, fake *appStateFake) *client.Client {
 
 	c, err := client.Dial(t.Context(), socket, appParams())
 	if err != nil {
-		t.Fatalf("dial the scripted app-state host: %v", err)
+		t.Fatalf("dial the scripted host: %v", err)
 	}
 	t.Cleanup(func() { c.Close() })
 	return c
 }
+
+func serveAppStateFake(t *testing.T, fake *appStateFake) *client.Client {
+	t.Helper()
+	mux := http.NewServeMux()
+	mux.Handle(hostv1connect.NewHostServiceHandler(fake))
+	mux.Handle(appstatev1connect.NewAppStateServiceHandler(fake))
+	return serveFakeOnUnixSocket(t, mux)
+}
+
+const testAppStateWindow = "0d20ab17-0000-4000-8000-000000000042"
 
 func TestAppStateClientMethodsOverRealSocket(t *testing.T) {
 	t.Parallel()
@@ -159,60 +164,54 @@ func TestAppStateClientMethodsOverRealSocket(t *testing.T) {
 	}
 
 	layout := []byte(`{"schema_version":1,"slots":["main"],"pad":"  keep verbatim  "}`)
-	win := "0d20ab17-0000-4000-8000-000000000042"
+	assertWindowPut(t, ctx, c, "cmd-client-1", testAppStateWindow, 0, layout, 1)
+	assertWindowPut(t, ctx, c, "cmd-client-3", testAppStateWindow, 1, layout, 2)
+	assertListedWindow(t, ctx, c, layout)
+
+	if delErr := c.DeleteAppStateWindow(ctx, "cmd-client-4", testAppStateWindow, 2); delErr != nil {
+		t.Fatalf("DeleteAppStateWindow: %v", delErr)
+	}
+	assertAppStateDeleted(t, ctx, c)
+}
+
+// assertWindowPut submits one window layout and expects the given revision.
+func assertWindowPut(t *testing.T, ctx context.Context, c *client.Client, commandID, windowID string, expected uint64, layout []byte, wantRev uint64) {
+	t.Helper()
 	rev, err := c.PutAppStateWindow(ctx, &client.PutAppStateWindowInput{
-		CommandID: "cmd-client-1", WindowID: win, Layout: layout,
+		CommandID: commandID, WindowID: windowID, ExpectedRevision: expected, Layout: layout,
 	})
-	if err != nil || rev != 1 {
-		t.Fatalf("PutAppStateWindow create = (%d, %v), want (1, nil)", rev, err)
+	if err != nil || rev != wantRev {
+		t.Fatalf("PutAppStateWindow %s = (%d, %v), want (%d, nil)", commandID, rev, err, wantRev)
 	}
+}
 
-	// A stale revision fails typed with the current revision attached.
-	_, err = c.PutAppStateWindow(ctx, &client.PutAppStateWindowInput{
-		CommandID: "cmd-client-2", WindowID: win, ExpectedRevision: 9, Layout: layout,
-	})
-	code, ok := client.AppStateCodeOf(err)
-	if !ok || code != "appstate.revision_conflict" {
-		t.Fatalf("AppStateCodeOf = (%q, %v), want appstate.revision_conflict", code, ok)
-	}
-	if current, ok := client.AppStateCurrentRevision(err); !ok || current != 1 {
-		t.Fatalf("AppStateCurrentRevision = (%d, %v), want (1, true)", current, ok)
-	}
-
-	rev, err = c.PutAppStateWindow(ctx, &client.PutAppStateWindowInput{
-		CommandID: "cmd-client-3", WindowID: win, ExpectedRevision: 1, Layout: layout,
-	})
-	if err != nil || rev != 2 {
-		t.Fatalf("PutAppStateWindow update = (%d, %v), want (2, nil)", rev, err)
-	}
-	windows, err = c.ListWindows(ctx)
+// assertListedWindow asserts the one stored window round-trips verbatim.
+func assertListedWindow(t *testing.T, ctx context.Context, c *client.Client, layout []byte) {
+	t.Helper()
+	windows, err := c.ListWindows(ctx)
 	if err != nil || len(windows) != 1 {
 		t.Fatalf("ListWindows = (%+v, %v)", windows, err)
 	}
-	if windows[0].WindowID != win || windows[0].Revision != 2 || string(windows[0].Layout) != string(layout) {
+	if windows[0].WindowID != testAppStateWindow || windows[0].Revision != 2 || string(windows[0].Layout) != string(layout) {
 		t.Fatalf("the layout did not round-trip verbatim: %+v", windows[0])
 	}
+}
 
-	if err := c.DeleteAppStateWindow(ctx, "cmd-client-4", win, 2); err != nil {
-		t.Fatalf("DeleteAppStateWindow: %v", err)
-	}
-	err = c.DeleteAppStateWindow(ctx, "cmd-client-5", win, 2)
-	if code, ok := client.AppStateCodeOf(err); !ok || code != "appstate.revision_conflict" {
-		t.Fatalf("DeleteAppStateWindow twice = %v, want revision_conflict", err)
-	}
+// TestAppStatePreferencesOverRealSocket drives the shared preferences
+// document over the socket.
+func TestAppStatePreferencesOverRealSocket(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	c := serveAppStateFake(t, newAppStateFake())
 
 	prefsRaw := []byte(`{"schema_version":1,"theme":"dark"}`)
 	prefs, err := c.GetAppStatePreferences(ctx)
 	if err != nil || prefs.Revision != 0 {
 		t.Fatalf("GetAppStatePreferences before any save = (%+v, %v)", prefs, err)
 	}
-	rev, err = c.PutAppStatePreferences(ctx, &client.PutAppStatePreferencesInput{CommandID: "cmd-client-6", Preferences: prefsRaw})
+	rev, err := c.PutAppStatePreferences(ctx, &client.PutAppStatePreferencesInput{CommandID: "cmd-client-6", Preferences: prefsRaw})
 	if err != nil || rev != 1 {
 		t.Fatalf("PutAppStatePreferences create = (%d, %v), want (1, nil)", rev, err)
-	}
-	_, err = c.PutAppStatePreferences(ctx, &client.PutAppStatePreferencesInput{CommandID: "cmd-client-7", ExpectedRevision: 5, Preferences: prefsRaw})
-	if code, ok := client.AppStateCodeOf(err); !ok || code != "appstate.revision_conflict" {
-		t.Fatalf("PutAppStatePreferences stale = %v, want revision_conflict", err)
 	}
 	prefs, err = c.GetAppStatePreferences(ctx)
 	if err != nil || prefs.Revision != 1 || string(prefs.Preferences) != string(prefsRaw) {
@@ -220,7 +219,52 @@ func TestAppStateClientMethodsOverRealSocket(t *testing.T) {
 	}
 }
 
-func TestAppStateTopicDecoders(t *testing.T) {
+// assertAppStateDeleted asserts the second delete of the same window fails
+// typed with the current (absent) revision.
+func assertAppStateDeleted(t *testing.T, ctx context.Context, c *client.Client) {
+	t.Helper()
+	err := c.DeleteAppStateWindow(ctx, "cmd-client-5", testAppStateWindow, 2)
+	code, ok := client.AppStateCodeOf(err)
+	if !ok || code != AppStateConflictCode {
+		t.Fatalf("DeleteAppStateWindow twice = %v, want revision_conflict", err)
+	}
+	if current, ok := client.AppStateCurrentRevision(err); !ok || current != 0 {
+		t.Fatalf("the second delete names current revision (%d, %v), want (0, true)", current, ok)
+	}
+}
+
+// TestAppStateClientReportsTheCurrentRevision pins the typed conflict
+// detail: the code plus the revision the stored document carries now, so the
+// caller can retry its CAS against it.
+func TestAppStateClientReportsTheCurrentRevision(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	c := serveAppStateFake(t, newAppStateFake())
+
+	layout := []byte(`{"schema_version":1}`)
+	if _, err := c.PutAppStateWindow(ctx, &client.PutAppStateWindowInput{
+		CommandID: "cmd-conflict-1", WindowID: testAppStateWindow, Layout: layout,
+	}); err != nil {
+		t.Fatalf("create the window: %v", err)
+	}
+	_, err := c.PutAppStateWindow(ctx, &client.PutAppStateWindowInput{
+		CommandID: "cmd-conflict-2", WindowID: testAppStateWindow, ExpectedRevision: 9, Layout: layout,
+	})
+	code, ok := client.AppStateCodeOf(err)
+	if !ok || code != AppStateConflictCode {
+		t.Fatalf("AppStateCodeOf = (%q, %v), want %s", code, ok, AppStateConflictCode)
+	}
+	if current, ok := client.AppStateCurrentRevision(err); !ok || current != 1 {
+		t.Fatalf("AppStateCurrentRevision = (%d, %v), want (1, true)", current, ok)
+	}
+
+	_, err = c.PutAppStatePreferences(ctx, &client.PutAppStatePreferencesInput{CommandID: "cmd-conflict-3", ExpectedRevision: 5, Preferences: layout})
+	if code, ok := client.AppStateCodeOf(err); !ok || code != AppStateConflictCode {
+		t.Fatalf("PutAppStatePreferences stale = %v, want revision_conflict", err)
+	}
+}
+
+func TestAppStateSnapshotDecoder(t *testing.T) {
 	t.Parallel()
 	snap, err := client.DecodeAppStateSnapshot([]byte(
 		`{"windows":[{"window_id":"0d20ab17-0000-4000-8000-000000000001","revision":2,"layout":{"schema_version":1},"updated_at":"2026-11-21T00:00:00Z"}],` +
@@ -238,7 +282,10 @@ func TestAppStateTopicDecoders(t *testing.T) {
 	if snap.Preferences.Revision != 1 || string(snap.Preferences.Preferences) != `{"theme":"dark"}` {
 		t.Fatalf("snapshot preferences = %+v", snap.Preferences)
 	}
+}
 
+func TestAppStateEventDecoder(t *testing.T) {
+	t.Parallel()
 	put, err := client.DecodeAppStateEvent(client.EventAppStateWindowPut, []byte(`{"window_id":"0d20ab17-0000-4000-8000-000000000001","revision":2}`))
 	if err != nil || put.WindowID != "0d20ab17-0000-4000-8000-000000000001" || put.Revision != 2 {
 		t.Fatalf("DecodeAppStateEvent window_put = (%+v, %v)", put, err)

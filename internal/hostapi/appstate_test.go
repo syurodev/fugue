@@ -16,19 +16,38 @@ import (
 func TestAppStateRPCsDenyUnhelloedAndSessionPrincipals(t *testing.T) {
 	t.Parallel()
 	v := startTokenHost(t, "")
-	_, httpClient := newTestClient(t, v.sockPath)
-	appStateClient := appstatev1connect.NewAppStateServiceClient(httpClient, testBaseURL)
-
-	assertAllAppStateRPCsDenied(t, appStateClient)
-
-	wsID := v.workspaceWithRoot(t, t.TempDir())
-	_ = v.readySession(t, "appstate-deny-1", wsID, "")
-	tokens := sessionTokens(t, 1)
-	_, sessHTTP, err := attachSession(t, v.sockPath, tokens[0])
-	if err != nil {
-		t.Fatal(err)
+	for _, tc := range []struct {
+		name   string
+		client func(t *testing.T) appstatev1connect.AppStateServiceClient
+	}{
+		{
+			name: "unhelloed",
+			client: func(t *testing.T) appstatev1connect.AppStateServiceClient {
+				t.Helper()
+				_, httpClient := newTestClient(t, v.sockPath)
+				return appstatev1connect.NewAppStateServiceClient(httpClient, testBaseURL)
+			},
+		},
+		{
+			name: "session principal",
+			client: func(t *testing.T) appstatev1connect.AppStateServiceClient {
+				t.Helper()
+				wsID := v.workspaceWithRoot(t, t.TempDir())
+				_ = v.readySession(t, "appstate-deny-1", wsID, "")
+				tokens := sessionTokens(t, 1)
+				_, sessHTTP, err := attachSession(t, v.sockPath, tokens[0])
+				if err != nil {
+					t.Fatal(err)
+				}
+				return appstatev1connect.NewAppStateServiceClient(sessHTTP, testBaseURL)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			assertAllAppStateRPCsDenied(t, tc.client(t))
+		})
 	}
-	assertAllAppStateRPCsDenied(t, appstatev1connect.NewAppStateServiceClient(sessHTTP, testBaseURL))
 }
 
 func assertAllAppStateRPCsDenied(t *testing.T, c appstatev1connect.AppStateServiceClient) {

@@ -8,6 +8,7 @@ package client
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -16,6 +17,10 @@ import (
 	appstatev1 "github.com/syurodev/fugue/pkg/pb/fugue/appstate/v1"
 	"github.com/syurodev/fugue/pkg/pb/fugue/appstate/v1/appstatev1connect"
 )
+
+// errAppStateEventUnknown is the static cause behind an event type this
+// client does not decode; it is wrapped, never constructed, at the call site.
+var errAppStateEventUnknown = errors.New("the app-state event type is not one the client decodes")
 
 // TopicAppState and its event names mirror the host's durable appstate
 // topic. Events carry the window ID and the revision, never a document.
@@ -151,12 +156,15 @@ func AppStateCodeOf(err error) (string, bool) {
 	return detail.GetCode(), true
 }
 
+// AppStateConflictCode is the public code a failed app-state CAS reports.
+const AppStateConflictCode = "appstate.revision_conflict"
+
 // AppStateCurrentRevision returns the revision the stored document carries
 // now when a call failed with appstate.revision_conflict, so the caller can
-// retry its CAS against it.
+// retry its CAS against it. The revision 0 means the document is gone.
 func AppStateCurrentRevision(err error) (uint64, bool) {
 	detail, ok := errorDetailOf(err)
-	if !ok || detail.GetCurrentRevision() == 0 {
+	if !ok || detail.GetCode() != AppStateConflictCode {
 		return 0, false
 	}
 	return detail.GetCurrentRevision(), true
@@ -222,7 +230,7 @@ func DecodeAppStateEvent(eventType string, payload []byte) (AppStateEvent, error
 		}
 		return AppStateEvent{Type: eventType, Revision: wire.Revision}, nil
 	default:
-		return AppStateEvent{}, fmt.Errorf("decode the app-state event %q: unknown event type", eventType)
+		return AppStateEvent{}, fmt.Errorf("%w: %q", errAppStateEventUnknown, eventType)
 	}
 }
 

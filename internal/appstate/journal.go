@@ -10,6 +10,8 @@ import (
 	"database/sql"
 	"errors"
 	"time"
+
+	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
 // The journal row kinds; they are the `appstate` topic's event types.
@@ -43,6 +45,16 @@ type Snapshot struct {
 	Sequence    int64
 }
 
+// ChangeSequence converts a committed journal sequence for the durable
+// topic. Sequences are positive by construction, so a negative value fails
+// typed instead of converting.
+func ChangeSequence(n int64) (uint64, error) {
+	if n < 0 {
+		return 0, errcode.New(errcode.Internal, "a negative app-state change sequence")
+	}
+	return uint64(n), nil
+}
+
 // appendChange writes one journal row and prunes the journal, inside the
 // caller's transaction, and returns the row's sequence for the publish.
 func appendChange(ctx context.Context, tx *sql.Tx, kind, windowID string, revision uint64, now time.Time) (int64, error) {
@@ -52,14 +64,14 @@ func appendChange(ctx context.Context, tx *sql.Tx, kind, windowID string, revisi
 	if err != nil {
 		return 0, writeFailed("append the app-state change", err)
 	}
-	if _, err := tx.ExecContext(ctx,
+	if _, pruneErr := tx.ExecContext(ctx,
 		`DELETE FROM app_state_events WHERE seq NOT IN (SELECT seq FROM app_state_events ORDER BY seq DESC LIMIT ?)`,
-		JournalRetention); err != nil {
-		return 0, writeFailed("prune the app-state journal", err)
+		JournalRetention); pruneErr != nil {
+		return 0, writeFailed("prune the app-state journal", pruneErr)
 	}
-	seq, err := res.LastInsertId()
-	if err != nil {
-		return 0, writeFailed("read the app-state change sequence", err)
+	seq, lastErr := res.LastInsertId()
+	if lastErr != nil {
+		return 0, writeFailed("read the app-state change sequence", lastErr)
 	}
 	return seq, nil
 }
@@ -73,8 +85,8 @@ func (s *Store) ChangesSince(ctx context.Context, seq int64) ([]Change, error) {
 	}
 	defer rollback(ctx, tx)
 	var oldest sql.NullInt64
-	if err := tx.QueryRowContext(ctx, `SELECT MIN(seq) FROM app_state_events`).Scan(&oldest); err != nil {
-		return nil, readFailed("read the app-state journal oldest row", err)
+	if scanErr := tx.QueryRowContext(ctx, `SELECT MIN(seq) FROM app_state_events`).Scan(&oldest); scanErr != nil {
+		return nil, readFailed("read the app-state journal oldest row", scanErr)
 	}
 	if oldest.Valid && seq+1 < oldest.Int64 {
 		return nil, ErrChangeCursorTooOld
@@ -84,12 +96,12 @@ func (s *Store) ChangesSince(ctx context.Context, seq int64) ([]Change, error) {
 	if err != nil {
 		return nil, readFailed("read the app-state journal", err)
 	}
-	defer rows.Close()
+	defer closeRows(ctx, rows)
 	out := []Change{}
 	for rows.Next() {
 		var c Change
-		if err := rows.Scan(&c.Sequence, &c.Kind, &c.WindowID, &c.Revision); err != nil {
-			return nil, readFailed("scan an app-state change", err)
+		if scanErr := rows.Scan(&c.Sequence, &c.Kind, &c.WindowID, &c.Revision); scanErr != nil {
+			return nil, readFailed("scan an app-state change", scanErr)
 		}
 		out = append(out, c)
 	}
@@ -111,14 +123,14 @@ func (s *Store) Snapshot(ctx context.Context) (Snapshot, error) {
 	if err := tx.QueryRowContext(ctx, `SELECT COALESCE(MAX(seq), 0) FROM app_state_events`).Scan(&snap.Sequence); err != nil {
 		return Snapshot{}, readFailed("read the app-state journal sequence", err)
 	}
-	windows, err := snapshotWindows(ctx, tx)
-	if err != nil {
-		return Snapshot{}, err
+	windows, windowsErr := snapshotWindows(ctx, tx)
+	if windowsErr != nil {
+		return Snapshot{}, windowsErr
 	}
 	snap.Windows = windows
-	prefs, err := snapshotPreferences(ctx, tx)
-	if err != nil {
-		return Snapshot{}, err
+	prefs, prefsErr := snapshotPreferences(ctx, tx)
+	if prefsErr != nil {
+		return Snapshot{}, prefsErr
 	}
 	snap.Preferences = prefs
 	return snap, nil
@@ -130,7 +142,7 @@ func snapshotWindows(ctx context.Context, tx *sql.Tx) ([]Window, error) {
 	if err != nil {
 		return nil, readFailed("read the app windows", err)
 	}
-	defer rows.Close()
+	defer closeRows(ctx, rows)
 	out := []Window{}
 	for rows.Next() {
 		w, scanErr := scanWindow(rows)

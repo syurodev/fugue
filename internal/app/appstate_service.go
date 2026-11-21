@@ -44,25 +44,21 @@ func IsAppPrincipal(p string) bool {
 	return ClientKind(p) == KindApp
 }
 
-// AppStateWindowView is the Host API view of one saved window layout. The
+// StateWindowView is the Host API view of one saved window layout. The
 // transport sees only app types, never the store's.
-type AppStateWindowView struct {
+type StateWindowView struct {
 	WindowID  string
 	Revision  uint64
 	Layout    []byte
 	UpdatedAt time.Time
 }
 
-// AppStatePreferencesView is the Host API view of the shared preferences
+// StatePreferencesView is the Host API view of the shared preferences
 // document. Revision 0 with an empty Document means the app never saved any.
-type AppStatePreferencesView struct {
+type StatePreferencesView struct {
 	Revision  uint64
 	Document  []byte
 	UpdatedAt time.Time
-}
-
-func appStateWindowView(w appstate.Window) AppStateWindowView {
-	return AppStateWindowView{WindowID: w.WindowID, Revision: w.Revision, Layout: w.Layout, UpdatedAt: w.UpdatedAt}
 }
 
 // PutWindowCommand is a PutWindow request's domain fields.
@@ -90,38 +86,38 @@ type PutPreferencesCommand struct {
 	Preferences      []byte
 }
 
-// appStateDedupEntry is one replayed command's result and request
-// fingerprint, so the same command_id returns the same result and a reused
-// command_id for a different command fails typed (host-api §5).
-type appStateDedupEntry struct {
+// stateDedupEntry is one replayed command's result and request fingerprint,
+// so the same command_id returns the same result and a reused command_id for
+// a different command fails typed (host-api §5).
+type stateDedupEntry struct {
 	revision    uint64
 	fingerprint string
 }
 
-// AppStateService stores the app's documents with command dedup and CAS, and
+// StateService stores the app's documents with command dedup and CAS, and
 // publishes every committed change on the durable appstate topic.
-type AppStateService struct {
+type StateService struct {
 	store *appstate.Store
 	hub   *EventHub
 	clk   clock.Clock
 
 	mu       sync.Mutex
-	dedup    map[string]appStateDedupEntry
+	dedup    map[string]stateDedupEntry
 	dedupOrd []string
 }
 
-const appStateDedupCapacity = 1024
+const stateDedupCapacity = 1024
 
-// NewAppStateService builds the service and registers the durable appstate
+// NewStateService builds the service and registers the durable appstate
 // topic on the hub.
-func NewAppStateService(store *appstate.Store, hub *EventHub, clk clock.Clock) (*AppStateService, error) {
+func NewStateService(store *appstate.Store, hub *EventHub, clk clock.Clock) (*StateService, error) {
 	if store == nil || hub == nil {
 		return nil, errcode.New(errcode.InvalidArgument, "app state service dependencies are required")
 	}
 	if clk == nil {
 		clk = clock.Real{}
 	}
-	s := &AppStateService{store: store, hub: hub, clk: clk, dedup: map[string]appStateDedupEntry{}}
+	s := &StateService{store: store, hub: hub, clk: clk, dedup: map[string]stateDedupEntry{}}
 	if err := hub.RegisterDurable(TopicAppState, &appStateTopic{store: store}); err != nil {
 		return nil, err
 	}
@@ -136,40 +132,45 @@ func requireAppPrincipal(principal string) error {
 }
 
 // ListWindows returns every saved window, so the app rebuilds them all.
-func (s *AppStateService) ListWindows(ctx context.Context, principal string) ([]AppStateWindowView, error) {
+func (s *StateService) ListWindows(ctx context.Context, principal string) ([]StateWindowView, error) {
 	if err := requireAppPrincipal(principal); err != nil {
 		return nil, err
 	}
 	windows, err := s.store.ListWindows(ctx)
 	if err != nil {
-		return nil, err
+		return nil, errcode.Wrap(errcode.CodeOf(err), "list the saved windows", err)
 	}
-	views := make([]AppStateWindowView, 0, len(windows))
+	views := make([]StateWindowView, 0, len(windows))
 	for i := range windows {
-		views = append(views, appStateWindowView(windows[i]))
+		views = append(views, StateWindowView{
+			WindowID: windows[i].WindowID, Revision: windows[i].Revision,
+			Layout: windows[i].Layout, UpdatedAt: windows[i].UpdatedAt,
+		})
 	}
 	return views, nil
 }
 
 // GetPreferences returns the shared preferences document; revision 0 means
 // the app never saved any.
-func (s *AppStateService) GetPreferences(ctx context.Context, principal string) (AppStatePreferencesView, error) {
+func (s *StateService) GetPreferences(ctx context.Context, principal string) (StatePreferencesView, error) {
 	if err := requireAppPrincipal(principal); err != nil {
-		return AppStatePreferencesView{}, err
+		return StatePreferencesView{}, err
 	}
 	prefs, err := s.store.Preferences(ctx)
 	if err != nil {
-		return AppStatePreferencesView{}, err
+		return StatePreferencesView{}, errcode.Wrap(errcode.CodeOf(err), "read the app preferences", err)
 	}
-	return AppStatePreferencesView{Revision: prefs.Revision, Document: prefs.Document, UpdatedAt: prefs.UpdatedAt}, nil
+	return StatePreferencesView{
+		Revision: prefs.Revision, Document: prefs.Document, UpdatedAt: prefs.UpdatedAt,
+	}, nil
 }
 
 // PutWindow stores one window layout under CAS.
-func (s *AppStateService) PutWindow(ctx context.Context, cmd *PutWindowCommand) (uint64, error) {
-	if err := validateAppStateCommand(cmd.Principal, cmd.CommandID); err != nil {
+func (s *StateService) PutWindow(ctx context.Context, cmd *PutWindowCommand) (uint64, error) {
+	if err := validateStateCommand(cmd.Principal, cmd.CommandID); err != nil {
 		return 0, err
 	}
-	fp := appStateFingerprint("window", cmd.WindowID, cmd.ExpectedRevision, cmd.Layout)
+	fp := stateFingerprint("window", cmd.WindowID, cmd.ExpectedRevision, cmd.Layout)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if e, cached := s.dedup[cmd.CommandID]; cached {
@@ -180,20 +181,20 @@ func (s *AppStateService) PutWindow(ctx context.Context, cmd *PutWindowCommand) 
 	}
 	revision, seq, err := s.store.PutWindow(ctx, cmd.WindowID, cmd.ExpectedRevision, cmd.Layout, s.clk.Now())
 	if err != nil {
-		return 0, err
+		return 0, errcode.Wrap(errcode.CodeOf(err), "store the window layout", err)
 	}
 	s.publishAppState(seq, EventAppStateWindowPut, cmd.WindowID, revision)
-	s.rememberAppStateCommand(cmd.CommandID, revision, fp)
+	s.rememberStateCommand(cmd.CommandID, revision, fp)
 	return revision, nil
 }
 
 // DeleteWindow deletes one window under CAS. Closing the last window keeps
 // its layout, so the app can restore it later (host-api §5.2).
-func (s *AppStateService) DeleteWindow(ctx context.Context, cmd *DeleteWindowCommand) error {
-	if err := validateAppStateCommand(cmd.Principal, cmd.CommandID); err != nil {
+func (s *StateService) DeleteWindow(ctx context.Context, cmd *DeleteWindowCommand) error {
+	if err := validateStateCommand(cmd.Principal, cmd.CommandID); err != nil {
 		return err
 	}
-	fp := appStateFingerprint("delete", cmd.WindowID, cmd.ExpectedRevision, nil)
+	fp := stateFingerprint("delete", cmd.WindowID, cmd.ExpectedRevision, nil)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if e, cached := s.dedup[cmd.CommandID]; cached {
@@ -204,19 +205,19 @@ func (s *AppStateService) DeleteWindow(ctx context.Context, cmd *DeleteWindowCom
 	}
 	seq, err := s.store.DeleteWindow(ctx, cmd.WindowID, cmd.ExpectedRevision, s.clk.Now())
 	if err != nil {
-		return err
+		return errcode.Wrap(errcode.CodeOf(err), "delete the saved window", err)
 	}
 	s.publishAppState(seq, EventAppStateWindowDeleted, cmd.WindowID, cmd.ExpectedRevision)
-	s.rememberAppStateCommand(cmd.CommandID, cmd.ExpectedRevision, fp)
+	s.rememberStateCommand(cmd.CommandID, cmd.ExpectedRevision, fp)
 	return nil
 }
 
 // PutPreferences stores the shared preferences document under CAS.
-func (s *AppStateService) PutPreferences(ctx context.Context, cmd *PutPreferencesCommand) (uint64, error) {
-	if err := validateAppStateCommand(cmd.Principal, cmd.CommandID); err != nil {
+func (s *StateService) PutPreferences(ctx context.Context, cmd *PutPreferencesCommand) (uint64, error) {
+	if err := validateStateCommand(cmd.Principal, cmd.CommandID); err != nil {
 		return 0, err
 	}
-	fp := appStateFingerprint("preferences", "", cmd.ExpectedRevision, cmd.Preferences)
+	fp := stateFingerprint("preferences", "", cmd.ExpectedRevision, cmd.Preferences)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if e, cached := s.dedup[cmd.CommandID]; cached {
@@ -227,14 +228,14 @@ func (s *AppStateService) PutPreferences(ctx context.Context, cmd *PutPreference
 	}
 	revision, seq, err := s.store.PutPreferences(ctx, cmd.ExpectedRevision, cmd.Preferences, s.clk.Now())
 	if err != nil {
-		return 0, err
+		return 0, errcode.Wrap(errcode.CodeOf(err), "store the app preferences", err)
 	}
 	s.publishAppState(seq, EventAppStatePreferencesPut, "", revision)
-	s.rememberAppStateCommand(cmd.CommandID, revision, fp)
+	s.rememberStateCommand(cmd.CommandID, revision, fp)
 	return revision, nil
 }
 
-func validateAppStateCommand(principal, commandID string) error {
+func validateStateCommand(principal, commandID string) error {
 	if err := requireAppPrincipal(principal); err != nil {
 		return err
 	}
@@ -244,10 +245,10 @@ func validateAppStateCommand(principal, commandID string) error {
 	return nil
 }
 
-// appStateFingerprint identifies the exact request a command_id was used
-// for. It hashes the document bytes, so they never appear in the dedup table
-// or in any error.
-func appStateFingerprint(kind, windowID string, expected uint64, doc []byte) string {
+// stateFingerprint identifies the exact request a command_id was used for.
+// It hashes the document bytes, so they never appear in the dedup table or
+// in any error.
+func stateFingerprint(kind, windowID string, expected uint64, doc []byte) string {
 	h := sha256.New()
 	h.Write([]byte(kind))
 	h.Write([]byte{0})
@@ -259,13 +260,13 @@ func appStateFingerprint(kind, windowID string, expected uint64, doc []byte) str
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-func (s *AppStateService) rememberAppStateCommand(commandID string, revision uint64, fp string) {
-	if len(s.dedupOrd) >= appStateDedupCapacity {
+func (s *StateService) rememberStateCommand(commandID string, revision uint64, fp string) {
+	if len(s.dedupOrd) >= stateDedupCapacity {
 		oldest := s.dedupOrd[0]
 		s.dedupOrd = s.dedupOrd[1:]
 		delete(s.dedup, oldest)
 	}
-	s.dedup[commandID] = appStateDedupEntry{revision: revision, fingerprint: fp}
+	s.dedup[commandID] = stateDedupEntry{revision: revision, fingerprint: fp}
 	s.dedupOrd = append(s.dedupOrd, commandID)
 }
 
@@ -274,19 +275,24 @@ func (s *AppStateService) rememberAppStateCommand(commandID string, revision uin
 // serves exactly this event. Publish holds no caller lock that matters and a
 // failed publish is logged, not propagated: the committed state is already
 // durable and every subscriber catches up through Since.
-func (s *AppStateService) publishAppState(seq int64, eventType, windowID string, revision uint64) {
+func (s *StateService) publishAppState(seq int64, eventType, windowID string, revision uint64) {
+	eventSeq, seqErr := appstate.ChangeSequence(seq)
+	if seqErr != nil {
+		slog.Warn("convert an app-state event sequence", "error_code", string(errcode.CodeOf(seqErr)))
+		return
+	}
 	payload, err := marshalAppStateEvent(eventType, windowID, revision)
 	if err != nil {
 		slog.Warn("marshal an app-state event", "error_code", string(errcode.CodeOf(err)))
 		return
 	}
-	if _, err := s.hub.Publish(TopicAppState, Event{Seq: uint64(seq), Type: eventType, Payload: payload}); err != nil {
+	if _, err := s.hub.Publish(TopicAppState, Event{Seq: eventSeq, Type: eventType, Payload: payload}); err != nil {
 		slog.Warn("publish an app-state event", "error_code", string(errcode.CodeOf(err)))
 	}
 }
 
 // AppStateService returns the app-state service the Host API serves.
-func (rt *HostRuntime) AppStateService() (*AppStateService, error) {
+func (rt *HostRuntime) AppStateService() (*StateService, error) {
 	if rt.appStates == nil {
 		return nil, errcode.New(errcode.Unavailable, "the app state service is unavailable")
 	}

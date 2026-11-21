@@ -6,6 +6,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"strings"
@@ -19,8 +20,11 @@ import (
 )
 
 const (
-	testAppStatePass  = "app-state-test-passphrase"
-	testAppStateOwner = "app"
+	// testAppStateMasterUnlock configures the vault so a restart starts
+	// locked rather than unconfigured.
+	testAppStateMasterUnlock = "app-state-test-unlock-phrase"
+	testAppStateOwner        = "app"
+	testStateConflictCode    = "appstate.revision_conflict"
 )
 
 // testWindowID is a deterministic valid window UUID.
@@ -28,7 +32,8 @@ func testWindowID(n int) string {
 	return fmt.Sprintf("0d20a000-0000-4000-8000-%012d", n)
 }
 
-// startAppStateHost starts a host for the app-state tests.
+// startAppStateHost starts a host for the app-state tests; closeAppStateHost
+// closes it at the end of the test.
 func startAppStateHost(t *testing.T, dir string, clk *clock.Fake) *HostProcess {
 	t.Helper()
 	hp, err := StartHost(t.Context(), testHostDeps(dir, clk, newScriptedTransport()))
@@ -38,7 +43,18 @@ func startAppStateHost(t *testing.T, dir string, clk *clock.Fake) *HostProcess {
 	return hp
 }
 
-func appStateService(t *testing.T, hp *HostProcess) *AppStateService {
+// closeAppStateHost closes a host at the end of the test and reports a
+// failed close.
+func closeAppStateHost(t *testing.T, hp *HostProcess) {
+	t.Helper()
+	t.Cleanup(func() {
+		if closeErr := hp.Close(); closeErr != nil {
+			t.Errorf("close the app-state host: %v", closeErr)
+		}
+	})
+}
+
+func stateServiceOf(t *testing.T, hp *HostProcess) *StateService {
 	t.Helper()
 	svc, err := hp.rt.AppStateService()
 	if err != nil {
@@ -47,7 +63,7 @@ func appStateService(t *testing.T, hp *HostProcess) *AppStateService {
 	return svc
 }
 
-func appStateWindowCmd(commandID, windowID string, expected uint64, layout []byte) *PutWindowCommand {
+func stateWindowCmd(commandID, windowID string, expected uint64, layout []byte) *PutWindowCommand {
 	return &PutWindowCommand{
 		Principal:        testAppStateOwner,
 		CommandID:        commandID,
@@ -55,6 +71,24 @@ func appStateWindowCmd(commandID, windowID string, expected uint64, layout []byt
 		ExpectedRevision: expected,
 		Layout:           layout,
 	}
+}
+
+func mustPutWindow(t *testing.T, ctx context.Context, svc *StateService, cmd *PutWindowCommand) uint64 {
+	t.Helper()
+	revision, err := svc.PutWindow(ctx, cmd)
+	if err != nil {
+		t.Fatalf("put window %s: %v", cmd.WindowID, err)
+	}
+	return revision
+}
+
+func mustPutPreferences(t *testing.T, ctx context.Context, svc *StateService, cmd *PutPreferencesCommand) uint64 {
+	t.Helper()
+	revision, err := svc.PutPreferences(ctx, cmd)
+	if err != nil {
+		t.Fatalf("put preferences %s: %v", cmd.CommandID, err)
+	}
+	return revision
 }
 
 func TestAppStateRestoresEveryWindowWhileTheVaultIsLocked(t *testing.T) {
@@ -66,27 +100,21 @@ func TestAppStateRestoresEveryWindowWhileTheVaultIsLocked(t *testing.T) {
 	first := startAppStateHost(t, dir, clk)
 	// Configure the vault so the restart starts locked rather than
 	// unconfigured: the layout store must work in both states.
-	if _, err := first.Vault().SetupBytes(ctx, []byte(testAppStatePass)); err != nil {
+	if _, err := first.Vault().SetupBytes(ctx, []byte(testAppStateMasterUnlock)); err != nil {
 		t.Fatalf("configure the vault: %v", err)
 	}
 	first.Vault().Lock()
-	svc := appStateService(t, first)
+	svc := stateServiceOf(t, first)
 
 	layoutMain := []byte(`{"schema_version":1,"slots":["main"],"ratio":0.5}`)
 	layoutSide := []byte(`{"schema_version":1,"slots":["main","side"],"ratio":0.7}`)
 	winMain, winSide := testWindowID(1), testWindowID(2)
-	if _, err := svc.PutWindow(ctx, appStateWindowCmd("cmd-restore-1", winMain, 0, layoutMain)); err != nil {
-		t.Fatalf("put window 1: %v", err)
-	}
-	if _, err := svc.PutWindow(ctx, appStateWindowCmd("cmd-restore-2", winSide, 0, layoutSide)); err != nil {
-		t.Fatalf("put window 2: %v", err)
-	}
+	mustPutWindow(t, ctx, svc, stateWindowCmd("cmd-restore-1", winMain, 0, layoutMain))
+	mustPutWindow(t, ctx, svc, stateWindowCmd("cmd-restore-2", winSide, 0, layoutSide))
 	prefsRaw := []byte(`{"schema_version":1,"theme":"dark"}`)
-	if _, err := svc.PutPreferences(ctx, &PutPreferencesCommand{
+	mustPutPreferences(t, ctx, svc, &PutPreferencesCommand{
 		Principal: testAppStateOwner, CommandID: "cmd-restore-prefs", Preferences: prefsRaw,
-	}); err != nil {
-		t.Fatalf("put preferences: %v", err)
-	}
+	})
 	if err := first.Close(); err != nil {
 		t.Fatalf("close the first host: %v", err)
 	}
@@ -95,11 +123,11 @@ func TestAppStateRestoresEveryWindowWhileTheVaultIsLocked(t *testing.T) {
 	if err != nil {
 		t.Fatalf("start the second host: %v", err)
 	}
-	t.Cleanup(func() { second.Close() })
+	closeAppStateHost(t, second)
 	if got := second.Vault().Snapshot().State; got != vault.StateLocked {
 		t.Fatalf("vault state after restart = %q, want locked", got)
 	}
-	svc = appStateService(t, second)
+	svc = stateServiceOf(t, second)
 
 	windows, err := svc.ListWindows(ctx, testAppStateOwner)
 	if err != nil {
@@ -121,7 +149,7 @@ func TestAppStateRestoresEveryWindowWhileTheVaultIsLocked(t *testing.T) {
 
 // assertRestoredWindow asserts one restored window's identity, revision and
 // exact layout bytes.
-func assertRestoredWindow(t *testing.T, got AppStateWindowView, windowID string, revision uint64, layout []byte) {
+func assertRestoredWindow(t *testing.T, got StateWindowView, windowID string, revision uint64, layout []byte) {
 	t.Helper()
 	if got.WindowID != windowID || got.Revision != revision || string(got.Layout) != string(layout) {
 		t.Fatalf("restored window = (%s, %d, %s), want (%s, %d, %s)",
@@ -136,11 +164,11 @@ func TestAppStatePutRejectsAStaleRevision(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	hp := startAppStateHost(t, t.TempDir(), clock.NewFake(time.Unix(0, 0)))
-	t.Cleanup(func() { hp.Close() })
-	svc := appStateService(t, hp)
+	closeAppStateHost(t, hp)
+	svc := stateServiceOf(t, hp)
 
 	win := testWindowID(3)
-	rev, err := svc.PutWindow(ctx, appStateWindowCmd("cmd-cas-create", win, 0, []byte(`{"schema_version":1}`)))
+	rev, err := svc.PutWindow(ctx, stateWindowCmd("cmd-cas-create", win, 0, []byte(`{"schema_version":1}`)))
 	if err != nil {
 		t.Fatalf("create the window: %v", err)
 	}
@@ -151,47 +179,46 @@ func TestAppStatePutRejectsAStaleRevision(t *testing.T) {
 	// A stale expected revision on update, create-on-existing and delete all
 	// fail typed with the current revision attached.
 	stale := rev + 7
-	_, err = svc.PutWindow(ctx, appStateWindowCmd("cmd-cas-stale", win, stale, []byte(`{"schema_version":1}`)))
-	assertAppStateConflict(t, err, rev)
-	_, err = svc.PutWindow(ctx, appStateWindowCmd("cmd-cas-recreate", win, 0, []byte(`{"schema_version":1}`)))
-	assertAppStateConflict(t, err, rev)
+	_, err = svc.PutWindow(ctx, stateWindowCmd("cmd-cas-stale", win, stale, []byte(`{"schema_version":1}`)))
+	assertStateConflict(t, err, rev)
+	_, err = svc.PutWindow(ctx, stateWindowCmd("cmd-cas-recreate", win, 0, []byte(`{"schema_version":1}`)))
+	assertStateConflict(t, err, rev)
 	err = svc.DeleteWindow(ctx, &DeleteWindowCommand{
 		Principal: testAppStateOwner, CommandID: "cmd-cas-del", WindowID: win, ExpectedRevision: stale,
 	})
-	assertAppStateConflict(t, err, rev)
+	assertStateConflict(t, err, rev)
 
 	// The same CAS rule holds for the shared preferences.
-	if _, err := svc.PutPreferences(ctx, &PutPreferencesCommand{
+	mustPutPreferences(t, ctx, svc, &PutPreferencesCommand{
 		Principal: testAppStateOwner, CommandID: "cmd-cas-prefs", Preferences: []byte(`{"schema_version":1}`),
-	}); err != nil {
-		t.Fatalf("create the preferences: %v", err)
-	}
+	})
 	_, err = svc.PutPreferences(ctx, &PutPreferencesCommand{
 		Principal: testAppStateOwner, CommandID: "cmd-cas-prefs-stale", ExpectedRevision: 99,
 		Preferences: []byte(`{"schema_version":1}`),
 	})
-	assertAppStateConflict(t, err, 1)
+	assertStateConflict(t, err, 1)
 
-	// The current revision from the conflict lets the caller retry, and the
-	// retry succeeds.
-	_, err = svc.PutWindow(ctx, appStateWindowCmd("cmd-cas-stale", win, stale, []byte(`{"schema_version":1}`)))
-	if !errors.As(err, new(*appstate.ConflictError)) {
+	// The retry with the stale revision conflicts again; the retry with the
+	// current revision succeeds.
+	_, err = svc.PutWindow(ctx, stateWindowCmd("cmd-cas-stale", win, stale, []byte(`{"schema_version":1}`)))
+	var conflict *appstate.ConflictError
+	if !errors.As(err, &conflict) {
 		t.Fatalf("retry with the stale revision = %v, want a conflict", err)
 	}
-	if _, err := svc.PutWindow(ctx, appStateWindowCmd("cmd-cas-retry", win, rev, []byte(`{"schema_version":1,"slots":[]}`))); err != nil {
+	if _, err := svc.PutWindow(ctx, stateWindowCmd("cmd-cas-retry", win, rev, []byte(`{"schema_version":1,"slots":[]}`))); err != nil {
 		t.Fatalf("retry with the current revision: %v", err)
 	}
 }
 
-// assertAppStateConflict asserts a typed revision_conflict with the current
+// assertStateConflict asserts a typed revision_conflict with the current
 // revision attached.
-func assertAppStateConflict(t *testing.T, err error, current uint64) {
+func assertStateConflict(t *testing.T, err error, current uint64) {
 	t.Helper()
 	if err == nil {
-		t.Fatal("the CAS write succeeded, want appstate.revision_conflict")
+		t.Fatal("the CAS write succeeded, want a conflict")
 	}
 	if errcode.CodeOf(err) != errcode.AppStateRevisionConflict {
-		t.Fatalf("code = %q, want appstate.revision_conflict", errcode.CodeOf(err))
+		t.Fatalf("code = %q, want %s", errcode.CodeOf(err), testStateConflictCode)
 	}
 	var conflict *appstate.ConflictError
 	if !errors.As(err, &conflict) {
@@ -202,113 +229,75 @@ func assertAppStateConflict(t *testing.T, err error, current uint64) {
 	}
 }
 
+// The document kinds a case submits through.
+const (
+	kindLayout      = "layout"
+	kindPreferences = "preferences"
+)
+
+// documentCase is one invalid or oversized document the host must reject.
+type documentCase struct {
+	name, doc string
+	kind      string
+	badID     bool
+	fill      bool
+	want      errcode.Code
+}
+
+func invalidDocumentCases() []documentCase {
+	bigLayout := `{"schema_version":1,"pad":"` + strings.Repeat("x", appstate.MaxLayoutBytes) + `"}`
+	bigPrefs := `{"schema_version":1,"pad":"` + strings.Repeat("x", appstate.MaxPreferencesBytes) + `"}`
+	return []documentCase{
+		{name: "not json", kind: kindLayout, doc: `{"schema_version":`, want: errcode.AppStateInvalidDocument},
+		{name: "missing schema_version", kind: kindLayout, doc: `{"slots":[]}`, want: errcode.AppStateInvalidDocument},
+		{name: "schema_version zero", kind: kindLayout, doc: `{"schema_version":0}`, want: errcode.AppStateInvalidDocument},
+		{name: "schema_version not a number", kind: kindLayout, doc: `{"schema_version":"1"}`, want: errcode.AppStateInvalidDocument},
+		{name: "schema_version fractional", kind: kindLayout, doc: `{"schema_version":1.5}`, want: errcode.AppStateInvalidDocument},
+		{name: "layout too large", kind: kindLayout, doc: bigLayout, want: errcode.AppStateTooLarge},
+		{name: "preferences too large", kind: kindPreferences, doc: bigPrefs, want: errcode.AppStateTooLarge},
+		{name: "window id not a uuid", kind: kindLayout, doc: `{"schema_version":1}`, badID: true, want: errcode.InvalidArgument},
+		{name: "too many windows", kind: kindLayout, doc: `{"schema_version":1}`, fill: true, want: errcode.AppStateTooManyWindows},
+	}
+}
+
+// putDocument submits one case's document through the RPC it names.
+func putDocument(t *testing.T, ctx context.Context, svc *StateService, tc documentCase, seq int) error {
+	t.Helper()
+	doc := []byte(tc.doc)
+	windowID := testWindowID(300 + seq)
+	if tc.badID {
+		windowID = "not-a-uuid"
+	}
+	switch tc.kind {
+	case kindPreferences:
+		_, err := svc.PutPreferences(ctx, &PutPreferencesCommand{
+			Principal: testAppStateOwner, CommandID: fmt.Sprintf("cmd-bad-%d", seq), Preferences: doc,
+		})
+		return err
+	default:
+		_, err := svc.PutWindow(ctx, stateWindowCmd(fmt.Sprintf("cmd-bad-%d", seq), windowID, 0, doc))
+		return err
+	}
+}
+
 func TestAppStateRejectsInvalidOrOversizedDocuments(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	hp := startAppStateHost(t, t.TempDir(), clock.NewFake(time.Unix(0, 0)))
-	t.Cleanup(func() { hp.Close() })
-	svc := appStateService(t, hp)
+	closeAppStateHost(t, hp)
+	svc := stateServiceOf(t, hp)
 
-	// Sixteen valid windows fill the store, so the window-count case can run
-	// last.
-	fill := func(t *testing.T) {
-		t.Helper()
-		for n := 1; n <= appstate.MaxWindows; n++ {
-			if _, err := svc.PutWindow(ctx, appStateWindowCmd(fmt.Sprintf("cmd-fill-%d", n), testWindowID(100+n), 0, []byte(`{"schema_version":1}`))); err != nil {
-				t.Fatalf("put fill window %d: %v", n, err)
-			}
-		}
-	}
-
-	cases := []struct {
-		name string
-		code errcode.Code
-		put  func(t *testing.T) error
-	}{
-		{
-			name: "not json",
-			code: errcode.AppStateInvalidDocument,
-			put: func(t *testing.T) error {
-				_, err := svc.PutWindow(ctx, appStateWindowCmd("cmd-bad-1", testWindowID(1), 0, []byte(`{"schema_version":`)))
-				return err
-			},
-		},
-		{
-			name: "missing schema_version",
-			code: errcode.AppStateInvalidDocument,
-			put: func(t *testing.T) error {
-				_, err := svc.PutWindow(ctx, appStateWindowCmd("cmd-bad-2", testWindowID(2), 0, []byte(`{"slots":[]}`)))
-				return err
-			},
-		},
-		{
-			name: "schema_version zero",
-			code: errcode.AppStateInvalidDocument,
-			put: func(t *testing.T) error {
-				_, err := svc.PutWindow(ctx, appStateWindowCmd("cmd-bad-3", testWindowID(3), 0, []byte(`{"schema_version":0}`)))
-				return err
-			},
-		},
-		{
-			name: "schema_version not a number",
-			code: errcode.AppStateInvalidDocument,
-			put: func(t *testing.T) error {
-				_, err := svc.PutWindow(ctx, appStateWindowCmd("cmd-bad-4", testWindowID(4), 0, []byte(`{"schema_version":"1"}`)))
-				return err
-			},
-		},
-		{
-			name: "schema_version fractional",
-			code: errcode.AppStateInvalidDocument,
-			put: func(t *testing.T) error {
-				_, err := svc.PutWindow(ctx, appStateWindowCmd("cmd-bad-5", testWindowID(5), 0, []byte(`{"schema_version":1.5}`)))
-				return err
-			},
-		},
-		{
-			name: "layout too large",
-			code: errcode.AppStateTooLarge,
-			put: func(t *testing.T) error {
-				big := []byte(`{"schema_version":1,"pad":"` + strings.Repeat("x", appstate.MaxLayoutBytes) + `"}`)
-				_, err := svc.PutWindow(ctx, appStateWindowCmd("cmd-bad-6", testWindowID(6), 0, big))
-				return err
-			},
-		},
-		{
-			name: "preferences too large",
-			code: errcode.AppStateTooLarge,
-			put: func(t *testing.T) error {
-				big := []byte(`{"schema_version":1,"pad":"` + strings.Repeat("x", appstate.MaxPreferencesBytes) + `"}`)
-				_, err := svc.PutPreferences(ctx, &PutPreferencesCommand{
-					Principal: testAppStateOwner, CommandID: "cmd-bad-7", Preferences: big,
-				})
-				return err
-			},
-		},
-		{
-			name: "window id not a uuid",
-			code: errcode.InvalidArgument,
-			put: func(t *testing.T) error {
-				_, err := svc.PutWindow(ctx, appStateWindowCmd("cmd-bad-8", "not-a-uuid", 0, []byte(`{"schema_version":1}`)))
-				return err
-			},
-		},
-		{
-			name: "too many windows",
-			code: errcode.AppStateTooManyWindows,
-			put: func(t *testing.T) error {
-				fill(t)
-				_, err := svc.PutWindow(ctx, appStateWindowCmd("cmd-bad-9", testWindowID(200), 0, []byte(`{"schema_version":1}`)))
-				return err
-			},
-		},
-	}
-	for _, tc := range cases {
+	for seq, tc := range invalidDocumentCases() {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := tc.put(t)
-			if errcode.CodeOf(err) != tc.code {
-				t.Fatalf("code = %q, want %q (err %v)", errcode.CodeOf(err), tc.code, err)
+			if tc.fill {
+				for n := 1; n <= appstate.MaxWindows; n++ {
+					mustPutWindow(t, ctx, svc, stateWindowCmd(fmt.Sprintf("cmd-fill-%d", n), testWindowID(100+n), 0, []byte(`{"schema_version":1}`)))
+				}
+			}
+			err := putDocument(t, ctx, svc, tc, seq)
+			if errcode.CodeOf(err) != tc.want {
+				t.Fatalf("code = %q, want %q (err %v)", errcode.CodeOf(err), tc.want, err)
 			}
 		})
 	}
@@ -318,8 +307,8 @@ func TestAppStateDeniesNonAppPrincipals(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	hp := startAppStateHost(t, t.TempDir(), clock.NewFake(time.Unix(0, 0)))
-	t.Cleanup(func() { hp.Close() })
-	svc := appStateService(t, hp)
+	closeAppStateHost(t, hp)
+	svc := stateServiceOf(t, hp)
 
 	win := testWindowID(9)
 	denied := []string{
@@ -327,35 +316,39 @@ func TestAppStateDeniesNonAppPrincipals(t *testing.T) {
 		PrincipalSession, "", "guard", "unknown-kind",
 	}
 	for _, principal := range denied {
-		principal := principal
 		t.Run("principal "+principal, func(t *testing.T) {
 			t.Parallel()
-			if _, err := svc.ListWindows(ctx, principal); !appStateDenied(err) {
-				t.Fatalf("ListWindows principal %q = %v, want permission_denied", principal, err)
-			}
-			if _, err := svc.PutWindow(ctx, &PutWindowCommand{Principal: principal, CommandID: "cmd-deny-1", WindowID: win, Layout: []byte(`{"schema_version":1}`)}); !appStateDenied(err) {
-				t.Fatalf("PutWindow principal %q = %v, want permission_denied", principal, err)
-			}
-			if err := svc.DeleteWindow(ctx, &DeleteWindowCommand{Principal: principal, CommandID: "cmd-deny-2", WindowID: win, ExpectedRevision: 1}); !appStateDenied(err) {
-				t.Fatalf("DeleteWindow principal %q = %v, want permission_denied", principal, err)
-			}
-			if _, err := svc.GetPreferences(ctx, principal); !appStateDenied(err) {
-				t.Fatalf("GetPreferences principal %q = %v, want permission_denied", principal, err)
-			}
-			if _, err := svc.PutPreferences(ctx, &PutPreferencesCommand{Principal: principal, CommandID: "cmd-deny-3", Preferences: []byte(`{"schema_version":1}`)}); !appStateDenied(err) {
-				t.Fatalf("PutPreferences principal %q = %v, want permission_denied", principal, err)
-			}
+			assertAppStateOpsDenied(t, ctx, svc, principal, win)
 		})
 	}
 
 	// The app client kind works, including after all those denials.
-	if _, err := svc.PutWindow(ctx, appStateWindowCmd("cmd-allow", win, 0, []byte(`{"schema_version":1}`))); err != nil {
-		t.Fatalf("PutWindow as the app client: %v", err)
+	mustPutWindow(t, ctx, svc, stateWindowCmd("cmd-allow", win, 0, []byte(`{"schema_version":1}`)))
+}
+
+// assertAppStateOpsDenied runs every app-state operation as principal and
+// expects the typed denial on each.
+func assertAppStateOpsDenied(t *testing.T, ctx context.Context, svc *StateService, principal, win string) {
+	t.Helper()
+	if _, err := svc.ListWindows(ctx, principal); !stateDenied(err) {
+		t.Fatalf("ListWindows principal %q = %v, want permission_denied", principal, err)
+	}
+	if _, err := svc.PutWindow(ctx, &PutWindowCommand{Principal: principal, CommandID: "cmd-deny-1", WindowID: win, Layout: []byte(`{"schema_version":1}`)}); !stateDenied(err) {
+		t.Fatalf("PutWindow principal %q = %v, want permission_denied", principal, err)
+	}
+	if err := svc.DeleteWindow(ctx, &DeleteWindowCommand{Principal: principal, CommandID: "cmd-deny-2", WindowID: win, ExpectedRevision: 1}); !stateDenied(err) {
+		t.Fatalf("DeleteWindow principal %q = %v, want permission_denied", principal, err)
+	}
+	if _, err := svc.GetPreferences(ctx, principal); !stateDenied(err) {
+		t.Fatalf("GetPreferences principal %q = %v, want permission_denied", principal, err)
+	}
+	if _, err := svc.PutPreferences(ctx, &PutPreferencesCommand{Principal: principal, CommandID: "cmd-deny-3", Preferences: []byte(`{"schema_version":1}`)}); !stateDenied(err) {
+		t.Fatalf("PutPreferences principal %q = %v, want permission_denied", principal, err)
 	}
 }
 
-// appStateDenied reports whether err is the app-state principal denial.
-func appStateDenied(err error) bool {
+// stateDenied reports whether err is the app-state principal denial.
+func stateDenied(err error) bool {
 	return err != nil && errcode.CodeOf(err) == errcode.PermissionDenied
 }
 
@@ -363,11 +356,10 @@ func TestAppStateTopicEventsCarryNoDocumentContent(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 	hp := startAppStateHost(t, t.TempDir(), clock.NewFake(time.Unix(0, 0)))
-	t.Cleanup(func() { hp.Close() })
-	svc := appStateService(t, hp)
-	hub := hp.rt.hub
+	closeAppStateHost(t, hp)
+	svc := stateServiceOf(t, hp)
 
-	sub, err := hub.Subscribe(ctx, SubscribeParams{Principal: testAppStateOwner, Topic: TopicAppState})
+	sub, err := hp.rt.hub.Subscribe(ctx, SubscribeParams{Principal: testAppStateOwner, Topic: TopicAppState})
 	if err != nil {
 		t.Fatalf("subscribe to the appstate topic: %v", err)
 	}
@@ -375,14 +367,10 @@ func TestAppStateTopicEventsCarryNoDocumentContent(t *testing.T) {
 
 	layout := []byte(`{"schema_version":1,"secret-marker":"layout-9f31c2"}`)
 	prefs := []byte(`{"schema_version":1,"secret-marker":"prefs-7b04de"}`)
-	if _, err := svc.PutWindow(ctx, appStateWindowCmd("cmd-topic-1", testWindowID(10), 0, layout)); err != nil {
-		t.Fatalf("put the window: %v", err)
-	}
-	if _, err := svc.PutPreferences(ctx, &PutPreferencesCommand{
+	mustPutWindow(t, ctx, svc, stateWindowCmd("cmd-topic-1", testWindowID(10), 0, layout))
+	mustPutPreferences(t, ctx, svc, &PutPreferencesCommand{
 		Principal: testAppStateOwner, CommandID: "cmd-topic-2", Preferences: prefs,
-	}); err != nil {
-		t.Fatalf("put the preferences: %v", err)
-	}
+	})
 	if err := svc.DeleteWindow(ctx, &DeleteWindowCommand{
 		Principal: testAppStateOwner, CommandID: "cmd-topic-3", WindowID: testWindowID(10), ExpectedRevision: 1,
 	}); err != nil {
@@ -390,6 +378,13 @@ func TestAppStateTopicEventsCarryNoDocumentContent(t *testing.T) {
 	}
 
 	events := collectN(t, ctx, sub, 3)
+	assertTopicEventsCarryNoDocuments(t, events, layout, prefs)
+}
+
+// assertTopicEventsCarryNoDocuments asserts the topic events' order and that
+// none of them carries a document.
+func assertTopicEventsCarryNoDocuments(t *testing.T, events []Event, layout, prefs []byte) {
+	t.Helper()
 	wantTypes := []string{EventAppStateWindowPut, EventAppStatePreferencesPut, EventAppStateWindowDeleted}
 	for i, ev := range events {
 		if ev.Type != wantTypes[i] {

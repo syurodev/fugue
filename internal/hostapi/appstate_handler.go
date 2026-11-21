@@ -18,10 +18,10 @@ import (
 type appstateHandler struct{ backend app.Backend }
 
 type appStateProvider interface {
-	AppStateService() (*app.AppStateService, error)
+	AppStateService() (*app.StateService, error)
 }
 
-func (h *appstateHandler) service(ctx context.Context) (string, *app.AppStateService, error) {
+func (h *appstateHandler) service(ctx context.Context) (string, *app.StateService, error) {
 	principal, authErr := localSessionPrincipal(ctx, h.backend, "app state")
 	if authErr != nil {
 		return "", nil, authErr
@@ -119,7 +119,7 @@ func (h *appstateHandler) PutPreferences(ctx context.Context, req *connect.Reque
 	return connect.NewResponse(&appstatev1.PutPreferencesResponse{Revision: revision}), nil
 }
 
-func protoSavedWindow(w *app.AppStateWindowView) *appstatev1.SavedWindow {
+func protoSavedWindow(w *app.StateWindowView) *appstatev1.SavedWindow {
 	return &appstatev1.SavedWindow{
 		WindowId:  w.WindowID,
 		Revision:  w.Revision,
