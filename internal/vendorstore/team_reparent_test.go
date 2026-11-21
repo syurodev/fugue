@@ -153,3 +153,89 @@ func TestReparentToIsRejectedOutsideManagerCancel(t *testing.T) {
 		}
 	}
 }
+
+// TestManagerCancelReaddressesQueuedMailToTheLead pins the mailbox half of
+// the takeover cancel (F11.9): the manager's pending, unclaimed rows are
+// re-addressed to the adopting lead in the same transaction, keeping their
+// message IDs and creation order; rows the lead itself sent (named in the
+// keep list) stay with the manager, and rows a batch already claimed are
+// left alone so a delivery never duplicates.
+func TestManagerCancelReaddressesQueuedMailToTheLead(t *testing.T) {
+	t.Parallel()
+	s, _, _ := protectedStore(t)
+	rec := createReparentTeam(t, s)
+
+	// A row the wake already claimed and delivered (never re-addressed nor
+	// duplicated), the child's done digest queued while the manager was
+	// unknown, and the lead's own message to the manager.
+	claimedDigestID := reparentTeamID + ":claimed-digest:" + reparentMgrTask
+	if err := s.EnqueueDirectMailbox(t.Context(), reparentTeamID, reparentMgrTask, MailboxKindDigest, claimedDigestID,
+		[]byte(`{"task_id":"`+reparentMemTask+`","state":"checking"}`)); err != nil {
+		t.Fatalf("enqueue %s: %v", claimedDigestID, err)
+	}
+	claimed, err := s.ClaimMailbox(t.Context(), reparentTeamID, reparentMgrTask)
+	if err != nil || len(claimed) != 1 {
+		t.Fatalf("ClaimMailbox = (%d rows, %v), want the one queued row", len(claimed), err)
+	}
+	if err = s.MarkMailboxBatchDelivered(t.Context(), claimed[0].BatchID); err != nil {
+		t.Fatal(err)
+	}
+	for _, mail := range []struct{ id, kind string }{
+		{"child-done-digest", MailboxKindDigest},
+		{"lead-own-send", MailboxKindSend},
+	} {
+		if err := s.EnqueueDirectMailbox(t.Context(), reparentTeamID, reparentMgrTask, mail.kind, mail.id,
+			[]byte(`{"task_id":"`+reparentMemTask+`","state":"checking"}`)); err != nil {
+			t.Fatalf("enqueue %s: %v", mail.id, err)
+		}
+	}
+	queued, err := s.PendingMailboxRows(t.Context(), reparentTeamID, reparentMgrTask)
+	if err != nil || len(queued) != 2 {
+		t.Fatalf("PendingMailboxRows before the cancel = (%d rows, %v), want the two queued rows", len(queued), err)
+	}
+	var digestID, leadSendID string
+	for i := range queued {
+		switch queued[i].Kind {
+		case MailboxKindDigest:
+			digestID = queued[i].MessageID
+		case MailboxKindSend:
+			leadSendID = queued[i].MessageID
+		}
+	}
+	if digestID == "" || leadSendID == "" {
+		t.Fatalf("queued rows = %+v, want one digest and one send", queued)
+	}
+
+	seq, err := s.AppendTeamEvent(t.Context(), reparentTeamID, rec.LastSeq, &AppendTeamEventInput{
+		EventID: "ev-r-cancel-mail", TaskID: reparentMgrTask, EventType: EventTaskRecoveryDecided,
+		Outcome: RecoveryOutcomeCancel, ReparentTo: reparentLeadTask, SessionID: reparentMgrSess,
+		ReaddressMailboxFrom: reparentMgrTask, ReaddressMailboxKeep: []string{leadSendID},
+	})
+	if err != nil {
+		t.Fatalf("manager cancel with re-address: %v", err)
+	}
+
+	rows, err := s.PendingMailboxRows(t.Context(), reparentTeamID, reparentLeadTask)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0].MessageID != digestID {
+		t.Fatalf("lead pending rows = %+v, want exactly the moved digest with its original ID", rows)
+	}
+	kept, err := s.PendingMailboxRows(t.Context(), reparentTeamID, reparentMgrTask)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(kept) != 1 || kept[0].MessageID != leadSendID {
+		t.Fatalf("manager pending rows = %+v, want only the lead's own send kept", kept)
+	}
+	if rows[0].CreatedAt != kept[0].CreatedAt {
+		t.Fatal("the re-addressed digest lost its creation order")
+	}
+	if _, err = s.AppendTeamEvent(t.Context(), reparentTeamID, seq, &AppendTeamEventInput{
+		EventID: "ev-r-mail-bad", TaskID: reparentLeadTask, EventType: EventTaskEnded, Outcome: outcomeCancelled,
+		ReaddressMailboxFrom: reparentMgrTask,
+	}); err == nil {
+		t.Fatal("a non-cancel event accepted ReaddressMailboxFrom")
+	}
+}

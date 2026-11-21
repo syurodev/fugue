@@ -277,6 +277,35 @@ func (s *Store) MarkMailboxBatchDelivered(ctx context.Context, batchID string) e
 	return s.updateMailboxBatch(ctx, batchID, MailboxDelivered)
 }
 
+// PendingMailboxRows lists one recipient's pending mailbox rows, metadata
+// only, oldest first (F11.9: the takeover cancel classifies them by their
+// opened payloads before re-addressing them to the adopting lead).
+func (s *Store) PendingMailboxRows(ctx context.Context, teamID, recipientTaskID string) ([]MailboxMessage, error) {
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT message_id, team_id, recipient_task_id, batch_id, kind, state, source_seq, created_at
+		FROM team_mailbox_messages
+		WHERE team_id = ? AND recipient_task_id = ? AND state = ?
+		ORDER BY created_at, message_id`,
+		teamID, recipientTaskID, MailboxPending,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("%w: query the pending mailbox rows: %w", ErrUnavailable, err)
+	}
+	defer closeRows(ctx, rows)
+	var out []MailboxMessage
+	for rows.Next() {
+		var m MailboxMessage
+		if err := rows.Scan(&m.MessageID, &m.TeamID, &m.RecipientTaskID, &m.BatchID, &m.Kind, &m.State, &m.SourceSeq, &m.CreatedAt); err != nil {
+			return nil, fmt.Errorf("%w: scan the pending mailbox row: %w", ErrUnavailable, err)
+		}
+		out = append(out, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("%w: iterate the pending mailbox rows: %w", ErrUnavailable, err)
+	}
+	return out, nil
+}
+
 // ReleaseMailboxBatch returns a claimed batch to pending after a refused or
 // busy send, keeping its batch ID for the resend (Q-122).
 func (s *Store) ReleaseMailboxBatch(ctx context.Context, batchID string) error {

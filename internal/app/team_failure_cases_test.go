@@ -418,27 +418,13 @@ func appendExitEvent(t *testing.T, h *exitHarness, taskID string, evType vendors
 	return seq, nil
 }
 
-// mustCloseExitSessions closes the manager while advancing the fake clock so
-// the idle timers of the detach pin cannot deadlock the close.
+// mustCloseExitSessions closes every session of the exit harness; the close
+// commands are served without the fake clock, so the armed idle timers of the
+// detach pin cannot deadlock it.
 func mustCloseExitSessions(t *testing.T, h *exitHarness) {
 	t.Helper()
-	done := make(chan struct{})
-	var closeErr error
-	go func() {
-		defer close(done)
-		closeErr = h.m.CloseAll(context.Background())
-	}()
-	testutil.Spin(t, "close exit sessions", func() bool {
-		h.f.clock.Advance(time.Millisecond)
-		select {
-		case <-done:
-			return true
-		default:
-			return false
-		}
-	})
-	if closeErr != nil {
-		t.Errorf("close exit sessions: %v", closeErr)
+	if err := h.m.CloseAll(t.Context()); err != nil {
+		t.Errorf("close exit sessions: %v", err)
 	}
 }
 

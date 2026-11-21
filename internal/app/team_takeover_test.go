@@ -20,11 +20,11 @@ import (
 
 // markManagerUnknown drives the live §12 path: the manager's session died,
 // so OnSessionDied marks the manager unknown and notifies the lead.
-func markManagerUnknown(t *testing.T, f *activeTeamFixture, sess string) {
+func markManagerUnknown(t *testing.T, f *activeTeamFixture, ctx context.Context, sess string) {
 	t.Helper()
-	f.rt.teamTasks.OnSessionDied(t.Context(), sess)
+	f.rt.teamTasks.OnSessionDied(ctx, sess)
 	testutil.Spin(t, "manager task unknown", func() bool {
-		_, tasks, err := f.hp.vendorStore.TeamSnapshot(t.Context(), f.teamID)
+		_, tasks, err := f.hp.vendorStore.TeamSnapshot(ctx, f.teamID)
 		if err != nil {
 			return false
 		}
@@ -42,11 +42,11 @@ func TestLeadRecoversChildrenOfUnknownTeamManager(t *testing.T) {
 	f := newActiveTeamFixture(t, nil)
 
 	assertNoTakeoverWhileManagerRuns(t, f, ctx)
-	markManagerUnknown(t, f, "sess-mgr")
+	markManagerUnknown(t, f, ctx, "sess-mgr")
 	assertUnknownManagerNoticeIsIdempotent(t, f, ctx)
 	assertLeadTakeoverGrant(t, f, ctx)
 	assertTakeoverRevokedWhenManagerRecovers(t, f, ctx)
-	markManagerUnknown(t, f, "sess-mgr")
+	markManagerUnknown(t, f, ctx, "sess-mgr")
 	assertManagerCancelReparentsLiveChildren(t, f, ctx)
 }
 
