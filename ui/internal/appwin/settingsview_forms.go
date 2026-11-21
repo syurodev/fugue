@@ -292,37 +292,34 @@ func (v *settingsView) layoutPolicySwitch(
 	fieldID, label string, sw *kit.SwitchState,
 	checked bool, onToggle func(bool),
 ) layout.Dimensions {
-	children := []layout.FlexChild{
-		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			props := kit.SwitchProps{
-				Label:    label,
-				Checked:  checked,
-				Disabled: !sc.settings.Loaded || sc.settings.Saving,
-			}
-			local := *gtx
-			toggled, err := sw.Layout(env, &local, props)
-			sc.fail(err)
-			if toggled {
-				onToggle(!checked)
-				sc.settings.PolicyConfirmArmed = false
-			}
-			return sw.Measure(env, gtx, props)
-		}),
-		spacerW(theme.SpaceSM),
-	}
-	children = append(children, v.fieldMetaTagChildren(env, sc, fieldID, "policy")...)
-	children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-		return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
-	}))
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx, children...)
+	lead := rigidWidget(func(gtx *layout.Context) layout.Dimensions {
+		props := kit.SwitchProps{
+			Label:    label,
+			Checked:  checked,
+			Disabled: !sc.settings.Loaded || sc.settings.Saving,
+		}
+		local := *gtx
+		toggled, err := sw.Layout(env, &local, props)
+		sc.fail(err)
+		if toggled {
+			onToggle(!checked)
+			sc.settings.PolicyConfirmArmed = false
+		}
+		return sw.Measure(env, gtx, props)
+	})
+	return v.layoutHorizontalMetaRow(gtx, env, sc, lead, fieldID, "policy")
 }
 
 func (v *settingsView) layoutFieldHeaderRow(gtx *layout.Context, env *kit.Env, sc *screens, label, fieldID, kindBadge string) layout.Dimensions {
-	children := []layout.FlexChild{
-		rigidLabel(env, theme.TypeLabel(), env.Th.Chrome().Fg, label),
-		spacerW(theme.SpaceSM),
-	}
-	children = append(children, v.fieldMetaTagChildren(env, sc, fieldID, kindBadge)...)
+	lead := rigidLabel(env, theme.TypeLabel(), env.Th.Chrome().Fg, label)
+	return v.layoutHorizontalMetaRow(gtx, env, sc, lead, fieldID, kindBadge)
+}
+
+func (v *settingsView) layoutHorizontalMetaRow(gtx *layout.Context, env *kit.Env, sc *screens, lead layout.FlexChild, fieldID, kindBadge string) layout.Dimensions {
+	tags := v.fieldMetaTagChildren(env, sc, fieldID, kindBadge)
+	children := make([]layout.FlexChild, 0, 3+len(tags))
+	children = append(children, lead, spacerW(theme.SpaceSM))
+	children = append(children, tags...)
 	children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 		return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
 	}))
