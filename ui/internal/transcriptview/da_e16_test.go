@@ -329,3 +329,159 @@ func bandDiffersRGBA(a, b *image.RGBA, x0, x1, y0, y1 int) bool {
 	}
 	return false
 }
+
+// TestToolRowsShareOneHeight verifies that plain, badge, warning, failed, and
+// sub-group summary rows share the theme.Row (28 dp) height at 100% and 125%,
+// badges fit without clipping at 90/100/125%, and warning/failed tints cover
+// the full row height.
+func TestToolRowsShareOneHeight(t *testing.T) {
+	t.Parallel()
+	shaper, err := fonts.Shaper()
+	if err != nil {
+		t.Fatal(err)
+	}
+	th := theme.Light(shaper)
+	for _, scale := range []float32{1.0, 1.25} {
+		assertToolRowsHeightAtScale(t, &th, scale)
+	}
+	for _, scale := range []float32{0.9, 1.0, 1.25} {
+		assertBadgeFitsRowAtScale(t, &th, scale)
+	}
+	assertRowTintsCoverFullHeight(t, &th)
+}
+
+func assertToolRowsHeightAtScale(t *testing.T, th *theme.Theme, scale float32) {
+	t.Helper()
+	st := NewState(kit.NewVirtualHeightCache())
+	plainItem := &session.Item{TranscriptItem: client.TranscriptItem{
+		ItemID: "h-plain", Kind: kindSubagent, Sequence: 1, Revision: 1,
+		Metadata: client.TranscriptMetadata{Status: statusDone}, View: client.TranscriptView{Title: "Verify lint clean"},
+	}}
+	badgeItem := makeWorkToolItem("h-badge", 2, "", "read_file", statusDone, `{"file_path":"ui/internal/mdview/codeblock.go","start_line":10,"end_line":40}`, 0)
+	warnItem := &session.Item{TranscriptItem: client.TranscriptItem{
+		ItemID: "h-warn", Kind: kindApproval, Sequence: 3, Revision: 1,
+		Metadata: client.TranscriptMetadata{RequestKind: "command", Status: "pending"},
+		View:     client.TranscriptView{Title: "go test ./internal/mdview"},
+	}}
+	failItem := makeWorkToolItem("h-fail", 4, "", "bash", statusFailed, `{"command":"false"}`, 1)
+	failSpec := inspectToolRow(failItem)
+	sg := subGroup{title: "Read 3 files"}
+
+	measure := func(fn func(*kit.Env, *layout.Context) layout.Dimensions) (int, int) {
+		var ops op.Ops
+		var router input.Router
+		now := time.Unix(1_700_000_000, 0)
+		env := &kit.Env{Th: th, Sh: th.Shaper(), ReducedMotion: true}
+		env.Begin(now)
+		gtx := &layout.Context{
+			Ops: &ops, Metric: unit.Metric{PxPerDp: scale, PxPerSp: scale},
+			Constraints: layout.Constraints{Max: image.Pt(600, 200)}, Source: router.Source(), Now: now,
+		}
+		env.TrackInput(gtx)
+		d := fn(env, gtx)
+		env.FrameEnd(gtx)
+		return d.Size.Y, gtx.Dp(theme.Row)
+	}
+
+	plainH, wantH := measure(func(env *kit.Env, gtx *layout.Context) layout.Dimensions {
+		return layoutWorkMember(env, gtx, st, plainItem, Callbacks{})
+	})
+	badgeH, _ := measure(func(env *kit.Env, gtx *layout.Context) layout.Dimensions {
+		return layoutWorkMember(env, gtx, st, badgeItem, Callbacks{})
+	})
+	warnH, _ := measure(func(env *kit.Env, gtx *layout.Context) layout.Dimensions {
+		return layoutItem(env, gtx, st, warnItem, Callbacks{})
+	})
+	failLineH, _ := measure(func(env *kit.Env, gtx *layout.Context) layout.Dimensions {
+		return renderToolRowLine(env, gtx, cardOf(st, "h-fail-line"), &failSpec, "exit 1", true, false, Callbacks{})
+	})
+	summaryH, _ := measure(func(env *kit.Env, gtx *layout.Context) layout.Dimensions {
+		return layoutSubGroupHeader(env, gtx, &sg, false)
+	})
+
+	if plainH != wantH || badgeH != wantH || warnH != wantH || failLineH != wantH || summaryH != wantH {
+		t.Fatalf("scale %.2f heights: plain=%d badge=%d warn=%d failedLine=%d summary=%d, want all %d",
+			scale, plainH, badgeH, warnH, failLineH, summaryH, wantH)
+	}
+}
+
+func assertBadgeFitsRowAtScale(t *testing.T, th *theme.Theme, scale float32) {
+	t.Helper()
+	var ops op.Ops
+	var router input.Router
+	now := time.Unix(1_700_000_000, 0)
+	env := &kit.Env{Th: th, Sh: th.Shaper(), ReducedMotion: true}
+	env.Begin(now)
+	gtx := &layout.Context{
+		Ops: &ops, Metric: unit.Metric{PxPerDp: scale, PxPerSp: scale},
+		Constraints: layout.Constraints{Max: image.Pt(600, 120)}, Source: router.Source(), Now: now,
+	}
+	env.TrackInput(gtx)
+	click := &widget.Clickable{}
+	badgeDims := mdview.DrawBadge(env, gtx, click, mdview.BadgeSpec{
+		Kind: mdview.BadgeFile,
+		File: mdview.FileRef{Path: daSampleFile, Line: 10, EndLine: 20, Raw: daSampleFile},
+	}, nil)
+	env.FrameEnd(gtx)
+	if rowH := gtx.Dp(theme.Row); badgeDims.Size.Y > rowH {
+		t.Fatalf("scale %.2f badge height %d > row height %d", scale, badgeDims.Size.Y, rowH)
+	}
+}
+
+func assertRowTintsCoverFullHeight(t *testing.T, th *theme.Theme) {
+	t.Helper()
+	const winW, winH = 600, 120
+	win, err := glwin.Open(winW, winH)
+	if err != nil {
+		t.Fatalf("open headless window: %v", err)
+	}
+	st := NewState(kit.NewVirtualHeightCache())
+	warnItem := &session.Item{TranscriptItem: client.TranscriptItem{
+		ItemID: "t-warn", Kind: kindApproval, Sequence: 1, Revision: 1,
+		Metadata: client.TranscriptMetadata{RequestKind: "command", Status: "pending"},
+		View:     client.TranscriptView{Title: "go test ./..."},
+	}}
+	failItem := makeWorkToolItem("t-fail", 2, "", "bash", statusFailed, `{"command":"false"}`, 1)
+	failItem.View.Text = "permission denied"
+
+	assertItemTintBounds(t, win, th, image.Pt(winW, winH), st, warnItem, "warning")
+	assertItemTintBounds(t, win, th, image.Pt(winW, winH), st, failItem, "failed")
+}
+
+func assertItemTintBounds(
+	t *testing.T, win *headless.Window, th *theme.Theme, size image.Point, st *State, item *session.Item, name string,
+) {
+	t.Helper()
+	var ops op.Ops
+	var router input.Router
+	now := time.Unix(1_700_000_000, 0)
+	env := &kit.Env{Th: th, Sh: th.Shaper(), ReducedMotion: true}
+	var dims layout.Dimensions
+	for range 2 {
+		ops.Reset()
+		env.Begin(now)
+		paint.FillShape(&ops, th.Chrome().CanvasBg, clip.Rect{Max: size}.Op())
+		gtx := &layout.Context{
+			Ops: &ops, Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1},
+			Constraints: layout.Constraints{Max: size}, Source: router.Source(), Now: now,
+		}
+		env.TrackInput(gtx)
+		dims = layoutItem(env, gtx, st, item, Callbacks{})
+		env.FrameEnd(gtx)
+		if err := win.Frame(&ops); err != nil {
+			t.Fatalf("win.Frame: %v", err)
+		}
+		router.Frame(&ops)
+	}
+	img := image.NewRGBA(image.Rectangle{Max: size})
+	if err := win.Screenshot(img); err != nil {
+		t.Fatalf("screenshot: %v", err)
+	}
+	bg := th.Chrome().CanvasBg
+	topCol := color.NRGBA(img.RGBAAt(size.X/2, 0))
+	botCol := color.NRGBA(img.RGBAAt(size.X/2, dims.Size.Y-1))
+	if topCol == bg || botCol == bg {
+		t.Fatalf("%s row tint did not cover full height [0,%d): top=%+v bottom=%+v bg=%+v",
+			name, dims.Size.Y, topCol, botCol, bg)
+	}
+}

@@ -235,7 +235,9 @@ func layoutSubGroupHeader(env *kit.Env, gtx *layout.Context, sg *subGroup, expan
 	if expanded {
 		caret = kit.IconChevronDown
 	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
+	g := *gtx
+	g.Constraints.Min.Y = max(g.Constraints.Min.Y, gtx.Dp(theme.Row))
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(g,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := gtx
 			d, err := env.Icon(&l, iconForCategory(sg.category), theme.IconSM, ch.IconMuted)
@@ -248,7 +250,7 @@ func layoutSubGroupHeader(env *kit.Env, gtx *layout.Context, sg *subGroup, expan
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			l := gtx
 			// Same size as a tool row, so a folded group reads as one of the rows.
-			return kit.Label(env, &l, theme.TypeBody(), ch.FgMuted, sg.title)
+			return kit.EllipsisLabel(env, &l, theme.TypeBody(), ch.FgMuted, sg.title)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Left: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {

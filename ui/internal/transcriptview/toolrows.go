@@ -330,7 +330,9 @@ func renderToolRowLine(
 	if rightDanger {
 		rightCol = env.Th.Status().Danger
 	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
+	g := *gtx
+	g.Constraints.Min.Y = max(g.Constraints.Min.Y, gtx.Dp(theme.Row))
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(g,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := gtx
 			d, err := env.Icon(&l, spec.icon, theme.IconSM, ch.IconMuted)
@@ -427,7 +429,7 @@ func drawDiffStatCounts(env *kit.Env, gtx *layout.Context, added, removed int64)
 
 func wrapSurfaceTone(_ *kit.Env, gtx *layout.Context, fill color.NRGBA, draw func(*layout.Context) layout.Dimensions) layout.Dimensions {
 	rec := op.Record(gtx.Ops)
-	dims := layout.Inset{Top: theme.SpaceSM, Bottom: theme.SpaceSM, Left: theme.SpaceMD, Right: theme.SpaceMD}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+	dims := layout.Inset{Left: theme.SpaceMD, Right: theme.SpaceMD}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
 		l := gtx
 		return draw(&l)
 	})

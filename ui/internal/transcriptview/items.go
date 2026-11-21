@@ -152,7 +152,7 @@ func layoutToolRowSurface(
 				return header(&l)
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return layout.Inset{Top: theme.SpaceXXS, Left: theme.SpaceXL}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: theme.SpaceXXS, Bottom: theme.SpaceXS, Left: theme.SpaceXL}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 					l := gtx
 					return kit.Label(env, &l, theme.TypeSmall(), env.Th.Chrome().DangerFg, failedReasonLine(item))
 				})
