@@ -137,7 +137,9 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Admit: admit,
 		Roots: hp.rt.workspaces.domain, Git: locateTeamGit(ctx, deps), DataDir: deps.DataDir, IDs: deps.IDs, Vault: v,
 		Wake: hp.rt.teamWake, Clock: deps.Clock, TeamsConfig: teamsCfg, Budgets: hp.rt.teamBudgets,
+		Disk: resolveDiskSpace(deps.DiskSpace),
 	})
+	hp.rt.teamDispatch.Start(base)
 	if hp.rt.teamTasks != nil {
 		hp.wireTeamTaskHooks(sessions, deps)
 	}
@@ -168,6 +170,12 @@ func (hp *HostProcess) wireTeamTaskHooks(sessions *VendorSessions, deps *HostDep
 	sessions.SetTurnFailedHook(func(sessionID, failureCode string) {
 		hp.rt.goTask("team.turn-failure-check", func(checkCtx context.Context) error {
 			hp.rt.teamTasks.OnTurnFailed(checkCtx, sessionID, failureCode)
+			return nil
+		})
+	})
+	sessions.SetSessionDiedHook(func(sessionID string) {
+		hp.rt.goTask("team.session-died-check", func(checkCtx context.Context) error {
+			hp.rt.teamTasks.OnSessionDied(checkCtx, sessionID)
 			return nil
 		})
 	})

@@ -90,6 +90,7 @@ type VendorSessions struct {
 	observationHook   func(sessionID string)
 	turnCompletedHook func(sessionID string)
 	turnFailedHook    func(sessionID, failureCode string)
+	sessionDiedHook   func(sessionID string)
 	closed            bool
 	pacer             *vendorPacer
 	capMu             sync.Mutex

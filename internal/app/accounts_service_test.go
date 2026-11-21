@@ -170,6 +170,9 @@ func TestAccountViewCarriesNoIdentityAndFormatsTimes(t *testing.T) {
 	if view.PausedUntil != "2026-11-10T12:40:00Z" || view.Windows[0].ResetsAt != "2026-11-10T12:40:00Z" {
 		t.Fatalf("view = %s", raw)
 	}
+	if view.QuotaGate != vendor.QuotaGateThreshold {
+		t.Fatalf("view.QuotaGate = %v, want %v", view.QuotaGate, vendor.QuotaGateThreshold)
+	}
 	var keys map[string]any
 	if err := json.Unmarshal(raw, &keys); err != nil {
 		t.Fatal(err)

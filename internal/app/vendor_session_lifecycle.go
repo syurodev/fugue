@@ -91,21 +91,51 @@ func (a *vendorSessionActor) processExited(ctx context.Context) error {
 	if err := a.awaitSessionEndWork(ctx); err != nil {
 		return err
 	}
+	next, err := a.exitState(ctx)
+	if err != nil {
+		return err
+	}
+	requested, err := a.closeAfterExit(ctx)
+	if err != nil {
+		return err
+	}
+	a.finished = true
+	a.state = next
+	// §12 (F11.9): the process exited with no requested stop, so the turn's
+	// outcome is unknown and a bound team task must go unknown. A clean stop,
+	// close, detach, idle detach, task end and host shutdown all set a close
+	// reason first and never reach this.
+	if requested == "" {
+		a.manager.notifySessionDied(a.info.ID)
+	}
+	return nil
+}
+
+// exitState transitions the session to closed and ends an open turn as
+// outcome-unknown, since the exit carries no vendor verdict.
+func (a *vendorSessionActor) exitState(ctx context.Context) (vendor.State, error) {
 	next := vendor.State{Kind: vendor.StateClosed}
 	if a.state.Kind != vendor.StateDetached {
 		var transitionErr error
 		next, _, transitionErr = vendor.Transition(a.state, vendor.Fact{Kind: vendor.FactProcessExited})
 		if transitionErr != nil {
-			return fmt.Errorf("record process exit state: %w", transitionErr)
+			return next, fmt.Errorf("record process exit state: %w", transitionErr)
 		}
 	}
 	if a.turnID != "" {
 		if err := a.append(ctx, &vendorstore.Event{Type: vendorstore.VendorTurnEnded, TurnID: a.turnID, Outcome: vendorstore.OutcomeUnknown}); err != nil {
-			return err
+			return next, err
 		}
 		a.turnID = ""
 	}
-	reason := a.requestedCloseReason()
+	return next, nil
+}
+
+// closeAfterExit stops the process and persists the exit and close events,
+// returning the close reason that was requested before the exit, if any.
+func (a *vendorSessionActor) closeAfterExit(ctx context.Context) (vendor.CloseReason, error) {
+	requested := a.requestedCloseReason()
+	reason := requested
 	if reason == "" {
 		reason = vendor.CloseHostStop
 	}
@@ -116,14 +146,12 @@ func (a *vendorSessionActor) processExited(ctx context.Context) error {
 		status = string(process.StopProofUnknown)
 	}
 	if err := a.append(ctx, &vendorstore.Event{Type: vendorstore.VendorProcessExited, StopProof: status}); err != nil {
-		return err
+		return requested, err
 	}
 	if err := a.append(ctx, &vendorstore.Event{Type: vendorstore.VendorSessionClosed, StopProof: status, State: vendorstore.StateClosed, CloseReason: string(reason)}); err != nil {
-		return err
+		return requested, err
 	}
-	a.finished = true
-	a.state = next
-	return nil
+	return requested, nil
 }
 
 func (a *vendorSessionActor) fail(ctx context.Context, cause error) error {

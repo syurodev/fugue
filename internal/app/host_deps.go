@@ -24,7 +24,10 @@ type HostDeps struct {
 	Clock         clock.Clock
 	IDs           ids.Generator
 	HostResources HostResources
-	Transport     HostTransport
+	// DiskSpace reports the free disk space of the data directory's
+	// filesystem for the §12 disk pause (F11.9). Nil uses the platform port.
+	DiskSpace DiskSpaceChecker
+	Transport HostTransport
 	// VendorBinary overrides the Claude binary (absolute path); empty
 	// resolves claude on PATH at probe time.
 	VendorBinary string

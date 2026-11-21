@@ -16,6 +16,8 @@ import (
 // and startable, matching pickTeamCandidate) receive 1-based QueuePosition
 // values; queued tasks that are currently blocked (parent not running/asking or
 // unmet dependencies) are returned with Blocked=true and QueuePosition=0.
+// WaitReason is "disk" while the §12 disk pause holds a task that would
+// otherwise start (F11.9).
 type QueuedTaskPosition struct {
 	TeamID        string
 	TaskID        string
@@ -24,6 +26,7 @@ type QueuedTaskPosition struct {
 	CreatedAt     int64
 	QueuePosition int
 	Blocked       bool
+	WaitReason    string
 }
 
 type queuedTaskKey struct{ teamID, taskID string }
@@ -109,21 +112,29 @@ func (d *teamDispatcher) QueueSnapshot(ctx context.Context) ([]QueuedTaskPositio
 		if rec.State != vendorstore.TeamStateActive {
 			continue
 		}
-		queued = appendTeamQueuePositions(queued, tasks, rec.WaitingReason != "")
+		queued = appendTeamQueuePositions(queued, tasks, rec.WaitingReason != "", d.diskPaused())
 	}
 	return sortAndNumberQueue(queued), nil
 }
 
-func appendTeamQueuePositions(dst []QueuedTaskPosition, tasks []vendorstore.TaskRecord, teamWaiting bool) []QueuedTaskPosition {
+func appendTeamQueuePositions(dst []QueuedTaskPosition, tasks []vendorstore.TaskRecord, teamWaiting, diskPaused bool) []QueuedTaskPosition {
 	byID, retryChild := resolveTaskChain(tasks)
 	for i := range tasks {
 		t := &tasks[i]
 		if t.State != vendorstore.TaskStateQueued || t.ExplicitStart {
 			continue
 		}
+		// The §12 disk pause holds only tasks that would otherwise start and
+		// need a new worktree; the lead binds without one.
+		diskHeld := diskPaused && !teamWaiting && t.HierarchyRole != vendorstore.RoleLead && startable(t, byID, retryChild)
+		wait := ""
+		if diskHeld {
+			wait = waitDisk
+		}
 		dst = append(dst, QueuedTaskPosition{
 			TeamID: t.TeamID, TaskID: t.TaskID, HierarchyRole: t.HierarchyRole,
-			Depth: t.Depth, CreatedAt: t.CreatedAt, Blocked: teamWaiting || !startable(t, byID, retryChild),
+			Depth: t.Depth, CreatedAt: t.CreatedAt, Blocked: teamWaiting || !startable(t, byID, retryChild) || diskHeld,
+			WaitReason: wait,
 		})
 	}
 	return dst

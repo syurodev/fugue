@@ -31,6 +31,10 @@ const (
 	failWorktree       = "worktree"
 	failSessionStart   = "session_start"
 	failIntro          = "intro"
+	// failDisk ends a task whose worktree creation or session start hit
+	// ENOSPC (§12, F11.9); the scheduler pauses new worktrees until space
+	// is free again.
+	failDisk = "disk"
 )
 
 // rootResolver resolves a workspace root name to its directory; the
@@ -51,8 +55,10 @@ type teamDispatcherDeps struct {
 	DataDir string
 	IDs     ids.Generator
 	Vault   *vault.Service
-	// Wake is the F11.3b mailbox pump; nil leaves the digest for the next
-	// trigger (the decide-path tests admit nothing, so they enqueue none).
+	// Disk reports the free space of the data directory's filesystem (F11.9);
+	// nil disables the disk pre-check, and a real disk-full failure still
+	// pauses worktree creation through the classification.
+	Disk        DiskSpaceChecker
 	Wake        *teamWake
 	Clock       clock.Clock
 	TeamsConfig func(context.Context, string) (workspace.TeamsConfig, error)
@@ -61,6 +67,9 @@ type teamDispatcherDeps struct {
 	// appendTaskEvent so tests can inject real races.
 	TestBeforeStartAppend func(context.Context)
 	TestBeforeFailAppend  func(context.Context)
+	// TestWorktreeErr, when set, fails createWorktree with it (F11.9 tests
+	// inject a classified disk-full error).
+	TestWorktreeErr error
 }
 
 // teamDispatcher starts the queued tasks of active teams. One run at a time:
@@ -68,10 +77,15 @@ type teamDispatcherDeps struct {
 type teamDispatcher struct {
 	deps teamDispatcherDeps
 	mu   sync.Mutex
+	// diskMu guards diskWait (§12): set by the pre-check or by a real
+	// disk-full failure, cleared by the re-check loop in Start.
+	diskMu   sync.Mutex
+	diskWait bool
+	diskWake chan struct{}
 }
 
 func newTeamDispatcher(deps *teamDispatcherDeps) *teamDispatcher {
-	return &teamDispatcher{deps: *deps}
+	return &teamDispatcher{deps: *deps, diskWake: make(chan struct{}, 1)}
 }
 
 // notifyMailbox asks the wake pump for a delivery pass after an append
@@ -192,7 +206,9 @@ func startable(t *vendorstore.TaskRecord, byID map[string]*vendorstore.TaskRecor
 }
 
 // start starts one task and reports whether it left the queue. A task that
-// is not admitted stays queued; one that fails to start is ended failed.
+// is not admitted stays queued; one that fails to start is ended failed. A
+// task that needs a new worktree stays queued while the disk pause holds
+// (§12, F11.9); the lead binds without one and starts regardless.
 func (d *teamDispatcher) start(ctx context.Context, rec *vendorstore.TeamRecord, task *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord) (bool, error) {
 	admitted, err := d.deps.Admit.Admit(ctx, task, tasks)
 	if err != nil {
@@ -203,6 +219,9 @@ func (d *teamDispatcher) start(ctx context.Context, rec *vendorstore.TeamRecord,
 	}
 	if task.HierarchyRole == vendorstore.RoleLead {
 		return d.bindLead(ctx, rec, task)
+	}
+	if !d.diskRoomForWorktree(ctx) {
+		return false, nil
 	}
 	return d.startChild(ctx, rec, task, tasks)
 }

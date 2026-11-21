@@ -63,6 +63,7 @@ const (
 	compVirtualList
 	compTreeView
 	compTag
+	compLineRow
 	compProgress
 	compDivider
 	compSplitPane
