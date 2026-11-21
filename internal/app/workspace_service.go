@@ -74,6 +74,23 @@ type EffectiveWorkspaceConfig struct {
 	Provenance map[string]int64
 }
 
+// WorkspaceFileView is the app boundary shape of one confined file read
+// (host-api v0.18 §5.4). Content is the file's text; it never reaches logs,
+// errors or audit metadata.
+type WorkspaceFileView struct {
+	Content    string
+	TotalLines int64
+	Language   string
+	Truncated  bool
+}
+
+// WorkspaceDirEntryView is the app boundary shape of one directory entry.
+type WorkspaceDirEntryView struct {
+	Name string
+	Kind string
+	Size int64
+}
+
 // WorkspaceBackend is implemented by HostRuntime and accessed by the Host API
 // without adding workspace calls to the backend fakes used by other services.
 type WorkspaceBackend interface {
@@ -89,6 +106,8 @@ type WorkspaceBackend interface {
 	RemoveWorkspaceRoot(context.Context, string, string, string, string) (*WorkspaceView, error)
 	UpdateWorkspaceRoot(context.Context, string, string, string, string, string, string, string) (*WorkspaceView, error)
 	DeleteWorkspace(context.Context, string, string, string, string) error
+	ReadWorkspaceFile(context.Context, string, string, string, string, int64, int64) (*WorkspaceFileView, error)
+	ListWorkspaceDir(context.Context, string, string, string, string) ([]WorkspaceDirEntryView, error)
 }
 
 // WorkspaceService composes workspace domain operations with the ephemeral topic.
@@ -295,6 +314,50 @@ func (s *WorkspaceService) Delete(ctx context.Context, principal, id, expectedHa
 	return publicWorkspaceError(err)
 }
 
+// ReadFile serves the ReadWorkspaceFile Host API RPC (host-api v0.18 §5.4):
+// only the app's client kind may read, the host confines the path, and the
+// content is returned per call with no host-side cache.
+func (s *WorkspaceService) ReadFile(ctx context.Context, principal, id, rootName, path string, startLine, endLine int64) (*WorkspaceFileView, error) {
+	if err := authorizeWorkspaceFileRead(principal); err != nil {
+		return nil, err
+	}
+	if startLine < 0 || endLine < 0 {
+		return nil, errcode.New(errcode.InvalidArgument, "line bounds must not be negative")
+	}
+	read, err := s.domain.ReadFile(ctx, id, rootName, path, startLine, endLine)
+	if err != nil {
+		return nil, publicWorkspaceError(err)
+	}
+	return &WorkspaceFileView{Content: read.Content, TotalLines: read.TotalLines, Language: read.Language, Truncated: read.Truncated}, nil
+}
+
+// ListDir serves the ListWorkspaceDir Host API RPC (host-api v0.18 §5.4):
+// the same app-only gate and path confinement as ReadFile.
+func (s *WorkspaceService) ListDir(ctx context.Context, principal, id, rootName, path string) ([]WorkspaceDirEntryView, error) {
+	if err := authorizeWorkspaceFileRead(principal); err != nil {
+		return nil, err
+	}
+	entries, err := s.domain.ListDir(ctx, id, rootName, path)
+	if err != nil {
+		return nil, publicWorkspaceError(err)
+	}
+	out := make([]WorkspaceDirEntryView, 0, len(entries))
+	for _, e := range entries {
+		out = append(out, WorkspaceDirEntryView{Name: e.Name, Kind: e.Kind, Size: e.Size})
+	}
+	return out, nil
+}
+
+// authorizeWorkspaceFileRead denies everything but the app client kind
+// (host-api §7): tui, cli and app-background are local but not the viewer's
+// caller, and the session principal is not local at all. Fail closed.
+func authorizeWorkspaceFileRead(principal string) error {
+	if !IsAppPrincipal(principal) {
+		return errcode.New(errcode.PermissionDenied, "only the app client may read workspace files")
+	}
+	return nil
+}
+
 func authorizeWorkspace(principal string) error {
 	if !IsLocalPrincipal(principal) {
 		return errcode.New(errcode.PermissionDenied, "only local principals may access workspaces")
@@ -392,7 +455,8 @@ func workspaceErrorCode(code workspace.Code) (errcode.Code, string) {
 		return errcode.WorkspacePathDenied, "workspace path is not allowed"
 	case workspace.ErrOwnershipInvalid:
 		return errcode.WorkspaceOwnershipInvalid, "workspace ownership or permissions are invalid"
-	case workspace.ErrIDInvalid, workspace.ErrConfirmationRequired, workspace.ErrDeleteFailed:
+	case workspace.ErrIDInvalid, workspace.ErrConfirmationRequired, workspace.ErrDeleteFailed,
+		workspace.ErrPathOutsideRoot, workspace.ErrFileNotFound, workspace.ErrFileTooLarge, workspace.ErrNotText:
 		return additionalWorkspaceErrorCode(code)
 	default:
 		return errcode.Internal, workspaceOperationFailedMessage
@@ -407,6 +471,14 @@ func additionalWorkspaceErrorCode(code workspace.Code) (errcode.Code, string) {
 		return errcode.WorkspaceConfigUnconfirmed, "workspace deletion requires matching confirmation"
 	case workspace.ErrDeleteFailed:
 		return errcode.WorkspaceOwnershipInvalid, "workspace state could not be safely removed"
+	case workspace.ErrPathOutsideRoot:
+		return errcode.WorkspacePathOutsideRoot, "the path is outside the workspace root"
+	case workspace.ErrFileNotFound:
+		return errcode.WorkspaceFileNotFound, "the file was not found in the workspace root"
+	case workspace.ErrFileTooLarge:
+		return errcode.WorkspaceFileTooLarge, "the file exceeds the 1 MiB read limit"
+	case workspace.ErrNotText:
+		return errcode.WorkspaceNotText, "the file is not UTF-8 text"
 	case workspace.ErrNotFound, workspace.ErrAlreadyExists, workspace.ErrConfigInvalid,
 		workspace.ErrConfigChanged, workspace.ErrConfigUnconfirmed, workspace.ErrRootInvalid,
 		workspace.ErrRootMissing, workspace.ErrPathDenied, workspace.ErrOwnershipInvalid:
