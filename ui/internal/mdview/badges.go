@@ -111,11 +111,11 @@ func RunGitRefAction(gtx *layout.Context, reg GitRefRegistry, ref GitRef) bool {
 	return false
 }
 
-// PaintBadgeChrome paints the shared pill container (radius.full, SurfaceRaised,
+// PaintBadgeChrome paints the shared pill container (radius.full, SurfaceBase,
 // BorderSubtle hairline) for file badges, folder badges, and PR/branch badges.
 func PaintBadgeChrome(th *theme.Theme, gtx *layout.Context, box image.Rectangle, deleted bool) {
 	ch := th.Chrome()
-	fillCol := ch.SurfaceRaised
+	fillCol := ch.SurfaceBase
 	if deleted {
 		fillCol = ch.FillSoft
 	}

@@ -244,8 +244,10 @@ func (v *view) drawCodeBlockContents(
 
 func (v *view) paintCodeBlockFrame(gtx *layout.Context, st *CodeBlockState, _ *CodeBlockProps, box image.Rectangle, drawInner func()) {
 	radius := gtx.Dp(theme.RadiusLG)
-	paint.FillShape(gtx.Ops, v.th.Chrome().SurfaceRaised, clip.UniformRRect(box, radius).Op(gtx.Ops))
-	paint.FillShape(gtx.Ops, v.th.Chrome().BorderSubtle, clip.Stroke{
+	// SurfaceBase plus a hairline: on the light canvas a SurfaceRaised block reads
+	// as a heavy gray slab; the border carries the edge instead.
+	paint.FillShape(gtx.Ops, v.th.Chrome().SurfaceBase, clip.UniformRRect(box, radius).Op(gtx.Ops))
+	paint.FillShape(gtx.Ops, v.th.Chrome().Border, clip.Stroke{
 		Path:  clip.UniformRRect(box, radius).Path(gtx.Ops),
 		Width: float32(max(gtx.Dp(theme.Hairline), 1)),
 	}.Op())

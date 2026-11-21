@@ -161,6 +161,10 @@ func expandTSBounds(firstCreated, lastUpdated time.Time, it *session.Item) (time
 	return firstCreated, lastUpdated
 }
 
+// minFoldedRun is the shortest run of same-kind items folded under one
+// summary row.
+const minFoldedRun = 4
+
 func buildSubGroups(items []*session.Item) []subGroup {
 	var out []subGroup
 	i := 0
@@ -171,6 +175,18 @@ func buildSubGroups(items []*session.Item) []subGroup {
 			j++
 		}
 		slice := items[i:j]
+		if len(slice) < minFoldedRun {
+			// Short runs stay as individual rows; folding three edits into
+			// "Edited 3 files ›" hides more than it saves.
+			for _, it := range slice {
+				out = append(out, subGroup{
+					key: "sg:" + it.ItemID, category: cat, kind: it.Kind,
+					title: subGroupSummary(cat, []*session.Item{it}), items: []*session.Item{it},
+				})
+			}
+			i = j
+			continue
+		}
 		out = append(out, subGroup{
 			key:      "sg:" + slice[0].ItemID,
 			category: cat,

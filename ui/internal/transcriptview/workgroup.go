@@ -283,7 +283,9 @@ func layoutWorkMember(env *kit.Env, gtx *layout.Context, st *State, it *session.
 	case kindFileChange:
 		return layoutFileChange(env, gtx, st, c, it, cb)
 	case kindSubagent:
-		return layoutSubagentLine(env, gtx, st, c, it)
+		// Inside a work group a subagent is a "Ran subagent" row like the
+		// other tools (desktop-app v0.10 table), with its icon and time.
+		return layoutToolCall(env, gtx, st, c, it, cb)
 	default:
 		return layoutCompactCard(env, gtx, st, c, it)
 	}
