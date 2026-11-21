@@ -1,0 +1,484 @@
+{
+  "source": "miguelsolorio/vscode-symbols",
+  "commit": "a405d32",
+  "license": "MIT, see ../../LICENSE-symbols.txt",
+  "iconDefinitions": {
+    "astro": {
+      "iconPath": "./icons/files/astro.svg"
+    },
+    "brackets-purple": {
+      "iconPath": "./icons/files/brackets-purple.svg"
+    },
+    "brackets-sky": {
+      "iconPath": "./icons/files/brackets-sky.svg"
+    },
+    "brackets-yellow": {
+      "iconPath": "./icons/files/brackets-yellow.svg"
+    },
+    "c": {
+      "iconPath": "./icons/files/c.svg"
+    },
+    "code-orange": {
+      "iconPath": "./icons/files/code-orange.svg"
+    },
+    "compressed": {
+      "iconPath": "./icons/files/compressed.svg"
+    },
+    "cplus": {
+      "iconPath": "./icons/files/cplus.svg"
+    },
+    "csharp": {
+      "iconPath": "./icons/files/csharp.svg"
+    },
+    "database": {
+      "iconPath": "./icons/files/database.svg"
+    },
+    "docker": {
+      "iconPath": "./icons/files/docker.svg"
+    },
+    "docker-pink": {
+      "iconPath": "./icons/files/docker-pink.svg"
+    },
+    "document": {
+      "iconPath": "./icons/files/document.svg"
+    },
+    "elixir": {
+      "iconPath": "./icons/files/elixir.svg"
+    },
+    "erlang": {
+      "iconPath": "./icons/files/erlang.svg"
+    },
+    "folder": {
+      "iconPath": "./icons/folders/folder.svg"
+    },
+    "folder-documents": {
+      "iconPath": "./icons/folders/folder-documents.svg"
+    },
+    "gear": {
+      "iconPath": "./icons/files/gear.svg"
+    },
+    "git": {
+      "iconPath": "./icons/files/git.svg"
+    },
+    "go": {
+      "iconPath": "./icons/files/go.svg"
+    },
+    "go-mod": {
+      "iconPath": "./icons/files/go-pink.svg"
+    },
+    "gradle": {
+      "iconPath": "./icons/files/gradle.svg"
+    },
+    "graphql": {
+      "iconPath": "./icons/files/graphql.svg"
+    },
+    "h": {
+      "iconPath": "./icons/files/h.svg"
+    },
+    "image": {
+      "iconPath": "./icons/files/image.svg"
+    },
+    "js": {
+      "iconPath": "./icons/files/js.svg"
+    },
+    "kotlin": {
+      "iconPath": "./icons/files/kotlin.svg"
+    },
+    "license": {
+      "iconPath": "./icons/files/license.svg"
+    },
+    "lock": {
+      "iconPath": "./icons/files/lock.svg"
+    },
+    "lua": {
+      "iconPath": "./icons/files/lua.svg"
+    },
+    "markdown": {
+      "iconPath": "./icons/files/markdown.svg"
+    },
+    "mdx": {
+      "iconPath": "./icons/files/mdx.svg"
+    },
+    "nix": {
+      "iconPath": "./icons/files/nix.svg"
+    },
+    "node": {
+      "iconPath": "./icons/files/node.svg"
+    },
+    "pdf": {
+      "iconPath": "./icons/files/pdf.svg"
+    },
+    "python": {
+      "iconPath": "./icons/files/python.svg"
+    },
+    "react": {
+      "iconPath": "./icons/files/react.svg"
+    },
+    "react-ts": {
+      "iconPath": "./icons/files/react-ts.svg"
+    },
+    "rust": {
+      "iconPath": "./icons/files/rust.svg"
+    },
+    "sass": {
+      "iconPath": "./icons/files/sass.svg"
+    },
+    "shell": {
+      "iconPath": "./icons/files/shell.svg"
+    },
+    "swift": {
+      "iconPath": "./icons/files/swift.svg"
+    },
+    "terraform": {
+      "iconPath": "./icons/files/terraform.svg"
+    },
+    "text": {
+      "iconPath": "./icons/files/text.svg"
+    },
+    "ts": {
+      "iconPath": "./icons/files/ts.svg"
+    },
+    "yaml": {
+      "iconPath": "./icons/files/yaml.svg"
+    },
+    "zig": {
+      "iconPath": "./icons/files/zig.svg"
+    }
+  },
+  "fileNames": {
+    ".direnv": "gear",
+    ".env": "gear",
+    ".env.dev": "gear",
+    ".env.development": "gear",
+    ".env.local": "gear",
+    ".env.prod": "gear",
+    ".env.production": "gear",
+    ".env.test": "gear",
+    ".esmrc": "node",
+    ".git-blame-ignore": "git",
+    ".gitattributes": "git",
+    ".gitconfig": "git",
+    ".gitignore": "git",
+    ".gitignore-global": "git",
+    ".gitignore_global": "git",
+    ".gitinclude": "git",
+    ".gitkeep": "git",
+    ".gitmodules": "git",
+    ".graphqlconfig": "graphql",
+    ".graphqlrc": "graphql",
+    ".graphqlrc.cjs": "graphql",
+    ".graphqlrc.js": "graphql",
+    ".graphqlrc.json": "graphql",
+    ".graphqlrc.toml": "graphql",
+    ".graphqlrc.ts": "graphql",
+    ".graphqlrc.yaml": "graphql",
+    ".graphqlrc.yml": "graphql",
+    ".luacheckrc": "lua",
+    ".node-version": "node",
+    ".nvmrc": "node",
+    ".pylintrc": "python",
+    ".python-version": "python",
+    ".swift-version": "swift",
+    ".xcode-version": "swift",
+    "astro.config.cjs": "astro",
+    "astro.config.cts": "astro",
+    "astro.config.js": "astro",
+    "astro.config.mjs": "astro",
+    "astro.config.mts": "astro",
+    "astro.config.ts": "astro",
+    "commit-msg": "shell",
+    "compose.alpha.yaml": "docker-pink",
+    "compose.alpha.yml": "docker-pink",
+    "compose.beta.yaml": "docker-pink",
+    "compose.beta.yml": "docker-pink",
+    "compose.ci.yaml": "docker-pink",
+    "compose.ci.yml": "docker-pink",
+    "compose.dev.yaml": "docker-pink",
+    "compose.dev.yml": "docker-pink",
+    "compose.development.yaml": "docker-pink",
+    "compose.development.yml": "docker-pink",
+    "compose.local.yaml": "docker-pink",
+    "compose.local.yml": "docker-pink",
+    "compose.override.yaml": "docker-pink",
+    "compose.override.yml": "docker-pink",
+    "compose.prod.yaml": "docker-pink",
+    "compose.prod.yml": "docker-pink",
+    "compose.production.yaml": "docker-pink",
+    "compose.production.yml": "docker-pink",
+    "compose.stage.yaml": "docker-pink",
+    "compose.stage.yml": "docker-pink",
+    "compose.staging.yaml": "docker-pink",
+    "compose.staging.yml": "docker-pink",
+    "compose.test.yaml": "docker-pink",
+    "compose.test.yml": "docker-pink",
+    "compose.testing.yaml": "docker-pink",
+    "compose.testing.yml": "docker-pink",
+    "compose.web.yaml": "docker-pink",
+    "compose.web.yml": "docker-pink",
+    "compose.worker.yaml": "docker-pink",
+    "compose.worker.yml": "docker-pink",
+    "compose.yaml": "docker-pink",
+    "compose.yml": "docker-pink",
+    "docker-compose.alpha.yaml": "docker-pink",
+    "docker-compose.alpha.yml": "docker-pink",
+    "docker-compose.beta.yaml": "docker-pink",
+    "docker-compose.beta.yml": "docker-pink",
+    "docker-compose.ci.yaml": "docker-pink",
+    "docker-compose.ci.yml": "docker-pink",
+    "docker-compose.dev.yaml": "docker-pink",
+    "docker-compose.dev.yml": "docker-pink",
+    "docker-compose.development.yaml": "docker-pink",
+    "docker-compose.development.yml": "docker-pink",
+    "docker-compose.local.yaml": "docker-pink",
+    "docker-compose.local.yml": "docker-pink",
+    "docker-compose.override.yaml": "docker-pink",
+    "docker-compose.override.yml": "docker-pink",
+    "docker-compose.prod.yaml": "docker-pink",
+    "docker-compose.prod.yml": "docker-pink",
+    "docker-compose.production.yaml": "docker-pink",
+    "docker-compose.production.yml": "docker-pink",
+    "docker-compose.stage.yaml": "docker-pink",
+    "docker-compose.stage.yml": "docker-pink",
+    "docker-compose.staging.yaml": "docker-pink",
+    "docker-compose.staging.yml": "docker-pink",
+    "docker-compose.test.yaml": "docker-pink",
+    "docker-compose.test.yml": "docker-pink",
+    "docker-compose.testing.yaml": "docker-pink",
+    "docker-compose.testing.yml": "docker-pink",
+    "docker-compose.web.yaml": "docker-pink",
+    "docker-compose.web.yml": "docker-pink",
+    "docker-compose.worker.yaml": "docker-pink",
+    "docker-compose.worker.yml": "docker-pink",
+    "docker-compose.yaml": "docker-pink",
+    "docker-compose.yml": "docker-pink",
+    "dockerfile": "docker",
+    "dockerfile.alpha": "docker",
+    "dockerfile.beta": "docker",
+    "dockerfile.ci": "docker",
+    "dockerfile.dev": "docker",
+    "dockerfile.development": "docker",
+    "dockerfile.local": "docker",
+    "dockerfile.prod": "docker",
+    "dockerfile.production": "docker",
+    "dockerfile.stage": "docker",
+    "dockerfile.staging": "docker",
+    "dockerfile.test": "docker",
+    "dockerfile.testing": "docker",
+    "dockerfile.web": "docker",
+    "dockerfile.worker": "docker",
+    "file.config": "gear",
+    "git-history": "git",
+    "go.mod": "go-mod",
+    "go.sum": "go-mod",
+    "go.work": "go-mod",
+    "go.work.sum": "go-mod",
+    "gradle-wrapper.properties": "gradle",
+    "gradle.properties": "gradle",
+    "gradlew": "gradle",
+    "graphql.config.js": "graphql",
+    "graphql.config.json": "graphql",
+    "graphql.config.toml": "graphql",
+    "graphql.config.ts": "graphql",
+    "graphql.config.yaml": "graphql",
+    "graphql.config.yml": "graphql",
+    "license": "license",
+    "license-agpl": "license",
+    "license-apache": "license",
+    "license-bsd": "license",
+    "license-gpl": "license",
+    "license-lgpl": "license",
+    "license-mit": "license",
+    "license.md": "license",
+    "license.rst": "license",
+    "license.txt": "license",
+    "manifest.in": "python",
+    "package-lock.json": "node",
+    "package.json": "node",
+    "pipfile": "python",
+    "post-merge": "shell",
+    "pre-commit": "shell",
+    "pre-push": "shell",
+    "pylintrc": "python",
+    "pyproject.toml": "gear",
+    "requirements.txt": "python",
+    "robots.txt": "text",
+    "setup.cfg": "python"
+  },
+  "fileExtensions": {
+    "7z": "compressed",
+    "YAML-tmLanguage": "yaml",
+    "accdb": "database",
+    "afphoto": "image",
+    "ami": "image",
+    "apx": "image",
+    "ase": "image",
+    "aseprite": "image",
+    "astro": "astro",
+    "avif": "image",
+    "awk": "shell",
+    "bash": "shell",
+    "bat": "shell",
+    "bmp": "image",
+    "bpg": "image",
+    "brk": "image",
+    "c": "c",
+    "c++": "cplus",
+    "cc": "cplus",
+    "cjs": "js",
+    "clip": "image",
+    "cmd": "shell",
+    "containerignore": "docker",
+    "cp": "cplus",
+    "cpp": "cplus",
+    "cpt": "image",
+    "cs": "csharp",
+    "csh": "shell",
+    "css": "brackets-purple",
+    "csx": "csharp",
+    "cur": "image",
+    "cxx": "cplus",
+    "db": "database",
+    "db3": "database",
+    "dds": "image",
+    "deb": "compressed",
+    "dmg": "compressed",
+    "dng": "image",
+    "dockerfile": "docker",
+    "dockerignore": "docker",
+    "eex": "elixir",
+    "env": "gear",
+    "env.example": "gear",
+    "eps": "image",
+    "erl": "erlang",
+    "ex": "elixir",
+    "exp": "shell",
+    "exr": "image",
+    "exs": "elixir",
+    "fish": "shell",
+    "fpx": "image",
+    "gbr": "image",
+    "go": "go",
+    "go.mod": "go-mod",
+    "gql": "graphql",
+    "gradle": "gradle",
+    "graphql": "graphql",
+    "gz": "compressed",
+    "h": "h",
+    "heex": "elixir",
+    "heic": "image",
+    "heif": "image",
+    "hrl": "erlang",
+    "htaccess": "document",
+    "htm": "code-orange",
+    "html": "code-orange",
+    "i": "c",
+    "ico": "image",
+    "ii": "cplus",
+    "img": "image",
+    "import": "gear",
+    "iso": "compressed",
+    "jb2": "image",
+    "jbig2": "image",
+    "jfif": "image",
+    "jng": "image",
+    "jpeg": "image",
+    "jpg": "image",
+    "js": "js",
+    "json": "brackets-yellow",
+    "jsx": "react",
+    "jxr": "image",
+    "kra": "image",
+    "ksh": "shell",
+    "kt": "kotlin",
+    "kts": "kotlin",
+    "leex": "elixir",
+    "less": "brackets-sky",
+    "lock": "lock",
+    "lua": "lua",
+    "md": "markdown",
+    "mdb": "database",
+    "mdp": "image",
+    "mdx": "mdx",
+    "mi": "c",
+    "mii": "cplus",
+    "mjs": "js",
+    "mm": "cplus",
+    "nix": "nix",
+    "nu": "shell",
+    "ora": "image",
+    "pbm": "image",
+    "pdb": "database",
+    "pdf": "pdf",
+    "pdn": "image",
+    "pgf": "image",
+    "pgm": "image",
+    "pgsql": "database",
+    "pic": "image",
+    "pkb": "database",
+    "pks": "database",
+    "png": "image",
+    "pnm": "image",
+    "postgres": "database",
+    "ppm": "image",
+    "ps1": "shell",
+    "ps1xml": "shell",
+    "psc1": "shell",
+    "psd1": "shell",
+    "psm1": "shell",
+    "psql": "database",
+    "pssc": "shell",
+    "py": "python",
+    "python": "python",
+    "rar": "compressed",
+    "raw": "image",
+    "reb": "image",
+    "ron": "rust",
+    "rpm": "compressed",
+    "rs": "rust",
+    "sai": "image",
+    "sass": "sass",
+    "scss": "sass",
+    "sh": "shell",
+    "shtml": "code-orange",
+    "sql": "database",
+    "sqlite": "database",
+    "sqlite3": "database",
+    "ssh_config": "shell",
+    "svgx": "image",
+    "swift": "swift",
+    "tar": "compressed",
+    "tar.bz2": "compressed",
+    "tar.gz": "compressed",
+    "tcsh": "shell",
+    "test": "code-orange",
+    "tf": "terraform",
+    "tf.json": "terraform",
+    "tfstate": "terraform",
+    "tfvars": "terraform",
+    "tga": "image",
+    "tif": "image",
+    "tiff": "image",
+    "toml": "gear",
+    "ts": "ts",
+    "tsx": "react-ts",
+    "txt": "text",
+    "webp": "image",
+    "xcf": "image",
+    "yaml": "yaml",
+    "yaml.dist": "yaml",
+    "yml": "yaml",
+    "yml.dist": "yaml",
+    "zig": "zig",
+    "zip": "compressed",
+    "zsh": "shell"
+  },
+  "folderNames": {
+    "doc": "folder-documents",
+    "docs": "folder-documents",
+    "documentation": "folder-documents",
+    "documents": "folder-documents"
+  },
+  "rootFolderNames": {},
+  "file": "document",
+  "folder": "folder"
+}
