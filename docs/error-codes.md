@@ -53,6 +53,10 @@ Changing this file needs a review of what clients can rely on; hiding a code nee
 | `vault.rate_limited` | Too many failed vault unlock attempts; wait before retrying. |
 | `vault.not_configured` | The vault is not configured yet. |
 | `vault.already_configured` | The vault is already configured. |
+| `appstate.revision_conflict` | The app-state document changed under the caller's expected revision; the typed detail names the current one. |
+| `appstate.invalid_document` | The layout or preferences document is not valid JSON with an integer `schema_version` >= 1. |
+| `appstate.too_large` | The layout or preferences document exceeds its size limit. |
+| `appstate.too_many_windows` | At most 16 windows can be saved. |
 
 ## Hidden on purpose
 

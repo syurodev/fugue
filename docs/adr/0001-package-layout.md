@@ -68,7 +68,8 @@ library and third-party imports are governed separately (section 4 and `depguard
 | `internal/tools/pure_read` | 3 | Deterministic in-memory read tool. Owner: tool system (G-04). | `internal/kernel`, `internal/platform/errcode` | F2.8 |
 | `internal/workspacememory` | 3 | Workspace memory entries, history, CAS by revision. Owner: context engine. | `internal/storage`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/ids` | F4.7 |
 | `internal/workspace` | 3 | Workspace layout, named roots, and workspace metadata store. Owner: workspace. | `internal/storage`, `internal/config`, `internal/secrets`, `internal/environments`, `internal/shellrules`, `internal/platform/errcode`, `internal/platform/clock`, `internal/platform/ids` | F5.6a |
-| `internal/app` | 4 | Composition root and application services. Owner: application layer. | `internal/kernel`, `internal/codec`, `internal/crypto`, `internal/vault`, `internal/storage`, `internal/credentials`, `internal/execstore`, `internal/coordinator`, `internal/contextengine`, `internal/modeladapter`, `internal/modeladapter/faux`, `internal/modeladapter/anthropic`, `internal/modeladapter/openai`, `internal/tools/...`, `internal/interaction`, `internal/environments`, `internal/sandbox`, `internal/snapshot`, `internal/gitops`, `internal/workspacememory`, `internal/secrets`, `internal/sealing`, `internal/teams`, `internal/transcript`, `internal/vendorstore`, `internal/workspace`, `internal/process`, `internal/vendor`, `internal/vendoradapter/claude`, `internal/vendoradapter/codex`, `internal/vendoradapter/agy`, `internal/config`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/ids`, `internal/platform/supervise` | F5.1 |
+| `internal/appstate` | 3 | SQL for the app's window layouts and preferences (`host-api §5.2`), stored outside the vault; document envelope validation and the change journal behind the durable `appstate` topic. Owner: application layer (F10.20a). | `internal/platform/errcode`, `internal/platform/ids` | F10.20a |
+| `internal/app` | 4 | Composition root and application services. Owner: application layer. | `internal/kernel`, `internal/codec`, `internal/crypto`, `internal/vault`, `internal/storage`, `internal/credentials`, `internal/execstore`, `internal/coordinator`, `internal/contextengine`, `internal/modeladapter`, `internal/modeladapter/faux`, `internal/modeladapter/anthropic`, `internal/modeladapter/openai`, `internal/tools/...`, `internal/interaction`, `internal/environments`, `internal/sandbox`, `internal/snapshot`, `internal/gitops`, `internal/workspacememory`, `internal/secrets`, `internal/sealing`, `internal/teams`, `internal/transcript`, `internal/vendorstore`, `internal/workspace`, `internal/appstate`, `internal/process`, `internal/vendor`, `internal/vendoradapter/claude`, `internal/vendoradapter/codex`, `internal/vendoradapter/agy`, `internal/config`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/ids`, `internal/platform/supervise` | F5.1 |
 | `internal/hostapi` | 5 | Connect handlers; maps proto types to domain types and calls `app`. Owner: Host API. | `internal/app`, `internal/kernel`, `pkg/pb/...`, `internal/platform/errcode`, `internal/platform/redact`, `internal/platform/clock`, `internal/platform/ids`, `internal/platform/supervise`, `internal/config` | F5.1 |
 | `internal/testutil/cheapvault` | support | The one vault fixture of the tests: the minimum-cost keyring, an unlocked vault, a seeded data directory. Owner: quality gates (§6). Imported from test files only, never from `internal/vault` or `internal/crypto` tests (it imports them). | `internal/vault`, `internal/crypto`, `internal/storage`, `internal/config`, `internal/platform/clock`, `internal/platform/ids`, `internal/platform/redact` | F0.9 |
 | `internal/perf` | perf | Speed budgets, tests under the `perf` build tag run only by the nightly job (`task perf`). Owner: quality gates (§6). Nothing imports it. | `internal/secrets`, `internal/platform/redact` | F0.9 |
@@ -109,7 +110,7 @@ Directories outside `internal/` and not covered by this table:
 
 `modernc.org/sqlite` is imported only by `internal/storage`. `database/sql` is imported only by
 `internal/storage`, `internal/vault`, `internal/credentials`, `internal/execstore`,
-`internal/workspacememory` and `internal/workspace`, each touching only the tables it owns. These six are the
+`internal/workspacememory`, `internal/workspace` and `internal/appstate`, each touching only the tables it owns. These seven are the
 allowlist for `TestTableOwnership`.
 
 `storage.Open` returns the single connection handle (`journal_mode=DELETE`,
@@ -147,6 +148,9 @@ amendment. Column details are fixed by the migration, not here.
 | `workspace_memory_entries` | `internal/workspacememory` | F4.7 |
 | `workspace_memory_history` | `internal/workspacememory` | F4.7 |
 | `workspaces` | `internal/workspace` | F5.6a |
+| `app_windows` | `internal/appstate` | F10.20a |
+| `app_preferences` | `internal/appstate` | F10.20a |
+| `app_state_events` | `internal/appstate` | F10.20a |
 
 Q-13 (user, 2026-11-03, option A): the F2.4 phase for `exec_payloads`,
 `exec_session_keys` and `exec_purges` introduces physical schema, constraints, trigger support
