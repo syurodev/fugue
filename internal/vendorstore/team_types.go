@@ -126,7 +126,37 @@ const (
 	// EventTaskStalled records a watchdog silence escalation without changing
 	// the task's state (Q-150).
 	EventTaskStalled TeamEventType = "TaskStalled"
-	EventTaskEnded   TeamEventType = "TaskEnded"
+	// EventTaskMessaged records one informational sibling send of §6.7 (Q-177
+	// A, F11.10a): the sealed payload carries the target task and the message,
+	// and the producing transaction enqueues the mailbox rows that deliver it.
+	// It changes no task state, so the channel can project it as a `send` line.
+	EventTaskMessaged TeamEventType = "TaskMessaged"
+	EventTaskEnded    TeamEventType = "TaskEnded"
+)
+
+// Channel line kinds of §6.7 (F11.10a). Each tag names the kind of thing the
+// line reports; the content itself stays sealed in the source event payload.
+const (
+	ChannelKindPlan     = "plan"
+	ChannelKindDecision = "decision"
+	ChannelKindTask     = "task"
+	ChannelKindQuestion = "question"
+	ChannelKindAnswer   = "answer"
+	ChannelKindSend     = "send"
+	ChannelKindNote     = "note"
+	ChannelKindResult   = "result"
+	ChannelKindFailed   = "failed"
+	ChannelKindStall    = "stall"
+	ChannelKindApproval = "approval"
+)
+
+// Channel sender kinds of §6.7: an agent by its task, the user, Fugue itself,
+// or the watchdog.
+const (
+	ChannelSenderAgent    = "agent"
+	ChannelSenderUser     = "user"
+	ChannelSenderFugue    = "fugue"
+	ChannelSenderWatchdog = "watchdog"
 )
 
 // TeamWaitingDeadline is the waiting_reason recorded when an active team's
@@ -274,6 +304,43 @@ type RecoveredTask struct {
 	TaskID        string
 	PreviousState TaskState
 	Sequence      int64
+}
+
+// taskMessagePayload is the sealed payload of EventTaskMessaged (Q-177 A):
+// the sibling send's target and its message. The message is agent output and
+// stays sealed; only the channel line metadata is public.
+type taskMessagePayload struct {
+	ToTaskID string `json:"to_task_id"`
+	Message  string `json:"message"`
+}
+
+// TeamChannelMessage is the metadata view of one team_channel_messages row
+// (INV-09, §6.7): the line's number, kind, thread, sender, recipient and the
+// source event it projects. The content is only reachable by opening the
+// sealed payload of SourceSeq.
+type TeamChannelMessage struct {
+	TeamID          string
+	ChannelSeq      int64
+	Kind            string
+	ThreadRoot      string
+	SenderKind      string
+	SenderTaskID    string
+	RecipientTaskID string
+	SourceSeq       int64
+	Bytes           int64
+	CreatedAt       int64
+}
+
+// TeamChannelPageQuery scopes one channel read (§6.7 fugue_team_read).
+// ThreadRoots limits the read to those threads (empty = every thread, the
+// lead's whole-team read); GeneralOnly reads just the general channel; Before
+// and Since bound the numbering as exclusive cursors; Limit caps the lines.
+type TeamChannelPageQuery struct {
+	ThreadRoots []string
+	GeneralOnly bool
+	Before      int64
+	Since       int64
+	Limit       int
 }
 
 // TaskOutcomeFailed is the TaskEnded outcome of a task that failed; the event

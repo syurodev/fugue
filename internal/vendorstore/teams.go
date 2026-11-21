@@ -131,6 +131,13 @@ func (s *Store) insertTeamProposedEvent(ctx context.Context, tx *sql.Tx, in *New
 	if err != nil {
 		return fmt.Errorf("insert TeamProposed event: %w", err)
 	}
+	// §6.7: the proposed plan is the team channel's first `plan` line; the
+	// content stays sealed in the event payload, the row is metadata only.
+	if err := appendChannelForEvent(ctx, tx, in.TeamID, 1, &AppendTeamEventInput{
+		EventType: EventTeamProposed, ProtectedPayload: in.ProposedPayload,
+	}, now); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -256,6 +263,9 @@ func (s *Store) writeAppendedEvent(ctx context.Context, tx *sql.Tx, teamID strin
 		return err
 	}
 	if err := insertAppendedTeamEvent(ctx, tx, teamID, seq, ev, fromState, toState, envelope, now); err != nil {
+		return err
+	}
+	if err := appendChannelForEvent(ctx, tx, teamID, seq, ev, now); err != nil {
 		return err
 	}
 	if err := s.appendMailboxForEvent(ctx, tx, teamID, seq, ev, meta, now); err != nil {

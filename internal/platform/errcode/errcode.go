@@ -57,6 +57,7 @@ const (
 	VaultRateLimited            Code = "vault.rate_limited"
 	VaultNotConfigured          Code = "vault.not_configured"
 	VaultAlreadyConfigured      Code = "vault.already_configured"
+	TasksSendRateLimited        Code = "tasks.send_rate_limited"
 )
 
 // Entry classifies one code. Hidden codes are never shown to a client; the
@@ -113,6 +114,7 @@ func Registry() []Entry {
 		{VaultRateLimited, true, "too many failed vault unlock attempts; wait before retrying"},
 		{VaultNotConfigured, true, "the vault is not configured yet"},
 		{VaultAlreadyConfigured, true, "the vault is already configured"},
+		{TasksSendRateLimited, true, "the sibling send limit is reached (6 per agent and 30 per team per 10 minutes)"},
 	}
 }
 

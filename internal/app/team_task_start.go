@@ -23,11 +23,22 @@ type taskLaunch struct {
 	brief      string
 	deps       []depSummary
 	nonce      string
+	retry      retryIntro
 	req        taskSessionRequest
 	repoDir    string
 	repoID     string
 	parentRef  string
 	headCommit string
+}
+
+// retryIntro carries the §5.4 retry facts the intro states (§6.7, F11.10a):
+// the attempt number, the chain root and the previous attempt's failure code.
+// The history itself is never copied into the intro; the agent reads it from
+// its channel thread with fugue_team_read.
+type retryIntro struct {
+	attempt  int
+	root     string
+	prevCode string
 }
 
 // startChild starts the vendor session of one child task in its own worktree
@@ -84,7 +95,7 @@ func (d *teamDispatcher) startChild(ctx context.Context, rec *vendorstore.TeamRe
 }
 
 func (d *teamDispatcher) sendTaskIntro(ctx context.Context, teamID string, task *vendorstore.TaskRecord, launch *taskLaunch) (bool, error) {
-	intro := taskIntro(task, &launch.spec, launch.brief, launch.deps, launch.nonce)
+	intro := taskIntro(task, &launch.spec, launch.brief, launch.deps, launch.nonce, launch.retry)
 	opCtx := context.WithoutCancel(ctx)
 	taskID, sessionID := task.TaskID, launch.req.SessionID
 	err := d.deps.Sessions.SendAsync(ctx, sessionID, vendor.Input{Text: intro, Origin: vendor.OriginFugue}, func(sendErr error) {
@@ -111,6 +122,16 @@ func (d *teamDispatcher) prepareLaunch(ctx context.Context, rec *vendorstore.Tea
 		return nil, code, err
 	}
 	launch := &taskLaunch{spec: spec}
+	if task.RetryOf != "" {
+		launch.retry.attempt = task.Attempt
+		launch.retry.root = vendorstore.ThreadRootTaskID(task.TaskID)
+		for i := range tasks {
+			if tasks[i].TaskID == task.RetryOf {
+				launch.retry.prevCode = tasks[i].FailureCode
+				break
+			}
+		}
+	}
 	lead, err := d.deps.Store.Snapshot(ctx, rec.SessionID)
 	if err != nil {
 		return nil, "", boundaryError("read the lead session", err)

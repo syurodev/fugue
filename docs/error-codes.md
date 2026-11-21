@@ -53,6 +53,7 @@ Changing this file needs a review of what clients can rely on; hiding a code nee
 | `vault.rate_limited` | Too many failed vault unlock attempts; wait before retrying. |
 | `vault.not_configured` | The vault is not configured yet. |
 | `vault.already_configured` | The vault is already configured. |
+| `tasks.send_rate_limited` | The sibling send limit is reached (6 per agent and 30 per team per 10 minutes). |
 
 ## Hidden on purpose
 
