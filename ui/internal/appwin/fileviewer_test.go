@@ -12,6 +12,7 @@ import (
 	"github.com/syurodev/fugue/pkg/client"
 
 	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
+
 	"github.com/syurodev/fugue/ui/internal/glwin"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/mdview"
@@ -21,6 +22,13 @@ import (
 )
 
 const viewerTestWS = "ws-viewer"
+
+// The literals the viewer tests share; named once for goconst and clarity.
+const (
+	viewerWSName = "fugue"
+	viewerPath   = "src/notes.md"
+	viewerDir    = "src"
+)
 
 var errViewerScripted = errors.New("scripted file view error")
 
@@ -32,9 +40,9 @@ func viewerTestScreens(t *testing.T) *screens {
 	sc := newScreens(m, &fakeFetcher{}, session.NewPoster(m.Client), workspace.NewMutator(func() workspace.MutatorClient { return nil }))
 	sc.vault.ApplyStatus(vault.Status{State: client.VaultStateUnlocked, Revision: 1, Incarnation: "inc-viewer"})
 	sc.open = "s1"
-	sc.sidebar.ApplyList(client.SessionList{Sessions: []client.Session{{ID: "s1", Vendor: "claude", State: "running", WorkspaceID: viewerTestWS}}})
-	sc.workspaces.ApplyList([]workspace.Summary{{ID: viewerTestWS, Name: "fugue"}})
-	sc.workspaces.ApplyDetail(&workspace.Detail{ID: viewerTestWS, Name: "fugue", ConfigHash: "h", Roots: []workspace.Root{
+	sc.sidebar.ApplyList(client.SessionList{Sessions: []client.Session{{ID: "s1", Vendor: "claude", State: stateRunning, WorkspaceID: viewerTestWS}}})
+	sc.workspaces.ApplyList([]workspace.Summary{{ID: viewerTestWS, Name: viewerWSName}})
+	sc.workspaces.ApplyDetail(&workspace.Detail{ID: viewerTestWS, Name: viewerWSName, ConfigHash: "h", Roots: []workspace.Root{
 		{Name: "main", Path: "/tmp/proj", Access: "rw"},
 	}})
 	sc.transcripts["s1"] = session.NewTranscript("s1")
@@ -81,47 +89,64 @@ func viewerReadRefusal(code string) error {
 func TestFileChipOpensTheFileAtTheLine(t *testing.T) {
 	t.Parallel()
 	sc := viewerTestScreens(t)
-	cb := sc.transcriptCallbacks()
+	sc.transcriptCallbacks().OnOpenFile(mdview.FileRef{Path: viewerPath, Line: 10, EndLine: 19, Raw: viewerPath + ":10-19"})
+	assertViewerOpenedAtRange(t, sc)
+	assertViewerTriesNextRootAndFolds(t, sc)
 
-	cb.OnOpenFile(mdview.FileRef{Path: "src/notes.md", Line: 10, EndLine: 19, Raw: "src/notes.md:10-19"})
+	if img := renderViewerEvidenceFrame(t, sc, "viewer-file-evidence"); isUniformRGBA(img) {
+		t.Fatal("the file viewer rendered a blank image")
+	}
 	v := sc.viewer
-	if !v.open || v.mode != fileViewFile || v.path != "src/notes.md" || v.line != 10 || v.endLine != 19 {
-		t.Fatalf("viewer after chip click = (open %v, mode %d, path %q, line %d, end %d)", v.open, v.mode, v.path, v.line, v.endLine)
-	}
-	if !v.loading || len(v.pendingRoots) != 1 || v.pendingRoots[0] != "main" {
-		t.Fatalf("viewer roots after chip click = (loading %v, roots %v)", v.loading, v.pendingRoots)
-	}
-
-	// An outside-root answer moves to the next root candidate, so a path
-	// under another root still opens.
-	v.pendingRoots = append(v.pendingRoots, "second")
-	sc.applyFileViewResults([]fileResult{{Op: fileOpRead, Path: "src/notes.md", Err: viewerReadRefusal(client.WorkspaceCodePathOutsideRoot)}})
-	if !v.loading || len(v.pendingRoots) != 1 || v.pendingRoots[0] != "second" || v.errMsg != "" {
-		t.Fatalf("viewer after outside-root refusal = (loading %v, roots %v, msg %q)", v.loading, v.pendingRoots, v.errMsg)
-	}
-
-	sc.applyFileViewResults([]fileResult{{Op: fileOpRead, Path: "src/notes.md", File: client.WorkspaceFile{Content: fileBody(200), TotalLines: 200, Language: "markdown"}}})
-	if v.file == nil || v.file.TotalLines != 200 || v.file.Language != "markdown" || v.errMsg != "" {
-		t.Fatalf("viewer after read = (file %+v, msg %q)", v.file, v.errMsg)
-	}
-	if !v.scrollPending {
-		t.Fatal("the viewer did not arm the jump to the requested line")
-	}
-
-	win, err := glwin.Open(shotWindowW, shotWindowH)
-	if err != nil {
-		t.Fatalf("open headless window: %v", err)
-	}
-	env := newAccountsTestEnv(t, true, 1.0)
-	img := renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), "viewer-file-evidence")
 	if v.scrollPending {
 		t.Fatal("the layout did not consume the line jump")
 	}
 	if v.code.ScrollY <= 0 {
 		t.Fatalf("the viewer did not scroll to line 10 (ScrollY %d)", v.code.ScrollY)
 	}
-	if isUniformRGBA(img) {
-		t.Fatal("the file viewer rendered a blank image")
+}
+
+// assertViewerOpenedAtRange pins the state a chip click leaves: the viewer
+// open on the file, waiting on the workspace's single root.
+func assertViewerOpenedAtRange(t *testing.T, sc *screens) {
+	t.Helper()
+	v := sc.viewer
+	if !v.open || v.mode != fileViewFile || v.path != viewerPath || v.line != 10 || v.endLine != 19 {
+		t.Fatalf("viewer after chip click = (open %v, mode %d, path %q, line %d, end %d)", v.open, v.mode, v.path, v.line, v.endLine)
+	}
+	if !v.loading || len(v.pendingRoots) != 1 || v.pendingRoots[0] != "main" {
+		t.Fatalf("viewer roots after chip click = (loading %v, roots %v)", v.loading, v.pendingRoots)
+	}
+}
+
+// renderViewerEvidenceFrame opens the shared headless window and renders one
+// settled frame of the viewer for an evidence assertion.
+func renderViewerEvidenceFrame(t *testing.T, sc *screens, name string) *image.RGBA {
+	t.Helper()
+	win, err := glwin.Open(shotWindowW, shotWindowH)
+	if err != nil {
+		t.Fatalf("open headless window: %v", err)
+	}
+	env := newAccountsTestEnv(t, true, 1.0)
+	return renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), name)
+}
+
+// assertViewerTriesNextRootAndFolds covers the multi-root candidate walk and
+// the successful fold: an outside-root refusal moves to the next candidate,
+// then the read lands and arms the jump.
+func assertViewerTriesNextRootAndFolds(t *testing.T, sc *screens) {
+	t.Helper()
+	v := sc.viewer
+	v.pendingRoots = append(v.pendingRoots, "second")
+	sc.applyFileViewResults([]fileResult{{Op: fileOpRead, Path: viewerPath, Err: viewerReadRefusal(client.WorkspaceCodePathOutsideRoot)}})
+	if !v.loading || len(v.pendingRoots) != 1 || v.pendingRoots[0] != "second" || v.errMsg != "" {
+		t.Fatalf("viewer after outside-root refusal = (loading %v, roots %v, msg %q)", v.loading, v.pendingRoots, v.errMsg)
+	}
+	sc.applyFileViewResults([]fileResult{{Op: fileOpRead, Path: viewerPath, File: client.WorkspaceFile{Content: fileBody(200), TotalLines: 200, Language: "markdown"}}})
+	if v.file == nil || v.file.TotalLines != 200 || v.file.Language != "markdown" || v.errMsg != "" {
+		t.Fatalf("viewer after read = (file %+v, msg %q)", v.file, v.errMsg)
+	}
+	if !v.scrollPending {
+		t.Fatal("the viewer did not arm the jump to the requested line")
 	}
 }
 
@@ -143,13 +168,7 @@ func TestEditedRowOpensTheFullDiff(t *testing.T) {
 	if v.loading || v.file != nil {
 		t.Fatalf("a diff opens with no file read (loading %v, file %+v)", v.loading, v.file)
 	}
-	win, err := glwin.Open(shotWindowW, shotWindowH)
-	if err != nil {
-		t.Fatalf("open headless window: %v", err)
-	}
-	env := newAccountsTestEnv(t, true, 1.0)
-	img := renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), "viewer-diff-evidence")
-	if isUniformRGBA(img) {
+	if img := renderViewerEvidenceFrame(t, sc, "viewer-diff-evidence"); isUniformRGBA(img) {
 		t.Fatal("the diff viewer rendered a blank image")
 	}
 }
@@ -160,36 +179,45 @@ func TestEditedRowOpensTheFullDiff(t *testing.T) {
 func TestFolderBadgeListsTheDirectory(t *testing.T) {
 	t.Parallel()
 	sc := viewerTestScreens(t)
-	sc.transcriptCallbacks().OnOpenFile(mdview.FileRef{Path: "src", Raw: "src", Folder: true})
+	sc.transcriptCallbacks().OnOpenFile(mdview.FileRef{Path: viewerDir, Raw: viewerDir, Folder: true})
 	v := sc.viewer
-	if !v.open || v.mode != fileViewFolder || v.path != "src" {
+	if !v.open || v.mode != fileViewFolder || v.path != viewerDir {
 		t.Fatalf("viewer after folder click = (open %v, mode %d, path %q)", v.open, v.mode, v.path)
 	}
-	sc.applyFileViewResults([]fileResult{{Op: fileOpList, Path: "src", Entries: []client.WorkspaceDirEntry{
-		{Name: "notes.md", Kind: "file", Size: 42},
-		{Name: "nested", Kind: "dir"},
+	assertFolderListingFolded(t, sc)
+
+	if img := renderViewerEvidenceFrame(t, sc, "viewer-folder-evidence"); isUniformRGBA(img) {
+		t.Fatal("the folder viewer rendered a blank image")
+	}
+	assertEntryClickOpensTheFile(t, sc)
+}
+
+// assertFolderListingFolded pins the folded listing: two entries, no error.
+func assertFolderListingFolded(t *testing.T, sc *screens) {
+	t.Helper()
+	sc.applyFileViewResults([]fileResult{{Op: fileOpList, Path: viewerDir, Entries: []client.WorkspaceDirEntry{
+		{Name: "notes.md", Kind: dirKindFile, Size: 42},
+		{Name: "nested", Kind: dirKindDir},
 	}}})
+	v := sc.viewer
 	if len(v.entries) != 2 || v.errMsg != "" {
 		t.Fatalf("viewer after listing = (%d entries, msg %q)", len(v.entries), v.errMsg)
 	}
+}
 
-	win, err := glwin.Open(shotWindowW, shotWindowH)
-	if err != nil {
-		t.Fatalf("open headless window: %v", err)
-	}
-	env := newAccountsTestEnv(t, true, 1.0)
-	img := renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), "viewer-folder-evidence")
+// assertEntryClickOpensTheFile renders the badges, clicks the file entry,
+// and pins that the viewer switches to the file at its path.
+func assertEntryClickOpensTheFile(t *testing.T, sc *screens) {
+	t.Helper()
+	v := sc.viewer
 	if len(v.entries) != 2 || v.entryClicks == nil || v.entryClicks["notes.md"] == nil {
 		t.Fatalf("the folder view did not render clickable badges (entries %d, clicks %v)", len(v.entries), v.entryClicks)
 	}
-	if isUniformRGBA(img) {
-		t.Fatal("the folder viewer rendered a blank image")
-	}
-
-	// Clicking the file entry opens it through the same wiring.
 	v.entryClicks["notes.md"].Click()
-	img = renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), "viewer-folder-open")
-	if v.mode != fileViewFile || v.path != "src/notes.md" || !v.loading {
+	if img := renderViewerEvidenceFrame(t, sc, "viewer-folder-open"); isUniformRGBA(img) {
+		t.Fatal("the opened entry rendered a blank image")
+	}
+	if v.mode != fileViewFile || v.path != viewerPath || !v.loading {
 		t.Fatalf("entry click did not open the file (mode %d, path %q, loading %v)", v.mode, v.path, v.loading)
 	}
 }

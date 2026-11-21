@@ -80,12 +80,12 @@ func TestCollectHighlightRectCoversExactlyTheRange(t *testing.T) {
 	}
 
 	props.HighlightLine, props.HighlightEndLine = 0, 0
-	if rect := collectHighlightRect(props, flows, len(flows), pad, bodyTop, 0, lineH); rect != nil {
-		t.Fatalf("unset range drew %+v", rect)
+	if unset := collectHighlightRect(props, flows, len(flows), pad, bodyTop, 0, lineH); unset != nil {
+		t.Fatalf("unset range drew %+v", unset)
 	}
 	props.HighlightLine, props.HighlightEndLine = 11, 12
-	if rect := collectHighlightRect(props, flows, len(flows), pad, bodyTop, 0, lineH); rect != nil {
-		t.Fatalf("out-of-range range drew %+v", rect)
+	if outside := collectHighlightRect(props, flows, len(flows), pad, bodyTop, 0, lineH); outside != nil {
+		t.Fatalf("out-of-range range drew %+v", outside)
 	}
 	props.HighlightLine, props.HighlightEndLine = 7, 0
 	rect = collectHighlightRect(props, flows, len(flows), pad, bodyTop, 0, lineH)

@@ -29,6 +29,14 @@ import (
 // ReadWorkspaceFile and ListWorkspaceDir: transcript paths are untrusted
 // data, the host decides, the viewer only asks.
 
+// diffLabel names the diff view in its header when the item carries no
+// file path, and dirKindFile/dirKindDir are the host's entry kinds.
+const (
+	diffLabel   = "diff"
+	dirKindFile = "file"
+	dirKindDir  = "dir"
+)
+
 type fileViewMode uint8
 
 const (
@@ -149,7 +157,7 @@ func (v *fileViewer) openDiff(item *session.Item, diffPath string) {
 	v.path = diffPath
 	v.diffRaw, v.diffTitle = item.Display().Text, path.Base(diffPath)
 	if v.diffTitle == "." || v.diffTitle == "/" {
-		v.diffTitle = "diff"
+		v.diffTitle = diffLabel
 	}
 }
 
@@ -314,10 +322,10 @@ func (v *fileViewer) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens
 
 func (v *fileViewer) displayPath() string {
 	if v.mode == fileViewDiff {
-		if v.diffTitle != "" && v.diffTitle != "diff" {
+		if v.diffTitle != "" && v.diffTitle != diffLabel {
 			return v.diffTitle
 		}
-		return "diff"
+		return diffLabel
 	}
 	name := v.path
 	if v.rootName != "" && v.path != "." {
@@ -423,14 +431,14 @@ func (v *fileViewer) layoutFolder(env *kit.Env, gtx *layout.Context, sc *screens
 	for _, e := range v.entries {
 		entry := e
 		kind := mdview.BadgeFile
-		if entry.Kind == "dir" {
+		if entry.Kind == dirKindDir {
 			kind = mdview.BadgeFolder
 		}
 		click := ensureEntryClick(v.entryClicks, entry.Name)
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Bottom: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				l := gtx
-				ref := mdview.FileRef{Path: joinDirPath(v.path, entry.Name), Raw: entry.Name, Folder: entry.Kind == "dir"}
+				ref := mdview.FileRef{Path: joinDirPath(v.path, entry.Name), Raw: entry.Name, Folder: entry.Kind == dirKindDir}
 				return mdview.DrawBadge(env, &l, click, mdview.BadgeSpec{Kind: kind, File: ref}, func(r mdview.FileRef) {
 					sc.openFileRef(r)
 				})

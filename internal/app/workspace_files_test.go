@@ -15,14 +15,19 @@ import (
 	"github.com/syurodev/fugue/internal/workspace"
 )
 
-// TestReadWorkspaceFileConfinesToRegisteredRoots proves HA-E09 (F10.4e): a
-// range read answers the exact lines with total_lines; "..", absolute paths
-// and symlinks resolving outside the root are refused with
-// workspace.path_outside_root; over-limit and binary files are refused with
-// typed codes; the session principal (and every non-app client kind) is
-// denied; and ListWorkspaceDir lists sorted with the 1,000-entry cap.
-func TestReadWorkspaceFileConfinesToRegisteredRoots(t *testing.T) {
-	t.Parallel()
+// fileReadFixture is one host with a workspace whose single root main holds
+// the files the HA-E09 assertions read: a 300-line text file, a nested text
+// file, a binary file, an over-limit file, and a symlink pointing outside.
+type fileReadFixture struct {
+	rt         *HostRuntime
+	ws         *WorkspaceView
+	rootDir    string
+	outsideDir string
+	lines      []string
+}
+
+func newFileReadFixture(t *testing.T) *fileReadFixture {
+	t.Helper()
 	ctx := t.Context()
 	dataDir := t.TempDir()
 	fugueHome := filepath.Join(t.TempDir(), "Fugue")
@@ -47,38 +52,61 @@ func TestReadWorkspaceFileConfinesToRegisteredRoots(t *testing.T) {
 	if err := os.MkdirAll(filepath.Join(rootDir, "nested"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	body := make([]string, 0, 300)
+	lines := make([]string, 0, 300)
 	for i := 1; i <= 300; i++ {
-		body = append(body, "line "+strconv.Itoa(i))
+		lines = append(lines, "line "+strconv.Itoa(i))
 	}
-	if err := os.WriteFile(filepath.Join(rootDir, "notes.md"), []byte(strings.Join(body, "\n")+"\n"), 0o600); err != nil {
+	f := &fileReadFixture{rt: rt, ws: created, rootDir: rootDir, lines: lines}
+	f.write(t, "notes.md", strings.Join(lines, "\n")+"\n")
+	f.write(t, filepath.Join("nested", "inner.go"), "package nested\n")
+	f.write(t, "binary.dat", string(append([]byte("ok\n"), make([]byte, 64)...)))
+	f.write(t, "big.txt", strings.Repeat("x", workspace.FileReadMaxBytes+1))
+	f.outsideDir = filepath.Join(t.TempDir(), "outside")
+	if err := os.MkdirAll(f.outsideDir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(rootDir, "nested", "inner.go"), []byte("package nested\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(f.outsideDir, "secret.txt"), []byte("outside\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(rootDir, "binary.dat"), append([]byte("ok\n"), make([]byte, 64)...), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(rootDir, "big.txt"), []byte(strings.Repeat("x", workspace.FileReadMaxBytes+1)), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	outsideDir := filepath.Join(t.TempDir(), "outside")
-	if err := os.MkdirAll(outsideDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(outsideDir, "secret.txt"), []byte("outside\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Symlink(filepath.Join(outsideDir, "secret.txt"), filepath.Join(rootDir, "link-out.txt")); err != nil {
+	if err := os.Symlink(filepath.Join(f.outsideDir, "secret.txt"), filepath.Join(rootDir, "link-out.txt")); err != nil {
 		t.Fatal(err)
 	}
 	if _, addErr := rt.AddWorkspaceRoot(ctx, string(KindApp), created.ID, "main", rootDir, "rw", created.ConfigHash); addErr != nil {
 		t.Fatal(addErr)
 	}
+	return f
+}
 
-	// A whole read answers the file with its language hint and line count.
-	whole, wholeErr := rt.ReadWorkspaceFile(ctx, string(KindApp), created.ID, "main", "notes.md", 0, 0)
+func (f *fileReadFixture) write(t *testing.T, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(f.rootDir, name), []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestReadWorkspaceFileConfinesToRegisteredRoots proves HA-E09 (F10.4e): a
+// range read answers the exact lines with total_lines; "..", absolute paths
+// and symlinks resolving outside the root are refused with
+// workspace.path_outside_root; over-limit and binary files are refused with
+// typed codes; the session principal (and every non-app client kind) is
+// denied; and ListWorkspaceDir lists sorted with the 1,000-entry cap.
+func TestReadWorkspaceFileConfinesToRegisteredRoots(t *testing.T) {
+	t.Parallel()
+	f := newFileReadFixture(t)
+
+	assertFileReadRangeAndTotals(t, f)
+	assertFileReadConfinesPaths(t, f)
+	assertFileReadDeniesNonAppPrincipals(t, f)
+	assertWorkspaceDirListsSortedWithKinds(t, f)
+	assertWorkspaceDirListCapsAtThousandEntries(t, f)
+}
+
+// assertFileReadRangeAndTotals covers the whole and range reads: language
+// hint, total_lines, the exact requested slice, and the truncated flag.
+func assertFileReadRangeAndTotals(t *testing.T, f *fileReadFixture) {
+	t.Helper()
+	ctx := t.Context()
+	whole, wholeErr := f.rt.ReadWorkspaceFile(ctx, string(KindApp), f.ws.ID, "main", "notes.md", 0, 0)
 	if wholeErr != nil {
 		t.Fatalf("whole read: %v", wholeErr)
 	}
@@ -89,55 +117,75 @@ func TestReadWorkspaceFileConfinesToRegisteredRoots(t *testing.T) {
 		t.Fatalf("whole read content edges do not match: %q...", whole.Content[:32])
 	}
 
-	// A range read answers exactly that range and marks the rest cut.
-	ranged, rangeErr := rt.ReadWorkspaceFile(ctx, string(KindApp), created.ID, "main", "notes.md", 10, 19)
+	ranged, rangeErr := f.rt.ReadWorkspaceFile(ctx, string(KindApp), f.ws.ID, "main", "notes.md", 10, 19)
 	if rangeErr != nil {
 		t.Fatalf("range read: %v", rangeErr)
 	}
 	if !ranged.Truncated || ranged.TotalLines != 300 {
 		t.Fatalf("range read = (%d lines, truncated %v)", ranged.TotalLines, ranged.Truncated)
 	}
-	wantRange := strings.Join(body[9:19], "\n")
-	if ranged.Content != wantRange {
-		t.Fatalf("range read content = %q, want %q", ranged.Content, wantRange)
+	if want := strings.Join(f.lines[9:19], "\n"); ranged.Content != want {
+		t.Fatalf("range read content = %q, want %q", ranged.Content, want)
 	}
 
-	// A nested read stays confined inside the root.
-	if _, nestedErr := rt.ReadWorkspaceFile(ctx, string(KindApp), created.ID, "main", "nested/inner.go", 0, 0); nestedErr != nil {
+	if _, nestedErr := f.rt.ReadWorkspaceFile(ctx, string(KindApp), f.ws.ID, "main", "nested/inner.go", 0, 0); nestedErr != nil {
 		t.Fatalf("nested read: %v", nestedErr)
 	}
+}
 
-	// Escapes, absolute paths and outside symlinks are refused with one code.
+// assertFileReadConfinesPaths covers the refusals: escapes, absolute paths,
+// outside symlinks, missing, binary, over-limit, and unknown root or
+// workspace, each with its typed code.
+func assertFileReadConfinesPaths(t *testing.T, f *fileReadFixture) {
+	t.Helper()
+	ctx := t.Context()
 	for name, tc := range map[string]struct {
 		path string
 		code errcode.Code
 	}{
-		"dotdot":     {"../outside/secret.txt", errcode.WorkspacePathOutsideRoot},
-		"deepdotdot": {"nested/../../outside/secret.txt", errcode.WorkspacePathOutsideRoot},
-		"absolute":   {filepath.Join(outsideDir, "secret.txt"), errcode.WorkspacePathOutsideRoot},
-		"symlink":    {"link-out.txt", errcode.WorkspacePathOutsideRoot},
-		"missing":    {"nope.md", errcode.WorkspaceFileNotFound},
-		"binary":     {"binary.dat", errcode.WorkspaceNotText},
-		"oversize":   {"big.txt", errcode.WorkspaceFileTooLarge},
+		"dotdot":      {"../outside/secret.txt", errcode.WorkspacePathOutsideRoot},
+		"deepdotdot":  {"nested/../../outside/secret.txt", errcode.WorkspacePathOutsideRoot},
+		"absolute":    {filepath.Join(f.outsideDir, "secret.txt"), errcode.WorkspacePathOutsideRoot},
+		"symlink":     {"link-out.txt", errcode.WorkspacePathOutsideRoot},
+		"missing":     {"nope.md", errcode.WorkspaceFileNotFound},
+		"binary":      {"binary.dat", errcode.WorkspaceNotText},
+		"oversize":    {"big.txt", errcode.WorkspaceFileTooLarge},
+		"unknownroot": {"notes.md", errcode.WorkspaceRootInvalid},
 	} {
-		_, readErr := rt.ReadWorkspaceFile(ctx, string(KindApp), created.ID, "main", tc.path, 0, 0)
+		root := "main"
+		if name == "unknownroot" {
+			root = "nope"
+		}
+		_, readErr := f.rt.ReadWorkspaceFile(ctx, string(KindApp), f.ws.ID, root, tc.path, 0, 0)
 		if errcode.CodeOf(readErr) != tc.code {
 			t.Fatalf("%s read error = %v, want %v", name, readErr, tc.code)
 		}
 	}
+	if _, wsErr := f.rt.ReadWorkspaceFile(ctx, string(KindApp), "ws-none", "main", "notes.md", 0, 0); errcode.CodeOf(wsErr) != errcode.WorkspaceNotFound {
+		t.Fatalf("unknown workspace error = %v", wsErr)
+	}
+}
 
-	// Every non-app principal is denied, fail closed, even for an existing file.
-	for _, principal := range []string{"session", string(KindTUI), string(KindCLI), string(KindAppBackground)} {
-		if _, deniedErr := rt.ReadWorkspaceFile(ctx, principal, created.ID, "main", "notes.md", 0, 0); errcode.CodeOf(deniedErr) != errcode.PermissionDenied {
+// assertFileReadDeniesNonAppPrincipals covers the fail-closed gate: every
+// principal but the app client kind is refused, even for an existing file.
+func assertFileReadDeniesNonAppPrincipals(t *testing.T, f *fileReadFixture) {
+	t.Helper()
+	ctx := t.Context()
+	for _, principal := range []string{PrincipalSession, string(KindTUI), string(KindCLI), string(KindAppBackground)} {
+		if _, deniedErr := f.rt.ReadWorkspaceFile(ctx, principal, f.ws.ID, "main", "notes.md", 0, 0); errcode.CodeOf(deniedErr) != errcode.PermissionDenied {
 			t.Fatalf("%s file read error = %v, want permission_denied", principal, deniedErr)
 		}
-		if _, deniedErr := rt.ListWorkspaceDir(ctx, principal, created.ID, "main", "."); errcode.CodeOf(deniedErr) != errcode.PermissionDenied {
+		if _, deniedErr := f.rt.ListWorkspaceDir(ctx, principal, f.ws.ID, "main", "."); errcode.CodeOf(deniedErr) != errcode.PermissionDenied {
 			t.Fatalf("%s dir list error = %v, want permission_denied", principal, deniedErr)
 		}
 	}
+}
 
-	// A listing answers sorted names with kinds, capped at 1,000 entries.
-	entries, listErr := rt.ListWorkspaceDir(ctx, string(KindApp), created.ID, "main", ".")
+// assertWorkspaceDirListsSortedWithKinds covers the root listing: sorted
+// names with kinds and sizes.
+func assertWorkspaceDirListsSortedWithKinds(t *testing.T, f *fileReadFixture) {
+	t.Helper()
+	entries, listErr := f.rt.ListWorkspaceDir(t.Context(), string(KindApp), f.ws.ID, "main", ".")
 	if listErr != nil {
 		t.Fatal(listErr)
 	}
@@ -154,9 +202,13 @@ func TestReadWorkspaceFileConfinesToRegisteredRoots(t *testing.T) {
 	if entries[3].Name != "nested" || entries[3].Kind != "dir" {
 		t.Fatalf("nested entry = %+v", entries[3])
 	}
+}
 
-	// More than 1,000 entries list exactly the cap, in sorted order.
-	crowded := filepath.Join(rootDir, "nested", "crowd")
+// assertWorkspaceDirListCapsAtThousandEntries covers the cap: more than
+// 1,000 entries list exactly the cap, in sorted order.
+func assertWorkspaceDirListCapsAtThousandEntries(t *testing.T, f *fileReadFixture) {
+	t.Helper()
+	crowded := filepath.Join(f.rootDir, "nested", "crowd")
 	if err := os.MkdirAll(crowded, 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +217,7 @@ func TestReadWorkspaceFileConfinesToRegisteredRoots(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	crowd, crowdErr := rt.ListWorkspaceDir(ctx, string(KindApp), created.ID, "main", "nested/crowd")
+	crowd, crowdErr := f.rt.ListWorkspaceDir(t.Context(), string(KindApp), f.ws.ID, "main", "nested/crowd")
 	if crowdErr != nil {
 		t.Fatal(crowdErr)
 	}
@@ -176,13 +228,5 @@ func TestReadWorkspaceFileConfinesToRegisteredRoots(t *testing.T) {
 		if crowd[i-1].Name >= crowd[i].Name {
 			t.Fatalf("crowded listing not sorted at %d: %s >= %s", i, crowd[i-1].Name, crowd[i].Name)
 		}
-	}
-
-	// An unknown root or workspace fails typed, not with a leak.
-	if _, rootErr := rt.ReadWorkspaceFile(ctx, string(KindApp), created.ID, "nope", "notes.md", 0, 0); errcode.CodeOf(rootErr) != errcode.WorkspaceRootInvalid {
-		t.Fatalf("unknown root error = %v", rootErr)
-	}
-	if _, wsErr := rt.ReadWorkspaceFile(ctx, string(KindApp), "ws-none", "main", "notes.md", 0, 0); errcode.CodeOf(wsErr) != errcode.WorkspaceNotFound {
-		t.Fatalf("unknown workspace error = %v", wsErr)
 	}
 }

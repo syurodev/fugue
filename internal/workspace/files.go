@@ -64,7 +64,7 @@ func (s *Service) ReadFile(ctx context.Context, workspaceID, rootName, path stri
 	if info.Size() > FileReadMaxBytes {
 		return nil, NewError(ErrFileTooLarge, "the file exceeds the 1 MiB read limit")
 	}
-	raw, err := os.ReadFile(target)
+	raw, err := os.ReadFile(target) // #nosec G304 -- target just passed resolveInsideRoot's confinement to a registered root.
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, NewError(ErrFileNotFound, "the file does not exist in the workspace root")
@@ -96,7 +96,7 @@ func totalLines(content string) int64 {
 // range in place and reports whether any content was cut. A bound of zero
 // means unset; out-of-range or inverted ranges are left unclipped and report
 // no cut, so a caller asking for lines of an empty file still reads it whole.
-func applyLineRange(content *string, total int64, startLine, endLine int64) bool {
+func applyLineRange(content *string, total, startLine, endLine int64) bool {
 	if startLine <= 0 && endLine <= 0 {
 		return false
 	}
@@ -161,6 +161,16 @@ func (s *Service) confinedPath(ctx context.Context, workspaceID, rootName, path 
 	if filepath.IsAbs(path) || strings.ContainsRune(path, 0) {
 		return "", NewError(ErrPathOutsideRoot, "the path must be relative to the workspace root")
 	}
+	rootPath, err := s.confinedRoot(ctx, workspaceID, rootName)
+	if err != nil {
+		return "", err
+	}
+	return resolveInsideRoot(rootPath, path)
+}
+
+// confinedRoot resolves the named root of the workspace to its canonical
+// on-disk directory, refusing unknown names and missing roots.
+func (s *Service) confinedRoot(ctx context.Context, workspaceID, rootName string) (string, error) {
 	ws, err := s.GetWorkspace(ctx, workspaceID)
 	if err != nil {
 		return "", err
@@ -181,6 +191,14 @@ func (s *Service) confinedPath(ctx context.Context, workspaceID, rootName, path 
 	if err != nil {
 		return "", WrapError(ErrRootMissing, "resolve the root", err)
 	}
+	return resolvedRoot, nil
+}
+
+// resolveInsideRoot normalizes a root-relative path, resolves symlinks on
+// the join, and refuses anything resolving outside the root: a ".." escape
+// before the join and a resolved path outside after it both fail with one
+// code (host-api §5.4).
+func resolveInsideRoot(resolvedRoot, path string) (string, error) {
 	clean := filepath.Clean(path)
 	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", NewError(ErrPathOutsideRoot, "the path escapes the workspace root")
@@ -193,16 +211,10 @@ func (s *Service) confinedPath(ctx context.Context, workspaceID, rootName, path 
 		return "", WrapError(ErrFileNotFound, "resolve the path", err)
 	}
 	rel, relErr := filepath.Rel(resolvedRoot, resolved)
-	if relErr != nil || rel == "." && !isDirRequest(path) || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+	if relErr != nil || rel == "." && clean != "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 		return "", NewError(ErrPathOutsideRoot, "the path resolves outside the workspace root")
 	}
 	return resolved, nil
-}
-
-// isDirRequest reports a listing request for the root itself ("." is the
-// root's own relative path, always inside it).
-func isDirRequest(path string) bool {
-	return filepath.Clean(path) == "."
 }
 
 func hasNULInHead(raw []byte, head int) bool {
@@ -215,35 +227,50 @@ func hasNULInHead(raw []byte, head int) bool {
 	return false
 }
 
-// languageHints suggests a language name from a file extension (host-api
-// §5.4), matching the viewer's chroma roles; unknown extensions are "text".
-var languageHints = map[string]string{
-	".go": "go", ".ts": "typescript", ".tsx": "typescript", ".js": "javascript",
-	".jsx": "javascript", ".py": "python", ".rs": "rust", ".rb": "ruby",
-	".java": "java", ".kt": "kotlin", ".swift": "swift", ".c": "c", ".h": "c",
-	".cpp": "cpp", ".cc": "cpp", ".hpp": "cpp", ".cs": "csharp", ".php": "php",
-	".json": "json", ".yaml": "yaml", ".yml": "yaml", ".toml": "toml",
-	".sql": "sql", ".proto": "protobuf", ".sh": "bash", ".bash": "bash",
-	".zsh": "bash", ".md": "markdown", ".mdx": "markdown", ".css": "css",
-	".scss": "scss", ".html": "html", ".xml": "xml", ".lua": "lua",
-}
+// Language names LanguageHint returns for more than one extension, named so
+// the extension table carries no duplicate literals.
+const (
+	langBash       = "bash"
+	langCPP        = "cpp"
+	langGo         = "go"
+	langJavaScript = "javascript"
+	langMarkdown   = "markdown"
+	langText       = "text"
+	langTypeScript = "typescript"
+)
 
 // LanguageHint suggests a language name from the file's extension (host-api
-// §5.4); unknown extensions and known special filenames return their own
-// language, everything else "text".
+// §5.4), matching the viewer's chroma roles; known special filenames return
+// their own language, everything else "text".
 func LanguageHint(path string) string {
-	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(path)))
-	if lang, ok := languageHints[ext]; ok {
-		return lang
-	}
-	name := strings.ToLower(filepath.Base(strings.TrimSpace(path)))
+	trimmed := strings.TrimSpace(path)
+	name := strings.ToLower(filepath.Base(trimmed))
 	switch {
 	case name == "dockerfile" || strings.HasPrefix(name, "dockerfile."):
 		return "dockerfile"
 	case name == "makefile" || strings.HasPrefix(name, "makefile."):
 		return "makefile"
 	case name == "go.mod" || name == "go.sum" || name == "go.work":
-		return "go"
+		return langGo
 	}
-	return "text"
+	lang, ok := languageHints()[strings.ToLower(filepath.Ext(trimmed))]
+	if !ok {
+		return langText
+	}
+	return lang
+}
+
+// languageHints maps file extensions to language names (host-api §5.4).
+func languageHints() map[string]string {
+	return map[string]string{
+		".go": langGo, ".ts": langTypeScript, ".tsx": langTypeScript,
+		".js": langJavaScript, ".jsx": langJavaScript, ".py": "python",
+		".rs": "rust", ".rb": "ruby", ".java": "java", ".kt": "kotlin",
+		".swift": "swift", ".c": "c", ".h": "c", ".cpp": langCPP, ".cc": langCPP,
+		".hpp": langCPP, ".cs": "csharp", ".php": "php", ".json": "json",
+		".yaml": "yaml", ".yml": "yaml", ".toml": "toml", ".sql": "sql",
+		".proto": "protobuf", ".sh": langBash, ".bash": langBash, ".zsh": langBash,
+		".md": langMarkdown, ".mdx": langMarkdown, ".css": "css", ".scss": "scss",
+		".html": "html", ".xml": "xml", ".lua": "lua",
+	}
 }

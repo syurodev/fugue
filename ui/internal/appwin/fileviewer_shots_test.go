@@ -18,6 +18,10 @@ const (
 	shotViewerFile   = "viewer-file"
 	shotViewerDiff   = "viewer-diff"
 	shotViewerFolder = "viewer-folder"
+
+	// The path the file and diff scenes open, relative to the root.
+	shotViewerGoPath = "internal/viewer/page.go"
+	shotViewerGoDir  = "internal/viewer"
 )
 
 func viewerShotSpecs() []shotSpec {
@@ -33,24 +37,24 @@ func buildViewerShotScreens(t *testing.T, scene string) *screens {
 	v := sc.viewer
 	switch scene {
 	case shotViewerFile:
-		sc.transcriptCallbacks().OnOpenFile(mdview.FileRef{Path: "internal/viewer/page.go", Line: 96, EndLine: 103, Raw: "internal/viewer/page.go:96-103"})
-		sc.applyFileViewResults([]fileResult{{Op: fileOpRead, Path: "internal/viewer/page.go", File: client.WorkspaceFile{
+		sc.transcriptCallbacks().OnOpenFile(mdview.FileRef{Path: shotViewerGoPath, Line: 96, EndLine: 103, Raw: shotViewerGoPath + ":96-103"})
+		sc.applyFileViewResults([]fileResult{{Op: fileOpRead, Path: shotViewerGoPath, File: client.WorkspaceFile{
 			Content: viewerShotGoBody(), TotalLines: 120, Language: "go",
 		}}})
 	case shotViewerDiff:
 		sc.transcripts["s1"].ApplyNewestPage([]client.TranscriptItem{{
 			ItemID: "fc-shot", Kind: "file_change", Sequence: 1, Revision: 1,
-			View: client.TranscriptView{Title: "internal/viewer/page.go", Text: viewerShotDiffBody()},
+			View: client.TranscriptView{Title: shotViewerGoPath, Text: viewerShotDiffBody()},
 		}})
 		sc.openDiffViewer("fc-shot")
 	case shotViewerFolder:
-		sc.transcriptCallbacks().OnOpenFile(mdview.FileRef{Path: "internal/viewer", Raw: "internal/viewer", Folder: true})
-		sc.applyFileViewResults([]fileResult{{Op: fileOpList, Path: "internal/viewer", Entries: []client.WorkspaceDirEntry{
-			{Name: "badge.go", Kind: "file", Size: 4212},
-			{Name: "page.go", Kind: "file", Size: 18144},
-			{Name: "render.go", Kind: "file", Size: 9307},
-			{Name: "state.go", Kind: "file", Size: 6650},
-			{Name: "testdata", Kind: "dir"},
+		sc.transcriptCallbacks().OnOpenFile(mdview.FileRef{Path: shotViewerGoDir, Raw: shotViewerGoDir, Folder: true})
+		sc.applyFileViewResults([]fileResult{{Op: fileOpList, Path: shotViewerGoDir, Entries: []client.WorkspaceDirEntry{
+			{Name: "badge.go", Kind: dirKindFile, Size: 4212},
+			{Name: "page.go", Kind: dirKindFile, Size: 18144},
+			{Name: "render.go", Kind: dirKindFile, Size: 9307},
+			{Name: "state.go", Kind: dirKindFile, Size: 6650},
+			{Name: "testdata", Kind: dirKindDir},
 		}}})
 	default:
 		t.Fatalf("unknown viewer shot scene %q", scene)
