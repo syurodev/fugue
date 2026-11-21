@@ -170,8 +170,8 @@ type sourceRef struct {
 	entry  int
 }
 
-// citeChannelLines appends the `#n` of each entry's source channel line to
-// its state text (§6.7: the digest records the number so the reader can say
+// citeChannelLines records the `#n` of each entry's source channel line on
+// the entry (§6.7: the digest records the number so the reader can say
 // "see #14" instead of copying content). The line in the entry task's thread
 // is preferred; a team-wide duplicate falls back to the first line.
 func (w *teamWake) citeChannelLines(ctx context.Context, teamID string, entries []teams.DigestEntry, sources []sourceRef) error {
@@ -199,7 +199,7 @@ func (w *teamWake) citeChannelLines(ctx context.Context, teamID string, entries 
 				break
 			}
 		}
-		entries[ref.entry].State += fmt.Sprintf(" (see #%d)", chosen)
+		entries[ref.entry].Ref = chosen
 	}
 	return nil
 }

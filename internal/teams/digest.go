@@ -27,12 +27,15 @@ const (
 
 // DigestEntry is one item of a mailbox turn. TaskID and State are Fugue
 // metadata; Summary, when present, is model output and always rendered as
-// untrusted data (OR-13).
+// untrusted data (OR-13). Ref, when positive, is the `#n` of the entry's
+// source channel line (§6.7): the digest cites the number so the reader can
+// say "see #14" instead of copying content.
 type DigestEntry struct {
 	TaskID   string
 	State    string
 	Summary  string
 	Question bool
+	Ref      int64
 }
 
 // BuildDigest renders one mailbox turn of at most limit bytes: the header and
@@ -56,10 +59,19 @@ func BuildDigest(header string, entries []DigestEntry, nonce string, limit int) 
 	for _, e := range orderQuestionsFirst(entries) {
 		safeID := EscapeDigestText(e.TaskID)
 		line := fmt.Sprintf(digestStateLine, safeID, EscapeDigestText(e.State))
+		if e.Ref > 0 {
+			line = fmt.Sprintf("%s (see #%d)", line, e.Ref)
+		}
 		block := digestBlock(safeID, safeNonce, e.Summary)
-		fits := e.Summary != "" && !omitted && b.Len()+len(block)+2 <= limit
-		if fits {
+		fits := len(block) + 2
+		if e.Ref > 0 {
+			fits += len(line) + 2
+		}
+		if e.Summary != "" && !omitted && b.Len()+fits <= limit {
 			addLine(&b, "")
+			if e.Ref > 0 {
+				addLine(&b, line)
+			}
 			addLine(&b, block)
 			continue
 		}

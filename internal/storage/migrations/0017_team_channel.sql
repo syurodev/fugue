@@ -2,8 +2,7 @@
 -- v0.3 §6.7, Q-176 A, Q-178 A). team_channel_messages holds only the line
 -- metadata (number, kind, thread, sender, recipient, source event reference
 -- and a byte count); the content stays sealed in the source event payload
--- (INV-09), so the table is never a second source of truth. The numbering is
--- 0018: 0017 is taken by F10.20a's appstate migration.
+-- (INV-09), so the table is never a second source of truth.
 --
 -- informational marks a mailbox row that never schedules its own delivery:
 -- it rides the recipient's next digest without waking them (§6.7: the
