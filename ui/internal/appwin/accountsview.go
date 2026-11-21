@@ -6,8 +6,6 @@ import (
 
 	"gioui.org/io/key"
 	"gioui.org/layout"
-	"gioui.org/op/clip"
-	"gioui.org/op/paint"
 
 	"github.com/syurodev/fugue/pkg/client"
 
@@ -132,9 +130,10 @@ func (s *screens) toggleAccountsShortcut(gtx *layout.Context) {
 			return
 		}
 		if k, isKey := ke.(key.Event); isKey && k.State == key.Press {
-			s.accountsOpen = !s.accountsOpen
 			if s.accountsOpen {
-				s.inboxOpen = false
+				s.showPane(paneTranscript)
+			} else {
+				s.showPane(paneAccounts)
 			}
 		}
 	}
@@ -150,17 +149,10 @@ func (s *screens) requestRefreshAccounts() {
 }
 
 func (v *accountsView) layout(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
-	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
-	return layout.Inset{Top: theme.SpaceMD, Bottom: theme.SpaceMD, Left: theme.SpaceLG, Right: theme.SpaceLG}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			rigidWidget(func(gtx *layout.Context) layout.Dimensions { return v.layoutHeader(gtx, env, sc) }),
-			spacerH(theme.SpaceMD),
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				return v.layoutBody(&local, env, sc)
-			}),
-		)
-	})
+	return layoutRightPane(gtx, env,
+		func(gtx *layout.Context) layout.Dimensions { return v.layoutHeader(gtx, env, sc) },
+		func(gtx *layout.Context) layout.Dimensions { return v.layoutBody(gtx, env, sc) },
+	)
 }
 
 func (v *accountsView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
@@ -191,7 +183,7 @@ func (v *accountsView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *scree
 		}),
 		spacerW(theme.SpaceSM),
 		rigidInboxButton(env, sc.fail, v.backBtn, kit.ButtonProps{
-			Text: "Back to chat", Variant: kit.Ghost, Size: kit.SizeSM, Disabled: sc.open == "",
+			Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM, Disabled: sc.open == "",
 		}, func() { sc.accountsOpen = false }),
 	)
 }
@@ -293,7 +285,7 @@ func (v *accountsView) layoutCardHeader(gtx *layout.Context, env *kit.Env, sc *s
 	}))
 	if running {
 		children = append(children, rigidInboxButton(env, sc.fail, w.cancelBtn, kit.ButtonProps{
-			Text: "Cancel", Variant: kit.Danger, Size: kit.SizeSM, Busy: login.Cancelling, Disabled: sc.accountsWorker == nil,
+			Text: labelCancel, Variant: kit.Danger, Size: kit.SizeSM, Busy: login.Cancelling, Disabled: sc.accountsWorker == nil,
 		}, func() {
 			if sc.accountsWorker == nil {
 				return

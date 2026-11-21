@@ -212,3 +212,82 @@ func errDisconnectedFromStream(ctx context.Context, c *client.Client) error {
 	}
 	return nil
 }
+
+func serveConnTracking(t *testing.T, onEvent func(*connect.ServerStream[hostv1.SubscribeResponse]) error) (string, <-chan struct{}) {
+	t.Helper()
+	socket := filepath.Join(shortDir(t), "fugue.sock")
+	var lc net.ListenConfig
+	ln, err := lc.Listen(t.Context(), "unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connClosed := make(chan struct{}, 1)
+	mux := http.NewServeMux()
+	mux.Handle(hostv1connect.NewHostServiceHandler(&fakeHandler{
+		subscribe: func(sctx context.Context, _ *connect.Request[hostv1.SubscribeRequest], stream *connect.ServerStream[hostv1.SubscribeResponse]) error {
+			if serr := onEvent(stream); serr != nil {
+				return serr
+			}
+			<-sctx.Done()
+			return sctx.Err()
+		},
+	}))
+	var protos http.Protocols
+	protos.SetHTTP2(true)
+	protos.SetUnencryptedHTTP2(true)
+	// httptest starts and stops the serve loop itself, so the test needs no bare
+	// goroutine (fuguevet) and Close waits for it.
+	srv := httptest.NewUnstartedServer(mux)
+	srv.Listener = ln
+	srv.Config.Protocols = &protos
+	srv.Config.ConnState = func(_ net.Conn, st http.ConnState) {
+		if st == http.StateClosed {
+			select {
+			case connClosed <- struct{}{}:
+			default:
+			}
+		}
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+	return socket, connClosed
+}
+
+// TestClientCloseClosesSocketAfterCanceledStream pins that Client.Close closes
+// the leased Unix socket even when called immediately after closing a stream
+// whose context was canceled (where http2's transportResponseBody.Close may
+// return on ctx.Done before the stream ID is forgotten from cc.streams).
+func TestClientCloseClosesSocketAfterCanceledStream(t *testing.T) {
+	t.Parallel()
+	socket, connClosed := serveConnTracking(t, func(stream *connect.ServerStream[hostv1.SubscribeResponse]) error {
+		return stream.Send(&hostv1.SubscribeResponse{Kind: &hostv1.SubscribeResponse_Event{
+			Event: &hostv1.HostEvent{Sequence: 1, Type: testTrailer},
+		}})
+	})
+	ctx := testCtx(t)
+	c, err := client.Dial(ctx, socket, appParams())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(c.Close)
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	stream, err := c.Subscribe(streamCtx, testTopic, nil)
+	if err != nil {
+		cancelStream()
+		t.Fatal(err)
+	}
+	if _, err := stream.Recv(); err != nil {
+		cancelStream()
+		closeQuietly(stream)
+		t.Fatal(err)
+	}
+	cancelStream()
+	closeQuietly(stream)
+	c.Close()
+
+	select {
+	case <-connClosed:
+	case <-ctx.Done():
+		t.Fatalf("server never saw connection close after c.Close(): %v", ctx.Err())
+	}
+}
