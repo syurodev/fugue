@@ -132,6 +132,14 @@ func (v *fileViewer) applyRoots(roots []workspace.Root) {
 	v.loading = true
 }
 
+// openUnavailable opens the pane with an inline refusal and no read, for a
+// click the session cannot serve (no workspace bound).
+func (v *fileViewer) openUnavailable(msg string) {
+	v.reset()
+	v.open = true
+	v.errMsg = msg
+}
+
 // openDiff targets an Edited row: the diff comes from the file_change item
 // itself, so no file read happens.
 func (v *fileViewer) openDiff(item *session.Item, diffPath string) {
@@ -179,7 +187,11 @@ func (v *fileViewer) apply(res *fileResult) {
 	switch res.Op {
 	case fileOpRead:
 		v.file = &res.File
+		// Expanded keeps the block uncapped while still bounding its
+		// viewport, so long files scroll inside the pane instead of
+		// stretching it (desktop-app v0.9 height rules, F10.4e).
 		v.code = mdview.NewCodeBlockState()
+		v.code.Expanded = true
 		v.scrollPending = v.line > 0
 	case fileOpList:
 		v.entries = res.Entries
@@ -355,17 +367,15 @@ func (v *fileViewer) layoutError(env *kit.Env, gtx *layout.Context, _ *screens) 
 
 // layoutFile renders the read through the shared code block: line numbers,
 // syntax colors from the host's language hint, wrap toggle, horizontal
-// scroll, and the requested line or range tinted.
+// scroll, and the requested line or range tinted. The jump lands a few rows
+// above the range so it reads with context; the reader scrolls on from there.
 func (v *fileViewer) layoutFile(env *kit.Env, gtx *layout.Context) layout.Dimensions {
+	jump := 0
 	if v.scrollPending {
-		lineH := max(gtx.Sp(theme.TypeCode().Line), 1)
-		v.code.ScrollY = max(v.line-1, 0) * lineH
+		jump = max(v.line-viewerScrollContext, 1)
 		v.scrollPending = false
 	}
-	end := v.endLine
-	if end < v.line {
-		end = v.line
-	}
+	end := max(v.endLine, v.line)
 	local := *gtx
 	dims, _ := mdview.LayoutCodeBlock(env, &local, v.code, &mdview.CodeBlockProps{
 		Title: path.Base(v.path), Format: v.file.Language, Icon: kit.IconFileCode,
@@ -373,8 +383,22 @@ func (v *fileViewer) layoutFile(env *kit.Env, gtx *layout.Context) layout.Dimens
 		Raw:              v.file.Content,
 		HighlightLine:    v.line,
 		HighlightEndLine: end,
+		ScrollToLine:     jump,
+		ViewportLines:    viewerViewportLines(gtx),
 	})
 	return dims
+}
+
+// viewerScrollContext is how many rows above the requested range the jump
+// keeps visible.
+const viewerScrollContext = 4
+
+// viewerViewportLines sizes the code block's inner viewport to the pane, so
+// the requested line lands on screen instead of inside an oversized block.
+func viewerViewportLines(gtx *layout.Context) int {
+	lineEst := max(gtx.Sp(theme.TypeCode().Line), 1)
+	chrome := 6 * gtx.Dp(theme.SpaceMD)
+	return max((gtx.Constraints.Max.Y-chrome)/lineEst, 8)
 }
 
 // layoutDiff renders the Edited row's full diff with the same three columns

@@ -1,7 +1,6 @@
 package appwin
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/syurodev/fugue/ui/internal/mdview"
@@ -21,7 +20,8 @@ func (s *screens) openFileRef(ref mdview.FileRef) {
 	}
 	sess, ok := s.sidebar.Lookup(s.open)
 	if !ok || sess.WorkspaceID == "" {
-		s.fail(fmt.Errorf("this session has no workspace to read files from"))
+		s.viewer.openUnavailable("This session has no workspace to read files from.")
+		s.showPane(paneViewer)
 		return
 	}
 	s.viewer.openFile(ref, sess.WorkspaceID)

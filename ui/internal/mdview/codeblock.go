@@ -49,6 +49,15 @@ type CodeBlockProps struct {
 	// behind the text (F10.4e); zero on both disables the tint.
 	HighlightLine    int
 	HighlightEndLine int
+	// ScrollToLine scrolls the block once on this frame so the named
+	// displayed row lands at the viewport top (F10.4e); the caller decides
+	// when to stop passing it, so the reader's own scrolling wins after.
+	ScrollToLine int
+	// ViewportLines overrides how many rows the expanded block shows before
+	// its inner scroll ends (F10.4e); zero keeps the shared default. The
+	// file viewer sizes it to the pane so a jump to a line is actually on
+	// screen.
+	ViewportLines int
 }
 
 // CodeBlockResult reports user actions triggered on a code block this frame.
@@ -161,6 +170,7 @@ func (v *view) layoutCodeBlock(env *kit.Env, gtx *layout.Context, st *CodeBlockS
 	st.syncCache(env, p)
 	v.pollBlockEvents(env, gtx, st)
 	m := v.measureCodeBlock(gtx, st, p)
+	scrollToLine(gtx, st, p, &m)
 
 	rec := op.Record(gtx.Ops)
 	y := v.drawCodeBlockContents(env, gtx, st, p, &m, &res)
@@ -172,6 +182,20 @@ func (v *view) layoutCodeBlock(env *kit.Env, gtx *layout.Context, st *CodeBlockS
 		call.Add(gtx.Ops)
 	})
 	return layout.Dimensions{Size: image.Pt(m.w, y)}, res
+}
+
+// scrollToLine moves the scroll offset once so the requested displayed row
+// lands at the viewport top, clamped to the measured bounds (F10.4e). It
+// runs after measure, where exact row heights are known.
+func scrollToLine(_ *layout.Context, st *CodeBlockState, p *CodeBlockProps, m *codeBlockMetrics) {
+	if p.ScrollToLine <= 1 || p.IsDiff {
+		return
+	}
+	y := 0
+	for i := range min(p.ScrollToLine-1, len(m.flows)) {
+		y += max(m.flows[i].height, m.lineH)
+	}
+	st.ScrollY = min(y, max(st.maxScrollY, 0))
 }
 
 func (v *view) measureCodeBlock(gtx *layout.Context, st *CodeBlockState, p *CodeBlockProps) codeBlockMetrics {
@@ -193,8 +217,12 @@ func (v *view) measureCodeBlock(gtx *layout.Context, st *CodeBlockState, p *Code
 	codeAvailW := max(bodyMaxW-gutterW-markerW, 0)
 	flows, contentW, contentH := v.measureCodeRows(lines, diffLines, visCount, codeAvailW, fs, p.IsDiff, st.Wrapped, lineH)
 	viewH := contentH
-	if st.Expanded && visCount > maxExpandedViewportLines {
-		viewH = min(contentH, maxExpandedViewportLines*lineH)
+	viewportLines := maxExpandedViewportLines
+	if p.ViewportLines > 0 {
+		viewportLines = p.ViewportLines
+	}
+	if st.Expanded && visCount > viewportLines {
+		viewH = min(contentH, viewportLines*lineH)
 	}
 	st.updateScrollBounds(codeAvailW, contentW, viewH, contentH)
 	return codeBlockMetrics{
