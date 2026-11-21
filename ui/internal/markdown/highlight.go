@@ -13,13 +13,14 @@ import (
 // the size caps, a lexer error — stays plain. The analyser is never
 // called: an unknown language is never guessed.
 
-// highlight tokenizes one code block into role-tagged lines and reports
-// whether tokenization happened. src must already be tab-expanded and
-// sanitized; the size caps are checked against it here. Without a clock
-// there is no time budget to enforce, so the block stays plain: the
-// highlighter fails safe instead of running the lexer unbounded. A lexer
-// panic is recovered: a lexer that misbehaves on hostile input leaves the
-// block plain instead of taking the process down.
+// Highlight tokenizes src for language into syntax-role-tagged span lines under
+// clock's highlight budget. Without a clock or a known language lexer, it returns
+// ok=false cleanly so callers fall back to plain spans.
+func Highlight(language, src string, clock Clock) ([][]Span, bool) {
+	lineCount := strings.Count(src, "\n") + 1
+	return highlight(language, src, lineCount, clock)
+}
+
 func highlight(language, src string, lineCount int, clock Clock) (lines [][]Span, ok bool) {
 	if clock == nil || language == "" || len(src) > maxHighlightBytes || lineCount > maxHighlightLines {
 		return nil, false

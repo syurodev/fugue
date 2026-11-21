@@ -75,6 +75,9 @@ const (
 // document at this width and centers it in the rest.
 const ProseMeasure = unit.Dp(780)
 
+// TranscriptMeasure is the centered transcript column width (desktop-app v0.10 §5.4).
+const TranscriptMeasure = unit.Dp(720)
+
 // SidebarWidth is the session list's column width in the app window: wide
 // enough for a vendor name, state and wait reason at type.body, never a
 // second pane. F10.20's slot grid owns the shell chrome; until then the

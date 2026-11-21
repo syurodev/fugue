@@ -1,6 +1,7 @@
 package mdview
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"io"
@@ -28,6 +29,22 @@ func logMDViewErr(err error) {
 	}
 }
 
+func (v *view) measureCommandBlock(gtx *layout.Context, st *CodeBlockState, bodyMaxW int) ([]*flow, int) {
+	if len(st.cachedCmdLn) == 0 {
+		return nil, 0
+	}
+	fs := flowStyle{px: fixed.I(gtx.Sp(theme.TypeCode().Size)), mono: true, whole: false}
+	lineH := max(gtx.Sp(theme.TypeCode().Line), fs.lineHeight())
+	flows := make([]*flow, len(st.cachedCmdLn))
+	totalH := 0
+	for i, spans := range st.cachedCmdLn {
+		f := v.flowFor(spans, max(bodyMaxW, 1), fs)
+		flows[i] = f
+		totalH += max(f.height, lineH)
+	}
+	return flows, totalH
+}
+
 func (v *view) measureCodeRows(
 	lines [][]markdown.Span,
 	diffLines []DiffLine,
@@ -45,9 +62,7 @@ func (v *view) measureCodeRows(
 	for i := range visCount {
 		var spans []markdown.Span
 		if isDiff {
-			if diffLines[i].Text != "" {
-				spans = []markdown.Span{{Text: diffLines[i].Text}}
-			}
+			spans = diffLineSpans(&diffLines[i])
 		} else if i < len(lines) {
 			spans = lines[i]
 		}
@@ -57,6 +72,52 @@ func (v *view) measureCodeRows(
 		totalH += max(f.height, lineH)
 	}
 	return flows, widest, totalH
+}
+
+func diffLineSpans(dl *DiffLine) []markdown.Span {
+	if len(dl.Spans) > 0 {
+		return dl.Spans
+	}
+	if dl.Text == "" {
+		return nil
+	}
+	return []markdown.Span{{Text: dl.Text}}
+}
+
+func resolvedHeader(p *CodeBlockProps) (icon kit.IconName, title, fmtLabel string) {
+	switch {
+	case p.Command != "":
+		icon = kit.IconTerminal
+		if p.Icon != "" {
+			icon = p.Icon
+		}
+		return icon, "shell", ""
+	case p.IsDiff:
+		title = p.Title
+		if title == "" {
+			title = "diff"
+		}
+		icon = p.Icon
+		if icon == "" {
+			icon = FileIcon(p.Title)
+			if p.Title == "" {
+				icon = kit.IconPencil
+			}
+		}
+		return icon, title, ""
+	case p.IsOutputCard:
+		icon = p.Icon
+		if icon == "" {
+			icon = kit.IconFileCode
+		}
+		return icon, "output", p.Format
+	default:
+		title = p.Format
+		if title == "" {
+			title = "code"
+		}
+		return kit.IconFileCode, title, ""
+	}
 }
 
 func (v *view) drawBlockHeader(
@@ -69,28 +130,19 @@ func (v *view) drawBlockHeader(
 	res *CodeBlockResult,
 ) int {
 	c := v.th.Chrome()
-	title := p.Title
-	if title == "" {
-		title = "Output"
-	}
+	icon, title, fmtLabel := resolvedHeader(p)
 	rowH := gtx.Dp(theme.ControlSM) + 2*gtx.Dp(theme.SpaceXS)
 	off := op.Offset(image.Pt(pad, gtx.Dp(theme.SpaceXS))).Push(gtx.Ops)
 	inner := *gtx
 	inner.Constraints = layout.Constraints{Min: image.Pt(max(w-2*pad, 0), gtx.Dp(theme.ControlSM)), Max: image.Pt(max(w-2*pad, 0), gtx.Dp(theme.ControlSM))}
 	layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(inner,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if p.Icon == "" {
-				return layout.Dimensions{}
-			}
 			local := gtx
-			d, err := env.Icon(&local, p.Icon, theme.IconSM, c.FgMuted)
+			d, err := env.Icon(&local, icon, theme.IconSM, c.IconMuted)
 			logMDViewErr(err)
 			return d
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if p.Icon == "" {
-				return layout.Dimensions{}
-			}
 			return layout.Dimensions{Size: image.Pt(gtx.Dp(theme.SpaceSM), 0)}
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -98,15 +150,19 @@ func (v *view) drawBlockHeader(
 			return kit.Label(env, &local, theme.TypeLabel(), c.Fg, title)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if p.Format == "" {
+			if fmtLabel == "" {
 				return layout.Dimensions{}
 			}
 			return layout.Inset{Left: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				local := gtx
-				return kit.Label(env, &local, theme.TypeSmall(), c.FgSubtle, p.Format)
+				return kit.Label(env, &local, theme.TypeSmall(), c.FgSubtle, fmtLabel)
 			})
 		}),
 		layout.Flexed(1, func(layout.Context) layout.Dimensions { return layout.Dimensions{} }),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			local := gtx
+			return v.drawHeaderStatus(env, &local, p)
+		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			if !showActions {
 				return layout.Dimensions{}
@@ -119,23 +175,35 @@ func (v *view) drawBlockHeader(
 	return rowH
 }
 
-func (v *view) drawFloatingActions(env *kit.Env, gtx *layout.Context, st *CodeBlockState, p *CodeBlockProps, w, pad int, res *CodeBlockResult) {
-	rec := op.Record(gtx.Ops)
-	local := *gtx
-	local.Constraints = layout.Constraints{Max: image.Pt(max(w-2*pad, 0), gtx.Dp(theme.ControlSM))}
-	dims := v.drawActionButtons(env, &local, st, p, res)
-	call := rec.Stop()
-	x := max(w-pad-dims.Size.X, pad)
-	y := gtx.Dp(theme.SpaceXS)
-	box := image.Rect(x, y, x+dims.Size.X, y+dims.Size.Y)
-	rad := gtx.Dp(theme.RadiusSM)
-	paint.FillShape(gtx.Ops, v.th.Chrome().SurfaceRaised, clip.UniformRRect(box, rad).Op(gtx.Ops))
-	paint.FillShape(gtx.Ops, v.th.Chrome().BorderSubtle, clip.Stroke{
-		Path: clip.UniformRRect(box, rad).Path(gtx.Ops), Width: float32(max(gtx.Dp(theme.Hairline), 1)),
-	}.Op())
-	off := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
-	call.Add(gtx.Ops)
-	off.Pop()
+func (v *view) drawHeaderStatus(env *kit.Env, gtx *layout.Context, p *CodeBlockProps) layout.Dimensions {
+	if p.ExitCode == nil && p.Duration == "" {
+		return layout.Dimensions{}
+	}
+	c := v.th.Chrome()
+	return layout.Inset{Right: theme.SpaceSM}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if p.ExitCode == nil {
+					return layout.Dimensions{}
+				}
+				col := v.th.Status().Success
+				if *p.ExitCode != 0 {
+					col = v.th.Status().Danger
+				}
+				l := gtx
+				return kit.Label(env, &l, theme.TypeSmall(), col, fmt.Sprintf("exit %d", *p.ExitCode))
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if p.Duration == "" {
+					return layout.Dimensions{}
+				}
+				return layout.Inset{Left: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+					l := gtx
+					return kit.Label(env, &l, theme.TypeSmall(), c.FgSubtle, p.Duration)
+				})
+			}),
+		)
+	})
 }
 
 func (v *view) drawActionButtons(env *kit.Env, gtx *layout.Context, st *CodeBlockState, p *CodeBlockProps, res *CodeBlockResult) layout.Dimensions {
@@ -172,6 +240,9 @@ func (v *view) drawActionButtons(env *kit.Env, gtx *layout.Context, st *CodeBloc
 			logMDViewErr(err)
 			if clicked {
 				txt := PlainCopyText(p.Raw, p.IsDiff)
+				if txt == "" && p.Command != "" {
+					txt = p.Command
+				}
 				gtx.Execute(clipboard.WriteCmd{Type: clipboardMIME, Data: io.NopCloser(strings.NewReader(txt))})
 				st.CopiedUntil = env.Now().Add(copiedFlashDuration)
 				env.Driver.WakeAt(st.CopiedUntil)
@@ -291,8 +362,25 @@ func (v *view) drawDividerAt(env *kit.Env, gtx *layout.Context, w, y int) int {
 	return d.Size.Y
 }
 
-func (v *view) drawExpandFooter(env *kit.Env, gtx *layout.Context, st *CodeBlockState, w, pad, y int, res *CodeBlockResult, truncated bool) int {
-	off := op.Offset(image.Pt(pad, y+gtx.Dp(theme.SpaceXS))).Push(gtx.Ops)
+func (v *view) drawCommandHeader(env *kit.Env, gtx *layout.Context, flows []*flow, w, pad, topY, lineH int, hasOutput bool) int {
+	y := topY + pad
+	cmdAvailW := max(w-2*pad, 1)
+	for _, f := range flows {
+		rowH := max(f.height, lineH)
+		off := op.Offset(image.Pt(pad, y)).Push(gtx.Ops)
+		v.drawFlow(gtx, f, markdown.AlignNone, cmdAvailW)
+		off.Pop()
+		y += rowH
+	}
+	y += gtx.Dp(theme.SpaceSM)
+	if hasOutput {
+		y += v.drawDividerAt(env, gtx, w, y)
+	}
+	return y
+}
+
+func (v *view) drawExpandAction(env *kit.Env, gtx *layout.Context, st *CodeBlockState, w, pad, y int, res *CodeBlockResult, truncated bool) int {
+	off := op.Offset(image.Pt(pad, y)).Push(gtx.Ops)
 	local := *gtx
 	local.Constraints = layout.Constraints{Max: image.Pt(max(w-2*pad, 0), gtx.Dp(theme.ControlSM))}
 	bp := kit.ButtonProps{
@@ -308,5 +396,5 @@ func (v *view) drawExpandFooter(env *kit.Env, gtx *layout.Context, st *CodeBlock
 		st.Expanded = true
 		res.RequestFull = truncated
 	}
-	return dims.Size.Y + 2*gtx.Dp(theme.SpaceXS)
+	return dims.Size.Y + gtx.Dp(theme.SpaceSM)
 }

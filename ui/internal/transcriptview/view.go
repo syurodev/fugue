@@ -6,6 +6,7 @@ import (
 
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/unit"
 
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/mdview"
@@ -28,10 +29,13 @@ func logTVErr(err error) {
 // coupling transcriptview to host writes or OS openers.
 type Callbacks struct {
 	OnOpenLink   func(url string)
+	OnOpenFile   func(ref mdview.FileRef)
 	OnFileChip   func(ref mdview.FileRef)
 	OnIDChip     func(id string)
 	OnFullOutput func(itemID string)
 	OnViewDiff   func(itemID string)
+	OnOpenInbox  func()
+	GitActions   mdview.GitRefRegistry
 }
 
 // State is one session's view state (F10.13, F10.4c): VirtualList owns the
@@ -92,13 +96,13 @@ func Layout(env *kit.Env, gtx *layout.Context, st *State, items []*session.Item)
 	return LayoutWithCallbacks(env, gtx, st, items, Callbacks{})
 }
 
-// LayoutWithCallbacks lays the transcript out centered up to theme.ProseMeasure
-// and delivers link, chip, and full-output actions to cb.
+// LayoutWithCallbacks lays the transcript out centered up to theme.TranscriptMeasure
+// and delivers link, chip, inbox, git-ref, and full-output actions to cb.
 func LayoutWithCallbacks(env *kit.Env, gtx *layout.Context, st *State, items []*session.Item, cb Callbacks) layout.Dimensions {
 	rows := buildDisplayRows(items)
 	vis := virtualDisplayItems(rows)
 	availW := gtx.Constraints.Max.X
-	colMax := gtx.Dp(theme.ProseMeasure)
+	colMax := gtx.Dp(theme.TranscriptMeasure)
 	colW := min(availW, colMax)
 	padX := max((availW-colW)/2, 0)
 
@@ -109,8 +113,22 @@ func LayoutWithCallbacks(env *kit.Env, gtx *layout.Context, st *State, items []*
 	off := op.Offset(image.Pt(padX, 0)).Push(gtx.Ops)
 	dims := st.list.Layout(env, &inner, kit.VirtualListProps{FollowBottom: true}, vis,
 		func(env *kit.Env, gtx *layout.Context, i int, _ kit.VirtualItem, _ *kit.VirtualItemState) layout.Dimensions {
-			return layoutRow(env, gtx, st, &rows[i], cb)
+			return layoutRow(env, gtx, st, &rows[i], rowGapFor(rows, i), cb)
 		})
 	off.Pop()
 	return layout.Dimensions{Size: image.Pt(availW, dims.Size.Y)}
+}
+
+func rowGapFor(rows []displayRow, i int) unit.Dp {
+	if i+1 >= len(rows) {
+		return theme.SpaceMD
+	}
+	cur, next := rows[i].item, rows[i+1].item
+	if next != nil && next.Kind == kindUserMessage {
+		return theme.SpaceXL
+	}
+	if cur != nil && cur.Kind == kindUserMessage {
+		return theme.SpaceLG
+	}
+	return theme.SpaceMD
 }

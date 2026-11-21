@@ -1,8 +1,11 @@
 package mdview
 
 import (
+	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/syurodev/fugue/ui/internal/markdown"
 )
 
 // DiffKind classifies one line in a unified diff.
@@ -26,6 +29,7 @@ type DiffLine struct {
 	Marker string
 	Text   string
 	LineNo int
+	Spans  []markdown.Span
 }
 
 // ParseDiff parses unified diff text into structured lines with a dedicated
@@ -85,6 +89,61 @@ func PlainCopyText(raw string, isDiff bool) string {
 		return raw
 	}
 	return strings.Join(body, "\n")
+}
+
+// HighlightDiff applies theme syntax roles (via markdown.Highlight) to diff
+// content lines using the language inferred from title, marking metadata rows
+// with RoleMeta.
+func HighlightDiff(title string, lines []DiffLine, clock markdown.Clock) {
+	if len(lines) == 0 {
+		return
+	}
+	if lang := langFromPath(title); lang != "" && clock != nil {
+		applyDiffSyntax(lang, lines, clock)
+	}
+	for i := range lines {
+		if lines[i].Kind == DiffMeta && len(lines[i].Spans) == 0 && lines[i].Text != "" {
+			lines[i].Spans = []markdown.Span{{Text: lines[i].Text, Role: markdown.RoleMeta}}
+		}
+	}
+}
+
+func applyDiffSyntax(lang string, lines []DiffLine, clock markdown.Clock) {
+	body := make([]string, len(lines))
+	for i := range lines {
+		if lines[i].Kind != DiffMeta {
+			body[i] = lines[i].Text
+		}
+	}
+	hl, ok := markdown.Highlight(lang, strings.Join(body, "\n"), clock)
+	if !ok || len(hl) != len(lines) {
+		return
+	}
+	for i := range lines {
+		if lines[i].Kind != DiffMeta {
+			lines[i].Spans = hl[i]
+		}
+	}
+}
+
+const langMarkdown = "markdown"
+
+func extLangMap() map[string]string {
+	return map[string]string{
+		".go": "go", ".ts": "typescript", ".tsx": "typescript",
+		".js": "javascript", ".jsx": "javascript", ".py": "python",
+		".rs": "rust", ".json": "json", ".yaml": "yaml", ".yml": "yaml",
+		".toml": "toml", ".sql": "sql", ".proto": "protobuf",
+		".sh": "bash", ".zsh": "bash", ".md": langMarkdown, ".mdx": langMarkdown,
+		".css": "css", ".html": "html",
+	}
+}
+
+func langFromPath(path string) string {
+	if lang := extLangMap()[strings.ToLower(filepath.Ext(strings.TrimSpace(path)))]; lang != "" {
+		return lang
+	}
+	return "diff"
 }
 
 func parseHunkHeader(line string) (oldStart, newStart int, ok bool) {

@@ -337,9 +337,15 @@ type toolInputFields struct {
 	Command     string `json:"command"`
 	FilePath    string `json:"file_path"`
 	Path        string `json:"path"`
+	Directory   string `json:"directory"`
+	SearchPath  string `json:"search_path"`
 	Pattern     string `json:"pattern"`
 	Query       string `json:"query"`
 	URL         string `json:"url"`
+	StartLine   int    `json:"start_line"`
+	EndLine     int    `json:"end_line"`
+	Offset      int    `json:"offset"`
+	Limit       int    `json:"limit"`
 }
 
 func parseToolInput(raw string) toolInputFields {

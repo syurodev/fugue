@@ -28,12 +28,15 @@ const (
 	copiedFlashDuration      = 1500 * time.Millisecond
 )
 
-// CodeBlockProps configures one code block, Output card, or file_change diff
-// for the current frame (desktop-app v0.9 §5.4).
+// CodeBlockProps configures one code block, terminal block, Output card, or
+// file_change diff for the current frame (desktop-app v0.9/v0.10 §5.4).
 type CodeBlockProps struct {
 	Title           string
 	Format          string
 	Icon            kit.IconName
+	Command         string
+	ExitCode        *int32
+	Duration        string
 	IsOutputCard    bool
 	IsDiff          bool
 	Raw             string
@@ -72,7 +75,10 @@ type CodeBlockState struct {
 
 	cachedFormat string
 	cachedRaw    string
+	cachedCmd    string
+	cachedTitle  string
 	cachedLines  [][]markdown.Span
+	cachedCmdLn  [][]markdown.Span
 	cachedDiff   []DiffLine
 }
 
@@ -133,11 +139,13 @@ type codeBlockMetrics struct {
 	w, pad     int
 	codeAvailW int
 	viewH      int
+	cmdH       int
 	gutterW    int
 	markerW    int
 	lineH      int
 	visCount   int
 	capped     bool
+	cmdFlows   []*flow
 	flows      []*flow
 	diffLines  []DiffLine
 }
@@ -145,7 +153,7 @@ type codeBlockMetrics struct {
 func (v *view) layoutCodeBlock(env *kit.Env, gtx *layout.Context, st *CodeBlockState, p *CodeBlockProps) (layout.Dimensions, CodeBlockResult) {
 	st.ensureButtons()
 	var res CodeBlockResult
-	st.syncCache(p)
+	st.syncCache(env, p)
 	v.pollBlockEvents(env, gtx, st)
 	m := v.measureCodeBlock(gtx, st, p)
 
@@ -165,6 +173,7 @@ func (v *view) measureCodeBlock(gtx *layout.Context, st *CodeBlockState, p *Code
 	w := gtx.Constraints.Max.X
 	pad := gtx.Dp(theme.SpaceMD)
 	bodyMaxW := max(w-2*pad, 0)
+	cmdFlows, cmdH := v.measureCommandBlock(gtx, st, bodyMaxW)
 	lines := st.resolvedLines(p)
 	diffLines := st.cachedDiff
 	totalLines := len(lines)
@@ -172,7 +181,7 @@ func (v *view) measureCodeBlock(gtx *layout.Context, st *CodeBlockState, p *Code
 		totalLines = len(diffLines)
 	}
 	capped, visCount := capLineCount(p.MaxLines, st.Expanded, p.Truncated, totalLines)
-	fs := flowStyle{px: fixed.I(gtx.Sp(theme.TypeCode().Size)), mono: true, whole: !st.Wrapped}
+	fs := flowStyle{px: fixed.I(gtx.Sp(theme.TypeCode().Size)), mono: true, whole: !st.Wrapped, muted: p.Command != ""}
 	lineH := max(gtx.Sp(theme.TypeCode().Line), fs.lineHeight())
 	gutterW, markerW := v.gutterWidths(gtx, totalLines, p.IsDiff, p.ShowLineNumbers || p.IsDiff)
 	codeAvailW := max(bodyMaxW-gutterW-markerW, 0)
@@ -183,9 +192,9 @@ func (v *view) measureCodeBlock(gtx *layout.Context, st *CodeBlockState, p *Code
 	}
 	st.updateScrollBounds(codeAvailW, contentW, viewH, contentH)
 	return codeBlockMetrics{
-		w: w, pad: pad, codeAvailW: codeAvailW, viewH: viewH,
+		w: w, pad: pad, codeAvailW: codeAvailW, viewH: viewH, cmdH: cmdH,
 		gutterW: gutterW, markerW: markerW, lineH: lineH,
-		visCount: visCount, capped: capped, flows: flows, diffLines: diffLines,
+		visCount: visCount, capped: capped, cmdFlows: cmdFlows, flows: flows, diffLines: diffLines,
 	}
 }
 
@@ -217,30 +226,25 @@ func (v *view) drawCodeBlockContents(
 	env *kit.Env, gtx *layout.Context, st *CodeBlockState, p *CodeBlockProps, m *codeBlockMetrics, res *CodeBlockResult,
 ) int {
 	showActions := st.ActionsVisible(env, gtx)
-	y := 0
-	if p.IsOutputCard {
-		y += v.drawBlockHeader(env, gtx, st, p, m.w, m.pad, showActions, res)
-		y += v.drawDividerAt(env, gtx, m.w, y)
+	y := v.drawBlockHeader(env, gtx, st, p, m.w, m.pad, showActions, res)
+	y += v.drawDividerAt(env, gtx, m.w, y)
+	if len(m.cmdFlows) > 0 {
+		y = v.drawCommandHeader(env, gtx, m.cmdFlows, m.w, m.pad, y, m.lineH, m.viewH > 0)
 	}
-	bodyTop := y + m.pad
-	v.drawCodeBody(gtx, st, p, m.flows, m.diffLines, m.visCount, m.pad, bodyTop, m.codeAvailW, m.viewH, m.gutterW, m.markerW, m.lineH)
-	y = bodyTop + m.viewH + m.pad
-	if !p.IsOutputCard && showActions {
-		v.drawFloatingActions(env, gtx, st, p, m.w, m.pad, res)
+	if m.viewH > 0 {
+		bodyTop := y + m.pad
+		v.drawCodeBody(gtx, st, p, m.flows, m.diffLines, m.visCount, m.pad, bodyTop, m.codeAvailW, m.viewH, m.gutterW, m.markerW, m.lineH)
+		y = bodyTop + m.viewH + m.pad
 	}
 	if m.capped {
-		y += v.drawDividerAt(env, gtx, m.w, y)
-		y += v.drawExpandFooter(env, gtx, st, m.w, m.pad, y, res, p.Truncated)
+		y += v.drawExpandAction(env, gtx, st, m.w, m.pad, y, res, p.Truncated)
 	}
 	return y
 }
 
-func (v *view) paintCodeBlockFrame(gtx *layout.Context, st *CodeBlockState, p *CodeBlockProps, box image.Rectangle, drawInner func()) {
-	surf, radius := v.th.CodeSurface(), gtx.Dp(theme.RadiusSM)
-	if p.IsOutputCard {
-		surf, radius = v.th.Chrome().SurfaceRaised, gtx.Dp(theme.RadiusLG)
-	}
-	paint.FillShape(gtx.Ops, surf, clip.UniformRRect(box, radius).Op(gtx.Ops))
+func (v *view) paintCodeBlockFrame(gtx *layout.Context, st *CodeBlockState, _ *CodeBlockProps, box image.Rectangle, drawInner func()) {
+	radius := gtx.Dp(theme.RadiusLG)
+	paint.FillShape(gtx.Ops, v.th.Chrome().SurfaceRaised, clip.UniformRRect(box, radius).Op(gtx.Ops))
 	paint.FillShape(gtx.Ops, v.th.Chrome().BorderSubtle, clip.Stroke{
 		Path:  clip.UniformRRect(box, radius).Path(gtx.Ops),
 		Width: float32(max(gtx.Dp(theme.Hairline), 1)),
@@ -254,22 +258,74 @@ func (v *view) paintCodeBlockFrame(gtx *layout.Context, st *CodeBlockState, p *C
 	}
 }
 
-func (s *CodeBlockState) syncCache(p *CodeBlockProps) {
-	if s.cachedRaw == p.Raw && s.cachedFormat == p.Format && (len(s.cachedLines) > 0 || len(s.cachedDiff) > 0 || p.Raw == "") {
+type envClock struct{ env *kit.Env }
+
+func (c envClock) Now() time.Time {
+	if c.env != nil {
+		return c.env.Now()
+	}
+	return time.Time{}
+}
+
+func (s *CodeBlockState) syncCache(env *kit.Env, p *CodeBlockProps) {
+	if s.cacheValid(p) {
 		return
 	}
-	s.cachedRaw = p.Raw
-	s.cachedFormat = p.Format
-	s.cachedLines = nil
-	s.cachedDiff = nil
+	s.cachedRaw, s.cachedFormat = p.Raw, p.Format
+	s.cachedCmd, s.cachedTitle = p.Command, p.Title
+	s.cachedLines, s.cachedCmdLn, s.cachedDiff = nil, nil, nil
+	clk := envClock{env: env}
+	s.syncCommandCache(p.Command, clk)
+	s.syncBodyCache(p, clk)
+}
+
+func (s *CodeBlockState) cacheValid(p *CodeBlockProps) bool {
+	if s.cachedRaw != p.Raw || s.cachedFormat != p.Format || s.cachedCmd != p.Command || s.cachedTitle != p.Title {
+		return false
+	}
+	return len(s.cachedLines) > 0 || len(s.cachedDiff) > 0 || (p.Raw == "" && p.Command == "")
+}
+
+func (s *CodeBlockState) syncCommandCache(cmd string, clk markdown.Clock) {
+	if cmd == "" {
+		return
+	}
+	cmdSrc := normalizeCode("$ " + cmd)
+	if hl, ok := markdown.Highlight("sh", cmdSrc, clk); ok {
+		s.cachedCmdLn = hl
+		return
+	}
+	s.cachedCmdLn = plainCodeLines(cmdSrc)
+}
+
+func (s *CodeBlockState) syncBodyCache(p *CodeBlockProps, clk markdown.Clock) {
 	if p.IsDiff {
 		s.cachedDiff = ParseDiff(p.Raw)
+		HighlightDiff(p.Title, s.cachedDiff, clk)
 		return
 	}
-	if len(p.Lines) > 0 {
+	if len(p.Lines) > 0 || p.Raw == "" {
 		return
+	}
+	if lang := codeLanguage(p); lang != "" {
+		if hl, ok := markdown.Highlight(lang, normalizeCode(p.Raw), clk); ok {
+			s.cachedLines = hl
+			return
+		}
 	}
 	s.cachedLines = plainCodeLines(p.Raw)
+}
+
+func codeLanguage(p *CodeBlockProps) string {
+	lang := strings.ToLower(strings.TrimSpace(p.Format))
+	if lang == "" || lang == "text" || lang == "plain" {
+		return ""
+	}
+	return lang
+}
+
+func normalizeCode(raw string) string {
+	return strings.ReplaceAll(strings.TrimSuffix(raw, "\n"), "\t", tabSpaces)
 }
 
 func (s *CodeBlockState) resolvedLines(p *CodeBlockProps) [][]markdown.Span {

@@ -32,27 +32,30 @@ type IconName string
 // The icons packaged for kit v1's components. Adding one is a line here,
 // its Lucide path data in icondata's testdata, and a regeneration run.
 const (
-	IconCheck        IconName = "check"
-	IconChevronDown  IconName = "chevron-down"
-	IconChevronRight IconName = "chevron-right"
-	IconSearch       IconName = "search"
-	IconClose        IconName = "x"
-	IconEye          IconName = "eye"
-	IconEyeOff       IconName = "eye-off"
-	IconCopy         IconName = "copy"
-	IconRestart      IconName = "rotate-ccw"
-	IconHelp         IconName = "circle-help"
-	IconPin          IconName = "pin"
-	IconPlus         IconName = "plus"
-	IconEllipsis     IconName = "ellipsis"
-	IconTerminal     IconName = "terminal"
-	IconPencil       IconName = "pencil"
-	IconFileText     IconName = "file-text"
-	IconFileCode     IconName = "file-code"
-	IconGlobe        IconName = "globe"
-	IconWrench       IconName = "wrench"
-	IconGitCommit    IconName = "git-commit"
-	IconWrapText     IconName = "wrap-text"
+	IconCheck          IconName = "check"
+	IconChevronDown    IconName = "chevron-down"
+	IconChevronRight   IconName = "chevron-right"
+	IconSearch         IconName = "search"
+	IconClose          IconName = "x"
+	IconEye            IconName = "eye"
+	IconEyeOff         IconName = "eye-off"
+	IconCopy           IconName = "copy"
+	IconRestart        IconName = "rotate-ccw"
+	IconHelp           IconName = "circle-help"
+	IconPin            IconName = "pin"
+	IconPlus           IconName = "plus"
+	IconEllipsis       IconName = "ellipsis"
+	IconTerminal       IconName = "terminal"
+	IconPencil         IconName = "pencil"
+	IconFileText       IconName = "file-text"
+	IconFileCode       IconName = "file-code"
+	IconGlobe          IconName = "globe"
+	IconWrench         IconName = "wrench"
+	IconGitCommit      IconName = "git-commit"
+	IconWrapText       IconName = "wrap-text"
+	IconFolder         IconName = "folder"
+	IconGitBranch      IconName = "git-branch"
+	IconGitPullRequest IconName = "git-pull-request"
 )
 
 // iconGrid is the Lucide coordinate grid in dp: paths are authored on it.
@@ -66,27 +69,30 @@ var errIconUnknown = errors.New("unknown icon")
 // parsed subpaths being cached on the Env.
 func pathOf(n IconName) (string, error) {
 	paths := map[IconName]string{
-		IconCheck:        icondata.Check,
-		IconChevronDown:  icondata.ChevronDown,
-		IconChevronRight: icondata.ChevronRight,
-		IconSearch:       icondata.Search,
-		IconClose:        icondata.X,
-		IconEye:          icondata.Eye,
-		IconEyeOff:       icondata.EyeOff,
-		IconCopy:         icondata.Copy,
-		IconRestart:      icondata.RotateCCW,
-		IconHelp:         icondata.CircleHelp,
-		IconPin:          icondata.Pin,
-		IconPlus:         icondata.Plus,
-		IconEllipsis:     icondata.Ellipsis,
-		IconTerminal:     icondata.Terminal,
-		IconPencil:       icondata.Pencil,
-		IconFileText:     icondata.FileText,
-		IconFileCode:     icondata.FileCode,
-		IconGlobe:        icondata.Globe,
-		IconWrench:       icondata.Wrench,
-		IconGitCommit:    icondata.GitCommit,
-		IconWrapText:     icondata.WrapText,
+		IconCheck:          icondata.Check,
+		IconChevronDown:    icondata.ChevronDown,
+		IconChevronRight:   icondata.ChevronRight,
+		IconSearch:         icondata.Search,
+		IconClose:          icondata.X,
+		IconEye:            icondata.Eye,
+		IconEyeOff:         icondata.EyeOff,
+		IconCopy:           icondata.Copy,
+		IconRestart:        icondata.RotateCCW,
+		IconHelp:           icondata.CircleHelp,
+		IconPin:            icondata.Pin,
+		IconPlus:           icondata.Plus,
+		IconEllipsis:       icondata.Ellipsis,
+		IconTerminal:       icondata.Terminal,
+		IconPencil:         icondata.Pencil,
+		IconFileText:       icondata.FileText,
+		IconFileCode:       icondata.FileCode,
+		IconGlobe:          icondata.Globe,
+		IconWrench:         icondata.Wrench,
+		IconGitCommit:      icondata.GitCommit,
+		IconWrapText:       icondata.WrapText,
+		IconFolder:         icondata.Folder,
+		IconGitBranch:      icondata.GitBranch,
+		IconGitPullRequest: icondata.GitPullRequest,
 	}
 	if p, ok := paths[n]; ok {
 		return p, nil

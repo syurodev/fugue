@@ -4,6 +4,9 @@ import (
 	"image"
 
 	"gioui.org/layout"
+	"gioui.org/op"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/widget"
 
 	"github.com/syurodev/fugue/ui/internal/kit"
@@ -97,21 +100,34 @@ func layoutWorkGroup(env *kit.Env, gtx *layout.Context, st *State, grp *workGrou
 			})
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Top: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				l := gtx
-				return kit.Divider(env, &l, kit.DividerProps{Orientation: kit.Horizontal})
-			})
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
 			return layoutAnimatedCollapse(&local, vis, prog, func(gtx *layout.Context) layout.Dimensions {
-				return layout.Inset{Top: theme.SpaceSM}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Inset{Top: theme.SpaceXS}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
 					l := gtx
-					return layoutSubGroups(env, &l, st, gs, grp.subGroups, cb)
+					return layoutWorkRail(env, &l, func(gtx *layout.Context) layout.Dimensions {
+						return layoutSubGroups(env, gtx, st, gs, grp.subGroups, cb)
+					})
 				})
 			})
 		}),
 	)
+}
+
+func layoutWorkRail(env *kit.Env, gtx *layout.Context, body func(*layout.Context) layout.Dimensions) layout.Dimensions {
+	rec := op.Record(gtx.Ops)
+	dims := layout.Inset{Left: theme.SpaceMD}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+		l := gtx
+		return body(&l)
+	})
+	call := rec.Stop()
+	if dims.Size.Y > 0 {
+		railW := max(gtx.Dp(theme.Hairline), 1)
+		railX := gtx.Dp(theme.SpaceXS)
+		rail := image.Rect(railX, 0, railX+railW, dims.Size.Y)
+		paint.FillShape(gtx.Ops, env.Th.Chrome().BorderSubtle, clip.Rect(rail).Op())
+	}
+	call.Add(gtx.Ops)
+	return dims
 }
 
 func workGroupHeaderText(grp *workGroup) string {

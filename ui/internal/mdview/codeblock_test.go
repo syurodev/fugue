@@ -311,7 +311,7 @@ func collectChipResults(runs []ChipRun) (rebuilt string, files []FileRef, hashes
 			files = append(files, runs[i].File)
 		case ChipHash:
 			hashes = append(hashes, runs[i].Text)
-		case ChipNone:
+		case ChipNone, ChipGitRef:
 		}
 	}
 	return sb.String(), files, hashes

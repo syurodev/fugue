@@ -19,6 +19,8 @@ const (
 	ChipFile
 	// ChipHash is a commit hash or Fugue ID rendered in mono with a dotted underline.
 	ChipHash
+	// ChipGitRef is an inline PR (#123, owner/repo#123, PR URL) chip.
+	ChipGitRef
 )
 
 // FileRef is a parsed file reference chip target.
@@ -31,9 +33,18 @@ type FileRef struct {
 
 // ChipRun is one contiguous slice of text with its detected chip kind.
 type ChipRun struct {
-	Text string
-	Kind ChipKind
-	File FileRef
+	Text   string
+	Kind   ChipKind
+	File   FileRef
+	GitRef *GitRef
+}
+
+// AsGitRef returns the git ref carried by r when r is a commit hash or PR ref.
+func (r *ChipRun) AsGitRef() (GitRef, bool) {
+	if r != nil && r.GitRef != nil {
+		return *r.GitRef, true
+	}
+	return GitRef{}, false
 }
 
 // ParseChips scans s on the fly during rendering and splits out file reference
@@ -67,7 +78,11 @@ func scanChipToken(s string, start int, out *[]ChipRun) int {
 	switch {
 	case trimmed == "":
 	case hasFileRefPrefix(trimmed):
-		appendPlainChip(out, trimmed)
+		if pr, ok := parsePRURL(trimmed); ok {
+			*out = append(*out, ChipRun{Text: trimmed, Kind: ChipGitRef, GitRef: &pr})
+		} else {
+			appendPlainChip(out, trimmed)
+		}
 	default:
 		classifyChipToken(trimmed, out)
 	}
@@ -84,21 +99,74 @@ func classifyChipToken(tok string, out *[]ChipRun) {
 		*out = append(*out, ChipRun{Text: tok, Kind: ChipFile, File: ref})
 		return
 	}
+	if pr, ok := parsePRToken(tok); ok {
+		*out = append(*out, ChipRun{Text: tok, Kind: ChipGitRef, GitRef: &pr})
+		return
+	}
 	if isHashOrID(tok) {
-		*out = append(*out, ChipRun{Text: tok, Kind: ChipHash})
+		var gr *GitRef
+		if len(tok) <= 40 && isMixedHex(tok) {
+			gr = &GitRef{Kind: GitCommit, Text: tok, Hash: tok}
+		}
+		*out = append(*out, ChipRun{Text: tok, Kind: ChipHash, GitRef: gr})
 		return
 	}
 	appendPlainChip(out, tok)
 }
 
+func parsePRToken(tok string) (GitRef, bool) {
+	if after, ok := strings.CutPrefix(tok, "#"); ok && isDigits(after) {
+		return GitRef{Kind: GitPR, Text: tok}, true
+	}
+	hash := strings.IndexByte(tok, '#')
+	if hash > 0 && isDigits(tok[hash+1:]) {
+		repo := tok[:hash]
+		if slash := strings.IndexByte(repo, '/'); slash > 0 && slash < len(repo)-1 && !strings.ContainsRune(repo, ':') {
+			url := "https://github.com/" + repo + "/pull/" + tok[hash+1:]
+			return GitRef{Kind: GitPR, Text: tok, URL: url}, true
+		}
+	}
+	return GitRef{}, false
+}
+
+func parsePRURL(tok string) (GitRef, bool) {
+	if !strings.HasPrefix(tok, "https://") {
+		return GitRef{}, false
+	}
+	parts := strings.Split(strings.TrimPrefix(tok, "https://"), "/")
+	if len(parts) < 5 {
+		return GitRef{}, false
+	}
+	kindIdx := len(parts) - 2
+	if (parts[kindIdx] == "pull" || parts[kindIdx] == "merge_requests") && isDigits(parts[kindIdx+1]) {
+		return GitRef{Kind: GitPR, Text: "#" + parts[kindIdx+1], URL: tok}, true
+	}
+	return GitRef{}, false
+}
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // FileIcon returns the Lucide icon for a file path based on its extension.
 func FileIcon(path string) kit.IconName {
-	switch strings.ToLower(filepath.Ext(path)) {
-	case ".md", ".mdx", ".txt", ".log", ".csv":
+	ext := strings.ToLower(filepath.Ext(path))
+	if extLangMap()[ext] == langMarkdown || isDocExt(ext) {
 		return kit.IconFileText
-	default:
-		return kit.IconFileCode
 	}
+	return kit.IconFileCode
+}
+
+func isDocExt(ext string) bool {
+	return ext == ".txt" || ext == ".log" || ext == ".csv"
 }
 
 func appendPlainChip(out *[]ChipRun, txt string) {

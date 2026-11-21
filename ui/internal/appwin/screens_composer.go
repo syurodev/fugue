@@ -264,7 +264,11 @@ func (s *screens) transcriptCallbacks() transcriptview.Callbacks {
 			s.pendingItem[key] = true
 			s.fetcher.RequestItem(s.open, itemID)
 		},
-		// TODO(F10.20b): wire OnFileChip once Q-179 / slot grid is answered.
+		OnOpenInbox: func() {
+			s.inboxOpen = true
+			s.accountsOpen = false
+		},
+		// TODO(F10.4e): wire OnOpenFile to the right-pane read-only file/diff viewer.
 	}
 }
 

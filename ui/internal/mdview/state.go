@@ -25,6 +25,11 @@ type IDClick struct {
 	ID string
 }
 
+// GitRefClick reports a click or activation on an inline git reference chip.
+type GitRefClick struct {
+	Ref GitRef
+}
+
 type chipState struct {
 	hover bool
 }
@@ -35,19 +40,20 @@ type chipState struct {
 // document and call Layout with the same State every frame. It belongs to the
 // window goroutine.
 type State struct {
-	doc        *markdown.Doc
-	shaper     *text.Shaper
-	metric     unit.Metric
-	chrome     theme.Chrome
-	flows      map[flowKey]*flow
-	links      map[*markdown.Link]*linkState
-	codeBlocks map[*markdown.Block]*CodeBlockState
-	chips      map[string]*chipState
-	marks      map[*markdown.ListItem][]markdown.Span
-	pinned     *markdown.Link
-	opens      []OpenLink
-	fileClicks []FileClick
-	idClicks   []IDClick
+	doc          *markdown.Doc
+	shaper       *text.Shaper
+	metric       unit.Metric
+	chrome       theme.Chrome
+	flows        map[flowKey]*flow
+	links        map[*markdown.Link]*linkState
+	codeBlocks   map[*markdown.Block]*CodeBlockState
+	chips        map[string]*chipState
+	marks        map[*markdown.ListItem][]markdown.Span
+	pinned       *markdown.Link
+	opens        []OpenLink
+	fileClicks   []FileClick
+	idClicks     []IDClick
+	gitRefClicks []GitRefClick
 }
 
 // PollOpen returns the next queued open request, oldest first.
@@ -77,6 +83,16 @@ func (s *State) PollIDClick() (IDClick, bool) {
 	}
 	next := s.idClicks[0]
 	s.idClicks = s.idClicks[1:]
+	return next, true
+}
+
+// PollGitRefClick returns the next queued git reference click, oldest first.
+func (s *State) PollGitRefClick() (GitRefClick, bool) {
+	if len(s.gitRefClicks) == 0 {
+		return GitRefClick{}, false
+	}
+	next := s.gitRefClicks[0]
+	s.gitRefClicks = s.gitRefClicks[1:]
 	return next, true
 }
 

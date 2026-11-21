@@ -65,12 +65,20 @@ func (v *view) drawFlow(gtx *layout.Context, f *flow, align markdown.Align, avai
 		v.popover(gtx, an, avail)
 	}
 	for i := range f.chips {
-		ch := &f.chips[i]
-		cs := v.st.chip(ch.key)
-		v.pollChip(gtx, ch, cs)
-		if gtx.Focused(cs) {
-			v.outline(gtx, ch.box, v.th.Chrome().FocusBorder)
+		v.drawOneChip(gtx, &f.chips[i])
+	}
+}
+
+func (v *view) drawOneChip(gtx *layout.Context, ch *chipAnchor) {
+	cs := v.st.chip(ch.key)
+	v.pollChip(gtx, ch, cs)
+	if cs.hover || gtx.Focused(cs) {
+		if gr, ok := ch.chip.AsGitRef(); ok && v.env != nil {
+			DrawGitRefHoverCard(v.env, gtx, ch.box, gr)
 		}
+	}
+	if gtx.Focused(cs) {
+		v.outline(gtx, ch.box, v.th.Chrome().FocusBorder)
 	}
 }
 
@@ -144,27 +152,39 @@ func (v *view) noteLink(gtx *layout.Context, anchors []linkAnchor, lk *markdown.
 // links and hash/ID chips.
 func (v *view) drawAtom(gtx *layout.Context, a *atom, x, base int) {
 	sp := a.span
-	isFileChip := a.chip != nil && a.chip.Kind == ChipFile
-	isHashChip := a.chip != nil && a.chip.Kind == ChipHash
-	if sp.Style&markdown.StyleCode != 0 || isFileChip {
-		box := image.Rect(x, base-a.asc-1, x+a.w, base+a.desc+1)
-		paint.FillShape(gtx.Ops, v.th.Chrome().FillSoft, clip.UniformRRect(box, gtx.Dp(theme.RadiusXS)).Op(gtx.Ops))
-	}
-	textX := v.drawChipLeadingIcon(gtx, a, x, base, isFileChip)
+	hasPill := a.chip != nil && (a.chip.Kind == ChipFile || a.chip.Kind == ChipGitRef)
+	hasCommit := a.chip != nil && a.chip.GitRef != nil && a.chip.GitRef.Kind == GitCommit
+	v.paintAtomSurface(gtx, a, sp, x, base, hasPill)
+	textX := v.drawChipLeadingIcon(gtx, a, x, base, hasPill || hasCommit)
 	ink := v.ink(sp)
+	if a.muted && sp.Role == "" && sp.Link == nil && sp.Image == nil {
+		ink = v.th.Chrome().FgMuted
+	}
 	v.drawAtomGlyphs(gtx, a.glyphs, textX, base, ink)
+	isHashChip := a.chip != nil && a.chip.Kind == ChipHash
 	v.drawAtomDecorations(gtx, a, x, textX, base, ink, isHashChip)
 }
 
-func (v *view) drawChipLeadingIcon(gtx *layout.Context, a *atom, x, base int, isFileChip bool) int {
-	if !isFileChip || a.chipIcon == "" {
+func (v *view) paintAtomSurface(gtx *layout.Context, a *atom, sp *markdown.Span, x, base int, hasPill bool) {
+	box := image.Rect(x, base-a.asc-1, x+a.w, base+a.desc+1)
+	if hasPill {
+		PaintBadgeChrome(v.th, gtx, box, false)
+		return
+	}
+	if sp.Style&markdown.StyleCode != 0 {
+		paint.FillShape(gtx.Ops, v.th.Chrome().FillSoft, clip.UniformRRect(box, gtx.Dp(theme.RadiusXS)).Op(gtx.Ops))
+	}
+}
+
+func (v *view) drawChipLeadingIcon(gtx *layout.Context, a *atom, x, base int, hasChipIcon bool) int {
+	if !hasChipIcon || a.chipIcon == "" {
 		return x
 	}
 	iconPx := gtx.Dp(theme.IconXS)
 	iconY := base - a.asc + max((a.asc+a.desc-iconPx)/2, 0)
 	if v.env != nil {
 		off := op.Offset(image.Pt(x+gtx.Dp(theme.SpaceXXS), iconY)).Push(gtx.Ops)
-		if _, err := v.env.Icon(gtx, a.chipIcon, theme.IconXS, v.th.Chrome().FgMuted); err != nil {
+		if _, err := v.env.Icon(gtx, a.chipIcon, theme.IconXS, v.th.Chrome().IconMuted); err != nil {
 			logMDViewErr(err)
 		}
 		off.Pop()
@@ -307,10 +327,21 @@ func (v *view) pollChip(gtx *layout.Context, ch *chipAnchor, cs *chipState) {
 	if !activated {
 		return
 	}
+	v.recordChipActivation(ch)
+}
+
+func (v *view) recordChipActivation(ch *chipAnchor) {
 	switch ch.chip.Kind {
 	case ChipFile:
 		v.st.fileClicks = append(v.st.fileClicks, FileClick{Ref: ch.chip.File})
+	case ChipGitRef:
+		if gr, ok := ch.chip.AsGitRef(); ok {
+			v.st.gitRefClicks = append(v.st.gitRefClicks, GitRefClick{Ref: gr})
+		}
 	case ChipHash:
+		if gr, ok := ch.chip.AsGitRef(); ok {
+			v.st.gitRefClicks = append(v.st.gitRefClicks, GitRefClick{Ref: gr})
+		}
 		v.st.idClicks = append(v.st.idClicks, IDClick{ID: ch.chip.Text})
 	case ChipNone:
 	}

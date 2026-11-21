@@ -94,6 +94,9 @@ func packagedIcons() []packagedIcon {
 		{"wrench", "Wrench"},
 		{"git-commit", "GitCommit"},
 		{"wrap-text", "WrapText"},
+		{"folder", "Folder"},
+		{"git-branch", "GitBranch"},
+		{"git-pull-request", "GitPullRequest"},
 	}
 }
 

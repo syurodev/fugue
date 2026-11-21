@@ -23,22 +23,24 @@ import (
 
 func layoutCommitCard(env *kit.Env, gtx *layout.Context, c *cardState, item *session.Item, eff commitEffect, cb Callbacks) layout.Dimensions {
 	ch := env.Th.Chrome()
+	ref := mdview.GitRef{Kind: mdview.GitCommit, Text: shortHash(eff.Hash), Hash: eff.Hash, Subject: eff.Message}
 	dims, _, err := c.commitCard.Layout(env, gtx, kit.CardProps{Padding: theme.SpaceMD}, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				l := gtx
-				d, iconErr := env.Icon(&l, kit.IconGitCommit, theme.IconSM, env.Th.Status().Success)
-				logTVErr(iconErr)
-				return d
-			}),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return layout.Dimensions{Size: image.Pt(gtx.Dp(theme.SpaceSM), 0)}
-			}),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						l := gtx
-						return kit.Label(env, &l, theme.TypeLabel(), ch.Fg, "Committed "+eff.Hash)
+						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								l := gtx
+								return kit.Label(env, &l, theme.TypeBody(), ch.FgMuted, "Committed")
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return layout.Inset{Left: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									l := gtx
+									return mdview.DrawGitRefChip(env, &l, c.chipClick("commit:"+ref.Text), ref, gitRegistryFor(cb))
+								})
+							}),
+						)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						if eff.Message == "" {
@@ -66,91 +68,41 @@ func layoutCommitCard(env *kit.Env, gtx *layout.Context, c *cardState, item *ses
 }
 
 func layoutFileChange(env *kit.Env, gtx *layout.Context, st *State, c *cardState, item *session.Item, cb Callbacks) layout.Dimensions {
-	clicked := c.click.Clicked(*gtx)
+	spec := fileChangeSpec(item)
+	clicked := spec.expandable && c.click.Clicked(*gtx)
 	if clicked {
 		st.list.ToggleExpanded(item.ItemID)
 	}
-	expanded := st.list.Expanded(item.ItemID)
+	expanded := spec.expandable && st.list.Expanded(item.ItemID)
 	vis, prog := c.anim.step(env, expanded, clicked)
+	fileCB := cb
+	if spec.verb == verbEdited && cb.OnViewDiff != nil {
+		fileCB.OnOpenFile = func(mdview.FileRef) { cb.OnViewDiff(item.ItemID) }
+	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return c.click.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			drawHeader := func(gtx layout.Context) layout.Dimensions {
 				local := gtx
-				return layoutFileChangeHeader(env, &local, c, item, expanded, cb)
-			})
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			return layoutFileChangeBody(env, &local, c, item, vis, prog, cb)
-		}),
-	)
-}
-
-func layoutFileChangeHeader(env *kit.Env, gtx *layout.Context, c *cardState, item *session.Item, expanded bool, cb Callbacks) layout.Dimensions {
-	ch := env.Th.Chrome()
-	m := item.Metadata
-	caret := kit.IconChevronRight
-	if expanded {
-		caret = kit.IconChevronDown
-	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			l := gtx
-			d, err := env.Icon(&l, kit.IconPencil, theme.IconSM, ch.FgMuted)
-			logTVErr(err)
-			return d
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Dimensions{Size: image.Pt(gtx.Dp(theme.SpaceSM), 0)}
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			l := gtx
-			return drawInlineTitleWithChips(env, &l, c, "Edited "+fileChangePath(item), ch.Fg, cb)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Left: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				l := gtx
-				return kit.Label(env, &l, theme.TypeCodeSmall(), env.Th.Status().Success, fmt.Sprintf("+%d", m.LinesAdded))
-			})
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Left: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				l := gtx
-				return kit.Label(env, &l, theme.TypeCodeSmall(), env.Th.Status().Danger, fmt.Sprintf("−%d", m.LinesRemoved))
-			})
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Left: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				l := gtx
-				d, err := env.Icon(&l, caret, theme.IconXS, ch.FgMuted)
-				logTVErr(err)
-				return d
-			})
-		}),
-	)
-}
-
-func layoutFileChangeBody(env *kit.Env, gtx *layout.Context, c *cardState, item *session.Item, vis bool, prog float32, cb Callbacks) layout.Dimensions {
-	diffText := item.Display().Text
-	if diffText == "" {
-		return layout.Dimensions{}
-	}
-	return layoutAnimatedCollapse(gtx, vis, prog, func(gtx *layout.Context) layout.Dimensions {
-		return layout.Inset{Top: theme.SpaceSM}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
-			l := gtx
-			dims, res := mdview.LayoutCodeBlock(env, &l, c.code, &mdview.CodeBlockProps{
-				Format:          formatDiff,
-				IsDiff:          true,
-				ShowLineNumbers: true,
-				Raw:             diffText,
-				Truncated:       item.Display().Truncated,
-			})
-			if res.RequestFull && cb.OnFullOutput != nil {
-				cb.OnFullOutput(item.ItemID)
+				return renderToolRowLine(env, &local, c, &spec, "", false, expanded, fileCB)
 			}
-			return dims
-		})
-	})
+			if spec.expandable {
+				return c.click.Layout(gtx, drawHeader)
+			}
+			return drawHeader(gtx)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if !spec.expandable {
+				return layout.Dimensions{}
+			}
+			local := gtx
+			return layoutAnimatedCollapse(&local, vis, prog, func(gtx *layout.Context) layout.Dimensions {
+				return layout.Inset{Top: theme.SpaceSM}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+					l := gtx
+					return drawDiffOrOutputExpanded(env, &l, c, item, spec.path, true, cb)
+				})
+			})
+		}),
+	)
 }
 
 func layoutPlanCard(env *kit.Env, gtx *layout.Context, c *cardState, item *session.Item) layout.Dimensions {

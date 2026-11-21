@@ -42,6 +42,7 @@ type flowStyle struct {
 	bold  bool
 	mono  bool
 	whole bool // one atom per span, spaces kept: code lines never wrap
+	muted bool // draw unhighlighted spans in FgMuted (terminal output)
 }
 
 // lineHeight is the distance between baselines of a run in px.
@@ -62,6 +63,7 @@ type atom struct {
 	asc, desc int
 	lh        int
 	arrow     bool
+	muted     bool
 	chip      *ChipRun
 	chipIcon  kit.IconName
 }
@@ -184,7 +186,7 @@ func (v *view) appendSpanTokens(spans []markdown.Span, i int, fs flowStyle, out 
 		}
 		return
 	}
-	v.appendRunTokens(sp, sp.Text, f, px, fs.whole, nil, out)
+	v.appendRunTokens(sp, sp.Text, f, px, fs.whole, fs.muted, nil, out)
 	if sp.Link != nil && sp.Link.Openable && (i+1 == len(spans) || spans[i+1].Link != sp.Link) {
 		a := v.shape(arrowGlyph, f, px*4/5)
 		a.span, a.arrow = sp, true
@@ -206,24 +208,42 @@ func (v *view) chipTokens(sp *markdown.Span, fs flowStyle, out *[]token) bool {
 	for idx := range parsed {
 		cr := parsed[idx]
 		if cr.Kind == ChipNone {
-			v.appendRunTokens(sp, cr.Text, f, px, false, nil, out)
+			v.appendRunTokens(sp, cr.Text, f, px, false, fs.muted, nil, out)
 			continue
 		}
 		cp := cr
-		var iconName kit.IconName
-		if cp.Kind == ChipFile {
-			iconName = FileIcon(cp.File.Path)
-		}
+		iconName := iconForChip(&cp)
 		a := v.shape(cp.Text, monoF, monoPx)
 		a.span = sp
+		a.muted = fs.muted
 		a.chip = &cp
 		a.chipIcon = iconName
 		if iconName != "" {
-			a.w += a.lh + 2 // space for leading file icon + gap inside the chip pill
+			a.w += a.lh + 2
 		}
 		*out = append(*out, token{a: a})
 	}
 	return true
+}
+
+func iconForChip(cp *ChipRun) kit.IconName {
+	switch cp.Kind {
+	case ChipFile:
+		return FileIcon(cp.File.Path)
+	case ChipGitRef:
+		if cp.GitRef != nil && cp.GitRef.Kind == GitBranch {
+			return kit.IconGitBranch
+		}
+		return kit.IconGitPullRequest
+	case ChipHash:
+		if gr, ok := cp.AsGitRef(); ok && gr.Kind == GitCommit {
+			return kit.IconGitCommit
+		}
+		return ""
+	case ChipNone:
+		return ""
+	}
+	return ""
 }
 
 func containsNonPlainChip(runs []ChipRun) bool {
@@ -235,11 +255,12 @@ func containsNonPlainChip(runs []ChipRun) bool {
 	return false
 }
 
-func (v *view) appendRunTokens(sp *markdown.Span, txt string, f font.Font, px fixed.Int26_6, whole bool, chip *ChipRun, out *[]token) {
+func (v *view) appendRunTokens(sp *markdown.Span, txt string, f font.Font, px fixed.Int26_6, whole, muted bool, chip *ChipRun, out *[]token) {
 	for _, r := range runs(txt, whole) {
 		if !r.space {
 			a := v.shape(r.text, f, px)
 			a.span = sp
+			a.muted = muted
 			a.chip = chip
 			*out = append(*out, token{a: a})
 			continue

@@ -3,11 +3,13 @@ package transcriptview
 import (
 	"image"
 	"image/color"
+	"time"
 
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/unit"
 	"gioui.org/widget"
 
 	"github.com/syurodev/fugue/ui/internal/kit"
@@ -73,9 +75,11 @@ type cardState struct {
 	md         mdview.State
 	click      widget.Clickable
 	code       *mdview.CodeBlockState
+	inputCode  *mdview.CodeBlockState
 	planCard   *kit.CardState
 	commitCard *kit.CardState
 	viewDiff   *kit.ButtonState
+	inboxBtn   *kit.ButtonState
 	anim       expandAnim
 	chips      map[string]*widget.Clickable
 }
@@ -84,9 +88,11 @@ func cardOf(st *State, key string) *cardState {
 	return kit.PayloadOf(st.list, key, func() *cardState {
 		return &cardState{
 			code:       mdview.NewCodeBlockState(),
+			inputCode:  mdview.NewCodeBlockState(),
 			planCard:   kit.NewCardState(),
 			commitCard: kit.NewCardState(),
 			viewDiff:   kit.NewButtonState(),
+			inboxBtn:   kit.NewButtonState(),
 			anim:       newExpandAnim(),
 			chips:      map[string]*widget.Clickable{},
 		}
@@ -105,8 +111,8 @@ func (c *cardState) chipClick(key string) *widget.Clickable {
 	return cl
 }
 
-func layoutRow(env *kit.Env, gtx *layout.Context, st *State, row *displayRow, cb Callbacks) layout.Dimensions {
-	gap := layout.Inset{Bottom: theme.SpaceMD}
+func layoutRow(env *kit.Env, gtx *layout.Context, st *State, row *displayRow, bottomGap unit.Dp, cb Callbacks) layout.Dimensions {
+	gap := layout.Inset{Bottom: bottomGap}
 	return gap.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
 		local := gtx
 		if row.group != nil {
@@ -126,7 +132,7 @@ func layoutItem(env *kit.Env, gtx *layout.Context, st *State, item *session.Item
 		return layoutUserPill(env, gtx, c, item, cb)
 	case kindReasoning:
 		return layoutReasoning(env, gtx, st, c, item)
-	case kindToolCall:
+	case kindToolCall, kindApproval, kindCommand:
 		return layoutToolCall(env, gtx, st, c, item, cb)
 	case kindFileChange:
 		return layoutFileChange(env, gtx, st, c, item, cb)
@@ -139,24 +145,38 @@ func layoutItem(env *kit.Env, gtx *layout.Context, st *State, item *session.Item
 	}
 }
 
+type envClock struct{ env *kit.Env }
+
+func (c envClock) Now() time.Time {
+	if c.env != nil {
+		return c.env.Now()
+	}
+	return time.Time{}
+}
+
 func layoutMarkdownBody(env *kit.Env, gtx *layout.Context, c *cardState, src string, cb Callbacks) layout.Dimensions {
 	if c.doc == nil || c.docSrc != src {
-		c.doc = markdown.Parse(src)
+		c.doc = markdown.Parse(src, markdown.WithClock(envClock{env: env}))
 		c.docSrc = src
 	}
 	dims := mdview.LayoutEnv(env, gtx, c.doc, &c.md)
-	drainMarkdownEvents(&c.md, cb)
+	drainMarkdownEvents(gtx, &c.md, cb)
 	return dims
 }
 
-func drainMarkdownEvents(md *mdview.State, cb Callbacks) {
+func drainMarkdownEvents(gtx *layout.Context, md *mdview.State, cb Callbacks) {
+	drainLinkAndFileEvents(md, cb)
+	drainChipClickEvents(gtx, md, cb)
+}
+
+func drainLinkAndFileEvents(md *mdview.State, cb Callbacks) {
 	for {
-		op, ok := md.PollOpen()
+		opn, ok := md.PollOpen()
 		if !ok {
 			break
 		}
 		if cb.OnOpenLink != nil {
-			cb.OnOpenLink(op.URL)
+			cb.OnOpenLink(opn.URL)
 		}
 	}
 	for {
@@ -164,9 +184,18 @@ func drainMarkdownEvents(md *mdview.State, cb Callbacks) {
 		if !ok {
 			break
 		}
-		if cb.OnFileChip != nil {
-			cb.OnFileChip(fc.Ref)
+		openFile(cb, fc.Ref)
+	}
+}
+
+func drainChipClickEvents(gtx *layout.Context, md *mdview.State, cb Callbacks) {
+	reg := gitRegistryFor(cb)
+	for {
+		gc, ok := md.PollGitRefClick()
+		if !ok {
+			break
 		}
+		mdview.RunGitRefAction(gtx, reg, gc.Ref)
 	}
 	for {
 		ic, ok := md.PollIDClick()
