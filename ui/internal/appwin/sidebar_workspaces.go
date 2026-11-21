@@ -362,6 +362,10 @@ func (s *screens) layoutSidebar(gtx *layout.Context, env *kit.Env) layout.Dimens
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
+			return s.layoutSettingsRow(env, &local)
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			local := gtx
 			header, ev := s.header.Layout(env, &local, &kit.SectionHeaderProps{
 				Label:  "Workspaces",
 				Action: &kit.IconButtonProps{Icon: kit.IconPlus, Label: "New workspace"},
@@ -392,8 +396,7 @@ func (s *screens) layoutInboxRow(env *kit.Env, gtx *layout.Context) layout.Dimen
 	}
 	dims, ev := s.inboxRow.Layout(env, gtx, props)
 	if ev.Clicked || ev.Opened {
-		s.inboxOpen = true
-		s.accountsOpen = false
+		s.showPane(paneInbox)
 	}
 	return dims
 }
@@ -414,8 +417,23 @@ func (s *screens) layoutAccountsRow(env *kit.Env, gtx *layout.Context) layout.Di
 	}
 	dims, ev := s.accountsRow.Layout(env, gtx, props)
 	if ev.Clicked || ev.Opened {
-		s.accountsOpen = true
-		s.inboxOpen = false
+		s.showPane(paneAccounts)
+	}
+	return dims
+}
+
+func (s *screens) layoutSettingsRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
+	props := &kit.ListRowProps{
+		Label:    "Settings",
+		Selected: s.settingsOpen,
+	}
+	if dirty := len(s.settings.DirtyFields()); dirty > 0 {
+		props.StateLabel = fmt.Sprintf("%d unsaved", dirty)
+		props.StateTone = kit.ToneInfo
+	}
+	dims, ev := s.settingsRow.Layout(env, gtx, props)
+	if ev.Clicked || ev.Opened {
+		s.openSettingsPane()
 	}
 	return dims
 }
@@ -431,7 +449,7 @@ func (s *screens) sessionRows(env *kit.Env, sessions []session.Session) []layout
 			row.Enter()
 			s.rows[sess.ID] = row
 		}
-		selected := !s.inboxOpen && !s.accountsOpen && s.open == sess.ID
+		selected := !s.inboxOpen && !s.accountsOpen && !s.settingsOpen && s.open == sess.ID
 		pending := s.inbox.PendingCountForSession(sess.ID)
 		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx

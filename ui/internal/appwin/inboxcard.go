@@ -261,7 +261,7 @@ func layoutCardFooter(gtx *layout.Context, env *kit.Env, sc *screens, req *clien
 			}),
 		)
 	case client.InteractionKindQuestion:
-		cancelLabel, cancelOutcome := "Cancel", client.InteractionOutcomeCancelled
+		cancelLabel, cancelOutcome := labelCancel, client.InteractionOutcomeCancelled
 		if !slices.Contains(req.OfferedOutcomes, client.InteractionOutcomeCancelled) && slices.Contains(req.OfferedOutcomes, client.InteractionOutcomeDenied) {
 			cancelLabel, cancelOutcome = labelDeny, client.InteractionOutcomeDenied
 		}

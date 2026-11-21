@@ -13,6 +13,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/inbox"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
+	"github.com/syurodev/fugue/ui/internal/settings"
 	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/transcriptview"
 	"github.com/syurodev/fugue/ui/internal/vault"
@@ -30,6 +31,7 @@ const (
 	topicInteraction    = "interaction"
 	topicQuota          = client.TopicQuota
 	topicLogin          = client.TopicLogin
+	topicAppState       = client.TopicAppState
 )
 
 // pageFetcher is the read side the screens drive: the session.Fetcher, and a
@@ -116,6 +118,11 @@ type screens struct {
 	accountsView    *accountsView
 	accountsRow     *kit.ListRowState
 	accountsOpen    bool
+	settings        *settings.Model
+	settingsWorker  *settings.Worker
+	settingsView    *settingsView
+	settingsRow     *kit.ListRowState
+	settingsOpen    bool
 	emptyTranscript *kit.EmptyStateState
 }
 
@@ -126,6 +133,8 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 	inboxRow.Enter()
 	accountsRow := kit.NewListRowState()
 	accountsRow.Enter()
+	settingsRow := kit.NewListRowState()
+	settingsRow.Enter()
 	return &screens{
 		m:               m,
 		fetcher:         fetcher,
@@ -157,6 +166,9 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 		accounts:        accounts.NewModel(),
 		accountsView:    newAccountsView(),
 		accountsRow:     accountsRow,
+		settings:        settings.NewModel(),
+		settingsView:    newSettingsView(),
+		settingsRow:     settingsRow,
 		emptyTranscript: kit.NewEmptyStateState(),
 	}
 }
@@ -210,6 +222,8 @@ func (s *screens) applyUpdate(u hostconn.Update) {
 		s.applyQuotaDelivery(u)
 	case topicLogin:
 		s.applyLoginDelivery(u)
+	case topicAppState:
+		s.applyAppStateDelivery(u)
 	case topicTranscriptDlt + s.open:
 		if u.Event != nil {
 			s.applyDelta(u.Event.Payload)
@@ -251,6 +265,10 @@ func (s *screens) reconnected() {
 	if s.accountsWorker != nil {
 		req := accounts.Request{Kind: accounts.OpListAccounts}
 		s.accountsWorker.Do(&req)
+	}
+	if s.settingsWorker != nil {
+		req := settings.Request{Kind: settings.OpLoadPrefs}
+		s.settingsWorker.Do(&req)
 	}
 	if s.open != "" {
 		s.m.AddTopic(topicTranscript + s.open)
@@ -364,8 +382,7 @@ func (s *screens) applyPageResult(r *session.Result) {
 // openSession opens a session's transcript: its topics join the connection,
 // and its newest page and commands are read if the model has none.
 func (s *screens) openSession(id string) {
-	s.inboxOpen = false
-	s.accountsOpen = false
+	s.showPane(paneTranscript)
 	if s.open == id {
 		return
 	}
@@ -424,6 +441,7 @@ func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 	}
 	s.toggleInboxShortcut(gtx)
 	s.toggleAccountsShortcut(gtx)
+	s.toggleSettingsShortcut(gtx)
 	layout.Flex{Axis: layout.Horizontal}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Right: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
@@ -433,12 +451,15 @@ func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			local := gtx
-			// TODO(F10.20b): move the inbox and accounts views into slots
+			// TODO(F10.20b): move the inbox, accounts, and settings views into slots
 			if s.inboxOpen {
 				return s.inboxView.layout(&local, env, s)
 			}
 			if s.accountsOpen {
 				return s.accountsView.layout(&local, env, s)
+			}
+			if s.settingsOpen {
+				return s.settingsView.layout(&local, env, s)
 			}
 			return s.layoutTranscript(&local, env)
 		}),
