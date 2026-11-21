@@ -207,6 +207,9 @@ func (w *Worker) handle(ctx context.Context, req *Request) {
 		return
 	}
 	res := w.execute(ctx, c, req)
+	// Clear before delivering: a caller that reads the result must already
+	// see the request bytes zeroed, not after a race with the deferred clear.
+	clear(req.Secret)
 	if ctx.Err() != nil {
 		res.Clear()
 		return
