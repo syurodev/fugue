@@ -19,7 +19,10 @@ import (
 	"github.com/syurodev/fugue/internal/workspace"
 )
 
-const crossReviewTestBrief = "Cross review brief."
+const (
+	crossReviewTestBrief = "Cross review brief."
+	testOCRBinaryPath    = "/usr/local/bin/ocr"
+)
 
 type crossReviewFakeAdapter struct {
 	mu       sync.Mutex
@@ -279,7 +282,7 @@ func TestCrossReviewBundlesWithOCRAndVerifiesPositions(t *testing.T) {
 			return `[{"file":"pkg/api/handler.go","line_start":3,"line_end":3,"severity":"medium","rule":"err-wrap","description":"wrap err"}]`
 		},
 	}
-	f := newCrossReviewFixture(t, reviewer, ocr.ProbeResult{Found: true, Supported: true, Path: "/usr/local/bin/ocr", Version: "1.9.2"})
+	f := newCrossReviewFixture(t, reviewer, ocr.ProbeResult{Found: true, Path: testOCRBinaryPath, Version: "1.14.0"})
 	writeWorktreeFiles(t, f.wtDir, map[string]string{
 		"pkg/auth/session.go": "package auth\n\nfunc Verify() bool { return true }\n",
 		"pkg/api/handler.go":  "package api\n\nfunc Handle() error { return nil }\n",
@@ -354,44 +357,94 @@ func assertOCRReviewReport(t *testing.T, f *gateDiffFixture) {
 
 func TestCrossReviewFallsBackWithoutOCR(t *testing.T) {
 	t.Parallel()
+	previewJSON, err := os.ReadFile(filepath.Join("..", "ocr", "testdata", "preview.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ruleJSON, err := os.ReadFile(filepath.Join("..", "ocr", "testdata", "rule.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
 	unknownPreview, err := os.ReadFile(filepath.Join("..", "ocr", "testdata", "preview_unknown_schema.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct {
-		name     string
-		probe    ocr.ProbeResult
-		ocrReply string
+		name      string
+		probe     ocr.ProbeResult
+		ocrReply  string
+		wantOCR   bool
+		wantNote  string
+		wantTotal int
 	}{
-		{name: "missing_binary", probe: ocr.ProbeResult{Found: false}},
-		{name: "unknown_schema_version", probe: ocr.ProbeResult{Found: true, Supported: true, Path: "/usr/local/bin/ocr"}, ocrReply: string(unknownPreview)},
+		{
+			name:      "newer_ocr_supported_schema",
+			probe:     ocr.ProbeResult{Found: true, Path: testOCRBinaryPath, Version: "1.14.0"},
+			wantOCR:   true,
+			wantNote:  "OCR",
+			wantTotal: 3,
+		},
+		{
+			name:      "unknown_schema_version",
+			probe:     ocr.ProbeResult{Found: true, Path: testOCRBinaryPath, Version: "1.15.0"},
+			ocrReply:  string(unknownPreview),
+			wantOCR:   false,
+			wantNote:  "OCR 1.15.0: schema 99 not supported",
+			wantTotal: 2,
+		},
+		{
+			name:      "missing_binary",
+			probe:     ocr.ProbeResult{Found: false},
+			wantOCR:   false,
+			wantNote:  "no OCR",
+			wantTotal: 2,
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			reviewer := &crossReviewFakeAdapter{}
-			f := newCrossReviewFixture(t, reviewer, tc.probe)
-			writeWorktreeFiles(t, f.wtDir, map[string]string{
-				"pkg/a/one.go": "package x\n",
-				"pkg/b/two.go": "package x\n",
-			})
-			gate, ok := f.rt.teamTasks.resultGate.(*hostResultGate)
-			if !ok {
-				t.Fatal("resultGate is not *hostResultGate")
-			}
-			gate.runCheck = func(_ context.Context, _, _ string) (string, int, error) {
-				return tc.ocrReply, 0, nil
-			}
-			if _, doneErr := f.rt.teamTasks.Done(t.Context(), f.sessID, "done", nil, taskStatusSucceeded); doneErr != nil {
-				t.Fatalf("Done: %v", doneErr)
-			}
-			if len(reviewer.calls) != 2 {
-				t.Fatalf("directory fallback reviewer calls = %d, want 2 (pkg/a and pkg/b)", len(reviewer.calls))
-			}
-			report := readCrossReviewReport(t, f)
-			if report.Coverage.UsedOCR || report.Coverage.ModeLabel != "no OCR" || report.Coverage.ReviewedFiles != 2 || report.Coverage.TotalFiles != 2 {
-				t.Fatalf("coverage = %+v, want no OCR 2/2", report.Coverage)
-			}
+			runCrossReviewFallbackCase(t, tc.probe, tc.ocrReply, string(previewJSON), string(ruleJSON), tc.wantOCR, tc.wantNote, tc.wantTotal)
 		})
+	}
+}
+
+func runCrossReviewFallbackCase(
+	t *testing.T,
+	probe ocr.ProbeResult,
+	ocrReply, previewJSON, ruleJSON string,
+	wantOCR bool,
+	wantNote string,
+	wantTotal int,
+) {
+	t.Helper()
+	reviewer := &crossReviewFakeAdapter{}
+	f := newCrossReviewFixture(t, reviewer, probe)
+	writeWorktreeFiles(t, f.wtDir, map[string]string{
+		"pkg/a/one.go": "package x\n",
+		"pkg/b/two.go": "package x\n",
+	})
+	gate, ok := f.rt.teamTasks.resultGate.(*hostResultGate)
+	if !ok {
+		t.Fatal("resultGate is not *hostResultGate")
+	}
+	gate.runCheck = func(_ context.Context, _, cmd string) (string, int, error) {
+		if wantOCR {
+			if strings.Contains(cmd, "delegate rule") {
+				return ruleJSON, 0, nil
+			}
+			return previewJSON, 0, nil
+		}
+		return ocrReply, 0, nil
+	}
+	if _, doneErr := f.rt.teamTasks.Done(t.Context(), f.sessID, "done", nil, taskStatusSucceeded); doneErr != nil {
+		t.Fatalf("Done: %v", doneErr)
+	}
+	if len(reviewer.calls) != 2 {
+		t.Fatalf("reviewer calls = %d, want 2", len(reviewer.calls))
+	}
+	report := readCrossReviewReport(t, f)
+	if report.Coverage.UsedOCR != wantOCR || !strings.Contains(report.Coverage.ModeLabel, wantNote) ||
+		report.Coverage.ReviewedFiles != 2 || report.Coverage.TotalFiles != wantTotal {
+		t.Fatalf("coverage = %+v, want UsedOCR=%t note~=%q 2/%d", report.Coverage, wantOCR, wantNote, wantTotal)
 	}
 }

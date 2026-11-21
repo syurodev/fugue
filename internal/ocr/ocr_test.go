@@ -15,13 +15,13 @@ import (
 
 const testAuthSessionPath = "pkg/auth/session.go"
 
-func TestProbeMissingSupportedAndUnsupported(t *testing.T) {
+func TestProbeReportsPresenceAndVersion(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
 	missing := ocr.Probe(ctx, filepath.Join(t.TempDir(), "missing-ocr"), nil, time.Second)
-	if missing.Found || missing.Supported {
-		t.Fatalf("missing probe = %+v, want not found and not supported", missing)
+	if missing.Found || missing.Version != "" {
+		t.Fatalf("missing probe = %+v, want not found", missing)
 	}
 
 	writeExe := func(name, script string) string {
@@ -30,24 +30,19 @@ func TestProbeMissingSupportedAndUnsupported(t *testing.T) {
 		return p
 	}
 	for _, tc := range []struct {
-		name      string
-		script    string
-		supported bool
-		version   string
-		wantWarn  bool
+		name    string
+		script  string
+		version string
 	}{
-		{name: "ocr-ok", script: "echo 'ocr version v1.9.2'\n", supported: true, version: "1.9.2"},
-		{name: "ocr-old", script: "echo 'ocr 1.8.0'\n", supported: false, version: "1.8.0", wantWarn: true},
-		{name: "ocr-bad", script: "echo 'garbled'\n", supported: false, wantWarn: true},
-		{name: "ocr-fail", script: "exit 2\n", supported: false, wantWarn: true},
+		{name: "ocr-v14", script: "echo 'ocr version v1.14.0'\n", version: "1.14.0"},
+		{name: "ocr-v13", script: "echo 'ocr 1.13.2'\n", version: "1.13.2"},
+		{name: "ocr-bad", script: "echo 'garbled'\n", version: ""},
+		{name: "ocr-fail", script: "exit 2\n", version: ""},
 	} {
 		bin := writeExe(tc.name, tc.script)
 		res := ocr.Probe(ctx, bin, []string{"PATH=" + filepath.Dir(bin)}, 2*time.Second)
-		if !res.Found || res.Supported != tc.supported || res.Version != tc.version {
-			t.Fatalf("%s probe = %+v, want supported=%t version=%q", tc.name, res, tc.supported, tc.version)
-		}
-		if tc.wantWarn && res.Warning == "" {
-			t.Fatalf("%s probe = %+v, want non-empty warning", tc.name, res)
+		if !res.Found || res.Version != tc.version {
+			t.Fatalf("%s probe = %+v, want found=true version=%q", tc.name, res, tc.version)
 		}
 	}
 }

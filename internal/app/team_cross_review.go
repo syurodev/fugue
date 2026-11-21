@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -168,16 +169,19 @@ func (g *hostResultGate) planCrossReviewBundles(
 	task *vendorstore.TaskRecord,
 	repoID, workDir, parentRef, taskBranch string,
 ) crossReviewPlan {
-	if g.ocrProbe.Found && g.ocrProbe.Supported && g.ocrProbe.Path != "" {
-		if plan, ok := g.tryOCRPlan(ctx, team, task, workDir, parentRef, taskBranch); ok {
+	modeLabel := "no OCR (not installed)"
+	if g.ocrProbe.Found && g.ocrProbe.Path != "" {
+		plan, note, ok := g.tryOCRPlan(ctx, team, task, workDir, parentRef, taskBranch)
+		if ok {
 			return plan
 		}
+		modeLabel = note
 	}
 	changed, err := g.git.ChangedFiles(ctx, g.dataDir, repoID, gitTaskID(task.TaskID), parentRef)
 	if err != nil {
 		return crossReviewPlan{
 			coverage: CrossReviewCoverage{
-				ModeLabel:   "no OCR",
+				ModeLabel:   modeLabel,
 				SkipReasons: []string{"changed files unavailable"},
 			},
 		}
@@ -187,7 +191,7 @@ func (g *hostResultGate) planCrossReviewBundles(
 		coverage: CrossReviewCoverage{
 			TotalFiles: len(changed),
 			UsedOCR:    false,
-			ModeLabel:  "no OCR",
+			ModeLabel:  modeLabel,
 		},
 	}
 }
@@ -197,16 +201,16 @@ func (g *hostResultGate) tryOCRPlan(
 	team *vendorstore.TeamRecord,
 	task *vendorstore.TaskRecord,
 	workDir, parentRef, taskBranch string,
-) (crossReviewPlan, bool) {
+) (crossReviewPlan, string, bool) {
 	previewCmd := fmt.Sprintf("%s delegate preview --from %s --to %s --format json",
 		shellQuoteArg(g.ocrProbe.Path), shellQuoteArg(parentRef), shellQuoteArg(taskBranch))
 	out, code, err := g.runPolicyOCRCommand(ctx, team, task, workDir, previewCmd)
 	if err != nil || code != 0 {
-		return crossReviewPlan{}, false
+		return crossReviewPlan{}, "no OCR (command failed)", false
 	}
 	preview, err := ocr.ParsePreview([]byte(out))
 	if err != nil {
-		return crossReviewPlan{}, false
+		return crossReviewPlan{}, g.ocrFallbackNote(err), false
 	}
 	var paths []string
 	for _, f := range preview.ReviewableFiles {
@@ -216,10 +220,11 @@ func (g *hostResultGate) tryOCRPlan(
 	}
 	var ruleOut *ocr.RuleOutput
 	if len(paths) > 0 {
+		var note string
 		var ok bool
-		ruleOut, ok = g.fetchOCRRules(ctx, team, task, workDir, paths)
+		ruleOut, note, ok = g.fetchOCRRules(ctx, team, task, workDir, paths)
 		if !ok {
-			return crossReviewPlan{}, false
+			return crossReviewPlan{}, note, false
 		}
 	}
 	skips := make([]string, 0, len(preview.ExcludedFiles))
@@ -239,7 +244,7 @@ func (g *hostResultGate) tryOCRPlan(
 			ModeLabel:   "OCR",
 			SkipReasons: skips,
 		},
-	}, true
+	}, "", true
 }
 
 func (g *hostResultGate) fetchOCRRules(
@@ -248,7 +253,7 @@ func (g *hostResultGate) fetchOCRRules(
 	task *vendorstore.TaskRecord,
 	workDir string,
 	paths []string,
-) (*ocr.RuleOutput, bool) {
+) (*ocr.RuleOutput, string, bool) {
 	quoted := make([]string, 0, len(paths))
 	for _, p := range paths {
 		quoted = append(quoted, shellQuoteArg(p))
@@ -256,13 +261,25 @@ func (g *hostResultGate) fetchOCRRules(
 	ruleCmd := fmt.Sprintf("%s delegate rule %s --format json", shellQuoteArg(g.ocrProbe.Path), strings.Join(quoted, " "))
 	rOut, rCode, rErr := g.runPolicyOCRCommand(ctx, team, task, workDir, ruleCmd)
 	if rErr != nil || rCode != 0 {
-		return nil, false
+		return nil, "no OCR (rule command failed)", false
 	}
 	parsedRules, parseErr := ocr.ParseRule([]byte(rOut))
 	if parseErr != nil {
-		return nil, false
+		return nil, g.ocrFallbackNote(parseErr), false
 	}
-	return &parsedRules, true
+	return &parsedRules, "", true
+}
+
+func (g *hostResultGate) ocrFallbackNote(err error) string {
+	var schemaErr *ocr.UnsupportedSchemaError
+	if errors.As(err, &schemaErr) {
+		ver := strings.TrimSpace(g.ocrProbe.Version)
+		if ver == "" {
+			return fmt.Sprintf("no OCR (OCR: schema %s not supported)", schemaErr.SchemaVersion)
+		}
+		return fmt.Sprintf("no OCR (OCR %s: schema %s not supported)", ver, schemaErr.SchemaVersion)
+	}
+	return "no OCR (invalid output)"
 }
 
 func (g *hostResultGate) pickReviewerVendor(authorVendor string) string {

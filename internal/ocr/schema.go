@@ -3,6 +3,7 @@ package ocr
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"path"
 	"slices"
 	"strings"
@@ -10,9 +11,33 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
+// SupportedSchemaVersions returns the delegate-mode JSON schema_version values
+// supported by Fugue (orchestration §10.1).
+func SupportedSchemaVersions() []string {
+	return []string{"1"}
+}
+
+// IsSupportedSchemaVersion reports whether v is in SupportedSchemaVersions().
+func IsSupportedSchemaVersion(v string) bool {
+	return slices.Contains(SupportedSchemaVersions(), strings.TrimSpace(v))
+}
+
 // ErrUnsupportedSchema indicates that OCR emitted a schema_version outside
-// Fugue's supported version, which §10.1 treats as "no OCR".
+// SupportedSchemaVersions, which §10.1 treats as "no OCR".
 var ErrUnsupportedSchema = errors.New("unsupported ocr schema_version")
+
+// UnsupportedSchemaError carries the unknown schema_version reported by OCR.
+type UnsupportedSchemaError struct {
+	SchemaVersion string
+}
+
+func (e *UnsupportedSchemaError) Error() string {
+	return fmt.Sprintf("%s: %q", ErrUnsupportedSchema, e.SchemaVersion)
+}
+
+func (e *UnsupportedSchemaError) Unwrap() error {
+	return ErrUnsupportedSchema
+}
 
 // PreviewOutput is the JSON payload emitted by `ocr delegate preview --format json`.
 type PreviewOutput struct {
@@ -77,8 +102,8 @@ func ParsePreview(raw []byte) (PreviewOutput, error) {
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return PreviewOutput{}, errcode.Wrap(errcode.InvalidArgument, "decode ocr preview output", err)
 	}
-	if strings.TrimSpace(out.SchemaVersion) != SupportedSchemaVersion {
-		return PreviewOutput{}, ErrUnsupportedSchema
+	if !IsSupportedSchemaVersion(out.SchemaVersion) {
+		return PreviewOutput{}, &UnsupportedSchemaError{SchemaVersion: strings.TrimSpace(out.SchemaVersion)}
 	}
 	return out, nil
 }
@@ -89,8 +114,8 @@ func ParseRule(raw []byte) (RuleOutput, error) {
 	if err := json.Unmarshal(raw, &out); err != nil {
 		return RuleOutput{}, errcode.Wrap(errcode.InvalidArgument, "decode ocr rule output", err)
 	}
-	if strings.TrimSpace(out.SchemaVersion) != SupportedSchemaVersion {
-		return RuleOutput{}, ErrUnsupportedSchema
+	if !IsSupportedSchemaVersion(out.SchemaVersion) {
+		return RuleOutput{}, &UnsupportedSchemaError{SchemaVersion: strings.TrimSpace(out.SchemaVersion)}
 	}
 	return out, nil
 }
