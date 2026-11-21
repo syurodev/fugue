@@ -66,7 +66,7 @@ func (h *tasksHandler) PostChannelMessage(ctx context.Context, req *connect.Requ
 	if err != nil {
 		return nil, err
 	}
-	result, err := svc.PostChannelMessage(ctx, app.PostChannelCommand{
+	result, err := svc.PostChannelMessage(ctx, &app.PostChannelCommand{
 		CommandID:    req.Msg.GetCommandId(),
 		TeamID:       req.Msg.GetTeamId(),
 		ThreadTaskID: req.Msg.GetThreadTaskId(),
@@ -87,7 +87,7 @@ func protoChannelLine(v *app.ChannelLineView) *tasksv1.ChannelLine {
 		SenderTaskId:     v.SenderTaskID,
 		RecipientTaskId:  v.RecipientTaskID,
 		ThreadRootTaskId: v.ThreadRoot,
-		Attempt:          uint32(v.Attempt),
+		Attempt:          v.Attempt,
 		SourceSeq:        v.SourceSeq,
 		CreatedAt:        timestamppb.New(time.UnixMilli(v.CreatedAt).UTC()),
 		Content:          v.Content,

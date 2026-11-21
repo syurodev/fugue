@@ -12,6 +12,9 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+
+	"github.com/syurodev/fugue/internal/platform/errcode"
+	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
 	tasksv1 "github.com/syurodev/fugue/pkg/pb/fugue/tasks/v1"
 	"github.com/syurodev/fugue/pkg/pb/fugue/tasks/v1/tasksv1connect"
 )
@@ -39,5 +42,23 @@ func TestChannelHostAPIDeniesSessionPrincipal(t *testing.T) {
 	}))
 	if !errors.Is(deniedPost, ErrSessionPrincipalDenied) && connect.CodeOf(deniedPost) != connect.CodePermissionDenied {
 		t.Fatalf("session principal PostChannelMessage err = %v, want permission_denied", deniedPost)
+	}
+}
+
+func TestChannelHostAPIMapsLocalErrors(t *testing.T) {
+	t.Parallel()
+	v := startTokenHost(t, "")
+	host, localHTTP := newTestClient(t, v.sockPath)
+	if _, err := host.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_APP, "v1")); err != nil {
+		t.Fatal(err)
+	}
+	localTasks := tasksv1connect.NewTaskServiceClient(localHTTP, "http://fugue")
+	_, pageErr := localTasks.PageChannel(t.Context(), connect.NewRequest(&tasksv1.PageChannelRequest{TeamId: "missing-team"}))
+	if connect.CodeOf(pageErr) != connect.CodeNotFound {
+		t.Fatalf("local PageChannel err = %v, want not_found", pageErr)
+	}
+	_, postErr := localTasks.PostChannelMessage(t.Context(), connect.NewRequest(&tasksv1.PostChannelMessageRequest{TeamId: "missing-team", Text: "hi"}))
+	if connect.CodeOf(postErr) != connect.CodeInvalidArgument && errcode.CodeOf(postErr) != errcode.InvalidArgument {
+		t.Fatalf("local PostChannelMessage without command_id err = %v, want invalid_argument", postErr)
 	}
 }

@@ -169,7 +169,7 @@ func channelLifecycleContent(row *vendorstore.TeamChannelMessage, src *vendorsto
 }
 
 // channelPayloadContent renders the content kinds from their sealed payload.
-func channelPayloadContent(row *vendorstore.TeamChannelMessage, src *vendorstore.RecordedTeamEvent, raw []byte) string {
+func channelPayloadContent(row *vendorstore.TeamChannelMessage, raw []byte) string {
 	switch row.Kind {
 	case vendorstore.ChannelKindPlan:
 		return planContent(raw)

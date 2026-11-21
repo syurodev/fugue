@@ -12,10 +12,11 @@ package app
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -44,7 +45,7 @@ type ChannelLineView struct {
 	SenderTaskID    string `json:"sender_task_id,omitempty"`
 	RecipientTaskID string `json:"recipient_task_id,omitempty"`
 	ThreadRoot      string `json:"thread_root_task_id,omitempty"`
-	Attempt         int    `json:"attempt"`
+	Attempt         uint32 `json:"attempt"`
 	SourceSeq       int64  `json:"source_seq"`
 	CreatedAt       int64  `json:"created_at"`
 	Content         string `json:"content,omitempty"`
@@ -201,12 +202,12 @@ func (s *TasksService) pageChannelQuery(ctx context.Context, teamID, threadTaskI
 		limit = 500
 	}
 	q := vendorstore.TeamChannelPageQuery{Before: before, Since: since, Limit: limit}
-	if threadTaskID == "" {
-		return q, nil
-	}
 	_, tasks, err := s.store.TeamSnapshot(ctx, teamID)
 	if err != nil {
 		return vendorstore.TeamChannelPageQuery{}, s.teamReadError(err)
+	}
+	if threadTaskID == "" {
+		return q, nil
 	}
 	if _, ok := findTask(tasks, threadTaskID); !ok {
 		return vendorstore.TeamChannelPageQuery{}, errcode.New(errcode.TasksTaskNotFound, "the team task does not exist in this team")
@@ -240,7 +241,7 @@ func (s *TasksService) teamReadError(err error) error {
 // PostChannelMessage records one §6.7 user post and delivers it to the routed
 // agent (§5.3). The channel line and the delegator's informational mention
 // commit with the event; the delivery is an immediate origin=user turn.
-func (s *TasksService) PostChannelMessage(ctx context.Context, cmd PostChannelCommand) (PostChannelResult, error) {
+func (s *TasksService) PostChannelMessage(ctx context.Context, cmd *PostChannelCommand) (PostChannelResult, error) {
 	trimmed, fingerprint, err := s.validatePost(cmd)
 	if err != nil {
 		return PostChannelResult{}, err
@@ -257,7 +258,7 @@ func (s *TasksService) PostChannelMessage(ctx context.Context, cmd PostChannelCo
 	if err != nil {
 		return PostChannelResult{}, err
 	}
-	target, err := s.routeUserPost(&rec, tasks, cmd.ThreadTaskID, cmd.ToTaskID)
+	target, err := s.routeUserPost(tasks, cmd.ThreadTaskID, cmd.ToTaskID)
 	if err != nil {
 		return PostChannelResult{}, err
 	}
@@ -277,7 +278,7 @@ func (s *TasksService) PostChannelMessage(ctx context.Context, cmd PostChannelCo
 
 // validatePost checks the command shape and the §5.3 text cap, and computes
 // the command fingerprint for the dedup.
-func (s *TasksService) validatePost(cmd PostChannelCommand) (string, string, error) {
+func (s *TasksService) validatePost(cmd *PostChannelCommand) (string, string, error) {
 	if cmd.CommandID == "" {
 		return "", "", errcode.New(errcode.InvalidArgument, "command_id is required")
 	}
@@ -335,7 +336,7 @@ func (s *TasksService) appendUserPost(ctx context.Context, commandID, fingerprin
 	}
 	evSeq, appendErr := s.store.AppendTeamEvent(ctx, rec.TeamID, rec.LastSeq, &vendorstore.AppendTeamEventInput{
 		EventID: evID, EventType: vendorstore.EventTeamUserPosted, ProtectedPayload: payload,
-		Mailbox: userPostMentionRows(rec, tasks, target, trimmed),
+		Mailbox: userPostMentionRows(tasks, target, trimmed),
 	})
 	if appendErr != nil {
 		if errors.Is(appendErr, vendorstore.ErrTeamNotFound) {
@@ -362,7 +363,7 @@ func (s *TasksService) appendUserPost(ctx context.Context, commandID, fingerprin
 
 // routeUserPost resolves the §5.3 routing: to_task_id when given, else the
 // thread's task agent, else the lead.
-func (s *TasksService) routeUserPost(rec *vendorstore.TeamRecord, tasks []vendorstore.TaskRecord, threadTaskID, toTaskID string) (*vendorstore.TaskRecord, error) {
+func (s *TasksService) routeUserPost(tasks []vendorstore.TaskRecord, threadTaskID, toTaskID string) (*vendorstore.TaskRecord, error) {
 	switch {
 	case toTaskID != "":
 		target, ok := findTask(tasks, toTaskID)
@@ -388,12 +389,12 @@ func (s *TasksService) routeUserPost(rec *vendorstore.TeamRecord, tasks []vendor
 
 // userPostMentionRows seals the delegator's informational mention (§6.2): it
 // rides the delegator's next digest without a separate wake (Q-177 A).
-func userPostMentionRows(rec *vendorstore.TeamRecord, tasks []vendorstore.TaskRecord, target *vendorstore.TaskRecord, text string) []vendorstore.MailboxEnqueueInput {
+func userPostMentionRows(tasks []vendorstore.TaskRecord, target *vendorstore.TaskRecord, text string) []vendorstore.MailboxEnqueueInput {
 	delegator := resolvedParentID(target.ParentTaskID, tasks)
 	if delegator == "" || delegator == target.TaskID {
 		return nil
 	}
-	payload, err := json.Marshal(mailboxDigestItem{TaskID: "user", State: "message", Summary: text})
+	payload, err := json.Marshal(mailboxDigestItem{TaskID: vendorstore.ChannelSenderUser, State: mailboxStateMessage, Summary: text})
 	if err != nil {
 		return nil
 	}
@@ -428,12 +429,16 @@ func (s *TasksService) deliverUserPost(ctx context.Context, sessionID, text stri
 // result (appstate pattern).
 func channelPostFingerprint(teamID, threadTaskID, toTaskID, text string) string {
 	h := sha256.New()
+	var lenBuf [20]byte
 	for _, part := range []string{teamID, threadTaskID, toTaskID, text} {
 		// sha256.Hash.Write never fails; the length prefix keeps the parts
 		// distinct, so no separator can collide with the text.
-		_, _ = h.Write([]byte(fmt.Sprintf("%d:%s\n", len(part), part)))
+		_, _ = h.Write(strconv.AppendInt(lenBuf[:0], int64(len(part)), 10))
+		_, _ = h.Write([]byte(":"))
+		_, _ = h.Write([]byte(part))
+		_, _ = h.Write([]byte("\n"))
 	}
-	return fmt.Sprintf("%x", h.Sum(nil))
+	return hex.EncodeToString(h.Sum(nil))
 }
 
 const tasksDedupCapacity = 1024

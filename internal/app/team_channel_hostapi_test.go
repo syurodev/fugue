@@ -9,40 +9,23 @@ package app
 // seeding can use the team store directly.
 
 import (
-	"context"
 	"encoding/json"
+	"math"
+	"strings"
 	"testing"
 
-	"github.com/syurodev/fugue/internal/vendorstore"
+	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
-// seedChannelHostTeam stores an active team with a lead whose task runs in
-// the given session.
-func seedChannelHostTeam(t *testing.T, store *vendorstore.Store, teamID, leadSession string) {
+const testChannelHello = "hello team"
+
+func mustChannelEventSeq(t *testing.T, seq int64) EventSeq {
 	t.Helper()
-	spec := []byte(`{"goal":"channel e2e"}`)
-	rec, _, err := store.CreateTeam(t.Context(), &vendorstore.NewTeamInput{
-		TeamID: teamID, WorkspaceID: "ws-chan", ProposedEventID: "p-" + teamID,
-		ProposedPayload: []byte(`{"title":"channel","brief":"E2E brief."}`),
-		Tasks: []vendorstore.NewTaskInput{
-			{TaskID: teamID + "-lead", HierarchyRole: vendorstore.RoleLead, CatalogRole: "researcher", Deliverable: vendorstore.DeliverableReport, CreatedEventID: "c-" + teamID, ProtectedSpec: spec},
-		},
-	})
+	out, err := channelEventSeq(seq)
 	if err != nil {
 		t.Fatal(err)
 	}
-	seq := rec.LastSeq
-	for _, ev := range []vendorstore.AppendTeamEventInput{
-		{EventID: "start-" + teamID, EventType: vendorstore.EventTeamStarted},
-		{EventID: "as-" + teamID, TaskID: teamID + "-lead", EventType: vendorstore.EventTaskAssigned, SessionID: leadSession},
-		{EventID: "st-" + teamID, TaskID: teamID + "-lead", EventType: vendorstore.EventTaskStarted},
-	} {
-		next, appendErr := store.AppendTeamEvent(t.Context(), teamID, seq, &ev)
-		if appendErr != nil {
-			t.Fatalf("AppendTeamEvent(%s): %v", ev.EventID, appendErr)
-		}
-		seq = next
-	}
+	return out
 }
 
 func TestChannelHostAPIPagesPostsAndLocksMetadataOnly(t *testing.T) {
@@ -51,7 +34,9 @@ func TestChannelHostAPIPagesPostsAndLocksMetadataOnly(t *testing.T) {
 
 	x.assertUnlockedSnapshotHasContent(t)
 	x.assertPostDedupAndLiveEvent(t)
+	x.assertCursorCatchUp(t)
 	x.assertPagingBothWays(t)
+	x.assertChannelValidationErrors(t)
 	x.assertLockedVaultFailsClosedAndTopicIsMetadataOnly(t)
 }
 
@@ -100,14 +85,14 @@ func (x *channelHostAPIFixture) assertUnlockedSnapshotHasContent(t *testing.T) {
 func (x *channelHostAPIFixture) assertPostDedupAndLiveEvent(t *testing.T) {
 	t.Helper()
 	ctx := t.Context()
-	first, err := x.svc.PostChannelMessage(ctx, PostChannelCommand{
-		CommandID: "post-1", TeamID: x.teamID, ToTaskID: x.f.memAID, Text: "hello team",
+	first, err := x.svc.PostChannelMessage(ctx, &PostChannelCommand{
+		CommandID: "post-1", TeamID: x.teamID, ToTaskID: x.f.memAID, Text: testChannelHello,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := x.svc.PostChannelMessage(ctx, PostChannelCommand{
-		CommandID: "post-1", TeamID: x.teamID, ToTaskID: x.f.memAID, Text: "hello team",
+	second, err := x.svc.PostChannelMessage(ctx, &PostChannelCommand{
+		CommandID: "post-1", TeamID: x.teamID, ToTaskID: x.f.memAID, Text: testChannelHello,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -116,12 +101,13 @@ func (x *channelHostAPIFixture) assertPostDedupAndLiveEvent(t *testing.T) {
 		t.Fatalf("replayed command_id posted again: %d then %d", first.ChannelSeq, second.ChannelSeq)
 	}
 	x.postSeq = first.ChannelSeq
+	wantSeq := mustChannelEventSeq(t, first.ChannelSeq)
 	for {
 		ev, ok := x.sub.Next(ctx)
 		if !ok {
 			t.Fatal("the topic stream ended before the post event")
 		}
-		if ev.Type != "channel.appended" || ev.Seq != uint64(first.ChannelSeq) {
+		if ev.Type != channelEventName || ev.Seq != wantSeq {
 			continue
 		}
 		// A live event payload is one line, not a snapshot.
@@ -129,7 +115,7 @@ func (x *channelHostAPIFixture) assertPostDedupAndLiveEvent(t *testing.T) {
 		if err := json.Unmarshal(ev.Payload, &live); err != nil {
 			t.Fatal(err)
 		}
-		if live.ChannelSeq != first.ChannelSeq || live.Content != "hello team" {
+		if live.ChannelSeq != first.ChannelSeq || live.Content != testChannelHello {
 			t.Fatalf("live event line = %+v, want the posted line with content", live)
 		}
 		return
@@ -147,10 +133,10 @@ func (x *channelHostAPIFixture) assertPagingBothWays(t *testing.T) {
 	if len(general) < 3 {
 		t.Fatalf("general page = %d lines, want the plan, decision and post", len(general))
 	}
-	if general[0].Content != "hello team" || general[0].Attempt != 1 {
+	if general[0].Content != testChannelHello || general[0].Attempt != 1 {
 		t.Fatalf("newest general line = %+v, want the post at attempt 1", general[0])
 	}
-	thread, err := x.svc.PageChannel(ctx, x.teamID, x.f.memAID, 0, int64(general[0].ChannelSeq), 0)
+	thread, err := x.svc.PageChannel(ctx, x.teamID, x.f.memAID, 0, general[0].ChannelSeq, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +161,7 @@ func (x *channelHostAPIFixture) assertLockedVaultFailsClosedAndTopicIsMetadataOn
 	if _, err := x.svc.PageChannel(t.Context(), x.teamID, "", 0, 0, 0); err == nil {
 		t.Fatal("locked PageChannel succeeded, want fail closed")
 	}
-	if _, err := x.svc.PostChannelMessage(t.Context(), PostChannelCommand{
+	if _, err := x.svc.PostChannelMessage(t.Context(), &PostChannelCommand{
 		CommandID: "post-locked", TeamID: x.teamID, ToTaskID: x.f.memAID, Text: "while locked",
 	}); err == nil {
 		t.Fatal("a post on a locked vault succeeded, want fail closed")
@@ -200,6 +186,71 @@ func (x *channelHostAPIFixture) assertLockedVaultFailsClosedAndTopicIsMetadataOn
 	}
 }
 
+// assertCursorCatchUp subscribes with a cursor before the post and checks
+// durable catch-up through Since.
+func (x *channelHostAPIFixture) assertCursorCatchUp(t *testing.T) {
+	t.Helper()
+	ctx := t.Context()
+	if x.postSeq < 2 {
+		t.Fatalf("postSeq = %d, want >= 2", x.postSeq)
+	}
+	sub, err := x.f.rt.hub.Subscribe(ctx, SubscribeParams{
+		Principal: testAppPrincipal,
+		Topic:     TeamChannelTopicName(x.teamID),
+		Cursor: &EventCursor{
+			Topic:       TeamChannelTopicName(x.teamID),
+			Incarnation: x.f.rt.incarnation.IncarnationID,
+			Sequence:    mustChannelEventSeq(t, x.postSeq-1),
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	if _, _, hasSnap := sub.Snapshot(); hasSnap {
+		t.Fatal("cursor catch-up unexpectedly sent a snapshot")
+	}
+	ev, ok := sub.Next(ctx)
+	if !ok || ev.Type != channelEventName || ev.Seq != mustChannelEventSeq(t, x.postSeq) {
+		t.Fatalf("catch-up event = (%+v, %v), want %s at #%d", ev, ok, channelEventName, x.postSeq)
+	}
+	topic := &teamChannelTopic{topics: x.f.rt.teamChannels, teamID: x.teamID}
+	if far, farErr := topic.Since(ctx, math.MaxUint64); farErr != nil || len(far) != 0 {
+		t.Fatalf("Since(MaxUint64) = (%v, %v), want empty", far, farErr)
+	}
+}
+
+// assertChannelValidationErrors checks PageChannel and PostChannelMessage
+// boundary rejections and TasksService accessor.
+func (x *channelHostAPIFixture) assertChannelValidationErrors(t *testing.T) {
+	t.Helper()
+	ctx := t.Context()
+	gotSvc, svcErr := x.f.rt.TasksService()
+	if svcErr != nil || gotSvc != x.svc {
+		t.Fatalf("TasksService() = (%v, %v), want %v", gotSvc, svcErr, x.svc)
+	}
+	for _, tc := range []struct {
+		name string
+		err  error
+		want errcode.Code
+	}{
+		{"empty team", errOfPage(x.svc.PageChannel(ctx, "", "", 0, 0, 0)), errcode.TasksTeamNotFound},
+		{"negative cursor", errOfPage(x.svc.PageChannel(ctx, x.teamID, "", -1, 0, 0)), errcode.InvalidArgument},
+		{"since >= before", errOfPage(x.svc.PageChannel(ctx, x.teamID, "", 5, 5, 0)), errcode.InvalidArgument},
+		{"missing team", errOfPage(x.svc.PageChannel(ctx, "no-team", x.f.memAID, 0, 0, 0)), errcode.TasksTeamNotFound},
+		{"empty command_id", errOfPost(x.svc.PostChannelMessage(ctx, &PostChannelCommand{TeamID: x.teamID, Text: "hi"})), errcode.InvalidArgument},
+		{"empty post text", errOfPost(x.svc.PostChannelMessage(ctx, &PostChannelCommand{CommandID: "c1", TeamID: x.teamID, Text: " \t\n "})), errcode.InvalidArgument},
+		{"oversized post", errOfPost(x.svc.PostChannelMessage(ctx, &PostChannelCommand{CommandID: "c2", TeamID: x.teamID, Text: strings.Repeat("a", maxChannelPostBytes+1)})), errcode.TasksPostTooLarge},
+	} {
+		if errcode.CodeOf(tc.err) != tc.want {
+			t.Fatalf("%s code = %v, want %v", tc.name, errcode.CodeOf(tc.err), tc.want)
+		}
+	}
+}
+
+func errOfPage(_ []ChannelLineView, err error) error { return err }
+func errOfPost(_ PostChannelResult, err error) error { return err }
+
 // channelWireLines decodes a snapshot payload's lines.
 func channelWireLines(t *testing.T, payload []byte) []channelLineWire {
 	t.Helper()
@@ -210,23 +261,4 @@ func channelWireLines(t *testing.T, payload []byte) []channelLineWire {
 		t.Fatal(err)
 	}
 	return wire.Lines
-}
-
-// channelEventLines waits for the topic events of one source line.
-func channelEventLines(t *testing.T, sub *Subscription, seq int64) []channelLineWire {
-	t.Helper()
-	for {
-		ev, ok := sub.Next(context.Background())
-		if !ok {
-			t.Fatal("the topic stream ended before the expected event")
-		}
-		if ev.Type != "channel.appended" || ev.Seq != uint64(seq) {
-			continue
-		}
-		var wire channelLineWire
-		if err := json.Unmarshal(ev.Payload, &wire); err != nil {
-			t.Fatal(err)
-		}
-		return []channelLineWire{wire}
-	}
 }

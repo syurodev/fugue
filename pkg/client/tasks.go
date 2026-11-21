@@ -27,6 +27,17 @@ var errTasksEventUnknown = errors.New("the team channel event type is not one th
 // is not a JSON object; it is wrapped, never constructed, at the call site.
 var errTasksPayloadNotObject = errors.New("the team channel payload is not a JSON object")
 
+// errTasksSequenceNegative is the static cause behind a negative channel
+// sequence in a snapshot payload.
+var errTasksSequenceNegative = errors.New("the team channel sequence must not be negative")
+
+func channelEventSequence(n int64) (uint64, error) {
+	if n < 0 {
+		return 0, fmt.Errorf("%w: %d", errTasksSequenceNegative, n)
+	}
+	return uint64(n), nil
+}
+
 // TopicTeamChannel names the durable channel topic of one team: prefix a
 // team ID, as in `team:<id>`.
 const TopicTeamChannel = "team:"
@@ -147,8 +158,12 @@ func DecodeTeamChannelSnapshot(payload []byte) (TeamChannelSnapshot, error) {
 		out.Lines = append(out.Lines, wire.Lines[i].view())
 	}
 	for i := range out.Lines {
-		if out.Lines[i].ChannelSeq > int64(out.Sequence) {
-			out.Sequence = uint64(out.Lines[i].ChannelSeq)
+		seq, seqErr := channelEventSequence(out.Lines[i].ChannelSeq)
+		if seqErr != nil {
+			return TeamChannelSnapshot{}, seqErr
+		}
+		if seq > out.Sequence {
+			out.Sequence = seq
 		}
 	}
 	return out, nil
@@ -202,7 +217,7 @@ type channelLineWire struct {
 	Content         string `json:"content,omitempty"`
 }
 
-func (w channelLineWire) view() ChannelLine {
+func (w *channelLineWire) view() ChannelLine {
 	return ChannelLine{
 		ChannelSeq:      w.ChannelSeq,
 		Kind:            w.Kind,

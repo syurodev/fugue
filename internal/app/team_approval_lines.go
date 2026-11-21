@@ -71,9 +71,14 @@ func (s *teamTaskService) ObserveApproval(ctx context.Context, ev interaction.Li
 }
 
 // teamTaskOfTicket resolves the team task a ticket belongs to: the binding
-// names the session that raised it. Non-team sessions record nothing.
+// names the session that raised it. Non-team sessions and Fugue's own team
+// decision/question cards (unrelayed KindQuestion) record nothing — they emit
+// their own team events, never tool-approval lines.
 func (s *teamTaskService) teamTaskOfTicket(ctx context.Context, ticket *interaction.Ticket) (string, string, bool) {
 	if ticket == nil || ticket.Binding.SessionID == "" {
+		return "", "", false
+	}
+	if ticket.Kind == interaction.KindQuestion && !ticket.Relayed {
 		return "", "", false
 	}
 	task, found, err := s.store.TaskForSession(ctx, ticket.Binding.SessionID)

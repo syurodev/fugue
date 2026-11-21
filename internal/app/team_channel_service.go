@@ -10,6 +10,7 @@ package app
 import (
 	"context"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -312,15 +313,15 @@ func channelBlock(label, text string) string {
 
 // channelAttemptOf derives the attempt a line belongs to: the attempt of the
 // task its source event names (Q-126: <root> is attempt 1, <root>~r<k> k+1).
-func channelAttemptOf(row *vendorstore.TeamChannelMessage, src *vendorstore.RecordedTeamEvent) int {
+func channelAttemptOf(row *vendorstore.TeamChannelMessage, src *vendorstore.RecordedTeamEvent) uint32 {
 	taskID := row.ThreadRoot
 	if src != nil && src.TaskID != "" {
 		taskID = src.TaskID
 	}
 	root := vendorstore.ThreadRootTaskID(taskID)
 	if rest := taskID[len(root):]; strings.HasPrefix(rest, "~r") {
-		if n, err := strconv.Atoi(rest[2:]); err == nil {
-			return n + 1
+		if n, err := strconv.ParseUint(rest[2:], 10, 32); err == nil && n < math.MaxUint32 {
+			return uint32(n) + 1
 		}
 	}
 	return 1
@@ -329,12 +330,9 @@ func channelAttemptOf(row *vendorstore.TeamChannelMessage, src *vendorstore.Reco
 // channelContentText extracts one line's content from its sealed source
 // payload: the primary text of the kind, host metadata for the lifecycle
 // kinds, and nothing for a payload-less event.
-// channelContentText extracts one line's content from its sealed source
-// payload: the primary text of the kind, host metadata for the lifecycle
-// kinds, and nothing for a payload-less event.
 func channelContentText(row *vendorstore.TeamChannelMessage, src *vendorstore.RecordedTeamEvent, raw []byte) string {
 	if len(raw) == 0 {
 		return channelLifecycleContent(row, src)
 	}
-	return channelPayloadContent(row, src, raw)
+	return channelPayloadContent(row, raw)
 }

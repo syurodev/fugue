@@ -11,13 +11,24 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
+	"math"
 	"sync"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
+
+var errNegativeChannelSeq = errors.New("channel sequence must not be negative")
+
+func channelEventSeq(n int64) (EventSeq, error) {
+	if n < 0 {
+		return 0, errcode.Wrap(errcode.Internal, "convert the channel sequence", errNegativeChannelSeq)
+	}
+	return uint64(n), nil
+}
 
 // TeamChannelTopicName is the durable topic of one team's channel.
 func TeamChannelTopicName(teamID string) string {
@@ -128,13 +139,18 @@ func (t *teamChannelTopics) observe(ctx context.Context, teamID string, seq int6
 
 // publish pushes one line's event to the topic.
 func (t *teamChannelTopics) publish(ctx context.Context, teamID string, row *vendorstore.TeamChannelMessage) {
+	seq, seqErr := channelEventSeq(row.ChannelSeq)
+	if seqErr != nil {
+		slog.Warn("channel sequence is negative", "team_id", teamID, "error_code", string(errcode.CodeOf(seqErr)))
+		return
+	}
 	payload, err := json.Marshal(t.lineWire(ctx, row))
 	if err != nil {
 		slog.Warn("marshalling the channel event failed", "team_id", teamID, "error_code", string(errcode.CodeOf(err)))
 		return
 	}
 	if _, err := t.hub.Publish(TeamChannelTopicName(teamID), Event{
-		Seq: uint64(row.ChannelSeq), Type: channelEventName, Payload: payload,
+		Seq: seq, Type: channelEventName, Payload: payload,
 	}); err != nil {
 		slog.Warn("publishing the channel event failed", "team_id", teamID, "error_code", string(errcode.CodeOf(err)))
 	}
@@ -189,9 +205,13 @@ func (t *teamChannelTopic) Snapshot(ctx context.Context) ([]byte, EventSeq, erro
 	seq := EventSeq(0)
 	for i := range rows {
 		row := &rows[i]
+		rowSeq, seqErr := channelEventSeq(row.ChannelSeq)
+		if seqErr != nil {
+			return nil, 0, seqErr
+		}
 		wire.Lines = append(wire.Lines, t.topics.lineWire(ctx, row))
-		if uint64(row.ChannelSeq) > seq {
-			seq = uint64(row.ChannelSeq)
+		if rowSeq > seq {
+			seq = rowSeq
 		}
 	}
 	state, err := json.Marshal(wire)
@@ -204,6 +224,9 @@ func (t *teamChannelTopic) Snapshot(ctx context.Context) ([]byte, EventSeq, erro
 // Since returns the channel events after seq, oldest first. The channel rows
 // are append-only and never pruned, so the cursor never goes too old.
 func (t *teamChannelTopic) Since(ctx context.Context, seq EventSeq) ([]Event, error) {
+	if seq > math.MaxInt64 {
+		return nil, nil
+	}
 	rows, err := t.topics.store.TeamChannelMessages(ctx, t.teamID, vendorstore.TeamChannelPageQuery{Since: int64(seq), Limit: 500})
 	if err != nil {
 		return nil, errcode.Wrap(errcode.Unavailable, "read the team channel since", err)
@@ -212,11 +235,15 @@ func (t *teamChannelTopic) Since(ctx context.Context, seq EventSeq) ([]Event, er
 	// TeamChannelMessages is newest first; the hub replays oldest first.
 	for i := len(rows) - 1; i >= 0; i-- {
 		row := &rows[i]
+		rowSeq, seqErr := channelEventSeq(row.ChannelSeq)
+		if seqErr != nil {
+			return nil, seqErr
+		}
 		payload, err := json.Marshal(t.topics.lineWire(ctx, row))
 		if err != nil {
 			return nil, errcode.Wrap(errcode.Unavailable, "marshal the team channel event", err)
 		}
-		out = append(out, Event{Seq: uint64(row.ChannelSeq), Type: channelEventName, Payload: payload})
+		out = append(out, Event{Seq: rowSeq, Type: channelEventName, Payload: payload})
 	}
 	return out, nil
 }

@@ -8,10 +8,7 @@ package client_test
 import (
 	"context"
 	"errors"
-	"net"
 	"net/http"
-	"net/http/httptest"
-	"path/filepath"
 	"sync"
 	"testing"
 
@@ -22,6 +19,11 @@ import (
 	hostv1connect "github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
 	tasksv1 "github.com/syurodev/fugue/pkg/pb/fugue/tasks/v1"
 	"github.com/syurodev/fugue/pkg/pb/fugue/tasks/v1/tasksv1connect"
+)
+
+const (
+	testChannelTeamID = "chan-1"
+	testChannelHello  = "channel hello"
 )
 
 // tasksFake serves the tasks service with scripted lines and one failing
@@ -93,27 +95,7 @@ func serveTasksFake(t *testing.T, fake *tasksFake) *client.Client {
 	mux := http.NewServeMux()
 	mux.Handle(hostv1connect.NewHostServiceHandler(fake))
 	mux.Handle(tasksv1connect.NewTaskServiceHandler(fake))
-	socket := filepath.Join(shortDir(t), "tasks.sock")
-	var lc net.ListenConfig
-	ln, err := lc.Listen(t.Context(), "unix", socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	var protos http.Protocols
-	protos.SetHTTP2(true)
-	protos.SetUnencryptedHTTP2(true)
-	srv := httptest.NewUnstartedServer(mux)
-	srv.Listener = ln
-	srv.Config.Protocols = &protos
-	srv.Start()
-	t.Cleanup(srv.Close)
-
-	c, err := client.Dial(t.Context(), socket, appParams())
-	if err != nil {
-		t.Fatalf("dial the scripted host: %v", err)
-	}
-	t.Cleanup(func() { c.Close() })
-	return c
+	return serveFakeOnUnixSocket(t, mux)
 }
 
 func TestTasksClientMethodsOverRealSocket(t *testing.T) {
@@ -124,10 +106,10 @@ func TestTasksClientMethodsOverRealSocket(t *testing.T) {
 
 	assertEmptyChannelPage(ctx, t, c)
 	seq := assertTaskPost(ctx, t, c, &client.PostChannelMessageInput{
-		CommandID: "post-1", TeamID: "chan-1", ToTaskID: "task-a", Text: "hello from the app",
+		CommandID: "post-1", TeamID: testChannelTeamID, ToTaskID: "task-a", Text: "hello from the app",
 	}, 1)
 	assertTaskPost(ctx, t, c, &client.PostChannelMessageInput{
-		CommandID: "post-1", TeamID: "chan-1", ToTaskID: "task-a", Text: "hello from the app",
+		CommandID: "post-1", TeamID: testChannelTeamID, ToTaskID: "task-a", Text: "hello from the app",
 	}, seq)
 	assertTaskPagedLine(ctx, t, c, "hello from the app", "task-a")
 	assertTaskCodedFailures(ctx, t, c)
@@ -136,7 +118,7 @@ func TestTasksClientMethodsOverRealSocket(t *testing.T) {
 // assertEmptyChannelPage pages a team with no lines.
 func assertEmptyChannelPage(ctx context.Context, t *testing.T, c *client.Client) {
 	t.Helper()
-	lines, err := c.PageChannel(ctx, &client.PageChannelInput{TeamID: "chan-1"})
+	lines, err := c.PageChannel(ctx, &client.PageChannelInput{TeamID: testChannelTeamID})
 	if err != nil {
 		t.Fatalf("PageChannel: %v", err)
 	}
@@ -158,7 +140,7 @@ func assertTaskPost(ctx context.Context, t *testing.T, c *client.Client, in *cli
 // assertTaskPagedLine pages the channel and expects one round-tripped line.
 func assertTaskPagedLine(ctx context.Context, t *testing.T, c *client.Client, text, toTask string) {
 	t.Helper()
-	lines, err := c.PageChannel(ctx, &client.PageChannelInput{TeamID: "chan-1"})
+	lines, err := c.PageChannel(ctx, &client.PageChannelInput{TeamID: testChannelTeamID})
 	if err != nil || len(lines) != 1 {
 		t.Fatalf("PageChannel = (%+v, %v), want the one posted line", lines, err)
 	}
@@ -175,7 +157,7 @@ func assertTaskCodedFailures(ctx context.Context, t *testing.T, c *client.Client
 		code  string
 	}{
 		{&client.PostChannelMessageInput{CommandID: "post-ended", TeamID: "ended", Text: "too late"}, "tasks.team_ended"},
-		{&client.PostChannelMessageInput{CommandID: "post-too-large", TeamID: "chan-1", Text: "x"}, "tasks.post_too_large"},
+		{&client.PostChannelMessageInput{CommandID: "post-too-large", TeamID: testChannelTeamID, Text: "x"}, "tasks.post_too_large"},
 	} {
 		if _, err := c.PostChannelMessage(ctx, tc.input); err == nil {
 			t.Fatalf("post %s succeeded, want a coded failure", tc.input.CommandID)
@@ -201,20 +183,20 @@ func TestTeamChannelTopicDecoders(t *testing.T) {
 // their content.
 func assertUnlockedDecode(t *testing.T) {
 	t.Helper()
-	taskUnlockedSnapshot := []byte(`{"lines":[{"channel_seq":3,"kind":"send","sender_kind":"user","recipient_task_id":"task-a","thread_root_task_id":"","source_seq":9,"created_at":1700000000000,"content":"hello"}]}`)
-	taskUnlockedLine := []byte(`{"channel_seq":3,"kind":"send","sender_kind":"user","recipient_task_id":"task-a","thread_root_task_id":"","source_seq":9,"created_at":1700000000000,"content":"hello"}`)
+	taskUnlockedSnapshot := []byte(`{"lines":[{"channel_seq":3,"kind":"send","sender_kind":"user","recipient_task_id":"task-a","thread_root_task_id":"","source_seq":9,"created_at":1700000000000,"content":"` + testChannelHello + `"}]}`)
+	taskUnlockedLine := []byte(`{"channel_seq":3,"kind":"send","sender_kind":"user","recipient_task_id":"task-a","thread_root_task_id":"","source_seq":9,"created_at":1700000000000,"content":"` + testChannelHello + `"}`)
 	snap, err := client.DecodeTeamChannelSnapshot(taskUnlockedSnapshot)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if snap.Sequence != 3 || len(snap.Lines) != 1 || snap.Lines[0].Content != "hello" {
+	if snap.Sequence != 3 || len(snap.Lines) != 1 || snap.Lines[0].Content != testChannelHello {
 		t.Fatalf("snapshot = %+v, want the line with its content at sequence 3", snap)
 	}
 	ev, err := client.DecodeTeamChannelEvent(client.EventTeamChannelAppended, taskUnlockedLine)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ev.Locked || ev.Line.Content != "hello" || ev.Line.CreatedAt.IsZero() {
+	if ev.Locked || ev.Line.Content != testChannelHello || ev.Line.CreatedAt.IsZero() {
 		t.Fatalf("event = %+v, want the unlocked line", ev)
 	}
 }
@@ -240,15 +222,18 @@ func assertLockedDecode(t *testing.T) {
 	}
 }
 
-// assertDecodeRejections checks the unknown event types and non-object
-// payloads fail typed.
+// assertDecodeRejections checks the unknown event types, negative sequences,
+// and non-object payloads fail typed.
 func assertDecodeRejections(t *testing.T) {
 	t.Helper()
-	taskUnlockedSnapshot := []byte(`{"lines":[{"channel_seq":3,"kind":"send","sender_kind":"user","recipient_task_id":"task-a","thread_root_task_id":"","source_seq":9,"created_at":1700000000000,"content":"hello"}]}`)
+	taskUnlockedSnapshot := []byte(`{"lines":[{"channel_seq":3,"kind":"send","sender_kind":"user","recipient_task_id":"task-a","thread_root_task_id":"","source_seq":9,"created_at":1700000000000,"content":"` + testChannelHello + `"}]}`)
 	if _, err := client.DecodeTeamChannelEvent("something.else", taskUnlockedSnapshot); err == nil {
 		t.Fatal("an unknown event type decoded")
 	}
 	if _, err := client.DecodeTeamChannelEvent(client.EventTeamChannelAppended, []byte("null")); err == nil {
 		t.Fatal("a null payload decoded")
+	}
+	if _, err := client.DecodeTeamChannelSnapshot([]byte(`{"lines":[{"channel_seq":-1,"kind":"send","sender_kind":"user","source_seq":1,"created_at":1700000000000}]}`)); err == nil {
+		t.Fatal("a negative channel_seq snapshot decoded")
 	}
 }

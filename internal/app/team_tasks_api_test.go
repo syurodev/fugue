@@ -22,6 +22,12 @@ import (
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
+const (
+	testPostMentionCmd  = "post-mention"
+	testPostMentionText = "focus on tests"
+	testToolShell       = "shell"
+)
+
 // sentTurn records one delivered turn with its origin.
 type sentTurn struct {
 	sessionID string
@@ -110,17 +116,17 @@ func TestUserPostRoutesByMentionAndThread(t *testing.T) {
 	svc := tasksServiceWith(t, f, rec)
 
 	// to_task_id routes to that agent: origin user, immediate.
-	mentionSeq := f.postAndCheck(t, svc, rec, PostChannelCommand{
-		CommandID: "post-mention", TeamID: f.teamID, ToTaskID: f.memAID, Text: "focus on tests",
+	mentionSeq := f.postAndCheck(t, svc, rec, &PostChannelCommand{
+		CommandID: testPostMentionCmd, TeamID: f.teamID, ToTaskID: f.memAID, Text: testPostMentionText,
 	}, "chan-a")
 
 	// The thread default routes to the task's agent.
-	f.postAndCheck(t, svc, rec, PostChannelCommand{
+	f.postAndCheck(t, svc, rec, &PostChannelCommand{
 		CommandID: "post-thread", TeamID: f.teamID, ThreadTaskID: f.memAID, Text: "thread reply",
 	}, "chan-a")
 
 	// The general channel routes to the lead.
-	f.postAndCheck(t, svc, rec, PostChannelCommand{
+	f.postAndCheck(t, svc, rec, &PostChannelCommand{
 		CommandID: "post-general", TeamID: f.teamID, Text: "how is it going",
 	}, f.session.ID)
 
@@ -128,7 +134,7 @@ func TestUserPostRoutesByMentionAndThread(t *testing.T) {
 	f.assertDelegatorMentionRidesNextDigest(t)
 
 	// Posting to a task outside the team is rejected with the typed code.
-	if _, err := svc.PostChannelMessage(t.Context(), PostChannelCommand{
+	if _, err := svc.PostChannelMessage(t.Context(), &PostChannelCommand{
 		CommandID: "post-outside", TeamID: f.teamID, ToTaskID: "chan-other-o", Text: "hi",
 	}); errcode.CodeOf(err) != errcode.TasksTaskNotFound {
 		t.Fatalf("post outside the team code = %v, want tasks.task_not_found", errcode.CodeOf(err))
@@ -136,7 +142,7 @@ func TestUserPostRoutesByMentionAndThread(t *testing.T) {
 
 	// An ended team rejects the post with the typed code.
 	f.endTeam(t)
-	if _, err := svc.PostChannelMessage(t.Context(), PostChannelCommand{
+	if _, err := svc.PostChannelMessage(t.Context(), &PostChannelCommand{
 		CommandID: "post-ended", TeamID: f.teamID, ToTaskID: f.memAID, Text: "too late",
 	}); errcode.CodeOf(err) != errcode.TasksTeamEnded {
 		t.Fatalf("post to an ended team code = %v, want tasks.team_ended", errcode.CodeOf(err))
@@ -145,8 +151,8 @@ func TestUserPostRoutesByMentionAndThread(t *testing.T) {
 	// A replayed command_id returns the cached line without posting again,
 	// and a replayed command_id with other arguments fails typed.
 	before := f.userPostLine(t)
-	replayed, err := svc.PostChannelMessage(t.Context(), PostChannelCommand{
-		CommandID: "post-mention", TeamID: f.teamID, ToTaskID: f.memAID, Text: "focus on tests",
+	replayed, err := svc.PostChannelMessage(t.Context(), &PostChannelCommand{
+		CommandID: testPostMentionCmd, TeamID: f.teamID, ToTaskID: f.memAID, Text: testPostMentionText,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -154,8 +160,8 @@ func TestUserPostRoutesByMentionAndThread(t *testing.T) {
 	if replayed.ChannelSeq != mentionSeq || f.userPostLine(t).ChannelSeq != before.ChannelSeq {
 		t.Fatalf("replay posted again: %d vs #%d (top line #%d)", replayed.ChannelSeq, mentionSeq, before.ChannelSeq)
 	}
-	if _, err := svc.PostChannelMessage(t.Context(), PostChannelCommand{
-		CommandID: "post-mention", TeamID: f.teamID, ToTaskID: f.memBID, Text: "focus on tests",
+	if _, err := svc.PostChannelMessage(t.Context(), &PostChannelCommand{
+		CommandID: testPostMentionCmd, TeamID: f.teamID, ToTaskID: f.memBID, Text: testPostMentionText,
 	}); errcode.CodeOf(err) != errcode.InvalidArgument {
 		t.Fatalf("replayed command_id with other arguments code = %v, want invalid_argument", errcode.CodeOf(err))
 	}
@@ -163,7 +169,7 @@ func TestUserPostRoutesByMentionAndThread(t *testing.T) {
 
 // postAndCheck posts one command, asserts the routed delivery, and returns
 // the new line's `#n`.
-func (f *channelFixture) postAndCheck(t *testing.T, svc *TasksService, rec *originRecordingSessions, cmd PostChannelCommand, wantSession string) int64 {
+func (f *channelFixture) postAndCheck(t *testing.T, svc *TasksService, rec *originRecordingSessions, cmd *PostChannelCommand, wantSession string) int64 {
 	t.Helper()
 	res, err := svc.PostChannelMessage(t.Context(), cmd)
 	if err != nil {
@@ -241,8 +247,8 @@ func TestApprovalLineCarriesOnlyAReference(t *testing.T) {
 	t.Parallel()
 	x := newApprovalLineFixture(t)
 
-	requested := x.assertRequestedReference(t)
-	x.assertResolvedReference(t, requested)
+	x.assertRequestedReference(t)
+	x.assertResolvedReference(t)
 }
 
 // approvalLineFixture holds the approval-line test state: the team fixture,
@@ -277,10 +283,10 @@ func newApprovalLineFixture(t *testing.T) *approvalLineFixture {
 		OperationID: opID,
 		Kind:        interaction.KindConfirm,
 		Summary:     "SECRET-SUMMARY run the tool rm -rf",
-		Risk:        "write",
+		Risk:        testRiskWrite,
 		Offers:      []interaction.Outcome{interaction.OutcomeAllowedOnce},
 		Binding: interaction.Binding{
-			SessionID: f.aBinding.SessionID, ToolName: "shell",
+			SessionID: f.aBinding.SessionID, ToolName: testToolShell,
 			InvocationID: "inv-1", AttemptID: "att-1", CheckGeneration: 1,
 		},
 	})
@@ -292,7 +298,7 @@ func newApprovalLineFixture(t *testing.T) *approvalLineFixture {
 
 // assertRequestedReference checks the requested reference line, its event
 // payload and its topic event.
-func (x *approvalLineFixture) assertRequestedReference(t *testing.T) channelLineWire {
+func (x *approvalLineFixture) assertRequestedReference(t *testing.T) {
 	t.Helper()
 	testutil.Poll(t, "the approval reference line", func() bool {
 		return len(x.f.approvalLines(t)) == 1
@@ -306,21 +312,20 @@ func (x *approvalLineFixture) assertRequestedReference(t *testing.T) channelLine
 	if jsonErr := json.Unmarshal(raw, &ref); jsonErr != nil {
 		t.Fatal(jsonErr)
 	}
-	if ref.RequestID != x.ticket.RequestID || ref.Tool != "shell" || ref.Outcome != "" {
+	if ref.RequestID != x.ticket.RequestID || ref.Tool != testToolShell || ref.Outcome != "" {
 		t.Fatalf("approval reference = %+v, want the request and the tool only", ref)
 	}
 	assertNoApprovalContent(t, raw)
 	requested := readChannelEvent(t, x.sub, line.ChannelSeq)
 	assertNoApprovalContent(t, []byte(requested.Content))
-	if !strings.Contains(requested.Content, x.ticket.RequestID) || !strings.Contains(requested.Content, "shell") {
+	if !strings.Contains(requested.Content, x.ticket.RequestID) || !strings.Contains(requested.Content, testToolShell) {
 		t.Fatalf("requested topic event = %+v, want the request and the tool in the reference", requested)
 	}
-	return requested
 }
 
 // assertResolvedReference answers the approval and checks the resolved
 // reference line, event and topic event.
-func (x *approvalLineFixture) assertResolvedReference(t *testing.T, requested channelLineWire) {
+func (x *approvalLineFixture) assertResolvedReference(t *testing.T) {
 	t.Helper()
 	if _, err := x.f.rt.AnswerInteraction(t.Context(), &AnswerInteractionCommand{
 		CommandID: "approve-1", Principal: testAppPrincipal,
@@ -351,19 +356,19 @@ func (x *approvalLineFixture) assertResolvedReference(t *testing.T, requested ch
 	if !strings.Contains(resolvedEvent.Content, x.ticket.RequestID) || !strings.Contains(resolvedEvent.Content, string(interaction.OutcomeDenied)) {
 		t.Fatalf("resolved topic event = %+v, want the reference and the denied outcome", resolvedEvent)
 	}
-	_ = requested
 }
 
 // readChannelEvent waits for the topic event of one line and returns its
 // wire shape.
 func readChannelEvent(t *testing.T, sub *Subscription, seq int64) channelLineWire {
 	t.Helper()
+	wantSeq := mustChannelEventSeq(t, seq)
 	for {
 		ev, ok := sub.Next(t.Context())
 		if !ok {
 			t.Fatal("the topic stream ended before the expected event")
 		}
-		if ev.Type != "channel.appended" || ev.Seq != uint64(seq) {
+		if ev.Type != channelEventName || ev.Seq != wantSeq {
 			continue
 		}
 		var wire channelLineWire
@@ -378,9 +383,63 @@ func readChannelEvent(t *testing.T, sub *Subscription, seq int64) channelLineWir
 // instead of the reference (interaction §7, VR-05).
 func assertNoApprovalContent(t *testing.T, payload []byte) {
 	t.Helper()
-	for _, secret := range []string{"SECRET-SUMMARY", "SECRET-DETAIL", "rm -rf"} {
-		if strings.Contains(string(payload), secret) {
-			t.Fatalf("the approval event leaked %q", secret)
+	for _, forbidden := range []string{"SECRET-SUMMARY", "SECRET-DETAIL", "rm -rf"} {
+		if strings.Contains(string(payload), forbidden) {
+			t.Fatalf("the approval event leaked %q", forbidden)
+		}
+	}
+}
+
+func TestApprovalLineIgnoresUnrelayedQuestions(t *testing.T) {
+	t.Parallel()
+	f := newChannelFixture(t)
+	opID, err := interaction.NativeOperationKey(f.teamID, "card", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.rt.interactions.Ensure(&interaction.Spec{
+		OperationID: opID,
+		Kind:        interaction.KindQuestion,
+		Summary:     "team card",
+		Questions:   []interaction.Question{{ID: "q", Question: "proceed?", Header: "card"}},
+		Binding:     interaction.Binding{SessionID: f.session.ID, InvocationID: f.teamID, AttemptID: "card", CheckGeneration: 1, ToolName: teamProposeToolName},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.approvalLines(t); len(got) != 0 {
+		t.Fatalf("unrelayed question emitted approval lines: %+v", got)
+	}
+	if _, seqErr := channelEventSeq(-1); seqErr == nil {
+		t.Fatal("channelEventSeq(-1) succeeded, want typed error")
+	}
+}
+
+func TestChannelContentExtractsAllKinds(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		kind string
+		raw  string
+		want string
+	}{
+		{vendorstore.ChannelKindNote, `{"note":"keep tests green"}`, "keep tests green"},
+		{vendorstore.ChannelKindQuestion, `{"to":"lead","question":"which port?"}`, "which port?"},
+		{vendorstore.ChannelKindAnswer, `{"answer":"8080","answered_by":"lead"}`, "8080"},
+		{vendorstore.ChannelKindResult, `{"status":"complete","summary":"done"}`, "done"},
+		{vendorstore.ChannelKindStall, `{"task_id":"t1","waiting_on":"user","silent_seconds":30,"team_wide":true}`, "waiting_on=user"},
+		{vendorstore.ChannelKindDecision, `{"role_edits":[{"name":"r","vendor":"claude","permission":"read"}]}`, "amended"},
+		{vendorstore.ChannelKindSend, `{"to_task_id":"t1","message":"ping"}`, "ping"},
+		{"unknown", "raw-fallback", "raw-fallback"},
+	} {
+		row := &vendorstore.TeamChannelMessage{Kind: tc.kind, ThreadRoot: "t1"}
+		parts := channelPayloadParts(tc.kind, []byte(tc.raw), "lbl")
+		if len(parts) == 0 {
+			t.Fatalf("kind %s parts empty", tc.kind)
+		}
+		if got := channelContentText(row, nil, []byte(tc.raw)); !strings.Contains(got, tc.want) {
+			t.Fatalf("kind %s content = %q, want substring %q", tc.kind, got, tc.want)
+		}
+		if bad := channelPayloadParts(tc.kind, []byte("{bad"), "lbl"); len(bad) == 0 {
+			t.Fatalf("kind %s malformed fallback empty", tc.kind)
 		}
 	}
 }
