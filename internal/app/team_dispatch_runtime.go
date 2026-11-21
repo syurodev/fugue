@@ -7,7 +7,6 @@ import (
 	"github.com/syurodev/fugue/internal/gitops"
 	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
-	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/snapshot"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
@@ -17,7 +16,7 @@ import (
 // onVaultLockState mirrors the vault state into the services that gate on it,
 // and on an unlock starts the queued tasks and delivers the mail the lock
 // held (Q-123).
-func (hp *HostProcess) onVaultLockState(base context.Context, owner *interaction.Owner, snap vault.Snapshot) {
+func (hp *HostProcess) onVaultLockState(owner *interaction.Owner, snap vault.Snapshot) {
 	unlocked := snap.State == vault.StateUnlocked
 	owner.SetVaultLocked(!unlocked)
 	if !unlocked {
@@ -27,18 +26,18 @@ func (hp *HostProcess) onVaultLockState(base context.Context, owner *interaction
 		hp.rt.teamBudgets.Notify()
 	}
 	if hp.rt.teamProposals != nil || hp.rt.teamTasks != nil {
-		hp.recoverOnUnlockAsync(base)
+		hp.recoverOnUnlockAsync()
 	}
 	if hp.rt.teamDispatch != nil {
-		hp.dispatchAllAsync(base)
+		hp.dispatchAllAsync()
 	}
 	if hp.rt.teamWake != nil {
 		hp.rt.teamWake.Notify()
 	}
 }
 
-func (hp *HostProcess) recoverOnUnlockAsync(base context.Context) {
-	supervise.Go(base, "team-unlock-recovery", func(ctx context.Context) error {
+func (hp *HostProcess) recoverOnUnlockAsync() {
+	hp.rt.goTask("team-unlock-recovery", func(ctx context.Context) error {
 		if hp.rt.teamProposals != nil {
 			if err := hp.rt.teamProposals.RebuildPendingProposalCards(ctx); err != nil && ctx.Err() == nil {
 				slog.WarnContext(ctx, "rebuilding pending proposal cards failed", "error_code", string(errcode.CodeOf(err)))
@@ -75,16 +74,16 @@ func locateTeamGit(ctx context.Context, deps *HostDeps) *gitops.Manager {
 // dispatchTeamAsync runs one dispatch of a team on the host's lifetime; the
 // decision that activated the team never waits for sessions to spawn. A failed
 // run is logged by its code only and retried by the next trigger.
-func (hp *HostProcess) dispatchTeamAsync(base context.Context, teamID string) {
-	supervise.Go(base, "team-dispatch-"+teamID, func(ctx context.Context) error {
+func (hp *HostProcess) dispatchTeamAsync(teamID string) {
+	hp.rt.goTask("team-dispatch-"+teamID, func(ctx context.Context) error {
 		hp.logDispatch(ctx, hp.rt.teamDispatch.Dispatch(ctx, teamID))
 		return nil
 	})
 }
 
 // dispatchAllAsync dispatches every active team, as the vault unlock does.
-func (hp *HostProcess) dispatchAllAsync(base context.Context) {
-	supervise.Go(base, "team-dispatch-all", func(ctx context.Context) error {
+func (hp *HostProcess) dispatchAllAsync() {
+	hp.rt.goTask("team-dispatch-all", func(ctx context.Context) error {
 		hp.logDispatch(ctx, hp.rt.teamDispatch.DispatchAll(ctx))
 		return nil
 	})
@@ -112,13 +111,13 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 	hp.rt.teamWake = newTeamWake(&teamWakeDeps{
 		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Roots: hp.rt.workspaces.domain,
 		Clock: deps.Clock, IDs: deps.IDs, Vault: v, Hub: hp.rt.hub, DataDir: deps.DataDir,
-		RecoverLead: recoverLead,
+		RecoverLead: recoverLead, GoTask: hp.rt.goTask,
 	})
 	hp.rt.teamWake.Start(base)
 	hp.rt.teamBudgets = newTeamBudgets(&teamBudgetsDeps{
 		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Interactions: hp.rt.interactions,
 		TeamsConfig: teamsCfg, Vault: v, Clock: deps.Clock, IDs: deps.IDs, Wake: hp.rt.teamWake,
-		OnTeamResume: func(teamID string) { hp.dispatchTeamAsync(base, teamID) },
+		OnTeamResume: func(teamID string) { hp.dispatchTeamAsync(teamID) },
 	})
 	if hp.rt.interactions != nil {
 		hp.rt.interactions.SetTeamDeadlineResolver(hp.rt.teamBudgets)
@@ -137,7 +136,7 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Admit: admit,
 		Roots: hp.rt.workspaces.domain, Git: locateTeamGit(ctx, deps), DataDir: deps.DataDir, IDs: deps.IDs, Vault: v,
 		Wake: hp.rt.teamWake, Clock: deps.Clock, TeamsConfig: teamsCfg, Budgets: hp.rt.teamBudgets,
-		Disk: resolveDiskSpace(deps.DiskSpace),
+		Disk: resolveDiskSpace(deps.DiskSpace), GoTask: hp.rt.goTask,
 	})
 	hp.rt.teamDispatch.Start(base)
 	if hp.rt.teamTasks != nil {
@@ -147,7 +146,7 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 	hp.rt.teamProposals.SetOnTimerArmed(func() { hp.rt.teamBudgets.Notify() })
 	hp.rt.teamProposals.SetOnTeamActive(func(teamID string) {
 		hp.rt.teamBudgets.Notify()
-		hp.dispatchTeamAsync(base, teamID)
+		hp.dispatchTeamAsync(teamID)
 	})
 	hp.rt.teamProposals.SetOnMailbox(func() { hp.rt.teamWake.Notify() })
 }

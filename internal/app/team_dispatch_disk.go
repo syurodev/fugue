@@ -101,6 +101,10 @@ func (d *teamDispatcher) setDiskPaused(paused bool) {
 // resumes dispatching when space is free again; the fake clock drives the
 // timer, so tests never sleep.
 func (d *teamDispatcher) Start(base context.Context) {
+	if d.deps.GoTask != nil {
+		d.deps.GoTask("team-dispatch-disk-watch", d.diskLoop)
+		return
+	}
 	supervise.Go(base, "team-dispatch-disk-watch", d.diskLoop)
 }
 

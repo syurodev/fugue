@@ -70,6 +70,7 @@ type teamWakeDeps struct {
 	DataDir string
 	// RecoverLead retries OnSessionResumed when a resumed lead task stays unknown.
 	RecoverLead func(context.Context, string) error
+	GoTask      func(string, func(context.Context) error) *supervise.Task
 }
 
 // teamWake delivers the team mailbox. One run at a time: the mutex serializes
@@ -117,6 +118,9 @@ func (w *teamWake) Notify() {
 // Start runs the pump on the host's lifetime. A failed pass is logged by its
 // code only and retried by the next trigger.
 func (w *teamWake) Start(base context.Context) *supervise.Task {
+	if w.deps.GoTask != nil {
+		return w.deps.GoTask("team-wake", w.loop)
+	}
 	return supervise.Go(base, "team-wake", w.loop)
 }
 
