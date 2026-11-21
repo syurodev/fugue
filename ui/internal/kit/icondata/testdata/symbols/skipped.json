@@ -1,0 +1,159 @@
+{
+  "skipped": [
+    {
+      "icon": "cmake",
+      "path": "files/cmake.svg",
+      "reason": "uses more than one color (#4ade80, #60a5fa, #f87171)"
+    },
+    {
+      "icon": "csv",
+      "path": "files/csv.svg",
+      "reason": "uses a mask, filter or use element"
+    },
+    {
+      "icon": "dart",
+      "path": "files/dart.svg",
+      "reason": "uses more than one color (#075985, #38bdf8)"
+    },
+    {
+      "icon": "editorconfig",
+      "path": "files/editorconfig.svg",
+      "reason": "uses more than one color (#475569, #bfdbfe, #fafafa, #fecaca)"
+    },
+    {
+      "icon": "eslint",
+      "path": "files/eslint.svg",
+      "reason": "uses more than one color (#4f46e5, #a5b4fc)"
+    },
+    {
+      "icon": "folder-assets",
+      "path": "folders/folder-assets.svg",
+      "reason": "uses more than one color (#0d9488, #22d3ee, #2563eb, #64748b, #c084fc)"
+    },
+    {
+      "icon": "folder-build",
+      "path": "folders/folder-build.svg",
+      "reason": "uses more than one color (#64748b, #c084fc)"
+    },
+    {
+      "icon": "folder-components",
+      "path": "folders/folder-components.svg",
+      "reason": "uses more than one color (#2563eb, #64748b)"
+    },
+    {
+      "icon": "folder-config",
+      "path": "folders/folder-config.svg",
+      "reason": "uses more than one color (#0ea5e9, #64748b)"
+    },
+    {
+      "icon": "folder-github",
+      "path": "folders/folder-github.svg",
+      "reason": "uses more than one color (#64748b, #a1a1aa)"
+    },
+    {
+      "icon": "folder-go",
+      "path": "folders/folder-go.svg",
+      "reason": "uses more than one color (#60a5fa, #64748b)"
+    },
+    {
+      "icon": "folder-hooks",
+      "path": "folders/folder-hooks.svg",
+      "reason": "uses more than one color (#64748b, #8b5cf6)"
+    },
+    {
+      "icon": "folder-node-modules",
+      "path": "folders/folder-node-modules.svg",
+      "reason": "uses more than one color (#2dd4bf, #64748b)"
+    },
+    {
+      "icon": "folder-orange-code",
+      "path": "folders/folder-orange-code.svg",
+      "reason": "uses more than one color (#64748b, #ea580c)"
+    },
+    {
+      "icon": "folder-purple-code",
+      "path": "folders/folder-purple-code.svg",
+      "reason": "uses more than one color (#64748b, #8b5cf6)"
+    },
+    {
+      "icon": "folder-purple-outline",
+      "path": "folders/folder-purple-outline.svg",
+      "reason": "uses more than one color (#64748b, #8b5cf6)"
+    },
+    {
+      "icon": "folder-red",
+      "path": "folders/folder-red.svg",
+      "reason": "uses more than one color (#64748b, #f87171)"
+    },
+    {
+      "icon": "folder-red-code",
+      "path": "folders/folder-red-code.svg",
+      "reason": "uses more than one color (#64748b, #f87171)"
+    },
+    {
+      "icon": "folder-utils",
+      "path": "folders/folder-utils.svg",
+      "reason": "uses more than one color (#64748b, #c084fc)"
+    },
+    {
+      "icon": "folder-vscode",
+      "path": "folders/folder-vscode.svg",
+      "reason": "uses a gradient"
+    },
+    {
+      "icon": "gif",
+      "path": "files/gif.svg",
+      "reason": "uses more than one stroke style"
+    },
+    {
+      "icon": "haskell",
+      "path": "files/haskell.svg",
+      "reason": "uses more than one color (#a855f7, #c084fc)"
+    },
+    {
+      "icon": "java",
+      "path": "files/java.svg",
+      "reason": "uses a mask, filter or use element"
+    },
+    {
+      "icon": "prettier",
+      "path": "files/prettier.svg",
+      "reason": "uses more than one color (#2dd4bf, #c084fc, #f87171, #fbbf24)"
+    },
+    {
+      "icon": "r",
+      "path": "files/r.svg",
+      "reason": "uses more than one color (#2563eb, #71717a)"
+    },
+    {
+      "icon": "ruby",
+      "path": "files/ruby.svg",
+      "reason": "uses a mask, filter or use element"
+    },
+    {
+      "icon": "scala",
+      "path": "files/scala.svg",
+      "reason": "uses more than one color (#7f1d1d, #f87171)"
+    },
+    {
+      "icon": "svelte",
+      "path": "files/svelte.svg",
+      "reason": "uses a mask, filter or use element"
+    },
+    {
+      "icon": "svg",
+      "path": "files/svg.svg",
+      "reason": "uses more than one color (#52525b, #f472b6)"
+    },
+    {
+      "icon": "tsconfig",
+      "path": "files/tsconfig.svg",
+      "reason": "uses more than one color (#2563eb, #64748b)"
+    },
+    {
+      "icon": "xml",
+      "path": "files/xml.svg",
+      "reason": "uses a mask, filter or use element"
+    }
+  ]
+}

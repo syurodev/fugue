@@ -123,6 +123,13 @@ type Env struct {
 	iconStrokes map[iconKey]clip.Op
 	// iconPaths caches the parsed path data per icon.
 	iconPaths map[IconName][]iconSubpath
+	// symbolPathCache caches parsed Symbols fill subpaths per icon name.
+	symbolPathCache map[string][]iconSubpath
+	// symbolEvenOddCache caches parsed Symbols even-odd fill subpaths per
+	// icon name, with direction reversed for non-zero winding.
+	symbolEvenOddCache map[string][]iconSubpath
+	// symbolStrokeCache caches stroked Symbols paths per (name, dp size).
+	symbolStrokeCache map[symbolKey]clip.Op
 }
 
 // iconKey identifies one cached stroke: an icon at a dp size. The key is dp,

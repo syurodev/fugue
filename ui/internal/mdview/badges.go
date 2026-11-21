@@ -12,9 +12,11 @@ import (
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/unit"
 	"gioui.org/widget"
 
 	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/kit/icondata"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
@@ -144,20 +146,33 @@ func drawBadgeContent(env *kit.Env, gtx *layout.Context, spec *BadgeSpec) layout
 	ch := env.Th.Chrome()
 	deleted := spec.Kind == BadgeDeleted
 	pathText, lineSuffix := splitFileAndLine(&spec.File)
-	icon := FileIcon(spec.File.Path)
+	var (
+		name     string
+		icon     icondata.FileIcon
+		iconSize unit.Dp
+	)
 	if spec.Kind == BadgeFolder {
-		icon = kit.IconFolder
+		name, icon = kit.FolderIconData(spec.File.Path)
+	} else {
+		name, icon = kit.FileIconData(spec.File.Path)
 	}
-	iconCol, pathCol := ch.IconMuted, ch.Fg
+	iconCol := env.Th.FileColor(theme.FileColorName(icon.Color))
+	pathCol := ch.Fg
 	if deleted {
-		iconCol, pathCol = ch.FgDisabled, ch.FgDisabled
+		iconCol = ch.FgDisabled
+		pathCol = ch.FgDisabled
 	}
+	iconSize = theme.IconSM
 	rec := op.Record(gtx.Ops)
 	inner := *gtx
 	inner.Constraints.Min = image.Point{}
 	pad := layout.Inset{Left: theme.SpaceSM, Right: theme.SpaceSM, Top: theme.SpaceXXS, Bottom: theme.SpaceXXS}
 	dims := pad.Layout(inner, func(gtx layout.Context) layout.Dimensions {
-		return layoutBadgeRow(env, &gtx, icon, iconCol, pathText, pathCol, lineSuffix, ch.FgSubtle)
+		return layoutBadgeRow(env, &gtx, func(gtx *layout.Context) layout.Dimensions {
+			d, err := env.DrawSymbol(gtx, name, &icon, iconSize, iconCol)
+			logMDViewErr(err)
+			return d
+		}, iconSize, pathText, pathCol, lineSuffix, ch.FgSubtle)
 	})
 	call := rec.Stop()
 	PaintBadgeChrome(env.Th, gtx, image.Rectangle{Max: dims.Size}, deleted)
@@ -184,7 +199,7 @@ func splitFileAndLine(ref *FileRef) (pathText, lineSuffix string) {
 
 func layoutBadgeRow(
 	env *kit.Env, gtx *layout.Context,
-	icon kit.IconName, iconCol color.NRGBA,
+	drawIcon func(gtx *layout.Context) layout.Dimensions, iconSize unit.Dp,
 	label string, labelCol color.NRGBA,
 	subtle string, subtleCol color.NRGBA,
 ) layout.Dimensions {
@@ -192,12 +207,11 @@ func layoutBadgeRow(
 	if subtle != "" {
 		suffixW = kit.MeasureLabel(env, gtx, theme.TypeCodeSmall(), subtle).X
 	}
-	labelMaxW := max(gtx.Constraints.Max.X-gtx.Dp(theme.IconXS)-gtx.Dp(theme.SpaceXS)-suffixW, 0)
+	labelMaxW := max(gtx.Constraints.Max.X-gtx.Dp(iconSize)-gtx.Dp(theme.SpaceXS)-suffixW, 0)
 	kids := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := gtx
-			d, err := env.Icon(&l, icon, theme.IconXS, iconCol)
-			logMDViewErr(err)
+			d := drawIcon(&l)
 			return d
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -243,7 +257,11 @@ func DrawGitRefChip(
 
 func drawCommitRef(env *kit.Env, gtx *layout.Context, ref GitRef) layout.Dimensions {
 	ch := env.Th.Chrome()
-	dims := layoutBadgeRow(env, gtx, kit.IconGitCommit, ch.IconMuted, ref.Text, ch.Fg, "", ch.FgSubtle)
+	dims := layoutBadgeRow(env, gtx, func(gtx *layout.Context) layout.Dimensions {
+		d, err := env.Icon(gtx, kit.IconGitCommit, theme.IconXS, ch.IconMuted)
+		logMDViewErr(err)
+		return d
+	}, theme.IconXS, ref.Text, ch.Fg, "", ch.FgSubtle)
 	thin := max(gtx.Dp(theme.Hairline), 1)
 	y := max(dims.Size.Y-thin, 0)
 	for dx := 0; dx < dims.Size.X; dx += 3 * thin {
@@ -263,7 +281,11 @@ func drawGitPillRef(env *kit.Env, gtx *layout.Context, ref GitRef) layout.Dimens
 	inner.Constraints.Min = image.Point{}
 	pad := layout.Inset{Left: theme.SpaceSM, Right: theme.SpaceSM, Top: theme.SpaceXXS, Bottom: theme.SpaceXXS}
 	dims := pad.Layout(inner, func(gtx layout.Context) layout.Dimensions {
-		return layoutBadgeRow(env, &gtx, icon, ch.IconMuted, ref.Text, ch.Fg, "", ch.FgSubtle)
+		return layoutBadgeRow(env, &gtx, func(gtx *layout.Context) layout.Dimensions {
+			d, err := env.Icon(gtx, icon, theme.IconXS, ch.IconMuted)
+			logMDViewErr(err)
+			return d
+		}, theme.IconXS, ref.Text, ch.Fg, "", ch.FgSubtle)
 	})
 	call := rec.Stop()
 	PaintBadgeChrome(env.Th, gtx, image.Rectangle{Max: dims.Size}, false)
