@@ -156,16 +156,15 @@ func (g *gateDiffFixture) writeWorktreeFile(t *testing.T, rel, content string) {
 	}
 }
 
-func (g *gateDiffFixture) callDone(t *testing.T) (FugueToolResult, error) {
-	t.Helper()
-	return g.tools.Call(t.Context(), g.binding, taskDoneToolName, []byte(`{"summary":"done","status":"succeeded"}`))
+func (g *gateDiffFixture) callDone(ctx context.Context) (FugueToolResult, error) {
+	return g.tools.Call(ctx, g.binding, taskDoneToolName, []byte(`{"summary":"done","status":"succeeded"}`))
 }
 
 func (g *gateDiffFixture) startDoneAsync(t *testing.T) <-chan error {
 	t.Helper()
 	doneCh := make(chan error, 1)
-	supervise.Go(t.Context(), "gate-test-done", func(_ context.Context) error {
-		res, callErr := g.callDone(t)
+	supervise.Go(t.Context(), "gate-test-done", func(ctx context.Context) error {
+		res, callErr := g.callDone(ctx)
 		if callErr == nil && res.IsError {
 			callErr = fmt.Errorf("%w: %s", errGateTestTool, res.Text)
 		}
@@ -244,7 +243,7 @@ func TestWriteScopeBouncesOnceThenFails(t *testing.T) {
 	g := newGateDiffFixture(t, []string{"allowed/**"}, nil, vendorstore.ApprovalAuto)
 
 	g.writeWorktreeFile(t, "outside/bad.txt", "nope\n")
-	if res, err := g.callDone(t); err != nil || res.IsError {
+	if res, err := g.callDone(t.Context()); err != nil || res.IsError {
 		t.Fatalf("first done = (%+v, %v)", res, err)
 	}
 	if rec := g.taskRecord(t); rec.State != vendorstore.TaskStateRunning || rec.ScopeBounces != 1 {
@@ -256,7 +255,7 @@ func TestWriteScopeBouncesOnceThenFails(t *testing.T) {
 	}
 
 	g.writeWorktreeFile(t, "outside/bad2.txt", "still nope\n")
-	if res, err := g.callDone(t); err != nil || res.IsError {
+	if res, err := g.callDone(t.Context()); err != nil || res.IsError {
 		t.Fatalf("second done = (%+v, %v)", res, err)
 	}
 	if rec := g.taskRecord(t); rec.State != vendorstore.TaskStateFailed || rec.FailureCode != "scope" {
@@ -270,7 +269,7 @@ func assertInScopePasses(t *testing.T) {
 	t.Helper()
 	g2 := newGateDiffFixture(t, []string{"allowed/**"}, nil, vendorstore.ApprovalAuto)
 	g2.writeWorktreeFile(t, "allowed/ok.go", "package allowed\n")
-	if res, doneErr := g2.callDone(t); doneErr != nil || res.IsError {
+	if res, doneErr := g2.callDone(t.Context()); doneErr != nil || res.IsError {
 		t.Fatalf("in-scope done = (%+v, %v)", res, doneErr)
 	}
 	if rec := g2.taskRecord(t); rec.State != vendorstore.TaskStateReview {
