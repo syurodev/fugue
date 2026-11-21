@@ -44,6 +44,11 @@ type CodeBlockProps struct {
 	Truncated       bool
 	MaxLines        int
 	ShowLineNumbers bool
+	// HighlightLine and HighlightEndLine mark a 1-based inclusive row range
+	// (of the displayed code rows, not diff lines) the file viewer tints
+	// behind the text (F10.4e); zero on both disables the tint.
+	HighlightLine    int
+	HighlightEndLine int
 }
 
 // CodeBlockResult reports user actions triggered on a code block this frame.

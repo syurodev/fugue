@@ -346,6 +346,9 @@ func (v *view) drawCodeBody(
 		hunks := collectDiffHunks(diffLines, flows, visCount, pad, bodyTop, bodyW, st.ScrollY, lineH, gtx.Dp(theme.SpaceXXS))
 		v.paintDiffHunks(gtx, hunks, bodyTop, viewH, ConcentricRadius(gtx, theme.RadiusLG, pad))
 	}
+	if hl := collectHighlightRect(p, flows, visCount, pad, bodyTop, st.ScrollY, lineH); hl != nil {
+		paint.FillShape(gtx.Ops, v.th.Chrome().SelectedWash, clip.UniformRRect(*hl, max(ConcentricRadius(gtx, theme.RadiusLG, pad)/2, 2)).Op(gtx.Ops))
+	}
 	y := bodyTop - st.ScrollY
 	codeX := pad + gutterW + markerW
 
@@ -368,6 +371,49 @@ func (v *view) drawCodeBody(
 	clipped.Pop()
 }
 
+// collectHighlightRect builds the tinted rectangle behind the requested row
+// range (F10.4e), or nil when no range is set or it falls outside the
+// rendered rows.
+func collectHighlightRect(
+	p *CodeBlockProps, flows []*flow, visCount, pad, bodyTop, scrollY, lineH int,
+) *image.Rectangle {
+	first, last := p.HighlightLine, p.HighlightEndLine
+	if first <= 0 {
+		return nil
+	}
+	if last < first {
+		last = first
+	}
+	if first > visCount {
+		return nil
+	}
+	rect := image.Rectangle{}
+	y := bodyTop - scrollY
+	for i := range visCount {
+		rowH := max(flows[i].height, lineH)
+		if i+1 == first {
+			rect.Min.X, rect.Min.Y = pad, y
+		}
+		if i+1 == min(last, visCount) {
+			rect.Max.X, rect.Max.Y = pad+gutterlessWidth(flows, pad), y+rowH
+			return &rect
+		}
+		y += rowH
+	}
+	return nil
+}
+
+// gutterlessWidth names the full body width the highlight spans: the widest
+// rendered row plus the pad, so a short highlighted line still reads as one
+// full-width band.
+func gutterlessWidth(flows []*flow, pad int) int {
+	w := 0
+	for _, f := range flows {
+		w = max(w, f.width)
+	}
+	return max(w, 1) + pad
+}
+
 func (v *view) drawCodeRowChrome(
 	gtx *layout.Context, p *CodeBlockProps, diffLines []DiffLine, idx, pad, y, gutterW, markerW, rowH int,
 ) {
@@ -376,7 +422,11 @@ func (v *view) drawCodeRowChrome(
 	pxSmall := fixed.I(gtx.Sp(theme.TypeCodeSmall().Size))
 	if !p.IsDiff || idx >= len(diffLines) {
 		if gutterW > 0 {
-			v.drawMonoGlyph(gtx, strconv.Itoa(idx+1), monoSmall, pxSmall, c.FgSubtle, pad+gtx.Dp(theme.SpaceSM), y, rowH)
+			numCol := c.FgSubtle
+			if inHighlightRange(p, idx) {
+				numCol = c.Fg
+			}
+			v.drawMonoGlyph(gtx, strconv.Itoa(idx+1), monoSmall, pxSmall, numCol, pad+gtx.Dp(theme.SpaceSM), y, rowH)
 		}
 		return
 	}
@@ -390,6 +440,16 @@ func (v *view) drawCodeRowChrome(
 		glyphW := v.shape(dl.Marker, monoSmall, pxSmall).w
 		v.drawMonoGlyph(gtx, dl.Marker, monoSmall, pxSmall, diffMarkerColor(v.th, dl.Kind), pad+gutterW+(markerW-glyphW)/2, y, rowH)
 	}
+}
+
+// inHighlightRange reports whether displayed row idx (0-based) sits inside
+// the props' requested highlight range.
+func inHighlightRange(p *CodeBlockProps, idx int) bool {
+	if p.HighlightLine <= 0 {
+		return false
+	}
+	last := max(p.HighlightEndLine, p.HighlightLine)
+	return idx+1 >= p.HighlightLine && idx+1 <= last
 }
 
 func diffMarkerColor(th *theme.Theme, kind DiffKind) color.NRGBA {
