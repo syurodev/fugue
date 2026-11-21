@@ -106,6 +106,9 @@ func (s *teamTaskService) appendTaskEventWithRetry(
 // completes a turn while still in TaskStateRunning. A team_manager with
 // non-terminal children is never nudged or failed until its last child ends.
 func (s *teamTaskService) OnTurnCompleted(ctx context.Context, sessionID string) {
+	if s.mergeQueue != nil {
+		s.mergeQueue.Notify()
+	}
 	task, found, err := s.store.TaskForSession(ctx, sessionID)
 	if err != nil {
 		slog.WarnContext(ctx, "no-report check failed to read task", "session_id", sessionID, "error_code", string(errcode.CodeOf(err)))
@@ -156,6 +159,9 @@ func (s *teamTaskService) sendNoReportNudge(ctx context.Context, sessionID strin
 // Q-149): it moves the task to failed(quota)/failed(auth) and notifies the
 // direct delegator in the same transaction.
 func (s *teamTaskService) OnTurnFailed(ctx context.Context, sessionID, failureCode string) {
+	if s.mergeQueue != nil {
+		s.mergeQueue.Notify()
+	}
 	if failureCode != string(vendor.FailureQuota) && failureCode != string(vendor.FailureAuth) {
 		return
 	}

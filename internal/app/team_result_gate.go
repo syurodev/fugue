@@ -81,13 +81,13 @@ func (g *hostResultGate) Evaluate(ctx context.Context, teamID, taskID string) (R
 	if err != nil {
 		return ResultGateVerdict{}, err
 	}
-	repoDir, repoID := g.resolveRepo(ctx, &team)
+	repoDir, repoID := resolveTeamRepo(ctx, g.workspaces, &team)
 	workDir := repoDir
 
 	if task.Deliverable != vendorstore.DeliverableReport {
 		var verdict ResultGateVerdict
 		var done bool
-		workDir, verdict, done, err = g.evaluateDiffGates(ctx, &team, tasks, task, repoID, spec.WriteScope)
+		workDir, verdict, done, err = g.evaluateDiffGates(ctx, &team, tasks, task, repoDir, repoID, spec.WriteScope)
 		if err != nil || done {
 			return verdict, err
 		}
@@ -105,13 +105,13 @@ func (g *hostResultGate) evaluateDiffGates(
 	team *vendorstore.TeamRecord,
 	tasks []vendorstore.TaskRecord,
 	task *vendorstore.TaskRecord,
-	repoID string,
+	repoDir, repoID string,
 	writeScope []string,
 ) (workDir string, verdict ResultGateVerdict, done bool, err error) {
 	if g.git == nil {
 		return "", ResultGateVerdict{}, true, errcode.New(errcode.FailedPrecondition, "gitops is not configured")
 	}
-	parentRef, err := parentBranch(task, tasks)
+	parentRef, err := g.resolvePreRebaseParent(ctx, team, tasks, task, repoDir)
 	if err != nil {
 		return "", ResultGateVerdict{}, true, err
 	}
@@ -141,16 +141,25 @@ func (g *hostResultGate) openSpec(ctx context.Context, teamID, taskID string) (t
 	return spec, nil
 }
 
-func (g *hostResultGate) resolveRepo(ctx context.Context, team *vendorstore.TeamRecord) (repoDir, repoID string) {
-	if g.workspaces != nil && team.WorkspaceID != "" {
-		if ws, err := g.workspaces.GetWorkspace(ctx, team.WorkspaceID); err == nil && len(ws.Roots) > 0 {
-			repoDir = ws.Roots[0].Path
+func (g *hostResultGate) resolvePreRebaseParent(
+	ctx context.Context,
+	team *vendorstore.TeamRecord,
+	tasks []vendorstore.TaskRecord,
+	task *vendorstore.TaskRecord,
+	repoDir string,
+) (string, error) {
+	parentRef, err := parentBranch(task, tasks)
+	if err != nil {
+		return "", err
+	}
+	teamBranch, tbErr := gitops.TeamBranchName(team.TeamID)
+	taskBranch, kbErr := gitops.TaskBranchName(gitTaskID(task.TaskID))
+	if tbErr == nil && kbErr == nil && parentRef == teamBranch && repoDir != "" {
+		if base, reparented, rpErr := reparentedTaskBase(ctx, g.git, repoDir, teamBranch, taskBranch, tasks); rpErr == nil && reparented {
+			return base, nil
 		}
 	}
-	if canonical, err := filepath.EvalSymlinks(repoDir); err == nil {
-		repoDir = canonical
-	}
-	return repoDir, repoIDFor(repoDir)
+	return parentRef, nil
 }
 
 func (g *hostResultGate) checkWriteScope(

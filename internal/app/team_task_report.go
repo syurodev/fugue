@@ -244,17 +244,21 @@ func (s *teamTaskService) buildCheckEvent(tasks []vendorstore.TaskRecord, taskID
 	if !ok || cur.State != vendorstore.TaskStateChecking {
 		return nil, errcode.New(errcode.FailedPrecondition, "task is not in checking")
 	}
+	return s.buildCheckEventForState(cur, resolvedParentID(parentTaskID, tasks), verdict)
+}
+
+func (s *teamTaskService) buildCheckEventForState(cur *vendorstore.TaskRecord, resolvedParent string, verdict ResultGateVerdict) (*vendorstore.AppendTeamEventInput, error) {
 	evID, idErr := s.ids.NewID()
 	if idErr != nil {
 		return nil, errcode.Wrap(errcode.Internal, "generate check event ID", idErr)
 	}
 	ev := &vendorstore.AppendTeamEventInput{
-		EventID: evID, TaskID: taskID, EventType: vendorstore.EventTaskCheckCompleted, Outcome: "passed",
+		EventID: evID, TaskID: cur.TaskID, EventType: vendorstore.EventTaskCheckCompleted, Outcome: "passed",
 	}
 	if verdict.Bounce {
 		ev.Outcome = "scope_bounce"
 		msgPayload, mErr := json.Marshal(mailboxDigestItem{
-			TaskID:  taskID,
+			TaskID:  cur.TaskID,
 			State:   "scope_bounce",
 			Summary: "out-of-scope files: " + strings.Join(verdict.BounceFiles, ", "),
 		})
@@ -262,7 +266,7 @@ func (s *teamTaskService) buildCheckEvent(tasks []vendorstore.TaskRecord, taskID
 			return nil, errcode.Wrap(errcode.Internal, "encode scope bounce payload", mErr)
 		}
 		ev.Mailbox = []vendorstore.MailboxEnqueueInput{{
-			RecipientTaskID: taskID, Kind: vendorstore.MailboxKindSend, Payload: msgPayload,
+			RecipientTaskID: cur.TaskID, Kind: vendorstore.MailboxKindSend, Payload: msgPayload,
 		}}
 		return ev, nil
 	}
@@ -272,7 +276,7 @@ func (s *teamTaskService) buildCheckEvent(tasks []vendorstore.TaskRecord, taskID
 		if ev.FailureCode == "" {
 			ev.FailureCode = "checks_failed"
 		}
-		ev.Mailbox = digestSummaryRows(taskID, resolvedParentID(parentTaskID, tasks), string(vendorstore.TaskStateFailed), ev.FailureCode, "", false)
+		ev.Mailbox = digestSummaryRows(cur.TaskID, resolvedParent, string(vendorstore.TaskStateFailed), ev.FailureCode, "", false)
 	}
 	return ev, nil
 }

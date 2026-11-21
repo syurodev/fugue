@@ -72,6 +72,8 @@ type teamTaskService struct {
 	wake         *teamWake
 	interactions *InteractionService
 	teamsCfg     func(context.Context, string) (workspace.TeamsConfig, error)
+	workspaces   *workspace.Service
+	mergeQueue   *teamMergeQueue
 	budgets      *teamBudgets
 	clk          clock.Clock
 	unlockMu     sync.Mutex
@@ -108,6 +110,11 @@ func (s *teamTaskService) SetTeamsConfig(fn func(context.Context, string) (works
 
 func (s *teamTaskService) SetBudgets(b *teamBudgets) {
 	s.budgets = b
+}
+
+func (s *teamTaskService) SetIntegration(ws *workspace.Service, mq *teamMergeQueue) {
+	s.workspaces = ws
+	s.mergeQueue = mq
 }
 
 func (s *teamTaskService) SetClock(clk clock.Clock) {

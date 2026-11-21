@@ -108,6 +108,9 @@ type TeamsConfig struct {
 	// TeamMaxAgents caps total non-lead tasks (including retries) in a team without
 	// user-approved amendment (default 12).
 	TeamMaxAgents int
+	// ApproveEveryDiffStep raises a user approval card before each diff task is
+	// enqueued for integration (§9).
+	ApproveEveryDiffStep bool
 }
 
 // HostConfig holds host-wide settings valid only in Tier 2 (<FugueHome>/config.toml).
@@ -187,6 +190,7 @@ func defaultProvenanceKeys() []string {
 		"session.scratch_dir", "session.teams", "session.teams_auto_approve",
 		"teams.idle_detach_seconds", "teams.task_deadline_seconds", "teams.task_max_turns",
 		"teams.silence_timeout_seconds", "teams.team_deadline_seconds", "teams.team_max_agents",
+		"teams.approve_every_diff_step",
 		"host.workspaces_dir", "host.output_retention_total", "host.seen_versions_per_session", "host.snapshot_disk",
 		"host.per_account_sessions", "host.max_sessions", "host.heavy_commands", "host.heavy_slot_max_hold_seconds",
 		"host.prompt_pacing_min_seconds", "host.prompt_pacing_max_seconds",
@@ -300,6 +304,10 @@ func applyTeamsTier(dst *EffectiveConfig, tier Tier, teamsCfg *rawTeams) {
 	setIntScalar(&dst.Teams.SilenceTimeoutSeconds, dst.Provenance, "teams.silence_timeout_seconds", tier, teamsCfg.SilenceTimeoutSeconds)
 	setIntScalar(&dst.Teams.TeamDeadlineSeconds, dst.Provenance, "teams.team_deadline_seconds", tier, teamsCfg.TeamDeadlineSeconds)
 	setIntScalar(&dst.Teams.TeamMaxAgents, dst.Provenance, "teams.team_max_agents", tier, teamsCfg.TeamMaxAgents)
+	if teamsCfg.ApproveEveryDiffStep != nil {
+		dst.Teams.ApproveEveryDiffStep = *teamsCfg.ApproveEveryDiffStep
+		dst.Provenance["teams.approve_every_diff_step"] = tier
+	}
 }
 
 func applySessionTier(dst *EffectiveConfig, tier Tier, sess *rawSession, homeDir string) {

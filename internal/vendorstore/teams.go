@@ -252,7 +252,7 @@ func applyTaskProjection(
 }
 
 func updateTaskScopeBouncesOnEvent(ctx context.Context, tx *sql.Tx, teamID string, ev *AppendTeamEventInput) error {
-	if ev.EventType != EventTaskCheckCompleted || ev.Outcome != "scope_bounce" {
+	if ev.EventType != EventTaskCheckCompleted || ev.Outcome != outcomeScopeBounce {
 		return nil
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE team_tasks SET scope_bounces = scope_bounces + 1 WHERE team_id = ? AND task_id = ?`,

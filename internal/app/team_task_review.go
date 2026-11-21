@@ -2,12 +2,15 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
 
+	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
@@ -16,25 +19,37 @@ import (
 const maxAcceptNoteBytes = 4 << 10
 
 // Accept completes a report/no-diff direct child task in review (`complete_no_diff`
-// -> `done`) and dispatches any dependent tasks that become startable (Q-125, Q-126).
-// Diff tasks are refused until F11.5 wires the merge queue.
+// -> `done`) or approves a diff task (`approved` -> `integrating`) and enqueues
+// it into the target branch merge queue (§9).
 func (s *teamTaskService) Accept(ctx context.Context, sessionID, taskID, note string) (string, error) {
 	trimmed := strings.TrimSpace(note)
 	if len(trimmed) > maxAcceptNoteBytes {
 		return "", errcode.New(errcode.InvalidArgument, "note exceeds 4 KiB limit")
 	}
-	var payload []byte
-	if trimmed != "" {
-		var encErr error
-		payload, encErr = json.Marshal(struct {
-			Note string `json:"note"`
-		}{Note: trimmed})
-		if encErr != nil {
-			return "", errcode.Wrap(errcode.Internal, "encode accept note", encErr)
-		}
+	payload, err := encodeAcceptNote(trimmed)
+	if err != nil {
+		return "", err
 	}
-	var teamID, targetID, targetSessionID string
-	if err := s.appendTeamWithRetry(ctx, sessionID, func(_ context.Context, c *callerTeamContext) (*vendorstore.AppendTeamEventInput, error) {
+	if diffErr := s.maybeAskDiffStepApproval(ctx, sessionID, taskID); diffErr != nil {
+		return "", diffErr
+	}
+	teamID, targetID, targetSessionID, isDiff, err := s.appendAcceptEvent(ctx, sessionID, taskID, payload)
+	if err != nil {
+		return "", err
+	}
+	if isDiff {
+		if enqErr := s.mergeQueue.Enqueue(ctx, teamID, targetID); enqErr != nil {
+			return "", enqErr
+		}
+		return "task " + targetID + " accepted for integration", nil
+	}
+	s.closeTaskSession(ctx, targetSessionID)
+	s.dispatchAfterChange(ctx, teamID)
+	return "task " + targetID + " accepted and done", nil
+}
+
+func (s *teamTaskService) appendAcceptEvent(ctx context.Context, sessionID, taskID string, payload []byte) (teamID, targetID, targetSessionID string, isDiff bool, err error) {
+	err = s.appendTeamWithRetry(ctx, sessionID, func(_ context.Context, c *callerTeamContext) (*vendorstore.AppendTeamEventInput, error) {
 		target, delErr := c.requireDelegator(taskID)
 		if delErr != nil {
 			return nil, delErr
@@ -42,8 +57,13 @@ func (s *teamTaskService) Accept(ctx context.Context, sessionID, taskID, note st
 		if target.State != vendorstore.TaskStateReview {
 			return nil, errcode.New(errcode.FailedPrecondition, "task is not in review")
 		}
+		outcome := "complete_no_diff"
 		if target.Deliverable != vendorstore.DeliverableReport {
-			return nil, errcode.New(errcode.FailedPrecondition, "diff task integration requires F11.5 merge queue")
+			if s.mergeQueue == nil {
+				return nil, errcode.New(errcode.FailedPrecondition, "diff task integration requires F11.5 merge queue")
+			}
+			outcome = "approved"
+			isDiff = true
 		}
 		evID, idErr := s.ids.NewID()
 		if idErr != nil {
@@ -52,14 +72,90 @@ func (s *teamTaskService) Accept(ctx context.Context, sessionID, taskID, note st
 		teamID, targetID, targetSessionID = c.team.TeamID, target.TaskID, target.SessionID
 		return &vendorstore.AppendTeamEventInput{
 			EventID: evID, TaskID: target.TaskID, EventType: vendorstore.EventTaskReviewed,
-			Outcome: "complete_no_diff", ProtectedPayload: payload,
+			Outcome: outcome, ProtectedPayload: payload,
 		}, nil
-	}); err != nil {
-		return "", err
+	})
+	return teamID, targetID, targetSessionID, isDiff, err
+}
+
+func encodeAcceptNote(trimmed string) ([]byte, error) {
+	if trimmed == "" {
+		return nil, nil
 	}
-	s.closeTaskSession(ctx, targetSessionID)
-	s.dispatchAfterChange(ctx, teamID)
-	return "task " + targetID + " accepted and done", nil
+	payload, err := json.Marshal(struct {
+		Note string `json:"note"`
+	}{Note: trimmed})
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "encode accept note", err)
+	}
+	return payload, nil
+}
+
+func (s *teamTaskService) maybeAskDiffStepApproval(ctx context.Context, sessionID, taskID string) error {
+	if s.teamsCfg == nil {
+		return nil
+	}
+	c, err := s.resolveCaller(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	target, delErr := c.requireDelegator(taskID)
+	if delErr != nil {
+		return delErr
+	}
+	if target.State != vendorstore.TaskStateReview || target.Deliverable == vendorstore.DeliverableReport {
+		return nil
+	}
+	cfg, cfgErr := s.teamsCfg(ctx, c.team.WorkspaceID)
+	if cfgErr != nil {
+		return boundaryError("read teams config", cfgErr)
+	}
+	if !cfg.ApproveEveryDiffStep {
+		return nil
+	}
+	return s.askDiffStepCard(ctx, sessionID, c.team.WorkspaceID, c.team.TeamID, target.TaskID)
+}
+
+func (s *teamTaskService) askDiffStepCard(ctx context.Context, sessionID, workspaceID, teamID, taskID string) error {
+	if s.interactions == nil || s.interactions.owner == nil {
+		return errcode.New(errcode.FailedPrecondition, "interaction service is not configured")
+	}
+	invID, err := s.ids.NewID()
+	if err != nil {
+		return errcode.Wrap(errcode.Internal, "generate diff approval ID", err)
+	}
+	opID, err := interaction.NativeOperationKey(invID, invID, 1)
+	if err != nil {
+		return errcode.Wrap(errcode.Internal, "key diff approval", err)
+	}
+	digest := sha256.Sum256([]byte(teamID + ":" + taskID + ":diff_step"))
+	ticket, err := s.interactions.Ensure(&interaction.Spec{
+		OperationID: opID,
+		Kind:        interaction.KindConfirm,
+		Summary:     "Approve integrating diff for task " + taskID,
+		Risk:        string(interaction.RiskWrite),
+		Offers:      []interaction.Outcome{interaction.OutcomeAllowedOnce},
+		Binding: interaction.Binding{
+			SessionID: sessionID, WorkspaceID: workspaceID,
+			InvocationID: invID, AttemptID: invID, CheckGeneration: 1,
+			ToolName: "diff_step_approval", ArgsDigest: hex.EncodeToString(digest[:]),
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if !ticket.Resolved {
+		if ticket, err = s.interactions.AwaitResolved(ctx, ticket.RequestID); err != nil {
+			if _, cancelErr := s.interactions.owner.InvalidateOperation(opID); cancelErr != nil {
+				return errcode.Wrap(errcode.Internal, "cancel abandoned diff approval", cancelErr)
+			}
+			return err
+		}
+	}
+	if ticket.Outcome != interaction.OutcomeAllowedOnce {
+		return errcode.New(errcode.PermissionDenied, "diff integration rejected by user")
+	}
+	return nil
 }
 
 // Reject transitions a direct child task from review back to running with
