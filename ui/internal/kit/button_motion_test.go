@@ -1,6 +1,7 @@
 package kit
 
 import (
+	"fmt"
 	"image"
 	"image/color"
 	"math"
@@ -8,8 +9,11 @@ import (
 
 	"gioui.org/f32"
 	"gioui.org/io/pointer"
+	"gioui.org/layout"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
+
+	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
 // The render tests of Button's §3.7 motion and its busy swap: they draw
@@ -291,4 +295,108 @@ func TestButtonMotionSettlesAndRetargets(t *testing.T) {
 			t.Fatalf("hover settled at %v, want %v", v, want.value)
 		}
 	}
+}
+
+// TestButtonLabelSharesTheRowTextCenter verifies that a Button's label ink
+// shares the vertical text center of a plain kit.Label on the same
+// layout.Middle row across variants (Ghost, Primary), sizes (SizeSM, SizeMD)
+// and UI scales (100%, 125%).
+func TestButtonLabelSharesTheRowTextCenter(t *testing.T) {
+	t.Parallel()
+	for _, uiScale := range []float32{1, 1.25} {
+		for _, size := range []struct {
+			name string
+			val  ButtonSize
+		}{{"SizeSM", SizeSM}, {"SizeMD", SizeMD}} {
+			for _, variant := range []struct {
+				name string
+				val  ButtonVariant
+			}{{"Ghost", Ghost}, {"Primary", Primary}} {
+				t.Run(fmt.Sprintf("%s-%s-ui%d", variant.name, size.name, int(uiScale*100)), func(t *testing.T) {
+					t.Parallel()
+					checkRowTextCenter(t, uiScale, variant.val, size.val)
+				})
+			}
+		}
+	}
+}
+
+func checkRowTextCenter(t *testing.T, uiScale float32, variant ButtonVariant, size ButtonSize) {
+	t.Helper()
+	h, img, labelRect, btnRect := renderRowShot(t, uiScale, variant, size)
+
+	flexH := max(labelRect.Dy(), btnRect.Dy())
+	labelArea := labelRect.Add(image.Pt(0, (flexH-labelRect.Dy())/2))
+	btnArea := image.Rect(
+		btnRect.Min.X+h.gtx.Dp(theme.RadiusMD),
+		(flexH-btnRect.Dy())/2+1,
+		btnRect.Max.X-h.gtx.Dp(theme.RadiusMD),
+		(flexH-btnRect.Dy())/2+btnRect.Dy()-1,
+	)
+	lblBG := pixel(img, 0, 0)
+	if labelArea.Min.Y > 0 {
+		lblBG = pixel(img, labelArea.Min.X, labelArea.Min.Y-1)
+	}
+	btnBG := pixel(img, btnArea.Min.X, btnArea.Min.Y)
+
+	lblInk, _, _, lblN := scan(img, labelArea, func(c color.RGBA) bool { return colorDist(c, lblBG) > 30 })
+	btnInk, _, _, btnN := scan(img, btnArea, func(c color.RGBA) bool { return colorDist(c, btnBG) > 30 })
+	if lblN == 0 || btnN == 0 {
+		t.Fatalf("missing ink: label=%d btn=%d", lblN, btnN)
+	}
+	lblCenter := float64(lblInk.Min.Y+lblInk.Max.Y) / 2
+	btnCenter := float64(btnInk.Min.Y+btnInk.Max.Y) / 2
+	if diff := math.Abs(lblCenter - btnCenter); diff > 1.0 {
+		t.Errorf("text ink vertical centers differ by %.2f px (label=%.2f in %v, button=%.2f in %v), want <= 1 px",
+			diff, lblCenter, lblInk, btnCenter, btnInk)
+	}
+}
+
+func renderRowShot(t *testing.T, uiScale float32, variant ButtonVariant, size ButtonSize) (*harness, *image.RGBA, image.Rectangle, image.Rectangle) {
+	t.Helper()
+	const (
+		rowW = 400
+		rowH = 80
+	)
+	h := newHarness(t)
+	h.env.UIScale = uiScale
+	h.env.ReducedMotion = true
+	st := NewButtonState()
+	bp := ButtonProps{Text: "Open inbox", Variant: variant, Size: size}
+
+	h.frameSize(t, rowW, rowH)
+	paint.Fill(h.gtx.Ops, h.env.Th.Chrome().CanvasBg)
+	var labelRect, btnRect image.Rectangle
+	rowGtx := h.gtx
+	rowGtx.Constraints.Min = image.Point{}
+	layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(rowGtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := gtx
+			dims := Label(h.env, &l, theme.TypeBody(), h.env.Th.Chrome().Fg, "Waiting for approval")
+			labelRect = image.Rectangle{Max: dims.Size}
+			return dims
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			l := gtx
+			if _, err := st.Layout(h.env, &l, bp); err != nil {
+				t.Fatalf("lay the button out: %v", err)
+			}
+			dims := st.Measure(h.env, &l, bp)
+			btnRect = image.Rectangle{Max: dims.Size}.Add(image.Pt(labelRect.Max.X, 0))
+			return dims
+		}),
+	)
+	img := h.shot(t, rowW, rowH)
+	h.end()
+	return h, img, labelRect, btnRect
+}
+
+func colorDist(a, b color.RGBA) int {
+	abs := func(x int) int {
+		if x < 0 {
+			return -x
+		}
+		return x
+	}
+	return abs(int(a.R)-int(b.R)) + abs(int(a.G)-int(b.G)) + abs(int(a.B)-int(b.B))
 }
