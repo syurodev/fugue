@@ -82,6 +82,8 @@ type InteractionService struct {
 	// teamDeadlines consumes the answers of team deadline extension/cancel
 	// cards (F11.6c).
 	teamDeadlines teamDeadlineResolver
+	// teamFinalReviews consumes the answers of team final-review cards (F11.5c).
+	teamFinalReviews teamFinalReviewResolver
 
 	// betweenListReads is a test seam: ListPending calls it between reading
 	// the topic sequence and reading the pending views. Always nil in

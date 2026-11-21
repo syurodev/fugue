@@ -19,8 +19,9 @@ type mergeTargetKey struct {
 }
 
 type mergeQueueEntry struct {
-	teamID string
-	taskID string
+	teamID      string
+	taskID      string
+	isFinalTeam bool
 }
 
 type targetMergeQueue struct {
@@ -100,13 +101,53 @@ func (q *teamMergeQueue) Enqueue(ctx context.Context, teamID, taskID string) err
 		q.targets[key] = tq
 	}
 	for _, existing := range tq.entries {
-		if existing.teamID == teamID && existing.taskID == taskID {
+		if !existing.isFinalTeam && existing.teamID == teamID && existing.taskID == taskID {
 			q.mu.Unlock()
 			q.Notify()
 			return nil
 		}
 	}
 	tq.entries = append(tq.entries, mergeQueueEntry{teamID: teamID, taskID: taskID})
+	q.markBusyLocked()
+	q.mu.Unlock()
+	q.Notify()
+	return nil
+}
+
+// EnqueueFinalTeamMerge adds an approved team's final merge (team branch ->
+// workspace target branch) to its per-target merge queue (§9).
+func (q *teamMergeQueue) EnqueueFinalTeamMerge(ctx context.Context, teamID string) error {
+	rec, _, err := q.svc.store.TeamSnapshot(ctx, teamID)
+	if err != nil {
+		return boundaryError("read team for final merge queue", err)
+	}
+	if rec.State != vendorstore.TeamStateFinalReview {
+		return errcode.New(errcode.FailedPrecondition, "team is not awaiting final review")
+	}
+	repoDir, repoID := resolveTeamRepo(ctx, q.svc.workspaces, &rec)
+	if repoDir == "" || q.svc.git == nil {
+		return errcode.New(errcode.FailedPrecondition, "gitops is not configured")
+	}
+	targetBranch, err := q.svc.git.CurrentBranch(ctx, repoDir)
+	if err != nil {
+		return boundaryError("resolve workspace target branch", err)
+	}
+	key := mergeTargetKey{repoID: repoID, targetBranch: targetBranch}
+
+	q.mu.Lock()
+	tq, exists := q.targets[key]
+	if !exists {
+		tq = &targetMergeQueue{}
+		q.targets[key] = tq
+	}
+	for _, existing := range tq.entries {
+		if existing.isFinalTeam && existing.teamID == teamID {
+			q.mu.Unlock()
+			q.Notify()
+			return nil
+		}
+	}
+	tq.entries = append(tq.entries, mergeQueueEntry{teamID: teamID, isFinalTeam: true})
 	q.markBusyLocked()
 	q.mu.Unlock()
 	q.Notify()
@@ -246,6 +287,10 @@ type mergeEntryPaths struct {
 }
 
 func (q *teamMergeQueue) processEntry(ctx context.Context, entry mergeQueueEntry) (waitTurn bool) {
+	if entry.isFinalTeam {
+		q.executeFinalTeamMerge(ctx, entry.teamID)
+		return false
+	}
 	ep, ok := q.resolveEntryPaths(ctx, entry)
 	if !ok {
 		return false

@@ -108,8 +108,8 @@ func (s *TeamProposalService) requestAmendCard(ctx context.Context, sessionID st
 		Questions: []interaction.Question{{
 			ID: teamAmendQuestionID, Question: "Should the team take this amendment?", Header: "team amendment",
 			Options: []interaction.Option{
-				{ID: decisionApprove, Label: "Approve", Description: "The amendment applies; added tasks are queued and nothing starts"},
-				{ID: decisionReject, Label: "Reject", Description: "The team keeps running unchanged"},
+				{ID: decisionApprove, Label: cardOptionApproveLabel, Description: "The amendment applies; added tasks are queued and nothing starts"},
+				{ID: decisionReject, Label: cardOptionRejectLabel, Description: "The team keeps running unchanged"},
 			},
 		}},
 		Binding: interaction.Binding{

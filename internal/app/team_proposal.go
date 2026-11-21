@@ -347,7 +347,7 @@ func catalogRoles(eff *workspace.EffectiveConfig) []teams.Role {
 		out = append(out, teams.Role{
 			Name: r.Name, Description: r.Description, Vendor: teams.Vendor(r.Vendor),
 			Model: r.Model, Effort: teams.Effort(r.Effort), Permission: teams.Permission(r.Permission),
-			IsLeadEligible: r.IsLeadEligible, Checks: r.Checks,
+			IsLeadEligible: r.IsLeadEligible, CrossReview: r.CrossReview, Checks: r.Checks,
 		})
 	}
 	return out

@@ -55,15 +55,35 @@ func (g *hostResultGate) runSingleCheck(
 	cfg *workspace.EffectiveConfig,
 	command, workDir string,
 ) (ResultGateVerdict, bool, error) {
+	allowed, reason, err := g.authorizePolicyCommand(ctx, team, task, mode, cfg, checkToolName, command)
+	if err != nil {
+		return ResultGateVerdict{}, true, err
+	}
+	if !allowed {
+		return failChecksVerdict(reason), true, nil
+	}
+	return g.executeCheck(ctx, task, command, workDir)
+}
+
+// authorizePolicyCommand evaluates static shell rules and interaction.Decide
+// for any command Fugue runs (VR-13: checks and ocr).
+func (g *hostResultGate) authorizePolicyCommand(
+	ctx context.Context,
+	team *vendorstore.TeamRecord,
+	task *vendorstore.TaskRecord,
+	mode interaction.ApprovalMode,
+	cfg *workspace.EffectiveConfig,
+	toolName, command string,
+) (bool, string, error) {
 	eval := workspace.EvaluateShell(cfg, g.tags, command)
 	invID, err := g.ids.NewID()
 	if err != nil {
-		return ResultGateVerdict{}, true, errcode.Wrap(errcode.Internal, "generate check invocation ID", err)
+		return false, "", errcode.Wrap(errcode.Internal, "generate command invocation ID", err)
 	}
 	digest := sha256.Sum256([]byte(command))
 	grantKey := ""
 	if eval.Target == "" {
-		grantKey = "check:" + hex.EncodeToString(digest[:8])
+		grantKey = toolName + ":" + hex.EncodeToString(digest[:8])
 	}
 	binding := interaction.Binding{
 		SessionID:       task.SessionID,
@@ -71,7 +91,7 @@ func (g *hostResultGate) runSingleCheck(
 		InvocationID:    invID,
 		AttemptID:       invID,
 		CheckGeneration: 1,
-		ToolName:        checkToolName,
+		ToolName:        toolName,
 		GrantScopeKey:   grantKey,
 		HasTarget:       eval.Target != "",
 		EnvTag:          eval.EnvTag,
@@ -92,22 +112,52 @@ func (g *hostResultGate) runSingleCheck(
 	}
 	verdict, err := interaction.Decide(mode, desc, call, g.tags, grants)
 	if err != nil {
-		return ResultGateVerdict{}, true, errcode.Wrap(errcode.Internal, "evaluate check policy", err)
+		return false, "", errcode.Wrap(errcode.Internal, "evaluate command policy", err)
 	}
 	switch verdict.Kind {
 	case interaction.VerdictRefuse:
-		return failChecksVerdict("check refused by policy: " + verdict.Reason), true, nil
+		return false, "command refused by policy: " + verdict.Reason, nil
 	case interaction.VerdictAsk:
 		allowed, askErr := g.askCheckConfirm(ctx, &binding, command, &eval, verdict.Offers)
 		if askErr != nil {
-			return ResultGateVerdict{}, true, askErr
+			return false, "", askErr
 		}
 		if !allowed {
-			return failChecksVerdict("check denied by user"), true, nil
+			return false, "command denied by user", nil
 		}
 	case interaction.VerdictRun:
 	}
-	return g.executeCheck(ctx, task, command, workDir)
+	return true, "", nil
+}
+
+// runPolicyOCRCommand runs an ocr CLI command through VR-13 policy and heavySemaphore.
+func (g *hostResultGate) runPolicyOCRCommand(
+	ctx context.Context,
+	team *vendorstore.TeamRecord,
+	task *vendorstore.TaskRecord,
+	workDir, command string,
+) (string, int, error) {
+	mode := g.sessionApprovalMode(ctx, task.SessionID)
+	cfg := g.workspaceConfig(ctx, team.WorkspaceID)
+	allowed, reason, err := g.authorizePolicyCommand(ctx, team, task, mode, &cfg, "ocr", command)
+	if err != nil {
+		return "", -1, err
+	}
+	if !allowed {
+		return "", -1, errcode.New(errcode.PermissionDenied, reason)
+	}
+	if g.heavy != nil {
+		release, _, acqErr := g.heavy.Acquire(ctx)
+		if acqErr != nil {
+			return "", -1, acqErr
+		}
+		defer release()
+	}
+	runner := g.runCheck
+	if runner == nil {
+		runner = execCheckCommand
+	}
+	return runner(ctx, workDir, command)
 }
 
 func (g *hostResultGate) askCheckConfirm(

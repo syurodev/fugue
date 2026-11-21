@@ -1,0 +1,14 @@
+{
+  "schema_version": "99",
+  "mode": "range",
+  "total_files": 1,
+  "reviewable_count": 1,
+  "excluded_count": 0,
+  "reviewable_files": [
+    {
+      "path": "pkg/auth/token.go",
+      "status": "modified"
+    }
+  ],
+  "excluded_files": []
+}

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/transcript"
 	"github.com/syurodev/fugue/internal/vault"
@@ -320,6 +321,7 @@ func (m *VendorSessions) SetTurnCompletedHook(hook func(sessionID string)) {
 }
 
 func (m *VendorSessions) notifyTurnCompleted(sessionID string) {
+	m.resolveTurnWaiter(sessionID, nil)
 	if m.turnCompletedHook != nil {
 		m.turnCompletedHook(sessionID)
 	}
@@ -331,6 +333,7 @@ func (m *VendorSessions) SetTurnFailedHook(hook func(sessionID, failureCode stri
 }
 
 func (m *VendorSessions) notifyTurnFailed(sessionID, failureCode string) {
+	m.resolveTurnWaiter(sessionID, errcode.New(errcode.Unavailable, "reviewer turn failed: "+failureCode))
 	if m.turnFailedHook != nil {
 		m.turnFailedHook(sessionID, failureCode)
 	}
@@ -365,6 +368,7 @@ func (m *VendorSessions) SetSessionDiedHook(hook func(sessionID string)) {
 }
 
 func (m *VendorSessions) notifySessionDied(sessionID string) {
+	m.resolveTurnWaiter(sessionID, errcode.New(errcode.Unavailable, "reviewer session exited mid-turn"))
 	if m.sessionDiedHook != nil {
 		m.sessionDiedHook(sessionID)
 	}

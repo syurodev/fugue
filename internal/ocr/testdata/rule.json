@@ -1,0 +1,27 @@
+{
+  "schema_version": "1",
+  "groups": [
+    {
+      "files": ["pkg/auth/session.go"],
+      "rules": [
+        {
+          "id": "sec-token-leak",
+          "severity": "high",
+          "title": "Do not log secret tokens",
+          "description": "Ensure bearer tokens and credentials are never passed to loggers or errors."
+        }
+      ]
+    },
+    {
+      "files": ["pkg/api/handler.go"],
+      "rules": [
+        {
+          "id": "err-wrap",
+          "severity": "medium",
+          "title": "Wrap boundary errors",
+          "description": "Return typed errors with stable error codes at API boundaries."
+        }
+      ]
+    }
+  ]
+}

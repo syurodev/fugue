@@ -18,6 +18,12 @@ type ResultGate interface {
 	Evaluate(ctx context.Context, teamID, taskID string) (ResultGateVerdict, error)
 }
 
+// InitialResultGate extends ResultGate with step 5 (bundled cross review) on
+// the initial checking -> review transition.
+type InitialResultGate interface {
+	EvaluateInitial(ctx context.Context, teamID, taskID string) (ResultGateVerdict, error)
+}
+
 // ResultGateVerdict is the outcome of a ResultGate check pass.
 type ResultGateVerdict struct {
 	Ready       bool
@@ -26,6 +32,7 @@ type ResultGateVerdict struct {
 	BounceFiles []string
 	FailureCode string
 	Summary     string
+	CrossReview *CrossReviewReport
 }
 
 type unconfiguredResultGate struct{}
@@ -137,6 +144,7 @@ func (s *teamTaskService) recordTaskFailedReport(ctx context.Context, c *callerT
 	if s.wake != nil {
 		s.wake.Notify()
 	}
+	s.maybeTriggerFinalReview(ctx, c.team.TeamID)
 	return fmt.Sprintf("task %s recorded as failed", taskID), nil
 }
 
@@ -165,6 +173,7 @@ func (s *teamTaskService) recordTaskSucceededReport(ctx context.Context, c *call
 	if s.wake != nil {
 		s.wake.Notify()
 	}
+	s.maybeTriggerFinalReview(ctx, teamID)
 	return fmt.Sprintf("task %s reported (schema_valid=%t)", taskID, schemaValid), nil
 }
 
@@ -226,19 +235,6 @@ func (s *teamTaskService) validateTaskOutput(ctx context.Context, teamID, taskID
 	return teams.ValidateOutputAgainstSchema(spec.OutputSchema, output)
 }
 
-func (s *teamTaskService) applyResultGate(ctx context.Context, teamID, taskID, parentTaskID string) error {
-	verdict, err := s.resultGate.Evaluate(ctx, teamID, taskID)
-	if err != nil {
-		return boundaryError("evaluate result gate", err)
-	}
-	if !verdict.Ready {
-		return nil
-	}
-	return s.appendTaskEventWithRetry(ctx, teamID, func(_ *vendorstore.TeamRecord, tasks []vendorstore.TaskRecord) (*vendorstore.AppendTeamEventInput, error) {
-		return s.buildCheckEvent(tasks, taskID, parentTaskID, verdict)
-	})
-}
-
 func (s *teamTaskService) buildCheckEvent(tasks []vendorstore.TaskRecord, taskID, parentTaskID string, verdict ResultGateVerdict) (*vendorstore.AppendTeamEventInput, error) {
 	cur, ok := findTask(tasks, taskID)
 	if !ok || cur.State != vendorstore.TaskStateChecking {
@@ -277,6 +273,15 @@ func (s *teamTaskService) buildCheckEventForState(cur *vendorstore.TaskRecord, r
 			ev.FailureCode = "checks_failed"
 		}
 		ev.Mailbox = digestSummaryRows(cur.TaskID, resolvedParent, string(vendorstore.TaskStateFailed), ev.FailureCode, "", false)
+		return ev, nil
+	}
+	if verdict.CrossReview != nil {
+		raw, mErr := json.Marshal(verdict.CrossReview)
+		if mErr != nil {
+			return nil, errcode.Wrap(errcode.Internal, "encode cross review report", mErr)
+		}
+		ev.ProtectedPayload = raw
+		ev.Mailbox = digestSummaryRows(cur.TaskID, resolvedParent, string(vendorstore.TaskStateReview), "", formatCrossReviewDigest(verdict.CrossReview), false)
 	}
 	return ev, nil
 }
@@ -398,17 +403,6 @@ func resolveLatestTarget(target *vendorstore.TaskRecord, tasks []vendorstore.Tas
 		return latest
 	}
 	return target
-}
-
-func (s *teamTaskService) readTaskChecks(ctx context.Context, teamID, taskID string) (string, error) {
-	verdict, gateErr := s.resultGate.Evaluate(ctx, teamID, taskID)
-	if gateErr != nil {
-		return "", boundaryError("evaluate checks", gateErr)
-	}
-	if !verdict.Ready {
-		return "not_run", nil
-	}
-	return fmt.Sprintf("passed=%t summary=%s", verdict.Passed, verdict.Summary), nil
 }
 
 func (s *teamTaskService) readTaskDiff(ctx context.Context, c *callerTeamContext, target *vendorstore.TaskRecord, offset, limit int) (string, error) {

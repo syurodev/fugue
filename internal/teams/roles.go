@@ -65,6 +65,7 @@ type Role struct {
 	Effort         Effort
 	Permission     Permission
 	IsLeadEligible bool
+	CrossReview    bool
 	Checks         []string
 }
 
@@ -236,6 +237,7 @@ func StarterCatalog(probes []VendorProbe) []Role {
 			Vendor:         coderVendor,
 			Permission:     PermissionWrite,
 			IsLeadEligible: true,
+			CrossReview:    true,
 		},
 		{
 			Name:        "tester",
