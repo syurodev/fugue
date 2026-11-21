@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"net/url"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -185,11 +184,15 @@ func isSafeHTTPSURL(raw string) bool {
 	if raw == "" || strings.IndexFunc(raw, isUnsafeURLRune) >= 0 {
 		return false
 	}
-	u, err := url.Parse(raw)
-	if err != nil {
+	const prefix = "https://"
+	if len(raw) <= len(prefix) || !strings.EqualFold(raw[:len(prefix)], prefix) {
 		return false
 	}
-	return strings.EqualFold(u.Scheme, "https") && u.Host != ""
+	rest := raw[len(prefix):]
+	if end := strings.IndexAny(rest, "/?#"); end >= 0 {
+		rest = rest[:end]
+	}
+	return rest != "" && !strings.Contains(rest, "@") && !strings.Contains(rest, `\`)
 }
 
 func isUnsafeURLRune(r rune) bool {

@@ -195,26 +195,24 @@ func TestInboxReconcilesEventsAndDisappearsOnExternalResolve(t *testing.T) {
 		t.Fatalf("stale ListPending rolled back state: count=%d seq=%d", m.PendingCount(), m.Sequence())
 	}
 
-	resolvedPayload := mustJSON(t, client.InteractionResolvedEvent{RequestID: testReqB, Outcome: client.InteractionOutcomeExpired})
-	if err := m.ApplyTopicEvent(13, client.EventInteractionResolved, resolvedPayload); err != nil {
-		t.Fatal(err)
-	}
-	if m.CanAnswer(Pin{RequestID: testReqB, Incarnation: testInc1}) || m.PendingCountForSession(testSess1) != 1 {
-		t.Fatalf("resolved ticket remained in inbox: count=%d sess1=%d", m.PendingCount(), m.PendingCountForSession(testSess1))
-	}
-
+	assertExternalResolveDropsTicket(t, m, 13, testReqB, client.InteractionOutcomeExpired, testSess1, 1)
 	// Q-161: external cancellation (turn end / vendor abort) drops the ticket.
-	cancelledPayload := mustJSON(t, client.InteractionResolvedEvent{RequestID: testReqC, Outcome: client.InteractionOutcomeCancelled})
-	if err := m.ApplyTopicEvent(14, client.EventInteractionResolved, cancelledPayload); err != nil {
-		t.Fatal(err)
-	}
-	if m.CanAnswer(Pin{RequestID: testReqC, Incarnation: testInc1}) || m.PendingCountForSession(testSess2) != 0 {
-		t.Fatalf("cancelled ticket remained in inbox: count=%d sess2=%d", m.PendingCount(), m.PendingCountForSession(testSess2))
-	}
+	assertExternalResolveDropsTicket(t, m, 14, testReqC, client.InteractionOutcomeCancelled, testSess2, 0)
 
 	m.ApplyListPending(testInc2, client.PendingInteractionList{Sequence: 0})
 	if m.PendingCount() != 0 || m.Incarnation() != testInc2 {
 		t.Fatalf("after empty new incarnation: count=%d inc=%q", m.PendingCount(), m.Incarnation())
+	}
+}
+
+func assertExternalResolveDropsTicket(t *testing.T, m *Model, seq uint64, reqID, outcome, sessID string, wantSessCount int) {
+	t.Helper()
+	payload := mustJSON(t, client.InteractionResolvedEvent{RequestID: reqID, Outcome: outcome})
+	if err := m.ApplyTopicEvent(seq, client.EventInteractionResolved, payload); err != nil {
+		t.Fatal(err)
+	}
+	if m.CanAnswer(Pin{RequestID: reqID, Incarnation: testInc1}) || m.PendingCountForSession(sessID) != wantSessCount {
+		t.Fatalf("resolved(%s) ticket remained in inbox: count=%d sess=%d", outcome, m.PendingCount(), m.PendingCountForSession(sessID))
 	}
 }
 
