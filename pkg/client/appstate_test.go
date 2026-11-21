@@ -2,14 +2,18 @@ package client_test
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/syurodev/fugue/pkg/client"
 	appstatev1 "github.com/syurodev/fugue/pkg/pb/fugue/appstate/v1"
@@ -20,17 +24,24 @@ import (
 
 const AppStateConflictCode = "appstate.revision_conflict"
 
+// errAppStateScripted is the static cause behind a scripted fake failure; it
+// is wrapped, never constructed, at the call site.
+var errAppStateScripted = errors.New("scripted app-state error")
+
 // appStateFake is a scripted app-state host: in-memory CAS with the typed
 // conflict detail, so the client's revision_conflict handling is exercised
-// against the real wire shapes.
+// against the real wire shapes. failRPC names the methods that answer with a
+// coded failure; scriptedWindows replaces the store listing verbatim.
 type appStateFake struct {
 	hostv1connect.UnimplementedHostServiceHandler
 	appstatev1connect.UnimplementedAppStateServiceHandler
 
-	mu       sync.Mutex
-	windows  map[string]*appstatev1.SavedWindow
-	prefsRev uint64
-	prefsDoc []byte
+	mu              sync.Mutex
+	windows         map[string]*appstatev1.SavedWindow
+	prefsRev        uint64
+	prefsDoc        []byte
+	failRPC         map[string]bool
+	scriptedWindows []*appstatev1.SavedWindow
 }
 
 func newAppStateFake() *appStateFake {
@@ -39,6 +50,18 @@ func newAppStateFake() *appStateFake {
 
 func (f *appStateFake) Hello(context.Context, *connect.Request[hostv1.HelloRequest]) (*connect.Response[hostv1.HelloResponse], error) {
 	return connect.NewResponse(&hostv1.HelloResponse{HostVersion: "v1", ApiVersion: "v1"}), nil
+}
+
+// failErr is the scripted failure: a coded Connect error with the typed
+// detail, so the client's code extraction sees the real wire shape.
+func (f *appStateFake) failErr() error {
+	cerr := connect.NewError(connect.CodeInternal, errAppStateScripted)
+	detail, derr := connect.NewErrorDetail(&hostv1.ErrorDetail{Code: "internal"})
+	if derr != nil {
+		return cerr
+	}
+	cerr.AddDetail(detail)
+	return cerr
 }
 
 func (f *appStateFake) conflict(current uint64) error {
@@ -54,6 +77,12 @@ func (f *appStateFake) conflict(current uint64) error {
 func (f *appStateFake) ListWindows(context.Context, *connect.Request[appstatev1.ListWindowsRequest]) (*connect.Response[appstatev1.ListWindowsResponse], error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failRPC["ListWindows"] {
+		return nil, f.failErr()
+	}
+	if f.scriptedWindows != nil {
+		return connect.NewResponse(&appstatev1.ListWindowsResponse{Windows: f.scriptedWindows}), nil
+	}
 	out := make([]*appstatev1.SavedWindow, 0, len(f.windows))
 	for _, w := range f.windows {
 		out = append(out, w)
@@ -64,6 +93,9 @@ func (f *appStateFake) ListWindows(context.Context, *connect.Request[appstatev1.
 func (f *appStateFake) PutWindow(_ context.Context, req *connect.Request[appstatev1.PutWindowRequest]) (*connect.Response[appstatev1.PutWindowResponse], error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failRPC["PutWindow"] {
+		return nil, f.failErr()
+	}
 	msg := req.Msg
 	if cur, ok := f.windows[msg.GetWindowId()]; ok {
 		if cur.GetRevision() != msg.GetExpectedRevision() || msg.GetExpectedRevision() == 0 {
@@ -83,6 +115,9 @@ func (f *appStateFake) PutWindow(_ context.Context, req *connect.Request[appstat
 func (f *appStateFake) DeleteWindow(_ context.Context, req *connect.Request[appstatev1.DeleteWindowRequest]) (*connect.Response[appstatev1.DeleteWindowResponse], error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failRPC["DeleteWindow"] {
+		return nil, f.failErr()
+	}
 	cur, ok := f.windows[req.Msg.GetWindowId()]
 	if !ok || cur.GetRevision() != req.Msg.GetExpectedRevision() {
 		var gone uint64
@@ -98,12 +133,18 @@ func (f *appStateFake) DeleteWindow(_ context.Context, req *connect.Request[apps
 func (f *appStateFake) GetPreferences(context.Context, *connect.Request[appstatev1.GetPreferencesRequest]) (*connect.Response[appstatev1.GetPreferencesResponse], error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failRPC["GetPreferences"] {
+		return nil, f.failErr()
+	}
 	return connect.NewResponse(&appstatev1.GetPreferencesResponse{Revision: f.prefsRev, Preferences: f.prefsDoc}), nil
 }
 
 func (f *appStateFake) PutPreferences(_ context.Context, req *connect.Request[appstatev1.PutPreferencesRequest]) (*connect.Response[appstatev1.PutPreferencesResponse], error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.failRPC["PutPreferences"] {
+		return nil, f.failErr()
+	}
 	if f.prefsRev != req.Msg.GetExpectedRevision() {
 		return nil, f.conflict(f.prefsRev)
 	}
@@ -300,5 +341,133 @@ func TestAppStateEventDecoder(t *testing.T) {
 	}
 	if _, err := client.DecodeAppStateEvent("unknown", nil); err == nil {
 		t.Fatal("an unknown event type decoded")
+	}
+}
+
+// TestAppStateClientErrorPathsOverRealSocket drives every app-state method
+// against a host that fails them, so the client's wrapping and the typed
+// detail extraction are exercised on the failures too.
+func TestAppStateClientErrorPathsOverRealSocket(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	fake := newAppStateFake()
+	fake.mu.Lock()
+	fake.failRPC = map[string]bool{
+		"ListWindows": true, "PutWindow": true, "DeleteWindow": true,
+		"GetPreferences": true, "PutPreferences": true,
+	}
+	fake.mu.Unlock()
+	c := serveAppStateFake(t, fake)
+
+	if _, err := c.ListWindows(ctx); !appStateScripted(err, "list the saved windows") {
+		t.Fatalf("ListWindows = %v, want a wrapped scripted failure", err)
+	}
+	if _, err := c.PutAppStateWindow(ctx, &client.PutAppStateWindowInput{CommandID: "cmd-fail-1", WindowID: testAppStateWindow}); !appStateScripted(err, "put the window layout") {
+		t.Fatalf("PutAppStateWindow = %v, want a wrapped scripted failure", err)
+	}
+	if err := c.DeleteAppStateWindow(ctx, "cmd-fail-2", testAppStateWindow, 1); !appStateScripted(err, "delete the saved window") {
+		t.Fatalf("DeleteAppStateWindow = %v, want a wrapped scripted failure", err)
+	}
+	if _, err := c.GetAppStatePreferences(ctx); !appStateScripted(err, "read the app preferences") {
+		t.Fatalf("GetAppStatePreferences = %v, want a wrapped scripted failure", err)
+	}
+	if _, err := c.PutAppStatePreferences(ctx, &client.PutAppStatePreferencesInput{CommandID: "cmd-fail-3"}); !appStateScripted(err, "put the app preferences") {
+		t.Fatalf("PutAppStatePreferences = %v, want a wrapped scripted failure", err)
+	}
+	if code, ok := client.AppStateCodeOf(errors.Join(errAppStateScripted)); ok {
+		t.Fatalf("AppStateCodeOf on a plain error = (%q, %v), want not ok", code, ok)
+	}
+}
+
+// appStateScripted reports whether err wraps the scripted Connect failure
+// with the client's own context.
+func appStateScripted(err error, what string) bool {
+	code, ok := client.AppStateCodeOf(err)
+	return err != nil && ok && code == "internal" && strings.Contains(err.Error(), what)
+}
+
+// TestAppStateCodeOfRejectsPlainErrors pins the code extraction on errors
+// that carry no detail or a detail of another code.
+func TestAppStateCodeOfRejectsPlainErrors(t *testing.T) {
+	t.Parallel()
+	if _, ok := client.AppStateCodeOf(errAppStateScripted); ok {
+		t.Fatal("AppStateCodeOf decoded a plain error")
+	}
+	if _, ok := client.AppStateCurrentRevision(errAppStateScripted); ok {
+		t.Fatal("AppStateCurrentRevision decoded a plain error")
+	}
+	cerr := connect.NewError(connect.CodeResourceExhausted, errAppStateScripted)
+	detail, derr := connect.NewErrorDetail(&hostv1.ErrorDetail{Code: "appstate.too_large"})
+	if derr != nil {
+		t.Fatal(derr)
+	}
+	cerr.AddDetail(detail)
+	if code, ok := client.AppStateCodeOf(cerr); !ok || code != "appstate.too_large" {
+		t.Fatalf("AppStateCodeOf = (%q, %v), want appstate.too_large", code, ok)
+	}
+	if _, ok := client.AppStateCurrentRevision(cerr); ok {
+		t.Fatal("AppStateCurrentRevision decoded a conflict revision from another code")
+	}
+}
+
+// TestAppStateDecodersRejectMalformedPayloads pins the decoders' failure
+// paths: a payload that is not the topic's JSON shape never decodes.
+func TestAppStateDecodersRejectMalformedPayloads(t *testing.T) {
+	t.Parallel()
+	if _, err := client.DecodeAppStateSnapshot([]byte(`{"windows":`)); err == nil {
+		t.Fatal("a truncated snapshot decoded")
+	}
+	if _, err := client.DecodeAppStateSnapshot([]byte(`[]`)); err == nil {
+		t.Fatal("an array snapshot decoded")
+	}
+	if _, err := client.DecodeAppStateSnapshot([]byte(`null`)); err == nil {
+		t.Fatal("a null snapshot decoded")
+	}
+	if _, err := client.DecodeAppStateEvent(client.EventAppStateWindowPut, []byte(`{`)); err == nil {
+		t.Fatal("a truncated window event decoded")
+	}
+	if _, err := client.DecodeAppStateEvent(client.EventAppStatePreferencesPut, []byte(`5`)); err == nil {
+		t.Fatal("a number preferences event decoded")
+	}
+	if _, err := client.DecodeAppStateEvent(client.EventAppStateWindowDeleted, []byte(`null`)); err == nil {
+		t.Fatal("a null window event decoded")
+	}
+	if _, err := client.DecodeAppStateEvent(client.EventAppStatePreferencesPut, []byte(`null`)); err == nil {
+		t.Fatal("a null preferences event decoded")
+	}
+}
+
+// TestAppStateListMapsNilProtoFields pins the nil handling of the wire
+// mapping: a nil window element maps to the zero view and a missing
+// timestamp maps to the zero time, never a panic.
+func TestAppStateListMapsNilProtoFields(t *testing.T) {
+	t.Parallel()
+	fake := newAppStateFake()
+	stamp := time.Date(2026, 11, 21, 10, 0, 0, 0, time.UTC)
+	stamped := timestamppb.New(stamp)
+	fake.mu.Lock()
+	fake.scriptedWindows = []*appstatev1.SavedWindow{nil, {
+		WindowId: testAppStateWindow, Revision: 2, Layout: []byte(`{"schema_version":1}`),
+	}, {
+		WindowId: testAppStateWindow, Revision: 3, Layout: []byte(`{"schema_version":1}`), UpdatedAt: stamped,
+	}}
+	fake.mu.Unlock()
+	c := serveAppStateFake(t, fake)
+
+	windows, err := c.ListWindows(t.Context())
+	if err != nil {
+		t.Fatalf("ListWindows: %v", err)
+	}
+	if len(windows) != 3 {
+		t.Fatalf("ListWindows = %d windows, want 3", len(windows))
+	}
+	if windows[0].WindowID != "" || windows[0].Revision != 0 || windows[0].Layout != nil || !windows[0].UpdatedAt.IsZero() {
+		t.Fatalf("a nil wire window mapped to %+v, want the zero view", windows[0])
+	}
+	if windows[1].WindowID != testAppStateWindow || windows[1].Revision != 2 || !windows[1].UpdatedAt.IsZero() {
+		t.Fatalf("a window without a timestamp mapped to %+v", windows[1])
+	}
+	if windows[2].Revision != 3 || !windows[2].UpdatedAt.Equal(stamp) {
+		t.Fatalf("a window with a timestamp mapped to %+v, want %v", windows[2], stamp)
 	}
 }

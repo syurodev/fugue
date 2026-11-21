@@ -170,6 +170,25 @@ func AppStateCurrentRevision(err error) (uint64, bool) {
 	return detail.GetCurrentRevision(), true
 }
 
+// errAppStatePayloadNotObject is the static cause behind a topic payload
+// that is not a JSON object; it is wrapped, never constructed, at the call
+// site.
+var errAppStatePayloadNotObject = errors.New("the app-state payload is not a JSON object")
+
+// decodeAppStateJSON decodes a topic payload into out, refusing a payload
+// that is not a JSON object: json.Unmarshal takes a bare null as a no-op,
+// and a null event would silently become the zero value.
+func decodeAppStateJSON(payload []byte, out any, what string) error {
+	if err := json.Unmarshal(payload, out); err != nil {
+		return fmt.Errorf("decode %s: %w", what, err)
+	}
+	var probe map[string]json.RawMessage
+	if probeErr := json.Unmarshal(payload, &probe); probeErr != nil || probe == nil {
+		return fmt.Errorf("%w: %s", errAppStatePayloadNotObject, what)
+	}
+	return nil
+}
+
 // DecodeAppStateSnapshot decodes the appstate topic's snapshot payload.
 func DecodeAppStateSnapshot(payload []byte) (AppStateSnapshot, error) {
 	var wire struct {
@@ -184,8 +203,8 @@ func DecodeAppStateSnapshot(payload []byte) (AppStateSnapshot, error) {
 			Preferences json.RawMessage `json:"preferences"`
 		} `json:"preferences"`
 	}
-	if err := json.Unmarshal(payload, &wire); err != nil {
-		return AppStateSnapshot{}, fmt.Errorf("decode the app-state snapshot: %w", err)
+	if err := decodeAppStateJSON(payload, &wire, "the app-state snapshot"); err != nil {
+		return AppStateSnapshot{}, err
 	}
 	out := AppStateSnapshot{Windows: make([]AppStateWindow, 0, len(wire.Windows))}
 	for _, w := range wire.Windows {
@@ -217,16 +236,16 @@ func DecodeAppStateEvent(eventType string, payload []byte) (AppStateEvent, error
 			WindowID string `json:"window_id"`
 			Revision uint64 `json:"revision"`
 		}
-		if err := json.Unmarshal(payload, &wire); err != nil {
-			return AppStateEvent{}, fmt.Errorf("decode the app-state window event: %w", err)
+		if err := decodeAppStateJSON(payload, &wire, "the app-state window event"); err != nil {
+			return AppStateEvent{}, err
 		}
 		return AppStateEvent{Type: eventType, WindowID: wire.WindowID, Revision: wire.Revision}, nil
 	case EventAppStatePreferencesPut:
 		var wire struct {
 			Revision uint64 `json:"revision"`
 		}
-		if err := json.Unmarshal(payload, &wire); err != nil {
-			return AppStateEvent{}, fmt.Errorf("decode the app-state preferences event: %w", err)
+		if err := decodeAppStateJSON(payload, &wire, "the app-state preferences event"); err != nil {
+			return AppStateEvent{}, err
 		}
 		return AppStateEvent{Type: eventType, Revision: wire.Revision}, nil
 	default:
