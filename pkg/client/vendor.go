@@ -103,8 +103,9 @@ type PolicyDiffEntry struct {
 // mutations and the Q-64 confirmation card.
 type Workspace struct {
 	ID, Name                           string
+	RawTOML                            []byte
 	ConfigHash                         string
-	ConfigRevision                     int64
+	ConfigRevision, PolicyRevision     int64
 	Roots                              []WorkspaceRoot
 	MissingRoots                       []string
 	PendingPolicyConfirmation          bool
@@ -261,21 +262,7 @@ func (c *Client) Workspace(ctx context.Context, id string) (Workspace, error) {
 	if err != nil {
 		return Workspace{}, fmt.Errorf("read the workspace: %w", err)
 	}
-	w := res.Msg.GetWorkspace()
-	out := Workspace{
-		ID: w.GetId(), Name: w.GetName(), ConfigHash: w.GetConfigHash(), ConfigRevision: w.GetConfigRevision(),
-		MissingRoots:              w.GetMissingRoots(),
-		PendingPolicyConfirmation: w.GetPendingPolicyConfirmation(),
-		ConfigErrorKey:            w.GetConfigErrorKey(), ConfigErrorLine: w.GetConfigErrorLine(),
-		ConfigErrorColumn: w.GetConfigErrorColumn(),
-	}
-	for _, r := range w.GetRoots() {
-		out.Roots = append(out.Roots, WorkspaceRoot{Name: r.GetName(), Path: r.GetPath(), Access: r.GetAccess(), Missing: r.GetMissing()})
-	}
-	for _, d := range w.GetPolicyDiff() {
-		out.PolicyDiff = append(out.PolicyDiff, PolicyDiffEntry{Key: d.GetKey(), OldValue: d.GetOldValue(), NewValue: d.GetNewValue()})
-	}
-	return out, nil
+	return workspaceFromProto(res.Msg.GetWorkspace()), nil
 }
 
 // workspaceClient builds the workspace service client on the client's

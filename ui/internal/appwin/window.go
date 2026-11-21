@@ -24,6 +24,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/inbox"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
+	"github.com/syurodev/fugue/ui/internal/settings"
 	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/vault"
 	"github.com/syurodev/fugue/ui/internal/workspace"
@@ -107,6 +108,7 @@ func Run(ctx context.Context, opts Options) error {
 	sc.vaultWorker = workers.vaultW
 	sc.inboxWorker = workers.inboxW
 	sc.accountsWorker = workers.accountsW
+	sc.settingsWorker = workers.settingsW
 	return eventLoop(w, env, sc, q, &light, &dark)
 }
 
@@ -117,6 +119,7 @@ type appWorkers struct {
 	vaultW    *vault.Worker
 	inboxW    *inbox.Worker
 	accountsW *accounts.Worker
+	settingsW *settings.Worker
 }
 
 func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) appWorkers {
@@ -147,10 +150,18 @@ func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) ap
 		return nil
 	}, w.Invalidate)
 	accountsW.Start(ctx)
-	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW}
+	settingsW := settings.NewWorker(func() settings.Client {
+		if c := m.Client(); c != nil {
+			return c
+		}
+		return nil
+	}, w.Invalidate)
+	settingsW.Start(ctx)
+	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW, settingsW: settingsW}
 }
 
 func (a appWorkers) stop() {
+	a.settingsW.Stop()
 	a.accountsW.Stop()
 	a.inboxW.Stop()
 	a.vaultW.Stop()
@@ -278,7 +289,11 @@ drainPosts:
 	if sc.accountsWorker != nil {
 		sc.applyAccountsResults(drainAccountsResults(sc.accountsWorker))
 	}
-	toggleTheme(gtx, env, light, dark)
+	if sc.settingsWorker != nil {
+		sc.applySettingsResults(drainSettingsResults(sc.settingsWorker))
+	}
+	sc.applyLivePreferences(env, light, dark)
+	toggleTheme(gtx, env, sc, light, dark)
 	drawWindow(gtx, env, sc)
 }
 
@@ -286,7 +301,7 @@ drainPosts:
 // arrive as their upper-case name on every platform Gio supports, and the
 // window starts light: Gio v0.10.3 exposes no OS light/dark preference to
 // follow (F10.2c plan), so light is the default.
-func toggleTheme(gtx *layout.Context, env *kit.Env, light, dark *theme.Theme) {
+func toggleTheme(gtx *layout.Context, env *kit.Env, sc *screens, light, dark *theme.Theme) {
 	for {
 		ke, ok := gtx.Event(key.Filter{Required: key.ModCtrl, Name: key.Name("D")})
 		if !ok {
@@ -295,8 +310,10 @@ func toggleTheme(gtx *layout.Context, env *kit.Env, light, dark *theme.Theme) {
 		if k, isKey := ke.(key.Event); isKey && k.State == key.Press {
 			if env.Th == light {
 				env.Th = dark
+				sc.settings.Prefs.Current.ThemeMode = settings.ThemeDark
 			} else {
 				env.Th = light
+				sc.settings.Prefs.Current.ThemeMode = settings.ThemeLight
 			}
 		}
 	}
@@ -348,6 +365,20 @@ drain:
 
 func drainAccountsResults(w *accounts.Worker) []accounts.Result {
 	out := make([]accounts.Result, 0, 4)
+drain:
+	for {
+		select {
+		case res := <-w.Results():
+			out = append(out, res)
+		default:
+			break drain
+		}
+	}
+	return out
+}
+
+func drainSettingsResults(w *settings.Worker) []settings.Result {
+	out := make([]settings.Result, 0, 4)
 drain:
 	for {
 		select {

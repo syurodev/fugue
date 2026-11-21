@@ -42,6 +42,12 @@ func newTeamProposalFixture(t *testing.T, extraTOML string) *teamProposalFixture
 // newTeamFixture builds the fixture; noDispatch keeps approved teams queued.
 func newTeamFixture(t *testing.T, extraTOML string, noDispatch bool) *teamProposalFixture {
 	t.Helper()
+	return newTeamFixtureWithGit(t, extraTOML, noDispatch, "")
+}
+
+// newTeamFixtureWithGit builds the team fixture with an optional git binary override.
+func newTeamFixtureWithGit(t *testing.T, extraTOML string, noDispatch bool, gitBinary string) *teamProposalFixture {
+	t.Helper()
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +56,7 @@ func newTeamFixture(t *testing.T, extraTOML string, noDispatch bool) *teamPropos
 	hp, err := StartHost(t.Context(), &HostDeps{
 		DataDir: cheapVaultDataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("team-test")),
-		Transport: newScriptedTransport(), VendorBinary: exe,
+		Transport: newScriptedTransport(), VendorBinary: exe, GitBinary: gitBinary,
 		Bridge: VendorBridge{Binary: exe, Socket: filepath.Join(t.TempDir(), "host.sock")}, TeamAdmitter: admitterFor(noDispatch),
 	})
 	if err != nil {

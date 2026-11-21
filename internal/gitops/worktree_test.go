@@ -302,6 +302,70 @@ exit $status
 	}
 }
 
+// TestCanceledWorktreeAddLeavesNoBranch pins that canceling CreateTaskWorktree
+// mid-add (after git created the branch and worktree) still cleans up both the
+// worktree and the branch instead of aborting cleanup on the canceled context.
+//
+// Not parallel: it changes the process environment.
+func TestCanceledWorktreeAddLeavesNoBranch(t *testing.T) {
+	started := filepath.Join(t.TempDir(), "add-started")
+	t.Setenv("REAL_GIT", locateGit(t))
+	t.Setenv("ADD_STARTED", started)
+	script := `is_add=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "worktree" ] && [ "$a" = "add" ]; then
+    is_add=1
+  fi
+  prev="$a"
+done
+"$REAL_GIT" "$@"
+status=$?
+if [ -n "$is_add" ] && [ $status -eq 0 ]; then
+  echo ready > "$ADD_STARTED"
+  exec sleep 30
+fi
+exit $status
+`
+	m, root, _ := testManagerWithGit(t, wrapperGit(t, script))
+	repoDir := initRepo(t)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	errCh := make(chan error, 1)
+	task := supervise.Go(t.Context(), "test.cancel-worktree-add", func(context.Context) error {
+		_, err := m.CreateTaskWorktree(ctx, root, repoDir, testRepoID, "t1", "main")
+		errCh <- err
+		return nil
+	})
+	defer func() {
+		task.Stop()
+		if waitErr := task.Wait(); waitErr != nil {
+			t.Errorf("wait task: %v", waitErr)
+		}
+	}()
+
+	waitForFile(t, t.Context(), started)
+	cancel()
+	err := <-errCh
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("CreateTaskWorktree err = %v, want context.Canceled", err)
+	}
+	if out := fixtureGit(t, repoDir, "branch", "--list", "fugue/task/t1"); strings.TrimSpace(out) != "" {
+		t.Fatalf("the branch created before cancel survived: %q", out)
+	}
+	if rows, rowsErr := m.worktreeListRows(t.Context(), repoDir); rowsErr != nil || len(rows) != 1 {
+		t.Fatalf("worktrees after cancel = %v (err %v), want only the main worktree", rows, rowsErr)
+	}
+	wtPath, pathErr := TaskWorktreePath(root, testRepoID, "t1")
+	if pathErr != nil {
+		t.Fatalf("TaskWorktreePath: %v", pathErr)
+	}
+	if _, statErr := os.Lstat(wtPath); !errors.Is(statErr, os.ErrNotExist) {
+		t.Fatalf("worktree path still exists after cancel: %v", statErr)
+	}
+}
+
 // wrapperGit installs script at a fresh path and returns it as the manager's
 // git binary.
 func wrapperGit(t *testing.T, script string) string {

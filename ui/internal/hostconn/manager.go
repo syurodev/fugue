@@ -301,7 +301,14 @@ func (m *Manager) run(ctx context.Context) {
 }
 
 func (m *Manager) connected(ctx context.Context, conn *client.Client) bool {
-	defer conn.Close()
+	defer func() {
+		m.mu.Lock()
+		if m.conn == conn {
+			m.conn = nil
+		}
+		m.mu.Unlock()
+		conn.Close()
+	}()
 	if m.cfg.AutoStart {
 		status, err := m.hostStatus(ctx, conn)
 		if err != nil {
@@ -320,6 +327,12 @@ func (m *Manager) connected(ctx context.Context, conn *client.Client) bool {
 	m.mu.Unlock()
 	m.setState(ctx, StateConnected, "")
 	m.runStreams(ctx, conn)
+	m.mu.Lock()
+	if m.conn == conn {
+		m.conn = nil
+	}
+	m.mu.Unlock()
+	conn.Close()
 	if ctx.Err() != nil {
 		return false
 	}

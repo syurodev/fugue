@@ -85,7 +85,7 @@ func DialSession(ctx context.Context, socket string, token SessionToken) (*Sessi
 	if token.IsZero() {
 		return nil, ErrSessionTokenMissing
 	}
-	hc := &http.Client{Transport: newTransport(socket, false)}
+	hc := &http.Client{Transport: newTransport(socket, false, nil)}
 	tools := sessiontoolsv1connect.NewSessionToolServiceClient(hc, "http://fugue")
 	res, err := tools.Attach(ctx, connect.NewRequest(&sessiontoolsv1.AttachRequest{SessionToken: token.value}))
 	if err != nil {

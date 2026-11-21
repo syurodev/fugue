@@ -16,6 +16,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/vendor"
@@ -611,4 +612,131 @@ func (f *teamProposalFixture) assertMemberSession(t *testing.T, teamID string, t
 	if names := teamToolNames(t, f.tools, binding); slices.Contains(names, teamProposeToolName) {
 		t.Fatalf("a member is offered %v", names)
 	}
+}
+
+// TestHostCloseWaitsForInflightWorktreeAdd pins that HostProcess.Close waits
+// for an in-flight dispatchTeamAsync worktree creation to finish or undo its
+// half-made worktree and branch before returning.
+func TestHostCloseWaitsForInflightWorktreeAdd(t *testing.T) {
+	t.Parallel()
+	addStarted, undoStarted, undoRelease, wrapper := writeBlockingGitWrapper(t)
+
+	f := newTeamFixtureWithGit(t, "", false, wrapper)
+	initRepo(t, f.root)
+	if _, err := f.rt.teamProposals.Propose(t.Context(), f.session.ID, validTeamProposalArgs()); err != nil {
+		t.Fatalf("Propose: %v", err)
+	}
+	if answerErr := f.answerCard(t, "close-inflight-wt", teamProposeToolName, teamDecisionQuestionID, decisionApprove, ""); answerErr != nil {
+		t.Fatalf("approve: %v", answerErr)
+	}
+
+	testutil.Poll(t, "worktree add started", func() bool {
+		_, statErr := os.Stat(addStarted)
+		return statErr == nil
+	})
+
+	closeHostDuringUndo(t, f, undoStarted, undoRelease)
+
+	cmd := exec.CommandContext(t.Context(), "git")
+	cmd.Path = gitBinary(t)
+	cmd.Args = []string{"git", "-C", f.root, "branch", "--list", "fugue/task/*"}
+	out, listErr := cmd.CombinedOutput()
+	if listErr != nil {
+		t.Fatalf("list task branches: %v (%s)", listErr, out)
+	}
+	if strings.TrimSpace(string(out)) != "" {
+		t.Fatalf("task branch survived Close: %q", out)
+	}
+}
+
+func closeHostDuringUndo(t *testing.T, f *teamProposalFixture, undoStarted, undoRelease string) {
+	t.Helper()
+	// Advance the fake clock while Close runs so process.Stop cannot stall.
+	clockDone := make(chan struct{})
+	advancer := supervise.Go(t.Context(), "test.advance-clock-close", func(context.Context) error {
+		testutil.Spin(t, "advance clock for close", func() bool {
+			select {
+			case <-clockDone:
+				return true
+			default:
+				f.clk.Advance(time.Millisecond)
+				return false
+			}
+		})
+		return nil
+	})
+	closeErrCh := make(chan error, 1)
+	closer := supervise.Go(t.Context(), "test.host-close", func(context.Context) error {
+		closeErrCh <- f.hp.Close()
+		return nil
+	})
+
+	testutil.Poll(t, "undo branch delete started", func() bool {
+		_, statErr := os.Stat(undoStarted)
+		return statErr == nil
+	})
+	select {
+	case closeErr := <-closeErrCh:
+		t.Fatalf("Close returned (%v) while worktree undo was still in flight", closeErr)
+	default:
+	}
+
+	if writeErr := os.WriteFile(undoRelease, []byte("go\n"), 0o600); writeErr != nil {
+		t.Fatalf("release undo: %v", writeErr)
+	}
+	if closeErr := <-closeErrCh; closeErr != nil {
+		t.Fatalf("Close: %v", closeErr)
+	}
+	close(clockDone)
+	if waitErr := advancer.Wait(); waitErr != nil {
+		t.Fatalf("advancer wait: %v", waitErr)
+	}
+	if waitErr := closer.Wait(); waitErr != nil {
+		t.Fatalf("closer wait: %v", waitErr)
+	}
+}
+
+func writeBlockingGitWrapper(t *testing.T) (addStarted, undoStarted, undoRelease, wrapper string) {
+	t.Helper()
+	realGit := gitBinary(t)
+	dir := t.TempDir()
+	addStarted = filepath.Join(dir, "add-started")
+	undoStarted = filepath.Join(dir, "undo-started")
+	undoRelease = filepath.Join(dir, "undo-release")
+	wrapper = filepath.Join(dir, "wrappergit")
+	tmpl := `#!/bin/sh
+is_add=""
+is_branch_del=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "worktree" ] && [ "$a" = "add" ]; then
+    is_add=1
+  fi
+  if [ "$prev" = "branch" ] && [ "$a" = "-D" ]; then
+    is_branch_del=1
+  fi
+  prev="$a"
+done
+if [ -n "$is_branch_del" ]; then
+  echo ready > "__UNDO_STARTED__"
+  while [ ! -f "__UNDO_RELEASE__" ]; do
+    sleep 0.01
+  done
+fi
+"__REAL_GIT__" "$@"
+status=$?
+if [ -n "$is_add" ] && [ $status -eq 0 ]; then
+  echo ready > "__ADD_STARTED__"
+  exec sleep 30
+fi
+exit $status
+`
+	script := strings.NewReplacer(
+		"__REAL_GIT__", realGit,
+		"__ADD_STARTED__", addStarted,
+		"__UNDO_STARTED__", undoStarted,
+		"__UNDO_RELEASE__", undoRelease,
+	).Replace(tmpl)
+	testutil.WriteExecutable(t, wrapper, []byte(script))
+	return addStarted, undoStarted, undoRelease, wrapper
 }
