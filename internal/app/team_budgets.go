@@ -314,17 +314,6 @@ func (b *teamBudgets) buildBudgetFailureEvent(taskID, failureCode string, timerR
 	return &vendorstore.AppendTeamEventInput{EventID: evID, TaskID: cur.TaskID, EventType: vendorstore.EventTaskEnded, Outcome: vendorstore.TaskOutcomeFailed, FailureCode: failureCode, Mailbox: mail, FireTimer: timerRef}, nil
 }
 
-func buildSendMailbox(recipientTaskID string, item mailboxDigestItem) ([]vendorstore.MailboxEnqueueInput, error) {
-	if recipientTaskID == "" {
-		return nil, nil
-	}
-	raw, err := json.Marshal(item)
-	if err != nil {
-		return nil, errcode.Wrap(errcode.Internal, "marshal mailbox item", err)
-	}
-	return []vendorstore.MailboxEnqueueInput{{RecipientTaskID: recipientTaskID, Kind: vendorstore.MailboxKindSend, Payload: raw}}, nil
-}
-
 func (b *teamBudgets) processSilenceWatches(ctx context.Context, now time.Time) (time.Time, bool) {
 	teamIDs, err := b.deps.Store.ActiveTeamIDs(ctx)
 	if err != nil {
@@ -398,15 +387,6 @@ func (b *teamBudgets) evalTeamSilenceWatches(ctx context.Context, rec *vendorsto
 		}
 	}
 	return earliest
-}
-
-func allWatchesSilent(watched []*silenceWatch, now time.Time, timeout time.Duration) bool {
-	for _, w := range watched {
-		if now.Sub(w.lastActivity) < timeout {
-			return false
-		}
-	}
-	return len(watched) > 0
 }
 
 func (b *teamBudgets) trackTaskWatch(teamID string, task *vendorstore.TaskRecord, state vendorstore.TaskState, sessionID string, seq, updatedAt int64) {
