@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -141,10 +142,51 @@ func testFinalReviewConflictGoesToLead(t *testing.T) {
 	if err != nil || rec.State != vendorstore.TeamStateActive {
 		t.Fatalf("team state on conflict = (%s, %v), want active", rec.State, err)
 	}
-	mail, err := fx.hp.vendorStore.PendingMailboxRows(ctx, fx.teamID, intLeadTaskID)
-	if err != nil || len(mail) == 0 {
-		t.Fatalf("lead mailbox = (%d, %v), want conflict notice", len(mail), err)
+	assertConflictRecordedForLead(t, fx, "shared.txt")
+	testutil.Spin(t, "lead mailbox has conflict notice", func() bool {
+		mail, mErr := fx.hp.vendorStore.PendingMailboxRows(ctx, fx.teamID, intLeadTaskID)
+		return mErr == nil && hasMailboxSummary(ctx, fx, mail, "shared.txt")
+	})
+}
+
+func assertConflictRecordedForLead(t *testing.T, fx *integrationFixture, file string) {
+	t.Helper()
+	ctx := t.Context()
+	events, err := fx.hp.vendorStore.TeamEventsSince(ctx, fx.teamID, 0, 50)
+	if err != nil {
+		t.Fatal(err)
 	}
+	for i := range events {
+		ev := &events[i]
+		if ev.EventType != vendorstore.EventTeamDecided || ev.Outcome != "revision" {
+			continue
+		}
+		payload, openErr := fx.hp.vendorStore.OpenTeamEventPayload(ctx, fx.teamID, ev.Sequence)
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		var body struct {
+			Reason string `json:"reason"`
+		}
+		if json.Unmarshal(payload, &body) == nil && strings.Contains(body.Reason, file) {
+			return
+		}
+	}
+	t.Fatalf("expected EventTeamDecided(revision) with conflict in %s", file)
+}
+
+func hasMailboxSummary(ctx context.Context, fx *integrationFixture, mail []vendorstore.MailboxMessage, substr string) bool {
+	for i := range mail {
+		payload, openErr := fx.hp.vendorStore.OpenMailboxPayload(ctx, fx.teamID, mail[i].MessageID)
+		if openErr != nil {
+			continue
+		}
+		var item mailboxDigestItem
+		if json.Unmarshal(payload, &item) == nil && strings.Contains(item.Summary, substr) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestFinalReviewRejectWakesTheLead(t *testing.T) {
@@ -168,20 +210,7 @@ func TestFinalReviewRejectWakesTheLead(t *testing.T) {
 	}
 	testutil.Spin(t, "lead mailbox has rejection reason", func() bool {
 		mail, mErr := fx.hp.vendorStore.PendingMailboxRows(ctx, fx.teamID, intLeadTaskID)
-		if mErr != nil {
-			return false
-		}
-		for _, m := range mail {
-			payload, openErr := fx.hp.vendorStore.OpenMailboxPayload(ctx, fx.teamID, m.MessageID)
-			if openErr != nil {
-				continue
-			}
-			var item mailboxDigestItem
-			if json.Unmarshal(payload, &item) == nil && strings.Contains(item.Summary, "please add unit tests") {
-				return true
-			}
-		}
-		return false
+		return mErr == nil && hasMailboxSummary(ctx, fx, mail, "please add unit tests")
 	})
 }
 
