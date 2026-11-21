@@ -419,7 +419,7 @@ func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			local := gtx
-			// TODO(F10.20): move the inbox and accounts views into slots
+			// TODO(F10.20b): move the inbox and accounts views into slots
 			if s.inboxOpen {
 				return s.inboxView.layout(&local, env, s)
 			}
