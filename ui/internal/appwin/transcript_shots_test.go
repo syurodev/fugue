@@ -24,6 +24,7 @@ const (
 	shotScale90         = float32(0.9)
 	shotScale100        = float32(1.0)
 	shotScale125        = float32(1.25)
+	shotKindFileChange  = "file_change"
 )
 
 func transcriptShotSpecs() []shotSpec {
@@ -69,7 +70,7 @@ func transcriptCardsScene() ([]client.TranscriptItem, []string) {
 			View:     client.TranscriptView{Steps: []string{"Inspect parser", "Update codeblock diff renderer", "Regenerate goldens"}},
 		},
 		{
-			ItemID: "i-diff", Kind: "file_change", Sequence: 2, Revision: 1,
+			ItemID: "i-diff", Kind: shotKindFileChange, Sequence: 2, Revision: 1,
 			Metadata: client.TranscriptMetadata{ChangeKind: "modify", LinesAdded: 2, LinesRemoved: 1},
 			View: client.TranscriptView{
 				Title: "ui/internal/mdview/diff.go",
@@ -83,31 +84,60 @@ func transcriptCardsScene() ([]client.TranscriptItem, []string) {
 }
 
 func transcriptItemsScene() ([]client.TranscriptItem, []string) {
+	exitZero := int32(0)
 	items := []client.TranscriptItem{
 		{
 			ItemID: "i-u1", Kind: "user_message", Sequence: 1, Revision: 1,
 			TurnOrigin: "lead", Metadata: client.TranscriptMetadata{Origin: "lead"},
-			View: client.TranscriptView{Text: "Update ui/internal/mdview/codeblock.go:124 and check commit 24cd741."},
+			View: client.TranscriptView{Text: "Update ui/internal/mdview/codeblock.go:124, check commit 24cd741, and review #185."},
 		},
 		{
 			ItemID: "i-r1", Kind: "reasoning", Sequence: 2, Revision: 1,
 			Metadata: client.TranscriptMetadata{DurationMillis: 6000},
 			View:     client.TranscriptView{Text: "Checking existing layout measurements."},
 		},
-		shotToolCall("i-w1", "t1", "read_file", "succeeded", `{"file_path":"ui/internal/mdview/codeblock.go"}`, "", 3, nil),
-		shotToolCall("i-w2", "t1", "edit_file", "succeeded", `{"file_path":"ui/internal/mdview/diff.go"}`, "", 4, nil),
+		shotToolCall("i-w1", "t1", "read_file", "succeeded", `{"file_path":"ui/internal/mdview/codeblock.go","start_line":10,"end_line":40}`, "", 3, nil),
 		{
-			ItemID: "i-w3", TurnID: "t1", Kind: "subagent", Sequence: 5, Revision: 1,
-			Metadata: client.TranscriptMetadata{Status: "succeeded"},
-			View:     client.TranscriptView{Title: "Verify lint clean"},
+			ItemID: "i-w2", TurnID: "t1", Kind: shotKindFileChange, Sequence: 4, Revision: 1,
+			Metadata: client.TranscriptMetadata{ChangeKind: "modify", LinesAdded: 2, LinesRemoved: 1, DurationMillis: 90},
+			View:     client.TranscriptView{Title: "ui/internal/mdview/diff.go", Text: "@@ -1,1 +1,1 @@\n-old\n+new\n"},
 		},
 		{
-			ItemID: "i-w4", TurnID: "t1", Kind: "command", Sequence: 6, Revision: 1,
-			Metadata: client.TranscriptMetadata{Source: "git", Status: "succeeded"},
-			View:     client.TranscriptView{Title: "/review"},
+			ItemID: "i-w3", TurnID: "t1", Kind: shotKindFileChange, Sequence: 5, Revision: 1,
+			Metadata: client.TranscriptMetadata{ChangeKind: "create", LinesAdded: 12, DurationMillis: 40},
+			View:     client.TranscriptView{Title: "ui/internal/mdview/badges.go"},
 		},
 		{
-			ItemID: "i-a1", Kind: "assistant" + "_message", Sequence: 7, Revision: 1,
+			ItemID: "i-w4", TurnID: "t1", Kind: shotKindFileChange, Sequence: 6, Revision: 1,
+			Metadata: client.TranscriptMetadata{ChangeKind: "delete", LinesRemoved: 8, DurationMillis: 30},
+			View:     client.TranscriptView{Title: "ui/internal/mdview/legacy.go"},
+		},
+		shotToolCall("i-w5", "t1", "grep", "succeeded", `{"pattern":"PaintBadgeChrome","directory":"ui/internal/mdview"}`, "ui/internal/mdview/badges.go:97: func PaintBadgeChrome\n", 7, nil),
+		shotToolCall("i-w6", "t1", "list_dir", "succeeded", `{"directory":"ui/internal/mdview"}`, "badges.go\ncodeblock.go\ndiff.go\n", 8, nil),
+		shotToolCall("i-w7", "t1", "bash", "succeeded", `{"command":"go test ./internal/mdview"}`, "ok github.com/syurodev/fugue/ui/internal/mdview\n", 9, &exitZero),
+		shotToolCall("i-w8", "t1", "fetch_url", "succeeded", `{"url":"https://github.com/syurodev/fugue/pull/185"}`, "Pull request details", 10, nil),
+		shotToolCall("i-w9", "t1", "web_search", "succeeded", `{"query":"gio op.Defer overlay"}`, "https://pkg.go.dev/gioui.org/op\n", 11, nil),
+		shotToolCall("i-w10", "t1", "mcp__github__get_pr", "succeeded", `{"number":185}`, `{"state":"open"}`, 12, nil),
+		shotToolCall("i-w11", "t1", "git_commit", "succeeded", `{"command":"git commit -m 'polish'"}`, "[feat/f10.4c 24cd741] polish v0.10", 13, nil),
+		shotToolCall("i-w12", "t1", "gh_pr", "succeeded", `{"command":"gh pr view 185"}`, "syurodev/fugue#185", 14, nil),
+		shotToolCall("i-w13", "t1", "bash", "succeeded", `{"command":"git checkout feat/f10.4c-transcript-items"}`, "Switched to branch 'feat/f10.4c-transcript-items'", 15, &exitZero),
+		{
+			ItemID: "i-w14", TurnID: "t1", Kind: "subagent", Sequence: 16, Revision: 1,
+			Metadata: client.TranscriptMetadata{Status: "succeeded"}, View: client.TranscriptView{Title: "Verify lint clean"},
+		},
+		shotToolCall("i-w15", "t1", "update_plan", "succeeded", `{"description":"Finish v0.10 row polish"}`, "", 17, nil),
+		{
+			ItemID: "i-ap", Kind: "approval", Sequence: 18, Revision: 1,
+			Metadata: client.TranscriptMetadata{RequestKind: "command", Status: "pending"},
+			View:     client.TranscriptView{Title: "go test -tags regenerate ./internal/appwin"},
+		},
+		{
+			ItemID: "i-q1", Kind: "tool_call", Sequence: 19, Revision: 1,
+			Metadata: client.TranscriptMetadata{Tool: "ask_user", RequestKind: "question", Status: "waiting"},
+			View:     client.TranscriptView{Title: "Keep PR #185 in one piece?"},
+		},
+		{
+			ItemID: "i-a1", Kind: "assistant" + "_message", Sequence: 20, Revision: 1,
 			View: client.TranscriptView{Text: "Updated `ui/internal/mdview/codeblock.go:124` in commit 24cd741.\n\n```go\nfunc Render() int {\n\treturn 42\n}\n```"},
 		},
 	}

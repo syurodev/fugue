@@ -22,8 +22,9 @@ import (
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
+// chroma's regexp2 engine keeps one background timer goroutine (runClock) on first use.
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m)
+	goleak.VerifyTestMain(m, goleak.IgnoreAnyFunction("github.com/dlclark/regexp2/v2.runClock"))
 }
 
 // harness is a headless transcript pane: a router for input, one kit.Env

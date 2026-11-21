@@ -106,12 +106,20 @@ func verifyFoldedFortyGroup(t *testing.T, grp *workGroup) *workGroup {
 
 func renderItemsPixels(t *testing.T, win *headless.Window, size image.Point, th *theme.Theme, items []*session.Item) *image.RGBA {
 	t.Helper()
+	return renderItemsPixelsExpanded(t, win, size, th, items, nil)
+}
+
+func renderItemsPixelsExpanded(t *testing.T, win *headless.Window, size image.Point, th *theme.Theme, items []*session.Item, openKeys []string) *image.RGBA {
+	t.Helper()
 	var ops op.Ops
 	var router input.Router
 	now := time.Unix(1_700_000_000, 0)
 	env := &kit.Env{Th: th, Sh: th.Shaper(), ReducedMotion: true}
 	st := NewState(kit.NewVirtualHeightCache())
 	st.FollowOff()
+	for _, k := range openKeys {
+		st.SetExpanded(k, true)
+	}
 	for range 2 {
 		ops.Reset()
 		env.Begin(now)

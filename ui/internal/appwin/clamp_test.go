@@ -8,8 +8,9 @@ import (
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 )
 
+// chroma's regexp2 engine keeps one background timer goroutine (runClock) on first use.
 func TestMain(m *testing.M) {
-	goleak.VerifyTestMain(m)
+	goleak.VerifyTestMain(m, goleak.IgnoreAnyFunction("github.com/dlclark/regexp2/v2.runClock"))
 }
 
 // TestClampDp pins the window-size clamp against the F10.1 finding: 900x1000
