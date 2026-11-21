@@ -3,9 +3,14 @@ package kit
 import (
 	"errors"
 	"fmt"
+	"image"
+	"strings"
 	"testing"
+	"time"
 
 	"gioui.org/font"
+	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/text"
 	"gioui.org/unit"
 	"golang.org/x/image/math/fixed"
@@ -144,5 +149,32 @@ func parameters(tok theme.Type, m unit.Metric) text.Parameters {
 		LineHeight:      fixed.I(m.Sp(tok.Line)),
 		LineHeightScale: 1,
 		WrapPolicy:      text.WrapWords,
+	}
+}
+
+// TestMiddleEllipsisKeepsFileName verifies that fitMiddleEllipsis inserts "…"
+// in the middle while keeping the trailing filename intact when space allows.
+func TestMiddleEllipsisKeepsFileName(t *testing.T) {
+	t.Parallel()
+	sh, err := fonts.Shaper()
+	if err != nil {
+		t.Fatalf("build shaper: %v", err)
+	}
+	th := theme.Light(sh)
+	var ops op.Ops
+	env := &Env{Th: &th, Sh: sh}
+	env.Begin(time.Unix(1_700_000_000, 0))
+	gtx := &layout.Context{
+		Ops:         &ops,
+		Metric:      unit.Metric{PxPerDp: 1.25, PxPerSp: 1.25},
+		Constraints: layout.Constraints{Max: image.Pt(220, 40)},
+	}
+	path := "ui/internal/very/deeply/nested/subpackage/component/codeblock_draw.go"
+	got := fitMiddleEllipsis(env, gtx, theme.TypeCodeSmall(), path, 220)
+	if !strings.Contains(got, "…") || !strings.HasSuffix(got, "/codeblock_draw.go") {
+		t.Fatalf("fitMiddleEllipsis = %q, want middle ellipsis keeping /codeblock_draw.go", got)
+	}
+	if w := measureLabel(env, gtx, theme.TypeCodeSmall(), got).X; w > 220 {
+		t.Fatalf("fitMiddleEllipsis width = %d, want <= 220", w)
 	}
 }

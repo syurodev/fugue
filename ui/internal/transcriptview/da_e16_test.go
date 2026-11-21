@@ -6,10 +6,13 @@ import (
 	"testing"
 	"time"
 
+	"gioui.org/gpu/headless"
 	"gioui.org/io/input"
 	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
 
@@ -24,8 +27,9 @@ import (
 )
 
 const (
-	daOldFile    = "old.go"
-	daSampleFile = "pkg/a.go"
+	daOldFile     = "old.go"
+	daSampleFile  = "pkg/a.go"
+	testOpenInbox = "Open inbox"
 )
 
 func renderGroupExpanded(t *testing.T, th *theme.Theme, size image.Point, items []*session.Item, openKeys []string) *image.RGBA {
@@ -226,4 +230,102 @@ func runBadgeFrame(t *testing.T, th *theme.Theme, router *input.Router, draw fun
 	env.FrameEnd(gtx)
 	router.Frame(&ops)
 	return dims
+}
+
+// TestToolRowObjectEllipsizesBeforeTheRightSlot verifies that a long command
+// and a long path at 125% UI scale stay on one line, truncate with an ellipsis
+// inside the Flexed object slot, and leave the right-hand action slot intact
+// with zero overlap.
+func TestToolRowObjectEllipsizesBeforeTheRightSlot(t *testing.T) {
+	t.Parallel()
+	shaper, err := fonts.Shaper()
+	if err != nil {
+		t.Fatal(err)
+	}
+	th := theme.Dark(shaper)
+	assertToolRowEllipsisCase(t, &th,
+		&toolRowSpec{verb: verbApproval, icon: kit.IconHelp, verbLabel: "Waiting for approval", query: "ls", warningRow: true, actionText: testOpenInbox},
+		&toolRowSpec{verb: verbApproval, icon: kit.IconHelp, verbLabel: "Waiting for approval", query: "go test -race -shuffle=on -tags regenerate ./internal/appwin/very/long/subpackage", warningRow: true, actionText: testOpenInbox},
+	)
+	assertToolRowEllipsisCase(t, &th,
+		&toolRowSpec{verb: verbEdited, icon: kit.IconPencil, verbLabel: "Edited", path: "a.go", line: 12, warningRow: true, actionText: testOpenInbox},
+		&toolRowSpec{verb: verbEdited, icon: kit.IconPencil, verbLabel: "Edited", path: "ui/internal/very/deeply/nested/subpackage/component/codeblock_draw.go", line: 124, warningRow: true, actionText: testOpenInbox},
+	)
+}
+
+func assertToolRowEllipsisCase(t *testing.T, th *theme.Theme, shortSpec, longSpec *toolRowSpec) {
+	t.Helper()
+	const winW, winH = 460, 80
+	win, err := glwin.Open(winW, winH)
+	if err != nil {
+		t.Fatalf("open headless window: %v", err)
+	}
+	shortImg, shortDims, rightBound := renderToolRowAt125(t, win, th, image.Pt(winW, winH), shortSpec)
+	longImg, longDims, _ := renderToolRowAt125(t, win, th, image.Pt(winW, winH), longSpec)
+	if longDims.Size.Y != shortDims.Size.Y {
+		t.Fatalf("long row height %d != single-line short row height %d", longDims.Size.Y, shortDims.Size.Y)
+	}
+	if longDims.Size.X > winW {
+		t.Fatalf("long row width %d exceeded container %d", longDims.Size.X, winW)
+	}
+	for y := range longDims.Size.Y {
+		for x := rightBound; x < winW; x++ {
+			if longImg.RGBAAt(x, y) != shortImg.RGBAAt(x, y) {
+				t.Fatalf("right slot pixel (%d,%d) changed from %+v to %+v; object overlapped right slot",
+					x, y, shortImg.RGBAAt(x, y), longImg.RGBAAt(x, y))
+			}
+		}
+	}
+	if !bandDiffersRGBA(shortImg, longImg, rightBound-24, rightBound, 0, longDims.Size.Y) {
+		t.Fatalf("expected truncated object/ellipsis ink in [%d,%d) before right slot", rightBound-24, rightBound)
+	}
+}
+
+func renderToolRowAt125(
+	t *testing.T, win *headless.Window, th *theme.Theme, size image.Point, spec *toolRowSpec,
+) (*image.RGBA, layout.Dimensions, int) {
+	t.Helper()
+	var ops op.Ops
+	var router input.Router
+	now := time.Unix(1_700_000_000, 0)
+	env := &kit.Env{Th: th, Sh: th.Shaper(), ReducedMotion: true}
+	card := cardOf(NewState(kit.NewVirtualHeightCache()), "ellip")
+	var dims layout.Dimensions
+	rightBound := size.X
+	for range 2 {
+		ops.Reset()
+		env.Begin(now)
+		paint.FillShape(&ops, th.Chrome().CanvasBg, clip.Rect{Max: size}.Op())
+		gtx := &layout.Context{
+			Ops: &ops, Metric: unit.Metric{PxPerDp: 1.25, PxPerSp: 1.25},
+			Constraints: layout.Constraints{Max: size}, Source: router.Source(), Now: now,
+		}
+		env.TrackInput(gtx)
+		dims = wrapSurfaceTone(env, gtx, env.Th.StatusTone(theme.StatusWarning).Fill, func(gtx *layout.Context) layout.Dimensions {
+			return renderToolRowLine(env, gtx, card, spec, "", false, false, Callbacks{})
+		})
+		btnW := card.inboxBtn.Measure(env, gtx, kit.ButtonProps{Text: spec.actionText, Variant: kit.Ghost, Size: kit.SizeSM}).Size.X
+		rightBound = size.X - gtx.Dp(theme.SpaceMD) - btnW - gtx.Dp(theme.SpaceSM)
+		env.FrameEnd(gtx)
+		if err := win.Frame(&ops); err != nil {
+			t.Fatalf("win.Frame: %v", err)
+		}
+		router.Frame(&ops)
+	}
+	img := image.NewRGBA(image.Rectangle{Max: size})
+	if err := win.Screenshot(img); err != nil {
+		t.Fatalf("screenshot: %v", err)
+	}
+	return img, dims, rightBound
+}
+
+func bandDiffersRGBA(a, b *image.RGBA, x0, x1, y0, y1 int) bool {
+	for y := max(y0, 0); y < min(y1, a.Bounds().Dy()); y++ {
+		for x := max(x0, 0); x < min(x1, a.Bounds().Dx()); x++ {
+			if a.RGBAAt(x, y) != b.RGBAAt(x, y) {
+				return true
+			}
+		}
+	}
+	return false
 }

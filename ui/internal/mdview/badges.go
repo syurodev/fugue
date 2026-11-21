@@ -188,6 +188,11 @@ func layoutBadgeRow(
 	label string, labelCol color.NRGBA,
 	subtle string, subtleCol color.NRGBA,
 ) layout.Dimensions {
+	suffixW := 0
+	if subtle != "" {
+		suffixW = kit.MeasureLabel(env, gtx, theme.TypeCodeSmall(), subtle).X
+	}
+	labelMaxW := max(gtx.Constraints.Max.X-gtx.Dp(theme.IconXS)-gtx.Dp(theme.SpaceXS)-suffixW, 0)
 	kids := []layout.FlexChild{
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := gtx
@@ -198,14 +203,15 @@ func layoutBadgeRow(
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Left: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				l := gtx
-				return kit.Label(env, &l, theme.TypeCodeSmall(), labelCol, label)
+				l.Constraints.Max.X = min(l.Constraints.Max.X, labelMaxW)
+				return kit.MiddleEllipsisLabel(env, &l, theme.TypeCodeSmall(), labelCol, label)
 			})
 		}),
 	}
 	if subtle != "" {
 		kids = append(kids, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := gtx
-			return kit.Label(env, &l, theme.TypeCodeSmall(), subtleCol, subtle)
+			return kit.EllipsisLabel(env, &l, theme.TypeCodeSmall(), subtleCol, subtle)
 		}))
 	}
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx, kids...)

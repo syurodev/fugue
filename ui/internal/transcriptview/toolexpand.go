@@ -20,10 +20,13 @@ func drawToolRowObject(
 ) layout.Dimensions {
 	kids := []layout.FlexChild{layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 		l := gtx
-		return kit.Label(env, &l, theme.TypeBody(), verbCol, spec.verbLabel)
+		return kit.EllipsisLabel(env, &l, theme.TypeBody(), verbCol, spec.verbLabel)
 	})}
 	add := func(fn func(layout.Context) layout.Dimensions) {
 		kids = append(kids, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if gtx.Constraints.Max.X <= gtx.Dp(theme.SpaceSM) {
+				return layout.Dimensions{}
+			}
 			return layout.Inset{Left: theme.SpaceSM}.Layout(gtx, fn)
 		}))
 	}
@@ -63,7 +66,7 @@ func appendPrimaryObjectKids(
 		q := spec.query
 		add(func(gtx layout.Context) layout.Dimensions {
 			l := gtx
-			return kit.Label(env, &l, tp, env.Th.Chrome().Fg, q)
+			return kit.EllipsisLabel(env, &l, tp, env.Th.Chrome().Fg, q)
 		})
 	}
 }
@@ -76,7 +79,7 @@ func appendTrailingObjectKids(
 		if spec.verb == verbSearched {
 			add(func(gtx layout.Context) layout.Dimensions {
 				l := gtx
-				return kit.Label(env, &l, theme.TypeBody(), ch.FgMuted, "in")
+				return kit.EllipsisLabel(env, &l, theme.TypeBody(), ch.FgMuted, "in")
 			})
 		}
 		dir := mdview.FileRef{Path: spec.dir, Raw: spec.dir}
@@ -100,7 +103,7 @@ func appendTrailingObjectKids(
 			s := seg
 			add(func(gtx layout.Context) layout.Dimensions {
 				l := gtx
-				return kit.Label(env, &l, s.tp, s.col, s.txt)
+				return kit.EllipsisLabel(env, &l, s.tp, s.col, s.txt)
 			})
 		}
 	}

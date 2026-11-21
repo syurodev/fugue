@@ -338,7 +338,7 @@ func renderToolRowLine(
 			return d
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Left: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Inset{Left: theme.SpaceSM, Right: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				l := gtx
 				return drawToolRowObject(env, &l, c, spec, verbCol, cb)
 			})
