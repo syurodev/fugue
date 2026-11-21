@@ -239,6 +239,7 @@ func (a *vendorSessionActor) endInterruptedTurn(ctx context.Context, turnID, out
 	}
 	a.state, a.turnID, a.userInterruptTurnID = next, "", ""
 	delete(a.turns, turnID)
+	a.cancelTurnInteractions(turnID)
 	a.resetIdleTimer(ctx)
 	a.manager.notifyWake(a.info.ID)
 	return nil
@@ -265,6 +266,7 @@ func (a *vendorSessionActor) endVaultLockedTurn(ctx context.Context, outcome str
 	a.vaultInterruptTurnID = ""
 	a.userInterruptTurnID = ""
 	delete(a.turns, turnID)
+	a.cancelTurnInteractions(turnID)
 	a.stopIdleTimer()
 	return nil
 }

@@ -136,6 +136,9 @@ func (s *screens) toggleInboxShortcut(gtx *layout.Context) {
 		}
 		if k, isKey := ke.(key.Event); isKey && k.State == key.Press {
 			s.inboxOpen = !s.inboxOpen
+			if s.inboxOpen {
+				s.accountsOpen = false
+			}
 		}
 	}
 }

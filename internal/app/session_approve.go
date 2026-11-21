@@ -219,10 +219,8 @@ func (s *SessionToolService) awaitAndTakeRelayed(ctx context.Context, binding Se
 	}
 	resolved, err := s.interactions.awaitResolvedUntil(ctx, ticket.RequestID, s.tokens.watch(binding))
 	if err != nil || resolved == nil || !resolved.Resolved {
-		if !s.tokens.live(binding) {
-			if _, invErr := s.interactions.owner.InvalidateOperation(opID); invErr != nil {
-				return approveChoice{}, false
-			}
+		if _, invErr := s.interactions.owner.InvalidateOperation(opID); invErr != nil {
+			return approveChoice{}, false
 		}
 		return approveChoice{}, false
 	}
