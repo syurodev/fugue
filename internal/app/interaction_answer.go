@@ -201,29 +201,39 @@ func (s *InteractionService) executeAnswer(ctx context.Context, cmd *AnswerInter
 }
 
 func (s *InteractionService) validateBeforeAnswer(ctx context.Context, ticket *interaction.Ticket, decision *interaction.Decision) error {
-	if s.teamCards != nil && isTeamCard(ticket) {
-		return s.teamCards.validateTeamCardAnswer(ctx, ticket, decision)
-	}
-	if s.taskQuestions != nil && isTaskQuestionCard(ticket) {
-		return s.taskQuestions.validateTaskQuestionAnswer(ctx, ticket, decision)
-	}
-	if s.teamDeadlines != nil && isTeamDeadlineCard(ticket) {
-		return s.teamDeadlines.validateTeamDeadlineAnswer(ctx, ticket, decision)
-	}
-	return nil
+	return s.dispatchCardHook(ctx, ticket, decision, true)
 }
 
 func (s *InteractionService) applyAfterAnswer(ctx context.Context, ticket *interaction.Ticket, decision *interaction.Decision) error {
-	if s.teamCards != nil && isTeamCard(ticket) {
-		return s.teamCards.applyTeamCardAnswer(ctx, ticket, decision)
+	return s.dispatchCardHook(ctx, ticket, decision, false)
+}
+
+func (s *InteractionService) dispatchCardHook(ctx context.Context, ticket *interaction.Ticket, decision *interaction.Decision, validateOnly bool) error {
+	validate, apply, ok := s.resolveCardHooks(ticket)
+	if !ok {
+		return nil
 	}
-	if s.taskQuestions != nil && isTaskQuestionCard(ticket) {
-		return s.taskQuestions.applyTaskQuestionAnswer(ctx, ticket, decision)
+	if validateOnly {
+		return validate(ctx, ticket, decision)
 	}
-	if s.teamDeadlines != nil && isTeamDeadlineCard(ticket) {
-		return s.teamDeadlines.applyTeamDeadlineAnswer(ctx, ticket, decision)
+	return apply(ctx, ticket, decision)
+}
+
+type cardHookFn func(context.Context, *interaction.Ticket, *interaction.Decision) error
+
+func (s *InteractionService) resolveCardHooks(ticket *interaction.Ticket) (validate, apply cardHookFn, ok bool) {
+	switch {
+	case s.teamCards != nil && isTeamCard(ticket):
+		return s.teamCards.validateTeamCardAnswer, s.teamCards.applyTeamCardAnswer, true
+	case s.taskQuestions != nil && isTaskQuestionCard(ticket):
+		return s.taskQuestions.validateTaskQuestionAnswer, s.taskQuestions.applyTaskQuestionAnswer, true
+	case s.teamDeadlines != nil && isTeamDeadlineCard(ticket):
+		return s.teamDeadlines.validateTeamDeadlineAnswer, s.teamDeadlines.applyTeamDeadlineAnswer, true
+	case s.teamFinalReviews != nil && isTeamFinalReviewCard(ticket):
+		return s.teamFinalReviews.validateTeamFinalReviewAnswer, s.teamFinalReviews.applyTeamFinalReviewAnswer, true
+	default:
+		return nil, nil, false
 	}
-	return nil
 }
 
 // ExpireExpired resolves any overdue pending requests and emits resolved events.

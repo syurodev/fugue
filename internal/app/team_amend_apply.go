@@ -103,7 +103,7 @@ func amendedRolePayloads(edits []teams.RoleEdit, resolved map[string]teams.Role)
 			effort = edits[i].Effort
 		}
 		out = append(out, decidedRole{
-			Name: role.Name, Vendor: string(vendor), Model: model, Effort: string(effort), Permission: string(role.Permission),
+			Name: role.Name, Vendor: string(vendor), Model: model, Effort: string(effort), Permission: string(role.Permission), CrossReview: role.CrossReview,
 		})
 	}
 	return out

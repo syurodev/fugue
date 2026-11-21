@@ -99,6 +99,8 @@ type VendorSessions struct {
 	reservations      map[string]slotAccountKey
 	inflightSpawns    int
 	spawnSettled      chan struct{}
+	waiterMu          sync.Mutex
+	turnWaiters       map[string]chan error
 }
 
 type pendingOwner struct {
@@ -129,6 +131,7 @@ func NewVendorSessions(ctx context.Context, deps *VendorSessionDeps) (*VendorSes
 		retainedOwners: make(map[*retainedOwner]struct{}),
 		capabilities:   make(map[string]vendor.Capability),
 		reservations:   make(map[string]slotAccountKey),
+		turnWaiters:    make(map[string]chan error),
 		pacer:          newVendorPacer(copyDeps.Clock, spawn, copyDeps.HostConfig, copyDeps.PromptPacingJitter),
 	}, nil
 }

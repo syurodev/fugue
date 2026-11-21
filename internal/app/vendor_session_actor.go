@@ -148,6 +148,7 @@ func (a *vendorSessionActor) call(ctx context.Context, command *actorCommand) er
 
 func (a *vendorSessionActor) run(ctx context.Context) error {
 	defer close(a.done)
+	defer a.manager.resolveTurnWaiter(a.info.ID, errcode.New(errcode.Unavailable, "vendor session ended"))
 	defer a.manager.removeActor(a.info.ID, a)
 	if ended := a.manager.deps.OnSessionEnded; ended != nil {
 		defer ended(a.info.ID)

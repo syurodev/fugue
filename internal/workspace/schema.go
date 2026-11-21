@@ -66,6 +66,7 @@ type RoleConfig struct {
 	Effort         string   `toml:"effort,omitempty"`
 	Permission     string   `toml:"permission"`
 	IsLeadEligible bool     `toml:"is_lead_eligible,omitempty"`
+	CrossReview    bool     `toml:"cross_review,omitempty"`
 	Checks         []string `toml:"checks,omitempty"`
 }
 

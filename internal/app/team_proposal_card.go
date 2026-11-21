@@ -19,17 +19,21 @@ import (
 
 // cardTruncationMarker ends a card field that outgrew its §9 limit. The full
 // content always stays in the transcript item.
-const cardTruncationMarker = "\n…(truncated; the full plan is in the transcript)"
+const (
+	cardTruncationMarker   = "\n…(truncated; the full plan is in the transcript)"
+	cardOptionApproveLabel = "Approve"
+	cardOptionRejectLabel  = "Reject"
+)
 
 // proposalDecisionOptions are the fixed choices of the proposal card (§5.3).
 // Labels are Fugue's own words, never model content; the IDs are the
 // decision options the decide path consumes.
 func proposalDecisionOptions() []interaction.Option {
 	return []interaction.Option{
-		{ID: decisionApprove, Label: "Approve", Description: "Activate the team and queue its root tasks (F11.2b applies the decision)"},
+		{ID: decisionApprove, Label: cardOptionApproveLabel, Description: "Activate the team and queue its root tasks (F11.2b applies the decision)"},
 		{ID: decisionApproveEdited, Label: "Approve with edits", Description: "Apply your edits and activate the team"},
 		{ID: decisionSolo, Label: "Work solo", Description: "Keep the session solo"},
-		{ID: decisionReject, Label: "Reject", Description: "Reject the proposal"},
+		{ID: decisionReject, Label: cardOptionRejectLabel, Description: "Reject the proposal"},
 	}
 }
 

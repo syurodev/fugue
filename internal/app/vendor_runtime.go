@@ -9,6 +9,7 @@ import (
 
 	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/interaction"
+	"github.com/syurodev/fugue/internal/ocr"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/storage"
@@ -211,13 +212,15 @@ func wireTeamServices(
 	// and task-question cards; wiring happens before any client can answer.
 	hp.rt.interactions.SetTeamCardResolver(hp.rt.teamProposals)
 	teamGit := locateTeamGit(ctx, deps)
+	ocrProbe := ocr.Probe(ctx, deps.OCRBinary, deps.VendorHostEnv, vendor.DefaultProbeTimeout)
 	gate := deps.TeamResultGate
 	if gate == nil {
-		gate = newHostResultGate(vs, teamGit, deps.DataDir, hp.rt.workspaces.domain, hp.rt.interactions, hp.rt.tags, hp.rt.heavy, sessions, deps.IDs)
+		gate = newHostResultGate(vs, teamGit, deps.DataDir, hp.rt.workspaces.domain, hp.rt.interactions, hp.rt.tags, hp.rt.heavy, sessions, hp.rt.vendors, ocrProbe, deps.IDs)
 	}
 	hp.rt.teamTasks = newTeamTaskService(vs, vendorTaskSessions{svc: &VendorService{sessions: sessions, store: vs}}, hp.rt.workspaces.domain, teamGit, deps.DataDir, deps.IDs, v, gate)
 	hp.rt.teamTasks.SetInteractions(hp.rt.interactions)
 	hp.rt.interactions.SetTaskQuestionResolver(hp.rt.teamTasks)
+	hp.rt.interactions.SetTeamFinalReviewResolver(hp.rt.teamTasks)
 	// F11.10b: the team channel topics and the tasks service share the store
 	// and the sessions port with the team services. The topics register at
 	// startup (ended teams included — their channel stays readable) and on

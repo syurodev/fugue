@@ -58,6 +58,9 @@ type HostDeps struct {
 	// TeamResultGate evaluates checks after fugue_task_done (Q-125). Nil fails
 	// closed in F11.3 and leaves the task in checking until F11.5 wires checks.
 	TeamResultGate ResultGate
+	// OCRBinary overrides the Open Code Review (`ocr`) binary path; empty
+	// resolves `ocr` on PATH at host startup.
+	OCRBinary string
 	// TestFugueTools registers Fugue MCP tools for tests only. The fugue
 	// binary never sets it, so a normal host serves none of them.
 	TestFugueTools []*FugueTool

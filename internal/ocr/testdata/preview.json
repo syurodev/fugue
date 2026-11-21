@@ -1,0 +1,43 @@
+{
+  "schema_version": "1",
+  "mode": "range",
+  "repository": "/tmp/repo",
+  "from": "fugue/team/t1",
+  "to": "fugue/task/task-1",
+  "merge_base": "abc1234",
+  "total_files": 3,
+  "reviewable_count": 2,
+  "excluded_count": 1,
+  "reviewable_files": [
+    {
+      "path": "pkg/auth/session.go",
+      "status": "modified",
+      "additions": 12,
+      "deletions": 2,
+      "bundle": "auth"
+    },
+    {
+      "path": "pkg/api/handler.go",
+      "status": "added",
+      "additions": 25,
+      "deletions": 0,
+      "bundle": "api"
+    }
+  ],
+  "excluded_files": [
+    {
+      "path": "docs/notes.md",
+      "reason": "unsupported_ext"
+    }
+  ],
+  "bundles": [
+    {
+      "name": "auth",
+      "files": ["pkg/auth/session.go"]
+    },
+    {
+      "name": "api",
+      "files": ["pkg/api/handler.go"]
+    }
+  ]
+}

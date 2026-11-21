@@ -68,11 +68,12 @@ type teamDecisionPayload struct {
 
 // decidedRole is one role profile as decided on the card.
 type decidedRole struct {
-	Name       string `json:"name"`
-	Vendor     string `json:"vendor"`
-	Model      string `json:"model,omitempty"`
-	Effort     string `json:"effort,omitempty"`
-	Permission string `json:"permission"`
+	Name        string `json:"name"`
+	Vendor      string `json:"vendor"`
+	Model       string `json:"model,omitempty"`
+	Effort      string `json:"effort,omitempty"`
+	Permission  string `json:"permission"`
+	CrossReview bool   `json:"cross_review,omitempty"`
 }
 
 // validateTeamCardAnswer implements teamCardResolver. It runs before the card
