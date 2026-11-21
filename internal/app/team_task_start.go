@@ -61,12 +61,18 @@ func (d *teamDispatcher) startChild(ctx context.Context, rec *vendorstore.TeamRe
 	cwd, err := d.createWorktree(ctx, rec.TeamID, task, launch)
 	if err != nil {
 		slog.WarnContext(ctx, "creating the task worktree failed", "team_id", rec.TeamID, "task_id", task.TaskID, "error_code", string(errcode.CodeOf(err)))
+		if isDiskFull(err) {
+			return true, d.failDiskFull(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateStarting, launch.req.SessionID, err)
+		}
 		return true, d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateStarting, launch.req.SessionID, failWorktree)
 	}
 	launch.req.Cwd = cwd
 	if err := d.deps.Sessions.StartTaskSession(ctx, &launch.req); err != nil {
 		slog.WarnContext(ctx, "starting the task session failed", "team_id", rec.TeamID, "task_id", task.TaskID, "error_code", string(errcode.CodeOf(err)))
 		d.removeWorktree(ctx, launch, task.TaskID)
+		if isDiskFull(err) {
+			return true, d.failDiskFull(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateStarting, launch.req.SessionID, err)
+		}
 		return true, d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateStarting, launch.req.SessionID, failSessionStart)
 	}
 	if err := d.appendTaskStartedWithRetry(ctx, rec.TeamID, task.TaskID, launch.req.SessionID); err != nil {
@@ -252,6 +258,9 @@ func wrapGit(value string, err error) (string, error) {
 // createWorktree makes the team branch when it does not exist yet, then the
 // task worktree, and returns its host-derived path.
 func (d *teamDispatcher) createWorktree(ctx context.Context, teamID string, task *vendorstore.TaskRecord, launch *taskLaunch) (string, error) {
+	if d.deps.TestWorktreeErr != nil {
+		return "", d.deps.TestWorktreeErr
+	}
 	git := d.deps.Git
 	if err := git.CreateTeamBranch(ctx, launch.repoDir, teamID, launch.headCommit); err != nil && errcode.CodeOf(err) != errcode.AlreadyExists {
 		return "", boundaryError("create the team branch", err)

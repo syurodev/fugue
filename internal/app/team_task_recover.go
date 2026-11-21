@@ -61,7 +61,10 @@ func (s *teamTaskService) recoverCancel(ctx context.Context, sessionID string, c
 	if err != nil {
 		return "", errcode.Wrap(errcode.Internal, "encode recovery cancel payload", err)
 	}
-	if err := s.appendRecoveryEvent(ctx, sessionID, target.TaskID, recoveryDecisionCancel, "", payload); err != nil {
+	if target.HierarchyRole == vendorstore.RoleTeamManager {
+		return s.recoverCancelManager(ctx, sessionID, c, target, payload)
+	}
+	if err := s.appendRecoveryEvent(ctx, sessionID, target.TaskID, recoveryDecisionCancel, "", payload, "", "", nil); err != nil {
 		return "", err
 	}
 	s.invalidateTaskQuestionCard(ctx, c.team.TeamID, target.TaskID)
@@ -73,6 +76,53 @@ func (s *teamTaskService) recoverCancel(ctx context.Context, sessionID string, c
 	sessions = append(sessions, descSessions...)
 	s.closeCancelledSessions(ctx, sessions)
 	return "task " + target.TaskID + " recovery cancelled", nil
+}
+
+// recoverCancelManager cancels an unknown team manager without cancelling its
+// running work (§12, Q-159 A): the manager's non-terminal children are
+// re-parented to the lead in the same event projection, and only the
+// manager's own session closes. The caller is the lead through the takeover
+// grant; the store rejects a non-lead adopter. Mail already queued for the
+// manager is re-addressed to the lead in the same transaction, except the
+// rows the lead itself sent, so a queued member digest reaches the lead.
+func (s *teamTaskService) recoverCancelManager(ctx context.Context, sessionID string, c *callerTeamContext, target *vendorstore.TaskRecord, payload []byte) (string, error) {
+	keep := s.mailTheLeadSent(ctx, &c.team, target.TaskID, c.caller.TaskID)
+	if err := s.appendRecoveryEvent(ctx, sessionID, target.TaskID, recoveryDecisionCancel, "", payload, c.caller.TaskID, target.TaskID, keep); err != nil {
+		return "", err
+	}
+	s.invalidateTaskQuestionCard(ctx, c.team.TeamID, target.TaskID)
+	if target.SessionID != "" {
+		s.closeCancelledSessions(ctx, []string{target.SessionID})
+	}
+	return "task " + target.TaskID + " recovery cancelled; its running children were re-parented to the lead", nil
+}
+
+// mailTheLeadSent returns the manager's pending mailbox rows the lead itself
+// sent (§12, F11.9): a row whose opened payload names the adopting lead is
+// the lead's own message, so it stays behind. The vault is unlocked on the
+// delegator's tool path; a row that cannot be opened or attributed is not
+// kept, so it moves with the manager's other mail instead of stranding.
+func (s *teamTaskService) mailTheLeadSent(ctx context.Context, rec *vendorstore.TeamRecord, managerTaskID, leadTaskID string) []string {
+	rows, err := s.store.PendingMailboxRows(ctx, rec.TeamID, managerTaskID)
+	if err != nil {
+		slog.WarnContext(ctx, "reading the manager's pending mail before the takeover failed", "team_id", rec.TeamID, "task_id", managerTaskID, "error_code", string(errcode.CodeOf(err)))
+		return nil
+	}
+	var keep []string
+	for i := range rows {
+		raw, openErr := s.store.OpenMailboxPayload(ctx, rec.TeamID, rows[i].MessageID)
+		if openErr != nil {
+			continue
+		}
+		var item mailboxDigestItem
+		if json.Unmarshal(raw, &item) != nil {
+			continue
+		}
+		if item.TaskID == leadTaskID {
+			keep = append(keep, rows[i].MessageID)
+		}
+	}
+	return keep
 }
 
 func (s *teamTaskService) recoverKeepDiff(ctx context.Context, sessionID string, c *callerTeamContext, target *vendorstore.TaskRecord, reason string) (string, error) {
@@ -97,7 +147,7 @@ func (s *teamTaskService) recoverKeepDiff(ctx context.Context, sessionID string,
 	if err != nil {
 		return "", errcode.Wrap(errcode.Internal, "encode keep_diff payload", err)
 	}
-	if err := s.appendRecoveryEvent(ctx, sessionID, target.TaskID, recoveryDecisionKeepDiff, "", payload); err != nil {
+	if err := s.appendRecoveryEvent(ctx, sessionID, target.TaskID, recoveryDecisionKeepDiff, "", payload, "", "", nil); err != nil {
 		return "", err
 	}
 	s.invalidateTaskQuestionCard(ctx, c.team.TeamID, target.TaskID)
@@ -144,7 +194,7 @@ func (s *teamTaskService) resumeDetachedTask(ctx context.Context, callerSessionI
 	if !room {
 		return errcode.New(errcode.VendorCapacity, "no session capacity available to resume task")
 	}
-	if err := s.appendRecoveryEvent(ctx, callerSessionID, target.TaskID, recoveryDecisionResume, "", payload); err != nil {
+	if err := s.appendRecoveryEvent(ctx, callerSessionID, target.TaskID, recoveryDecisionResume, "", payload, "", "", nil); err != nil {
 		return err
 	}
 	if err := s.sessions.ResumeTaskSession(ctx, target.SessionID, wt); err != nil {
@@ -170,7 +220,7 @@ func (s *teamTaskService) respawnRecoveredTask(
 	if target.SessionID != "" {
 		s.closeTaskSession(ctx, target.SessionID)
 	}
-	if err := s.appendRecoveryEvent(ctx, callerSessionID, target.TaskID, recoveryDecisionResume, req.SessionID, payload); err != nil {
+	if err := s.appendRecoveryEvent(ctx, callerSessionID, target.TaskID, recoveryDecisionResume, req.SessionID, payload, "", "", nil); err != nil {
 		return err
 	}
 	if err := s.sessions.StartTaskSession(ctx, req); err != nil {
@@ -190,7 +240,7 @@ func (s *teamTaskService) finishRecoveredStart(ctx context.Context, teamID strin
 	return nil
 }
 
-func (s *teamTaskService) appendRecoveryEvent(ctx context.Context, callerSessionID, taskID, outcome, newSessionID string, payload []byte) error {
+func (s *teamTaskService) appendRecoveryEvent(ctx context.Context, callerSessionID, taskID, outcome, newSessionID string, payload []byte, reparentTo, readdressFrom string, readdressKeep []string) error {
 	return s.appendTeamWithRetry(ctx, callerSessionID, func(_ context.Context, cur *callerTeamContext) (*vendorstore.AppendTeamEventInput, error) {
 		curTarget, delErr := cur.requireDelegator(taskID)
 		if delErr != nil {
@@ -205,7 +255,9 @@ func (s *teamTaskService) appendRecoveryEvent(ctx context.Context, callerSession
 		}
 		return &vendorstore.AppendTeamEventInput{
 			EventID: evID, TaskID: curTarget.TaskID, EventType: vendorstore.EventTaskRecoveryDecided,
-			Outcome: outcome, SessionID: newSessionID, ProtectedPayload: payload,
+			Outcome: outcome, SessionID: newSessionID, ReparentTo: reparentTo,
+			ReaddressMailboxFrom: readdressFrom, ReaddressMailboxKeep: readdressKeep,
+			ProtectedPayload: payload,
 		}, nil
 	})
 }
