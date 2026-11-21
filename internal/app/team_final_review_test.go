@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/syurodev/fugue/internal/interaction"
+	"github.com/syurodev/fugue/internal/ocr"
 	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -244,5 +245,117 @@ func TestFinalReviewCardRebuildsOnUnlockAndInFlightReconciles(t *testing.T) {
 	rec, _, err := fx.hp.vendorStore.TeamSnapshot(ctx, fx.teamID)
 	if err != nil || rec.State != vendorstore.TeamStateDone {
 		t.Fatalf("team state after reconcile = (%s, %v), want done", rec.State, err)
+	}
+}
+
+func TestFinalReviewAnswerValidationAndEdgeCases(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	fx := newLeadMembersFixture(t, "team-fr-val", "sess-fr-val-lead", []string{teamTestTaskA}, [][]string{{"*"}})
+	svc := fx.rt.teamTasks
+	ticket := &interaction.Ticket{Binding: interaction.Binding{InvocationID: fx.teamID}}
+
+	if err := svc.validateTeamFinalReviewAnswer(ctx, ticket, &interaction.Decision{Outcome: interaction.OutcomeCancelled}); err != nil {
+		t.Fatalf("validate non-answered: %v", err)
+	}
+	if err := svc.applyTeamFinalReviewAnswer(ctx, ticket, &interaction.Decision{Outcome: interaction.OutcomeCancelled}); err != nil {
+		t.Fatalf("apply non-answered: %v", err)
+	}
+	badOpt := &interaction.Decision{
+		Outcome: interaction.OutcomeAnswered,
+		Answers: []interaction.Answer{{QuestionID: teamDecisionQuestionID, OptionIDs: []string{decisionSolo}}},
+	}
+	if err := svc.validateTeamFinalReviewAnswer(ctx, ticket, badOpt); err == nil {
+		t.Fatal("validate invalid option succeeded, want error")
+	}
+	if err := svc.applyTeamFinalReviewAnswer(ctx, ticket, badOpt); err == nil {
+		t.Fatal("apply invalid option succeeded, want error")
+	}
+	approveDec := &interaction.Decision{
+		Outcome: interaction.OutcomeAnswered,
+		Answers: []interaction.Answer{{QuestionID: teamDecisionQuestionID, OptionIDs: []string{decisionApprove}}},
+	}
+	if err := svc.validateTeamFinalReviewAnswer(ctx, ticket, approveDec); err == nil {
+		t.Fatal("validate approve in active state succeeded, want error")
+	}
+	if err := (&teamTaskService{}).applyTeamFinalReviewAnswer(ctx, ticket, approveDec); err == nil {
+		t.Fatal("apply approve without mergeQueue succeeded, want error")
+	}
+
+	wt := fx.createWorktree(t, teamTestTaskA, fx.teamBr)
+	fx.writeAndCommit(t, wt, "f.txt", "hi\n")
+	fx.doneAndAccept(t, teamTestTaskA)
+	fx.waitMergeIdle(t)
+	_ = findPendingFinalReviewCard(t, fx)
+	rejectEmpty := &interaction.Decision{
+		Outcome: interaction.OutcomeAnswered,
+		Answers: []interaction.Answer{{QuestionID: teamDecisionQuestionID, OptionIDs: []string{decisionReject}, Text: "\t "}},
+	}
+	if err := svc.applyTeamFinalReviewAnswer(ctx, ticket, rejectEmpty); err != nil {
+		t.Fatalf("apply reject empty reason: %v", err)
+	}
+	testutil.Spin(t, "lead mailbox has default reject reason", func() bool {
+		mail, mErr := fx.hp.vendorStore.PendingMailboxRows(ctx, fx.teamID, intLeadTaskID)
+		return mErr == nil && hasMailboxSummary(ctx, fx, mail, "rejected by user")
+	})
+}
+
+func TestCrossReviewCheckReadAndAggregate(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	fx := newLeadMembersFixture(t, "team-cr-read", "sess-cr-read-lead", []string{teamTestTaskA, "t-b"}, [][]string{{"*"}, {"*"}})
+	svc := fx.rt.teamTasks
+	if _, err := svc.readTaskChecks(ctx, fx.teamID, teamTestTaskA); err == nil {
+		t.Fatal("readTaskChecks without worktree succeeded, want error")
+	}
+
+	wt := fx.createWorktree(t, teamTestTaskA, fx.teamBr)
+	fx.writeAndCommit(t, wt, "f.txt", "hi\n")
+
+	cr := CrossReviewReport{
+		Coverage: CrossReviewCoverage{
+			ReviewedFiles:        2,
+			TotalFiles:           3,
+			ModeLabel:            "no OCR",
+			SkipReasons:          []string{"bundle-1: empty"},
+			DroppedLowCount:      1,
+			DroppedPositionCount: 1,
+		},
+		Findings: []ocr.Finding{{
+			File: "a.go", LineStart: 1, LineEnd: 2, Severity: "high", Rule: "sec", Description: "issue",
+		}},
+	}
+	payload, err := json.Marshal(cr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repErr := svc.appendTaskEventWithRetry(ctx, fx.teamID, func(_ *vendorstore.TeamRecord, _ []vendorstore.TaskRecord) (*vendorstore.AppendTeamEventInput, error) {
+		return &vendorstore.AppendTeamEventInput{
+			EventID: "ev-sub-ta", EventType: vendorstore.EventTaskReported, TaskID: teamTestTaskA,
+		}, nil
+	}); repErr != nil {
+		t.Fatal(repErr)
+	}
+	if chkErr := svc.appendTaskEventWithRetry(ctx, fx.teamID, func(_ *vendorstore.TeamRecord, _ []vendorstore.TaskRecord) (*vendorstore.AppendTeamEventInput, error) {
+		return &vendorstore.AppendTeamEventInput{
+			EventID: "ev-chk-ta", EventType: vendorstore.EventTaskCheckCompleted, TaskID: teamTestTaskA, Outcome: "passed", ProtectedPayload: payload,
+		}, nil
+	}); chkErr != nil {
+		t.Fatal(chkErr)
+	}
+
+	checks, err := svc.readTaskChecks(ctx, fx.teamID, teamTestTaskA)
+	if err != nil || !strings.Contains(checks, "passed=true") || !strings.Contains(checks, "[high] a.go:1-2 (sec): issue") {
+		t.Fatalf("readTaskChecks(with report) = (%q, %v)", checks, err)
+	}
+	_, tasks, err := fx.hp.vendorStore.TeamSnapshot(ctx, fx.teamID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agg := svc.aggregateCrossReviewSummary(ctx, fx.teamID, tasks)
+	if !strings.Contains(agg, "2/3 files reviewed") || !strings.Contains(agg, "1 finding(s)") {
+		t.Fatalf("aggregateCrossReviewSummary = %q", agg)
 	}
 }
