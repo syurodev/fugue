@@ -428,3 +428,36 @@ func TestAgentsNeverReceiveTheChannelStream(t *testing.T) {
 		t.Fatalf("a read delivered a turn: %q", got)
 	}
 }
+
+// TestTeamReadStopsAtThePageSizeBudget checks the 16 KiB page budget: a page
+// stops before exceeding it, so a line that does not fit is left for the
+// next page (§6.7).
+func TestTeamReadStopsAtThePageSizeBudget(t *testing.T) {
+	t.Parallel()
+	f := newChannelFixture(t)
+	note := func(eventID, marker string, size int) {
+		t.Helper()
+		f.appendTeamEvent(t, f.teamID, &vendorstore.AppendTeamEventInput{
+			EventID: eventID, EventType: vendorstore.EventTeamNoted,
+			ProtectedPayload: []byte(`{"author_task_id":"` + f.mgrID + `","note":"` + marker + strings.Repeat("x", size) + `"}`),
+		})
+	}
+	// Newest first: the second note is read before the first one.
+	note("note-huge", "huge-block-", 24*1024)
+	note("note-first", "first-block-", 9*1024)
+
+	read := f.readChannel(t, f.aBinding, `{"thread":"general"}`)
+	if !strings.Contains(read, "first-block-") {
+		t.Fatalf("general read = %q, want the fitting note", read)
+	}
+	if strings.Contains(read, "huge-block-") {
+		t.Fatal("the 24 KiB line exceeded the 16 KiB page budget")
+	}
+
+	// A page of nothing but oversized lines says so instead of dropping them
+	// silently.
+	only := f.readChannel(t, f.aBinding, `{"thread":"`+f.memAID+`"}`)
+	if strings.Contains(only, "untrusted source=team-channel") && len(only) > maxTeamReadBytes {
+		t.Fatalf("thread read = %d bytes, want the budget respected", len(only))
+	}
+}

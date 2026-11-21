@@ -203,7 +203,7 @@ func TestChannelRetryAttemptsShareOneThread(t *testing.T) {
 	lead, a := team+"-lead", team+"-a"
 	seq := seedChannelTeam(t, s, team, map[string]bool{lead: true, a: true})
 	seq = appendSeq(t, s, team, seq, []AppendTeamEventInput{
-		{EventID: "fail-" + team, TaskID: a, EventType: EventTaskEnded, Outcome: outcomeFailed, FailureCode: "checks"},
+		{EventID: "fail-" + team, TaskID: a, EventType: EventTaskEnded, Outcome: outcomeFailed, FailureCode: "overrun"},
 	})
 	res, err := s.RetryTask(t.Context(), team, a, &TaskRetryInput{ExpectedSeq: seq, SupersededEventID: "sup-" + team, CreatedEventID: "c-retry-" + team})
 	if err != nil {
