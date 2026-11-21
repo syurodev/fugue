@@ -21,52 +21,6 @@ import (
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
-func layoutCommitCard(env *kit.Env, gtx *layout.Context, c *cardState, item *session.Item, eff commitEffect, cb Callbacks) layout.Dimensions {
-	ch := env.Th.Chrome()
-	ref := mdview.GitRef{Kind: mdview.GitCommit, Text: shortHash(eff.Hash), Hash: eff.Hash, Subject: eff.Message}
-	dims, _, err := c.commitCard.Layout(env, gtx, kit.CardProps{Padding: theme.SpaceMD}, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								l := gtx
-								return kit.Label(env, &l, theme.TypeBody(), ch.FgMuted, "Committed")
-							}),
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return layout.Inset{Left: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									l := gtx
-									return mdview.DrawGitRefChip(env, &l, c.chipClick("commit:"+ref.Text), ref, gitRegistryFor(cb))
-								})
-							}),
-						)
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						if eff.Message == "" {
-							return layout.Dimensions{}
-						}
-						l := gtx
-						return kit.Label(env, &l, theme.TypeSmall(), ch.FgMuted, eff.Message)
-					}),
-				)
-			}),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				l := gtx
-				bp := kit.ButtonProps{Text: "View diff ↗", Variant: kit.Ghost, Size: kit.SizeSM}
-				clicked, btnErr := c.viewDiff.Layout(env, &l, bp)
-				logTVErr(btnErr)
-				if clicked && cb.OnViewDiff != nil {
-					cb.OnViewDiff(item.ItemID)
-				}
-				return c.viewDiff.Measure(env, &l, bp)
-			}),
-		)
-	})
-	logTVErr(err)
-	return dims
-}
-
 func layoutFileChange(env *kit.Env, gtx *layout.Context, st *State, c *cardState, item *session.Item, cb Callbacks) layout.Dimensions {
 	spec := fileChangeSpec(item)
 	clicked := spec.expandable && c.click.Clicked(*gtx)

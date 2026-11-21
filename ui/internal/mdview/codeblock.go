@@ -439,10 +439,13 @@ func (v *view) gutterWidths(gtx *layout.Context, totalLines int, isDiff, showLin
 	charW := max(v.shape("0", font.Font{Typeface: fonts.Mono}, fixed.I(gtx.Sp(theme.TypeCodeSmall().Size))).w, 1)
 	if showLineNums {
 		digits := len(strconv.Itoa(max(totalLines, 1)))
-		gutterW = digits*charW + gtx.Dp(theme.SpaceMD)
+		// SpaceSM before the number (it sits inside a hunk's tint) and SpaceMD after it.
+		gutterW = digits*charW + gtx.Dp(theme.SpaceSM) + gtx.Dp(theme.SpaceMD)
 	}
 	if isDiff {
-		markerW = charW + gtx.Dp(theme.SpaceSM)
+		// The +/− marker gets its own column with SpaceMD on each side, so the
+		// line number, the marker and the code never crowd each other.
+		markerW = charW + 2*gtx.Dp(theme.SpaceMD)
 	}
 	return gutterW, markerW
 }

@@ -175,11 +175,12 @@ func drawToolExpandedBody(
 	case verbEdited, verbCreated:
 		return drawDiffOrOutputExpanded(env, gtx, c, item, spec.path, spec.verb == verbEdited, cb)
 	case verbCommitted:
-		if spec.gitRef != nil {
-			eff := commitEffect{Hash: spec.gitRef.Hash, Message: spec.gitRef.Subject}
-			return layoutCommitCard(env, gtx, c, item, eff, cb)
+		// The row already carries the hash and subject; expanding shows the
+		// command's own output rather than a card that repeats the row.
+		if item.Display().Text == "" {
+			return layout.Dimensions{}
 		}
-		return layout.Dimensions{}
+		return drawDiffOrOutputExpanded(env, gtx, c, item, "", false, cb)
 	case verbRead, verbDeleted, verbOpenedPR, verbBranch, verbSubagent, verbPlan, verbApproval, verbQuestion:
 		if item.Display().Text == "" {
 			return layout.Dimensions{}

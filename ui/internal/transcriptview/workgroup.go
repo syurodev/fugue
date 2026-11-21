@@ -124,7 +124,9 @@ func layoutWorkRail(env *kit.Env, gtx *layout.Context, body func(*layout.Context
 		railW := max(gtx.Dp(theme.Hairline), 1)
 		railX := gtx.Dp(theme.SpaceXS)
 		rail := image.Rect(railX, 0, railX+railW, dims.Size.Y)
-		paint.FillShape(gtx.Ops, env.Th.Chrome().BorderSubtle, clip.Rect(rail).Op())
+		// BorderSubtle vanishes on the light canvas; the rail is a divider, so it
+		// uses the divider token.
+		paint.FillShape(gtx.Ops, env.Th.Chrome().Border, clip.Rect(rail).Op())
 	}
 	call.Add(gtx.Ops)
 	return dims
@@ -236,7 +238,7 @@ func layoutSubGroupHeader(env *kit.Env, gtx *layout.Context, sg *subGroup, expan
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := gtx
-			d, err := env.Icon(&l, iconForCategory(sg.category), theme.IconXS, ch.FgSubtle)
+			d, err := env.Icon(&l, iconForCategory(sg.category), theme.IconSM, ch.IconMuted)
 			logTVErr(err)
 			return d
 		}),
@@ -245,7 +247,8 @@ func layoutSubGroupHeader(env *kit.Env, gtx *layout.Context, sg *subGroup, expan
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			l := gtx
-			return kit.Label(env, &l, theme.TypeSmall(), ch.FgMuted, sg.title)
+			// Same size as a tool row, so a folded group reads as one of the rows.
+			return kit.Label(env, &l, theme.TypeBody(), ch.FgMuted, sg.title)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{Left: theme.SpaceXS}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {

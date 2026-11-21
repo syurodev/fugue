@@ -70,31 +70,29 @@ func (a *expandAnim) step(env *kit.Env, expanded, fromClick bool) (visible bool,
 }
 
 type cardState struct {
-	doc        *markdown.Doc
-	docSrc     string
-	md         mdview.State
-	click      widget.Clickable
-	code       *mdview.CodeBlockState
-	inputCode  *mdview.CodeBlockState
-	planCard   *kit.CardState
-	commitCard *kit.CardState
-	viewDiff   *kit.ButtonState
-	inboxBtn   *kit.ButtonState
-	anim       expandAnim
-	chips      map[string]*widget.Clickable
+	doc       *markdown.Doc
+	docSrc    string
+	md        mdview.State
+	click     widget.Clickable
+	code      *mdview.CodeBlockState
+	inputCode *mdview.CodeBlockState
+	planCard  *kit.CardState
+	viewDiff  *kit.ButtonState
+	inboxBtn  *kit.ButtonState
+	anim      expandAnim
+	chips     map[string]*widget.Clickable
 }
 
 func cardOf(st *State, key string) *cardState {
 	return kit.PayloadOf(st.list, key, func() *cardState {
 		return &cardState{
-			code:       mdview.NewCodeBlockState(),
-			inputCode:  mdview.NewCodeBlockState(),
-			planCard:   kit.NewCardState(),
-			commitCard: kit.NewCardState(),
-			viewDiff:   kit.NewButtonState(),
-			inboxBtn:   kit.NewButtonState(),
-			anim:       newExpandAnim(),
-			chips:      map[string]*widget.Clickable{},
+			code:      mdview.NewCodeBlockState(),
+			inputCode: mdview.NewCodeBlockState(),
+			planCard:  kit.NewCardState(),
+			viewDiff:  kit.NewButtonState(),
+			inboxBtn:  kit.NewButtonState(),
+			anim:      newExpandAnim(),
+			chips:     map[string]*widget.Clickable{},
 		}
 	})
 }

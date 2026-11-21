@@ -233,6 +233,10 @@ func countLabel(n int, noun string) string {
 	if n <= 0 {
 		return ""
 	}
+	if n == 1 {
+		// Nouns are passed in their plural form ("results", "files").
+		noun = strings.TrimSuffix(noun, "s")
+	}
 	return fmt.Sprintf("%d %s", n, noun)
 }
 
@@ -319,6 +323,9 @@ func renderToolRowLine(
 	verbCol, rightCol := ch.FgMuted, ch.FgSubtle
 	if spec.warningRow {
 		verbCol = env.Th.StatusTone(theme.StatusWarning).Fg
+		// A row waiting on the user shows only its action; a "running…" slot
+		// next to "Open inbox" says the same thing twice.
+		rightText = ""
 	}
 	if rightDanger {
 		rightCol = env.Th.Status().Danger

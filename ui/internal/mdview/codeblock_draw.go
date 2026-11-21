@@ -158,7 +158,10 @@ func (v *view) drawBlockHeader(
 				return kit.Label(env, &local, theme.TypeSmall(), c.FgSubtle, fmtLabel)
 			})
 		}),
-		layout.Flexed(1, func(layout.Context) layout.Dimensions { return layout.Dimensions{} }),
+		// The spacer must take its share, or the status sits glued to the title.
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
+		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
 			return v.drawHeaderStatus(env, &local, p)
@@ -294,7 +297,7 @@ func (v *view) drawCodeRowChrome(
 	pxSmall := fixed.I(gtx.Sp(theme.TypeCodeSmall().Size))
 	if !p.IsDiff || idx >= len(diffLines) {
 		if p.ShowLineNumbers && gutterW > 0 {
-			v.drawMonoGlyph(gtx, strconv.Itoa(idx+1), monoSmall, pxSmall, c.FgSubtle, pad, y, rowH)
+			v.drawMonoGlyph(gtx, strconv.Itoa(idx+1), monoSmall, pxSmall, c.FgSubtle, pad+gtx.Dp(theme.SpaceSM), y, rowH)
 		}
 		return
 	}
@@ -308,10 +311,13 @@ func (v *view) drawCodeRowChrome(
 	case DiffContext, DiffMeta:
 	}
 	if dl.LineNo > 0 && gutterW > 0 {
-		v.drawMonoGlyph(gtx, strconv.Itoa(dl.LineNo), monoSmall, pxSmall, c.FgSubtle, pad, y, rowH)
+		v.drawMonoGlyph(gtx, strconv.Itoa(dl.LineNo), monoSmall, pxSmall, c.FgSubtle, pad+gtx.Dp(theme.SpaceSM), y, rowH)
 	}
 	if dl.Marker != "" && markerW > 0 {
-		v.drawMonoGlyph(gtx, dl.Marker, monoSmall, pxSmall, diffMarkerColor(v.th, dl.Kind), pad+gutterW, y, rowH)
+		// Centered in its own column, with room on both sides, so number,
+		// marker and code read as three separate columns.
+		glyphW := v.shape(dl.Marker, monoSmall, pxSmall).w
+		v.drawMonoGlyph(gtx, dl.Marker, monoSmall, pxSmall, diffMarkerColor(v.th, dl.Kind), pad+gutterW+(markerW-glyphW)/2, y, rowH)
 	}
 }
 
