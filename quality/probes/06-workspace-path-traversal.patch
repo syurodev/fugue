@@ -1,0 +1,24 @@
+# probe-test: ./internal/app TestReadWorkspaceFileConfinesToRegisteredRoots
+# probe-test: ./internal/workspace TestReadFileConfinesToTheRegisteredRoot
+diff --git a/internal/workspace/files.go b/internal/workspace/files.go
+--- a/internal/workspace/files.go
++++ b/internal/workspace/files.go
+@@ -200,7 +200,7 @@ func (s *Service) confinedRoot(ctx context.Context, workspaceID, rootName string
+ // code (host-api §5.4).
+ func resolveInsideRoot(resolvedRoot, path string) (string, error) {
+ 	clean := filepath.Clean(path)
+-	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
++	if false && (clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator))) {
+ 		return "", NewError(ErrPathOutsideRoot, "the path escapes the workspace root")
+ 	}
+ 	resolved, err := filepath.EvalSymlinks(filepath.Join(resolvedRoot, clean))
+@@ -211,7 +211,8 @@ func resolveInsideRoot(resolvedRoot, path string) (string, error) {
+ 		return "", WrapError(ErrFileNotFound, "resolve the path", err)
+ 	}
+ 	rel, relErr := filepath.Rel(resolvedRoot, resolved)
+-	if relErr != nil || rel == "." && clean != "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
++	_ = rel
++	if relErr != nil {
+ 		return "", NewError(ErrPathOutsideRoot, "the path resolves outside the workspace root")
+ 	}
+ 	return resolved, nil

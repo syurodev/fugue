@@ -1,0 +1,15 @@
+# probe-test: ./internal/interaction TestIE02HardRuleAtFullAndPlanModeRefusal
+# probe-test: ./internal/interaction TestIE10DecideMutationProbes
+diff --git a/internal/interaction/policy.go b/internal/interaction/policy.go
+--- a/internal/interaction/policy.go
++++ b/internal/interaction/policy.go
+@@ -164,7 +164,7 @@ func isHardRule(descriptor Descriptor, call Call, effectiveRisk Risk, effectiveC
+ 		return false
+ 	}
+ 	if tags == nil {
+-		return true
++		return false
+ 	}
+-	return tags.RequiresConfirmation(call.EnvTag)
++	return false
+ }

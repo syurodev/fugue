@@ -70,9 +70,9 @@ func tallyOutcomes(r io.Reader) (map[string]outcomes, error) {
 		name := ev.Package + "." + ev.Test
 		o := tally[name]
 		switch ev.Action {
-		case "pass":
+		case actionPass:
 			o.passed++
-		case "fail":
+		case actionFail:
 			o.failed++
 		}
 		tally[name] = o

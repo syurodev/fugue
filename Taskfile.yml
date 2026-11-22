@@ -142,6 +142,11 @@ tasks:
     cmds:
       - '{{.HEAVY_WRAP}} {{.HEAVY_LOCK}} go test -race -shuffle=on -count={{if .COUNT}}{{.COUNT}}{{else}}1{{end}}{{if .RUN}} -run {{.RUN | shellQuote}}{{end}} {{if .PKG}}{{.PKG}}{{else}}./...{{end}}'
 
+  probes:
+    desc: Verify mutation patches with their declared tests
+    cmds:
+      - "{{.HEAVY_WRAP}} {{.HEAVY_LOCK}} go run ./cmd/fuguegate probes {{.CLI_ARGS}}"
+
   coverage:
     desc: Per-package coverage floor and baseline
     cmds:

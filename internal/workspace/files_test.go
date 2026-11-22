@@ -40,6 +40,12 @@ func newFileReadFixture(t *testing.T) *fileReadFixture {
 	if err := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(root, "link.txt")); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Symlink(outside, filepath.Join(root, "dir-link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(root, filepath.Join(root, "self-link")); err != nil {
+		t.Fatal(err)
+	}
 	write := func(name, content string) {
 		t.Helper()
 		if err := os.WriteFile(filepath.Join(root, name), []byte(content), 0o600); err != nil {
@@ -89,6 +95,12 @@ func TestReadFileConfinesToTheRegisteredRoot(t *testing.T) {
 	if _, dotErr := f.svc.ListDir(t.Context(), f.wsID, testMainRoot, "../outside"); CodeOf(dotErr) != ErrPathOutsideRoot {
 		t.Fatalf("listing escape error = %v", dotErr)
 	}
+	if _, symErr := f.svc.ListDir(t.Context(), f.wsID, testMainRoot, "dir-link"); CodeOf(symErr) != ErrPathOutsideRoot {
+		t.Fatalf("listing symlink escape error = %v", symErr)
+	}
+	if _, nulErr := f.svc.ListDir(t.Context(), f.wsID, testMainRoot, "notes\x00.md"); CodeOf(nulErr) != ErrPathOutsideRoot {
+		t.Fatalf("listing NUL error = %v", nulErr)
+	}
 }
 
 // assertFileReadAnswersTotalsAndRanges covers the whole read, the exact
@@ -131,6 +143,8 @@ func assertFileReadRefusesEscapesAndNonText(t *testing.T, f *fileReadFixture) {
 		"deep":      {fileTestNested + "/../../outside/secret.txt", ErrPathOutsideRoot},
 		"absolute":  {filepath.Join(f.outside, "secret.txt"), ErrPathOutsideRoot},
 		"symlink":   {"link.txt", ErrPathOutsideRoot},
+		"selflink":  {"self-link", ErrPathOutsideRoot},
+		"nul":       {"notes\x00.md", ErrPathOutsideRoot},
 		"missing":   {"gone.md", ErrFileNotFound},
 		"directory": {fileTestNested, ErrFileNotFound},
 		"binary":    {"bin.dat", ErrNotText},

@@ -1,0 +1,25 @@
+# probe-test: ./internal/app TestFugueNeverAnswersACodexRequestInAnyMode
+# probe-test: ./internal/app TestFugueNeverAnswersAnAgyPermissionRequestInAnyMode
+# probe-test: ./internal/app TestFugueNeverAnswersAVendorRequestInAnyMode
+diff --git a/internal/app/session_approve.go b/internal/app/session_approve.go
+--- a/internal/app/session_approve.go
++++ b/internal/app/session_approve.go
+@@ -217,6 +217,7 @@ func (s *SessionToolService) awaitAndTakeRelayed(ctx context.Context, binding Se
+ 	if err != nil {
+ 		return approveChoice{}, false
+ 	}
++	return approveChoice{allow: true}, true
+ 	resolved, err := s.interactions.awaitResolvedUntil(ctx, ticket.RequestID, s.tokens.watch(binding))
+ 	if err != nil || resolved == nil || !resolved.Resolved {
+ 		if _, invErr := s.interactions.owner.InvalidateOperation(opID); invErr != nil {
+diff --git a/internal/app/session_codex_relay.go b/internal/app/session_codex_relay.go
+--- a/internal/app/session_codex_relay.go
++++ b/internal/app/session_codex_relay.go
+@@ -288,6 +288,7 @@ func (s *SessionToolService) awaitAndTakeCodexRelayed(
+ 	if err != nil {
+ 		return codexRelayChoice{}, false
+ 	}
++	return codexRelayChoice{decision: vendor.Decision{Allow: true}, decisionLabel: "allow"}, true
+ 	if ticket.TurnCancelled {
+ 		return translateServerRelayedOutcome(ticket, req)
+ 	}

@@ -82,7 +82,7 @@ func taskProbe(t *testing.T, probe string) string {
 // HEAVY_LOCK; docs/quality-gates.md section 6. The mutation tasks are covered
 // by the prefix rule below, so only the base name is listed.
 func heavyTasks() []string {
-	return []string{"test", "test-pkg", "coverage", "fuzz-short", "mutation", "lint", "vet"}
+	return []string{"test", "test-pkg", "coverage", "fuzz-short", "mutation", "probes", "lint", "vet"}
 }
 
 // isHeavyTask reports whether a task must carry both wrappers.
