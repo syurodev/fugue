@@ -38,10 +38,14 @@ type Callbacks struct {
 	GitActions   mdview.GitRefRegistry
 }
 
-// State is one session's view state (F10.13, F10.4c): VirtualList owns the
-// scroll offset, follow pin, anchor, and bounded LRU height cache.
+// State is one session's view state (F10.13, F10.4c, F10.4d): VirtualList owns
+// the scroll offset, follow pin, anchor, and bounded LRU height cache; the
+// choice store keeps the reader's expand/collapse picks, and latest is the
+// "Latest" jump button.
 type State struct {
-	list *kit.VirtualListState
+	list    *kit.VirtualListState
+	choices choiceStore
+	latest  latestButton
 }
 
 // NewState builds a session's view state over the window's shared height cache.
@@ -101,6 +105,7 @@ func Layout(env *kit.Env, gtx *layout.Context, st *State, items []*session.Item)
 func LayoutWithCallbacks(env *kit.Env, gtx *layout.Context, st *State, items []*session.Item, cb Callbacks) layout.Dimensions {
 	rows := buildDisplayRows(items)
 	vis := virtualDisplayItems(rows)
+	cb = breakFollowOnContent(st, cb)
 	availW := gtx.Constraints.Max.X
 	colMax := gtx.Dp(theme.TranscriptMeasure)
 	colW := min(availW, colMax)
@@ -116,6 +121,7 @@ func LayoutWithCallbacks(env *kit.Env, gtx *layout.Context, st *State, items []*
 			return layoutRow(env, gtx, st, &rows[i], rowGapFor(rows, i), cb)
 		})
 	off.Pop()
+	drawLatest(env, gtx, st, rows, vis)
 	return layout.Dimensions{Size: image.Pt(availW, dims.Size.Y)}
 }
 

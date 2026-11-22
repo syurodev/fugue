@@ -210,4 +210,5 @@ func (s *screens) applyPageResult(r *session.Result) {
 	}
 	t.ApplyNewestPage(r.Items)
 	s.pendingPage[r.Session] = false
+	s.applyReopenAnchor(r.Session)
 }

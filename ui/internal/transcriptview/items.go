@@ -11,8 +11,20 @@ import (
 func layoutReasoning(env *kit.Env, gtx *layout.Context, st *State, c *cardState, item *session.Item) layout.Dimensions {
 	clicked := c.click.Clicked(*gtx)
 	if clicked {
-		st.list.ToggleExpanded(item.ItemID)
+		st.toggleUserChoice(item.ItemID)
 	}
+	// The auto rules (v0.9): reasoning streams open and closes when done. A
+	// reader choice stands down both for the rest of the turn.
+	running := isItemRunning(item)
+	if !clicked && !st.userChose(item.ItemID) {
+		expanded := st.list.Expanded(item.ItemID)
+		if running && !expanded {
+			st.list.SetExpanded(item.ItemID, true)
+		} else if c.wasRunning && !running && expanded {
+			st.list.SetExpanded(item.ItemID, false)
+		}
+	}
+	c.wasRunning = running
 	expanded := st.list.Expanded(item.ItemID)
 	vis, prog := c.anim.step(env, expanded, clicked)
 

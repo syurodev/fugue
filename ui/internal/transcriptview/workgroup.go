@@ -16,14 +16,17 @@ import (
 )
 
 type workGroupState struct {
-	click        widget.Clickable
-	anim         expandAnim
-	titleFade    motion.Follower
-	lastTitle    string
-	subExpanded  map[string]bool
-	subClicks    map[string]*widget.Clickable
-	subAnims     map[string]*expandAnim
-	userOverride bool
+	click     widget.Clickable
+	anim      expandAnim
+	titleFade motion.Follower
+	lastTitle string
+	// wasRunning is the running flag of the previous frame: the running→done
+	// edge fires the auto-collapse. It rides the payload cache, so a group
+	// that leaves the render window for longer than the cache's bound may
+	// miss the edge once — the expanded value itself never moves.
+	wasRunning bool
+	subClicks  map[string]*widget.Clickable
+	subAnims   map[string]*expandAnim
 }
 
 func groupStateOf(st *State, key string) *workGroupState {
@@ -31,11 +34,10 @@ func groupStateOf(st *State, key string) *workGroupState {
 		f := motion.NewFollower(motion.Smooth())
 		f.Snap(1)
 		return &workGroupState{
-			anim:        newExpandAnim(),
-			titleFade:   f,
-			subExpanded: map[string]bool{},
-			subClicks:   map[string]*widget.Clickable{},
-			subAnims:    map[string]*expandAnim{},
+			anim:      newExpandAnim(),
+			titleFade: f,
+			subClicks: map[string]*widget.Clickable{},
+			subAnims:  map[string]*expandAnim{},
 		}
 	})
 }
@@ -63,11 +65,11 @@ func layoutWorkGroup(env *kit.Env, gtx *layout.Context, st *State, grp *workGrou
 	gs := groupStateOf(st, grp.key)
 	clicked := gs.click.Clicked(*gtx)
 	if clicked {
-		gs.userOverride = true
-		st.list.ToggleExpanded(grp.key)
-	} else if !gs.userOverride && grp.running && !st.list.Expanded(grp.key) {
-		st.list.SetExpanded(grp.key, true)
+		st.toggleUserChoice(grp.key)
+	} else if !st.userChose(grp.key) {
+		applyGroupAutoRules(st, gs, grp)
 	}
+	gs.wasRunning = grp.running
 	expanded := st.list.Expanded(grp.key)
 	vis, prog := gs.anim.step(env, expanded, clicked)
 
@@ -111,6 +113,17 @@ func layoutWorkGroup(env *kit.Env, gtx *layout.Context, st *State, grp *workGrou
 			})
 		}),
 	)
+}
+
+// applyGroupAutoRules applies the v0.9 auto rules to one work group: a
+// running group opens, and it closes when the turn finishes. The caller has
+// already stood them down for a group the reader chose by hand.
+func applyGroupAutoRules(st *State, gs *workGroupState, grp *workGroup) {
+	if grp.running && !st.list.Expanded(grp.key) {
+		st.list.SetExpanded(grp.key, true)
+	} else if gs.wasRunning && !grp.running && st.list.Expanded(grp.key) {
+		st.list.SetExpanded(grp.key, false)
+	}
 }
 
 func layoutWorkRail(env *kit.Env, gtx *layout.Context, body func(*layout.Context) layout.Dimensions) layout.Dimensions {
@@ -206,9 +219,12 @@ func layoutOneSubGroup(env *kit.Env, gtx *layout.Context, st *State, gs *workGro
 	cl := gs.subClick(sg.key)
 	clicked := cl.Clicked(*gtx)
 	if clicked {
-		gs.subExpanded[sg.key] = !gs.subExpanded[sg.key]
+		// The fold state rides the list's per-key state, not the payload: a
+		// sub-group the reader folded keeps its fold when the group leaves
+		// the render window and comes back (v0.9, "Thao tác của user thắng").
+		st.list.ToggleExpanded(sg.key)
 	}
-	expanded := gs.subExpanded[sg.key]
+	expanded := st.list.Expanded(sg.key)
 	vis, prog := gs.subAnim(sg.key).step(env, expanded, clicked)
 	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
