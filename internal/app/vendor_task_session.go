@@ -13,9 +13,9 @@ import (
 // one session bound to a team task, in a host-derived working directory
 // (Q-119). Nothing in it comes from a client.
 type taskSessionRequest struct {
-	SessionID, Vendor, Model, Effort string
-	Cwd, WorkspaceID, RootName       string
-	TeamID, TaskID                   string
+	SessionID, Vendor, AccountID, Model, Effort string
+	Cwd, WorkspaceID, RootName                  string
+	TeamID, TaskID                              string
 	// Role is the task's hierarchy role; the session token is minted with it
 	// (Q-117), so the session principal is the task and nothing wider.
 	Role vendorstore.TeamRole
@@ -188,11 +188,23 @@ func (s *VendorService) startTaskSession(ctx context.Context, req *taskSessionRe
 	if err := s.requireUnlocked(); err != nil {
 		return err
 	}
+	accountID := req.AccountID
+	if accountID == "" {
+		accountID = vendorDefaultAccount
+	}
+	var home vendor.AccountHome
+	if s.accounts != nil {
+		resolved, ok := s.accounts.AccountHomeFor(req.Vendor, accountID)
+		if !ok {
+			return errcode.New(errcode.FailedPrecondition, "selected vendor account is not enabled")
+		}
+		home = resolved
+	}
 	spec := &vendor.StartSpec{
-		SessionID: req.SessionID, Cwd: req.Cwd, HostEnv: s.hostEnv, Model: req.Model, Effort: req.Effort, Bridge: s.bridge,
+		SessionID: req.SessionID, Cwd: req.Cwd, Home: home, HostEnv: s.hostEnv, Model: req.Model, Effort: req.Effort, Bridge: s.bridge,
 	}
 	info := &vendorstore.Session{
-		ID: req.SessionID, Vendor: req.Vendor, AccountID: vendorDefaultAccount, Role: string(req.Role),
+		ID: req.SessionID, Vendor: req.Vendor, AccountID: accountID, Role: string(req.Role),
 		TeamID: req.TeamID, TaskID: req.TaskID, ApprovalMode: req.ApprovalMode,
 		WorkspaceID: req.WorkspaceID, WorkspaceRoot: req.RootName,
 	}

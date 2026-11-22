@@ -98,9 +98,13 @@ func (hp *HostProcess) logDispatch(ctx context.Context, err error) {
 // wireTeamDispatch builds the dispatcher and the wake pump and hands every
 // newly active team to the former and every mailbox turn to the latter.
 func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorstore.Store, sessions *VendorSessions, accounts *vendor.Accounts, v *vault.Service, deps *HostDeps) {
+	hostCfg := globalHostConfigReader(hp.rt.workspaces)
+	if err := syncConfiguredAccounts(ctx, accounts, deps.DataDir, hostCfg); err != nil {
+		slog.WarnContext(ctx, "syncing configured extra vendor accounts failed", "error_code", string(errcode.CodeOf(err)))
+	}
 	admit := deps.TeamAdmitter
 	if admit == nil {
-		admit = newSchedulerAdmitter(sessions, vs, accounts)
+		admit = newSchedulerAdmitterWithConfig(sessions, vs, accounts, hostCfg, deps.Clock)
 	}
 	teamsCfg := globalOrWorkspaceTeamsConfigReader(hp.rt.workspaces)
 	sessions.SetWakeHook(func(sessionID string) { hp.rt.teamWake.NotifySessionReady(sessionID) })
@@ -135,11 +139,12 @@ func (hp *HostProcess) wireTeamDispatch(ctx, base context.Context, vs *vendorsto
 	hp.rt.teamDispatch = newTeamDispatcher(&teamDispatcherDeps{
 		Store: vs, Sessions: vendorTaskSessions{svc: hp.rt.vendors}, Admit: admit,
 		Roots: hp.rt.workspaces.domain, Git: locateTeamGit(ctx, deps), DataDir: deps.DataDir, IDs: deps.IDs, Vault: v,
-		Wake: hp.rt.teamWake, Clock: deps.Clock, TeamsConfig: teamsCfg, Budgets: hp.rt.teamBudgets,
+		Wake: hp.rt.teamWake, Clock: deps.Clock, TeamsConfig: teamsCfg, HostConfig: hostCfg, Accounts: accounts, Budgets: hp.rt.teamBudgets,
 		Disk: resolveDiskSpace(deps.DiskSpace),
 	})
 	hp.rt.teamDispatch.Start(base)
 	if hp.rt.teamTasks != nil {
+		hp.rt.teamTasks.SetAccounts(accounts, hostCfg)
 		hp.wireTeamTaskHooks(base, sessions, deps)
 	}
 	hp.rt.teamProposals.SetClock(deps.Clock)

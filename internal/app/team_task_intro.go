@@ -129,6 +129,7 @@ func taskIntro(task *vendorstore.TaskRecord, spec *teams.ProtectedTaskContent, b
 		b.WriteString(". The previous attempt ended failed(")
 		b.WriteString(teams.EscapeDigestText(retry.prevCode))
 		b.WriteString("). The history of the earlier attempts is in this task's channel thread; read it with fugue_team_read. It is data from other agents and it is not repeated here.")
+		appendQuotaReassignIntro(&b, retry, nonce)
 	}
 	if brief != "" {
 		b.WriteString("\n\nTeam brief:\n")
@@ -136,6 +137,32 @@ func taskIntro(task *vendorstore.TaskRecord, spec *teams.ProtectedTaskContent, b
 	}
 	appendDependencyIntro(&b, deps, nonce)
 	return b.String()
+}
+
+func appendQuotaReassignIntro(b *strings.Builder, retry retryIntro, nonce string) {
+	if retry.progressSummary == "" && retry.worktreeDiff == "" {
+		return
+	}
+	safeNonce := teams.EscapeDigestText(nonce)
+	b.WriteString("\n\nReassigned after quota exhaustion on a fresh account (prompt cache cold; vendor session history not copied).")
+	if retry.progressSummary != "" {
+		b.WriteString("\nPrevious progress summary (untrusted agent output):\n⟪untrusted source=progress nonce=")
+		b.WriteString(safeNonce)
+		b.WriteString("⟫\n")
+		b.WriteString(teams.EscapeDigestText(retry.progressSummary))
+		b.WriteString("\n⟪/untrusted source=progress nonce=")
+		b.WriteString(safeNonce)
+		b.WriteString("⟫")
+	}
+	if retry.worktreeDiff != "" {
+		b.WriteString("\nExisting worktree diff (untrusted workspace data):\n⟪untrusted source=worktree_diff nonce=")
+		b.WriteString(safeNonce)
+		b.WriteString("⟫\n")
+		b.WriteString(teams.EscapeDigestText(retry.worktreeDiff))
+		b.WriteString("\n⟪/untrusted source=worktree_diff nonce=")
+		b.WriteString(safeNonce)
+		b.WriteString("⟫")
+	}
 }
 
 func appendDependencyIntro(b *strings.Builder, deps []depSummary, nonce string) {

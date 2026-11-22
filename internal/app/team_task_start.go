@@ -36,9 +36,18 @@ type taskLaunch struct {
 // The history itself is never copied into the intro; the agent reads it from
 // its channel thread with fugue_team_read.
 type retryIntro struct {
-	attempt  int
-	root     string
-	prevCode string
+	attempt         int
+	root            string
+	prevCode        string
+	progressSummary string
+	worktreeDiff    string
+}
+
+type quotaReassignPayload struct {
+	FromAccount     string `json:"from_account,omitempty"`
+	ToAccount       string `json:"to_account,omitempty"`
+	ProgressSummary string `json:"progress_summary,omitempty"`
+	WorktreeDiff    string `json:"worktree_diff,omitempty"`
 }
 
 // startChild starts the vendor session of one child task in its own worktree
@@ -54,12 +63,9 @@ func (d *teamDispatcher) startChild(ctx context.Context, rec *vendorstore.TeamRe
 	if code != "" {
 		return true, d.failTaskInState(ctx, rec.TeamID, task.TaskID, vendorstore.TaskStateQueued, "", code)
 	}
-	releaseSlot, capErr := d.deps.Sessions.ReserveSlot(ctx, launch.req.SessionID, launch.req.Vendor, vendorDefaultAccount)
-	if capErr != nil {
-		if errors.Is(capErr, ErrVendorSessionCapacity) || errcode.CodeOf(capErr) == errcode.VendorCapacity {
-			return false, nil
-		}
-		return false, boundaryError("reserve task slot", capErr)
+	releaseSlot, ok, capErr := d.reserveTaskAccountSlot(ctx, launch)
+	if capErr != nil || !ok {
+		return false, capErr
 	}
 	defer releaseSlot()
 	launch.req.SlotReserved = true
@@ -94,6 +100,30 @@ func (d *teamDispatcher) startChild(ctx context.Context, rec *vendorstore.TeamRe
 	return d.sendTaskIntro(ctx, rec.TeamID, task, launch)
 }
 
+func (d *teamDispatcher) reserveTaskAccountSlot(ctx context.Context, launch *taskLaunch) (func(), bool, error) {
+	if d.picker != nil {
+		accountID, allLimited, _, _, pickErr := d.picker.PickForTask(ctx, launch.req.Vendor, launch.req.Model, "")
+		if pickErr != nil {
+			return nil, false, boundaryError("select vendor account", pickErr)
+		}
+		if allLimited {
+			return nil, false, nil
+		}
+		launch.req.AccountID = accountID
+	}
+	if launch.req.AccountID == "" {
+		launch.req.AccountID = vendorDefaultAccount
+	}
+	releaseSlot, capErr := d.deps.Sessions.ReserveSlot(ctx, launch.req.SessionID, launch.req.Vendor, launch.req.AccountID)
+	if capErr != nil {
+		if errors.Is(capErr, ErrVendorSessionCapacity) || errcode.CodeOf(capErr) == errcode.VendorCapacity {
+			return nil, false, nil
+		}
+		return nil, false, boundaryError("reserve task slot", capErr)
+	}
+	return releaseSlot, true, nil
+}
+
 func (d *teamDispatcher) sendTaskIntro(ctx context.Context, teamID string, task *vendorstore.TaskRecord, launch *taskLaunch) (bool, error) {
 	intro := taskIntro(task, &launch.spec, launch.brief, launch.deps, launch.nonce, launch.retry)
 	opCtx := context.WithoutCancel(ctx)
@@ -122,16 +152,7 @@ func (d *teamDispatcher) prepareLaunch(ctx context.Context, rec *vendorstore.Tea
 		return nil, code, err
 	}
 	launch := &taskLaunch{spec: spec}
-	if task.RetryOf != "" {
-		launch.retry.attempt = task.Attempt
-		launch.retry.root = vendorstore.ThreadRootTaskID(task.TaskID)
-		for i := range tasks {
-			if tasks[i].TaskID == task.RetryOf {
-				launch.retry.prevCode = tasks[i].FailureCode
-				break
-			}
-		}
-	}
+	d.initRetryContext(ctx, rec.TeamID, task, tasks, launch)
 	lead, err := d.deps.Store.Snapshot(ctx, rec.SessionID)
 	if err != nil {
 		return nil, "", boundaryError("read the lead session", err)
@@ -147,7 +168,7 @@ func (d *teamDispatcher) prepareLaunch(ctx context.Context, rec *vendorstore.Tea
 		launch.brief = brief
 	}
 	launch.deps = d.dependencySummaries(ctx, rec.TeamID, task, tasks)
-	if len(launch.deps) > 0 {
+	if len(launch.deps) > 0 || launch.retry.progressSummary != "" || launch.retry.worktreeDiff != "" {
 		nonce, nErr := d.deps.IDs.NewID()
 		if nErr != nil {
 			return nil, "", errcode.Wrap(errcode.Internal, "allocate the intro nonce", nErr)
@@ -160,6 +181,23 @@ func (d *teamDispatcher) prepareLaunch(ctx context.Context, rec *vendorstore.Tea
 		Role: task.HierarchyRole, ApprovalMode: approvalModeFor(role.Permission),
 	}
 	return launch, "", nil
+}
+
+func (d *teamDispatcher) initRetryContext(ctx context.Context, teamID string, task *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord, launch *taskLaunch) {
+	if task.RetryOf == "" {
+		return
+	}
+	launch.retry.attempt = task.Attempt
+	launch.retry.root = vendorstore.ThreadRootTaskID(task.TaskID)
+	for i := range tasks {
+		if tasks[i].TaskID == task.RetryOf {
+			launch.retry.prevCode = tasks[i].FailureCode
+			break
+		}
+	}
+	if launch.retry.prevCode == string(vendor.FailureQuota) {
+		d.loadQuotaReassignContext(ctx, teamID, task.RetryOf, &launch.retry)
+	}
 }
 
 // resolveTaskProfile decodes a task's sealed spec, looks up its decided catalog
@@ -239,8 +277,28 @@ func (d *teamDispatcher) resolveRepo(ctx context.Context, launch *taskLaunch, le
 	if err != nil {
 		return worktreeFailure(ctx, err)
 	}
+	if launch.retry.prevCode == string(vendor.FailureQuota) && task.RetryOf != "" {
+		if prevBranch, bErr := wrapGit(gitops.TaskBranchName(gitTaskID(task.RetryOf))); bErr == nil {
+			if ok, cErr := d.deps.Git.BranchContainsCommit(ctx, dir, prevBranch, head); cErr == nil && ok {
+				parent = prevBranch
+			}
+		}
+	}
 	launch.parentRef = parent
 	return ""
+}
+
+func (d *teamDispatcher) loadQuotaReassignContext(ctx context.Context, teamID, prevTaskID string, retry *retryIntro) {
+	raw, found, err := d.deps.Store.OpenLatestTaskEventPayload(ctx, teamID, prevTaskID, vendorstore.EventTaskSuperseded)
+	if err != nil || !found || len(raw) == 0 {
+		return
+	}
+	var payload quotaReassignPayload
+	if json.Unmarshal(raw, &payload) != nil {
+		return
+	}
+	retry.progressSummary = payload.ProgressSummary
+	retry.worktreeDiff = payload.WorktreeDiff
 }
 
 // worktreeFailure logs why the repository could not be used and returns the

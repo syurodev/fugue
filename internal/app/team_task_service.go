@@ -15,6 +15,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/vault"
+	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 	"github.com/syurodev/fugue/internal/workspace"
 )
@@ -75,6 +76,8 @@ type teamTaskService struct {
 	workspaces   *workspace.Service
 	mergeQueue   *teamMergeQueue
 	budgets      *teamBudgets
+	accounts     *vendor.Accounts
+	hostCfg      HostConfigReader
 	clk          clock.Clock
 	unlockMu     sync.Mutex
 }
@@ -119,6 +122,11 @@ func (s *teamTaskService) SetIntegration(ws *workspace.Service, mq *teamMergeQue
 
 func (s *teamTaskService) SetClock(clk clock.Clock) {
 	s.clk = clk
+}
+
+func (s *teamTaskService) SetAccounts(accounts *vendor.Accounts, hostCfg HostConfigReader) {
+	s.accounts = accounts
+	s.hostCfg = hostCfg
 }
 
 func (s *teamTaskService) now() time.Time {

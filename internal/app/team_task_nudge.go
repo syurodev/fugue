@@ -7,9 +7,11 @@ import (
 	"log/slog"
 	"unicode/utf8"
 
+	"github.com/syurodev/fugue/internal/gitops"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/transcript"
+	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -177,10 +179,142 @@ func (s *teamTaskService) OnTurnFailed(ctx context.Context, sessionID, failureCo
 		slog.WarnContext(ctx, "recording task quota/auth failure failed", "team_id", task.TeamID, "task_id", task.TaskID, "error_code", string(errcode.CodeOf(err)))
 		return
 	}
+	s.closeFailedTaskSession(ctx, sessionID)
 	if s.wake != nil {
 		s.wake.Notify()
 	}
-	s.closeFailedTaskSession(ctx, sessionID)
+	if failureCode == string(vendor.FailureQuota) && s.tryReassignOnQuota(ctx, &task, sessionID) {
+		s.dispatchReassignedTeam(ctx, task.TeamID, task.TaskID)
+	}
+}
+
+func (s *teamTaskService) dispatchReassignedTeam(ctx context.Context, teamID, taskID string) {
+	if s.dispatch == nil {
+		return
+	}
+	if dispErr := s.dispatch.Dispatch(ctx, teamID); dispErr != nil && ctx.Err() == nil {
+		slog.WarnContext(ctx, "dispatching quota-reassigned task failed", "team_id", teamID, "task_id", taskID, "error_code", string(errcode.CodeOf(dispErr)))
+	}
+}
+
+func (s *teamTaskService) tryReassignOnQuota(ctx context.Context, task *vendorstore.TaskRecord, sessionID string) bool {
+	if s.accounts == nil || (s.vault != nil && s.vault.Snapshot().State != vault.StateUnlocked) {
+		return false
+	}
+	fromAccount, toAccount, ok := s.pickQuotaAlternateAccount(ctx, task, sessionID)
+	if !ok {
+		return false
+	}
+	payload, ok := s.buildQuotaReassignPayload(ctx, task, sessionID, fromAccount, toAccount)
+	if !ok {
+		return false
+	}
+	return s.commitQuotaReassignRetry(ctx, task, fromAccount, toAccount, payload)
+}
+
+func (s *teamTaskService) pickQuotaAlternateAccount(ctx context.Context, task *vendorstore.TaskRecord, sessionID string) (fromAccount, toAccount string, ok bool) {
+	sess, err := s.store.Snapshot(ctx, sessionID)
+	if err != nil {
+		return "", "", false
+	}
+	fromAccount = sess.AccountID
+	if fromAccount == "" {
+		fromAccount = vendorDefaultAccount
+	}
+	_, role, code, err := resolveTaskProfile(ctx, s.store, task.TeamID, task.TaskID, task.CatalogRole)
+	if err != nil || code != "" {
+		return "", "", false
+	}
+	toAccount, allLimited, _, _, pickErr := s.accountPicker().PickForTask(ctx, sess.Vendor, role.Model, fromAccount)
+	if pickErr != nil || allLimited || toAccount == "" || toAccount == fromAccount {
+		return "", "", false
+	}
+	return fromAccount, toAccount, true
+}
+
+func (s *teamTaskService) buildQuotaReassignPayload(ctx context.Context, task *vendorstore.TaskRecord, sessionID, fromAccount, toAccount string) ([]byte, bool) {
+	progressSummary, _ := truncateUTF8(s.lastAssistantText(ctx, sessionID), teams.MaxReportSummaryBytes)
+	worktreeDiff := s.captureQuotaWorktreeDiff(ctx, task)
+	payload, mErr := json.Marshal(quotaReassignPayload{
+		FromAccount:     fromAccount,
+		ToAccount:       toAccount,
+		ProgressSummary: progressSummary,
+		WorktreeDiff:    worktreeDiff,
+	})
+	return payload, mErr == nil
+}
+
+func (s *teamTaskService) commitQuotaReassignRetry(ctx context.Context, task *vendorstore.TaskRecord, fromAccount, toAccount string, payload []byte) bool {
+	for attempt := range maxAppendRetries {
+		rec, _, snapErr := s.store.TeamSnapshot(ctx, task.TeamID)
+		if snapErr != nil || rec.State != vendorstore.TeamStateActive {
+			return false
+		}
+		supID, id1 := s.ids.NewID()
+		crtID, id2 := s.ids.NewID()
+		if id1 != nil || id2 != nil {
+			return false
+		}
+		_, retryErr := s.store.RetryTask(ctx, task.TeamID, task.TaskID, &vendorstore.TaskRetryInput{
+			ExpectedSeq:       rec.LastSeq,
+			SupersededEventID: supID,
+			CreatedEventID:    crtID,
+			SupersededPayload: payload,
+			QuotaReassign:     true,
+		})
+		if retryErr == nil {
+			slog.InfoContext(ctx, "reassigned quota-exhausted task to alternate account",
+				"team_id", task.TeamID, "task_id", task.TaskID, "from_account", fromAccount, "to_account", toAccount)
+			return true
+		}
+		if !errors.Is(retryErr, vendorstore.ErrSequenceConflict) || attempt+1 == maxAppendRetries {
+			return false
+		}
+	}
+	return false
+}
+
+func (s *teamTaskService) accountPicker() *accountPicker {
+	if s.dispatch != nil && s.dispatch.picker != nil {
+		return s.dispatch.picker
+	}
+	return newAccountPicker(s.accounts, s.hostCfg, s.clk)
+}
+
+func (s *teamTaskService) captureQuotaWorktreeDiff(ctx context.Context, task *vendorstore.TaskRecord) string {
+	if s.git == nil || s.roots == nil || s.dataDir == "" {
+		return ""
+	}
+	rec, tasks, err := s.store.TeamSnapshot(ctx, task.TeamID)
+	if err != nil {
+		return ""
+	}
+	lead, err := s.store.Snapshot(ctx, rec.SessionID)
+	if err != nil {
+		return ""
+	}
+	repoDir, err := s.roots.SelectSessionCwd(ctx, lead.WorkspaceID, lead.WorkspaceRoot)
+	if err != nil {
+		return ""
+	}
+	repoID := repoIDFor(repoDir)
+	wtID := gitTaskID(task.TaskID)
+	wtDir, wtErr := gitops.TaskWorktreePath(s.dataDir, repoID, wtID)
+	if wtErr != nil {
+		return ""
+	}
+	if _, cErr := s.git.CommitWorktree(ctx, wtDir, "fugue: checkpoint before quota reassignment"); cErr != nil {
+		slog.DebugContext(ctx, "quota reassignment worktree checkpoint skipped", "task_id", task.TaskID, "error_code", string(errcode.CodeOf(cErr)))
+	}
+	parentRef, pErr := parentBranch(task, tasks)
+	if pErr != nil {
+		return ""
+	}
+	diffRes, dErr := s.git.DiffAgainstParent(ctx, s.dataDir, repoID, wtID, parentRef, 0, defaultResultLimit)
+	if dErr != nil {
+		return ""
+	}
+	return diffRes.Text
 }
 
 func canFailTaskOnTurn(task *vendorstore.TaskRecord) bool {

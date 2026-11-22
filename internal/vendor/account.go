@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
+	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
 // AccountState is the state of a vendor account (orchestration §8).
@@ -41,11 +42,12 @@ const (
 	quotaStatusRejected = "rejected"
 )
 
-// Account is one vendor's default account as the host reports it. Windows is
-// empty and QuotaKnown false for a vendor with no quota signal (agy): the
-// scheduler treats that as "unknown", never as "unlimited".
+// Account is one vendor account as the host reports it. Windows is empty and
+// QuotaKnown false for a vendor with no quota signal (agy): the scheduler
+// treats that as "unknown", never as "unlimited".
 type Account struct {
 	Vendor      string
+	ID          string
 	State       AccountState
 	PausedUntil time.Time
 	Login       LoginState
@@ -60,34 +62,102 @@ type AccountVendor struct {
 	DirectQuota bool
 }
 
+type accountKey struct {
+	vendor string
+	id     string
+}
+
 type accountRecord struct {
 	vendor     AccountVendor
+	id         string
+	home       AccountHome
 	login      LoginState
 	needsLogin bool
 	windows    map[string]Window
 	updatedAt  time.Time
 }
 
-// Accounts holds the default account of each vendor in memory (F9.10a; more
-// accounts per vendor are F11.8). State is derived from what was observed: a
-// login status from the CLI's own status command, a failed(auth) turn, and the
-// vendor's quota windows. Nothing here reads a vendor credential (VR-03).
+// Accounts holds vendor accounts in memory (F9.10a default account; F11.8
+// opt-in extra accounts per vendor). State is derived from what was observed:
+// a login status from the CLI's own status command, a failed(auth) turn, and
+// the vendor's quota windows. Nothing here reads a vendor credential (VR-03).
 type Accounts struct {
-	clk      clock.Clock
-	mu       sync.Mutex
-	records  map[string]*accountRecord
-	order    []string
-	onChange func(*Account)
+	clk          clock.Clock
+	mu           sync.Mutex
+	multiEnabled bool
+	vendors      map[string]AccountVendor
+	records      map[accountKey]*accountRecord
+	order        []accountKey
+	onChange     func(*Account)
 }
 
-// NewAccounts builds a registry with one account per named vendor.
+// NewAccounts builds a registry with one default account per named vendor.
 func NewAccounts(clk clock.Clock, vendors []AccountVendor) *Accounts {
-	a := &Accounts{clk: clk, records: make(map[string]*accountRecord, len(vendors))}
+	a := &Accounts{
+		clk:     clk,
+		vendors: make(map[string]AccountVendor, len(vendors)),
+		records: make(map[accountKey]*accountRecord, len(vendors)),
+	}
 	for _, v := range vendors {
-		a.records[v.Name] = &accountRecord{vendor: v, login: LoginUnknown, windows: map[string]Window{}}
-		a.order = append(a.order, v.Name)
+		a.vendors[v.Name] = v
+		key := accountKey{vendor: v.Name, id: DefaultAccountID}
+		a.records[key] = &accountRecord{vendor: v, id: DefaultAccountID, login: LoginUnknown, windows: map[string]Window{}}
+		a.order = append(a.order, key)
 	}
 	return a
+}
+
+// SetMultiAccountEnabled enables or disables opt-in extra accounts per vendor.
+// When disabled, selection and quota checks fail closed to the default account.
+func (a *Accounts) SetMultiAccountEnabled(enabled bool) {
+	a.mu.Lock()
+	a.multiEnabled = enabled
+	a.mu.Unlock()
+}
+
+// MultiAccountEnabled reports whether opt-in extra accounts are enabled.
+func (a *Accounts) MultiAccountEnabled() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.multiEnabled
+}
+
+// RegisterAccount adds an extra account for vendor with its prepared home.
+func (a *Accounts) RegisterAccount(vendorName, accountID string, home AccountHome) error {
+	if err := ValidateAccountID(accountID); err != nil {
+		return err
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	v, ok := a.vendors[vendorName]
+	if !ok {
+		return errcode.New(errcode.InvalidArgument, "unknown vendor for account registration")
+	}
+	key := accountKey{vendor: vendorName, id: accountID}
+	if _, exists := a.records[key]; exists {
+		return errcode.New(errcode.AlreadyExists, "account already registered")
+	}
+	a.records[key] = &accountRecord{
+		vendor: v, id: accountID, home: home, login: LoginUnknown, windows: map[string]Window{},
+	}
+	a.order = append(a.order, key)
+	return nil
+}
+
+// RemoveAccount removes a registered extra account (never the default account).
+func (a *Accounts) RemoveAccount(vendorName, accountID string) error {
+	if accountID == "" || accountID == DefaultAccountID {
+		return errcode.New(errcode.InvalidArgument, "cannot remove the default vendor account")
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	key := accountKey{vendor: vendorName, id: accountID}
+	if _, exists := a.records[key]; !exists {
+		return errcode.New(errcode.NotFound, "vendor account not found")
+	}
+	delete(a.records, key)
+	a.order = slices.DeleteFunc(a.order, func(k accountKey) bool { return k == key })
+	return nil
 }
 
 // SetOnChange registers the callback that receives an account after an
@@ -100,10 +170,15 @@ func (a *Accounts) SetOnChange(fn func(*Account)) {
 	a.onChange = fn
 }
 
-// ObserveLogin records the login status the CLI reported. A logged-out status
-// needs login; a logged-in one clears it; unknown changes nothing.
+// ObserveLogin records the login status on vendor's default account.
 func (a *Accounts) ObserveLogin(vendor string, login LoginState) {
-	a.observe(vendor, func(r *accountRecord) {
+	a.ObserveAccountLogin(vendor, DefaultAccountID, login)
+}
+
+// ObserveAccountLogin records the login status the CLI reported for one account.
+// A logged-out status needs login; a logged-in one clears it; unknown changes nothing.
+func (a *Accounts) ObserveAccountLogin(vendor, accountID string, login LoginState) {
+	a.observe(vendor, accountID, func(r *accountRecord) {
 		switch login {
 		case LoginMissing:
 			r.login, r.needsLogin = login, true
@@ -114,16 +189,21 @@ func (a *Accounts) ObserveLogin(vendor string, login LoginState) {
 	})
 }
 
-// ObserveQuota merges the windows of one quota observation into the account.
+// ObserveQuota merges quota windows into vendor's default account.
+func (a *Accounts) ObserveQuota(vendor string, limit *RateLimit) {
+	a.ObserveAccountQuota(vendor, DefaultAccountID, limit)
+}
+
+// ObserveAccountQuota merges the windows of one quota observation into the account.
 // Windows are validated first: a window with a bad name or a non-finite or
 // negative utilization is dropped, utilization is clamped to [0, 1], and a
 // reset time that is zero, in the past or past the horizon is kept as unknown.
-func (a *Accounts) ObserveQuota(vendor string, limit *RateLimit) {
+func (a *Accounts) ObserveAccountQuota(vendor, accountID string, limit *RateLimit) {
 	if limit == nil {
 		return
 	}
 	now := a.clk.Now()
-	a.observe(vendor, func(r *accountRecord) {
+	a.observe(vendor, accountID, func(r *accountRecord) {
 		for i := range min(len(limit.Windows), maxQuotaWindows) {
 			w, ok := sanitizeWindow(&limit.Windows[i], now)
 			if !ok {
@@ -138,50 +218,122 @@ func (a *Accounts) ObserveQuota(vendor string, limit *RateLimit) {
 	})
 }
 
-// ObserveFailure applies a classified failed turn. failed(auth) needs login.
-// failed(quota) changes nothing by itself: the pause comes from the vendor's
-// exhausted window and its reset time, and a quota failure with no known
-// reset cannot be bounded. A temporary rate limit is left to the vendor.
+// ObserveFailure applies a classified failed turn to vendor's default account.
 func (a *Accounts) ObserveFailure(vendor string, class FailureClass) {
+	a.ObserveAccountFailure(vendor, DefaultAccountID, class)
+}
+
+// ObserveAccountFailure applies a classified failed turn to one account.
+// failed(auth) needs login; failed(quota) changes nothing by itself.
+func (a *Accounts) ObserveAccountFailure(vendor, accountID string, class FailureClass) {
 	if class != FailureAuth {
 		return
 	}
-	a.observe(vendor, func(r *accountRecord) { r.needsLogin = true })
+	a.observe(vendor, accountID, func(r *accountRecord) { r.needsLogin = true })
 }
 
-// Snapshot returns every account in registration order. A pause that reached
-// its reset time reads as ok.
+// Snapshot returns every active account in registration order (only default
+// accounts when multi-account opt-in is disabled). A pause past its reset reads as ok.
 func (a *Accounts) Snapshot() []Account {
 	now := a.clk.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	out := make([]Account, 0, len(a.order))
-	for _, name := range a.order {
-		out = append(out, a.records[name].view(now))
+	for _, key := range a.order {
+		if !a.multiEnabled && key.id != DefaultAccountID {
+			continue
+		}
+		out = append(out, a.records[key].view(now))
 	}
 	return out
 }
 
-// Account returns one vendor's current account, or false for an unknown vendor.
-func (a *Accounts) Account(vendor string) (Account, bool) {
+// VendorAccounts returns all active accounts for vendor in registration order.
+func (a *Accounts) VendorAccounts(vendor string) []Account {
 	now := a.clk.Now()
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	r, ok := a.records[vendor]
+	var out []Account
+	for _, key := range a.order {
+		if key.vendor != vendor {
+			continue
+		}
+		if !a.multiEnabled && key.id != DefaultAccountID {
+			continue
+		}
+		out = append(out, a.records[key].view(now))
+	}
+	return out
+}
+
+// Account returns one vendor's default account, or false for an unknown vendor.
+func (a *Accounts) Account(vendor string) (Account, bool) {
+	return a.AccountByID(vendor, DefaultAccountID)
+}
+
+// AccountByID returns one specific account of vendor, or false if not found.
+func (a *Accounts) AccountByID(vendor, accountID string) (Account, bool) {
+	if accountID == "" {
+		accountID = DefaultAccountID
+	}
+	now := a.clk.Now()
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.multiEnabled && accountID != DefaultAccountID {
+		return Account{}, false
+	}
+	r, ok := a.records[accountKey{vendor: vendor, id: accountID}]
 	if !ok {
 		return Account{}, false
 	}
 	return r.view(now), true
 }
 
-// QuotaAllows reports whether vendor's account may accept new team tasks under
-// the §8 (OR-09) 85% quota gate and account health rules.
-func (a *Accounts) QuotaAllows(vendor string) bool {
-	now := a.clk.Now()
-	acc, ok := a.Account(vendor)
+// AccountHomeFor returns the AccountHome for (vendor, accountID).
+// Fails closed to false for non-default accounts when multi-account is disabled.
+func (a *Accounts) AccountHomeFor(vendor, accountID string) (AccountHome, bool) {
+	if accountID == "" {
+		accountID = DefaultAccountID
+	}
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if !a.multiEnabled && accountID != DefaultAccountID {
+		return AccountHome{}, false
+	}
+	r, ok := a.records[accountKey{vendor: vendor, id: accountID}]
 	if !ok {
+		return AccountHome{}, false
+	}
+	return r.home, true
+}
+
+// QuotaAllows reports whether at least one active account for vendor may accept
+// new team tasks under the §8 (OR-09) 85% quota gate and account health rules.
+func (a *Accounts) QuotaAllows(vendor string) bool {
+	accounts := a.VendorAccounts(vendor)
+	if len(accounts) == 0 {
 		return true
 	}
+	now := a.clk.Now()
+	for i := range accounts {
+		if accountQuotaAllows(&accounts[i], now) {
+			return true
+		}
+	}
+	return false
+}
+
+// QuotaAllowsAccount reports whether a specific account of vendor passes the
+// §8 (OR-09) 85% quota gate and account health rules.
+func (a *Accounts) QuotaAllowsAccount(vendor, accountID string) bool {
+	acc, ok := a.AccountByID(vendor, accountID)
+	if !ok {
+		return false
+	}
+	return accountQuotaAllows(&acc, a.clk.Now())
+}
+
+func accountQuotaAllows(acc *Account, now time.Time) bool {
 	if acc.State == AccountPaused || acc.State == AccountNeedsLogin {
 		return false
 	}
@@ -228,10 +380,13 @@ func nextAccountQuotaReset(acc *Account, now time.Time) time.Time {
 	return earliest
 }
 
-func (a *Accounts) observe(vendor string, apply func(*accountRecord)) {
+func (a *Accounts) observe(vendor, accountID string, apply func(*accountRecord)) {
+	if accountID == "" {
+		accountID = DefaultAccountID
+	}
 	now := a.clk.Now()
 	a.mu.Lock()
-	r, ok := a.records[vendor]
+	r, ok := a.records[accountKey{vendor: vendor, id: accountID}]
 	if !ok {
 		a.mu.Unlock()
 		return
@@ -249,7 +404,7 @@ func (a *Accounts) observe(vendor string, apply func(*accountRecord)) {
 
 func (r *accountRecord) view(now time.Time) Account {
 	out := Account{
-		Vendor: r.vendor.Name, State: AccountOK, Login: r.login,
+		Vendor: r.vendor.Name, ID: r.id, State: AccountOK, Login: r.login,
 		QuotaKnown: r.vendor.DirectQuota, UpdatedAt: r.updatedAt,
 		Windows: make([]Window, 0, len(r.windows)),
 	}

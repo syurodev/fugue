@@ -24,6 +24,9 @@ type TaskRetryInput struct {
 	// MaxTeamAgents, when positive, enforces the §11 non-lead task ceiling
 	// (including retry attempts) inside the retry transaction.
 	MaxTeamAgents int
+	// QuotaReassign bypasses MaxTaskRetries for automatic quota-exhaustion
+	// reassignment across accounts (orchestration §8, budget §3).
+	QuotaReassign bool
 }
 
 // TaskRetryResult returns the newly created queued retry attempt and new team sequence.
@@ -87,7 +90,7 @@ func (s *Store) executeRetryTx(ctx context.Context, tx *sql.Tx, teamID, taskID s
 	if err != nil {
 		return TaskRetryResult{}, err
 	}
-	if src.attempt >= 1+MaxTaskRetries {
+	if !in.QuotaReassign && src.attempt >= 1+MaxTaskRetries {
 		return TaskRetryResult{}, ErrRetryLimitReached
 	}
 	if in.MaxTeamAgents > 0 {
