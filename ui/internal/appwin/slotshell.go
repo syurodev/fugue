@@ -174,7 +174,9 @@ func (s *screens) layoutGridContainer(gtx *layout.Context, env *kit.Env, plan Pl
 		paint.FillShape(local.Ops, env.Th.Chrome().CanvasBg, panel.Op(local.Ops))
 		area := gridRect
 		local.Constraints = layout.Constraints{Min: image.Pt(0, 0), Max: gridRect.Size()}
+		stack := panel.Push(local.Ops)
 		s.grid.layoutArea(&local, env, s, area, plan)
+		stack.Pop()
 		// The crisp outline rides on top of the cells' edges.
 		paint.FillShape(local.Ops, env.Th.Chrome().BorderSubtle,
 			clip.Stroke{Path: panel.Path(local.Ops), Width: float32(max(gtx.Dp(theme.Hairline), 1))}.Op())
