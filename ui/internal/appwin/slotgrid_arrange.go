@@ -19,9 +19,10 @@ import (
 // labelArrange names the popover and its heading row.
 const labelArrange = "Arrange"
 
-// arrangeRow is one popover row: a heading or a command button.
+// arrangeRow is one popover row: a heading, a divider, or a command button.
 type arrangeRow struct {
 	heading  bool
+	divider  bool
 	label    string
 	disabled bool
 	do       arrangeCmd
@@ -58,13 +59,14 @@ func (g *slotGrid) arrangeRows(p Pos) []arrangeRow {
 	labels := [4]string{"Move left", "Move right", "Move up", "Move down"}
 	dirs := [4]Direction{DirLeft, DirRight, DirUp, DirDown}
 	cmds := [4]arrangeCmd{arrangeMoveLeft, arrangeMoveRight, arrangeMoveUp, arrangeMoveDown}
-	rows := []arrangeRow{{heading: true, label: labels[0]}}
+	rows := []arrangeRow{{heading: true, label: "Move"}}
 	for i := range dirs {
 		_, ok := neighborCell(g.doc, p, dirs[i])
 		rows = append(rows, arrangeRow{label: labels[i], disabled: !ok, do: cmds[i]})
 	}
 	splitable := len(g.doc.Columns[0].Slots) < maxRowsPerColumn
 	return append(rows,
+		arrangeRow{divider: true},
 		arrangeRow{heading: true, label: labelArrange},
 		arrangeRow{label: fillLabel(g.doc, p), do: arrangeFill},
 		arrangeRow{label: "Split", disabled: !splitable, do: arrangeSplit},
@@ -82,16 +84,32 @@ func (g *slotGrid) measureArrangeContent(env *kit.Env, gtx *layout.Context, p Po
 	for i := range rows {
 		row := rows[i]
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			if row.heading {
-				return kit.Label(env, &local, theme.TypeSmall(), c.FgMuted, row.label)
+			cell := gtx
+			if row.divider {
+				return arrangeDividerDims(cell.Dp(theme.SpaceXS))
 			}
-			return g.arrPop.rowState(row).Measure(env, &local, kit.ButtonProps{
+			if row.heading {
+				return kit.Label(env, &cell, theme.TypeSmall(), c.FgMuted, row.label)
+			}
+			return g.arrPop.rowState(row).Measure(env, &cell, kit.ButtonProps{
 				Text: row.label, Variant: kit.Ghost, Size: kit.SizeSM, Disabled: row.disabled,
 			})
 		}))
 	}
-	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, children...).Size
+	var box layout.Dimensions
+	layout.Inset{
+		Top: theme.SpaceXS, Bottom: theme.SpaceXS, Left: theme.SpaceXS, Right: theme.SpaceXS,
+	}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+		local := gtx
+		box = layout.Flex{Axis: layout.Vertical}.Layout(local, children...)
+		return layout.Dimensions{}
+	})
+	return box.Size
+}
+
+// arrangeDividerDims is the divider row's size: gap, hairline, gap.
+func arrangeDividerDims(gap int) layout.Dimensions {
+	return layout.Dimensions{Size: image.Pt(0, 2*gap+max(int(theme.Hairline), 1))}
 }
 
 // layoutArrangeContent draws the rows; the popover calls it once per frame.
@@ -105,6 +123,14 @@ func (g *slotGrid) layoutArrangeContent(gtx *layout.Context, env *kit.Env, sc *s
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
 			local.Constraints.Min = image.Pt(0, 0)
+			if row.divider {
+				return layout.Inset{Top: theme.SpaceXS, Bottom: theme.SpaceXS}.Layout(local, func(gtx layout.Context) layout.Dimensions {
+					cell := gtx
+					h := max(cell.Dp(theme.Hairline), 1)
+					paint.FillShape(cell.Ops, c.BorderSubtle, clip.Rect{Max: image.Pt(cell.Constraints.Max.X, h)}.Op())
+					return layout.Dimensions{Size: image.Pt(cell.Constraints.Max.X, h)}
+				})
+			}
 			if row.heading {
 				return kit.Label(env, &local, theme.TypeSmall(), c.FgMuted, row.label)
 			}
@@ -120,7 +146,13 @@ func (g *slotGrid) layoutArrangeContent(gtx *layout.Context, env *kit.Env, sc *s
 			return st.Measure(env, &local, props)
 		}))
 	}
-	layout.Flex{Axis: layout.Vertical}.Layout(*gtx, children...)
+	layout.Inset{
+		Top: theme.SpaceXS, Bottom: theme.SpaceXS, Left: theme.SpaceXS, Right: theme.SpaceXS,
+	}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+		local := gtx
+		local.Constraints.Min = image.Pt(0, 0)
+		return layout.Flex{Axis: layout.Vertical}.Layout(local, children...)
+	})
 }
 
 // rowState returns the row's button state.

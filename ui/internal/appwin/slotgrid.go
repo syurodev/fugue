@@ -98,13 +98,12 @@ type slotGrid struct {
 	// buttons of the chrome: per cell the arrange and close buttons, per
 	// folded cell the edge tab, and the rail's and collapsed sidebar's own
 	// buttons.
-	arrangeBtns   map[string]*kit.IconButtonState
-	closeBtns     map[string]*kit.IconButtonState
-	tabBtns       map[string]*kit.IconButtonState
-	railBtns      map[railItem]*kit.IconButtonState
-	sidebarBtn    *kit.IconButtonState
-	sidebarToggle *kit.IconButtonState
-	arrPop        arrangeActions
+	arrangeBtns map[string]*kit.IconButtonState
+	closeBtns   map[string]*kit.IconButtonState
+	tabBtns     map[string]*kit.IconButtonState
+	railBtns    map[railItem]*kit.IconButtonState
+	sidebarBtn  *kit.IconButtonState
+	arrPop      arrangeActions
 	// newWindow is the last "open in new window" request (F10.21 consumes).
 	newWindow *NewWindowRequest
 	// applyGeometry applies a restored window size; the window owns the
@@ -165,7 +164,6 @@ func newSlotGrid() *slotGrid {
 		tabBtns:        map[string]*kit.IconButtonState{},
 		railBtns:       map[railItem]*kit.IconButtonState{},
 		sidebarBtn:     kit.NewIconButtonState(),
-		sidebarToggle:  kit.NewIconButtonState(),
 		arrPop:         newArrangeActions(),
 		drawerPresence: motion.NewPresence(motion.Smooth(), motion.Exit()),
 	}

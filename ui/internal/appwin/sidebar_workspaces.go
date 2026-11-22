@@ -346,12 +346,7 @@ func (s *screens) layoutPolicyBanner(env *kit.Env, gtx *layout.Context) layout.D
 // main slot.
 func (s *screens) layoutSidebarPanel(gtx *layout.Context, env *kit.Env) layout.Dimensions {
 	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(theme.SidebarWidth))
-	rows := []layout.FlexChild{
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			return s.layoutSidebarToggle(env, &local)
-		}),
-	}
+	var rows []layout.FlexChild
 	switch s.grid.rail {
 	case railChat:
 		rows = append(rows,
@@ -400,20 +395,6 @@ func (s *screens) layoutSidebarPanel(gtx *layout.Context, env *kit.Env) layout.D
 		}))
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, rows...)
-}
-
-// layoutSidebarToggle is the sidebar's collapse toggle (§5.3: the sidebar
-// folds to just the rail; the rail never folds).
-func (s *screens) layoutSidebarToggle(env *kit.Env, gtx *layout.Context) layout.Dimensions {
-	props := kit.IconButtonProps{Icon: kit.IconChevronLeft, Label: "Collapse sidebar", Variant: kit.IconButtonGhost, Size: kit.SizeSM}
-	clicked, err := s.grid.sidebarToggle.Layout(env, gtx, &props)
-	s.fail(err)
-	if clicked {
-		doc := cloneLayout(s.grid.doc)
-		doc.SidebarCollapsed = true
-		s.grid.edited(doc)
-	}
-	return s.grid.sidebarToggle.Measure(env, gtx, &props)
 }
 
 // layoutSidebarSoon is a rail's sidebar before its screens land.

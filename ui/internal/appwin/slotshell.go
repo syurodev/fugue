@@ -21,20 +21,23 @@ func atPoint(gtx *layout.Context, p image.Point, fn func(*layout.Context)) {
 	fn(gtx)
 }
 
-// The app shell (desktop-app §5.3, DA-10): the rail on the left — chat,
-// team, then the registered modules in install order, never folding — the
-// per-rail sidebar that can collapse to just the rail, and the slot grid
-// taking the rest. A narrow window folds regular columns into the edge tab
-// strip first and the sidebar second; the main slot keeps its minimum.
+// The app shell (desktop-app §5.3, DA-10): a darker AppBg base carrying the
+// rail and the sidebar directly on it, and the slot grid inside one rounded
+// CanvasBg container framed by the darker base. A narrow window folds
+// regular columns into the edge tab strip first and the sidebar second; the
+// main slot keeps its minimum.
 
-// layoutShell draws the failure strip, then the rail, the sidebar and the
-// grid (F10.5e keeps the strip above the panes).
+// layoutShell draws the failure strip over the shell base, then rail,
+// sidebar and grid (F10.5e keeps the strip above the panes).
 func (s *screens) layoutShell(gtx *layout.Context, env *kit.Env) {
 	if s.vaultGate.active(s.vault) {
 		s.vaultGate.layout(gtx, env, s)
 		return
 	}
 	s.layoutShortcuts(gtx)
+	// The outer shell is the darker AppBg everywhere: rail and sidebar sit
+	// on it directly, the grid floats in its rounded container (§5.3).
+	paint.FillShape(gtx.Ops, env.Th.Chrome().AppBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
 	layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
@@ -108,8 +111,8 @@ func (s *screens) toggleCompanion(kind SlotKind) {
 	s.grid.openCompanion(SlotRef{Kind: kind})
 }
 
-// layoutShellBody lays out rail, sidebar and grid; a width-driven sidebar
-// fold removes the sidebar before the grid measures.
+// layoutShellBody lays out rail, sidebar and the grid container; a
+// width-driven sidebar fold removes the sidebar before the grid measures.
 func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dimensions {
 	railW := gtx.Dp(theme.RailWidth)
 	sidebarOpen := s.sidebarVisible()
@@ -124,20 +127,24 @@ func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dime
 	return layout.Flex{Axis: layout.Horizontal}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
-			return layout.Inset{Right: theme.SpaceXS}.Layout(local, func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				return s.layoutRail(&local, env)
-			})
+			return s.layoutRail(&local, env, sidebarOpen)
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
-			return s.layoutSidebarOrRail(&local, env, sidebarOpen)
+			if !sidebarOpen {
+				// Collapsed, the sidebar leaves only the rail (§5.3); the
+				// rail's bottom toggle reopens it.
+				return layout.Dimensions{}
+			}
+			return layout.Inset{Right: theme.SpaceXS}.Layout(local, func(gtx layout.Context) layout.Dimensions {
+				local := gtx
+				local.Constraints.Max.X = min(local.Constraints.Max.X, gtx.Dp(theme.SidebarWidth))
+				return s.layoutSidebarPanel(&local, env)
+			})
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			local := gtx
-			area := image.Rectangle{Max: local.Constraints.Max}
-			s.grid.layoutArea(&local, env, s, area, plan)
-			return layout.Dimensions{Size: local.Constraints.Max}
+			return s.layoutGridContainer(&local, env, plan)
 		}),
 	)
 }
@@ -145,46 +152,48 @@ func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dime
 // sidebarVisible is the sidebar's user state: the persisted collapsed flag.
 func (s *screens) sidebarVisible() bool { return !s.grid.doc.SidebarCollapsed }
 
-// layoutSidebarOrRail draws the full sidebar, or — collapsed — the thin
-// reopen strip next to the rail.
-func (s *screens) layoutSidebarOrRail(gtx *layout.Context, env *kit.Env, open bool) layout.Dimensions {
-	if open {
-		return layout.Inset{Right: theme.SpaceSM}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			local.Constraints.Max.X = min(local.Constraints.Max.X, gtx.Dp(theme.SidebarWidth))
-			return s.layoutSidebarPanel(&local, env)
-		})
+// layoutGridContainer frames the whole slot grid as one rounded panel: the
+// darker AppBg frames it, the panel fills with the lighter CanvasBg behind a
+// hairline BorderSubtle outline, and every boundary inside stays a hairline
+// SplitPane divider (§5.3, ui-kit §6.27).
+func (s *screens) layoutGridContainer(gtx *layout.Context, env *kit.Env, plan PlanFoldResult) layout.Dimensions {
+	inset := layout.Inset{
+		Left:   theme.SpaceXS / 2,
+		Top:    theme.SpaceXS,
+		Right:  theme.SpaceXS,
+		Bottom: theme.SpaceXS,
 	}
-	return s.layoutSidebarExpand(gtx, env)
+	return inset.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+		local := gtx
+		gridRect := image.Rectangle{Max: local.Constraints.Max}
+		if gridRect.Empty() {
+			return layout.Dimensions{}
+		}
+		radius := gtx.Dp(theme.RadiusMD)
+		panel := clip.UniformRRect(gridRect, radius)
+		paint.FillShape(local.Ops, env.Th.Chrome().CanvasBg, panel.Op(local.Ops))
+		area := gridRect
+		local.Constraints = layout.Constraints{Min: image.Pt(0, 0), Max: gridRect.Size()}
+		s.grid.layoutArea(&local, env, s, area, plan)
+		// The crisp outline rides on top of the cells' edges.
+		paint.FillShape(local.Ops, env.Th.Chrome().BorderSubtle,
+			clip.Stroke{Path: panel.Path(local.Ops), Width: float32(max(gtx.Dp(theme.Hairline), 1))}.Op())
+		return layout.Dimensions{Size: gridRect.Size()}
+	})
 }
 
-// layoutSidebarExpand is the collapsed sidebar's strip: one button to
-// reopen.
-func (s *screens) layoutSidebarExpand(gtx *layout.Context, env *kit.Env) layout.Dimensions {
-	return layout.Flex{Axis: layout.Vertical, Alignment: layout.End}.Layout(*gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			props := kit.IconButtonProps{Icon: kit.IconChevronRight, Label: "Open sidebar", Variant: kit.IconButtonGhost, Size: kit.SizeSM}
-			clicked, err := s.grid.sidebarBtn.Layout(env, &local, &props)
-			s.fail(err)
-			if clicked {
-				doc := cloneLayout(s.grid.doc)
-				doc.SidebarCollapsed = false
-				s.grid.edited(doc)
-			}
-			return s.grid.sidebarBtn.Measure(env, &local, &props)
-		}),
-	)
-}
-
-// layoutRail draws the rail (§5.3): one icon per rail item, the selected one
-// washed; the rail never folds.
-func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env) layout.Dimensions {
+// layoutRail draws the rail (§5.3) on the shell's AppBg: the rail items'
+// icons centered in the rail column, the sidebar toggle at the bottom —
+// collapse points left when the sidebar is open, right when it is not; the
+// rail never folds.
+func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool) layout.Dimensions {
 	w := gtx.Dp(theme.RailWidth)
 	local := *gtx
-	local.Constraints = layout.Constraints{Min: image.Pt(w, 0), Max: image.Pt(w, gtx.Constraints.Max.Y)}
+	h := local.Constraints.Max.Y
+	local.Constraints = layout.Constraints{Min: image.Pt(w, 0), Max: image.Pt(w, h)}
 	gtx = &local
-	paint.FillShape(gtx.Ops, env.Th.Chrome().SurfaceBase, clip.Rect{Max: image.Pt(w, gtx.Constraints.Max.Y)}.Op())
+	btnW := gtx.Dp(theme.ControlMD)
+	x := max((w-btnW)/2, 0)
 	items := []struct {
 		item railItem
 		icon kit.IconName
@@ -203,16 +212,37 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env) layout.Dimension
 		}
 		var clicked bool
 		var err error
-		atPoint(gtx, image.Pt(0, y), func(gtx *layout.Context) {
+		atPoint(gtx, image.Pt(x, y), func(gtx *layout.Context) {
 			clicked, err = btn.Layout(env, gtx, &props)
 		})
 		s.fail(err)
 		if clicked {
 			s.grid.selectRail(it.item)
 		}
-		y += gtx.Dp(theme.ControlMD) + gtx.Dp(theme.SpaceXS)
+		y += btnW + gtx.Dp(theme.SpaceXS)
 	}
-	return layout.Dimensions{Size: image.Pt(w, gtx.Constraints.Max.Y)}
+	// The sidebar's toggle lives at the bottom of the rail itself, so a
+	// collapsed sidebar leaves only the rail (§5.3).
+	toggle := s.grid.sidebarBtn
+	icon := kit.IconChevronLeft
+	hint := "Collapse sidebar"
+	if !sidebarOpen {
+		icon = kit.IconChevronRight
+		hint = "Open sidebar"
+	}
+	props := kit.IconButtonProps{Icon: icon, Label: hint, Variant: kit.IconButtonGhost, Size: kit.SizeSM}
+	var clicked bool
+	var err error
+	atPoint(gtx, image.Pt(x, max(h-btnW-gtx.Dp(theme.SpaceSM), y)), func(gtx *layout.Context) {
+		clicked, err = toggle.Layout(env, gtx, &props)
+	})
+	s.fail(err)
+	if clicked {
+		doc := cloneLayout(s.grid.doc)
+		doc.SidebarCollapsed = sidebarOpen
+		s.grid.edited(doc)
+	}
+	return layout.Dimensions{Size: image.Pt(w, h)}
 }
 
 // railBtn returns the rail item's button state, building it on first use.
