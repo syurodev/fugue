@@ -15,6 +15,11 @@ import (
 	"github.com/syurodev/fugue/pkg/pb/fugue/workspace/v1/workspacev1connect"
 )
 
+const (
+	testPatchCmdNonPolicy = "patch-non-policy-1"
+	testPatchKeyIdle      = "teams.idle_detach_seconds"
+)
+
 func TestPatchWorkspaceConfigPreservesCommentsAndEnforcesCASAndPolicy(t *testing.T) {
 	t.Parallel()
 	srv, fugueHome := hostWithWorkspaceServer(t)
@@ -22,11 +27,18 @@ func TestPatchWorkspaceConfigPreservesCommentsAndEnforcesCASAndPolicy(t *testing
 	if _, err := host.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_APP, "v1")); err != nil {
 		t.Fatal(err)
 	}
+	ws := seedPatchWorkspace(t, workspaces)
+	patched := assertNonPolicyPatchAndDedup(t, workspaces, ws)
+	polPatched := assertPatchCASAndPolicy(t, workspaces, ws.Id, ws.ConfigHash, patched)
+	assertPatchBoundsAndCorrupt(t, workspaces, fugueHome, ws.Id, polPatched.ConfigHash)
+}
+
+func seedPatchWorkspace(t *testing.T, workspaces workspacev1connect.WorkspaceServiceClient) *workspacev1.Workspace {
+	t.Helper()
 	created, err := workspaces.CreateWorkspace(t.Context(), connect.NewRequest(&workspacev1.CreateWorkspaceRequest{Name: "patch-e2e"}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ws := created.Msg.Workspace
 	initial := strings.Join([]string{
 		"# Top comment",
 		"name = \"patch-e2e\"",
@@ -42,22 +54,22 @@ func TestPatchWorkspaceConfigPreservesCommentsAndEnforcesCASAndPolicy(t *testing
 		"",
 	}, "\n")
 	seeded, err := workspaces.UpdateWorkspaceConfig(t.Context(), connect.NewRequest(&workspacev1.UpdateWorkspaceConfigRequest{
-		Id: ws.Id, RawToml: []byte(initial), ExpectedHash: ws.ConfigHash,
+		Id: created.Msg.Workspace.Id, RawToml: []byte(initial), ExpectedHash: created.Msg.Workspace.ConfigHash,
 	}))
 	if err != nil {
 		t.Fatal(err)
 	}
-	ws = seeded.Msg.Workspace
+	return seeded.Msg.Workspace
+}
 
-	// Non-policy patch preserves comments, key order, and does not bump PolicyRevision.
+func assertNonPolicyPatchAndDedup(t *testing.T, workspaces workspacev1connect.WorkspaceServiceClient, ws *workspacev1.Workspace) *workspacev1.Workspace {
+	t.Helper()
+	patches := []*workspacev1.ConfigPatch{
+		{DottedKey: testPatchKeyIdle, Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewNumberValue(90)},
+		{DottedKey: "teams.team_max_agents", Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_DELETE},
+	}
 	patched, err := workspaces.PatchWorkspaceConfig(t.Context(), connect.NewRequest(&workspacev1.PatchWorkspaceConfigRequest{
-		CommandId:    "patch-non-policy-1",
-		WorkspaceId:  ws.Id,
-		ExpectedHash: ws.ConfigHash,
-		Patches: []*workspacev1.ConfigPatch{
-			{DottedKey: "teams.idle_detach_seconds", Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewNumberValue(90)},
-			{DottedKey: "teams.team_max_agents", Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_DELETE},
-		},
+		CommandId: testPatchCmdNonPolicy, WorkspaceId: ws.Id, ExpectedHash: ws.ConfigHash, Patches: patches,
 	}))
 	if err != nil {
 		t.Fatalf("PatchWorkspaceConfig non-policy: %v", err)
@@ -74,96 +86,76 @@ func TestPatchWorkspaceConfigPreservesCommentsAndEnforcesCASAndPolicy(t *testing
 	if patched.Msg.Workspace.PolicyRevision != ws.PolicyRevision {
 		t.Fatalf("PolicyRevision = %d, want %d", patched.Msg.Workspace.PolicyRevision, ws.PolicyRevision)
 	}
-
-	// CommandId dedup replays the same response and rejects a different payload.
 	replayed, err := workspaces.PatchWorkspaceConfig(t.Context(), connect.NewRequest(&workspacev1.PatchWorkspaceConfigRequest{
-		CommandId:    "patch-non-policy-1",
-		WorkspaceId:  ws.Id,
-		ExpectedHash: ws.ConfigHash,
-		Patches: []*workspacev1.ConfigPatch{
-			{DottedKey: "teams.idle_detach_seconds", Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewNumberValue(90)},
-			{DottedKey: "teams.team_max_agents", Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_DELETE},
-		},
+		CommandId: testPatchCmdNonPolicy, WorkspaceId: ws.Id, ExpectedHash: ws.ConfigHash, Patches: patches,
 	}))
 	if err != nil || replayed.Msg.Workspace.ConfigHash != patched.Msg.Workspace.ConfigHash {
 		t.Fatalf("command_id replay = (%+v, %v)", replayed, err)
 	}
 	_, mismatchErr := workspaces.PatchWorkspaceConfig(t.Context(), connect.NewRequest(&workspacev1.PatchWorkspaceConfigRequest{
-		CommandId:    "patch-non-policy-1",
-		WorkspaceId:  ws.Id,
-		ExpectedHash: ws.ConfigHash,
-		Patches: []*workspacev1.ConfigPatch{
-			{DottedKey: "teams.idle_detach_seconds", Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewNumberValue(45)},
-		},
+		CommandId: testPatchCmdNonPolicy, WorkspaceId: ws.Id, ExpectedHash: ws.ConfigHash,
+		Patches: []*workspacev1.ConfigPatch{{DottedKey: testPatchKeyIdle, Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewNumberValue(45)}},
 	}))
 	if connect.CodeOf(mismatchErr) != connect.CodeInvalidArgument {
 		t.Fatalf("command_id reuse mismatch code = %v, want InvalidArgument", connect.CodeOf(mismatchErr))
 	}
+	return patched.Msg.Workspace
+}
 
-	// Stale expected_hash is rejected with CAS conflict.
+func assertPatchCASAndPolicy(t *testing.T, workspaces workspacev1connect.WorkspaceServiceClient, wsID, staleHash string, patched *workspacev1.Workspace) *workspacev1.Workspace {
+	t.Helper()
 	_, staleErr := workspaces.PatchWorkspaceConfig(t.Context(), connect.NewRequest(&workspacev1.PatchWorkspaceConfigRequest{
-		CommandId:    "patch-stale-1",
-		WorkspaceId:  ws.Id,
-		ExpectedHash: ws.ConfigHash,
-		Patches: []*workspacev1.ConfigPatch{
-			{DottedKey: "teams.idle_detach_seconds", Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewNumberValue(60)},
-		},
+		CommandId: "patch-stale-1", WorkspaceId: wsID, ExpectedHash: staleHash,
+		Patches: []*workspacev1.ConfigPatch{{DottedKey: testPatchKeyIdle, Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewNumberValue(60)}},
 	}))
 	assertConnectCode(t, staleErr, connect.CodeFailedPrecondition, errcode.WorkspaceConfigChanged)
 
-	// Policy patch bumps PolicyRevision (diffPolicy).
 	polPatched, err := workspaces.PatchWorkspaceConfig(t.Context(), connect.NewRequest(&workspacev1.PatchWorkspaceConfigRequest{
-		CommandId:    "patch-policy-1",
-		WorkspaceId:  ws.Id,
-		ExpectedHash: patched.Msg.Workspace.ConfigHash,
-		Patches: []*workspacev1.ConfigPatch{
-			{DottedKey: "policy.approval_mode", Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewStringValue("ask")},
-		},
+		CommandId: "patch-policy-1", WorkspaceId: wsID, ExpectedHash: patched.ConfigHash,
+		Patches: []*workspacev1.ConfigPatch{{DottedKey: "policy.approval_mode", Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewStringValue("ask")}},
 	}))
 	if err != nil {
 		t.Fatalf("PatchWorkspaceConfig policy: %v", err)
 	}
-	if polPatched.Msg.Workspace.PolicyRevision != patched.Msg.Workspace.PolicyRevision+1 {
-		t.Fatalf("PolicyRevision = %d, want %d", polPatched.Msg.Workspace.PolicyRevision, patched.Msg.Workspace.PolicyRevision+1)
+	if polPatched.Msg.Workspace.PolicyRevision != patched.PolicyRevision+1 {
+		t.Fatalf("PolicyRevision = %d, want %d", polPatched.Msg.Workspace.PolicyRevision, patched.PolicyRevision+1)
 	}
 	if !strings.Contains(string(polPatched.Msg.Workspace.RawToml), "approval_mode = \"ask\" # keep inline") {
 		t.Fatalf("inline comment lost on policy patch:\n%s", polPatched.Msg.Workspace.RawToml)
 	}
+	return polPatched.Msg.Workspace
+}
 
-	// Empty and oversized patch batches are rejected with InvalidArgument.
+func assertPatchBoundsAndCorrupt(t *testing.T, workspaces workspacev1connect.WorkspaceServiceClient, fugueHome, wsID, curHash string) {
+	t.Helper()
 	_, emptyErr := workspaces.PatchWorkspaceConfig(t.Context(), connect.NewRequest(&workspacev1.PatchWorkspaceConfigRequest{
-		CommandId: "patch-empty-1", WorkspaceId: ws.Id, ExpectedHash: polPatched.Msg.Workspace.ConfigHash,
+		CommandId: "patch-empty-1", WorkspaceId: wsID, ExpectedHash: curHash,
 	}))
 	if connect.CodeOf(emptyErr) != connect.CodeInvalidArgument {
 		t.Fatalf("empty patches code = %v, want InvalidArgument", connect.CodeOf(emptyErr))
 	}
 	oversized := make([]*workspacev1.ConfigPatch, 65)
 	for i := range oversized {
-		oversized[i] = &workspacev1.ConfigPatch{DottedKey: "teams.idle_detach_seconds", Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewNumberValue(60)}
+		oversized[i] = &workspacev1.ConfigPatch{DottedKey: testPatchKeyIdle, Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewNumberValue(60)}
 	}
 	_, overErr := workspaces.PatchWorkspaceConfig(t.Context(), connect.NewRequest(&workspacev1.PatchWorkspaceConfigRequest{
-		CommandId: "patch-over-1", WorkspaceId: ws.Id, ExpectedHash: polPatched.Msg.Workspace.ConfigHash, Patches: oversized,
+		CommandId: "patch-over-1", WorkspaceId: wsID, ExpectedHash: curHash, Patches: oversized,
 	}))
 	if connect.CodeOf(overErr) != connect.CodeInvalidArgument {
 		t.Fatalf("oversized patches code = %v, want InvalidArgument", connect.CodeOf(overErr))
 	}
 
-	// Corrupt TOML on disk is rejected with typed WorkspaceConfigInvalid.
-	diskPath := filepath.Join(fugueHome, "workspaces", ws.Id, "fugue.toml")
-	if err := os.WriteFile(diskPath, []byte("not = [valid toml\n"), 0o600); err != nil {
-		t.Fatal(err)
+	diskPath := filepath.Join(fugueHome, "workspaces", wsID, "fugue.toml")
+	if writeErr := os.WriteFile(diskPath, []byte("not = [valid toml\n"), 0o600); writeErr != nil {
+		t.Fatal(writeErr)
 	}
-	corruptView, err := workspaces.GetWorkspace(t.Context(), connect.NewRequest(&workspacev1.GetWorkspaceRequest{Id: ws.Id}))
+	corruptView, err := workspaces.GetWorkspace(t.Context(), connect.NewRequest(&workspacev1.GetWorkspaceRequest{Id: wsID}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	_, corruptErr := workspaces.PatchWorkspaceConfig(t.Context(), connect.NewRequest(&workspacev1.PatchWorkspaceConfigRequest{
-		CommandId:    "patch-corrupt-1",
-		WorkspaceId:  ws.Id,
-		ExpectedHash: corruptView.Msg.Workspace.ConfigHash,
-		Patches: []*workspacev1.ConfigPatch{
-			{DottedKey: "teams.idle_detach_seconds", Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewNumberValue(60)},
-		},
+		CommandId: "patch-corrupt-1", WorkspaceId: wsID, ExpectedHash: corruptView.Msg.Workspace.ConfigHash,
+		Patches: []*workspacev1.ConfigPatch{{DottedKey: testPatchKeyIdle, Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewNumberValue(60)}},
 	}))
 	assertConnectCode(t, corruptErr, connect.CodeInvalidArgument, errcode.WorkspaceConfigInvalid)
 }
@@ -173,7 +165,6 @@ func TestPatchWorkspaceConfigDeniesNonAppAndSessionPrincipals(t *testing.T) {
 	v := startTokenHost(t, "")
 	v.readySession(t, "cmd-lead-patch", "", t.TempDir())
 
-	// Session principal must be denied.
 	_, attachHTTP, attachErr := attachSession(t, v.sockPath, sessionTokens(t, 1)[0])
 	if attachErr != nil {
 		t.Fatal(attachErr)
@@ -181,20 +172,19 @@ func TestPatchWorkspaceConfigDeniesNonAppAndSessionPrincipals(t *testing.T) {
 	sessionWS := workspacev1connect.NewWorkspaceServiceClient(attachHTTP, "http://fugue")
 	_, sessErr := sessionWS.PatchWorkspaceConfig(t.Context(), connect.NewRequest(&workspacev1.PatchWorkspaceConfigRequest{
 		CommandId: "sess-patch-1", WorkspaceId: "ws-1", ExpectedHash: "h1",
-		Patches: []*workspacev1.ConfigPatch{{DottedKey: "teams.idle_detach_seconds", Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewNumberValue(60)}},
+		Patches: []*workspacev1.ConfigPatch{{DottedKey: testPatchKeyIdle, Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewNumberValue(60)}},
 	}))
 	if connect.CodeOf(sessErr) != connect.CodePermissionDenied {
 		t.Fatalf("session principal PatchWorkspaceConfig code = %v, want PermissionDenied", connect.CodeOf(sessErr))
 	}
 
-	// Local CLI principal (non-app) must also be denied.
 	cliHost, cliWS := workspaceSocketClients(t, v.sockPath)
 	if _, err := cliHost.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_CLI, "v1")); err != nil {
 		t.Fatal(err)
 	}
 	_, cliErr := cliWS.PatchWorkspaceConfig(t.Context(), connect.NewRequest(&workspacev1.PatchWorkspaceConfigRequest{
 		CommandId: "cli-patch-1", WorkspaceId: "ws-1", ExpectedHash: "h1",
-		Patches: []*workspacev1.ConfigPatch{{DottedKey: "teams.idle_detach_seconds", Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewNumberValue(60)}},
+		Patches: []*workspacev1.ConfigPatch{{DottedKey: testPatchKeyIdle, Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewNumberValue(60)}},
 	}))
 	if connect.CodeOf(cliErr) != connect.CodePermissionDenied {
 		t.Fatalf("cli principal PatchWorkspaceConfig code = %v, want PermissionDenied", connect.CodeOf(cliErr))

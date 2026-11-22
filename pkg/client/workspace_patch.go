@@ -2,12 +2,18 @@ package client
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/structpb"
 
 	workspacev1 "github.com/syurodev/fugue/pkg/pb/fugue/workspace/v1"
+)
+
+var (
+	errPatchInputRequired = errors.New("patch workspace configuration: input is required")
+	errUnsupportedPatchOp = errors.New("unsupported config patch op")
 )
 
 // ConfigPatchOp identifies a structured workspace config patch operation.
@@ -39,7 +45,7 @@ type PatchWorkspaceConfigInput struct {
 // preserving comments and key order, using CAS on ExpectedHash.
 func (c *Client) PatchWorkspaceConfig(ctx context.Context, in *PatchWorkspaceConfigInput) (Workspace, error) {
 	if in == nil {
-		return Workspace{}, fmt.Errorf("patch workspace configuration: input is required")
+		return Workspace{}, errPatchInputRequired
 	}
 	pbPatches, err := buildProtoConfigPatches(in.Patch, in.Patches)
 	if err != nil {
@@ -170,7 +176,7 @@ func toProtoConfigPatch(p ConfigPatch) (*workspacev1.ConfigPatch, error) {
 	case ConfigPatchDelete:
 		pb.Op = workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_DELETE
 	default:
-		return nil, fmt.Errorf("unsupported config patch op for %s", p.DottedKey)
+		return nil, fmt.Errorf("%w for %s", errUnsupportedPatchOp, p.DottedKey)
 	}
 	return pb, nil
 }

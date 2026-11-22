@@ -44,8 +44,8 @@ func (s *Service) PatchWorkspaceConfig(ctx context.Context, id, expectedHash str
 	if err != nil {
 		return nil, err
 	}
-	if err := checkExpectedHash(diskBytes, rec.ConfigHash, expectedHash); err != nil {
-		return nil, err
+	if casErr := checkExpectedHash(diskBytes, rec.ConfigHash, expectedHash); casErr != nil {
+		return nil, casErr
 	}
 	patchedTOML, err := PatchTOML(diskBytes, patches)
 	if err != nil {
@@ -100,8 +100,8 @@ func (s *Service) RejectWorkspaceConfig(ctx context.Context, id, expectedHash st
 	if readErr != nil {
 		return nil, WrapError(ErrNotFound, "read config for workspace", readErr)
 	}
-	if err := checkExpectedHash(diskBytes, rec.ConfigHash, expectedHash); err != nil {
-		return nil, err
+	if casErr := checkExpectedHash(diskBytes, rec.ConfigHash, expectedHash); casErr != nil {
+		return nil, casErr
 	}
 	rec.ConfigHash = rec.AcceptedConfigHash
 	if err := firstErr(writeAtomic(s.paths.WorkspaceDir(id), "fugue.toml", accBytes), s.store.Update(ctx, rec)); err != nil {

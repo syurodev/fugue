@@ -97,8 +97,8 @@ func (s *WorkspaceService) Patch(ctx context.Context, principal, commandID, id, 
 	if err != nil {
 		return nil, err
 	}
-	if cached, hit, err := s.patchDedup.lookup(commandID, fp); err != nil {
-		return nil, err
+	if cached, hit, lookupErr := s.patchDedup.lookup(commandID, fp); lookupErr != nil {
+		return nil, lookupErr
 	} else if hit {
 		return cached, nil
 	}

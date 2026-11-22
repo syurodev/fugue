@@ -8,9 +8,38 @@ import (
 	"github.com/google/go-cmp/cmp"
 )
 
+const (
+	testPatchKeyIdleDetach  = "teams.idle_detach_seconds"
+	testPatchKeyShellAllow  = "policy.shell_allow"
+	testPatchKeyName        = "name"
+	testPatchValAsk         = "ask"
+	testPatchValProd        = "prod"
+	testPatchValVendorModel = "claude"
+)
+
 func TestPatchTOMLPreservesCommentsBlankLinesAndKeyOrder(t *testing.T) {
 	t.Parallel()
-	orig := strings.Join([]string{
+	orig := patchTOMLTestInput()
+	patched, err := PatchTOML([]byte(orig), []ConfigPatch{
+		{DottedKey: keyPolicyApprovalMode, Op: PatchOpSet, Value: testPatchValAsk},
+		{DottedKey: testPatchKeyShellAllow, Op: PatchOpSet, Value: []string{"git status", `echo "ok"`}},
+		{DottedKey: "policy.shell_allow_add", Op: PatchOpDelete},
+		{DottedKey: "policy.env_tags", Op: PatchOpSet, Value: []EnvTagRule{{Match: "prod/*", Tag: testPatchValProd}}},
+		{DottedKey: "profiles.my-root.vendor", Op: PatchOpSet, Value: testPatchValVendorModel},
+		{DottedKey: testPatchKeyIdleDetach, Op: PatchOpSet, Value: 120},
+		{DottedKey: "session.teams", Op: PatchOpSet, Value: true},
+		{DottedKey: "profiles.fast.vendor", Op: PatchOpSet, Value: testPatchValVendorModel},
+	})
+	if err != nil {
+		t.Fatalf("PatchTOML: %v", err)
+	}
+	if diff := cmp.Diff(patchTOMLTestExpected(), string(patched)); diff != "" {
+		t.Fatalf("patched TOML mismatch (-want +got):\n%s", diff)
+	}
+}
+
+func patchTOMLTestInput() string {
+	return strings.Join([]string{
 		"# Workspace header comment",
 		"name = \"alpha\" # inline name comment",
 		"",
@@ -44,21 +73,10 @@ func TestPatchTOMLPreservesCommentsBlankLinesAndKeyOrder(t *testing.T) {
 		"idle_detach_seconds = 300",
 		"",
 	}, "\n")
+}
 
-	patched, err := PatchTOML([]byte(orig), []ConfigPatch{
-		{DottedKey: "policy.approval_mode", Op: PatchOpSet, Value: "ask"},
-		{DottedKey: "policy.shell_allow", Op: PatchOpSet, Value: []string{"git status", `echo "ok"`}},
-		{DottedKey: "policy.shell_allow_add", Op: PatchOpDelete},
-		{DottedKey: "policy.env_tags", Op: PatchOpSet, Value: []EnvTagRule{{Match: "prod/*", Tag: "prod"}}},
-		{DottedKey: "profiles.my-root.vendor", Op: PatchOpSet, Value: "claude"},
-		{DottedKey: "teams.idle_detach_seconds", Op: PatchOpSet, Value: 120},
-		{DottedKey: "session.teams", Op: PatchOpSet, Value: true},
-		{DottedKey: "profiles.fast.vendor", Op: PatchOpSet, Value: "claude"},
-	})
-	if err != nil {
-		t.Fatalf("PatchTOML: %v", err)
-	}
-	want := strings.Join([]string{
+func patchTOMLTestExpected() string {
+	return strings.Join([]string{
 		"# Workspace header comment",
 		"name = \"alpha\" # inline name comment",
 		"",
@@ -89,9 +107,6 @@ func TestPatchTOMLPreservesCommentsBlankLinesAndKeyOrder(t *testing.T) {
 		"vendor = \"claude\"",
 		"",
 	}, "\n")
-	if diff := cmp.Diff(want, string(patched)); diff != "" {
-		t.Fatalf("patched TOML mismatch (-want +got):\n%s", diff)
-	}
 }
 
 func TestPatchTOMLRejectsInvalidInputsAndInjection(t *testing.T) {
@@ -105,12 +120,12 @@ func TestPatchTOMLRejectsInvalidInputsAndInjection(t *testing.T) {
 		{"unknown_key", base, ConfigPatch{DottedKey: "unknown.key", Op: PatchOpSet, Value: "x"}},
 		{"host_key_rejected", base, ConfigPatch{DottedKey: "host.max_sessions", Op: PatchOpSet, Value: 5}},
 		{"roots_rejected", base, ConfigPatch{DottedKey: "roots", Op: PatchOpSet, Value: "x"}},
-		{"newline_injection", base, ConfigPatch{DottedKey: "policy.approval_mode", Op: PatchOpSet, Value: "ask\n[policy]\napproval_mode = \"full\""}},
-		{"cr_injection", base, ConfigPatch{DottedKey: "name", Op: PatchOpSet, Value: "a\rb"}},
-		{"nul_injection", base, ConfigPatch{DottedKey: "policy.shell_allow", Op: PatchOpSet, Value: []string{"ok\x00bad"}}},
+		{"newline_injection", base, ConfigPatch{DottedKey: keyPolicyApprovalMode, Op: PatchOpSet, Value: "ask\n[policy]\napproval_mode = \"full\""}},
+		{"cr_injection", base, ConfigPatch{DottedKey: testPatchKeyName, Op: PatchOpSet, Value: "a\rb"}},
+		{"nul_injection", base, ConfigPatch{DottedKey: testPatchKeyShellAllow, Op: PatchOpSet, Value: []string{"ok\x00bad"}}},
 		{"wrong_type_bool", base, ConfigPatch{DottedKey: "session.teams", Op: PatchOpSet, Value: "true"}},
-		{"wrong_type_float", base, ConfigPatch{DottedKey: "teams.idle_detach_seconds", Op: PatchOpSet, Value: 1.5}},
-		{"bad_existing_toml", []byte("not = [valid toml\n"), ConfigPatch{DottedKey: "name", Op: PatchOpSet, Value: "beta"}},
+		{"wrong_type_float", base, ConfigPatch{DottedKey: testPatchKeyIdleDetach, Op: PatchOpSet, Value: 1.5}},
+		{"bad_existing_toml", []byte("not = [valid toml\n"), ConfigPatch{DottedKey: testPatchKeyName, Op: PatchOpSet, Value: "beta"}},
 	}
 	for _, tc := range badCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -125,7 +140,7 @@ func TestPatchTOMLRejectsInvalidInputsAndInjection(t *testing.T) {
 	}
 	tooMany := make([]ConfigPatch, maxConfigPatches+1)
 	for i := range tooMany {
-		tooMany[i] = ConfigPatch{DottedKey: "name", Op: PatchOpSet, Value: "alpha"}
+		tooMany[i] = ConfigPatch{DottedKey: testPatchKeyName, Op: PatchOpSet, Value: "alpha"}
 	}
 	if _, err := PatchTOML(base, tooMany); CodeOf(err) != ErrConfigInvalid {
 		t.Fatalf("oversized patches err = %v, want ErrConfigInvalid", err)
@@ -142,9 +157,8 @@ func TestServicePatchWorkspaceConfigCASAndPolicyRevision(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Non-policy patch keeps PolicyRevision unchanged and preserves comments.
 	nonPolicy, err := f.svc.PatchWorkspaceConfig(ctx, ws.ID, updated.ConfigHash, []ConfigPatch{
-		{DottedKey: "teams.idle_detach_seconds", Op: PatchOpSet, Value: 90},
+		{DottedKey: testPatchKeyIdleDetach, Op: PatchOpSet, Value: 90},
 	})
 	if err != nil {
 		t.Fatalf("non-policy PatchWorkspaceConfig: %v", err)
@@ -152,22 +166,20 @@ func TestServicePatchWorkspaceConfigCASAndPolicyRevision(t *testing.T) {
 	if nonPolicy.PolicyRevision != updated.PolicyRevision {
 		t.Fatalf("PolicyRevision bumped on non-policy patch: got %d want %d", nonPolicy.PolicyRevision, updated.PolicyRevision)
 	}
-	diskBytes, err := os.ReadFile(f.svc.Paths().ConfigPath(ws.ID))
+	diskBytes, err := os.ReadFile(f.paths.ConfigPath(ws.ID))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(string(diskBytes), "# header") || !strings.Contains(string(diskBytes), "# keep me") {
 		t.Fatalf("comments lost in fugue.toml:\n%s", diskBytes)
 	}
-	// Stale CAS fails.
-	if _, err := f.svc.PatchWorkspaceConfig(ctx, ws.ID, updated.ConfigHash, []ConfigPatch{
-		{DottedKey: "teams.idle_detach_seconds", Op: PatchOpSet, Value: 60},
-	}); CodeOf(err) != ErrConfigChanged {
-		t.Fatalf("stale CAS err = %v, want ErrConfigChanged", err)
+	if _, casErr := f.svc.PatchWorkspaceConfig(ctx, ws.ID, updated.ConfigHash, []ConfigPatch{
+		{DottedKey: testPatchKeyIdleDetach, Op: PatchOpSet, Value: 60},
+	}); CodeOf(casErr) != ErrConfigChanged {
+		t.Fatalf("stale CAS err = %v, want ErrConfigChanged", casErr)
 	}
-	// Policy patch bumps PolicyRevision.
 	policyUpdated, err := f.svc.PatchWorkspaceConfig(ctx, ws.ID, nonPolicy.ConfigHash, []ConfigPatch{
-		{DottedKey: "policy.approval_mode", Op: PatchOpSet, Value: "ask"},
+		{DottedKey: keyPolicyApprovalMode, Op: PatchOpSet, Value: testPatchValAsk},
 	})
 	if err != nil {
 		t.Fatalf("policy PatchWorkspaceConfig: %v", err)

@@ -38,33 +38,24 @@ const (
 	patchKindEnvTags
 )
 
-var allowedPatchKeys = map[string]patchValueKind{
-	"name":                          patchKindString,
-	keyPolicyApprovalMode:           patchKindString,
-	"policy.sandbox_profile":        patchKindString,
-	"policy.shell_ask":              patchKindStringSlice,
-	"policy.shell_ask_add":          patchKindStringSlice,
-	"policy.shell_allow":            patchKindStringSlice,
-	"policy.shell_allow_add":        patchKindStringSlice,
-	"policy.env_tags":               patchKindEnvTags,
-	"env.keep":                      patchKindStringSlice,
-	"env.keep_add":                  patchKindStringSlice,
-	"env.override_allow":            patchKindStringSlice,
-	"env.override_allow_add":        patchKindStringSlice,
-	"redact.allow_keys":             patchKindStringSlice,
-	"redact.allow_keys_add":         patchKindStringSlice,
-	"redact.allow_paths":            patchKindStringSlice,
-	"redact.allow_paths_add":        patchKindStringSlice,
-	"session.scratch_dir":           patchKindString,
-	"session.teams":                 patchKindBool,
-	"session.teams_auto_approve":    patchKindBool,
-	"teams.idle_detach_seconds":     patchKindInt,
-	"teams.task_deadline_seconds":   patchKindInt,
-	"teams.task_max_turns":          patchKindInt,
-	"teams.silence_timeout_seconds": patchKindInt,
-	"teams.team_deadline_seconds":   patchKindInt,
-	"teams.team_max_agents":         patchKindInt,
-	"teams.approve_every_diff_step": patchKindBool,
+func lookupAllowedPatchKey(dottedKey string) (patchValueKind, bool) {
+	switch dottedKey {
+	case "name", keyPolicyApprovalMode, "policy.sandbox_profile", "session.scratch_dir":
+		return patchKindString, true
+	case "session.teams", "session.teams_auto_approve", "teams.approve_every_diff_step":
+		return patchKindBool, true
+	case "teams.idle_detach_seconds", "teams.task_deadline_seconds", "teams.task_max_turns",
+		"teams.silence_timeout_seconds", "teams.team_deadline_seconds", "teams.team_max_agents":
+		return patchKindInt, true
+	case "policy.shell_ask", "policy.shell_ask_add", "policy.shell_allow", "policy.shell_allow_add",
+		"env.keep", "env.keep_add", "env.override_allow", "env.override_allow_add",
+		"redact.allow_keys", "redact.allow_keys_add", "redact.allow_paths", "redact.allow_paths_add":
+		return patchKindStringSlice, true
+	case "policy.env_tags":
+		return patchKindEnvTags, true
+	default:
+		return 0, false
+	}
 }
 
 const maxConfigPatches = 64
@@ -137,7 +128,7 @@ func validatePatchKey(dottedKey string) (patchValueKind, string, string, error) 
 	if dottedKey == "" || hasControlChars(dottedKey) || strings.ContainsAny(dottedKey, " \t") {
 		return 0, "", "", cfgErr("fugue.toml", dottedKey, "invalid configuration key")
 	}
-	if kind, ok := allowedPatchKeys[dottedKey]; ok {
+	if kind, ok := lookupAllowedPatchKey(dottedKey); ok {
 		sec, key := splitDottedSection(dottedKey)
 		return kind, sec, key, nil
 	}

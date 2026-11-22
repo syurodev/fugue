@@ -27,6 +27,7 @@ const (
 	testCfgTagProd    = "prod"
 	testCfgBadKey     = "bad_key"
 	testCfgProvKey    = "policy.approval_mode"
+	testCfgHashV1     = "hash-v1"
 )
 
 var (
@@ -53,7 +54,7 @@ type workspaceConfigFake struct {
 func newWorkspaceConfigFake() *workspaceConfigFake {
 	return &workspaceConfigFake{
 		rawTOML:  []byte("name = \"" + testCfgWSName + "\"\n"),
-		hash:     "hash-v1",
+		hash:     testCfgHashV1,
 		revision: 1,
 		values: map[string]any{
 			"Name": testCfgWSName,
@@ -353,7 +354,7 @@ func TestPatchWorkspaceConfigClientRPC(t *testing.T) {
 	if _, err := c.PatchWorkspaceConfig(ctx, &client.PatchWorkspaceConfigInput{
 		CommandID:    "cmd-patch-stale",
 		WorkspaceID:  testWorkspaceID,
-		ExpectedHash: "hash-v1",
+		ExpectedHash: testCfgHashV1,
 		Patch:        &client.WorkspaceSettingsPatch{IdleDetachSeconds: intPtr(60)},
 	}); !errors.Is(err, client.ErrWorkspaceConfigChanged) {
 		t.Fatalf("stale CAS err = %v, want ErrWorkspaceConfigChanged", err)

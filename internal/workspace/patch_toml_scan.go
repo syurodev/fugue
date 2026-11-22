@@ -13,60 +13,82 @@ type parsedTOMLLayout struct {
 	firstSectionIdx      int
 }
 
+type scanState struct {
+	layout              parsedTOMLLayout
+	curSection          string
+	targetKey           string
+	targetSection       string
+	inTargetSection     bool
+	lastContentInTarget int
+}
+
 func scanTOMLLayout(lines []string, targetKey, targetSection string) parsedTOMLLayout {
-	layout := parsedTOMLLayout{matchStart: -1, matchEnd: -1, sectionInsertIdx: -1, firstSectionIdx: -1}
-	curSection := ""
-	inTargetSection := targetSection == ""
-	lastContentInTarget := -1
+	st := scanState{
+		layout:              parsedTOMLLayout{matchStart: -1, matchEnd: -1, sectionInsertIdx: -1, firstSectionIdx: -1},
+		targetKey:           targetKey,
+		targetSection:       targetSection,
+		inTargetSection:     targetSection == "",
+		lastContentInTarget: -1,
+	}
 	if targetSection == "" {
-		lastContentInTarget = 0
+		st.lastContentInTarget = 0
 	}
 	for i := 0; i < len(lines); i++ {
-		trimmed := strings.TrimSpace(lines[i])
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
-			continue
-		}
-		if hdr, isArray, ok := parseSectionHeader(trimmed); ok {
-			if layout.firstSectionIdx < 0 {
-				layout.firstSectionIdx = i
-			}
-			if inTargetSection {
-				layout.sectionInsertIdx = lastContentInTarget
-			}
-			if isArray {
-				curSection = "array:" + hdr
-				inTargetSection = false
-			} else {
-				curSection = hdr
-				inTargetSection = curSection == targetSection
-				if inTargetSection {
-					lastContentInTarget = i + 1
-				}
-			}
-			continue
-		}
-		lhs, rhs, ok := splitKeyAssign(lines[i])
-		if !ok {
-			if inTargetSection {
-				lastContentInTarget = i + 1
-			}
-			continue
-		}
-		endIdx, trailing := findAssignEnd(lines, i, rhs)
-		if inTargetSection {
-			lastContentInTarget = endIdx + 1
-		}
-		if !strings.HasPrefix(curSection, "array:") && qualifyKey(curSection, lhs) == targetKey {
-			layout.matchStart, layout.matchEnd = i, endIdx
-			layout.matchedLHS = lhs
-			layout.trailingComment = trailing
-		}
-		i = endIdx
+		i = st.step(lines, i)
 	}
-	if inTargetSection && layout.sectionInsertIdx < 0 {
-		layout.sectionInsertIdx = lastContentInTarget
+	if st.inTargetSection && st.layout.sectionInsertIdx < 0 {
+		st.layout.sectionInsertIdx = st.lastContentInTarget
 	}
-	return layout
+	return st.layout
+}
+
+func (st *scanState) step(lines []string, i int) int {
+	trimmed := strings.TrimSpace(lines[i])
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return i
+	}
+	if hdr, isArray, ok := parseSectionHeader(trimmed); ok {
+		st.enterSection(i, hdr, isArray)
+		return i
+	}
+	lhs, rhs, ok := splitKeyAssign(lines[i])
+	if !ok {
+		st.markTargetContent(i)
+		return i
+	}
+	endIdx, trailing := findAssignEnd(lines, i, rhs)
+	st.markTargetContent(endIdx)
+	if !strings.HasPrefix(st.curSection, "array:") && qualifyKey(st.curSection, lhs) == st.targetKey {
+		st.layout.matchStart, st.layout.matchEnd = i, endIdx
+		st.layout.matchedLHS = lhs
+		st.layout.trailingComment = trailing
+	}
+	return endIdx
+}
+
+func (st *scanState) enterSection(lineIdx int, hdr string, isArray bool) {
+	if st.layout.firstSectionIdx < 0 {
+		st.layout.firstSectionIdx = lineIdx
+	}
+	if st.inTargetSection {
+		st.layout.sectionInsertIdx = st.lastContentInTarget
+	}
+	if isArray {
+		st.curSection = "array:" + hdr
+		st.inTargetSection = false
+		return
+	}
+	st.curSection = hdr
+	st.inTargetSection = st.curSection == st.targetSection
+	if st.inTargetSection {
+		st.lastContentInTarget = lineIdx + 1
+	}
+}
+
+func (st *scanState) markTargetContent(endIdx int) {
+	if st.inTargetSection {
+		st.lastContentInTarget = endIdx + 1
+	}
 }
 
 func applySinglePatch(lines []string, dottedKey, section, key string, op ConfigPatchOp, encoded string) []string {
