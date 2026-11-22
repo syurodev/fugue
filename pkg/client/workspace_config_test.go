@@ -27,6 +27,7 @@ const (
 	testCfgTagProd    = "prod"
 	testCfgBadKey     = "bad_key"
 	testCfgProvKey    = "policy.approval_mode"
+	testCfgHashV1     = "hash-v1"
 )
 
 var (
@@ -47,12 +48,13 @@ type workspaceConfigFake struct {
 	provenance map[string]int64
 	issues     []*workspacev1.ConfigIssue
 	updateErr  error
+	lastPatch  *workspacev1.PatchWorkspaceConfigRequest
 }
 
 func newWorkspaceConfigFake() *workspaceConfigFake {
 	return &workspaceConfigFake{
 		rawTOML:  []byte("name = \"" + testCfgWSName + "\"\n"),
-		hash:     "hash-v1",
+		hash:     testCfgHashV1,
 		revision: 1,
 		values: map[string]any{
 			"Name": testCfgWSName,
@@ -134,6 +136,35 @@ func (f *workspaceConfigFake) ValidateConfig(_ context.Context, req *connect.Req
 		}), nil
 	}
 	return connect.NewResponse(&workspacev1.ValidateConfigResponse{Issues: f.issues}), nil
+}
+
+func (f *workspaceConfigFake) PatchWorkspaceConfig(_ context.Context, req *connect.Request[workspacev1.PatchWorkspaceConfigRequest]) (*connect.Response[workspacev1.PatchWorkspaceConfigResponse], error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.updateErr != nil {
+		return nil, f.updateErr
+	}
+	if req.Msg.GetExpectedHash() != f.hash {
+		return nil, scriptedConfigError(connect.CodeFailedPrecondition, errScriptedConfigChanged, client.WorkspaceCodeConfigChanged)
+	}
+	for _, p := range req.Msg.GetPatches() {
+		if p.GetDottedKey() == testCfgBadKey {
+			return nil, scriptedConfigError(connect.CodeInvalidArgument, errScriptedConfigInvalid, client.WorkspaceCodeConfigInvalid)
+		}
+	}
+	f.lastPatch = req.Msg
+	f.hash = "hash-patched"
+	f.revision++
+	return connect.NewResponse(&workspacev1.PatchWorkspaceConfigResponse{
+		Workspace: &workspacev1.Workspace{
+			Id:             req.Msg.GetWorkspaceId(),
+			Name:           testCfgWSName,
+			RawToml:        f.rawTOML,
+			ConfigHash:     f.hash,
+			ConfigRevision: f.revision,
+			PolicyRevision: f.policyRev,
+		},
+	}), nil
 }
 
 func scriptedConfigError(connectCode connect.Code, cause error, publicCode string) error {
@@ -250,13 +281,7 @@ func assertValidateConfigIssues(t *testing.T, ctx context.Context, c *client.Cli
 
 func assertUpdateCASAndTypedErrors(t *testing.T, ctx context.Context, c *client.Client, ws *client.Workspace) {
 	t.Helper()
-	patched, err := client.PatchWorkspaceTOML(ws.RawTOML, &client.WorkspaceSettingsPatch{
-		IdleDetachSeconds: intPtr(120),
-	})
-	if err != nil {
-		t.Fatalf("PatchWorkspaceTOML: %v", err)
-	}
-	updated, err := c.UpdateWorkspaceConfig(ctx, testWorkspaceID, patched, ws.ConfigHash)
+	updated, err := c.UpdateWorkspaceConfig(ctx, testWorkspaceID, []byte("name = \""+testCfgWSName+"\"\n[teams]\nidle_detach_seconds = 120\n"), ws.ConfigHash)
 	if err != nil {
 		t.Fatalf("UpdateWorkspaceConfig: %v", err)
 	}
@@ -264,7 +289,7 @@ func assertUpdateCASAndTypedErrors(t *testing.T, ctx context.Context, c *client.
 		t.Fatalf("updated = %+v", updated)
 	}
 
-	_, err = c.UpdateWorkspaceConfig(ctx, testWorkspaceID, patched, ws.ConfigHash)
+	_, err = c.UpdateWorkspaceConfig(ctx, testWorkspaceID, []byte("name = \""+testCfgWSName+"\"\n"), ws.ConfigHash)
 	if !errors.Is(err, client.ErrWorkspaceConfigChanged) {
 		t.Fatalf("stale CAS err = %v, want ErrWorkspaceConfigChanged", err)
 	}
@@ -286,50 +311,61 @@ func assertUpdateValidationErr(t *testing.T, ctx context.Context, c *client.Clie
 	}
 }
 
-func TestPatchWorkspaceTOMLPreservesOtherFields(t *testing.T) {
+func TestPatchWorkspaceConfigClientRPC(t *testing.T) {
 	t.Parallel()
-	base := []byte("name = \"" + testCfgWSName + "\"\n\n[[roots]]\nname = \"main\"\npath = \"/repo\"\naccess = \"rw\"\n\n[policy]\nshell_ask = [\"rm\"]\nshell_allow_add = [\"ls\"]\n")
+	fake := newWorkspaceConfigFake()
+	c := serveWorkspaceConfigFake(t, fake)
+	ctx := t.Context()
+
 	approval := testCfgModeAsk
 	sandbox := "read-only"
 	allow := []string{testCfgShellAllow, "go test"}
 	tags := []client.EnvTagRule{{Match: "prod/*", Tag: testCfgTagProd}}
 	teams := false
 	autoApprove := true
-	patched, err := client.PatchWorkspaceTOML(base, &client.WorkspaceSettingsPatch{
-		ApprovalMode:          &approval,
-		SandboxProfile:        &sandbox,
-		ShellAllow:            &allow,
-		EnvTags:               &tags,
-		SessionTeams:          &teams,
-		TeamsAutoApprove:      &autoApprove,
-		IdleDetachSeconds:     intPtr(90),
-		TaskDeadlineSeconds:   intPtr(1800),
-		TaskMaxTurns:          intPtr(25),
-		SilenceTimeoutSeconds: intPtr(300),
-		TeamDeadlineSeconds:   intPtr(7200),
-		TeamMaxAgents:         intPtr(6),
+	updated, err := c.PatchWorkspaceConfig(ctx, &client.PatchWorkspaceConfigInput{
+		CommandID:    "cmd-patch-1",
+		WorkspaceID:  testWorkspaceID,
+		ExpectedHash: fake.hash,
+		Patch: &client.WorkspaceSettingsPatch{
+			ApprovalMode:          &approval,
+			SandboxProfile:        &sandbox,
+			ShellAllow:            &allow,
+			EnvTags:               &tags,
+			SessionTeams:          &teams,
+			TeamsAutoApprove:      &autoApprove,
+			IdleDetachSeconds:     intPtr(90),
+			TaskDeadlineSeconds:   intPtr(1800),
+			TaskMaxTurns:          intPtr(25),
+			SilenceTimeoutSeconds: intPtr(300),
+			TeamDeadlineSeconds:   intPtr(7200),
+			TeamMaxAgents:         intPtr(6),
+		},
 	})
 	if err != nil {
-		t.Fatalf("PatchWorkspaceTOML: %v", err)
+		t.Fatalf("PatchWorkspaceConfig: %v", err)
 	}
-	got := string(patched)
-	for _, want := range []string{"name = '" + testCfgWSName + "'", "shell_ask", "approval_mode = '" + testCfgModeAsk + "'", "sandbox_profile = 'read-only'", "idle_detach_seconds = 90", "teams_auto_approve = true", "prod/*"} {
-		if !strings.Contains(got, want) {
-			t.Fatalf("patched TOML missing %q:\n%s", want, got)
-		}
+	if updated.ConfigHash != "hash-patched" || updated.ConfigRevision != 2 {
+		t.Fatalf("updated = %+v", updated)
 	}
-	if strings.Contains(got, "shell_allow_add") {
-		t.Fatalf("patched TOML did not drop shell_allow_add:\n%s", got)
+	if fake.lastPatch == nil || fake.lastPatch.GetCommandId() != "cmd-patch-1" || len(fake.lastPatch.GetPatches()) != 13 {
+		t.Fatalf("lastPatch = %+v, want 13 patches (12 settings + delete shell_allow_add)", fake.lastPatch)
 	}
-	// Patching existing sections preserves unrelated keys within those sections too.
-	reparsed, err := client.PatchWorkspaceTOML(patched, &client.WorkspaceSettingsPatch{
-		IdleDetachSeconds: intPtr(60),
-	})
-	if err != nil || !strings.Contains(string(reparsed), "idle_detach_seconds = 60") {
-		t.Fatalf("re-patch = (%s, %v)", reparsed, err)
+	if _, err := c.PatchWorkspaceConfig(ctx, &client.PatchWorkspaceConfigInput{
+		CommandID:    "cmd-patch-stale",
+		WorkspaceID:  testWorkspaceID,
+		ExpectedHash: testCfgHashV1,
+		Patch:        &client.WorkspaceSettingsPatch{IdleDetachSeconds: intPtr(60)},
+	}); !errors.Is(err, client.ErrWorkspaceConfigChanged) {
+		t.Fatalf("stale CAS err = %v, want ErrWorkspaceConfigChanged", err)
 	}
-	if _, err := client.PatchWorkspaceTOML([]byte("not = [valid toml"), nil); err == nil {
-		t.Fatal("PatchWorkspaceTOML accepted invalid TOML")
+	if _, err := c.PatchWorkspaceConfig(ctx, &client.PatchWorkspaceConfigInput{
+		CommandID:    "cmd-patch-bad",
+		WorkspaceID:  testWorkspaceID,
+		ExpectedHash: updated.ConfigHash,
+		Patches:      []client.ConfigPatch{{DottedKey: testCfgBadKey, Op: client.ConfigPatchSet, Value: 1}},
+	}); !errors.Is(err, client.ErrWorkspaceConfigInvalid) {
+		t.Fatalf("invalid key err = %v, want ErrWorkspaceConfigInvalid", err)
 	}
 }
 

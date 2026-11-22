@@ -51,6 +51,9 @@ const (
 	// WorkspaceServiceUpdateWorkspaceConfigProcedure is the fully-qualified name of the
 	// WorkspaceService's UpdateWorkspaceConfig RPC.
 	WorkspaceServiceUpdateWorkspaceConfigProcedure = "/fugue.workspace.v1.WorkspaceService/UpdateWorkspaceConfig"
+	// WorkspaceServicePatchWorkspaceConfigProcedure is the fully-qualified name of the
+	// WorkspaceService's PatchWorkspaceConfig RPC.
+	WorkspaceServicePatchWorkspaceConfigProcedure = "/fugue.workspace.v1.WorkspaceService/PatchWorkspaceConfig"
 	// WorkspaceServiceConfirmWorkspaceConfigProcedure is the fully-qualified name of the
 	// WorkspaceService's ConfirmWorkspaceConfig RPC.
 	WorkspaceServiceConfirmWorkspaceConfigProcedure = "/fugue.workspace.v1.WorkspaceService/ConfirmWorkspaceConfig"
@@ -85,6 +88,7 @@ type WorkspaceServiceClient interface {
 	GetEffectiveConfig(context.Context, *connect.Request[v1.GetEffectiveConfigRequest]) (*connect.Response[v1.GetEffectiveConfigResponse], error)
 	ValidateConfig(context.Context, *connect.Request[v1.ValidateConfigRequest]) (*connect.Response[v1.ValidateConfigResponse], error)
 	UpdateWorkspaceConfig(context.Context, *connect.Request[v1.UpdateWorkspaceConfigRequest]) (*connect.Response[v1.UpdateWorkspaceConfigResponse], error)
+	PatchWorkspaceConfig(context.Context, *connect.Request[v1.PatchWorkspaceConfigRequest]) (*connect.Response[v1.PatchWorkspaceConfigResponse], error)
 	ConfirmWorkspaceConfig(context.Context, *connect.Request[v1.ConfirmWorkspaceConfigRequest]) (*connect.Response[v1.ConfirmWorkspaceConfigResponse], error)
 	RejectWorkspaceConfig(context.Context, *connect.Request[v1.RejectWorkspaceConfigRequest]) (*connect.Response[v1.RejectWorkspaceConfigResponse], error)
 	AddRoot(context.Context, *connect.Request[v1.AddRootRequest]) (*connect.Response[v1.AddRootResponse], error)
@@ -140,6 +144,12 @@ func NewWorkspaceServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			httpClient,
 			baseURL+WorkspaceServiceUpdateWorkspaceConfigProcedure,
 			connect.WithSchema(workspaceServiceMethods.ByName("UpdateWorkspaceConfig")),
+			connect.WithClientOptions(opts...),
+		),
+		patchWorkspaceConfig: connect.NewClient[v1.PatchWorkspaceConfigRequest, v1.PatchWorkspaceConfigResponse](
+			httpClient,
+			baseURL+WorkspaceServicePatchWorkspaceConfigProcedure,
+			connect.WithSchema(workspaceServiceMethods.ByName("PatchWorkspaceConfig")),
 			connect.WithClientOptions(opts...),
 		),
 		confirmWorkspaceConfig: connect.NewClient[v1.ConfirmWorkspaceConfigRequest, v1.ConfirmWorkspaceConfigResponse](
@@ -201,6 +211,7 @@ type workspaceServiceClient struct {
 	getEffectiveConfig     *connect.Client[v1.GetEffectiveConfigRequest, v1.GetEffectiveConfigResponse]
 	validateConfig         *connect.Client[v1.ValidateConfigRequest, v1.ValidateConfigResponse]
 	updateWorkspaceConfig  *connect.Client[v1.UpdateWorkspaceConfigRequest, v1.UpdateWorkspaceConfigResponse]
+	patchWorkspaceConfig   *connect.Client[v1.PatchWorkspaceConfigRequest, v1.PatchWorkspaceConfigResponse]
 	confirmWorkspaceConfig *connect.Client[v1.ConfirmWorkspaceConfigRequest, v1.ConfirmWorkspaceConfigResponse]
 	rejectWorkspaceConfig  *connect.Client[v1.RejectWorkspaceConfigRequest, v1.RejectWorkspaceConfigResponse]
 	addRoot                *connect.Client[v1.AddRootRequest, v1.AddRootResponse]
@@ -239,6 +250,11 @@ func (c *workspaceServiceClient) ValidateConfig(ctx context.Context, req *connec
 // UpdateWorkspaceConfig calls fugue.workspace.v1.WorkspaceService.UpdateWorkspaceConfig.
 func (c *workspaceServiceClient) UpdateWorkspaceConfig(ctx context.Context, req *connect.Request[v1.UpdateWorkspaceConfigRequest]) (*connect.Response[v1.UpdateWorkspaceConfigResponse], error) {
 	return c.updateWorkspaceConfig.CallUnary(ctx, req)
+}
+
+// PatchWorkspaceConfig calls fugue.workspace.v1.WorkspaceService.PatchWorkspaceConfig.
+func (c *workspaceServiceClient) PatchWorkspaceConfig(ctx context.Context, req *connect.Request[v1.PatchWorkspaceConfigRequest]) (*connect.Response[v1.PatchWorkspaceConfigResponse], error) {
+	return c.patchWorkspaceConfig.CallUnary(ctx, req)
 }
 
 // ConfirmWorkspaceConfig calls fugue.workspace.v1.WorkspaceService.ConfirmWorkspaceConfig.
@@ -289,6 +305,7 @@ type WorkspaceServiceHandler interface {
 	GetEffectiveConfig(context.Context, *connect.Request[v1.GetEffectiveConfigRequest]) (*connect.Response[v1.GetEffectiveConfigResponse], error)
 	ValidateConfig(context.Context, *connect.Request[v1.ValidateConfigRequest]) (*connect.Response[v1.ValidateConfigResponse], error)
 	UpdateWorkspaceConfig(context.Context, *connect.Request[v1.UpdateWorkspaceConfigRequest]) (*connect.Response[v1.UpdateWorkspaceConfigResponse], error)
+	PatchWorkspaceConfig(context.Context, *connect.Request[v1.PatchWorkspaceConfigRequest]) (*connect.Response[v1.PatchWorkspaceConfigResponse], error)
 	ConfirmWorkspaceConfig(context.Context, *connect.Request[v1.ConfirmWorkspaceConfigRequest]) (*connect.Response[v1.ConfirmWorkspaceConfigResponse], error)
 	RejectWorkspaceConfig(context.Context, *connect.Request[v1.RejectWorkspaceConfigRequest]) (*connect.Response[v1.RejectWorkspaceConfigResponse], error)
 	AddRoot(context.Context, *connect.Request[v1.AddRootRequest]) (*connect.Response[v1.AddRootResponse], error)
@@ -340,6 +357,12 @@ func NewWorkspaceServiceHandler(svc WorkspaceServiceHandler, opts ...connect.Han
 		WorkspaceServiceUpdateWorkspaceConfigProcedure,
 		svc.UpdateWorkspaceConfig,
 		connect.WithSchema(workspaceServiceMethods.ByName("UpdateWorkspaceConfig")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workspaceServicePatchWorkspaceConfigHandler := connect.NewUnaryHandler(
+		WorkspaceServicePatchWorkspaceConfigProcedure,
+		svc.PatchWorkspaceConfig,
+		connect.WithSchema(workspaceServiceMethods.ByName("PatchWorkspaceConfig")),
 		connect.WithHandlerOptions(opts...),
 	)
 	workspaceServiceConfirmWorkspaceConfigHandler := connect.NewUnaryHandler(
@@ -404,6 +427,8 @@ func NewWorkspaceServiceHandler(svc WorkspaceServiceHandler, opts ...connect.Han
 			workspaceServiceValidateConfigHandler.ServeHTTP(w, r)
 		case WorkspaceServiceUpdateWorkspaceConfigProcedure:
 			workspaceServiceUpdateWorkspaceConfigHandler.ServeHTTP(w, r)
+		case WorkspaceServicePatchWorkspaceConfigProcedure:
+			workspaceServicePatchWorkspaceConfigHandler.ServeHTTP(w, r)
 		case WorkspaceServiceConfirmWorkspaceConfigProcedure:
 			workspaceServiceConfirmWorkspaceConfigHandler.ServeHTTP(w, r)
 		case WorkspaceServiceRejectWorkspaceConfigProcedure:
@@ -451,6 +476,10 @@ func (UnimplementedWorkspaceServiceHandler) ValidateConfig(context.Context, *con
 
 func (UnimplementedWorkspaceServiceHandler) UpdateWorkspaceConfig(context.Context, *connect.Request[v1.UpdateWorkspaceConfigRequest]) (*connect.Response[v1.UpdateWorkspaceConfigResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.workspace.v1.WorkspaceService.UpdateWorkspaceConfig is not implemented"))
+}
+
+func (UnimplementedWorkspaceServiceHandler) PatchWorkspaceConfig(context.Context, *connect.Request[v1.PatchWorkspaceConfigRequest]) (*connect.Response[v1.PatchWorkspaceConfigResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.workspace.v1.WorkspaceService.PatchWorkspaceConfig is not implemented"))
 }
 
 func (UnimplementedWorkspaceServiceHandler) ConfirmWorkspaceConfig(context.Context, *connect.Request[v1.ConfirmWorkspaceConfigRequest]) (*connect.Response[v1.ConfirmWorkspaceConfigResponse], error) {

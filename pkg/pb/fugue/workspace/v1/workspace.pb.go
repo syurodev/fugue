@@ -22,6 +22,55 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type ConfigPatchOp int32
+
+const (
+	ConfigPatchOp_CONFIG_PATCH_OP_UNSPECIFIED ConfigPatchOp = 0
+	ConfigPatchOp_CONFIG_PATCH_OP_SET         ConfigPatchOp = 1
+	ConfigPatchOp_CONFIG_PATCH_OP_DELETE      ConfigPatchOp = 2
+)
+
+// Enum value maps for ConfigPatchOp.
+var (
+	ConfigPatchOp_name = map[int32]string{
+		0: "CONFIG_PATCH_OP_UNSPECIFIED",
+		1: "CONFIG_PATCH_OP_SET",
+		2: "CONFIG_PATCH_OP_DELETE",
+	}
+	ConfigPatchOp_value = map[string]int32{
+		"CONFIG_PATCH_OP_UNSPECIFIED": 0,
+		"CONFIG_PATCH_OP_SET":         1,
+		"CONFIG_PATCH_OP_DELETE":      2,
+	}
+)
+
+func (x ConfigPatchOp) Enum() *ConfigPatchOp {
+	p := new(ConfigPatchOp)
+	*p = x
+	return p
+}
+
+func (x ConfigPatchOp) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (ConfigPatchOp) Descriptor() protoreflect.EnumDescriptor {
+	return file_fugue_workspace_v1_workspace_proto_enumTypes[0].Descriptor()
+}
+
+func (ConfigPatchOp) Type() protoreflect.EnumType {
+	return &file_fugue_workspace_v1_workspace_proto_enumTypes[0]
+}
+
+func (x ConfigPatchOp) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use ConfigPatchOp.Descriptor instead.
+func (ConfigPatchOp) EnumDescriptor() ([]byte, []int) {
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{0}
+}
+
 type Root struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
@@ -994,6 +1043,178 @@ func (x *UpdateWorkspaceConfigResponse) GetWorkspace() *Workspace {
 	return nil
 }
 
+type ConfigPatch struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DottedKey     string                 `protobuf:"bytes,1,opt,name=dotted_key,json=dottedKey,proto3" json:"dotted_key,omitempty"`
+	Op            ConfigPatchOp          `protobuf:"varint,2,opt,name=op,proto3,enum=fugue.workspace.v1.ConfigPatchOp" json:"op,omitempty"`
+	Value         *structpb.Value        `protobuf:"bytes,3,opt,name=value,proto3" json:"value,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ConfigPatch) Reset() {
+	*x = ConfigPatch{}
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ConfigPatch) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ConfigPatch) ProtoMessage() {}
+
+func (x *ConfigPatch) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ConfigPatch.ProtoReflect.Descriptor instead.
+func (*ConfigPatch) Descriptor() ([]byte, []int) {
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ConfigPatch) GetDottedKey() string {
+	if x != nil {
+		return x.DottedKey
+	}
+	return ""
+}
+
+func (x *ConfigPatch) GetOp() ConfigPatchOp {
+	if x != nil {
+		return x.Op
+	}
+	return ConfigPatchOp_CONFIG_PATCH_OP_UNSPECIFIED
+}
+
+func (x *ConfigPatch) GetValue() *structpb.Value {
+	if x != nil {
+		return x.Value
+	}
+	return nil
+}
+
+type PatchWorkspaceConfigRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CommandId     string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	ExpectedHash  string                 `protobuf:"bytes,3,opt,name=expected_hash,json=expectedHash,proto3" json:"expected_hash,omitempty"`
+	Patches       []*ConfigPatch         `protobuf:"bytes,4,rep,name=patches,proto3" json:"patches,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PatchWorkspaceConfigRequest) Reset() {
+	*x = PatchWorkspaceConfigRequest{}
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PatchWorkspaceConfigRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PatchWorkspaceConfigRequest) ProtoMessage() {}
+
+func (x *PatchWorkspaceConfigRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PatchWorkspaceConfigRequest.ProtoReflect.Descriptor instead.
+func (*PatchWorkspaceConfigRequest) Descriptor() ([]byte, []int) {
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *PatchWorkspaceConfigRequest) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *PatchWorkspaceConfigRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *PatchWorkspaceConfigRequest) GetExpectedHash() string {
+	if x != nil {
+		return x.ExpectedHash
+	}
+	return ""
+}
+
+func (x *PatchWorkspaceConfigRequest) GetPatches() []*ConfigPatch {
+	if x != nil {
+		return x.Patches
+	}
+	return nil
+}
+
+type PatchWorkspaceConfigResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Workspace     *Workspace             `protobuf:"bytes,1,opt,name=workspace,proto3" json:"workspace,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PatchWorkspaceConfigResponse) Reset() {
+	*x = PatchWorkspaceConfigResponse{}
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PatchWorkspaceConfigResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PatchWorkspaceConfigResponse) ProtoMessage() {}
+
+func (x *PatchWorkspaceConfigResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PatchWorkspaceConfigResponse.ProtoReflect.Descriptor instead.
+func (*PatchWorkspaceConfigResponse) Descriptor() ([]byte, []int) {
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *PatchWorkspaceConfigResponse) GetWorkspace() *Workspace {
+	if x != nil {
+		return x.Workspace
+	}
+	return nil
+}
+
 type ConfirmWorkspaceConfigRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
@@ -1004,7 +1225,7 @@ type ConfirmWorkspaceConfigRequest struct {
 
 func (x *ConfirmWorkspaceConfigRequest) Reset() {
 	*x = ConfirmWorkspaceConfigRequest{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[17]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1016,7 +1237,7 @@ func (x *ConfirmWorkspaceConfigRequest) String() string {
 func (*ConfirmWorkspaceConfigRequest) ProtoMessage() {}
 
 func (x *ConfirmWorkspaceConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[17]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1029,7 +1250,7 @@ func (x *ConfirmWorkspaceConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfirmWorkspaceConfigRequest.ProtoReflect.Descriptor instead.
 func (*ConfirmWorkspaceConfigRequest) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{17}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *ConfirmWorkspaceConfigRequest) GetId() string {
@@ -1055,7 +1276,7 @@ type ConfirmWorkspaceConfigResponse struct {
 
 func (x *ConfirmWorkspaceConfigResponse) Reset() {
 	*x = ConfirmWorkspaceConfigResponse{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[18]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1067,7 +1288,7 @@ func (x *ConfirmWorkspaceConfigResponse) String() string {
 func (*ConfirmWorkspaceConfigResponse) ProtoMessage() {}
 
 func (x *ConfirmWorkspaceConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[18]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1080,7 +1301,7 @@ func (x *ConfirmWorkspaceConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ConfirmWorkspaceConfigResponse.ProtoReflect.Descriptor instead.
 func (*ConfirmWorkspaceConfigResponse) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{18}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ConfirmWorkspaceConfigResponse) GetWorkspace() *Workspace {
@@ -1100,7 +1321,7 @@ type RejectWorkspaceConfigRequest struct {
 
 func (x *RejectWorkspaceConfigRequest) Reset() {
 	*x = RejectWorkspaceConfigRequest{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[19]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1112,7 +1333,7 @@ func (x *RejectWorkspaceConfigRequest) String() string {
 func (*RejectWorkspaceConfigRequest) ProtoMessage() {}
 
 func (x *RejectWorkspaceConfigRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[19]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1125,7 +1346,7 @@ func (x *RejectWorkspaceConfigRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RejectWorkspaceConfigRequest.ProtoReflect.Descriptor instead.
 func (*RejectWorkspaceConfigRequest) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{19}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *RejectWorkspaceConfigRequest) GetId() string {
@@ -1151,7 +1372,7 @@ type RejectWorkspaceConfigResponse struct {
 
 func (x *RejectWorkspaceConfigResponse) Reset() {
 	*x = RejectWorkspaceConfigResponse{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[20]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1163,7 +1384,7 @@ func (x *RejectWorkspaceConfigResponse) String() string {
 func (*RejectWorkspaceConfigResponse) ProtoMessage() {}
 
 func (x *RejectWorkspaceConfigResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[20]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1176,7 +1397,7 @@ func (x *RejectWorkspaceConfigResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RejectWorkspaceConfigResponse.ProtoReflect.Descriptor instead.
 func (*RejectWorkspaceConfigResponse) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{20}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *RejectWorkspaceConfigResponse) GetWorkspace() *Workspace {
@@ -1199,7 +1420,7 @@ type AddRootRequest struct {
 
 func (x *AddRootRequest) Reset() {
 	*x = AddRootRequest{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[21]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1211,7 +1432,7 @@ func (x *AddRootRequest) String() string {
 func (*AddRootRequest) ProtoMessage() {}
 
 func (x *AddRootRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[21]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1224,7 +1445,7 @@ func (x *AddRootRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddRootRequest.ProtoReflect.Descriptor instead.
 func (*AddRootRequest) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{21}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{24}
 }
 
 func (x *AddRootRequest) GetId() string {
@@ -1271,7 +1492,7 @@ type AddRootResponse struct {
 
 func (x *AddRootResponse) Reset() {
 	*x = AddRootResponse{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[22]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1283,7 +1504,7 @@ func (x *AddRootResponse) String() string {
 func (*AddRootResponse) ProtoMessage() {}
 
 func (x *AddRootResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[22]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1296,7 +1517,7 @@ func (x *AddRootResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AddRootResponse.ProtoReflect.Descriptor instead.
 func (*AddRootResponse) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{22}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *AddRootResponse) GetWorkspace() *Workspace {
@@ -1317,7 +1538,7 @@ type RemoveRootRequest struct {
 
 func (x *RemoveRootRequest) Reset() {
 	*x = RemoveRootRequest{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[23]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1329,7 +1550,7 @@ func (x *RemoveRootRequest) String() string {
 func (*RemoveRootRequest) ProtoMessage() {}
 
 func (x *RemoveRootRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[23]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1342,7 +1563,7 @@ func (x *RemoveRootRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveRootRequest.ProtoReflect.Descriptor instead.
 func (*RemoveRootRequest) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{23}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *RemoveRootRequest) GetId() string {
@@ -1375,7 +1596,7 @@ type RemoveRootResponse struct {
 
 func (x *RemoveRootResponse) Reset() {
 	*x = RemoveRootResponse{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[24]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1387,7 +1608,7 @@ func (x *RemoveRootResponse) String() string {
 func (*RemoveRootResponse) ProtoMessage() {}
 
 func (x *RemoveRootResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[24]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1400,7 +1621,7 @@ func (x *RemoveRootResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveRootResponse.ProtoReflect.Descriptor instead.
 func (*RemoveRootResponse) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{24}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{27}
 }
 
 func (x *RemoveRootResponse) GetWorkspace() *Workspace {
@@ -1424,7 +1645,7 @@ type UpdateRootRequest struct {
 
 func (x *UpdateRootRequest) Reset() {
 	*x = UpdateRootRequest{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[25]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1436,7 +1657,7 @@ func (x *UpdateRootRequest) String() string {
 func (*UpdateRootRequest) ProtoMessage() {}
 
 func (x *UpdateRootRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[25]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1449,7 +1670,7 @@ func (x *UpdateRootRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateRootRequest.ProtoReflect.Descriptor instead.
 func (*UpdateRootRequest) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{25}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{28}
 }
 
 func (x *UpdateRootRequest) GetId() string {
@@ -1503,7 +1724,7 @@ type UpdateRootResponse struct {
 
 func (x *UpdateRootResponse) Reset() {
 	*x = UpdateRootResponse{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[26]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[29]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1515,7 +1736,7 @@ func (x *UpdateRootResponse) String() string {
 func (*UpdateRootResponse) ProtoMessage() {}
 
 func (x *UpdateRootResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[26]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[29]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1528,7 +1749,7 @@ func (x *UpdateRootResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use UpdateRootResponse.ProtoReflect.Descriptor instead.
 func (*UpdateRootResponse) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{26}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{29}
 }
 
 func (x *UpdateRootResponse) GetWorkspace() *Workspace {
@@ -1549,7 +1770,7 @@ type DeleteWorkspaceRequest struct {
 
 func (x *DeleteWorkspaceRequest) Reset() {
 	*x = DeleteWorkspaceRequest{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[27]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1561,7 +1782,7 @@ func (x *DeleteWorkspaceRequest) String() string {
 func (*DeleteWorkspaceRequest) ProtoMessage() {}
 
 func (x *DeleteWorkspaceRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[27]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1574,7 +1795,7 @@ func (x *DeleteWorkspaceRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteWorkspaceRequest.ProtoReflect.Descriptor instead.
 func (*DeleteWorkspaceRequest) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{27}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{30}
 }
 
 func (x *DeleteWorkspaceRequest) GetId() string {
@@ -1607,7 +1828,7 @@ type DeleteWorkspaceResponse struct {
 
 func (x *DeleteWorkspaceResponse) Reset() {
 	*x = DeleteWorkspaceResponse{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[28]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1619,7 +1840,7 @@ func (x *DeleteWorkspaceResponse) String() string {
 func (*DeleteWorkspaceResponse) ProtoMessage() {}
 
 func (x *DeleteWorkspaceResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[28]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1632,7 +1853,7 @@ func (x *DeleteWorkspaceResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DeleteWorkspaceResponse.ProtoReflect.Descriptor instead.
 func (*DeleteWorkspaceResponse) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{28}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *DeleteWorkspaceResponse) GetId() string {
@@ -1655,7 +1876,7 @@ type ReadWorkspaceFileRequest struct {
 
 func (x *ReadWorkspaceFileRequest) Reset() {
 	*x = ReadWorkspaceFileRequest{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[29]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1667,7 +1888,7 @@ func (x *ReadWorkspaceFileRequest) String() string {
 func (*ReadWorkspaceFileRequest) ProtoMessage() {}
 
 func (x *ReadWorkspaceFileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[29]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1680,7 +1901,7 @@ func (x *ReadWorkspaceFileRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadWorkspaceFileRequest.ProtoReflect.Descriptor instead.
 func (*ReadWorkspaceFileRequest) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{29}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *ReadWorkspaceFileRequest) GetWorkspaceId() string {
@@ -1730,7 +1951,7 @@ type ReadWorkspaceFileResponse struct {
 
 func (x *ReadWorkspaceFileResponse) Reset() {
 	*x = ReadWorkspaceFileResponse{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[30]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1742,7 +1963,7 @@ func (x *ReadWorkspaceFileResponse) String() string {
 func (*ReadWorkspaceFileResponse) ProtoMessage() {}
 
 func (x *ReadWorkspaceFileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[30]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1755,7 +1976,7 @@ func (x *ReadWorkspaceFileResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReadWorkspaceFileResponse.ProtoReflect.Descriptor instead.
 func (*ReadWorkspaceFileResponse) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{30}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ReadWorkspaceFileResponse) GetContent() string {
@@ -1797,7 +2018,7 @@ type ListWorkspaceDirRequest struct {
 
 func (x *ListWorkspaceDirRequest) Reset() {
 	*x = ListWorkspaceDirRequest{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[31]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1809,7 +2030,7 @@ func (x *ListWorkspaceDirRequest) String() string {
 func (*ListWorkspaceDirRequest) ProtoMessage() {}
 
 func (x *ListWorkspaceDirRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[31]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1822,7 +2043,7 @@ func (x *ListWorkspaceDirRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkspaceDirRequest.ProtoReflect.Descriptor instead.
 func (*ListWorkspaceDirRequest) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{31}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ListWorkspaceDirRequest) GetWorkspaceId() string {
@@ -1857,7 +2078,7 @@ type DirEntry struct {
 
 func (x *DirEntry) Reset() {
 	*x = DirEntry{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[32]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1869,7 +2090,7 @@ func (x *DirEntry) String() string {
 func (*DirEntry) ProtoMessage() {}
 
 func (x *DirEntry) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[32]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1882,7 +2103,7 @@ func (x *DirEntry) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DirEntry.ProtoReflect.Descriptor instead.
 func (*DirEntry) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{32}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *DirEntry) GetName() string {
@@ -1915,7 +2136,7 @@ type ListWorkspaceDirResponse struct {
 
 func (x *ListWorkspaceDirResponse) Reset() {
 	*x = ListWorkspaceDirResponse{}
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[33]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1927,7 +2148,7 @@ func (x *ListWorkspaceDirResponse) String() string {
 func (*ListWorkspaceDirResponse) ProtoMessage() {}
 
 func (x *ListWorkspaceDirResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[33]
+	mi := &file_fugue_workspace_v1_workspace_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1940,7 +2161,7 @@ func (x *ListWorkspaceDirResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListWorkspaceDirResponse.ProtoReflect.Descriptor instead.
 func (*ListWorkspaceDirResponse) Descriptor() ([]byte, []int) {
-	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{33}
+	return file_fugue_workspace_v1_workspace_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ListWorkspaceDirResponse) GetEntries() []*DirEntry {
@@ -2027,6 +2248,19 @@ const file_fugue_workspace_v1_workspace_proto_rawDesc = "" +
 	"\braw_toml\x18\x02 \x01(\fR\arawToml\x12#\n" +
 	"\rexpected_hash\x18\x03 \x01(\tR\fexpectedHash\"\\\n" +
 	"\x1dUpdateWorkspaceConfigResponse\x12;\n" +
+	"\tworkspace\x18\x01 \x01(\v2\x1d.fugue.workspace.v1.WorkspaceR\tworkspace\"\x8d\x01\n" +
+	"\vConfigPatch\x12\x1d\n" +
+	"\n" +
+	"dotted_key\x18\x01 \x01(\tR\tdottedKey\x121\n" +
+	"\x02op\x18\x02 \x01(\x0e2!.fugue.workspace.v1.ConfigPatchOpR\x02op\x12,\n" +
+	"\x05value\x18\x03 \x01(\v2\x16.google.protobuf.ValueR\x05value\"\xbf\x01\n" +
+	"\x1bPatchWorkspaceConfigRequest\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x01 \x01(\tR\tcommandId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12#\n" +
+	"\rexpected_hash\x18\x03 \x01(\tR\fexpectedHash\x129\n" +
+	"\apatches\x18\x04 \x03(\v2\x1f.fugue.workspace.v1.ConfigPatchR\apatches\"[\n" +
+	"\x1cPatchWorkspaceConfigResponse\x12;\n" +
 	"\tworkspace\x18\x01 \x01(\v2\x1d.fugue.workspace.v1.WorkspaceR\tworkspace\"T\n" +
 	"\x1dConfirmWorkspaceConfigRequest\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12#\n" +
@@ -2089,14 +2323,19 @@ const file_fugue_workspace_v1_workspace_proto_rawDesc = "" +
 	"\x04kind\x18\x02 \x01(\tR\x04kind\x12\x12\n" +
 	"\x04size\x18\x03 \x01(\x03R\x04size\"R\n" +
 	"\x18ListWorkspaceDirResponse\x126\n" +
-	"\aentries\x18\x01 \x03(\v2\x1c.fugue.workspace.v1.DirEntryR\aentries2\x80\f\n" +
+	"\aentries\x18\x01 \x03(\v2\x1c.fugue.workspace.v1.DirEntryR\aentries*e\n" +
+	"\rConfigPatchOp\x12\x1f\n" +
+	"\x1bCONFIG_PATCH_OP_UNSPECIFIED\x10\x00\x12\x17\n" +
+	"\x13CONFIG_PATCH_OP_SET\x10\x01\x12\x1a\n" +
+	"\x16CONFIG_PATCH_OP_DELETE\x10\x022\xfb\f\n" +
 	"\x10WorkspaceService\x12j\n" +
 	"\x0fCreateWorkspace\x12*.fugue.workspace.v1.CreateWorkspaceRequest\x1a+.fugue.workspace.v1.CreateWorkspaceResponse\x12g\n" +
 	"\x0eListWorkspaces\x12).fugue.workspace.v1.ListWorkspacesRequest\x1a*.fugue.workspace.v1.ListWorkspacesResponse\x12a\n" +
 	"\fGetWorkspace\x12'.fugue.workspace.v1.GetWorkspaceRequest\x1a(.fugue.workspace.v1.GetWorkspaceResponse\x12s\n" +
 	"\x12GetEffectiveConfig\x12-.fugue.workspace.v1.GetEffectiveConfigRequest\x1a..fugue.workspace.v1.GetEffectiveConfigResponse\x12g\n" +
 	"\x0eValidateConfig\x12).fugue.workspace.v1.ValidateConfigRequest\x1a*.fugue.workspace.v1.ValidateConfigResponse\x12|\n" +
-	"\x15UpdateWorkspaceConfig\x120.fugue.workspace.v1.UpdateWorkspaceConfigRequest\x1a1.fugue.workspace.v1.UpdateWorkspaceConfigResponse\x12\x7f\n" +
+	"\x15UpdateWorkspaceConfig\x120.fugue.workspace.v1.UpdateWorkspaceConfigRequest\x1a1.fugue.workspace.v1.UpdateWorkspaceConfigResponse\x12y\n" +
+	"\x14PatchWorkspaceConfig\x12/.fugue.workspace.v1.PatchWorkspaceConfigRequest\x1a0.fugue.workspace.v1.PatchWorkspaceConfigResponse\x12\x7f\n" +
 	"\x16ConfirmWorkspaceConfig\x121.fugue.workspace.v1.ConfirmWorkspaceConfigRequest\x1a2.fugue.workspace.v1.ConfirmWorkspaceConfigResponse\x12|\n" +
 	"\x15RejectWorkspaceConfig\x120.fugue.workspace.v1.RejectWorkspaceConfigRequest\x1a1.fugue.workspace.v1.RejectWorkspaceConfigResponse\x12R\n" +
 	"\aAddRoot\x12\".fugue.workspace.v1.AddRootRequest\x1a#.fugue.workspace.v1.AddRootResponse\x12[\n" +
@@ -2121,94 +2360,106 @@ func file_fugue_workspace_v1_workspace_proto_rawDescGZIP() []byte {
 	return file_fugue_workspace_v1_workspace_proto_rawDescData
 }
 
-var file_fugue_workspace_v1_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
+var file_fugue_workspace_v1_workspace_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
+var file_fugue_workspace_v1_workspace_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
 var file_fugue_workspace_v1_workspace_proto_goTypes = []any{
-	(*Root)(nil),                           // 0: fugue.workspace.v1.Root
-	(*PolicyDiffEntry)(nil),                // 1: fugue.workspace.v1.PolicyDiffEntry
-	(*WorkspaceSummary)(nil),               // 2: fugue.workspace.v1.WorkspaceSummary
-	(*Workspace)(nil),                      // 3: fugue.workspace.v1.Workspace
-	(*ConfigIssue)(nil),                    // 4: fugue.workspace.v1.ConfigIssue
-	(*CreateWorkspaceRequest)(nil),         // 5: fugue.workspace.v1.CreateWorkspaceRequest
-	(*CreateWorkspaceResponse)(nil),        // 6: fugue.workspace.v1.CreateWorkspaceResponse
-	(*ListWorkspacesRequest)(nil),          // 7: fugue.workspace.v1.ListWorkspacesRequest
-	(*ListWorkspacesResponse)(nil),         // 8: fugue.workspace.v1.ListWorkspacesResponse
-	(*GetWorkspaceRequest)(nil),            // 9: fugue.workspace.v1.GetWorkspaceRequest
-	(*GetWorkspaceResponse)(nil),           // 10: fugue.workspace.v1.GetWorkspaceResponse
-	(*GetEffectiveConfigRequest)(nil),      // 11: fugue.workspace.v1.GetEffectiveConfigRequest
-	(*GetEffectiveConfigResponse)(nil),     // 12: fugue.workspace.v1.GetEffectiveConfigResponse
-	(*ValidateConfigRequest)(nil),          // 13: fugue.workspace.v1.ValidateConfigRequest
-	(*ValidateConfigResponse)(nil),         // 14: fugue.workspace.v1.ValidateConfigResponse
-	(*UpdateWorkspaceConfigRequest)(nil),   // 15: fugue.workspace.v1.UpdateWorkspaceConfigRequest
-	(*UpdateWorkspaceConfigResponse)(nil),  // 16: fugue.workspace.v1.UpdateWorkspaceConfigResponse
-	(*ConfirmWorkspaceConfigRequest)(nil),  // 17: fugue.workspace.v1.ConfirmWorkspaceConfigRequest
-	(*ConfirmWorkspaceConfigResponse)(nil), // 18: fugue.workspace.v1.ConfirmWorkspaceConfigResponse
-	(*RejectWorkspaceConfigRequest)(nil),   // 19: fugue.workspace.v1.RejectWorkspaceConfigRequest
-	(*RejectWorkspaceConfigResponse)(nil),  // 20: fugue.workspace.v1.RejectWorkspaceConfigResponse
-	(*AddRootRequest)(nil),                 // 21: fugue.workspace.v1.AddRootRequest
-	(*AddRootResponse)(nil),                // 22: fugue.workspace.v1.AddRootResponse
-	(*RemoveRootRequest)(nil),              // 23: fugue.workspace.v1.RemoveRootRequest
-	(*RemoveRootResponse)(nil),             // 24: fugue.workspace.v1.RemoveRootResponse
-	(*UpdateRootRequest)(nil),              // 25: fugue.workspace.v1.UpdateRootRequest
-	(*UpdateRootResponse)(nil),             // 26: fugue.workspace.v1.UpdateRootResponse
-	(*DeleteWorkspaceRequest)(nil),         // 27: fugue.workspace.v1.DeleteWorkspaceRequest
-	(*DeleteWorkspaceResponse)(nil),        // 28: fugue.workspace.v1.DeleteWorkspaceResponse
-	(*ReadWorkspaceFileRequest)(nil),       // 29: fugue.workspace.v1.ReadWorkspaceFileRequest
-	(*ReadWorkspaceFileResponse)(nil),      // 30: fugue.workspace.v1.ReadWorkspaceFileResponse
-	(*ListWorkspaceDirRequest)(nil),        // 31: fugue.workspace.v1.ListWorkspaceDirRequest
-	(*DirEntry)(nil),                       // 32: fugue.workspace.v1.DirEntry
-	(*ListWorkspaceDirResponse)(nil),       // 33: fugue.workspace.v1.ListWorkspaceDirResponse
-	nil,                                    // 34: fugue.workspace.v1.GetEffectiveConfigResponse.ProvenanceEntry
-	(*structpb.Struct)(nil),                // 35: google.protobuf.Struct
+	(ConfigPatchOp)(0),                     // 0: fugue.workspace.v1.ConfigPatchOp
+	(*Root)(nil),                           // 1: fugue.workspace.v1.Root
+	(*PolicyDiffEntry)(nil),                // 2: fugue.workspace.v1.PolicyDiffEntry
+	(*WorkspaceSummary)(nil),               // 3: fugue.workspace.v1.WorkspaceSummary
+	(*Workspace)(nil),                      // 4: fugue.workspace.v1.Workspace
+	(*ConfigIssue)(nil),                    // 5: fugue.workspace.v1.ConfigIssue
+	(*CreateWorkspaceRequest)(nil),         // 6: fugue.workspace.v1.CreateWorkspaceRequest
+	(*CreateWorkspaceResponse)(nil),        // 7: fugue.workspace.v1.CreateWorkspaceResponse
+	(*ListWorkspacesRequest)(nil),          // 8: fugue.workspace.v1.ListWorkspacesRequest
+	(*ListWorkspacesResponse)(nil),         // 9: fugue.workspace.v1.ListWorkspacesResponse
+	(*GetWorkspaceRequest)(nil),            // 10: fugue.workspace.v1.GetWorkspaceRequest
+	(*GetWorkspaceResponse)(nil),           // 11: fugue.workspace.v1.GetWorkspaceResponse
+	(*GetEffectiveConfigRequest)(nil),      // 12: fugue.workspace.v1.GetEffectiveConfigRequest
+	(*GetEffectiveConfigResponse)(nil),     // 13: fugue.workspace.v1.GetEffectiveConfigResponse
+	(*ValidateConfigRequest)(nil),          // 14: fugue.workspace.v1.ValidateConfigRequest
+	(*ValidateConfigResponse)(nil),         // 15: fugue.workspace.v1.ValidateConfigResponse
+	(*UpdateWorkspaceConfigRequest)(nil),   // 16: fugue.workspace.v1.UpdateWorkspaceConfigRequest
+	(*UpdateWorkspaceConfigResponse)(nil),  // 17: fugue.workspace.v1.UpdateWorkspaceConfigResponse
+	(*ConfigPatch)(nil),                    // 18: fugue.workspace.v1.ConfigPatch
+	(*PatchWorkspaceConfigRequest)(nil),    // 19: fugue.workspace.v1.PatchWorkspaceConfigRequest
+	(*PatchWorkspaceConfigResponse)(nil),   // 20: fugue.workspace.v1.PatchWorkspaceConfigResponse
+	(*ConfirmWorkspaceConfigRequest)(nil),  // 21: fugue.workspace.v1.ConfirmWorkspaceConfigRequest
+	(*ConfirmWorkspaceConfigResponse)(nil), // 22: fugue.workspace.v1.ConfirmWorkspaceConfigResponse
+	(*RejectWorkspaceConfigRequest)(nil),   // 23: fugue.workspace.v1.RejectWorkspaceConfigRequest
+	(*RejectWorkspaceConfigResponse)(nil),  // 24: fugue.workspace.v1.RejectWorkspaceConfigResponse
+	(*AddRootRequest)(nil),                 // 25: fugue.workspace.v1.AddRootRequest
+	(*AddRootResponse)(nil),                // 26: fugue.workspace.v1.AddRootResponse
+	(*RemoveRootRequest)(nil),              // 27: fugue.workspace.v1.RemoveRootRequest
+	(*RemoveRootResponse)(nil),             // 28: fugue.workspace.v1.RemoveRootResponse
+	(*UpdateRootRequest)(nil),              // 29: fugue.workspace.v1.UpdateRootRequest
+	(*UpdateRootResponse)(nil),             // 30: fugue.workspace.v1.UpdateRootResponse
+	(*DeleteWorkspaceRequest)(nil),         // 31: fugue.workspace.v1.DeleteWorkspaceRequest
+	(*DeleteWorkspaceResponse)(nil),        // 32: fugue.workspace.v1.DeleteWorkspaceResponse
+	(*ReadWorkspaceFileRequest)(nil),       // 33: fugue.workspace.v1.ReadWorkspaceFileRequest
+	(*ReadWorkspaceFileResponse)(nil),      // 34: fugue.workspace.v1.ReadWorkspaceFileResponse
+	(*ListWorkspaceDirRequest)(nil),        // 35: fugue.workspace.v1.ListWorkspaceDirRequest
+	(*DirEntry)(nil),                       // 36: fugue.workspace.v1.DirEntry
+	(*ListWorkspaceDirResponse)(nil),       // 37: fugue.workspace.v1.ListWorkspaceDirResponse
+	nil,                                    // 38: fugue.workspace.v1.GetEffectiveConfigResponse.ProvenanceEntry
+	(*structpb.Struct)(nil),                // 39: google.protobuf.Struct
+	(*structpb.Value)(nil),                 // 40: google.protobuf.Value
 }
 var file_fugue_workspace_v1_workspace_proto_depIdxs = []int32{
-	0,  // 0: fugue.workspace.v1.Workspace.roots:type_name -> fugue.workspace.v1.Root
-	1,  // 1: fugue.workspace.v1.Workspace.policy_diff:type_name -> fugue.workspace.v1.PolicyDiffEntry
-	3,  // 2: fugue.workspace.v1.CreateWorkspaceResponse.workspace:type_name -> fugue.workspace.v1.Workspace
-	2,  // 3: fugue.workspace.v1.ListWorkspacesResponse.workspaces:type_name -> fugue.workspace.v1.WorkspaceSummary
-	3,  // 4: fugue.workspace.v1.GetWorkspaceResponse.workspace:type_name -> fugue.workspace.v1.Workspace
-	35, // 5: fugue.workspace.v1.GetEffectiveConfigResponse.values:type_name -> google.protobuf.Struct
-	34, // 6: fugue.workspace.v1.GetEffectiveConfigResponse.provenance:type_name -> fugue.workspace.v1.GetEffectiveConfigResponse.ProvenanceEntry
-	4,  // 7: fugue.workspace.v1.ValidateConfigResponse.issues:type_name -> fugue.workspace.v1.ConfigIssue
-	3,  // 8: fugue.workspace.v1.UpdateWorkspaceConfigResponse.workspace:type_name -> fugue.workspace.v1.Workspace
-	3,  // 9: fugue.workspace.v1.ConfirmWorkspaceConfigResponse.workspace:type_name -> fugue.workspace.v1.Workspace
-	3,  // 10: fugue.workspace.v1.RejectWorkspaceConfigResponse.workspace:type_name -> fugue.workspace.v1.Workspace
-	3,  // 11: fugue.workspace.v1.AddRootResponse.workspace:type_name -> fugue.workspace.v1.Workspace
-	3,  // 12: fugue.workspace.v1.RemoveRootResponse.workspace:type_name -> fugue.workspace.v1.Workspace
-	3,  // 13: fugue.workspace.v1.UpdateRootResponse.workspace:type_name -> fugue.workspace.v1.Workspace
-	32, // 14: fugue.workspace.v1.ListWorkspaceDirResponse.entries:type_name -> fugue.workspace.v1.DirEntry
-	5,  // 15: fugue.workspace.v1.WorkspaceService.CreateWorkspace:input_type -> fugue.workspace.v1.CreateWorkspaceRequest
-	7,  // 16: fugue.workspace.v1.WorkspaceService.ListWorkspaces:input_type -> fugue.workspace.v1.ListWorkspacesRequest
-	9,  // 17: fugue.workspace.v1.WorkspaceService.GetWorkspace:input_type -> fugue.workspace.v1.GetWorkspaceRequest
-	11, // 18: fugue.workspace.v1.WorkspaceService.GetEffectiveConfig:input_type -> fugue.workspace.v1.GetEffectiveConfigRequest
-	13, // 19: fugue.workspace.v1.WorkspaceService.ValidateConfig:input_type -> fugue.workspace.v1.ValidateConfigRequest
-	15, // 20: fugue.workspace.v1.WorkspaceService.UpdateWorkspaceConfig:input_type -> fugue.workspace.v1.UpdateWorkspaceConfigRequest
-	17, // 21: fugue.workspace.v1.WorkspaceService.ConfirmWorkspaceConfig:input_type -> fugue.workspace.v1.ConfirmWorkspaceConfigRequest
-	19, // 22: fugue.workspace.v1.WorkspaceService.RejectWorkspaceConfig:input_type -> fugue.workspace.v1.RejectWorkspaceConfigRequest
-	21, // 23: fugue.workspace.v1.WorkspaceService.AddRoot:input_type -> fugue.workspace.v1.AddRootRequest
-	23, // 24: fugue.workspace.v1.WorkspaceService.RemoveRoot:input_type -> fugue.workspace.v1.RemoveRootRequest
-	25, // 25: fugue.workspace.v1.WorkspaceService.UpdateRoot:input_type -> fugue.workspace.v1.UpdateRootRequest
-	27, // 26: fugue.workspace.v1.WorkspaceService.DeleteWorkspace:input_type -> fugue.workspace.v1.DeleteWorkspaceRequest
-	29, // 27: fugue.workspace.v1.WorkspaceService.ReadWorkspaceFile:input_type -> fugue.workspace.v1.ReadWorkspaceFileRequest
-	31, // 28: fugue.workspace.v1.WorkspaceService.ListWorkspaceDir:input_type -> fugue.workspace.v1.ListWorkspaceDirRequest
-	6,  // 29: fugue.workspace.v1.WorkspaceService.CreateWorkspace:output_type -> fugue.workspace.v1.CreateWorkspaceResponse
-	8,  // 30: fugue.workspace.v1.WorkspaceService.ListWorkspaces:output_type -> fugue.workspace.v1.ListWorkspacesResponse
-	10, // 31: fugue.workspace.v1.WorkspaceService.GetWorkspace:output_type -> fugue.workspace.v1.GetWorkspaceResponse
-	12, // 32: fugue.workspace.v1.WorkspaceService.GetEffectiveConfig:output_type -> fugue.workspace.v1.GetEffectiveConfigResponse
-	14, // 33: fugue.workspace.v1.WorkspaceService.ValidateConfig:output_type -> fugue.workspace.v1.ValidateConfigResponse
-	16, // 34: fugue.workspace.v1.WorkspaceService.UpdateWorkspaceConfig:output_type -> fugue.workspace.v1.UpdateWorkspaceConfigResponse
-	18, // 35: fugue.workspace.v1.WorkspaceService.ConfirmWorkspaceConfig:output_type -> fugue.workspace.v1.ConfirmWorkspaceConfigResponse
-	20, // 36: fugue.workspace.v1.WorkspaceService.RejectWorkspaceConfig:output_type -> fugue.workspace.v1.RejectWorkspaceConfigResponse
-	22, // 37: fugue.workspace.v1.WorkspaceService.AddRoot:output_type -> fugue.workspace.v1.AddRootResponse
-	24, // 38: fugue.workspace.v1.WorkspaceService.RemoveRoot:output_type -> fugue.workspace.v1.RemoveRootResponse
-	26, // 39: fugue.workspace.v1.WorkspaceService.UpdateRoot:output_type -> fugue.workspace.v1.UpdateRootResponse
-	28, // 40: fugue.workspace.v1.WorkspaceService.DeleteWorkspace:output_type -> fugue.workspace.v1.DeleteWorkspaceResponse
-	30, // 41: fugue.workspace.v1.WorkspaceService.ReadWorkspaceFile:output_type -> fugue.workspace.v1.ReadWorkspaceFileResponse
-	33, // 42: fugue.workspace.v1.WorkspaceService.ListWorkspaceDir:output_type -> fugue.workspace.v1.ListWorkspaceDirResponse
-	29, // [29:43] is the sub-list for method output_type
-	15, // [15:29] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	1,  // 0: fugue.workspace.v1.Workspace.roots:type_name -> fugue.workspace.v1.Root
+	2,  // 1: fugue.workspace.v1.Workspace.policy_diff:type_name -> fugue.workspace.v1.PolicyDiffEntry
+	4,  // 2: fugue.workspace.v1.CreateWorkspaceResponse.workspace:type_name -> fugue.workspace.v1.Workspace
+	3,  // 3: fugue.workspace.v1.ListWorkspacesResponse.workspaces:type_name -> fugue.workspace.v1.WorkspaceSummary
+	4,  // 4: fugue.workspace.v1.GetWorkspaceResponse.workspace:type_name -> fugue.workspace.v1.Workspace
+	39, // 5: fugue.workspace.v1.GetEffectiveConfigResponse.values:type_name -> google.protobuf.Struct
+	38, // 6: fugue.workspace.v1.GetEffectiveConfigResponse.provenance:type_name -> fugue.workspace.v1.GetEffectiveConfigResponse.ProvenanceEntry
+	5,  // 7: fugue.workspace.v1.ValidateConfigResponse.issues:type_name -> fugue.workspace.v1.ConfigIssue
+	4,  // 8: fugue.workspace.v1.UpdateWorkspaceConfigResponse.workspace:type_name -> fugue.workspace.v1.Workspace
+	0,  // 9: fugue.workspace.v1.ConfigPatch.op:type_name -> fugue.workspace.v1.ConfigPatchOp
+	40, // 10: fugue.workspace.v1.ConfigPatch.value:type_name -> google.protobuf.Value
+	18, // 11: fugue.workspace.v1.PatchWorkspaceConfigRequest.patches:type_name -> fugue.workspace.v1.ConfigPatch
+	4,  // 12: fugue.workspace.v1.PatchWorkspaceConfigResponse.workspace:type_name -> fugue.workspace.v1.Workspace
+	4,  // 13: fugue.workspace.v1.ConfirmWorkspaceConfigResponse.workspace:type_name -> fugue.workspace.v1.Workspace
+	4,  // 14: fugue.workspace.v1.RejectWorkspaceConfigResponse.workspace:type_name -> fugue.workspace.v1.Workspace
+	4,  // 15: fugue.workspace.v1.AddRootResponse.workspace:type_name -> fugue.workspace.v1.Workspace
+	4,  // 16: fugue.workspace.v1.RemoveRootResponse.workspace:type_name -> fugue.workspace.v1.Workspace
+	4,  // 17: fugue.workspace.v1.UpdateRootResponse.workspace:type_name -> fugue.workspace.v1.Workspace
+	36, // 18: fugue.workspace.v1.ListWorkspaceDirResponse.entries:type_name -> fugue.workspace.v1.DirEntry
+	6,  // 19: fugue.workspace.v1.WorkspaceService.CreateWorkspace:input_type -> fugue.workspace.v1.CreateWorkspaceRequest
+	8,  // 20: fugue.workspace.v1.WorkspaceService.ListWorkspaces:input_type -> fugue.workspace.v1.ListWorkspacesRequest
+	10, // 21: fugue.workspace.v1.WorkspaceService.GetWorkspace:input_type -> fugue.workspace.v1.GetWorkspaceRequest
+	12, // 22: fugue.workspace.v1.WorkspaceService.GetEffectiveConfig:input_type -> fugue.workspace.v1.GetEffectiveConfigRequest
+	14, // 23: fugue.workspace.v1.WorkspaceService.ValidateConfig:input_type -> fugue.workspace.v1.ValidateConfigRequest
+	16, // 24: fugue.workspace.v1.WorkspaceService.UpdateWorkspaceConfig:input_type -> fugue.workspace.v1.UpdateWorkspaceConfigRequest
+	19, // 25: fugue.workspace.v1.WorkspaceService.PatchWorkspaceConfig:input_type -> fugue.workspace.v1.PatchWorkspaceConfigRequest
+	21, // 26: fugue.workspace.v1.WorkspaceService.ConfirmWorkspaceConfig:input_type -> fugue.workspace.v1.ConfirmWorkspaceConfigRequest
+	23, // 27: fugue.workspace.v1.WorkspaceService.RejectWorkspaceConfig:input_type -> fugue.workspace.v1.RejectWorkspaceConfigRequest
+	25, // 28: fugue.workspace.v1.WorkspaceService.AddRoot:input_type -> fugue.workspace.v1.AddRootRequest
+	27, // 29: fugue.workspace.v1.WorkspaceService.RemoveRoot:input_type -> fugue.workspace.v1.RemoveRootRequest
+	29, // 30: fugue.workspace.v1.WorkspaceService.UpdateRoot:input_type -> fugue.workspace.v1.UpdateRootRequest
+	31, // 31: fugue.workspace.v1.WorkspaceService.DeleteWorkspace:input_type -> fugue.workspace.v1.DeleteWorkspaceRequest
+	33, // 32: fugue.workspace.v1.WorkspaceService.ReadWorkspaceFile:input_type -> fugue.workspace.v1.ReadWorkspaceFileRequest
+	35, // 33: fugue.workspace.v1.WorkspaceService.ListWorkspaceDir:input_type -> fugue.workspace.v1.ListWorkspaceDirRequest
+	7,  // 34: fugue.workspace.v1.WorkspaceService.CreateWorkspace:output_type -> fugue.workspace.v1.CreateWorkspaceResponse
+	9,  // 35: fugue.workspace.v1.WorkspaceService.ListWorkspaces:output_type -> fugue.workspace.v1.ListWorkspacesResponse
+	11, // 36: fugue.workspace.v1.WorkspaceService.GetWorkspace:output_type -> fugue.workspace.v1.GetWorkspaceResponse
+	13, // 37: fugue.workspace.v1.WorkspaceService.GetEffectiveConfig:output_type -> fugue.workspace.v1.GetEffectiveConfigResponse
+	15, // 38: fugue.workspace.v1.WorkspaceService.ValidateConfig:output_type -> fugue.workspace.v1.ValidateConfigResponse
+	17, // 39: fugue.workspace.v1.WorkspaceService.UpdateWorkspaceConfig:output_type -> fugue.workspace.v1.UpdateWorkspaceConfigResponse
+	20, // 40: fugue.workspace.v1.WorkspaceService.PatchWorkspaceConfig:output_type -> fugue.workspace.v1.PatchWorkspaceConfigResponse
+	22, // 41: fugue.workspace.v1.WorkspaceService.ConfirmWorkspaceConfig:output_type -> fugue.workspace.v1.ConfirmWorkspaceConfigResponse
+	24, // 42: fugue.workspace.v1.WorkspaceService.RejectWorkspaceConfig:output_type -> fugue.workspace.v1.RejectWorkspaceConfigResponse
+	26, // 43: fugue.workspace.v1.WorkspaceService.AddRoot:output_type -> fugue.workspace.v1.AddRootResponse
+	28, // 44: fugue.workspace.v1.WorkspaceService.RemoveRoot:output_type -> fugue.workspace.v1.RemoveRootResponse
+	30, // 45: fugue.workspace.v1.WorkspaceService.UpdateRoot:output_type -> fugue.workspace.v1.UpdateRootResponse
+	32, // 46: fugue.workspace.v1.WorkspaceService.DeleteWorkspace:output_type -> fugue.workspace.v1.DeleteWorkspaceResponse
+	34, // 47: fugue.workspace.v1.WorkspaceService.ReadWorkspaceFile:output_type -> fugue.workspace.v1.ReadWorkspaceFileResponse
+	37, // 48: fugue.workspace.v1.WorkspaceService.ListWorkspaceDir:output_type -> fugue.workspace.v1.ListWorkspaceDirResponse
+	34, // [34:49] is the sub-list for method output_type
+	19, // [19:34] is the sub-list for method input_type
+	19, // [19:19] is the sub-list for extension type_name
+	19, // [19:19] is the sub-list for extension extendee
+	0,  // [0:19] is the sub-list for field type_name
 }
 
 func init() { file_fugue_workspace_v1_workspace_proto_init() }
@@ -2221,13 +2472,14 @@ func file_fugue_workspace_v1_workspace_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fugue_workspace_v1_workspace_proto_rawDesc), len(file_fugue_workspace_v1_workspace_proto_rawDesc)),
-			NumEnums:      0,
-			NumMessages:   35,
+			NumEnums:      1,
+			NumMessages:   38,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
 		GoTypes:           file_fugue_workspace_v1_workspace_proto_goTypes,
 		DependencyIndexes: file_fugue_workspace_v1_workspace_proto_depIdxs,
+		EnumInfos:         file_fugue_workspace_v1_workspace_proto_enumTypes,
 		MessageInfos:      file_fugue_workspace_v1_workspace_proto_msgTypes,
 	}.Build()
 	File_fugue_workspace_v1_workspace_proto = out.File

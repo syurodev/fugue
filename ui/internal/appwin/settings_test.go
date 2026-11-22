@@ -270,6 +270,10 @@ func (f *fakeAppSettingsClient) UpdateWorkspaceConfig(_ context.Context, _ strin
 	return f.ws, nil
 }
 
+func (f *fakeAppSettingsClient) PatchWorkspaceConfig(ctx context.Context, in *client.PatchWorkspaceConfigInput) (client.Workspace, error) {
+	return f.UpdateWorkspaceConfig(ctx, in.WorkspaceID, f.ws.RawTOML, in.ExpectedHash)
+}
+
 func (f *fakeAppSettingsClient) GetAppStatePreferences(context.Context) (client.AppStatePreferences, error) {
 	return client.AppStatePreferences{}, nil
 }
