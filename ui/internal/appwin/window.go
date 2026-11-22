@@ -244,13 +244,23 @@ func stopSideGoroutines(cancel context.CancelFunc, feederDone, closerDone <-chan
 // eventLoop is the window's event loop until it is destroyed. Every frame
 // drives the env the way kitgallery's window does (F10.13): the UI scale on
 // the metric, the driver's frame step, the modality and the overlay's window
-// size before layout, and the frame-end invalidations after.
+// size before layout, and the frame-end invalidations after. A destroy while
+// a session's turn still runs opens the close confirmation instead (DA-E08,
+// F10.5e); the confirmed close re-performs the action past the dialog.
 func eventLoop(w *app.Window, env *kit.Env, sc *screens, q *updateQueue, light, dark *theme.Theme) error {
 	var ops op.Ops
+	sc.failure.closeDlg.requestClose = func() { w.Perform(system.ActionClose) }
 	for {
 		switch e := w.Event().(type) {
 		case app.DestroyEvent:
-			// TODO(F10.5e): Ask before closing when active-session counts are available.
+			// The intercept keeps the loop alive so the dialog renders; the
+			// destroy is accepted only once nothing asks. Returning e.Err is
+			// the loop's way of closing the window, which is why the close
+			// action itself cannot live inside requestWindowClose here.
+			if !requestWindowClose(sc, func() {}) {
+				w.Invalidate()
+				continue
+			}
 			return e.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
@@ -330,92 +340,6 @@ func toggleTheme(gtx *layout.Context, env *kit.Env, sc *screens, light, dark *th
 	}
 }
 
-// drainMutResults takes every mutation result the mutator delivered this
-// frame; the window goroutine folds them into the dialogs.
-func drainMutResults(m *workspace.Mutator) []workspace.MutResult {
-	muts := make([]workspace.MutResult, 0, 4)
-drain:
-	for {
-		select {
-		case res := <-m.Results():
-			muts = append(muts, res)
-		default:
-			break drain
-		}
-	}
-	return muts
-}
-
-func drainVaultResults(w *vault.Worker) []vault.Result {
-	out := make([]vault.Result, 0, 4)
-drain:
-	for {
-		select {
-		case res := <-w.Results():
-			out = append(out, res)
-		default:
-			break drain
-		}
-	}
-	return out
-}
-
-func drainInboxResults(w *inbox.Worker) []inbox.Result {
-	out := make([]inbox.Result, 0, 4)
-drain:
-	for {
-		select {
-		case res := <-w.Results():
-			out = append(out, res)
-		default:
-			break drain
-		}
-	}
-	return out
-}
-
-func drainAccountsResults(w *accounts.Worker) []accounts.Result {
-	out := make([]accounts.Result, 0, 4)
-drain:
-	for {
-		select {
-		case res := <-w.Results():
-			out = append(out, res)
-		default:
-			break drain
-		}
-	}
-	return out
-}
-
-func drainSettingsResults(w *settings.Worker) []settings.Result {
-	out := make([]settings.Result, 0, 4)
-drain:
-	for {
-		select {
-		case res := <-w.Results():
-			out = append(out, res)
-		default:
-			break drain
-		}
-	}
-	return out
-}
-
-func drainFileViewResults(w *fileViewWorker) []fileResult {
-	out := make([]fileResult, 0, 4)
-drain:
-	for {
-		select {
-		case res := <-w.Results():
-			out = append(out, res)
-		default:
-			break drain
-		}
-	}
-	return out
-}
-
 // drawWindow lays out the screens — the sidebar, the transcript pane and the
 // composer (F10.4a, F10.4b, F10.14) — and the status bar with the connection
 // state (F10.2a). The open dialog draws last, over everything (UK-07). Every
@@ -451,11 +375,13 @@ func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 			})
 		}),
 	)
-	// The start and workspace dialogs (F10.4b, F10.14) draw over the whole
-	// window, last, with the full frame's gtx: the scrim dims everything
-	// beneath whichever dialog is open.
+	// The start and workspace dialogs (F10.4b, F10.14), the active-session
+	// close confirmation (F10.5e) draw over the whole window, last, with the
+	// full frame's gtx: the scrim dims everything beneath whichever dialog is
+	// open.
 	sc.composer.start.layout(env, gtx, sc, sc.composer)
 	sc.dlg.layout(env, gtx, sc)
+	sc.failure.closeDlg.layout(env, gtx, sc)
 }
 
 // statusColor maps the connection state onto the theme's status tokens

@@ -13,8 +13,13 @@ import (
 	"github.com/syurodev/fugue/pkg/client"
 )
 
-// TestMain checks the package for leaked goroutines.
+// TestMain checks the package for leaked goroutines, after the fake vendor
+// dispatch: a re-execution with a vendor CLI's argv plays the vendor and
+// never reaches the tests (DA-E05).
 func TestMain(m *testing.M) {
+	if playFakeVendorCLI(os.Args) {
+		os.Exit(0)
+	}
 	goleak.VerifyTestMain(m)
 }
 
@@ -64,14 +69,16 @@ func (h *testHost) restartServe(t *testing.T, ctx context.Context, bin string) *
 	return serveIn(t, ctx, bin, h.dataDir, h.runtime)
 }
 
-// serveIn runs `fugue serve` on existing data and runtime directories.
-func serveIn(t *testing.T, ctx context.Context, bin, dataDir, runtime string) *testHost {
+// serveIn runs `fugue serve` on existing data and runtime directories; the
+// extra env entries land after the inherited environment, so callers use them
+// to override, for example PATH (the fake vendor of DA-E05).
+func serveIn(t *testing.T, ctx context.Context, bin, dataDir, runtime string, extraEnv ...string) *testHost {
 	t.Helper()
 	cmd := exec.CommandContext(ctx, bin, "serve")
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(append(os.Environ(),
 		"SYNX_FUGUE_DATA_DIR="+dataDir,
 		"XDG_RUNTIME_DIR="+runtime,
-	)
+	), extraEnv...)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

@@ -41,6 +41,7 @@ func (s *screens) applyComposerResult(r session.Result) {
 	case session.ResultProbe:
 		s.pendingProbe = false
 		s.composer.applyProbes(r.Probes)
+		s.failure.applyProbe(r.Probes, r.Err)
 		if r.Err != nil {
 			s.fail(fmt.Errorf("probe the vendors: %w", r.Err))
 		}
@@ -135,7 +136,7 @@ func (s *screens) applyPostResult(p session.PostResult) {
 			st.area.SetText(p.Text)
 			st.area.MoveCaretToEnd()
 		}
-	case session.PostInterrupt:
+	case session.PostInterrupt, session.PostClose:
 		if p.Err != nil {
 			s.composer.stateFor(p.Session).lastErr = p.Err.Error()
 		}

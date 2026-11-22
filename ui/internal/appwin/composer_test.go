@@ -88,6 +88,11 @@ func (f *fakeVendorHost) Interrupt(ctx context.Context, req *connect.Request[ven
 	return connect.NewResponse(&vendorsv1.InterruptResponse{Status: vendorsv1.OperationStatus_OPERATION_STATUS_DONE}), nil
 }
 
+func (f *fakeVendorHost) CloseSession(ctx context.Context, req *connect.Request[vendorsv1.CloseSessionRequest]) (*connect.Response[vendorsv1.CloseSessionResponse], error) {
+	f.record(vendorCall{method: "close", commandID: req.Msg.CommandId, session: req.Msg.SessionId})
+	return connect.NewResponse(&vendorsv1.CloseSessionResponse{Status: vendorsv1.OperationStatus_OPERATION_STATUS_DONE}), nil
+}
+
 func (f *fakeVendorHost) StartSession(ctx context.Context, req *connect.Request[vendorsv1.StartSessionRequest]) (*connect.Response[vendorsv1.StartSessionResponse], error) {
 	m := req.Msg
 	f.record(vendorCall{

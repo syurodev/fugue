@@ -214,6 +214,19 @@ func (c *Client) Interrupt(ctx context.Context, commandID, sessionID string) (bo
 	return res.Msg.GetStatus() == vendorsv1.OperationStatus_OPERATION_STATUS_DONE, nil
 }
 
+// CloseSession closes a vendor session for good — a detached session's close
+// action, never a substitute for a stop. It reports whether the close was
+// delivered inside the caller's deadline; a false Done means the close keeps
+// running on the host and the session's final state arrives on its topics.
+func (c *Client) CloseSession(ctx context.Context, commandID, sessionID string) (bool, error) {
+	res, err := vendorsv1connect.NewVendorServiceClient(c.hc, c.base).CloseSession(ctx,
+		connect.NewRequest(&vendorsv1.CloseSessionRequest{CommandId: commandID, SessionId: sessionID}))
+	if err != nil {
+		return false, fmt.Errorf("close the vendor session: %w", err)
+	}
+	return res.Msg.GetStatus() == vendorsv1.OperationStatus_OPERATION_STATUS_DONE, nil
+}
+
 // ListCommands reads a session's slash commands: the vendor's own group and
 // the host's `/fugue:` group (vendor-runtime §9). It re-reads whenever the
 // session's commands revision advances on the vendor-sessions topic.

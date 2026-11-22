@@ -188,6 +188,26 @@ func (f *startFlow) usableRoots(sc *screens) []workspace.Root {
 	return roots
 }
 
+// pausedReason reports the vendor-reported pause of the chosen vendor's
+// account, empty when the account is usable or its state is unknown: the
+// start dialog shows it before a doomed submit (desktop-app §6 — the reset
+// time is the vendor's to report, never a guess).
+func (f *startFlow) pausedReason(sc *screens) string {
+	acc, ok := sc.accounts.Account(f.vendorName())
+	if !ok || acc.State != client.AccountStatePaused {
+		return ""
+	}
+	msg := "The " + f.vendorName() + " account is paused by the vendor"
+	if until := formatPausedUntil(acc.PausedUntil); until != "" {
+		msg += " until " + until
+	}
+	return msg + ". The vendor reported this time; starts wait until the account resumes."
+}
+
+// startBlocked reports a start the flow refuses up front so the button does
+// not submit into a typed rejection.
+func (f *startFlow) startBlocked(sc *screens) bool { return f.pausedReason(sc) != "" }
+
 // measure is the start row's height at the current width.
 func (f *startFlow) measure(env *kit.Env, gtx *layout.Context) int {
 	return f.newSession.Measure(env, gtx, kit.ButtonProps{
@@ -228,7 +248,7 @@ func (f *startFlow) layout(env *kit.Env, gtx *layout.Context, sc *screens, c *co
 		Primary:         f.start,
 		PrimaryLabel:    "Start",
 		PrimaryVariant:  kit.Primary,
-		PrimaryDisabled: !f.canStart(sc),
+		PrimaryDisabled: !f.canStart(sc) || f.startBlocked(sc),
 		Dirty:           f.dirty(),
 		Busy:            f.busy,
 		Body: func(gtx *layout.Context, bands *kit.DialogBands) image.Point {
@@ -290,8 +310,23 @@ func (f *startFlow) body(env *kit.Env, gtx *layout.Context, bands *kit.DialogBan
 	f.layVendor(env, c, lay)
 	f.layModel(env, lay)
 	f.layEffort(env, lay)
+	f.layPaused(env, sc, lay)
 	f.layError(env, w, lay)
 	return image.Pt(w, max(y-gap, 0))
+}
+
+// layPaused draws the chosen vendor's vendor-reported pause, if any, ahead of
+// the generic error line (F10.5e).
+func (f *startFlow) layPaused(env *kit.Env, sc *screens, lay fieldLay) {
+	if f.pausedReason(sc) == "" {
+		return
+	}
+	lay(nil, func(gtx *layout.Context) (layout.Dimensions, error) {
+		local := *gtx
+		local.Constraints.Min.X = gtx.Constraints.Max.X
+		dims := kit.Paragraph(env, &local, theme.TypeSmall(), env.Th.Status().Warning, f.pausedReason(sc))
+		return layout.Dimensions{Size: dims.Size}, nil
+	})
 }
 
 // layWorkspace draws the workspace picker from the shared workspace model
