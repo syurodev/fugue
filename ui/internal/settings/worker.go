@@ -39,6 +39,7 @@ type Request struct {
 	Kind          OpKind
 	WorkspaceID   string
 	RawTOML       []byte
+	Patch         *client.WorkspaceSettingsPatch
 	RawRevision   uint64
 	ExpectedHash  string
 	CommandID     string
@@ -67,6 +68,7 @@ type Client interface {
 	GetEffectiveConfig(ctx context.Context, workspaceID string) (client.EffectiveWorkspaceConfig, error)
 	ValidateConfig(ctx context.Context, workspaceID string, rawTOML []byte) ([]client.WorkspaceConfigIssue, error)
 	UpdateWorkspaceConfig(ctx context.Context, workspaceID string, rawTOML []byte, expectedHash string) (client.Workspace, error)
+	PatchWorkspaceConfig(ctx context.Context, in *client.PatchWorkspaceConfigInput) (client.Workspace, error)
 	ConfirmWorkspaceConfig(ctx context.Context, workspaceID, expectedHash string) error
 	RejectWorkspaceConfig(ctx context.Context, workspaceID, expectedHash string) error
 	GetAppStatePreferences(ctx context.Context) (client.AppStatePreferences, error)
@@ -290,7 +292,20 @@ func executeLoadWorkspace(ctx context.Context, c Client, workspaceID string) Res
 
 func executeSaveWorkspace(ctx context.Context, c Client, req *Request) Result {
 	res := Result{Kind: OpSaveWorkspace, WorkspaceID: req.WorkspaceID}
-	ws, err := c.UpdateWorkspaceConfig(ctx, req.WorkspaceID, req.RawTOML, req.ExpectedHash)
+	var (
+		ws  client.Workspace
+		err error
+	)
+	if req.Patch != nil {
+		ws, err = c.PatchWorkspaceConfig(ctx, &client.PatchWorkspaceConfigInput{
+			CommandID:    req.CommandID,
+			WorkspaceID:  req.WorkspaceID,
+			ExpectedHash: req.ExpectedHash,
+			Patch:        req.Patch,
+		})
+	} else {
+		ws, err = c.UpdateWorkspaceConfig(ctx, req.WorkspaceID, req.RawTOML, req.ExpectedHash)
+	}
 	if err == nil {
 		eff, effErr := c.GetEffectiveConfig(ctx, req.WorkspaceID)
 		if effErr != nil {

@@ -100,6 +100,10 @@ func (f *fakeSettingsClient) UpdateWorkspaceConfig(_ context.Context, _ string, 
 	return f.ws, nil
 }
 
+func (f *fakeSettingsClient) PatchWorkspaceConfig(ctx context.Context, in *client.PatchWorkspaceConfigInput) (client.Workspace, error) {
+	return f.UpdateWorkspaceConfig(ctx, in.WorkspaceID, f.ws.RawTOML, in.ExpectedHash)
+}
+
 func (f *fakeSettingsClient) GetAppStatePreferences(context.Context) (client.AppStatePreferences, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -210,11 +214,7 @@ func assertCASConflictReload(t *testing.T, fc *fakeSettingsClient, w *Worker, m 
 	fc.eff.Settings.TeamMaxAgents = 8
 	fc.mu.Unlock()
 
-	raw, err := client.PatchWorkspaceTOML(m.RawTOML, patch)
-	if err != nil {
-		t.Fatal(err)
-	}
-	saveReq := Request{Kind: OpSaveWorkspace, WorkspaceID: testSettingsWSID, RawTOML: raw, ExpectedHash: m.ConfigHash}
+	saveReq := Request{Kind: OpSaveWorkspace, CommandID: "cmd-cas-1", WorkspaceID: testSettingsWSID, Patch: patch, ExpectedHash: m.ConfigHash}
 	w.Do(&saveReq)
 	saveRes := <-w.Results()
 	if !saveRes.CASConflict || saveRes.Workspace == nil || saveRes.Effective == nil {

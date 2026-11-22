@@ -87,6 +87,25 @@ message UpdateWorkspaceConfigRequest {
 message UpdateWorkspaceConfigResponse {
   Workspace workspace = 1;
 }
+enum ConfigPatchOp {
+  CONFIG_PATCH_OP_UNSPECIFIED = 0;
+  CONFIG_PATCH_OP_SET = 1;
+  CONFIG_PATCH_OP_DELETE = 2;
+}
+message ConfigPatch {
+  string dotted_key = 1;
+  ConfigPatchOp op = 2;
+  google.protobuf.Value value = 3;
+}
+message PatchWorkspaceConfigRequest {
+  string command_id = 1;
+  string workspace_id = 2;
+  string expected_hash = 3;
+  repeated ConfigPatch patches = 4;
+}
+message PatchWorkspaceConfigResponse {
+  Workspace workspace = 1;
+}
 message ConfirmWorkspaceConfigRequest {
   string id = 1;
   string expected_hash = 2;
@@ -172,6 +191,7 @@ service WorkspaceService {
   rpc GetEffectiveConfig(GetEffectiveConfigRequest) returns (GetEffectiveConfigResponse);
   rpc ValidateConfig(ValidateConfigRequest) returns (ValidateConfigResponse);
   rpc UpdateWorkspaceConfig(UpdateWorkspaceConfigRequest) returns (UpdateWorkspaceConfigResponse);
+  rpc PatchWorkspaceConfig(PatchWorkspaceConfigRequest) returns (PatchWorkspaceConfigResponse);
   rpc ConfirmWorkspaceConfig(ConfirmWorkspaceConfigRequest) returns (ConfirmWorkspaceConfigResponse);
   rpc RejectWorkspaceConfig(RejectWorkspaceConfigRequest) returns (RejectWorkspaceConfigResponse);
   rpc AddRoot(AddRootRequest) returns (AddRootResponse);

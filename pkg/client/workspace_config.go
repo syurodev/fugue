@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"connectrpc.com/connect"
-	"github.com/pelletier/go-toml/v2"
 
 	workspacev1 "github.com/syurodev/fugue/pkg/pb/fugue/workspace/v1"
 )
@@ -240,100 +239,6 @@ func parseLineColumnSuffix(msg string) (int64, int64) {
 		return 0, 0
 	}
 	return line, col
-}
-
-// PatchWorkspaceTOML applies only the non-nil fields of patch onto rawTOML
-// while preserving unrelated Tier 3 tables and keys. Re-marshalling drops
-// comments and key order (Q-208).
-//
-// TODO(F10.24): replace with the host-side PatchWorkspaceConfig RPC.
-func PatchWorkspaceTOML(rawTOML []byte, patch *WorkspaceSettingsPatch) ([]byte, error) {
-	doc := map[string]any{}
-	if len(strings.TrimSpace(string(rawTOML))) > 0 {
-		if err := toml.Unmarshal(rawTOML, &doc); err != nil {
-			return nil, fmt.Errorf("decode workspace TOML: %w", err)
-		}
-	}
-	if patch != nil {
-		applyPolicyPatch(doc, patch)
-		applySessionPatch(doc, patch)
-		applyTeamsPatch(doc, patch)
-	}
-	out, err := toml.Marshal(doc)
-	if err != nil {
-		return nil, fmt.Errorf("encode workspace TOML: %w", err)
-	}
-	return out, nil
-}
-
-func applyPolicyPatch(doc map[string]any, patch *WorkspaceSettingsPatch) {
-	if patch.ApprovalMode == nil && patch.SandboxProfile == nil && patch.ShellAllow == nil && patch.EnvTags == nil {
-		return
-	}
-	pol := ensureTOMLTable(doc, "policy")
-	if patch.ApprovalMode != nil {
-		pol["approval_mode"] = *patch.ApprovalMode
-	}
-	if patch.SandboxProfile != nil {
-		pol["sandbox_profile"] = *patch.SandboxProfile
-	}
-	if patch.ShellAllow != nil {
-		pol["shell_allow"] = slices.Clone(*patch.ShellAllow)
-		delete(pol, "shell_allow_add")
-	}
-	if patch.EnvTags != nil {
-		rules := make([]map[string]string, 0, len(*patch.EnvTags))
-		for _, r := range *patch.EnvTags {
-			rules = append(rules, map[string]string{"match": r.Match, "tag": r.Tag})
-		}
-		pol["env_tags"] = rules
-	}
-}
-
-func applySessionPatch(doc map[string]any, patch *WorkspaceSettingsPatch) {
-	if patch.SessionTeams == nil && patch.TeamsAutoApprove == nil {
-		return
-	}
-	sess := ensureTOMLTable(doc, "session")
-	if patch.SessionTeams != nil {
-		sess["teams"] = *patch.SessionTeams
-	}
-	if patch.TeamsAutoApprove != nil {
-		sess["teams_auto_approve"] = *patch.TeamsAutoApprove
-	}
-}
-
-func applyTeamsPatch(doc map[string]any, patch *WorkspaceSettingsPatch) {
-	entries := []struct {
-		key string
-		val *int
-	}{
-		{"idle_detach_seconds", patch.IdleDetachSeconds},
-		{"task_deadline_seconds", patch.TaskDeadlineSeconds},
-		{"task_max_turns", patch.TaskMaxTurns},
-		{"silence_timeout_seconds", patch.SilenceTimeoutSeconds},
-		{"team_deadline_seconds", patch.TeamDeadlineSeconds},
-		{"team_max_agents", patch.TeamMaxAgents},
-	}
-	var teams map[string]any
-	for _, e := range entries {
-		if e.val == nil {
-			continue
-		}
-		if teams == nil {
-			teams = ensureTOMLTable(doc, "teams")
-		}
-		teams[e.key] = *e.val
-	}
-}
-
-func ensureTOMLTable(doc map[string]any, section string) map[string]any {
-	if existing, ok := doc[section].(map[string]any); ok {
-		return existing
-	}
-	tbl := map[string]any{}
-	doc[section] = tbl
-	return tbl
 }
 
 func extractWorkspaceSettings(values map[string]any) WorkspaceSettings {

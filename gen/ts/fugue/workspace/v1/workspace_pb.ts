@@ -2,8 +2,9 @@
 // @generated from file fugue/workspace/v1/workspace.proto (package fugue.workspace.v1, syntax proto3)
 /* eslint-disable */
 
-import type { GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
-import { fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { GenEnum, GenFile, GenMessage, GenService } from "@bufbuild/protobuf/codegenv2";
+import { enumDesc, fileDesc, messageDesc, serviceDesc } from "@bufbuild/protobuf/codegenv2";
+import type { Value } from "@bufbuild/protobuf/wkt";
 import { file_google_protobuf_struct } from "@bufbuild/protobuf/wkt";
 import type { JsonObject, Message } from "@bufbuild/protobuf";
 
@@ -11,7 +12,7 @@ import type { JsonObject, Message } from "@bufbuild/protobuf";
  * Describes the file fugue/workspace/v1/workspace.proto.
  */
 export const file_fugue_workspace_v1_workspace: GenFile = /*@__PURE__*/
-  fileDesc("CiJmdWd1ZS93b3Jrc3BhY2UvdjEvd29ya3NwYWNlLnByb3RvEhJmdWd1ZS53b3Jrc3BhY2UudjEiQwoEUm9vdBIMCgRuYW1lGAEgASgJEgwKBHBhdGgYAiABKAkSDgoGYWNjZXNzGAMgASgJEg8KB21pc3NpbmcYBCABKAgiRAoPUG9saWN5RGlmZkVudHJ5EgsKA2tleRgBIAEoCRIRCglvbGRfdmFsdWUYAiABKAkSEQoJbmV3X3ZhbHVlGAMgASgJIoEBChBXb3Jrc3BhY2VTdW1tYXJ5EgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSFQoNbWlzc2luZ19yb290cxgDIAMoCRIXCg9jb25maWdfcmV2aXNpb24YBCABKAMSIwobcGVuZGluZ19wb2xpY3lfY29uZmlybWF0aW9uGAUgASgIIoMDCglXb3Jrc3BhY2USCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRInCgVyb290cxgDIAMoCzIYLmZ1Z3VlLndvcmtzcGFjZS52MS5Sb290EhUKDW1pc3Npbmdfcm9vdHMYBCADKAkSEAoIcmF3X3RvbWwYBSABKAwSEwoLY29uZmlnX2hhc2gYBiABKAkSFwoPY29uZmlnX3JldmlzaW9uGAcgASgDEhcKD3BvbGljeV9yZXZpc2lvbhgIIAEoAxIjChtwZW5kaW5nX3BvbGljeV9jb25maXJtYXRpb24YCSABKAgSOAoLcG9saWN5X2RpZmYYCiADKAsyIy5mdWd1ZS53b3Jrc3BhY2UudjEuUG9saWN5RGlmZkVudHJ5EhIKCmNyZWF0ZWRfYXQYCyABKAkSGAoQY29uZmlnX2Vycm9yX2tleRgMIAEoCRIZChFjb25maWdfZXJyb3JfbGluZRgNIAEoAxIbChNjb25maWdfZXJyb3JfY29sdW1uGA4gASgDIkkKC0NvbmZpZ0lzc3VlEgsKA2tleRgBIAEoCRIMCgRsaW5lGAIgASgDEg4KBmNvbHVtbhgDIAEoAxIPCgdtZXNzYWdlGAQgASgJIiYKFkNyZWF0ZVdvcmtzcGFjZVJlcXVlc3QSDAoEbmFtZRgBIAEoCSJLChdDcmVhdGVXb3Jrc3BhY2VSZXNwb25zZRIwCgl3b3Jrc3BhY2UYASABKAsyHS5mdWd1ZS53b3Jrc3BhY2UudjEuV29ya3NwYWNlIhcKFUxpc3RXb3Jrc3BhY2VzUmVxdWVzdCJSChZMaXN0V29ya3NwYWNlc1Jlc3BvbnNlEjgKCndvcmtzcGFjZXMYASADKAsyJC5mdWd1ZS53b3Jrc3BhY2UudjEuV29ya3NwYWNlU3VtbWFyeSIhChNHZXRXb3Jrc3BhY2VSZXF1ZXN0EgoKAmlkGAEgASgJIkgKFEdldFdvcmtzcGFjZVJlc3BvbnNlEjAKCXdvcmtzcGFjZRgBIAEoCzIdLmZ1Z3VlLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2UiJwoZR2V0RWZmZWN0aXZlQ29uZmlnUmVxdWVzdBIKCgJpZBgBIAEoCSLMAQoaR2V0RWZmZWN0aXZlQ29uZmlnUmVzcG9uc2USJwoGdmFsdWVzGAEgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBJSCgpwcm92ZW5hbmNlGAIgAygLMj4uZnVndWUud29ya3NwYWNlLnYxLkdldEVmZmVjdGl2ZUNvbmZpZ1Jlc3BvbnNlLlByb3ZlbmFuY2VFbnRyeRoxCg9Qcm92ZW5hbmNlRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgDOgI4ASI1ChVWYWxpZGF0ZUNvbmZpZ1JlcXVlc3QSCgoCaWQYASABKAkSEAoIcmF3X3RvbWwYAiABKAwiSQoWVmFsaWRhdGVDb25maWdSZXNwb25zZRIvCgZpc3N1ZXMYASADKAsyHy5mdWd1ZS53b3Jrc3BhY2UudjEuQ29uZmlnSXNzdWUiUwocVXBkYXRlV29ya3NwYWNlQ29uZmlnUmVxdWVzdBIKCgJpZBgBIAEoCRIQCghyYXdfdG9tbBgCIAEoDBIVCg1leHBlY3RlZF9oYXNoGAMgASgJIlEKHVVwZGF0ZVdvcmtzcGFjZUNvbmZpZ1Jlc3BvbnNlEjAKCXdvcmtzcGFjZRgBIAEoCzIdLmZ1Z3VlLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2UiQgodQ29uZmlybVdvcmtzcGFjZUNvbmZpZ1JlcXVlc3QSCgoCaWQYASABKAkSFQoNZXhwZWN0ZWRfaGFzaBgCIAEoCSJSCh5Db25maXJtV29ya3NwYWNlQ29uZmlnUmVzcG9uc2USMAoJd29ya3NwYWNlGAEgASgLMh0uZnVndWUud29ya3NwYWNlLnYxLldvcmtzcGFjZSJBChxSZWplY3RXb3Jrc3BhY2VDb25maWdSZXF1ZXN0EgoKAmlkGAEgASgJEhUKDWV4cGVjdGVkX2hhc2gYAiABKAkiUQodUmVqZWN0V29ya3NwYWNlQ29uZmlnUmVzcG9uc2USMAoJd29ya3NwYWNlGAEgASgLMh0uZnVndWUud29ya3NwYWNlLnYxLldvcmtzcGFjZSJfCg5BZGRSb290UmVxdWVzdBIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEgwKBHBhdGgYAyABKAkSDgoGYWNjZXNzGAQgASgJEhUKDWV4cGVjdGVkX2hhc2gYBSABKAkiQwoPQWRkUm9vdFJlc3BvbnNlEjAKCXdvcmtzcGFjZRgBIAEoCzIdLmZ1Z3VlLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2UiRAoRUmVtb3ZlUm9vdFJlcXVlc3QSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIVCg1leHBlY3RlZF9oYXNoGAMgASgJIkYKElJlbW92ZVJvb3RSZXNwb25zZRIwCgl3b3Jrc3BhY2UYASABKAsyHS5mdWd1ZS53b3Jrc3BhY2UudjEuV29ya3NwYWNlInQKEVVwZGF0ZVJvb3RSZXF1ZXN0EgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSEAoIbmV3X25hbWUYAyABKAkSDAoEcGF0aBgEIAEoCRIOCgZhY2Nlc3MYBSABKAkSFQoNZXhwZWN0ZWRfaGFzaBgGIAEoCSJGChJVcGRhdGVSb290UmVzcG9uc2USMAoJd29ya3NwYWNlGAEgASgLMh0uZnVndWUud29ya3NwYWNlLnYxLldvcmtzcGFjZSJRChZEZWxldGVXb3Jrc3BhY2VSZXF1ZXN0EgoKAmlkGAEgASgJEhUKDWV4cGVjdGVkX2hhc2gYAiABKAkSFAoMY29uZmlybV9uYW1lGAMgASgJIiUKF0RlbGV0ZVdvcmtzcGFjZVJlc3BvbnNlEgoKAmlkGAEgASgJIncKGFJlYWRXb3Jrc3BhY2VGaWxlUmVxdWVzdBIUCgx3b3Jrc3BhY2VfaWQYASABKAkSEQoJcm9vdF9uYW1lGAIgASgJEgwKBHBhdGgYAyABKAkSEgoKc3RhcnRfbGluZRgEIAEoAxIQCghlbmRfbGluZRgFIAEoAyJmChlSZWFkV29ya3NwYWNlRmlsZVJlc3BvbnNlEg8KB2NvbnRlbnQYASABKAkSEwoLdG90YWxfbGluZXMYAiABKAMSEAoIbGFuZ3VhZ2UYAyABKAkSEQoJdHJ1bmNhdGVkGAQgASgIIlAKF0xpc3RXb3Jrc3BhY2VEaXJSZXF1ZXN0EhQKDHdvcmtzcGFjZV9pZBgBIAEoCRIRCglyb290X25hbWUYAiABKAkSDAoEcGF0aBgDIAEoCSI0CghEaXJFbnRyeRIMCgRuYW1lGAEgASgJEgwKBGtpbmQYAiABKAkSDAoEc2l6ZRgDIAEoAyJJChhMaXN0V29ya3NwYWNlRGlyUmVzcG9uc2USLQoHZW50cmllcxgBIAMoCzIcLmZ1Z3VlLndvcmtzcGFjZS52MS5EaXJFbnRyeTKADAoQV29ya3NwYWNlU2VydmljZRJqCg9DcmVhdGVXb3Jrc3BhY2USKi5mdWd1ZS53b3Jrc3BhY2UudjEuQ3JlYXRlV29ya3NwYWNlUmVxdWVzdBorLmZ1Z3VlLndvcmtzcGFjZS52MS5DcmVhdGVXb3Jrc3BhY2VSZXNwb25zZRJnCg5MaXN0V29ya3NwYWNlcxIpLmZ1Z3VlLndvcmtzcGFjZS52MS5MaXN0V29ya3NwYWNlc1JlcXVlc3QaKi5mdWd1ZS53b3Jrc3BhY2UudjEuTGlzdFdvcmtzcGFjZXNSZXNwb25zZRJhCgxHZXRXb3Jrc3BhY2USJy5mdWd1ZS53b3Jrc3BhY2UudjEuR2V0V29ya3NwYWNlUmVxdWVzdBooLmZ1Z3VlLndvcmtzcGFjZS52MS5HZXRXb3Jrc3BhY2VSZXNwb25zZRJzChJHZXRFZmZlY3RpdmVDb25maWcSLS5mdWd1ZS53b3Jrc3BhY2UudjEuR2V0RWZmZWN0aXZlQ29uZmlnUmVxdWVzdBouLmZ1Z3VlLndvcmtzcGFjZS52MS5HZXRFZmZlY3RpdmVDb25maWdSZXNwb25zZRJnCg5WYWxpZGF0ZUNvbmZpZxIpLmZ1Z3VlLndvcmtzcGFjZS52MS5WYWxpZGF0ZUNvbmZpZ1JlcXVlc3QaKi5mdWd1ZS53b3Jrc3BhY2UudjEuVmFsaWRhdGVDb25maWdSZXNwb25zZRJ8ChVVcGRhdGVXb3Jrc3BhY2VDb25maWcSMC5mdWd1ZS53b3Jrc3BhY2UudjEuVXBkYXRlV29ya3NwYWNlQ29uZmlnUmVxdWVzdBoxLmZ1Z3VlLndvcmtzcGFjZS52MS5VcGRhdGVXb3Jrc3BhY2VDb25maWdSZXNwb25zZRJ/ChZDb25maXJtV29ya3NwYWNlQ29uZmlnEjEuZnVndWUud29ya3NwYWNlLnYxLkNvbmZpcm1Xb3Jrc3BhY2VDb25maWdSZXF1ZXN0GjIuZnVndWUud29ya3NwYWNlLnYxLkNvbmZpcm1Xb3Jrc3BhY2VDb25maWdSZXNwb25zZRJ8ChVSZWplY3RXb3Jrc3BhY2VDb25maWcSMC5mdWd1ZS53b3Jrc3BhY2UudjEuUmVqZWN0V29ya3NwYWNlQ29uZmlnUmVxdWVzdBoxLmZ1Z3VlLndvcmtzcGFjZS52MS5SZWplY3RXb3Jrc3BhY2VDb25maWdSZXNwb25zZRJSCgdBZGRSb290EiIuZnVndWUud29ya3NwYWNlLnYxLkFkZFJvb3RSZXF1ZXN0GiMuZnVndWUud29ya3NwYWNlLnYxLkFkZFJvb3RSZXNwb25zZRJbCgpSZW1vdmVSb290EiUuZnVndWUud29ya3NwYWNlLnYxLlJlbW92ZVJvb3RSZXF1ZXN0GiYuZnVndWUud29ya3NwYWNlLnYxLlJlbW92ZVJvb3RSZXNwb25zZRJbCgpVcGRhdGVSb290EiUuZnVndWUud29ya3NwYWNlLnYxLlVwZGF0ZVJvb3RSZXF1ZXN0GiYuZnVndWUud29ya3NwYWNlLnYxLlVwZGF0ZVJvb3RSZXNwb25zZRJqCg9EZWxldGVXb3Jrc3BhY2USKi5mdWd1ZS53b3Jrc3BhY2UudjEuRGVsZXRlV29ya3NwYWNlUmVxdWVzdBorLmZ1Z3VlLndvcmtzcGFjZS52MS5EZWxldGVXb3Jrc3BhY2VSZXNwb25zZRJwChFSZWFkV29ya3NwYWNlRmlsZRIsLmZ1Z3VlLndvcmtzcGFjZS52MS5SZWFkV29ya3NwYWNlRmlsZVJlcXVlc3QaLS5mdWd1ZS53b3Jrc3BhY2UudjEuUmVhZFdvcmtzcGFjZUZpbGVSZXNwb25zZRJtChBMaXN0V29ya3NwYWNlRGlyEisuZnVndWUud29ya3NwYWNlLnYxLkxpc3RXb3Jrc3BhY2VEaXJSZXF1ZXN0GiwuZnVndWUud29ya3NwYWNlLnYxLkxpc3RXb3Jrc3BhY2VEaXJSZXNwb25zZULTAQoWY29tLmZ1Z3VlLndvcmtzcGFjZS52MUIOV29ya3NwYWNlUHJvdG9QAVo/Z2l0aHViLmNvbS9zeXVyb2Rldi9mdWd1ZS9wa2cvcGIvZnVndWUvd29ya3NwYWNlL3YxO3dvcmtzcGFjZXYxogIDRldYqgISRnVndWUuV29ya3NwYWNlLlYxygISRnVndWVcV29ya3NwYWNlXFYx4gIeRnVndWVcV29ya3NwYWNlXFYxXEdQQk1ldGFkYXRh6gIURnVndWU6OldvcmtzcGFjZTo6VjFiBnByb3RvMw", [file_google_protobuf_struct]);
+  fileDesc("CiJmdWd1ZS93b3Jrc3BhY2UvdjEvd29ya3NwYWNlLnByb3RvEhJmdWd1ZS53b3Jrc3BhY2UudjEiQwoEUm9vdBIMCgRuYW1lGAEgASgJEgwKBHBhdGgYAiABKAkSDgoGYWNjZXNzGAMgASgJEg8KB21pc3NpbmcYBCABKAgiRAoPUG9saWN5RGlmZkVudHJ5EgsKA2tleRgBIAEoCRIRCglvbGRfdmFsdWUYAiABKAkSEQoJbmV3X3ZhbHVlGAMgASgJIoEBChBXb3Jrc3BhY2VTdW1tYXJ5EgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSFQoNbWlzc2luZ19yb290cxgDIAMoCRIXCg9jb25maWdfcmV2aXNpb24YBCABKAMSIwobcGVuZGluZ19wb2xpY3lfY29uZmlybWF0aW9uGAUgASgIIoMDCglXb3Jrc3BhY2USCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRInCgVyb290cxgDIAMoCzIYLmZ1Z3VlLndvcmtzcGFjZS52MS5Sb290EhUKDW1pc3Npbmdfcm9vdHMYBCADKAkSEAoIcmF3X3RvbWwYBSABKAwSEwoLY29uZmlnX2hhc2gYBiABKAkSFwoPY29uZmlnX3JldmlzaW9uGAcgASgDEhcKD3BvbGljeV9yZXZpc2lvbhgIIAEoAxIjChtwZW5kaW5nX3BvbGljeV9jb25maXJtYXRpb24YCSABKAgSOAoLcG9saWN5X2RpZmYYCiADKAsyIy5mdWd1ZS53b3Jrc3BhY2UudjEuUG9saWN5RGlmZkVudHJ5EhIKCmNyZWF0ZWRfYXQYCyABKAkSGAoQY29uZmlnX2Vycm9yX2tleRgMIAEoCRIZChFjb25maWdfZXJyb3JfbGluZRgNIAEoAxIbChNjb25maWdfZXJyb3JfY29sdW1uGA4gASgDIkkKC0NvbmZpZ0lzc3VlEgsKA2tleRgBIAEoCRIMCgRsaW5lGAIgASgDEg4KBmNvbHVtbhgDIAEoAxIPCgdtZXNzYWdlGAQgASgJIiYKFkNyZWF0ZVdvcmtzcGFjZVJlcXVlc3QSDAoEbmFtZRgBIAEoCSJLChdDcmVhdGVXb3Jrc3BhY2VSZXNwb25zZRIwCgl3b3Jrc3BhY2UYASABKAsyHS5mdWd1ZS53b3Jrc3BhY2UudjEuV29ya3NwYWNlIhcKFUxpc3RXb3Jrc3BhY2VzUmVxdWVzdCJSChZMaXN0V29ya3NwYWNlc1Jlc3BvbnNlEjgKCndvcmtzcGFjZXMYASADKAsyJC5mdWd1ZS53b3Jrc3BhY2UudjEuV29ya3NwYWNlU3VtbWFyeSIhChNHZXRXb3Jrc3BhY2VSZXF1ZXN0EgoKAmlkGAEgASgJIkgKFEdldFdvcmtzcGFjZVJlc3BvbnNlEjAKCXdvcmtzcGFjZRgBIAEoCzIdLmZ1Z3VlLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2UiJwoZR2V0RWZmZWN0aXZlQ29uZmlnUmVxdWVzdBIKCgJpZBgBIAEoCSLMAQoaR2V0RWZmZWN0aXZlQ29uZmlnUmVzcG9uc2USJwoGdmFsdWVzGAEgASgLMhcuZ29vZ2xlLnByb3RvYnVmLlN0cnVjdBJSCgpwcm92ZW5hbmNlGAIgAygLMj4uZnVndWUud29ya3NwYWNlLnYxLkdldEVmZmVjdGl2ZUNvbmZpZ1Jlc3BvbnNlLlByb3ZlbmFuY2VFbnRyeRoxCg9Qcm92ZW5hbmNlRW50cnkSCwoDa2V5GAEgASgJEg0KBXZhbHVlGAIgASgDOgI4ASI1ChVWYWxpZGF0ZUNvbmZpZ1JlcXVlc3QSCgoCaWQYASABKAkSEAoIcmF3X3RvbWwYAiABKAwiSQoWVmFsaWRhdGVDb25maWdSZXNwb25zZRIvCgZpc3N1ZXMYASADKAsyHy5mdWd1ZS53b3Jrc3BhY2UudjEuQ29uZmlnSXNzdWUiUwocVXBkYXRlV29ya3NwYWNlQ29uZmlnUmVxdWVzdBIKCgJpZBgBIAEoCRIQCghyYXdfdG9tbBgCIAEoDBIVCg1leHBlY3RlZF9oYXNoGAMgASgJIlEKHVVwZGF0ZVdvcmtzcGFjZUNvbmZpZ1Jlc3BvbnNlEjAKCXdvcmtzcGFjZRgBIAEoCzIdLmZ1Z3VlLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2UidwoLQ29uZmlnUGF0Y2gSEgoKZG90dGVkX2tleRgBIAEoCRItCgJvcBgCIAEoDjIhLmZ1Z3VlLndvcmtzcGFjZS52MS5Db25maWdQYXRjaE9wEiUKBXZhbHVlGAMgASgLMhYuZ29vZ2xlLnByb3RvYnVmLlZhbHVlIpABChtQYXRjaFdvcmtzcGFjZUNvbmZpZ1JlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRIUCgx3b3Jrc3BhY2VfaWQYAiABKAkSFQoNZXhwZWN0ZWRfaGFzaBgDIAEoCRIwCgdwYXRjaGVzGAQgAygLMh8uZnVndWUud29ya3NwYWNlLnYxLkNvbmZpZ1BhdGNoIlAKHFBhdGNoV29ya3NwYWNlQ29uZmlnUmVzcG9uc2USMAoJd29ya3NwYWNlGAEgASgLMh0uZnVndWUud29ya3NwYWNlLnYxLldvcmtzcGFjZSJCCh1Db25maXJtV29ya3NwYWNlQ29uZmlnUmVxdWVzdBIKCgJpZBgBIAEoCRIVCg1leHBlY3RlZF9oYXNoGAIgASgJIlIKHkNvbmZpcm1Xb3Jrc3BhY2VDb25maWdSZXNwb25zZRIwCgl3b3Jrc3BhY2UYASABKAsyHS5mdWd1ZS53b3Jrc3BhY2UudjEuV29ya3NwYWNlIkEKHFJlamVjdFdvcmtzcGFjZUNvbmZpZ1JlcXVlc3QSCgoCaWQYASABKAkSFQoNZXhwZWN0ZWRfaGFzaBgCIAEoCSJRCh1SZWplY3RXb3Jrc3BhY2VDb25maWdSZXNwb25zZRIwCgl3b3Jrc3BhY2UYASABKAsyHS5mdWd1ZS53b3Jrc3BhY2UudjEuV29ya3NwYWNlIl8KDkFkZFJvb3RSZXF1ZXN0EgoKAmlkGAEgASgJEgwKBG5hbWUYAiABKAkSDAoEcGF0aBgDIAEoCRIOCgZhY2Nlc3MYBCABKAkSFQoNZXhwZWN0ZWRfaGFzaBgFIAEoCSJDCg9BZGRSb290UmVzcG9uc2USMAoJd29ya3NwYWNlGAEgASgLMh0uZnVndWUud29ya3NwYWNlLnYxLldvcmtzcGFjZSJEChFSZW1vdmVSb290UmVxdWVzdBIKCgJpZBgBIAEoCRIMCgRuYW1lGAIgASgJEhUKDWV4cGVjdGVkX2hhc2gYAyABKAkiRgoSUmVtb3ZlUm9vdFJlc3BvbnNlEjAKCXdvcmtzcGFjZRgBIAEoCzIdLmZ1Z3VlLndvcmtzcGFjZS52MS5Xb3Jrc3BhY2UidAoRVXBkYXRlUm9vdFJlcXVlc3QSCgoCaWQYASABKAkSDAoEbmFtZRgCIAEoCRIQCghuZXdfbmFtZRgDIAEoCRIMCgRwYXRoGAQgASgJEg4KBmFjY2VzcxgFIAEoCRIVCg1leHBlY3RlZF9oYXNoGAYgASgJIkYKElVwZGF0ZVJvb3RSZXNwb25zZRIwCgl3b3Jrc3BhY2UYASABKAsyHS5mdWd1ZS53b3Jrc3BhY2UudjEuV29ya3NwYWNlIlEKFkRlbGV0ZVdvcmtzcGFjZVJlcXVlc3QSCgoCaWQYASABKAkSFQoNZXhwZWN0ZWRfaGFzaBgCIAEoCRIUCgxjb25maXJtX25hbWUYAyABKAkiJQoXRGVsZXRlV29ya3NwYWNlUmVzcG9uc2USCgoCaWQYASABKAkidwoYUmVhZFdvcmtzcGFjZUZpbGVSZXF1ZXN0EhQKDHdvcmtzcGFjZV9pZBgBIAEoCRIRCglyb290X25hbWUYAiABKAkSDAoEcGF0aBgDIAEoCRISCgpzdGFydF9saW5lGAQgASgDEhAKCGVuZF9saW5lGAUgASgDImYKGVJlYWRXb3Jrc3BhY2VGaWxlUmVzcG9uc2USDwoHY29udGVudBgBIAEoCRITCgt0b3RhbF9saW5lcxgCIAEoAxIQCghsYW5ndWFnZRgDIAEoCRIRCgl0cnVuY2F0ZWQYBCABKAgiUAoXTGlzdFdvcmtzcGFjZURpclJlcXVlc3QSFAoMd29ya3NwYWNlX2lkGAEgASgJEhEKCXJvb3RfbmFtZRgCIAEoCRIMCgRwYXRoGAMgASgJIjQKCERpckVudHJ5EgwKBG5hbWUYASABKAkSDAoEa2luZBgCIAEoCRIMCgRzaXplGAMgASgDIkkKGExpc3RXb3Jrc3BhY2VEaXJSZXNwb25zZRItCgdlbnRyaWVzGAEgAygLMhwuZnVndWUud29ya3NwYWNlLnYxLkRpckVudHJ5KmUKDUNvbmZpZ1BhdGNoT3ASHwobQ09ORklHX1BBVENIX09QX1VOU1BFQ0lGSUVEEAASFwoTQ09ORklHX1BBVENIX09QX1NFVBABEhoKFkNPTkZJR19QQVRDSF9PUF9ERUxFVEUQAjL7DAoQV29ya3NwYWNlU2VydmljZRJqCg9DcmVhdGVXb3Jrc3BhY2USKi5mdWd1ZS53b3Jrc3BhY2UudjEuQ3JlYXRlV29ya3NwYWNlUmVxdWVzdBorLmZ1Z3VlLndvcmtzcGFjZS52MS5DcmVhdGVXb3Jrc3BhY2VSZXNwb25zZRJnCg5MaXN0V29ya3NwYWNlcxIpLmZ1Z3VlLndvcmtzcGFjZS52MS5MaXN0V29ya3NwYWNlc1JlcXVlc3QaKi5mdWd1ZS53b3Jrc3BhY2UudjEuTGlzdFdvcmtzcGFjZXNSZXNwb25zZRJhCgxHZXRXb3Jrc3BhY2USJy5mdWd1ZS53b3Jrc3BhY2UudjEuR2V0V29ya3NwYWNlUmVxdWVzdBooLmZ1Z3VlLndvcmtzcGFjZS52MS5HZXRXb3Jrc3BhY2VSZXNwb25zZRJzChJHZXRFZmZlY3RpdmVDb25maWcSLS5mdWd1ZS53b3Jrc3BhY2UudjEuR2V0RWZmZWN0aXZlQ29uZmlnUmVxdWVzdBouLmZ1Z3VlLndvcmtzcGFjZS52MS5HZXRFZmZlY3RpdmVDb25maWdSZXNwb25zZRJnCg5WYWxpZGF0ZUNvbmZpZxIpLmZ1Z3VlLndvcmtzcGFjZS52MS5WYWxpZGF0ZUNvbmZpZ1JlcXVlc3QaKi5mdWd1ZS53b3Jrc3BhY2UudjEuVmFsaWRhdGVDb25maWdSZXNwb25zZRJ8ChVVcGRhdGVXb3Jrc3BhY2VDb25maWcSMC5mdWd1ZS53b3Jrc3BhY2UudjEuVXBkYXRlV29ya3NwYWNlQ29uZmlnUmVxdWVzdBoxLmZ1Z3VlLndvcmtzcGFjZS52MS5VcGRhdGVXb3Jrc3BhY2VDb25maWdSZXNwb25zZRJ5ChRQYXRjaFdvcmtzcGFjZUNvbmZpZxIvLmZ1Z3VlLndvcmtzcGFjZS52MS5QYXRjaFdvcmtzcGFjZUNvbmZpZ1JlcXVlc3QaMC5mdWd1ZS53b3Jrc3BhY2UudjEuUGF0Y2hXb3Jrc3BhY2VDb25maWdSZXNwb25zZRJ/ChZDb25maXJtV29ya3NwYWNlQ29uZmlnEjEuZnVndWUud29ya3NwYWNlLnYxLkNvbmZpcm1Xb3Jrc3BhY2VDb25maWdSZXF1ZXN0GjIuZnVndWUud29ya3NwYWNlLnYxLkNvbmZpcm1Xb3Jrc3BhY2VDb25maWdSZXNwb25zZRJ8ChVSZWplY3RXb3Jrc3BhY2VDb25maWcSMC5mdWd1ZS53b3Jrc3BhY2UudjEuUmVqZWN0V29ya3NwYWNlQ29uZmlnUmVxdWVzdBoxLmZ1Z3VlLndvcmtzcGFjZS52MS5SZWplY3RXb3Jrc3BhY2VDb25maWdSZXNwb25zZRJSCgdBZGRSb290EiIuZnVndWUud29ya3NwYWNlLnYxLkFkZFJvb3RSZXF1ZXN0GiMuZnVndWUud29ya3NwYWNlLnYxLkFkZFJvb3RSZXNwb25zZRJbCgpSZW1vdmVSb290EiUuZnVndWUud29ya3NwYWNlLnYxLlJlbW92ZVJvb3RSZXF1ZXN0GiYuZnVndWUud29ya3NwYWNlLnYxLlJlbW92ZVJvb3RSZXNwb25zZRJbCgpVcGRhdGVSb290EiUuZnVndWUud29ya3NwYWNlLnYxLlVwZGF0ZVJvb3RSZXF1ZXN0GiYuZnVndWUud29ya3NwYWNlLnYxLlVwZGF0ZVJvb3RSZXNwb25zZRJqCg9EZWxldGVXb3Jrc3BhY2USKi5mdWd1ZS53b3Jrc3BhY2UudjEuRGVsZXRlV29ya3NwYWNlUmVxdWVzdBorLmZ1Z3VlLndvcmtzcGFjZS52MS5EZWxldGVXb3Jrc3BhY2VSZXNwb25zZRJwChFSZWFkV29ya3NwYWNlRmlsZRIsLmZ1Z3VlLndvcmtzcGFjZS52MS5SZWFkV29ya3NwYWNlRmlsZVJlcXVlc3QaLS5mdWd1ZS53b3Jrc3BhY2UudjEuUmVhZFdvcmtzcGFjZUZpbGVSZXNwb25zZRJtChBMaXN0V29ya3NwYWNlRGlyEisuZnVndWUud29ya3NwYWNlLnYxLkxpc3RXb3Jrc3BhY2VEaXJSZXF1ZXN0GiwuZnVndWUud29ya3NwYWNlLnYxLkxpc3RXb3Jrc3BhY2VEaXJSZXNwb25zZULTAQoWY29tLmZ1Z3VlLndvcmtzcGFjZS52MUIOV29ya3NwYWNlUHJvdG9QAVo/Z2l0aHViLmNvbS9zeXVyb2Rldi9mdWd1ZS9wa2cvcGIvZnVndWUvd29ya3NwYWNlL3YxO3dvcmtzcGFjZXYxogIDRldYqgISRnVndWUuV29ya3NwYWNlLlYxygISRnVndWVcV29ya3NwYWNlXFYx4gIeRnVndWVcV29ya3NwYWNlXFYxXEdQQk1ldGFkYXRh6gIURnVndWU6OldvcmtzcGFjZTo6VjFiBnByb3RvMw", [file_google_protobuf_struct]);
 
 /**
  * @generated from message fugue.workspace.v1.Root
@@ -444,6 +445,82 @@ export const UpdateWorkspaceConfigResponseSchema: GenMessage<UpdateWorkspaceConf
   messageDesc(file_fugue_workspace_v1_workspace, 16);
 
 /**
+ * @generated from message fugue.workspace.v1.ConfigPatch
+ */
+export type ConfigPatch = Message<"fugue.workspace.v1.ConfigPatch"> & {
+  /**
+   * @generated from field: string dotted_key = 1;
+   */
+  dottedKey: string;
+
+  /**
+   * @generated from field: fugue.workspace.v1.ConfigPatchOp op = 2;
+   */
+  op: ConfigPatchOp;
+
+  /**
+   * @generated from field: google.protobuf.Value value = 3;
+   */
+  value?: Value | undefined;
+};
+
+/**
+ * Describes the message fugue.workspace.v1.ConfigPatch.
+ * Use `create(ConfigPatchSchema)` to create a new message.
+ */
+export const ConfigPatchSchema: GenMessage<ConfigPatch> = /*@__PURE__*/
+  messageDesc(file_fugue_workspace_v1_workspace, 17);
+
+/**
+ * @generated from message fugue.workspace.v1.PatchWorkspaceConfigRequest
+ */
+export type PatchWorkspaceConfigRequest = Message<"fugue.workspace.v1.PatchWorkspaceConfigRequest"> & {
+  /**
+   * @generated from field: string command_id = 1;
+   */
+  commandId: string;
+
+  /**
+   * @generated from field: string workspace_id = 2;
+   */
+  workspaceId: string;
+
+  /**
+   * @generated from field: string expected_hash = 3;
+   */
+  expectedHash: string;
+
+  /**
+   * @generated from field: repeated fugue.workspace.v1.ConfigPatch patches = 4;
+   */
+  patches: ConfigPatch[];
+};
+
+/**
+ * Describes the message fugue.workspace.v1.PatchWorkspaceConfigRequest.
+ * Use `create(PatchWorkspaceConfigRequestSchema)` to create a new message.
+ */
+export const PatchWorkspaceConfigRequestSchema: GenMessage<PatchWorkspaceConfigRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_workspace_v1_workspace, 18);
+
+/**
+ * @generated from message fugue.workspace.v1.PatchWorkspaceConfigResponse
+ */
+export type PatchWorkspaceConfigResponse = Message<"fugue.workspace.v1.PatchWorkspaceConfigResponse"> & {
+  /**
+   * @generated from field: fugue.workspace.v1.Workspace workspace = 1;
+   */
+  workspace?: Workspace | undefined;
+};
+
+/**
+ * Describes the message fugue.workspace.v1.PatchWorkspaceConfigResponse.
+ * Use `create(PatchWorkspaceConfigResponseSchema)` to create a new message.
+ */
+export const PatchWorkspaceConfigResponseSchema: GenMessage<PatchWorkspaceConfigResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_workspace_v1_workspace, 19);
+
+/**
  * @generated from message fugue.workspace.v1.ConfirmWorkspaceConfigRequest
  */
 export type ConfirmWorkspaceConfigRequest = Message<"fugue.workspace.v1.ConfirmWorkspaceConfigRequest"> & {
@@ -463,7 +540,7 @@ export type ConfirmWorkspaceConfigRequest = Message<"fugue.workspace.v1.ConfirmW
  * Use `create(ConfirmWorkspaceConfigRequestSchema)` to create a new message.
  */
 export const ConfirmWorkspaceConfigRequestSchema: GenMessage<ConfirmWorkspaceConfigRequest> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 17);
+  messageDesc(file_fugue_workspace_v1_workspace, 20);
 
 /**
  * @generated from message fugue.workspace.v1.ConfirmWorkspaceConfigResponse
@@ -480,7 +557,7 @@ export type ConfirmWorkspaceConfigResponse = Message<"fugue.workspace.v1.Confirm
  * Use `create(ConfirmWorkspaceConfigResponseSchema)` to create a new message.
  */
 export const ConfirmWorkspaceConfigResponseSchema: GenMessage<ConfirmWorkspaceConfigResponse> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 18);
+  messageDesc(file_fugue_workspace_v1_workspace, 21);
 
 /**
  * @generated from message fugue.workspace.v1.RejectWorkspaceConfigRequest
@@ -502,7 +579,7 @@ export type RejectWorkspaceConfigRequest = Message<"fugue.workspace.v1.RejectWor
  * Use `create(RejectWorkspaceConfigRequestSchema)` to create a new message.
  */
 export const RejectWorkspaceConfigRequestSchema: GenMessage<RejectWorkspaceConfigRequest> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 19);
+  messageDesc(file_fugue_workspace_v1_workspace, 22);
 
 /**
  * @generated from message fugue.workspace.v1.RejectWorkspaceConfigResponse
@@ -519,7 +596,7 @@ export type RejectWorkspaceConfigResponse = Message<"fugue.workspace.v1.RejectWo
  * Use `create(RejectWorkspaceConfigResponseSchema)` to create a new message.
  */
 export const RejectWorkspaceConfigResponseSchema: GenMessage<RejectWorkspaceConfigResponse> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 20);
+  messageDesc(file_fugue_workspace_v1_workspace, 23);
 
 /**
  * @generated from message fugue.workspace.v1.AddRootRequest
@@ -556,7 +633,7 @@ export type AddRootRequest = Message<"fugue.workspace.v1.AddRootRequest"> & {
  * Use `create(AddRootRequestSchema)` to create a new message.
  */
 export const AddRootRequestSchema: GenMessage<AddRootRequest> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 21);
+  messageDesc(file_fugue_workspace_v1_workspace, 24);
 
 /**
  * @generated from message fugue.workspace.v1.AddRootResponse
@@ -573,7 +650,7 @@ export type AddRootResponse = Message<"fugue.workspace.v1.AddRootResponse"> & {
  * Use `create(AddRootResponseSchema)` to create a new message.
  */
 export const AddRootResponseSchema: GenMessage<AddRootResponse> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 22);
+  messageDesc(file_fugue_workspace_v1_workspace, 25);
 
 /**
  * @generated from message fugue.workspace.v1.RemoveRootRequest
@@ -600,7 +677,7 @@ export type RemoveRootRequest = Message<"fugue.workspace.v1.RemoveRootRequest"> 
  * Use `create(RemoveRootRequestSchema)` to create a new message.
  */
 export const RemoveRootRequestSchema: GenMessage<RemoveRootRequest> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 23);
+  messageDesc(file_fugue_workspace_v1_workspace, 26);
 
 /**
  * @generated from message fugue.workspace.v1.RemoveRootResponse
@@ -617,7 +694,7 @@ export type RemoveRootResponse = Message<"fugue.workspace.v1.RemoveRootResponse"
  * Use `create(RemoveRootResponseSchema)` to create a new message.
  */
 export const RemoveRootResponseSchema: GenMessage<RemoveRootResponse> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 24);
+  messageDesc(file_fugue_workspace_v1_workspace, 27);
 
 /**
  * @generated from message fugue.workspace.v1.UpdateRootRequest
@@ -659,7 +736,7 @@ export type UpdateRootRequest = Message<"fugue.workspace.v1.UpdateRootRequest"> 
  * Use `create(UpdateRootRequestSchema)` to create a new message.
  */
 export const UpdateRootRequestSchema: GenMessage<UpdateRootRequest> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 25);
+  messageDesc(file_fugue_workspace_v1_workspace, 28);
 
 /**
  * @generated from message fugue.workspace.v1.UpdateRootResponse
@@ -676,7 +753,7 @@ export type UpdateRootResponse = Message<"fugue.workspace.v1.UpdateRootResponse"
  * Use `create(UpdateRootResponseSchema)` to create a new message.
  */
 export const UpdateRootResponseSchema: GenMessage<UpdateRootResponse> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 26);
+  messageDesc(file_fugue_workspace_v1_workspace, 29);
 
 /**
  * @generated from message fugue.workspace.v1.DeleteWorkspaceRequest
@@ -703,7 +780,7 @@ export type DeleteWorkspaceRequest = Message<"fugue.workspace.v1.DeleteWorkspace
  * Use `create(DeleteWorkspaceRequestSchema)` to create a new message.
  */
 export const DeleteWorkspaceRequestSchema: GenMessage<DeleteWorkspaceRequest> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 27);
+  messageDesc(file_fugue_workspace_v1_workspace, 30);
 
 /**
  * @generated from message fugue.workspace.v1.DeleteWorkspaceResponse
@@ -720,7 +797,7 @@ export type DeleteWorkspaceResponse = Message<"fugue.workspace.v1.DeleteWorkspac
  * Use `create(DeleteWorkspaceResponseSchema)` to create a new message.
  */
 export const DeleteWorkspaceResponseSchema: GenMessage<DeleteWorkspaceResponse> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 28);
+  messageDesc(file_fugue_workspace_v1_workspace, 31);
 
 /**
  * @generated from message fugue.workspace.v1.ReadWorkspaceFileRequest
@@ -757,7 +834,7 @@ export type ReadWorkspaceFileRequest = Message<"fugue.workspace.v1.ReadWorkspace
  * Use `create(ReadWorkspaceFileRequestSchema)` to create a new message.
  */
 export const ReadWorkspaceFileRequestSchema: GenMessage<ReadWorkspaceFileRequest> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 29);
+  messageDesc(file_fugue_workspace_v1_workspace, 32);
 
 /**
  * @generated from message fugue.workspace.v1.ReadWorkspaceFileResponse
@@ -789,7 +866,7 @@ export type ReadWorkspaceFileResponse = Message<"fugue.workspace.v1.ReadWorkspac
  * Use `create(ReadWorkspaceFileResponseSchema)` to create a new message.
  */
 export const ReadWorkspaceFileResponseSchema: GenMessage<ReadWorkspaceFileResponse> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 30);
+  messageDesc(file_fugue_workspace_v1_workspace, 33);
 
 /**
  * @generated from message fugue.workspace.v1.ListWorkspaceDirRequest
@@ -816,7 +893,7 @@ export type ListWorkspaceDirRequest = Message<"fugue.workspace.v1.ListWorkspaceD
  * Use `create(ListWorkspaceDirRequestSchema)` to create a new message.
  */
 export const ListWorkspaceDirRequestSchema: GenMessage<ListWorkspaceDirRequest> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 31);
+  messageDesc(file_fugue_workspace_v1_workspace, 34);
 
 /**
  * @generated from message fugue.workspace.v1.DirEntry
@@ -843,7 +920,7 @@ export type DirEntry = Message<"fugue.workspace.v1.DirEntry"> & {
  * Use `create(DirEntrySchema)` to create a new message.
  */
 export const DirEntrySchema: GenMessage<DirEntry> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 32);
+  messageDesc(file_fugue_workspace_v1_workspace, 35);
 
 /**
  * @generated from message fugue.workspace.v1.ListWorkspaceDirResponse
@@ -860,7 +937,33 @@ export type ListWorkspaceDirResponse = Message<"fugue.workspace.v1.ListWorkspace
  * Use `create(ListWorkspaceDirResponseSchema)` to create a new message.
  */
 export const ListWorkspaceDirResponseSchema: GenMessage<ListWorkspaceDirResponse> = /*@__PURE__*/
-  messageDesc(file_fugue_workspace_v1_workspace, 33);
+  messageDesc(file_fugue_workspace_v1_workspace, 36);
+
+/**
+ * @generated from enum fugue.workspace.v1.ConfigPatchOp
+ */
+export enum ConfigPatchOp {
+  /**
+   * @generated from enum value: CONFIG_PATCH_OP_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: CONFIG_PATCH_OP_SET = 1;
+   */
+  SET = 1,
+
+  /**
+   * @generated from enum value: CONFIG_PATCH_OP_DELETE = 2;
+   */
+  DELETE = 2,
+}
+
+/**
+ * Describes the enum fugue.workspace.v1.ConfigPatchOp.
+ */
+export const ConfigPatchOpSchema: GenEnum<ConfigPatchOp> = /*@__PURE__*/
+  enumDesc(file_fugue_workspace_v1_workspace, 0);
 
 /**
  * @generated from service fugue.workspace.v1.WorkspaceService
@@ -913,6 +1016,14 @@ export const WorkspaceService: GenService<{
     methodKind: "unary";
     input: typeof UpdateWorkspaceConfigRequestSchema;
     output: typeof UpdateWorkspaceConfigResponseSchema;
+  },
+  /**
+   * @generated from rpc fugue.workspace.v1.WorkspaceService.PatchWorkspaceConfig
+   */
+  patchWorkspaceConfig: {
+    methodKind: "unary";
+    input: typeof PatchWorkspaceConfigRequestSchema;
+    output: typeof PatchWorkspaceConfigResponseSchema;
   },
   /**
    * @generated from rpc fugue.workspace.v1.WorkspaceService.ConfirmWorkspaceConfig

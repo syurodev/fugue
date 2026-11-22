@@ -239,18 +239,14 @@ func (s *screens) submitWorkspaceSettings(confirmPolicy bool) {
 		s.settings.PolicyConfirmArmed = true
 		return
 	}
-	raw, err := client.PatchWorkspaceTOML(s.settings.RawTOML, patch)
-	if err != nil {
-		s.settings.SaveErr = err.Error()
-		return
-	}
 	s.settings.Saving = true
 	s.settings.SaveErr = ""
 	s.settings.PolicyConfirmArmed = false
 	req := settings.Request{
 		Kind:         settings.OpSaveWorkspace,
+		CommandID:    s.settings.Prefs.NextCommandID(),
 		WorkspaceID:  s.settings.WorkspaceID,
-		RawTOML:      raw,
+		Patch:        patch,
 		ExpectedHash: s.settings.ConfigHash,
 	}
 	s.settingsWorker.Do(&req)

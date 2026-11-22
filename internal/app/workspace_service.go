@@ -100,6 +100,7 @@ type WorkspaceBackend interface {
 	GetEffectiveWorkspaceConfig(context.Context, string, string) (EffectiveWorkspaceConfig, *WorkspaceView, error)
 	ValidateWorkspaceConfig(context.Context, string, []byte) (WorkspaceConfigIssue, error)
 	UpdateWorkspaceConfig(context.Context, string, string, []byte, string) (*WorkspaceView, error)
+	PatchWorkspaceConfig(context.Context, string, string, string, string, []WorkspaceConfigPatch) (*WorkspaceView, error)
 	ConfirmWorkspaceConfig(context.Context, string, string, string) (*WorkspaceView, error)
 	RejectWorkspaceConfig(context.Context, string, string, string) (*WorkspaceView, error)
 	AddWorkspaceRoot(context.Context, string, string, string, string, string, string) (*WorkspaceView, error)
@@ -112,8 +113,9 @@ type WorkspaceBackend interface {
 
 // WorkspaceService composes workspace domain operations with the ephemeral topic.
 type WorkspaceService struct {
-	domain *workspace.Service
-	hub    *EventHub
+	domain     *workspace.Service
+	hub        *EventHub
+	patchDedup *workspacePatchDedup
 }
 
 // NewWorkspaceService binds the domain service to the app event hub.
@@ -121,7 +123,7 @@ func NewWorkspaceService(domain *workspace.Service, hub *EventHub) (*WorkspaceSe
 	if domain == nil || hub == nil {
 		return nil, errcode.New(errcode.InvalidArgument, "workspace service dependencies are required")
 	}
-	s := &WorkspaceService{domain: domain, hub: hub}
+	s := &WorkspaceService{domain: domain, hub: hub, patchDedup: newWorkspacePatchDedup()}
 	if err := hub.RegisterEphemeral(TopicWorkspaces, s.snapshot, defaultEphemeralBufferCap); err != nil {
 		return nil, err
 	}
