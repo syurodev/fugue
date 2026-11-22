@@ -1,4 +1,4 @@
-<!-- PR title: a Conventional Commit, for example `fix(storage): reject a wrong pragma`. Add the roadmap ID in parentheses only when the change belongs to one. -->
+<!-- PR title: a Conventional Commit, for example `fix(storage): reject a wrong pragma`. Include the Linear issue ID in parentheses for tracked work. -->
 
 ## Description
 
@@ -43,9 +43,10 @@
 - [ ] New behavior has named tests; a bug fix has a regression test
 - [ ] No new `nolint` or `t.Skip`
 - [ ] No new dependency without a row in `docs/dependencies.md`
-- [ ] Docs updated: the roadmap row if this belongs to a roadmap item, an ADR if a decision changed
+- [ ] Linked the PR and updated the Linear issue (`FUG-*`), if applicable
+- [ ] Updated `docs/verification.md` if release evidence changed and the relevant ADR if a decision changed
 - [ ] No `Co-Authored-By` or other attribution trailer in commits
 
 ## Related
 
-<!-- Issues ("Closes #123"), roadmap item, design pages, ADRs, other PRs. "None" is fine. -->
+<!-- Linear issue (FUG-*), design pages, ADRs, other PRs. "None" is fine. -->

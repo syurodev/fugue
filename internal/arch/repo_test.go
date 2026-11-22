@@ -28,7 +28,6 @@ func TestMain(m *testing.M) {
 const (
 	adrFile          = "docs/adr/0001-package-layout.md"
 	dependenciesFile = "docs/dependencies.md"
-	roadmapFile      = "docs/roadmap.md"
 	repoRoot         = "../.."
 )
 

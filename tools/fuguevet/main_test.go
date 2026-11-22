@@ -18,12 +18,8 @@ func TestMain(m *testing.M) {
 
 func vet(ctx context.Context, t *testing.T, bin, dir string) (string, bool) {
 	t.Helper()
-	roadmap, err := filepath.Abs(filepath.Join("testdata", "roadmap.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
 	//nolint:gosec // G204: the program is `go`; arguments are literals and test-controlled paths.
-	cmd := exec.CommandContext(ctx, "go", "vet", "-vettool="+bin, "-todoref.roadmap="+roadmap, "./...")
+	cmd := exec.CommandContext(ctx, "go", "vet", "-vettool="+bin, "./...")
 	cmd.Dir = dir
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -53,7 +49,7 @@ func TestVettoolRunsEveryAnalyzer(t *testing.T) {
 		"kernelpure":  `kernel import "os" is not allowlisted`,
 		"nobarego":    "bare go statement",
 		"secretlog":   "token looks like a secret",
-		"todoref":     "must read",
+		"todoref":     "must use TODO(FUG-<n>):",
 		"cheapvault":  "pays the production Argon2id cost",
 		"realclock":   "clock.Real reads or measures the wall clock",
 		"noprotoleak": "proto-generated and Connect code is importable only by internal/hostapi, pkg/client and cmd",

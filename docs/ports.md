@@ -1,8 +1,16 @@
 # Ports
 
-Provenance of every package ported from `syurodev/dev-kit` (roadmap §3). One row per package,
-one PR per package. The vector tests of a port are built from the original code's output; they
-must not be regenerated from the ported code.
+Porting rules and provenance for packages copied from `syurodev/dev-kit`.
+
+1. Copy only what is needed, one small package and one PR at a time.
+2. Record the original path, DevKit commit SHA, and what was dropped or changed on this page.
+3. Remove DevKit dependencies and identifiers, including Wails, `bridge`, `app`, `AppService`,
+   `DEVKIT_*` variables and the DevKit name.
+4. Run the same quality gates as for new code. Do not add a `nolint` to get a port through.
+5. Before making changes, capture the original code's output in vector tests. These tests must
+   pass after the port. Keep the original vectors.
+6. Record changes in behavior or format in an ADR.
+7. Ports of `crypto`, `vault` and `sandbox` need the user's approval.
 
 Source repository state: `b3c8ff5df42e6fc58c1cd8077dddd278fc7dd84e` (`feat(harness): enforce
 exact and metadata closure contracts (#419)`).
