@@ -50,6 +50,9 @@ type HostConfig struct {
 	// DrainTimeout bounds the graceful drain; the deadline cancels the drain
 	// context through the injected clock. 0 waits unbounded.
 	DrainTimeout time.Duration
+	// CrashPoint is the optional named Stage A crash point armed via
+	// internal/config (SYNX_FUGUE_CRASH_POINT).
+	CrashPoint string
 }
 
 // HelloParams are the Hello request's domain fields.

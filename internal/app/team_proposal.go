@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
@@ -78,6 +79,7 @@ type TeamProposalService struct {
 	pendingAmends amendCards
 	clk           clock.Clock
 	onTimerArmed  func()
+	crashPoint    string
 }
 
 // sessionSettles counts in-flight session-end cancels per session and hands
@@ -156,6 +158,9 @@ func (s *TeamProposalService) SetClock(clk clock.Clock) { s.clk = clk }
 
 // SetOnTimerArmed installs the notification fired after a durable timer is armed.
 func (s *TeamProposalService) SetOnTimerArmed(fn func()) { s.onTimerArmed = fn }
+
+// SetCrashPoint arms an optional Stage A crash point from internal/config.
+func (s *TeamProposalService) SetCrashPoint(point string) { s.crashPoint = point }
 
 func (s *TeamProposalService) now() time.Time {
 	if s.clk != nil {
@@ -336,6 +341,7 @@ func (s *TeamProposalService) Propose(ctx context.Context, sessionID string, arg
 	if err := s.ensureCard(ctx, &snap, teamID, input, warnings, &eff); err != nil {
 		return "", err
 	}
+	config.TriggerCrashPoint(s.crashPoint, config.CrashPointInteractionCardPending)
 	return teamID, nil
 }
 

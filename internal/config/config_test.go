@@ -142,3 +142,25 @@ func TestFromProcessFindsADataDirectoryOrExplainsWhy(t *testing.T) {
 		t.Fatalf("DataDir %q is not absolute", got.DataDir)
 	}
 }
+
+func TestLoadReadsCrashPointAndTriggerNoopWhenUnarmed(t *testing.T) {
+	t.Parallel()
+	got, err := config.Load(config.MapEnv{config.EnvCrashPoint: config.CrashPointVendorTurnActive}, userDir(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CrashPoint != config.CrashPointVendorTurnActive {
+		t.Fatalf("CrashPoint = %q, want %q", got.CrashPoint, config.CrashPointVendorTurnActive)
+	}
+	// Unarmed or mismatched crash points must be a zero-cost no-op.
+	config.TriggerCrashPoint("", config.CrashPointVendorTurnActive)
+	config.TriggerCrashPoint(config.CrashPointTeamTaskRunning, config.CrashPointVendorTurnActive)
+
+	var exitedCode int
+	config.TriggerCrashPoint(config.CrashPointVendorTurnActive, config.CrashPointVendorTurnActive, func(code int) {
+		exitedCode = code
+	})
+	if exitedCode != config.CrashExitCode {
+		t.Fatalf("TriggerCrashPoint exit code = %d, want %d", exitedCode, config.CrashExitCode)
+	}
+}

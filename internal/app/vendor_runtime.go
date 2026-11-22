@@ -220,6 +220,7 @@ func composeVendorSessionManager(
 		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: endSession, SessionEndSettled: sessionEndSettled,
 		TestDelaySpawnRegistration: deps.TestDelaySpawnRegistration,
 		TestOnWaitInflightSpawn:    deps.TestOnWaitInflightSpawn,
+		CrashPoint:                 deps.Config.CrashPoint,
 	})
 }
 
@@ -233,6 +234,7 @@ func wireTeamServices(
 	deps *HostDeps,
 ) {
 	hp.rt.teamProposals = newTeamProposalService(vs, sessions, hp.rt.workspaces.domain, hp.rt.interactions, nopUsageHistory{}, deps.IDs, tokens.liveSession)
+	hp.rt.teamProposals.SetCrashPoint(deps.Config.CrashPoint)
 	// The interaction service consumes the answers of the team proposal, amend,
 	// and task-question cards; wiring happens before any client can answer.
 	hp.rt.interactions.SetTeamCardResolver(hp.rt.teamProposals)
@@ -243,6 +245,7 @@ func wireTeamServices(
 		gate = newHostResultGate(vs, teamGit, deps.DataDir, hp.rt.workspaces.domain, hp.rt.interactions, hp.rt.tags, hp.rt.heavy, sessions, hp.rt.vendors, ocrProbe, deps.IDs)
 	}
 	hp.rt.teamTasks = newTeamTaskService(vs, vendorTaskSessions{svc: &VendorService{sessions: sessions, store: vs}}, hp.rt.workspaces.domain, teamGit, deps.DataDir, deps.IDs, v, gate)
+	hp.rt.teamTasks.SetCrashPoint(deps.Config.CrashPoint)
 	hp.rt.teamTasks.SetInteractions(hp.rt.interactions)
 	hp.rt.interactions.SetTaskQuestionResolver(hp.rt.teamTasks)
 	hp.rt.interactions.SetTeamFinalReviewResolver(hp.rt.teamTasks)
