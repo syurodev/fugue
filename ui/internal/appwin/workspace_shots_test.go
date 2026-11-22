@@ -87,7 +87,7 @@ func buildShotScreens(t *testing.T, scene string) *screens {
 		Roots: []workspace.Root{{Name: testMainRoot, Path: "/srv/repos/docs", Access: "rw"}},
 	})
 	sc.sidebar.ApplyList(client.SessionList{Sessions: []client.Session{
-		{ID: "s1", Vendor: client.VendorClaude, State: "running", WorkspaceID: "w1"},
+		{ID: "s1", Vendor: client.VendorClaude, State: stateRunning, WorkspaceID: "w1"},
 		{ID: "s2", Vendor: client.VendorClaude, State: stateReady, WorkspaceID: "w1"},
 		{ID: "s3", Vendor: client.VendorCodex, State: "detached", WorkspaceID: "w2"},
 	}})
@@ -110,6 +110,11 @@ func buildShotScreens(t *testing.T, scene string) *screens {
 
 func renderWorkspaceShot(t *testing.T, win *headless.Window, spec shotSpec) *image.RGBA {
 	t.Helper()
+	return renderAppShot(t, win, spec, buildShotScreens(t, spec.scene))
+}
+
+func renderAppShot(t *testing.T, win *headless.Window, spec shotSpec, sc *screens) *image.RGBA {
+	t.Helper()
 	sh, err := fonts.Shaper()
 	if err != nil {
 		t.Fatalf("build shaper: %v", err)
@@ -119,7 +124,6 @@ func renderWorkspaceShot(t *testing.T, win *headless.Window, spec shotSpec) *ima
 		th = theme.Light(sh)
 	}
 	env := &kit.Env{Th: &th, Sh: sh, UIScale: spec.uiScale, ReducedMotion: true}
-	sc := buildShotScreens(t, spec.scene)
 	img := renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), spec.name)
 	if sc.lastErr != "" {
 		t.Fatalf("shot %s recorded screen error: %s", spec.name, sc.lastErr)

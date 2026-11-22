@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"slices"
 	"strconv"
 	"sync"
 
@@ -96,6 +97,7 @@ func (w *Worker) Do(req *Request) {
 	q := *req
 	if q.Kind == OpAnswer {
 		if !q.Pin.Valid() {
+			clearAnswerSecrets(q.Answer.Answers)
 			w.deliver(&Result{Kind: q.Kind, Pin: q.Pin, Err: errMissingPin})
 			return
 		}
@@ -103,10 +105,20 @@ func (w *Worker) Do(req *Request) {
 		if q.Answer.CommandID == "" {
 			q.Answer.CommandID = w.newID()
 		}
+		if len(req.Answer.Answers) > 0 {
+			cloned := make([]client.InteractionQuestionAnswer, len(req.Answer.Answers))
+			for i := range req.Answer.Answers {
+				cloned[i] = req.Answer.Answers[i]
+				cloned[i].SecretValue = slices.Clone(req.Answer.Answers[i].SecretValue)
+				clear(req.Answer.Answers[i].SecretValue)
+			}
+			q.Answer.Answers = cloned
+		}
 	}
 	select {
 	case w.reqs <- q:
 	default:
+		clearAnswerSecrets(q.Answer.Answers)
 		w.deliver(&Result{Kind: q.Kind, Pin: q.Pin, Err: errWorkerQueueFull})
 	}
 }
@@ -127,6 +139,7 @@ func (w *Worker) run(ctx context.Context) {
 }
 
 func (w *Worker) handle(ctx context.Context, req *Request) {
+	defer clearAnswerSecrets(req.Answer.Answers)
 	c := w.clientOf()
 	if c == nil {
 		w.deliver(&Result{Kind: req.Kind, Pin: req.Pin, Err: client.ErrDisconnected})
@@ -168,12 +181,19 @@ func (w *Worker) execute(ctx context.Context, c Client, req *Request) Result {
 			}
 		}
 	case OpAnswer:
+		defer clearAnswerSecrets(req.Answer.Answers)
 		res.Answer, res.Err = c.AnswerInteraction(ctx, &req.Answer)
 	}
 	if res.Err != nil {
 		res.Code, _ = client.InteractionCodeOf(res.Err)
 	}
 	return res
+}
+
+func clearAnswerSecrets(answers []client.InteractionQuestionAnswer) {
+	for i := range answers {
+		clear(answers[i].SecretValue)
+	}
 }
 
 func newCommandIDs() func() string {

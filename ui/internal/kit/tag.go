@@ -3,6 +3,7 @@ package kit
 import (
 	"errors"
 	"image"
+	"image/color"
 	"math"
 
 	"gioui.org/f32"
@@ -45,6 +46,7 @@ type TagProps struct {
 	Status  theme.StatusKind
 	Hue     theme.Hue
 	Env     string
+	Code    bool // roomier monospace pill for identifiers
 }
 
 // TagState is the long-lived state the caller keeps per Tag (UK-02).
@@ -120,7 +122,7 @@ func (s *TagState) Measure(env *Env, gtx *layout.Context, p TagProps) (layout.Di
 	if label == "" {
 		return layout.Dimensions{}, errTagEmptyText
 	}
-	return layout.Dimensions{Size: tagSize(env, gtx, p.Icon, label)}, nil
+	return layout.Dimensions{Size: tagSize(env, gtx, p, label)}, nil
 }
 
 // Layout draws the Tag and advances its presence and Snappy tone transitions (§6.4).
@@ -138,7 +140,7 @@ func (s *TagState) Layout(env *Env, gtx *layout.Context, p TagProps) (layout.Dim
 		return layout.Dimensions{}, nil
 	}
 
-	box := tagSize(env, gtx, p.Icon, label)
+	box := tagSize(env, gtx, p, label)
 	tone := s.stepTone(env, ResolveTagTone(env.Th, p))
 	alpha, scale, outW := s.presenceVisuals(box.X)
 	if alpha <= 0 || outW <= 0 {
@@ -155,21 +157,34 @@ func (s *TagState) Layout(env *Env, gtx *layout.Context, p TagProps) (layout.Dim
 	radius := box.Y / 2
 	fillRRect(gtx.Ops, image.Rectangle{Max: box}, radius, fill)
 
-	padX := gtx.Dp(theme.SpaceSM)
+	if err := drawTagLabel(env, gtx, p, box, fg, label); err != nil {
+		return layout.Dimensions{}, err
+	}
+	return layout.Dimensions{Size: image.Pt(outW, box.Y)}, nil
+}
+
+func drawTagLabel(env *Env, gtx *layout.Context, p TagProps, box image.Point, fg color.NRGBA, label string) error {
+	t, padX, _ := tagMetrics(gtx, p.Code)
 	x := padX
 	if p.Icon != "" {
 		iconPx := gtx.Dp(theme.IconXS)
 		iconY := (box.Y - iconPx) / 2
 		if err := drawIconAt(env, gtx, image.Pt(x, iconY), p.Icon, theme.IconXS, fg); err != nil {
-			return layout.Dimensions{}, err
+			return err
 		}
 		x += iconPx + gtx.Dp(theme.SpaceXS)
 	}
-	textY := centerLabelY(env, gtx, theme.TypeSmall(), box.Y)
+	textY := centerLabelY(env, gtx, t, box.Y)
 	at(gtx, image.Pt(x, textY), func(g *layout.Context) {
-		drawText(env, g, theme.TypeSmall(), fg, label, true)
+		if p.Code {
+			g.Constraints.Min.X = 0
+			g.Constraints.Max.X = max(0, box.X-x-padX)
+			MiddleEllipsisLabel(env, g, t, fg, label)
+			return
+		}
+		drawText(env, g, t, fg, label, true)
 	})
-	return layout.Dimensions{Size: image.Pt(outW, box.Y)}, nil
+	return nil
 }
 
 func (s *TagState) presenceVisuals(fullW int) (alpha, scale float32, outW int) {
@@ -208,13 +223,19 @@ func (s *TagState) stepTone(env *Env, target theme.Tone) theme.Tone {
 	}
 }
 
-func tagSize(env *Env, gtx *layout.Context, icon IconName, label string) image.Point {
-	padX := gtx.Dp(theme.SpaceSM)
-	padY := gtx.Dp(theme.SpaceXXS)
-	lbl := measureLabel(env, gtx, theme.TypeSmall(), label)
+func tagMetrics(gtx *layout.Context, code bool) (theme.Type, int, int) {
+	if code {
+		return theme.TypeCodeSmall(), gtx.Dp(theme.SpaceMD), gtx.Dp(theme.SpaceXS)
+	}
+	return theme.TypeSmall(), gtx.Dp(theme.SpaceSM), gtx.Dp(theme.SpaceXXS)
+}
+
+func tagSize(env *Env, gtx *layout.Context, p TagProps, label string) image.Point {
+	t, padX, padY := tagMetrics(gtx, p.Code)
+	lbl := measureLabel(env, gtx, t, label)
 	w := padX*2 + lbl.X
-	h := max(padY*2+labelLine(env, gtx, theme.TypeSmall()), padY*2+lbl.Y)
-	if icon != "" {
+	h := max(padY*2+labelLine(env, gtx, t), padY*2+lbl.Y)
+	if p.Icon != "" {
 		iconPx := gtx.Dp(theme.IconXS)
 		w += iconPx + gtx.Dp(theme.SpaceXS)
 		h = max(h, padY*2+iconPx)

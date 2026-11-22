@@ -6,6 +6,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/accounts"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/inbox"
+	"github.com/syurodev/fugue/ui/internal/secrets"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/settings"
 	"github.com/syurodev/fugue/ui/internal/vault"
@@ -57,6 +58,15 @@ func (s *screens) applyUpdate(u hostconn.Update) {
 		s.applyLoginDelivery(u)
 	case topicAppState:
 		s.applyAppStateDelivery(u)
+	case topicSecrets:
+		s.applySecretsDelivery(u)
+	default:
+		s.applyOpenTranscriptUpdate(u)
+	}
+}
+
+func (s *screens) applyOpenTranscriptUpdate(u hostconn.Update) {
+	switch u.Topic {
 	case topicTranscriptDlt + s.open:
 		if u.Event != nil {
 			s.applyDelta(u.Event.Payload)
@@ -102,6 +112,10 @@ func (s *screens) reconnected() {
 	if s.settingsWorker != nil {
 		req := settings.Request{Kind: settings.OpLoadPrefs}
 		s.settingsWorker.Do(&req)
+	}
+	if s.secretsWorker != nil {
+		req := secrets.Request{Kind: secrets.OpListSecrets}
+		s.secretsWorker.Do(&req)
 	}
 	if s.open != "" {
 		s.m.AddTopic(topicTranscript + s.open)

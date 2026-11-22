@@ -368,6 +368,10 @@ func (s *screens) layoutSidebarPanel(gtx *layout.Context, env *kit.Env) layout.D
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				local := gtx
+				return s.layoutSecretsRow(env, &local)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				local := gtx
 				header, ev := s.header.Layout(env, &local, &kit.SectionHeaderProps{
 					Label:  "Workspaces",
 					Action: &kit.IconButtonProps{Icon: kit.IconPlus, Label: "New workspace"},

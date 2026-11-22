@@ -26,6 +26,16 @@ type questionFormState struct {
 	optionRows     map[string]*kit.ListRowState
 	checks         map[string]*kit.CheckboxState
 	textInput      *kit.TextAreaState
+	secretMode     int
+	modeSeg        *kit.SegmentedState
+	secretInput    *kit.TextFieldState
+	saveSecret     bool
+	saveCheck      *kit.CheckboxState
+	saveName       *kit.TextFieldState
+	saveScopeIdx   int
+	saveScopeSeg   *kit.SegmentedState
+	secretPicker   *kit.SelectState
+	selectedSecID  string
 }
 
 type cardFormState struct {
@@ -49,7 +59,10 @@ func (v *inboxView) formFor(req *client.PendingInteraction) *cardFormState {
 		qs = append(qs, &questionFormState{
 			questionID: req.Questions[i].QuestionID, multiSelected: map[string]bool{},
 			optionRows: map[string]*kit.ListRowState{}, checks: map[string]*kit.CheckboxState{},
-			textInput: kit.NewTextAreaState(),
+			textInput: kit.NewTextAreaState(), modeSeg: kit.NewSegmentedState(),
+			secretInput: kit.NewTextFieldState(), saveCheck: kit.NewCheckboxState(),
+			saveName: kit.NewTextFieldState(), saveScopeSeg: kit.NewSegmentedState(),
+			secretPicker: kit.NewSelectState(),
 		})
 	}
 	f := &cardFormState{
@@ -84,7 +97,7 @@ func (v *inboxView) layoutActiveCard(gtx *layout.Context, env *kit.Env, sc *scre
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				local := gtx
 				return v.scroll.Layout(env, &local, kit.ScrollAreaProps{Axis: layout.Vertical}, func(gtx *layout.Context) layout.Dimensions {
-					return layoutCardScrollBody(gtx, env, req, form)
+					return layoutCardScrollBody(gtx, env, sc, req, form)
 				})
 			}),
 			spacerH(theme.SpaceSM),
@@ -142,7 +155,7 @@ func layoutCardHeader(gtx *layout.Context, env *kit.Env, sc *screens, req *clien
 	)
 }
 
-func layoutCardScrollBody(gtx *layout.Context, env *kit.Env, req *client.PendingInteraction, form *cardFormState) layout.Dimensions {
+func layoutCardScrollBody(gtx *layout.Context, env *kit.Env, sc *screens, req *client.PendingInteraction, form *cardFormState) layout.Dimensions {
 	c := env.Th.Chrome()
 	children := make([]layout.FlexChild, 0, 8)
 	for _, block := range []struct {
@@ -166,17 +179,17 @@ func layoutCardScrollBody(gtx *layout.Context, env *kit.Env, req *client.Pending
 		children = append(children, spacerH(theme.SpaceSM),
 			rigidParagraph(env, theme.TypeSmall(), c.FgMuted, "Session scope: "+req.GrantScopeLabel))
 	}
-	children = append(children, layoutCardInteractiveBody(env, req, form)...)
+	children = append(children, layoutCardInteractiveBody(env, sc, req, form)...)
 	children = append(children, spacerH(theme.SpaceMD))
 	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, children...)
 }
 
-func layoutCardInteractiveBody(env *kit.Env, req *client.PendingInteraction, form *cardFormState) []layout.FlexChild {
+func layoutCardInteractiveBody(env *kit.Env, sc *screens, req *client.PendingInteraction, form *cardFormState) []layout.FlexChild {
 	switch req.Kind {
 	case client.InteractionKindSelect:
 		return layoutOptionsSection(env, req.Options, form)
 	case client.InteractionKindQuestion:
-		return layoutQuestionsSection(env, req, form)
+		return layoutQuestionsSection(env, sc, req, form)
 	case client.InteractionKindConfirm:
 		var out []layout.FlexChild
 		if len(req.Options) > 0 {
@@ -202,7 +215,7 @@ func layoutOptionsSection(env *kit.Env, opts []client.InteractionOption, form *c
 	return out
 }
 
-func layoutQuestionsSection(env *kit.Env, req *client.PendingInteraction, form *cardFormState) []layout.FlexChild {
+func layoutQuestionsSection(env *kit.Env, sc *screens, req *client.PendingInteraction, form *cardFormState) []layout.FlexChild {
 	out := make([]layout.FlexChild, 0, len(req.Questions)*4)
 	for qi := range req.Questions {
 		if qi >= len(form.questions) {
@@ -210,6 +223,10 @@ func layoutQuestionsSection(env *kit.Env, req *client.PendingInteraction, form *
 		}
 		q, qf := req.Questions[qi], form.questions[qi]
 		out = append(out, spacerH(theme.SpaceMD), rigidParagraph(env, theme.TypeLabel(), env.Th.Chrome().Fg, q.Prompt))
+		if q.Secret {
+			out = append(out, layoutSecretQuestion(env, sc, qf, form.busy)...)
+			continue
+		}
 		out = append(out, layoutQuestionOptions(env, &q, qf, form.busy)...)
 		if q.AllowText || len(q.Options) == 0 {
 			out = append(out, spacerH(theme.SpaceSM), rigidTextArea(env, qf.textInput, "Answer", "Type your answer…", form.busy))
@@ -270,11 +287,13 @@ func layoutCardFooter(gtx *layout.Context, env *kit.Env, sc *screens, req *clien
 		}
 		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
 			rigidInboxButton(env, sc.fail, form.cancelBtn, kit.ButtonProps{Text: cancelLabel, Variant: kit.Secondary, Busy: form.busy}, func() {
+				form.clearSecrets()
 				submitInboxAnswer(sc, form, pin, &client.AnswerInteractionInput{Outcome: cancelOutcome})
 			}),
 			spacerW(theme.SpaceSM),
 			rigidInboxButton(env, sc.fail, form.submitBtn, kit.ButtonProps{Text: "Submit answer", Variant: kit.Primary, Disabled: !canSubmitQuestions(req, form), Busy: form.busy}, func() {
-				submitInboxAnswer(sc, form, pin, &client.AnswerInteractionInput{Outcome: client.InteractionOutcomeAnswered, Answers: buildQuestionAnswers(req, form)})
+				wsID, _ := sc.currentWorkspace()
+				submitInboxAnswer(sc, form, pin, &client.AnswerInteractionInput{Outcome: client.InteractionOutcomeAnswered, Answers: buildQuestionAnswers(req, form, wsID)})
 			}),
 		)
 	default:
@@ -319,22 +338,34 @@ func canSubmitQuestions(req *client.PendingInteraction, form *cardFormState) boo
 		return false
 	}
 	for i := range req.Questions {
-		q, qf := req.Questions[i], form.questions[i]
-		if qf.textInput.Text() != "" || (!q.MultiSelect && qf.singleSelected != "") {
-			continue
+		if !canSubmitOneQuestion(&req.Questions[i], form.questions[i]) {
+			return false
 		}
-		if q.MultiSelect && slices.ContainsFunc(q.Options, func(o client.InteractionOption) bool { return qf.multiSelected[o.ID] }) {
-			continue
-		}
-		return false
 	}
 	return true
 }
 
-func buildQuestionAnswers(req *client.PendingInteraction, form *cardFormState) []client.InteractionQuestionAnswer {
+func canSubmitOneQuestion(q *client.InteractionQuestion, qf *questionFormState) bool {
+	if q.Secret {
+		return canSubmitSecretQuestion(qf)
+	}
+	if qf.textInput.Text() != "" {
+		return true
+	}
+	if !q.MultiSelect {
+		return qf.singleSelected != ""
+	}
+	return slices.ContainsFunc(q.Options, func(o client.InteractionOption) bool { return qf.multiSelected[o.ID] })
+}
+
+func buildQuestionAnswers(req *client.PendingInteraction, form *cardFormState, wsID string) []client.InteractionQuestionAnswer {
 	out := make([]client.InteractionQuestionAnswer, 0, len(req.Questions))
 	for i := range req.Questions {
 		q, qf := req.Questions[i], form.questions[i]
+		if q.Secret {
+			out = append(out, buildSecretQuestionAnswer(q.QuestionID, qf, wsID))
+			continue
+		}
 		var optIDs []string
 		if q.MultiSelect {
 			for oi := range q.Options {

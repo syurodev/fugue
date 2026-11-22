@@ -42,13 +42,24 @@ func newInboxView() *inboxView {
 	}
 }
 
+func (v *inboxView) clearSecretInputs() {
+	for _, f := range v.forms {
+		f.clearSecrets()
+	}
+}
+
 func (v *inboxView) reconcile(m *inbox.Model) {
 	items := m.Items()
 	live := make(map[inbox.Pin]bool, len(items))
 	for i := range items {
 		live[inbox.Pin{RequestID: items[i].RequestID, Incarnation: items[i].Incarnation}] = true
 	}
-	pruneKnownMap(v.forms, live)
+	for k, f := range v.forms {
+		if !live[k] {
+			f.clearSecrets()
+			delete(v.forms, k)
+		}
+	}
 	pruneKnownMap(v.queueRows, live)
 	if len(items) == 0 {
 		v.active, v.focusedPin = inbox.Pin{}, inbox.Pin{}
@@ -92,6 +103,9 @@ func (v *inboxView) applied(res *inbox.Result, m *inbox.Model, w *inbox.Worker) 
 		}
 	}
 	if res.Err == nil || res.Code == "interaction.already_answered" || res.Code == "interaction.not_found" || res.Code == codeStaleIncarnation {
+		if f := v.forms[res.Pin]; f != nil {
+			f.clearSecrets()
+		}
 		m.Remove(res.Pin)
 		delete(v.forms, res.Pin)
 		if res.Code == codeStaleIncarnation && w != nil {
