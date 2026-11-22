@@ -60,6 +60,13 @@ func (s *screens) applyUpdate(u hostconn.Update) {
 		s.applyAppStateDelivery(u)
 	case topicSecrets:
 		s.applySecretsDelivery(u)
+	default:
+		s.applyOpenTranscriptUpdate(u)
+	}
+}
+
+func (s *screens) applyOpenTranscriptUpdate(u hostconn.Update) {
+	switch u.Topic {
 	case topicTranscriptDlt + s.open:
 		if u.Event != nil {
 			s.applyDelta(u.Event.Payload)

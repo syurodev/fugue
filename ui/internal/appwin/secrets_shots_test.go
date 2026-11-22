@@ -10,11 +10,8 @@ import (
 
 	"github.com/syurodev/fugue/pkg/client"
 
-	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/glwin"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
-	"github.com/syurodev/fugue/ui/internal/kit"
-	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/vault"
 )
 
@@ -61,7 +58,7 @@ func buildSecretsShotScreens(t *testing.T, scene string) *screens {
 			{
 				SecretID:    "sec-3",
 				ScopeKind:   client.SecretScopeWorkspace,
-				ScopeID:     "ws-1",
+				ScopeID:     testSettingsWSID,
 				Name:        "STAGING_DB_URL",
 				Description: "Alpha workspace database connection",
 				UpdatedAt:   time.Date(2026, 11, 22, 18, 15, 0, 0, time.UTC),
@@ -74,67 +71,58 @@ func buildSecretsShotScreens(t *testing.T, scene string) *screens {
 	sc.applySecretsDelivery(hostconn.Update{Topic: topicSecrets, Snapshot: &client.Snapshot{State: snap}})
 
 	if scene == shotInboxSecretQuestion {
-		req := client.PendingInteraction{
-			RequestID:       "req-sec-shot-1",
-			Incarnation:     testInboxInc,
-			SessionID:       "sess-1",
-			Kind:            client.InteractionKindQuestion,
-			Summary:         "Vendor session needs a credential to access the staging API.",
-			OfferedOutcomes: []string{client.InteractionOutcomeAnswered, client.InteractionOutcomeCancelled},
-			Questions: []client.InteractionQuestion{
-				{
-					QuestionID: "q-api-key",
-					Prompt:     "Enter staging API token",
-					AllowText:  true,
-					Secret:     true,
-				},
-			},
-		}
-		isnap, err := json.Marshal([]client.PendingInteraction{req})
-		if err != nil {
-			t.Fatal(err)
-		}
-		sc.applyInteractionDelivery(hostconn.Update{
-			Topic:    topicInteraction,
-			Snapshot: &client.Snapshot{Incarnation: testInboxInc, Sequence: 1, State: isnap},
-		})
-		form := sc.inboxView.formFor(&req)
-		qf := form.questions[0]
-		qf.secretInput.SetText("sk-staging-demo")
-		qf.saveSecret = true
-		qf.saveName.SetText("STAGING_API_TOKEN")
-		qf.saveScopeIdx = 1
-		openVisibleSlot(sc, SlotRef{Kind: KindInbox})
+		setupInboxSecretShot(t, sc)
 		return sc
 	}
 
 	openVisibleSlot(sc, SlotRef{Kind: KindSecrets})
 	if scene == shotSecretsAddDialog {
-		sc.secretsView.addDlg.open("ws-1")
+		sc.secretsView.addDlg.open(testSettingsWSID)
 		sc.secretsView.addDlg.name.SetText("OPENAI_API_KEY")
 		sc.secretsView.addDlg.description.SetText("Used by vendor sessions")
-		sc.secretsView.addDlg.value.SetText("sk-demo-secret")
+		sc.secretsView.addDlg.value.SetText("sample")
 	}
 	return sc
 }
 
+func setupInboxSecretShot(t *testing.T, sc *screens) {
+	t.Helper()
+	req := client.PendingInteraction{
+		RequestID:       "req-sec-shot-1",
+		Incarnation:     testInboxInc,
+		SessionID:       testSecretSessionID,
+		Kind:            client.InteractionKindQuestion,
+		Summary:         "Vendor session needs a credential to access the staging API.",
+		OfferedOutcomes: []string{client.InteractionOutcomeAnswered, client.InteractionOutcomeCancelled},
+		Questions: []client.InteractionQuestion{
+			{
+				QuestionID: "q-api-key",
+				Prompt:     "Enter staging API token",
+				AllowText:  true,
+				Secret:     true,
+			},
+		},
+	}
+	isnap, err := json.Marshal([]client.PendingInteraction{req})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.applyInteractionDelivery(hostconn.Update{
+		Topic:    topicInteraction,
+		Snapshot: &client.Snapshot{Incarnation: testInboxInc, Sequence: 1, State: isnap},
+	})
+	form := sc.inboxView.formFor(&req)
+	qf := form.questions[0]
+	qf.secretInput.SetText("sk-staging-demo")
+	qf.saveSecret = true
+	qf.saveName.SetText("STAGING_API_TOKEN")
+	qf.saveScopeIdx = 1
+	openVisibleSlot(sc, SlotRef{Kind: KindInbox})
+}
+
 func renderSecretsShot(t *testing.T, win *headless.Window, spec shotSpec) *image.RGBA {
 	t.Helper()
-	sh, err := fonts.Shaper()
-	if err != nil {
-		t.Fatalf("build shaper: %v", err)
-	}
-	th := theme.Dark(sh)
-	if spec.light {
-		th = theme.Light(sh)
-	}
-	env := &kit.Env{Th: &th, Sh: sh, UIScale: spec.uiScale, ReducedMotion: true}
-	sc := buildSecretsShotScreens(t, spec.scene)
-	img := renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), spec.name)
-	if sc.lastErr != "" {
-		t.Fatalf("secrets shot %s recorded error: %s", spec.name, sc.lastErr)
-	}
-	return img
+	return renderAppShot(t, win, spec, buildSecretsShotScreens(t, spec.scene))
 }
 
 func TestSecretsAndInboxSecretQuestionShots(t *testing.T) {

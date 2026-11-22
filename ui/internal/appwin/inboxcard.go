@@ -4,7 +4,6 @@ import (
 	"image"
 	"image/color"
 	"slices"
-	"strings"
 
 	"gioui.org/io/input"
 	"gioui.org/io/key"
@@ -339,28 +338,24 @@ func canSubmitQuestions(req *client.PendingInteraction, form *cardFormState) boo
 		return false
 	}
 	for i := range req.Questions {
-		q, qf := req.Questions[i], form.questions[i]
-		if q.Secret {
-			if qf.secretMode == 1 {
-				if qf.selectedSecID != "" {
-					continue
-				}
-				return false
-			}
-			if qf.secretInput.Text() != "" && (!qf.saveSecret || strings.TrimSpace(qf.saveName.Text()) != "") {
-				continue
-			}
+		if !canSubmitOneQuestion(&req.Questions[i], form.questions[i]) {
 			return false
 		}
-		if qf.textInput.Text() != "" || (!q.MultiSelect && qf.singleSelected != "") {
-			continue
-		}
-		if q.MultiSelect && slices.ContainsFunc(q.Options, func(o client.InteractionOption) bool { return qf.multiSelected[o.ID] }) {
-			continue
-		}
-		return false
 	}
 	return true
+}
+
+func canSubmitOneQuestion(q *client.InteractionQuestion, qf *questionFormState) bool {
+	if q.Secret {
+		return canSubmitSecretQuestion(qf)
+	}
+	if qf.textInput.Text() != "" {
+		return true
+	}
+	if !q.MultiSelect {
+		return qf.singleSelected != ""
+	}
+	return slices.ContainsFunc(q.Options, func(o client.InteractionOption) bool { return qf.multiSelected[o.ID] })
 }
 
 func buildQuestionAnswers(req *client.PendingInteraction, form *cardFormState, wsID string) []client.InteractionQuestionAnswer {

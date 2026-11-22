@@ -1,8 +1,8 @@
 package appwin
 
 import (
-	"fmt"
 	"image"
+	"strconv"
 
 	"gioui.org/layout"
 
@@ -21,6 +21,23 @@ const (
 )
 
 const vaultLockedSecretsMsg = "Vault is locked — unlock to add, replace, or delete secrets."
+
+const (
+	labelWorkspace         = "Workspace"
+	labelGlobal            = "Global"
+	labelAddSecret         = "Add secret"
+	labelDelete            = "Delete"
+	labelName              = "Name"
+	labelSecretValue       = "Secret value"
+	placeholderSecretValue = "Enter secret value…"
+)
+
+func workspaceScopeLabel(name string) string {
+	if name == "" {
+		return labelWorkspace
+	}
+	return name
+}
 
 type secretRowWidgets struct {
 	card       *kit.CardState
@@ -152,14 +169,14 @@ func (v *secretsView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screen
 		rigidLabel(env, titleTok, titleCol, "Secrets"),
 		spacerW(theme.SpaceSM),
 		rigidTag(env, sc.fail, v.countTag, kit.TagProps{
-			Text:    fmt.Sprintf("%d", len(items)),
+			Text:    strconv.Itoa(len(items)),
 			Variant: kit.TagNeutral,
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
 		}),
 		rigidInboxButton(env, sc.fail, v.addBtn, kit.ButtonProps{
-			Text:     "Add secret",
+			Text:     labelAddSecret,
 			Variant:  kit.Primary,
 			Size:     kit.SizeSM,
 			Disabled: locked || sc.secretsWorker == nil,
@@ -246,14 +263,11 @@ func (v *secretsView) layoutBody(gtx *layout.Context, env *kit.Env, sc *screens)
 }
 
 func (v *secretsView) layoutFilterBar(gtx *layout.Context, env *kit.Env, sc *screens, wsID, wsName string) layout.Dimensions {
-	wsLabel := "Workspace"
-	if wsName != "" {
-		wsLabel = wsName
-	}
+	wsLabel := workspaceScopeLabel(wsName)
 	changed, next, err := v.scopeFilter.Layout(env, gtx, kit.SegmentedProps{
 		Options: []kit.SegmentedOption{
 			{ID: "all", Label: "All"},
-			{ID: client.SecretScopeGlobal, Label: "Global"},
+			{ID: client.SecretScopeGlobal, Label: labelGlobal},
 			{ID: client.SecretScopeWorkspace, Label: wsLabel, Disabled: wsID == ""},
 		},
 		Selected: v.filterScope,
@@ -265,7 +279,7 @@ func (v *secretsView) layoutFilterBar(gtx *layout.Context, env *kit.Env, sc *scr
 	return v.scopeFilter.Measure(env, gtx, kit.SegmentedProps{
 		Options: []kit.SegmentedOption{
 			{ID: "all", Label: "All"},
-			{ID: client.SecretScopeGlobal, Label: "Global"},
+			{ID: client.SecretScopeGlobal, Label: labelGlobal},
 			{ID: client.SecretScopeWorkspace, Label: wsLabel, Disabled: wsID == ""},
 		},
 		Selected: v.filterScope,
@@ -275,7 +289,7 @@ func (v *secretsView) layoutFilterBar(gtx *layout.Context, env *kit.Env, sc *scr
 func (v *secretsView) layoutEmpty(gtx *layout.Context, env *kit.Env, sc *screens, locked bool, wsID string) layout.Dimensions {
 	primary := ""
 	if !locked && sc.secretsWorker != nil {
-		primary = "Add secret"
+		primary = labelAddSecret
 	}
 	dims, ev, err := v.empty.Layout(env, gtx, &kit.EmptyStateProps{
 		Icon:          kit.IconEye,
@@ -299,75 +313,68 @@ func (v *secretsView) layoutSecretRow(
 	locked bool,
 ) layout.Dimensions {
 	w := v.widgetsFor(meta.SecretID)
-	c := env.Th.Chrome()
-	scopeText := "Global"
-	if meta.ScopeKind == client.SecretScopeWorkspace {
-		if wsName != "" {
-			scopeText = wsName
-		} else {
-			scopeText = "Workspace"
-		}
-	}
-	updatedText := ""
-	if !meta.UpdatedAt.IsZero() {
-		updatedText = "Updated " + meta.UpdatedAt.Local().Format("2006-01-02 15:04")
-	}
-	disabled := locked || sc.secretsWorker == nil
 	dims, _, err := w.card.Layout(env, gtx, kit.CardProps{}, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						local := gtx
-						return kit.Label(env, &local, theme.TypeCodeSmall(), c.Fg, meta.Name)
-					}),
-					spacerW(theme.SpaceSM),
-					rigidTag(env, sc.fail, w.scopeTag, kit.TagProps{Text: scopeText, Variant: kit.TagNeutral}),
-				)
+				return w.layoutHeader(gtx, env, sc, meta, wsName)
 			}),
 			spacerH(theme.SpaceXS),
 			rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						var col []layout.FlexChild
-						if meta.Description != "" {
-							col = append(col, rigidParagraph(env, theme.TypeSmall(), c.FgMuted, meta.Description))
-						}
-						if updatedText != "" {
-							if len(col) > 0 {
-								col = append(col, spacerH(theme.SpaceXXS))
-							}
-							col = append(col, rigidLabel(env, theme.TypeCaption(), c.FgMuted, updatedText))
-						}
-						if len(col) == 0 {
-							return layout.Dimensions{}
-						}
-						return layout.Flex{Axis: layout.Vertical}.Layout(gtx, col...)
-					}),
-					spacerW(theme.SpaceSM),
-					rigidInboxButton(env, sc.fail, w.replaceBtn, kit.ButtonProps{
-						Text:     "Replace",
-						Variant:  kit.Secondary,
-						Size:     kit.SizeSM,
-						Disabled: disabled,
-					}, func() {
-						v.replaceDlg.open(meta)
-					}),
-					spacerW(theme.SpaceXS),
-					rigidInboxButton(env, sc.fail, w.deleteBtn, kit.ButtonProps{
-						Text:     "Delete",
-						Variant:  kit.Danger,
-						Size:     kit.SizeSM,
-						Disabled: disabled,
-					}, func() {
-						v.deleteDlg.open(meta)
-					}),
-				)
+				return v.layoutRowFooter(gtx, env, sc, w, meta, locked || sc.secretsWorker == nil)
 			}),
 		)
 	})
 	sc.fail(err)
 	return dims
+}
+
+func (w *secretRowWidgets) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens, meta *client.SecretMeta, wsName string) layout.Dimensions {
+	scopeText := labelGlobal
+	if meta.ScopeKind == client.SecretScopeWorkspace {
+		scopeText = workspaceScopeLabel(wsName)
+	}
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return kit.Label(env, &gtx, theme.TypeCodeSmall(), env.Th.Chrome().Fg, meta.Name)
+		}),
+		spacerW(theme.SpaceSM),
+		rigidTag(env, sc.fail, w.scopeTag, kit.TagProps{Text: scopeText, Variant: kit.TagNeutral}),
+	)
+}
+
+func (v *secretsView) layoutRowFooter(gtx *layout.Context, env *kit.Env, sc *screens, w *secretRowWidgets, meta *client.SecretMeta, disabled bool) layout.Dimensions {
+	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			return layoutSecretRowDetails(&gtx, env, meta)
+		}),
+		spacerW(theme.SpaceSM),
+		rigidInboxButton(env, sc.fail, w.replaceBtn, kit.ButtonProps{
+			Text: "Replace", Variant: kit.Secondary, Size: kit.SizeSM, Disabled: disabled,
+		}, func() { v.replaceDlg.open(meta) }),
+		spacerW(theme.SpaceXS),
+		rigidInboxButton(env, sc.fail, w.deleteBtn, kit.ButtonProps{
+			Text: labelDelete, Variant: kit.Danger, Size: kit.SizeSM, Disabled: disabled,
+		}, func() { v.deleteDlg.open(meta) }),
+	)
+}
+
+func layoutSecretRowDetails(gtx *layout.Context, env *kit.Env, meta *client.SecretMeta) layout.Dimensions {
+	muted := env.Th.Chrome().FgMuted
+	var children []layout.FlexChild
+	if meta.Description != "" {
+		children = append(children, rigidParagraph(env, theme.TypeSmall(), muted, meta.Description))
+	}
+	if !meta.UpdatedAt.IsZero() {
+		if len(children) > 0 {
+			children = append(children, spacerH(theme.SpaceXXS))
+		}
+		updated := "Updated " + meta.UpdatedAt.Local().Format("2006-01-02 15:04")
+		children = append(children, rigidLabel(env, theme.TypeCaption(), muted, updated))
+	}
+	if len(children) == 0 {
+		return layout.Dimensions{}
+	}
+	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, children...)
 }
 
 func (v *secretsView) layoutDialogs(env *kit.Env, gtx *layout.Context, sc *screens) {

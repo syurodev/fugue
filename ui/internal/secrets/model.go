@@ -110,18 +110,18 @@ func (m *Model) ApplyEvent(eventType string, payload []byte) error {
 }
 
 // UpsertMeta inserts or updates one SecretMeta record.
-func (m *Model) UpsertMeta(meta client.SecretMeta) {
-	if meta.SecretID == "" {
+func (m *Model) UpsertMeta(meta *client.SecretMeta) {
+	if meta == nil || meta.SecretID == "" {
 		return
 	}
 	for i := range m.items {
 		if m.items[i].SecretID == meta.SecretID {
-			m.items[i] = meta
+			m.items[i] = *meta
 			sortSecrets(m.items)
 			return
 		}
 	}
-	m.items = append(m.items, meta)
+	m.items = append(m.items, *meta)
 	sortSecrets(m.items)
 }
 

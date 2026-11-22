@@ -17,16 +17,16 @@ import (
 )
 
 type secretAddDialog struct {
-	dialog          *kit.DialogState
-	cancel, submit  *kit.ButtonState
-	scopeSeg        *kit.SegmentedState
-	name            *kit.TextFieldState
-	description     *kit.TextFieldState
-	value           *kit.TextFieldState
-	scopeIdx        int
-	wsID            string
-	busy            bool
-	lastErr         string
+	dialog         *kit.DialogState
+	cancel, submit *kit.ButtonState
+	scopeSeg       *kit.SegmentedState
+	name           *kit.TextFieldState
+	description    *kit.TextFieldState
+	value          *kit.TextFieldState
+	scopeIdx       int
+	wsID           string
+	busy           bool
+	lastErr        string
 }
 
 func newSecretAddDialog() *secretAddDialog {
@@ -67,7 +67,7 @@ func (d *secretAddDialog) applied(res *secrets.Result, m *secrets.Model) {
 		return
 	}
 	d.lastErr = ""
-	m.UpsertMeta(res.Secret)
+	m.UpsertMeta(&res.Secret)
 	d.clearSecret()
 	d.dialog.Close()
 }
@@ -78,16 +78,13 @@ func (d *secretAddDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens)
 	}
 	wsID, wsName := sc.currentWorkspace()
 	d.wsID = wsID
-	wsLabel := "Workspace"
-	if wsName != "" {
-		wsLabel = wsName
-	}
+	wsLabel := workspaceScopeLabel(wsName)
 	nameTrim := strings.TrimSpace(d.name.Text())
 	canSubmit := nameTrim != "" && d.value.Text() != "" && !sc.vault.Locked() && sc.secretsWorker != nil
 
 	res, err := d.dialog.Layout(env, gtx, &kit.DialogProps{
 		Variant:         kit.DialogForm,
-		Title:           "Add secret",
+		Title:           labelAddSecret,
 		Description:     "Stored encrypted in the host vault. Values are write-only and never displayed again.",
 		Cancel:          d.cancel,
 		Primary:         d.submit,
@@ -98,56 +95,10 @@ func (d *secretAddDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens)
 		Busy:            d.busy,
 		Body: func(gtx *layout.Context, bands *kit.DialogBands) image.Point {
 			body := newSecretDlgBody(env, gtx, bands, sc.fail)
-			body.field(d.scopeSeg.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
-				opts := []kit.SegmentedOption{
-					{ID: client.SecretScopeGlobal, Label: "Global"},
-					{ID: client.SecretScopeWorkspace, Label: wsLabel, Disabled: d.wsID == ""},
-				}
-				changed, next, ferr := d.scopeSeg.Layout(env, gtx, kit.SegmentedProps{
-					Options:  opts,
-					Selected: d.scopeIdx,
-					Disabled: d.busy,
-				})
-				if ferr == nil && changed {
-					d.scopeIdx = next
-				}
-				return d.scopeSeg.Measure(env, gtx, kit.SegmentedProps{Options: opts, Selected: d.scopeIdx}), ferr
-			})
-			body.field(d.name.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
-				props := &kit.TextFieldProps{
-					Label:       "Name",
-					Placeholder: "OPENAI_API_KEY",
-					Disabled:    d.busy,
-				}
-				ev, ferr := d.name.Layout(env, gtx, props)
-				if ferr == nil && ev.Submitted && canSubmit {
-					d.dialog.Submit()
-				}
-				return d.name.Measure(env, gtx, props), ferr
-			})
-			body.field(d.description.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
-				props := &kit.TextFieldProps{
-					Label:       "Description (optional)",
-					Placeholder: "Used by vendor sessions or modules",
-					Disabled:    d.busy,
-				}
-				_, ferr := d.description.Layout(env, gtx, props)
-				return d.description.Measure(env, gtx, props), ferr
-			})
-			body.field(d.value.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
-				props := &kit.TextFieldProps{
-					Label:       "Secret value",
-					Placeholder: "Enter secret value…",
-					Variant:     kit.TextFieldSecret,
-					NoReveal:    true,
-					Disabled:    d.busy,
-				}
-				ev, ferr := d.value.Layout(env, gtx, props)
-				if ferr == nil && ev.Submitted && canSubmit {
-					d.dialog.Submit()
-				}
-				return d.value.Measure(env, gtx, props), ferr
-			})
+			d.layScope(body, wsLabel)
+			d.layName(body, canSubmit)
+			d.layDescription(body)
+			d.layValue(body, canSubmit)
 			if d.lastErr != "" {
 				body.label(d.lastErr, env.Th.Status().Danger)
 			}
@@ -162,6 +113,51 @@ func (d *secretAddDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens)
 	if res.Submitted && canSubmit {
 		d.submitSecret(sc)
 	}
+}
+
+func (d *secretAddDialog) layScope(body *secretDlgBody, wsLabel string) {
+	body.field(d.scopeSeg.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
+		props := kit.SegmentedProps{
+			Options: []kit.SegmentedOption{
+				{ID: client.SecretScopeGlobal, Label: labelGlobal},
+				{ID: client.SecretScopeWorkspace, Label: wsLabel, Disabled: d.wsID == ""},
+			},
+			Selected: d.scopeIdx,
+			Disabled: d.busy,
+		}
+		changed, next, err := d.scopeSeg.Layout(body.env, gtx, props)
+		if err == nil && changed {
+			d.scopeIdx = next
+		}
+		props.Selected = d.scopeIdx
+		return d.scopeSeg.Measure(body.env, gtx, props), err
+	})
+}
+
+func (d *secretAddDialog) layName(body *secretDlgBody, canSubmit bool) {
+	body.textField(d.name, &kit.TextFieldProps{
+		Label:       labelName,
+		Placeholder: "OPENAI_API_KEY",
+		Disabled:    d.busy,
+	}, canSubmit, d.dialog)
+}
+
+func (d *secretAddDialog) layDescription(body *secretDlgBody) {
+	body.textField(d.description, &kit.TextFieldProps{
+		Label:       "Description (optional)",
+		Placeholder: "Used by vendor sessions or modules",
+		Disabled:    d.busy,
+	}, false, d.dialog)
+}
+
+func (d *secretAddDialog) layValue(body *secretDlgBody, canSubmit bool) {
+	body.textField(d.value, &kit.TextFieldProps{
+		Label:       labelSecretValue,
+		Placeholder: placeholderSecretValue,
+		Variant:     kit.TextFieldSecret,
+		NoReveal:    true,
+		Disabled:    d.busy,
+	}, canSubmit, d.dialog)
 }
 
 func (d *secretAddDialog) submitSecret(sc *screens) {
@@ -230,7 +226,7 @@ func (d *secretReplaceDialog) applied(res *secrets.Result, m *secrets.Model) {
 		return
 	}
 	d.lastErr = ""
-	m.UpsertMeta(res.Secret)
+	m.UpsertMeta(&res.Secret)
 	d.clearSecret()
 	d.dialog.Close()
 }
@@ -253,20 +249,13 @@ func (d *secretReplaceDialog) layout(env *kit.Env, gtx *layout.Context, sc *scre
 		Busy:            d.busy,
 		Body: func(gtx *layout.Context, bands *kit.DialogBands) image.Point {
 			body := newSecretDlgBody(env, gtx, bands, sc.fail)
-			body.field(d.value.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
-				props := &kit.TextFieldProps{
-					Label:       "New secret value",
-					Placeholder: "Enter new secret value…",
-					Variant:     kit.TextFieldSecret,
-					NoReveal:    true,
-					Disabled:    d.busy,
-				}
-				ev, ferr := d.value.Layout(env, gtx, props)
-				if ferr == nil && ev.Submitted && canSubmit {
-					d.dialog.Submit()
-				}
-				return d.value.Measure(env, gtx, props), ferr
-			})
+			body.textField(d.value, &kit.TextFieldProps{
+				Label:       "New secret value",
+				Placeholder: "Enter new secret value…",
+				Variant:     kit.TextFieldSecret,
+				NoReveal:    true,
+				Disabled:    d.busy,
+			}, canSubmit, d.dialog)
 			if d.lastErr != "" {
 				body.label(d.lastErr, env.Th.Status().Danger)
 			}
@@ -351,7 +340,7 @@ func (d *secretDeleteDialog) layout(env *kit.Env, gtx *layout.Context, sc *scree
 		Description:     "Permanently removes this secret from the vault. Sessions or modules referencing it can no longer resolve it.",
 		Cancel:          d.cancel,
 		Primary:         d.confirm,
-		PrimaryLabel:    "Delete",
+		PrimaryLabel:    labelDelete,
 		PrimaryVariant:  kit.Danger,
 		PrimaryDisabled: sc.vault.Locked() || sc.secretsWorker == nil,
 		Busy:            d.busy,
@@ -391,7 +380,12 @@ func newSecretDlgBody(env *kit.Env, gtx *layout.Context, bands *kit.DialogBands,
 
 func (b *secretDlgBody) field(tag event.Tag, draw func(gtx *layout.Context) (layout.Dimensions, error)) {
 	local := *b.gtx
-	local.Constraints.Min.X = b.w
+	// The dialog's body has a large height limit for scrolling. Each field
+	// needs its natural height so the next focus band starts just below it.
+	local.Constraints = layout.Constraints{
+		Min: image.Pt(b.w, 0),
+		Max: image.Pt(b.w, b.gtx.Constraints.Max.Y),
+	}
 	stack := op.Offset(image.Pt(0, b.y)).Push(local.Ops)
 	dims, err := draw(&local)
 	stack.Pop()
@@ -402,6 +396,16 @@ func (b *secretDlgBody) field(tag event.Tag, draw func(gtx *layout.Context) (lay
 		b.bands.Focusable(tag, b.y, b.y+dims.Size.Y)
 	}
 	b.y += dims.Size.Y + b.gap
+}
+
+func (b *secretDlgBody) textField(field *kit.TextFieldState, props *kit.TextFieldProps, canSubmit bool, dialog *kit.DialogState) {
+	b.field(field.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
+		ev, err := field.Layout(b.env, gtx, props)
+		if err == nil && ev.Submitted && canSubmit {
+			dialog.Submit()
+		}
+		return field.Measure(b.env, gtx, props), err
+	})
 }
 
 func (b *secretDlgBody) label(text string, c color.NRGBA) {

@@ -134,12 +134,9 @@ func (d *DialogState) paintFrame(env *Env, gtx *layout.Context, props *DialogPro
 	return d.drawFooter(env, gtx, props, res, m, active)
 }
 
-// runBody runs the caller's Body once, at the body's own offset inside the
-// frame — the recorded ops replay under the scroll's clip later, so the
-// offset must be part of them — and returns its full height, the recorded
-// ops, the bands it declared and the scroll maximum. The body's content
-// takes the inner width minus the ring allowance, and a frame on its way out
-// runs it disabled, so it takes no input (§3.7).
+// runBody records the caller's Body at its own origin so drawBody can place
+// it inside the scroll viewport. The body's width leaves room for focus
+// rings, and a frame on its way out disables its input (§3.7).
 func (d *DialogState) runBody(gtx *layout.Context, props *DialogProps, m dialogMetrics) (bodyH int, bodyOps op.CallOp, bands []dialogBand, scrollMax int) {
 	if props.Body == nil {
 		return 0, op.CallOp{}, nil, 0
@@ -151,12 +148,8 @@ func (d *DialogState) runBody(gtx *layout.Context, props *DialogProps, m dialogM
 		bg = gtx.Disabled()
 	}
 	ring := dialogRing(gtx)
-	bodyTop := m.pad + m.headH + gtx.Dp(theme.SpaceSM) + m.descH
-	at(&bg, image.Pt(m.pad+ring, bodyTop), func(bg *layout.Context) {
-		g := *bg
-		g.Constraints = layout.Exact(image.Pt(m.innerW-2*ring, 1<<20))
-		bodyH = props.Body(&g, &handle).Y
-	})
+	bg.Constraints = layout.Exact(image.Pt(m.innerW-2*ring, 1<<20))
+	bodyH = props.Body(&bg, &handle).Y
 	bodyOps = bmacro.Stop()
 	scrollMax = max(bodyH-m.maxBody, 0)
 	return bodyH, bodyOps, handle.bands, scrollMax
@@ -181,7 +174,7 @@ func (d *DialogState) drawChrome(env *Env, gtx *layout.Context, props *DialogPro
 		at(gtx, image.Pt(inner.Min.X, inner.Min.Y+m.headH+gtx.Dp(theme.SpaceXS)), func(gtx *layout.Context) {
 			g := *gtx
 			g.Constraints.Max.X = m.innerW
-			dims := drawText(env, gtx, theme.TypeSmall(), c.FgMuted, props.Description, true)
+			dims := drawText(env, &g, theme.TypeSmall(), c.FgMuted, props.Description, true)
 			recordRun(env, image.Rectangle{Max: dims.Size}.Add(image.Pt(inner.Min.X, inner.Min.Y+m.headH+gtx.Dp(theme.SpaceXS))))
 		})
 	}
@@ -202,6 +195,7 @@ func (d *DialogState) drawBody(env *Env, gtx *layout.Context, m dialogMetrics, b
 	bodyTop := d.rect.Min.Y + m.pad + m.headH + gtx.Dp(theme.SpaceSM) + m.descH
 	bodyRect := image.Rect(d.rect.Min.X+m.pad, bodyTop, d.rect.Max.X-m.pad, bodyTop+min(bodyH, m.maxBody))
 	viewport := growClipped(bodyRect, ring, d.rect.Inset(gtx.Dp(theme.Hairline)))
+	bodyOrigin := bodyRect.Min.Sub(viewport.Min).Add(image.Pt(ring, 0))
 
 	at(gtx, viewport.Min, func(gtx *layout.Context) {
 		g := *gtx
@@ -210,7 +204,7 @@ func (d *DialogState) drawBody(env *Env, gtx *layout.Context, m dialogMetrics, b
 			g = gtx.Disabled()
 		}
 		d.scroll.Layout(env, &g, ScrollAreaProps{Axis: layout.Vertical}, func(gtx *layout.Context) layout.Dimensions {
-			at(gtx, image.Pt(ring, ring), func(gtx *layout.Context) {
+			at(gtx, bodyOrigin, func(gtx *layout.Context) {
 				bodyOps.Add(gtx.Ops)
 			})
 			return layout.Dimensions{Size: image.Pt(viewport.Dx()-2*ring, bodyH+2*ring)}

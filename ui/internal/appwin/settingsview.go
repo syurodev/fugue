@@ -369,7 +369,7 @@ func (v *settingsView) tabSwitchBannerChild(env *kit.Env, sc *screens) layout.Fl
 func (v *settingsView) workspaceSelectChild(env *kit.Env, sc *screens, opts []kit.SelectOption) layout.FlexChild {
 	return rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 		props := &kit.SelectProps{
-			Label:       "Workspace",
+			Label:       labelWorkspace,
 			Placeholder: "Choose a workspace",
 			Options:     opts,
 			Value:       sc.settings.WorkspaceID,

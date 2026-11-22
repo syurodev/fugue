@@ -328,29 +328,33 @@ drainPosts:
 		}
 	}
 	sc.update(q.drain(), results, posts, drainMutResults(sc.wsMut))
-	if sc.vaultWorker != nil {
-		sc.applyVaultResults(drainVaultResults(sc.vaultWorker))
-	}
-	if sc.inboxWorker != nil {
-		sc.applyInboxResults(drainInboxResults(sc.inboxWorker))
-	}
-	if sc.accountsWorker != nil {
-		sc.applyAccountsResults(drainAccountsResults(sc.accountsWorker))
-	}
-	if sc.settingsWorker != nil {
-		sc.applySettingsResults(drainSettingsResults(sc.settingsWorker))
-	}
-	if sc.secretsWorker != nil {
-		sc.applySecretsResults(drainSecretsResults(sc.secretsWorker))
-	}
-	sc.applyFileViewResults(drainFileViewResults(sc.viewerWorker))
-	if sc.layoutWorker != nil {
-		sc.applyLayoutResults(drainLayoutResults(sc.layoutWorker))
-	}
+	sc.drainWorkerResults()
 	sc.grid.maybeSave(sc.layoutWorker)
 	sc.applyLivePreferences(env, light, dark)
 	toggleTheme(gtx, env, sc, light, dark)
 	drawWindow(gtx, env, sc)
+}
+
+func (s *screens) drainWorkerResults() {
+	if s.vaultWorker != nil {
+		s.applyVaultResults(drainVaultResults(s.vaultWorker))
+	}
+	if s.inboxWorker != nil {
+		s.applyInboxResults(drainInboxResults(s.inboxWorker))
+	}
+	if s.accountsWorker != nil {
+		s.applyAccountsResults(drainAccountsResults(s.accountsWorker))
+	}
+	if s.settingsWorker != nil {
+		s.applySettingsResults(drainSettingsResults(s.settingsWorker))
+	}
+	if s.secretsWorker != nil {
+		s.applySecretsResults(drainSecretsResults(s.secretsWorker))
+	}
+	s.applyFileViewResults(drainFileViewResults(s.viewerWorker))
+	if s.layoutWorker != nil {
+		s.applyLayoutResults(drainLayoutResults(s.layoutWorker))
+	}
 }
 
 // toggleTheme handles the window's Ctrl+D theme toggle (DA-08). Letters

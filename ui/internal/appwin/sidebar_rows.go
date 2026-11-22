@@ -2,6 +2,7 @@ package appwin
 
 import (
 	"fmt"
+	"strconv"
 
 	"gioui.org/layout"
 
@@ -77,7 +78,7 @@ func (s *screens) layoutSecretsRow(env *kit.Env, gtx *layout.Context) layout.Dim
 		props.StateLabel = "locked"
 		props.StateTone = kit.ToneWarning
 	case s.secrets.HasSnapshot():
-		props.Trailing = fmt.Sprintf("%d", len(s.secrets.All()))
+		props.Trailing = strconv.Itoa(len(s.secrets.All()))
 	}
 	dims, ev := s.secretsRow.Layout(env, gtx, props)
 	if ev.Clicked || ev.Opened {

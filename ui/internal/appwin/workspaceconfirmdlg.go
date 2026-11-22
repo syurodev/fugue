@@ -68,7 +68,7 @@ func (d *deleteDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens) {
 		Description:    "Removes the workspace's directory, configuration and board. Session history stays.",
 		Cancel:         d.cancel,
 		Primary:        d.confirm,
-		PrimaryLabel:   "Delete",
+		PrimaryLabel:   labelDelete,
 		PrimaryVariant: kit.Danger,
 		Dirty:          d.name.Text() != "",
 		Busy:           d.busy,

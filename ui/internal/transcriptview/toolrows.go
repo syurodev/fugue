@@ -113,18 +113,20 @@ func approvalOrQuestionSpec(item *session.Item) toolRowSpec {
 	if d := item.Metadata.Decision; d != "" {
 		warning = false
 		action = ""
-		if item.Metadata.RequestKind == "question" {
-			if d == "answered_secret" || strings.Contains(strings.ToLower(d), "secret") {
-				label = "Answered (secret)"
-				obj = firstNonEmpty(item.Display().Title, "Secret question")
-			} else {
-				label = "Answered"
-			}
-		} else {
-			label = "Approval (" + d + ")"
-		}
+		label, obj = resolvedApprovalOrQuestionLabel(item, obj)
 	}
 	return toolRowSpec{verb: verb, icon: kit.IconHelp, verbLabel: label, query: obj, warningRow: warning, actionText: action}
+}
+
+func resolvedApprovalOrQuestionLabel(item *session.Item, object string) (label, query string) {
+	decision := item.Metadata.Decision
+	if item.Metadata.RequestKind != "question" {
+		return "Approval (" + decision + ")", object
+	}
+	if strings.Contains(strings.ToLower(decision), "secret") {
+		return "Answered (secret)", firstNonEmpty(item.Display().Title, "Secret question")
+	}
+	return "Answered", object
 }
 
 func fileChangeSpec(item *session.Item) toolRowSpec {

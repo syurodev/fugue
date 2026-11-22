@@ -11,6 +11,8 @@ import (
 	"github.com/syurodev/fugue/pkg/client"
 )
 
+const testPutSecretID = "sec-TOKEN"
+
 type fakeSecretsClient struct {
 	listRes  []client.SecretMeta
 	listErr  error
@@ -33,7 +35,6 @@ func (f *fakeSecretsClient) PutSecret(_ context.Context, in *client.PutSecretInp
 	cp.Value = bytes.Clone(in.Value)
 	f.puts = append(f.puts, cp)
 	f.captured = append(f.captured, in.Value)
-	clear(in.Value)
 	if f.putErr != nil {
 		return client.SecretMeta{}, f.putErr
 	}
@@ -71,9 +72,38 @@ func TestModelSnapshotEventsAndScopes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := m.ApplySnapshot(snap); err != nil {
+	if err = m.ApplySnapshot(snap); err != nil {
 		t.Fatalf("ApplySnapshot: %v", err)
 	}
+	assertSnapshotScopes(t, m)
+
+	putEv, err := json.Marshal(client.SecretTopicEvent{
+		SecretID: "s4", ScopeKind: client.SecretScopeGlobal, Name: "OPENAI_KEY",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = m.ApplyEvent(client.EventSecretPut, putEv); err != nil {
+		t.Fatalf("ApplyEvent put: %v", err)
+	}
+	if _, ok := m.Lookup("s4"); !ok {
+		t.Fatal("expected s4 after secret_put event")
+	}
+
+	delEv, err := json.Marshal(client.SecretTopicEvent{SecretID: "s1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = m.ApplyEvent(client.EventSecretDeleted, delEv); err != nil {
+		t.Fatalf("ApplyEvent deleted: %v", err)
+	}
+	if _, ok := m.Lookup("s1"); ok {
+		t.Fatal("expected s1 to be removed after secret_deleted event")
+	}
+}
+
+func assertSnapshotScopes(t *testing.T, m *Model) {
+	t.Helper()
 	if !m.HasSnapshot() {
 		t.Fatal("expected HasSnapshot = true")
 	}
@@ -85,30 +115,6 @@ func TestModelSnapshotEventsAndScopes(t *testing.T) {
 	}
 	if got := len(m.AllForScope("w1")); got != 2 {
 		t.Fatalf("expected 2 secrets for w1 scope, got %d", got)
-	}
-
-	putEv, err := json.Marshal(client.SecretTopicEvent{
-		SecretID: "s4", ScopeKind: client.SecretScopeGlobal, Name: "OPENAI_KEY",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := m.ApplyEvent(client.EventSecretPut, putEv); err != nil {
-		t.Fatalf("ApplyEvent put: %v", err)
-	}
-	if _, ok := m.Lookup("s4"); !ok {
-		t.Fatal("expected s4 after secret_put event")
-	}
-
-	delEv, err := json.Marshal(client.SecretTopicEvent{SecretID: "s1"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := m.ApplyEvent(client.EventSecretDeleted, delEv); err != nil {
-		t.Fatalf("ApplyEvent deleted: %v", err)
-	}
-	if _, ok := m.Lookup("s1"); ok {
-		t.Fatal("expected s1 to be removed after secret_deleted event")
 	}
 }
 
@@ -137,40 +143,44 @@ func TestWorkerPutZeroesPlaintextAndMintsCommandIDs(t *testing.T) {
 	}
 	w.Do(&req)
 
-	// Caller's slice must be zeroed immediately by Do.
-	for i, b := range val {
-		if b != 0 {
-			t.Fatalf("caller secret byte[%d] not zeroed: %d", i, b)
-		}
-	}
-
+	assertCleared(t, val)
 	res := <-w.Results()
-	if res.Err != nil {
-		t.Fatalf("OpPutSecret failed: %v", res.Err)
-	}
-	if res.Secret.SecretID != "sec-TOKEN" {
-		t.Fatalf("unexpected SecretID: %q", res.Secret.SecretID)
-	}
-	if len(fc.puts) != 1 || fc.puts[0].CommandID == "" {
-		t.Fatalf("expected minted CommandID, got %+v", fc.puts)
-	}
-	if string(fc.puts[0].Value) != "super-secret-value-123" {
-		t.Fatalf("fake client received wrong value: %q", fc.puts[0].Value)
-	}
-	for i, b := range fc.captured[0] {
-		if b != 0 {
-			t.Fatalf("worker secret byte[%d] not zeroed after PutSecret: %d", i, b)
-		}
-	}
 
-	delReq := Request{Kind: OpDeleteSecret, SecretID: "sec-TOKEN"}
+	delReq := Request{Kind: OpDeleteSecret, SecretID: testPutSecretID}
 	w.Do(&delReq)
 	delRes := <-w.Results()
+	assertPutResult(t, fc, &res)
 	if delRes.Err != nil || !delRes.Deleted {
 		t.Fatalf("OpDeleteSecret failed: %+v", delRes)
 	}
-	if len(fc.deletes) != 1 || fc.deletes[0].cmdID == "" || fc.deletes[0].secretID != "sec-TOKEN" {
+	if len(fc.deletes) != 1 || fc.deletes[0].cmdID == "" || fc.deletes[0].secretID != testPutSecretID {
 		t.Fatalf("unexpected delete call: %+v", fc.deletes)
+	}
+}
+
+func assertPutResult(t *testing.T, fc *fakeSecretsClient, res *Result) {
+	t.Helper()
+	if res.Err != nil {
+		t.Fatalf("OpPutSecret failed: %v", res.Err)
+	}
+	if res.Secret.SecretID != testPutSecretID {
+		t.Fatalf("unexpected SecretID: %q", res.Secret.SecretID)
+	}
+	if len(fc.puts) != 1 || fc.puts[0].CommandID == "" {
+		t.Fatal("expected one PutSecret call with a minted command ID")
+	}
+	if string(fc.puts[0].Value) != "super-secret-value-123" {
+		t.Fatal("fake client received the wrong value")
+	}
+	assertCleared(t, fc.captured[0])
+}
+
+func assertCleared(t *testing.T, value []byte) {
+	t.Helper()
+	for i, b := range value {
+		if b != 0 {
+			t.Fatalf("buffer byte %d was not cleared", i)
+		}
 	}
 }
 
@@ -192,9 +202,5 @@ func TestWorkerZeroesPlaintextWhenDisconnected(t *testing.T) {
 	if !errors.Is(res.Err, client.ErrDisconnected) {
 		t.Fatalf("expected ErrDisconnected, got %v", res.Err)
 	}
-	for i, b := range val {
-		if b != 0 {
-			t.Fatalf("byte[%d] not zeroed on disconnect: %d", i, b)
-		}
-	}
+	assertCleared(t, val)
 }
