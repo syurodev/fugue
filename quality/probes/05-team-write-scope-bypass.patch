@@ -1,0 +1,14 @@
+# probe-test: ./internal/app TestWriteScopeBouncesOnceThenFails
+# probe-test: ./internal/app TestWriteScopeEdgeCasesAndUnconfiguredGate
+diff --git a/internal/app/team_result_gate.go b/internal/app/team_result_gate.go
+--- a/internal/app/team_result_gate.go
++++ b/internal/app/team_result_gate.go
+@@ -187,7 +187,7 @@ func (g *hostResultGate) checkWriteScope(
+ 			outOfScope = append(outOfScope, f)
+ 		}
+ 	}
+-	if len(outOfScope) == 0 {
++	if len(outOfScope) >= 0 {
+ 		return ResultGateVerdict{}, false, nil
+ 	}
+ 	if task.ScopeBounces == 0 {
