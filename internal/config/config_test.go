@@ -155,4 +155,12 @@ func TestLoadReadsCrashPointAndTriggerNoopWhenUnarmed(t *testing.T) {
 	// Unarmed or mismatched crash points must be a zero-cost no-op.
 	config.TriggerCrashPoint("", config.CrashPointVendorTurnActive)
 	config.TriggerCrashPoint(config.CrashPointTeamTaskRunning, config.CrashPointVendorTurnActive)
+
+	var exitedCode int
+	config.TriggerCrashPoint(config.CrashPointVendorTurnActive, config.CrashPointVendorTurnActive, func(code int) {
+		exitedCode = code
+	})
+	if exitedCode != config.CrashExitCode {
+		t.Fatalf("TriggerCrashPoint exit code = %d, want %d", exitedCode, config.CrashExitCode)
+	}
 }

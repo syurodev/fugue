@@ -91,11 +91,17 @@ func Load(env Env, userConfigDir func() (string, error)) (Config, error) {
 }
 
 // TriggerCrashPoint terminates the process immediately with CrashExitCode when
-// armed matches point. When armed is empty it is a zero-cost no-op.
-func TriggerCrashPoint(armed, point string) {
-	if armed != "" && armed == point {
-		os.Exit(CrashExitCode)
+// armed matches point. When armed is empty it is a zero-cost no-op. An
+// optional custom exit callback may be passed by tests (defaulting to os.Exit).
+func TriggerCrashPoint(armed, point string, exitFn ...func(int)) {
+	if armed == "" || armed != point {
+		return
 	}
+	exit := os.Exit
+	if len(exitFn) > 0 && exitFn[0] != nil {
+		exit = exitFn[0]
+	}
+	exit(CrashExitCode)
 }
 
 // runtimeDir resolves the runtime base for sockets that do not fit the data
