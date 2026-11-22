@@ -69,6 +69,12 @@ const (
 	// WorkspaceServiceDeleteWorkspaceProcedure is the fully-qualified name of the WorkspaceService's
 	// DeleteWorkspace RPC.
 	WorkspaceServiceDeleteWorkspaceProcedure = "/fugue.workspace.v1.WorkspaceService/DeleteWorkspace"
+	// WorkspaceServiceReadWorkspaceFileProcedure is the fully-qualified name of the WorkspaceService's
+	// ReadWorkspaceFile RPC.
+	WorkspaceServiceReadWorkspaceFileProcedure = "/fugue.workspace.v1.WorkspaceService/ReadWorkspaceFile"
+	// WorkspaceServiceListWorkspaceDirProcedure is the fully-qualified name of the WorkspaceService's
+	// ListWorkspaceDir RPC.
+	WorkspaceServiceListWorkspaceDirProcedure = "/fugue.workspace.v1.WorkspaceService/ListWorkspaceDir"
 )
 
 // WorkspaceServiceClient is a client for the fugue.workspace.v1.WorkspaceService service.
@@ -85,6 +91,8 @@ type WorkspaceServiceClient interface {
 	RemoveRoot(context.Context, *connect.Request[v1.RemoveRootRequest]) (*connect.Response[v1.RemoveRootResponse], error)
 	UpdateRoot(context.Context, *connect.Request[v1.UpdateRootRequest]) (*connect.Response[v1.UpdateRootResponse], error)
 	DeleteWorkspace(context.Context, *connect.Request[v1.DeleteWorkspaceRequest]) (*connect.Response[v1.DeleteWorkspaceResponse], error)
+	ReadWorkspaceFile(context.Context, *connect.Request[v1.ReadWorkspaceFileRequest]) (*connect.Response[v1.ReadWorkspaceFileResponse], error)
+	ListWorkspaceDir(context.Context, *connect.Request[v1.ListWorkspaceDirRequest]) (*connect.Response[v1.ListWorkspaceDirResponse], error)
 }
 
 // NewWorkspaceServiceClient constructs a client for the fugue.workspace.v1.WorkspaceService
@@ -170,6 +178,18 @@ func NewWorkspaceServiceClient(httpClient connect.HTTPClient, baseURL string, op
 			connect.WithSchema(workspaceServiceMethods.ByName("DeleteWorkspace")),
 			connect.WithClientOptions(opts...),
 		),
+		readWorkspaceFile: connect.NewClient[v1.ReadWorkspaceFileRequest, v1.ReadWorkspaceFileResponse](
+			httpClient,
+			baseURL+WorkspaceServiceReadWorkspaceFileProcedure,
+			connect.WithSchema(workspaceServiceMethods.ByName("ReadWorkspaceFile")),
+			connect.WithClientOptions(opts...),
+		),
+		listWorkspaceDir: connect.NewClient[v1.ListWorkspaceDirRequest, v1.ListWorkspaceDirResponse](
+			httpClient,
+			baseURL+WorkspaceServiceListWorkspaceDirProcedure,
+			connect.WithSchema(workspaceServiceMethods.ByName("ListWorkspaceDir")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -187,6 +207,8 @@ type workspaceServiceClient struct {
 	removeRoot             *connect.Client[v1.RemoveRootRequest, v1.RemoveRootResponse]
 	updateRoot             *connect.Client[v1.UpdateRootRequest, v1.UpdateRootResponse]
 	deleteWorkspace        *connect.Client[v1.DeleteWorkspaceRequest, v1.DeleteWorkspaceResponse]
+	readWorkspaceFile      *connect.Client[v1.ReadWorkspaceFileRequest, v1.ReadWorkspaceFileResponse]
+	listWorkspaceDir       *connect.Client[v1.ListWorkspaceDirRequest, v1.ListWorkspaceDirResponse]
 }
 
 // CreateWorkspace calls fugue.workspace.v1.WorkspaceService.CreateWorkspace.
@@ -249,6 +271,16 @@ func (c *workspaceServiceClient) DeleteWorkspace(ctx context.Context, req *conne
 	return c.deleteWorkspace.CallUnary(ctx, req)
 }
 
+// ReadWorkspaceFile calls fugue.workspace.v1.WorkspaceService.ReadWorkspaceFile.
+func (c *workspaceServiceClient) ReadWorkspaceFile(ctx context.Context, req *connect.Request[v1.ReadWorkspaceFileRequest]) (*connect.Response[v1.ReadWorkspaceFileResponse], error) {
+	return c.readWorkspaceFile.CallUnary(ctx, req)
+}
+
+// ListWorkspaceDir calls fugue.workspace.v1.WorkspaceService.ListWorkspaceDir.
+func (c *workspaceServiceClient) ListWorkspaceDir(ctx context.Context, req *connect.Request[v1.ListWorkspaceDirRequest]) (*connect.Response[v1.ListWorkspaceDirResponse], error) {
+	return c.listWorkspaceDir.CallUnary(ctx, req)
+}
+
 // WorkspaceServiceHandler is an implementation of the fugue.workspace.v1.WorkspaceService service.
 type WorkspaceServiceHandler interface {
 	CreateWorkspace(context.Context, *connect.Request[v1.CreateWorkspaceRequest]) (*connect.Response[v1.CreateWorkspaceResponse], error)
@@ -263,6 +295,8 @@ type WorkspaceServiceHandler interface {
 	RemoveRoot(context.Context, *connect.Request[v1.RemoveRootRequest]) (*connect.Response[v1.RemoveRootResponse], error)
 	UpdateRoot(context.Context, *connect.Request[v1.UpdateRootRequest]) (*connect.Response[v1.UpdateRootResponse], error)
 	DeleteWorkspace(context.Context, *connect.Request[v1.DeleteWorkspaceRequest]) (*connect.Response[v1.DeleteWorkspaceResponse], error)
+	ReadWorkspaceFile(context.Context, *connect.Request[v1.ReadWorkspaceFileRequest]) (*connect.Response[v1.ReadWorkspaceFileResponse], error)
+	ListWorkspaceDir(context.Context, *connect.Request[v1.ListWorkspaceDirRequest]) (*connect.Response[v1.ListWorkspaceDirResponse], error)
 }
 
 // NewWorkspaceServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -344,6 +378,18 @@ func NewWorkspaceServiceHandler(svc WorkspaceServiceHandler, opts ...connect.Han
 		connect.WithSchema(workspaceServiceMethods.ByName("DeleteWorkspace")),
 		connect.WithHandlerOptions(opts...),
 	)
+	workspaceServiceReadWorkspaceFileHandler := connect.NewUnaryHandler(
+		WorkspaceServiceReadWorkspaceFileProcedure,
+		svc.ReadWorkspaceFile,
+		connect.WithSchema(workspaceServiceMethods.ByName("ReadWorkspaceFile")),
+		connect.WithHandlerOptions(opts...),
+	)
+	workspaceServiceListWorkspaceDirHandler := connect.NewUnaryHandler(
+		WorkspaceServiceListWorkspaceDirProcedure,
+		svc.ListWorkspaceDir,
+		connect.WithSchema(workspaceServiceMethods.ByName("ListWorkspaceDir")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fugue.workspace.v1.WorkspaceService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case WorkspaceServiceCreateWorkspaceProcedure:
@@ -370,6 +416,10 @@ func NewWorkspaceServiceHandler(svc WorkspaceServiceHandler, opts ...connect.Han
 			workspaceServiceUpdateRootHandler.ServeHTTP(w, r)
 		case WorkspaceServiceDeleteWorkspaceProcedure:
 			workspaceServiceDeleteWorkspaceHandler.ServeHTTP(w, r)
+		case WorkspaceServiceReadWorkspaceFileProcedure:
+			workspaceServiceReadWorkspaceFileHandler.ServeHTTP(w, r)
+		case WorkspaceServiceListWorkspaceDirProcedure:
+			workspaceServiceListWorkspaceDirHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -425,4 +475,12 @@ func (UnimplementedWorkspaceServiceHandler) UpdateRoot(context.Context, *connect
 
 func (UnimplementedWorkspaceServiceHandler) DeleteWorkspace(context.Context, *connect.Request[v1.DeleteWorkspaceRequest]) (*connect.Response[v1.DeleteWorkspaceResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.workspace.v1.WorkspaceService.DeleteWorkspace is not implemented"))
+}
+
+func (UnimplementedWorkspaceServiceHandler) ReadWorkspaceFile(context.Context, *connect.Request[v1.ReadWorkspaceFileRequest]) (*connect.Response[v1.ReadWorkspaceFileResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.workspace.v1.WorkspaceService.ReadWorkspaceFile is not implemented"))
+}
+
+func (UnimplementedWorkspaceServiceHandler) ListWorkspaceDir(context.Context, *connect.Request[v1.ListWorkspaceDirRequest]) (*connect.Response[v1.ListWorkspaceDirResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.workspace.v1.WorkspaceService.ListWorkspaceDir is not implemented"))
 }

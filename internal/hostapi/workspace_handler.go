@@ -34,6 +34,56 @@ func (h *workspaceHandler) auth(ctx context.Context) (app.WorkspaceBackend, stri
 	return service, principal, nil
 }
 
+// fileAuth is the stricter gate of the file and directory reads (host-api
+// v0.18 §5.4): only the app's client kind may call them; every other local
+// kind and the session principal are denied, fail-closed.
+func (h *workspaceHandler) fileAuth(ctx context.Context) (app.WorkspaceBackend, string, error) {
+	svc, principal, err := h.auth(ctx)
+	if err != nil {
+		return nil, "", err
+	}
+	if !app.IsAppPrincipal(principal) {
+		return nil, "", toConnectError(ctx, h.backend, errcode.New(errcode.PermissionDenied, "only the app client may read workspace files"))
+	}
+	return svc, principal, nil
+}
+
+func (h *workspaceHandler) ReadWorkspaceFile(ctx context.Context, req *connect.Request[workspacev1.ReadWorkspaceFileRequest]) (*connect.Response[workspacev1.ReadWorkspaceFileResponse], error) {
+	svc, principal, err := h.fileAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Msg == nil {
+		return nil, toConnectError(ctx, h.backend, errcode.New(errcode.InvalidArgument, "request is required"))
+	}
+	read, err := svc.ReadWorkspaceFile(ctx, principal, req.Msg.WorkspaceId, req.Msg.RootName, req.Msg.Path, req.Msg.StartLine, req.Msg.EndLine)
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	return connect.NewResponse(&workspacev1.ReadWorkspaceFileResponse{
+		Content: read.Content, TotalLines: read.TotalLines, Language: read.Language, Truncated: read.Truncated,
+	}), nil
+}
+
+func (h *workspaceHandler) ListWorkspaceDir(ctx context.Context, req *connect.Request[workspacev1.ListWorkspaceDirRequest]) (*connect.Response[workspacev1.ListWorkspaceDirResponse], error) {
+	svc, principal, err := h.fileAuth(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if req.Msg == nil {
+		return nil, toConnectError(ctx, h.backend, errcode.New(errcode.InvalidArgument, "request is required"))
+	}
+	entries, err := svc.ListWorkspaceDir(ctx, principal, req.Msg.WorkspaceId, req.Msg.RootName, req.Msg.Path)
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	out := &workspacev1.ListWorkspaceDirResponse{Entries: make([]*workspacev1.DirEntry, 0, len(entries))}
+	for _, e := range entries {
+		out.Entries = append(out.Entries, &workspacev1.DirEntry{Name: e.Name, Kind: e.Kind, Size: e.Size})
+	}
+	return connect.NewResponse(out), nil
+}
+
 func (h *workspaceHandler) CreateWorkspace(ctx context.Context, req *connect.Request[workspacev1.CreateWorkspaceRequest]) (*connect.Response[workspacev1.CreateWorkspaceResponse], error) {
 	svc, principal, err := h.auth(ctx)
 	if err != nil {

@@ -8,8 +8,6 @@ import (
 
 	"gioui.org/font"
 	"gioui.org/io/event"
-	"gioui.org/io/key"
-	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
@@ -44,6 +42,20 @@ type CodeBlockProps struct {
 	Truncated       bool
 	MaxLines        int
 	ShowLineNumbers bool
+	// HighlightLine and HighlightEndLine mark a 1-based inclusive row range
+	// (of the displayed code rows, not diff lines) the file viewer tints
+	// behind the text (F10.4e); zero on both disables the tint.
+	HighlightLine    int
+	HighlightEndLine int
+	// ScrollToLine scrolls the block once on this frame so the named
+	// displayed row lands at the viewport top (F10.4e); the caller decides
+	// when to stop passing it, so the reader's own scrolling wins after.
+	ScrollToLine int
+	// ViewportLines overrides how many rows the expanded block shows before
+	// its inner scroll ends (F10.4e); zero keeps the shared default. The
+	// file viewer sizes it to the pane so a jump to a line is actually on
+	// screen.
+	ViewportLines int
 }
 
 // CodeBlockResult reports user actions triggered on a code block this frame.
@@ -156,6 +168,7 @@ func (v *view) layoutCodeBlock(env *kit.Env, gtx *layout.Context, st *CodeBlockS
 	st.syncCache(env, p)
 	v.pollBlockEvents(env, gtx, st)
 	m := v.measureCodeBlock(gtx, st, p)
+	scrollToLine(gtx, st, p, &m)
 
 	rec := op.Record(gtx.Ops)
 	y := v.drawCodeBlockContents(env, gtx, st, p, &m, &res)
@@ -167,6 +180,20 @@ func (v *view) layoutCodeBlock(env *kit.Env, gtx *layout.Context, st *CodeBlockS
 		call.Add(gtx.Ops)
 	})
 	return layout.Dimensions{Size: image.Pt(m.w, y)}, res
+}
+
+// scrollToLine moves the scroll offset once so the requested displayed row
+// lands at the viewport top, clamped to the measured bounds (F10.4e). It
+// runs after measure, where exact row heights are known.
+func scrollToLine(_ *layout.Context, st *CodeBlockState, p *CodeBlockProps, m *codeBlockMetrics) {
+	if p.ScrollToLine <= 1 || p.IsDiff {
+		return
+	}
+	y := 0
+	for i := range min(p.ScrollToLine-1, len(m.flows)) {
+		y += max(m.flows[i].height, m.lineH)
+	}
+	st.ScrollY = min(y, max(st.maxScrollY, 0))
 }
 
 func (v *view) measureCodeBlock(gtx *layout.Context, st *CodeBlockState, p *CodeBlockProps) codeBlockMetrics {
@@ -188,8 +215,12 @@ func (v *view) measureCodeBlock(gtx *layout.Context, st *CodeBlockState, p *Code
 	codeAvailW := max(bodyMaxW-gutterW-markerW, 0)
 	flows, contentW, contentH := v.measureCodeRows(lines, diffLines, visCount, codeAvailW, fs, p.IsDiff, st.Wrapped, lineH)
 	viewH := contentH
-	if st.Expanded && visCount > maxExpandedViewportLines {
-		viewH = min(contentH, maxExpandedViewportLines*lineH)
+	viewportLines := maxExpandedViewportLines
+	if p.ViewportLines > 0 {
+		viewportLines = p.ViewportLines
+	}
+	if st.Expanded && visCount > viewportLines {
+		viewH = min(contentH, viewportLines*lineH)
 	}
 	st.updateScrollBounds(codeAvailW, contentW, viewH, contentH)
 	return codeBlockMetrics{
@@ -351,91 +382,6 @@ func plainCodeLines(raw string) [][]markdown.Span {
 		}
 	}
 	return out
-}
-
-func (v *view) pollBlockEvents(env *kit.Env, gtx *layout.Context, st *CodeBlockState) {
-	if !st.CopiedUntil.IsZero() {
-		if env.Now().Before(st.CopiedUntil) {
-			env.Driver.WakeAt(st.CopiedUntil)
-		} else {
-			st.CopiedUntil = time.Time{}
-		}
-	}
-	for {
-		ev, ok := gtx.Event(
-			pointer.Filter{Target: &st.focusTag, Kinds: pointer.Enter | pointer.Leave | pointer.Press | pointer.Cancel | pointer.Scroll, ScrollX: pointer.ScrollRange{Min: -1 << 20, Max: 1 << 20}, ScrollY: pointer.ScrollRange{Min: -1 << 20, Max: 1 << 20}},
-			key.FocusFilter{Target: &st.focusTag},
-			key.Filter{Focus: &st.focusTag, Name: key.NameLeftArrow},
-			key.Filter{Focus: &st.focusTag, Name: key.NameRightArrow},
-			key.Filter{Focus: &st.focusTag, Name: key.NameUpArrow},
-			key.Filter{Focus: &st.focusTag, Name: key.NameDownArrow},
-			key.Filter{Focus: &st.focusTag, Name: key.NamePageUp},
-			key.Filter{Focus: &st.focusTag, Name: key.NamePageDown},
-			key.Filter{Focus: &st.focusTag, Name: key.NameHome},
-			key.Filter{Focus: &st.focusTag, Name: key.NameEnd},
-		)
-		if !ok {
-			break
-		}
-		switch e := ev.(type) {
-		case pointer.Event:
-			v.handleBlockPointer(gtx, st, e)
-		case key.Event:
-			if e.State == key.Press {
-				v.handleBlockKey(gtx, st, e)
-			}
-		}
-	}
-}
-
-func (v *view) handleBlockPointer(gtx *layout.Context, st *CodeBlockState, e pointer.Event) {
-	switch e.Kind {
-	case pointer.Enter:
-		st.hovered = true
-	case pointer.Leave, pointer.Cancel:
-		st.hovered = false
-	case pointer.Press:
-		if e.Buttons.Contain(pointer.ButtonPrimary) {
-			gtx.Execute(key.FocusCmd{Tag: &st.focusTag})
-		}
-	case pointer.Scroll:
-		if st.maxScrollX > 0 && e.Scroll.X != 0 {
-			st.ScrollX = min(max(st.ScrollX+int(e.Scroll.X), 0), st.maxScrollX)
-		}
-		if st.maxScrollY > 0 && e.Scroll.Y != 0 {
-			st.ScrollY = min(max(st.ScrollY+int(e.Scroll.Y), 0), st.maxScrollY)
-		}
-	case pointer.Move, pointer.Release, pointer.Drag:
-	}
-}
-
-func (v *view) handleBlockKey(gtx *layout.Context, st *CodeBlockState, e key.Event) {
-	stepX := max(gtx.Dp(theme.SpaceXXL), 1)
-	stepY := max(gtx.Sp(theme.TypeCode().Line), 1)
-	switch string(e.Name) {
-	case string(key.NameLeftArrow):
-		st.ScrollX = max(st.ScrollX-stepX, 0)
-	case string(key.NameRightArrow):
-		st.ScrollX = min(st.ScrollX+stepX, st.maxScrollX)
-	case string(key.NameUpArrow):
-		st.ScrollY = max(st.ScrollY-stepY, 0)
-	case string(key.NameDownArrow):
-		st.ScrollY = min(st.ScrollY+stepY, st.maxScrollY)
-	case string(key.NamePageUp):
-		st.ScrollY = max(st.ScrollY-max(st.viewH, stepY), 0)
-	case string(key.NamePageDown):
-		st.ScrollY = min(st.ScrollY+max(st.viewH, stepY), st.maxScrollY)
-	case string(key.NameHome):
-		st.ScrollX = 0
-	case string(key.NameEnd):
-		st.ScrollX = st.maxScrollX
-	}
-}
-
-func (v *view) registerBlockInput(gtx *layout.Context, st *CodeBlockState, box image.Rectangle) {
-	area := clip.Rect(box).Push(gtx.Ops)
-	event.Op(gtx.Ops, &st.focusTag)
-	area.Pop()
 }
 
 func showCodeLineNumbers(p *CodeBlockProps, totalLines int) bool {

@@ -138,6 +138,32 @@ message DeleteWorkspaceRequest {
 message DeleteWorkspaceResponse {
   string id = 1;
 }
+message ReadWorkspaceFileRequest {
+  string workspace_id = 1;
+  string root_name = 2;
+  string path = 3;
+  int64 start_line = 4;
+  int64 end_line = 5;
+}
+message ReadWorkspaceFileResponse {
+  string content = 1;
+  int64 total_lines = 2;
+  string language = 3;
+  bool truncated = 4;
+}
+message ListWorkspaceDirRequest {
+  string workspace_id = 1;
+  string root_name = 2;
+  string path = 3;
+}
+message DirEntry {
+  string name = 1;
+  string kind = 2;
+  int64 size = 3;
+}
+message ListWorkspaceDirResponse {
+  repeated DirEntry entries = 1;
+}
 
 service WorkspaceService {
   rpc CreateWorkspace(CreateWorkspaceRequest) returns (CreateWorkspaceResponse);
@@ -152,4 +178,6 @@ service WorkspaceService {
   rpc RemoveRoot(RemoveRootRequest) returns (RemoveRootResponse);
   rpc UpdateRoot(UpdateRootRequest) returns (UpdateRootResponse);
   rpc DeleteWorkspace(DeleteWorkspaceRequest) returns (DeleteWorkspaceResponse);
+  rpc ReadWorkspaceFile(ReadWorkspaceFileRequest) returns (ReadWorkspaceFileResponse);
+  rpc ListWorkspaceDir(ListWorkspaceDirRequest) returns (ListWorkspaceDirResponse);
 }

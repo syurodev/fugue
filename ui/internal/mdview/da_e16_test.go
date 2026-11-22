@@ -135,9 +135,9 @@ func TestCodeTerminalOutputAndDiffShareOneTopHeader(t *testing.T) {
 	}
 	th := theme.Light(shaper)
 	for _, tc := range cases {
-		_, title, fmtStr := resolvedHeader(&tc.props)
-		if title != tc.title || fmtStr != tc.fmt {
-			t.Fatalf("%s resolvedHeader = (%q, %q), want (%q, %q)", tc.name, title, fmtStr, tc.title, tc.fmt)
+		head := resolvedHeader(&tc.props)
+		if head.title != tc.title || head.fmtLabel != tc.fmt {
+			t.Fatalf("%s resolvedHeader = (%q, %q), want (%q, %q)", tc.name, head.title, head.fmtLabel, tc.title, tc.fmt)
 		}
 		var dims layout.Dimensions
 		st := NewCodeBlockState()

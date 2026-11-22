@@ -65,6 +65,7 @@ func (s *screens) applyComposerResult(r session.Result) {
 			delete(s.wsDetailReq, det.ID)
 		}
 		s.composer.start.reconcile(s)
+		s.armViewerRead()
 	case session.ResultSessions, session.ResultPage, session.ResultItem:
 		// The list, page, and item-detail reads fold in applyResult.
 	}
@@ -268,7 +269,8 @@ func (s *screens) transcriptCallbacks() transcriptview.Callbacks {
 			s.inboxOpen = true
 			s.accountsOpen = false
 		},
-		// TODO(F10.4e): wire OnOpenFile to the right-pane read-only file/diff viewer.
+		OnOpenFile: s.openFileRef,
+		OnViewDiff: s.openDiffViewer,
 	}
 }
 

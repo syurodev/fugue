@@ -40,6 +40,10 @@ const (
 	WorkspacePathDenied         Code = "workspace.path_denied"
 	WorkspaceOwnershipInvalid   Code = "workspace.ownership_invalid"
 	WorkspaceConfigTooLarge     Code = "workspace.config_too_large"
+	WorkspacePathOutsideRoot    Code = "workspace.path_outside_root"
+	WorkspaceFileNotFound       Code = "workspace.file_not_found"
+	WorkspaceFileTooLarge       Code = "workspace.file_too_large"
+	WorkspaceNotText            Code = "workspace.not_text"
 	VendorUnsupported           Code = "vendor.unsupported"
 	VendorSessionNotFound       Code = "vendor.session_not_found"
 	VendorSessionState          Code = "vendor.session_state"
@@ -105,6 +109,10 @@ func Registry() []Entry {
 		{WorkspacePathDenied, true, "the workspace path is not allowed"},
 		{WorkspaceOwnershipInvalid, true, "workspace ownership or permissions are invalid"},
 		{WorkspaceConfigTooLarge, true, "the workspace configuration exceeds the size limit"},
+		{WorkspacePathOutsideRoot, true, "the requested path resolves outside the workspace's registered root"},
+		{WorkspaceFileNotFound, true, "the requested file does not exist inside the workspace root"},
+		{WorkspaceFileTooLarge, true, "the requested file exceeds the 1 MiB read limit"},
+		{WorkspaceNotText, true, "the requested file is not UTF-8 text"},
 		{VendorUnsupported, true, "the vendor or operation is not supported in this phase"},
 		{VendorSessionNotFound, true, "the vendor session does not exist or is not live"},
 		{VendorSessionState, true, "the vendor session state does not allow the operation (busy, closed or not resumable)"},

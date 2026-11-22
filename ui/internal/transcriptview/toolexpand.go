@@ -82,7 +82,7 @@ func appendTrailingObjectKids(
 				return kit.EllipsisLabel(env, &l, theme.TypeBody(), ch.FgMuted, "in")
 			})
 		}
-		dir := mdview.FileRef{Path: spec.dir, Raw: spec.dir}
+		dir := mdview.FileRef{Path: spec.dir, Raw: spec.dir, Folder: true}
 		add(func(gtx layout.Context) layout.Dimensions {
 			l := gtx
 			return mdview.DrawBadge(env, &l, c.chipClick("d:"+dir.Path), mdview.BadgeSpec{Kind: mdview.BadgeFolder, File: dir}, func(r mdview.FileRef) {
@@ -140,10 +140,12 @@ func parseListEntries(txt string) []mdview.BadgeSpec {
 			continue
 		}
 		kind, clean := mdview.BadgeFile, strings.TrimSuffix(entry, "/")
+		ref := mdview.FileRef{Path: clean, Raw: clean}
 		if strings.HasSuffix(entry, "/") {
 			kind = mdview.BadgeFolder
+			ref.Folder = true
 		}
-		out = append(out, mdview.BadgeSpec{Kind: kind, File: mdview.FileRef{Path: clean, Raw: clean}})
+		out = append(out, mdview.BadgeSpec{Kind: kind, File: ref})
 	}
 	return out
 }
