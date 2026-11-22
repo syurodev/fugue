@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"image"
 
-	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
@@ -20,9 +19,9 @@ import (
 
 const codeStaleIncarnation = "interaction.stale_incarnation"
 
-// inboxView owns the approvals inbox pane (F10.5b, desktop-app §5).
-// Until F10.20's slot grid lands, it occupies the right pane when selected
-// from the sidebar or toggled with Ctrl/Cmd+Shift+I.
+// inboxView owns the approvals inbox slot (F10.5b, desktop-app §5): the
+// shell's grid opens it in the nearest empty slot, the sidebar row and the
+// Ctrl/Cmd+Shift+I shortcut toggle it.
 type inboxView struct {
 	active, focusedPin inbox.Pin
 	forms              map[inbox.Pin]*cardFormState
@@ -128,22 +127,6 @@ func (s *screens) applyInboxResults(results []inbox.Result) {
 	}
 }
 
-func (s *screens) toggleInboxShortcut(gtx *layout.Context) {
-	for {
-		ke, ok := gtx.Event(key.Filter{Required: key.ModShortcut | key.ModShift, Name: key.Name("I")})
-		if !ok {
-			return
-		}
-		if k, isKey := ke.(key.Event); isKey && k.State == key.Press {
-			if s.inboxOpen {
-				s.showPane(paneTranscript)
-			} else {
-				s.showPane(paneInbox)
-			}
-		}
-	}
-}
-
 func (v *inboxView) layout(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
 	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
 	items := sc.inbox.Items()
@@ -171,8 +154,8 @@ func (v *inboxView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
 		}),
-		rigidInboxButton(env, sc.fail, v.backBtn, kit.ButtonProps{Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM, Disabled: sc.open == ""}, func() {
-			sc.inboxOpen = false
+		rigidInboxButton(env, sc.fail, v.backBtn, kit.ButtonProps{Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM}, func() {
+			sc.grid.closeSlotOf(KindInbox)
 		}),
 	)
 }

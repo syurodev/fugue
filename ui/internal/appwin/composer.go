@@ -2,14 +2,11 @@ package appwin
 
 import (
 	"image"
-	"image/color"
 	"strings"
 
 	"gioui.org/io/event"
-	"gioui.org/io/input"
 	"gioui.org/io/key"
 	"gioui.org/layout"
-	"gioui.org/op"
 
 	"github.com/syurodev/fugue/pkg/client"
 
@@ -175,12 +172,14 @@ func turnActive(state string) bool {
 // measure returns the composer row's height at the current width: the input
 // box at its cap, the action row, and the write-failure line. Everything
 // measures with dead input, so no widget lays out twice in a frame (UK-02).
-func (c *composer) measure(env *kit.Env, gtx *layout.Context, sc *screens) int {
-	if sc.open == "" {
+// The target is the session the row belongs to — the open session in the
+// main slot, or the slot's own session (§5.3).
+func (c *composer) measure(env *kit.Env, gtx *layout.Context, sc *screens, target string) int {
+	if target == "" {
 		return c.start.measure(env, gtx)
 	}
-	st := c.stateFor(sc.open)
-	sess, known := sc.sidebar.Lookup(sc.open)
+	st := c.stateFor(target)
+	sess, known := sc.sidebar.Lookup(target)
 	if !known {
 		return 0
 	}
@@ -224,32 +223,19 @@ func (c *composer) actionMeasure(env *kit.Env, gtx *layout.Context, st *composer
 	return row
 }
 
-// measureLabel lays one label into a throwaway macro with a dead input
-// source and returns its size, the number the row's height is computed from.
-func measureLabel(env *kit.Env, gtx *layout.Context, t theme.Type, c color.NRGBA, txt string, width int) image.Point {
-	m := op.Record(gtx.Ops)
-	g := *gtx
-	var dead input.Source
-	g.Source = dead
-	g.Constraints = layout.Constraints{Max: image.Pt(width, 1<<20)}
-	dims := kit.Label(env, &g, t, c, txt)
-	m.Stop()
-	return dims.Size
-}
-
-// layout draws the composer row: the start row when no session is open, the
-// input and its actions otherwise. It returns the row it laid out — the row
-// height the caller allotted is the row's own (§5: the transcript pane gives
-// the composer everything above the measured row). The caller lays it out
-// inside Env.Offset, so the slash menu's anchor knows its place in the
-// window, and passes whether the host is reachable, which disables the
-// composer while it is not.
-func (c *composer) layout(env *kit.Env, gtx *layout.Context, sc *screens, connected bool) layout.Dimensions {
-	if sc.open == "" {
+// layout draws the composer row for one target session: the start row when
+// no session is open, the input and its actions otherwise. It returns the
+// row it laid out — the row height the caller allotted is the row's own (§5:
+// the transcript pane gives the composer everything above the measured row).
+// The caller lays it out inside Env.Offset, so the slash menu's anchor knows
+// its place in the window, and passes whether the host is reachable, which
+// disables the composer while it is not.
+func (c *composer) layout(env *kit.Env, gtx *layout.Context, sc *screens, target string, connected bool) layout.Dimensions {
+	if target == "" {
 		return c.start.row(env, gtx, sc)
 	}
-	st := c.stateFor(sc.open)
-	sess, known := sc.sidebar.Lookup(sc.open)
+	st := c.stateFor(target)
+	sess, known := sc.sidebar.Lookup(target)
 	if !known {
 		return layout.Dimensions{}
 	}
@@ -261,7 +247,7 @@ func (c *composer) layout(env *kit.Env, gtx *layout.Context, sc *screens, connec
 	// this snapshot, not whatever the frame's own typing produced.
 	draft := st.area.Text()
 	query, isSlash := session.SlashQuery(draft)
-	items, chosen, ateReturn := c.syncMenu(gtx, sc, st, draft, query, isSlash, disabled)
+	items, chosen, ateReturn := c.syncMenu(gtx, sc, st, target, draft, query, isSlash, disabled)
 
 	var rowDims layout.Dimensions
 	row := layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
@@ -275,7 +261,7 @@ func (c *composer) layout(env *kit.Env, gtx *layout.Context, sc *screens, connec
 			return c.layoutErr(env, &local, st)
 		}),
 	)
-	c.layoutMenu(env, gtx, sc, st, draft, query, chosen, items, rowDims)
+	c.layoutMenu(env, gtx, sc, st, target, draft, query, chosen, items, rowDims)
 	return row
 }
 
@@ -284,12 +270,12 @@ func (c *composer) layout(env *kit.Env, gtx *layout.Context, sc *screens, connec
 // forwards the open menu's keys (§6.14: the list never takes focus). It
 // returns the suggestion rows, the command a key chose, and whether a Return
 // was the menu's, so the composer keeps it from also submitting the draft.
-func (c *composer) syncMenu(gtx *layout.Context, sc *screens, st *composerState, draft, query string, isSlash, disabled bool) ([]kit.SuggestItem, string, bool) {
+func (c *composer) syncMenu(gtx *layout.Context, sc *screens, st *composerState, target, draft, query string, isSlash, disabled bool) ([]kit.SuggestItem, string, bool) {
 	if disabled || !isSlash {
 		st.menu.Close()
 		return nil, "", false
 	}
-	items := c.suggestItems(sc.commandsFor(sc.open), query)
+	items := c.suggestItems(sc.commandsFor(target), query)
 	if gtx.Focused(st.area.Tag()) && draft != st.menuDraft {
 		st.menu.Open()
 	}
@@ -300,12 +286,12 @@ func (c *composer) syncMenu(gtx *layout.Context, sc *screens, st *composerState,
 // layoutMenu draws the open menu below the input row, anchors to the row, and
 // makes a choice the whole prompt (§9: a command is the entire prompt, never
 // a fragment inside it).
-func (c *composer) layoutMenu(env *kit.Env, gtx *layout.Context, sc *screens, st *composerState, draft, query, chosen string, items []kit.SuggestItem, rowDims layout.Dimensions) {
+func (c *composer) layoutMenu(env *kit.Env, gtx *layout.Context, sc *screens, st *composerState, target, draft, query, chosen string, items []kit.SuggestItem, rowDims layout.Dimensions) {
 	res, err := st.menu.Layout(env, gtx, &kit.SuggestProps{
 		Items:     items,
 		Anchor:    image.Rect(0, 0, rowDims.Size.X, rowDims.Size.Y),
 		Query:     query,
-		Loading:   sc.commandsPending(sc.open),
+		Loading:   sc.commandsPending(target),
 		EmptyText: "No commands",
 		NoResText: "No matching command",
 		MinWidth:  rowDims.Size.X,

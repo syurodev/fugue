@@ -75,6 +75,7 @@ func packagedIcons() []packagedIcon {
 	return []packagedIcon{
 		{"check", "Check"},
 		{"chevron-down", "ChevronDown"},
+		{"chevron-left", "ChevronLeft"},
 		{"chevron-right", "ChevronRight"},
 		{"search", "Search"},
 		{"x", "X"},
@@ -97,6 +98,8 @@ func packagedIcons() []packagedIcon {
 		{"folder", "Folder"},
 		{"git-branch", "GitBranch"},
 		{"git-pull-request", "GitPullRequest"},
+		{"message-square", "MessageSquare"},
+		{"users", "Users"},
 	}
 }
 

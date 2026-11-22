@@ -273,8 +273,7 @@ func (s *screens) transcriptCallbacks() transcriptview.Callbacks {
 			s.fetcher.RequestItem(s.open, itemID)
 		},
 		OnOpenInbox: func() {
-			s.inboxOpen = true
-			s.accountsOpen = false
+			s.grid.openCompanion(SlotRef{Kind: KindInbox})
 		},
 		OnOpenFile: s.openFileRef,
 		OnViewDiff: s.openDiffViewer,
@@ -353,10 +352,13 @@ func (s *screens) applyReopenAnchor(id string) {
 }
 
 // layoutTranscriptPane draws the transcript itself: the canvas, the empty
-// state, the transcript list and the read failure line.
-func (s *screens) layoutTranscriptPane(gtx *layout.Context, env *kit.Env, view *transcriptview.State, items []*session.Item) {
+// state, the transcript list and the read failure line. The pane serves the
+// session id names — the main slot's open session, or another session's slot
+// (§5.3); the anchors and on-demand paging stay the open session's, whose
+// read side they belong to.
+func (s *screens) layoutTranscriptPane(gtx *layout.Context, env *kit.Env, id string, view *transcriptview.State, items []*session.Item) {
 	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
-	if len(items) == 0 && s.open == "" {
+	if len(items) == 0 && id == "" {
 		layout.Center.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
 			local := gtx
 			dims, _, err := s.emptyTranscript.Layout(env, &local, &kit.EmptyStateProps{
@@ -368,10 +370,14 @@ func (s *screens) layoutTranscriptPane(gtx *layout.Context, env *kit.Env, view *
 		})
 		return
 	}
-	s.applyTurnAnchor()
+	if id == s.open {
+		s.applyTurnAnchor()
+	}
 	transcriptview.LayoutWithCallbacks(env, gtx, view, items, s.transcriptCallbacks())
-	s.trackScroll(view)
-	s.maybePageOlder()
+	if id == s.open {
+		s.trackScroll(view)
+		s.maybePageOlder()
+	}
 	if s.lastErr == "" {
 		return
 	}

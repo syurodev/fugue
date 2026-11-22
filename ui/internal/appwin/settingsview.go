@@ -165,8 +165,8 @@ func (v *settingsView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *scree
 		}),
 		spacerW(theme.SpaceSM),
 		rigidInboxButton(env, sc.fail, v.backBtn, kit.ButtonProps{
-			Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM, Disabled: sc.open == "",
-		}, func() { sc.showPane(paneTranscript) }),
+			Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM,
+		}, func() { sc.grid.closeSlotOf(KindSettings) }),
 	)
 }
 

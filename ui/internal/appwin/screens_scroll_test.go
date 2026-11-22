@@ -81,11 +81,11 @@ func TestSentMessageFiresTheTurnAnchorWhenItsItemLands(t *testing.T) {
 	f.focus(t, fx)
 	f.typeInto(st, "one question")
 	f.frame(t, image.Pt(600, 400), func(gtx *layout.Context) {
-		fx.c.layout(f.env, gtx, fx.sc, true)
+		fx.c.layout(f.env, gtx, fx.sc, fx.sc.open, true)
 	})
 	f.tapReturn(0)
 	f.frame(t, image.Pt(600, 400), func(gtx *layout.Context) {
-		fx.c.layout(f.env, gtx, fx.sc, true)
+		fx.c.layout(f.env, gtx, fx.sc, fx.sc.open, true)
 	})
 	if !fx.sc.turnArm {
 		t.Fatal("the Enter-send did not arm the new-turn anchor")

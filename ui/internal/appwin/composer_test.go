@@ -215,7 +215,7 @@ func (h *frameRunner) frame(t *testing.T, size image.Point, fn func(gtx *layout.
 func (h *frameRunner) focus(t *testing.T, fx *composerFixture) {
 	t.Helper()
 	h.frame(t, image.Pt(600, 400), func(gtx *layout.Context) {
-		fx.c.layout(h.env, gtx, fx.sc, true)
+		fx.c.layout(h.env, gtx, fx.sc, fx.sc.open, true)
 		gtx.Execute(key.FocusCmd{Tag: fx.state().area.Tag()})
 	})
 }
@@ -326,10 +326,10 @@ func TestComposerEnterSendsTheReadyDraft(t *testing.T) {
 	h.focus(t, fx)
 	h.typeInto(st, "hello")
 	h.frame(t, image.Pt(600, 400), func(gtx *layout.Context) {
-		fx.c.layout(h.env, gtx, fx.sc, true)
+		fx.c.layout(h.env, gtx, fx.sc, fx.sc.open, true)
 	})
 	h.frame(t, image.Pt(600, 400), func(gtx *layout.Context) {
-		fx.c.layout(h.env, gtx, fx.sc, true)
+		fx.c.layout(h.env, gtx, fx.sc, fx.sc.open, true)
 	})
 	if got := st.area.Text(); got != "hello" {
 		t.Fatalf("draft = %q after typing, want hello", got)
@@ -337,7 +337,7 @@ func TestComposerEnterSendsTheReadyDraft(t *testing.T) {
 
 	h.tapReturn(0)
 	h.frame(t, image.Pt(600, 400), func(gtx *layout.Context) {
-		fx.c.layout(h.env, gtx, fx.sc, true)
+		fx.c.layout(h.env, gtx, fx.sc, fx.sc.open, true)
 	})
 	if got := st.area.Text(); got != "" {
 		t.Fatalf("draft = %q after the send, want it cleared", got)
@@ -357,12 +357,12 @@ func TestComposerEnterSteersWhileTheTurnRuns(t *testing.T) {
 	h.focus(t, fx)
 	h.typeInto(fx.state(), "one more thing")
 	h.frame(t, image.Pt(600, 400), func(gtx *layout.Context) {
-		fx.c.layout(h.env, gtx, fx.sc, true)
+		fx.c.layout(h.env, gtx, fx.sc, fx.sc.open, true)
 	})
 
 	h.tapReturn(0)
 	h.frame(t, image.Pt(600, 400), func(gtx *layout.Context) {
-		fx.c.layout(h.env, gtx, fx.sc, true)
+		fx.c.layout(h.env, gtx, fx.sc, fx.sc.open, true)
 	})
 	calls := fx.awaitWrite()
 	if len(calls) != 1 || calls[0].method != callSteer || calls[0].text != "one more thing" {
@@ -380,12 +380,12 @@ func TestComposerShiftEnterKeepsTheDraft(t *testing.T) {
 	h.focus(t, fx)
 	h.typeInto(fx.state(), "line one")
 	h.frame(t, image.Pt(600, 400), func(gtx *layout.Context) {
-		fx.c.layout(h.env, gtx, fx.sc, true)
+		fx.c.layout(h.env, gtx, fx.sc, fx.sc.open, true)
 	})
 
 	h.tapReturn(key.ModShift)
 	h.frame(t, image.Pt(600, 400), func(gtx *layout.Context) {
-		fx.c.layout(h.env, gtx, fx.sc, true)
+		fx.c.layout(h.env, gtx, fx.sc, fx.sc.open, true)
 	})
 	if got := st.area.Text(); got != "line one\n" {
 		t.Fatalf("draft = %q after shift+return, want the newline and the draft intact", got)
@@ -410,10 +410,10 @@ func TestComposerSlashMenuChoosesTheWholePrompt(t *testing.T) {
 	h.focus(t, fx)
 	h.typeInto(st, "/")
 	h.frame(t, image.Pt(600, 400), func(gtx *layout.Context) {
-		fx.c.layout(h.env, gtx, fx.sc, true)
+		fx.c.layout(h.env, gtx, fx.sc, fx.sc.open, true)
 	})
 	h.frame(t, image.Pt(600, 400), func(gtx *layout.Context) {
-		fx.c.layout(h.env, gtx, fx.sc, true)
+		fx.c.layout(h.env, gtx, fx.sc, fx.sc.open, true)
 	})
 	if !st.menu.IsOpen() {
 		t.Fatal("the slash menu did not open on the command draft")
@@ -422,7 +422,7 @@ func TestComposerSlashMenuChoosesTheWholePrompt(t *testing.T) {
 	// Return chooses; the command is the whole prompt and nothing posts.
 	h.tapReturn(0)
 	h.frame(t, image.Pt(600, 400), func(gtx *layout.Context) {
-		fx.c.layout(h.env, gtx, fx.sc, true)
+		fx.c.layout(h.env, gtx, fx.sc, fx.sc.open, true)
 	})
 	if got := st.area.Text(); got != "/clear" {
 		t.Fatalf("draft = %q after the choice, want the whole prompt /clear", got)
@@ -434,7 +434,7 @@ func TestComposerSlashMenuChoosesTheWholePrompt(t *testing.T) {
 	// The next Return sends the command as the whole prompt.
 	h.tapReturn(0)
 	h.frame(t, image.Pt(600, 400), func(gtx *layout.Context) {
-		fx.c.layout(h.env, gtx, fx.sc, true)
+		fx.c.layout(h.env, gtx, fx.sc, fx.sc.open, true)
 	})
 	calls := fx.awaitWrite()
 	if len(calls) != 1 || calls[0].method != callSend || calls[0].text != "/clear" {
@@ -631,7 +631,7 @@ func TestComposerLaysOutWithinItsRowHeight(t *testing.T) {
 	var rowH int
 	h.frame(t, image.Pt(width, 400), func(gtx *layout.Context) {
 		st.lastErr = "the host refused the send"
-		rowH = fx.c.measure(h.env, gtx, fx.sc)
+		rowH = fx.c.measure(h.env, gtx, fx.sc, fx.sc.open)
 	})
 
 	var row layout.Dimensions
@@ -641,7 +641,7 @@ func TestComposerLaysOutWithinItsRowHeight(t *testing.T) {
 		local.Constraints = layout.Constraints{
 			Min: image.Pt(width, rowH), Max: image.Pt(width, rowH),
 		}
-		row = fx.c.layout(h.env, &local, fx.sc, true)
+		row = fx.c.layout(h.env, &local, fx.sc, fx.sc.open, true)
 	})
 	if row.Size.Y != rowH {
 		t.Fatalf("composer row = %d px, want the row height %d the pane allotted", row.Size.Y, rowH)

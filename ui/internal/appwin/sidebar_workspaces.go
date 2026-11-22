@@ -339,102 +339,68 @@ func (s *screens) layoutPolicyBanner(env *kit.Env, gtx *layout.Context) layout.D
 	return dims
 }
 
-// layoutSidebar draws the workspace groups and their sessions (F10.14,
-// desktop-app §5.3): the top header carries the create-workspace action, a
-// warning banner rides above the list while a policy change waits, and a row
-// click opens the session. The column holds the SidebarWidth token: kit rows
-// fill the width they are given, so the list must not swallow the
-// transcript's half of the window.
-func (s *screens) layoutSidebar(gtx *layout.Context, env *kit.Env) layout.Dimensions {
+// layoutSidebarPanel draws the sidebar of the selected rail item (§5.3): a
+// collapse toggle on top, then the rail's own list — the chat rail's
+// workspaces and sessions, the team and module rails their placeholders.
+// The utility rows open their slots; a row click opens the session in the
+// main slot.
+func (s *screens) layoutSidebarPanel(gtx *layout.Context, env *kit.Env) layout.Dimensions {
 	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(theme.SidebarWidth))
-	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+	var rows []layout.FlexChild
+	switch s.grid.rail {
+	case railChat:
+		rows = append(rows,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				local := gtx
+				return s.layoutPolicyBanner(env, &local)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				local := gtx
+				return s.layoutInboxRow(env, &local)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				local := gtx
+				return s.layoutAccountsRow(env, &local)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				local := gtx
+				return s.layoutSettingsRow(env, &local)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				local := gtx
+				header, ev := s.header.Layout(env, &local, &kit.SectionHeaderProps{
+					Label:  "Workspaces",
+					Action: &kit.IconButtonProps{Icon: kit.IconPlus, Label: "New workspace"},
+				}, func(gtx *layout.Context) layout.Dimensions {
+					return s.layoutSidebarContent(env, gtx)
+				})
+				if ev.ActionClick {
+					s.dlg.create.open()
+				}
+				if ev.Err != nil {
+					s.fail(ev.Err)
+				}
+				return header
+			}),
+		)
+	case railTeam:
+		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
-			return s.layoutPolicyBanner(env, &local)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return s.layoutSidebarSoon(env, &local, "Teams", "The team list and boards open here with the team screens.")
+		}))
+	case railModules:
+		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
-			return s.layoutInboxRow(env, &local)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			return s.layoutAccountsRow(env, &local)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			return s.layoutSettingsRow(env, &local)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			header, ev := s.header.Layout(env, &local, &kit.SectionHeaderProps{
-				Label:  "Workspaces",
-				Action: &kit.IconButtonProps{Icon: kit.IconPlus, Label: "New workspace"},
-			}, func(gtx *layout.Context) layout.Dimensions {
-				return s.layoutSidebarContent(env, gtx)
-			})
-			if ev.ActionClick {
-				s.dlg.create.open()
-			}
-			if ev.Err != nil {
-				s.fail(ev.Err)
-			}
-			return header
-		}),
-	)
+			return s.layoutSidebarSoon(env, &local, "Modules", "Registered modules list here in install order.")
+		}))
+	}
+	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, rows...)
 }
 
-func (s *screens) layoutInboxRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
-	props := &kit.ListRowProps{
-		Label:    "Approvals",
-		Selected: s.inboxOpen,
-	}
-	if count := s.inbox.PendingCount(); count > 0 {
-		props.StateLabel = fmt.Sprintf("%d pending", count)
-		props.StateTone = kit.ToneWarning
-	} else {
-		props.Trailing = "0"
-	}
-	dims, ev := s.inboxRow.Layout(env, gtx, props)
-	if ev.Clicked || ev.Opened {
-		s.showPane(paneInbox)
-	}
-	return dims
-}
-
-func (s *screens) layoutAccountsRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
-	props := &kit.ListRowProps{
-		Label:    "Accounts",
-		Selected: s.accountsOpen,
-	}
-	switch {
-	case !s.accounts.HasSnapshot():
-		props.Trailing = "unknown"
-	case s.accounts.NeedsAttentionCount() > 0:
-		props.StateLabel = formatAlertCount(s.accounts.NeedsAttentionCount())
-		props.StateTone = kit.ToneWarning
-	default:
-		props.Trailing = "ok"
-	}
-	dims, ev := s.accountsRow.Layout(env, gtx, props)
-	if ev.Clicked || ev.Opened {
-		s.showPane(paneAccounts)
-	}
-	return dims
-}
-
-func (s *screens) layoutSettingsRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
-	props := &kit.ListRowProps{
-		Label:    "Settings",
-		Selected: s.settingsOpen,
-	}
-	if dirty := len(s.settings.DirtyFields()); dirty > 0 {
-		props.StateLabel = fmt.Sprintf("%d unsaved", dirty)
-		props.StateTone = kit.ToneInfo
-	}
-	dims, ev := s.settingsRow.Layout(env, gtx, props)
-	if ev.Clicked || ev.Opened {
-		s.openSettingsPane()
-	}
+// layoutSidebarSoon is a rail's sidebar before its screens land.
+func (s *screens) layoutSidebarSoon(env *kit.Env, gtx *layout.Context, title, desc string) layout.Dimensions {
+	dims, _, err := s.slotSoonSidebar.Layout(env, gtx, &kit.EmptyStateProps{Icon: kit.IconHelp, Title: title, Description: desc})
+	s.fail(err)
 	return dims
 }
 
@@ -449,7 +415,7 @@ func (s *screens) sessionRows(env *kit.Env, sessions []session.Session) []layout
 			row.Enter()
 			s.rows[sess.ID] = row
 		}
-		selected := !s.inboxOpen && !s.accountsOpen && !s.settingsOpen && s.open == sess.ID
+		selected := s.grid.rail == railChat && s.grid.mainRef().ID == sess.ID && s.grid.mainRef().Kind == KindSession
 		pending := s.inbox.PendingCountForSession(sess.ID)
 		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx

@@ -250,12 +250,10 @@ func layoutBannerSpec(env *kit.Env, gtx *layout.Context, spec bannerSpec) (layou
 	return dims, ev, nil
 }
 
-// openAccounts is the needs-login banner's action: the accounts pane owns the
-// vendor's own login flow (F10.5c).
+// openAccounts is the needs-login banner's action: the accounts slot owns
+// the vendor's own login flow (F10.5c).
 func (s *screens) openAccounts() {
-	s.accountsOpen = true
-	s.inboxOpen = false
-	s.settingsOpen = false
+	s.grid.openCompanion(SlotRef{Kind: KindAccounts})
 }
 
 // activeSessionCount counts the sessions whose turn is live, the count the
