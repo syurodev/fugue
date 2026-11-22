@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/gitops"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
@@ -378,6 +379,7 @@ func (q *teamMergeQueue) executeMergeEntry(ctx context.Context, ep *mergeEntryPa
 		}
 		return
 	}
+	config.TriggerCrashPoint(q.svc.crashPoint, config.CrashPointTeamMergeAfterFF)
 	q.recordIntegrated(ctx, ep.rec.TeamID, ep.task.TaskID, ep.task.SessionID, ep.parentID, ep.targetBranch, mergedSHA)
 }
 

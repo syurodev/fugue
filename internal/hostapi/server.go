@@ -296,6 +296,7 @@ func (s *Server) Start(ctx context.Context, backend app.Backend) error {
 			return context.WithValue(connCtx, connStateKey{}, s.registerConn(c))
 		},
 	}
+	s.mu.Lock()
 	s.serveTask = supervise.Go(ctx, "hostapi.serve", func(context.Context) error {
 		err := s.httpSrv.Serve(s.listener)
 		// ErrServerClosed is Shutdown/Close; net.ErrClosed is our own
@@ -305,6 +306,7 @@ func (s *Server) Start(ctx context.Context, backend app.Backend) error {
 		}
 		return errcode.Wrap(errcode.Internal, "serve the host api", err)
 	})
+	s.mu.Unlock()
 	return nil
 }
 
@@ -402,9 +404,14 @@ func (s *Server) Drain(ctx context.Context, force bool) error {
 	// Wait for the serve loop so no stdlib goroutine outlives the drain; a
 	// serve failure is part of the drain's outcome, joined with any shutdown
 	// failure above.
-	if err := s.serveTask.Wait(); err != nil {
-		drainErr = errors.Join(drainErr,
-			errcode.Wrap(errcode.Internal, "the host api serve loop failed", err))
+	s.mu.Lock()
+	serveTask := s.serveTask
+	s.mu.Unlock()
+	if serveTask != nil {
+		if err := serveTask.Wait(); err != nil {
+			drainErr = errors.Join(drainErr,
+				errcode.Wrap(errcode.Internal, "the host api serve loop failed", err))
+		}
 	}
 	return drainErr
 }

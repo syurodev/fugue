@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
@@ -400,7 +401,11 @@ func (a *vendorSessionActor) send(ctx context.Context, input vendor.Input) error
 		Metadata: transcript.UserMessageMetadata{Origin: origin},
 		Content:  transcript.UserMessageContent{Text: input.Text},
 	}
-	return a.recordItem(ctx, &item)
+	if err := a.recordItem(ctx, &item); err != nil {
+		return err
+	}
+	config.TriggerCrashPoint(a.manager.deps.CrashPoint, config.CrashPointVendorTurnActive)
+	return nil
 }
 
 func (a *vendorSessionActor) steer(ctx context.Context, input vendor.Input) error {

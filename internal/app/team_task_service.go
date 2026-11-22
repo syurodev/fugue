@@ -79,8 +79,12 @@ type teamTaskService struct {
 	accounts     *vendor.Accounts
 	hostCfg      HostConfigReader
 	clk          clock.Clock
+	crashPoint   string
 	unlockMu     sync.Mutex
 }
+
+// SetCrashPoint arms an optional Stage A crash point from internal/config.
+func (s *teamTaskService) SetCrashPoint(point string) { s.crashPoint = point }
 
 func newTeamTaskService(store *vendorstore.Store, sessions taskSessions, roots rootResolver,
 	git *gitops.Manager, dataDir string, gen ids.Generator, v *vault.Service, gate ResultGate,

@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/transcript"
@@ -69,11 +70,15 @@ func (a *vendorSessionActor) persistObservedItems(ctx context.Context, items []t
 		if item.TurnID == "" {
 			continue
 		}
+		wasRunning := a.turns[item.TurnID]
 		if err := a.ensureVendorTurnStarted(ctx, item.TurnID); err != nil {
 			return err
 		}
 		if err := a.recordItem(ctx, &item); err != nil {
 			return err
+		}
+		if !wasRunning && a.turns[item.TurnID] {
+			config.TriggerCrashPoint(a.manager.deps.CrashPoint, config.CrashPointVendorTurnActive)
 		}
 	}
 	return nil

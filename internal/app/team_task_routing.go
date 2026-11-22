@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/vendorstore"
@@ -152,8 +153,11 @@ func (s *teamTaskService) ensureUserQuestionCard(teamID, workspaceID string, tar
 	if err != nil {
 		return err
 	}
-	_, err = s.interactions.Ensure(spec)
-	return err
+	if _, err = s.interactions.Ensure(spec); err != nil {
+		return err
+	}
+	config.TriggerCrashPoint(s.crashPoint, config.CrashPointInteractionCardPending)
+	return nil
 }
 
 func (s *teamTaskService) userQuestionCardSpec(teamID, workspaceID string, target *vendorstore.TaskRecord, askedSeq int64, question string) (*interaction.Spec, error) {

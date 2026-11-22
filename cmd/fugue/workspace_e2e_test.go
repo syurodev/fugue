@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -44,8 +45,9 @@ func playFakeVendor(args []string) bool {
 		}
 		scanner := bufio.NewScanner(os.Stdin)
 		for scanner.Scan() {
-			// Hold stdin open until the host closes or stops the session.
-			continue
+			if strings.Contains(scanner.Text(), "CRASH_TEST_PROPOSE_TEAM") {
+				callCrashProposeViaMCPBridge(args)
+			}
 		}
 		return true
 	default:

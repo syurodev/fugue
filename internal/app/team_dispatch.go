@@ -15,6 +15,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/gitops"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -73,6 +74,8 @@ type teamDispatcherDeps struct {
 	// TestWorktreeErr, when set, fails createWorktree with it (F11.9 tests
 	// inject a classified disk-full error).
 	TestWorktreeErr error
+	// CrashPoint is the optional named Stage A crash point armed via internal/config.
+	CrashPoint string
 }
 
 // teamDispatcher starts the queued tasks of active teams. One run at a time:
@@ -319,6 +322,9 @@ func (d *teamDispatcher) appendTaskStartedAttempt(ctx context.Context, teamID, t
 	if d.deps.Budgets != nil {
 		d.deps.Budgets.trackTaskWatch(teamID, task, vendorstore.TaskStateRunning, sessionID, rec.LastSeq+1, d.now().UnixMilli())
 		d.deps.Budgets.Notify()
+	}
+	if task.HierarchyRole == vendorstore.RoleMember {
+		config.TriggerCrashPoint(d.deps.CrashPoint, config.CrashPointTeamTaskRunning)
 	}
 	return nil
 }
