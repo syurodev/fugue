@@ -199,6 +199,39 @@ func TestFailureUXActiveSessionCountAndCloseConfirm(t *testing.T) {
 	}
 }
 
+// TestFailureUXRequestWindowCloseInterceptsALiveTurn pins the DA-E08
+// intercept: a close with live turns opens the dialog on the exact count
+// instead of closing, and both a confirmed close and a quiet window pass the
+// close action through.
+func TestFailureUXRequestWindowCloseInterceptsALiveTurn(t *testing.T) {
+	t.Parallel()
+	sc, _ := newTestScreens(t)
+	sc.sidebar.ApplyList(client.SessionList{Sessions: []client.Session{
+		{ID: "s1", State: stateRunning},
+	}})
+	closes := 0
+	closeFn := func() { closes++ }
+	if requestWindowClose(sc, closeFn) {
+		t.Fatal("a live turn let the window close without the confirm")
+	}
+	if !sc.failure.closeDlg.dialog.IsOpen() {
+		t.Fatal("the close confirmation did not open")
+	}
+	if sc.failure.closeDlg.active != 1 {
+		t.Fatalf("the dialog opened on %d active sessions, want 1", sc.failure.closeDlg.active)
+	}
+	// A quiet window closes without asking.
+	sc2, _ := newTestScreens(t)
+	if !requestWindowClose(sc2, closeFn) || closes != 1 {
+		t.Fatalf("a quiet window did not close (closes %d)", closes)
+	}
+	// The confirmed close passes the next attempt through.
+	sc.failure.closeDlg.armed = true
+	if !requestWindowClose(sc, closeFn) || closes != 2 {
+		t.Fatalf("the confirmed close was intercepted again (closes %d)", closes)
+	}
+}
+
 // TestFailureUXVaultWaitingCount pins the unlock card's count: only sessions
 // waiting on the vault count (activation §3).
 func TestFailureUXVaultWaitingCount(t *testing.T) {

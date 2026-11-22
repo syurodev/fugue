@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -163,15 +164,27 @@ func (h *testHost) restartServeWithFakeVendor(t *testing.T, ctx context.Context,
 
 // serveWithFakeVendorOn runs `fugue serve` on the given directories with the
 // fake dir as its whole PATH: the serve resolves the vendor CLI on PATH
-// alone, and nothing else on it may shadow the fake.
+// alone, and nothing else on it may shadow the fake. The child sees exactly
+// one PATH and one data-dir pair — the inherited entries are filtered out
+// before the test's own land.
 func serveWithFakeVendorOn(t *testing.T, ctx context.Context, bin, dataDir, runtime, fakeDir string) *testHost {
 	t.Helper()
+	kept := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		switch {
+		case strings.HasPrefix(kv, "PATH="),
+			strings.HasPrefix(kv, "SYNX_FUGUE_DATA_DIR="),
+			strings.HasPrefix(kv, "XDG_RUNTIME_DIR="):
+		default:
+			kept = append(kept, kv)
+		}
+	}
 	cmd := exec.CommandContext(ctx, bin, "serve")
-	cmd.Env = append(os.Environ(),
-		"SYNX_FUGUE_DATA_DIR="+dataDir,
-		"XDG_RUNTIME_DIR="+runtime,
-		"PATH="+fakeDir,
-	)
+	cmd.Env = slices.Concat(kept, []string{
+		"SYNX_FUGUE_DATA_DIR=" + dataDir,
+		"XDG_RUNTIME_DIR=" + runtime,
+		"PATH=" + fakeDir,
+	})
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

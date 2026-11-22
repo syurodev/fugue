@@ -2,10 +2,7 @@ package client_test
 
 import (
 	"context"
-	"net"
 	"net/http"
-	"net/http/httptest"
-	"path/filepath"
 	"sync"
 	"testing"
 
@@ -50,34 +47,13 @@ func (f *vendorCloseFake) taken() []*vendorsv1.CloseSessionRequest {
 	return f.session
 }
 
-// serveVendorCloseFake serves the fake on a unix socket and dials a client.
+// serveVendorCloseFake serves the fake and dials a client at it.
 func serveVendorCloseFake(t *testing.T, fake *vendorCloseFake) *client.Client {
 	t.Helper()
-	socket := filepath.Join(shortDir(t), "close.sock")
-	var lc net.ListenConfig
-	ln, err := lc.Listen(t.Context(), "unix", socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mux := http.NewServeMux()
-	mux.Handle(hostv1connect.NewHostServiceHandler(fake))
-	mux.Handle(vendorsv1connect.NewVendorServiceHandler(fake))
-	srv := httptest.NewUnstartedServer(mux)
-	srv.Listener = ln
-	var protos http.Protocols
-	protos.SetHTTP1(true)
-	protos.SetHTTP2(true)
-	protos.SetUnencryptedHTTP2(true)
-	srv.Config.Protocols = &protos
-	srv.Start()
-	t.Cleanup(srv.Close)
-
-	c, err := client.Dial(t.Context(), socket, appParams())
-	if err != nil {
-		t.Fatalf("dial the scripted vendor host: %v", err)
-	}
-	t.Cleanup(func() { c.Close() })
-	return c
+	return dialScriptedHost(t, "close.sock", func(mux *http.ServeMux) {
+		mux.Handle(hostv1connect.NewHostServiceHandler(fake))
+		mux.Handle(vendorsv1connect.NewVendorServiceHandler(fake))
+	})
 }
 
 // TestClientCloseSessionSendsFieldsAndReportsDone pins the client wrapper:

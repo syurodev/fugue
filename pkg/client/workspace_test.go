@@ -3,10 +3,7 @@ package client_test
 import (
 	"context"
 	"errors"
-	"net"
 	"net/http"
-	"net/http/httptest"
-	"path/filepath"
 	"sync"
 	"testing"
 
@@ -135,31 +132,10 @@ func (f *workspaceFake) RejectWorkspaceConfig(_ context.Context, req *connect.Re
 // unencrypted HTTP/2 and dials a pkg/client at it.
 func serveWorkspaceFake(t *testing.T, fake *workspaceFake) *client.Client {
 	t.Helper()
-	socket := filepath.Join(shortDir(t), "ws.sock")
-	var lc net.ListenConfig
-	ln, err := lc.Listen(t.Context(), "unix", socket)
-	if err != nil {
-		t.Fatal(err)
-	}
-	mux := http.NewServeMux()
-	mux.Handle(hostv1connect.NewHostServiceHandler(fake))
-	mux.Handle(workspacev1connect.NewWorkspaceServiceHandler(fake))
-	srv := httptest.NewUnstartedServer(mux)
-	srv.Listener = ln
-	var protos http.Protocols
-	protos.SetHTTP1(true)
-	protos.SetHTTP2(true)
-	protos.SetUnencryptedHTTP2(true)
-	srv.Config.Protocols = &protos
-	srv.Start()
-	t.Cleanup(srv.Close)
-
-	c, err := client.Dial(t.Context(), socket, appParams())
-	if err != nil {
-		t.Fatalf("dial the scripted workspace host: %v", err)
-	}
-	t.Cleanup(func() { c.Close() })
-	return c
+	return dialScriptedHost(t, "ws.sock", func(mux *http.ServeMux) {
+		mux.Handle(hostv1connect.NewHostServiceHandler(fake))
+		mux.Handle(workspacev1connect.NewWorkspaceServiceHandler(fake))
+	})
 }
 
 // scriptedWorkspaceError builds a connect error carrying a host ErrorDetail code.

@@ -13,88 +13,44 @@ import (
 // goroutine drains each into UI state at the top of the frame. The window's
 // loop and layout live in window.go; both files are one package.
 
+// drainChan takes every buffered result off one channel without blocking,
+// the loop every worker drain shares.
+func drainChan[T any](ch <-chan T) []T {
+	out := make([]T, 0, 4)
+drain:
+	for {
+		select {
+		case res := <-ch:
+			out = append(out, res)
+		default:
+			break drain
+		}
+	}
+	return out
+}
+
 // drainMutResults takes every mutation result the mutator delivered this
 // frame; the window goroutine folds them into the dialogs.
 func drainMutResults(m *workspace.Mutator) []workspace.MutResult {
-	muts := make([]workspace.MutResult, 0, 4)
-drain:
-	for {
-		select {
-		case res := <-m.Results():
-			muts = append(muts, res)
-		default:
-			break drain
-		}
-	}
-	return muts
+	return drainChan(m.Results())
 }
 
 func drainVaultResults(w *vault.Worker) []vault.Result {
-	out := make([]vault.Result, 0, 4)
-drain:
-	for {
-		select {
-		case res := <-w.Results():
-			out = append(out, res)
-		default:
-			break drain
-		}
-	}
-	return out
+	return drainChan(w.Results())
 }
 
 func drainInboxResults(w *inbox.Worker) []inbox.Result {
-	out := make([]inbox.Result, 0, 4)
-drain:
-	for {
-		select {
-		case res := <-w.Results():
-			out = append(out, res)
-		default:
-			break drain
-		}
-	}
-	return out
+	return drainChan(w.Results())
 }
 
 func drainAccountsResults(w *accounts.Worker) []accounts.Result {
-	out := make([]accounts.Result, 0, 4)
-drain:
-	for {
-		select {
-		case res := <-w.Results():
-			out = append(out, res)
-		default:
-			break drain
-		}
-	}
-	return out
+	return drainChan(w.Results())
 }
 
 func drainSettingsResults(w *settings.Worker) []settings.Result {
-	out := make([]settings.Result, 0, 4)
-drain:
-	for {
-		select {
-		case res := <-w.Results():
-			out = append(out, res)
-		default:
-			break drain
-		}
-	}
-	return out
+	return drainChan(w.Results())
 }
 
 func drainFileViewResults(w *fileViewWorker) []fileResult {
-	out := make([]fileResult, 0, 4)
-drain:
-	for {
-		select {
-		case res := <-w.Results():
-			out = append(out, res)
-		default:
-			break drain
-		}
-	}
-	return out
+	return drainChan(w.Results())
 }

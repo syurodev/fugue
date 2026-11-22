@@ -6,6 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -96,6 +99,37 @@ func testCtx(t *testing.T) context.Context {
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	t.Cleanup(cancel)
 	return ctx
+}
+
+// dialScriptedHost serves the scripted handlers on a fresh unix socket —
+// short-named, so macOS sun_path fits — over unencrypted HTTP/2 and dials a
+// client at it. Every scripted-host test rides the same transport.
+func dialScriptedHost(t *testing.T, socketName string, register func(mux *http.ServeMux)) *client.Client {
+	t.Helper()
+	socket := filepath.Join(shortDir(t), socketName)
+	var lc net.ListenConfig
+	ln, err := lc.Listen(t.Context(), "unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	register(mux)
+	srv := httptest.NewUnstartedServer(mux)
+	srv.Listener = ln
+	var protos http.Protocols
+	protos.SetHTTP1(true)
+	protos.SetHTTP2(true)
+	protos.SetUnencryptedHTTP2(true)
+	srv.Config.Protocols = &protos
+	srv.Start()
+	t.Cleanup(srv.Close)
+
+	c, err := client.Dial(t.Context(), socket, appParams())
+	if err != nil {
+		t.Fatalf("dial the scripted host: %v", err)
+	}
+	t.Cleanup(func() { c.Close() })
+	return c
 }
 
 // fakeHandler serves scripted Hello and Subscribe replies for one test.

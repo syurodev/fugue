@@ -108,21 +108,26 @@ func (f *failureUX) applyProbe(probes []client.VendorProbe, err error) {
 		}
 	}
 	f.carry = c
-	// A changed answer un-dismisses its banner: the dismissal belonged to the
-	// old answer, not to the topic.
+	// The shown keys move here, with the reset: a changed answer
+	// un-dismisses its banner — the dismissal belonged to the old answer,
+	// not to the topic — so specs stays side-effect-free for the layout.
 	if f.versionShown != c.versionKey() {
 		f.versionDismiss = false
 	}
+	f.versionShown = c.versionKey()
 	if f.loginShown != c.loginKey() {
 		f.loginDismiss = false
 	}
+	f.loginShown = c.loginKey()
 }
 
 // specs derives the visible window-level banners in display order: the lost
 // connection first, then the CLI problems, then the open session's detached
 // banner. reason is the connection state's own reason and dataDir the host
 // data directory the banner names for a manual `fugue serve` start. hasOpen
-// names whether a session is open, in openSess.
+// names whether a session is open, in openSess. It reads no clock and
+// mutates nothing: the dismissals the specs reflect are folded in by
+// applyEvents and applyProbe.
 func (f *failureUX) specs(state hostconn.State, reason, dataDir string, hasOpen bool, openSess session.Session) []bannerSpec {
 	specs := make([]bannerSpec, 0, 4)
 	if state != hostconn.StateConnected {
@@ -156,7 +161,6 @@ func (f *failureUX) specs(state hostconn.State, reason, dataDir string, hasOpen 
 			dismissible: true,
 			visible:     !f.versionDismiss,
 		})
-		f.versionShown = f.carry.versionKey()
 	}
 	if f.carry.loggedOutVendor != "" {
 		specs = append(specs, bannerSpec{
@@ -167,7 +171,6 @@ func (f *failureUX) specs(state hostconn.State, reason, dataDir string, hasOpen 
 			dismissible: true,
 			visible:     !f.loginDismiss,
 		})
-		f.loginShown = f.carry.loginKey()
 	}
 	if hasOpen && openSess.State == stateDetached {
 		specs = append(specs, bannerSpec{
@@ -267,6 +270,20 @@ func activeSessionCount(sessions []session.Session) int {
 	return n
 }
 
+// requestWindowClose runs one attempt to close the window: a close that
+// would leave live turns opens the close confirmation instead, and the
+// caller's close action runs only when nothing asks. It reports whether the
+// close may proceed; a false means the dialog decides what happens next.
+func requestWindowClose(sc *screens, closeFn func()) bool {
+	active := activeSessionCount(sc.sidebar.List())
+	if sc.failure.closeDlg.shouldAsk(active) {
+		sc.failure.closeDlg.open(active)
+		return false
+	}
+	closeFn()
+	return true
+}
+
 // closeConfirmDialog asks before the last window closes while a session's
 // turn still runs (DA-E08): the safe choice is cancel, and confirming
 // re-triggers the close the dialog interrupted.
@@ -316,14 +333,19 @@ func (d *closeConfirmDialog) confirmed() {
 // asks again.
 func (d *closeConfirmDialog) cancelled() { d.dialog.Close() }
 
-// layout draws the dialog over the window while it is open.
+// layout draws the dialog over the window while it is open, naming the live
+// count the ask is about.
 func (d *closeConfirmDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens) {
 	if !d.dialog.IsOpen() {
 		return
 	}
+	word := "sessions"
+	if d.active == 1 {
+		word = "session"
+	}
 	res, err := d.dialog.Layout(env, gtx, &kit.DialogProps{
 		Variant:        kit.DialogConfirm,
-		Title:          "Sessions still running",
+		Title:          fmt.Sprintf("%d %s still running", d.active, word),
 		Description:    "Closing the last window leaves the running turns without a client. The host keeps them running until it stops.",
 		Cancel:         d.cancel,
 		Primary:        d.close,

@@ -253,11 +253,13 @@ func eventLoop(w *app.Window, env *kit.Env, sc *screens, q *updateQueue, light, 
 	for {
 		switch e := w.Event().(type) {
 		case app.DestroyEvent:
-			active := activeSessionCount(sc.sidebar.List())
-			if sc.failure.closeDlg.shouldAsk(active) {
-				sc.failure.closeDlg.open(active)
+			// The intercept keeps the loop alive so the dialog renders; the
+			// destroy is accepted only once nothing asks. Returning e.Err is
+			// the loop's way of closing the window, which is why the close
+			// action itself cannot live inside requestWindowClose here.
+			if !requestWindowClose(sc, func() {}) {
 				w.Invalidate()
-				return nil
+				continue
 			}
 			return e.Err
 		case app.FrameEvent:
