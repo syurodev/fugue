@@ -14,6 +14,7 @@ import (
 
 	"github.com/syurodev/fugue/pkg/client"
 	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
+
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 )
 

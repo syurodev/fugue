@@ -8,6 +8,7 @@ import (
 	"gioui.org/layout"
 
 	"github.com/syurodev/fugue/pkg/client"
+
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/mdview"
 	"github.com/syurodev/fugue/ui/internal/settings"

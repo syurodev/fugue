@@ -10,6 +10,7 @@ import (
 	"gioui.org/io/input"
 
 	"github.com/syurodev/fugue/pkg/client"
+
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/settings"

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/syurodev/fugue/pkg/client"
+
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 )
 
