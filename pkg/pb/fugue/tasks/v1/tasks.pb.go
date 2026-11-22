@@ -383,6 +383,110 @@ func (x *PostChannelMessageResponse) GetChannelSeq() int64 {
 	return 0
 }
 
+type PruneWorktreesRequest struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	RetentionSeconds int64                  `protobuf:"varint,1,opt,name=retention_seconds,json=retentionSeconds,proto3" json:"retention_seconds,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *PruneWorktreesRequest) Reset() {
+	*x = PruneWorktreesRequest{}
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PruneWorktreesRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PruneWorktreesRequest) ProtoMessage() {}
+
+func (x *PruneWorktreesRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PruneWorktreesRequest.ProtoReflect.Descriptor instead.
+func (*PruneWorktreesRequest) Descriptor() ([]byte, []int) {
+	return file_fugue_tasks_v1_tasks_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *PruneWorktreesRequest) GetRetentionSeconds() int64 {
+	if x != nil {
+		return x.RetentionSeconds
+	}
+	return 0
+}
+
+type PruneWorktreesResponse struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	RemovedWorktrees    []string               `protobuf:"bytes,1,rep,name=removed_worktrees,json=removedWorktrees,proto3" json:"removed_worktrees,omitempty"`
+	RemovedBranches     []string               `protobuf:"bytes,2,rep,name=removed_branches,json=removedBranches,proto3" json:"removed_branches,omitempty"`
+	RemovedAdminEntries int32                  `protobuf:"varint,3,opt,name=removed_admin_entries,json=removedAdminEntries,proto3" json:"removed_admin_entries,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *PruneWorktreesResponse) Reset() {
+	*x = PruneWorktreesResponse{}
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PruneWorktreesResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PruneWorktreesResponse) ProtoMessage() {}
+
+func (x *PruneWorktreesResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PruneWorktreesResponse.ProtoReflect.Descriptor instead.
+func (*PruneWorktreesResponse) Descriptor() ([]byte, []int) {
+	return file_fugue_tasks_v1_tasks_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *PruneWorktreesResponse) GetRemovedWorktrees() []string {
+	if x != nil {
+		return x.RemovedWorktrees
+	}
+	return nil
+}
+
+func (x *PruneWorktreesResponse) GetRemovedBranches() []string {
+	if x != nil {
+		return x.RemovedBranches
+	}
+	return nil
+}
+
+func (x *PruneWorktreesResponse) GetRemovedAdminEntries() int32 {
+	if x != nil {
+		return x.RemovedAdminEntries
+	}
+	return 0
+}
+
 var File_fugue_tasks_v1_tasks_proto protoreflect.FileDescriptor
 
 const file_fugue_tasks_v1_tasks_proto_rawDesc = "" +
@@ -422,10 +526,17 @@ const file_fugue_tasks_v1_tasks_proto_rawDesc = "" +
 	"\x04text\x18\x05 \x01(\tR\x04text\"=\n" +
 	"\x1aPostChannelMessageResponse\x12\x1f\n" +
 	"\vchannel_seq\x18\x01 \x01(\x03R\n" +
-	"channelSeq2\xd2\x01\n" +
+	"channelSeq\"D\n" +
+	"\x15PruneWorktreesRequest\x12+\n" +
+	"\x11retention_seconds\x18\x01 \x01(\x03R\x10retentionSeconds\"\xa4\x01\n" +
+	"\x16PruneWorktreesResponse\x12+\n" +
+	"\x11removed_worktrees\x18\x01 \x03(\tR\x10removedWorktrees\x12)\n" +
+	"\x10removed_branches\x18\x02 \x03(\tR\x0fremovedBranches\x122\n" +
+	"\x15removed_admin_entries\x18\x03 \x01(\x05R\x13removedAdminEntries2\xb3\x02\n" +
 	"\vTaskService\x12V\n" +
 	"\vPageChannel\x12\".fugue.tasks.v1.PageChannelRequest\x1a#.fugue.tasks.v1.PageChannelResponse\x12k\n" +
-	"\x12PostChannelMessage\x12).fugue.tasks.v1.PostChannelMessageRequest\x1a*.fugue.tasks.v1.PostChannelMessageResponseB\xb3\x01\n" +
+	"\x12PostChannelMessage\x12).fugue.tasks.v1.PostChannelMessageRequest\x1a*.fugue.tasks.v1.PostChannelMessageResponse\x12_\n" +
+	"\x0ePruneWorktrees\x12%.fugue.tasks.v1.PruneWorktreesRequest\x1a&.fugue.tasks.v1.PruneWorktreesResponseB\xb3\x01\n" +
 	"\x12com.fugue.tasks.v1B\n" +
 	"TasksProtoP\x01Z7github.com/syurodev/fugue/pkg/pb/fugue/tasks/v1;tasksv1\xa2\x02\x03FTX\xaa\x02\x0eFugue.Tasks.V1\xca\x02\x0eFugue\\Tasks\\V1\xe2\x02\x1aFugue\\Tasks\\V1\\GPBMetadata\xea\x02\x10Fugue::Tasks::V1b\x06proto3"
 
@@ -441,24 +552,28 @@ func file_fugue_tasks_v1_tasks_proto_rawDescGZIP() []byte {
 	return file_fugue_tasks_v1_tasks_proto_rawDescData
 }
 
-var file_fugue_tasks_v1_tasks_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_fugue_tasks_v1_tasks_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_fugue_tasks_v1_tasks_proto_goTypes = []any{
 	(*ChannelLine)(nil),                // 0: fugue.tasks.v1.ChannelLine
 	(*PageChannelRequest)(nil),         // 1: fugue.tasks.v1.PageChannelRequest
 	(*PageChannelResponse)(nil),        // 2: fugue.tasks.v1.PageChannelResponse
 	(*PostChannelMessageRequest)(nil),  // 3: fugue.tasks.v1.PostChannelMessageRequest
 	(*PostChannelMessageResponse)(nil), // 4: fugue.tasks.v1.PostChannelMessageResponse
-	(*timestamppb.Timestamp)(nil),      // 5: google.protobuf.Timestamp
+	(*PruneWorktreesRequest)(nil),      // 5: fugue.tasks.v1.PruneWorktreesRequest
+	(*PruneWorktreesResponse)(nil),     // 6: fugue.tasks.v1.PruneWorktreesResponse
+	(*timestamppb.Timestamp)(nil),      // 7: google.protobuf.Timestamp
 }
 var file_fugue_tasks_v1_tasks_proto_depIdxs = []int32{
-	5, // 0: fugue.tasks.v1.ChannelLine.created_at:type_name -> google.protobuf.Timestamp
+	7, // 0: fugue.tasks.v1.ChannelLine.created_at:type_name -> google.protobuf.Timestamp
 	0, // 1: fugue.tasks.v1.PageChannelResponse.lines:type_name -> fugue.tasks.v1.ChannelLine
 	1, // 2: fugue.tasks.v1.TaskService.PageChannel:input_type -> fugue.tasks.v1.PageChannelRequest
 	3, // 3: fugue.tasks.v1.TaskService.PostChannelMessage:input_type -> fugue.tasks.v1.PostChannelMessageRequest
-	2, // 4: fugue.tasks.v1.TaskService.PageChannel:output_type -> fugue.tasks.v1.PageChannelResponse
-	4, // 5: fugue.tasks.v1.TaskService.PostChannelMessage:output_type -> fugue.tasks.v1.PostChannelMessageResponse
-	4, // [4:6] is the sub-list for method output_type
-	2, // [2:4] is the sub-list for method input_type
+	5, // 4: fugue.tasks.v1.TaskService.PruneWorktrees:input_type -> fugue.tasks.v1.PruneWorktreesRequest
+	2, // 5: fugue.tasks.v1.TaskService.PageChannel:output_type -> fugue.tasks.v1.PageChannelResponse
+	4, // 6: fugue.tasks.v1.TaskService.PostChannelMessage:output_type -> fugue.tasks.v1.PostChannelMessageResponse
+	6, // 7: fugue.tasks.v1.TaskService.PruneWorktrees:output_type -> fugue.tasks.v1.PruneWorktreesResponse
+	5, // [5:8] is the sub-list for method output_type
+	2, // [2:5] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name
 	2, // [2:2] is the sub-list for extension extendee
 	0, // [0:2] is the sub-list for field type_name
@@ -475,7 +590,7 @@ func file_fugue_tasks_v1_tasks_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fugue_tasks_v1_tasks_proto_rawDesc), len(file_fugue_tasks_v1_tasks_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

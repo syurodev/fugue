@@ -31,6 +31,10 @@ var errTasksPayloadNotObject = errors.New("the team channel payload is not a JSO
 // sequence in a snapshot payload.
 var errTasksSequenceNegative = errors.New("the team channel sequence must not be negative")
 
+// errPruneRetentionInvalid is the static cause behind an invalid prune
+// retention duration.
+var errPruneRetentionInvalid = errors.New("prune retention must be zero or a positive whole number of seconds")
+
 func channelEventSequence(n int64) (uint64, error) {
 	if n < 0 {
 		return 0, fmt.Errorf("%w: %d", errTasksSequenceNegative, n)
@@ -118,6 +122,33 @@ func (c *Client) PostChannelMessage(ctx context.Context, in *PostChannelMessageI
 		return 0, fmt.Errorf("post the channel message: %w", err)
 	}
 	return res.Msg.GetChannelSeq(), nil
+}
+
+// PruneWorktreesResult reports what one host prune pass removed.
+type PruneWorktreesResult struct {
+	RemovedWorktrees    []string
+	RemovedBranches     []string
+	RemovedAdminEntries int
+}
+
+// PruneWorktrees removes ended-team task worktrees and branches past the
+// retention duration (zero uses the host's 24h default, orchestration §9).
+func (c *Client) PruneWorktrees(ctx context.Context, retention time.Duration) (PruneWorktreesResult, error) {
+	if retention < 0 || (retention != 0 && (retention < time.Second || retention%time.Second != 0)) {
+		return PruneWorktreesResult{}, fmt.Errorf("%w: %s", errPruneRetentionInvalid, retention)
+	}
+	res, err := tasksv1connect.NewTaskServiceClient(c.hc, c.base).PruneWorktrees(ctx,
+		connect.NewRequest(&tasksv1.PruneWorktreesRequest{
+			RetentionSeconds: int64(retention / time.Second),
+		}))
+	if err != nil {
+		return PruneWorktreesResult{}, fmt.Errorf("prune task worktrees: %w", err)
+	}
+	return PruneWorktreesResult{
+		RemovedWorktrees:    res.Msg.GetRemovedWorktrees(),
+		RemovedBranches:     res.Msg.GetRemovedBranches(),
+		RemovedAdminEntries: int(res.Msg.GetRemovedAdminEntries()),
+	}, nil
 }
 
 // TasksCodeOf returns the public code of a tasks call failure, for example

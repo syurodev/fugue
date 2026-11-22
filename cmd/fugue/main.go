@@ -25,28 +25,12 @@ func main() {
 // through RunServe's code (cli §5.2). Usage goes to out, real errors to
 // errOut.
 func runMain(ctx context.Context, args []string, out, errOut io.Writer) int {
-	if socket, ok := bridgeArguments(args); ok {
-		// The bridge's stdout is the MCP channel; its log goes to stderr,
-		// which the vendor CLI owns.
-		slog.SetDefault(slog.New(redact.NewJSONHandler(os.Stderr, slog.LevelWarn)))
-		return RunBridge(ctx, os.Stdin, out, config.ProcessEnv{}, socket, version)
-	}
-	if socket, cmdArgs, matched, valid := parseExclusiveArgs(args); matched {
-		if !valid {
-			if uerr := usage(out); uerr != nil {
-				slog.Error("write usage", "err", uerr)
-			}
-			return exitUsage
-		}
-		slog.SetDefault(slog.New(redact.NewJSONHandler(os.Stderr, slog.LevelWarn)))
-		return RunExclusive(ctx, os.Stdin, out, errOut, config.ProcessEnv{}, socket, cmdArgs, version)
+	if code, handled := dispatchSubcommand(ctx, args, out, errOut); handled {
+		return code
 	}
 	grace, valid := serveArguments(args)
 	if !valid {
-		if uerr := usage(out); uerr != nil {
-			slog.Error("write usage", "err", uerr)
-		}
-		return exitUsage
+		return usageError(out)
 	}
 	cfg, err := config.FromProcess()
 	if err != nil {
@@ -57,6 +41,37 @@ func runMain(ctx context.Context, args []string, out, errOut io.Writer) int {
 	}
 	slog.SetDefault(slog.New(redact.NewJSONHandler(os.Stderr, cfg.LogLevel)))
 	return RunServe(ctx, out, cfg, version, grace)
+}
+
+func dispatchSubcommand(ctx context.Context, args []string, out, errOut io.Writer) (int, bool) {
+	if socket, ok := bridgeArguments(args); ok {
+		// The bridge's stdout is the MCP channel; its log goes to stderr,
+		// which the vendor CLI owns.
+		slog.SetDefault(slog.New(redact.NewJSONHandler(os.Stderr, slog.LevelWarn)))
+		return RunBridge(ctx, os.Stdin, out, config.ProcessEnv{}, socket, version), true
+	}
+	if socket, cmdArgs, matched, valid := parseExclusiveArgs(args); matched {
+		if !valid {
+			return usageError(out), true
+		}
+		slog.SetDefault(slog.New(redact.NewJSONHandler(os.Stderr, slog.LevelWarn)))
+		return RunExclusive(ctx, os.Stdin, out, errOut, config.ProcessEnv{}, socket, cmdArgs, version), true
+	}
+	if socket, retention, matched, valid := parseTaskPruneArgs(args); matched {
+		if !valid {
+			return usageError(out), true
+		}
+		slog.SetDefault(slog.New(redact.NewJSONHandler(os.Stderr, slog.LevelWarn)))
+		return RunTaskPrune(ctx, out, errOut, config.ProcessEnv{}, socket, retention, version), true
+	}
+	return 0, false
+}
+
+func usageError(out io.Writer) int {
+	if uerr := usage(out); uerr != nil {
+		slog.Error("write usage", "err", uerr)
+	}
+	return exitUsage
 }
 
 func serveArguments(args []string) (time.Duration, bool) {
@@ -95,7 +110,13 @@ func usage(out io.Writer) error {
 	if err := say(out, "usage: fugue exclusive [--socket <path>] -- <command> [args...]"); err != nil {
 		return err
 	}
-	return say(out, "  runs a heavy command holding one slot of the host's §7 heavy-command semaphore")
+	if err := say(out, "  runs a heavy command holding one slot of the host's §7 heavy-command semaphore"); err != nil {
+		return err
+	}
+	if err := say(out, "usage: fugue task prune [--socket <path>] [--retention <duration>]"); err != nil {
+		return err
+	}
+	return say(out, "  prunes ended-team task worktrees and branches past the retention window")
 }
 
 // say writes one formatted line of user output.
