@@ -89,6 +89,12 @@ const SidebarWidth = unit.Dp(240)
 // with the measured height (VirtualList §6.26 Estimate).
 const CardEstimate = unit.Dp(96)
 
+// SpaceTurnContext is the strip of the preceding item kept visible above a
+// message the view anchors near the top — a sent message, a reopened
+// session's last turn, a `#n` jump — so the reader keeps their context
+// (desktop-app v0.9 §5.4, "Neo lượt mới").
+const SpaceTurnContext = unit.Dp(64)
+
 // Icon sizes (§3.4).
 const (
 	IconXS = unit.Dp(12)

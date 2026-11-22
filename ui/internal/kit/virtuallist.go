@@ -63,8 +63,16 @@ type VirtualListState struct {
 	anchorKey     string
 	anchorTop     int
 	pendingAnchor bool
-	ensureKey     string
-	rendered      int
+	// pendingAnchorAt is an external anchor request (F10.4d, virtuallist_scroll.go):
+	// the key to anchor near the top and the context dp kept visible above it.
+	pendingAnchorAt string
+	pendingAnchorDp unit.Dp
+	// dragHeld holds the pin off after a marking drag (F10.4d): the drag does
+	// not move the offset, so the landing-at-the-bottom rule must not undo
+	// the break before a real scroll act happens.
+	dragHeld  bool
+	ensureKey string
+	rendered  int
 }
 
 // NewVirtualListState builds a VirtualListState with a bounded LRU height
@@ -114,6 +122,7 @@ func (s *VirtualListState) CacheLen() int { return len(s.cache.entries) }
 // from the bottom.
 func (s *VirtualListState) SetOffset(v int) {
 	s.scrollOffset = max(v, 0)
+	s.dragHeld = false
 	s.following = s.maxOffset > 0 && s.scrollOffset >= s.maxOffset
 }
 
@@ -220,9 +229,10 @@ func (s *VirtualListState) Layout(env *Env, gtx *layout.Context, p VirtualListPr
 	area := clip.Rect{Max: image.Pt(width, viewport)}.Push(gtx.Ops)
 	scrolled := false
 	if !nested {
-		scrolled = s.pollEvents(env, gtx, image.Rectangle{Max: image.Pt(width, viewport)}, p.FollowBottom)
+		scrolled = s.pollEvents(env, gtx, image.Rectangle{Max: image.Pt(width, viewport)})
 	}
 
+	s.applyPendingAnchorAt(gtx, items)
 	wasPending := s.pendingAnchor
 	s.applyAnchorAndFollow(items, prefix, viewport, p.FollowBottom)
 	s.layoutWindow(env, gtx, items, prefix, width, viewport, row)
@@ -256,6 +266,10 @@ func (s *VirtualListState) layoutWindow(env *Env, gtx *layout.Context, items []V
 	n := len(items)
 	first, last := visibleRange(prefix, s.scrollOffset, viewport)
 	w0, w1 := max(0, first-virtualAboveWindow), min(n-1, last+virtualBelowWindow)
+	anchorIdx := -1
+	if !s.following {
+		anchorIdx = anchorIndex(items, s.anchorKey)
+	}
 
 	origin := op.Offset(image.Pt(0, -s.scrollOffset)).Push(gtx.Ops)
 	saved := gtx.Constraints
@@ -271,6 +285,7 @@ func (s *VirtualListState) layoutWindow(env *Env, gtx *layout.Context, items []V
 		st.MeasuredHeight = dims.Size.Y
 		s.cache.put(virtualHeightKey{key: item.Key, revision: item.Revision}, dims.Size.Y)
 		if delta := dims.Size.Y - (prefix[i+1] - prefix[i]); delta != 0 {
+			s.holdAnchorBelow(i, anchorIdx, delta)
 			for j := i + 1; j <= n; j++ {
 				prefix[j] += delta
 			}
@@ -345,10 +360,12 @@ func (s *VirtualListState) applyEnsureVisible(items []VirtualItem, prefix []int,
 	}
 }
 
-func (s *VirtualListState) pollEvents(env *Env, gtx *layout.Context, box image.Rectangle, followBottom bool) bool {
+func (s *VirtualListState) pollEvents(env *Env, gtx *layout.Context, box image.Rectangle) bool {
 	defer clip.Rect(box).Push(gtx.Ops).Pop()
 	event.Op(gtx.Ops, &s.tag)
 	filter := scrollFilter(&s.tag, layout.Vertical)
+	// A drag marks content (v0.9), so it is a reader act like an upward wheel.
+	filter.Kinds |= pointer.Drag
 	scrolled := false
 	for {
 		e, ok := gtx.Event(filter)
@@ -359,10 +376,8 @@ func (s *VirtualListState) pollEvents(env *Env, gtx *layout.Context, box image.R
 			scrolled = true
 		}
 	}
+	scrolled = s.pollScrollKeys(env, gtx, box.Max.Y) || scrolled
 	s.scrollOffset = min(max(s.scrollOffset, 0), s.maxOffset)
-	if followBottom && s.scrollOffset >= s.maxOffset {
-		s.following = true
-	}
 	return scrolled
 }
 
@@ -375,6 +390,7 @@ func (s *VirtualListState) handleScrollPointer(env *Env, pe pointer.Event) bool 
 		s.bar.hovered = false
 		return false
 	}
+	s.dragBreakFollow(pe)
 	if pe.Kind != pointer.Scroll {
 		return false
 	}
@@ -382,10 +398,19 @@ func (s *VirtualListState) handleScrollPointer(env *Env, pe pointer.Event) bool 
 	if delta == 0 {
 		return false
 	}
-	if delta < 0 {
+	// A wheel act is a reader act: it lifts the marking drag's hold, ends the
+	// pin when it moves the view up, and re-engages the pin when it lands at
+	// the bottom (v0.9: only the newest edge does). A wheel on content
+	// shorter than the viewport moves nothing and changes nothing.
+	s.dragHeld = false
+	before := s.scrollOffset
+	s.scrollOffset = min(max(s.scrollOffset+delta, 0), s.maxOffset)
+	switch {
+	case s.scrollOffset < before:
 		s.following = false
+	case delta > 0 && s.maxOffset > 0 && s.scrollOffset >= s.maxOffset:
+		s.following = true
 	}
-	s.scrollOffset += delta
 	s.bar.lastAct = env.Now()
 	return true
 }
