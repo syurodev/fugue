@@ -176,3 +176,76 @@ func assertDeleteAndJournal(t *testing.T, f *secretFixture, secretID string) {
 		t.Fatalf("unexpected change[2]: %+v", changes[2])
 	}
 }
+
+func TestSecretStoreEdgeCasesAndJournalCursor(t *testing.T) {
+	t.Parallel()
+	f := newSecretFixture(t)
+	assertScopeAndInputErrors(t, f)
+	assertScopeFilterAndNilIDs(t, f)
+	assertClosedDBErrors(t, f)
+}
+
+func assertScopeFilterAndNilIDs(t *testing.T, f *secretFixture) {
+	t.Helper()
+	ctx := t.Context()
+	if _, seqErr := ChangeSequence(-1); errcode.CodeOf(seqErr) != errcode.Internal {
+		t.Fatalf("ChangeSequence(-1) code = %v, want internal", errcode.CodeOf(seqErr))
+	}
+	if seq, seqErr := ChangeSequence(5); seqErr != nil || seq != 5 {
+		t.Fatalf("ChangeSequence(5) = (%d, %v)", seq, seqErr)
+	}
+	if _, _, err := f.store.PutSecret(ctx, ScopeGlobal, "", "G_KEY", "", []byte("12345678")); err != nil {
+		t.Fatalf("PutSecret global: %v", err)
+	}
+	if _, _, err := f.store.PutSecret(ctx, ScopeWorkspace, "ws-9", "W_KEY", "", []byte("12345678")); err != nil {
+		t.Fatalf("PutSecret workspace: %v", err)
+	}
+	wsList, err := f.store.ListSecrets(ctx, ScopeWorkspace, "ws-9")
+	if err != nil || len(wsList) != 1 || wsList[0].Name != "W_KEY" {
+		t.Fatalf("ListSecrets(workspace, ws-9) = (%+v, %v)", wsList, err)
+	}
+	nilIDsStore := New(f.store.db, f.vault, nil, nil)
+	if _, _, idErr := nilIDsStore.PutSecret(ctx, ScopeGlobal, "", "NO_IDS", "", []byte("12345678")); errcode.CodeOf(idErr) != errcode.Internal {
+		t.Fatalf("PutSecret with nil ids code = %v, want internal", errcode.CodeOf(idErr))
+	}
+}
+
+func assertClosedDBErrors(t *testing.T, f *secretFixture) {
+	t.Helper()
+	ctx := t.Context()
+	if closeErr := f.store.db.Close(); closeErr != nil {
+		t.Fatalf("close db: %v", closeErr)
+	}
+	if _, listErr := f.store.ListSecrets(ctx, "", ""); errcode.CodeOf(listErr) != errcode.Internal {
+		t.Fatalf("ListSecrets on closed DB code = %v, want internal", errcode.CodeOf(listErr))
+	}
+	if _, _, putErr := f.store.PutSecret(ctx, ScopeGlobal, "", "CLOSED", "", []byte("12345678")); errcode.CodeOf(putErr) != errcode.Internal {
+		t.Fatalf("PutSecret on closed DB code = %v, want internal", errcode.CodeOf(putErr))
+	}
+}
+
+func assertScopeAndInputErrors(t *testing.T, f *secretFixture) {
+	t.Helper()
+	ctx := t.Context()
+	if err := ValidateScope(ScopeGlobal, "ws-1"); errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("global with scope_id code = %v", errcode.CodeOf(err))
+	}
+	if err := ValidateScope(ScopeWorkspace, ""); errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("workspace without scope_id code = %v", errcode.CodeOf(err))
+	}
+	if err := ValidateScope("other", ""); errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("unknown scope code = %v", errcode.CodeOf(err))
+	}
+	if _, err := f.store.ListSecrets(ctx, "", "ws-1"); errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("ListSecrets scope_id without scope_kind code = %v", errcode.CodeOf(err))
+	}
+	if _, _, err := f.store.PutSecret(ctx, ScopeGlobal, "", "BAD_DESC", strings.Repeat("d", MaxDescriptionBytes+1), []byte("12345678")); errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("long description code = %v", errcode.CodeOf(err))
+	}
+	if _, _, err := f.store.DeleteSecret(ctx, ""); errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("DeleteSecret empty id code = %v", errcode.CodeOf(err))
+	}
+	if _, err := f.store.OpenSecretValue(ctx, ""); errcode.CodeOf(err) != errcode.InvalidArgument {
+		t.Fatalf("OpenSecretValue empty id code = %v", errcode.CodeOf(err))
+	}
+}
