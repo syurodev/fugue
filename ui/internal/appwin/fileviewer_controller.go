@@ -13,20 +13,38 @@ import (
 // session's workspace names. The workspace and the roots always come from
 // the session's own workspace record — never parsed from transcript text.
 
-// openFileRef opens one file or folder badge click in the right-pane viewer.
+// openFileRef opens one file or folder badge click in the viewer slot (§5.3:
+// the nearest regular slot, remembered per kind). The workspace and roots
+// come from the viewing session's own record.
 func (s *screens) openFileRef(ref mdview.FileRef) {
-	if s.open == "" {
+	s.openFileRefFor(ref, s.open)
+}
+
+// openFileRefFor is openFileRef for the session whose transcript the click
+// came from — the main slot's session, or the session slot's own.
+func (s *screens) openFileRefFor(ref mdview.FileRef, sessionID string) {
+	if sessionID == "" {
 		return
 	}
-	sess, ok := s.sidebar.Lookup(s.open)
+	sess, ok := s.sidebar.Lookup(sessionID)
 	if !ok || sess.WorkspaceID == "" {
 		s.viewer.openUnavailable("This session has no workspace to read files from.")
-		s.showPane(paneViewer)
+		s.openViewerSlot()
 		return
 	}
 	s.viewer.openFile(ref, sess.WorkspaceID)
-	s.showPane(paneViewer)
+	s.openViewerSlot()
 	s.armViewerRead()
+}
+
+// openViewerSlot opens or updates the diff slot (§5.3) once the viewer holds
+// content; the slot's id is the viewer's path so the title names the file.
+func (s *screens) openViewerSlot() {
+	id := s.viewer.path
+	if s.viewer.mode == fileViewDiff {
+		id = s.viewer.path
+	}
+	s.grid.openCompanion(SlotRef{Kind: KindDiff, ID: id})
 }
 
 // openDiffViewer opens an Edited row's full diff from the file_change item
@@ -44,7 +62,7 @@ func (s *screens) openDiffViewer(itemID string) {
 		return
 	}
 	s.viewer.openDiff(item, fileChangeViewerPath(item))
-	s.showPane(paneViewer)
+	s.openViewerSlot()
 }
 
 // fileChangeViewerPath names the file a file_change item edited, from the

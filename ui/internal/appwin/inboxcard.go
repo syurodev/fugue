@@ -1,11 +1,14 @@
 package appwin
 
 import (
+	"image"
 	"image/color"
 	"slices"
 
+	"gioui.org/io/input"
 	"gioui.org/io/key"
 	"gioui.org/layout"
+	"gioui.org/op"
 
 	"github.com/syurodev/fugue/pkg/client"
 
@@ -420,4 +423,17 @@ func rigidLabel(env *kit.Env, tp theme.Type, fg color.NRGBA, txt string) layout.
 
 func rigidParagraph(env *kit.Env, tp theme.Type, fg color.NRGBA, txt string) layout.FlexChild {
 	return rigidWidget(func(gtx *layout.Context) layout.Dimensions { return kit.Paragraph(env, gtx, tp, fg, txt) })
+}
+
+// measureLabel lays one label into a throwaway macro with a dead input
+// source and returns its size, the number the row's height is computed from.
+func measureLabel(env *kit.Env, gtx *layout.Context, t theme.Type, c color.NRGBA, txt string, width int) image.Point {
+	m := op.Record(gtx.Ops)
+	g := *gtx
+	var dead input.Source
+	g.Source = dead
+	g.Constraints = layout.Constraints{Max: image.Pt(width, 1<<20)}
+	dims := kit.Label(env, &g, t, c, txt)
+	m.Stop()
+	return dims.Size
 }

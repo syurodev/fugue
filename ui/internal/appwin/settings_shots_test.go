@@ -112,7 +112,7 @@ func buildSettingsShotScreens(t *testing.T, scene string) *screens {
 	sc.settings.ApplyWorkspaceLoaded(&ws, &eff)
 	applySettingsShotScene(sc, scene)
 	sc.settingsView.syncFromModel(sc.settings)
-	sc.showPane(paneSettings)
+	openVisibleSlot(sc, SlotRef{Kind: KindSettings})
 	return sc
 }
 

@@ -62,7 +62,7 @@ func buildViewerShotScreens(t *testing.T, scene string) *screens {
 	if v.errMsg != "" {
 		t.Fatalf("viewer shot scene %s recorded %q", scene, v.errMsg)
 	}
-	sc.showPane(paneViewer)
+	openVisibleSlot(sc, SlotRef{Kind: KindDiff, ID: sc.viewer.path})
 	return sc
 }
 

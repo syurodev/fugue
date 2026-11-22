@@ -110,6 +110,14 @@ func Run(ctx context.Context, opts Options) error {
 	sc.accountsWorker = workers.accountsW
 	sc.settingsWorker = workers.settingsW
 	sc.viewerWorker = workers.viewerW
+	sc.layoutWorker = workers.layoutW
+	// The restored window geometry applies once the appstate snapshot
+	// lands; the option reaches the compositor from the window goroutine.
+	sc.grid.applyGeometry = func(widthDp, heightDp int) {
+		if widthDp > 0 && heightDp > 0 {
+			w.Option(app.Size(unit.Dp(widthDp), unit.Dp(heightDp)))
+		}
+	}
 	return eventLoop(w, env, sc, q, &light, &dark)
 }
 
@@ -122,6 +130,7 @@ type appWorkers struct {
 	accountsW *accounts.Worker
 	settingsW *settings.Worker
 	viewerW   *fileViewWorker
+	layoutW   *layoutWorker
 }
 
 func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) appWorkers {
@@ -166,10 +175,18 @@ func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) ap
 		return nil
 	})
 	viewerW.Start(ctx)
-	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW, settingsW: settingsW, viewerW: viewerW}
+	layoutW := newLayoutWorker(func() layoutClient {
+		if c := m.Client(); c != nil {
+			return c
+		}
+		return nil
+	}, w.Invalidate)
+	layoutW.Start(ctx)
+	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW, settingsW: settingsW, viewerW: viewerW, layoutW: layoutW}
 }
 
 func (a appWorkers) stop() {
+	a.layoutW.Stop()
 	a.viewerW.Stop()
 	a.settingsW.Stop()
 	a.accountsW.Stop()
@@ -313,6 +330,10 @@ drainPosts:
 		sc.applySettingsResults(drainSettingsResults(sc.settingsWorker))
 	}
 	sc.applyFileViewResults(drainFileViewResults(sc.viewerWorker))
+	if sc.layoutWorker != nil {
+		sc.applyLayoutResults(drainLayoutResults(sc.layoutWorker))
+	}
+	sc.grid.maybeSave(sc.layoutWorker)
 	sc.applyLivePreferences(env, light, dark)
 	toggleTheme(gtx, env, sc, light, dark)
 	drawWindow(gtx, env, sc)
@@ -346,6 +367,9 @@ func toggleTheme(gtx *layout.Context, env *kit.Env, sc *screens, light, dark *th
 // color comes from the theme tokens (F10.2c); appwin defines none of its own.
 func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 	paint.Fill(gtx.Ops, env.Th.Chrome().AppBg)
+	// The window's current size rides every layout save, so the next start
+	// opens the same size (host-api §5.2: the geometry is the document's).
+	sc.grid.markGeometryDirty(pxToDp(gtx, gtx.Constraints.Max.X), pxToDp(gtx, gtx.Constraints.Max.Y))
 	state, reason := sc.m.State()
 	status := statusLine(state, reason)
 	layout.Flex{Axis: layout.Vertical}.Layout(*gtx,

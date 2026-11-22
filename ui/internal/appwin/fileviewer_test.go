@@ -43,7 +43,7 @@ func viewerTestScreens(t *testing.T) *screens {
 	sc.sidebar.ApplyList(client.SessionList{Sessions: []client.Session{{ID: "s1", Vendor: "claude", State: stateRunning, WorkspaceID: viewerTestWS}}})
 	sc.workspaces.ApplyList([]workspace.Summary{{ID: viewerTestWS, Name: viewerWSName}})
 	sc.workspaces.ApplyDetail(&workspace.Detail{ID: viewerTestWS, Name: viewerWSName, ConfigHash: "h", Roots: []workspace.Root{
-		{Name: "main", Path: "/tmp/proj", Access: "rw"},
+		{Name: "main", Path: testMainRoot, Access: "rw"},
 	}})
 	sc.transcripts["s1"] = session.NewTranscript("s1")
 	return sc
@@ -125,6 +125,14 @@ func renderViewerEvidenceFrame(t *testing.T, sc *screens, name string) *image.RG
 	win, err := glwin.Open(shotWindowW, shotWindowH)
 	if err != nil {
 		t.Fatalf("open headless window: %v", err)
+	}
+	// The shell folds every regular column at the shot width; the viewer
+	// body renders — and consumes its line jump — inside its drawer (§5.3).
+	for _, p := range regularCells(sc.grid.doc) {
+		if slot, _ := slotAt(sc.grid.doc, p); slot.Ref.Kind == KindDiff {
+			sc.grid.drawer = p.key()
+			sc.grid.drawerPresence.Snap(true)
+		}
 	}
 	env := newAccountsTestEnv(t, true, 1.0)
 	return renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), name)
