@@ -21,6 +21,7 @@ const (
 	paneInbox
 	paneAccounts
 	paneSettings
+	paneViewer
 )
 
 const (
@@ -32,6 +33,7 @@ func (s *screens) showPane(pane paneKind) {
 	s.inboxOpen = pane == paneInbox
 	s.accountsOpen = pane == paneAccounts
 	s.settingsOpen = pane == paneSettings
+	s.viewer.setOpen(pane == paneViewer)
 }
 
 func layoutRightPane(gtx *layout.Context, env *kit.Env, headerFn, bodyFn func(*layout.Context) layout.Dimensions) layout.Dimensions {

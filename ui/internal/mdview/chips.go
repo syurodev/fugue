@@ -29,6 +29,9 @@ type FileRef struct {
 	Line    int
 	EndLine int
 	Raw     string
+	// Folder marks a directory reference (F10.4e): the viewer opens the
+	// folder listing instead of reading the file.
+	Folder bool
 }
 
 // ChipRun is one contiguous slice of text with its detected chip kind.

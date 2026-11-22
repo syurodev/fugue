@@ -36,6 +36,10 @@ Changing this file needs a review of what clients can rely on; hiding a code nee
 | `workspace.path_denied` | The workspace path is not allowed. |
 | `workspace.ownership_invalid` | Workspace ownership or permissions are invalid. |
 | `workspace.config_too_large` | The workspace configuration exceeds the size limit. |
+| `workspace.path_outside_root` | The requested path resolves outside the workspace's registered root. |
+| `workspace.file_not_found` | The requested file does not exist inside the workspace root. |
+| `workspace.file_too_large` | The requested file exceeds the 1 MiB read limit. |
+| `workspace.not_text` | The requested file is not UTF-8 text. |
 | `vendor.unsupported` | The vendor or operation is not supported in this phase. |
 | `vendor.session_not_found` | The vendor session does not exist or is not live. |
 | `vendor.session_state` | The vendor session state does not allow the operation (busy, closed or not resumable). |

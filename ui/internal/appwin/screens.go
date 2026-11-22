@@ -123,6 +123,8 @@ type screens struct {
 	settingsView    *settingsView
 	settingsRow     *kit.ListRowState
 	settingsOpen    bool
+	viewer          *fileViewer
+	viewerWorker    *fileViewWorker
 	emptyTranscript *kit.EmptyStateState
 }
 
@@ -169,6 +171,7 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 		settings:        settings.NewModel(),
 		settingsView:    newSettingsView(),
 		settingsRow:     settingsRow,
+		viewer:          newFileViewer(),
 		emptyTranscript: kit.NewEmptyStateState(),
 	}
 }
@@ -451,7 +454,10 @@ func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			local := gtx
-			// TODO(F10.20b): move the inbox, accounts, and settings views into slots
+			// TODO(F10.20b): move the inbox, accounts, settings, and file viewer views into slots
+			if s.viewer.open {
+				return s.viewer.layout(&local, env, s)
+			}
 			if s.inboxOpen {
 				return s.inboxView.layout(&local, env, s)
 			}

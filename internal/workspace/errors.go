@@ -22,6 +22,10 @@ const (
 	ErrIDInvalid            Code = "workspace.id_invalid"
 	ErrConfirmationRequired Code = "workspace.confirmation_required"
 	ErrDeleteFailed         Code = "workspace.delete_failed"
+	ErrPathOutsideRoot      Code = "workspace.path_outside_root"
+	ErrFileNotFound         Code = "workspace.file_not_found"
+	ErrFileTooLarge         Code = "workspace.file_too_large"
+	ErrNotText              Code = "workspace.not_text"
 )
 
 // Error is a typed workspace error with a stable machine-readable Code.
