@@ -303,8 +303,8 @@ func (v *view) drawCodeBody(
 		hunks := collectDiffHunks(diffLines, flows, visCount, pad, bodyTop, bodyW, st.ScrollY, lineH, gtx.Dp(theme.SpaceXXS))
 		v.paintDiffHunks(gtx, hunks, bodyTop, viewH, ConcentricRadius(gtx, theme.RadiusLG, pad))
 	}
-	if hl := collectHighlightRect(p, flows, visCount, pad, bodyTop, st.ScrollY, lineH); hl != nil {
-		paint.FillShape(gtx.Ops, v.th.Chrome().SelectedWash, clip.UniformRRect(*hl, max(ConcentricRadius(gtx, theme.RadiusLG, pad)/2, 2)).Op(gtx.Ops))
+	if hl := collectHighlightRect(p, flows, visCount, pad, bodyTop, bodyW, st.ScrollY, lineH); hl != nil {
+		paint.FillShape(gtx.Ops, v.th.Chrome().SelectedWash, clip.UniformRRect(*hl, ConcentricRadius(gtx, theme.RadiusLG, pad)).Op(gtx.Ops))
 	}
 	y := bodyTop - st.ScrollY
 	codeX := pad + gutterW + markerW
@@ -330,9 +330,11 @@ func (v *view) drawCodeBody(
 
 // collectHighlightRect builds the tinted rectangle behind the requested row
 // range (F10.4e), or nil when no range is set or it falls outside the
-// rendered rows.
+// rendered rows. It spans the whole body (gutter, marker and code columns)
+// like a diff hunk, so it stays concentric with the block whatever the row
+// widths or the horizontal scroll.
 func collectHighlightRect(
-	p *CodeBlockProps, flows []*flow, visCount, pad, bodyTop, scrollY, lineH int,
+	p *CodeBlockProps, flows []*flow, visCount, pad, bodyTop, bodyW, scrollY, lineH int,
 ) *image.Rectangle {
 	first, last := p.HighlightLine, p.HighlightEndLine
 	if first <= 0 {
@@ -352,23 +354,12 @@ func collectHighlightRect(
 			rect.Min.X, rect.Min.Y = pad, y
 		}
 		if i+1 == min(last, visCount) {
-			rect.Max.X, rect.Max.Y = pad+gutterlessWidth(flows, pad), y+rowH
+			rect.Max.X, rect.Max.Y = pad+bodyW, y+rowH
 			return &rect
 		}
 		y += rowH
 	}
 	return nil
-}
-
-// gutterlessWidth names the full body width the highlight spans: the widest
-// rendered row plus the pad, so a short highlighted line still reads as one
-// full-width band.
-func gutterlessWidth(flows []*flow, pad int) int {
-	w := 0
-	for _, f := range flows {
-		w = max(w, f.width)
-	}
-	return max(w, 1) + pad
 }
 
 func (v *view) drawCodeRowChrome(

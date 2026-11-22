@@ -61,34 +61,36 @@ func TestCodeBlockScrollToLineClampsToBounds(t *testing.T) {
 }
 
 // TestCollectHighlightRectCoversExactlyTheRange pins the tint geometry over
-// uniform rows: rows first..last, no more.
+// uniform rows: rows first..last, no more, across the whole body width even
+// when a row is wider than the body (horizontal scroll).
 func TestCollectHighlightRectCoversExactlyTheRange(t *testing.T) {
 	t.Parallel()
-	lineH, pad, bodyTop := 20, 12, 100
+	lineH, pad, bodyTop, bodyW := 20, 12, 100, 300
 	flows := make([]*flow, 10)
 	for i := range flows {
 		flows[i] = &flow{width: 200, height: lineH}
 	}
+	flows[3].width = 900
 	props := &CodeBlockProps{HighlightLine: 3, HighlightEndLine: 5}
-	rect := collectHighlightRect(props, flows, len(flows), pad, bodyTop, 0, lineH)
+	rect := collectHighlightRect(props, flows, len(flows), pad, bodyTop, bodyW, 0, lineH)
 	if rect == nil {
 		t.Fatal("no rect for rows 3..5")
 	}
-	want := image.Rect(pad, bodyTop+2*lineH, pad+200+pad, bodyTop+5*lineH)
+	want := image.Rect(pad, bodyTop+2*lineH, pad+bodyW, bodyTop+5*lineH)
 	if *rect != want {
 		t.Fatalf("rect = %+v, want %+v", *rect, want)
 	}
 
 	props.HighlightLine, props.HighlightEndLine = 0, 0
-	if unset := collectHighlightRect(props, flows, len(flows), pad, bodyTop, 0, lineH); unset != nil {
+	if unset := collectHighlightRect(props, flows, len(flows), pad, bodyTop, bodyW, 0, lineH); unset != nil {
 		t.Fatalf("unset range drew %+v", unset)
 	}
 	props.HighlightLine, props.HighlightEndLine = 11, 12
-	if outside := collectHighlightRect(props, flows, len(flows), pad, bodyTop, 0, lineH); outside != nil {
+	if outside := collectHighlightRect(props, flows, len(flows), pad, bodyTop, bodyW, 0, lineH); outside != nil {
 		t.Fatalf("out-of-range range drew %+v", outside)
 	}
 	props.HighlightLine, props.HighlightEndLine = 7, 0
-	rect = collectHighlightRect(props, flows, len(flows), pad, bodyTop, 0, lineH)
+	rect = collectHighlightRect(props, flows, len(flows), pad, bodyTop, bodyW, 0, lineH)
 	if rect == nil || rect.Min.Y != bodyTop+6*lineH || rect.Max.Y != bodyTop+7*lineH {
 		t.Fatalf("open-ended range rect = %+v, want exactly row 7", rect)
 	}
