@@ -133,6 +133,14 @@ type HostConfig struct {
 	// per-vendor jitter delay (seconds) for origin=fugue prompts (defaults 10..15).
 	PromptPacingMinSeconds int
 	PromptPacingMaxSeconds int
+	// MultiAccountEnabled opts into multiple accounts per vendor (F11.8).
+	MultiAccountEnabled bool
+	// MultiAccountTermsAccepted records user acceptance of vendor terms warnings (F11.8).
+	MultiAccountTermsAccepted bool
+	// AccountStrategy selects among multiple accounts ("order", "best", "consumeFirst").
+	AccountStrategy string
+	// ExtraAccounts lists additional account IDs per vendor (F11.8).
+	ExtraAccounts map[string][]string
 }
 
 // SessionOverride holds Tier 4 per-session overrides (Q-53 A: model and effort only).
@@ -180,6 +188,7 @@ func DefaultConfig(fugueHome, workspaceID string) EffectiveConfig {
 		Host: HostConfig{
 			WorkspacesDir: wsDir, OutputRetentionTotal: "64 MiB", SeenVersionsPerSession: "8 MiB", SnapshotDisk: "1 GiB",
 			PerAccountSessions: 6, HeavySlotMaxHoldSeconds: 3600, PromptPacingMinSeconds: 10, PromptPacingMaxSeconds: 15,
+			AccountStrategy: "order",
 		},
 	}
 }
@@ -195,6 +204,7 @@ func defaultProvenanceKeys() []string {
 		"host.workspaces_dir", "host.output_retention_total", "host.seen_versions_per_session", "host.snapshot_disk",
 		"host.per_account_sessions", "host.max_sessions", "host.heavy_commands", "host.heavy_slot_max_hold_seconds",
 		"host.prompt_pacing_min_seconds", "host.prompt_pacing_max_seconds",
+		"host.multi_account_enabled", "host.multi_account_terms_accepted", "host.account_strategy", "host.extra_accounts",
 	}
 }
 
@@ -293,6 +303,23 @@ func applyHostTier(dst *EffectiveConfig, host *rawHost, homeDir string) {
 	setIntScalar(&dst.Host.HeavySlotMaxHoldSeconds, dst.Provenance, "host.heavy_slot_max_hold_seconds", TierGlobal, host.HeavySlotMaxHoldSeconds)
 	setIntScalar(&dst.Host.PromptPacingMinSeconds, dst.Provenance, "host.prompt_pacing_min_seconds", TierGlobal, host.PromptPacingMinSeconds)
 	setIntScalar(&dst.Host.PromptPacingMaxSeconds, dst.Provenance, "host.prompt_pacing_max_seconds", TierGlobal, host.PromptPacingMaxSeconds)
+	if host.MultiAccountEnabled != nil {
+		dst.Host.MultiAccountEnabled = *host.MultiAccountEnabled
+		dst.Provenance["host.multi_account_enabled"] = TierGlobal
+	}
+	if host.MultiAccountTermsAccepted != nil {
+		dst.Host.MultiAccountTermsAccepted = *host.MultiAccountTermsAccepted
+		dst.Provenance["host.multi_account_terms_accepted"] = TierGlobal
+	}
+	setScalar(&dst.Host.AccountStrategy, dst.Provenance, "host.account_strategy", TierGlobal, host.AccountStrategy)
+	if len(host.ExtraAccounts) > 0 {
+		copied := make(map[string][]string, len(host.ExtraAccounts))
+		for k, v := range host.ExtraAccounts {
+			copied[k] = slices.Clone(v)
+		}
+		dst.Host.ExtraAccounts = copied
+		dst.Provenance["host.extra_accounts"] = TierGlobal
+	}
 }
 
 func applyTeamsTier(dst *EffectiveConfig, tier Tier, teamsCfg *rawTeams) {

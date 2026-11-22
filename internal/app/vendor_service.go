@@ -226,6 +226,7 @@ func (s *VendorService) Resume(ctx context.Context, principal string, cmd *Resum
 			return VendorSessionView{}, err
 		}
 		spec.SessionID = cmd.SessionID
+		s.applyAccountHome(&info, spec)
 		if err := s.spawn(spec, info.Role, func() error { return s.sessions.Resume(opCtx, cmd.SessionID, spec) }); err != nil {
 			return VendorSessionView{}, publicVendorError(err)
 		}

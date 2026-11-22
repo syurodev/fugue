@@ -69,16 +69,20 @@ type rawTeams struct {
 }
 
 type rawHost struct {
-	WorkspacesDir           *string `toml:"workspaces_dir,omitempty"`
-	OutputRetentionTotal    *string `toml:"output_retention_total,omitempty"`
-	SeenVersionsPerSession  *string `toml:"seen_versions_per_session,omitempty"`
-	SnapshotDisk            *string `toml:"snapshot_disk,omitempty"`
-	PerAccountSessions      *int    `toml:"per_account_sessions,omitempty"`
-	MaxSessions             *int    `toml:"max_sessions,omitempty"`
-	HeavyCommands           *int    `toml:"heavy_commands,omitempty"`
-	HeavySlotMaxHoldSeconds *int    `toml:"heavy_slot_max_hold_seconds,omitempty"`
-	PromptPacingMinSeconds  *int    `toml:"prompt_pacing_min_seconds,omitempty"`
-	PromptPacingMaxSeconds  *int    `toml:"prompt_pacing_max_seconds,omitempty"`
+	WorkspacesDir             *string             `toml:"workspaces_dir,omitempty"`
+	OutputRetentionTotal      *string             `toml:"output_retention_total,omitempty"`
+	SeenVersionsPerSession    *string             `toml:"seen_versions_per_session,omitempty"`
+	SnapshotDisk              *string             `toml:"snapshot_disk,omitempty"`
+	PerAccountSessions        *int                `toml:"per_account_sessions,omitempty"`
+	MaxSessions               *int                `toml:"max_sessions,omitempty"`
+	HeavyCommands             *int                `toml:"heavy_commands,omitempty"`
+	HeavySlotMaxHoldSeconds   *int                `toml:"heavy_slot_max_hold_seconds,omitempty"`
+	PromptPacingMinSeconds    *int                `toml:"prompt_pacing_min_seconds,omitempty"`
+	PromptPacingMaxSeconds    *int                `toml:"prompt_pacing_max_seconds,omitempty"`
+	MultiAccountEnabled       *bool               `toml:"multi_account_enabled,omitempty"`
+	MultiAccountTermsAccepted *bool               `toml:"multi_account_terms_accepted,omitempty"`
+	AccountStrategy           *string             `toml:"account_strategy,omitempty"`
+	ExtraAccounts             map[string][]string `toml:"extra_accounts,omitempty"`
 }
 
 // tier2RawConfig deliberately omits policy, env and redact (Q-72): tier 2 has no accepted copy,
@@ -389,25 +393,6 @@ func validateProfiles(file string, profiles map[string]ProfileConfig) error {
 		}
 	}
 	return nil
-}
-
-func validateHost(file string, host *rawHost, homeDir string) error {
-	if host == nil {
-		return nil
-	}
-	return firstErr(
-		validatePathField(file, "host.workspaces_dir", host.WorkspacesDir, homeDir),
-		validateByteSizeField(file, "host.output_retention_total", host.OutputRetentionTotal),
-		validateByteSizeField(file, "host.seen_versions_per_session", host.SeenVersionsPerSession),
-		validateByteSizeField(file, "host.snapshot_disk", host.SnapshotDisk),
-		validateIntMin(file, "host.per_account_sessions", host.PerAccountSessions, 1),
-		validateIntMin(file, "host.max_sessions", host.MaxSessions, 1),
-		validateIntMin(file, "host.heavy_commands", host.HeavyCommands, 1),
-		validateIntRange(file, "host.heavy_slot_max_hold_seconds", host.HeavySlotMaxHoldSeconds, 0, maxHeavySlotHoldSeconds),
-		validateIntRange(file, "host.prompt_pacing_min_seconds", host.PromptPacingMinSeconds, 0, maxPromptPacingSeconds),
-		validateIntRange(file, "host.prompt_pacing_max_seconds", host.PromptPacingMaxSeconds, 0, maxPromptPacingSeconds),
-		validatePacingBounds(file, host.PromptPacingMinSeconds, host.PromptPacingMaxSeconds),
-	)
 }
 
 func validateTeams(file string, teamsCfg *rawTeams) error {

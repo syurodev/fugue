@@ -20,6 +20,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/vault"
+	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 	"github.com/syurodev/fugue/internal/workspace"
 )
@@ -62,6 +63,8 @@ type teamDispatcherDeps struct {
 	Wake        *teamWake
 	Clock       clock.Clock
 	TeamsConfig func(context.Context, string) (workspace.TeamsConfig, error)
+	HostConfig  HostConfigReader
+	Accounts    *vendor.Accounts
 	Budgets     *teamBudgets
 	// Test hooks, nil in production, invoked between TeamSnapshot and
 	// appendTaskEvent so tests can inject real races.
@@ -75,8 +78,9 @@ type teamDispatcherDeps struct {
 // teamDispatcher starts the queued tasks of active teams. One run at a time:
 // the mutex serializes runs, so two triggers never start the same task twice.
 type teamDispatcher struct {
-	deps teamDispatcherDeps
-	mu   sync.Mutex
+	deps   teamDispatcherDeps
+	picker *accountPicker
+	mu     sync.Mutex
 	// diskMu guards diskWait (§12): set by the pre-check or by a real
 	// disk-full failure, cleared by the re-check loop in Start.
 	diskMu   sync.Mutex
@@ -85,7 +89,11 @@ type teamDispatcher struct {
 }
 
 func newTeamDispatcher(deps *teamDispatcherDeps) *teamDispatcher {
-	return &teamDispatcher{deps: *deps, diskWake: make(chan struct{}, 1)}
+	return &teamDispatcher{
+		deps:     *deps,
+		picker:   newAccountPicker(deps.Accounts, deps.HostConfig, deps.Clock),
+		diskWake: make(chan struct{}, 1),
+	}
 }
 
 // notifyMailbox asks the wake pump for a delivery pass after an append

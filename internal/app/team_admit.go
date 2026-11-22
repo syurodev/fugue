@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 
+	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -52,10 +53,25 @@ type schedulerAdmitter struct {
 	capacity accountCapacityReader
 	store    *vendorstore.Store
 	accounts *vendor.Accounts
+	picker   *accountPicker
 }
 
 func newSchedulerAdmitter(capacity accountCapacityReader, store *vendorstore.Store, accounts *vendor.Accounts) Admitter {
-	return schedulerAdmitter{capacity: capacity, store: store, accounts: accounts}
+	return schedulerAdmitter{
+		capacity: capacity,
+		store:    store,
+		accounts: accounts,
+		picker:   newAccountPicker(accounts, nil, nil),
+	}
+}
+
+func newSchedulerAdmitterWithConfig(capacity accountCapacityReader, store *vendorstore.Store, accounts *vendor.Accounts, hostCfg HostConfigReader, clk clock.Clock) Admitter {
+	return schedulerAdmitter{
+		capacity: capacity,
+		store:    store,
+		accounts: accounts,
+		picker:   newAccountPicker(accounts, hostCfg, clk),
+	}
 }
 
 // Admit checks the §11 4-child cap (Q-118), the §8 85% quota gate (OR-09),
@@ -67,7 +83,7 @@ func (a schedulerAdmitter) Admit(ctx context.Context, task *vendorstore.TaskReco
 	if workingDirectChildren(task, tasks) >= maxRunningDirectChildren {
 		return false, nil
 	}
-	vendorName := ""
+	vendorName, modelName := "", ""
 	if a.store != nil {
 		_, role, code, err := resolveTaskProfile(ctx, a.store, task.TeamID, task.TaskID, task.CatalogRole)
 		if err != nil {
@@ -77,20 +93,30 @@ func (a schedulerAdmitter) Admit(ctx context.Context, task *vendorstore.TaskReco
 			// Let startChild fail the invalid task with its stable failure code.
 			return true, nil
 		}
-		vendorName = role.Vendor
+		vendorName, modelName = role.Vendor, role.Model
 	}
-	var (
-		room bool
-		err  error
-	)
-	if vendorName != "" {
-		if a.accounts != nil && !a.accounts.QuotaAllows(vendorName) {
-			return false, nil
+	if vendorName == "" {
+		room, err := a.capacity.HasCapacity(ctx)
+		if err != nil {
+			return false, boundaryError("read the session capacity", err)
 		}
-		room, err = a.capacity.HasCapacityFor(ctx, vendorName, vendorDefaultAccount)
-	} else {
-		room, err = a.capacity.HasCapacity(ctx)
+		return room, nil
 	}
+	return a.admitVendorCapacity(ctx, vendorName, modelName)
+}
+
+func (a schedulerAdmitter) admitVendorCapacity(ctx context.Context, vendorName, modelName string) (bool, error) {
+	if a.picker != nil && a.accounts != nil {
+		ok, err := a.picker.HasEligibleAccountWithCapacity(ctx, a.capacity, vendorName, modelName)
+		if err != nil {
+			return false, boundaryError("read the session capacity", err)
+		}
+		return ok, nil
+	}
+	if a.accounts != nil && !a.accounts.QuotaAllows(vendorName) {
+		return false, nil
+	}
+	room, err := a.capacity.HasCapacityFor(ctx, vendorName, vendorDefaultAccount)
 	if err != nil {
 		return false, boundaryError("read the session capacity", err)
 	}

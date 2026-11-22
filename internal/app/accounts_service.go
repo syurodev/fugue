@@ -175,16 +175,20 @@ func (s *AccountsService) seedBlockedSnapshot() {
 // callback's copy, which a concurrent observation may already have outdated.
 func (s *AccountsService) publish(changed *vendor.Account) {
 	s.notifyMu.Lock()
-	account, ok := s.accounts.Account(changed.Vendor)
+	account, ok := s.accounts.AccountByID(changed.Vendor, changed.ID)
 	if ok {
 		s.blockedMu.Lock()
 		s.lastBlocked[account.Vendor] = !s.accounts.QuotaAllows(account.Vendor)
 		s.blockedMu.Unlock()
 		view := accountView(&account)
+		eventKey := view.Vendor
+		if account.ID != "" && account.ID != vendor.DefaultAccountID {
+			eventKey = view.Vendor + ":" + account.ID
+		}
 		payload, err := json.Marshal(view)
 		if err != nil {
 			slog.Warn("marshal a quota event", "code", errcode.CodeOf(err))
-		} else if _, err := s.hub.Publish(TopicQuota, Event{Type: EventQuotaAccountChanged, Key: view.Vendor, Payload: payload, LatestForKey: true}); err != nil {
+		} else if _, err := s.hub.Publish(TopicQuota, Event{Type: EventQuotaAccountChanged, Key: eventKey, Payload: payload, LatestForKey: true}); err != nil {
 			slog.Warn("publish a quota event", "code", errcode.CodeOf(err))
 		}
 	}
