@@ -167,9 +167,9 @@ func (a *vendorSessionActor) observeAccount(observation *vendor.Observation) {
 	if accounts == nil {
 		return
 	}
-	accounts.ObserveQuota(a.info.Vendor, observation.Quota)
+	accounts.ObserveAccountQuota(a.info.Vendor, a.info.AccountID, observation.Quota)
 	if observation.TurnEnd != nil {
-		accounts.ObserveFailure(a.info.Vendor, observation.TurnEnd.Failure)
+		accounts.ObserveAccountFailure(a.info.Vendor, a.info.AccountID, observation.TurnEnd.Failure)
 	}
 }
 
