@@ -145,9 +145,6 @@ func (c *Client) RecoverTask(ctx context.Context, in *RecoverTaskInput) (TaskNod
 }
 
 func teamSummaryFromProto(s *tasksv1.TeamSummary) TeamSummary {
-	if s == nil {
-		return TeamSummary{}
-	}
 	out := TeamSummary{
 		TeamID:        s.GetTeamId(),
 		WorkspaceID:   s.GetWorkspaceId(),
@@ -173,9 +170,6 @@ func teamSummaryFromProto(s *tasksv1.TeamSummary) TeamSummary {
 }
 
 func teamViewFromProto(v *tasksv1.TeamView) TeamView {
-	if v == nil {
-		return TeamView{}
-	}
 	out := TeamView{
 		Summary:          teamSummaryFromProto(v.GetSummary()),
 		VaultLocked:      v.GetVaultLocked(),
@@ -199,9 +193,6 @@ func teamViewFromProto(v *tasksv1.TeamView) TeamView {
 }
 
 func taskNodeFromProto(t *tasksv1.TaskNode) TaskNode {
-	if t == nil {
-		return TaskNode{}
-	}
 	return TaskNode{
 		TaskID:         t.GetTaskId(),
 		ParentTaskID:   t.GetParentTaskId(),

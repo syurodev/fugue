@@ -85,7 +85,8 @@ func (s *TasksService) readRecoveredTaskNode(ctx context.Context, teamID, taskID
 	if err != nil {
 		return TaskNodeView{}, boundaryError("read task channel sequences", err)
 	}
-	node, _ := s.buildTaskNode(ctx, teamID, task, lastSeqs, nil, false)
+	roleProfiles, _ := s.loadProposalContent(ctx, &TeamView{}, teamID)
+	node, _ := s.buildTaskNode(ctx, teamID, task, lastSeqs, roleProfiles, false)
 	return node, nil
 }
 

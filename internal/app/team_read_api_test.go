@@ -1,6 +1,7 @@
 package app
 
 import (
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/syurodev/fugue/internal/gitops"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
@@ -98,8 +100,36 @@ func TestListTeamsAndGetTeamTreeAndLockedVault(t *testing.T) {
 	taskAID := seedTeamReadDiffBranches(t, f, gm, pending.TeamID, baseBranch)
 
 	assertTeamReadUnlocked(t, f, pending.TeamID, taskAID)
+	assertTeamReadEditedRoleModel(t, f, pending.TeamID, taskAID)
 	f.hp.vault.Lock()
 	assertTeamReadLocked(t, f, pending.TeamID)
+}
+
+func assertTeamReadEditedRoleModel(t *testing.T, f *teamProposalFixture, teamID, taskAID string) {
+	t.Helper()
+	edit, err := json.Marshal(teams.EditSet{
+		Version: teams.EditSetVersion,
+		Roles:   []teams.RoleEdit{{Name: teamTestRole, Model: teamTestModelEdited}},
+	})
+	if err != nil {
+		t.Fatalf("marshal edit set: %v", err)
+	}
+	if ansErr := f.answerCard(t, "decide-read-edited", teamProposeToolName, teamDecisionQuestionID, decisionApproveEdited, string(edit)); ansErr != nil {
+		t.Fatalf("approve with edits: %v", ansErr)
+	}
+	view, err := f.rt.tasksService.GetTeam(t.Context(), teamID, "")
+	if err != nil {
+		t.Fatalf("GetTeam after approve_edited: %v", err)
+	}
+	for i := range view.Tasks {
+		if view.Tasks[i].TaskID == taskAID {
+			if view.Tasks[i].Model != teamTestModelEdited {
+				t.Fatalf("task %s model = %q, want %q", taskAID, view.Tasks[i].Model, teamTestModelEdited)
+			}
+			return
+		}
+	}
+	t.Fatalf("task %s not found after approve_edited", taskAID)
 }
 
 func assertTeamReadUnlocked(t *testing.T, f *teamProposalFixture, teamID, taskAID string) {

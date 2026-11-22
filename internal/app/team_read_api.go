@@ -209,7 +209,43 @@ func (s *TasksService) loadProposalContent(ctx context.Context, view *TeamView, 
 	for i := range prop.Roles {
 		roles[prop.Roles[i].Name] = prop.Roles[i]
 	}
+	if overlayDecidedRoles(ctx, s.store, teamID, roles) {
+		return nil, true
+	}
 	return roles, false
+}
+
+func overlayDecidedRoles(ctx context.Context, store *vendorstore.Store, teamID string, roles map[string]teams.ProposedRole) bool {
+	events, err := store.TeamEventsSince(ctx, teamID, 0, teamEventScanLimit)
+	if err != nil {
+		return false
+	}
+	var startedSeq int64
+	for i := range events {
+		if events[i].EventType == vendorstore.EventTeamStarted {
+			startedSeq = events[i].Sequence
+		}
+	}
+	if startedSeq == 0 {
+		return false
+	}
+	raw, err := store.OpenTeamEventPayload(ctx, teamID, startedSeq)
+	if err != nil {
+		return errors.Is(err, vault.ErrLocked)
+	}
+	var decision teamDecisionPayload
+	if !json.Valid(raw) || json.Unmarshal(raw, &decision) != nil {
+		return false
+	}
+	for i := range decision.Roles {
+		dr := decision.Roles[i]
+		role := roles[dr.Name]
+		role.Name = dr.Name
+		role.Vendor = teams.Vendor(dr.Vendor)
+		role.Model = dr.Model
+		roles[dr.Name] = role
+	}
+	return false
 }
 
 func (s *TasksService) buildTaskNode(
