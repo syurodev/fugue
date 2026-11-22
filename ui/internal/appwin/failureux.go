@@ -130,7 +130,7 @@ func (f *failureUX) applyProbe(probes []client.VendorProbe, err error) {
 // applyEvents and applyProbe.
 func (f *failureUX) specs(state hostconn.State, reason, dataDir string, hasOpen bool, openSess session.Session) []bannerSpec {
 	specs := make([]bannerSpec, 0, 4)
-	if state != hostconn.StateConnected {
+	if state == hostconn.StateDisconnected {
 		msg := "Fugue reconnects on its own and replays what it missed."
 		if reason != "" {
 			msg = reason + ". " + msg

@@ -139,6 +139,11 @@ func TestFailureUXDisconnectedNamesDataDir(t *testing.T) {
 	if titles := visibleTitles(f, false, session.Session{}); len(titles) != 0 {
 		t.Fatalf("banners while connected = %v, want none", titles)
 	}
+	for _, quiet := range []hostconn.State{"", hostconn.StateConnecting} {
+		if specs := f.specs(quiet, "", "/tmp/fugue-data", false, session.Session{}); len(specs) != 0 {
+			t.Fatalf("banners in state %q = %+v, want none", quiet, specs)
+		}
+	}
 }
 
 // TestFailureUXDetachedBannerFollowsTheOpenSession pins the detached row
