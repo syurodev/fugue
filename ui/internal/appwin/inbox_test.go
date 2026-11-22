@@ -183,7 +183,7 @@ func assertQuestionIMEAndSubmit(t *testing.T, env *kit.Env, sc *screens, router 
 	formQ.questions[0].textInput.SetText("tiếng Việt")
 	submitInboxAnswer(sc, formQ, pinQ, &client.AnswerInteractionInput{
 		Outcome: client.InteractionOutcomeAnswered,
-		Answers: buildQuestionAnswers(questionReq, formQ),
+		Answers: buildQuestionAnswers(questionReq, formQ, ""),
 	})
 	sc.applyInboxResults([]inbox.Result{awaitAppInboxResult(t, sc)})
 }

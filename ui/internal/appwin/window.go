@@ -23,6 +23,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/inbox"
 	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/secrets"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/settings"
 	"github.com/syurodev/fugue/ui/internal/theme"
@@ -109,6 +110,7 @@ func Run(ctx context.Context, opts Options) error {
 	sc.inboxWorker = workers.inboxW
 	sc.accountsWorker = workers.accountsW
 	sc.settingsWorker = workers.settingsW
+	sc.secretsWorker = workers.secretsW
 	sc.viewerWorker = workers.viewerW
 	sc.layoutWorker = workers.layoutW
 	// The restored window geometry applies once the appstate snapshot
@@ -129,6 +131,7 @@ type appWorkers struct {
 	inboxW    *inbox.Worker
 	accountsW *accounts.Worker
 	settingsW *settings.Worker
+	secretsW  *secrets.Worker
 	viewerW   *fileViewWorker
 	layoutW   *layoutWorker
 }
@@ -168,6 +171,13 @@ func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) ap
 		return nil
 	}, w.Invalidate)
 	settingsW.Start(ctx)
+	secretsW := secrets.NewWorker(func() secrets.Client {
+		if c := m.Client(); c != nil {
+			return c
+		}
+		return nil
+	}, w.Invalidate)
+	secretsW.Start(ctx)
 	viewerW := newFileViewWorker(func() fileViewClient {
 		if c := m.Client(); c != nil {
 			return c
@@ -182,12 +192,13 @@ func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) ap
 		return nil
 	}, w.Invalidate)
 	layoutW.Start(ctx)
-	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW, settingsW: settingsW, viewerW: viewerW, layoutW: layoutW}
+	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW, settingsW: settingsW, secretsW: secretsW, viewerW: viewerW, layoutW: layoutW}
 }
 
 func (a appWorkers) stop() {
 	a.layoutW.Stop()
 	a.viewerW.Stop()
+	a.secretsW.Stop()
 	a.settingsW.Stop()
 	a.accountsW.Stop()
 	a.inboxW.Stop()
@@ -329,6 +340,9 @@ drainPosts:
 	if sc.settingsWorker != nil {
 		sc.applySettingsResults(drainSettingsResults(sc.settingsWorker))
 	}
+	if sc.secretsWorker != nil {
+		sc.applySecretsResults(drainSecretsResults(sc.secretsWorker))
+	}
 	sc.applyFileViewResults(drainFileViewResults(sc.viewerWorker))
 	if sc.layoutWorker != nil {
 		sc.applyLayoutResults(drainLayoutResults(sc.layoutWorker))
@@ -405,6 +419,7 @@ func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 	// open.
 	sc.composer.start.layout(env, gtx, sc, sc.composer)
 	sc.dlg.layout(env, gtx, sc)
+	sc.secretsView.layoutDialogs(env, gtx, sc)
 	sc.failure.closeDlg.layout(env, gtx, sc)
 }
 

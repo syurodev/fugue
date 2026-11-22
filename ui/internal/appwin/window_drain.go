@@ -3,6 +3,7 @@ package appwin
 import (
 	"github.com/syurodev/fugue/ui/internal/accounts"
 	"github.com/syurodev/fugue/ui/internal/inbox"
+	"github.com/syurodev/fugue/ui/internal/secrets"
 	"github.com/syurodev/fugue/ui/internal/settings"
 	"github.com/syurodev/fugue/ui/internal/vault"
 	"github.com/syurodev/fugue/ui/internal/workspace"
@@ -48,6 +49,10 @@ func drainAccountsResults(w *accounts.Worker) []accounts.Result {
 }
 
 func drainSettingsResults(w *settings.Worker) []settings.Result {
+	return drainChan(w.Results())
+}
+
+func drainSecretsResults(w *secrets.Worker) []secrets.Result {
 	return drainChan(w.Results())
 }
 

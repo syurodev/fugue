@@ -104,12 +104,27 @@ func isWaitingItem(item *session.Item) bool {
 
 func approvalOrQuestionSpec(item *session.Item) toolRowSpec {
 	verb, label, action := verbApproval, "Waiting for approval", "Open inbox"
+	warning := true
 	if item.Metadata.RequestKind == "question" {
 		verb, label, action = verbQuestion, "Asked you", "Answer"
 	}
 	fields := parseToolInput(item.Display().Input)
 	obj := firstNonEmpty(item.Display().Title, fields.Command, fields.Description, fields.Query, item.Display().Text, item.Metadata.RequestKind)
-	return toolRowSpec{verb: verb, icon: kit.IconHelp, verbLabel: label, query: obj, warningRow: true, actionText: action}
+	if d := item.Metadata.Decision; d != "" {
+		warning = false
+		action = ""
+		if item.Metadata.RequestKind == "question" {
+			if d == "answered_secret" || strings.Contains(strings.ToLower(d), "secret") {
+				label = "Answered (secret)"
+				obj = firstNonEmpty(item.Display().Title, "Secret question")
+			} else {
+				label = "Answered"
+			}
+		} else {
+			label = "Approval (" + d + ")"
+		}
+	}
+	return toolRowSpec{verb: verb, icon: kit.IconHelp, verbLabel: label, query: obj, warningRow: warning, actionText: action}
 }
 
 func fileChangeSpec(item *session.Item) toolRowSpec {

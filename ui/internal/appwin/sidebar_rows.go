@@ -66,3 +66,22 @@ func (s *screens) layoutSettingsRow(env *kit.Env, gtx *layout.Context) layout.Di
 	}
 	return dims
 }
+
+func (s *screens) layoutSecretsRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
+	props := &kit.ListRowProps{
+		Label:    "Secrets",
+		Selected: s.hasSlotKind(KindSecrets),
+	}
+	switch {
+	case s.vault.Locked():
+		props.StateLabel = "locked"
+		props.StateTone = kit.ToneWarning
+	case s.secrets.HasSnapshot():
+		props.Trailing = fmt.Sprintf("%d", len(s.secrets.All()))
+	}
+	dims, ev := s.secretsRow.Layout(env, gtx, props)
+	if ev.Clicked || ev.Opened {
+		s.toggleCompanion(KindSecrets)
+	}
+	return dims
+}
