@@ -34,6 +34,9 @@ func TestParseTaskPruneArgs(t *testing.T) {
 		{taskCommand, taskPruneSubcommand, exclusiveSocketFlag},
 		{taskCommand, taskPruneSubcommand, taskRetentionFlag, "not-a-dur"},
 		{taskCommand, taskPruneSubcommand, taskRetentionFlag + "=-1h"},
+		{taskCommand, taskPruneSubcommand, taskRetentionFlag + "=0s"},
+		{taskCommand, taskPruneSubcommand, taskRetentionFlag + "=500ms"},
+		{taskCommand, taskPruneSubcommand, taskRetentionFlag + "=1500ms"},
 		{taskCommand, taskPruneSubcommand, "--unknown"},
 	} {
 		_, _, matched, ok := parseTaskPruneArgs(bad)

@@ -130,10 +130,13 @@ func (m *Manager) pruneTask(ctx context.Context, repoDir, root, repoID string, t
 		}
 		result.RemovedWorktrees = append(result.RemovedWorktrees, wtPath)
 	}
-	if err := m.deleteBranch(ctx, repoDir, branch); err != nil {
+	deleted, err := m.deleteBranchStatus(ctx, repoDir, branch)
+	if err != nil {
 		return err
 	}
-	result.RemovedBranches = append(result.RemovedBranches, branch)
+	if deleted {
+		result.RemovedBranches = append(result.RemovedBranches, branch)
+	}
 	return nil
 }
 

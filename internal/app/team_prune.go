@@ -35,13 +35,18 @@ type pruneRepoKey struct {
 // ended more than retention ago (zero uses gitops.DefaultRetention = 24h),
 // leaving active, non-terminal, and within-retention teams untouched.
 func (s *TasksService) PruneWorktrees(ctx context.Context, retention time.Duration) (PruneWorktreesResult, error) {
-	if s.git == nil || s.store == nil {
+	if s.git == nil || s.store == nil || s.clk == nil {
 		return PruneWorktreesResult{}, errcode.New(errcode.FailedPrecondition, "gitops is not configured")
 	}
 	if retention < 0 {
 		return PruneWorktreesResult{}, errcode.New(errcode.InvalidArgument, "prune retention must not be negative")
 	}
-	grouped, keys, err := s.collectEndedTeamPruneTasks(ctx)
+	effRetention := retention
+	if effRetention == 0 {
+		effRetention = gitops.DefaultRetention
+	}
+	cutoff := s.clk.Now().Add(-effRetention)
+	grouped, keys, err := s.collectEndedTeamPruneTasks(ctx, cutoff)
 	if err != nil {
 		return PruneWorktreesResult{}, err
 	}
@@ -64,7 +69,7 @@ func (s *TasksService) PruneWorktrees(ctx context.Context, retention time.Durati
 	return out, nil
 }
 
-func (s *TasksService) collectEndedTeamPruneTasks(ctx context.Context) (map[pruneRepoKey][]gitops.PruneTask, []pruneRepoKey, error) {
+func (s *TasksService) collectEndedTeamPruneTasks(ctx context.Context, cutoff time.Time) (map[pruneRepoKey][]gitops.PruneTask, []pruneRepoKey, error) {
 	teams, err := s.store.EndedTeams(ctx)
 	if err != nil {
 		return nil, nil, boundaryError("list ended teams for prune", err)
@@ -75,6 +80,10 @@ func (s *TasksService) collectEndedTeamPruneTasks(ctx context.Context) (map[prun
 		if rec.EndedAt <= 0 {
 			continue
 		}
+		endedAt := time.UnixMilli(rec.EndedAt).UTC()
+		if endedAt.After(cutoff) {
+			continue
+		}
 		repoDir, repoID := resolveTeamRepo(ctx, s.workspaces, rec)
 		if repoDir == "" {
 			continue
@@ -83,7 +92,6 @@ func (s *TasksService) collectEndedTeamPruneTasks(ctx context.Context) (map[prun
 		if snapErr != nil {
 			return nil, nil, boundaryError("read ended team tasks for prune", snapErr)
 		}
-		endedAt := time.UnixMilli(rec.EndedAt).UTC()
 		key := pruneRepoKey{repoDir: repoDir, repoID: repoID}
 		for j := range tasks {
 			grouped[key] = append(grouped[key], gitops.PruneTask{

@@ -171,14 +171,22 @@ func (m *Manager) branchExists(ctx context.Context, repoDir, branch string) (boo
 // deleteBranch deletes a local branch. A missing branch is not an error so
 // cleanup paths stay idempotent.
 func (m *Manager) deleteBranch(ctx context.Context, repoDir, branch string) error {
+	_, err := m.deleteBranchStatus(ctx, repoDir, branch)
+	return err
+}
+
+func (m *Manager) deleteBranchStatus(ctx context.Context, repoDir, branch string) (bool, error) {
 	res, err := m.exec(ctx, repoDir, "branch", "-D", branch)
 	if err != nil {
-		return err
+		return false, err
 	}
-	if res.ExitCode != 0 && classify(res.Stderr) != failureMissingRef {
-		return m.gitFailure("branch", res)
+	if res.ExitCode == 0 {
+		return true, nil
 	}
-	return nil
+	if classify(res.Stderr) != failureMissingRef {
+		return false, m.gitFailure("branch", res)
+	}
+	return false, nil
 }
 
 // worktreeListRows returns the worktree paths git knows about.

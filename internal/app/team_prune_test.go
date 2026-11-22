@@ -59,6 +59,15 @@ func TestPruneWorktreesRespectsRetentionAndProtectsActiveTeams(t *testing.T) {
 	}
 	assertPrunedTasks(t, res, worktrees, []string{"t-prune-old", "t-prune-bound"})
 	assertKeptTasks(t, res, worktrees, []string{"t-prune-fresh", "t-prune-active"})
+
+	// Immediate second pass must be idempotent: 0 removed worktrees and 0 removed branches.
+	res2, err := svc.PruneWorktrees(ctx, 0)
+	if err != nil {
+		t.Fatalf("second PruneWorktrees(0) = %v", err)
+	}
+	if len(res2.RemovedWorktrees) != 0 || len(res2.RemovedBranches) != 0 {
+		t.Fatalf("second PruneWorktrees(0) = %+v, want 0 removed worktrees and branches", res2)
+	}
 }
 
 func seedPruneTeams(t *testing.T, f *teamProposalFixture, repoDir, baseHead string, specs []pruneSeedSpec) map[string]string {

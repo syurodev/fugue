@@ -49,7 +49,7 @@ func parseRetentionFlag(args []string) (dur time.Duration, rest []string, matche
 		return 0, next, matched, false
 	}
 	dur, err := time.ParseDuration(val)
-	if err != nil || dur < 0 {
+	if err != nil || dur <= 0 || dur%time.Second != 0 {
 		return 0, nil, true, false
 	}
 	return dur, next, true, true
