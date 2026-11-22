@@ -354,6 +354,7 @@ type approveTombstoneEntry struct {
 	digest         [sha256.Size]byte
 	allow          bool
 	cancelled      bool
+	secret         bool
 	selectedOption string
 	note           string
 	answers        map[string][]string
@@ -411,6 +412,12 @@ func (t *approveTombstones) putEntry(sessionID, opID string, entry *approveTombs
 func (t *approveTombstones) putCodex(sessionID, opID string, digest [sha256.Size]byte, allow bool, selectedOption string, answers map[string][]string) {
 	t.putEntry(sessionID, opID, &approveTombstoneEntry{
 		digest: digest, allow: allow, selectedOption: selectedOption, answers: cloneCodexAnswers(answers),
+	})
+}
+
+func (t *approveTombstones) putCodexSecret(sessionID, opID string, digest [sha256.Size]byte) {
+	t.putEntry(sessionID, opID, &approveTombstoneEntry{
+		digest: digest, secret: true,
 	})
 }
 

@@ -11,15 +11,13 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/syurodev/fugue/internal/transcript"
 	"github.com/syurodev/fugue/internal/vendor"
 )
 
 const (
-	maxSummaryBytes               = 2 << 10
-	truncationSuffix              = "… [truncated, full input in detail]"
-	jsonRPCServerErrorCode        = -32000
-	secretInputUnsupportedMessage = "Codex asked for secret input, which Fugue cannot relay yet"
+	maxSummaryBytes        = 2 << 10
+	truncationSuffix       = "… [truncated, full input in detail]"
+	jsonRPCServerErrorCode = -32000
 )
 
 type pendingServerRequest struct {
@@ -298,9 +296,6 @@ func (n *Normalizer) normalizeUserInputRequest(frame *Frame) Observation {
 	if json.Unmarshal(frame.Params, &params) != nil || params.TurnID == "" || params.ItemID == "" || len(params.Questions) == 0 {
 		return n.unsupported(n.frameRef(frame), frame.Method)
 	}
-	if hasSecretQuestion(params.Questions) {
-		return n.secretInputUnsupported(frame, params.TurnID)
-	}
 	var qOpts []vendor.ServerRequestQuestionOption
 	questions := make([]vendor.ServerRequestQuestionItem, 0, len(params.Questions))
 	allowFreeText := false
@@ -327,6 +322,7 @@ func (n *Normalizer) normalizeUserInputRequest(frame *Frame) Observation {
 			Header:   q.Header,
 			Question: q.Question,
 			Options:  opts,
+			Secret:   q.IsSecret,
 		})
 	}
 	summary := strings.Join(summaryParts, "; ")
@@ -349,28 +345,7 @@ func (n *Normalizer) normalizeUserInputRequest(frame *Frame) Observation {
 	}
 }
 
-func hasSecretQuestion(questions []UserInputQuestion) bool {
-	for _, q := range questions {
-		if q.IsSecret {
-			return true
-		}
-	}
-	return false
-}
-
-func (n *Normalizer) secretInputUnsupported(frame *Frame, codexTurnID string) Observation {
-	rawRef := n.frameRef(frame)
-	item := transcript.UnsupportedEvent("notice-"+rawRef, n.session, n.resolveTurnID(codexTurnID), rawRef)
-	item.Content = transcript.NoticeContent{Text: secretInputUnsupportedMessage}
-	return Observation{Records: []transcript.Item{item}}
-}
-
-func unrelayedServerRequestMessage(obs *Observation) string {
-	if obs != nil && len(obs.Records) > 0 {
-		if nc, ok := obs.Records[0].Content.(transcript.NoticeContent); ok && nc.Text == secretInputUnsupportedMessage {
-			return secretInputUnsupportedMessage
-		}
-	}
+func unrelayedServerRequestMessage(_ *Observation) string {
 	return "unsupported server request"
 }
 

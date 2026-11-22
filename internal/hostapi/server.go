@@ -20,6 +20,7 @@ import (
 	appstatev1connect "github.com/syurodev/fugue/pkg/pb/fugue/appstate/v1/appstatev1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/interaction/v1/interactionv1connect"
+	"github.com/syurodev/fugue/pkg/pb/fugue/secrets/v1/secretsv1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/sessiontools/v1/sessiontoolsv1connect"
 	tasksv1connect "github.com/syurodev/fugue/pkg/pb/fugue/tasks/v1/tasksv1connect"
 	"github.com/syurodev/fugue/pkg/pb/fugue/transcript/v1/transcriptv1connect"
@@ -224,6 +225,10 @@ func newServiceMux(backend app.Backend) *http.ServeMux {
 	handler.Handle(appstatev1connect.NewAppStateServiceHandler(
 		&appstateHandler{backend: backend},
 		connect.WithReadMaxBytes(app.AppStateRequestMaxBytes),
+	))
+	handler.Handle(secretsv1connect.NewSecretServiceHandler(
+		&secretsHandler{backend: backend},
+		connect.WithReadMaxBytes(secretsRequestMaxBytes),
 	))
 	handler.Handle(tasksv1connect.NewTaskServiceHandler(
 		&tasksHandler{backend: backend},

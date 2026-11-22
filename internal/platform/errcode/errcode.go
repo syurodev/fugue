@@ -71,6 +71,10 @@ const (
 	TasksTeamEnded              Code = "tasks.team_ended"
 	TasksPostTooLarge           Code = "tasks.post_too_large"
 	TasksTaskNotUnknown         Code = "tasks.task_not_unknown"
+	StoreRecordNotFound         Code = "secrets.not_found"
+	SecretsInvalidName          Code = "secrets.invalid_name"
+	SecretsValueTooLarge        Code = "secrets.value_too_large"
+	SecretsLimitExceeded        Code = "secrets.limit_exceeded"
 )
 
 // Entry classifies one code. Hidden codes are never shown to a client; the
@@ -83,6 +87,14 @@ type Entry struct {
 
 // Registry lists every code with its classification.
 func Registry() []Entry {
+	out := make([]Entry, 0, 64)
+	out = append(out, coreAndInteractionRegistry()...)
+	out = append(out, workspaceAndVendorRegistry()...)
+	out = append(out, serviceRegistry()...)
+	return out
+}
+
+func coreAndInteractionRegistry() []Entry {
 	return []Entry{
 		{Internal, false, "an unexpected failure; its detail stays in the host's logs"},
 		{InvalidArgument, true, "the request is malformed or a value is out of range"},
@@ -100,6 +112,11 @@ func Registry() []Entry {
 		{InteractionStaleIncarnation, true, "the interaction request belongs to a previous host incarnation"},
 		{InteractionOptionNotOffered, true, "the selected outcome or option was not offered"},
 		{InteractionTextTooLarge, true, "the interaction answer text or deny note exceeds the size limit"},
+	}
+}
+
+func workspaceAndVendorRegistry() []Entry {
+	return []Entry{
 		{WorkspaceNotFound, true, "the workspace does not exist"},
 		{WorkspaceAlreadyExists, true, "the workspace already exists"},
 		{WorkspaceConfigInvalid, true, "the workspace configuration is invalid"},
@@ -125,6 +142,11 @@ func Registry() []Entry {
 		{VendorCommandUnavailable, true, "the registered /fugue: command is not available yet; it never reaches the vendor"},
 		{VendorCommandConflict, true, "the command_id was already used for a different command"},
 		{VendorWorkspaceMismatch, true, "the session is bound to the workspace root it was created in"},
+	}
+}
+
+func serviceRegistry() []Entry {
+	return []Entry{
 		{TranscriptSessionNotFound, true, "the transcript session does not exist"},
 		{TranscriptItemNotFound, true, "the transcript item does not exist in this session"},
 		{VaultInvalidPassphrase, true, "the vault passphrase or recovery key is invalid"},
@@ -141,6 +163,10 @@ func Registry() []Entry {
 		{TasksTeamEnded, true, "the team has ended; its channel is read-only"},
 		{TasksPostTooLarge, true, "the channel post exceeds the 4 KiB limit"},
 		{TasksTaskNotUnknown, true, "the team task is not in the unknown state and cannot be recovered"},
+		{StoreRecordNotFound, true, "the requested secret does not exist"},
+		{SecretsInvalidName, true, "the secret name does not match the allowed ASCII identifier format"},
+		{SecretsValueTooLarge, true, "the secret value exceeds the 64 KiB limit or is empty"},
+		{SecretsLimitExceeded, true, "the secret count limit for this scope (512) has been reached"},
 	}
 }
 

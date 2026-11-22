@@ -5,6 +5,7 @@ package app
 // command dedup makes a retried answer idempotent.
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/secretstore"
 )
 
 func (s *InteractionService) validateAnswerCmd(cmd *AnswerInteractionCommand) error {
@@ -79,7 +81,8 @@ func checkAnswerItems(answers []InteractionAnswer) error {
 	if len(answers) > interaction.MaxOptions {
 		return errcode.New(errcode.InvalidArgument, "number of answers exceeds limit")
 	}
-	for _, a := range answers {
+	for i := range answers {
+		a := &answers[i]
 		if len(a.Text) > interaction.MaxAnswerBytes {
 			return errcode.New(errcode.InteractionTextTooLarge, "question answer text exceeds size limit")
 		}
@@ -159,14 +162,18 @@ func (s *InteractionService) executeAnswer(ctx context.Context, cmd *AnswerInter
 		return AnswerInteractionResult{}, lerr
 	}
 
-	domainAnswers := make([]interaction.Answer, 0, len(cmd.Answers))
-	for _, a := range cmd.Answers {
-		domainAnswers = append(domainAnswers, interaction.Answer{
-			QuestionID: a.QuestionID,
-			OptionIDs:  a.OptionIDs,
-			Text:       a.Text,
-		})
+	domainAnswers, err := s.resolveDomainAnswers(ctx, cmd, ticket)
+	if err != nil {
+		return AnswerInteractionResult{}, err
 	}
+	defer func() {
+		for i := range domainAnswers {
+			clear(domainAnswers[i].SecretValue)
+		}
+		for i := range cmd.Answers {
+			clear(cmd.Answers[i].SecretValue)
+		}
+	}()
 	decision := &interaction.Decision{
 		Incarnation: cmd.Incarnation,
 		RequestID:   cmd.RequestID,
@@ -198,6 +205,85 @@ func (s *InteractionService) executeAnswer(ctx context.Context, cmd *AnswerInter
 		RequestID: resolvedTicket.RequestID,
 		Outcome:   string(resolvedTicket.Outcome),
 	}, nil
+}
+
+func (s *InteractionService) resolveDomainAnswers(ctx context.Context, cmd *AnswerInteractionCommand, ticket *interaction.Ticket) ([]interaction.Answer, error) {
+	domainAnswers := make([]interaction.Answer, 0, len(cmd.Answers))
+	clearOnErr := func() {
+		for i := range domainAnswers {
+			clear(domainAnswers[i].SecretValue)
+		}
+	}
+	for i := range cmd.Answers {
+		ans, err := s.resolveOneAnswer(ctx, cmd, &cmd.Answers[i])
+		if err != nil {
+			clearOnErr()
+			return nil, err
+		}
+		domainAnswers = append(domainAnswers, ans)
+	}
+	_ = ticket
+	return domainAnswers, nil
+}
+
+func (s *InteractionService) resolveOneAnswer(ctx context.Context, cmd *AnswerInteractionCommand, a *InteractionAnswer) (interaction.Answer, error) {
+	if a.SecretID != "" && len(a.SecretValue) > 0 {
+		return interaction.Answer{}, errcode.New(errcode.InvalidArgument, "cannot specify both secret_id and secret_value")
+	}
+	secretVal, err := s.resolveSecretAnswerValue(ctx, cmd, a)
+	if err != nil {
+		return interaction.Answer{}, err
+	}
+	return interaction.Answer{
+		QuestionID:  a.QuestionID,
+		OptionIDs:   a.OptionIDs,
+		Text:        a.Text,
+		SecretValue: secretVal,
+	}, nil
+}
+
+func (s *InteractionService) resolveSecretAnswerValue(ctx context.Context, cmd *AnswerInteractionCommand, a *InteractionAnswer) ([]byte, error) {
+	if a.SecretID == "" && len(a.SecretValue) == 0 {
+		return nil, nil
+	}
+	if cmd.Incarnation != s.inc {
+		return nil, errcode.New(errcode.InteractionStaleIncarnation, "interaction request belongs to a previous incarnation")
+	}
+	if a.SecretID != "" {
+		if s.secretService == nil {
+			return nil, errcode.New(errcode.Unavailable, "secret service is unavailable")
+		}
+		return s.secretService.OpenSecretValue(ctx, a.SecretID)
+	}
+	if err := s.maybeSaveSecretAnswer(ctx, cmd, a); err != nil {
+		return nil, err
+	}
+	if s.transcripts != nil && len(a.SecretValue) >= secretstore.KnownValueMinBytes {
+		s.transcripts.AddEphemeralSecret(ctx, a.SecretValue)
+	}
+	return bytes.Clone(a.SecretValue), nil
+}
+
+func (s *InteractionService) maybeSaveSecretAnswer(ctx context.Context, cmd *AnswerInteractionCommand, a *InteractionAnswer) error {
+	if a.SaveSecretName == "" {
+		return nil
+	}
+	if s.secretService == nil {
+		return errcode.New(errcode.Unavailable, "secret service is unavailable")
+	}
+	scopeKind := a.SaveScopeKind
+	if scopeKind == "" {
+		scopeKind = secretstore.ScopeGlobal
+	}
+	_, err := s.secretService.PutSecret(ctx, &PutSecretCommand{
+		Principal: cmd.Principal,
+		CommandID: cmd.CommandID + ":save:" + a.QuestionID,
+		ScopeKind: scopeKind,
+		ScopeID:   a.SaveScopeID,
+		Name:      a.SaveSecretName,
+		Value:     bytes.Clone(a.SecretValue),
+	})
+	return err
 }
 
 func (s *InteractionService) validateBeforeAnswer(ctx context.Context, ticket *interaction.Ticket, decision *interaction.Decision) error {

@@ -109,6 +109,20 @@ func NewTranscripts(ctx context.Context, deps TranscriptDeps) (*Transcripts, err
 	return t, nil
 }
 
+// RefreshRedactor synchronously rebuilds the transcript SecretRedactor.
+func (t *Transcripts) RefreshRedactor(ctx context.Context) {
+	if t != nil && t.redactor != nil {
+		t.redactor.RefreshSync(ctx)
+	}
+}
+
+// AddEphemeralSecret feeds a one-time secret value into the transcript SecretRedactor.
+func (t *Transcripts) AddEphemeralSecret(ctx context.Context, val []byte) {
+	if t != nil && t.redactor != nil {
+		t.redactor.AddEphemeral(ctx, val)
+	}
+}
+
 // locked is the vault guard: it only swaps in-memory state and never blocks.
 // The coalescers close on one supervised task because Close flushes at delta
 // rate and a guard must be quick.

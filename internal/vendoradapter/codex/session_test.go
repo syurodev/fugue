@@ -378,7 +378,7 @@ func assertResolvedRPCLog(t *testing.T, rpcDir, rpcLogName string) {
 		`"id":4,"result":{"answers":{"q1":{"answers":["yes"]}}}`,
 		`"id":5,"result":{"answers":{}}`,
 		`"id":8,"result":{"decision":{"acceptWithExecpolicyAmendment":{"execpolicy_amendment":["git","status"]}}}`,
-		`"id":9,"error":{"code":-32000,"message":"Codex asked for secret input, which Fugue cannot relay yet"}`,
+		`"id":9,"error":{"code":-32000,"message":"unsupported server request"}`,
 	} {
 		if !strings.Contains(logText, wantSubstr) {
 			t.Fatalf("rpcLog missing %s\ngot:\n%s", wantSubstr, logText)
@@ -412,15 +412,15 @@ func assertAdditionalServerRequestResolutions(t *testing.T, codexSess *Session) 
 			t.Fatalf("Resolve(%s) failed: %v", tc.id, err)
 		}
 	}
-	secretFrame := Frame{
-		Kind: FrameServerRequest, ID: json.RawMessage(`9`), CanonicalID: "9", Method: MethodRequestUserInput,
-		Params: json.RawMessage(`{"threadId":"th-1","turnId":"t-1","itemId":"q-sec","questions":[{"id":"s1","header":"H","question":"SECRET-LOG-CANARY","isSecret":true}]}`),
+	unrelayedFrame := Frame{
+		Kind: FrameServerRequest, ID: json.RawMessage(`9`), CanonicalID: "9", Method: "item/unknown/request",
+		Params: json.RawMessage(`{"threadId":"th-1","turnId":"t-1"}`),
 	}
-	if !codexSess.registerServerRequest(&secretFrame) {
+	if !codexSess.registerServerRequest(&unrelayedFrame) {
 		t.Fatal("registerServerRequest(9) returned false")
 	}
-	secObs := codexSess.normalizer.NormalizeFrame(&secretFrame)
-	codexSess.rejectUnrelayedServerRequest(secretFrame.CanonicalID, unrelayedServerRequestMessage(&secObs))
+	unrelayedObs := codexSess.normalizer.NormalizeFrame(&unrelayedFrame)
+	codexSess.rejectUnrelayedServerRequest(unrelayedFrame.CanonicalID, unrelayedServerRequestMessage(&unrelayedObs))
 
 	// Register one more pending request so Close exercises rejectPendingApprovalsLocked.
 	pendingFrame := Frame{Kind: FrameServerRequest, ID: json.RawMessage(`7`), CanonicalID: "7", Method: MethodCommandApproval, Params: json.RawMessage(`{"threadId":"th-1","turnId":"t-1","itemId":"c-7"}`)}

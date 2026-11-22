@@ -1,6 +1,7 @@
 package interaction
 
 import (
+	"bytes"
 	"slices"
 	"time"
 
@@ -220,7 +221,8 @@ func normalizeAnswers(questions []Question, answers []Answer) ([]Answer, error) 
 	}
 	out := make([]Answer, 0, len(answers))
 	seen := make(map[string]struct{}, len(answers))
-	for _, ans := range answers {
+	for i := range answers {
+		ans := &answers[i]
 		q, err := answerFor(asked, seen, ans)
 		if err != nil {
 			return nil, err
@@ -229,14 +231,19 @@ func normalizeAnswers(questions []Question, answers []Answer) ([]Answer, error) 
 			return nil, err
 		}
 		seen[ans.QuestionID] = struct{}{}
-		out = append(out, Answer{QuestionID: ans.QuestionID, OptionIDs: slices.Clone(ans.OptionIDs), Text: ans.Text})
+		out = append(out, Answer{
+			QuestionID:  ans.QuestionID,
+			OptionIDs:   slices.Clone(ans.OptionIDs),
+			Text:        ans.Text,
+			SecretValue: bytes.Clone(ans.SecretValue),
+		})
 	}
 	return out, nil
 }
 
 // answerFor resolves the asked question of one answer, rejecting unknown and
 // repeated question IDs.
-func answerFor(asked map[string]Question, seen map[string]struct{}, ans Answer) (Question, error) {
+func answerFor(asked map[string]Question, seen map[string]struct{}, ans *Answer) (Question, error) {
 	q, ok := asked[ans.QuestionID]
 	if !ok {
 		return Question{}, errcode.New(errcode.InvalidArgument, "answer references an unknown question")
@@ -247,8 +254,27 @@ func answerFor(asked map[string]Question, seen map[string]struct{}, ans Answer) 
 	return q, nil
 }
 
+func checkSecretAnswer(q *Question, ans *Answer) error {
+	if !q.Secret {
+		if len(ans.SecretValue) > 0 {
+			return errcode.New(errcode.InvalidArgument, "non-secret question cannot carry a secret value")
+		}
+		return nil
+	}
+	if ans.Text != "" {
+		return errcode.New(errcode.InvalidArgument, "secret question answer must not use plain text")
+	}
+	if len(ans.SecretValue) > MaxSecretAnswerBytes {
+		return errcode.New(errcode.SecretsValueTooLarge, "secret answer exceeds the 64 KiB limit")
+	}
+	return nil
+}
+
 // checkAnswer validates one answer against its question (ask-plan §4).
-func checkAnswer(q *Question, ans Answer) error {
+func checkAnswer(q *Question, ans *Answer) error {
+	if err := checkSecretAnswer(q, ans); err != nil {
+		return err
+	}
 	if err := checkTextLimit(ans.Text, MaxAnswerBytes, "answer text"); err != nil {
 		return err
 	}
@@ -260,8 +286,8 @@ func checkAnswer(q *Question, ans Answer) error {
 			return ErrOptionNotOffered
 		}
 	}
-	if len(ans.OptionIDs) == 0 && ans.Text == "" {
-		return errcode.New(errcode.InvalidArgument, "answer requires an option or text")
+	if len(ans.OptionIDs) == 0 && ans.Text == "" && len(ans.SecretValue) == 0 {
+		return errcode.New(errcode.InvalidArgument, "answer requires an option, text, or secret value")
 	}
 	return nil
 }

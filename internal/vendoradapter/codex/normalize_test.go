@@ -248,16 +248,7 @@ func assertExecpolicyAndSecretUserInputNormalize(t *testing.T, n *Normalizer) {
 	}
 
 	secretObs := feed(t, n, `{"id":15,"method":"item/tool/requestUserInput","params":{"threadId":"th-1","turnId":"t-1","itemId":"q-sec","isBlocking":true,"questions":[{"id":"tok","header":"API-TOKEN-HDR","question":"SECRET-TOKEN-PROMPT","isOther":true,"isSecret":true}]}}`)
-	if secretObs.ServerRequest != nil {
-		t.Fatalf("secret question produced ServerRequest = %+v, want nil", secretObs.ServerRequest)
-	}
-	noticeItem := oneRecord(t, &secretObs)
-	noticeMeta := metaOf[transcript.NoticeMetadata](t, noticeItem.Metadata)
-	noticeBody, ok := noticeItem.Content.(transcript.NoticeContent)
-	if !ok || noticeMeta.Code != unsupportedEventCode || noticeBody.Text != secretInputUnsupportedMessage {
-		t.Fatalf("secret question notice = (%+v, %+v)", noticeMeta, noticeBody)
-	}
-	if strings.Contains(noticeItem.RawRef, "SECRET") || strings.Contains(noticeBody.Text, "API-TOKEN-HDR") || strings.Contains(noticeBody.Text, "SECRET-TOKEN-PROMPT") {
-		t.Fatalf("secret question text leaked into notice item: %+v", noticeItem)
+	if secretObs.ServerRequest == nil || len(secretObs.ServerRequest.Questions) != 1 || !secretObs.ServerRequest.Questions[0].Secret {
+		t.Fatalf("secret question ServerRequest = %+v, want 1 secret question", secretObs.ServerRequest)
 	}
 }

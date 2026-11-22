@@ -19,6 +19,8 @@ const (
 	// MaxAnswerBytes bounds the free text of a question answer and the
 	// optional message of a relayed approval.
 	MaxAnswerBytes = 16 * 1024
+	// MaxSecretAnswerBytes bounds a secret answer value (64 KiB, matching secretstore).
+	MaxSecretAnswerBytes = 64 * 1024
 	// MaxNoteBytes bounds the deny note delivered with a denial.
 	MaxNoteBytes = 4 * 1024
 	// MaxOptions bounds the number of options per request or per question.

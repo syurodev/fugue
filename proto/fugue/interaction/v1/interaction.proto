@@ -17,6 +17,9 @@ message Question {
   repeated Option options = 3;
   bool multi_select = 4;
   bool allow_text = 5;
+  // secret marks a question whose answer is sensitive (interaction v0.17 §7-8,
+  // Codex isSecret). The answer is relayed once in memory and never persisted.
+  bool secret = 6;
 }
 
 // QuestionAnswer carries the user's answer to one question of a question-kind
@@ -25,6 +28,16 @@ message QuestionAnswer {
   string question_id = 1;
   repeated string option_ids = 2;
   string text = 3;
+  // secret_id references an existing secret in fugue.secrets.v1 for a secret
+  // question; the host opens it in memory and relays it to the vendor.
+  string secret_id = 4;
+  // secret_value carries a one-time direct secret answer (never persisted).
+  bytes secret_value = 5;
+  // save_secret_name, when non-empty alongside secret_value, saves the secret
+  // into fugue.secrets.v1 before relaying.
+  string save_secret_name = 6;
+  string save_scope_kind = 7;
+  string save_scope_id = 8;
 }
 
 // PendingRequest is the view of a single pending interaction request (docs:

@@ -1,6 +1,7 @@
 package interaction
 
 import (
+	"bytes"
 	"slices"
 	"time"
 )
@@ -31,7 +32,7 @@ func sameQuestions(a, b []Question) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].ID != b[i].ID || a[i].Question != b[i].Question || a[i].Header != b[i].Header || a[i].MultiSelect != b[i].MultiSelect {
+		if a[i].ID != b[i].ID || a[i].Question != b[i].Question || a[i].Header != b[i].Header || a[i].MultiSelect != b[i].MultiSelect || a[i].Secret != b[i].Secret {
 			return false
 		}
 		if !slices.Equal(a[i].Options, b[i].Options) {
@@ -76,8 +77,18 @@ func cloneAnswers(answers []Answer) []Answer {
 	for i := range answers {
 		out[i] = answers[i]
 		out[i].OptionIDs = slices.Clone(answers[i].OptionIDs)
+		out[i].SecretValue = bytes.Clone(answers[i].SecretValue)
 	}
 	return out
+}
+
+func clearSecretAnswers(answers []Answer) {
+	for i := range answers {
+		if len(answers[i].SecretValue) > 0 {
+			clear(answers[i].SecretValue)
+			answers[i].SecretValue = nil
+		}
+	}
 }
 
 func (o *Owner) isTicketDoneLocked(t *Ticket, now time.Time) bool {
