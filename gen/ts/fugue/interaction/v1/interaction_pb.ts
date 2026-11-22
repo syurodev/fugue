@@ -10,7 +10,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fugue/interaction/v1/interaction.proto.
  */
 export const file_fugue_interaction_v1_interaction: GenFile = /*@__PURE__*/
-  fileDesc("CiZmdWd1ZS9pbnRlcmFjdGlvbi92MS9pbnRlcmFjdGlvbi5wcm90bxIUZnVndWUuaW50ZXJhY3Rpb24udjEiOAoGT3B0aW9uEgoKAmlkGAEgASgJEg0KBWxhYmVsGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJIogBCghRdWVzdGlvbhITCgtxdWVzdGlvbl9pZBgBIAEoCRIOCgZwcm9tcHQYAiABKAkSLQoHb3B0aW9ucxgDIAMoCzIcLmZ1Z3VlLmludGVyYWN0aW9uLnYxLk9wdGlvbhIUCgxtdWx0aV9zZWxlY3QYBCABKAgSEgoKYWxsb3dfdGV4dBgFIAEoCCJHCg5RdWVzdGlvbkFuc3dlchITCgtxdWVzdGlvbl9pZBgBIAEoCRISCgpvcHRpb25faWRzGAIgAygJEgwKBHRleHQYAyABKAkizgIKDlBlbmRpbmdSZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSEwoLaW5jYXJuYXRpb24YAiABKAkSEgoKc2Vzc2lvbl9pZBgDIAEoCRIMCgR0b29sGAQgASgJEgwKBGtpbmQYBSABKAkSDAoEcmlzaxgGIAEoCRIPCgdlbnZfdGFnGAcgASgJEg8KB3N1bW1hcnkYCCABKAkSGAoQb2ZmZXJlZF9vdXRjb21lcxgJIAMoCRItCgdvcHRpb25zGAogAygLMhwuZnVndWUuaW50ZXJhY3Rpb24udjEuT3B0aW9uEhkKEWdyYW50X3Njb3BlX2xhYmVsGAsgASgJEjEKCXF1ZXN0aW9ucxgMIAMoCzIeLmZ1Z3VlLmludGVyYWN0aW9uLnYxLlF1ZXN0aW9uEg4KBmRldGFpbBgNIAEoCRIMCgRib2R5GA4gASgJIhQKEkxpc3RQZW5kaW5nUmVxdWVzdCJfChNMaXN0UGVuZGluZ1Jlc3BvbnNlEjYKCHJlcXVlc3RzGAEgAygLMiQuZnVndWUuaW50ZXJhY3Rpb24udjEuUGVuZGluZ1JlcXVlc3QSEAoIc2VxdWVuY2UYAiABKAQi1gEKDUFuc3dlclJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRITCgtpbmNhcm5hdGlvbhgCIAEoCRISCgpyZXF1ZXN0X2lkGAMgASgJEg8KB291dGNvbWUYBCABKAkSFgoJb3B0aW9uX2lkGAUgASgJSACIAQESEQoEdGV4dBgGIAEoCUgBiAEBEjUKB2Fuc3dlcnMYByADKAsyJC5mdWd1ZS5pbnRlcmFjdGlvbi52MS5RdWVzdGlvbkFuc3dlckIMCgpfb3B0aW9uX2lkQgcKBV90ZXh0IjUKDkFuc3dlclJlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSDwoHb3V0Y29tZRgCIAEoCTLNAQoSSW50ZXJhY3Rpb25TZXJ2aWNlEmIKC0xpc3RQZW5kaW5nEiguZnVndWUuaW50ZXJhY3Rpb24udjEuTGlzdFBlbmRpbmdSZXF1ZXN0GikuZnVndWUuaW50ZXJhY3Rpb24udjEuTGlzdFBlbmRpbmdSZXNwb25zZRJTCgZBbnN3ZXISIy5mdWd1ZS5pbnRlcmFjdGlvbi52MS5BbnN3ZXJSZXF1ZXN0GiQuZnVndWUuaW50ZXJhY3Rpb24udjEuQW5zd2VyUmVzcG9uc2VC4wEKGGNvbS5mdWd1ZS5pbnRlcmFjdGlvbi52MUIQSW50ZXJhY3Rpb25Qcm90b1ABWkNnaXRodWIuY29tL3N5dXJvZGV2L2Z1Z3VlL3BrZy9wYi9mdWd1ZS9pbnRlcmFjdGlvbi92MTtpbnRlcmFjdGlvbnYxogIDRklYqgIURnVndWUuSW50ZXJhY3Rpb24uVjHKAhRGdWd1ZVxJbnRlcmFjdGlvblxWMeICIEZ1Z3VlXEludGVyYWN0aW9uXFYxXEdQQk1ldGFkYXRh6gIWRnVndWU6OkludGVyYWN0aW9uOjpWMWIGcHJvdG8z");
+  fileDesc("CiZmdWd1ZS9pbnRlcmFjdGlvbi92MS9pbnRlcmFjdGlvbi5wcm90bxIUZnVndWUuaW50ZXJhY3Rpb24udjEiOAoGT3B0aW9uEgoKAmlkGAEgASgJEg0KBWxhYmVsGAIgASgJEhMKC2Rlc2NyaXB0aW9uGAMgASgJIpgBCghRdWVzdGlvbhITCgtxdWVzdGlvbl9pZBgBIAEoCRIOCgZwcm9tcHQYAiABKAkSLQoHb3B0aW9ucxgDIAMoCzIcLmZ1Z3VlLmludGVyYWN0aW9uLnYxLk9wdGlvbhIUCgxtdWx0aV9zZWxlY3QYBCABKAgSEgoKYWxsb3dfdGV4dBgFIAEoCBIOCgZzZWNyZXQYBiABKAgiugEKDlF1ZXN0aW9uQW5zd2VyEhMKC3F1ZXN0aW9uX2lkGAEgASgJEhIKCm9wdGlvbl9pZHMYAiADKAkSDAoEdGV4dBgDIAEoCRIRCglzZWNyZXRfaWQYBCABKAkSFAoMc2VjcmV0X3ZhbHVlGAUgASgMEhgKEHNhdmVfc2VjcmV0X25hbWUYBiABKAkSFwoPc2F2ZV9zY29wZV9raW5kGAcgASgJEhUKDXNhdmVfc2NvcGVfaWQYCCABKAkizgIKDlBlbmRpbmdSZXF1ZXN0EhIKCnJlcXVlc3RfaWQYASABKAkSEwoLaW5jYXJuYXRpb24YAiABKAkSEgoKc2Vzc2lvbl9pZBgDIAEoCRIMCgR0b29sGAQgASgJEgwKBGtpbmQYBSABKAkSDAoEcmlzaxgGIAEoCRIPCgdlbnZfdGFnGAcgASgJEg8KB3N1bW1hcnkYCCABKAkSGAoQb2ZmZXJlZF9vdXRjb21lcxgJIAMoCRItCgdvcHRpb25zGAogAygLMhwuZnVndWUuaW50ZXJhY3Rpb24udjEuT3B0aW9uEhkKEWdyYW50X3Njb3BlX2xhYmVsGAsgASgJEjEKCXF1ZXN0aW9ucxgMIAMoCzIeLmZ1Z3VlLmludGVyYWN0aW9uLnYxLlF1ZXN0aW9uEg4KBmRldGFpbBgNIAEoCRIMCgRib2R5GA4gASgJIhQKEkxpc3RQZW5kaW5nUmVxdWVzdCJfChNMaXN0UGVuZGluZ1Jlc3BvbnNlEjYKCHJlcXVlc3RzGAEgAygLMiQuZnVndWUuaW50ZXJhY3Rpb24udjEuUGVuZGluZ1JlcXVlc3QSEAoIc2VxdWVuY2UYAiABKAQi1gEKDUFuc3dlclJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRITCgtpbmNhcm5hdGlvbhgCIAEoCRISCgpyZXF1ZXN0X2lkGAMgASgJEg8KB291dGNvbWUYBCABKAkSFgoJb3B0aW9uX2lkGAUgASgJSACIAQESEQoEdGV4dBgGIAEoCUgBiAEBEjUKB2Fuc3dlcnMYByADKAsyJC5mdWd1ZS5pbnRlcmFjdGlvbi52MS5RdWVzdGlvbkFuc3dlckIMCgpfb3B0aW9uX2lkQgcKBV90ZXh0IjUKDkFuc3dlclJlc3BvbnNlEhIKCnJlcXVlc3RfaWQYASABKAkSDwoHb3V0Y29tZRgCIAEoCTLNAQoSSW50ZXJhY3Rpb25TZXJ2aWNlEmIKC0xpc3RQZW5kaW5nEiguZnVndWUuaW50ZXJhY3Rpb24udjEuTGlzdFBlbmRpbmdSZXF1ZXN0GikuZnVndWUuaW50ZXJhY3Rpb24udjEuTGlzdFBlbmRpbmdSZXNwb25zZRJTCgZBbnN3ZXISIy5mdWd1ZS5pbnRlcmFjdGlvbi52MS5BbnN3ZXJSZXF1ZXN0GiQuZnVndWUuaW50ZXJhY3Rpb24udjEuQW5zd2VyUmVzcG9uc2VC4wEKGGNvbS5mdWd1ZS5pbnRlcmFjdGlvbi52MUIQSW50ZXJhY3Rpb25Qcm90b1ABWkNnaXRodWIuY29tL3N5dXJvZGV2L2Z1Z3VlL3BrZy9wYi9mdWd1ZS9pbnRlcmFjdGlvbi92MTtpbnRlcmFjdGlvbnYxogIDRklYqgIURnVndWUuSW50ZXJhY3Rpb24uVjHKAhRGdWd1ZVxJbnRlcmFjdGlvblxWMeICIEZ1Z3VlXEludGVyYWN0aW9uXFYxXEdQQk1ldGFkYXRh6gIWRnVndWU6OkludGVyYWN0aW9uOjpWMWIGcHJvdG8z");
 
 /**
  * Option is one selectable choice offered by a select request, by a question,
@@ -72,6 +72,14 @@ export type Question = Message<"fugue.interaction.v1.Question"> & {
    * @generated from field: bool allow_text = 5;
    */
   allowText: boolean;
+
+  /**
+   * secret marks a question whose answer is sensitive (interaction v0.17 §7-8,
+   * Codex isSecret). The answer is relayed once in memory and never persisted.
+   *
+   * @generated from field: bool secret = 6;
+   */
+  secret: boolean;
 };
 
 /**
@@ -102,6 +110,39 @@ export type QuestionAnswer = Message<"fugue.interaction.v1.QuestionAnswer"> & {
    * @generated from field: string text = 3;
    */
   text: string;
+
+  /**
+   * secret_id references an existing secret in fugue.secrets.v1 for a secret
+   * question; the host opens it in memory and relays it to the vendor.
+   *
+   * @generated from field: string secret_id = 4;
+   */
+  secretId: string;
+
+  /**
+   * secret_value carries a one-time direct secret answer (never persisted).
+   *
+   * @generated from field: bytes secret_value = 5;
+   */
+  secretValue: Uint8Array;
+
+  /**
+   * save_secret_name, when non-empty alongside secret_value, saves the secret
+   * into fugue.secrets.v1 before relaying.
+   *
+   * @generated from field: string save_secret_name = 6;
+   */
+  saveSecretName: string;
+
+  /**
+   * @generated from field: string save_scope_kind = 7;
+   */
+  saveScopeKind: string;
+
+  /**
+   * @generated from field: string save_scope_id = 8;
+   */
+  saveScopeId: string;
 };
 
 /**

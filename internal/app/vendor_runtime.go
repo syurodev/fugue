@@ -12,6 +12,7 @@ import (
 	"github.com/syurodev/fugue/internal/ocr"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/process"
+	"github.com/syurodev/fugue/internal/secretstore"
 	"github.com/syurodev/fugue/internal/storage"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
@@ -51,7 +52,7 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 		return errors.Join(errcode.Wrap(errcode.Internal, "recover vendor sessions", recErr), vs.Close())
 	}
 	reapLeftoverVendorProcesses(ctx, identities, deps)
-	transcripts, err := NewTranscripts(base, TranscriptDeps{Store: vs, Hub: hp.rt.hub, Vault: v, Clock: deps.Clock})
+	transcripts, err := initTranscriptsAndSecrets(base, hp, store, vs, v, deps)
 	if err != nil {
 		return errors.Join(err, vs.Close())
 	}
@@ -87,6 +88,30 @@ func initVendor(ctx, base context.Context, hp *HostProcess, store *storage.Store
 		return err
 	}
 	return nil
+}
+
+func initTranscriptsAndSecrets(base context.Context, hp *HostProcess, store *storage.Store, vs *vendorstore.Store, v *vault.Service, deps *HostDeps) (*Transcripts, error) {
+	secStore := secretstore.New(store.DB(), v, deps.Clock, deps.IDs)
+	secSvc, err := NewSecretService(secStore, hp.rt.hub, deps.Clock)
+	if err != nil {
+		return nil, err
+	}
+	hp.rt.secretService = secSvc
+	transcripts, err := NewTranscripts(base, TranscriptDeps{
+		Store:       vs,
+		Hub:         hp.rt.hub,
+		Vault:       v,
+		Clock:       deps.Clock,
+		KnownValues: secStore.KnownValues,
+	})
+	if err != nil {
+		return nil, err
+	}
+	secSvc.SetOnMutate(transcripts.RefreshRedactor)
+	if hp.rt.interactions != nil {
+		hp.rt.interactions.SetSecretSupport(secSvc, transcripts)
+	}
+	return transcripts, nil
 }
 
 // newHostVault opens the host vault and the Host API vault service over it;
@@ -232,6 +257,7 @@ func wireTeamServices(
 	hp.rt.teamProposals.SetTeamChannels(topics)
 	hp.rt.tasksService = NewTasksService(vs, vendorTaskSessions{svc: &VendorService{sessions: sessions, store: vs}}, v, deps.Clock, deps.IDs)
 	hp.rt.tasksService.SetWorktreePruner(hp.rt.workspaces.domain, teamGit, deps.DataDir)
+	hp.rt.tasksService.SetTeamServices(hp.rt.teamTasks, hp.rt.interactions)
 	hp.rt.interactions.SetTeamApprovalObserver(func(ev interaction.LifecycleEvent) {
 		hp.rt.goTask("team.approval-line", func(lineCtx context.Context) error {
 			hp.rt.teamTasks.ObserveApproval(lineCtx, ev)

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"slices"
+	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -105,6 +106,24 @@ func validateHostDeps(deps *HostDeps) error {
 		}
 	}
 	return nil
+}
+
+// parseAPIVersion parses "v<N>" numerically; anything else is invalid.
+func parseAPIVersion(v string) (int, error) {
+	const invalid = "an api version must be \"v\" followed by digits"
+	if len(v) < 2 || v[0] != 'v' {
+		return 0, errcode.New(errcode.InvalidArgument, invalid)
+	}
+	for _, r := range v[1:] {
+		if r < '0' || r > '9' {
+			return 0, errcode.New(errcode.InvalidArgument, invalid)
+		}
+	}
+	n, err := strconv.Atoi(v[1:])
+	if err != nil || n <= 0 {
+		return 0, errcode.New(errcode.InvalidArgument, invalid)
+	}
+	return n, nil
 }
 
 func openHostStore(ctx context.Context, deps *HostDeps) (*storage.Store, error) {

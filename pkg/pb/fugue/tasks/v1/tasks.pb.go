@@ -487,6 +487,798 @@ func (x *PruneWorktreesResponse) GetRemovedAdminEntries() int32 {
 	return 0
 }
 
+// TeamSummary is the metadata-only summary of one team (host-api v0.19 §5.3,
+// INV-09). It is served even while the vault is locked so the sidebar and team
+// strip can render badges.
+type TeamSummary struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TeamId        string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	WorkspaceId   string                 `protobuf:"bytes,2,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	SessionId     string                 `protobuf:"bytes,3,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	State         string                 `protobuf:"bytes,4,opt,name=state,proto3" json:"state,omitempty"`
+	WaitingReason string                 `protobuf:"bytes,5,opt,name=waiting_reason,json=waitingReason,proto3" json:"waiting_reason,omitempty"`
+	TaskCount     uint32                 `protobuf:"varint,6,opt,name=task_count,json=taskCount,proto3" json:"task_count,omitempty"`
+	RunningCount  uint32                 `protobuf:"varint,7,opt,name=running_count,json=runningCount,proto3" json:"running_count,omitempty"`
+	AskingCount   uint32                 `protobuf:"varint,8,opt,name=asking_count,json=askingCount,proto3" json:"asking_count,omitempty"`
+	FailedCount   uint32                 `protobuf:"varint,9,opt,name=failed_count,json=failedCount,proto3" json:"failed_count,omitempty"`
+	LastSeq       int64                  `protobuf:"varint,10,opt,name=last_seq,json=lastSeq,proto3" json:"last_seq,omitempty"`
+	CreatedAt     *timestamppb.Timestamp `protobuf:"bytes,11,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
+	UpdatedAt     *timestamppb.Timestamp `protobuf:"bytes,12,opt,name=updated_at,json=updatedAt,proto3" json:"updated_at,omitempty"`
+	EndedAt       *timestamppb.Timestamp `protobuf:"bytes,13,opt,name=ended_at,json=endedAt,proto3" json:"ended_at,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TeamSummary) Reset() {
+	*x = TeamSummary{}
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[7]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TeamSummary) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TeamSummary) ProtoMessage() {}
+
+func (x *TeamSummary) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[7]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TeamSummary.ProtoReflect.Descriptor instead.
+func (*TeamSummary) Descriptor() ([]byte, []int) {
+	return file_fugue_tasks_v1_tasks_proto_rawDescGZIP(), []int{7}
+}
+
+func (x *TeamSummary) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *TeamSummary) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *TeamSummary) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *TeamSummary) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *TeamSummary) GetWaitingReason() string {
+	if x != nil {
+		return x.WaitingReason
+	}
+	return ""
+}
+
+func (x *TeamSummary) GetTaskCount() uint32 {
+	if x != nil {
+		return x.TaskCount
+	}
+	return 0
+}
+
+func (x *TeamSummary) GetRunningCount() uint32 {
+	if x != nil {
+		return x.RunningCount
+	}
+	return 0
+}
+
+func (x *TeamSummary) GetAskingCount() uint32 {
+	if x != nil {
+		return x.AskingCount
+	}
+	return 0
+}
+
+func (x *TeamSummary) GetFailedCount() uint32 {
+	if x != nil {
+		return x.FailedCount
+	}
+	return 0
+}
+
+func (x *TeamSummary) GetLastSeq() int64 {
+	if x != nil {
+		return x.LastSeq
+	}
+	return 0
+}
+
+func (x *TeamSummary) GetCreatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.CreatedAt
+	}
+	return nil
+}
+
+func (x *TeamSummary) GetUpdatedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.UpdatedAt
+	}
+	return nil
+}
+
+func (x *TeamSummary) GetEndedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.EndedAt
+	}
+	return nil
+}
+
+// TeamBudget carries optional team-wide §11 limits.
+type TeamBudget struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	MaxAgents          uint32                 `protobuf:"varint,1,opt,name=max_agents,json=maxAgents,proto3" json:"max_agents,omitempty"`
+	MaxDurationSeconds int64                  `protobuf:"varint,2,opt,name=max_duration_seconds,json=maxDurationSeconds,proto3" json:"max_duration_seconds,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *TeamBudget) Reset() {
+	*x = TeamBudget{}
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TeamBudget) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TeamBudget) ProtoMessage() {}
+
+func (x *TeamBudget) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TeamBudget.ProtoReflect.Descriptor instead.
+func (*TeamBudget) Descriptor() ([]byte, []int) {
+	return file_fugue_tasks_v1_tasks_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *TeamBudget) GetMaxAgents() uint32 {
+	if x != nil {
+		return x.MaxAgents
+	}
+	return 0
+}
+
+func (x *TeamBudget) GetMaxDurationSeconds() int64 {
+	if x != nil {
+		return x.MaxDurationSeconds
+	}
+	return 0
+}
+
+// TaskNode is one node in a team's task tree (§5.3). When the vault is locked,
+// sealed fields (goal, write_scope) are omitted.
+type TaskNode struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	TaskId         string                 `protobuf:"bytes,1,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	ParentTaskId   string                 `protobuf:"bytes,2,opt,name=parent_task_id,json=parentTaskId,proto3" json:"parent_task_id,omitempty"`
+	RetryOf        string                 `protobuf:"bytes,3,opt,name=retry_of,json=retryOf,proto3" json:"retry_of,omitempty"`
+	Attempt        uint32                 `protobuf:"varint,4,opt,name=attempt,proto3" json:"attempt,omitempty"`
+	HierarchyRole  string                 `protobuf:"bytes,5,opt,name=hierarchy_role,json=hierarchyRole,proto3" json:"hierarchy_role,omitempty"`
+	CatalogRole    string                 `protobuf:"bytes,6,opt,name=catalog_role,json=catalogRole,proto3" json:"catalog_role,omitempty"`
+	Vendor         string                 `protobuf:"bytes,7,opt,name=vendor,proto3" json:"vendor,omitempty"`
+	Model          string                 `protobuf:"bytes,8,opt,name=model,proto3" json:"model,omitempty"`
+	AccountId      string                 `protobuf:"bytes,9,opt,name=account_id,json=accountId,proto3" json:"account_id,omitempty"`
+	State          string                 `protobuf:"bytes,10,opt,name=state,proto3" json:"state,omitempty"`
+	FailureCode    string                 `protobuf:"bytes,11,opt,name=failure_code,json=failureCode,proto3" json:"failure_code,omitempty"`
+	SessionId      string                 `protobuf:"bytes,12,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	Goal           string                 `protobuf:"bytes,13,opt,name=goal,proto3" json:"goal,omitempty"`
+	WriteScope     []string               `protobuf:"bytes,14,rep,name=write_scope,json=writeScope,proto3" json:"write_scope,omitempty"`
+	DependsOn      []string               `protobuf:"bytes,15,rep,name=depends_on,json=dependsOn,proto3" json:"depends_on,omitempty"`
+	LastChannelSeq int64                  `protobuf:"varint,16,opt,name=last_channel_seq,json=lastChannelSeq,proto3" json:"last_channel_seq,omitempty"`
+	ElapsedMs      int64                  `protobuf:"varint,17,opt,name=elapsed_ms,json=elapsedMs,proto3" json:"elapsed_ms,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *TaskNode) Reset() {
+	*x = TaskNode{}
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TaskNode) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TaskNode) ProtoMessage() {}
+
+func (x *TaskNode) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TaskNode.ProtoReflect.Descriptor instead.
+func (*TaskNode) Descriptor() ([]byte, []int) {
+	return file_fugue_tasks_v1_tasks_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *TaskNode) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *TaskNode) GetParentTaskId() string {
+	if x != nil {
+		return x.ParentTaskId
+	}
+	return ""
+}
+
+func (x *TaskNode) GetRetryOf() string {
+	if x != nil {
+		return x.RetryOf
+	}
+	return ""
+}
+
+func (x *TaskNode) GetAttempt() uint32 {
+	if x != nil {
+		return x.Attempt
+	}
+	return 0
+}
+
+func (x *TaskNode) GetHierarchyRole() string {
+	if x != nil {
+		return x.HierarchyRole
+	}
+	return ""
+}
+
+func (x *TaskNode) GetCatalogRole() string {
+	if x != nil {
+		return x.CatalogRole
+	}
+	return ""
+}
+
+func (x *TaskNode) GetVendor() string {
+	if x != nil {
+		return x.Vendor
+	}
+	return ""
+}
+
+func (x *TaskNode) GetModel() string {
+	if x != nil {
+		return x.Model
+	}
+	return ""
+}
+
+func (x *TaskNode) GetAccountId() string {
+	if x != nil {
+		return x.AccountId
+	}
+	return ""
+}
+
+func (x *TaskNode) GetState() string {
+	if x != nil {
+		return x.State
+	}
+	return ""
+}
+
+func (x *TaskNode) GetFailureCode() string {
+	if x != nil {
+		return x.FailureCode
+	}
+	return ""
+}
+
+func (x *TaskNode) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *TaskNode) GetGoal() string {
+	if x != nil {
+		return x.Goal
+	}
+	return ""
+}
+
+func (x *TaskNode) GetWriteScope() []string {
+	if x != nil {
+		return x.WriteScope
+	}
+	return nil
+}
+
+func (x *TaskNode) GetDependsOn() []string {
+	if x != nil {
+		return x.DependsOn
+	}
+	return nil
+}
+
+func (x *TaskNode) GetLastChannelSeq() int64 {
+	if x != nil {
+		return x.LastChannelSeq
+	}
+	return 0
+}
+
+func (x *TaskNode) GetElapsedMs() int64 {
+	if x != nil {
+		return x.ElapsedMs
+	}
+	return 0
+}
+
+// TeamView is the full read model of one team (§5.3). When vault_locked is
+// true, sealed content (title, brief, goal, write_scope, diff_text) is omitted.
+type TeamView struct {
+	state            protoimpl.MessageState `protogen:"open.v1"`
+	Summary          *TeamSummary           `protobuf:"bytes,1,opt,name=summary,proto3" json:"summary,omitempty"`
+	VaultLocked      bool                   `protobuf:"varint,2,opt,name=vault_locked,json=vaultLocked,proto3" json:"vault_locked,omitempty"`
+	Title            string                 `protobuf:"bytes,3,opt,name=title,proto3" json:"title,omitempty"`
+	Brief            string                 `protobuf:"bytes,4,opt,name=brief,proto3" json:"brief,omitempty"`
+	Budget           *TeamBudget            `protobuf:"bytes,5,opt,name=budget,proto3" json:"budget,omitempty"`
+	PendingRequestId string                 `protobuf:"bytes,6,opt,name=pending_request_id,json=pendingRequestId,proto3" json:"pending_request_id,omitempty"`
+	Tasks            []*TaskNode            `protobuf:"bytes,7,rep,name=tasks,proto3" json:"tasks,omitempty"`
+	DiffText         string                 `protobuf:"bytes,8,opt,name=diff_text,json=diffText,proto3" json:"diff_text,omitempty"`
+	DiffTruncated    bool                   `protobuf:"varint,9,opt,name=diff_truncated,json=diffTruncated,proto3" json:"diff_truncated,omitempty"`
+	unknownFields    protoimpl.UnknownFields
+	sizeCache        protoimpl.SizeCache
+}
+
+func (x *TeamView) Reset() {
+	*x = TeamView{}
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TeamView) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TeamView) ProtoMessage() {}
+
+func (x *TeamView) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TeamView.ProtoReflect.Descriptor instead.
+func (*TeamView) Descriptor() ([]byte, []int) {
+	return file_fugue_tasks_v1_tasks_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *TeamView) GetSummary() *TeamSummary {
+	if x != nil {
+		return x.Summary
+	}
+	return nil
+}
+
+func (x *TeamView) GetVaultLocked() bool {
+	if x != nil {
+		return x.VaultLocked
+	}
+	return false
+}
+
+func (x *TeamView) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *TeamView) GetBrief() string {
+	if x != nil {
+		return x.Brief
+	}
+	return ""
+}
+
+func (x *TeamView) GetBudget() *TeamBudget {
+	if x != nil {
+		return x.Budget
+	}
+	return nil
+}
+
+func (x *TeamView) GetPendingRequestId() string {
+	if x != nil {
+		return x.PendingRequestId
+	}
+	return ""
+}
+
+func (x *TeamView) GetTasks() []*TaskNode {
+	if x != nil {
+		return x.Tasks
+	}
+	return nil
+}
+
+func (x *TeamView) GetDiffText() string {
+	if x != nil {
+		return x.DiffText
+	}
+	return ""
+}
+
+func (x *TeamView) GetDiffTruncated() bool {
+	if x != nil {
+		return x.DiffTruncated
+	}
+	return false
+}
+
+type ListTeamsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	SessionId     string                 `protobuf:"bytes,2,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTeamsRequest) Reset() {
+	*x = ListTeamsRequest{}
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTeamsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTeamsRequest) ProtoMessage() {}
+
+func (x *ListTeamsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTeamsRequest.ProtoReflect.Descriptor instead.
+func (*ListTeamsRequest) Descriptor() ([]byte, []int) {
+	return file_fugue_tasks_v1_tasks_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *ListTeamsRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ListTeamsRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+type ListTeamsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Teams         []*TeamSummary         `protobuf:"bytes,1,rep,name=teams,proto3" json:"teams,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTeamsResponse) Reset() {
+	*x = ListTeamsResponse{}
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTeamsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTeamsResponse) ProtoMessage() {}
+
+func (x *ListTeamsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTeamsResponse.ProtoReflect.Descriptor instead.
+func (*ListTeamsResponse) Descriptor() ([]byte, []int) {
+	return file_fugue_tasks_v1_tasks_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *ListTeamsResponse) GetTeams() []*TeamSummary {
+	if x != nil {
+		return x.Teams
+	}
+	return nil
+}
+
+type GetTeamRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TeamId        string                 `protobuf:"bytes,1,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	DiffTaskId    string                 `protobuf:"bytes,2,opt,name=diff_task_id,json=diffTaskId,proto3" json:"diff_task_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetTeamRequest) Reset() {
+	*x = GetTeamRequest{}
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetTeamRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTeamRequest) ProtoMessage() {}
+
+func (x *GetTeamRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTeamRequest.ProtoReflect.Descriptor instead.
+func (*GetTeamRequest) Descriptor() ([]byte, []int) {
+	return file_fugue_tasks_v1_tasks_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *GetTeamRequest) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *GetTeamRequest) GetDiffTaskId() string {
+	if x != nil {
+		return x.DiffTaskId
+	}
+	return ""
+}
+
+type GetTeamResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Team          *TeamView              `protobuf:"bytes,1,opt,name=team,proto3" json:"team,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetTeamResponse) Reset() {
+	*x = GetTeamResponse{}
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetTeamResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetTeamResponse) ProtoMessage() {}
+
+func (x *GetTeamResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetTeamResponse.ProtoReflect.Descriptor instead.
+func (*GetTeamResponse) Descriptor() ([]byte, []int) {
+	return file_fugue_tasks_v1_tasks_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *GetTeamResponse) GetTeam() *TeamView {
+	if x != nil {
+		return x.Team
+	}
+	return nil
+}
+
+type RecoverTaskRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CommandId     string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	TeamId        string                 `protobuf:"bytes,2,opt,name=team_id,json=teamId,proto3" json:"team_id,omitempty"`
+	TaskId        string                 `protobuf:"bytes,3,opt,name=task_id,json=taskId,proto3" json:"task_id,omitempty"`
+	Decision      string                 `protobuf:"bytes,4,opt,name=decision,proto3" json:"decision,omitempty"`
+	Reason        string                 `protobuf:"bytes,5,opt,name=reason,proto3" json:"reason,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecoverTaskRequest) Reset() {
+	*x = RecoverTaskRequest{}
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecoverTaskRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecoverTaskRequest) ProtoMessage() {}
+
+func (x *RecoverTaskRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecoverTaskRequest.ProtoReflect.Descriptor instead.
+func (*RecoverTaskRequest) Descriptor() ([]byte, []int) {
+	return file_fugue_tasks_v1_tasks_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *RecoverTaskRequest) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *RecoverTaskRequest) GetTeamId() string {
+	if x != nil {
+		return x.TeamId
+	}
+	return ""
+}
+
+func (x *RecoverTaskRequest) GetTaskId() string {
+	if x != nil {
+		return x.TaskId
+	}
+	return ""
+}
+
+func (x *RecoverTaskRequest) GetDecision() string {
+	if x != nil {
+		return x.Decision
+	}
+	return ""
+}
+
+func (x *RecoverTaskRequest) GetReason() string {
+	if x != nil {
+		return x.Reason
+	}
+	return ""
+}
+
+type RecoverTaskResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Task          *TaskNode              `protobuf:"bytes,1,opt,name=task,proto3" json:"task,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RecoverTaskResponse) Reset() {
+	*x = RecoverTaskResponse{}
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RecoverTaskResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RecoverTaskResponse) ProtoMessage() {}
+
+func (x *RecoverTaskResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_tasks_v1_tasks_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RecoverTaskResponse.ProtoReflect.Descriptor instead.
+func (*RecoverTaskResponse) Descriptor() ([]byte, []int) {
+	return file_fugue_tasks_v1_tasks_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *RecoverTaskResponse) GetTask() *TaskNode {
+	if x != nil {
+		return x.Task
+	}
+	return nil
+}
+
 var File_fugue_tasks_v1_tasks_proto protoreflect.FileDescriptor
 
 const file_fugue_tasks_v1_tasks_proto_rawDesc = "" +
@@ -532,11 +1324,93 @@ const file_fugue_tasks_v1_tasks_proto_rawDesc = "" +
 	"\x16PruneWorktreesResponse\x12+\n" +
 	"\x11removed_worktrees\x18\x01 \x03(\tR\x10removedWorktrees\x12)\n" +
 	"\x10removed_branches\x18\x02 \x03(\tR\x0fremovedBranches\x122\n" +
-	"\x15removed_admin_entries\x18\x03 \x01(\x05R\x13removedAdminEntries2\xb3\x02\n" +
+	"\x15removed_admin_entries\x18\x03 \x01(\x05R\x13removedAdminEntries\"\xf7\x03\n" +
+	"\vTeamSummary\x12\x17\n" +
+	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12!\n" +
+	"\fworkspace_id\x18\x02 \x01(\tR\vworkspaceId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x03 \x01(\tR\tsessionId\x12\x14\n" +
+	"\x05state\x18\x04 \x01(\tR\x05state\x12%\n" +
+	"\x0ewaiting_reason\x18\x05 \x01(\tR\rwaitingReason\x12\x1d\n" +
+	"\n" +
+	"task_count\x18\x06 \x01(\rR\ttaskCount\x12#\n" +
+	"\rrunning_count\x18\a \x01(\rR\frunningCount\x12!\n" +
+	"\fasking_count\x18\b \x01(\rR\vaskingCount\x12!\n" +
+	"\ffailed_count\x18\t \x01(\rR\vfailedCount\x12\x19\n" +
+	"\blast_seq\x18\n" +
+	" \x01(\x03R\alastSeq\x129\n" +
+	"\n" +
+	"created_at\x18\v \x01(\v2\x1a.google.protobuf.TimestampR\tcreatedAt\x129\n" +
+	"\n" +
+	"updated_at\x18\f \x01(\v2\x1a.google.protobuf.TimestampR\tupdatedAt\x125\n" +
+	"\bended_at\x18\r \x01(\v2\x1a.google.protobuf.TimestampR\aendedAt\"]\n" +
+	"\n" +
+	"TeamBudget\x12\x1d\n" +
+	"\n" +
+	"max_agents\x18\x01 \x01(\rR\tmaxAgents\x120\n" +
+	"\x14max_duration_seconds\x18\x02 \x01(\x03R\x12maxDurationSeconds\"\x8a\x04\n" +
+	"\bTaskNode\x12\x17\n" +
+	"\atask_id\x18\x01 \x01(\tR\x06taskId\x12$\n" +
+	"\x0eparent_task_id\x18\x02 \x01(\tR\fparentTaskId\x12\x19\n" +
+	"\bretry_of\x18\x03 \x01(\tR\aretryOf\x12\x18\n" +
+	"\aattempt\x18\x04 \x01(\rR\aattempt\x12%\n" +
+	"\x0ehierarchy_role\x18\x05 \x01(\tR\rhierarchyRole\x12!\n" +
+	"\fcatalog_role\x18\x06 \x01(\tR\vcatalogRole\x12\x16\n" +
+	"\x06vendor\x18\a \x01(\tR\x06vendor\x12\x14\n" +
+	"\x05model\x18\b \x01(\tR\x05model\x12\x1d\n" +
+	"\n" +
+	"account_id\x18\t \x01(\tR\taccountId\x12\x14\n" +
+	"\x05state\x18\n" +
+	" \x01(\tR\x05state\x12!\n" +
+	"\ffailure_code\x18\v \x01(\tR\vfailureCode\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\f \x01(\tR\tsessionId\x12\x12\n" +
+	"\x04goal\x18\r \x01(\tR\x04goal\x12\x1f\n" +
+	"\vwrite_scope\x18\x0e \x03(\tR\n" +
+	"writeScope\x12\x1d\n" +
+	"\n" +
+	"depends_on\x18\x0f \x03(\tR\tdependsOn\x12(\n" +
+	"\x10last_channel_seq\x18\x10 \x01(\x03R\x0elastChannelSeq\x12\x1d\n" +
+	"\n" +
+	"elapsed_ms\x18\x11 \x01(\x03R\telapsedMs\"\xe6\x02\n" +
+	"\bTeamView\x125\n" +
+	"\asummary\x18\x01 \x01(\v2\x1b.fugue.tasks.v1.TeamSummaryR\asummary\x12!\n" +
+	"\fvault_locked\x18\x02 \x01(\bR\vvaultLocked\x12\x14\n" +
+	"\x05title\x18\x03 \x01(\tR\x05title\x12\x14\n" +
+	"\x05brief\x18\x04 \x01(\tR\x05brief\x122\n" +
+	"\x06budget\x18\x05 \x01(\v2\x1a.fugue.tasks.v1.TeamBudgetR\x06budget\x12,\n" +
+	"\x12pending_request_id\x18\x06 \x01(\tR\x10pendingRequestId\x12.\n" +
+	"\x05tasks\x18\a \x03(\v2\x18.fugue.tasks.v1.TaskNodeR\x05tasks\x12\x1b\n" +
+	"\tdiff_text\x18\b \x01(\tR\bdiffText\x12%\n" +
+	"\x0ediff_truncated\x18\t \x01(\bR\rdiffTruncated\"T\n" +
+	"\x10ListTeamsRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x02 \x01(\tR\tsessionId\"F\n" +
+	"\x11ListTeamsResponse\x121\n" +
+	"\x05teams\x18\x01 \x03(\v2\x1b.fugue.tasks.v1.TeamSummaryR\x05teams\"K\n" +
+	"\x0eGetTeamRequest\x12\x17\n" +
+	"\ateam_id\x18\x01 \x01(\tR\x06teamId\x12 \n" +
+	"\fdiff_task_id\x18\x02 \x01(\tR\n" +
+	"diffTaskId\"?\n" +
+	"\x0fGetTeamResponse\x12,\n" +
+	"\x04team\x18\x01 \x01(\v2\x18.fugue.tasks.v1.TeamViewR\x04team\"\x99\x01\n" +
+	"\x12RecoverTaskRequest\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x17\n" +
+	"\ateam_id\x18\x02 \x01(\tR\x06teamId\x12\x17\n" +
+	"\atask_id\x18\x03 \x01(\tR\x06taskId\x12\x1a\n" +
+	"\bdecision\x18\x04 \x01(\tR\bdecision\x12\x16\n" +
+	"\x06reason\x18\x05 \x01(\tR\x06reason\"C\n" +
+	"\x13RecoverTaskResponse\x12,\n" +
+	"\x04task\x18\x01 \x01(\v2\x18.fugue.tasks.v1.TaskNodeR\x04task2\xa9\x04\n" +
 	"\vTaskService\x12V\n" +
 	"\vPageChannel\x12\".fugue.tasks.v1.PageChannelRequest\x1a#.fugue.tasks.v1.PageChannelResponse\x12k\n" +
 	"\x12PostChannelMessage\x12).fugue.tasks.v1.PostChannelMessageRequest\x1a*.fugue.tasks.v1.PostChannelMessageResponse\x12_\n" +
-	"\x0ePruneWorktrees\x12%.fugue.tasks.v1.PruneWorktreesRequest\x1a&.fugue.tasks.v1.PruneWorktreesResponseB\xb3\x01\n" +
+	"\x0ePruneWorktrees\x12%.fugue.tasks.v1.PruneWorktreesRequest\x1a&.fugue.tasks.v1.PruneWorktreesResponse\x12P\n" +
+	"\tListTeams\x12 .fugue.tasks.v1.ListTeamsRequest\x1a!.fugue.tasks.v1.ListTeamsResponse\x12J\n" +
+	"\aGetTeam\x12\x1e.fugue.tasks.v1.GetTeamRequest\x1a\x1f.fugue.tasks.v1.GetTeamResponse\x12V\n" +
+	"\vRecoverTask\x12\".fugue.tasks.v1.RecoverTaskRequest\x1a#.fugue.tasks.v1.RecoverTaskResponseB\xb3\x01\n" +
 	"\x12com.fugue.tasks.v1B\n" +
 	"TasksProtoP\x01Z7github.com/syurodev/fugue/pkg/pb/fugue/tasks/v1;tasksv1\xa2\x02\x03FTX\xaa\x02\x0eFugue.Tasks.V1\xca\x02\x0eFugue\\Tasks\\V1\xe2\x02\x1aFugue\\Tasks\\V1\\GPBMetadata\xea\x02\x10Fugue::Tasks::V1b\x06proto3"
 
@@ -552,7 +1426,7 @@ func file_fugue_tasks_v1_tasks_proto_rawDescGZIP() []byte {
 	return file_fugue_tasks_v1_tasks_proto_rawDescData
 }
 
-var file_fugue_tasks_v1_tasks_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
+var file_fugue_tasks_v1_tasks_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_fugue_tasks_v1_tasks_proto_goTypes = []any{
 	(*ChannelLine)(nil),                // 0: fugue.tasks.v1.ChannelLine
 	(*PageChannelRequest)(nil),         // 1: fugue.tasks.v1.PageChannelRequest
@@ -561,22 +1435,47 @@ var file_fugue_tasks_v1_tasks_proto_goTypes = []any{
 	(*PostChannelMessageResponse)(nil), // 4: fugue.tasks.v1.PostChannelMessageResponse
 	(*PruneWorktreesRequest)(nil),      // 5: fugue.tasks.v1.PruneWorktreesRequest
 	(*PruneWorktreesResponse)(nil),     // 6: fugue.tasks.v1.PruneWorktreesResponse
-	(*timestamppb.Timestamp)(nil),      // 7: google.protobuf.Timestamp
+	(*TeamSummary)(nil),                // 7: fugue.tasks.v1.TeamSummary
+	(*TeamBudget)(nil),                 // 8: fugue.tasks.v1.TeamBudget
+	(*TaskNode)(nil),                   // 9: fugue.tasks.v1.TaskNode
+	(*TeamView)(nil),                   // 10: fugue.tasks.v1.TeamView
+	(*ListTeamsRequest)(nil),           // 11: fugue.tasks.v1.ListTeamsRequest
+	(*ListTeamsResponse)(nil),          // 12: fugue.tasks.v1.ListTeamsResponse
+	(*GetTeamRequest)(nil),             // 13: fugue.tasks.v1.GetTeamRequest
+	(*GetTeamResponse)(nil),            // 14: fugue.tasks.v1.GetTeamResponse
+	(*RecoverTaskRequest)(nil),         // 15: fugue.tasks.v1.RecoverTaskRequest
+	(*RecoverTaskResponse)(nil),        // 16: fugue.tasks.v1.RecoverTaskResponse
+	(*timestamppb.Timestamp)(nil),      // 17: google.protobuf.Timestamp
 }
 var file_fugue_tasks_v1_tasks_proto_depIdxs = []int32{
-	7, // 0: fugue.tasks.v1.ChannelLine.created_at:type_name -> google.protobuf.Timestamp
-	0, // 1: fugue.tasks.v1.PageChannelResponse.lines:type_name -> fugue.tasks.v1.ChannelLine
-	1, // 2: fugue.tasks.v1.TaskService.PageChannel:input_type -> fugue.tasks.v1.PageChannelRequest
-	3, // 3: fugue.tasks.v1.TaskService.PostChannelMessage:input_type -> fugue.tasks.v1.PostChannelMessageRequest
-	5, // 4: fugue.tasks.v1.TaskService.PruneWorktrees:input_type -> fugue.tasks.v1.PruneWorktreesRequest
-	2, // 5: fugue.tasks.v1.TaskService.PageChannel:output_type -> fugue.tasks.v1.PageChannelResponse
-	4, // 6: fugue.tasks.v1.TaskService.PostChannelMessage:output_type -> fugue.tasks.v1.PostChannelMessageResponse
-	6, // 7: fugue.tasks.v1.TaskService.PruneWorktrees:output_type -> fugue.tasks.v1.PruneWorktreesResponse
-	5, // [5:8] is the sub-list for method output_type
-	2, // [2:5] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	17, // 0: fugue.tasks.v1.ChannelLine.created_at:type_name -> google.protobuf.Timestamp
+	0,  // 1: fugue.tasks.v1.PageChannelResponse.lines:type_name -> fugue.tasks.v1.ChannelLine
+	17, // 2: fugue.tasks.v1.TeamSummary.created_at:type_name -> google.protobuf.Timestamp
+	17, // 3: fugue.tasks.v1.TeamSummary.updated_at:type_name -> google.protobuf.Timestamp
+	17, // 4: fugue.tasks.v1.TeamSummary.ended_at:type_name -> google.protobuf.Timestamp
+	7,  // 5: fugue.tasks.v1.TeamView.summary:type_name -> fugue.tasks.v1.TeamSummary
+	8,  // 6: fugue.tasks.v1.TeamView.budget:type_name -> fugue.tasks.v1.TeamBudget
+	9,  // 7: fugue.tasks.v1.TeamView.tasks:type_name -> fugue.tasks.v1.TaskNode
+	7,  // 8: fugue.tasks.v1.ListTeamsResponse.teams:type_name -> fugue.tasks.v1.TeamSummary
+	10, // 9: fugue.tasks.v1.GetTeamResponse.team:type_name -> fugue.tasks.v1.TeamView
+	9,  // 10: fugue.tasks.v1.RecoverTaskResponse.task:type_name -> fugue.tasks.v1.TaskNode
+	1,  // 11: fugue.tasks.v1.TaskService.PageChannel:input_type -> fugue.tasks.v1.PageChannelRequest
+	3,  // 12: fugue.tasks.v1.TaskService.PostChannelMessage:input_type -> fugue.tasks.v1.PostChannelMessageRequest
+	5,  // 13: fugue.tasks.v1.TaskService.PruneWorktrees:input_type -> fugue.tasks.v1.PruneWorktreesRequest
+	11, // 14: fugue.tasks.v1.TaskService.ListTeams:input_type -> fugue.tasks.v1.ListTeamsRequest
+	13, // 15: fugue.tasks.v1.TaskService.GetTeam:input_type -> fugue.tasks.v1.GetTeamRequest
+	15, // 16: fugue.tasks.v1.TaskService.RecoverTask:input_type -> fugue.tasks.v1.RecoverTaskRequest
+	2,  // 17: fugue.tasks.v1.TaskService.PageChannel:output_type -> fugue.tasks.v1.PageChannelResponse
+	4,  // 18: fugue.tasks.v1.TaskService.PostChannelMessage:output_type -> fugue.tasks.v1.PostChannelMessageResponse
+	6,  // 19: fugue.tasks.v1.TaskService.PruneWorktrees:output_type -> fugue.tasks.v1.PruneWorktreesResponse
+	12, // 20: fugue.tasks.v1.TaskService.ListTeams:output_type -> fugue.tasks.v1.ListTeamsResponse
+	14, // 21: fugue.tasks.v1.TaskService.GetTeam:output_type -> fugue.tasks.v1.GetTeamResponse
+	16, // 22: fugue.tasks.v1.TaskService.RecoverTask:output_type -> fugue.tasks.v1.RecoverTaskResponse
+	17, // [17:23] is the sub-list for method output_type
+	11, // [11:17] is the sub-list for method input_type
+	11, // [11:11] is the sub-list for extension type_name
+	11, // [11:11] is the sub-list for extension extendee
+	0,  // [0:11] is the sub-list for field type_name
 }
 
 func init() { file_fugue_tasks_v1_tasks_proto_init() }
@@ -590,7 +1489,7 @@ func file_fugue_tasks_v1_tasks_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fugue_tasks_v1_tasks_proto_rawDesc), len(file_fugue_tasks_v1_tasks_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   7,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

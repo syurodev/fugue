@@ -85,12 +85,15 @@ func (x *Option) GetDescription() string {
 
 // Question is one question within a question-kind interaction request.
 type Question struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	QuestionId    string                 `protobuf:"bytes,1,opt,name=question_id,json=questionId,proto3" json:"question_id,omitempty"`
-	Prompt        string                 `protobuf:"bytes,2,opt,name=prompt,proto3" json:"prompt,omitempty"`
-	Options       []*Option              `protobuf:"bytes,3,rep,name=options,proto3" json:"options,omitempty"`
-	MultiSelect   bool                   `protobuf:"varint,4,opt,name=multi_select,json=multiSelect,proto3" json:"multi_select,omitempty"`
-	AllowText     bool                   `protobuf:"varint,5,opt,name=allow_text,json=allowText,proto3" json:"allow_text,omitempty"`
+	state       protoimpl.MessageState `protogen:"open.v1"`
+	QuestionId  string                 `protobuf:"bytes,1,opt,name=question_id,json=questionId,proto3" json:"question_id,omitempty"`
+	Prompt      string                 `protobuf:"bytes,2,opt,name=prompt,proto3" json:"prompt,omitempty"`
+	Options     []*Option              `protobuf:"bytes,3,rep,name=options,proto3" json:"options,omitempty"`
+	MultiSelect bool                   `protobuf:"varint,4,opt,name=multi_select,json=multiSelect,proto3" json:"multi_select,omitempty"`
+	AllowText   bool                   `protobuf:"varint,5,opt,name=allow_text,json=allowText,proto3" json:"allow_text,omitempty"`
+	// secret marks a question whose answer is sensitive (interaction v0.17 §7-8,
+	// Codex isSecret). The answer is relayed once in memory and never persisted.
+	Secret        bool `protobuf:"varint,6,opt,name=secret,proto3" json:"secret,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -160,15 +163,32 @@ func (x *Question) GetAllowText() bool {
 	return false
 }
 
+func (x *Question) GetSecret() bool {
+	if x != nil {
+		return x.Secret
+	}
+	return false
+}
+
 // QuestionAnswer carries the user's answer to one question of a question-kind
 // request (docs: interaction §4.1).
 type QuestionAnswer struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	QuestionId    string                 `protobuf:"bytes,1,opt,name=question_id,json=questionId,proto3" json:"question_id,omitempty"`
-	OptionIds     []string               `protobuf:"bytes,2,rep,name=option_ids,json=optionIds,proto3" json:"option_ids,omitempty"`
-	Text          string                 `protobuf:"bytes,3,opt,name=text,proto3" json:"text,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state      protoimpl.MessageState `protogen:"open.v1"`
+	QuestionId string                 `protobuf:"bytes,1,opt,name=question_id,json=questionId,proto3" json:"question_id,omitempty"`
+	OptionIds  []string               `protobuf:"bytes,2,rep,name=option_ids,json=optionIds,proto3" json:"option_ids,omitempty"`
+	Text       string                 `protobuf:"bytes,3,opt,name=text,proto3" json:"text,omitempty"`
+	// secret_id references an existing secret in fugue.secrets.v1 for a secret
+	// question; the host opens it in memory and relays it to the vendor.
+	SecretId string `protobuf:"bytes,4,opt,name=secret_id,json=secretId,proto3" json:"secret_id,omitempty"`
+	// secret_value carries a one-time direct secret answer (never persisted).
+	SecretValue []byte `protobuf:"bytes,5,opt,name=secret_value,json=secretValue,proto3" json:"secret_value,omitempty"`
+	// save_secret_name, when non-empty alongside secret_value, saves the secret
+	// into fugue.secrets.v1 before relaying.
+	SaveSecretName string `protobuf:"bytes,6,opt,name=save_secret_name,json=saveSecretName,proto3" json:"save_secret_name,omitempty"`
+	SaveScopeKind  string `protobuf:"bytes,7,opt,name=save_scope_kind,json=saveScopeKind,proto3" json:"save_scope_kind,omitempty"`
+	SaveScopeId    string `protobuf:"bytes,8,opt,name=save_scope_id,json=saveScopeId,proto3" json:"save_scope_id,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *QuestionAnswer) Reset() {
@@ -218,6 +238,41 @@ func (x *QuestionAnswer) GetOptionIds() []string {
 func (x *QuestionAnswer) GetText() string {
 	if x != nil {
 		return x.Text
+	}
+	return ""
+}
+
+func (x *QuestionAnswer) GetSecretId() string {
+	if x != nil {
+		return x.SecretId
+	}
+	return ""
+}
+
+func (x *QuestionAnswer) GetSecretValue() []byte {
+	if x != nil {
+		return x.SecretValue
+	}
+	return nil
+}
+
+func (x *QuestionAnswer) GetSaveSecretName() string {
+	if x != nil {
+		return x.SaveSecretName
+	}
+	return ""
+}
+
+func (x *QuestionAnswer) GetSaveScopeKind() string {
+	if x != nil {
+		return x.SaveScopeKind
+	}
+	return ""
+}
+
+func (x *QuestionAnswer) GetSaveScopeId() string {
+	if x != nil {
+		return x.SaveScopeId
 	}
 	return ""
 }
@@ -631,7 +686,7 @@ const file_fugue_interaction_v1_interaction_proto_rawDesc = "" +
 	"\x06Option\x12\x0e\n" +
 	"\x02id\x18\x01 \x01(\tR\x02id\x12\x14\n" +
 	"\x05label\x18\x02 \x01(\tR\x05label\x12 \n" +
-	"\vdescription\x18\x03 \x01(\tR\vdescription\"\xbd\x01\n" +
+	"\vdescription\x18\x03 \x01(\tR\vdescription\"\xd5\x01\n" +
 	"\bQuestion\x12\x1f\n" +
 	"\vquestion_id\x18\x01 \x01(\tR\n" +
 	"questionId\x12\x16\n" +
@@ -639,13 +694,19 @@ const file_fugue_interaction_v1_interaction_proto_rawDesc = "" +
 	"\aoptions\x18\x03 \x03(\v2\x1c.fugue.interaction.v1.OptionR\aoptions\x12!\n" +
 	"\fmulti_select\x18\x04 \x01(\bR\vmultiSelect\x12\x1d\n" +
 	"\n" +
-	"allow_text\x18\x05 \x01(\bR\tallowText\"d\n" +
+	"allow_text\x18\x05 \x01(\bR\tallowText\x12\x16\n" +
+	"\x06secret\x18\x06 \x01(\bR\x06secret\"\x9a\x02\n" +
 	"\x0eQuestionAnswer\x12\x1f\n" +
 	"\vquestion_id\x18\x01 \x01(\tR\n" +
 	"questionId\x12\x1d\n" +
 	"\n" +
 	"option_ids\x18\x02 \x03(\tR\toptionIds\x12\x12\n" +
-	"\x04text\x18\x03 \x01(\tR\x04text\"\xd8\x03\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\x12\x1b\n" +
+	"\tsecret_id\x18\x04 \x01(\tR\bsecretId\x12!\n" +
+	"\fsecret_value\x18\x05 \x01(\fR\vsecretValue\x12(\n" +
+	"\x10save_secret_name\x18\x06 \x01(\tR\x0esaveSecretName\x12&\n" +
+	"\x0fsave_scope_kind\x18\a \x01(\tR\rsaveScopeKind\x12\"\n" +
+	"\rsave_scope_id\x18\b \x01(\tR\vsaveScopeId\"\xd8\x03\n" +
 	"\x0ePendingRequest\x12\x1d\n" +
 	"\n" +
 	"request_id\x18\x01 \x01(\tR\trequestId\x12 \n" +

@@ -1,6 +1,7 @@
 package interaction
 
 import (
+	"bytes"
 	"slices"
 	"time"
 )
@@ -31,7 +32,7 @@ func sameQuestions(a, b []Question) bool {
 		return false
 	}
 	for i := range a {
-		if a[i].ID != b[i].ID || a[i].Question != b[i].Question || a[i].Header != b[i].Header || a[i].MultiSelect != b[i].MultiSelect {
+		if a[i].ID != b[i].ID || a[i].Question != b[i].Question || a[i].Header != b[i].Header || a[i].MultiSelect != b[i].MultiSelect || a[i].Secret != b[i].Secret {
 			return false
 		}
 		if !slices.Equal(a[i].Options, b[i].Options) {
@@ -52,8 +53,14 @@ func cloneTicket(t *Ticket) *Ticket {
 	cp.Offers = slices.Clone(t.Offers)
 	cp.Options = slices.Clone(t.Options)
 	cp.Questions = cloneQuestions(t.Questions)
-	cp.Answers = cloneAnswers(t.Answers)
+	cp.Answers = cloneAnswers(t.Answers, false)
 	return &cp
+}
+
+func cloneTicketForRelay(t *Ticket) *Ticket {
+	cp := cloneTicket(t)
+	cp.Answers = cloneAnswers(t.Answers, true)
+	return cp
 }
 
 func cloneQuestions(questions []Question) []Question {
@@ -68,7 +75,7 @@ func cloneQuestions(questions []Question) []Question {
 	return out
 }
 
-func cloneAnswers(answers []Answer) []Answer {
+func cloneAnswers(answers []Answer, includeSecret bool) []Answer {
 	if answers == nil {
 		return nil
 	}
@@ -76,8 +83,22 @@ func cloneAnswers(answers []Answer) []Answer {
 	for i := range answers {
 		out[i] = answers[i]
 		out[i].OptionIDs = slices.Clone(answers[i].OptionIDs)
+		if includeSecret {
+			out[i].SecretValue = bytes.Clone(answers[i].SecretValue)
+		} else {
+			out[i].SecretValue = nil
+		}
 	}
 	return out
+}
+
+func clearSecretAnswers(answers []Answer) {
+	for i := range answers {
+		if len(answers[i].SecretValue) > 0 {
+			clear(answers[i].SecretValue)
+			answers[i].SecretValue = nil
+		}
+	}
 }
 
 func (o *Owner) isTicketDoneLocked(t *Ticket, now time.Time) bool {
@@ -105,6 +126,7 @@ func (o *Owner) pruneTicketsLocked(now time.Time) {
 			continue
 		}
 		if o.isTicketDoneLocked(ticket, now) {
+			clearSecretAnswers(ticket.Answers)
 			delete(o.byRequest, reqID)
 			delete(o.byOperation, ticket.OperationID)
 			continue

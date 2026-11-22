@@ -15,7 +15,6 @@ import (
 
 	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/errcode"
-	"github.com/syurodev/fugue/internal/transcript"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/codex"
 )
@@ -288,69 +287,87 @@ func readRawRPCResponseLine(t *testing.T, dir, id string) []byte {
 	return found
 }
 
-func TestCodexSecretQuestionFailsClosedWithoutATicket(t *testing.T) {
+func TestCodexSecretQuestionRelaysWithZeroPersistenceAndNoReplay(t *testing.T) {
 	t.Parallel()
+	directCanary := "direct-ephemeral-" + "canary-909"
+	storedCanary := "stored-vault-" + "canary-910"
+	assertDirectSecretQuestionRelayAndNoReplay(t, directCanary)
+	assertSecretIDQuestionRelay(t, storedCanary)
+}
+
+func assertDirectSecretQuestionRelayAndNoReplay(t *testing.T, canary string) {
+	t.Helper()
 	f := newCodexRelayFixture(t)
 	sub := f.subscribeInteractions(t)
 
-	const (
-		canaryHeader   = "PRIVATE-CANARY-HEADER-909"
-		canaryQuestion = "PRIVATE-CANARY-QUESTION-909"
-		canaryOption   = "PRIVATE-CANARY-OPTION-909"
-		publicQuestion = "PUBLIC-COUSIN-QUESTION-909"
-		wantNoticeText = "Codex asked for secret input, which Fugue cannot relay yet"
-	)
-	secretFrame := fmt.Sprintf(`{"id":601,"method":%q,"params":{"threadId":%q,"turnId":"t-1","itemId":"ask-secret","isBlocking":true,"questions":[{"id":"q-pub","header":"Pub","question":%q,"isOther":false,"isSecret":false,"options":[]},{"id":"q-sec","header":%q,"question":%q,"isOther":true,"isSecret":true,"options":[{"label":%q,"description":"masked"}]}]}}`,
-		codex.MethodRequestUserInput, fakeCodexThreadID, publicQuestion, canaryHeader, canaryQuestion, canaryOption)
+	secretFrame := fmt.Sprintf(`{"id":601,"method":%q,"params":{"threadId":%q,"turnId":"t-1","itemId":"ask-secret","isBlocking":true,"questions":[{"id":"q-sec","header":"Token","question":"Enter API token","isOther":true,"isSecret":true}]}}`,
+		codex.MethodRequestUserInput, fakeCodexThreadID)
 	f.sendServerRequestTurn(t, "codex-secret-turn", secretFrame)
 
+	prompt := awaitRequested(t, sub)
+	if len(prompt.Questions) != 1 || !prompt.Questions[0].Secret {
+		t.Fatalf("relayed question prompt = %+v, want 1 secret question", prompt.Questions)
+	}
+	ansVal := []byte(canary)
+	saveName := "RELAYED_" + "ENV_VAR"
+	if _, err := f.inter.Answer(t.Context(), &AnswerInteractionCommand{
+		CommandID: "cmd-sec-1", Principal: testAppPrincipal, Incarnation: f.inter.Incarnation(),
+		RequestID: prompt.RequestID, Outcome: OutcomeAnswered,
+		Answers: []InteractionAnswer{{QuestionID: "q-sec", SecretValue: ansVal, SaveSecretName: saveName, SaveScopeKind: "global"}},
+	}); err != nil {
+		t.Fatalf("Answer secret question: %v", err)
+	}
+	_, _ = sub.Next(t.Context())
+	if !bytes.Equal(ansVal, make([]byte, len(ansVal))) {
+		t.Fatalf("Answer did not clear SecretValue buffer")
+	}
 	resp := f.awaitRPCResponse(t, "601")
-	if resp.Error == nil || len(resp.Result) != 0 || !strings.Contains(resp.Error.Message, wantNoticeText) {
-		t.Fatalf("RPC 601 response = %+v, want JSON-RPC error %q with no result", resp, wantNoticeText)
+	if resp.Error != nil || !strings.Contains(string(resp.Result), canary) {
+		t.Fatalf("RPC 601 response = %+v, want relayed canary", resp)
 	}
-	if pending, _, pErr := f.inter.ListPending(t.Context(), testAppPrincipal); pErr != nil || len(pending) != 0 {
-		t.Fatalf("ListPending = (%+v, %v), want 0 tickets for secret question", pending, pErr)
+	assertDataDirContainsNoCanaries(t, f.hp.deps.DataDir, []string{canary})
+	if red := f.rt.transcripts.redactor.Redact("leaked " + canary); strings.Contains(red, canary) || !strings.Contains(red, "[secret:vault]") {
+		t.Fatalf("Redact after secret answer = %q, want [secret:vault]", red)
 	}
-	if ev, hasEv := sub.popEvent(); hasEv {
-		t.Fatalf("unexpected interaction event for secret question: %+v", ev)
+	replaySess, replayDir, replayReqs := startHelperCodexWithRequests(t, "secret-replay", secretFrame, 1)
+	f.tools.RelayServerRequest(t.Context(), f.session.ID, replayReqs["601"], replaySess)
+	rawLine := readRawRPCResponseLine(t, replayDir, "601")
+	if !strings.Contains(string(rawLine), `"error"`) || strings.Contains(string(rawLine), canary) {
+		t.Fatalf("retry RPC 601 response = %s, want JSON-RPC error without replay", rawLine)
 	}
-	canaries := []string{canaryHeader, canaryQuestion, canaryOption, publicQuestion}
-	assertSecretUnsupportedNoticeInTranscript(t, f, wantNoticeText, canaries)
-	if got := len(f.recordedDecisions(t, canaries...)); got != 0 {
-		t.Fatalf("ApprovalDecided count = %d, want 0", got)
-	}
-	assertDataDirContainsNoCanaries(t, f.hp.deps.DataDir, canaries)
 }
 
-func assertSecretUnsupportedNoticeInTranscript(t *testing.T, f *codexRelayFixture, wantNoticeText string, canaries []string) {
+func assertSecretIDQuestionRelay(t *testing.T, canary string) {
 	t.Helper()
-	var notice *TranscriptEntry
-	awaitActor(t, func() bool {
-		page, err := f.rt.transcripts.TranscriptPage(t.Context(), TranscriptPageParams{Session: f.session.ID, Limit: 50})
-		if err != nil {
-			return false
-		}
-		for i := range page {
-			if page[i].Kind == transcript.Notice && page[i].View.Text == wantNoticeText {
-				entry := page[i]
-				notice = &entry
-				return true
-			}
-		}
-		return false
+	f := newCodexRelayFixture(t)
+	sub := f.subscribeInteractions(t)
+	secSvc, err := f.rt.SecretService()
+	if err != nil {
+		t.Fatalf("SecretService: %v", err)
+	}
+	savedMeta, err := secSvc.PutSecret(t.Context(), &PutSecretCommand{
+		Principal: testAppPrincipal, CommandID: "cmd-put-sec2", ScopeKind: "global", Name: "SECOND_SECRET", Value: []byte(canary),
 	})
-	if notice.Metadata.Code != "unsupported_event" {
-		t.Fatalf("notice metadata code = %q, want unsupported_event", notice.Metadata.Code)
+	if err != nil {
+		t.Fatalf("PutSecret: %v", err)
 	}
-	detail, dErr := f.rt.transcripts.TranscriptItem(t.Context(), f.session.ID, notice.ID)
-	if dErr != nil {
-		t.Fatalf("TranscriptItem(%s): %v", notice.ID, dErr)
+	secretFrame := fmt.Sprintf(`{"id":602,"method":%q,"params":{"threadId":%q,"turnId":"t-1","itemId":"ask-secret-2","isBlocking":true,"questions":[{"id":"q-sec2","header":"Token2","question":"Enter second token","isOther":true,"isSecret":true}]}}`,
+		codex.MethodRequestUserInput, fakeCodexThreadID)
+	f.sendServerRequestTurn(t, "codex-secret-turn-2", secretFrame)
+	prompt := awaitRequested(t, sub)
+	if _, ansErr := f.inter.Answer(t.Context(), &AnswerInteractionCommand{
+		CommandID: "cmd-sec-2", Principal: testAppPrincipal, Incarnation: f.inter.Incarnation(),
+		RequestID: prompt.RequestID, Outcome: OutcomeAnswered,
+		Answers: []InteractionAnswer{{QuestionID: "q-sec2", SecretID: savedMeta.SecretID}},
+	}); ansErr != nil {
+		t.Fatalf("Answer secret question by SecretID: %v", ansErr)
 	}
-	for _, needle := range canaries {
-		if strings.Contains(string(detail.Content), needle) {
-			t.Fatalf("secret question canary %q in transcript item content: %s", needle, detail.Content)
-		}
+	_, _ = sub.Next(t.Context())
+	resp := f.awaitRPCResponse(t, "602")
+	if resp.Error != nil || !strings.Contains(string(resp.Result), canary) {
+		t.Fatalf("RPC 602 response = %+v, want relayed canary", resp)
 	}
+	assertDataDirContainsNoCanaries(t, f.hp.deps.DataDir, []string{canary})
 }
 
 func assertDataDirContainsNoCanaries(t *testing.T, dataDir string, canaries []string) {

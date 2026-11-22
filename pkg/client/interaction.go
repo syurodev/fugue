@@ -51,6 +51,7 @@ type InteractionQuestion struct {
 	Options     []InteractionOption `json:"options,omitempty"`
 	MultiSelect bool                `json:"multi_select,omitempty"`
 	AllowText   bool                `json:"allow_text,omitempty"`
+	Secret      bool                `json:"secret,omitempty"`
 }
 
 // PendingInteraction is the Host API view of one pending approval, selection,
@@ -80,9 +81,14 @@ type PendingInteractionList struct {
 
 // InteractionQuestionAnswer carries the user's reply to one question.
 type InteractionQuestionAnswer struct {
-	QuestionID string
-	OptionIDs  []string
-	Text       string
+	QuestionID     string
+	OptionIDs      []string
+	Text           string
+	SecretID       string
+	SecretValue    []byte
+	SaveSecretName string
+	SaveScopeKind  string
+	SaveScopeID    string
 }
 
 // AnswerInteractionInput carries one human decision for a pinned
@@ -131,6 +137,16 @@ func (c *Client) AnswerInteraction(ctx context.Context, in *AnswerInteractionInp
 		txt := in.Text
 		req.Text = &txt
 	}
+	defer func() {
+		for i := range in.Answers {
+			clear(in.Answers[i].SecretValue)
+		}
+		for _, a := range req.Answers {
+			if a != nil {
+				clear(a.SecretValue)
+			}
+		}
+	}()
 	res, err := interactionv1connect.NewInteractionServiceClient(c.hc, c.base).Answer(ctx, connect.NewRequest(req))
 	if err != nil {
 		return InteractionAnswerResult{}, fmt.Errorf("answer interaction: %w", err)
@@ -203,6 +219,7 @@ func interactionQuestionsFromProto(qs []*interactionv1.Question) []InteractionQu
 		out[i] = InteractionQuestion{
 			QuestionID: q.GetQuestionId(), Prompt: q.GetPrompt(),
 			Options: interactionOptionsFromProto(q.GetOptions()), MultiSelect: q.GetMultiSelect(), AllowText: q.GetAllowText(),
+			Secret: q.GetSecret(),
 		}
 	}
 	return out
@@ -213,8 +230,18 @@ func protoQuestionAnswers(answers []InteractionQuestionAnswer) []*interactionv1.
 		return nil
 	}
 	out := make([]*interactionv1.QuestionAnswer, len(answers))
-	for i, a := range answers {
-		out[i] = &interactionv1.QuestionAnswer{QuestionId: a.QuestionID, OptionIds: slices.Clone(a.OptionIDs), Text: a.Text}
+	for i := range answers {
+		a := &answers[i]
+		out[i] = &interactionv1.QuestionAnswer{
+			QuestionId:     a.QuestionID,
+			OptionIds:      slices.Clone(a.OptionIDs),
+			Text:           a.Text,
+			SecretId:       a.SecretID,
+			SecretValue:    slices.Clone(a.SecretValue),
+			SaveSecretName: a.SaveSecretName,
+			SaveScopeKind:  a.SaveScopeKind,
+			SaveScopeId:    a.SaveScopeID,
+		}
 	}
 	return out
 }

@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"sync"
 
+	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/secrets"
 	"github.com/syurodev/fugue/internal/vault"
@@ -33,8 +34,9 @@ type SecretRedactor struct {
 	known KnownValues
 	wake  chan struct{}
 
-	mu       sync.Mutex
-	detector *secrets.Detector
+	mu        sync.Mutex
+	detector  *secrets.Detector
+	ephemeral []secrets.KnownValue
 
 	task       *supervise.Task
 	once       sync.Once
@@ -55,6 +57,7 @@ func NewSecretRedactor(ctx context.Context, v *vault.Service, known KnownValues)
 			}
 			r.mu.Lock()
 			r.detector = &secrets.Detector{}
+			r.ephemeral = nil
 			r.mu.Unlock()
 		})
 	}
@@ -109,6 +112,30 @@ func (r *SecretRedactor) run(ctx context.Context) error {
 	}
 }
 
+// RefreshSync rebuilds the detector synchronously so newly added secrets are
+// masked immediately before any subsequent transcript or vendor output.
+func (r *SecretRedactor) RefreshSync(ctx context.Context) {
+	if err := r.rebuild(ctx); err != nil {
+		slog.Warn("the transcript redactor did not rebuild", "err", err.Error())
+	}
+}
+
+// AddEphemeral registers a one-time secret value (>= 8 bytes) in memory for
+// immediate transcript redaction and rebuilds the detector synchronously.
+func (r *SecretRedactor) AddEphemeral(ctx context.Context, val []byte) {
+	if len(val) < 8 {
+		return
+	}
+	const maxEphemeral = 256
+	r.mu.Lock()
+	if len(r.ephemeral) >= maxEphemeral {
+		r.ephemeral = r.ephemeral[1:]
+	}
+	r.ephemeral = append(r.ephemeral, secrets.KnownValue{Kind: "vault", Value: redact.NewSecret(string(val))})
+	r.mu.Unlock()
+	r.RefreshSync(ctx)
+}
+
 func (r *SecretRedactor) rebuild(ctx context.Context) error {
 	var values []secrets.KnownValue
 	if r.known != nil {
@@ -117,6 +144,11 @@ func (r *SecretRedactor) rebuild(ctx context.Context) error {
 			return err
 		}
 	}
+	r.mu.Lock()
+	if len(r.ephemeral) > 0 {
+		values = append(values, r.ephemeral...)
+	}
+	r.mu.Unlock()
 	detector := secrets.New(values, secrets.Options{})
 	r.mu.Lock()
 	r.detector = detector

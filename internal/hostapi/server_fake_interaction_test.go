@@ -51,7 +51,8 @@ func validateFakeAnswerSizes(cmd *app.AnswerInteractionCommand) error {
 	if cmd.Outcome != app.OutcomeDenied && len(cmd.Text) > app.MaxInteractionAnswerBytes {
 		return errcode.New(errcode.InteractionTextTooLarge, "interaction answer text exceeds size limit")
 	}
-	for _, a := range cmd.Answers {
+	for i := range cmd.Answers {
+		a := &cmd.Answers[i]
 		if len(a.Text) > app.MaxInteractionAnswerBytes {
 			return errcode.New(errcode.InteractionTextTooLarge, "question answer text exceeds size limit")
 		}

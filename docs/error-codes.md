@@ -66,6 +66,11 @@ Changing this file needs a review of what clients can rely on; hiding a code nee
 | `tasks.task_not_found` | The team task does not exist in this team. |
 | `tasks.team_ended` | The team has ended; its channel is read-only. |
 | `tasks.post_too_large` | The channel post exceeds the 4 KiB limit. |
+| `tasks.task_not_unknown` | The team task is not in the unknown state and cannot be recovered. |
+| `secrets.not_found` | The requested secret does not exist. |
+| `secrets.invalid_name` | The secret name does not match the allowed ASCII identifier format. |
+| `secrets.value_too_large` | The secret value is empty or exceeds the 64 KiB limit. |
+| `secrets.limit_exceeded` | The secret count limit for this scope (512) has been reached. |
 
 ## Hidden on purpose
 

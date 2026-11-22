@@ -774,7 +774,7 @@ func TestAgyDecisionAllowFollowsTheOptionKind(t *testing.T) {
 			t.Fatalf("option %s: choice = %+v (ok=%v), want Allow=%v", option, choice, ok, wantAllow)
 		}
 		svc := &SessionToolService{tombstones: tombs}
-		svc.recordRelayTombstone("s1", "op-"+option, [32]byte{}, req.Method, &choice)
+		svc.recordRelayTombstone("s1", "op-"+option, [32]byte{}, req, &choice)
 		entry, found := tombs.get("s1", "op-"+option)
 		if replay := codexDecisionFromTombstone(&entry); !found || replay.Allow != wantAllow || replay.Message != option || replay.Cancelled {
 			t.Fatalf("option %s: tombstone replay = %+v (found=%v), want Allow=%v", option, replay, found, wantAllow)

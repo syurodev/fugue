@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 	"slices"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -138,6 +137,7 @@ type HostRuntime struct {
 	vendors         *VendorService
 	accountsService *AccountsService
 	vaultService    *VaultService
+	secretService   *SecretService
 	transcripts     *Transcripts
 	sessionTools    *SessionToolService
 	teamProposals   *TeamProposalService
@@ -479,22 +479,4 @@ func (rt *HostRuntime) disarmGraceLocked() {
 
 func (rt *HostRuntime) closeDrained() {
 	rt.drainOnce.Do(func() { close(rt.drained) })
-}
-
-// parseAPIVersion parses "v<N>" numerically; anything else is invalid.
-func parseAPIVersion(v string) (int, error) {
-	const invalid = "an api version must be \"v\" followed by digits"
-	if len(v) < 2 || v[0] != 'v' {
-		return 0, errcode.New(errcode.InvalidArgument, invalid)
-	}
-	for _, r := range v[1:] {
-		if r < '0' || r > '9' {
-			return 0, errcode.New(errcode.InvalidArgument, invalid)
-		}
-	}
-	n, err := strconv.Atoi(v[1:])
-	if err != nil || n <= 0 {
-		return 0, errcode.New(errcode.InvalidArgument, invalid)
-	}
-	return n, nil
 }
