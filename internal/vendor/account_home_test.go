@@ -112,3 +112,73 @@ func TestAccountsMultiAccountFailClosedWhenDisabled(t *testing.T) {
 		t.Fatalf("MultiAccountTermsWarning missing vendor notices: %q", MultiAccountTermsWarning())
 	}
 }
+
+func TestDefaultPrimaryHomeDirAndSymlinkHardening(t *testing.T) {
+	t.Parallel()
+	if got := DefaultPrimaryHomeDir("/home/u", "claude"); got != filepath.Join("/home/u", ".claude") {
+		t.Fatalf("claude primary home = %q", got)
+	}
+	if got := DefaultPrimaryHomeDir("/home/u", "codex"); got != filepath.Join("/home/u", ".codex") {
+		t.Fatalf("codex primary home = %q", got)
+	}
+	if got := DefaultPrimaryHomeDir("/home/u", "agy"); got != "/home/u" {
+		t.Fatalf("agy primary home = %q", got)
+	}
+	if got := DefaultPrimaryHomeDir("", "claude"); got != "" {
+		t.Fatalf("empty home = %q, want empty", got)
+	}
+	assertSymlinkedPrimarySkipped(t)
+	assertSymlinkedIntermediateAndSrcSkipped(t)
+}
+
+func assertSymlinkedPrimarySkipped(t *testing.T) {
+	t.Helper()
+	dataDir := t.TempDir()
+	realPrimary := t.TempDir()
+	if wErr := os.WriteFile(filepath.Join(realPrimary, "settings.json"), []byte("{}"), 0o600); wErr != nil {
+		t.Fatal(wErr)
+	}
+	symPrimary := filepath.Join(t.TempDir(), "sym-primary")
+	if symErr := os.Symlink(realPrimary, symPrimary); symErr != nil {
+		t.Fatal(symErr)
+	}
+	home1, err := PrepareExtraHome(dataDir, "claude", "sym-pri", symPrimary)
+	if err != nil {
+		t.Fatalf("PrepareExtraHome(symPrimary): %v", err)
+	}
+	if _, statErr := os.Lstat(filepath.Join(home1.ConfigDir, "settings.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("symlinked primaryDir must not be linked, err=%v", statErr)
+	}
+}
+
+func assertSymlinkedIntermediateAndSrcSkipped(t *testing.T) {
+	t.Helper()
+	dataDir := t.TempDir()
+	outside := t.TempDir()
+	if wErr := os.WriteFile(filepath.Join(outside, "settings.json"), []byte("{}"), 0o600); wErr != nil {
+		t.Fatal(wErr)
+	}
+	agyPrimary := t.TempDir()
+	if symErr := os.Symlink(outside, filepath.Join(agyPrimary, ".gemini")); symErr != nil {
+		t.Fatal(symErr)
+	}
+	home2, err := PrepareExtraHome(dataDir, "agy", "sym-inter", agyPrimary)
+	if err != nil {
+		t.Fatalf("PrepareExtraHome(sym-inter): %v", err)
+	}
+	if _, statErr := os.Lstat(filepath.Join(home2.ConfigDir, ".gemini", "settings.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("symlinked intermediate .gemini must not be linked, err=%v", statErr)
+	}
+
+	claudePrimary := t.TempDir()
+	if symErr := os.Symlink(filepath.Join(outside, "settings.json"), filepath.Join(claudePrimary, "settings.json")); symErr != nil {
+		t.Fatal(symErr)
+	}
+	home3, err := PrepareExtraHome(dataDir, "claude", "sym-src", claudePrimary)
+	if err != nil {
+		t.Fatalf("PrepareExtraHome(sym-src): %v", err)
+	}
+	if _, statErr := os.Lstat(filepath.Join(home3.ConfigDir, "settings.json")); !os.IsNotExist(statErr) {
+		t.Fatalf("symlinked source file must not be linked, err=%v", statErr)
+	}
+}

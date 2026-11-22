@@ -101,7 +101,7 @@ func (d *teamDispatcher) dependencySummaries(ctx context.Context, teamID string,
 // goal, limits, team brief, the retry facts of a re-run (§5.4), and completed
 // dependency summaries (as untrusted data blocks with read access
 // instructions for fugue_task_result).
-func taskIntro(task *vendorstore.TaskRecord, spec *teams.ProtectedTaskContent, brief string, deps []depSummary, nonce string, retry retryIntro) string {
+func taskIntro(task *vendorstore.TaskRecord, spec *teams.ProtectedTaskContent, brief string, deps []depSummary, nonce string, retry *retryIntro) string {
 	var b strings.Builder
 	b.WriteString("You are an agent of a Fugue team, working on task ")
 	b.WriteString(task.TaskID)
@@ -139,7 +139,7 @@ func taskIntro(task *vendorstore.TaskRecord, spec *teams.ProtectedTaskContent, b
 	return b.String()
 }
 
-func appendQuotaReassignIntro(b *strings.Builder, retry retryIntro, nonce string) {
+func appendQuotaReassignIntro(b *strings.Builder, retry *retryIntro, nonce string) {
 	if retry.progressSummary == "" && retry.worktreeDiff == "" {
 		return
 	}

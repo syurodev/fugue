@@ -484,3 +484,43 @@ func TestQuotaFailureWithNoAlternateAccountNotifiesDelegator(t *testing.T) {
 		t.Fatalf("expected delegator digest notification, pending=%d err=%v", len(pending), err)
 	}
 }
+
+func TestRepeatedQuotaFailuresTerminateWithoutPingPong(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	h := newMultiAccountHarness(t, &workspace.HostConfig{
+		MultiAccountEnabled: true, MultiAccountTermsAccepted: true, AccountStrategy: string(credentials.StrategyOrder),
+	})
+	defer mustCloseActorSessions(t, h.m)
+
+	// Read-only Admit check must not mutate picker state.
+	if ok, err := h.disp.picker.HasEligibleAccountWithCapacity(ctx, h.m, VendorClaude, "claude-sonnet-4"); err != nil || !ok {
+		t.Fatalf("HasEligibleAccountWithCapacity = (%v, %v), want (true, nil)", ok, err)
+	}
+	h.disp.picker.mu.Lock()
+	stateLen := len(h.disp.picker.state)
+	h.disp.picker.mu.Unlock()
+	if stateLen != 0 {
+		t.Fatalf("read-only Admit mutated picker state: %d entries", stateLen)
+	}
+
+	setupMultiAccountTeam(t, ctx, h, "ping-team", []string{"ping-team.m1"})
+	if err := h.disp.Dispatch(ctx, "ping-team"); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	t1 := mustTeamTasks(t, ctx, h, "ping-team")[1]
+	// Fail default with FailureQuota without any >= 85% window observation.
+	h.tt.OnTurnFailed(ctx, t1.SessionID, string(vendor.FailureQuota))
+
+	tasks2 := mustTeamTasks(t, ctx, h, "ping-team")
+	if len(tasks2) != 3 || tasks2[2].State != vendorstore.TaskStateRunning {
+		t.Fatalf("expected one reassignment to work-2, got %+v", tasks2)
+	}
+	// Fail work-2 with FailureQuota without any >= 85% window observation:
+	// default is still in cooldown, so reassignment must terminate instead of ping-ponging.
+	h.tt.OnTurnFailed(ctx, tasks2[2].SessionID, string(vendor.FailureQuota))
+	tasks3 := mustTeamTasks(t, ctx, h, "ping-team")
+	if len(tasks3) != 3 || tasks3[2].State != vendorstore.TaskStateFailed || tasks3[2].FailureCode != string(vendor.FailureQuota) {
+		t.Fatalf("expected termination at ~r1 failed(quota) without ping-pong, got %+v", tasks3)
+	}
+}

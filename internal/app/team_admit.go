@@ -107,11 +107,11 @@ func (a schedulerAdmitter) Admit(ctx context.Context, task *vendorstore.TaskReco
 
 func (a schedulerAdmitter) admitVendorCapacity(ctx context.Context, vendorName, modelName string) (bool, error) {
 	if a.picker != nil && a.accounts != nil {
-		room, ok, err := a.picker.PickWithCapacity(ctx, a.capacity, vendorName, modelName)
+		ok, err := a.picker.HasEligibleAccountWithCapacity(ctx, a.capacity, vendorName, modelName)
 		if err != nil {
 			return false, boundaryError("read the session capacity", err)
 		}
-		return ok && room != "", nil
+		return ok, nil
 	}
 	if a.accounts != nil && !a.accounts.QuotaAllows(vendorName) {
 		return false, nil

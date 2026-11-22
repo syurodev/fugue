@@ -221,6 +221,9 @@ func (s *teamTaskService) pickQuotaAlternateAccount(ctx context.Context, task *v
 	if fromAccount == "" {
 		fromAccount = vendorDefaultAccount
 	}
+	// Bound failed(quota) re-selection even when the vendor reported no
+	// window >= 85% or reset timestamp (S1: prevents ping-pong loops).
+	s.accounts.MarkQuotaCooldown(sess.Vendor, fromAccount, defaultQuotaCooldown)
 	_, role, code, err := resolveTaskProfile(ctx, s.store, task.TeamID, task.TaskID, task.CatalogRole)
 	if err != nil || code != "" {
 		return "", "", false

@@ -11,7 +11,12 @@ import (
 // DefaultAccountID is the identifier of each vendor's primary home account.
 const DefaultAccountID = "default"
 
-const maxAccountIDLen = 64
+const (
+	maxAccountIDLen = 64
+	vendorClaude    = "claude"
+	vendorCodex     = "codex"
+	vendorAgy       = "agy"
+)
 
 // MultiAccountTermsWarning returns the vendor terms-of-service warning shown
 // when the user opts into multiple accounts per vendor (orchestration §8).
@@ -73,7 +78,26 @@ func PrepareExtraHome(dataDir, vendorName, accountID, primaryHomeDir string) (Ac
 }
 
 func isKnownVendorName(v string) bool {
-	return v == "claude" || v == "codex" || v == "agy"
+	return v == vendorClaude || v == vendorCodex || v == vendorAgy
+}
+
+// DefaultPrimaryHomeDir returns the vendor's default home directory under
+// userHomeDir, or "" when userHomeDir or vendorName is empty/unknown.
+func DefaultPrimaryHomeDir(userHomeDir, vendorName string) string {
+	if userHomeDir == "" {
+		return ""
+	}
+	cleanHome := filepath.Clean(userHomeDir)
+	switch vendorName {
+	case vendorClaude:
+		return filepath.Join(cleanHome, ".claude")
+	case vendorCodex:
+		return filepath.Join(cleanHome, ".codex")
+	case vendorAgy:
+		return cleanHome
+	default:
+		return ""
+	}
 }
 
 func ensureSafeSubdir(base string, parts ...string) (string, error) {
@@ -102,11 +126,11 @@ func ensureSafeSubdir(base string, parts ...string) (string, error) {
 
 func sharedVendorItems(vendorName string) []string {
 	switch vendorName {
-	case "claude":
+	case vendorClaude:
 		return []string{"settings.json", "settings.local.json", "plugins", "skills", "commands", "CLAUDE.md"}
-	case "codex":
+	case vendorCodex:
 		return []string{"config.toml", "instructions.md", "skills", "rules"}
-	case "agy":
+	case vendorAgy:
 		return []string{
 			filepath.Join(".gemini", "settings.json"),
 			filepath.Join(".gemini", "GEMINI.md"),
@@ -118,8 +142,8 @@ func sharedVendorItems(vendorName string) []string {
 }
 
 func linkSharedVendorItems(vendorName, primaryDir, extraDir string) error {
-	info, statErr := os.Stat(primaryDir)
-	if statErr == nil && info.IsDir() {
+	info, statErr := os.Lstat(primaryDir)
+	if statErr == nil && info.Mode()&os.ModeSymlink == 0 && info.IsDir() {
 		for _, rel := range sharedVendorItems(vendorName) {
 			if err := linkOneSharedItem(primaryDir, extraDir, rel); err != nil {
 				return err
@@ -127,6 +151,22 @@ func linkSharedVendorItems(vendorName, primaryDir, extraDir string) error {
 		}
 	}
 	return nil
+}
+
+func isRealNonSymlinkPath(base, rel string, requireDir bool) bool {
+	cur := base
+	parts := strings.Split(rel, string(filepath.Separator))
+	for i, part := range parts {
+		cur = filepath.Join(cur, part)
+		info, err := os.Lstat(cur)
+		if err != nil || info.Mode()&os.ModeSymlink != 0 {
+			return false
+		}
+		if (i < len(parts)-1 || requireDir) && !info.IsDir() {
+			return false
+		}
+	}
+	return true
 }
 
 func hasPath(p string) bool {
@@ -137,7 +177,7 @@ func hasPath(p string) bool {
 func linkOneSharedItem(primaryDir, extraDir, rel string) error {
 	src := filepath.Join(primaryDir, rel)
 	dst := filepath.Join(extraDir, rel)
-	if !hasPath(src) || hasPath(dst) {
+	if !isRealNonSymlinkPath(primaryDir, rel, false) || hasPath(dst) {
 		return nil
 	}
 	if dir := filepath.Dir(rel); dir != "." {

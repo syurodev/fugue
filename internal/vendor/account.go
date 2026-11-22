@@ -68,13 +68,14 @@ type accountKey struct {
 }
 
 type accountRecord struct {
-	vendor     AccountVendor
-	id         string
-	home       AccountHome
-	login      LoginState
-	needsLogin bool
-	windows    map[string]Window
-	updatedAt  time.Time
+	vendor        AccountVendor
+	id            string
+	home          AccountHome
+	login         LoginState
+	needsLogin    bool
+	cooldownUntil time.Time
+	windows       map[string]Window
+	updatedAt     time.Time
 }
 
 // Accounts holds vendor accounts in memory (F9.10a default account; F11.8
@@ -230,6 +231,20 @@ func (a *Accounts) ObserveAccountFailure(vendor, accountID string, class Failure
 		return
 	}
 	a.observe(vendor, accountID, func(r *accountRecord) { r.needsLogin = true })
+}
+
+// MarkQuotaCooldown pauses an account for d on the injected clock when no
+// later window reset is already set, preventing immediate re-selection loops.
+func (a *Accounts) MarkQuotaCooldown(vendor, accountID string, d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	until := a.clk.Now().Add(d)
+	a.observe(vendor, accountID, func(r *accountRecord) {
+		if until.After(r.cooldownUntil) {
+			r.cooldownUntil = until
+		}
+	})
 }
 
 // Snapshot returns every active account in registration order (only default
@@ -413,6 +428,9 @@ func (r *accountRecord) view(now time.Time) Account {
 		if exhausted(&w) && w.ResetsAt.After(now) && w.ResetsAt.After(out.PausedUntil) {
 			out.PausedUntil = w.ResetsAt
 		}
+	}
+	if r.cooldownUntil.After(now) && r.cooldownUntil.After(out.PausedUntil) {
+		out.PausedUntil = r.cooldownUntil
 	}
 	slices.SortFunc(out.Windows, func(x, y Window) int {
 		switch {

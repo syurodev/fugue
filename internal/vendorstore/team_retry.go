@@ -15,6 +15,10 @@ import (
 // without user approval via fugue_team_amend (Q-126, OR-E16).
 const MaxTaskRetries = 2
 
+// maxQuotaReassignRetries bounds automatic quota-exhaustion reassignments per
+// task so repeated quota failures across accounts cannot loop indefinitely.
+const maxQuotaReassignRetries = 6
+
 // TaskRetryInput describes one atomic retry of a failed task (Q-126).
 type TaskRetryInput struct {
 	ExpectedSeq       int64
@@ -90,7 +94,11 @@ func (s *Store) executeRetryTx(ctx context.Context, tx *sql.Tx, teamID, taskID s
 	if err != nil {
 		return TaskRetryResult{}, err
 	}
-	if !in.QuotaReassign && src.attempt >= 1+MaxTaskRetries {
+	retryCap := MaxTaskRetries
+	if in.QuotaReassign {
+		retryCap = maxQuotaReassignRetries
+	}
+	if src.attempt >= 1+retryCap {
 		return TaskRetryResult{}, ErrRetryLimitReached
 	}
 	if in.MaxTeamAgents > 0 {

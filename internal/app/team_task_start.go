@@ -39,6 +39,8 @@ type retryIntro struct {
 	attempt         int
 	root            string
 	prevCode        string
+	fromAccount     string
+	toAccount       string
 	progressSummary string
 	worktreeDiff    string
 }
@@ -101,31 +103,44 @@ func (d *teamDispatcher) startChild(ctx context.Context, rec *vendorstore.TeamRe
 }
 
 func (d *teamDispatcher) reserveTaskAccountSlot(ctx context.Context, launch *taskLaunch) (func(), bool, error) {
-	if d.picker != nil {
-		accountID, allLimited, _, _, pickErr := d.picker.PickForTask(ctx, launch.req.Vendor, launch.req.Model, "")
-		if pickErr != nil {
-			return nil, false, boundaryError("select vendor account", pickErr)
-		}
-		if allLimited {
-			return nil, false, nil
-		}
-		launch.req.AccountID = accountID
+	candidates, err := d.candidateAccountsForLaunch(ctx, launch)
+	if err != nil {
+		return nil, false, err
 	}
-	if launch.req.AccountID == "" {
-		launch.req.AccountID = vendorDefaultAccount
-	}
-	releaseSlot, capErr := d.deps.Sessions.ReserveSlot(ctx, launch.req.SessionID, launch.req.Vendor, launch.req.AccountID)
-	if capErr != nil {
-		if errors.Is(capErr, ErrVendorSessionCapacity) || errcode.CodeOf(capErr) == errcode.VendorCapacity {
-			return nil, false, nil
+	for _, cand := range candidates {
+		releaseSlot, capErr := d.deps.Sessions.ReserveSlot(ctx, launch.req.SessionID, launch.req.Vendor, cand)
+		if capErr == nil {
+			launch.req.AccountID = cand
+			d.picker.CommitSelection(ctx, launch.req.Vendor, cand)
+			return releaseSlot, true, nil
 		}
-		return nil, false, boundaryError("reserve task slot", capErr)
+		if !errors.Is(capErr, ErrVendorSessionCapacity) && errcode.CodeOf(capErr) != errcode.VendorCapacity {
+			return nil, false, boundaryError("reserve task slot", capErr)
+		}
 	}
-	return releaseSlot, true, nil
+	return nil, false, nil
+}
+
+func (d *teamDispatcher) candidateAccountsForLaunch(ctx context.Context, launch *taskLaunch) ([]string, error) {
+	if d.picker == nil {
+		if launch.req.AccountID == "" {
+			return []string{vendorDefaultAccount}, nil
+		}
+		return []string{launch.req.AccountID}, nil
+	}
+	prefer, exclude := "", ""
+	if launch.retry.prevCode == string(vendor.FailureQuota) {
+		prefer, exclude = launch.retry.toAccount, launch.retry.fromAccount
+	}
+	candidates, err := d.picker.CandidateAccounts(ctx, launch.req.Vendor, launch.req.Model, prefer, exclude)
+	if err != nil {
+		return nil, boundaryError("select vendor account", err)
+	}
+	return candidates, nil
 }
 
 func (d *teamDispatcher) sendTaskIntro(ctx context.Context, teamID string, task *vendorstore.TaskRecord, launch *taskLaunch) (bool, error) {
-	intro := taskIntro(task, &launch.spec, launch.brief, launch.deps, launch.nonce, launch.retry)
+	intro := taskIntro(task, &launch.spec, launch.brief, launch.deps, launch.nonce, &launch.retry)
 	opCtx := context.WithoutCancel(ctx)
 	taskID, sessionID := task.TaskID, launch.req.SessionID
 	err := d.deps.Sessions.SendAsync(ctx, sessionID, vendor.Input{Text: intro, Origin: vendor.OriginFugue}, func(sendErr error) {
@@ -297,6 +312,8 @@ func (d *teamDispatcher) loadQuotaReassignContext(ctx context.Context, teamID, p
 	if json.Unmarshal(raw, &payload) != nil {
 		return
 	}
+	retry.fromAccount = payload.FromAccount
+	retry.toAccount = payload.ToAccount
 	retry.progressSummary = payload.ProgressSummary
 	retry.worktreeDiff = payload.WorktreeDiff
 }
