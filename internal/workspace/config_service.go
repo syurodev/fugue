@@ -37,6 +37,23 @@ func (s *Service) UpdateWorkspaceConfig(ctx context.Context, id string, rawTOML 
 	return s.applyWorkspaceConfig(ctx, id, rawTOML, expectedHash, false)
 }
 
+// PatchWorkspaceConfig applies field-level patches to fugue.toml while preserving
+// comments and key order, then validates and commits with CAS and policy checks.
+func (s *Service) PatchWorkspaceConfig(ctx context.Context, id, expectedHash string, patches []ConfigPatch) (*Workspace, error) {
+	rec, _, diskBytes, _, _, err := s.loadWorkspaceInputs(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkExpectedHash(diskBytes, rec.ConfigHash, expectedHash); err != nil {
+		return nil, err
+	}
+	patchedTOML, err := PatchTOML(diskBytes, patches)
+	if err != nil {
+		return nil, err
+	}
+	return s.UpdateWorkspaceConfig(ctx, id, patchedTOML, expectedHash)
+}
+
 // ConfirmWorkspaceConfig confirms a pending out-of-band configuration change (Q-64, Q-70: write accepted.toml first, update DB second).
 func (s *Service) ConfirmWorkspaceConfig(ctx context.Context, id, expectedHash string) (*Workspace, error) {
 	return s.applyWorkspaceConfig(ctx, id, nil, expectedHash, true)

@@ -191,6 +191,62 @@ func (h *workspaceHandler) UpdateWorkspaceConfig(ctx context.Context, req *conne
 	return connect.NewResponse(&workspacev1.UpdateWorkspaceConfigResponse{Workspace: protoWorkspace(ws, raw)}), nil
 }
 
+func (h *workspaceHandler) PatchWorkspaceConfig(ctx context.Context, req *connect.Request[workspacev1.PatchWorkspaceConfigRequest]) (*connect.Response[workspacev1.PatchWorkspaceConfigResponse], error) {
+	svc, principal, err := h.auth(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if !app.IsAppPrincipal(principal) {
+		return nil, toConnectError(ctx, h.backend, errcode.New(errcode.PermissionDenied, "only the app client may patch workspace configuration"))
+	}
+	if req.Msg == nil {
+		return nil, toConnectError(ctx, h.backend, errcode.New(errcode.InvalidArgument, "request is required"))
+	}
+	patches, err := appConfigPatches(req.Msg.Patches)
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	ws, err := svc.PatchWorkspaceConfig(ctx, principal, req.Msg.CommandId, req.Msg.WorkspaceId, req.Msg.ExpectedHash, patches)
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	_, raw, err := svc.GetWorkspace(ctx, principal, ws.ID)
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	return connect.NewResponse(&workspacev1.PatchWorkspaceConfigResponse{Workspace: protoWorkspace(ws, raw)}), nil
+}
+
+func appConfigPatches(raw []*workspacev1.ConfigPatch) ([]app.WorkspaceConfigPatch, error) {
+	out := make([]app.WorkspaceConfigPatch, 0, len(raw))
+	for _, p := range raw {
+		if p == nil {
+			return nil, errcode.New(errcode.InvalidArgument, "config patch entry is required")
+		}
+		var op app.WorkspaceConfigPatchOp
+		switch p.GetOp() {
+		case workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET:
+			op = app.WorkspacePatchSet
+		case workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_DELETE:
+			op = app.WorkspacePatchDelete
+		case workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_UNSPECIFIED:
+			return nil, errcode.New(errcode.InvalidArgument, "config patch operation is required")
+		default:
+			return nil, errcode.New(errcode.InvalidArgument, "unsupported config patch operation")
+		}
+		var val any
+		if p.GetValue() != nil {
+			val = p.GetValue().AsInterface()
+		}
+		out = append(out, app.WorkspaceConfigPatch{
+			DottedKey: p.GetDottedKey(),
+			Op:        op,
+			Value:     val,
+		})
+	}
+	return out, nil
+}
+
 func (h *workspaceHandler) ConfirmWorkspaceConfig(ctx context.Context, req *connect.Request[workspacev1.ConfirmWorkspaceConfigRequest]) (*connect.Response[workspacev1.ConfirmWorkspaceConfigResponse], error) {
 	return handleWorkspaceDecision(ctx, h, req,
 		func(msg *workspacev1.ConfirmWorkspaceConfigRequest) (string, string) { return msg.Id, msg.ExpectedHash }, true,
