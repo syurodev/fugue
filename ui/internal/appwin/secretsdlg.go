@@ -95,8 +95,7 @@ func (d *secretAddDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens)
 		Busy:            d.busy,
 		Body: func(gtx *layout.Context, bands *kit.DialogBands) image.Point {
 			body := newSecretDlgBody(env, gtx, bands, sc.fail)
-			d.layScope(body, wsLabel)
-			d.layName(body, canSubmit)
+			d.layIdentity(body, wsLabel, canSubmit)
 			d.layDescription(body)
 			d.layValue(body, canSubmit)
 			if d.lastErr != "" {
@@ -117,14 +116,7 @@ func (d *secretAddDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens)
 
 func (d *secretAddDialog) layScope(body *secretDlgBody, wsLabel string) {
 	body.field(d.scopeSeg.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
-		props := kit.SegmentedProps{
-			Options: []kit.SegmentedOption{
-				{ID: client.SecretScopeGlobal, Label: labelGlobal},
-				{ID: client.SecretScopeWorkspace, Label: wsLabel, Disabled: d.wsID == ""},
-			},
-			Selected: d.scopeIdx,
-			Disabled: d.busy,
-		}
+		props := d.scopeProps(wsLabel)
 		changed, next, err := d.scopeSeg.Layout(body.env, gtx, props)
 		if err == nil && changed {
 			d.scopeIdx = next
@@ -132,6 +124,39 @@ func (d *secretAddDialog) layScope(body *secretDlgBody, wsLabel string) {
 		props.Selected = d.scopeIdx
 		return d.scopeSeg.Measure(body.env, gtx, props), err
 	})
+}
+
+func (d *secretAddDialog) scopeProps(wsLabel string) kit.SegmentedProps {
+	return kit.SegmentedProps{
+		Options: []kit.SegmentedOption{
+			{ID: client.SecretScopeGlobal, Label: labelGlobal},
+			{ID: client.SecretScopeWorkspace, Label: wsLabel, Disabled: d.wsID == ""},
+		},
+		Selected: d.scopeIdx,
+		Disabled: d.busy,
+	}
+}
+
+func (d *secretAddDialog) layIdentity(body *secretDlgBody, wsLabel string, canSubmit bool) {
+	right := body.w * 4 / 9
+	local := *body.gtx
+	local.Constraints.Min = image.Point{}
+	scopeWidth := d.scopeSeg.Measure(body.env, &local, d.scopeProps(wsLabel)).Size.X
+	nameWidth := body.w - right - body.gap
+	if right < scopeWidth || nameWidth < body.gtx.Dp(theme.ControlLG)*4 {
+		d.layName(body, canSubmit)
+		d.layScope(body, wsLabel)
+		return
+	}
+	name, scope := *body, *body
+	name.w = nameWidth
+	scope.w = right
+	scope.x = nameWidth + body.gap
+	d.layName(&name, canSubmit)
+	scope.label("Scope", body.env.Th.Chrome().FgMuted)
+	scope.y -= scope.gap - scope.gtx.Dp(theme.SpaceXS)
+	d.layScope(&scope, wsLabel)
+	body.y = max(name.y, scope.y)
 }
 
 func (d *secretAddDialog) layName(body *secretDlgBody, canSubmit bool) {
@@ -370,6 +395,7 @@ type secretDlgBody struct {
 	gtx   *layout.Context
 	fail  func(error)
 	w     int
+	x     int
 	y     int
 	gap   int
 }
@@ -386,7 +412,7 @@ func (b *secretDlgBody) field(tag event.Tag, draw func(gtx *layout.Context) (lay
 		Min: image.Pt(b.w, 0),
 		Max: image.Pt(b.w, b.gtx.Constraints.Max.Y),
 	}
-	stack := op.Offset(image.Pt(0, b.y)).Push(local.Ops)
+	stack := op.Offset(image.Pt(b.x, b.y)).Push(local.Ops)
 	dims, err := draw(&local)
 	stack.Pop()
 	if err != nil {

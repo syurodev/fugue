@@ -4,16 +4,23 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"image"
 	"sync"
 	"testing"
 	"time"
 
+	"gioui.org/io/input"
+	"gioui.org/io/key"
+
 	"github.com/syurodev/fugue/pkg/client"
 
+	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/inbox"
+	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/secrets"
 	"github.com/syurodev/fugue/ui/internal/session"
+	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/vault"
 	"github.com/syurodev/fugue/ui/internal/workspace"
 )
@@ -102,6 +109,38 @@ func awaitAppSecretsResult(t *testing.T, sc *screens) secrets.Result {
 	case <-t.Context().Done():
 		t.Fatalf("waiting for secrets worker: %v", t.Context().Err())
 		return secrets.Result{}
+	}
+}
+
+func TestSecretRowMenuKeyboardOpensReplaceDialog(t *testing.T) {
+	t.Parallel()
+	sc := buildSecretsShotScreens(t, shotSecretsStore)
+	sh, err := fonts.Shaper()
+	if err != nil {
+		t.Fatalf("build shaper: %v", err)
+	}
+	th := theme.Dark(sh)
+	env := &kit.Env{Th: &th, Sh: sh, ReducedMotion: true}
+	router := new(input.Router)
+	size := image.Pt(shotWindowW, shotWindowH)
+	items := sc.secrets.GlobalSecrets()
+	if len(items) == 0 {
+		t.Fatal("missing global fixture")
+	}
+	first := sc.secretsView.widgetsFor(items[0].SecretID)
+	runAppFrame(env, sc, router, size)
+	focusTagInFrame(env, sc, router, size, first.actions.Tag())
+	enter := func() {
+		router.Queue(key.Event{Name: key.NameReturn, State: key.Press}, key.Event{Name: key.NameReturn, State: key.Release})
+		runAppFrame(env, sc, router, size)
+	}
+	enter()
+	if !sc.secretsView.menu.IsOpen() {
+		t.Fatal("Enter did not open the focused row menu")
+	}
+	enter()
+	if !sc.secretsView.replaceDlg.dialog.IsOpen() {
+		t.Fatal("Enter did not open Replace value from the row menu")
 	}
 }
 
