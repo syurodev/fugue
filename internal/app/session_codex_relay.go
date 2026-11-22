@@ -301,7 +301,7 @@ func (s *SessionToolService) awaitAndTakeCodexRelayed(
 	if !s.canApproveNow(binding) {
 		return codexRelayChoice{}, false
 	}
-	if resolved.Outcome != interaction.OutcomeAnswered && resolved.Outcome != interaction.OutcomeDenied {
+	if !canRelayResolvedTicket(resolved, req) {
 		return codexRelayChoice{}, false
 	}
 	delivered, err := s.interactions.TakeRelayed(opID)
@@ -313,6 +313,13 @@ func (s *SessionToolService) awaitAndTakeCodexRelayed(
 		clear(delivered.Answers[i].SecretValue)
 	}
 	return choice, ok
+}
+
+func canRelayResolvedTicket(resolved *interaction.Ticket, req *vendor.ServerRequest) bool {
+	if resolved.Outcome == interaction.OutcomeAnswered || resolved.Outcome == interaction.OutcomeDenied {
+		return true
+	}
+	return req != nil && isAgyPermissionMethod(req.Method) && resolved.Outcome == interaction.OutcomeCancelled && resolved.TurnCancelled
 }
 
 func translateServerRelayedOutcome(ticket *interaction.Ticket, req *vendor.ServerRequest) (codexRelayChoice, bool) {
