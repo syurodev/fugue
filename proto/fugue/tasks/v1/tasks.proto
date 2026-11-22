@@ -46,12 +46,24 @@ message PostChannelMessageResponse {
   int64 channel_seq = 1;
 }
 
+message PruneWorktreesRequest {
+  int64 retention_seconds = 1;
+}
+
+message PruneWorktreesResponse {
+  repeated string removed_worktrees = 1;
+  repeated string removed_branches = 2;
+  int32 removed_admin_entries = 3;
+}
+
 // TaskService serves the team channel of host-api v0.17 §5.3: local
 // principals only — vendor session principals never read, post or subscribe.
 // PageChannel without thread_task_id is the general channel; the durable
 // topic `team:<id>` streams one event per appended line, with a snapshot of
-// the newest 100.
+// the newest 100. PruneWorktrees removes ended-team task worktrees and
+// branches past the retention window (orchestration §9).
 service TaskService {
   rpc PageChannel(PageChannelRequest) returns (PageChannelResponse);
   rpc PostChannelMessage(PostChannelMessageRequest) returns (PostChannelMessageResponse);
+  rpc PruneWorktrees(PruneWorktreesRequest) returns (PruneWorktreesResponse);
 }

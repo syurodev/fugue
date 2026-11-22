@@ -2,6 +2,7 @@ package hostapi
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"connectrpc.com/connect"
@@ -77,6 +78,36 @@ func (h *tasksHandler) PostChannelMessage(ctx context.Context, req *connect.Requ
 		return nil, toConnectError(ctx, h.backend, err)
 	}
 	return connect.NewResponse(&tasksv1.PostChannelMessageResponse{ChannelSeq: result.ChannelSeq}), nil
+}
+
+// PruneWorktrees removes ended-team task worktrees and branches past the
+// retention window (orchestration §9, F11.11).
+func (h *tasksHandler) PruneWorktrees(ctx context.Context, req *connect.Request[tasksv1.PruneWorktreesRequest]) (*connect.Response[tasksv1.PruneWorktreesResponse], error) {
+	svc, err := h.service(ctx)
+	if err != nil {
+		return nil, err
+	}
+	retention := time.Duration(req.Msg.GetRetentionSeconds()) * time.Second
+	res, err := svc.PruneWorktrees(ctx, retention)
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	adminEntries := clampInt32(res.RemovedAdminEntries)
+	return connect.NewResponse(&tasksv1.PruneWorktreesResponse{
+		RemovedWorktrees:    res.RemovedWorktrees,
+		RemovedBranches:     res.RemovedBranches,
+		RemovedAdminEntries: adminEntries,
+	}), nil
+}
+
+func clampInt32(n int) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if n < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(n)
 }
 
 func protoChannelLine(v *app.ChannelLineView) *tasksv1.ChannelLine {

@@ -120,6 +120,30 @@ func (c *Client) PostChannelMessage(ctx context.Context, in *PostChannelMessageI
 	return res.Msg.GetChannelSeq(), nil
 }
 
+// PruneWorktreesResult reports what one host prune pass removed.
+type PruneWorktreesResult struct {
+	RemovedWorktrees    []string
+	RemovedBranches     []string
+	RemovedAdminEntries int
+}
+
+// PruneWorktrees removes ended-team task worktrees and branches past the
+// retention duration (zero uses the host's 24h default, orchestration §9).
+func (c *Client) PruneWorktrees(ctx context.Context, retention time.Duration) (PruneWorktreesResult, error) {
+	res, err := tasksv1connect.NewTaskServiceClient(c.hc, c.base).PruneWorktrees(ctx,
+		connect.NewRequest(&tasksv1.PruneWorktreesRequest{
+			RetentionSeconds: int64(retention / time.Second),
+		}))
+	if err != nil {
+		return PruneWorktreesResult{}, fmt.Errorf("prune task worktrees: %w", err)
+	}
+	return PruneWorktreesResult{
+		RemovedWorktrees:    res.Msg.GetRemovedWorktrees(),
+		RemovedBranches:     res.Msg.GetRemovedBranches(),
+		RemovedAdminEntries: int(res.Msg.GetRemovedAdminEntries()),
+	}, nil
+}
+
 // TasksCodeOf returns the public code of a tasks call failure, for example
 // tasks.team_ended.
 func TasksCodeOf(err error) (string, bool) {

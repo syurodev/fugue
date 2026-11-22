@@ -43,6 +43,10 @@ func TestChannelHostAPIDeniesSessionPrincipal(t *testing.T) {
 	if !errors.Is(deniedPost, ErrSessionPrincipalDenied) && connect.CodeOf(deniedPost) != connect.CodePermissionDenied {
 		t.Fatalf("session principal PostChannelMessage err = %v, want permission_denied", deniedPost)
 	}
+	_, deniedPrune := sessionTasks.PruneWorktrees(t.Context(), connect.NewRequest(&tasksv1.PruneWorktreesRequest{}))
+	if !errors.Is(deniedPrune, ErrSessionPrincipalDenied) && connect.CodeOf(deniedPrune) != connect.CodePermissionDenied {
+		t.Fatalf("session principal PruneWorktrees err = %v, want permission_denied", deniedPrune)
+	}
 }
 
 func TestChannelHostAPIMapsLocalErrors(t *testing.T) {
@@ -60,5 +64,9 @@ func TestChannelHostAPIMapsLocalErrors(t *testing.T) {
 	_, postErr := localTasks.PostChannelMessage(t.Context(), connect.NewRequest(&tasksv1.PostChannelMessageRequest{TeamId: "missing-team", Text: "hi"}))
 	if connect.CodeOf(postErr) != connect.CodeInvalidArgument && errcode.CodeOf(postErr) != errcode.InvalidArgument {
 		t.Fatalf("local PostChannelMessage without command_id err = %v, want invalid_argument", postErr)
+	}
+	_, pruneErr := localTasks.PruneWorktrees(t.Context(), connect.NewRequest(&tasksv1.PruneWorktreesRequest{RetentionSeconds: -1}))
+	if connect.CodeOf(pruneErr) != connect.CodeInvalidArgument && errcode.CodeOf(pruneErr) != errcode.InvalidArgument {
+		t.Fatalf("local PruneWorktrees with negative retention err = %v, want invalid_argument", pruneErr)
 	}
 }
