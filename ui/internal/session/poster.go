@@ -33,13 +33,14 @@ func processIdentity() string {
 // PostKind names the write a poster runs.
 type PostKind uint8
 
-// The write kinds, the composer's actions (F10.4b).
+// The write kinds, the composer's actions (F10.4b, F10.5e).
 const (
 	PostStart PostKind = iota
 	PostResume
 	PostSend
 	PostSteer
 	PostInterrupt
+	PostClose
 )
 
 // PostResult is one finished write, delivered to the window goroutine.
@@ -151,6 +152,13 @@ func (p *Poster) Interrupt(sessionID string) {
 	p.queue(&postOp{kind: PostInterrupt, session: sessionID})
 }
 
+// CloseSession posts the close of a detached or idle session (F10.5e): the
+// detached banner's close action. Closing is final, so the caller confirms
+// first; the poster only carries the write.
+func (p *Poster) CloseSession(sessionID string) {
+	p.queue(&postOp{kind: PostClose, session: sessionID})
+}
+
 // queue hands one post over, failing it at once when the queue is full. The
 // command id is minted here, per post, so the id belongs to the logical
 // write and not to the moment it runs.
@@ -202,6 +210,9 @@ func (p *Poster) deliver(ctx context.Context, c *client.Client, op *postOp) bool
 	case PostInterrupt:
 		done, stopErr := c.Interrupt(ctx, op.commandID, op.session)
 		res.Done, err = done, stopErr
+	case PostClose:
+		done, closeErr := c.CloseSession(ctx, op.commandID, op.session)
+		res.Done, err = done, closeErr
 	}
 	if err != nil {
 		res.Err = err

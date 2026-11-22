@@ -33,7 +33,8 @@ import (
 const composerMaxLines = 8
 
 // The session states the composer gates on, mirroring the vendor session
-// state machine's wire values.
+// state machine's wire values; reasonVaultLocked is the one waiting reason
+// the failure UX names (F10.5e).
 const (
 	stateReady            = "ready"
 	stateRunning          = "running"
@@ -42,6 +43,8 @@ const (
 	stateWaiting          = "waiting"
 	stateDetached         = "detached"
 	stateClosed           = "closed"
+
+	reasonVaultLocked = "vault_locked"
 )
 
 // // composerState is one session's composer view state, kept per session like
@@ -52,6 +55,7 @@ type composerState struct {
 	send   *kit.ButtonState
 	stop   *kit.ButtonState
 	resume *kit.ButtonState
+	close  *kit.ButtonState
 	// lastErr is the write failure the composer could not act on, shown
 	// under the input; a failed send puts the draft back while the user has
 	// not typed since.
@@ -71,6 +75,7 @@ func newComposerState() *composerState {
 		send:   kit.NewButtonState(),
 		stop:   kit.NewButtonState(),
 		resume: kit.NewButtonState(),
+		close:  kit.NewButtonState(),
 	}
 }
 
@@ -211,7 +216,10 @@ func (c *composer) actionMeasure(env *kit.Env, gtx *layout.Context, st *composer
 		resume := st.resume.Measure(env, gtx, kit.ButtonProps{
 			Text: "Resume", Variant: kit.Primary, Size: kit.SizeLG,
 		}).Size.Y
-		row = max(row, resume)
+		closer := st.close.Measure(env, gtx, kit.ButtonProps{
+			Text: "Close", Variant: kit.Secondary, Size: kit.SizeLG,
+		}).Size.Y
+		row = max(row, resume, closer)
 	}
 	return row
 }
@@ -404,17 +412,17 @@ func (c *composer) submit(st *composerState, sess session.Session, kind session.
 		c.poster.Send(sess.ID, text)
 	case session.PostSteer:
 		c.poster.Steer(sess.ID, text)
-	case session.PostStart, session.PostResume, session.PostInterrupt:
+	case session.PostStart, session.PostResume, session.PostInterrupt, session.PostClose:
 		// The primary action never carries these kinds: starts go through
-		// the start flow and stops through their own button.
+		// the start flow, stops and closes through their own buttons.
 	}
 	st.area.SetText("")
 	st.lastErr = ""
 }
 
 // layoutActions draws the action row: the primary action (send or steer),
-// the stop button on an active turn, and the resume button on a detached
-// session.
+// the stop button on an active turn, and the resume and close buttons on a
+// detached session (F10.5e).
 func (c *composer) layoutActions(env *kit.Env, gtx *layout.Context, sc *screens, st *composerState, sess session.Session, disabled bool) layout.Dimensions {
 	kind, actionable := c.action(sess)
 	sendLabel := "Send"
@@ -430,8 +438,11 @@ func (c *composer) layoutActions(env *kit.Env, gtx *layout.Context, sc *screens,
 			func() { c.poster.Interrupt(sess.ID) }))
 	}
 	if sess.State == stateDetached {
-		children = append(children, c.button(env, sc, st.resume, "Resume", kit.Primary, disabled,
-			func() { c.poster.ResumeSession(sess.ID, client.SessionProfile{}) }))
+		children = append(children,
+			c.button(env, sc, st.resume, "Resume", kit.Primary, disabled,
+				func() { c.poster.ResumeSession(sess.ID, client.SessionProfile{}) }),
+			c.button(env, sc, st.close, "Close", kit.Secondary, disabled,
+				func() { c.poster.CloseSession(sess.ID) }))
 	}
 	local := *gtx
 	return layout.Flex{Axis: layout.Horizontal}.Layout(local, children...)

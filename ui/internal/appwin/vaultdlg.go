@@ -185,6 +185,7 @@ func (g *vaultGate) layoutUnlock(gtx *layout.Context, env *kit.Env, sc *screens)
 		vaultLabelRow(env, theme.TypeTitle(), c.Fg, "Unlock vault"),
 		layout.Rigid(layout.Spacer{Height: theme.SpaceSM}.Layout),
 		vaultLabelRow(env, theme.TypeSmall(), c.FgMuted, "Enter your passphrase to unlock sessions and protected history."),
+		g.layoutWaitingRow(env, sc),
 		layout.Rigid(layout.Spacer{Height: theme.SpaceMD}.Layout),
 		vaultSecretRow(env, g.pass, fieldLabel, g.busy, &submitted, sc.fail),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return g.layoutErrorLine(&gtx, env) }),
@@ -225,6 +226,27 @@ func (g *vaultGate) layoutErrorLine(gtx *layout.Context, env *kit.Env) layout.Di
 	return layout.Inset{Top: theme.SpaceSM}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
 		l := gtx
 		return kit.Label(env, &l, theme.TypeSmall(), env.Th.Status().Danger, g.lastErr)
+	})
+}
+
+// layoutWaitingRow names the sessions the lock suspends (activation §3:
+// `Waiting(vault_locked)` with the number of waiting runs); unlocking moves
+// them back to ready on the host.
+func (g *vaultGate) layoutWaitingRow(env *kit.Env, sc *screens) layout.FlexChild {
+	n := vaultWaitingCount(sc.sidebar.List())
+	if n == 0 {
+		return layout.Rigid(layout.Spacer{Height: 0}.Layout)
+	}
+	word := "sessions wait"
+	if n == 1 {
+		word = "session waits"
+	}
+	return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		return layout.Inset{Top: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			l := gtx
+			return kit.Label(env, &l, theme.TypeSmall(), env.Th.Status().Warning,
+				fmt.Sprintf("%d %s for the vault.", n, word))
+		})
 	})
 }
 

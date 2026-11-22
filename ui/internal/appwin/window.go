@@ -244,13 +244,21 @@ func stopSideGoroutines(cancel context.CancelFunc, feederDone, closerDone <-chan
 // eventLoop is the window's event loop until it is destroyed. Every frame
 // drives the env the way kitgallery's window does (F10.13): the UI scale on
 // the metric, the driver's frame step, the modality and the overlay's window
-// size before layout, and the frame-end invalidations after.
+// size before layout, and the frame-end invalidations after. A destroy while
+// a session's turn still runs opens the close confirmation instead (DA-E08,
+// F10.5e); the confirmed close re-performs the action past the dialog.
 func eventLoop(w *app.Window, env *kit.Env, sc *screens, q *updateQueue, light, dark *theme.Theme) error {
 	var ops op.Ops
+	sc.failure.closeDlg.requestClose = func() { w.Perform(system.ActionClose) }
 	for {
 		switch e := w.Event().(type) {
 		case app.DestroyEvent:
-			// TODO(F10.5e): Ask before closing when active-session counts are available.
+			active := activeSessionCount(sc.sidebar.List())
+			if sc.failure.closeDlg.shouldAsk(active) {
+				sc.failure.closeDlg.open(active)
+				w.Invalidate()
+				return nil
+			}
 			return e.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
@@ -451,11 +459,13 @@ func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 			})
 		}),
 	)
-	// The start and workspace dialogs (F10.4b, F10.14) draw over the whole
-	// window, last, with the full frame's gtx: the scrim dims everything
-	// beneath whichever dialog is open.
+	// The start and workspace dialogs (F10.4b, F10.14), the active-session
+	// close confirmation (F10.5e) draw over the whole window, last, with the
+	// full frame's gtx: the scrim dims everything beneath whichever dialog is
+	// open.
 	sc.composer.start.layout(env, gtx, sc, sc.composer)
 	sc.dlg.layout(env, gtx, sc)
+	sc.failure.closeDlg.layout(env, gtx, sc)
 }
 
 // statusColor maps the connection state onto the theme's status tokens

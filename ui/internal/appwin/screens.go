@@ -126,6 +126,9 @@ type screens struct {
 	viewer          *fileViewer
 	viewerWorker    *fileViewWorker
 	emptyTranscript *kit.EmptyStateState
+	// failure is the window's failure UX (F10.5e): the actionable banners and
+	// the active-session close confirmation.
+	failure *failureUX
 }
 
 // newScreens builds the screens over the manager, its fetcher, the composer's
@@ -173,6 +176,7 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 		settingsRow:     settingsRow,
 		viewer:          newFileViewer(),
 		emptyTranscript: kit.NewEmptyStateState(),
+		failure:         newFailureUX(),
 	}
 }
 
@@ -436,7 +440,9 @@ func (s *screens) fail(err error) {
 	}
 }
 
-// layout draws the VaultGate while locked, or the sidebar and transcript pane.
+// layout draws the VaultGate while locked, or the failure banner strip, the
+// sidebar and the transcript pane (F10.5e puts the strip above the panes; a
+// Gio Flex Rigid child needs no pre-measure, so the panes shrink to fit).
 func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 	if s.vaultGate.active(s.vault) {
 		s.vaultGate.layout(gtx, env, s)
@@ -445,29 +451,39 @@ func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 	s.toggleInboxShortcut(gtx)
 	s.toggleAccountsShortcut(gtx)
 	s.toggleSettingsShortcut(gtx)
-	layout.Flex{Axis: layout.Horizontal}.Layout(*gtx,
+	layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{Right: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				return s.layoutSidebar(&local, env)
-			})
+			local := gtx
+			return s.failure.layout(env, &local, s)
 		}),
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			local := gtx
-			// TODO(F10.20b): move the inbox, accounts, settings, and file viewer views into slots
-			if s.viewer.open {
-				return s.viewer.layout(&local, env, s)
-			}
-			if s.inboxOpen {
-				return s.inboxView.layout(&local, env, s)
-			}
-			if s.accountsOpen {
-				return s.accountsView.layout(&local, env, s)
-			}
-			if s.settingsOpen {
-				return s.settingsView.layout(&local, env, s)
-			}
-			return s.layoutTranscript(&local, env)
+			layout.Flex{Axis: layout.Horizontal}.Layout(local,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Inset{Right: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						local := gtx
+						return s.layoutSidebar(&local, env)
+					})
+				}),
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					local := gtx
+					// TODO(F10.20b): move the inbox, accounts, settings, and file viewer views into slots
+					if s.viewer.open {
+						return s.viewer.layout(&local, env, s)
+					}
+					if s.inboxOpen {
+						return s.inboxView.layout(&local, env, s)
+					}
+					if s.accountsOpen {
+						return s.accountsView.layout(&local, env, s)
+					}
+					if s.settingsOpen {
+						return s.settingsView.layout(&local, env, s)
+					}
+					return s.layoutTranscript(&local, env)
+				}),
+			)
+			return layout.Dimensions{Size: gtx.Constraints.Max}
 		}),
 	)
 }

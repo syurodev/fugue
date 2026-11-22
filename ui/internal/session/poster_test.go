@@ -91,6 +91,13 @@ func (f *fakeVendors) Interrupt(ctx context.Context, req *connect.Request[vendor
 	return connect.NewResponse(&vendorsv1.InterruptResponse{Status: vendorsv1.OperationStatus_OPERATION_STATUS_DONE}), nil
 }
 
+func (f *fakeVendors) CloseSession(ctx context.Context, req *connect.Request[vendorsv1.CloseSessionRequest]) (*connect.Response[vendorsv1.CloseSessionResponse], error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.calls = append(f.calls, capturedCall{method: "close", commandID: req.Msg.CommandId, session: req.Msg.SessionId})
+	return connect.NewResponse(&vendorsv1.CloseSessionResponse{Status: vendorsv1.OperationStatus_OPERATION_STATUS_DONE}), nil
+}
+
 func (f *fakeVendors) StartSession(ctx context.Context, req *connect.Request[vendorsv1.StartSessionRequest]) (*connect.Response[vendorsv1.StartSessionResponse], error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -167,9 +174,10 @@ func TestPosterDeliversEveryWriteWithItsOwnCommandID(t *testing.T) {
 	p.Interrupt("s1")
 	p.StartSession("claude", "ws", "", client.SessionProfile{Model: "sonnet"})
 	p.ResumeSession("s2", client.SessionProfile{})
+	p.CloseSession("s3")
 
 	seen := map[PostKind]bool{}
-	for range []int{0, 1, 2, 3, 4} {
+	for range []int{0, 1, 2, 3, 4, 5} {
 		res := <-p.Results()
 		if res.Err != nil {
 			t.Fatalf("post %d failed: %v", res.Kind, res.Err)
@@ -179,9 +187,12 @@ func TestPosterDeliversEveryWriteWithItsOwnCommandID(t *testing.T) {
 		}
 		seen[res.Kind] = true
 	}
+	if !seen[PostClose] {
+		t.Fatal("the close post was never delivered")
+	}
 	calls := recorded(fake)
-	if len(calls) != 5 {
-		t.Fatalf("calls = %+v, want the five writes", calls)
+	if len(calls) != 6 {
+		t.Fatalf("calls = %+v, want the six writes", calls)
 	}
 	ids := map[string]bool{}
 	for _, call := range calls {

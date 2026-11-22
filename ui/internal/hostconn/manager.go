@@ -156,6 +156,11 @@ func (m *Manager) State() (State, string) {
 	return m.state, m.reason
 }
 
+// DataDir returns the data directory the manager watches; the disconnected
+// banner names it, so a manual `fugue serve` start knows where to point
+// (activation §3, F10.5e).
+func (m *Manager) DataDir() string { return m.cfg.DataDir }
+
 // AddTopic streams one more topic from the current connection, subscribing
 // from its stored cursor when it has one and from a snapshot otherwise. The
 // topic survives reconnects until RemoveTopic. Safe from the window
