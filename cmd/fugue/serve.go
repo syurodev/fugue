@@ -128,6 +128,7 @@ func hostDeps(cfg config.Config, version string, idleGrace time.Duration, clk cl
 			// Foreground serve defaults to no idle shutdown (Q-25).
 			IdleGrace:    idleGrace,
 			DrainTimeout: 0,
+			CrashPoint:   cfg.CrashPoint,
 		},
 		Clock:     clk,
 		IDs:       ids.NewUUIDv7(clk, ids.CryptoRandom{}),

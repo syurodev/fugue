@@ -16,7 +16,18 @@ const (
 	EnvDataDir    = "SYNX_FUGUE_DATA_DIR"
 	EnvFugueHome  = "SYNX_FUGUE_HOME"
 	EnvLogLevel   = "SYNX_FUGUE_LOG_LEVEL"
+	EnvCrashPoint = "SYNX_FUGUE_CRASH_POINT"
 	EnvRuntimeDir = "XDG_RUNTIME_DIR"
+
+	// CrashExitCode is the exit status used when an armed crash point fires
+	// (128 + SIGKILL).
+	CrashExitCode = 137
+
+	// Stage A named crash points (verification v0.15 §3.1, A-E06).
+	CrashPointVendorTurnActive       = "vendor_turn_active"
+	CrashPointTeamTaskRunning        = "team_task_running"
+	CrashPointTeamMergeAfterFF       = "team_merge_after_ff"
+	CrashPointInteractionCardPending = "interaction_card_pending"
 
 	dataDirName = "Fugue"
 )
@@ -32,6 +43,9 @@ type Config struct {
 	// (host-api §3): XDG_RUNTIME_DIR when set, otherwise a per-user directory
 	// fugue creates under the OS temp dir.
 	RuntimeDir string
+	// CrashPoint is the optional named Stage A crash point armed via
+	// SYNX_FUGUE_CRASH_POINT. Empty means unarmed (zero-cost no-op).
+	CrashPoint string
 }
 
 // Env looks up environment variables. Production uses ProcessEnv; tests use MapEnv.
@@ -72,7 +86,16 @@ func Load(env Env, userConfigDir func() (string, error)) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	return Config{DataDir: dir, LogLevel: level, RuntimeDir: rt}, nil
+	cp, _ := env.Lookup(EnvCrashPoint)
+	return Config{DataDir: dir, LogLevel: level, RuntimeDir: rt, CrashPoint: cp}, nil
+}
+
+// TriggerCrashPoint terminates the process immediately with CrashExitCode when
+// armed matches point. When armed is empty it is a zero-cost no-op.
+func TriggerCrashPoint(armed, point string) {
+	if armed != "" && armed == point {
+		os.Exit(CrashExitCode)
+	}
 }
 
 // runtimeDir resolves the runtime base for sockets that do not fit the data

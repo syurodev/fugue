@@ -62,6 +62,8 @@ type VendorSessionDeps struct {
 	TestOnWaitInflightSpawn func()
 	// TestAfterPeerSnapshot runs between snapshotting owners and checking live actors.
 	TestAfterPeerSnapshot func()
+	// CrashPoint is the optional named Stage A crash point armed via internal/config.
+	CrashPoint string
 }
 
 type vendorVaultObserver interface {
