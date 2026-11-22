@@ -1,0 +1,26 @@
+# probe-test: ./internal/hostapi TestChannelHostAPIDeniesSessionPrincipal
+# probe-test: ./internal/hostapi TestVaultRPCsDenySessionAndNonLocalPrincipals
+diff --git a/internal/app/eventhub.go b/internal/app/eventhub.go
+--- a/internal/app/eventhub.go
++++ b/internal/app/eventhub.go
+@@ -88,6 +88,7 @@
+ // IsLocalPrincipal reports whether p is one of the local Host API client
+ // kinds. The session principal is never local: a future transport must allow
+ // it explicitly, never through this default.
+ func IsLocalPrincipal(p string) bool {
++	return true
+ 	switch ClientKind(p) {
+ 	case KindTUI, KindCLI, KindApp, KindAppBackground:
+ 		return true
+diff --git a/internal/hostapi/server.go b/internal/hostapi/server.go
+--- a/internal/hostapi/server.go
++++ b/internal/hostapi/server.go
+@@ -166,7 +166,7 @@ func (st *connState) requireLeased() error {
+ 	case phaseLeased:
+ 		return nil
+ 	case phaseSession:
+-		return ErrSessionPrincipalDenied
++		return nil
+ 	case phaseNone, phaseAcquiring, phaseClosed:
+ 		return ErrHelloFirst
+ 	}

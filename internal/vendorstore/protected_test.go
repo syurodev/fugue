@@ -494,6 +494,36 @@ func scanAllVendorColumns(t *testing.T, s *Store, marker []byte) {
 	}
 }
 
+func TestOpenPayloadAndReadItemFailClosedWhenVaultLocked(t *testing.T) {
+	t.Parallel()
+	s, v, _ := protectedStore(t)
+	_, turnErr := s.Append(t.Context(), "s", 1, &Event{Type: VendorTurnStarted, TurnID: "t", State: StateRunning})
+	requireNoError(t, turnErr)
+	_, err := s.Append(t.Context(), "s", 2, &Event{
+		Type: TranscriptItemRecorded,
+		Item: &Item{
+			ID:      "i-locked",
+			TurnID:  "t",
+			Kind:    KindFileChange,
+			Content: []byte("secret-content"),
+			Metadata: ItemMetadata{
+				ChangeKind: "modify",
+			},
+		},
+	})
+	requireNoError(t, err)
+	var payloadID string
+	requireNoError(t, s.db.QueryRowContext(t.Context(), "SELECT payload_id FROM vendor_transcript_items WHERE session_id='s' AND item_id='i-locked'").Scan(&payloadID))
+
+	v.Lock()
+	if _, err := s.OpenPayload(t.Context(), "s", payloadID); !errors.Is(err, vault.ErrLocked) {
+		t.Fatalf("OpenPayload after Lock = %v, want vault.ErrLocked", err)
+	}
+	if _, _, err := s.ReadItem(t.Context(), "s", "i-locked"); !errors.Is(err, vault.ErrLocked) {
+		t.Fatalf("ReadItem after Lock = %v, want vault.ErrLocked", err)
+	}
+}
+
 func assertVaultWaiting(t *testing.T, s *Store) {
 	t.Helper()
 	snapshot, err := s.Snapshot(t.Context(), "s")

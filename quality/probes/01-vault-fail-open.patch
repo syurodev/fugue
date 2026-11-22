@@ -1,0 +1,132 @@
+# probe-test: ./internal/app TestVRE11VaultLockInterruptsAndWaitsWithoutPlaintext
+# probe-test: ./internal/app TestVaultLockClearsKeyAndTriggersVaultLocked
+# probe-test: ./internal/vendorstore TestOpenPayloadAndReadItemFailClosedWhenVaultLocked
+diff --git a/internal/app/transcript.go b/internal/app/transcript.go
+--- a/internal/app/transcript.go
++++ b/internal/app/transcript.go
+@@ -163,7 +163,7 @@ func (t *Transcripts) locked(snap vault.Snapshot) {
+ // unlocked reports whether protected content may be read or streamed: only an
+ // unlocked vault counts, so an unknown state fails closed.
+ func (t *Transcripts) unlocked() bool {
+-	return t.deps.Vault != nil && t.deps.Vault.Snapshot().State == vault.StateUnlocked
++	return t.deps.Vault != nil
+ }
+ 
+ // RegisterSession registers the durable and delta topics of one session. It is
+diff --git a/internal/app/vendor_session_observations.go b/internal/app/vendor_session_observations.go
+--- a/internal/app/vendor_session_observations.go
++++ b/internal/app/vendor_session_observations.go
+@@ -245,7 +245,7 @@ func (a *vendorSessionActor) endTurn(ctx context.Context, turnID string, outcom
+ }
+ 
+ func (a *vendorSessionActor) recordItem(ctx context.Context, item *transcript.Item) error {
+-	if a.manager.deps.Vault.Snapshot().State != vault.StateUnlocked {
++	if false && a.manager.deps.Vault.Snapshot().State != vault.StateUnlocked {
+ 		item.Content = nil
+ 		item.ContentTruncated = false
+ 		item.ContentOriginalSize = 0
+diff --git a/internal/sealing/key.go b/internal/sealing/key.go
+--- a/internal/sealing/key.go
++++ b/internal/sealing/key.go
+@@ -11,7 +11,7 @@
+ // Contextual error wraps do not add a store error code; callers must wrap them
+ // with their store's typed error, preserving existing dependency codes.
+ func UnwrapSessionKey(v *vault.Service, recordType, sessionID, keyID string, wrapped []byte) ([]byte, error) {
+-	if v == nil || v.Snapshot().State != vault.StateUnlocked {
++	if v == nil {
+ 		return nil, vault.ErrLocked
+ 	}
+ 	key, err := v.OpenRecord(vault.RecordBinding{RecordType: recordType, RecordID: sessionID, KeyID: keyID}, wrapped)
+@@ -25,7 +25,7 @@ func UnwrapSessionKey(v *vault.Service, recordType, sessionID, keyID string, wra
+ // Contextual error wraps do not add a store error code; callers must wrap them
+ // with their store's typed error, preserving existing dependency codes.
+ func GenerateSessionKey(v *vault.Service, random ids.Random, recordType, sessionID, keyID string) ([]byte, *SessionKey, error) {
+-	if v == nil || v.Snapshot().State != vault.StateUnlocked {
++	if v == nil {
+ 		return nil, nil, vault.ErrLocked
+ 	}
+ 	raw := make([]byte, 32)
+diff --git a/internal/vault/record.go b/internal/vault/record.go
+--- a/internal/vault/record.go
++++ b/internal/vault/record.go
+@@ -26,7 +26,7 @@
+ func (s *Service) SealRecord(binding RecordBinding, plaintext []byte) ([]byte, error) {
+ 	s.mu.RLock()
+ 	defer s.mu.RUnlock()
+-	if s.state != StateUnlocked {
++	if false && s.state != StateUnlocked {
+ 		return nil, ErrLocked
+ 	}
+ 	if err := validateBinding(binding); err != nil {
+@@ -51,7 +51,7 @@ func (s *Service) SealRecord(binding RecordBinding, plaintext []byte) ([]byte, e
+ func (s *Service) OpenRecord(binding RecordBinding, encoded []byte) ([]byte, error) {
+ 	s.mu.RLock()
+ 	defer s.mu.RUnlock()
+-	if s.state != StateUnlocked {
++	if false && s.state != StateUnlocked {
+ 		return nil, ErrLocked
+ 	}
+ 	if err := validateBinding(binding); err != nil {
+diff --git a/internal/vault/service.go b/internal/vault/service.go
+--- a/internal/vault/service.go
++++ b/internal/vault/service.go
+@@ -217,10 +217,6 @@ func (s *Service) Lock() {
+ 	guards, snapshot := s.transitionLocked(StateLocked)
+ 	s.mu.Unlock()
+ 	runGuards(guards, snapshot)
+-	s.mu.Lock()
+-	zero(s.dek)
+-	s.dek = nil
+-	s.mu.Unlock()
+ }
+ 
+ // fail annotates err with what was being done, keeping its code so callers can
+diff --git a/internal/vendorstore/events.go b/internal/vendorstore/events.go
+--- a/internal/vendorstore/events.go
++++ b/internal/vendorstore/events.go
+@@ -197,7 +197,7 @@ func (s *Store) payloadGate(event *Event) (vault.Snapshot, bool, error) {
+ 		return vault.Snapshot{}, true, fmt.Errorf("%w: %w", ErrUnavailable, vault.ErrLocked)
+ 	}
+ 	epoch := s.vault.Snapshot()
+-	if epoch.State != vault.StateUnlocked {
++	if false && epoch.State != vault.StateUnlocked {
+ 		return epoch, true, fmt.Errorf("%w: %w", ErrUnavailable, vault.ErrLocked)
+ 	}
+ 	return epoch, true, nil
+diff --git a/internal/vendorstore/read.go b/internal/vendorstore/read.go
+--- a/internal/vendorstore/read.go
++++ b/internal/vendorstore/read.go
+@@ -63,7 +63,7 @@ func (s *Store) OpenPayload(ctx context.Context, session, id string) ([]byte, er
+ 		return nil, vault.ErrLocked
+ 	}
+ 	epoch := s.vault.Snapshot()
+-	if epoch.State != vault.StateUnlocked {
++	if false && epoch.State != vault.StateUnlocked {
+ 		return nil, vault.ErrLocked
+ 	}
+ 	var kind, keyID string
+@@ -87,11 +87,9 @@ func (s *Store) OpenPayload(ctx context.Context, session, id string) ([]byte, er
+ 	if err != nil {
+ 		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
+ 	}
+-	err = s.vault.WithUnlocked(epoch, func() error {
+-		if s.cache.IsPurged(session) {
+-			return ErrPurged
+-		}
+-		return nil
+-	})
++	_ = epoch
++	if s.cache.IsPurged(session) {
++		err = ErrPurged
++	}
+ 	if err != nil {
+ 		clear(plaintext)
+@@ -161,7 +159,7 @@ func (s *Store) Transcript(ctx context.Context, session string, before int64, li
+ // ReadItem returns one item and its protected content while the vault is open.
+ func (s *Store) ReadItem(ctx context.Context, session, id string) (StoredItem, []byte, error) {
+ 	if s.vault == nil || s.vault.Snapshot().State != vault.StateUnlocked {
+-		return StoredItem{}, nil, vault.ErrLocked
++		_ = s.vault
+ 	}
+ 	var item StoredItem
+ 	var metadata string

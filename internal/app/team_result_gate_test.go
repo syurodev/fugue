@@ -386,3 +386,54 @@ func assertRecordedCheckToolCalls(t *testing.T, g *gateDiffFixture, want int) {
 		t.Fatalf("recorded succeeded check tool_call items = %d, want %d", got, want)
 	}
 }
+
+func TestWriteScopeEdgeCasesAndUnconfiguredGate(t *testing.T) {
+	t.Parallel()
+	if v, err := (unconfiguredResultGate{}).Evaluate(t.Context(), "", ""); err != nil || v.Ready {
+		t.Fatalf("unconfiguredResultGate.Evaluate = (%+v, %v), want Ready=false, nil", v, err)
+	}
+	for _, tc := range []struct {
+		raw  string
+		want string
+	}{
+		{"./a/b.go", "a/b.go"},
+		{"../escape", ""},
+		{".", ""},
+		{"/abs/path", ""},
+	} {
+		if got := normalizeScopePath(tc.raw); got != tc.want {
+			t.Errorf("normalizeScopePath(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+	for _, tc := range []struct {
+		file, pat string
+		want      bool
+	}{
+		{"a/b.go", "", false},
+		{"a/b.go", ".", true},
+		{"a/b.go", "a/**", true},
+		{"a/b.go", "a/", true},
+		{"pkg/sub/f.go", "pkg", true},
+		{"other/f.go", "pkg", false},
+		{"top.go", "*.go", true},
+	} {
+		if got := matchWriteScopePattern(tc.file, tc.pat); got != tc.want {
+			t.Errorf("matchWriteScopePattern(%q, %q) = %v, want %v", tc.file, tc.pat, got, tc.want)
+		}
+	}
+
+	g := newGateDiffFixture(t, []string{}, nil, vendorstore.ApprovalAuto)
+	g.writeWorktreeFile(t, "any.txt", "changed\n")
+	if res, err := g.callDone(t.Context()); err != nil || res.IsError {
+		t.Fatalf("empty-scope first done = (%+v, %v)", res, err)
+	}
+	if rec := g.taskRecord(t); rec.State != vendorstore.TaskStateRunning || rec.ScopeBounces != 1 {
+		t.Fatalf("empty-scope 1st bounce: state=%s bounces=%d, want running/1", rec.State, rec.ScopeBounces)
+	}
+	if res, err := g.callDone(t.Context()); err != nil || res.IsError {
+		t.Fatalf("empty-scope second done = (%+v, %v)", res, err)
+	}
+	if rec := g.taskRecord(t); rec.State != vendorstore.TaskStateFailed || rec.FailureCode != "scope" {
+		t.Fatalf("empty-scope 2nd offense: state=%s code=%q, want failed/scope", rec.State, rec.FailureCode)
+	}
+}
