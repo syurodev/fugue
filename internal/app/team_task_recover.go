@@ -31,7 +31,7 @@ type recoveryDecisionPayload struct {
 // Recover applies a delegator's §12 recovery decision (resume, keep_diff, or
 // cancel) to a direct child task in TaskStateUnknown (Q-151).
 func (s *teamTaskService) Recover(ctx context.Context, sessionID, taskID, decision, reason string) (string, error) {
-	if decision != recoveryDecisionResume && decision != recoveryDecisionKeepDiff && decision != recoveryDecisionCancel {
+	if !validRecoveryDecision(decision) {
 		return "", errcode.New(errcode.InvalidArgument, "decision must be resume, keep_diff, or cancel")
 	}
 	cutReason, _ := truncateUTF8(strings.TrimSpace(reason), maxCancelReasonBytes)
@@ -46,29 +46,22 @@ func (s *teamTaskService) Recover(ctx context.Context, sessionID, taskID, decisi
 	if target.State != vendorstore.TaskStateUnknown {
 		return "", errcode.New(errcode.FailedPrecondition, "task is not in unknown state")
 	}
-	switch decision {
-	case recoveryDecisionCancel:
-		return s.recoverCancel(ctx, sessionID, c, target, cutReason)
-	case recoveryDecisionKeepDiff:
-		return s.recoverKeepDiff(ctx, sessionID, c, target, cutReason)
-	default:
-		return s.recoverResume(ctx, sessionID, c, target, cutReason)
-	}
+	return s.executeRecovery(ctx, sessionID, &c.team, c.caller.TaskID, target, c.tasks, decision, cutReason)
 }
 
-func (s *teamTaskService) recoverCancel(ctx context.Context, sessionID string, c *callerTeamContext, target *vendorstore.TaskRecord, reason string) (string, error) {
+func (s *teamTaskService) recoverCancel(ctx context.Context, sessionID string, rec *vendorstore.TeamRecord, leadTaskID string, target *vendorstore.TaskRecord, reason string) (string, error) {
 	payload, err := json.Marshal(recoveryDecisionPayload{Reason: reason})
 	if err != nil {
 		return "", errcode.Wrap(errcode.Internal, "encode recovery cancel payload", err)
 	}
 	if target.HierarchyRole == vendorstore.RoleTeamManager {
-		return s.recoverCancelManager(ctx, sessionID, c, target, payload)
+		return s.recoverCancelManager(ctx, sessionID, rec, leadTaskID, target, payload)
 	}
-	if err := s.appendRecoveryEvent(ctx, sessionID, target.TaskID, recoveryDecisionCancel, "", payload, "", "", nil); err != nil {
+	if err := s.appendRecoveryEvent(ctx, sessionID, rec.TeamID, target.TaskID, recoveryDecisionCancel, "", payload, "", "", nil); err != nil {
 		return "", err
 	}
-	s.invalidateTaskQuestionCard(ctx, c.team.TeamID, target.TaskID)
-	descSessions := s.cancelSubtreeDescendants(ctx, sessionID, target.TaskID, payload)
+	s.invalidateTaskQuestionCard(ctx, rec.TeamID, target.TaskID)
+	descSessions := s.cancelSubtreeDescendantsByTeam(ctx, rec.TeamID, target.TaskID, payload)
 	sessions := make([]string, 0, 1+len(descSessions))
 	if target.SessionID != "" {
 		sessions = append(sessions, target.SessionID)
@@ -85,12 +78,12 @@ func (s *teamTaskService) recoverCancel(ctx context.Context, sessionID string, c
 // grant; the store rejects a non-lead adopter. Mail already queued for the
 // manager is re-addressed to the lead in the same transaction, except the
 // rows the lead itself sent, so a queued member digest reaches the lead.
-func (s *teamTaskService) recoverCancelManager(ctx context.Context, sessionID string, c *callerTeamContext, target *vendorstore.TaskRecord, payload []byte) (string, error) {
-	keep := s.mailTheLeadSent(ctx, &c.team, target.TaskID, c.caller.TaskID)
-	if err := s.appendRecoveryEvent(ctx, sessionID, target.TaskID, recoveryDecisionCancel, "", payload, c.caller.TaskID, target.TaskID, keep); err != nil {
+func (s *teamTaskService) recoverCancelManager(ctx context.Context, sessionID string, rec *vendorstore.TeamRecord, leadTaskID string, target *vendorstore.TaskRecord, payload []byte) (string, error) {
+	keep := s.mailTheLeadSent(ctx, rec, target.TaskID, leadTaskID)
+	if err := s.appendRecoveryEvent(ctx, sessionID, rec.TeamID, target.TaskID, recoveryDecisionCancel, "", payload, leadTaskID, target.TaskID, keep); err != nil {
 		return "", err
 	}
-	s.invalidateTaskQuestionCard(ctx, c.team.TeamID, target.TaskID)
+	s.invalidateTaskQuestionCard(ctx, rec.TeamID, target.TaskID)
 	if target.SessionID != "" {
 		s.closeCancelledSessions(ctx, []string{target.SessionID})
 	}
@@ -125,11 +118,11 @@ func (s *teamTaskService) mailTheLeadSent(ctx context.Context, rec *vendorstore.
 	return keep
 }
 
-func (s *teamTaskService) recoverKeepDiff(ctx context.Context, sessionID string, c *callerTeamContext, target *vendorstore.TaskRecord, reason string) (string, error) {
+func (s *teamTaskService) recoverKeepDiff(ctx context.Context, sessionID string, rec *vendorstore.TeamRecord, target *vendorstore.TaskRecord, reason string) (string, error) {
 	if s.git == nil {
 		return "", errcode.New(errcode.FailedPrecondition, "gitops is not configured")
 	}
-	wt, err := s.taskWorktreeDir(ctx, &c.team, target.TaskID)
+	wt, err := s.taskWorktreeDir(ctx, rec, target.TaskID)
 	if err != nil {
 		return "", err
 	}
@@ -147,18 +140,18 @@ func (s *teamTaskService) recoverKeepDiff(ctx context.Context, sessionID string,
 	if err != nil {
 		return "", errcode.Wrap(errcode.Internal, "encode keep_diff payload", err)
 	}
-	if err := s.appendRecoveryEvent(ctx, sessionID, target.TaskID, recoveryDecisionKeepDiff, "", payload, "", "", nil); err != nil {
+	if err := s.appendRecoveryEvent(ctx, sessionID, rec.TeamID, target.TaskID, recoveryDecisionKeepDiff, "", payload, "", "", nil); err != nil {
 		return "", err
 	}
-	s.invalidateTaskQuestionCard(ctx, c.team.TeamID, target.TaskID)
+	s.invalidateTaskQuestionCard(ctx, rec.TeamID, target.TaskID)
 	return "task " + target.TaskID + " diff kept and moved to review", nil
 }
 
-func (s *teamTaskService) recoverResume(ctx context.Context, sessionID string, c *callerTeamContext, target *vendorstore.TaskRecord, reason string) (string, error) {
+func (s *teamTaskService) recoverResume(ctx context.Context, sessionID string, rec *vendorstore.TeamRecord, target *vendorstore.TaskRecord, tasks []vendorstore.TaskRecord, reason string) (string, error) {
 	if s.sessions == nil {
 		return "", errcode.New(errcode.FailedPrecondition, "vendor sessions are not configured")
 	}
-	wt, err := s.taskWorktreeDir(ctx, &c.team, target.TaskID)
+	wt, err := s.taskWorktreeDir(ctx, rec, target.TaskID)
 	if err != nil {
 		return "", err
 	}
@@ -167,14 +160,14 @@ func (s *teamTaskService) recoverResume(ctx context.Context, sessionID string, c
 		return "", errcode.Wrap(errcode.Internal, "encode recovery resume payload", err)
 	}
 	if s.canResumeSession(ctx, target.SessionID) {
-		err = s.resumeDetachedTask(ctx, sessionID, c.team.TeamID, target, wt, payload, reason)
+		err = s.resumeDetachedTask(ctx, sessionID, rec.TeamID, target, wt, payload, reason)
 	} else {
-		err = s.respawnRecoveredTask(ctx, sessionID, &c.team, target, c.tasks, wt, payload, reason)
+		err = s.respawnRecoveredTask(ctx, sessionID, rec, target, tasks, wt, payload, reason)
 	}
 	if err != nil {
 		return "", err
 	}
-	s.invalidateTaskQuestionCard(ctx, c.team.TeamID, target.TaskID)
+	s.invalidateTaskQuestionCard(ctx, rec.TeamID, target.TaskID)
 	return "task " + target.TaskID + " resumed", nil
 }
 
@@ -194,7 +187,7 @@ func (s *teamTaskService) resumeDetachedTask(ctx context.Context, callerSessionI
 	if !room {
 		return errcode.New(errcode.VendorCapacity, "no session capacity available to resume task")
 	}
-	if err := s.appendRecoveryEvent(ctx, callerSessionID, target.TaskID, recoveryDecisionResume, "", payload, "", "", nil); err != nil {
+	if err := s.appendRecoveryEvent(ctx, callerSessionID, teamID, target.TaskID, recoveryDecisionResume, "", payload, "", "", nil); err != nil {
 		return err
 	}
 	if err := s.sessions.ResumeTaskSession(ctx, target.SessionID, wt); err != nil {
@@ -220,7 +213,7 @@ func (s *teamTaskService) respawnRecoveredTask(
 	if target.SessionID != "" {
 		s.closeTaskSession(ctx, target.SessionID)
 	}
-	if err := s.appendRecoveryEvent(ctx, callerSessionID, target.TaskID, recoveryDecisionResume, req.SessionID, payload, "", "", nil); err != nil {
+	if err := s.appendRecoveryEvent(ctx, callerSessionID, rec.TeamID, target.TaskID, recoveryDecisionResume, req.SessionID, payload, "", "", nil); err != nil {
 		return err
 	}
 	if err := s.sessions.StartTaskSession(ctx, req); err != nil {
@@ -240,14 +233,10 @@ func (s *teamTaskService) finishRecoveredStart(ctx context.Context, teamID strin
 	return nil
 }
 
-func (s *teamTaskService) appendRecoveryEvent(ctx context.Context, callerSessionID, taskID, outcome, newSessionID string, payload []byte, reparentTo, readdressFrom string, readdressKeep []string) error {
-	return s.appendTeamWithRetry(ctx, callerSessionID, func(_ context.Context, cur *callerTeamContext) (*vendorstore.AppendTeamEventInput, error) {
-		curTarget, delErr := cur.requireDelegator(taskID)
-		if delErr != nil {
-			return nil, delErr
-		}
+func (s *teamTaskService) appendRecoveryEvent(ctx context.Context, callerSessionID, teamID, taskID, outcome, newSessionID string, payload []byte, reparentTo, readdressFrom string, readdressKeep []string) error {
+	build := func(curTarget *vendorstore.TaskRecord, notUnknownCode errcode.Code) (*vendorstore.AppendTeamEventInput, error) {
 		if curTarget.State != vendorstore.TaskStateUnknown {
-			return nil, errcode.New(errcode.FailedPrecondition, "task is not in unknown state")
+			return nil, errcode.New(notUnknownCode, "task is not in unknown state")
 		}
 		evID, idErr := s.ids.NewID()
 		if idErr != nil {
@@ -259,6 +248,22 @@ func (s *teamTaskService) appendRecoveryEvent(ctx context.Context, callerSession
 			ReaddressMailboxFrom: readdressFrom, ReaddressMailboxKeep: readdressKeep,
 			ProtectedPayload: payload,
 		}, nil
+	}
+	if callerSessionID == "" {
+		return s.appendTaskEventWithRetry(ctx, teamID, func(_ *vendorstore.TeamRecord, tasks []vendorstore.TaskRecord) (*vendorstore.AppendTeamEventInput, error) {
+			curTarget, ok := findTask(tasks, taskID)
+			if !ok {
+				return nil, errcode.New(errcode.TasksTaskNotFound, "the team task does not exist in this team")
+			}
+			return build(curTarget, errcode.TasksTaskNotUnknown)
+		})
+	}
+	return s.appendTeamWithRetry(ctx, callerSessionID, func(_ context.Context, cur *callerTeamContext) (*vendorstore.AppendTeamEventInput, error) {
+		curTarget, delErr := cur.requireDelegator(taskID)
+		if delErr != nil {
+			return nil, delErr
+		}
+		return build(curTarget, errcode.FailedPrecondition)
 	})
 }
 

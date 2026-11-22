@@ -85,13 +85,25 @@ func (s *teamTaskService) cancelSubtreeDescendants(ctx context.Context, sessionI
 	if err != nil {
 		return nil
 	}
-	desc := collectSubtreeTasks(c.tasks, rootID)
+	return s.cancelSubtreeDescendantsInTasks(ctx, c.team.TeamID, c.tasks, rootID, payload)
+}
+
+func (s *teamTaskService) cancelSubtreeDescendantsByTeam(ctx context.Context, teamID, rootID string, payload []byte) []string {
+	_, tasks, err := s.store.TeamSnapshot(ctx, teamID)
+	if err != nil {
+		return nil
+	}
+	return s.cancelSubtreeDescendantsInTasks(ctx, teamID, tasks, rootID, payload)
+}
+
+func (s *teamTaskService) cancelSubtreeDescendantsInTasks(ctx context.Context, teamID string, tasks []vendorstore.TaskRecord, rootID string, payload []byte) []string {
+	desc := collectSubtreeTasks(tasks, rootID)
 	sessions := make([]string, 0, len(desc))
 	for i := range desc {
 		if teamTaskTerminal(desc[i].State) {
 			continue
 		}
-		if sid := s.cancelDescendant(ctx, c.team.TeamID, desc[i].TaskID, payload); sid != "" {
+		if sid := s.cancelDescendant(ctx, teamID, desc[i].TaskID, payload); sid != "" {
 			sessions = append(sessions, sid)
 		}
 	}

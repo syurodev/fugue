@@ -56,8 +56,100 @@ message PruneWorktreesResponse {
   int32 removed_admin_entries = 3;
 }
 
-// TaskService serves the team channel of host-api v0.17 §5.3: local
-// principals only — vendor session principals never read, post or subscribe.
+// TeamSummary is the metadata-only summary of one team (host-api v0.19 §5.3,
+// INV-09). It is served even while the vault is locked so the sidebar and team
+// strip can render badges.
+message TeamSummary {
+  string team_id = 1;
+  string workspace_id = 2;
+  string session_id = 3;
+  string state = 4;
+  string waiting_reason = 5;
+  uint32 task_count = 6;
+  uint32 running_count = 7;
+  uint32 asking_count = 8;
+  uint32 failed_count = 9;
+  int64 last_seq = 10;
+  google.protobuf.Timestamp created_at = 11;
+  google.protobuf.Timestamp updated_at = 12;
+  google.protobuf.Timestamp ended_at = 13;
+}
+
+// TeamBudget carries optional team-wide §11 limits.
+message TeamBudget {
+  uint32 max_agents = 1;
+  int64 max_duration_seconds = 2;
+}
+
+// TaskNode is one node in a team's task tree (§5.3). When the vault is locked,
+// sealed fields (goal, write_scope) are omitted.
+message TaskNode {
+  string task_id = 1;
+  string parent_task_id = 2;
+  string retry_of = 3;
+  uint32 attempt = 4;
+  string hierarchy_role = 5;
+  string catalog_role = 6;
+  string vendor = 7;
+  string model = 8;
+  string account_id = 9;
+  string state = 10;
+  string failure_code = 11;
+  string session_id = 12;
+  string goal = 13;
+  repeated string write_scope = 14;
+  repeated string depends_on = 15;
+  int64 last_channel_seq = 16;
+  int64 elapsed_ms = 17;
+}
+
+// TeamView is the full read model of one team (§5.3). When vault_locked is
+// true, sealed content (title, brief, goal, write_scope, diff_text) is omitted.
+message TeamView {
+  TeamSummary summary = 1;
+  bool vault_locked = 2;
+  string title = 3;
+  string brief = 4;
+  TeamBudget budget = 5;
+  string pending_request_id = 6;
+  repeated TaskNode tasks = 7;
+  string diff_text = 8;
+  bool diff_truncated = 9;
+}
+
+message ListTeamsRequest {
+  string workspace_id = 1;
+  string session_id = 2;
+}
+
+message ListTeamsResponse {
+  repeated TeamSummary teams = 1;
+}
+
+message GetTeamRequest {
+  string team_id = 1;
+  string diff_task_id = 2;
+}
+
+message GetTeamResponse {
+  TeamView team = 1;
+}
+
+message RecoverTaskRequest {
+  string command_id = 1;
+  string team_id = 2;
+  string task_id = 3;
+  string decision = 4;
+  string reason = 5;
+}
+
+message RecoverTaskResponse {
+  TaskNode task = 1;
+}
+
+// TaskService serves the team channel, team read model, and unknown-task
+// recovery of host-api v0.17/v0.19 §5.3: local principals only — vendor
+// session and guard principals never read, post, recover, or subscribe.
 // PageChannel without thread_task_id is the general channel; the durable
 // topic `team:<id>` streams one event per appended line, with a snapshot of
 // the newest 100. PruneWorktrees removes ended-team task worktrees and
@@ -66,4 +158,7 @@ service TaskService {
   rpc PageChannel(PageChannelRequest) returns (PageChannelResponse);
   rpc PostChannelMessage(PostChannelMessageRequest) returns (PostChannelMessageResponse);
   rpc PruneWorktrees(PruneWorktreesRequest) returns (PruneWorktreesResponse);
+  rpc ListTeams(ListTeamsRequest) returns (ListTeamsResponse);
+  rpc GetTeam(GetTeamRequest) returns (GetTeamResponse);
+  rpc RecoverTask(RecoverTaskRequest) returns (RecoverTaskResponse);
 }

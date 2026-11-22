@@ -66,6 +66,7 @@ Changing this file needs a review of what clients can rely on; hiding a code nee
 | `tasks.task_not_found` | The team task does not exist in this team. |
 | `tasks.team_ended` | The team has ended; its channel is read-only. |
 | `tasks.post_too_large` | The channel post exceeds the 4 KiB limit. |
+| `tasks.task_not_unknown` | The team task is not in the unknown state and cannot be recovered. |
 
 ## Hidden on purpose
 
