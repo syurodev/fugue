@@ -77,6 +77,14 @@ type screens struct {
 	lastStarted string
 	// open is the open session's id, empty when none is.
 	open string
+	// The scroll anchors of F10.4d: reopenAnchor marks sessions whose fresh
+	// view still needs the last-turn-user-message anchor once the newest
+	// page lands, and the turn fields arm the new-turn anchor a composer
+	// send requests — the anchor fires when the sent message's item lands.
+	reopenAnchor map[string]bool
+	turnArm      bool
+	turnSeq      uint64
+	turnAnchored string
 
 	header *kit.SectionHeaderState
 	rows   map[string]*kit.ListRowState
@@ -147,6 +155,7 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 		sidebar:         session.NewSidebar(),
 		transcripts:     map[string]*session.Transcript{},
 		views:           map[string]*transcriptview.State{},
+		reopenAnchor:    map[string]bool{},
 		viewCache:       kit.NewVirtualHeightCache(),
 		commands:        map[string]*session.Commands{},
 		pendingCommands: map[string]bool{},
@@ -180,7 +189,7 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 }
 
 // viewFor returns the session's scroll state, building it on first use. A new
-// state follows the newest item, so opening a session lands on it.
+// state follows the newest item until its reopen anchor lands (F10.4d).
 func (s *screens) viewFor(id string) *transcriptview.State {
 	view, ok := s.views[id]
 	if !ok {
@@ -191,7 +200,11 @@ func (s *screens) viewFor(id string) *transcriptview.State {
 }
 
 // openSession opens a session's transcript: its topics join the connection,
-// and its newest page and commands are read if the model has none.
+// and its newest page and commands are read if the model has none. A first
+// open arms the reopen anchor — the view lands at the last turn's user
+// message when the page arrives, not at the bottom (desktop-app v0.9 §5.4).
+// Returning to an already-open session keeps the reader's place: their
+// choice wins.
 func (s *screens) openSession(id string) {
 	s.showPane(paneTranscript)
 	if s.open == id {
@@ -202,6 +215,9 @@ func (s *screens) openSession(id string) {
 		s.m.RemoveTopic(topicTranscriptDlt + s.open)
 	}
 	s.open, s.scrolled = id, false
+	if _, ok := s.views[id]; !ok {
+		s.reopenAnchor[id] = true
+	}
 	s.viewFor(id)
 	s.m.AddTopic(topicTranscript + id)
 	s.m.AddTopic(topicTranscriptDlt + id)

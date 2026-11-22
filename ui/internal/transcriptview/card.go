@@ -81,6 +81,9 @@ type cardState struct {
 	inboxBtn  *kit.ButtonState
 	anim      expandAnim
 	chips     map[string]*widget.Clickable
+	// wasRunning is the running flag of the previous frame; the running→done
+	// edge fires the reasoning auto-collapse (F10.4d).
+	wasRunning bool
 }
 
 func cardOf(st *State, key string) *cardState {

@@ -130,6 +130,11 @@ func (s *screens) applyPostResult(p session.PostResult) {
 		if p.Err == nil {
 			return
 		}
+		// The send never landed: no item will arrive, so the armed
+		// new-turn anchor stands down (F10.4d).
+		if p.Session == s.open {
+			s.turnArm = false
+		}
 		st := s.composer.stateFor(p.Session)
 		st.lastErr = p.Err.Error()
 		if st.area.Text() == "" && p.Text != "" {
@@ -235,6 +240,7 @@ func (s *screens) prune() {
 	pruneKnown(s.transcripts, known)
 	pruneKnown(s.pendingPage, known)
 	pruneKnown(s.pendingOlder, known)
+	pruneKnown(s.reopenAnchor, known)
 	pruneKnown(s.rows, known)
 	pruneKnown(s.commands, known)
 	pruneKnown(s.pendingCommands, known)
@@ -272,6 +278,77 @@ func (s *screens) transcriptCallbacks() transcriptview.Callbacks {
 		},
 		OnOpenFile: s.openFileRef,
 		OnViewDiff: s.openDiffViewer,
+		OnIDChip:   s.jumpToItem,
+	}
+}
+
+// jumpToItem follows a `#n` chip to its message: the jump anchors the message
+// near the top and ends the follow-at-bottom (F10.4d, desktop-app v0.9 §5.4).
+func (s *screens) jumpToItem(id string) {
+	if s.open == "" || id == "" {
+		return
+	}
+	t := s.transcripts[s.open]
+	if t == nil {
+		return
+	}
+	if _, ok := t.ItemByID(id); ok {
+		s.viewFor(s.open).AnchorTurn(id)
+	}
+}
+
+// armTurnAnchor records a composer send (Send or Steer): the sent message's
+// user_message item, once it lands newer than the newest item the transcript
+// holds, anchors near the top with its context (F10.4d).
+func (s *screens) armTurnAnchor(id string) {
+	if id != s.open {
+		return
+	}
+	t := s.transcripts[id]
+	if t == nil {
+		return
+	}
+	s.turnArm, s.turnSeq = true, t.LastItemSequence()
+}
+
+// applyTurnAnchor fires the armed new-turn anchor once the sent message's
+// item is in the model. It runs on the transcript pane's frame path and
+// returns immediately while no send is pending.
+func (s *screens) applyTurnAnchor() {
+	if !s.turnArm {
+		return
+	}
+	t := s.transcripts[s.open]
+	if t == nil {
+		return
+	}
+	msg, ok := t.LastUserMessage()
+	if !ok || msg.Sequence <= s.turnSeq {
+		return
+	}
+	s.turnArm = false
+	if msg.ItemID == s.turnAnchored {
+		return
+	}
+	s.turnAnchored = msg.ItemID
+	s.viewFor(s.open).AnchorTurn(msg.ItemID)
+}
+
+// applyReopenAnchor anchors a session's fresh view at the last turn's user
+// message when its newest page lands — before the pane draws the page, so
+// the reader never sees the view jump (desktop-app v0.9 §5.4, "Mở lại
+// phiên"). A session with no turn yet keeps the fresh view's follow.
+func (s *screens) applyReopenAnchor(id string) {
+	if !s.reopenAnchor[id] {
+		return
+	}
+	delete(s.reopenAnchor, id)
+	t := s.transcripts[id]
+	if t == nil {
+		return
+	}
+	if msg, ok := t.LastUserMessage(); ok {
+		s.viewFor(id).AnchorTurn(msg.ItemID)
 	}
 }
 
@@ -291,6 +368,7 @@ func (s *screens) layoutTranscriptPane(gtx *layout.Context, env *kit.Env, view *
 		})
 		return
 	}
+	s.applyTurnAnchor()
 	transcriptview.LayoutWithCallbacks(env, gtx, view, items, s.transcriptCallbacks())
 	s.trackScroll(view)
 	s.maybePageOlder()

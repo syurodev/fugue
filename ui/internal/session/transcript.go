@@ -88,8 +88,33 @@ func (t *Transcript) ItemByID(id string) (*Item, bool) {
 	return it, ok
 }
 
+// KindUserMessage is the transcript kind of a message a user sent.
+const KindUserMessage = "user_message"
+
+// LastUserMessage returns the newest user_message item the model holds. The
+// reply items of the last turn sit after it, so the backward scan stops
+// within one turn in practice; the reopen and new-turn anchors (F10.4d)
+// read it while arming, not every frame.
+func (t *Transcript) LastUserMessage() (*Item, bool) {
+	for i := len(t.items) - 1; i >= 0; i-- {
+		if t.items[i].Kind == KindUserMessage {
+			return t.items[i], true
+		}
+	}
+	return nil, false
+}
+
 // LastSequence is the newest durable topic sequence the model applied.
 func (t *Transcript) LastSequence() uint64 { return t.lastSeq }
+
+// LastItemSequence is the newest item sequence the model holds, zero when it
+// holds none: the marker a new-turn anchor arms against (F10.4d).
+func (t *Transcript) LastItemSequence() uint64 {
+	if len(t.items) == 0 {
+		return 0
+	}
+	return t.items[len(t.items)-1].Sequence
+}
 
 // NeedsNewestPage reports whether the history must be read: after the model
 // was created or cleared by a snapshot.

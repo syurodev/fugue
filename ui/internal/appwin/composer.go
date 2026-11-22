@@ -383,7 +383,7 @@ func (c *composer) layoutInput(env *kit.Env, gtx *layout.Context, sc *screens, s
 			}
 			if ev.Submitted && !ateReturn {
 				kind, ok := c.action(sess)
-				c.submit(st, sess, kind, ok)
+				c.submit(sc, st, sess, kind, ok)
 			}
 			st.area.ScrollToCaret()
 			// The drawn height is the measured one: the box at its cap with
@@ -401,8 +401,9 @@ func (c *composer) layoutInput(env *kit.Env, gtx *layout.Context, sc *screens, s
 }
 
 // submit posts the draft as the session state's action and clears it; a
-// failed send puts the words back (applyPostResult).
-func (c *composer) submit(st *composerState, sess session.Session, kind session.PostKind, ok bool) {
+// failed send puts the words back (applyPostResult). A send or steer arms
+// the new-turn anchor (F10.4d): the sent message lands near the top.
+func (c *composer) submit(sc *screens, st *composerState, sess session.Session, kind session.PostKind, ok bool) {
 	text := strings.TrimSpace(st.area.Text())
 	if !ok || text == "" {
 		return
@@ -410,8 +411,10 @@ func (c *composer) submit(st *composerState, sess session.Session, kind session.
 	switch kind {
 	case session.PostSend:
 		c.poster.Send(sess.ID, text)
+		sc.armTurnAnchor(sess.ID)
 	case session.PostSteer:
 		c.poster.Steer(sess.ID, text)
+		sc.armTurnAnchor(sess.ID)
 	case session.PostStart, session.PostResume, session.PostInterrupt, session.PostClose:
 		// The primary action never carries these kinds: starts go through
 		// the start flow, stops and closes through their own buttons.
@@ -432,7 +435,7 @@ func (c *composer) layoutActions(env *kit.Env, gtx *layout.Context, sc *screens,
 	var children []layout.FlexChild
 	children = append(children, c.button(env, sc, st.send, sendLabel, kit.Primary,
 		disabled || !actionable || strings.TrimSpace(st.area.Text()) == "",
-		func() { c.submit(st, sess, kind, actionable) }))
+		func() { c.submit(sc, st, sess, kind, actionable) }))
 	if turnActive(sess.State) && c.interruptOK(sess.Vendor) {
 		children = append(children, c.button(env, sc, st.stop, "Stop", kit.Secondary, disabled,
 			func() { c.poster.Interrupt(sess.ID) }))
