@@ -243,7 +243,10 @@ func parseLineColumnSuffix(msg string) (int64, int64) {
 }
 
 // PatchWorkspaceTOML applies only the non-nil fields of patch onto rawTOML
-// while preserving unrelated Tier 3 tables and keys.
+// while preserving unrelated Tier 3 tables and keys. Re-marshalling drops
+// comments and key order (Q-208).
+//
+// TODO(F10.24): replace with the host-side PatchWorkspaceConfig RPC.
 func PatchWorkspaceTOML(rawTOML []byte, patch *WorkspaceSettingsPatch) ([]byte, error) {
 	doc := map[string]any{}
 	if len(strings.TrimSpace(string(rawTOML))) > 0 {
