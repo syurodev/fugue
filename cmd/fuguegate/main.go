@@ -26,6 +26,9 @@ func main() {
 const (
 	exitFailed      = 1
 	exitOutputError = 2
+
+	actionPass = "pass"
+	actionFail = "fail"
 )
 
 func run(ctx context.Context, clk clock.Clock, args []string, stdout, stderr io.Writer) int {

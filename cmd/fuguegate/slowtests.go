@@ -61,7 +61,7 @@ func runSlowTests(args []string, stdout io.Writer) error {
 func overBudget(r io.Reader, budget time.Duration) ([]slowTest, error) {
 	var slow []slowTest
 	err := eachEvent(r, func(ev testEvent) {
-		if ev.Test == "" || ev.Elapsed == nil || (ev.Action != "pass" && ev.Action != "fail") {
+		if ev.Test == "" || ev.Elapsed == nil || (ev.Action != actionPass && ev.Action != actionFail) {
 			return
 		}
 		if d := time.Duration(*ev.Elapsed * float64(time.Second)); d > budget {

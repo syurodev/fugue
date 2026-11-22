@@ -392,35 +392,7 @@ func TestWriteScopeEdgeCasesAndUnconfiguredGate(t *testing.T) {
 	if v, err := (unconfiguredResultGate{}).Evaluate(t.Context(), "", ""); err != nil || v.Ready {
 		t.Fatalf("unconfiguredResultGate.Evaluate = (%+v, %v), want Ready=false, nil", v, err)
 	}
-	for _, tc := range []struct {
-		raw  string
-		want string
-	}{
-		{"./a/b.go", "a/b.go"},
-		{"../escape", ""},
-		{".", ""},
-		{"/abs/path", ""},
-	} {
-		if got := normalizeScopePath(tc.raw); got != tc.want {
-			t.Errorf("normalizeScopePath(%q) = %q, want %q", tc.raw, got, tc.want)
-		}
-	}
-	for _, tc := range []struct {
-		file, pat string
-		want      bool
-	}{
-		{"a/b.go", "", false},
-		{"a/b.go", ".", true},
-		{"a/b.go", "a/**", true},
-		{"a/b.go", "a/", true},
-		{"pkg/sub/f.go", "pkg", true},
-		{"other/f.go", "pkg", false},
-		{"top.go", "*.go", true},
-	} {
-		if got := matchWriteScopePattern(tc.file, tc.pat); got != tc.want {
-			t.Errorf("matchWriteScopePattern(%q, %q) = %v, want %v", tc.file, tc.pat, got, tc.want)
-		}
-	}
+	assertScopePathAndPatternHelpers(t)
 
 	g := newGateDiffFixture(t, []string{}, nil, vendorstore.ApprovalAuto)
 	g.writeWorktreeFile(t, "any.txt", "changed\n")
@@ -435,5 +407,39 @@ func TestWriteScopeEdgeCasesAndUnconfiguredGate(t *testing.T) {
 	}
 	if rec := g.taskRecord(t); rec.State != vendorstore.TaskStateFailed || rec.FailureCode != "scope" {
 		t.Fatalf("empty-scope 2nd offense: state=%s code=%q, want failed/scope", rec.State, rec.FailureCode)
+	}
+}
+
+func assertScopePathAndPatternHelpers(t *testing.T) {
+	t.Helper()
+	const sampleFile = "a/b.go"
+	for _, tc := range []struct {
+		raw  string
+		want string
+	}{
+		{"./" + sampleFile, sampleFile},
+		{"../escape", ""},
+		{".", ""},
+		{"/abs/path", ""},
+	} {
+		if got := normalizeScopePath(tc.raw); got != tc.want {
+			t.Errorf("normalizeScopePath(%q) = %q, want %q", tc.raw, got, tc.want)
+		}
+	}
+	for _, tc := range []struct {
+		file, pat string
+		want      bool
+	}{
+		{sampleFile, "", false},
+		{sampleFile, ".", true},
+		{sampleFile, "a/**", true},
+		{sampleFile, "a/", true},
+		{"pkg/sub/f.go", "pkg", true},
+		{"other/f.go", "pkg", false},
+		{"top.go", "*.go", true},
+	} {
+		if got := matchWriteScopePattern(tc.file, tc.pat); got != tc.want {
+			t.Errorf("matchWriteScopePattern(%q, %q) = %v, want %v", tc.file, tc.pat, got, tc.want)
+		}
 	}
 }

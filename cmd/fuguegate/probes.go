@@ -85,9 +85,17 @@ func readProbe(file string) (probeSpec, error) {
 	if err != nil {
 		return probeSpec{}, fmt.Errorf("%w: resolve %s: %w", ErrProbes, file, err)
 	}
-	data, err := os.ReadFile(absolute)
+	root, err := os.OpenRoot(filepath.Dir(absolute))
 	if err != nil {
-		return probeSpec{}, fmt.Errorf("%w: read %s: %w", ErrProbes, file, err)
+		return probeSpec{}, fmt.Errorf("%w: open %s: %w", ErrProbes, file, err)
+	}
+	data, readErr := root.ReadFile(filepath.Base(absolute))
+	closeErr := root.Close()
+	if readErr != nil {
+		return probeSpec{}, fmt.Errorf("%w: read %s: %w", ErrProbes, file, readErr)
+	}
+	if closeErr != nil {
+		return probeSpec{}, fmt.Errorf("%w: close %s: %w", ErrProbes, file, closeErr)
 	}
 	targets, err := parseProbeTargets(string(data))
 	if err != nil {
@@ -142,13 +150,13 @@ func runProbe(ctx context.Context, dir string, probe probeSpec, budget time.Dura
 	if err := applyProbe(ctx, snapshot, probe.patch, "--check"); err != nil {
 		return err
 	}
-	if err := checkProbeTargets(ctx, snapshot, probe, budget, test, "pass"); err != nil {
+	if err := checkProbeTargets(ctx, snapshot, probe, budget, test, actionPass); err != nil {
 		return err
 	}
 	if err := applyProbe(ctx, snapshot, probe.patch); err != nil {
 		return err
 	}
-	return checkProbeTargets(ctx, snapshot, probe, budget, test, "fail")
+	return checkProbeTargets(ctx, snapshot, probe, budget, test, actionFail)
 }
 
 func applyProbe(ctx context.Context, snapshot, patch string, flags ...string) error {
@@ -180,20 +188,23 @@ func runProbeTest(ctx context.Context, dir string, target probeTarget, budget ti
 	return stdout, err
 }
 
+func probeExitMatches(want string, commandErr error) bool {
+	if want != actionFail {
+		return commandErr == nil
+	}
+	var exit *exec.ExitError
+	return errors.As(commandErr, &exit) && exit.ProcessState != nil && exit.ExitCode() == 1
+}
+
 func probeOutcome(log, name, want string, commandErr error) bool {
-	if want == "fail" {
-		var exit *exec.ExitError
-		if !errors.As(commandErr, &exit) || exit.ProcessState == nil || exit.ExitCode() != 1 {
-			return false
-		}
-	} else if commandErr != nil {
+	if !probeExitMatches(want, commandErr) {
 		return false
 	}
 
 	var named, packageResult string
 	var namedCount, packageCount int
 	err := eachEvent(strings.NewReader(log), func(event testEvent) {
-		if event.Action != "pass" && event.Action != "fail" {
+		if event.Action != actionPass && event.Action != actionFail {
 			return
 		}
 		switch event.Test {
@@ -212,57 +223,88 @@ func probeOutcome(log, name, want string, commandErr error) bool {
 	return err == nil && namedCount == 1 && packageCount == 1 && named != "" && named == packageResult
 }
 
-func snapshotRepository(ctx context.Context, dir string) (string, error) {
+func snapshotRepository(ctx context.Context, dir string) (snapshot string, retErr error) {
 	listed, err := capture(ctx, dir, "git", "ls-files", "-z", "--cached", "--others", "--exclude-standard")
 	if err != nil {
 		return "", err
 	}
-	snapshot, err := os.MkdirTemp("", "fugue-probes-")
+	snapshot, err = os.MkdirTemp("", "fugue-probes-")
 	if err != nil {
 		return "", fmt.Errorf("create temporary directory: %w", err)
 	}
+	defer func() {
+		if retErr != nil {
+			retErr = errors.Join(retErr, os.RemoveAll(snapshot))
+		}
+	}()
+	sourceRoot, err := os.OpenRoot(dir)
+	if err != nil {
+		return "", fmt.Errorf("open repository root: %w", err)
+	}
+	defer func() {
+		if closeErr := sourceRoot.Close(); closeErr != nil {
+			retErr = errors.Join(retErr, closeErr)
+		}
+	}()
+	targetRoot, err := os.OpenRoot(snapshot)
+	if err != nil {
+		return "", fmt.Errorf("open snapshot root: %w", err)
+	}
+	defer func() {
+		if closeErr := targetRoot.Close(); closeErr != nil {
+			retErr = errors.Join(retErr, closeErr)
+		}
+	}()
+	if copyErr := copyProbeFiles(sourceRoot, targetRoot, dir, snapshot, listed); copyErr != nil {
+		return "", copyErr
+	}
+	return snapshot, nil
+}
+
+func copyProbeFiles(sourceRoot, targetRoot *os.Root, dir, snapshot, listed string) error {
 	for _, rel := range strings.Split(strings.TrimSuffix(listed, "\x00"), "\x00") {
 		if rel == "" {
 			continue
 		}
 		if !filepath.IsLocal(rel) {
-			_ = os.RemoveAll(snapshot)
-			return "", fmt.Errorf("repository path is not local: %q", rel)
+			return fmt.Errorf("%w: repository path is not local: %q", ErrProbes, rel)
 		}
-		if err := copyProbeFile(dir, snapshot, rel); err != nil {
-			_ = os.RemoveAll(snapshot)
-			return "", err
+		if copyErr := copyProbeFile(sourceRoot, targetRoot, dir, snapshot, rel); copyErr != nil {
+			return copyErr
 		}
 	}
-	return snapshot, nil
+	return nil
 }
 
-func copyProbeFile(sourceRoot, targetRoot, rel string) error {
-	source := filepath.Join(sourceRoot, filepath.FromSlash(rel))
-	target := filepath.Join(targetRoot, filepath.FromSlash(rel))
+func copyProbeFile(sourceRoot, targetRoot *os.Root, dir, snapshot, rel string) error {
+	relPath := filepath.FromSlash(rel)
+	source := filepath.Join(dir, relPath)
+	target := filepath.Join(snapshot, relPath)
 	info, err := os.Lstat(source)
 	if err != nil {
 		return fmt.Errorf("stat %s: %w", rel, err)
 	}
-	if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
-		return fmt.Errorf("create parent for %s: %w", rel, err)
+	if parent := filepath.Dir(relPath); parent != "." {
+		if mkErr := targetRoot.MkdirAll(parent, 0o750); mkErr != nil {
+			return fmt.Errorf("create parent for %s: %w", rel, mkErr)
+		}
 	}
 	if info.Mode()&os.ModeSymlink != 0 {
-		link, err := os.Readlink(source)
-		if err != nil {
-			return fmt.Errorf("read link %s: %w", rel, err)
+		link, linkErr := os.Readlink(source)
+		if linkErr != nil {
+			return fmt.Errorf("read link %s: %w", rel, linkErr)
 		}
-		if err := os.Symlink(link, target); err != nil {
-			return fmt.Errorf("copy link %s: %w", rel, err)
+		if symErr := os.Symlink(link, target); symErr != nil {
+			return fmt.Errorf("copy link %s: %w", rel, symErr)
 		}
 		return nil
 	}
-	data, err := os.ReadFile(source)
-	if err != nil {
-		return fmt.Errorf("read %s: %w", rel, err)
+	data, readErr := sourceRoot.ReadFile(relPath)
+	if readErr != nil {
+		return fmt.Errorf("read %s: %w", rel, readErr)
 	}
-	if err := os.WriteFile(target, data, info.Mode().Perm()); err != nil {
-		return fmt.Errorf("write %s: %w", rel, err)
+	if writeErr := targetRoot.WriteFile(relPath, data, info.Mode().Perm()); writeErr != nil {
+		return fmt.Errorf("write %s: %w", rel, writeErr)
 	}
 	return nil
 }

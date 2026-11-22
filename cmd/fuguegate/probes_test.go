@@ -61,12 +61,18 @@ func setupProbeRepo(t *testing.T, files map[string]string) string {
 	return dir
 }
 
+const (
+	probeGoModFile = "go.mod"
+	probeGoModBody = "module example.test/probe\n\ngo 1.25\n"
+	probeTestFile  = "example/value_test.go"
+)
+
 func TestProbeRunsAgainstAnIsolatedSnapshot(t *testing.T) {
 	t.Parallel()
 	files := map[string]string{
-		"go.mod":    "module example.test/probe\n\ngo 1.25\n",
-		"value.txt": "baseline\n",
-		"example/value_test.go": `package example
+		probeGoModFile: probeGoModBody,
+		"value.txt":    "baseline\n",
+		probeTestFile: `package example
 
 import ("os"; "testing")
 
@@ -85,12 +91,17 @@ func TestValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runProbe(t.Context(), dir, probe, time.Minute, runProbeTest); err != nil {
+	if runErr := runProbe(t.Context(), dir, probe, time.Minute, runProbeTest); runErr != nil {
+		t.Fatal(runErr)
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
 		t.Fatal(err)
 	}
-	value, err := os.ReadFile(filepath.Join(dir, "value.txt"))
-	if err != nil || string(value) != files["value.txt"] {
-		t.Fatalf("source snapshot changed: %q, %v", value, err)
+	value, readErr := root.ReadFile("value.txt")
+	closeErr := root.Close()
+	if readErr != nil || closeErr != nil || string(value) != files["value.txt"] {
+		t.Fatalf("source snapshot changed: %q, readErr=%v, closeErr=%v", value, readErr, closeErr)
 	}
 }
 
@@ -115,9 +126,9 @@ func TestSecond(t *testing.T) {
 func TestUnrelated(t *testing.T) {}
 `
 	files := map[string]string{
-		"go.mod":                "module example.test/probe\n\ngo 1.25\n",
-		"value.txt":             "baseline\n",
-		"example/value_test.go": testSrc,
+		probeGoModFile: probeGoModBody,
+		"value.txt":    "baseline\n",
+		probeTestFile:  testSrc,
 		"all_fail.patch": "# probe-test: ./example TestFirst\n# probe-test: ./example TestSecond\n" +
 			"diff --git a/value.txt b/value.txt\n--- a/value.txt\n+++ b/value.txt\n@@ -1 +1 @@\n-baseline\n+mutated\n",
 		"one_passes.patch": "# probe-test: ./example TestFirst\n# probe-test: ./example TestUnrelated\n" +
@@ -129,25 +140,25 @@ func TestUnrelated(t *testing.T) {}
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runProbe(t.Context(), dir, good, time.Minute, runProbeTest); err != nil {
-		t.Fatalf("all_fail.patch: %v", err)
+	if runErr := runProbe(t.Context(), dir, good, time.Minute, runProbeTest); runErr != nil {
+		t.Fatalf("all_fail.patch: %v", runErr)
 	}
 
 	partial, err := readProbe(filepath.Join(dir, "one_passes.patch"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runProbe(t.Context(), dir, partial, time.Minute, runProbeTest); !errors.Is(err, ErrProbes) {
-		t.Fatalf("one_passes.patch error = %v, want ErrProbes", err)
+	if runErr := runProbe(t.Context(), dir, partial, time.Minute, runProbeTest); !errors.Is(runErr, ErrProbes) {
+		t.Fatalf("one_passes.patch error = %v, want ErrProbes", runErr)
 	}
 }
 
 func TestProbeRejectsBuildErrorsAndSkippedTests(t *testing.T) {
 	t.Parallel()
 	files := map[string]string{
-		"go.mod":          "module example.test/probe\n\ngo 1.25\n",
+		probeGoModFile:    probeGoModBody,
 		"example/prod.go": "package example\n\nfunc Value() int { return 1 }\n",
-		"example/value_test.go": `package example
+		probeTestFile: `package example
 
 import "testing"
 
@@ -173,8 +184,8 @@ func TestSkipped(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := runProbe(t.Context(), dir, probe, time.Minute, runProbeTest); !errors.Is(err, ErrProbes) {
-			t.Errorf("%s error = %v, want ErrProbes", name, err)
+		if runErr := runProbe(t.Context(), dir, probe, time.Minute, runProbeTest); !errors.Is(runErr, ErrProbes) {
+			t.Errorf("%s error = %v, want ErrProbes", name, runErr)
 		}
 	}
 }
@@ -184,9 +195,9 @@ func TestProbeRejectsWrongTestFailingAndCleansTempDirs(t *testing.T) {
 	t.Setenv("TMPDIR", tempRoot)
 
 	files := map[string]string{
-		"go.mod":          "module example.test/probe\n\ngo 1.25\n",
+		probeGoModFile:    probeGoModBody,
 		"example/prod.go": "package example\n\nfunc Value() int { return 1 }\n",
-		"example/value_test.go": `package example
+		probeTestFile: `package example
 
 import "testing"
 
@@ -207,8 +218,8 @@ func TestOther(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := runProbe(t.Context(), dir, probe, time.Minute, runProbeTest); !errors.Is(err, ErrProbes) {
-		t.Fatalf("wrong_test.patch error = %v, want ErrProbes", err)
+	if runErr := runProbe(t.Context(), dir, probe, time.Minute, runProbeTest); !errors.Is(runErr, ErrProbes) {
+		t.Fatalf("wrong_test.patch error = %v, want ErrProbes", runErr)
 	}
 
 	const wrongFail = `{"Action":"pass","Package":"example/p","Test":"TestTarget"}` + "\n" +
