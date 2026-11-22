@@ -231,6 +231,7 @@ func wireTeamServices(
 	hp.rt.teamChannels = topics
 	hp.rt.teamProposals.SetTeamChannels(topics)
 	hp.rt.tasksService = NewTasksService(vs, vendorTaskSessions{svc: &VendorService{sessions: sessions, store: vs}}, v, deps.Clock, deps.IDs)
+	hp.rt.tasksService.SetWorktreePruner(hp.rt.workspaces.domain, teamGit, deps.DataDir)
 	hp.rt.interactions.SetTeamApprovalObserver(func(ev interaction.LifecycleEvent) {
 		hp.rt.goTask("team.approval-line", func(lineCtx context.Context) error {
 			hp.rt.teamTasks.ObserveApproval(lineCtx, ev)

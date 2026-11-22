@@ -38,12 +38,16 @@ const (
 	// TaskServicePostChannelMessageProcedure is the fully-qualified name of the TaskService's
 	// PostChannelMessage RPC.
 	TaskServicePostChannelMessageProcedure = "/fugue.tasks.v1.TaskService/PostChannelMessage"
+	// TaskServicePruneWorktreesProcedure is the fully-qualified name of the TaskService's
+	// PruneWorktrees RPC.
+	TaskServicePruneWorktreesProcedure = "/fugue.tasks.v1.TaskService/PruneWorktrees"
 )
 
 // TaskServiceClient is a client for the fugue.tasks.v1.TaskService service.
 type TaskServiceClient interface {
 	PageChannel(context.Context, *connect.Request[v1.PageChannelRequest]) (*connect.Response[v1.PageChannelResponse], error)
 	PostChannelMessage(context.Context, *connect.Request[v1.PostChannelMessageRequest]) (*connect.Response[v1.PostChannelMessageResponse], error)
+	PruneWorktrees(context.Context, *connect.Request[v1.PruneWorktreesRequest]) (*connect.Response[v1.PruneWorktreesResponse], error)
 }
 
 // NewTaskServiceClient constructs a client for the fugue.tasks.v1.TaskService service. By default,
@@ -69,6 +73,12 @@ func NewTaskServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(taskServiceMethods.ByName("PostChannelMessage")),
 			connect.WithClientOptions(opts...),
 		),
+		pruneWorktrees: connect.NewClient[v1.PruneWorktreesRequest, v1.PruneWorktreesResponse](
+			httpClient,
+			baseURL+TaskServicePruneWorktreesProcedure,
+			connect.WithSchema(taskServiceMethods.ByName("PruneWorktrees")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -76,6 +86,7 @@ func NewTaskServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 type taskServiceClient struct {
 	pageChannel        *connect.Client[v1.PageChannelRequest, v1.PageChannelResponse]
 	postChannelMessage *connect.Client[v1.PostChannelMessageRequest, v1.PostChannelMessageResponse]
+	pruneWorktrees     *connect.Client[v1.PruneWorktreesRequest, v1.PruneWorktreesResponse]
 }
 
 // PageChannel calls fugue.tasks.v1.TaskService.PageChannel.
@@ -88,10 +99,16 @@ func (c *taskServiceClient) PostChannelMessage(ctx context.Context, req *connect
 	return c.postChannelMessage.CallUnary(ctx, req)
 }
 
+// PruneWorktrees calls fugue.tasks.v1.TaskService.PruneWorktrees.
+func (c *taskServiceClient) PruneWorktrees(ctx context.Context, req *connect.Request[v1.PruneWorktreesRequest]) (*connect.Response[v1.PruneWorktreesResponse], error) {
+	return c.pruneWorktrees.CallUnary(ctx, req)
+}
+
 // TaskServiceHandler is an implementation of the fugue.tasks.v1.TaskService service.
 type TaskServiceHandler interface {
 	PageChannel(context.Context, *connect.Request[v1.PageChannelRequest]) (*connect.Response[v1.PageChannelResponse], error)
 	PostChannelMessage(context.Context, *connect.Request[v1.PostChannelMessageRequest]) (*connect.Response[v1.PostChannelMessageResponse], error)
+	PruneWorktrees(context.Context, *connect.Request[v1.PruneWorktreesRequest]) (*connect.Response[v1.PruneWorktreesResponse], error)
 }
 
 // NewTaskServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -113,12 +130,20 @@ func NewTaskServiceHandler(svc TaskServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(taskServiceMethods.ByName("PostChannelMessage")),
 		connect.WithHandlerOptions(opts...),
 	)
+	taskServicePruneWorktreesHandler := connect.NewUnaryHandler(
+		TaskServicePruneWorktreesProcedure,
+		svc.PruneWorktrees,
+		connect.WithSchema(taskServiceMethods.ByName("PruneWorktrees")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fugue.tasks.v1.TaskService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case TaskServicePageChannelProcedure:
 			taskServicePageChannelHandler.ServeHTTP(w, r)
 		case TaskServicePostChannelMessageProcedure:
 			taskServicePostChannelMessageHandler.ServeHTTP(w, r)
+		case TaskServicePruneWorktreesProcedure:
+			taskServicePruneWorktreesHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -134,4 +159,8 @@ func (UnimplementedTaskServiceHandler) PageChannel(context.Context, *connect.Req
 
 func (UnimplementedTaskServiceHandler) PostChannelMessage(context.Context, *connect.Request[v1.PostChannelMessageRequest]) (*connect.Response[v1.PostChannelMessageResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.tasks.v1.TaskService.PostChannelMessage is not implemented"))
+}
+
+func (UnimplementedTaskServiceHandler) PruneWorktrees(context.Context, *connect.Request[v1.PruneWorktreesRequest]) (*connect.Response[v1.PruneWorktreesResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.tasks.v1.TaskService.PruneWorktrees is not implemented"))
 }

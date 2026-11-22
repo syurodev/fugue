@@ -20,12 +20,14 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/syurodev/fugue/internal/gitops"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
+	"github.com/syurodev/fugue/internal/workspace"
 )
 
 // TasksRequestMaxBytes bounds one tasks RPC request on the wire: the post
@@ -93,11 +95,14 @@ type tasksDedupEntry struct {
 
 // TasksService serves the channel Host API and the §6.7 user posts.
 type TasksService struct {
-	store    *vendorstore.Store
-	sessions taskSessions
-	vault    *vault.Service
-	clk      clock.Clock
-	ids      ids.Generator
+	store      *vendorstore.Store
+	sessions   taskSessions
+	vault      *vault.Service
+	clk        clock.Clock
+	ids        ids.Generator
+	workspaces *workspace.Service
+	git        *gitops.Manager
+	dataDir    string
 
 	dedupMu    sync.Mutex
 	dedup      map[string]tasksDedupEntry
