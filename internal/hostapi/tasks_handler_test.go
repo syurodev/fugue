@@ -9,6 +9,7 @@ package hostapi
 
 import (
 	"errors"
+	"math"
 	"testing"
 
 	"connectrpc.com/connect"
@@ -68,5 +69,9 @@ func TestChannelHostAPIMapsLocalErrors(t *testing.T) {
 	_, pruneErr := localTasks.PruneWorktrees(t.Context(), connect.NewRequest(&tasksv1.PruneWorktreesRequest{RetentionSeconds: -1}))
 	if connect.CodeOf(pruneErr) != connect.CodeInvalidArgument && errcode.CodeOf(pruneErr) != errcode.InvalidArgument {
 		t.Fatalf("local PruneWorktrees with negative retention err = %v, want invalid_argument", pruneErr)
+	}
+	_, overflowErr := localTasks.PruneWorktrees(t.Context(), connect.NewRequest(&tasksv1.PruneWorktreesRequest{RetentionSeconds: math.MaxInt64}))
+	if connect.CodeOf(overflowErr) != connect.CodeInvalidArgument && errcode.CodeOf(overflowErr) != errcode.InvalidArgument {
+		t.Fatalf("local PruneWorktrees with overflow retention err = %v, want invalid_argument", overflowErr)
 	}
 }

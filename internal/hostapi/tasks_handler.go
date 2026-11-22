@@ -87,7 +87,11 @@ func (h *tasksHandler) PruneWorktrees(ctx context.Context, req *connect.Request[
 	if err != nil {
 		return nil, err
 	}
-	retention := time.Duration(req.Msg.GetRetentionSeconds()) * time.Second
+	sec := req.Msg.GetRetentionSeconds()
+	if sec < 0 || sec > math.MaxInt64/int64(time.Second) {
+		return nil, toConnectError(ctx, h.backend, errcode.New(errcode.InvalidArgument, "retention_seconds is out of range"))
+	}
+	retention := time.Duration(sec) * time.Second
 	res, err := svc.PruneWorktrees(ctx, retention)
 	if err != nil {
 		return nil, toConnectError(ctx, h.backend, err)

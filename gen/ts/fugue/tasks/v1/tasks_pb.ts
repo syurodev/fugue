@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fugue/tasks/v1/tasks.proto.
  */
 export const file_fugue_tasks_v1_tasks: GenFile = /*@__PURE__*/
-  fileDesc("ChpmdWd1ZS90YXNrcy92MS90YXNrcy5wcm90bxIOZnVndWUudGFza3MudjEi+wEKC0NoYW5uZWxMaW5lEhMKC2NoYW5uZWxfc2VxGAEgASgDEgwKBGtpbmQYAiABKAkSEwoLc2VuZGVyX2tpbmQYAyABKAkSFgoOc2VuZGVyX3Rhc2tfaWQYBCABKAkSGQoRcmVjaXBpZW50X3Rhc2tfaWQYBSABKAkSGwoTdGhyZWFkX3Jvb3RfdGFza19pZBgGIAEoCRIPCgdhdHRlbXB0GAcgASgNEhIKCnNvdXJjZV9zZXEYCCABKAMSLgoKY3JlYXRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDwoHY29udGVudBgKIAEoCSJrChJQYWdlQ2hhbm5lbFJlcXVlc3QSDwoHdGVhbV9pZBgBIAEoCRIWCg50aHJlYWRfdGFza19pZBgCIAEoCRIOCgZiZWZvcmUYAyABKAMSDQoFc2luY2UYBCABKAMSDQoFbGltaXQYBSABKA0iQQoTUGFnZUNoYW5uZWxSZXNwb25zZRIqCgVsaW5lcxgBIAMoCzIbLmZ1Z3VlLnRhc2tzLnYxLkNoYW5uZWxMaW5lInoKGVBvc3RDaGFubmVsTWVzc2FnZVJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRIPCgd0ZWFtX2lkGAIgASgJEhYKDnRocmVhZF90YXNrX2lkGAMgASgJEhIKCnRvX3Rhc2tfaWQYBCABKAkSDAoEdGV4dBgFIAEoCSIxChpQb3N0Q2hhbm5lbE1lc3NhZ2VSZXNwb25zZRITCgtjaGFubmVsX3NlcRgBIAEoAzLSAQoLVGFza1NlcnZpY2USVgoLUGFnZUNoYW5uZWwSIi5mdWd1ZS50YXNrcy52MS5QYWdlQ2hhbm5lbFJlcXVlc3QaIy5mdWd1ZS50YXNrcy52MS5QYWdlQ2hhbm5lbFJlc3BvbnNlEmsKElBvc3RDaGFubmVsTWVzc2FnZRIpLmZ1Z3VlLnRhc2tzLnYxLlBvc3RDaGFubmVsTWVzc2FnZVJlcXVlc3QaKi5mdWd1ZS50YXNrcy52MS5Qb3N0Q2hhbm5lbE1lc3NhZ2VSZXNwb25zZUKzAQoSY29tLmZ1Z3VlLnRhc2tzLnYxQgpUYXNrc1Byb3RvUAFaN2dpdGh1Yi5jb20vc3l1cm9kZXYvZnVndWUvcGtnL3BiL2Z1Z3VlL3Rhc2tzL3YxO3Rhc2tzdjGiAgNGVFiqAg5GdWd1ZS5UYXNrcy5WMcoCDkZ1Z3VlXFRhc2tzXFYx4gIaRnVndWVcVGFza3NcVjFcR1BCTWV0YWRhdGHqAhBGdWd1ZTo6VGFza3M6OlYxYgZwcm90bzM", [file_google_protobuf_timestamp]);
+  fileDesc("ChpmdWd1ZS90YXNrcy92MS90YXNrcy5wcm90bxIOZnVndWUudGFza3MudjEi+wEKC0NoYW5uZWxMaW5lEhMKC2NoYW5uZWxfc2VxGAEgASgDEgwKBGtpbmQYAiABKAkSEwoLc2VuZGVyX2tpbmQYAyABKAkSFgoOc2VuZGVyX3Rhc2tfaWQYBCABKAkSGQoRcmVjaXBpZW50X3Rhc2tfaWQYBSABKAkSGwoTdGhyZWFkX3Jvb3RfdGFza19pZBgGIAEoCRIPCgdhdHRlbXB0GAcgASgNEhIKCnNvdXJjZV9zZXEYCCABKAMSLgoKY3JlYXRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDwoHY29udGVudBgKIAEoCSJrChJQYWdlQ2hhbm5lbFJlcXVlc3QSDwoHdGVhbV9pZBgBIAEoCRIWCg50aHJlYWRfdGFza19pZBgCIAEoCRIOCgZiZWZvcmUYAyABKAMSDQoFc2luY2UYBCABKAMSDQoFbGltaXQYBSABKA0iQQoTUGFnZUNoYW5uZWxSZXNwb25zZRIqCgVsaW5lcxgBIAMoCzIbLmZ1Z3VlLnRhc2tzLnYxLkNoYW5uZWxMaW5lInoKGVBvc3RDaGFubmVsTWVzc2FnZVJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRIPCgd0ZWFtX2lkGAIgASgJEhYKDnRocmVhZF90YXNrX2lkGAMgASgJEhIKCnRvX3Rhc2tfaWQYBCABKAkSDAoEdGV4dBgFIAEoCSIxChpQb3N0Q2hhbm5lbE1lc3NhZ2VSZXNwb25zZRITCgtjaGFubmVsX3NlcRgBIAEoAyIyChVQcnVuZVdvcmt0cmVlc1JlcXVlc3QSGQoRcmV0ZW50aW9uX3NlY29uZHMYASABKAMibAoWUHJ1bmVXb3JrdHJlZXNSZXNwb25zZRIZChFyZW1vdmVkX3dvcmt0cmVlcxgBIAMoCRIYChByZW1vdmVkX2JyYW5jaGVzGAIgAygJEh0KFXJlbW92ZWRfYWRtaW5fZW50cmllcxgDIAEoBTKzAgoLVGFza1NlcnZpY2USVgoLUGFnZUNoYW5uZWwSIi5mdWd1ZS50YXNrcy52MS5QYWdlQ2hhbm5lbFJlcXVlc3QaIy5mdWd1ZS50YXNrcy52MS5QYWdlQ2hhbm5lbFJlc3BvbnNlEmsKElBvc3RDaGFubmVsTWVzc2FnZRIpLmZ1Z3VlLnRhc2tzLnYxLlBvc3RDaGFubmVsTWVzc2FnZVJlcXVlc3QaKi5mdWd1ZS50YXNrcy52MS5Qb3N0Q2hhbm5lbE1lc3NhZ2VSZXNwb25zZRJfCg5QcnVuZVdvcmt0cmVlcxIlLmZ1Z3VlLnRhc2tzLnYxLlBydW5lV29ya3RyZWVzUmVxdWVzdBomLmZ1Z3VlLnRhc2tzLnYxLlBydW5lV29ya3RyZWVzUmVzcG9uc2VCswEKEmNvbS5mdWd1ZS50YXNrcy52MUIKVGFza3NQcm90b1ABWjdnaXRodWIuY29tL3N5dXJvZGV2L2Z1Z3VlL3BrZy9wYi9mdWd1ZS90YXNrcy92MTt0YXNrc3YxogIDRlRYqgIORnVndWUuVGFza3MuVjHKAg5GdWd1ZVxUYXNrc1xWMeICGkZ1Z3VlXFRhc2tzXFYxXEdQQk1ldGFkYXRh6gIQRnVndWU6OlRhc2tzOjpWMWIGcHJvdG8z", [file_google_protobuf_timestamp]);
 
 /**
  * ChannelLine is one line of a team's channel (host-api §5.3, orchestration
@@ -191,11 +191,56 @@ export const PostChannelMessageResponseSchema: GenMessage<PostChannelMessageResp
   messageDesc(file_fugue_tasks_v1_tasks, 4);
 
 /**
+ * @generated from message fugue.tasks.v1.PruneWorktreesRequest
+ */
+export type PruneWorktreesRequest = Message<"fugue.tasks.v1.PruneWorktreesRequest"> & {
+  /**
+   * @generated from field: int64 retention_seconds = 1;
+   */
+  retentionSeconds: bigint;
+};
+
+/**
+ * Describes the message fugue.tasks.v1.PruneWorktreesRequest.
+ * Use `create(PruneWorktreesRequestSchema)` to create a new message.
+ */
+export const PruneWorktreesRequestSchema: GenMessage<PruneWorktreesRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_tasks_v1_tasks, 5);
+
+/**
+ * @generated from message fugue.tasks.v1.PruneWorktreesResponse
+ */
+export type PruneWorktreesResponse = Message<"fugue.tasks.v1.PruneWorktreesResponse"> & {
+  /**
+   * @generated from field: repeated string removed_worktrees = 1;
+   */
+  removedWorktrees: string[];
+
+  /**
+   * @generated from field: repeated string removed_branches = 2;
+   */
+  removedBranches: string[];
+
+  /**
+   * @generated from field: int32 removed_admin_entries = 3;
+   */
+  removedAdminEntries: number;
+};
+
+/**
+ * Describes the message fugue.tasks.v1.PruneWorktreesResponse.
+ * Use `create(PruneWorktreesResponseSchema)` to create a new message.
+ */
+export const PruneWorktreesResponseSchema: GenMessage<PruneWorktreesResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_tasks_v1_tasks, 6);
+
+/**
  * TaskService serves the team channel of host-api v0.17 §5.3: local
  * principals only — vendor session principals never read, post or subscribe.
  * PageChannel without thread_task_id is the general channel; the durable
  * topic `team:<id>` streams one event per appended line, with a snapshot of
- * the newest 100.
+ * the newest 100. PruneWorktrees removes ended-team task worktrees and
+ * branches past the retention window (orchestration §9).
  *
  * @generated from service fugue.tasks.v1.TaskService
  */
@@ -215,6 +260,14 @@ export const TaskService: GenService<{
     methodKind: "unary";
     input: typeof PostChannelMessageRequestSchema;
     output: typeof PostChannelMessageResponseSchema;
+  },
+  /**
+   * @generated from rpc fugue.tasks.v1.TaskService.PruneWorktrees
+   */
+  pruneWorktrees: {
+    methodKind: "unary";
+    input: typeof PruneWorktreesRequestSchema;
+    output: typeof PruneWorktreesResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fugue_tasks_v1_tasks, 0);
