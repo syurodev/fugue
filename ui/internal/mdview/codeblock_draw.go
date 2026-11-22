@@ -374,13 +374,13 @@ func (v *view) drawCodeRowChrome(
 			if inHighlightRange(p, idx) {
 				numCol = c.Fg
 			}
-			v.drawMonoGlyph(gtx, strconv.Itoa(idx+1), monoSmall, pxSmall, numCol, pad+gtx.Dp(theme.SpaceSM), y, rowH)
+			v.drawLineNumber(gtx, idx+1, numCol, pad, gutterW, y, rowH)
 		}
 		return
 	}
 	dl := diffLines[idx]
 	if dl.LineNo > 0 && gutterW > 0 {
-		v.drawMonoGlyph(gtx, strconv.Itoa(dl.LineNo), monoSmall, pxSmall, c.FgSubtle, pad+gtx.Dp(theme.SpaceSM), y, rowH)
+		v.drawLineNumber(gtx, dl.LineNo, c.FgSubtle, pad, gutterW, y, rowH)
 	}
 	if dl.Marker != "" && markerW > 0 {
 		// Centered in its own column, with room on both sides, so number,
@@ -388,6 +388,16 @@ func (v *view) drawCodeRowChrome(
 		glyphW := v.shape(dl.Marker, monoSmall, pxSmall).w
 		v.drawMonoGlyph(gtx, dl.Marker, monoSmall, pxSmall, diffMarkerColor(v.th, dl.Kind), pad+gutterW+(markerW-glyphW)/2, y, rowH)
 	}
+}
+
+// drawLineNumber right-aligns n against the gutter's trailing SpaceMD, so
+// every row keeps the same gap to the next column whatever its digit count.
+func (v *view) drawLineNumber(gtx *layout.Context, n int, col color.NRGBA, pad, gutterW, y, rowH int) {
+	monoSmall := font.Font{Typeface: fonts.Mono}
+	pxSmall := fixed.I(gtx.Sp(theme.TypeCodeSmall().Size))
+	txt := strconv.Itoa(n)
+	right := pad + gutterW - gtx.Dp(theme.SpaceMD)
+	v.drawMonoGlyph(gtx, txt, monoSmall, pxSmall, col, right-v.shape(txt, monoSmall, pxSmall).w, y, rowH)
 }
 
 // inHighlightRange reports whether displayed row idx (0-based) sits inside
