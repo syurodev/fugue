@@ -4,7 +4,6 @@ import (
 	"image"
 	"time"
 
-	"gioui.org/io/key"
 	"gioui.org/layout"
 
 	"github.com/syurodev/fugue/pkg/client"
@@ -123,22 +122,6 @@ func (s *screens) applyAccountsResults(results []accounts.Result) {
 	}
 }
 
-func (s *screens) toggleAccountsShortcut(gtx *layout.Context) {
-	for {
-		ke, ok := gtx.Event(key.Filter{Required: key.ModShortcut | key.ModShift, Name: key.Name("A")})
-		if !ok {
-			return
-		}
-		if k, isKey := ke.(key.Event); isKey && k.State == key.Press {
-			if s.accountsOpen {
-				s.showPane(paneTranscript)
-			} else {
-				s.showPane(paneAccounts)
-			}
-		}
-	}
-}
-
 func (s *screens) requestRefreshAccounts() {
 	if s.accountsWorker == nil || s.accountsView.refreshing {
 		return
@@ -148,8 +131,8 @@ func (s *screens) requestRefreshAccounts() {
 	s.accountsWorker.Do(&req)
 }
 
-func (v *accountsView) layout(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
-	return layoutRightPane(gtx, env,
+func (v *accountsView) layout(gtx *layout.Context, env *kit.Env, sc *screens) {
+	layoutRightPane(gtx, env,
 		func(gtx *layout.Context) layout.Dimensions { return v.layoutHeader(gtx, env, sc) },
 		func(gtx *layout.Context) layout.Dimensions { return v.layoutBody(gtx, env, sc) },
 	)
@@ -183,8 +166,8 @@ func (v *accountsView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *scree
 		}),
 		spacerW(theme.SpaceSM),
 		rigidInboxButton(env, sc.fail, v.backBtn, kit.ButtonProps{
-			Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM, Disabled: sc.open == "",
-		}, func() { sc.accountsOpen = false }),
+			Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM,
+		}, func() { sc.grid.closeSlotOf(KindAccounts) }),
 	)
 }
 

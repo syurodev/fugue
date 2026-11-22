@@ -115,8 +115,22 @@ func buildInboxConfirmScreens(t *testing.T, ic inbox.Client) *screens {
 		Topic:    topicInteraction,
 		Snapshot: &client.Snapshot{Incarnation: testInboxInc, Sequence: 1, State: snap},
 	})
-	sc.inboxOpen = true
+	openVisibleSlot(sc, SlotRef{Kind: KindInbox})
 	return sc
+}
+
+// openVisibleSlot opens ref's companion slot and slides its drawer out, so
+// the body renders and interacts at the shared shot width, where the shell
+// folds every regular column into the edge tab strip (§5.3).
+func openVisibleSlot(sc *screens, ref SlotRef) {
+	sc.grid.openCompanion(ref)
+	for _, p := range regularCells(sc.grid.doc) {
+		if slot, _ := slotAt(sc.grid.doc, p); slot.Ref.Kind == ref.Kind {
+			sc.grid.drawer = p.key()
+			sc.grid.drawerPresence.Snap(true)
+			return
+		}
+	}
 }
 
 func renderInboxShot(t *testing.T, win *headless.Window, spec shotSpec) *image.RGBA {

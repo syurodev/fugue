@@ -86,15 +86,16 @@ func TestInboxSidebarBadgesReconnectAndExternalResolution(t *testing.T) {
 		t.Fatalf("counts after external resolve = total:%d s1:%d", sc.inbox.PendingCount(), sc.inbox.PendingCountForSession(testInboxSess1))
 	}
 
-	// Ctrl/Cmd+Shift+I toggles inbox view without plain letter shortcuts.
+	// Ctrl/Cmd+Shift+I toggles the inbox slot without plain letter shortcuts:
+	// closed, the press opens it.
 	env := newInboxTestEnv(t)
 	router := new(input.Router)
-	sc.inboxOpen = false
+	sc.grid.closeSlotOf(KindInbox)
 	runAppFrame(env, sc, router, image.Pt(shotWindowW, shotWindowH))
 	router.Queue(key.Event{Name: key.Name("I"), Modifiers: key.ModShortcut | key.ModShift, State: key.Press})
 	runAppFrame(env, sc, router, image.Pt(shotWindowW, shotWindowH))
-	if !sc.inboxOpen {
-		t.Fatal("Ctrl/Cmd+Shift+I did not open the inbox")
+	if !sc.hasSlotKind(KindInbox) {
+		t.Fatal("Ctrl/Cmd+Shift+I did not open the inbox slot")
 	}
 }
 

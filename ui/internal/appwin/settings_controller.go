@@ -1,7 +1,6 @@
 package appwin
 
 import (
-	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
@@ -14,26 +13,23 @@ import (
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
-type paneKind uint8
-
-const (
-	paneTranscript paneKind = iota
-	paneInbox
-	paneAccounts
-	paneSettings
-	paneViewer
-)
-
 const (
 	labelBackToChat = "Back to chat"
 	labelCancel     = "Cancel"
 )
 
-func (s *screens) showPane(pane paneKind) {
-	s.inboxOpen = pane == paneInbox
-	s.accountsOpen = pane == paneAccounts
-	s.settingsOpen = pane == paneSettings
-	s.viewer.setOpen(pane == paneViewer)
+// openSettings opens the settings slot and arms its reads (F10.5d). The
+// shell's Ctrl/Cmd+, shortcut and the sidebar row land here.
+func (s *screens) openSettings() {
+	s.grid.openCompanion(SlotRef{Kind: KindSettings})
+	if s.settingsWorker == nil {
+		return
+	}
+	if !s.settings.Prefs.Loaded {
+		req := settings.Request{Kind: settings.OpLoadPrefs}
+		s.settingsWorker.Do(&req)
+	}
+	s.ensureSettingsWorkspaceSelected()
 }
 
 func layoutRightPane(gtx *layout.Context, env *kit.Env, headerFn, bodyFn func(*layout.Context) layout.Dimensions) layout.Dimensions {
@@ -48,34 +44,6 @@ func layoutRightPane(gtx *layout.Context, env *kit.Env, headerFn, bodyFn func(*l
 			}),
 		)
 	})
-}
-
-func (s *screens) toggleSettingsShortcut(gtx *layout.Context) {
-	for {
-		ke, ok := gtx.Event(key.Filter{Required: key.ModShortcut, Name: key.Name(",")})
-		if !ok {
-			return
-		}
-		if k, isKey := ke.(key.Event); isKey && k.State == key.Press {
-			if s.settingsOpen {
-				s.showPane(paneTranscript)
-			} else {
-				s.openSettingsPane()
-			}
-		}
-	}
-}
-
-func (s *screens) openSettingsPane() {
-	s.showPane(paneSettings)
-	if s.settingsWorker == nil {
-		return
-	}
-	if !s.settings.Prefs.Loaded {
-		req := settings.Request{Kind: settings.OpLoadPrefs}
-		s.settingsWorker.Do(&req)
-	}
-	s.ensureSettingsWorkspaceSelected()
 }
 
 func (s *screens) ensureSettingsWorkspaceSelected() {
@@ -114,6 +82,7 @@ func (s *screens) applyAppStateDelivery(u hostconn.Update) {
 			return
 		}
 		s.fail(s.settings.Prefs.ApplySnapshot(&snap))
+		s.applyLayoutSnapshot(&snap)
 		return
 	}
 	if u.Event != nil {

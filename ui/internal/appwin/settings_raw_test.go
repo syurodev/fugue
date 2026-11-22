@@ -83,7 +83,7 @@ func newRawTestScreens(t *testing.T, fc *fakeAppSettingsClient, clk hostconn.Clo
 	w.Start(t.Context())
 	t.Cleanup(w.Stop)
 	sc.settingsWorker = w
-	sc.openSettingsPane()
+	sc.openSettings()
 	sc.applySettingsResults([]settings.Result{awaitSettingsResult(t, w), awaitSettingsResult(t, w)})
 	sc.settingsView.activeTab = tabRaw
 	return sc, w

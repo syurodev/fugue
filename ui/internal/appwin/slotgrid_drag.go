@@ -1,0 +1,306 @@
+package appwin
+
+import (
+	"image"
+	"image/color"
+
+	"gioui.org/layout"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
+
+	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/theme"
+)
+
+// The drag, the drop zones and the narrow-window fold's visuals (desktop-app
+// §5.3, DA-E09): a drag tracks the pointer without a spring, the grid shows
+// only the valid drop zones — never a fourth column, a third row, left of
+// the main slot, or the main slot's own cell — Escape cancels, and the
+// folded columns live in an edge tab strip whose tab slides the slot out as
+// an overlay drawer on Smooth.
+
+// zoneRect pairs a drop target with its rectangle in grid coordinates.
+type zoneRect struct {
+	target DropTarget
+	Rect   image.Rectangle
+}
+
+// dropZoneRects gives every valid target its rectangle: column edges are
+// narrow strips on the boundary, cell halves are the cell's halves, and a
+// swap is the center of the cell.
+func dropZoneRects(gtx *layout.Context, geom []cellGeom, area image.Rectangle, targets []DropTarget) []zoneRect {
+	out := make([]zoneRect, 0, len(targets))
+	for _, t := range targets {
+		zr := zoneRect{target: t, Rect: dropZoneRect(gtx, geom, area, t)}
+		if !zr.Rect.Empty() {
+			out = append(out, zr)
+		}
+	}
+	return out
+}
+
+// dropZoneRect computes one target's rectangle; empty when the target's
+// column or cell is not on screen.
+func dropZoneRect(gtx *layout.Context, geom []cellGeom, area image.Rectangle, t DropTarget) image.Rectangle {
+	switch t.Kind {
+	case DropColumnLeft, DropColumnRight:
+		return columnEdgeRect(geom, area, gtx.Dp(theme.DropEdgeWidth), t)
+	case DropCellTop, DropCellBottom:
+		return cellHalfRect(geom, t)
+	case DropSwap:
+		return swapRect(geom, t)
+	}
+	return image.Rectangle{}
+}
+
+// columnEdgeRect is the strip across the whole grid at a column's edge,
+// edge pixels wide.
+func columnEdgeRect(geom []cellGeom, area image.Rectangle, edge int, t DropTarget) image.Rectangle {
+	colRect := columnRect(geom, t.Pos.Col, area)
+	if colRect.Empty() {
+		return image.Rectangle{}
+	}
+	x := colRect.Min.X
+	if t.Kind == DropColumnRight {
+		x = colRect.Max.X
+	}
+	return image.Rect(x-edge/2, area.Min.Y, x-edge/2+edge, area.Max.Y)
+}
+
+// cellHalfRect is the target cell's top or bottom half.
+func cellHalfRect(geom []cellGeom, t DropTarget) image.Rectangle {
+	cell := rectOfGeom(geom, t.Pos)
+	if cell.Empty() {
+		return image.Rectangle{}
+	}
+	mid := (cell.Min.Y + cell.Max.Y) / 2
+	if t.Kind == DropCellTop {
+		return image.Rect(cell.Min.X, cell.Min.Y, cell.Max.X, mid)
+	}
+	return image.Rect(cell.Min.X, mid, cell.Max.X, cell.Max.Y)
+}
+
+// swapRect is the target cell's center quarter, the "drop onto this slot"
+// region (§5.3).
+func swapRect(geom []cellGeom, t DropTarget) image.Rectangle {
+	cell := rectOfGeom(geom, t.Pos)
+	if cell.Empty() {
+		return image.Rectangle{}
+	}
+	return shrinkRect(cell, min(cell.Dx(), cell.Dy())/4)
+}
+
+// columnRect is a whole column's span within the grid area.
+func columnRect(geom []cellGeom, col int, area image.Rectangle) image.Rectangle {
+	out := image.Rectangle{}
+	for _, cg := range geom {
+		if cg.pos.Col != col {
+			continue
+		}
+		if out.Empty() {
+			out = image.Rect(cg.Rect.Min.X, area.Min.Y, cg.Rect.Max.X, area.Max.Y)
+			break
+		}
+	}
+	return out
+}
+
+// rectOfGeom is a cell's rect by position.
+func rectOfGeom(geom []cellGeom, p Pos) image.Rectangle {
+	for _, cg := range geom {
+		if cg.pos == p {
+			return cg.Rect
+		}
+	}
+	return image.Rectangle{}
+}
+
+// shrinkRect insets a rect by n on each side, keeping it non-empty.
+func shrinkRect(r image.Rectangle, n int) image.Rectangle {
+	n = min(n, min(r.Dx(), r.Dy())/2-1)
+	if n <= 0 {
+		return r
+	}
+	return image.Rect(r.Min.X+n, r.Min.Y+n, r.Max.X-n, r.Max.Y-n)
+}
+
+// wash fades a theme color by alpha, for the drop-zone washes and the dimmed
+// origin cell.
+func wash(c color.NRGBA, alpha float32) color.NRGBA {
+	c.A = uint8(float32(c.A) * min(max(alpha, 0), 1))
+	return c
+}
+
+// previewRect is the dragged slot's ghost box: the pointer minus the grab,
+// clamped into the grid area.
+func (g *slotGrid) previewRect(area image.Rectangle, size image.Point) image.Rectangle {
+	topLeft := g.drag.pointer.Sub(g.drag.grab)
+	clamped := image.Pt(
+		min(max(topLeft.X, area.Min.X), max(area.Max.X-size.X, area.Min.X)),
+		min(max(topLeft.Y, area.Min.Y), max(area.Max.Y-size.Y, area.Min.Y)))
+	return image.Rectangle{Min: clamped, Max: clamped.Add(size)}
+}
+
+// dragState is one header drag (§5.3, DA-E09): armed on press, active once
+// the pointer passes DragSlop, tracking the pointer without a spring. The
+// pointer position and the grab offset are grid coordinates — the filter
+// registers at the grid level.
+type dragState struct {
+	armed  bool
+	active bool
+	// pressed marks a header press of this drag; a Cancel without one never
+	// belonged to it.
+	pressed bool
+	pos     Pos
+	origin  image.Point
+	// pressAt is the press point, grab the offset inside the slot the ghost
+	// keeps, pointer the live pointer.
+	pressAt image.Point
+	grab    image.Point
+	pointer image.Point
+}
+
+// layoutDrag draws the active drag: the valid zones washed, the hovered one
+// accented, the dragged slot's ghost under the pointer, and the origin cell
+// dimmed (§5.3, DA-E09).
+func (g *slotGrid) layoutDrag(gtx *layout.Context, env *kit.Env, sc *screens, geom []cellGeom, area image.Rectangle) {
+	zones := dropZoneRects(gtx, geom, area, ValidDropTargets(g.doc, g.drag.pos))
+	hovered := -1
+	for i, z := range zones {
+		if g.drag.pointer.In(z.Rect) {
+			hovered = i
+			break
+		}
+	}
+	for i, z := range zones {
+		c := env.Th.Chrome().Action
+		if i == hovered {
+			c = env.Th.Status().Info
+		}
+		paint.FillShape(gtx.Ops, wash(c, 0.25), clip.Rect(z.Rect).Op())
+	}
+	if origin := rectOfGeom(geom, g.drag.pos); !origin.Empty() {
+		paint.FillShape(gtx.Ops, wash(env.Th.Chrome().CanvasBg, 0.6), clip.Rect(origin).Op())
+		ghost := g.previewRect(area, image.Pt(min(origin.Dx(), area.Dx()/2), gtx.Dp(theme.SlotHeaderHeight)*3))
+		g.drawGhost(gtx, env, sc, ghost)
+	}
+}
+
+// drawGhost draws the dragged slot's preview card: the chrome only, under
+// its own clip, tracking the pointer (§5.3 — no spring).
+func (g *slotGrid) drawGhost(gtx *layout.Context, env *kit.Env, sc *screens, rect image.Rectangle) {
+	c := env.Th.Chrome()
+	h := gtx.Dp(theme.SlotHeaderHeight)
+	defer clip.Rect(rect).Push(gtx.Ops).Pop()
+	paint.FillShape(gtx.Ops, c.SurfaceRaised, clip.Rect(rect).Op())
+	paint.FillShape(gtx.Ops, c.SurfaceBase, clip.Rect(image.Rect(rect.Min.X, rect.Min.Y, rect.Max.X, rect.Min.Y+h)).Op())
+	ref := refAt(g.doc, g.drag.pos)
+	atPoint(gtx, rect.Min, func(gtx *layout.Context) {
+		local := *gtx
+		local.Constraints = layout.Constraints{Max: rect.Size()}
+		layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(local,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				local := gtx
+				_, err := env.Icon(&local, slotIcon(ref.Kind), theme.IconSM, c.FgMuted)
+				sc.fail(err)
+				return layout.Dimensions{Size: image.Pt(gtx.Dp(theme.IconSM)+gtx.Dp(theme.SpaceXS), h)}
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				local := gtx
+				return kit.Label(env, &local, theme.TypeSmall(), c.Fg, slotTitle(sc, ref))
+			}),
+		)
+	})
+}
+
+// finishDrag ends an active drag: the drop target under the pointer
+// applies, anything else slides the slot back to its cell (§5.3). The zones
+// and cells recompute against the frame's stored area.
+func (g *slotGrid) finishDrag(gtx *layout.Context) {
+	geom := g.computeRects(gtx, g.lastArea, g.lastVisible)
+	zones := dropZoneRects(gtx, geom, g.lastArea, ValidDropTargets(g.doc, g.drag.pos))
+	for _, z := range zones {
+		if g.drag.pointer.In(z.Rect) {
+			dragged := g.drag.pos
+			g.drag = dragState{}
+			g.drop(dragged, z.target)
+			return
+		}
+	}
+	g.cancelDrag()
+}
+
+// layoutFolded draws the narrow-window fold (§5.3, DA-E09): the edge tab
+// strip on the right — one tab per folded slot — and the drawer a tab
+// slides out over the grid.
+func (g *slotGrid) layoutFolded(gtx *layout.Context, env *kit.Env, sc *screens, area image.Rectangle, plan PlanFoldResult) {
+	stripW := gtx.Dp(theme.EdgeTabWidth)
+	strip := image.Rect(area.Max.X-stripW, area.Min.Y, area.Max.X, area.Max.Y)
+	g.layoutTabStrip(gtx, env, sc, strip, g.foldedCells(plan))
+	g.layoutDrawer(gtx, env, sc, image.Rect(area.Min.X, area.Min.Y, strip.Min.X, area.Max.Y))
+}
+
+// foldedCells lists the folded regular columns' cells, right to left, in
+// tab order.
+func (g *slotGrid) foldedCells(plan PlanFoldResult) []Pos {
+	first := len(g.doc.Columns) - plan.FoldedCols
+	var out []Pos
+	for c := len(g.doc.Columns) - 1; c >= first; c-- {
+		for r := range g.doc.Columns[c].Slots {
+			out = append(out, Pos{Col: c, Row: r})
+		}
+	}
+	return out
+}
+
+// layoutTabStrip draws one tab per folded slot; the active tab opens the
+// drawer, clicking it again closes it.
+func (g *slotGrid) layoutTabStrip(gtx *layout.Context, env *kit.Env, sc *screens, strip image.Rectangle, folded []Pos) {
+	paint.FillShape(gtx.Ops, env.Th.Chrome().SurfaceBase, clip.Rect(strip).Op())
+	y := strip.Min.Y + gtx.Dp(theme.SpaceXS)
+	for _, p := range folded {
+		btn := ensureIconButton(&g.tabBtns, p.key())
+		ref := refAt(g.doc, p)
+		props := kit.IconButtonProps{
+			Icon: slotIcon(ref.Kind), Label: slotTitle(sc, ref),
+			Variant: kit.IconButtonGhost, Size: kit.SizeSM, Toggled: g.drawer == p.key(),
+		}
+		var clicked bool
+		var err error
+		atPoint(gtx, image.Pt(strip.Min.X, y), func(gtx *layout.Context) {
+			local := *gtx
+			clicked, err = btn.Layout(env, &local, &props)
+		})
+		sc.fail(err)
+		if clicked {
+			if g.drawer == p.key() {
+				g.drawerPresence.Show(false)
+			} else {
+				g.drawer = p.key()
+				g.drawerPresence.Show(true)
+			}
+		}
+		y += gtx.Dp(theme.ControlMD) + gtx.Dp(theme.SpaceXS)
+	}
+}
+
+// layoutDrawer slides the drawer slot out over the grid on Smooth (§5.3).
+func (g *slotGrid) layoutDrawer(gtx *layout.Context, env *kit.Env, sc *screens, area image.Rectangle) {
+	if g.drawerPresence.Advance(env.DT()) {
+		env.Keep()
+	}
+	if !g.drawerPresence.Visible() {
+		if !g.drawerPresence.Shown() {
+			g.drawer = ""
+		}
+		return
+	}
+	w := min(gtx.Dp(theme.SlotMinWidth), area.Dx())
+	p := g.drawerPresence.Progress()
+	x := area.Max.X - int(float32(w)*p+0.5)
+	rect := image.Rect(x, area.Min.Y, x+w, area.Max.Y)
+	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect(rect).Op())
+	if c, r, ok := parseSlotKey(g.drawer); ok {
+		g.drawSlot(gtx, env, sc, Pos{Col: c, Row: r}, rect)
+	}
+}

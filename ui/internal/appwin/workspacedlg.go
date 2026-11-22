@@ -49,6 +49,13 @@ func newWorkspaceDialogs() *workspaceDialogs {
 	}
 }
 
+// anyOpen reports whether any workspace dialog is on screen, so the shell's
+// Escape does not act beneath it (§7).
+func (d *workspaceDialogs) anyOpen() bool {
+	return d.root.dialog.IsOpen() || d.del.dialog.IsOpen() || d.rmRoot.dialog.IsOpen() || d.policy.dialog.IsOpen() ||
+		d.create.dialog.IsOpen()
+}
+
 // layout draws the open dialog over the window; every dialog lays itself out
 // only while open, so exactly one frame carries a dialog.
 func (d *workspaceDialogs) layout(env *kit.Env, gtx *layout.Context, sc *screens) {

@@ -88,7 +88,7 @@ func buildShotScreens(t *testing.T, scene string) *screens {
 	})
 	sc.sidebar.ApplyList(client.SessionList{Sessions: []client.Session{
 		{ID: "s1", Vendor: client.VendorClaude, State: "running", WorkspaceID: "w1"},
-		{ID: "s2", Vendor: client.VendorClaude, State: "ready", WorkspaceID: "w1"},
+		{ID: "s2", Vendor: client.VendorClaude, State: stateReady, WorkspaceID: "w1"},
 		{ID: "s3", Vendor: client.VendorCodex, State: "detached", WorkspaceID: "w2"},
 	}})
 	sc.openSession("s1")

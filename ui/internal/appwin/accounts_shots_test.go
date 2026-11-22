@@ -168,7 +168,7 @@ func seedAccountsShotData(t *testing.T, sc *screens, scene string) {
 			Kind: accounts.OpStartLogin, Vendor: client.VendorAGY, Code: "failed_precondition", Err: errTestUnsupportedLogin,
 		})
 	}
-	sc.accountsOpen = true
+	openVisibleSlot(sc, SlotRef{Kind: KindAccounts})
 }
 
 func renderAccountsShot(t *testing.T, win *headless.Window, spec shotSpec) *image.RGBA {
@@ -341,7 +341,10 @@ func assertAccountCardTextsAndTooltip(t *testing.T) {
 		}
 		env.Begin(tNow)
 		env.TrackInput(&gtx)
-		drawWindow(&gtx, env, sc)
+		// The view renders in its own frame: the hover targets the row's
+		// own geometry, independent of where the shell's grid puts the
+		// accounts slot (§5.3).
+		sc.accountsView.layout(&gtx, env, sc)
 		env.FrameEnd(&gtx)
 		router.Frame(&ops)
 	}
@@ -391,13 +394,14 @@ func assertAccountsViewStatesAndLinks(t *testing.T) {
 	env := newInboxTestEnv(t)
 	router := new(input.Router)
 
-	sc.accountsOpen = false
-	sc.inboxOpen = true
+	sc.grid.closeSlotOf(KindAccounts)
+	sc.grid.openCompanion(SlotRef{Kind: KindInbox})
 	runAppFrame(env, sc, router, image.Pt(shotWindowW, shotWindowH))
 	router.Queue(key.Event{Name: key.Name("A"), Modifiers: key.ModShortcut | key.ModShift, State: key.Press})
 	runAppFrame(env, sc, router, image.Pt(shotWindowW, shotWindowH))
-	if !sc.accountsOpen || sc.inboxOpen {
-		t.Fatalf("Ctrl/Cmd+Shift+A accountsOpen=%v inboxOpen=%v, want true/false", sc.accountsOpen, sc.inboxOpen)
+	if !sc.hasSlotKind(KindAccounts) || sc.hasSlotKind(KindInbox) {
+		t.Fatalf("Ctrl/Cmd+Shift+A accounts slot=%v inbox slot=%v, want open/closed",
+			sc.hasSlotKind(KindAccounts), sc.hasSlotKind(KindInbox))
 	}
 	if claudeAcc, ok := sc.accounts.Account(client.VendorClaude); !ok || claudeAcc.State != accounts.AccountStateUnknown {
 		t.Fatalf("unknown claude state = %+v, want unknown", claudeAcc)

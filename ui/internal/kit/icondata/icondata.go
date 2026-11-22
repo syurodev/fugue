@@ -11,6 +11,8 @@ const (
 
 	// ChevronDown is the "chevron-down" icon.
 	ChevronDown = "M6 9L12 15L18 9"
+	// ChevronLeft is the "chevron-left" icon.
+	ChevronLeft = "M15 18L9 12L15 6"
 	// ChevronRight is the "chevron-right" icon.
 	ChevronRight = "M9 18L15 12L9 6"
 	// Search is the "search" icon.
@@ -55,4 +57,8 @@ const (
 	GitBranch = "M6 3L6 15M18 3C16.343 3 15 4.343 15 6C15 7.657 16.343 9 18 9C19.657 9 21 7.657 21 6C21 4.343 19.657 3 18 3M6 15C4.343 15 3 16.343 3 18C3 19.657 4.343 21 6 21C7.657 21 9 19.657 9 18C9 16.343 7.657 15 6 15M18 9C18 13.971 13.971 18 9 18"
 	// GitPullRequest is the "git-pull-request" icon.
 	GitPullRequest = "M18 15C16.343 15 15 16.343 15 18C15 19.657 16.343 21 18 21C19.657 21 21 19.657 21 18C21 16.343 19.657 15 18 15M6 3C4.343 3 3 4.343 3 6C3 7.657 4.343 9 6 9C7.657 9 9 7.657 9 6C9 4.343 7.657 3 6 3M13 6L16 6C17.105 6 18 6.895 18 8L18 15M6 9L6 21"
+	// MessageSquare is the "message-square" icon.
+	MessageSquare = "M21 15C21 16.105 20.105 17 19 17L7 17L3 21L3 5C3 3.895 3.895 3 5 3L19 3C20.105 3 21 3.895 21 5L21 15Z"
+	// Users is the "users" icon.
+	Users = "M16 21L16 19C16 16.791 14.209 15 12 15L6 15C3.791 15 2 16.791 2 19L2 21M13 7C13 9.209 11.209 11 9 11C6.791 11 5 9.209 5 7C5 4.791 6.791 3 9 3C11.209 3 13 4.791 13 7M22 21L22 19C21.999 17.177 20.765 15.586 19 15.13M16 3.13C17.77 3.583 19.008 5.178 19.008 7.005C19.008 8.832 17.77 10.427 16 10.88"
 )

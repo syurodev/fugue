@@ -173,7 +173,7 @@ func TestPruneClosesTheOpenSessionWhenItLeavesTheList(t *testing.T) {
 	// The list read no longer names the open session: the host reports it
 	// gone.
 	s.sidebar.ApplyList(client.SessionList{Sessions: []client.Session{
-		{ID: "s2", Vendor: client.VendorClaude, State: "ready"},
+		{ID: "s2", Vendor: client.VendorClaude, State: stateReady},
 	}})
 	s.prune()
 	if s.open != "" {

@@ -328,7 +328,7 @@ func (f *fakeAppSettingsClient) RejectWorkspaceConfig(_ context.Context, _, expe
 func TestSettingsCASConflictKeepsUnsavedEdits(t *testing.T) {
 	t.Parallel()
 	fc := &fakeAppSettingsClient{
-		ws: client.Workspace{ID: testSettingsWSID, Name: "alpha", ConfigHash: "hash-v1", ConfigRevision: 1, RawTOML: []byte("name = \"alpha\"\n")},
+		ws: client.Workspace{ID: testSettingsWSID, Name: testRawWSName, ConfigHash: "hash-v1", ConfigRevision: 1, RawTOML: []byte("name = \"alpha\"\n")},
 		eff: client.EffectiveWorkspaceConfig{
 			Provenance: map[string]int64{settings.FieldIdleDetachSeconds: client.ConfigTierDefault, settings.FieldApprovalMode: client.ConfigTierDefault},
 			Settings: client.WorkspaceSettings{
@@ -341,7 +341,7 @@ func TestSettingsCASConflictKeepsUnsavedEdits(t *testing.T) {
 	m := hostconn.NewManager(&hostconn.Config{})
 	sc := newScreens(m, &fakeFetcher{}, session.NewPoster(m.Client), workspace.NewMutator(func() workspace.MutatorClient { return nil }))
 	sc.vault.ApplyStatus(vault.Status{State: client.VaultStateUnlocked, Revision: 1, Incarnation: testSettingsInc})
-	sc.workspaces.ApplyList([]workspace.Summary{{ID: testSettingsWSID, Name: "alpha", ConfigRevision: 1}})
+	sc.workspaces.ApplyList([]workspace.Summary{{ID: testSettingsWSID, Name: testRawWSName, ConfigRevision: 1}})
 	w := settings.NewWorker(func() settings.Client { return fc }, nil)
 	w.Start(t.Context())
 	t.Cleanup(w.Stop)
@@ -359,8 +359,8 @@ func assertShortcutAndIMENonSubmit(t *testing.T, sc *screens, w *settings.Worker
 	runAppFrame(env, sc, router, image.Pt(shotWindowW, shotWindowH))
 	router.Queue(key.Event{Name: key.Name(","), Modifiers: key.ModShortcut, State: key.Press})
 	runAppFrame(env, sc, router, image.Pt(shotWindowW, shotWindowH))
-	if !sc.settingsOpen {
-		t.Fatal("ModShortcut+, did not open settings pane")
+	if !sc.hasSlotKind(KindSettings) {
+		t.Fatal("ModShortcut+, did not open the settings slot")
 	}
 	sc.applySettingsResults([]settings.Result{awaitSettingsResult(t, w), awaitSettingsResult(t, w)})
 

@@ -13,7 +13,6 @@ import (
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/settings"
-	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/transcriptview"
 	"github.com/syurodev/fugue/ui/internal/vault"
 	"github.com/syurodev/fugue/ui/internal/workspace"
@@ -48,7 +47,8 @@ type pageFetcher interface {
 
 // screens is the app's read and write sides (F10.4a, F10.4b): the sidebar's
 // session list, the open session's transcript model, each session's
-// transcript view state, and the composer. It changes only on the window
+// transcript view state, the composer, and the slot grid of F10.20b that
+// arranges them (desktop-app §5.3). It changes only on the window
 // goroutine, which applies every delivered update here.
 type screens struct {
 	m       *hostconn.Manager
@@ -56,6 +56,20 @@ type screens struct {
 	// poster is the composer's write side; composer holds its view state.
 	poster   *session.Poster
 	composer *composer
+
+	// grid is the app shell's slot grid: the layout document, the rail, the
+	// arrange and drag state, and the persistence marks (F10.20b).
+	grid *slotGrid
+	// slotEmpty and slotGone are the placeholder and missing-object empty
+	// states the regular slots render (DA-E10).
+	slotEmpty *kit.EmptyStateState
+	slotGone  *kit.EmptyStateState
+	// slotSoonSidebar is the rail sidebars' placeholder before their screens
+	// land.
+	slotSoonSidebar *kit.EmptyStateState
+	// slotSessions are the sessions a regular slot already joined topics
+	// for, so the layout arms each one's reads once.
+	slotSessions map[string]bool
 
 	sidebar     *session.Sidebar
 	transcripts map[string]*session.Transcript
@@ -75,7 +89,8 @@ type screens struct {
 	// lastStarted is the session the composer last asked to start, opened
 	// as soon as the topic announces it.
 	lastStarted string
-	// open is the open session's id, empty when none is.
+	// open is the open session's id — the main slot's session while the
+	// chat rail is selected (§5.3) — empty when none is.
 	open string
 	// The scroll anchors of F10.4d: reopenAnchor marks sessions whose fresh
 	// view still needs the last-turn-user-message anchor once the newest
@@ -102,36 +117,36 @@ type screens struct {
 	// The workspace side (F10.14): the workspaces the topic reports, the
 	// reads that fill their details, the mutations the dialogs post, and
 	// the sidebar's own state per workspace.
-	workspaces      *workspace.Model
-	wsMut           *workspace.Mutator
-	wsReads         wsReader
-	wsDetailReq     map[string]uint64
-	wsHeaders       map[string]*kit.SectionHeaderState
-	wsMenu          *kit.MenuState
-	wsMenuFor       string
-	policyBanner    *kit.BannerState
-	otherHeader     *kit.SectionHeaderState
-	dlg             *workspaceDialogs
-	vault           *vault.Model
-	vaultWorker     *vault.Worker
-	vaultGate       *vaultGate
-	inbox           *inbox.Model
-	inboxWorker     *inbox.Worker
-	inboxView       *inboxView
-	inboxRow        *kit.ListRowState
-	inboxOpen       bool
-	accounts        *accounts.Model
-	accountsWorker  *accounts.Worker
-	accountsView    *accountsView
-	accountsRow     *kit.ListRowState
-	accountsOpen    bool
-	settings        *settings.Model
-	settingsWorker  *settings.Worker
-	settingsView    *settingsView
-	settingsRow     *kit.ListRowState
-	settingsOpen    bool
-	viewer          *fileViewer
-	viewerWorker    *fileViewWorker
+	workspaces     *workspace.Model
+	wsMut          *workspace.Mutator
+	wsReads        wsReader
+	wsDetailReq    map[string]uint64
+	wsHeaders      map[string]*kit.SectionHeaderState
+	wsMenu         *kit.MenuState
+	wsMenuFor      string
+	policyBanner   *kit.BannerState
+	otherHeader    *kit.SectionHeaderState
+	dlg            *workspaceDialogs
+	vault          *vault.Model
+	vaultWorker    *vault.Worker
+	vaultGate      *vaultGate
+	inbox          *inbox.Model
+	inboxWorker    *inbox.Worker
+	inboxView      *inboxView
+	inboxRow       *kit.ListRowState
+	accounts       *accounts.Model
+	accountsWorker *accounts.Worker
+	accountsView   *accountsView
+	accountsRow    *kit.ListRowState
+	settings       *settings.Model
+	settingsWorker *settings.Worker
+	settingsView   *settingsView
+	settingsRow    *kit.ListRowState
+	viewer         *fileViewer
+	viewerWorker   *fileViewWorker
+	// layoutWorker saves the layout document off the window goroutine
+	// (slotpersist.go); nil in the headless tests that build no worker.
+	layoutWorker    *layoutWorker
 	emptyTranscript *kit.EmptyStateState
 	// failure is the window's failure UX (F10.5e): the actionable banners and
 	// the active-session close confirmation.
@@ -152,6 +167,11 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 		fetcher:         fetcher,
 		poster:          poster,
 		composer:        newComposer(poster),
+		grid:            newSlotGrid(),
+		slotEmpty:       kit.NewEmptyStateState(),
+		slotGone:        kit.NewEmptyStateState(),
+		slotSoonSidebar: kit.NewEmptyStateState(),
+		slotSessions:    map[string]bool{},
 		sidebar:         session.NewSidebar(),
 		transcripts:     map[string]*session.Transcript{},
 		views:           map[string]*transcriptview.State{},
@@ -188,6 +208,17 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 	}
 }
 
+// hasSlotKind reports whether a regular slot of the kind is open, the
+// sidebar rows' selected state.
+func (s *screens) hasSlotKind(kind SlotKind) bool {
+	for _, p := range regularCells(s.grid.doc) {
+		if slot, _ := slotAt(s.grid.doc, p); slot.Ref.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
 // viewFor returns the session's scroll state, building it on first use. A new
 // state follows the newest item until its reopen anchor lands (F10.4d).
 func (s *screens) viewFor(id string) *transcriptview.State {
@@ -199,33 +230,49 @@ func (s *screens) viewFor(id string) *transcriptview.State {
 	return view
 }
 
-// openSession opens a session's transcript: its topics join the connection,
-// and its newest page and commands are read if the model has none. A first
-// open arms the reopen anchor — the view lands at the last turn's user
-// message when the page arrives, not at the bottom (desktop-app v0.9 §5.4).
-// Returning to an already-open session keeps the reader's place: their
-// choice wins.
+// openSession opens a session in the main slot (§5.3): its topics join the
+// connection, its newest page and commands are read if the model has none,
+// and the shell swaps the main slot's content in place. A first open arms
+// the reopen anchor — the view lands at the last turn's user message when
+// the page arrives, not at the bottom (desktop-app v0.9 §5.4). Returning to
+// an already-open session keeps the reader's place: their choice wins.
 func (s *screens) openSession(id string) {
-	s.showPane(paneTranscript)
-	if s.open == id {
+	if s.open != id {
+		if s.open != "" {
+			s.m.RemoveTopic(topicTranscript + s.open)
+			s.m.RemoveTopic(topicTranscriptDlt + s.open)
+		}
+		s.open, s.scrolled = id, false
+		if _, ok := s.views[id]; !ok {
+			s.reopenAnchor[id] = true
+		}
+		if _, ok := s.transcripts[id]; !ok {
+			s.transcripts[id] = session.NewTranscript(id)
+		}
+		s.requestNewestPage(id)
+		s.requestCommands(id)
+	}
+	s.ensureSessionTopics(id)
+	s.grid.openMain(SlotRef{Kind: KindSession, ID: id})
+}
+
+// ensureSessionTopics joins a session's topics and arms its reads once, for
+// the sessions a regular slot shows (§5.3: another session's transcript in
+// its own slot).
+func (s *screens) ensureSessionTopics(id string) {
+	if id == "" {
 		return
 	}
-	if s.open != "" {
-		s.m.RemoveTopic(topicTranscript + s.open)
-		s.m.RemoveTopic(topicTranscriptDlt + s.open)
-	}
-	s.open, s.scrolled = id, false
-	if _, ok := s.views[id]; !ok {
-		s.reopenAnchor[id] = true
-	}
-	s.viewFor(id)
 	s.m.AddTopic(topicTranscript + id)
 	s.m.AddTopic(topicTranscriptDlt + id)
 	if _, ok := s.transcripts[id]; !ok {
 		s.transcripts[id] = session.NewTranscript(id)
 	}
-	s.requestNewestPage(id)
-	s.requestCommands(id)
+	if !s.slotSessions[id] {
+		s.slotSessions[id] = true
+		s.requestNewestPage(id)
+		s.requestCommands(id)
+	}
 }
 
 // requestNewestPage reads the newest page once per trigger.
@@ -260,76 +307,44 @@ func (s *screens) fail(err error) {
 	}
 }
 
-// layout draws the VaultGate while locked, or the failure banner strip, the
-// sidebar and the transcript pane (F10.5e puts the strip above the panes; a
-// Gio Flex Rigid child needs no pre-measure, so the panes shrink to fit).
+// anyFloatLayerOpen reports whether a dialog or a kit floating layer owns
+// the window right now, so the shell's plain Escape does not act beneath
+// them (§7: Escape closes the topmost layer first).
+func (s *screens) anyFloatLayerOpen() bool {
+	return s.dlg.anyOpen() || s.composer.start.dialog.IsOpen() || s.failure.closeDlg.dialog.IsOpen() ||
+		s.grid.popover.IsOpen() || s.vaultGate.active(s.vault)
+}
+
+// layout draws the shell (F10.20b, desktop-app §5.3): the VaultGate while
+// locked, then the failure banner strip, the rail, the sidebar and the slot
+// grid (a Gio Flex Rigid child needs no pre-measure, so the panes shrink to
+// fit).
 func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
-	if s.vaultGate.active(s.vault) {
-		s.vaultGate.layout(gtx, env, s)
-		return
-	}
-	s.toggleInboxShortcut(gtx)
-	s.toggleAccountsShortcut(gtx)
-	s.toggleSettingsShortcut(gtx)
-	layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			return s.failure.layout(env, &local, s)
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			layout.Flex{Axis: layout.Horizontal}.Layout(local,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return layout.Inset{Right: theme.SpaceSM}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						local := gtx
-						return s.layoutSidebar(&local, env)
-					})
-				}),
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					local := gtx
-					// TODO(F10.20b): move the inbox, accounts, settings, and file viewer views into slots
-					if s.viewer.open {
-						return s.viewer.layout(&local, env, s)
-					}
-					if s.inboxOpen {
-						return s.inboxView.layout(&local, env, s)
-					}
-					if s.accountsOpen {
-						return s.accountsView.layout(&local, env, s)
-					}
-					if s.settingsOpen {
-						return s.settingsView.layout(&local, env, s)
-					}
-					return s.layoutTranscript(&local, env)
-				}),
-			)
-			return layout.Dimensions{Size: gtx.Constraints.Max}
-		}),
-	)
+	s.layoutShell(gtx, env)
 }
 
 // layoutTranscript draws the transcript pane and, under it, the composer
-// row. The split is manual — the transcript takes everything above the
-// measured row — so the row's origin is known and Env.Offset can record it
-// for the slash menu's anchor (UK-07).
-func (s *screens) layoutTranscript(gtx *layout.Context, env *kit.Env) layout.Dimensions {
+// row for one session: the main slot's open session, or another session's
+// slot (§5.3). The split is manual — the transcript takes everything above
+// the measured row — so the row's origin is known and Env.Offset can record
+// it for the slash menu's anchor (UK-07).
+func (s *screens) layoutTranscriptFor(gtx *layout.Context, env *kit.Env, id string) {
 	w, h := gtx.Constraints.Max.X, gtx.Constraints.Max.Y
-	rowH := s.composer.measure(env, gtx, s)
+	rowH := s.composer.measure(env, gtx, s, id)
 	pane := image.Pt(w, max(h-rowH, 0))
 
 	var items []*session.Item
-	if t := s.transcripts[s.open]; t != nil {
+	if t := s.transcripts[id]; t != nil {
 		items = t.Items()
 	}
-	view := s.viewFor(s.open)
+	view := s.viewFor(id)
 	local := *gtx
 	local.Constraints = layout.Constraints{Min: image.Pt(w, 0), Max: pane}
-	s.layoutTranscriptPane(&local, env, view, items)
+	s.layoutTranscriptPane(&local, env, id, view, items)
 	_, connected := s.connected()
 	env.Offset(gtx, image.Pt(0, pane.Y), func(gtx *layout.Context) {
 		local := *gtx
 		local.Constraints = layout.Constraints{Min: image.Pt(w, rowH), Max: image.Pt(w, rowH)}
-		s.composer.layout(env, &local, s, connected)
+		s.composer.layout(env, &local, s, id, connected)
 	})
-	return layout.Dimensions{Size: gtx.Constraints.Max}
 }

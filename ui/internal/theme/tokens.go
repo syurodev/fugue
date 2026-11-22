@@ -80,9 +80,34 @@ const TranscriptMeasure = unit.Dp(720)
 
 // SidebarWidth is the session list's column width in the app window: wide
 // enough for a vendor name, state and wait reason at type.body, never a
-// second pane. F10.20's slot grid owns the shell chrome; until then the
-// window's screens use this directly.
+// second pane.
 const SidebarWidth = unit.Dp(240)
+
+// App-shell metrics of the rail and the slot grid (desktop-app §5.3). The
+// slot minimums are the folding triggers: a window narrower than its
+// columns' minimums folds regular columns into the edge tab strip, then the
+// sidebar, while the main slot keeps MainSlotMinWidth and never folds.
+const (
+	// RailWidth is the rail's one icon column; the rail never folds.
+	RailWidth = unit.Dp(48)
+	// MainSlotMinWidth is the main slot's minimum width.
+	MainSlotMinWidth = unit.Dp(520)
+	// SlotMinWidth is a regular slot's minimum width and the drawer width a
+	// folded slot opens at.
+	SlotMinWidth = unit.Dp(300)
+	// SlotMinHeight is the minimum height of every grid row.
+	SlotMinHeight = unit.Dp(160)
+	// SlotHeaderHeight is a regular slot's header bar.
+	SlotHeaderHeight = unit.Dp(36)
+	// EdgeTabWidth is the narrow-window tab strip on the right edge.
+	EdgeTabWidth = unit.Dp(40)
+	// DropEdgeWidth is the width of a column-edge drop zone at a column's
+	// edge during a drag (§5.3).
+	DropEdgeWidth = unit.Dp(24)
+	// DragSlop is the pointer travel past which a header press becomes a
+	// slot drag; shorter releases are clicks.
+	DragSlop = unit.Dp(4)
+)
 
 // CardEstimate is the height assumed for a transcript card its list has
 // never measured: the first frame that renders it replaces the estimate
