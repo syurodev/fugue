@@ -104,6 +104,129 @@ func (h *tasksHandler) PruneWorktrees(ctx context.Context, req *connect.Request[
 	}), nil
 }
 
+// ListTeams returns metadata-only team summaries, optionally filtered by
+// workspace_id and/or session_id (host-api v0.19 §5.3). Succeeds while the
+// vault is locked (INV-09).
+func (h *tasksHandler) ListTeams(ctx context.Context, req *connect.Request[tasksv1.ListTeamsRequest]) (*connect.Response[tasksv1.ListTeamsResponse], error) {
+	svc, err := h.service(ctx)
+	if err != nil {
+		return nil, err
+	}
+	teams, err := svc.ListTeams(ctx, req.Msg.GetWorkspaceId(), req.Msg.GetSessionId())
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	out := make([]*tasksv1.TeamSummary, 0, len(teams))
+	for i := range teams {
+		out = append(out, protoTeamSummary(&teams[i]))
+	}
+	return connect.NewResponse(&tasksv1.ListTeamsResponse{Teams: out}), nil
+}
+
+// GetTeam returns the read model for one team (§5.3). When the vault is
+// locked, it returns metadata-only TaskNodes with vault_locked = true (INV-09).
+func (h *tasksHandler) GetTeam(ctx context.Context, req *connect.Request[tasksv1.GetTeamRequest]) (*connect.Response[tasksv1.GetTeamResponse], error) {
+	svc, err := h.service(ctx)
+	if err != nil {
+		return nil, err
+	}
+	view, err := svc.GetTeam(ctx, req.Msg.GetTeamId(), req.Msg.GetDiffTaskId())
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	return connect.NewResponse(&tasksv1.GetTeamResponse{Team: protoTeamView(&view)}), nil
+}
+
+// RecoverTask applies a local user's recovery decision (resume, keep_diff, or
+// cancel) to an unknown task with command_id deduplication (§5.3).
+func (h *tasksHandler) RecoverTask(ctx context.Context, req *connect.Request[tasksv1.RecoverTaskRequest]) (*connect.Response[tasksv1.RecoverTaskResponse], error) {
+	svc, err := h.service(ctx)
+	if err != nil {
+		return nil, err
+	}
+	node, err := svc.RecoverTask(ctx, &app.RecoverTaskCommand{
+		CommandID: req.Msg.GetCommandId(),
+		TeamID:    req.Msg.GetTeamId(),
+		TaskID:    req.Msg.GetTaskId(),
+		Decision:  req.Msg.GetDecision(),
+		Reason:    req.Msg.GetReason(),
+	})
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	return connect.NewResponse(&tasksv1.RecoverTaskResponse{Task: protoTaskNode(&node)}), nil
+}
+
+func protoTeamSummary(s *app.TeamSummaryView) *tasksv1.TeamSummary {
+	out := &tasksv1.TeamSummary{
+		TeamId:        s.TeamID,
+		WorkspaceId:   s.WorkspaceID,
+		SessionId:     s.SessionID,
+		State:         s.State,
+		WaitingReason: s.WaitingReason,
+		TaskCount:     s.TaskCount,
+		RunningCount:  s.RunningCount,
+		AskingCount:   s.AskingCount,
+		FailedCount:   s.FailedCount,
+		LastSeq:       s.LastSeq,
+	}
+	if s.CreatedAt > 0 {
+		out.CreatedAt = timestamppb.New(time.UnixMilli(s.CreatedAt).UTC())
+	}
+	if s.UpdatedAt > 0 {
+		out.UpdatedAt = timestamppb.New(time.UnixMilli(s.UpdatedAt).UTC())
+	}
+	if s.EndedAt > 0 {
+		out.EndedAt = timestamppb.New(time.UnixMilli(s.EndedAt).UTC())
+	}
+	return out
+}
+
+func protoTeamView(v *app.TeamView) *tasksv1.TeamView {
+	out := &tasksv1.TeamView{
+		Summary:          protoTeamSummary(&v.Summary),
+		VaultLocked:      v.VaultLocked,
+		Title:            v.Title,
+		Brief:            v.Brief,
+		PendingRequestId: v.PendingRequestID,
+		Tasks:            make([]*tasksv1.TaskNode, 0, len(v.Tasks)),
+		DiffText:         v.DiffText,
+		DiffTruncated:    v.DiffTruncated,
+	}
+	if v.Budget != nil {
+		out.Budget = &tasksv1.TeamBudget{
+			MaxAgents:          v.Budget.MaxAgents,
+			MaxDurationSeconds: v.Budget.MaxDurationSeconds,
+		}
+	}
+	for i := range v.Tasks {
+		out.Tasks = append(out.Tasks, protoTaskNode(&v.Tasks[i]))
+	}
+	return out
+}
+
+func protoTaskNode(n *app.TaskNodeView) *tasksv1.TaskNode {
+	return &tasksv1.TaskNode{
+		TaskId:         n.TaskID,
+		ParentTaskId:   n.ParentTaskID,
+		RetryOf:        n.RetryOf,
+		Attempt:        n.Attempt,
+		HierarchyRole:  n.HierarchyRole,
+		CatalogRole:    n.CatalogRole,
+		Vendor:         n.Vendor,
+		Model:          n.Model,
+		AccountId:      n.AccountID,
+		State:          n.State,
+		FailureCode:    n.FailureCode,
+		SessionId:      n.SessionID,
+		Goal:           n.Goal,
+		WriteScope:     n.WriteScope,
+		DependsOn:      n.DependsOn,
+		LastChannelSeq: n.LastChannelSeq,
+		ElapsedMs:      n.ElapsedMs,
+	}
+}
+
 func clampInt32(n int) int32 {
 	if n > math.MaxInt32 {
 		return math.MaxInt32

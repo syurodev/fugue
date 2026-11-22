@@ -45,7 +45,7 @@ func connectCode(c errcode.Code) connect.Code {
 	case errcode.AlreadyExists, errcode.WorkspaceAlreadyExists, errcode.VaultAlreadyConfigured:
 		return connect.CodeAlreadyExists
 	case errcode.FailedPrecondition, errcode.UnsupportedVersion, errcode.InteractionAlreadyAnswered, errcode.InteractionStaleIncarnation, errcode.WorkspaceConfigChanged, errcode.WorkspaceConfigUnconfirmed,
-		errcode.VendorUnsupported, errcode.VendorSessionState, errcode.VendorTurnNotActive, errcode.VendorVaultLocked, errcode.VaultNotConfigured, errcode.AppStateRevisionConflict, errcode.TasksTeamEnded:
+		errcode.VendorUnsupported, errcode.VendorSessionState, errcode.VendorTurnNotActive, errcode.VendorVaultLocked, errcode.VaultNotConfigured, errcode.AppStateRevisionConflict, errcode.TasksTeamEnded, errcode.TasksTaskNotUnknown:
 		return connect.CodeFailedPrecondition
 	case errcode.FrameTooLarge, errcode.InteractionTextTooLarge, errcode.WorkspaceConfigTooLarge, errcode.WorkspaceFileTooLarge, errcode.VendorCapacity, errcode.VaultRateLimited,
 		errcode.AppStateTooLarge, errcode.AppStateTooManyWindows, errcode.TasksSendRateLimited, errcode.TasksPostTooLarge:

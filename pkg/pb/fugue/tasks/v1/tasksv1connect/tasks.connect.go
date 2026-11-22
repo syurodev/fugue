@@ -41,6 +41,12 @@ const (
 	// TaskServicePruneWorktreesProcedure is the fully-qualified name of the TaskService's
 	// PruneWorktrees RPC.
 	TaskServicePruneWorktreesProcedure = "/fugue.tasks.v1.TaskService/PruneWorktrees"
+	// TaskServiceListTeamsProcedure is the fully-qualified name of the TaskService's ListTeams RPC.
+	TaskServiceListTeamsProcedure = "/fugue.tasks.v1.TaskService/ListTeams"
+	// TaskServiceGetTeamProcedure is the fully-qualified name of the TaskService's GetTeam RPC.
+	TaskServiceGetTeamProcedure = "/fugue.tasks.v1.TaskService/GetTeam"
+	// TaskServiceRecoverTaskProcedure is the fully-qualified name of the TaskService's RecoverTask RPC.
+	TaskServiceRecoverTaskProcedure = "/fugue.tasks.v1.TaskService/RecoverTask"
 )
 
 // TaskServiceClient is a client for the fugue.tasks.v1.TaskService service.
@@ -48,6 +54,9 @@ type TaskServiceClient interface {
 	PageChannel(context.Context, *connect.Request[v1.PageChannelRequest]) (*connect.Response[v1.PageChannelResponse], error)
 	PostChannelMessage(context.Context, *connect.Request[v1.PostChannelMessageRequest]) (*connect.Response[v1.PostChannelMessageResponse], error)
 	PruneWorktrees(context.Context, *connect.Request[v1.PruneWorktreesRequest]) (*connect.Response[v1.PruneWorktreesResponse], error)
+	ListTeams(context.Context, *connect.Request[v1.ListTeamsRequest]) (*connect.Response[v1.ListTeamsResponse], error)
+	GetTeam(context.Context, *connect.Request[v1.GetTeamRequest]) (*connect.Response[v1.GetTeamResponse], error)
+	RecoverTask(context.Context, *connect.Request[v1.RecoverTaskRequest]) (*connect.Response[v1.RecoverTaskResponse], error)
 }
 
 // NewTaskServiceClient constructs a client for the fugue.tasks.v1.TaskService service. By default,
@@ -79,6 +88,24 @@ func NewTaskServiceClient(httpClient connect.HTTPClient, baseURL string, opts ..
 			connect.WithSchema(taskServiceMethods.ByName("PruneWorktrees")),
 			connect.WithClientOptions(opts...),
 		),
+		listTeams: connect.NewClient[v1.ListTeamsRequest, v1.ListTeamsResponse](
+			httpClient,
+			baseURL+TaskServiceListTeamsProcedure,
+			connect.WithSchema(taskServiceMethods.ByName("ListTeams")),
+			connect.WithClientOptions(opts...),
+		),
+		getTeam: connect.NewClient[v1.GetTeamRequest, v1.GetTeamResponse](
+			httpClient,
+			baseURL+TaskServiceGetTeamProcedure,
+			connect.WithSchema(taskServiceMethods.ByName("GetTeam")),
+			connect.WithClientOptions(opts...),
+		),
+		recoverTask: connect.NewClient[v1.RecoverTaskRequest, v1.RecoverTaskResponse](
+			httpClient,
+			baseURL+TaskServiceRecoverTaskProcedure,
+			connect.WithSchema(taskServiceMethods.ByName("RecoverTask")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -87,6 +114,9 @@ type taskServiceClient struct {
 	pageChannel        *connect.Client[v1.PageChannelRequest, v1.PageChannelResponse]
 	postChannelMessage *connect.Client[v1.PostChannelMessageRequest, v1.PostChannelMessageResponse]
 	pruneWorktrees     *connect.Client[v1.PruneWorktreesRequest, v1.PruneWorktreesResponse]
+	listTeams          *connect.Client[v1.ListTeamsRequest, v1.ListTeamsResponse]
+	getTeam            *connect.Client[v1.GetTeamRequest, v1.GetTeamResponse]
+	recoverTask        *connect.Client[v1.RecoverTaskRequest, v1.RecoverTaskResponse]
 }
 
 // PageChannel calls fugue.tasks.v1.TaskService.PageChannel.
@@ -104,11 +134,29 @@ func (c *taskServiceClient) PruneWorktrees(ctx context.Context, req *connect.Req
 	return c.pruneWorktrees.CallUnary(ctx, req)
 }
 
+// ListTeams calls fugue.tasks.v1.TaskService.ListTeams.
+func (c *taskServiceClient) ListTeams(ctx context.Context, req *connect.Request[v1.ListTeamsRequest]) (*connect.Response[v1.ListTeamsResponse], error) {
+	return c.listTeams.CallUnary(ctx, req)
+}
+
+// GetTeam calls fugue.tasks.v1.TaskService.GetTeam.
+func (c *taskServiceClient) GetTeam(ctx context.Context, req *connect.Request[v1.GetTeamRequest]) (*connect.Response[v1.GetTeamResponse], error) {
+	return c.getTeam.CallUnary(ctx, req)
+}
+
+// RecoverTask calls fugue.tasks.v1.TaskService.RecoverTask.
+func (c *taskServiceClient) RecoverTask(ctx context.Context, req *connect.Request[v1.RecoverTaskRequest]) (*connect.Response[v1.RecoverTaskResponse], error) {
+	return c.recoverTask.CallUnary(ctx, req)
+}
+
 // TaskServiceHandler is an implementation of the fugue.tasks.v1.TaskService service.
 type TaskServiceHandler interface {
 	PageChannel(context.Context, *connect.Request[v1.PageChannelRequest]) (*connect.Response[v1.PageChannelResponse], error)
 	PostChannelMessage(context.Context, *connect.Request[v1.PostChannelMessageRequest]) (*connect.Response[v1.PostChannelMessageResponse], error)
 	PruneWorktrees(context.Context, *connect.Request[v1.PruneWorktreesRequest]) (*connect.Response[v1.PruneWorktreesResponse], error)
+	ListTeams(context.Context, *connect.Request[v1.ListTeamsRequest]) (*connect.Response[v1.ListTeamsResponse], error)
+	GetTeam(context.Context, *connect.Request[v1.GetTeamRequest]) (*connect.Response[v1.GetTeamResponse], error)
+	RecoverTask(context.Context, *connect.Request[v1.RecoverTaskRequest]) (*connect.Response[v1.RecoverTaskResponse], error)
 }
 
 // NewTaskServiceHandler builds an HTTP handler from the service implementation. It returns the path
@@ -136,6 +184,24 @@ func NewTaskServiceHandler(svc TaskServiceHandler, opts ...connect.HandlerOption
 		connect.WithSchema(taskServiceMethods.ByName("PruneWorktrees")),
 		connect.WithHandlerOptions(opts...),
 	)
+	taskServiceListTeamsHandler := connect.NewUnaryHandler(
+		TaskServiceListTeamsProcedure,
+		svc.ListTeams,
+		connect.WithSchema(taskServiceMethods.ByName("ListTeams")),
+		connect.WithHandlerOptions(opts...),
+	)
+	taskServiceGetTeamHandler := connect.NewUnaryHandler(
+		TaskServiceGetTeamProcedure,
+		svc.GetTeam,
+		connect.WithSchema(taskServiceMethods.ByName("GetTeam")),
+		connect.WithHandlerOptions(opts...),
+	)
+	taskServiceRecoverTaskHandler := connect.NewUnaryHandler(
+		TaskServiceRecoverTaskProcedure,
+		svc.RecoverTask,
+		connect.WithSchema(taskServiceMethods.ByName("RecoverTask")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fugue.tasks.v1.TaskService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case TaskServicePageChannelProcedure:
@@ -144,6 +210,12 @@ func NewTaskServiceHandler(svc TaskServiceHandler, opts ...connect.HandlerOption
 			taskServicePostChannelMessageHandler.ServeHTTP(w, r)
 		case TaskServicePruneWorktreesProcedure:
 			taskServicePruneWorktreesHandler.ServeHTTP(w, r)
+		case TaskServiceListTeamsProcedure:
+			taskServiceListTeamsHandler.ServeHTTP(w, r)
+		case TaskServiceGetTeamProcedure:
+			taskServiceGetTeamHandler.ServeHTTP(w, r)
+		case TaskServiceRecoverTaskProcedure:
+			taskServiceRecoverTaskHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -163,4 +235,16 @@ func (UnimplementedTaskServiceHandler) PostChannelMessage(context.Context, *conn
 
 func (UnimplementedTaskServiceHandler) PruneWorktrees(context.Context, *connect.Request[v1.PruneWorktreesRequest]) (*connect.Response[v1.PruneWorktreesResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.tasks.v1.TaskService.PruneWorktrees is not implemented"))
+}
+
+func (UnimplementedTaskServiceHandler) ListTeams(context.Context, *connect.Request[v1.ListTeamsRequest]) (*connect.Response[v1.ListTeamsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.tasks.v1.TaskService.ListTeams is not implemented"))
+}
+
+func (UnimplementedTaskServiceHandler) GetTeam(context.Context, *connect.Request[v1.GetTeamRequest]) (*connect.Response[v1.GetTeamResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.tasks.v1.TaskService.GetTeam is not implemented"))
+}
+
+func (UnimplementedTaskServiceHandler) RecoverTask(context.Context, *connect.Request[v1.RecoverTaskRequest]) (*connect.Response[v1.RecoverTaskResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.tasks.v1.TaskService.RecoverTask is not implemented"))
 }

@@ -93,20 +93,24 @@ type tasksDedupEntry struct {
 	fingerprint string
 }
 
-// TasksService serves the channel Host API and the §6.7 user posts.
+// TasksService serves the channel Host API, team read model, and recovery.
 type TasksService struct {
-	store      *vendorstore.Store
-	sessions   taskSessions
-	vault      *vault.Service
-	clk        clock.Clock
-	ids        ids.Generator
-	workspaces *workspace.Service
-	git        *gitops.Manager
-	dataDir    string
+	store        *vendorstore.Store
+	sessions     taskSessions
+	vault        *vault.Service
+	clk          clock.Clock
+	ids          ids.Generator
+	workspaces   *workspace.Service
+	git          *gitops.Manager
+	dataDir      string
+	teamTasks    *teamTaskService
+	interactions *InteractionService
 
-	dedupMu    sync.Mutex
-	dedup      map[string]tasksDedupEntry
-	dedupOrder []string
+	dedupMu           sync.Mutex
+	dedup             map[string]tasksDedupEntry
+	dedupOrder        []string
+	recoverDedup      map[string]recoverTaskDedupEntry
+	recoverDedupOrder []string
 }
 
 // NewTasksService builds the service; the host wires it with the team
@@ -114,7 +118,8 @@ type TasksService struct {
 func NewTasksService(store *vendorstore.Store, sessions taskSessions, v *vault.Service, clk clock.Clock, gen ids.Generator) *TasksService {
 	return &TasksService{
 		store: store, sessions: sessions, vault: v, clk: clk, ids: gen,
-		dedup: make(map[string]tasksDedupEntry, 16),
+		dedup:        make(map[string]tasksDedupEntry, 16),
+		recoverDedup: make(map[string]recoverTaskDedupEntry, 16),
 	}
 }
 

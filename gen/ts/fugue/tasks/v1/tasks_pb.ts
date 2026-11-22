@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fugue/tasks/v1/tasks.proto.
  */
 export const file_fugue_tasks_v1_tasks: GenFile = /*@__PURE__*/
-  fileDesc("ChpmdWd1ZS90YXNrcy92MS90YXNrcy5wcm90bxIOZnVndWUudGFza3MudjEi+wEKC0NoYW5uZWxMaW5lEhMKC2NoYW5uZWxfc2VxGAEgASgDEgwKBGtpbmQYAiABKAkSEwoLc2VuZGVyX2tpbmQYAyABKAkSFgoOc2VuZGVyX3Rhc2tfaWQYBCABKAkSGQoRcmVjaXBpZW50X3Rhc2tfaWQYBSABKAkSGwoTdGhyZWFkX3Jvb3RfdGFza19pZBgGIAEoCRIPCgdhdHRlbXB0GAcgASgNEhIKCnNvdXJjZV9zZXEYCCABKAMSLgoKY3JlYXRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDwoHY29udGVudBgKIAEoCSJrChJQYWdlQ2hhbm5lbFJlcXVlc3QSDwoHdGVhbV9pZBgBIAEoCRIWCg50aHJlYWRfdGFza19pZBgCIAEoCRIOCgZiZWZvcmUYAyABKAMSDQoFc2luY2UYBCABKAMSDQoFbGltaXQYBSABKA0iQQoTUGFnZUNoYW5uZWxSZXNwb25zZRIqCgVsaW5lcxgBIAMoCzIbLmZ1Z3VlLnRhc2tzLnYxLkNoYW5uZWxMaW5lInoKGVBvc3RDaGFubmVsTWVzc2FnZVJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRIPCgd0ZWFtX2lkGAIgASgJEhYKDnRocmVhZF90YXNrX2lkGAMgASgJEhIKCnRvX3Rhc2tfaWQYBCABKAkSDAoEdGV4dBgFIAEoCSIxChpQb3N0Q2hhbm5lbE1lc3NhZ2VSZXNwb25zZRITCgtjaGFubmVsX3NlcRgBIAEoAyIyChVQcnVuZVdvcmt0cmVlc1JlcXVlc3QSGQoRcmV0ZW50aW9uX3NlY29uZHMYASABKAMibAoWUHJ1bmVXb3JrdHJlZXNSZXNwb25zZRIZChFyZW1vdmVkX3dvcmt0cmVlcxgBIAMoCRIYChByZW1vdmVkX2JyYW5jaGVzGAIgAygJEh0KFXJlbW92ZWRfYWRtaW5fZW50cmllcxgDIAEoBTKzAgoLVGFza1NlcnZpY2USVgoLUGFnZUNoYW5uZWwSIi5mdWd1ZS50YXNrcy52MS5QYWdlQ2hhbm5lbFJlcXVlc3QaIy5mdWd1ZS50YXNrcy52MS5QYWdlQ2hhbm5lbFJlc3BvbnNlEmsKElBvc3RDaGFubmVsTWVzc2FnZRIpLmZ1Z3VlLnRhc2tzLnYxLlBvc3RDaGFubmVsTWVzc2FnZVJlcXVlc3QaKi5mdWd1ZS50YXNrcy52MS5Qb3N0Q2hhbm5lbE1lc3NhZ2VSZXNwb25zZRJfCg5QcnVuZVdvcmt0cmVlcxIlLmZ1Z3VlLnRhc2tzLnYxLlBydW5lV29ya3RyZWVzUmVxdWVzdBomLmZ1Z3VlLnRhc2tzLnYxLlBydW5lV29ya3RyZWVzUmVzcG9uc2VCswEKEmNvbS5mdWd1ZS50YXNrcy52MUIKVGFza3NQcm90b1ABWjdnaXRodWIuY29tL3N5dXJvZGV2L2Z1Z3VlL3BrZy9wYi9mdWd1ZS90YXNrcy92MTt0YXNrc3YxogIDRlRYqgIORnVndWUuVGFza3MuVjHKAg5GdWd1ZVxUYXNrc1xWMeICGkZ1Z3VlXFRhc2tzXFYxXEdQQk1ldGFkYXRh6gIQRnVndWU6OlRhc2tzOjpWMWIGcHJvdG8z", [file_google_protobuf_timestamp]);
+  fileDesc("ChpmdWd1ZS90YXNrcy92MS90YXNrcy5wcm90bxIOZnVndWUudGFza3MudjEi+wEKC0NoYW5uZWxMaW5lEhMKC2NoYW5uZWxfc2VxGAEgASgDEgwKBGtpbmQYAiABKAkSEwoLc2VuZGVyX2tpbmQYAyABKAkSFgoOc2VuZGVyX3Rhc2tfaWQYBCABKAkSGQoRcmVjaXBpZW50X3Rhc2tfaWQYBSABKAkSGwoTdGhyZWFkX3Jvb3RfdGFza19pZBgGIAEoCRIPCgdhdHRlbXB0GAcgASgNEhIKCnNvdXJjZV9zZXEYCCABKAMSLgoKY3JlYXRlZF9hdBgJIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXASDwoHY29udGVudBgKIAEoCSJrChJQYWdlQ2hhbm5lbFJlcXVlc3QSDwoHdGVhbV9pZBgBIAEoCRIWCg50aHJlYWRfdGFza19pZBgCIAEoCRIOCgZiZWZvcmUYAyABKAMSDQoFc2luY2UYBCABKAMSDQoFbGltaXQYBSABKA0iQQoTUGFnZUNoYW5uZWxSZXNwb25zZRIqCgVsaW5lcxgBIAMoCzIbLmZ1Z3VlLnRhc2tzLnYxLkNoYW5uZWxMaW5lInoKGVBvc3RDaGFubmVsTWVzc2FnZVJlcXVlc3QSEgoKY29tbWFuZF9pZBgBIAEoCRIPCgd0ZWFtX2lkGAIgASgJEhYKDnRocmVhZF90YXNrX2lkGAMgASgJEhIKCnRvX3Rhc2tfaWQYBCABKAkSDAoEdGV4dBgFIAEoCSIxChpQb3N0Q2hhbm5lbE1lc3NhZ2VSZXNwb25zZRITCgtjaGFubmVsX3NlcRgBIAEoAyIyChVQcnVuZVdvcmt0cmVlc1JlcXVlc3QSGQoRcmV0ZW50aW9uX3NlY29uZHMYASABKAMibAoWUHJ1bmVXb3JrdHJlZXNSZXNwb25zZRIZChFyZW1vdmVkX3dvcmt0cmVlcxgBIAMoCRIYChByZW1vdmVkX2JyYW5jaGVzGAIgAygJEh0KFXJlbW92ZWRfYWRtaW5fZW50cmllcxgDIAEoBSLmAgoLVGVhbVN1bW1hcnkSDwoHdGVhbV9pZBgBIAEoCRIUCgx3b3Jrc3BhY2VfaWQYAiABKAkSEgoKc2Vzc2lvbl9pZBgDIAEoCRINCgVzdGF0ZRgEIAEoCRIWCg53YWl0aW5nX3JlYXNvbhgFIAEoCRISCgp0YXNrX2NvdW50GAYgASgNEhUKDXJ1bm5pbmdfY291bnQYByABKA0SFAoMYXNraW5nX2NvdW50GAggASgNEhQKDGZhaWxlZF9jb3VudBgJIAEoDRIQCghsYXN0X3NlcRgKIAEoAxIuCgpjcmVhdGVkX2F0GAsgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIuCgp1cGRhdGVkX2F0GAwgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIsCghlbmRlZF9hdBgNIAEoCzIaLmdvb2dsZS5wcm90b2J1Zi5UaW1lc3RhbXAiPgoKVGVhbUJ1ZGdldBISCgptYXhfYWdlbnRzGAEgASgNEhwKFG1heF9kdXJhdGlvbl9zZWNvbmRzGAIgASgDItUCCghUYXNrTm9kZRIPCgd0YXNrX2lkGAEgASgJEhYKDnBhcmVudF90YXNrX2lkGAIgASgJEhAKCHJldHJ5X29mGAMgASgJEg8KB2F0dGVtcHQYBCABKA0SFgoOaGllcmFyY2h5X3JvbGUYBSABKAkSFAoMY2F0YWxvZ19yb2xlGAYgASgJEg4KBnZlbmRvchgHIAEoCRINCgVtb2RlbBgIIAEoCRISCgphY2NvdW50X2lkGAkgASgJEg0KBXN0YXRlGAogASgJEhQKDGZhaWx1cmVfY29kZRgLIAEoCRISCgpzZXNzaW9uX2lkGAwgASgJEgwKBGdvYWwYDSABKAkSEwoLd3JpdGVfc2NvcGUYDiADKAkSEgoKZGVwZW5kc19vbhgPIAMoCRIYChBsYXN0X2NoYW5uZWxfc2VxGBAgASgDEhIKCmVsYXBzZWRfbXMYESABKAMiiAIKCFRlYW1WaWV3EiwKB3N1bW1hcnkYASABKAsyGy5mdWd1ZS50YXNrcy52MS5UZWFtU3VtbWFyeRIUCgx2YXVsdF9sb2NrZWQYAiABKAgSDQoFdGl0bGUYAyABKAkSDQoFYnJpZWYYBCABKAkSKgoGYnVkZ2V0GAUgASgLMhouZnVndWUudGFza3MudjEuVGVhbUJ1ZGdldBIaChJwZW5kaW5nX3JlcXVlc3RfaWQYBiABKAkSJwoFdGFza3MYByADKAsyGC5mdWd1ZS50YXNrcy52MS5UYXNrTm9kZRIRCglkaWZmX3RleHQYCCABKAkSFgoOZGlmZl90cnVuY2F0ZWQYCSABKAgiPAoQTGlzdFRlYW1zUmVxdWVzdBIUCgx3b3Jrc3BhY2VfaWQYASABKAkSEgoKc2Vzc2lvbl9pZBgCIAEoCSI/ChFMaXN0VGVhbXNSZXNwb25zZRIqCgV0ZWFtcxgBIAMoCzIbLmZ1Z3VlLnRhc2tzLnYxLlRlYW1TdW1tYXJ5IjcKDkdldFRlYW1SZXF1ZXN0Eg8KB3RlYW1faWQYASABKAkSFAoMZGlmZl90YXNrX2lkGAIgASgJIjkKD0dldFRlYW1SZXNwb25zZRImCgR0ZWFtGAEgASgLMhguZnVndWUudGFza3MudjEuVGVhbVZpZXcibAoSUmVjb3ZlclRhc2tSZXF1ZXN0EhIKCmNvbW1hbmRfaWQYASABKAkSDwoHdGVhbV9pZBgCIAEoCRIPCgd0YXNrX2lkGAMgASgJEhAKCGRlY2lzaW9uGAQgASgJEg4KBnJlYXNvbhgFIAEoCSI9ChNSZWNvdmVyVGFza1Jlc3BvbnNlEiYKBHRhc2sYASABKAsyGC5mdWd1ZS50YXNrcy52MS5UYXNrTm9kZTKpBAoLVGFza1NlcnZpY2USVgoLUGFnZUNoYW5uZWwSIi5mdWd1ZS50YXNrcy52MS5QYWdlQ2hhbm5lbFJlcXVlc3QaIy5mdWd1ZS50YXNrcy52MS5QYWdlQ2hhbm5lbFJlc3BvbnNlEmsKElBvc3RDaGFubmVsTWVzc2FnZRIpLmZ1Z3VlLnRhc2tzLnYxLlBvc3RDaGFubmVsTWVzc2FnZVJlcXVlc3QaKi5mdWd1ZS50YXNrcy52MS5Qb3N0Q2hhbm5lbE1lc3NhZ2VSZXNwb25zZRJfCg5QcnVuZVdvcmt0cmVlcxIlLmZ1Z3VlLnRhc2tzLnYxLlBydW5lV29ya3RyZWVzUmVxdWVzdBomLmZ1Z3VlLnRhc2tzLnYxLlBydW5lV29ya3RyZWVzUmVzcG9uc2USUAoJTGlzdFRlYW1zEiAuZnVndWUudGFza3MudjEuTGlzdFRlYW1zUmVxdWVzdBohLmZ1Z3VlLnRhc2tzLnYxLkxpc3RUZWFtc1Jlc3BvbnNlEkoKB0dldFRlYW0SHi5mdWd1ZS50YXNrcy52MS5HZXRUZWFtUmVxdWVzdBofLmZ1Z3VlLnRhc2tzLnYxLkdldFRlYW1SZXNwb25zZRJWCgtSZWNvdmVyVGFzaxIiLmZ1Z3VlLnRhc2tzLnYxLlJlY292ZXJUYXNrUmVxdWVzdBojLmZ1Z3VlLnRhc2tzLnYxLlJlY292ZXJUYXNrUmVzcG9uc2VCswEKEmNvbS5mdWd1ZS50YXNrcy52MUIKVGFza3NQcm90b1ABWjdnaXRodWIuY29tL3N5dXJvZGV2L2Z1Z3VlL3BrZy9wYi9mdWd1ZS90YXNrcy92MTt0YXNrc3YxogIDRlRYqgIORnVndWUuVGFza3MuVjHKAg5GdWd1ZVxUYXNrc1xWMeICGkZ1Z3VlXFRhc2tzXFYxXEdQQk1ldGFkYXRh6gIQRnVndWU6OlRhc2tzOjpWMWIGcHJvdG8z", [file_google_protobuf_timestamp]);
 
 /**
  * ChannelLine is one line of a team's channel (host-api §5.3, orchestration
@@ -235,8 +235,406 @@ export const PruneWorktreesResponseSchema: GenMessage<PruneWorktreesResponse> = 
   messageDesc(file_fugue_tasks_v1_tasks, 6);
 
 /**
- * TaskService serves the team channel of host-api v0.17 §5.3: local
- * principals only — vendor session principals never read, post or subscribe.
+ * TeamSummary is the metadata-only summary of one team (host-api v0.19 §5.3,
+ * INV-09). It is served even while the vault is locked so the sidebar and team
+ * strip can render badges.
+ *
+ * @generated from message fugue.tasks.v1.TeamSummary
+ */
+export type TeamSummary = Message<"fugue.tasks.v1.TeamSummary"> & {
+  /**
+   * @generated from field: string team_id = 1;
+   */
+  teamId: string;
+
+  /**
+   * @generated from field: string workspace_id = 2;
+   */
+  workspaceId: string;
+
+  /**
+   * @generated from field: string session_id = 3;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string state = 4;
+   */
+  state: string;
+
+  /**
+   * @generated from field: string waiting_reason = 5;
+   */
+  waitingReason: string;
+
+  /**
+   * @generated from field: uint32 task_count = 6;
+   */
+  taskCount: number;
+
+  /**
+   * @generated from field: uint32 running_count = 7;
+   */
+  runningCount: number;
+
+  /**
+   * @generated from field: uint32 asking_count = 8;
+   */
+  askingCount: number;
+
+  /**
+   * @generated from field: uint32 failed_count = 9;
+   */
+  failedCount: number;
+
+  /**
+   * @generated from field: int64 last_seq = 10;
+   */
+  lastSeq: bigint;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp created_at = 11;
+   */
+  createdAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp updated_at = 12;
+   */
+  updatedAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp ended_at = 13;
+   */
+  endedAt?: Timestamp | undefined;
+};
+
+/**
+ * Describes the message fugue.tasks.v1.TeamSummary.
+ * Use `create(TeamSummarySchema)` to create a new message.
+ */
+export const TeamSummarySchema: GenMessage<TeamSummary> = /*@__PURE__*/
+  messageDesc(file_fugue_tasks_v1_tasks, 7);
+
+/**
+ * TeamBudget carries optional team-wide §11 limits.
+ *
+ * @generated from message fugue.tasks.v1.TeamBudget
+ */
+export type TeamBudget = Message<"fugue.tasks.v1.TeamBudget"> & {
+  /**
+   * @generated from field: uint32 max_agents = 1;
+   */
+  maxAgents: number;
+
+  /**
+   * @generated from field: int64 max_duration_seconds = 2;
+   */
+  maxDurationSeconds: bigint;
+};
+
+/**
+ * Describes the message fugue.tasks.v1.TeamBudget.
+ * Use `create(TeamBudgetSchema)` to create a new message.
+ */
+export const TeamBudgetSchema: GenMessage<TeamBudget> = /*@__PURE__*/
+  messageDesc(file_fugue_tasks_v1_tasks, 8);
+
+/**
+ * TaskNode is one node in a team's task tree (§5.3). When the vault is locked,
+ * sealed fields (goal, write_scope) are omitted.
+ *
+ * @generated from message fugue.tasks.v1.TaskNode
+ */
+export type TaskNode = Message<"fugue.tasks.v1.TaskNode"> & {
+  /**
+   * @generated from field: string task_id = 1;
+   */
+  taskId: string;
+
+  /**
+   * @generated from field: string parent_task_id = 2;
+   */
+  parentTaskId: string;
+
+  /**
+   * @generated from field: string retry_of = 3;
+   */
+  retryOf: string;
+
+  /**
+   * @generated from field: uint32 attempt = 4;
+   */
+  attempt: number;
+
+  /**
+   * @generated from field: string hierarchy_role = 5;
+   */
+  hierarchyRole: string;
+
+  /**
+   * @generated from field: string catalog_role = 6;
+   */
+  catalogRole: string;
+
+  /**
+   * @generated from field: string vendor = 7;
+   */
+  vendor: string;
+
+  /**
+   * @generated from field: string model = 8;
+   */
+  model: string;
+
+  /**
+   * @generated from field: string account_id = 9;
+   */
+  accountId: string;
+
+  /**
+   * @generated from field: string state = 10;
+   */
+  state: string;
+
+  /**
+   * @generated from field: string failure_code = 11;
+   */
+  failureCode: string;
+
+  /**
+   * @generated from field: string session_id = 12;
+   */
+  sessionId: string;
+
+  /**
+   * @generated from field: string goal = 13;
+   */
+  goal: string;
+
+  /**
+   * @generated from field: repeated string write_scope = 14;
+   */
+  writeScope: string[];
+
+  /**
+   * @generated from field: repeated string depends_on = 15;
+   */
+  dependsOn: string[];
+
+  /**
+   * @generated from field: int64 last_channel_seq = 16;
+   */
+  lastChannelSeq: bigint;
+
+  /**
+   * @generated from field: int64 elapsed_ms = 17;
+   */
+  elapsedMs: bigint;
+};
+
+/**
+ * Describes the message fugue.tasks.v1.TaskNode.
+ * Use `create(TaskNodeSchema)` to create a new message.
+ */
+export const TaskNodeSchema: GenMessage<TaskNode> = /*@__PURE__*/
+  messageDesc(file_fugue_tasks_v1_tasks, 9);
+
+/**
+ * TeamView is the full read model of one team (§5.3). When vault_locked is
+ * true, sealed content (title, brief, goal, write_scope, diff_text) is omitted.
+ *
+ * @generated from message fugue.tasks.v1.TeamView
+ */
+export type TeamView = Message<"fugue.tasks.v1.TeamView"> & {
+  /**
+   * @generated from field: fugue.tasks.v1.TeamSummary summary = 1;
+   */
+  summary?: TeamSummary | undefined;
+
+  /**
+   * @generated from field: bool vault_locked = 2;
+   */
+  vaultLocked: boolean;
+
+  /**
+   * @generated from field: string title = 3;
+   */
+  title: string;
+
+  /**
+   * @generated from field: string brief = 4;
+   */
+  brief: string;
+
+  /**
+   * @generated from field: fugue.tasks.v1.TeamBudget budget = 5;
+   */
+  budget?: TeamBudget | undefined;
+
+  /**
+   * @generated from field: string pending_request_id = 6;
+   */
+  pendingRequestId: string;
+
+  /**
+   * @generated from field: repeated fugue.tasks.v1.TaskNode tasks = 7;
+   */
+  tasks: TaskNode[];
+
+  /**
+   * @generated from field: string diff_text = 8;
+   */
+  diffText: string;
+
+  /**
+   * @generated from field: bool diff_truncated = 9;
+   */
+  diffTruncated: boolean;
+};
+
+/**
+ * Describes the message fugue.tasks.v1.TeamView.
+ * Use `create(TeamViewSchema)` to create a new message.
+ */
+export const TeamViewSchema: GenMessage<TeamView> = /*@__PURE__*/
+  messageDesc(file_fugue_tasks_v1_tasks, 10);
+
+/**
+ * @generated from message fugue.tasks.v1.ListTeamsRequest
+ */
+export type ListTeamsRequest = Message<"fugue.tasks.v1.ListTeamsRequest"> & {
+  /**
+   * @generated from field: string workspace_id = 1;
+   */
+  workspaceId: string;
+
+  /**
+   * @generated from field: string session_id = 2;
+   */
+  sessionId: string;
+};
+
+/**
+ * Describes the message fugue.tasks.v1.ListTeamsRequest.
+ * Use `create(ListTeamsRequestSchema)` to create a new message.
+ */
+export const ListTeamsRequestSchema: GenMessage<ListTeamsRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_tasks_v1_tasks, 11);
+
+/**
+ * @generated from message fugue.tasks.v1.ListTeamsResponse
+ */
+export type ListTeamsResponse = Message<"fugue.tasks.v1.ListTeamsResponse"> & {
+  /**
+   * @generated from field: repeated fugue.tasks.v1.TeamSummary teams = 1;
+   */
+  teams: TeamSummary[];
+};
+
+/**
+ * Describes the message fugue.tasks.v1.ListTeamsResponse.
+ * Use `create(ListTeamsResponseSchema)` to create a new message.
+ */
+export const ListTeamsResponseSchema: GenMessage<ListTeamsResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_tasks_v1_tasks, 12);
+
+/**
+ * @generated from message fugue.tasks.v1.GetTeamRequest
+ */
+export type GetTeamRequest = Message<"fugue.tasks.v1.GetTeamRequest"> & {
+  /**
+   * @generated from field: string team_id = 1;
+   */
+  teamId: string;
+
+  /**
+   * @generated from field: string diff_task_id = 2;
+   */
+  diffTaskId: string;
+};
+
+/**
+ * Describes the message fugue.tasks.v1.GetTeamRequest.
+ * Use `create(GetTeamRequestSchema)` to create a new message.
+ */
+export const GetTeamRequestSchema: GenMessage<GetTeamRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_tasks_v1_tasks, 13);
+
+/**
+ * @generated from message fugue.tasks.v1.GetTeamResponse
+ */
+export type GetTeamResponse = Message<"fugue.tasks.v1.GetTeamResponse"> & {
+  /**
+   * @generated from field: fugue.tasks.v1.TeamView team = 1;
+   */
+  team?: TeamView | undefined;
+};
+
+/**
+ * Describes the message fugue.tasks.v1.GetTeamResponse.
+ * Use `create(GetTeamResponseSchema)` to create a new message.
+ */
+export const GetTeamResponseSchema: GenMessage<GetTeamResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_tasks_v1_tasks, 14);
+
+/**
+ * @generated from message fugue.tasks.v1.RecoverTaskRequest
+ */
+export type RecoverTaskRequest = Message<"fugue.tasks.v1.RecoverTaskRequest"> & {
+  /**
+   * @generated from field: string command_id = 1;
+   */
+  commandId: string;
+
+  /**
+   * @generated from field: string team_id = 2;
+   */
+  teamId: string;
+
+  /**
+   * @generated from field: string task_id = 3;
+   */
+  taskId: string;
+
+  /**
+   * @generated from field: string decision = 4;
+   */
+  decision: string;
+
+  /**
+   * @generated from field: string reason = 5;
+   */
+  reason: string;
+};
+
+/**
+ * Describes the message fugue.tasks.v1.RecoverTaskRequest.
+ * Use `create(RecoverTaskRequestSchema)` to create a new message.
+ */
+export const RecoverTaskRequestSchema: GenMessage<RecoverTaskRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_tasks_v1_tasks, 15);
+
+/**
+ * @generated from message fugue.tasks.v1.RecoverTaskResponse
+ */
+export type RecoverTaskResponse = Message<"fugue.tasks.v1.RecoverTaskResponse"> & {
+  /**
+   * @generated from field: fugue.tasks.v1.TaskNode task = 1;
+   */
+  task?: TaskNode | undefined;
+};
+
+/**
+ * Describes the message fugue.tasks.v1.RecoverTaskResponse.
+ * Use `create(RecoverTaskResponseSchema)` to create a new message.
+ */
+export const RecoverTaskResponseSchema: GenMessage<RecoverTaskResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_tasks_v1_tasks, 16);
+
+/**
+ * TaskService serves the team channel, team read model, and unknown-task
+ * recovery of host-api v0.17/v0.19 §5.3: local principals only — vendor
+ * session and guard principals never read, post, recover, or subscribe.
  * PageChannel without thread_task_id is the general channel; the durable
  * topic `team:<id>` streams one event per appended line, with a snapshot of
  * the newest 100. PruneWorktrees removes ended-team task worktrees and
@@ -268,6 +666,30 @@ export const TaskService: GenService<{
     methodKind: "unary";
     input: typeof PruneWorktreesRequestSchema;
     output: typeof PruneWorktreesResponseSchema;
+  },
+  /**
+   * @generated from rpc fugue.tasks.v1.TaskService.ListTeams
+   */
+  listTeams: {
+    methodKind: "unary";
+    input: typeof ListTeamsRequestSchema;
+    output: typeof ListTeamsResponseSchema;
+  },
+  /**
+   * @generated from rpc fugue.tasks.v1.TaskService.GetTeam
+   */
+  getTeam: {
+    methodKind: "unary";
+    input: typeof GetTeamRequestSchema;
+    output: typeof GetTeamResponseSchema;
+  },
+  /**
+   * @generated from rpc fugue.tasks.v1.TaskService.RecoverTask
+   */
+  recoverTask: {
+    methodKind: "unary";
+    input: typeof RecoverTaskRequestSchema;
+    output: typeof RecoverTaskResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fugue_tasks_v1_tasks, 0);

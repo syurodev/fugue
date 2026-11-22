@@ -70,6 +70,7 @@ const (
 	TasksTaskNotFound           Code = "tasks.task_not_found"
 	TasksTeamEnded              Code = "tasks.team_ended"
 	TasksPostTooLarge           Code = "tasks.post_too_large"
+	TasksTaskNotUnknown         Code = "tasks.task_not_unknown"
 )
 
 // Entry classifies one code. Hidden codes are never shown to a client; the
@@ -139,6 +140,7 @@ func Registry() []Entry {
 		{TasksTaskNotFound, true, "the team task does not exist in this team"},
 		{TasksTeamEnded, true, "the team has ended; its channel is read-only"},
 		{TasksPostTooLarge, true, "the channel post exceeds the 4 KiB limit"},
+		{TasksTaskNotUnknown, true, "the team task is not in the unknown state and cannot be recovered"},
 	}
 }
 
