@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/syurodev/fugue/internal/interaction"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/secretstore"
@@ -90,5 +91,55 @@ func assertDeleteSecretAndEvent(t *testing.T, svc *SecretService, sub *Subscript
 	ev2, ok := sub.Next(ctx)
 	if !ok || ev2.Type != EventSecretDeleted || strings.Contains(string(ev2.Payload), canary) {
 		t.Fatalf("unexpected secret_deleted event: ev=%+v ok=%v", ev2, ok)
+	}
+}
+
+func TestAnswerInteractionSecretValidationAndPrincipalGate(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewFake(time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC))
+	hp := startAppStateHost(t, t.TempDir(), clk)
+	closeAppStateHost(t, hp)
+
+	ctx := t.Context()
+	if _, setupErr := hp.rt.vaultService.Setup(ctx, testAppPrincipal, []byte(testAppStateMasterUnlock)); setupErr != nil {
+		t.Fatalf("Setup vault: %v", setupErr)
+	}
+	opID, opErr := interaction.VendorOperationKey("sess-1", "turn-sec-gate", "vr-sec-gate")
+	if opErr != nil {
+		t.Fatalf("VendorOperationKey: %v", opErr)
+	}
+	ticket, err := hp.rt.interactions.Ensure(&interaction.Spec{
+		OperationID: opID,
+		Kind:        interaction.KindQuestion,
+		Relayed:     true,
+		Summary:     "Secret prompt",
+		Questions:   []interaction.Question{{ID: "q1", Question: "Token?", Secret: true}},
+		Binding:     interaction.Binding{SessionID: "sess-1", TurnID: "turn-sec-gate", VendorRequestID: "vr-sec-gate"},
+	})
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	// Non-app principal cannot answer with secret fields.
+	if _, cliErr := hp.rt.AnswerInteraction(ctx, &AnswerInteractionCommand{
+		CommandID: "c-cli", Principal: "cli:1", Incarnation: hp.rt.interactions.Incarnation(),
+		RequestID: ticket.RequestID, Outcome: OutcomeAnswered,
+		Answers: []InteractionAnswer{{QuestionID: "q1", SecretID: "sec-1"}},
+	}); errcode.CodeOf(cliErr) != errcode.PermissionDenied {
+		t.Fatalf("cli secret Answer code = %v, want permission_denied", errcode.CodeOf(cliErr))
+	}
+	// SaveSecretName without SecretValue is rejected without touching secret_records.
+	if _, saveErr := hp.rt.AnswerInteraction(ctx, &AnswerInteractionCommand{
+		CommandID: "c-nosv", Principal: testAppPrincipal, Incarnation: hp.rt.interactions.Incarnation(),
+		RequestID: ticket.RequestID, Outcome: OutcomeAnswered,
+		Answers: []InteractionAnswer{{QuestionID: "q1", OptionIDs: []string{}, SaveSecretName: "SHOULD_NOT_SAVE"}},
+	}); errcode.CodeOf(saveErr) != errcode.InvalidArgument {
+		t.Fatalf("SaveSecretName without SecretValue code = %v, want invalid_argument", errcode.CodeOf(saveErr))
+	}
+	svc, svcErr := hp.rt.SecretService()
+	if svcErr != nil {
+		t.Fatalf("SecretService: %v", svcErr)
+	}
+	if list, listErr := svc.ListSecrets(ctx, testAppPrincipal, "", ""); listErr != nil || len(list) != 0 {
+		t.Fatalf("ListSecrets after rejected Answer = (%+v, %v), want empty", list, listErr)
 	}
 }

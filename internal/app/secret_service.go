@@ -4,7 +4,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"hash"
 	"log/slog"
+	"strconv"
 	"sync"
 	"time"
 
@@ -218,6 +220,14 @@ func (s *SecretService) OpenSecretValue(ctx context.Context, secretID string) ([
 	return val, nil
 }
 
+// RequireUnlocked fails closed if the vault is locked.
+func (s *SecretService) RequireUnlocked() error {
+	if err := s.store.RequireUnlocked(); err != nil {
+		return errcode.Wrap(errcode.CodeOf(err), "check vault unlocked", err)
+	}
+	return nil
+}
+
 func (s *SecretService) rememberDedup(commandID string, entry *secretDedupEntry) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -248,27 +258,28 @@ func (s *SecretService) publishSecretEvent(seq int64, eventType string, meta *se
 	}
 }
 
+func writeLenPrefixed(h hash.Hash, b []byte) {
+	var lenBuf [24]byte
+	h.Write(strconv.AppendInt(lenBuf[:0], int64(len(b)), 10))
+	h.Write([]byte{':'})
+	h.Write(b)
+}
+
 func putSecretFingerprint(cmd *PutSecretCommand) string {
 	h := sha256.New()
-	h.Write([]byte("put"))
-	h.Write([]byte{0})
-	h.Write([]byte(cmd.ScopeKind))
-	h.Write([]byte{0})
-	h.Write([]byte(cmd.ScopeID))
-	h.Write([]byte{0})
-	h.Write([]byte(cmd.Name))
-	h.Write([]byte{0})
-	h.Write([]byte(cmd.Description))
-	h.Write([]byte{0})
-	h.Write(cmd.Value)
+	writeLenPrefixed(h, []byte("put"))
+	writeLenPrefixed(h, []byte(cmd.ScopeKind))
+	writeLenPrefixed(h, []byte(cmd.ScopeID))
+	writeLenPrefixed(h, []byte(cmd.Name))
+	writeLenPrefixed(h, []byte(cmd.Description))
+	writeLenPrefixed(h, cmd.Value)
 	return hex.EncodeToString(h.Sum(nil))
 }
 
 func deleteSecretFingerprint(secretID string) string {
 	h := sha256.New()
-	h.Write([]byte("delete"))
-	h.Write([]byte{0})
-	h.Write([]byte(secretID))
+	writeLenPrefixed(h, []byte("delete"))
+	writeLenPrefixed(h, []byte(secretID))
 	return hex.EncodeToString(h.Sum(nil))
 }
 

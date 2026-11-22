@@ -101,7 +101,8 @@ func ValidateScope(scopeKind, scopeID string) error {
 	}
 }
 
-func (s *Store) requireUnlocked() error {
+// RequireUnlocked fails closed if the vault is locked.
+func (s *Store) RequireUnlocked() error {
 	if s.vault == nil || s.vault.Snapshot().State != vault.StateUnlocked {
 		return errcode.New(errcode.FailedPrecondition, "vault is locked")
 	}
@@ -168,7 +169,7 @@ func (s *Store) PutSecret(ctx context.Context, scopeKind, scopeID, name, descrip
 	if err := validatePutSecret(scopeKind, scopeID, name, description, value); err != nil {
 		return Meta{}, 0, err
 	}
-	if err := s.requireUnlocked(); err != nil {
+	if err := s.RequireUnlocked(); err != nil {
 		return Meta{}, 0, err
 	}
 	now := s.clk.Now().UTC()
@@ -278,7 +279,7 @@ func (s *Store) DeleteSecret(ctx context.Context, secretID string) (Meta, int64,
 	if secretID == "" {
 		return Meta{}, 0, errcode.New(errcode.InvalidArgument, "secret_id is required")
 	}
-	if err := s.requireUnlocked(); err != nil {
+	if err := s.RequireUnlocked(); err != nil {
 		return Meta{}, 0, err
 	}
 	now := s.clk.Now().UTC()
@@ -323,7 +324,7 @@ func (s *Store) OpenSecretValue(ctx context.Context, secretID string) ([]byte, e
 	if secretID == "" {
 		return nil, errcode.New(errcode.InvalidArgument, "secret_id is required")
 	}
-	if err := s.requireUnlocked(); err != nil {
+	if err := s.RequireUnlocked(); err != nil {
 		return nil, err
 	}
 	var scopeKind, scopeID, name, keyID string

@@ -301,7 +301,7 @@ func (s *SessionToolService) awaitAndTakeCodexRelayed(
 	if !s.canApproveNow(binding) {
 		return codexRelayChoice{}, false
 	}
-	if _, ok := translateServerRelayedOutcome(resolved, req); !ok {
+	if resolved.Outcome != interaction.OutcomeAnswered && resolved.Outcome != interaction.OutcomeDenied {
 		return codexRelayChoice{}, false
 	}
 	delivered, err := s.interactions.TakeRelayed(opID)
