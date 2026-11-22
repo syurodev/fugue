@@ -130,6 +130,24 @@ func TestPatchWorkspaceConfigPreservesCommentsAndEnforcesCASAndPolicy(t *testing
 		t.Fatalf("inline comment lost on policy patch:\n%s", polPatched.Msg.Workspace.RawToml)
 	}
 
+	// Empty and oversized patch batches are rejected with InvalidArgument.
+	_, emptyErr := workspaces.PatchWorkspaceConfig(t.Context(), connect.NewRequest(&workspacev1.PatchWorkspaceConfigRequest{
+		CommandId: "patch-empty-1", WorkspaceId: ws.Id, ExpectedHash: polPatched.Msg.Workspace.ConfigHash,
+	}))
+	if connect.CodeOf(emptyErr) != connect.CodeInvalidArgument {
+		t.Fatalf("empty patches code = %v, want InvalidArgument", connect.CodeOf(emptyErr))
+	}
+	oversized := make([]*workspacev1.ConfigPatch, 65)
+	for i := range oversized {
+		oversized[i] = &workspacev1.ConfigPatch{DottedKey: "teams.idle_detach_seconds", Op: workspacev1.ConfigPatchOp_CONFIG_PATCH_OP_SET, Value: structpb.NewNumberValue(60)}
+	}
+	_, overErr := workspaces.PatchWorkspaceConfig(t.Context(), connect.NewRequest(&workspacev1.PatchWorkspaceConfigRequest{
+		CommandId: "patch-over-1", WorkspaceId: ws.Id, ExpectedHash: polPatched.Msg.Workspace.ConfigHash, Patches: oversized,
+	}))
+	if connect.CodeOf(overErr) != connect.CodeInvalidArgument {
+		t.Fatalf("oversized patches code = %v, want InvalidArgument", connect.CodeOf(overErr))
+	}
+
 	// Corrupt TOML on disk is rejected with typed WorkspaceConfigInvalid.
 	diskPath := filepath.Join(fugueHome, "workspaces", ws.Id, "fugue.toml")
 	if err := os.WriteFile(diskPath, []byte("not = [valid toml\n"), 0o600); err != nil {

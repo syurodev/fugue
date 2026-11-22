@@ -67,9 +67,14 @@ var allowedPatchKeys = map[string]patchValueKind{
 	"teams.approve_every_diff_step": patchKindBool,
 }
 
+const maxConfigPatches = 64
+
 // PatchTOML applies patches to rawTOML in-place while preserving comments,
 // blank lines, and existing key order.
 func PatchTOML(rawTOML []byte, patches []ConfigPatch) ([]byte, error) {
+	if len(patches) == 0 || len(patches) > maxConfigPatches {
+		return nil, cfgErr("fugue.toml", "", "config patch count must be between 1 and 64")
+	}
 	if err := checkTOMLSyntax(rawTOML); err != nil {
 		return nil, err
 	}

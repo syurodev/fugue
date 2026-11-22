@@ -115,11 +115,23 @@ func parseSectionHeader(trimmed string) (name string, isArray, ok bool) {
 }
 
 func normalizeSectionName(raw string) string {
+	return normalizeDottedPath(raw)
+}
+
+func normalizeDottedPath(raw string) string {
 	parts := strings.Split(raw, ".")
 	for i := range parts {
-		parts[i] = strings.TrimSpace(parts[i])
+		parts[i] = unquoteTOMLSegment(parts[i])
 	}
 	return strings.Join(parts, ".")
+}
+
+func unquoteTOMLSegment(seg string) string {
+	s := strings.TrimSpace(seg)
+	if len(s) >= 2 && ((s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'')) {
+		return s[1 : len(s)-1]
+	}
+	return s
 }
 
 func splitKeyAssign(line string) (lhs, rhs string, ok bool) {
@@ -135,10 +147,11 @@ func splitKeyAssign(line string) (lhs, rhs string, ok bool) {
 }
 
 func qualifyKey(section, lhs string) string {
+	normLHS := normalizeDottedPath(lhs)
 	if section == "" {
-		return lhs
+		return normLHS
 	}
-	return section + "." + lhs
+	return section + "." + normLHS
 }
 
 func findAssignEnd(lines []string, start int, firstRHS string) (int, string) {
@@ -174,9 +187,9 @@ func bracketDelta(s string) int {
 			return delta
 		case '"', '\'':
 			inQuote = ch
-		case '[':
+		case '[', '{':
 			delta++
-		case ']':
+		case ']', '}':
 			delta--
 		}
 	}

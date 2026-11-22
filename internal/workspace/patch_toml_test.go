@@ -22,12 +22,21 @@ func TestPatchTOMLPreservesCommentsBlankLinesAndKeyOrder(t *testing.T) {
 		"[policy]",
 		"# Keep this policy comment",
 		"sandbox_profile = \"workspace-write\"",
-		"approval_mode = \"auto\" # inline approval comment",
+		"\"approval_mode\" = \"auto\" # inline approval comment",
 		"shell_allow = [",
 		"  \"git status\",",
 		"  \"go version\",",
 		"]",
 		"shell_allow_add = [\"ls\"]",
+		"env_tags = [",
+		"  {",
+		"    match = \"*.prod\",",
+		"    tag = \"prod\",",
+		"  },",
+		"]",
+		"",
+		"[profiles.\"my-root\"]",
+		"vendor = \"codex\"",
 		"",
 		"[teams]",
 		"# Team comment",
@@ -40,6 +49,8 @@ func TestPatchTOMLPreservesCommentsBlankLinesAndKeyOrder(t *testing.T) {
 		{DottedKey: "policy.approval_mode", Op: PatchOpSet, Value: "ask"},
 		{DottedKey: "policy.shell_allow", Op: PatchOpSet, Value: []string{"git status", `echo "ok"`}},
 		{DottedKey: "policy.shell_allow_add", Op: PatchOpDelete},
+		{DottedKey: "policy.env_tags", Op: PatchOpSet, Value: []EnvTagRule{{Match: "prod/*", Tag: "prod"}}},
+		{DottedKey: "profiles.my-root.vendor", Op: PatchOpSet, Value: "claude"},
 		{DottedKey: "teams.idle_detach_seconds", Op: PatchOpSet, Value: 120},
 		{DottedKey: "session.teams", Op: PatchOpSet, Value: true},
 		{DottedKey: "profiles.fast.vendor", Op: PatchOpSet, Value: "claude"},
@@ -59,8 +70,12 @@ func TestPatchTOMLPreservesCommentsBlankLinesAndKeyOrder(t *testing.T) {
 		"[policy]",
 		"# Keep this policy comment",
 		"sandbox_profile = \"workspace-write\"",
-		"approval_mode = \"ask\" # inline approval comment",
+		"\"approval_mode\" = \"ask\" # inline approval comment",
 		"shell_allow = [\"git status\", \"echo \\\"ok\\\"\"]",
+		"env_tags = [{ match = \"prod/*\", tag = \"prod\" }]",
+		"",
+		"[profiles.\"my-root\"]",
+		"vendor = \"claude\"",
 		"",
 		"[teams]",
 		"# Team comment",
@@ -104,6 +119,16 @@ func TestPatchTOMLRejectsInvalidInputsAndInjection(t *testing.T) {
 				t.Fatalf("PatchTOML(%s) err = %v (code=%q), want ErrConfigInvalid", tc.name, err, CodeOf(err))
 			}
 		})
+	}
+	if _, err := PatchTOML(base, nil); CodeOf(err) != ErrConfigInvalid {
+		t.Fatalf("empty patches err = %v, want ErrConfigInvalid", err)
+	}
+	tooMany := make([]ConfigPatch, maxConfigPatches+1)
+	for i := range tooMany {
+		tooMany[i] = ConfigPatch{DottedKey: "name", Op: PatchOpSet, Value: "alpha"}
+	}
+	if _, err := PatchTOML(base, tooMany); CodeOf(err) != ErrConfigInvalid {
+		t.Fatalf("oversized patches err = %v, want ErrConfigInvalid", err)
 	}
 }
 

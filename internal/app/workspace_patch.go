@@ -11,7 +11,10 @@ import (
 	"github.com/syurodev/fugue/internal/workspace"
 )
 
-const workspacePatchDedupCap = 128
+const (
+	workspacePatchDedupCap    = 128
+	maxWorkspaceConfigPatches = 64
+)
 
 // WorkspaceConfigPatchOp identifies the operation for a structured workspace config patch.
 type WorkspaceConfigPatchOp uint8
@@ -86,6 +89,9 @@ func (s *WorkspaceService) Patch(ctx context.Context, principal, commandID, id, 
 	}
 	if commandID == "" {
 		return nil, errcode.New(errcode.InvalidArgument, "command_id is required")
+	}
+	if len(patches) == 0 || len(patches) > maxWorkspaceConfigPatches {
+		return nil, errcode.New(errcode.InvalidArgument, "config patch count must be between 1 and 64")
 	}
 	fp, err := workspacePatchFingerprint(id, expectedHash, patches)
 	if err != nil {
