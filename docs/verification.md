@@ -1,6 +1,6 @@
 # Verification Registry
 
-Seeded registry of stage A verification IDs (`docs/roadmap.md` F3.6a, `verification §1–2, §5–6`).
+Seeded registry of stage A verification IDs (spec item F3.6a, `verification §1–2, §5–6`).
 Until `verification` v0.15 settles the stage-A gates and counts for every prefix (`Q-81`), only the
 four prefixes below are seeded. Each row's status reflects only whether its named evidence already
 exists on `main` (`V-05`).

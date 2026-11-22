@@ -36,6 +36,7 @@ const (
 )
 
 var (
+	evidenceName   = regexp.MustCompile(`\b(?:Test|Fuzz)[A-Z]\w*`)
 	probePatchRef  = regexp.MustCompile(`quality/probes/([a-zA-Z0-9._-]+)\.patch`)
 	probeNamedRef  = regexp.MustCompile(`\bprobe:\s*([a-zA-Z0-9._-]+)`)
 	liveRecordRef  = regexp.MustCompile(`quality/records/([A-Za-z0-9-]+)/(\d{4}-\d{2}-\d{2})-(linux|darwin)\.json`)

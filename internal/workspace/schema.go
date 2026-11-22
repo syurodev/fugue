@@ -42,8 +42,7 @@ type PolicyConfig struct {
 
 // Env is validated and versioned since F5.6b but has no consumer in stage A
 // (Q-71). F6.4 (env snapshot) and F6.6 (shell tool) must read it from the
-// merged configuration; see docs/roadmap.md Q-71 before adding another env
-// setting.
+// merged configuration so the env settings stay part of the versioned policy.
 type Env struct {
 	Keep             []string `toml:"keep,omitempty"`
 	KeepAdd          []string `toml:"keep_add,omitempty"`

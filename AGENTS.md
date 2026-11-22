@@ -5,13 +5,13 @@
 Fugue by SynX is a local-first, all-in-one Go core. One host process (`fugue serve`) owns the
 data directory, the vault, the execution store and every service; the desktop shell and other
 clients talk to it only through the versioned Host API (`proto/fugue/<module>/v1`). The current
-goal is stage A: the vendor runtime, the Gio desktop app and teams (`docs/roadmap.md` §0); the
-native harness is stage B. DevKit (Wails) is frozen: never import from or add a
-dependency on `syurodev/dev-kit`; port code only under the porting rules in `docs/roadmap.md` §3.
+goal is stage A, which covers the vendor runtime, the Gio desktop app and teams. The native
+harness is stage B. DevKit (Wails) is frozen. Never import from or add a dependency on
+`syurodev/dev-kit`. Follow the porting rules in `docs/ports.md`.
 
 Design lives in the base-doc repository under `content/projects/dev-kit/core-harness/`. Read
-only the pages the roadmap item names. Path names there (`internal/...`, `devkit.db`,
-`AppService`) are superseded by this repository's ADRs; semantics are not.
+only the pages the Linear issue names. Follow this repository's ADRs for paths and the
+design pages for semantics.
 
 ## Security invariants
 
@@ -31,18 +31,19 @@ only the pages the roadmap item names. Path names there (`internal/...`, `devkit
 
 ## Workflow
 
-1. Work only on a roadmap item whose design is settled. Read `docs/roadmap.md` §1 first.
-2. Roadmap work: one item, one branch (`<type>/<id>-<slug>`), one PR into `main`. Never stack PRs.
-   A change outside the roadmap (bug, chore, docs) is also a branch and a PR; it needs no item ID.
-3. Do not change design or gates on your own. Record the question in the roadmap's
-   "Needs decision" table, mark the item, and move to an unblocked item.
-4. For roadmap work, update the roadmap row (status, PR link, evidence test names, log line) in
-   the same PR.
-5. Commits and PR titles are Conventional Commits (squash merges use the title). Add the roadmap
-   ID in parentheses only when the change belongs to an item: `feat(kernel): derive wait reasons (F2.1)`.
+1. Use the [Fugue team in Linear](https://linear.app/fugue) (`FUG-*`) for roadmap and work-item
+   tracking. Start only when the design is settled. Read the quality gates and relevant ADRs.
+2. For tracked work, use one issue, one branch (`<type>/<id>-<slug>`), and one PR into `main`.
+   Untracked bugs, chores and docs changes use their own branch and PR. Never stack PRs.
+3. Do not change design or gates on your own. Record the question in the Linear issue, flag it
+   for a decision, and move to an unblocked issue.
+4. Update the Linear issue with status, PR link and evidence test names. Update
+   `docs/verification.md` in the PR when release verification evidence changes.
+5. Commits and PR titles use Conventional Commits (squash merges use the title). Include the
+   issue ID in parentheses for tracked work, as in `feat(kernel): derive wait reasons (FUG-23)`.
 6. Commit messages never contain `Co-Authored-By` or any other attribution trailer.
-7. "Done" means merged with every CI gate green and the named evidence tests present and
-   passing. `TestRoadmapEvidence` checks the names.
+7. "Done" means merged with every CI gate green and the named tests present and passing.
+   `TestVerificationEvidence` checks the release evidence registry in `docs/verification.md`.
 
 ## Code rules
 
@@ -63,8 +64,9 @@ Every rule below is machine-enforced; the full list and thresholds are in
 - Errors are typed with stable codes; wrap with `%w`; no dynamic `errors.New` inside functions;
   no `panic` outside `cmd`.
 - Logging is `log/slog` only.
-- No dead code, commented-out code, placeholder bodies, or `TODO` without a live roadmap ID
-  (`TODO(F2.4): ...`).
+- No dead code, commented-out code or placeholder bodies.
+- A to-do comment uses a Linear issue ID or a spec item ID, as in `TODO(FUG-23): ...` or
+  `TODO(F11.5): ...`. Spec item IDs can end in a single lowercase letter.
 - Add an interface only at a port boundary or when two implementations exist.
 - New third-party modules need a row in `docs/dependencies.md` (reason, license, approver).
 - Tests use stdlib `testing` and `go-cmp`, run with `-race -shuffle=on`, use the fake clock
@@ -93,10 +95,11 @@ Every rule below is machine-enforced; the full list and thresholds are in
 
 | Need | Read |
 | --- | --- |
-| What to do next, status, porting rules, open questions | `docs/roadmap.md` |
+| What to do next, status, open questions | [Fugue team in Linear](https://linear.app/fugue) (`FUG-*`) |
+| Release verification evidence | `docs/verification.md` |
 | Every quality rule, threshold and how it is enforced | `docs/quality-gates.md` |
 | Package layout and layering | `docs/adr/0001-package-layout.md` (after F0.2) |
 | Third-party modules | `docs/dependencies.md` |
-| Provenance of ported code | `docs/ports.md` |
+| Porting rules and provenance | `docs/ports.md` |
 
 Keep this file at or below 10 KiB. Put detailed contracts in focused docs, not here.
