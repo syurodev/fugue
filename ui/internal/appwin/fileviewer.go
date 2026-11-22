@@ -296,6 +296,9 @@ func (v *fileViewer) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens
 			return d
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Dimensions{Size: image.Pt(gtx.Dp(theme.SpaceSM), 0)}
+		}),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
 			local.Constraints.Max.X = max(gtx.Constraints.Max.X-gtx.Dp(220), gtx.Dp(80))
 			return kit.MiddleEllipsisLabel(env, &local, theme.TypeLabel(), ch.Fg, v.displayPath())
