@@ -63,9 +63,18 @@ func MenuSeparator() MenuItem { return MenuItem{separator: true} }
 // Inline draws the menu where the cursor is, open and still, instead of on
 // the overlay: the gallery's specimens of a menu's states, many at a time.
 type MenuProps struct {
-	Items  []MenuItem
-	Anchor image.Rectangle
-	Inline bool
+	Items    []MenuItem
+	Anchor   image.Rectangle
+	AlignEnd bool // align the menu's right edge with the trigger's
+	Inline   bool
+}
+
+func (p MenuProps) anchorFor(width int) image.Rectangle {
+	anchor := p.Anchor
+	if p.AlignEnd {
+		anchor.Min.X = anchor.Max.X - width
+	}
+	return anchor
 }
 
 // MenuResult is what happened in the frame. Chosen is the ID of the item
@@ -327,7 +336,7 @@ func (m *MenuState) place(env *Env, gtx *layout.Context, p MenuProps) error {
 			case k == 0 && p.Inline:
 				lv.setRect(image.Point{}, size, image.Pt(0, -1))
 			case k == 0:
-				pos, up := placeBelow(p.Anchor, size, win, gap)
+				pos, up := placeBelow(p.anchorFor(size.X), size, win, gap)
 				lv.setRect(pos, size, image.Pt(0, dirOf(up)))
 			default:
 				pos, left := placeBeside(m.lv[k-1].parentItem(), size, win, 0)

@@ -334,7 +334,7 @@ func (f *startFlow) layPaused(env *kit.Env, sc *screens, lay fieldLay) {
 func (f *startFlow) layWorkspace(env *kit.Env, sc *screens, lay fieldLay) {
 	lay(f.workspace.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
 		props := &kit.ComboboxProps{
-			Label:       "Workspace",
+			Label:       labelWorkspace,
 			Placeholder: "Pick a workspace",
 			Items:       workspaceItems(sc.workspaces.List()),
 			Loading:     sc.workspacesPending(),

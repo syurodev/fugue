@@ -340,10 +340,18 @@ func (s *screens) applyVaultDelivery(u hostconn.Update) {
 	} else if u.Event != nil {
 		s.fail(s.vault.ApplyEvent(u.Event.Type, u.Event.Payload))
 	}
+	if s.vault.Locked() {
+		s.secretsView.clearSecretInputs()
+		s.inboxView.clearSecretInputs()
+	}
 }
 
 func (s *screens) applyVaultResults(results []vault.Result) {
 	for i := range results {
 		s.vaultGate.applied(&results[i], s.vault)
+	}
+	if s.vault.Locked() {
+		s.secretsView.clearSecretInputs()
+		s.inboxView.clearSecretInputs()
 	}
 }

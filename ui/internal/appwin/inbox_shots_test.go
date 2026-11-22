@@ -91,12 +91,12 @@ func buildInboxConfirmScreens(t *testing.T, ic inbox.Client) *screens {
 		sc.inboxWorker = w
 	}
 	sc.sidebar.ApplyList(client.SessionList{Sessions: []client.Session{
-		{ID: "sess-1", Vendor: client.VendorCodex, State: "awaiting_approval"},
+		{ID: testSecretSessionID, Vendor: client.VendorCodex, State: "awaiting_approval"},
 	}})
 	req := client.PendingInteraction{
 		RequestID:       "req-confirm-1",
 		Incarnation:     testInboxInc,
-		SessionID:       "sess-1",
+		SessionID:       testSecretSessionID,
 		Tool:            "bash",
 		Kind:            client.InteractionKindConfirm,
 		Risk:            "exec",

@@ -182,7 +182,7 @@ func (d *createDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens) {
 			body := newWSBody(env, gtx, bands, sc.fail)
 			body.field(d.name.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
 				props := &kit.TextFieldProps{
-					Label:       "Name",
+					Label:       labelName,
 					Placeholder: "for example fsap",
 					Helper:      "The host validates the name.",
 					Error:       "Name the workspace",
@@ -329,7 +329,7 @@ func (d *rootDialog) body(env *kit.Env, gtx *layout.Context, bands *kit.DialogBa
 // layName draws the root's name field; Enter submits the dialog.
 func (d *rootDialog) layName(env *kit.Env, body *wsBody) {
 	body.field(d.name.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
-		props := &kit.TextFieldProps{Label: "Name", Placeholder: "for example kong", Error: "Name the root"}
+		props := &kit.TextFieldProps{Label: labelName, Placeholder: "for example kong", Error: "Name the root"}
 		ev, ferr := d.name.Layout(env, gtx, props)
 		if ferr == nil && ev.Submitted {
 			d.dialog.Submit()

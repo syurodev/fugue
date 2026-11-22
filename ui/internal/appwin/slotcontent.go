@@ -152,7 +152,7 @@ func (s *screens) layoutRegularSlot(gtx *layout.Context, env *kit.Env, p Pos, re
 	case KindAgent:
 		s.layoutSoonSlot(gtx, env, p, "Agent detail", "An agent's transcript, diff and checks open here with the team screens.")
 	case KindSecrets:
-		s.layoutSoonSlot(gtx, env, p, "Secrets", "The secret vault screen opens here with the secrets item.")
+		s.secretsView.layout(gtx, env, s)
 	case KindModule:
 		s.layoutModuleSlot(gtx, env, p, ref)
 	case SlotKind(""):

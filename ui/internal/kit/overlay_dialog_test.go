@@ -7,7 +7,9 @@ import (
 
 	"gioui.org/io/event"
 	"gioui.org/io/key"
+	"gioui.org/io/semantic"
 	"gioui.org/layout"
+	"gioui.org/op/clip"
 
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
@@ -153,6 +155,35 @@ func TestDialogTrapsFocusAndReturnsItToTheOpener(t *testing.T) {
 	if !res.EscapeRefused || !f.d.IsOpen() {
 		t.Fatalf("Escape closed a form with unsaved input: %+v, open %v", res, f.d.IsOpen())
 	}
+}
+
+func TestDialogBodyStartsBelowDescription(t *testing.T) {
+	t.Parallel()
+	f := newDialogFixture(t)
+	const bodyLabel = "Dialog body marker"
+	size := image.Pt(24, 20)
+	f.props.Body = func(gtx *layout.Context, _ *DialogBands) image.Point {
+		area := clip.Rect(image.Rectangle{Max: size}).Push(gtx.Ops)
+		semantic.LabelOp(bodyLabel).Add(gtx.Ops)
+		area.Pop()
+		return size
+	}
+	f.d.Open()
+	f.frame()
+
+	gtx := &f.h.gtx
+	m := f.d.measure(f.h.env, gtx, f.props, f.h.env.windowRect())
+	origin := f.d.rect.Min.Add(image.Pt(m.pad+dialogRing(gtx), m.pad+m.headH+gtx.Dp(theme.SpaceSM)+m.descH))
+	want := image.Rectangle{Min: origin, Max: origin.Add(size)}
+	for _, node := range f.h.router.AppendSemantics(nil) {
+		if node.Desc.Label == bodyLabel {
+			if node.Desc.Bounds != want {
+				t.Fatalf("dialog body bounds = %v, want %v", node.Desc.Bounds, want)
+			}
+			return
+		}
+	}
+	t.Fatal("dialog body is clipped out of the viewport")
 }
 
 // focusAfterTab taps Tab (with mod) and asserts the tag took focus two
