@@ -442,7 +442,8 @@ func (o *Owner) TakeRelayed(operationID string) (*Ticket, error) {
 	}
 	delete(o.byOperation, ticket.OperationID)
 	delete(o.byRequest, ticket.RequestID)
-	cp := cloneTicket(ticket)
+	cp := cloneTicketForRelay(ticket)
+	clearSecretAnswers(ticket.Answers)
 	ev := o.newAuditEvent("delivered", ticket)
 	o.mu.Unlock()
 	o.emitAudit(&ev)

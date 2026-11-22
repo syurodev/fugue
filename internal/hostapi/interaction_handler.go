@@ -1,6 +1,7 @@
 package hostapi
 
 import (
+	"bytes"
 	"context"
 	"slices"
 
@@ -68,6 +69,7 @@ func protoQuestions(qs []app.InteractionQuestion) []*interactionv1.Question {
 			Options:     protoOptions(q.Options),
 			MultiSelect: q.MultiSelect,
 			AllowText:   q.AllowText,
+			Secret:      q.Secret,
 		})
 	}
 	return out
@@ -103,6 +105,15 @@ func (h *interactionHandler) Answer(ctx context.Context, req *connect.Request[in
 		optionID = *req.Msg.OptionId
 	}
 
+	if req.Msg != nil {
+		defer func() {
+			for _, a := range req.Msg.Answers {
+				if a != nil {
+					clear(a.SecretValue)
+				}
+			}
+		}()
+	}
 	res, err := h.backend.AnswerInteraction(ctx, &app.AnswerInteractionCommand{
 		CommandID:   req.Msg.CommandId,
 		Principal:   principal,
@@ -155,9 +166,14 @@ func buildDomainAnswers(protoAnswers []*interactionv1.QuestionAnswer) []app.Inte
 	answers := make([]app.InteractionAnswer, 0, len(protoAnswers))
 	for _, a := range protoAnswers {
 		answers = append(answers, app.InteractionAnswer{
-			QuestionID: a.QuestionId,
-			OptionIDs:  slices.Clone(a.OptionIds),
-			Text:       a.Text,
+			QuestionID:     a.QuestionId,
+			OptionIDs:      slices.Clone(a.OptionIds),
+			Text:           a.Text,
+			SecretID:       a.SecretId,
+			SecretValue:    bytes.Clone(a.SecretValue),
+			SaveSecretName: a.SaveSecretName,
+			SaveScopeKind:  a.SaveScopeKind,
+			SaveScopeID:    a.SaveScopeId,
 		})
 	}
 	return answers

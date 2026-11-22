@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 
 	"github.com/syurodev/fugue/internal/interaction"
@@ -11,7 +10,6 @@ import (
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/agy"
 	"github.com/syurodev/fugue/internal/vendoradapter/codex"
-	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
 var errRelayUnavailable = errors.New(approveUnavailableMessage)
@@ -83,13 +81,19 @@ func (s *SessionToolService) executeCodexRelay(
 		return
 	}
 	if !choice.decision.Cancelled {
-		if err := s.recordCodexApprovalDecided(ctx, binding, turnID, opID, req, &choice); err != nil || !s.canApproveNow(binding) {
+		if recErr := s.recordCodexApprovalDecided(ctx, binding, turnID, opID, req, &choice); recErr != nil || !s.canApproveNow(binding) {
 			resolveCodexRelayError(ctx, session, req.RequestID)
 			return
 		}
 	}
-	s.recordRelayTombstone(binding.SessionID, opID, digest, req.Method, &choice)
-	if err := session.Resolve(context.WithoutCancel(ctx), vendor.ApprovalRef{ID: req.RequestID}, choice.decision); err != nil {
+	s.recordRelayTombstone(binding.SessionID, opID, digest, req, &choice)
+	err = session.Resolve(context.WithoutCancel(ctx), vendor.ApprovalRef{ID: req.RequestID}, choice.decision)
+	if hasSecretQuestionItem(req.Questions) {
+		for k := range choice.decision.Answers {
+			delete(choice.decision.Answers, k)
+		}
+	}
+	if err != nil {
 		return
 	}
 }
@@ -97,11 +101,15 @@ func (s *SessionToolService) executeCodexRelay(
 func (s *SessionToolService) recordRelayTombstone(
 	sessionID, opID string,
 	digest [sha256.Size]byte,
-	method string,
+	req *vendor.ServerRequest,
 	choice *codexRelayChoice,
 ) {
-	if isAgyPermissionMethod(method) {
+	if isAgyPermissionMethod(req.Method) {
 		s.tombstones.putAgy(sessionID, opID, digest, choice.selectedOption, choice.decision.Allow, choice.decision.Cancelled)
+		return
+	}
+	if hasSecretQuestionItem(req.Questions) {
+		s.tombstones.putCodexSecret(sessionID, opID, digest)
 		return
 	}
 	s.tombstones.putCodex(sessionID, opID, digest, choice.decision.Allow, choice.selectedOption, choice.decision.Answers)
@@ -151,7 +159,7 @@ func (s *SessionToolService) replayCodexTombstone(
 	if !ok {
 		return false
 	}
-	if entry.digest != digest || !s.canApproveNow(binding) {
+	if entry.secret || entry.digest != digest || !s.canApproveNow(binding) {
 		resolveCodexRelayError(ctx, session, requestID)
 		return true
 	}
@@ -240,6 +248,7 @@ func buildCodexRelayQuestions(req *vendor.ServerRequest) []interaction.Question 
 				Header:   q.Header,
 				Question: q.Question,
 				Options:  opts,
+				Secret:   q.Secret,
 			})
 		}
 		return out
@@ -292,14 +301,25 @@ func (s *SessionToolService) awaitAndTakeCodexRelayed(
 	if !s.canApproveNow(binding) {
 		return codexRelayChoice{}, false
 	}
-	if _, ok := translateServerRelayedOutcome(resolved, req); !ok {
+	if !canRelayResolvedTicket(resolved, req) {
 		return codexRelayChoice{}, false
 	}
 	delivered, err := s.interactions.TakeRelayed(opID)
 	if err != nil {
 		return s.fallbackCodexRelayedTombstone(err, binding, opID, digest, req.Kind)
 	}
-	return translateServerRelayedOutcome(delivered, req)
+	choice, ok := translateServerRelayedOutcome(delivered, req)
+	for i := range delivered.Answers {
+		clear(delivered.Answers[i].SecretValue)
+	}
+	return choice, ok
+}
+
+func canRelayResolvedTicket(resolved *interaction.Ticket, req *vendor.ServerRequest) bool {
+	if resolved.Outcome == interaction.OutcomeAnswered || resolved.Outcome == interaction.OutcomeDenied {
+		return true
+	}
+	return req != nil && isAgyPermissionMethod(req.Method) && resolved.Outcome == interaction.OutcomeCancelled && resolved.TurnCancelled
 }
 
 func translateServerRelayedOutcome(ticket *interaction.Ticket, req *vendor.ServerRequest) (codexRelayChoice, bool) {
@@ -381,7 +401,7 @@ func (s *SessionToolService) fallbackCodexRelayedTombstone(
 		return codexRelayChoice{}, false
 	}
 	entry, ok := s.tombstones.get(binding.SessionID, opID)
-	if !ok || entry.digest != digest || !s.canApproveNow(binding) {
+	if !ok || entry.secret || entry.digest != digest || !s.canApproveNow(binding) {
 		return codexRelayChoice{}, false
 	}
 	return codexRelayChoice{
@@ -396,7 +416,9 @@ func translateCodexQuestionAnswers(ticket *interaction.Ticket) map[string][]stri
 	for _, ans := range ticket.Answers {
 		var vals []string
 		vals = append(vals, ans.OptionIDs...)
-		if ans.Text != "" {
+		if len(ans.SecretValue) > 0 {
+			vals = append(vals, string(ans.SecretValue))
+		} else if ans.Text != "" {
 			vals = append(vals, ans.Text)
 		}
 		if len(vals) > 0 {
@@ -445,50 +467,4 @@ func translateCodexRelayedOutcome(ticket *interaction.Ticket, kind vendor.Server
 	default:
 		return codexRelayChoice{}, false
 	}
-}
-
-func (s *SessionToolService) recordCodexApprovalDecided(ctx context.Context, binding SessionBinding, turnID, opID string, req *vendor.ServerRequest, choice *codexRelayChoice) error {
-	if s.recorder == nil || s.ids == nil {
-		return errcode.New(errcode.FailedPrecondition, approveUnavailableMessage)
-	}
-	itemID, err := s.ids.NewID()
-	if err != nil {
-		return errcode.Wrap(errcode.Internal, "generate approval event ID", err)
-	}
-	sealedBody, err := json.Marshal(struct {
-		OperationID string              `json:"operation_id"`
-		Method      string              `json:"method"`
-		RequestID   string              `json:"request_id"`
-		Decision    string              `json:"decision"`
-		Note        string              `json:"note,omitempty"`
-		Answers     map[string][]string `json:"answers,omitempty"`
-	}{
-		OperationID: opID,
-		Method:      req.Method,
-		RequestID:   req.RequestID,
-		Decision:    choice.decisionLabel,
-		Note:        choice.note,
-		Answers:     choice.decision.Answers,
-	})
-	if err != nil {
-		return errcode.Wrap(errcode.Internal, "marshal approval decision", err)
-	}
-	if recErr := s.recorder.RecordEvent(ctx, binding.SessionID, &vendorstore.Event{
-		Type:    vendorstore.ApprovalDecided,
-		TurnID:  turnID,
-		Payload: sealedBody,
-		Item: &vendorstore.Item{
-			ID:     itemID,
-			TurnID: turnID,
-			Kind:   vendorstore.KindApproval,
-			Metadata: vendorstore.ItemMetadata{
-				RequestKind: req.Method,
-				Decision:    choice.decisionLabel,
-				Decider:     decidedByUser,
-			},
-		},
-	}); recErr != nil {
-		return errcode.Wrap(errcode.Internal, "record approval decision", recErr)
-	}
-	return nil
 }

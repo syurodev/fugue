@@ -88,6 +88,7 @@ type ServerRequestQuestionItem struct {
 	Header   string
 	Question string
 	Options  []ServerRequestQuestionOption
+	Secret   bool
 }
 
 // ServerRequestOption is one selectable choice in a relayed confirmation

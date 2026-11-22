@@ -41,13 +41,19 @@ type InteractionQuestion struct {
 	Options     []InteractionOption `json:"options,omitempty"`
 	MultiSelect bool                `json:"multi_select,omitempty"`
 	AllowText   bool                `json:"allow_text,omitempty"`
+	Secret      bool                `json:"secret,omitempty"`
 }
 
 // InteractionAnswer is an answer to a question in an interaction request.
 type InteractionAnswer struct {
-	QuestionID string
-	OptionIDs  []string
-	Text       string
+	QuestionID     string
+	OptionIDs      []string
+	Text           string
+	SecretID       string
+	SecretValue    []byte
+	SaveSecretName string
+	SaveScopeKind  string
+	SaveScopeID    string
 }
 
 func hasOption(options []interaction.Option, id string) bool {
@@ -92,6 +98,7 @@ func viewFromTicket(t *interaction.Ticket) PendingInteractionView {
 			Options:     qOpts,
 			MultiSelect: q.MultiSelect,
 			AllowText:   true,
+			Secret:      q.Secret,
 		})
 	}
 

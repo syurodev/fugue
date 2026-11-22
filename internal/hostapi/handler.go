@@ -37,10 +37,10 @@ func connectCode(c errcode.Code) connect.Code {
 	switch c {
 	case errcode.InvalidArgument, errcode.InteractionOptionNotOffered, errcode.WorkspaceConfigInvalid, errcode.WorkspaceRootInvalid, errcode.WorkspaceNotText,
 		errcode.VendorInvalidProfile, errcode.VendorUnknownCommand, errcode.VendorCommandUnavailable, errcode.VendorCommandConflict, errcode.VendorWorkspaceMismatch,
-		errcode.AppStateInvalidDocument:
+		errcode.AppStateInvalidDocument, errcode.SecretsInvalidName:
 		return connect.CodeInvalidArgument
 	case errcode.NotFound, errcode.InteractionNotFound, errcode.WorkspaceNotFound, errcode.WorkspaceRootMissing, errcode.WorkspaceFileNotFound, errcode.VendorSessionNotFound, errcode.TranscriptSessionNotFound, errcode.TranscriptItemNotFound,
-		errcode.TasksTeamNotFound, errcode.TasksTaskNotFound:
+		errcode.TasksTeamNotFound, errcode.TasksTaskNotFound, errcode.StoreRecordNotFound:
 		return connect.CodeNotFound
 	case errcode.AlreadyExists, errcode.WorkspaceAlreadyExists, errcode.VaultAlreadyConfigured:
 		return connect.CodeAlreadyExists
@@ -48,7 +48,7 @@ func connectCode(c errcode.Code) connect.Code {
 		errcode.VendorUnsupported, errcode.VendorSessionState, errcode.VendorTurnNotActive, errcode.VendorVaultLocked, errcode.VaultNotConfigured, errcode.AppStateRevisionConflict, errcode.TasksTeamEnded, errcode.TasksTaskNotUnknown:
 		return connect.CodeFailedPrecondition
 	case errcode.FrameTooLarge, errcode.InteractionTextTooLarge, errcode.WorkspaceConfigTooLarge, errcode.WorkspaceFileTooLarge, errcode.VendorCapacity, errcode.VaultRateLimited,
-		errcode.AppStateTooLarge, errcode.AppStateTooManyWindows, errcode.TasksSendRateLimited, errcode.TasksPostTooLarge:
+		errcode.AppStateTooLarge, errcode.AppStateTooManyWindows, errcode.TasksSendRateLimited, errcode.TasksPostTooLarge, errcode.SecretsValueTooLarge, errcode.SecretsLimitExceeded:
 		return connect.CodeResourceExhausted
 	case errcode.PermissionDenied, errcode.WorkspacePathDenied, errcode.WorkspacePathOutsideRoot, errcode.WorkspaceOwnershipInvalid, errcode.VaultInvalidPassphrase:
 		return connect.CodePermissionDenied

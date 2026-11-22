@@ -84,6 +84,9 @@ type InteractionService struct {
 	teamDeadlines teamDeadlineResolver
 	// teamFinalReviews consumes the answers of team final-review cards (F11.5c).
 	teamFinalReviews teamFinalReviewResolver
+	// secretService and transcripts support secret question answers (F10.15a).
+	secretService *SecretService
+	transcripts   *Transcripts
 
 	// betweenListReads is a test seam: ListPending calls it between reading
 	// the topic sequence and reading the pending views. Always nil in
@@ -119,6 +122,12 @@ func NewInteractionService(owner *interaction.Owner, hub *EventHub, clk clock.Cl
 
 	owner.SetOnLifecycle(s.handleLifecycle)
 	return s, nil
+}
+
+// SetSecretSupport wires SecretService and Transcripts for secret question answers.
+func (s *InteractionService) SetSecretSupport(sec *SecretService, tr *Transcripts) {
+	s.secretService = sec
+	s.transcripts = tr
 }
 
 func (s *InteractionService) handleLifecycle(ev interaction.LifecycleEvent) {

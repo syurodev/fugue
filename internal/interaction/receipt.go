@@ -18,7 +18,7 @@ func (o *Owner) issueReceiptLocked(ticket *Ticket, selectedOptionID string, answ
 		Incarnation:      o.incarnation,
 		Kind:             ticket.Kind,
 		SelectedOptionID: selectedOptionID,
-		Answers:          cloneAnswers(answers),
+		Answers:          cloneAnswers(answers, false),
 		Binding:          ticket.Binding,
 		IssuedAt:         now,
 		ExpiresAt:        ticket.ExpiresAt,
@@ -62,7 +62,7 @@ func (o *Owner) ClaimAnswers(receiptID string, expected *Binding) ([]Answer, err
 	if err != nil {
 		return nil, err
 	}
-	return cloneAnswers(receipt.Answers), nil
+	return cloneAnswers(receipt.Answers, false), nil
 }
 
 func (o *Owner) claimByKind(receiptID string, kind Kind, expected *Binding) (*Receipt, error) {
@@ -152,6 +152,7 @@ func (o *Owner) InvalidateOperation(operationID string) (string, error) {
 
 func (o *Owner) cancelOperationTicketLocked(ticket *Ticket, now time.Time) *AuditEvent {
 	delete(o.byOperation, ticket.OperationID)
+	clearSecretAnswers(ticket.Answers)
 	if ticket.ReceiptID != "" {
 		if r, exists := o.receipts[ticket.ReceiptID]; exists && !r.Claimed {
 			delete(o.receipts, ticket.ReceiptID)
@@ -200,6 +201,7 @@ func (o *Owner) ResetSession(sessionID string) {
 			continue
 		}
 		delete(o.byOperation, ticket.OperationID)
+		clearSecretAnswers(ticket.Answers)
 		if !ticket.Resolved {
 			o.markResolvedLocked(ticket, now, OutcomeCancelled)
 			ev := o.newAuditEvent("cancelled", ticket)
@@ -353,16 +355,22 @@ func (o *Owner) cancelAllPendingLocked(action string, now time.Time) []*AuditEve
 	o.nextResolvedPrune = now
 	var cancelled []*AuditEvent
 	for _, ticket := range o.byRequest {
-		if !ticket.Resolved {
-			o.markResolvedLocked(ticket, now, OutcomeCancelled)
-			ev := o.newAuditEvent(action, ticket)
-			cancelled = append(cancelled, &ev)
-			o.emitLifecycleLocked(LifecycleEvent{
-				Kind:      EventResolved,
-				RequestID: ticket.RequestID,
-				Outcome:   OutcomeCancelled,
-			})
+		clearSecretAnswers(ticket.Answers)
+		if ticket.Resolved {
+			if ticket.Relayed {
+				delete(o.byRequest, ticket.RequestID)
+				delete(o.byOperation, ticket.OperationID)
+			}
+			continue
 		}
+		o.markResolvedLocked(ticket, now, OutcomeCancelled)
+		ev := o.newAuditEvent(action, ticket)
+		cancelled = append(cancelled, &ev)
+		o.emitLifecycleLocked(LifecycleEvent{
+			Kind:      EventResolved,
+			RequestID: ticket.RequestID,
+			Outcome:   OutcomeCancelled,
+		})
 	}
 	return cancelled
 }

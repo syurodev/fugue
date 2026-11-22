@@ -77,14 +77,16 @@ type Question struct {
 	Header      string
 	Options     []Option
 	MultiSelect bool
+	Secret      bool
 }
 
 // Answer is the user's reply to one Question of a KindQuestion request. A
-// reply carries options from the offered set, free text, or both.
+// reply carries options from the offered set, free text, or a secret value.
 type Answer struct {
-	QuestionID string
-	OptionIDs  []string
-	Text       string
+	QuestionID  string
+	OptionIDs   []string
+	Text        string
+	SecretValue []byte
 }
 
 // Binding ties a request and its resulting receipt to the exact execution
