@@ -231,10 +231,14 @@ func assertAppStateEventReloadsWindow(t *testing.T, srv *lockedVaultAppStateServ
 }
 
 type fakeAppSettingsClient struct {
-	mu          sync.Mutex
-	ws          client.Workspace
-	eff         client.EffectiveWorkspaceConfig
-	updateCalls int
+	mu            sync.Mutex
+	ws            client.Workspace
+	eff           client.EffectiveWorkspaceConfig
+	updateCalls   int
+	validateCalls int
+	confirmCalls  int
+	rejectCalls   int
+	issues        []client.WorkspaceConfigIssue
 }
 
 func (f *fakeAppSettingsClient) Workspace(context.Context, string) (client.Workspace, error) {
@@ -272,6 +276,46 @@ func (f *fakeAppSettingsClient) GetAppStatePreferences(context.Context) (client.
 
 func (f *fakeAppSettingsClient) PutAppStatePreferences(context.Context, *client.PutAppStatePreferencesInput) (uint64, error) {
 	return 1, nil
+}
+
+func (f *fakeAppSettingsClient) ValidateConfig(_ context.Context, _ string, _ []byte) ([]client.WorkspaceConfigIssue, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.validateCalls++
+	return f.issues, nil
+}
+
+func (f *fakeAppSettingsClient) ConfirmWorkspaceConfig(_ context.Context, _, expectedHash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.confirmCalls++
+	if expectedHash != f.ws.ConfigHash {
+		cerr := connect.NewError(connect.CodeFailedPrecondition, errLockedAppStateScripted)
+		if detail, err := connect.NewErrorDetail(&hostv1.ErrorDetail{Code: client.WorkspaceCodeConfigChanged}); err == nil {
+			cerr.AddDetail(detail)
+		}
+		return &client.WorkspaceConfigConflictError{Cause: cerr}
+	}
+	f.ws.PendingPolicyConfirmation = false
+	f.ws.PolicyDiff = nil
+	f.ws.PolicyRevision++
+	return nil
+}
+
+func (f *fakeAppSettingsClient) RejectWorkspaceConfig(_ context.Context, _, expectedHash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rejectCalls++
+	if expectedHash != f.ws.ConfigHash {
+		cerr := connect.NewError(connect.CodeFailedPrecondition, errLockedAppStateScripted)
+		if detail, err := connect.NewErrorDetail(&hostv1.ErrorDetail{Code: client.WorkspaceCodeConfigChanged}); err == nil {
+			cerr.AddDetail(detail)
+		}
+		return &client.WorkspaceConfigConflictError{Cause: cerr}
+	}
+	f.ws.PendingPolicyConfirmation = false
+	f.ws.PolicyDiff = nil
+	return nil
 }
 
 // TestSettingsCASConflictKeepsUnsavedEdits verifies policy confirm gating,

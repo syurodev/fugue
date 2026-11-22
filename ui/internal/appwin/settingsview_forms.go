@@ -389,4 +389,11 @@ func (v *settingsView) syncFromModel(m *settings.Model) {
 		w.field.SetText(strconv.Itoa(spec.get(&m.Draft)))
 		w.err = ""
 	}
+	v.syncRawFromModel(m)
+}
+
+func (v *settingsView) syncRawFromModel(m *settings.Model) {
+	if v.rawView != nil {
+		v.rawView.syncFromModel(m)
+	}
 }

@@ -6,6 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
 	"github.com/google/go-cmp/cmp"
@@ -13,6 +14,8 @@ import (
 
 	"github.com/syurodev/fugue/pkg/client"
 	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
+
+	"github.com/syurodev/fugue/ui/internal/hostconn"
 )
 
 func TestMain(m *testing.M) {
@@ -22,14 +25,50 @@ func TestMain(m *testing.M) {
 var errSettingsScripted = errors.New("scripted settings failure")
 
 type fakeSettingsClient struct {
-	mu           sync.Mutex
-	ws           client.Workspace
-	eff          client.EffectiveWorkspaceConfig
-	prefsRev     uint64
-	prefsRaw     []byte
-	updateCalls  int
-	putPrefCalls int
-	conflictOnce bool
+	mu            sync.Mutex
+	ws            client.Workspace
+	eff           client.EffectiveWorkspaceConfig
+	prefsRev      uint64
+	prefsRaw      []byte
+	updateCalls   int
+	validateCalls int
+	confirmCalls  int
+	rejectCalls   int
+	putPrefCalls  int
+	conflictOnce  bool
+	issues        []client.WorkspaceConfigIssue
+}
+
+func (f *fakeSettingsClient) ValidateConfig(_ context.Context, _ string, _ []byte) ([]client.WorkspaceConfigIssue, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.validateCalls++
+	return f.issues, nil
+}
+
+func (f *fakeSettingsClient) ConfirmWorkspaceConfig(_ context.Context, _, expectedHash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.confirmCalls++
+	if expectedHash != f.ws.ConfigHash {
+		return errSettingsScripted
+	}
+	f.ws.PendingPolicyConfirmation = false
+	f.ws.PolicyDiff = nil
+	f.ws.PolicyRevision++
+	return nil
+}
+
+func (f *fakeSettingsClient) RejectWorkspaceConfig(_ context.Context, _, expectedHash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.rejectCalls++
+	if expectedHash != f.ws.ConfigHash {
+		return errSettingsScripted
+	}
+	f.ws.PendingPolicyConfirmation = false
+	f.ws.PolicyDiff = nil
+	return nil
 }
 
 func (f *fakeSettingsClient) Workspace(context.Context, string) (client.Workspace, error) {
@@ -217,5 +256,100 @@ func TestParsersAndValidation(t *testing.T) {
 	}
 	if _, err := ParseBoundedInt("999999", 0, MaxIdleDetachSeconds); err == nil {
 		t.Fatal("expected out-of-range error")
+	}
+}
+
+type fakeClock struct {
+	mu     sync.Mutex
+	timers []*fakeTimer
+	armed  chan struct{}
+}
+
+func newFakeClock() *fakeClock {
+	return &fakeClock{armed: make(chan struct{}, 16)}
+}
+
+func (c *fakeClock) NewTimer(d time.Duration) hostconn.Timer {
+	t := &fakeTimer{ch: make(chan time.Time, 1), d: d}
+	c.mu.Lock()
+	c.timers = append(c.timers, t)
+	c.mu.Unlock()
+	select {
+	case c.armed <- struct{}{}:
+	default:
+	}
+	return t
+}
+
+func (c *fakeClock) fireLatest() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i := len(c.timers) - 1; i >= 0; i-- {
+		t := c.timers[i]
+		if !t.stopped {
+			t.ch <- time.Time{}
+			return
+		}
+	}
+}
+
+type fakeTimer struct {
+	ch      chan time.Time
+	d       time.Duration
+	stopped bool
+}
+
+func (t *fakeTimer) C() <-chan time.Time { return t.ch }
+func (t *fakeTimer) Stop() bool {
+	was := !t.stopped
+	t.stopped = true
+	return was
+}
+
+func TestWorkerDebouncesValidateConfigOnInjectedClock(t *testing.T) {
+	t.Parallel()
+	fc := &fakeSettingsClient{
+		ws:     client.Workspace{ID: testSettingsWSID, ConfigHash: "h1"},
+		issues: []client.WorkspaceConfigIssue{{Key: "policy.bogus", Line: 2, Column: 1, Message: "unknown key"}},
+	}
+	clk := newFakeClock()
+	w := NewWorker(func() Client { return fc }, nil)
+	w.SetClock(clk)
+	w.Start(t.Context())
+	defer w.Stop()
+
+	w.Do(&Request{Kind: OpValidateWorkspace, WorkspaceID: testSettingsWSID, RawTOML: []byte("a = 1"), RawRevision: 1})
+	<-clk.armed
+	w.Do(&Request{Kind: OpValidateWorkspace, WorkspaceID: testSettingsWSID, RawTOML: []byte("a = 2"), RawRevision: 2})
+	<-clk.armed
+
+	fc.mu.Lock()
+	beforeFire := fc.validateCalls
+	fc.mu.Unlock()
+	if beforeFire != 0 {
+		t.Fatalf("validateCalls before debounce timer fired = %d, want 0", beforeFire)
+	}
+
+	clk.fireLatest()
+	res := <-w.Results()
+	if res.Kind != OpValidateWorkspace || res.RawRevision != 2 || len(res.Issues) != 1 {
+		t.Fatalf("validation result = %+v", res)
+	}
+	fc.mu.Lock()
+	afterFire := fc.validateCalls
+	fc.mu.Unlock()
+	if afterFire != 1 {
+		t.Fatalf("validateCalls after debounce = %d, want 1", afterFire)
+	}
+}
+
+func TestLineColToRuneOffset(t *testing.T) {
+	t.Parallel()
+	src := "abc\ndefg\nhi"
+	if got := LineColToRuneOffset(src, 2, 3); got != 6 {
+		t.Fatalf("LineColToRuneOffset(2,3) = %d, want 6", got)
+	}
+	if got := LineColToRuneOffset(src, 1, 1); got != 0 {
+		t.Fatalf("LineColToRuneOffset(1,1) = %d, want 0", got)
 	}
 }

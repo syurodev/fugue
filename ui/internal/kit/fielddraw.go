@@ -23,7 +23,10 @@ import (
 // macro pattern builds: the glyphs and the caret in fg, the selection in
 // sel. The caller has clipped to the text area.
 func drawEditor(env *Env, gtx *layout.Context, ed *widget.Editor, fg, sel color.NRGBA) layout.Dimensions {
-	t := editorType()
+	return drawEditorWithType(env, gtx, ed, editorType(), fg, sel)
+}
+
+func drawEditorWithType(env *Env, gtx *layout.Context, ed *widget.Editor, t theme.Type, fg, sel color.NRGBA) layout.Dimensions {
 	size, line := env.Content(t)
 	m := op.Record(gtx.Ops)
 	paint.ColorOp{Color: fg}.Add(gtx.Ops)
