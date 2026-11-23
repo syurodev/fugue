@@ -59,6 +59,11 @@ func seededPrefixCounts() map[string]int {
 		"DA-E": 8,
 		"A-E":  10,
 		"A-S":  3,
+		"OR-E": 22,
+		"S-E":  13,
+		"I-E":  11,
+		"HA-E": 9,
+		"CL-E": 12,
 	}
 }
 
