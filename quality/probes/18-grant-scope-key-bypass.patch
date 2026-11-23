@@ -1,0 +1,13 @@
+# probe-test: ./internal/interaction TestIE03GrantScopeKeyMatchingAndPolicyRevisionInvalidation
+diff --git a/internal/interaction/keys.go b/internal/interaction/keys.go
+--- a/internal/interaction/keys.go
++++ b/internal/interaction/keys.go
+@@ -73,7 +73,7 @@ func (o *Owner) grantKeyFor(b *Binding) (grantKey, bool) {
+ 	key := grantKey{
+ 		sessionID:      b.SessionID,
+ 		workspaceID:    b.WorkspaceID,
+-		grantScopeKey:  b.GrantScopeKey,
++		grantScopeKey:  "",
+ 		targetRevision: b.TargetRevision,
+ 		envRevision:    "",
+ 		envTag:         b.EnvTag,
