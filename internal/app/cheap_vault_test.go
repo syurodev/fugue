@@ -63,6 +63,10 @@ func buildTestTemplates() (func(int), error) {
 		cleanup(0)
 		return nil, err
 	}
+	if err := buildGitRepoTemplate(dir); err != nil {
+		cleanup(0)
+		return nil, err
+	}
 	return cleanup, nil
 }
 
@@ -160,6 +164,17 @@ func copyMigratedTestDB(t *testing.T, path string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+// seedMigratedDataDir copies the pre-migrated database (no keyring) into dir
+// when dir has no database yet, so a host started on it skips the migrations.
+func seedMigratedDataDir(t *testing.T, dir string) {
+	t.Helper()
+	dstPath := storage.DBPath(dir)
+	if _, err := os.Stat(dstPath); err == nil {
+		return
+	}
+	copyMigratedTestDB(t, dstPath)
 }
 
 func readCheapKeyring() (*crypto.Keyring, error) {

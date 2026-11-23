@@ -19,7 +19,7 @@ import (
 func TestMain(m *testing.M) {
 	// The vendor service tests run this test binary as the Claude or Codex CLI.
 	if playFakeVendorCLI(os.Args) {
-		os.Exit(0)
+		exitFakeCLI()
 	}
 	cleanup, err := buildTestTemplates()
 	if err != nil {
@@ -27,6 +27,15 @@ func TestMain(m *testing.M) {
 		os.Exit(1)
 	}
 	goleak.VerifyTestMain(m, goleak.Cleanup(cleanup))
+}
+
+// exitFakeCLI ends the process acting as a vendor CLI. os.Exit runs the race
+// detector's exit hook, which idles for a second (GORACE atexit_sleep_ms) so
+// reports can flush; this child holds nothing to flush, and every test that
+// spawns one would otherwise wait that second, holding one of GOMAXPROCS
+// parallel slots. syscall.Exit skips the hook; stdout is unbuffered.
+func exitFakeCLI() {
+	syscall.Exit(0)
 }
 
 func playFakeVendorCLI(args []string) bool {

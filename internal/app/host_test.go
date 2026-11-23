@@ -79,7 +79,9 @@ func testHostConfig() HostConfig {
 	}
 }
 
-func testHostDeps(dir string, clk *clock.Fake, tr HostTransport) *HostDeps {
+func testHostDeps(t *testing.T, dir string, clk *clock.Fake, tr HostTransport) *HostDeps {
+	t.Helper()
+	seedMigratedDataDir(t, dir)
 	return &HostDeps{
 		DataDir:   dir,
 		Config:    testHostConfig(),
@@ -369,7 +371,7 @@ func newDrainingRuntime(t *testing.T) (*HostRuntime, <-chan struct{}, func()) {
 func TestStatusReportsVersionIncarnationAndCounts(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Unix(100, 0))
-	hp, err := StartHost(t.Context(), testHostDeps(t.TempDir(), clk, newScriptedTransport()))
+	hp, err := StartHost(t.Context(), testHostDeps(t, t.TempDir(), clk, newScriptedTransport()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -415,7 +417,7 @@ func TestStartHostDrainsThroughStoreCloseLast(t *testing.T) {
 	tr := newScriptedTransport()
 	tr.block = make(chan struct{})
 	dir := t.TempDir()
-	hp, err := StartHost(t.Context(), testHostDeps(dir, clk, tr))
+	hp, err := StartHost(t.Context(), testHostDeps(t, dir, clk, tr))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -440,7 +442,7 @@ func TestStartHostDrainsThroughStoreCloseLast(t *testing.T) {
 func TestStartHostRejectsMalformedConfiguredVersions(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Unix(0, 0))
-	deps := testHostDeps(t.TempDir(), clk, newScriptedTransport())
+	deps := testHostDeps(t, t.TempDir(), clk, newScriptedTransport())
 	deps.Config.APIVersions = []string{"v1", "banana"}
 	if _, err := StartHost(t.Context(), deps); errcode.CodeOf(err) != errcode.InvalidArgument {
 		t.Fatalf("StartHost with a malformed configured version = %v, want invalid_argument", err)
@@ -453,7 +455,7 @@ func TestDrainDeadlineComesFromTheClock(t *testing.T) {
 	tr := newScriptedTransport()
 	tr.block = make(chan struct{})
 	t.Cleanup(func() { close(tr.block) })
-	deps := testHostDeps(t.TempDir(), clk, tr)
+	deps := testHostDeps(t, t.TempDir(), clk, tr)
 	deps.Config.DrainTimeout = 5 * time.Second
 	hp, err := StartHost(t.Context(), deps)
 	if err != nil {
@@ -478,7 +480,7 @@ func TestDrainDeadlineComesFromTheClock(t *testing.T) {
 func TestHostProcessCloseIsIdempotent(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Unix(0, 0))
-	hp, err := StartHost(t.Context(), testHostDeps(t.TempDir(), clk, newScriptedTransport()))
+	hp, err := StartHost(t.Context(), testHostDeps(t, t.TempDir(), clk, newScriptedTransport()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -591,7 +593,7 @@ func TestGraceRearmDoesNotGrowTasks(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Unix(0, 0))
 	dir := t.TempDir()
-	deps := testHostDeps(dir, clk, newScriptedTransport())
+	deps := testHostDeps(t, dir, clk, newScriptedTransport())
 	deps.Config.IdleGrace = 10 * time.Second
 	hp, err := StartHost(t.Context(), deps)
 	if err != nil {
@@ -686,7 +688,7 @@ func TestGraceFireRacingLeaseAcquiredNeverDrainsWithALease(t *testing.T) {
 func TestLeaseReleasedNeverBlocksAfterClose(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Unix(0, 0))
-	deps := testHostDeps(t.TempDir(), clk, newScriptedTransport())
+	deps := testHostDeps(t, t.TempDir(), clk, newScriptedTransport())
 	deps.Config.IdleGrace = 10 * time.Second
 	hp, err := StartHost(t.Context(), deps)
 	if err != nil {

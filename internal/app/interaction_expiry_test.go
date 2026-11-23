@@ -203,7 +203,7 @@ func TestInteractionExpiryTimerStopsOnContextCancel(t *testing.T) {
 func TestHostProcessStopsInteractionExpiryOnClose(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Unix(100, 0))
-	hp, err := StartHost(t.Context(), testHostDeps(t.TempDir(), clk, newScriptedTransport()))
+	hp, err := StartHost(t.Context(), testHostDeps(t, t.TempDir(), clk, newScriptedTransport()))
 	if err != nil {
 		t.Fatal(err)
 	}

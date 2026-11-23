@@ -31,7 +31,7 @@ func newFileReadFixture(t *testing.T) *fileReadFixture {
 	ctx := t.Context()
 	dataDir := t.TempDir()
 	fugueHome := filepath.Join(t.TempDir(), "Fugue")
-	deps := testHostDeps(dataDir, clock.NewFake(time.Unix(100, 0)), newScriptedTransport())
+	deps := testHostDeps(t, dataDir, clock.NewFake(time.Unix(100, 0)), newScriptedTransport())
 	deps.WorkspaceEnv = config.MapEnv{config.EnvFugueHome: fugueHome}
 	host, startErr := StartHost(ctx, deps)
 	if startErr != nil {
