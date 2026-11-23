@@ -2,7 +2,6 @@ package appwin
 
 import (
 	"fmt"
-	"image"
 
 	"gioui.org/layout"
 	"gioui.org/op/clip"
@@ -164,16 +163,12 @@ func (v *inboxView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens,
 	if count > 0 {
 		status = theme.StatusWarning
 	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
-		rigidLabel(env, theme.TypeTitle(), env.Th.Chrome().Fg, "Approvals inbox"),
-		spacerW(theme.SpaceSM),
-		rigidTag(env, sc.fail, v.countTag, kit.TagProps{Text: fmt.Sprintf("%d pending", count), Variant: kit.TagStatus, Status: status}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
-		}),
-		rigidInboxButton(env, sc.fail, v.backBtn, kit.ButtonProps{Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM}, func() {
+	return flowHeader(gtx,
+		flowTitle(env, gtx, theme.TypeTitle(), env.Th.Chrome().Fg, "Approvals inbox"),
+		flowTag(env, gtx, sc.fail, v.countTag, kit.TagProps{Text: fmt.Sprintf("%d pending", count), Variant: kit.TagStatus, Status: status}),
+		atEnd(flowButton(env, gtx, sc.fail, v.backBtn, kit.ButtonProps{Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM}, func() {
 			sc.grid.closeSlotOf(KindInbox)
-		}),
+		})),
 	)
 }
 

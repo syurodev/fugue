@@ -1,7 +1,6 @@
 package appwin
 
 import (
-	"image"
 	"strconv"
 
 	"gioui.org/layout"
@@ -168,34 +167,17 @@ func (v *secretsView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screen
 	items := v.filteredItems(sc.secrets, wsID)
 	locked := sc.vault.Locked()
 	titleTok, titleCol := accountPaneTitleStyle(env.Th)
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
-		rigidLabel(env, titleTok, titleCol, "Secrets"),
-		spacerW(theme.SpaceSM),
-		rigidTag(env, sc.fail, v.countTag, kit.TagProps{
-			Text:    strconv.Itoa(len(items)),
-			Variant: kit.TagNeutral,
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
-		}),
-		rigidInboxButton(env, sc.fail, v.addBtn, kit.ButtonProps{
+	back := kit.IconButtonProps{Icon: kit.IconChevronLeft, Label: labelBackToChat}
+	return flowHeader(gtx,
+		flowTitle(env, gtx, titleTok, titleCol, "Secrets"),
+		flowTag(env, gtx, sc.fail, v.countTag, kit.TagProps{Text: strconv.Itoa(len(items)), Variant: kit.TagNeutral}),
+		atEnd(flowButton(env, gtx, sc.fail, v.addBtn, kit.ButtonProps{
 			Text:     labelAddSecret,
 			Icon:     kit.IconPlus,
 			Variant:  kit.Primary,
 			Disabled: locked || sc.secretsWorker == nil,
-		}, func() {
-			v.addDlg.open(wsID)
-		}),
-		spacerW(theme.SpaceSM),
-		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			props := kit.IconButtonProps{Icon: kit.IconChevronLeft, Label: labelBackToChat}
-			clicked, err := v.backBtn.Layout(env, gtx, &props)
-			sc.fail(err)
-			if clicked {
-				sc.grid.closeSlotOf(KindSecrets)
-			}
-			return v.backBtn.Measure(env, gtx, &props)
-		}),
+		}, func() { v.addDlg.open(wsID) })),
+		atEnd(flowIconButton(env, gtx, sc.fail, v.backBtn, &back, func() { sc.grid.closeSlotOf(KindSecrets) })),
 	)
 }
 

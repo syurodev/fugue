@@ -138,25 +138,27 @@ func layoutCardHeader(gtx *layout.Context, env *kit.Env, sc *screens, req *clien
 	} else if title == "" {
 		title = "Approval request"
 	}
-	tags := []layout.FlexChild{rigidTag(env, sc.fail, form.kindTag, kit.TagProps{Text: req.Kind, Variant: kit.TagNeutral})}
-	if req.Kind == client.InteractionKindQuestion {
-		tags = append(tags, spacerW(theme.SpaceXS), rigidTag(env, sc.fail, form.agentTag, kit.TagProps{Text: "Model output", Variant: kit.TagStatus, Status: theme.StatusInfo}))
-	}
-	if req.Risk != "" {
-		st := theme.StatusInfo
-		if req.Risk != "read" {
-			st = theme.StatusWarning
-		}
-		tags = append(tags, spacerW(theme.SpaceXS), rigidTag(env, sc.fail, form.riskTag, kit.TagProps{Text: req.Risk, Variant: kit.TagStatus, Status: st}))
-	}
-	if req.EnvTag != "" {
-		tags = append(tags, spacerW(theme.SpaceXS), rigidTag(env, sc.fail, form.envTag, kit.TagProps{Env: req.EnvTag, Variant: kit.TagEnv}))
-	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
-				append([]layout.FlexChild{rigidLabel(env, theme.TypeTitle(), c.Fg, title), spacerW(theme.SpaceSM)}, tags...)...,
-			)
+			items := []kit.FlowItem{
+				flowTitle(env, gtx, theme.TypeTitle(), c.Fg, title),
+				flowTag(env, gtx, sc.fail, form.kindTag, kit.TagProps{Text: req.Kind, Variant: kit.TagNeutral}),
+			}
+			if req.Kind == client.InteractionKindQuestion {
+				items = append(items, flowTag(env, gtx, sc.fail, form.agentTag, kit.TagProps{Text: "Model output", Variant: kit.TagStatus, Status: theme.StatusInfo}))
+			}
+			if req.Risk != "" {
+				st := theme.StatusInfo
+				if req.Risk != "read" {
+					st = theme.StatusWarning
+				}
+				items = append(items, flowTag(env, gtx, sc.fail, form.riskTag, kit.TagProps{Text: req.Risk, Variant: kit.TagStatus, Status: st}))
+			}
+			if req.EnvTag != "" {
+				items = append(items, flowTag(env, gtx, sc.fail, form.envTag, kit.TagProps{Env: req.EnvTag, Variant: kit.TagEnv}))
+			}
+			gap, rowGap := flowGap(gtx)
+			return kit.FlowRow(gtx, gap, rowGap, items)
 		}),
 		spacerH(theme.SpaceXXS),
 		rigidLabel(env, theme.TypeCaption(), c.FgMuted, "session "+req.SessionID+" · request "+req.RequestID),
@@ -281,52 +283,52 @@ func layoutCardFooter(gtx *layout.Context, env *kit.Env, sc *screens, req *clien
 	if isProposalRequest(req) {
 		return layoutProposalFooter(gtx, env, sc, req, form, pin)
 	}
+	var items []kit.FlowItem
 	switch req.Kind {
 	case client.InteractionKindConfirm:
-		return layoutConfirmFooter(gtx, env, sc, req, form, pin)
+		items = confirmFooterItems(gtx, env, sc, req, form, pin)
 	case client.InteractionKindSelect:
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
-			rigidInboxButton(env, sc.fail, form.denyBtn, kit.ButtonProps{Text: labelDeny, Variant: kit.Danger, Busy: form.busy}, func() {
+		items = []kit.FlowItem{
+			flowButton(env, gtx, sc.fail, form.denyBtn, kit.ButtonProps{Text: labelDeny, Variant: kit.Danger, Busy: form.busy}, func() {
 				submitInboxAnswer(sc, form, pin, &client.AnswerInteractionInput{Outcome: client.InteractionOutcomeDenied})
 			}),
-			spacerW(theme.SpaceSM),
-			rigidInboxButton(env, sc.fail, form.submitBtn, kit.ButtonProps{Text: "Choose option", Variant: kit.Primary, Disabled: form.selectedOption == "", Busy: form.busy}, func() {
+			flowButton(env, gtx, sc.fail, form.submitBtn, kit.ButtonProps{Text: "Choose option", Variant: kit.Primary, Disabled: form.selectedOption == "", Busy: form.busy}, func() {
 				submitInboxAnswer(sc, form, pin, &client.AnswerInteractionInput{Outcome: client.InteractionOutcomeAllowedOnce, OptionID: form.selectedOption})
 			}),
-		)
+		}
 	case client.InteractionKindQuestion:
 		cancelLabel, cancelOutcome := labelCancel, client.InteractionOutcomeCancelled
 		if !slices.Contains(req.OfferedOutcomes, client.InteractionOutcomeCancelled) && slices.Contains(req.OfferedOutcomes, client.InteractionOutcomeDenied) {
 			cancelLabel, cancelOutcome = labelDeny, client.InteractionOutcomeDenied
 		}
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
-			rigidInboxButton(env, sc.fail, form.cancelBtn, kit.ButtonProps{Text: cancelLabel, Variant: kit.Secondary, Busy: form.busy}, func() {
+		items = []kit.FlowItem{
+			flowButton(env, gtx, sc.fail, form.cancelBtn, kit.ButtonProps{Text: cancelLabel, Variant: kit.Secondary, Busy: form.busy}, func() {
 				form.clearSecrets()
 				submitInboxAnswer(sc, form, pin, &client.AnswerInteractionInput{Outcome: cancelOutcome})
 			}),
-			spacerW(theme.SpaceSM),
-			rigidInboxButton(env, sc.fail, form.submitBtn, kit.ButtonProps{Text: "Submit answer", Variant: kit.Primary, Disabled: !canSubmitQuestions(req, form), Busy: form.busy}, func() {
+			flowButton(env, gtx, sc.fail, form.submitBtn, kit.ButtonProps{Text: "Submit answer", Variant: kit.Primary, Disabled: !canSubmitQuestions(req, form), Busy: form.busy}, func() {
 				wsID, _ := sc.currentWorkspace()
 				submitInboxAnswer(sc, form, pin, &client.AnswerInteractionInput{Outcome: client.InteractionOutcomeAnswered, Answers: buildQuestionAnswers(req, form, wsID)})
 			}),
-		)
+		}
 	default:
 		return layout.Dimensions{}
 	}
+	gap, rowGap := flowGap(gtx)
+	return kit.FlowRow(gtx, gap, rowGap, items)
 }
 
-func layoutConfirmFooter(gtx *layout.Context, env *kit.Env, sc *screens, req *client.PendingInteraction, form *cardFormState, pin inbox.Pin) layout.Dimensions {
-	btns := []layout.FlexChild{
-		rigidInboxButton(env, sc.fail, form.denyBtn, kit.ButtonProps{Text: labelDeny, Variant: kit.Danger, Busy: form.busy}, func() {
+func confirmFooterItems(gtx *layout.Context, env *kit.Env, sc *screens, req *client.PendingInteraction, form *cardFormState, pin inbox.Pin) []kit.FlowItem {
+	items := []kit.FlowItem{
+		flowButton(env, gtx, sc.fail, form.denyBtn, kit.ButtonProps{Text: labelDeny, Variant: kit.Danger, Busy: form.busy}, func() {
 			submitInboxAnswer(sc, form, pin, &client.AnswerInteractionInput{Outcome: client.InteractionOutcomeDenied, Text: form.denyNote.Text()})
 		}),
 	}
 	if len(req.Options) > 0 && slices.Contains(req.OfferedOutcomes, client.InteractionOutcomeAnswered) {
-		btns = append(btns, spacerW(theme.SpaceSM),
-			rigidInboxButton(env, sc.fail, form.submitBtn, kit.ButtonProps{Text: "Confirm choice", Variant: kit.Primary, Disabled: form.selectedOption == "", Busy: form.busy}, func() {
+		return append(items,
+			flowButton(env, gtx, sc.fail, form.submitBtn, kit.ButtonProps{Text: "Confirm choice", Variant: kit.Primary, Disabled: form.selectedOption == "", Busy: form.busy}, func() {
 				submitInboxAnswer(sc, form, pin, &client.AnswerInteractionInput{Outcome: client.InteractionOutcomeAnswered, OptionID: form.selectedOption})
 			}))
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx, btns...)
 	}
 	for _, opt := range []struct {
 		outcome, label string
@@ -339,12 +341,12 @@ func layoutConfirmFooter(gtx *layout.Context, env *kit.Env, sc *screens, req *cl
 		if !slices.Contains(req.OfferedOutcomes, opt.outcome) {
 			continue
 		}
-		btns = append(btns, spacerW(theme.SpaceSM),
-			rigidInboxButton(env, sc.fail, opt.btn, kit.ButtonProps{Text: opt.label, Variant: opt.variant, Busy: form.busy}, func() {
+		items = append(items,
+			flowButton(env, gtx, sc.fail, opt.btn, kit.ButtonProps{Text: opt.label, Variant: opt.variant, Busy: form.busy}, func() {
 				submitInboxAnswer(sc, form, pin, &client.AnswerInteractionInput{Outcome: opt.outcome})
 			}))
 	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx, btns...)
+	return items
 }
 
 func canSubmitQuestions(req *client.PendingInteraction, form *cardFormState) bool {
@@ -462,8 +464,10 @@ func rigidWidget(fn func(*layout.Context) layout.Dimensions) layout.FlexChild {
 	})
 }
 
+// rigidLabel lays txt as a paragraph: on one line while it fits, wrapped
+// to the container's width when it does not, never clipped.
 func rigidLabel(env *kit.Env, tp theme.Type, fg color.NRGBA, txt string) layout.FlexChild {
-	return rigidWidget(func(gtx *layout.Context) layout.Dimensions { return kit.Label(env, gtx, tp, fg, txt) })
+	return rigidParagraph(env, tp, fg, txt)
 }
 
 func rigidParagraph(env *kit.Env, tp theme.Type, fg color.NRGBA, txt string) layout.FlexChild {

@@ -13,6 +13,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/mdview"
 	"github.com/syurodev/fugue/ui/internal/settings"
 	"github.com/syurodev/fugue/ui/internal/theme"
+	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
 type rawTOMLView struct {
@@ -182,14 +183,13 @@ func (r *rawTOMLView) layoutSaveBar(gtx *layout.Context, env *kit.Env, sc *scree
 	}
 
 	canSave := sc.settingsWorker != nil && sc.settings.Loaded && !sc.settings.Saving && dirty
-	buttons := []layout.FlexChild{}
+	var buttons []kit.FlowItem
 	if sc.settings.PolicyConfirmArmed && len(diffs) > 0 {
 		buttons = append(buttons,
-			rigidInboxButton(env, sc.fail, r.confirmPolicyBtn, kit.ButtonProps{
+			flowButton(env, gtx, sc.fail, r.confirmPolicyBtn, kit.ButtonProps{
 				Text: "Confirm & save policy", Variant: kit.Primary, Size: kit.SizeMD, Busy: sc.settings.Saving, Disabled: !canSave,
 			}, func() { sc.submitRawTOML(true) }),
-			spacerW(theme.SpaceSM),
-			rigidInboxButton(env, sc.fail, r.cancelPolicyBtn, kit.ButtonProps{
+			flowButton(env, gtx, sc.fail, r.cancelPolicyBtn, kit.ButtonProps{
 				Text: labelCancel, Variant: kit.Secondary, Size: kit.SizeMD, Disabled: sc.settings.Saving,
 			}, func() {
 				sc.settings.PolicyConfirmArmed = false
@@ -198,21 +198,18 @@ func (r *rawTOMLView) layoutSaveBar(gtx *layout.Context, env *kit.Env, sc *scree
 		)
 	} else {
 		buttons = append(buttons,
-			rigidInboxButton(env, sc.fail, r.saveBtn, kit.ButtonProps{
+			flowButton(env, gtx, sc.fail, r.saveBtn, kit.ButtonProps{
 				Text: "Save raw TOML", Variant: kit.Primary, Size: kit.SizeMD, Busy: sc.settings.Saving, Disabled: !canSave,
 			}, func() { sc.submitRawTOML(false) }),
 		)
 	}
 	buttons = append(buttons,
-		spacerW(theme.SpaceSM),
-		rigidInboxButton(env, sc.fail, r.discardBtn, kit.ButtonProps{
+		flowButton(env, gtx, sc.fail, r.discardBtn, kit.ButtonProps{
 			Text: "Discard", Variant: kit.Ghost, Size: kit.SizeMD, Disabled: !dirty || sc.settings.Saving,
-		}, func() {
-			sc.reloadRawFromHost()
-		}),
+		}, sc.reloadRawFromHost),
 	)
 	children = append(children, rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx, buttons...)
+		return flowHeader(gtx, buttons...)
 	}))
 	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, children...)
 }
@@ -234,19 +231,23 @@ func (v *settingsView) layoutPendingPolicyCard(gtx *layout.Context, env *kit.Env
 			rigidLabel(env, theme.TypeSmall(), env.Th.Chrome().FgMuted,
 				"fugue.toml changed outside the app. The host keeps the accepted policy until you confirm or reject."),
 		)
-		for _, d := range sc.settings.PendingPolicyDiff {
-			inner = append(inner, spacerH(theme.SpaceXXS),
-				rigidLabel(env, theme.TypeCode(), env.Th.Chrome().Fg, fmt.Sprintf("%s: %s → %s", d.Key, d.OldValue, d.NewValue)))
+		if len(sc.settings.PendingPolicyDiff) > 0 {
+			diff := make([]workspace.DiffEntry, 0, len(sc.settings.PendingPolicyDiff))
+			for _, d := range sc.settings.PendingPolicyDiff {
+				diff = append(diff, workspace.DiffEntry{Key: d.Key, OldValue: d.OldValue, NewValue: d.NewValue})
+			}
+			inner = append(inner, spacerH(theme.SpaceSM), rigidWidget(func(gtx *layout.Context) layout.Dimensions {
+				return layoutDiffPanel(env, gtx, diff)
+			}))
 		}
 		busy := sc.settings.PolicyDecisionBusy
 		canAct := sc.settingsWorker != nil && sc.settings.Loaded && !busy
 		inner = append(inner, spacerH(theme.SpaceSM), rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
-				rigidInboxButton(env, sc.fail, v.pendingConfirmBtn, kit.ButtonProps{
+			return flowHeader(gtx,
+				flowButton(env, gtx, sc.fail, v.pendingConfirmBtn, kit.ButtonProps{
 					Text: "Confirm", Variant: kit.Primary, Size: kit.SizeSM, Busy: busy, Disabled: !canAct,
 				}, sc.confirmPendingPolicy),
-				spacerW(theme.SpaceSM),
-				rigidInboxButton(env, sc.fail, v.pendingRejectBtn, kit.ButtonProps{
+				flowButton(env, gtx, sc.fail, v.pendingRejectBtn, kit.ButtonProps{
 					Text: "Reject", Variant: kit.Secondary, Size: kit.SizeSM, Busy: busy, Disabled: !canAct,
 				}, sc.rejectPendingPolicy),
 			)
