@@ -218,7 +218,7 @@ func startClockPump(t *testing.T, clk *clock.Fake) *clockPump {
 	ctx, cancel := context.WithCancel(context.WithoutCancel(t.Context()))
 	task := supervise.Go(ctx, "test.clock-pump", func(ctx context.Context) error {
 		for ctx.Err() == nil {
-			if err := clock.Sleep(ctx, clock.Real{}, clockPumpTick); err == nil && !p.paused.Load() {
+			if err := clock.Sleep(ctx, testutil.OSClock(), clockPumpTick); err == nil && !p.paused.Load() {
 				clk.Advance(clockPumpStep)
 			}
 		}
