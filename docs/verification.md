@@ -141,6 +141,22 @@ exists on `main` (`V-05`).
 | `CL-E09` | `cli §9` | `release` | `pr` | `TestServeExitCodeForSignals`, `TestSecondServeOnTheSameDataDirectoryFailsTyped`, `TestRunUntilStoppedCloseErrorExitsFailure`, `TestServeUsageRejectsUnknownSubcommand`. Stage A part only (`fugue serve` exit codes, `cli §5.2`); the other commands and `--json` are stage B | `Done` |
 
 
+## Storage evidence for G-03 (storage-security §10, stage A, FUG-59)
+
+The `S-E` prefix is not seeded in the registry, so these items have no registry row yet. The
+stage A part on the `vendor_*` tables is covered by tests in `internal/vendorstore`
+(`storage_evidence_test.go`). The execution-store parts (receipt, admission, `exec_*` tables) and
+the run limit are not stage A.
+
+- S-E01 atomicity (payload, event, projection, commit; `Done` for the vendor store):
+  `TestStorageEvidenceSE01FaultBetweenEveryWriteStep`,
+  `TestStorageEvidenceSE01BatchFaultLeavesNoEvent`.
+- S-E04 append-only (`Done`): `TestStorageEvidenceSE04TriggersBlockMutationOutsidePurge`,
+  `TestStorageEvidenceSE04PurgeRemovesExactlyOneSession`.
+- S-E05 crypto-shred (`Done`): `TestStorageEvidenceSE05PurgedWrappedKeyAbsentFromDatabaseFiles`.
+- S-E09 limits (`Done` for 1 MiB payload and 1 GiB session):
+  `TestStorageEvidenceSE09PayloadLimitFailsTyped`, `TestStorageEvidenceSE09SessionLimitFailsTyped`.
+
 ## F11.7b team UI evidence
 
 - DA-E07 performance: `TestTeamTreeLayoutBudget` (manual run with the `perf` build tag). The
