@@ -215,3 +215,49 @@ func seedManagerTeamForRetry(t *testing.T, s *Store) (TeamRecord, int64) {
 	seq = failTaskEvent(t, s, rec.TeamID, "mgr-team.mgr", seq, "fm0")
 	return rec, seq
 }
+
+// TestRetryTaskRefusesUnknownTask pins OR-15: a task whose outcome is unknown
+// may leave unknown only through an explicit recovery decision, never through
+// the failed-task retry path, which would start a second attempt of work that
+// may already have taken effect.
+func TestRetryTaskRefusesUnknownTask(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	s, _, _ := protectedStore(t)
+	setupMixedStateTeamForRecovery(t, s)
+	if _, err := s.RecoverTeams(ctx); err != nil {
+		t.Fatalf("RecoverTeams: %v", err)
+	}
+	rec, before, err := s.TeamSnapshot(ctx, "team-recover")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, retryErr := s.RetryTask(ctx, "team-recover", testTaskRunID, &TaskRetryInput{
+		ExpectedSeq: rec.LastSeq, SupersededEventID: "sup-unknown", CreatedEventID: "cre-unknown",
+	})
+	if !errors.Is(retryErr, ErrTeamTransition) {
+		t.Fatalf("RetryTask(unknown) = %v, want ErrTeamTransition", retryErr)
+	}
+
+	after, afterTasks, err := s.TeamSnapshot(ctx, "team-recover")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.LastSeq != rec.LastSeq || len(afterTasks) != len(before) {
+		t.Fatalf("refused retry changed the team: seq %d -> %d, tasks %d -> %d",
+			rec.LastSeq, after.LastSeq, len(before), len(afterTasks))
+	}
+	if st := findTaskState(afterTasks, testTaskRunID); st != TaskStateUnknown {
+		t.Fatalf("task %s state = %s, want unknown", testTaskRunID, st)
+	}
+}
+
+func findTaskState(tasks []TaskRecord, taskID string) TaskState {
+	for i := range tasks {
+		if tasks[i].TaskID == taskID {
+			return tasks[i].State
+		}
+	}
+	return ""
+}

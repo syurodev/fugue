@@ -1,0 +1,15 @@
+# probe-test: ./internal/process TestLinuxCgroupStopProofAndFallback
+# probe-test: ./internal/process TestStopKillsGroupMembersAfterLeaderExits
+diff --git a/internal/process/stop.go b/internal/process/stop.go
+index 9e9ee80..4cd5fd4 100644
+--- a/internal/process/stop.go
++++ b/internal/process/stop.go
+@@ -109,7 +109,7 @@ func (p *Process) Stop(ctx context.Context) (StopProof, error) {
+ }
+ 
+ func (p *Process) buildStopProof(reason string) StopProof {
+-	if p.scope != nil && p.scope.isEmpty() && reason != ReasonGroupNotEmpty && reason != ReasonKillFailed && reason != ReasonPipeHeldOpen {
++	if reason != ReasonGroupNotEmpty && reason != ReasonKillFailed && reason != ReasonPipeHeldOpen {
+ 		return StopProof{
+ 			Status: StopProofProved,
+ 			Reason: reason,

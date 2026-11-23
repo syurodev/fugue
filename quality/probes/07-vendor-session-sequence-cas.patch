@@ -1,0 +1,16 @@
+# probe-test: ./internal/vendorstore TestAppendBatchCommitsContiguousSequencesAtomically
+# probe-test: ./internal/vendorstore TestConcurrentAppendConflictsAndConsistentSnapshot
+# probe-test: ./internal/vendorstore TestSequenceConflictAndSnapshot
+diff --git a/internal/vendorstore/events.go b/internal/vendorstore/events.go
+index 0343f73..53f50dd 100644
+--- a/internal/vendorstore/events.go
++++ b/internal/vendorstore/events.go
+@@ -15,7 +15,7 @@ import (
+ 
+ const (
+ 	advanceSequenceQuery = `UPDATE vendor_sessions SET last_sequence = last_sequence + 1, updated_at = ?
+-		WHERE session_id = ? AND last_sequence = ? AND state <> 'closed'`
++		WHERE session_id = ? AND ? >= 0 AND state <> 'closed'`
+ 	rejectPurgedQuery = "SELECT EXISTS(SELECT 1 FROM vendor_purges WHERE session_id=?)"
+ 	insertEventQuery  = `INSERT INTO vendor_events(session_id,sequence,event_type,recorded_at,payload_id,metadata)
+ 		VALUES (?,?,?,?,?,?)`
