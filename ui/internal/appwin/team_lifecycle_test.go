@@ -6,6 +6,7 @@ import (
 	"image"
 	"sync"
 	"testing"
+	"time"
 
 	"gioui.org/f32"
 	"gioui.org/io/pointer"
@@ -20,23 +21,23 @@ var errLifecycle = errors.New("lifecycle host failure")
 
 const keptTeam = "keep"
 
-type topicRecorder struct {
+type teamTopicRecorder struct {
 	mu      sync.Mutex
 	adds    map[string]int
 	removes map[string]int
 }
 
-func newTopicRecorder() *topicRecorder {
-	return &topicRecorder{adds: map[string]int{}, removes: map[string]int{}}
+func newTeamTopicRecorder() *teamTopicRecorder {
+	return &teamTopicRecorder{adds: map[string]int{}, removes: map[string]int{}}
 }
 
-func (r *topicRecorder) AddTopic(topic string) {
+func (r *teamTopicRecorder) AddTopic(topic string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.adds[topic]++
 }
 
-func (r *topicRecorder) RemoveTopic(topic string) {
+func (r *teamTopicRecorder) RemoveTopic(topic string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.removes[topic]++
@@ -87,7 +88,7 @@ func TestTeamTopicReleasedWhenNoLongerDisplayed(t *testing.T) {
 	t.Parallel()
 	sc := teamShotScreens(t, tabChannel)
 	startLifecycleWorker(t, sc, nil)
-	rec := newTopicRecorder()
+	rec := newTeamTopicRecorder()
 	sc.teamTopicPort = rec
 	id := sc.teamSummaries[0].TeamID
 	topic := client.TopicTeamChannel + id
@@ -96,24 +97,59 @@ func TestTeamTopicReleasedWhenNoLongerDisplayed(t *testing.T) {
 	show := func(g *layout.Context) {
 		sc.layoutTeamBoard(g, h.env, teamBoardKey{team: id, main: true})
 	}
+	frame := func(fn func(*layout.Context)) {
+		h.frame(t, size, fn)
+		sc.releaseTeamTopics(&h.gtx)
+	}
+	hide := func(*layout.Context) {}
 	for range 2 {
-		h.frame(t, size, show)
-		sc.releaseTeamTopics()
+		frame(show)
 	}
 	if rec.adds[topic] != 1 || rec.removes[topic] != 0 {
 		t.Fatalf("displayed team: adds=%d removes=%d, want 1 and 0", rec.adds[topic], rec.removes[topic])
 	}
-	for range 2 {
-		h.frame(t, size, func(*layout.Context) {})
-		sc.releaseTeamTopics()
+	// Hidden inside the grace period: the stream stays, and showing the team
+	// again neither removes nor re-adds it.
+	frame(hide)
+	h.now = h.now.Add(teamTopicGrace / 2)
+	frame(hide)
+	frame(show)
+	if rec.adds[topic] != 1 || rec.removes[topic] != 0 || !sc.teamTopics[id] {
+		t.Fatalf("hidden within grace: adds=%d removes=%d, want 1 and 0", rec.adds[topic], rec.removes[topic])
 	}
+	// Hidden past the grace period: released exactly once.
+	frame(hide)
+	h.now = h.now.Add(teamTopicGrace - time.Second)
+	frame(hide)
+	if rec.removes[topic] != 0 {
+		t.Fatalf("released before the grace period: removes=%d", rec.removes[topic])
+	}
+	h.now = h.now.Add(2 * time.Second)
+	frame(hide)
+	frame(hide)
 	if rec.removes[topic] != 1 || sc.teamTopics[id] {
 		t.Fatalf("hidden team: removes=%d, tracked=%v, want 1 and false", rec.removes[topic], sc.teamTopics[id])
 	}
-	h.frame(t, size, show)
-	sc.releaseTeamTopics()
+	frame(show)
 	if rec.adds[topic] != 2 || !sc.teamPending[team.Request{Op: team.Read, Team: id, Epoch: sc.teamEpoch}] {
 		t.Fatalf("redisplay: adds=%d, refresh queued=%v", rec.adds[topic], sc.teamPending)
+	}
+}
+
+func TestTeamPostClearsDraftAcrossEpochChange(t *testing.T) {
+	t.Parallel()
+	sc := teamShotScreens(t, tabChannel)
+	host := &lifecycleHost{}
+	wake := startLifecycleWorker(t, sc, host)
+	id := sc.teamSummaries[0].TeamID
+	c := newTeamChannelComposer()
+	c.area.SetText("ship it")
+	c.submit(sc, id, nil)
+	sc.clearTeamPayloads()
+	awaitWake(t, wake)
+	sc.drainTeamResults()
+	if c.posting != 0 || c.area.Text() != "" {
+		t.Fatalf("accepted post across an epoch change: posting=%d text=%q", c.posting, c.area.Text())
 	}
 }
 
@@ -153,7 +189,7 @@ func TestTeamRetryRequeuesFailedRead(t *testing.T) {
 	t.Parallel()
 	sc := teamShotScreens(t, tabChannel)
 	startLifecycleWorker(t, sc, nil)
-	sc.teamTopicPort = newTopicRecorder()
+	sc.teamTopicPort = newTeamTopicRecorder()
 	id := sc.teamSummaries[0].TeamID
 	delete(sc.teamViews, id)
 	read := team.Request{Op: team.Read, Team: id, Epoch: sc.teamEpoch}
@@ -200,5 +236,61 @@ func TestTeamListPrunesReadMarkers(t *testing.T) {
 	sc.applyTeamResult(&team.Result{Op: team.List, Epoch: sc.teamEpoch, Summaries: []client.TeamSummary{{TeamID: keptTeam}}})
 	if sc.grid.dirty {
 		t.Fatal("a prune with nothing to remove marked the grid dirty")
+	}
+}
+
+func TestMultiWindowTeamTopicIsRefCounted(t *testing.T) {
+	t.Parallel()
+	coord := newMultiWindow(nil, nil)
+	rec := newTeamTopicRecorder()
+	type win struct {
+		sc *screens
+		h  *frameRunner
+	}
+	var wins [2]win
+	for i := range wins {
+		sc := teamShotScreens(t, tabChannel)
+		startLifecycleWorker(t, sc, nil)
+		u := &windowUpdates{queue: &updateQueue{}}
+		coord.register(u)
+		sc.setTopic = func(topic string, active bool) {
+			add, remove := coord.updateTopicRef(u, topic, active)
+			if add {
+				rec.AddTopic(topic)
+			} else if remove {
+				rec.RemoveTopic(topic)
+			}
+		}
+		wins[i] = win{sc: sc, h: newFrameRunner(t)}
+	}
+	id := wins[0].sc.teamSummaries[0].TeamID
+	topic := client.TopicTeamChannel + id
+	size := image.Pt(900, 600)
+	frame := func(w win, shown bool) {
+		w.h.frame(t, size, func(g *layout.Context) {
+			if shown {
+				w.sc.layoutTeamBoard(g, w.h.env, teamBoardKey{team: id, main: true})
+			}
+		})
+		w.sc.releaseTeamTopics(&w.h.gtx)
+	}
+	release := func(w win) {
+		frame(w, false)
+		w.h.now = w.h.now.Add(teamTopicGrace + time.Second)
+		frame(w, false)
+	}
+	frame(wins[0], true)
+	frame(wins[1], true)
+	if rec.adds[topic] != 1 || rec.removes[topic] != 0 {
+		t.Fatalf("two windows showing a team: adds=%d removes=%d, want 1 and 0", rec.adds[topic], rec.removes[topic])
+	}
+	release(wins[0])
+	if rec.removes[topic] != 0 || wins[0].sc.teamTopics[id] {
+		t.Fatalf("first window hid the team: removes=%d, still tracked=%v", rec.removes[topic], wins[0].sc.teamTopics[id])
+	}
+	frame(wins[1], true)
+	release(wins[1])
+	if rec.adds[topic] != 1 || rec.removes[topic] != 1 {
+		t.Fatalf("both windows hid the team: adds=%d removes=%d, want 1 and 1", rec.adds[topic], rec.removes[topic])
 	}
 }

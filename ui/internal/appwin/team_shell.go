@@ -12,23 +12,22 @@ import (
 	"github.com/syurodev/fugue/pkg/client"
 
 	"github.com/syurodev/fugue/ui/internal/kit"
-	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
 const teamLabel = "Team"
 
 type teamShell struct {
-	mode                        *kit.SegmentedState
-	open, create, needs, failed *kit.ButtonState
-	showTeam                    bool
+	mode                *kit.SegmentedState
+	open, needs, failed *kit.ButtonState
+	showTeam            bool
 }
 
 func (s *screens) teamShell(id string) *teamShell {
 	state := s.teamShells[id]
 	if state == nil {
 		state = &teamShell{
-			mode: kit.NewSegmentedState(), open: kit.NewButtonState(), create: kit.NewButtonState(),
+			mode: kit.NewSegmentedState(), open: kit.NewButtonState(),
 			needs: kit.NewButtonState(), failed: kit.NewButtonState(),
 		}
 		s.teamShells[id] = state
@@ -45,7 +44,7 @@ func (s *screens) layoutTeamSessionContent(gtx *layout.Context, env *kit.Env, id
 	sh := s.teamShell(id)
 	layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		rigidWidget(func(g *layout.Context) layout.Dimensions {
-			return s.layoutTeamSessionHeader(g, env, sh, id, &summary, active)
+			return s.layoutTeamSessionHeader(g, env, sh, &summary, active)
 		}),
 		layout.Flexed(1, func(g layout.Context) layout.Dimensions {
 			if active && sh.showTeam {
@@ -63,9 +62,9 @@ func (s *screens) layoutTeamSessionContent(gtx *layout.Context, env *kit.Env, id
 	)
 }
 
-func (s *screens) layoutTeamSessionHeader(gtx *layout.Context, env *kit.Env, sh *teamShell, id string, summary *client.TeamSummary, active bool) layout.Dimensions {
+func (s *screens) layoutTeamSessionHeader(gtx *layout.Context, env *kit.Env, sh *teamShell, summary *client.TeamSummary, active bool) layout.Dimensions {
 	if !active {
-		return s.layoutCreateTeam(gtx, env, sh, id)
+		return layout.Dimensions{}
 	}
 	return layout.Inset{Top: theme.SpaceLG, Bottom: theme.SpaceLG, Left: theme.SpaceXL, Right: theme.SpaceXL}.Layout(*gtx, func(g layout.Context) layout.Dimensions {
 		return layout.Flex{Alignment: layout.Middle}.Layout(g,
@@ -93,29 +92,6 @@ func (s *screens) layoutTeamMode(gtx *layout.Context, env *kit.Env, sh *teamShel
 		}
 	}
 	return sh.mode.Measure(env, gtx, props)
-}
-
-func (s *screens) layoutCreateTeam(gtx *layout.Context, env *kit.Env, sh *teamShell, id string) layout.Dimensions {
-	sess, exists := s.sidebar.Lookup(id)
-	if !exists || s.poster == nil {
-		return layout.Dimensions{}
-	}
-	kind, allowed := s.composer.action(sess)
-	connected := s.connected()
-	return layout.Inset{Top: theme.SpaceXS, Left: theme.SpaceMD}.Layout(*gtx, func(g layout.Context) layout.Dimensions {
-		props := kit.ButtonProps{Text: "Create team", Icon: kit.IconUsers, Size: kit.SizeSM, Disabled: !connected || !allowed || s.vault.Locked()}
-		clicked, err := sh.create.Layout(env, &g, props)
-		s.fail(err)
-		if clicked {
-			if kind == session.PostSteer {
-				s.poster.Steer(id, "/fugue:team")
-			} else {
-				s.poster.Send(id, "/fugue:team")
-			}
-			s.armTurnAnchor(id)
-		}
-		return sh.create.Measure(env, &g, props)
-	})
 }
 
 func (s *screens) layoutTeamStrip(gtx *layout.Context, env *kit.Env, sh *teamShell, summary *client.TeamSummary) layout.Dimensions {

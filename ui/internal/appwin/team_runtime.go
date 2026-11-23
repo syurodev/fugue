@@ -2,8 +2,10 @@ package appwin
 
 import (
 	"strings"
+	"time"
 
 	"gioui.org/layout"
+	"gioui.org/op"
 
 	"github.com/syurodev/fugue/pkg/client"
 
@@ -27,6 +29,7 @@ type teamRuntime struct {
 	teamFailedReads map[team.Request]bool
 	teamTopics      map[string]bool
 	teamShown       map[string]bool
+	teamLastShown   map[string]time.Time
 	teamTopicPort   teamTopicPort
 	teamPosts       map[uint64]*teamPostWait
 	teamPostSeq     uint64
@@ -49,6 +52,7 @@ func newTeamRuntime() teamRuntime {
 		teamFailedReads: make(map[team.Request]bool),
 		teamTopics:      make(map[string]bool),
 		teamShown:       make(map[string]bool),
+		teamLastShown:   make(map[string]time.Time),
 		teamPosts:       make(map[uint64]*teamPostWait),
 		teamRead:        make(map[string]map[string]int64),
 	}
@@ -60,31 +64,60 @@ type teamTopicPort interface {
 	RemoveTopic(topic string)
 }
 
+// teamTopicGrace is how long a team may stay off screen before its stream
+// stops: maximizing a slot or switching Chat and Team skips the board for a
+// few frames, and dropping the stream then would re-add it and refetch.
+const teamTopicGrace = 10 * time.Second
+
 // setTeamTopic is the single place a team channel stream starts or stops.
+// It goes through the window's reference-counted hook so windows sharing a
+// team keep one host stream between them.
 func (s *screens) setTeamTopic(id string, active bool) {
-	var port teamTopicPort = s.m
-	if s.teamTopicPort != nil {
-		port = s.teamTopicPort
-	}
-	if active {
-		port.AddTopic(client.TopicTeamChannel + id)
-	} else {
-		port.RemoveTopic(client.TopicTeamChannel + id)
+	topic := client.TopicTeamChannel + id
+	switch {
+	case s.setTopic != nil:
+		s.setTopic(topic, active)
+	case s.teamTopicPort != nil && active:
+		s.teamTopicPort.AddTopic(topic)
+	case s.teamTopicPort != nil:
+		s.teamTopicPort.RemoveTopic(topic)
+	case active:
+		s.m.AddTopic(topic)
+	default:
+		s.m.RemoveTopic(topic)
 	}
 }
 
-// releaseTeamTopics stops the streams of teams no frame displayed since the
-// last call. A team shown again re-subscribes and refreshes its view, and the
-// kept cursor makes the channel catch up.
-func (s *screens) releaseTeamTopics() {
+// releaseTeamTopics stops the streams of teams that no frame has displayed
+// for teamTopicGrace. A team shown again in time keeps its stream; one shown
+// after the release re-subscribes and refreshes its view, and the kept cursor
+// makes the channel catch up. A wake-up is scheduled for the earliest
+// release so it still happens when nothing else invalidates the window.
+func (s *screens) releaseTeamTopics(gtx *layout.Context) {
+	now := gtx.Now
+	var wake time.Time
 	for id := range s.teamTopics {
-		if !s.teamShown[id] {
-			s.setTeamTopic(id, false)
-			delete(s.teamTopics, id)
-			delete(s.teamRefresh, id)
+		last, seen := s.teamLastShown[id]
+		if s.teamShown[id] || !seen {
+			s.teamLastShown[id] = now
+			continue
 		}
+		due := last.Add(teamTopicGrace)
+		if now.Before(due) {
+			if wake.IsZero() || due.Before(wake) {
+				wake = due
+			}
+			continue
+		}
+		s.setTeamTopic(id, false)
+		delete(s.teamTopics, id)
+		delete(s.teamRefresh, id)
+		delete(s.teamLastShown, id)
 	}
 	clear(s.teamShown)
+	if !wake.IsZero() {
+		gtx.Execute(op.InvalidateCmd{At: wake})
+	}
 }
 
 func (s *screens) requestTeam(id string) {
@@ -160,9 +193,11 @@ func (s *screens) finishTeamPost(r *team.Result) {
 	delete(s.teamPosts, r.Ref)
 	c := wait.c
 	c.posting = 0
-	if r.Err != nil || r.Epoch != s.teamEpoch {
+	if r.Err != nil {
 		return
 	}
+	// The host accepted the message, so the draft goes even when the epoch
+	// moved on; a stale composer is harmless to clear.
 	if c.thread == wait.thread {
 		if strings.TrimSpace(c.area.Text()) == wait.text {
 			c.area.SetText("")

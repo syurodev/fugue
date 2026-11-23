@@ -69,12 +69,17 @@ func (s *screens) applyUpdate(u hostconn.Update) {
 	case topicSecrets:
 		s.applySecretsDelivery(u)
 	default:
-		if strings.HasPrefix(u.Topic, client.TopicTeamChannel) {
-			s.applyTeamTopic(u)
-			return
-		}
-		s.applyTranscriptUpdate(u)
+		s.applyDynamicUpdate(u)
 	}
+}
+
+// applyDynamicUpdate routes the per-id topics: team channels and transcripts.
+func (s *screens) applyDynamicUpdate(u hostconn.Update) {
+	if strings.HasPrefix(u.Topic, client.TopicTeamChannel) {
+		s.applyTeamTopic(u)
+		return
+	}
+	s.applyTranscriptUpdate(u)
 }
 
 func (s *screens) applyConnectionUpdate(state hostconn.State) bool {

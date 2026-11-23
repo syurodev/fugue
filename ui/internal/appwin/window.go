@@ -175,13 +175,18 @@ func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) ap
 		return nil
 	}, w.Invalidate)
 	layoutW.Start(ctx)
-	teamW := team.Start(ctx, func() team.Client {
+	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW, settingsW: settingsW, secretsW: secretsW, viewerW: viewerW, layoutW: layoutW, teamW: startTeamWorker(ctx, m, w)}
+}
+
+// startTeamWorker gives each window its own team worker, so a window's
+// results wake that window only.
+func startTeamWorker(ctx context.Context, m *hostconn.Manager, w *app.Window) *team.Worker {
+	return team.Start(ctx, func() team.Client {
 		if c := m.Client(); c != nil {
 			return c
 		}
 		return nil
 	}, w.Invalidate, rand.Text)
-	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW, settingsW: settingsW, secretsW: secretsW, viewerW: viewerW, layoutW: layoutW, teamW: teamW}
 }
 
 func (a appWorkers) stop() {
