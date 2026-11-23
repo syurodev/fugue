@@ -123,6 +123,9 @@ type TranscriptMetadata struct {
 	ResetAt, Level, Code          string
 	ContentTruncated              bool
 	RawTruncated                  bool
+	FilesAdded, FilesModified     int64
+	FilesDeleted, FilesRenamed    int64
+	Overlapped                    bool
 	OriginalContentBytes          int64
 	OriginalRawBytes              int64
 }
@@ -214,6 +217,8 @@ func metadataFromProto(m *transcriptv1.TranscriptMetadata) TranscriptMetadata {
 		Cost: m.GetCost(), Account: m.GetAccount(), Window: m.GetWindow(), Used: m.GetUsed(),
 		ResetAt: m.GetResetAt(), Level: m.GetLevel(), Code: m.GetCode(),
 		ContentTruncated: m.GetContentTruncated(), RawTruncated: m.GetRawTruncated(),
+		FilesAdded: m.GetFilesAdded(), FilesModified: m.GetFilesModified(), FilesDeleted: m.GetFilesDeleted(),
+		FilesRenamed: m.GetFilesRenamed(), Overlapped: m.GetOverlapped(),
 		OriginalContentBytes: m.GetOriginalContentBytes(), OriginalRawBytes: m.GetOriginalRawBytes(),
 	}
 }

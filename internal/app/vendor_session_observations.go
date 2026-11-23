@@ -93,6 +93,7 @@ func (a *vendorSessionActor) ensureVendorTurnStarted(ctx context.Context, turnID
 	}
 	a.stopIdleTimer()
 	a.turns[turnID] = true
+	a.trackTurnSnapshot(turnID, a.beginTurnSnapshot(ctx))
 	if _, _, err := vendor.Transition(a.state, vendor.Fact{Kind: vendor.FactVendorTurn}); err != nil {
 		return fmt.Errorf("record vendor-origin turn: %w", err)
 	}
@@ -292,6 +293,11 @@ func (a *vendorSessionActor) transition(ctx context.Context, fact vendor.Fact) e
 }
 
 func (a *vendorSessionActor) append(ctx context.Context, event *vendorstore.Event) error {
+	if event.Type == vendorstore.VendorTurnEnded {
+		// Every turn end passes here, so the closing snapshot and the
+		// turn_diff item are written once, before the turn is marked ended.
+		a.recordTurnDiff(ctx, event.TurnID)
+	}
 	next, err := a.manager.deps.Store.Append(ctx, a.info.ID, a.sequence, event)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrVendorActorFailed, safeActorError(err))

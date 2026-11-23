@@ -183,6 +183,17 @@ func (e *Engine) captureBeforeSlot(ctx context.Context, store Store, sessionID, 
 // by CaptureToolBefore and records the resulting tree hash under the same
 // snapshot ID.
 func (e *Engine) CaptureToolAfter(ctx context.Context, store Store, snapshotID, workTree string) (Record, Snapshot, error) {
+	return e.captureAfterSlot(ctx, store, snapshotID, workTree, KindTool)
+}
+
+// CaptureTurnEnd captures the after-slot of a turn snapshot previously opened
+// by CaptureTurn under the same snapshot ID. The pair counts once against the
+// session's turn quota.
+func (e *Engine) CaptureTurnEnd(ctx context.Context, store Store, snapshotID, workTree string) (Record, Snapshot, error) {
+	return e.captureAfterSlot(ctx, store, snapshotID, workTree, KindTurn)
+}
+
+func (e *Engine) captureAfterSlot(ctx context.Context, store Store, snapshotID, workTree string, kind Kind) (Record, Snapshot, error) {
 	if store == nil {
 		return Record{}, Snapshot{}, errcode.New(errcode.InvalidArgument, "snapshot: store is nil")
 	}
@@ -190,8 +201,8 @@ func (e *Engine) CaptureToolAfter(ctx context.Context, store Store, snapshotID, 
 	if err != nil {
 		return Record{}, Snapshot{}, fmt.Errorf("snapshot: get %s: %w", snapshotID, err)
 	}
-	if rec.Kind != KindTool {
-		return Record{}, Snapshot{}, errcode.New(errcode.InvalidArgument, "snapshot: expected tool snapshot for "+snapshotID)
+	if rec.Kind != kind {
+		return Record{}, Snapshot{}, errcode.New(errcode.InvalidArgument, "snapshot: expected "+string(kind)+" snapshot for "+snapshotID)
 	}
 	repo, err := e.Open(ctx, workTree)
 	if err != nil {

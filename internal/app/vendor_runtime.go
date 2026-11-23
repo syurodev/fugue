@@ -13,6 +13,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/secretstore"
+	"github.com/syurodev/fugue/internal/snapshot"
 	"github.com/syurodev/fugue/internal/storage"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
@@ -218,6 +219,7 @@ func composeVendorSessionManager(
 			return hp.rt.interactions != nil && hp.rt.interactions.owner.HasPendingForSession(sessionID)
 		},
 		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: endSession, SessionEndSettled: sessionEndSettled,
+		TurnSnapshots:              newEngineTurnSnapshots(deps.DataDir, turnSnapshotGit(ctx, deps), snapshot.DefaultLimits(), deps.Clock, deps.IDs),
 		TestDelaySpawnRegistration: deps.TestDelaySpawnRegistration,
 		TestOnWaitInflightSpawn:    deps.TestOnWaitInflightSpawn,
 		CrashPoint:                 deps.Config.CrashPoint,

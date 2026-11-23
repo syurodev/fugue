@@ -29,7 +29,7 @@ func viewKindFor(kind transcript.Kind) transcript.ViewKind {
 	case transcript.UserMessage, transcript.AssistantMessage, transcript.Reasoning,
 		transcript.Approval, transcript.Plan, transcript.Subagent, transcript.Command,
 		transcript.TeamProposal, transcript.TaskLink, transcript.Usage, transcript.Quota,
-		transcript.Notice:
+		transcript.Notice, transcript.TurnDiff:
 		return transcript.ViewText
 	default:
 		return transcript.ViewText
@@ -76,6 +76,12 @@ func storeMetadataRest(m transcript.Metadata) vendorstore.ItemMetadata {
 		return vendorstore.ItemMetadata{Account: v.AccountID, Window: v.Window, Used: v.Used, ResetAt: v.ResetsAt.UTC().Format(time.RFC3339Nano)}
 	case transcript.NoticeMetadata:
 		return vendorstore.ItemMetadata{Level: v.Level, Code: v.Code}
+	case transcript.TurnDiffMetadata:
+		return vendorstore.ItemMetadata{
+			Status: v.Status, FilesAdded: int64(v.FilesAdded), FilesModified: int64(v.FilesModified),
+			FilesDeleted: int64(v.FilesDeleted), FilesRenamed: int64(v.FilesRenamed),
+			LinesAdded: int64(v.LinesAdded), LinesRemoved: int64(v.LinesRemoved), Overlapped: v.Overlapped,
+		}
 	default:
 		return vendorstore.ItemMetadata{}
 	}
@@ -137,6 +143,7 @@ func itemContentDecoders() map[transcript.Kind]func([]byte) (transcript.Content,
 		transcript.TeamProposal: decodeAs(transcript.TeamProposalContent{}),
 		transcript.TaskLink:     decodeAs(transcript.TaskLinkContent{}),
 		transcript.Notice:       decodeAs(transcript.NoticeContent{}),
+		transcript.TurnDiff:     decodeAs(transcript.TurnDiffContent{}),
 		transcript.Usage: func([]byte) (transcript.Content, error) {
 			return transcript.UsageContent{}, nil
 		},
@@ -294,6 +301,12 @@ func redactContent(content transcript.Content, redactor transcript.Redactor) tra
 	case transcript.PlanContent:
 		v.Steps = redactSlice(v.Steps, redactor)
 		return v
+	case transcript.TurnDiffContent:
+		v.Files = slices.Clone(v.Files)
+		for i := range v.Files {
+			v.Files[i].Path = redactor.Redact(v.Files[i].Path)
+		}
+		return v
 	case transcript.CommandContent:
 		v.Name = redactor.Redact(v.Name)
 		v.Args = redactSlice(v.Args, redactor)
@@ -353,6 +366,8 @@ func buildItemView(content transcript.Content, kind transcript.Kind, redactor tr
 		out := viewFromTranscript(transcript.BuildView(transcript.ViewText, strings.Join(steps, "\n"), redactor))
 		out.Steps = slices.Clip(steps)
 		return out
+	case transcript.TurnDiffContent:
+		return turnDiffView(&v, redactor)
 	case transcript.SubagentContent:
 		out := viewFromTranscript(transcript.BuildView(transcript.ViewText, v.Result, redactor))
 		out.Title = cleanViewSummary(v.Name, redactor)
@@ -372,4 +387,19 @@ func buildItemView(content transcript.Content, kind transcript.Kind, redactor tr
 		}
 		return TranscriptView{}
 	}
+}
+
+// turnDiffView lists the changed files: the header carries the change kind and
+// the redacted path; the diff text itself is never stored (git-guard §3.2).
+// A binary file (counts of -1) shows no line counts.
+func turnDiffView(content *transcript.TurnDiffContent, redactor transcript.Redactor) TranscriptView {
+	files := make([]transcript.FileSummary, 0, len(content.Files))
+	for i := range content.Files {
+		f := &content.Files[i]
+		files = append(files, transcript.FileSummary{
+			Header: f.Change + " " + cleanViewSummary(f.Path, redactor),
+			Added:  max(f.Added, 0), Removed: max(f.Removed, 0),
+		})
+	}
+	return TranscriptView{Files: files}
 }

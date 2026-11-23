@@ -131,6 +131,11 @@ type ItemMetadata struct {
 	ResetAt              string  `json:"reset_at,omitempty"`
 	Level                string  `json:"level,omitempty"`
 	Code                 string  `json:"code,omitempty"`
+	FilesAdded           int64   `json:"files_added,omitempty"`
+	FilesModified        int64   `json:"files_modified,omitempty"`
+	FilesDeleted         int64   `json:"files_deleted,omitempty"`
+	FilesRenamed         int64   `json:"files_renamed,omitempty"`
+	Overlapped           bool    `json:"overlapped,omitempty"`
 	ContentTruncated     bool    `json:"content_truncated,omitempty"`
 	RawTruncated         bool    `json:"raw_truncated,omitempty"`
 	OriginalContentBytes int64   `json:"original_content_bytes,omitempty"`
