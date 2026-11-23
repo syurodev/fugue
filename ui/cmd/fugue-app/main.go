@@ -51,6 +51,9 @@ func main() {
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	if err := appwin.MatchSystemCursor(ctx, os.LookupEnv, os.Setenv); err != nil {
+		fmt.Fprintln(os.Stderr, "fugue-app:", err)
+	}
 	go func() {
 		// app.Main must own the main thread; the window runs beside it and
 		// ends the process with its own outcome.
