@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -49,6 +50,59 @@ func TestProtoBreakingIsSkippedOnlyWhenBaseHasNoProto(t *testing.T) {
 	out, err := execute(t, protoArgs("proto-fresh", "-base", "origin/does-not-exist")...)
 	if err != nil || !strings.Contains(out, "breaking check skipped") {
 		t.Fatalf("out = %q, err = %v", out, err)
+	}
+}
+
+// A field main gained after the PR branched is not a deletion by the PR: the
+// breaking check compares with the merge-base, not with the base's tip.
+func TestProtoBreakingComparesWithTheForkPoint(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	repo := t.TempDir()
+	git := func(args ...string) {
+		t.Helper()
+		full := append([]string{"-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false"}, args...)
+		if out, err := capture(ctx, repo, "git", full...); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	put := func(fixture string) {
+		t.Helper()
+		if err := os.CopyFS(filepath.Join(repo, "proto"), os.DirFS(filepath.Join("testdata", fixture, "proto"))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	git("init", "-q", "-b", "feature")
+	put("proto-breaking-after")
+	git("add", ".")
+	git("commit", "-q", "-m", "fork point")
+	if err := os.RemoveAll(filepath.Join(repo, "proto")); err != nil {
+		t.Fatal(err)
+	}
+	git("checkout", "-q", "-b", "main")
+	put("proto-breaking-before")
+	git("add", ".")
+	git("commit", "-q", "-m", "main adds a field")
+	git("update-ref", "refs/remotes/origin/main", "main")
+	git("checkout", "-q", "feature")
+	buf, err := toolPath(ctx, "buf")
+	if err != nil {
+		t.Fatal(err)
+	}
+	g := &protoGate{root: repo, protoDir: filepath.Join(repo, "proto"), base: "origin/main", buf: buf}
+	if err := g.breaking(ctx, io.Discard); err != nil {
+		t.Fatalf("a field added on main after the fork point counted against the branch: %v", err)
+	}
+	git("checkout", "-q", "main")
+	git("checkout", "-q", "-b", "drops-the-field", "HEAD")
+	if err := os.RemoveAll(filepath.Join(repo, "proto")); err != nil {
+		t.Fatal(err)
+	}
+	put("proto-breaking-after")
+	git("add", "-A")
+	git("commit", "-q", "-m", "branch deletes the field")
+	if err := g.breaking(ctx, io.Discard); !errors.Is(err, ErrProto) || !strings.Contains(err.Error(), "was deleted") {
+		t.Fatalf("a field the branch itself deleted: err = %v, want a breaking failure", err)
 	}
 }
 
