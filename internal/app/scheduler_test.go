@@ -166,8 +166,10 @@ func testPerAccountAndMachineCap(t *testing.T) {
 			t.Fatalf("start %s: %v", id, err)
 		}
 	}
-	if err := m.Start(t.Context(), &vendorstore.Session{ID: "claude-6", Vendor: VendorClaude, AccountID: vendorDefaultAccount, Role: testActorRole}, &vendor.StartSpec{SessionID: "claude-6"}); !errors.Is(err, ErrVendorSessionCapacity) {
-		t.Fatalf("7th claude start err = %v, want ErrVendorSessionCapacity", err)
+	err := m.Start(t.Context(), &vendorstore.Session{ID: "claude-6", Vendor: VendorClaude, AccountID: vendorDefaultAccount, Role: testActorRole}, &vendor.StartSpec{SessionID: "claude-6"})
+	var capErr *SessionCapacityError
+	if !errors.Is(err, ErrVendorSessionCapacity) || !errors.As(err, &capErr) || *capErr != (SessionCapacityError{Running: 6, Limit: 6, Scope: CapacityScopeAccount}) {
+		t.Fatalf("7th claude start err = %v, want the account tier's 6 of 6", err)
 	}
 	for i := range 2 {
 		id := fmt.Sprintf("codex-%d", i)

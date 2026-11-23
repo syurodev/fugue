@@ -37,8 +37,15 @@ type ErrorDetail struct {
 	// revision the stored document carries now, so the caller can retry its CAS
 	// against it (host-api §5.2).
 	CurrentRevision uint64 `protobuf:"varint,4,opt,name=current_revision,json=currentRevision,proto3" json:"current_revision,omitempty"`
-	unknownFields   protoimpl.UnknownFields
-	sizeCache       protoimpl.SizeCache
+	// running_sessions, session_limit and session_limit_scope are present when
+	// code is vendor.capacity: the sessions counted against the tier that
+	// refused the start, that tier's cap, and the tier ("machine" or
+	// "account"). Plain numbers and a fixed word; no ids, paths or accounts.
+	RunningSessions   int64  `protobuf:"varint,5,opt,name=running_sessions,json=runningSessions,proto3" json:"running_sessions,omitempty"`
+	SessionLimit      int64  `protobuf:"varint,6,opt,name=session_limit,json=sessionLimit,proto3" json:"session_limit,omitempty"`
+	SessionLimitScope string `protobuf:"bytes,7,opt,name=session_limit_scope,json=sessionLimitScope,proto3" json:"session_limit_scope,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
 }
 
 func (x *ErrorDetail) Reset() {
@@ -99,16 +106,40 @@ func (x *ErrorDetail) GetCurrentRevision() uint64 {
 	return 0
 }
 
+func (x *ErrorDetail) GetRunningSessions() int64 {
+	if x != nil {
+		return x.RunningSessions
+	}
+	return 0
+}
+
+func (x *ErrorDetail) GetSessionLimit() int64 {
+	if x != nil {
+		return x.SessionLimit
+	}
+	return 0
+}
+
+func (x *ErrorDetail) GetSessionLimitScope() string {
+	if x != nil {
+		return x.SessionLimitScope
+	}
+	return ""
+}
+
 var File_fugue_host_v1_error_detail_proto protoreflect.FileDescriptor
 
 const file_fugue_host_v1_error_detail_proto_rawDesc = "" +
 	"\n" +
-	" fugue/host/v1/error_detail.proto\x12\rfugue.host.v1\"\xb2\x01\n" +
+	" fugue/host/v1/error_detail.proto\x12\rfugue.host.v1\"\xb2\x02\n" +
 	"\vErrorDetail\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\tR\x04code\x124\n" +
 	"\x16supported_api_versions\x18\x02 \x03(\tR\x14supportedApiVersions\x12.\n" +
 	"\x13retry_after_seconds\x18\x03 \x01(\x03R\x11retryAfterSeconds\x12)\n" +
-	"\x10current_revision\x18\x04 \x01(\x04R\x0fcurrentRevisionB\xb2\x01\n" +
+	"\x10current_revision\x18\x04 \x01(\x04R\x0fcurrentRevision\x12)\n" +
+	"\x10running_sessions\x18\x05 \x01(\x03R\x0frunningSessions\x12#\n" +
+	"\rsession_limit\x18\x06 \x01(\x03R\fsessionLimit\x12.\n" +
+	"\x13session_limit_scope\x18\a \x01(\tR\x11sessionLimitScopeB\xb2\x01\n" +
 	"\x11com.fugue.host.v1B\x10ErrorDetailProtoP\x01Z5github.com/syurodev/fugue/pkg/pb/fugue/host/v1;hostv1\xa2\x02\x03FHX\xaa\x02\rFugue.Host.V1\xca\x02\rFugue\\Host\\V1\xe2\x02\x19Fugue\\Host\\V1\\GPBMetadata\xea\x02\x0fFugue::Host::V1b\x06proto3"
 
 var (
