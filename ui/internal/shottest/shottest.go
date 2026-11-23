@@ -14,9 +14,16 @@ import (
 
 // The golden PNGs are Linux references rendered through Mesa's software GL
 // (llvmpipe), the renderer of the ubuntu CI job and of a developer's Xvfb. A
-// second run on the same machine is byte-identical, so on Linux the only
-// slack needed is a guard against a Mesa or font-stack bump moving an
-// antialiased edge by a few levels.
+// second run on the same machine is byte-identical, and the first CI run
+// matched a local render to within one pixel (0.1119% against 0.1117% over
+// the threshold on secrets-store-dark-ui100) once both ran in the same time
+// zone: the only difference between a developer machine and the runner was
+// the local-time digits ("Updated 14:00" against "21:00"), not the
+// rasterizer. appwin's TestMain therefore pins time.Local to UTC, and on
+// Linux the slack only guards a Mesa or font-stack bump moving an antialiased
+// edge by a few levels. A 1 dp spacing token change moves the smallest scene
+// (multiwin-secondary) by 0.11% and the vault shots by 0.25% to 0.39%, all
+// above the budget, so the share is not loosened.
 //
 // Other platforms rasterize through their own GL driver (Metal on macOS),
 // which changes antialiasing on glyph and rounded-corner edges but not

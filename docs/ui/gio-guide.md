@@ -272,6 +272,12 @@ golden of another size, or too many differing pixels fails the test.
   is small enough that one changed line of text (about 0.1% of a shot) or a
   1 dp spacing token change (0.25% to 5%) fails. Both are named constants
   in `shottest.go` with their justification.
+- **Time zone.** Screens format some times in the viewer's local zone, and the
+  goldens capture those digits. appwin's `TestMain` sets `time.Local` to UTC so
+  a render does not depend on the machine's `TZ`; before that, goldens made in
+  UTC+7 failed secrets-store-dark-ui100 on the UTC CI runner by 0.1119%, which
+  a local render under `TZ=UTC` reproduced to within one pixel (0.1117%).
+  Shots pass under `TZ=UTC`, `Asia/Ho_Chi_Minh` and `America/Los_Angeles`.
 - **Cross-OS policy.** The goldens are Linux references (Mesa software GL,
   the ubuntu CI job). Other platforms run the same comparison with a looser
   budget (40/255 per channel, 1% of pixels) because their GL driver
