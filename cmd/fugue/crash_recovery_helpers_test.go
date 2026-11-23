@@ -126,6 +126,16 @@ func parseMCPBridgeArgs(args []string) ([]string, bool) {
 }
 
 func callCrashProposeViaMCPBridge(args []string) {
+	callCrashToolViaMCPBridge(args, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fugue_team_propose","arguments":{"title":"Crash proposal","brief":"Test pending card","tasks":[{"id":"t1","team_role":"lead","role":"lead-dev","goal":"Coordinate","deliverable":"report","write_scope":[]},{"id":"t2","parent_task_id":"t1","team_role":"member","role":"worker-dev","goal":"Implement","deliverable":"diff","write_scope":["README.md"]}]}}}`)
+}
+
+// callCrashDoneViaMCPBridge reports the calling member task as succeeded,
+// which commits its worktree before the report is recorded.
+func callCrashDoneViaMCPBridge(args []string) {
+	callCrashToolViaMCPBridge(args, `{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fugue_task_done","arguments":{"summary":"crash report","status":"succeeded"}}}`)
+}
+
+func callCrashToolViaMCPBridge(args []string, toolCall string) {
 	bridgeArgs, ok := parseMCPBridgeArgs(args)
 	if !ok {
 		return
@@ -137,7 +147,7 @@ func callCrashProposeViaMCPBridge(args []string) {
 	reqs := strings.Join([]string{
 		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"fake-claude","version":"1.0"}}}`,
 		`{"jsonrpc":"2.0","method":"notifications/initialized"}`,
-		`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fugue_team_propose","arguments":{"title":"Crash proposal","brief":"Test pending card","tasks":[{"id":"t1","team_role":"lead","role":"lead-dev","goal":"Coordinate","deliverable":"report","write_scope":[]},{"id":"t2","parent_task_id":"t1","team_role":"member","role":"worker-dev","goal":"Implement","deliverable":"diff","write_scope":["README.md"]}]}}}`,
+		toolCall,
 	}, "\n") + "\n"
 
 	pr, pw := io.Pipe()

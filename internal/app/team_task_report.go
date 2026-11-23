@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/vendorstore"
@@ -152,6 +153,12 @@ func (s *teamTaskService) recordTaskSucceededReport(ctx context.Context, c *call
 	commitSHA, err := s.maybeCommitWorktree(ctx, c)
 	if err != nil {
 		return "", err
+	}
+	// The task-branch commit is an external effect with no event yet: a host
+	// death here leaves its outcome unknown to the store, so restart must
+	// reconcile it without committing again.
+	if commitSHA != "" {
+		config.TriggerCrashPoint(s.crashPoint, config.CrashPointTeamTaskCommitted)
 	}
 	schemaValid, schemaErr := s.validateTaskOutput(ctx, c.team.TeamID, c.caller.TaskID, output)
 	payload, err := json.Marshal(taskReportPayload{
