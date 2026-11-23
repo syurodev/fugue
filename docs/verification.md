@@ -51,8 +51,18 @@ exists on `main` (`V-05`).
 | `DA-E04` | `desktop-app §10` | `release` | `pr` | `TestAppReconnectsAndCatchesUpFromSequence` | `Done` |
 | `DA-E05` | `desktop-app §10` | `release` | `pr` | `TestFailureUXMissingVendorCLIProbesAsTypedError`, `TestFailureUXUnsupportedVersionAndLoggedOutProbeOverRealHost`, `TestFailureUXDetachedSessionResumesAndClosesOverRealHost`, `TestFailureUXVaultLockSuspendsAndResumesSessionOverRealHost` | `Done` |
 | `DA-E06` | `desktop-app §10` | `release` | `pr` | `TestCoreNeverImportsUI`, `TestAppWritesOnlyThroughHostAPI` | `Done` |
-| `DA-E07` | `desktop-app §10` | `release` | `pr` | Team proposal edit and 12-agent team table thresholds (F11.7) | `Not started` |
+| `DA-E07` | `desktop-app §10` | `release` | `pr` | `TestProposalCardSubmitsExactEdits`, `TestTeamTreeReusesUnchangedAgentLayouts` | `Done` |
 | `DA-E08` | `desktop-app §10` | `release` | `pr` | `TestHostManagerStartsAbsentHost`, `TestBackgroundKeepsRealHostAliveUntilDisabled`, `TestServeExitsAfterLastLeaseIdleGrace`, `TestConcurrentAppStartsShareOneHost` | `Done` |
 | `A-S01` | `activation §6` | `stable` | `live` | Recovery drill live records (>= 20 kills, >= 5 on macOS) | `Not started` |
 | `A-S02` | `activation §6` | `stable` | `live` | Safety live record (0 SM violations, 0 double-dispatch, 0 unexplained `Interrupted`) | `Not started` |
 | `A-S03` | `activation §6` | `stable` | `live` | Prompt-to-vendor-stdin latency live records (p50 <= 100 ms, p95 <= 300 ms) | `Not started` |
+
+
+## F11.7b team UI evidence
+
+- DA-E07 performance: `TestTeamTreeLayoutBudget` (manual run with the `perf` build tag). The
+  test measures the p95 layout time for a 12-agent tree during continuous updates.
+- DA-E11 Chat/Team switch: `TestTeamSwitchPreservesChatAndComposer`.
+- DA-E13 Channel: `TestTeamChannelThreadsRoutingAndInbox`,
+  `TestTeamChannelRestoresUnreadPositionFromLayout`, `TestWorkerPassesThreadAndExplicitTargetToHost`,
+  and `TestUserPostRoutesByMentionAndThread`.

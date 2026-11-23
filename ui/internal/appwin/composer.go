@@ -198,7 +198,7 @@ func (c *composer) measure(env *kit.Env, gtx *layout.Context, sc *screens, targe
 // lays out.
 func (c *composer) actionMeasure(env *kit.Env, gtx *layout.Context, st *composerState, sess session.Session) int {
 	kind, actionable := c.action(sess)
-	sendLabel := "Send"
+	sendLabel := sendLabelText
 	if kind == session.PostSteer {
 		sendLabel = "Steer"
 	}
@@ -414,7 +414,7 @@ func (c *composer) submit(sc *screens, st *composerState, sess session.Session, 
 // detached session (F10.5e).
 func (c *composer) layoutActions(env *kit.Env, gtx *layout.Context, sc *screens, st *composerState, sess session.Session, disabled bool) layout.Dimensions {
 	kind, actionable := c.action(sess)
-	sendLabel := "Send"
+	sendLabel := sendLabelText
 	if kind == session.PostSteer {
 		sendLabel = "Steer"
 	}

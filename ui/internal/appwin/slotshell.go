@@ -202,7 +202,7 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool
 		hint string
 	}{
 		{railChat, kit.IconMessageSquare, "Chat"},
-		{railTeam, kit.IconUsers, "Team"},
+		{railTeam, kit.IconUsers, teamLabel},
 		{railModules, kit.IconWrench, "Modules"},
 	}
 	y := gtx.Dp(theme.SpaceSM)

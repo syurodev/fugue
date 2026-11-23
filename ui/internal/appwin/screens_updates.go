@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/syurodev/fugue/pkg/client"
+
 	"github.com/syurodev/fugue/ui/internal/accounts"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/inbox"
@@ -43,8 +45,7 @@ func (s *screens) update(updates []hostconn.Update, results []session.Result, po
 
 // applyUpdate routes one topic delivery or connection-state change.
 func (s *screens) applyUpdate(u hostconn.Update) {
-	if u.State == hostconn.StateConnected {
-		s.reconnected()
+	if s.applyConnectionUpdate(u.State) {
 		return
 	}
 	switch u.Topic {
@@ -68,7 +69,24 @@ func (s *screens) applyUpdate(u hostconn.Update) {
 	case topicSecrets:
 		s.applySecretsDelivery(u)
 	default:
+		if strings.HasPrefix(u.Topic, client.TopicTeamChannel) {
+			s.applyTeamTopic(u)
+			return
+		}
 		s.applyTranscriptUpdate(u)
+	}
+}
+
+func (s *screens) applyConnectionUpdate(state hostconn.State) bool {
+	switch state {
+	case hostconn.StateConnected:
+		s.reconnected()
+		return true
+	case hostconn.StateDisconnected, hostconn.StateIncompatible, hostconn.StateConnecting:
+		s.clearTeamPayloads()
+		return true
+	default:
+		return false
 	}
 }
 
@@ -103,6 +121,7 @@ func (s *screens) applyVendorSessionsDelivery(u hostconn.Update) {
 // newest page and commands. A request dropped while the host was down
 // re-arms here.
 func (s *screens) reconnected() {
+	s.resetTeamPayloads()
 	s.pendingItem = map[string]bool{}
 	s.wsDetailReq = map[string]uint64{}
 	s.fetcher.RequestSessions()

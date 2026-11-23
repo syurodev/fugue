@@ -28,14 +28,15 @@ func logTVErr(err error) {
 // Callbacks forwards transcript interactions to the enclosing window without
 // coupling transcriptview to host writes or OS openers.
 type Callbacks struct {
-	OnOpenLink   func(url string)
-	OnOpenFile   func(ref mdview.FileRef)
-	OnFileChip   func(ref mdview.FileRef)
-	OnIDChip     func(id string)
-	OnFullOutput func(itemID string)
-	OnViewDiff   func(itemID string)
-	OnOpenInbox  func()
-	GitActions   mdview.GitRefRegistry
+	OnOpenLink     func(url string)
+	OnOpenFile     func(ref mdview.FileRef)
+	OnFileChip     func(ref mdview.FileRef)
+	OnIDChip       func(id string)
+	OnFullOutput   func(itemID string)
+	OnViewDiff     func(itemID string)
+	OnOpenInbox    func()
+	OnOpenProposal func(teamID string)
+	GitActions     mdview.GitRefRegistry
 }
 
 // State is one session's view state (F10.13, F10.4c, F10.4d): VirtualList owns

@@ -87,8 +87,8 @@ func transcriptItemsScene() ([]client.TranscriptItem, []string) {
 	exitZero := int32(0)
 	items := []client.TranscriptItem{
 		{
-			ItemID: "i-u1", Kind: "user_message", Sequence: 1, Revision: 1,
-			TurnOrigin: "lead", Metadata: client.TranscriptMetadata{Origin: "lead"},
+			ItemID: "i-u1", Kind: shotUserMessage, Sequence: 1, Revision: 1,
+			TurnOrigin: proposalRoleLead, Metadata: client.TranscriptMetadata{Origin: proposalRoleLead},
 			View: client.TranscriptView{Text: "Update ui/internal/mdview/codeblock.go:124, check commit 24cd741, and review #185."},
 		},
 		{
@@ -133,7 +133,7 @@ func transcriptItemsScene() ([]client.TranscriptItem, []string) {
 		},
 		{
 			ItemID: "i-q1", Kind: "tool_call", Sequence: 19, Revision: 1,
-			Metadata: client.TranscriptMetadata{Tool: "ask_user", RequestKind: "question", Status: "waiting"},
+			Metadata: client.TranscriptMetadata{Tool: "ask_user", RequestKind: client.InteractionKindQuestion, Status: "waiting"},
 			View:     client.TranscriptView{Title: "Keep PR #185 in one piece?"},
 		},
 		{

@@ -353,6 +353,9 @@ func (s *screens) applyVaultResults(results []vault.Result) {
 }
 
 func (s *screens) syncVaultViews(wasLocked bool) {
+	if wasLocked != s.vault.Locked() {
+		s.resetTeamPayloads()
+	}
 	if s.vault.Locked() {
 		s.secretsView.clearSecretInputs()
 		s.inboxView.clearSecretInputs()

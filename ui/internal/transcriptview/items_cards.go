@@ -165,7 +165,7 @@ func layoutPlanStepRow(env *kit.Env, gtx *layout.Context, status, label string) 
 	)
 }
 
-func layoutCompactCard(env *kit.Env, gtx *layout.Context, st *State, c *cardState, item *session.Item) layout.Dimensions {
+func layoutCompactCard(env *kit.Env, gtx *layout.Context, st *State, c *cardState, item *session.Item, cb Callbacks) layout.Dimensions {
 	clicked := c.click.Clicked(*gtx)
 	if clicked {
 		st.list.ToggleExpanded(item.ItemID)
@@ -197,6 +197,19 @@ func layoutCompactCard(env *kit.Env, gtx *layout.Context, st *State, c *cardStat
 						return kit.Paragraph(env, &l, theme.TypeBody(), col, bodyText)
 					})
 				})
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if item.Kind != kindTeamProposal || item.Metadata.Decision != "pending" || cb.OnOpenProposal == nil {
+					return layout.Dimensions{}
+				}
+				local := gtx
+				props := kit.ButtonProps{Text: "Open in inbox", Variant: kit.Ghost, Size: kit.SizeSM}
+				clicked, err := c.inboxBtn.Layout(env, &local, props)
+				logTVErr(err)
+				if clicked {
+					cb.OnOpenProposal(item.Metadata.ProposalID)
+				}
+				return c.inboxBtn.Measure(env, &local, props)
 			}),
 		)
 	})

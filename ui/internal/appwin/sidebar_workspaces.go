@@ -240,7 +240,7 @@ func (s *screens) manageItems(ws workspace.Summary) []kit.MenuItem {
 	det, hasDetail := s.workspaces.DetailFor(ws.ID)
 	ready := hasDetail && det.ConfigHash != ""
 	if ws.PendingPolicyConfirmation {
-		items = append(items, kit.MenuItem{ID: "review", Label: "Review policy change…", Disabled: !ready})
+		items = append(items, kit.MenuItem{ID: teamStateReview, Label: "Review policy change…", Disabled: !ready})
 	}
 	items = append(items, kit.MenuItem{ID: "add-root", Label: "Add root…", Disabled: !ready})
 	if ready && len(det.Roots) > 0 {
@@ -265,7 +265,7 @@ func (s *screens) chooseManage(ws workspace.Summary, chosen string) {
 	det, hasDetail := s.workspaces.DetailFor(ws.ID)
 	ready := hasDetail && det.ConfigHash != ""
 	switch {
-	case chosen == "review":
+	case chosen == teamStateReview:
 		if !ready {
 			s.fail(errDialogNeedsDetail)
 			return
@@ -404,10 +404,7 @@ func (s *screens) layoutSidebarPanel(gtx *layout.Context, env *kit.Env) layout.D
 			}),
 		)
 	case railTeam:
-		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			return s.layoutSidebarSoon(env, &local, "Teams", "The team list and boards open here with the team screens.")
-		}))
+		return s.layoutTeamsSidebar(gtx, env)
 	case railModules:
 		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx

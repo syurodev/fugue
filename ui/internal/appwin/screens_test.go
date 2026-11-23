@@ -62,7 +62,7 @@ func itemsFrom(start, count int) []client.TranscriptItem {
 	for i := range items {
 		seq := start + i
 		items[i] = client.TranscriptItem{
-			ItemID: fmt.Sprintf("i%d", seq), Kind: "assistant_message",
+			ItemID: fmt.Sprintf("i%d", seq), Kind: shotAssistantMessage,
 			Sequence: uint64(max(seq, 0)), Revision: 1,
 			View: client.TranscriptView{Text: "paragraph"},
 		}

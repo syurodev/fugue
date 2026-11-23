@@ -340,6 +340,7 @@ func newWindowScreens(m *hostconn.Manager, w *app.Window, workers appWorkers, co
 	sc.secretsWorker = workers.secretsW
 	sc.viewerWorker = workers.viewerW
 	sc.layoutWorker = workers.layoutW
+	sc.teamWorker = workers.teamW
 	sc.grid.applyGeometry = func(widthDp, heightDp int) {
 		if widthDp > 0 && heightDp > 0 {
 			w.Option(app.Size(unit.Dp(widthDp), unit.Dp(heightDp)))

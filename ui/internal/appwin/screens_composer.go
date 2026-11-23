@@ -150,9 +150,9 @@ func (s *screens) applyPostResult(p session.PostResult) {
 
 // connected reports the manager's connection state and whether the host is
 // reachable, which disables the composer while it is not.
-func (s *screens) connected() (hostconn.State, bool) {
+func (s *screens) connected() bool {
 	state, _ := s.m.State()
-	return state, state == hostconn.StateConnected
+	return state == hostconn.StateConnected
 }
 
 // commandsFor returns the session's command model, empty until its first
@@ -274,9 +274,10 @@ func (s *screens) transcriptCallbacks() transcriptview.Callbacks {
 		OnOpenInbox: func() {
 			s.grid.openCompanion(SlotRef{Kind: KindInbox})
 		},
-		OnOpenFile: s.openFileRef,
-		OnViewDiff: s.openDiffViewer,
-		OnIDChip:   s.jumpToItem,
+		OnOpenProposal: s.openProposalInInbox,
+		OnOpenFile:     s.openFileRef,
+		OnViewDiff:     s.openDiffViewer,
+		OnIDChip:       s.jumpToItem,
 	}
 }
 
