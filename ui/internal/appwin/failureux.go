@@ -2,6 +2,7 @@ package appwin
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"gioui.org/layout"
@@ -45,6 +46,16 @@ type failureUX struct {
 	version   *kit.BannerState
 	login     *kit.BannerState
 	detached  *kit.BannerState
+	// store, incompat and unproved are the refused-start, version-mismatch
+	// and unproved-stop banners (activation §3).
+	store     *kit.BannerState
+	incompat  *kit.BannerState
+	unproved  *kit.BannerState
+	appParams client.Params
+	// stopUnproved says the open session's transcript reported a stop the
+	// host could not prove; layout fills it from the transcript before the
+	// specs are derived, as the sidebar's own reads carry no proof.
+	stopUnproved bool
 	// carry is what the last probe read reported: the failure it ended with,
 	// or the answers worth a banner (an untested version, a signed-out CLI).
 	// A read replaces the carry wholesale — the probe is the authority on the
@@ -88,6 +99,9 @@ func newFailureUX() *failureUX {
 		version:   kit.NewBannerState(),
 		login:     kit.NewBannerState(),
 		detached:  kit.NewBannerState(),
+		store:     kit.NewBannerState(),
+		incompat:  kit.NewBannerState(),
+		unproved:  kit.NewBannerState(),
 		closeDlg:  newCloseConfirmDialog(),
 	}
 }
@@ -133,6 +147,9 @@ func (f *failureUX) applyProbe(probes []client.VendorProbe, err error) {
 // applyEvents and applyProbe.
 func (f *failureUX) specs(state hostconn.State, reason, dataDir string, hasOpen bool, openSess session.Session) []bannerSpec {
 	specs := make([]bannerSpec, 0, 4)
+	if spec, ok := f.startRefusalSpec(state, reason, dataDir); ok {
+		return append(specs, spec)
+	}
 	if state == hostconn.StateDisconnected && f.refusal != nil {
 		specs = append(specs, f.refusalSpec())
 	} else if state == hostconn.StateDisconnected {
@@ -177,6 +194,14 @@ func (f *failureUX) specs(state hostconn.State, reason, dataDir string, hasOpen 
 			visible:     !f.loginDismiss,
 		})
 	}
+	return append(specs, f.sessionSpecs(hasOpen, openSess)...)
+}
+
+// sessionSpecs derives the banners of the open session's own state: a
+// detached session offers its resume, and a closed session whose stop was not
+// proved tells the user to restart the host (activation §3).
+func (f *failureUX) sessionSpecs(hasOpen bool, openSess session.Session) []bannerSpec {
+	var specs []bannerSpec
 	if hasOpen && openSess.State == stateDetached {
 		specs = append(specs, bannerSpec{
 			st: f.detached, kind: kit.BannerWarning,
@@ -184,6 +209,14 @@ func (f *failureUX) specs(state hostconn.State, reason, dataDir string, hasOpen 
 			message:     "The host restarted while this session ran. Resume continues it with the vendor's own resume; Close in the composer ends it for good.",
 			actionLabel: "Resume session",
 			visible:     true,
+		})
+	}
+	if hasOpen && openSess.State == stateClosed && f.stopUnproved {
+		specs = append(specs, bannerSpec{
+			st: f.unproved, kind: kit.BannerWarning,
+			title:   "Restart the Fugue host to close this run",
+			message: "Fugue could not prove that the vendor process stopped. Restarting the host does not prove that its external effects have stopped either.",
+			visible: true,
 		})
 	}
 	return specs
@@ -202,12 +235,48 @@ func (f *failureUX) refusalSpec() bannerSpec {
 	}
 }
 
+// startRefusalSpec derives the banner of a host that never came up or speaks
+// no version in common: a data directory another process holds, a schema this
+// Fugue cannot serve, and a Host API version mismatch (activation §3). Each
+// names the data directory or both versions and the action that clears it;
+// ok is false for every other connection state.
+func (f *failureUX) startRefusalSpec(state hostconn.State, reason, dataDir string) (bannerSpec, bool) {
+	identity := fmt.Sprintf("This app is Fugue %s and speaks Host API %s.", f.appParams.Version, strings.Join(f.appParams.APIVersions, ", "))
+	switch {
+	case state == hostconn.StateDisconnected && reason == hostconn.ReasonDataDirInUse:
+		return bannerSpec{
+			st: f.store, kind: kit.BannerDanger,
+			title:   "Execution store unavailable",
+			message: "Another process holds the Fugue data directory " + dataDir + ". Close that process, then open Fugue again.",
+			visible: true,
+		}, true
+	case state == hostconn.StateDisconnected && reason == hostconn.ReasonStoreUnsupported:
+		return bannerSpec{
+			st: f.store, kind: kit.BannerDanger,
+			title:   "Execution store unavailable",
+			message: "The data directory " + dataDir + " was written by a newer Fugue than this one, so the host cannot open it and left it untouched. " + identity + " Upgrade Fugue, then open it again.",
+			visible: true,
+		}, true
+	case state == hostconn.StateIncompatible:
+		return bannerSpec{
+			st: f.incompat, kind: kit.BannerDanger,
+			title:   "Fugue app and host versions do not match",
+			message: reason + ". " + identity + " Upgrade Fugue (the host or the app) so both speak a common version.",
+			visible: true,
+		}, true
+	}
+	return bannerSpec{}, false
+}
+
 // layout draws the visible banners stacked at the top of the window and folds
 // their events in, returning the stack's dimensions.
 func (f *failureUX) layout(env *kit.Env, gtx *layout.Context, sc *screens) layout.Dimensions {
 	state, reason := sc.m.State()
 	sess, hasOpen := sc.sidebar.Lookup(sc.open)
 	f.refusal = sc.m.Refusal()
+	t := sc.transcripts[sc.open]
+	f.stopUnproved = hasOpen && t != nil && t.StopUnproved()
+	f.appParams = sc.m.AppParams()
 	specs := f.specs(state, reason, sc.m.DataDir(), hasOpen, sess)
 	if len(specs) == 0 {
 		return layout.Dimensions{}

@@ -10,7 +10,10 @@ import (
 // ErrUnsafeExecutable means the host executable cannot be authenticated.
 var ErrUnsafeExecutable = errors.New("unsafe host executable")
 
-type launchedChildren struct{ host, log <-chan error }
+type launchedChildren struct {
+	host, log <-chan error
+	exit      *hostExit
+}
 
 func validateExecutable(_ string) error                { return ErrUnsafeExecutable }
 func validateExecutableFor(_ string, _, _ int64) error { return ErrUnsafeExecutable }

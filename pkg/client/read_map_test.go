@@ -221,6 +221,29 @@ func TestDecodeTranscriptDeltaCarriesTheBaseAndView(t *testing.T) {
 	}
 }
 
+// TestDecodeTranscriptStateCarriesTheStopProof pins the state decoder: the
+// turn, outcome and the stop proof a close recorded arrive whole.
+func TestDecodeTranscriptStateCarriesTheStopProof(t *testing.T) {
+	t.Parallel()
+	payload, err := proto.Marshal(&transcriptv1.TranscriptStateEvent{
+		TurnId: testTurn, State: "stopped", Outcome: "interrupted", StopProof: "unproved", TurnOrigin: testOrigin,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := client.DecodeTranscriptState(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := client.TranscriptState{TurnID: testTurn, State: "stopped", Outcome: "interrupted", StopProof: "unproved", TurnOrigin: testOrigin}
+	if got != want {
+		t.Fatalf("state = %+v, want %+v", got, want)
+	}
+	if _, err := client.DecodeTranscriptState([]byte("not a transcript message")); err == nil {
+		t.Fatal("a payload the host did not write passed the state decoder")
+	}
+}
+
 // TestDecodeTranscriptTopicRejectsForeignPayloads pins that a payload the
 // host did not write fails every decoder.
 func TestDecodeTranscriptTopicRejectsForeignPayloads(t *testing.T) {

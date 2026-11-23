@@ -19,6 +19,10 @@ const (
 	EventTranscriptDelta = "transcript.delta"
 )
 
+// stopProved is the stop proof a close reports when the host verified the
+// vendor process tree empty; any other value is an unproved stop.
+const stopProved = "proved"
+
 // PageLimit is the newest page's item count (transcript §6).
 const PageLimit = 200
 
@@ -52,6 +56,10 @@ type Transcript struct {
 
 	sessionState  string
 	contentLocked bool
+	// stopUnproved is set when a state event reported a stop proof other
+	// than proved; the durable snapshot carries no proof, so a transcript
+	// opened after the close does not know.
+	stopUnproved bool
 	// lastSeq is the newest durable topic sequence applied, so a catch-up can
 	// be pinned as gapless.
 	lastSeq    uint64
@@ -73,6 +81,11 @@ func (t *Transcript) Session() string { return t.session }
 
 // SessionState is the session's state as the durable topic last reported it.
 func (t *Transcript) SessionState() string { return t.sessionState }
+
+// StopUnproved reports whether the session ended with a stop the host could
+// not prove (activation §3: the hung-worker row): the vendor process may
+// still run, and only a host restart closes the run.
+func (t *Transcript) StopUnproved() bool { return t.stopUnproved }
 
 // ContentLocked reports whether the vault is locked and the views carry
 // metadata only.
@@ -172,7 +185,15 @@ func (t *Transcript) ApplyEvent(eventType string, sequence uint64, payload []byt
 		}
 	case EventTranscriptState:
 		// Turn and outcome states are rendered by the composer and the
-		// status row (F10.4b); the read side records the sequence only.
+		// status row (F10.4b); the read side records the sequence and the
+		// stop proof a close reported.
+		state, err := client.DecodeTranscriptState(payload)
+		if err != nil {
+			return fmt.Errorf("apply the transcript state event: %w", err)
+		}
+		if state.StopProof != "" {
+			t.stopUnproved = state.StopProof != stopProved
+		}
 	default:
 		return nil
 	}

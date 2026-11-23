@@ -5,8 +5,10 @@ import (
 	"testing"
 
 	"go.uber.org/goleak"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/syurodev/fugue/pkg/client"
+	transcriptv1 "github.com/syurodev/fugue/pkg/pb/fugue/transcript/v1"
 )
 
 func TestMain(m *testing.M) {
@@ -258,4 +260,34 @@ func fullPage(t *testing.T, want int) []client.TranscriptItem {
 		page[i] = transcriptFixture(t, fmt.Sprintf("p%d", seq), uint64(seq), 1, "older")
 	}
 	return page
+}
+
+// TestTranscriptRecordsAnUnprovedStop pins the hung-worker read side: a state
+// event carrying a stop proof other than proved marks the transcript, a
+// proved one clears it, and an event without a proof leaves it as it was.
+func TestTranscriptRecordsAnUnprovedStop(t *testing.T) {
+	t.Parallel()
+	m := NewTranscript("s1")
+	state := func(proof string) []byte {
+		payload, err := proto.Marshal(&transcriptv1.TranscriptStateEvent{State: "closed", StopProof: proof})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return payload
+	}
+	steps := []struct {
+		proof string
+		want  bool
+	}{{"", false}, {"unknown", true}, {"", true}, {"proved", false}}
+	for i, step := range steps {
+		if err := m.ApplyEvent(EventTranscriptState, uint64(i+1), state(step.proof)); err != nil {
+			t.Fatal(err)
+		}
+		if m.StopUnproved() != step.want {
+			t.Fatalf("after proof %q StopUnproved = %v, want %v", step.proof, m.StopUnproved(), step.want)
+		}
+	}
+	if err := m.ApplyEvent(EventTranscriptState, 9, []byte{0xff}); err == nil {
+		t.Fatal("a state event the host did not write was accepted")
+	}
 }
