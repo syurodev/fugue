@@ -239,10 +239,11 @@ func (c *multiWindow) generateID() string {
 	// rand.Text carries 130 random bits as unpadded base32; the first 16
 	// decoded bytes are the UUID's random payload.
 	raw, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(rand.Text())
-	var b [16]byte
-	if err == nil {
-		copy(b[:], raw)
+	if err != nil || len(raw) < 16 {
+		panic("appwin: crypto randomness unavailable or unexpected rand.Text encoding")
 	}
+	var b [16]byte
+	copy(b[:], raw)
 	b[6] = (b[6] & 0x0f) | 0x40
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
