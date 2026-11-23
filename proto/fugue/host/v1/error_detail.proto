@@ -17,4 +17,11 @@ message ErrorDetail {
   // revision the stored document carries now, so the caller can retry its CAS
   // against it (host-api §5.2).
   uint64 current_revision = 4;
+  // running_sessions, session_limit and session_limit_scope are present when
+  // code is vendor.capacity: the sessions counted against the tier that
+  // refused the start, that tier's cap, and the tier ("machine" or
+  // "account"). Plain numbers and a fixed word; no ids, paths or accounts.
+  int64 running_sessions = 5;
+  int64 session_limit = 6;
+  string session_limit_scope = 7;
 }

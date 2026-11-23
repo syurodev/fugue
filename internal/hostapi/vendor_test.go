@@ -3,6 +3,7 @@ package hostapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -519,6 +520,24 @@ func TestVendorCapacityRejectsThirdStart(t *testing.T) {
 	v.start(t, "cap-2", wsID)
 	_, err := v.vendors.StartSession(t.Context(), connect.NewRequest(&vendorsv1.StartSessionRequest{CommandId: "cap-3", Vendor: vendorsv1.Vendor_VENDOR_CLAUDE, WorkspaceId: wsID}))
 	assertConnectCode(t, err, connect.CodeResourceExhausted, errcode.VendorCapacity)
+	// The detail carries the counts the app words its refusal from: plain
+	// numbers and a fixed scope, nothing else.
+	var cerr *connect.Error
+	if !errors.As(err, &cerr) {
+		t.Fatalf("capacity refusal is %T, want a connect error", err)
+	}
+	val, derr := cerr.Details()[0].Value()
+	if derr != nil {
+		t.Fatal(derr)
+	}
+	detail, ok := val.(*hostv1.ErrorDetail)
+	if !ok {
+		t.Fatalf("detail is %T, want ErrorDetail", val)
+	}
+	if detail.GetRunningSessions() != 2 || detail.GetSessionLimit() != 2 || detail.GetSessionLimitScope() != app.CapacityScopeMachine {
+		t.Fatalf("capacity detail = running %d limit %d scope %q, want 2 of 2 machine",
+			detail.GetRunningSessions(), detail.GetSessionLimit(), detail.GetSessionLimitScope())
+	}
 }
 
 func TestVendorTypedErrorsCarryNoClientValues(t *testing.T) {

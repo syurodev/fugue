@@ -95,6 +95,16 @@ func toConnectError(ctx context.Context, backend app.Backend, err error) error {
 	if errors.As(err, &crErr) {
 		detail.CurrentRevision = crErr.CurrentRevision()
 	}
+	var capErr interface {
+		RunningSessions() int64
+		SessionLimit() int64
+		SessionLimitScope() string
+	}
+	if errors.As(err, &capErr) {
+		detail.RunningSessions = capErr.RunningSessions()
+		detail.SessionLimit = capErr.SessionLimit()
+		detail.SessionLimitScope = capErr.SessionLimitScope()
+	}
 	d, derr := connect.NewErrorDetail(detail)
 	if derr != nil {
 		// Marshalling a plain message cannot fail; if it ever does, the
