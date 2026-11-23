@@ -1,0 +1,13 @@
+# probe-test: ./internal/interaction TestOnlyHeadlessResolvesUnavailableWhileNilResponderWaits
+diff --git a/internal/interaction/owner.go b/internal/interaction/owner.go
+--- a/internal/interaction/owner.go
++++ b/internal/interaction/owner.go
+@@ -489,7 +489,7 @@ func (o *Owner) ExpireExpired() []*Ticket {
+ // creation (interaction §5, I-07). A missing responder leaves the request
+ // pending instead.
+ func (o *Owner) isUnavailableLocked() bool {
+-	return o.headless || o.isVaultLockedLocked()
++	return o.headless || o.responder == nil || o.isVaultLockedLocked()
+ }
+ 
+ func (o *Owner) isVaultLockedLocked() bool {
