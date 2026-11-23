@@ -3,6 +3,7 @@ package appwin
 import (
 	"image"
 	"image/color"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -263,39 +264,41 @@ func TestDiffPanelShowsEveryPolicyKeyWholeAtSlotWidth(t *testing.T) {
 		"policy." + strings.Repeat("k", 120),
 	}
 	for _, scale := range []float32{1, 1.25} {
-		t.Run(scaleName(scale), func(t *testing.T) {
-			t.Parallel()
-			env := slotEnv(t, scale)
-			var runs []image.Rectangle
-			env.RunRecorder = func(r image.Rectangle) { runs = append(runs, r) }
-			var ops op.Ops
-			gtx := slotGtx(env, &ops, new(input.Router), image.Point{})
-			panelW := gtx.Dp(theme.SlotMinWidth) - 4*gtx.Dp(theme.SpaceLG)
-			gtx.Constraints = layout.Constraints{Max: image.Pt(panelW, 1<<20)}
-			inner := panelW - 2*gtx.Dp(theme.SpaceLG)
-			for _, key := range keys {
-				runs = runs[:0]
-				diff := []workspace.DiffEntry{{Key: key, OldValue: "auto", NewValue: "never"}}
-				dims := layoutDiffPanel(env, &gtx, diff)
-				if dims.Size.X != panelW {
-					t.Fatalf("panel is %d px wide, want %d", dims.Size.X, panelW)
-				}
-				one := kit.MeasureLabel(env, &gtx, theme.TypeCodeSmall(), "k")
-				tallest := 0
-				for _, r := range runs {
-					if r.Dx() > inner {
-						t.Fatalf("a run is %d px wide in an inner width of %d", r.Dx(), inner)
-					}
-					tallest = max(tallest, r.Dy())
-				}
-				need := (kit.MeasureLabel(env, &gtx, theme.TypeCodeSmall(), key).X + inner - 1) / inner
-				if lines := (tallest + one.Y/2) / one.Y; lines < need {
-					t.Fatalf("key %q laid out in %d lines, want at least %d", key, lines, need)
-				}
-				if dims.Size.Y < tallest+2*gtx.Dp(theme.SpaceLG) {
-					t.Fatalf("panel height %d does not hold its key (%d)", dims.Size.Y, tallest)
-				}
-			}
-		})
+		for _, key := range keys {
+			t.Run(scaleName(scale)+"/"+strconv.Itoa(len(key)), func(t *testing.T) {
+				t.Parallel()
+				assertKeyShownWhole(t, slotEnv(t, scale), key)
+			})
+		}
+	}
+}
+
+func assertKeyShownWhole(t *testing.T, env *kit.Env, key string) {
+	t.Helper()
+	var runs []image.Rectangle
+	env.RunRecorder = func(r image.Rectangle) { runs = append(runs, r) }
+	var ops op.Ops
+	gtx := slotGtx(env, &ops, new(input.Router), image.Point{})
+	panelW := gtx.Dp(theme.SlotMinWidth) - 4*gtx.Dp(theme.SpaceLG)
+	gtx.Constraints = layout.Constraints{Max: image.Pt(panelW, 1<<20)}
+	inner := panelW - 2*gtx.Dp(theme.SpaceLG)
+	dims := layoutDiffPanel(env, &gtx, []workspace.DiffEntry{{Key: key, OldValue: testApprovalAuto, NewValue: testApprovalFull}})
+	if dims.Size.X != panelW {
+		t.Fatalf("panel is %d px wide, want %d", dims.Size.X, panelW)
+	}
+	one := kit.MeasureLabel(env, &gtx, theme.TypeCodeSmall(), "k")
+	tallest := 0
+	for _, r := range runs {
+		if r.Dx() > inner {
+			t.Fatalf("a run is %d px wide in an inner width of %d", r.Dx(), inner)
+		}
+		tallest = max(tallest, r.Dy())
+	}
+	need := (kit.MeasureLabel(env, &gtx, theme.TypeCodeSmall(), key).X + inner - 1) / inner
+	if lines := (tallest + one.Y/2) / one.Y; lines < need {
+		t.Fatalf("key %q laid out in %d lines, want at least %d", key, lines, need)
+	}
+	if dims.Size.Y < tallest+2*gtx.Dp(theme.SpaceLG) {
+		t.Fatalf("panel height %d does not hold its key (%d)", dims.Size.Y, tallest)
 	}
 }
