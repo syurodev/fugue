@@ -7,10 +7,8 @@ import (
 	"strings"
 
 	"gioui.org/layout"
-	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
-	"gioui.org/unit"
 
 	"github.com/syurodev/fugue/pkg/client"
 
@@ -47,7 +45,7 @@ func (s *screens) layoutTeamChannel(gtx *layout.Context, env *kit.Env, view *cli
 		layout.Rigid(func(g layout.Context) layout.Dimensions {
 			g.Constraints.Max.X = min(g.Constraints.Max.X, g.Dp(theme.SidebarWidth))
 			g.Constraints.Min.X = g.Constraints.Max.X
-			return teamPanel(g, env, env.Th.Chrome().FillSoft, layout.UniformInset(theme.SpaceLG), func(g layout.Context) layout.Dimensions {
+			return teamPanel(g, env, env.Th.Chrome().SurfaceBase, layout.UniformInset(theme.SpaceLG), func(g layout.Context) layout.Dimensions {
 				g.Constraints.Min.Y = g.Constraints.Max.Y
 				return s.layoutChannelThreads(&g, env, p, threads, &data)
 			})
@@ -55,27 +53,6 @@ func (s *screens) layoutTeamChannel(gtx *layout.Context, env *kit.Env, view *cli
 		spacerW(theme.SpaceXL),
 		layout.Flexed(1, func(g layout.Context) layout.Dimensions {
 			return s.layoutChannelConversation(&g, env, view, p, threads, &data)
-		}),
-	)
-}
-
-func (s *screens) layoutChannelThreads(gtx *layout.Context, env *kit.Env, p *teamChannelPane, threads []teamChannelThread, data *teamChannelData) layout.Dimensions {
-	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
-		rigidParagraph(env, theme.TypeHeading(), env.Th.Chrome().Fg, "Threads"),
-		spacerH(theme.SpaceSM),
-		rigidWidget(func(g *layout.Context) layout.Dimensions { return s.layoutChannelFilter(g, env, p) }),
-		spacerH(theme.SpaceMD),
-		rigidWidget(func(g *layout.Context) layout.Dimensions {
-			return s.layoutChannelThreadRow(g, env, p, teamChannelThread{}, data)
-		}),
-		layout.Flexed(1, func(g layout.Context) layout.Dimensions {
-			return p.threadList.Layout(g, len(threads), func(g layout.Context, i int) layout.Dimensions {
-				row := threads[i]
-				if !filterChannelThread(p.filter, row.node.State) {
-					return layout.Dimensions{}
-				}
-				return s.layoutChannelThreadRow(&g, env, p, row, data)
-			})
 		}),
 	)
 }
@@ -88,7 +65,10 @@ func (s *screens) layoutChannelFilter(gtx *layout.Context, env *kit.Env, p *team
 			label = item.Label
 		}
 	}
-	return s.layoutChannelMenu(gtx, env, p.filterButton, p.filterMenu, "Filter · "+label, choices, func(id string) { p.filter = id })
+	return s.layoutChannelMenu(gtx, env, p.filterButton, p.filterMenu, label, choices, func(id string) {
+		p.threadList.Position = layout.Position{}
+		p.filter = id
+	})
 }
 
 func (s *screens) layoutChannelThreadMenu(gtx *layout.Context, env *kit.Env, p *teamChannelPane, threads []teamChannelThread, data *teamChannelData) layout.Dimensions {
@@ -121,7 +101,7 @@ func (s *screens) layoutChannelThreadMenu(gtx *layout.Context, env *kit.Env, p *
 }
 
 func (s *screens) layoutChannelMenu(gtx *layout.Context, env *kit.Env, button *kit.ButtonState, menu *kit.MenuState, text string, items []kit.MenuItem, choose func(string)) layout.Dimensions {
-	props := kit.ButtonProps{Text: text, Size: kit.SizeSM}
+	props := kit.ButtonProps{Text: text, Icon: kit.IconChevronDown, Variant: kit.Bordered, Size: kit.SizeSM}
 	clicked, err := button.Layout(env, gtx, props)
 	s.fail(err)
 	dims := button.Measure(env, gtx, props)
@@ -134,40 +114,6 @@ func (s *screens) layoutChannelMenu(gtx *layout.Context, env *kit.Env, button *k
 		choose(event.Chosen)
 	}
 	return dims
-}
-
-func (s *screens) layoutChannelThreadRow(gtx *layout.Context, env *kit.Env, p *teamChannelPane, row teamChannelThread, data *teamChannelData) layout.Dimensions {
-	state := p.threadRows[row.id]
-	if state == nil {
-		state = kit.NewListRowState()
-		state.Enter()
-		p.threadRows[row.id] = state
-	}
-	props := kit.ListRowProps{Label: channelGeneral, Icon: kit.IconMessageSquare, Selected: row.id == p.thread}
-	if row.node != nil {
-		props.Label = channelRole(row.node)
-		props.StateLabel, props.StateTone = channelThreadStatus(row.node.State)
-	}
-	if unread := data.unread[row.id]; unread > 0 {
-		props.Trailing = strconv.Itoa(unread)
-	}
-	return layout.Inset{Left: theme.SpaceSM * unit.Dp(min(row.depth, 3))}.Layout(*gtx, func(g layout.Context) layout.Dimensions {
-		dims, ev := state.Layout(env, &g, &props)
-		s.fail(ev.Err)
-		if ev.Clicked {
-			p.switchThread(row.id)
-		}
-		if row.node == nil {
-			return dims
-		}
-		g.Constraints.Min.X = 0
-		offset := op.Offset(image.Pt(0, dims.Size.Y)).Push(g.Ops)
-		defer offset.Pop()
-		caption := layout.Inset{Left: theme.ControlSM, Right: theme.SpaceSM, Bottom: theme.SpaceXS}.Layout(g, func(g layout.Context) layout.Dimensions {
-			return kit.EllipsisLabel(env, &g, theme.TypeCaption(), env.Th.Chrome().FgMuted, row.node.Goal)
-		})
-		return layout.Dimensions{Size: image.Pt(dims.Size.X, dims.Size.Y+caption.Size.Y)}
-	})
 }
 
 func (s *screens) layoutChannelConversation(gtx *layout.Context, env *kit.Env, view *client.TeamView, p *teamChannelPane, threads []teamChannelThread, data *teamChannelData) layout.Dimensions {

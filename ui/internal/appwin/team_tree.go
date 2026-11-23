@@ -224,11 +224,9 @@ func paintTeamBranches(gtx *layout.Context, ink color.NRGBA, row teamTreeRow, in
 	}
 	right := indent * row.depth
 	x := right - indent/2
-	mid := height / 2
-	bottom := mid + hairline
+	mid := (height - gtx.Dp(theme.SpaceMD)) / 2
 	if row.sibling {
-		bottom = height
+		paint.FillShape(gtx.Ops, ink, clip.Rect(image.Rect(x, 0, x+hairline, height)).Op())
 	}
-	paint.FillShape(gtx.Ops, ink, clip.Rect(image.Rect(x, 0, x+hairline, bottom)).Op())
-	paint.FillShape(gtx.Ops, ink, clip.Rect(image.Rect(x, mid, right, mid+hairline)).Op())
+	paintTeamElbow(gtx, ink, x, mid, right)
 }

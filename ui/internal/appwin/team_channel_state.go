@@ -29,7 +29,7 @@ type teamChannelPane struct {
 	thread, filter                     string
 	threadList                         layout.List
 	list                               layout.List
-	threadRows                         map[string]*kit.ListRowState
+	threadRows                         map[string]*channelThreadRowState
 	messageRows                        map[int64]*teamMessageRow
 	filterButton, older, threadsButton *kit.ButtonState
 	filterMenu, threadsMenu            *kit.MenuState
@@ -56,7 +56,7 @@ func newTeamChannelPane(lastRead map[string]int64) *teamChannelPane {
 	return &teamChannelPane{
 		threadList:   layout.List{Axis: layout.Vertical},
 		list:         layout.List{Axis: layout.Vertical, ScrollToEnd: true},
-		threadRows:   make(map[string]*kit.ListRowState),
+		threadRows:   make(map[string]*channelThreadRowState),
 		messageRows:  make(map[int64]*teamMessageRow),
 		filterButton: kit.NewButtonState(), older: kit.NewButtonState(),
 		threadsButton: kit.NewButtonState(),
@@ -224,6 +224,9 @@ func (d *teamChannelData) role(taskID string) string {
 }
 
 func channelRole(task *client.TaskNode) string {
+	if task.CatalogRole == "" && task.HierarchyRole == proposalRoleLead {
+		return "Lead"
+	}
 	return cmp.Or(task.CatalogRole, task.HierarchyRole, task.TaskID)
 }
 
