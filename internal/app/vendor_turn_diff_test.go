@@ -174,9 +174,9 @@ func TestVRE14GGE01ShellChangeAppearsInTurnDiff(t *testing.T) {
 	}
 }
 
-// hashGitDir digests every file under dir, so any change to refs, index,
-// objects or config shows.
-func hashGitDir(t *testing.T, dir string) string {
+// digestGitDir maps every path under dir to the digest of its content, so a
+// change to refs, index, objects or config is reported by path.
+func digestGitDir(t *testing.T, dir string) map[string]string {
 	t.Helper()
 	root, err := os.OpenRoot(dir)
 	if err != nil {
@@ -187,32 +187,52 @@ func hashGitDir(t *testing.T, dir string) string {
 			t.Error(closeErr)
 		}
 	}()
-	sum := sha256.New()
+	out := map[string]string{}
 	fsys := root.FS()
 	walkErr := fs.WalkDir(fsys, ".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			t.Fatal(err)
 		}
-		sum.Write([]byte(path + "\x00"))
-		if !entry.IsDir() {
-			data, readErr := fs.ReadFile(fsys, path)
-			if readErr != nil {
-				t.Fatal(readErr)
-			}
-			sum.Write(data)
+		if entry.IsDir() {
+			out[path] = "dir"
+			return nil
 		}
+		data, readErr := fs.ReadFile(fsys, path)
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		sum := sha256.Sum256(data)
+		out[path] = hex.EncodeToString(sum[:])
 		return nil
 	})
 	if walkErr != nil {
 		t.Fatal(walkErr)
 	}
-	return hex.EncodeToString(sum.Sum(nil))
+	return out
+}
+
+// userGitEnvironment describes the git the test ran, for a failure message.
+func userGitEnvironment(t *testing.T, dir string) string {
+	t.Helper()
+	cmd := exec.CommandContext(t.Context(), userGitBinary)
+	cmd.Args = []string{userGitBinary, "-C", dir, "config", "--list", "--show-origin"}
+	version := exec.CommandContext(t.Context(), userGitBinary)
+	version.Args = []string{userGitBinary, "--version"}
+	config, configErr := cmd.CombinedOutput()
+	ver, verErr := version.CombinedOutput()
+	return fmt.Sprintf("%s%s(errors: %v, %v)", ver, config, verErr, configErr)
 }
 
 func runUserGit(t *testing.T, dir string, args ...string) {
 	t.Helper()
 	cmd := exec.CommandContext(t.Context(), userGitBinary)
-	cmd.Args = append([]string{userGitBinary, "-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.invalid"}, args...)
+	// Newer git runs automatic maintenance (repack, multi-pack-index) detached
+	// after a commit, which rewrites .git after the test has taken its digest.
+	// The harness switches it off so only the guard's own behaviour is measured.
+	cmd.Args = append([]string{
+		userGitBinary, "-C", dir, "-c", "user.name=t", "-c", "user.email=t@example.invalid",
+		"-c", "maintenance.auto=false", "-c", "gc.auto=0", "-c", "gc.autoDetach=false",
+	}, args...)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
 	}
@@ -227,13 +247,13 @@ func TestVRE14GGE02UserGitUntouchedAndNoGitDirectoryWorks(t *testing.T) {
 	runUserGit(t, repo, "init", "-q")
 	runUserGit(t, repo, "add", "a.txt")
 	runUserGit(t, repo, "commit", "-q", "-m", "init")
-	before := hashGitDir(t, filepath.Join(repo, ".git"))
+	before := digestGitDir(t, filepath.Join(repo, ".git"))
 	h := newTurnDiffHarness(t, repo, realTurnSnapshots(t))
 	for i := range 5 {
 		h.runTurn(func() { writeTestFile(t, filepath.Join(repo, "a.txt"), fmt.Sprintf("edit %d\n", i)) })
 	}
-	if after := hashGitDir(t, filepath.Join(repo, ".git")); after != before {
-		t.Fatal("the user's .git changed after five turns")
+	if diff := cmp.Diff(before, digestGitDir(t, filepath.Join(repo, ".git"))); diff != "" {
+		t.Fatalf("the user's .git changed after five turns (-before +after):\n%s\n%s", diff, userGitEnvironment(t, repo))
 	}
 	for _, entry := range h.turnDiffs() {
 		if entry.Metadata.Status != transcript.TurnDiffComplete || entry.Metadata.FilesModified != 1 {
