@@ -97,7 +97,9 @@ func (v *inboxView) layoutActiveCard(gtx *layout.Context, env *kit.Env, sc *scre
 			}),
 			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 				local := gtx
-				return v.scroll.Layout(env, &local, kit.ScrollAreaProps{Axis: layout.Vertical}, func(gtx *layout.Context) layout.Dimensions {
+				// The detail gates the decision: keep a cue while any of it is
+				// unread (VR-05).
+				return v.scroll.Layout(env, &local, kit.ScrollAreaProps{Axis: layout.Vertical, OverflowCue: true, CueSurface: cardSurface(env, req)}, func(gtx *layout.Context) layout.Dimensions {
 					return layoutCardScrollBody(gtx, env, sc, req, form)
 				})
 			}),
@@ -485,4 +487,13 @@ func measureLabel(env *kit.Env, gtx *layout.Context, t theme.Type, c color.NRGBA
 	dims := kit.Label(env, &g, t, c, txt)
 	m.Stop()
 	return dims.Size
+}
+
+// cardSurface is the opaque surface behind the card body, which the scroll
+// cue fades into: the proposal panel and the kit Card differ.
+func cardSurface(env *kit.Env, req *client.PendingInteraction) color.NRGBA {
+	if isProposalRequest(req) {
+		return env.Th.Chrome().SurfaceBase
+	}
+	return env.Th.Chrome().SurfaceRaised
 }

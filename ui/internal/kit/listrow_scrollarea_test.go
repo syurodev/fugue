@@ -367,3 +367,75 @@ func TestListRowAndSectionHeaderTextContrastOnSurface(t *testing.T) {
 		})
 	}
 }
+
+func layCueFrames(t *testing.T, h *harness, sa *ScrollAreaState, contentH, n int) *image.RGBA {
+	t.Helper()
+	surface := h.env.Th.Chrome().SurfaceRaised
+	for range n {
+		h.frameSize(t, 200, 100)
+		sa.Layout(h.env, &h.gtx, ScrollAreaProps{Axis: layout.Vertical, OverflowCue: true, CueSurface: surface}, func(gtx *layout.Context) layout.Dimensions {
+			return layout.Dimensions{Size: image.Pt(200, contentH)}
+		})
+		h.end()
+	}
+	return h.shot(t, 200, 100)
+}
+
+func TestScrollAreaOverflowCueShowsWithoutHoverOrScroll(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	sa := NewScrollAreaState()
+	img := layCueFrames(t, h, sa, 400, 30)
+	if sa.BarAlpha() < 0.99 {
+		t.Fatalf("persistent BarAlpha = %v, want ~1", sa.BarAlpha())
+	}
+	if !sa.MoreAfter() || sa.MoreBefore() {
+		t.Fatalf("MoreAfter/MoreBefore = %v/%v, want true/false", sa.MoreAfter(), sa.MoreBefore())
+	}
+	// The cue outlives the idle delay.
+	h.now = h.now.Add(5 * scrollIdleDelay)
+	layCueFrames(t, h, sa, 400, 5)
+	if sa.BarAlpha() < 0.99 {
+		t.Fatalf("BarAlpha after idle = %v, want ~1", sa.BarAlpha())
+	}
+	surface := h.env.Th.Chrome().SurfaceRaised
+	if got := img.RGBAAt(10, 99); got == (color.RGBA{R: surface.R, G: surface.G, B: surface.B, A: 255}) {
+		t.Fatalf("bottom edge pixel %v shows no cue over surface %v", got, surface)
+	}
+}
+
+func TestScrollAreaOverflowCueAbsentWhenContentFits(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	sa := NewScrollAreaState()
+	img := layCueFrames(t, h, sa, 60, 30)
+	if sa.BarAlpha() != 0 || sa.MoreAfter() || sa.MoreBefore() {
+		t.Fatalf("fitting content: BarAlpha %v MoreAfter %v MoreBefore %v, want none", sa.BarAlpha(), sa.MoreAfter(), sa.MoreBefore())
+	}
+	base := img.RGBAAt(10, 99)
+	for x := range 200 {
+		if img.RGBAAt(x, 99) != base || img.RGBAAt(x, 0) != base {
+			t.Fatalf("fitting content drew a cue at x=%d", x)
+		}
+	}
+}
+
+func TestScrollAreaOverflowCueBottomFadeEndsAtContentEnd(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	sa := NewScrollAreaState()
+	before := layCueFrames(t, h, sa, 400, 3)
+	sa.SetOffset(1 << 20)
+	after := layCueFrames(t, h, sa, 400, 3)
+	if sa.MoreAfter() || !sa.MoreBefore() {
+		t.Fatalf("at end MoreAfter/MoreBefore = %v/%v, want false/true", sa.MoreAfter(), sa.MoreBefore())
+	}
+	// Left of the bar, the bottom row is faded with more below and clean at the end.
+	if before.RGBAAt(10, 99) == after.RGBAAt(10, 99) {
+		t.Fatalf("bottom row unchanged at the end: %v", after.RGBAAt(10, 99))
+	}
+	surface := h.env.Th.Chrome().SurfaceRaised
+	if got := after.RGBAAt(10, 99); got != (color.RGBA{R: surface.R, G: surface.G, B: surface.B, A: 255}) && got != after.RGBAAt(10, 70) {
+		t.Fatalf("bottom row at end = %v, want clean surface", got)
+	}
+}
