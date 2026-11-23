@@ -146,6 +146,27 @@ func TestFailureUXDisconnectedNamesDataDir(t *testing.T) {
 	}
 }
 
+// TestFailureUXRefusedExecutableNamesThePathAndTheFix pins the banner for a
+// host executable the launch refused as writable by others (FUG-56): it names
+// the path and the chmod that fixes it instead of promising a reconnect.
+func TestFailureUXRefusedExecutableNamesThePathAndTheFix(t *testing.T) {
+	t.Parallel()
+	f := newFailureUX()
+	f.refusal = &hostconn.WritableExecutableError{Path: "/opt/fugue/fugue"}
+	specs := f.specs(hostconn.StateDisconnected, f.refusal.Error(), "/tmp/fugue-data", false, session.Session{})
+	if len(specs) != 1 || specs[0].kind != kit.BannerDanger || !specs[0].visible || specs[0].dismissible {
+		t.Fatalf("specs = %+v, want one visible, non-dismissible danger banner", specs)
+	}
+	for _, want := range []string{"/opt/fugue/fugue", "chmod 755 /opt/fugue /opt/fugue/fugue"} {
+		if !strings.Contains(specs[0].message, want) {
+			t.Fatalf("message %q misses %q", specs[0].message, want)
+		}
+	}
+	if strings.Contains(specs[0].message, "reconnects") {
+		t.Fatalf("message %q promises a reconnect", specs[0].message)
+	}
+}
+
 // TestFailureUXDetachedBannerFollowsTheOpenSession pins the detached row
 // (desktop-app §6): the open detached session explains itself and offers
 // resume; other states stay quiet.

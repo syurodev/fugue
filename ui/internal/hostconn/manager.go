@@ -84,9 +84,12 @@ type Manager struct {
 	topicReqs chan topicReq
 	children  launchedChildren
 
-	mu      sync.Mutex
-	state   State
-	reason  string
+	mu     sync.Mutex
+	state  State
+	reason string
+	// refusal is the unsafe-executable refusal that froze the manager, nil
+	// otherwise; the banner names its fix.
+	refusal *WritableExecutableError
 	conn    *client.Client
 	cursors map[string]client.Cursor
 	// streamsCancel cancels the current connection's stream pumps; a network
@@ -112,6 +115,7 @@ func NewManager(cfg *Config) *Manager {
 		mu:            sync.Mutex{},
 		state:         "",
 		reason:        "",
+		refusal:       nil,
 		conn:          nil,
 		cursors:       map[string]client.Cursor{},
 		dynamic:       map[string]bool{},
@@ -291,6 +295,7 @@ func (m *Manager) run(ctx context.Context) {
 		case isUntrusted(err):
 			// An unsafe executable or an untrusted discovery file or peer
 			// does not heal by retrying; the status bar keeps the reason.
+			m.recordRefusal(err)
 			m.setState(ctx, StateDisconnected, err.Error())
 			return
 		default:

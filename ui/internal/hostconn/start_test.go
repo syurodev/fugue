@@ -24,17 +24,81 @@ func TestHostExecutableRejectsWritableBinaryAndDirectory(t *testing.T) {
 	if err := validateExecutable(bin); err != nil {
 		t.Fatal(err)
 	}
-	if err := validateExecutableForUID(bin, int64(os.Getuid())+1); !errors.Is(err, ErrUnsafeExecutable) {
+	uid, gid := int64(os.Getuid()), int64(os.Getgid())
+	if err := validateExecutableFor(bin, uid+1, gid); !errors.Is(err, ErrUnsafeExecutable) {
 		t.Fatalf("wrong owner: %v", err)
 	}
-	testSetMode(t, bin, 0o720)
+	testSetMode(t, bin, 0o702)
 	if err := validateExecutable(bin); !errors.Is(err, ErrUnsafeExecutable) {
-		t.Fatalf("writable binary: %v", err)
+		t.Fatalf("other-writable binary: %v", err)
 	}
 	testSetMode(t, bin, 0o700)
-	testSetMode(t, dir, 0o720)
+	testSetMode(t, dir, 0o702)
 	if err := validateExecutable(bin); !errors.Is(err, ErrUnsafeExecutable) {
-		t.Fatalf("writable directory: %v", err)
+		t.Fatalf("other-writable directory: %v", err)
+	}
+}
+
+// The default 002 umask makes a build output 0775 in a 0775 directory, both
+// in the user's own group; that must launch (FUG-56). The same modes with a
+// group that is not the user's own must not.
+func TestHostExecutableTrustsOwnGroupWritable(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "fugue")
+	testExecutable(t, bin, []byte("x"))
+	testSetMode(t, bin, 0o775)
+	testSetMode(t, dir, 0o775)
+	uid, gid := int64(os.Getuid()), int64(os.Getgid())
+	if err := validateEntries(bin, uid, gid); err != nil {
+		t.Fatalf("own-group 0775: %v", err)
+	}
+	if err := validateExecutable(bin); err != nil {
+		t.Fatalf("own-group 0775 through the real check: %v", err)
+	}
+	err := validateEntries(bin, uid, gid+1)
+	var refused *WritableExecutableError
+	if !errors.As(err, &refused) || !errors.Is(err, ErrUnsafeExecutable) {
+		t.Fatalf("foreign-group 0775: %v", err)
+	}
+	if want := "chmod 755 " + dir + " " + bin; refused.Fix() != want || !strings.Contains(err.Error(), want) {
+		t.Fatalf("fix = %q, error = %q, want %q", refused.Fix(), err, want)
+	}
+	testSetMode(t, dir, 0o755)
+	if err := validateEntries(bin, uid, gid+1); !errors.As(err, &refused) {
+		t.Fatalf("foreign-group binary alone: %v", err)
+	}
+	testSetMode(t, bin, 0o755)
+	if err := validateEntries(bin, uid, gid+1); err != nil {
+		t.Fatalf("0755 with a foreign group: %v", err)
+	}
+}
+
+func TestHostExecutableRejectsNonExecutableAndWrongKinds(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	testSetMode(t, dir, 0o775)
+	bin := filepath.Join(dir, "fugue")
+	testExecutable(t, bin, []byte("x"))
+	testSetMode(t, bin, 0o664)
+	uid, gid := int64(os.Getuid()), int64(os.Getgid())
+	if err := validateEntries(bin, uid, gid); !errors.Is(err, ErrUnsafeExecutable) {
+		t.Fatalf("non-executable: %v", err)
+	}
+	testSetMode(t, bin, 0o775)
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(bin, link); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateEntries(link, uid, gid); !errors.Is(err, ErrUnsafeExecutable) {
+		t.Fatalf("symlinked executable: %v", err)
+	}
+	linkDir := filepath.Join(t.TempDir(), "dirlink")
+	if err := os.Symlink(dir, linkDir); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateEntries(filepath.Join(linkDir, "fugue"), uid, gid); !errors.Is(err, ErrUnsafeExecutable) {
+		t.Fatalf("symlinked directory: %v", err)
 	}
 }
 
