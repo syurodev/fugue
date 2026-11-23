@@ -19,6 +19,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
+	"github.com/syurodev/fugue/ui/internal/shottest"
 	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/vault"
 	"github.com/syurodev/fugue/ui/internal/workspace"
@@ -167,6 +168,7 @@ func TestSlotGridShellRendersAndShowsTheEvidence(t *testing.T) {
 	rendered := map[string]*image.RGBA{}
 	for _, spec := range slotGridShotSpecs() {
 		img := renderSlotGridShot(t, win, spec)
+		shottest.Compare(t, spec.name, img)
 		if isUniformRGBA(img) {
 			t.Fatalf("slot grid shot %s is blank/uniform", spec.name)
 		}

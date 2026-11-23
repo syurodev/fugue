@@ -27,6 +27,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
+	"github.com/syurodev/fugue/ui/internal/shottest"
 	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/vault"
 	"github.com/syurodev/fugue/ui/internal/workspace"
@@ -371,6 +372,7 @@ func TestAccountsViewRendersWindowsAndLoginFlow(t *testing.T) {
 	rendered := map[string]*image.RGBA{}
 	for _, spec := range accountsShotSpecs() {
 		img := renderAccountsShot(t, win, spec)
+		shottest.Compare(t, spec.name, img)
 		if isUniformRGBA(img) {
 			t.Fatalf("accounts shot %s rendered uniform/blank image", spec.name)
 		}

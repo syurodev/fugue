@@ -17,6 +17,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/glwin"
 	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/shottest"
 	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/workspace"
 )
@@ -219,6 +220,7 @@ func TestWorkspaceShotsRender(t *testing.T) {
 	rendered := map[string]*image.RGBA{}
 	for _, spec := range workspaceShotSpecs() {
 		img := renderWorkspaceShot(t, win, spec)
+		shottest.Compare(t, spec.name, img)
 		if isUniformRGBA(img) {
 			t.Fatalf("shot %s is blank/uniform", spec.name)
 		}

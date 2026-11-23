@@ -2,6 +2,7 @@ package appwin
 
 import (
 	"testing"
+	"time"
 
 	"go.uber.org/goleak"
 
@@ -10,6 +11,10 @@ import (
 
 // chroma's regexp2 engine keeps one background timer goroutine (runClock) on first use.
 func TestMain(m *testing.M) {
+	// Several screens format times in the viewer's local zone, and the shot
+	// goldens capture those digits: pin the zone so a render does not depend
+	// on the machine's TZ (the CI runners are UTC).
+	time.Local = time.UTC
 	goleak.VerifyTestMain(m, goleak.IgnoreAnyFunction("github.com/dlclark/regexp2/v2.runClock"))
 }
 

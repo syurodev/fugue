@@ -258,6 +258,47 @@ h)`, `win.Frame(&ops)`, `win.Screenshot(img)`. The spike's shooter drove the
 real input path so the shots show true hover, focus and menu states. The
 gallery (F10.9) owns the shot matrix from here.
 
+### Golden shots (FUG-36)
+
+Every shot test renders its scene and then calls `shottest.Compare(t, name,
+img)` (`ui/internal/shottest`), which compares the render with
+`testdata/shots/<name>.png` in the test's package. A shot with no golden, a
+golden of another size, or too many differing pixels fails the test.
+
+- **Tolerance.** A pixel counts as different when any channel differs by more
+  than 8/255; the test fails when more than 0.1% of the pixels differ. The
+  channel slack absorbs antialiasing noise (goldens rendered on another
+  Linux machine differed by at most 6 levels on unchanged scenes); the share
+  is small enough that one changed line of text (about 0.1% of a shot) or a
+  1 dp spacing token change (0.25% to 5%) fails. Both are named constants
+  in `shottest.go` with their justification.
+- **Time zone.** Screens format some times in the viewer's local zone, and the
+  goldens capture those digits. appwin's `TestMain` sets `time.Local` to UTC so
+  a render does not depend on the machine's `TZ`; before that, goldens made in
+  UTC+7 failed secrets-store-dark-ui100 on the UTC CI runner by 0.1119%, which
+  a local render under `TZ=UTC` reproduced to within one pixel (0.1117%).
+  Shots pass under `TZ=UTC`, `Asia/Ho_Chi_Minh` and `America/Los_Angeles`.
+- **Cross-OS policy.** The goldens are Linux references (Mesa software GL,
+  the ubuntu CI job). Other platforms run the same comparison with a looser
+  budget (40/255 per channel, 1% of pixels) because their GL driver
+  antialiases glyph and corner edges differently while layout stays the
+  same; a moved or overlapping block still changes far more than 1%. The
+  looser budget is an estimate, not a measurement: if the macOS CI job fails
+  on edge noise alone, widen the `other*` pair and record the measured diff.
+  There is no `t.Skip` and no per-OS golden directory.
+- **On a mismatch** the failure names the shot and the differing share, and
+  logs the paths of `<name>.actual.png` and `<name>.diff.png` (differing
+  pixels in red over a dimmed golden). They go to a fresh `fugue-shot-*`
+  directory under the OS temp directory, never into `testdata`, and stay
+  there for you to open.
+- **Updating a golden** is deliberate: run the package's regenerate test on
+  Linux, for example `go run ../cmd/fuguegate exclusive -- go test -tags
+  regenerate -run Regenerate ./internal/appwin` from `ui/`, open
+  every PNG that changed and confirm it shows what the scene is for, and give
+  the reason in the PR. Do not copy an `.actual.png` over a golden. Regenerate
+  only the shots whose content changed; a golden that differs only by
+  rasterization noise passes as it is and needs no commit.
+
 ## 11. Pitfalls (all hit and fixed; each worth remembering)
 
 1. **Pointer absorption**: any non-pass input area stops the hit-test walk; an

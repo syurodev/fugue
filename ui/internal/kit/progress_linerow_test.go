@@ -10,6 +10,7 @@ import (
 	"gioui.org/op/paint"
 
 	"github.com/syurodev/fugue/ui/internal/glwin"
+	"github.com/syurodev/fugue/ui/internal/shottest"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
@@ -316,6 +317,7 @@ func TestProgressShotsRender(t *testing.T) {
 		if isUniformImage(img) {
 			t.Fatalf("shot %s rendered uniform image", spec.name)
 		}
+		shottest.Compare(t, spec.name, img)
 		rendered[spec.name] = img
 	}
 	if imagesEqual(rendered["progress-light-ui100"], rendered["progress-dark-ui100"]) {

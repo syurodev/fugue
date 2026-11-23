@@ -25,6 +25,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/inbox"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
+	"github.com/syurodev/fugue/ui/internal/shottest"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
@@ -183,7 +184,9 @@ func TestProposalCardShot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if img := renderProposalShot(t, win); isUniformRGBA(img) {
+	img := renderProposalShot(t, win)
+	if isUniformRGBA(img) {
 		t.Fatal("proposal shot is uniform")
 	}
+	shottest.Compare(t, proposalShotName, img)
 }

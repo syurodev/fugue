@@ -13,6 +13,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/glwin"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/session"
+	"github.com/syurodev/fugue/ui/internal/shottest"
 	"github.com/syurodev/fugue/ui/internal/vault"
 	"github.com/syurodev/fugue/ui/internal/workspace"
 )
@@ -156,6 +157,9 @@ func buildTranscriptShotScreens(t *testing.T, scene string) *screens {
 	}
 	sc.sidebar.ApplyList(client.SessionList{Sessions: []client.Session{sess}})
 	sc.open = transcriptShotSess
+	// The grid, not sc.open, picks the main slot: without it the shot shows the
+	// empty "Select a session" state instead of the transcript under test.
+	sc.grid.openMain(SlotRef{Kind: KindSession, ID: transcriptShotSess})
 	tr := session.NewTranscript(transcriptShotSess)
 	items, expanded := transcriptShotFixtures(scene)
 	tr.ApplyNewestPage(items)
@@ -190,6 +194,7 @@ func TestTranscriptItemShotsRender(t *testing.T) {
 	rendered := map[string]*image.RGBA{}
 	for _, spec := range transcriptShotSpecs() {
 		img := renderTranscriptShot(t, win, spec)
+		shottest.Compare(t, spec.name, img)
 		if isUniformRGBA(img) {
 			t.Fatalf("transcript shot %s rendered uniform/blank image", spec.name)
 		}
