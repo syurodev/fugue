@@ -33,7 +33,7 @@ func validateItemMetadata(item *Item) error {
 		KindTaskLink:         {"TaskID", "Agent", metadataStatus},
 		KindUsage:            {"InputTokens", "OutputTokens", "CacheTokens", "Cost"},
 		KindQuota:            {"Account", "Window", "Used", "ResetAt"},
-		KindNotice:           {metadataLevel, "Code"},
+		KindNotice:           {metadataLevel, "Code", "FindingCount", "FindingFiles", "ScanIncomplete"},
 		KindTurnDiff:         {metadataStatus, "FilesAdded", "FilesModified", "FilesDeleted", "FilesRenamed", "LinesAdded", "LinesRemoved", "Overlapped"},
 	}
 	if _, ok := fields[item.Kind]; !ok {

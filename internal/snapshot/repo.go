@@ -340,26 +340,9 @@ func looksLikeNestedRepo(fullDir string) bool {
 }
 
 func (r *Repo) git(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
-	runCtx := ctx
-	var cancel context.CancelFunc
-	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
-		runCtx, cancel = context.WithTimeout(ctx, r.limits.GitTimeout)
-		defer cancel()
-	}
-
-	full := make([]string, 0, 5+len(args))
-	full = append(full, "--git-dir="+r.gitDir)
-	if len(args) == 0 || args[0] != "init" {
-		full = append(full, "--work-tree="+r.workTree)
-	}
-	full = append(full, "-c", "core.quotePath=false")
-	full = append(full, args...)
-
-	cmd := exec.CommandContext(runCtx, "git")
-	cmd.Path = r.gitPath
-	cmd.Args = append([]string{r.gitPath}, full...)
-	cmd.Dir = r.workTree
-	cmd.Env = cleanGitEnv(r.gitDir)
+	runCtx, cancel := r.withGitTimeout(ctx)
+	defer cancel()
+	cmd := r.gitCommand(runCtx, args...)
 	if stdin != nil {
 		cmd.Stdin = bytes.NewReader(stdin)
 	}
@@ -379,6 +362,34 @@ func (r *Repo) git(ctx context.Context, stdin []byte, args ...string) ([]byte, e
 		return nil, fmt.Errorf("snapshot: %s: %s: %w", verb, msg, err)
 	}
 	return stdout.Bytes(), nil
+}
+
+// withGitTimeout bounds a git run by the configured timeout unless the caller
+// already set a deadline.
+func (r *Repo) withGitTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, hasDeadline := ctx.Deadline(); hasDeadline {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, r.limits.GitTimeout)
+}
+
+// gitCommand builds a git invocation against the shadow repository with a
+// scrubbed environment, so no user or repository configuration can run code.
+func (r *Repo) gitCommand(ctx context.Context, args ...string) *exec.Cmd {
+	full := make([]string, 0, 5+len(args))
+	full = append(full, "--git-dir="+r.gitDir)
+	if len(args) == 0 || args[0] != "init" {
+		full = append(full, "--work-tree="+r.workTree)
+	}
+	full = append(full, "-c", "core.quotePath=false")
+	full = append(full, args...)
+
+	cmd := exec.CommandContext(ctx, "git")
+	cmd.Path = r.gitPath
+	cmd.Args = append([]string{r.gitPath}, full...)
+	cmd.Dir = r.workTree
+	cmd.Env = cleanGitEnv(r.gitDir)
+	return cmd
 }
 
 func cleanGitEnv(gitDir string) []string {

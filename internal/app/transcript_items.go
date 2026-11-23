@@ -75,7 +75,7 @@ func storeMetadataRest(m transcript.Metadata) vendorstore.ItemMetadata {
 	case transcript.QuotaMetadata:
 		return vendorstore.ItemMetadata{Account: v.AccountID, Window: v.Window, Used: v.Used, ResetAt: v.ResetsAt.UTC().Format(time.RFC3339Nano)}
 	case transcript.NoticeMetadata:
-		return vendorstore.ItemMetadata{Level: v.Level, Code: v.Code}
+		return vendorstore.ItemMetadata{Level: v.Level, Code: v.Code, FindingCount: int64(v.Findings), FindingFiles: int64(v.Files), ScanIncomplete: v.ScanIncomplete}
 	case transcript.TurnDiffMetadata:
 		return vendorstore.ItemMetadata{
 			Status: v.Status, FilesAdded: int64(v.FilesAdded), FilesModified: int64(v.FilesModified),

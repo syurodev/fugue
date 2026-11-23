@@ -48,6 +48,7 @@ type transcriptFixture struct {
 	hub     *EventHub
 	clock   *clock.Fake
 	service *Transcripts
+	dbPath  string
 }
 
 func newTranscriptFixture(t *testing.T, known KnownValues) *transcriptFixture {
@@ -85,7 +86,7 @@ func newTranscriptFixture(t *testing.T, known KnownValues) *transcriptFixture {
 			t.Error(cerr)
 		}
 	})
-	f := &transcriptFixture{t: t, store: s, vault: v, hub: hub, clock: clk, service: service}
+	f := &transcriptFixture{t: t, store: s, vault: v, hub: hub, clock: clk, service: service, dbPath: path}
 	f.mustCreateSession(testSession)
 	return f
 }

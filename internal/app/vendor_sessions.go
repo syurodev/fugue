@@ -51,6 +51,9 @@ type VendorSessionDeps struct {
 	// TurnSnapshots snapshots the working directory around every turn for the
 	// turn_diff item; nil disables turn snapshots (git-guard §3).
 	TurnSnapshots TurnSnapshotter
+	// TurnScanBytes bounds the added content the end-of-turn secret scan reads;
+	// zero means TurnScanCap (git-guard §6).
+	TurnScanBytes int64
 	// OnSessionEnded runs once when a session's actor stops, however it
 	// stopped; the host revokes the session token there.
 	OnSessionEnded func(sessionID string)

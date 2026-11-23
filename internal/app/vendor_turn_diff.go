@@ -44,6 +44,10 @@ type TurnSnapshot struct {
 type TurnChanges struct {
 	Files   []snapshot.Change
 	Skipped int
+	// BeforeTree and AfterTree name the two shadow trees the diff came from, so
+	// the end-of-turn secret scan can read the added lines before the pair is
+	// released. They are tree hashes, never shown to a client.
+	BeforeTree, AfterTree string
 }
 
 // TurnSnapshotter is the port the vendor session actor uses to snapshot a
@@ -117,7 +121,7 @@ func (e *engineTurnSnapshots) End(ctx context.Context, snap TurnSnapshot) (TurnC
 	if err != nil {
 		return TurnChanges{}, fmt.Errorf("diff the turn snapshots: %w", err)
 	}
-	return TurnChanges{Files: files, Skipped: len(end.Skipped)}, nil
+	return TurnChanges{Files: files, Skipped: len(end.Skipped), BeforeTree: rec.BeforeTree, AfterTree: end.Tree}, nil
 }
 
 // capped runs fn under the snapshot cap on the injected clock. On timeout the
@@ -187,6 +191,7 @@ func (a *vendorSessionActor) recordTurnDiff(ctx context.Context, turnID string) 
 	delete(a.snaps, turnID)
 	metadata := transcript.TurnDiffMetadata{Status: transcript.TurnDiffUnavailable}
 	var content transcript.Content
+	var scan *turnScanResult
 	if start.ID != "" {
 		changes, err := capped(ctx, a.manager, "turn-snapshot-end-"+a.info.ID, func(taskCtx context.Context) (TurnChanges, error) {
 			return a.manager.deps.TurnSnapshots.End(taskCtx, start)
@@ -195,6 +200,7 @@ func (a *vendorSessionActor) recordTurnDiff(ctx context.Context, turnID string) 
 			a.manager.deps.Logger.WarnContext(ctx, "the turn end snapshot failed", "error_code", string(errcode.CodeOf(err)))
 		} else {
 			metadata, content = turnDiffItemData(&changes)
+			scan = a.scanTurnAdditions(ctx, start, &changes)
 		}
 	}
 	if start.ID != "" {
@@ -209,6 +215,7 @@ func (a *vendorSessionActor) recordTurnDiff(ctx context.Context, turnID string) 
 	if err := a.recordItem(ctx, &item); err != nil {
 		a.manager.deps.Logger.WarnContext(ctx, "the turn diff item was not recorded", "error_code", string(errcode.CodeOf(err)))
 	}
+	a.recordPossibleSecretNotice(ctx, turnID, scan)
 }
 
 // turnDiffItemData turns the snapshot difference into the allowlisted counts
