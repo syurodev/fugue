@@ -231,6 +231,9 @@ func (s *screens) pruneWorkspaceHeaders() {
 	}
 }
 
+// wsMenuReview is the manage menu item that opens the policy card.
+const wsMenuReview = "review"
+
 // manageItems builds the workspace's manage menu: the policy card first
 // while a change waits, then the root management, then the deletion. The
 // root items need the workspace's detail, whose hash every mutation is a
@@ -240,7 +243,7 @@ func (s *screens) manageItems(ws workspace.Summary) []kit.MenuItem {
 	det, hasDetail := s.workspaces.DetailFor(ws.ID)
 	ready := hasDetail && det.ConfigHash != ""
 	if ws.PendingPolicyConfirmation {
-		items = append(items, kit.MenuItem{ID: teamStateReview, Label: "Review policy change…", Disabled: !ready})
+		items = append(items, kit.MenuItem{ID: wsMenuReview, Label: "Review policy change…", Disabled: !ready})
 	}
 	items = append(items, kit.MenuItem{ID: "add-root", Label: "Add root…", Disabled: !ready})
 	if ready && len(det.Roots) > 0 {
@@ -265,7 +268,7 @@ func (s *screens) chooseManage(ws workspace.Summary, chosen string) {
 	det, hasDetail := s.workspaces.DetailFor(ws.ID)
 	ready := hasDetail && det.ConfigHash != ""
 	switch {
-	case chosen == teamStateReview:
+	case chosen == wsMenuReview:
 		if !ready {
 			s.fail(errDialogNeedsDetail)
 			return

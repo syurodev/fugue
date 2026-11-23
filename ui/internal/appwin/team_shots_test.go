@@ -82,7 +82,7 @@ func teamShotLines() []client.ChannelLine {
 		{ChannelSeq: 42, Kind: client.InteractionKindQuestion, SenderKind: "agent", SenderTaskID: testTeamReviewer, RecipientTaskID: testTeamEditor, ThreadRoot: testTeamReviewer, CreatedAt: now, Content: "Should the release notes cover the behavior in #41?"},
 		{ChannelSeq: 43, Kind: "send", SenderKind: channelUser, RecipientTaskID: testTeamReviewer, ThreadRoot: testTeamReviewer, CreatedAt: now, Content: "Yes, include a short example."},
 		{ChannelSeq: 44, Kind: "stall", SenderKind: "watchdog", ThreadRoot: testTeamIntegration, CreatedAt: now, Content: "Integration is waiting for the build checks."},
-		{ChannelSeq: 45, Kind: "approval", SenderKind: "system", ThreadRoot: testTeamReviewer, CreatedAt: now, Content: "approval request req-review (review result)"},
+		{ChannelSeq: 45, Kind: channelApproval, SenderKind: "system", ThreadRoot: testTeamReviewer, CreatedAt: now, Content: "approval request req-review (review result)"},
 	}
 }
 
