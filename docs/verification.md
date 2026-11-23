@@ -2,7 +2,7 @@
 
 Seeded registry of stage A verification IDs (spec item F3.6a, `verification §1–2, §5–6`).
 Until `verification` v0.15 settles the stage-A gates and counts for every prefix (`Q-81`), only the
-four prefixes below are seeded. Each row's status reflects only whether its named evidence already
+five prefixes below are seeded. Each row's status reflects only whether its named evidence already
 exists on `main` (`V-05`).
 
 ## Seeded prefixes
@@ -12,12 +12,14 @@ exists on `main` (`V-05`).
 | `VR-E` | `vendor-runtime §15` | 14 |
 | `TR-E` | `transcript §9` | 8 |
 | `DA-E` | `desktop-app §10` | 8 |
+| `A-E` | `activation §5` | 10 |
 | `A-S` | `activation §6` | 3 |
 
 ## Not in stage A
 
 | ID | Reason |
 | --- | --- |
+| `A-E09` | Gate B (`activation §5`: OpenAI spike `model-adapter §11.7` and ChatGPT login with a real account, moved to B in v0.14) |
 | `VR-E12` | Gate B (`vendor-runtime §15`: GLM through Claude Code via Z.ai) |
 
 ## Registry
@@ -53,6 +55,15 @@ exists on `main` (`V-05`).
 | `DA-E06` | `desktop-app §10` | `release` | `pr` | `TestCoreNeverImportsUI`, `TestAppWritesOnlyThroughHostAPI` | `Done` |
 | `DA-E07` | `desktop-app §10` | `release` | `pr` | `TestProposalCardSubmitsExactEdits`, `TestTeamTreeReusesUnchangedAgentLayouts` | `Done` |
 | `DA-E08` | `desktop-app §10` | `release` | `pr` | `TestHostManagerStartsAbsentHost`, `TestBackgroundKeepsRealHostAliveUntilDisabled`, `TestServeExitsAfterLastLeaseIdleGrace`, `TestConcurrentAppStartsShareOneHost` | `Done` |
+| `A-E01` | `activation §5` | `release` | `pr` | Gates G-01 to G-06 closed and the G-03 evidence (`storage-security §10`) passing; G-04 on the ChatGPT adapter and tool set | `Not started` |
+| `A-E02` | `activation §5` | `release` | `pr` | Headless tests for every group in the validation criteria (`decisions-and-validation`) with the deterministic clock and fault injection | `Not started` |
+| `A-E03` | `activation §5` | `release` | `nightly` | Nightly `probes` job (`task probes`, `fuguegate probes`) applies each patch and requires its declared tests to fail: `quality/probes/01-vault-fail-open.patch`, `quality/probes/02-session-principal-escalation.patch`, `quality/probes/03-vendor-auto-approve-bypass.patch`, `quality/probes/04-decide-hard-rule-bypass.patch`, `quality/probes/05-team-write-scope-bypass.patch`, `quality/probes/06-workspace-path-traversal.patch`. The design lists five probes (remove CAS, remove the current-authority check, dispatch on replay, retry unknown, cancellation as stop proof); none of the six patches is one of them | `In progress` |
+| `A-E04` | `activation §5` | `release` | `pr` | Invariant checker SM-01 to SM-12 after every batch in the test build and the dogfood build | `Not started` |
+| `A-E05` | `activation §5` | `release` | `pr` | Partial, over a real host with a fake vendor CLI (shared with DA-E05): `TestFailureUXMissingVendorCLIProbesAsTypedError`, `TestFailureUXUnsupportedVersionAndLoggedOutProbeOverRealHost`, `TestFailureUXDetachedSessionResumesAndClosesOverRealHost`, `TestFailureUXVaultLockSuspendsAndResumesSessionOverRealHost`. Rows of `activation §3` still without an end-to-end test: host connection lost, `Waiting(recovery_admission)`, `Interrupted(effect_unknown)`, `payload_unavailable`, run context selection, hung worker without stop proof, budget/quota/worker-capacity waits, data directory held by another process, unsupported schema or protocol, paused vendor account, `unknown` task or rejected result gate; the headless host failing closed is not covered either | `In progress` |
+| `A-E06` | `activation §5` | `release` | `pr` | Crash points in `cmd/fugue/crash_recovery_test.go`: `TestCrashPointVendorTurnActiveRecovery` (streaming vendor turn), `TestCrashPointInteractionCardPendingRecovery` (pending approval), `TestCrashPointTeamTaskRunningRecovery` (running task), `TestCrashPointTeamMergeAfterFFRecovery` (merge queue). Gap: no crash point for an unknown commit. The tests run on Linux in the PR `test` job and on macOS in `main.yml` (every merge into main) and the nightly `repeat-tests`, not in PR runs unless platform-specific files change | `In progress` |
+| `A-E07` | `activation §5` | `release` | `pr` | Sandbox smoke with the three presets on Linux and macOS | `Not started` |
+| `A-E08` | `activation §5` | `release` | `nightly` | Upgrade drill (stop host mid-run, install new build, resume through `Waiting(recovery_admission)`) and downgrade drill (old build opening the new data directory does not append) | `Not started` |
+| `A-E10` | `activation §5` | `release` | `release` | Release-gate evidence of vendor-runtime, transcript, orchestration and desktop-app all passing | `Not started` |
 | `A-S01` | `activation §6` | `stable` | `live` | Recovery drill live records (>= 20 kills, >= 5 on macOS) | `Not started` |
 | `A-S02` | `activation §6` | `stable` | `live` | Safety live record (0 SM violations, 0 double-dispatch, 0 unexplained `Interrupted`) | `Not started` |
 | `A-S03` | `activation §6` | `stable` | `live` | Prompt-to-vendor-stdin latency live records (p50 <= 100 ms, p95 <= 300 ms) | `Not started` |
