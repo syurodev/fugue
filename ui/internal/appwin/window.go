@@ -438,6 +438,9 @@ func statusColor(th *theme.Theme, state hostconn.State) color.NRGBA {
 // statusLine renders the status bar text; "host not running" is its own
 // phrase so the retry (and, from F10.2b, the auto-start) is visible.
 func statusLine(state hostconn.State, reason string) string {
+	if state == "" {
+		return ""
+	}
 	if reason == "" {
 		return "connection: " + string(state)
 	}

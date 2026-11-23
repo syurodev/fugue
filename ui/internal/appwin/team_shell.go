@@ -7,6 +7,7 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/unit"
 
 	"github.com/syurodev/fugue/pkg/client"
 
@@ -124,7 +125,7 @@ func (s *screens) layoutTeamStrip(gtx *layout.Context, env *kit.Env, sh *teamShe
 	if title == "" {
 		title = teamLabel
 	}
-	return layout.Inset{Left: theme.SpaceXL, Right: theme.SpaceXL, Bottom: theme.SpaceSM}.Layout(*gtx, func(g layout.Context) layout.Dimensions {
+	return layoutTeamChatWidth(gtx, env, theme.SpaceSM, func(g layout.Context) layout.Dimensions {
 		return teamPanel(g, env, ch.FillSoft, layout.UniformInset(theme.SpaceMD), func(g layout.Context) layout.Dimensions {
 			return layout.Flex{Alignment: layout.Middle}.Layout(g,
 				rigidWidget(func(g *layout.Context) layout.Dimensions {
@@ -173,15 +174,54 @@ func (s *screens) teamStripChip(env *kit.Env, sh *teamShell, summary *client.Tea
 }
 
 func (s *screens) layoutTeamLeadComposer(gtx *layout.Context, env *kit.Env, id string, connected bool) {
-	layout.Inset{Left: theme.SpaceXL, Right: theme.SpaceXL, Bottom: theme.SpaceLG}.Layout(*gtx, func(g layout.Context) layout.Dimensions {
-		return teamPanel(g, env, env.Th.Chrome().SurfaceBase, layout.UniformInset(theme.SpaceMD), func(g layout.Context) layout.Dimensions {
+	layoutTeamChatWidth(gtx, env, theme.SpaceLG, func(g layout.Context) layout.Dimensions {
+		return layoutLeadComposerSurface(g, env, s.composer.stateFor(id).area, func(g layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Vertical}.Layout(g,
-				rigidParagraph(env, theme.TypeCaption(), env.Th.Chrome().FgMuted, "Message the lead"),
+				rigidWidget(func(g *layout.Context) layout.Dimensions {
+					return layout.Inset{Left: theme.SpaceLG}.Layout(*g, func(g layout.Context) layout.Dimensions {
+						return kit.Label(env, &g, theme.TypeCaption(), env.Th.Chrome().FgMuted, "To Lead")
+					})
+				}),
 				spacerH(theme.SpaceXS),
-				rigidWidget(func(g *layout.Context) layout.Dimensions { return s.composer.layout(env, g, s, id, connected) }),
+				rigidWidget(func(g *layout.Context) layout.Dimensions {
+					return s.composer.layoutSessionComposer(env, g, s, id, connected, true)
+				}),
 			)
 		})
 	})
+}
+
+func layoutLeadComposerSurface(gtx layout.Context, env *kit.Env, area *kit.TextAreaState, body layout.Widget) layout.Dimensions {
+	return layout.Background{}.Layout(gtx, func(g layout.Context) layout.Dimensions {
+		size := g.Constraints.Min
+		chrome := env.Th.Chrome()
+		paintTeamSurface(&g, env, size, chrome.SurfaceBase)
+		if env.FocusVisible(&g, area.Tag()) {
+			stroke := max(1, g.Dp(theme.Hairline))
+			rings := clip.UniformRRect(image.Rectangle{Max: size}.Inset(stroke), g.Dp(theme.RadiusXL)-stroke)
+			paint.FillShape(g.Ops, chrome.FocusBorder, clip.Stroke{Path: rings.Path(g.Ops), Width: float32(stroke)}.Op())
+		}
+		return layout.Dimensions{Size: size}
+	}, func(g layout.Context) layout.Dimensions {
+		return layout.UniformInset(theme.SpaceLG).Layout(g, body)
+	})
+}
+
+func teamChatWidth(gtx *layout.Context) int {
+	return min(gtx.Dp(theme.TranscriptMeasure), max(gtx.Constraints.Max.X-2*gtx.Dp(theme.SpaceXL), 0))
+}
+
+func layoutTeamChatWidth(gtx *layout.Context, env *kit.Env, bottom unit.Dp, body layout.Widget) layout.Dimensions {
+	width := teamChatWidth(gtx)
+	x := (gtx.Constraints.Max.X - width) / 2
+	var dims layout.Dimensions
+	env.Offset(gtx, image.Pt(x, 0), func(g *layout.Context) {
+		local := *g
+		local.Constraints.Min.X, local.Constraints.Max.X = width, width
+		dims = layout.Inset{Bottom: bottom}.Layout(local, body)
+	})
+	dims.Size.X = gtx.Constraints.Max.X
+	return dims
 }
 
 func (s *screens) jumpFromTeamStrip(sh *teamShell, id string, status theme.StatusKind) {

@@ -8,14 +8,13 @@ import (
 	"github.com/syurodev/fugue/pkg/client"
 
 	"github.com/syurodev/fugue/ui/internal/hostconn"
-	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/team"
 )
 
 type teamRuntime struct {
 	teamWorker      *team.Worker
 	teamSidebarList layout.List
-	teamSidebarRows map[string]*kit.ListRowState
+	teamSidebarRows map[string]*teamSidebarRow
 	teamViews       map[string]client.TeamView
 	teamCatalog     map[string][]team.Role
 	teamRefresh     map[string]bool
@@ -34,7 +33,7 @@ type teamRuntime struct {
 func newTeamRuntime() teamRuntime {
 	return teamRuntime{
 		teamSidebarList: layout.List{Axis: layout.Vertical},
-		teamSidebarRows: make(map[string]*kit.ListRowState),
+		teamSidebarRows: make(map[string]*teamSidebarRow),
 		teamViews:       make(map[string]client.TeamView),
 		teamCatalog:     make(map[string][]team.Role),
 		teamRefresh:     make(map[string]bool),

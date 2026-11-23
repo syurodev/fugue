@@ -9,6 +9,7 @@ import (
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
+	"gioui.org/widget"
 
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/theme"
@@ -77,4 +78,23 @@ func paintTeamElbow(gtx *layout.Context, ink color.NRGBA, spine, center, edge in
 	path.QuadTo(f32.Pt(x, y), f32.Pt(x+radius, y))
 	path.LineTo(f32.Pt(float32(edge), y))
 	paint.FillShape(gtx.Ops, ink, clip.Stroke{Path: path.End(), Width: float32(width)}.Op())
+}
+
+func layoutTeamNavHighlight(gtx layout.Context, env *kit.Env, click *widget.Clickable, selected bool, body layout.Widget) layout.Dimensions {
+	bg := func(g layout.Context) layout.Dimensions {
+		ch := env.Th.Chrome()
+		bounds := image.Rectangle{Max: g.Constraints.Min}
+		shape := clip.UniformRRect(bounds, g.Dp(theme.RadiusMD))
+		switch {
+		case selected:
+			paint.FillShape(g.Ops, env.Th.StatusTone(theme.StatusInfo).Fill, shape.Op(g.Ops))
+		case click.Hovered():
+			paint.FillShape(g.Ops, ch.HoverWash, shape.Op(g.Ops))
+		}
+		if env.FocusVisible(&g, click) {
+			paint.FillShape(g.Ops, ch.FocusBorder, clip.Stroke{Path: shape.Path(g.Ops), Width: float32(max(1, g.Dp(theme.Hairline)))}.Op())
+		}
+		return layout.Dimensions{Size: g.Constraints.Min}
+	}
+	return layout.Background{}.Layout(gtx, bg, body)
 }

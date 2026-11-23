@@ -48,6 +48,9 @@ func TestClampDp(t *testing.T) {
 // parentheses, and the plain state stands alone.
 func TestStatusLine(t *testing.T) {
 	t.Parallel()
+	if got := statusLine("", ""); got != "" {
+		t.Fatalf("unexpected empty connection label %q", got)
+	}
 	if got := statusLine(hostconn.StateConnected, ""); got != "connection: connected" {
 		t.Errorf("statusLine(connected, %q) = %q", "", got)
 	}

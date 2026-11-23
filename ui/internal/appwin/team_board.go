@@ -1,14 +1,11 @@
 package appwin
 
 import (
-	"image"
 	"maps"
 	"slices"
-	"strconv"
 	"strings"
 
 	"gioui.org/layout"
-	"gioui.org/op"
 
 	"github.com/syurodev/fugue/pkg/client"
 
@@ -111,13 +108,7 @@ func (s *screens) layoutTeamBoardHeader(gtx *layout.Context, env *kit.Env, view 
 	if title == "" {
 		title = "Team board"
 	}
-	status := kit.TagProps{Text: strings.ReplaceAll(view.Summary.State, "_", " "), Variant: kit.TagNeutral}
-	if view.Summary.State == channelActive {
-		status.Variant, status.Status = kit.TagStatus, theme.StatusSuccess
-	}
-	if view.Summary.State == teamFinalReview {
-		status.Variant, status.Status = kit.TagStatus, theme.StatusWarning
-	}
+	status := teamBoardStatus(view.Summary.State)
 	return layout.Flex{Alignment: layout.Middle}.Layout(*gtx,
 		rigidWidget(func(g *layout.Context) layout.Dimensions {
 			return teamAvatar(g, env, kit.IconUsers, env.Th.StatusTone(theme.StatusInfo))
@@ -154,41 +145,6 @@ func (s *screens) layoutTeamsSidebar(gtx *layout.Context, env *kit.Env) layout.D
 				})
 			}),
 		)
-	})
-}
-
-func (s *screens) layoutTeamSidebarRow(gtx *layout.Context, env *kit.Env, summary *client.TeamSummary) layout.Dimensions {
-	id := summary.TeamID
-	row := s.teamSidebarRows[id]
-	if row == nil {
-		row = kit.NewListRowState()
-		row.Enter()
-		s.teamSidebarRows[id] = row
-	}
-	title := s.teamViews[id].Title
-	if title == "" {
-		title = id
-	}
-	ref := SlotRef{Kind: KindTeam, ID: id}
-	ch := env.Th.Chrome()
-	return layout.Inset{Bottom: theme.SpaceSM}.Layout(*gtx, func(g layout.Context) layout.Dimensions {
-		return teamPanel(g, env, ch.SurfaceBase, layout.UniformInset(theme.SpaceXS), func(g layout.Context) layout.Dimensions {
-			dims, ev := row.Layout(env, &g, &kit.ListRowProps{
-				Label: title, Icon: kit.IconUsers, Trailing: strconv.FormatUint(uint64(summary.TaskCount), 10), Selected: ref == refAt(s.grid.doc, Pos{}),
-			})
-			s.fail(ev.Err)
-			if ev.Clicked {
-				s.boardFor(teamBoardKey{team: id, main: true}).channel.reopen()
-				s.grid.openMain(ref)
-			}
-			g.Constraints.Min = image.Point{}
-			status := layout.Inset{Top: theme.SpaceXXS, Left: theme.SpaceXL, Bottom: theme.SpaceXS}.Layout(g, func(g layout.Context) layout.Dimensions {
-				stack := op.Offset(image.Pt(0, dims.Size.Y)).Push(g.Ops)
-				defer stack.Pop()
-				return kit.EllipsisLabel(env, &g, theme.TypeCaption(), ch.FgMuted, strings.ReplaceAll(summary.State, "_", " "))
-			})
-			return layout.Dimensions{Size: image.Pt(dims.Size.X, dims.Size.Y+status.Size.Y)}
-		})
 	})
 }
 
@@ -236,4 +192,15 @@ func (s *screens) saveTeamPosition(p *teamChannelPane) {
 	positions[p.teamID] = maps.Clone(p.lastRead)
 	s.grid.doc.TeamRead = positions
 	s.grid.dirty = true
+}
+
+func teamBoardStatus(state string) kit.TagProps {
+	status := kit.TagProps{Text: strings.ReplaceAll(state, "_", " "), Variant: kit.TagNeutral}
+	if state == channelActive {
+		status.Variant, status.Status = kit.TagStatus, theme.StatusSuccess
+	}
+	if state == teamFinalReview {
+		status.Variant, status.Status = kit.TagStatus, theme.StatusWarning
+	}
+	return status
 }

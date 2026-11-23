@@ -86,22 +86,7 @@ func (s *screens) layoutChannelThreadRow(gtx *layout.Context, env *kit.Env, p *t
 }
 
 func (s *screens) layoutChannelThreadCard(gtx *layout.Context, env *kit.Env, state *channelThreadRowState, row teamChannelThread, selected bool, unread int) layout.Dimensions {
-	bg := func(g layout.Context) layout.Dimensions {
-		ch := env.Th.Chrome()
-		bounds := image.Rectangle{Max: g.Constraints.Min}
-		shape := clip.UniformRRect(bounds, g.Dp(theme.RadiusMD))
-		switch {
-		case selected:
-			paint.FillShape(g.Ops, env.Th.StatusTone(theme.StatusInfo).Fill, shape.Op(g.Ops))
-		case state.click.Hovered():
-			paint.FillShape(g.Ops, ch.HoverWash, shape.Op(g.Ops))
-		}
-		if env.FocusVisible(&g, &state.click) {
-			paint.FillShape(g.Ops, ch.FocusBorder, clip.Stroke{Path: shape.Path(g.Ops), Width: float32(max(1, g.Dp(theme.Hairline)))}.Op())
-		}
-		return layout.Dimensions{Size: g.Constraints.Min}
-	}
-	return layout.Background{}.Layout(*gtx, bg, func(g layout.Context) layout.Dimensions {
+	return layoutTeamNavHighlight(*gtx, env, &state.click, selected, func(g layout.Context) layout.Dimensions {
 		return layout.Inset{Top: theme.SpaceSM, Bottom: theme.SpaceSM, Left: theme.SpaceSM, Right: theme.SpaceSM}.Layout(g, func(g layout.Context) layout.Dimensions {
 			return s.layoutChannelThreadContent(&g, env, state, row, unread)
 		})

@@ -413,8 +413,8 @@ func (s *screens) layoutSessionPane(gtx *layout.Context, env *kit.Env, id string
 	leadComposer := leads && main
 	measureWidth, boxHeight := w, 0
 	if leadComposer {
-		measureWidth = max(w-gtx.Dp(2*(theme.SpaceXL+theme.SpaceMD)), 0)
-		boxHeight = gtx.Dp(theme.SpaceLG+2*theme.SpaceMD+theme.SpaceXS) + gtx.Sp(theme.TypeCaption().Line)
+		measureWidth = max(teamChatWidth(gtx)-2*gtx.Dp(theme.SpaceLG), 0)
+		boxHeight = gtx.Dp(3*theme.SpaceLG+theme.SpaceXS) + gtx.Sp(theme.TypeCaption().Line)
 	}
 	measure.Constraints.Min = image.Pt(measureWidth, 0)
 	measure.Constraints.Max.X = measureWidth
