@@ -194,6 +194,13 @@ func (d *policyDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens) {
 
 func (d *policyDialog) body(env *kit.Env, gtx *layout.Context, bands *kit.DialogBands, sc *screens) image.Point {
 	body := newWSBody(env, gtx, bands, sc.fail)
+	d.fill(env, body, sc)
+	return body.size()
+}
+
+// fill lays the card's rows out top to bottom: the diff, one changed key per
+// row, then the reject action on a row of its own, then the host's answer.
+func (d *policyDialog) fill(env *kit.Env, body *wsBody, sc *screens) {
 	if len(d.diff) == 0 {
 		body.label("The change's diff is not known yet; the next workspace read fills it in.", env.Th.Chrome().FgMuted)
 	}
@@ -214,7 +221,6 @@ func (d *policyDialog) body(env *kit.Env, gtx *layout.Context, bands *kit.Dialog
 	if d.lastErr != "" {
 		body.label(d.lastErr, env.Th.Status().Danger)
 	}
-	return body.size()
 }
 
 func (d *policyDialog) submit(sc *screens) {
