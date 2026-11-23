@@ -4,7 +4,6 @@ package hostconn
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,7 +12,12 @@ import (
 	"github.com/syurodev/fugue/pkg/client"
 )
 
-type launchedChildren struct{ host, log <-chan error }
+type launchedChildren struct {
+	host, log <-chan error
+	// exit records the host child's exit for the failure UX without taking
+	// the value off host, which callers still read.
+	exit *hostExit
+}
 
 func launchDetached(ctx context.Context, appPath, dataDir string, env []string) (launchedChildren, error) {
 	appPath, err := filepath.EvalSymlinks(appPath)
@@ -50,20 +54,29 @@ func launchDetached(ctx context.Context, appPath, dataDir string, env []string) 
 	if err != nil {
 		return launchedChildren{log: logDone}, fmt.Errorf("start host: %w", err)
 	}
-	return launchedChildren{host: reap(host), log: logDone}, nil
+	hostDone, exit := reapHost(host)
+	return launchedChildren{host: hostDone, log: logDone, exit: exit}, nil
 }
 
-var errChildExited = errors.New("host child exited unsuccessfully")
-
 func reap(process *os.Process) <-chan error {
+	done, _ := reapHost(process)
+	return done
+}
+
+// reapHost waits for the process and reports its exit twice: on the channel
+// the lifecycle callers drain, and on the exit record the manager peeks.
+func reapHost(process *os.Process) (<-chan error, *hostExit) {
 	done := make(chan error, 1)
+	exit := &hostExit{done: make(chan struct{})}
 	go func() {
 		state, err := process.Wait()
 		if err == nil && !state.Success() {
-			err = errChildExited
+			err = &HostExitError{Code: state.ExitCode()}
 		}
+		exit.err = err
+		close(exit.done)
 		done <- err
 		close(done)
 	}()
-	return done
+	return done, exit
 }

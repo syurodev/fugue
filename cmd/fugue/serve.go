@@ -17,6 +17,8 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
+	"github.com/syurodev/fugue/internal/storage"
+	"github.com/syurodev/fugue/pkg/client"
 )
 
 // The exit codes of a serve run (cli §5.2).
@@ -99,7 +101,7 @@ func serve(ctx context.Context, out io.Writer, cfg config.Config, version string
 	bridge := app.VendorBridge{Binary: self, Socket: sock.Path}
 	hp, err := app.StartHost(ctx, hostDeps(cfg, version, opts.idleGrace, clk, transport, bridge))
 	if err != nil {
-		return exitFailure, errors.Join(startupErr(err, "open the host store"), teardownSocket(sock))
+		return startupExitCode(err), errors.Join(startupErr(err, "open the host store"), teardownSocket(sock))
 	}
 	if err := srv.Start(ctx, hp.Runtime()); err != nil {
 		return exitFailure, errors.Join(startupErr(err, "serve the host api"), teardownHost(hp, cfg.DataDir, sock))
@@ -187,6 +189,20 @@ func exitForSignal(sig os.Signal) (string, int) {
 		return "interrupt", exitInterrupted
 	}
 	return "terminated", exitOK
+}
+
+// startupExitCode maps a store-open failure onto the exit code a launching
+// client reads: a held data directory and an unsupported schema each have
+// their own, everything else is the generic failure.
+func startupExitCode(err error) int {
+	switch {
+	case errors.Is(err, storage.ErrDataDirLocked):
+		return client.ExitDataDirInUse
+	case errors.Is(err, storage.ErrSchemaUnsupported):
+		return client.ExitStoreUnsupported
+	default:
+		return exitFailure
+	}
 }
 
 // startupErr re-wraps a startup failure under its own public code, so a

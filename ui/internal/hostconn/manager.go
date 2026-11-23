@@ -287,6 +287,11 @@ func (m *Manager) run(ctx context.Context) {
 		case isVersionMismatch(err):
 			m.setState(ctx, StateIncompatible, err.Error())
 			return
+		case refusalReason(err) != "":
+			// A launched host the data directory refused does not heal by
+			// retrying: the window names the cause and what clears it.
+			m.setState(ctx, StateDisconnected, refusalReason(err))
+			return
 		case errors.Is(err, ErrStartupTimeout):
 			m.setState(ctx, StateDisconnected, err.Error())
 			return
@@ -356,9 +361,16 @@ func (m *Manager) dial(ctx context.Context) (*client.Client, error) {
 		return m.dialOnce(ctx, false)
 	}
 	launched := false
+	watch := &launchWatch{}
 	return waitForHost(ctx, m.clock(), func(callCtx context.Context) (*client.Client, error) {
 		conn, err := m.dialOnce(callCtx, true)
-		if !errors.Is(err, client.ErrHostNotRunning) || launched {
+		if !errors.Is(err, client.ErrHostNotRunning) {
+			return conn, err
+		}
+		if launched {
+			if refused := watch.failure(); refused != nil {
+				return nil, refused
+			}
 			return conn, err
 		}
 		path := m.cfg.ExecutablePath
@@ -376,6 +388,7 @@ func (m *Manager) dial(ctx context.Context) (*client.Client, error) {
 		m.children = children
 		m.mu.Unlock()
 		launched = true
+		watch.exit = children.exit
 		return nil, client.ErrHostNotRunning
 	})
 }

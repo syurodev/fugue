@@ -26,6 +26,32 @@ type TranscriptDelta struct {
 	View         TranscriptView
 }
 
+// TranscriptState is one transcript topic state event: where a turn or the
+// session stands, with the stop proof a close recorded (activation §3: a
+// close the host could not prove stopped is the hung-worker row).
+type TranscriptState struct {
+	TurnID        string
+	State         string
+	WaitingReason string
+	Outcome       string
+	FailureCode   string
+	StopProof     string
+	TurnOrigin    string
+}
+
+// DecodeTranscriptState decodes the transcript topic's state event.
+func DecodeTranscriptState(payload []byte) (TranscriptState, error) {
+	var wire transcriptv1.TranscriptStateEvent
+	if err := proto.Unmarshal(payload, &wire); err != nil {
+		return TranscriptState{}, fmt.Errorf("decode the transcript state event: %w", err)
+	}
+	return TranscriptState{
+		TurnID: wire.GetTurnId(), State: wire.GetState(), WaitingReason: wire.GetWaitingReason(),
+		Outcome: wire.GetOutcome(), FailureCode: wire.GetFailureCode(), StopProof: wire.GetStopProof(),
+		TurnOrigin: wire.GetTurnOrigin(),
+	}, nil
+}
+
 // DecodeTranscriptSnapshot decodes the transcript topic's snapshot payload.
 func DecodeTranscriptSnapshot(payload []byte) (TranscriptTopicSnapshot, error) {
 	var wire transcriptv1.TranscriptSnapshot

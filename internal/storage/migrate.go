@@ -18,6 +18,12 @@ import (
 //go:embed migrations/*.sql
 var embeddedMigrations embed.FS
 
+// ErrSchemaUnsupported is the cause behind a store whose recorded schema this
+// binary cannot serve: it holds more migrations than the binary knows, or
+// ones that differ from the binary's own. The host refuses to start on it and
+// the data stays untouched; the way out is a newer Fugue (activation §3).
+var ErrSchemaUnsupported = errcode.New(errcode.FailedPrecondition, "data directory schema is not supported by this Fugue")
+
 // Migration is a single forward-only SQL schema migration.
 type Migration struct {
 	Version int
@@ -156,20 +162,22 @@ func RunMigrations(ctx context.Context, db *sql.DB, clk clock.Clock, migrations 
 		return err
 	}
 	if len(applied) > len(copied) {
-		return errcode.New(
+		return errcode.Wrap(
 			errcode.FailedPrecondition,
 			fmt.Sprintf("database has %d applied migrations, binary only knows %d", len(applied), len(copied)),
+			ErrSchemaUnsupported,
 		)
 	}
 	for i, existing := range applied {
 		expected := copied[i]
 		if existing.Version != expected.Version || existing.Name != expected.Name {
-			return errcode.New(
+			return errcode.Wrap(
 				errcode.FailedPrecondition,
 				fmt.Sprintf(
 					"applied migration %d (%s) does not match expected %d (%s)",
 					existing.Version, existing.Name, expected.Version, expected.Name,
 				),
+				ErrSchemaUnsupported,
 			)
 		}
 	}
