@@ -202,6 +202,24 @@ func setupMultiAccountTeam(t *testing.T, ctx context.Context, h *multiAcctHarnes
 	}
 }
 
+// waitIntroPersisted waits until the actor has finished the intro send, not
+// only until the adapter saw it: the actor appends the turn and the user item
+// to the session log after Send returns, and a test append in that window
+// makes the actor fail the send and the task (failed(intro)).
+func waitIntroPersisted(t *testing.T, ctx context.Context, h *multiAcctHarness, sessionID string) {
+	t.Helper()
+	testutil.Spin(t, "initial intro persisted", func() bool {
+		if len(h.sends.snapshot()) < 1 {
+			return false
+		}
+		items, err := h.f.store.Transcript(ctx, sessionID, 0, 10)
+		if err != nil {
+			t.Fatalf("Transcript(%s): %v", sessionID, err)
+		}
+		return len(items) > 0
+	})
+}
+
 func seedQuotaWorktreeAndProgress(t *testing.T, ctx context.Context, h *multiAcctHarness, origTask *vendorstore.TaskRecord) {
 	t.Helper()
 	wt1, wtErr := gitops.TaskWorktreePath(h.dataDir, repoIDFor(h.repoDir), gitTaskID(origTask.TaskID))
@@ -296,9 +314,7 @@ func TestQuotaExhaustionReassignsTaskToAnotherAccountWithDiffAndSummary(t *testi
 	if origTask.State != vendorstore.TaskStateRunning {
 		t.Fatalf("initial task state = %s, want running", origTask.State)
 	}
-	testutil.Spin(t, "initial intro delivered", func() bool {
-		return len(h.sends.snapshot()) >= 1
-	})
+	waitIntroPersisted(t, ctx, h, origTask.SessionID)
 	sess1 := mustSessionSnapshot(t, ctx, h, origTask.SessionID)
 	if sess1.AccountID != vendorDefaultAccount {
 		t.Fatalf("initial session AccountID = %q, want %q", sess1.AccountID, vendorDefaultAccount)
