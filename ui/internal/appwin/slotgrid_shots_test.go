@@ -150,14 +150,13 @@ func renderSlotGridShot(t *testing.T, _ *headless.Window, spec shotSpec) *image.
 // both regular columns while the main slot stayed.
 func TestSlotGridShellRendersAndShowsTheEvidence(t *testing.T) {
 	t.Parallel()
-	// The model behind the narrow scene: 700 dp of window minus rail and
-	// sidebar cannot fit two regular columns at their 300 dp minimums, and
-	// the main slot's column never folds (DA-E09).
-	plan := PlanFold(700-48-240, true, 3)
+	// The model behind the narrow scene: a 700 dp window cannot fit two regular columns at their 300 dp
+	// minimums, and the main slot's column never folds (DA-E09).
+	plan := PlanFold(700, true, 3)
 	if plan.FoldedCols != 2 {
 		t.Fatalf("narrow plan folded %d columns, want both regular ones", plan.FoldedCols)
 	}
-	if wide := PlanFold(1800-48-240, true, 3); wide.FoldedCols != 0 || wide.TempSidebarFolded {
+	if wide := PlanFold(1800, true, 3); wide.FoldedCols != 0 || wide.TempSidebarFolded {
 		t.Fatalf("the wide scene folded: %+v", wide)
 	}
 

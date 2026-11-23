@@ -114,13 +114,8 @@ func (s *screens) toggleCompanion(kind SlotKind) {
 // layoutShellBody lays out rail, sidebar and the grid container; a
 // width-driven sidebar fold removes the sidebar before the grid measures.
 func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dimensions {
-	railW := gtx.Dp(theme.RailWidth)
+	plan := s.planShell(gtx)
 	sidebarOpen := s.sidebarVisible()
-	gridW := gtx.Constraints.Max.X - railW
-	if sidebarOpen {
-		gridW -= gtx.Dp(theme.SidebarWidth)
-	}
-	plan := PlanFold(pxToDp(gtx, gridW), sidebarOpen, len(s.grid.doc.Columns))
 	if plan.TempSidebarFolded {
 		sidebarOpen = false
 	}
@@ -147,6 +142,15 @@ func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dime
 			return s.layoutGridContainer(&local, env, plan)
 		}),
 	)
+}
+
+// planShell derives the narrow-window fold for the shell body. The plan
+// compares the window's width against the shell's minimums, which already
+// include the rail and the sidebar; drawWindow's side insets are part of the
+// window, not of the shell body, so they are added back here.
+func (s *screens) planShell(gtx *layout.Context) PlanFoldResult {
+	windowW := gtx.Constraints.Max.X + 2*gtx.Dp(theme.SpaceLG)
+	return PlanFold(pxToDp(gtx, windowW), s.sidebarVisible(), len(s.grid.doc.Columns))
 }
 
 // sidebarVisible is the sidebar's user state: the persisted collapsed flag.
