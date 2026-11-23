@@ -23,6 +23,7 @@ type teamChannelComposer struct {
 	drafts            map[string]string
 	thread, dismissed string
 	direct            string
+	posting           uint64
 }
 
 func newTeamChannelComposer() *teamChannelComposer {
@@ -120,7 +121,7 @@ func (c *teamChannelComposer) layout(gtx *layout.Context, env *kit.Env, s *scree
 		}),
 		layout.Rigid(layout.Spacer{Width: theme.SpaceSM}.Layout),
 		c.mentionAction(gtx, env, s, props.Disabled),
-		channelButton(env, s, c.send, kit.ButtonProps{Text: sendLabelText, Variant: kit.Primary, Size: kit.SizeSM, Disabled: props.Disabled || strings.TrimSpace(c.area.Text()) == ""}, func() {
+		channelButton(env, s, c.send, kit.ButtonProps{Text: sendLabelText, Variant: kit.Primary, Size: kit.SizeSM, Busy: c.posting != 0, Disabled: props.Disabled || strings.TrimSpace(c.area.Text()) == ""}, func() {
 			submit = true
 		}),
 	)
@@ -170,8 +171,11 @@ func (c *teamChannelComposer) submit(s *screens, teamID string, threads []teamCh
 		c.area.MarkSubmitted()
 		return
 	}
-	if s.postTeamMessage(teamID, c.thread, to, body) {
-		c.area.SetText("")
+	if c.posting != 0 {
+		return
+	}
+	// The draft stays until the host accepts the post (see finishTeamPost).
+	if c.posting = s.postTeamMessage(c, teamID, c.thread, to, body); c.posting != 0 {
 		c.menu.Close()
 	}
 }

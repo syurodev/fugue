@@ -110,6 +110,7 @@ func (s *screens) proposalView(req *client.PendingInteraction) (client.TeamView,
 	for id := range s.teamViews {
 		view := s.teamViews[id]
 		if view.PendingRequestID == req.RequestID && view.Summary.SessionID == req.SessionID {
+			s.requestTeam(id) // the card being drawn keeps the team stream open
 			return view, !view.VaultLocked
 		}
 	}

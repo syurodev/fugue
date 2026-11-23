@@ -31,6 +31,7 @@ type teamBoardState struct {
 	tabs      *kit.TabsState
 	status    *kit.TagState
 	tab, jump string
+	retry     *kit.ButtonState
 }
 
 func (s *screens) boardFor(key teamBoardKey) *teamBoardState {
@@ -44,7 +45,7 @@ func (s *screens) boardFor(key teamBoardKey) *teamBoardState {
 			read = make(map[string]int64)
 		}
 		s.teamRead[key.team] = read
-		board = &teamBoardState{channel: newTeamChannelPane(read), tabs: kit.NewTabsState(), status: kit.NewTagState(), tab: tabChannel}
+		board = &teamBoardState{channel: newTeamChannelPane(read), tabs: kit.NewTabsState(), status: kit.NewTagState(), tab: tabChannel, retry: kit.NewButtonState()}
 		board.channel.teamID = key.team
 		s.teamBoards[key] = board
 	}
@@ -56,14 +57,14 @@ func (s *screens) layoutTeamBoard(gtx *layout.Context, env *kit.Env, key teamBoa
 		return teamText(gtx, env, "Select a team in the sidebar.")
 	}
 	s.requestTeam(key.team)
+	board := s.boardFor(key)
 	view, ok := s.teamViews[key.team]
 	if !ok {
 		if s.failedTeamRead(team.Read, key.team, "") {
-			return teamText(gtx, env, "Team unavailable.")
+			return s.layoutTeamRetry(gtx, env, board.retry, "Team unavailable.", team.Read, key.team, "")
 		}
 		return teamText(gtx, env, "Loading team…")
 	}
-	board := s.boardFor(key)
 	return layout.Inset{Top: theme.SpaceXL, Bottom: theme.SpaceLG, Left: theme.SpaceXL, Right: theme.SpaceXL}.Layout(*gtx, func(g layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(g,
 			rigidWidget(func(g *layout.Context) layout.Dimensions { return s.layoutTeamBoardHeader(g, env, &view, board) }),
@@ -146,6 +147,20 @@ func (s *screens) layoutTeamsSidebar(gtx *layout.Context, env *kit.Env) layout.D
 			}),
 		)
 	})
+}
+
+// layoutTeamRetry shows a failure message with a Retry button that queues the
+// failed read again.
+func (s *screens) layoutTeamRetry(gtx *layout.Context, env *kit.Env, retry *kit.ButtonState, text string, op team.Operation, id, task string) layout.Dimensions {
+	local := *gtx
+	local.Constraints.Min.Y = 0
+	return layout.Flex{Alignment: layout.Middle}.Layout(local,
+		layout.Flexed(1, func(g layout.Context) layout.Dimensions { return teamText(&g, env, text) }),
+		spacerW(theme.SpaceMD),
+		channelButton(env, s, retry, kit.ButtonProps{Text: "Retry", Size: kit.SizeSM}, func() {
+			s.retryTeamRead(op, id, task)
+		}),
+	)
 }
 
 func teamText(gtx *layout.Context, env *kit.Env, text string) layout.Dimensions {

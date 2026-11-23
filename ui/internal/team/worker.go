@@ -27,6 +27,9 @@ type Request struct {
 	Team, Task, Thread, Text, Decision string
 	Before                             int64
 	Epoch                              uint64
+	// Ref is an opaque caller token echoed back on the Result so a Post can be
+	// matched to the composer that sent it.
+	Ref uint64
 }
 
 // Result returns the response together with the request's routing metadata.
@@ -35,6 +38,7 @@ type Result struct {
 	Team, Task string
 	Before     int64
 	Epoch      uint64
+	Ref        uint64
 	Summaries  []client.TeamSummary
 	View       client.TeamView
 	Lines      []client.ChannelLine
@@ -114,7 +118,7 @@ func (w *Worker) run(ctx context.Context) {
 }
 
 func execute(ctx context.Context, host Client, req *Request, newID func() string) Result {
-	res := Result{Op: req.Op, Team: req.Team, Task: req.Task, Before: req.Before, Epoch: req.Epoch}
+	res := Result{Op: req.Op, Team: req.Team, Task: req.Task, Before: req.Before, Epoch: req.Epoch, Ref: req.Ref}
 	if host == nil {
 		res.Err = client.ErrDisconnected
 		return res

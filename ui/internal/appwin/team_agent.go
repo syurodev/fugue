@@ -27,6 +27,7 @@ type teamAgentDetail struct {
 	diffLayout mdview.State
 	diffList   layout.List
 	inbox      *kit.ButtonState
+	retry      *kit.ButtonState
 }
 
 func (s *screens) teamDetail(id, task string) *teamAgentDetail {
@@ -35,7 +36,7 @@ func (s *screens) teamDetail(id, task string) *teamAgentDetail {
 	if detail == nil {
 		detail = &teamAgentDetail{
 			section: kit.NewTabsState(), selected: "transcript", message: newTeamChannelComposer(),
-			inbox: kit.NewButtonState(), diffList: layout.List{Axis: layout.Vertical},
+			inbox: kit.NewButtonState(), retry: kit.NewButtonState(), diffList: layout.List{Axis: layout.Vertical},
 			recovery: []*kit.ButtonState{kit.NewButtonState(), kit.NewButtonState(), kit.NewButtonState()},
 		}
 		s.teamAgents[key] = detail
@@ -188,7 +189,7 @@ func (s *screens) layoutTeamReview(gtx *layout.Context, env *kit.Env, detail *te
 func (s *screens) layoutAgentDiff(gtx *layout.Context, env *kit.Env, id, task string, detail *teamAgentDetail) layout.Dimensions {
 	if detail.view == nil {
 		if s.failedTeamRead(team.Diff, id, task) {
-			return teamText(gtx, env, "Diff unavailable.")
+			return s.layoutTeamRetry(gtx, env, detail.retry, "Diff unavailable.", team.Diff, id, task)
 		}
 		s.queueTeam(team.Request{Op: team.Diff, Team: id, Task: task})
 		return teamText(gtx, env, "Loading diff…")

@@ -391,6 +391,7 @@ func (s *screens) anyFloatLayerOpen() bool {
 // fit).
 func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 	s.layoutShell(gtx, env)
+	s.releaseTeamTopics()
 }
 
 // layoutTranscript draws the transcript pane and, under it, the composer
