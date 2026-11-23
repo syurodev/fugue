@@ -6,6 +6,7 @@ import (
 
 	"gioui.org/io/event"
 	"gioui.org/layout"
+	"gioui.org/op"
 
 	"github.com/syurodev/fugue/pkg/client"
 
@@ -59,6 +60,9 @@ type startFlow struct {
 	// (§6.17); lastErr is the failure the dialog could not act on.
 	busy    bool
 	lastErr string
+	// refused marks lastErr as a refusal the user can act on (the session
+	// cap), drawn as a warning rather than a fault.
+	refused bool
 }
 
 // newStartFlow builds the flow's kit state. The flow is shared state the
@@ -80,7 +84,7 @@ func newStartFlow() *startFlow {
 // open opens the dialog and arms the workspace list read.
 func (f *startFlow) open(sc *screens) {
 	f.dialog.Open()
-	f.lastErr = ""
+	f.lastErr, f.refused = "", false
 	sc.requestWorkspaces()
 }
 
@@ -130,15 +134,6 @@ func (f *startFlow) detailLoading(sc *screens) bool {
 // loaded so Start can submit safely.
 func (f *startFlow) canStart(sc *screens) bool {
 	return f.wsID != "" && !f.detailLoading(sc)
-}
-
-// startPosted folds a start post's result in: the busy mark clears, a
-// failure shows.
-func (f *startFlow) startPosted(err error) {
-	f.busy = false
-	if err != nil {
-		f.lastErr = err.Error()
-	}
 }
 
 // dirty reports a form with input, which refuses Escape (§6.17).
@@ -201,7 +196,7 @@ func (f *startFlow) pausedReason(sc *screens) string {
 	if until := formatPausedUntil(acc.PausedUntil); until != "" {
 		msg += " until " + until
 	}
-	return msg + ". The vendor reported this time; starts wait until the account resumes."
+	return msg + ". The vendor reported this time; start a session once the account resumes."
 }
 
 // startBlocked reports a start the flow refuses up front so the button does
@@ -279,7 +274,7 @@ func (f *startFlow) submit(sc *screens, c *composer) {
 	profile := client.SessionProfile{Model: strings.TrimSpace(f.model.Text()), Effort: f.effortValue()}
 	c.poster.StartSession(f.vendorName(), f.wsID, f.rootName(sc), profile)
 	f.busy = true
-	f.lastErr = ""
+	f.lastErr, f.refused = "", false
 }
 
 // fieldLay lays one dialog field out at the body's width and declares its
@@ -296,7 +291,11 @@ func (f *startFlow) body(env *kit.Env, gtx *layout.Context, bands *kit.DialogBan
 	lay := func(tag event.Tag, draw func(gtx *layout.Context) (layout.Dimensions, error)) {
 		local := *gtx
 		local.Constraints.Min.X = w
+		// Each field paints at its own y: the recorded body ops all start at
+		// the body's origin, so without the offset they stack on the first.
+		off := op.Offset(image.Pt(0, y)).Push(local.Ops)
 		dims, err := draw(&local)
+		off.Pop()
 		if err != nil {
 			sc.fail(err)
 		}
@@ -438,7 +437,11 @@ func (f *startFlow) layError(env *kit.Env, w int, lay fieldLay) {
 	lay(nil, func(gtx *layout.Context) (layout.Dimensions, error) {
 		local := *gtx
 		local.Constraints.Min.X = w
-		dims := kit.Paragraph(env, &local, theme.TypeSmall(), env.Th.Status().Danger, f.lastErr)
+		tone := env.Th.Status().Danger
+		if f.refused {
+			tone = env.Th.Status().Warning
+		}
+		dims := kit.Paragraph(env, &local, theme.TypeSmall(), tone, f.lastErr)
 		return layout.Dimensions{Size: dims.Size}, nil
 	})
 }

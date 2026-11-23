@@ -106,15 +106,21 @@ jobs:
           go-version-file: go.mod
       - run: go tool task arch
 
-  # Linux tests run for every code change; macOS tests run when the change is
-  # platform-specific (fuguegate changes) and after every merge (main.yml).
-  # The macOS entry is a separate job gated by `if`, not a matrix entry decided
-  # by a step, so it requests no runner when it has nothing to do (see the
-  # notice step of the changes job for why). Linux keeps the in-step decision:
-  # the job runs on every PR, so the required check reports success as before.
+  # PR tests are paused (quality-gates section 11, 2026-11-23): test, stress
+  # and coverage run on every release tag (build.yml), on every merge for macOS
+  # (main.yml) and nightly. The repository variable PR_TESTS=on turns them back
+  # on without a workflow change. A job skipped by `if` requests no runner and
+  # reports under its literal name; a skipped check counts as success for the
+  # required status checks, so every required check still reports.
+  # When on: Linux tests run for every code change; macOS tests run when the
+  # change is platform-specific (fuguegate changes). The macOS entry is a
+  # separate job gated by `if`, not a matrix entry decided by a step, so it
+  # requests no runner when it has nothing to do (see the notice step of the
+  # changes job for why).
   test:
     name: test (ubuntu-latest)
     needs: changes
+    if: vars.PR_TESTS == 'on'
     runs-on: ubuntu-latest
     steps:
       - id: decide
@@ -159,7 +165,7 @@ jobs:
   test-macos:
     name: test (macos-latest)
     needs: changes
-    if: needs.changes.outputs.code == 'true' && needs.changes.outputs.platform == 'true'
+    if: vars.PR_TESTS == 'on' && needs.changes.outputs.code == 'true' && needs.changes.outputs.platform == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -182,6 +188,7 @@ jobs:
   stress:
     name: stress (ubuntu-latest)
     needs: changes
+    if: vars.PR_TESTS == 'on'
     runs-on: ubuntu-latest
     steps:
       - id: decide
@@ -219,7 +226,7 @@ jobs:
   stress-macos:
     name: stress (macos-latest)
     needs: changes
-    if: needs.changes.outputs.test_pkgs != '' && needs.changes.outputs.test_run != '' && needs.changes.outputs.platform == 'true'
+    if: vars.PR_TESTS == 'on' && needs.changes.outputs.test_pkgs != '' && needs.changes.outputs.test_run != '' && needs.changes.outputs.platform == 'true'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -236,6 +243,7 @@ jobs:
 
   coverage:
     needs: [changes, test]
+    if: vars.PR_TESTS == 'on'
     runs-on: ubuntu-latest
     steps:
       - if: needs.changes.outputs.code != 'true'

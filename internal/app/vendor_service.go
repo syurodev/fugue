@@ -474,7 +474,9 @@ func publicVendorError(err error) error {
 	case errors.Is(err, vendorstore.ErrSessionNotFound):
 		return errcode.New(errcode.VendorSessionNotFound, "the vendor session is not live")
 	case errors.Is(err, ErrVendorSessionCapacity):
-		return errcode.New(errcode.VendorCapacity, "the host already runs the maximum number of vendor sessions")
+		// The typed capacity error rides as the cause so the Host API can
+		// carry its counts in the error detail; they are plain numbers.
+		return errcode.Wrap(errcode.VendorCapacity, "the host already runs the maximum number of vendor sessions", err)
 	case errors.Is(err, vendor.ErrTurnNotRunning):
 		return errcode.New(errcode.VendorTurnNotActive, "no vendor turn is running")
 	}

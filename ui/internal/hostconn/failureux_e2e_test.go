@@ -167,7 +167,7 @@ func (h *testHost) restartServeWithFakeVendor(t *testing.T, ctx context.Context,
 // alone, and nothing else on it may shadow the fake. The child sees exactly
 // one PATH and one data-dir pair — the inherited entries are filtered out
 // before the test's own land.
-func serveWithFakeVendorOn(t *testing.T, ctx context.Context, bin, dataDir, runtime, fakeDir string) *testHost {
+func serveWithFakeVendorOn(t *testing.T, ctx context.Context, bin, dataDir, runtime, fakeDir string, extraEnv ...string) *testHost {
 	t.Helper()
 	kept := make([]string, 0, len(os.Environ()))
 	for _, kv := range os.Environ() {
@@ -184,7 +184,7 @@ func serveWithFakeVendorOn(t *testing.T, ctx context.Context, bin, dataDir, runt
 		"SYNX_FUGUE_DATA_DIR=" + dataDir,
 		"XDG_RUNTIME_DIR=" + runtime,
 		"PATH=" + fakeDir,
-	})
+	}, extraEnv)
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
 	}

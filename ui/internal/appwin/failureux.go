@@ -50,6 +50,9 @@ type failureUX struct {
 	// A read replaces the carry wholesale — the probe is the authority on the
 	// CLIs.
 	carry probeCarry
+	// refusal is the host launch's refusal of a writable executable, nil
+	// when there is none; layout reads it from the manager each frame.
+	refusal *hostconn.WritableExecutableError
 	// dismissals pin a dismissed warning banner to the answer that showed it:
 	// the banner returns when a later read reports a different vendor or
 	// version, and never ghosts back mid-answer.
@@ -130,7 +133,9 @@ func (f *failureUX) applyProbe(probes []client.VendorProbe, err error) {
 // applyEvents and applyProbe.
 func (f *failureUX) specs(state hostconn.State, reason, dataDir string, hasOpen bool, openSess session.Session) []bannerSpec {
 	specs := make([]bannerSpec, 0, 4)
-	if state == hostconn.StateDisconnected {
+	if state == hostconn.StateDisconnected && f.refusal != nil {
+		specs = append(specs, f.refusalSpec())
+	} else if state == hostconn.StateDisconnected {
 		msg := "Fugue reconnects on its own and replays what it missed."
 		if reason != "" {
 			msg = reason + ". " + msg
@@ -184,11 +189,25 @@ func (f *failureUX) specs(state hostconn.State, reason, dataDir string, hasOpen 
 	return specs
 }
 
+// refusalSpec is the banner for a refused writable executable. Retrying cannot
+// heal it, so it skips the reconnect promise and names the path and the
+// command that fixes it.
+func (f *failureUX) refusalSpec() bannerSpec {
+	return bannerSpec{
+		st: f.conn, kind: kit.BannerDanger,
+		title: "Fugue refused to start the core",
+		message: f.refusal.Path + " or its directory is writable by other users. Fix it with `" +
+			f.refusal.Fix() + "`, then restart Fugue.",
+		visible: true,
+	}
+}
+
 // layout draws the visible banners stacked at the top of the window and folds
 // their events in, returning the stack's dimensions.
 func (f *failureUX) layout(env *kit.Env, gtx *layout.Context, sc *screens) layout.Dimensions {
 	state, reason := sc.m.State()
 	sess, hasOpen := sc.sidebar.Lookup(sc.open)
+	f.refusal = sc.m.Refusal()
 	specs := f.specs(state, reason, sc.m.DataDir(), hasOpen, sess)
 	if len(specs) == 0 {
 		return layout.Dimensions{}

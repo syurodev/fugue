@@ -30,8 +30,11 @@ func (m *VendorSessions) reserveSlot(ctx context.Context, sessionID, vendorName,
 	if err != nil {
 		return nil, err
 	}
-	if total >= tiers.MachineWide || byAccount[key] >= tiers.PerAccount {
-		return nil, ErrVendorSessionCapacity
+	if total >= tiers.MachineWide {
+		return nil, &SessionCapacityError{Running: total, Limit: tiers.MachineWide, Scope: CapacityScopeMachine}
+	}
+	if byAccount[key] >= tiers.PerAccount {
+		return nil, &SessionCapacityError{Running: byAccount[key], Limit: tiers.PerAccount, Scope: CapacityScopeAccount}
 	}
 	m.mu.Lock()
 	if m.closed || m.actors[sessionID] != nil || m.hasReservationLocked(sessionID) {
