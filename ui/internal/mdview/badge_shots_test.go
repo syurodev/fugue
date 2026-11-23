@@ -18,6 +18,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/glwin"
 	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/shottest"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
@@ -129,6 +130,7 @@ func TestFileBadgeShotsRender(t *testing.T) {
 		if isUniformRGBA(img) {
 			t.Fatalf("shot %s rendered uniform image", spec.name)
 		}
+		shottest.Compare(t, spec.name, img)
 		rendered[spec.name] = img
 	}
 	if bytes.Equal(rendered["file-badges-light-ui100"].Pix, rendered["file-badges-dark-ui100"].Pix) {

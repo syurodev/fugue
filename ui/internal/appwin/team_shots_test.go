@@ -11,6 +11,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/glwin"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
+	"github.com/syurodev/fugue/ui/internal/shottest"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
@@ -132,6 +133,6 @@ func renderTeamShot(t *testing.T, spec shotSpec) *image.RGBA {
 func TestTeamBoardShots(t *testing.T) {
 	t.Parallel()
 	for _, spec := range teamShots() {
-		renderTeamShot(t, spec)
+		shottest.Compare(t, spec.name, renderTeamShot(t, spec))
 	}
 }

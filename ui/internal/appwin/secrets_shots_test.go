@@ -12,6 +12,7 @@ import (
 
 	"github.com/syurodev/fugue/ui/internal/glwin"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
+	"github.com/syurodev/fugue/ui/internal/shottest"
 	"github.com/syurodev/fugue/ui/internal/vault"
 )
 
@@ -134,6 +135,7 @@ func TestSecretsAndInboxSecretQuestionShots(t *testing.T) {
 	rendered := map[string]*image.RGBA{}
 	for _, spec := range secretsShotSpecs() {
 		img := renderSecretsShot(t, win, spec)
+		shottest.Compare(t, spec.name, img)
 		if isUniformRGBA(img) {
 			t.Fatalf("secrets shot %s is blank/uniform", spec.name)
 		}

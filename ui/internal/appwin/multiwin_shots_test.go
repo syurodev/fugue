@@ -14,6 +14,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/glwin"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/session"
+	"github.com/syurodev/fugue/ui/internal/shottest"
 	"github.com/syurodev/fugue/ui/internal/vault"
 	"github.com/syurodev/fugue/ui/internal/workspace"
 )
@@ -40,6 +41,7 @@ func TestMultiWindowShotsRender(t *testing.T) {
 		if isUniformRGBA(shot.img) {
 			t.Fatalf("multi-window shot %s rendered a blank image", shot.name)
 		}
+		shottest.Compare(t, shot.name, shot.img)
 	}
 }
 

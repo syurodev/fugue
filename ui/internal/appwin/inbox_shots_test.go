@@ -24,6 +24,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/inbox"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
+	"github.com/syurodev/fugue/ui/internal/shottest"
 	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/vault"
 	"github.com/syurodev/fugue/ui/internal/workspace"
@@ -166,6 +167,7 @@ func TestInboxConfirmShowsFullDetailAndDefaultsToSafeChoice(t *testing.T) {
 	rendered := map[string]*image.RGBA{}
 	for _, spec := range inboxShotSpecs() {
 		img := renderInboxShot(t, win, spec)
+		shottest.Compare(t, spec.name, img)
 		if isUniformRGBA(img) {
 			t.Fatalf("inbox shot %s is blank/uniform", spec.name)
 		}

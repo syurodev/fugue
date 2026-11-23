@@ -12,6 +12,7 @@ import (
 
 	"github.com/syurodev/fugue/ui/internal/glwin"
 	"github.com/syurodev/fugue/ui/internal/mdview"
+	"github.com/syurodev/fugue/ui/internal/shottest"
 )
 
 const (
@@ -121,6 +122,7 @@ func TestViewerShotsRender(t *testing.T) {
 	rendered := map[string]*image.RGBA{}
 	for _, spec := range viewerShotSpecs() {
 		img := renderViewerShot(t, win, spec)
+		shottest.Compare(t, spec.name, img)
 		if isUniformRGBA(img) {
 			t.Fatalf("viewer shot %s rendered uniform/blank image", spec.name)
 		}

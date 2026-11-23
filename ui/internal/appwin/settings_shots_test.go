@@ -12,6 +12,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/settings"
+	"github.com/syurodev/fugue/ui/internal/shottest"
 	"github.com/syurodev/fugue/ui/internal/vault"
 	"github.com/syurodev/fugue/ui/internal/workspace"
 )
@@ -180,6 +181,7 @@ func TestSettingsShotsRender(t *testing.T) {
 	rendered := map[string]*image.RGBA{}
 	for _, spec := range settingsShotSpecs() {
 		img := renderSettingsShot(t, win, spec)
+		shottest.Compare(t, spec.name, img)
 		if isUniformRGBA(img) {
 			t.Fatalf("settings shot %s rendered uniform/blank image", spec.name)
 		}
