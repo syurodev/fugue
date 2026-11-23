@@ -58,6 +58,7 @@ const (
 	KindUsage            = "usage"
 	KindQuota            = "quota"
 	KindNotice           = "notice"
+	KindTurnDiff         = "turn_diff"
 )
 
 // Tool-call statuses carried in transcript item metadata.
@@ -118,6 +119,15 @@ func validMode(mode string) bool {
 func validToolStatus(status string) bool {
 	switch status {
 	case ToolPending, ToolRunning, ToolSucceeded, ToolFailed, ToolDenied, ToolUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+func validTurnDiffStatus(status string) bool {
+	switch status {
+	case "complete", "partial", "unavailable", "expired":
 		return true
 	default:
 		return false

@@ -36,6 +36,7 @@ const (
 	kindUsage            = "usage"
 	kindQuota            = "quota"
 	kindNotice           = "notice"
+	kindTurnDiff         = "turn_diff"
 )
 
 type expandAnim struct {

@@ -117,6 +117,8 @@ func protoTranscriptMetadata(metadata *app.TranscriptMetadata) *transcriptv1.Tra
 		ResetAt: metadata.ResetAt, Level: metadata.Level, Code: metadata.Code,
 		ContentTruncated: metadata.ContentTruncated, RawTruncated: metadata.RawTruncated,
 		OriginalContentBytes: metadata.OriginalContentBytes, OriginalRawBytes: metadata.OriginalRawBytes,
+		FilesAdded: metadata.FilesAdded, FilesModified: metadata.FilesModified, FilesDeleted: metadata.FilesDeleted,
+		FilesRenamed: metadata.FilesRenamed, Overlapped: metadata.Overlapped,
 	}
 }
 
@@ -157,6 +159,8 @@ func protoTranscriptSpecialKind(kind string) transcriptv1.TranscriptKind {
 		return transcriptv1.TranscriptKind_TRANSCRIPT_KIND_QUOTA
 	case "notice":
 		return transcriptv1.TranscriptKind_TRANSCRIPT_KIND_NOTICE
+	case "turn_diff":
+		return transcriptv1.TranscriptKind_TRANSCRIPT_KIND_TURN_DIFF
 	default:
 		return transcriptv1.TranscriptKind_TRANSCRIPT_KIND_UNSPECIFIED
 	}

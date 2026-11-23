@@ -226,7 +226,7 @@ func layoutCompactCard(env *kit.Env, gtx *layout.Context, st *State, c *cardStat
 
 func knownKind(kind string) bool {
 	switch kind {
-	case kindApproval, kindPlan, kindSubagent, kindCommand, kindTeamProposal, kindTaskLink, kindUsage, kindQuota, kindNotice:
+	case kindApproval, kindPlan, kindSubagent, kindCommand, kindTeamProposal, kindTaskLink, kindUsage, kindQuota, kindNotice, kindTurnDiff:
 		return true
 	default:
 		return false
@@ -250,6 +250,9 @@ func compactHeader(item *session.Item) string {
 		return fmt.Sprintf("quota · %s · %s · %.0f%%", m.Account, m.Window, m.Used*100)
 	case kindNotice:
 		return "notice · " + m.Level + " · " + m.Code
+	case kindTurnDiff:
+		return fmt.Sprintf("turn diff · %s · %d files · +%d -%d", m.Status,
+			m.FilesAdded+m.FilesModified+m.FilesDeleted+m.FilesRenamed, m.LinesAdded, m.LinesRemoved)
 	default:
 		if !knownKindName(item.Kind) {
 			return "Unknown item (kind " + item.Kind + ")"
@@ -261,7 +264,7 @@ func compactHeader(item *session.Item) string {
 func knownKindName(kind string) bool {
 	switch kind {
 	case kindUserMessage, kindAssistantMessage, kindReasoning, kindToolCall, kindFileChange,
-		kindApproval, kindPlan, kindSubagent, kindCommand, kindTeamProposal, kindTaskLink, kindUsage, kindQuota, kindNotice:
+		kindApproval, kindPlan, kindSubagent, kindCommand, kindTeamProposal, kindTaskLink, kindUsage, kindQuota, kindNotice, kindTurnDiff:
 		return true
 	default:
 		return false

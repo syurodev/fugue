@@ -36,6 +36,7 @@ enum TranscriptKind {
   TRANSCRIPT_KIND_USAGE = 12;
   TRANSCRIPT_KIND_QUOTA = 13;
   TRANSCRIPT_KIND_NOTICE = 14;
+  TRANSCRIPT_KIND_TURN_DIFF = 15;
 }
 
 message TranscriptMetadata {
@@ -74,6 +75,11 @@ message TranscriptMetadata {
   bool raw_truncated = 33;
   int64 original_content_bytes = 34;
   int64 original_raw_bytes = 35;
+  int64 files_added = 36;
+  int64 files_modified = 37;
+  int64 files_deleted = 38;
+  int64 files_renamed = 39;
+  bool overlapped = 40;
 }
 message TranscriptFileSummary {
   string header = 1;

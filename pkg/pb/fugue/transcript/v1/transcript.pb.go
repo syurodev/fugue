@@ -39,6 +39,7 @@ const (
 	TranscriptKind_TRANSCRIPT_KIND_USAGE             TranscriptKind = 12
 	TranscriptKind_TRANSCRIPT_KIND_QUOTA             TranscriptKind = 13
 	TranscriptKind_TRANSCRIPT_KIND_NOTICE            TranscriptKind = 14
+	TranscriptKind_TRANSCRIPT_KIND_TURN_DIFF         TranscriptKind = 15
 )
 
 // Enum value maps for TranscriptKind.
@@ -59,6 +60,7 @@ var (
 		12: "TRANSCRIPT_KIND_USAGE",
 		13: "TRANSCRIPT_KIND_QUOTA",
 		14: "TRANSCRIPT_KIND_NOTICE",
+		15: "TRANSCRIPT_KIND_TURN_DIFF",
 	}
 	TranscriptKind_value = map[string]int32{
 		"TRANSCRIPT_KIND_UNSPECIFIED":       0,
@@ -76,6 +78,7 @@ var (
 		"TRANSCRIPT_KIND_USAGE":             12,
 		"TRANSCRIPT_KIND_QUOTA":             13,
 		"TRANSCRIPT_KIND_NOTICE":            14,
+		"TRANSCRIPT_KIND_TURN_DIFF":         15,
 	}
 )
 
@@ -343,6 +346,11 @@ type TranscriptMetadata struct {
 	RawTruncated         bool                   `protobuf:"varint,33,opt,name=raw_truncated,json=rawTruncated,proto3" json:"raw_truncated,omitempty"`
 	OriginalContentBytes int64                  `protobuf:"varint,34,opt,name=original_content_bytes,json=originalContentBytes,proto3" json:"original_content_bytes,omitempty"`
 	OriginalRawBytes     int64                  `protobuf:"varint,35,opt,name=original_raw_bytes,json=originalRawBytes,proto3" json:"original_raw_bytes,omitempty"`
+	FilesAdded           int64                  `protobuf:"varint,36,opt,name=files_added,json=filesAdded,proto3" json:"files_added,omitempty"`
+	FilesModified        int64                  `protobuf:"varint,37,opt,name=files_modified,json=filesModified,proto3" json:"files_modified,omitempty"`
+	FilesDeleted         int64                  `protobuf:"varint,38,opt,name=files_deleted,json=filesDeleted,proto3" json:"files_deleted,omitempty"`
+	FilesRenamed         int64                  `protobuf:"varint,39,opt,name=files_renamed,json=filesRenamed,proto3" json:"files_renamed,omitempty"`
+	Overlapped           bool                   `protobuf:"varint,40,opt,name=overlapped,proto3" json:"overlapped,omitempty"`
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
 }
@@ -620,6 +628,41 @@ func (x *TranscriptMetadata) GetOriginalRawBytes() int64 {
 		return x.OriginalRawBytes
 	}
 	return 0
+}
+
+func (x *TranscriptMetadata) GetFilesAdded() int64 {
+	if x != nil {
+		return x.FilesAdded
+	}
+	return 0
+}
+
+func (x *TranscriptMetadata) GetFilesModified() int64 {
+	if x != nil {
+		return x.FilesModified
+	}
+	return 0
+}
+
+func (x *TranscriptMetadata) GetFilesDeleted() int64 {
+	if x != nil {
+		return x.FilesDeleted
+	}
+	return 0
+}
+
+func (x *TranscriptMetadata) GetFilesRenamed() int64 {
+	if x != nil {
+		return x.FilesRenamed
+	}
+	return 0
+}
+
+func (x *TranscriptMetadata) GetOverlapped() bool {
+	if x != nil {
+		return x.Overlapped
+	}
+	return false
 }
 
 type TranscriptFileSummary struct {
@@ -1525,7 +1568,8 @@ const file_fugue_transcript_v1_transcript_proto_rawDesc = "" +
 	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x17\n" +
 	"\aitem_id\x18\x02 \x01(\tR\x06itemId\"S\n" +
 	"\x16TranscriptItemResponse\x129\n" +
-	"\x04item\x18\x01 \x01(\v2%.fugue.transcript.v1.TranscriptDetailR\x04item\"\xd5\b\n" +
+	"\x04item\x18\x01 \x01(\v2%.fugue.transcript.v1.TranscriptDetailR\x04item\"\x87\n" +
+	"\n" +
 	"\x12TranscriptMetadata\x12\x16\n" +
 	"\x06origin\x18\x01 \x01(\tR\x06origin\x12\x14\n" +
 	"\x05model\x18\x02 \x01(\tR\x05model\x12'\n" +
@@ -1567,7 +1611,15 @@ const file_fugue_transcript_v1_transcript_proto_rawDesc = "" +
 	"\x11content_truncated\x18  \x01(\bR\x10contentTruncated\x12#\n" +
 	"\rraw_truncated\x18! \x01(\bR\frawTruncated\x124\n" +
 	"\x16original_content_bytes\x18\" \x01(\x03R\x14originalContentBytes\x12,\n" +
-	"\x12original_raw_bytes\x18# \x01(\x03R\x10originalRawBytesB\f\n" +
+	"\x12original_raw_bytes\x18# \x01(\x03R\x10originalRawBytes\x12\x1f\n" +
+	"\vfiles_added\x18$ \x01(\x03R\n" +
+	"filesAdded\x12%\n" +
+	"\x0efiles_modified\x18% \x01(\x03R\rfilesModified\x12#\n" +
+	"\rfiles_deleted\x18& \x01(\x03R\ffilesDeleted\x12#\n" +
+	"\rfiles_renamed\x18' \x01(\x03R\ffilesRenamed\x12\x1e\n" +
+	"\n" +
+	"overlapped\x18( \x01(\bR\n" +
+	"overlappedB\f\n" +
 	"\n" +
 	"_exit_code\"_\n" +
 	"\x15TranscriptFileSummary\x12\x16\n" +
@@ -1650,7 +1702,7 @@ const file_fugue_transcript_v1_transcript_proto_rawDesc = "" +
 	"\x0fTranscriptDelta\x12\x17\n" +
 	"\aitem_id\x18\x01 \x01(\tR\x06itemId\x12#\n" +
 	"\rbase_revision\x18\x02 \x01(\x04R\fbaseRevision\x127\n" +
-	"\x04view\x18\x03 \x01(\v2#.fugue.transcript.v1.TranscriptViewR\x04view*\xe0\x03\n" +
+	"\x04view\x18\x03 \x01(\v2#.fugue.transcript.v1.TranscriptViewR\x04view*\xff\x03\n" +
 	"\x0eTranscriptKind\x12\x1f\n" +
 	"\x1bTRANSCRIPT_KIND_UNSPECIFIED\x10\x00\x12 \n" +
 	"\x1cTRANSCRIPT_KIND_USER_MESSAGE\x10\x01\x12%\n" +
@@ -1667,7 +1719,8 @@ const file_fugue_transcript_v1_transcript_proto_rawDesc = "" +
 	"\x19TRANSCRIPT_KIND_TASK_LINK\x10\v\x12\x19\n" +
 	"\x15TRANSCRIPT_KIND_USAGE\x10\f\x12\x19\n" +
 	"\x15TRANSCRIPT_KIND_QUOTA\x10\r\x12\x1a\n" +
-	"\x16TRANSCRIPT_KIND_NOTICE\x10\x0e2\xe9\x01\n" +
+	"\x16TRANSCRIPT_KIND_NOTICE\x10\x0e\x12\x1d\n" +
+	"\x19TRANSCRIPT_KIND_TURN_DIFF\x10\x0f2\xe9\x01\n" +
 	"\x11TranscriptService\x12i\n" +
 	"\x0eTranscriptPage\x12*.fugue.transcript.v1.TranscriptPageRequest\x1a+.fugue.transcript.v1.TranscriptPageResponse\x12i\n" +
 	"\x0eTranscriptItem\x12*.fugue.transcript.v1.TranscriptItemRequest\x1a+.fugue.transcript.v1.TranscriptItemResponseB\xdb\x01\n" +

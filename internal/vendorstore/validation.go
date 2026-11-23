@@ -34,6 +34,7 @@ func validateItemMetadata(item *Item) error {
 		KindUsage:            {"InputTokens", "OutputTokens", "CacheTokens", "Cost"},
 		KindQuota:            {"Account", "Window", "Used", "ResetAt"},
 		KindNotice:           {metadataLevel, "Code"},
+		KindTurnDiff:         {metadataStatus, "FilesAdded", "FilesModified", "FilesDeleted", "FilesRenamed", "LinesAdded", "LinesRemoved", "Overlapped"},
 	}
 	if _, ok := fields[item.Kind]; !ok {
 		return errcode.New(errcode.InvalidArgument, "unknown transcript kind")
@@ -94,6 +95,9 @@ func validateMetadataEnums(item *Item) error {
 		if value != "" && !slices.Contains(enums[field], value) {
 			return errcode.New(errcode.InvalidArgument, "invalid item metadata enum")
 		}
+	}
+	if item.Kind == KindTurnDiff && metadata.Status != "" && !validTurnDiffStatus(metadata.Status) {
+		return errcode.New(errcode.InvalidArgument, "invalid turn diff status")
 	}
 	if item.Kind == KindToolCall && metadata.Status != "" && !validToolStatus(metadata.Status) {
 		return errcode.New(errcode.InvalidArgument, "invalid tool status")

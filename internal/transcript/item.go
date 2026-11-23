@@ -25,6 +25,7 @@ const (
 	Usage            Kind = "usage"
 	Quota            Kind = "quota"
 	Notice           Kind = "notice"
+	TurnDiff         Kind = "turn_diff"
 )
 
 type (
@@ -128,6 +129,37 @@ type (
 	NoticeContent struct{ Text string }
 )
 
+// Turn diff statuses (git-guard §3.2).
+const (
+	TurnDiffComplete    = "complete"
+	TurnDiffPartial     = "partial"
+	TurnDiffUnavailable = "unavailable"
+	TurnDiffExpired     = "expired"
+)
+
+type (
+	// TurnDiffMetadata contains the TurnDiff metadata described in transcript §3:
+	// the status, file counts by change kind, line counts and the overlap flag.
+	TurnDiffMetadata struct {
+		Status                                  string
+		FilesAdded, FilesModified, FilesDeleted int
+		FilesRenamed, LinesAdded, LinesRemoved  int
+		Overlapped                              bool
+	}
+	// TurnDiffFile is one changed path of a turn with its change kind and line
+	// counts; both counts are -1 for a binary file.
+	TurnDiffFile struct {
+		Path, Change   string
+		Added, Removed int
+	}
+	// TurnDiffContent contains the TurnDiff protected content described in
+	// transcript §3. Skipped counts the files a partial snapshot left out.
+	TurnDiffContent struct {
+		Files   []TurnDiffFile
+		Skipped int
+	}
+)
+
 // Item contains stable identity, metadata and protected content.
 type Item struct {
 	ID, SessionID, TurnID                string
@@ -224,6 +256,9 @@ func (UsageContent) transcriptContent() Kind   { return Usage }
 func (QuotaMetadata) transcriptMetadata() Kind { return Quota }
 func (QuotaContent) transcriptContent() Kind   { return Quota }
 
+func (TurnDiffMetadata) transcriptMetadata() Kind { return TurnDiff }
+func (TurnDiffContent) transcriptContent() Kind   { return TurnDiff }
+
 func (NoticeMetadata) transcriptMetadata() Kind { return Notice }
 func (NoticeContent) transcriptContent() Kind   { return Notice }
 
@@ -264,3 +299,7 @@ func (UsageMetadata) valid() bool { return true }
 func (QuotaMetadata) valid() bool { return true }
 
 func (m NoticeMetadata) valid() bool { return valid(m.Level, "info", "warning", "error") }
+
+func (m TurnDiffMetadata) valid() bool {
+	return valid(m.Status, TurnDiffComplete, TurnDiffPartial, TurnDiffUnavailable, TurnDiffExpired)
+}

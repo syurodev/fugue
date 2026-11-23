@@ -218,6 +218,7 @@ func composeVendorSessionManager(
 			return hp.rt.interactions != nil && hp.rt.interactions.owner.HasPendingForSession(sessionID)
 		},
 		Vault: v, Clock: deps.Clock, IDs: deps.IDs, Logger: slog.Default(), OnSessionEnded: endSession, SessionEndSettled: sessionEndSettled,
+		TurnSnapshots:              newEngineTurnSnapshots(deps.DataDir, turnSnapshotGit(ctx, deps), deps.Clock, deps.IDs),
 		TestDelaySpawnRegistration: deps.TestDelaySpawnRegistration,
 		TestOnWaitInflightSpawn:    deps.TestOnWaitInflightSpawn,
 		CrashPoint:                 deps.Config.CrashPoint,

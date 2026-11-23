@@ -48,6 +48,9 @@ type VendorSessionDeps struct {
 	Clock    clock.Clock
 	IDs      ids.Generator
 	Logger   *slog.Logger
+	// TurnSnapshots snapshots the working directory around every turn for the
+	// turn_diff item; nil disables turn snapshots (git-guard §3).
+	TurnSnapshots TurnSnapshotter
 	// OnSessionEnded runs once when a session's actor stops, however it
 	// stopped; the host revokes the session token there.
 	OnSessionEnded func(sessionID string)
@@ -181,6 +184,7 @@ func (m *VendorSessions) startSession(ctx context.Context, session *vendorstore.
 	session.Model = spec.Model
 	session.Effort = spec.Effort
 	actor := newVendorSessionActor(m, session, started, observations)
+	actor.cwd = spec.Cwd
 	if err := m.installActor(session.ID, actor, pending); err != nil {
 		m.closeAndSettlePending(ctx, started, pending)
 		return err
@@ -267,6 +271,7 @@ func (m *VendorSessions) Resume(ctx context.Context, sessionID string, spec *ven
 	}
 	setProcessIdentity(&info, started)
 	actor := newVendorSessionActor(m, &info, started, observations)
+	actor.cwd = spec.Cwd
 	if err := m.installActor(sessionID, actor, pending); err != nil {
 		m.closeAndSettlePending(ctx, started, pending)
 		return err

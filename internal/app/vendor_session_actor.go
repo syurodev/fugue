@@ -64,8 +64,12 @@ type vendorSessionActor struct {
 	turnID        string
 	slashCommands []string
 	turns         map[string]bool
-	finished      bool
-	stopProved    bool
+	// cwd is the session's working directory and snaps the opening snapshot of
+	// each open turn (git-guard §3.1); a zero TurnSnapshot marks a failed one.
+	cwd        string
+	snaps      map[string]TurnSnapshot
+	finished   bool
+	stopProved bool
 	// attached turns on once the create or resume command has committed:
 	// a real process reports observations immediately, and none may be
 	// appended before the session row exists.
@@ -108,7 +112,7 @@ func newVendorSessionActor(manager *VendorSessions, info *vendorstore.Session, s
 	return &vendorSessionActor{
 		manager: manager, info: *info, session: session, obs: obs,
 		commands: make(chan actorRequest), state: state,
-		sequence: sequence, turns: make(map[string]bool), vaultSub: vaultSub, done: make(chan struct{}),
+		sequence: sequence, turns: make(map[string]bool), snaps: make(map[string]TurnSnapshot), vaultSub: vaultSub, done: make(chan struct{}),
 		interruptResults: make(chan vaultInterruptResult, 1), closeResults: make(chan actorCloseResult, 1),
 		detachResults: make(chan actorCloseResult, 1), touchCh: make(chan struct{}, 1),
 	}
@@ -366,6 +370,9 @@ func (a *vendorSessionActor) send(ctx context.Context, input vendor.Input) error
 	if a.state.Kind != vendor.StateReady {
 		return vendor.ErrBusy
 	}
+	// The opening snapshot precedes the input, so the diff holds only what the
+	// turn changed.
+	start := a.beginTurnSnapshot(ctx)
 	turn, err := a.session.Send(ctx, input)
 	if err != nil {
 		if errors.Is(err, vendor.ErrSessionClosed) {
@@ -386,6 +393,7 @@ func (a *vendorSessionActor) send(ctx context.Context, input vendor.Input) error
 	}
 	a.stopIdleTimer()
 	a.turnID, a.turns[turn.ID] = turn.ID, true
+	a.trackTurnSnapshot(turn.ID, start)
 	a.state = next
 	a.manager.notifyTurnStarted(a.info.ID)
 	itemID, err := a.manager.deps.IDs.NewID()
