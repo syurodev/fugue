@@ -8,6 +8,7 @@ import (
 
 	"gioui.org/io/event"
 	"gioui.org/layout"
+	"gioui.org/op"
 
 	"github.com/syurodev/fugue/pkg/client"
 
@@ -94,6 +95,8 @@ type wsBody struct {
 	w     int
 	gap   int
 	y     int
+	// rows is every drawn row's box in body coordinates, in draw order.
+	rows []image.Rectangle
 }
 
 func newWSBody(env *kit.Env, gtx *layout.Context, bands *kit.DialogBands, fail func(error)) *wsBody {
@@ -105,13 +108,18 @@ func newWSBody(env *kit.Env, gtx *layout.Context, bands *kit.DialogBands, fail f
 func (b *wsBody) field(tag event.Tag, draw func(gtx *layout.Context) (layout.Dimensions, error)) {
 	local := *b.gtx
 	local.Constraints.Min.X = b.w
+	// Each row is drawn at its own y: the recorded body ops all start at the
+	// body's origin, so without the offset every row paints on the first.
+	off := op.Offset(image.Pt(0, b.y)).Push(local.Ops)
 	dims, err := draw(&local)
+	off.Pop()
 	if err != nil {
 		b.fail(err)
 	}
 	if tag != nil {
 		b.bands.Focusable(tag, b.y, b.y+dims.Size.Y)
 	}
+	b.rows = append(b.rows, image.Rectangle{Min: image.Pt(0, b.y), Max: image.Pt(b.w, b.y+dims.Size.Y)})
 	b.y += dims.Size.Y + b.gap
 }
 
