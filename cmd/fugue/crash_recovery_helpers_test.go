@@ -81,6 +81,10 @@ func serveCrashSubprocess(cfg config.Config, exe string) int {
 	deps.VendorBinary = exe
 	hp, err := app.StartHost(ctx, deps)
 	if err != nil {
+		// The typed error code on stderr is what the downgrade drill reads.
+		if _, wErr := fmt.Fprintln(os.Stderr, err); wErr != nil {
+			return exitFailure
+		}
 		if tErr := teardownSocket(sock); tErr != nil {
 			return exitFailure
 		}
@@ -193,6 +197,15 @@ func readUntilRPCID2(r io.Reader) {
 
 func crashTestDirs(t *testing.T) (dataDir, fugueHome string) {
 	t.Helper()
+	dataDir, fugueHome = crashTestDirsUnseeded(t)
+	cheapvault.SeedDataDir(t, dataDir)
+	return dataDir, fugueHome
+}
+
+// crashTestDirsUnseeded is crashTestDirs without the vault keyring, so the
+// build under test creates the data directory's schema itself.
+func crashTestDirsUnseeded(t *testing.T) (dataDir, fugueHome string) {
+	t.Helper()
 	sum := sha256.Sum256([]byte(t.Name()))
 	dataDir = filepath.Join(os.TempDir(), fmt.Sprintf("fugue-cr-%x-%d", sum[:4], os.Getpid()))
 	if err := os.RemoveAll(dataDir); err != nil {
@@ -206,7 +219,6 @@ func crashTestDirs(t *testing.T) (dataDir, fugueHome string) {
 			t.Logf("cleanup %s: %v", dataDir, err)
 		}
 	})
-	cheapvault.SeedDataDir(t, dataDir)
 	fugueHome = filepath.Join(t.TempDir(), "Fugue")
 	return dataDir, fugueHome
 }
@@ -217,15 +229,32 @@ func startCrashSubprocess(t *testing.T, ctx context.Context, dataDir, fugueHome,
 	if err != nil {
 		t.Fatal(err)
 	}
+	return startHostSubprocess(t, ctx, hostBuild{exe: exe, args: []string{crashServeArg}}, dataDir, fugueHome, crashPoint)
+}
+
+// hostBuild is one build of the host the upgrade and downgrade drills launch:
+// the executable, its arguments and any environment the build needs, such as a
+// PATH with a fake vendor CLI in front.
+type hostBuild struct {
+	exe  string
+	args []string
+	env  []string
+}
+
+// startHostSubprocess runs the serve stack of build, which lets the drills put
+// an older build on a newer data directory.
+func startHostSubprocess(t *testing.T, ctx context.Context, build hostBuild, dataDir, fugueHome, crashPoint string) <-chan error {
+	t.Helper()
 	cmd := exec.CommandContext(ctx, "sh")
-	cmd.Path = exe
-	cmd.Args = []string{exe, crashServeArg}
+	cmd.Path = build.exe
+	cmd.Args = append([]string{build.exe}, build.args...)
 	cmd.Env = append(os.Environ(),
 		"HOME="+t.TempDir(),
 		config.EnvDataDir+"="+dataDir,
 		config.EnvFugueHome+"="+fugueHome,
 		config.EnvCrashPoint+"="+crashPoint,
 	)
+	cmd.Env = append(cmd.Env, build.env...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {

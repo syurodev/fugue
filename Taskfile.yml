@@ -107,6 +107,14 @@ tasks:
       - go test -tags perf -count=1 -timeout=10m -v -run 'Append10000Payloads' ./internal/vendorstore
       - cd ui && go test -tags perf -count=1 -timeout=10m -v ./internal/mdview/... ./internal/transcriptview/...
 
+  drill:
+    desc: Upgrade and downgrade drills (A-E08), across two real builds (nightly)
+    # The cross-build test is behind the drill tag: it builds the base revision
+    # (merge-base, or the previous schema generation on main), which a PR run
+    # must not pay for. The two same-build drills run with it.
+    cmds:
+      - "go test -tags drill -count=1 -timeout=30m -v -run '^(TestDrillAcrossBuilds|TestUpgradeDrillSameBuildResumesRecovery|TestDowngradeDrillRefusesNewerSchemaWithoutAppending)$' ./cmd/fugue"
+
   windows-build:
     desc: The module must still build for Windows (nightly)
     env:

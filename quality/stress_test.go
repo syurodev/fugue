@@ -130,3 +130,36 @@ func perfFiles(t *testing.T, dir string) []string {
 	}
 	return out
 }
+
+// The upgrade and downgrade drills run across two real builds only in the
+// nightly job: the cross-build test sits behind the drill build tag, and no PR
+// job or `task check` runs it.
+func TestDrillRunsOnlyInNightly(t *testing.T) {
+	t.Parallel()
+	task := readRepoFile(t, "Taskfile.yml")
+	_, afterDrill, ok := strings.Cut(task, "\n  drill:\n")
+	drill, _, _ := strings.Cut(afterDrill, "\n  windows-build:")
+	if !ok || !strings.Contains(drill, "-tags drill") || !strings.Contains(drill, "TestDrillAcrossBuilds") {
+		t.Fatal("Taskfile.yml has no drill task running the drill-tagged cross-build test")
+	}
+	workflows, err := os.ReadDir("../.github/workflows")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range workflows {
+		if name := entry.Name(); name != "nightly.yml" && strings.Contains(readWorkflow(t, name), "task drill") {
+			t.Errorf("%s runs task drill: the cross-build drill runs only in nightly.yml", name)
+		}
+	}
+	if !strings.Contains(readWorkflow(t, "nightly.yml"), "task drill") {
+		t.Error("nightly.yml does not run task drill")
+	}
+	_, afterCheck, _ := strings.Cut(task, "\n  check:")
+	check, _, _ := strings.Cut(afterCheck, "\n  fix:")
+	if strings.Contains(check, "drill") {
+		t.Error("task check runs the drill")
+	}
+	if head := readRepoFile(t, "cmd/fugue/drill_builds_test.go"); !strings.HasPrefix(head, "//go:build drill\n") {
+		t.Error("cmd/fugue/drill_builds_test.go must start with //go:build drill")
+	}
+}

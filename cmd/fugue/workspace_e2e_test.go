@@ -25,6 +25,11 @@ import (
 
 const fakeE2EVendorVersion = "2.1.319"
 
+// fakeE2EInitLine is the stream-json init event the fake vendor prints; the
+// drills' shell-script vendor prints the same line.
+const fakeE2EInitLine = `{"type":"system","subtype":"init","session_id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","tools":["Read"],"claude_code_version":"` +
+	fakeE2EVendorVersion + `","model":"fake-model","permissionMode":"default","slash_commands":["clear"],"terminal_slash_commands":[]}` + "\n"
+
 // playFakeVendor lets the cmd/fugue test binary serve as the fake Claude CLI
 // for HostDeps.VendorBinary in the DA-09 end-to-end tests (Q-140 A).
 func playFakeVendor(args []string) bool {
@@ -38,9 +43,7 @@ func playFakeVendor(args []string) bool {
 		}
 		return true
 	case "-p":
-		initLine := `{"type":"system","subtype":"init","session_id":"3f2504e0-4f89-41d3-9a0c-0305e82c3301","tools":["Read"],"claude_code_version":"` +
-			fakeE2EVendorVersion + `","model":"fake-model","permissionMode":"default","slash_commands":["clear"],"terminal_slash_commands":[]}` + "\n"
-		if _, err := os.Stdout.WriteString(initLine); err != nil {
+		if _, err := os.Stdout.WriteString(fakeE2EInitLine); err != nil {
 			os.Exit(1)
 		}
 		playFakeVendorTurns(args)
