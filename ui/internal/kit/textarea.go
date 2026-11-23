@@ -36,6 +36,8 @@ type TextAreaProps struct {
 	// EnterSubmits turns Enter into the composer's submit key (§6.9):
 	// Submitted reports a plain Enter and Shift+Enter inserts the newline.
 	EnterSubmits bool
+	// Borderless lets a containing surface provide the editor chrome.
+	Borderless bool
 	// Monospace renders the editor in theme.TypeCode for code/TOML editing.
 	Monospace bool
 	// ErrorLines lists 1-based line numbers to mark with a danger indicator.
@@ -193,13 +195,22 @@ func textAreaWidth(env *Env, gtx *layout.Context, p *TextAreaProps) int {
 	return min(w, gtx.Constraints.Max.X)
 }
 
+func textAreaLook(env *Env, p *TextAreaProps, errored bool) controlLook {
+	look := fieldLookOf(env, p.Disabled, errored)
+	if p.Borderless && p.Disabled {
+		// A disconnected composer can still contain a draft the user needs to read.
+		look.fg = env.Th.Chrome().FgMuted
+	}
+	return look
+}
+
 // draw paints the area: the label, the box with the editor inside the
 // inner rect — the box inset by its padding, which the scroll clip is
 // too, so text never draws into the padding however far it scrolls — and
 // the helper/error line below.
 func (s *TextAreaState) draw(env *Env, gtx *layout.Context, p *TextAreaProps, sz fieldSizes, boxH, maxBody int, scrolls, errored bool, fm fieldMotion) {
 	c := env.Th.Chrome()
-	look := fieldLookOf(env, p.Disabled, errored)
+	look := textAreaLook(env, p, errored)
 	w := textAreaWidth(env, gtx, p)
 	if p.Label != "" {
 		at(gtx, image.Pt(0, 0), func(gtx *layout.Context) {
@@ -208,7 +219,9 @@ func (s *TextAreaState) draw(env *Env, gtx *layout.Context, p *TextAreaProps, sz
 		})
 	}
 	box := image.Rect(0, sz.labelH, w, sz.labelH+boxH)
-	paintBox(gtx, box, look, fm)
+	if !p.Borderless {
+		paintBox(gtx, box, look, fm)
+	}
 
 	ig := *gtx
 	if p.Disabled {

@@ -202,7 +202,7 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool
 		hint string
 	}{
 		{railChat, kit.IconMessageSquare, "Chat"},
-		{railTeam, kit.IconUsers, "Team"},
+		{railTeam, kit.IconUsers, teamLabel},
 		{railModules, kit.IconWrench, "Modules"},
 	}
 	y := gtx.Dp(theme.SpaceSM)
@@ -232,10 +232,11 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool
 		icon = kit.IconChevronRight
 		hint = "Open sidebar"
 	}
-	props := kit.IconButtonProps{Icon: icon, Label: hint, Variant: kit.IconButtonGhost, Size: kit.SizeSM}
+	props := kit.IconButtonProps{Icon: icon, Label: hint, Variant: kit.IconButtonBordered, Size: kit.SizeSM}
+	toggleSize := toggle.Measure(env, gtx, &props).Size
 	var clicked bool
 	var err error
-	atPoint(gtx, image.Pt(x, max(h-btnW-gtx.Dp(theme.SpaceSM), y)), func(gtx *layout.Context) {
+	atPoint(gtx, image.Pt(max((w-toggleSize.X)/2, 0), max(h-toggleSize.Y-gtx.Dp(theme.SpaceSM), y)), func(gtx *layout.Context) {
 		clicked, err = toggle.Layout(env, gtx, &props)
 	})
 	s.fail(err)

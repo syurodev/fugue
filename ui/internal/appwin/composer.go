@@ -198,7 +198,7 @@ func (c *composer) measure(env *kit.Env, gtx *layout.Context, sc *screens, targe
 // lays out.
 func (c *composer) actionMeasure(env *kit.Env, gtx *layout.Context, st *composerState, sess session.Session) int {
 	kind, actionable := c.action(sess)
-	sendLabel := "Send"
+	sendLabel := sendLabelText
 	if kind == session.PostSteer {
 		sendLabel = "Steer"
 	}
@@ -231,6 +231,10 @@ func (c *composer) actionMeasure(env *kit.Env, gtx *layout.Context, st *composer
 // its place in the window, and passes whether the host is reachable, which
 // disables the composer while it is not.
 func (c *composer) layout(env *kit.Env, gtx *layout.Context, sc *screens, target string, connected bool) layout.Dimensions {
+	return c.layoutSessionComposer(env, gtx, sc, target, connected, false)
+}
+
+func (c *composer) layoutSessionComposer(env *kit.Env, gtx *layout.Context, sc *screens, target string, connected, lead bool) layout.Dimensions {
 	if target == "" {
 		return c.start.row(env, gtx, sc)
 	}
@@ -253,7 +257,7 @@ func (c *composer) layout(env *kit.Env, gtx *layout.Context, sc *screens, target
 	row := layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
-			rowDims = c.layoutInput(env, &local, sc, st, sess, disabled, ateReturn)
+			rowDims = c.layoutInput(env, &local, sc, st, sess, disabled, ateReturn, lead)
 			return rowDims
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -352,7 +356,7 @@ func (c *composer) menuKeys(gtx *layout.Context, st *composerState, items []kit.
 
 // layoutInput draws the input and its action buttons; the area grows to
 // composerMaxLines and scrolls inside past that, following the caret.
-func (c *composer) layoutInput(env *kit.Env, gtx *layout.Context, sc *screens, st *composerState, sess session.Session, disabled, ateReturn bool) layout.Dimensions {
+func (c *composer) layoutInput(env *kit.Env, gtx *layout.Context, sc *screens, st *composerState, sess session.Session, disabled, ateReturn, lead bool) layout.Dimensions {
 	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.End}.Layout(*gtx,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			local := gtx
@@ -362,6 +366,10 @@ func (c *composer) layoutInput(env *kit.Env, gtx *layout.Context, sc *screens, s
 				EnterSubmits: true,
 				Disabled:     disabled,
 				Helper:       stateHelper(sess),
+			}
+			if lead {
+				props.Placeholder = "Message the lead…"
+				props.Borderless = true
 			}
 			ev := st.area.Layout(env, &local, props)
 			if ev.FocusLost {
@@ -414,7 +422,7 @@ func (c *composer) submit(sc *screens, st *composerState, sess session.Session, 
 // detached session (F10.5e).
 func (c *composer) layoutActions(env *kit.Env, gtx *layout.Context, sc *screens, st *composerState, sess session.Session, disabled bool) layout.Dimensions {
 	kind, actionable := c.action(sess)
-	sendLabel := "Send"
+	sendLabel := sendLabelText
 	if kind == session.PostSteer {
 		sendLabel = "Steer"
 	}

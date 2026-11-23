@@ -142,7 +142,7 @@ func layoutItem(env *kit.Env, gtx *layout.Context, st *State, item *session.Item
 	case kindSubagent:
 		return layoutSubagentLine(env, gtx, st, c, item)
 	default:
-		return layoutCompactCard(env, gtx, st, c, item)
+		return layoutCompactCard(env, gtx, st, c, item, cb)
 	}
 }
 

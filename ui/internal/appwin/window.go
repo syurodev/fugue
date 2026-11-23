@@ -2,6 +2,7 @@ package appwin
 
 import (
 	"context"
+	"crypto/rand"
 	"image/color"
 	"log/slog"
 	"runtime"
@@ -25,6 +26,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/secrets"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/settings"
+	"github.com/syurodev/fugue/ui/internal/team"
 	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/vault"
 	"github.com/syurodev/fugue/ui/internal/workspace"
@@ -114,6 +116,7 @@ type appWorkers struct {
 	secretsW  *secrets.Worker
 	viewerW   *fileViewWorker
 	layoutW   *layoutWorker
+	teamW     *team.Worker
 }
 
 func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) appWorkers {
@@ -172,10 +175,22 @@ func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) ap
 		return nil
 	}, w.Invalidate)
 	layoutW.Start(ctx)
-	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW, settingsW: settingsW, secretsW: secretsW, viewerW: viewerW, layoutW: layoutW}
+	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW, settingsW: settingsW, secretsW: secretsW, viewerW: viewerW, layoutW: layoutW, teamW: startTeamWorker(ctx, m, w)}
+}
+
+// startTeamWorker gives each window its own team worker, so a window's
+// results wake that window only.
+func startTeamWorker(ctx context.Context, m *hostconn.Manager, w *app.Window) *team.Worker {
+	return team.Start(ctx, func() team.Client {
+		if c := m.Client(); c != nil {
+			return c
+		}
+		return nil
+	}, w.Invalidate, rand.Text)
 }
 
 func (a appWorkers) stop() {
+	a.teamW.Stop()
 	a.layoutW.Stop()
 	a.viewerW.Stop()
 	a.secretsW.Stop()
@@ -315,6 +330,7 @@ drainPosts:
 }
 
 func (s *screens) drainWorkerResults() {
+	s.drainTeamResults()
 	if s.vaultWorker != nil {
 		s.applyVaultResults(drainVaultResults(s.vaultWorker))
 	}
@@ -427,6 +443,9 @@ func statusColor(th *theme.Theme, state hostconn.State) color.NRGBA {
 // statusLine renders the status bar text; "host not running" is its own
 // phrase so the retry (and, from F10.2b, the auto-start) is visible.
 func statusLine(state hostconn.State, reason string) string {
+	if state == "" {
+		return ""
+	}
 	if reason == "" {
 		return "connection: " + string(state)
 	}

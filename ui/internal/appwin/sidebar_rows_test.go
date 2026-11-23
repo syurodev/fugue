@@ -86,7 +86,7 @@ func TestSessionStateTextAndTone(t *testing.T) {
 		{"ready", session.Session{State: stateReady}, stateReady, kit.ToneSuccess},
 		{"running", session.Session{State: stateRunning}, stateRunning, kit.ToneInfo},
 		{"starting", session.Session{State: stateStarting}, stateStarting, kit.ToneInfo},
-		{"approval", session.Session{State: stateAwaitingApproval}, "needs you", kit.ToneWarning},
+		{"awaiting approval", session.Session{State: stateAwaitingApproval}, "needs you", kit.ToneWarning},
 		{"waiting with reason", session.Session{State: stateWaiting, WaitingReason: reasonVaultLocked}, "waiting · vault_locked", kit.ToneWarning},
 		{"detached", session.Session{State: stateDetached}, stateDetached, kit.ToneWarning},
 		{"closed", session.Session{State: stateClosed}, stateClosed, kit.ToneNeutral},

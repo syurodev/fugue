@@ -94,8 +94,8 @@ func buildShotScreens(t *testing.T, scene string) *screens {
 	}})
 	sc.openSession("s1")
 	sc.transcripts["s1"].ApplyNewestPage([]client.TranscriptItem{
-		{ItemID: "i1", Kind: "user_message", Sequence: 1, Revision: 1, View: client.TranscriptView{Text: "Add the workspace root and confirm policy."}},
-		{ItemID: "i2", Kind: "assistant_message", Sequence: 2, Revision: 1, View: client.TranscriptView{Text: "Root `api` is configured; awaiting confirmation on the policy diff."}},
+		{ItemID: "i1", Kind: shotUserMessage, Sequence: 1, Revision: 1, View: client.TranscriptView{Text: "Add the workspace root and confirm policy."}},
+		{ItemID: "i2", Kind: shotAssistantMessage, Sequence: 2, Revision: 1, View: client.TranscriptView{Text: "Root `api` is configured; awaiting confirmation on the policy diff."}},
 	})
 
 	switch scene {

@@ -127,7 +127,7 @@ func wsTestDetail(diff []workspace.DiffEntry) *workspace.Detail {
 
 // wsSession is a sidebar session bound to a workspace.
 func wsSession(id, wsID string) session.Session {
-	return session.Session{ID: id, Vendor: "claude", State: stateRunning, WorkspaceID: wsID}
+	return session.Session{ID: id, Vendor: client.VendorClaude, State: stateRunning, WorkspaceID: wsID}
 }
 
 // TestSidebarGroupsSessionsUnderTheirWorkspaces pins the sidebar's grouping

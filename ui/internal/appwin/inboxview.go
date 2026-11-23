@@ -24,6 +24,7 @@ const codeStaleIncarnation = "interaction.stale_incarnation"
 // Ctrl/Cmd+Shift+I shortcut toggle it.
 type inboxView struct {
 	active, focusedPin inbox.Pin
+	proposalTeam       string
 	forms              map[inbox.Pin]*cardFormState
 	queueRows          map[inbox.Pin]*kit.ListRowState
 	empty              *kit.EmptyStateState
@@ -117,6 +118,7 @@ func (v *inboxView) applied(res *inbox.Result, m *inbox.Model, w *inbox.Worker) 
 }
 
 func (s *screens) applyInteractionDelivery(u hostconn.Update) {
+	s.listTeams()
 	if u.Snapshot != nil {
 		s.fail(s.inbox.ApplyTopicSnapshot(u.Snapshot.Incarnation, u.Snapshot.Sequence, u.Snapshot.State))
 	} else if u.Event != nil {
@@ -143,6 +145,7 @@ func (s *screens) applyInboxResults(results []inbox.Result) {
 
 func (v *inboxView) layout(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
 	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
+	sc.selectProposalRequest()
 	items := sc.inbox.Items()
 	return layout.Inset{Top: theme.SpaceMD, Bottom: theme.SpaceMD, Left: theme.SpaceLG, Right: theme.SpaceLG}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,

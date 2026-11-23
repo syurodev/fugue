@@ -305,6 +305,6 @@ func layoutWorkMember(env *kit.Env, gtx *layout.Context, st *State, it *session.
 		// other tools (desktop-app v0.10 table), with its icon and time.
 		return layoutToolCall(env, gtx, st, c, it, cb)
 	default:
-		return layoutCompactCard(env, gtx, st, c, it)
+		return layoutCompactCard(env, gtx, st, c, it, cb)
 	}
 }

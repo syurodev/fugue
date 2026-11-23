@@ -107,7 +107,7 @@ func (s *screens) layoutSlotBody(gtx *layout.Context, env *kit.Env, p Pos, ref S
 func (s *screens) layoutMainSlot(gtx *layout.Context, env *kit.Env, ref SlotRef) {
 	switch ref.Kind {
 	case KindSession:
-		s.layoutTranscriptFor(gtx, env, ref.ID)
+		s.layoutSessionWithComposer(gtx, env, ref.ID, true)
 	case KindModule:
 		s.layoutSoonSlot(gtx, env, Pos{}, "No modules", "Registered modules open their workbench here, in install order.")
 	case KindTeam:
@@ -148,9 +148,9 @@ func (s *screens) layoutRegularSlot(gtx *layout.Context, env *kit.Env, p Pos, re
 	case KindSettings:
 		s.settingsView.layout(gtx, env, s)
 	case KindTeam:
-		s.layoutSoonSlot(gtx, env, p, "Team board", "The team board opens here with the team screens.")
+		s.layoutTeamBoard(gtx, env, teamBoardKey{team: ref.ID, main: isMainPos(p)})
 	case KindAgent:
-		s.layoutSoonSlot(gtx, env, p, "Agent detail", "An agent's transcript, diff and checks open here with the team screens.")
+		s.layoutTeamAgent(gtx, env, ref)
 	case KindSecrets:
 		s.secretsView.layout(gtx, env, s)
 	case KindModule:

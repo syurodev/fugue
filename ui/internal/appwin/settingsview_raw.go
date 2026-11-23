@@ -76,7 +76,7 @@ func (r *rawTOMLView) layout(gtx *layout.Context, env *kit.Env, sc *screens) lay
 		children = append(children, spacerH(theme.SpaceMD), rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 			dims, _ := mdview.LayoutCodeBlock(env, gtx, r.diffBlock, &mdview.CodeBlockProps{
 				Title:           "fugue.toml (host vs yours)",
-				Format:          "diff",
+				Format:          diffLabel,
 				IsDiff:          true,
 				ShowLineNumbers: true,
 				Raw:             diffRaw,

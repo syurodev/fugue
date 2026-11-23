@@ -264,7 +264,7 @@ func (v *secretsView) layoutFilterBar(gtx *layout.Context, env *kit.Env, sc *scr
 	wsLabel := workspaceScopeLabel(wsName)
 	changed, next, err := v.scopeFilter.Layout(env, gtx, kit.SegmentedProps{
 		Options: []kit.SegmentedOption{
-			{ID: "all", Label: "All"},
+			{ID: allFilter, Label: allLabel},
 			{ID: client.SecretScopeGlobal, Label: labelGlobal},
 			{ID: client.SecretScopeWorkspace, Label: wsLabel, Disabled: wsID == ""},
 		},
@@ -278,7 +278,7 @@ func (v *secretsView) layoutFilterBar(gtx *layout.Context, env *kit.Env, sc *scr
 	}
 	return v.scopeFilter.Measure(env, gtx, kit.SegmentedProps{
 		Options: []kit.SegmentedOption{
-			{ID: "all", Label: "All"},
+			{ID: allFilter, Label: allLabel},
 			{ID: client.SecretScopeGlobal, Label: labelGlobal},
 			{ID: client.SecretScopeWorkspace, Label: wsLabel, Disabled: wsID == ""},
 		},

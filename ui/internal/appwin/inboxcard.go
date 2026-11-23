@@ -39,6 +39,7 @@ type questionFormState struct {
 }
 
 type cardFormState struct {
+	proposal                                       *proposalCard
 	busy                                           bool
 	lastErr, selectedOption                        string
 	optionRows                                     map[string]*kit.ListRowState
@@ -80,14 +81,14 @@ func (v *inboxView) layoutActiveCard(gtx *layout.Context, env *kit.Env, sc *scre
 	pin := inbox.Pin{RequestID: req.RequestID, Incarnation: req.Incarnation}
 	form := v.formFor(req)
 	safeBtn := form.denyBtn
-	if req.Kind == client.InteractionKindQuestion {
+	if req.Kind == client.InteractionKindQuestion && !isProposalRequest(req) {
 		safeBtn = form.cancelBtn
 	}
 	if v.focusedPin != pin {
 		v.focusedPin = pin
 		gtx.Execute(key.FocusCmd{Tag: safeBtn.Tag()})
 	}
-	dims, _, err := v.card.Layout(env, gtx, kit.CardProps{}, func(gtx layout.Context) layout.Dimensions {
+	body := func(gtx layout.Context) layout.Dimensions {
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			rigidWidget(func(gtx *layout.Context) layout.Dimensions { return layoutCardHeader(gtx, env, sc, req, form) }),
 			spacerH(theme.SpaceSM),
@@ -117,12 +118,19 @@ func (v *inboxView) layoutActiveCard(gtx *layout.Context, env *kit.Env, sc *scre
 			spacerH(theme.SpaceSM),
 			rigidWidget(func(gtx *layout.Context) layout.Dimensions { return layoutCardFooter(gtx, env, sc, req, form, pin) }),
 		)
-	})
+	}
+	if isProposalRequest(req) {
+		return teamPanel(*gtx, env, env.Th.Chrome().SurfaceBase, layout.UniformInset(theme.SpaceXL), body)
+	}
+	dims, _, err := v.card.Layout(env, gtx, kit.CardProps{}, body)
 	sc.fail(err)
 	return dims
 }
 
 func layoutCardHeader(gtx *layout.Context, env *kit.Env, sc *screens, req *client.PendingInteraction, form *cardFormState) layout.Dimensions {
+	if isProposalRequest(req) {
+		return layoutProposalHeader(gtx, env, sc, req, form)
+	}
 	c := env.Th.Chrome()
 	title := req.Tool
 	if req.Kind == client.InteractionKindQuestion {
@@ -156,6 +164,9 @@ func layoutCardHeader(gtx *layout.Context, env *kit.Env, sc *screens, req *clien
 }
 
 func layoutCardScrollBody(gtx *layout.Context, env *kit.Env, sc *screens, req *client.PendingInteraction, form *cardFormState) layout.Dimensions {
+	if isProposalRequest(req) {
+		return layoutProposalBody(gtx, env, sc, req, form)
+	}
 	c := env.Th.Chrome()
 	children := make([]layout.FlexChild, 0, 8)
 	for _, block := range []struct {
@@ -267,6 +278,9 @@ func layoutQuestionOptions(env *kit.Env, q *client.InteractionQuestion, qf *ques
 }
 
 func layoutCardFooter(gtx *layout.Context, env *kit.Env, sc *screens, req *client.PendingInteraction, form *cardFormState, pin inbox.Pin) layout.Dimensions {
+	if isProposalRequest(req) {
+		return layoutProposalFooter(gtx, env, sc, req, form, pin)
+	}
 	switch req.Kind {
 	case client.InteractionKindConfirm:
 		return layoutConfirmFooter(gtx, env, sc, req, form, pin)
