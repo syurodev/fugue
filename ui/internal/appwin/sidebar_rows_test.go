@@ -55,8 +55,8 @@ func TestSecretsRowState(t *testing.T) {
 		label       string
 		badge       string
 	}{
-		{"locked wins over a snapshot", true, true, 4, "locked", ""},
-		{"locked without snapshot", true, false, 0, "locked", ""},
+		{"locked wins over a snapshot", true, true, 4, vaultLockedLabel, ""},
+		{"locked without snapshot", true, false, 0, vaultLockedLabel, ""},
 		{"count badge", false, true, 4, "", "4"},
 		{"empty vault shows nothing", false, true, 0, "", ""},
 		{"no snapshot shows nothing", false, false, 0, "", ""},

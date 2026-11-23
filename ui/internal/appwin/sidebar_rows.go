@@ -99,13 +99,16 @@ func accountsRowState(hasSnapshot bool, attention int) (string, kit.ListRowTone)
 	return "", kit.ToneNeutral
 }
 
+// vaultLockedLabel is the Secrets row's warning label while the vault is locked.
+const vaultLockedLabel = "locked"
+
 // secretsRowState is the Secrets row's state: the warning "locked" label
 // while the vault is locked, else a neutral count badge once a snapshot
 // exists and holds at least one secret.
 func secretsRowState(locked, hasSnapshot bool, count int) (label string, tone kit.ListRowTone, badge string) {
 	switch {
 	case locked:
-		return "locked", kit.ToneWarning, ""
+		return vaultLockedLabel, kit.ToneWarning, ""
 	case hasSnapshot && count > 0:
 		return "", kit.ToneNeutral, strconv.Itoa(count)
 	}
