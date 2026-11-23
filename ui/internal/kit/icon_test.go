@@ -25,6 +25,7 @@ func TestEveryIconParses(t *testing.T) {
 		IconCheck, IconChevronDown, IconChevronRight, IconSearch, IconClose,
 		IconEye, IconEyeOff, IconCopy, IconRestart, IconHelp,
 		IconFolder, IconGitBranch, IconGitPullRequest,
+		IconInbox, IconCircleUser, IconSettings, IconKeyRound, IconBot, IconLock,
 	} {
 		t.Run(string(name), func(t *testing.T) {
 			t.Parallel()

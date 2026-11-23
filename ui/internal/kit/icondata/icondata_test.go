@@ -100,6 +100,12 @@ func packagedIcons() []packagedIcon {
 		{"git-pull-request", "GitPullRequest"},
 		{"message-square", "MessageSquare"},
 		{"users", "Users"},
+		{"inbox", "Inbox"},
+		{"circle-user", "CircleUser"},
+		{"settings", "Settings"},
+		{"key-round", "KeyRound"},
+		{"bot", "Bot"},
+		{"lock", "Lock"},
 	}
 }
 
