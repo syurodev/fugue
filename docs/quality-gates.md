@@ -252,6 +252,11 @@ not required status checks (owner decision, 2026-11-16). The `ui/` module is not
 (`repeat-tests`, with a report of every test that both passed and failed), the `perf` speed
 budgets, the upgrade and downgrade `drill` (A-E08), Windows build.
 
+**Release (by hand, new 2026-11-23):** `release.yml` runs `task release-check` on the chosen RC on
+ubuntu and macOS. The task runs `check`, `probes`, the full `mutation`, `drill` and `release-evidence`:
+`TestReleaseEvidence` under the `release` build tag, then `release-evidence.md`. No PR, main, nightly
+or ui job runs any of it (`TestReleaseEvidenceRunsOnlyInRelease`). See [release.md](release.md).
+
 `main` has branch protection: the checks above are required, squash merge only, no direct push
 and no force push.
 
@@ -291,6 +296,7 @@ Gate-defining files: `.golangci.yml`, `tools/fuguevet/**`, `internal/arch/**`, `
 | 2026-11-22 | Retire the Markdown roadmap integrity and evidence tests. Validate Linear and spec ID syntax in `todoref` (§4–5) | Work tracking moved to Linear. `TestVerificationEvidence` checks release verification. `TestTodoRef` and `TestVettoolRunsEveryAnalyzer` exercise the analyzer. | user (chat request and `gate-change-approved` on this PR) |
 | 2026-11-23 | FUG-44: new nightly job `drill` and `task drill` run the upgrade and downgrade drills of A-E08: `TestDrillAcrossBuilds` (behind the `drill` build tag) builds an old `cmd/fugue` test binary from the merge-base, or from the parent of the last commit that changed migrations or proto, kills it mid-run, resumes with the HEAD build and requires the old build to refuse the newer data directory; `TestUpgradeDrillSameBuildResumesRecovery` and `TestDowngradeDrillRefusesNewerSchemaWithoutAppending` run the same drill with one build and a synthetic newer schema version. Guard: `TestDrillRunsOnlyInNightly` | Nothing in the suite built two binaries, so no test could show that an old build leaves a newer data directory alone. No threshold moved and nothing was loosened. | pending (`gate-change-approved` on this PR) |
 | 2026-11-23 | PR tests **paused**: the `pr.yml` jobs `test`, `stress` and `coverage` on ubuntu and macOS run only when the repository variable `PR_TESTS` is `on`; new `build.yml` runs them on every pushed `v*` tag (full suite and coverage on both systems, stress of the test functions changed since the previous tag) and by hand (`workflow_dispatch`). `main.yml` (macOS tests on every merge), the nightly twenty-repeat run and every other PR gate are unchanged | Speed up merging for the stage A push: the test and stress jobs are the slowest PR jobs (the macOS `internal/app` run alone hit the 10-minute timeout, FUG-53). Temporary: re-enable with `gh variable set PR_TESTS --body on` (no workflow change), at the latest before `task release-check` closes stage A. A red `main.yml`, nightly or tag build is fixed like a broken build. Guard: `TestTagBuildRunsTestsWhilePRTestsArePaused`. Same day: the `main` ruleset no longer requires a branch to be up to date with `main` before merging (`docs/github-setup.md` §3), because every merge forced each open PR to rebase and rerun its checks | user (chat request; `gate-change-approved` on this PR) |
+| 2026-11-23 | F8.1 release gate: `task release-check` and `task release-evidence`, the manual `release.yml` workflow, and `fuguegate release-evidence` and `verify-live`. `TestReleaseEvidence` lives under the `release` build tag in `cmd/fuguegate`; `TestReleaseEvidenceRunsOnlyInRelease` keeps it out of every other job and forbids `t.Skip` in it. `release-check` runs the full `mutation`, which ends the §11 pause of 2026-11-05 for the release only; the PR job stays paused | Verification §7 needs one command that reruns the gates on the RC and checks the registry and the live records. Nothing is loosened | user (`gate-change-approved` on this PR) |
 
 ### Known flaky tests
 
