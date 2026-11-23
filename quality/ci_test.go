@@ -117,11 +117,11 @@ func TestPRWorkflowsSplitByTrigger(t *testing.T) {
 func TestTagBuildRunsTestsWhilePRTestsArePaused(t *testing.T) {
 	t.Parallel()
 	pr := readWorkflow(t, "pr.yml")
-	for _, job := range []string{"test", "test-macos", "stress", "stress-macos", "coverage"} {
-		_, body, ok := strings.Cut(pr, "\n  "+job+":\n")
+	for _, job := range []string{"\n  test:\n", "\n  test-macos:\n", "\n  stress:\n", "\n  stress-macos:\n", "\n  coverage:\n"} {
+		_, body, ok := strings.Cut(pr, job)
 		body, _, _ = strings.Cut(body, "\n\n  ")
 		if !ok || !strings.Contains(body, "if: vars.PR_TESTS == 'on'") {
-			t.Errorf("pr.yml job %q is not paused behind vars.PR_TESTS", job)
+			t.Errorf("pr.yml job %q is not paused behind vars.PR_TESTS", strings.TrimSpace(job))
 		}
 	}
 	build := readWorkflow(t, "build.yml")
