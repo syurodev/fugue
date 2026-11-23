@@ -2,6 +2,7 @@ package appwin
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/syurodev/fugue/ui/internal/accounts"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
@@ -22,6 +23,9 @@ import (
 // rather than copy: the delivery and result structs are wide, and the
 // window's hot path pays the copy every frame.
 func (s *screens) update(updates []hostconn.Update, results []session.Result, posts []session.PostResult, muts []workspace.MutResult) {
+	if !s.trackedOnce || s.grid.docGen != s.trackedGen {
+		s.trackTopics()
+	}
 	for i := range updates {
 		s.applyUpdate(updates[i])
 	}
@@ -58,40 +62,47 @@ func (s *screens) applyUpdate(u hostconn.Update) {
 		s.applyLoginDelivery(u)
 	case topicAppState:
 		s.applyAppStateDelivery(u)
+		if u.Snapshot != nil {
+			s.trackTopics()
+		}
 	case topicSecrets:
 		s.applySecretsDelivery(u)
 	default:
-		s.applyOpenTranscriptUpdate(u)
+		s.applyTranscriptUpdate(u)
 	}
 }
 
-func (s *screens) applyOpenTranscriptUpdate(u hostconn.Update) {
-	switch u.Topic {
-	case topicTranscriptDlt + s.open:
-		if u.Event != nil {
-			s.applyDelta(u.Event.Payload)
+func (s *screens) applyTranscriptUpdate(u hostconn.Update) {
+	if id, delta := strings.CutPrefix(u.Topic, topicTranscriptDlt); delta {
+		if t := s.transcripts[id]; s.slotSessions[id] && t != nil && u.Event != nil {
+			s.fail(t.ApplyDelta(u.Event.Payload))
 		}
-	case topicTranscript + s.open:
-		s.applyTranscriptDelivery(u)
+		return
+	}
+	if id, durable := strings.CutPrefix(u.Topic, topicTranscript); durable && s.slotSessions[id] {
+		s.applyTranscriptDelivery(id, u)
 	}
 }
 
 func (s *screens) applyVendorSessionsDelivery(u hostconn.Update) {
 	if u.Snapshot != nil {
-		s.fail(s.sidebar.ApplySnapshot(u.Snapshot.State))
+		if err := s.sidebar.ApplySnapshot(u.Snapshot.State); err != nil {
+			s.fail(err)
+			return
+		}
+		s.sessionsLoaded = true
 		s.prune()
+		s.trackTopics()
 	} else if u.Event != nil {
 		s.applySessionEvent(u.Event.Type, u.Event.Payload)
 	}
 }
 
 // reconnected arms the reads a fresh connection carries: the session list,
-// the workspace list, the vendors' capabilities, the open session's topics,
-// its newest page and its commands. A request dropped while the host was
-// down re-arms here.
+// the workspace list, the vendors' capabilities, and every visible session's
+// newest page and commands. A request dropped while the host was down
+// re-arms here.
 func (s *screens) reconnected() {
-	delete(s.pendingPage, s.open)
-	delete(s.pendingOlder, s.open)
 	s.pendingItem = map[string]bool{}
 	s.wsDetailReq = map[string]uint64{}
 	s.fetcher.RequestSessions()
@@ -117,11 +128,16 @@ func (s *screens) reconnected() {
 		req := secrets.Request{Kind: secrets.OpListSecrets}
 		s.secretsWorker.Do(&req)
 	}
-	if s.open != "" {
-		s.m.AddTopic(topicTranscript + s.open)
-		s.m.AddTopic(topicTranscriptDlt + s.open)
-		s.requestNewestPage(s.open)
-		s.requestCommands(s.open)
+	s.refreshVisibleTranscripts()
+}
+
+func (s *screens) refreshVisibleTranscripts() {
+	for id := range s.slotSessions {
+		delete(s.pendingPage, id)
+		delete(s.pendingOlder, id)
+		delete(s.pendingCommands, id)
+		s.requestNewestPage(id)
+		s.requestCommands(id)
 	}
 }
 
@@ -153,22 +169,15 @@ func (s *screens) applySessionEvent(eventType string, payload []byte) {
 	}
 }
 
-// applyDelta applies one transcript-delta delivery to the open session.
-func (s *screens) applyDelta(payload []byte) {
-	if t := s.transcripts[s.open]; t != nil {
-		s.fail(t.ApplyDelta(payload))
-	}
-}
-
 // applyTranscriptDelivery applies one durable transcript topic delivery.
-func (s *screens) applyTranscriptDelivery(u hostconn.Update) {
-	t := s.transcripts[s.open]
+func (s *screens) applyTranscriptDelivery(id string, u hostconn.Update) {
+	t := s.transcripts[id]
 	if t == nil {
 		return
 	}
 	if u.Snapshot != nil {
 		s.fail(t.ApplySnapshot(u.Snapshot.State))
-		s.requestNewestPage(s.open)
+		s.requestNewestPage(id)
 		return
 	}
 	if u.Event != nil {
@@ -186,7 +195,9 @@ func (s *screens) applyResult(r session.Result) {
 			return
 		}
 		s.sidebar.ApplyList(r.Sessions)
+		s.sessionsLoaded = true
 		s.prune()
+		s.trackTopics()
 		s.probeMissingVendors()
 	case session.ResultPage:
 		s.applyPageResult(&r)
@@ -209,6 +220,11 @@ func (s *screens) applyPageResult(r *session.Result) {
 	if t == nil {
 		return
 	}
+	if r.Older {
+		delete(s.pendingOlder, r.Session)
+	} else {
+		delete(s.pendingPage, r.Session)
+	}
 	if r.Err != nil {
 		s.fail(fmt.Errorf("read the transcript page: %w", r.Err))
 		return
@@ -219,10 +235,8 @@ func (s *screens) applyPageResult(r *session.Result) {
 		if prepended := t.ApplyOlderPage(r.Items); prepended > 0 {
 			s.viewFor(r.Session).AccountForPrepended(prepended)
 		}
-		s.pendingOlder[r.Session] = false
 		return
 	}
 	t.ApplyNewestPage(r.Items)
-	s.pendingPage[r.Session] = false
 	s.applyReopenAnchor(r.Session)
 }

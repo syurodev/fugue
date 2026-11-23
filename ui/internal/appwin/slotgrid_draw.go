@@ -32,6 +32,7 @@ type slotAnim struct {
 // the sidebar collapsed (§5.3). F10.21 attaches window creation; until then
 // the request is recorded so the action is wired end to end.
 type NewWindowRequest struct {
+	Pos Pos
 	Ref SlotRef
 	Doc LayoutDoc
 }

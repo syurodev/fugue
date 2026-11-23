@@ -67,6 +67,7 @@ const requestBuffer = 32
 // the host is unreachable are dropped; the window re-requests on reconnect.
 type Fetcher struct {
 	clientOf func() *client.Client
+	onResult func()
 	reqs     chan request
 	results  chan Result
 	cancel   context.CancelFunc
@@ -75,10 +76,12 @@ type Fetcher struct {
 }
 
 // NewFetcher builds a fetcher that reads through clientOf, which returns the
-// manager's current connection or nil while disconnected.
-func NewFetcher(clientOf func() *client.Client) *Fetcher {
+// manager's current connection or nil while disconnected. onResult wakes the
+// window independently of the event streams.
+func NewFetcher(clientOf func() *client.Client, onResult func()) *Fetcher {
 	return &Fetcher{
 		clientOf: clientOf,
+		onResult: onResult,
 		reqs:     make(chan request, requestBuffer),
 		results:  make(chan Result, requestBuffer),
 		done:     make(chan struct{}),
@@ -204,6 +207,9 @@ func (f *Fetcher) deliver(ctx context.Context, c *client.Client, r request) bool
 	}
 	select {
 	case f.results <- res:
+		if f.onResult != nil {
+			f.onResult()
+		}
 		return true
 	case <-ctx.Done():
 		return false

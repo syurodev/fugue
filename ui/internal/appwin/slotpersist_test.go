@@ -6,8 +6,10 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"connectrpc.com/connect"
+	"gioui.org/layout"
 
 	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
 
@@ -43,6 +45,7 @@ type fakeLayoutClient struct {
 	store    map[string]json.RawMessage
 	revs     map[string]uint64
 	puts     int
+	deletes  []string
 	failOnce int // conflicts to answer before accepting
 }
 
@@ -50,7 +53,7 @@ func newFakeLayoutClient() *fakeLayoutClient {
 	return &fakeLayoutClient{store: map[string]json.RawMessage{}, revs: map[string]uint64{}}
 }
 
-func (f *fakeLayoutClient) PutAppStateWindow(ctx context.Context, in *client.PutAppStateWindowInput) (uint64, error) {
+func (f *fakeLayoutClient) PutAppStateWindow(_ context.Context, in *client.PutAppStateWindowInput) (uint64, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.puts++
@@ -58,9 +61,24 @@ func (f *fakeLayoutClient) PutAppStateWindow(ctx context.Context, in *client.Put
 		f.failOnce--
 		return 0, conflictErr(f.revs[in.WindowID])
 	}
+	if cur := f.revs[in.WindowID]; cur != in.ExpectedRevision {
+		return 0, conflictErr(cur)
+	}
 	f.store[in.WindowID] = in.Layout
 	f.revs[in.WindowID]++
 	return f.revs[in.WindowID], nil
+}
+
+func (f *fakeLayoutClient) DeleteAppStateWindow(_ context.Context, _, windowID string, expectedRevision uint64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.deletes = append(f.deletes, windowID)
+	if cur := f.revs[windowID]; cur == 0 || cur != expectedRevision {
+		return conflictErr(cur)
+	}
+	delete(f.store, windowID)
+	delete(f.revs, windowID)
+	return nil
 }
 
 // seed stores one document directly, the way a previous run left it.
@@ -165,6 +183,86 @@ func TestLayoutSaveUsesCASAndRetriesTheConflict(t *testing.T) {
 		t.Fatal("the accepted save left the document dirty")
 	}
 	_ = rev
+}
+
+func TestLayoutDeleteRetriesUnderCurrentRevision(t *testing.T) {
+	t.Parallel()
+	fake := newFakeLayoutClient()
+	fake.seed(DefaultLayout())
+	const secondaryID = "a99854df-6c7d-4597-aad4-a00e73f746fd"
+	fake.revs[secondaryID] = 4
+	req := layoutRequest{kind: opDeleteWindow, windowID: secondaryID, rev: 3}
+	result := deleteLayout(t.Context(), fake, "layout-delete-command", &req)
+	if result.err != nil {
+		t.Fatal(result.err)
+	}
+	if got := fake.deletes; len(got) != 2 || got[0] != secondaryID || got[1] != secondaryID {
+		t.Fatalf("delete calls = %v, want two for the secondary window", got)
+	}
+	if fake.revs[secondaryID] != 0 || fake.revs[primaryWindowID] != 3 {
+		t.Fatal("delete did not preserve the primary window while removing the secondary")
+	}
+}
+
+func TestLayoutFlushKeepsEditMadeDuringPut(t *testing.T) {
+	t.Parallel()
+	sc, _ := newTestScreens(t)
+	fake := newFakeLayoutClient()
+	w := newLayoutWorker(func() layoutClient { return fake }, nil)
+	w.Start(t.Context())
+	t.Cleanup(w.Stop)
+	sc.layoutWorker = w
+	sc.applyWindowRecord(nil)
+
+	sc.grid.openCompanion(SlotRef{Kind: KindInbox})
+	sc.grid.maybeSave(w)
+	sc.grid.openCompanion(SlotRef{Kind: KindAccounts})
+	if err := sc.finishWindowLayout(t.Context(), false); err != nil {
+		t.Fatal(err)
+	}
+
+	stored, err := DecodeLayout(fake.store[primaryWindowID])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sc.grid.rev != 2 || sc.grid.dirty || !hasKind(stored.Doc, KindAccounts) {
+		t.Fatalf("revision=%d dirty=%v: close did not flush the edit made during the first put", sc.grid.rev, sc.grid.dirty)
+	}
+	if len(fake.deletes) != 0 {
+		t.Fatalf("close deleted layouts %v", fake.deletes)
+	}
+}
+
+func TestLayoutDebouncesChangesAndCopiesSplitWeights(t *testing.T) {
+	t.Parallel()
+	sc, _ := newTestScreens(t)
+	fake := newFakeLayoutClient()
+	w := newLayoutWorker(func() layoutClient { return fake }, nil)
+	sc.applyWindowRecord(nil)
+	g := sc.grid
+	g.openCompanion(SlotRef{Kind: KindInbox})
+
+	gtx := layout.Context{Now: time.Unix(0, 0)}
+	g.saveLayoutFrame(&gtx, w)
+	gtx.Now = gtx.Now.Add(layoutSaveDelay / 2)
+	g.setColumnRatio(0, 2, 0.25)
+	g.edited(g.doc)
+	g.saveLayoutFrame(&gtx, w)
+	gtx.Now = gtx.Now.Add(layoutSaveDelay / 2)
+	g.saveLayoutFrame(&gtx, w)
+	if len(w.reqs) != 0 {
+		t.Fatal("layout save did not debounce the second edit")
+	}
+	gtx.Now = gtx.Now.Add(layoutSaveDelay / 2)
+	g.saveLayoutFrame(&gtx, w)
+	if len(w.reqs) != 1 {
+		t.Fatal("layout save was not queued after the debounce")
+	}
+	req := <-w.reqs
+	g.setColumnRatio(0, 2, 0.75)
+	if ratio := columnRatio(req.doc, 0, 2); ratio != 0.25 {
+		t.Fatalf("queued layout shares live weights: ratio=%f", ratio)
+	}
 }
 
 // TestMissingSessionRendersEmptyStateNotVanish pins DA-E10's missing-object
