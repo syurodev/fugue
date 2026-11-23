@@ -22,8 +22,12 @@ import (
 )
 
 const (
-	shotWindowW    = 860
-	shotWindowH    = 560
+	shotWindowW = 860
+	shotWindowH = 560
+	// shotSidebarW is the sidebar scene's width: at 125% the shell must
+	// still hold rail, sidebar and the main slot's minimum (808 dp, about
+	// 1010 px plus the window insets), which the standard width cannot.
+	shotSidebarW   = 1100
 	shotSidebar    = "sidebar"
 	shotRootDialog = "root-dialog"
 	shotPolicyCard = "policy-card"
@@ -111,6 +115,14 @@ func buildShotScreens(t *testing.T, scene string) *screens {
 func renderWorkspaceShot(t *testing.T, win *headless.Window, spec shotSpec) *image.RGBA {
 	t.Helper()
 	size := image.Pt(shotWindowW, shotWindowH)
+	if spec.scene == shotSidebar {
+		size = image.Pt(shotSidebarW, shotWindowH)
+		wide, err := glwin.Open(size.X, size.Y)
+		if err != nil {
+			t.Fatalf("open headless window: %v", err)
+		}
+		win = wide
+	}
 	return renderAppShotSized(t, win, spec, buildShotScreens(t, spec.scene), size)
 }
 

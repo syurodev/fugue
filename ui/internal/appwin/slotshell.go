@@ -144,13 +144,11 @@ func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dime
 	)
 }
 
-// planShell derives the narrow-window fold for the shell body. The plan
-// compares the window's width against the shell's minimums, which already
-// include the rail and the sidebar; drawWindow's side insets are part of the
-// window, not of the shell body, so they are added back here.
+// planShell derives the narrow-window fold for the shell body. Max.X is the
+// width rail, sidebar and grid share (drawWindow's side insets are already
+// gone), and layoutMinWidthDp counts exactly those three.
 func (s *screens) planShell(gtx *layout.Context) PlanFoldResult {
-	windowW := gtx.Constraints.Max.X + 2*gtx.Dp(theme.SpaceLG)
-	return PlanFold(pxToDp(gtx, windowW), s.sidebarVisible(), len(s.grid.doc.Columns))
+	return PlanFold(pxToDp(gtx, gtx.Constraints.Max.X), s.sidebarVisible(), len(s.grid.doc.Columns))
 }
 
 // sidebarVisible is the sidebar's user state: the persisted collapsed flag.
