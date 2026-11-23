@@ -203,6 +203,9 @@ func (a *vendorSessionActor) recordTurnDiff(ctx context.Context, turnID string) 
 			scan = a.scanTurnAdditions(ctx, start, &changes)
 		}
 	}
+	// The turn stays open for the other sessions until its end snapshot is done;
+	// whatever the snapshot's outcome, its registry entry ends here.
+	metadata.Overlapped = a.manager.overlaps.end(a.cwd, a.info.ID, turnID)
 	if start.ID != "" {
 		a.releaseTurnSnapshot(ctx, start)
 	}
@@ -269,6 +272,7 @@ func transcriptChange(kind snapshot.ChangeKind) string {
 func (a *vendorSessionActor) trackTurnSnapshot(turnID string, snap TurnSnapshot) {
 	if a.manager.deps.TurnSnapshots != nil {
 		a.snaps[turnID] = snap
+		a.manager.overlaps.begin(a.cwd, a.info.ID, turnID)
 	}
 }
 
@@ -319,6 +323,7 @@ func (a *vendorSessionActor) releaseSessionSnapshots(ctx context.Context) {
 	if port == nil || a.cwd == "" {
 		return
 	}
+	a.manager.overlaps.endSession(a.info.ID)
 	_, err := capped(context.WithoutCancel(ctx), a.manager, "turn-snapshot-release-session-"+a.info.ID, func(taskCtx context.Context) (struct{}, error) {
 		return struct{}{}, port.ReleaseSession(taskCtx, a.info.ID, a.cwd)
 	})

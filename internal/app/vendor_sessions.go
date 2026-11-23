@@ -109,6 +109,7 @@ type VendorSessions struct {
 	spawnSettled      chan struct{}
 	waiterMu          sync.Mutex
 	turnWaiters       map[string]chan error
+	overlaps          *turnOverlaps
 }
 
 type pendingOwner struct {
@@ -140,6 +141,7 @@ func NewVendorSessions(ctx context.Context, deps *VendorSessionDeps) (*VendorSes
 		capabilities:   make(map[string]vendor.Capability),
 		reservations:   make(map[string]slotAccountKey),
 		turnWaiters:    make(map[string]chan error),
+		overlaps:       newTurnOverlaps(),
 		pacer:          newVendorPacer(copyDeps.Clock, spawn, copyDeps.HostConfig, copyDeps.PromptPacingJitter),
 	}, nil
 }
