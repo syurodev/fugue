@@ -66,8 +66,10 @@ type vendorSessionActor struct {
 	turns         map[string]bool
 	// cwd is the session's working directory and snaps the opening snapshot of
 	// each open turn (git-guard §3.1); a zero TurnSnapshot marks a failed one.
-	cwd        string
-	snaps      map[string]TurnSnapshot
+	cwd   string
+	snaps map[string]TurnSnapshot
+	// warm closes when the background warm-up of the shadow index has ended.
+	warm       chan struct{}
 	finished   bool
 	stopProved bool
 	// attached turns on once the create or resume command has committed:
@@ -159,6 +161,7 @@ func (a *vendorSessionActor) run(ctx context.Context) error {
 		defer ended(a.info.ID)
 	}
 	defer a.vaultSub.Close()
+	defer a.releaseSessionSnapshots(ctx)
 	defer a.retirePeerOwner()
 	defer a.stopIdleTimer()
 	for {
@@ -341,6 +344,7 @@ func (a *vendorSessionActor) createSession(ctx context.Context) error {
 		return fmt.Errorf("%w: %w", ErrVendorActorFailed, safeActorError(err))
 	}
 	a.attached = true
+	a.startWarmUp()
 	return nil
 }
 
@@ -360,6 +364,7 @@ func (a *vendorSessionActor) resumeSession(ctx context.Context) error {
 		return err
 	}
 	a.state, a.attached = next, true
+	a.startWarmUp()
 	return nil
 }
 

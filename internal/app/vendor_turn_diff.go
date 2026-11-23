@@ -48,9 +48,17 @@ type TurnChanges struct {
 
 // TurnSnapshotter is the port the vendor session actor uses to snapshot a
 // working directory around a turn. The host binds the shadow-git engine.
+//
+// Warm primes the shadow index of workDir so the first Begin is incremental.
+// Release forgets one turn's snapshot pair once its diff is computed, and
+// ReleaseSession forgets whatever a session still holds when it ends; neither
+// the engine's store nor its refs may grow with the number of turns.
 type TurnSnapshotter interface {
+	Warm(ctx context.Context, workDir string) error
 	Begin(ctx context.Context, sessionID, workDir string) (TurnSnapshot, error)
 	End(ctx context.Context, snap TurnSnapshot) (TurnChanges, error)
+	Release(ctx context.Context, snap TurnSnapshot) error
+	ReleaseSession(ctx context.Context, sessionID, workDir string) error
 }
 
 // engineTurnSnapshots implements TurnSnapshotter on the shadow-git engine.
@@ -62,9 +70,30 @@ type engineTurnSnapshots struct {
 // newEngineTurnSnapshots binds the shadow-git engine rooted in the data
 // directory. A machine without git still gets a port: every snapshot then
 // fails and the items say unavailable.
-func newEngineTurnSnapshots(dataDir string, git snapshot.Availability, clk clock.Clock, idGen ids.Generator) *engineTurnSnapshots {
-	engine := snapshot.NewWithDeps(filepath.Join(dataDir, turnSnapshotsDir), git, snapshot.DefaultLimits(), clk, idGen)
+func newEngineTurnSnapshots(dataDir string, git snapshot.Availability, limits snapshot.Limits, clk clock.Clock, idGen ids.Generator) *engineTurnSnapshots {
+	engine := snapshot.NewWithDeps(filepath.Join(dataDir, turnSnapshotsDir), git, limits, clk, idGen)
 	return &engineTurnSnapshots{engine: engine, store: snapshot.NewMemoryStore()}
+}
+
+func (e *engineTurnSnapshots) Warm(ctx context.Context, workDir string) error {
+	if err := e.engine.Warm(ctx, workDir); err != nil {
+		return fmt.Errorf("warm the shadow index: %w", err)
+	}
+	return nil
+}
+
+func (e *engineTurnSnapshots) Release(ctx context.Context, snap TurnSnapshot) error {
+	if err := e.engine.ReleaseCheckpoints(ctx, e.store, snap.WorkDir, snap.ID); err != nil {
+		return fmt.Errorf("release the turn snapshot: %w", err)
+	}
+	return nil
+}
+
+func (e *engineTurnSnapshots) ReleaseSession(ctx context.Context, sessionID, workDir string) error {
+	if err := e.engine.ReleaseSession(ctx, e.store, sessionID, workDir); err != nil {
+		return fmt.Errorf("release the session snapshots: %w", err)
+	}
+	return nil
 }
 
 func (e *engineTurnSnapshots) Begin(ctx context.Context, sessionID, workDir string) (TurnSnapshot, error) {
@@ -129,7 +158,15 @@ func (a *vendorSessionActor) beginTurnSnapshot(ctx context.Context) TurnSnapshot
 	if port == nil {
 		return TurnSnapshot{}
 	}
+	warm := a.warm
 	snap, err := capped(ctx, a.manager, "turn-snapshot-begin-"+a.info.ID, func(taskCtx context.Context) (TurnSnapshot, error) {
+		// A turn that starts during warm-up waits for it inside the same cap, so
+		// the start snapshot never races the priming capture.
+		select {
+		case <-warm:
+		case <-taskCtx.Done():
+			return TurnSnapshot{}, fmt.Errorf("wait for the shadow warm-up: %w", taskCtx.Err())
+		}
 		return port.Begin(taskCtx, a.info.ID, a.cwd)
 	})
 	if err != nil {
@@ -159,6 +196,9 @@ func (a *vendorSessionActor) recordTurnDiff(ctx context.Context, turnID string) 
 		} else {
 			metadata, content = turnDiffItemData(&changes)
 		}
+	}
+	if start.ID != "" {
+		a.releaseTurnSnapshot(ctx, start)
 	}
 	id, err := a.manager.deps.IDs.NewID()
 	if err != nil {
@@ -232,4 +272,50 @@ func turnSnapshotGit(ctx context.Context, deps *HostDeps) snapshot.Availability 
 		return snapshot.Availability{Path: deps.GitBinary}
 	}
 	return snapshot.Locate(ctx)
+}
+
+// startWarmUp primes the shadow index in the background when the session starts
+// or resumes, so the first turn's start snapshot, which must finish before the
+// input is sent, is incremental instead of a cold capture of the whole tree.
+func (a *vendorSessionActor) startWarmUp() {
+	port := a.manager.deps.TurnSnapshots
+	if port == nil || a.cwd == "" || a.warm != nil {
+		return
+	}
+	done := make(chan struct{})
+	a.warm = done
+	workDir, logger := a.cwd, a.manager.deps.Logger
+	a.manager.spawn("turn-snapshot-warm-"+a.info.ID, func(ctx context.Context) error {
+		defer close(done)
+		if err := port.Warm(ctx, workDir); err != nil {
+			logger.WarnContext(ctx, "the shadow warm-up failed", "error_code", string(errcode.CodeOf(err)))
+		}
+		return nil
+	})
+}
+
+// releaseTurnSnapshot forgets a turn's snapshot pair after its diff is computed,
+// under the same cap as the snapshots themselves.
+func (a *vendorSessionActor) releaseTurnSnapshot(ctx context.Context, start TurnSnapshot) {
+	_, err := capped(ctx, a.manager, "turn-snapshot-release-"+a.info.ID, func(taskCtx context.Context) (struct{}, error) {
+		return struct{}{}, a.manager.deps.TurnSnapshots.Release(taskCtx, start)
+	})
+	if err != nil {
+		a.manager.deps.Logger.WarnContext(ctx, "the turn snapshot was not released", "error_code", string(errcode.CodeOf(err)))
+	}
+}
+
+// releaseSessionSnapshots forgets whatever the session still holds when its
+// actor ends: a turn that never reached its end, or a failed release.
+func (a *vendorSessionActor) releaseSessionSnapshots(ctx context.Context) {
+	port := a.manager.deps.TurnSnapshots
+	if port == nil || a.cwd == "" {
+		return
+	}
+	_, err := capped(context.WithoutCancel(ctx), a.manager, "turn-snapshot-release-session-"+a.info.ID, func(taskCtx context.Context) (struct{}, error) {
+		return struct{}{}, port.ReleaseSession(taskCtx, a.info.ID, a.cwd)
+	})
+	if err != nil {
+		a.manager.deps.Logger.WarnContext(ctx, "the session snapshots were not released", "error_code", string(errcode.CodeOf(err)))
+	}
 }

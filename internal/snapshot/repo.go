@@ -51,6 +51,9 @@ func (r *Repo) runLocked(ctx context.Context, fn func() error) error {
 	select {
 	case <-r.gate:
 		defer func() { r.gate <- struct{}{} }()
+		if err := r.clearStaleLocks(); err != nil {
+			return err
+		}
 		return fn()
 	case <-ctx.Done():
 		return fmt.Errorf("snapshot: wait for project lock: %w", ctx.Err())

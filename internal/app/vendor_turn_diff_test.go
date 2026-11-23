@@ -64,11 +64,16 @@ func newTurnDiffHarness(t *testing.T, workDir string, port TurnSnapshotter) *tur
 
 func realTurnSnapshots(t *testing.T) *engineTurnSnapshots {
 	t.Helper()
+	return realTurnSnapshotsWith(t, snapshot.DefaultLimits())
+}
+
+func realTurnSnapshotsWith(t *testing.T, limits snapshot.Limits) *engineTurnSnapshots {
+	t.Helper()
 	git := snapshot.Locate(t.Context())
 	if !git.OK() {
 		t.Fatalf("git is required for the turn snapshot tests: %s", git.Reason)
 	}
-	return newEngineTurnSnapshots(t.TempDir(), git, testutil.OSClock(), ids.NewSequence("snap-"))
+	return newEngineTurnSnapshots(t.TempDir(), git, limits, testutil.OSClock(), ids.NewSequence("snap-"))
 }
 
 // runTurn sends one turn, runs step while the turn is open (the fake vendor's
@@ -248,8 +253,16 @@ func TestVRE14GGE02UserGitUntouchedAndNoGitDirectoryWorks(t *testing.T) {
 	}
 }
 
+// noopSnapshotLifecycle is the warm-up and release half of a fake snapshotter.
+type noopSnapshotLifecycle struct{}
+
+func (noopSnapshotLifecycle) Warm(context.Context, string) error                   { return nil }
+func (noopSnapshotLifecycle) Release(context.Context, TurnSnapshot) error          { return nil }
+func (noopSnapshotLifecycle) ReleaseSession(context.Context, string, string) error { return nil }
+
 // stalledSnapshots blocks Begin until its context ends, like a git that hangs.
 type stalledSnapshots struct {
+	noopSnapshotLifecycle
 	entered   chan struct{}
 	cancelled atomic.Bool
 	endErr    error
@@ -267,7 +280,7 @@ func (s *stalledSnapshots) End(context.Context, TurnSnapshot) (TurnChanges, erro
 }
 
 // failingEnd opens normally and fails at the end of the turn.
-type failingEnd struct{}
+type failingEnd struct{ noopSnapshotLifecycle }
 
 func (failingEnd) Begin(_ context.Context, _, workDir string) (TurnSnapshot, error) {
 	return TurnSnapshot{ID: "snap", WorkDir: workDir}, nil
@@ -318,4 +331,134 @@ func TestVRE14GGE03SnapshotFailureIsUnavailableAndTurnCompletes(t *testing.T) {
 	h := newTurnDiffHarness(t, t.TempDir(), failingEnd{})
 	h.runTurn(nil)
 	h.requireUnavailableAndReady()
+}
+
+func heldCheckpoints(t *testing.T, port *engineTurnSnapshots) int {
+	t.Helper()
+	rows, err := port.store.ListCheckpoints(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(rows)
+}
+
+// TestVRE14TurnDiffsOutliveTheSessionTurnQuota: a session with more turns than
+// the engine's per-session turn quota still gets complete turn_diffs, because
+// each turn's records are released once its diff is computed. The quota is 2
+// here so six turns cross it quickly; the default is 200.
+func TestVRE14TurnDiffsOutliveTheSessionTurnQuota(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "a.txt"), "0\n")
+	port := realTurnSnapshotsWith(t, snapshot.Limits{MaxTurnsPerSession: 2})
+	h := newTurnDiffHarness(t, dir, port)
+	for i := range 6 {
+		h.runTurn(func() { writeTestFile(t, filepath.Join(dir, "a.txt"), fmt.Sprintf("%d\n", i+1)) })
+	}
+	entries := h.turnDiffs()
+	if len(entries) != 6 {
+		t.Fatalf("turn_diff items = %d, want 6", len(entries))
+	}
+	for i := range entries {
+		if entries[i].Metadata.Status != transcript.TurnDiffComplete || entries[i].Metadata.FilesModified != 1 {
+			t.Fatalf("turn_diff metadata = %+v, want one modified file", entries[i].Metadata)
+		}
+	}
+}
+
+// TestVRE14SnapshotRecordsAreReleasedAfterTurnsAndSession: the journal is empty
+// once a turn's diff is computed, and a session's leftovers are released when
+// it closes.
+func TestVRE14SnapshotRecordsAreReleasedAfterTurnsAndSession(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "a.txt"), "0\n")
+	port := realTurnSnapshots(t)
+	h := newTurnDiffHarness(t, dir, port)
+	h.runTurn(func() { writeTestFile(t, filepath.Join(dir, "a.txt"), "1\n") })
+	h.runTurn(nil)
+	if n := heldCheckpoints(t, port); n != 0 {
+		t.Fatalf("records held after two turns = %d, want 0", n)
+	}
+	// A start snapshot nobody closed, as a turn lost to a crash would leave.
+	if _, err := port.Begin(t.Context(), testActorSessionID, dir); err != nil {
+		t.Fatal(err)
+	}
+	if n := heldCheckpoints(t, port); n != 1 {
+		t.Fatalf("records held with a dangling start = %d, want 1", n)
+	}
+	if err := h.manager.Close(t.Context(), testActorSessionID, vendor.CloseUserRequest); err != nil {
+		t.Fatal(err)
+	}
+	if n := heldCheckpoints(t, port); n != 0 {
+		t.Fatalf("records held after the session closed = %d, want 0", n)
+	}
+}
+
+// warmSnapshots records whether Begin ran after the warm-up finished.
+type warmSnapshots struct {
+	noopSnapshotLifecycle
+	gate        chan struct{}
+	warmEntered chan struct{}
+	warmed      atomic.Bool
+	beginWarmed atomic.Bool
+	beginCalls  atomic.Int32
+	endedWithID atomic.Value
+}
+
+func (w *warmSnapshots) Warm(ctx context.Context, _ string) error {
+	close(w.warmEntered)
+	select {
+	case <-w.gate:
+		w.warmed.Store(true)
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("warm cancelled: %w", ctx.Err())
+	}
+}
+
+func (w *warmSnapshots) Begin(_ context.Context, _, workDir string) (TurnSnapshot, error) {
+	w.beginCalls.Add(1)
+	w.beginWarmed.Store(w.warmed.Load())
+	return TurnSnapshot{ID: "start-1", WorkDir: workDir}, nil
+}
+
+func (w *warmSnapshots) End(_ context.Context, snap TurnSnapshot) (TurnChanges, error) {
+	w.endedWithID.Store(snap.ID)
+	return TurnChanges{}, nil
+}
+
+// TestVRE14TurnDuringWarmUpWaitsAndGetsACorrectStartSnapshot: the background
+// warm-up starts with the session, a turn that begins during it waits for it
+// before its start snapshot, and that snapshot is the one the turn ends with.
+func TestVRE14TurnDuringWarmUpWaitsAndGetsACorrectStartSnapshot(t *testing.T) {
+	t.Parallel()
+	port := &warmSnapshots{gate: make(chan struct{}), warmEntered: make(chan struct{})}
+	h := newTurnDiffHarness(t, t.TempDir(), port)
+	<-port.warmEntered
+	sent := make(chan error, 1)
+	supervise.Go(t.Context(), "send-during-warm-up", func(ctx context.Context) error {
+		sent <- h.manager.Send(ctx, testActorSessionID, vendor.Input{Text: "go"})
+		return nil
+	})
+	testutil.Spin(t, "the turn reaching its start snapshot wait", func() bool { return h.f.clock.Pending() > 0 })
+	if port.beginCalls.Load() != 0 {
+		t.Fatal("the start snapshot ran before the warm-up ended")
+	}
+	close(port.gate)
+	if err := <-sent; err != nil {
+		t.Fatal(err)
+	}
+	if !port.beginWarmed.Load() {
+		t.Fatal("Begin did not see a warmed shadow index")
+	}
+	h.session.observations <- claude.Observation{TurnEnd: &claude.TurnEnd{TurnID: h.session.turnID, Outcome: claude.OutcomeCompleted}}
+	h.turns++
+	awaitActor(t, func() bool { return len(h.turnDiffs()) == 1 })
+	if got := port.endedWithID.Load(); got != "start-1" {
+		t.Fatalf("End got snapshot %v, want start-1", got)
+	}
+	if h.turnDiffs()[0].Metadata.Status != transcript.TurnDiffComplete {
+		t.Fatalf("turn_diff = %+v, want complete", h.turnDiffs()[0].Metadata)
+	}
 }
