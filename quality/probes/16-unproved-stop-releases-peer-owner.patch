@@ -1,0 +1,14 @@
+# probe-test: ./internal/app TestEndedSessionSurvivingDescendantIsStillDenied
+diff --git a/internal/app/vendor_session_actor.go b/internal/app/vendor_session_actor.go
+index f9eda08..6c1cf50 100644
+--- a/internal/app/vendor_session_actor.go
++++ b/internal/app/vendor_session_actor.go
+@@ -247,7 +247,7 @@ func (a *vendorSessionActor) stopAfterHostCancel(ctx context.Context) error {
+ }
+ 
+ func (a *vendorSessionActor) recordStopResult(proof process.StopProof, err error) {
+-	a.stopProved = err == nil && proof.Status == process.StopProofProved
++	a.stopProved = true
+ }
+ 
+ func (a *vendorSessionActor) retirePeerOwner() {

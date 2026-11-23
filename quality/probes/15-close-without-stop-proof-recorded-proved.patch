@@ -1,0 +1,17 @@
+# probe-test: ./internal/app TestDetachFallsBackToClosedWithoutResumeWhenStopProofUnknownOrCloseErrors
+diff --git a/internal/app/vendor_session_lifecycle.go b/internal/app/vendor_session_lifecycle.go
+index 2a44e3d..aa11b0f 100644
+--- a/internal/app/vendor_session_lifecycle.go
++++ b/internal/app/vendor_session_lifecycle.go
+@@ -45,10 +45,7 @@ func (a *vendorSessionActor) persistClose(ctx context.Context, reason vendor.Clo
+ 	if err := a.awaitSessionEndWork(ctx); err != nil {
+ 		return err
+ 	}
+-	status := string(proof.Status)
+-	if status != string(process.StopProofProved) || closeErr != nil {
+-		status = string(process.StopProofUnknown)
+-	}
++	status := string(process.StopProofProved)
+ 	if a.turnID != "" {
+ 		outcome := vendorstore.OutcomeUnknown
+ 		fact := vendor.Fact{Kind: vendor.FactTurnUnknown}

@@ -1,0 +1,26 @@
+# probe-test: ./internal/vendorstore TestRetryTaskRefusesUnknownTask
+diff --git a/internal/vendorstore/team_retry.go b/internal/vendorstore/team_retry.go
+index edf7511..b26b37a 100644
+--- a/internal/vendorstore/team_retry.go
++++ b/internal/vendorstore/team_retry.go
+@@ -234,7 +234,7 @@ func loadRetrySource(ctx context.Context, tx *sql.Tx, teamID, taskID string) (re
+ 	row.role = TeamRole(roleStr)
+ 	row.deliverable = TeamDeliverable(delivStr)
+ 	row.state = TaskState(stateStr)
+-	if row.state != TaskStateFailed {
++	if row.state != TaskStateFailed && row.state != TaskStateUnknown {
+ 		return retrySourceRow{}, fmt.Errorf("%w: only failed tasks can retry (state is %s)", ErrTeamTransition, row.state)
+ 	}
+ 	var existingChild int
+diff --git a/internal/vendorstore/team_transitions.go b/internal/vendorstore/team_transitions.go
+index 6204597..816eb81 100644
+--- a/internal/vendorstore/team_transitions.go
++++ b/internal/vendorstore/team_transitions.go
+@@ -102,6 +102,7 @@ func taskTransitions() map[taskTransKey]TaskState {
+ 		{TaskStateReview, EventTaskEnded, outcomeFailed}:                      TaskStateFailed,
+ 		{TaskStateReview, EventTaskEnded, outcomeCancelled}:                   TaskStateCancelled,
+ 		{TaskStateFailed, EventTaskSuperseded, ""}:                            TaskStateStopped,
++		{TaskStateUnknown, EventTaskSuperseded, ""}:                           TaskStateStopped,
+ 		{TaskStateUnknown, EventTaskRecoveryDecided, RecoveryOutcomeResume}:   TaskStateStarting,
+ 		{TaskStateUnknown, EventTaskRecoveryDecided, RecoveryOutcomeKeepDiff}: TaskStateReview,
+ 		{TaskStateUnknown, EventTaskRecoveryDecided, RecoveryOutcomeCancel}:   TaskStateCancelled,

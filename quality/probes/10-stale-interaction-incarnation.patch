@@ -1,0 +1,40 @@
+# probe-test: ./internal/app TestInteractionValidationRejections
+# probe-test: ./internal/interaction TestAnOldRequestCannotBeAnsweredAfterRestart
+diff --git a/internal/app/interaction_answer.go b/internal/app/interaction_answer.go
+index 9e494ca..ee37e60 100644
+--- a/internal/app/interaction_answer.go
++++ b/internal/app/interaction_answer.go
+@@ -29,9 +29,6 @@ func (s *InteractionService) validateAnswerCmd(cmd *AnswerInteractionCommand) er
+ 	if cmd.Incarnation == "" {
+ 		return errcode.New(errcode.InvalidArgument, "incarnation is required")
+ 	}
+-	if cmd.Incarnation != s.inc {
+-		return errcode.New(errcode.InteractionStaleIncarnation, "interaction request belongs to a previous incarnation")
+-	}
+ 	return nil
+ }
+ 
+@@ -258,9 +255,6 @@ func (s *InteractionService) validateSecretAnswerUpfront(cmd *AnswerInteractionC
+ 	if a.SecretID != "" && len(a.SecretValue) > 0 {
+ 		return errcode.New(errcode.InvalidArgument, "cannot specify both secret_id and secret_value")
+ 	}
+-	if cmd.Incarnation != s.inc {
+-		return errcode.New(errcode.InteractionStaleIncarnation, "interaction request belongs to a previous incarnation")
+-	}
+ 	if cmd.Outcome != string(interaction.OutcomeAnswered) || !ticket.Relayed || ticket.Kind != interaction.KindQuestion {
+ 		return errcode.New(errcode.InvalidArgument, "secret answers are only valid for answered relayed questions")
+ 	}
+diff --git a/internal/interaction/owner.go b/internal/interaction/owner.go
+index 4bae5bd..ff6d8c0 100644
+--- a/internal/interaction/owner.go
++++ b/internal/interaction/owner.go
+@@ -370,9 +370,6 @@ func (o *Owner) Answer(decision *Decision) (*Ticket, error) {
+ 	if decision == nil || decision.RequestID == "" {
+ 		return nil, errcode.New(errcode.InvalidArgument, "interaction request ID is required")
+ 	}
+-	if decision.Incarnation != "" && decision.Incarnation != o.incarnation {
+-		return nil, ErrStaleIncarnation
+-	}
+ 	o.mu.Lock()
+ 	ticket, ok := o.byRequest[decision.RequestID]
+ 	if !ok {

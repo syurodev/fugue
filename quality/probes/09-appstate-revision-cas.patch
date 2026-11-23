@@ -1,0 +1,34 @@
+# probe-test: ./internal/appstate TestPreferencesCASUpdate
+# probe-test: ./internal/appstate TestWindowCASConflicts
+# probe-test: ./internal/appstate TestWindowDeleteUnderCAS
+diff --git a/internal/appstate/store.go b/internal/appstate/store.go
+index c47d214..725c6bf 100644
+--- a/internal/appstate/store.go
++++ b/internal/appstate/store.go
+@@ -173,8 +173,6 @@ func putWindowRow(ctx context.Context, tx *sql.Tx, windowID string, expected uin
+ 	switch {
+ 	case !found:
+ 		return insertWindowRow(ctx, tx, windowID, expected, layout, now)
+-	case current != expected:
+-		return 0, newConflict(current)
+ 	}
+ 	if _, err := tx.ExecContext(ctx,
+ 		`UPDATE app_windows SET revision = revision + 1, layout = ?, updated_at = ? WHERE window_id = ?`,
+@@ -212,7 +210,7 @@ func deleteWindowRow(ctx context.Context, tx *sql.Tx, windowID string, expected
+ 	switch {
+ 	case err != nil:
+ 		return 0, err
+-	case !found || current != expected:
++	case !found:
+ 		return 0, newConflict(current)
+ 	}
+ 	if _, err := tx.ExecContext(ctx, `DELETE FROM app_windows WHERE window_id = ?`, windowID); err != nil {
+@@ -230,8 +228,6 @@ func putPreferencesRow(ctx context.Context, tx *sql.Tx, expected uint64, prefs [
+ 	switch {
+ 	case !found:
+ 		return insertPreferencesRow(ctx, tx, expected, prefs, now)
+-	case current != expected:
+-		return 0, newConflict(current)
+ 	}
+ 	if _, err := tx.ExecContext(ctx,
+ 		`UPDATE app_preferences SET revision = revision + 1, preferences = ?, updated_at = ? WHERE id = 1`,

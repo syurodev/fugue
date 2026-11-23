@@ -1,0 +1,24 @@
+# probe-test: ./internal/vendorstore TestRestartMarksRunningTasksUnknownAndNeverReruns
+# probe-test: ./internal/app TestHostRestartLeavesRunningTasksUnknownAndNotifiesDelegator
+# probe-test: ./internal/app TestStartNeverReplaysATaskWhoseStartOutcomeIsUnknown
+diff --git a/internal/vendorstore/team_recovery.go b/internal/vendorstore/team_recovery.go
+index fff39d8..07e0075 100644
+--- a/internal/vendorstore/team_recovery.go
++++ b/internal/vendorstore/team_recovery.go
+@@ -111,14 +111,14 @@ func applyRecoveredTaskRow(ctx context.Context, tx *sql.Tx, c recoveryCandidate,
+ 			from_state, to_state, failure_code, payload_envelope, created_at
+ 		) VALUES (?, ?, ?, ?, ?, '', ?, ?, '', NULL, ?)`,
+ 		c.TeamID, seq, eventID, c.TaskID, string(EventTaskMarkedUnknown),
+-		string(c.PreviousState), string(TaskStateUnknown), now,
++		string(c.PreviousState), string(TaskStateQueued), now,
+ 	); err != nil {
+ 		return fmt.Errorf("insert TaskMarkedUnknown event: %w", err)
+ 	}
+ 	if _, err := tx.ExecContext(ctx, `
+ 		UPDATE team_tasks SET state = ?, last_event_seq = ?, updated_at = ?
+ 		WHERE team_id = ? AND task_id = ?`,
+-		string(TaskStateUnknown), seq, now, c.TeamID, c.TaskID,
++		string(TaskStateQueued), seq, now, c.TeamID, c.TaskID,
+ 	); err != nil {
+ 		return fmt.Errorf("mark task unknown: %w", err)
+ 	}

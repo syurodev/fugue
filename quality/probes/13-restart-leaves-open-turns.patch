@@ -1,0 +1,16 @@
+# probe-test: ./internal/vendorstore TestRecoveryDetachesSessionsAndMarksOpenTurnsUnknown
+# probe-test: ./internal/app TestHostRestartLeavesSessionsDetachedAndTurnsUnknownWithoutRespawn
+# probe-test: ./internal/app TestVRE06HostCrashDuringTurnMarksDetachedAndUnknown
+diff --git a/internal/vendorstore/recovery.go b/internal/vendorstore/recovery.go
+index 163ae00..ccfeafc 100644
+--- a/internal/vendorstore/recovery.go
++++ b/internal/vendorstore/recovery.go
+@@ -69,7 +69,7 @@ func (s *Store) Recover(ctx context.Context) ([]ProcessIdentity, error) {
+ func (s *Store) detachUnfinished(ctx context.Context, tx *sql.Tx) error {
+ 	now := s.clock.Now().UTC().Format(time.RFC3339Nano)
+ 	_, err := tx.ExecContext(ctx,
+-		`UPDATE vendor_turns SET outcome=?,ended_at=? WHERE outcome=''`, OutcomeUnknown, now)
++		`UPDATE vendor_turns SET outcome=?,ended_at=? WHERE outcome='-'`, OutcomeUnknown, now)
+ 	if err != nil {
+ 		return fmt.Errorf("%w: recover turns: %w", ErrUnavailable, err)
+ 	}

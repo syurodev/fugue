@@ -1,0 +1,17 @@
+# probe-test: ./internal/vendorstore TestDecideTeamRefusals
+# probe-test: ./internal/vendorstore TestTeamStoreAppendIsContiguousAndProjectionIsAtomic
+# probe-test: ./internal/vendorstore TestAmendTeamRefusals
+diff --git a/internal/vendorstore/teams.go b/internal/vendorstore/teams.go
+index f14d3c8..fd95787 100644
+--- a/internal/vendorstore/teams.go
++++ b/internal/vendorstore/teams.go
+@@ -127,9 +127,6 @@ func loadTeamMetaForUpdate(ctx context.Context, tx *sql.Tx, teamID string, expec
+ 	if err != nil {
+ 		return teamMetaRow{}, fmt.Errorf("query team record: %w", err)
+ 	}
+-	if row.LastSeq != expectedSeq {
+-		return teamMetaRow{}, fmt.Errorf("%w: expected %d, actual %d", ErrSequenceConflict, expectedSeq, row.LastSeq)
+-	}
+ 	row.State = TeamState(stateStr)
+ 	return row, nil
+ }

@@ -1,0 +1,17 @@
+# probe-test: ./internal/app TestTeamManagerCannotDelegateOutsideItsPart
+# probe-test: ./internal/app TestUnknownTaskRecoveryDecisionsResumeKeepDiffCancel
+diff --git a/internal/app/team_task_service.go b/internal/app/team_task_service.go
+index 4b31211..f1d5ae3 100644
+--- a/internal/app/team_task_service.go
++++ b/internal/app/team_task_service.go
+@@ -230,10 +230,6 @@ func (c *callerTeamContext) requireDelegator(taskID string) (*vendorstore.TaskRe
+ 	if err := teams.ValidateRoleIdentifier("role", target.CatalogRole); err != nil {
+ 		return nil, errcode.New(errcode.InvalidArgument, err.Error())
+ 	}
+-	byID, retryChild := resolveTaskChain(c.tasks)
+-	if c.caller == nil || (!sameAttemptChain(target.ParentTaskID, c.caller.TaskID, byID, retryChild) && !c.leadTakeoverOf(target, byID, retryChild)) {
+-		return nil, errcode.New(errcode.PermissionDenied, "cannot act on a task outside your delegation subtree")
+-	}
+ 	return target, nil
+ }
+ 
