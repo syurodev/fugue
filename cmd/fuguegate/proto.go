@@ -79,12 +79,25 @@ func (g *protoGate) breaking(ctx context.Context, stdout io.Writer) error {
 			return say(stdout, "breaking check skipped: %s has no proto/ yet", g.base)
 		}
 		// ref=, not branch=: CI checks out a detached merge commit with no local main.
-		against = g.root + "/.git#ref=" + g.base + ",subdir=proto"
+		against = g.root + "/.git#ref=" + g.forkPoint(ctx) + ",subdir=proto"
 	}
 	if _, err := capture(ctx, ".", g.buf, "breaking", g.protoDir, "--against", against); err != nil {
 		return fmt.Errorf("%w: breaking: %w", ErrProto, err)
 	}
 	return nil
+}
+
+// forkPoint is the commit of the base the checked-out tree builds on: the
+// merge-base of HEAD and the base ref. Comparing with the base's tip instead
+// reports a field another PR added to main after this PR's merge commit was made
+// as deleted here, since main need not be current for a merge (2026-11-23). A
+// base git cannot relate to HEAD falls back to the ref itself.
+func (g *protoGate) forkPoint(ctx context.Context) string {
+	out, err := capture(ctx, g.root, "git", "merge-base", "HEAD", g.base)
+	if sha := strings.TrimSpace(out); err == nil && sha != "" {
+		return sha
+	}
+	return g.base
 }
 
 // stale regenerates into a temporary directory and compares it with the
