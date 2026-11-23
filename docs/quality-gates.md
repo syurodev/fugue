@@ -245,7 +245,7 @@ not required status checks (owner decision, 2026-11-16). The `ui/` module is not
 
 **Nightly:** long fuzzing, full mutation, every test repeated twenty times on ubuntu and macOS
 (`repeat-tests`, with a report of every test that both passed and failed), the `perf` speed
-budgets, Windows build.
+budgets, the upgrade and downgrade `drill` (A-E08), Windows build.
 
 `main` has branch protection: the checks above are required, squash merge only, no direct push
 and no force push.
@@ -284,6 +284,7 @@ Gate-defining files: `.golangci.yml`, `tools/fuguevet/**`, `internal/arch/**`, `
 | 2026-11-18 | CI scope: the macOS entries of the `test`, `stress` and `ui` gates become separate jobs gated by `if` at the job level instead of matrix entries decided by a step (§9). Job names, scope rules, required checks and every real macOS run are unchanged (`main.yml` still tests every merge) | On PRs #155, #160 and #161, `test (macos-latest)`, `stress (macos-latest)` and `ui (macos-latest)` were cancelled after exactly 15 m 01 s with zero steps: the step-level decision still requested a macOS runner on every PR, and GitHub cancels a job that queues without acquiring a hosted runner after roughly 15 minutes. A skipped job requests no runner and reports under its literal name; a skipped check counts as success for required status checks. Guards: `TestPRWorkflowRunsEveryRequiredJob`, `TestPRStressRerunsChangedTestPackages`, `TestUIWorkflowRunsTheModuleGates` | user (chat request; `gate-change-approved` on this PR) |
 | 2026-11-23 | `TestAppWritesOnlyThroughHostAPI`: the package `ui/internal/shottest` (golden shot comparison, test support) may call `os.ReadFile` and `os.WriteFile`; the same test now fails any production `ui` file that imports it | The shot comparator reads golden PNGs and writes failing renders; it is test support, and the import rule keeps the app from ever reaching those calls. Fixtures: `ui-writes-good` (the exempt package, a test importing it) and `ui-writes-bad` (a production importer, a lookalike package with no exemption) | user (`gate-change-approved` on the FUG-36 PR) |
 | 2026-11-22 | Retire the Markdown roadmap integrity and evidence tests. Validate Linear and spec ID syntax in `todoref` (§4–5) | Work tracking moved to Linear. `TestVerificationEvidence` checks release verification. `TestTodoRef` and `TestVettoolRunsEveryAnalyzer` exercise the analyzer. | user (chat request and `gate-change-approved` on this PR) |
+| 2026-11-23 | FUG-44: new nightly job `drill` and `task drill` run the upgrade and downgrade drills of A-E08: `TestDrillAcrossBuilds` (behind the `drill` build tag) builds an old `cmd/fugue` test binary from the merge-base, or from the parent of the last commit that changed migrations or proto, kills it mid-run, resumes with the HEAD build and requires the old build to refuse the newer data directory; `TestUpgradeDrillSameBuildResumesRecovery` and `TestDowngradeDrillRefusesNewerSchemaWithoutAppending` run the same drill with one build and a synthetic newer schema version. Guard: `TestDrillRunsOnlyInNightly` | Nothing in the suite built two binaries, so no test could show that an old build leaves a newer data directory alone. No threshold moved and nothing was loosened. | pending (`gate-change-approved` on this PR) |
 
 ### Known flaky tests
 

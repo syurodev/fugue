@@ -6,8 +6,10 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/ids"
 )
 
 const testNoopSQL = "SELECT 1;"
@@ -182,5 +184,53 @@ func TestLoadMigrationsParsesAndValidatesFilenames(t *testing.T) {
 				t.Fatalf("loadMigrations(%s) code = %v, want %v", tc.name, errcode.CodeOf(err), errcode.InvalidArgument)
 			}
 		})
+	}
+}
+
+// An older binary opening a data directory a newer binary migrated refuses
+// before it records a host incarnation or touches any other row (activation
+// section 4: a downgrade never writes).
+func TestOpenStoreRefusesNewerSchemaWithoutWriting(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	dir := t.TempDir()
+	clk := clock.NewFake(time.Date(2026, 11, 23, 9, 0, 0, 0, time.UTC))
+	cfg := config.Config{DataDir: dir}
+
+	first, err := OpenStore(ctx, cfg, clk, ids.NewSequence("first"))
+	if err != nil {
+		t.Fatalf("OpenStore: %v", err)
+	}
+	known, err := Migrations()
+	if err != nil {
+		t.Fatalf("Migrations: %v", err)
+	}
+	if _, execErr := first.DB().ExecContext(
+		ctx,
+		"INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, 'future', '2026-11-23T09:00:00Z')",
+		len(known)+1,
+	); execErr != nil {
+		t.Fatalf("insert future migration: %v", execErr)
+	}
+	want := first.Incarnation()
+	if closeErr := first.Close(); closeErr != nil {
+		t.Fatalf("close first store: %v", closeErr)
+	}
+
+	if _, openErr := OpenStore(ctx, cfg, clk, ids.NewSequence("second")); errcode.CodeOf(openErr) != errcode.FailedPrecondition {
+		t.Fatalf("OpenStore(newer schema) = %v (code %v), want %v", openErr, errcode.CodeOf(openErr), errcode.FailedPrecondition)
+	}
+
+	db, err := OpenDataDir(ctx, dir)
+	if err != nil {
+		t.Fatalf("OpenDataDir: %v", err)
+	}
+	closeTestDB(t, db)
+	got, err := CurrentHostIncarnation(ctx, db)
+	if err != nil {
+		t.Fatalf("CurrentHostIncarnation: %v", err)
+	}
+	if got.LockGeneration != want.LockGeneration || got.IncarnationID != want.IncarnationID {
+		t.Fatalf("host incarnation after refused open = %+v, want %+v", got, want)
 	}
 }
