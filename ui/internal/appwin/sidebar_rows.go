@@ -15,15 +15,11 @@ import (
 
 func (s *screens) layoutInboxRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
 	props := &kit.ListRowProps{
+		Icon:     kit.IconInbox,
 		Label:    "Approvals",
 		Selected: s.hasSlotKind(KindInbox),
 	}
-	if count := s.inbox.PendingCount(); count > 0 {
-		props.StateLabel = fmt.Sprintf("%d pending", count)
-		props.StateTone = kit.ToneWarning
-	} else {
-		props.Trailing = "0"
-	}
+	props.StateLabel, props.StateTone = inboxRowState(s.inbox.PendingCount())
 	dims, ev := s.inboxRow.Layout(env, gtx, props)
 	if ev.Clicked || ev.Opened {
 		s.toggleCompanion(KindInbox)
@@ -33,18 +29,11 @@ func (s *screens) layoutInboxRow(env *kit.Env, gtx *layout.Context) layout.Dimen
 
 func (s *screens) layoutAccountsRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
 	props := &kit.ListRowProps{
+		Icon:     kit.IconCircleUser,
 		Label:    "Accounts",
 		Selected: s.hasSlotKind(KindAccounts),
 	}
-	switch {
-	case !s.accounts.HasSnapshot():
-		props.Trailing = "unknown"
-	case s.accounts.NeedsAttentionCount() > 0:
-		props.StateLabel = formatAlertCount(s.accounts.NeedsAttentionCount())
-		props.StateTone = kit.ToneWarning
-	default:
-		props.Trailing = "ok"
-	}
+	props.StateLabel, props.StateTone = accountsRowState(s.accounts.HasSnapshot(), s.accounts.NeedsAttentionCount())
 	dims, ev := s.accountsRow.Layout(env, gtx, props)
 	if ev.Clicked || ev.Opened {
 		s.toggleCompanion(KindAccounts)
@@ -54,6 +43,7 @@ func (s *screens) layoutAccountsRow(env *kit.Env, gtx *layout.Context) layout.Di
 
 func (s *screens) layoutSettingsRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
 	props := &kit.ListRowProps{
+		Icon:     kit.IconSettings,
 		Label:    "Settings",
 		Selected: s.hasSlotKind(KindSettings),
 	}
@@ -70,19 +60,64 @@ func (s *screens) layoutSettingsRow(env *kit.Env, gtx *layout.Context) layout.Di
 
 func (s *screens) layoutSecretsRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
 	props := &kit.ListRowProps{
+		Icon:     kit.IconKeyRound,
 		Label:    "Secrets",
 		Selected: s.hasSlotKind(KindSecrets),
 	}
-	switch {
-	case s.vault.Locked():
-		props.StateLabel = "locked"
-		props.StateTone = kit.ToneWarning
-	case s.secrets.HasSnapshot():
-		props.Trailing = strconv.Itoa(len(s.secrets.All()))
+	locked := s.vault.Locked()
+	if locked {
+		props.Icon = kit.IconLock
 	}
+	props.StateLabel, props.StateTone, props.Badge = secretsRowState(locked, s.secrets.HasSnapshot(), len(s.secrets.All()))
 	dims, ev := s.secretsRow.Layout(env, gtx, props)
 	if ev.Clicked || ev.Opened {
 		s.toggleCompanion(KindSecrets)
 	}
 	return dims
+}
+
+// The utility rows show a trailing value only when it asks for attention or
+// carries a count worth reading: a zero, an "ok" or an unknown is noise, so
+// it draws nothing.
+
+// inboxRowState is the Approvals row's state: a warning label while
+// approvals wait, nothing otherwise.
+func inboxRowState(pending int) (string, kit.ListRowTone) {
+	if pending > 0 {
+		return fmt.Sprintf("%d pending", pending), kit.ToneWarning
+	}
+	return "", kit.ToneNeutral
+}
+
+// accountsRowState is the Accounts row's state: a warning alert count when
+// accounts need attention, nothing before the first snapshot or when all is
+// well.
+func accountsRowState(hasSnapshot bool, attention int) (string, kit.ListRowTone) {
+	if hasSnapshot && attention > 0 {
+		return formatAlertCount(attention), kit.ToneWarning
+	}
+	return "", kit.ToneNeutral
+}
+
+// vaultLockedLabel is the Secrets row's warning label while the vault is locked.
+const vaultLockedLabel = "locked"
+
+// secretsRowState is the Secrets row's state: the warning "locked" label
+// while the vault is locked, else a neutral count badge once a snapshot
+// exists and holds at least one secret.
+func secretsRowState(locked, hasSnapshot bool, count int) (label string, tone kit.ListRowTone, badge string) {
+	switch {
+	case locked:
+		return vaultLockedLabel, kit.ToneWarning, ""
+	case hasSnapshot && count > 0:
+		return "", kit.ToneNeutral, strconv.Itoa(count)
+	}
+	return "", kit.ToneNeutral, ""
+}
+
+func formatAlertCount(n int) string {
+	if n == 1 {
+		return "1 alert"
+	}
+	return fmt.Sprintf("%d alerts", n)
 }

@@ -10,6 +10,7 @@ import (
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
+	"gioui.org/unit"
 
 	"github.com/syurodev/fugue/ui/internal/motion"
 	"github.com/syurodev/fugue/ui/internal/theme"
@@ -20,6 +21,12 @@ type SectionHeaderProps struct {
 	Label       string
 	Collapsible bool
 	Action      *IconButtonProps
+	// Icon is an optional leading glyph, drawn muted after the chevron.
+	Icon IconName
+	// Inset is the left inset of the first glyph or label; zero keeps
+	// theme.SpaceXS. A list that aligns the header with its rows passes the
+	// row's own padding.
+	Inset unit.Dp
 }
 
 // SectionHeaderEvents reports what happened on a SectionHeader in the frame.
@@ -85,8 +92,12 @@ func (s *SectionHeaderState) Layout(env *Env, gtx *layout.Context, p *SectionHea
 	foldT := followSmooth(env, &s.foldF, target)
 
 	x := gtx.Dp(theme.SpaceXS)
+	if p.Inset > 0 {
+		x = gtx.Dp(p.Inset)
+	}
 	right := s.drawAction(env, gtx, w, h, p.Action, &ev)
 	x = s.drawChevron(env, gtx, x, h, p.Collapsible, chevT, &ev)
+	x = drawHeaderIcon(env, gtx, x, h, p.Icon, &ev)
 	drawHeaderLabel(env, gtx, x, right, h, p.Label)
 	if focA > 0 {
 		insetFocusRing(gtx, box, gtx.Dp(theme.RadiusSM), env.Th.Chrome().FocusBorder, focA)
@@ -134,6 +145,17 @@ func (s *SectionHeaderState) drawChevron(env *Env, gtx *layout.Context, x, h int
 		ev.Err = err
 	}
 	return x + iconPx + gtx.Dp(theme.SpaceXS)
+}
+
+func drawHeaderIcon(env *Env, gtx *layout.Context, x, h int, icon IconName, ev *SectionHeaderEvents) int {
+	if icon == "" {
+		return x
+	}
+	iconPx := gtx.Dp(theme.IconSM)
+	if err := drawIconAt(env, gtx, image.Pt(x, (h-iconPx)/2), icon, theme.IconSM, env.Th.Chrome().IconMuted); err != nil && ev.Err == nil {
+		ev.Err = err
+	}
+	return x + iconPx + gtx.Dp(theme.SpaceSM)
 }
 
 func drawHeaderLabel(env *Env, gtx *layout.Context, x, right, h int, label string) {

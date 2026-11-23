@@ -1,7 +1,6 @@
 package appwin
 
 import (
-	"fmt"
 	"image"
 	"strings"
 
@@ -147,15 +146,22 @@ func (s *screens) layoutSidebarContent(env *kit.Env, gtx *layout.Context) layout
 	if len(other) > 0 {
 		sections = append(sections, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
-			header, _ := s.otherHeader.Layout(env, &local,
-				&kit.SectionHeaderProps{Label: "Other sessions"},
-				func(gtx *layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, s.sessionRows(env, other)...)
-				})
-			return header
+			return layout.Inset{Top: theme.SpaceLG}.Layout(local, func(gtx layout.Context) layout.Dimensions {
+				return s.otherSessionsSection(env, gtx, other)
+			})
 		}))
 	}
 	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, sections...)
+}
+
+// otherSessionsSection draws the trailing "Other sessions" section.
+func (s *screens) otherSessionsSection(env *kit.Env, gtx layout.Context, other []session.Session) layout.Dimensions {
+	header, _ := s.otherHeader.Layout(env, &gtx,
+		&kit.SectionHeaderProps{Label: "Other sessions", Inset: theme.SpaceLG},
+		func(gtx *layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, s.sessionRows(env, other)...)
+		})
+	return header
 }
 
 // workspaceSection draws one workspace: its header with the manage action
@@ -165,11 +171,16 @@ func (s *screens) workspaceSection(env *kit.Env, gtx *layout.Context, group wsGr
 	header := s.wsHeader(group.ws.ID)
 	props := &kit.SectionHeaderProps{
 		Label:       group.ws.Name,
+		Icon:        kit.IconFolder,
+		Inset:       theme.SpaceLG,
 		Collapsible: true,
 		Action:      &kit.IconButtonProps{Icon: kit.IconEllipsis, Label: "Manage workspace"},
 	}
 	dims, ev := header.Layout(env, gtx, props, func(gtx *layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, s.sessionRows(env, group.sessions)...)
+		// Sessions sit under the folder glyph, one step in from the header.
+		return layout.Inset{Left: theme.SpaceXL}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx, s.sessionRows(env, group.sessions)...)
+		})
 	})
 	if ev.ActionClick {
 		s.wsMenuFor = group.ws.ID
@@ -372,8 +383,13 @@ func (s *screens) layoutSidebarPanel(gtx *layout.Context, env *kit.Env) layout.D
 			}),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				local := gtx
+				return s.layoutSidebarDivider(env, &local)
+			}),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				local := gtx
 				header, ev := s.header.Layout(env, &local, &kit.SectionHeaderProps{
 					Label:  "Workspaces",
+					Inset:  theme.SpaceLG,
 					Action: &kit.IconButtonProps{Icon: kit.IconPlus, Label: "New workspace"},
 				}, func(gtx *layout.Context) layout.Dimensions {
 					return s.layoutSidebarContent(env, gtx)
@@ -408,62 +424,10 @@ func (s *screens) layoutSidebarSoon(env *kit.Env, gtx *layout.Context, title, de
 	return dims
 }
 
-// sessionRows builds one kit row per session of the given list; the row's
-// click opens it.
-func (s *screens) sessionRows(env *kit.Env, sessions []session.Session) []layout.FlexChild {
-	rows := make([]layout.FlexChild, 0, len(sessions))
-	for _, sess := range sessions {
-		row, ok := s.rows[sess.ID]
-		if !ok {
-			row = kit.NewListRowState()
-			row.Enter()
-			s.rows[sess.ID] = row
-		}
-		selected := s.grid.rail == railChat && s.grid.mainRef().ID == sess.ID && s.grid.mainRef().Kind == KindSession
-		pending := s.inbox.PendingCountForSession(sess.ID)
-		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			props := &kit.ListRowProps{
-				Label:     sessionName(sess),
-				Secondary: sessionState(sess),
-				Selected:  selected,
-			}
-			if pending > 0 {
-				props.StateLabel = fmt.Sprintf("%d pending", pending)
-				props.StateTone = kit.ToneWarning
-			}
-			dims, ev := row.Layout(env, &local, props)
-			if ev.Clicked {
-				s.openSession(sess.ID)
-			}
-			return dims
-		}))
-	}
-	return rows
-}
-
-// sessionName names a session row: the vendor, or "session" when the list
-// read has not named one yet.
-func formatAlertCount(n int) string {
-	if n == 1 {
-		return "1 alert"
-	}
-	return fmt.Sprintf("%d alerts", n)
-}
-
-func sessionName(sess session.Session) string {
-	if sess.Vendor == "" {
-		return "session"
-	}
-	return sess.Vendor
-}
-
-// sessionState is the row's secondary text: the state and the wait reason,
-// in FgMuted like every kit row's secondary text.
-func sessionState(sess session.Session) string {
-	state := sess.State
-	if sess.WaitingReason != "" {
-		state += " · " + sess.WaitingReason
-	}
-	return state
+// layoutSidebarDivider is the hairline between the utility rows and the
+// workspaces: inset to the rows' padding, with theme spacing above and below.
+func (s *screens) layoutSidebarDivider(env *kit.Env, gtx *layout.Context) layout.Dimensions {
+	return layout.Inset{Top: theme.SpaceMD, Bottom: theme.SpaceSM, Left: theme.SpaceMD, Right: theme.SpaceMD}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+		return kit.Divider(env, &gtx, kit.DividerProps{Orientation: kit.Horizontal})
+	})
 }
