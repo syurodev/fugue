@@ -26,11 +26,20 @@ const (
 	// failureUXProposeMarker makes the lead session propose a team. Its
 	// parameters follow as ;key=value pairs: members, max_agents,
 	// max_duration, quota (a five_hour utilization reported before the
-	// proposal) and scope (members write outside their write scope).
+	// proposal; 1 or more is a rejected window), resets (unix seconds the
+	// window reopens) and scope (members write outside their write scope).
 	failureUXProposeMarker = "FAILUX_PROPOSE"
 	// failureUXScopeMarker is in the goal of a member that writes outside its
 	// write scope and reports done.
 	failureUXScopeMarker = "FAILUX_OUT_OF_SCOPE"
+	// failureUXQuotaMarker makes the turn fail partway: the CLI reports a
+	// rejected five_hour window (resets=<unix seconds>) and then a 429 result.
+	failureUXQuotaMarker = "FAILUX_QUOTA_MIDTURN"
+	// failureUXReplyMarker makes the CLI answer the turn normally, which shows
+	// a session is usable after a failed turn.
+	failureUXReplyMarker = "FAILUX_REPLY"
+	// failureUXRepliedText is the assistant text a normal reply carries.
+	failureUXRepliedText = "replied after the failed turn"
 	// failureUXBounceText is the start of the mailbox text a scope bounce
 	// delivers to the member.
 	failureUXBounceText    = "out-of-scope files"
@@ -43,13 +52,13 @@ const (
 type failureUXPlan struct {
 	members, maxAgents, maxDuration int
 	quota                           string
+	resets                          int64
 	outOfScope                      bool
 }
 
-// parseFailureUXPlan reads the ;key=value parameters that follow the propose
-// marker in one stream-json prompt line.
-func parseFailureUXPlan(line string) failureUXPlan {
-	_, rest, _ := strings.Cut(line, failureUXProposeMarker)
+// parseFailureUXPlan reads the ;key=value parameters that follow the marker in one stream-json prompt line.
+func parseFailureUXPlan(line, marker string) failureUXPlan {
+	_, rest, _ := strings.Cut(line, marker)
 	if end := strings.IndexFunc(rest, func(r rune) bool {
 		return !unicode.IsLetter(r) && !unicode.IsDigit(r) && !strings.ContainsRune(";=._-", r)
 	}); end >= 0 {
@@ -68,6 +77,8 @@ func parseFailureUXPlan(line string) failureUXPlan {
 			plan.maxDuration = n
 		case "quota":
 			plan.quota = value
+		case "resets":
+			plan.resets = int64(n)
 		case "scope":
 			plan.outOfScope = true
 		}
@@ -155,8 +166,14 @@ func (f *failureUXFake) playLine(line string) bool {
 		f.member = true
 	}
 	switch {
+	case strings.Contains(line, failureUXQuotaMarker):
+		playFailureUXQuotaMidTurn(parseFailureUXPlan(line, failureUXQuotaMarker))
+	case strings.Contains(line, failureUXReplyMarker):
+		emitFailureUXText(failureUXRepliedText)
+		emitFailureUXLine(`{"type":"result","subtype":"success","is_error":false,"stop_reason":"end_turn","num_turns":1,` +
+			`"session_id":"` + failureUXSessionLine + `","result":"done"}`)
 	case strings.Contains(line, failureUXProposeMarker):
-		playFailureUXPropose(f.args, parseFailureUXPlan(line))
+		playFailureUXPropose(f.args, parseFailureUXPlan(line, failureUXProposeMarker))
 	case f.member:
 		playFailureUXMemberDone(f.args)
 	}
@@ -165,14 +182,39 @@ func (f *failureUXFake) playLine(line string) bool {
 
 func playFailureUXPropose(args []string, plan failureUXPlan) {
 	if plan.quota != "" {
-		emitFailureUXLine(`{"type":"rate_limit_event","rate_limit_info":{"status":"allowed","rateLimitType":"five_hour",` +
-			`"unifiedWindows":{"five_hour":{"utilization":` + plan.quota + `,"status":"allowed"}}}}`)
+		emitFailureUXQuotaWindow(plan)
 	}
 	raw, err := plan.proposalArgs()
 	if err != nil {
 		os.Exit(1)
 	}
 	emitFailureUXText("fugue_team_propose: " + callBridgeTool(args, "fugue_team_propose", string(raw)))
+}
+
+// emitFailureUXQuotaWindow reports the five_hour window: rejected once it is
+// full, which is what pauses the account until it resets.
+func emitFailureUXQuotaWindow(plan failureUXPlan) {
+	utilization, err := strconv.ParseFloat(plan.quota, 64)
+	if err != nil {
+		os.Exit(1)
+	}
+	status := "allowed"
+	if utilization >= 1 {
+		status = "rejected"
+	}
+	emitFailureUXLine(`{"type":"rate_limit_event","rate_limit_info":{"status":"` + status + `","rateLimitType":"five_hour",` +
+		`"unifiedWindows":{"five_hour":{"utilization":` + plan.quota + `,"resetsAt":` + strconv.FormatInt(plan.resets, 10) +
+		`,"status":"` + status + `"}}}}`)
+}
+
+// playFailureUXQuotaMidTurn runs out of quota partway through a turn: some
+// assistant text, the rejected window, then the 429 that ends the turn.
+func playFailureUXQuotaMidTurn(plan failureUXPlan) {
+	emitFailureUXText("working before the limit")
+	plan.quota = "1"
+	emitFailureUXQuotaWindow(plan)
+	emitFailureUXLine(`{"type":"result","subtype":"error_during_execution","is_error":true,"api_error_status":429,` +
+		`"num_turns":1,"session_id":"` + failureUXSessionLine + `","result":"usage limit reached"}`)
 }
 
 // playFailureUXMemberDone writes a file outside the member's write scope into
