@@ -131,6 +131,9 @@ type ItemMetadata struct {
 	ResetAt              string  `json:"reset_at,omitempty"`
 	Level                string  `json:"level,omitempty"`
 	Code                 string  `json:"code,omitempty"`
+	FindingCount         int64   `json:"finding_count,omitempty"`
+	FindingFiles         int64   `json:"finding_files,omitempty"`
+	ScanIncomplete       bool    `json:"scan_incomplete,omitempty"`
 	FilesAdded           int64   `json:"files_added,omitempty"`
 	FilesModified        int64   `json:"files_modified,omitempty"`
 	FilesDeleted         int64   `json:"files_deleted,omitempty"`

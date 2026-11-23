@@ -124,10 +124,22 @@ type (
 	// QuotaContent contains the Quota protected content described in transcript §3.
 	QuotaContent struct{}
 	// NoticeMetadata contains the Notice metadata described in transcript §3.
-	NoticeMetadata struct{ Level, Code string }
+	// Findings and Files are counts for a possible_secret notice, and
+	// ScanIncomplete marks a scan that stopped before covering every added line
+	// (git-guard §3.3); none of them carries content.
+	NoticeMetadata struct {
+		Level, Code    string
+		Findings       int
+		Files          int
+		ScanIncomplete bool
+	}
 	// NoticeContent contains the Notice protected content described in transcript §3.
 	NoticeContent struct{ Text string }
 )
+
+// NoticePossibleSecret is the notice code of the end-of-turn secret scan
+// (git-guard §3.3).
+const NoticePossibleSecret = "possible_secret"
 
 // Turn diff statuses (git-guard §3.2).
 const (
@@ -298,7 +310,9 @@ func (UsageMetadata) valid() bool { return true }
 
 func (QuotaMetadata) valid() bool { return true }
 
-func (m NoticeMetadata) valid() bool { return valid(m.Level, "info", "warning", "error") }
+func (m NoticeMetadata) valid() bool {
+	return valid(m.Level, "info", "warning", "error") && m.Findings >= 0 && m.Files >= 0
+}
 
 func (m TurnDiffMetadata) valid() bool {
 	return valid(m.Status, TurnDiffComplete, TurnDiffPartial, TurnDiffUnavailable, TurnDiffExpired)

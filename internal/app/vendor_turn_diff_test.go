@@ -43,11 +43,19 @@ type turnDiffHarness struct {
 
 func newTurnDiffHarness(t *testing.T, workDir string, port TurnSnapshotter) *turnDiffHarness {
 	t.Helper()
+	return newTurnDiffHarnessWith(t, workDir, port, &VendorSessionDeps{})
+}
+
+// newTurnDiffHarnessWith is newTurnDiffHarness with extra dependencies (a
+// logger, a scan cap); the fixture's own stores and clock are always used.
+func newTurnDiffHarnessWith(t *testing.T, workDir string, port TurnSnapshotter, extra *VendorSessionDeps) *turnDiffHarness {
+	t.Helper()
 	f := newTranscriptFixture(t, nil)
 	session := newActorTestSession()
 	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
 		Store: f.store, Transcripts: f.service, Adapter: actorTestAdapter{session: session}, Vault: f.vault,
 		Clock: f.clock, IDs: ids.NewSequence("actor-item-"), TurnSnapshots: port,
+		Logger: extra.Logger, TurnScanBytes: extra.TurnScanBytes,
 	})
 	info := &vendorstore.Session{ID: testActorSessionID, Vendor: testVendorName, AccountID: testAccountID, Role: testActorRole}
 	if err := manager.Start(t.Context(), info, &vendor.StartSpec{SessionID: testActorSessionID, Cwd: workDir}); err != nil {
