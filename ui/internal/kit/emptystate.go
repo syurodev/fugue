@@ -1,7 +1,9 @@
 package kit
 
 import (
+	"errors"
 	"image"
+	"image/color"
 
 	"gioui.org/layout"
 
@@ -91,70 +93,79 @@ func (s *EmptyStateState) drawHeader(env *Env, gtx *layout.Context, pr *EmptySta
 		}
 		y += badge + gapMD
 	}
-	if pr.Title != "" {
-		ts := measureLabel(env, gtx, theme.TypeTitle(), pr.Title)
-		tx := max((maxW-ts.X)/2, 0)
-		drawRunAt(env, gtx, image.Pt(tx, y), maxW-2*tx, ts.Y, theme.TypeTitle(), fade(c.Fg, p), pr.Title, true)
-		y += ts.Y + gapSM
+	// Text wraps inside the side padding and is centered line by line: an
+	// empty state in a 300 dp slot must show its whole sentence.
+	textW := max(maxW-2*gtx.Dp(theme.SpaceLG), 0)
+	paragraph := func(t theme.Type, col color.NRGBA, txt string) int {
+		if txt == "" {
+			return 0
+		}
+		var h int
+		at(gtx, image.Pt((maxW-textW)/2, y), func(gtx *layout.Context) {
+			g := *gtx
+			g.Constraints = layout.Constraints{Max: image.Pt(textW, 1<<20)}
+			dims := CenteredParagraph(env, &g, t, col, txt)
+			recordRun(env, image.Rectangle{Max: dims.Size}.Add(image.Pt((maxW-textW)/2, y)))
+			h = dims.Size.Y
+		})
+		return h
 	}
-	if pr.Description != "" {
-		ds := measureLabel(env, gtx, theme.TypeBody(), pr.Description)
-		dx := max((maxW-ds.X)/2, 0)
-		drawRunAt(env, gtx, image.Pt(dx, y), maxW-2*dx, ds.Y, theme.TypeBody(), fade(c.FgMuted, p), pr.Description, true)
-		y += ds.Y + gapMD
+	if h := paragraph(theme.TypeTitle(), fade(c.Fg, p), pr.Title); h > 0 {
+		y += h + gapSM
+	}
+	if h := paragraph(theme.TypeBody(), fade(c.FgMuted, p), pr.Description); h > 0 {
+		y += h + gapMD
 	}
 	return y, nil
 }
 
 func (s *EmptyStateState) layoutActions(env *Env, gtx *layout.Context, pr *EmptyStateProps, maxW, y int, ev *EmptyStateEvents) (int, error) {
-	gap := gtx.Dp(theme.SpaceMD)
-	var btns []struct {
-		st  *ButtonState
-		pr  ButtonProps
-		dst *bool
+	var items []FlowItem
+	var berr error
+	add := func(st *ButtonState, p ButtonProps, dst *bool) {
+		items = append(items, FlowItem{Size: st.Measure(env, gtx, p).Size, Draw: func(g *layout.Context) {
+			clicked, err := st.Layout(env, g, p)
+			berr = errors.Join(berr, err)
+			if clicked {
+				*dst = true
+			}
+		}})
 	}
 	if pr.NoResults && pr.ClearFilterAction != "" {
-		btns = append(btns, struct {
-			st  *ButtonState
-			pr  ButtonProps
-			dst *bool
-		}{s.clearBtn, ButtonProps{Text: pr.ClearFilterAction, Variant: Secondary}, &ev.ClearFilterClicked})
+		add(s.clearBtn, ButtonProps{Text: pr.ClearFilterAction, Variant: Secondary}, &ev.ClearFilterClicked)
 	}
 	if pr.PrimaryAction != "" {
-		btns = append(btns, struct {
-			st  *ButtonState
-			pr  ButtonProps
-			dst *bool
-		}{s.primaryBtn, ButtonProps{Text: pr.PrimaryAction, Variant: Primary}, &ev.PrimaryClicked})
+		add(s.primaryBtn, ButtonProps{Text: pr.PrimaryAction, Variant: Primary}, &ev.PrimaryClicked)
 	}
-	if len(btns) == 0 {
+	if len(items) == 0 {
 		return y, nil
 	}
-
-	sizes := make([]image.Point, len(btns))
-	totalW, maxH := 0, 0
-	for i, b := range btns {
-		sizes[i] = b.st.Measure(env, gtx, b.pr).Size
-		totalW += sizes[i].X
-		if i > 0 {
-			totalW += gap
-		}
-		maxH = max(maxH, sizes[i].Y)
-	}
-	x := max((maxW-totalW)/2, 0)
-	for i, b := range btns {
-		var berr error
-		at(gtx, image.Pt(x, y), func(gtx *layout.Context) {
-			var clicked bool
-			clicked, berr = b.st.Layout(env, gtx, b.pr)
-			if clicked {
-				*b.dst = true
-			}
+	// Buttons that do not fit side by side stack, each row centered.
+	gap := gtx.Dp(theme.SpaceMD)
+	rects, size := FlowPlace(maxW, gap, gap, items)
+	centerFlowRows(rects, maxW)
+	for i, it := range items {
+		at(gtx, rects[i].Min.Add(image.Pt(0, y)), func(gtx *layout.Context) {
+			g := *gtx
+			g.Constraints = layout.Constraints{Max: rects[i].Size()}
+			it.Draw(&g)
 		})
-		if berr != nil {
-			return y + maxH, berr
-		}
-		x += sizes[i].X + gap
 	}
-	return y + maxH, nil
+	return y + size.Y, berr
+}
+
+// centerFlowRows shifts every row of rects, told apart by x stepping back,
+// so it is centered in maxW.
+func centerFlowRows(rects []image.Rectangle, maxW int) {
+	for lo := 0; lo < len(rects); {
+		hi := lo + 1
+		for hi < len(rects) && rects[hi].Min.X > rects[hi-1].Min.X {
+			hi++
+		}
+		shift := (maxW - (rects[hi-1].Max.X - rects[lo].Min.X)) / 2
+		for i := lo; i < hi; i++ {
+			rects[i] = rects[i].Add(image.Pt(shift-rects[lo].Min.X, 0))
+		}
+		lo = hi
+	}
 }

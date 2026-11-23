@@ -140,34 +140,19 @@ func (v *accountsView) layout(gtx *layout.Context, env *kit.Env, sc *screens) {
 
 func (v *accountsView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
 	titleTok, titleCol := accountPaneTitleStyle(env.Th)
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
-		rigidLabel(env, titleTok, titleCol, "Accounts & quota"),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
-		}),
-		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			clicked, err := v.refreshBtn.Layout(env, gtx, &kit.IconButtonProps{
-				Icon:     kit.IconRestart,
-				Label:    "Refresh accounts",
-				Variant:  kit.IconButtonGhost,
-				Size:     kit.SizeSM,
-				Disabled: sc.accountsWorker == nil || v.refreshing,
-			})
-			sc.fail(err)
-			if clicked {
-				sc.requestRefreshAccounts()
-			}
-			return v.refreshBtn.Measure(env, gtx, &kit.IconButtonProps{
-				Icon:    kit.IconRestart,
-				Label:   "Refresh accounts",
-				Variant: kit.IconButtonGhost,
-				Size:    kit.SizeSM,
-			})
-		}),
-		spacerW(theme.SpaceSM),
-		rigidInboxButton(env, sc.fail, v.backBtn, kit.ButtonProps{
+	refresh := kit.IconButtonProps{
+		Icon:     kit.IconRestart,
+		Label:    "Refresh accounts",
+		Variant:  kit.IconButtonGhost,
+		Size:     kit.SizeSM,
+		Disabled: sc.accountsWorker == nil || v.refreshing,
+	}
+	return flowHeader(gtx,
+		flowTitle(env, gtx, titleTok, titleCol, "Accounts & quota"),
+		atEnd(flowIconButton(env, gtx, sc.fail, v.refreshBtn, &refresh, sc.requestRefreshAccounts)),
+		atEnd(flowButton(env, gtx, sc.fail, v.backBtn, kit.ButtonProps{
 			Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM,
-		}, func() { sc.grid.closeSlotOf(KindAccounts) }),
+		}, func() { sc.grid.closeSlotOf(KindAccounts) })),
 	)
 }
 

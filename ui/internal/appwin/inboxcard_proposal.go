@@ -324,23 +324,16 @@ func layoutProposalFooter(gtx *layout.Context, env *kit.Env, sc *screens, req *c
 		choice, primaryLabel = proposalEdited, "Approve with edits"
 	}
 	busy := form.busy || !sc.inbox.CanAnswer(pin)
-	row := []layout.FlexChild{
-		rigidInboxButton(env, sc.fail, form.allowOnceBtn, kit.ButtonProps{
+	gap, rowGap := flowGap(gtx)
+	return kit.FlowRow(gtx, gap, rowGap, []kit.FlowItem{
+		flowButton(env, gtx, sc.fail, form.allowOnceBtn, kit.ButtonProps{
 			Text: primaryLabel, Variant: kit.Primary, Size: kit.SizeSM, Disabled: busy || !valid || !proposalOffers(req, choice),
 		}, func() { submitProposal(sc, form, req, choice, &edits) }),
-		spacerW(theme.SpaceSM),
-		rigidInboxButton(env, sc.fail, form.cancelBtn, kit.ButtonProps{
+		flowButton(env, gtx, sc.fail, form.cancelBtn, kit.ButtonProps{
 			Text: "Work solo", Variant: kit.Secondary, Size: kit.SizeSM, Disabled: busy || !proposalOffers(req, proposalSolo),
 		}, func() { submitProposal(sc, form, req, proposalSolo, nil) }),
-		spacerW(theme.SpaceXS),
-		rigidInboxButton(env, sc.fail, form.denyBtn, kit.ButtonProps{
+		flowButton(env, gtx, sc.fail, form.denyBtn, kit.ButtonProps{
 			Text: "Reject", Variant: kit.Ghost, Size: kit.SizeSM, Disabled: busy || !proposalOffers(req, proposalReject),
 		}, func() { submitProposal(sc, form, req, proposalReject, nil) }),
-	}
-	if gtx.Constraints.Max.X < gtx.Dp(theme.SidebarWidth+theme.SpaceXXL) {
-		return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, row[0], spacerH(theme.SpaceXS), rigidWidget(func(g *layout.Context) layout.Dimensions {
-			return layout.Flex{Alignment: layout.Middle}.Layout(*g, row[2:]...)
-		}))
-	}
-	return layout.Flex{Alignment: layout.Middle}.Layout(*gtx, row...)
+	})
 }

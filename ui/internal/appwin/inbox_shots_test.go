@@ -30,8 +30,13 @@ import (
 	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
+// inboxSlotShotW is the window width at which the shell folds the inbox into
+// its drawer.
+const inboxSlotShotW = 700
+
 const (
 	shotInboxConfirm = "inbox-confirm"
+	shotInboxSlot    = "inbox-confirm-slot"
 	testInboxInc     = "inc-inbox-shot"
 )
 
@@ -65,6 +70,8 @@ func inboxShotSpecs() []shotSpec {
 	return []shotSpec{
 		{name: shotInboxConfirm + "-light-ui100", scene: shotInboxConfirm, light: true, uiScale: 1.0},
 		{name: shotInboxConfirm + "-dark-ui100", scene: shotInboxConfirm, light: false, uiScale: 1.0},
+		{name: shotInboxSlot + "-light-ui100", scene: shotInboxSlot, light: true, uiScale: 1.0},
+		{name: shotInboxSlot + "-dark-ui125", scene: shotInboxSlot, light: false, uiScale: 1.25},
 	}
 }
 
@@ -81,6 +88,11 @@ func longConfirmDetail() string {
 }
 
 func buildInboxConfirmScreens(t *testing.T, ic inbox.Client) *screens {
+	t.Helper()
+	return buildInboxScreensWithDetail(t, ic, longConfirmDetail())
+}
+
+func buildInboxScreensWithDetail(t *testing.T, ic inbox.Client, detail string) *screens {
 	t.Helper()
 	m := hostconn.NewManager(&hostconn.Config{})
 	sc := newScreens(m, &fakeFetcher{}, session.NewPoster(m.Client), workspace.NewMutator(func() workspace.MutatorClient { return nil }))
@@ -104,7 +116,7 @@ func buildInboxConfirmScreens(t *testing.T, ic inbox.Client) *screens {
 		EnvTag:          "prod",
 		Summary:         "Execute command [not-a-link](https://evil.invalid) <script>alert(1)</script>",
 		Body:            "Relayed verbatim from vendor.",
-		Detail:          longConfirmDetail(),
+		Detail:          detail,
 		OfferedOutcomes: []string{client.InteractionOutcomeAllowedOnce, client.InteractionOutcomeAllowedSession, client.InteractionOutcomeDenied},
 		GrantScopeLabel: "bash in prod",
 	}
@@ -146,7 +158,17 @@ func renderInboxShot(t *testing.T, win *headless.Window, spec shotSpec) *image.R
 	}
 	env := &kit.Env{Th: &th, Sh: sh, UIScale: spec.uiScale, ReducedMotion: true}
 	sc := buildInboxConfirmScreens(t, nil)
-	img := renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), spec.name)
+	size := image.Pt(shotWindowW, shotWindowH)
+	if spec.scene == shotInboxSlot {
+		// A window this narrow folds the inbox into the 300 dp drawer, the
+		// width the companion slot must wrap to (FUG-40).
+		size = image.Pt(inboxSlotShotW, shotWindowH)
+		var err error
+		if win, err = glwin.Open(size.X, size.Y); err != nil {
+			t.Fatalf("open headless window for %s: %v", spec.name, err)
+		}
+	}
+	img := renderShotFrames(t, win, env, sc, size, spec.name)
 	if sc.lastErr != "" {
 		t.Fatalf("inbox shot %s recorded error: %s", spec.name, sc.lastErr)
 	}

@@ -2,7 +2,6 @@ package appwin
 
 import (
 	"fmt"
-	"image"
 	"strings"
 
 	"gioui.org/layout"
@@ -143,30 +142,19 @@ func (v *settingsView) layout(gtx *layout.Context, env *kit.Env, sc *screens) la
 }
 
 func (v *settingsView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
-		rigidLabel(env, theme.TypeHeading(), env.Th.Chrome().Fg, "Settings"),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
-		}),
-		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			props := &kit.IconButtonProps{
-				Icon:     kit.IconRestart,
-				Label:    "Refresh settings",
-				Variant:  kit.IconButtonGhost,
-				Size:     kit.SizeSM,
-				Disabled: sc.settingsWorker == nil || sc.settings.Loading,
-			}
-			clicked, err := v.refreshBtn.Layout(env, gtx, props)
-			sc.fail(err)
-			if clicked {
-				sc.requestReloadSettings()
-			}
-			return v.refreshBtn.Measure(env, gtx, props)
-		}),
-		spacerW(theme.SpaceSM),
-		rigidInboxButton(env, sc.fail, v.backBtn, kit.ButtonProps{
+	refresh := kit.IconButtonProps{
+		Icon:     kit.IconRestart,
+		Label:    "Refresh settings",
+		Variant:  kit.IconButtonGhost,
+		Size:     kit.SizeSM,
+		Disabled: sc.settingsWorker == nil || sc.settings.Loading,
+	}
+	return flowHeader(gtx,
+		flowTitle(env, gtx, theme.TypeHeading(), env.Th.Chrome().Fg, "Settings"),
+		atEnd(flowIconButton(env, gtx, sc.fail, v.refreshBtn, &refresh, sc.requestReloadSettings)),
+		atEnd(flowButton(env, gtx, sc.fail, v.backBtn, kit.ButtonProps{
 			Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM,
-		}, func() { sc.grid.closeSlotOf(KindSettings) }),
+		}, func() { sc.grid.closeSlotOf(KindSettings) })),
 	)
 }
 

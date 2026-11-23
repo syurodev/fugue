@@ -112,9 +112,26 @@ func binarySearchFit(lo, hi int, fits func(int) bool) int {
 }
 
 // Paragraph draws txt in token t and color c, wrapped at the constraints'
-// width: prose, descriptions, helper text.
+// width: prose, descriptions, helper text. A word longer than a line is
+// broken at the line edge instead of overflowing, so untrusted verbatim text
+// (a command, a payload) is never clipped by its container.
 func Paragraph(env *Env, gtx *layout.Context, t theme.Type, c color.NRGBA, txt string) layout.Dimensions {
-	return drawText(env, gtx, t, c, txt, true)
+	g := *gtx
+	g.Constraints.Min = image.Point{}
+	dims := drawTextAligned(env, &g, t, c, txt, text.WrapHeuristically, text.Start)
+	recordRun(env, image.Rectangle{Max: dims.Size})
+	return dims
+}
+
+// CenteredParagraph draws txt like Paragraph with every line centered in the
+// constraints' width; the result is always that wide.
+func CenteredParagraph(env *Env, gtx *layout.Context, t theme.Type, c color.NRGBA, txt string) layout.Dimensions {
+	if gtx.Constraints.Max.X <= 0 || txt == "" {
+		return layout.Dimensions{}
+	}
+	g := *gtx
+	g.Constraints.Min = image.Pt(gtx.Constraints.Max.X, 0)
+	return drawTextAligned(env, &g, t, c, txt, text.WrapHeuristically, text.Middle)
 }
 
 // fontOf returns the face of a type token: Inter for text, JetBrains Mono
@@ -130,18 +147,25 @@ func fontOf(t theme.Type) font.Font {
 // §3.0) and paints it in c; wrap wraps at the constraints' width, otherwise
 // the text stays on one line.
 func drawText(env *Env, gtx *layout.Context, t theme.Type, c color.NRGBA, txt string, wrap bool) layout.Dimensions {
-	size, line := env.Content(t)
 	g := *gtx
 	g.Constraints.Min = image.Point{}
-	g.Constraints.Max.Y = 1 << 20
-	if wrap {
-		g.Constraints.Max.X = gtx.Constraints.Max.X
-	} else {
+	policy := text.WrapWords
+	if !wrap {
 		g.Constraints.Max.X = 1 << 20
 	}
+	return drawTextAligned(env, &g, t, c, txt, policy, text.Start)
+}
+
+// drawTextAligned wraps at the constraints' width under policy; policies
+// that break inside a word suit verbatim text, WrapWords suits fixed-height
+// rows that must not grow past one extra line.
+func drawTextAligned(env *Env, gtx *layout.Context, t theme.Type, c color.NRGBA, txt string, policy text.WrapPolicy, align text.Alignment) layout.Dimensions {
+	size, line := env.Content(t)
+	g := *gtx
+	g.Constraints.Max.Y = 1 << 20
 	m := op.Record(gtx.Ops)
 	paint.ColorOp{Color: c}.Add(gtx.Ops)
-	l := widget.Label{Alignment: text.Start, MaxLines: 0, WrapPolicy: text.WrapWords}
+	l := widget.Label{Alignment: align, MaxLines: 0, WrapPolicy: policy}
 	if t.Line == 0 {
 		// codeInline: the line height belongs to the containing text; the
 		// token is only ever laid inside a prose run, so leave Gio's

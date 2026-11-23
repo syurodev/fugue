@@ -288,40 +288,31 @@ func (v *fileViewer) layout(gtx *layout.Context, env *kit.Env, sc *screens) layo
 
 func (v *fileViewer) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
 	ch := env.Th.Chrome()
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
-		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			name, icon := v.headerSymbol()
-			d, err := env.DrawSymbol(gtx, name, &icon, theme.IconSM, env.Th.FileColor(theme.FileColorName(icon.Color)))
+	name, icon := v.headerSymbol()
+	iconPx := gtx.Dp(theme.IconSM)
+	items := []kit.FlowItem{
+		{Size: image.Pt(iconPx, iconPx), Draw: func(g *layout.Context) {
+			_, err := env.DrawSymbol(g, name, &icon, theme.IconSM, env.Th.FileColor(theme.FileColorName(icon.Color)))
 			sc.fail(err)
-			return d
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Dimensions{Size: image.Pt(gtx.Dp(theme.SpaceSM), 0)}
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			local.Constraints.Max.X = max(gtx.Constraints.Max.X-gtx.Dp(220), gtx.Dp(80))
-			return kit.MiddleEllipsisLabel(env, &local, theme.TypeLabel(), ch.Fg, v.displayPath())
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
-		}),
-		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			if v.mode == fileViewDiff || v.path == "" {
-				return layout.Dimensions{}
-			}
-			bp := kit.ButtonProps{Text: "Copy path", Icon: kit.IconCopy, Variant: kit.Ghost, Size: kit.SizeSM}
-			clicked, err := v.copyBtn.Layout(env, gtx, bp)
+		}},
+		{Size: kit.MeasureLabel(env, gtx, theme.TypeLabel(), v.displayPath()), Draw: func(g *layout.Context) {
+			kit.MiddleEllipsisLabel(env, g, theme.TypeLabel(), ch.Fg, v.displayPath())
+		}},
+	}
+	if v.mode != fileViewDiff && v.path != "" {
+		bp := kit.ButtonProps{Text: "Copy path", Icon: kit.IconCopy, Variant: kit.Ghost, Size: kit.SizeSM}
+		items = append(items, atEnd(kit.FlowItem{Size: v.copyBtn.Measure(env, gtx, bp).Size, Draw: func(g *layout.Context) {
+			clicked, err := v.copyBtn.Layout(env, g, bp)
 			sc.fail(err)
 			if clicked {
-				gtx.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(v.fullPath()))})
+				g.Execute(clipboard.WriteCmd{Type: "application/text", Data: io.NopCloser(strings.NewReader(v.fullPath()))})
 			}
-			return v.copyBtn.Measure(env, gtx, bp)
-		}),
-		rigidInboxButton(env, sc.fail, v.backBtn, kit.ButtonProps{Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM, Disabled: sc.open == ""}, func() {
-			v.setOpen(false)
-		}),
-	)
+		}}))
+	}
+	items = append(items, atEnd(flowButton(env, gtx, sc.fail, v.backBtn, kit.ButtonProps{Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM, Disabled: sc.open == ""}, func() {
+		v.setOpen(false)
+	})))
+	return flowHeader(gtx, items...)
 }
 
 // headerSymbol resolves the header glyph from the pure target path, never
@@ -370,7 +361,7 @@ func (v *fileViewer) layoutBody(gtx *layout.Context, env *kit.Env, sc *screens) 
 	case v.errMsg != "":
 		return v.layoutError(env, gtx, sc)
 	case v.loading:
-		return kit.Label(env, gtx, theme.TypeSmall(), env.Th.Chrome().FgMuted, "Reading…")
+		return kit.Paragraph(env, gtx, theme.TypeSmall(), env.Th.Chrome().FgMuted, "Reading…")
 	case v.mode == fileViewDiff:
 		return v.layoutDiff(env, gtx)
 	case v.mode == fileViewFolder:
@@ -378,7 +369,7 @@ func (v *fileViewer) layoutBody(gtx *layout.Context, env *kit.Env, sc *screens) 
 	case v.file != nil:
 		return v.layoutFile(env, gtx)
 	default:
-		return kit.Label(env, gtx, theme.TypeSmall(), env.Th.Chrome().FgMuted, "Nothing to show.")
+		return kit.Paragraph(env, gtx, theme.TypeSmall(), env.Th.Chrome().FgMuted, "Nothing to show.")
 	}
 }
 
@@ -386,7 +377,7 @@ func (v *fileViewer) layoutError(env *kit.Env, gtx *layout.Context, _ *screens) 
 	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := gtx
-			return kit.Label(env, &l, theme.TypeBody(), env.Th.Status().Danger, v.errMsg)
+			return kit.Paragraph(env, &l, theme.TypeBody(), env.Th.Status().Danger, v.errMsg)
 		}),
 	)
 }
@@ -443,7 +434,7 @@ func (v *fileViewer) layoutDiff(env *kit.Env, gtx *layout.Context) layout.Dimens
 // clicking one opens it in this viewer.
 func (v *fileViewer) layoutFolder(env *kit.Env, gtx *layout.Context, sc *screens) layout.Dimensions {
 	if len(v.entries) == 0 {
-		return kit.Label(env, gtx, theme.TypeSmall(), env.Th.Chrome().FgMuted, "This folder is empty.")
+		return kit.Paragraph(env, gtx, theme.TypeSmall(), env.Th.Chrome().FgMuted, "This folder is empty.")
 	}
 	children := make([]layout.FlexChild, 0, len(v.entries))
 	for _, e := range v.entries {
