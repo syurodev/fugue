@@ -339,6 +339,73 @@ func TestQuotaExhaustionReassignsTaskToAnotherAccountWithDiffAndSummary(t *testi
 		t.Fatalf("reassigned session = (%s, %s), want (claude, work-2)", sess2.Vendor, sess2.AccountID)
 	}
 	assertReassignedWorktreeAndIntro(t, h, reassigned.TaskID)
+	assertQuotaRetryLinkAndNotice(t, ctx, h, "or8-team", tasksAfter[1].TaskID, &reassigned)
+}
+
+// assertQuotaRetryLinkAndNotice covers the OR-E08 halves that the worktree and
+// intro checks do not: the new attempt is linked to the failed one, and the
+// direct delegator got the failed(quota) digest.
+func assertQuotaRetryLinkAndNotice(t *testing.T, ctx context.Context, h *multiAcctHarness, teamID, failedTaskID string, reassigned *vendorstore.TaskRecord) {
+	t.Helper()
+	if reassigned.RetryOf != failedTaskID || reassigned.Attempt != 2 || reassigned.ParentTaskID != teamID+".lead" {
+		t.Fatalf("reassigned link = (retry_of=%q, attempt=%d, parent=%q), want (%q, 2, %q)",
+			reassigned.RetryOf, reassigned.Attempt, reassigned.ParentTaskID, failedTaskID, teamID+".lead")
+	}
+	failed := mailboxFailureDigests(t, ctx, h, teamID, teamID+".lead")
+	if len(failed) != 1 || failed[0].TaskID != failedTaskID || failed[0].State != string(vendorstore.TaskStateFailed) || failed[0].FailureCode != string(vendor.FailureQuota) {
+		t.Fatalf("delegator digests = %+v, want one failed(quota) for %s", failed, failedTaskID)
+	}
+}
+
+func mailboxFailureDigests(t *testing.T, ctx context.Context, h *multiAcctHarness, teamID, recipientTaskID string) []mailboxDigestItem {
+	t.Helper()
+	mail, err := h.f.store.ClaimMailbox(ctx, teamID, recipientTaskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out []mailboxDigestItem
+	for i := range mail {
+		raw, openErr := h.f.store.OpenMailboxPayload(ctx, teamID, mail[i].MessageID)
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		var item mailboxDigestItem
+		if json.Unmarshal(raw, &item) == nil && item.FailureCode != "" {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func TestQuotaExhaustionWithoutAnotherAccountFailsTaskAndNotifiesDelegator(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	h := newMultiAccountHarness(t, &workspace.HostConfig{
+		MultiAccountEnabled: true, MultiAccountTermsAccepted: true, AccountStrategy: string(credentials.StrategyOrder),
+	})
+	defer mustCloseActorSessions(t, h.m)
+	setupMultiAccountTeam(t, ctx, h, "or8n-team", []string{"or8n-team.m1"})
+	if err := h.disp.Dispatch(ctx, "or8n-team"); err != nil {
+		t.Fatalf("Dispatch: %v", err)
+	}
+	orig := mustTeamTasks(t, ctx, h, "or8n-team")[1]
+	waitIntroPersisted(t, ctx, h, orig.SessionID)
+	limited := &vendor.RateLimit{Windows: []vendor.Window{{Name: "5h", Utilization: 1.0, ResetsAt: h.f.clock.Now().Add(time.Hour)}}}
+	h.accounts.ObserveAccountQuota(VendorClaude, vendorDefaultAccount, limited)
+	h.accounts.ObserveAccountQuota(VendorClaude, "work-2", limited)
+
+	h.tt.OnTurnFailed(ctx, orig.SessionID, string(vendor.FailureQuota))
+
+	tasks := mustTeamTasks(t, ctx, h, "or8n-team")
+	if len(tasks) != 2 || tasks[1].FailureCode != string(vendor.FailureQuota) || tasks[1].State != vendorstore.TaskStateFailed {
+		t.Fatalf("tasks = %+v, want the original failed(quota) and no reassigned task", tasks)
+	}
+	if n := len(h.ad.recordedStarts()); n != 1 {
+		t.Fatalf("recorded starts = %d, want 1 (no reassignment and no vendor switch)", n)
+	}
+	if got := mailboxFailureDigests(t, ctx, h, "or8n-team", "or8n-team.lead"); len(got) != 1 || got[0].FailureCode != string(vendor.FailureQuota) {
+		t.Fatalf("delegator digests = %+v, want one failed(quota)", got)
+	}
 }
 
 func TestMultiAccountOptInAndTermsGatingFailClosed(t *testing.T) {
