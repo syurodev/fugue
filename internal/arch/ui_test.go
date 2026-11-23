@@ -112,6 +112,32 @@ func isOSOpenCall(name string) bool {
 	}
 }
 
+// shotTestSupportPath is the one production ui package allowed to read and
+// write data files: shottest is test support that compares a headless
+// render with its golden PNG and writes the failing render next to it. The
+// exemption covers only the direct os file calls, not its imports, and
+// shottestImportProblems keeps every production file from importing it, so
+// the app can never reach those file calls (FUG-36).
+const (
+	shotTestSupportDir  = "ui/internal/shottest/"
+	shotTestSupportPath = uiModulePath + "/internal/shottest"
+)
+
+// shottestImportProblems reports a production ui file that imports the shot
+// test support package; only _test.go files may.
+func shottestImportProblems(rel string, imports []string) []string {
+	if strings.HasSuffix(rel, "_test.go") || strings.HasPrefix(rel, shotTestSupportDir) {
+		return nil
+	}
+	var out []string
+	for _, imp := range imports {
+		if imp == shotTestSupportPath {
+			out = append(out, fmt.Sprintf("%s imports %s: the shot test support package is imported only from _test.go files", rel, imp))
+		}
+	}
+	return out
+}
+
 // fileAppProblems checks one ui Go file: the import rules for every file, and
 // the direct data-file calls only for production files (the tests run
 // scripted hosts and sockets of their own).
@@ -121,13 +147,16 @@ func fileAppProblems(r repo, rel string) ([]string, error) {
 		return nil, err
 	}
 	var out []string
+	var imports []string
 	for _, spec := range f.Imports {
 		imp, err := strconv.Unquote(spec.Path.Value)
 		if err != nil {
 			continue
 		}
+		imports = append(imports, imp)
 		out = append(out, bannedCoreImport(rel, imp)...)
 	}
+	out = append(out, shottestImportProblems(rel, imports)...)
 	if strings.HasSuffix(rel, "_test.go") {
 		// The ui tests run scripted hosts and sockets of their own; the
 		// host-object rules bind the app's production files.
@@ -139,6 +168,9 @@ func fileAppProblems(r repo, rel string) ([]string, error) {
 			continue
 		}
 		out = append(out, bannedHostObjectImport(rel, imp)...)
+	}
+	if strings.HasPrefix(rel, shotTestSupportDir) {
+		return out, nil
 	}
 	ast.Inspect(f, func(n ast.Node) bool {
 		sel, ok := n.(*ast.SelectorExpr)
@@ -196,6 +228,8 @@ func TestAppWritesOnlyThroughHostAPI(t *testing.T) {
 				"ui/internal/hostconn/hostconn.go imports github.com/syurodev/fugue/internal/platform/clock: the app imports the core only through pkg/client and pkg/pb",
 				"ui/internal/hostconn/hostconn.go calls os.WriteFile: the app writes and reads only through the Host API",
 				"ui/cmd/fugue-app/main.go imports github.com/syurodev/fugue/internal/storage: the app imports the core only through pkg/client and pkg/pb",
+				"ui/internal/appwin/appwin.go imports github.com/syurodev/fugue/ui/internal/shottest: the shot test support package is imported only from _test.go files",
+				"ui/internal/shotshare/shotshare.go calls os.ReadFile: the app writes and reads only through the Host API",
 			},
 		},
 	}

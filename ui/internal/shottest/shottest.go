@@ -6,8 +6,8 @@ import (
 	"image"
 	"image/draw"
 	"image/png"
-	"io/fs"
 	"os"
+	"path/filepath"
 	"runtime"
 	"testing"
 )
@@ -56,7 +56,7 @@ func Compare(t *testing.T, name string, got *image.RGBA) {
 func compareIn(t *testing.T, dir, name string, got *image.RGBA) {
 	t.Helper()
 	tolerance, maxShare := budget(runtime.GOOS)
-	want, err := loadGolden(os.DirFS(dir), name+".png")
+	want, err := loadGolden(filepath.Join(dir, name+".png"))
 	if err != nil {
 		t.Errorf("shot %s: %v (generate it with the package's regenerate test: go test -tags regenerate -run Regenerate)", name, err)
 		return
@@ -82,14 +82,14 @@ func budget(goos string) (tolerance int, maxShare float64) {
 	return otherChannelTolerance, otherMaxDiffShare
 }
 
-func loadGolden(dir fs.FS, file string) (*image.RGBA, error) {
-	data, err := fs.ReadFile(dir, file)
+func loadGolden(path string) (*image.RGBA, error) {
+	data, err := os.ReadFile(filepath.Clean(path))
 	if err != nil {
 		return nil, fmt.Errorf("read golden: %w", err)
 	}
 	decoded, err := png.Decode(bytes.NewReader(data))
 	if err != nil {
-		return nil, fmt.Errorf("decode golden %s: %w", file, err)
+		return nil, fmt.Errorf("decode golden %s: %w", path, err)
 	}
 	rgba := image.NewRGBA(decoded.Bounds())
 	draw.Draw(rgba, rgba.Bounds(), decoded, decoded.Bounds().Min, draw.Src)
@@ -157,39 +157,26 @@ func keep(t *testing.T, name string, actual, diff *image.RGBA) (actualPath, diff
 	t.Helper()
 	dir, err := diffDir()
 	if err != nil {
-		t.Errorf("shot %s: create diff directory: %v", name, err)
+		t.Errorf("shot %s: %v", name, err)
 		return "", ""
 	}
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		t.Errorf("shot %s: open diff directory: %v", name, err)
-		return "", ""
-	}
-	defer func() {
-		if err := root.Close(); err != nil {
-			t.Errorf("shot %s: close diff directory: %v", name, err)
-		}
-	}()
-	actualPath = dir + "/" + name + ".actual.png"
-	writePNG(t, root, name+".actual.png", actual)
+	actualPath = filepath.Join(dir, name+".actual.png")
+	writePNG(t, actualPath, actual)
 	if diff != nil {
-		diffPath = dir + "/" + name + ".diff.png"
-		writePNG(t, root, name+".diff.png", diff)
+		diffPath = filepath.Join(dir, name+".diff.png")
+		writePNG(t, diffPath, diff)
 	}
 	return actualPath, diffPath
 }
 
-func writePNG(t *testing.T, root *os.Root, file string, img *image.RGBA) {
+func writePNG(t *testing.T, path string, img *image.RGBA) {
 	t.Helper()
-	f, err := root.Create(file)
-	if err != nil {
-		t.Errorf("create %s: %v", file, err)
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Errorf("encode %s: %v", path, err)
 		return
 	}
-	if err := png.Encode(f, img); err != nil {
-		t.Errorf("encode %s: %v", file, err)
-	}
-	if err := f.Close(); err != nil {
-		t.Errorf("close %s: %v", file, err)
+	if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+		t.Errorf("write %s: %v", path, err)
 	}
 }

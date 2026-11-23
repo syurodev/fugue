@@ -25,16 +25,7 @@ func solid(w, h int, c color.RGBA) *image.RGBA {
 
 func writeGolden(t *testing.T, dir, name string, img *image.RGBA) {
 	t.Helper()
-	root, err := os.OpenRoot(dir)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := root.Close(); err != nil {
-			t.Error(err)
-		}
-	})
-	writePNG(t, root, name+".png", img)
+	writePNG(t, filepath.Join(dir, name+".png"), img)
 }
 
 func TestComparePassesIdenticalAndAntialiasNoise(t *testing.T) {
