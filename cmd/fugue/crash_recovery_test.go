@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -189,6 +190,88 @@ func TestCrashPointTeamTaskRunningRecovery(t *testing.T) {
 	}
 	awaitCleanExit(t, ctx3, c3, done3)
 	assertSingleUnknownDelegatorNotice(t, dataDir)
+}
+
+func TestCrashPointTeamTaskCommittedRecovery(t *testing.T) {
+	t.Parallel()
+	dataDir, fugueHome := crashTestDirs(t)
+	repoDir := t.TempDir()
+	initGitRepo(t, repoDir)
+
+	ctx1, cancel1 := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel1()
+	done1 := startCrashSubprocess(t, ctx1, dataDir, fugueHome, config.CrashPointTeamTaskCommitted)
+	c1 := dialCrashClient(t, ctx1, dataDir, done1)
+	defer c1.Close()
+	if _, err := c1.UnlockVault(ctx1, []byte(cheapvault.MasterPassword)); err != nil {
+		t.Fatalf("UnlockVault: %v", err)
+	}
+	ws := setupCrashTeamWorkspace(t, ctx1, c1, repoDir)
+	sess, err := c1.StartSession(ctx1, "cmd-ttc-start", client.VendorClaude, ws.ID, "repo", client.SessionProfile{})
+	if err != nil {
+		t.Fatalf("StartSession: %v", err)
+	}
+	if sendErr := c1.Send(ctx1, "cmd-ttc-send", sess.ID, "CRASH_TEST_PROPOSE_TEAM"); sendErr != nil {
+		t.Fatalf("Send: %v", sendErr)
+	}
+	req := awaitPendingProposalCard(t, ctx1, c1)
+	if _, aErr := c1.AnswerInteraction(ctx1, &client.AnswerInteractionInput{
+		CommandID:   "cmd-ttc-approve",
+		RequestID:   req.RequestID,
+		Incarnation: req.Incarnation,
+		Outcome:     "answered",
+		Answers:     []client.InteractionQuestionAnswer{{QuestionID: "decision", OptionIDs: []string{"approve"}}},
+	}); aErr != nil {
+		t.Logf("AnswerInteraction returned: %v", aErr)
+	}
+	awaitCrashExit(t, ctx1, done1)
+
+	// The host died after the task-branch commit and before the report event,
+	// so the commit exists in git while the store never learned of it.
+	wantSHA := assertSingleTaskBranchCommit(t, repoDir)
+
+	restartAwaitUnknownKeepsCommit(t, dataDir, fugueHome, repoDir, wantSHA)
+	restartAwaitUnknownKeepsCommit(t, dataDir, fugueHome, repoDir, wantSHA)
+}
+
+// restartAwaitUnknownKeepsCommit boots an unarmed host, waits for the member
+// task to reconcile to unknown and checks the restart neither duplicated the
+// commit nor sent a second delegator notice.
+func restartAwaitUnknownKeepsCommit(t *testing.T, dataDir, fugueHome, repoDir, wantSHA string) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+	done := startCrashSubprocess(t, ctx, dataDir, fugueHome, "")
+	c := dialCrashClient(t, ctx, dataDir, done)
+	if _, err := c.UnlockVault(ctx, []byte(cheapvault.MasterPassword)); err != nil {
+		t.Fatalf("UnlockVault after restart: %v", err)
+	}
+	awaitMemberTaskUnknown(t, ctx, c)
+	awaitCleanExit(t, ctx, c, done)
+	assertSingleUnknownDelegatorNotice(t, dataDir)
+	if got := assertSingleTaskBranchCommit(t, repoDir); got != wantSHA {
+		t.Fatalf("task branch head after restart = %s, want unchanged %s", got, wantSHA)
+	}
+}
+
+// assertSingleTaskBranchCommit proves exactly one task branch carries exactly
+// one host commit over main (no duplicate effect) and returns its SHA.
+func assertSingleTaskBranchCommit(t *testing.T, repoDir string) string {
+	t.Helper()
+	refs := strings.Fields(runGit(t, repoDir, "for-each-ref", "--format=%(refname)", "refs/heads/"+gitops.TaskBranchPrefix))
+	var shas []string
+	for _, ref := range refs {
+		if n := runGit(t, repoDir, "rev-list", "--count", "main.."+ref); n != "0" {
+			if n != "1" {
+				t.Fatalf("%s has %s commits over main, want exactly 1", ref, n)
+			}
+			shas = append(shas, runGit(t, repoDir, "rev-parse", ref))
+		}
+	}
+	if len(shas) != 1 {
+		t.Fatalf("task branches with a commit = %v, want exactly 1", shas)
+	}
+	return shas[0]
 }
 
 func awaitPendingProposalCard(t *testing.T, ctx context.Context, c *client.Client) client.PendingInteraction {

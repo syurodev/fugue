@@ -164,3 +164,22 @@ func TestLoadReadsCrashPointAndTriggerNoopWhenUnarmed(t *testing.T) {
 		t.Fatalf("TriggerCrashPoint exit code = %d, want %d", exitedCode, config.CrashExitCode)
 	}
 }
+
+func TestTeamTaskCommittedCrashPointIsNamedAndScoped(t *testing.T) {
+	t.Parallel()
+	got, err := config.Load(config.MapEnv{config.EnvCrashPoint: config.CrashPointTeamTaskCommitted}, userDir(t.TempDir()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CrashPoint != "team_task_committed" {
+		t.Fatalf("CrashPoint = %q, want team_task_committed", got.CrashPoint)
+	}
+	// A different armed point must not fire this one.
+	config.TriggerCrashPoint(config.CrashPointTeamMergeAfterFF, config.CrashPointTeamTaskCommitted)
+
+	var exitedCode int
+	config.TriggerCrashPoint(got.CrashPoint, config.CrashPointTeamTaskCommitted, func(code int) { exitedCode = code })
+	if exitedCode != config.CrashExitCode {
+		t.Fatalf("exit code = %d, want %d", exitedCode, config.CrashExitCode)
+	}
+}

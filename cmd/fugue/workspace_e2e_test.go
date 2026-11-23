@@ -43,16 +43,36 @@ func playFakeVendor(args []string) bool {
 		if _, err := os.Stdout.WriteString(initLine); err != nil {
 			os.Exit(1)
 		}
-		scanner := bufio.NewScanner(os.Stdin)
-		for scanner.Scan() {
-			if strings.Contains(scanner.Text(), "CRASH_TEST_PROPOSE_TEAM") {
-				callCrashProposeViaMCPBridge(args)
-			}
-		}
+		playFakeVendorTurns(args)
 		return true
 	default:
 		return false
 	}
+}
+
+// playFakeVendorTurns answers each prompt line: a proposal marker proposes a
+// team; the first prompt inside a task worktree writes a change and reports.
+func playFakeVendorTurns(args []string) {
+	scanner := bufio.NewScanner(os.Stdin)
+	reported := false
+	for scanner.Scan() {
+		switch {
+		case strings.Contains(scanner.Text(), "CRASH_TEST_PROPOSE_TEAM"):
+			callCrashProposeViaMCPBridge(args)
+		case !reported && inLinkedWorktree():
+			reported = true
+			if os.WriteFile("change.txt", []byte("crash change\n"), 0o600) == nil {
+				callCrashDoneViaMCPBridge(args)
+			}
+		}
+	}
+}
+
+// inLinkedWorktree reports whether the fake vendor runs in a task worktree,
+// where git keeps a .git file instead of a directory.
+func inLinkedWorktree() bool {
+	info, err := os.Stat(".git")
+	return err == nil && info.Mode().IsRegular()
 }
 
 type e2eHost struct {

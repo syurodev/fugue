@@ -28,6 +28,7 @@ const (
 	CrashPointTeamTaskRunning        = "team_task_running"
 	CrashPointTeamMergeAfterFF       = "team_merge_after_ff"
 	CrashPointInteractionCardPending = "interaction_card_pending"
+	CrashPointTeamTaskCommitted      = "team_task_committed"
 
 	dataDirName = "Fugue"
 )
