@@ -2,8 +2,10 @@ package kit
 
 import (
 	"image"
+	"image/color"
 	"time"
 
+	"gioui.org/f32"
 	"gioui.org/io/event"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -26,15 +28,26 @@ const scrollUnit = 1 << 24
 type ScrollAreaProps struct {
 	Axis         layout.Axis
 	FollowBottom bool
+	// OverflowCue keeps the bar visible, and fades the viewport edge where
+	// unseen content remains, for as long as the content overflows. It is
+	// opt-in: §6.29 specifies a transient bar, so only an area whose content
+	// gates a decision (the approval card) turns it on. The cue is a bar plus a
+	// fade, with no animation to lose under reduced motion.
+	OverflowCue bool
+	// CueSurface is the opaque surface behind the area; the edge fade
+	// resolves into it. Required when OverflowCue is set.
+	CueSurface color.NRGBA
 }
 
 // scrollBar holds the shared idle timer and bar motion for ScrollArea and
 // VirtualList (§6.26, §6.29).
 type scrollBar struct {
-	hovered  bool
-	lastAct  time.Time
-	barA     motion.Follower
-	barAlpha float32
+	// persistent keeps the bar shown while the content overflows (OverflowCue).
+	persistent bool
+	hovered    bool
+	lastAct    time.Time
+	barA       motion.Follower
+	barAlpha   float32
 }
 
 func newScrollBar() scrollBar {
@@ -57,8 +70,8 @@ func (b *scrollBar) idleRemaining(env *Env, scrolled bool) time.Duration {
 
 func (b *scrollBar) stepAndDraw(env *Env, gtx *layout.Context, tag event.Tag, outSize image.Point, contentLen, viewLen, offset, maxOffset int, axis layout.Axis, scrolled bool) {
 	canScroll := maxOffset > 0
-	active := canScroll && (b.hovered || env.previewHover(tag) || b.idleRemaining(env, scrolled) > 0)
-	if active && !b.hovered && !b.lastAct.IsZero() {
+	active := canScroll && (b.persistent || b.hovered || env.previewHover(tag) || b.idleRemaining(env, scrolled) > 0)
+	if active && !b.persistent && !b.hovered && !b.lastAct.IsZero() {
 		env.Driver.WakeAt(b.lastAct.Add(scrollIdleDelay))
 	}
 	b.barAlpha = followSmooth(env, &b.barA, boolFloat(active))
@@ -146,7 +159,7 @@ func (s *ScrollAreaState) Layout(env *Env, gtx *layout.Context, p ScrollAreaProp
 		scrolled = s.pollEvents(env, gtx, image.Rectangle{Max: outSize}, p.Axis)
 	}
 	s.updateOffset(p.FollowBottom)
-	s.drawClipped(env, gtx, call, outSize, contentLen, viewLen, p.Axis, scrolled)
+	s.drawClipped(env, gtx, call, outSize, contentLen, viewLen, p.Axis, scrolled, p.OverflowCue, p.CueSurface)
 	return layout.Dimensions{Size: outSize}
 }
 
@@ -189,7 +202,7 @@ func (s *ScrollAreaState) updateOffset(followBottom bool) {
 	}
 }
 
-func (s *ScrollAreaState) drawClipped(env *Env, gtx *layout.Context, call op.CallOp, outSize image.Point, contentLen, viewLen int, axis layout.Axis, scrolled bool) {
+func (s *ScrollAreaState) drawClipped(env *Env, gtx *layout.Context, call op.CallOp, outSize image.Point, contentLen, viewLen int, axis layout.Axis, scrolled, cue bool, surface color.NRGBA) {
 	area := clip.Rect(image.Rectangle{Max: outSize}).Push(gtx.Ops)
 	shift := image.Pt(0, -s.offset)
 	if axis == layout.Horizontal {
@@ -199,6 +212,10 @@ func (s *ScrollAreaState) drawClipped(env *Env, gtx *layout.Context, call op.Cal
 	call.Add(gtx.Ops)
 	off.Pop()
 
+	s.bar.persistent = cue
+	if cue {
+		drawEdgeFades(gtx, surface, outSize, s.offset, s.maxOffset, axis)
+	}
 	s.bar.stepAndDraw(env, gtx, &s.tag, outSize, contentLen, viewLen, s.offset, s.maxOffset, axis, scrolled)
 	area.Pop()
 }
@@ -265,4 +282,55 @@ func thumbOffset(offset, maxOffset, slack int) int {
 		return 0
 	}
 	return slack * offset / maxOffset
+}
+
+// MoreBefore reports whether content remains unseen before the viewport.
+func (s *ScrollAreaState) MoreBefore() bool { return s.offset > 0 }
+
+// MoreAfter reports whether content remains unseen after the viewport.
+func (s *ScrollAreaState) MoreAfter() bool { return s.offset < s.maxOffset }
+
+// drawEdgeFades fades each viewport edge that still hides content into the
+// surface behind. The fade shrinks with the unseen distance, so it ends at
+// the end of the content without a timer.
+func drawEdgeFades(gtx *layout.Context, surface color.NRGBA, outSize image.Point, offset, maxOffset int, axis layout.Axis) {
+	if maxOffset <= 0 {
+		return
+	}
+	span := outSize.Y
+	if axis == layout.Horizontal {
+		span = outSize.X
+	}
+	depth := min(gtx.Dp(theme.SpaceXXL), span/2)
+	if depth <= 0 {
+		return
+	}
+	transparent := surface
+	transparent.A = 0
+	for _, e := range [2]struct {
+		unseen int
+		end    bool
+	}{{offset, false}, {maxOffset - offset, true}} {
+		h := min(depth, e.unseen)
+		if h <= 0 {
+			continue
+		}
+		a := float32(h) / float32(depth)
+		var r image.Rectangle
+		var from, to f32.Point
+		switch {
+		case axis == layout.Vertical && !e.end:
+			r, from, to = image.Rect(0, 0, outSize.X, h), f32.Pt(0, 0), f32.Pt(0, float32(h))
+		case axis == layout.Vertical:
+			r, from, to = image.Rect(0, outSize.Y-h, outSize.X, outSize.Y), f32.Pt(0, float32(outSize.Y)), f32.Pt(0, float32(outSize.Y-h))
+		case !e.end:
+			r, from, to = image.Rect(0, 0, h, outSize.Y), f32.Pt(0, 0), f32.Pt(float32(h), 0)
+		default:
+			r, from, to = image.Rect(outSize.X-h, 0, outSize.X, outSize.Y), f32.Pt(float32(outSize.X), 0), f32.Pt(float32(outSize.X-h), 0)
+		}
+		st := clip.Rect(r).Push(gtx.Ops)
+		paint.LinearGradientOp{Stop1: from, Stop2: to, Color1: fade(surface, a), Color2: transparent}.Add(gtx.Ops)
+		paint.PaintOp{}.Add(gtx.Ops)
+		st.Pop()
+	}
 }
