@@ -16,6 +16,7 @@ import (
 	"github.com/syurodev/fugue/internal/app"
 	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/internal/hostapi"
+	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/testutil"
@@ -58,8 +59,10 @@ func playFakeVendor(args []string) bool {
 func playFakeVendorTurns(args []string) {
 	scanner := bufio.NewScanner(os.Stdin)
 	reported := false
+	fake := &failureUXFake{args: args}
 	for scanner.Scan() {
 		switch {
+		case fake.playLine(scanner.Text()):
 		case strings.Contains(scanner.Text(), "CRASH_TEST_PROPOSE_TEAM"):
 			callCrashProposeViaMCPBridge(args)
 		case !reported && inLinkedWorktree():
@@ -103,18 +106,67 @@ func e2eSocketDir(t *testing.T) string {
 	return dir
 }
 
+// e2eHostOptions tunes the in-process host of one test. The zero value is the
+// DA-09 host: real clock, host defaults and no Fugue MCP bridge.
+type e2eHostOptions struct {
+	// clock replaces the real clock, so a test advances host time instead of
+	// waiting.
+	clock clock.Clock
+	// hostConfig is the content of the host's config.toml, written before the
+	// host starts.
+	hostConfig string
+	// bridge serves the Fugue MCP tools to the fake vendor CLI, which a team
+	// scenario needs.
+	bridge bool
+}
+
 // startE2EHost starts an in-process real app stack on a real Unix socket with
 // an unlocked cheap vault and the test binary wired as VendorBinary (Q-140 A).
 func startE2EHost(t *testing.T) *e2eHost {
 	t.Helper()
+	return startE2EHostWith(t, &e2eHostOptions{})
+}
+
+func (o *e2eHostOptions) clockOrReal() clock.Clock {
+	if o.clock != nil {
+		return o.clock
+	}
+	return testutil.OSClock()
+}
+
+func (o *e2eHostOptions) writeHostConfig(t *testing.T, fugueHome string) {
+	t.Helper()
+	if o.hostConfig == "" {
+		return
+	}
+	if err := os.MkdirAll(fugueHome, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(fugueHome, "config.toml"), []byte(o.hostConfig), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func (o *e2eHostOptions) wireBridge(deps *app.HostDeps, exe, socket string) {
+	if !o.bridge {
+		return
+	}
+	deps.Bridge = app.VendorBridge{Binary: exe, Socket: socket}
+	// The fake CLI starts the bridge through the PATH the allowlist keeps.
+	deps.VendorHostEnv = os.Environ()
+}
+
+func startE2EHostWith(t *testing.T, opts *e2eHostOptions) *e2eHost {
+	t.Helper()
 	dir := e2eSocketDir(t)
 	cheapvault.SeedDataDir(t, dir)
 	fugueHome := filepath.Join(t.TempDir(), "Fugue")
+	opts.writeHostConfig(t, fugueHome)
 	exe, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	clk := testutil.OSClock()
+	clk := opts.clockOrReal()
 	sock, err := hostapi.ListenSocket(t.Context(), hostapi.SocketOptions{DataDir: dir})
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +176,7 @@ func startE2EHost(t *testing.T) *e2eHost {
 		IDs:     ids.NewUUIDv7(clk, ids.NewDeterministic("e2e-conn")),
 		HostUID: int64(os.Getuid()),
 	})
-	hp, err := app.StartHost(t.Context(), &app.HostDeps{
+	deps := &app.HostDeps{
 		DataDir:      dir,
 		WorkspaceEnv: config.MapEnv{config.EnvFugueHome: fugueHome},
 		Config:       app.HostConfig{HostVersion: "test-e2e", APIVersions: []string{"v1"}},
@@ -132,7 +184,9 @@ func startE2EHost(t *testing.T) *e2eHost {
 		IDs:          ids.NewUUIDv7(clk, ids.NewDeterministic("e2e-host")),
 		Transport:    srv,
 		VendorBinary: exe,
-	})
+	}
+	opts.wireBridge(deps, exe, sock.Path)
+	hp, err := app.StartHost(t.Context(), deps)
 	if err != nil {
 		t.Fatal(err)
 	}
