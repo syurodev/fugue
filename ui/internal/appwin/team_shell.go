@@ -67,16 +67,14 @@ func (s *screens) layoutTeamSessionHeader(gtx *layout.Context, env *kit.Env, sh 
 		return s.layoutCreateTeam(gtx, env, sh, id)
 	}
 	return layout.Inset{Top: theme.SpaceLG, Bottom: theme.SpaceLG, Left: theme.SpaceXL, Right: theme.SpaceXL}.Layout(*gtx, func(g layout.Context) layout.Dimensions {
-		return teamPanel(g, env, env.Th.Chrome().FillSoft, layout.Inset{Left: theme.SpaceMD, Right: theme.SpaceMD, Top: theme.SpaceXS, Bottom: theme.SpaceXS}, func(g layout.Context) layout.Dimensions {
-			return layout.Flex{Alignment: layout.Middle}.Layout(g,
-				rigidWidget(func(g *layout.Context) layout.Dimensions { return s.layoutTeamMode(g, env, sh, summary.TeamID) }),
-				layout.Flexed(1, func(g layout.Context) layout.Dimensions { return layout.Dimensions{Size: g.Constraints.Min} }),
-				channelButton(env, s, sh.open, kit.ButtonProps{Text: "Open in slot", Icon: kit.IconUsers, Size: kit.SizeSM}, func() {
-					s.boardFor(teamBoardKey{team: summary.TeamID}).channel.reopen()
-					s.grid.openCompanion(SlotRef{Kind: KindTeam, ID: summary.TeamID})
-				}),
-			)
-		})
+		return layout.Flex{Alignment: layout.Middle}.Layout(g,
+			rigidWidget(func(g *layout.Context) layout.Dimensions { return s.layoutTeamMode(g, env, sh, summary.TeamID) }),
+			layout.Flexed(1, func(g layout.Context) layout.Dimensions { return layout.Dimensions{Size: g.Constraints.Min} }),
+			channelButton(env, s, sh.open, kit.ButtonProps{Text: "Open in slot", Icon: kit.IconUsers, Size: kit.SizeSM}, func() {
+				s.boardFor(teamBoardKey{team: summary.TeamID}).channel.reopen()
+				s.grid.openCompanion(SlotRef{Kind: KindTeam, ID: summary.TeamID})
+			}),
+		)
 	})
 }
 
