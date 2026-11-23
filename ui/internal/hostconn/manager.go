@@ -288,8 +288,7 @@ func (m *Manager) run(ctx context.Context) {
 			m.setState(ctx, StateIncompatible, err.Error())
 			return
 		case refusalReason(err) != "":
-			// A launched host the data directory refused does not heal by
-			// retrying: the window names the cause and what clears it.
+			// A data directory refusal does not heal by retrying.
 			m.setState(ctx, StateDisconnected, refusalReason(err))
 			return
 		case errors.Is(err, ErrStartupTimeout):
