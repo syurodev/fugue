@@ -166,58 +166,62 @@ func (d *policyDialog) applied(res *workspace.MutResult) {
 	d.lastErr = res.Err.Error()
 }
 
-func (d *policyDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens) {
-	if !d.dialog.IsOpen() {
-		return
-	}
-	res, err := d.dialog.Layout(env, gtx, &kit.DialogProps{
+// props builds the card's dialog props. Reject and restore is the footer's
+// left action, apart from Cancel and Confirm: it is a decision of its own
+// and never sits among the diff rows.
+func (d *policyDialog) props(env *kit.Env, sc *screens) *kit.DialogProps {
+	return &kit.DialogProps{
 		Variant:      kit.DialogConfirm,
 		Title:        "Policy change in " + d.wsName,
-		Description:  "The configuration changed outside Fugue and touches policy keys (Q-64). The change waits for your decision; a session cannot start in this workspace until it is made.",
+		Icon:         kit.IconLock,
+		Description:  "This workspace's configuration was changed outside Fugue and touches policy settings. Sessions in this workspace wait until you confirm the change or restore the previous settings.",
 		Cancel:       d.cancel,
 		Primary:      d.confirm,
 		PrimaryLabel: "Confirm",
 		// The safe choice is Cancel: it decides nothing. Confirm applies the
-		// proposed policy; the body's Reject restores the accepted one.
-		Busy: d.busy,
+		// proposed policy; Reject restores the accepted one.
+		Extra:        d.rejectBtn,
+		ExtraLabel:   "Reject and restore",
+		ExtraVariant: kit.Danger,
+		Busy:         d.busy,
 		Body: func(gtx *layout.Context, bands *kit.DialogBands) image.Point {
 			return d.body(env, gtx, bands, sc)
 		},
-	})
+	}
+}
+
+func (d *policyDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens) {
+	if !d.dialog.IsOpen() {
+		return
+	}
+	res, err := d.dialog.Layout(env, gtx, d.props(env, sc))
 	if err != nil {
 		sc.fail(err)
 	}
 	if res.Submitted {
 		d.submit(sc)
 	}
+	if res.Extra {
+		d.reject(sc)
+	}
 }
 
 func (d *policyDialog) body(env *kit.Env, gtx *layout.Context, bands *kit.DialogBands, sc *screens) image.Point {
 	body := newWSBody(env, gtx, bands, sc.fail)
-	d.fill(env, body, sc)
+	d.fill(env, body)
 	return body.size()
 }
 
-// fill lays the card's rows out top to bottom: the diff, one changed key per
-// row, then the reject action on a row of its own, then the host's answer.
-func (d *policyDialog) fill(env *kit.Env, body *wsBody, sc *screens) {
+// fill lays the card's body out top to bottom: the diff panel, then the
+// host's answer when a decision failed. The actions live in the footer.
+func (d *policyDialog) fill(env *kit.Env, body *wsBody) {
 	if len(d.diff) == 0 {
 		body.label("The change's diff is not known yet; the next workspace read fills it in.", env.Th.Chrome().FgMuted)
+	} else {
+		body.field(nil, func(gtx *layout.Context) (layout.Dimensions, error) {
+			return layoutDiffPanel(env, gtx, d.diff), nil
+		})
 	}
-	for _, e := range d.diff {
-		body.label(e.Key+": "+e.OldValue+" → "+e.NewValue, env.Th.Chrome().Fg)
-	}
-	body.field(nil, func(gtx *layout.Context) (layout.Dimensions, error) {
-		props := kit.ButtonProps{Text: "Reject and restore", Variant: kit.Secondary, Size: kit.SizeLG, Busy: d.busy}
-		clicked, berr := d.rejectBtn.Layout(env, gtx, props)
-		if berr != nil {
-			return d.rejectBtn.Measure(env, gtx, props), berr
-		}
-		if clicked {
-			d.reject(sc)
-		}
-		return d.rejectBtn.Measure(env, gtx, props), nil
-	})
 	if d.lastErr != "" {
 		body.label(d.lastErr, env.Th.Status().Danger)
 	}
@@ -296,7 +300,7 @@ func (d *removeRootDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens
 	res, err := d.dialog.Layout(env, gtx, &kit.DialogProps{
 		Variant:        kit.DialogConfirm,
 		Title:          "Remove root " + d.root,
-		Description:    "Sessions stop reaching the root at their next step, and its grants are dropped (workspace §4.2).",
+		Description:    "Sessions stop reaching the root at their next step, and its grants are dropped.",
 		Cancel:         d.cancel,
 		Primary:        d.confirm,
 		PrimaryLabel:   "Remove",

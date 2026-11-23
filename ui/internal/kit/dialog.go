@@ -23,8 +23,8 @@ import (
 // never opens one (§6.17).
 //
 // Keyboard (§6.17, §7): focus is trapped — Tab and Shift+Tab cycle through
-// the body controls the Body declared (DialogBands) and the two footer
-// buttons — and returns to the opener on close. The scroll follows focus: a
+// the body controls the Body declared (DialogBands), the Extra action when
+// there is one, and the two footer buttons — and returns to the opener on close. The scroll follows focus: a
 // focused control scrolled out of the body is brought back in, with room for
 // its §3.4 ring, which is why the body's clip grows by the ring allowance
 // and the content takes the width that remains. Escape closes only when safe
@@ -79,6 +79,19 @@ type DialogProps struct {
 	Cancel, Primary *ButtonState
 	PrimaryLabel    string
 	PrimaryVariant  ButtonVariant
+	// Icon is an optional leading glyph before the title (IconMD, IconMuted).
+	// The title text still names the dialog, so the icon never carries the
+	// meaning alone (§6.1). The zero value draws no icon.
+	Icon IconName
+	// Extra is an optional action on the footer's left edge, opposite the
+	// Cancel and primary pair: a decision that is neither (for example
+	// "Reject and restore"). The dialog lays it out and reports its click in
+	// DialogResult.Extra without closing; the caller decides what the click
+	// means. The zero value (a nil state) draws nothing and every dialog
+	// without it is unchanged.
+	Extra        *ButtonState
+	ExtraLabel   string
+	ExtraVariant ButtonVariant
 	// PrimaryDisabled disables the primary button and blocks Submit until the
 	// caller clears it (for example while required workspace detail reloads).
 	PrimaryDisabled bool
@@ -110,8 +123,21 @@ type DialogResult struct {
 	EscapeRefused bool
 	// Closed is any terminal outcome.
 	Closed bool
+	// Extra is a click on the Extra footer action; it never closes the
+	// dialog by itself.
+	Extra bool
 	// Size is the inline specimen's frame box.
 	Size image.Point
+	// Boxes are the boxes the frame drew this frame.
+	Boxes DialogBoxes
+}
+
+// DialogBoxes are the boxes of one drawn frame in the coordinates the frame
+// was laid out in (the window for a live dialog, the cursor for an inline
+// one). A button the props do not carry has an empty box. Tests and callers
+// that align content with the frame read them.
+type DialogBoxes struct {
+	Frame, Body, Extra, Cancel, Primary image.Rectangle
 }
 
 // DialogBands is the handle a dialog Body draws with: it declares each
@@ -156,6 +182,8 @@ type DialogState struct {
 	bands     []dialogBand
 	viewLenPx int
 	rect      image.Rectangle
+	// iconErr carries a header icon draw failure out of the draw closure.
+	iconErr error
 }
 
 // NewDialogState builds the state of one dialog.
@@ -318,11 +346,15 @@ func (d *DialogState) trapFocus(env *Env, gtx *layout.Context, props *DialogProp
 }
 
 // trapTags is the dialog's tab order: the body's bands in draw order, then
-// Cancel, then the primary (§6.17).
+// the Extra action on the footer's left, then Cancel, then the primary
+// (§6.17).
 func (d *DialogState) trapTags(props *DialogProps) []event.Tag {
-	tags := make([]event.Tag, 0, len(d.bands)+2)
+	tags := make([]event.Tag, 0, len(d.bands)+3)
 	for _, band := range d.bands {
 		tags = append(tags, band.tag)
+	}
+	if props.Extra != nil {
+		tags = append(tags, props.Extra.Tag())
 	}
 	if props.Cancel != nil {
 		tags = append(tags, props.Cancel.Tag())

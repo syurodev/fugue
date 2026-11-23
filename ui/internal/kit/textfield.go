@@ -123,11 +123,17 @@ func (s *TextFieldState) Number() (float64, bool) {
 
 // Measure returns the field's natural box: the widest of its label and
 // placeholder plus paddings and slots, at the full §6.8 height of label,
-// box and helper line. It draws nothing and touches no input source.
+// box and helper line; a constraint that stretches the field (Min.X) stretches
+// the measured box the same way Layout draws it. It draws nothing and touches
+// no input source.
 func (s *TextFieldState) Measure(env *Env, gtx *layout.Context, p *TextFieldProps) layout.Dimensions {
 	sz := fieldMetrics(env, gtx, p.Label)
 	lead, right := textFieldSlots(env, gtx, p)
 	w := fieldMinWidth(env, gtx, p.Label, p.Placeholder, lead+right)
+	// Under a stretching constraint the field draws at the stretched width,
+	// so the helper wraps there: measure the line at the width Layout uses,
+	// or a form column reserves a taller line than it draws.
+	w = max(w, min(gtx.Constraints.Min.X, gtx.Constraints.Max.X))
 	line := fieldLineHeight(env, gtx, p.Helper, p.Error, p.Error != "", w)
 	return layout.Dimensions{
 		Size:     image.Pt(w, sz.total(line)),

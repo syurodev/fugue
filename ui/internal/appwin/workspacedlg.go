@@ -95,22 +95,33 @@ type wsBody struct {
 	w     int
 	gap   int
 	y     int
+	// ring is the dialog's focus-ring allowance: the kit insets the body by
+	// it on each side, so fields draw that far out to share the title's and
+	// the description's left edge.
+	ring int
 	// rows is every drawn row's box in body coordinates, in draw order.
 	rows []image.Rectangle
 }
 
 func newWSBody(env *kit.Env, gtx *layout.Context, bands *kit.DialogBands, fail func(error)) *wsBody {
-	return &wsBody{env: env, bands: bands, gtx: gtx, fail: fail, w: gtx.Constraints.Max.X, gap: gtx.Dp(theme.SpaceMD)}
+	ring := gtx.Dp(theme.FocusStroke) + gtx.Dp(theme.FocusOffset)
+	gap := gtx.Dp(theme.SpaceLG)
+	// The body opens one gap below the description, so the first label does
+	// not touch it; the dialog frame adds no space of its own there.
+	return &wsBody{
+		env: env, bands: bands, gtx: gtx, fail: fail, ring: ring,
+		w: gtx.Constraints.Max.X + 2*ring, gap: gap, y: gap,
+	}
 }
 
 // field draws one field at the body's width and declares its band; a nil tag
 // is a row no keyboard traversal reaches, for example a diff line.
 func (b *wsBody) field(tag event.Tag, draw func(gtx *layout.Context) (layout.Dimensions, error)) {
 	local := *b.gtx
-	local.Constraints.Min.X = b.w
+	local.Constraints.Min.X, local.Constraints.Max.X = b.w, b.w
 	// Each row is drawn at its own y: the recorded body ops all start at the
 	// body's origin, so without the offset every row paints on the first.
-	off := op.Offset(image.Pt(0, b.y)).Push(local.Ops)
+	off := op.Offset(image.Pt(-b.ring, b.y)).Push(local.Ops)
 	dims, err := draw(&local)
 	off.Pop()
 	if err != nil {
@@ -302,7 +313,7 @@ func (d *rootDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens) {
 	res, err := d.dialog.Layout(env, gtx, &kit.DialogProps{
 		Variant:        kit.DialogForm,
 		Title:          title,
-		Description:    "The host validates the path against the workspace rules (workspace §2).",
+		Description:    "Fugue checks the path against this workspace's rules.",
 		Cancel:         d.cancel,
 		Primary:        d.save,
 		PrimaryLabel:   primary,
@@ -337,7 +348,10 @@ func (d *rootDialog) body(env *kit.Env, gtx *layout.Context, bands *kit.DialogBa
 // layName draws the root's name field; Enter submits the dialog.
 func (d *rootDialog) layName(env *kit.Env, body *wsBody) {
 	body.field(d.name.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
-		props := &kit.TextFieldProps{Label: labelName, Placeholder: "for example kong", Error: "Name the root"}
+		props := &kit.TextFieldProps{
+			Label: labelName, Placeholder: "for example kong",
+			Helper: "How the root is listed in this workspace.", Error: "Name the root",
+		}
 		ev, ferr := d.name.Layout(env, gtx, props)
 		if ferr == nil && ev.Submitted {
 			d.dialog.Submit()
@@ -352,7 +366,7 @@ func (d *rootDialog) layPath(env *kit.Env, body *wsBody) {
 		props := &kit.TextFieldProps{
 			Label:       "Path",
 			Placeholder: "/absolute/path/of/the/root",
-			Helper:      "An absolute path outside the Fugue home; the host validates it.",
+			Helper:      "An absolute path outside the Fugue home.",
 			Error:       "Type the root path",
 		}
 		ev, ferr := d.path.Layout(env, gtx, props)
