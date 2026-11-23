@@ -24,9 +24,10 @@ const (
 	diffUnset   = "unset"
 	diffRemoved = "removed"
 	diffArrow   = "→"
-	// diffKeyShare is the least percent of the panel's inner width a
-	// capped key column keeps, so long values stack instead of the key
-	// being cut.
+	// diffKeyShare is the percent of the panel's inner width past which a
+	// key stops sharing its row with the values and takes a line of its
+	// own. A policy key is never truncated: the user must see which key a
+	// change is about to touch.
 	diffKeyShare = 45
 )
 
@@ -36,6 +37,7 @@ type diffRow struct {
 	oldW, arrowW  int
 	newW, lineH   int
 	inline        bool
+	env           *kit.Env
 }
 
 // diffText returns the shown form of a value: an empty one is spoken, never
@@ -72,12 +74,14 @@ func layoutDiffPanel(env *kit.Env, gtx *layout.Context, diff []workspace.DiffEnt
 		r := measureDiffRow(env, gtx, e, 0, innerGap, line)
 		valW = max(valW, r.oldW+innerGap+arrowW+innerGap+r.newW)
 	}
-	// Keys keep their full width while the values still fit one line beside
-	// them; past that the key column is capped and long values stack.
-	if keyW+colGap+valW > innerW {
-		keyW = min(keyW, max(innerW*diffKeyShare/100, innerW-colGap-valW))
-	}
+	// Keys keep their full width beside the values while that fits or the
+	// key is short enough to leave the values room; a longer key is stacked
+	// above its values and wraps itself, so it is shown whole.
+	stack := keyW+colGap+valW > innerW && keyW > innerW*diffKeyShare/100
 	valX := keyW + colGap
+	if stack {
+		keyW, valX = innerW, 0
+	}
 	valW = innerW - valX
 
 	rec := op.Record(gtx.Ops)
@@ -87,7 +91,7 @@ func layoutDiffPanel(env *kit.Env, gtx *layout.Context, diff []workspace.DiffEnt
 			y += rowGap
 		}
 		r := measureDiffRow(env, gtx, e, valW, innerGap, line)
-		y += drawDiffRow(env, gtx, r, image.Pt(0, y), keyW, valX, valW, innerGap, chrome)
+		y += drawDiffRow(env, gtx, r, image.Pt(0, y), diffCols{keyW: keyW, valX: valX, valW: valW, stack: stack}, innerGap, chrome)
 	}
 	content := rec.Stop()
 
@@ -104,7 +108,7 @@ func layoutDiffPanel(env *kit.Env, gtx *layout.Context, diff []workspace.DiffEnt
 // value column or stack: a long value wraps instead of being cut, because a
 // policy decision must show the whole value.
 func measureDiffRow(env *kit.Env, gtx *layout.Context, e workspace.DiffEntry, valW, gap, line int) diffRow {
-	r := diffRow{key: e.Key, old: diffText(e.OldValue, diffUnset), new: diffText(e.NewValue, diffRemoved), lineH: line}
+	r := diffRow{key: e.Key, old: diffText(e.OldValue, diffUnset), new: diffText(e.NewValue, diffRemoved), lineH: line, env: env}
 	r.oldW = kit.MeasureLabel(env, gtx, theme.TypeSmall(), r.old).X
 	r.arrowW = kit.MeasureLabel(env, gtx, theme.TypeSmall(), diffArrow).X
 	r.newW = kit.MeasureLabel(env, gtx, mediumSmall(), r.new).X
@@ -112,47 +116,65 @@ func measureDiffRow(env *kit.Env, gtx *layout.Context, e workspace.DiffEntry, va
 	return r
 }
 
+// diffCols is the panel's column geometry: the key's width, where the values
+// start and how wide they are, and whether the key sits above them.
+type diffCols struct {
+	keyW, valX, valW int
+	stack            bool
+}
+
 // drawDiffRow draws one row at at and returns its height.
-func drawDiffRow(env *kit.Env, gtx *layout.Context, r diffRow, at image.Point, keyW, valX, valW, gap int, chrome theme.Chrome) int {
+func drawDiffRow(env *kit.Env, gtx *layout.Context, r diffRow, at image.Point, c diffCols, gap int, chrome theme.Chrome) int {
 	place := func(p image.Point, draw func(g *layout.Context) layout.Dimensions) layout.Dimensions {
 		defer op.Offset(at.Add(p)).Push(gtx.Ops).Pop()
 		g := *gtx
 		g.Constraints = layout.Constraints{Max: image.Pt(1<<20, 1<<20)}
 		return draw(&g)
 	}
-	place(image.Point{}, func(g *layout.Context) layout.Dimensions {
-		g.Constraints.Max.X = keyW
-		return kit.MiddleEllipsisLabel(env, g, theme.TypeCodeSmall(), chrome.FgMuted, r.key)
-	})
+	keyH := place(image.Point{}, func(g *layout.Context) layout.Dimensions {
+		g.Constraints.Max.X = c.keyW
+		return kit.Paragraph(env, g, theme.TypeCodeSmall(), chrome.FgMuted, r.key)
+	}).Size.Y
+	vy := 0
+	if c.stack {
+		vy = keyH
+	}
+	return max(keyH, vy+drawDiffValues(place, r, image.Pt(c.valX, vy), c.valW, gap, chrome))
+}
+
+// drawDiffValues draws a row's old and new values at p, side by side when
+// they fit and stacked otherwise, and returns their height.
+func drawDiffValues(place func(image.Point, func(*layout.Context) layout.Dimensions) layout.Dimensions, r diffRow, p image.Point, valW, gap int, chrome theme.Chrome) int {
+	env := r.env
 	if r.inline {
-		place(image.Pt(valX, 0), func(g *layout.Context) layout.Dimensions {
+		place(p, func(g *layout.Context) layout.Dimensions {
 			dims := kit.Label(env, g, theme.TypeSmall(), chrome.FgMuted, r.old)
 			strikeThrough(g, dims.Size, chrome)
 			return dims
 		})
-		x := valX + r.oldW + gap
-		place(image.Pt(x, 0), func(g *layout.Context) layout.Dimensions {
+		x := p.X + r.oldW + gap
+		place(image.Pt(x, p.Y), func(g *layout.Context) layout.Dimensions {
 			return kit.Label(env, g, theme.TypeSmall(), chrome.FgSubtle, diffArrow)
 		})
-		place(image.Pt(x+r.arrowW+gap, 0), func(g *layout.Context) layout.Dimensions {
+		place(image.Pt(x+r.arrowW+gap, p.Y), func(g *layout.Context) layout.Dimensions {
 			return kit.Label(env, g, mediumSmall(), chrome.Fg, r.new)
 		})
 		return r.lineH
 	}
-	oldH := place(image.Pt(valX, 0), func(g *layout.Context) layout.Dimensions {
+	oldH := place(p, func(g *layout.Context) layout.Dimensions {
 		g.Constraints.Max.X = valW
 		return kit.Paragraph(env, g, theme.TypeSmall(), chrome.FgMuted, r.old)
 	}).Size.Y
 	if oldH <= r.lineH {
-		place(image.Pt(valX, 0), func(g *layout.Context) layout.Dimensions {
+		place(p, func(g *layout.Context) layout.Dimensions {
 			strikeThrough(g, image.Pt(r.oldW, oldH), chrome)
 			return layout.Dimensions{}
 		})
 	}
-	place(image.Pt(valX, oldH), func(g *layout.Context) layout.Dimensions {
+	place(image.Pt(p.X, p.Y+oldH), func(g *layout.Context) layout.Dimensions {
 		return kit.Label(env, g, theme.TypeSmall(), chrome.FgSubtle, diffArrow)
 	})
-	newH := place(image.Pt(valX+r.arrowW+gap, oldH), func(g *layout.Context) layout.Dimensions {
+	newH := place(image.Pt(p.X+r.arrowW+gap, p.Y+oldH), func(g *layout.Context) layout.Dimensions {
 		g.Constraints.Max.X = valW - r.arrowW - gap
 		return kit.Paragraph(env, g, mediumSmall(), chrome.Fg, r.new)
 	}).Size.Y

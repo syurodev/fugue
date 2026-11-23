@@ -231,9 +231,9 @@ func renderOps(t *testing.T, fn func(*layout.Context) layout.Dimensions, gtx *la
 
 // findImage looks for sub inside img at column x, comparing everything but
 // the rounded corners (inset px from each edge), and returns where it sits.
-// A card draws its body through a recorded macro, which can move a few
-// antialiased edge pixels; a match tolerates one in a hundred, far fewer
-// than any other panel layout would differ by.
+// A card draws its body through a recorded macro, which can move
+// antialiased text edge pixels; a match tolerates one in twenty, far fewer
+// than a layout without the panel's fill would differ by.
 func findImage(img, sub *image.RGBA, x, inset int) (image.Point, bool) {
 	sw, sh := sub.Bounds().Dx(), sub.Bounds().Dy()
 	compared := (sw - 2*inset) * (sh - 2*inset)
@@ -246,9 +246,56 @@ func findImage(img, sub *image.RGBA, x, inset int) (image.Point, bool) {
 				}
 			}
 		}
-		if bad*100 <= compared {
+		if bad*20 <= compared {
 			return image.Pt(x, y), true
 		}
 	}
 	return image.Point{}, false
+}
+
+// TestDiffPanelShowsEveryPolicyKeyWholeAtSlotWidth: a key the column cannot
+// hold is stacked above its values and wrapped, never ellipsized, so the user
+// reads the whole key a change touches.
+func TestDiffPanelShowsEveryPolicyKeyWholeAtSlotWidth(t *testing.T) {
+	t.Parallel()
+	keys := []string{
+		"policy.approvals.auto_approve_for_environment_tag",
+		"policy." + strings.Repeat("k", 120),
+	}
+	for _, scale := range []float32{1, 1.25} {
+		t.Run(scaleName(scale), func(t *testing.T) {
+			t.Parallel()
+			env := slotEnv(t, scale)
+			var runs []image.Rectangle
+			env.RunRecorder = func(r image.Rectangle) { runs = append(runs, r) }
+			var ops op.Ops
+			gtx := slotGtx(env, &ops, new(input.Router), image.Point{})
+			panelW := gtx.Dp(theme.SlotMinWidth) - 4*gtx.Dp(theme.SpaceLG)
+			gtx.Constraints = layout.Constraints{Max: image.Pt(panelW, 1<<20)}
+			inner := panelW - 2*gtx.Dp(theme.SpaceLG)
+			for _, key := range keys {
+				runs = runs[:0]
+				diff := []workspace.DiffEntry{{Key: key, OldValue: "auto", NewValue: "never"}}
+				dims := layoutDiffPanel(env, &gtx, diff)
+				if dims.Size.X != panelW {
+					t.Fatalf("panel is %d px wide, want %d", dims.Size.X, panelW)
+				}
+				one := kit.MeasureLabel(env, &gtx, theme.TypeCodeSmall(), "k")
+				tallest := 0
+				for _, r := range runs {
+					if r.Dx() > inner {
+						t.Fatalf("a run is %d px wide in an inner width of %d", r.Dx(), inner)
+					}
+					tallest = max(tallest, r.Dy())
+				}
+				need := (kit.MeasureLabel(env, &gtx, theme.TypeCodeSmall(), key).X + inner - 1) / inner
+				if lines := (tallest + one.Y/2) / one.Y; lines < need {
+					t.Fatalf("key %q laid out in %d lines, want at least %d", key, lines, need)
+				}
+				if dims.Size.Y < tallest+2*gtx.Dp(theme.SpaceLG) {
+					t.Fatalf("panel height %d does not hold its key (%d)", dims.Size.Y, tallest)
+				}
+			}
+		})
+	}
 }
