@@ -1,0 +1,127 @@
+# Gate definition: docs/quality-gates.md section 9. Changes need the gate-change-approved label.
+# Release build: while PR tests are paused (pr.yml, quality-gates section 11),
+# every pushed version tag runs the full test suite and coverage on ubuntu and
+# macOS, and stresses the test functions changed since the previous tag. A red
+# run means the tag is not a release; fix on main and tag again.
+name: build
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # Scopes the stress jobs to the test functions changed since the previous
+  # version tag (fuguegate changes). With no previous tag there is no range to
+  # stress; the nightly repeat-tests job repeats every test twenty times.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      test_pkgs: ${{ steps.scope.outputs.test_pkgs }}
+      test_run: ${{ steps.scope.outputs.test_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - id: scope
+        run: |
+          head=$(git rev-parse HEAD)
+          if prev=$(git describe --tags --abbrev=0 --match 'v*' "$head^" 2>/dev/null); then
+            go run ./cmd/fuguegate changes -base "$(git rev-parse "$prev^{commit}")" -head "$head" >> "$GITHUB_OUTPUT"
+          else
+            echo "::notice::stress skipped: no previous version tag to diff against"
+          fi
+
+  test:
+    name: test (ubuntu-latest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - shell: bash
+        run: go tool task test -- -json | tee test.json | jq -j 'select(.Action == "output") | .Output'
+      - name: Report tests above the time budget
+        if: ${{ !cancelled() }}
+        run: go run ./cmd/fuguegate slowtests -json test.json -max 30s || echo "::warning::tests above the 30s per-test budget (report only, quality-gates section 6)"
+      - name: Keep the coverage profile for the coverage job
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: cover-profile
+          path: cover.out
+          retention-days: 1
+
+  test-macos:
+    name: test (macos-latest)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - shell: bash
+        run: go tool task test -- -json | tee test.json | jq -j 'select(.Action == "output") | .Output'
+      - name: Report tests above the time budget
+        if: ${{ !cancelled() }}
+        run: go run ./cmd/fuguegate slowtests -json test.json -max 30s || echo "::warning::tests above the 30s per-test budget (report only, quality-gates section 6)"
+
+  coverage:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: cover-profile
+      - run: go tool task coverage
+
+  # Ten separate -count=1 runs of the changed test functions, as in pr.yml.
+  stress:
+    name: stress (ubuntu-latest)
+    needs: changes
+    if: needs.changes.outputs.test_pkgs != '' && needs.changes.outputs.test_run != ''
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - env:
+          PACKAGES: ${{ needs.changes.outputs.test_pkgs }}
+          TESTS: ${{ needs.changes.outputs.test_run }}
+        run: |
+          for _ in $(seq 1 10); do
+            go tool task test-pkg PKG="$PACKAGES" RUN="$TESTS" COUNT=1
+          done
+
+  stress-macos:
+    name: stress (macos-latest)
+    needs: changes
+    if: needs.changes.outputs.test_pkgs != '' && needs.changes.outputs.test_run != ''
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - env:
+          PACKAGES: ${{ needs.changes.outputs.test_pkgs }}
+          TESTS: ${{ needs.changes.outputs.test_run }}
+        run: |
+          for _ in $(seq 1 10); do
+            go tool task test-pkg PKG="$PACKAGES" RUN="$TESTS" COUNT=1
+          done

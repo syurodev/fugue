@@ -54,7 +54,7 @@ gh api -X POST repos/syurodev/fugue/rulesets --input - <<'JSON'
         "required_review_thread_resolution": false,
         "allowed_merge_methods": ["squash"] } },
     { "type": "required_status_checks", "parameters": {
-        "strict_required_status_checks_policy": true,
+        "strict_required_status_checks_policy": false,
         "required_status_checks": [
           { "context": "fmt" }, { "context": "lint" }, { "context": "vet" },
           { "context": "arch" },
@@ -67,6 +67,11 @@ gh api -X POST repos/syurodev/fugue/rulesets --input - <<'JSON'
 }
 JSON
 ```
+
+Why branches need not be up to date (`strict_required_status_checks_policy: false`, 2026-11-23):
+every merge into a busy `main` forced each open PR to rebase and rerun its checks, which serialised
+the merge queue. A squash merge still lands only with every required check green on the PR head;
+`main.yml` and the nightly run catch a semantic clash between two PRs that each passed alone.
 
 Why no required reviews: the repository has one owner, who cannot approve their own pull
 request, so a required review would block every merge. `gate-guard` and the label take its

@@ -111,6 +111,32 @@ func TestPRWorkflowsSplitByTrigger(t *testing.T) {
 	}
 }
 
+// PR tests are paused behind the PR_TESTS repository variable (quality-gates
+// section 11, 2026-11-23); every version tag runs the full suite, coverage and
+// the stress of the tests changed since the previous tag on both systems.
+func TestTagBuildRunsTestsWhilePRTestsArePaused(t *testing.T) {
+	t.Parallel()
+	pr := readWorkflow(t, "pr.yml")
+	for _, job := range []string{"\n  test:\n", "\n  test-macos:\n", "\n  stress:\n", "\n  stress-macos:\n", "\n  coverage:\n"} {
+		_, body, ok := strings.Cut(pr, job)
+		body, _, _ = strings.Cut(body, "\n\n  ")
+		if !ok || !strings.Contains(body, "if: vars.PR_TESTS == 'on'") {
+			t.Errorf("pr.yml job %q is not paused behind vars.PR_TESTS", strings.TrimSpace(job))
+		}
+	}
+	build := readWorkflow(t, "build.yml")
+	for _, want := range []string{
+		"tags: [\"v*\"]", "name: test (ubuntu-latest)", "name: test (macos-latest)",
+		"name: stress (ubuntu-latest)", "name: stress (macos-latest)", "go tool task test -- -json",
+		"go tool task coverage", "fuguegate changes", "git describe --tags --abbrev=0",
+		"task test-pkg PKG=\"$PACKAGES\" RUN=\"$TESTS\" COUNT=1", "seq 1 10",
+	} {
+		if !strings.Contains(build, want) {
+			t.Errorf("build.yml lacks %q", want)
+		}
+	}
+}
+
 func TestNightlyWorkflowRunsTheLongJobs(t *testing.T) {
 	t.Parallel()
 	nightly := readWorkflow(t, "nightly.yml")
@@ -161,7 +187,7 @@ func TestCoverageJobReusesTheTestProfile(t *testing.T) {
 
 func TestActionsArePinnedToCommits(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"pr.yml", "pr-meta.yml", "main.yml", "nightly.yml", "cache.yml", "ui.yml"} {
+	for _, name := range []string{"pr.yml", "pr-meta.yml", "main.yml", "nightly.yml", "cache.yml", "ui.yml", "build.yml"} {
 		if got := unpinnedActions(readWorkflow(t, name)); len(got) > 0 {
 			t.Errorf("%s uses actions not pinned to a commit SHA: %v", name, got)
 		}
