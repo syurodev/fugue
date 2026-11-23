@@ -112,7 +112,7 @@ func workspaceRuntimeFixture(t *testing.T) (*HostRuntime, *Subscription, string)
 	dataDir := t.TempDir()
 	fugueHome := filepath.Join(t.TempDir(), "Fugue")
 	clk := clock.NewFake(time.Unix(100, 0))
-	deps := testHostDeps(dataDir, clk, newScriptedTransport())
+	deps := testHostDeps(t, dataDir, clk, newScriptedTransport())
 	deps.WorkspaceEnv = config.MapEnv{config.EnvFugueHome: fugueHome}
 	host, startErr := StartHost(t.Context(), deps)
 	if startErr != nil {

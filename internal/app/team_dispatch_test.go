@@ -214,29 +214,11 @@ func gitBinary(t *testing.T) string {
 }
 
 // initRepo makes dir a git repository with one commit and a local git identity
-// so worktree commits do not depend on a host or CI runner's global config.
+// so worktree commits do not depend on a host or CI runner's global config. It
+// copies the repository TestMain built once (git_template_test.go).
 func initRepo(t *testing.T, dir string) {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("fixture\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	const gitConfig = "config"
-	for _, args := range [][]string{
-		{"init", "-q", "-b", "main"},
-		{gitConfig, "user.name", "Fugue Test"},
-		{gitConfig, "user.email", "fugue@example.invalid"},
-		{gitConfig, "commit.gpgsign", "false"},
-		{"add", "."},
-		{"commit", "-q", "-m", "init"},
-	} {
-		cmd := exec.CommandContext(t.Context(), "git")
-		cmd.Path = gitBinary(t)
-		cmd.Args = append([]string{"git"}, args...)
-		cmd.Dir = dir
-		if out, err := cmd.CombinedOutput(); err != nil {
-			t.Fatalf("git %v: %v: %s", args, err, out)
-		}
-	}
+	copyGitRepoTemplate(t, dir)
 }
 
 func newDispatchFixture(t *testing.T, withGit bool) *dispatchFixture {

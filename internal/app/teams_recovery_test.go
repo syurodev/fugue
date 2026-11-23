@@ -18,7 +18,7 @@ func TestHostStartRecoversRunningTeamTasksAsUnknown(t *testing.T) {
 
 	// Simulate host restart with vault initially locked.
 	clk.Advance(time.Minute)
-	hp2, err := StartHost(ctx, testHostDeps(dir, clk, newScriptedTransport()))
+	hp2, err := StartHost(ctx, testHostDeps(t, dir, clk, newScriptedTransport()))
 	if err != nil {
 		t.Fatalf("StartHost 2: %v", err)
 	}
@@ -43,7 +43,7 @@ func setupTeamForHostRestart(t *testing.T, dir string, clk *clock.Fake) {
 	t.Helper()
 	ctx := t.Context()
 	seedCheapVaultDataDir(t, dir)
-	hp1, err := StartHost(ctx, testHostDeps(dir, clk, newScriptedTransport()))
+	hp1, err := StartHost(ctx, testHostDeps(t, dir, clk, newScriptedTransport()))
 	if err != nil {
 		t.Fatalf("StartHost 1: %v", err)
 	}

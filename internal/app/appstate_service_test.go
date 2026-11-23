@@ -36,7 +36,7 @@ func testWindowID(n int) string {
 // closes it at the end of the test.
 func startAppStateHost(t *testing.T, dir string, clk *clock.Fake) *HostProcess {
 	t.Helper()
-	hp, err := StartHost(t.Context(), testHostDeps(dir, clk, newScriptedTransport()))
+	hp, err := StartHost(t.Context(), testHostDeps(t, dir, clk, newScriptedTransport()))
 	if err != nil {
 		t.Fatalf("start the host: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestAppStateRestoresEveryWindowWhileTheVaultIsLocked(t *testing.T) {
 		t.Fatalf("close the first host: %v", err)
 	}
 
-	second, err := StartHost(ctx, testHostDeps(dir, clk, newScriptedTransport()))
+	second, err := StartHost(ctx, testHostDeps(t, dir, clk, newScriptedTransport()))
 	if err != nil {
 		t.Fatalf("start the second host: %v", err)
 	}

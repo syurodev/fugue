@@ -48,6 +48,7 @@ var errUnclassifiedVendor = errors.New("unclassified vendor failure")
 // kill leaves it, and closes the store so StartHost can take the lock.
 func seedCrashedVendorSession(t *testing.T, dir string) string {
 	t.Helper()
+	seedMigratedDataDir(t, dir)
 	clk := testutil.OSClock()
 	store, err := storage.OpenStore(t.Context(), config.Config{DataDir: dir}, clk,
 		ids.NewUUIDv7(clk, ids.NewDeterministic("vendor-seed")))
@@ -339,8 +340,10 @@ func TestSupervisorUsesRawXDGRuntimeDir(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Unix(0, 0))
 	deps := func(env []string) *HostDeps {
+		dir := t.TempDir()
+		seedMigratedDataDir(t, dir)
 		return &HostDeps{
-			DataDir: t.TempDir(), Config: testHostConfig(), Clock: clk,
+			DataDir: dir, Config: testHostConfig(), Clock: clk,
 			IDs:           ids.NewUUIDv7(clk, ids.NewDeterministic("vendor-xdg")),
 			Transport:     newScriptedTransport(),
 			VendorHostEnv: env,
