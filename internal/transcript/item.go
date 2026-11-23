@@ -128,10 +128,12 @@ type (
 	// ScanIncomplete marks a scan that stopped before covering every added line
 	// (git-guard §3.3); none of them carries content.
 	NoticeMetadata struct {
-		Level, Code    string
-		Findings       int
-		Files          int
-		ScanIncomplete bool
+		Level, Code string
+		// omitempty keeps every other notice serialized as before the scan
+		// fields existed (the vendor replay goldens).
+		Findings       int  `json:",omitempty"`
+		Files          int  `json:",omitempty"`
+		ScanIncomplete bool `json:",omitempty"`
 	}
 	// NoticeContent contains the Notice protected content described in transcript §3.
 	NoticeContent struct{ Text string }
