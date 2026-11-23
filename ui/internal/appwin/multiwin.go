@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"runtime"
 	"slices"
 	"sync"
 	"time"
@@ -302,6 +303,7 @@ func runWindow(ctx context.Context, m *hostconn.Manager, coord *multiWindow, win
 	w := new(app.Window)
 	w.Option(app.Title("Fugue"))
 	w.Option(app.Size(unit.Dp(initW), unit.Dp(initH)))
+	w.Option(windowOptions(runtime.GOOS)...)
 
 	q := &updateQueue{}
 	winReg := &windowUpdates{queue: q, invalidate: w.Invalidate}
@@ -324,6 +326,7 @@ func runWindow(ctx context.Context, m *hostconn.Manager, coord *multiWindow, win
 	env := newEnv(shaper, &light)
 	attach(env, w)
 	sc := newWindowScreens(m, w, workers, coord, winReg)
+	sc.titleBar = newTitleBar(runtime.GOOS)
 	applyInitialWindowLayout(m, sc, q, windowID, record, doc)
 	return eventLoop(winCtx, w, env, sc, q, coord, winReg, &light, &dark)
 }

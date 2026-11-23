@@ -57,8 +57,11 @@ type pageFetcher interface {
 // goroutine, which applies every delivered update here.
 type screens struct {
 	teamRuntime
-	m       *hostconn.Manager
-	fetcher pageFetcher
+	// titleBar is the app-drawn title bar of platforms that give the window
+	// none (FUG-58); nil in tests and wherever the platform draws it.
+	titleBar *titleBar
+	m        *hostconn.Manager
+	fetcher  pageFetcher
 	// poster is the composer's write side; composer holds its view state.
 	poster   *session.Poster
 	composer *composer

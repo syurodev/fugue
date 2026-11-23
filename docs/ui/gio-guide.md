@@ -326,3 +326,24 @@ golden of another size, or too many differing pixels fails the test.
     factor); every spike page laid out and rendered at 90/100/110/125% with
     nothing cached in pixels — the only pixel-cache risk (icon strokes) keys
     on dp size, which stays correct.
+
+## Window chrome and cursor on Linux (FUG-58)
+
+Verified on Gio v0.10.3.
+
+- Gio draws a blue Material title bar of its own whenever the platform grants
+  no server-side decorations, which is every GNOME Wayland session (Mutter
+  has no xdg-decoration). `app.Decorated(false)` turns that fallback off; the
+  window's `app.ConfigEvent.Config.Decorated` then reports what the platform
+  really granted (with the default `Decorated(true)` it is always true, so the
+  app cannot tell). `appwin/titlebar.go` draws a themed bar only when it is
+  false and the OS is in the X11/Wayland family; X11 always keeps its window
+  manager's bar. macOS, Windows and mobile get no option and no bar.
+- Move, minimize, maximize and close go through `widget.Decorations`,
+  `system.ActionInputOp(ActionMove)` and `Window.Perform`; double click on the
+  title uses `gesture.Click`.
+- Cursor size: Gio's Wayland backend loads the cursor theme at `XCURSOR_SIZE`
+  times the scale and uses 32 when the variable is unset
+  (`app/os_wayland.go` lines 386-396), while GNOME's default is 24 and is not
+  exported. `appwin.MatchSystemCursor` fills `XCURSOR_SIZE` and
+  `XCURSOR_THEME` from `org.gnome.desktop.interface` before the first window.

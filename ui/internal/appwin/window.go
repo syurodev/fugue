@@ -3,6 +3,7 @@ package appwin
 import (
 	"context"
 	"crypto/rand"
+	"image"
 	"image/color"
 	"log/slog"
 	"runtime"
@@ -281,6 +282,8 @@ func eventLoop(ctx context.Context, w *app.Window, env *kit.Env, sc *screens, q 
 			}
 			finishCancel()
 			return e.Err
+		case app.ConfigEvent:
+			sc.titleBar.applyConfig(e.Config)
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
 			gtx.Metric = env.Metric(gtx.Metric)
@@ -289,6 +292,9 @@ func eventLoop(ctx context.Context, w *app.Window, env *kit.Env, sc *screens, q 
 			frame(&gtx, env, sc, q, coord, light, dark)
 			env.FrameEnd(&gtx)
 			e.Frame(gtx.Ops)
+			if acts := sc.titleBar.takeActions(); acts != 0 {
+				w.Perform(acts)
+			}
 		}
 	}
 }
@@ -385,7 +391,12 @@ func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 	sc.grid.markGeometryDirty(pxToDp(gtx, gtx.Constraints.Max.X), pxToDp(gtx, gtx.Constraints.Max.Y))
 	state, reason := sc.m.State()
 	status := statusLine(state, reason)
-	layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
+	barH := sc.titleBar.layout(env, gtx)
+	shell := *gtx
+	shell.Constraints.Max.Y -= barH
+	shell.Constraints.Min.Y = min(shell.Constraints.Min.Y, shell.Constraints.Max.Y)
+	offset := op.Offset(image.Pt(0, barH)).Push(gtx.Ops)
+	layout.Flex{Axis: layout.Vertical}.Layout(shell,
 		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Inset{
 				Top: theme.SpaceMD, Left: theme.SpaceLG, Right: theme.SpaceLG,
@@ -412,6 +423,7 @@ func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 			})
 		}),
 	)
+	offset.Pop()
 	// The start and workspace dialogs (F10.4b, F10.14), the active-session
 	// close confirmation (F10.5e) draw over the whole window, last, with the
 	// full frame's gtx: the scrim dims everything beneath whichever dialog is
