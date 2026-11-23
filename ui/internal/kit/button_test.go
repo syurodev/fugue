@@ -146,7 +146,7 @@ func TestBusyShowsNoHoverOrPressWash(t *testing.T) {
 func TestButtonDisabledDrawsTheWholeControlAtDisabledOpacity(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
-	for _, v := range []ButtonVariant{Secondary, Primary, Bordered, Ghost, Danger} {
+	for _, v := range []ButtonVariant{Secondary, Primary, Bordered, Ghost, Danger, Link} {
 		on, off := buttonLookOf(h.env, v, false), buttonLookOf(h.env, v, true)
 		for name, pair := range map[string][2]color.NRGBA{
 			"base": {on.base, off.base}, "border": {on.border, off.border}, "fg": {on.fg, off.fg}, "ripple": {on.ripple, off.ripple},
@@ -227,7 +227,7 @@ type contrastCase struct {
 // hover. Busy shares the rest look: it adds no wash (§4.1).
 func contrastCases(env *Env) []contrastCase {
 	cases := make([]contrastCase, 0, 5*3+3*6)
-	for _, v := range []ButtonVariant{Secondary, Primary, Bordered, Ghost, Danger} {
+	for _, v := range []ButtonVariant{Secondary, Primary, Bordered, Ghost, Danger, Link} {
 		look := buttonLookOf(env, v, false)
 		cases = append(cases,
 			contrastCase{name: fmt.Sprintf("button %d rest", v), look: look},
@@ -348,7 +348,7 @@ func TestFocusRingReaches3to1InEveryVariant(t *testing.T) {
 // variantRings is the ring color of every Button and IconButton variant.
 func variantRings(env *Env) map[string]color.NRGBA {
 	rings := map[string]color.NRGBA{}
-	for _, v := range []ButtonVariant{Secondary, Primary, Bordered, Ghost, Danger} {
+	for _, v := range []ButtonVariant{Secondary, Primary, Bordered, Ghost, Danger, Link} {
 		rings[fmt.Sprintf("button %d", v)] = buttonLookOf(env, v, false).ring
 	}
 	for _, v := range []IconButtonVariant{IconButtonGhost, IconButtonSecondary, IconButtonBordered} {
@@ -367,5 +367,26 @@ func checkRing(t *testing.T, th *theme.Theme, name string, ring color.NRGBA) {
 		if got := contrastRatio(ring, surface.c); got < 3 {
 			t.Errorf("%s ring on %s: %.2f:1, want at least 3:1", name, surface.name, got)
 		}
+	}
+}
+
+const blockTestLabel = "Unlock"
+
+// TestBlockButtonFillsTheWidthAndLinkKeepsItsBox pins the two additions of the
+// vault panel: Block stretches to the width the layout allows, and the Link
+// variant measures like any other button of its label.
+func TestBlockButtonFillsTheWidthAndLinkKeepsItsBox(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.frame(t)
+	st := NewButtonState()
+	plain := st.Measure(h.env, &h.gtx, ButtonProps{Text: blockTestLabel, Variant: Primary})
+	block := st.Measure(h.env, &h.gtx, ButtonProps{Text: blockTestLabel, Variant: Primary, Block: true})
+	if block.Size.X != h.gtx.Constraints.Max.X || block.Size.Y != plain.Size.Y {
+		t.Fatalf("block box %v, want the full width %d at height %d", block.Size, h.gtx.Constraints.Max.X, plain.Size.Y)
+	}
+	link := st.Measure(h.env, &h.gtx, ButtonProps{Text: blockTestLabel, Variant: Link})
+	if link.Size != plain.Size {
+		t.Fatalf("link box %v differs from the primary box %v", link.Size, plain.Size)
 	}
 }

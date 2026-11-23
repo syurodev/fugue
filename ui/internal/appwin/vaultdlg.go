@@ -3,14 +3,9 @@ package appwin
 import (
 	"bytes"
 	"fmt"
-	"image"
 	"image/color"
 
 	"gioui.org/layout"
-	"gioui.org/op/clip"
-	"gioui.org/op/paint"
-
-	"github.com/syurodev/fugue/pkg/client"
 
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/kit"
@@ -24,13 +19,20 @@ const minVaultPassphraseBytes = 8
 // (F10.5a, desktop-app §5). Secrets enter through TextFieldSecret with
 // NoReveal, copy into []byte on submit, and clear immediately on every path.
 type vaultGate struct {
-	card         *kit.CardState
-	pass         *kit.TextFieldState
-	confirm      *kit.TextFieldState
-	submitBtn    *kit.ButtonState
-	modeBtn      *kit.ButtonState
-	lockBtn      *kit.ButtonState
-	ackBtn       *kit.ButtonState
+	card      *kit.CardState
+	pass      *kit.TextFieldState
+	confirm   *kit.TextFieldState
+	submitBtn *kit.ButtonState
+	modeBtn   *kit.ButtonState
+	lockBtn   *kit.ButtonState
+	ackBtn    *kit.ButtonState
+	copyBtn   *kit.ButtonState
+	savedChk  *kit.CheckboxState
+	spin      kit.Spinner
+	// saved is the explicit "I stored the key" confirmation and copied the
+	// feedback of the copy button; both reset with the key.
+	saved        kit.CheckState
+	copied       bool
 	recoveryMode bool
 	recovery     []byte
 	busy         bool
@@ -42,6 +44,7 @@ func newVaultGate() *vaultGate {
 	return &vaultGate{
 		card: kit.NewCardState(), pass: kit.NewTextFieldState(), confirm: kit.NewTextFieldState(),
 		submitBtn: kit.NewButtonState(), modeBtn: kit.NewButtonState(), lockBtn: kit.NewButtonState(), ackBtn: kit.NewButtonState(),
+		copyBtn: kit.NewButtonState(), savedChk: kit.NewCheckboxState(),
 	}
 }
 
@@ -56,6 +59,7 @@ func (g *vaultGate) resetFields() {
 func (g *vaultGate) clearRecovery() {
 	clear(g.recovery)
 	g.recovery = nil
+	g.saved, g.copied = kit.CheckOff, false
 }
 
 func (g *vaultGate) applied(res *vault.Result, m *vault.Model) {
@@ -99,124 +103,6 @@ func vaultErrorMessage(code string, retryAfter int64, err error) string {
 	default:
 		return err.Error()
 	}
-}
-
-func (g *vaultGate) layout(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
-	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
-	return layout.Center.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
-		cardGtx := gtx
-		cardW := min(gtx.Dp(theme.DialogWidth), max(gtx.Constraints.Max.X-2*gtx.Dp(theme.SpaceLG), 0))
-		cardGtx.Constraints = layout.Constraints{Min: image.Pt(cardW, 0), Max: image.Pt(cardW, gtx.Constraints.Max.Y)}
-		dims, _, err := g.card.Layout(env, &cardGtx, kit.CardProps{}, func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			return g.layoutCardBody(&local, env, sc)
-		})
-		if err != nil {
-			sc.fail(err)
-		}
-		return dims
-	})
-}
-
-func (g *vaultGate) layoutCardBody(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
-	if len(g.recovery) > 0 {
-		return g.layoutRecoveryAck(gtx, env)
-	}
-	if sc.vault.Status().State == client.VaultStateNotConfigured {
-		return g.layoutSetup(gtx, env, sc)
-	}
-	return g.layoutUnlock(gtx, env, sc)
-}
-
-func (g *vaultGate) layoutRecoveryAck(gtx *layout.Context, env *kit.Env) layout.Dimensions {
-	c := env.Th.Chrome()
-	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
-		vaultLabelRow(env, theme.TypeTitle(), c.Fg, "Save your recovery key"),
-		layout.Rigid(layout.Spacer{Height: theme.SpaceSM}.Layout),
-		vaultLabelRow(env, theme.TypeSmall(), c.FgMuted, "Shown once. Store it somewhere safe before continuing."),
-		layout.Rigid(layout.Spacer{Height: theme.SpaceMD}.Layout),
-		vaultLabelRow(env, theme.TypeCode(), c.Fg, string(g.recovery)),
-		layout.Rigid(layout.Spacer{Height: theme.SpaceLG}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			dims, clicked := layoutVaultButton(env, &gtx, g.ackBtn, kit.ButtonProps{Text: "I saved my recovery key", Variant: kit.Primary}, nil)
-			if clicked {
-				g.clearRecovery()
-			}
-			return dims
-		}),
-	)
-}
-
-func (g *vaultGate) layoutSetup(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
-	c := env.Th.Chrome()
-	submitted := false
-	dims := layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
-		vaultLabelRow(env, theme.TypeTitle(), c.Fg, "Set up vault"),
-		layout.Rigid(layout.Spacer{Height: theme.SpaceSM}.Layout),
-		vaultLabelRow(env, theme.TypeSmall(), c.FgMuted, "Create a master passphrase (at least 8 characters)."),
-		layout.Rigid(layout.Spacer{Height: theme.SpaceMD}.Layout),
-		vaultSecretRow(env, g.pass, "Passphrase", g.busy, &submitted, sc.fail),
-		layout.Rigid(layout.Spacer{Height: theme.SpaceMD}.Layout),
-		vaultSecretRow(env, g.confirm, "Confirm passphrase", g.busy, &submitted, sc.fail),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return g.layoutErrorLine(&gtx, env) }),
-		layout.Rigid(layout.Spacer{Height: theme.SpaceMD}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			dims, clicked := layoutVaultButton(env, &gtx, g.submitBtn, kit.ButtonProps{Text: "Create vault", Variant: kit.Primary, Busy: g.busy}, sc.fail)
-			if clicked {
-				submitted = true
-			}
-			return dims
-		}),
-	)
-	if submitted && !g.busy {
-		g.submitSetup(sc)
-	}
-	return dims
-}
-
-func (g *vaultGate) layoutUnlock(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
-	c := env.Th.Chrome()
-	fieldLabel, toggleLabel := "Master passphrase", "Use recovery key"
-	if g.recoveryMode {
-		fieldLabel, toggleLabel = "Recovery key", "Use master passphrase"
-	}
-	submitted, switched := false, false
-	dims := layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
-		vaultLabelRow(env, theme.TypeTitle(), c.Fg, "Unlock vault"),
-		layout.Rigid(layout.Spacer{Height: theme.SpaceSM}.Layout),
-		vaultLabelRow(env, theme.TypeSmall(), c.FgMuted, "Enter your passphrase to unlock sessions and protected history."),
-		g.layoutWaitingRow(env, sc),
-		layout.Rigid(layout.Spacer{Height: theme.SpaceMD}.Layout),
-		vaultSecretRow(env, g.pass, fieldLabel, g.busy, &submitted, sc.fail),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return g.layoutErrorLine(&gtx, env) }),
-		layout.Rigid(layout.Spacer{Height: theme.SpaceMD}.Layout),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					dims, clicked := layoutVaultButton(env, &gtx, g.submitBtn, kit.ButtonProps{Text: "Unlock", Variant: kit.Primary, Busy: g.busy}, sc.fail)
-					if clicked {
-						submitted = true
-					}
-					return dims
-				}),
-				layout.Rigid(layout.Spacer{Width: theme.SpaceSM}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					dims, clicked := layoutVaultButton(env, &gtx, g.modeBtn, kit.ButtonProps{Text: toggleLabel, Variant: kit.Ghost, Disabled: g.busy}, sc.fail)
-					if clicked {
-						switched = true
-					}
-					return dims
-				}),
-			)
-		}),
-	)
-	if switched {
-		g.recoveryMode, g.lastErr = !g.recoveryMode, ""
-		g.resetFields()
-	} else if submitted && !g.busy {
-		g.submitUnlock(sc)
-	}
-	return dims
 }
 
 func (g *vaultGate) layoutErrorLine(gtx *layout.Context, env *kit.Env) layout.Dimensions {
@@ -311,10 +197,20 @@ func vaultLabelRow(env *kit.Env, tp theme.Type, fg color.NRGBA, txt string) layo
 	})
 }
 
-func vaultSecretRow(env *kit.Env, field *kit.TextFieldState, label string, disabled bool, submitted *bool, onErr func(error)) layout.FlexChild {
-	props := &kit.TextFieldProps{Label: label, Variant: kit.TextFieldSecret, NoReveal: true, Disabled: disabled}
+// vaultFieldSpec is the text of one secret field of a panel.
+type vaultFieldSpec struct {
+	label, helper string
+	disabled      bool
+}
+
+// vaultSecretRow lays one secret field out at the panel's full width with a
+// show/hide control. Hiding is the default, and resetFields replaces the
+// state on every submit, so a revealed field masks again.
+func vaultSecretRow(env *kit.Env, field *kit.TextFieldState, spec vaultFieldSpec, submitted *bool, onErr func(error)) layout.FlexChild {
+	props := &kit.TextFieldProps{Label: spec.label, Helper: spec.helper, Variant: kit.TextFieldSecret, Disabled: spec.disabled}
 	return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 		local := gtx
+		local.Constraints.Min.X = local.Constraints.Max.X
 		ev, err := field.Layout(env, &local, props)
 		if err != nil && onErr != nil {
 			onErr(err)

@@ -45,7 +45,7 @@ func (s *screens) update(updates []hostconn.Update, results []session.Result, po
 
 // applyUpdate routes one topic delivery or connection-state change.
 func (s *screens) applyUpdate(u hostconn.Update) {
-	if s.applyConnectionUpdate(u.State) {
+	if s.applyConnectionUpdate(u.State, u.Reason) {
 		return
 	}
 	switch u.Topic {
@@ -82,7 +82,10 @@ func (s *screens) applyDynamicUpdate(u hostconn.Update) {
 	s.applyTranscriptUpdate(u)
 }
 
-func (s *screens) applyConnectionUpdate(state hostconn.State) bool {
+func (s *screens) applyConnectionUpdate(state hostconn.State, reason string) bool {
+	if state != "" {
+		s.hostState, s.hostReason = state, reason
+	}
 	switch state {
 	case hostconn.StateConnected:
 		s.reconnected()

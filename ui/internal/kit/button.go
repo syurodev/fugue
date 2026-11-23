@@ -7,6 +7,8 @@ import (
 
 	"gioui.org/f32"
 	"gioui.org/layout"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
 
 	"github.com/syurodev/fugue/ui/internal/motion"
@@ -14,7 +16,7 @@ import (
 )
 
 // Button, ui-kit §6.2: an optional icon and a type.label label on a
-// size.control box with radius.md, in five variants and the three §3.4
+// size.control box with radius.md, in six variants and the three §3.4
 // sizes. It shows every §4.1 state — rest, hover, pressed, the focus ring
 // outside the body (only after Tab, via Env.FocusVisible), disabled (the
 // whole control at DisabledOpacity) and busy — and reports Clicked during
@@ -47,6 +49,10 @@ const (
 	Bordered
 	Ghost
 	Danger
+	// Link is an underlined, transparent button for a quiet secondary
+	// action beside a primary one ("Use recovery key"): it reads as
+	// clickable where a Ghost resting on FgMuted reads as a plain label.
+	Link
 )
 
 // ButtonSize picks a size.control token (§3.4).
@@ -70,6 +76,9 @@ type ButtonProps struct {
 	Size     ButtonSize
 	Busy     bool
 	Disabled bool
+	// Block stretches the button to the full width the layout allows, for
+	// the one main action of a panel.
+	Block bool
 }
 
 // ButtonState is the long-lived state the caller keeps per logical button
@@ -103,7 +112,11 @@ func buttonBox(env *Env, gtx *layout.Context, p ButtonProps) (w, h, cw int) {
 	if p.Icon != "" {
 		cw += gtx.Dp(buttonIconSize(p.Size)) + gtx.Dp(iconGap)
 	}
-	return max(cw+2*gtx.Dp(padX), gtx.Dp(theme.HitMin)), h, cw
+	w = max(cw+2*gtx.Dp(padX), gtx.Dp(theme.HitMin))
+	if p.Block && gtx.Constraints.Max.X > w && gtx.Constraints.Max.X < 1<<20 {
+		w = gtx.Constraints.Max.X
+	}
+	return w, h, cw
 }
 
 // Layout draws the button at the current offset and reports whether it was
@@ -142,6 +155,9 @@ func (s *ButtonState) content(env *Env, gtx *layout.Context, p ButtonProps, fg c
 		at(gtx, labelAt, func(gtx *layout.Context) {
 			dims := drawText(env, gtx, theme.TypeLabel(), fade(fg, a), p.Text, false)
 			recordRun(env, image.Rectangle{Max: dims.Size}.Add(labelAt))
+			if p.Variant == Link {
+				underline(gtx, dims.Size, fade(fg, a))
+			}
 		})
 	}
 	if p.Icon == "" {
@@ -202,6 +218,8 @@ func buttonLookOf(env *Env, v ButtonVariant, disabled bool) controlLook {
 		l.border, l.hover, l.press = c.BorderSubtle, c.FillSoft, c.FillSoftHover
 	case Ghost:
 		l.fg, l.fgHover = c.FgMuted, c.Fg
+	case Link:
+		l.fg = c.Fg
 	case Danger:
 		l.base, l.hover, l.press, l.fg = c.DangerSoft, c.DangerSoftHover, c.DangerSoftPressed, c.DangerFg
 		l.ring = env.Th.Status().Danger
@@ -242,4 +260,13 @@ func buttonIconSize(s ButtonSize) unit.Dp {
 		return theme.IconSM
 	}
 	return theme.IconMD
+}
+
+// underline draws a 1 dp rule under a label of the given size at the current
+// offset, the Link variant's mark.
+func underline(gtx *layout.Context, size image.Point, c color.NRGBA) {
+	y := size.Y - gtx.Dp(theme.SpaceXXS)
+	r := image.Rect(0, y, size.X, y+max(gtx.Dp(1), 1))
+	defer clip.Rect(r).Push(gtx.Ops).Pop()
+	paint.Fill(gtx.Ops, c)
 }
