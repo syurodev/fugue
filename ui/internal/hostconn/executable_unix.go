@@ -6,7 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"syscall"
 )
 
@@ -14,18 +16,36 @@ import (
 var ErrUnsafeExecutable = errors.New("unsafe host executable")
 
 func validateExecutable(path string) error {
-	return validateExecutableFor(path, int64(os.Getuid()), int64(os.Getgid()))
+	uid := os.Getuid()
+	return validateExecutableFor(path, int64(uid), trustedGroup(uid, os.Getgid()))
+}
+
+// trustedGroup returns the user's primary gid when it is the user's private
+// group, named after the user (the user-private-group scheme Ubuntu and Fedora
+// default to), and -1 otherwise. A primary group other users share, such as
+// macOS staff, never earns write trust: a group-writable executable there is
+// writable by every local user.
+func trustedGroup(uid, gid int) int64 {
+	u, err := user.LookupId(strconv.Itoa(uid))
+	if err != nil {
+		return -1
+	}
+	g, err := user.LookupGroupId(strconv.Itoa(gid))
+	if err != nil || g.Name != u.Username {
+		return -1
+	}
+	return int64(gid)
 }
 
 // validateExecutableFor checks the executable and its directory for the app
-// user uid with primary group gid. Both must be owned by the user, the
+// user uid with trusted group gid (trustedGroup; -1 trusts no group). Both
+// must be owned by the user, the
 // directory a real directory and the executable a regular executable file.
 // Group-writable is accepted only when the group is the user's own, the same
 // trust the ancestors get (see validateAncestors): the usual 002 umask with
 // per-user groups makes every build output 0775 in a 0775 directory.
-// Other-writable is never accepted. Like the ancestors, this trusts that the
-// user's primary group has no other members; Fugue does not read the group
-// database to confirm it.
+// Other-writable is never accepted. A group named after the user is trusted
+// to have no other members; Fugue does not read the member list.
 func validateExecutableFor(path string, uid, gid int64) error {
 	if err := validateAncestors(filepath.Dir(path), uid, gid); err != nil {
 		return err

@@ -53,10 +53,20 @@ func TestHostExecutableTrustsOwnGroupWritable(t *testing.T) {
 	if err := validateEntries(bin, uid, gid); err != nil {
 		t.Fatalf("own-group 0775: %v", err)
 	}
-	if err := validateExecutable(bin); err != nil {
-		t.Fatalf("own-group 0775 through the real check: %v", err)
+	// The real check trusts the primary group only when it is the user's
+	// private group, so a shared one (macOS staff) refuses the same modes.
+	err := validateExecutable(bin)
+	if trustedGroup(os.Getuid(), os.Getgid()) == gid {
+		if err != nil {
+			t.Fatalf("private-group 0775 through the real check: %v", err)
+		}
+	} else if !errors.Is(err, ErrUnsafeExecutable) {
+		t.Fatalf("shared-group 0775 through the real check: %v", err)
 	}
-	err := validateEntries(bin, uid, gid+1)
+	if err = validateEntries(bin, uid, -1); !errors.Is(err, ErrUnsafeExecutable) {
+		t.Fatalf("0775 with no trusted group: %v", err)
+	}
+	err = validateEntries(bin, uid, gid+1)
 	var refused *WritableExecutableError
 	if !errors.As(err, &refused) || !errors.Is(err, ErrUnsafeExecutable) {
 		t.Fatalf("foreign-group 0775: %v", err)
@@ -71,6 +81,21 @@ func TestHostExecutableTrustsOwnGroupWritable(t *testing.T) {
 	testSetMode(t, bin, 0o755)
 	if err := validateEntries(bin, uid, gid+1); err != nil {
 		t.Fatalf("0755 with a foreign group: %v", err)
+	}
+}
+
+// A group that does not resolve, or whose name is not the user's, earns no
+// write trust.
+func TestTrustedGroupIsOnlyThePrivateGroup(t *testing.T) {
+	t.Parallel()
+	if got := trustedGroup(os.Getuid(), 1<<30); got != -1 {
+		t.Fatalf("unknown gid trusted as %d", got)
+	}
+	if got := trustedGroup(1<<30, os.Getgid()); got != -1 {
+		t.Fatalf("unknown uid trusted group %d", got)
+	}
+	if got := trustedGroup(os.Getuid(), os.Getgid()); got != -1 && got != int64(os.Getgid()) {
+		t.Fatalf("trusted group = %d, want -1 or the primary gid", got)
 	}
 }
 
