@@ -50,3 +50,4 @@ node_modules/
 .DS_Store
 /nightly-test.json
 /ui/kitgallery
+/release-evidence.md

@@ -83,6 +83,30 @@ tasks:
     cmds:
       - git config core.hooksPath .githooks
 
+  release-check:
+    desc: Release gate on the checked-out RC (Linux and macOS, verification section 7)
+    # The release tier reruns every PR and nightly gate on the RC and adds
+    # TestReleaseEvidence. Mutation runs in full here, which ends the pause of
+    # section 11 for the release. The repeated and long-fuzz nightly runs stay in
+    # nightly.yml, which also runs on the RC. CI_RUN=<url> records the CI run.
+    cmds:
+      - task: check
+      - task: probes
+      - task: mutation
+      - task: drill
+      - task: release-evidence
+
+  release-evidence:
+    desc: TestReleaseEvidence and release-evidence.md for the checked-out RC (release build tag, never part of check)
+    vars:
+      RC_COMMIT:
+        sh: git rev-parse HEAD
+    env:
+      FUGUE_RC_COMMIT: "{{.RC_COMMIT}}"
+    cmds:
+      - go test -tags release -race -shuffle=on -count=1 -run '^TestReleaseEvidence$' ./cmd/fuguegate
+      - go run ./cmd/fuguegate release-evidence -rc {{.RC_COMMIT}}{{if .CI_RUN}} -ci-run {{.CI_RUN | shellQuote}}{{end}}
+
   nightly-test:
     desc: Repeat every test twenty times with a fresh shuffle each time (nightly)
     # One invocation per repetition, not -count=20: the 10-minute test timeout

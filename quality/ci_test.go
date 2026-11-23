@@ -187,7 +187,7 @@ func TestCoverageJobReusesTheTestProfile(t *testing.T) {
 
 func TestActionsArePinnedToCommits(t *testing.T) {
 	t.Parallel()
-	for _, name := range []string{"pr.yml", "pr-meta.yml", "main.yml", "nightly.yml", "cache.yml", "ui.yml", "build.yml"} {
+	for _, name := range []string{"pr.yml", "pr-meta.yml", "main.yml", "nightly.yml", "cache.yml", "ui.yml", "build.yml", "release.yml"} {
 		if got := unpinnedActions(readWorkflow(t, name)); len(got) > 0 {
 			t.Errorf("%s uses actions not pinned to a commit SHA: %v", name, got)
 		}

@@ -14,7 +14,7 @@ import (
 )
 
 // ErrUsage reports a malformed command line.
-var ErrUsage = errors.New("usage: fuguegate coverage|fuzz|mutation|probes|deadcode|proto|commitlint|commitmsg|gateguard|changes|flaky|slowtests|exclusive [flags]")
+var ErrUsage = errors.New("usage: fuguegate coverage|fuzz|mutation|probes|deadcode|proto|commitlint|commitmsg|gateguard|changes|flaky|slowtests|exclusive|release-evidence|verify-live [flags]")
 
 func main() {
 	ctx, stop := signalContext()
@@ -75,6 +75,10 @@ func dispatch(ctx context.Context, clk clock.Clock, args []string, stdout io.Wri
 		return runSlowTests(rest, stdout)
 	case exclusiveCommand:
 		return runExclusive(ctx, rest, stdout, clk)
+	case "release-evidence":
+		return runReleaseEvidence(ctx, clk, rest, stdout)
+	case "verify-live":
+		return runVerifyLive(ctx, clk, rest, os.Stdin, stdout)
 	}
 	if cmd, ok := commands()[args[0]]; ok {
 		return cmd(ctx, rest, stdout)
