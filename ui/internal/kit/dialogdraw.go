@@ -127,9 +127,16 @@ func (d *DialogState) paintFrame(env *Env, gtx *layout.Context, props *DialogPro
 	// A frame on its way out takes no input (§3.7): the body and the footer
 	// buttons draw, but nothing under them receives events.
 	active := d.open.Shown() || props.Inline
+	d.iconErr = nil
 	if err := d.drawChrome(env, gtx, props, m, prog); err != nil {
 		return err
 	}
+	if d.iconErr != nil {
+		return d.iconErr
+	}
+	bodyTop := d.rect.Min.Y + m.pad + m.headH + gtx.Dp(theme.SpaceSM) + m.descH
+	res.Boxes.Frame = d.rect
+	res.Boxes.Body = image.Rect(d.rect.Min.X+m.pad, bodyTop, d.rect.Max.X-m.pad, bodyTop+min(bodyH, m.maxBody))
 	d.drawBody(env, gtx, m, bodyOps, bodyH, active)
 	return d.drawFooter(env, gtx, props, res, m, active)
 }
@@ -169,7 +176,11 @@ func (d *DialogState) drawChrome(env *Env, gtx *layout.Context, props *DialogPro
 	strokeRRect(gtx.Ops, d.rect, radius, float32(gtx.Dp(theme.Hairline)), c.BorderSubtle)
 	inner := d.rect.Inset(m.pad)
 
-	drawMenuText(env, gtx, theme.TypeTitle(), c.Fg, props.Title, image.Pt(inner.Min.X, inner.Min.Y), m.headH)
+	titleX := inner.Min.X
+	if props.Icon != "" {
+		titleX += d.drawHeaderIcon(env, gtx, props.Icon, inner.Min, m.headH)
+	}
+	drawMenuText(env, gtx, theme.TypeTitle(), c.Fg, props.Title, image.Pt(titleX, inner.Min.Y), m.headH)
 	if props.Description != "" {
 		at(gtx, image.Pt(inner.Min.X, inner.Min.Y+m.headH+gtx.Dp(theme.SpaceXS)), func(gtx *layout.Context) {
 			g := *gtx
@@ -179,6 +190,18 @@ func (d *DialogState) drawChrome(env *Env, gtx *layout.Context, props *DialogPro
 		})
 	}
 	return nil
+}
+
+// drawHeaderIcon paints the leading title icon vertically centered on the
+// title line and returns the width the title shifts right by.
+func (d *DialogState) drawHeaderIcon(env *Env, gtx *layout.Context, name IconName, top image.Point, headH int) int {
+	size := gtx.Dp(theme.IconMD)
+	at(gtx, image.Pt(top.X, top.Y+(headH-size)/2), func(gtx *layout.Context) {
+		if _, err := env.Icon(gtx, name, theme.IconMD, env.Th.Chrome().IconMuted); err != nil {
+			d.iconErr = fmt.Errorf("draw the header icon: %w", err)
+		}
+	})
+	return size + gtx.Dp(theme.SpaceSM)
 }
 
 // drawBody draws the body: its ScrollArea over the body slot grown by the
@@ -235,16 +258,28 @@ func (d *DialogState) drawFooter(env *Env, gtx *layout.Context, props *DialogPro
 	gap := gtx.Dp(theme.SpaceMD)
 	inner := d.rect.Inset(m.pad)
 
-	x := inner.Max.X - props.Primary.Measure(env, gtx, primaryPr).Size.X
+	pw := props.Primary.Measure(env, gtx, primaryPr).Size
+	cw := props.Cancel.Measure(env, gtx, cancelPr).Size
+	x := inner.Max.X - pw.X
+	res.Boxes.Primary = image.Rectangle{Min: image.Pt(x, footTop), Max: image.Pt(x+pw.X, footTop+pw.Y)}
 	if d.footButton(env, gtx, props.Primary, primaryPr, image.Pt(x, footTop), active && !props.PrimaryDisabled) {
 		res.Submitted, res.Closed = true, true
 		d.close(gtx)
 		return nil
 	}
-	x -= props.Cancel.Measure(env, gtx, cancelPr).Size.X + gap
+	x -= cw.X + gap
+	res.Boxes.Cancel = image.Rectangle{Min: image.Pt(x, footTop), Max: image.Pt(x+cw.X, footTop+cw.Y)}
 	if d.footButton(env, gtx, props.Cancel, cancelPr, image.Pt(x, footTop), active) {
 		d.cancel(gtx, res)
 		return nil
+	}
+	if props.Extra != nil {
+		extraPr := ButtonProps{Text: props.ExtraLabel, Variant: props.ExtraVariant, Size: SizeLG, Disabled: props.Busy}
+		ew := props.Extra.Measure(env, gtx, extraPr).Size
+		res.Boxes.Extra = image.Rectangle{Min: image.Pt(inner.Min.X, footTop), Max: image.Pt(inner.Min.X+ew.X, footTop+ew.Y)}
+		if d.footButton(env, gtx, props.Extra, extraPr, image.Pt(inner.Min.X, footTop), active) {
+			res.Extra = true
+		}
 	}
 	return nil
 }

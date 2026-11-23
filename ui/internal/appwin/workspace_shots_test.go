@@ -82,7 +82,7 @@ func buildShotScreens(t *testing.T, scene string) *screens {
 		Pending:        true,
 		Diff: []workspace.DiffEntry{
 			{Key: testPolicyKey, OldValue: testApprovalAsk, NewValue: testApprovalFull},
-			{Key: "session.teams_auto_approve", OldValue: "false", NewValue: "true"},
+			{Key: "session.teams_auto_approve", OldValue: testFalse, NewValue: testTrue},
 		},
 	}
 	sc.workspaces.ApplyDetail(det)
