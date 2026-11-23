@@ -57,6 +57,7 @@ func seededPrefixCounts() map[string]int {
 		"VR-E": 14,
 		"TR-E": 8,
 		"DA-E": 8,
+		"A-E":  10,
 		"A-S":  3,
 	}
 }
