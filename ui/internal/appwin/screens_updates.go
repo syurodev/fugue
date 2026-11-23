@@ -23,7 +23,9 @@ import (
 // rather than copy: the delivery and result structs are wide, and the
 // window's hot path pays the copy every frame.
 func (s *screens) update(updates []hostconn.Update, results []session.Result, posts []session.PostResult, muts []workspace.MutResult) {
-	s.trackTopics()
+	if !s.trackedOnce || s.grid.docGen != s.trackedGen {
+		s.trackTopics()
+	}
 	for i := range updates {
 		s.applyUpdate(updates[i])
 	}

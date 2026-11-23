@@ -74,6 +74,9 @@ type screens struct {
 	// Each window owns its interests even when other windows need the same topics.
 	setTopic     func(topic string, active bool)
 	slotSessions map[string]bool
+	// trackedGen is the grid's docGen at the last trackTopics run.
+	trackedGen  uint64
+	trackedOnce bool
 
 	sidebar        *session.Sidebar
 	sessionsLoaded bool
@@ -289,6 +292,7 @@ func (s *screens) visibleSessions() map[string]bool {
 // trackTopics reconciles restored, rearranged, and closed slots before their
 // models consume or draw any more transcript updates.
 func (s *screens) trackTopics() {
+	s.trackedGen, s.trackedOnce = s.grid.docGen, true
 	visible := s.visibleSessions()
 	main := s.grid.mainRef()
 	if main.Kind == KindSession && visible[main.ID] {

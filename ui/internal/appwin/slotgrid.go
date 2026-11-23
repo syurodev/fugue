@@ -59,6 +59,9 @@ func railOfKind(kind SlotKind) railItem {
 // slotGrid is the app shell's grid.
 type slotGrid struct {
 	doc LayoutDoc
+	// docGen counts document replacements so the screens re-track session
+	// topics only when the document changed.
+	docGen uint64
 	// rail is the selected rail item and railLast each item's last opened
 	// object (§5.3).
 	rail     railItem
@@ -199,6 +202,7 @@ func (g *slotGrid) edited(doc LayoutDoc) {
 		}
 	}
 	g.doc = doc
+	g.docGen++
 	g.higher = false
 	g.dirty = g.loaded
 	g.saveAt = time.Time{}

@@ -3,6 +3,7 @@ package appwin
 import (
 	"context"
 	"image/color"
+	"log/slog"
 	"runtime"
 	"sync"
 	"time"
@@ -87,8 +88,7 @@ func Run(ctx context.Context, opts Options) error {
 		go func() {
 			defer wg.Done()
 			if winErr := runWindow(runCtx, m, coord, windowID, record, doc); winErr != nil {
-				// Secondary window errors are surfaced on that window before exit.
-				_ = winErr
+				slog.Error("a secondary window exited with an error", "window_id", windowID, "error", winErr)
 			}
 		}()
 	})

@@ -2,12 +2,12 @@ package appwin
 
 import (
 	"context"
-	"encoding/binary"
+	"crypto/rand"
+	"encoding/base32"
 	"fmt"
 	"maps"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"gioui.org/app"
@@ -43,8 +43,7 @@ type multiWindow struct {
 	windows  map[*windowUpdates]struct{}
 	topics   map[string]int
 	restored bool
-	idSeq    atomic.Uint64
-	idSeed   uint64
+	known    map[string]bool
 }
 
 // newMultiWindow builds a coordinator over m and an optional window spawner.
@@ -54,7 +53,7 @@ func newMultiWindow(m *hostconn.Manager, openFn func(windowID string, record *cl
 		openFn:  openFn,
 		windows: map[*windowUpdates]struct{}{},
 		topics:  map[string]int{},
-		idSeed:  0x46756775654d5731,
+		known:   map[string]bool{},
 	}
 }
 
@@ -170,12 +169,7 @@ func (c *multiWindow) deliver(u hostconn.Update) {
 	targets := slices.Collect(maps.Keys(c.windows))
 	if u.Topic == topicAppState && u.Snapshot != nil && !c.restored {
 		c.restored = true
-		if snap, err := client.DecodeAppStateSnapshot(u.Snapshot.State); err == nil {
-			sorted := sortAppStateWindows(snap.Windows)
-			if len(sorted) > 1 {
-				secondary = sorted[1:]
-			}
-		}
+		secondary = c.restoreLocked(u.Snapshot.State)
 	}
 	c.mu.Unlock()
 
@@ -195,6 +189,23 @@ func (c *multiWindow) deliver(u hostconn.Update) {
 	}
 }
 
+// restoreLocked records the stored window IDs and returns the secondary
+// windows to reopen. Caller must hold c.mu.
+func (c *multiWindow) restoreLocked(state []byte) []client.AppStateWindow {
+	snap, err := client.DecodeAppStateSnapshot(state)
+	if err != nil {
+		return nil
+	}
+	for i := range snap.Windows {
+		c.known[snap.Windows[i].WindowID] = true
+	}
+	sorted := sortAppStateWindows(snap.Windows)
+	if len(sorted) > 1 {
+		return sorted[1:]
+	}
+	return nil
+}
+
 // openNew spawns a new secondary window for doc with a fresh UUID.
 func (c *multiWindow) openNew(doc LayoutDoc) error {
 	id := c.nextWindowID()
@@ -204,13 +215,34 @@ func (c *multiWindow) openNew(doc LayoutDoc) error {
 	return nil
 }
 
+// nextWindowID returns a random UUID v4 that differs from every stored
+// window ID the coordinator has seen and every ID it handed out before.
 func (c *multiWindow) nextWindowID() string {
+	for {
+		id := c.generateID()
+		c.mu.Lock()
+		taken := c.known[id]
+		if !taken {
+			c.known[id] = true
+		}
+		c.mu.Unlock()
+		if !taken {
+			return id
+		}
+	}
+}
+
+func (c *multiWindow) generateID() string {
 	if c.newID != nil {
 		return c.newID()
 	}
+	// rand.Text carries 130 random bits as unpadded base32; the first 16
+	// decoded bytes are the UUID's random payload.
+	raw, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(rand.Text())
 	var b [16]byte
-	binary.BigEndian.PutUint64(b[:8], c.idSeed)
-	binary.BigEndian.PutUint64(b[8:], c.idSeq.Add(1))
+	if err == nil {
+		copy(b[:], raw)
+	}
 	b[6] = (b[6] & 0x0f) | 0x40
 	b[8] = (b[8] & 0x3f) | 0x80
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
@@ -246,6 +278,7 @@ func installNewLayout(sc *screens, windowID string, doc LayoutDoc) {
 	g.loaded = true
 	g.higher = false
 	g.doc = cloneLayout(doc)
+	g.docGen++
 	g.dirty = true
 	g.saveAt = time.Time{}
 	g.syncFromDoc()

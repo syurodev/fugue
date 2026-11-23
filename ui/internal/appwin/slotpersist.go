@@ -2,6 +2,7 @@ package appwin
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"slices"
@@ -84,9 +85,12 @@ func newLayoutWorker(clientOf func() layoutClient, onResult func()) *layoutWorke
 	return &layoutWorker{
 		clientOf: clientOf,
 		onResult: onResult,
-		reqs:     make(chan layoutRequest, 8),
-		results:  make(chan layoutResult, 8),
-		done:     make(chan struct{}),
+		// The host remembers recent command IDs across UI launches, so each
+		// worker scopes its IDs to avoid replaying one with a new payload.
+		commandScope: rand.Text(),
+		reqs:         make(chan layoutRequest, 8),
+		results:      make(chan layoutResult, 8),
+		done:         make(chan struct{}),
 	}
 }
 
@@ -321,6 +325,7 @@ func (g *slotGrid) applyStored(res DecodeLayoutResult, rev uint64) {
 		return
 	}
 	g.doc = res.Doc
+	g.docGen++
 	g.syncFromDoc()
 	if g.applyGeometry != nil && res.Doc.Window.WidthDp > 0 && res.Doc.Window.HeightDp > 0 {
 		g.applyGeometry(res.Doc.Window.WidthDp, res.Doc.Window.HeightDp)
