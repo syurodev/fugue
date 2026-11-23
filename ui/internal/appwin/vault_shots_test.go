@@ -20,44 +20,61 @@ import (
 )
 
 const (
-	shotVaultUnlock = "vault-unlock"
-	shotVaultSetup  = "vault-setup"
+	shotVaultUnlock      = "vault-unlock"
+	shotVaultSetup       = "vault-setup"
+	shotVaultUnavailable = "vault-unavailable"
+	shotVaultConnecting  = "vault-connecting"
+	shotVaultRecoveryKey = "vault-recovery-key"
+	shotVaultRecovery    = "vault-recovery"
 )
 
 func vaultShotSpecs() []shotSpec {
-	scenes := []string{shotVaultUnlock, shotVaultSetup}
+	scenes := []string{shotVaultUnavailable, shotVaultConnecting, shotVaultSetup, shotVaultRecoveryKey, shotVaultUnlock, shotVaultRecovery}
 	modes := []struct {
-		label string
-		light bool
+		label   string
+		light   bool
+		uiScale float32
 	}{
-		{"light-ui100", true},
-		{"dark-ui100", false},
+		{"light-ui100", true, 1.0},
+		{"dark-ui100", false, 1.0},
+		{"light-ui125", true, 1.25},
+		{"dark-ui125", false, 1.25},
 	}
 	specs := make([]shotSpec, 0, len(scenes)*len(modes))
 	for _, s := range scenes {
 		for _, m := range modes {
-			specs = append(specs, shotSpec{
-				name:    s + "-" + m.label,
-				scene:   s,
-				light:   m.light,
-				uiScale: 1.0,
-			})
+			specs = append(specs, shotSpec{name: s + "-" + m.label, scene: s, light: m.light, uiScale: m.uiScale})
 		}
 	}
 	return specs
 }
 
 func buildVaultShotScreens(scene string) *screens {
-	m := hostconn.NewManager(&hostconn.Config{})
+	m := hostconn.NewManager(&hostconn.Config{DataDir: "/home/user/.local/share/fugue"})
 	sc := newScreens(m, &fakeFetcher{}, session.NewPoster(m.Client), workspace.NewMutator(func() workspace.MutatorClient { return nil }))
-	if scene == shotVaultSetup {
-		sc.vault.ApplyStatus(vault.Status{State: client.VaultStateNotConfigured, Incarnation: "shot"})
+	sc.applyConnectionUpdate(hostconn.StateConnected, "")
+	status := func(state string) { sc.vault.ApplyStatus(vault.Status{State: state, Revision: 1, Incarnation: "shot"}) }
+	switch scene {
+	case shotVaultUnavailable:
+		sc.applyConnectionUpdate(hostconn.StateDisconnected, "unsafe host executable")
+	case shotVaultConnecting:
+		sc.applyConnectionUpdate(hostconn.StateConnecting, "")
+	case shotVaultSetup:
+		status(client.VaultStateNotConfigured)
 		sc.vaultGate.pass.SetText("passphrase123")
 		sc.vaultGate.confirm.SetText("passphrase123")
-		return sc
+	case shotVaultRecoveryKey:
+		status(client.VaultStateUnlocked)
+		sc.vaultGate.recovery = []byte("FUG-RK-7QX2-M9PA-4TDV-KE8C-1JHW-ZB6N-U3YS-R5LG")
+	case shotVaultRecovery:
+		status(client.VaultStateLocked)
+		sc.vaultGate.recoveryMode = true
+		sc.vaultGate.pass.SetText("recovery-key-value")
+		sc.vaultGate.lastErr = vaultErrorMessage("vault.invalid_passphrase", 0, nil)
+	default:
+		status(client.VaultStateLocked)
+		sc.vaultGate.pass.SetText("passphrase123")
 	}
-	sc.vault.ApplyStatus(vault.Status{State: client.VaultStateLocked, Revision: 1, Incarnation: "shot"})
-	sc.vaultGate.pass.SetText("passphrase123")
 	return sc
 }
 
@@ -97,7 +114,7 @@ func TestVaultScreenMasksInputAndRendersShots(t *testing.T) {
 		}
 		rendered[spec.name] = img
 	}
-	for _, scene := range []string{shotVaultUnlock, shotVaultSetup} {
+	for _, scene := range []string{shotVaultUnavailable, shotVaultConnecting, shotVaultSetup, shotVaultRecoveryKey, shotVaultUnlock, shotVaultRecovery} {
 		if !imagesDifferRGBA(rendered[scene+"-light-ui100"], rendered[scene+"-dark-ui100"]) {
 			t.Fatalf("%s light and dark shots are identical", scene)
 		}

@@ -127,19 +127,24 @@ type screens struct {
 	// The workspace side (F10.14): the workspaces the topic reports, the
 	// reads that fill their details, the mutations the dialogs post, and
 	// the sidebar's own state per workspace.
-	workspaces     *workspace.Model
-	wsMut          *workspace.Mutator
-	wsReads        wsReader
-	wsDetailReq    map[string]uint64
-	wsHeaders      map[string]*kit.SectionHeaderState
-	wsMenu         *kit.MenuState
-	wsMenuFor      string
-	policyBanner   *kit.BannerState
-	otherHeader    *kit.SectionHeaderState
-	dlg            *workspaceDialogs
-	vault          *vault.Model
-	vaultWorker    *vault.Worker
-	vaultGate      *vaultGate
+	workspaces   *workspace.Model
+	wsMut        *workspace.Mutator
+	wsReads      wsReader
+	wsDetailReq  map[string]uint64
+	wsHeaders    map[string]*kit.SectionHeaderState
+	wsMenu       *kit.MenuState
+	wsMenuFor    string
+	policyBanner *kit.BannerState
+	otherHeader  *kit.SectionHeaderState
+	dlg          *workspaceDialogs
+	vault        *vault.Model
+	vaultWorker  *vault.Worker
+	vaultGate    *vaultGate
+	// hostState and hostReason are the last connection state the window
+	// goroutine folded in; the vault gate reads them (empty until the first
+	// update, which the gate treats as still connecting).
+	hostState      hostconn.State
+	hostReason     string
 	inbox          *inbox.Model
 	inboxWorker    *inbox.Worker
 	inboxView      *inboxView
