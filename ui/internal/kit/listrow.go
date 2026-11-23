@@ -42,18 +42,25 @@ type ListAction struct {
 
 // ListRowProps configures one ListRow for the current frame (§6.20).
 type ListRowProps struct {
-	Icon        IconName
-	Label       string
-	Secondary   string
-	Trailing    string
-	StateLabel  string
-	StateTone   ListRowTone
-	Actions     []ListAction
-	ContextMenu []MenuItem
-	Selected    bool
-	Draggable   bool
-	Dragging    bool
-	Disabled    bool
+	Icon      IconName
+	Label     string
+	Secondary string
+	Trailing  string
+	// Badge is a short count drawn as a small neutral pill at the trailing
+	// edge, left of the state; empty draws nothing.
+	Badge string
+	// SecondaryDot draws a status dot in SecondaryTone before the secondary
+	// text; the text still carries the state, the dot only supports it.
+	SecondaryDot  bool
+	SecondaryTone ListRowTone
+	StateLabel    string
+	StateTone     ListRowTone
+	Actions       []ListAction
+	ContextMenu   []MenuItem
+	Selected      bool
+	Draggable     bool
+	Dragging      bool
+	Disabled      bool
 }
 
 // ListRowEvents reports what happened on a ListRow in the current frame.
@@ -315,6 +322,9 @@ func (s *ListRowState) handleKey(gtx *layout.Context, e key.Event, pill image.Re
 
 func (s *ListRowState) drawContent(env *Env, gtx *layout.Context, pill image.Rectangle, h int, p *ListRowProps, pres, actA float32, ev *ListRowEvents) {
 	fg, muted, iconInk := s.contentColors(env, p.Disabled, pres)
+	if p.Selected && !p.Disabled {
+		iconInk = fg
+	}
 	padX := gtx.Dp(theme.SpaceMD)
 	gap := gtx.Dp(theme.SpaceSM)
 	x := pill.Min.X + padX
@@ -322,9 +332,10 @@ func (s *ListRowState) drawContent(env *Env, gtx *layout.Context, pill image.Rec
 
 	right = s.drawActions(env, gtx, pill, h, right, gap, p, actA, ev)
 	right = drawRowTrailing(env, gtx, pill, h, right, gap, p.Trailing, muted)
+	right = drawRowBadge(env, gtx, pill, h, right, gap, p.Badge, muted, pres)
 	right = s.drawRowState(env, gtx, pill, h, right, gap, p, muted, pres)
 	x = drawRowIcon(env, gtx, pill, h, x, gap, p.Icon, iconInk, ev)
-	drawRowLabels(env, gtx, pill, h, x, right, gap, p.Label, p.Secondary, fg, muted)
+	drawRowLabels(env, gtx, pill, h, x, right, gap, p.Label, p.Secondary, fg, muted, s.secondaryDot(env, p, pres))
 }
 
 func (s *ListRowState) contentColors(env *Env, disabled bool, pres float32) (fg, muted, iconInk color.NRGBA) {
@@ -402,13 +413,19 @@ func drawRowIcon(env *Env, gtx *layout.Context, pill image.Rectangle, h, x, gap 
 	return x + iconPx + gap
 }
 
-func drawRowLabels(env *Env, gtx *layout.Context, pill image.Rectangle, h, x, right, gap int, label, secondary string, fg, muted color.NRGBA) {
+func drawRowLabels(env *Env, gtx *layout.Context, pill image.Rectangle, h, x, right, gap int, label, secondary string, fg, muted color.NRGBA, dot *color.NRGBA) {
 	if x < right && label != "" {
 		pt := image.Pt(x, pill.Min.Y+centerLabelY(env, gtx, theme.TypeBody(), h))
 		drawRunAt(env, gtx, pt, max(right-x, 0), h, theme.TypeBody(), fg, label, true)
 		x += measureLabel(env, gtx, theme.TypeBody(), label).X + gap
+		if secondary != "" {
+			x += gtx.Dp(theme.SpaceXS)
+		}
 	}
 	if x < right && secondary != "" {
+		if dot != nil {
+			x = drawSecondaryDot(gtx, pill, h, x, *dot)
+		}
 		pt := image.Pt(x, pill.Min.Y+centerLabelY(env, gtx, theme.TypeSmall(), h))
 		drawRunAt(env, gtx, pt, max(right-x, 0), h, theme.TypeSmall(), muted, secondary, true)
 	}

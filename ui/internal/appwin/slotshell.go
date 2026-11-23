@@ -114,13 +114,8 @@ func (s *screens) toggleCompanion(kind SlotKind) {
 // layoutShellBody lays out rail, sidebar and the grid container; a
 // width-driven sidebar fold removes the sidebar before the grid measures.
 func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dimensions {
-	railW := gtx.Dp(theme.RailWidth)
+	plan := s.planShell(gtx)
 	sidebarOpen := s.sidebarVisible()
-	gridW := gtx.Constraints.Max.X - railW
-	if sidebarOpen {
-		gridW -= gtx.Dp(theme.SidebarWidth)
-	}
-	plan := PlanFold(pxToDp(gtx, gridW), sidebarOpen, len(s.grid.doc.Columns))
 	if plan.TempSidebarFolded {
 		sidebarOpen = false
 	}
@@ -147,6 +142,13 @@ func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dime
 			return s.layoutGridContainer(&local, env, plan)
 		}),
 	)
+}
+
+// planShell derives the narrow-window fold for the shell body. Max.X is the
+// width rail, sidebar and grid share (drawWindow's side insets are already
+// gone), and layoutMinWidthDp counts exactly those three.
+func (s *screens) planShell(gtx *layout.Context) PlanFoldResult {
+	return PlanFold(pxToDp(gtx, gtx.Constraints.Max.X), s.sidebarVisible(), len(s.grid.doc.Columns))
 }
 
 // sidebarVisible is the sidebar's user state: the persisted collapsed flag.
@@ -202,7 +204,7 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool
 		hint string
 	}{
 		{railChat, kit.IconMessageSquare, "Chat"},
-		{railTeam, kit.IconUsers, "Team"},
+		{railTeam, kit.IconUsers, teamLabel},
 		{railModules, kit.IconWrench, "Modules"},
 	}
 	y := gtx.Dp(theme.SpaceSM)
@@ -232,10 +234,11 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool
 		icon = kit.IconChevronRight
 		hint = "Open sidebar"
 	}
-	props := kit.IconButtonProps{Icon: icon, Label: hint, Variant: kit.IconButtonGhost, Size: kit.SizeSM}
+	props := kit.IconButtonProps{Icon: icon, Label: hint, Variant: kit.IconButtonBordered, Size: kit.SizeSM}
+	toggleSize := toggle.Measure(env, gtx, &props).Size
 	var clicked bool
 	var err error
-	atPoint(gtx, image.Pt(x, max(h-btnW-gtx.Dp(theme.SpaceSM), y)), func(gtx *layout.Context) {
+	atPoint(gtx, image.Pt(max((w-toggleSize.X)/2, 0), max(h-toggleSize.Y-gtx.Dp(theme.SpaceSM), y)), func(gtx *layout.Context) {
 		clicked, err = toggle.Layout(env, gtx, &props)
 	})
 	s.fail(err)

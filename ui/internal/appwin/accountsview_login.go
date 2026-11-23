@@ -85,7 +85,7 @@ func loginStatePresentation(vendor string, login *accounts.LoginEntry) (kit.TagP
 		if msg == "" {
 			msg = "CLI login failed."
 		}
-		return kit.TagProps{Text: "Failed", Variant: kit.TagStatus, Status: theme.StatusDanger}, msg
+		return kit.TagProps{Text: failedLabel, Variant: kit.TagStatus, Status: theme.StatusDanger}, msg
 	default:
 		return kit.TagProps{Text: accounts.AccountStateUnknown, Variant: kit.TagNeutral}, "Login state unknown."
 	}

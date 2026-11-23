@@ -40,7 +40,7 @@ func viewerTestScreens(t *testing.T) *screens {
 	sc := newScreens(m, &fakeFetcher{}, session.NewPoster(m.Client), workspace.NewMutator(func() workspace.MutatorClient { return nil }))
 	sc.vault.ApplyStatus(vault.Status{State: client.VaultStateUnlocked, Revision: 1, Incarnation: "inc-viewer"})
 	sc.open = "s1"
-	sc.sidebar.ApplyList(client.SessionList{Sessions: []client.Session{{ID: "s1", Vendor: "claude", State: stateRunning, WorkspaceID: viewerTestWS}}})
+	sc.sidebar.ApplyList(client.SessionList{Sessions: []client.Session{{ID: "s1", Vendor: client.VendorClaude, State: stateRunning, WorkspaceID: viewerTestWS}}})
 	sc.workspaces.ApplyList([]workspace.Summary{{ID: viewerTestWS, Name: viewerWSName}})
 	sc.workspaces.ApplyDetail(&workspace.Detail{ID: viewerTestWS, Name: viewerWSName, ConfigHash: "h", Roots: []workspace.Root{
 		{Name: "main", Path: testMainRoot, Access: "rw"},

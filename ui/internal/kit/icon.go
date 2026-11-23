@@ -59,6 +59,12 @@ const (
 	IconGitPullRequest IconName = "git-pull-request"
 	IconMessageSquare  IconName = "message-square"
 	IconUsers          IconName = "users"
+	IconInbox          IconName = "inbox"
+	IconCircleUser     IconName = "circle-user"
+	IconSettings       IconName = "settings"
+	IconKeyRound       IconName = "key-round"
+	IconBot            IconName = "bot"
+	IconLock           IconName = "lock"
 )
 
 // iconGrid is the Lucide coordinate grid in dp: paths are authored on it.
@@ -99,6 +105,12 @@ func pathOf(n IconName) (string, error) {
 		IconGitPullRequest: icondata.GitPullRequest,
 		IconMessageSquare:  icondata.MessageSquare,
 		IconUsers:          icondata.Users,
+		IconInbox:          icondata.Inbox,
+		IconCircleUser:     icondata.CircleUser,
+		IconSettings:       icondata.Settings,
+		IconKeyRound:       icondata.KeyRound,
+		IconBot:            icondata.Bot,
+		IconLock:           icondata.Lock,
 	}
 	if p, ok := paths[n]; ok {
 		return p, nil

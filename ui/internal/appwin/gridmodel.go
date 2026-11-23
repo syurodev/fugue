@@ -407,8 +407,10 @@ type PlanFoldResult struct {
 	TempSidebarFolded bool
 }
 
-// PlanFold computes the fold for a grid area availDp wide holding cols
-// columns; sidebarOpen is the sidebar's on-screen state before this plan.
+// PlanFold computes the fold for a shell availDp wide (rail, sidebar and
+// grid together, window insets excluded, matching layoutMinWidthDp)
+// holding cols columns;
+// sidebarOpen is the sidebar's on-screen state before this plan.
 func PlanFold(availDp int, sidebarOpen bool, cols int) PlanFoldResult {
 	regular := max(cols-1, 0)
 	folded := 0

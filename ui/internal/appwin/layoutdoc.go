@@ -90,6 +90,7 @@ type LayoutDoc struct {
 	FilledSlot string
 	Columns    []Column
 	Window     WindowGeometry
+	TeamRead   map[string]map[string]int64
 }
 
 // DefaultLayout is the layout a window with no stored document opens with:
@@ -108,9 +109,10 @@ func DefaultLayout() LayoutDoc {
 
 // layoutWire is the JSON shape of LayoutDoc. Weights round-trip as floats.
 type layoutWire struct {
-	SchemaVersion    int    `json:"schema_version"`
-	SidebarCollapsed bool   `json:"sidebar_collapsed,omitempty"`
-	FilledSlot       string `json:"filled_slot,omitempty"`
+	TeamRead         map[string]map[string]int64 `json:"team_read,omitempty"`
+	SchemaVersion    int                         `json:"schema_version"`
+	SidebarCollapsed bool                        `json:"sidebar_collapsed,omitempty"`
+	FilledSlot       string                      `json:"filled_slot,omitempty"`
 	Columns          []struct {
 		WidthWeight float32 `json:"width_weight"`
 		Slots       []struct {
@@ -132,6 +134,7 @@ func EncodeLayout(doc LayoutDoc) ([]byte, error) {
 		SchemaVersion:    LayoutSchemaVersion,
 		SidebarCollapsed: doc.SidebarCollapsed,
 		FilledSlot:       doc.FilledSlot,
+		TeamRead:         doc.TeamRead,
 	}
 	for _, col := range doc.Columns {
 		wc := struct {
@@ -192,6 +195,7 @@ func DecodeLayout(raw []byte) (DecodeLayoutResult, error) {
 		SchemaVersion:    LayoutSchemaVersion,
 		SidebarCollapsed: wire.SidebarCollapsed,
 		FilledSlot:       wire.FilledSlot,
+		TeamRead:         wire.TeamRead,
 	}
 	for _, wc := range wire.Columns {
 		col := Column{WidthWeight: wc.WidthWeight}

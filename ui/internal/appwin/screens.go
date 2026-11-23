@@ -16,6 +16,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/secrets"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/settings"
+	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/transcriptview"
 	"github.com/syurodev/fugue/ui/internal/vault"
 	"github.com/syurodev/fugue/ui/internal/workspace"
@@ -55,6 +56,7 @@ type pageFetcher interface {
 // arranges them (desktop-app §5.3). It changes only on the window
 // goroutine, which applies every delivered update here.
 type screens struct {
+	teamRuntime
 	m       *hostconn.Manager
 	fetcher pageFetcher
 	// poster is the composer's write side; composer holds its view state.
@@ -177,6 +179,7 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 	secretsRow := kit.NewListRowState()
 	secretsRow.Enter()
 	return &screens{
+		teamRuntime:     newTeamRuntime(),
 		m:               m,
 		fetcher:         fetcher,
 		poster:          poster,
@@ -388,6 +391,7 @@ func (s *screens) anyFloatLayerOpen() bool {
 // fit).
 func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 	s.layoutShell(gtx, env)
+	s.releaseTeamTopics(gtx)
 }
 
 // layoutTranscript draws the transcript pane and, under it, the composer
@@ -396,22 +400,50 @@ func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 // the measured row — so the row's origin is known and Env.Offset can record
 // it for the slash menu's anchor (UK-07).
 func (s *screens) layoutTranscriptFor(gtx *layout.Context, env *kit.Env, id string) {
+	s.layoutSessionWithComposer(gtx, env, id, false)
+}
+
+func (s *screens) layoutSessionWithComposer(gtx *layout.Context, env *kit.Env, id string, main bool) {
+	s.layoutSessionPane(gtx, env, id, main, s.connected())
+}
+
+func (s *screens) layoutSessionPane(gtx *layout.Context, env *kit.Env, id string, main, connected bool) {
 	w, h := gtx.Constraints.Max.X, gtx.Constraints.Max.Y
-	rowH := s.composer.measure(env, gtx, s, id)
+	measure := *gtx
+	_, leads := s.leadTeam(id)
+	leadComposer := leads && main
+	measureWidth, boxHeight := w, 0
+	if leadComposer {
+		measureWidth = max(teamChatWidth(gtx)-2*gtx.Dp(theme.SpaceLG), 0)
+		boxHeight = gtx.Dp(3*theme.SpaceLG+theme.SpaceXS) + gtx.Sp(theme.TypeCaption().Line)
+	}
+	measure.Constraints.Min = image.Pt(measureWidth, 0)
+	measure.Constraints.Max.X = measureWidth
+	rowH := s.composer.measure(env, &measure, s, id) + boxHeight
 	pane := image.Pt(w, max(h-rowH, 0))
 
+	local := *gtx
+	local.Constraints = layout.Constraints{Min: image.Pt(w, 0), Max: pane}
+	if main {
+		s.layoutTeamSessionContent(&local, env, id)
+	} else {
+		s.layoutChatContent(&local, env, id)
+	}
+	env.Offset(gtx, image.Pt(0, pane.Y), func(gtx *layout.Context) {
+		local := *gtx
+		local.Constraints = layout.Constraints{Min: image.Pt(w, rowH), Max: image.Pt(w, rowH)}
+		if leadComposer {
+			s.layoutTeamLeadComposer(&local, env, id, connected)
+		} else {
+			s.composer.layout(env, &local, s, id, connected)
+		}
+	})
+}
+
+func (s *screens) layoutChatContent(gtx *layout.Context, env *kit.Env, id string) {
 	var items []*session.Item
 	if t := s.transcripts[id]; t != nil {
 		items = t.Items()
 	}
-	view := s.viewFor(id)
-	local := *gtx
-	local.Constraints = layout.Constraints{Min: image.Pt(w, 0), Max: pane}
-	s.layoutTranscriptPane(&local, env, id, view, items)
-	_, connected := s.connected()
-	env.Offset(gtx, image.Pt(0, pane.Y), func(gtx *layout.Context) {
-		local := *gtx
-		local.Constraints = layout.Constraints{Min: image.Pt(w, rowH), Max: image.Pt(w, rowH)}
-		s.composer.layout(env, &local, s, id, connected)
-	})
+	s.layoutTranscriptPane(gtx, env, id, s.viewFor(id), items)
 }

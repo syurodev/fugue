@@ -22,8 +22,12 @@ import (
 )
 
 const (
-	shotWindowW    = 860
-	shotWindowH    = 560
+	shotWindowW = 860
+	shotWindowH = 560
+	// shotSidebarW is the sidebar scene's width: at 125% the shell must
+	// still hold rail, sidebar and the main slot's minimum (808 dp, about
+	// 1010 px plus the window insets), which the standard width cannot.
+	shotSidebarW   = 1100
 	shotSidebar    = "sidebar"
 	shotRootDialog = "root-dialog"
 	shotPolicyCard = "policy-card"
@@ -89,12 +93,12 @@ func buildShotScreens(t *testing.T, scene string) *screens {
 	sc.sidebar.ApplyList(client.SessionList{Sessions: []client.Session{
 		{ID: "s1", Vendor: client.VendorClaude, State: stateRunning, WorkspaceID: "w1"},
 		{ID: "s2", Vendor: client.VendorClaude, State: stateReady, WorkspaceID: "w1"},
-		{ID: "s3", Vendor: client.VendorCodex, State: "detached", WorkspaceID: "w2"},
+		{ID: "s3", Vendor: client.VendorCodex, State: stateDetached, WorkspaceID: "w2"},
 	}})
 	sc.openSession("s1")
 	sc.transcripts["s1"].ApplyNewestPage([]client.TranscriptItem{
-		{ItemID: "i1", Kind: "user_message", Sequence: 1, Revision: 1, View: client.TranscriptView{Text: "Add the workspace root and confirm policy."}},
-		{ItemID: "i2", Kind: "assistant_message", Sequence: 2, Revision: 1, View: client.TranscriptView{Text: "Root `api` is configured; awaiting confirmation on the policy diff."}},
+		{ItemID: "i1", Kind: shotUserMessage, Sequence: 1, Revision: 1, View: client.TranscriptView{Text: "Add the workspace root and confirm policy."}},
+		{ItemID: "i2", Kind: shotAssistantMessage, Sequence: 2, Revision: 1, View: client.TranscriptView{Text: "Root `api` is configured; awaiting confirmation on the policy diff."}},
 	})
 
 	switch scene {
@@ -110,10 +114,24 @@ func buildShotScreens(t *testing.T, scene string) *screens {
 
 func renderWorkspaceShot(t *testing.T, win *headless.Window, spec shotSpec) *image.RGBA {
 	t.Helper()
-	return renderAppShot(t, win, spec, buildShotScreens(t, spec.scene))
+	size := image.Pt(shotWindowW, shotWindowH)
+	if spec.scene == shotSidebar {
+		size = image.Pt(shotSidebarW, shotWindowH)
+		wide, err := glwin.Open(size.X, size.Y)
+		if err != nil {
+			t.Fatalf("open headless window: %v", err)
+		}
+		win = wide
+	}
+	return renderAppShotSized(t, win, spec, buildShotScreens(t, spec.scene), size)
 }
 
 func renderAppShot(t *testing.T, win *headless.Window, spec shotSpec, sc *screens) *image.RGBA {
+	t.Helper()
+	return renderAppShotSized(t, win, spec, sc, image.Pt(shotWindowW, shotWindowH))
+}
+
+func renderAppShotSized(t *testing.T, win *headless.Window, spec shotSpec, sc *screens, size image.Point) *image.RGBA {
 	t.Helper()
 	sh, err := fonts.Shaper()
 	if err != nil {
@@ -124,7 +142,7 @@ func renderAppShot(t *testing.T, win *headless.Window, spec shotSpec, sc *screen
 		th = theme.Light(sh)
 	}
 	env := &kit.Env{Th: &th, Sh: sh, UIScale: spec.uiScale, ReducedMotion: true}
-	img := renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), spec.name)
+	img := renderShotFrames(t, win, env, sc, size, spec.name)
 	if sc.lastErr != "" {
 		t.Fatalf("shot %s recorded screen error: %s", spec.name, sc.lastErr)
 	}

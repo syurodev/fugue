@@ -135,7 +135,7 @@ func composerSocketDir(t *testing.T) string {
 
 // serveFakeVendorHost serves the fake host on a unix socket over unencrypted
 // HTTP/2 and dials a client at it.
-func serveFakeVendorHost(t *testing.T) (*client.Client, *fakeVendorHost) {
+func serveFakeVendorHost(t *testing.T, handlers ...func(*http.ServeMux)) (*client.Client, *fakeVendorHost) {
 	t.Helper()
 	fake := &fakeVendorHost{}
 	socket := filepath.Join(composerSocketDir(t), "host.sock")
@@ -147,6 +147,9 @@ func serveFakeVendorHost(t *testing.T) (*client.Client, *fakeVendorHost) {
 	mux := http.NewServeMux()
 	mux.Handle(hostv1connect.NewHostServiceHandler(fake))
 	mux.Handle(vendorsv1connect.NewVendorServiceHandler(fake))
+	for _, register := range handlers {
+		register(mux)
+	}
 	srv := httptest.NewUnstartedServer(mux)
 	srv.Listener = ln
 	var protos http.Protocols
@@ -480,7 +483,7 @@ func TestStartFlowPostsTheChosenSession(t *testing.T) {
 			Roots: []client.WorkspaceRoot{{Name: testMainRoot, Path: "/repo", Access: "rw"}},
 		},
 	})
-	f.model.SetText("sonnet")
+	f.model.SetText(testTeamSonnet)
 	f.effortSel = "high"
 
 	f.submit(fx.sc, fx.c)
@@ -489,7 +492,7 @@ func TestStartFlowPostsTheChosenSession(t *testing.T) {
 	}
 	calls := fx.awaitWrite()
 	if len(calls) != 1 || calls[0].method != callStart || calls[0].text != "VENDOR_CLAUDE" ||
-		calls[0].workspace != testWorkspace || calls[0].root != "" || calls[0].model != "sonnet" || calls[0].effort != "high" {
+		calls[0].workspace != testWorkspace || calls[0].root != "" || calls[0].model != testTeamSonnet || calls[0].effort != "high" {
 		t.Fatalf("calls = %+v, want one start of claude in ws1 with the chosen profile", calls)
 	}
 
@@ -510,7 +513,7 @@ func TestStartFlowRefusesASubmitWithoutAWorkspace(t *testing.T) {
 	t.Parallel()
 	fx := newComposerFixture(t, stateReady, client.Capability{})
 	f := fx.c.start
-	f.model.SetText("sonnet")
+	f.model.SetText(testTeamSonnet)
 	f.submit(fx.sc, fx.c)
 	if f.busy {
 		t.Fatal("a start without a workspace posted")
