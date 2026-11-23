@@ -11,7 +11,11 @@ import (
 func TestMultiWindowIDsDifferAcrossLaunches(t *testing.T) {
 	t.Parallel()
 	a, b := newMultiWindow(nil, nil), newMultiWindow(nil, nil)
-	x, y := a.nextWindowID(), b.nextWindowID()
+	x, errX := a.nextWindowID()
+	y, errY := b.nextWindowID()
+	if errX != nil || errY != nil {
+		t.Fatal(errX, errY)
+	}
 	if x == y {
 		t.Fatalf("two launches produced the same window id %q", x)
 	}
@@ -33,7 +37,7 @@ func TestMultiWindowIDNeverEqualsRestoredWindow(t *testing.T) {
 		}
 		return "22222222-2222-4222-8222-222222222222"
 	}
-	if got := coord.nextWindowID(); got == restored || calls != 2 {
+	if got, err := coord.nextWindowID(); err != nil || got == restored || calls != 2 {
 		t.Fatalf("id = %q after %d calls, want a regenerated id", got, calls)
 	}
 }

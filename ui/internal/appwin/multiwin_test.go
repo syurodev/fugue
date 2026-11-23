@@ -48,7 +48,10 @@ func TestMultiWindowOpenSlotInNewWindowPromotesToMainAndCollapsesSidebar(t *test
 	coord := newMultiWindow(nil, nil)
 	var secondaryID string
 	if !sc1.openSlotWindow(func(doc LayoutDoc) error {
-		secondaryID = coord.nextWindowID()
+		var err error
+		if secondaryID, err = coord.nextWindowID(); err != nil {
+			return err
+		}
 		installNewLayout(sc2, secondaryID, doc)
 		return nil
 	}) {

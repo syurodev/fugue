@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/base32"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -19,6 +20,8 @@ import (
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
+
+var errWindowIDRandomness = errors.New("generate a window id: crypto randomness unavailable or unexpected rand.Text encoding")
 
 // windowUpdates is one open window's connection to the multi-window
 // coordinator: its delivery queue, wakeup callback, and the dynamic topics it
@@ -208,7 +211,10 @@ func (c *multiWindow) restoreLocked(state []byte) []client.AppStateWindow {
 
 // openNew spawns a new secondary window for doc with a fresh UUID.
 func (c *multiWindow) openNew(doc LayoutDoc) error {
-	id := c.nextWindowID()
+	id, err := c.nextWindowID()
+	if err != nil {
+		return err
+	}
 	if c.openFn != nil {
 		c.openFn(id, nil, &doc)
 	}
@@ -217,9 +223,12 @@ func (c *multiWindow) openNew(doc LayoutDoc) error {
 
 // nextWindowID returns a random UUID v4 that differs from every stored
 // window ID the coordinator has seen and every ID it handed out before.
-func (c *multiWindow) nextWindowID() string {
+func (c *multiWindow) nextWindowID() (string, error) {
 	for {
-		id := c.generateID()
+		id, err := c.generateID()
+		if err != nil {
+			return "", err
+		}
 		c.mu.Lock()
 		taken := c.known[id]
 		if !taken {
@@ -227,26 +236,26 @@ func (c *multiWindow) nextWindowID() string {
 		}
 		c.mu.Unlock()
 		if !taken {
-			return id
+			return id, nil
 		}
 	}
 }
 
-func (c *multiWindow) generateID() string {
+func (c *multiWindow) generateID() (string, error) {
 	if c.newID != nil {
-		return c.newID()
+		return c.newID(), nil
 	}
 	// rand.Text carries 130 random bits as unpadded base32; the first 16
 	// decoded bytes are the UUID's random payload.
 	raw, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(rand.Text())
 	if err != nil || len(raw) < 16 {
-		panic("appwin: crypto randomness unavailable or unexpected rand.Text encoding")
+		return "", errWindowIDRandomness
 	}
 	var b [16]byte
 	copy(b[:], raw)
 	b[6] = (b[6] & 0x0f) | 0x40
 	b[8] = (b[8] & 0x3f) | 0x80
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16])
+	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:16]), nil
 }
 
 // openSlotWindow consumes a pending "Open in new window" request, invokes open
