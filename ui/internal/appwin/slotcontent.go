@@ -89,7 +89,7 @@ func fixedSlotTitle(kind SlotKind) string {
 // rail, the views' own layouts for the regular kinds, and the EmptyStates
 // for missing objects and screens still to land.
 func (s *screens) layoutSlotBody(gtx *layout.Context, env *kit.Env, p Pos, ref SlotRef) {
-	if !isMainPos(p) && s.missingTarget(ref) {
+	if s.missingTarget(ref) {
 		s.layoutSlotGone(gtx, env, p)
 		return
 	}
@@ -160,14 +160,14 @@ func (s *screens) layoutRegularSlot(gtx *layout.Context, env *kit.Env, p Pos, re
 	}
 }
 
-// missingTarget reports a regular slot whose object the host no longer
+// missingTarget reports a slot whose object the host no longer
 // knows: a session that left the list. The slot shows the EmptyState with
 // its close button, never vanishing on its own (DA-E10).
 func (s *screens) missingTarget(ref SlotRef) bool {
 	if ref.Kind != KindSession || ref.ID == "" {
 		return false
 	}
-	if len(s.sidebar.List()) == 0 {
+	if !s.sessionsLoaded && len(s.sidebar.List()) == 0 {
 		// The list has not arrived yet; nothing is known to be missing.
 		return false
 	}
@@ -230,7 +230,11 @@ func (s *screens) layoutSlotGone(gtx *layout.Context, env *kit.Env, p Pos) {
 	})
 	s.fail(err)
 	if ev.PrimaryClicked {
-		s.grid.edited(CloseSlot(s.grid.doc, p))
+		if isMainPos(p) {
+			s.grid.openMain(SlotRef{Kind: KindSession})
+		} else {
+			s.grid.edited(CloseSlot(s.grid.doc, p))
+		}
 	}
 	_ = dims
 }

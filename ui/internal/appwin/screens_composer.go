@@ -231,10 +231,9 @@ func (s *screens) prune() {
 	for _, sess := range s.sidebar.List() {
 		known[sess.ID] = true
 	}
-	if s.open != "" && !known[s.open] {
-		s.m.RemoveTopic(topicTranscript + s.open)
-		s.m.RemoveTopic(topicTranscriptDlt + s.open)
-		s.open, s.scrolled = "", false
+	s.releaseSlotSessions(known)
+	if !known[s.open] {
+		s.setOpenSession("")
 	}
 	pruneKnown(s.views, known)
 	pruneKnown(s.transcripts, known)

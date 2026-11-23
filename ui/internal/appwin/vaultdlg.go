@@ -335,23 +335,30 @@ func layoutVaultButton(env *kit.Env, gtx *layout.Context, btn *kit.ButtonState, 
 }
 
 func (s *screens) applyVaultDelivery(u hostconn.Update) {
+	wasLocked := s.vault.Locked()
 	if u.Snapshot != nil {
 		s.fail(s.vault.ApplySnapshot(u.Snapshot.State))
 	} else if u.Event != nil {
 		s.fail(s.vault.ApplyEvent(u.Event.Type, u.Event.Payload))
 	}
-	if s.vault.Locked() {
-		s.secretsView.clearSecretInputs()
-		s.inboxView.clearSecretInputs()
-	}
+	s.syncVaultViews(wasLocked)
 }
 
 func (s *screens) applyVaultResults(results []vault.Result) {
+	wasLocked := s.vault.Locked()
 	for i := range results {
 		s.vaultGate.applied(&results[i], s.vault)
 	}
+	s.syncVaultViews(wasLocked)
+}
+
+func (s *screens) syncVaultViews(wasLocked bool) {
 	if s.vault.Locked() {
 		s.secretsView.clearSecretInputs()
 		s.inboxView.clearSecretInputs()
+		return
+	}
+	if wasLocked {
+		s.refreshVisibleTranscripts()
 	}
 }

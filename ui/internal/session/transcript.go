@@ -148,6 +148,7 @@ func (t *Transcript) ApplySnapshot(payload []byte) error {
 	t.contentLocked = snap.ContentLocked
 	grew := false
 	for i := range snap.Items {
+		snap.Items[i].ContentLocked = snap.ContentLocked
 		grew = t.upsert(&Item{TranscriptItem: snap.Items[i]}) || grew
 	}
 	if grew {
@@ -315,7 +316,10 @@ func (t *Transcript) applyPage(items []client.TranscriptItem) {
 func (t *Transcript) upsert(item *Item) bool {
 	held, ok := t.byID[item.ItemID]
 	if ok {
-		if item.Revision <= held.Revision {
+		if item.Revision < held.Revision {
+			return false
+		}
+		if item.Revision == held.Revision && (!held.ContentLocked || item.ContentLocked) {
 			return false
 		}
 		item.Streaming = nil

@@ -2,6 +2,7 @@ package appwin
 
 import (
 	"image"
+	"time"
 
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/motion"
@@ -70,12 +71,14 @@ type slotGrid struct {
 	// revision, dirty a local edit waiting to save, higher a stored document
 	// newer than this build understands (run on the default, save nothing
 	// until a user edit), and loaded marks the first snapshot applied.
-	rev    uint64
-	dirty  bool
-	saving bool
-	higher bool
-	loaded bool
-	cmdSeq uint64
+	windowID string
+	rev      uint64
+	dirty    bool
+	saving   bool
+	higher   bool
+	loaded   bool
+	cmdSeq   uint64
+	saveAt   time.Time
 
 	// View state.
 	rects      map[string]image.Rectangle
@@ -198,6 +201,7 @@ func (g *slotGrid) edited(doc LayoutDoc) {
 	g.doc = doc
 	g.higher = false
 	g.dirty = g.loaded
+	g.saveAt = time.Time{}
 }
 
 // allCells lists every cell of the document, main included.
@@ -232,6 +236,7 @@ func (g *slotGrid) markGeometryDirty(w, h int) {
 	}
 	g.doc.Window = WindowGeometry{WidthDp: w, HeightDp: h}
 	g.dirty = true
+	g.saveAt = time.Time{}
 }
 
 // mainRef is the main slot's current object.
@@ -370,11 +375,11 @@ func (g *slotGrid) requestNewWindow(p Pos) {
 	if !ok {
 		return
 	}
-	doc := cloneLayout(g.doc)
+	doc := DefaultLayout()
 	doc.Columns[0].Slots[0] = Slot{HeightWeight: 1, Ref: slot.Ref}
 	doc.SidebarCollapsed = true
 	doc.FilledSlot = ""
-	g.newWindow = &NewWindowRequest{Ref: slot.Ref, Doc: doc}
+	g.newWindow = &NewWindowRequest{Pos: p, Ref: slot.Ref, Doc: doc}
 }
 
 // applyMove applies one Move direction, keeping the popover's slot.

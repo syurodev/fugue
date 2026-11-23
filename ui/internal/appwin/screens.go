@@ -2,6 +2,8 @@ package appwin
 
 import (
 	"image"
+	"maps"
+	"slices"
 
 	"gioui.org/layout"
 
@@ -69,12 +71,13 @@ type screens struct {
 	// slotSoonSidebar is the rail sidebars' placeholder before their screens
 	// land.
 	slotSoonSidebar *kit.EmptyStateState
-	// slotSessions are the sessions a regular slot already joined topics
-	// for, so the layout arms each one's reads once.
+	// Each window owns its interests even when other windows need the same topics.
+	setTopic     func(topic string, active bool)
 	slotSessions map[string]bool
 
-	sidebar     *session.Sidebar
-	transcripts map[string]*session.Transcript
+	sidebar        *session.Sidebar
+	sessionsLoaded bool
+	transcripts    map[string]*session.Transcript
 	// views holds one scroll state per session, so session A's offset never
 	// leaks into session B; viewCache is the window's one shared layout
 	// cache every session's list rides (F10.4a, desktop-app §7).
@@ -248,41 +251,90 @@ func (s *screens) viewFor(id string) *transcriptview.State {
 // the page arrives, not at the bottom (desktop-app v0.9 §5.4). Returning to
 // an already-open session keeps the reader's place: their choice wins.
 func (s *screens) openSession(id string) {
-	if s.open != id {
-		if s.open != "" {
-			s.m.RemoveTopic(topicTranscript + s.open)
-			s.m.RemoveTopic(topicTranscriptDlt + s.open)
-		}
-		s.open, s.scrolled = id, false
+	s.grid.openMain(SlotRef{Kind: KindSession, ID: id})
+	s.setOpenSession(id)
+	visible := s.visibleSessions()
+	s.releaseSlotSessions(visible)
+	s.ensureSessionTopics(id)
+}
+
+func (s *screens) setOpenSession(id string) {
+	if s.open == id {
+		return
+	}
+	s.open, s.scrolled, s.turnArm = id, false, false
+	if id != "" {
 		if _, ok := s.views[id]; !ok {
 			s.reopenAnchor[id] = true
 		}
-		if _, ok := s.transcripts[id]; !ok {
-			s.transcripts[id] = session.NewTranscript(id)
-		}
-		s.requestNewestPage(id)
-		s.requestCommands(id)
 	}
-	s.ensureSessionTopics(id)
-	s.grid.openMain(SlotRef{Kind: KindSession, ID: id})
 }
 
-// ensureSessionTopics joins a session's topics and arms its reads once, for
-// the sessions a regular slot shows (§5.3: another session's transcript in
-// its own slot).
+func (s *screens) visibleSessions() map[string]bool {
+	visible := make(map[string]bool)
+	for c := range s.grid.doc.Columns {
+		for _, slot := range s.grid.doc.Columns[c].Slots {
+			ref := slot.Ref
+			if ref.Kind != KindSession || ref.ID == "" {
+				continue
+			}
+			if !s.missingTarget(ref) {
+				visible[ref.ID] = true
+			}
+		}
+	}
+	return visible
+}
+
+// trackTopics reconciles restored, rearranged, and closed slots before their
+// models consume or draw any more transcript updates.
+func (s *screens) trackTopics() {
+	visible := s.visibleSessions()
+	main := s.grid.mainRef()
+	if main.Kind == KindSession && visible[main.ID] {
+		s.setOpenSession(main.ID)
+	} else {
+		s.setOpenSession("")
+	}
+	s.releaseSlotSessions(visible)
+	for _, id := range slices.Sorted(maps.Keys(visible)) {
+		s.ensureSessionTopics(id)
+	}
+}
+
+func (s *screens) releaseSlotSessions(visible map[string]bool) {
+	for id := range s.slotSessions {
+		if !visible[id] {
+			s.setSessionTopics(id, false)
+			delete(s.slotSessions, id)
+		}
+	}
+}
+
 func (s *screens) ensureSessionTopics(id string) {
-	if id == "" {
+	if id == "" || s.slotSessions[id] {
 		return
 	}
-	s.m.AddTopic(topicTranscript + id)
-	s.m.AddTopic(topicTranscriptDlt + id)
+	s.slotSessions[id] = true
 	if _, ok := s.transcripts[id]; !ok {
 		s.transcripts[id] = session.NewTranscript(id)
 	}
-	if !s.slotSessions[id] {
-		s.slotSessions[id] = true
-		s.requestNewestPage(id)
-		s.requestCommands(id)
+	s.setSessionTopics(id, true)
+	s.requestNewestPage(id)
+	s.requestCommands(id)
+}
+
+func (s *screens) setSessionTopics(id string, active bool) {
+	for _, prefix := range []string{topicTranscript, topicTranscriptDlt} {
+		topic := prefix + id
+		switch {
+		case s.setTopic != nil:
+			s.setTopic(topic, active)
+		case active:
+			s.m.AddTopic(topic)
+		default:
+			s.m.RemoveTopic(topic)
+		}
 	}
 }
 

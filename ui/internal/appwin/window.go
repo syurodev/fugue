@@ -2,10 +2,10 @@ package appwin
 
 import (
 	"context"
-	"fmt"
 	"image/color"
 	"runtime"
 	"sync"
+	"time"
 
 	"gioui.org/app"
 	"gioui.org/io/key"
@@ -14,12 +14,10 @@ import (
 	"gioui.org/op"
 	"gioui.org/op/paint"
 	"gioui.org/text"
-	"gioui.org/unit"
 
 	"github.com/syurodev/fugue/pkg/client"
 
 	"github.com/syurodev/fugue/ui/internal/accounts"
-	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/inbox"
 	"github.com/syurodev/fugue/ui/internal/kit"
@@ -67,11 +65,10 @@ func (q *updateQueue) drain() []hostconn.Update {
 	return out
 }
 
-// Run opens the app's one window and runs its event loop until the window is
-// destroyed or ctx ends. It owns the hostconn Manager and stops it on return.
+// Run opens the app's windows and runs until every window is destroyed or ctx
+// ends. It owns the single shared hostconn Manager and stops it on return.
 func Run(ctx context.Context, opts Options) error {
 	runCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
 	updates := make(chan hostconn.Update, 128)
 	m := hostconn.NewManager(&hostconn.Config{
 		DataDir:   opts.DataDir,
@@ -83,44 +80,27 @@ func Run(ctx context.Context, opts Options) error {
 	m.Start(runCtx)
 	defer m.Stop()
 
-	// The initial size is the preferred one clamped to the work area the
-	// screen reports (F10.1: 900x1000 dp overflows an 864 dp-high 1080p
-	// screen at scale 1.25); where no work area is known the compositor
-	// clamps the granted size instead.
-	scale, screenW, screenH := workArea()
-	initW, initH := ClampDp(requestedW, requestedH, scale, screenW, screenH)
-	w := new(app.Window)
-	w.Option(app.Title("Fugue"))
-	w.Option(app.Size(unit.Dp(initW), unit.Dp(initH)))
+	var wg sync.WaitGroup
+	var coord *multiWindow
+	coord = newMultiWindow(m, func(windowID string, record *client.AppStateWindow, doc *LayoutDoc) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if winErr := runWindow(runCtx, m, coord, windowID, record, doc); winErr != nil {
+				// Secondary window errors are surfaced on that window before exit.
+				_ = winErr
+			}
+		}()
+	})
+	feederDone := startFeeder(runCtx, updates, coord)
+	defer func() {
+		cancel()
+		<-feederDone
+	}()
 
-	q := &updateQueue{}
-	workers := startAppWorkers(runCtx, m, w)
-	defer workers.stop()
-	defer stopSideGoroutines(cancel, startFeeder(runCtx, w, updates, q), startCloser(runCtx, w))
-
-	shaper, err := fonts.Shaper()
-	if err != nil {
-		return fmt.Errorf("build the text shaper: %w", err)
-	}
-	light, dark := theme.Light(shaper), theme.Dark(shaper)
-	env := newEnv(shaper, &light)
-	attach(env, w)
-	sc := newScreens(m, workers.fetcher, workers.poster, workers.wsMut)
-	sc.vaultWorker = workers.vaultW
-	sc.inboxWorker = workers.inboxW
-	sc.accountsWorker = workers.accountsW
-	sc.settingsWorker = workers.settingsW
-	sc.secretsWorker = workers.secretsW
-	sc.viewerWorker = workers.viewerW
-	sc.layoutWorker = workers.layoutW
-	// The restored window geometry applies once the appstate snapshot
-	// lands; the option reaches the compositor from the window goroutine.
-	sc.grid.applyGeometry = func(widthDp, heightDp int) {
-		if widthDp > 0 && heightDp > 0 {
-			w.Option(app.Size(unit.Dp(widthDp), unit.Dp(heightDp)))
-		}
-	}
-	return eventLoop(w, env, sc, q, &light, &dark)
+	err := runWindow(runCtx, m, coord, "", nil, nil)
+	wg.Wait()
+	return err
 }
 
 type appWorkers struct {
@@ -137,7 +117,7 @@ type appWorkers struct {
 }
 
 func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) appWorkers {
-	fetcher := session.NewFetcher(m.Client)
+	fetcher := session.NewFetcher(m.Client, w.Invalidate)
 	fetcher.Start(ctx)
 	poster := session.NewPoster(m.Client)
 	poster.Start(ctx)
@@ -228,18 +208,17 @@ func attach(env *kit.Env, w *app.Window) {
 	env.Invalidate = w.Invalidate
 }
 
-// startFeeder runs the update feeder: it moves deliveries into the queue and
-// wakes the window. It owns no UI state and ends with the run context; the
-// returned channel closes when it has ended.
-func startFeeder(ctx context.Context, w *app.Window, updates <-chan hostconn.Update, q *updateQueue) <-chan struct{} {
+// startFeeder runs the update feeder: it fans deliveries out to every active
+// window through coord. It owns no UI state and ends with the run context;
+// the returned channel closes when it has ended.
+func startFeeder(ctx context.Context, updates <-chan hostconn.Update, coord *multiWindow) <-chan struct{} {
 	feederDone := make(chan struct{})
 	go func() {
 		defer close(feederDone)
 		for {
 			select {
 			case u := <-updates:
-				q.push(u)
-				w.Invalidate()
+				coord.deliver(u)
 			case <-ctx.Done():
 				return
 			}
@@ -261,41 +240,38 @@ func startCloser(ctx context.Context, w *app.Window) <-chan struct{} {
 	return closerDone
 }
 
-// stopSideGoroutines waits for the feeder and the closer after canceling the
-// run context, so Run leaves no goroutine behind: both end on the context.
-func stopSideGoroutines(cancel context.CancelFunc, feederDone, closerDone <-chan struct{}) {
-	cancel()
-	<-feederDone
-	<-closerDone
-}
+const layoutFinishTimeout = 2 * time.Second
 
 // eventLoop is the window's event loop until it is destroyed. Every frame
 // drives the env the way kitgallery's window does (F10.13): the UI scale on
 // the metric, the driver's frame step, the modality and the overlay's window
-// size before layout, and the frame-end invalidations after. A destroy while
-// a session's turn still runs opens the close confirmation instead (DA-E08,
-// F10.5e); the confirmed close re-performs the action past the dialog.
-func eventLoop(w *app.Window, env *kit.Env, sc *screens, q *updateQueue, light, dark *theme.Theme) error {
+// size before layout, and the frame-end invalidations after. Closing the last
+// window while a session's turn still runs opens the close confirmation
+// instead (DA-E08, F10.5e); closing a secondary window removes its stored
+// layout without stopping any running turns (desktop-app §5.3, host-api §5.2).
+func eventLoop(ctx context.Context, w *app.Window, env *kit.Env, sc *screens, q *updateQueue, coord *multiWindow, winReg *windowUpdates, light, dark *theme.Theme) error {
 	var ops op.Ops
 	sc.failure.closeDlg.requestClose = func() { w.Perform(system.ActionClose) }
 	for {
 		switch e := w.Event().(type) {
 		case app.DestroyEvent:
-			// The intercept keeps the loop alive so the dialog renders; the
-			// destroy is accepted only once nothing asks. Returning e.Err is
-			// the loop's way of closing the window, which is why the close
-			// action itself cannot live inside requestWindowClose here.
-			if !requestWindowClose(sc, func() {}) {
+			isLast := coord == nil || coord.beginClose(winReg)
+			if isLast && !requestWindowClose(sc, func() {}) {
 				w.Invalidate()
 				continue
 			}
+			finishCtx, finishCancel := context.WithTimeout(ctx, layoutFinishTimeout)
+			if finishErr := sc.finishWindowLayout(finishCtx, !isLast); finishErr != nil {
+				sc.fail(finishErr)
+			}
+			finishCancel()
 			return e.Err
 		case app.FrameEvent:
 			gtx := app.NewContext(&ops, e)
 			gtx.Metric = env.Metric(gtx.Metric)
 			env.Begin(gtx.Now)
 			env.TrackInput(&gtx)
-			frame(&gtx, env, sc, q, light, dark)
+			frame(&gtx, env, sc, q, coord, light, dark)
 			env.FrameEnd(&gtx)
 			e.Frame(gtx.Ops)
 		}
@@ -304,7 +280,7 @@ func eventLoop(w *app.Window, env *kit.Env, sc *screens, q *updateQueue, light, 
 
 // frame drains the deliveries, read results and write results into UI state
 // on the window goroutine, handles the theme toggle, and lays the window out.
-func frame(gtx *layout.Context, env *kit.Env, sc *screens, q *updateQueue, light, dark *theme.Theme) {
+func frame(gtx *layout.Context, env *kit.Env, sc *screens, q *updateQueue, coord *multiWindow, light, dark *theme.Theme) {
 	// Deliveries, read results and write results become UI state here, on
 	// the window goroutine.
 	results := make([]session.Result, 0, 8)
@@ -329,10 +305,13 @@ drainPosts:
 	}
 	sc.update(q.drain(), results, posts, drainMutResults(sc.wsMut))
 	sc.drainWorkerResults()
-	sc.grid.maybeSave(sc.layoutWorker)
 	sc.applyLivePreferences(env, light, dark)
 	toggleTheme(gtx, env, sc, light, dark)
 	drawWindow(gtx, env, sc)
+	if coord != nil {
+		sc.openSlotWindow(coord.openNew)
+	}
+	sc.grid.saveLayoutFrame(gtx, sc.layoutWorker)
 }
 
 func (s *screens) drainWorkerResults() {
