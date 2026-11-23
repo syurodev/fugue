@@ -22,9 +22,12 @@ import (
 )
 
 const (
-	shotWindowW    = 860
-	shotWindowH    = 560
-	shotSidebarW   = 1500
+	shotWindowW = 860
+	shotWindowH = 560
+	// shotSidebarW is the sidebar scene's width: at 125% the shell must
+	// still hold rail, sidebar and the main slot's minimum (808 dp, about
+	// 1010 px plus the window insets), which the standard width cannot.
+	shotSidebarW   = 1100
 	shotSidebar    = "sidebar"
 	shotRootDialog = "root-dialog"
 	shotPolicyCard = "policy-card"
@@ -113,8 +116,6 @@ func renderWorkspaceShot(t *testing.T, win *headless.Window, spec shotSpec) *ima
 	t.Helper()
 	size := image.Pt(shotWindowW, shotWindowH)
 	if spec.scene == shotSidebar {
-		// The sidebar stays open only while the window fits the rail, the
-		// sidebar and the main slot's minimum, so its shot gets the room.
 		size = image.Pt(shotSidebarW, shotWindowH)
 		wide, err := glwin.Open(size.X, size.Y)
 		if err != nil {
