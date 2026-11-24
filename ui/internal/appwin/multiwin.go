@@ -39,9 +39,10 @@ type windowUpdates struct {
 // secondary windows on startup restore, and tracks window count for close
 // semantics (DA-07, host-api §5.2).
 type multiWindow struct {
-	m      *hostconn.Manager
-	openFn func(windowID string, record *client.AppStateWindow, doc *LayoutDoc)
-	newID  func() string
+	m          *hostconn.Manager
+	openFn     func(windowID string, record *client.AppStateWindow, doc *LayoutDoc)
+	newID      func() string
+	appearance appearanceSource
 
 	mu       sync.Mutex
 	windows  map[*windowUpdates]struct{}
@@ -58,6 +59,25 @@ func newMultiWindow(m *hostconn.Manager, openFn func(windowID string, record *cl
 		windows: map[*windowUpdates]struct{}{},
 		topics:  map[string]int{},
 		known:   map[string]bool{},
+	}
+}
+
+// invalidateAll wakes every registered window so each redraws with updated
+// shared state (such as an OS appearance change).
+func (c *multiWindow) invalidateAll() {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	wins := make([]*windowUpdates, 0, len(c.windows))
+	for w := range c.windows {
+		wins = append(wins, w)
+	}
+	c.mu.Unlock()
+	for _, w := range wins {
+		if w.invalidate != nil {
+			w.invalidate()
+		}
 	}
 }
 
@@ -333,6 +353,9 @@ func runWindow(ctx context.Context, m *hostconn.Manager, coord *multiWindow, win
 
 func newWindowScreens(m *hostconn.Manager, w *app.Window, workers appWorkers, coord *multiWindow, winReg *windowUpdates) *screens {
 	sc := newScreens(m, workers.fetcher, workers.poster, workers.wsMut)
+	if coord != nil {
+		sc.appearance = coord.appearance
+	}
 	sc.setTopic = func(topic string, active bool) {
 		coord.setTopic(winReg, topic, active)
 	}

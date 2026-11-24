@@ -292,15 +292,28 @@ func (s *screens) reloadRawFromHost() {
 	s.settingsView.syncRawFromModel(s.settings)
 }
 
+func (s *screens) systemAppearance() osAppearance {
+	if s == nil || s.appearance == nil {
+		return appearanceUnknown
+	}
+	return s.appearance.Current()
+}
+
 func (s *screens) applyLivePreferences(env *kit.Env, light, dark *theme.Theme) {
 	prefs := s.settings.Prefs.Current
 	if prefs.UIScale > 0 {
 		env.UIScale = settings.NormalizeUIScale(prefs.UIScale)
 	}
-	switch prefs.ThemeMode {
+	switch settings.NormalizeThemeMode(prefs.ThemeMode) {
 	case settings.ThemeDark:
 		env.Th = dark
-	case settings.ThemeLight, settings.ThemeSystem:
+	case settings.ThemeLight:
 		env.Th = light
+	case settings.ThemeSystem:
+		if s.systemAppearance() == appearanceDark {
+			env.Th = dark
+		} else {
+			env.Th = light
+		}
 	}
 }

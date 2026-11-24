@@ -181,6 +181,8 @@ type screens struct {
 	// failure is the window's failure UX (F10.5e): the actionable banners and
 	// the active-session close confirmation.
 	failure *failureUX
+	// appearance reads the OS light/dark preference for ThemeSystem (FUG-69).
+	appearance appearanceSource
 }
 
 // newScreens builds the screens over the manager, its fetcher, the composer's

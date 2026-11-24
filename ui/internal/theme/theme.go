@@ -403,16 +403,16 @@ func lightChrome() Chrome {
 // light fill with a dark foreground.
 func darkChrome() Chrome {
 	return Chrome{
-		AppBg:         nrgba(0x14161A),
-		CanvasBg:      nrgba(0x1A1D22),
-		SurfaceBase:   nrgba(0x1F2228),
-		SurfaceRaised: nrgba(0x272B33),
-		SurfaceTinted: nrgba(0x23272E),
+		AppBg:         nrgba(0x0A0A0A),
+		CanvasBg:      nrgba(0x111111),
+		SurfaceBase:   nrgba(0x161616),
+		SurfaceRaised: nrgba(0x1C1C1C),
+		SurfaceTinted: nrgba(0x191919),
 		Fg:            nrgba(0xF0F0F2),
 		FgMuted:       nrgba(0xA8AAB2),
 		FgSubtle:      nrgba(0x919199),
 		IconMuted:     nrgba(0xA8AAB2),
-		Border:        nrgba(0x3B3F48),
+		Border:        nrgba(0x2A2A2A),
 		FocusBorder:   nrgba(0xF0F0F2),
 		Action:        nrgba(0xF0F0F2),
 		ActionFg:      nrgba(0x14161A),

@@ -41,6 +41,8 @@ type Options struct {
 	Params client.Params
 	// Topics are the event topics the window streams.
 	Topics []string
+	// Appearance reads the OS light/dark preference; nil uses the platform reader.
+	Appearance appearanceSource
 }
 
 // updateQueue is the bridge from the connection goroutines to the window
@@ -84,6 +86,11 @@ func Run(ctx context.Context, opts Options) error {
 	m.Start(runCtx)
 	defer m.Stop()
 
+	appSrc := opts.Appearance
+	if appSrc == nil {
+		appSrc = newPlatformAppearanceSource()
+	}
+
 	var wg sync.WaitGroup
 	var coord *multiWindow
 	coord = newMultiWindow(m, func(windowID string, record *client.AppStateWindow, doc *LayoutDoc) {
@@ -95,6 +102,9 @@ func Run(ctx context.Context, opts Options) error {
 			}
 		}()
 	})
+	coord.appearance = appSrc
+	stopAppearance := appSrc.Subscribe(coord.invalidateAll)
+	defer stopAppearance()
 	feederDone := startFeeder(runCtx, updates, coord)
 	defer func() {
 		cancel()

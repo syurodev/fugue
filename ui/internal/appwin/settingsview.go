@@ -158,7 +158,7 @@ func (v *settingsView) layoutPreferencesCard(gtx *layout.Context, env *kit.Env, 
 	local := *gtx
 	local.Constraints.Min.X = local.Constraints.Max.X
 	dims, _, err := v.prefsCard.Layout(env, &local, kit.CardProps{}, func(gtx layout.Context) layout.Dimensions {
-		children := make([]layout.FlexChild, 0, 13)
+		children := make([]layout.FlexChild, 0, 15)
 		children = append(children,
 			rigidLabel(env, theme.TypeTitle(), env.Th.Chrome().Fg, "App preferences"),
 			spacerH(theme.SpaceXS),
@@ -167,6 +167,14 @@ func (v *settingsView) layoutPreferencesCard(gtx *layout.Context, env *kit.Env, 
 			rigidLabel(env, theme.TypeLabel(), env.Th.Chrome().Fg, "Theme mode"),
 			spacerH(theme.SpaceXS),
 			rigidWidget(func(gtx *layout.Context) layout.Dimensions { return v.layoutThemeModeControl(gtx, env, sc, cur) }),
+		)
+		if settings.NormalizeThemeMode(cur.ThemeMode) == settings.ThemeSystem && sc.systemAppearance() == appearanceUnknown {
+			children = append(children,
+				spacerH(theme.SpaceXS),
+				rigidLabel(env, theme.TypeSmall(), env.Th.Chrome().FgMuted, "System appearance could not be read; using Light."),
+			)
+		}
+		children = append(children,
 			spacerH(theme.SpaceMD),
 			rigidLabel(env, theme.TypeLabel(), env.Th.Chrome().Fg, "UI scale"),
 			spacerH(theme.SpaceXS),
