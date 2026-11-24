@@ -397,7 +397,7 @@ func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 		pad := gtx.Dp(theme.SpaceXS)
 		inner := shell
 		inner.Constraints.Max = image.Pt(max(shell.Constraints.Max.X-pad, 0), max(shell.Constraints.Max.Y-2*pad, 0))
-		inner.Constraints.Min = image.Point{}
+		inner.Constraints.Min = inner.Constraints.Max
 		env.Offset(gtx, image.Pt(0, pad), func(gtx *layout.Context) {
 			local := inner
 			local.Ops = gtx.Ops
