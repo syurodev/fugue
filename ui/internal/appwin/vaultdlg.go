@@ -24,7 +24,7 @@ type vaultGate struct {
 	confirm   *kit.TextFieldState
 	submitBtn *kit.ButtonState
 	modeBtn   *kit.ButtonState
-	lockBtn   *kit.ButtonState
+	lockBtn   *kit.IconButtonState
 	ackBtn    *kit.ButtonState
 	copyBtn   *kit.ButtonState
 	savedChk  *kit.CheckboxState
@@ -43,7 +43,7 @@ type vaultGate struct {
 func newVaultGate() *vaultGate {
 	return &vaultGate{
 		card: kit.NewCardState(), pass: kit.NewTextFieldState(), confirm: kit.NewTextFieldState(),
-		submitBtn: kit.NewButtonState(), modeBtn: kit.NewButtonState(), lockBtn: kit.NewButtonState(), ackBtn: kit.NewButtonState(),
+		submitBtn: kit.NewButtonState(), modeBtn: kit.NewButtonState(), lockBtn: kit.NewIconButtonState(), ackBtn: kit.NewButtonState(),
 		copyBtn: kit.NewButtonState(), savedChk: kit.NewCheckboxState(),
 	}
 }
@@ -181,13 +181,21 @@ func (g *vaultGate) layoutLockButton(gtx *layout.Context, env *kit.Env, sc *scre
 	if sc.vault.Locked() || sc.vaultWorker == nil {
 		return layout.Dimensions{}
 	}
-	dims, clicked := layoutVaultButton(env, gtx, g.lockBtn, kit.ButtonProps{Text: "Lock vault", Variant: kit.Secondary, Size: kit.SizeSM, Busy: g.busy}, sc.fail)
+	props := &kit.IconButtonProps{
+		Icon:     kit.IconLock,
+		Label:    "Lock vault",
+		Variant:  kit.IconButtonGhost,
+		Size:     kit.SizeSM,
+		Disabled: g.busy,
+	}
+	clicked, err := g.lockBtn.Layout(env, gtx, props)
+	sc.fail(err)
 	if clicked && !g.busy {
 		g.busy = true
 		req := vault.Request{Kind: vault.OpLock}
 		sc.vaultWorker.Do(&req)
 	}
-	return dims
+	return g.lockBtn.Measure(env, gtx, props)
 }
 
 func vaultLabelRow(env *kit.Env, tp theme.Type, fg color.NRGBA, txt string) layout.FlexChild {

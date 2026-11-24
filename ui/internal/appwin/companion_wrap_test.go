@@ -181,7 +181,7 @@ func TestSettingsPendingPolicyCardUsesTheSharedDiffPanel(t *testing.T) {
 			}
 			pad := gtx.Dp(theme.SpaceLG)
 			gtx.Constraints = layout.Constraints{Max: image.Pt(cardW-2*pad, 1<<20)}
-			panelBg := env.Th.Chrome().SurfaceRaised
+			panelBg := env.Th.Chrome().SurfaceBase
 			panel := renderOps(t, func(g *layout.Context) layout.Dimensions {
 				return layoutDiffPanel(env, g, diff)
 			}, &gtx, env, &panelBg)

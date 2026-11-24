@@ -108,7 +108,7 @@ func (s *CardState) paint(env *Env, gtx *layout.Context, r image.Rectangle, rad,
 	center := f32.Pt(float32(r.Min.X+r.Max.X)/2, float32(r.Min.Y+r.Max.Y)/2)
 	defer scaleAbout(gtx, center, scale).Pop()
 
-	fillLayer(gtx, r, rad, fade(c.SurfaceRaised, opScale), 1)
+	fillLayer(gtx, r, rad, fade(c.SurfaceBase, opScale), 1)
 	if hover > 0 {
 		fillLayer(gtx, r, rad, fade(c.HoverWash, opScale), unit01(hover)*(1-unit01(press)))
 	}

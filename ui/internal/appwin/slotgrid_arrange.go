@@ -115,7 +115,6 @@ func arrangeDividerDims(gap int) layout.Dimensions {
 // layoutArrangeContent draws the rows; the popover calls it once per frame.
 func (g *slotGrid) layoutArrangeContent(gtx *layout.Context, env *kit.Env, sc *screens, p Pos) {
 	c := env.Th.Chrome()
-	paint.FillShape(gtx.Ops, c.CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
 	rows := g.arrangeRows(p)
 	children := make([]layout.FlexChild, 0, len(rows))
 	for i := range rows {

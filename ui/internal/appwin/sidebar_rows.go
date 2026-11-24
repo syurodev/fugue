@@ -17,7 +17,7 @@ func (s *screens) layoutInboxRow(env *kit.Env, gtx *layout.Context) layout.Dimen
 	props := &kit.ListRowProps{
 		Icon:     kit.IconInbox,
 		Label:    "Approvals",
-		Selected: s.hasSlotKind(KindInbox),
+		Selected: s.grid.mainRef().Kind == KindInbox,
 	}
 	props.StateLabel, props.StateTone = inboxRowState(s.inbox.PendingCount())
 	dims, ev := s.inboxRow.Layout(env, gtx, props)
@@ -31,7 +31,7 @@ func (s *screens) layoutAccountsRow(env *kit.Env, gtx *layout.Context) layout.Di
 	props := &kit.ListRowProps{
 		Icon:     kit.IconCircleUser,
 		Label:    "Accounts",
-		Selected: s.hasSlotKind(KindAccounts),
+		Selected: s.grid.mainRef().Kind == KindAccounts,
 	}
 	props.StateLabel, props.StateTone = accountsRowState(s.accounts.HasSnapshot(), s.accounts.NeedsAttentionCount())
 	dims, ev := s.accountsRow.Layout(env, gtx, props)
@@ -45,7 +45,7 @@ func (s *screens) layoutSettingsRow(env *kit.Env, gtx *layout.Context) layout.Di
 	props := &kit.ListRowProps{
 		Icon:     kit.IconSettings,
 		Label:    "Settings",
-		Selected: s.hasSlotKind(KindSettings),
+		Selected: s.grid.mainRef().Kind == KindSettings,
 	}
 	if dirty := len(s.settings.DirtyFields()); dirty > 0 {
 		props.StateLabel = fmt.Sprintf("%d unsaved", dirty)
@@ -62,7 +62,7 @@ func (s *screens) layoutSecretsRow(env *kit.Env, gtx *layout.Context) layout.Dim
 	props := &kit.ListRowProps{
 		Icon:     kit.IconKeyRound,
 		Label:    "Secrets",
-		Selected: s.hasSlotKind(KindSecrets),
+		Selected: s.grid.mainRef().Kind == KindSecrets,
 	}
 	locked := s.vault.Locked()
 	if locked {

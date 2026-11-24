@@ -28,22 +28,6 @@ func flowButton(env *kit.Env, gtx *layout.Context, onErr func(error), btn *kit.B
 	}
 }
 
-// flowIconButton is a ghost icon button as a FlowRow item.
-func flowIconButton(env *kit.Env, gtx *layout.Context, onErr func(error), btn *kit.IconButtonState, props *kit.IconButtonProps, onClick func()) kit.FlowItem {
-	return kit.FlowItem{
-		Size: btn.Measure(env, gtx, props).Size,
-		Draw: func(g *layout.Context) {
-			clicked, err := btn.Layout(env, g, props)
-			if err != nil && onErr != nil {
-				onErr(err)
-			}
-			if clicked && onClick != nil {
-				onClick()
-			}
-		},
-	}
-}
-
 // flowTag is a tag as a FlowRow item.
 func flowTag(env *kit.Env, gtx *layout.Context, onErr func(error), st *kit.TagState, props kit.TagProps) kit.FlowItem {
 	dims, err := st.Measure(env, gtx, props)

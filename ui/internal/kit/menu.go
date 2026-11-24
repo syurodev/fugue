@@ -317,7 +317,7 @@ func (lv *menuLevel) progress(inline bool) float32 {
 // panel on its way out keeps the place it had.
 func (m *MenuState) place(env *Env, gtx *layout.Context, p MenuProps) error {
 	m.origin = env.origin
-	win := env.windowRect()
+	win := env.floatingWindowRect(gtx)
 	if p.Inline {
 		win = image.Rect(-1<<20, -1<<20, 1<<20, 1<<20)
 	}

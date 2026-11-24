@@ -85,16 +85,6 @@ func newFileViewer() *fileViewer {
 	}
 }
 
-func (v *fileViewer) setOpen(open bool) {
-	if v.open == open {
-		return
-	}
-	v.open = open
-	if !open {
-		v.reset()
-	}
-}
-
 func (v *fileViewer) reset() {
 	v.mode, v.loading, v.errMsg = fileViewFile, false, ""
 	v.wsID, v.rootName, v.path, v.rawPath = "", "", "", ""
@@ -309,9 +299,6 @@ func (v *fileViewer) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens
 			}
 		}}))
 	}
-	items = append(items, atEnd(flowButton(env, gtx, sc.fail, v.backBtn, kit.ButtonProps{Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM, Disabled: sc.open == ""}, func() {
-		v.setOpen(false)
-	})))
 	return flowHeader(gtx, items...)
 }
 

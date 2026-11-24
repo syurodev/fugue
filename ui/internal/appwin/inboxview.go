@@ -4,8 +4,6 @@ import (
 	"fmt"
 
 	"gioui.org/layout"
-	"gioui.org/op/clip"
-	"gioui.org/op/paint"
 	"gioui.org/unit"
 
 	"github.com/syurodev/fugue/pkg/client"
@@ -143,33 +141,11 @@ func (s *screens) applyInboxResults(results []inbox.Result) {
 }
 
 func (v *inboxView) layout(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
-	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
 	sc.selectProposalRequest()
 	items := sc.inbox.Items()
-	return layout.Inset{Top: theme.SpaceMD, Bottom: theme.SpaceMD, Left: theme.SpaceLG, Right: theme.SpaceLG}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			rigidWidget(func(gtx *layout.Context) layout.Dimensions { return v.layoutHeader(gtx, env, sc, len(items)) }),
-			spacerH(theme.SpaceMD),
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				return v.layoutBody(&local, env, sc, items)
-			}),
-		)
+	return layoutSlotContent(gtx, env, func(gtx *layout.Context) layout.Dimensions {
+		return v.layoutBody(gtx, env, sc, items)
 	})
-}
-
-func (v *inboxView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens, count int) layout.Dimensions {
-	status := theme.StatusInfo
-	if count > 0 {
-		status = theme.StatusWarning
-	}
-	return flowHeader(gtx,
-		flowTitle(env, gtx, theme.TypeTitle(), env.Th.Chrome().Fg, "Approvals inbox"),
-		flowTag(env, gtx, sc.fail, v.countTag, kit.TagProps{Text: fmt.Sprintf("%d pending", count), Variant: kit.TagStatus, Status: status}),
-		atEnd(flowButton(env, gtx, sc.fail, v.backBtn, kit.ButtonProps{Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM}, func() {
-			sc.grid.closeSlotOf(KindInbox)
-		})),
-	)
 }
 
 func (v *inboxView) layoutBody(gtx *layout.Context, env *kit.Env, sc *screens, items []client.PendingInteraction) layout.Dimensions {

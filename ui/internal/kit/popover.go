@@ -282,7 +282,7 @@ func (p *PopoverState) contentBox(gtx *layout.Context, props *PopoverProps) imag
 // place it had.
 func (p *PopoverState) place(env *Env, gtx *layout.Context, props *PopoverProps) {
 	p.origin = env.origin
-	win := env.windowRect()
+	win := env.floatingWindowRect(gtx)
 	if props.Inline {
 		win = image.Rect(-1<<20, -1<<20, 1<<20, 1<<20)
 	}

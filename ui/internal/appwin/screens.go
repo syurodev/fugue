@@ -6,6 +6,8 @@ import (
 	"slices"
 
 	"gioui.org/layout"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 
 	"github.com/syurodev/fugue/pkg/client"
 
@@ -417,6 +419,10 @@ func (s *screens) layoutSessionWithComposer(gtx *layout.Context, env *kit.Env, i
 
 func (s *screens) layoutSessionPane(gtx *layout.Context, env *kit.Env, id string, main, connected bool) {
 	w, h := gtx.Constraints.Max.X, gtx.Constraints.Max.Y
+	if main && id == "" {
+		s.layoutMainEmptyState(gtx, env)
+		return
+	}
 	measure := *gtx
 	_, leads := s.leadTeam(id)
 	leadComposer := leads && main
@@ -454,4 +460,27 @@ func (s *screens) layoutChatContent(gtx *layout.Context, env *kit.Env, id string
 		items = t.Items()
 	}
 	s.layoutTranscriptPane(gtx, env, id, s.viewFor(id), items)
+}
+
+// layoutMainEmptyState centers the kit EmptyState in the empty main session
+// slot with an icon, title, one-line description and primary "New session"
+// action (FUG-65).
+func (s *screens) layoutMainEmptyState(gtx *layout.Context, env *kit.Env) {
+	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
+	box := *gtx
+	box.Constraints.Min = box.Constraints.Max
+	layout.Center.Layout(box, func(gtx layout.Context) layout.Dimensions {
+		local := gtx
+		dims, ev, err := s.emptyTranscript.Layout(env, &local, &kit.EmptyStateProps{
+			Icon:          kit.IconMessageSquare,
+			Title:         "Select a session",
+			Description:   "Choose a session from the sidebar or start a new one.",
+			PrimaryAction: newSessionLabel,
+		})
+		s.fail(err)
+		if ev.PrimaryClicked {
+			s.composer.start.open(s)
+		}
+		return dims
+	})
 }

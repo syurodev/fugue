@@ -239,5 +239,56 @@ func (s *screens) layoutSlotGone(gtx *layout.Context, env *kit.Env, p Pos) {
 	_ = dims
 }
 
+// slotAction is one pane-level action button hosted in the slot header (§5.3).
+type slotAction struct {
+	props   kit.IconButtonProps
+	onClick func()
+}
+
+// slotHeaderActions returns the pane-level IconButton actions for ref, hosted
+// in the shared slot header with tooltips rather than duplicated in-pane.
+func slotHeaderActions(sc *screens, ref SlotRef) []slotAction {
+	switch ref.Kind {
+	case KindAccounts:
+		return []slotAction{{
+			props: kit.IconButtonProps{
+				Icon:     kit.IconRestart,
+				Label:    "Refresh accounts",
+				Variant:  kit.IconButtonGhost,
+				Size:     kit.SizeSM,
+				Disabled: sc.accountsWorker == nil || sc.accountsView.refreshing,
+			},
+			onClick: sc.requestRefreshAccounts,
+		}}
+	case KindSettings:
+		return []slotAction{{
+			props: kit.IconButtonProps{
+				Icon:     kit.IconRestart,
+				Label:    "Refresh settings",
+				Variant:  kit.IconButtonGhost,
+				Size:     kit.SizeSM,
+				Disabled: sc.settingsWorker == nil || sc.settings.Loading,
+			},
+			onClick: sc.requestReloadSettings,
+		}}
+	case KindSecrets:
+		wsID, _ := sc.currentWorkspace()
+		return []slotAction{{
+			props: kit.IconButtonProps{
+				Icon:     kit.IconPlus,
+				Label:    labelAddSecret,
+				Variant:  kit.IconButtonGhost,
+				Size:     kit.SizeSM,
+				Disabled: sc.vault.Locked() || sc.secretsWorker == nil,
+			},
+			onClick: func() { sc.secretsView.addDlg.open(wsID) },
+		}}
+	case KindSession, KindTeam, KindAgent, KindDiff, KindInbox, KindModule:
+		return nil
+	default:
+		return nil
+	}
+}
+
 // closeLabel names the slots' close action in the EmptyStates.
 const closeLabel = "Close slot"

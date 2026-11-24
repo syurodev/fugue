@@ -5,6 +5,8 @@ import (
 
 	"gioui.org/io/event"
 	"gioui.org/layout"
+
+	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
 // The window overlay (ui-kit UK-07). The window owns one overlay and draws
@@ -28,6 +30,17 @@ func (e *Env) Offset(gtx *layout.Context, p image.Point, fn func(*layout.Context
 // windowRect is the window in the cursor's coordinates.
 func (e *Env) windowRect() image.Rectangle {
 	return image.Rectangle{Max: e.win}.Sub(e.origin)
+}
+
+// floatingWindowRect is the window inset by the §3.1 edge margin (SpaceMD) so
+// floating menus and popovers never touch or clip against the window border.
+func (e *Env) floatingWindowRect(gtx *layout.Context) image.Rectangle {
+	win := e.windowRect()
+	margin := gtx.Dp(theme.SpaceMD)
+	if win.Dx() > 2*margin && win.Dy() > 2*margin {
+		return win.Inset(margin)
+	}
+	return win
 }
 
 // The floating layers (UK-07): at most two at once — a menu open from a

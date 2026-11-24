@@ -230,7 +230,10 @@ func (s *SegmentedState) draw(env *Env, gtx *layout.Context, size image.Point, r
 			fillLayer(gtx, r, pillRad, fade(c.HoverWash, opScale), 1)
 		}
 	}
-	s.pill.draw(gtx, pillRad, fade(c.SurfaceRaised, opScale))
+	s.pill.draw(gtx, pillRad, fade(c.CanvasBg, opScale))
+	if !s.pill.rect.Empty() {
+		strokeRRect(gtx.Ops, s.pill.rect, pillRad, float32(max(gtx.Dp(theme.Hairline), 1)), fade(c.Border, opScale))
+	}
 
 	for i, opt := range pr.Options {
 		if err := drawSegmentContent(env, gtx, rects[i], opt, i == selected, pr.Disabled || opt.Disabled, opScale); err != nil {

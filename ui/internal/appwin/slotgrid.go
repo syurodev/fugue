@@ -106,6 +106,7 @@ type slotGrid struct {
 	// buttons.
 	arrangeBtns map[string]*kit.IconButtonState
 	closeBtns   map[string]*kit.IconButtonState
+	actionBtns  map[string]*kit.IconButtonState
 	tabBtns     map[string]*kit.IconButtonState
 	railBtns    map[railItem]*kit.IconButtonState
 	sidebarBtn  *kit.IconButtonState
@@ -167,6 +168,7 @@ func newSlotGrid() *slotGrid {
 		popover:        kit.NewPopoverState(),
 		arrangeBtns:    map[string]*kit.IconButtonState{},
 		closeBtns:      map[string]*kit.IconButtonState{},
+		actionBtns:     map[string]*kit.IconButtonState{},
 		tabBtns:        map[string]*kit.IconButtonState{},
 		railBtns:       map[railItem]*kit.IconButtonState{},
 		sidebarBtn:     kit.NewIconButtonState(),

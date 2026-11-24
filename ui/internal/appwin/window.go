@@ -389,41 +389,21 @@ func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 	// The window's current size rides every layout save, so the next start
 	// opens the same size (host-api §5.2: the geometry is the document's).
 	sc.grid.markGeometryDirty(pxToDp(gtx, gtx.Constraints.Max.X), pxToDp(gtx, gtx.Constraints.Max.Y))
-	state, reason := sc.m.State()
-	status := statusLine(state, reason)
 	barH := sc.titleBar.layout(env, gtx)
 	shell := *gtx
-	shell.Constraints.Max.Y -= barH
+	shell.Constraints.Max.Y = max(shell.Constraints.Max.Y-barH, 0)
 	shell.Constraints.Min.Y = min(shell.Constraints.Min.Y, shell.Constraints.Max.Y)
-	offset := op.Offset(image.Pt(0, barH)).Push(gtx.Ops)
-	layout.Flex{Axis: layout.Vertical}.Layout(shell,
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{
-				Top: theme.SpaceMD, Left: theme.SpaceLG, Right: theme.SpaceLG,
-			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				sc.layout(&local, env)
-				return layout.Dimensions{Size: gtx.Constraints.Max}
-			})
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return layout.Inset{
-				Left: theme.SpaceLG, Right: theme.SpaceLG, Bottom: theme.SpaceMD,
-			}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						local := gtx
-						return kit.Label(env, &local, theme.TypeSmall(), statusColor(env.Th, state), status)
-					}),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						local := gtx
-						return sc.vaultGate.layoutLockButton(&local, env, sc)
-					}),
-				)
-			})
-		}),
-	)
-	offset.Pop()
+	env.Offset(gtx, image.Pt(0, barH), func(gtx *layout.Context) {
+		pad := gtx.Dp(theme.SpaceMD)
+		inner := shell
+		inner.Constraints.Max = image.Pt(max(shell.Constraints.Max.X-2*pad, 0), max(shell.Constraints.Max.Y-2*pad, 0))
+		inner.Constraints.Min = image.Point{}
+		env.Offset(gtx, image.Pt(pad, pad), func(gtx *layout.Context) {
+			local := inner
+			local.Ops = gtx.Ops
+			sc.layout(&local, env)
+		})
+	})
 	// The start and workspace dialogs (F10.4b, F10.14), the active-session
 	// close confirmation (F10.5e) draw over the whole window, last, with the
 	// full frame's gtx: the scrim dims everything beneath whichever dialog is
