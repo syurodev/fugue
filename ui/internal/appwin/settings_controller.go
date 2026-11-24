@@ -15,6 +15,9 @@ import (
 
 const (
 	labelCancel = "Cancel"
+	// slotContentInset is the shared slot-content inset on every side; tests
+	// that hover laid-out rows derive positions from it instead of pixels.
+	slotContentInset = theme.SpaceLG
 )
 
 // openSettings opens the settings slot and arms its reads (F10.5d). The
@@ -37,7 +40,7 @@ func (s *screens) openSettings() {
 // own heading or "Back to …" button.
 func layoutSlotContent(gtx *layout.Context, env *kit.Env, bodyFn func(*layout.Context) layout.Dimensions) layout.Dimensions {
 	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
-	return layout.Inset{Top: theme.SpaceLG, Bottom: theme.SpaceLG, Left: theme.SpaceLG, Right: theme.SpaceLG}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+	return layout.UniformInset(slotContentInset).Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
 		local := gtx
 		return bodyFn(&local)
 	})

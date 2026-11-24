@@ -198,18 +198,26 @@ func (v *accountsView) rigidBanner(env *kit.Env, sc *screens, msg string) layout
 	})
 }
 
+// The account card's padding and the gap under its header (desktop-app §5.5:
+// vendor name space.md above the first line row). Named so the hover tests
+// derive row positions from the same values the layout uses.
+const (
+	accountCardPadding = theme.SpaceLG
+	accountHeaderGap   = theme.SpaceMD
+)
+
 func (v *accountsView) layoutAccountCard(gtx *layout.Context, env *kit.Env, sc *screens, acc *client.Account) layout.Dimensions {
 	w := v.widgetsFor(acc.Vendor)
 	local := *gtx
 	local.Constraints.Min.X = local.Constraints.Max.X
-	dims, _, err := w.card.Layout(env, &local, kit.CardProps{}, func(gtx layout.Context) layout.Dimensions {
+	dims, _, err := w.card.Layout(env, &local, kit.CardProps{Padding: accountCardPadding}, func(gtx layout.Context) layout.Dimensions {
 		children := []layout.FlexChild{
 			rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 				d := v.layoutCardHeader(gtx, env, sc, w, acc)
 				w.headerH = d.Size.Y
 				return d
 			}),
-			spacerH(theme.SpaceMD),
+			spacerH(accountHeaderGap),
 		}
 		children = append(children, layoutQuotaWindows(env, w, acc, gtx.Now)...)
 		if login, ok := sc.accounts.Login(acc.Vendor); ok && login.Active() {

@@ -345,15 +345,15 @@ func assertAccountCardTextsAndTooltip(t *testing.T) {
 	if rh == nil || rh.size.X <= 0 || rh.size.Y <= 0 {
 		t.Fatalf("missing or empty five_hour rowHover state: %+v", rh)
 	}
-	insetLG := 2 * int(theme.SpaceLG) // layoutSlotContent SpaceLG + Card SpaceLG at 1.0 scale
-	hoverX := float32(insetLG + rh.size.X/2)
-	hoverY := float32(insetLG + w.headerH + int(theme.SpaceMD) + rh.size.Y/2)
-	router.Queue(pointer.Event{Kind: pointer.Move, Position: f32.Pt(hoverX, hoverY)})
+	// The view frame runs at PxPerDp 1, so dp values are pixels here.
+	inset := int(slotContentInset + accountCardPadding)
+	hover := f32.Pt(float32(inset+rh.size.X/2), float32(inset+w.headerH+int(accountHeaderGap)+rh.size.Y/2))
+	router.Queue(pointer.Event{Kind: pointer.Move, Position: hover})
 	for _, dt := range []time.Duration{0, 16 * time.Millisecond, 600 * time.Millisecond} {
 		runViewFrame(now.Add(dt))
 	}
 	if !rh.hovered {
-		t.Fatal("pointer.Move at (400, 84) did not hover five_hour row")
+		t.Fatalf("pointer.Move at %v did not hover five_hour row", hover)
 	}
 	if env.TooltipRect().Empty() {
 		t.Fatal("hovering quota window row for 600 ms did not open kit Tooltip")
