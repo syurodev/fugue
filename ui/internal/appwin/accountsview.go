@@ -23,6 +23,7 @@ type accountCardWidgets struct {
 	progress    map[string]*kit.ProgressState
 	rowHover    map[string]*windowRowHover
 	linkButtons map[string]*kit.ButtonState
+	headerH     int
 }
 
 // accountsView owns the vendor accounts, F9.10 quota windows, and CLI login
@@ -203,7 +204,11 @@ func (v *accountsView) layoutAccountCard(gtx *layout.Context, env *kit.Env, sc *
 	local.Constraints.Min.X = local.Constraints.Max.X
 	dims, _, err := w.card.Layout(env, &local, kit.CardProps{}, func(gtx layout.Context) layout.Dimensions {
 		children := []layout.FlexChild{
-			rigidWidget(func(gtx *layout.Context) layout.Dimensions { return v.layoutCardHeader(gtx, env, sc, w, acc) }),
+			rigidWidget(func(gtx *layout.Context) layout.Dimensions {
+				d := v.layoutCardHeader(gtx, env, sc, w, acc)
+				w.headerH = d.Size.Y
+				return d
+			}),
 			spacerH(theme.SpaceMD),
 		}
 		children = append(children, layoutQuotaWindows(env, w, acc, gtx.Now)...)

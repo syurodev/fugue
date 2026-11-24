@@ -322,19 +322,12 @@ func assertAccountCardTextsAndTooltip(t *testing.T) {
 	env.RunRecorder = nil
 	_ = runs
 
-	// Simulate pointer hover inside the claude five_hour row region and advance
-	// past tooltipHoverDelay (500 ms) so Tooltip opens.
-	w := sc.accountsView.widgetsFor(client.VendorClaude)
-	rh := w.rowHover[testWinFiveHour]
-	if rh == nil {
-		t.Fatal("missing five_hour rowHover state")
-	}
-	router.Queue(pointer.Event{Kind: pointer.Move, Position: f32.Pt(400, 90)})
+	// Warm up one frame of accountsView.layout so headerH and rh.size are
+	// measured, then hover the centre of the laid-out five_hour row.
 	var ops op.Ops
 	now := time.Unix(1_700_000_000, 0)
-	for _, dt := range []time.Duration{0, 16 * time.Millisecond, 600 * time.Millisecond} {
+	runViewFrame := func(tNow time.Time) {
 		ops.Reset()
-		tNow := now.Add(dt)
 		gtx := layout.Context{
 			Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}),
 			Constraints: layout.Exact(image.Pt(shotWindowW, shotWindowH)),
@@ -342,12 +335,22 @@ func assertAccountCardTextsAndTooltip(t *testing.T) {
 		}
 		env.Begin(tNow)
 		env.TrackInput(&gtx)
-		// The view renders in its own frame: the hover targets the row's
-		// own geometry, independent of where the shell's grid puts the
-		// accounts slot (§5.3).
 		sc.accountsView.layout(&gtx, env, sc)
 		env.FrameEnd(&gtx)
 		router.Frame(&ops)
+	}
+	runViewFrame(now)
+	w := sc.accountsView.widgetsFor(client.VendorClaude)
+	rh := w.rowHover[testWinFiveHour]
+	if rh == nil || rh.size.X <= 0 || rh.size.Y <= 0 {
+		t.Fatalf("missing or empty five_hour rowHover state: %+v", rh)
+	}
+	insetLG := 2 * int(theme.SpaceLG) // layoutSlotContent SpaceLG + Card SpaceLG at 1.0 scale
+	hoverX := float32(insetLG + rh.size.X/2)
+	hoverY := float32(insetLG + w.headerH + int(theme.SpaceMD) + rh.size.Y/2)
+	router.Queue(pointer.Event{Kind: pointer.Move, Position: f32.Pt(hoverX, hoverY)})
+	for _, dt := range []time.Duration{0, 16 * time.Millisecond, 600 * time.Millisecond} {
+		runViewFrame(now.Add(dt))
 	}
 	if !rh.hovered {
 		t.Fatal("pointer.Move at (400, 84) did not hover five_hour row")

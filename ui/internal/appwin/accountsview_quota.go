@@ -50,6 +50,7 @@ type windowRowHover struct {
 	hovered bool
 	hasPtr  bool
 	ptr     image.Point
+	size    image.Point
 }
 
 func layoutQuotaWindows(env *kit.Env, w *accountCardWidgets, acc *client.Account, now time.Time) []layout.FlexChild {
@@ -141,6 +142,7 @@ func layoutWindowRow(env *kit.Env, gtx *layout.Context, prog *kit.ProgressState,
 		}),
 	)
 
+	rh.size = dims.Size
 	updateWindowRowHover(gtx, rh, dims.Size)
 	if tip := formatWindowTooltip(win.ResetsAt, gateFrac, now); tip != "" {
 		env.TooltipAnchor(&rh.tag, image.Rectangle{Max: dims.Size}, rh.hovered, false, rh.hasPtr, rh.ptr, kit.TooltipProps{Text: tip})
