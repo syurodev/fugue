@@ -45,17 +45,14 @@ func classifyLogin(res *vendor.CommandResult) vendor.LoginState {
 	return vendor.LoginUnknown
 }
 
-// The login command (F9.10b, VR-03): `claude auth login`, the CLI's own
-// login, default claude.ai flow (Q-112). The CLI prints its OAuth URL and
-// opens a browser; the host relays the URL verbatim, opens nothing and
-// relies on the browser's localhost callback. The CLI can also finish by
-// reading a code pasted into its own stdin — a channel Fugue does not relay
-// — so a login still running at the timeout ends needs_terminal: the user
-// finishes it in their own terminal.
+// The login command (F9.10b, VR-03 v0.6): `claude auth login`, the CLI's own
+// login, default claude.ai flow (Q-112 revised). The CLI prints its OAuth URL
+// and opens a browser; the host relays the URL verbatim, opens nothing, and
+// relays any pasted code from the app to the CLI's stdin pipe.
 
 // LoginCommand implements vendor.LoginStarter.
 func (a *Adapter) LoginCommand() vendor.LoginCommand {
-	return vendor.LoginCommand{NeedsTerminal: true}
+	return vendor.LoginCommand{AcceptsCode: true}
 }
 
 // StartLogin implements vendor.LoginStarter.

@@ -90,3 +90,35 @@ func TestAccountsNonLocalPrincipalIsDeniedOnRPCAndTopic(t *testing.T) {
 	}
 	assertConnectCode(t, stream.Err(), connect.CodePermissionDenied, errcode.PermissionDenied)
 }
+
+func TestSubmitLoginCodeValidationAndPrincipal(t *testing.T) {
+	t.Parallel()
+	v := startVendorHost(t, true)
+	_, err := v.accounts.SubmitLoginCode(t.Context(), connect.NewRequest(&accountsv1.SubmitLoginCodeRequest{
+		CommandId: "cmd-1",
+		LoginId:   "login-1",
+		Code:      "",
+	}))
+	assertConnectCode(t, err, connect.CodeInvalidArgument, errcode.InvalidArgument)
+
+	_, err = v.accounts.SubmitLoginCode(t.Context(), connect.NewRequest(&accountsv1.SubmitLoginCodeRequest{
+		CommandId: "cmd-2",
+		LoginId:   "login-1",
+		Code:      "missing-login#state",
+	}))
+	assertConnectCode(t, err, connect.CodeFailedPrecondition, errcode.FailedPrecondition)
+
+	v.srv.mu.Lock()
+	for _, st := range v.srv.conns {
+		st.mu.Lock()
+		st.kind = app.ClientKind("session")
+		st.mu.Unlock()
+	}
+	v.srv.mu.Unlock()
+	_, err = v.accounts.SubmitLoginCode(t.Context(), connect.NewRequest(&accountsv1.SubmitLoginCodeRequest{
+		CommandId: "cmd-3",
+		LoginId:   "login-1",
+		Code:      "code#state",
+	}))
+	assertConnectCode(t, err, connect.CodePermissionDenied, errcode.PermissionDenied)
+}

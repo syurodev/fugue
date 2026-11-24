@@ -122,3 +122,15 @@ func TestLoginProcessEnvCarriesNoHostSecret(t *testing.T) {
 		}
 	}
 }
+
+func TestClaudeLoginCommandAcceptsCode(t *testing.T) {
+	t.Parallel()
+	a := &Adapter{}
+	cmd := a.LoginCommand()
+	if !cmd.AcceptsCode {
+		t.Fatal("claude LoginCommand().AcceptsCode = false, want true")
+	}
+	if cmd.NeedsTerminal {
+		t.Fatal("claude LoginCommand().NeedsTerminal = true, want false")
+	}
+}

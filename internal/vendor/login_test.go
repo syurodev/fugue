@@ -6,6 +6,7 @@ package vendor_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/testutil"
@@ -190,5 +192,34 @@ func TestStartLoginProcessEnvIsPassedUnchanged(t *testing.T) {
 	}
 	if strings.Contains(env, "FUGUE") {
 		t.Errorf("login environment carries a Fugue variable: %q", env)
+	}
+}
+
+func TestStartLoginProcessRelaysStderrAndWritesCode(t *testing.T) {
+	t.Parallel()
+	path := writeLoginCLI(t, `
+printf 'Paste code here if prompted > '
+IFS= read -r code
+if [ "$code" != "ok#state" ]; then
+  printf '%s\n' 'bad code' >&2
+  exit 1
+fi
+printf '%s\n' 'stderr ok' >&2
+exit 0
+`)
+	run := startFakeLogin(t, path)
+	if err := run.WriteCode(redact.NewSecret("ok#state")); err != nil {
+		t.Fatalf("WriteCode: %v", err)
+	}
+	out := drainLoginLines(t, run)
+	if !strings.Contains(out, "stderr ok") {
+		t.Fatalf("relayed lines = %q, want stderr line", out)
+	}
+	end := run.End()
+	if !end.Ran || end.ExitCode != 0 {
+		t.Fatalf("login end = %+v, want ran exit 0", end)
+	}
+	if err := run.WriteCode(redact.NewSecret("after#exit")); !errors.Is(err, process.ErrStdinClosed) {
+		t.Fatalf("WriteCode after exit = %v, want ErrStdinClosed", err)
 	}
 }

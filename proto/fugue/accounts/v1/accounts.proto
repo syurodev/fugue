@@ -62,6 +62,14 @@ message CancelLoginRequest {
 
 message CancelLoginResponse {}
 
+message SubmitLoginCodeRequest {
+  string command_id = 1;
+  string login_id = 2;
+  string code = 3;
+}
+
+message SubmitLoginCodeResponse {}
+
 // AccountService reports the vendor accounts (F9.10a) and starts the vendor
 // CLIs' own login commands (F9.10b). The `quota` topic carries the same
 // account shape as JSON: a snapshot {"accounts": [...]} and one event per
@@ -79,4 +87,7 @@ service AccountService {
   rpc StartLogin(StartLoginRequest) returns (StartLoginResponse);
   // CancelLogin stops the running login process of one vendor.
   rpc CancelLogin(CancelLoginRequest) returns (CancelLoginResponse);
+  // SubmitLoginCode relays a pasted browser code to a running login
+  // process's stdin (host-api v0.22 §5.5).
+  rpc SubmitLoginCode(SubmitLoginCodeRequest) returns (SubmitLoginCodeResponse);
 }

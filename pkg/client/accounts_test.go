@@ -150,6 +150,13 @@ func (f *accountsFake) CancelLogin(_ context.Context, req *connect.Request[accou
 	return connect.NewResponse(&accountsv1.CancelLoginResponse{}), nil
 }
 
+func (f *accountsFake) SubmitLoginCode(_ context.Context, req *connect.Request[accountsv1.SubmitLoginCodeRequest]) (*connect.Response[accountsv1.SubmitLoginCodeResponse], error) {
+	if req.Msg.GetCommandId() == "" || req.Msg.GetLoginId() == "" || req.Msg.GetCode() == "" {
+		return nil, scriptedAccountsError(connect.CodeInvalidArgument, "invalid_argument")
+	}
+	return connect.NewResponse(&accountsv1.SubmitLoginCodeResponse{}), nil
+}
+
 func scriptedAccountsError(cc connect.Code, code string) error {
 	cerr := connect.NewError(cc, errClientAccScripted)
 	detail, err := connect.NewErrorDetail(&hostv1.ErrorDetail{Code: code})
@@ -301,6 +308,10 @@ func TestAccountsClientMethodsOverRealSocket(t *testing.T) {
 		t.Fatal("CancelLogin(claude) succeeded, want typed not_found")
 	} else if code, ok := client.AccountsCodeOf(claudeErr); !ok || code != "not_found" {
 		t.Fatalf("CancelLogin(claude) code = (%q, %v), want not_found", code, ok)
+	}
+
+	if submitErr := c.SubmitLoginCode(t.Context(), "cmd-1", testAccLoginID, "code#state"); submitErr != nil {
+		t.Fatalf("SubmitLoginCode: %v", submitErr)
 	}
 
 	assertQuotaTopicStream(t, c, wantAccounts)

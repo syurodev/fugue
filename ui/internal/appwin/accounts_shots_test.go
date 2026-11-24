@@ -49,6 +49,7 @@ type fakeAppAccountsClient struct {
 	accounts    []client.Account
 	startCalls  []string
 	cancelCalls []string
+	submitCalls []string
 }
 
 func (f *fakeAppAccountsClient) HostStatus(context.Context) (client.HostStatus, error) {
@@ -74,6 +75,13 @@ func (f *fakeAppAccountsClient) CancelLogin(_ context.Context, vendor string) er
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.cancelCalls = append(f.cancelCalls, vendor)
+	return nil
+}
+
+func (f *fakeAppAccountsClient) SubmitLoginCode(_ context.Context, commandID, loginID, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.submitCalls = append(f.submitCalls, commandID+":"+loginID)
 	return nil
 }
 
@@ -490,5 +498,131 @@ func assertLoginOutcomesAndCancel(t *testing.T, env *kit.Env, sc *screens, route
 	runAppFrame(env, sc, router, image.Pt(shotWindowW, shotWindowH))
 	if sc.lastErr != "" {
 		t.Fatalf("unexpected screen error rendering login outcomes: %s", sc.lastErr)
+	}
+}
+
+const testClaudeLoginID = "login-claude-1"
+
+func claudeLoginCodeShotSpecs() []shotSpec {
+	all := buildShotMatrix(
+		"accounts-login-code-running",
+		"accounts-login-code-sent",
+		"accounts-login-code-failed",
+	)
+	specs := make([]shotSpec, 0, len(all))
+	for _, s := range all {
+		if s.uiScale >= 1.0 {
+			specs = append(specs, s)
+		}
+	}
+	return specs
+}
+
+func TestDAE18ClaudeLoginCodeBlockAndGoldens(t *testing.T) {
+	t.Parallel()
+	assertClaudeLoginCodeSubmitAndRetry(t)
+
+	win, err := glwin.Open(shotWindowW, shotWindowH)
+	if err != nil {
+		t.Fatalf("open headless window: %v", err)
+	}
+	for _, spec := range claudeLoginCodeShotSpecs() {
+		env := newAccountsTestEnv(t, spec.light, spec.uiScale)
+		sc := buildClaudeLoginCodeScreens(t, spec.scene)
+		img := renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), spec.name)
+		if sc.lastErr != "" {
+			t.Fatalf("shot %s recorded error: %s", spec.name, sc.lastErr)
+		}
+		if isUniformRGBA(img) {
+			t.Fatalf("shot %s rendered uniform/blank image", spec.name)
+		}
+		shottest.Compare(t, spec.name, img)
+	}
+}
+
+func seedClaudeLoginProgress(t *testing.T, sc *screens, state, prompt string) {
+	t.Helper()
+	ev, err := json.Marshal(client.LoginProgress{
+		Vendor:  client.VendorClaude,
+		LoginID: testClaudeLoginID,
+		State:   state,
+		Prompt:  prompt,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.applyLoginDelivery(hostconn.Update{
+		Topic: topicLogin,
+		Event: &client.Event{Sequence: 2, Type: client.EventLoginProgress, Payload: ev},
+	})
+}
+
+func buildClaudeLoginCodeScreens(t *testing.T, scene string) *screens {
+	t.Helper()
+	ac := &fakeAppAccountsClient{inc: testAccInc}
+	m := hostconn.NewManager(&hostconn.Config{})
+	sc := newScreens(m, &fakeFetcher{}, session.NewPoster(m.Client), workspace.NewMutator(func() workspace.MutatorClient { return nil }))
+	sc.vault.ApplyStatus(vault.Status{State: client.VaultStateUnlocked, Revision: 1, Incarnation: testAccInc})
+	w := accounts.NewWorker(func() accounts.Client { return ac }, nil)
+	w.Start(t.Context())
+	t.Cleanup(w.Stop)
+	sc.accountsWorker = w
+
+	snap, err := json.Marshal(map[string]any{
+		"accounts": []client.Account{
+			{Vendor: client.VendorClaude, State: client.AccountStateNeedsLogin, Login: client.AccountLoginLoggedOut},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sc.applyQuotaDelivery(hostconn.Update{
+		Topic:    topicQuota,
+		Snapshot: &client.Snapshot{Incarnation: testAccInc, Sequence: 1, State: snap},
+	})
+
+	switch scene {
+	case "accounts-login-code-running":
+		seedClaudeLoginProgress(t, sc, client.LoginStateStarted, "")
+	case "accounts-login-code-sent":
+		seedClaudeLoginProgress(t, sc, client.LoginStateWaiting,
+			"Opening browser to sign in…\nIf the browser didn't open, visit:\nhttps://claude.ai/oauth/authorize?code=true")
+		cmdID := sc.accounts.BeginSubmitLoginCode(client.VendorClaude, "cmd-sent")
+		sc.accounts.ApplySubmitLoginCodeResult(&accounts.Result{
+			Kind: accounts.OpSubmitLoginCode, Vendor: client.VendorClaude, CommandID: cmdID,
+		})
+	case "accounts-login-code-failed":
+		seedClaudeLoginProgress(t, sc, client.LoginStateFailed, "Couldn't log in: That code wasn't accepted.")
+	}
+	openVisibleSlot(sc, SlotRef{Kind: KindAccounts})
+	return sc
+}
+
+func assertClaudeLoginCodeSubmitAndRetry(t *testing.T) {
+	t.Helper()
+	sc := buildClaudeLoginCodeScreens(t, "accounts-login-code-running")
+	w := sc.accountsView.widgetsFor(client.VendorClaude)
+	w.codeField.SetText("pasted-code#state-1")
+	entry, ok := sc.accounts.Login(client.VendorClaude)
+	if !ok {
+		t.Fatal("missing claude login entry")
+	}
+	sc.accountsView.submitLoginCode(sc, w, client.VendorClaude, &entry)
+	if got := w.codeField.Text(); got != "" {
+		t.Fatalf("codeField after submit = %q, want cleared", got)
+	}
+	select {
+	case res := <-sc.accountsWorker.Results():
+		sc.applyAccountsResults([]accounts.Result{res})
+	case <-t.Context().Done():
+		t.Fatalf("timed out waiting for SubmitLoginCode: %v", t.Context().Err())
+	}
+	entry, _ = sc.accounts.Login(client.VendorClaude)
+	if !entry.CodeSent {
+		t.Fatal("expected CodeSent = true after successful submit")
+	}
+	_, summary := loginStatePresentation(client.VendorClaude, &entry)
+	if summary != claudeCodeSentLabel {
+		t.Fatalf("summary = %q, want %q", summary, claudeCodeSentLabel)
 	}
 }

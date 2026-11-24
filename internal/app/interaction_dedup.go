@@ -12,37 +12,37 @@ const (
 	defaultDedupTTL      = 10 * time.Minute
 )
 
-type dedupRecord struct {
+type dedupRecord[T any] struct {
 	commandID string
-	result    AnswerInteractionResult
+	result    T
 	cachedAt  time.Time
 }
 
-type commandDedupCache struct {
+type dedupCache[T any] struct {
 	mu       sync.Mutex
 	capacity int
 	ttl      time.Duration
 	clock    clock.Clock
-	entries  map[string]*dedupRecord
-	records  []*dedupRecord
+	entries  map[string]*dedupRecord[T]
+	records  []*dedupRecord[T]
 }
 
-func newCommandDedupCache(clk clock.Clock, capacity int, ttl time.Duration) *commandDedupCache {
+func newDedupCache[T any](clk clock.Clock, capacity int, ttl time.Duration) *dedupCache[T] {
 	if capacity <= 0 {
 		capacity = defaultDedupCapacity
 	}
 	if ttl <= 0 {
 		ttl = defaultDedupTTL
 	}
-	return &commandDedupCache{
+	return &dedupCache[T]{
 		capacity: capacity,
 		ttl:      ttl,
 		clock:    clk,
-		entries:  map[string]*dedupRecord{},
+		entries:  map[string]*dedupRecord[T]{},
 	}
 }
 
-func (c *commandDedupCache) Get(commandID string) (AnswerInteractionResult, bool) {
+func (c *dedupCache[T]) Get(commandID string) (T, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -51,19 +51,20 @@ func (c *commandDedupCache) Get(commandID string) (AnswerInteractionResult, bool
 
 	rec, ok := c.entries[commandID]
 	if !ok {
-		return AnswerInteractionResult{}, false
+		var zero T
+		return zero, false
 	}
 	return rec.result, true
 }
 
-func (c *commandDedupCache) Put(commandID string, result AnswerInteractionResult) {
+func (c *dedupCache[T]) Put(commandID string, result T) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	now := c.clock.Now().UTC()
 	c.evictExpiredLocked(now)
 
-	rec := &dedupRecord{
+	rec := &dedupRecord[T]{
 		commandID: commandID,
 		result:    result,
 		cachedAt:  now,
@@ -83,7 +84,7 @@ func (c *commandDedupCache) Put(commandID string, result AnswerInteractionResult
 	c.records = append(c.records, rec)
 }
 
-func (c *commandDedupCache) evictExpiredLocked(now time.Time) {
+func (c *dedupCache[T]) evictExpiredLocked(now time.Time) {
 	cutoff := now.Add(-c.ttl)
 	validIdx := len(c.records)
 	for i, r := range c.records {
@@ -102,8 +103,15 @@ func (c *commandDedupCache) evictExpiredLocked(now time.Time) {
 	}
 }
 
-type inflightCmd struct {
+type inflightCommand[T any] struct {
 	done   chan struct{}
-	result AnswerInteractionResult
+	result T
 	err    error
+}
+
+type commandDedupCache = dedupCache[AnswerInteractionResult]
+type inflightCmd = inflightCommand[AnswerInteractionResult]
+
+func newCommandDedupCache(clk clock.Clock, capacity int, ttl time.Duration) *commandDedupCache {
+	return newDedupCache[AnswerInteractionResult](clk, capacity, ttl)
 }

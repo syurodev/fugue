@@ -20,6 +20,22 @@ import (
 
 var errBlockedHTTPSURL = errors.New("only valid https URLs may be opened")
 
+const (
+	claudeCodeGuidanceLine = "Finish in the browser window Claude opened; if the page shows a code, paste it here"
+	claudeFallbackURLLabel = "Open sign-in page (shows a code to paste here)"
+	claudeCodeSentLabel    = "Code sent, waiting for Claude"
+	claudeSignInAgainLabel = "Sign in again"
+)
+
+func vendorAcceptsCode(vendor string) bool {
+	return vendor == client.VendorClaude
+}
+
+func (v *accountsView) nextCodeCommandID() string {
+	v.codeCmdSeq++
+	return fmt.Sprintf("login-code-%d", v.codeCmdSeq)
+}
+
 func (v *accountsView) layoutLoginSection(env *kit.Env, sc *screens, w *accountCardWidgets, vendor string, login *accounts.LoginEntry) []layout.FlexChild {
 	c := env.Th.Chrome()
 	tagProps, summary := loginStatePresentation(vendor, login)
@@ -50,6 +66,9 @@ func (v *accountsView) layoutLoginSection(env *kit.Env, sc *screens, w *accountC
 		children = append(children, spacerH(theme.SpaceXS),
 			rigidLabel(env, cliTok, cliCol, "Terminal command: "+terminalLoginCommand(vendor)))
 	}
+	if login.Active() && vendorAcceptsCode(vendor) {
+		children = append(children, v.layoutLoginCodeControls(env, sc, w, vendor, login)...)
+	}
 	if login.Prompt != "" {
 		children = append(children,
 			spacerH(theme.SpaceSM),
@@ -57,15 +76,80 @@ func (v *accountsView) layoutLoginSection(env *kit.Env, sc *screens, w *accountC
 			spacerH(theme.SpaceXXS),
 			rigidParagraph(env, cliTok, cliCol, login.Prompt),
 		)
-		children = append(children, v.layoutHTTPSLinks(env, sc, w, login.Prompt)...)
+		children = append(children, v.layoutHTTPSLinks(env, sc, w, vendor, login.Prompt)...)
 	}
 	return children
+}
+
+func (v *accountsView) layoutLoginCodeControls(env *kit.Env, sc *screens, w *accountCardWidgets, vendor string, login *accounts.LoginEntry) []layout.FlexChild {
+	c := env.Th.Chrome()
+	children := []layout.FlexChild{
+		spacerH(theme.SpaceSM),
+		rigidParagraph(env, theme.TypeSmall(), c.Fg, claudeCodeGuidanceLine),
+		spacerH(theme.SpaceXS),
+		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.End}.Layout(*gtx,
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					local := gtx
+					props := kit.TextFieldProps{
+						Placeholder: "Paste code here…",
+						Variant:     kit.TextFieldSecret,
+						NoReveal:    true,
+						Error:       login.CodeError,
+						Disabled:    login.SubmittingCode,
+					}
+					ev, err := w.codeField.Layout(env, &local, &props)
+					sc.fail(err)
+					if ev.Submitted {
+						v.submitLoginCode(sc, w, vendor, login)
+					}
+					return w.codeField.Measure(env, &local, &props)
+				}),
+				spacerW(theme.SpaceSM),
+				rigidInboxButton(env, sc.fail, w.submitCodeBtn, kit.ButtonProps{
+					Text:     "Submit",
+					Variant:  kit.Primary,
+					Size:     kit.SizeSM,
+					Busy:     login.SubmittingCode,
+					Disabled: sc.accountsWorker == nil || login.LoginID == "",
+				}, func() {
+					v.submitLoginCode(sc, w, vendor, login)
+				}),
+			)
+		}),
+	}
+	if login.CodeSent {
+		children = append(children, spacerH(theme.SpaceXS),
+			rigidParagraph(env, theme.TypeSmall(), c.FgMuted, claudeCodeSentLabel))
+	}
+	return children
+}
+
+func (v *accountsView) submitLoginCode(sc *screens, w *accountCardWidgets, vendor string, login *accounts.LoginEntry) {
+	if sc.accountsWorker == nil || login.LoginID == "" || login.SubmittingCode {
+		return
+	}
+	code := strings.TrimSpace(w.codeField.Text())
+	if code == "" {
+		return
+	}
+	w.codeField.SetText("")
+	w.codeField = kit.NewTextFieldState()
+	cmdID := sc.accounts.BeginSubmitLoginCode(vendor, v.nextCodeCommandID())
+	req := accounts.Request{
+		Kind:      accounts.OpSubmitLoginCode,
+		Vendor:    vendor,
+		CommandID: cmdID,
+		LoginID:   login.LoginID,
+		Code:      code,
+	}
+	sc.accountsWorker.Do(&req)
 }
 
 func loginStatePresentation(vendor string, login *accounts.LoginEntry) (kit.TagProps, string) {
 	switch login.State {
 	case client.LoginStateStarted, client.LoginStateWaiting:
-		return kit.TagProps{Text: "Login running", Variant: kit.TagStatus, Status: theme.StatusInfo}, runningLoginHint(vendor)
+		return kit.TagProps{Text: "Login running", Variant: kit.TagStatus, Status: theme.StatusInfo}, runningLoginMessage(vendor, login)
 	case client.LoginStateSucceeded:
 		return kit.TagProps{Text: "Login succeeded", Variant: kit.TagStatus, Status: theme.StatusSuccess}, "Account login verified."
 	case client.LoginStateCancelled:
@@ -75,20 +159,36 @@ func loginStatePresentation(vendor string, login *accounts.LoginEntry) (kit.TagP
 	case client.LoginStateNeedsTerminal:
 		return kit.TagProps{Text: "Needs terminal", Variant: kit.TagStatus, Status: theme.StatusWarning}, "Browser callback did not finish within the 15-minute timeout. Run the command below in a terminal."
 	case accounts.LoginStateUnsupported:
-		msg := login.ErrorMessage
-		if msg == "" {
-			msg = vendor + " has no login command; sign in from the " + vendor + " app."
-		}
-		return kit.TagProps{Text: "Unsupported", Variant: kit.TagStatus, Status: theme.StatusWarning}, msg
+		return kit.TagProps{Text: "Unsupported", Variant: kit.TagStatus, Status: theme.StatusWarning}, unsupportedLoginMessage(vendor, login)
 	case client.LoginStateFailed:
-		msg := login.ErrorMessage
-		if msg == "" {
-			msg = "CLI login failed."
-		}
-		return kit.TagProps{Text: failedLabel, Variant: kit.TagStatus, Status: theme.StatusDanger}, msg
+		return kit.TagProps{Text: failedLabel, Variant: kit.TagStatus, Status: theme.StatusDanger}, failedLoginMessage(vendor, login)
 	default:
 		return kit.TagProps{Text: accounts.AccountStateUnknown, Variant: kit.TagNeutral}, "Login state unknown."
 	}
+}
+
+func runningLoginMessage(vendor string, login *accounts.LoginEntry) string {
+	if vendorAcceptsCode(vendor) && login.CodeSent {
+		return claudeCodeSentLabel
+	}
+	return runningLoginHint(vendor)
+}
+
+func unsupportedLoginMessage(vendor string, login *accounts.LoginEntry) string {
+	if login.ErrorMessage != "" {
+		return login.ErrorMessage
+	}
+	return vendor + " has no login command; sign in from the " + vendor + " app."
+}
+
+func failedLoginMessage(vendor string, login *accounts.LoginEntry) string {
+	if login.ErrorMessage != "" {
+		return login.ErrorMessage
+	}
+	if vendorAcceptsCode(vendor) {
+		return claudeSignInAgainLabel
+	}
+	return "CLI login failed."
 }
 
 func runningLoginHint(vendor string) string {
@@ -109,10 +209,22 @@ func terminalLoginCommand(vendor string) string {
 	return vendor + " login"
 }
 
-func (v *accountsView) layoutHTTPSLinks(env *kit.Env, sc *screens, w *accountCardWidgets, prompt string) []layout.FlexChild {
+func (v *accountsView) layoutHTTPSLinks(env *kit.Env, sc *screens, w *accountCardWidgets, vendor, prompt string) []layout.FlexChild {
 	urls := extractHTTPSURLs(prompt)
 	if len(urls) == 0 {
 		return nil
+	}
+	if vendorAcceptsCode(vendor) {
+		children := make([]layout.FlexChild, 0, len(urls)*2)
+		for _, raw := range urls {
+			btn := ensureLinkButton(w.linkButtons, raw)
+			u := raw
+			children = append(children, spacerH(theme.SpaceXS),
+				rigidInboxButton(env, sc.fail, btn, kit.ButtonProps{
+					Text: claudeFallbackURLLabel, Variant: kit.Secondary, Size: kit.SizeSM,
+				}, func() { v.openHTTPS(u) }))
+		}
+		return children
 	}
 	secTok, secCol := accountLoginSectionLabelStyle(env.Th)
 	cliTok, cliCol := accountLoginCLITextStyle(env.Th)

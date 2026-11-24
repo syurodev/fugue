@@ -65,6 +65,9 @@ type Options struct {
 	ProcRoot string
 	// Probe caches the Linux systemd-run and cgroup v2 capability check across spawns.
 	Probe *SystemdProbe
+	// StderrLines exposes stderr as a LineReader via Process.Stderr() instead of
+	// draining it into StderrRing.
+	StderrLines bool
 }
 
 // ReapOptions configures host-restart reaping of a recorded process Identity.

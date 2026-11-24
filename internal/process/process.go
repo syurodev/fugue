@@ -32,6 +32,8 @@ type Process struct {
 	stdoutPipe  *outputPipe
 	stdoutR     *LineReader
 	stderrR     *os.File
+	stderrPipe  *outputPipe
+	stderrLineR *LineReader
 	stderrRing  *RingBuffer
 
 	stderrTask *supervise.Task
@@ -99,9 +101,11 @@ func Spawn(ctx context.Context, opts *Options) (*Process, error) {
 	closeQuietly(pipes.stdoutW)
 	closeQuietly(pipes.stderrW)
 
-	p := newProcess(cmd, clk, opts, pipes.stdin, pipes.stdoutR)
-	p.stderrR = pipes.stderrR
-	startStderrDrain(ctx, p, pipes.stderrR)
+	p := newProcess(cmd, clk, opts, pipes.stdin, pipes.stdoutR, pipes.stderrR)
+	if !opts.StderrLines {
+		p.stderrR = pipes.stderrR
+		startStderrDrain(ctx, p, pipes.stderrR)
+	}
 	containmentErr := attachPlatformContainment(ctx, p, &effectiveOpts, unitName, usedSystemd)
 	startWaitTask(ctx, p)
 	if containmentErr != nil {
@@ -179,10 +183,19 @@ func newProcess(
 	opts *Options,
 	stdin io.WriteCloser,
 	stdout *os.File,
+	stderr *os.File,
 ) *Process {
 	ring := NewRingBuffer(DefaultStderrRingCapacity)
 	out := newOutputPipe(stdout)
 	lineReader := NewLineReader(out, MaxFrameSize)
+	var (
+		errPipe *outputPipe
+		errLine *LineReader
+	)
+	if opts.StderrLines && stderr != nil {
+		errPipe = newOutputPipe(stderr)
+		errLine = NewLineReader(errPipe, MaxFrameSize)
+	}
 
 	return &Process{
 		cmd:          cmd,
@@ -192,6 +205,8 @@ func newProcess(
 		stdin:        stdin,
 		stdoutPipe:   out,
 		stdoutR:      lineReader,
+		stderrPipe:   errPipe,
+		stderrLineR:  errLine,
 		stderrRing:   ring,
 		exitCh:       make(chan struct{}),
 	}
@@ -294,6 +309,11 @@ func (p *Process) Identity() Identity {
 // Stdout returns the continuous frame LineReader.
 func (p *Process) Stdout() *LineReader {
 	return p.stdoutR
+}
+
+// Stderr returns the stderr LineReader when Options.StderrLines is enabled.
+func (p *Process) Stderr() *LineReader {
+	return p.stderrLineR
 }
 
 // StderrRing returns the 64 KiB ring buffer capturing stderr output.

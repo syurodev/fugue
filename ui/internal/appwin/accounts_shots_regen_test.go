@@ -4,6 +4,7 @@ package appwin
 
 import (
 	"bytes"
+	"image"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -28,6 +29,19 @@ func TestRegenerateAccountsShots(t *testing.T) {
 	}
 	for _, spec := range accountsShotSpecs() {
 		img := renderAccountsShot(t, win, spec)
+		var buf bytes.Buffer
+		if err := png.Encode(&buf, img); err != nil {
+			t.Fatalf("encode %s: %v", spec.name, err)
+		}
+		path := filepath.Join(outDir, spec.name+".png")
+		if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+			t.Fatalf("write %s: %v", path, err)
+		}
+	}
+	for _, spec := range claudeLoginCodeShotSpecs() {
+		env := newAccountsTestEnv(t, spec.light, spec.uiScale)
+		sc := buildClaudeLoginCodeScreens(t, spec.scene)
+		img := renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), spec.name)
 		var buf bytes.Buffer
 		if err := png.Encode(&buf, img); err != nil {
 			t.Fatalf("encode %s: %v", spec.name, err)

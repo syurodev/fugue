@@ -35,8 +35,10 @@ type fakeAccountsClient struct {
 	listErr     error
 	startErr    error
 	cancelErr   error
+	submitErr   error
 	startCalls  []string
 	cancelCalls []string
+	submitCalls []string
 }
 
 func (f *fakeAccountsClient) HostStatus(context.Context) (client.HostStatus, error) {
@@ -66,6 +68,13 @@ func (f *fakeAccountsClient) CancelLogin(_ context.Context, vendor string) error
 	defer f.mu.Unlock()
 	f.cancelCalls = append(f.cancelCalls, vendor)
 	return f.cancelErr
+}
+
+func (f *fakeAccountsClient) SubmitLoginCode(_ context.Context, commandID, loginID, _ string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.submitCalls = append(f.submitCalls, commandID+":"+loginID)
+	return f.submitErr
 }
 
 func mustJSON(t *testing.T, v any) []byte {
@@ -246,5 +255,63 @@ func assertUnsupportedStartLogin(t *testing.T) {
 	m.ApplyStartLoginResult(&Result{Kind: OpStartLogin, Vendor: client.VendorAGY, Code: "failed_precondition", Err: errScriptedAccounts})
 	if e, ok := m.Login(client.VendorAGY); !ok || e.State != LoginStateUnsupported || e.Active() {
 		t.Fatalf("failed_precondition login entry = %+v, want unsupported", e)
+	}
+}
+
+func TestSubmitLoginCodeModelRetryReusesCommandIDAndWorker(t *testing.T) {
+	t.Parallel()
+	assertSubmitLoginCodeModelRetry(t)
+	assertSubmitLoginCodeWorker(t)
+}
+
+func assertSubmitLoginCodeModelRetry(t *testing.T) {
+	t.Helper()
+	m := NewModel()
+	m.BeginStartLogin(client.VendorClaude)
+	m.ApplyStartLoginResult(&Result{
+		Kind:       OpStartLogin,
+		Vendor:     client.VendorClaude,
+		StartLogin: client.StartLoginResult{LoginID: "login-claude-1"},
+	})
+
+	cmd1 := m.BeginSubmitLoginCode(client.VendorClaude, "cmd-1")
+	if cmd1 != "cmd-1" {
+		t.Fatalf("first cmdID = %q, want cmd-1", cmd1)
+	}
+	m.ApplySubmitLoginCodeResult(&Result{Kind: OpSubmitLoginCode, Vendor: client.VendorClaude, CommandID: cmd1, Err: errScriptedAccounts})
+	if e, _ := m.Login(client.VendorClaude); e.CodeError == "" || e.CodeSent {
+		t.Fatalf("after failed submit = %+v, want CodeError and !CodeSent", e)
+	}
+
+	retryCmd := m.BeginSubmitLoginCode(client.VendorClaude, "cmd-2")
+	if retryCmd != "cmd-1" {
+		t.Fatalf("retry cmdID = %q, want cmd-1", retryCmd)
+	}
+	m.ApplySubmitLoginCodeResult(&Result{Kind: OpSubmitLoginCode, Vendor: client.VendorClaude, CommandID: retryCmd})
+	if e, _ := m.Login(client.VendorClaude); !e.CodeSent || e.CodeError != "" || e.PendingCodeCommandID != "" {
+		t.Fatalf("after successful submit = %+v, want CodeSent and cleared pending command_id", e)
+	}
+
+	if nextCmd := m.BeginSubmitLoginCode(client.VendorClaude, "cmd-3"); nextCmd != "cmd-3" {
+		t.Fatalf("next submit cmdID = %q, want cmd-3", nextCmd)
+	}
+}
+
+func assertSubmitLoginCodeWorker(t *testing.T) {
+	t.Helper()
+	fc := &fakeAccountsClient{inc: testInc1}
+	w := NewWorker(func() Client { return fc }, nil)
+	w.Start(t.Context())
+	defer w.Stop()
+	w.Do(&Request{Kind: OpSubmitLoginCode, Vendor: client.VendorClaude, CommandID: "cmd-w", LoginID: "login-claude-1", Code: "secret#state"})
+	res := awaitAccountsResult(t, w)
+	if res.Err != nil || res.CommandID != "cmd-w" {
+		t.Fatalf("worker OpSubmitLoginCode = %+v", res)
+	}
+	fc.mu.Lock()
+	calls := slices.Clone(fc.submitCalls)
+	fc.mu.Unlock()
+	if len(calls) != 1 || calls[0] != "cmd-w:login-claude-1" {
+		t.Fatalf("submitCalls = %+v, want [cmd-w:login-claude-1]", calls)
 	}
 }
