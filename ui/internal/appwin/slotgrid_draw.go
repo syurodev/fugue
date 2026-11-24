@@ -75,6 +75,11 @@ func (g *slotGrid) layoutArea(gtx *layout.Context, env *kit.Env, sc *screens, ar
 		for _, cg := range geom {
 			g.drawSlot(gtx, env, sc, cg.pos, cg.Rect)
 		}
+		// A slot's close button, an EmptyState's close or a view's back to
+		// chat replaces the document while the cells draw: the handles
+		// follow the columns that are left, not the count this frame
+		// planned with (FUG-64).
+		visible = min(visible, len(g.doc.Columns))
 		g.overlaySplits(gtx, env, geom, area, visible)
 	}
 	if plan.FoldedCols > 0 {
@@ -88,8 +93,14 @@ func (g *slotGrid) layoutArea(gtx *layout.Context, env *kit.Env, sc *screens, ar
 // overlaySplits lays the SplitPane handles over the boundaries: one per
 // column boundary over the columns it divides, and one per two-row column
 // over the column's rect. A moved handle writes the ratio back into the
-// weights — the split ratios are the layout (§5.3, ui-kit §6.27).
+// weights — the split ratios are the layout (§5.3, ui-kit §6.27). visible
+// is the column count the frame planned with; a close inside the frame may
+// have left fewer columns, so it never indexes past the document.
 func (g *slotGrid) overlaySplits(gtx *layout.Context, env *kit.Env, geom []cellGeom, area image.Rectangle, visible int) {
+	visible = min(visible, len(g.doc.Columns))
+	if visible <= 0 {
+		return
+	}
 	for i := range visible - 1 {
 		state, ok := g.splitC[i]
 		if !ok {
@@ -123,7 +134,8 @@ func (g *slotGrid) overlaySplits(gtx *layout.Context, env *kit.Env, geom []cellG
 // overlayRowSplit lays one two-row column's vertical SplitPane over its
 // cells and writes a moved ratio back into the row weights.
 func (g *slotGrid) overlayRowSplit(gtx *layout.Context, env *kit.Env, geom []cellGeom, visible, c int) {
-	if c >= visible || len(g.doc.Columns[c].Slots) < maxRowsPerColumn {
+	// c may name a column a close inside the frame took away (FUG-64).
+	if c < 0 || c >= visible || c >= len(g.doc.Columns) || len(g.doc.Columns[c].Slots) < maxRowsPerColumn {
 		return
 	}
 	state, ok := g.splitR[c]

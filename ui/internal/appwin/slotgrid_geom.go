@@ -133,6 +133,11 @@ func weightSum(doc LayoutDoc, first, visible int) float32 {
 // columnRatio is the boundary after column first's share of the columns it
 // divides: first's weight over the sum from first to visible.
 func columnRatio(doc LayoutDoc, first, visible int) float32 {
+	// first may name a column a close inside the frame took away (FUG-64).
+	if first < 0 || first >= len(doc.Columns) {
+		return 0
+	}
+	visible = min(visible, len(doc.Columns))
 	firstW := max(doc.Columns[first].WidthWeight, 0)
 	return firstW / weightSum(doc, first, visible)
 }
@@ -145,6 +150,11 @@ func defaultColumnRatio(first, visible int) float32 {
 // setColumnRatio writes a boundary's ratio back into the weights: first's
 // weight takes the ratio's share, the rest re-scale to the remainder.
 func (g *slotGrid) setColumnRatio(first, visible int, ratio float32) {
+	// first may name a column a close inside the frame took away (FUG-64).
+	if first < 0 || first >= len(g.doc.Columns) {
+		return
+	}
+	visible = min(visible, len(g.doc.Columns))
 	sum := weightSum(g.doc, first, visible)
 	g.doc.Columns[first].WidthWeight = ratio * sum
 	restOthers := weightSum(g.doc, first+1, visible)
