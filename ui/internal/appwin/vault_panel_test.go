@@ -1,13 +1,24 @@
 package appwin
 
 import (
+	"image"
+	"image/color"
+	"math"
 	"regexp"
 	"strings"
 	"testing"
 
+	"gioui.org/layout"
+	"gioui.org/op"
+	"gioui.org/unit"
+
 	"github.com/syurodev/fugue/pkg/client"
 
+	"github.com/syurodev/fugue/ui/internal/fonts"
+	"github.com/syurodev/fugue/ui/internal/glwin"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
+	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/vault"
 )
 
@@ -129,4 +140,83 @@ func TestHostProblemTextNamesTheFixWithoutInternalIDs(t *testing.T) {
 			t.Errorf("%s: text %q carries an internal ID", tc.name, all)
 		}
 	}
+}
+
+// TestVaultPanelIsCentredInWindow verifies that every vault gate panel is
+// centred within 1 dp of the window body's centre at both 100% and 125% UI
+// scale (FUG-68).
+func TestVaultPanelIsCentredInWindow(t *testing.T) {
+	t.Parallel()
+	win, err := glwin.Open(shotWindowW, shotWindowH)
+	if err != nil {
+		t.Fatalf("open headless window: %v", err)
+	}
+	sh, err := fonts.Shaper()
+	if err != nil {
+		t.Fatalf("build shaper: %v", err)
+	}
+	th := theme.Light(sh)
+	scenes := []string{
+		shotVaultConnecting,
+		shotVaultUnavailable,
+		shotVaultSetup,
+		shotVaultUnlock,
+		shotVaultRecovery,
+		shotVaultRecoveryKey,
+	}
+	scales := []float32{1.0, 1.25}
+	for _, scale := range scales {
+		env := &kit.Env{Th: &th, Sh: sh, UIScale: scale, ReducedMotion: true}
+		var ops op.Ops
+		gtx := layout.Context{
+			Ops:         &ops,
+			Metric:      env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}),
+			Constraints: layout.Exact(image.Pt(shotWindowW, shotWindowH)),
+		}
+		probe := buildVaultShotScreens(shotVaultUnlock)
+		barH := probe.titleBar.height(&gtx)
+		pad := gtx.Dp(theme.SpaceXS)
+		body := image.Rect(0, barH+pad, shotWindowW-pad, shotWindowH-pad)
+		bodyCenter := image.Pt(body.Min.X+body.Dx()/2, body.Min.Y+body.Dy()/2)
+		maxOffsetPx := int(math.Ceil(float64(scale)))
+
+		for _, scene := range scenes {
+			spec := shotSpec{name: scene, scene: scene, light: true, uiScale: scale}
+			img := renderVaultShot(t, win, spec)
+			bg := img.RGBAAt(0, shotWindowH-1)
+			panel := nonBackgroundBounds(img, barH, bg)
+			if panel.Empty() {
+				t.Fatalf("%s @ %.0f%%: vault panel not visible in rendered frame", scene, scale*100)
+			}
+			panelCenter := image.Pt(panel.Min.X+panel.Dx()/2, panel.Min.Y+panel.Dy()/2)
+			dx := absInt(panelCenter.X - bodyCenter.X)
+			dy := absInt(panelCenter.Y - bodyCenter.Y)
+			if dx > maxOffsetPx || dy > maxOffsetPx {
+				t.Errorf("%s @ %.0f%%: panel %v center %v not within 1 dp (%d px) of window body center %v (delta %d,%d)",
+					scene, scale*100, panel, panelCenter, maxOffsetPx, bodyCenter, dx, dy)
+			}
+		}
+	}
+}
+
+func nonBackgroundBounds(img *image.RGBA, minY int, bg color.RGBA) image.Rectangle {
+	b := img.Bounds()
+	out := image.Rectangle{Min: image.Pt(b.Max.X, b.Max.Y), Max: image.Pt(b.Min.X, b.Min.Y)}
+	found := false
+	for y := max(b.Min.Y, minY); y < b.Max.Y; y++ {
+		for x := b.Min.X; x < b.Max.X; x++ {
+			c := img.RGBAAt(x, y)
+			if absInt(int(c.R)-int(bg.R)) > 2 || absInt(int(c.G)-int(bg.G)) > 2 || absInt(int(c.B)-int(bg.B)) > 2 {
+				found = true
+				out.Min.X = min(out.Min.X, x)
+				out.Min.Y = min(out.Min.Y, y)
+				out.Max.X = max(out.Max.X, x+1)
+				out.Max.Y = max(out.Max.Y, y+1)
+			}
+		}
+	}
+	if !found {
+		return image.Rectangle{}
+	}
+	return out
 }

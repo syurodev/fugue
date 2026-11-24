@@ -359,7 +359,9 @@ func (s *screens) applyReopenAnchor(id string) {
 func (s *screens) layoutTranscriptPane(gtx *layout.Context, env *kit.Env, id string, view *transcriptview.State, items []*session.Item) {
 	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
 	if len(items) == 0 && id == "" {
-		layout.Center.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+		box := *gtx
+		box.Constraints.Min = box.Constraints.Max
+		layout.Center.Layout(box, func(gtx layout.Context) layout.Dimensions {
 			local := gtx
 			dims, _, err := s.emptyTranscript.Layout(env, &local, &kit.EmptyStateProps{
 				Title:       "Select a session",
