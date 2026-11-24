@@ -74,6 +74,7 @@ const (
 	IconColumns2       IconName = "columns-2"
 	IconPanelLeft      IconName = "panel-left"
 	IconAppWindow      IconName = "app-window"
+	IconStar           IconName = "star"
 )
 
 // iconGrid is the Lucide coordinate grid in dp: paths are authored on it.
@@ -129,6 +130,7 @@ func pathOf(n IconName) (string, error) {
 		IconColumns2:       icondata.Columns2,
 		IconPanelLeft:      icondata.PanelLeft,
 		IconAppWindow:      icondata.WindowFrame,
+		IconStar:           icondata.Star,
 	}
 	if p, ok := paths[n]; ok {
 		return p, nil

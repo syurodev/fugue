@@ -88,7 +88,7 @@ func arrangeMenuItems(doc LayoutDoc, p Pos) []kit.MenuItem {
 			Shortcut: kit.Shortcut{Mods: kit.ModPrimary | kit.ModShift, Key: kit.KeyEnter},
 		},
 		kit.MenuItem{ID: menuIDSplit, Label: "Split", Icon: kit.IconColumns2, Disabled: !splitable},
-		kit.MenuItem{ID: menuIDMakeMain, Label: "Make main", Icon: kit.IconPanelLeft},
+		kit.MenuItem{ID: menuIDMakeMain, Label: "Make main", Icon: kit.IconStar},
 		kit.MenuItem{ID: menuIDNewWindow, Label: "Open in new window", Icon: kit.IconAppWindow},
 	)
 }

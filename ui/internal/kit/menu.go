@@ -339,7 +339,7 @@ func (m *MenuState) place(env *Env, gtx *layout.Context, p MenuProps) error {
 				pos, up := placeBelow(p.anchorFor(size.X), size, win, gap)
 				lv.setRect(pos, size, image.Pt(0, dirOf(up)))
 			default:
-				pos, left := placeBeside(m.lv[k-1].parentItem(), size, win, 0)
+				pos, left := placeBeside(m.lv[k-1].parentItem(), size, env.windowRect(), win, 0)
 				lv.setRect(pos, size, image.Pt(dirOf(left), 0))
 			}
 		}

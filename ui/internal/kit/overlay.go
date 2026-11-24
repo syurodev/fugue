@@ -136,15 +136,20 @@ func placeBelow(a image.Rectangle, size image.Point, win image.Rectangle, gap in
 }
 
 // placeBeside puts a panel of size to the right of a, its top on the
-// anchor's, and flips to the left of a when it would leave the window on the
-// right and fits on the left: a submenu opens sideways (§6.15). left reports
-// the flip.
-func placeBeside(a image.Rectangle, size image.Point, win image.Rectangle, gap int) (pos image.Point, left bool) {
+// anchor's, and flips to the left of a when it would leave the padded window
+// on the right and fits on the left (using fullWin as the hard bound so a
+// margin-shifted parent still lets its submenu flip left without overlap):
+// a submenu opens sideways (§6.15). left reports the flip.
+func placeBeside(a image.Rectangle, size image.Point, fullWin, paddedWin image.Rectangle, gap int) (pos image.Point, left bool) {
 	pos = image.Pt(a.Max.X+gap, a.Min.Y)
-	if pos.X+size.X > win.Max.X && a.Min.X-gap-size.X >= win.Min.X {
+	if pos.X+size.X > paddedWin.Max.X && a.Min.X-gap-size.X >= fullWin.Min.X {
 		pos.X, left = a.Min.X-gap-size.X, true
+		if pos.X >= paddedWin.Min.X {
+			return clampInto(pos, size, paddedWin), left
+		}
+		return clampInto(pos, size, fullWin), left
 	}
-	return clampInto(pos, size, win), left
+	return clampInto(pos, size, paddedWin), left
 }
 
 // clampInto moves a panel's top-left the least it takes to bring the panel
