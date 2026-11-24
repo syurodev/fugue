@@ -170,17 +170,24 @@ type LoginProcess struct {
 func (p *LoginProcess) Lines() <-chan string { return p.lines }
 
 // WriteCode implements LoginRun by writing one pasted code line to the child's
-// stdin pipe and zeroing its temporary buffer immediately after writing.
+// stdin pipe and zeroing the temporary byte copy it makes immediately after
+// writing (the caller's redact.Secret string is immutable in Go).
 func (p *LoginProcess) WriteCode(code redact.Secret) error {
 	p.mu.Lock()
 	proc := p.proc
 	p.mu.Unlock()
 	if proc == nil {
-		return process.ErrStdinClosed
+		return errcode.Wrap(errcode.FailedPrecondition, "write login code to process", process.ErrStdinClosed)
 	}
 	buf := []byte(code.Reveal())
 	defer clear(buf)
-	return proc.WriteLine(buf)
+	if err := proc.WriteLine(buf); err != nil {
+		if errors.Is(err, process.ErrStdinClosed) {
+			return errcode.Wrap(errcode.FailedPrecondition, "write login code to process", err)
+		}
+		return errcode.Wrap(errcode.CodeOf(err), "write login code to process", err)
+	}
+	return nil
 }
 
 // Done implements LoginRun.

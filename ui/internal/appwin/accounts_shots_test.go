@@ -583,7 +583,8 @@ func buildClaudeLoginCodeScreens(t *testing.T, scene string) *screens {
 
 	switch scene {
 	case "accounts-login-code-running":
-		seedClaudeLoginProgress(t, sc, client.LoginStateStarted, "")
+		seedClaudeLoginProgress(t, sc, client.LoginStateStarted,
+			"Opening browser to sign in…\nIf the browser didn't open, visit:\nhttps://claude.ai/oauth/authorize?code=true")
 	case "accounts-login-code-sent":
 		seedClaudeLoginProgress(t, sc, client.LoginStateWaiting,
 			"Opening browser to sign in…\nIf the browser didn't open, visit:\nhttps://claude.ai/oauth/authorize?code=true")
@@ -601,7 +602,21 @@ func buildClaudeLoginCodeScreens(t *testing.T, scene string) *screens {
 func assertClaudeLoginCodeSubmitAndRetry(t *testing.T) {
 	t.Helper()
 	sc := buildClaudeLoginCodeScreens(t, "accounts-login-code-running")
+	env := newInboxTestEnv(t)
+	router := new(input.Router)
+	runAppFrame(env, sc, router, image.Pt(shotWindowW, shotWindowH))
+
 	w := sc.accountsView.widgetsFor(client.VendorClaude)
+	const fallbackURL = "https://claude.ai/oauth/authorize?code=true"
+	if w.linkButtons[fallbackURL] == nil {
+		t.Fatalf("missing fallback URL button %q for running claude login", fallbackURL)
+	}
+	// Verify layoutHTTPSLinks for claude renders only the labelled button (no bare URL paragraph).
+	links := sc.accountsView.layoutHTTPSLinks(env, sc, w, client.VendorClaude, fallbackURL)
+	if len(links) != 2 {
+		t.Fatalf("claude layoutHTTPSLinks child count = %d, want 2 (spacer + labelled button only)", len(links))
+	}
+
 	w.codeField.SetText("pasted-code#state-1")
 	entry, ok := sc.accounts.Login(client.VendorClaude)
 	if !ok {

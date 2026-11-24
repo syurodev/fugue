@@ -109,8 +109,10 @@ type inflightCommand[T any] struct {
 	err    error
 }
 
-type commandDedupCache = dedupCache[AnswerInteractionResult]
-type inflightCmd = inflightCommand[AnswerInteractionResult]
+type (
+	commandDedupCache = dedupCache[AnswerInteractionResult]
+	inflightCmd       = inflightCommand[AnswerInteractionResult]
+)
 
 func newCommandDedupCache(clk clock.Clock, capacity int, ttl time.Duration) *commandDedupCache {
 	return newDedupCache[AnswerInteractionResult](clk, capacity, ttl)

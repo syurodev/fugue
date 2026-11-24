@@ -21,7 +21,7 @@ import (
 var errBlockedHTTPSURL = errors.New("only valid https URLs may be opened")
 
 const (
-	claudeCodeGuidanceLine = "Finish in the browser window Claude opened; if the page shows a code, paste it here"
+	claudeCodeGuidanceLine = "Finish in the browser window Claude opened; if the page shows a code, paste it here."
 	claudeFallbackURLLabel = "Open sign-in page (shows a code to paste here)"
 	claudeCodeSentLabel    = "Code sent, waiting for Claude"
 	claudeSignInAgainLabel = "Sign in again"
@@ -88,7 +88,7 @@ func (v *accountsView) layoutLoginCodeControls(env *kit.Env, sc *screens, w *acc
 		rigidParagraph(env, theme.TypeSmall(), c.Fg, claudeCodeGuidanceLine),
 		spacerH(theme.SpaceXS),
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.End}.Layout(*gtx,
+			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					local := gtx
 					props := kit.TextFieldProps{
@@ -109,7 +109,7 @@ func (v *accountsView) layoutLoginCodeControls(env *kit.Env, sc *screens, w *acc
 				rigidInboxButton(env, sc.fail, w.submitCodeBtn, kit.ButtonProps{
 					Text:     "Submit",
 					Variant:  kit.Primary,
-					Size:     kit.SizeSM,
+					Size:     kit.SizeMD,
 					Busy:     login.SubmittingCode,
 					Disabled: sc.accountsWorker == nil || login.LoginID == "",
 				}, func() {

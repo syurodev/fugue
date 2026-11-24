@@ -291,6 +291,13 @@ func TestAccountsClientMethodsOverRealSocket(t *testing.T) {
 		t.Fatalf("ListAccounts mismatch (-want +got):\n%s", diff)
 	}
 
+	assertAccountsLoginAndCodeMethods(t, c)
+	assertQuotaTopicStream(t, c, wantAccounts)
+	assertLoginTopicStream(t, c)
+}
+
+func assertAccountsLoginAndCodeMethods(t *testing.T, c *client.Client) {
+	t.Helper()
 	res, err := c.StartLogin(t.Context(), client.VendorCodex)
 	if err != nil || res.LoginID != testAccLoginID {
 		t.Fatalf("StartLogin(codex) = (%+v, %v)", res, err)
@@ -313,9 +320,6 @@ func TestAccountsClientMethodsOverRealSocket(t *testing.T) {
 	if submitErr := c.SubmitLoginCode(t.Context(), "cmd-1", testAccLoginID, "code#state"); submitErr != nil {
 		t.Fatalf("SubmitLoginCode: %v", submitErr)
 	}
-
-	assertQuotaTopicStream(t, c, wantAccounts)
-	assertLoginTopicStream(t, c)
 }
 
 func assertQuotaTopicStream(t *testing.T, c *client.Client, want []client.Account) {

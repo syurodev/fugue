@@ -239,6 +239,9 @@ func awaitLoginInflight(ctx context.Context, principal, loginID string, inf *inf
 	}
 }
 
+// validateLoginCode checks the length cap and printable-ASCII constraint on
+// a temporary byte copy of code and zeroes that copy before returning (Go
+// strings in the RPC request and redact.Secret cannot be zeroed).
 func validateLoginCode(code redact.Secret) error {
 	buf := []byte(code.Reveal())
 	defer clear(buf)
@@ -364,7 +367,7 @@ func (s *AccountsService) monitorLogin(ctx context.Context, slot *loginRun) {
 		case <-slot.run.Done():
 			outcome = s.loginOutcome(ctx, slot)
 		case <-timer.C():
-			slot.stop(ctx)
+			slot.stop(ctx, s.log())
 			<-slot.run.Done()
 			// Q-112: a CLI that would read a pasted code from its own stdin
 			// cannot be finished by the host, so the timeout asks the user to
@@ -375,13 +378,13 @@ func (s *AccountsService) monitorLogin(ctx context.Context, slot *loginRun) {
 				outcome = LoginTimedOut
 			}
 		case <-slot.cancel:
-			slot.stop(ctx)
+			slot.stop(ctx, s.log())
 			<-slot.run.Done()
 			outcome = LoginCancelled
 		case <-ctx.Done():
 			// The host is stopping: stop the process like a session and end
 			// without a final event, the ephemeral topic dies with the host.
-			slot.stop(ctx)
+			slot.stop(ctx, s.log())
 			return
 		}
 	}
@@ -405,8 +408,15 @@ func (s *AccountsService) loginOutcome(ctx context.Context, slot *loginRun) stri
 	return LoginFailed
 }
 
+func (s *AccountsService) log() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.Default()
+}
+
 // stop runs the vendor-runtime §8 stop order on the login process group.
-func (slot *loginRun) stop(ctx context.Context) {
+func (slot *loginRun) stop(ctx context.Context, logger *slog.Logger) {
 	stopCtx, cancel := context.WithTimeout(ctx, LoginCancelLimit)
 	defer cancel()
 	slot.mu.Lock()
@@ -416,7 +426,7 @@ func (slot *loginRun) stop(ctx context.Context) {
 		return
 	}
 	if _, err := run.Stop(stopCtx); err != nil {
-		slog.WarnContext(stopCtx, "stop a login process", "vendor", slot.vendor, "code", errcode.CodeOf(err))
+		logger.WarnContext(stopCtx, "stop a login process", "vendor", slot.vendor, "code", errcode.CodeOf(err))
 	}
 }
 
@@ -436,11 +446,11 @@ func (s *AccountsService) finishLogin(slot *loginRun) {
 func (s *AccountsService) publishLogin(p LoginProgress, latest bool) {
 	payload, err := json.Marshal(p)
 	if err != nil {
-		slog.Warn("marshal a login event", "code", errcode.CodeOf(err))
+		s.log().Warn("marshal a login event", "code", errcode.CodeOf(err))
 		return
 	}
 	if _, err := s.hub.Publish(TopicLogin, Event{Type: EventLoginProgress, Key: p.Vendor, Payload: payload, LatestForKey: latest}); err != nil {
-		slog.Warn("publish a login event", "code", errcode.CodeOf(err))
+		s.log().Warn("publish a login event", "code", errcode.CodeOf(err))
 	}
 }
 
