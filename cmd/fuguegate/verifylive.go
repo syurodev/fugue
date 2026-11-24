@@ -159,15 +159,17 @@ func parseVerifyLive(args []string) (*verifyLiveInput, error) {
 	if !ok || fs.NArg() != 0 {
 		return nil, fmt.Errorf("%w: verify-live -id must be one of %s", ErrUsage, strings.Join(sortedKeys(liveChecks()), ", "))
 	}
-	if len(check.oses) > 0 && !slices.Contains(check.oses, runtime.GOOS) {
-		return nil, fmt.Errorf("%w: %s runs on %s only, this machine is %s", ErrVerifyLive, *id, strings.Join(check.oses, " and "), runtime.GOOS)
-	}
 	measurements, err := parseMeasurements(measures, check.measurements)
 	if err != nil {
 		return nil, err
 	}
 	if leak := secretFindings(*notes + " " + strings.Join(measures, " ")); len(leak) > 0 {
 		return nil, fmt.Errorf("%w: notes or measurements contain %s; a record holds no secret", ErrVerifyLive, strings.Join(leak, ", "))
+	}
+	// The command line is checked before the machine, so a usage error reads
+	// the same on every OS.
+	if len(check.oses) > 0 && !slices.Contains(check.oses, runtime.GOOS) {
+		return nil, fmt.Errorf("%w: %s runs on %s only, this machine is %s", ErrVerifyLive, *id, strings.Join(check.oses, " and "), runtime.GOOS)
 	}
 	return &verifyLiveInput{
 		dir: *dir, id: *id, check: check, notes: *notes, fugueVersion: *fugueVersion,
