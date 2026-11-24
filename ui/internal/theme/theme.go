@@ -380,11 +380,11 @@ func (t *Theme) Shaper() *text.Shaper { return t.shaper }
 // value was tuned.
 func lightChrome() Chrome {
 	return Chrome{
-		AppBg:         nrgba(0xF2F2F0),
-		CanvasBg:      nrgba(0xFFFFFF),
+		AppBg:         nrgba(0xEEF0F2),
+		CanvasBg:      nrgba(0xF9F9FA),
 		SurfaceBase:   nrgba(0xFFFFFF),
-		SurfaceRaised: nrgba(0xE9E9EB),
-		SurfaceTinted: nrgba(0xE4E4E8),
+		SurfaceRaised: nrgba(0xF1F2F4),
+		SurfaceTinted: nrgba(0xE9EAEE),
 		Fg:            nrgba(0x1C1D20),
 		FgMuted:       nrgba(0x52535A),
 		FgSubtle:      nrgba(0x656570),

@@ -24,7 +24,7 @@ type intFieldWidgets struct {
 // settingsView owns the F10.5d1/F10.5d2 settings pane: app preferences,
 // structured workspace settings forms, and the Q-62 raw TOML editor tab with
 // live validation, CAS conflict diffing, and Q-64 policy confirmation routing.
-// Until F10.20b's slot grid lands, it occupies the right pane.
+// It renders inside the Settings slot.
 type settingsView struct {
 	saveBtn           *kit.ButtonState
 	discardBtn        *kit.ButtonState

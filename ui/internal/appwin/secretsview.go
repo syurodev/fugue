@@ -54,8 +54,6 @@ type secretsView struct {
 	menuFor     string
 	scopeFilter *kit.SegmentedState
 	addBtn      *kit.ButtonState
-	backBtn     *kit.IconButtonState
-	countTag    *kit.TagState
 	lockBanner  *kit.BannerState
 	errBanner   *kit.BannerState
 	empty       *kit.EmptyStateState
@@ -74,8 +72,6 @@ func newSecretsView() *secretsView {
 		menu:        kit.NewMenuState(),
 		scopeFilter: kit.NewSegmentedState(),
 		addBtn:      kit.NewButtonState(),
-		backBtn:     kit.NewIconButtonState(),
-		countTag:    kit.NewTagState(),
 		lockBanner:  kit.NewBannerState(),
 		errBanner:   kit.NewBannerState(),
 		empty:       kit.NewEmptyStateState(),

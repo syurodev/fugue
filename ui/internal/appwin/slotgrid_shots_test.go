@@ -193,13 +193,12 @@ func TestArrangePopoverCommandsTrackValidity(t *testing.T) {
 	g := newSlotGrid()
 	g.doc = gridFixture()
 	g.openArrange(Pos{Col: 1, Row: 0})
-	rows := g.arrangeRows(Pos{Col: 1, Row: 0})
-	// Row 0 is the move heading; the move-left row is disabled toward the
-	// main slot, move-right enabled toward column 2 (§5.3).
-	if !rows[1].disabled {
+	items := arrangeMenuItems(g.doc, Pos{Col: 1, Row: 0})
+	// Item 0 is move left (disabled toward main slot), item 1 is move right (enabled toward column 2).
+	if !items[0].Disabled {
 		t.Fatal("move left toward the main slot was not disabled")
 	}
-	if rows[2].disabled {
+	if items[1].Disabled {
 		t.Fatal("move right toward column 2 was disabled")
 	}
 	g.arrange(Pos{Col: 1, Row: 0}, arrangeMakeMain)

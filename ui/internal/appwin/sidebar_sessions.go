@@ -7,6 +7,7 @@ import (
 
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
+	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
 // sessionRows builds one kit row per session of the given list; the row's
@@ -14,8 +15,11 @@ import (
 // dot plus muted text: the text carries the state, the dot's tone only
 // supports it.
 func (s *screens) sessionRows(env *kit.Env, sessions []session.Session) []layout.FlexChild {
-	rows := make([]layout.FlexChild, 0, len(sessions))
-	for _, sess := range sessions {
+	rows := make([]layout.FlexChild, 0, len(sessions)*2)
+	for i, sess := range sessions {
+		if i > 0 {
+			rows = append(rows, spacerH(theme.SpaceXXS))
+		}
 		row, ok := s.rows[sess.ID]
 		if !ok {
 			row = kit.NewListRowState()

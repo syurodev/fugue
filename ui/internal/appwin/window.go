@@ -394,11 +394,11 @@ func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 	shell.Constraints.Max.Y = max(shell.Constraints.Max.Y-barH, 0)
 	shell.Constraints.Min.Y = min(shell.Constraints.Min.Y, shell.Constraints.Max.Y)
 	env.Offset(gtx, image.Pt(0, barH), func(gtx *layout.Context) {
-		pad := gtx.Dp(theme.SpaceMD)
+		pad := gtx.Dp(theme.SpaceXS)
 		inner := shell
-		inner.Constraints.Max = image.Pt(max(shell.Constraints.Max.X-2*pad, 0), max(shell.Constraints.Max.Y-2*pad, 0))
+		inner.Constraints.Max = image.Pt(max(shell.Constraints.Max.X-pad, 0), max(shell.Constraints.Max.Y-2*pad, 0))
 		inner.Constraints.Min = image.Point{}
-		env.Offset(gtx, image.Pt(pad, pad), func(gtx *layout.Context) {
+		env.Offset(gtx, image.Pt(0, pad), func(gtx *layout.Context) {
 			local := inner
 			local.Ops = gtx.Ops
 			sc.layout(&local, env)

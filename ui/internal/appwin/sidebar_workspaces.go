@@ -372,14 +372,17 @@ func (s *screens) layoutSidebarPanel(gtx *layout.Context, env *kit.Env) layout.D
 				local := gtx
 				return s.layoutInboxRow(env, &local)
 			}),
+			spacerH(theme.SpaceXXS),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				local := gtx
 				return s.layoutAccountsRow(env, &local)
 			}),
+			spacerH(theme.SpaceXXS),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				local := gtx
 				return s.layoutSettingsRow(env, &local)
 			}),
+			spacerH(theme.SpaceXXS),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				local := gtx
 				return s.layoutSecretsRow(env, &local)

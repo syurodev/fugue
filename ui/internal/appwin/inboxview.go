@@ -25,8 +25,6 @@ type inboxView struct {
 	forms              map[inbox.Pin]*cardFormState
 	queueRows          map[inbox.Pin]*kit.ListRowState
 	empty              *kit.EmptyStateState
-	backBtn            *kit.ButtonState
-	countTag           *kit.TagState
 	card               *kit.CardState
 	scroll             *kit.ScrollAreaState
 	errBanner          *kit.BannerState
@@ -35,8 +33,8 @@ type inboxView struct {
 func newInboxView() *inboxView {
 	return &inboxView{
 		forms: map[inbox.Pin]*cardFormState{}, queueRows: map[inbox.Pin]*kit.ListRowState{},
-		empty: kit.NewEmptyStateState(), backBtn: kit.NewButtonState(), countTag: kit.NewTagState(),
-		card: kit.NewCardState(), scroll: kit.NewScrollAreaState(), errBanner: kit.NewBannerState(),
+		empty: kit.NewEmptyStateState(),
+		card:  kit.NewCardState(), scroll: kit.NewScrollAreaState(), errBanner: kit.NewBannerState(),
 	}
 }
 

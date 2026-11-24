@@ -13,7 +13,10 @@ import (
 	"github.com/syurodev/fugue/ui/internal/vault"
 )
 
-const minVaultPassphraseBytes = 8
+const (
+	minVaultPassphraseBytes = 8
+	labelLockVault          = "Lock vault"
+)
 
 // vaultGate owns the host-vault setup, unlock, recovery, and lock controls
 // (F10.5a, desktop-app §5). Secrets enter through TextFieldSecret with
@@ -177,13 +180,13 @@ func (g *vaultGate) submitUnlock(sc *screens) {
 	sc.vaultWorker.Do(&req)
 }
 
-func (g *vaultGate) layoutLockButton(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
+func (g *vaultGate) layoutLockButton(gtx *layout.Context, env *kit.Env, sc *screens) {
 	if sc.vault.Locked() || sc.vaultWorker == nil {
-		return layout.Dimensions{}
+		return
 	}
 	props := &kit.IconButtonProps{
 		Icon:     kit.IconLock,
-		Label:    "Lock vault",
+		Label:    labelLockVault,
 		Variant:  kit.IconButtonGhost,
 		Size:     kit.SizeSM,
 		Disabled: g.busy,
@@ -195,7 +198,6 @@ func (g *vaultGate) layoutLockButton(gtx *layout.Context, env *kit.Env, sc *scre
 		req := vault.Request{Kind: vault.OpLock}
 		sc.vaultWorker.Do(&req)
 	}
-	return g.lockBtn.Measure(env, gtx, props)
 }
 
 func vaultLabelRow(env *kit.Env, tp theme.Type, fg color.NRGBA, txt string) layout.FlexChild {

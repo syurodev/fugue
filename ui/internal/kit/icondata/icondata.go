@@ -73,4 +73,22 @@ const (
 	Bot = "M12 8L12 4L8 4M6 8L18 8C19.105 8 20 8.895 20 10L20 18C20 19.105 19.105 20 18 20L6 20C4.895 20 4 19.105 4 18L4 10C4 8.895 4.895 8 6 8ZM2 14L4 14M20 14L22 14M15 13L15 15M9 13L9 15"
 	// Lock is the "lock" icon.
 	Lock = "M5 11L19 11C20.105 11 21 11.895 21 13L21 20C21 21.105 20.105 22 19 22L5 22C3.895 22 3 21.105 3 20L3 13C3 11.895 3.895 11 5 11ZM7 11L7 7C7 4.239 9.239 2 12 2C14.761 2 17 4.239 17 7L17 11"
+	// ArrowLeft is the "arrow-left" icon.
+	ArrowLeft = "M12 19L5 12L12 5M19 12L5 12"
+	// ArrowRight is the "arrow-right" icon.
+	ArrowRight = "M5 12L19 12M12 5L19 12L12 19"
+	// ArrowUp is the "arrow-up" icon.
+	ArrowUp = "M5 12L12 5L19 12M12 19L12 5"
+	// ArrowDown is the "arrow-down" icon.
+	ArrowDown = "M12 5L12 19M19 12L12 19L5 12"
+	// Maximize2 is the "maximize-2" icon.
+	Maximize2 = "M15 3L21 3L21 9M21 3L14 10M3 21L10 14M9 21L3 21L3 15"
+	// Minimize2 is the "minimize-2" icon.
+	Minimize2 = "M14 10L21 3M20 10L14 10L14 4M3 21L10 14M4 14L10 14L10 20"
+	// Columns2 is the "columns-2" icon.
+	Columns2 = "M5 3L19 3C20.105 3 21 3.895 21 5L21 19C21 20.105 20.105 21 19 21L5 21C3.895 21 3 20.105 3 19L3 5C3 3.895 3.895 3 5 3ZM12 3L12 21"
+	// PanelLeft is the "panel-left" icon.
+	PanelLeft = "M5 3L19 3C20.105 3 21 3.895 21 5L21 19C21 20.105 20.105 21 19 21L5 21C3.895 21 3 20.105 3 19L3 5C3 3.895 3.895 3 5 3ZM9 3L9 21"
+	// WindowFrame is the "app-window" icon.
+	WindowFrame = "M4 4L20 4C21.105 4 22 4.895 22 6L22 18C22 19.105 21.105 20 20 20L4 20C2.895 20 2 19.105 2 18L2 6C2 4.895 2.895 4 4 4ZM10 4L10 8M2 8L22 8M6 4L6 8"
 )

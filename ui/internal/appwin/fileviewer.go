@@ -69,8 +69,8 @@ type fileViewer struct {
 	entries            []client.WorkspaceDirEntry
 	entryClicks        map[string]*widget.Clickable
 
-	backBtn, copyBtn *kit.ButtonState
-	card             *kit.CardState
+	copyBtn *kit.ButtonState
+	card    *kit.CardState
 	// scrollPending arms the one-time jump to the requested line once the
 	// content's line height is known.
 	scrollPending bool
@@ -80,8 +80,8 @@ func newFileViewer() *fileViewer {
 	return &fileViewer{
 		code:    mdview.NewCodeBlockState(),
 		diff:    mdview.NewCodeBlockState(),
-		backBtn: kit.NewButtonState(), copyBtn: kit.NewButtonState(),
-		card: kit.NewCardState(),
+		copyBtn: kit.NewButtonState(),
+		card:    kit.NewCardState(),
 	}
 }
 

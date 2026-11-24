@@ -13,11 +13,20 @@ import (
 // accounts and settings as regular slots — a row opens its kind's slot or
 // closes the one that is open, and the selected state reads the grid.
 
+func (s *screens) recordSidebarSelected(label string, selected bool) {
+	if s.sidebarSelected == nil {
+		s.sidebarSelected = map[string]bool{}
+	}
+	s.sidebarSelected[label] = selected
+}
+
 func (s *screens) layoutInboxRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
+	selected := s.grid.mainRef().Kind == KindInbox
+	s.recordSidebarSelected("Approvals", selected)
 	props := &kit.ListRowProps{
 		Icon:     kit.IconInbox,
 		Label:    "Approvals",
-		Selected: s.grid.mainRef().Kind == KindInbox,
+		Selected: selected,
 	}
 	props.StateLabel, props.StateTone = inboxRowState(s.inbox.PendingCount())
 	dims, ev := s.inboxRow.Layout(env, gtx, props)
@@ -28,10 +37,12 @@ func (s *screens) layoutInboxRow(env *kit.Env, gtx *layout.Context) layout.Dimen
 }
 
 func (s *screens) layoutAccountsRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
+	selected := s.grid.mainRef().Kind == KindAccounts
+	s.recordSidebarSelected("Accounts", selected)
 	props := &kit.ListRowProps{
 		Icon:     kit.IconCircleUser,
 		Label:    "Accounts",
-		Selected: s.grid.mainRef().Kind == KindAccounts,
+		Selected: selected,
 	}
 	props.StateLabel, props.StateTone = accountsRowState(s.accounts.HasSnapshot(), s.accounts.NeedsAttentionCount())
 	dims, ev := s.accountsRow.Layout(env, gtx, props)
@@ -42,10 +53,12 @@ func (s *screens) layoutAccountsRow(env *kit.Env, gtx *layout.Context) layout.Di
 }
 
 func (s *screens) layoutSettingsRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
+	selected := s.grid.mainRef().Kind == KindSettings
+	s.recordSidebarSelected("Settings", selected)
 	props := &kit.ListRowProps{
 		Icon:     kit.IconSettings,
 		Label:    "Settings",
-		Selected: s.grid.mainRef().Kind == KindSettings,
+		Selected: selected,
 	}
 	if dirty := len(s.settings.DirtyFields()); dirty > 0 {
 		props.StateLabel = fmt.Sprintf("%d unsaved", dirty)
@@ -59,10 +72,12 @@ func (s *screens) layoutSettingsRow(env *kit.Env, gtx *layout.Context) layout.Di
 }
 
 func (s *screens) layoutSecretsRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
+	selected := s.grid.mainRef().Kind == KindSecrets
+	s.recordSidebarSelected("Secrets", selected)
 	props := &kit.ListRowProps{
 		Icon:     kit.IconKeyRound,
 		Label:    "Secrets",
-		Selected: s.grid.mainRef().Kind == KindSecrets,
+		Selected: selected,
 	}
 	locked := s.vault.Locked()
 	if locked {

@@ -87,6 +87,7 @@ type slotGrid struct {
 	rects      map[string]image.Rectangle
 	refRects   map[string]image.Rectangle
 	anims      map[string]*slotAnim
+	closing    []*closingSlot
 	splitC     map[int]*kit.SplitPaneState
 	splitR     map[int]*kit.SplitPaneState
 	headerTags map[string]*headerTag
@@ -98,9 +99,9 @@ type slotGrid struct {
 	lastVisible    int
 	drawerPresence motion.Presence
 	focus          string
-	// popover is the arrange popover and popFor the cell it opened from.
-	popover *kit.PopoverState
-	popFor  string
+	// arrangeMenu is the arrange menu and popFor the cell it opened from.
+	arrangeMenu *kit.MenuState
+	popFor      string
 	// buttons of the chrome: per cell the arrange and close buttons, per
 	// folded cell the edge tab, and the rail's and collapsed sidebar's own
 	// buttons.
@@ -110,7 +111,6 @@ type slotGrid struct {
 	tabBtns     map[string]*kit.IconButtonState
 	railBtns    map[railItem]*kit.IconButtonState
 	sidebarBtn  *kit.IconButtonState
-	arrPop      arrangeActions
 	// newWindow is the last "open in new window" request (F10.21 consumes).
 	newWindow *NewWindowRequest
 	// applyGeometry applies a restored window size; the window owns the
@@ -118,7 +118,7 @@ type slotGrid struct {
 	applyGeometry func(widthDp, heightDp int)
 }
 
-// arrangeCmd is one arrange-popover command (§5.3).
+// arrangeCmd is one arrange-menu command (§5.3).
 type arrangeCmd uint8
 
 // The arrange commands: the four move directions, then fill, split beside
@@ -134,25 +134,6 @@ const (
 	arrangeNewWindow
 )
 
-// arrangeActions are the arrange popover's buttons (§5.3: move, fill, split,
-// make main, open in new window).
-type arrangeActions struct {
-	move   [4]*kit.ButtonState
-	fill   *kit.ButtonState
-	split  *kit.ButtonState
-	main   *kit.ButtonState
-	newWin *kit.ButtonState
-}
-
-func newArrangeActions() arrangeActions {
-	var a arrangeActions
-	for i := range a.move {
-		a.move[i] = kit.NewButtonState()
-	}
-	a.fill, a.split, a.main, a.newWin = kit.NewButtonState(), kit.NewButtonState(), kit.NewButtonState(), kit.NewButtonState()
-	return a
-}
-
 // newSlotGrid builds the shell over the default layout.
 func newSlotGrid() *slotGrid {
 	return &slotGrid{
@@ -165,14 +146,13 @@ func newSlotGrid() *slotGrid {
 		splitC:         map[int]*kit.SplitPaneState{},
 		splitR:         map[int]*kit.SplitPaneState{},
 		headerTags:     map[string]*headerTag{},
-		popover:        kit.NewPopoverState(),
+		arrangeMenu:    kit.NewMenuState(),
 		arrangeBtns:    map[string]*kit.IconButtonState{},
 		closeBtns:      map[string]*kit.IconButtonState{},
 		actionBtns:     map[string]*kit.IconButtonState{},
 		tabBtns:        map[string]*kit.IconButtonState{},
 		railBtns:       map[railItem]*kit.IconButtonState{},
 		sidebarBtn:     kit.NewIconButtonState(),
-		arrPop:         newArrangeActions(),
 		drawerPresence: motion.NewPresence(motion.Smooth(), motion.Exit()),
 	}
 }
@@ -192,22 +172,47 @@ func (g *slotGrid) syncFromDoc() {
 // higher-schema guard (the user's own edit may overwrite, host-api §5.2),
 // and marks the document for a save.
 func (g *slotGrid) edited(doc LayoutDoc) {
-	for _, p := range allCells(doc) {
-		ref := refAt(doc, p)
-		if ref.Kind == "" {
-			continue
-		}
-		if old, moved := findCell(g.doc, ref); moved && old != p {
-			if rect := g.rects[old.key()]; !rect.Empty() {
-				g.startAnim(keyOfRef(ref), rect)
-			}
-		}
-	}
+	g.armClosingAnims(doc)
+	g.armSlideAnims(doc)
 	g.doc = doc
 	g.docGen++
 	g.higher = false
 	g.dirty = g.loaded
 	g.saveAt = time.Time{}
+}
+
+func (g *slotGrid) armClosingAnims(doc LayoutDoc) {
+	for _, oldP := range allCells(g.doc) {
+		oldRef := refAt(g.doc, oldP)
+		if oldRef.Kind == "" {
+			continue
+		}
+		if _, still := findCell(doc, oldRef); !still {
+			if rect := g.rects[oldP.key()]; !rect.Empty() {
+				g.startClosing(oldRef, rect)
+			}
+		}
+	}
+}
+
+func (g *slotGrid) armSlideAnims(doc LayoutDoc) {
+	colsChanged := len(doc.Columns) != len(g.doc.Columns)
+	for _, p := range allCells(doc) {
+		ref := refAt(doc, p)
+		if ref.Kind == "" {
+			continue
+		}
+		old, moved := findCell(g.doc, ref)
+		if !moved {
+			continue
+		}
+		rowChanged := p.Col < len(g.doc.Columns) && len(doc.Columns[p.Col].Slots) != len(g.doc.Columns[p.Col].Slots)
+		if old != p || colsChanged || rowChanged {
+			if rect := g.rects[old.key()]; !rect.Empty() {
+				g.startAnim(keyOfRef(ref), rect)
+			}
+		}
+	}
 }
 
 // allCells lists every cell of the document, main included.
@@ -395,10 +400,10 @@ func (g *slotGrid) applyMove(p Pos, dir Direction) {
 	}
 }
 
-// openArrange opens the arrange popover for the slot at p (§5.3).
+// openArrange opens the arrange menu for the slot at p (§5.3).
 func (g *slotGrid) openArrange(p Pos) {
 	g.popFor = p.key()
-	g.popover.Open()
+	g.arrangeMenu.Open()
 }
 
 // drop applies a finished drag (§5.3): the slot lands per the target and
@@ -445,8 +450,20 @@ func (g *slotGrid) startAnim(refKey string, from image.Rectangle) {
 	g.anims[refKey].spring.Target = 1
 }
 
+func (g *slotGrid) startClosing(ref SlotRef, rect image.Rectangle) {
+	p := motion.NewPresence(motion.Smooth(), motion.Exit())
+	p.Snap(true)
+	p.Show(false)
+	g.closing = append(g.closing, &closingSlot{ref: ref, rect: rect, presence: p})
+}
+
 // advanceAnims steps every animation and drops the finished ones.
 func (g *slotGrid) advanceAnims(env *kit.Env) {
+	if env.ReducedMotion {
+		clear(g.anims)
+		g.closing = nil
+		return
+	}
 	dt := env.DT()
 	for key, anim := range g.anims {
 		anim.spring.Advance(dt)
@@ -456,6 +473,16 @@ func (g *slotGrid) advanceAnims(env *kit.Env) {
 		}
 		env.Keep()
 	}
+	kept := g.closing[:0]
+	for _, cs := range g.closing {
+		if cs.presence.Advance(dt) {
+			env.Keep()
+		}
+		if cs.presence.Visible() {
+			kept = append(kept, cs)
+		}
+	}
+	g.closing = kept
 }
 
 // animOf returns the in-flight animation of a ref, or nil.

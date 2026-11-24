@@ -27,6 +27,14 @@ type slotAnim struct {
 	spring motion.Spring
 }
 
+// closingSlot is a closed slot fading out on Exit while its neighbours slide
+// into the freed space on Smooth (FUG-65).
+type closingSlot struct {
+	ref      SlotRef
+	rect     image.Rectangle
+	presence motion.Presence
+}
+
 // NewWindowRequest is the "open in new window" product: the ref to move and
 // the layout document the new window starts from — the ref as its main slot,
 // the sidebar collapsed (§5.3). F10.21 attaches window creation; until then
@@ -72,6 +80,9 @@ func (g *slotGrid) layoutArea(gtx *layout.Context, env *kit.Env, sc *screens, ar
 			g.drawSlot(gtx, env, sc, Pos{Col: c, Row: r}, area)
 		}
 	} else {
+		for _, cs := range g.closing {
+			g.drawClosingSlot(gtx, env, sc, cs)
+		}
 		for _, cg := range geom {
 			g.drawSlot(gtx, env, sc, cg.pos, cg.Rect)
 		}
@@ -200,6 +211,26 @@ func (g *slotGrid) drawSlot(gtx *layout.Context, env *kit.Env, sc *screens, p Po
 		defer clip.Rect{Max: body.Size()}.Push(local.Ops).Pop()
 		sc.layoutSlotBody(&local, env, p, ref)
 	})
+}
+
+// drawClosingSlot paints a closing slot's header and surface fading out on
+// Exit while remaining slots slide over or into the freed space.
+func (g *slotGrid) drawClosingSlot(gtx *layout.Context, env *kit.Env, sc *screens, cs *closingSlot) {
+	if cs.rect.Empty() {
+		return
+	}
+	alpha := cs.presence.Progress()
+	if alpha <= 0 {
+		return
+	}
+	defer paint.PushOpacity(gtx.Ops, alpha).Pop()
+	h := min(gtx.Dp(theme.SlotHeaderHeight), cs.rect.Dy())
+	head := image.Rect(cs.rect.Min.X, cs.rect.Min.Y, cs.rect.Max.X, cs.rect.Min.Y+h)
+	g.drawHeaderBar(gtx, env, sc, Pos{Col: 1}, cs.ref, head, nil)
+	body := image.Rect(cs.rect.Min.X, cs.rect.Min.Y+h, cs.rect.Max.X, cs.rect.Max.Y)
+	if !body.Empty() {
+		paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect(body).Op())
+	}
 }
 
 // drawChrome draws a regular slot's header bar — icon and title, the drag

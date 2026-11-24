@@ -20,11 +20,13 @@ import (
 )
 
 const (
-	shotFUG65Shell3Slot   = "shell-3slot"
-	shotFUG65ArrangeEdge  = "arrange-popover-right-edge"
-	shotFUG65Accounts300  = "accounts-slot-300dp"
-	shotFUG65SettingsSlot = "settings-slot"
-	shotFUG65MainEmpty    = "main-empty"
+	shotFUG65Shell3Slot       = "shell-3slot"
+	shotFUG65ArrangeMenuEdge  = "arrange-menu-right-edge"
+	shotFUG65Accounts300      = "accounts-slot-300dp"
+	shotFUG65SettingsSlot     = "settings-slot"
+	shotFUG65MainEmpty        = "main-empty"
+	shotFUG65FooterUnlocked   = "shell-footer-unlocked"
+	shotFUG65SidebarCollapsed = "shell-sidebar-collapsed"
 )
 
 func fug65ShotSpecs() []shotSpec {
@@ -38,10 +40,12 @@ func fug65ShotSpecs() []shotSpec {
 	}{{"ui100", 1.0}, {"ui125", 1.25}}
 	scenes := []string{
 		shotFUG65Shell3Slot,
-		shotFUG65ArrangeEdge,
+		shotFUG65ArrangeMenuEdge,
 		shotFUG65Accounts300,
 		shotFUG65SettingsSlot,
 		shotFUG65MainEmpty,
+		shotFUG65FooterUnlocked,
+		shotFUG65SidebarCollapsed,
 	}
 	specs := make([]shotSpec, 0, len(scenes)*len(themes)*len(scales))
 	for _, s := range scenes {
@@ -66,14 +70,14 @@ func buildFUG65ShotScreens(t *testing.T, scene string) (*screens, image.Point) {
 			Vendor: client.VendorClaude, State: client.AccountStateNeedsLogin, QuotaKnown: true, QuotaGate: 0.85,
 			Windows: []client.QuotaWindow{{Name: "five_hour", Utilization: 0.42, Status: client.QuotaStatusAllowed}},
 		},
-		{Vendor: "codex", State: client.AccountStateOK, QuotaKnown: false},
+		{Vendor: client.VendorCodex, State: client.AccountStateOK, QuotaKnown: false},
 	})
 	switch scene {
 	case shotFUG65Shell3Slot:
 		sc.grid.openCompanion(SlotRef{Kind: KindAccounts})
 		sc.grid.openCompanion(SlotRef{Kind: KindSettings})
 		return sc, image.Pt(1500, 900)
-	case shotFUG65ArrangeEdge:
+	case shotFUG65ArrangeMenuEdge:
 		sc.grid.openCompanion(SlotRef{Kind: KindAccounts})
 		sc.grid.openCompanion(SlotRef{Kind: KindSettings})
 		sc.grid.openArrange(Pos{Col: 1, Row: 0})
@@ -86,9 +90,27 @@ func buildFUG65ShotScreens(t *testing.T, scene string) (*screens, image.Point) {
 		return sc, image.Pt(1200, 800)
 	case shotFUG65MainEmpty:
 		return sc, image.Pt(1200, 800)
+	case shotFUG65FooterUnlocked:
+		attachFUG65UnlockedVault(t, sc)
+		return sc, image.Pt(1200, 800)
+	case shotFUG65SidebarCollapsed:
+		attachFUG65UnlockedVault(t, sc)
+		doc := cloneLayout(sc.grid.doc)
+		doc.SidebarCollapsed = true
+		sc.grid.edited(doc)
+		return sc, image.Pt(1200, 800)
 	default:
 		return sc, image.Pt(1200, 800)
 	}
+}
+
+func attachFUG65UnlockedVault(t *testing.T, sc *screens) {
+	t.Helper()
+	vw := vault.NewWorker(func() vault.Client { return newFakeAppVaultClient() })
+	vw.Start(t.Context())
+	t.Cleanup(vw.Stop)
+	sc.vaultWorker = vw
+	sc.applyConnectionUpdate(hostconn.StateConnected, "")
 }
 
 func renderFUG65Shot(t *testing.T, spec shotSpec) *image.RGBA {
@@ -111,8 +133,8 @@ func renderFUG65Shot(t *testing.T, spec shotSpec) *image.RGBA {
 	return renderShotFrames(t, win, env, sc, size, spec.name)
 }
 
-// TestFUG65ShellVisualPassGoldens compares the five FUG-65 scenes in light
-// and dark at 100% and 125% against their checked-in goldens.
+// TestFUG65ShellVisualPassGoldens compares the FUG-65 scenes in light and dark
+// at 100% and 125% against their checked-in goldens.
 func TestFUG65ShellVisualPassGoldens(t *testing.T) {
 	t.Parallel()
 	for _, spec := range fug65ShotSpecs() {

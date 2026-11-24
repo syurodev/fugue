@@ -115,6 +115,14 @@ func (e *Env) TooltipRect() image.Rectangle {
 	return e.tip.rect
 }
 
+// TooltipText returns the active tooltip's text, or empty if not visible.
+func (e *Env) TooltipText() string {
+	if !e.tip.ready || !e.tip.open.Visible() {
+		return ""
+	}
+	return e.tip.activeProps.Text
+}
+
 // TooltipFlipped reports whether the active tooltip flipped below its anchor.
 func (e *Env) TooltipFlipped() bool {
 	return e.tip.ready && e.tip.open.Visible() && e.tip.flipped

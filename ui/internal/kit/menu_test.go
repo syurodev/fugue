@@ -319,7 +319,7 @@ func TestMenuFlipsAtTheWindowEdge(t *testing.T) {
 			func(p []image.Rectangle) bool { return len(p) == 2 && p[1].Min.X >= p[0].Max.X },
 		},
 		{
-			"submenu at the edge: left of its parent", image.Pt(290, 20),
+			"submenu at the edge: left of its parent", image.Pt(330, 20),
 			[]int{itemShare},
 			func(p []image.Rectangle) bool { return len(p) == 2 && p[1].Max.X <= p[0].Min.X },
 		},

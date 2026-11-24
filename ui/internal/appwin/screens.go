@@ -93,6 +93,14 @@ type screens struct {
 	// cache every session's list rides (F10.4a, desktop-app §7).
 	views     map[string]*transcriptview.State
 	viewCache *kit.VirtualHeightCache
+
+	connDotTag     struct{}
+	connDotHovered bool
+	connDotHasPtr  bool
+	connDotPtr     image.Point
+	// sidebarSelected records each sidebar row's Selected flag per frame for
+	// tests (FUG-65).
+	sidebarSelected map[string]bool
 	// commands holds one command model per session for the slash menu,
 	// refreshed when the session's commands revision advances (§9).
 	commands        map[string]*session.Commands
@@ -392,7 +400,7 @@ func (s *screens) fail(err error) {
 // them (§7: Escape closes the topmost layer first).
 func (s *screens) anyFloatLayerOpen() bool {
 	return s.dlg.anyOpen() || s.composer.start.dialog.IsOpen() || s.failure.closeDlg.dialog.IsOpen() ||
-		s.grid.popover.IsOpen() || s.vaultGate.active(s.vault)
+		s.grid.arrangeMenu.IsOpen() || s.vaultGate.active(s.vault)
 }
 
 // layout draws the shell (F10.20b, desktop-app §5.3): the VaultGate while
@@ -466,9 +474,14 @@ func (s *screens) layoutChatContent(gtx *layout.Context, env *kit.Env, id string
 // slot with an icon, title, one-line description and primary "New session"
 // action (FUG-65).
 func (s *screens) layoutMainEmptyState(gtx *layout.Context, env *kit.Env) {
+	s.layoutMainEmptyStateDims(gtx, env)
+}
+
+func (s *screens) layoutMainEmptyStateDims(gtx *layout.Context, env *kit.Env) image.Rectangle {
 	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
 	box := *gtx
 	box.Constraints.Min = box.Constraints.Max
+	var childRect image.Rectangle
 	layout.Center.Layout(box, func(gtx layout.Context) layout.Dimensions {
 		local := gtx
 		dims, ev, err := s.emptyTranscript.Layout(env, &local, &kit.EmptyStateProps{
@@ -481,6 +494,9 @@ func (s *screens) layoutMainEmptyState(gtx *layout.Context, env *kit.Env) {
 		if ev.PrimaryClicked {
 			s.composer.start.open(s)
 		}
+		off := box.Constraints.Max.Sub(dims.Size).Div(2)
+		childRect = image.Rectangle{Min: off, Max: off.Add(dims.Size)}
 		return dims
 	})
+	return childRect
 }

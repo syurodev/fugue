@@ -2,6 +2,7 @@ package kit
 
 import (
 	"image"
+	"image/color"
 	"testing"
 
 	"gioui.org/layout"
@@ -61,14 +62,18 @@ func TestPopoverStaysInsideWindowNearEdges(t *testing.T) {
 	}
 }
 
-// TestSegmentedSelectedSegmentContrast verifies that SegmentedControl's
-// selected pill has clear visual separation from its FillSoft track and
-// >= 4.5:1 text contrast in both light and dark modes (FUG-65).
+// TestSegmentedSelectedSegmentContrast renders a SegmentedControl in both light
+// and dark modes and verifies that the drawn selected pill pixels differ from
+// the FillSoft track and preserve >= 4.5:1 text contrast (FUG-65).
 func TestSegmentedSelectedSegmentContrast(t *testing.T) {
 	t.Parallel()
 	sh, err := fonts.Shaper()
 	if err != nil {
 		t.Fatalf("build shaper: %v", err)
+	}
+	opts := []SegmentedOption{
+		{ID: "a", Label: "Light"},
+		{ID: "b", Label: "Dark"},
 	}
 	for _, light := range []bool{true, false} {
 		th := theme.Dark(sh)
@@ -77,15 +82,29 @@ func TestSegmentedSelectedSegmentContrast(t *testing.T) {
 			th = theme.Light(sh)
 			mode = modeLight
 		}
-		c := th.Chrome()
-		if got := contrastRatio(c.Fg, c.CanvasBg); got < 4.5 {
-			t.Errorf("%s: Fg on CanvasBg contrast %.2f < 4.5", mode, got)
+		h := newHarness(t)
+		h.env.Th = &th
+		h.env.ReducedMotion = true
+		st := NewSegmentedState()
+		const w, hgt = 240, 60
+		h.frameSize(t, w, hgt)
+		if _, _, err := st.Layout(h.env, &h.gtx, SegmentedProps{Options: opts, Selected: 0}); err != nil {
+			t.Fatalf("%s: SegmentedControl.Layout: %v", mode, err)
 		}
-		if c.CanvasBg == c.FillSoft {
-			t.Errorf("%s: selected pill fill equals FillSoft track %v", mode, c.CanvasBg)
+		h.env.FrameEnd(&h.gtx)
+		img := h.shot(t, w, hgt)
+		pill := st.PillRect()
+		if pill.Empty() || len(st.rects) < 2 {
+			t.Fatalf("%s: expected pill and segment rects, got pill=%v rects=%v", mode, pill, st.rects)
 		}
-		if got := contrastRatio(c.Border, c.CanvasBg); got < 1.2 {
-			t.Errorf("%s: pill border %v lacks separation on %v (%.2f)", mode, c.Border, c.CanvasBg, got)
+		pillPx := img.RGBAAt(pill.Min.X+3, pill.Min.Y+3)
+		trackPx := img.RGBAAt(st.rects[1].Min.X+3, st.rects[1].Min.Y+3)
+		if pillPx == trackPx {
+			t.Errorf("%s: selected pill pixel %v matches unselected track pixel %v", mode, pillPx, trackPx)
+		}
+		pillNRGBA := color.NRGBA(pillPx)
+		if got := contrastRatio(th.Chrome().Fg, pillNRGBA); got < 4.5 {
+			t.Errorf("%s: Fg on drawn pill %v contrast %.2f < 4.5", mode, pillPx, got)
 		}
 	}
 }
