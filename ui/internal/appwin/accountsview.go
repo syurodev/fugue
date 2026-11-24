@@ -1,7 +1,6 @@
 package appwin
 
 import (
-	"image"
 	"time"
 
 	"gioui.org/layout"
@@ -24,6 +23,7 @@ type accountCardWidgets struct {
 	progress    map[string]*kit.ProgressState
 	rowHover    map[string]*windowRowHover
 	linkButtons map[string]*kit.ButtonState
+	headerH     int
 }
 
 // accountsView owns the vendor accounts, F9.10 quota windows, and CLI login
@@ -36,23 +36,19 @@ type accountsView struct {
 	openErr    string
 	openURL    func(string) error
 
-	refreshBtn *kit.IconButtonState
-	backBtn    *kit.ButtonState
-	empty      *kit.EmptyStateState
-	errBanner  *kit.BannerState
-	scroll     *kit.ScrollAreaState
-	cards      map[string]*accountCardWidgets
+	empty     *kit.EmptyStateState
+	errBanner *kit.BannerState
+	scroll    *kit.ScrollAreaState
+	cards     map[string]*accountCardWidgets
 }
 
 func newAccountsView() *accountsView {
 	return &accountsView{
-		openURL:    openHTTPSURL,
-		refreshBtn: kit.NewIconButtonState(),
-		backBtn:    kit.NewButtonState(),
-		empty:      kit.NewEmptyStateState(),
-		errBanner:  kit.NewBannerState(),
-		scroll:     kit.NewScrollAreaState(),
-		cards:      map[string]*accountCardWidgets{},
+		openURL:   openHTTPSURL,
+		empty:     kit.NewEmptyStateState(),
+		errBanner: kit.NewBannerState(),
+		scroll:    kit.NewScrollAreaState(),
+		cards:     map[string]*accountCardWidgets{},
 	}
 }
 
@@ -132,28 +128,9 @@ func (s *screens) requestRefreshAccounts() {
 }
 
 func (v *accountsView) layout(gtx *layout.Context, env *kit.Env, sc *screens) {
-	layoutRightPane(gtx, env,
-		func(gtx *layout.Context) layout.Dimensions { return v.layoutHeader(gtx, env, sc) },
-		func(gtx *layout.Context) layout.Dimensions { return v.layoutBody(gtx, env, sc) },
-	)
-}
-
-func (v *accountsView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
-	titleTok, titleCol := accountPaneTitleStyle(env.Th)
-	refresh := kit.IconButtonProps{
-		Icon:     kit.IconRestart,
-		Label:    "Refresh accounts",
-		Variant:  kit.IconButtonGhost,
-		Size:     kit.SizeSM,
-		Disabled: sc.accountsWorker == nil || v.refreshing,
-	}
-	return flowHeader(gtx,
-		flowTitle(env, gtx, titleTok, titleCol, "Accounts & quota"),
-		atEnd(flowIconButton(env, gtx, sc.fail, v.refreshBtn, &refresh, sc.requestRefreshAccounts)),
-		atEnd(flowButton(env, gtx, sc.fail, v.backBtn, kit.ButtonProps{
-			Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM,
-		}, func() { sc.grid.closeSlotOf(KindAccounts) })),
-	)
+	layoutSlotContent(gtx, env, func(gtx *layout.Context) layout.Dimensions {
+		return v.layoutBody(gtx, env, sc)
+	})
 }
 
 func (v *accountsView) layoutBody(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
@@ -221,12 +198,26 @@ func (v *accountsView) rigidBanner(env *kit.Env, sc *screens, msg string) layout
 	})
 }
 
+// The account card's padding and the gap under its header (desktop-app §5.5:
+// vendor name space.md above the first line row). Named so the hover tests
+// derive row positions from the same values the layout uses.
+const (
+	accountCardPadding = theme.SpaceLG
+	accountHeaderGap   = theme.SpaceMD
+)
+
 func (v *accountsView) layoutAccountCard(gtx *layout.Context, env *kit.Env, sc *screens, acc *client.Account) layout.Dimensions {
 	w := v.widgetsFor(acc.Vendor)
-	dims, _, err := w.card.Layout(env, gtx, kit.CardProps{}, func(gtx layout.Context) layout.Dimensions {
+	local := *gtx
+	local.Constraints.Min.X = local.Constraints.Max.X
+	dims, _, err := w.card.Layout(env, &local, kit.CardProps{Padding: accountCardPadding}, func(gtx layout.Context) layout.Dimensions {
 		children := []layout.FlexChild{
-			rigidWidget(func(gtx *layout.Context) layout.Dimensions { return v.layoutCardHeader(gtx, env, sc, w, acc) }),
-			spacerH(theme.SpaceMD),
+			rigidWidget(func(gtx *layout.Context) layout.Dimensions {
+				d := v.layoutCardHeader(gtx, env, sc, w, acc)
+				w.headerH = d.Size.Y
+				return d
+			}),
+			spacerH(accountHeaderGap),
 		}
 		children = append(children, layoutQuotaWindows(env, w, acc, gtx.Now)...)
 		if login, ok := sc.accounts.Login(acc.Vendor); ok && login.Active() {
@@ -242,17 +233,14 @@ func (v *accountsView) layoutCardHeader(gtx *layout.Context, env *kit.Env, sc *s
 	vendorTok, vendorCol := accountVendorNameStyle(env.Th)
 	login, hasLogin := sc.accounts.Login(acc.Vendor)
 	running := hasLogin && login.Active()
-	children := []layout.FlexChild{
-		rigidLabel(env, vendorTok, vendorCol, acc.Vendor),
+	items := []kit.FlowItem{
+		flowTitle(env, gtx, vendorTok, vendorCol, acc.Vendor),
 	}
 	if tagProps, showChip := accountStatusChipProps(acc, gtx.Now); showChip {
-		children = append(children, spacerW(theme.SpaceSM), rigidTag(env, sc.fail, w.stateTag, tagProps))
+		items = append(items, flowTag(env, gtx, sc.fail, w.stateTag, tagProps))
 	}
-	children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-		return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
-	}))
 	if running {
-		children = append(children, rigidInboxButton(env, sc.fail, w.cancelBtn, kit.ButtonProps{
+		items = append(items, atEnd(flowButton(env, gtx, sc.fail, w.cancelBtn, kit.ButtonProps{
 			Text: labelCancel, Variant: kit.Danger, Size: kit.SizeSM, Busy: login.Cancelling, Disabled: sc.accountsWorker == nil,
 		}, func() {
 			if sc.accountsWorker == nil {
@@ -261,9 +249,9 @@ func (v *accountsView) layoutCardHeader(gtx *layout.Context, env *kit.Env, sc *s
 			sc.accounts.BeginCancelLogin(acc.Vendor)
 			req := accounts.Request{Kind: accounts.OpCancelLogin, Vendor: acc.Vendor}
 			sc.accountsWorker.Do(&req)
-		}))
+		})))
 	} else if acc.State == client.AccountStateNeedsLogin {
-		children = append(children, rigidInboxButton(env, sc.fail, w.loginBtn, kit.ButtonProps{
+		items = append(items, atEnd(flowButton(env, gtx, sc.fail, w.loginBtn, kit.ButtonProps{
 			Text: "Sign in", Variant: kit.Secondary, Size: kit.SizeSM, Disabled: sc.accountsWorker == nil,
 		}, func() {
 			if sc.accountsWorker == nil || sc.accounts.IsLoginRunning(acc.Vendor) {
@@ -272,9 +260,9 @@ func (v *accountsView) layoutCardHeader(gtx *layout.Context, env *kit.Env, sc *s
 			sc.accounts.BeginStartLogin(acc.Vendor)
 			req := accounts.Request{Kind: accounts.OpStartLogin, Vendor: acc.Vendor}
 			sc.accountsWorker.Do(&req)
-		}))
+		})))
 	}
-	return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx, children...)
+	return flowHeader(gtx, items...)
 }
 
 func accountStatusChipProps(acc *client.Account, now time.Time) (kit.TagProps, bool) {

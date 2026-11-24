@@ -1,8 +1,6 @@
 package appwin
 
 import (
-	"strconv"
-
 	"gioui.org/layout"
 
 	"github.com/syurodev/fugue/pkg/client"
@@ -56,8 +54,6 @@ type secretsView struct {
 	menuFor     string
 	scopeFilter *kit.SegmentedState
 	addBtn      *kit.ButtonState
-	backBtn     *kit.IconButtonState
-	countTag    *kit.TagState
 	lockBanner  *kit.BannerState
 	errBanner   *kit.BannerState
 	empty       *kit.EmptyStateState
@@ -76,8 +72,6 @@ func newSecretsView() *secretsView {
 		menu:        kit.NewMenuState(),
 		scopeFilter: kit.NewSegmentedState(),
 		addBtn:      kit.NewButtonState(),
-		backBtn:     kit.NewIconButtonState(),
-		countTag:    kit.NewTagState(),
 		lockBanner:  kit.NewBannerState(),
 		errBanner:   kit.NewBannerState(),
 		empty:       kit.NewEmptyStateState(),
@@ -156,29 +150,9 @@ func (s *screens) applySecretsResults(results []secrets.Result) {
 }
 
 func (v *secretsView) layout(gtx *layout.Context, env *kit.Env, sc *screens) {
-	layoutRightPane(gtx, env,
-		func(gtx *layout.Context) layout.Dimensions { return v.layoutHeader(gtx, env, sc) },
-		func(gtx *layout.Context) layout.Dimensions { return v.layoutBody(gtx, env, sc) },
-	)
-}
-
-func (v *secretsView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
-	wsID, _ := sc.currentWorkspace()
-	items := v.filteredItems(sc.secrets, wsID)
-	locked := sc.vault.Locked()
-	titleTok, titleCol := accountPaneTitleStyle(env.Th)
-	back := kit.IconButtonProps{Icon: kit.IconChevronLeft, Label: labelBackToChat}
-	return flowHeader(gtx,
-		flowTitle(env, gtx, titleTok, titleCol, "Secrets"),
-		flowTag(env, gtx, sc.fail, v.countTag, kit.TagProps{Text: strconv.Itoa(len(items)), Variant: kit.TagNeutral}),
-		atEnd(flowButton(env, gtx, sc.fail, v.addBtn, kit.ButtonProps{
-			Text:     labelAddSecret,
-			Icon:     kit.IconPlus,
-			Variant:  kit.Primary,
-			Disabled: locked || sc.secretsWorker == nil,
-		}, func() { v.addDlg.open(wsID) })),
-		atEnd(flowIconButton(env, gtx, sc.fail, v.backBtn, &back, func() { sc.grid.closeSlotOf(KindSecrets) })),
-	)
+	layoutSlotContent(gtx, env, func(gtx *layout.Context) layout.Dimensions {
+		return v.layoutBody(gtx, env, sc)
+	})
 }
 
 func (v *secretsView) filteredItems(m *secrets.Model, wsID string) []client.SecretMeta {

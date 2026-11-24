@@ -14,8 +14,10 @@ import (
 )
 
 const (
-	labelBackToChat = "Back to chat"
-	labelCancel     = "Cancel"
+	labelCancel = "Cancel"
+	// slotContentInset is the shared slot-content inset on every side; tests
+	// that hover laid-out rows derive positions from it instead of pixels.
+	slotContentInset = theme.SpaceLG
 )
 
 // openSettings opens the settings slot and arms its reads (F10.5d). The
@@ -32,17 +34,15 @@ func (s *screens) openSettings() {
 	s.ensureSettingsWorkspaceSelected()
 }
 
-func layoutRightPane(gtx *layout.Context, env *kit.Env, headerFn, bodyFn func(*layout.Context) layout.Dimensions) layout.Dimensions {
+// layoutSlotContent is the shared slot-content contract (§5.3): fills the
+// slot surface and insets the body cleanly. The slot header owns the title,
+// pane actions and close/arrange controls, so slot content never draws its
+// own heading or "Back to …" button.
+func layoutSlotContent(gtx *layout.Context, env *kit.Env, bodyFn func(*layout.Context) layout.Dimensions) layout.Dimensions {
 	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
-	return layout.Inset{Top: theme.SpaceMD, Bottom: theme.SpaceMD, Left: theme.SpaceLG, Right: theme.SpaceLG}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-			rigidWidget(headerFn),
-			spacerH(theme.SpaceMD),
-			layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				return bodyFn(&local)
-			}),
-		)
+	return layout.UniformInset(slotContentInset).Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
+		local := gtx
+		return bodyFn(&local)
 	})
 }
 

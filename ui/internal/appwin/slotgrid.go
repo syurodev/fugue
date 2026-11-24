@@ -87,6 +87,7 @@ type slotGrid struct {
 	rects      map[string]image.Rectangle
 	refRects   map[string]image.Rectangle
 	anims      map[string]*slotAnim
+	closing    []*closingSlot
 	splitC     map[int]*kit.SplitPaneState
 	splitR     map[int]*kit.SplitPaneState
 	headerTags map[string]*headerTag
@@ -98,18 +99,18 @@ type slotGrid struct {
 	lastVisible    int
 	drawerPresence motion.Presence
 	focus          string
-	// popover is the arrange popover and popFor the cell it opened from.
-	popover *kit.PopoverState
-	popFor  string
+	// arrangeMenu is the arrange menu and popFor the cell it opened from.
+	arrangeMenu *kit.MenuState
+	popFor      string
 	// buttons of the chrome: per cell the arrange and close buttons, per
 	// folded cell the edge tab, and the rail's and collapsed sidebar's own
 	// buttons.
 	arrangeBtns map[string]*kit.IconButtonState
 	closeBtns   map[string]*kit.IconButtonState
+	actionBtns  map[string]*kit.IconButtonState
 	tabBtns     map[string]*kit.IconButtonState
 	railBtns    map[railItem]*kit.IconButtonState
 	sidebarBtn  *kit.IconButtonState
-	arrPop      arrangeActions
 	// newWindow is the last "open in new window" request (F10.21 consumes).
 	newWindow *NewWindowRequest
 	// applyGeometry applies a restored window size; the window owns the
@@ -117,7 +118,7 @@ type slotGrid struct {
 	applyGeometry func(widthDp, heightDp int)
 }
 
-// arrangeCmd is one arrange-popover command (§5.3).
+// arrangeCmd is one arrange-menu command (§5.3).
 type arrangeCmd uint8
 
 // The arrange commands: the four move directions, then fill, split beside
@@ -133,25 +134,6 @@ const (
 	arrangeNewWindow
 )
 
-// arrangeActions are the arrange popover's buttons (§5.3: move, fill, split,
-// make main, open in new window).
-type arrangeActions struct {
-	move   [4]*kit.ButtonState
-	fill   *kit.ButtonState
-	split  *kit.ButtonState
-	main   *kit.ButtonState
-	newWin *kit.ButtonState
-}
-
-func newArrangeActions() arrangeActions {
-	var a arrangeActions
-	for i := range a.move {
-		a.move[i] = kit.NewButtonState()
-	}
-	a.fill, a.split, a.main, a.newWin = kit.NewButtonState(), kit.NewButtonState(), kit.NewButtonState(), kit.NewButtonState()
-	return a
-}
-
 // newSlotGrid builds the shell over the default layout.
 func newSlotGrid() *slotGrid {
 	return &slotGrid{
@@ -164,13 +146,13 @@ func newSlotGrid() *slotGrid {
 		splitC:         map[int]*kit.SplitPaneState{},
 		splitR:         map[int]*kit.SplitPaneState{},
 		headerTags:     map[string]*headerTag{},
-		popover:        kit.NewPopoverState(),
+		arrangeMenu:    kit.NewMenuState(),
 		arrangeBtns:    map[string]*kit.IconButtonState{},
 		closeBtns:      map[string]*kit.IconButtonState{},
+		actionBtns:     map[string]*kit.IconButtonState{},
 		tabBtns:        map[string]*kit.IconButtonState{},
 		railBtns:       map[railItem]*kit.IconButtonState{},
 		sidebarBtn:     kit.NewIconButtonState(),
-		arrPop:         newArrangeActions(),
 		drawerPresence: motion.NewPresence(motion.Smooth(), motion.Exit()),
 	}
 }
@@ -190,22 +172,47 @@ func (g *slotGrid) syncFromDoc() {
 // higher-schema guard (the user's own edit may overwrite, host-api §5.2),
 // and marks the document for a save.
 func (g *slotGrid) edited(doc LayoutDoc) {
-	for _, p := range allCells(doc) {
-		ref := refAt(doc, p)
-		if ref.Kind == "" {
-			continue
-		}
-		if old, moved := findCell(g.doc, ref); moved && old != p {
-			if rect := g.rects[old.key()]; !rect.Empty() {
-				g.startAnim(keyOfRef(ref), rect)
-			}
-		}
-	}
+	g.armClosingAnims(doc)
+	g.armSlideAnims(doc)
 	g.doc = doc
 	g.docGen++
 	g.higher = false
 	g.dirty = g.loaded
 	g.saveAt = time.Time{}
+}
+
+func (g *slotGrid) armClosingAnims(doc LayoutDoc) {
+	for _, oldP := range allCells(g.doc) {
+		oldRef := refAt(g.doc, oldP)
+		if oldRef.Kind == "" {
+			continue
+		}
+		if _, still := findCell(doc, oldRef); !still {
+			if rect := g.rects[oldP.key()]; !rect.Empty() {
+				g.startClosing(oldRef, rect)
+			}
+		}
+	}
+}
+
+func (g *slotGrid) armSlideAnims(doc LayoutDoc) {
+	colsChanged := len(doc.Columns) != len(g.doc.Columns)
+	for _, p := range allCells(doc) {
+		ref := refAt(doc, p)
+		if ref.Kind == "" {
+			continue
+		}
+		old, moved := findCell(g.doc, ref)
+		if !moved {
+			continue
+		}
+		rowChanged := p.Col < len(g.doc.Columns) && len(doc.Columns[p.Col].Slots) != len(g.doc.Columns[p.Col].Slots)
+		if old != p || colsChanged || rowChanged {
+			if rect := g.rects[old.key()]; !rect.Empty() {
+				g.startAnim(keyOfRef(ref), rect)
+			}
+		}
+	}
 }
 
 // allCells lists every cell of the document, main included.
@@ -393,10 +400,10 @@ func (g *slotGrid) applyMove(p Pos, dir Direction) {
 	}
 }
 
-// openArrange opens the arrange popover for the slot at p (§5.3).
+// openArrange opens the arrange menu for the slot at p (§5.3).
 func (g *slotGrid) openArrange(p Pos) {
 	g.popFor = p.key()
-	g.popover.Open()
+	g.arrangeMenu.Open()
 }
 
 // drop applies a finished drag (§5.3): the slot lands per the target and
@@ -432,38 +439,6 @@ func mustSlotAt(doc LayoutDoc, p Pos) Slot {
 	slot, _ := slotAt(doc, p)
 	return slot
 }
-
-// startAnim arms a Smooth slide of refKey from from to wherever it lays out
-// next (§5.3, §3.7).
-func (g *slotGrid) startAnim(refKey string, from image.Rectangle) {
-	if from.Empty() {
-		return
-	}
-	g.anims[refKey] = &slotAnim{from: from, spring: motion.NewSpringSpec(0, motion.Smooth())}
-	g.anims[refKey].spring.Target = 1
-}
-
-// advanceAnims steps every animation and drops the finished ones.
-func (g *slotGrid) advanceAnims(env *kit.Env) {
-	dt := env.DT()
-	for key, anim := range g.anims {
-		anim.spring.Advance(dt)
-		if anim.spring.AtRest() {
-			delete(g.anims, key)
-			continue
-		}
-		env.Keep()
-	}
-}
-
-// animOf returns the in-flight animation of a ref, or nil.
-func (g *slotGrid) animOf(ref SlotRef) *slotAnim {
-	return g.anims[keyOfRef(ref)]
-}
-
-// keyOfRef names a ref for the animation table: kind and id, the identity a
-// moving slot keeps.
-func keyOfRef(ref SlotRef) string { return string(ref.Kind) + ":" + ref.ID }
 
 // refAt is the ref at p, empty outside the grid.
 func refAt(doc LayoutDoc, p Pos) SlotRef {

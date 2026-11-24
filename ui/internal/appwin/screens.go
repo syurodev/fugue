@@ -91,6 +91,14 @@ type screens struct {
 	// cache every session's list rides (F10.4a, desktop-app §7).
 	views     map[string]*transcriptview.State
 	viewCache *kit.VirtualHeightCache
+
+	connDotTag     struct{}
+	connDotHovered bool
+	connDotHasPtr  bool
+	connDotPtr     image.Point
+	// sidebarSelected records each sidebar row's Selected flag per frame for
+	// tests (FUG-65).
+	sidebarSelected map[string]bool
 	// commands holds one command model per session for the slash menu,
 	// refreshed when the session's commands revision advances (§9).
 	commands        map[string]*session.Commands
@@ -390,7 +398,7 @@ func (s *screens) fail(err error) {
 // them (§7: Escape closes the topmost layer first).
 func (s *screens) anyFloatLayerOpen() bool {
 	return s.dlg.anyOpen() || s.composer.start.dialog.IsOpen() || s.failure.closeDlg.dialog.IsOpen() ||
-		s.grid.popover.IsOpen() || s.vaultGate.active(s.vault)
+		s.grid.arrangeMenu.IsOpen() || s.vaultGate.active(s.vault)
 }
 
 // layout draws the shell (F10.20b, desktop-app §5.3): the VaultGate while
@@ -417,6 +425,10 @@ func (s *screens) layoutSessionWithComposer(gtx *layout.Context, env *kit.Env, i
 
 func (s *screens) layoutSessionPane(gtx *layout.Context, env *kit.Env, id string, main, connected bool) {
 	w, h := gtx.Constraints.Max.X, gtx.Constraints.Max.Y
+	if main && id == "" {
+		s.layoutMainEmptyState(gtx, env)
+		return
+	}
 	measure := *gtx
 	_, leads := s.leadTeam(id)
 	leadComposer := leads && main

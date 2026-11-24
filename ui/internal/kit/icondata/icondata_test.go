@@ -106,6 +106,16 @@ func packagedIcons() []packagedIcon {
 		{"key-round", "KeyRound"},
 		{"bot", "Bot"},
 		{"lock", "Lock"},
+		{"arrow-left", "ArrowLeft"},
+		{"arrow-right", "ArrowRight"},
+		{"arrow-up", "ArrowUp"},
+		{"arrow-down", "ArrowDown"},
+		{"maximize-2", "Maximize2"},
+		{"minimize-2", "Minimize2"},
+		{"columns-2", "Columns2"},
+		{"panel-left", "PanelLeft"},
+		{"app-window", "WindowFrame"},
+		{"star", "Star"},
 	}
 }
 

@@ -3,12 +3,15 @@ package appwin
 import (
 	"image"
 
+	"gioui.org/io/event"
 	"gioui.org/io/key"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 
+	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
@@ -38,16 +41,15 @@ func (s *screens) layoutShell(gtx *layout.Context, env *kit.Env) {
 	// The outer shell is the darker AppBg everywhere: rail and sidebar sit
 	// on it directly, the grid floats in its rounded container (§5.3).
 	paint.FillShape(gtx.Ops, env.Th.Chrome().AppBg, clip.Rect{Max: gtx.Constraints.Max}.Op())
-	layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			return s.failure.layout(env, &local, s)
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			return s.layoutShellBody(&local, env)
-		}),
-	)
+	failGtx := *gtx
+	failGtx.Constraints.Min = image.Point{}
+	failDims := s.failure.layout(env, &failGtx, s)
+	bodyH := max(gtx.Constraints.Max.Y-failDims.Size.Y, 0)
+	env.Offset(gtx, image.Pt(0, failDims.Size.Y), func(gtx *layout.Context) {
+		local := *gtx
+		local.Constraints = layout.Constraints{Max: image.Pt(gtx.Constraints.Max.X, bodyH)}
+		s.layoutShellBody(&local, env)
+	})
 }
 
 // layoutShortcuts consumes the shell-level shortcuts (§5.3): Ctrl/Cmd+, opens
@@ -119,29 +121,40 @@ func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dime
 	if plan.TempSidebarFolded {
 		sidebarOpen = false
 	}
-	return layout.Flex{Axis: layout.Horizontal}.Layout(*gtx,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			return s.layoutRail(&local, env, sidebarOpen)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			if !sidebarOpen {
-				// Collapsed, the sidebar leaves only the rail (§5.3); the
-				// rail's bottom toggle reopens it.
-				return layout.Dimensions{}
-			}
-			return layout.Inset{Right: theme.SpaceXS}.Layout(local, func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				local.Constraints.Max.X = min(local.Constraints.Max.X, gtx.Dp(theme.SidebarWidth))
-				return s.layoutSidebarPanel(&local, env)
-			})
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			return s.layoutGridContainer(&local, env, plan)
-		}),
-	)
+	totalW, totalH := gtx.Constraints.Max.X, gtx.Constraints.Max.Y
+	railW := min(gtx.Dp(theme.RailWidth), totalW)
+	footerH := gtx.Dp(theme.ControlLG)
+	if !sidebarOpen && !s.vault.Locked() && s.vaultWorker != nil {
+		footerH += gtx.Dp(theme.ControlSM) + gtx.Dp(theme.SpaceSM) + gtx.Dp(theme.SpaceXS)
+	}
+	colH := max(totalH-footerH, 0)
+	gutter := gtx.Dp(theme.SpaceXS)
+	sideW := 0
+	if sidebarOpen {
+		sideW = min(max(totalW-railW-gutter, 0), gtx.Dp(theme.SidebarWidth))
+	}
+	railGtx := *gtx
+	railGtx.Constraints = layout.Constraints{Min: image.Pt(railW, 0), Max: image.Pt(railW, colH)}
+	s.layoutRail(&railGtx, env)
+	if sidebarOpen && sideW > 0 {
+		env.Offset(gtx, image.Pt(railW, 0), func(gtx *layout.Context) {
+			local := *gtx
+			local.Constraints = layout.Constraints{Min: image.Pt(sideW, 0), Max: image.Pt(sideW, colH)}
+			s.layoutSidebarPanel(&local, env)
+		})
+	}
+	s.layoutShellFooter(gtx, env, sidebarOpen, railW, sideW, colH, footerH)
+	gridX := railW + sideW
+	if sidebarOpen && sideW > 0 {
+		gridX += gutter
+	}
+	gridW := max(totalW-gridX, 0)
+	env.Offset(gtx, image.Pt(gridX, 0), func(gtx *layout.Context) {
+		local := *gtx
+		local.Constraints = layout.Constraints{Min: image.Pt(gridW, 0), Max: image.Pt(gridW, totalH)}
+		s.layoutGridContainer(&local, env, plan)
+	})
+	return layout.Dimensions{Size: image.Pt(totalW, totalH)}
 }
 
 // planShell derives the narrow-window fold for the shell body. Max.X is the
@@ -159,44 +172,32 @@ func (s *screens) sidebarVisible() bool { return !s.grid.doc.SidebarCollapsed }
 // hairline BorderSubtle outline, and every boundary inside stays a hairline
 // SplitPane divider (§5.3, ui-kit §6.27).
 func (s *screens) layoutGridContainer(gtx *layout.Context, env *kit.Env, plan PlanFoldResult) layout.Dimensions {
-	inset := layout.Inset{
-		Left:   theme.SpaceXS / 2,
-		Top:    theme.SpaceXS,
-		Right:  theme.SpaceXS,
-		Bottom: theme.SpaceXS,
+	local := *gtx
+	gridRect := image.Rectangle{Max: local.Constraints.Max}
+	if gridRect.Empty() {
+		return layout.Dimensions{}
 	}
-	return inset.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
-		local := gtx
-		gridRect := image.Rectangle{Max: local.Constraints.Max}
-		if gridRect.Empty() {
-			return layout.Dimensions{}
-		}
-		radius := gtx.Dp(theme.RadiusMD)
-		panel := clip.UniformRRect(gridRect, radius)
-		paint.FillShape(local.Ops, env.Th.Chrome().CanvasBg, panel.Op(local.Ops))
-		area := gridRect
-		local.Constraints = layout.Constraints{Min: image.Pt(0, 0), Max: gridRect.Size()}
-		stack := panel.Push(local.Ops)
-		s.grid.layoutArea(&local, env, s, area, plan)
-		stack.Pop()
-		// The crisp outline rides on top of the cells' edges.
-		paint.FillShape(local.Ops, env.Th.Chrome().BorderSubtle,
-			clip.Stroke{Path: panel.Path(local.Ops), Width: float32(max(gtx.Dp(theme.Hairline), 1))}.Op())
-		return layout.Dimensions{Size: gridRect.Size()}
-	})
+	radius := gtx.Dp(theme.RadiusMD)
+	panel := clip.UniformRRect(gridRect, radius)
+	paint.FillShape(local.Ops, env.Th.Chrome().CanvasBg, panel.Op(local.Ops))
+	area := gridRect
+	local.Constraints = layout.Constraints{Min: image.Pt(0, 0), Max: gridRect.Size()}
+	stack := panel.Push(local.Ops)
+	s.grid.layoutArea(&local, env, s, area, plan)
+	stack.Pop()
+	// The crisp outline rides on top of the cells' edges.
+	paint.FillShape(local.Ops, env.Th.Chrome().BorderSubtle,
+		clip.Stroke{Path: panel.Path(local.Ops), Width: float32(max(gtx.Dp(theme.Hairline), 1))}.Op())
+	return layout.Dimensions{Size: gridRect.Size()}
 }
 
 // layoutRail draws the rail (§5.3) on the shell's AppBg: the rail items'
-// icons centered in the rail column, the sidebar toggle at the bottom —
-// collapse points left when the sidebar is open, right when it is not; the
-// rail never folds.
-func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool) layout.Dimensions {
+// icons centered in the rail column with kit Tooltips and SelectedWash for
+// the active item; the rail never folds.
+func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env) layout.Dimensions {
 	w := gtx.Dp(theme.RailWidth)
-	local := *gtx
-	h := local.Constraints.Max.Y
-	local.Constraints = layout.Constraints{Min: image.Pt(w, 0), Max: image.Pt(w, h)}
-	gtx = &local
-	btnW := gtx.Dp(theme.ControlMD)
+	h := gtx.Constraints.Max.Y
+	btnW := gtx.Dp(theme.ControlLG)
 	x := max((w-btnW)/2, 0)
 	items := []struct {
 		item railItem
@@ -207,16 +208,16 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool
 		{railTeam, kit.IconUsers, teamLabel},
 		{railModules, kit.IconWrench, "Modules"},
 	}
-	y := gtx.Dp(theme.SpaceSM)
+	y := gtx.Dp(theme.SpaceXS)
 	for _, it := range items {
 		btn := s.grid.railBtn(it.item)
 		props := kit.IconButtonProps{
-			Icon: it.icon, Label: it.hint, Variant: kit.IconButtonGhost, Size: kit.SizeMD,
+			Icon: it.icon, Label: it.hint, Variant: kit.IconButtonGhost, Size: kit.SizeLG,
 			Toggled: s.grid.rail == it.item,
 		}
 		var clicked bool
 		var err error
-		atPoint(gtx, image.Pt(x, y), func(gtx *layout.Context) {
+		env.Offset(gtx, image.Pt(x, y), func(gtx *layout.Context) {
 			clicked, err = btn.Layout(env, gtx, &props)
 		})
 		s.fail(err)
@@ -225,8 +226,16 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool
 		}
 		y += btnW + gtx.Dp(theme.SpaceXS)
 	}
-	// The sidebar's toggle lives at the bottom of the rail itself, so a
-	// collapsed sidebar leaves only the rail (§5.3).
+	return layout.Dimensions{Size: image.Pt(w, h)}
+}
+
+// layoutShellFooter draws the bottom-left footer row: the sidebar collapse
+// chevron in the rail column, the Lock vault IconButton aligned to the
+// sidebar icon column when unlocked, and a small connection status dot with
+// a tooltip (no raw text while connected; "Reconnecting…" while connecting).
+// When the sidebar is collapsed, Lock vault and the connection dot stack in
+// the rail column above the collapse chevron.
+func (s *screens) layoutShellFooter(gtx *layout.Context, env *kit.Env, sidebarOpen bool, railW, sideW, y, h int) {
 	toggle := s.grid.sidebarBtn
 	icon := kit.IconChevronLeft
 	hint := "Collapse sidebar"
@@ -234,12 +243,17 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool
 		icon = kit.IconChevronRight
 		hint = "Open sidebar"
 	}
-	props := kit.IconButtonProps{Icon: icon, Label: hint, Variant: kit.IconButtonBordered, Size: kit.SizeSM}
-	toggleSize := toggle.Measure(env, gtx, &props).Size
+	toggleProps := kit.IconButtonProps{Icon: icon, Label: hint, Variant: kit.IconButtonBordered, Size: kit.SizeSM}
+	toggleSize := toggle.Measure(env, gtx, &toggleProps).Size
+	if !sidebarOpen || sideW <= 0 {
+		s.layoutCollapsedFooter(gtx, env, toggle, &toggleProps, railW, y, h)
+		return
+	}
+	togglePos := image.Pt(max((railW-toggleSize.X)/2, 0), y+max((h-toggleSize.Y)/2, 0))
 	var clicked bool
 	var err error
-	atPoint(gtx, image.Pt(max((w-toggleSize.X)/2, 0), max(h-toggleSize.Y-gtx.Dp(theme.SpaceSM), y)), func(gtx *layout.Context) {
-		clicked, err = toggle.Layout(env, gtx, &props)
+	env.Offset(gtx, togglePos, func(gtx *layout.Context) {
+		clicked, err = toggle.Layout(env, gtx, &toggleProps)
 	})
 	s.fail(err)
 	if clicked {
@@ -247,7 +261,103 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool
 		doc.SidebarCollapsed = sidebarOpen
 		s.grid.edited(doc)
 	}
-	return layout.Dimensions{Size: image.Pt(w, h)}
+	// Align Lock vault to the sidebar icon column (SpaceXS pill inset + SpaceMD icon inset).
+	lockProps := kit.IconButtonProps{Icon: kit.IconLock, Label: labelLockVault, Variant: kit.IconButtonGhost, Size: kit.SizeSM}
+	lockSize := s.vaultGate.lockBtn.Measure(env, gtx, &lockProps).Size
+	iconColX := railW + gtx.Dp(theme.SpaceXS) + gtx.Dp(theme.SpaceMD) - max((lockSize.X-gtx.Dp(theme.IconMD))/2, 0)
+	lockY := y + max((h-lockSize.Y)/2, 0)
+	env.Offset(gtx, image.Pt(iconColX, lockY), func(gtx *layout.Context) {
+		local := *gtx
+		s.vaultGate.layoutLockButton(&local, env, s)
+	})
+	dotX := iconColX + lockSize.X + gtx.Dp(theme.SpaceSM)
+	if s.vault.Locked() || s.vaultWorker == nil {
+		dotX = railW + gtx.Dp(theme.SpaceXS) + gtx.Dp(theme.SpaceMD)
+	}
+	s.layoutConnectionDot(gtx, env, image.Pt(dotX, y+h/2), true)
+}
+
+func (s *screens) layoutCollapsedFooter(gtx *layout.Context, env *kit.Env, toggle *kit.IconButtonState, toggleProps *kit.IconButtonProps, railW, y, h int) {
+	toggleSize := toggle.Measure(env, gtx, toggleProps).Size
+	curY := y + h - toggleSize.Y - gtx.Dp(theme.SpaceXXS)
+	env.Offset(gtx, image.Pt(max((railW-toggleSize.X)/2, 0), curY), func(gtx *layout.Context) {
+		clicked, err := toggle.Layout(env, gtx, toggleProps)
+		s.fail(err)
+		if clicked {
+			doc := cloneLayout(s.grid.doc)
+			doc.SidebarCollapsed = false
+			s.grid.edited(doc)
+		}
+	})
+	if !s.vault.Locked() && s.vaultWorker != nil {
+		lockProps := kit.IconButtonProps{Icon: kit.IconLock, Label: labelLockVault, Variant: kit.IconButtonGhost, Size: kit.SizeSM}
+		lockSize := s.vaultGate.lockBtn.Measure(env, gtx, &lockProps).Size
+		curY -= lockSize.Y + gtx.Dp(theme.SpaceXS)
+		env.Offset(gtx, image.Pt(max((railW-lockSize.X)/2, 0), curY), func(gtx *layout.Context) {
+			local := *gtx
+			s.vaultGate.layoutLockButton(&local, env, s)
+		})
+	}
+	dotD := max(gtx.Dp(theme.SpaceSM), 4)
+	curY -= dotD + gtx.Dp(theme.SpaceXS)
+	s.layoutConnectionDot(gtx, env, image.Pt(max((railW-dotD)/2, 0), curY+dotD/2), false)
+}
+
+func (s *screens) layoutConnectionDot(gtx *layout.Context, env *kit.Env, center image.Point, showLabel bool) {
+	state, reason := s.m.State()
+	if s.hostState != "" {
+		state, reason = s.hostState, s.hostReason
+	}
+	if state == "" {
+		return
+	}
+	dotD := max(gtx.Dp(theme.SpaceSM), 4)
+	r := image.Rect(0, 0, dotD, dotD)
+	pos := image.Pt(center.X, center.Y-dotD/2)
+	tip := "Host connected"
+	col := env.Th.Chrome().FgSubtle
+	if state != hostconn.StateConnected {
+		tip = statusLine(state, reason)
+		col = statusColor(env.Th, state)
+	}
+	env.Offset(gtx, pos, func(gtx *layout.Context) {
+		paint.FillShape(gtx.Ops, col, clip.UniformRRect(r, dotD/2).Op(gtx.Ops))
+		area := clip.Rect(r).Push(gtx.Ops)
+		event.Op(gtx.Ops, &s.connDotTag)
+		s.pollConnDotEvents(gtx)
+		area.Pop()
+		env.TooltipAnchor(&s.connDotTag, r, s.connDotHovered, false, s.connDotHasPtr, s.connDotPtr, kit.TooltipProps{Text: tip})
+	})
+	if showLabel && state == hostconn.StateConnecting {
+		labelX := center.X + dotD + gtx.Dp(theme.SpaceXS)
+		labelY := center.Y - gtx.Sp(theme.TypeCaption().Line)/2
+		env.Offset(gtx, image.Pt(labelX, labelY), func(gtx *layout.Context) {
+			local := *gtx
+			local.Constraints.Min = image.Point{}
+			kit.Label(env, &local, theme.TypeCaption(), env.Th.Chrome().FgMuted, "Reconnecting…")
+		})
+	}
+}
+
+func (s *screens) pollConnDotEvents(gtx *layout.Context) {
+	for {
+		ev, ok := gtx.Event(pointer.Filter{Target: &s.connDotTag, Kinds: pointer.Enter | pointer.Move | pointer.Leave | pointer.Cancel})
+		if !ok {
+			return
+		}
+		pe, is := ev.(pointer.Event)
+		if !is {
+			continue
+		}
+		switch pe.Kind {
+		case pointer.Enter, pointer.Move:
+			s.connDotHovered, s.connDotHasPtr = true, true
+			s.connDotPtr = pe.Position.Round()
+		case pointer.Leave, pointer.Cancel:
+			s.connDotHovered, s.connDotHasPtr = false, false
+		case pointer.Press, pointer.Release, pointer.Drag, pointer.Scroll:
+		}
+	}
 }
 
 // railBtn returns the rail item's button state, building it on first use.

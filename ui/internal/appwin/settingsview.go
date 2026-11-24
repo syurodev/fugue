@@ -24,10 +24,8 @@ type intFieldWidgets struct {
 // settingsView owns the F10.5d1/F10.5d2 settings pane: app preferences,
 // structured workspace settings forms, and the Q-62 raw TOML editor tab with
 // live validation, CAS conflict diffing, and Q-64 policy confirmation routing.
-// Until F10.20b's slot grid lands, it occupies the right pane.
+// It renders inside the Settings slot.
 type settingsView struct {
-	refreshBtn        *kit.IconButtonState
-	backBtn           *kit.ButtonState
 	saveBtn           *kit.ButtonState
 	discardBtn        *kit.ButtonState
 	confirmPolicyBtn  *kit.ButtonState
@@ -74,8 +72,6 @@ type settingsView struct {
 
 func newSettingsView() *settingsView {
 	return &settingsView{
-		refreshBtn:        kit.NewIconButtonState(),
-		backBtn:           kit.NewButtonState(),
 		saveBtn:           kit.NewButtonState(),
 		discardBtn:        kit.NewButtonState(),
 		confirmPolicyBtn:  kit.NewButtonState(),
@@ -135,27 +131,9 @@ func (v *settingsView) hasFieldValidationError() bool {
 }
 
 func (v *settingsView) layout(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
-	return layoutRightPane(gtx, env,
-		func(gtx *layout.Context) layout.Dimensions { return v.layoutHeader(gtx, env, sc) },
-		func(gtx *layout.Context) layout.Dimensions { return v.layoutBody(gtx, env, sc) },
-	)
-}
-
-func (v *settingsView) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
-	refresh := kit.IconButtonProps{
-		Icon:     kit.IconRestart,
-		Label:    "Refresh settings",
-		Variant:  kit.IconButtonGhost,
-		Size:     kit.SizeSM,
-		Disabled: sc.settingsWorker == nil || sc.settings.Loading,
-	}
-	return flowHeader(gtx,
-		flowTitle(env, gtx, theme.TypeHeading(), env.Th.Chrome().Fg, "Settings"),
-		atEnd(flowIconButton(env, gtx, sc.fail, v.refreshBtn, &refresh, sc.requestReloadSettings)),
-		atEnd(flowButton(env, gtx, sc.fail, v.backBtn, kit.ButtonProps{
-			Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM,
-		}, func() { sc.grid.closeSlotOf(KindSettings) })),
-	)
+	return layoutSlotContent(gtx, env, func(gtx *layout.Context) layout.Dimensions {
+		return v.layoutBody(gtx, env, sc)
+	})
 }
 
 func (v *settingsView) layoutBody(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
@@ -163,17 +141,23 @@ func (v *settingsView) layoutBody(gtx *layout.Context, env *kit.Env, sc *screens
 	children := make([]layout.FlexChild, 0, 2+len(wsChildren))
 	children = append(children,
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions { return v.layoutPreferencesCard(gtx, env, sc) }),
-		spacerH(theme.SpaceMD),
+		spacerH(theme.SpaceXXL),
 	)
 	children = append(children, wsChildren...)
 	return v.scroll.Layout(env, gtx, kit.ScrollAreaProps{Axis: layout.Vertical}, func(gtx *layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, children...)
+		colW := min(gtx.Constraints.Max.X, gtx.Dp(theme.TranscriptMeasure))
+		local := *gtx
+		local.Constraints.Min.X = colW
+		local.Constraints.Max.X = colW
+		return layout.Flex{Axis: layout.Vertical}.Layout(local, children...)
 	})
 }
 
 func (v *settingsView) layoutPreferencesCard(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
 	cur := sc.settings.Prefs.Current
-	dims, _, err := v.prefsCard.Layout(env, gtx, kit.CardProps{}, func(gtx layout.Context) layout.Dimensions {
+	local := *gtx
+	local.Constraints.Min.X = local.Constraints.Max.X
+	dims, _, err := v.prefsCard.Layout(env, &local, kit.CardProps{}, func(gtx layout.Context) layout.Dimensions {
 		children := make([]layout.FlexChild, 0, 13)
 		children = append(children,
 			rigidLabel(env, theme.TypeTitle(), env.Th.Chrome().Fg, "App preferences"),
@@ -285,9 +269,9 @@ func (v *settingsView) workspaceSectionChildren(env *kit.Env, sc *screens) []lay
 	}
 	children = append(children,
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions { return v.layoutTeamsCard(gtx, env, sc) }),
-		spacerH(theme.SpaceMD),
+		spacerH(theme.SpaceXXL),
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions { return v.layoutPolicyCard(gtx, env, sc) }),
-		spacerH(theme.SpaceMD),
+		spacerH(theme.SpaceXXL),
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions { return v.layoutSaveBar(gtx, env, sc) }),
 	)
 	return children

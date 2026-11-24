@@ -27,6 +27,14 @@ type slotAnim struct {
 	spring motion.Spring
 }
 
+// closingSlot is a closed slot fading out on Exit while its neighbours slide
+// into the freed space on Smooth (FUG-65).
+type closingSlot struct {
+	ref      SlotRef
+	rect     image.Rectangle
+	presence motion.Presence
+}
+
 // NewWindowRequest is the "open in new window" product: the ref to move and
 // the layout document the new window starts from — the ref as its main slot,
 // the sidebar collapsed (§5.3). F10.21 attaches window creation; until then
@@ -72,6 +80,9 @@ func (g *slotGrid) layoutArea(gtx *layout.Context, env *kit.Env, sc *screens, ar
 			g.drawSlot(gtx, env, sc, Pos{Col: c, Row: r}, area)
 		}
 	} else {
+		for _, cs := range g.closing {
+			g.drawClosingSlot(gtx, env, sc, cs)
+		}
 		for _, cg := range geom {
 			g.drawSlot(gtx, env, sc, cg.pos, cg.Rect)
 		}
@@ -194,12 +205,32 @@ func (g *slotGrid) drawSlot(gtx *layout.Context, env *kit.Env, sc *screens, p Po
 	} else {
 		g.drawChrome(gtx, env, sc, p, head)
 	}
-	atPoint(gtx, body.Min, func(gtx *layout.Context) {
+	env.Offset(gtx, body.Min, func(gtx *layout.Context) {
 		local := *gtx
 		local.Constraints = layout.Constraints{Max: body.Size()}
 		defer clip.Rect{Max: body.Size()}.Push(local.Ops).Pop()
 		sc.layoutSlotBody(&local, env, p, ref)
 	})
+}
+
+// drawClosingSlot paints a closing slot's header and surface fading out on
+// Exit while remaining slots slide over or into the freed space.
+func (g *slotGrid) drawClosingSlot(gtx *layout.Context, env *kit.Env, sc *screens, cs *closingSlot) {
+	if cs.rect.Empty() {
+		return
+	}
+	alpha := cs.presence.Progress()
+	if alpha <= 0 {
+		return
+	}
+	defer paint.PushOpacity(gtx.Ops, alpha).Pop()
+	h := min(gtx.Dp(theme.SlotHeaderHeight), cs.rect.Dy())
+	head := image.Rect(cs.rect.Min.X, cs.rect.Min.Y, cs.rect.Max.X, cs.rect.Min.Y+h)
+	g.drawHeaderBar(gtx, env, sc, Pos{Col: 1}, cs.ref, head, nil)
+	body := image.Rect(cs.rect.Min.X, cs.rect.Min.Y+h, cs.rect.Max.X, cs.rect.Max.Y)
+	if !body.Empty() {
+		paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect(body).Op())
+	}
 }
 
 // drawChrome draws a regular slot's header bar — icon and title, the drag
@@ -212,11 +243,8 @@ func (g *slotGrid) drawChrome(gtx *layout.Context, env *kit.Env, sc *screens, p 
 	tag := g.headerTagFor(p)
 	g.processHeaderInput(gtx, tag, rect.Min, p)
 	arrange := ensureIconButton(&g.arrangeBtns, p.key())
-	close := ensureIconButton(&g.closeBtns, p.key())
-	anchor := g.drawHeaderBar(gtx, env, sc, p, refAt(g.doc, p), rect, &headerButtons{arrange: arrange, close: close})
-	if anchor != nil {
-		g.layoutArrange(env, gtx, sc, p, *anchor)
-	}
+	closeBtn := ensureIconButton(&g.closeBtns, p.key())
+	g.drawHeaderBar(gtx, env, sc, p, refAt(g.doc, p), rect, &headerButtons{arrange: arrange, close: closeBtn})
 }
 
 // headerButtons are the regular header's right-side controls; the main
@@ -227,79 +255,104 @@ type headerButtons struct {
 
 // drawHeaderBar draws one header band: the raised bar over the whole
 // rectangle — it reads as the drag handle — a hairline under it, and the
-// icon + title centered with the buttons at the right. It returns the
-// arrange button's box in this cursor's coordinates, nil when there is no
-// arrange button.
-func (g *slotGrid) drawHeaderBar(gtx *layout.Context, env *kit.Env, sc *screens, p Pos, ref SlotRef, rect image.Rectangle, btns *headerButtons) *image.Rectangle {
+// icon + title centered with the buttons at the right.
+func (g *slotGrid) drawHeaderBar(gtx *layout.Context, env *kit.Env, sc *screens, p Pos, ref SlotRef, rect image.Rectangle, btns *headerButtons) {
 	h := rect.Dy()
-	var anchor *image.Rectangle
-	atPoint(gtx, rect.Min, func(gtx *layout.Context) {
+	env.Offset(gtx, rect.Min, func(gtx *layout.Context) {
 		bar := *gtx
 		bar.Constraints = layout.Constraints{Min: image.Pt(rect.Dx(), h), Max: image.Pt(rect.Dx(), h)}
-		paint.FillShape(bar.Ops, env.Th.Chrome().SurfaceBase, clip.Rect{Max: image.Pt(rect.Dx(), h)}.Op())
-		layout.Inset{Left: theme.SpaceMD, Right: theme.SpaceXS}.Layout(bar, func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(local, g.headerChildren(env, sc, p, ref, btns)...)
+		paint.FillShape(bar.Ops, env.Th.Chrome().CanvasBg, clip.Rect{Max: image.Pt(rect.Dx(), h)}.Op())
+		padL := gtx.Dp(theme.SpaceMD)
+		padR := gtx.Dp(theme.SpaceXS)
+		innerW := max(rect.Dx()-padL-padR, 0)
+		env.Offset(&bar, image.Pt(padL, 0), func(gtx *layout.Context) {
+			local := *gtx
+			local.Constraints = layout.Constraints{Min: image.Pt(innerW, h), Max: image.Pt(innerW, h)}
+			g.layoutHeaderRow(env, &local, sc, p, ref, btns)
 		})
+		if btns != nil {
+			btnW := gtx.Dp(theme.ControlSM)
+			anchor := image.Rect(rect.Dx()-2*btnW-padR, 0, rect.Dx()-btnW-padR, h)
+			g.layoutArrange(env, gtx, sc, p, anchor)
+		}
 	})
 	// The hairline under the band separates it from the body.
 	line := max(gtx.Dp(theme.Hairline), 1)
 	paint.FillShape(gtx.Ops, env.Th.Chrome().BorderSubtle,
 		clip.Rect(image.Rect(rect.Min.X, rect.Max.Y-line, rect.Max.X, rect.Max.Y)).Op())
-	if btns != nil {
-		box := image.Rect(rect.Max.X-2*gtx.Dp(theme.ControlMD)-gtx.Dp(theme.SpaceXS), rect.Min.Y,
-			rect.Max.X-gtx.Dp(theme.SpaceXS), rect.Max.Y)
-		anchor = &box
-	}
-	return anchor
 }
 
-// headerChildren builds the header row's flex children: the slot icon
-// vertically centered beside the title, then — for regular slots — the
-// arrange and close buttons pushed right.
-func (g *slotGrid) headerChildren(env *kit.Env, sc *screens, p Pos, ref SlotRef, btns *headerButtons) []layout.FlexChild {
-	children := make([]layout.FlexChild, 0, 5)
-	children = append(children,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			dims, err := env.Icon(&local, slotIcon(ref.Kind), theme.IconSM, env.Th.Chrome().FgMuted)
-			sc.fail(err)
-			return layout.Inset{Right: theme.SpaceXS}.Layout(local, func(gtx layout.Context) layout.Dimensions {
-				return dims
-			})
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			return kit.Label(env, &local, theme.TypeSmall(), env.Th.Chrome().Fg, slotTitle(sc, ref))
-		}),
-		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, 0)}
-		}))
-	if btns == nil {
-		return children
+// layoutHeaderRow lays out the header row's children using env.Offset so every
+// IconButton's tooltip anchors at its exact window coordinates.
+func (g *slotGrid) layoutHeaderRow(env *kit.Env, gtx *layout.Context, sc *screens, p Pos, ref SlotRef, btns *headerButtons) {
+	w, h := gtx.Constraints.Max.X, gtx.Constraints.Max.Y
+	iconPx := gtx.Dp(theme.IconSM)
+	gap := gtx.Dp(theme.SpaceXS)
+	x := 0
+	env.Offset(gtx, image.Pt(x, max((h-iconPx)/2, 0)), func(gtx *layout.Context) {
+		local := *gtx
+		local.Constraints = layout.Constraints{Max: image.Pt(iconPx, iconPx)}
+		_, err := env.Icon(&local, slotIcon(ref.Kind), theme.IconSM, env.Th.Chrome().FgMuted)
+		sc.fail(err)
+	})
+	x += iconPx + gap
+
+	actions := slotHeaderActions(sc, ref)
+	btnSize := gtx.Dp(theme.ControlSM)
+	rightCount := len(actions)
+	if btns != nil {
+		rightCount += 2
 	}
-	return append(children,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			props := kit.IconButtonProps{Icon: kit.IconEllipsis, Label: labelArrange, Variant: kit.IconButtonGhost, Size: kit.SizeSM}
-			clicked, err := btns.arrange.Layout(env, &local, &props)
+	rightW := rightCount * btnSize
+	titleMaxW := max(w-x-rightW-gap, 0)
+	titleH := gtx.Sp(theme.TypeSmall().Line)
+	env.Offset(gtx, image.Pt(x, max((h-titleH)/2, 0)), func(gtx *layout.Context) {
+		local := *gtx
+		local.Constraints = layout.Constraints{Max: image.Pt(titleMaxW, titleH)}
+		kit.Label(env, &local, theme.TypeSmall(), env.Th.Chrome().Fg, slotTitle(sc, ref))
+	})
+
+	rx := w - rightW
+	g.layoutHeaderButtons(env, gtx, sc, p, btns, actions, rx, h, btnSize)
+}
+
+func (g *slotGrid) layoutHeaderButtons(env *kit.Env, gtx *layout.Context, sc *screens, p Pos, btns *headerButtons, actions []slotAction, rx, h, btnSize int) {
+	y := max((h-btnSize)/2, 0)
+	for i := range actions {
+		act := actions[i]
+		btn := ensureIconButton(&g.actionBtns, p.key()+":act:"+act.props.Label)
+		env.Offset(gtx, image.Pt(rx, y), func(gtx *layout.Context) {
+			local := *gtx
+			clicked, err := btn.Layout(env, &local, &act.props)
 			sc.fail(err)
-			if clicked {
-				g.openArrange(p)
+			if clicked && act.onClick != nil {
+				act.onClick()
 			}
-			return btns.arrange.Measure(env, &local, &props)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			props := kit.IconButtonProps{Icon: kit.IconClose, Label: "Close slot", Variant: kit.IconButtonGhost, Size: kit.SizeSM}
-			clicked, err := btns.close.Layout(env, &local, &props)
-			sc.fail(err)
-			if clicked {
-				g.edited(CloseSlot(g.doc, p))
-			}
-			return btns.close.Measure(env, &local, &props)
-		}),
-	)
+		})
+		rx += btnSize
+	}
+	if btns == nil {
+		return
+	}
+	env.Offset(gtx, image.Pt(rx, y), func(gtx *layout.Context) {
+		local := *gtx
+		props := kit.IconButtonProps{Icon: kit.IconEllipsis, Label: labelArrange, Variant: kit.IconButtonGhost, Size: kit.SizeSM}
+		clicked, err := btns.arrange.Layout(env, &local, &props)
+		sc.fail(err)
+		if clicked {
+			g.openArrange(p)
+		}
+	})
+	rx += btnSize
+	env.Offset(gtx, image.Pt(rx, y), func(gtx *layout.Context) {
+		local := *gtx
+		props := kit.IconButtonProps{Icon: kit.IconClose, Label: "Close slot", Variant: kit.IconButtonGhost, Size: kit.SizeSM}
+		clicked, err := btns.close.Layout(env, &local, &props)
+		sc.fail(err)
+		if clicked {
+			g.edited(CloseSlot(g.doc, p))
+		}
+	})
 }
 
 // ensureIconButton returns the named button, building it on first use.

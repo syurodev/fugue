@@ -323,6 +323,11 @@ func TestMenuFlipsAtTheWindowEdge(t *testing.T) {
 			[]int{itemShare},
 			func(p []image.Rectangle) bool { return len(p) == 2 && p[1].Max.X <= p[0].Min.X },
 		},
+		{
+			"submenu at margin-shifted root: left of its parent", image.Pt(330, 20),
+			[]int{itemShare},
+			func(p []image.Rectangle) bool { return len(p) == 2 && p[1].Max.X <= p[0].Min.X && p[1].Min.X >= 8 },
+		},
 	}
 	for _, c := range cases {
 		if panels := laidMenu(t, c.at, trigger, c.path...); !c.check(panels) {

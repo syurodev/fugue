@@ -69,8 +69,8 @@ type fileViewer struct {
 	entries            []client.WorkspaceDirEntry
 	entryClicks        map[string]*widget.Clickable
 
-	backBtn, copyBtn *kit.ButtonState
-	card             *kit.CardState
+	copyBtn *kit.ButtonState
+	card    *kit.CardState
 	// scrollPending arms the one-time jump to the requested line once the
 	// content's line height is known.
 	scrollPending bool
@@ -80,18 +80,8 @@ func newFileViewer() *fileViewer {
 	return &fileViewer{
 		code:    mdview.NewCodeBlockState(),
 		diff:    mdview.NewCodeBlockState(),
-		backBtn: kit.NewButtonState(), copyBtn: kit.NewButtonState(),
-		card: kit.NewCardState(),
-	}
-}
-
-func (v *fileViewer) setOpen(open bool) {
-	if v.open == open {
-		return
-	}
-	v.open = open
-	if !open {
-		v.reset()
+		copyBtn: kit.NewButtonState(),
+		card:    kit.NewCardState(),
 	}
 }
 
@@ -309,9 +299,6 @@ func (v *fileViewer) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens
 			}
 		}}))
 	}
-	items = append(items, atEnd(flowButton(env, gtx, sc.fail, v.backBtn, kit.ButtonProps{Text: labelBackToChat, Variant: kit.Ghost, Size: kit.SizeSM, Disabled: sc.open == ""}, func() {
-		v.setOpen(false)
-	})))
 	return flowHeader(gtx, items...)
 }
 

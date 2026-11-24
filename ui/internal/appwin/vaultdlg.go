@@ -13,7 +13,10 @@ import (
 	"github.com/syurodev/fugue/ui/internal/vault"
 )
 
-const minVaultPassphraseBytes = 8
+const (
+	minVaultPassphraseBytes = 8
+	labelLockVault          = "Lock vault"
+)
 
 // vaultGate owns the host-vault setup, unlock, recovery, and lock controls
 // (F10.5a, desktop-app §5). Secrets enter through TextFieldSecret with
@@ -24,7 +27,7 @@ type vaultGate struct {
 	confirm   *kit.TextFieldState
 	submitBtn *kit.ButtonState
 	modeBtn   *kit.ButtonState
-	lockBtn   *kit.ButtonState
+	lockBtn   *kit.IconButtonState
 	ackBtn    *kit.ButtonState
 	copyBtn   *kit.ButtonState
 	savedChk  *kit.CheckboxState
@@ -43,7 +46,7 @@ type vaultGate struct {
 func newVaultGate() *vaultGate {
 	return &vaultGate{
 		card: kit.NewCardState(), pass: kit.NewTextFieldState(), confirm: kit.NewTextFieldState(),
-		submitBtn: kit.NewButtonState(), modeBtn: kit.NewButtonState(), lockBtn: kit.NewButtonState(), ackBtn: kit.NewButtonState(),
+		submitBtn: kit.NewButtonState(), modeBtn: kit.NewButtonState(), lockBtn: kit.NewIconButtonState(), ackBtn: kit.NewButtonState(),
 		copyBtn: kit.NewButtonState(), savedChk: kit.NewCheckboxState(),
 	}
 }
@@ -177,17 +180,24 @@ func (g *vaultGate) submitUnlock(sc *screens) {
 	sc.vaultWorker.Do(&req)
 }
 
-func (g *vaultGate) layoutLockButton(gtx *layout.Context, env *kit.Env, sc *screens) layout.Dimensions {
+func (g *vaultGate) layoutLockButton(gtx *layout.Context, env *kit.Env, sc *screens) {
 	if sc.vault.Locked() || sc.vaultWorker == nil {
-		return layout.Dimensions{}
+		return
 	}
-	dims, clicked := layoutVaultButton(env, gtx, g.lockBtn, kit.ButtonProps{Text: "Lock vault", Variant: kit.Secondary, Size: kit.SizeSM, Busy: g.busy}, sc.fail)
+	props := &kit.IconButtonProps{
+		Icon:     kit.IconLock,
+		Label:    labelLockVault,
+		Variant:  kit.IconButtonGhost,
+		Size:     kit.SizeSM,
+		Disabled: g.busy,
+	}
+	clicked, err := g.lockBtn.Layout(env, gtx, props)
+	sc.fail(err)
 	if clicked && !g.busy {
 		g.busy = true
 		req := vault.Request{Kind: vault.OpLock}
 		sc.vaultWorker.Do(&req)
 	}
-	return dims
 }
 
 func vaultLabelRow(env *kit.Env, tp theme.Type, fg color.NRGBA, txt string) layout.FlexChild {
