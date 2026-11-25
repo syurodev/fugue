@@ -292,6 +292,7 @@ func installNewLayout(sc *screens, windowID string, doc LayoutDoc) {
 	g.docGen++
 	g.dirty = true
 	g.saveAt = time.Time{}
+	g.resetShellMotion()
 	g.syncFromDoc()
 	sc.trackTopics()
 }

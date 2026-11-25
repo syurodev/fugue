@@ -39,13 +39,14 @@ const (
 // it is the accessible name and the later tooltip text. Size is the
 // control token of the square, md by default.
 type IconButtonProps struct {
-	Icon     IconName
-	Label    string
-	Shortcut Shortcut
-	Variant  IconButtonVariant
-	Size     ButtonSize
-	Toggled  bool
-	Disabled bool
+	Icon           IconName
+	Label          string
+	Shortcut       Shortcut
+	Variant        IconButtonVariant
+	Size           ButtonSize
+	Toggled        bool
+	Disabled       bool
+	NoSelectedFill bool
 }
 
 // IconButtonState is the long-lived state the caller keeps per logical
@@ -75,8 +76,12 @@ func (s *IconButtonState) Layout(env *Env, gtx *layout.Context, p *IconButtonPro
 	}
 	side := s.Measure(env, gtx, p).Size
 	clicked, mv := s.begin(env, gtx, side, pressOpts{disabled: p.Disabled, toggled: p.Toggled})
+	look := iconButtonLookOf(env, p.Variant, p.Toggled, p.Disabled)
+	if p.NoSelectedFill {
+		look.sel.A = 0
+	}
 	var err error
-	s.paint(env, gtx, image.Rectangle{Max: side}, gtx.Dp(theme.RadiusMD), iconButtonLookOf(env, p.Variant, p.Toggled, p.Disabled), mv,
+	s.paint(env, gtx, image.Rectangle{Max: side}, gtx.Dp(theme.RadiusMD), look, mv,
 		func(fg color.NRGBA) {
 			d := buttonIconSize(p.Size)
 			box := gtx.Dp(d)

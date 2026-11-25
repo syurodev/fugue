@@ -105,12 +105,17 @@ type slotGrid struct {
 	// buttons of the chrome: per cell the arrange and close buttons, per
 	// folded cell the edge tab, and the rail's and collapsed sidebar's own
 	// buttons.
-	arrangeBtns map[string]*kit.IconButtonState
-	closeBtns   map[string]*kit.IconButtonState
-	actionBtns  map[string]*kit.IconButtonState
-	tabBtns     map[string]*kit.IconButtonState
-	railBtns    map[railItem]*kit.IconButtonState
-	sidebarBtn  *kit.IconButtonState
+	arrangeBtns   map[string]*kit.IconButtonState
+	closeBtns     map[string]*kit.IconButtonState
+	actionBtns    map[string]*kit.IconButtonState
+	tabBtns       map[string]*kit.IconButtonState
+	railBtns      map[railItem]*kit.IconButtonState
+	railToggled   map[railItem]bool
+	railY         motion.Follower
+	sidebarBtn    *kit.IconButtonState
+	sidebarOpenF  motion.Follower
+	wasTempFolded bool
+	lastSideW     int
 	// newWindow is the last "open in new window" request (F10.21 consumes).
 	newWindow *NewWindowRequest
 	// applyGeometry applies a restored window size; the window owns the
@@ -152,7 +157,10 @@ func newSlotGrid() *slotGrid {
 		actionBtns:     map[string]*kit.IconButtonState{},
 		tabBtns:        map[string]*kit.IconButtonState{},
 		railBtns:       map[railItem]*kit.IconButtonState{},
+		railToggled:    map[railItem]bool{},
+		railY:          motion.NewFollower(motion.Smooth()),
 		sidebarBtn:     kit.NewIconButtonState(),
+		sidebarOpenF:   motion.NewFollower(motion.Smooth()),
 		drawerPresence: motion.NewPresence(motion.Smooth(), motion.Exit()),
 	}
 }
@@ -165,6 +173,13 @@ func (g *slotGrid) syncFromDoc() {
 		g.railLast[main.Kind] = main
 	}
 	g.rail = railOfKind(main.Kind)
+}
+
+// resetShellMotion clears shell motion followers so the next frame snaps
+// immediately without animating (used on restore and new-window open).
+func (g *slotGrid) resetShellMotion() {
+	g.railY = motion.NewFollower(motion.Smooth())
+	g.sidebarOpenF = motion.NewFollower(motion.Smooth())
 }
 
 // edited records a user-driven layout change: it arms the slide animations
@@ -263,9 +278,9 @@ func (g *slotGrid) selectRail(item railItem) {
 	}
 	doc := cloneLayout(g.doc)
 	doc.Columns[0].Slots[0].Ref = last
-	g.rail = item
-	g.syncFromDoc()
 	g.edited(doc)
+	g.syncFromDoc()
+	g.rail = item
 }
 
 // openMain opens a session in the main slot: the content swaps in place,
