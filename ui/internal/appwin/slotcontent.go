@@ -94,14 +94,25 @@ func fixedSlotTitle(kind SlotKind) string {
 // for missing objects and screens still to land.
 func (s *screens) layoutSlotBody(gtx *layout.Context, env *kit.Env, p Pos, ref SlotRef) {
 	if s.missingTarget(ref) {
-		s.layoutSlotGone(gtx, env, p)
+		s.layoutSlotGone(gtx, env, p, ref, nil)
 		return
 	}
 	if isMainPos(p) {
 		s.layoutMainSlot(gtx, env, ref)
 		return
 	}
-	s.layoutRegularSlot(gtx, env, p, ref)
+	s.layoutRegularSlot(gtx, env, p, ref, nil)
+}
+
+// layoutClosingSlotBody draws a closing ghost's view-only body using ref
+// directly (never reading g.doc by pos) and a dedicated EmptyState with no
+// actions so it shares no interactive state with live slots.
+func (s *screens) layoutClosingSlotBody(gtx *layout.Context, env *kit.Env, ref SlotRef, ghostEmpty *kit.EmptyStateState) {
+	if s.missingTarget(ref) {
+		s.layoutSlotGone(gtx, env, Pos{Col: 1}, ref, ghostEmpty)
+		return
+	}
+	s.layoutRegularSlot(gtx, env, Pos{Col: 1}, ref, ghostEmpty)
 }
 
 // layoutMainSlot draws the rail item's work view: the session chat, the
@@ -113,38 +124,24 @@ func (s *screens) layoutMainSlot(gtx *layout.Context, env *kit.Env, ref SlotRef)
 	case KindSession:
 		s.layoutSessionWithComposer(gtx, env, ref.ID, true)
 	case KindModule:
-		s.layoutSoonSlot(gtx, env, Pos{}, "No modules", "Registered modules open their workbench here, in install order.")
-	case KindTeam:
-		s.layoutRegularSlot(gtx, env, Pos{}, ref)
-	case KindAgent:
-		s.layoutRegularSlot(gtx, env, Pos{}, ref)
-	case KindDiff:
-		s.layoutRegularSlot(gtx, env, Pos{}, ref)
-	case KindInbox:
-		s.layoutRegularSlot(gtx, env, Pos{}, ref)
-	case KindAccounts:
-		s.layoutRegularSlot(gtx, env, Pos{}, ref)
-	case KindSettings:
-		s.layoutRegularSlot(gtx, env, Pos{}, ref)
-	case KindSecrets:
-		s.layoutRegularSlot(gtx, env, Pos{}, ref)
-	case SlotKind(""):
-		s.layoutRegularSlot(gtx, env, Pos{}, ref)
+		s.layoutSoonSlot(gtx, env, Pos{}, ref, nil, "No modules", "Registered modules open their workbench here, in install order.")
+	case KindTeam, KindAgent, KindDiff, KindInbox, KindAccounts, KindSettings, KindSecrets, SlotKind(""):
+		s.layoutRegularSlot(gtx, env, Pos{}, ref, nil)
 	}
 }
 
 // layoutRegularSlot draws one regular slot's view by kind, with the
 // EmptyStates for objects missing and screens still to land (DA-E10).
-func (s *screens) layoutRegularSlot(gtx *layout.Context, env *kit.Env, p Pos, ref SlotRef) {
+func (s *screens) layoutRegularSlot(gtx *layout.Context, env *kit.Env, p Pos, ref SlotRef, ghostEmpty *kit.EmptyStateState) {
 	switch ref.Kind {
 	case KindSession:
 		if ref.ID == "" {
-			s.layoutSoonSlot(gtx, env, p, "No session", "Pick a session in the sidebar to open it here.")
+			s.layoutSoonSlot(gtx, env, p, ref, ghostEmpty, "No session", "Pick a session in the sidebar to open it here.")
 			return
 		}
 		s.layoutTranscriptFor(gtx, env, ref.ID)
 	case KindDiff:
-		s.layoutDiffSlot(gtx, env, p)
+		s.layoutDiffSlot(gtx, env, p, ref, ghostEmpty)
 	case KindInbox:
 		s.inboxView.layout(gtx, env, s)
 	case KindAccounts:
@@ -158,9 +155,9 @@ func (s *screens) layoutRegularSlot(gtx *layout.Context, env *kit.Env, p Pos, re
 	case KindSecrets:
 		s.secretsView.layout(gtx, env, s)
 	case KindModule:
-		s.layoutModuleSlot(gtx, env, p, ref)
+		s.layoutModuleSlot(gtx, env, p, ref, ghostEmpty)
 	case SlotKind(""):
-		s.layoutSoonSlot(gtx, env, p, "Empty slot", "Nothing is open in this slot.")
+		s.layoutSoonSlot(gtx, env, p, ref, ghostEmpty, "Empty slot", "Nothing is open in this slot.")
 	}
 }
 
@@ -184,9 +181,9 @@ func (s *screens) missingTarget(ref SlotRef) bool {
 // a composer bound to its own session.
 // layoutDiffSlot draws the file and diff viewer's slot; before anything is
 // open it shows the invitation (§5.4).
-func (s *screens) layoutDiffSlot(gtx *layout.Context, env *kit.Env, p Pos) {
+func (s *screens) layoutDiffSlot(gtx *layout.Context, env *kit.Env, p Pos, ref SlotRef, ghostEmpty *kit.EmptyStateState) {
 	if !s.viewer.open {
-		s.layoutSoonSlot(gtx, env, p, "File viewer", "A file badge or an Edited row opens its view here.")
+		s.layoutSoonSlot(gtx, env, p, ref, ghostEmpty, "File viewer", "A file badge or an Edited row opens its view here.")
 		return
 	}
 	s.viewer.layout(gtx, env, s)
@@ -195,29 +192,35 @@ func (s *screens) layoutDiffSlot(gtx *layout.Context, env *kit.Env, p Pos) {
 // layoutModuleSlot draws the modules' slot; stage A registers no modules,
 // so the main slot shows the invitation and a regular slot its own empty
 // state with a close button (§5.3).
-func (s *screens) layoutModuleSlot(gtx *layout.Context, env *kit.Env, p Pos, ref SlotRef) {
+func (s *screens) layoutModuleSlot(gtx *layout.Context, env *kit.Env, p Pos, ref SlotRef, ghostEmpty *kit.EmptyStateState) {
 	if isMainPos(p) {
-		s.layoutSoonSlot(gtx, env, p, "No modules", "Registered modules open their workbench here, in install order.")
+		s.layoutSoonSlot(gtx, env, p, ref, ghostEmpty, "No modules", "Registered modules open their workbench here, in install order.")
 		return
 	}
 	if ref.ID == "" {
-		s.layoutSoonSlot(gtx, env, p, "Module", "A module panel opens here when an agent uses the module.")
+		s.layoutSoonSlot(gtx, env, p, ref, ghostEmpty, "Module", "A module panel opens here when an agent uses the module.")
 		return
 	}
-	s.layoutSoonSlot(gtx, env, p, "Module: "+ref.ID, "The module's panel opens here with its module item.")
+	s.layoutSoonSlot(gtx, env, p, ref, ghostEmpty, "Module: "+ref.ID, "The module's panel opens here with its module item.")
 }
 
 // layoutSoonSlot is the clean placeholder for a screen that lands in a
 // later item, with the slot's close button (§5.3).
-func (s *screens) layoutSoonSlot(gtx *layout.Context, env *kit.Env, p Pos, title, desc string) {
-	dims, ev, err := s.slotEmpty.Layout(env, gtx, &kit.EmptyStateProps{
-		Icon:          slotIcon(refAt(s.grid.doc, p).Kind),
+func (s *screens) layoutSoonSlot(gtx *layout.Context, env *kit.Env, p Pos, ref SlotRef, ghostEmpty *kit.EmptyStateState, title, desc string) {
+	st := ghostEmpty
+	action := ""
+	if st == nil {
+		st = emptyStateFor(s.slotEmpty, ref)
+		action = closeLabel
+	}
+	dims, ev, err := st.Layout(env, gtx, &kit.EmptyStateProps{
+		Icon:          slotIcon(ref.Kind),
 		Title:         title,
 		Description:   desc,
-		PrimaryAction: closeLabel,
+		PrimaryAction: action,
 	})
 	s.fail(err)
-	if ev.PrimaryClicked {
+	if ghostEmpty == nil && ev.PrimaryClicked {
 		s.grid.edited(CloseSlot(s.grid.doc, p))
 	}
 	_ = dims
@@ -225,15 +228,21 @@ func (s *screens) layoutSoonSlot(gtx *layout.Context, env *kit.Env, p Pos, title
 
 // layoutSlotGone is the missing-object EmptyState: the slot says so and
 // offers its close button (DA-E10).
-func (s *screens) layoutSlotGone(gtx *layout.Context, env *kit.Env, p Pos) {
-	dims, ev, err := s.slotGone.Layout(env, gtx, &kit.EmptyStateProps{
+func (s *screens) layoutSlotGone(gtx *layout.Context, env *kit.Env, p Pos, ref SlotRef, ghostEmpty *kit.EmptyStateState) {
+	st := ghostEmpty
+	action := ""
+	if st == nil {
+		st = emptyStateFor(s.slotGone, ref)
+		action = closeLabel
+	}
+	dims, ev, err := st.Layout(env, gtx, &kit.EmptyStateProps{
 		Icon:          kit.IconHelp,
 		Title:         "This object is gone",
 		Description:   "The session this slot pointed to no longer exists.",
-		PrimaryAction: closeLabel,
+		PrimaryAction: action,
 	})
 	s.fail(err)
-	if ev.PrimaryClicked {
+	if ghostEmpty == nil && ev.PrimaryClicked {
 		if isMainPos(p) {
 			s.grid.openMain(SlotRef{Kind: KindSession})
 		} else {
@@ -326,4 +335,36 @@ func (s *screens) layoutMainEmptyStateDims(gtx *layout.Context, env *kit.Env) im
 		return dims
 	})
 	return childRect
+}
+
+func emptyStateFor(m map[string]*kit.EmptyStateState, ref SlotRef) *kit.EmptyStateState {
+	key := keyOfRef(ref)
+	st, ok := m[key]
+	if !ok {
+		st = kit.NewEmptyStateState()
+		m[key] = st
+	}
+	return st
+}
+
+func (s *screens) pruneSlotEmptyStates() {
+	live := make(map[string]bool, len(s.grid.doc.Columns)*maxRowsPerColumn+len(s.grid.closing))
+	for _, p := range allCells(s.grid.doc) {
+		if ref := refAt(s.grid.doc, p); ref.Kind != "" {
+			live[keyOfRef(ref)] = true
+		}
+	}
+	for _, cs := range s.grid.closing {
+		live[keyOfRef(cs.ref)] = true
+	}
+	for k := range s.slotEmpty {
+		if !live[k] {
+			delete(s.slotEmpty, k)
+		}
+	}
+	for k := range s.slotGone {
+		if !live[k] {
+			delete(s.slotGone, k)
+		}
+	}
 }

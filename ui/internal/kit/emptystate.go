@@ -49,6 +49,13 @@ func NewEmptyStateState() *EmptyStateState {
 // Presence returns the current fade/rise progress in [0..1] for motion tests.
 func (s *EmptyStateState) Presence() float32 { return s.presence.Progress() }
 
+// SnapShown marks the EmptyState already settled at full visibility so a
+// view-only closing ghost does not fade in from zero while exiting.
+func (s *EmptyStateState) SnapShown() {
+	s.inited = true
+	s.presence.Snap(true)
+}
+
 // Layout lays out the EmptyState centered within constraints, with Smooth fade
 // + 4 dp upward translate, optional icon, inviting title, one-sentence
 // description, primary action, and the "no results" clear-filter variant (§6.25).

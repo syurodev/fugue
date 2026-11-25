@@ -20,11 +20,13 @@ import (
 // column/row boundaries ride kit.SplitPane handles in both directions —
 // double-click resets the ratio, the arrows move it by keyboard (§6.27).
 
-// slotAnim is one in-flight rectangle animation: the slot slides from
-// `from` to its laid-out rect on Smooth (§5.3: slots changing places slide).
+// slotAnim is one in-flight rectangle animation: the slot slides (or enters
+// from a collapsed edge) from `from` to its laid-out rect on Smooth (§5.3, §3.7).
 type slotAnim struct {
-	from   image.Rectangle
-	spring motion.Spring
+	from     image.Rectangle
+	spring   motion.Spring
+	entering bool
+	presence motion.Presence
 }
 
 // closingSlot is a closed slot fading out on Exit while its neighbours slide
@@ -33,6 +35,7 @@ type closingSlot struct {
 	ref      SlotRef
 	rect     image.Rectangle
 	presence motion.Presence
+	empty    *kit.EmptyStateState
 }
 
 // NewWindowRequest is the "open in new window" product: the ref to move and
@@ -80,11 +83,12 @@ func (g *slotGrid) layoutArea(gtx *layout.Context, env *kit.Env, sc *screens, ar
 			g.drawSlot(gtx, env, sc, Pos{Col: c, Row: r}, area)
 		}
 	} else {
-		for _, cs := range g.closing {
-			g.drawClosingSlot(gtx, env, sc, cs)
-		}
+		prevClosing := len(g.closing)
 		for _, cg := range geom {
 			g.drawSlot(gtx, env, sc, cg.pos, cg.Rect)
+		}
+		for _, cs := range g.closing[:prevClosing] {
+			g.drawClosingSlot(gtx, env, sc, cs)
 		}
 		// A slot's close button, an EmptyState's close or a view's back to
 		// chat replaces the document while the cells draw: the handles
@@ -99,90 +103,10 @@ func (g *slotGrid) layoutArea(gtx *layout.Context, env *kit.Env, sc *screens, ar
 	if g.drag.active {
 		g.layoutDrag(gtx, env, sc, geom, area)
 	}
-}
-
-// overlaySplits lays the SplitPane handles over the boundaries: one per
-// column boundary over the columns it divides, and one per two-row column
-// over the column's rect. A moved handle writes the ratio back into the
-// weights — the split ratios are the layout (§5.3, ui-kit §6.27). visible
-// is the column count the frame planned with; a close inside the frame may
-// have left fewer columns, so it never indexes past the document.
-func (g *slotGrid) overlaySplits(gtx *layout.Context, env *kit.Env, geom []cellGeom, area image.Rectangle, visible int) {
-	visible = min(visible, len(g.doc.Columns))
-	if visible <= 0 {
-		return
-	}
-	for i := range visible - 1 {
-		state, ok := g.splitC[i]
-		if !ok {
-			state = kit.NewSplitPaneState()
-			g.splitC[i] = state
-		}
-		left := g.rectOf(geom, Pos{Col: i, Row: 0})
-		sub := image.Rect(left.Min.X, area.Min.Y, area.Max.X, area.Max.Y)
-		local := *gtx
-		local.Constraints = layout.Exact(sub.Size())
-		atPoint(&local, sub.Min, func(gtx *layout.Context) {
-			local := *gtx
-			ratio, changed, _ := state.Layout(env, &local, kit.SplitPaneProps{
-				Orientation:  kit.Horizontal,
-				Ratio:        columnRatio(g.doc, i, visible),
-				DefaultRatio: defaultColumnRatio(i, visible),
-				MinFirst:     colMin(i),
-				MinSecond:    sumDp(colMins(i+1, visible)),
-			}, emptyPane, emptyPane)
-			if changed {
-				g.setColumnRatio(i, visible, ratio)
-				g.edited(g.doc)
-			}
-		})
-	}
-	for c := range visible {
-		g.overlayRowSplit(gtx, env, geom, visible, c)
+	if !env.ReducedMotion && (len(g.anims) > 0 || len(g.closing) > 0) {
+		env.Keep()
 	}
 }
-
-// overlayRowSplit lays one two-row column's vertical SplitPane over its
-// cells and writes a moved ratio back into the row weights.
-func (g *slotGrid) overlayRowSplit(gtx *layout.Context, env *kit.Env, geom []cellGeom, visible, c int) {
-	// c may name a column a close inside the frame took away (FUG-64).
-	if c < 0 || c >= visible || c >= len(g.doc.Columns) || len(g.doc.Columns[c].Slots) < maxRowsPerColumn {
-		return
-	}
-	state, ok := g.splitR[c]
-	if !ok {
-		state = kit.NewSplitPaneState()
-		g.splitR[c] = state
-	}
-	top := g.rectOf(geom, Pos{Col: c, Row: 0})
-	bottom := g.rectOf(geom, Pos{Col: c, Row: 1})
-	if top.Empty() || bottom.Empty() {
-		return
-	}
-	colRect := image.Rect(top.Min.X, top.Min.Y, top.Max.X, bottom.Max.Y)
-	local := *gtx
-	local.Constraints = layout.Exact(colRect.Size())
-	atPoint(&local, colRect.Min, func(gtx *layout.Context) {
-		local := *gtx
-		ratio, changed, _ := state.Layout(env, &local, kit.SplitPaneProps{
-			Orientation:  kit.Vertical,
-			Ratio:        rowRatio(g.doc.Columns[c]),
-			DefaultRatio: 0.5,
-			MinFirst:     theme.SlotMinHeight,
-			MinSecond:    theme.SlotMinHeight,
-		}, emptyPane, emptyPane)
-		if changed {
-			col := g.doc.Columns[c]
-			col.Slots[0].HeightWeight = ratio
-			col.Slots[1].HeightWeight = 1 - ratio
-			g.edited(g.doc)
-		}
-	})
-}
-
-// emptyPane is SplitPane's pane widget: the handles overlay cells drawn
-// elsewhere.
-func emptyPane(layout.Context) layout.Dimensions { return layout.Dimensions{} }
 
 // drawSlot draws one slot: the header band across the top — every slot,
 // the main one included, so the band runs continuously over the grid (§5.3)
@@ -193,9 +117,22 @@ func (g *slotGrid) drawSlot(gtx *layout.Context, env *kit.Env, sc *screens, p Po
 		return
 	}
 	ref := refAt(g.doc, p)
-	draw := rect
-	if anim := g.animOf(ref); anim != nil && !anim.from.Empty() {
+	draw, alpha := rect, float32(1)
+	anim := g.animOf(ref)
+	if anim != nil {
 		draw = lerpRect(anim.from, rect, anim.spring.Value)
+		if anim.entering {
+			alpha = min(max(anim.presence.Progress(), 0), 1)
+		}
+	}
+	if draw.Empty() || alpha <= 0 {
+		return
+	}
+	if anim != nil {
+		defer clip.Rect(draw).Push(gtx.Ops).Pop()
+	}
+	if alpha < 1 {
+		defer paint.PushOpacity(gtx.Ops, alpha).Pop()
 	}
 	h := min(gtx.Dp(theme.SlotHeaderHeight), draw.Dy())
 	head := image.Rect(draw.Min.X, draw.Min.Y, draw.Max.X, draw.Min.Y+h)
@@ -205,32 +142,15 @@ func (g *slotGrid) drawSlot(gtx *layout.Context, env *kit.Env, sc *screens, p Po
 	} else {
 		g.drawChrome(gtx, env, sc, p, head)
 	}
+	if !body.Empty() && alpha < 1 {
+		paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect(body).Op())
+	}
 	env.Offset(gtx, body.Min, func(gtx *layout.Context) {
 		local := *gtx
 		local.Constraints = layout.Constraints{Max: body.Size()}
 		defer clip.Rect{Max: body.Size()}.Push(local.Ops).Pop()
 		sc.layoutSlotBody(&local, env, p, ref)
 	})
-}
-
-// drawClosingSlot paints a closing slot's header and surface fading out on
-// Exit while remaining slots slide over or into the freed space.
-func (g *slotGrid) drawClosingSlot(gtx *layout.Context, env *kit.Env, sc *screens, cs *closingSlot) {
-	if cs.rect.Empty() {
-		return
-	}
-	alpha := cs.presence.Progress()
-	if alpha <= 0 {
-		return
-	}
-	defer paint.PushOpacity(gtx.Ops, alpha).Pop()
-	h := min(gtx.Dp(theme.SlotHeaderHeight), cs.rect.Dy())
-	head := image.Rect(cs.rect.Min.X, cs.rect.Min.Y, cs.rect.Max.X, cs.rect.Min.Y+h)
-	g.drawHeaderBar(gtx, env, sc, Pos{Col: 1}, cs.ref, head, nil)
-	body := image.Rect(cs.rect.Min.X, cs.rect.Min.Y+h, cs.rect.Max.X, cs.rect.Max.Y)
-	if !body.Empty() {
-		paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect(body).Op())
-	}
 }
 
 // drawChrome draws a regular slot's header bar — icon and title, the drag
@@ -248,9 +168,11 @@ func (g *slotGrid) drawChrome(gtx *layout.Context, env *kit.Env, sc *screens, p 
 }
 
 // headerButtons are the regular header's right-side controls; the main
-// header passes nil and draws none (§5.3: no close, drag or arrange).
+// header passes nil and draws none (§5.3: no close, drag or arrange). A closing
+// ghost sets ghost=true to draw static action icons without widget state.
 type headerButtons struct {
 	arrange, close *kit.IconButtonState
+	ghost          bool
 }
 
 // drawHeaderBar draws one header band: the raised bar over the whole
@@ -270,7 +192,7 @@ func (g *slotGrid) drawHeaderBar(gtx *layout.Context, env *kit.Env, sc *screens,
 			local.Constraints = layout.Constraints{Min: image.Pt(innerW, h), Max: image.Pt(innerW, h)}
 			g.layoutHeaderRow(env, &local, sc, p, ref, btns)
 		})
-		if btns != nil {
+		if btns != nil && !btns.ghost {
 			btnW := gtx.Dp(theme.ControlSM)
 			anchor := image.Rect(rect.Dx()-2*btnW-padR, 0, rect.Dx()-btnW-padR, h)
 			g.layoutArrange(env, gtx, sc, p, anchor)
@@ -300,24 +222,43 @@ func (g *slotGrid) layoutHeaderRow(env *kit.Env, gtx *layout.Context, sc *screen
 	actions := slotHeaderActions(sc, ref)
 	btnSize := gtx.Dp(theme.ControlSM)
 	rightCount := len(actions)
-	if btns != nil {
+	if btns != nil && !btns.ghost {
 		rightCount += 2
 	}
 	rightW := rightCount * btnSize
 	titleMaxW := max(w-x-rightW-gap, 0)
 	titleH := gtx.Sp(theme.TypeSmall().Line)
-	env.Offset(gtx, image.Pt(x, max((h-titleH)/2, 0)), func(gtx *layout.Context) {
-		local := *gtx
-		local.Constraints = layout.Constraints{Max: image.Pt(titleMaxW, titleH)}
-		kit.Label(env, &local, theme.TypeSmall(), env.Th.Chrome().Fg, slotTitle(sc, ref))
-	})
+	if titleMaxW > 0 {
+		env.Offset(gtx, image.Pt(x, max((h-titleH)/2, 0)), func(gtx *layout.Context) {
+			local := *gtx
+			local.Constraints = layout.Constraints{Max: image.Pt(titleMaxW, titleH)}
+			defer clip.Rect{Max: image.Pt(titleMaxW, titleH)}.Push(local.Ops).Pop()
+			kit.Label(env, &local, theme.TypeSmall(), env.Th.Chrome().Fg, slotTitle(sc, ref))
+		})
+	}
 
-	rx := w - rightW
-	g.layoutHeaderButtons(env, gtx, sc, p, btns, actions, rx, h, btnSize)
+	if w >= x+rightW {
+		g.layoutHeaderButtons(env, gtx, sc, p, btns, actions, w-rightW, h, btnSize)
+	}
 }
 
 func (g *slotGrid) layoutHeaderButtons(env *kit.Env, gtx *layout.Context, sc *screens, p Pos, btns *headerButtons, actions []slotAction, rx, h, btnSize int) {
 	y := max((h-btnSize)/2, 0)
+	if btns != nil && btns.ghost {
+		iconPx := gtx.Dp(theme.IconSM)
+		pad := max((btnSize-iconPx)/2, 0)
+		for i := range actions {
+			act := actions[i]
+			env.Offset(gtx, image.Pt(rx+pad, y+pad), func(gtx *layout.Context) {
+				local := *gtx
+				local.Constraints = layout.Constraints{Max: image.Pt(iconPx, iconPx)}
+				_, err := env.Icon(&local, act.props.Icon, theme.IconSM, env.Th.Chrome().FgMuted)
+				sc.fail(err)
+			})
+			rx += btnSize
+		}
+		return
+	}
 	for i := range actions {
 		act := actions[i]
 		btn := ensureIconButton(&g.actionBtns, p.key()+":act:"+act.props.Label)
