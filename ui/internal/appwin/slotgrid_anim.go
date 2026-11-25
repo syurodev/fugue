@@ -48,7 +48,7 @@ func (g *slotGrid) armClosingCell(doc LayoutDoc, oldP Pos, sameShape bool) {
 		pres = &p
 	}
 	delete(g.anims, keyOfRef(oldRef))
-	g.startClosing(oldP, oldRef, cur, pres)
+	g.startClosing(oldRef, cur, pres)
 }
 
 // armAnims arms Smooth slide animations for existing slots that moved or
@@ -204,7 +204,7 @@ func (g *slotGrid) startReenterAnim(refKey string, cs *closingSlot) {
 	g.anims[refKey] = &slotAnim{from: cs.rect, spring: s, entering: true, presence: p}
 }
 
-func (g *slotGrid) startClosing(pos Pos, ref SlotRef, rect image.Rectangle, existing *motion.Presence) {
+func (g *slotGrid) startClosing(ref SlotRef, rect image.Rectangle, existing *motion.Presence) {
 	var p motion.Presence
 	if existing != nil {
 		p = *existing
@@ -213,14 +213,16 @@ func (g *slotGrid) startClosing(pos Pos, ref SlotRef, rect image.Rectangle, exis
 		p.Snap(true)
 	}
 	p.Show(false)
+	empty := kit.NewEmptyStateState()
+	empty.SnapShown()
 	key := keyOfRef(ref)
 	for i, cs := range g.closing {
 		if keyOfRef(cs.ref) == key {
-			g.closing[i] = &closingSlot{pos: pos, ref: ref, rect: rect, presence: p}
+			g.closing[i] = &closingSlot{ref: ref, rect: rect, presence: p, empty: empty}
 			return
 		}
 	}
-	g.closing = append(g.closing, &closingSlot{pos: pos, ref: ref, rect: rect, presence: p})
+	g.closing = append(g.closing, &closingSlot{ref: ref, rect: rect, presence: p, empty: empty})
 }
 
 func (g *slotGrid) takeClosing(ref SlotRef) *closingSlot {
@@ -287,28 +289,25 @@ func (g *slotGrid) drawnCellRect(geom []cellGeom, p Pos) image.Rectangle {
 // moving slot keeps.
 func keyOfRef(ref SlotRef) string { return string(ref.Kind) + ":" + ref.ID }
 
-func (g *slotGrid) drawAnimatedDividers(gtx *layout.Context, env *kit.Env, geom []cellGeom, area image.Rectangle, visible int) {
-	line := max(gtx.Dp(theme.Hairline), 1)
-	col := env.Th.Chrome().BorderSubtle
-	for i := range visible - 1 {
-		left := g.drawnCellRect(geom, Pos{Col: i, Row: 0})
-		if !left.Empty() && left.Max.X < area.Max.X {
-			paint.FillShape(gtx.Ops, col, clip.Rect(image.Rect(left.Max.X, area.Min.Y, left.Max.X+line, area.Max.Y)).Op())
+func (g *slotGrid) hasSingletonLiveConflict(ref SlotRef) bool {
+	switch ref.Kind {
+	case KindAccounts, KindInbox, KindSettings, KindSecrets, KindDiff:
+		for _, p := range allCells(g.doc) {
+			if refAt(g.doc, p).Kind == ref.Kind {
+				return true
+			}
 		}
+	case KindTeam:
+		_, live := findCell(g.doc, ref)
+		return live
+	case KindSession, KindAgent, KindModule, SlotKind(""):
 	}
-	for c := range visible {
-		if len(g.doc.Columns[c].Slots) < maxRowsPerColumn {
-			continue
-		}
-		top := g.drawnCellRect(geom, Pos{Col: c, Row: 0})
-		if !top.Empty() {
-			paint.FillShape(gtx.Ops, col, clip.Rect(image.Rect(top.Min.X, top.Max.Y, top.Max.X, top.Max.Y+line)).Op())
-		}
-	}
+	return false
 }
 
 // drawClosingSlot paints a closing slot's header and body fading out together
-// on Exit above its sliding neighbours, without taking or blocking pointer input.
+// on Exit above its sliding neighbours, without taking or blocking pointer input
+// or sharing interactive widget state with live slots.
 func (g *slotGrid) drawClosingSlot(gtx *layout.Context, env *kit.Env, sc *screens, cs *closingSlot) {
 	if cs.rect.Empty() {
 		return
@@ -324,18 +323,20 @@ func (g *slotGrid) drawClosingSlot(gtx *layout.Context, env *kit.Env, sc *screen
 	h := min(disabled.Dp(theme.SlotHeaderHeight), cs.rect.Dy())
 	head := image.Rect(cs.rect.Min.X, cs.rect.Min.Y, cs.rect.Max.X, cs.rect.Min.Y+h)
 	if cs.rect.Dx() >= disabled.Dp(theme.ControlSM)*3 {
-		g.drawHeaderBar(&disabled, env, sc, cs.pos, cs.ref, head, nil)
+		g.drawHeaderBar(&disabled, env, sc, Pos{Col: 1}, cs.ref, head, &headerButtons{ghost: true})
 	} else if !head.Empty() {
 		paint.FillShape(disabled.Ops, env.Th.Chrome().CanvasBg, clip.Rect(head).Op())
 	}
 	body := image.Rect(cs.rect.Min.X, cs.rect.Min.Y+h, cs.rect.Max.X, cs.rect.Max.Y)
 	if !body.Empty() {
 		paint.FillShape(disabled.Ops, env.Th.Chrome().CanvasBg, clip.Rect(body).Op())
-		env.Offset(&disabled, body.Min, func(gtx *layout.Context) {
-			local := *gtx
-			local.Constraints = layout.Constraints{Max: body.Size()}
-			defer clip.Rect{Max: body.Size()}.Push(local.Ops).Pop()
-			sc.layoutSlotBody(&local, env, cs.pos, cs.ref)
-		})
+		if !g.hasSingletonLiveConflict(cs.ref) {
+			env.Offset(&disabled, body.Min, func(gtx *layout.Context) {
+				local := *gtx
+				local.Constraints = layout.Constraints{Max: body.Size()}
+				defer clip.Rect{Max: body.Size()}.Push(local.Ops).Pop()
+				sc.layoutClosingSlotBody(&local, env, cs.ref, cs.empty)
+			})
+		}
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"gioui.org/layout"
 	"gioui.org/unit"
 
+	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
@@ -196,3 +197,115 @@ func (g *slotGrid) recordRects(geom []cellGeom) {
 	}
 	g.rects, g.refRects = rects, refRects
 }
+
+// overlaySplits lays the SplitPane handles over the boundaries, keeping handle
+// state and keyboard focus alive while animating and tracking moving rects.
+func (g *slotGrid) overlaySplits(gtx *layout.Context, env *kit.Env, geom []cellGeom, area image.Rectangle, visible int) {
+	visible = min(visible, len(g.doc.Columns))
+	if visible <= 0 {
+		return
+	}
+	animating := len(g.anims) > 0
+	for i := range visible - 1 {
+		g.overlayColSplit(gtx, env, geom, area, visible, i, animating)
+	}
+	for c := range visible {
+		g.overlayRowSplit(gtx, env, geom, visible, c)
+	}
+}
+
+func (g *slotGrid) overlayColSplit(gtx *layout.Context, env *kit.Env, geom []cellGeom, area image.Rectangle, visible, i int, animating bool) {
+	state, ok := g.splitC[i]
+	if !ok {
+		state = kit.NewSplitPaneState()
+		g.splitC[i] = state
+	}
+	left, props := g.colSplitProps(geom, area, visible, i, animating)
+	sub := image.Rect(left.Min.X, area.Min.Y, area.Max.X, area.Max.Y)
+	local := *gtx
+	local.Constraints = layout.Exact(sub.Size())
+	atPoint(&local, sub.Min, func(gtx *layout.Context) {
+		local := *gtx
+		next, changed, _ := state.Layout(env, &local, props, emptyPane, emptyPane)
+		if changed && !animating {
+			g.setColumnRatio(i, visible, next)
+			g.edited(g.doc)
+		}
+	})
+}
+
+func (g *slotGrid) colSplitProps(geom []cellGeom, area image.Rectangle, visible, i int, animating bool) (image.Rectangle, kit.SplitPaneProps) {
+	left := g.rectOf(geom, Pos{Col: i, Row: 0})
+	props := kit.SplitPaneProps{
+		Orientation:  kit.Horizontal,
+		Ratio:        columnRatio(g.doc, i, visible),
+		DefaultRatio: defaultColumnRatio(i, visible),
+		MinFirst:     colMin(i),
+		MinSecond:    sumDp(colMins(i+1, visible)),
+	}
+	if !animating {
+		return left, props
+	}
+	left = g.drawnCellRect(geom, Pos{Col: i, Row: 0})
+	if totalW := area.Max.X - left.Min.X; totalW > 0 {
+		props.Ratio = float32(left.Dx()) / float32(totalW)
+	}
+	props.MinFirst, props.MinSecond = 0, 0
+	return left, props
+}
+
+// overlayRowSplit lays one two-row column's vertical SplitPane over its
+// cells and writes a moved ratio back into the row weights.
+func (g *slotGrid) overlayRowSplit(gtx *layout.Context, env *kit.Env, geom []cellGeom, visible, c int) {
+	if c < 0 || c >= visible || c >= len(g.doc.Columns) || len(g.doc.Columns[c].Slots) < maxRowsPerColumn {
+		return
+	}
+	state, ok := g.splitR[c]
+	if !ok {
+		state = kit.NewSplitPaneState()
+		g.splitR[c] = state
+	}
+	animating := len(g.anims) > 0
+	colRect, props, ok := g.rowSplitProps(geom, c, animating)
+	if !ok {
+		return
+	}
+	local := *gtx
+	local.Constraints = layout.Exact(colRect.Size())
+	atPoint(&local, colRect.Min, func(gtx *layout.Context) {
+		local := *gtx
+		next, changed, _ := state.Layout(env, &local, props, emptyPane, emptyPane)
+		if changed && !animating {
+			col := g.doc.Columns[c]
+			col.Slots[0].HeightWeight = next
+			col.Slots[1].HeightWeight = 1 - next
+			g.edited(g.doc)
+		}
+	})
+}
+
+func (g *slotGrid) rowSplitProps(geom []cellGeom, c int, animating bool) (image.Rectangle, kit.SplitPaneProps, bool) {
+	top := g.rectOf(geom, Pos{Col: c, Row: 0})
+	bottom := g.rectOf(geom, Pos{Col: c, Row: 1})
+	props := kit.SplitPaneProps{
+		Orientation:  kit.Vertical,
+		Ratio:        rowRatio(g.doc.Columns[c]),
+		DefaultRatio: 0.5,
+		MinFirst:     theme.SlotMinHeight,
+		MinSecond:    theme.SlotMinHeight,
+	}
+	if animating {
+		top = g.drawnCellRect(geom, Pos{Col: c, Row: 0})
+		bottom = g.drawnCellRect(geom, Pos{Col: c, Row: 1})
+		if totalH := bottom.Max.Y - top.Min.Y; totalH > 0 {
+			props.Ratio = float32(top.Dy()) / float32(totalH)
+		}
+		props.MinFirst, props.MinSecond = 0, 0
+	}
+	if top.Empty() || (bottom.Empty() && !animating) {
+		return image.Rectangle{}, props, false
+	}
+	return image.Rect(top.Min.X, top.Min.Y, top.Max.X, max(bottom.Max.Y, top.Max.Y)), props, true
+}
+
+func emptyPane(layout.Context) layout.Dimensions { return layout.Dimensions{} }

@@ -8,6 +8,7 @@ import (
 	"gioui.org/f32"
 	"gioui.org/gpu/headless"
 	"gioui.org/io/input"
+	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/unit"
@@ -250,8 +251,13 @@ func assertClosingAccountsIgnoresClick(t *testing.T, env *kit.Env, sc *screens, 
 	)
 	*now = now.Add(16 * time.Millisecond)
 	clickShellAt(t, env, sc, router, size, *now, refreshPt)
-	if btn := sc.grid.actionBtns[accClosing.pos.key()+":act:Refresh accounts"]; btn != nil && btn.Hovered() {
-		t.Fatal("closing Accounts slot must not receive hover or click on its header button")
+	if sc.accountsView.refreshing {
+		t.Fatal("closing Accounts slot must not trigger refresh on click")
+	}
+	for _, btn := range sc.grid.actionBtns {
+		if btn != nil && btn.Hovered() {
+			t.Fatal("closing Accounts slot must not receive hover on ghost header icon")
+		}
 	}
 }
 
@@ -435,5 +441,180 @@ func TestFUG73ReducedMotionInstantNoFrame(t *testing.T) {
 	if len(sc.grid.closing) != 0 || len(sc.grid.anims) != 0 || wantsImmediateFrame(env) {
 		t.Fatalf("ReducedMotion close: closing=%d anims=%d immediate=%v",
 			len(sc.grid.closing), len(sc.grid.anims), wantsImmediateFrame(env))
+	}
+}
+
+func placeholderCloseBtnPt(t *testing.T, env *kit.Env, sc *screens, size image.Point, slotRect image.Rectangle, ref SlotRef, title, desc string) f32.Point {
+	t.Helper()
+	var ops op.Ops
+	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
+	pad := gtx.Dp(theme.SpaceXS)
+	headerH := min(gtx.Dp(theme.SlotHeaderHeight), slotRect.Dy())
+	bodyW := slotRect.Dx()
+	measure := layout.Context{
+		Ops:         &ops,
+		Metric:      gtx.Metric,
+		Constraints: layout.Constraints{Max: image.Pt(bodyW, max(slotRect.Dy()-headerH, 0))},
+	}
+	tmp := kit.NewEmptyStateState()
+	tmp.SnapShown()
+	dims, _, err := tmp.Layout(env, &measure, &kit.EmptyStateProps{
+		Icon: slotIcon(ref.Kind), Title: title, Description: desc, PrimaryAction: closeLabel,
+	})
+	if err != nil {
+		t.Fatalf("measure EmptyState: %v", err)
+	}
+	gridOrigin := image.Pt(size.X-pad-sc.grid.lastArea.Dx(), pad)
+	btnY := slotRect.Min.Y + headerH + dims.Size.Y - gtx.Dp(theme.SpaceXXL) - gtx.Dp(theme.ControlMD)/2
+	return f32.Pt(float32(gridOrigin.X+slotRect.Min.X+bodyW/2), float32(gridOrigin.Y+btnY))
+}
+
+// TestFUG73TwoPlaceholdersCloseSeparately verifies that two simultaneously open
+// placeholder slots keep separate EmptyState instances keyed by ref (kind:id),
+// clicking Close on B closes only B, and B's state is pruned once settled.
+func TestFUG73TwoPlaceholdersCloseSeparately(t *testing.T) {
+	t.Parallel()
+	sc := newFUG65TestScreens(t)
+	env := newFUG65Env(t, true)
+	env.ReducedMotion = false
+	router := new(input.Router)
+	size := image.Pt(1500, 800)
+	now := time.Unix(1_700_000_000, 0)
+
+	refA := SlotRef{Kind: KindModule, ID: "mod-a"}
+	refB := SlotRef{Kind: KindModule, ID: "mod-b"}
+	doc, _, _ := PlaceNearest(sc.grid.doc, refA)
+	doc, _, _ = PlaceNearest(doc, refB)
+	sc.grid.edited(doc)
+	settleShellFrames(t, env, sc, router, size, &now)
+
+	rectB := sc.grid.rects[Pos{Col: 1, Row: 1}.key()]
+	ptB := placeholderCloseBtnPt(t, env, sc, size, rectB, refB, "Module: mod-b", "The module's panel opens here with its module item.")
+	now = now.Add(16 * time.Millisecond)
+	clickShellAt(t, env, sc, router, size, now, ptB)
+
+	if _, bStill := findCell(sc.grid.doc, refB); bStill {
+		t.Fatal("clicking Close on placeholder B did not close B")
+	}
+	if _, aStill := findCell(sc.grid.doc, refA); !aStill {
+		t.Fatal("clicking Close on placeholder B also closed A")
+	}
+	settleShellFrames(t, env, sc, router, size, &now)
+	if sc.slotEmpty[keyOfRef(refB)] != nil {
+		t.Fatal("closed placeholder B state was not pruned")
+	}
+	if sc.slotEmpty[keyOfRef(refA)] == nil {
+		t.Fatal("live placeholder A state was unexpectedly pruned")
+	}
+}
+
+// TestFUG73ClosingPlaceholderGhostPreservesIconAndDoesNotTriggerLiveSlot
+// verifies that a closing placeholder ghost keeps its own icon (not the
+// neighbour sliding into its old pos) and registers no shared Close button hit
+// area that could close the live placeholder sliding underneath.
+func TestFUG73ClosingPlaceholderGhostPreservesIconAndDoesNotTriggerLiveSlot(t *testing.T) {
+	t.Parallel()
+	sc := newFUG65TestScreens(t)
+	env := newFUG65Env(t, true)
+	env.ReducedMotion = false
+	router := new(input.Router)
+	size := image.Pt(1500, 800)
+	now := time.Unix(1_700_000_000, 0)
+
+	diffRef := SlotRef{Kind: KindDiff}
+	modRef := SlotRef{Kind: KindModule, ID: "mod-live"}
+	doc, _, _ := PlaceNearest(sc.grid.doc, diffRef)
+	doc, _, _ = PlaceNearest(doc, modRef)
+	sc.grid.edited(doc)
+	settleShellFrames(t, env, sc, router, size, &now)
+
+	oldDiffRect := sc.grid.rects[Pos{Col: 1, Row: 0}.key()]
+	oldDiffClosePt := placeholderCloseBtnPt(t, env, sc, size, oldDiffRect, diffRef, "File viewer", "A file badge or an Edited row opens its view here.")
+
+	sc.grid.edited(CloseSlot(sc.grid.doc, Pos{Col: 1, Row: 0}))
+	advanceShellFrames(t, env, sc, router, size, &now, 2)
+	if len(sc.grid.closing) != 1 {
+		t.Fatalf("expected 1 closing ghost, got %d", len(sc.grid.closing))
+	}
+	cs := sc.grid.closing[0]
+	if cs.ref != diffRef || slotIcon(cs.ref.Kind) != kit.IconFileText {
+		t.Fatalf("ghost ref=%+v icon=%v, want KindDiff/IconFileText", cs.ref, slotIcon(cs.ref.Kind))
+	}
+	if cs.empty == sc.slotEmpty[keyOfRef(modRef)] {
+		t.Fatal("closing ghost shared EmptyState with live placeholder")
+	}
+
+	// Click where the closing Diff ghost's Close button sat while live Module
+	// slides upward underneath: live Module must remain open on this and the next frame.
+	now = now.Add(16 * time.Millisecond)
+	clickShellAt(t, env, sc, router, size, now, oldDiffClosePt)
+	now = now.Add(16 * time.Millisecond)
+	runShellEnvFrame(t, env, sc, router, size, now)
+	if _, live := findCell(sc.grid.doc, modRef); !live {
+		t.Fatal("clicking closing ghost area closed the live placeholder underneath")
+	}
+}
+
+// TestFUG73SplitHandlePreservesFocusDuringAnimation verifies that SplitPane
+// handles remain laid out during slot animations so keyboard focus is never
+// dropped mid-transition.
+func TestFUG73SplitHandlePreservesFocusDuringAnimation(t *testing.T) {
+	t.Parallel()
+	sc := newFUG65TestScreens(t)
+	env := newFUG65Env(t, true)
+	env.ReducedMotion = false
+	router := new(input.Router)
+	size := image.Pt(1500, 800)
+	now := time.Unix(1_700_000_000, 0)
+
+	sc.grid.openCompanion(SlotRef{Kind: KindInbox})
+	settleShellFrames(t, env, sc, router, size, &now)
+
+	splitTag := sc.grid.splitC[0].Tag()
+	focusSplitFrame := func() bool {
+		var ops op.Ops
+		now = now.Add(16 * time.Millisecond)
+		gtx := layout.Context{
+			Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}),
+			Constraints: layout.Exact(size), Source: router.Source(), Now: now,
+		}
+		env.Begin(now)
+		env.TrackInput(&gtx)
+		drawWindow(&gtx, env, sc)
+		focused := gtx.Focused(splitTag)
+		env.FrameEnd(&gtx)
+		router.Frame(&ops)
+		return focused
+	}
+
+	// Grant focus to splitC[0] and verify it holds before animation.
+	var ops op.Ops
+	now = now.Add(16 * time.Millisecond)
+	gtx := layout.Context{
+		Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}),
+		Constraints: layout.Exact(size), Source: router.Source(), Now: now,
+	}
+	env.Begin(now)
+	env.TrackInput(&gtx)
+	drawWindow(&gtx, env, sc)
+	gtx.Execute(key.FocusCmd{Tag: splitTag})
+	env.FrameEnd(&gtx)
+	router.Frame(&ops)
+	if !focusSplitFrame() {
+		t.Fatal("split handle did not receive initial focus")
+	}
+
+	// Open a 3rd column to animate while splitC[0] stays focused.
+	sc.grid.openCompanion(SlotRef{Kind: KindSettings})
+	if len(sc.grid.anims) == 0 {
+		t.Fatal("expected slot animations to start")
+	}
+	for frame := 1; len(sc.grid.anims) > 0 && frame <= 100; frame++ {
+		if !focusSplitFrame() {
+			t.Fatalf("split handle lost focus on animation frame %d", frame)
+		}
+	}
+	if len(sc.grid.anims) > 0 {
+		t.Fatal("slot animation did not settle within 100 frames")
 	}
 }

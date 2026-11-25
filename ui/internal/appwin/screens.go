@@ -69,10 +69,10 @@ type screens struct {
 	// grid is the app shell's slot grid: the layout document, the rail, the
 	// arrange and drag state, and the persistence marks (F10.20b).
 	grid *slotGrid
-	// slotEmpty and slotGone are the placeholder and missing-object empty
-	// states the regular slots render (DA-E10).
-	slotEmpty *kit.EmptyStateState
-	slotGone  *kit.EmptyStateState
+	// slotEmpty and slotGone are the per-slot placeholder and missing-object
+	// empty states keyed by keyOfRef (kind:id) (DA-E10).
+	slotEmpty map[string]*kit.EmptyStateState
+	slotGone  map[string]*kit.EmptyStateState
 	// slotSoonSidebar is the rail sidebars' placeholder before their screens
 	// land.
 	slotSoonSidebar *kit.EmptyStateState
@@ -201,8 +201,8 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 		poster:          poster,
 		composer:        newComposer(poster),
 		grid:            newSlotGrid(),
-		slotEmpty:       kit.NewEmptyStateState(),
-		slotGone:        kit.NewEmptyStateState(),
+		slotEmpty:       map[string]*kit.EmptyStateState{},
+		slotGone:        map[string]*kit.EmptyStateState{},
 		slotSoonSidebar: kit.NewEmptyStateState(),
 		slotSessions:    map[string]bool{},
 		sidebar:         session.NewSidebar(),
@@ -408,6 +408,7 @@ func (s *screens) anyFloatLayerOpen() bool {
 func (s *screens) layout(gtx *layout.Context, env *kit.Env) {
 	s.layoutShell(gtx, env)
 	s.releaseTeamTopics(gtx)
+	s.pruneSlotEmptyStates()
 }
 
 // layoutTranscript draws the transcript pane and, under it, the composer
