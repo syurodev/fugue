@@ -113,6 +113,7 @@ type slotGrid struct {
 	railY         motion.Follower
 	sidebarBtn    *kit.IconButtonState
 	sidebarOpenF  motion.Follower
+	sidebarFadeF  motion.Follower
 	wasTempFolded bool
 	// newWindow is the last "open in new window" request (F10.21 consumes).
 	newWindow *NewWindowRequest
@@ -158,6 +159,7 @@ func newSlotGrid() *slotGrid {
 		railY:          motion.NewFollower(motion.Smooth()),
 		sidebarBtn:     kit.NewIconButtonState(),
 		sidebarOpenF:   motion.NewFollower(motion.Smooth()),
+		sidebarFadeF:   motion.NewFollower(motion.Snappy()),
 		drawerPresence: motion.NewPresence(motion.Smooth(), motion.Exit()),
 	}
 }
@@ -177,6 +179,7 @@ func (g *slotGrid) syncFromDoc() {
 func (g *slotGrid) resetShellMotion() {
 	g.railY = motion.NewFollower(motion.Smooth())
 	g.sidebarOpenF = motion.NewFollower(motion.Smooth())
+	g.sidebarFadeF = motion.NewFollower(motion.Snappy())
 	clear(g.anims)
 	g.closing = nil
 }

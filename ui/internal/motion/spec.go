@@ -27,17 +27,19 @@ func (sp Spec) Damping() float32 {
 // The app's motion tokens. Every animation uses one of these so the whole
 // app moves with one feel; tune them here, never per widget.
 
-// Snappy is for direct responses to input: presses, menus opening, toggles.
-func Snappy() Spec { return Spec{Response: 300 * time.Millisecond, DampingFraction: 0.86} }
+// Snappy is for direct responses to input: menus opening, toggles, and
+// fast fade-ins.
+func Snappy() Spec { return Spec{Response: 220 * time.Millisecond, DampingFraction: 0.9} }
 
-// Smooth is for content moving or resizing: lists, sections, selections.
-func Smooth() Spec { return Spec{Response: 450 * time.Millisecond, DampingFraction: 1} }
+// Smooth is for content moving or resizing: lists, sections, selections, slots,
+// and sidebar geometry.
+func Smooth() Spec { return Spec{Response: 300 * time.Millisecond, DampingFraction: 1} }
 
 // Bouncy is for small playful elements such as a switch knob.
-func Bouncy() Spec { return Spec{Response: 400 * time.Millisecond, DampingFraction: 0.68} }
+func Bouncy() Spec { return Spec{Response: 320 * time.Millisecond, DampingFraction: 0.72} }
 
 // Exit is for things leaving the screen: quicker than they arrived, no bounce.
-func Exit() Spec { return Spec{Response: 200 * time.Millisecond, DampingFraction: 1} }
+func Exit() Spec { return Spec{Response: 150 * time.Millisecond, DampingFraction: 1} }
 
 // NewSpringSpec returns a spring at rest on value tuned by spec.
 func NewSpringSpec(value float32, spec Spec) Spring {

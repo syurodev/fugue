@@ -13,6 +13,7 @@ import (
 
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/motion"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
@@ -118,7 +119,7 @@ func (s *screens) toggleCompanion(kind SlotKind) {
 func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dimensions {
 	plan := s.planShell(gtx)
 	sidebarOpen := s.pollSidebarToggle(gtx, plan.TempSidebarFolded)
-	openProg := s.stepSidebarOpen(env, sidebarOpen, plan.TempSidebarFolded)
+	openProg, fadeProg := s.stepSidebarOpen(env, sidebarOpen, plan.TempSidebarFolded)
 
 	totalW, totalH := gtx.Constraints.Max.X, gtx.Constraints.Max.Y
 	railW := min(gtx.Dp(theme.RailWidth), totalW)
@@ -132,7 +133,7 @@ func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dime
 	railGtx := *gtx
 	railGtx.Constraints = layout.Constraints{Min: image.Pt(railW, 0), Max: image.Pt(railW, colH)}
 	s.layoutRail(&railGtx, env)
-	s.layoutAnimatedSidebar(gtx, env, railW, maxSideW, sideW, colH, openProg)
+	s.layoutAnimatedSidebar(gtx, env, railW, maxSideW, sideW, colH, openProg, fadeProg)
 	s.layoutShellFooter(gtx, env, sidebarOpen, railW, sideW, colH, footerH, openProg)
 
 	gridX := railW + sideW + scaledPx(gutter, openProg)
@@ -165,27 +166,36 @@ func (s *screens) pollSidebarToggle(gtx *layout.Context, tempFolded bool) bool {
 	return open
 }
 
-func (s *screens) stepSidebarOpen(env *kit.Env, sidebarOpen, tempFolded bool) float32 {
+func (s *screens) stepSidebarOpen(env *kit.Env, sidebarOpen, tempFolded bool) (openProg, fadeProg float32) {
 	target := float32(0)
 	if sidebarOpen {
 		target = 1
 	}
-	var prog float32
-	if env.ReducedMotion || tempFolded || s.grid.wasTempFolded != tempFolded {
-		s.grid.sidebarOpenF.Snap(target)
-		prog = target
-	} else {
-		prog = s.grid.sidebarOpenF.Follow(target, env.DT())
-		if s.grid.sidebarOpenF.Moving() {
-			env.Keep()
-		}
-	}
+	snap := env.ReducedMotion || tempFolded || s.grid.wasTempFolded != tempFolded
 	s.grid.wasTempFolded = tempFolded
-	return prog
+	if snap {
+		s.grid.sidebarOpenF.Snap(target)
+		s.grid.sidebarFadeF.Snap(target)
+		return target, target
+	}
+	openProg = s.grid.sidebarOpenF.Follow(target, env.DT())
+	if s.grid.sidebarOpenF.Moving() {
+		env.Keep()
+	}
+	fadeSpec := motion.Exit()
+	if sidebarOpen {
+		fadeSpec = motion.Snappy()
+	}
+	s.grid.sidebarFadeF.Use(fadeSpec)
+	fadeProg = s.grid.sidebarFadeF.Follow(target, env.DT())
+	if s.grid.sidebarFadeF.Moving() {
+		env.Keep()
+	}
+	return openProg, fadeProg
 }
 
-func (s *screens) layoutAnimatedSidebar(gtx *layout.Context, env *kit.Env, railW, maxSideW, sideW, colH int, openProg float32) {
-	if sideW <= 0 || openProg <= 0 {
+func (s *screens) layoutAnimatedSidebar(gtx *layout.Context, env *kit.Env, railW, maxSideW, sideW, colH int, openProg, fadeProg float32) {
+	if sideW <= 0 || openProg <= 0 || fadeProg <= 0 {
 		return
 	}
 	env.Offset(gtx, image.Pt(railW, 0), func(gtx *layout.Context) {
@@ -193,7 +203,9 @@ func (s *screens) layoutAnimatedSidebar(gtx *layout.Context, env *kit.Env, railW
 		local.Constraints = layout.Constraints{Min: image.Pt(maxSideW, 0), Max: image.Pt(maxSideW, colH)}
 		if openProg < 1 {
 			defer clip.Rect{Max: image.Pt(sideW, colH)}.Push(local.Ops).Pop()
-			defer paint.PushOpacity(local.Ops, min(max(openProg, 0), 1)).Pop()
+		}
+		if fadeProg < 1 {
+			defer paint.PushOpacity(local.Ops, min(max(fadeProg, 0), 1)).Pop()
 		}
 		s.layoutSidebarPanel(&local, env)
 	})

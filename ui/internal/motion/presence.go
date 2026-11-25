@@ -98,6 +98,12 @@ func (f *Follower) Moving() bool { return !f.spring.AtRest() }
 // Value is the current value without advancing.
 func (f *Follower) Value() float32 { return f.spring.Value }
 
+// Use retunes the follower's spring to spec without snapping its current value
+// or velocity.
+func (f *Follower) Use(spec Spec) {
+	f.spring.Use(spec)
+}
+
 // Snap puts the follower at rest on v: the reduced-motion path (UK-04),
 // where a change lands in the same frame instead of springing.
 func (f *Follower) Snap(v float32) {

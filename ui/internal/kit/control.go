@@ -83,7 +83,8 @@ func (l controlLook) dim(a float32) controlLook {
 type motionVals struct{ hover, press, focus, sel float32 }
 
 // pressable is the state both pressable controls share: the clickable, the
-// Snappy followers of §3.7 and the ripple. It must be built with
+// §3.7 hover/press followers (snap in, Exit out with no bounce), the Snappy
+// focus/selection followers and the ripple. It must be built with
 // newPressable: a zero follower has no spring.
 type pressable struct {
 	click                        widget.Clickable
@@ -97,8 +98,9 @@ type pressable struct {
 
 func newPressable() pressable {
 	s := motion.Snappy()
+	ex := motion.Exit()
 	return pressable{
-		hoverF: motion.NewFollower(s), pressF: motion.NewFollower(s),
+		hoverF: motion.NewFollower(ex), pressF: motion.NewFollower(ex),
 		focusF: motion.NewFollower(s), selF: motion.NewFollower(s),
 		rip: newRipple(),
 	}
@@ -162,8 +164,8 @@ func (c *pressable) begin(env *Env, gtx *layout.Context, box image.Point, o pres
 	st := resolveState(env, &ig, c.Tag(), &c.click, o)
 	c.click.Layout(ig, func(layout.Context) layout.Dimensions { return layout.Dimensions{Size: box} })
 	mv = motionVals{
-		hover: followState(env, &c.hoverF, st.hovered),
-		press: followState(env, &c.pressF, st.pressed),
+		hover: followSnapIn(env, &c.hoverF, st.hovered),
+		press: followSnapIn(env, &c.pressF, st.pressed),
 		focus: followState(env, &c.focusF, st.focused),
 		sel:   followState(env, &c.selF, st.toggled),
 	}
@@ -276,6 +278,26 @@ func (r *ripple) draw(gtx *layout.Context, body image.Rectangle, radius int, c c
 	centre := r.at.Add(body.Min)
 	disc := clip.Ellipse{Min: centre.Sub(d), Max: centre.Add(d)}.Op(gtx.Ops)
 	paint.FillShape(gtx.Ops, fade(c, a), disc)
+}
+
+// followSnapIn snaps to 1 on the first frame when target is true (hover enter,
+// press down), and fades out on Exit when target is false with no bounce.
+// Reduced motion snaps both ways.
+func followSnapIn(env *Env, f *motion.Follower, target bool) float32 {
+	if env.ReducedMotion || target {
+		v := float32(0)
+		if target {
+			v = 1
+		}
+		f.Snap(v)
+		return v
+	}
+	f.Use(motion.Exit())
+	v := f.Follow(0, env.DT())
+	if f.Moving() {
+		env.Keep()
+	}
+	return v
 }
 
 // followState moves one §3.7 transition toward target on Snappy and asks
