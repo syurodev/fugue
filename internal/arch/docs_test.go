@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -18,24 +16,13 @@ import (
 
 const goleakPath = "go.uber.org/goleak"
 
-func parseFile(file string) (*ast.File, error) {
-	src, err := os.ReadFile(filepath.Clean(file))
-	if err != nil {
-		return nil, fmt.Errorf("read %s: %w", file, err)
-	}
-	f, err := parser.ParseFile(token.NewFileSet(), file, src, parser.ParseComments)
-	if err != nil {
-		return nil, fmt.Errorf("parse %s: %w", file, err)
-	}
-	return f, nil
-}
-
-func allGenerated(p *goPackage) (bool, error) {
+func allGenerated(r repo, p *goPackage) (bool, error) {
 	if len(p.GoFiles) == 0 {
 		return false, nil
 	}
+	relDir := p.rel()
 	for _, name := range p.GoFiles {
-		f, err := parseFile(filepath.Join(p.Dir, name))
+		f, err := r.parse(filepath.ToSlash(filepath.Join(relDir, name)))
 		if err != nil {
 			return false, err
 		}
@@ -55,14 +42,14 @@ func checkPackageDocs(ctx context.Context, r repo) ([]string, error) {
 	}
 	var out []string
 	for _, p := range pkgs {
-		generated, err := allGenerated(p)
+		generated, err := allGenerated(r, p)
 		if err != nil {
 			return nil, err
 		}
 		if generated {
 			continue
 		}
-		problem, err := docProblem(p)
+		problem, err := docProblem(r, p)
 		if err != nil {
 			return nil, err
 		}
@@ -74,14 +61,14 @@ func checkPackageDocs(ctx context.Context, r repo) ([]string, error) {
 	return out, nil
 }
 
-func docProblem(p *goPackage) (string, error) {
+func docProblem(r repo, p *goPackage) (string, error) {
 	file := filepath.Join(p.Dir, "doc.go")
 	if _, err := os.Stat(file); errors.Is(err, fs.ErrNotExist) {
 		return "has no doc.go", nil
 	} else if err != nil {
 		return "", fmt.Errorf("stat %s: %w", file, err)
 	}
-	f, err := parseFile(file)
+	f, err := r.parse(filepath.ToSlash(filepath.Join(p.rel(), "doc.go")))
 	if err != nil {
 		return "", err
 	}
@@ -112,7 +99,7 @@ func checkGoleak(ctx context.Context, r repo) ([]string, error) {
 		if len(files) == 0 {
 			continue
 		}
-		ok, err := anyVerifiesMain(p.Dir, files)
+		ok, err := anyVerifiesMain(r, p.rel(), files)
 		if err != nil {
 			return nil, err
 		}
@@ -124,9 +111,9 @@ func checkGoleak(ctx context.Context, r repo) ([]string, error) {
 	return out, nil
 }
 
-func anyVerifiesMain(dir string, files []string) (bool, error) {
+func anyVerifiesMain(r repo, relDir string, files []string) (bool, error) {
 	for _, name := range files {
-		f, err := parseFile(filepath.Join(dir, name))
+		f, err := r.parse(filepath.ToSlash(filepath.Join(relDir, name)))
 		if err != nil {
 			return false, err
 		}

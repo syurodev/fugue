@@ -60,8 +60,9 @@ func checkTableOwnership(ctx context.Context, r repo) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	tablePattern := compileTablePattern(owners)
 	for _, file := range files {
-		problems, fileErr := fileTableProblems(r, file, owners)
+		problems, fileErr := fileTableProblems(r, file, owners, tablePattern)
 		if fileErr != nil {
 			return nil, fileErr
 		}
@@ -76,7 +77,19 @@ func checkTableOwnership(ctx context.Context, r repo) ([]string, error) {
 	return out, nil
 }
 
-func fileTableProblems(r repo, file string, owners map[string]string) ([]string, error) {
+func compileTablePattern(owners map[string]string) *regexp.Regexp {
+	if len(owners) == 0 {
+		return nil
+	}
+	parts := make([]string, 0, len(owners))
+	for table := range owners {
+		parts = append(parts, regexp.QuoteMeta(table))
+	}
+	slices.Sort(parts)
+	return regexp.MustCompile(`\b(?:` + strings.Join(parts, "|") + `)\b`)
+}
+
+func fileTableProblems(r repo, file string, owners map[string]string, tablePattern *regexp.Regexp) ([]string, error) {
 	src, err := r.read(file)
 	if err != nil {
 		return nil, err
@@ -93,7 +106,7 @@ func fileTableProblems(r repo, file string, owners map[string]string) ([]string,
 	if !strings.HasSuffix(file, ".go") {
 		return out, nil
 	}
-	touched, err := tablesTouchedByGo(r, file, owners)
+	touched, err := tablesTouchedByGo(r, file, owners, tablePattern)
 	if err != nil {
 		return nil, err
 	}
@@ -102,7 +115,7 @@ func fileTableProblems(r repo, file string, owners map[string]string) ([]string,
 
 // tablesTouchedByGo finds SQL in string literals that names a table owned by a
 // different package.
-func tablesTouchedByGo(r repo, file string, owners map[string]string) ([]string, error) {
+func tablesTouchedByGo(r repo, file string, owners map[string]string, tablePattern *regexp.Regexp) ([]string, error) {
 	f, err := r.parse(file)
 	if err != nil {
 		return nil, err
@@ -115,11 +128,16 @@ func tablesTouchedByGo(r repo, file string, owners map[string]string) ([]string,
 			return true
 		}
 		text, err := strconv.Unquote(lit.Value)
-		if err != nil || !sqlWord.MatchString(text) {
+		if err != nil || !sqlWord.MatchString(text) || tablePattern == nil {
 			return true
 		}
-		for table, owner := range owners {
-			if owner != pkgDir && regexp.MustCompile(`\b`+regexp.QuoteMeta(table)+`\b`).MatchString(text) {
+		matches := tablePattern.FindAllString(text, -1)
+		if len(matches) > 1 {
+			slices.Sort(matches)
+			matches = slices.Compact(matches)
+		}
+		for _, table := range matches {
+			if owner, ok := owners[table]; ok && owner != pkgDir {
 				out = append(out, fmt.Sprintf("%s: SQL touches table %s, owned by %s", file, table, owner))
 			}
 		}
