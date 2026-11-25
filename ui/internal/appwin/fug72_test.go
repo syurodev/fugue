@@ -15,6 +15,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/theme"
+	"github.com/syurodev/fugue/ui/internal/vault"
 )
 
 func wantsImmediateFrame(env *kit.Env) bool {
@@ -72,10 +73,8 @@ func assertRailConsistent(t *testing.T, sc *screens, wantRail railItem, wantKind
 	if got := sc.grid.mainRef().Kind; got != wantKind {
 		t.Fatalf("main slot kind = %v, want %v", got, wantKind)
 	}
-	for _, it := range []railItem{railChat, railTeam, railModules} {
-		if got := sc.grid.railToggled[it]; got != (it == wantRail) {
-			t.Fatalf("railToggled[%v] = %v, want %v", it, got, it == wantRail)
-		}
+	if sc.grid.railBtns[wantRail] == nil {
+		t.Fatalf("rail button for %v was not laid out", wantRail)
 	}
 }
 
@@ -139,11 +138,35 @@ func TestFUG72RailHighlightFollowsClickAndSlides(t *testing.T) {
 	}
 }
 
-func assertSidebarSettled(t *testing.T, env *kit.Env, sc *screens, wantW int, wantCollapsed bool) {
+func drawnSidebarWidth(gtx *layout.Context, sc *screens, size image.Point) int {
+	pad := gtx.Dp(theme.SpaceXS)
+	totalW := max(size.X-pad, 0)
+	railW := min(gtx.Dp(theme.RailWidth), totalW)
+	gutter := gtx.Dp(theme.SpaceXS)
+	maxSideW := min(max(totalW-railW-gutter, 0), gtx.Dp(theme.SidebarWidth))
+	return scaledPx(maxSideW, sc.grid.sidebarOpenF.Value())
+}
+
+func drawnColumnHeight(gtx *layout.Context, sc *screens, size image.Point) int {
+	pad := gtx.Dp(theme.SpaceXS)
+	totalH := max(size.Y-2*pad, 0)
+	showLock := !sc.vault.Locked() && sc.vaultWorker != nil
+	return max(totalH-shellFooterHeight(gtx, showLock, sc.grid.sidebarOpenF.Value()), 0)
+}
+
+func assertSidebarSettled(t *testing.T, env *kit.Env, sc *screens, gtx *layout.Context, size image.Point, wantW int, wantCollapsed bool) {
 	t.Helper()
-	if sc.grid.doc.SidebarCollapsed != wantCollapsed || sc.grid.lastSideW != wantW || wantsImmediateFrame(env) {
+	sideW := drawnSidebarWidth(gtx, sc, size)
+	if sc.grid.doc.SidebarCollapsed != wantCollapsed || sideW != wantW || wantsImmediateFrame(env) {
 		t.Fatalf("collapsed=%v (want %v) sideW=%d (want %d) immediate=%v",
-			sc.grid.doc.SidebarCollapsed, wantCollapsed, sc.grid.lastSideW, wantW, wantsImmediateFrame(env))
+			sc.grid.doc.SidebarCollapsed, wantCollapsed, sideW, wantW, wantsImmediateFrame(env))
+	}
+	pad := gtx.Dp(theme.SpaceXS)
+	totalW := max(size.X-pad, 0)
+	railW := min(gtx.Dp(theme.RailWidth), totalW)
+	wantGridW := max(totalW-(railW+sideW+scaledPx(gtx.Dp(theme.SpaceXS), sc.grid.sidebarOpenF.Value())), 0)
+	if gotGridW := sc.grid.lastArea.Dx(); gotGridW != wantGridW {
+		t.Fatalf("grid area width = %d, want %d (sideW=%d)", gotGridW, wantGridW, sideW)
 	}
 }
 
@@ -164,7 +187,7 @@ func TestFUG72SidebarCollapseExpandMotion(t *testing.T) {
 	collapsePt, expandPt := sidebarTogglePts(&gtx, size)
 
 	settleShellFrames(t, env, sc, router, size, &now)
-	assertSidebarSettled(t, env, sc, fullW, false)
+	assertSidebarSettled(t, env, sc, &gtx, size, fullW, false)
 
 	now = now.Add(16 * time.Millisecond)
 	clickShellAt(t, env, sc, router, size, now, collapsePt)
@@ -173,7 +196,7 @@ func TestFUG72SidebarCollapseExpandMotion(t *testing.T) {
 	}
 
 	advanceShellFrames(t, env, sc, router, size, &now, 10)
-	if midW := sc.grid.lastSideW; midW <= 0 || midW >= fullW || !wantsImmediateFrame(env) {
+	if midW := drawnSidebarWidth(&gtx, sc, size); midW <= 0 || midW >= fullW || !wantsImmediateFrame(env) {
 		t.Fatalf("mid-collapse sideW = %d (want 0..%d), immediate = %v", midW, fullW, wantsImmediateFrame(env))
 	}
 
@@ -181,13 +204,69 @@ func TestFUG72SidebarCollapseExpandMotion(t *testing.T) {
 	now = now.Add(16 * time.Millisecond)
 	clickShellAt(t, env, sc, router, size, now, expandPt)
 	settleShellFrames(t, env, sc, router, size, &now)
-	assertSidebarSettled(t, env, sc, fullW, false)
+	assertSidebarSettled(t, env, sc, &gtx, size, fullW, false)
 
 	// Collapse to end and verify 0 width and idle at rest.
 	now = now.Add(16 * time.Millisecond)
 	clickShellAt(t, env, sc, router, size, now, collapsePt)
 	settleShellFrames(t, env, sc, router, size, &now)
-	assertSidebarSettled(t, env, sc, 0, true)
+	assertSidebarSettled(t, env, sc, &gtx, size, 0, true)
+}
+
+// TestFUG72SidebarFooterColumnHeightSmooth verifies that with an unlocked vault
+// (Lock button in the footer), the rail/sidebar column height never jumps in a
+// single frame during collapse or expand.
+func TestFUG72SidebarFooterColumnHeightSmooth(t *testing.T) {
+	t.Parallel()
+	vw := vault.NewWorker(func() vault.Client { return newFakeAppVaultClient() })
+	vw.Start(t.Context())
+	t.Cleanup(vw.Stop)
+
+	sc := newFUG65TestScreens(t)
+	sc.vaultWorker = vw
+	sc.applyConnectionUpdate(hostconn.StateConnected, "")
+	env := newFUG65Env(t, true)
+	env.ReducedMotion = false
+	router := new(input.Router)
+	size := image.Pt(1200, 800)
+	now := time.Unix(1_700_000_000, 0)
+
+	var ops op.Ops
+	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
+	collapsePt, expandPt := sidebarTogglePts(&gtx, size)
+	lockJumpPx := gtx.Dp(theme.ControlSM) + gtx.Dp(theme.SpaceSM) + gtx.Dp(theme.SpaceXS)
+
+	settleShellFrames(t, env, sc, router, size, &now)
+	prevH := drawnColumnHeight(&gtx, sc, size)
+
+	checkSmooth := func(label string, pt f32.Point) {
+		now = now.Add(16 * time.Millisecond)
+		clickShellAt(t, env, sc, router, size, now, pt)
+		for range 100 {
+			curH := drawnColumnHeight(&gtx, sc, size)
+			delta := absInt(curH - prevH)
+			if delta > lockJumpPx/4 {
+				t.Fatalf("%s: column height jumped by %d px in one frame (%d -> %d, lock row=%d)",
+					label, delta, prevH, curH, lockJumpPx)
+			}
+			prevH = curH
+			if !wantsImmediateFrame(env) {
+				return
+			}
+			now = now.Add(16 * time.Millisecond)
+			runShellEnvFrame(t, env, sc, router, size, now)
+		}
+		t.Fatalf("%s: did not settle within 100 frames", label)
+	}
+
+	checkSmooth("collapse", collapsePt)
+	if got, want := drawnColumnHeight(&gtx, sc, size), size.Y-2*gtx.Dp(theme.SpaceXS)-gtx.Dp(theme.ControlLG)-lockJumpPx; got != want {
+		t.Fatalf("collapsed colH = %d, want %d", got, want)
+	}
+	checkSmooth("expand", expandPt)
+	if got, want := drawnColumnHeight(&gtx, sc, size), size.Y-2*gtx.Dp(theme.SpaceXS)-gtx.Dp(theme.ControlLG); got != want {
+		t.Fatalf("expanded colH = %d, want %d", got, want)
+	}
 }
 
 // TestFUG72SidebarReducedMotionInstant verifies ReducedMotion flips sidebar
@@ -210,14 +289,14 @@ func TestFUG72SidebarReducedMotionInstant(t *testing.T) {
 
 	now = now.Add(16 * time.Millisecond)
 	clickShellAt(t, env, sc, router, size, now, collapsePt)
-	if sc.grid.lastSideW != 0 || wantsImmediateFrame(env) {
-		t.Fatalf("ReducedMotion collapse sideW=%d immediate=%v", sc.grid.lastSideW, wantsImmediateFrame(env))
+	if sideW := drawnSidebarWidth(&gtx, sc, size); sideW != 0 || wantsImmediateFrame(env) {
+		t.Fatalf("ReducedMotion collapse sideW=%d immediate=%v", sideW, wantsImmediateFrame(env))
 	}
 
 	now = now.Add(16 * time.Millisecond)
 	clickShellAt(t, env, sc, router, size, now, expandPt)
-	if sc.grid.lastSideW != fullW || wantsImmediateFrame(env) {
-		t.Fatalf("ReducedMotion expand sideW=%d immediate=%v", sc.grid.lastSideW, wantsImmediateFrame(env))
+	if sideW := drawnSidebarWidth(&gtx, sc, size); sideW != fullW || wantsImmediateFrame(env) {
+		t.Fatalf("ReducedMotion expand sideW=%d immediate=%v", sideW, wantsImmediateFrame(env))
 	}
 }
 
@@ -237,20 +316,20 @@ func TestFUG72SidebarNoAnimOnTempFoldAndRestore(t *testing.T) {
 	fullW := gtx.Dp(theme.SidebarWidth)
 
 	settleShellFrames(t, env, sc, router, wide, &now)
-	if sc.grid.lastSideW != fullW {
-		t.Fatalf("wide sideW = %d, want %d", sc.grid.lastSideW, fullW)
+	if sideW := drawnSidebarWidth(&gtx, sc, wide); sideW != fullW {
+		t.Fatalf("wide sideW = %d, want %d", sideW, fullW)
 	}
 
 	now = now.Add(16 * time.Millisecond)
 	runShellEnvFrame(t, env, sc, router, narrow, now)
-	if sc.grid.lastSideW != 0 || wantsImmediateFrame(env) {
-		t.Fatalf("TempSidebarFolded sideW=%d immediate=%v", sc.grid.lastSideW, wantsImmediateFrame(env))
+	if sideW := drawnSidebarWidth(&gtx, sc, narrow); sideW != 0 || wantsImmediateFrame(env) {
+		t.Fatalf("TempSidebarFolded sideW=%d immediate=%v", sideW, wantsImmediateFrame(env))
 	}
 
 	now = now.Add(16 * time.Millisecond)
 	runShellEnvFrame(t, env, sc, router, wide, now)
-	if sc.grid.lastSideW != fullW || wantsImmediateFrame(env) {
-		t.Fatalf("unfold sideW=%d immediate=%v", sc.grid.lastSideW, wantsImmediateFrame(env))
+	if sideW := drawnSidebarWidth(&gtx, sc, wide); sideW != fullW || wantsImmediateFrame(env) {
+		t.Fatalf("unfold sideW=%d immediate=%v", sideW, wantsImmediateFrame(env))
 	}
 
 	restored := DefaultLayout()
@@ -258,7 +337,7 @@ func TestFUG72SidebarNoAnimOnTempFoldAndRestore(t *testing.T) {
 	sc.grid.applyStored(DecodeLayoutResult{Doc: restored}, 2)
 	now = now.Add(16 * time.Millisecond)
 	runShellEnvFrame(t, env, sc, router, wide, now)
-	if sc.grid.lastSideW != 0 || wantsImmediateFrame(env) {
-		t.Fatalf("restored collapsed sideW=%d immediate=%v", sc.grid.lastSideW, wantsImmediateFrame(env))
+	if sideW := drawnSidebarWidth(&gtx, sc, wide); sideW != 0 || wantsImmediateFrame(env) {
+		t.Fatalf("restored collapsed sideW=%d immediate=%v", sideW, wantsImmediateFrame(env))
 	}
 }

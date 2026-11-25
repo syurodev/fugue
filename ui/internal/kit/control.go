@@ -92,6 +92,7 @@ type pressable struct {
 	lastPressEnd                 time.Time
 	keyClicked                   bool
 	polledClick                  bool
+	polledAt                     time.Time
 }
 
 func newPressable() pressable {
@@ -115,10 +116,21 @@ func (c *pressable) KeyClicked() bool { return c.keyClicked }
 
 // PollClick drains any pending click before Layout so a parent can update
 // state (such as Toggled) before drawing the same frame. Layout still reports
-// the click on its own return value.
-func (c *pressable) PollClick(gtx *layout.Context) bool {
+// the click on its own return value within the same frame; if Layout does not
+// run in that frame, the latched click expires before the next frame. Disabled
+// and busy controls never report a click (§4.1).
+func (c *pressable) PollClick(gtx *layout.Context, disabled, busy bool) bool {
+	if c.polledClick && !c.polledAt.Equal(gtx.Now) {
+		c.polledClick = false
+	}
+	if disabled || busy {
+		_ = c.click.Clicked(*gtx)
+		c.polledClick = false
+		return false
+	}
 	if c.click.Clicked(*gtx) {
 		c.polledClick = true
+		c.polledAt = gtx.Now
 	}
 	return c.polledClick
 }
@@ -130,6 +142,9 @@ func (c *pressable) PollClick(gtx *layout.Context) bool {
 func (c *pressable) begin(env *Env, gtx *layout.Context, box image.Point, o pressOpts) (clicked bool, mv motionVals) {
 	ig := *gtx
 	prevEnd := c.lastPressEnd
+	if c.polledClick && !c.polledAt.Equal(gtx.Now) {
+		c.polledClick = false
+	}
 	if o.disabled {
 		// A disabled control consumes nothing: no hover, no focus (§4.1).
 		ig = gtx.Disabled()

@@ -125,18 +125,15 @@ func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dime
 	gutter := gtx.Dp(theme.SpaceXS)
 	maxSideW := min(max(totalW-railW-gutter, 0), gtx.Dp(theme.SidebarWidth))
 	sideW := scaledPx(maxSideW, openProg)
-	s.grid.lastSideW = sideW
 
-	footerH := gtx.Dp(theme.ControlLG)
-	if sideW <= 0 && !s.vault.Locked() && s.vaultWorker != nil {
-		footerH += gtx.Dp(theme.ControlSM) + gtx.Dp(theme.SpaceSM) + gtx.Dp(theme.SpaceXS)
-	}
+	showLock := !s.vault.Locked() && s.vaultWorker != nil
+	footerH := shellFooterHeight(gtx, showLock, openProg)
 	colH := max(totalH-footerH, 0)
 	railGtx := *gtx
 	railGtx.Constraints = layout.Constraints{Min: image.Pt(railW, 0), Max: image.Pt(railW, colH)}
 	s.layoutRail(&railGtx, env)
 	s.layoutAnimatedSidebar(gtx, env, railW, maxSideW, sideW, colH, openProg)
-	s.layoutShellFooter(gtx, env, sidebarOpen, railW, sideW, colH, footerH)
+	s.layoutShellFooter(gtx, env, sidebarOpen, railW, sideW, colH, footerH, openProg)
 
 	gridX := railW + sideW + scaledPx(gutter, openProg)
 	gridW := max(totalW-gridX, 0)
@@ -148,9 +145,18 @@ func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dime
 	return layout.Dimensions{Size: image.Pt(totalW, totalH)}
 }
 
+func shellFooterHeight(gtx *layout.Context, showLock bool, openProg float32) int {
+	h := gtx.Dp(theme.ControlLG)
+	if showLock {
+		extra := gtx.Dp(theme.ControlSM) + gtx.Dp(theme.SpaceSM) + gtx.Dp(theme.SpaceXS)
+		h += scaledPx(extra, 1-openProg)
+	}
+	return h
+}
+
 func (s *screens) pollSidebarToggle(gtx *layout.Context, tempFolded bool) bool {
 	open := s.sidebarVisible() && !tempFolded
-	if s.grid.sidebarBtn.PollClick(gtx) {
+	if s.grid.sidebarBtn.PollClick(gtx, false, false) {
 		doc := cloneLayout(s.grid.doc)
 		doc.SidebarCollapsed = open
 		s.grid.edited(doc)
@@ -258,7 +264,7 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env) layout.Dimension
 	// Process rail clicks before building Toggled and stepping the indicator so
 	// the highlight follows the click in the same frame.
 	for _, it := range items {
-		if s.grid.railBtn(it.item).PollClick(gtx) {
+		if s.grid.railBtn(it.item).PollClick(gtx, false, false) {
 			s.grid.selectRail(it.item)
 		}
 	}
@@ -286,7 +292,6 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env) layout.Dimension
 	for _, it := range items {
 		btn := s.grid.railBtn(it.item)
 		toggled := s.grid.rail == it.item
-		s.grid.railToggled[it.item] = toggled
 		props := kit.IconButtonProps{
 			Icon: it.icon, Label: it.hint, Variant: kit.IconButtonGhost, Size: kit.SizeLG,
 			Toggled: toggled, NoSelectedFill: true,
@@ -307,7 +312,7 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env) layout.Dimension
 // a tooltip (no raw text while connected; "Reconnecting…" while connecting).
 // When the sidebar is collapsed, Lock vault and the connection dot stack in
 // the rail column above the collapse chevron.
-func (s *screens) layoutShellFooter(gtx *layout.Context, env *kit.Env, sidebarOpen bool, railW, sideW, y, h int) {
+func (s *screens) layoutShellFooter(gtx *layout.Context, env *kit.Env, sidebarOpen bool, railW, sideW, y, h int, openProg float32) {
 	toggle := s.grid.sidebarBtn
 	icon := kit.IconChevronLeft
 	hint := "Collapse sidebar"
@@ -317,16 +322,30 @@ func (s *screens) layoutShellFooter(gtx *layout.Context, env *kit.Env, sidebarOp
 	}
 	toggleProps := kit.IconButtonProps{Icon: icon, Label: hint, Variant: kit.IconButtonBordered, Size: kit.SizeSM}
 	toggleSize := toggle.Measure(env, gtx, &toggleProps).Size
-	if sideW <= 0 {
-		s.layoutCollapsedFooter(gtx, env, toggle, &toggleProps, railW, y, h)
+	closedY := y + h - toggleSize.Y - gtx.Dp(theme.SpaceXXS)
+	openY := y + max((gtx.Dp(theme.ControlLG)-toggleSize.Y)/2, 0)
+	toggleY := closedY + int(float32(openY-closedY)*min(max(openProg, 0), 1)+0.5)
+	if openProg <= 0 {
+		toggleY = closedY
+	} else if openProg >= 1 {
+		toggleY = openY
+	}
+	env.Offset(gtx, image.Pt(max((railW-toggleSize.X)/2, 0), toggleY), func(gtx *layout.Context) {
+		_, err := toggle.Layout(env, gtx, &toggleProps)
+		s.fail(err)
+	})
+	if openProg < 0.5 {
+		defer clip.Rect(image.Rect(0, y, railW, y+h)).Push(gtx.Ops).Pop()
+		if openProg > 0 {
+			defer paint.PushOpacity(gtx.Ops, 1-2*openProg).Pop()
+		}
+		s.layoutCollapsedFooterItems(gtx, env, railW, toggleY)
 		return
 	}
-	togglePos := image.Pt(max((railW-toggleSize.X)/2, 0), y+max((h-toggleSize.Y)/2, 0))
-	var err error
-	env.Offset(gtx, togglePos, func(gtx *layout.Context) {
-		_, err = toggle.Layout(env, gtx, &toggleProps)
-	})
-	s.fail(err)
+	if openProg < 1 {
+		defer clip.Rect(image.Rect(railW, y, railW+sideW, y+h)).Push(gtx.Ops).Pop()
+		defer paint.PushOpacity(gtx.Ops, 2*(openProg-0.5)).Pop()
+	}
 	// Align Lock vault to the sidebar icon column (SpaceXS pill inset + SpaceMD icon inset).
 	lockProps := kit.IconButtonProps{Icon: kit.IconLock, Label: labelLockVault, Variant: kit.IconButtonGhost, Size: kit.SizeSM}
 	lockSize := s.vaultGate.lockBtn.Measure(env, gtx, &lockProps).Size
@@ -343,13 +362,7 @@ func (s *screens) layoutShellFooter(gtx *layout.Context, env *kit.Env, sidebarOp
 	s.layoutConnectionDot(gtx, env, image.Pt(dotX, y+h/2), true)
 }
 
-func (s *screens) layoutCollapsedFooter(gtx *layout.Context, env *kit.Env, toggle *kit.IconButtonState, toggleProps *kit.IconButtonProps, railW, y, h int) {
-	toggleSize := toggle.Measure(env, gtx, toggleProps).Size
-	curY := y + h - toggleSize.Y - gtx.Dp(theme.SpaceXXS)
-	env.Offset(gtx, image.Pt(max((railW-toggleSize.X)/2, 0), curY), func(gtx *layout.Context) {
-		_, err := toggle.Layout(env, gtx, toggleProps)
-		s.fail(err)
-	})
+func (s *screens) layoutCollapsedFooterItems(gtx *layout.Context, env *kit.Env, railW, curY int) {
 	if !s.vault.Locked() && s.vaultWorker != nil {
 		lockProps := kit.IconButtonProps{Icon: kit.IconLock, Label: labelLockVault, Variant: kit.IconButtonGhost, Size: kit.SizeSM}
 		lockSize := s.vaultGate.lockBtn.Measure(env, gtx, &lockProps).Size

@@ -110,12 +110,10 @@ type slotGrid struct {
 	actionBtns    map[string]*kit.IconButtonState
 	tabBtns       map[string]*kit.IconButtonState
 	railBtns      map[railItem]*kit.IconButtonState
-	railToggled   map[railItem]bool
 	railY         motion.Follower
 	sidebarBtn    *kit.IconButtonState
 	sidebarOpenF  motion.Follower
 	wasTempFolded bool
-	lastSideW     int
 	// newWindow is the last "open in new window" request (F10.21 consumes).
 	newWindow *NewWindowRequest
 	// applyGeometry applies a restored window size; the window owns the
@@ -157,7 +155,6 @@ func newSlotGrid() *slotGrid {
 		actionBtns:     map[string]*kit.IconButtonState{},
 		tabBtns:        map[string]*kit.IconButtonState{},
 		railBtns:       map[railItem]*kit.IconButtonState{},
-		railToggled:    map[railItem]bool{},
 		railY:          motion.NewFollower(motion.Smooth()),
 		sidebarBtn:     kit.NewIconButtonState(),
 		sidebarOpenF:   motion.NewFollower(motion.Smooth()),
@@ -175,59 +172,26 @@ func (g *slotGrid) syncFromDoc() {
 	g.rail = railOfKind(main.Kind)
 }
 
-// resetShellMotion clears shell motion followers so the next frame snaps
-// immediately without animating (used on restore and new-window open).
+// resetShellMotion clears shell motion followers and slot transitions so the
+// next frame snaps immediately without animating (used on restore and new-window open).
 func (g *slotGrid) resetShellMotion() {
 	g.railY = motion.NewFollower(motion.Smooth())
 	g.sidebarOpenF = motion.NewFollower(motion.Smooth())
+	clear(g.anims)
+	g.closing = nil
 }
 
-// edited records a user-driven layout change: it arms the slide animations
-// of every ref that changed cell (§5.3: slots slide on Smooth), clears a
-// higher-schema guard (the user's own edit may overwrite, host-api §5.2),
-// and marks the document for a save.
+// edited records a user-driven layout change: it arms the slide, enter, and
+// closing animations (§5.3, §3.7), clears a higher-schema guard (the user's
+// own edit may overwrite, host-api §5.2), and marks the document for a save.
 func (g *slotGrid) edited(doc LayoutDoc) {
 	g.armClosingAnims(doc)
-	g.armSlideAnims(doc)
+	g.armAnims(doc)
 	g.doc = doc
 	g.docGen++
 	g.higher = false
 	g.dirty = g.loaded
 	g.saveAt = time.Time{}
-}
-
-func (g *slotGrid) armClosingAnims(doc LayoutDoc) {
-	for _, oldP := range allCells(g.doc) {
-		oldRef := refAt(g.doc, oldP)
-		if oldRef.Kind == "" {
-			continue
-		}
-		if _, still := findCell(doc, oldRef); !still {
-			if rect := g.rects[oldP.key()]; !rect.Empty() {
-				g.startClosing(oldRef, rect)
-			}
-		}
-	}
-}
-
-func (g *slotGrid) armSlideAnims(doc LayoutDoc) {
-	colsChanged := len(doc.Columns) != len(g.doc.Columns)
-	for _, p := range allCells(doc) {
-		ref := refAt(doc, p)
-		if ref.Kind == "" {
-			continue
-		}
-		old, moved := findCell(g.doc, ref)
-		if !moved {
-			continue
-		}
-		rowChanged := p.Col < len(g.doc.Columns) && len(doc.Columns[p.Col].Slots) != len(g.doc.Columns[p.Col].Slots)
-		if old != p || colsChanged || rowChanged {
-			if rect := g.rects[old.key()]; !rect.Empty() {
-				g.startAnim(keyOfRef(ref), rect)
-			}
-		}
-	}
 }
 
 // allCells lists every cell of the document, main included.
