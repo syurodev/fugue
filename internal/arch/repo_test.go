@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"go.uber.org/goleak"
@@ -46,6 +47,37 @@ var (
 // repo is a repository root: the real one or a mini-repository in testdata.
 type repo struct{ root string }
 
+func (r repo) isRoot() bool { return r.root == repoRoot }
+
+type cachedRead struct {
+	once sync.Once
+	val  string
+	err  error
+}
+
+type cachedParse struct {
+	once sync.Once
+	file *ast.File
+	err  error
+}
+
+type repoCache struct {
+	pkgsOnce sync.Once
+	pkgs     []*goPackage
+	pkgsErr  error
+
+	filesOnce sync.Once
+	files     []string
+	filesErr  error
+
+	reads  sync.Map
+	parses sync.Map
+}
+
+// rootCache caches walks, reads, AST parses, and `go list` output for the
+// immutable repoRoot only (never testdata fixtures).
+var rootCache = &repoCache{}
+
 func fixture(name string) repo { return repo{root: filepath.Join("testdata", name)} }
 
 // goPackage is the part of `go list -json` the rules use.
@@ -72,12 +104,22 @@ func (p *goPackage) allImports() []string {
 // packages lists the repository's packages. -e keeps going past imports that
 // are not downloaded: the rules read syntax and import paths, not types.
 func (r repo) packages(ctx context.Context) ([]*goPackage, error) {
+	if !r.isRoot() {
+		return listPackages(ctx, r.root)
+	}
+	rootCache.pkgsOnce.Do(func() {
+		rootCache.pkgs, rootCache.pkgsErr = listPackages(context.WithoutCancel(ctx), r.root)
+	})
+	return rootCache.pkgs, rootCache.pkgsErr
+}
+
+func listPackages(ctx context.Context, dir string) ([]*goPackage, error) {
 	cmd := exec.CommandContext(ctx, "go", "list", "-e", "-json", "./...")
-	cmd.Dir = r.root
+	cmd.Dir = dir
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("go list in %s: %w", r.root, err)
+		return nil, fmt.Errorf("go list in %s: %w", dir, err)
 	}
 	var pkgs []*goPackage
 	dec := json.NewDecoder(&out)
@@ -95,36 +137,85 @@ func (r repo) packages(ctx context.Context) ([]*goPackage, error) {
 // files returns the repository-relative files with one of the suffixes,
 // skipping testdata, vendored code and hidden directories.
 func (r repo) files(suffixes ...string) ([]string, error) {
+	if !r.isRoot() {
+		return walkFiles(r.root, suffixes...)
+	}
+	rootCache.filesOnce.Do(func() {
+		rootCache.files, rootCache.filesErr = walkFiles(r.root)
+	})
+	if rootCache.filesErr != nil {
+		return nil, rootCache.filesErr
+	}
+	if len(suffixes) == 0 {
+		return rootCache.files, nil
+	}
+	var matched []string
+	for _, f := range rootCache.files {
+		if hasAnySuffix(f, suffixes) {
+			matched = append(matched, f)
+		}
+	}
+	return matched, nil
+}
+
+func hasAnySuffix(name string, suffixes []string) bool {
+	return slices.ContainsFunc(suffixes, func(sfx string) bool { return strings.HasSuffix(name, sfx) })
+}
+
+func isSkippedWalkDir(root, path, name string) bool {
+	if path == root {
+		return false
+	}
+	return name == "testdata" || name == "vendor" || strings.HasPrefix(name, ".") || name == "node_modules"
+}
+
+func walkFiles(root string, suffixes ...string) ([]string, error) {
 	var files []string
-	err := filepath.WalkDir(r.root, func(p string, d fs.DirEntry, err error) error {
+	err := filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
 		name := d.Name()
 		if d.IsDir() {
-			if p != r.root && (name == "testdata" || name == "vendor" || strings.HasPrefix(name, ".") || name == "node_modules") {
+			if isSkippedWalkDir(root, p, name) {
 				return fs.SkipDir
 			}
 			return nil
 		}
-		if slices.ContainsFunc(suffixes, func(sfx string) bool { return strings.HasSuffix(name, sfx) }) {
-			rel, relErr := filepath.Rel(r.root, p)
-			if relErr != nil {
-				return fmt.Errorf("relative path of %s: %w", p, relErr)
-			}
-			files = append(files, filepath.ToSlash(rel))
+		if len(suffixes) > 0 && !hasAnySuffix(name, suffixes) {
+			return nil
 		}
+		rel, relErr := filepath.Rel(root, p)
+		if relErr != nil {
+			return fmt.Errorf("relative path of %s: %w", p, relErr)
+		}
+		files = append(files, filepath.ToSlash(rel))
 		return nil
 	})
 	if err != nil {
-		return nil, fmt.Errorf("walk %s: %w", r.root, err)
+		return nil, fmt.Errorf("walk %s: %w", root, err)
 	}
 	slices.Sort(files)
 	return files, nil
 }
 
 func (r repo) read(rel string) (string, error) {
-	data, err := fs.ReadFile(os.DirFS(r.root), rel)
+	if !r.isRoot() {
+		return readRepoFile(r.root, rel)
+	}
+	v, _ := rootCache.reads.LoadOrStore(rel, &cachedRead{})
+	entry, ok := v.(*cachedRead)
+	if !ok {
+		return readRepoFile(r.root, rel)
+	}
+	entry.once.Do(func() {
+		entry.val, entry.err = readRepoFile(r.root, rel)
+	})
+	return entry.val, entry.err
+}
+
+func readRepoFile(root, rel string) (string, error) {
+	data, err := fs.ReadFile(os.DirFS(root), rel)
 	if err != nil {
 		return "", fmt.Errorf("read %s: %w", rel, err)
 	}
@@ -132,6 +223,21 @@ func (r repo) read(rel string) (string, error) {
 }
 
 func (r repo) parse(rel string) (*ast.File, error) {
+	if !r.isRoot() {
+		return parseRepoFile(r, rel)
+	}
+	v, _ := rootCache.parses.LoadOrStore(rel, &cachedParse{})
+	entry, ok := v.(*cachedParse)
+	if !ok {
+		return parseRepoFile(r, rel)
+	}
+	entry.once.Do(func() {
+		entry.file, entry.err = parseRepoFile(r, rel)
+	})
+	return entry.file, entry.err
+}
+
+func parseRepoFile(r repo, rel string) (*ast.File, error) {
 	src, err := r.read(rel)
 	if err != nil {
 		return nil, err

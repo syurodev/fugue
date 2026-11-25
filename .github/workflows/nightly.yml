@@ -12,7 +12,7 @@ permissions:
 jobs:
   fuzz-long:
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
@@ -69,7 +69,18 @@ jobs:
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-      - run: go tool task perf
+      # The Gio build requirements on Ubuntu (matching ui.yml): task perf also
+      # runs ui/internal/mdview and ui/internal/transcriptview perf tests.
+      - run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            gcc pkg-config libwayland-dev libx11-dev libx11-xcb-dev \
+            libxkbcommon-x11-dev libgles2-mesa-dev libegl1-mesa-dev \
+            libffi-dev libxcursor-dev libvulkan-dev xvfb
+      - name: perf (under Xvfb, software GL)
+        env:
+          LIBGL_ALWAYS_SOFTWARE: "1"
+        run: xvfb-run -a go tool task perf
 
   # Applies each mutation patch in quality/probes and requires its declared
   # tests to fail (activation section 5, A-E03).

@@ -246,6 +246,11 @@ linters:
       - path: '_test\.go$'
         linters: [forbidigo]
         text: 'panic|context\.(Background|TODO)'
+      # Read-only sync.Once cache of the immutable repository root so parallel
+      # architecture tests share one walk, AST parse, and `go list` (FUG-89).
+      - path: '^internal/arch/repo_test\.go$'
+        linters: [gochecknoglobals]
+        text: 'rootCache'
 
 formatters:
   enable:

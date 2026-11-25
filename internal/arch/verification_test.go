@@ -7,8 +7,6 @@ import (
 	"errors"
 	"fmt"
 	"go/ast"
-	"go/parser"
-	"go/token"
 	"io"
 	"os"
 	"os/exec"
@@ -401,21 +399,26 @@ func checkRowTests(row *verificationRow, linuxTests, darwinTests map[string]bool
 }
 
 func (r repo) testFuncsForOS(ctx context.Context, goos string) (map[string]bool, error) {
-	roots := []string{r.root}
+	type modTarget struct {
+		dir    string
+		prefix string
+	}
+	roots := []modTarget{{dir: r.root}}
 	uiMod := filepath.Join(r.root, "ui", "go.mod")
 	if info, err := os.Stat(uiMod); err == nil && !info.IsDir() {
-		roots = append(roots, filepath.Join(r.root, "ui"))
+		roots = append(roots, modTarget{dir: filepath.Join(r.root, "ui"), prefix: "ui"})
 	}
 	funcs := map[string]bool{}
-	fset := token.NewFileSet()
-	for _, modRoot := range roots {
-		pkgs, err := listPackagesForOS(ctx, modRoot, goos)
+	for _, mod := range roots {
+		pkgs, err := listPackagesForOS(ctx, mod.dir, goos)
 		if err != nil {
 			return nil, err
 		}
 		for _, p := range pkgs {
+			relDir := filepath.Join(mod.prefix, p.rel())
 			for _, name := range slices.Concat(p.TestGoFiles, p.XTestGoFiles) {
-				if err := collectTestFuncs(fset, filepath.Join(p.Dir, name), funcs); err != nil {
+				rel := filepath.ToSlash(filepath.Join(relDir, name))
+				if err := collectTestFuncs(r, rel, funcs); err != nil {
 					return nil, err
 				}
 			}
@@ -447,10 +450,10 @@ func listPackagesForOS(ctx context.Context, dir, goos string) ([]*goPackage, err
 	}
 }
 
-func collectTestFuncs(fset *token.FileSet, path string, funcs map[string]bool) error {
-	f, err := parser.ParseFile(fset, path, nil, 0)
+func collectTestFuncs(r repo, rel string, funcs map[string]bool) error {
+	f, err := r.parse(rel)
 	if err != nil {
-		return fmt.Errorf("parse %s: %w", path, err)
+		return err
 	}
 	for _, decl := range f.Decls {
 		if fn, ok := decl.(*ast.FuncDecl); ok && fn.Recv == nil && (strings.HasPrefix(fn.Name.Name, "Test") || strings.HasPrefix(fn.Name.Name, "Fuzz")) {
