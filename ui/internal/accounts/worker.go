@@ -20,18 +20,23 @@ const (
 	OpListAccounts OpKind = iota
 	OpStartLogin
 	OpCancelLogin
+	OpSubmitLoginCode
 )
 
 // Request carries one accounts operation.
 type Request struct {
-	Kind   OpKind
-	Vendor string
+	Kind      OpKind
+	Vendor    string
+	CommandID string
+	LoginID   string
+	Code      string
 }
 
 // Result delivers one completed accounts operation to the window goroutine.
 type Result struct {
 	Kind        OpKind
 	Vendor      string
+	CommandID   string
 	Incarnation string
 	Accounts    []client.Account
 	StartLogin  client.StartLoginResult
@@ -45,6 +50,7 @@ type Client interface {
 	ListAccounts(ctx context.Context) ([]client.Account, error)
 	StartLogin(ctx context.Context, vendor string) (client.StartLoginResult, error)
 	CancelLogin(ctx context.Context, vendor string) error
+	SubmitLoginCode(ctx context.Context, commandID, loginID, code string) error
 }
 
 // Worker runs accounts Host API calls off the window goroutine.
@@ -153,6 +159,9 @@ func (w *Worker) execute(ctx context.Context, c Client, req *Request) Result {
 		res.StartLogin, res.Err = c.StartLogin(ctx, req.Vendor)
 	case OpCancelLogin:
 		res.Err = c.CancelLogin(ctx, req.Vendor)
+	case OpSubmitLoginCode:
+		res.CommandID = req.CommandID
+		res.Err = c.SubmitLoginCode(ctx, req.CommandID, req.LoginID, req.Code)
 	}
 	if res.Err != nil {
 		res.Code, _ = client.AccountsCodeOf(res.Err)

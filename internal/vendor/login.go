@@ -6,10 +6,12 @@ import (
 	"io"
 	"os/exec"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/process"
 )
@@ -29,9 +31,12 @@ type LoginEnd struct {
 // for a decision — a login counts as successful only after the login probe
 // (the F9.10a status command) says logged in.
 type LoginRun interface {
-	// Lines streams every complete stdout line the CLI printed, verbatim.
-	// It closes when the process has exited or its output became unreadable.
+	// Lines streams every complete stdout and stderr line the CLI printed,
+	// verbatim. It closes when both streams have ended or become unreadable.
 	Lines() <-chan string
+	// WriteCode writes one pasted code line to the CLI's stdin pipe and zeroes
+	// its temporary byte buffer after writing.
+	WriteCode(code redact.Secret) error
 	// Done closes when the process has ended; End is valid after it.
 	Done() <-chan struct{}
 	// End reports how the process ended.
@@ -44,11 +49,14 @@ type LoginRun interface {
 // adapter whose CLI has no login command does not implement LoginStarter at
 // all; the host answers a typed unsupported error.
 type LoginCommand struct {
-	// NeedsTerminal marks a CLI that finishes its login by reading a code
-	// pasted into its own stdin (claude, Q-112): if the browser callback has
-	// not completed when the timeout fires, the host ends the run with the
+	// NeedsTerminal marks a CLI that cannot accept a pasted code through
+	// stdin (Q-112, revised in v0.6): if the browser callback has not
+	// completed when the timeout fires, the host ends the run with the
 	// outcome needs_terminal instead of timed_out.
 	NeedsTerminal bool
+	// AcceptsCode marks a CLI that accepts a pasted browser code over its
+	// stdin pipe (claude, VR-03 v0.6).
+	AcceptsCode bool
 }
 
 // LoginStarter is the port of a vendor CLI that has its own login command
@@ -111,6 +119,7 @@ func StartLoginProcess(ctx context.Context, opts *LoginOptions) (*LoginProcess, 
 		SessionID:     opts.SessionID,
 		XDGRuntimeDir: opts.XDGRuntimeDir,
 		Probe:         opts.Probe,
+		StderrLines:   true,
 	})
 	if err != nil {
 		switch {
@@ -126,8 +135,13 @@ func StartLoginProcess(ctx context.Context, opts *LoginOptions) (*LoginProcess, 
 		done:  make(chan struct{}),
 		proc:  proc,
 	}
+	p.streamsRemaining.Store(2)
 	supervise.Go(context.WithoutCancel(ctx), opts.Name+".login-stdout", func(taskCtx context.Context) error {
-		p.pump(taskCtx)
+		p.pumpStream(taskCtx, p.stdout())
+		return nil
+	})
+	supervise.Go(context.WithoutCancel(ctx), opts.Name+".login-stderr", func(taskCtx context.Context) error {
+		p.pumpStream(taskCtx, p.stderr())
 		return nil
 	})
 	supervise.Go(context.WithoutCancel(ctx), opts.Name+".login-wait", func(taskCtx context.Context) error {
@@ -141,8 +155,9 @@ func StartLoginProcess(ctx context.Context, opts *LoginOptions) (*LoginProcess, 
 // process. Nothing here reads or writes a vendor credential; the child owns
 // its own login flow and the host only watches it run.
 type LoginProcess struct {
-	lines chan string
-	done  chan struct{}
+	lines            chan string
+	done             chan struct{}
+	streamsRemaining atomic.Int32
 
 	mu       sync.Mutex
 	proc     *process.Process
@@ -153,6 +168,27 @@ type LoginProcess struct {
 
 // Lines implements LoginRun.
 func (p *LoginProcess) Lines() <-chan string { return p.lines }
+
+// WriteCode implements LoginRun by writing one pasted code line to the child's
+// stdin pipe and zeroing the temporary byte copy it makes immediately after
+// writing (the caller's redact.Secret string is immutable in Go).
+func (p *LoginProcess) WriteCode(code redact.Secret) error {
+	p.mu.Lock()
+	proc := p.proc
+	p.mu.Unlock()
+	if proc == nil {
+		return errcode.Wrap(errcode.FailedPrecondition, "write login code to process", process.ErrStdinClosed)
+	}
+	buf := []byte(code.Reveal())
+	defer clear(buf)
+	if err := proc.WriteLine(buf); err != nil {
+		if errors.Is(err, process.ErrStdinClosed) {
+			return errcode.Wrap(errcode.FailedPrecondition, "write login code to process", err)
+		}
+		return errcode.Wrap(errcode.CodeOf(err), "write login code to process", err)
+	}
+	return nil
+}
 
 // Done implements LoginRun.
 func (p *LoginProcess) Done() <-chan struct{} { return p.done }
@@ -176,12 +212,18 @@ func (p *LoginProcess) Stop(ctx context.Context) (process.StopProof, error) {
 	return proof, nil
 }
 
-// pump streams complete stdout lines verbatim until the stream ends or a
-// line grows past the frame limit; a line no consumer has room for is
+// pumpStream streams complete lines from one stream verbatim until it ends or
+// a line grows past the frame limit; a line no consumer has room for is
 // dropped, because the relay is live progress, not a transcript.
-func (p *LoginProcess) pump(taskCtx context.Context) {
-	defer close(p.lines)
-	reader := p.stdout()
+func (p *LoginProcess) pumpStream(taskCtx context.Context, reader *process.LineReader) {
+	defer func() {
+		if p.streamsRemaining.Add(-1) == 0 {
+			close(p.lines)
+		}
+	}()
+	if reader == nil {
+		return
+	}
 	for {
 		line, err := reader.ReadLine()
 		if err != nil {
@@ -218,6 +260,12 @@ func (p *LoginProcess) stdout() *process.LineReader {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.proc.Stdout()
+}
+
+func (p *LoginProcess) stderr() *process.LineReader {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.proc.Stderr()
 }
 
 // finish collects the process end. A stdout that failed before the process

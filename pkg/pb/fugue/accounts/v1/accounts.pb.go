@@ -458,6 +458,102 @@ func (*CancelLoginResponse) Descriptor() ([]byte, []int) {
 	return file_fugue_accounts_v1_accounts_proto_rawDescGZIP(), []int{7}
 }
 
+type SubmitLoginCodeRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CommandId     string                 `protobuf:"bytes,1,opt,name=command_id,json=commandId,proto3" json:"command_id,omitempty"`
+	LoginId       string                 `protobuf:"bytes,2,opt,name=login_id,json=loginId,proto3" json:"login_id,omitempty"`
+	Code          string                 `protobuf:"bytes,3,opt,name=code,proto3" json:"code,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubmitLoginCodeRequest) Reset() {
+	*x = SubmitLoginCodeRequest{}
+	mi := &file_fugue_accounts_v1_accounts_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubmitLoginCodeRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitLoginCodeRequest) ProtoMessage() {}
+
+func (x *SubmitLoginCodeRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_accounts_v1_accounts_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitLoginCodeRequest.ProtoReflect.Descriptor instead.
+func (*SubmitLoginCodeRequest) Descriptor() ([]byte, []int) {
+	return file_fugue_accounts_v1_accounts_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *SubmitLoginCodeRequest) GetCommandId() string {
+	if x != nil {
+		return x.CommandId
+	}
+	return ""
+}
+
+func (x *SubmitLoginCodeRequest) GetLoginId() string {
+	if x != nil {
+		return x.LoginId
+	}
+	return ""
+}
+
+func (x *SubmitLoginCodeRequest) GetCode() string {
+	if x != nil {
+		return x.Code
+	}
+	return ""
+}
+
+type SubmitLoginCodeResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubmitLoginCodeResponse) Reset() {
+	*x = SubmitLoginCodeResponse{}
+	mi := &file_fugue_accounts_v1_accounts_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubmitLoginCodeResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubmitLoginCodeResponse) ProtoMessage() {}
+
+func (x *SubmitLoginCodeResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_accounts_v1_accounts_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubmitLoginCodeResponse.ProtoReflect.Descriptor instead.
+func (*SubmitLoginCodeResponse) Descriptor() ([]byte, []int) {
+	return file_fugue_accounts_v1_accounts_proto_rawDescGZIP(), []int{9}
+}
+
 var File_fugue_accounts_v1_accounts_proto protoreflect.FileDescriptor
 
 const file_fugue_accounts_v1_accounts_proto_rawDesc = "" +
@@ -489,12 +585,19 @@ const file_fugue_accounts_v1_accounts_proto_rawDesc = "" +
 	"\blogin_id\x18\x01 \x01(\tR\aloginId\"F\n" +
 	"\x12CancelLoginRequest\x120\n" +
 	"\x06vendor\x18\x01 \x01(\x0e2\x18.fugue.vendors.v1.VendorR\x06vendor\"\x15\n" +
-	"\x13CancelLoginResponse2\xaa\x02\n" +
+	"\x13CancelLoginResponse\"f\n" +
+	"\x16SubmitLoginCodeRequest\x12\x1d\n" +
+	"\n" +
+	"command_id\x18\x01 \x01(\tR\tcommandId\x12\x19\n" +
+	"\blogin_id\x18\x02 \x01(\tR\aloginId\x12\x12\n" +
+	"\x04code\x18\x03 \x01(\tR\x04code\"\x19\n" +
+	"\x17SubmitLoginCodeResponse2\x94\x03\n" +
 	"\x0eAccountService\x12_\n" +
 	"\fListAccounts\x12&.fugue.accounts.v1.ListAccountsRequest\x1a'.fugue.accounts.v1.ListAccountsResponse\x12Y\n" +
 	"\n" +
 	"StartLogin\x12$.fugue.accounts.v1.StartLoginRequest\x1a%.fugue.accounts.v1.StartLoginResponse\x12\\\n" +
-	"\vCancelLogin\x12%.fugue.accounts.v1.CancelLoginRequest\x1a&.fugue.accounts.v1.CancelLoginResponseB\xcb\x01\n" +
+	"\vCancelLogin\x12%.fugue.accounts.v1.CancelLoginRequest\x1a&.fugue.accounts.v1.CancelLoginResponse\x12h\n" +
+	"\x0fSubmitLoginCode\x12).fugue.accounts.v1.SubmitLoginCodeRequest\x1a*.fugue.accounts.v1.SubmitLoginCodeResponseB\xcb\x01\n" +
 	"\x15com.fugue.accounts.v1B\rAccountsProtoP\x01Z=github.com/syurodev/fugue/pkg/pb/fugue/accounts/v1;accountsv1\xa2\x02\x03FAX\xaa\x02\x11Fugue.Accounts.V1\xca\x02\x11Fugue\\Accounts\\V1\xe2\x02\x1dFugue\\Accounts\\V1\\GPBMetadata\xea\x02\x13Fugue::Accounts::V1b\x06proto3"
 
 var (
@@ -509,35 +612,39 @@ func file_fugue_accounts_v1_accounts_proto_rawDescGZIP() []byte {
 	return file_fugue_accounts_v1_accounts_proto_rawDescData
 }
 
-var file_fugue_accounts_v1_accounts_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_fugue_accounts_v1_accounts_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
 var file_fugue_accounts_v1_accounts_proto_goTypes = []any{
-	(*QuotaWindow)(nil),          // 0: fugue.accounts.v1.QuotaWindow
-	(*Account)(nil),              // 1: fugue.accounts.v1.Account
-	(*ListAccountsRequest)(nil),  // 2: fugue.accounts.v1.ListAccountsRequest
-	(*ListAccountsResponse)(nil), // 3: fugue.accounts.v1.ListAccountsResponse
-	(*StartLoginRequest)(nil),    // 4: fugue.accounts.v1.StartLoginRequest
-	(*StartLoginResponse)(nil),   // 5: fugue.accounts.v1.StartLoginResponse
-	(*CancelLoginRequest)(nil),   // 6: fugue.accounts.v1.CancelLoginRequest
-	(*CancelLoginResponse)(nil),  // 7: fugue.accounts.v1.CancelLoginResponse
-	(v1.Vendor)(0),               // 8: fugue.vendors.v1.Vendor
+	(*QuotaWindow)(nil),             // 0: fugue.accounts.v1.QuotaWindow
+	(*Account)(nil),                 // 1: fugue.accounts.v1.Account
+	(*ListAccountsRequest)(nil),     // 2: fugue.accounts.v1.ListAccountsRequest
+	(*ListAccountsResponse)(nil),    // 3: fugue.accounts.v1.ListAccountsResponse
+	(*StartLoginRequest)(nil),       // 4: fugue.accounts.v1.StartLoginRequest
+	(*StartLoginResponse)(nil),      // 5: fugue.accounts.v1.StartLoginResponse
+	(*CancelLoginRequest)(nil),      // 6: fugue.accounts.v1.CancelLoginRequest
+	(*CancelLoginResponse)(nil),     // 7: fugue.accounts.v1.CancelLoginResponse
+	(*SubmitLoginCodeRequest)(nil),  // 8: fugue.accounts.v1.SubmitLoginCodeRequest
+	(*SubmitLoginCodeResponse)(nil), // 9: fugue.accounts.v1.SubmitLoginCodeResponse
+	(v1.Vendor)(0),                  // 10: fugue.vendors.v1.Vendor
 }
 var file_fugue_accounts_v1_accounts_proto_depIdxs = []int32{
-	8, // 0: fugue.accounts.v1.Account.vendor:type_name -> fugue.vendors.v1.Vendor
-	0, // 1: fugue.accounts.v1.Account.windows:type_name -> fugue.accounts.v1.QuotaWindow
-	1, // 2: fugue.accounts.v1.ListAccountsResponse.accounts:type_name -> fugue.accounts.v1.Account
-	8, // 3: fugue.accounts.v1.StartLoginRequest.vendor:type_name -> fugue.vendors.v1.Vendor
-	8, // 4: fugue.accounts.v1.CancelLoginRequest.vendor:type_name -> fugue.vendors.v1.Vendor
-	2, // 5: fugue.accounts.v1.AccountService.ListAccounts:input_type -> fugue.accounts.v1.ListAccountsRequest
-	4, // 6: fugue.accounts.v1.AccountService.StartLogin:input_type -> fugue.accounts.v1.StartLoginRequest
-	6, // 7: fugue.accounts.v1.AccountService.CancelLogin:input_type -> fugue.accounts.v1.CancelLoginRequest
-	3, // 8: fugue.accounts.v1.AccountService.ListAccounts:output_type -> fugue.accounts.v1.ListAccountsResponse
-	5, // 9: fugue.accounts.v1.AccountService.StartLogin:output_type -> fugue.accounts.v1.StartLoginResponse
-	7, // 10: fugue.accounts.v1.AccountService.CancelLogin:output_type -> fugue.accounts.v1.CancelLoginResponse
-	8, // [8:11] is the sub-list for method output_type
-	5, // [5:8] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	10, // 0: fugue.accounts.v1.Account.vendor:type_name -> fugue.vendors.v1.Vendor
+	0,  // 1: fugue.accounts.v1.Account.windows:type_name -> fugue.accounts.v1.QuotaWindow
+	1,  // 2: fugue.accounts.v1.ListAccountsResponse.accounts:type_name -> fugue.accounts.v1.Account
+	10, // 3: fugue.accounts.v1.StartLoginRequest.vendor:type_name -> fugue.vendors.v1.Vendor
+	10, // 4: fugue.accounts.v1.CancelLoginRequest.vendor:type_name -> fugue.vendors.v1.Vendor
+	2,  // 5: fugue.accounts.v1.AccountService.ListAccounts:input_type -> fugue.accounts.v1.ListAccountsRequest
+	4,  // 6: fugue.accounts.v1.AccountService.StartLogin:input_type -> fugue.accounts.v1.StartLoginRequest
+	6,  // 7: fugue.accounts.v1.AccountService.CancelLogin:input_type -> fugue.accounts.v1.CancelLoginRequest
+	8,  // 8: fugue.accounts.v1.AccountService.SubmitLoginCode:input_type -> fugue.accounts.v1.SubmitLoginCodeRequest
+	3,  // 9: fugue.accounts.v1.AccountService.ListAccounts:output_type -> fugue.accounts.v1.ListAccountsResponse
+	5,  // 10: fugue.accounts.v1.AccountService.StartLogin:output_type -> fugue.accounts.v1.StartLoginResponse
+	7,  // 11: fugue.accounts.v1.AccountService.CancelLogin:output_type -> fugue.accounts.v1.CancelLoginResponse
+	9,  // 12: fugue.accounts.v1.AccountService.SubmitLoginCode:output_type -> fugue.accounts.v1.SubmitLoginCodeResponse
+	9,  // [9:13] is the sub-list for method output_type
+	5,  // [5:9] is the sub-list for method input_type
+	5,  // [5:5] is the sub-list for extension type_name
+	5,  // [5:5] is the sub-list for extension extendee
+	0,  // [0:5] is the sub-list for field type_name
 }
 
 func init() { file_fugue_accounts_v1_accounts_proto_init() }
@@ -551,7 +658,7 @@ func file_fugue_accounts_v1_accounts_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fugue_accounts_v1_accounts_proto_rawDesc), len(file_fugue_accounts_v1_accounts_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   10,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -47,6 +47,11 @@ func (p *Process) Stdout() *LineReader {
 	return nil
 }
 
+// Stderr returns nil on unsupported platforms.
+func (p *Process) Stderr() *LineReader {
+	return nil
+}
+
 // StderrRing returns nil on unsupported platforms.
 func (p *Process) StderrRing() *RingBuffer {
 	return nil

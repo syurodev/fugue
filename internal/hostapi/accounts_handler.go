@@ -7,6 +7,7 @@ import (
 
 	"github.com/syurodev/fugue/internal/app"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/redact"
 	accountsv1 "github.com/syurodev/fugue/pkg/pb/fugue/accounts/v1"
 )
 
@@ -84,6 +85,27 @@ func (h *accountsHandler) CancelLogin(ctx context.Context, req *connect.Request[
 		return nil, toConnectError(ctx, h.backend, err)
 	}
 	return connect.NewResponse(&accountsv1.CancelLoginResponse{}), nil
+}
+
+// SubmitLoginCode relays a pasted browser code to a running login process's stdin.
+func (h *accountsHandler) SubmitLoginCode(ctx context.Context, req *connect.Request[accountsv1.SubmitLoginCodeRequest]) (*connect.Response[accountsv1.SubmitLoginCodeResponse], error) {
+	principal, authErr := localSessionPrincipal(ctx, h.backend, "accounts")
+	if authErr != nil {
+		return nil, authErr
+	}
+	provider, ok := h.backend.(accountsProvider)
+	if !ok {
+		return nil, toConnectError(ctx, h.backend, errcode.New(errcode.Unavailable, "the accounts service is unavailable"))
+	}
+	svc, err := provider.AccountsService()
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	code := redact.NewSecret(req.Msg.GetCode())
+	if err := svc.SubmitLoginCode(ctx, principal, req.Msg.GetCommandId(), req.Msg.GetLoginId(), code); err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	return connect.NewResponse(&accountsv1.SubmitLoginCodeResponse{}), nil
 }
 
 func protoAccount(v *app.AccountView) *accountsv1.Account {

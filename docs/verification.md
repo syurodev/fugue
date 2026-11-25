@@ -149,3 +149,15 @@ exists on `main` (`V-05`).
 - DA-E13 Channel: `TestTeamChannelThreadsRoutingAndInbox`,
   `TestTeamChannelRestoresUnreadPositionFromLayout`, `TestWorkerPassesThreadAndExplicitTargetToHost`,
   and `TestUserPostRoutesByMentionAndThread`.
+
+## FUG-67 login code relay evidence
+
+- `VR-E15` (`vendor-runtime §15`): `TestStartLoginProcessRelaysStderrAndWritesCode`,
+  `TestClaudeLoginCommandAcceptsCode`, `TestVRE15LoginCodeAcceptedLogsIn`,
+  `TestVRE15LoginCodeMissingHashShowsStderrAndKeepsRunning`, `TestVRE15LoginCodeRejectedFailsLogin`.
+- `HA-E13` (`host-api §10`): `TestHAE13SubmitLoginCodeAfterExitReturnsTypedError`,
+  `TestHAE13SubmitLoginCodeByAnotherPrincipalRefused`, `TestHAE13SubmitLoginCodeRepeatedCommandIDWritesOnce`,
+  `TestHAE13SubmitLoginCodeInvalidInputRefusedBeforeWrite`, `TestHAE13SubmitLoginCodeAbsentFromLogsErrorsAndEvents`,
+  `TestSubmitLoginCodeValidationAndPrincipal`, `TestAccountsClientMethodsOverRealSocket`.
+- `DA-E18` (`desktop-app §10`): `TestSubmitLoginCodeModelRetryReusesCommandIDAndWorker`,
+  `TestDAE18ClaudeLoginCodeBlockAndGoldens`.

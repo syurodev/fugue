@@ -123,6 +123,20 @@ func (c *Client) CancelLogin(ctx context.Context, vendor string) error {
 	return nil
 }
 
+// SubmitLoginCode relays one pasted browser code to a running login process on the host.
+func (c *Client) SubmitLoginCode(ctx context.Context, commandID, loginID, code string) error {
+	_, err := accountsv1connect.NewAccountServiceClient(c.hc, c.base).SubmitLoginCode(ctx,
+		connect.NewRequest(&accountsv1.SubmitLoginCodeRequest{
+			CommandId: commandID,
+			LoginId:   loginID,
+			Code:      code,
+		}))
+	if err != nil {
+		return fmt.Errorf("submit login code: %w", err)
+	}
+	return nil
+}
+
 // AccountsCodeOf returns the public error code carried by a failed accounts RPC.
 func AccountsCodeOf(err error) (string, bool) {
 	detail, ok := errorDetailOf(err)

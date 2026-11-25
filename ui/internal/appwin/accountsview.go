@@ -8,22 +8,25 @@ import (
 	"github.com/syurodev/fugue/pkg/client"
 
 	"github.com/syurodev/fugue/ui/internal/accounts"
+	"github.com/syurodev/fugue/ui/internal/cmdid"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
 type accountCardWidgets struct {
-	card        *kit.CardState
-	stateTag    *kit.TagState
-	loginBtn    *kit.ButtonState
-	cancelBtn   *kit.ButtonState
-	dismissBtn  *kit.ButtonState
-	loginTag    *kit.TagState
-	progress    map[string]*kit.ProgressState
-	rowHover    map[string]*windowRowHover
-	linkButtons map[string]*kit.ButtonState
-	headerH     int
+	card          *kit.CardState
+	stateTag      *kit.TagState
+	loginBtn      *kit.ButtonState
+	cancelBtn     *kit.ButtonState
+	dismissBtn    *kit.ButtonState
+	submitCodeBtn *kit.ButtonState
+	codeField     *kit.TextFieldState
+	loginTag      *kit.TagState
+	progress      map[string]*kit.ProgressState
+	rowHover      map[string]*windowRowHover
+	linkButtons   map[string]*kit.ButtonState
+	headerH       int
 }
 
 // accountsView owns the vendor accounts, F9.10 quota windows, and CLI login
@@ -31,10 +34,11 @@ type accountCardWidgets struct {
 // lands, it occupies the right pane when selected from the sidebar or toggled
 // with Ctrl/Cmd+Shift+A.
 type accountsView struct {
-	refreshing bool
-	listErr    string
-	openErr    string
-	openURL    func(string) error
+	refreshing       bool
+	listErr          string
+	openErr          string
+	openURL          func(string) error
+	newCodeCommandID func() string
 
 	empty     *kit.EmptyStateState
 	errBanner *kit.BannerState
@@ -44,11 +48,12 @@ type accountsView struct {
 
 func newAccountsView() *accountsView {
 	return &accountsView{
-		openURL:   openHTTPSURL,
-		empty:     kit.NewEmptyStateState(),
-		errBanner: kit.NewBannerState(),
-		scroll:    kit.NewScrollAreaState(),
-		cards:     map[string]*accountCardWidgets{},
+		openURL:          openHTTPSURL,
+		newCodeCommandID: cmdid.New(),
+		empty:            kit.NewEmptyStateState(),
+		errBanner:        kit.NewBannerState(),
+		scroll:           kit.NewScrollAreaState(),
+		cards:            map[string]*accountCardWidgets{},
 	}
 }
 
@@ -57,15 +62,17 @@ func (v *accountsView) widgetsFor(vendor string) *accountCardWidgets {
 		return w
 	}
 	w := &accountCardWidgets{
-		card:        kit.NewCardState(),
-		stateTag:    kit.NewTagState(),
-		loginBtn:    kit.NewButtonState(),
-		cancelBtn:   kit.NewButtonState(),
-		dismissBtn:  kit.NewButtonState(),
-		loginTag:    kit.NewTagState(),
-		progress:    map[string]*kit.ProgressState{},
-		rowHover:    map[string]*windowRowHover{},
-		linkButtons: map[string]*kit.ButtonState{},
+		card:          kit.NewCardState(),
+		stateTag:      kit.NewTagState(),
+		loginBtn:      kit.NewButtonState(),
+		cancelBtn:     kit.NewButtonState(),
+		dismissBtn:    kit.NewButtonState(),
+		submitCodeBtn: kit.NewButtonState(),
+		codeField:     kit.NewTextFieldState(),
+		loginTag:      kit.NewTagState(),
+		progress:      map[string]*kit.ProgressState{},
+		rowHover:      map[string]*windowRowHover{},
+		linkButtons:   map[string]*kit.ButtonState{},
 	}
 	v.cards[vendor] = w
 	return w
@@ -114,6 +121,8 @@ func (s *screens) applyAccountsResults(results []accounts.Result) {
 			s.accounts.ApplyStartLoginResult(res)
 		case accounts.OpCancelLogin:
 			s.accounts.ApplyCancelLoginResult(res)
+		case accounts.OpSubmitLoginCode:
+			s.accounts.ApplySubmitLoginCodeResult(res)
 		}
 	}
 }
@@ -220,7 +229,7 @@ func (v *accountsView) layoutAccountCard(gtx *layout.Context, env *kit.Env, sc *
 			spacerH(accountHeaderGap),
 		}
 		children = append(children, layoutQuotaWindows(env, w, acc, gtx.Now)...)
-		if login, ok := sc.accounts.Login(acc.Vendor); ok && login.Active() {
+		if login, ok := sc.accounts.Login(acc.Vendor); ok && (login.Active() || login.State == client.LoginStateFailed) {
 			children = append(children, v.layoutLoginSection(env, sc, w, acc.Vendor, &login)...)
 		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
@@ -252,7 +261,7 @@ func (v *accountsView) layoutCardHeader(gtx *layout.Context, env *kit.Env, sc *s
 		})))
 	} else if acc.State == client.AccountStateNeedsLogin {
 		items = append(items, atEnd(flowButton(env, gtx, sc.fail, w.loginBtn, kit.ButtonProps{
-			Text: "Sign in", Variant: kit.Secondary, Size: kit.SizeSM, Disabled: sc.accountsWorker == nil,
+			Text: signInButtonLabel(hasLogin, &login), Variant: kit.Secondary, Size: kit.SizeSM, Disabled: sc.accountsWorker == nil,
 		}, func() {
 			if sc.accountsWorker == nil || sc.accounts.IsLoginRunning(acc.Vendor) {
 				return
@@ -263,6 +272,13 @@ func (v *accountsView) layoutCardHeader(gtx *layout.Context, env *kit.Env, sc *s
 		})))
 	}
 	return flowHeader(gtx, items...)
+}
+
+func signInButtonLabel(hasLogin bool, login *accounts.LoginEntry) string {
+	if hasLogin && login.State == client.LoginStateFailed {
+		return claudeSignInAgainLabel
+	}
+	return "Sign in"
 }
 
 func accountStatusChipProps(acc *client.Account, now time.Time) (kit.TagProps, bool) {

@@ -22,13 +22,17 @@ var (
 
 // LoginEntry holds the UI state for one vendor's active or recent login flow.
 type LoginEntry struct {
-	Vendor       string
-	LoginID      string
-	State        string
-	Prompt       string
-	ErrorMessage string
-	Starting     bool
-	Cancelling   bool
+	Vendor               string
+	LoginID              string
+	State                string
+	Prompt               string
+	ErrorMessage         string
+	CodeError            string
+	PendingCodeCommandID string
+	Starting             bool
+	Cancelling           bool
+	SubmittingCode       bool
+	CodeSent             bool
 }
 
 // Active reports whether the login attempt is currently running or starting.
@@ -215,13 +219,7 @@ func (m *Model) ApplyLoginSnapshot(incarnation string, payload []byte) error {
 	}
 	for v, p := range running {
 		prev := m.logins[v]
-		m.logins[v] = LoginEntry{
-			Vendor:     v,
-			LoginID:    p.LoginID,
-			State:      p.State,
-			Prompt:     p.Prompt,
-			Cancelling: prev.Cancelling && isRunningLoginState(p.State),
-		}
+		m.logins[v] = mergeLoginEntry(&prev, &p)
 	}
 	return nil
 }
@@ -239,15 +237,31 @@ func (m *Model) ApplyLoginEvent(eventType string, payload []byte) error {
 		return nil
 	}
 	prev := m.logins[p.Vendor]
-	running := isRunningLoginState(p.State)
-	m.logins[p.Vendor] = LoginEntry{
-		Vendor:     p.Vendor,
-		LoginID:    p.LoginID,
-		State:      p.State,
-		Prompt:     p.Prompt,
-		Cancelling: prev.Cancelling && running,
-	}
+	m.logins[p.Vendor] = mergeLoginEntry(&prev, &p)
 	return nil
+}
+
+func mergeLoginEntry(prev *LoginEntry, p *client.LoginProgress) LoginEntry {
+	running := isRunningLoginState(p.State)
+	keepCode := running && (prev.LoginID == "" || prev.LoginID == p.LoginID)
+	return LoginEntry{
+		Vendor:               p.Vendor,
+		LoginID:              p.LoginID,
+		State:                p.State,
+		Prompt:               p.Prompt,
+		CodeError:            ifSame(keepCode, prev.CodeError),
+		PendingCodeCommandID: ifSame(keepCode, prev.PendingCodeCommandID),
+		Cancelling:           keepCode && prev.Cancelling,
+		SubmittingCode:       keepCode && prev.SubmittingCode,
+		CodeSent:             keepCode && prev.CodeSent,
+	}
+}
+
+func ifSame(cond bool, val string) string {
+	if cond {
+		return val
+	}
+	return ""
 }
 
 // BeginStartLogin marks vendor as starting a login while the RPC runs.
@@ -325,11 +339,57 @@ func (m *Model) ApplyCancelLoginResult(res *Result) {
 	m.logins[res.Vendor] = cur
 }
 
+// BeginSubmitLoginCode marks a code submit in flight, reusing any pending
+// command_id on retry and assigning freshCommandID for a new submit.
+func (m *Model) BeginSubmitLoginCode(vendor, freshCommandID string) string {
+	cur, ok := m.logins[vendor]
+	if !ok {
+		return freshCommandID
+	}
+	cmdID := cur.PendingCodeCommandID
+	if cmdID == "" {
+		cmdID = freshCommandID
+		cur.PendingCodeCommandID = cmdID
+	}
+	cur.SubmittingCode = true
+	cur.CodeError = ""
+	m.logins[vendor] = cur
+	return cmdID
+}
+
+// ApplySubmitLoginCodeResult updates vendor's login state after SubmitLoginCode returns.
+func (m *Model) ApplySubmitLoginCodeResult(res *Result) {
+	if res == nil || res.Vendor == "" {
+		return
+	}
+	cur, ok := m.logins[res.Vendor]
+	if !ok {
+		return
+	}
+	cur.SubmittingCode = false
+	if res.Err != nil {
+		cur.CodeError = res.Err.Error()
+		if !isTransientCodeSubmitError(res.Code) {
+			cur.PendingCodeCommandID = ""
+		}
+		m.logins[res.Vendor] = cur
+		return
+	}
+	cur.CodeSent = true
+	cur.CodeError = ""
+	cur.PendingCodeCommandID = ""
+	m.logins[res.Vendor] = cur
+}
+
 // DismissLogin clears a non-running login entry from view.
 func (m *Model) DismissLogin(vendor string) {
 	if e, ok := m.logins[vendor]; ok && !e.Active() {
 		delete(m.logins, vendor)
 	}
+}
+
+func isTransientCodeSubmitError(code string) bool {
+	return code == "" || code == "unavailable" || code == "deadline_exceeded"
 }
 
 func isRunningLoginState(state string) bool {

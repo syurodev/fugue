@@ -42,6 +42,9 @@ const (
 	// AccountServiceCancelLoginProcedure is the fully-qualified name of the AccountService's
 	// CancelLogin RPC.
 	AccountServiceCancelLoginProcedure = "/fugue.accounts.v1.AccountService/CancelLogin"
+	// AccountServiceSubmitLoginCodeProcedure is the fully-qualified name of the AccountService's
+	// SubmitLoginCode RPC.
+	AccountServiceSubmitLoginCodeProcedure = "/fugue.accounts.v1.AccountService/SubmitLoginCode"
 )
 
 // AccountServiceClient is a client for the fugue.accounts.v1.AccountService service.
@@ -56,6 +59,9 @@ type AccountServiceClient interface {
 	StartLogin(context.Context, *connect.Request[v1.StartLoginRequest]) (*connect.Response[v1.StartLoginResponse], error)
 	// CancelLogin stops the running login process of one vendor.
 	CancelLogin(context.Context, *connect.Request[v1.CancelLoginRequest]) (*connect.Response[v1.CancelLoginResponse], error)
+	// SubmitLoginCode relays a pasted browser code to a running login
+	// process's stdin (host-api v0.22 §5.5).
+	SubmitLoginCode(context.Context, *connect.Request[v1.SubmitLoginCodeRequest]) (*connect.Response[v1.SubmitLoginCodeResponse], error)
 }
 
 // NewAccountServiceClient constructs a client for the fugue.accounts.v1.AccountService service. By
@@ -87,14 +93,21 @@ func NewAccountServiceClient(httpClient connect.HTTPClient, baseURL string, opts
 			connect.WithSchema(accountServiceMethods.ByName("CancelLogin")),
 			connect.WithClientOptions(opts...),
 		),
+		submitLoginCode: connect.NewClient[v1.SubmitLoginCodeRequest, v1.SubmitLoginCodeResponse](
+			httpClient,
+			baseURL+AccountServiceSubmitLoginCodeProcedure,
+			connect.WithSchema(accountServiceMethods.ByName("SubmitLoginCode")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // accountServiceClient implements AccountServiceClient.
 type accountServiceClient struct {
-	listAccounts *connect.Client[v1.ListAccountsRequest, v1.ListAccountsResponse]
-	startLogin   *connect.Client[v1.StartLoginRequest, v1.StartLoginResponse]
-	cancelLogin  *connect.Client[v1.CancelLoginRequest, v1.CancelLoginResponse]
+	listAccounts    *connect.Client[v1.ListAccountsRequest, v1.ListAccountsResponse]
+	startLogin      *connect.Client[v1.StartLoginRequest, v1.StartLoginResponse]
+	cancelLogin     *connect.Client[v1.CancelLoginRequest, v1.CancelLoginResponse]
+	submitLoginCode *connect.Client[v1.SubmitLoginCodeRequest, v1.SubmitLoginCodeResponse]
 }
 
 // ListAccounts calls fugue.accounts.v1.AccountService.ListAccounts.
@@ -112,6 +125,11 @@ func (c *accountServiceClient) CancelLogin(ctx context.Context, req *connect.Req
 	return c.cancelLogin.CallUnary(ctx, req)
 }
 
+// SubmitLoginCode calls fugue.accounts.v1.AccountService.SubmitLoginCode.
+func (c *accountServiceClient) SubmitLoginCode(ctx context.Context, req *connect.Request[v1.SubmitLoginCodeRequest]) (*connect.Response[v1.SubmitLoginCodeResponse], error) {
+	return c.submitLoginCode.CallUnary(ctx, req)
+}
+
 // AccountServiceHandler is an implementation of the fugue.accounts.v1.AccountService service.
 type AccountServiceHandler interface {
 	// ListAccounts refreshes each vendor's login state through the CLI's own
@@ -124,6 +142,9 @@ type AccountServiceHandler interface {
 	StartLogin(context.Context, *connect.Request[v1.StartLoginRequest]) (*connect.Response[v1.StartLoginResponse], error)
 	// CancelLogin stops the running login process of one vendor.
 	CancelLogin(context.Context, *connect.Request[v1.CancelLoginRequest]) (*connect.Response[v1.CancelLoginResponse], error)
+	// SubmitLoginCode relays a pasted browser code to a running login
+	// process's stdin (host-api v0.22 §5.5).
+	SubmitLoginCode(context.Context, *connect.Request[v1.SubmitLoginCodeRequest]) (*connect.Response[v1.SubmitLoginCodeResponse], error)
 }
 
 // NewAccountServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -151,6 +172,12 @@ func NewAccountServiceHandler(svc AccountServiceHandler, opts ...connect.Handler
 		connect.WithSchema(accountServiceMethods.ByName("CancelLogin")),
 		connect.WithHandlerOptions(opts...),
 	)
+	accountServiceSubmitLoginCodeHandler := connect.NewUnaryHandler(
+		AccountServiceSubmitLoginCodeProcedure,
+		svc.SubmitLoginCode,
+		connect.WithSchema(accountServiceMethods.ByName("SubmitLoginCode")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fugue.accounts.v1.AccountService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case AccountServiceListAccountsProcedure:
@@ -159,6 +186,8 @@ func NewAccountServiceHandler(svc AccountServiceHandler, opts ...connect.Handler
 			accountServiceStartLoginHandler.ServeHTTP(w, r)
 		case AccountServiceCancelLoginProcedure:
 			accountServiceCancelLoginHandler.ServeHTTP(w, r)
+		case AccountServiceSubmitLoginCodeProcedure:
+			accountServiceSubmitLoginCodeHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -178,4 +207,8 @@ func (UnimplementedAccountServiceHandler) StartLogin(context.Context, *connect.R
 
 func (UnimplementedAccountServiceHandler) CancelLogin(context.Context, *connect.Request[v1.CancelLoginRequest]) (*connect.Response[v1.CancelLoginResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.accounts.v1.AccountService.CancelLogin is not implemented"))
+}
+
+func (UnimplementedAccountServiceHandler) SubmitLoginCode(context.Context, *connect.Request[v1.SubmitLoginCodeRequest]) (*connect.Response[v1.SubmitLoginCodeResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.accounts.v1.AccountService.SubmitLoginCode is not implemented"))
 }

@@ -335,10 +335,14 @@ func (p *Process) settlePipes() bool {
 // nil for a pipe that is settled.
 func (p *Process) unsettledPipes() (<-chan struct{}, <-chan struct{}) {
 	var stderrC, stdoutC <-chan struct{}
-	select {
-	case <-p.stderrTask.Done():
-	default:
-		stderrC = p.stderrTask.Done()
+	if p.stderrTask != nil {
+		select {
+		case <-p.stderrTask.Done():
+		default:
+			stderrC = p.stderrTask.Done()
+		}
+	} else if p.stderrPipe != nil && !p.stderrPipe.settled() {
+		stderrC = p.stderrPipe.ended
 	}
 	if !p.stdoutPipe.settled() {
 		stdoutC = p.stdoutPipe.ended
@@ -352,8 +356,12 @@ func (p *Process) closeHeldPipes() bool {
 		return false
 	}
 	if stderrC != nil {
-		closeQuietly(p.stderrR)
-		<-p.stderrTask.Done()
+		if p.stderrTask != nil {
+			closeQuietly(p.stderrR)
+			<-p.stderrTask.Done()
+		} else if p.stderrPipe != nil {
+			closeQuietly(p.stderrPipe)
+		}
 	}
 	if stdoutC != nil {
 		closeQuietly(p.stdoutPipe)

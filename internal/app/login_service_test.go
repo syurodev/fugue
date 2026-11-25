@@ -61,6 +61,7 @@ func exitCLI(t *testing.T, code int) string {
 type fakeLoginAdapter struct {
 	clk           clock.Clock
 	needsTerminal bool
+	acceptsCode   bool
 	cliPath       string
 	entered       chan struct{} // closed once a status probe entered
 	release       chan struct{} // the probe answers logged_in only after this closes
@@ -96,7 +97,7 @@ func (a *fakeLoginAdapter) Start(context.Context, *vendor.StartSpec) (vendor.Ses
 
 // LoginCommand implements vendor.LoginStarter.
 func (a *fakeLoginAdapter) LoginCommand() vendor.LoginCommand {
-	return vendor.LoginCommand{NeedsTerminal: a.needsTerminal}
+	return vendor.LoginCommand{NeedsTerminal: a.needsTerminal, AcceptsCode: a.acceptsCode}
 }
 
 // StartLogin implements vendor.LoginStarter: the real login runner over the

@@ -86,6 +86,7 @@ type AccountsService struct {
 	hub      *EventHub
 	clk      clock.Clock
 	ids      ids.Generator
+	logger   *slog.Logger
 	goTask   func(name string, fn func(context.Context) error) *supervise.Task
 
 	// notifyMu orders publication: the view is re-read under it, so the last
@@ -105,6 +106,10 @@ type AccountsService struct {
 	// loginsMu guards the running login attempts, at most one per vendor.
 	loginsMu sync.Mutex
 	logins   map[string]*loginRun
+
+	loginCmdMu    sync.Mutex
+	loginDedup    *dedupCache[loginCodeResult]
+	loginInflight map[string]*inflightCommand[loginCodeResult]
 }
 
 // refreshFlight is one in-flight login refresh that concurrent List calls
@@ -117,8 +122,9 @@ type refreshFlight struct {
 // and IDs fall back to the production defaults; a nil GoTask disables the
 // login half (the host always supplies its supervised task spawner).
 type accountsServiceDeps struct {
-	Clock clock.Clock
-	IDs   ids.Generator
+	Clock  clock.Clock
+	IDs    ids.Generator
+	Logger *slog.Logger
 	// GoTask spawns a supervised goroutine on the host's base context; the
 	// login monitor outlives the StartLogin RPC that started it.
 	GoTask func(name string, fn func(context.Context) error) *supervise.Task
@@ -140,11 +146,13 @@ func newAccountsService(accounts *vendor.Accounts, vendors *VendorService, hub *
 	}
 	s := &AccountsService{
 		accounts: accounts, vendors: vendors, hub: hub,
-		clk: clk, ids: idGen, goTask: deps.GoTask,
+		clk: clk, ids: idGen, logger: deps.Logger, goTask: deps.GoTask,
 		lastBlocked:   make(map[string]bool),
 		reopenWake:    make(chan struct{}, 1),
 		onQuotaReopen: deps.OnQuotaReopen,
 		logins:        make(map[string]*loginRun),
+		loginDedup:    newDedupCache[loginCodeResult](clk, defaultDedupCapacity, defaultDedupTTL),
+		loginInflight: make(map[string]*inflightCommand[loginCodeResult]),
 	}
 	snapshot := func(context.Context) ([]byte, error) {
 		return json.Marshal(quotaSnapshot{Accounts: accountViews(accounts.Snapshot())})

@@ -2,33 +2,18 @@ package session
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"fmt"
-	"os"
-	"strconv"
 	"sync"
 
 	"github.com/syurodev/fugue/pkg/client"
+
+	"github.com/syurodev/fugue/ui/internal/cmdid"
 )
 
 // postBuffer bounds the write queue. A write dropped because the queue is
 // full reports a failure to the composer rather than vanishing: the draft is
 // the user's words, and the composer restores it from the failed post.
 const postBuffer = 32
-
-// processIdentity names this app process in the command ids, together with
-// the poster's sequence: hostnames and process ids are unique while a process
-// runs, so two posters — here or in another app process — never mint the same
-// id, which the host would refuse as a conflict.
-func processIdentity() string {
-	host, err := os.Hostname()
-	if err != nil {
-		host = "unknown-host"
-	}
-	return fmt.Sprintf("%s:%d", host, os.Getpid())
-}
 
 // PostKind names the write a poster runs.
 type PostKind uint8
@@ -96,7 +81,7 @@ type Poster struct {
 func NewPoster(clientOf func() *client.Client) *Poster {
 	return &Poster{
 		clientOf: clientOf,
-		newID:    newCommandIDs(),
+		newID:    cmdid.New(),
 		ops:      make(chan *postOp, postBuffer),
 		results:  make(chan PostResult, postBuffer),
 		done:     make(chan struct{}),
@@ -236,20 +221,6 @@ func (p *Poster) deliverResult(res *PostResult) {
 	select {
 	case p.results <- *res:
 	default:
-	}
-}
-
-// newCommandIDs returns the poster's command-id minter: a hash of this
-// process's identity and a sequence number, unique per post across every app
-// process — two posts never share an id, which the host would refuse as a
-// conflict — without reaching for randomness the module does not inject.
-func newCommandIDs() func() string {
-	identity := processIdentity()
-	var seq uint64
-	return func() string {
-		seq++
-		sum := sha256.Sum256([]byte(identity + ":" + strconv.FormatUint(seq, 10)))
-		return hex.EncodeToString(sum[:16])
 	}
 }
 

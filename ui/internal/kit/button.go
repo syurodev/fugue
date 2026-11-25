@@ -7,8 +7,10 @@ import (
 
 	"gioui.org/f32"
 	"gioui.org/layout"
+	"gioui.org/op"
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
+	"gioui.org/text"
 	"gioui.org/unit"
 
 	"github.com/syurodev/fugue/ui/internal/motion"
@@ -79,6 +81,9 @@ type ButtonProps struct {
 	// Block stretches the button to the full width the layout allows, for
 	// the one main action of a panel.
 	Block bool
+	// Wrap lets a long label wrap across lines within the available width
+	// instead of overflowing the container.
+	Wrap bool
 }
 
 // ButtonState is the long-lived state the caller keeps per logical button
@@ -98,25 +103,58 @@ func NewButtonState() *ButtonState {
 // number measured layouts need, without drawing or touching the input
 // source. Busy never changes it (§6.2).
 func (s *ButtonState) Measure(env *Env, gtx *layout.Context, p ButtonProps) layout.Dimensions {
-	w, h, _ := buttonBox(env, gtx, p)
-	return layout.Dimensions{Size: image.Pt(w, h), Baseline: (h + labelLine(env, gtx, theme.TypeLabel())) / 2}
+	spec := computeButtonBox(env, gtx, p)
+	return layout.Dimensions{Size: image.Pt(spec.w, spec.h), Baseline: (spec.h + labelLine(env, gtx, theme.TypeLabel())) / 2}
+}
+
+type buttonBoxSpec struct {
+	w        int
+	h        int
+	cw       int
+	textMaxW int
+	wrapped  bool
 }
 
 // buttonBox is the idle box of §6.2: the height token of the size, twice
 // the padding, the label and — when there is one — the icon slot with its
 // gap, at least HitMin wide. cw is the content's width inside it.
 func buttonBox(env *Env, gtx *layout.Context, p ButtonProps) (w, h, cw int) {
+	spec := computeButtonBox(env, gtx, p)
+	return spec.w, spec.h, spec.cw
+}
+
+func computeButtonBox(env *Env, gtx *layout.Context, p ButtonProps) buttonBoxSpec {
 	padX, iconGap := buttonMetrics(p.Size)
-	h = controlHeight(gtx, p.Size)
-	cw = measureLabel(env, gtx, theme.TypeLabel(), p.Text).X
+	h := controlHeight(gtx, p.Size)
+	single := measureLabel(env, gtx, theme.TypeLabel(), p.Text)
+	iconW := 0
 	if p.Icon != "" {
-		cw += gtx.Dp(buttonIconSize(p.Size)) + gtx.Dp(iconGap)
+		iconW = gtx.Dp(buttonIconSize(p.Size)) + gtx.Dp(iconGap)
 	}
-	w = max(cw+2*gtx.Dp(padX), gtx.Dp(theme.HitMin))
+	cw := single.X + iconW
+	w := max(cw+2*gtx.Dp(padX), gtx.Dp(theme.HitMin))
+	if p.Wrap && gtx.Constraints.Max.X > 0 && gtx.Constraints.Max.X < 1<<20 && w > gtx.Constraints.Max.X {
+		w = gtx.Constraints.Max.X
+		textMaxW := max(w-2*gtx.Dp(padX)-iconW, 1)
+		wrapped := measureWrappedLabel(env, gtx, theme.TypeLabel(), p.Text, textMaxW)
+		padY := max(h-single.Y, gtx.Dp(theme.SpaceXS))
+		h = max(h, wrapped.Y+padY)
+		return buttonBoxSpec{w: w, h: h, cw: textMaxW + iconW, textMaxW: textMaxW, wrapped: true}
+	}
 	if p.Block && gtx.Constraints.Max.X > w && gtx.Constraints.Max.X < 1<<20 {
 		w = gtx.Constraints.Max.X
 	}
-	return w, h, cw
+	return buttonBoxSpec{w: w, h: h, cw: cw, textMaxW: single.X}
+}
+
+func measureWrappedLabel(env *Env, gtx *layout.Context, t theme.Type, txt string, maxW int) image.Point {
+	g := *gtx
+	g.Constraints.Min = image.Point{}
+	g.Constraints.Max.X = maxW
+	m := op.Record(gtx.Ops)
+	dims := drawTextAligned(env, &g, t, env.Th.Chrome().Fg, txt, text.WrapWords, text.Middle)
+	m.Stop()
+	return dims.Size
 }
 
 // Layout draws the button at the current offset and reports whether it was
@@ -125,13 +163,13 @@ func buttonBox(env *Env, gtx *layout.Context, p ButtonProps) (w, h, cw int) {
 // programming error and comes back as an error instead of a button with no
 // glyph.
 func (s *ButtonState) Layout(env *Env, gtx *layout.Context, p ButtonProps) (bool, error) {
-	w, h, cw := buttonBox(env, gtx, p)
+	spec := computeButtonBox(env, gtx, p)
 	busy := p.Busy && !p.Disabled
-	clicked, mv := s.begin(env, gtx, image.Pt(w, h), pressOpts{disabled: p.Disabled, busy: p.Busy})
+	clicked, mv := s.begin(env, gtx, image.Pt(spec.w, spec.h), pressOpts{disabled: p.Disabled, busy: p.Busy})
 	swap := followState(env, &s.busyF, busy)
 	var err error
-	s.paint(env, gtx, image.Rect(0, 0, w, h), gtx.Dp(theme.RadiusMD), buttonLookOf(env, p.Variant, p.Disabled), mv,
-		func(fg color.NRGBA) { err = s.content(env, gtx, p, fg, w, h, cw, swap) })
+	s.paint(env, gtx, image.Rect(0, 0, spec.w, spec.h), gtx.Dp(theme.RadiusMD), buttonLookOf(env, p.Variant, p.Disabled), mv,
+		func(fg color.NRGBA) { err = s.content(env, gtx, p, fg, spec, swap) })
 	if err != nil {
 		return false, fmt.Errorf("draw the button: %w", err)
 	}
@@ -143,17 +181,14 @@ func (s *ButtonState) Layout(env *Env, gtx *layout.Context, p ButtonProps) (bool
 // slot and the label stays put (§4.1, §6.2); without one the spinner fades
 // in over the fading label, centered in the same box, so the width never
 // changes. Entering content scales up from 0.8, leaving content down to it.
-func (s *ButtonState) content(env *Env, gtx *layout.Context, p ButtonProps, fg color.NRGBA, w, h, cw int, swap float32) error {
+func (s *ButtonState) content(env *Env, gtx *layout.Context, p ButtonProps, fg color.NRGBA, spec buttonBoxSpec, swap float32) error {
 	_, iconGap := buttonMetrics(p.Size)
-	x := (w - cw) / 2
-	// Center the label's actual ascent+descent line box rather than theme.Type.Line
-	// so the button label shares a vertical text center with a sibling kit.Label
-	// in a layout.Middle row.
-	labelH := measureLabel(env, gtx, theme.TypeLabel(), p.Text).Y
-	labelAt := image.Pt(x, (h-labelH)/2)
+	x := (spec.w - spec.cw) / 2
+	labelH := buttonLabelHeight(env, gtx, p.Text, spec)
+	labelAt := image.Pt(x, (spec.h-labelH)/2)
 	drawLabel := func(a float32) {
 		at(gtx, labelAt, func(gtx *layout.Context) {
-			dims := drawText(env, gtx, theme.TypeLabel(), fade(fg, a), p.Text, false)
+			dims := drawButtonLabel(env, gtx, theme.TypeLabel(), fade(fg, a), p.Text, spec)
 			recordRun(env, image.Rectangle{Max: dims.Size}.Add(labelAt))
 			if p.Variant == Link {
 				underline(gtx, dims.Size, fade(fg, a))
@@ -165,12 +200,12 @@ func (s *ButtonState) content(env *Env, gtx *layout.Context, p ButtonProps, fg c
 			drawLabel(1 - swap)
 		}
 		box := gtx.Dp(theme.IconMD)
-		s.spinner(env, gtx, image.Pt((w-box)/2, (h-box)/2), box, fade(fg, swap), swap)
+		s.spinner(env, gtx, image.Pt((spec.w-box)/2, (spec.h-box)/2), box, fade(fg, swap), swap)
 		return nil
 	}
 	iconD := buttonIconSize(p.Size)
 	slot := gtx.Dp(iconD)
-	pt := image.Pt(x, (h-slot)/2)
+	pt := image.Pt(x, (spec.h-slot)/2)
 	if swap < 1 {
 		if err := drawIconScaled(env, gtx, pt, p.Icon, iconD, fade(fg, 1-swap), 0.8+0.2*(1-swap)); err != nil {
 			return err
@@ -180,6 +215,23 @@ func (s *ButtonState) content(env *Env, gtx *layout.Context, p ButtonProps, fg c
 	drawLabel(1)
 	s.spinner(env, gtx, pt, slot, fade(fg, swap), swap)
 	return nil
+}
+
+func buttonLabelHeight(env *Env, gtx *layout.Context, txt string, spec buttonBoxSpec) int {
+	if spec.wrapped {
+		return measureWrappedLabel(env, gtx, theme.TypeLabel(), txt, spec.textMaxW).Y
+	}
+	return measureLabel(env, gtx, theme.TypeLabel(), txt).Y
+}
+
+func drawButtonLabel(env *Env, gtx *layout.Context, t theme.Type, c color.NRGBA, txt string, spec buttonBoxSpec) layout.Dimensions {
+	if spec.wrapped {
+		g := *gtx
+		g.Constraints.Min = image.Point{X: spec.textMaxW}
+		g.Constraints.Max.X = spec.textMaxW
+		return drawTextAligned(env, &g, t, c, txt, text.WrapWords, text.Middle)
+	}
+	return drawText(env, gtx, t, c, txt, false)
 }
 
 // spinner draws the busy ring in the box×box slot at p while the

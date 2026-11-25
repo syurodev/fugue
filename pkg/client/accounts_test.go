@@ -150,6 +150,13 @@ func (f *accountsFake) CancelLogin(_ context.Context, req *connect.Request[accou
 	return connect.NewResponse(&accountsv1.CancelLoginResponse{}), nil
 }
 
+func (f *accountsFake) SubmitLoginCode(_ context.Context, req *connect.Request[accountsv1.SubmitLoginCodeRequest]) (*connect.Response[accountsv1.SubmitLoginCodeResponse], error) {
+	if req.Msg.GetCommandId() == "" || req.Msg.GetLoginId() == "" || req.Msg.GetCode() == "" {
+		return nil, scriptedAccountsError(connect.CodeInvalidArgument, "invalid_argument")
+	}
+	return connect.NewResponse(&accountsv1.SubmitLoginCodeResponse{}), nil
+}
+
 func scriptedAccountsError(cc connect.Code, code string) error {
 	cerr := connect.NewError(cc, errClientAccScripted)
 	detail, err := connect.NewErrorDetail(&hostv1.ErrorDetail{Code: code})
@@ -284,6 +291,13 @@ func TestAccountsClientMethodsOverRealSocket(t *testing.T) {
 		t.Fatalf("ListAccounts mismatch (-want +got):\n%s", diff)
 	}
 
+	assertAccountsLoginAndCodeMethods(t, c)
+	assertQuotaTopicStream(t, c, wantAccounts)
+	assertLoginTopicStream(t, c)
+}
+
+func assertAccountsLoginAndCodeMethods(t *testing.T, c *client.Client) {
+	t.Helper()
 	res, err := c.StartLogin(t.Context(), client.VendorCodex)
 	if err != nil || res.LoginID != testAccLoginID {
 		t.Fatalf("StartLogin(codex) = (%+v, %v)", res, err)
@@ -303,8 +317,9 @@ func TestAccountsClientMethodsOverRealSocket(t *testing.T) {
 		t.Fatalf("CancelLogin(claude) code = (%q, %v), want not_found", code, ok)
 	}
 
-	assertQuotaTopicStream(t, c, wantAccounts)
-	assertLoginTopicStream(t, c)
+	if submitErr := c.SubmitLoginCode(t.Context(), "cmd-1", testAccLoginID, "code#state"); submitErr != nil {
+		t.Fatalf("SubmitLoginCode: %v", submitErr)
+	}
 }
 
 func assertQuotaTopicStream(t *testing.T, c *client.Client, want []client.Account) {

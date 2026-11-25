@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fugue/accounts/v1/accounts.proto.
  */
 export const file_fugue_accounts_v1_accounts: GenFile = /*@__PURE__*/
-  fileDesc("CiBmdWd1ZS9hY2NvdW50cy92MS9hY2NvdW50cy5wcm90bxIRZnVndWUuYWNjb3VudHMudjEiUwoLUXVvdGFXaW5kb3cSDAoEbmFtZRgBIAEoCRITCgt1dGlsaXphdGlvbhgCIAEoARIRCglyZXNldHNfYXQYAyABKAkSDgoGc3RhdHVzGAQgASgJItUBCgdBY2NvdW50EigKBnZlbmRvchgBIAEoDjIYLmZ1Z3VlLnZlbmRvcnMudjEuVmVuZG9yEg0KBXN0YXRlGAIgASgJEhQKDHBhdXNlZF91bnRpbBgDIAEoCRINCgVsb2dpbhgEIAEoCRITCgtxdW90YV9rbm93bhgFIAEoCBIvCgd3aW5kb3dzGAYgAygLMh4uZnVndWUuYWNjb3VudHMudjEuUXVvdGFXaW5kb3cSEgoKdXBkYXRlZF9hdBgHIAEoCRISCgpxdW90YV9nYXRlGAggASgBIhUKE0xpc3RBY2NvdW50c1JlcXVlc3QiRAoUTGlzdEFjY291bnRzUmVzcG9uc2USLAoIYWNjb3VudHMYASADKAsyGi5mdWd1ZS5hY2NvdW50cy52MS5BY2NvdW50Ij0KEVN0YXJ0TG9naW5SZXF1ZXN0EigKBnZlbmRvchgBIAEoDjIYLmZ1Z3VlLnZlbmRvcnMudjEuVmVuZG9yIiYKElN0YXJ0TG9naW5SZXNwb25zZRIQCghsb2dpbl9pZBgBIAEoCSI+ChJDYW5jZWxMb2dpblJlcXVlc3QSKAoGdmVuZG9yGAEgASgOMhguZnVndWUudmVuZG9ycy52MS5WZW5kb3IiFQoTQ2FuY2VsTG9naW5SZXNwb25zZTKqAgoOQWNjb3VudFNlcnZpY2USXwoMTGlzdEFjY291bnRzEiYuZnVndWUuYWNjb3VudHMudjEuTGlzdEFjY291bnRzUmVxdWVzdBonLmZ1Z3VlLmFjY291bnRzLnYxLkxpc3RBY2NvdW50c1Jlc3BvbnNlElkKClN0YXJ0TG9naW4SJC5mdWd1ZS5hY2NvdW50cy52MS5TdGFydExvZ2luUmVxdWVzdBolLmZ1Z3VlLmFjY291bnRzLnYxLlN0YXJ0TG9naW5SZXNwb25zZRJcCgtDYW5jZWxMb2dpbhIlLmZ1Z3VlLmFjY291bnRzLnYxLkNhbmNlbExvZ2luUmVxdWVzdBomLmZ1Z3VlLmFjY291bnRzLnYxLkNhbmNlbExvZ2luUmVzcG9uc2VCywEKFWNvbS5mdWd1ZS5hY2NvdW50cy52MUINQWNjb3VudHNQcm90b1ABWj1naXRodWIuY29tL3N5dXJvZGV2L2Z1Z3VlL3BrZy9wYi9mdWd1ZS9hY2NvdW50cy92MTthY2NvdW50c3YxogIDRkFYqgIRRnVndWUuQWNjb3VudHMuVjHKAhFGdWd1ZVxBY2NvdW50c1xWMeICHUZ1Z3VlXEFjY291bnRzXFYxXEdQQk1ldGFkYXRh6gITRnVndWU6OkFjY291bnRzOjpWMWIGcHJvdG8z", [file_fugue_vendors_v1_vendors]);
+  fileDesc("CiBmdWd1ZS9hY2NvdW50cy92MS9hY2NvdW50cy5wcm90bxIRZnVndWUuYWNjb3VudHMudjEiUwoLUXVvdGFXaW5kb3cSDAoEbmFtZRgBIAEoCRITCgt1dGlsaXphdGlvbhgCIAEoARIRCglyZXNldHNfYXQYAyABKAkSDgoGc3RhdHVzGAQgASgJItUBCgdBY2NvdW50EigKBnZlbmRvchgBIAEoDjIYLmZ1Z3VlLnZlbmRvcnMudjEuVmVuZG9yEg0KBXN0YXRlGAIgASgJEhQKDHBhdXNlZF91bnRpbBgDIAEoCRINCgVsb2dpbhgEIAEoCRITCgtxdW90YV9rbm93bhgFIAEoCBIvCgd3aW5kb3dzGAYgAygLMh4uZnVndWUuYWNjb3VudHMudjEuUXVvdGFXaW5kb3cSEgoKdXBkYXRlZF9hdBgHIAEoCRISCgpxdW90YV9nYXRlGAggASgBIhUKE0xpc3RBY2NvdW50c1JlcXVlc3QiRAoUTGlzdEFjY291bnRzUmVzcG9uc2USLAoIYWNjb3VudHMYASADKAsyGi5mdWd1ZS5hY2NvdW50cy52MS5BY2NvdW50Ij0KEVN0YXJ0TG9naW5SZXF1ZXN0EigKBnZlbmRvchgBIAEoDjIYLmZ1Z3VlLnZlbmRvcnMudjEuVmVuZG9yIiYKElN0YXJ0TG9naW5SZXNwb25zZRIQCghsb2dpbl9pZBgBIAEoCSI+ChJDYW5jZWxMb2dpblJlcXVlc3QSKAoGdmVuZG9yGAEgASgOMhguZnVndWUudmVuZG9ycy52MS5WZW5kb3IiFQoTQ2FuY2VsTG9naW5SZXNwb25zZSJMChZTdWJtaXRMb2dpbkNvZGVSZXF1ZXN0EhIKCmNvbW1hbmRfaWQYASABKAkSEAoIbG9naW5faWQYAiABKAkSDAoEY29kZRgDIAEoCSIZChdTdWJtaXRMb2dpbkNvZGVSZXNwb25zZTKUAwoOQWNjb3VudFNlcnZpY2USXwoMTGlzdEFjY291bnRzEiYuZnVndWUuYWNjb3VudHMudjEuTGlzdEFjY291bnRzUmVxdWVzdBonLmZ1Z3VlLmFjY291bnRzLnYxLkxpc3RBY2NvdW50c1Jlc3BvbnNlElkKClN0YXJ0TG9naW4SJC5mdWd1ZS5hY2NvdW50cy52MS5TdGFydExvZ2luUmVxdWVzdBolLmZ1Z3VlLmFjY291bnRzLnYxLlN0YXJ0TG9naW5SZXNwb25zZRJcCgtDYW5jZWxMb2dpbhIlLmZ1Z3VlLmFjY291bnRzLnYxLkNhbmNlbExvZ2luUmVxdWVzdBomLmZ1Z3VlLmFjY291bnRzLnYxLkNhbmNlbExvZ2luUmVzcG9uc2USaAoPU3VibWl0TG9naW5Db2RlEikuZnVndWUuYWNjb3VudHMudjEuU3VibWl0TG9naW5Db2RlUmVxdWVzdBoqLmZ1Z3VlLmFjY291bnRzLnYxLlN1Ym1pdExvZ2luQ29kZVJlc3BvbnNlQssBChVjb20uZnVndWUuYWNjb3VudHMudjFCDUFjY291bnRzUHJvdG9QAVo9Z2l0aHViLmNvbS9zeXVyb2Rldi9mdWd1ZS9wa2cvcGIvZnVndWUvYWNjb3VudHMvdjE7YWNjb3VudHN2MaICA0ZBWKoCEUZ1Z3VlLkFjY291bnRzLlYxygIRRnVndWVcQWNjb3VudHNcVjHiAh1GdWd1ZVxBY2NvdW50c1xWMVxHUEJNZXRhZGF0YeoCE0Z1Z3VlOjpBY2NvdW50czo6VjFiBnByb3RvMw", [file_fugue_vendors_v1_vendors]);
 
 /**
  * QuotaWindow is one quota window a vendor reports. utilization is a fraction
@@ -223,6 +223,46 @@ export const CancelLoginResponseSchema: GenMessage<CancelLoginResponse> = /*@__P
   messageDesc(file_fugue_accounts_v1_accounts, 7);
 
 /**
+ * @generated from message fugue.accounts.v1.SubmitLoginCodeRequest
+ */
+export type SubmitLoginCodeRequest = Message<"fugue.accounts.v1.SubmitLoginCodeRequest"> & {
+  /**
+   * @generated from field: string command_id = 1;
+   */
+  commandId: string;
+
+  /**
+   * @generated from field: string login_id = 2;
+   */
+  loginId: string;
+
+  /**
+   * @generated from field: string code = 3;
+   */
+  code: string;
+};
+
+/**
+ * Describes the message fugue.accounts.v1.SubmitLoginCodeRequest.
+ * Use `create(SubmitLoginCodeRequestSchema)` to create a new message.
+ */
+export const SubmitLoginCodeRequestSchema: GenMessage<SubmitLoginCodeRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_accounts_v1_accounts, 8);
+
+/**
+ * @generated from message fugue.accounts.v1.SubmitLoginCodeResponse
+ */
+export type SubmitLoginCodeResponse = Message<"fugue.accounts.v1.SubmitLoginCodeResponse"> & {
+};
+
+/**
+ * Describes the message fugue.accounts.v1.SubmitLoginCodeResponse.
+ * Use `create(SubmitLoginCodeResponseSchema)` to create a new message.
+ */
+export const SubmitLoginCodeResponseSchema: GenMessage<SubmitLoginCodeResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_accounts_v1_accounts, 9);
+
+/**
  * AccountService reports the vendor accounts (F9.10a) and starts the vendor
  * CLIs' own login commands (F9.10b). The `quota` topic carries the same
  * account shape as JSON: a snapshot {"accounts": [...]} and one event per
@@ -266,6 +306,17 @@ export const AccountService: GenService<{
     methodKind: "unary";
     input: typeof CancelLoginRequestSchema;
     output: typeof CancelLoginResponseSchema;
+  },
+  /**
+   * SubmitLoginCode relays a pasted browser code to a running login
+   * process's stdin (host-api v0.22 §5.5).
+   *
+   * @generated from rpc fugue.accounts.v1.AccountService.SubmitLoginCode
+   */
+  submitLoginCode: {
+    methodKind: "unary";
+    input: typeof SubmitLoginCodeRequestSchema;
+    output: typeof SubmitLoginCodeResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fugue_accounts_v1_accounts, 0);
