@@ -16,7 +16,6 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
-	"github.com/syurodev/fugue/internal/testutil"
 )
 
 const (
@@ -72,41 +71,32 @@ const (
 	memoryWindowCycles = 200
 )
 
-// cycleCost is what a window of cycles cost: wall time and heap allocations.
-type cycleCost struct {
-	took   time.Duration
+// allocCost is the heap allocations of one window of cycles.
+type allocCost struct {
 	allocs uint64
 }
 
 // perCycleAllocs is the average number of heap allocations in one cycle.
-func (c cycleCost) perCycleAllocs() float64 {
+func (c allocCost) perCycleAllocs() float64 {
 	return float64(c.allocs) / memoryWindowCycles
 }
 
 // measureWindows runs memoryWindows windows of memoryWindowCycles cycles from
-// start. It returns the cheapest window by allocations and the fastest by
-// wall time: scheduling noise and background work only ever add to either, so
-// the minimum is the closest to the real cost.
-func measureWindows(t *testing.T, svc *InteractionService, start uint64) (cheapest, fastest cycleCost) {
+// start and returns the cheapest window by heap allocations.
+func measureWindows(t *testing.T, svc *InteractionService, start uint64) (cheapest allocCost) {
 	t.Helper()
-	realClock := testutil.OSClock()
 	for w := range uint64(memoryWindows) {
 		from := start + w*memoryWindowCycles
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
-		began := realClock.Now()
 		runMemoryCycles(t, t.Context(), svc, from, from+memoryWindowCycles)
-		took := realClock.Now().Sub(began)
 		runtime.ReadMemStats(&after)
-		cost := cycleCost{took: took, allocs: after.Mallocs - before.Mallocs}
+		cost := allocCost{allocs: after.Mallocs - before.Mallocs}
 		if w == 0 || cost.allocs < cheapest.allocs {
 			cheapest = cost
 		}
-		if w == 0 || cost.took < fastest.took {
-			fastest = cost
-		}
 	}
-	return cheapest, fastest
+	return cheapest
 }
 
 func TestInteractionServiceMemoryBounded10kCycles(t *testing.T) {
@@ -132,29 +122,20 @@ func TestInteractionServiceMemoryBounded10kCycles(t *testing.T) {
 	}
 
 	// The cost of one cycle must not grow with the number of resolved tickets
-	// held. Allocations per cycle are the primary measure: they are exact and
-	// do not depend on runner speed or on the live heap's cache behaviour,
-	// which made wall time 4x slower late in the run on a loaded macOS runner
-	// with no change in the work done. The late average may exceed the early
-	// one only by a small constant for map growth and GC bookkeeping.
+	// held. Allocations per cycle are exact and do not depend on runner speed
+	// or heap cache behaviour; the wall-clock latency ratio budget lives in
+	// internal/perf under the perf build tag. The late average may exceed the
+	// early one only by a small constant for map growth and GC bookkeeping.
 	const totalCycles = 10000
 	const measured = memoryWindows * memoryWindowCycles
 	const allocSlack = 8.0
-	// Wall time only has to catch an order-of-magnitude regression, such as
-	// a scan over every resolved ticket (10k tickets would cost far more than
-	// 10x); a 10x bound leaves the noisy runner ample room.
-	const timeBound = 10
-	firstAllocs, firstTime := measureWindows(t, svc, 0)
+	firstAllocs := measureWindows(t, svc, 0)
 	runMemoryCycles(t, t.Context(), svc, measured, totalCycles-measured)
-	lastAllocs, lastTime := measureWindows(t, svc, totalCycles-measured)
-	t.Logf("allocs/cycle: first %.1f, last %.1f; fastest %d-cycle window: first %s, last %s",
-		firstAllocs.perCycleAllocs(), lastAllocs.perCycleAllocs(), memoryWindowCycles, firstTime.took, lastTime.took)
+	lastAllocs := measureWindows(t, svc, totalCycles-measured)
+	t.Logf("allocs/cycle: first %.1f, last %.1f", firstAllocs.perCycleAllocs(), lastAllocs.perCycleAllocs())
 	if lastAllocs.perCycleAllocs() > firstAllocs.perCycleAllocs()+allocSlack {
 		t.Fatalf("late cycles allocate %.1f per cycle, early %.1f: cost grows with held tickets",
 			lastAllocs.perCycleAllocs(), firstAllocs.perCycleAllocs())
-	}
-	if lastTime.took > firstTime.took*timeBound {
-		t.Fatalf("fastest late window took %s, more than %dx the fastest early window %s", lastTime.took, timeBound, firstTime.took)
 	}
 
 	// Advance clock past ResolvedRetentionTTL so all tickets and receipts become evictable

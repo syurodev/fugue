@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -184,13 +185,15 @@ func awaitFailureUXFailedTurn(t *testing.T, stream *client.Stream) client.Transc
 // host" row of activation §3 (A-E05): with no app or responder attached, an
 // approval-needing request (the lead's team proposal card) is never resolved
 // by the host. It stays pending however much host time passes, the team stays
-// proposed, no member session starts, and the lead's tool call gets no answer.
+// proposed, no member session starts, and the proposal transcript item stays
+// pending with no decision delivered.
 func TestFailureUXHeadlessHostNeverAutoApprovesOverARealHost(t *testing.T) {
 	t.Parallel()
 	h, clk, pump, _ := failureUXQuotaHost(t, true)
 	ctx := failureUXCtx(t)
 	_, lead := startFailureUXLead(t, ctx, h.client, failureUXRepo(t), "FAILUX_PROPOSE;members=1;")
 	card := awaitPendingProposalCard(t, ctx, h.client)
+	awaitFailureUXText(t, ctx, h.client, lead.ID, failureUXAssistant, "waits for the user's decision in the approval inbox")
 
 	pump.paused.Store(true)
 	t.Cleanup(func() { pump.paused.Store(false) })
@@ -209,13 +212,33 @@ func TestFailureUXHeadlessHostNeverAutoApprovesOverARealHost(t *testing.T) {
 	if got := failureUXSessionCount(t, ctx, h.client); got != 1 {
 		t.Fatalf("sessions = %d, want 1 (the lead only)", got)
 	}
-	page, err := h.client.TranscriptPage(ctx, lead.ID, 0, 100)
+	assertLeadProposalUnanswered(t, ctx, h.client, lead.ID)
+}
+
+func assertLeadProposalUnanswered(t *testing.T, ctx context.Context, c *client.Client, leadID string) {
+	t.Helper()
+	page, err := c.TranscriptPage(ctx, leadID, 0, 100)
 	if err != nil {
 		t.Fatalf("TranscriptPage: %v", err)
 	}
+	var proposalFound bool
+	var userItems int
 	for i := range page {
-		if page[i].Kind == failureUXAssistant {
-			t.Fatalf("lead transcript has an assistant item %+v: the tool call must stay unanswered", page[i])
+		switch page[i].Kind {
+		case "team_proposal":
+			proposalFound = true
+			if page[i].Metadata.Decision != "pending" || page[i].Metadata.Decider != "" {
+				t.Fatalf("lead proposal item = %+v, want pending with no decider", page[i])
+			}
+		case failureUXUser:
+			userItems++
+		case failureUXAssistant:
+			if text := failureUXItemText(ctx, c, leadID, &page[i]); !strings.Contains(text, "waits for the user's decision in the approval inbox") {
+				t.Fatalf("unexpected lead assistant item %q: the proposal must stay pending", text)
+			}
 		}
+	}
+	if !proposalFound || userItems != 1 {
+		t.Fatalf("lead transcript proposalFound=%v userItems=%d, want true and 1", proposalFound, userItems)
 	}
 }
