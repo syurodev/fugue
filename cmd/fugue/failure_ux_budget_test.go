@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +63,9 @@ func TestFailureUXTeamDeadlineBudgetWaitsForADecisionOverARealHost(t *testing.T)
 			teamID := approveFailureUXProposal(t, ctx, h.client)
 			// The cap of four running direct children leaves the fifth queued.
 			awaitFailureUXMembers(t, ctx, h.client, teamID, "running", "running", "running", "running", failureUXTaskQueued)
+			// Wait for all four paced intro turns to land before jumping the fake
+			// clock past pacedSendTimeout (30s) and idleDetach (300s).
+			awaitFailureUXMemberIntros(t, ctx, h.client, teamID)
 
 			pump.paused.Store(true)
 			t.Cleanup(func() { pump.paused.Store(false) })
@@ -86,4 +90,33 @@ func TestFailureUXTeamDeadlineBudgetWaitsForADecisionOverARealHost(t *testing.T)
 			})
 		})
 	}
+}
+
+func awaitFailureUXMemberIntros(t *testing.T, ctx context.Context, c *client.Client, teamID string) {
+	t.Helper()
+	testutil.Spin(t, "running member intro turns started", func() bool {
+		_, members := failureUXMembers(t, ctx, c, teamID)
+		for i := range members {
+			if members[i].State != failureUXTaskRunning {
+				continue
+			}
+			if members[i].SessionID == "" || !sessionHasItemKind(ctx, c, members[i].SessionID, failureUXUser) {
+				return false
+			}
+		}
+		return true
+	})
+}
+
+func sessionHasItemKind(ctx context.Context, c *client.Client, sessionID, kind string) bool {
+	page, err := c.TranscriptPage(ctx, sessionID, 0, 10)
+	if err != nil {
+		return false
+	}
+	for i := range page {
+		if page[i].Kind == kind {
+			return true
+		}
+	}
+	return false
 }

@@ -245,7 +245,7 @@ func (p *vendorPacer) callSendWithTimeout(ctx context.Context, actor *vendorSess
 	close(stopWatch)
 	cancelSend()
 	<-doneWatch
-	if timedOut.Load() {
+	if err != nil && timedOut.Load() {
 		return errcode.New(errcode.DeadlineExceeded, "timed out waiting for vendor session send")
 	}
 	return err
