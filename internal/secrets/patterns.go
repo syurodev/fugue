@@ -6,8 +6,9 @@ import (
 )
 
 type tokenPattern struct {
-	kind string
-	re   *regexp.Regexp
+	kind    string
+	re      *regexp.Regexp
+	needles []string
 }
 
 // Compiled once and never mutated; regexp matching is safe concurrently.
@@ -32,36 +33,61 @@ var (
 
 func patterns() []tokenPattern {
 	return []tokenPattern{
-		{KindAWSAccessKey, awsAccessKeyPattern},
-		{KindGitHubToken, githubTokenPattern},
-		{KindSlackToken, slackTokenPattern},
-		{KindAnthropic, anthropicTokenPattern},
-		{KindOpenAIToken, openaiTokenPattern},
-		{KindGoogleAPIKey, googleAPIKeyPattern},
-		{KindStripeToken, stripeTokenPattern},
-		{KindJWT, jwtPattern},
-		{KindPrivateKey, privateKeyPattern},
+		{KindAWSAccessKey, awsAccessKeyPattern, []string{"AKIA", "ASIA"}},
+		{KindGitHubToken, githubTokenPattern, []string{"ghp_", "gho_", "ghu_", "ghs_", "ghr_", "github_pat_"}},
+		{KindSlackToken, slackTokenPattern, []string{"xox"}},
+		{KindAnthropic, anthropicTokenPattern, []string{"sk-ant-"}},
+		{KindOpenAIToken, openaiTokenPattern, []string{"sk-"}},
+		{KindGoogleAPIKey, googleAPIKeyPattern, []string{"AIza"}},
+		{KindStripeToken, stripeTokenPattern, []string{"k_live_"}},
+		{KindJWT, jwtPattern, []string{"eyJ"}},
+		{KindPrivateKey, privateKeyPattern, []string{"-----BEGIN "}},
 	}
+}
+
+func containsAny(text string, needles []string) bool {
+	for _, needle := range needles {
+		if strings.Contains(text, needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func findPatterns(text string) []Finding {
 	var findings []Finding
 	for _, pattern := range patterns() {
-		for _, match := range pattern.re.FindAllStringSubmatchIndex(text, -1) {
-			start, end := match[0], match[1]
-			if excludedPattern(pattern.kind, text, start, end) {
-				continue
-			}
-			if pattern.kind == KindPrivateKey {
-				if text[match[2]:match[3]] != text[match[6]:match[7]] {
-					continue
-				}
-				start, end = match[4], match[5]
-			}
-			findings = append(findings, Finding{Start: start, End: end, Kind: pattern.kind})
+		if !containsAny(text, pattern.needles) {
+			continue
 		}
+		if pattern.kind == KindPrivateKey {
+			findings = appendPrivateKeyFindings(findings, text, pattern.re)
+			continue
+		}
+		findings = appendTokenFindings(findings, text, pattern.kind, pattern.re)
 	}
 	return findings
+}
+
+func appendPrivateKeyFindings(dst []Finding, text string, re *regexp.Regexp) []Finding {
+	for _, match := range re.FindAllStringSubmatchIndex(text, -1) {
+		if text[match[2]:match[3]] != text[match[6]:match[7]] {
+			continue
+		}
+		dst = append(dst, Finding{Start: match[4], End: match[5], Kind: KindPrivateKey})
+	}
+	return dst
+}
+
+func appendTokenFindings(dst []Finding, text, kind string, re *regexp.Regexp) []Finding {
+	for _, match := range re.FindAllStringIndex(text, -1) {
+		start, end := match[0], match[1]
+		if excludedPattern(kind, text, start, end) {
+			continue
+		}
+		dst = append(dst, Finding{Start: start, End: end, Kind: kind})
+	}
+	return dst
 }
 
 // Google bodies may end in '-', so a word boundary would reject valid keys.
