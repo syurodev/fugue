@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"gioui.org/layout"
+	"gioui.org/unit"
 
 	"github.com/syurodev/fugue/pkg/client"
 
@@ -60,8 +61,21 @@ type screens struct {
 	// titleBar is the app-drawn title bar of platforms that give the window
 	// none (FUG-58); nil in tests and wherever the platform draws it.
 	titleBar *titleBar
-	m        *hostconn.Manager
-	fetcher  pageFetcher
+	// deviceMetric is the frame's system metric before env.UIScale is applied.
+	deviceMetric unit.Metric
+	// pendingMaximize applies app.Maximized.Option() after the window driver is
+	// initialized so Gio records the normal window size before maximizing
+	// (Wayland's Gio driver panics on unmaximize if Maximized is in initialOpts).
+	pendingMaximize           bool
+	restoreNormalOnUnmaximize bool
+	sawMaximized              bool
+	pendingNormalRestore      bool
+	skipGeometry              bool
+	restoreNormalAttempts     int
+	maximizedPxSize           image.Point
+	restoreNormalSize         WindowGeometry
+	m                         *hostconn.Manager
+	fetcher                   pageFetcher
 	// poster is the composer's write side; composer holds its view state.
 	poster   *session.Poster
 	composer *composer

@@ -7,11 +7,11 @@
 package appwin
 
 // requestedW and requestedH are the window's preferred initial size in dp
-// (F10.1): 900x1000 dp overflows an 864 dp-high 1080p screen at scale 1.25,
-// so the effective size is clamped to the work area before the window opens.
+// (FUG-83): landscape 1280x800 dp for the multi-column shell, clamped to the
+// work area where known (macOS) before the window opens.
 const (
-	requestedW = 900
-	requestedH = 1000
+	requestedW = 1280
+	requestedH = 800
 )
 
 // minW and minH keep the window usable on very small work areas: below them

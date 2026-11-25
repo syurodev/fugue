@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"gioui.org/app"
-	"gioui.org/unit"
 
 	"github.com/syurodev/fugue/pkg/client"
 
@@ -297,14 +296,13 @@ func installNewLayout(sc *screens, windowID string, doc LayoutDoc) {
 	sc.trackTopics()
 }
 
-func runWindow(ctx context.Context, m *hostconn.Manager, coord *multiWindow, windowID string, record *client.AppStateWindow, doc *LayoutDoc) error {
+func runWindow(ctx context.Context, m *hostconn.Manager, coord *multiWindow, windowID string, record *client.AppStateWindow, doc *LayoutDoc, ready chan<- struct{}) error {
 	winCtx, winCancel := context.WithCancel(ctx)
-	scale, screenW, screenH := workArea()
-	initW, initH := ClampDp(requestedW, requestedH, scale, screenW, screenH)
+	initGeom := resolveWindowGeometry(record, doc, workArea)
 	w := new(app.Window)
 	w.Option(app.Title("Fugue"))
-	w.Option(app.Size(unit.Dp(initW), unit.Dp(initH)))
 	w.Option(windowOptions(runtime.GOOS)...)
+	applyInitialWindowOptions(w, initGeom)
 
 	q := &updateQueue{}
 	winReg := &windowUpdates{queue: q, invalidate: w.Invalidate}
@@ -326,13 +324,29 @@ func runWindow(ctx context.Context, m *hostconn.Manager, coord *multiWindow, win
 	light, dark := theme.Light(shaper), theme.Dark(shaper)
 	env := newEnv(shaper, &light)
 	attach(env, w)
-	sc := newWindowScreens(m, w, workers, coord, winReg)
+	sc := newWindowScreens(m, workers, coord, winReg)
 	sc.titleBar = newTitleBar(runtime.GOOS)
 	applyInitialWindowLayout(m, sc, q, windowID, record, doc)
+	sc.seedInitialWindowMode(initGeom)
+	wireApplyGeometry(sc, w)
+	if ready != nil {
+		close(ready)
+	}
 	return eventLoop(winCtx, w, env, sc, q, coord, winReg, &light, &dark)
 }
 
-func newWindowScreens(m *hostconn.Manager, w *app.Window, workers appWorkers, coord *multiWindow, winReg *windowUpdates) *screens {
+func wireApplyGeometry(sc *screens, w *app.Window) {
+	sc.grid.applyGeometry = func(geom WindowGeometry) {
+		clamped := clampGeometry(geom, workArea)
+		if clamped.Maximized {
+			sc.restoreNormalOnUnmaximize = true
+			sc.restoreNormalSize = clamped
+		}
+		applyWindowOptions(w, clamped)
+	}
+}
+
+func newWindowScreens(m *hostconn.Manager, workers appWorkers, coord *multiWindow, winReg *windowUpdates) *screens {
 	sc := newScreens(m, workers.fetcher, workers.poster, workers.wsMut)
 	sc.setTopic = func(topic string, active bool) {
 		coord.setTopic(winReg, topic, active)
@@ -345,11 +359,6 @@ func newWindowScreens(m *hostconn.Manager, w *app.Window, workers appWorkers, co
 	sc.viewerWorker = workers.viewerW
 	sc.layoutWorker = workers.layoutW
 	sc.teamWorker = workers.teamW
-	sc.grid.applyGeometry = func(widthDp, heightDp int) {
-		if widthDp > 0 && heightDp > 0 {
-			w.Option(app.Size(unit.Dp(widthDp), unit.Dp(heightDp)))
-		}
-	}
 	return sc
 }
 

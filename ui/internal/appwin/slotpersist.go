@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"gioui.org/app"
 	"gioui.org/layout"
 	"gioui.org/op"
 
@@ -317,7 +318,8 @@ func (w *layoutWorker) await(ctx context.Context) layoutResult {
 
 // applyStored applies a stored layout document at rev: a newer schema runs
 // on the default without overwriting (host-api §5.2). The first application
-// seeds the rail from the main slot.
+// seeds the rail from the main slot. If the user already resized or maximized
+// the window before a late record arrived, the window geometry is not stolen.
 func (g *slotGrid) applyStored(res DecodeLayoutResult, rev uint64) {
 	g.rev, g.loaded = rev, true
 	if res.HigherSchema {
@@ -328,8 +330,36 @@ func (g *slotGrid) applyStored(res DecodeLayoutResult, rev uint64) {
 	g.docGen++
 	g.resetShellMotion()
 	g.syncFromDoc()
-	if g.applyGeometry != nil && res.Doc.Window.WidthDp > 0 && res.Doc.Window.HeightDp > 0 {
-		g.applyGeometry(res.Doc.Window.WidthDp, res.Doc.Window.HeightDp)
+	if g.userResized {
+		g.preserveUserGeometry(res.Doc.Window)
+		return
+	}
+	if g.applyGeometry != nil && hasStoredGeometry(res.Doc.Window) {
+		if res.Doc.Window.Maximized {
+			g.windowMode = app.Maximized
+		}
+		g.applyGeometry(res.Doc.Window)
+	}
+}
+
+func hasStoredGeometry(geom WindowGeometry) bool {
+	return (geom.WidthDp > 0 && geom.HeightDp > 0) || geom.Maximized
+}
+
+func (g *slotGrid) preserveUserGeometry(stored WindowGeometry) {
+	userMax := g.windowMode == app.Maximized
+	w, h := g.lastMeasuredSize.X, g.lastMeasuredSize.Y
+	if w <= 0 || h <= 0 {
+		w, h = g.initialSize.X, g.initialSize.Y
+	}
+	if w > 0 && h > 0 {
+		g.doc.Window = WindowGeometry{WidthDp: w, HeightDp: h, Maximized: userMax}
+	} else {
+		g.doc.Window.Maximized = userMax
+	}
+	if g.doc.Window != stored {
+		g.dirty = true
+		g.saveAt = time.Time{}
 	}
 }
 
