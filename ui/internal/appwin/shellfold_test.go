@@ -6,6 +6,8 @@ import (
 
 	"gioui.org/layout"
 	"gioui.org/unit"
+
+	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
 // shellPlanAt plans the fold for a shell shellDp wide at a 1:1 metric.
@@ -22,6 +24,8 @@ func shellPlanAt(sc *screens, shellDp int) PlanFoldResult {
 // after drawWindow's insets) always folded the sidebar.
 func TestShellFoldUsesTheShellWidth(t *testing.T) {
 	t.Parallel()
+	oneColMin := int(theme.RailWidth) + int(theme.RightStripeWidth) + int(theme.SidebarWidth) + int(theme.IslandGap) + int(theme.MainSlotMinWidth)
+	twoColMin := oneColMin + int(theme.SlotMinWidth) + int(theme.IslandGap)
 	cases := []struct {
 		name         string
 		cols         int
@@ -30,10 +34,10 @@ func TestShellFoldUsesTheShellWidth(t *testing.T) {
 		wantSidebarF bool
 	}{
 		{"default 900 dp window keeps the sidebar", 1, 876, 0, false},
-		{"exact minimum keeps the sidebar", 1, 808, 0, false},
-		{"one dp short folds the sidebar", 1, 807, 0, true},
-		{"two columns fit exactly", 2, 1108, 0, false},
-		{"one dp short folds the regular column", 2, 1107, 1, false},
+		{"exact minimum keeps the sidebar", 1, oneColMin, 0, false},
+		{"one dp short folds the sidebar", 1, oneColMin - 1, 0, true},
+		{"two columns fit exactly", 2, twoColMin, 0, false},
+		{"one dp short folds the regular column", 2, twoColMin - 1, 1, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

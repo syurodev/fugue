@@ -175,8 +175,7 @@ func TestVaultPanelIsCentredInWindow(t *testing.T) {
 		}
 		probe := buildVaultShotScreens(shotVaultUnlock)
 		barH := probe.titleBar.height(&gtx)
-		pad := gtx.Dp(theme.SpaceXS)
-		body := image.Rect(0, barH+pad, shotWindowW-pad, shotWindowH-pad)
+		body := image.Rect(0, barH, shotWindowW, shotWindowH)
 		bodyCenter := image.Pt(body.Min.X+body.Dx()/2, body.Min.Y+body.Dy()/2)
 		maxOffsetPx := int(math.Ceil(float64(scale)))
 

@@ -22,26 +22,30 @@ type cellGeom struct {
 }
 
 // computeRects lays out the visible columns' cells into area: columns split
-// horizontally by their weights, rows vertically inside each column.
+// horizontally by their weights, rows vertically inside each column, leaving
+// IslandGap (2 dp) between adjacent islands (FUG-92).
 func (g *slotGrid) computeRects(gtx *layout.Context, area image.Rectangle, visible int) []cellGeom {
 	if visible <= 0 || area.Empty() {
 		return nil
 	}
+	gap := gtx.Dp(theme.IslandGap)
 	weights := columnWeights(g.doc, visible)
 	minsPx := dpToPx(gtx, colMins(0, visible))
-	widths := splitPx(weights, area.Dx(), minsPx)
+	availW := max(area.Dx()-(visible-1)*gap, 0)
+	widths := splitPx(weights, availW, minsPx)
 	geom := make([]cellGeom, 0, visible*maxRowsPerColumn)
 	x := area.Min.X
 	for c := range visible {
 		col := g.doc.Columns[c]
 		colRect := image.Rect(x, area.Min.Y, x+widths[c], area.Max.Y)
-		heights := splitPx(rowWeights(col), colRect.Dy(), dpToPx(gtx, rowMins(len(col.Slots))))
+		availH := max(colRect.Dy()-(len(col.Slots)-1)*gap, 0)
+		heights := splitPx(rowWeights(col), availH, dpToPx(gtx, rowMins(len(col.Slots))))
 		y := colRect.Min.Y
 		for r := range col.Slots {
 			geom = append(geom, cellGeom{pos: Pos{Col: c, Row: r}, Rect: image.Rect(colRect.Min.X, y, colRect.Max.X, y+heights[r])})
-			y += heights[r]
+			y += heights[r] + gap
 		}
-		x += widths[c]
+		x += widths[c] + gap
 	}
 	return geom
 }
@@ -220,7 +224,7 @@ func (g *slotGrid) overlayColSplit(gtx *layout.Context, env *kit.Env, geom []cel
 		state = kit.NewSplitPaneState()
 		g.splitC[i] = state
 	}
-	left, props := g.colSplitProps(geom, area, visible, i, animating)
+	left, props := g.colSplitProps(gtx, geom, area, visible, i, animating)
 	sub := image.Rect(left.Min.X, area.Min.Y, area.Max.X, area.Max.Y)
 	local := *gtx
 	local.Constraints = layout.Exact(sub.Size())
@@ -228,27 +232,41 @@ func (g *slotGrid) overlayColSplit(gtx *layout.Context, env *kit.Env, geom []cel
 		local := *gtx
 		next, changed, _ := state.Layout(env, &local, props, emptyPane, emptyPane)
 		if changed && !animating {
-			g.setColumnRatio(i, visible, next)
+			gap := gtx.Dp(theme.IslandGap)
+			avail := float32(max(sub.Dx()-(visible-1-i)*gap, 1))
+			r := min(max((next*float32(sub.Dx())-float32(gap)/2)/avail, 0), 1)
+			g.setColumnRatio(i, visible, r)
 			g.edited(g.doc)
 		}
 	})
 }
 
-func (g *slotGrid) colSplitProps(geom []cellGeom, area image.Rectangle, visible, i int, animating bool) (image.Rectangle, kit.SplitPaneProps) {
+func (g *slotGrid) colSplitProps(gtx *layout.Context, geom []cellGeom, area image.Rectangle, visible, i int, animating bool) (image.Rectangle, kit.SplitPaneProps) {
 	left := g.rectOf(geom, Pos{Col: i, Row: 0})
+	gap := gtx.Dp(theme.IslandGap)
+	gapHalf := theme.IslandGap / 2
+	subW := area.Max.X - left.Min.X
+	availW := float32(max(subW-(visible-1-i)*gap, 1))
+	defRatio := defaultColumnRatio(i, visible)
+	ratio := columnRatio(g.doc, i, visible)
+	if subW > 0 {
+		ratio = (float32(left.Dx()) + float32(gap)/2) / float32(subW)
+		defRatio = (defRatio*availW + float32(gap)/2) / float32(subW)
+	}
 	props := kit.SplitPaneProps{
 		Orientation:  kit.Horizontal,
-		Ratio:        columnRatio(g.doc, i, visible),
-		DefaultRatio: defaultColumnRatio(i, visible),
-		MinFirst:     colMin(i),
-		MinSecond:    sumDp(colMins(i+1, visible)),
+		Ratio:        ratio,
+		DefaultRatio: defRatio,
+		MinFirst:     colMin(i) + gapHalf,
+		MinSecond:    sumDp(colMins(i+1, visible)) + unit.Dp(visible-1-i)*theme.IslandGap - gapHalf,
+		HideRestLine: true,
 	}
 	if !animating {
 		return left, props
 	}
 	left = g.drawnCellRect(geom, Pos{Col: i, Row: 0})
 	if totalW := area.Max.X - left.Min.X; totalW > 0 {
-		props.Ratio = float32(left.Dx()) / float32(totalW)
+		props.Ratio = (float32(left.Dx()) + float32(gap)/2) / float32(totalW)
 	}
 	props.MinFirst, props.MinSecond = 0, 0
 	return left, props
@@ -266,7 +284,7 @@ func (g *slotGrid) overlayRowSplit(gtx *layout.Context, env *kit.Env, geom []cel
 		g.splitR[c] = state
 	}
 	animating := len(g.anims) > 0
-	colRect, props, ok := g.rowSplitProps(geom, c, animating)
+	colRect, props, ok := g.rowSplitProps(gtx, geom, c, animating)
 	if !ok {
 		return
 	}
@@ -276,36 +294,48 @@ func (g *slotGrid) overlayRowSplit(gtx *layout.Context, env *kit.Env, geom []cel
 		local := *gtx
 		next, changed, _ := state.Layout(env, &local, props, emptyPane, emptyPane)
 		if changed && !animating {
+			gap := gtx.Dp(theme.IslandGap)
+			avail := float32(max(colRect.Dy()-gap, 1))
+			r := min(max((next*float32(colRect.Dy())-float32(gap)/2)/avail, 0), 1)
 			col := g.doc.Columns[c]
-			col.Slots[0].HeightWeight = next
-			col.Slots[1].HeightWeight = 1 - next
+			col.Slots[0].HeightWeight = r
+			col.Slots[1].HeightWeight = 1 - r
 			g.edited(g.doc)
 		}
 	})
 }
 
-func (g *slotGrid) rowSplitProps(geom []cellGeom, c int, animating bool) (image.Rectangle, kit.SplitPaneProps, bool) {
+func (g *slotGrid) rowSplitProps(gtx *layout.Context, geom []cellGeom, c int, animating bool) (image.Rectangle, kit.SplitPaneProps, bool) {
 	top := g.rectOf(geom, Pos{Col: c, Row: 0})
 	bottom := g.rectOf(geom, Pos{Col: c, Row: 1})
+	if top.Empty() || (bottom.Empty() && !animating) {
+		return image.Rectangle{}, kit.SplitPaneProps{}, false
+	}
+	colRect := image.Rect(top.Min.X, top.Min.Y, top.Max.X, max(bottom.Max.Y, top.Max.Y))
+	gap := gtx.Dp(theme.IslandGap)
+	gapHalf := theme.IslandGap / 2
+	ratio := rowRatio(g.doc.Columns[c])
+	if colRect.Dy() > 0 {
+		ratio = (float32(top.Dy()) + float32(gap)/2) / float32(colRect.Dy())
+	}
 	props := kit.SplitPaneProps{
 		Orientation:  kit.Vertical,
-		Ratio:        rowRatio(g.doc.Columns[c]),
+		Ratio:        ratio,
 		DefaultRatio: 0.5,
-		MinFirst:     theme.SlotMinHeight,
-		MinSecond:    theme.SlotMinHeight,
+		MinFirst:     theme.SlotMinHeight + gapHalf,
+		MinSecond:    theme.SlotMinHeight + theme.IslandGap - gapHalf,
+		HideRestLine: true,
 	}
 	if animating {
 		top = g.drawnCellRect(geom, Pos{Col: c, Row: 0})
 		bottom = g.drawnCellRect(geom, Pos{Col: c, Row: 1})
-		if totalH := bottom.Max.Y - top.Min.Y; totalH > 0 {
-			props.Ratio = float32(top.Dy()) / float32(totalH)
+		colRect = image.Rect(top.Min.X, top.Min.Y, top.Max.X, max(bottom.Max.Y, top.Max.Y))
+		if totalH := colRect.Dy(); totalH > 0 {
+			props.Ratio = (float32(top.Dy()) + float32(gap)/2) / float32(totalH)
 		}
 		props.MinFirst, props.MinSecond = 0, 0
 	}
-	if top.Empty() || (bottom.Empty() && !animating) {
-		return image.Rectangle{}, props, false
-	}
-	return image.Rect(top.Min.X, top.Min.Y, top.Max.X, max(bottom.Max.Y, top.Max.Y)), props, true
+	return colRect, props, true
 }
 
 func emptyPane(layout.Context) layout.Dimensions { return layout.Dimensions{} }

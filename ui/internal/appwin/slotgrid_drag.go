@@ -174,7 +174,7 @@ func (g *slotGrid) layoutDrag(gtx *layout.Context, env *kit.Env, sc *screens, ge
 		}
 	}
 	inset := gtx.Dp(theme.SpaceXS)
-	radius := gtx.Dp(theme.RadiusMD)
+	radius := gtx.Dp(theme.RadiusIsland)
 	info := env.Th.Status().Info
 	for i, z := range zones {
 		hover := i == hovered
@@ -193,7 +193,7 @@ func (g *slotGrid) layoutDrag(gtx *layout.Context, env *kit.Env, sc *screens, ge
 			clip.Stroke{Path: rr.Path(gtx.Ops), Width: 1.5}.Op())
 	}
 	if origin := rectOfGeom(geom, g.drag.pos); !origin.Empty() {
-		paint.FillShape(gtx.Ops, wash(env.Th.Chrome().CanvasBg, 0.6), clip.Rect(origin).Op())
+		paint.FillShape(gtx.Ops, wash(env.Th.Chrome().CanvasBg, 0.6), clip.UniformRRect(origin, radius).Op(gtx.Ops))
 		ghost := g.previewRect(area, image.Pt(min(origin.Dx(), area.Dx()/2), gtx.Dp(theme.SlotHeaderHeight)*3))
 		g.drawGhost(gtx, env, sc, ghost)
 	}
@@ -208,7 +208,7 @@ func (g *slotGrid) drawGhost(gtx *layout.Context, env *kit.Env, sc *screens, rec
 	if rect.Dy() < h {
 		return
 	}
-	radius := gtx.Dp(theme.RadiusMD)
+	radius := gtx.Dp(theme.RadiusIsland)
 	kit.DrawFloatShadow(gtx, rect, radius)
 	defer clip.UniformRRect(rect, radius).Push(gtx.Ops).Pop()
 	rr := clip.UniformRRect(rect, radius)
@@ -256,16 +256,6 @@ func (g *slotGrid) finishDrag(gtx *layout.Context) {
 	g.cancelDrag()
 }
 
-// layoutFolded draws the narrow-window fold (§5.3, DA-E09): the edge tab
-// strip on the right — one tab per folded slot — and the drawer a tab
-// slides out over the grid.
-func (g *slotGrid) layoutFolded(gtx *layout.Context, env *kit.Env, sc *screens, area image.Rectangle, plan PlanFoldResult) {
-	stripW := gtx.Dp(theme.EdgeTabWidth)
-	strip := image.Rect(area.Max.X-stripW, area.Min.Y, area.Max.X, area.Max.Y)
-	g.layoutTabStrip(gtx, env, sc, strip, g.foldedCells(plan))
-	g.layoutDrawer(gtx, env, sc, image.Rect(area.Min.X, area.Min.Y, strip.Min.X, area.Max.Y))
-}
-
 // foldedCells lists the folded regular columns' cells, right to left, in
 // tab order.
 func (g *slotGrid) foldedCells(plan PlanFoldResult) []Pos {
@@ -279,43 +269,8 @@ func (g *slotGrid) foldedCells(plan PlanFoldResult) []Pos {
 	return out
 }
 
-// layoutTabStrip draws one tab per folded slot, the icons centered in the
-// strip and a hairline on its left separating it from the grid; the active
-// tab opens the drawer, clicking it again closes it.
-func (g *slotGrid) layoutTabStrip(gtx *layout.Context, env *kit.Env, sc *screens, strip image.Rectangle, folded []Pos) {
-	paint.FillShape(gtx.Ops, env.Th.Chrome().SurfaceBase, clip.Rect(strip).Op())
-	line := max(gtx.Dp(theme.Hairline), 1)
-	paint.FillShape(gtx.Ops, env.Th.Chrome().BorderSubtle,
-		clip.Rect(image.Rect(strip.Min.X, strip.Min.Y, strip.Min.X+line, strip.Max.Y)).Op())
-	btnW := gtx.Dp(theme.ControlSM)
-	x := strip.Min.X + max((strip.Dx()-btnW)/2, 0)
-	y := strip.Min.Y + gtx.Dp(theme.SpaceXS)
-	for _, p := range folded {
-		btn := ensureIconButton(&g.tabBtns, p.key())
-		ref := refAt(g.doc, p)
-		props := kit.IconButtonProps{
-			Icon: slotIcon(ref.Kind), Label: slotTitle(sc, ref),
-			Variant: kit.IconButtonGhost, Size: kit.SizeSM, Toggled: g.drawer == p.key(),
-		}
-		var clicked bool
-		var err error
-		atPoint(gtx, image.Pt(x, y), func(gtx *layout.Context) {
-			clicked, err = btn.Layout(env, gtx, &props)
-		})
-		sc.fail(err)
-		if clicked {
-			if g.drawer == p.key() {
-				g.drawerPresence.Show(false)
-			} else {
-				g.drawer = p.key()
-				g.drawerPresence.Show(true)
-			}
-		}
-		y += gtx.Dp(theme.ControlMD) + gtx.Dp(theme.SpaceXS)
-	}
-}
-
-// layoutDrawer slides the drawer slot out over the grid on Smooth (§5.3).
+// layoutDrawer slides the drawer slot out over the grid on Smooth (§5.3,
+// FUG-94) right next to the permanent Right Stripe as an 8 dp rounded island.
 func (g *slotGrid) layoutDrawer(gtx *layout.Context, env *kit.Env, sc *screens, area image.Rectangle) {
 	if g.drawerPresence.Advance(env.DT()) {
 		env.Keep()
@@ -326,16 +281,14 @@ func (g *slotGrid) layoutDrawer(gtx *layout.Context, env *kit.Env, sc *screens, 
 		}
 		return
 	}
+	c, r, ok := parseSlotKey(g.drawer)
+	if !ok {
+		return
+	}
 	w := min(gtx.Dp(theme.SlotMinWidth), area.Dx())
 	p := g.drawerPresence.Progress()
 	x := area.Max.X - int(float32(w)*p+0.5)
 	rect := image.Rect(x, area.Min.Y, x+w, area.Max.Y)
-	kit.DrawFloatShadow(gtx, rect, 0)
-	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect(rect).Op())
-	line := max(gtx.Dp(theme.Hairline), 1)
-	paint.FillShape(gtx.Ops, env.Th.Chrome().Border,
-		clip.Rect(image.Rect(rect.Min.X, rect.Min.Y, rect.Min.X+line, rect.Max.Y)).Op())
-	if c, r, ok := parseSlotKey(g.drawer); ok {
-		g.drawSlot(gtx, env, sc, Pos{Col: c, Row: r}, rect)
-	}
+	kit.DrawFloatShadow(gtx, rect, gtx.Dp(theme.RadiusIsland))
+	g.drawSlot(gtx, env, sc, Pos{Col: c, Row: r}, rect)
 }

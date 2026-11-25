@@ -380,14 +380,14 @@ func (t *Theme) Shaper() *text.Shaper { return t.shaper }
 // value was tuned.
 func lightChrome() Chrome {
 	return Chrome{
-		AppBg:         nrgba(0xEEF0F2),
-		CanvasBg:      nrgba(0xF9F9FA),
-		SurfaceBase:   nrgba(0xFFFFFF),
+		AppBg:         nrgba(0xE5E7EB),
+		CanvasBg:      nrgba(0xFFFFFF),
+		SurfaceBase:   nrgba(0xF7F8FA),
 		SurfaceRaised: nrgba(0xF1F2F4),
-		SurfaceTinted: nrgba(0xE9EAEE),
+		SurfaceTinted: nrgba(0xECEEF2),
 		Fg:            nrgba(0x1C1D20),
 		FgMuted:       nrgba(0x52535A),
-		FgSubtle:      nrgba(0x656570),
+		FgSubtle:      nrgba(0x63646E),
 		IconMuted:     nrgba(0x52535A),
 		Border:        nrgba(0xC9C9CE),
 		FocusBorder:   nrgba(0x1C1D20),
@@ -400,22 +400,23 @@ func lightChrome() Chrome {
 }
 
 // darkChrome is the dark mode's neutral table; the action pair inverts to a
-// light fill with a dark foreground.
+// light fill with a dark foreground. Islands Dark sets AppBg lighter (#2B2D30)
+// than the shared island CanvasBg (#1E1F22) with flat solid surfaces.
 func darkChrome() Chrome {
 	return Chrome{
-		AppBg:         nrgba(0x14161A),
-		CanvasBg:      nrgba(0x1A1D22),
-		SurfaceBase:   nrgba(0x1F2228),
-		SurfaceRaised: nrgba(0x272B33),
-		SurfaceTinted: nrgba(0x23272E),
+		AppBg:         nrgba(0x2B2D30),
+		CanvasBg:      nrgba(0x1E1F22),
+		SurfaceBase:   nrgba(0x25272B),
+		SurfaceRaised: nrgba(0x2D3036),
+		SurfaceTinted: nrgba(0x23262B),
 		Fg:            nrgba(0xF0F0F2),
-		FgMuted:       nrgba(0xA8AAB2),
-		FgSubtle:      nrgba(0x919199),
-		IconMuted:     nrgba(0xA8AAB2),
-		Border:        nrgba(0x3B3F48),
+		FgMuted:       nrgba(0xB0B2BA),
+		FgSubtle:      nrgba(0x9C9EA6),
+		IconMuted:     nrgba(0xB0B2BA),
+		Border:        nrgba(0x3F434C),
 		FocusBorder:   nrgba(0xF0F0F2),
 		Action:        nrgba(0xF0F0F2),
-		ActionFg:      nrgba(0x14161A),
+		ActionFg:      nrgba(0x1E1F22),
 		ActionHover:   nrgba(0xD6D6DA),
 		ActionPressed: nrgba(0xFFFFFF),
 		DangerFg:      nrgba(0xF4B8B3),
@@ -438,17 +439,17 @@ func lightPalette() Palette {
 }
 
 // darkPalette is the dark mode's hue table; lightness is lifted by 4.5:1 on
-// the app background.
+// every dark chrome surface (including AppBg #2B2D30 and SurfaceRaised #2D3036).
 func darkPalette() Palette {
 	return Palette{
-		Red:    nrgba(0xDC736B),
-		Orange: nrgba(0xCE7F30),
-		Yellow: nrgba(0xAF8E29),
-		Green:  nrgba(0x3FA558),
-		Teal:   nrgba(0x3DA194),
-		Blue:   nrgba(0x728FDE),
-		Violet: nrgba(0xA084D0),
-		Pink:   nrgba(0xCB77A1),
+		Red:    nrgba(0xE57E76),
+		Orange: nrgba(0xD88A3C),
+		Yellow: nrgba(0xB99835),
+		Green:  nrgba(0x47B161),
+		Teal:   nrgba(0x45ADA0),
+		Blue:   nrgba(0x7D99E7),
+		Violet: nrgba(0xAA8FD9),
+		Pink:   nrgba(0xD582AC),
 	}
 }
 

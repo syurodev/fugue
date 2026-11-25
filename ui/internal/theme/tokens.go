@@ -25,11 +25,12 @@ const (
 // Corner radii (§3.2, v0.3). radius.full is half the element's height,
 // computed at the point of use and never a constant here.
 const (
-	RadiusXS = unit.Dp(4)
-	RadiusSM = unit.Dp(6)
-	RadiusMD = unit.Dp(10)
-	RadiusLG = unit.Dp(14)
-	RadiusXL = unit.Dp(16)
+	RadiusXS     = unit.Dp(4)
+	RadiusSM     = unit.Dp(6)
+	RadiusIsland = unit.Dp(8)
+	RadiusMD     = unit.Dp(10)
+	RadiusLG     = unit.Dp(14)
+	RadiusXL     = unit.Dp(16)
 )
 
 // Control, row and tab heights (§3.4).
@@ -88,8 +89,20 @@ const SidebarWidth = unit.Dp(240)
 // columns' minimums folds regular columns into the edge tab strip, then the
 // sidebar, while the main slot keeps MainSlotMinWidth and never folds.
 const (
-	// RailWidth is the rail's one icon column; the rail never folds.
-	RailWidth = unit.Dp(48)
+	// RailWidth is the left rail's one icon column; the rail never folds.
+	RailWidth = unit.Dp(30)
+	// RightStripeWidth is the permanent right tool stripe hosting companion
+	// slot toggles and narrow-window folded slots (Islands shell, FUG-90).
+	RightStripeWidth = unit.Dp(30)
+	// IslandGap is the 4 dp gutter separating the Sidebar Island, grid
+	// columns, and grid rows on the AppBg chrome.
+	IslandGap = SpaceXS
+	// TopBarHeight is the unified top bar height across desktop platforms.
+	TopBarHeight = Tab
+	// StatusBarHeight is the full-width bottom status bar visual height.
+	StatusBarHeight = unit.Dp(22)
+	// RailIconSize is the icon size centered inside 24 dp rail/stripe buttons.
+	RailIconSize = unit.Dp(15)
 	// MainSlotMinWidth is the main slot's minimum width.
 	MainSlotMinWidth = unit.Dp(520)
 	// SlotMinWidth is a regular slot's minimum width and the drawer width a
@@ -97,9 +110,10 @@ const (
 	SlotMinWidth = unit.Dp(300)
 	// SlotMinHeight is the minimum height of every grid row.
 	SlotMinHeight = unit.Dp(160)
-	// SlotHeaderHeight is a regular slot's header bar.
-	SlotHeaderHeight = unit.Dp(36)
-	// EdgeTabWidth is the narrow-window tab strip on the right edge.
+	// SlotHeaderHeight is the uniform header bar height of Sidebar and Slot islands.
+	SlotHeaderHeight = unit.Dp(30)
+	// EdgeTabWidth is the legacy narrow-window tab strip on the right edge;
+	// retained until FUG-94 migrates folded slots onto RightStripeWidth.
 	EdgeTabWidth = unit.Dp(40)
 	// DropEdgeWidth is the width of a column-edge drop zone at a column's
 	// edge during a drag (§5.3).

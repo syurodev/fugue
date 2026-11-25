@@ -5,6 +5,8 @@ import (
 	"strings"
 
 	"gioui.org/layout"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/kit"
@@ -353,71 +355,90 @@ func (s *screens) layoutPolicyBanner(env *kit.Env, gtx *layout.Context) layout.D
 	return dims
 }
 
-// layoutSidebarPanel draws the sidebar of the selected rail item (§5.3): a
-// collapse toggle on top, then the rail's own list — the chat rail's
-// workspaces and sessions, the team and module rails their placeholders.
-// The utility rows open their slots; a row click opens the session in the
-// main slot.
+// layoutSidebarPanel draws the Sidebar Island's contents (§5.3, FUG-93): a
+// 30 dp header bar aligned with the slot headers, followed by the selected rail
+// mode's list — workspaces and sessions for Chat, teams for Team, or modules
+// for Modules — without utility rows.
 func (s *screens) layoutSidebarPanel(gtx *layout.Context, env *kit.Env) layout.Dimensions {
 	gtx.Constraints.Max.X = min(gtx.Constraints.Max.X, gtx.Dp(theme.SidebarWidth))
-	var rows []layout.FlexChild
+	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			local := gtx
+			return s.layoutSidebarIslandHeader(env, &local)
+		}),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			local := gtx
+			switch s.grid.rail {
+			case railChat:
+				return layout.Flex{Axis: layout.Vertical}.Layout(local,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						local := gtx
+						return s.layoutPolicyBanner(env, &local)
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						local := gtx
+						return layout.Inset{Top: theme.SpaceXS}.Layout(local, func(gtx layout.Context) layout.Dimensions {
+							local := gtx
+							return s.layoutSidebarContent(env, &local)
+						})
+					}),
+				)
+			case railTeam:
+				return s.layoutTeamsSidebar(&local, env)
+			case railModules:
+				return s.layoutSidebarSoon(env, &local, "Modules", "Registered modules list here in install order.")
+			}
+			return layout.Dimensions{}
+		}),
+	)
+}
+
+func (s *screens) layoutSidebarIslandHeader(env *kit.Env, gtx *layout.Context) layout.Dimensions {
+	w := gtx.Constraints.Max.X
+	h := gtx.Dp(theme.SlotHeaderHeight)
+	if w <= 0 || h <= 0 {
+		return layout.Dimensions{}
+	}
+	title := "Workspaces"
 	switch s.grid.rail {
 	case railChat:
-		rows = append(rows,
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				return s.layoutPolicyBanner(env, &local)
-			}),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				return s.layoutInboxRow(env, &local)
-			}),
-			spacerH(theme.SpaceXXS),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				return s.layoutAccountsRow(env, &local)
-			}),
-			spacerH(theme.SpaceXXS),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				return s.layoutSettingsRow(env, &local)
-			}),
-			spacerH(theme.SpaceXXS),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				return s.layoutSecretsRow(env, &local)
-			}),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				return s.layoutSidebarDivider(env, &local)
-			}),
-			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				local := gtx
-				header, ev := s.header.Layout(env, &local, &kit.SectionHeaderProps{
-					Label:  "Workspaces",
-					Inset:  theme.SpaceLG,
-					Action: &kit.IconButtonProps{Icon: kit.IconPlus, Label: "New workspace"},
-				}, func(gtx *layout.Context) layout.Dimensions {
-					return s.layoutSidebarContent(env, gtx)
-				})
-				if ev.ActionClick {
-					s.dlg.create.open()
-				}
-				if ev.Err != nil {
-					s.fail(ev.Err)
-				}
-				return header
-			}),
-		)
 	case railTeam:
-		return s.layoutTeamsSidebar(gtx, env)
+		title = teamLabel
 	case railModules:
-		rows = append(rows, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			return s.layoutSidebarSoon(env, &local, "Modules", "Registered modules list here in install order.")
-		}))
+		title = "Modules"
 	}
-	return layout.Flex{Axis: layout.Vertical}.Layout(*gtx, rows...)
+	c := env.Th.Chrome()
+	padL := gtx.Dp(theme.SpaceMD)
+	padR := gtx.Dp(theme.SpaceXS)
+	btnSize := gtx.Dp(theme.ControlSM)
+	hasAdd := s.grid.rail == railChat
+	rightW := 0
+	if hasAdd {
+		rightW = btnSize
+	}
+	titleH := gtx.Sp(theme.TypeSmall().Line)
+	titleMaxW := max(w-padL-padR-rightW-gtx.Dp(theme.SpaceXS), 0)
+	if titleMaxW > 0 {
+		env.Offset(gtx, image.Pt(padL, max((h-titleH)/2, 0)), func(gtx *layout.Context) {
+			local := *gtx
+			local.Constraints = layout.Constraints{Max: image.Pt(titleMaxW, titleH)}
+			kit.Label(env, &local, theme.TypeSmall(), c.Fg, title)
+		})
+	}
+	if hasAdd && w >= padL+rightW+padR {
+		env.Offset(gtx, image.Pt(w-padR-btnSize, max((h-btnSize)/2, 0)), func(gtx *layout.Context) {
+			local := *gtx
+			props := kit.IconButtonProps{Icon: kit.IconPlus, Label: "New workspace", Variant: kit.IconButtonGhost, Size: kit.SizeSM}
+			clicked, err := s.wsAddBtn.Layout(env, &local, &props)
+			s.fail(err)
+			if clicked {
+				s.dlg.create.open()
+			}
+		})
+	}
+	line := max(gtx.Dp(theme.Hairline), 1)
+	paint.FillShape(gtx.Ops, c.BorderSubtle, clip.Rect(image.Rect(0, h-line, w, h)).Op())
+	return layout.Dimensions{Size: image.Pt(w, h)}
 }
 
 // layoutSidebarSoon is a rail's sidebar before its screens land.
@@ -425,12 +446,4 @@ func (s *screens) layoutSidebarSoon(env *kit.Env, gtx *layout.Context, title, de
 	dims, _, err := s.slotSoonSidebar.Layout(env, gtx, &kit.EmptyStateProps{Icon: kit.IconHelp, Title: title, Description: desc})
 	s.fail(err)
 	return dims
-}
-
-// layoutSidebarDivider is the hairline between the utility rows and the
-// workspaces: inset to the rows' padding, with theme spacing above and below.
-func (s *screens) layoutSidebarDivider(env *kit.Env, gtx *layout.Context) layout.Dimensions {
-	return layout.Inset{Top: theme.SpaceMD, Bottom: theme.SpaceSM, Left: theme.SpaceMD, Right: theme.SpaceMD}.Layout(*gtx, func(gtx layout.Context) layout.Dimensions {
-		return kit.Divider(env, &gtx, kit.DividerProps{Orientation: kit.Horizontal})
-	})
 }

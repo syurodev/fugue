@@ -37,6 +37,10 @@ type SplitPaneProps struct {
 	DefaultRatio float32
 	MinFirst     unit.Dp
 	MinSecond    unit.Dp
+	// HideRestLine skips drawing the resting hairline so an AppBg gutter
+	// between rounded islands stays clean while hover/drag still shows the
+	// 2 dp resize indicator.
+	HideRestLine bool
 }
 
 // SplitPaneState is the long-lived state the caller keeps per SplitPane (UK-02).
@@ -89,7 +93,7 @@ func (s *SplitPaneState) Layout(env *Env, gtx *layout.Context, p SplitPaneProps,
 		firstPx = clampSplit(int(math.Round(float64(newRatio)*float64(total))), total, minFirst, minSecond)
 	}
 
-	s.drawHandle(env, gtx, p.Orientation, firstPx, total, cross)
+	s.drawHandle(env, gtx, p.Orientation, p.HideRestLine, firstPx, total, cross)
 	return newRatio, changed, layout.Dimensions{Size: box}
 }
 
@@ -288,7 +292,7 @@ func applySplitKey(name, decKey, incKey key.Name, curPx, step, lo, hi, total, mi
 	return curPx, false
 }
 
-func (s *SplitPaneState) drawHandle(env *Env, gtx *layout.Context, orient Orientation, firstPx, total, cross int) {
+func (s *SplitPaneState) drawHandle(env *Env, gtx *layout.Context, orient Orientation, hideRestLine bool, firstPx, total, cross int) {
 	hovered := s.hovered || env.previewHover(&s.tag)
 	dragging := s.dragged || env.previewPress(&s.tag)
 	thick := max(gtx.Dp(theme.Hairline), 1)
@@ -301,13 +305,15 @@ func (s *SplitPaneState) drawHandle(env *Env, gtx *layout.Context, orient Orient
 		lineColor = env.Th.Chrome().FgMuted
 	}
 	pos := min(max(firstPx-thick/2, 0), max(total-thick, 0))
-	var bar image.Rectangle
-	if orient == Vertical {
-		bar = image.Rect(0, pos, cross, pos+thick)
-	} else {
-		bar = image.Rect(pos, 0, pos+thick, cross)
+	if !hideRestLine || hovered || dragging {
+		var bar image.Rectangle
+		if orient == Vertical {
+			bar = image.Rect(0, pos, cross, pos+thick)
+		} else {
+			bar = image.Rect(pos, 0, pos+thick, cross)
+		}
+		paint.FillShape(gtx.Ops, lineColor, clip.Rect(bar).Op())
 	}
-	paint.FillShape(gtx.Ops, lineColor, clip.Rect(bar).Op())
 
 	focused := env.FocusVisible(gtx, &s.tag) || env.previewFocus(&s.tag)
 	focusAlpha := followState(env, &s.focusF, focused)

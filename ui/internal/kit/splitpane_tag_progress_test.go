@@ -470,3 +470,39 @@ func wcagRatio(a, b color.NRGBA) float64 {
 	hi, lo := math.Max(la, lb), math.Min(la, lb)
 	return (hi + 0.05) / (lo + 0.05)
 }
+
+// TestSplitPaneHideRestLineStillDragsAndResets verifies that HideRestLine skips
+// resting handle hairlines without breaking pointer drag or double-click reset.
+func TestSplitPaneHideRestLineStillDragsAndResets(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	s := NewSplitPaneState()
+	p := SplitPaneProps{
+		Orientation:  Horizontal,
+		Ratio:        0.5,
+		DefaultRatio: 0.4,
+		MinFirst:     unit.Dp(40),
+		MinSecond:    unit.Dp(40),
+		HideRestLine: true,
+	}
+	splitFrame(t, h, s, &p)
+
+	h.router.Queue(pointer.Event{Kind: pointer.Press, Position: f32.Pt(200, 100), Buttons: pointer.ButtonPrimary})
+	splitFrame(t, h, s, &p)
+	h.router.Queue(pointer.Event{Kind: pointer.Move, Position: f32.Pt(280, 100), Buttons: pointer.ButtonPrimary})
+	ratio, changed := splitFrame(t, h, s, &p)
+	if !changed || math.Abs(float64(ratio-0.70)) > 0.01 {
+		t.Fatalf("HideRestLine drag ratio=%v changed=%v, want ~0.70, true", ratio, changed)
+	}
+	h.router.Queue(pointer.Event{Kind: pointer.Release, Position: f32.Pt(280, 100)})
+	splitFrame(t, h, s, &p)
+
+	h.now = h.now.Add(500 * time.Millisecond)
+	h.click(280, 100)
+	h.now = h.now.Add(100 * time.Millisecond)
+	h.click(280, 100)
+	ratio, changed = splitFrame(t, h, s, &p)
+	if !changed || math.Abs(float64(ratio-0.40)) > 0.01 {
+		t.Fatalf("HideRestLine double-click reset ratio=%v changed=%v, want 0.40, true", ratio, changed)
+	}
+}

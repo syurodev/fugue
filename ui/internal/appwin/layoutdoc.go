@@ -293,15 +293,16 @@ func isWorkViewKind(kind SlotKind) bool {
 }
 
 // layoutMinWidthDp is the smallest width the shell needs for cols columns
-// with the sidebar open (desktop-app §5.3): rail, sidebar, the main slot's
-// minimum, and one regular minimum per further column.
+// (desktop-app §5.3, FUG-94): permanent Left Rail + Right Stripe, optional
+// Sidebar Island + IslandGap, main slot minimum, and regular slot minimums +
+// IslandGap gutters.
 func layoutMinWidthDp(cols int, sidebar bool) int {
-	w := int(theme.RailWidth) + int(theme.MainSlotMinWidth)
+	w := int(theme.RailWidth) + int(theme.RightStripeWidth) + int(theme.MainSlotMinWidth)
 	if sidebar {
-		w += int(theme.SidebarWidth)
+		w += int(theme.SidebarWidth) + int(theme.IslandGap)
 	}
 	if cols > 1 {
-		w += (cols - 1) * int(theme.SlotMinWidth)
+		w += (cols - 1) * (int(theme.SlotMinWidth) + int(theme.IslandGap))
 	}
 	return w
 }

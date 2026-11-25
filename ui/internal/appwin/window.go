@@ -350,6 +350,7 @@ drainPosts:
 	sc.drainWorkerResults()
 	sc.applyLivePreferences(env, light, dark)
 	toggleTheme(gtx, env, sc, light, dark)
+	sc.onThemeToggle = func() { sc.applyLivePreferences(env, light, dark) }
 	drawWindow(gtx, env, sc)
 	if coord != nil {
 		sc.openSlotWindow(coord.openNew)
@@ -416,21 +417,25 @@ func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 			systemPxToDp(gtx, env, sc.deviceMetric, gtx.Constraints.Max.Y),
 		)
 	}
-	barH := sc.titleBar.layout(env, gtx)
-	shell := *gtx
-	shell.Constraints.Max.Y = max(shell.Constraints.Max.Y-barH, 0)
-	shell.Constraints.Min.Y = min(shell.Constraints.Min.Y, shell.Constraints.Max.Y)
+	barH := sc.titleBar.layout(env, gtx, sc)
+	statusH := 0
+	if !sc.vaultGate.active(sc.vault) {
+		statusH = gtx.Dp(theme.StatusBarHeight)
+	}
+	totalW, totalH := gtx.Constraints.Max.X, gtx.Constraints.Max.Y
+	bodyH := max(totalH-barH-statusH, 0)
 	env.Offset(gtx, image.Pt(0, barH), func(gtx *layout.Context) {
-		pad := gtx.Dp(theme.SpaceXS)
-		inner := shell
-		inner.Constraints.Max = image.Pt(max(shell.Constraints.Max.X-pad, 0), max(shell.Constraints.Max.Y-2*pad, 0))
-		inner.Constraints.Min = inner.Constraints.Max
-		env.Offset(gtx, image.Pt(0, pad), func(gtx *layout.Context) {
-			local := inner
-			local.Ops = gtx.Ops
-			sc.layout(&local, env)
-		})
+		local := *gtx
+		local.Constraints = layout.Exact(image.Pt(totalW, bodyH))
+		sc.layout(&local, env)
 	})
+	if statusH > 0 && totalH >= barH+statusH {
+		env.Offset(gtx, image.Pt(0, totalH-statusH), func(gtx *layout.Context) {
+			local := *gtx
+			local.Constraints = layout.Exact(image.Pt(totalW, statusH))
+			sc.layoutStatusBar(&local, env)
+		})
+	}
 	// The start and workspace dialogs (F10.4b, F10.14), the active-session
 	// close confirmation (F10.5e) draw over the whole window, last, with the
 	// full frame's gtx: the scrim dims everything beneath whichever dialog is

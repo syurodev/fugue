@@ -105,15 +105,15 @@ type slotGrid struct {
 	arrangeMenu *kit.MenuState
 	popFor      string
 	// buttons of the chrome: per cell the arrange and close buttons, per
-	// folded cell the edge tab, and the rail's and collapsed sidebar's own
-	// buttons.
+	// folded cell the stripe tab, the rail buttons, and the Right Stripe
+	// companion slot buttons.
 	arrangeBtns   map[string]*kit.IconButtonState
 	closeBtns     map[string]*kit.IconButtonState
 	actionBtns    map[string]*kit.IconButtonState
 	tabBtns       map[string]*kit.IconButtonState
 	railBtns      map[railItem]*kit.IconButtonState
+	stripeBtns    map[SlotKind]*kit.IconButtonState
 	railY         motion.Follower
-	sidebarBtn    *kit.IconButtonState
 	sidebarOpenF  motion.Follower
 	sidebarFadeF  motion.Follower
 	wasTempFolded bool
@@ -165,8 +165,8 @@ func newSlotGrid() *slotGrid {
 		actionBtns:     map[string]*kit.IconButtonState{},
 		tabBtns:        map[string]*kit.IconButtonState{},
 		railBtns:       map[railItem]*kit.IconButtonState{},
+		stripeBtns:     map[SlotKind]*kit.IconButtonState{},
 		railY:          motion.NewFollower(motion.Smooth()),
-		sidebarBtn:     kit.NewIconButtonState(),
 		sidebarOpenF:   motion.NewFollower(motion.Smooth()),
 		sidebarFadeF:   motion.NewFollower(motion.Snappy()),
 		drawerPresence: motion.NewPresence(motion.Smooth(), motion.Exit()),
@@ -189,6 +189,8 @@ func (g *slotGrid) resetShellMotion() {
 	g.railY = motion.NewFollower(motion.Smooth())
 	g.sidebarOpenF = motion.NewFollower(motion.Smooth())
 	g.sidebarFadeF = motion.NewFollower(motion.Snappy())
+	clear(g.railBtns)
+	clear(g.stripeBtns)
 	clear(g.anims)
 	g.closing = nil
 }

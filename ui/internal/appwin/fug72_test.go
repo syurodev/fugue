@@ -36,23 +36,19 @@ func settleShellFrames(t *testing.T, env *kit.Env, sc *screens, router *input.Ro
 }
 
 func railCenter(env *kit.Env, sc *screens, gtx *layout.Context, index int) f32.Point {
-	barH := sc.titleBar.layout(env, gtx)
-	pad := gtx.Dp(theme.SpaceXS)
+	barH := sc.titleBar.layout(env, gtx, sc)
 	failGtx := *gtx
 	failGtx.Constraints.Min = image.Point{}
 	failH := sc.failure.layout(env, &failGtx, sc).Size.Y
 	w := gtx.Dp(theme.RailWidth)
-	btnW := gtx.Dp(theme.ControlLG)
+	btnW := gtx.Dp(theme.ControlSM)
 	gap := gtx.Dp(theme.SpaceXS)
-	return f32.Pt(float32(w)/2, float32(barH+pad+failH+gap+index*(btnW+gap))+float32(btnW)/2)
+	return f32.Pt(float32(w)/2, float32(barH+failH+gap+index*(btnW+gap))+float32(btnW)/2)
 }
 
-func sidebarTogglePts(gtx *layout.Context, size image.Point) (collapsePt, expandPt f32.Point) {
-	railW := gtx.Dp(theme.RailWidth)
-	footerH := gtx.Dp(theme.ControlLG)
-	collapsePt = f32.Pt(float32(railW)/2, float32(size.Y)-float32(footerH)/2)
-	expandPt = f32.Pt(float32(railW)/2, float32(size.Y-gtx.Dp(theme.SpaceXXS)-gtx.Dp(theme.ControlSM)/2))
-	return collapsePt, expandPt
+func sidebarTogglePts(env *kit.Env, sc *screens, gtx *layout.Context) (collapsePt, expandPt f32.Point) {
+	pt := railCenter(env, sc, gtx, 0)
+	return pt, pt
 }
 
 func clickShellAt(t *testing.T, env *kit.Env, sc *screens, router *input.Router, size image.Point, now time.Time, pt f32.Point) {
@@ -104,7 +100,7 @@ func TestFUG72RailHighlightFollowsClickAndSlides(t *testing.T) {
 
 	var ops op.Ops
 	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}), Constraints: layout.Exact(size)}
-	gap, btnW := float32(gtx.Dp(theme.SpaceXS)), float32(gtx.Dp(theme.ControlLG))
+	gap, btnW := float32(gtx.Dp(theme.SpaceXS)), float32(gtx.Dp(theme.ControlSM))
 	steps := []struct {
 		pt       f32.Point
 		wantRail railItem
@@ -142,19 +138,16 @@ func TestFUG72RailHighlightFollowsClickAndSlides(t *testing.T) {
 }
 
 func drawnSidebarWidth(gtx *layout.Context, sc *screens, size image.Point) int {
-	pad := gtx.Dp(theme.SpaceXS)
-	totalW := max(size.X-pad, 0)
+	totalW := size.X
 	railW := min(gtx.Dp(theme.RailWidth), totalW)
-	gutter := gtx.Dp(theme.SpaceXS)
-	maxSideW := min(max(totalW-railW-gutter, 0), gtx.Dp(theme.SidebarWidth))
+	rightW := min(gtx.Dp(theme.RightStripeWidth), max(totalW-railW, 0))
+	gutter := gtx.Dp(theme.IslandGap)
+	maxSideW := min(max(totalW-railW-rightW-gutter, 0), gtx.Dp(theme.SidebarWidth))
 	return scaledPx(maxSideW, sc.grid.sidebarOpenF.Value())
 }
 
 func drawnColumnHeight(gtx *layout.Context, sc *screens, size image.Point) int {
-	pad := gtx.Dp(theme.SpaceXS)
-	totalH := max(size.Y-2*pad, 0)
-	showLock := !sc.vault.Locked() && sc.vaultWorker != nil
-	return max(totalH-shellFooterHeight(gtx, showLock, sc.grid.sidebarOpenF.Value()), 0)
+	return max(size.Y-sc.titleBar.height(gtx)-gtx.Dp(theme.StatusBarHeight), 0)
 }
 
 func assertSidebarSettled(t *testing.T, env *kit.Env, sc *screens, gtx *layout.Context, size image.Point, wantW int, wantCollapsed bool) {
@@ -164,10 +157,10 @@ func assertSidebarSettled(t *testing.T, env *kit.Env, sc *screens, gtx *layout.C
 		t.Fatalf("collapsed=%v (want %v) sideW=%d (want %d) immediate=%v",
 			sc.grid.doc.SidebarCollapsed, wantCollapsed, sideW, wantW, wantsImmediateFrame(env))
 	}
-	pad := gtx.Dp(theme.SpaceXS)
-	totalW := max(size.X-pad, 0)
+	totalW := size.X
 	railW := min(gtx.Dp(theme.RailWidth), totalW)
-	wantGridW := max(totalW-(railW+sideW+scaledPx(gtx.Dp(theme.SpaceXS), sc.grid.sidebarOpenF.Value())), 0)
+	rightW := min(gtx.Dp(theme.RightStripeWidth), max(totalW-railW, 0))
+	wantGridW := max(totalW-(railW+sideW+scaledPx(gtx.Dp(theme.IslandGap), sc.grid.sidebarOpenF.Value()))-rightW, 0)
 	if gotGridW := sc.grid.lastArea.Dx(); gotGridW != wantGridW {
 		t.Fatalf("grid area width = %d, want %d (sideW=%d)", gotGridW, wantGridW, sideW)
 	}
@@ -185,9 +178,9 @@ func TestFUG72SidebarCollapseExpandMotion(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 
 	var ops op.Ops
-	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
+	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}), Constraints: layout.Exact(size)}
 	fullW := gtx.Dp(theme.SidebarWidth)
-	collapsePt, expandPt := sidebarTogglePts(&gtx, size)
+	collapsePt, expandPt := sidebarTogglePts(env, sc, &gtx)
 
 	settleShellFrames(t, env, sc, router, size, &now)
 	assertSidebarSettled(t, env, sc, &gtx, size, fullW, false)
@@ -260,8 +253,8 @@ func TestFUG72SidebarFooterColumnHeightSmooth(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 
 	var ops op.Ops
-	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
-	collapsePt, expandPt := sidebarTogglePts(&gtx, size)
+	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}), Constraints: layout.Exact(size)}
+	collapsePt, expandPt := sidebarTogglePts(env, sc, &gtx)
 	lockJumpPx := gtx.Dp(theme.ControlSM) + gtx.Dp(theme.SpaceSM) + gtx.Dp(theme.SpaceXS)
 
 	settleShellFrames(t, env, sc, router, size, &now)
@@ -287,13 +280,14 @@ func TestFUG72SidebarFooterColumnHeightSmooth(t *testing.T) {
 		t.Fatalf("%s: did not settle within 100 frames", label)
 	}
 
+	wantH := size.Y - gtx.Dp(theme.TopBarHeight) - gtx.Dp(theme.StatusBarHeight)
 	checkSmooth("collapse", collapsePt)
-	if got, want := drawnColumnHeight(&gtx, sc, size), size.Y-2*gtx.Dp(theme.SpaceXS)-gtx.Dp(theme.ControlLG)-lockJumpPx; got != want {
-		t.Fatalf("collapsed colH = %d, want %d", got, want)
+	if got := drawnColumnHeight(&gtx, sc, size); got != wantH {
+		t.Fatalf("collapsed colH = %d, want %d", got, wantH)
 	}
 	checkSmooth("expand", expandPt)
-	if got, want := drawnColumnHeight(&gtx, sc, size), size.Y-2*gtx.Dp(theme.SpaceXS)-gtx.Dp(theme.ControlLG); got != want {
-		t.Fatalf("expanded colH = %d, want %d", got, want)
+	if got := drawnColumnHeight(&gtx, sc, size); got != wantH {
+		t.Fatalf("expanded colH = %d, want %d", got, wantH)
 	}
 }
 
@@ -309,9 +303,9 @@ func TestFUG72SidebarReducedMotionInstant(t *testing.T) {
 	now := time.Unix(1_700_000_000, 0)
 
 	var ops op.Ops
-	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
+	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}), Constraints: layout.Exact(size)}
 	fullW := gtx.Dp(theme.SidebarWidth)
-	collapsePt, expandPt := sidebarTogglePts(&gtx, size)
+	collapsePt, expandPt := sidebarTogglePts(env, sc, &gtx)
 
 	runShellEnvFrame(t, env, sc, router, size, now)
 
@@ -367,5 +361,37 @@ func TestFUG72SidebarNoAnimOnTempFoldAndRestore(t *testing.T) {
 	runShellEnvFrame(t, env, sc, router, wide, now)
 	if sideW := drawnSidebarWidth(&gtx, sc, wide); sideW != 0 || wantsImmediateFrame(env) {
 		t.Fatalf("restored collapsed sideW=%d immediate=%v", sideW, wantsImmediateFrame(env))
+	}
+}
+
+// TestFUG72ClickingInactiveRailExpandsCollapsedSidebar verifies the FUG-93
+// JetBrains rail toggle rule: clicking the active rail item collapses the
+// sidebar, and clicking an inactive rail item switches sections and expands it.
+func TestFUG72ClickingInactiveRailExpandsCollapsedSidebar(t *testing.T) {
+	t.Parallel()
+	sc := newFUG65TestScreens(t)
+	env := newFUG65Env(t, true)
+	env.ReducedMotion = true
+	router := new(input.Router)
+	size := image.Pt(1200, 800)
+	now := time.Unix(1_700_000_000, 0)
+
+	var ops op.Ops
+	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}), Constraints: layout.Exact(size)}
+	runShellEnvFrame(t, env, sc, router, size, now)
+
+	// Clicking active Chat collapses the sidebar.
+	now = now.Add(16 * time.Millisecond)
+	clickShellAt(t, env, sc, router, size, now, railCenter(env, sc, &gtx, 0))
+	if !sc.grid.doc.SidebarCollapsed {
+		t.Fatal("clicking active rail item should collapse sidebar")
+	}
+
+	// Clicking inactive Team switches rail to Team AND re-expands sidebar.
+	now = now.Add(16 * time.Millisecond)
+	clickShellAt(t, env, sc, router, size, now, railCenter(env, sc, &gtx, 1))
+	assertRailConsistent(t, sc, railTeam, KindTeam)
+	if sc.grid.doc.SidebarCollapsed {
+		t.Fatal("clicking inactive rail item while collapsed should expand sidebar")
 	}
 }

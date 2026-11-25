@@ -318,25 +318,25 @@ func (g *slotGrid) drawClosingSlot(gtx *layout.Context, env *kit.Env, sc *screen
 	}
 	disabled := gtx.Disabled()
 	defer pointer.PassOp{}.Push(disabled.Ops).Pop()
-	defer clip.Rect(cs.rect).Push(disabled.Ops).Pop()
 	defer paint.PushOpacity(disabled.Ops, alpha).Pop()
+	rr := clip.UniformRRect(cs.rect, disabled.Dp(theme.RadiusIsland))
+	paint.FillShape(disabled.Ops, env.Th.Chrome().CanvasBg, rr.Op(disabled.Ops))
+	stack := rr.Push(disabled.Ops)
 	h := min(disabled.Dp(theme.SlotHeaderHeight), cs.rect.Dy())
 	head := image.Rect(cs.rect.Min.X, cs.rect.Min.Y, cs.rect.Max.X, cs.rect.Min.Y+h)
 	if cs.rect.Dx() >= disabled.Dp(theme.ControlSM)*3 {
 		g.drawHeaderBar(&disabled, env, sc, Pos{Col: 1}, cs.ref, head, &headerButtons{ghost: true})
-	} else if !head.Empty() {
-		paint.FillShape(disabled.Ops, env.Th.Chrome().CanvasBg, clip.Rect(head).Op())
 	}
 	body := image.Rect(cs.rect.Min.X, cs.rect.Min.Y+h, cs.rect.Max.X, cs.rect.Max.Y)
-	if !body.Empty() {
-		paint.FillShape(disabled.Ops, env.Th.Chrome().CanvasBg, clip.Rect(body).Op())
-		if !g.hasSingletonLiveConflict(cs.ref) {
-			env.Offset(&disabled, body.Min, func(gtx *layout.Context) {
-				local := *gtx
-				local.Constraints = layout.Constraints{Max: body.Size()}
-				defer clip.Rect{Max: body.Size()}.Push(local.Ops).Pop()
-				sc.layoutClosingSlotBody(&local, env, cs.ref, cs.empty)
-			})
-		}
+	if !body.Empty() && !g.hasSingletonLiveConflict(cs.ref) {
+		env.Offset(&disabled, body.Min, func(gtx *layout.Context) {
+			local := *gtx
+			local.Constraints = layout.Constraints{Max: body.Size()}
+			defer clip.Rect{Max: body.Size()}.Push(local.Ops).Pop()
+			sc.layoutClosingSlotBody(&local, env, cs.ref, cs.empty)
+		})
 	}
+	stack.Pop()
+	paint.FillShape(disabled.Ops, env.Th.Chrome().BorderSubtle,
+		clip.Stroke{Path: rr.Path(disabled.Ops), Width: float32(max(disabled.Dp(theme.Hairline), 1))}.Op())
 }
