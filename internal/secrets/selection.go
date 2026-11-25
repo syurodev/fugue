@@ -10,12 +10,11 @@ type candidate struct {
 	priority uint8
 }
 
-func ranked(findings []Finding, priority uint8) []candidate {
-	result := make([]candidate, 0, len(findings))
+func appendRanked(dst []candidate, findings []Finding, priority uint8) []candidate {
 	for _, f := range findings {
-		result = append(result, candidate{finding: f, priority: priority})
+		dst = append(dst, candidate{finding: f, priority: priority})
 	}
-	return result
+	return dst
 }
 
 func compareCandidates(a, b candidate) int {

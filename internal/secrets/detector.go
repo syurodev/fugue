@@ -63,10 +63,14 @@ type Detector struct {
 // New builds an independent detector without reading the environment or vault.
 // It retains only recognized kinds and values with at least eight characters.
 func New(values []KnownValue, options Options) *Detector {
-	d := &Detector{nodes: []node{{edges: make(map[byte]int)}}, allowKeys: make(map[string]bool)}
-	for _, key := range options.AllowKeys {
-		d.allowKeys[normalize(key)] = true
+	var allowKeys map[string]bool
+	if len(options.AllowKeys) > 0 {
+		allowKeys = make(map[string]bool, len(options.AllowKeys))
+		for _, key := range options.AllowKeys {
+			allowKeys[normalize(key)] = true
+		}
 	}
+	d := &Detector{nodes: []node{{}}, allowKeys: allowKeys}
 	d.allowPaths = slices.Clone(options.AllowPaths)
 	for _, v := range values {
 		if validKnown(v) {
@@ -103,13 +107,13 @@ func (d *Detector) Find(text string) []Finding { return d.FindIn(text, "") }
 // FindIn applies path exceptions without rebuilding the known-value automaton.
 // An empty filePath means no path; known values are never excepted.
 func (d *Detector) FindIn(text, filePath string) []Finding {
-	candidates := ranked(d.findKnown(text), 3)
+	candidates := appendRanked(nil, d.findKnown(text), 3)
 	var allowed []Finding
 	if !d.pathAllowed(filePath) {
 		assignments, exceptions := d.findAssignments(text)
 		allowed = exceptions
-		candidates = append(candidates, ranked(findPatterns(text), 2)...)
-		candidates = append(candidates, ranked(assignments, 1)...)
+		candidates = appendRanked(candidates, findPatterns(text), 2)
+		candidates = appendRanked(candidates, assignments, 1)
 	}
 	return selectCandidates(candidates, allowed)
 }
