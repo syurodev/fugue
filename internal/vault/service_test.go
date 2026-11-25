@@ -289,25 +289,25 @@ func TestBytesMethodsClearCallerSlices(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(pw, make([]byte, len(pw))) {
-		t.Fatal("SetupBytes did not clear caller password slice")
+	assertZeroed(t, pw, "SetupBytes caller password slice")
+	sealed, err := s.SealRecord(testBinding(), []byte("setup-dek-check"))
+	if err != nil {
+		t.Fatal(err)
 	}
 	s.Lock()
 	pw2 := []byte(longPassword)
 	if uerr := s.UnlockBytes(t.Context(), pw2); uerr != nil {
 		t.Fatal(uerr)
 	}
-	if !bytes.Equal(pw2, make([]byte, len(pw2))) {
-		t.Fatal("UnlockBytes did not clear caller password slice")
-	}
+	assertZeroed(t, pw2, "UnlockBytes caller password slice")
+	assertOpensRecord(t, s, sealed, []byte("setup-dek-check"))
 	s.Lock()
 	recCopy := bytes.Clone(rec)
 	if rerr := s.UnlockWithRecoveryBytes(t.Context(), recCopy); rerr != nil {
 		t.Fatal(rerr)
 	}
-	if !bytes.Equal(recCopy, make([]byte, len(recCopy))) {
-		t.Fatal("UnlockWithRecoveryBytes did not clear caller recovery slice")
-	}
+	assertZeroed(t, recCopy, "UnlockWithRecoveryBytes caller recovery slice")
+	assertOpensRecord(t, s, sealed, []byte("setup-dek-check"))
 	clear(rec)
 	flakySvc, err := NewService(t.Context(), &flakyStore{inner: NewMemoryKeyringStore(nil), existsErr: errStore}, ids.NewSequence("inc-"))
 	if err != nil {
@@ -317,7 +317,20 @@ func TestBytesMethodsClearCallerSlices(t *testing.T) {
 	if _, serr := flakySvc.SetupBytes(t.Context(), pwFail); errcode.CodeOf(serr) != errcode.Internal {
 		t.Fatalf("SetupBytes on failing store = %v, want internal", serr)
 	}
-	if !bytes.Equal(pwFail, make([]byte, len(pwFail))) {
-		t.Fatal("SetupBytes did not clear caller password slice on error")
+	assertZeroed(t, pwFail, "SetupBytes caller password slice on error")
+}
+
+func assertZeroed(t *testing.T, buf []byte, label string) {
+	t.Helper()
+	if !bytes.Equal(buf, make([]byte, len(buf))) {
+		t.Fatalf("%s was not cleared", label)
+	}
+}
+
+func assertOpensRecord(t *testing.T, s *Service, sealed, want []byte) {
+	t.Helper()
+	opened, err := s.OpenRecord(testBinding(), sealed)
+	if err != nil || !bytes.Equal(opened, want) {
+		t.Fatalf("OpenRecord = (%q, %v), want %q", opened, err, want)
 	}
 }

@@ -32,6 +32,9 @@ type tb interface {
 // MasterPassword opens the fixture keyring.
 const MasterPassword = "master-pw"
 
+// RecoveryKey opens the fixture keyring via recovery unlock.
+const RecoveryKey = "recovery-secret"
+
 // Keyring returns the minimum-cost keyring, read from the vault's golden
 // vector so there is exactly one copy of it.
 func Keyring(t tb) *crypto.Keyring {

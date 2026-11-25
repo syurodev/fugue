@@ -214,8 +214,42 @@ func TestBytesEntryPointsAndZeroing(t *testing.T) {
 	if !bytes.Equal(dek1, dek2) {
 		t.Fatal("password and recovery DEK mismatch")
 	}
-	// Trigger error path on second wrapDEKBytes inside newKeyringBytes (limit 95 -> fails recovery wrap).
+	clear(dek1)
+	clear(dek2)
+	clear(rec)
+
+	// Trigger error path on second wrapDEKBytes inside newKeyringWithDEKBytes (limit 95 -> fails recovery wrap).
 	if _, _, err := newKeyringBytes(io.LimitReader(newStream(), 95), pass); err == nil {
 		t.Fatal("expected error when random fails during recovery wrap")
+	}
+}
+
+func TestNewKeyringWithDEKBytes(t *testing.T) {
+	t.Parallel()
+	pass := []byte(primaryPhrase)
+	krWithDEK, dek, recWithDEK, err := NewKeyringWithDEKBytes(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(dek)
+	defer clear(recWithDEK)
+	if len(dek) != dekLength {
+		t.Fatalf("DEK length = %d, want %d", len(dek), dekLength)
+	}
+	openedByPW, err := krWithDEK.UnlockWithPasswordBytes(pass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(openedByPW)
+	openedByRec, err := krWithDEK.UnlockWithRecoveryBytes(recWithDEK)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clear(openedByRec)
+	if !bytes.Equal(dek, openedByPW) || !bytes.Equal(dek, openedByRec) {
+		t.Fatal("NewKeyringWithDEKBytes DEK does not match unlocked DEK")
+	}
+	if _, _, _, err := NewKeyringWithDEKBytes(nil); err == nil {
+		t.Fatal("expected error for empty password")
 	}
 }

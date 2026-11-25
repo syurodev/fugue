@@ -17,6 +17,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/redact"
+	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/claude"
@@ -31,7 +32,16 @@ const (
 
 func newTestVaultAppService(t *testing.T, clk clock.Clock) (*vault.Service, *VaultService, *EventHub) {
 	t.Helper()
-	store := vault.NewMemoryKeyringStore(nil)
+	return newVaultAppServiceWithStore(t, clk, vault.NewMemoryKeyringStore(nil))
+}
+
+func newCheapVaultAppService(t *testing.T, clk clock.Clock) (*vault.Service, *VaultService, *EventHub) {
+	t.Helper()
+	return newVaultAppServiceWithStore(t, clk, vault.NewMemoryKeyringStore(cheapvault.Keyring(t)))
+}
+
+func newVaultAppServiceWithStore(t *testing.T, clk clock.Clock, store vault.KeyringStore) (*vault.Service, *VaultService, *EventHub) {
+	t.Helper()
 	v, err := vault.NewService(t.Context(), store, ids.NewSequence("v-inc-"))
 	if err != nil {
 		t.Fatal(err)
@@ -70,19 +80,12 @@ func TestVaultRPCsDenySessionAndNonLocalPrincipalsAtService(t *testing.T) {
 func TestVaultUnlockBackoffAndTypedErrorOnFakeClock(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Unix(1_700_000_000, 0))
-	_, svc, _ := newTestVaultAppService(t, clk)
-
-	if _, err := svc.Unlock(t.Context(), testVaultLocal, []byte(testVaultPassphrase)); errcode.CodeOf(err) != errcode.VaultNotConfigured {
+	_, unconfigured, _ := newTestVaultAppService(t, clk)
+	if _, err := unconfigured.Unlock(t.Context(), testVaultLocal, []byte(testVaultPassphrase)); errcode.CodeOf(err) != errcode.VaultNotConfigured {
 		t.Fatalf("Unlock before Setup code = %v, want %v", errcode.CodeOf(err), errcode.VaultNotConfigured)
 	}
-	res, err := svc.Setup(t.Context(), testVaultLocal, []byte(testVaultPassphrase))
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer res.Clear()
-	if _, lockErr := svc.Lock(t.Context(), testVaultLocal); lockErr != nil {
-		t.Fatal(lockErr)
-	}
+
+	_, svc, _ := newCheapVaultAppService(t, clk)
 
 	// First three failures carry zero/2s backoff.
 	for i := range vaultFreeAttempts {
@@ -90,7 +93,7 @@ func TestVaultUnlockBackoffAndTypedErrorOnFakeClock(t *testing.T) {
 	}
 
 	// Immediately blocked with VaultRateLimited and RetryAfterSeconds=2.
-	_, blockedErr := svc.Unlock(t.Context(), testVaultLocal, []byte(testVaultPassphrase))
+	_, blockedErr := svc.Unlock(t.Context(), testVaultLocal, []byte(cheapvault.MasterPassword))
 	if errcode.CodeOf(blockedErr) != errcode.VaultRateLimited {
 		t.Fatalf("blocked Unlock code = %v, want %v", errcode.CodeOf(blockedErr), errcode.VaultRateLimited)
 	}
@@ -109,7 +112,7 @@ func TestVaultUnlockBackoffAndTypedErrorOnFakeClock(t *testing.T) {
 
 	// Advance 4s and unlock successfully; backoff resets completely.
 	clk.Advance(4 * time.Second)
-	if _, uerr := svc.Unlock(t.Context(), testVaultLocal, []byte(testVaultPassphrase)); uerr != nil {
+	if _, uerr := svc.Unlock(t.Context(), testVaultLocal, []byte(cheapvault.MasterPassword)); uerr != nil {
 		t.Fatalf("unlock after backoff: %v", uerr)
 	}
 	stOK := assertVaultRetryAfter(t, svc, 0)
@@ -141,13 +144,11 @@ func assertVaultRetryAfter(t *testing.T, svc *VaultService, want int64) VaultSta
 func TestVaultSetupRefusesAlreadyConfiguredAndNeverOverwrites(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Unix(1_700_000_000, 0))
-	v, svc, _ := newTestVaultAppService(t, clk)
+	v, svc, _ := newCheapVaultAppService(t, clk)
 
-	res, err := svc.Setup(t.Context(), testVaultLocal, []byte(testVaultPassphrase))
-	if err != nil {
+	if _, err := svc.Unlock(t.Context(), testVaultLocal, []byte(cheapvault.MasterPassword)); err != nil {
 		t.Fatal(err)
 	}
-	res.Clear()
 
 	sealed, err := v.SealRecord(vault.RecordBinding{RecordType: "vault-check", RecordID: "1", KeyID: "k"}, []byte("keep-me"))
 	if err != nil {
@@ -164,7 +165,7 @@ func TestVaultSetupRefusesAlreadyConfiguredAndNeverOverwrites(t *testing.T) {
 		}
 	}
 
-	if _, uerr := svc.Unlock(t.Context(), testVaultLocal, []byte(testVaultPassphrase)); uerr != nil {
+	if _, uerr := svc.Unlock(t.Context(), testVaultLocal, []byte(cheapvault.MasterPassword)); uerr != nil {
 		t.Fatalf("original passphrase failed after rejected repeat Setup: %v", uerr)
 	}
 	opened, err := v.OpenRecord(vault.RecordBinding{RecordType: "vault-check", RecordID: "1", KeyID: "k"}, sealed)
@@ -235,9 +236,9 @@ func TestVaultSecretAbsentFromLogsErrorsTopicsAndFormatting(t *testing.T) {
 	t.Cleanup(func() { slog.SetDefault(oldLogger) })
 
 	clk := clock.NewFake(time.Unix(1_700_000_000, 0))
-	_, svc, hub := newTestVaultAppService(t, clk)
+	_, svc, hub := newCheapVaultAppService(t, clk)
 
-	res := mustSetupCleared(t, svc)
+	res := mustSeededSetupResult(t, svc)
 	recPlain := string(res.RecoveryKey)
 	defer res.Clear()
 	assertSetupResultRedacted(t, res, recPlain, logs)
@@ -249,21 +250,24 @@ func TestVaultSecretAbsentFromLogsErrorsTopicsAndFormatting(t *testing.T) {
 	defer sub.Close()
 
 	topicOut, badErr := exerciseVaultUnlockAndCollectTopic(t, svc, sub, res.RecoveryKey)
-	assertNoSecretsInOutputs(t, []string{testVaultPassphrase, testVaultWrongPass, recPlain},
+	assertNoSecretsInOutputs(t, []string{cheapvault.MasterPassword, testVaultPassphrase, testVaultWrongPass, recPlain},
 		[]string{logs.String(), topicOut, fmt.Sprint(badErr)})
 }
 
-func mustSetupCleared(t *testing.T, svc *VaultService) VaultSetupResult {
+func mustSeededSetupResult(t *testing.T, svc *VaultService) VaultSetupResult {
 	t.Helper()
 	pass := []byte(testVaultPassphrase)
-	res, err := svc.Setup(t.Context(), testVaultLocal, pass)
-	if err != nil {
-		t.Fatal(err)
+	if _, err := svc.Setup(t.Context(), testVaultLocal, pass); errcode.CodeOf(err) != errcode.VaultAlreadyConfigured {
+		t.Fatalf("repeat Setup code = %v, want %v", errcode.CodeOf(err), errcode.VaultAlreadyConfigured)
 	}
 	if !bytes.Equal(pass, make([]byte, len(pass))) {
 		t.Fatal("Setup did not zero caller passphrase slice")
 	}
-	return res
+	st, err := svc.Unlock(t.Context(), testVaultLocal, []byte(cheapvault.MasterPassword))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return VaultSetupResult{Status: st, RecoveryKey: []byte(cheapvault.RecoveryKey)}
 }
 
 func assertSetupResultRedacted(t *testing.T, res VaultSetupResult, recPlain string, logs *vaultLogBuffer) {
@@ -320,15 +324,7 @@ func assertNoSecretsInOutputs(t *testing.T, secretsList, outputs []string) {
 func TestVaultConcurrentUnlockAttemptsCannotBypassBackoff(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Unix(1_700_000_000, 0))
-	_, svc, _ := newTestVaultAppService(t, clk)
-	res, err := svc.Setup(t.Context(), testVaultLocal, []byte(testVaultPassphrase))
-	if err != nil {
-		t.Fatal(err)
-	}
-	res.Clear()
-	if _, lerr := svc.Lock(t.Context(), testVaultLocal); lerr != nil {
-		t.Fatal(lerr)
-	}
+	_, svc, _ := newCheapVaultAppService(t, clk)
 
 	const attempts = 20
 	var kdfCalls atomic.Int32

@@ -110,22 +110,19 @@ func (s *Service) SetupBytes(ctx context.Context, masterPassword []byte) ([]byte
 	if exists {
 		return nil, errcode.New(errcode.AlreadyExists, "vault is already configured")
 	}
-	keyring, recoveryKey, err := crypto.NewKeyringBytes(secret)
+	keyring, dek, recoveryKey, err := crypto.NewKeyringWithDEKBytes(secret)
 	if err != nil {
 		return nil, fail("create the keyring", err)
 	}
 	ok := false
 	defer func() {
 		if !ok {
+			clear(dek)
 			clear(recoveryKey)
 		}
 	}()
 	if err = s.store.Save(ctx, keyring); err != nil {
 		return nil, fail("save the keyring", err)
-	}
-	dek, err := keyring.UnlockWithPasswordBytes(secret)
-	if err != nil {
-		return nil, fail("unlock the new keyring", err)
 	}
 	s.install(dek)
 	ok = true
