@@ -156,6 +156,21 @@ tasks:
         cmd: go tool -n {{.ITEM}}
       - "{{.GOLANGCI_LINT}} --version"
 
+  build:
+    desc: Build the host and the desktop app side by side into bin/
+    # The app starts the host binary named fugue from its own directory, so
+    # both must land in the same place; `go run` would put the app in a
+    # temporary directory with no host beside it.
+    cmds:
+      - go build -o bin/fugue ./cmd/fugue
+      - go -C ui build -o ../bin/fugue-app ./cmd/fugue-app
+
+  run:
+    desc: Build and start the desktop app, which starts its host (set SYNX_FUGUE_DATA_DIR to an absolute path for a scratch data directory)
+    cmds:
+      - task: build
+      - ./bin/fugue-app
+
   vet:
     desc: Custom analyzers of tools/fuguevet through go vet
     cmds:

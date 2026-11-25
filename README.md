@@ -13,6 +13,18 @@ vendors work as a team. The native agent harness follows in stage B.
 - Quality rules and how they are enforced: [docs/quality-gates.md](docs/quality-gates.md)
 - Rules for agents working in this repository: [AGENTS.md](AGENTS.md)
 
+## Run from source
+
+```sh
+task run                                             # build bin/fugue and bin/fugue-app, start the app
+SYNX_FUGUE_DATA_DIR=/tmp/fugue-dev task run          # same, with a scratch data directory
+task build                                           # build only
+```
+
+The app starts its host (`fugue serve`) from the binary next to it, so both are built into
+`bin/`. Without `SYNX_FUGUE_DATA_DIR` it uses your real data directory and your real vendor
+logins.
+
 ## License
 
 Apache License 2.0. See [LICENSE](LICENSE).
