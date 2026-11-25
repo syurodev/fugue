@@ -50,6 +50,14 @@ func NewKeyringBytes(masterPassword []byte) (*Keyring, []byte, error) {
 	return newKeyringBytes(rand.Reader, masterPassword)
 }
 
+// NewKeyringWithDEKBytes generates a random DEK, wraps it under masterPassword
+// bytes and under a freshly generated recovery key, and returns the keyring,
+// plaintext DEK, and recovery key. Callers must clear the DEK and recovery key
+// when done.
+func NewKeyringWithDEKBytes(masterPassword []byte) (*Keyring, []byte, []byte, error) {
+	return newKeyringWithDEKBytes(rand.Reader, masterPassword)
+}
+
 func newKeyring(random io.Reader, masterPassword string) (*Keyring, string, error) {
 	buf := []byte(masterPassword)
 	defer clear(buf)
@@ -62,31 +70,46 @@ func newKeyring(random io.Reader, masterPassword string) (*Keyring, string, erro
 }
 
 func newKeyringBytes(random io.Reader, masterPassword []byte) (*Keyring, []byte, error) {
+	kr, dek, recoveryKey, err := newKeyringWithDEKBytes(random, masterPassword)
+	if err != nil {
+		return nil, nil, err
+	}
+	clear(dek)
+	return kr, recoveryKey, nil
+}
+
+func newKeyringWithDEKBytes(random io.Reader, masterPassword []byte) (*Keyring, []byte, []byte, error) {
 	if len(masterPassword) == 0 {
-		return nil, nil, errcode.New(errcode.InvalidArgument, "master password is required")
+		return nil, nil, nil, errcode.New(errcode.InvalidArgument, "master password is required")
 	}
 	dek := make([]byte, dekLength)
-	defer clear(dek)
+	ok := false
+	defer func() {
+		if !ok {
+			clear(dek)
+		}
+	}()
 	if _, err := io.ReadFull(random, dek); err != nil {
-		return nil, nil, errcode.Wrap(errcode.Internal, "random source failed", err)
+		return nil, nil, nil, errcode.Wrap(errcode.Internal, "random source failed", err)
 	}
 	masterKDF, masterWrapped, err := wrapDEKBytes(random, keyringMasterAssociatedData(), masterPassword, dek)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	recoveryKey, err := newRecoveryKeyBytes(random)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	recoveryKDF, recoveryWrapped, err := wrapDEKBytes(random, keyringRecoveryAssociatedData(), recoveryKey, dek)
 	if err != nil {
 		clear(recoveryKey)
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
+	ok = true
 	return &Keyring{
 		Version: keyringVersion, MasterKDF: masterKDF, MasterWrapped: masterWrapped,
 		RecoveryKDF: recoveryKDF, RecoveryWrapped: recoveryWrapped,
-	}, recoveryKey, nil
+	}, dek, recoveryKey, nil
 }
 
 // UnlockWithPassword returns the plaintext DEK when masterPassword is correct.

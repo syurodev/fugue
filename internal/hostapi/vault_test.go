@@ -14,6 +14,7 @@ import (
 	"github.com/syurodev/fugue/internal/app"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/redact"
+	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
 	"github.com/syurodev/fugue/pkg/pb/fugue/host/v1/hostv1connect"
 	vaultv1 "github.com/syurodev/fugue/pkg/pb/fugue/vault/v1"
@@ -87,7 +88,7 @@ func TestVaultHostAPISecretAbsentFromLogsErrorsAndProtoFormatting(t *testing.T) 
 	slog.SetDefault(slog.New(redact.NewJSONHandler(logs, slog.LevelDebug)))
 	t.Cleanup(func() { slog.SetDefault(previous) })
 
-	var recPlain, badErrText, events string
+	var badErrText, events string
 	// Registered before the host starts, so (LIFO) it runs after the host's
 	// drain and close: no background goroutine writes to logs while we read.
 	t.Cleanup(func() {
@@ -95,7 +96,7 @@ func TestVaultHostAPISecretAbsentFromLogsErrorsAndProtoFormatting(t *testing.T) 
 			return
 		}
 		logOut := logs.String()
-		for _, needle := range []string{testHostVaultPass, testHostVaultWrong, recPlain} {
+		for _, needle := range []string{cheapvault.MasterPassword, testHostVaultWrong, cheapvault.RecoveryKey} {
 			for _, hay := range []string{logOut, events, badErrText} {
 				if strings.Contains(hay, needle) {
 					t.Errorf("protected input leaked in output %q", hay)
@@ -105,7 +106,7 @@ func TestVaultHostAPISecretAbsentFromLogsErrorsAndProtoFormatting(t *testing.T) 
 	})
 
 	vc, stream := startLocalVaultHostAndSubscribe(t)
-	recPlain, badErrText = exerciseVaultHostAPI(t, vc)
+	badErrText = exerciseVaultHostAPI(t, vc)
 	events = collectVaultHostStreamEvents(t, stream)
 }
 
@@ -133,7 +134,7 @@ func assertVaultProtoDebugRedact(t *testing.T) {
 
 func startLocalVaultHostAndSubscribe(t *testing.T) (vaultv1connect.VaultServiceClient, *connect.ServerStreamForClient[hostv1.SubscribeResponse]) {
 	t.Helper()
-	v := startVendorHost(t, false)
+	v := startVendorHost(t, true)
 	_, httpClient := newTestClient(t, v.sockPath)
 	host := hostv1connect.NewHostServiceClient(httpClient, testBaseURL)
 	if _, err := host.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_APP, "v1")); err != nil {
@@ -149,15 +150,11 @@ func startLocalVaultHostAndSubscribe(t *testing.T) (vaultv1connect.VaultServiceC
 	return vaultv1connect.NewVaultServiceClient(httpClient, testBaseURL), stream
 }
 
-func exerciseVaultHostAPI(t *testing.T, vc vaultv1connect.VaultServiceClient) (string, string) {
+func exerciseVaultHostAPI(t *testing.T, vc vaultv1connect.VaultServiceClient) string {
 	t.Helper()
 	stRes, err := vc.GetStatus(t.Context(), connect.NewRequest(&vaultv1.GetStatusRequest{}))
-	if err != nil || stRes.Msg.GetStatus().GetState() != "not_configured" {
+	if err != nil || stRes.Msg.GetStatus().GetState() != "unlocked" {
 		t.Fatalf("initial GetStatus = %v, err=%v", stRes, err)
-	}
-	setupRes, err := vc.Setup(t.Context(), connect.NewRequest(&vaultv1.SetupRequest{Passphrase: []byte(testHostVaultPass)}))
-	if err != nil || setupRes.Msg.GetStatus().GetState() != "unlocked" || len(setupRes.Msg.GetRecoveryKey()) == 0 {
-		t.Fatalf("Setup = %v, err=%v", setupRes, err)
 	}
 	if _, rerr := vc.Setup(t.Context(), connect.NewRequest(&vaultv1.SetupRequest{Passphrase: []byte("another-passphrase")})); rerr == nil {
 		t.Fatal("repeat Setup succeeded")
@@ -170,18 +167,17 @@ func exerciseVaultHostAPI(t *testing.T, vc vaultv1connect.VaultServiceClient) (s
 	_, badErr := vc.Unlock(t.Context(), connect.NewRequest(&vaultv1.UnlockRequest{Passphrase: []byte(testHostVaultWrong)}))
 	assertConnectCode(t, badErr, connect.CodePermissionDenied, errcode.VaultInvalidPassphrase)
 
-	recPlain := string(setupRes.Msg.GetRecoveryKey())
-	if _, rerr := vc.UnlockWithRecovery(t.Context(), connect.NewRequest(&vaultv1.UnlockWithRecoveryRequest{RecoveryKey: []byte(recPlain)})); rerr != nil {
+	if _, rerr := vc.UnlockWithRecovery(t.Context(), connect.NewRequest(&vaultv1.UnlockWithRecoveryRequest{RecoveryKey: []byte(cheapvault.RecoveryKey)})); rerr != nil {
 		t.Fatal(rerr)
 	}
-	return recPlain, badErr.Error()
+	return badErr.Error()
 }
 
 func collectVaultHostStreamEvents(t *testing.T, stream *connect.ServerStreamForClient[hostv1.SubscribeResponse]) string {
 	t.Helper()
 	var events strings.Builder
 	events.Write(stream.Msg().GetSnapshot().GetState())
-	for range 3 {
+	for range 2 {
 		if !stream.Receive() {
 			break
 		}
