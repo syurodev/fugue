@@ -60,9 +60,9 @@ func TestRegressionProtectedAppendMustNotCommitAfterLock(t *testing.T) {
 	}
 }
 
-func TestRegressionPayloadSizeCannotBeUnderstated(t *testing.T) {
-	t.Parallel()
-	s, _, _, _ := newVaultAndStore(t)
+func runRegressionPayloadSizeCannotBeUnderstated(t *testing.T, v *vault.Service) {
+	t.Helper()
+	s, _ := newStoreWithVault(t, v)
 	plain := bytes.Repeat([]byte("x"), 1024)
 	p, k, err := s.SealPayload(t.Context(), "review-session", "review-payload", "command_input", plain)
 	if err != nil {
@@ -82,9 +82,9 @@ func TestRegressionPayloadSizeCannotBeUnderstated(t *testing.T) {
 	}
 }
 
-func TestRegressionFirstKeyRollbackCanPrepareAgain(t *testing.T) {
-	t.Parallel()
-	s, _, _, _ := newVaultAndStore(t)
+func runRegressionFirstKeyRollbackCanPrepareAgain(t *testing.T, v *vault.Service) {
+	t.Helper()
+	s, _ := newStoreWithVault(t, v)
 	plain := []byte("fixture")
 	p, k, err := s.SealPayload(t.Context(), "review-session", "first-payload", "command_input", plain)
 	if err != nil {
@@ -102,9 +102,9 @@ func TestRegressionFirstKeyRollbackCanPrepareAgain(t *testing.T) {
 	appendPersisted(t.Context(), t, s, makeAcceptedReq(s, "review-session", "second-run", "second-command", p.PayloadID, plain, []SealedPayload{p}, k))
 }
 
-func TestRegressionFailedPurgeKeepsSessionUsable(t *testing.T) {
-	t.Parallel()
-	s, _, _, _ := newVaultAndStore(t)
+func runRegressionFailedPurgeKeepsSessionUsable(t *testing.T, v *vault.Service) {
+	t.Helper()
+	s, _ := newStoreWithVault(t, v)
 	plain := []byte("fixture")
 	p, k, err := s.SealPayload(t.Context(), "review-session", "review-payload", "command_input", plain)
 	if err != nil {
@@ -133,9 +133,9 @@ func (r *failingKeyRandom) Read(p []byte) error {
 	return errSecurityRandom
 }
 
-func TestSessionKeyRandomFailureIsZeroedAndRetryable(t *testing.T) {
-	t.Parallel()
-	s, _, _, _ := newVaultAndStore(t)
+func runSessionKeyRandomFailureIsZeroedAndRetryable(t *testing.T, v *vault.Service) {
+	t.Helper()
+	s, _ := newStoreWithVault(t, v)
 	original := s.random
 	failed := &failingKeyRandom{}
 	s.random = failed
@@ -173,9 +173,9 @@ func TestSessionKeyWrapRevocationDoesNotPopulateCache(t *testing.T) {
 	}
 }
 
-func TestPurgeDeleteFailureRestoresAccess(t *testing.T) {
-	t.Parallel()
-	s, _, _, _ := newVaultAndStore(t)
+func runPurgeDeleteFailureRestoresAccess(t *testing.T, v *vault.Service) {
+	t.Helper()
+	s, _ := newStoreWithVault(t, v)
 	plain := []byte("fixture")
 	p, k, err := s.SealPayload(t.Context(), "delete-fail", "p", "command_input", plain)
 	if err != nil {
@@ -193,9 +193,9 @@ func TestPurgeDeleteFailureRestoresAccess(t *testing.T) {
 	}
 }
 
-func TestPayloadAccountingRejectsMalformedEnvelope(t *testing.T) {
-	t.Parallel()
-	s, _, _, _ := newVaultAndStore(t)
+func runPayloadAccountingRejectsMalformedEnvelope(t *testing.T, v *vault.Service) {
+	t.Helper()
+	s, _ := newStoreWithVault(t, v)
 	original, _, err := s.SealPayload(t.Context(), "accounting", "p", "command_input", []byte("fixture"))
 	if err != nil {
 		t.Fatal(err)
@@ -223,9 +223,9 @@ func TestPayloadAccountingRejectsMalformedEnvelope(t *testing.T) {
 	}
 }
 
-func TestCanceledPurgeDoesNotPoisonSession(t *testing.T) {
-	t.Parallel()
-	s, _, _, _ := newVaultAndStore(t)
+func runCanceledPurgeDoesNotPoisonSession(t *testing.T, v *vault.Service) {
+	t.Helper()
+	s, _ := newStoreWithVault(t, v)
 	plain := []byte("fixture")
 	p, k, err := s.SealPayload(t.Context(), "cancel-purge", "p", "command_input", plain)
 	if err != nil {
@@ -271,9 +271,9 @@ func TestPreparedKeyFromEarlierEpochWinsSafely(t *testing.T) {
 	}
 }
 
-func TestConflictingKeyCandidateCanReprepare(t *testing.T) {
-	t.Parallel()
-	s, _, _, _ := newVaultAndStore(t)
+func runConflictingKeyCandidateCanReprepare(t *testing.T, v *vault.Service) {
+	t.Helper()
+	s, _ := newStoreWithVault(t, v)
 	other, err := New(t.Context(), s.db, s.vault, s.host, s.clk, s.ids, s.random, nil)
 	if err != nil {
 		t.Fatal(err)

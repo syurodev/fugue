@@ -11,9 +11,9 @@ type failingSealingID struct{}
 
 func (failingSealingID) NewID() (string, error) { return "", errEntropy }
 
-func TestSealPayloadFailsClosedOnPreparationErrors(t *testing.T) {
-	t.Parallel()
-	s, _, _, _ := newVaultAndStore(t)
+func runSealPayloadFailsClosedOnPreparationErrors(t *testing.T, v *vault.Service) {
+	t.Helper()
+	s, _ := newStoreWithVault(t, v)
 	s.ids = failingSealingID{}
 	if _, _, err := s.SealPayload(t.Context(), "session", "", "message", []byte("data")); !errors.Is(err, ErrStoreUnavailable) || !errors.Is(err, errEntropy) {
 		t.Fatalf("ID error: %v", err)
@@ -28,9 +28,9 @@ func TestSealPayloadFailsClosedOnPreparationErrors(t *testing.T) {
 	}
 }
 
-func TestSealPayloadRejectsNonceEntropyFailure(t *testing.T) {
-	t.Parallel()
-	s, _, _, _ := newVaultAndStore(t)
+func runSealPayloadRejectsNonceEntropyFailure(t *testing.T, v *vault.Service) {
+	t.Helper()
+	s, _ := newStoreWithVault(t, v)
 	s.randomReader = randomReader{r: failingRandom{}}
 	if _, _, err := s.SealPayload(t.Context(), "session", "id", "message", []byte("data")); !errors.Is(err, ErrStoreUnavailable) || !errors.Is(err, errEntropy) {
 		t.Fatalf("nonce entropy error: %v", err)

@@ -370,14 +370,13 @@ func TestResolveCommitAndAppendClosedDB(t *testing.T) {
 	host := storage.HostIncarnation{LockGeneration: 1, IncarnationID: "host-closed", AcquiredAt: clk.Now()}
 	idGen := ids.NewSequence("closed")
 
-	db, err := storage.Open(ctx, storage.DBPath(t.TempDir()))
+	dbPath := storage.DBPath(t.TempDir())
+	copyMigratedTestDB(t, dbPath)
+	db, err := storage.Open(ctx, dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	closeTestDB(t, db)
-	if migErr := storage.Migrate(ctx, db, clk); migErr != nil {
-		t.Fatal(migErr)
-	}
 
 	s, err := New(ctx, db, nil, host, clk, idGen, nil, nil)
 	if err != nil {
