@@ -14,6 +14,7 @@ import (
 	"gioui.org/op"
 	"gioui.org/unit"
 
+	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/glwin"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/kit"
@@ -68,10 +69,12 @@ type titleBarHarness struct {
 	now    time.Time
 }
 
+const testTitleBarTitle = "Fugue"
+
 func newTitleBarHarness(t *testing.T, maximized bool) *titleBarHarness {
 	t.Helper()
 	h := &titleBarHarness{t: t, env: newInboxTestEnv(t), bar: newTitleBar("linux"), size: image.Pt(900, 400), now: time.Unix(1_700_000_000, 0)}
-	cfg := app.Config{Title: "Fugue", Focused: true}
+	cfg := app.Config{Title: testTitleBarTitle, Focused: true}
 	if maximized {
 		cfg.Mode = app.Maximized
 	}
@@ -177,7 +180,7 @@ func renderTitleBarShots(t *testing.T) []titleBarShot {
 		manager := hostconn.NewManager(&hostconn.Config{})
 		sc, _ := newMultiWindowShotScreens(manager)
 		sc.titleBar = newTitleBar("linux")
-		cfg := app.Config{Title: "Fugue", Focused: true}
+		cfg := app.Config{Title: testTitleBarTitle, Focused: true}
 		if spec.maximized {
 			cfg.Mode = app.Maximized
 		}
@@ -185,4 +188,87 @@ func renderTitleBarShots(t *testing.T) []titleBarShot {
 		shots = append(shots, titleBarShot{name: spec.name, img: renderShotFrames(t, win, env, sc, size, spec.name)})
 	}
 	return shots
+}
+
+// TestTitleBarNoBottomSeam verifies FUG-71: the bottom row of the app-drawn
+// title bar (y = barH - 1) carries no BorderSubtle separator line in light or
+// dark theme.
+func TestTitleBarNoBottomSeam(t *testing.T) {
+	t.Parallel()
+	seamY := int(theme.Tab) - 1
+	for _, shot := range renderTitleBarShots(t) {
+		bg := shot.img.RGBAAt(0, 0)
+		for x := range shot.img.Bounds().Dx() {
+			if got := shot.img.RGBAAt(x, seamY); got != bg {
+				t.Fatalf("%s: pixel at (%d, %d) = %+v, want AppBg %+v (no bottom seam)", shot.name, x, seamY, got, bg)
+			}
+		}
+	}
+}
+
+// TestTitleBarTopGapMatchesLeftGutter verifies FUG-71: the gap between the
+// bottom of the title bar and the top of the slot grid container equals the
+// left gutter between the sidebar and the slot grid container in px at both
+// 100% and 125% UI scale.
+func TestTitleBarTopGapMatchesLeftGutter(t *testing.T) {
+	t.Parallel()
+	for _, scale := range []float32{1.0, 1.25} {
+		for _, light := range []bool{true, false} {
+			checkTitleBarShellGaps(t, scale, light)
+		}
+	}
+}
+
+func checkTitleBarShellGaps(t *testing.T, scale float32, light bool) {
+	t.Helper()
+	sh, err := fonts.Shaper()
+	if err != nil {
+		t.Fatalf("build shaper: %v", err)
+	}
+	th := theme.Dark(sh)
+	if light {
+		th = theme.Light(sh)
+	}
+	env := &kit.Env{Th: &th, Sh: sh, UIScale: scale, ReducedMotion: true}
+	sc, _ := buildFUG65ShotScreens(t, shotFUG65Shell3Slot)
+	sc.titleBar = newTitleBar("linux")
+	sc.titleBar.applyConfig(app.Config{Title: testTitleBarTitle, Focused: true})
+
+	size := image.Pt(1500, 900)
+	win, err := glwin.Open(size.X, size.Y)
+	if err != nil {
+		t.Fatalf("open headless window (scale=%.2f, light=%v): %v", scale, light, err)
+	}
+	img := renderShotFrames(t, win, env, sc, size, "titlebar-gap")
+
+	gtx := layout.Context{Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
+	barH := sc.titleBar.height(&gtx)
+	sidebarRight := gtx.Dp(theme.RailWidth) + gtx.Dp(theme.SidebarWidth)
+	topGap, leftGutter := measureGridGaps(img, barH, sidebarRight)
+	if topGap <= 0 || leftGutter <= 0 {
+		t.Fatalf("scale=%.2f light=%v: failed to locate grid edges (topGap=%d, leftGutter=%d)", scale, light, topGap, leftGutter)
+	}
+	if topGap != leftGutter {
+		t.Errorf("scale=%.2f light=%v: top gap = %dpx, left gutter = %dpx, want equal", scale, light, topGap, leftGutter)
+	}
+}
+
+func measureGridGaps(img *image.RGBA, barH, sidebarRight int) (topGap, leftGutter int) {
+	b := img.Bounds()
+	bg := img.RGBAAt(0, 0)
+	midX, midY := b.Dx()/2, b.Dy()/2
+	topGap, leftGutter = -1, -1
+	for y := barH; y < b.Dy(); y++ {
+		if img.RGBAAt(midX, y) != bg {
+			topGap = y - barH
+			break
+		}
+	}
+	for x := sidebarRight; x < b.Dx(); x++ {
+		if img.RGBAAt(x, midY) != bg {
+			leftGutter = x - sidebarRight
+			break
+		}
+	}
+	return topGap, leftGutter
 }

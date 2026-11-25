@@ -105,7 +105,6 @@ func (b *titleBar) layout(env *kit.Env, gtx *layout.Context) int {
 	local := *gtx
 	local.Constraints = layout.Exact(image.Pt(width, h))
 	paint.FillShape(local.Ops, c.AppBg, clip.Rect{Max: local.Constraints.Max}.Op())
-	paint.FillShape(local.Ops, c.BorderSubtle, clip.Rect{Min: image.Pt(0, h-1), Max: image.Pt(width, h)}.Op())
 	layout.Flex{Alignment: layout.Middle}.Layout(local,
 		layout.Flexed(1, func(g layout.Context) layout.Dimensions { return b.layoutTitle(env, &g, h) }),
 		layout.Rigid(func(g layout.Context) layout.Dimensions { return b.layoutButtons(env, &g, h) }),
