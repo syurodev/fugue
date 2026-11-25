@@ -91,6 +91,7 @@ type pressable struct {
 	rip                          ripple
 	lastPressEnd                 time.Time
 	keyClicked                   bool
+	polledClick                  bool
 }
 
 func newPressable() pressable {
@@ -112,6 +113,16 @@ func (c *pressable) Hovered() bool { return c.click.Hovered() }
 // Space rather than a pointer click (a pointer click records a Press end).
 func (c *pressable) KeyClicked() bool { return c.keyClicked }
 
+// PollClick drains any pending click before Layout so a parent can update
+// state (such as Toggled) before drawing the same frame. Layout still reports
+// the click on its own return value.
+func (c *pressable) PollClick(gtx *layout.Context) bool {
+	if c.click.Clicked(*gtx) {
+		c.polledClick = true
+	}
+	return c.polledClick
+}
+
 // begin runs the input and the motion of a frame at the current offset:
 // it reads the activation (busy blocks it, §4.1), registers the hit area of
 // box — which press scaling never touches (§3.7) — resolves the state and
@@ -122,8 +133,10 @@ func (c *pressable) begin(env *Env, gtx *layout.Context, box image.Point, o pres
 	if o.disabled {
 		// A disabled control consumes nothing: no hover, no focus (§4.1).
 		ig = gtx.Disabled()
+		c.polledClick = false
 	} else {
-		clicked = c.click.Clicked(ig) && !o.busy
+		clicked = (c.polledClick || c.click.Clicked(ig)) && !o.busy
+		c.polledClick = false
 	}
 	var curEnd time.Time
 	if h := c.click.History(); len(h) > 0 {

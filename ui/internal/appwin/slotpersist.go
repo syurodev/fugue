@@ -326,6 +326,7 @@ func (g *slotGrid) applyStored(res DecodeLayoutResult, rev uint64) {
 	}
 	g.doc = res.Doc
 	g.docGen++
+	g.resetShellMotion()
 	g.syncFromDoc()
 	if g.applyGeometry != nil && res.Doc.Window.WidthDp > 0 && res.Doc.Window.HeightDp > 0 {
 		g.applyGeometry(res.Doc.Window.WidthDp, res.Doc.Window.HeightDp)
