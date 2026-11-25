@@ -216,15 +216,31 @@ func denyPatterns(extra []string) []string {
 // Engine manages the per-project shadow repositories under a single root
 // directory.
 type Engine struct {
-	rootDir  string
-	git      Availability
-	limits   Limits
-	clock    clock.Clock
-	ids      ids.Generator
-	activity *Activity
+	rootDir       string
+	git           Availability
+	limits        Limits
+	clock         clock.Clock
+	ids           ids.Generator
+	activity      *Activity
+	excludedDirs  map[string]struct{}
+	excludedFiles map[string]struct{}
 
 	mu    sync.Mutex
 	repos map[string]*Repo
+}
+
+func buildExcludeMaps() (dirs, files map[string]struct{}) {
+	rawDirs := defaultExcludedDirs()
+	dirs = make(map[string]struct{}, len(rawDirs))
+	for _, d := range rawDirs {
+		dirs[d] = struct{}{}
+	}
+	rawFiles := defaultExcludedFiles()
+	files = make(map[string]struct{}, len(rawFiles))
+	for _, f := range rawFiles {
+		files[f] = struct{}{}
+	}
+	return dirs, files
 }
 
 // New creates an Engine rooted at rootDir using the real clock and UUIDv7 ID
@@ -242,14 +258,17 @@ func NewWithDeps(rootDir string, git Availability, limits Limits, clk clock.Cloc
 	if idGen == nil {
 		idGen = ids.NewUUIDv7(clk, ids.CryptoRandom{})
 	}
+	excludedDirs, excludedFiles := buildExcludeMaps()
 	return &Engine{
-		rootDir:  rootDir,
-		git:      git,
-		limits:   limits.withDefaults(),
-		clock:    clk,
-		ids:      idGen,
-		activity: NewActivity(clk),
-		repos:    make(map[string]*Repo),
+		rootDir:       rootDir,
+		git:           git,
+		limits:        limits.withDefaults(),
+		clock:         clk,
+		ids:           idGen,
+		activity:      NewActivity(clk),
+		excludedDirs:  excludedDirs,
+		excludedFiles: excludedFiles,
+		repos:         make(map[string]*Repo),
 	}
 }
 
@@ -276,14 +295,16 @@ func (e *Engine) Open(ctx context.Context, workTree string) (*Repo, error) {
 	repo, ok := e.repos[key]
 	if !ok {
 		repo = &Repo{
-			key:      key,
-			workTree: resolved,
-			gitDir:   filepath.Join(e.rootDir, key),
-			gitPath:  e.git.Path,
-			limits:   e.limits,
-			clock:    e.clock,
-			ids:      e.ids,
-			gate:     make(chan struct{}, 1),
+			key:           key,
+			workTree:      resolved,
+			gitDir:        filepath.Join(e.rootDir, key),
+			gitPath:       e.git.Path,
+			limits:        e.limits,
+			clock:         e.clock,
+			ids:           e.ids,
+			excludedDirs:  e.excludedDirs,
+			excludedFiles: e.excludedFiles,
+			gate:          make(chan struct{}, 1),
 		}
 		repo.gate <- struct{}{}
 		e.repos[key] = repo
