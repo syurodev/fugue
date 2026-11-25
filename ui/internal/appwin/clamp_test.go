@@ -30,6 +30,8 @@ func TestClampDp(t *testing.T) {
 		wantW, wantH       int
 	}{
 		{"the F10.1 overflow", 900, 1000, 1.25, 1920, 1080, 900, 864},
+		{"FUG-83 landscape default on 1080p at 1.25x", requestedW, requestedH, 1.25, 1920, 1080, 1280, 800},
+		{"stored size larger than screen clamps both axes", 2400, 1400, 1.25, 1920, 1080, 1536, 864},
 		{"fits already", 900, 800, 1.25, 1920, 1080, 900, 800},
 		{"width clamps too", 2000, 400, 1, 1920, 1080, 1920, 400},
 		{"retina scale", 900, 1000, 2, 2880, 1800, 900, 900},

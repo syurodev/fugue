@@ -4,6 +4,8 @@ import (
 	"image"
 	"time"
 
+	"gioui.org/app"
+
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/motion"
 )
@@ -117,9 +119,16 @@ type slotGrid struct {
 	wasTempFolded bool
 	// newWindow is the last "open in new window" request (F10.21 consumes).
 	newWindow *NewWindowRequest
-	// applyGeometry applies a restored window size; the window owns the
-	// option, the shell only knows the numbers. Nil in the tests.
-	applyGeometry func(widthDp, heightDp int)
+	// applyGeometry applies a restored window size and maximized state; the
+	// window owns the option, the shell only knows the numbers. Nil in tests.
+	applyGeometry func(WindowGeometry)
+	// windowMode tracks the last app.ConfigEvent mode; normal size is saved
+	// only in app.Windowed so maximizing never overwrites the restore size.
+	windowMode       app.WindowMode
+	hasInitialSize   bool
+	initialSize      image.Point
+	userResized      bool
+	lastMeasuredSize image.Point
 }
 
 // arrangeCmd is one arrange-menu command (§5.3).
@@ -219,17 +228,72 @@ func findCell(doc LayoutDoc, ref SlotRef) (Pos, bool) {
 }
 
 // markGeometryDirty arms a geometry-only save, keeping the higher-schema
-// guard: the window's size is not a layout edit.
+// guard: the window's size is not a layout edit. While maximized (or
+// minimized/fullscreen), normal width and height stay untouched.
 func (g *slotGrid) markGeometryDirty(w, h int) {
-	if !g.loaded || g.higher {
+	if w <= 0 || h <= 0 {
 		return
 	}
-	if g.doc.Window.WidthDp == w && g.doc.Window.HeightDp == h {
+	sz := image.Pt(w, h)
+	if !g.loaded {
+		g.recordPreLoadSize(sz)
 		return
 	}
-	g.doc.Window = WindowGeometry{WidthDp: w, HeightDp: h}
+	if g.higher || g.windowMode != app.Windowed {
+		return
+	}
+	g.lastMeasuredSize = sz
+	if g.doc.Window.WidthDp == w && g.doc.Window.HeightDp == h && !g.doc.Window.Maximized {
+		return
+	}
+	g.doc.Window = WindowGeometry{WidthDp: w, HeightDp: h, Maximized: false}
 	g.dirty = true
 	g.saveAt = time.Time{}
+}
+
+func (g *slotGrid) recordPreLoadSize(sz image.Point) {
+	if g.windowMode == app.Windowed {
+		g.lastMeasuredSize = sz
+	}
+	if !g.hasInitialSize {
+		g.hasInitialSize = true
+		g.initialSize = sz
+		return
+	}
+	if g.windowMode == app.Windowed && g.initialSize != sz {
+		g.userResized = true
+	}
+}
+
+// setWindowMode tracks app.ConfigEvent.Mode so maximizing keeps the last
+// normal size and marks the maximized flag dirty once loaded.
+func (g *slotGrid) setWindowMode(mode app.WindowMode) {
+	prev := g.windowMode
+	g.windowMode = mode
+	if !g.loaded {
+		if mode != app.Windowed && mode != prev {
+			g.userResized = true
+		}
+		return
+	}
+	if g.higher {
+		return
+	}
+	switch mode {
+	case app.Maximized:
+		if !g.doc.Window.Maximized {
+			g.doc.Window.Maximized = true
+			g.dirty = true
+			g.saveAt = time.Time{}
+		}
+	case app.Windowed:
+		if g.doc.Window.Maximized {
+			g.doc.Window.Maximized = false
+			g.dirty = true
+			g.saveAt = time.Time{}
+		}
+	case app.Fullscreen, app.Minimized:
+	}
 }
 
 // mainRef is the main slot's current object.

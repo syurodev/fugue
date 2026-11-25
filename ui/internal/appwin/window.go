@@ -41,6 +41,8 @@ type Options struct {
 	Params client.Params
 	// Topics are the event topics the window streams.
 	Topics []string
+	// Clock drives reconnect backoff and the startup layout wait; nil uses RealClock.
+	Clock hostconn.Clock
 }
 
 // updateQueue is the bridge from the connection goroutines to the window
@@ -74,15 +76,22 @@ func (q *updateQueue) drain() []hostconn.Update {
 func Run(ctx context.Context, opts Options) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	updates := make(chan hostconn.Update, 128)
+	clk := opts.Clock
+	if clk == nil {
+		clk = hostconn.RealClock{}
+	}
 	m := hostconn.NewManager(&hostconn.Config{
 		DataDir:   opts.DataDir,
 		AutoStart: true,
 		Params:    opts.Params,
 		Topics:    opts.Topics,
 		Updates:   updates,
+		Clock:     clk,
 	})
 	m.Start(runCtx)
 	defer m.Stop()
+
+	buffered, primaryRecord := awaitInitialAppState(runCtx, updates, clk, initialLayoutWait)
 
 	var wg sync.WaitGroup
 	var coord *multiWindow
@@ -90,18 +99,19 @@ func Run(ctx context.Context, opts Options) error {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if winErr := runWindow(runCtx, m, coord, windowID, record, doc); winErr != nil {
+			if winErr := runWindow(runCtx, m, coord, windowID, record, doc, nil); winErr != nil {
 				slog.Error("a secondary window exited with an error", "window_id", windowID, "error", winErr)
 			}
 		}()
 	})
-	feederDone := startFeeder(runCtx, updates, coord)
+	ready := make(chan struct{})
+	feederDone := startFeeder(runCtx, ready, buffered, updates, coord)
 	defer func() {
 		cancel()
 		<-feederDone
 	}()
 
-	err := runWindow(runCtx, m, coord, "", nil, nil)
+	err := runWindow(runCtx, m, coord, "", primaryRecord, nil, ready)
 	wg.Wait()
 	return err
 }
@@ -224,13 +234,21 @@ func attach(env *kit.Env, w *app.Window) {
 	env.Invalidate = w.Invalidate
 }
 
-// startFeeder runs the update feeder: it fans deliveries out to every active
-// window through coord. It owns no UI state and ends with the run context;
-// the returned channel closes when it has ended.
-func startFeeder(ctx context.Context, updates <-chan hostconn.Update, coord *multiWindow) <-chan struct{} {
+// startFeeder runs the update feeder: once ready closes, it replays any
+// startup updates buffered during the initial layout wait and then fans
+// live deliveries out to every active window through coord.
+func startFeeder(ctx context.Context, ready <-chan struct{}, buffered []hostconn.Update, updates <-chan hostconn.Update, coord *multiWindow) <-chan struct{} {
 	feederDone := make(chan struct{})
 	go func() {
 		defer close(feederDone)
+		select {
+		case <-ready:
+		case <-ctx.Done():
+			return
+		}
+		for i := range buffered {
+			coord.deliver(buffered[i])
+		}
 		for {
 			select {
 			case u := <-updates:
@@ -284,12 +302,16 @@ func eventLoop(ctx context.Context, w *app.Window, env *kit.Env, sc *screens, q 
 			return e.Err
 		case app.ConfigEvent:
 			sc.titleBar.applyConfig(e.Config)
+			sc.handleWindowConfig(w, e.Config)
 		case app.FrameEvent:
+			sc.deviceMetric = e.Metric
 			gtx := app.NewContext(&ops, e)
 			gtx.Metric = env.Metric(gtx.Metric)
 			env.Begin(gtx.Now)
 			env.TrackInput(&gtx)
+			sc.skipGeometry = sc.applyPendingNormalRestore(w)
 			frame(&gtx, env, sc, q, coord, light, dark)
+			sc.skipGeometry = false
 			env.FrameEnd(&gtx)
 			e.Frame(gtx.Ops)
 			if acts := sc.titleBar.takeActions(); acts != 0 {
@@ -386,9 +408,14 @@ func toggleTheme(gtx *layout.Context, env *kit.Env, sc *screens, light, dark *th
 // color comes from the theme tokens (F10.2c); appwin defines none of its own.
 func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 	paint.Fill(gtx.Ops, env.Th.Chrome().AppBg)
-	// The window's current size rides every layout save, so the next start
-	// opens the same size (host-api §5.2: the geometry is the document's).
-	sc.grid.markGeometryDirty(pxToDp(gtx, gtx.Constraints.Max.X), pxToDp(gtx, gtx.Constraints.Max.Y))
+	if !sc.skipGeometry {
+		// The window's current size rides every layout save, measured in system
+		// dp (before env.UIScale) so restore calls app.Size in the same unit.
+		sc.grid.markGeometryDirty(
+			systemPxToDp(gtx, env, sc.deviceMetric, gtx.Constraints.Max.X),
+			systemPxToDp(gtx, env, sc.deviceMetric, gtx.Constraints.Max.Y),
+		)
+	}
 	barH := sc.titleBar.layout(env, gtx)
 	shell := *gtx
 	shell.Constraints.Max.Y = max(shell.Constraints.Max.Y-barH, 0)

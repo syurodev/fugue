@@ -74,11 +74,13 @@ type Column struct {
 	Slots       []Slot
 }
 
-// WindowGeometry is the window's size in dp. The compositor position is not
-// exposed by Gio v0.10.3; the multi-window item (F10.21) revisits.
+// WindowGeometry is the window's normal size in system dp and maximized state.
+// The compositor position is not exposed by Gio v0.10.3; the multi-window
+// item (F10.21) revisits.
 type WindowGeometry struct {
-	WidthDp  int
-	HeightDp int
+	WidthDp   int
+	HeightDp  int
+	Maximized bool
 }
 
 // LayoutDoc is the persisted layout of one window.
@@ -122,8 +124,9 @@ type layoutWire struct {
 		} `json:"slots"`
 	} `json:"columns"`
 	Window *struct {
-		WidthDp  int `json:"width_dp,omitempty"`
-		HeightDp int `json:"height_dp,omitempty"`
+		WidthDp   int  `json:"width_dp,omitempty"`
+		HeightDp  int  `json:"height_dp,omitempty"`
+		Maximized bool `json:"maximized,omitempty"`
 	} `json:"window,omitempty"`
 }
 
@@ -154,11 +157,12 @@ func EncodeLayout(doc LayoutDoc) ([]byte, error) {
 		}
 		wire.Columns = append(wire.Columns, wc)
 	}
-	if doc.Window.WidthDp > 0 || doc.Window.HeightDp > 0 {
+	if doc.Window.WidthDp > 0 || doc.Window.HeightDp > 0 || doc.Window.Maximized {
 		wire.Window = &struct {
-			WidthDp  int `json:"width_dp,omitempty"`
-			HeightDp int `json:"height_dp,omitempty"`
-		}{WidthDp: doc.Window.WidthDp, HeightDp: doc.Window.HeightDp}
+			WidthDp   int  `json:"width_dp,omitempty"`
+			HeightDp  int  `json:"height_dp,omitempty"`
+			Maximized bool `json:"maximized,omitempty"`
+		}{WidthDp: doc.Window.WidthDp, HeightDp: doc.Window.HeightDp, Maximized: doc.Window.Maximized}
 	}
 	raw, err := json.Marshal(wire)
 	if err != nil {
@@ -214,7 +218,11 @@ func DecodeLayout(raw []byte) (DecodeLayoutResult, error) {
 	}
 	repairLayout(&doc)
 	if wire.Window != nil {
-		doc.Window = WindowGeometry{WidthDp: wire.Window.WidthDp, HeightDp: wire.Window.HeightDp}
+		doc.Window = WindowGeometry{
+			WidthDp:   wire.Window.WidthDp,
+			HeightDp:  wire.Window.HeightDp,
+			Maximized: wire.Window.Maximized,
+		}
 	}
 	return DecodeLayoutResult{Doc: doc}, nil
 }
