@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"testing"
 	"time"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/storage"
+	"github.com/syurodev/fugue/internal/vault"
 )
 
 const (
@@ -29,7 +31,6 @@ const (
 	testUser1            = "user-1"
 	testSess             = "sess"
 	testRequirementNone  = "none"
-	cheapKeyringJSON     = `{"version":1,"master_kdf":{"algorithm":"argon2id","memory":32768,"iterations":2,"parallelism":1,"key_length":32,"salt":"tVpEp1SJuG76TJDI9r2H1Q=="},"master_wrapped":{"version":2,"algorithm":"xchacha20-poly1305","key_id":"dek","nonce":"S3PG4uILC7IXgVxu7E14YWW2yW8ZWxvT","ciphertext":"tieySptWh8lyenjjCIkuLel5svy5WeHq2w2k7l172/yQP8zRHtdocmDHmzmZvAU4"},"recovery_kdf":{"algorithm":"argon2id","memory":32768,"iterations":2,"parallelism":1,"key_length":32,"salt":"f1EOZLClsIpLqjqSXEzBmg=="},"recovery_wrapped":{"version":2,"algorithm":"xchacha20-poly1305","key_id":"dek","nonce":"5alTvaMhrmgH8xAa2Bfp2yt+htLRoltJ","ciphertext":"uNlkGM5qCYZv+XCNs6J7el0Dg17ffubXFMGjazNVU3mz8SlRx9YCYV+HmfAt2eih"}}`
 )
 
 var (
@@ -67,18 +68,31 @@ func closeTestDB(t *testing.T, closer io.Closer) {
 	})
 }
 
+func copyMigratedTestDB(t *testing.T, dstPath string) {
+	t.Helper()
+	if err := copyTemplateFile(execstoreTemplateDir(os.Getpid()), migratedTemplateFile, dstPath); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func copySeededTestDB(t *testing.T, dstPath string) {
+	t.Helper()
+	if err := copyTemplateFile(execstoreTemplateDir(os.Getpid()), seededTemplateFile, dstPath); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func newTestStore(ctx context.Context, t *testing.T, equality ProtectedEquality) (*Store, *sql.DB, string) {
 	t.Helper()
 	dataDir := t.TempDir()
-	db, err := storage.Open(ctx, storage.DBPath(dataDir))
+	dbPath := storage.DBPath(dataDir)
+	copyMigratedTestDB(t, dbPath)
+	db, err := storage.Open(ctx, dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	closeTestDB(t, db)
 	clk := clock.NewFake(time.Date(2026, 11, 2, 10, 0, 0, 0, time.UTC))
-	if migErr := storage.Migrate(ctx, db, clk); migErr != nil {
-		t.Fatal(migErr)
-	}
 	host := storage.HostIncarnation{
 		LockGeneration: 1,
 		IncarnationID:  "host-inc-1",
@@ -90,6 +104,33 @@ func newTestStore(ctx context.Context, t *testing.T, equality ProtectedEquality)
 		t.Fatal(err)
 	}
 	return s, db, dataDir
+}
+
+func newStoreWithVault(t *testing.T, v *vault.Service) (*Store, string) {
+	t.Helper()
+	ctx := t.Context()
+	dataDir := t.TempDir()
+	dbPath := storage.DBPath(dataDir)
+	copyMigratedTestDB(t, dbPath)
+	db, err := storage.Open(ctx, dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeTestDB(t, db)
+	clk := clock.NewFake(time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC))
+	host := storage.HostIncarnation{
+		LockGeneration: 1,
+		IncarnationID:  "host-inc-test",
+		AcquiredAt:     clk.Now(),
+	}
+	s, err := New(ctx, db, v, host, clk, ids.NewSequence("test-payload-id-"), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		closeStore(t, s)
+	})
+	return s, dataDir
 }
 
 func sealedTestPayload(t *testing.T, payloadID string, plaintext []byte) (SealedPayload, SealedSessionKey) {

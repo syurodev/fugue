@@ -12,6 +12,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/storage"
+	"github.com/syurodev/fugue/internal/vault"
 )
 
 func TestStoreConstructorValidations(t *testing.T) {
@@ -283,7 +284,11 @@ func TestTargetedMutantKillersProjections(t *testing.T) {
 func TestStoreNilAndAccessors(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	v, err := vault.NewService(ctx, vault.NewMemoryKeyringStore(nil), ids.NewSequence("vault-inc-"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := newStoreWithVault(t, v)
 
 	var nilStore *Store
 	if _, _, err := nilStore.SealPayload(ctx, "sess", "pl", testToolResultKind, []byte("x")); !errors.Is(err, ErrStoreUnavailable) {

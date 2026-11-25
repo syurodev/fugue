@@ -18,6 +18,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/storage"
+	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vault"
 )
 
@@ -36,17 +37,15 @@ func newVaultAndStore(t *testing.T) (*Store, *vault.Service, string, redact.Secr
 	t.Helper()
 	ctx := t.Context()
 	dataDir := t.TempDir()
-	db, err := storage.Open(ctx, storage.DBPath(dataDir))
+	dbPath := storage.DBPath(dataDir)
+	copySeededTestDB(t, dbPath)
+	db, err := storage.Open(ctx, dbPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	closeTestDB(t, db)
 
 	clk := clock.NewFake(time.Date(2026, 11, 4, 10, 0, 0, 0, time.UTC))
-	if migErr := storage.Migrate(ctx, db, clk); migErr != nil {
-		t.Fatal(migErr)
-	}
-
 	host := storage.HostIncarnation{
 		LockGeneration: 1,
 		IncarnationID:  "host-inc-test",
@@ -54,23 +53,13 @@ func newVaultAndStore(t *testing.T) (*Store, *vault.Service, string, redact.Secr
 	}
 
 	vStore := vault.NewSQLKeyringStore(db)
-	var kr crypto.Keyring
-	if unmarshalErr := json.Unmarshal([]byte(cheapKeyringJSON), &kr); unmarshalErr != nil {
-		t.Fatal(unmarshalErr)
-	}
-	if saveErr := vStore.Save(ctx, &kr); saveErr != nil {
-		t.Fatal(saveErr)
-	}
-
 	vService, err := vault.NewService(ctx, vStore, ids.NewSequence("vault-inc-"))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	masterPass := redact.NewSecret("master-pw")
-	if unlockErr := vService.Unlock(ctx, masterPass); unlockErr != nil {
-		t.Fatal(unlockErr)
-	}
+	masterPass := redact.NewSecret(cheapvault.MasterPassword)
+	cheapvault.Unlock(t, vService)
 
 	idGen := ids.NewSequence("test-payload-id-")
 	s, err := New(ctx, db, vService, host, clk, idGen, nil, nil)
@@ -175,10 +164,10 @@ func verifyPayloadsReadable(t *testing.T, s *Store, sessionID string, payloads m
 	}
 }
 
-func TestSessionKeyReusedAcrossMultiplePayloads(t *testing.T) {
-	t.Parallel()
+func runSessionKeyReusedAcrossMultiplePayloads(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	sessionID := "sess-multi-pl"
 	p1, k1, err := s.SealPayload(ctx, sessionID, "pl-1", testToolResultKind, []byte("result 1"))
@@ -260,10 +249,10 @@ func verifyRollbackAndSecondWriterCommit(
 	}
 }
 
-func TestConcurrentFirstWritesAndRollbackNoKeyMismatch(t *testing.T) {
-	t.Parallel()
+func runConcurrentFirstWritesAndRollbackNoKeyMismatch(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	sessionID := "sess-concurrent-first"
 
@@ -345,10 +334,10 @@ func verifyTamperedCiphertextRejected(
 	}
 }
 
-func TestTamperingAndSubstitutionRejections(t *testing.T) {
-	t.Parallel()
+func runTamperingAndSubstitutionRejections(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	sessionID := "sess-tamper-1"
 	payloadID := "pl-tamper-1"
@@ -522,10 +511,10 @@ func verifySessionLimitOverflow(ctx context.Context, t *testing.T, s *Store, ses
 	}
 }
 
-func TestPayloadSizeLimitsAndBoundaries(t *testing.T) {
-	t.Parallel()
+func runPayloadSizeLimitsAndBoundaries(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	sessionID := "sess-limits-1"
 
@@ -571,10 +560,10 @@ func TestPayloadSizeLimitsAndBoundaries(t *testing.T) {
 	}
 }
 
-func TestNoSensitiveDataInDiagnostics(t *testing.T) {
-	t.Parallel()
+func runNoSensitiveDataInDiagnostics(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	// Single payload too large: error message must not leak content
 	overBytes := make([]byte, MaxPayloadPlaintext+1)
@@ -598,9 +587,9 @@ func TestNoSensitiveDataInDiagnostics(t *testing.T) {
 	}
 }
 
-func TestStoreVaultGetter(t *testing.T) {
-	t.Parallel()
-	s, v, _, _ := newVaultAndStore(t)
+func runStoreVaultGetter(t *testing.T, v *vault.Service) {
+	t.Helper()
+	s, _ := newStoreWithVault(t, v)
 	if s.Vault() != v {
 		t.Fatalf("expected vault %p, got %p", v, s.Vault())
 	}
@@ -619,10 +608,10 @@ func TestStoreVaultGetter(t *testing.T) {
 	}
 }
 
-func TestSessionKeyConflictAndMatching(t *testing.T) {
-	t.Parallel()
+func runSessionKeyConflictAndMatching(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	sessionID := "sess-key-conflict"
 	p1, k1, err := s.SealPayload(ctx, sessionID, "pl-1", testToolResultKind, []byte("data 1"))
@@ -657,10 +646,10 @@ func TestSessionKeyConflictAndMatching(t *testing.T) {
 	}
 }
 
-func TestPayloadValidationEdgeCases(t *testing.T) {
-	t.Parallel()
+func runPayloadValidationEdgeCases(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	// Empty and long session ID
 	if _, _, err := s.SealPayload(ctx, "", "pl", testToolResultKind, []byte("x")); errcode.CodeOf(err) != errcode.InvalidArgument {
@@ -684,10 +673,10 @@ func TestPayloadValidationEdgeCases(t *testing.T) {
 	}
 }
 
-func TestPayloadOpenValidationEdgeCases(t *testing.T) {
-	t.Parallel()
+func runPayloadOpenValidationEdgeCases(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	// Open validation edge cases
 	if _, err := s.OpenPayload(ctx, "", "pl"); errcode.CodeOf(err) != errcode.InvalidArgument {
@@ -710,10 +699,10 @@ func TestPayloadOpenValidationEdgeCases(t *testing.T) {
 	}
 }
 
-func TestKeyCacheOperations(t *testing.T) {
-	t.Parallel()
+func runKeyCacheOperations(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	if _, _, err := s.SealPayload(ctx, "sess-edge", "pl", testToolResultKind, []byte("x")); err != nil {
 		t.Fatal(err)
@@ -738,10 +727,10 @@ func TestKeyCacheOperations(t *testing.T) {
 	}
 }
 
-func TestOpenPayloadCorruptedEnvelope(t *testing.T) {
-	t.Parallel()
+func runOpenPayloadCorruptedEnvelope(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	sessionID := "sess-corrupt-env"
 	p, k, err := s.SealPayload(ctx, sessionID, "pl-1", testToolResultKind, []byte("valid"))

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/syurodev/fugue/internal/storage"
+	"github.com/syurodev/fugue/internal/vault"
 )
 
 var errSimulatedPurgeCrash = errors.New("simulated-purge-crash")
@@ -42,10 +43,10 @@ func verifyPostPurgeKeysInDB(t *testing.T, rawDB []byte, k1, k2 *SealedSessionKe
 	}
 }
 
-func TestPurgeSessionCryptoShredAndDirectDBByteInspection(t *testing.T) {
-	t.Parallel()
+func runPurgeSessionCryptoShredAndDirectDBByteInspection(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, dataDir, _ := newVaultAndStore(t)
+	s, dataDir := newStoreWithVault(t, v)
 
 	s1 := "sess-purge-1"
 	s2 := "sess-purge-2"
@@ -88,10 +89,10 @@ func TestPurgeSessionCryptoShredAndDirectDBByteInspection(t *testing.T) {
 	}
 }
 
-func TestPurgeSessionIsolationAndSafeRetry(t *testing.T) {
-	t.Parallel()
+func runPurgeSessionIsolationAndSafeRetry(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	sessionID := "sess-retry-purge"
 	p, k, err := s.SealPayload(ctx, sessionID, "pl-1", "tool_result", []byte("data"))
@@ -122,10 +123,10 @@ func TestPurgeSessionIsolationAndSafeRetry(t *testing.T) {
 	}
 }
 
-func TestPurgeSessionPreventsResurrection(t *testing.T) {
-	t.Parallel()
+func runPurgeSessionPreventsResurrection(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	sessionID := "sess-no-resurrect"
 	p, k, err := s.SealPayload(ctx, sessionID, "pl-1", "tool_result", []byte("initial"))
@@ -170,10 +171,10 @@ func TestPurgeSessionPreventsResurrection(t *testing.T) {
 	}
 }
 
-func TestPurgeSessionRollbackPreservesSession(t *testing.T) {
-	t.Parallel()
+func runPurgeSessionRollbackPreservesSession(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	sessionID := "sess-purge-rollback"
 	p, k, err := s.SealPayload(ctx, sessionID, "pl-1", "tool_result", []byte("keep-me"))
@@ -226,10 +227,10 @@ func TestPurgeSessionRollbackPreservesSession(t *testing.T) {
 	}
 }
 
-func TestPurgeValidationEdgeCases(t *testing.T) {
-	t.Parallel()
+func runPurgeValidationEdgeCases(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	var nilStore *Store
 	if err := nilStore.PurgeSession(ctx, "s"); !errors.Is(err, ErrStoreUnavailable) {

@@ -8,12 +8,13 @@ import (
 	"testing"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/vault"
 )
 
-func TestPayloadUsageValidation(t *testing.T) {
-	t.Parallel()
+func runPayloadUsageValidation(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	var nilStore *Store
 	if _, err := nilStore.PayloadUsage(ctx, "s"); !errors.Is(err, ErrStoreUnavailable) {
@@ -43,10 +44,10 @@ func TestPayloadUsageValidation(t *testing.T) {
 	}
 }
 
-func TestPayloadUsageReporting(t *testing.T) {
-	t.Parallel()
+func runPayloadUsageReporting(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	sessionID := "sess-usage-test"
 	p1, k1, err := s.SealPayload(ctx, sessionID, "pl-u1", testToolResultKind, []byte("usage payload"))
@@ -94,10 +95,10 @@ func TestValidateBatchPayloadsLimits(t *testing.T) {
 	}
 }
 
-func TestProtectedInputAdditionEmptyAndInBatch(t *testing.T) {
-	t.Parallel()
+func runProtectedInputAdditionEmptyAndInBatch(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	conn, err := s.acquireConfiguredConn(ctx)
 	if err != nil {
@@ -124,10 +125,10 @@ func TestProtectedInputAdditionEmptyAndInBatch(t *testing.T) {
 	}
 }
 
-func TestProtectedInputAdditionCalculation(t *testing.T) {
-	t.Parallel()
+func runProtectedInputAdditionCalculation(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	sessionID := "sess-pi-add"
 	sealed, key, err := s.SealPayload(ctx, sessionID, "pl-seeded-1", testToolResultKind, []byte("12345"))
@@ -164,10 +165,10 @@ func TestProtectedInputAdditionCalculation(t *testing.T) {
 	}
 }
 
-func TestProtectedInputAdditionNewRun(t *testing.T) {
-	t.Parallel()
+func runProtectedInputAdditionNewRun(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	sessionID := "sess-pi-add-new"
 	sealed, key, err := s.SealPayload(ctx, sessionID, "pl-seeded-1", testToolResultKind, []byte("12345"))
@@ -206,10 +207,10 @@ func TestProtectedInputAdditionNewRun(t *testing.T) {
 	}
 }
 
-func TestRunAndSessionOverflowLimits(t *testing.T) {
-	t.Parallel()
+func runRunAndSessionOverflowLimits(t *testing.T, v *vault.Service) {
+	t.Helper()
 	ctx := t.Context()
-	s, _, _, _ := newVaultAndStore(t)
+	s, _ := newStoreWithVault(t, v)
 
 	sessionID := "sess-overflow"
 	conn, err := s.acquireConfiguredConn(ctx)
