@@ -274,9 +274,10 @@ func assertSubmitLoginCodeModelRetry(t *testing.T) {
 		StartLogin: client.StartLoginResult{LoginID: "login-claude-1"},
 	})
 
-	cmd1 := m.BeginSubmitLoginCode(client.VendorClaude, "cmd-1")
-	if cmd1 != "cmd-1" {
-		t.Fatalf("first cmdID = %q, want cmd-1", cmd1)
+	const firstCmd = "cmd-1"
+	cmd1 := m.BeginSubmitLoginCode(client.VendorClaude, firstCmd)
+	if cmd1 != firstCmd {
+		t.Fatalf("first cmdID = %q, want %s", cmd1, firstCmd)
 	}
 	m.ApplySubmitLoginCodeResult(&Result{Kind: OpSubmitLoginCode, Vendor: client.VendorClaude, CommandID: cmd1, Err: errScriptedAccounts})
 	if e, _ := m.Login(client.VendorClaude); e.CodeError == "" || e.CodeSent {
@@ -284,12 +285,12 @@ func assertSubmitLoginCodeModelRetry(t *testing.T) {
 	}
 
 	retryCmd := m.BeginSubmitLoginCode(client.VendorClaude, "cmd-2")
-	if retryCmd != "cmd-1" {
-		t.Fatalf("retry cmdID = %q, want cmd-1", retryCmd)
+	if retryCmd != firstCmd {
+		t.Fatalf("retry cmdID = %q, want %s", retryCmd, firstCmd)
 	}
 	m.ApplySubmitLoginCodeResult(&Result{Kind: OpSubmitLoginCode, Vendor: client.VendorClaude, CommandID: retryCmd, Code: "unavailable", Err: errScriptedAccounts})
-	if retryUnavailable := m.BeginSubmitLoginCode(client.VendorClaude, "cmd-unavailable"); retryUnavailable != "cmd-1" {
-		t.Fatalf("retry after unavailable cmdID = %q, want cmd-1", retryUnavailable)
+	if retryUnavailable := m.BeginSubmitLoginCode(client.VendorClaude, "cmd-unavailable"); retryUnavailable != firstCmd {
+		t.Fatalf("retry after unavailable cmdID = %q, want %s", retryUnavailable, firstCmd)
 	}
 	m.ApplySubmitLoginCodeResult(&Result{Kind: OpSubmitLoginCode, Vendor: client.VendorClaude, CommandID: retryCmd, Code: "invalid_argument", Err: errScriptedAccounts})
 	freshAfterInvalid := m.BeginSubmitLoginCode(client.VendorClaude, "cmd-invalid")

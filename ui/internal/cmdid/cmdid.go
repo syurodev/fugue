@@ -1,42 +1,40 @@
 package cmdid
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
 	"strconv"
-	"sync"
+	"sync/atomic"
 )
 
-// processIdentity names this app process in command ids, together with a
-// per-minter sequence: hostnames and process ids are unique while a process
-// runs, so two minters — here or in another app process — never mint the same
-// id, which the host would refuse as a conflict.
+// processIdentity names this app process and one minter instance in command
+// ids, together with an atomic sequence: hostnames and process ids separate
+// processes, the per-minter random nonce separates concurrent minters within
+// the same process (such as multiple windows), and the atomic sequence
+// separates calls on the same minter.
 func processIdentity() string {
 	host, err := os.Hostname()
 	if err != nil {
 		host = "unknown-host"
 	}
-	return fmt.Sprintf("%s:%d", host, os.Getpid())
+	return fmt.Sprintf("%s:%d:%s", host, os.Getpid(), rand.Text())
 }
 
-// New returns a command-id minter: a hash of this process's identity and a
-// sequence number, unique per command across every app process — two commands
-// never share an id, which the host would refuse as a conflict — without
-// reaching for randomness.
+// New returns a command-id minter: a hash of this process-and-minter identity
+// and an atomic sequence number, unique per command across every minter in
+// this process and across every app process — two commands never share an id,
+// which the host would refuse as a conflict.
 func New() func() string {
-	return newWithIdentity(processIdentity())
+	var seq atomic.Uint64
+	return newWithIdentity(processIdentity(), &seq)
 }
 
-func newWithIdentity(identity string) func() string {
-	var mu sync.Mutex
-	var seq uint64
+func newWithIdentity(identity string, seq *atomic.Uint64) func() string {
 	return func() string {
-		mu.Lock()
-		seq++
-		n := seq
-		mu.Unlock()
+		n := seq.Add(1)
 		sum := sha256.Sum256([]byte(identity + ":" + strconv.FormatUint(n, 10)))
 		return hex.EncodeToString(sum[:16])
 	}
