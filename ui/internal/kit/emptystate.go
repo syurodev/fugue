@@ -40,7 +40,7 @@ type EmptyStateState struct {
 // NewEmptyStateState builds an EmptyStateState at rest.
 func NewEmptyStateState() *EmptyStateState {
 	return &EmptyStateState{
-		presence:   motion.NewPresence(motion.Smooth(), motion.Exit()),
+		presence:   motion.NewPresence(motion.Snappy(), motion.Exit()),
 		primaryBtn: NewButtonState(),
 		clearBtn:   NewButtonState(),
 	}
@@ -56,7 +56,7 @@ func (s *EmptyStateState) SnapShown() {
 	s.presence.Snap(true)
 }
 
-// Layout lays out the EmptyState centered within constraints, with Smooth fade
+// Layout lays out the EmptyState centered within constraints, with Snappy fade
 // + 4 dp upward translate, optional icon, inviting title, one-sentence
 // description, primary action, and the "no results" clear-filter variant (§6.25).
 func (s *EmptyStateState) Layout(env *Env, gtx *layout.Context, pr *EmptyStateProps) (layout.Dimensions, EmptyStateEvents, error) {

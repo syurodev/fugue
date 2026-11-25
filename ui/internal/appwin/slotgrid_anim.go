@@ -52,8 +52,8 @@ func (g *slotGrid) armClosingCell(doc LayoutDoc, oldP Pos, sameShape bool) {
 }
 
 // armAnims arms Smooth slide animations for existing slots that moved or
-// resized, and enter animations (size from 0 at the slot's edge plus fade-in
-// on Smooth) for newly opened slots (§5.3, §3.7).
+// resized, and enter animations (size from 0 at the slot's edge on Smooth plus
+// fade-in on Snappy) for newly opened slots (§5.3, §3.7).
 func (g *slotGrid) armAnims(doc LayoutDoc) {
 	if len(g.rects) == 0 {
 		clear(g.anims)
@@ -189,7 +189,7 @@ func (g *slotGrid) startSlideAnim(refKey string, from image.Rectangle) {
 }
 
 func (g *slotGrid) startEnterAnim(refKey string, from image.Rectangle) {
-	p := motion.NewPresence(motion.Smooth(), motion.Exit())
+	p := motion.NewPresence(motion.Snappy(), motion.Exit())
 	p.Show(true)
 	s := motion.NewSpringSpec(0, motion.Smooth())
 	s.Target = 1
@@ -209,7 +209,7 @@ func (g *slotGrid) startClosing(ref SlotRef, rect image.Rectangle, existing *mot
 	if existing != nil {
 		p = *existing
 	} else {
-		p = motion.NewPresence(motion.Smooth(), motion.Exit())
+		p = motion.NewPresence(motion.Snappy(), motion.Exit())
 		p.Snap(true)
 	}
 	p.Show(false)

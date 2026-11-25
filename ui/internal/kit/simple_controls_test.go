@@ -378,23 +378,114 @@ func TestBannerAndEmptyStateUseTheirTokens(t *testing.T) {
 		t.Fatalf("dismissed Banner did not settle to 0: %v", b.Presence())
 	}
 
+	checkEmptyStateMotion(t, h)
+}
+
+func checkEmptyStateMotion(t *testing.T, h *harness) {
+	t.Helper()
 	es := NewEmptyStateState()
-	for range 60 {
+	esProps := &EmptyStateProps{
+		Icon:              IconSearch,
+		Title:             "No results",
+		Description:       "Try another query.",
+		NoResults:         true,
+		ClearFilterAction: "Clear filter",
+	}
+	stepEmpty := func() {
 		h.frameSize(t, 360, 240)
-		_, _, err := es.Layout(h.env, &h.gtx, &EmptyStateProps{
-			Icon:              IconSearch,
-			Title:             "No results",
-			Description:       "Try another query.",
-			NoResults:         true,
-			ClearFilterAction: "Clear filter",
-		})
-		if err != nil {
+		if _, _, err := es.Layout(h.env, &h.gtx, esProps); err != nil {
 			t.Fatalf("EmptyState.Layout: %v", err)
 		}
 		h.end()
 	}
+	for range 3 {
+		stepEmpty()
+	}
+	if mid := es.Presence(); mid <= 0.1 || mid >= 0.8 {
+		t.Fatalf("EmptyState mid-frame after 3 frames = %v, want in (0.1, 0.8)", mid)
+	}
+	for range 4 {
+		stepEmpty()
+	}
+	if p6 := es.Presence(); p6 <= 0.8 {
+		t.Fatalf("EmptyState fade+rise on Snappy after 6 advancing frames = %v, want > 0.8", p6)
+	}
+	for range 53 {
+		stepEmpty()
+	}
 	if es.Presence() < 0.99 {
 		t.Fatalf("EmptyState did not settle to 1: %v", es.Presence())
+	}
+
+	h.env.ReducedMotion = true
+	esReduced := NewEmptyStateState()
+	h.frameSize(t, 360, 240)
+	if _, _, err := esReduced.Layout(h.env, &h.gtx, esProps); err != nil {
+		t.Fatalf("EmptyState.Layout reduced: %v", err)
+	}
+	h.end()
+	if esReduced.Presence() != 1 {
+		t.Fatalf("ReducedMotion EmptyState = %v, want 1", esReduced.Presence())
+	}
+}
+
+func checkCardSnapInExitOut(t *testing.T, name string, step func(Preview) bool, active Preview, val func() float32) {
+	t.Helper()
+	step(active)
+	if v := val(); v != 1 {
+		t.Fatalf("Card %s first frame = %v, want 1", name, v)
+	}
+	step(Preview{})
+	step(Preview{})
+	if mid := val(); mid <= 0.05 || mid >= 0.95 {
+		t.Fatalf("Card %s leave after 2 frames = %v, want in (0.05, 0.95)", name, mid)
+	}
+	for i := 0; step(Preview{}); i++ {
+		if val() < 0 {
+			t.Fatalf("Card %s bounced below 0: %v", name, val())
+		}
+		if i == 120 {
+			t.Fatalf("Card %s leave did not settle", name)
+		}
+	}
+}
+
+// TestCardHoverAndPressSnapInAndExitOut verifies §3.7 hover/press motion on
+// clickable Card: instant highlight/press on the first frame, Exit fade-out
+// over >1 frame with no bounce, and instant snap under ReducedMotion.
+func TestCardHoverAndPressSnapInAndExitOut(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	card := NewCardState()
+	step := func(p Preview) bool {
+		h.env.Preview = p
+		h.frameSize(t, 240, 120)
+		_, _, err := card.Layout(h.env, &h.gtx, CardProps{Clickable: true}, func(gtx layout.Context) layout.Dimensions {
+			return Label(h.env, &gtx, theme.TypeBody(), h.env.Th.Chrome().Fg, "Card body")
+		})
+		if err != nil {
+			t.Fatalf("Card.Layout: %v", err)
+		}
+		_, moving := h.env.Driver.Next()
+		h.end()
+		return moving
+	}
+	step(Preview{})
+	checkCardSnapInExitOut(t, "hover", step, Preview{Hover: card.Tag()}, card.hoverF.Value)
+	checkCardSnapInExitOut(t, "press", step, Preview{Press: card.Tag()}, card.pressF.Value)
+
+	h.env.ReducedMotion = true
+	if step(Preview{Hover: card.Tag(), Press: card.Tag()}) {
+		t.Fatal("ReducedMotion Card enter requested a frame")
+	}
+	if card.hoverF.Value() != 1 || card.pressF.Value() != 1 {
+		t.Fatalf("ReducedMotion Card enter = (%v,%v), want (1,1)", card.hoverF.Value(), card.pressF.Value())
+	}
+	if step(Preview{}) {
+		t.Fatal("ReducedMotion Card leave requested a frame")
+	}
+	if card.hoverF.Value() != 0 || card.pressF.Value() != 0 {
+		t.Fatalf("ReducedMotion Card leave = (%v,%v), want (0,0)", card.hoverF.Value(), card.pressF.Value())
 	}
 }
 

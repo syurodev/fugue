@@ -618,3 +618,33 @@ func TestFUG73SplitHandlePreservesFocusDuringAnimation(t *testing.T) {
 		t.Fatal("slot animation did not settle within 100 frames")
 	}
 }
+
+// TestFUG73SlotEnterOpacityLeadsSize verifies FUG-74: on slot enter, Snappy
+// opacity leads Smooth width growth so content is already >0.8 opaque around
+// mid-open before the slot finishes expanding.
+func TestFUG73SlotEnterOpacityLeadsSize(t *testing.T) {
+	t.Parallel()
+	sc := newFUG65TestScreens(t)
+	env := newFUG65Env(t, true)
+	env.ReducedMotion = false
+	router := new(input.Router)
+	size := image.Pt(1200, 800)
+	now := time.Unix(1_700_000_000, 0)
+	settleShellFrames(t, env, sc, router, size, &now)
+
+	accRef := SlotRef{Kind: KindAccounts}
+	sc.toggleCompanion(KindAccounts)
+	advanceShellFrames(t, env, sc, router, size, &now, 5)
+	anim := sc.grid.animOf(accRef)
+	if anim == nil || !anim.entering {
+		t.Fatal("missing enter anim on Accounts")
+	}
+	if size5, alpha5 := anim.spring.Value, anim.presence.Progress(); size5 < 0.45 || size5 > 0.60 || alpha5 <= size5+0.15 {
+		t.Fatalf("at ~50%% size frame (5): size=%v alpha=%v, want size in [0.45,0.60] and alpha > size+0.15", size5, alpha5)
+	}
+	advanceShellFrames(t, env, sc, router, size, &now, 1)
+	if size6, alpha6 := anim.spring.Value, anim.presence.Progress(); size6 < 0.55 || size6 >= 0.70 || alpha6 <= 0.8 {
+		t.Fatalf("at mid-open frame (6): size=%v alpha=%v, want size in [0.55,0.70) and alpha > 0.8", size6, alpha6)
+	}
+	settleShellFrames(t, env, sc, router, size, &now)
+}

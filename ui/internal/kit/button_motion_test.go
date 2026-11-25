@@ -231,14 +231,11 @@ type hoverRig struct {
 	p  ButtonProps
 }
 
-// frame lays one frame out with hover forced on or off and returns whether
-// the frame asked for the next one.
-func (r *hoverRig) frame(hover bool) bool {
+// frameState lays one frame with preview p and returns whether the frame asked
+// for the next one.
+func (r *hoverRig) frameState(p Preview) bool {
 	r.t.Helper()
-	r.h.env.Preview = Preview{}
-	if hover {
-		r.h.env.Preview.Hover = r.st.Tag()
-	}
+	r.h.env.Preview = p
 	r.h.frame(r.t)
 	if _, err := r.st.Layout(r.h.env, &r.h.gtx, r.p); err != nil {
 		r.t.Fatalf("lay the button out: %v", err)
@@ -248,53 +245,100 @@ func (r *hoverRig) frame(hover bool) bool {
 	return moving
 }
 
-// settle runs frames until the button stops asking for them, then demands
-// two more quiet ones (UK-E11).
-func (r *hoverRig) settle(hover bool) {
+// settleIdle runs frames at rest until the button stops asking for them,
+// then demands two more quiet ones (UK-E11).
+func (r *hoverRig) settleIdle() {
 	r.t.Helper()
-	for i := 0; r.frame(hover); i++ {
+	for i := 0; r.frameState(Preview{}); i++ {
 		if i == 240 {
 			r.t.Fatal("the button never stopped asking for frames")
 		}
 	}
 	for range 2 {
-		if r.frame(hover) {
+		if r.frameState(Preview{}) {
 			r.t.Fatal("a settled button asked for another frame")
 		}
 	}
 }
 
-// TestButtonMotionSettlesAndRetargets covers UK-E11: every motion of a
-// button reaches its target and then stops asking for frames — two quiet
-// frames in a row — and a target changed mid-flight continues from the
-// value the motion has, without a jump.
+func (r *hoverRig) verifySnapInExitOut(name string, active Preview, val func() float32) {
+	r.t.Helper()
+	r.frameState(active)
+	if v := val(); v != 1 {
+		r.t.Fatalf("%s first frame = %v, want 1", name, v)
+	}
+	r.frameState(Preview{})
+	r.frameState(Preview{})
+	if mid := val(); mid <= 0.05 || mid >= 0.95 {
+		r.t.Fatalf("%s leave after 2 frames = %v, want mid-fade in (0.05, 0.95)", name, mid)
+	}
+	for i := 0; r.frameState(Preview{}); i++ {
+		if val() < 0 {
+			r.t.Fatalf("%s bounced below 0: %v", name, val())
+		}
+		if i == 240 {
+			r.t.Fatalf("%s leave never settled", name)
+		}
+	}
+	r.settleIdle()
+	if v := val(); v != 0 {
+		r.t.Fatalf("%s settled at %v, want 0", name, v)
+	}
+}
+
+func (r *hoverRig) verifyFocusRetarget(st *ButtonState) {
+	r.t.Helper()
+	r.h.env.KeyboardOnly = true
+	for range 3 {
+		r.frameState(Preview{Focus: st.Tag()})
+	}
+	midFocus := st.focusF.Value()
+	if midFocus <= 0.05 || midFocus >= 0.95 {
+		r.t.Fatalf("focus after 3 frames = %v, want mid-flight in (0.05, 0.95)", midFocus)
+	}
+	r.frameState(Preview{})
+	if next := st.focusF.Value(); math.Abs(float64(next-midFocus)) > 0.25 {
+		r.t.Fatalf("focus jumped from %v to %v when retargeted", midFocus, next)
+	}
+	r.settleIdle()
+	if v := st.focusF.Value(); v != 0 {
+		r.t.Fatalf("focus settled at %v, want 0", v)
+	}
+}
+
+func (r *hoverRig) verifyReducedMotion(st *ButtonState) {
+	r.t.Helper()
+	r.h.env.ReducedMotion = true
+	if r.frameState(Preview{Hover: st.Tag(), Press: st.Tag()}) {
+		r.t.Fatal("ReducedMotion hover/press enter requested a frame")
+	}
+	if st.hoverF.Value() != 1 || st.pressF.Value() != 1 {
+		r.t.Fatalf("ReducedMotion enter left hover=%v press=%v, want 1, 1", st.hoverF.Value(), st.pressF.Value())
+	}
+	if r.frameState(Preview{}) {
+		r.t.Fatal("ReducedMotion hover/press leave requested a frame")
+	}
+	if st.hoverF.Value() != 0 || st.pressF.Value() != 0 {
+		r.t.Fatalf("ReducedMotion leave left hover=%v press=%v, want 0, 0", st.hoverF.Value(), st.pressF.Value())
+	}
+}
+
+// TestButtonMotionSettlesAndRetargets covers UK-E11 and §3.7: hover and press
+// appear on the first frame and fade out on Exit over >1 frame with no bounce,
+// focus follows Snappy with mid-flight retargeting without a jump, every
+// motion stops asking for frames once settled (two quiet frames in a row), and
+// ReducedMotion snaps in one frame.
 func TestButtonMotionSettlesAndRetargets(t *testing.T) {
 	t.Parallel()
 	h := newHarness(t)
 	st := NewButtonState()
 	r := &hoverRig{t: t, h: h, st: st, p: ButtonProps{Text: labelSave, Variant: Secondary}}
-	r.frame(false)
-	r.settle(false)
-	for range 5 {
-		r.frame(true)
-	}
-	mid := st.hoverF.Value()
-	if mid < 0.05 || mid > 0.95 {
-		t.Fatalf("hover is at %v five frames in, want it mid-flight", mid)
-	}
-	r.frame(false)
-	if next := st.hoverF.Value(); math.Abs(float64(next-mid)) > 0.25 {
-		t.Fatalf("hover jumped from %v to %v when its target changed", mid, next)
-	}
-	for _, want := range []struct {
-		hover bool
-		value float32
-	}{{false, 0}, {true, 1}} {
-		r.settle(want.hover)
-		if v := st.hoverF.Value(); v != want.value {
-			t.Fatalf("hover settled at %v, want %v", v, want.value)
-		}
-	}
+	r.frameState(Preview{})
+	r.settleIdle()
+	r.verifySnapInExitOut("hover", Preview{Hover: st.Tag()}, st.hoverF.Value)
+	r.verifySnapInExitOut("press", Preview{Press: st.Tag()}, st.pressF.Value)
+	r.verifyFocusRetarget(st)
+	r.verifyReducedMotion(st)
 }
 
 // TestButtonLabelSharesTheRowTextCenter verifies that a Button's label ink

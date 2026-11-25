@@ -116,15 +116,18 @@ func TestFUG72RailHighlightFollowsClickAndSlides(t *testing.T) {
 		{railCenter(env, sc, &gtx, 0), railChat, KindSession, gap},
 	}
 	for _, st := range steps {
+		startY := sc.grid.railY.Value()
 		now = now.Add(16 * time.Millisecond)
 		clickShellAt(t, env, sc, router, size, now, st.pt)
 		assertRailConsistent(t, sc, st.wantRail, st.wantKind)
 		if !wantsImmediateFrame(env) {
 			t.Fatalf("after clicking %v, expected a new frame to be requested", st.wantRail)
 		}
-		advanceShellFrames(t, env, sc, router, size, &now, 6)
-		if curY := sc.grid.railY.Value(); curY == st.targetY {
-			t.Fatalf("expected rail indicator mid-slide toward %v, already at %v", st.targetY, curY)
+		advanceShellFrames(t, env, sc, router, size, &now, 5)
+		curY := sc.grid.railY.Value()
+		lo, hi := min(startY, st.targetY), max(startY, st.targetY)
+		if curY <= lo || curY >= hi {
+			t.Fatalf("expected rail indicator mid-slide strictly between %v and %v, got %v", lo, hi, curY)
 		}
 		settleShellFrames(t, env, sc, router, size, &now)
 	}
@@ -195,9 +198,12 @@ func TestFUG72SidebarCollapseExpandMotion(t *testing.T) {
 		t.Fatal("collapse should flip SidebarCollapsed immediately and request a frame")
 	}
 
-	advanceShellFrames(t, env, sc, router, size, &now, 10)
+	advanceShellFrames(t, env, sc, router, size, &now, 4)
 	if midW := drawnSidebarWidth(&gtx, sc, size); midW <= 0 || midW >= fullW || !wantsImmediateFrame(env) {
 		t.Fatalf("mid-collapse sideW = %d (want 0..%d), immediate = %v", midW, fullW, wantsImmediateFrame(env))
+	}
+	if sc.grid.sidebarFadeF.Value() >= sc.grid.sidebarOpenF.Value() {
+		t.Fatalf("collapse fade %v should exit faster than width %v", sc.grid.sidebarFadeF.Value(), sc.grid.sidebarOpenF.Value())
 	}
 
 	// Reverse mid-flight and settle back to fullW.
@@ -211,6 +217,28 @@ func TestFUG72SidebarCollapseExpandMotion(t *testing.T) {
 	clickShellAt(t, env, sc, router, size, now, collapsePt)
 	settleShellFrames(t, env, sc, router, size, &now)
 	assertSidebarSettled(t, env, sc, &gtx, size, 0, true)
+
+	checkSidebarExpandFadeLeadsWidth(t, env, sc, router, &gtx, size, &now, expandPt, fullW)
+}
+
+func checkSidebarExpandFadeLeadsWidth(t *testing.T, env *kit.Env, sc *screens, router *input.Router, gtx *layout.Context, size image.Point, now *time.Time, expandPt f32.Point, fullW int) {
+	t.Helper()
+	*now = now.Add(16 * time.Millisecond)
+	clickShellAt(t, env, sc, router, size, *now, expandPt)
+	advanceShellFrames(t, env, sc, router, size, now, 4)
+	if midW := drawnSidebarWidth(gtx, sc, size); midW <= 0 || midW >= fullW {
+		t.Fatalf("mid-expand sideW = %d (want 0..%d)", midW, fullW)
+	}
+	if sc.grid.sidebarFadeF.Value() <= sc.grid.sidebarOpenF.Value() {
+		t.Fatalf("expand fade %v should lead width %v", sc.grid.sidebarFadeF.Value(), sc.grid.sidebarOpenF.Value())
+	}
+	advanceShellFrames(t, env, sc, router, size, now, 1)
+	if sc.grid.sidebarFadeF.Value() <= 0.8 || sc.grid.sidebarOpenF.Value() >= 0.7 {
+		t.Fatalf("frame 6 expand fade=%v width=%v, want fade>0.8 while width<0.7",
+			sc.grid.sidebarFadeF.Value(), sc.grid.sidebarOpenF.Value())
+	}
+	settleShellFrames(t, env, sc, router, size, now)
+	assertSidebarSettled(t, env, sc, gtx, size, fullW, false)
 }
 
 // TestFUG72SidebarFooterColumnHeightSmooth verifies that with an unlocked vault
@@ -289,14 +317,14 @@ func TestFUG72SidebarReducedMotionInstant(t *testing.T) {
 
 	now = now.Add(16 * time.Millisecond)
 	clickShellAt(t, env, sc, router, size, now, collapsePt)
-	if sideW := drawnSidebarWidth(&gtx, sc, size); sideW != 0 || wantsImmediateFrame(env) {
-		t.Fatalf("ReducedMotion collapse sideW=%d immediate=%v", sideW, wantsImmediateFrame(env))
+	if sideW := drawnSidebarWidth(&gtx, sc, size); sideW != 0 || sc.grid.sidebarFadeF.Value() != 0 || wantsImmediateFrame(env) {
+		t.Fatalf("ReducedMotion collapse sideW=%d fade=%v immediate=%v", sideW, sc.grid.sidebarFadeF.Value(), wantsImmediateFrame(env))
 	}
 
 	now = now.Add(16 * time.Millisecond)
 	clickShellAt(t, env, sc, router, size, now, expandPt)
-	if sideW := drawnSidebarWidth(&gtx, sc, size); sideW != fullW || wantsImmediateFrame(env) {
-		t.Fatalf("ReducedMotion expand sideW=%d immediate=%v", sideW, wantsImmediateFrame(env))
+	if sideW := drawnSidebarWidth(&gtx, sc, size); sideW != fullW || sc.grid.sidebarFadeF.Value() != 1 || wantsImmediateFrame(env) {
+		t.Fatalf("ReducedMotion expand sideW=%d fade=%v immediate=%v", sideW, sc.grid.sidebarFadeF.Value(), wantsImmediateFrame(env))
 	}
 }
 

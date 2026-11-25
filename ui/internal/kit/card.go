@@ -36,9 +36,10 @@ type CardState struct {
 // NewCardState builds a CardState at rest.
 func NewCardState() *CardState {
 	sn := motion.Snappy()
+	ex := motion.Exit()
 	return &CardState{
-		hoverF: motion.NewFollower(sn),
-		pressF: motion.NewFollower(sn),
+		hoverF: motion.NewFollower(ex),
+		pressF: motion.NewFollower(ex),
 		focusF: motion.NewFollower(sn),
 	}
 }
@@ -48,8 +49,9 @@ func NewCardState() *CardState {
 func (s *CardState) Tag() event.Tag { return &s.click }
 
 // Layout lays out the Card with SurfaceRaised, BorderSubtle, radius.lg,
-// space.lg padding and no shadow (§6.19). When Clickable, hover brightens
-// the surface on Snappy and press scales to 0.99.
+// space.lg padding and no shadow (§6.19). When Clickable, hover and press
+// appear on the first frame and fade out on Exit with no bounce, and press
+// scales to 0.99.
 func (s *CardState) Layout(env *Env, gtx *layout.Context, pr CardProps, body layout.Widget) (dims layout.Dimensions, clicked bool, err error) {
 	padDp := pr.Padding
 	if padDp <= 0 {
@@ -86,8 +88,8 @@ func (s *CardState) Layout(env *Env, gtx *layout.Context, pr CardProps, body lay
 		}
 		st := resolveState(env, &ig, s.Tag(), &s.click, pressOpts{disabled: pr.Disabled})
 		s.click.Layout(ig, func(layout.Context) layout.Dimensions { return layout.Dimensions{Size: size} })
-		hover = followState(env, &s.hoverF, st.hovered)
-		press = followState(env, &s.pressF, st.pressed)
+		hover = followSnapIn(env, &s.hoverF, st.hovered)
+		press = followSnapIn(env, &s.pressF, st.pressed)
 		focus = followState(env, &s.focusF, st.focused)
 	}
 
