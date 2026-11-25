@@ -23,13 +23,15 @@ const shadowAttributes = "* -text -ident -filter -merge -crlf -working-tree-enco
 
 // Repo is one project's shadow Git repository.
 type Repo struct {
-	key      string
-	workTree string
-	gitDir   string
-	gitPath  string
-	limits   Limits
-	clock    clock.Clock
-	ids      ids.Generator
+	key           string
+	workTree      string
+	gitDir        string
+	gitPath       string
+	limits        Limits
+	clock         clock.Clock
+	ids           ids.Generator
+	excludedDirs  map[string]struct{}
+	excludedFiles map[string]struct{}
 
 	initOnce sync.Once
 	initErr  error
@@ -92,6 +94,10 @@ func (r *Repo) configureShadowRepo(ctx context.Context) error {
 		{"core.symlinks", gitTrue},
 		{"core.fsmonitor", gitFalse},
 		{"core.hooksPath", os.DevNull},
+		{"core.looseCompression", "0"},
+		{"core.fsync", "none"},
+		{"index.threads", gitTrue},
+		{"index.version", "4"},
 		{"gc.auto", "0"},
 		{"advice.ignoredHook", gitFalse},
 	}
@@ -157,16 +163,34 @@ func (r *Repo) snapshotLocked(ctx context.Context, checkpointID, slot string) (S
 	if err != nil {
 		return Snapshot{}, err
 	}
-	toRefresh, toRemove, skipped := r.partitionIndex(tracked)
+	toRefresh, toRemove, skipped, err := r.partitionIndex(ctx, tracked)
+	if err != nil {
+		return Snapshot{}, err
+	}
 
 	untracked, untrackedSkips, err := r.untrackedFiles(ctx, patterns, len(toRefresh))
 	if err != nil {
 		return Snapshot{}, err
 	}
 	skipped = append(skipped, untrackedSkips...)
+	toRemove = dropReplacedByDirectory(tracked, toRemove, toRefresh, untracked)
 
-	toRemove = dropReplacedByDirectory(toRemove, toRefresh, untracked)
-	if applyErr := r.applyIndexUpdates(ctx, toRemove, toRefresh, untracked); applyErr != nil {
+	if shouldUseFastImport(len(tracked), len(untracked)) {
+		tree, allSkips, fiErr := r.snapshotFastImportLocked(
+			ctx, checkpointID, slot, tracked, toRemove, toRefresh, untracked, skipped,
+		)
+		if fiErr != nil {
+			return Snapshot{}, fiErr
+		}
+		return Snapshot{
+			Tree:    tree,
+			Skipped: allSkips,
+			Elapsed: r.clock.Now().Sub(started),
+		}, nil
+	}
+
+	untrackedPaths := candidatePathsOnly(untracked)
+	if applyErr := r.applyIndexUpdates(ctx, toRemove, toRefresh, untrackedPaths); applyErr != nil {
 		return Snapshot{}, applyErr
 	}
 
@@ -213,130 +237,15 @@ func (r *Repo) indexPaths(ctx context.Context) ([]string, error) {
 	return splitNUL(raw), nil
 }
 
-func (r *Repo) partitionIndex(tracked []string) (keep, remove []string, skipped []Skip) {
-	for _, rel := range tracked {
-		if r.isDenied(rel) {
-			remove = append(remove, rel)
-			skipped = append(skipped, Skip{Path: rel, Reason: SkipExcluded})
-			continue
-		}
-		info, statErr := os.Lstat(filepath.Join(r.workTree, filepath.FromSlash(rel)))
-		if statErr != nil || info.IsDir() {
-			remove = append(remove, rel)
-			continue
-		}
-		if info.Mode().IsRegular() && info.Size() > r.limits.MaxFileBytes {
-			remove = append(remove, rel)
-			skipped = append(skipped, Skip{Path: rel, Reason: SkipTooLarge, Bytes: info.Size()})
-			continue
-		}
-		keep = append(keep, rel)
+func candidatePathsOnly(entries []candidateEntry) []string {
+	if len(entries) == 0 {
+		return nil
 	}
-	return keep, remove, skipped
-}
-
-func (r *Repo) untrackedFiles(ctx context.Context, patterns []string, alreadyKept int) ([]string, []Skip, error) {
-	args := make([]string, 0, 5+len(patterns))
-	args = append(args, "ls-files", "-z", "--others", "--exclude-standard")
-	for _, p := range patterns {
-		args = append(args, "-x", p)
+	out := make([]string, len(entries))
+	for i, e := range entries {
+		out[i] = e.rel
 	}
-	raw, err := r.git(ctx, nil, args...)
-	if err != nil {
-		return nil, nil, err
-	}
-	candidates := splitNUL(raw)
-	if alreadyKept+len(candidates) > int(r.limits.MaxFiles) {
-		return nil, nil, fmt.Errorf("%w: more than %d files in %s", ErrProjectTooLarge, r.limits.MaxFiles, r.workTree)
-	}
-	keep, skipped := r.filterUntrackedCandidates(candidates)
-	return keep, skipped, nil
-}
-
-func (r *Repo) filterUntrackedCandidates(candidates []string) ([]string, []Skip) {
-	var keep []string
-	var skipped []Skip
-	for _, rel := range candidates {
-		clean := strings.TrimSuffix(rel, "/")
-		if clean == "" {
-			continue
-		}
-		if r.isDenied(clean) {
-			skipped = append(skipped, Skip{Path: clean, Reason: SkipExcluded})
-			continue
-		}
-		kept, skip, ok := r.classifyCandidate(rel, clean)
-		if skip != nil {
-			skipped = append(skipped, *skip)
-		}
-		if ok {
-			keep = append(keep, kept)
-		}
-	}
-	return keep, skipped
-}
-
-func (r *Repo) classifyCandidate(rawRel, clean string) (string, *Skip, bool) {
-	full := filepath.Join(r.workTree, filepath.FromSlash(clean))
-	info, err := os.Lstat(full)
-	if err != nil {
-		return "", &Skip{Path: clean, Reason: SkipUnreadable}, false
-	}
-	if info.IsDir() || strings.HasSuffix(rawRel, "/") {
-		if looksLikeNestedRepo(full) {
-			return "", &Skip{Path: clean, Reason: SkipNestedRepo}, false
-		}
-		return "", nil, false
-	}
-	mode := info.Mode()
-	if !mode.IsRegular() && mode&os.ModeSymlink == 0 {
-		return "", nil, false
-	}
-	if mode.IsRegular() && info.Size() > r.limits.MaxFileBytes {
-		return "", &Skip{Path: clean, Reason: SkipTooLarge, Bytes: info.Size()}, false
-	}
-	return clean, nil, true
-}
-
-func dropReplacedByDirectory(toRemove, toRefresh, untracked []string) []string {
-	existing := make(map[string]bool, len(toRemove))
-	for _, p := range toRemove {
-		existing[p] = true
-	}
-	for _, list := range [][]string{toRefresh, untracked} {
-		for _, p := range list {
-			for dir := filepath.ToSlash(filepath.Dir(p)); dir != "." && dir != "" && dir != "/"; dir = filepath.ToSlash(filepath.Dir(dir)) {
-				if !existing[dir] {
-					existing[dir] = true
-					toRemove = append(toRemove, dir)
-				}
-			}
-		}
-	}
-	return toRemove
-}
-
-func (r *Repo) isDenied(rel string) bool {
-	dirs := defaultExcludedDirs()
-	for _, part := range strings.Split(rel, "/") {
-		for _, denied := range dirs {
-			if part == denied {
-				return true
-			}
-		}
-	}
-	base := filepath.Base(rel)
-	for _, denied := range defaultExcludedFiles() {
-		if base == denied {
-			return true
-		}
-	}
-	return false
-}
-
-func looksLikeNestedRepo(fullDir string) bool {
-	_, err := os.Lstat(filepath.Join(fullDir, ".git"))
-	return err == nil
+	return out
 }
 
 func (r *Repo) git(ctx context.Context, stdin []byte, args ...string) ([]byte, error) {
