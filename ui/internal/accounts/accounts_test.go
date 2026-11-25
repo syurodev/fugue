@@ -287,7 +287,16 @@ func assertSubmitLoginCodeModelRetry(t *testing.T) {
 	if retryCmd != "cmd-1" {
 		t.Fatalf("retry cmdID = %q, want cmd-1", retryCmd)
 	}
-	m.ApplySubmitLoginCodeResult(&Result{Kind: OpSubmitLoginCode, Vendor: client.VendorClaude, CommandID: retryCmd})
+	m.ApplySubmitLoginCodeResult(&Result{Kind: OpSubmitLoginCode, Vendor: client.VendorClaude, CommandID: retryCmd, Code: "unavailable", Err: errScriptedAccounts})
+	if retryUnavailable := m.BeginSubmitLoginCode(client.VendorClaude, "cmd-unavailable"); retryUnavailable != "cmd-1" {
+		t.Fatalf("retry after unavailable cmdID = %q, want cmd-1", retryUnavailable)
+	}
+	m.ApplySubmitLoginCodeResult(&Result{Kind: OpSubmitLoginCode, Vendor: client.VendorClaude, CommandID: retryCmd, Code: "invalid_argument", Err: errScriptedAccounts})
+	freshAfterInvalid := m.BeginSubmitLoginCode(client.VendorClaude, "cmd-invalid")
+	if freshAfterInvalid != "cmd-invalid" {
+		t.Fatalf("after invalid_argument cmdID = %q, want cmd-invalid", freshAfterInvalid)
+	}
+	m.ApplySubmitLoginCodeResult(&Result{Kind: OpSubmitLoginCode, Vendor: client.VendorClaude, CommandID: freshAfterInvalid})
 	if e, _ := m.Login(client.VendorClaude); !e.CodeSent || e.CodeError != "" || e.PendingCodeCommandID != "" {
 		t.Fatalf("after successful submit = %+v, want CodeSent and cleared pending command_id", e)
 	}

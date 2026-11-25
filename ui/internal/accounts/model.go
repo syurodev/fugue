@@ -369,6 +369,9 @@ func (m *Model) ApplySubmitLoginCodeResult(res *Result) {
 	cur.SubmittingCode = false
 	if res.Err != nil {
 		cur.CodeError = res.Err.Error()
+		if !isTransientCodeSubmitError(res.Code) {
+			cur.PendingCodeCommandID = ""
+		}
 		m.logins[res.Vendor] = cur
 		return
 	}
@@ -383,6 +386,10 @@ func (m *Model) DismissLogin(vendor string) {
 	if e, ok := m.logins[vendor]; ok && !e.Active() {
 		delete(m.logins, vendor)
 	}
+}
+
+func isTransientCodeSubmitError(code string) bool {
+	return code == "" || code == "unavailable" || code == "deadline_exceeded"
 }
 
 func isRunningLoginState(state string) bool {

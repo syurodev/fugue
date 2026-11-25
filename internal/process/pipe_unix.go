@@ -10,10 +10,11 @@ import (
 	"sync"
 )
 
-// outputPipe is the parent's read end of the child's stdout. It records
-// when the stream ended (EOF or a read error), so Stop knows whether stdout
-// has settled without reading on the consumer's behalf.
+// outputPipe is the parent's read end of a child output stream (stdout or
+// stderr). It records when the stream ended (EOF or a read error), so Stop
+// knows whether the stream has settled without reading on the consumer's behalf.
 type outputPipe struct {
+	name      string
 	file      *os.File
 	ended     chan struct{}
 	endOnce   sync.Once
@@ -21,8 +22,8 @@ type outputPipe struct {
 	closeErr  error
 }
 
-func newOutputPipe(f *os.File) *outputPipe {
-	return &outputPipe{file: f, ended: make(chan struct{})}
+func newOutputPipe(name string, f *os.File) *outputPipe {
+	return &outputPipe{name: name, file: f, ended: make(chan struct{})}
 }
 
 func (o *outputPipe) Read(b []byte) (int, error) {
@@ -32,7 +33,7 @@ func (o *outputPipe) Read(b []byte) (int, error) {
 		if errors.Is(err, io.EOF) {
 			return n, io.EOF
 		}
-		return n, fmt.Errorf("read stdout pipe: %w", err)
+		return n, fmt.Errorf("read %s pipe: %w", o.name, err)
 	}
 	return n, nil
 }
@@ -42,7 +43,7 @@ func (o *outputPipe) Read(b []byte) (int, error) {
 func (o *outputPipe) Close() error {
 	o.closeOnce.Do(func() {
 		if err := o.file.Close(); err != nil {
-			o.closeErr = fmt.Errorf("close stdout pipe: %w", err)
+			o.closeErr = fmt.Errorf("close %s pipe: %w", o.name, err)
 		}
 	})
 	return o.closeErr

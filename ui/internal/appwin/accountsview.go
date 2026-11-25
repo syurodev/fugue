@@ -8,6 +8,7 @@ import (
 	"github.com/syurodev/fugue/pkg/client"
 
 	"github.com/syurodev/fugue/ui/internal/accounts"
+	"github.com/syurodev/fugue/ui/internal/cmdid"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/theme"
@@ -33,11 +34,11 @@ type accountCardWidgets struct {
 // lands, it occupies the right pane when selected from the sidebar or toggled
 // with Ctrl/Cmd+Shift+A.
 type accountsView struct {
-	refreshing bool
-	listErr    string
-	openErr    string
-	openURL    func(string) error
-	codeCmdSeq int
+	refreshing       bool
+	listErr          string
+	openErr          string
+	openURL          func(string) error
+	newCodeCommandID func() string
 
 	empty     *kit.EmptyStateState
 	errBanner *kit.BannerState
@@ -47,11 +48,12 @@ type accountsView struct {
 
 func newAccountsView() *accountsView {
 	return &accountsView{
-		openURL:   openHTTPSURL,
-		empty:     kit.NewEmptyStateState(),
-		errBanner: kit.NewBannerState(),
-		scroll:    kit.NewScrollAreaState(),
-		cards:     map[string]*accountCardWidgets{},
+		openURL:          openHTTPSURL,
+		newCodeCommandID: cmdid.New(),
+		empty:            kit.NewEmptyStateState(),
+		errBanner:        kit.NewBannerState(),
+		scroll:           kit.NewScrollAreaState(),
+		cards:            map[string]*accountCardWidgets{},
 	}
 }
 

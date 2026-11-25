@@ -186,14 +186,14 @@ func newProcess(
 	stderr *os.File,
 ) *Process {
 	ring := NewRingBuffer(DefaultStderrRingCapacity)
-	out := newOutputPipe(stdout)
+	out := newOutputPipe("stdout", stdout)
 	lineReader := NewLineReader(out, MaxFrameSize)
 	var (
 		errPipe *outputPipe
 		errLine *LineReader
 	)
 	if opts.StderrLines && stderr != nil {
-		errPipe = newOutputPipe(stderr)
+		errPipe = newOutputPipe("stderr", stderr)
 		errLine = NewLineReader(errPipe, MaxFrameSize)
 	}
 

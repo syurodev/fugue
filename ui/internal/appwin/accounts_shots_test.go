@@ -637,7 +637,7 @@ func assertClaudeLoginCodeSubmitAndRetry(t *testing.T) {
 		t.Fatal("expected CodeSent = true after successful submit")
 	}
 	_, summary := loginStatePresentation(client.VendorClaude, &entry)
-	if summary != claudeCodeSentLabel {
-		t.Fatalf("summary = %q, want %q", summary, claudeCodeSentLabel)
+	if want := runningLoginHint(client.VendorClaude); summary != want {
+		t.Fatalf("summary = %q, want %q", summary, want)
 	}
 }

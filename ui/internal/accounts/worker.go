@@ -162,7 +162,6 @@ func (w *Worker) execute(ctx context.Context, c Client, req *Request) Result {
 	case OpSubmitLoginCode:
 		res.CommandID = req.CommandID
 		res.Err = c.SubmitLoginCode(ctx, req.CommandID, req.LoginID, req.Code)
-		req.Code = ""
 	}
 	if res.Err != nil {
 		res.Code, _ = client.AccountsCodeOf(res.Err)

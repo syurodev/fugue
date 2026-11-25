@@ -390,3 +390,21 @@ func TestBlockButtonFillsTheWidthAndLinkKeepsItsBox(t *testing.T) {
 		t.Fatalf("link box %v differs from the primary box %v", link.Size, plain.Size)
 	}
 }
+
+func TestWrapButtonFitsNarrowWidthAndGrowsHeight(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	h.frame(t)
+	st := NewButtonState()
+	const longLabel = "Open sign-in page (shows a code to paste here)"
+	single := st.Measure(h.env, &h.gtx, ButtonProps{Text: longLabel, Variant: Secondary, Size: SizeSM})
+	narrow := h.gtx
+	narrow.Constraints.Max.X = max(single.Size.X/2, 120)
+	wrapped := st.Measure(h.env, &narrow, ButtonProps{Text: longLabel, Variant: Secondary, Size: SizeSM, Wrap: true})
+	if wrapped.Size.X > narrow.Constraints.Max.X {
+		t.Fatalf("wrapped width = %d, want <= %d", wrapped.Size.X, narrow.Constraints.Max.X)
+	}
+	if wrapped.Size.Y <= single.Size.Y {
+		t.Fatalf("wrapped height = %d, want > single-line height %d", wrapped.Size.Y, single.Size.Y)
+	}
+}

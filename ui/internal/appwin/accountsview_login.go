@@ -14,6 +14,7 @@ import (
 	"github.com/syurodev/fugue/pkg/client"
 
 	"github.com/syurodev/fugue/ui/internal/accounts"
+	"github.com/syurodev/fugue/ui/internal/cmdid"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
@@ -31,18 +32,16 @@ func vendorAcceptsCode(vendor string) bool {
 	return vendor == client.VendorClaude
 }
 
-func (v *accountsView) nextCodeCommandID() string {
-	v.codeCmdSeq++
-	return fmt.Sprintf("login-code-%d", v.codeCmdSeq)
-}
-
 func (v *accountsView) layoutLoginSection(env *kit.Env, sc *screens, w *accountCardWidgets, vendor string, login *accounts.LoginEntry) []layout.FlexChild {
 	c := env.Th.Chrome()
 	tagProps, summary := loginStatePresentation(vendor, login)
 	headerChildren := []layout.FlexChild{
 		rigidTag(env, sc.fail, w.loginTag, tagProps),
 		spacerW(theme.SpaceSM),
-		rigidParagraph(env, theme.TypeSmall(), c.Fg, summary),
+		layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+			local := gtx
+			return kit.Paragraph(env, &local, theme.TypeSmall(), c.Fg, summary)
+		}),
 	}
 	if !login.Active() {
 		headerChildren = append(headerChildren, spacerW(theme.SpaceSM),
@@ -135,7 +134,10 @@ func (v *accountsView) submitLoginCode(sc *screens, w *accountCardWidgets, vendo
 	}
 	w.codeField.SetText("")
 	w.codeField = kit.NewTextFieldState()
-	cmdID := sc.accounts.BeginSubmitLoginCode(vendor, v.nextCodeCommandID())
+	if v.newCodeCommandID == nil {
+		v.newCodeCommandID = cmdid.New()
+	}
+	cmdID := sc.accounts.BeginSubmitLoginCode(vendor, v.newCodeCommandID())
 	req := accounts.Request{
 		Kind:      accounts.OpSubmitLoginCode,
 		Vendor:    vendor,
@@ -149,7 +151,7 @@ func (v *accountsView) submitLoginCode(sc *screens, w *accountCardWidgets, vendo
 func loginStatePresentation(vendor string, login *accounts.LoginEntry) (kit.TagProps, string) {
 	switch login.State {
 	case client.LoginStateStarted, client.LoginStateWaiting:
-		return kit.TagProps{Text: "Login running", Variant: kit.TagStatus, Status: theme.StatusInfo}, runningLoginMessage(vendor, login)
+		return kit.TagProps{Text: "Login running", Variant: kit.TagStatus, Status: theme.StatusInfo}, runningLoginHint(vendor)
 	case client.LoginStateSucceeded:
 		return kit.TagProps{Text: "Login succeeded", Variant: kit.TagStatus, Status: theme.StatusSuccess}, "Account login verified."
 	case client.LoginStateCancelled:
@@ -167,13 +169,6 @@ func loginStatePresentation(vendor string, login *accounts.LoginEntry) (kit.TagP
 	}
 }
 
-func runningLoginMessage(vendor string, login *accounts.LoginEntry) string {
-	if vendorAcceptsCode(vendor) && login.CodeSent {
-		return claudeCodeSentLabel
-	}
-	return runningLoginHint(vendor)
-}
-
 func unsupportedLoginMessage(vendor string, login *accounts.LoginEntry) string {
 	if login.ErrorMessage != "" {
 		return login.ErrorMessage
@@ -186,7 +181,7 @@ func failedLoginMessage(vendor string, login *accounts.LoginEntry) string {
 		return login.ErrorMessage
 	}
 	if vendorAcceptsCode(vendor) {
-		return claudeSignInAgainLabel
+		return "Claude did not accept the login."
 	}
 	return "CLI login failed."
 }
@@ -221,7 +216,7 @@ func (v *accountsView) layoutHTTPSLinks(env *kit.Env, sc *screens, w *accountCar
 			u := raw
 			children = append(children, spacerH(theme.SpaceXS),
 				rigidInboxButton(env, sc.fail, btn, kit.ButtonProps{
-					Text: claudeFallbackURLLabel, Variant: kit.Secondary, Size: kit.SizeSM,
+					Text: claudeFallbackURLLabel, Variant: kit.Secondary, Size: kit.SizeSM, Wrap: true,
 				}, func() { v.openHTTPS(u) }))
 		}
 		return children
