@@ -16,6 +16,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/inbox"
 	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/osappearance"
 	"github.com/syurodev/fugue/ui/internal/secrets"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/settings"
@@ -179,11 +180,13 @@ type screens struct {
 	settings       *settings.Model
 	settingsWorker *settings.Worker
 	settingsView   *settingsView
-	secrets        *secrets.Model
-	secretsWorker  *secrets.Worker
-	secretsView    *secretsView
-	viewer         *fileViewer
-	viewerWorker   *fileViewWorker
+	// osAppearance reads the cached OS light/dark preference for ThemeSystem.
+	osAppearance  osappearance.Source
+	secrets       *secrets.Model
+	secretsWorker *secrets.Worker
+	secretsView   *secretsView
+	viewer        *fileViewer
+	viewerWorker  *fileViewWorker
 	// layoutWorker saves the layout document off the window goroutine
 	// (slotpersist.go); nil in the headless tests that build no worker.
 	layoutWorker    *layoutWorker

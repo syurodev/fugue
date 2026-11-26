@@ -51,6 +51,7 @@ Rows for the desktop app's own `go.mod` (ADR 0002 §6); none of them reach the c
 | `golang.org/x/image` | BSD-3-Clause | `font/sfnt` glyph-index checks of the bundled fonts in tests | user, ADR 0002 | F10.2a |
 | `github.com/yuin/goldmark` | MIT | CommonMark parsing of vendor markdown into the immutable model of `ui/internal/markdown` (DA-03) | user, roadmap F10.3a | F10.3a |
 | `github.com/alecthomas/chroma/v2` | MIT | Syntax tokenization of fenced code blocks into stable roles in `ui/internal/markdown`; lexer only, never the HTML formatter (DA-03) | user, roadmap F10.3a | F10.3a |
+| `github.com/godbus/dbus/v5` | BSD-2-Clause | Read `org.freedesktop.portal.Settings` `color-scheme` for the `System` theme mode (FUG-69); previously indirect | owner, FUG-69 | FUG-69 |
 
 Bundled static assets of `ui/` (DA-04), not Go modules:
 

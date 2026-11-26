@@ -18,6 +18,7 @@ import (
 
 	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
+	"github.com/syurodev/fugue/ui/internal/osappearance"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
@@ -192,6 +193,31 @@ func (c *multiWindow) deliver(u hostconn.Update) {
 	}
 }
 
+// invalidateAll wakes every currently registered window so it redraws on
+// process-wide changes such as an OS appearance update.
+func (c *multiWindow) invalidateAll() {
+	c.mu.Lock()
+	targets := slices.Collect(maps.Keys(c.windows))
+	c.mu.Unlock()
+
+	for _, w := range targets {
+		if w.invalidate != nil {
+			w.invalidate()
+		}
+	}
+}
+
+func startAppearanceWatcher(ctx context.Context, src osappearance.Source, coord *multiWindow) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		src.Watch(ctx, func(osappearance.Appearance) {
+			coord.invalidateAll()
+		})
+	}()
+	return done
+}
+
 // restoreLocked records the stored window IDs and returns the secondary
 // windows to reopen. Caller must hold c.mu.
 func (c *multiWindow) restoreLocked(state []byte) []client.AppStateWindow {
@@ -296,7 +322,7 @@ func installNewLayout(sc *screens, windowID string, doc LayoutDoc) {
 	sc.trackTopics()
 }
 
-func runWindow(ctx context.Context, m *hostconn.Manager, coord *multiWindow, windowID string, record *client.AppStateWindow, doc *LayoutDoc, ready chan<- struct{}) error {
+func runWindow(ctx context.Context, m *hostconn.Manager, coord *multiWindow, appearance osappearance.Source, windowID string, record *client.AppStateWindow, doc *LayoutDoc, ready chan<- struct{}) error {
 	winCtx, winCancel := context.WithCancel(ctx)
 	initGeom := resolveWindowGeometry(record, doc, workArea)
 	w := new(app.Window)
@@ -324,7 +350,7 @@ func runWindow(ctx context.Context, m *hostconn.Manager, coord *multiWindow, win
 	light, dark := theme.Light(shaper), theme.Dark(shaper)
 	env := newEnv(shaper, &light)
 	attach(env, w)
-	sc := newWindowScreens(m, workers, coord, winReg)
+	sc := newWindowScreens(m, workers, coord, winReg, appearance)
 	sc.titleBar = newTitleBar(runtime.GOOS)
 	applyInitialWindowLayout(m, sc, q, windowID, record, doc)
 	sc.seedInitialWindowMode(initGeom)
@@ -347,8 +373,9 @@ func wireApplyGeometry(sc *screens, w *app.Window) {
 	}
 }
 
-func newWindowScreens(m *hostconn.Manager, workers appWorkers, coord *multiWindow, winReg *windowUpdates) *screens {
+func newWindowScreens(m *hostconn.Manager, workers appWorkers, coord *multiWindow, winReg *windowUpdates, appearance osappearance.Source) *screens {
 	sc := newScreens(m, workers.fetcher, workers.poster, workers.wsMut)
+	sc.osAppearance = appearance
 	sc.setTopic = func(topic string, active bool) {
 		coord.setTopic(winReg, topic, active)
 	}

@@ -158,6 +158,7 @@ func renderInboxShot(t *testing.T, win *headless.Window, spec shotSpec) *image.R
 	}
 	env := &kit.Env{Th: &th, Sh: sh, UIScale: spec.uiScale, ReducedMotion: true}
 	sc := buildInboxConfirmScreens(t, nil)
+	sc.osAppearance = newShotAppearanceSource(spec.light)
 	size := image.Pt(shotWindowW, shotWindowH)
 	if spec.scene == shotInboxSlot {
 		// A window this narrow folds the inbox into the 300 dp drawer, the

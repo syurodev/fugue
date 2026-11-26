@@ -9,6 +9,7 @@ import (
 
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/osappearance"
 	"github.com/syurodev/fugue/ui/internal/settings"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
@@ -292,6 +293,13 @@ func (s *screens) reloadRawFromHost() {
 	s.settingsView.syncRawFromModel(s.settings)
 }
 
+func (s *screens) currentOSAppearance() osappearance.Appearance {
+	if s.osAppearance == nil {
+		return osappearance.Unknown
+	}
+	return s.osAppearance.Current()
+}
+
 func (s *screens) applyLivePreferences(env *kit.Env, light, dark *theme.Theme) {
 	prefs := s.settings.Prefs.Current
 	if prefs.UIScale > 0 {
@@ -300,7 +308,15 @@ func (s *screens) applyLivePreferences(env *kit.Env, light, dark *theme.Theme) {
 	switch prefs.ThemeMode {
 	case settings.ThemeDark:
 		env.Th = dark
-	case settings.ThemeLight, settings.ThemeSystem:
+	case settings.ThemeLight:
 		env.Th = light
+	case settings.ThemeSystem:
+		fallthrough
+	default:
+		if s.currentOSAppearance() == osappearance.Dark {
+			env.Th = dark
+		} else {
+			env.Th = light
+		}
 	}
 }

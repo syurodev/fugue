@@ -102,6 +102,7 @@ func assertMultiWindowShotDelta(t *testing.T, sc *screens) {
 
 func newMultiWindowShotScreens(manager *hostconn.Manager) (*screens, *windowUpdates) {
 	sc := newScreens(manager, &fakeFetcher{}, session.NewPoster(manager.Client), workspace.NewMutator(func() workspace.MutatorClient { return nil }))
+	sc.osAppearance = newShotAppearanceSource(true)
 	sc.vault.ApplyStatus(vault.Status{State: client.VaultStateUnlocked, Revision: 1, Incarnation: "multiwin-shot"})
 	createdAt := time.Unix(1_700_000_000, 0).UTC().Format(time.RFC3339)
 	sc.sidebar.ApplyList(client.SessionList{Sessions: []client.Session{

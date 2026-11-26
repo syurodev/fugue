@@ -125,6 +125,7 @@ func renderFUG65Shot(t *testing.T, spec shotSpec) *image.RGBA {
 	}
 	env := &kit.Env{Th: &th, Sh: sh, UIScale: spec.uiScale, ReducedMotion: true}
 	sc, size := buildFUG65ShotScreens(t, spec.scene)
+	sc.osAppearance = newShotAppearanceSource(spec.light)
 	var win *headless.Window
 	win, err = glwin.Open(size.X, size.Y)
 	if err != nil {
