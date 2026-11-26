@@ -6,6 +6,7 @@ import (
 	"runtime"
 	"slices"
 
+	"gioui.org/app"
 	"gioui.org/layout"
 	"gioui.org/unit"
 
@@ -68,6 +69,7 @@ type screens struct {
 	// initialized so Gio records the normal window size before maximizing
 	// (Wayland's Gio driver panics on unmaximize if Maximized is in initialOpts).
 	pendingMaximize           bool
+	preMinimizeMode           app.WindowMode
 	restoreNormalOnUnmaximize bool
 	sawMaximized              bool
 	pendingNormalRestore      bool

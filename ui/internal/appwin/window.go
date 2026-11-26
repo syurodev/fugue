@@ -301,9 +301,7 @@ func eventLoop(ctx context.Context, w *app.Window, env *kit.Env, sc *screens, q 
 			finishCancel()
 			return e.Err
 		case app.ConfigEvent:
-			sc.titleBar.applyConfig(e.Config)
-			sc.handleWindowConfig(w, e.Config)
-			sc.titleBar.reapplyPlatformChrome()
+			sc.handleConfigEvent(w, e.Config)
 		case app.ViewEvent:
 			sc.titleBar.applyViewEvent(e)
 		case app.FrameEvent:

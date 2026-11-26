@@ -402,3 +402,268 @@ func TestStartupLateRecordDoesNotFightUserResize(t *testing.T) {
 		t.Fatalf("stored user window = %+v, want %+v", sc.grid.doc.Window, wantUser)
 	}
 }
+
+type recordingWindow struct {
+	configs []app.Config
+}
+
+func (r *recordingWindow) Option(opts ...app.Option) {
+	metric := unit.Metric{PxPerDp: 1, PxPerSp: 1}
+	for _, opt := range opts {
+		var cfg app.Config
+		opt(metric, &cfg)
+		r.configs = append(r.configs, cfg)
+	}
+}
+
+func (r *recordingWindow) clear() {
+	r.configs = nil
+}
+
+func (r *recordingWindow) sizeOptions() []image.Point {
+	var sizes []image.Point
+	for _, cfg := range r.configs {
+		if cfg.Size != (image.Point{}) {
+			sizes = append(sizes, cfg.Size)
+		}
+	}
+	return sizes
+}
+
+func (r *recordingWindow) hasModeOption(mode app.WindowMode) bool {
+	for _, cfg := range r.configs {
+		if cfg.Mode == mode && cfg.Size == (image.Point{}) {
+			return true
+		}
+	}
+	return false
+}
+
+func runTestWindowFrame(env *kit.Env, sc *screens, w windowOptioner, device unit.Metric, sizePx image.Point) {
+	sc.skipGeometry = sc.applyPendingNormalRestore(w)
+	drawTestWindowFrame(env, sc, device, sizePx)
+	sc.skipGeometry = false
+}
+
+func newMaximizedRecord(t *testing.T, geom WindowGeometry) *client.AppStateWindow {
+	t.Helper()
+	doc := DefaultLayout()
+	doc.Window = geom
+	raw, err := EncodeLayout(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return &client.AppStateWindow{WindowID: primaryWindowID, Revision: 2, Layout: raw}
+}
+
+// TestWindowRestoreFromMinimizeOpenedMaximized pins FUG-98 (a): restoring a
+// window that opened maximized from minimize keeps Maximized=true, keeps the
+// title bar in restore state, avoids app.Size, and re-asserts app.Maximized.
+func TestWindowRestoreFromMinimizeOpenedMaximized(t *testing.T) {
+	t.Parallel()
+	env := newInboxTestEnv(t)
+	sc, _ := newTestScreens(t)
+	w := &recordingWindow{}
+	device := unit.Metric{PxPerDp: 1, PxPerSp: 1}
+	wantGeom := WindowGeometry{WidthDp: 1180, HeightDp: 760, Maximized: true}
+
+	rec := newMaximizedRecord(t, wantGeom)
+	sc.applyWindowRecord(rec)
+	sc.seedInitialWindowMode(wantGeom)
+	sc.handleConfigEvent(w, app.Config{Mode: app.Windowed, Size: image.Pt(1180, 760), Focused: true})
+	sc.handleConfigEvent(w, app.Config{Mode: app.Maximized, Size: image.Pt(1920, 1048), Focused: true})
+	runTestWindowFrame(env, sc, w, device, image.Pt(1920, 1048))
+	w.clear()
+
+	sc.handleConfigEvent(w, app.Config{Mode: app.Minimized, Size: image.Pt(1920, 1048)})
+	sc.handleConfigEvent(w, app.Config{Mode: app.Windowed, Size: image.Pt(1920, 1048), Focused: true})
+
+	if sc.pendingNormalRestore {
+		t.Fatal("pendingNormalRestore armed on minimize restore")
+	}
+	if sizes := w.sizeOptions(); len(sizes) != 0 {
+		t.Fatalf("unexpected app.Size options on minimize restore: %+v", sizes)
+	}
+	if !w.hasModeOption(app.Maximized) {
+		t.Fatalf("expected app.Maximized.Option() after minimize restore, got %+v", w.configs)
+	}
+	if !sc.titleBar.maximized {
+		t.Fatal("titleBar.maximized = false, want true")
+	}
+	if !cmp.Equal(sc.grid.doc.Window, wantGeom) {
+		t.Fatalf("doc.Window = %+v, want %+v", sc.grid.doc.Window, wantGeom)
+	}
+
+	runTestWindowFrame(env, sc, w, device, image.Pt(1920, 1048))
+	if sizes := w.sizeOptions(); len(sizes) != 0 {
+		t.Fatalf("unexpected app.Size option on frame during minimize restore: %+v", sizes)
+	}
+	if !cmp.Equal(sc.grid.doc.Window, wantGeom) {
+		t.Fatalf("frame during restore overwrote doc.Window: got %+v, want %+v", sc.grid.doc.Window, wantGeom)
+	}
+}
+
+// TestWindowRestoreFromMinimizeMaximizedDuringSession pins FUG-98 (b):
+// maximizing during a session, minimizing, and restoring keeps Maximized=true,
+// titleBar.maximized=true, normal size intact, and re-asserts app.Maximized.
+func TestWindowRestoreFromMinimizeMaximizedDuringSession(t *testing.T) {
+	t.Parallel()
+	env := newInboxTestEnv(t)
+	sc, _ := newTestScreens(t)
+	sc.applyWindowRecord(nil)
+	w := &recordingWindow{}
+	device := unit.Metric{PxPerDp: 1, PxPerSp: 1}
+
+	sc.handleConfigEvent(w, app.Config{Mode: app.Windowed, Size: image.Pt(1180, 760), Focused: true})
+	runTestWindowFrame(env, sc, w, device, image.Pt(1180, 760))
+	sc.handleConfigEvent(w, app.Config{Mode: app.Maximized, Size: image.Pt(1920, 1048), Focused: true})
+	runTestWindowFrame(env, sc, w, device, image.Pt(1920, 1048))
+	w.clear()
+
+	sc.handleConfigEvent(w, app.Config{Mode: app.Minimized, Size: image.Pt(1920, 1048)})
+	sc.handleConfigEvent(w, app.Config{Mode: app.Windowed, Size: image.Pt(1920, 1048), Focused: true})
+
+	wantGeom := WindowGeometry{WidthDp: 1180, HeightDp: 760, Maximized: true}
+	if sc.pendingNormalRestore {
+		t.Fatal("pendingNormalRestore armed on minimize restore")
+	}
+	if sizes := w.sizeOptions(); len(sizes) != 0 {
+		t.Fatalf("unexpected app.Size options on minimize restore: %+v", sizes)
+	}
+	if !w.hasModeOption(app.Maximized) {
+		t.Fatalf("expected app.Maximized.Option() after minimize restore, got %+v", w.configs)
+	}
+	if !sc.titleBar.maximized {
+		t.Fatal("titleBar.maximized = false, want true")
+	}
+	if !cmp.Equal(sc.grid.doc.Window, wantGeom) {
+		t.Fatalf("doc.Window = %+v, want %+v", sc.grid.doc.Window, wantGeom)
+	}
+}
+
+// TestWindowRestoreFromMinimizeNormalWindow pins FUG-98 (c): minimizing and
+// restoring a normal windowed window sends no options and keeps Windowed mode.
+func TestWindowRestoreFromMinimizeNormalWindow(t *testing.T) {
+	t.Parallel()
+	env := newInboxTestEnv(t)
+	sc, _ := newTestScreens(t)
+	sc.applyWindowRecord(nil)
+	w := &recordingWindow{}
+	device := unit.Metric{PxPerDp: 1, PxPerSp: 1}
+
+	sc.handleConfigEvent(w, app.Config{Mode: app.Windowed, Size: image.Pt(1180, 760), Focused: true})
+	runTestWindowFrame(env, sc, w, device, image.Pt(1180, 760))
+	w.clear()
+
+	sc.handleConfigEvent(w, app.Config{Mode: app.Minimized, Size: image.Pt(1180, 760)})
+	sc.handleConfigEvent(w, app.Config{Mode: app.Windowed, Size: image.Pt(1180, 760), Focused: true})
+
+	if len(w.configs) != 0 {
+		t.Fatalf("unexpected window options on normal minimize restore: %+v", w.configs)
+	}
+	if sc.grid.windowMode != app.Windowed {
+		t.Fatalf("windowMode = %v, want Windowed", sc.grid.windowMode)
+	}
+	if sc.titleBar.maximized {
+		t.Fatal("titleBar.maximized = true, want false")
+	}
+	wantGeom := WindowGeometry{WidthDp: 1180, HeightDp: 760, Maximized: false}
+	if !cmp.Equal(sc.grid.doc.Window, wantGeom) {
+		t.Fatalf("doc.Window = %+v, want %+v", sc.grid.doc.Window, wantGeom)
+	}
+}
+
+// TestWindowUnmaximizeAfterMinimizeRestoreRestoresNormalSize pins FUG-98 (d)
+// and (e): after restoring a maximized window from minimize, a real unmaximize
+// restores the saved normal size without intermediate frames overwriting it.
+func TestWindowUnmaximizeAfterMinimizeRestoreRestoresNormalSize(t *testing.T) {
+	t.Parallel()
+	env := newInboxTestEnv(t)
+	sc, _ := newTestScreens(t)
+	w := &recordingWindow{}
+	device := unit.Metric{PxPerDp: 1, PxPerSp: 1}
+	initGeom := WindowGeometry{WidthDp: 1180, HeightDp: 760, Maximized: true}
+
+	sc.applyWindowRecord(newMaximizedRecord(t, initGeom))
+	sc.seedInitialWindowMode(initGeom)
+	sc.handleConfigEvent(w, app.Config{Mode: app.Windowed, Size: image.Pt(1180, 760), Focused: true})
+	sc.handleConfigEvent(w, app.Config{Mode: app.Maximized, Size: image.Pt(1920, 1048), Focused: true})
+	runTestWindowFrame(env, sc, w, device, image.Pt(1920, 1048))
+	w.clear()
+
+	sc.handleConfigEvent(w, app.Config{Mode: app.Minimized, Size: image.Pt(1920, 1048)})
+	sc.handleConfigEvent(w, app.Config{Mode: app.Windowed, Size: image.Pt(1920, 1048), Focused: true})
+	runTestWindowFrame(env, sc, w, device, image.Pt(1920, 1048))
+	if sc.pendingNormalRestore || len(w.sizeOptions()) != 0 || !w.hasModeOption(app.Maximized) {
+		t.Fatalf("minimize restore misfired: pending=%v configs=%+v", sc.pendingNormalRestore, w.configs)
+	}
+	if !cmp.Equal(sc.grid.doc.Window, initGeom) {
+		t.Fatalf("after minimize restore doc.Window = %+v, want %+v", sc.grid.doc.Window, initGeom)
+	}
+	sc.handleConfigEvent(w, app.Config{Mode: app.Maximized, Size: image.Pt(1920, 1048), Focused: true})
+	w.clear()
+
+	// Real user un-maximize (Windowed following Maximized).
+	sc.handleConfigEvent(w, app.Config{Mode: app.Windowed, Size: image.Pt(1920, 1048), Focused: true})
+	runTestWindowFrame(env, sc, w, device, image.Pt(1920, 1048))
+
+	wantSizes := []image.Point{image.Pt(1180, 760)}
+	if !cmp.Equal(w.sizeOptions(), wantSizes) {
+		t.Fatalf("sizeOptions = %+v, want %+v", w.sizeOptions(), wantSizes)
+	}
+	if sc.titleBar.maximized {
+		t.Fatal("titleBar.maximized = true after real unmaximize, want false")
+	}
+	wantUnmax := WindowGeometry{WidthDp: 1180, HeightDp: 760, Maximized: false}
+	if !cmp.Equal(sc.grid.doc.Window, wantUnmax) {
+		t.Fatalf("pre-resize restore frame overwrote doc.Window: got %+v, want %+v", sc.grid.doc.Window, wantUnmax)
+	}
+
+	runTestWindowFrame(env, sc, w, device, image.Pt(1180, 760))
+	if !cmp.Equal(sc.grid.doc.Window, wantUnmax) {
+		t.Fatalf("post-restore doc.Window = %+v, want %+v", sc.grid.doc.Window, wantUnmax)
+	}
+}
+
+// TestWindowRestoreFramesDoNotOverwriteNormalSize pins FUG-98 (e): frames at
+// the maximized pixel size during minimize recovery or unmaximize restore
+// never overwrite the saved normal size in doc.Window.
+func TestWindowRestoreFramesDoNotOverwriteNormalSize(t *testing.T) {
+	t.Parallel()
+	env := newInboxTestEnv(t)
+	sc, _ := newTestScreens(t)
+	sc.applyWindowRecord(nil)
+	w := &recordingWindow{}
+	device := unit.Metric{PxPerDp: 1, PxPerSp: 1}
+
+	sc.handleConfigEvent(w, app.Config{Mode: app.Windowed, Size: image.Pt(1180, 760), Focused: true})
+	runTestWindowFrame(env, sc, w, device, image.Pt(1180, 760))
+	sc.handleConfigEvent(w, app.Config{Mode: app.Maximized, Size: image.Pt(1920, 1048), Focused: true})
+	runTestWindowFrame(env, sc, w, device, image.Pt(1920, 1048))
+
+	sc.handleConfigEvent(w, app.Config{Mode: app.Minimized, Size: image.Pt(1920, 1048)})
+	sc.handleConfigEvent(w, app.Config{Mode: app.Windowed, Size: image.Pt(1920, 1048), Focused: true})
+	runTestWindowFrame(env, sc, w, device, image.Pt(1920, 1048))
+	runTestWindowFrame(env, sc, w, device, image.Pt(1920, 1048))
+
+	wantMax := WindowGeometry{WidthDp: 1180, HeightDp: 760, Maximized: true}
+	if !cmp.Equal(sc.grid.doc.Window, wantMax) {
+		t.Fatalf("frames during minimize restore overwrote doc.Window: got %+v, want %+v", sc.grid.doc.Window, wantMax)
+	}
+
+	sc.handleConfigEvent(w, app.Config{Mode: app.Maximized, Size: image.Pt(1920, 1048), Focused: true})
+	w.clear()
+	sc.handleConfigEvent(w, app.Config{Mode: app.Windowed, Size: image.Pt(1920, 1048), Focused: true})
+	runTestWindowFrame(env, sc, w, device, image.Pt(1920, 1048))
+	// Second pre-resize configure/frame at maximized pixel size while restoreNormalAttempts > 0.
+	sc.handleConfigEvent(w, app.Config{Mode: app.Windowed, Size: image.Pt(1920, 1048), Focused: true})
+	runTestWindowFrame(env, sc, w, device, image.Pt(1920, 1048))
+
+	wantUnmax := WindowGeometry{WidthDp: 1180, HeightDp: 760, Maximized: false}
+	if !cmp.Equal(sc.grid.doc.Window, wantUnmax) {
+		t.Fatalf("frames during unmaximize restore overwrote doc.Window: got %+v, want %+v", sc.grid.doc.Window, wantUnmax)
+	}
+	if sizes := w.sizeOptions(); len(sizes) != 2 || sizes[0] != image.Pt(1180, 760) {
+		t.Fatalf("expected app.Size(1180, 760) restore options, got %+v", sizes)
+	}
+}
