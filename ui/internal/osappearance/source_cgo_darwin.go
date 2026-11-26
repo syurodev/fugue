@@ -124,6 +124,8 @@ static void fugueStopAppearanceWatch(uintptr_t ptr) {
 		}
 	});
 }
+
+// cgo appearance observer entry points.
 */
 import "C"
 
