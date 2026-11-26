@@ -21,6 +21,7 @@ func TestSizeTokensMatchTheKitSpec(t *testing.T) {
 	t.Run("radius", testRadiusTokens)
 	t.Run("controls rows and tabs", testControlTokens)
 	t.Run("icons strokes and minimums", testIconTokens)
+	t.Run("islands shell", testIslandsShellTokens)
 	t.Run("type", testTypeTokens)
 }
 
@@ -75,6 +76,20 @@ func testControlTokens(t *testing.T) {
 		{"size.row", theme.Row, 28},
 		{"size.row.dense", theme.RowDense, 24},
 		{"size.tab", theme.Tab, 32},
+	})
+}
+
+func testIslandsShellTokens(t *testing.T) {
+	t.Parallel()
+	expectDp(t, []named{
+		{"radius.island", theme.RadiusIsland, 8},
+		{"shell.rail.width", theme.RailWidth, 30},
+		{"shell.right_stripe.width", theme.RightStripeWidth, 30},
+		{"shell.island.gap", theme.IslandGap, 4},
+		{"shell.topbar.height", theme.TopBarHeight, 32},
+		{"shell.statusbar.height", theme.StatusBarHeight, 22},
+		{"shell.slot_header.height", theme.SlotHeaderHeight, 30},
+		{"shell.mac_traffic_light_inset", theme.MacTrafficLightInset, 72},
 	})
 }
 

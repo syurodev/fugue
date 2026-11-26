@@ -142,30 +142,20 @@ func TestAccountsCardFitsMinSlotWidth(t *testing.T) {
 	}
 }
 
-// TestSidebarHasAtMostOneSelectedRow verifies that opening Accounts and Settings
-// in regular slots leaves zero utility rows selected, and making Accounts main
-// selects only Accounts (FUG-65).
-func TestSidebarHasAtMostOneSelectedRow(t *testing.T) {
+// TestSidebarHasNoUtilityRowsAndKeepsSessions verifies that utility rows
+// (Approvals, Accounts, Settings, Secrets) were removed from the Sidebar Island
+// while opening companion slots still leaves the session list clean (FUG-93).
+func TestSidebarHasNoUtilityRowsAndKeepsSessions(t *testing.T) {
 	t.Parallel()
 	sc := newFUG65TestScreens(t)
 	sc.grid.openCompanion(SlotRef{Kind: KindAccounts})
 	sc.grid.openCompanion(SlotRef{Kind: KindSettings})
 	runShellTestFrame(t, sc, image.Pt(1500, 900))
-	for _, name := range []string{"Approvals", "Accounts", "Settings", "Secrets"} {
-		if sc.sidebarSelected[name] {
-			t.Fatalf("regular-slot row %q should not have SelectedWash", name)
-		}
+	if !hasKind(sc.grid.doc, KindAccounts) || !hasKind(sc.grid.doc, KindSettings) {
+		t.Fatal("expected Accounts and Settings companion slots to be open")
 	}
-	sc.grid.arrange(Pos{Col: 1, Row: 0}, arrangeMakeMain)
-	runShellTestFrame(t, sc, image.Pt(1500, 900))
-	selectedCount := 0
-	for _, sel := range sc.sidebarSelected {
-		if sel {
-			selectedCount++
-		}
-	}
-	if !sc.sidebarSelected["Accounts"] || selectedCount != 1 {
-		t.Fatalf("expected only Accounts selected after Make main, got %v", sc.sidebarSelected)
+	if sc.grid.doc.SidebarCollapsed {
+		t.Fatal("sidebar should remain open by default")
 	}
 }
 
@@ -185,24 +175,25 @@ func TestConnectedStatusShowsNoText(t *testing.T) {
 	scEmpty := newFUG65TestScreens(t)
 	imgEmpty := renderShotFrames(t, win, newFUG65Env(t, true), scEmpty, image.Pt(900, 600), "empty")
 
-	// Footer region (x: 50..280, y: 565..596): connected differs from empty only
-	// by the small dot (far fewer than a text label's pixels).
-	diffConnected := countDiffPixels(imgConn, imgEmpty, image.Rect(50, 565, 280, 596))
+	// Bottom Status Bar region (x: 0..900, y: 600-StatusBarHeight..600): connected differs from
+	// empty only by the small 6dp status dot on the right.
+	statusTop := 600 - int(theme.StatusBarHeight)
+	diffConnected := countDiffPixels(imgConn, imgEmpty, image.Rect(0, statusTop, 900, 600))
 	if diffConnected == 0 || diffConnected > 64 {
-		t.Fatalf("expected only the small dot in connected footer, got %d changed pixels", diffConnected)
+		t.Fatalf("expected only the small dot in connected status bar, got %d changed pixels", diffConnected)
 	}
 
 	scReconn := newFUG65TestScreens(t)
 	scReconn.applyConnectionUpdate(hostconn.StateConnecting, "")
 	imgReconn := renderShotFrames(t, win, newFUG65Env(t, true), scReconn, image.Pt(900, 600), "reconn")
-	diffReconn := countDiffPixels(imgReconn, imgConn, image.Rect(50, 565, 280, 596))
+	diffReconn := countDiffPixels(imgReconn, imgConn, image.Rect(0, statusTop, 900, 600))
 	if diffReconn <= diffConnected {
 		t.Fatalf("expected Reconnecting… label to add pixels beyond the dot (%d <= %d)", diffReconn, diffConnected)
 	}
 }
 
-// TestLockVaultIsIconButtonWithTooltip verifies that hovering the footer Lock
-// vault IconButton shows the "Lock vault" tooltip and clicking it issues OpLock (FUG-65).
+// TestLockVaultIsIconButtonWithTooltip verifies that hovering the Bottom Status
+// Bar Lock vault IconButton shows the "Lock vault" tooltip and clicking it issues OpLock (FUG-95).
 func TestLockVaultIsIconButtonWithTooltip(t *testing.T) {
 	t.Parallel()
 	vc := newFakeAppVaultClient()
@@ -219,9 +210,16 @@ func TestLockVaultIsIconButtonWithTooltip(t *testing.T) {
 	router := new(input.Router)
 	runShellEnvFrame(t, env, sc, router, size, time.Unix(1_700_000_000, 0))
 
-	// Lock button sits in the footer row aligned to the sidebar icon column:
-	// x ≈ RailWidth (48) + SpaceXS (4) + SpaceMD (8) + 4 = 64, y ≈ 700 - SpaceXS (4) - 16 = 680.
-	lockPt := f32.Pt(64, 680)
+	var ops op.Ops
+	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
+	padX := gtx.Dp(theme.SpaceMD)
+	dotD := max(gtx.Dp(theme.SpaceSM), 6)
+	btnW := gtx.Dp(theme.ControlSM)
+	statusH := gtx.Dp(theme.StatusBarHeight)
+	// Lock button sits immediately left of the connection dot in the Bottom Status Bar.
+	lockX := float32(size.X-padX-dotD-padX) - float32(btnW)/2
+	lockY := float32(size.Y - statusH/2)
+	lockPt := f32.Pt(lockX, lockY)
 	router.Queue(pointer.Event{Kind: pointer.Move, Position: lockPt})
 	runShellEnvFrame(t, env, sc, router, size, time.Unix(1_700_000_000, 0))
 	runShellEnvFrame(t, env, sc, router, size, time.Unix(1_700_000_001, 0))
@@ -379,14 +377,15 @@ func TestShellRailFlushLeftAndOuterMarginXS(t *testing.T) {
 	if mainRect.Empty() {
 		t.Fatal("main slot rect is empty")
 	}
-	// Grid height = 800 - 2*SpaceXS(4) = 792.
-	if sc.grid.lastArea.Dy() != size.Y-2*4 {
-		t.Fatalf("expected grid height %d (SpaceXS top+bottom), got %d", size.Y-8, sc.grid.lastArea.Dy())
+	// Grid height = 800 - TopBarHeight(32) - StatusBarHeight(22) = 746.
+	wantH := size.Y - int(theme.TopBarHeight) - int(theme.StatusBarHeight)
+	if sc.grid.lastArea.Dy() != wantH {
+		t.Fatalf("expected grid height %d (TopBar+StatusBar chrome), got %d", wantH, sc.grid.lastArea.Dy())
 	}
-	// Grid width = 1200 - RailWidth(48) - SidebarWidth(240) - SpaceXS(4 gutter) - SpaceXS(4 right) = 904.
-	wantW := size.X - 48 - 240 - 4 - 4
+	// Grid width = 1200 - RailWidth(30) - SidebarWidth(240) - IslandGap(4) - RightStripeWidth(30) = 896.
+	wantW := size.X - int(theme.RailWidth) - int(theme.SidebarWidth) - int(theme.IslandGap) - int(theme.RightStripeWidth)
 	if sc.grid.lastArea.Dx() != wantW {
-		t.Fatalf("expected grid width %d (rail flush left, SpaceXS gutter+right), got %d", wantW, sc.grid.lastArea.Dx())
+		t.Fatalf("expected grid width %d (rail flush left, Right Stripe, IslandGap gutter), got %d", wantW, sc.grid.lastArea.Dx())
 	}
 }
 

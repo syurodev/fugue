@@ -183,6 +183,7 @@ func (s *screens) applyPendingNormalRestore(w *app.Window) bool {
 	}
 	if s.restoreNormalSize.WidthDp > 0 && s.restoreNormalSize.HeightDp > 0 {
 		w.Option(app.Size(unit.Dp(s.restoreNormalSize.WidthDp), unit.Dp(s.restoreNormalSize.HeightDp)))
+		s.titleBar.reapplyPlatformChrome()
 	}
 	return true
 }

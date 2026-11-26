@@ -37,6 +37,7 @@ const (
 	shotSlotGridA  = "slotgrid-arrange"
 	shotSlotGridD  = "slotgrid-drag"
 	shotSlotGridN  = "slotgrid-narrow"
+	shotSlotGridNS = "slotgrid-narrow-sidebar"
 	shotSlotSessID = "sess-shot-grid"
 )
 
@@ -48,6 +49,8 @@ func slotGridShotSpecs() []shotSpec {
 		{name: shotSlotGridA + "-light-ui100", scene: shotSlotGridA, light: true, uiScale: 1.0},
 		{name: shotSlotGridD + "-dark-ui100", scene: shotSlotGridD, light: false, uiScale: 1.0},
 		{name: shotSlotGridN + "-light-ui100", scene: shotSlotGridN, light: true, uiScale: 1.0},
+		{name: shotSlotGridNS + "-light-ui100", scene: shotSlotGridNS, light: true, uiScale: 1.0},
+		{name: shotSlotGridNS + "-dark-ui100", scene: shotSlotGridNS, light: false, uiScale: 1.0},
 	}
 }
 
@@ -108,6 +111,10 @@ func buildSlotGridShotScreens(t *testing.T, scene string) *screens {
 		sc.grid.openCompanion(SlotRef{Kind: KindAccounts})
 		sc.grid.drawer = fillKeyCol1Row0
 		sc.grid.drawerPresence.Snap(true)
+	case shotSlotGridNS:
+		// Narrow window temporarily folds the sidebar; clicking the active rail
+		// icon opens the floating Sidebar Island overlay over the grid.
+		sc.grid.tempSidebarPresence.Snap(true)
 	}
 	return sc
 }
@@ -132,8 +139,11 @@ func renderSlotGridShot(t *testing.T, _ *headless.Window, spec shotSpec) *image.
 	// regular columns fold right to left (§5.3, DA-E09). Each scene opens
 	// its own window at the scene's size, the way the shell really runs.
 	size := image.Pt(1800, 900)
-	if spec.scene == shotSlotGridN {
+	switch spec.scene {
+	case shotSlotGridN:
 		size = image.Pt(700, shotWindowH)
+	case shotSlotGridNS:
+		size = image.Pt(500, shotWindowH)
 	}
 	win, err := glwin.Open(size.X, size.Y)
 	if err != nil {
@@ -182,6 +192,9 @@ func TestSlotGridShellRendersAndShowsTheEvidence(t *testing.T) {
 	}
 	if !imagesDifferRGBA(rendered[shotSlotGrid+"-dark-ui100"], rendered[shotSlotGridD+"-dark-ui100"]) {
 		t.Fatal("the drag scene drew no zones over the plain grid")
+	}
+	if !imagesDifferRGBA(rendered[shotSlotGridNS+"-light-ui100"], rendered[shotSlotGridNS+"-dark-ui100"]) {
+		t.Fatal("narrow sidebar overlay light and dark shots are identical")
 	}
 }
 

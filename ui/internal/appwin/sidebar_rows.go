@@ -4,96 +4,16 @@ import (
 	"fmt"
 	"strconv"
 
-	"gioui.org/layout"
-
 	"github.com/syurodev/fugue/ui/internal/kit"
 )
 
-// The chat sidebar's utility rows (F10.5b, F10.5c, F10.5d): approvals,
-// accounts and settings as regular slots — a row opens its kind's slot or
-// closes the one that is open, and the selected state reads the grid.
-
-func (s *screens) recordSidebarSelected(label string, selected bool) {
-	if s.sidebarSelected == nil {
-		s.sidebarSelected = map[string]bool{}
-	}
-	s.sidebarSelected[label] = selected
-}
-
-func (s *screens) layoutInboxRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
-	selected := s.grid.mainRef().Kind == KindInbox
-	s.recordSidebarSelected("Approvals", selected)
-	props := &kit.ListRowProps{
-		Icon:     kit.IconInbox,
-		Label:    "Approvals",
-		Selected: selected,
-	}
-	props.StateLabel, props.StateTone = inboxRowState(s.inbox.PendingCount())
-	dims, ev := s.inboxRow.Layout(env, gtx, props)
-	if ev.Clicked || ev.Opened {
-		s.toggleCompanion(KindInbox)
-	}
-	return dims
-}
-
-func (s *screens) layoutAccountsRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
-	selected := s.grid.mainRef().Kind == KindAccounts
-	s.recordSidebarSelected("Accounts", selected)
-	props := &kit.ListRowProps{
-		Icon:     kit.IconCircleUser,
-		Label:    "Accounts",
-		Selected: selected,
-	}
-	props.StateLabel, props.StateTone = accountsRowState(s.accounts.HasSnapshot(), s.accounts.NeedsAttentionCount())
-	dims, ev := s.accountsRow.Layout(env, gtx, props)
-	if ev.Clicked || ev.Opened {
-		s.toggleCompanion(KindAccounts)
-	}
-	return dims
-}
-
-func (s *screens) layoutSettingsRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
-	selected := s.grid.mainRef().Kind == KindSettings
-	s.recordSidebarSelected("Settings", selected)
-	props := &kit.ListRowProps{
-		Icon:     kit.IconSettings,
-		Label:    "Settings",
-		Selected: selected,
-	}
-	if dirty := len(s.settings.DirtyFields()); dirty > 0 {
-		props.StateLabel = fmt.Sprintf("%d unsaved", dirty)
-		props.StateTone = kit.ToneInfo
-	}
-	dims, ev := s.settingsRow.Layout(env, gtx, props)
-	if ev.Clicked || ev.Opened {
-		s.openSettings()
-	}
-	return dims
-}
-
-func (s *screens) layoutSecretsRow(env *kit.Env, gtx *layout.Context) layout.Dimensions {
-	selected := s.grid.mainRef().Kind == KindSecrets
-	s.recordSidebarSelected("Secrets", selected)
-	props := &kit.ListRowProps{
-		Icon:     kit.IconKeyRound,
-		Label:    "Secrets",
-		Selected: selected,
-	}
-	locked := s.vault.Locked()
-	if locked {
-		props.Icon = kit.IconLock
-	}
-	props.StateLabel, props.StateTone, props.Badge = secretsRowState(locked, s.secrets.HasSnapshot(), len(s.secrets.All()))
-	dims, ev := s.secretsRow.Layout(env, gtx, props)
-	if ev.Clicked || ev.Opened {
-		s.toggleCompanion(KindSecrets)
-	}
-	return dims
-}
-
-// The utility rows show a trailing value only when it asks for attention or
-// carries a count worth reading: a zero, an "ok" or an unknown is noise, so
-// it draws nothing.
+// The utility slot state helpers (F10.5b, F10.5c, F10.5d): approvals, accounts
+// and secrets badges/status labels, consumed by the Right Stripe (FUG-94) and
+// unit tests after removing the utility rows from the Sidebar Island (FUG-93).
+//
+// The helpers show a trailing value only when it asks for attention or carries
+// a count worth reading: a zero, an "ok" or an unknown is noise, so it draws
+// nothing.
 
 // inboxRowState is the Approvals row's state: a warning label while
 // approvals wait, nothing otherwise.

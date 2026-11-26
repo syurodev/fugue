@@ -395,7 +395,7 @@ func ApplyDrop(doc LayoutDoc, dragged Pos, t DropTarget) LayoutDoc {
 
 // PlanFoldResult is the temporary narrow-window fold's plan (§5.3): while
 // the window cannot fit every column at its minimum width, regular columns
-// fold from the right into the edge tab strip; still too narrow, the
+// fold from the right into the permanent Right Stripe; still too narrow, the
 // sidebar folds to the rail. The main slot never folds. The plan is derived
 // state — widening the window unfolds in reverse — and never mutates the
 // stored layout.
@@ -407,9 +407,9 @@ type PlanFoldResult struct {
 	TempSidebarFolded bool
 }
 
-// PlanFold computes the fold for a shell availDp wide (rail, sidebar and
-// grid together, window insets excluded, matching layoutMinWidthDp)
-// holding cols columns;
+// PlanFold computes the fold for a shell availDp wide (permanent Left Rail,
+// Right Stripe, Sidebar Island, IslandGap gutters, and grid together, window
+// insets excluded, matching layoutMinWidthDp) holding cols columns;
 // sidebarOpen is the sidebar's on-screen state before this plan.
 func PlanFold(availDp int, sidebarOpen bool, cols int) PlanFoldResult {
 	regular := max(cols-1, 0)

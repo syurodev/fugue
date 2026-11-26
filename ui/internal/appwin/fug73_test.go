@@ -129,8 +129,10 @@ func assertMidOpenFrame(t *testing.T, h *fug73RenderHarness, imgClosed *image.RG
 		t.Fatalf("cycle %d: main slot did not slide on open", cycle)
 	}
 	finalMain := h.sc.grid.rects[Pos{Col: 0, Row: 0}.key()]
-	if midMain := lerpRect(mainAnim.from, finalMain, mainAnim.spring.Value); midMain.Max.X != midRect.Min.X {
-		t.Fatalf("cycle %d: main right edge %d != new slot left edge %d", cycle, midMain.Max.X, midRect.Min.X)
+	midMain := lerpRect(mainAnim.from, finalMain, mainAnim.spring.Value)
+	if gap := midRect.Min.X - midMain.Max.X; gap < 0 || gap > int(theme.IslandGap) {
+		t.Fatalf("cycle %d: mid-open gutter %d between main (%d) and new slot (%d) outside [0, %d]",
+			cycle, gap, midMain.Max.X, midRect.Min.X, int(theme.IslandGap))
 	}
 	h.now = h.now.Add(16 * time.Millisecond)
 	imgMidOpen := renderFUG73Frame(t, h.win, h.env, h.sc, h.router, h.size, h.now)
@@ -216,7 +218,9 @@ func TestFUG73ClosingSlotPassesInputThrough(t *testing.T) {
 	var ops op.Ops
 	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
 	pad, btnSide := gtx.Dp(theme.SpaceXS), gtx.Dp(theme.ControlSM)
-	gridOrigin := image.Pt(size.X-pad-sc.grid.lastArea.Dx(), pad)
+	barH := sc.titleBar.height(&gtx)
+	rightW := gtx.Dp(theme.RightStripeWidth)
+	gridOrigin := image.Pt(size.X-rightW-sc.grid.lastArea.Dx(), barH)
 	accDraw := sc.grid.drawnCellRect([]cellGeom{{pos: Pos{Col: 1, Row: 0}, Rect: sc.grid.rects[Pos{Col: 1, Row: 0}.key()]}}, Pos{Col: 1, Row: 0})
 	closePt := f32.Pt(
 		float32(gridOrigin.X+accDraw.Max.X-pad-btnSide/2),
@@ -448,7 +452,6 @@ func placeholderCloseBtnPt(t *testing.T, env *kit.Env, sc *screens, size image.P
 	t.Helper()
 	var ops op.Ops
 	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
-	pad := gtx.Dp(theme.SpaceXS)
 	headerH := min(gtx.Dp(theme.SlotHeaderHeight), slotRect.Dy())
 	bodyW := slotRect.Dx()
 	measure := layout.Context{
@@ -464,7 +467,9 @@ func placeholderCloseBtnPt(t *testing.T, env *kit.Env, sc *screens, size image.P
 	if err != nil {
 		t.Fatalf("measure EmptyState: %v", err)
 	}
-	gridOrigin := image.Pt(size.X-pad-sc.grid.lastArea.Dx(), pad)
+	barH := sc.titleBar.height(&gtx)
+	rightW := gtx.Dp(theme.RightStripeWidth)
+	gridOrigin := image.Pt(size.X-rightW-sc.grid.lastArea.Dx(), barH)
 	btnY := slotRect.Min.Y + headerH + dims.Size.Y - gtx.Dp(theme.SpaceXXL) - gtx.Dp(theme.ControlMD)/2
 	return f32.Pt(float32(gridOrigin.X+slotRect.Min.X+bodyW/2), float32(gridOrigin.Y+btnY))
 }

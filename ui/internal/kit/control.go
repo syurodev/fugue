@@ -116,6 +116,18 @@ func (c *pressable) Hovered() bool { return c.click.Hovered() }
 // Space rather than a pointer click (a pointer click records a Press end).
 func (c *pressable) KeyClicked() bool { return c.keyClicked }
 
+// SnapToggled snaps the selection transition to v with no animation.
+func (c *pressable) SnapToggled(v bool) {
+	val := float32(0)
+	if v {
+		val = 1
+	}
+	c.selF.Snap(val)
+}
+
+// ToggledProgress returns the current selection transition progress in [0, 1].
+func (c *pressable) ToggledProgress() float32 { return c.selF.Value() }
+
 // PollClick drains any pending click before Layout so a parent can update
 // state (such as Toggled) before drawing the same frame. Layout still reports
 // the click on its own return value within the same frame; if Layout does not

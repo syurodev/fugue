@@ -105,18 +105,21 @@ type slotGrid struct {
 	arrangeMenu *kit.MenuState
 	popFor      string
 	// buttons of the chrome: per cell the arrange and close buttons, per
-	// folded cell the edge tab, and the rail's and collapsed sidebar's own
-	// buttons.
-	arrangeBtns   map[string]*kit.IconButtonState
-	closeBtns     map[string]*kit.IconButtonState
-	actionBtns    map[string]*kit.IconButtonState
-	tabBtns       map[string]*kit.IconButtonState
-	railBtns      map[railItem]*kit.IconButtonState
-	railY         motion.Follower
-	sidebarBtn    *kit.IconButtonState
-	sidebarOpenF  motion.Follower
-	sidebarFadeF  motion.Follower
-	wasTempFolded bool
+	// folded cell the stripe tab, the rail buttons, and the Right Stripe
+	// companion slot buttons.
+	arrangeBtns         map[string]*kit.IconButtonState
+	closeBtns           map[string]*kit.IconButtonState
+	actionBtns          map[string]*kit.IconButtonState
+	tabBtns             map[string]*kit.IconButtonState
+	railBtns            map[railItem]*kit.IconButtonState
+	stripeBtns          map[SlotKind]*kit.IconButtonState
+	railY               motion.Follower
+	sidebarOpenF        motion.Follower
+	sidebarFadeF        motion.Follower
+	wasTempFolded       bool
+	snapRailNext        bool
+	tempSidebarPresence motion.Presence
+	tempSidebarTag      struct{}
 	// newWindow is the last "open in new window" request (F10.21 consumes).
 	newWindow *NewWindowRequest
 	// applyGeometry applies a restored window size and maximized state; the
@@ -150,26 +153,27 @@ const (
 // newSlotGrid builds the shell over the default layout.
 func newSlotGrid() *slotGrid {
 	return &slotGrid{
-		doc:            DefaultLayout(),
-		railLast:       map[SlotKind]SlotRef{},
-		kindPos:        map[SlotKind]Pos{},
-		rects:          map[string]image.Rectangle{},
-		refRects:       map[string]image.Rectangle{},
-		anims:          map[string]*slotAnim{},
-		splitC:         map[int]*kit.SplitPaneState{},
-		splitR:         map[int]*kit.SplitPaneState{},
-		headerTags:     map[string]*headerTag{},
-		arrangeMenu:    kit.NewMenuState(),
-		arrangeBtns:    map[string]*kit.IconButtonState{},
-		closeBtns:      map[string]*kit.IconButtonState{},
-		actionBtns:     map[string]*kit.IconButtonState{},
-		tabBtns:        map[string]*kit.IconButtonState{},
-		railBtns:       map[railItem]*kit.IconButtonState{},
-		railY:          motion.NewFollower(motion.Smooth()),
-		sidebarBtn:     kit.NewIconButtonState(),
-		sidebarOpenF:   motion.NewFollower(motion.Smooth()),
-		sidebarFadeF:   motion.NewFollower(motion.Snappy()),
-		drawerPresence: motion.NewPresence(motion.Smooth(), motion.Exit()),
+		doc:                 DefaultLayout(),
+		railLast:            map[SlotKind]SlotRef{},
+		kindPos:             map[SlotKind]Pos{},
+		rects:               map[string]image.Rectangle{},
+		refRects:            map[string]image.Rectangle{},
+		anims:               map[string]*slotAnim{},
+		splitC:              map[int]*kit.SplitPaneState{},
+		splitR:              map[int]*kit.SplitPaneState{},
+		headerTags:          map[string]*headerTag{},
+		arrangeMenu:         kit.NewMenuState(),
+		arrangeBtns:         map[string]*kit.IconButtonState{},
+		closeBtns:           map[string]*kit.IconButtonState{},
+		actionBtns:          map[string]*kit.IconButtonState{},
+		tabBtns:             map[string]*kit.IconButtonState{},
+		railBtns:            map[railItem]*kit.IconButtonState{},
+		stripeBtns:          map[SlotKind]*kit.IconButtonState{},
+		railY:               motion.NewFollower(motion.Smooth()),
+		sidebarOpenF:        motion.NewFollower(motion.Smooth()),
+		sidebarFadeF:        motion.NewFollower(motion.Snappy()),
+		tempSidebarPresence: motion.NewPresence(motion.Smooth(), motion.Exit()),
+		drawerPresence:      motion.NewPresence(motion.Smooth(), motion.Exit()),
 	}
 }
 
@@ -181,16 +185,6 @@ func (g *slotGrid) syncFromDoc() {
 		g.railLast[main.Kind] = main
 	}
 	g.rail = railOfKind(main.Kind)
-}
-
-// resetShellMotion clears shell motion followers and slot transitions so the
-// next frame snaps immediately without animating (used on restore and new-window open).
-func (g *slotGrid) resetShellMotion() {
-	g.railY = motion.NewFollower(motion.Smooth())
-	g.sidebarOpenF = motion.NewFollower(motion.Smooth())
-	g.sidebarFadeF = motion.NewFollower(motion.Snappy())
-	clear(g.anims)
-	g.closing = nil
 }
 
 // edited records a user-driven layout change: it arms the slide, enter, and

@@ -13,6 +13,31 @@ import (
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
+// hasRegularSlotKind reports whether a regular slot of kind is open.
+func (g *slotGrid) hasRegularSlotKind(kind SlotKind) bool {
+	for _, p := range regularCells(g.doc) {
+		if slot, _ := slotAt(g.doc, p); slot.Ref.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// resetShellMotion clears shell motion followers and slot transitions so the
+// next frame snaps immediately without animating (used on restore and new-window open).
+func (g *slotGrid) resetShellMotion() {
+	g.railY = motion.NewFollower(motion.Smooth())
+	g.sidebarOpenF = motion.NewFollower(motion.Smooth())
+	g.sidebarFadeF = motion.NewFollower(motion.Snappy())
+	g.tempSidebarPresence.Snap(false)
+	g.snapRailNext = true
+	for kind, btn := range g.stripeBtns {
+		btn.SnapToggled(g.hasRegularSlotKind(kind))
+	}
+	clear(g.anims)
+	g.closing = nil
+}
+
 // armClosingAnims starts an Exit fade for every regular slot removed by doc,
 // preserving its current drawn rect and opacity if it was mid-enter.
 func (g *slotGrid) armClosingAnims(doc LayoutDoc) {
@@ -318,25 +343,25 @@ func (g *slotGrid) drawClosingSlot(gtx *layout.Context, env *kit.Env, sc *screen
 	}
 	disabled := gtx.Disabled()
 	defer pointer.PassOp{}.Push(disabled.Ops).Pop()
-	defer clip.Rect(cs.rect).Push(disabled.Ops).Pop()
 	defer paint.PushOpacity(disabled.Ops, alpha).Pop()
+	rr := clip.UniformRRect(cs.rect, disabled.Dp(theme.RadiusIsland))
+	paint.FillShape(disabled.Ops, env.Th.Chrome().CanvasBg, rr.Op(disabled.Ops))
+	stack := rr.Push(disabled.Ops)
 	h := min(disabled.Dp(theme.SlotHeaderHeight), cs.rect.Dy())
 	head := image.Rect(cs.rect.Min.X, cs.rect.Min.Y, cs.rect.Max.X, cs.rect.Min.Y+h)
 	if cs.rect.Dx() >= disabled.Dp(theme.ControlSM)*3 {
 		g.drawHeaderBar(&disabled, env, sc, Pos{Col: 1}, cs.ref, head, &headerButtons{ghost: true})
-	} else if !head.Empty() {
-		paint.FillShape(disabled.Ops, env.Th.Chrome().CanvasBg, clip.Rect(head).Op())
 	}
 	body := image.Rect(cs.rect.Min.X, cs.rect.Min.Y+h, cs.rect.Max.X, cs.rect.Max.Y)
-	if !body.Empty() {
-		paint.FillShape(disabled.Ops, env.Th.Chrome().CanvasBg, clip.Rect(body).Op())
-		if !g.hasSingletonLiveConflict(cs.ref) {
-			env.Offset(&disabled, body.Min, func(gtx *layout.Context) {
-				local := *gtx
-				local.Constraints = layout.Constraints{Max: body.Size()}
-				defer clip.Rect{Max: body.Size()}.Push(local.Ops).Pop()
-				sc.layoutClosingSlotBody(&local, env, cs.ref, cs.empty)
-			})
-		}
+	if !body.Empty() && !g.hasSingletonLiveConflict(cs.ref) {
+		env.Offset(&disabled, body.Min, func(gtx *layout.Context) {
+			local := *gtx
+			local.Constraints = layout.Constraints{Max: body.Size()}
+			defer clip.Rect{Max: body.Size()}.Push(local.Ops).Pop()
+			sc.layoutClosingSlotBody(&local, env, cs.ref, cs.empty)
+		})
 	}
+	stack.Pop()
+	paint.FillShape(disabled.Ops, env.Th.Chrome().BorderSubtle,
+		clip.Stroke{Path: rr.Path(disabled.Ops), Width: float32(max(disabled.Dp(theme.Hairline), 1))}.Op())
 }

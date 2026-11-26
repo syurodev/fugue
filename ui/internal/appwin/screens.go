@@ -3,6 +3,7 @@ package appwin
 import (
 	"image"
 	"maps"
+	"runtime"
 	"slices"
 
 	"gioui.org/layout"
@@ -110,9 +111,6 @@ type screens struct {
 	connDotHovered bool
 	connDotHasPtr  bool
 	connDotPtr     image.Point
-	// sidebarSelected records each sidebar row's Selected flag per frame for
-	// tests (FUG-65).
-	sidebarSelected map[string]bool
 	// commands holds one command model per session for the slash menu,
 	// refreshed when the session's commands revision advances (§9).
 	commands        map[string]*session.Commands
@@ -136,8 +134,8 @@ type screens struct {
 	turnSeq      uint64
 	turnAnchored string
 
-	header *kit.SectionHeaderState
-	rows   map[string]*kit.ListRowState
+	wsAddBtn *kit.IconButtonState
+	rows     map[string]*kit.ListRowState
 	// pendingPage and pendingOlder guard one read per trigger, and scrolled
 	// makes paging older a user-driven act: it arms after the first scroll
 	// and resets when the session changes.
@@ -173,19 +171,15 @@ type screens struct {
 	inbox          *inbox.Model
 	inboxWorker    *inbox.Worker
 	inboxView      *inboxView
-	inboxRow       *kit.ListRowState
 	accounts       *accounts.Model
 	accountsWorker *accounts.Worker
 	accountsView   *accountsView
-	accountsRow    *kit.ListRowState
 	settings       *settings.Model
 	settingsWorker *settings.Worker
 	settingsView   *settingsView
-	settingsRow    *kit.ListRowState
 	secrets        *secrets.Model
 	secretsWorker  *secrets.Worker
 	secretsView    *secretsView
-	secretsRow     *kit.ListRowState
 	viewer         *fileViewer
 	viewerWorker   *fileViewWorker
 	// layoutWorker saves the layout document off the window goroutine
@@ -200,15 +194,8 @@ type screens struct {
 // newScreens builds the screens over the manager, its fetcher, the composer's
 // poster and the workspace mutator.
 func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster, wsMut *workspace.Mutator) *screens {
-	inboxRow := kit.NewListRowState()
-	inboxRow.Enter()
-	accountsRow := kit.NewListRowState()
-	accountsRow.Enter()
-	settingsRow := kit.NewListRowState()
-	settingsRow.Enter()
-	secretsRow := kit.NewListRowState()
-	secretsRow.Enter()
 	return &screens{
+		titleBar:        newTitleBar(runtime.GOOS),
 		teamRuntime:     newTeamRuntime(),
 		m:               m,
 		fetcher:         fetcher,
@@ -226,7 +213,7 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 		viewCache:       kit.NewVirtualHeightCache(),
 		commands:        map[string]*session.Commands{},
 		pendingCommands: map[string]bool{},
-		header:          kit.NewSectionHeaderState(true),
+		wsAddBtn:        kit.NewIconButtonState(),
 		rows:            map[string]*kit.ListRowState{},
 		pendingPage:     map[string]bool{}, pendingOlder: map[string]bool{}, pendingItem: map[string]bool{},
 		workspaces:      workspace.NewModel(),
@@ -242,16 +229,12 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 		vaultGate:       newVaultGate(),
 		inbox:           inbox.NewModel(),
 		inboxView:       newInboxView(),
-		inboxRow:        inboxRow,
 		accounts:        accounts.NewModel(),
 		accountsView:    newAccountsView(),
-		accountsRow:     accountsRow,
 		settings:        settings.NewModel(),
 		settingsView:    newSettingsView(),
-		settingsRow:     settingsRow,
 		secrets:         secrets.NewModel(),
 		secretsView:     newSecretsView(),
-		secretsRow:      secretsRow,
 		viewer:          newFileViewer(),
 		emptyTranscript: kit.NewEmptyStateState(),
 		failure:         newFailureUX(),
@@ -259,14 +242,9 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 }
 
 // hasSlotKind reports whether a regular slot of the kind is open, the
-// sidebar rows' selected state.
+// Right Stripe and Top Bar icons' active state.
 func (s *screens) hasSlotKind(kind SlotKind) bool {
-	for _, p := range regularCells(s.grid.doc) {
-		if slot, _ := slotAt(s.grid.doc, p); slot.Ref.Kind == kind {
-			return true
-		}
-	}
-	return false
+	return s.grid.hasRegularSlotKind(kind)
 }
 
 // viewFor returns the session's scroll state, building it on first use. A new

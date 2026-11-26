@@ -133,19 +133,13 @@ func (s *screens) layoutTeamBoardHeader(gtx *layout.Context, env *kit.Env, view 
 
 func (s *screens) layoutTeamsSidebar(gtx *layout.Context, env *kit.Env) layout.Dimensions {
 	gtx.Constraints.Min.X = gtx.Constraints.Max.X
-	return layout.Inset{Top: theme.SpaceXL, Left: theme.SpaceMD, Right: theme.SpaceSM}.Layout(*gtx, func(g layout.Context) layout.Dimensions {
-		return layout.Flex{Axis: layout.Vertical}.Layout(g,
-			rigidParagraph(env, theme.TypeHeading(), env.Th.Chrome().Fg, "Teams"),
-			spacerH(theme.SpaceLG),
-			layout.Flexed(1, func(g layout.Context) layout.Dimensions {
-				if len(s.teamSummaries) == 0 {
-					return teamText(&g, env, "No teams yet.")
-				}
-				return s.teamSidebarList.Layout(g, len(s.teamSummaries), func(g layout.Context, i int) layout.Dimensions {
-					return s.layoutTeamSidebarRow(&g, env, &s.teamSummaries[i])
-				})
-			}),
-		)
+	return layout.Inset{Top: theme.SpaceSM, Left: theme.SpaceMD, Right: theme.SpaceSM}.Layout(*gtx, func(g layout.Context) layout.Dimensions {
+		if len(s.teamSummaries) == 0 {
+			return teamText(&g, env, "No teams yet.")
+		}
+		return s.teamSidebarList.Layout(g, len(s.teamSummaries), func(g layout.Context, i int) layout.Dimensions {
+			return s.layoutTeamSidebarRow(&g, env, &s.teamSummaries[i])
+		})
 	})
 }
 

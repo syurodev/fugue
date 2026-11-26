@@ -343,6 +343,7 @@ func wireApplyGeometry(sc *screens, w *app.Window) {
 			sc.restoreNormalSize = clamped
 		}
 		applyWindowOptions(w, clamped)
+		sc.titleBar.reapplyPlatformChrome()
 	}
 }
 

@@ -116,6 +116,8 @@ func packagedIcons() []packagedIcon {
 		{"panel-left", "PanelLeft"},
 		{"app-window", "WindowFrame"},
 		{"star", "Star"},
+		{"sun", "Sun"},
+		{"moon", "Moon"},
 	}
 }
 

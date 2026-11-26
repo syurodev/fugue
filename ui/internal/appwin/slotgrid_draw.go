@@ -98,7 +98,7 @@ func (g *slotGrid) layoutArea(gtx *layout.Context, env *kit.Env, sc *screens, ar
 		g.overlaySplits(gtx, env, geom, area, visible)
 	}
 	if plan.FoldedCols > 0 {
-		g.layoutFolded(gtx, env, sc, area, plan)
+		g.layoutDrawer(gtx, env, sc, area)
 	}
 	if g.drag.active {
 		g.layoutDrag(gtx, env, sc, geom, area)
@@ -108,10 +108,10 @@ func (g *slotGrid) layoutArea(gtx *layout.Context, env *kit.Env, sc *screens, ar
 	}
 }
 
-// drawSlot draws one slot: the header band across the top — every slot,
-// the main one included, so the band runs continuously over the grid (§5.3)
-// — and the body in the rectangle under it. A slot mid-slide draws at the
-// interpolated rect (§3.7).
+// drawSlot draws one slot as an independent 8 dp-rounded CanvasBg island with
+// a calm BorderSubtle outline (no accent focus border), containing its 30 dp
+// header band and clipped body. A slot mid-slide draws at the interpolated
+// rect (§3.7).
 func (g *slotGrid) drawSlot(gtx *layout.Context, env *kit.Env, sc *screens, p Pos, rect image.Rectangle) {
 	if rect.Empty() {
 		return
@@ -128,12 +128,14 @@ func (g *slotGrid) drawSlot(gtx *layout.Context, env *kit.Env, sc *screens, p Po
 	if draw.Empty() || alpha <= 0 {
 		return
 	}
-	if anim != nil {
-		defer clip.Rect(draw).Push(gtx.Ops).Pop()
-	}
 	if alpha < 1 {
 		defer paint.PushOpacity(gtx.Ops, alpha).Pop()
 	}
+	radius := gtx.Dp(theme.RadiusIsland)
+	rr := clip.UniformRRect(draw, radius)
+	paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, rr.Op(gtx.Ops))
+	stack := rr.Push(gtx.Ops)
+
 	h := min(gtx.Dp(theme.SlotHeaderHeight), draw.Dy())
 	head := image.Rect(draw.Min.X, draw.Min.Y, draw.Max.X, draw.Min.Y+h)
 	body := image.Rect(draw.Min.X, draw.Min.Y+h, draw.Max.X, draw.Max.Y)
@@ -142,15 +144,15 @@ func (g *slotGrid) drawSlot(gtx *layout.Context, env *kit.Env, sc *screens, p Po
 	} else {
 		g.drawChrome(gtx, env, sc, p, head)
 	}
-	if !body.Empty() && alpha < 1 {
-		paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, clip.Rect(body).Op())
-	}
 	env.Offset(gtx, body.Min, func(gtx *layout.Context) {
 		local := *gtx
 		local.Constraints = layout.Constraints{Max: body.Size()}
 		defer clip.Rect{Max: body.Size()}.Push(local.Ops).Pop()
 		sc.layoutSlotBody(&local, env, p, ref)
 	})
+	stack.Pop()
+	paint.FillShape(gtx.Ops, env.Th.Chrome().BorderSubtle,
+		clip.Stroke{Path: rr.Path(gtx.Ops), Width: float32(max(gtx.Dp(theme.Hairline), 1))}.Op())
 }
 
 // drawChrome draws a regular slot's header bar — icon and title, the drag

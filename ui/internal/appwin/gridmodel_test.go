@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+
+	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
 // The slot grid model's evidence (DA-E09, DA-E10 one window, DA-E11): the
@@ -417,18 +419,20 @@ func TestDecodeRepairsBrokenDocuments(t *testing.T) {
 func TestFoldPlanFoldsRightToLeftThenSidebar(t *testing.T) {
 	t.Parallel()
 	const (
-		railDp    = 48
-		sidebarDp = 240
-		mainDp    = 520
-		regDp     = 300
+		railDp    = int(theme.RailWidth)
+		stripeDp  = int(theme.RightStripeWidth)
+		gapDp     = int(theme.IslandGap)
+		sidebarDp = int(theme.SidebarWidth)
+		mainDp    = int(theme.MainSlotMinWidth)
+		regDp     = int(theme.SlotMinWidth)
 	)
 	cols := 3
-	plan := PlanFold(railDp+sidebarDp+mainDp+2*regDp, true, cols)
+	plan := PlanFold(railDp+stripeDp+sidebarDp+gapDp+mainDp+2*(regDp+gapDp), true, cols)
 	if plan.FoldedCols != 0 || plan.TempSidebarFolded {
 		t.Fatalf("a wide window folded: %+v", plan)
 	}
 	// Exactly the two-column minimum: fold the rightmost only.
-	plan = PlanFold(railDp+sidebarDp+mainDp+regDp, true, cols)
+	plan = PlanFold(railDp+stripeDp+sidebarDp+gapDp+mainDp+regDp+gapDp, true, cols)
 	if plan.FoldedCols != 1 {
 		t.Fatalf("folded = %d, want the rightmost column folded first", plan.FoldedCols)
 	}
@@ -436,17 +440,17 @@ func TestFoldPlanFoldsRightToLeftThenSidebar(t *testing.T) {
 		t.Fatal("the sidebar folded while the columns still fit")
 	}
 	// Only the main column left and still too narrow: fold the sidebar.
-	plan = PlanFold(railDp+sidebarDp+mainDp-1, true, cols)
+	plan = PlanFold(railDp+stripeDp+sidebarDp+gapDp+mainDp-1, true, cols)
 	if plan.FoldedCols != 2 || !plan.TempSidebarFolded {
 		t.Fatalf("plan = %+v, want both regular columns and then the sidebar folded", plan)
 	}
 	// The user's own collapse is not the width-driven fold.
-	plan = PlanFold(railDp+mainDp-1, false, 1)
+	plan = PlanFold(railDp+stripeDp+mainDp-1, false, 1)
 	if plan.TempSidebarFolded {
 		t.Fatal("the width fold fired while the sidebar was already collapsed")
 	}
 	// The main slot never folds.
-	plan = PlanFold(railDp+mainDp+regDp, true, 2)
+	plan = PlanFold(railDp+stripeDp+mainDp+regDp+gapDp, true, 2)
 	if plan.FoldedCols != 1 {
 		t.Fatalf("folded = %d, want the regular column folded and the main kept", plan.FoldedCols)
 	}

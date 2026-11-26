@@ -140,3 +140,33 @@ func TestPollClickAndLayoutSameFrameCountsOnce(t *testing.T) {
 	}
 	h.end()
 }
+
+// TestSnapToggledSnapsWithoutAnimation verifies SnapToggled sets ToggledProgress
+// immediately without scheduling animation frames.
+func TestSnapToggledSnapsWithoutAnimation(t *testing.T) {
+	t.Parallel()
+	h := newHarness(t)
+	btn := NewIconButtonState()
+
+	h.frame(t)
+	if _, err := btn.Layout(h.env, &h.gtx, &IconButtonProps{Icon: IconPlus, Label: labelPin, Toggled: true}); err != nil {
+		t.Fatalf("IconButton.Layout: %v", err)
+	}
+	h.end()
+
+	btn.SnapToggled(false)
+	if got := btn.ToggledProgress(); got != 0 {
+		t.Fatalf("after SnapToggled(false), ToggledProgress = %v, want 0", got)
+	}
+	h.frame(t)
+	if _, err := btn.Layout(h.env, &h.gtx, &IconButtonProps{Icon: IconPlus, Label: labelPin, Toggled: false}); err != nil {
+		t.Fatalf("IconButton.Layout: %v", err)
+	}
+	h.end()
+	if got := btn.ToggledProgress(); got != 0 {
+		t.Fatalf("next frame ToggledProgress = %v, want 0", got)
+	}
+	if at, ok := h.env.Driver.Next(); ok && at.IsZero() {
+		t.Fatal("SnapToggled scheduled an unexpected animation frame")
+	}
+}

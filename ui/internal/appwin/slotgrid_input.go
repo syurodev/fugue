@@ -92,6 +92,8 @@ func (g *slotGrid) handleEscape(gtx *layout.Context) {
 				g.cancelDrag()
 			case g.drawer != "":
 				g.drawer = ""
+			case g.tempSidebarPresence.Shown():
+				g.tempSidebarPresence.Show(false)
 			case g.doc.FilledSlot != "":
 				c, r, _ := parseSlotKey(g.doc.FilledSlot)
 				if doc, ok := ToggleFill(g.doc, Pos{Col: c, Row: r}); ok {
