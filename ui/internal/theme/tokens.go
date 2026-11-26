@@ -101,8 +101,6 @@ const (
 	TopBarHeight = Tab
 	// StatusBarHeight is the full-width bottom status bar visual height.
 	StatusBarHeight = unit.Dp(22)
-	// RailIconSize is the icon size centered inside 24 dp rail/stripe buttons.
-	RailIconSize = unit.Dp(15)
 	// MacTrafficLightInset is the horizontal inset reserved on the left of the
 	// 32 dp Top Bar on macOS (non-fullscreen) for native Close/Minimize/Zoom
 	// traffic lights rendered inside fullSizeContentView.
@@ -116,9 +114,6 @@ const (
 	SlotMinHeight = unit.Dp(160)
 	// SlotHeaderHeight is the uniform header bar height of Sidebar and Slot islands.
 	SlotHeaderHeight = unit.Dp(30)
-	// EdgeTabWidth is the legacy narrow-window tab strip on the right edge;
-	// retained until FUG-94 migrates folded slots onto RightStripeWidth.
-	EdgeTabWidth = unit.Dp(40)
 	// DropEdgeWidth is the width of a column-edge drop zone at a column's
 	// edge during a drag (§5.3).
 	DropEdgeWidth = unit.Dp(24)

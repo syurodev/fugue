@@ -7,6 +7,7 @@ import (
 	"gioui.org/app"
 	"gioui.org/f32"
 	"gioui.org/gesture"
+	"gioui.org/io/event"
 	"gioui.org/io/system"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -54,6 +55,7 @@ type titleBar struct {
 	fullscreen  bool
 	focused     bool
 	maximized   bool
+	nativeView  uintptr
 	title       string
 	pending     system.Action
 	themeBtn    *kit.IconButtonState
@@ -80,6 +82,31 @@ func (b *titleBar) applyConfig(cfg app.Config) {
 	b.maximized = cfg.Mode == app.Maximized
 	b.deco.Maximized = b.maximized
 	b.title = cfg.Title
+}
+
+// applyViewEvent records the native view handle from app.ViewEvent and applies
+// initial platform titlebar styling.
+func (b *titleBar) applyViewEvent(e event.Event) {
+	if b == nil {
+		return
+	}
+	if ptr, ok := extractPlatformView(e); ok {
+		b.nativeView = ptr
+		applyPlatformTitleBar(ptr, b.fullscreen)
+	}
+}
+
+// reapplyPlatformChrome restores platform titlebar styling after Gio window
+// option updates (which reset macOS fullSizeContentView on v0.10.3).
+func (b *titleBar) reapplyPlatformChrome() {
+	if b == nil || b.nativeView == 0 {
+		return
+	}
+	applyPlatformTitleBar(b.nativeView, b.fullscreen)
+}
+
+func (b *titleBar) hasDragArea() bool {
+	return b.csd || (b.goos == osDarwin && !b.fullscreen)
 }
 
 // takeActions returns the window actions the user asked for and clears them.
@@ -192,7 +219,7 @@ func (b *titleBar) layout(env *kit.Env, gtx *layout.Context, sc *screens) int {
 	maxLeftW := max(width-m.rightTotalW-leftX-gtx.Dp(theme.SpaceMD), 0)
 	pillW := b.layoutContextPill(env, &local, sc, leftX, h, maxLeftW)
 
-	if b.csd {
+	if b.hasDragArea() {
 		dragStart := leftX + pillW
 		dragEnd := max(width-m.rightTotalW, dragStart)
 		b.layoutDragArea(&local, image.Rect(dragStart, 0, dragEnd, h))
@@ -231,7 +258,7 @@ func (b *titleBar) layoutThemeToggleBtn(env *kit.Env, gtx *layout.Context, sc *s
 		clicked, err := b.themeBtn.Layout(env, gtx, &props)
 		sc.fail(err)
 		if clicked {
-			sc.toggleThemeFromUI(isDark)
+			sc.toggleThemeFromUI(env, isDark)
 		}
 	})
 }
@@ -308,31 +335,39 @@ func (b *titleBar) layoutContextPill(env *kit.Env, gtx *layout.Context, sc *scre
 	return pillW
 }
 
-// layoutDragArea registers the middle window move and double-click maximize area.
+// layoutDragArea registers the middle window move and Linux CSD double-click maximize area.
 func (b *titleBar) layoutDragArea(gtx *layout.Context, area image.Rectangle) {
 	size := area.Size()
 	if size.X <= 0 || size.Y <= 0 {
 		return
 	}
-	for {
-		ev, ok := b.click.Update(gtx.Source)
-		if !ok {
-			break
-		}
-		if ev.Kind == gesture.KindClick && ev.NumClicks == 2 {
-			b.pending |= b.toggleMaximize()
-		}
+	if b.csd {
+		b.pollDragDoubleClick(gtx)
 	}
 	off := op.Offset(area.Min).Push(gtx.Ops)
 	local := *gtx
 	local.Constraints = layout.Exact(size)
 	b.deco.LayoutMove(local, func(g layout.Context) layout.Dimensions {
-		st := clip.Rect{Max: size}.Push(g.Ops)
-		b.click.Add(g.Ops)
-		st.Pop()
+		if b.csd {
+			st := clip.Rect{Max: size}.Push(g.Ops)
+			b.click.Add(g.Ops)
+			st.Pop()
+		}
 		return layout.Dimensions{Size: size}
 	})
 	off.Pop()
+}
+
+func (b *titleBar) pollDragDoubleClick(gtx *layout.Context) {
+	for {
+		ev, ok := b.click.Update(gtx.Source)
+		if !ok {
+			return
+		}
+		if ev.Kind == gesture.KindClick && ev.NumClicks == 2 {
+			b.pending |= b.toggleMaximize()
+		}
+	}
 }
 
 func (b *titleBar) toggleMaximize() system.Action {

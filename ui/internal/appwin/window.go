@@ -303,8 +303,9 @@ func eventLoop(ctx context.Context, w *app.Window, env *kit.Env, sc *screens, q 
 		case app.ConfigEvent:
 			sc.titleBar.applyConfig(e.Config)
 			sc.handleWindowConfig(w, e.Config)
+			sc.titleBar.reapplyPlatformChrome()
 		case app.ViewEvent:
-			configurePlatformTitleBar(e)
+			sc.titleBar.applyViewEvent(e)
 		case app.FrameEvent:
 			sc.deviceMetric = e.Metric
 			gtx := app.NewContext(&ops, e)
@@ -352,7 +353,6 @@ drainPosts:
 	sc.drainWorkerResults()
 	sc.applyLivePreferences(env, light, dark)
 	toggleTheme(gtx, env, sc, light, dark)
-	sc.onThemeToggle = func() { sc.applyLivePreferences(env, light, dark) }
 	drawWindow(gtx, env, sc)
 	if coord != nil {
 		sc.openSlotWindow(coord.openNew)

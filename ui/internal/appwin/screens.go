@@ -188,8 +188,7 @@ type screens struct {
 	emptyTranscript *kit.EmptyStateState
 	// failure is the window's failure UX (F10.5e): the actionable banners and
 	// the active-session close confirmation.
-	failure       *failureUX
-	onThemeToggle func()
+	failure *failureUX
 }
 
 // newScreens builds the screens over the manager, its fetcher, the composer's

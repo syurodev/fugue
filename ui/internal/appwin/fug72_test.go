@@ -395,3 +395,39 @@ func TestFUG72ClickingInactiveRailExpandsCollapsedSidebar(t *testing.T) {
 		t.Fatal("clicking inactive rail item while collapsed should expand sidebar")
 	}
 }
+
+// TestFUG72NarrowWindowActiveRailClickDoesNotSaveCollapsed verifies clicking the
+// active rail icon while TempSidebarFolded hides the sidebar does not persist
+// SidebarCollapsed=true, so widening restores the visible sidebar.
+func TestFUG72NarrowWindowActiveRailClickDoesNotSaveCollapsed(t *testing.T) {
+	t.Parallel()
+	sc := newFUG65TestScreens(t)
+	env := newFUG65Env(t, true)
+	env.ReducedMotion = true
+	router := new(input.Router)
+	wide, narrow := image.Pt(1200, 800), image.Pt(500, 800)
+	now := time.Unix(1_700_000_000, 0)
+
+	var ops op.Ops
+	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
+	fullW := gtx.Dp(theme.SidebarWidth)
+
+	runShellEnvFrame(t, env, sc, router, wide, now)
+	now = now.Add(16 * time.Millisecond)
+	runShellEnvFrame(t, env, sc, router, narrow, now)
+	if sideW := drawnSidebarWidth(&gtx, sc, narrow); sideW != 0 {
+		t.Fatalf("narrow sideW = %d, want 0", sideW)
+	}
+
+	now = now.Add(16 * time.Millisecond)
+	clickShellAt(t, env, sc, router, narrow, now, railCenter(env, sc, &gtx, 0))
+	if sc.grid.doc.SidebarCollapsed {
+		t.Fatal("clicking active rail item in narrow folded window saved SidebarCollapsed=true")
+	}
+
+	now = now.Add(16 * time.Millisecond)
+	runShellEnvFrame(t, env, sc, router, wide, now)
+	if sideW := drawnSidebarWidth(&gtx, sc, wide); sideW != fullW {
+		t.Fatalf("widened sideW = %d, want %d", sideW, fullW)
+	}
+}

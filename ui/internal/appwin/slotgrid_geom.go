@@ -23,7 +23,7 @@ type cellGeom struct {
 
 // computeRects lays out the visible columns' cells into area: columns split
 // horizontally by their weights, rows vertically inside each column, leaving
-// IslandGap (2 dp) between adjacent islands (FUG-92).
+// IslandGap (4 dp) between adjacent islands (FUG-92).
 func (g *slotGrid) computeRects(gtx *layout.Context, area image.Rectangle, visible int) []cellGeom {
 	if visible <= 0 || area.Empty() {
 		return nil

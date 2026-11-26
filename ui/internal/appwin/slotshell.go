@@ -150,16 +150,20 @@ func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dime
 func (s *screens) pollRailAndSidebar(gtx *layout.Context, tempFolded bool) bool {
 	for _, item := range []railItem{railChat, railTeam, railModules} {
 		if s.grid.railBtn(item).PollClick(gtx, false, false) {
-			s.handleRailClick(item)
+			s.handleRailClick(item, tempFolded)
 		}
 	}
 	return s.sidebarVisible() && !tempFolded
 }
 
-func (s *screens) handleRailClick(item railItem) {
+func (s *screens) handleRailClick(item railItem, tempFolded bool) {
 	if s.grid.rail == item {
+		shown := s.sidebarVisible() && !tempFolded
+		if s.grid.doc.SidebarCollapsed == shown {
+			return
+		}
 		doc := cloneLayout(s.grid.doc)
-		doc.SidebarCollapsed = s.sidebarVisible()
+		doc.SidebarCollapsed = shown
 		s.grid.edited(doc)
 		return
 	}
@@ -243,7 +247,7 @@ func (s *screens) planShell(gtx *layout.Context) PlanFoldResult {
 func (s *screens) sidebarVisible() bool { return !s.grid.doc.SidebarCollapsed }
 
 // layoutGridContainer lays the slot grid directly over the shell's AppBg so
-// each slot draws as its own 8 dp rounded CanvasBg island separated by 2 dp
+// each slot draws as its own 8 dp rounded CanvasBg island separated by 4 dp
 // gutters (FUG-92).
 func (s *screens) layoutGridContainer(gtx *layout.Context, env *kit.Env, plan PlanFoldResult) layout.Dimensions {
 	local := *gtx

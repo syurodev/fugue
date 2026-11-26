@@ -23,15 +23,13 @@ const (
 	osDarwin     = "darwin"
 )
 
-func (s *screens) toggleThemeFromUI(darkNow bool) {
+func (s *screens) toggleThemeFromUI(env *kit.Env, darkNow bool) {
 	if darkNow {
 		s.settings.Prefs.Current.ThemeMode = settings.ThemeLight
 	} else {
 		s.settings.Prefs.Current.ThemeMode = settings.ThemeDark
 	}
-	if s.onThemeToggle != nil {
-		s.onThemeToggle()
-	}
+	env.Keep()
 }
 
 func (s *screens) activeSessionParts() (wsName, sessName string) {

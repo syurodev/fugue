@@ -294,8 +294,9 @@ func measureGridGaps(img *image.RGBA, barH, sidebarRight int) (topGap, leftGutte
 }
 
 // TestTopBarThemeToggleAndSettings verifies FUG-95: clicking Quick Theme Toggle
-// flips ThemeMode and fires onThemeToggle, clicking Settings toggles KindSettings,
-// and unsaved settings fields surface in the Settings button tooltip.
+// flips ThemeMode and schedules an immediate redraw for the next frame instead of
+// mutating env.Th mid-draw, clicking Settings toggles KindSettings, and unsaved
+// settings fields surface in the Settings button tooltip.
 func TestTopBarThemeToggleAndSettings(t *testing.T) {
 	t.Parallel()
 	sc := newFUG65TestScreens(t)
@@ -303,9 +304,6 @@ func TestTopBarThemeToggleAndSettings(t *testing.T) {
 	router := new(input.Router)
 	size := image.Pt(1200, 800)
 	now := time.Unix(1_700_000_000, 0)
-
-	toggled := false
-	sc.onThemeToggle = func() { toggled = true }
 
 	var ops op.Ops
 	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}), Constraints: layout.Exact(size)}
@@ -322,11 +320,14 @@ func TestTopBarThemeToggleAndSettings(t *testing.T) {
 	themeX := settingsX - float32(btnW+btnGap)
 	y := float32(barH) / 2
 
-	// Click Theme Toggle -> switches light to dark.
+	// Click Theme Toggle -> switches light to dark cleanly for the next frame.
 	now = now.Add(16 * time.Millisecond)
 	clickShellAt(t, env, sc, router, size, now, f32.Pt(themeX, y))
-	if !toggled || sc.settings.Prefs.Current.ThemeMode != "dark" {
-		t.Fatalf("Theme Toggle clicked: toggled=%v themeMode=%q", toggled, sc.settings.Prefs.Current.ThemeMode)
+	if sc.settings.Prefs.Current.ThemeMode != "dark" || !wantsImmediateFrame(env) {
+		t.Fatalf("Theme Toggle clicked: themeMode=%q wantsImmediateFrame=%v", sc.settings.Prefs.Current.ThemeMode, wantsImmediateFrame(env))
+	}
+	if env.Th.Chrome().CanvasBg.R < 128 {
+		t.Fatal("env.Th switched mid-draw during Theme Toggle click frame; expected deferred next-frame switch")
 	}
 
 	// Dirty settings -> hover Settings button -> "Settings (unsaved changes)".
@@ -392,5 +393,43 @@ func TestDarwinTitleBarTrafficLightInset(t *testing.T) {
 	bar.applyConfig(app.Config{Mode: app.Fullscreen})
 	if got, want := bar.leftInset(&gtx, true), gtx.Dp(theme.RailWidth); got != want {
 		t.Fatalf("darwin fullscreen leftInset = %d, want %d", got, want)
+	}
+}
+
+// TestDarwinTitleBarMoveAction verifies windowed macOS Top Bar registers
+// system.ActionMove across the empty drag span (for native Gio/AppKit drag)
+// while leaving traffic-light insets and fullscreen mode un-registered.
+func TestDarwinTitleBarMoveAction(t *testing.T) {
+	t.Parallel()
+	bar := newTitleBar(osDarwin)
+	env := newFUG65Env(t, true)
+	router := new(input.Router)
+	size := image.Pt(1000, 32)
+	var ops op.Ops
+
+	render := func(cfg app.Config) {
+		bar.applyConfig(cfg)
+		ops.Reset()
+		gtx := layout.Context{
+			Ops:         &ops,
+			Source:      router.Source(),
+			Metric:      env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}),
+			Constraints: layout.Exact(size),
+		}
+		bar.layout(env, &gtx, nil)
+		router.Frame(gtx.Ops)
+	}
+
+	render(app.Config{Mode: app.Windowed, Decorated: true, Focused: true, Title: "Fugue"})
+	if act, ok := router.ActionAt(f32.Pt(float32(size.X/2), 16)); !ok || act != system.ActionMove {
+		t.Fatalf("windowed darwin middle Top Bar ActionAt = (%v, %v), want (ActionMove, true)", act, ok)
+	}
+	if act, ok := router.ActionAt(f32.Pt(10, 16)); ok && act == system.ActionMove {
+		t.Fatalf("windowed darwin traffic-light inset should not register ActionMove, got (%v, %v)", act, ok)
+	}
+
+	render(app.Config{Mode: app.Fullscreen, Decorated: true, Focused: true, Title: "Fugue"})
+	if act, ok := router.ActionAt(f32.Pt(float32(size.X/2), 16)); ok && act == system.ActionMove {
+		t.Fatalf("fullscreen darwin Top Bar should not register ActionMove, got (%v, %v)", act, ok)
 	}
 }
