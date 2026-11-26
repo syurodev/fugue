@@ -2,6 +2,7 @@ package appwin
 
 import (
 	"image"
+	"image/color"
 	"testing"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"gioui.org/unit"
 
 	"github.com/syurodev/fugue/pkg/client"
+
 	"github.com/syurodev/fugue/ui/internal/fonts"
 	"github.com/syurodev/fugue/ui/internal/glwin"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
@@ -208,21 +210,18 @@ func TestTitleBarNoBottomSeam(t *testing.T) {
 	for _, shot := range renderTitleBarShots(t) {
 		bg := shot.img.RGBAAt(0, 0)
 		w := shot.img.Bounds().Dx()
-		for x := range w {
-			if got := shot.img.RGBAAt(x, seamY-1); got != bg {
-				t.Fatalf("%s: pixel at (%d, %d) = %+v, want AppBg %+v (no bottom seam)", shot.name, x, seamY-1, got, bg)
-			}
-		}
+		assertAppBgSpan(t, shot, seamY-1, 0, w, bg)
 		// Directly under the Left Rail and Right Stripe at y = barH - 1, no island stroke sits below.
-		for x := range int(theme.RailWidth) {
-			if got := shot.img.RGBAAt(x, seamY); got != bg {
-				t.Fatalf("%s: pixel at (%d, %d) = %+v, want AppBg %+v (no bottom seam)", shot.name, x, seamY, got, bg)
-			}
-		}
-		for x := w - int(theme.RightStripeWidth); x < w; x++ {
-			if got := shot.img.RGBAAt(x, seamY); got != bg {
-				t.Fatalf("%s: pixel at (%d, %d) = %+v, want AppBg %+v (no bottom seam)", shot.name, x, seamY, got, bg)
-			}
+		assertAppBgSpan(t, shot, seamY, 0, int(theme.RailWidth), bg)
+		assertAppBgSpan(t, shot, seamY, w-int(theme.RightStripeWidth), w, bg)
+	}
+}
+
+func assertAppBgSpan(t *testing.T, shot titleBarShot, y, fromX, toX int, bg color.RGBA) {
+	t.Helper()
+	for x := fromX; x < toX; x++ {
+		if got := shot.img.RGBAAt(x, y); got != bg {
+			t.Fatalf("%s: pixel at (%d, %d) = %+v, want AppBg %+v (no bottom seam)", shot.name, x, y, got, bg)
 		}
 	}
 }
@@ -375,5 +374,23 @@ func TestStatusBarBreadcrumbAndVaultLock(t *testing.T) {
 	}
 	if got := sc.statusBarBreadcrumb(); got != teamLabel {
 		t.Fatalf("railTeam statusBarBreadcrumb = %q, want %q", got, teamLabel)
+	}
+}
+
+// TestDarwinTitleBarTrafficLightInset verifies FUG-96: macOS Top Bar reserves
+// 72 dp on the left for native traffic lights in windowed mode and collapses to
+// RailWidth in fullscreen mode.
+func TestDarwinTitleBarTrafficLightInset(t *testing.T) {
+	t.Parallel()
+	bar := newTitleBar("darwin")
+	var ops op.Ops
+	gtx := layout.Context{Ops: &ops, Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}}
+	bar.applyConfig(app.Config{Mode: app.Windowed})
+	if got, want := bar.leftInset(&gtx, true), gtx.Dp(theme.MacTrafficLightInset); got != want {
+		t.Fatalf("darwin windowed leftInset = %d, want %d", got, want)
+	}
+	bar.applyConfig(app.Config{Mode: app.Fullscreen})
+	if got, want := bar.leftInset(&gtx, true), gtx.Dp(theme.RailWidth); got != want {
+		t.Fatalf("darwin fullscreen leftInset = %d, want %d", got, want)
 	}
 }

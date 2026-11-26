@@ -15,6 +15,7 @@ import (
 	"gioui.org/unit"
 
 	"github.com/syurodev/fugue/pkg/client"
+
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )

@@ -90,6 +90,7 @@ func testIslandsShellTokens(t *testing.T) {
 		{"shell.statusbar.height", theme.StatusBarHeight, 22},
 		{"shell.slot_header.height", theme.SlotHeaderHeight, 30},
 		{"shell.rail.icon", theme.RailIconSize, 15},
+		{"shell.mac_traffic_light_inset", theme.MacTrafficLightInset, 72},
 	})
 }
 

@@ -45,12 +45,13 @@ func windowOptions(goos string) []app.Option {
 	return []app.Option{app.Decorated(false)}
 }
 
-// titleBar is the app-drawn 32 dp Top Bar (FUG-95) and optional Linux CSD chrome.
+// titleBar is the app-drawn 32 dp Top Bar (FUG-95, FUG-96) and optional Linux CSD chrome.
 type titleBar struct {
 	goos        string
 	deco        widget.Decorations
 	click       gesture.Click
 	csd         bool
+	fullscreen  bool
 	focused     bool
 	maximized   bool
 	title       string
@@ -73,7 +74,8 @@ func (b *titleBar) applyConfig(cfg app.Config) {
 	if b == nil {
 		return
 	}
-	b.csd = drawsOwnChrome(b.goos) && !cfg.Decorated && cfg.Mode != app.Fullscreen
+	b.fullscreen = cfg.Mode == app.Fullscreen
+	b.csd = drawsOwnChrome(b.goos) && !cfg.Decorated && !b.fullscreen
 	b.focused = cfg.Focused
 	b.maximized = cfg.Mode == app.Maximized
 	b.deco.Maximized = b.maximized
@@ -98,35 +100,44 @@ func (b *titleBar) height(gtx *layout.Context) int {
 	return gtx.Dp(theme.TopBarHeight)
 }
 
-// layout draws the 32 dp Top Bar at the top of the window and returns its height.
-func (b *titleBar) layout(env *kit.Env, gtx *layout.Context, sc *screens) int {
-	h := b.height(gtx)
-	if h == 0 {
-		return 0
-	}
+func (b *titleBar) ensureButtons() {
 	if b.themeBtn == nil {
 		b.themeBtn = kit.NewIconButtonState()
 	}
 	if b.settingsBtn == nil {
 		b.settingsBtn = kit.NewIconButtonState()
 	}
-	if b.csd {
-		b.pending |= b.deco.Update(*gtx)
-	}
-	c := env.Th.Chrome()
-	width := gtx.Constraints.Max.X
-	local := *gtx
-	local.Constraints = layout.Exact(image.Pt(width, h))
-	paint.FillShape(local.Ops, c.AppBg, clip.Rect{Max: local.Constraints.Max}.Op())
+}
 
+func (b *titleBar) leftInset(gtx *layout.Context, hasSettings bool) int {
+	if b.goos == osDarwin && !b.fullscreen {
+		return gtx.Dp(theme.MacTrafficLightInset)
+	}
+	if hasSettings {
+		return gtx.Dp(theme.RailWidth)
+	}
+	return gtx.Dp(theme.SpaceMD)
+}
+
+type titleBarMetrics struct {
+	btnW         int
+	btnGap       int
+	csdW         int
+	hasTheme     bool
+	hasSettings  bool
+	rightPad     int
+	rightBtnsW   int
+	rightEdgeGap int
+	rightTotalW  int
+}
+
+func (b *titleBar) computeMetrics(gtx *layout.Context, sc *screens) titleBarMetrics {
 	btnW := gtx.Dp(theme.ControlSM)
 	btnGap := gtx.Dp(theme.SpaceXS)
-	csdSide := gtx.Dp(theme.SpaceXXXL) + gtx.Dp(theme.SpaceMD)
 	csdW := 0
 	if b.csd {
-		csdW = 3 * csdSide
+		csdW = 3 * (gtx.Dp(theme.SpaceXXXL) + gtx.Dp(theme.SpaceMD))
 	}
-
 	hasTheme := sc != nil
 	hasSettings := sc != nil && !sc.vaultGate.active(sc.vault)
 	rightPad := 0
@@ -147,72 +158,110 @@ func (b *titleBar) layout(env *kit.Env, gtx *layout.Context, sc *screens) int {
 	if b.csd && rightBtnsW > 0 {
 		rightEdgeGap = btnGap
 	}
-	rightTotalW := rightBtnsW + rightEdgeGap + csdW + rightPad
-
-	leftX := gtx.Dp(theme.SpaceMD)
-	if hasSettings {
-		leftX = gtx.Dp(theme.RailWidth)
+	return titleBarMetrics{
+		btnW:         btnW,
+		btnGap:       btnGap,
+		csdW:         csdW,
+		hasTheme:     hasTheme,
+		hasSettings:  hasSettings,
+		rightPad:     rightPad,
+		rightBtnsW:   rightBtnsW,
+		rightEdgeGap: rightEdgeGap,
+		rightTotalW:  rightBtnsW + rightEdgeGap + csdW + rightPad,
 	}
-	maxLeftW := max(width-rightTotalW-leftX-gtx.Dp(theme.SpaceMD), 0)
+}
+
+// layout draws the 32 dp Top Bar at the top of the window and returns its height.
+func (b *titleBar) layout(env *kit.Env, gtx *layout.Context, sc *screens) int {
+	h := b.height(gtx)
+	if h == 0 {
+		return 0
+	}
+	b.ensureButtons()
+	if b.csd {
+		b.pending |= b.deco.Update(*gtx)
+	}
+	c := env.Th.Chrome()
+	width := gtx.Constraints.Max.X
+	local := *gtx
+	local.Constraints = layout.Exact(image.Pt(width, h))
+	paint.FillShape(local.Ops, c.AppBg, clip.Rect{Max: local.Constraints.Max}.Op())
+
+	m := b.computeMetrics(&local, sc)
+	leftX := b.leftInset(&local, m.hasSettings)
+	maxLeftW := max(width-m.rightTotalW-leftX-gtx.Dp(theme.SpaceMD), 0)
 	pillW := b.layoutContextPill(env, &local, sc, leftX, h, maxLeftW)
 
-	dragStart := leftX + pillW
-	dragEnd := max(width-rightTotalW, dragStart)
-	if b.csd && dragEnd > dragStart {
+	if b.csd {
+		dragStart := leftX + pillW
+		dragEnd := max(width-m.rightTotalW, dragStart)
 		b.layoutDragArea(&local, image.Rect(dragStart, 0, dragEnd, h))
 	}
+	b.layoutRightCluster(env, &local, sc, width, h, m)
+	return h
+}
 
-	btnY := max((h-btnW)/2, 0)
-	curX := width - rightPad - csdW - rightEdgeGap - rightBtnsW
-	if hasTheme {
-		isDark := c.CanvasBg.R < 128
-		icon := kit.IconMoon
-		tip := "Switch to dark theme (Ctrl+D)"
-		if isDark {
-			icon = kit.IconSun
-			tip = "Switch to light theme (Ctrl+D)"
-		}
-		env.Offset(&local, image.Pt(curX, btnY), func(gtx *layout.Context) {
-			props := kit.IconButtonProps{Icon: icon, Label: tip, Variant: kit.IconButtonGhost, Size: kit.SizeSM}
-			clicked, err := b.themeBtn.Layout(env, gtx, &props)
-			sc.fail(err)
-			if clicked {
-				sc.toggleThemeFromUI(isDark)
-			}
-		})
-		curX += btnW + btnGap
+func (b *titleBar) layoutRightCluster(env *kit.Env, gtx *layout.Context, sc *screens, width, h int, m titleBarMetrics) {
+	btnY := max((h-m.btnW)/2, 0)
+	curX := width - m.rightPad - m.csdW - m.rightEdgeGap - m.rightBtnsW
+	if m.hasTheme {
+		b.layoutThemeToggleBtn(env, gtx, sc, curX, btnY)
+		curX += m.btnW + m.btnGap
 	}
-	if hasSettings {
-		dirty := len(sc.settings.DirtyFields()) > 0
-		tip := "Settings"
-		if dirty {
-			tip = "Settings (unsaved changes)"
-		}
-		open := sc.hasSlotKind(KindSettings)
-		env.Offset(&local, image.Pt(curX, btnY), func(gtx *layout.Context) {
-			props := kit.IconButtonProps{Icon: kit.IconSettings, Label: tip, Variant: kit.IconButtonGhost, Size: kit.SizeSM, Toggled: open}
-			clicked, err := b.settingsBtn.Layout(env, gtx, &props)
-			sc.fail(err)
-			if dirty {
-				drawStatusBadgeDot(gtx, env, btnW, env.Th.Status().Warning)
-			}
-			if clicked {
-				if open {
-					sc.grid.closeSlotOf(KindSettings)
-				} else {
-					sc.openSettings()
-				}
-			}
-		})
+	if m.hasSettings {
+		b.layoutSettingsBtn(env, gtx, sc, curX, btnY, m.btnW)
 	}
 	if b.csd {
-		off := op.Offset(image.Pt(width-csdW, 0)).Push(local.Ops)
-		csdGtx := local
-		csdGtx.Constraints = layout.Exact(image.Pt(csdW, h))
+		off := op.Offset(image.Pt(width-m.csdW, 0)).Push(gtx.Ops)
+		csdGtx := *gtx
+		csdGtx.Constraints = layout.Exact(image.Pt(m.csdW, h))
 		b.layoutButtons(env, &csdGtx, h)
 		off.Pop()
 	}
-	return h
+}
+
+func (b *titleBar) layoutThemeToggleBtn(env *kit.Env, gtx *layout.Context, sc *screens, x, y int) {
+	isDark := env.Th.Chrome().CanvasBg.R < 128
+	icon, tip := kit.IconMoon, "Switch to dark theme (Ctrl+D)"
+	if isDark {
+		icon, tip = kit.IconSun, "Switch to light theme (Ctrl+D)"
+	}
+	env.Offset(gtx, image.Pt(x, y), func(gtx *layout.Context) {
+		props := kit.IconButtonProps{Icon: icon, Label: tip, Variant: kit.IconButtonGhost, Size: kit.SizeSM}
+		clicked, err := b.themeBtn.Layout(env, gtx, &props)
+		sc.fail(err)
+		if clicked {
+			sc.toggleThemeFromUI(isDark)
+		}
+	})
+}
+
+func (b *titleBar) layoutSettingsBtn(env *kit.Env, gtx *layout.Context, sc *screens, x, y, btnW int) {
+	dirty := len(sc.settings.DirtyFields()) > 0
+	tip := "Settings"
+	if dirty {
+		tip = "Settings (unsaved changes)"
+	}
+	open := sc.hasSlotKind(KindSettings)
+	env.Offset(gtx, image.Pt(x, y), func(gtx *layout.Context) {
+		props := kit.IconButtonProps{Icon: kit.IconSettings, Label: tip, Variant: kit.IconButtonGhost, Size: kit.SizeSM, Toggled: open}
+		clicked, err := b.settingsBtn.Layout(env, gtx, &props)
+		sc.fail(err)
+		if dirty {
+			drawStatusBadgeDot(gtx, env, btnW, env.Th.Status().Warning)
+		}
+		if clicked {
+			toggleSettingsSlot(sc, open)
+		}
+	})
+}
+
+func toggleSettingsSlot(sc *screens, open bool) {
+	if open {
+		sc.grid.closeSlotOf(KindSettings)
+		return
+	}
+	sc.openSettings()
 }
 
 func (b *titleBar) layoutContextPill(env *kit.Env, gtx *layout.Context, sc *screens, x, h, maxW int) int {
@@ -224,7 +273,7 @@ func (b *titleBar) layoutContextPill(env *kit.Env, gtx *layout.Context, sc *scre
 		text = sc.topBarContext()
 	}
 	if text == "" {
-		text = "Fugue"
+		text = appName
 	}
 	c := env.Th.Chrome()
 	fg := c.FgMuted

@@ -322,7 +322,7 @@ func openHTTPSURL(raw string) error {
 		return errBlockedHTTPSURL
 	}
 	name := "xdg-open"
-	if runtime.GOOS == "darwin" {
+	if runtime.GOOS == osDarwin {
 		name = "open"
 	}
 	path, err := exec.LookPath(name)

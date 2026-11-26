@@ -372,21 +372,21 @@ func (s *screens) layoutSidebarPanel(gtx *layout.Context, env *kit.Env) layout.D
 			case railChat:
 				return layout.Flex{Axis: layout.Vertical}.Layout(local,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						local := gtx
-						return s.layoutPolicyBanner(env, &local)
+						bannerGtx := gtx
+						return s.layoutPolicyBanner(env, &bannerGtx)
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						local := gtx
-						return layout.Inset{Top: theme.SpaceXS}.Layout(local, func(gtx layout.Context) layout.Dimensions {
-							local := gtx
-							return s.layoutSidebarContent(env, &local)
+						insetGtx := gtx
+						return layout.Inset{Top: theme.SpaceXS}.Layout(insetGtx, func(gtx layout.Context) layout.Dimensions {
+							contentGtx := gtx
+							return s.layoutSidebarContent(env, &contentGtx)
 						})
 					}),
 				)
 			case railTeam:
 				return s.layoutTeamsSidebar(&local, env)
 			case railModules:
-				return s.layoutSidebarSoon(env, &local, "Modules", "Registered modules list here in install order.")
+				return s.layoutSidebarSoon(env, &local, modulesLabel, "Registered modules list here in install order.")
 			}
 			return layout.Dimensions{}
 		}),
@@ -405,7 +405,7 @@ func (s *screens) layoutSidebarIslandHeader(env *kit.Env, gtx *layout.Context) l
 	case railTeam:
 		title = teamLabel
 	case railModules:
-		title = "Modules"
+		title = modulesLabel
 	}
 	c := env.Th.Chrome()
 	padL := gtx.Dp(theme.SpaceMD)

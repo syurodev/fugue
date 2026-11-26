@@ -221,7 +221,7 @@ func (a appWorkers) stop() {
 // are F10.5's — and the motion driver rides in the zero value of the Env.
 func newEnv(sh *text.Shaper, light *theme.Theme) *kit.Env {
 	env := &kit.Env{Th: light, Sh: sh}
-	if runtime.GOOS == "darwin" {
+	if runtime.GOOS == osDarwin {
 		env.Platform = kit.PlatformMac
 	}
 	return env
@@ -303,6 +303,8 @@ func eventLoop(ctx context.Context, w *app.Window, env *kit.Env, sc *screens, q 
 		case app.ConfigEvent:
 			sc.titleBar.applyConfig(e.Config)
 			sc.handleWindowConfig(w, e.Config)
+		case app.ViewEvent:
+			configurePlatformTitleBar(e)
 		case app.FrameEvent:
 			sc.deviceMetric = e.Metric
 			gtx := app.NewContext(&ops, e)

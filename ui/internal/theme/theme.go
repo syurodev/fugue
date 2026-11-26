@@ -447,7 +447,7 @@ func darkPalette() Palette {
 		Yellow: nrgba(0xB99835),
 		Green:  nrgba(0x47B161),
 		Teal:   nrgba(0x45ADA0),
-		Blue:   nrgba(0x7D99E7),
+		Blue:   nrgba(0x839EE9),
 		Violet: nrgba(0xAA8FD9),
 		Pink:   nrgba(0xD582AC),
 	}

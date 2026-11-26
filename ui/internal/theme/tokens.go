@@ -103,6 +103,10 @@ const (
 	StatusBarHeight = unit.Dp(22)
 	// RailIconSize is the icon size centered inside 24 dp rail/stripe buttons.
 	RailIconSize = unit.Dp(15)
+	// MacTrafficLightInset is the horizontal inset reserved on the left of the
+	// 32 dp Top Bar on macOS (non-fullscreen) for native Close/Minimize/Zoom
+	// traffic lights rendered inside fullSizeContentView.
+	MacTrafficLightInset = unit.Dp(72)
 	// MainSlotMinWidth is the main slot's minimum width.
 	MainSlotMinWidth = unit.Dp(520)
 	// SlotMinWidth is a regular slot's minimum width and the drawer width a

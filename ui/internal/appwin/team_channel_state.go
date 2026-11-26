@@ -239,7 +239,7 @@ func channelSender(line *client.ChannelLine, d *teamChannelData) string {
 	case "watchdog":
 		return "Watchdog"
 	default:
-		return "Fugue"
+		return appName
 	}
 }
 
