@@ -136,11 +136,78 @@ func (s *screens) seedInitialWindowMode(initGeom WindowGeometry) {
 	s.restoreNormalSize = initGeom
 }
 
-func (s *screens) handleWindowConfig(w *app.Window, cfg app.Config) {
+type windowOptioner interface {
+	Option(opts ...app.Option)
+}
+
+// handleConfigEvent applies a platform ConfigEvent to the title bar and window
+// geometry state in event-loop order.
+func (s *screens) handleConfigEvent(w windowOptioner, cfg app.Config) {
+	if s.restoreMaximizedFromMinimize(w, cfg) {
+		s.titleBar.reapplyPlatformChrome()
+		return
+	}
+	s.titleBar.applyConfig(cfg)
+	s.handleWindowConfig(w, cfg)
+	s.titleBar.reapplyPlatformChrome()
+}
+
+// restoreMaximizedFromMinimize works around Gio v0.10.3 on Wayland
+// (app/os_wayland.go): Configure case Minimized overwrites Mode=Maximized
+// with Minimized, then gio_onSurfaceEnter forces Mode=Windowed on restore
+// while gio_onToplevelConfigure ignores xdg_toplevel states. For the first
+// Windowed immediately after Minimized when the pre-minimize mode was
+// Maximized, keep the maximized window/title-bar state, skip normal restore,
+// and re-assert app.Maximized.Option() (a compositor no-op when already
+// maximized) so Gio's Mode returns to Maximized.
+func (s *screens) restoreMaximizedFromMinimize(w windowOptioner, cfg app.Config) bool {
+	if s.grid.windowMode != app.Minimized || s.preMinimizeMode != app.Maximized || cfg.Mode != app.Windowed {
+		return false
+	}
+	s.preMinimizeMode = app.Windowed
+	effective := cfg
+	effective.Mode = app.Maximized
+	s.titleBar.applyConfig(effective)
+	s.grid.setWindowMode(app.Maximized)
+	if !s.restoreNormalOnUnmaximize {
+		if norm, ok := s.normalGeometryForRestore(); ok {
+			s.restoreNormalOnUnmaximize = true
+			s.restoreNormalSize = norm
+			s.sawMaximized = true
+			s.maximizedPxSize = cfg.Size
+		}
+	}
+	if w != nil {
+		w.Option(app.Maximized.Option())
+	}
+	return true
+}
+
+func (s *screens) normalGeometryForRestore() (WindowGeometry, bool) {
+	if s.grid.loaded && s.grid.doc.Window.WidthDp > 0 && s.grid.doc.Window.HeightDp > 0 {
+		return s.grid.doc.Window, true
+	}
+	if s.grid.lastMeasuredSize.X > 0 && s.grid.lastMeasuredSize.Y > 0 {
+		return WindowGeometry{
+			WidthDp:  s.grid.lastMeasuredSize.X,
+			HeightDp: s.grid.lastMeasuredSize.Y,
+		}, true
+	}
+	return WindowGeometry{}, false
+}
+
+func (s *screens) handleWindowConfig(w windowOptioner, cfg app.Config) {
 	if s.pendingMaximize {
 		s.pendingMaximize = false
-		w.Option(app.Maximized.Option())
+		if w != nil {
+			w.Option(app.Maximized.Option())
+		}
 		return
+	}
+	if cfg.Mode == app.Minimized && s.grid.windowMode != app.Minimized {
+		s.preMinimizeMode = s.grid.windowMode
+	} else if cfg.Mode != app.Minimized {
+		s.preMinimizeMode = app.Windowed
 	}
 	s.trackUnmaximizeRestore(cfg)
 	s.grid.setWindowMode(cfg.Mode)
@@ -173,7 +240,7 @@ func (s *screens) trackUnmaximizeRestore(cfg app.Config) {
 // post-unmaximize configure, so applying Size here lands after its configure.
 // Returns true while a restore was just issued so the caller skips recording
 // the pre-restore maximized pixel size as the normal size.
-func (s *screens) applyPendingNormalRestore(w *app.Window) bool {
+func (s *screens) applyPendingNormalRestore(w windowOptioner) bool {
 	if !s.pendingNormalRestore {
 		return false
 	}
