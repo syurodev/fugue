@@ -184,6 +184,7 @@ func renderAccountsShot(t *testing.T, win *headless.Window, spec shotSpec) *imag
 	t.Helper()
 	env := newAccountsTestEnv(t, spec.light, spec.uiScale)
 	sc, opened := buildAccountsShotScreens(t, nil, spec.scene)
+	sc.osAppearance = newShotAppearanceSource(spec.light)
 	img := renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), spec.name)
 	if sc.lastErr != "" {
 		t.Fatalf("accounts shot %s recorded error: %s", spec.name, sc.lastErr)
@@ -529,6 +530,7 @@ func TestDAE18ClaudeLoginCodeBlockAndGoldens(t *testing.T) {
 	for _, spec := range claudeLoginCodeShotSpecs() {
 		env := newAccountsTestEnv(t, spec.light, spec.uiScale)
 		sc := buildClaudeLoginCodeScreens(t, spec.scene)
+		sc.osAppearance = newShotAppearanceSource(spec.light)
 		img := renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), spec.name)
 		if sc.lastErr != "" {
 			t.Fatalf("shot %s recorded error: %s", spec.name, sc.lastErr)

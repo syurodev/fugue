@@ -152,6 +152,7 @@ func assertExactProposalAnswer(t *testing.T, req *client.PendingInteraction, got
 func renderProposalShot(t *testing.T, win *headless.Window) *image.RGBA {
 	t.Helper()
 	sc, req := proposalFixture(t, nil)
+	sc.osAppearance = newShotAppearanceSource(true)
 	sc.grid.drawer = ""
 	sc.grid.drawerPresence.Snap(false)
 	sc.openSession(req.SessionID)

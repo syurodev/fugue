@@ -292,6 +292,7 @@ func renderTitleBarShots(t *testing.T) []titleBarShot {
 		}
 		manager := hostconn.NewManager(&hostconn.Config{})
 		sc, _ := newMultiWindowShotScreens(manager)
+		sc.osAppearance = newShotAppearanceSource(!spec.dark)
 		sc.titleBar = newTitleBar("linux")
 		cfg := app.Config{Title: testTitleBarTitle, Focused: true}
 		if spec.maximized {
@@ -356,6 +357,7 @@ func checkTitleBarShellGaps(t *testing.T, scale float32, light bool) {
 	}
 	env := &kit.Env{Th: &th, Sh: sh, UIScale: scale, ReducedMotion: true}
 	sc, _ := buildFUG65ShotScreens(t, shotFUG65Shell3Slot)
+	sc.osAppearance = newShotAppearanceSource(light)
 	sc.titleBar = newTitleBar("linux")
 	sc.titleBar.applyConfig(app.Config{Title: testTitleBarTitle, Focused: true})
 

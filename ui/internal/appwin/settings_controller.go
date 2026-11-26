@@ -311,11 +311,7 @@ func (s *screens) applyLivePreferences(env *kit.Env, light, dark *theme.Theme) {
 	case settings.ThemeLight:
 		env.Th = light
 	case settings.ThemeSystem:
-		if s.currentOSAppearance() == osappearance.Dark {
-			env.Th = dark
-		} else {
-			env.Th = light
-		}
+		fallthrough
 	default:
 		if s.currentOSAppearance() == osappearance.Dark {
 			env.Th = dark

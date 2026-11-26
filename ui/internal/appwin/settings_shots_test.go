@@ -169,6 +169,7 @@ func renderSettingsShot(t *testing.T, win *headless.Window, spec shotSpec) *imag
 	env := newAccountsTestEnv(t, spec.light, spec.uiScale)
 	sc := buildSettingsShotScreens(t, spec.scene)
 	if spec.scene != shotSettingsSystemUnknown {
+		sc.osAppearance = newShotAppearanceSource(spec.light)
 		if spec.light {
 			sc.settings.Prefs.Current.ThemeMode = settings.ThemeLight
 		} else {

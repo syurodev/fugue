@@ -67,6 +67,7 @@ func renderFailureShot(t *testing.T, win *headless.Window, spec shotSpec) *image
 	}
 	env := &kit.Env{Th: &th, Sh: sh, UIScale: spec.uiScale, ReducedMotion: true}
 	sc := buildFailureShotScreens(t)
+	sc.osAppearance = newShotAppearanceSource(spec.light)
 	img := renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), spec.name)
 	if sc.failure.unproved.Presence() <= 0 {
 		t.Fatalf("failure shot %s did not show the unproved-stop banner", spec.name)

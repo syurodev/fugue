@@ -35,6 +35,24 @@ func newFakeAppearanceSource(initial osappearance.Appearance) *fakeAppearanceSou
 	return &fakeAppearanceSource{cur: initial, notify: make(chan struct{}, 16)}
 }
 
+// newShotAppearanceSource returns a deterministic fake OS appearance matching
+// a golden shot's light or dark theme.
+func newShotAppearanceSource(light bool) osappearance.Source {
+	if light {
+		return newFakeAppearanceSource(osappearance.Light)
+	}
+	return newFakeAppearanceSource(osappearance.Dark)
+}
+
+// injectShotAppearance sets sc.osAppearance to match light when sc does not
+// already carry an injected Source.
+func injectShotAppearance(sc *screens, light bool) {
+	if sc == nil || sc.osAppearance != nil {
+		return
+	}
+	sc.osAppearance = newShotAppearanceSource(light)
+}
+
 func (f *fakeAppearanceSource) Current() osappearance.Appearance {
 	f.mu.Lock()
 	defer f.mu.Unlock()

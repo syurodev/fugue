@@ -133,6 +133,7 @@ func renderSlotGridShot(t *testing.T, _ *headless.Window, spec shotSpec) *image.
 	}
 	env := &kit.Env{Th: &th, Sh: sh, UIScale: spec.uiScale, ReducedMotion: true}
 	sc := buildSlotGridShotScreens(t, spec.scene)
+	sc.osAppearance = newShotAppearanceSource(spec.light)
 	// The wide scenes show the multi-column grid, which needs room for the
 	// rail, the sidebar, the main column and two regular columns at their
 	// minimums; the narrow scene is under the two-column minimum, so the

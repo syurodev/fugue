@@ -2,6 +2,9 @@
 
 package osappearance
 
+/*
+#include <stdint.h>
+*/
 import "C"
 
 import (

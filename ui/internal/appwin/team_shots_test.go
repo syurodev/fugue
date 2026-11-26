@@ -123,6 +123,7 @@ func renderTeamShot(t *testing.T, spec shotSpec) *image.RGBA {
 	}
 	env := &kit.Env{Th: &th, Sh: sh, UIScale: 1, ReducedMotion: true}
 	sc := teamShotScreens(t, spec.scene)
+	sc.osAppearance = newShotAppearanceSource(spec.light)
 	img := renderShotFrames(t, win, env, sc, size, spec.name)
 	if sc.lastErr != "" || isUniformRGBA(img) {
 		t.Fatalf("invalid shot %s: %s", spec.name, sc.lastErr)

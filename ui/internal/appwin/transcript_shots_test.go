@@ -176,6 +176,7 @@ func renderTranscriptShot(t *testing.T, win *headless.Window, spec shotSpec) *im
 	t.Helper()
 	env := newAccountsTestEnv(t, spec.light, spec.uiScale)
 	sc := buildTranscriptShotScreens(t, spec.scene)
+	sc.osAppearance = newShotAppearanceSource(spec.light)
 	img := renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), spec.name)
 	if sc.lastErr != "" {
 		t.Fatalf("transcript shot %s recorded error: %s", spec.name, sc.lastErr)

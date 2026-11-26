@@ -143,6 +143,7 @@ func renderAppShotSized(t *testing.T, win *headless.Window, spec shotSpec, sc *s
 		th = theme.Light(sh)
 	}
 	env := &kit.Env{Th: &th, Sh: sh, UIScale: spec.uiScale, ReducedMotion: true}
+	injectShotAppearance(sc, spec.light)
 	img := renderShotFrames(t, win, env, sc, size, spec.name)
 	if sc.lastErr != "" {
 		t.Fatalf("shot %s recorded screen error: %s", spec.name, sc.lastErr)
@@ -152,6 +153,7 @@ func renderAppShotSized(t *testing.T, win *headless.Window, spec shotSpec, sc *s
 
 func renderShotFrames(t *testing.T, win *headless.Window, env *kit.Env, sc *screens, size image.Point, name string) *image.RGBA {
 	t.Helper()
+	injectShotAppearance(sc, env.Th == nil || env.Th.Chrome().CanvasBg.R >= 128)
 	router := new(input.Router)
 	var ops op.Ops
 	now := time.Unix(1_700_000_000, 0)

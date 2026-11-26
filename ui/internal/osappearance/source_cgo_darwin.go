@@ -11,11 +11,7 @@ package osappearance
 extern void fugueOnAppearanceChange(uintptr_t handle, int code);
 extern void fugueReleaseAppearanceHandle(uintptr_t handle);
 
-typedef struct {
-	uintptr_t handle;
-	CFTypeRef observer;
-	BOOL stopped;
-} FugueAppearanceWatch;
+static int fugueAppearanceKVOContext;
 
 static int fugueReadAppearance(void) {
 	if (NSApp == nil) {
@@ -38,6 +34,46 @@ static int fugueReadAppearance(void) {
 	return 0;
 }
 
+@interface FugueAppearanceObserver : NSObject
+@property (nonatomic, assign) uintptr_t handle;
+@property (nonatomic, assign) BOOL stopped;
+@property (nonatomic, assign) BOOL observing;
+@end
+
+@implementation FugueAppearanceObserver
+- (void)observeValueForKeyPath:(NSString *)keyPath
+                      ofObject:(id)object
+                        change:(NSDictionary<NSKeyValueChangeKey, id> *)change
+                       context:(void *)context {
+	(void)keyPath;
+	(void)object;
+	(void)change;
+	if (context == &fugueAppearanceKVOContext) {
+		if (!self.stopped) {
+			if ([NSThread isMainThread]) {
+				fugueOnAppearanceChange(self.handle, fugueReadAppearance());
+			} else {
+				dispatch_async(dispatch_get_main_queue(), ^{
+					@autoreleasepool {
+						if (!self.stopped) {
+							fugueOnAppearanceChange(self.handle, fugueReadAppearance());
+						}
+					}
+				});
+			}
+		}
+		return;
+	}
+	[super observeValueForKeyPath:keyPath ofObject:object change:change context:context];
+}
+@end
+
+typedef struct {
+	uintptr_t handle;
+	CFTypeRef observer;
+	BOOL stopped;
+} FugueAppearanceWatch;
+
 static uintptr_t fugueStartAppearanceWatch(uintptr_t handle) {
 	FugueAppearanceWatch *watch = (FugueAppearanceWatch *)calloc(1, sizeof(FugueAppearanceWatch));
 	if (watch == NULL) {
@@ -46,23 +82,18 @@ static uintptr_t fugueStartAppearanceWatch(uintptr_t handle) {
 	watch->handle = handle;
 	dispatch_async(dispatch_get_main_queue(), ^{
 		@autoreleasepool {
-			if (watch->stopped) {
+			if (watch->stopped || NSApp == nil) {
 				return;
 			}
-			fugueOnAppearanceChange(watch->handle, fugueReadAppearance());
-			id obs = [[NSDistributedNotificationCenter defaultCenter]
-				addObserverForName:@"AppleInterfaceThemeChangedNotification"
-				object:nil
-				queue:NSOperationQueue.mainQueue
-				usingBlock:^(NSNotification *note) {
-					(void)note;
-					if (!watch->stopped) {
-						fugueOnAppearanceChange(watch->handle, fugueReadAppearance());
-					}
-				}];
-			if (obs != nil) {
-				watch->observer = CFRetain((CFTypeRef)obs);
-			}
+			FugueAppearanceObserver *obs = [[FugueAppearanceObserver alloc] init];
+			obs.handle = watch->handle;
+			obs.stopped = NO;
+			obs.observing = YES;
+			watch->observer = (CFTypeRef)obs;
+			[NSApp addObserver:obs
+			        forKeyPath:@"effectiveAppearance"
+			           options:(NSKeyValueObservingOptionNew | NSKeyValueObservingOptionInitial)
+			           context:&fugueAppearanceKVOContext];
 		}
 	});
 	return (uintptr_t)watch;
@@ -77,7 +108,14 @@ static void fugueStopAppearanceWatch(uintptr_t ptr) {
 		@autoreleasepool {
 			watch->stopped = YES;
 			if (watch->observer != NULL) {
-				[[NSDistributedNotificationCenter defaultCenter] removeObserver:(__bridge id)watch->observer];
+				FugueAppearanceObserver *obs = (__bridge FugueAppearanceObserver *)watch->observer;
+				obs.stopped = YES;
+				if (obs.observing && NSApp != nil) {
+					[NSApp removeObserver:obs
+					           forKeyPath:@"effectiveAppearance"
+					              context:&fugueAppearanceKVOContext];
+					obs.observing = NO;
+				}
 				CFRelease(watch->observer);
 				watch->observer = NULL;
 			}

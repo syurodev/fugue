@@ -90,6 +90,7 @@ func renderVaultShot(t *testing.T, win *headless.Window, spec shotSpec) *image.R
 	}
 	env := &kit.Env{Th: &th, Sh: sh, UIScale: spec.uiScale, ReducedMotion: true}
 	sc := buildVaultShotScreens(spec.scene)
+	sc.osAppearance = newShotAppearanceSource(spec.light)
 	img := renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), spec.name)
 	if !sc.vaultGate.active(sc.vault) {
 		t.Fatalf("vault shot %s failed to render active vault gate", spec.name)
