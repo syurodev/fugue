@@ -115,12 +115,12 @@ func (h *titleBarHarness) tap(p f32.Point, clicks int) {
 func TestTitleBarActions(t *testing.T) {
 	t.Parallel()
 	y := float32(theme.TopBarHeight) / 2
-	// With 28 dp controls, 4 dp gaps, and 8 dp right padding (100 dp cluster)
-	// in a 900 dp bar, the three button centers sit at 814, 846, and 878.
+	// With 24 dp controls, 4 dp gaps, and 8 dp right padding (88 dp cluster)
+	// in a 900 dp bar, the three button centers sit at 824, 852, and 880.
 	const (
-		minX   = 814
-		maxX   = 846
-		closeX = 878
+		minX   = 824
+		maxX   = 852
+		closeX = 880
 	)
 	for _, tc := range []struct {
 		name      string
@@ -158,10 +158,11 @@ func TestTitleBarMoveAction(t *testing.T) {
 		label string
 		x     float32
 	}{
-		{"minimize button", 814},
-		{"inter-button gap", 830},
-		{"maximize button", 846},
-		{"close button", 878},
+		{"minimize button", 824},
+		{"first inter-button gap", 838},
+		{"maximize button", 852},
+		{"second inter-button gap", 866},
+		{"close button", 880},
 		{"right padding", 896},
 	} {
 		if act, ok := h.router.ActionAt(f32.Pt(tc.x, y)); ok && act == system.ActionMove {
@@ -171,8 +172,8 @@ func TestTitleBarMoveAction(t *testing.T) {
 
 	var ops op.Ops
 	gtx := layout.Context{Ops: &ops, Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}}
-	if m := h.bar.computeMetrics(&gtx, nil); m.csdW != 100 {
-		t.Errorf("linux CSD cluster width = %d, want 100", m.csdW)
+	if m := h.bar.computeMetrics(&gtx, nil); m.csdW != 88 {
+		t.Errorf("linux CSD cluster width = %d, want 88", m.csdW)
 	}
 	for _, tc := range []struct {
 		goos string
@@ -197,7 +198,65 @@ func TestTitleBarShots(t *testing.T) {
 			t.Fatalf("title bar shot %s rendered a blank image", shot.name)
 		}
 		shottest.Compare(t, shot.name, shot.img)
+		assertCSDGlyphBounds(t, shot)
 	}
+}
+
+func assertCSDGlyphBounds(t *testing.T, shot titleBarShot) {
+	t.Helper()
+	w := shot.img.Bounds().Dx()
+	barH := int(theme.TopBarHeight)
+	btnW := int(theme.ControlSM)
+	gap := int(theme.SpaceXS)
+	padR := int(theme.SpaceMD)
+	csdW := 3*btnW + 2*gap + padR
+	closeBox := glyphBoundingBox(shot.img, image.Rect(w-padR-btnW, 0, w-padR, barH))
+	maxBox := glyphBoundingBox(shot.img, image.Rect(w-padR-2*btnW-gap, 0, w-padR-btnW-gap, barH))
+	minBox := glyphBoundingBox(shot.img, image.Rect(w-csdW, 0, w-csdW+btnW, barH))
+	themeX1 := w - csdW - gap - btnW - gap
+	themeBox := glyphBoundingBox(shot.img, image.Rect(themeX1-btnW, 0, themeX1, barH))
+
+	assertGlyphWithin(t, shot.name, "csd-minimize", minBox, themeBox, 12, true)
+	assertGlyphWithin(t, shot.name, "csd-close", closeBox, themeBox, 12, true)
+	if shot.name == "titlebar-light" || shot.name == "titlebar-normal-dark" {
+		assertGlyphWithin(t, shot.name, "csd-maximize", maxBox, themeBox, 12, true)
+		return
+	}
+	// Restore uses IconCopy at IconSM (14 dp), spanning 14x14 px (smaller than 16 dp IconMD).
+	assertGlyphWithin(t, shot.name, "csd-restore", maxBox, themeBox, int(theme.IconSM), false)
+}
+
+func assertGlyphWithin(t *testing.T, shotName, label string, box, themeBox image.Point, maxSide int, compareTheme bool) {
+	t.Helper()
+	if box.X == 0 || box.Y == 0 {
+		t.Fatalf("%s %s glyph rendered empty: %v", shotName, label, box)
+	}
+	if box.X > maxSide || box.Y > maxSide {
+		t.Errorf("%s %s glyph box = %v, want <= %dx%d px at scale 1.0", shotName, label, box, maxSide, maxSide)
+	}
+	if compareTheme && (box.X > themeBox.X+1 || box.Y > themeBox.Y+1) {
+		t.Errorf("%s %s glyph box = %v exceeds theme icon box %v by >1 px", shotName, label, box, themeBox)
+	}
+}
+
+func glyphBoundingBox(img *image.RGBA, area image.Rectangle) image.Point {
+	bg := img.RGBAAt(0, 0)
+	minX, minY := area.Max.X, area.Max.Y
+	maxX, maxY := area.Min.X-1, area.Min.Y-1
+	for y := area.Min.Y; y < area.Max.Y; y++ {
+		for x := area.Min.X; x < area.Max.X; x++ {
+			if img.RGBAAt(x, y) != bg {
+				minX = min(minX, x)
+				minY = min(minY, y)
+				maxX = max(maxX, x)
+				maxY = max(maxY, y)
+			}
+		}
+	}
+	if maxX < minX || maxY < minY {
+		return image.Point{}
+	}
+	return image.Pt(maxX-minX+1, maxY-minY+1)
 }
 
 type titleBarShot struct {

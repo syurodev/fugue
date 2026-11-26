@@ -161,7 +161,7 @@ type titleBarMetrics struct {
 }
 
 func csdButtonMetrics(gtx *layout.Context) (btnSide, gap, totalW int) {
-	btnSide = gtx.Dp(theme.ControlMD)
+	btnSide = gtx.Dp(theme.ControlSM)
 	gap = gtx.Dp(theme.SpaceXS)
 	padR := gtx.Dp(theme.SpaceMD)
 	totalW = 3*btnSide + 2*gap + padR
@@ -388,7 +388,7 @@ func (b *titleBar) toggleMaximize() system.Action {
 }
 
 // layoutButtons lays out minimize, maximize or restore, and close, right
-// aligned as 28×28 dp ghost buttons with 16 dp Lucide icons centered
+// aligned as 24×24 dp ghost buttons with 14 dp Lucide icons centered
 // vertically in the 32 dp Top Bar (FUG-97). Hover and pressed states are the
 // kit washes; close hovers on the danger tint, as the kit's danger button does.
 func (b *titleBar) layoutButtons(env *kit.Env, gtx *layout.Context, sc *screens, h int) layout.Dimensions {
@@ -422,7 +422,7 @@ func (b *titleBar) layoutButton(env *kit.Env, gtx *layout.Context, sc *screens, 
 	local := *gtx
 	local.Constraints = layout.Exact(size)
 	radius := gtx.Dp(theme.RadiusMD)
-	iconPx := gtx.Dp(theme.IconMD)
+	iconPx := gtx.Dp(theme.IconSM)
 	click.Layout(local, func(g layout.Context) layout.Dimensions {
 		fg, bg := c.Fg, c.AppBg
 		switch {
@@ -441,7 +441,7 @@ func (b *titleBar) layoutButton(env *kit.Env, gtx *layout.Context, sc *screens, 
 		off := op.Offset(image.Pt((size.X-iconPx)/2, (size.Y-iconPx)/2)).Push(g.Ops)
 		iconGtx := g
 		iconGtx.Constraints = layout.Exact(image.Pt(iconPx, iconPx))
-		_, err := env.Icon(&iconGtx, icon, theme.IconMD, fg)
+		_, err := env.Icon(&iconGtx, icon, theme.IconSM, fg)
 		off.Pop()
 		if sc != nil {
 			sc.fail(err)
