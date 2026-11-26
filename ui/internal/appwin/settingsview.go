@@ -7,6 +7,7 @@ import (
 	"gioui.org/layout"
 
 	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/osappearance"
 	"github.com/syurodev/fugue/ui/internal/settings"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
@@ -14,6 +15,8 @@ import (
 const (
 	tabForms = "forms"
 	tabRaw   = "raw"
+
+	systemAppearanceUnknownHelper = "Couldn't read the system appearance, so Light is used."
 )
 
 type intFieldWidgets struct {
@@ -197,14 +200,24 @@ func (v *settingsView) layoutThemeModeControl(gtx *layout.Context, env *kit.Env,
 		themeIdx = 2
 	}
 	pr := kit.SegmentedProps{Options: themeOpts, Selected: themeIdx}
-	changed, next, segErr := v.themeSeg.Layout(env, gtx, pr)
-	sc.fail(segErr)
-	if changed && next >= 0 && next < len(themeOpts) {
-		updated := cur
-		updated.ThemeMode = settings.ThemeMode(themeOpts[next].ID)
-		sc.updatePreferences(updated)
+	layoutSeg := func(gtx *layout.Context) layout.Dimensions {
+		changed, next, segErr := v.themeSeg.Layout(env, gtx, pr)
+		sc.fail(segErr)
+		if changed && next >= 0 && next < len(themeOpts) {
+			updated := cur
+			updated.ThemeMode = settings.ThemeMode(themeOpts[next].ID)
+			sc.updatePreferences(updated)
+		}
+		return v.themeSeg.Measure(env, gtx, pr)
 	}
-	return v.themeSeg.Measure(env, gtx, pr)
+	if settings.NormalizeThemeMode(cur.ThemeMode) == settings.ThemeSystem && sc.currentOSAppearance() == osappearance.Unknown {
+		return layout.Flex{Axis: layout.Vertical}.Layout(*gtx,
+			rigidWidget(layoutSeg),
+			spacerH(theme.SpaceXS),
+			rigidLabel(env, theme.TypeSmall(), env.Th.Chrome().FgMuted, systemAppearanceUnknownHelper),
+		)
+	}
+	return layoutSeg(gtx)
 }
 
 func (v *settingsView) layoutUIScaleControl(gtx *layout.Context, env *kit.Env, sc *screens, cur settings.Preferences) layout.Dimensions {

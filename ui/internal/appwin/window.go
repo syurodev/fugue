@@ -24,6 +24,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/inbox"
 	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/osappearance"
 	"github.com/syurodev/fugue/ui/internal/secrets"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/settings"
@@ -43,6 +44,8 @@ type Options struct {
 	Topics []string
 	// Clock drives reconnect backoff and the startup layout wait; nil uses RealClock.
 	Clock hostconn.Clock
+	// Appearance provides the OS light/dark preference; nil uses osappearance.New().
+	Appearance osappearance.Source
 }
 
 // updateQueue is the bridge from the connection goroutines to the window
@@ -93,25 +96,32 @@ func Run(ctx context.Context, opts Options) error {
 
 	buffered, primaryRecord := awaitInitialAppState(runCtx, updates, clk, initialLayoutWait)
 
+	appearance := opts.Appearance
+	if appearance == nil {
+		appearance = osappearance.New()
+	}
+
 	var wg sync.WaitGroup
 	var coord *multiWindow
 	coord = newMultiWindow(m, func(windowID string, record *client.AppStateWindow, doc *LayoutDoc) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if winErr := runWindow(runCtx, m, coord, windowID, record, doc, nil); winErr != nil {
+			if winErr := runWindow(runCtx, m, coord, appearance, windowID, record, doc, nil); winErr != nil {
 				slog.Error("a secondary window exited with an error", "window_id", windowID, "error", winErr)
 			}
 		}()
 	})
+	watchDone := startAppearanceWatcher(runCtx, appearance, coord)
 	ready := make(chan struct{})
 	feederDone := startFeeder(runCtx, ready, buffered, updates, coord)
 	defer func() {
 		cancel()
 		<-feederDone
+		<-watchDone
 	}()
 
-	err := runWindow(runCtx, m, coord, "", primaryRecord, nil, ready)
+	err := runWindow(runCtx, m, coord, appearance, "", primaryRecord, nil, ready)
 	wg.Wait()
 	return err
 }

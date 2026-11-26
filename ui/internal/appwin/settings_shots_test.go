@@ -10,6 +10,7 @@ import (
 
 	"github.com/syurodev/fugue/ui/internal/glwin"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
+	"github.com/syurodev/fugue/ui/internal/osappearance"
 	"github.com/syurodev/fugue/ui/internal/session"
 	"github.com/syurodev/fugue/ui/internal/settings"
 	"github.com/syurodev/fugue/ui/internal/shottest"
@@ -20,6 +21,7 @@ import (
 const (
 	shotSettings              = "settings"
 	shotSettingsStates        = "settings-states"
+	shotSettingsSystemUnknown = "settings-system-unknown"
 	shotSettingsRawClean      = "settings-raw-clean"
 	shotSettingsRawErrors     = "settings-raw-errors"
 	shotSettingsRawConflict   = "settings-raw-conflict"
@@ -66,6 +68,13 @@ func settingsShotSpecs() []shotSpec {
 		shotSettingsRawConflict,
 		shotSettingsPendingPolicy,
 	)
+}
+
+func settingsSystemUnknownShotSpecs() []shotSpec {
+	return []shotSpec{
+		{name: shotSettingsSystemUnknown + "-" + testThemeLight + "-ui100", scene: shotSettingsSystemUnknown, light: true, uiScale: settings.Scale100},
+		{name: shotSettingsSystemUnknown + "-" + testThemeDark + "-ui100", scene: shotSettingsSystemUnknown, light: false, uiScale: settings.Scale100},
+	}
 }
 
 func buildSettingsShotScreens(t *testing.T, scene string) *screens {
@@ -119,6 +128,9 @@ func buildSettingsShotScreens(t *testing.T, scene string) *screens {
 
 func applySettingsShotScene(sc *screens, scene string) {
 	switch scene {
+	case shotSettingsSystemUnknown:
+		sc.osAppearance = newFakeAppearanceSource(osappearance.Unknown)
+		sc.settings.Prefs.Current.ThemeMode = settings.ThemeSystem
 	case shotSettingsStates:
 		sc.settings.Draft.IdleDetachSeconds = 120
 		sc.settings.Draft.ApprovalMode = testApprovalAsk
@@ -156,10 +168,12 @@ func renderSettingsShot(t *testing.T, win *headless.Window, spec shotSpec) *imag
 	t.Helper()
 	env := newAccountsTestEnv(t, spec.light, spec.uiScale)
 	sc := buildSettingsShotScreens(t, spec.scene)
-	if spec.light {
-		sc.settings.Prefs.Current.ThemeMode = settings.ThemeLight
-	} else {
-		sc.settings.Prefs.Current.ThemeMode = settings.ThemeDark
+	if spec.scene != shotSettingsSystemUnknown {
+		if spec.light {
+			sc.settings.Prefs.Current.ThemeMode = settings.ThemeLight
+		} else {
+			sc.settings.Prefs.Current.ThemeMode = settings.ThemeDark
+		}
 	}
 	sc.settings.Prefs.Current.UIScale = spec.uiScale
 	img := renderShotFrames(t, win, env, sc, image.Pt(shotWindowW, shotWindowH), spec.name)
@@ -202,5 +216,31 @@ func TestSettingsShotsRender(t *testing.T) {
 			!imagesDifferRGBA(rendered[scene+"-light-ui100"], rendered[scene+"-light-ui125"]) {
 			t.Fatalf("%s 90%%/100%%/125%% shots must differ", scene)
 		}
+	}
+}
+
+// TestSettingsSystemUnknownShots verifies the Settings System+Unknown golden
+// PNGs (light and dark) with the helper text rendered below the segmented
+// control.
+func TestSettingsSystemUnknownShots(t *testing.T) {
+	t.Parallel()
+	win, err := glwin.Open(shotWindowW, shotWindowH)
+	if err != nil {
+		t.Fatalf("open headless window: %v", err)
+	}
+	rendered := map[string]*image.RGBA{}
+	for _, spec := range settingsSystemUnknownShotSpecs() {
+		img := renderSettingsShot(t, win, spec)
+		shottest.Compare(t, spec.name, img)
+		if isUniformRGBA(img) {
+			t.Fatalf("settings shot %s rendered uniform/blank image", spec.name)
+		}
+		rendered[spec.name] = img
+	}
+	if !imagesDifferRGBA(
+		rendered[shotSettingsSystemUnknown+"-"+testThemeLight+"-ui100"],
+		rendered[shotSettingsSystemUnknown+"-"+testThemeDark+"-ui100"],
+	) {
+		t.Fatalf("%s light and dark shots are identical", shotSettingsSystemUnknown)
 	}
 }
