@@ -394,13 +394,13 @@ func toggleTheme(gtx *layout.Context, env *kit.Env, sc *screens, light, dark *th
 			return
 		}
 		if k, isKey := ke.(key.Event); isKey && k.State == key.Press {
-			if env.Th == light {
-				env.Th = dark
-				sc.settings.Prefs.Current.ThemeMode = settings.ThemeDark
-			} else {
+			darkNow := env.Th != light
+			if darkNow {
 				env.Th = light
-				sc.settings.Prefs.Current.ThemeMode = settings.ThemeLight
+			} else {
+				env.Th = dark
 			}
+			sc.toggleThemeFromUI(env, darkNow)
 		}
 	}
 }

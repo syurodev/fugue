@@ -24,11 +24,18 @@ const (
 )
 
 func (s *screens) toggleThemeFromUI(env *kit.Env, darkNow bool) {
+	mode := settings.ThemeDark
 	if darkNow {
-		s.settings.Prefs.Current.ThemeMode = settings.ThemeLight
-	} else {
-		s.settings.Prefs.Current.ThemeMode = settings.ThemeDark
+		mode = settings.ThemeLight
 	}
+	if !s.settings.Prefs.Loaded {
+		s.settings.Prefs.Current.ThemeMode = mode
+		env.Keep()
+		return
+	}
+	next := s.settings.Prefs.Current
+	next.ThemeMode = mode
+	s.updatePreferences(next)
 	env.Keep()
 }
 
@@ -137,6 +144,24 @@ func (s *screens) rightStripeCompanionItems() []rightStripeItem {
 	}
 }
 
+// pollRightStripe drains pending Right Stripe companion and folded-slot clicks
+// before the grid lays out so same-frame slot/drawer updates land immediately
+// even under ReducedMotion.
+func (s *screens) pollRightStripe(gtx *layout.Context, plan PlanFoldResult) {
+	for _, kind := range [...]SlotKind{KindInbox, KindAccounts, KindSecrets} {
+		if s.grid.stripeBtn(kind).PollClick(gtx, false, false) {
+			s.toggleCompanion(kind)
+		}
+	}
+	if plan.FoldedCols > 0 {
+		for _, p := range s.grid.foldedCells(plan) {
+			if ensureIconButton(&s.grid.tabBtns, p.key()).PollClick(gtx, false, false) {
+				s.toggleFoldedDrawer(p)
+			}
+		}
+	}
+}
+
 // layoutRightStripe draws the permanent 30 dp Right Stripe (FUG-94) on AppBg:
 // companion tool-window toggles (Approvals, Accounts, Secrets) at the top, and
 // folded slot tabs at the bottom when narrow-window columns fold.
@@ -160,18 +185,14 @@ func (s *screens) layoutRightStripeCompanions(gtx *layout.Context, env *kit.Env,
 			Icon: it.icon, Label: it.tip, Variant: kit.IconButtonGhost, Size: kit.SizeSM,
 			Toggled: s.hasSlotKind(it.kind),
 		}
-		var clicked bool
 		var err error
 		env.Offset(gtx, image.Pt(x, y), func(gtx *layout.Context) {
-			clicked, err = btn.Layout(env, gtx, &props)
+			_, err = btn.Layout(env, gtx, &props)
 			if it.warnDot {
 				drawStatusBadgeDot(gtx, env, btnW, env.Th.Status().Warning)
 			}
 		})
 		s.fail(err)
-		if clicked {
-			s.toggleCompanion(it.kind)
-		}
 		y += btnW + gap
 	}
 	return y
@@ -200,15 +221,11 @@ func (s *screens) layoutRightStripeFolded(gtx *layout.Context, env *kit.Env, pla
 			Icon: slotIcon(ref.Kind), Label: slotTitle(s, ref),
 			Variant: kit.IconButtonGhost, Size: kit.SizeSM, Toggled: s.grid.drawer == p.key(),
 		}
-		var clicked bool
 		var err error
 		env.Offset(gtx, image.Pt(x, curY), func(gtx *layout.Context) {
-			clicked, err = btn.Layout(env, gtx, &props)
+			_, err = btn.Layout(env, gtx, &props)
 		})
 		s.fail(err)
-		if clicked {
-			s.toggleFoldedDrawer(p)
-		}
 		curY += btnW + gap
 	}
 }

@@ -272,7 +272,9 @@ func (g *slotGrid) foldedCells(plan PlanFoldResult) []Pos {
 // layoutDrawer slides the drawer slot out over the grid on Smooth (§5.3,
 // FUG-94) right next to the permanent Right Stripe as an 8 dp rounded island.
 func (g *slotGrid) layoutDrawer(gtx *layout.Context, env *kit.Env, sc *screens, area image.Rectangle) {
-	if g.drawerPresence.Advance(env.DT()) {
+	if env.ReducedMotion {
+		g.drawerPresence.Snap(g.drawerPresence.Shown())
+	} else if g.drawerPresence.Advance(env.DT()) {
 		env.Keep()
 	}
 	if !g.drawerPresence.Visible() {

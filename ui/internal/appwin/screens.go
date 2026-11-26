@@ -244,12 +244,7 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 // hasSlotKind reports whether a regular slot of the kind is open, the
 // Right Stripe and Top Bar icons' active state.
 func (s *screens) hasSlotKind(kind SlotKind) bool {
-	for _, p := range regularCells(s.grid.doc) {
-		if slot, _ := slotAt(s.grid.doc, p); slot.Ref.Kind == kind {
-			return true
-		}
-	}
-	return false
+	return s.grid.hasRegularSlotKind(kind)
 }
 
 // viewFor returns the session's scroll state, building it on first use. A new

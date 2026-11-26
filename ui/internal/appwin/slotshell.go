@@ -3,6 +3,7 @@ package appwin
 import (
 	"image"
 
+	"gioui.org/io/event"
 	"gioui.org/io/key"
 	"gioui.org/layout"
 	"gioui.org/op"
@@ -115,8 +116,20 @@ func (s *screens) toggleCompanion(kind SlotKind) {
 // width-driven sidebar fold removes the sidebar before the grid measures.
 func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dimensions {
 	plan := s.planShell(gtx)
-	sidebarOpen := s.pollRailAndSidebar(gtx, plan.TempSidebarFolded)
-	openProg, fadeProg := s.stepSidebarOpen(env, sidebarOpen, plan.TempSidebarFolded)
+	s.pollRailAndSidebar(gtx, plan.TempSidebarFolded)
+	s.pollRightStripe(gtx, plan)
+	plan = s.planShell(gtx)
+
+	sidebarOpen := s.sidebarVisible() && !plan.TempSidebarFolded
+	openProg, fadeProg, tempFoldChanged := s.stepSidebarOpen(env, sidebarOpen, plan.TempSidebarFolded)
+	overlayProg := s.stepTempSidebar(env, plan.TempSidebarFolded)
+	railActive := sidebarOpen || (plan.TempSidebarFolded && s.grid.tempSidebarPresence.Shown())
+	if tempFoldChanged || s.grid.snapRailNext {
+		s.grid.snapRailNext = false
+		for item, btn := range s.grid.railBtns {
+			btn.SnapToggled(railActive && s.grid.rail == item)
+		}
+	}
 
 	totalW, totalH := gtx.Constraints.Max.X, gtx.Constraints.Max.Y
 	railW := min(gtx.Dp(theme.RailWidth), totalW)
@@ -127,7 +140,7 @@ func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dime
 
 	railGtx := *gtx
 	railGtx.Constraints = layout.Constraints{Min: image.Pt(railW, 0), Max: image.Pt(railW, totalH)}
-	s.layoutRail(&railGtx, env, sidebarOpen)
+	s.layoutRail(&railGtx, env, railActive)
 	s.layoutAnimatedSidebar(gtx, env, railW, maxSideW, sideW, totalH, openProg, fadeProg)
 
 	gridX := railW + sideW + scaledPx(gutter, openProg)
@@ -137,7 +150,11 @@ func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dime
 		local.Constraints = layout.Constraints{Min: image.Pt(gridW, 0), Max: image.Pt(gridW, totalH)}
 		s.layoutGridContainer(&local, env, plan)
 	})
+	if plan.TempSidebarFolded && s.grid.tempSidebarPresence.Visible() {
+		s.layoutOverlaySidebar(gtx, env, railW, maxSideW, totalH, overlayProg)
+	}
 	if rightW > 0 {
+		plan = s.planShell(gtx)
 		env.Offset(gtx, image.Pt(totalW-rightW, 0), func(gtx *layout.Context) {
 			local := *gtx
 			local.Constraints = layout.Constraints{Min: image.Pt(rightW, 0), Max: image.Pt(rightW, totalH)}
@@ -147,45 +164,60 @@ func (s *screens) layoutShellBody(gtx *layout.Context, env *kit.Env) layout.Dime
 	return layout.Dimensions{Size: image.Pt(totalW, totalH)}
 }
 
-func (s *screens) pollRailAndSidebar(gtx *layout.Context, tempFolded bool) bool {
+func (s *screens) pollRailAndSidebar(gtx *layout.Context, tempFolded bool) {
 	for _, item := range []railItem{railChat, railTeam, railModules} {
 		if s.grid.railBtn(item).PollClick(gtx, false, false) {
-			s.handleRailClick(item, tempFolded)
+			s.handleRailClick(gtx, item, tempFolded)
 		}
 	}
-	return s.sidebarVisible() && !tempFolded
 }
 
-func (s *screens) handleRailClick(item railItem, tempFolded bool) {
+func (s *screens) handleRailClick(gtx *layout.Context, item railItem, tempFolded bool) {
 	if s.grid.rail == item {
-		shown := s.sidebarVisible() && !tempFolded
-		if s.grid.doc.SidebarCollapsed == shown {
+		if tempFolded {
+			s.grid.tempSidebarPresence.Show(!s.grid.tempSidebarPresence.Shown())
+			return
+		}
+		if s.grid.doc.SidebarCollapsed {
+			s.expandSidebarFromRail(gtx)
 			return
 		}
 		doc := cloneLayout(s.grid.doc)
-		doc.SidebarCollapsed = shown
+		doc.SidebarCollapsed = true
 		s.grid.edited(doc)
 		return
 	}
 	s.grid.selectRail(item)
 	if !s.sidebarVisible() {
-		doc := cloneLayout(s.grid.doc)
-		doc.SidebarCollapsed = false
-		s.grid.edited(doc)
+		s.expandSidebarFromRail(gtx)
+		return
+	}
+	if tempFolded {
+		s.grid.tempSidebarPresence.Show(true)
 	}
 }
 
-func (s *screens) stepSidebarOpen(env *kit.Env, sidebarOpen, tempFolded bool) (openProg, fadeProg float32) {
+func (s *screens) expandSidebarFromRail(gtx *layout.Context) {
+	doc := cloneLayout(s.grid.doc)
+	doc.SidebarCollapsed = false
+	s.grid.edited(doc)
+	if s.planShell(gtx).TempSidebarFolded {
+		s.grid.tempSidebarPresence.Show(true)
+	}
+}
+
+func (s *screens) stepSidebarOpen(env *kit.Env, sidebarOpen, tempFolded bool) (openProg, fadeProg float32, tempFoldChanged bool) {
 	target := float32(0)
 	if sidebarOpen {
 		target = 1
 	}
-	snap := env.ReducedMotion || tempFolded || s.grid.wasTempFolded != tempFolded
+	tempFoldChanged = s.grid.wasTempFolded != tempFolded
+	snap := env.ReducedMotion || tempFolded || tempFoldChanged
 	s.grid.wasTempFolded = tempFolded
 	if snap {
 		s.grid.sidebarOpenF.Snap(target)
 		s.grid.sidebarFadeF.Snap(target)
-		return target, target
+		return target, target, tempFoldChanged
 	}
 	openProg = s.grid.sidebarOpenF.Follow(target, env.DT())
 	if s.grid.sidebarOpenF.Moving() {
@@ -200,23 +232,53 @@ func (s *screens) stepSidebarOpen(env *kit.Env, sidebarOpen, tempFolded bool) (o
 	if s.grid.sidebarFadeF.Moving() {
 		env.Keep()
 	}
-	return openProg, fadeProg
+	return openProg, fadeProg, tempFoldChanged
+}
+
+func (s *screens) stepTempSidebar(env *kit.Env, tempFolded bool) float32 {
+	if !tempFolded {
+		s.grid.tempSidebarPresence.Snap(false)
+		return 0
+	}
+	if env.ReducedMotion {
+		s.grid.tempSidebarPresence.Snap(s.grid.tempSidebarPresence.Shown())
+	} else if s.grid.tempSidebarPresence.Advance(env.DT()) {
+		env.Keep()
+	}
+	return s.grid.tempSidebarPresence.Progress()
 }
 
 func (s *screens) layoutAnimatedSidebar(gtx *layout.Context, env *kit.Env, railW, maxSideW, sideW, colH int, openProg, fadeProg float32) {
 	if sideW <= 0 || openProg <= 0 || fadeProg <= 0 || colH <= 0 {
 		return
 	}
+	s.drawSidebarIsland(gtx, env, railW, maxSideW, sideW, colH, min(max(fadeProg, 0), 1), false)
+}
+
+func (s *screens) layoutOverlaySidebar(gtx *layout.Context, env *kit.Env, railW, maxSideW, colH int, overlayProg float32) {
+	sideW := scaledPx(maxSideW, overlayProg)
+	if sideW <= 0 || overlayProg <= 0 || colH <= 0 {
+		return
+	}
+	s.drawSidebarIsland(gtx, env, railW, maxSideW, sideW, colH, 1, true)
+}
+
+func (s *screens) drawSidebarIsland(gtx *layout.Context, env *kit.Env, railW, maxSideW, sideW, colH int, alpha float32, overlay bool) {
 	env.Offset(gtx, image.Pt(railW, 0), func(gtx *layout.Context) {
 		box := image.Rect(0, 0, sideW, colH)
 		radius := gtx.Dp(theme.RadiusIsland)
+		if overlay {
+			kit.DrawFloatShadow(gtx, box, radius)
+		}
 		rr := clip.UniformRRect(box, radius)
-		alpha := min(max(fadeProg, 0), 1)
 		if alpha < 1 {
 			defer paint.PushOpacity(gtx.Ops, alpha).Pop()
 		}
 		paint.FillShape(gtx.Ops, env.Th.Chrome().CanvasBg, rr.Op(gtx.Ops))
 		stack := rr.Push(gtx.Ops)
+		if overlay {
+			event.Op(gtx.Ops, &s.grid.tempSidebarTag)
+		}
 		local := *gtx
 		local.Constraints = layout.Constraints{Min: image.Pt(maxSideW, 0), Max: image.Pt(maxSideW, colH)}
 		s.layoutSidebarPanel(&local, env)
@@ -304,9 +366,7 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool
 	y := gap
 	for _, it := range items {
 		btn := s.grid.railBtn(it.item)
-		// Tie Toggled to the user's persisted SidebarCollapsed state so a
-		// width-driven TempSidebarFolded snap never starts an icon fade.
-		toggled := s.sidebarVisible() && s.grid.rail == it.item
+		toggled := sidebarOpen && s.grid.rail == it.item
 		props := kit.IconButtonProps{
 			Icon: it.icon, Label: it.hint, Variant: kit.IconButtonGhost, Size: kit.SizeSM,
 			Toggled: toggled, NoSelectedFill: true,

@@ -12,6 +12,7 @@ import (
 	"gioui.org/op"
 	"gioui.org/unit"
 
+	"github.com/syurodev/fugue/ui/internal/glwin"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/theme"
@@ -429,5 +430,84 @@ func TestFUG72NarrowWindowActiveRailClickDoesNotSaveCollapsed(t *testing.T) {
 	runShellEnvFrame(t, env, sc, router, wide, now)
 	if sideW := drawnSidebarWidth(&gtx, sc, wide); sideW != fullW {
 		t.Fatalf("widened sideW = %d, want %d", sideW, fullW)
+	}
+}
+
+// TestFUG72NarrowWindowRailTogglesOverlaySidebarAndPill verifies that when the
+// sidebar is temporarily folded in a narrow window, the rail pill stays off until
+// clicked, clicking the active rail icon opens/closes the overlay sidebar without
+// mutating SidebarCollapsed, clicking an inactive icon switches sections and opens
+// the overlay, and widening restores the inline sidebar.
+func TestFUG72NarrowWindowRailTogglesOverlaySidebarAndPill(t *testing.T) {
+	t.Parallel()
+	wide, narrow := image.Pt(1200, 800), image.Pt(500, 800)
+	win, err := glwin.Open(narrow.X, narrow.Y)
+	if err != nil {
+		t.Fatalf("open headless window: %v", err)
+	}
+	sc := newFUG65TestScreens(t)
+	env := newFUG65Env(t, true)
+	router := new(input.Router)
+	now := time.Unix(1_700_000_000, 0)
+
+	var ops op.Ops
+	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
+	fullW := gtx.Dp(theme.SidebarWidth)
+	chatPt := railCenter(env, sc, &gtx, 0)
+	teamPt := railCenter(env, sc, &gtx, 1)
+	pillProbePt := image.Pt(int(chatPt.X)-gtx.Dp(theme.ControlSM)/2+1, int(chatPt.Y)-gtx.Dp(theme.ControlSM)/2+1)
+
+	renderNarrow := func() *image.RGBA {
+		now = now.Add(16 * time.Millisecond)
+		return renderFUG73Frame(t, win, env, sc, router, narrow, now)
+	}
+
+	runShellEnvFrame(t, env, sc, router, wide, now)
+	imgFolded := renderNarrow()
+	assertNarrowOverlayState(t, sc, false, 0)
+	if got := imgFolded.RGBAAt(pillProbePt.X, pillProbePt.Y); got != imgFolded.RGBAAt(0, 0) {
+		t.Fatalf("folded rail pill corner = %+v, want AppBg %+v when sidebar is hidden", got, imgFolded.RGBAAt(0, 0))
+	}
+
+	imgOverlay := clickAndRenderNarrow(router, renderNarrow, chatPt)
+	assertNarrowOverlayState(t, sc, true, 1)
+	if sc.grid.doc.SidebarCollapsed {
+		t.Fatal("opening narrow overlay sidebar must not set SidebarCollapsed")
+	}
+	if got := imgOverlay.RGBAAt(pillProbePt.X, pillProbePt.Y); got == imgOverlay.RGBAAt(0, 0) {
+		t.Fatal("rail pill remained AppBg when narrow overlay sidebar opened")
+	}
+
+	clickAndRenderNarrow(router, renderNarrow, chatPt)
+	assertNarrowOverlayState(t, sc, false, 0)
+
+	clickAndRenderNarrow(router, renderNarrow, teamPt)
+	assertRailConsistent(t, sc, railTeam, KindTeam)
+	assertNarrowOverlayState(t, sc, true, 1)
+
+	now = now.Add(16 * time.Millisecond)
+	runShellEnvFrame(t, env, sc, router, wide, now)
+	if sc.grid.tempSidebarPresence.Shown() || drawnSidebarWidth(&gtx, sc, wide) != fullW {
+		t.Fatalf("widened: overlay=%v sideW=%d (want false, %d)",
+			sc.grid.tempSidebarPresence.Shown(), drawnSidebarWidth(&gtx, sc, wide), fullW)
+	}
+}
+
+func clickAndRenderNarrow(router *input.Router, renderNarrow func() *image.RGBA, pt f32.Point) *image.RGBA {
+	router.Queue(
+		pointer.Event{Kind: pointer.Move, Position: pt},
+		pointer.Event{Kind: pointer.Press, Buttons: pointer.ButtonPrimary, Position: pt},
+		pointer.Event{Kind: pointer.Release, Buttons: pointer.ButtonPrimary, Position: pt},
+	)
+	return renderNarrow()
+}
+
+func assertNarrowOverlayState(t *testing.T, sc *screens, wantShown bool, wantProg float32) {
+	t.Helper()
+	if got := sc.grid.tempSidebarPresence.Shown(); got != wantShown {
+		t.Fatalf("overlay shown = %v, want %v", got, wantShown)
+	}
+	if got := sc.grid.tempSidebarPresence.Progress(); got != wantProg {
+		t.Fatalf("overlay progress = %v, want %v", got, wantProg)
 	}
 }

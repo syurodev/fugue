@@ -13,6 +13,31 @@ import (
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
+// hasRegularSlotKind reports whether a regular slot of kind is open.
+func (g *slotGrid) hasRegularSlotKind(kind SlotKind) bool {
+	for _, p := range regularCells(g.doc) {
+		if slot, _ := slotAt(g.doc, p); slot.Ref.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+// resetShellMotion clears shell motion followers and slot transitions so the
+// next frame snaps immediately without animating (used on restore and new-window open).
+func (g *slotGrid) resetShellMotion() {
+	g.railY = motion.NewFollower(motion.Smooth())
+	g.sidebarOpenF = motion.NewFollower(motion.Smooth())
+	g.sidebarFadeF = motion.NewFollower(motion.Snappy())
+	g.tempSidebarPresence.Snap(false)
+	g.snapRailNext = true
+	for kind, btn := range g.stripeBtns {
+		btn.SnapToggled(g.hasRegularSlotKind(kind))
+	}
+	clear(g.anims)
+	g.closing = nil
+}
+
 // armClosingAnims starts an Exit fade for every regular slot removed by doc,
 // preserving its current drawn rect and opacity if it was mid-enter.
 func (g *slotGrid) armClosingAnims(doc LayoutDoc) {

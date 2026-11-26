@@ -17,8 +17,10 @@ import (
 	"testing"
 
 	"connectrpc.com/connect"
+	"gioui.org/f32"
 	"gioui.org/io/input"
 	"gioui.org/io/key"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/unit"
@@ -190,6 +192,116 @@ func TestSettingsPersistsThemeAndScaleLocally(t *testing.T) {
 
 	sc2, env2, light2, dark2 := assertPrefsRestoredAfterRestart(t, sock)
 	assertAppStateEventReloadsWindow(t, srv, sc2, env2, light2, dark2)
+}
+
+// TestTopBarThemeTogglePersistsAcrossSettingsLoadAndRestart verifies that
+// toggling the theme before prefs load updates only in-memory ThemeMode without
+// overwriting stored preferences, while toggling after prefs load persists
+// ThemeMode alongside the loaded UIScale across Settings reloads and restarts.
+func TestTopBarThemeTogglePersistsAcrossSettingsLoadAndRestart(t *testing.T) {
+	t.Parallel()
+	srv := &lockedVaultAppStateServer{}
+	encoded, err := settings.EncodePreferences(settings.Preferences{ThemeMode: settings.ThemeLight, UIScale: settings.Scale125})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv.prefsRev, srv.prefsDoc = 1, encoded
+	sock := serveAppStateSocket(t, srv)
+
+	sc1, c1, env1, light1, dark1 := dialAppStateTestScreens(t, sock)
+	sc1.vault.ApplyStatus(vault.Status{State: client.VaultStateUnlocked, Revision: 1, Incarnation: "inc-unlocked"})
+	router := new(input.Router)
+	size := image.Pt(1200, 800)
+	runFull := func() { runThemeTestFullFrame(env1, sc1, router, size, light1, dark1) }
+	runFull()
+
+	themePt := topBarThemeBtnCenter(env1, sc1, size)
+	assertUnloadedThemeToggleSkipsSave(t, sc1, router, themePt, runFull)
+
+	if err := sc1.settings.Prefs.ApplyDocument(1, encoded); err != nil {
+		t.Fatalf("ApplyDocument: %v", err)
+	}
+	runFull()
+	queuePointerClick(router, themePt)
+	runFull()
+	saveRes := awaitSettingsResult(t, sc1.settingsWorker)
+	sc1.applySettingsResults([]settings.Result{saveRes})
+	if saveRes.Err != nil || sc1.settings.Prefs.Revision != 2 || sc1.settings.Prefs.Current.UIScale != settings.Scale125 {
+		t.Fatalf("save prefs after loaded Top Bar toggle = (rev=%d scale=%v err=%v)",
+			sc1.settings.Prefs.Revision, sc1.settings.Prefs.Current.UIScale, saveRes.Err)
+	}
+
+	assertReloadedPrefsKeepThemeAndScale(t, sc1, env1, dark1)
+	c1.Close()
+
+	sc2, _, env2, light2, dark2 := dialAppStateTestScreens(t, sock)
+	assertReloadedPrefsKeepThemeAndScale(t, sc2, env2, dark2)
+	_ = light2
+}
+
+func runThemeTestFullFrame(env *kit.Env, sc *screens, router *input.Router, size image.Point, light, dark *theme.Theme) {
+	var ops op.Ops
+	gtx := layout.Context{
+		Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}),
+		Constraints: layout.Exact(size), Source: router.Source(),
+	}
+	env.Begin(gtx.Now)
+	env.TrackInput(&gtx)
+	sc.applyLivePreferences(env, light, dark)
+	toggleTheme(&gtx, env, sc, light, dark)
+	drawWindow(&gtx, env, sc)
+	env.FrameEnd(&gtx)
+	router.Frame(&ops)
+}
+
+func topBarThemeBtnCenter(env *kit.Env, sc *screens, size image.Point) f32.Point {
+	var ops op.Ops
+	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}), Constraints: layout.Exact(size)}
+	btnW, btnGap := gtx.Dp(theme.ControlSM), gtx.Dp(theme.SpaceXS)
+	rightPad := max((gtx.Dp(theme.RightStripeWidth)-btnW)/2, 0)
+	if sc.titleBar.csd {
+		rightPad = 3*(gtx.Dp(theme.SpaceXXXL)+gtx.Dp(theme.SpaceMD)) + btnGap
+	}
+	themeX := float32(size.X-rightPad-btnW/2) - float32(btnW+btnGap)
+	return f32.Pt(themeX, float32(gtx.Dp(theme.TopBarHeight))/2)
+}
+
+func queuePointerClick(router *input.Router, pt f32.Point) {
+	router.Queue(
+		pointer.Event{Kind: pointer.Move, Position: pt},
+		pointer.Event{Kind: pointer.Press, Buttons: pointer.ButtonPrimary, Position: pt},
+		pointer.Event{Kind: pointer.Release, Buttons: pointer.ButtonPrimary, Position: pt},
+	)
+}
+
+func assertUnloadedThemeToggleSkipsSave(t *testing.T, sc *screens, router *input.Router, themePt f32.Point, runFull func()) {
+	t.Helper()
+	queuePointerClick(router, themePt)
+	runFull()
+	if sc.settings.Prefs.Current.ThemeMode != settings.ThemeDark || sc.settings.Prefs.Saving {
+		t.Fatalf("unloaded Top Bar toggle: mode=%q saving=%v", sc.settings.Prefs.Current.ThemeMode, sc.settings.Prefs.Saving)
+	}
+	router.Queue(key.Event{Name: key.Name("D"), Modifiers: key.ModCtrl, State: key.Press})
+	runFull()
+	if sc.settings.Prefs.Current.ThemeMode != settings.ThemeLight || sc.settings.Prefs.Saving {
+		t.Fatalf("unloaded Ctrl+D toggle: mode=%q saving=%v", sc.settings.Prefs.Current.ThemeMode, sc.settings.Prefs.Saving)
+	}
+	select {
+	case res := <-sc.settingsWorker.Results():
+		t.Fatalf("unexpected OpSavePrefs while Prefs.Loaded == false: %+v", res)
+	default:
+	}
+}
+
+func assertReloadedPrefsKeepThemeAndScale(t *testing.T, sc *screens, env *kit.Env, wantDark *theme.Theme) {
+	t.Helper()
+	req := settings.Request{Kind: settings.OpLoadPrefs}
+	sc.settingsWorker.Do(&req)
+	sc.applySettingsResults([]settings.Result{awaitSettingsResult(t, sc.settingsWorker)})
+	sc.applyLivePreferences(env, nil, wantDark)
+	if sc.settings.Prefs.Current.ThemeMode != settings.ThemeDark || env.Th != wantDark || env.UIScale != settings.Scale125 {
+		t.Fatalf("reloaded prefs mismatch: mode=%q scale=%v", sc.settings.Prefs.Current.ThemeMode, env.UIScale)
+	}
 }
 
 func assertPrefsRestoredAfterRestart(t *testing.T, sock string) (*screens, *kit.Env, *theme.Theme, *theme.Theme) {

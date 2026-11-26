@@ -433,3 +433,17 @@ func TestDarwinTitleBarMoveAction(t *testing.T) {
 		t.Fatalf("fullscreen darwin Top Bar should not register ActionMove, got (%v, %v)", act, ok)
 	}
 }
+
+// TestTitleBarApplyViewEventClearsStaleNativeView verifies that an invalid
+// ViewEvent clears any previously recorded nativeView handle so a subsequent
+// reapplyPlatformChrome cannot pass a freed NSView pointer to CFRetain.
+func TestTitleBarApplyViewEventClearsStaleNativeView(t *testing.T) {
+	t.Parallel()
+	bar := newTitleBar(osDarwin)
+	bar.nativeView = 0xdeadbeef
+	bar.applyViewEvent(nil)
+	if bar.nativeView != 0 {
+		t.Fatalf("nativeView = %#x after invalid ViewEvent, want 0", bar.nativeView)
+	}
+	bar.reapplyPlatformChrome()
+}

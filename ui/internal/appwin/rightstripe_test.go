@@ -80,10 +80,19 @@ func TestRightStripeTogglesCompanionsAndSyncsShortcuts(t *testing.T) {
 		if !sc.hasSlotKind(tc.kind) {
 			t.Fatalf("clicking Right Stripe index %d did not open %v", tc.idx, tc.kind)
 		}
+		if r := sc.grid.refRects[keyOfRef(SlotRef{Kind: tc.kind})]; r.Empty() {
+			t.Fatalf("clicking Right Stripe index %d did not lay out %v in the same frame", tc.idx, tc.kind)
+		}
+		if wantsImmediateFrame(env) {
+			t.Fatalf("ReducedMotion Right Stripe open of %v requested extra frame", tc.kind)
+		}
 		now = now.Add(16 * time.Millisecond)
 		clickShellAt(t, env, sc, router, size, now, pt)
 		if sc.hasSlotKind(tc.kind) {
 			t.Fatalf("clicking Right Stripe index %d a second time did not close %v", tc.idx, tc.kind)
+		}
+		if _, stillLaidOut := sc.grid.refRects[keyOfRef(SlotRef{Kind: tc.kind})]; stillLaidOut {
+			t.Fatalf("clicking Right Stripe index %d a second time left %v laid out in the same frame", tc.idx, tc.kind)
 		}
 	}
 
@@ -176,8 +185,14 @@ func TestRightStripeFoldedSlotsToggleDrawer(t *testing.T) {
 	pt := rightStripeFoldedCenter(env, sc, &gtx, narrow, len(folded), 0)
 	now = now.Add(16 * time.Millisecond)
 	clickShellAt(t, env, sc, router, narrow, now, pt)
-	if sc.grid.drawer != folded[0].key() || !sc.grid.drawerPresence.Shown() {
-		t.Fatalf("clicking Right Stripe folded slot %q did not open drawer (drawer=%q shown=%v)",
-			folded[0].key(), sc.grid.drawer, sc.grid.drawerPresence.Shown())
+	if sc.grid.drawer != folded[0].key() || !sc.grid.drawerPresence.Shown() || sc.grid.drawerPresence.Progress() != 1 {
+		t.Fatalf("clicking Right Stripe folded slot %q did not open drawer in same frame (drawer=%q shown=%v prog=%v)",
+			folded[0].key(), sc.grid.drawer, sc.grid.drawerPresence.Shown(), sc.grid.drawerPresence.Progress())
+	}
+	now = now.Add(16 * time.Millisecond)
+	clickShellAt(t, env, sc, router, narrow, now, pt)
+	if sc.grid.drawer != "" || sc.grid.drawerPresence.Shown() || sc.grid.drawerPresence.Progress() != 0 {
+		t.Fatalf("clicking Right Stripe folded slot %q again did not close drawer in same frame (drawer=%q shown=%v prog=%v)",
+			folded[0].key(), sc.grid.drawer, sc.grid.drawerPresence.Shown(), sc.grid.drawerPresence.Progress())
 	}
 }

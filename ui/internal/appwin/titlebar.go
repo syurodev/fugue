@@ -85,15 +85,19 @@ func (b *titleBar) applyConfig(cfg app.Config) {
 }
 
 // applyViewEvent records the native view handle from app.ViewEvent and applies
-// initial platform titlebar styling.
+// initial platform titlebar styling, clearing any stale handle when the event
+// does not carry a valid native view.
 func (b *titleBar) applyViewEvent(e event.Event) {
 	if b == nil {
 		return
 	}
-	if ptr, ok := extractPlatformView(e); ok {
-		b.nativeView = ptr
-		applyPlatformTitleBar(ptr, b.fullscreen)
+	ptr, ok := extractPlatformView(e)
+	if !ok {
+		b.nativeView = 0
+		return
 	}
+	b.nativeView = ptr
+	applyPlatformTitleBar(ptr, b.fullscreen)
 }
 
 // reapplyPlatformChrome restores platform titlebar styling after Gio window
