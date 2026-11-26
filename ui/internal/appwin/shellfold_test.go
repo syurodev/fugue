@@ -26,6 +26,9 @@ func TestShellFoldUsesTheShellWidth(t *testing.T) {
 	t.Parallel()
 	oneColMin := int(theme.RailWidth) + int(theme.RightStripeWidth) + int(theme.SidebarWidth) + int(theme.IslandGap) + int(theme.MainSlotMinWidth)
 	twoColMin := oneColMin + int(theme.SlotMinWidth) + int(theme.IslandGap)
+	if oneColMin != 844 || twoColMin != 1148 {
+		t.Fatalf("unexpected fold minimums: oneColMin=%d twoColMin=%d, want 844 and 1148", oneColMin, twoColMin)
+	}
 	cases := []struct {
 		name         string
 		cols         int

@@ -112,6 +112,8 @@ func packagedIcons() []packagedIcon {
 		{"arrow-down", "ArrowDown"},
 		{"maximize-2", "Maximize2"},
 		{"minimize-2", "Minimize2"},
+		{"minus", "Minus"},
+		{"square", "Square"},
 		{"columns-2", "Columns2"},
 		{"panel-left", "PanelLeft"},
 		{"app-window", "WindowFrame"},

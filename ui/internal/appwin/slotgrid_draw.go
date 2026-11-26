@@ -108,10 +108,9 @@ func (g *slotGrid) layoutArea(gtx *layout.Context, env *kit.Env, sc *screens, ar
 	}
 }
 
-// drawSlot draws one slot as an independent 8 dp-rounded CanvasBg island with
-// a calm BorderSubtle outline (no accent focus border), containing its 30 dp
-// header band and clipped body. A slot mid-slide draws at the interpolated
-// rect (§3.7).
+// drawSlot draws one slot as an independent borderless 8 dp-rounded CanvasBg
+// island (FUG-97), containing its 30 dp header band and clipped body. A slot
+// mid-slide draws at the interpolated rect (§3.7).
 func (g *slotGrid) drawSlot(gtx *layout.Context, env *kit.Env, sc *screens, p Pos, rect image.Rectangle) {
 	if rect.Empty() {
 		return
@@ -151,8 +150,6 @@ func (g *slotGrid) drawSlot(gtx *layout.Context, env *kit.Env, sc *screens, p Po
 		sc.layoutSlotBody(&local, env, p, ref)
 	})
 	stack.Pop()
-	paint.FillShape(gtx.Ops, env.Th.Chrome().BorderSubtle,
-		clip.Stroke{Path: rr.Path(gtx.Ops), Width: float32(max(gtx.Dp(theme.Hairline), 1))}.Op())
 }
 
 // drawChrome draws a regular slot's header bar — icon and title, the drag

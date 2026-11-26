@@ -71,6 +71,8 @@ const (
 	IconArrowDown      IconName = "arrow-down"
 	IconMaximize2      IconName = "maximize-2"
 	IconMinimize2      IconName = "minimize-2"
+	IconMinus          IconName = "minus"
+	IconSquare         IconName = "square"
 	IconColumns2       IconName = "columns-2"
 	IconPanelLeft      IconName = "panel-left"
 	IconAppWindow      IconName = "app-window"
@@ -129,6 +131,8 @@ func pathOf(n IconName) (string, error) {
 		IconArrowDown:      icondata.ArrowDown,
 		IconMaximize2:      icondata.Maximize2,
 		IconMinimize2:      icondata.Minimize2,
+		IconMinus:          icondata.Minus,
+		IconSquare:         icondata.Square,
 		IconColumns2:       icondata.Columns2,
 		IconPanelLeft:      icondata.PanelLeft,
 		IconAppWindow:      icondata.WindowFrame,

@@ -26,7 +26,7 @@ func rightStripeCenter(env *kit.Env, sc *screens, gtx *layout.Context, size imag
 	failGtx.Constraints.Min = image.Point{}
 	failH := sc.failure.layout(env, &failGtx, sc).Size.Y
 	rightW := gtx.Dp(theme.RightStripeWidth)
-	btnW := gtx.Dp(theme.ControlSM)
+	btnW := gtx.Dp(theme.ControlMD)
 	gap := gtx.Dp(theme.SpaceXS)
 	x := float32(size.X) - float32(rightW)/2
 	y := float32(barH+failH+gap+index*(btnW+gap)) + float32(btnW)/2
@@ -35,7 +35,7 @@ func rightStripeCenter(env *kit.Env, sc *screens, gtx *layout.Context, size imag
 
 func rightStripeFoldedCenter(env *kit.Env, sc *screens, gtx *layout.Context, size image.Point, foldedCount, index int) f32.Point {
 	rightW := gtx.Dp(theme.RightStripeWidth)
-	btnW := gtx.Dp(theme.ControlSM)
+	btnW := gtx.Dp(theme.ControlMD)
 	gap := gtx.Dp(theme.SpaceXS)
 	barH := sc.titleBar.layout(env, gtx, sc)
 	statusH := gtx.Dp(theme.StatusBarHeight)
@@ -51,7 +51,7 @@ func rightStripeFoldedCenter(env *kit.Env, sc *screens, gtx *layout.Context, siz
 }
 
 // TestRightStripeTogglesCompanionsAndSyncsShortcuts verifies FUG-94: clicking
-// Approvals, Accounts, and Secrets icons in the 30 dp Right Stripe toggles the
+// Approvals, Accounts, and Secrets icons in the 40 dp Right Stripe toggles the
 // corresponding companion slots, and Ctrl/Cmd+Shift+I / A stay synced.
 func TestRightStripeTogglesCompanionsAndSyncsShortcuts(t *testing.T) {
 	t.Parallel()

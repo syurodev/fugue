@@ -283,8 +283,6 @@ func (s *screens) drawSidebarIsland(gtx *layout.Context, env *kit.Env, railW, ma
 		local.Constraints = layout.Constraints{Min: image.Pt(maxSideW, 0), Max: image.Pt(maxSideW, colH)}
 		s.layoutSidebarPanel(&local, env)
 		stack.Pop()
-		paint.FillShape(gtx.Ops, env.Th.Chrome().BorderSubtle,
-			clip.Stroke{Path: rr.Path(gtx.Ops), Width: float32(max(gtx.Dp(theme.Hairline), 1))}.Op())
 	})
 }
 
@@ -322,14 +320,15 @@ func (s *screens) layoutGridContainer(gtx *layout.Context, env *kit.Env, plan Pl
 	return layout.Dimensions{Size: gridRect.Size()}
 }
 
-// layoutRail draws the 30 dp rail (§5.3, FUG-93) on the shell's AppBg: 24 dp
-// icon buttons centered in the column with kit Tooltips and a Smooth sliding
-// SelectedWash pill while the sidebar is open. Clicking an active icon toggles
-// SidebarCollapsed; clicking an inactive icon switches mode and opens the sidebar.
+// layoutRail draws the 40 dp rail (§5.3, FUG-93, FUG-97) on the shell's AppBg:
+// 28 dp icon buttons centered in the column with kit Tooltips and a Smooth
+// sliding SelectedWash pill while the sidebar is open. Clicking an active icon
+// toggles SidebarCollapsed; clicking an inactive icon switches mode and opens
+// the sidebar.
 func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool) layout.Dimensions {
 	w := gtx.Dp(theme.RailWidth)
 	h := gtx.Constraints.Max.Y
-	btnW := gtx.Dp(theme.ControlSM)
+	btnW := gtx.Dp(theme.ControlMD)
 	x := max((w-btnW)/2, 0)
 	gap := gtx.Dp(theme.SpaceXS)
 	items := []struct {
@@ -368,7 +367,7 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool
 		btn := s.grid.railBtn(it.item)
 		toggled := sidebarOpen && s.grid.rail == it.item
 		props := kit.IconButtonProps{
-			Icon: it.icon, Label: it.hint, Variant: kit.IconButtonGhost, Size: kit.SizeSM,
+			Icon: it.icon, Label: it.hint, Variant: kit.IconButtonGhost, Size: kit.SizeMD,
 			Toggled: toggled, NoSelectedFill: true,
 		}
 		var err error

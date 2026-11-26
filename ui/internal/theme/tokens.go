@@ -90,10 +90,10 @@ const SidebarWidth = unit.Dp(240)
 // sidebar, while the main slot keeps MainSlotMinWidth and never folds.
 const (
 	// RailWidth is the left rail's one icon column; the rail never folds.
-	RailWidth = unit.Dp(30)
+	RailWidth = unit.Dp(40)
 	// RightStripeWidth is the permanent right tool stripe hosting companion
-	// slot toggles and narrow-window folded slots (Islands shell, FUG-90).
-	RightStripeWidth = unit.Dp(30)
+	// slot toggles and narrow-window folded slots (Islands shell, FUG-90, FUG-97).
+	RightStripeWidth = unit.Dp(40)
 	// IslandGap is the 4 dp gutter separating the Sidebar Island, grid
 	// columns, and grid rows on the AppBg chrome.
 	IslandGap = SpaceXS

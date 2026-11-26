@@ -2,10 +2,8 @@ package appwin
 
 import (
 	"image"
-	"image/color"
 
 	"gioui.org/app"
-	"gioui.org/f32"
 	"gioui.org/gesture"
 	"gioui.org/io/event"
 	"gioui.org/io/system"
@@ -162,12 +160,20 @@ type titleBarMetrics struct {
 	rightTotalW  int
 }
 
+func csdButtonMetrics(gtx *layout.Context) (btnSide, gap, totalW int) {
+	btnSide = gtx.Dp(theme.ControlSM)
+	gap = gtx.Dp(theme.SpaceXS)
+	padR := gtx.Dp(theme.SpaceMD)
+	totalW = 3*btnSide + 2*gap + padR
+	return btnSide, gap, totalW
+}
+
 func (b *titleBar) computeMetrics(gtx *layout.Context, sc *screens) titleBarMetrics {
 	btnW := gtx.Dp(theme.ControlSM)
 	btnGap := gtx.Dp(theme.SpaceXS)
 	csdW := 0
 	if b.csd {
-		csdW = 3 * (gtx.Dp(theme.SpaceXXXL) + gtx.Dp(theme.SpaceMD))
+		_, _, csdW = csdButtonMetrics(gtx)
 	}
 	hasTheme := sc != nil
 	hasSettings := sc != nil && !sc.vaultGate.active(sc.vault)
@@ -246,7 +252,7 @@ func (b *titleBar) layoutRightCluster(env *kit.Env, gtx *layout.Context, sc *scr
 		off := op.Offset(image.Pt(width-m.csdW, 0)).Push(gtx.Ops)
 		csdGtx := *gtx
 		csdGtx.Constraints = layout.Exact(image.Pt(m.csdW, h))
-		b.layoutButtons(env, &csdGtx, h)
+		b.layoutButtons(env, &csdGtx, sc, h)
 		off.Pop()
 	}
 }
@@ -382,43 +388,47 @@ func (b *titleBar) toggleMaximize() system.Action {
 }
 
 // layoutButtons lays out minimize, maximize or restore, and close, right
-// aligned. Hover and pressed states are the kit washes; close hovers on the
-// danger tint, as the kit's danger button does.
-func (b *titleBar) layoutButtons(env *kit.Env, gtx *layout.Context, h int) layout.Dimensions {
-	side := gtx.Dp(theme.SpaceXXXL) + gtx.Dp(theme.SpaceMD)
+// aligned as 24×24 dp ghost buttons with 14 dp Lucide icons centered
+// vertically in the 32 dp Top Bar (FUG-97). Hover and pressed states are the
+// kit washes; close hovers on the danger tint, as the kit's danger button does.
+func (b *titleBar) layoutButtons(env *kit.Env, gtx *layout.Context, sc *screens, h int) layout.Dimensions {
+	btnSide, gap, totalW := csdButtonMetrics(gtx)
+	y := max((h-btnSide)/2, 0)
 	buttons := []struct {
 		action system.Action
-		glyph  glyphKind
+		icon   kit.IconName
 	}{
-		{system.ActionMinimize, glyphMinimize},
-		{system.ActionMaximize, glyphMaximize},
-		{system.ActionClose, glyphClose},
+		{system.ActionMinimize, kit.IconMinus},
+		{system.ActionMaximize, kit.IconSquare},
+		{system.ActionClose, kit.IconClose},
 	}
 	x := 0
 	for _, btn := range buttons {
-		kind := btn.glyph
-		if kind == glyphMaximize && b.maximized {
-			kind = glyphRestore
+		icon := btn.icon
+		if btn.action == system.ActionMaximize && b.maximized {
+			icon = kit.IconCopy
 		}
-		off := op.Offset(image.Pt(x, 0)).Push(gtx.Ops)
-		b.layoutButton(env, gtx, btn.action, kind, image.Pt(side, h))
+		off := op.Offset(image.Pt(x, y)).Push(gtx.Ops)
+		b.layoutButton(env, gtx, sc, btn.action, icon, image.Pt(btnSide, btnSide))
 		off.Pop()
-		x += side
+		x += btnSide + gap
 	}
-	return layout.Dimensions{Size: image.Pt(x, h)}
+	return layout.Dimensions{Size: image.Pt(totalW, h)}
 }
 
-func (b *titleBar) layoutButton(env *kit.Env, gtx *layout.Context, action system.Action, kind glyphKind, size image.Point) {
+func (b *titleBar) layoutButton(env *kit.Env, gtx *layout.Context, sc *screens, action system.Action, icon kit.IconName, size image.Point) {
 	c := env.Th.Chrome()
 	click := b.deco.Clickable(action)
 	local := *gtx
 	local.Constraints = layout.Exact(size)
+	radius := gtx.Dp(theme.RadiusMD)
+	iconPx := gtx.Dp(theme.IconSM)
 	click.Layout(local, func(g layout.Context) layout.Dimensions {
 		fg, bg := c.Fg, c.AppBg
 		switch {
-		case kind == glyphClose && click.Pressed():
+		case action == system.ActionClose && click.Pressed():
 			fg, bg = c.DangerFg, c.DangerSoftPressed
-		case kind == glyphClose && click.Hovered():
+		case action == system.ActionClose && click.Hovered():
 			fg, bg = c.DangerFg, c.DangerSoftHover
 		case click.Pressed():
 			bg = c.PressedWash
@@ -426,63 +436,16 @@ func (b *titleBar) layoutButton(env *kit.Env, gtx *layout.Context, action system
 			bg = c.HoverWash
 		}
 		if bg != c.AppBg {
-			paint.FillShape(g.Ops, bg, clip.Rect{Max: size}.Op())
+			paint.FillShape(g.Ops, bg, clip.UniformRRect(image.Rectangle{Max: size}, radius).Op(g.Ops))
 		}
-		drawGlyph(&g, kind, fg, size)
+		off := op.Offset(image.Pt((size.X-iconPx)/2, (size.Y-iconPx)/2)).Push(g.Ops)
+		iconGtx := g
+		iconGtx.Constraints = layout.Exact(image.Pt(iconPx, iconPx))
+		_, err := env.Icon(&iconGtx, icon, theme.IconSM, fg)
+		off.Pop()
+		if sc != nil {
+			sc.fail(err)
+		}
 		return layout.Dimensions{Size: size}
 	})
-}
-
-type glyphKind int
-
-const (
-	glyphMinimize glyphKind = iota
-	glyphMaximize
-	glyphRestore
-	glyphClose
-)
-
-// drawGlyph strokes the button's symbol centered in size. The glyph box and
-// stroke come from spacing tokens, so the symbols scale with the UI scale.
-func drawGlyph(gtx *layout.Context, kind glyphKind, fg color.NRGBA, size image.Point) {
-	box := gtx.Dp(theme.SpaceLG)
-	stroke := float32(max(1, gtx.Dp(theme.SpaceXXS)/2))
-	x0, y0 := (size.X-box)/2, (size.Y-box)/2
-	r := image.Rect(x0, y0, x0+box, y0+box)
-	var p clip.Path
-	p.Begin(gtx.Ops)
-	switch kind {
-	case glyphMinimize:
-		mid := float32(y0 + box/2)
-		p.MoveTo(f32.Pt(float32(r.Min.X), mid))
-		p.LineTo(f32.Pt(float32(r.Max.X), mid))
-	case glyphMaximize:
-		rect(&p, r)
-	case glyphRestore:
-		gap := box / 4
-		rect(&p, image.Rect(r.Min.X, r.Min.Y+gap, r.Max.X-gap, r.Max.Y))
-		p.MoveTo(f32.Pt(float32(r.Min.X+gap), float32(r.Min.Y+gap)))
-		p.LineTo(f32.Pt(float32(r.Min.X+gap), float32(r.Min.Y)))
-		p.LineTo(f32.Pt(float32(r.Max.X), float32(r.Min.Y)))
-		p.LineTo(f32.Pt(float32(r.Max.X), float32(r.Max.Y-gap)))
-		p.LineTo(f32.Pt(float32(r.Max.X-gap), float32(r.Max.Y-gap)))
-	case glyphClose:
-		p.MoveTo(f32.Pt(float32(r.Min.X), float32(r.Min.Y)))
-		p.LineTo(f32.Pt(float32(r.Max.X), float32(r.Max.Y)))
-		p.MoveTo(f32.Pt(float32(r.Max.X), float32(r.Min.Y)))
-		p.LineTo(f32.Pt(float32(r.Min.X), float32(r.Max.Y)))
-	}
-	st := clip.Stroke{Path: p.End(), Width: stroke}.Op().Push(gtx.Ops)
-	paint.ColorOp{Color: fg}.Add(gtx.Ops)
-	paint.PaintOp{}.Add(gtx.Ops)
-	st.Pop()
-}
-
-// rect appends a closed rectangle subpath.
-func rect(p *clip.Path, r image.Rectangle) {
-	p.MoveTo(f32.Pt(float32(r.Min.X), float32(r.Min.Y)))
-	p.LineTo(f32.Pt(float32(r.Max.X), float32(r.Min.Y)))
-	p.LineTo(f32.Pt(float32(r.Max.X), float32(r.Max.Y)))
-	p.LineTo(f32.Pt(float32(r.Min.X), float32(r.Max.Y)))
-	p.Close()
 }

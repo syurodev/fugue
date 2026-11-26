@@ -115,6 +115,13 @@ func (h *titleBarHarness) tap(p f32.Point, clicks int) {
 func TestTitleBarActions(t *testing.T) {
 	t.Parallel()
 	y := float32(theme.TopBarHeight) / 2
+	// With 24 dp controls, 4 dp gaps, and 8 dp right padding (88 dp cluster)
+	// in a 900 dp bar, the three button centers sit at 824, 852, and 880.
+	const (
+		minX   = 824
+		maxX   = 852
+		closeX = 880
+	)
 	for _, tc := range []struct {
 		name      string
 		maximized bool
@@ -122,10 +129,10 @@ func TestTitleBarActions(t *testing.T) {
 		clicks    int
 		want      system.Action
 	}{
-		{"close button", false, f32.Pt(880, y), 1, system.ActionClose},
-		{"minimize button", false, f32.Pt(800, y), 1, system.ActionMinimize},
-		{"maximize button", false, f32.Pt(840, y), 1, system.ActionMaximize},
-		{"restore button when maximized", true, f32.Pt(840, y), 1, system.ActionUnmaximize},
+		{"close button", false, f32.Pt(closeX, y), 1, system.ActionClose},
+		{"minimize button", false, f32.Pt(minX, y), 1, system.ActionMinimize},
+		{"maximize button", false, f32.Pt(maxX, y), 1, system.ActionMaximize},
+		{"restore button when maximized", true, f32.Pt(maxX, y), 1, system.ActionUnmaximize},
 		{"double click on the title maximizes", false, f32.Pt(300, y), 2, system.ActionMaximize},
 		{"double click on the title restores", true, f32.Pt(300, y), 2, system.ActionUnmaximize},
 	} {
@@ -138,7 +145,8 @@ func TestTitleBarActions(t *testing.T) {
 }
 
 // TestTitleBarMoveAction checks that the title area is registered as the
-// window-move area (drag to move), and the buttons are not.
+// window-move area (drag to move), and the compact CSD buttons, gaps, and right
+// padding are not, while non-CSD platforms reserve no CSD cluster width.
 func TestTitleBarMoveAction(t *testing.T) {
 	t.Parallel()
 	h := newTitleBarHarness(t, false)
@@ -146,8 +154,40 @@ func TestTitleBarMoveAction(t *testing.T) {
 	if act, ok := h.router.ActionAt(f32.Pt(300, y)); !ok || act != system.ActionMove {
 		t.Errorf("title area action = %v (%v), want ActionMove", act, ok)
 	}
-	if act, ok := h.router.ActionAt(f32.Pt(880, y)); ok && act == system.ActionMove {
-		t.Errorf("close button moves the window: %v", act)
+	for _, tc := range []struct {
+		label string
+		x     float32
+	}{
+		{"minimize button", 824},
+		{"first inter-button gap", 838},
+		{"maximize button", 852},
+		{"second inter-button gap", 866},
+		{"close button", 880},
+		{"right padding", 896},
+	} {
+		if act, ok := h.router.ActionAt(f32.Pt(tc.x, y)); ok && act == system.ActionMove {
+			t.Errorf("%s (x=%.0f) moves the window: %v", tc.label, tc.x, act)
+		}
+	}
+
+	var ops op.Ops
+	gtx := layout.Context{Ops: &ops, Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}}
+	if m := h.bar.computeMetrics(&gtx, nil); m.csdW != 88 {
+		t.Errorf("linux CSD cluster width = %d, want 88", m.csdW)
+	}
+	for _, tc := range []struct {
+		goos string
+		cfg  app.Config
+	}{
+		{"linux", app.Config{Decorated: true}},
+		{"windows", app.Config{Decorated: false}},
+		{osDarwin, app.Config{Decorated: false}},
+	} {
+		bar := newTitleBar(tc.goos)
+		bar.applyConfig(tc.cfg)
+		if m := bar.computeMetrics(&gtx, nil); bar.csd || m.csdW != 0 {
+			t.Errorf("%s (decorated=%v): csd=%v csdW=%d, want false and 0", tc.goos, tc.cfg.Decorated, bar.csd, m.csdW)
+		}
 	}
 }
 
@@ -158,7 +198,65 @@ func TestTitleBarShots(t *testing.T) {
 			t.Fatalf("title bar shot %s rendered a blank image", shot.name)
 		}
 		shottest.Compare(t, shot.name, shot.img)
+		assertCSDGlyphBounds(t, shot)
 	}
+}
+
+func assertCSDGlyphBounds(t *testing.T, shot titleBarShot) {
+	t.Helper()
+	w := shot.img.Bounds().Dx()
+	barH := int(theme.TopBarHeight)
+	btnW := int(theme.ControlSM)
+	gap := int(theme.SpaceXS)
+	padR := int(theme.SpaceMD)
+	csdW := 3*btnW + 2*gap + padR
+	closeBox := glyphBoundingBox(shot.img, image.Rect(w-padR-btnW, 0, w-padR, barH))
+	maxBox := glyphBoundingBox(shot.img, image.Rect(w-padR-2*btnW-gap, 0, w-padR-btnW-gap, barH))
+	minBox := glyphBoundingBox(shot.img, image.Rect(w-csdW, 0, w-csdW+btnW, barH))
+	themeX1 := w - csdW - gap - btnW - gap
+	themeBox := glyphBoundingBox(shot.img, image.Rect(themeX1-btnW, 0, themeX1, barH))
+
+	assertGlyphWithin(t, shot.name, "csd-minimize", minBox, themeBox, 12, true)
+	assertGlyphWithin(t, shot.name, "csd-close", closeBox, themeBox, 12, true)
+	if shot.name == "titlebar-light" || shot.name == "titlebar-normal-dark" {
+		assertGlyphWithin(t, shot.name, "csd-maximize", maxBox, themeBox, 12, true)
+		return
+	}
+	// Restore uses IconCopy at IconSM (14 dp), spanning 14x14 px (smaller than 16 dp IconMD).
+	assertGlyphWithin(t, shot.name, "csd-restore", maxBox, themeBox, int(theme.IconSM), false)
+}
+
+func assertGlyphWithin(t *testing.T, shotName, label string, box, themeBox image.Point, maxSide int, compareTheme bool) {
+	t.Helper()
+	if box.X == 0 || box.Y == 0 {
+		t.Fatalf("%s %s glyph rendered empty: %v", shotName, label, box)
+	}
+	if box.X > maxSide || box.Y > maxSide {
+		t.Errorf("%s %s glyph box = %v, want <= %dx%d px at scale 1.0", shotName, label, box, maxSide, maxSide)
+	}
+	if compareTheme && (box.X > themeBox.X+1 || box.Y > themeBox.Y+1) {
+		t.Errorf("%s %s glyph box = %v exceeds theme icon box %v by >1 px", shotName, label, box, themeBox)
+	}
+}
+
+func glyphBoundingBox(img *image.RGBA, area image.Rectangle) image.Point {
+	bg := img.RGBAAt(0, 0)
+	minX, minY := area.Max.X, area.Max.Y
+	maxX, maxY := area.Min.X-1, area.Min.Y-1
+	for y := area.Min.Y; y < area.Max.Y; y++ {
+		for x := area.Min.X; x < area.Max.X; x++ {
+			if img.RGBAAt(x, y) != bg {
+				minX = min(minX, x)
+				minY = min(minY, y)
+				maxX = max(maxX, x)
+				maxY = max(maxY, y)
+			}
+		}
+	}
+	if maxX < minX || maxY < minY {
+		return image.Point{}
+	}
+	return image.Pt(maxX-minX+1, maxY-minY+1)
 }
 
 type titleBarShot struct {
@@ -166,17 +264,23 @@ type titleBarShot struct {
 	img  *image.RGBA
 }
 
-// renderTitleBarShots renders the shell under the app-drawn title bar in
-// light and dark, the second with maximize shown as restore.
+// renderTitleBarShots renders the shell under the app-drawn Linux CSD title bar
+// in normal and maximized states for both light and dark themes.
 func renderTitleBarShots(t *testing.T) []titleBarShot {
 	t.Helper()
 	size := image.Pt(shotWindowW, shotWindowH)
-	shots := make([]titleBarShot, 0, 2)
-	for _, spec := range []struct {
+	specs := []struct {
 		name      string
 		dark      bool
 		maximized bool
-	}{{"titlebar-light", false, false}, {"titlebar-dark", true, true}} {
+	}{
+		{"titlebar-light", false, false},
+		{"titlebar-dark", true, true},
+		{"titlebar-normal-dark", true, false},
+		{"titlebar-maximized-light", false, true},
+	}
+	shots := make([]titleBarShot, 0, len(specs))
+	for _, spec := range specs {
 		win, err := glwin.Open(size.X, size.Y)
 		if err != nil {
 			t.Fatalf("open headless window for %s: %v", spec.name, err)
@@ -226,10 +330,11 @@ func assertAppBgSpan(t *testing.T, shot titleBarShot, y, fromX, toX int, bg colo
 	}
 }
 
-// TestTitleBarTopGapMatchesLeftGutter verifies FUG-71 / FUG-95: the islands
-// start flush under the 32 dp Top Bar (topGap == 0) while the gutter between
-// the Sidebar Island and the slot grid equals IslandGap (4 dp, allowing 1 px
-// for the centered BorderSubtle stroke overhang).
+// TestTitleBarTopGapMatchesLeftGutter verifies FUG-71 / FUG-95 / FUG-97:
+// borderless islands start flush under the 32 dp Top Bar (topGap == 0),
+// adjacent islands are separated by the exact 4 dp IslandGap (4 px at 1.0,
+// 5 px at 1.25) of AppBg, and island edges draw CanvasBg directly with no
+// BorderSubtle outline stroke.
 func TestTitleBarTopGapMatchesLeftGutter(t *testing.T) {
 	t.Parallel()
 	for _, scale := range []float32{1.0, 1.25} {
@@ -264,28 +369,61 @@ func checkTitleBarShellGaps(t *testing.T, scale float32, light bool) {
 	gtx := layout.Context{Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
 	barH := sc.titleBar.height(&gtx)
 	sidebarRight := gtx.Dp(theme.RailWidth) + gtx.Dp(theme.SidebarWidth)
-	topGap, leftGutter := measureGridGaps(img, barH, sidebarRight)
+	wantGap := gtx.Dp(theme.IslandGap)
+	canvas := color.RGBA{R: th.Chrome().CanvasBg.R, G: th.Chrome().CanvasBg.G, B: th.Chrome().CanvasBg.B, A: 255}
+	topGap, leftGutter := measureGridGaps(img, barH, sidebarRight, canvas)
 	if topGap != 0 {
 		t.Errorf("scale=%.2f light=%v: top gap = %dpx, want 0px (islands flush under Top Bar)", scale, light, topGap)
 	}
-	if wantGap := gtx.Dp(theme.IslandGap); leftGutter < wantGap-1 || leftGutter > wantGap {
-		t.Errorf("scale=%.2f light=%v: left gutter = %dpx, want %d..%dpx (IslandGap minus centered stroke)", scale, light, leftGutter, wantGap-1, wantGap)
+	if leftGutter != wantGap {
+		t.Errorf("scale=%.2f light=%v: left gutter = %dpx, want exact %dpx (borderless islands)", scale, light, leftGutter, wantGap)
+	}
+
+	appBg := img.RGBAAt(0, 0)
+	midY := img.Bounds().Dy() / 2
+	assertIslandEdgeBorderless(t, img, "sidebar-main", sidebarRight, wantGap, midY, canvas, appBg, scale, light)
+
+	gridLeft := sidebarRight + wantGap
+	col0 := sc.grid.rects[Pos{Col: 0, Row: 0}.key()]
+	col1 := sc.grid.rects[Pos{Col: 1, Row: 0}.key()]
+	if colGap := col1.Min.X - col0.Max.X; colGap != wantGap {
+		t.Errorf("scale=%.2f light=%v: grid col gap = %dpx, want %dpx", scale, light, colGap, wantGap)
+	}
+	// Probe inside row 0 well away from col 1's rounded row-split corner near midY.
+	row0Y := barH + gtx.Dp(theme.SlotHeaderHeight) + gtx.Dp(theme.SpaceXXL)
+	assertIslandEdgeBorderless(t, img, "col0-col1", gridLeft+col0.Max.X, wantGap, row0Y, canvas, appBg, scale, light)
+}
+
+func assertIslandEdgeBorderless(t *testing.T, img *image.RGBA, label string, gutterStart, gapPx, y int, canvas, appBg color.RGBA, scale float32, light bool) {
+	t.Helper()
+	if got := img.RGBAAt(gutterStart-1, y); got != canvas {
+		t.Errorf("scale=%.2f light=%v %s left edge (%d,%d) = %+v, want CanvasBg %+v (no BorderSubtle stroke)",
+			scale, light, label, gutterStart-1, y, got, canvas)
+	}
+	for x := gutterStart; x < gutterStart+gapPx; x++ {
+		if got := img.RGBAAt(x, y); got != appBg {
+			t.Errorf("scale=%.2f light=%v %s gutter (%d,%d) = %+v, want AppBg %+v",
+				scale, light, label, x, y, got, appBg)
+		}
+	}
+	if got := img.RGBAAt(gutterStart+gapPx, y); got != canvas {
+		t.Errorf("scale=%.2f light=%v %s right edge (%d,%d) = %+v, want CanvasBg %+v (no BorderSubtle stroke)",
+			scale, light, label, gutterStart+gapPx, y, got, canvas)
 	}
 }
 
-func measureGridGaps(img *image.RGBA, barH, sidebarRight int) (topGap, leftGutter int) {
+func measureGridGaps(img *image.RGBA, barH, sidebarRight int, canvas color.RGBA) (topGap, leftGutter int) {
 	b := img.Bounds()
-	bg := img.RGBAAt(0, 0)
 	midX, midY := b.Dx()/2, b.Dy()/2
 	topGap, leftGutter = -1, -1
 	for y := barH; y < b.Dy(); y++ {
-		if img.RGBAAt(midX, y) != bg {
+		if img.RGBAAt(midX, y) == canvas {
 			topGap = y - barH
 			break
 		}
 	}
-	for x := sidebarRight + 1; x < b.Dx(); x++ {
-		if img.RGBAAt(x, midY) != bg {
+	for x := sidebarRight; x < b.Dx(); x++ {
+		if img.RGBAAt(x, midY) == canvas {
 			leftGutter = x - sidebarRight
 			break
 		}
@@ -314,7 +452,8 @@ func TestTopBarThemeToggleAndSettings(t *testing.T) {
 	btnGap := gtx.Dp(theme.SpaceXS)
 	rightPad := max((gtx.Dp(theme.RightStripeWidth)-btnW)/2, 0)
 	if sc.titleBar.csd {
-		rightPad = 3*(gtx.Dp(theme.SpaceXXXL)+gtx.Dp(theme.SpaceMD)) + btnGap
+		_, _, csdW := csdButtonMetrics(&gtx)
+		rightPad = csdW + btnGap
 	}
 	settingsX := float32(size.X - rightPad - btnW/2)
 	themeX := settingsX - float32(btnW+btnGap)

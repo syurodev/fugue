@@ -260,7 +260,8 @@ func topBarThemeBtnCenter(env *kit.Env, sc *screens, size image.Point) f32.Point
 	btnW, btnGap := gtx.Dp(theme.ControlSM), gtx.Dp(theme.SpaceXS)
 	rightPad := max((gtx.Dp(theme.RightStripeWidth)-btnW)/2, 0)
 	if sc.titleBar.csd {
-		rightPad = 3*(gtx.Dp(theme.SpaceXXXL)+gtx.Dp(theme.SpaceMD)) + btnGap
+		_, _, csdW := csdButtonMetrics(&gtx)
+		rightPad = csdW + btnGap
 	}
 	themeX := float32(size.X-rightPad-btnW/2) - float32(btnW+btnGap)
 	return f32.Pt(themeX, float32(gtx.Dp(theme.TopBarHeight))/2)

@@ -362,6 +362,4 @@ func (g *slotGrid) drawClosingSlot(gtx *layout.Context, env *kit.Env, sc *screen
 		})
 	}
 	stack.Pop()
-	paint.FillShape(disabled.Ops, env.Th.Chrome().BorderSubtle,
-		clip.Stroke{Path: rr.Path(disabled.Ops), Width: float32(max(disabled.Dp(theme.Hairline), 1))}.Op())
 }
