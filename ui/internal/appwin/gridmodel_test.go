@@ -426,6 +426,15 @@ func TestFoldPlanFoldsRightToLeftThenSidebar(t *testing.T) {
 		mainDp    = int(theme.MainSlotMinWidth)
 		regDp     = int(theme.SlotMinWidth)
 	)
+	if got := layoutMinWidthDp(1, false); got != 600 {
+		t.Fatalf("layoutMinWidthDp(1, false) = %d, want 600", got)
+	}
+	if got := layoutMinWidthDp(1, true); got != 844 {
+		t.Fatalf("layoutMinWidthDp(1, true) = %d, want 844", got)
+	}
+	if got := layoutMinWidthDp(2, true); got != 1148 {
+		t.Fatalf("layoutMinWidthDp(2, true) = %d, want 1148", got)
+	}
 	cols := 3
 	plan := PlanFold(railDp+stripeDp+sidebarDp+gapDp+mainDp+2*(regDp+gapDp), true, cols)
 	if plan.FoldedCols != 0 || plan.TempSidebarFolded {

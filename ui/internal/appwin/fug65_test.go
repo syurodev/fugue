@@ -382,7 +382,7 @@ func TestShellRailFlushLeftAndOuterMarginXS(t *testing.T) {
 	if sc.grid.lastArea.Dy() != wantH {
 		t.Fatalf("expected grid height %d (TopBar+StatusBar chrome), got %d", wantH, sc.grid.lastArea.Dy())
 	}
-	// Grid width = 1200 - RailWidth(30) - SidebarWidth(240) - IslandGap(4) - RightStripeWidth(30) = 896.
+	// Grid width = 1200 - RailWidth(40) - SidebarWidth(240) - IslandGap(4) - RightStripeWidth(40) = 876.
 	wantW := size.X - int(theme.RailWidth) - int(theme.SidebarWidth) - int(theme.IslandGap) - int(theme.RightStripeWidth)
 	if sc.grid.lastArea.Dx() != wantW {
 		t.Fatalf("expected grid width %d (rail flush left, Right Stripe, IslandGap gutter), got %d", wantW, sc.grid.lastArea.Dx())

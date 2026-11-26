@@ -162,13 +162,13 @@ func (s *screens) pollRightStripe(gtx *layout.Context, plan PlanFoldResult) {
 	}
 }
 
-// layoutRightStripe draws the permanent 30 dp Right Stripe (FUG-94) on AppBg:
-// companion tool-window toggles (Approvals, Accounts, Secrets) at the top, and
-// folded slot tabs at the bottom when narrow-window columns fold.
+// layoutRightStripe draws the permanent 40 dp Right Stripe (FUG-94, FUG-97) on
+// AppBg: companion tool-window toggles (Approvals, Accounts, Secrets) at the
+// top, and folded slot tabs at the bottom when narrow-window columns fold.
 func (s *screens) layoutRightStripe(gtx *layout.Context, env *kit.Env, plan PlanFoldResult) layout.Dimensions {
 	w := gtx.Dp(theme.RightStripeWidth)
 	h := gtx.Constraints.Max.Y
-	btnW := gtx.Dp(theme.ControlSM)
+	btnW := gtx.Dp(theme.ControlMD)
 	x := max((w-btnW)/2, 0)
 	gap := gtx.Dp(theme.SpaceXS)
 	y := s.layoutRightStripeCompanions(gtx, env, x, gap, btnW, gap)
@@ -182,7 +182,7 @@ func (s *screens) layoutRightStripeCompanions(gtx *layout.Context, env *kit.Env,
 	for _, it := range s.rightStripeCompanionItems() {
 		btn := s.grid.stripeBtn(it.kind)
 		props := kit.IconButtonProps{
-			Icon: it.icon, Label: it.tip, Variant: kit.IconButtonGhost, Size: kit.SizeSM,
+			Icon: it.icon, Label: it.tip, Variant: kit.IconButtonGhost, Size: kit.SizeMD,
 			Toggled: s.hasSlotKind(it.kind),
 		}
 		var err error
@@ -206,7 +206,7 @@ func (s *screens) layoutRightStripeFolded(gtx *layout.Context, env *kit.Env, pla
 	groupH := len(folded)*btnW + max(len(folded)-1, 0)*gap
 	startY := max(h-gap-groupH, minY)
 	if startY > minY+gap {
-		lineW := min(gtx.Dp(theme.SpaceLG), max(w-2*gtx.Dp(theme.SpaceXXS), 0))
+		lineW := min(btnW, max(w-2*gtx.Dp(theme.SpaceXXS), 0))
 		lineX := max((w-lineW)/2, 0)
 		lineH := max(gtx.Dp(theme.Hairline), 1)
 		lineY := startY - gap - lineH/2
@@ -219,7 +219,7 @@ func (s *screens) layoutRightStripeFolded(gtx *layout.Context, env *kit.Env, pla
 		ref := refAt(s.grid.doc, p)
 		props := kit.IconButtonProps{
 			Icon: slotIcon(ref.Kind), Label: slotTitle(s, ref),
-			Variant: kit.IconButtonGhost, Size: kit.SizeSM, Toggled: s.grid.drawer == p.key(),
+			Variant: kit.IconButtonGhost, Size: kit.SizeMD, Toggled: s.grid.drawer == p.key(),
 		}
 		var err error
 		env.Offset(gtx, image.Pt(x, curY), func(gtx *layout.Context) {
@@ -240,7 +240,7 @@ func (s *screens) toggleFoldedDrawer(p Pos) {
 }
 
 // drawStatusBadgeDot draws a compact status dot at the top-right corner of a
-// ControlSM button with a thin AppBg halo so it reads crisply over icons.
+// button of btnSize with a thin AppBg halo so it reads crisply over icons.
 func drawStatusBadgeDot(gtx *layout.Context, env *kit.Env, btnSize int, col color.NRGBA) {
 	dotD := max(gtx.Dp(theme.SpaceSM), 6)
 	ring := max(gtx.Dp(theme.SpaceXXS)/2, 1)

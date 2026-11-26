@@ -83,8 +83,8 @@ func testIslandsShellTokens(t *testing.T) {
 	t.Parallel()
 	expectDp(t, []named{
 		{"radius.island", theme.RadiusIsland, 8},
-		{"shell.rail.width", theme.RailWidth, 30},
-		{"shell.right_stripe.width", theme.RightStripeWidth, 30},
+		{"shell.rail.width", theme.RailWidth, 40},
+		{"shell.right_stripe.width", theme.RightStripeWidth, 40},
 		{"shell.island.gap", theme.IslandGap, 4},
 		{"shell.topbar.height", theme.TopBarHeight, 32},
 		{"shell.statusbar.height", theme.StatusBarHeight, 22},

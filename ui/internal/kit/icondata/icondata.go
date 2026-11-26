@@ -85,6 +85,10 @@ const (
 	Maximize2 = "M15 3L21 3L21 9M21 3L14 10M3 21L10 14M9 21L3 21L3 15"
 	// Minimize2 is the "minimize-2" icon.
 	Minimize2 = "M14 10L21 3M20 10L14 10L14 4M3 21L10 14M4 14L10 14L10 20"
+	// Minus is the "minus" icon.
+	Minus = "M5 12L19 12"
+	// Square is the "square" icon.
+	Square = "M5 3L19 3C20.105 3 21 3.895 21 5L21 19C21 20.105 20.105 21 19 21L5 21C3.895 21 3 20.105 3 19L3 5C3 3.895 3.895 3 5 3Z"
 	// Columns2 is the "columns-2" icon.
 	Columns2 = "M5 3L19 3C20.105 3 21 3.895 21 5L21 19C21 20.105 20.105 21 19 21L5 21C3.895 21 3 20.105 3 19L3 5C3 3.895 3.895 3 5 3ZM12 3L12 21"
 	// PanelLeft is the "panel-left" icon.
