@@ -141,6 +141,22 @@ func (b *titleBar) takeActions() system.Action {
 	return a
 }
 
+func (b *titleBar) performActions(w *app.Window) {
+	if b == nil || w == nil {
+		return
+	}
+	acts := b.takeActions()
+	if acts == 0 {
+		return
+	}
+	w.Perform(acts)
+	if acts&(system.ActionMinimize|system.ActionMaximize|system.ActionUnmaximize|system.ActionFullscreen) != 0 {
+		// Perform converts mode actions into Option/Configure calls,
+		// which hide the macOS standard buttons on Decorated=false windows.
+		b.reapplyPlatformChrome()
+	}
+}
+
 // height is the bar's height in px, zero when nil.
 func (b *titleBar) height(gtx *layout.Context) int {
 	if b == nil {

@@ -325,21 +325,8 @@ func eventLoop(ctx context.Context, w *app.Window, env *kit.Env, sc *screens, q 
 			sc.skipGeometry = false
 			env.FrameEnd(&gtx)
 			e.Frame(gtx.Ops)
-			performTitleBarActions(w, sc)
+			sc.titleBar.performActions(w)
 		}
-	}
-}
-
-func performTitleBarActions(w *app.Window, sc *screens) {
-	acts := sc.titleBar.takeActions()
-	if acts == 0 {
-		return
-	}
-	w.Perform(acts)
-	if acts&(system.ActionMinimize|system.ActionMaximize|system.ActionUnmaximize|system.ActionFullscreen) != 0 {
-		// Perform converts mode actions into Option/Configure calls,
-		// which hide the macOS standard buttons on Decorated=false windows.
-		sc.titleBar.reapplyPlatformChrome()
 	}
 }
 
