@@ -325,9 +325,7 @@ func eventLoop(ctx context.Context, w *app.Window, env *kit.Env, sc *screens, q 
 			sc.skipGeometry = false
 			env.FrameEnd(&gtx)
 			e.Frame(gtx.Ops)
-			if acts := sc.titleBar.takeActions(); acts != 0 {
-				w.Perform(acts)
-			}
+			sc.titleBar.performActions(w)
 		}
 	}
 }
