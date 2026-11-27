@@ -25,7 +25,8 @@ func TestArmDoesNotUnparkOtherSessionsTimers(t *testing.T) {
 		testTimer1: {TimerID: testTimer1, Generation: 1, Purpose: kernel.TimerPurposeModelRetry, Deadline: deadline1},
 	})
 
-	ctx := t.Context()
+	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
+	t.Cleanup(cancel)
 	sess1, sess2, cfg := setupTwoSessionsForUnparkTest(t, ctx, store, fakeClk)
 
 	var mu sync.Mutex

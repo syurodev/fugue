@@ -38,7 +38,13 @@ func testObsSubmitFailures(t *testing.T) {
 	idGen := ids.NewUUIDv7(fakeClk, ids.NewDeterministic("obs-fail-test"))
 	store := newFakeStore()
 	setupDispatchedRun(store, 1)
+	releaseWork := make(chan struct{})
+	workReceived := make(chan struct{}, 1)
 	exec := newFakeExecutor()
+	exec.onExec = func(_ *Work, _ func(*Observation)) {
+		workReceived <- struct{}{}
+		<-releaseWork
+	}
 	cfg := Config{
 		SessionID:        testSessionID,
 		OwnerIncarnation: 1,
@@ -55,8 +61,9 @@ func testObsSubmitFailures(t *testing.T) {
 		t.Fatalf("start failed: %v", err)
 	}
 	defer sess.Stop()
+	defer close(releaseWork)
 
-	setupManualSlotAttempt(sess, store)
+	dispatchAttemptForObs(t, ctx, sess, workReceived, "cmd-disp-fail")
 
 	obsFail := makeModelResponseObservation(testSessionID, testRunID1, "m1", "a1", "cmd-fail", 1, 1, 5)
 
@@ -77,14 +84,20 @@ func testObsSubmitFailures(t *testing.T) {
 		t.Error("expected kernel rejection on empty response ref")
 	}
 
-	// 3. LoadRun error on observation
-	store.loadRunFn = func(_ context.Context, _ string) (*kernel.State, uint64, error) {
+	testObsSubmitLoadError(t)
+}
+
+func testObsSubmitLoadError(t *testing.T) {
+	t.Helper()
+	storeLoadErr := newFakeStore()
+	storeLoadErr.admission = Admission{SessionID: testSessionID, OwnerIncarnation: 1, ActiveRunID: "r-uncached", AdmissionToken: 1, Revision: 1}
+	storeLoadErr.loadRunFn = func(_ context.Context, _ string) (*kernel.State, uint64, error) {
 		return nil, 0, errLoadRunBoom
 	}
+	ctxErr, sessErr := startTestSession(t, storeLoadErr, newFakeExecutor(), "obs-load-err", 1)
+	defer sessErr.Stop()
 	obsUncached := makeModelResponseObservation(testSessionID, "r-uncached", "m1", "a1", "cmd-uncached", 1, 1, 5)
-	sess.admission.ActiveRunID = "r-uncached"
-	_, err = sess.SubmitObservation(ctx, &obsUncached)
-	if !errors.Is(err, errLoadRunBoom) {
+	if _, err := sessErr.SubmitObservation(ctxErr, &obsUncached); !errors.Is(err, errLoadRunBoom) {
 		t.Errorf("expected load error, got %v", err)
 	}
 }
@@ -97,11 +110,20 @@ func TestObservationAdditionalCoverage(t *testing.T) {
 	store := newFakeStore()
 	setupDispatchedRun(store, 1)
 
+	releaseWork := make(chan struct{})
+	workReceived := make(chan struct{}, 1)
 	exec := newFakeExecutor()
+	exec.onExec = func(_ *Work, _ func(*Observation)) {
+		workReceived <- struct{}{}
+		<-releaseWork
+	}
 	ctx, sess := startTestSession(t, store, exec, "obs-more-test", 1)
 	defer sess.Stop()
+	defer close(releaseWork)
 
 	testNilSubmissions(t, ctx, sess)
+
+	dispatchAttemptForObs(t, ctx, sess, workReceived, "cmd-disp-def")
 
 	// 1. Observation with empty CommandID, Origin, Token (auto-generates and defaults)
 	obsDefaults := makeModelResponseObservation(testSessionID, testRunID1, "m1", "a1", "", 0, 1, 5)
@@ -111,7 +133,6 @@ func TestObservationAdditionalCoverage(t *testing.T) {
 		c.RunID = ""
 	}
 	obsDefaults.Lease.AdmissionToken = 1
-	setupManualSlotAttempt(sess, store)
 
 	store.queueAppend(&AppendResult{
 		Duplicate:         false,
@@ -146,10 +167,12 @@ func testNilSubmissions(t *testing.T, ctx context.Context, sess *Session) {
 	sess.report(nil)
 }
 
-func setupManualSlotAttempt(sess *Session, store *fakeStore) {
-	sess.runs[testRunID1] = store.runs[testRunID1]
-	sess.attemptSlots[attemptKey{runID: testRunID1, invocationID: "m1", attemptID: "a1"}] = "slot-manual"
-	sess.slots.active["slot-manual"] = slotHandedOff
-	sess.runs[testRunID1].ModelInvocations["m1"].Attempts["a1"].Status = kernel.ModelAttemptStatusRequesting
-	sess.runs[testRunID1].ModelInvocations["m1"].Attempts["a1"].Dispatch.ExecutorFence = 5
+func dispatchAttemptForObs(t *testing.T, ctx context.Context, sess *Session, workReceived <-chan struct{}, cmdID string) {
+	t.Helper()
+	req := makeModelDispatchRequest(testRunID1, "m1", "a1", cmdID)
+	req.Facts.ModelDispatch.ExecutorFence = 5
+	if _, err := sess.Submit(ctx, &req); err != nil {
+		t.Fatalf("dispatch failed: %v", err)
+	}
+	waitSignal(t, ctx, workReceived, "work received")
 }

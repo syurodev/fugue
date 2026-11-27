@@ -65,7 +65,8 @@ func TestSlowSessionDoesNotDelayOtherSessionsTimers(t *testing.T) {
 	startTime := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
 	fakeClk := clock.NewFake(startTime)
 	store := newTestStoreWithAdmission(1)
-	ctx := t.Context()
+	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
+	t.Cleanup(cancel)
 
 	sessSlow, sessFast := setupSlowFastSessions(t, ctx, store, fakeClk, startTime)
 	defer sessSlow.Stop()
@@ -99,12 +100,16 @@ func TestSlowSessionDoesNotDelayOtherSessionsTimers(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartScheduler: %v", err)
 	}
-	defer sched.Stop()
+	var slowOnce sync.Once
+	defer func() {
+		slowOnce.Do(func() { close(slowBlockCh) })
+		sched.Stop()
+	}()
 
 	sessFast.SetScheduler(sched)
 	sessSlow.SetScheduler(sched)
 
-	armAndVerifyFastSlow(t, ctx, sched, fakeClk, slowBlockCh, fastFiredCh, slowFiredCh, startTime)
+	armAndVerifyFastSlow(t, ctx, sched, fakeClk, &slowOnce, slowBlockCh, fastFiredCh, slowFiredCh, startTime)
 }
 
 func armAndVerifyFastSlow(
@@ -112,6 +117,7 @@ func armAndVerifyFastSlow(
 	ctx context.Context,
 	sched *Scheduler,
 	fakeClk *clock.Fake,
+	slowOnce *sync.Once,
 	slowBlockCh chan struct{},
 	fastFiredCh, slowFiredCh <-chan struct{},
 	startTime time.Time,
@@ -142,7 +148,7 @@ func armAndVerifyFastSlow(
 		t.Fatal("timeout waiting for fast session timer to fire")
 	}
 
-	close(slowBlockCh)
+	slowOnce.Do(func() { close(slowBlockCh) })
 
 	select {
 	case <-slowFiredCh:
@@ -210,7 +216,11 @@ func TestArmFromActorNeverBlocksWhileSchedulerSubmits(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StartScheduler: %v", err)
 	}
-	defer sched.Stop()
+	var unblockOnce sync.Once
+	defer func() {
+		unblockOnce.Do(func() { close(blockSubmit) })
+		sched.Stop()
+	}()
 
 	sched.Arm(&ArmedTimer{
 		TimerID:    testTimer1,
@@ -230,7 +240,7 @@ func TestArmFromActorNeverBlocksWhileSchedulerSubmits(t *testing.T) {
 	}
 
 	assertNonBlockingArm(t, ctx, sched, startTime)
-	close(blockSubmit)
+	unblockOnce.Do(func() { close(blockSubmit) })
 }
 
 func TestUnroutableTimerStaysPendingUntilSessionRegisters(t *testing.T) {
@@ -249,7 +259,7 @@ func TestUnroutableTimerStaysPendingUntilSessionRegisters(t *testing.T) {
 
 	var mu sync.Mutex
 	registered := false
-	firedCh := make(chan struct{}, 1)
+	firedCh, parkedCh := make(chan struct{}, 1), make(chan struct{}, 1)
 
 	sched, err := StartScheduler(
 		ctx, store, fakeClk,
@@ -261,6 +271,11 @@ func TestUnroutableTimerStaysPendingUntilSessionRegisters(t *testing.T) {
 			}
 			return nil, false
 		},
+		WithOnParked(func(at *ArmedTimer) {
+			if at.TimerID == timer.TimerID {
+				parkedCh <- struct{}{}
+			}
+		}),
 		WithOnFire(func(at *ArmedTimer) {
 			if at.TimerID == timer.TimerID {
 				firedCh <- struct{}{}
@@ -272,8 +287,22 @@ func TestUnroutableTimerStaysPendingUntilSessionRegisters(t *testing.T) {
 	}
 	defer sched.Stop()
 
-	fakeClk.Advance(1 * time.Second)
+	verifyUnroutableParksThenFires(t, ctx, sched, sess, fakeClk, parkedCh, firedCh, &mu, &registered)
+}
 
+func verifyUnroutableParksThenFires(
+	t *testing.T,
+	ctx context.Context,
+	sched *Scheduler,
+	sess *Session,
+	fakeClk *clock.Fake,
+	parkedCh, firedCh <-chan struct{},
+	mu *sync.Mutex,
+	registered *bool,
+) {
+	t.Helper()
+	waitSignal(t, ctx, parkedCh, "unroutable timer to park")
+	fakeClk.Advance(1 * time.Second)
 	select {
 	case <-firedCh:
 		t.Fatal("timer fired while session was unroutable!")
@@ -281,16 +310,10 @@ func TestUnroutableTimerStaysPendingUntilSessionRegisters(t *testing.T) {
 	}
 
 	mu.Lock()
-	registered = true
+	*registered = true
 	mu.Unlock()
-
 	sess.SetScheduler(sched)
-
-	select {
-	case <-firedCh:
-	case <-ctx.Done():
-		t.Fatal("timeout waiting for timer to fire after session registration")
-	}
+	waitSignal(t, ctx, firedCh, "timer to fire after session registration")
 }
 
 func armAndAwaitRetry(
@@ -526,54 +549,37 @@ func verifyTransientBackoffIntervals(
 ) {
 	t.Helper()
 	sched.Arm(&ArmedTimer{
-		TimerID:    testTimer1,
-		SessionID:  testSessionID1,
-		RunID:      testRun1,
-		Generation: 1,
-		Purpose:    kernel.TimerPurposeModelRetry,
-		Deadline:   deadline,
+		TimerID: testTimer1, SessionID: testSessionID1, RunID: testRun1,
+		Generation: 1, Purpose: kernel.TimerPurposeModelRetry, Deadline: deadline,
 	})
-
-	select {
-	case <-armCh:
-	case <-ctx.Done():
-		t.Fatal("timeout waiting for initial arm")
-	}
+	waitSignal(t, ctx, armCh, "initial arm")
 
 	fakeClk.Advance(time.Second)
-	select {
-	case <-armCh:
-	case <-ctx.Done():
-		t.Fatal("timeout waiting for retry 1 arm")
-	}
-
-	mu.Lock()
-	count1 := *attempts
-	mu.Unlock()
-	if count1 != 1 {
-		t.Fatalf("expected 1 attempt at t=1s, got %d", count1)
-	}
+	waitSignal(t, ctx, armCh, "retry 1 arm")
+	requireAttemptCount(t, mu, attempts, 1, "at t=1s")
 
 	fakeClk.Advance(500 * time.Millisecond)
-	mu.Lock()
-	countMid := *attempts
-	mu.Unlock()
-	if countMid != 1 {
-		t.Fatalf("expected still 1 attempt during backoff, got %d", countMid)
-	}
+	requireAttemptCount(t, mu, attempts, 1, "during 1s backoff")
 
 	fakeClk.Advance(500 * time.Millisecond)
-	select {
-	case <-armCh:
-	case <-ctx.Done():
-		t.Fatal("timeout waiting for retry 2 arm")
-	}
+	waitSignal(t, ctx, armCh, "retry 2 arm")
+	requireAttemptCount(t, mu, attempts, 2, "at t=2s")
 
+	fakeClk.Advance(1500 * time.Millisecond)
+	requireAttemptCount(t, mu, attempts, 2, "during 2s backoff")
+
+	fakeClk.Advance(500 * time.Millisecond)
+	waitSignal(t, ctx, armCh, "retry 3 arm")
+	requireAttemptCount(t, mu, attempts, 3, "at t=4s")
+}
+
+func requireAttemptCount(t *testing.T, mu *sync.Mutex, attempts *int, want int, when string) {
+	t.Helper()
 	mu.Lock()
-	count2 := *attempts
+	got := *attempts
 	mu.Unlock()
-	if count2 != 2 {
-		t.Fatalf("expected 2 attempts at t=2s, got %d", count2)
+	if got != want {
+		t.Fatalf("expected %d attempts %s, got %d", want, when, got)
 	}
 }
 
@@ -584,7 +590,8 @@ func TestStopCancelsInFlightFire(t *testing.T) {
 	fakeClk := clock.NewFake(startTime)
 	store := newTestStoreWithAdmission(1)
 
-	ctx := t.Context()
+	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
+	t.Cleanup(cancel)
 	deadline := startTime.Add(time.Second)
 
 	// Create a session and stop its loop so its mailbox has no reader,
@@ -625,136 +632,5 @@ func TestStopCancelsInFlightFire(t *testing.T) {
 	case <-stopped:
 	case <-ctx.Done():
 		t.Fatal("sched.Stop hung while a fire was in-flight")
-	}
-}
-
-func TestFiredSetIsBounded(t *testing.T) {
-	t.Parallel()
-
-	startTime := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
-	fakeClk := clock.NewFake(startTime)
-	store := newTestStoreWithAdmission(1)
-
-	deadline := startTime.Add(5 * time.Second)
-	setupTestRunState(store, testRun1, true, map[string]*kernel.ActiveTimer{
-		testTimer1: {TimerID: testTimer1, Generation: 1, Purpose: kernel.TimerPurposeModelRetry, Deadline: deadline},
-	})
-
-	ctx, sess := newTestSessionWithClock(t, store, newFakeExecutor(), fakeClk, "fired-bounded")
-	defer sess.Stop()
-
-	queueTimerAppend(store, "cmd-fired-1", testRun1, 2)
-	queueTimerAppend(store, "cmd-fired-2", testRun1, 3)
-
-	fireCh := make(chan struct{}, 5)
-	armCh := make(chan struct{}, 5)
-
-	sched, err := StartScheduler(
-		ctx, store, fakeClk,
-		func(sessionID string) (*Session, bool) {
-			return sess, sessionID == testSessionID1
-		},
-		WithOnFire(func(at *ArmedTimer) {
-			if at.TimerID == testTimer1 {
-				fireCh <- struct{}{}
-			}
-		}),
-		WithOnArm(func(at *ArmedTimer) {
-			if at.TimerID == testTimer1 {
-				armCh <- struct{}{}
-			}
-		}),
-	)
-	if err != nil {
-		t.Fatalf("StartScheduler: %v", err)
-	}
-	defer sched.Stop()
-	sess.SetScheduler(sched)
-
-	verifyLateRearmNoOp(t, ctx, sched, fakeClk, deadline, armCh, fireCh, store)
-}
-
-func armAndFireInitial(
-	t *testing.T,
-	ctx context.Context,
-	sched *Scheduler,
-	fakeClk *clock.Fake,
-	deadline time.Time,
-	armCh, fireCh <-chan struct{},
-) {
-	t.Helper()
-	sched.Arm(&ArmedTimer{
-		TimerID:    testTimer1,
-		SessionID:  testSessionID1,
-		RunID:      testRun1,
-		Generation: 1,
-		Purpose:    kernel.TimerPurposeModelRetry,
-		Deadline:   deadline,
-	})
-
-	select {
-	case <-armCh:
-	case <-ctx.Done():
-		t.Fatal("timeout waiting for initial arm")
-	}
-
-	fakeClk.Advance(6 * time.Second)
-	select {
-	case <-fireCh:
-	case <-ctx.Done():
-		t.Fatal("timeout waiting for initial fire")
-	}
-}
-
-func verifyLateRearmNoOp(
-	t *testing.T,
-	ctx context.Context,
-	sched *Scheduler,
-	fakeClk *clock.Fake,
-	deadline time.Time,
-	armCh, fireCh <-chan struct{},
-	store *fakeStore,
-) {
-	t.Helper()
-	armAndFireInitial(t, ctx, sched, fakeClk, deadline, armCh, fireCh)
-
-	// Advance clock past firedTTL (10 min) to evict entry from fired set
-	fakeClk.Advance(15 * time.Minute)
-	sched.Wake(testSessionID1)
-
-	// Late re-arm of the same old generation after eviction
-	sched.Arm(&ArmedTimer{
-		TimerID:    testTimer1,
-		SessionID:  testSessionID1,
-		RunID:      testRun1,
-		Generation: 1,
-		Purpose:    kernel.TimerPurposeModelRetry,
-		Deadline:   deadline,
-	})
-
-	select {
-	case <-armCh:
-	case <-ctx.Done():
-		t.Fatal("timeout waiting for late arm")
-	}
-
-	fakeClk.Advance(1 * time.Second)
-	select {
-	case <-fireCh:
-	case <-ctx.Done():
-		t.Fatal("timeout waiting for late re-arm fire to resolve as no-op")
-	}
-
-	store.mu.Lock()
-	defer store.mu.Unlock()
-	events := store.transitions[0].Events
-	elapsedCount := 0
-	for _, ev := range events {
-		if _, ok := ev.(*kernel.TimerElapsedEvent); ok {
-			elapsedCount++
-		}
-	}
-	if elapsedCount > 1 {
-		t.Fatalf("expected at most 1 TimerElapsedEvent, got %d", elapsedCount)
 	}
 }

@@ -41,8 +41,10 @@ const (
 
 // testTimeout only stops a hung test. Tests drive time through the fake clock
 // and wait on explicit signals, so no result may depend on this deadline;
-// keep it generous because -race on slow CI runners makes real work slow.
-const testTimeout = 10 * time.Second
+// keep it tight enough that a hung mutant fails well inside gremlins'
+// per-mutant timeout even when build caches are warm, while still ~30x above
+// the slowest -race test (~30ms).
+const testTimeout = time.Second
 
 type appendResultOrError struct {
 	result AppendResult

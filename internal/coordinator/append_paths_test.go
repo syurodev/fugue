@@ -103,6 +103,8 @@ func TestResolverNeverAppendsAndActorAppliesTheResolution(t *testing.T) {
 	// The actor keeps serving other commands while the commit is unresolved. Its
 	// append blocks until the resolver has read the commit back.
 	acceptBlocked, releaseAccept := blockAppendsOf(ctx, store, testRunID2)
+	var releaseOnce sync.Once
+	defer releaseOnce.Do(func() { close(releaseAccept) })
 	accept := acceptRunRequest(testRunID2, testCmdAcceptR2, "m2", "a2")
 	acceptDone := submitAsync(ctx, sess, &accept)
 	waitSignal(t, ctx, acceptBlocked, "accept r2 append")
@@ -110,7 +112,7 @@ func TestResolverNeverAppendsAndActorAppliesTheResolution(t *testing.T) {
 	store.queueResolve(CommitResolutionNotCommitted, nil)
 	fakeClk.Advance(time.Second)
 	waitValue(t, ctx, resolveReport, "resolver read-back")
-	close(releaseAccept)
+	releaseOnce.Do(func() { close(releaseAccept) })
 
 	if err := waitValue(t, ctx, acceptDone, "accept r2 reply"); err != nil {
 		t.Fatalf("accept r2: %v", err)
@@ -437,5 +439,163 @@ func TestAppendAfterResolvedUnknownCommitUsesTheStoresRevisions(t *testing.T) {
 	last := transitions[len(transitions)-1]
 	if last.ExpectedRunRevision != 7 || last.ExpectedAdmissionRevision != 9 {
 		t.Fatalf("append used revisions %d/%d, want the store's 7/9", last.ExpectedRunRevision, last.ExpectedAdmissionRevision)
+	}
+}
+
+func TestRefreshAppendRevisionsHandlesAdmissionLoadError(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeStore()
+	store.admission = Admission{SessionID: testSessionID, OwnerIncarnation: 1, Revision: 1, QueueRevision: 1}
+	ctx, sess := startTestSession(t, store, newFakeExecutor(), "refresh-adm-err", 1)
+	defer sess.Stop()
+
+	// AcceptRun has AdmissionToken==0, so applyAppended marks admissionStale=true before maybeAdmitNext.
+	// Fail the follow-up AdmitRun's refreshAppendRevisions via admissionErr.
+	store.onAppend = func(tr *Transition) {
+		if tr.Kind == testKindAcceptRun {
+			store.mu.Lock()
+			store.admissionErr = errAdmLoadBoom
+			store.mu.Unlock()
+		}
+	}
+	if _, err := sess.Submit(ctx, reqPtr(acceptRunRequest(testRunID1, testCmdAccept1, "m1", "a1"))); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if sess.admission.ActiveRunID != "" {
+		t.Fatalf("expected admission deferred on refreshAdmission error, got active=%q", sess.admission.ActiveRunID)
+	}
+
+	// Recover with explicit admission revision 23; trigger maybeAdmitNext via a second accept.
+	store.mu.Lock()
+	store.onAppend = nil
+	store.admissionErr = nil
+	store.admission.Revision = 23
+	store.mu.Unlock()
+	if _, err := sess.Submit(ctx, reqPtr(acceptRunRequest(testRunID2, testCmdAcceptR2, "m2", "a2"))); err != nil {
+		t.Fatalf("accept r2: %v", err)
+	}
+	admit := admitTransition(store)
+	if admit == nil || admit.ExpectedAdmissionRevision != 24 {
+		t.Fatalf("expected AdmitRun ExpectedAdmissionRevision=24, got %+v", admit)
+	}
+}
+
+func TestRefreshAppendRevisionsHandlesRunLoadError(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeStore()
+	store.admission = Admission{SessionID: testSessionID, OwnerIncarnation: 1, Revision: 1, QueueRevision: 1}
+	ctx, sess := startTestSession(t, store, newFakeExecutor(), "refresh-run-err", 1)
+	defer sess.Stop()
+
+	// AcceptRun with RevisionsUnavailable deletes runRevs[r1] before maybeAdmitNext calls commit.
+	// Fail LoadRun inside refreshAppendRevisions on that follow-up AdmitRun commit.
+	store.queueAppend(&AppendResult{RevisionsUnavailable: true}, nil)
+	store.onAppend = func(tr *Transition) {
+		if tr.Kind == testKindAcceptRun {
+			store.mu.Lock()
+			store.loadRunFn = func(context.Context, string) (*kernel.State, uint64, error) {
+				return nil, 0, errLoadRunBoom
+			}
+			store.mu.Unlock()
+		}
+	}
+	if _, err := sess.Submit(ctx, reqPtr(acceptRunRequest(testRunID1, testCmdAccept1, "m1", "a1"))); err != nil {
+		t.Fatalf("accept: %v", err)
+	}
+	if sess.admission.ActiveRunID != "" {
+		t.Fatalf("expected admission deferred on LoadRun error, got active=%q", sess.admission.ActiveRunID)
+	}
+
+	// Recover with explicit store run revision 17; trigger maybeAdmitNext via a second accept.
+	store.mu.Lock()
+	store.onAppend = nil
+	store.loadRunFn = nil
+	store.runRevs[testRunID1] = 17
+	store.mu.Unlock()
+	if _, err := sess.Submit(ctx, reqPtr(acceptRunRequest(testRunID2, testCmdAcceptR2, "m2", "a2"))); err != nil {
+		t.Fatalf("accept r2: %v", err)
+	}
+	admit := admitTransition(store)
+	if admit == nil || admit.ExpectedRunRevision != 17 {
+		t.Fatalf("expected AdmitRun ExpectedRunRevision=17, got %+v", admit)
+	}
+}
+
+func TestReloadConfirmedTracksPartialReloadFailures(t *testing.T) {
+	t.Parallel()
+
+	t.Run("run load error keeps run revision invalidated", func(t *testing.T) {
+		t.Parallel()
+		store := newFakeStore()
+		ctx, sess := setupDispatchedObservationSession(t, store, "reload-confirmed-run-err")
+		defer sess.Stop()
+
+		store.mu.Lock()
+		store.loadRunFn = func(context.Context, string) (*kernel.State, uint64, error) {
+			return nil, 0, errLoadRunBoom
+		}
+		store.mu.Unlock()
+		store.queueAppend(&AppendResult{Duplicate: true}, nil)
+		obs := makeModelResponseObservation(testSessionID, testRunID1, "m1", "a1", "cmd-dup-run-err", 1, 1, 5)
+		if _, err := sess.SubmitObservation(ctx, &obs); err != nil {
+			t.Fatalf("confirmed duplicate append must succeed despite reload error: %v", err)
+		}
+		// Subsequent step on r1 must still attempt refreshAppendRevisions (failing with errLoadRunBoom).
+		if _, err := sess.Submit(ctx, reqPtr(extendBudgetRequest(testOriginUser, testOriginUser))); !errors.Is(err, errLoadRunBoom) {
+			t.Fatalf("expected next commit to reload run and hit errLoadRunBoom, got %v", err)
+		}
+	})
+
+	t.Run("admission load error keeps admission stale", func(t *testing.T) {
+		t.Parallel()
+		store := newFakeStore()
+		ctx, sess := setupDispatchedObservationSession(t, store, "reload-confirmed-adm-err")
+		defer sess.Stop()
+
+		store.mu.Lock()
+		store.admissionErr = errAdmLoadBoom
+		store.mu.Unlock()
+		store.queueAppend(&AppendResult{Duplicate: true}, nil)
+		obs := makeModelResponseObservation(testSessionID, testRunID1, "m1", "a1", "cmd-dup-adm-err", 1, 1, 5)
+		if _, err := sess.SubmitObservation(ctx, &obs); err != nil {
+			t.Fatalf("confirmed duplicate append must succeed despite admission reload error: %v", err)
+		}
+		// Next request prepares admission via refreshAdmission and sees errAdmLoadBoom.
+		if _, err := sess.Submit(ctx, reqPtr(extendBudgetRequest(testOriginUser, testOriginUser))); !errors.Is(err, errAdmLoadBoom) {
+			t.Fatalf("expected next request to reload admission and hit errAdmLoadBoom, got %v", err)
+		}
+	})
+}
+
+func TestReloadConfirmedSetsRevisionsUnavailable(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeStore()
+	setupAdmittedRun(store)
+	ctx, sess := startTestSession(t, store, newFakeExecutor(), "reload-confirmed-flags", 1)
+	defer sess.Stop()
+	sess.Stop()
+
+	var res AppendResult
+	sess.reloadConfirmed(ctx, testRunID1, &res)
+	if res.RevisionsUnavailable || res.RunRevision != 1 || res.AdmissionRevision != 1 {
+		t.Fatalf("expected revisions available (1/1), got %+v", res)
+	}
+
+	store.loadRunFn = func(context.Context, string) (*kernel.State, uint64, error) {
+		return nil, 0, errLoadRunBoom
+	}
+	sess.reloadConfirmed(ctx, testRunID1, &res)
+	if !res.RevisionsUnavailable {
+		t.Fatalf("expected RevisionsUnavailable=true on run load error, got %+v", res)
+	}
+
+	store.loadRunFn = nil
+	store.admissionErr = errAdmLoadBoom
+	sess.reloadConfirmed(ctx, testRunID1, &res)
+	if !res.RevisionsUnavailable {
+		t.Fatalf("expected RevisionsUnavailable=true on admission load error, got %+v", res)
 	}
 }
