@@ -9,6 +9,7 @@ import (
 
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/process"
+	"github.com/syurodev/fugue/internal/testutil/cheapvault"
 	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
@@ -132,6 +133,11 @@ func (s *bareStopSession) OwnsPID(pid int) (bool, error) {
 // session keeps its PeerOwner in the retained set unless StopProof proved the
 // tree empty, denies surviving descendants, fails closed on tree-read errors,
 // and prunes verified-empty owners on the next check.
+func TestEndedSessionSurvivingDescendantIsStillDenied(t *testing.T) {
+	t.Parallel()
+	runEndedSessionSurvivingDescendantIsStillDenied(t, cheapvault.Unlocked(t))
+}
+
 func runEndedSessionSurvivingDescendantIsStillDenied(t *testing.T, v *vault.Service) {
 	t.Helper()
 	assertRetainedVerifiableLifecycle(t, v)

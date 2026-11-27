@@ -399,6 +399,20 @@ func checkRowTests(row *verificationRow, linuxTests, darwinTests map[string]bool
 }
 
 func (r repo) testFuncsForOS(ctx context.Context, goos string) (map[string]bool, error) {
+	byPkg, err := r.testFuncsByPkgForOS(ctx, goos)
+	if err != nil {
+		return nil, err
+	}
+	funcs := map[string]bool{}
+	for _, pkgFuncs := range byPkg {
+		for name := range pkgFuncs {
+			funcs[name] = true
+		}
+	}
+	return funcs, nil
+}
+
+func (r repo) testFuncsByPkgForOS(ctx context.Context, goos string) (map[string]map[string]bool, error) {
 	type modTarget struct {
 		dir    string
 		prefix string
@@ -408,23 +422,38 @@ func (r repo) testFuncsForOS(ctx context.Context, goos string) (map[string]bool,
 	if info, err := os.Stat(uiMod); err == nil && !info.IsDir() {
 		roots = append(roots, modTarget{dir: filepath.Join(r.root, "ui"), prefix: "ui"})
 	}
-	funcs := map[string]bool{}
+	byPkg := map[string]map[string]bool{}
 	for _, mod := range roots {
 		pkgs, err := listPackagesForOS(ctx, mod.dir, goos)
 		if err != nil {
 			return nil, err
 		}
 		for _, p := range pkgs {
-			relDir := filepath.Join(mod.prefix, p.rel())
-			for _, name := range slices.Concat(p.TestGoFiles, p.XTestGoFiles) {
-				rel := filepath.ToSlash(filepath.Join(relDir, name))
-				if err := collectTestFuncs(r, rel, funcs); err != nil {
-					return nil, err
-				}
+			if err := collectPackageTests(r, mod.prefix, p, byPkg); err != nil {
+				return nil, err
 			}
 		}
 	}
-	return funcs, nil
+	return byPkg, nil
+}
+
+func collectPackageTests(r repo, modPrefix string, p *goPackage, byPkg map[string]map[string]bool) error {
+	relDir := filepath.ToSlash(filepath.Join(modPrefix, p.rel()))
+	if relDir == "" {
+		relDir = "."
+	}
+	funcs := byPkg[relDir]
+	if funcs == nil {
+		funcs = map[string]bool{}
+		byPkg[relDir] = funcs
+	}
+	for _, name := range slices.Concat(p.TestGoFiles, p.XTestGoFiles) {
+		rel := filepath.ToSlash(filepath.Join(relDir, name))
+		if err := collectTestFuncs(r, rel, funcs); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func listPackagesForOS(ctx context.Context, dir, goos string) ([]*goPackage, error) {

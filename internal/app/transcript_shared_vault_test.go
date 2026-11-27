@@ -24,7 +24,6 @@ func sharedTranscriptVaultCases() []sharedTranscriptVaultCase {
 		{"TestCompleteBeforeAppendSoNoStaleDeltaFollowsTheDurableEvent", runCompleteBeforeAppendSoNoStaleDeltaFollowsTheDurableEvent},
 		{"TestPurgedSessionTopicsAreUnregisteredAndDenied", runPurgedSessionTopicsAreUnregisteredAndDenied},
 		{"TestRedactionMasksOneMiB", runRedactionMasksOneMiB},
-		{"TestEndedSessionSurvivingDescendantIsStillDenied", runEndedSessionSurvivingDescendantIsStillDenied},
 		{"TestFailedStopKeepsPendingOwner", runFailedStopKeepsPendingOwner},
 		{"TestActorRetiringDuringPeerCheckStillDenies", runActorRetiringDuringPeerCheckStillDenies},
 		{"TestSendAppendFailureClosesSession", runSendAppendFailureClosesSession},

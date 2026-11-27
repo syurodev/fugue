@@ -1,0 +1,7 @@
+# probe-test: ./internal/a TestSubtest
+diff --git a/internal/a/a.go b/internal/a/a.go
+--- a/internal/a/a.go
++++ b/internal/a/a.go
+@@ -1 +1 @@
+-a
++b
