@@ -106,6 +106,9 @@ static void fugueConfigureTitleBar(uintptr_t viewPtr, int fullscreen, uintptr_t 
 				}
 				if (handle != 0) {
 					fugueOnTitleBarMetrics(handle, barH, zx0, zy0, zx1, zy1);
+					// Redraw through AppKit: Gio's Window.Invalidate deadlocks
+					// when called on the main thread (FUG-101).
+					[view setNeedsDisplay:YES];
 				}
 			}
 			if (handle != 0) {

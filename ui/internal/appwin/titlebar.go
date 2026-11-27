@@ -56,7 +56,6 @@ type titleBar struct {
 	nativeView     uintptr
 	platform       macTitleBarPlatform
 	mac            macMetricsState
-	invalidate     func()
 	lastDragRectDp image.Rectangle
 	title          string
 	pending        system.Action
