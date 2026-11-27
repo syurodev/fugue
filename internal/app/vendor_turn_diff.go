@@ -296,13 +296,23 @@ func (a *vendorSessionActor) startWarmUp() {
 	done := make(chan struct{})
 	a.warm = done
 	workDir, logger := a.cwd, a.manager.deps.Logger
-	a.manager.spawn("turn-snapshot-warm-"+a.info.ID, func(ctx context.Context) error {
+	a.warmTask = a.manager.spawn("turn-snapshot-warm-"+a.info.ID, func(ctx context.Context) error {
 		defer close(done)
 		if err := port.Warm(ctx, workDir); err != nil {
 			logger.WarnContext(ctx, "the shadow warm-up failed", "error_code", string(errcode.CodeOf(err)))
 		}
 		return nil
 	})
+}
+
+// stopWarmUp stops an in-flight shadow warm-up and waits for it to exit
+// before session teardown releases snapshots or removes its temp directory.
+func (a *vendorSessionActor) stopWarmUp() {
+	if a.warmTask == nil {
+		return
+	}
+	a.warmTask.Stop()
+	<-a.warm
 }
 
 // releaseTurnSnapshot forgets a turn's snapshot pair after its diff is computed,

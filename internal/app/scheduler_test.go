@@ -21,6 +21,7 @@ import (
 	"github.com/syurodev/fugue/internal/storage"
 	"github.com/syurodev/fugue/internal/teams"
 	"github.com/syurodev/fugue/internal/testutil/cheapvault"
+	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 	"github.com/syurodev/fugue/internal/workspace"
@@ -199,9 +200,9 @@ func testTier2HostConfigOverride(t *testing.T) {
 	requireCode(t, err, errcode.VendorCapacity)
 }
 
-func TestTeamSubTasksGetLowerCPUWeight(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runTeamSubTasksGetLowerCPUWeight(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	ad := &cpuWeightCaptureAdapter{}
 	m := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
 		Store: f.store, Transcripts: f.service, Adapter: ad, Vault: f.vault,

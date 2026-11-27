@@ -64,6 +64,8 @@ func newAgyRelayFixture(t *testing.T) *agyRelayFixture {
 		Transport:    newScriptedTransport(),
 		VendorBinary: exe,
 		AgyBinary:    agyLink,
+		GitBinary:    testGitBinary(t),
+		OCRBinary:    testNoOCRBinary(),
 	})
 	if err != nil {
 		t.Fatal(err)

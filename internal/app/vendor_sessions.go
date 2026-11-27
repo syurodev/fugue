@@ -70,6 +70,9 @@ type VendorSessionDeps struct {
 	TestAfterPeerSnapshot func()
 	// CrashPoint is the optional named Stage A crash point armed via internal/config.
 	CrashPoint string
+	// Spawn optionally overrides the task spawner for supervised session tasks so
+	// host shutdown waits for background warm-up and release tasks.
+	Spawn func(string, func(context.Context) error) *supervise.Task
 }
 
 type vendorVaultObserver interface {
@@ -129,8 +132,11 @@ func NewVendorSessions(ctx context.Context, deps *VendorSessionDeps) (*VendorSes
 	if copyDeps.Logger == nil {
 		copyDeps.Logger = slog.Default()
 	}
-	spawn := func(name string, fn func(context.Context) error) *supervise.Task {
-		return supervise.Go(ctx, name, fn)
+	spawn := copyDeps.Spawn
+	if spawn == nil {
+		spawn = func(name string, fn func(context.Context) error) *supervise.Task {
+			return supervise.Go(ctx, name, fn)
+		}
 	}
 	return &VendorSessions{
 		deps:           copyDeps,

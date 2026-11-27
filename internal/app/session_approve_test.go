@@ -46,7 +46,7 @@ func newApproveFixture(t *testing.T) *approveFixture {
 	hp, err := StartHost(t.Context(), &HostDeps{
 		DataDir: cheapVaultDataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("approve-test")),
-		Transport: newScriptedTransport(), VendorBinary: exe,
+		Transport: newScriptedTransport(), VendorBinary: exe, GitBinary: testGitBinary(t), OCRBinary: testNoOCRBinary(),
 		Bridge: VendorBridge{Binary: exe, Socket: filepath.Join(t.TempDir(), "host.sock")},
 	})
 	if err != nil {
@@ -637,6 +637,7 @@ func startReadySessionWithoutTurn(t *testing.T) (*HostRuntime, *SessionToolServi
 		DataDir: cheapVaultDataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("approve-noturn")),
 		Transport: newScriptedTransport(), VendorBinary: mustExe(t),
+		GitBinary: testGitBinary(t), OCRBinary: testNoOCRBinary(),
 		Bridge: VendorBridge{Binary: mustExe(t), Socket: filepath.Join(t.TempDir(), "host.sock")},
 	})
 	if err != nil {

@@ -70,6 +70,7 @@ type vendorSessionActor struct {
 	snaps map[string]TurnSnapshot
 	// warm closes when the background warm-up of the shadow index has ended.
 	warm       chan struct{}
+	warmTask   *supervise.Task
 	finished   bool
 	stopProved bool
 	// attached turns on once the create or resume command has committed:
@@ -162,6 +163,7 @@ func (a *vendorSessionActor) run(ctx context.Context) error {
 	}
 	defer a.vaultSub.Close()
 	defer a.releaseSessionSnapshots(ctx)
+	defer a.stopWarmUp()
 	defer a.retirePeerOwner()
 	defer a.stopIdleTimer()
 	for {

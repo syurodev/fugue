@@ -59,6 +59,7 @@ func newVendorServiceFixtureCustom(t *testing.T, customize func(*HostDeps)) *ven
 		DataDir: cheapVaultDataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: fugueHome},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("vendor-svc")),
 		Transport: newScriptedTransport(), VendorBinary: exe,
+		GitBinary: testGitBinary(t), OCRBinary: testNoOCRBinary(),
 	}
 	if customize != nil {
 		customize(deps)

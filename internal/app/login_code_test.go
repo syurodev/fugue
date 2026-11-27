@@ -6,6 +6,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -14,10 +15,12 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/redact"
+	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/vendor"
 )
@@ -57,7 +60,7 @@ exit 1
 
 func startCodeLoginWithLogger(t *testing.T, expectedCode, stdinLogPath string, logger *slog.Logger) (*AccountsService, *fakeLoginAdapter, *Subscription, string) {
 	t.Helper()
-	f := newTranscriptFixture(t, nil)
+	f := newHubOnlyFixture(t)
 	cli := codePromptCLI(t, expectedCode, stdinLogPath)
 	ad := newFakeLoginAdapter(t, f.clock, cli, false)
 	ad.acceptsCode = true
@@ -275,5 +278,98 @@ func TestHAE13SubmitLoginCodeAbsentFromLogsErrorsAndEvents(t *testing.T) {
 	}
 	if strings.Contains(logBuf.String(), testInput) {
 		t.Fatal("logs contain the submitted input")
+	}
+}
+
+type controlledLoginRun struct {
+	lines     chan string
+	done      chan struct{}
+	closeOnce sync.Once
+	end       vendor.LoginEnd
+}
+
+func (r *controlledLoginRun) Lines() <-chan string { return r.lines }
+
+func (r *controlledLoginRun) WriteCode(_ redact.Secret) error {
+	r.closeOnce.Do(func() { close(r.done) })
+	return nil
+}
+
+func (r *controlledLoginRun) Done() <-chan struct{} { return r.done }
+
+func (r *controlledLoginRun) End() vendor.LoginEnd { return r.end }
+
+func (r *controlledLoginRun) Stop(_ context.Context) (process.StopProof, error) {
+	r.closeOnce.Do(func() { close(r.done) })
+	return process.StopProof{Status: process.StopProofProved}, nil
+}
+
+type controlledLoginAdapter struct {
+	run *controlledLoginRun
+}
+
+func (a *controlledLoginAdapter) Probe(context.Context, vendor.AccountHome) (vendor.Probe, error) {
+	return vendor.Probe{Login: vendor.LoginMissing}, nil
+}
+
+func (a *controlledLoginAdapter) Start(context.Context, *vendor.StartSpec) (vendor.Session, error) {
+	return nil, errcode.New(errcode.InvalidArgument, "not used")
+}
+
+func (a *controlledLoginAdapter) LoginCommand() vendor.LoginCommand {
+	return vendor.LoginCommand{AcceptsCode: true}
+}
+
+func (a *controlledLoginAdapter) StartLogin(context.Context, vendor.AccountHome) (vendor.LoginRun, error) {
+	return a.run, nil
+}
+
+// TestVRE15LoginCodeRejectedDrainsLinesAfterDoneAndFreesSlot is a deterministic
+// regression test for the monitorLogin race: when Done() closes before Lines()
+// delivers the rejection stderr line and closes, monitorLogin must still drain
+// Lines() before publishing LoginFailed and must free the vendor slot before
+// the terminal event is visible to subscribers.
+func TestVRE15LoginCodeRejectedDrainsLinesAfterDoneAndFreesSlot(t *testing.T) {
+	t.Parallel()
+	f := newHubOnlyFixture(t)
+	run := &controlledLoginRun{
+		lines: make(chan string, 4),
+		done:  make(chan struct{}),
+		end:   vendor.LoginEnd{Ran: true, ExitCode: 1},
+	}
+	ad := &controlledLoginAdapter{run: run}
+	svc, _, _ := newLoginService(t, f, map[string]vendor.Adapter{VendorClaude: ad})
+	sub := subscribeLoginTopic(t, f)
+
+	view, err := svc.StartLogin(t.Context(), string(KindApp), VendorClaude)
+	if err != nil {
+		t.Fatalf("StartLogin: %v", err)
+	}
+	run.lines <- "Paste code here if prompted > "
+	for {
+		p := nextLoginProgress(t, sub)
+		if p.State == LoginWaiting && strings.Contains(p.Prompt, "Paste code here if prompted > ") {
+			break
+		}
+	}
+
+	if err := svc.SubmitLoginCode(t.Context(), string(KindApp), "cmd-race", view.LoginID, redact.NewSecret("bad#code")); err != nil {
+		t.Fatalf("SubmitLoginCode: %v", err)
+	}
+	run.lines <- "Couldn't log in: That code wasn't accepted."
+	close(run.lines)
+
+	for {
+		p := nextLoginProgress(t, sub)
+		if p.State != LoginFailed {
+			continue
+		}
+		if !strings.Contains(p.Prompt, "Couldn't log in: That code wasn't accepted.") {
+			t.Fatalf("failed prompt = %q, want stderr rejection message", p.Prompt)
+		}
+		break
+	}
+	if _, err := svc.StartLogin(t.Context(), string(KindApp), VendorClaude); err != nil {
+		t.Fatalf("StartLogin immediately after LoginFailed = %v, want free slot", err)
 	}
 }

@@ -303,6 +303,8 @@ func formatTeamBudgetLine(b *teams.TeamBudget) string {
 // whose proposing session is not closed (Q-143 A). Calling it on repeated
 // vault unlocks is idempotent via InteractionService.Ensure.
 func (s *TeamProposalService) RebuildPendingProposalCards(ctx context.Context) error {
+	s.rebuildMu.Lock()
+	defer s.rebuildMu.Unlock()
 	if s.interactions == nil {
 		return nil
 	}

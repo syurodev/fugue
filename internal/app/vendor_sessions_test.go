@@ -14,6 +14,7 @@ import (
 	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/transcript"
+	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/claude"
 	"github.com/syurodev/fugue/internal/vendorstore"
@@ -161,9 +162,9 @@ func (s *actorTestSession) Close(ctx context.Context, _ vendor.CloseReason) (pro
 	return process.StopProof{Status: process.StopProofProved}, nil
 }
 
-func TestActorPersistsVendorInitiatedTurnFromLateSteer(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runActorPersistsVendorInitiatedTurnFromLateSteer(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	session := newActorTestSession()
 	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
 		Store: f.store, Transcripts: f.service, Adapter: actorTestAdapter{session: session}, Vault: f.vault,
@@ -202,9 +203,9 @@ func TestActorPersistsVendorInitiatedTurnFromLateSteer(t *testing.T) {
 	mustCloseActorSessions(t, manager)
 }
 
-func TestVendorSessionSteerInterruptAndList(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runVendorSessionSteerInterruptAndList(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	session := newActorTestSession()
 	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
 		Store: f.store, Transcripts: f.service, Adapter: actorTestAdapter{session: session}, Vault: f.vault,
@@ -240,9 +241,9 @@ func TestVendorSessionSteerInterruptAndList(t *testing.T) {
 	mustCloseActorSessions(t, manager)
 }
 
-func TestActorAbsorbedSendEndsFugueTurn(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runActorAbsorbedSendEndsFugueTurn(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	session := newActorTestSession()
 	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
 		Store: f.store, Transcripts: f.service, Adapter: actorTestAdapter{session: session}, Vault: f.vault,
@@ -489,9 +490,9 @@ func hasProvedProcessExit(events []vendorstore.RecordedEvent) bool {
 	return false
 }
 
-func TestActorProcessExitPersistsStopProofBeforeClose(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runActorProcessExitPersistsStopProofBeforeClose(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	session := newActorTestSession()
 	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
 		Store: f.store, Transcripts: f.service, Adapter: actorTestAdapter{session: session}, Vault: f.vault,
@@ -529,9 +530,9 @@ func TestActorProcessExitPersistsStopProofBeforeClose(t *testing.T) {
 	}
 }
 
-func TestVendorSessionResumeUsesStoredHandleAndStartsNewProcess(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runVendorSessionResumeUsesStoredHandleAndStartsNewProcess(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	firstSession := newActorTestSession()
 	firstSession.closeStarted = make(chan struct{})
 	actorCtx, cancelActor := context.WithCancel(t.Context())
@@ -574,9 +575,9 @@ func TestVendorSessionResumeUsesStoredHandleAndStartsNewProcess(t *testing.T) {
 	mustCloseActorSessions(t, secondManager)
 }
 
-func TestActorAppendFailureDoesNotAdvanceSequence(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runActorAppendFailureDoesNotAdvanceSequence(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	store := &failAppendVendorStore{Store: f.store, eventType: vendorstore.VendorTurnStarted}
 	session := newActorTestSession()
 	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
@@ -598,9 +599,9 @@ func TestActorAppendFailureDoesNotAdvanceSequence(t *testing.T) {
 	}
 }
 
-func TestVendorSessionCapacityRejectsThirdActiveProcess(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runVendorSessionCapacityRejectsThirdActiveProcess(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	session := newActorTestSession()
 	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
 		Store: f.store, Transcripts: f.service, Adapter: actorTestAdapter{session: session}, Vault: f.vault,
@@ -615,9 +616,9 @@ func TestVendorSessionCapacityRejectsThirdActiveProcess(t *testing.T) {
 	mustCloseActorSessions(t, manager)
 }
 
-func TestActorObservationBackpressurePreservesAll(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runActorObservationBackpressurePreservesAll(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	session := newActorTestSession()
 	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
 		Store: f.store, Transcripts: f.service, Adapter: actorTestAdapter{session: session}, Vault: f.vault,
@@ -644,9 +645,9 @@ func TestActorObservationBackpressurePreservesAll(t *testing.T) {
 	mustCloseActorSessions(t, manager)
 }
 
-func TestActorUsesCommittedTranscriptPath(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runActorUsesCommittedTranscriptPath(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	session := newActorTestSession()
 	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
 		Store: f.store, Transcripts: f.service, Adapter: actorTestAdapter{session: session}, Vault: f.vault,
@@ -661,9 +662,9 @@ func TestActorUsesCommittedTranscriptPath(t *testing.T) {
 	mustCloseActorSessions(t, manager)
 }
 
-func TestCloseRPCDeadlineDoesNotSkipStopOrder(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runCloseRPCDeadlineDoesNotSkipStopOrder(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	session := newActorTestSession()
 	session.closeStarted = make(chan struct{})
 	closeGate := make(chan struct{})

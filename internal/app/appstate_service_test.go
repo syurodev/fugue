@@ -96,14 +96,11 @@ func TestAppStateRestoresEveryWindowWhileTheVaultIsLocked(t *testing.T) {
 	ctx := t.Context()
 	clk := clock.NewFake(time.Unix(0, 0))
 	dir := t.TempDir()
+	seedCheapVaultDataDir(t, dir)
 
 	first := startAppStateHost(t, dir, clk)
-	// Configure the vault so the restart starts locked rather than
+	// Seed the cheap keyring so the restart starts locked rather than
 	// unconfigured: the layout store must work in both states.
-	if _, err := first.Vault().SetupBytes(ctx, []byte(testAppStateMasterUnlock)); err != nil {
-		t.Fatalf("configure the vault: %v", err)
-	}
-	first.Vault().Lock()
 	svc := stateServiceOf(t, first)
 
 	layoutMain := []byte(`{"schema_version":1,"slots":["main"],"ratio":0.5}`)

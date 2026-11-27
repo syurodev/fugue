@@ -18,6 +18,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/testutil"
 	"github.com/syurodev/fugue/internal/transcript"
+	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/claude"
 )
@@ -28,9 +29,9 @@ func claudeOnlyAccounts(f *transcriptFixture) *vendor.Accounts {
 	return vendor.NewAccounts(f.clock, []vendor.AccountVendor{{Name: testVendorName, DirectQuota: true}})
 }
 
-func TestActorFeedsQuotaAndFailedAuthToTheVendorAccount(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runActorFeedsQuotaAndFailedAuthToTheVendorAccount(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	accounts := claudeOnlyAccounts(f)
 	session := newActorTestSession()
 	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
@@ -92,7 +93,7 @@ func newTestAccountsServiceDeps(t *testing.T, f *transcriptFixture, deps account
 
 func TestQuotaTopicServesSnapshotThenCatchUpAndLiveEvents(t *testing.T) {
 	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+	f := newHubOnlyFixture(t)
 	_, accounts := newTestAccountsService(t, f)
 	accounts.ObserveLogin(testVendorName, vendor.LoginActive)
 	sub, err := f.hub.Subscribe(t.Context(), SubscribeParams{Principal: string(KindApp), Topic: TopicQuota})
@@ -141,7 +142,7 @@ func assertNeedsLoginEvent(t *testing.T, sub *Subscription) {
 
 func TestQuotaTopicAndListAccountsDenyNonLocalPrincipals(t *testing.T) {
 	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+	f := newHubOnlyFixture(t)
 	svc, _ := newTestAccountsService(t, f)
 	for _, principal := range []string{PrincipalSession, "", "someone-else"} {
 		if _, err := f.hub.Subscribe(t.Context(), SubscribeParams{Principal: principal, Topic: TopicQuota}); err == nil {
@@ -245,7 +246,7 @@ func (a quotaProbeAdapter) Probe(context.Context, vendor.AccountHome) (vendor.Pr
 
 func TestConcurrentListAccountsShareOneRefresh(t *testing.T) {
 	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+	f := newHubOnlyFixture(t)
 	accounts := claudeOnlyAccounts(f)
 	adapter := quotaProbeAdapter{probes: new(atomic.Int32), entered: make(chan struct{}), release: make(chan struct{})}
 	vendors := &VendorService{accounts: accounts, adapters: map[string]vendor.Adapter{testVendorName: adapter}}
@@ -295,7 +296,7 @@ func TestConcurrentListAccountsShareOneRefresh(t *testing.T) {
 
 func TestQuotaTopicNeverEndsOnAStaleView(t *testing.T) {
 	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+	f := newHubOnlyFixture(t)
 	names := []string{"va", "vb"}
 	const sentinel = "vc"
 	accounts := vendor.NewAccounts(f.clock, []vendor.AccountVendor{

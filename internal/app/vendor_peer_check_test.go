@@ -9,6 +9,7 @@ import (
 
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/process"
+	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
@@ -131,15 +132,15 @@ func (s *bareStopSession) OwnsPID(pid int) (bool, error) {
 // session keeps its PeerOwner in the retained set unless StopProof proved the
 // tree empty, denies surviving descendants, fails closed on tree-read errors,
 // and prunes verified-empty owners on the next check.
-func TestEndedSessionSurvivingDescendantIsStillDenied(t *testing.T) {
-	t.Parallel()
-	assertRetainedVerifiableLifecycle(t)
-	assertRetainedUnverifiableAndProvedEnded(t)
+func runEndedSessionSurvivingDescendantIsStillDenied(t *testing.T, v *vault.Service) {
+	t.Helper()
+	assertRetainedVerifiableLifecycle(t, v)
+	assertRetainedUnverifiableAndProvedEnded(t, v)
 }
 
-func assertRetainedVerifiableLifecycle(t *testing.T) {
+func assertRetainedVerifiableLifecycle(t *testing.T, v *vault.Service) {
 	t.Helper()
-	f := newTranscriptFixture(t, nil)
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	const (
 		survivingPID = 7171
 		unrelatedPID = 8888
@@ -204,9 +205,9 @@ func assertRetainedReadErrorsFailClosed(t *testing.T, manager *VendorSessions, s
 	}
 }
 
-func assertRetainedUnverifiableAndProvedEnded(t *testing.T) {
+func assertRetainedUnverifiableAndProvedEnded(t *testing.T, v *vault.Service) {
 	t.Helper()
-	f := newTranscriptFixture(t, nil)
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	const survivingPID = 7272
 	unverifiable := &staticRetainedSession{
 		actorTestSession: newActorTestSession(),
@@ -266,8 +267,8 @@ type failedStopCase struct {
 // retained set when closing an untracked session returns ReasonGroupNotEmpty,
 // ReasonKillFailed, a close error, or when Adapter.Start fails after OnSpawned,
 // and are dropped only when StopProofProved succeeds with nil error.
-func TestFailedStopKeepsPendingOwner(t *testing.T) {
-	t.Parallel()
+func runFailedStopKeepsPendingOwner(t *testing.T, v *vault.Service) {
+	t.Helper()
 	cases := map[string]failedStopCase{
 		"group not empty retains pending owner": {
 			proof:      process.StopProof{Status: process.StopProofUnknown, Reason: process.ReasonGroupNotEmpty},
@@ -295,15 +296,15 @@ func TestFailedStopKeepsPendingOwner(t *testing.T) {
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			assertFailedStopCase(t, tc)
+			assertFailedStopCase(t, v, tc)
 		})
 	}
 }
 
-func assertFailedStopCase(t *testing.T, tc failedStopCase) {
+func assertFailedStopCase(t *testing.T, v *vault.Service, tc failedStopCase) {
 	t.Helper()
 	const survivingPID = 8181
-	f := newTranscriptFixture(t, nil)
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	bare := &bareStopSession{
 		ownedPIDs:  []int{survivingPID},
 		closeProof: tc.proof,
@@ -339,10 +340,10 @@ func assertFailedStopCase(t *testing.T, tc failedStopCase) {
 // TestActorRetiringDuringPeerCheckStillDenies verifies that an actor retiring
 // after OwnsPeer snapshots actors (before checkLiveActorOwner runs) cannot slip
 // surviving descendants or missing-tree sessions past the ownership check.
-func TestActorRetiringDuringPeerCheckStillDenies(t *testing.T) {
-	t.Parallel()
+func runActorRetiringDuringPeerCheckStillDenies(t *testing.T, v *vault.Service) {
+	t.Helper()
 	const descendantPID = 9191
-	f := newTranscriptFixture(t, nil)
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	surviving := &verifiableRetainedSession{
 		actorTestSession: newActorTestSession(),
 		ownedPIDs:        []int{descendantPID},

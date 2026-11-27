@@ -76,6 +76,8 @@ func startBridgedVendorHost(t *testing.T, ran *int, mu *sync.Mutex) (*HostProces
 		CodexBinary:    vendorLink(t, exe, "codex"),
 		AgyBinary:      vendorLink(t, exe, "agy"),
 		Bridge:         VendorBridge{Binary: exe, Socket: filepath.Join(t.TempDir(), "host.sock")},
+		GitBinary:      testGitBinary(t),
+		OCRBinary:      testNoOCRBinary(),
 		TestFugueTools: []*FugueTool{bridgedDeployTool(ran, mu)},
 	})
 	if err != nil {

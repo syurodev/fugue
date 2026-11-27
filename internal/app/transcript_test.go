@@ -51,7 +51,23 @@ type transcriptFixture struct {
 	dbPath  string
 }
 
+// newHubOnlyFixture returns a lightweight fixture holding only a fake clock
+// and an event hub for tests that need neither SQLite nor a vault.
+func newHubOnlyFixture(t *testing.T) *transcriptFixture {
+	t.Helper()
+	return &transcriptFixture{
+		t:     t,
+		clock: clock.NewFake(time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC)),
+		hub:   NewEventHub(testIncarn),
+	}
+}
+
 func newTranscriptFixture(t *testing.T, known KnownValues) *transcriptFixture {
+	t.Helper()
+	return newTranscriptFixtureWithVault(t, cheapvault.Unlocked(t), known)
+}
+
+func newTranscriptFixtureWithVault(t *testing.T, v *vault.Service, known KnownValues) *transcriptFixture {
 	t.Helper()
 	clk := clock.NewFake(time.Date(2026, 11, 8, 0, 0, 0, 0, time.UTC))
 	path := filepath.Join(t.TempDir(), "transcript.db")
@@ -64,7 +80,6 @@ func newTranscriptFixture(t *testing.T, known KnownValues) *transcriptFixture {
 			t.Error(cerr)
 		}
 	})
-	v := cheapvault.Unlocked(t)
 	s, storeErr := vendorstore.New(t.Context(), db, v, clk, nil)
 	if storeErr != nil {
 		t.Fatal(storeErr)
@@ -296,9 +311,9 @@ func assertFinalDurableState(t *testing.T, f *transcriptFixture, durable *Subscr
 	}
 }
 
-func TestCompleteBeforeAppendSoNoStaleDeltaFollowsTheDurableEvent(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runCompleteBeforeAppendSoNoStaleDeltaFollowsTheDurableEvent(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 
 	durable := subscribe(t, f.hub, TopicTranscript+testSession)
 
@@ -407,9 +422,9 @@ func assertLockedDurableEvent(t *testing.T, f *transcriptFixture, durable *Subsc
 	}
 }
 
-func TestPurgedSessionTopicsAreUnregisteredAndDenied(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runPurgedSessionTopicsAreUnregisteredAndDenied(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	durable := subscribe(t, f.hub, TopicTranscript+testSession)
 	delta := subscribe(t, f.hub, TopicTranscriptDelta+testSession)
 
@@ -482,11 +497,12 @@ func secretText(size int, token string) string {
 // package cannot share the CPU. One contended sample can otherwise inflate
 // either size by an order of magnitude; run alone the ratio is about 16x to
 // 19x.
-func TestRedactionMasksOneMiB(t *testing.T) {
+func runRedactionMasksOneMiB(t *testing.T, v *vault.Service) {
+	t.Helper()
 	// The fixture wires the credential directly and exercises the J-04
 	// environment mapping the composition will use. The linear-cost budget is
 	// a speed assertion and lives in internal/perf (nightly).
-	f := newTranscriptFixture(t, func(context.Context) ([]secrets.KnownValue, error) {
+	f := newTranscriptFixtureWithVault(t, v, func(context.Context) ([]secrets.KnownValue, error) {
 		known := make([]secrets.KnownValue, 0, 4)
 		known = append(known, secrets.KnownValue{
 			Value: redact.NewSecret(knownAPIToken), Kind: secrets.KindCredential,
@@ -497,7 +513,6 @@ func TestRedactionMasksOneMiB(t *testing.T) {
 		return known, nil
 	})
 	f.awaitKnownValues()
-	t.Parallel()
 	token := githubToken()
 	if masked := f.service.redactor.Redact(secretText(1<<20, token)); strings.Contains(masked, knownAPIToken) || strings.Contains(masked, token) {
 		t.Fatal("1 MiB masking failed")

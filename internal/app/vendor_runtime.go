@@ -223,6 +223,7 @@ func composeVendorSessionManager(
 		TestDelaySpawnRegistration: deps.TestDelaySpawnRegistration,
 		TestOnWaitInflightSpawn:    deps.TestOnWaitInflightSpawn,
 		CrashPoint:                 deps.Config.CrashPoint,
+		Spawn:                      hp.rt.goTask,
 	})
 }
 

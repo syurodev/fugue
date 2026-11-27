@@ -88,6 +88,8 @@ func testHostDeps(t *testing.T, dir string, clk *clock.Fake, tr HostTransport) *
 		Clock:     clk,
 		IDs:       ids.NewUUIDv7(clk, ids.NewDeterministic(testHostVersion)),
 		Transport: tr,
+		GitBinary: testGitBinary(t),
+		OCRBinary: testNoOCRBinary(),
 	}
 }
 

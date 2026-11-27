@@ -10,6 +10,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/redact"
 	"github.com/syurodev/fugue/internal/secrets"
 	"github.com/syurodev/fugue/internal/transcript"
+	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
@@ -18,9 +19,9 @@ const (
 	absorbedNoticeCode  = "absorbed_into_vendor_turn"
 )
 
-func TestTranscriptPageRPCDefaultsTo200AndClampsAt500NewestFirst(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runTranscriptPageRPCDefaultsTo200AndClampsAt500NewestFirst(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	recordPageItems(t, f, 600)
 	defaultPage, err := f.service.TranscriptPage(t.Context(), TranscriptPageParams{Session: testSession})
 	if err != nil || len(defaultPage) != 200 {
@@ -38,9 +39,9 @@ func TestTranscriptPageRPCDefaultsTo200AndClampsAt500NewestFirst(t *testing.T) {
 	}
 }
 
-func TestTranscriptItemRPCReturnsFullRedactedContent(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, func(context.Context) ([]secrets.KnownValue, error) {
+func runTranscriptItemRPCReturnsFullRedactedContent(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, func(context.Context) ([]secrets.KnownValue, error) {
 		return []secrets.KnownValue{{Value: redact.NewSecret(knownAPIToken), Kind: secrets.KindCredential}}, nil
 	})
 	f.awaitKnownValues()
@@ -90,9 +91,9 @@ func TestTranscriptRPCsWhileVaultLockedReturnMetadataOnly(t *testing.T) {
 	}
 }
 
-func TestTranscriptRPCsDenyNonLocalPrincipal(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runTranscriptRPCsDenyNonLocalPrincipal(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	for _, principal := range []string{adapterSession, "unknown"} {
 		if _, err := f.service.TranscriptPageFor(t.Context(), principal, TranscriptPageParams{Session: testSession}); errcode.CodeOf(err) != errcode.PermissionDenied {
 			t.Fatalf("principal %q page error = %v, want permission denied", principal, err)
@@ -103,9 +104,9 @@ func TestTranscriptRPCsDenyNonLocalPrincipal(t *testing.T) {
 	}
 }
 
-func TestUnknownTranscriptSessionAndItemAreTyped(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runUnknownTranscriptSessionAndItemAreTyped(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	if _, err := f.service.TranscriptPage(t.Context(), TranscriptPageParams{Session: "unknown-session"}); errcode.CodeOf(err) != errcode.TranscriptSessionNotFound {
 		t.Fatalf("unknown session page error = %v", err)
 	}
@@ -114,9 +115,9 @@ func TestUnknownTranscriptSessionAndItemAreTyped(t *testing.T) {
 	}
 }
 
-func TestVendorOriginTurnsAreGroupedAndAbsorbedNoticeStaysOnFugueTurn(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runVendorOriginTurnsAreGroupedAndAbsorbedNoticeStaysOnFugueTurn(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	vendorTurn := "vendor-3f2504e0-4f89-41d3-9a0c-0305e82c3301"
 	if _, err := f.store.Append(t.Context(), testSession, 2, &vendorstore.Event{
 		Type: vendorstore.VendorTurnStarted, TurnID: vendorTurn, TurnOrigin: vendorstore.TurnOriginVendor,
