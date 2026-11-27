@@ -411,6 +411,9 @@ func TestOverdueTimerFiresOnceAfterRestart(t *testing.T) {
 		WithOnArm(func(t *ArmedTimer) {
 			armCh <- t.TimerID
 		}),
+		WithOnDropped(func(at *ArmedTimer) {
+			t.Errorf("unexpected dropped timer %s gen %d", at.TimerID, at.Generation)
+		}),
 	)
 	if err != nil {
 		t.Fatalf("start scheduler failed: %v", err)
@@ -581,16 +584,11 @@ func TestRecoveryRequiredTimerParksUntilWake(t *testing.T) {
 
 	idGen := ids.NewUUIDv7(fakeClk, ids.NewDeterministic("rec-sess"))
 	cfg := Config{
-		SessionID:        testSessionID1,
-		OwnerIncarnation: 2,
-		WorkerCapacity:   1,
-		Store:            store,
-		Executor:         newFakeExecutor(),
-		Clock:            fakeClk,
-		IDs:              idGen,
+		SessionID: testSessionID1, OwnerIncarnation: 2, WorkerCapacity: 1,
+		Store: store, Executor: newFakeExecutor(), Clock: fakeClk, IDs: idGen,
 	}
-
-	ctx := t.Context()
+	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
+	t.Cleanup(cancel)
 	sess, err := Start(ctx, &cfg)
 	if err != nil {
 		t.Fatalf("Start session: %v", err)
@@ -599,8 +597,7 @@ func TestRecoveryRequiredTimerParksUntilWake(t *testing.T) {
 
 	var mu sync.Mutex
 	activeSess := sess
-	fireCh := make(chan struct{}, 1)
-	parkedCh := make(chan struct{}, 1)
+	fireCh, parkedCh := make(chan struct{}, 1), make(chan struct{}, 1)
 	sched, err := StartScheduler(
 		ctx, store, fakeClk,
 		func(sessionID string) (*Session, bool) {

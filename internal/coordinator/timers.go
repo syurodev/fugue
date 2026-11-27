@@ -212,17 +212,17 @@ func handleWakes(wakes []string, active map[string]*scheduledTimer) {
 	}
 }
 
-func (s *Scheduler) notifySettledFire(firedT, retriedT, parkedT, droppedT *ArmedTimer) {
-	switch {
-	case retriedT != nil && s.onArm != nil:
-		s.onArm(retriedT)
-	case firedT != nil && s.onFire != nil:
-		s.onFire(firedT)
-	case parkedT != nil && s.onParked != nil:
-		s.onParked(parkedT)
-	case droppedT != nil && s.onDropped != nil:
-		s.onDropped(droppedT)
+func notifyIf(cb func(*ArmedTimer), t *ArmedTimer) {
+	if t != nil && cb != nil {
+		cb(t)
 	}
+}
+
+func (s *Scheduler) notifySettledFire(firedT, retriedT, parkedT, droppedT *ArmedTimer) {
+	notifyIf(s.onArm, retriedT)
+	notifyIf(s.onFire, firedT)
+	notifyIf(s.onParked, parkedT)
+	notifyIf(s.onDropped, droppedT)
 }
 
 func (s *Scheduler) loop(ctx, fireCtx context.Context, initial []ArmedTimer) error {

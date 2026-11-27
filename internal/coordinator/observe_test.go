@@ -3,6 +3,7 @@ package coordinator
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -209,6 +210,7 @@ func TestTerminalObservationReleasesSlot(t *testing.T) {
 	// without reporting would have abandoned the attempt instead.
 	workReceived := make(chan struct{}, 1)
 	release := make(chan struct{})
+	var releaseOnce sync.Once
 	exec := newFakeExecutor()
 	exec.onExec = func(w *Work, report func(*Observation)) {
 		workReceived <- struct{}{}
@@ -226,6 +228,7 @@ func TestTerminalObservationReleasesSlot(t *testing.T) {
 	ctx, sess := startTestSessionOnCommit(t, store, exec, "terminal-release-slot-test", func(string, *kernel.State) {
 		committed <- struct{}{}
 	})
+	defer releaseOnce.Do(func() { close(release) })
 
 	req := makeModelDispatchRequest("r1", "m1", "a1", "cmd-disp-term")
 	if _, err := sess.Submit(ctx, &req); err != nil {
@@ -241,7 +244,7 @@ func TestTerminalObservationReleasesSlot(t *testing.T) {
 	// The executor finishes with the terminal observation; its commit completes
 	// the slot and finishes the run. Two deliveries arrive: the dispatch's own
 	// notification and the observation's.
-	release <- struct{}{}
+	releaseOnce.Do(func() { close(release) })
 	waitSignal(t, ctx, committed, "dispatch commit notification")
 	waitSignal(t, ctx, committed, "terminal observation commit")
 
@@ -557,12 +560,10 @@ func setupToolFencingState(store *fakeStore) {
 	st.LastSequence = 6
 	st.StepStarted = true
 	st.CurrentStepIndex = 1
+	st.Budgets = kernel.RunBudgets{Steps: 10, Tokens: 1000, ToolCalls: 5, ActiveTime: time.Hour}
 
 	respEvt := new(kernel.ModelResponseRecordedEvent)
 	respEvt.ResponseRef = "model-resp-ref"
-
-	toolDispEvt := new(kernel.ToolDispatchStartedEvent)
-	toolDispEvt.ExecutorFence = 7
 
 	st.CurrentModelInvocationID = "m1"
 	st.ModelInvocations["m1"] = &kernel.ModelInvocation{
@@ -579,12 +580,13 @@ func setupToolFencingState(store *fakeStore) {
 	}
 	st.ToolOrder = []string{"t1"}
 	st.ToolInvocations["t1"] = &kernel.ToolInvocation{
-		ToolCallID: "t1",
+		ToolCallID:      "t1",
+		EffectClass:     kernel.EffectClassPureRead,
+		CheckGeneration: 1,
 		Attempts: map[string]*kernel.ToolAttempt{
 			testAttTool1: {
 				AttemptID: testAttTool1,
-				Status:    kernel.ToolAttemptStatusDispatching,
-				Dispatch:  *toolDispEvt,
+				Status:    kernel.ToolAttemptStatusReady,
 			},
 		},
 	}
@@ -597,42 +599,58 @@ func TestToolObservationFencing(t *testing.T) {
 
 	store := newFakeStore()
 	setupToolFencingState(store)
+	workReceived := make(chan struct{}, 1)
+	releaseWork := make(chan struct{})
 	exec := newFakeExecutor()
+	exec.onExec = func(_ *Work, _ func(*Observation)) {
+		workReceived <- struct{}{}
+		<-releaseWork
+	}
 
 	ctx, sess := startTestSession(t, store, exec, "tool-observation-test", 1)
 	defer sess.Stop()
+	defer close(releaseWork)
 
-	// Tool observation with stale fence 6
-	staleToolObs := Observation{
-		Lease: Lease{
-			SessionID:        "s1",
-			RunID:            "r1",
-			InvocationID:     "t1",
-			AttemptID:        testAttTool1,
-			AdmissionToken:   1,
-			OwnerIncarnation: 1,
-			ExecutorFence:    6,
-		},
-		Command: &kernel.ObserveToolResultCommand{
-			CommandID:      "cmd-tool-res-stale",
-			RunID:          "r1",
-			Origin:         testOriginWorker,
-			Token:          1,
-			ToolCallID:     "t1",
-			AttemptID:      testAttTool1,
-			Outcome:        "succeeded",
-			ResultRef:      "res-ref",
-			Code:           "200",
-			EffectEvidence: "ev",
-			SourcePosition: 0,
-		},
+	dispReq := newToolFencingDispatchRequest()
+	if _, err := sess.Submit(ctx, &dispReq); err != nil {
+		t.Fatalf("tool dispatch failed: %v", err)
 	}
-	_, err := sess.SubmitObservation(ctx, &staleToolObs)
-	if !errors.Is(err, ErrStaleLease) {
+	waitSignal(t, ctx, workReceived, "tool work received")
+
+	staleToolObs := newStaleToolFencingObs()
+	if _, err := sess.SubmitObservation(ctx, &staleToolObs); !errors.Is(err, ErrStaleLease) {
 		t.Fatalf("expected ErrStaleLease for tool fence mismatch, got %v", err)
 	}
 
 	submitMatchingToolObservation(t, ctx, sess, &staleToolObs)
+}
+
+func newToolFencingDispatchRequest() Request {
+	return Request{
+		Command: &kernel.PrepareDispatchCommand{
+			CommandID: "cmd-tool-disp", RunID: "r1", Origin: testOriginSystem,
+			Token: 1, InvocationID: "t1", AttemptID: testAttTool1,
+		},
+		Facts:     kernel.DecisionFacts{DispatchAuthorizationRef: "auth-tool"},
+		Kind:      testKindPrepare,
+		Principal: testOriginSystem,
+		Origin:    testOriginSystem,
+		Target:    "r1",
+	}
+}
+
+func newStaleToolFencingObs() Observation {
+	return Observation{
+		Lease: Lease{
+			SessionID: "s1", RunID: "r1", InvocationID: "t1", AttemptID: testAttTool1,
+			AdmissionToken: 1, OwnerIncarnation: 1, ExecutorFence: 6,
+		},
+		Command: &kernel.ObserveToolResultCommand{
+			CommandID: "cmd-tool-res-stale", RunID: "r1", Origin: testOriginWorker,
+			Token: 1, ToolCallID: "t1", AttemptID: testAttTool1,
+			Outcome: "succeeded", ResultRef: "res-ref", Code: "200", EffectEvidence: "ev", SourcePosition: 0,
+		},
+	}
 }
 
 func submitMatchingToolObservation(t *testing.T, ctx context.Context, sess *Session, baseObs *Observation) {
@@ -671,20 +689,15 @@ func submitMatchingToolObservation(t *testing.T, ctx context.Context, sess *Sess
 		return m
 	}()
 
-	ref, ok := reserveSlot(sess.slots)
-	if !ok {
-		t.Fatal("reserve failed")
-	}
-	if handoffErr := sess.slots.handoff(ref, &Work{}); handoffErr != nil {
-		t.Fatalf("handoff: %v", handoffErr)
-	}
-	sess.attemptSlots[attemptKey{runID: "r1", invocationID: "t1", attemptID: testAttTool1}] = ref
-
 	if _, err := sess.SubmitObservation(ctx, &matchingToolObs); err != nil {
 		t.Fatalf("matching tool observation failed: %v", err)
 	}
 
-	if _, canReserve := reserveSlot(sess.slots); !canReserve {
+	ref, canReserve := reserveSlot(sess.slots)
+	if !canReserve {
 		t.Fatal("expected slot to be released after tool result commit")
+	}
+	if err := sess.slots.release(ref); err != nil {
+		t.Fatalf("release: %v", err)
 	}
 }

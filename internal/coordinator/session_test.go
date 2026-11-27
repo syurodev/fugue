@@ -305,8 +305,7 @@ func verifyCommittedAdvance(t *testing.T, store *fakeStore, sess *Session) {
 	}
 }
 
-func setupBlockedAppend(t *testing.T, store *fakeStore) (chan struct{}, chan struct{}, chan struct{}) {
-	t.Helper()
+func setupBlockedAppend(ctx context.Context, store *fakeStore) (chan struct{}, chan struct{}, chan struct{}) {
 	appendBlocked := make(chan struct{})
 	releaseAppend := make(chan struct{})
 	appendDone := make(chan struct{})
@@ -317,7 +316,7 @@ func setupBlockedAppend(t *testing.T, store *fakeStore) (chan struct{}, chan str
 			close(appendBlocked)
 			select {
 			case <-releaseAppend:
-			case <-t.Context().Done():
+			case <-ctx.Done():
 			}
 			close(appendDone)
 		})
@@ -345,8 +344,6 @@ func TestCallerCancellationDoesNotAbortAcceptedCommand(t *testing.T) {
 		QueueRevision:    1,
 	}
 
-	appendBlocked, releaseAppend, appendDone := setupBlockedAppend(t, store)
-
 	committed := make(chan struct{}, 1)
 	sessCtx, sess := startSingleCapacitySessionHook(t, store, "cancel-test", func(string, *kernel.State) {
 		select {
@@ -354,7 +351,12 @@ func TestCallerCancellationDoesNotAbortAcceptedCommand(t *testing.T) {
 		default:
 		}
 	})
-	defer sess.Stop()
+	appendBlocked, releaseAppend, appendDone := setupBlockedAppend(sessCtx, store)
+	var releaseOnce sync.Once
+	defer func() {
+		releaseOnce.Do(func() { close(releaseAppend) })
+		sess.Stop()
+	}()
 
 	callerCtx, cancelCaller := context.WithCancel(sessCtx)
 
@@ -373,7 +375,7 @@ func TestCallerCancellationDoesNotAbortAcceptedCommand(t *testing.T) {
 		t.Fatalf("expected context.Canceled for caller Submit, got %v", submitErr)
 	}
 
-	close(releaseAppend)
+	releaseOnce.Do(func() { close(releaseAppend) })
 	waitSignal(t, sessCtx, appendDone, "appendDone")
 	waitSignal(t, sessCtx, committed, "committed")
 
@@ -405,35 +407,45 @@ func TestSessionEdgeCases(t *testing.T) {
 
 	t.Run("zero worker capacity defaults to 1 and stopped submit fails", func(t *testing.T) {
 		t.Parallel()
-		store := newFakeStore()
-		exec := newFakeExecutor()
-		ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
-		t.Cleanup(cancel)
-		sess, err := Start(ctx, &Config{
-			SessionID:      "s-cap0",
-			WorkerCapacity: 0,
-			Store:          store,
-			Executor:       exec,
-			Clock:          fakeClk,
-			IDs:            idGen,
-		})
-		if err != nil {
-			t.Fatalf("start failed: %v", err)
-		}
-		if sess.slots.capacity != 1 {
-			t.Errorf("expected capacity 1, got %d", sess.slots.capacity)
-		}
-		sess.Stop()
-		_, err = sess.Submit(ctx, &Request{})
-		if !errors.Is(err, ErrSessionStopped) {
-			t.Errorf("expected ErrSessionStopped, got %v", err)
-		}
+		testWorkerCapacityDefaults(t, fakeClk, idGen)
 	})
 
 	t.Run("submit errors and default fields", func(t *testing.T) {
 		t.Parallel()
 		testSessionSubmitCases(t, fakeClk, idGen)
 	})
+}
+
+func testWorkerCapacityDefaults(t *testing.T, fakeClk clock.Clock, idGen ids.Generator) {
+	t.Helper()
+	store := newFakeStore()
+	exec := newFakeExecutor()
+	ctx, cancel := context.WithTimeout(t.Context(), testTimeout)
+	t.Cleanup(cancel)
+	sess, err := Start(ctx, &Config{
+		SessionID: "s-cap0", WorkerCapacity: 0, Store: store, Executor: exec, Clock: fakeClk, IDs: idGen,
+	})
+	if err != nil {
+		t.Fatalf("start failed: %v", err)
+	}
+	if sess.slots.capacity != 1 || len(sess.workerTasks) != 1 {
+		t.Errorf("expected capacity 1 and 1 worker, got cap=%d workers=%d", sess.slots.capacity, len(sess.workerTasks))
+	}
+	sess.Stop()
+	if _, err = sess.Submit(ctx, &Request{}); !errors.Is(err, ErrSessionStopped) {
+		t.Errorf("expected ErrSessionStopped, got %v", err)
+	}
+
+	sess2, err := Start(ctx, &Config{
+		SessionID: "s-cap2", WorkerCapacity: 2, Store: store, Executor: exec, Clock: fakeClk, IDs: idGen,
+	})
+	if err != nil {
+		t.Fatalf("start cap2 failed: %v", err)
+	}
+	if sess2.slots.capacity != 2 || len(sess2.workerTasks) != 2 {
+		t.Errorf("expected capacity 2 and 2 workers, got cap=%d workers=%d", sess2.slots.capacity, len(sess2.workerTasks))
+	}
+	sess2.Stop()
 }
 
 func testSessionSubmitCases(t *testing.T, fakeClk clock.Clock, idGen ids.Generator) {

@@ -100,8 +100,7 @@ func verifyDispatchedWorkItem(t *testing.T, exec *fakeExecutor, wantFence uint64
 	}
 }
 
-func setupHandoffBlockedAppend(t *testing.T, store *fakeStore) (chan struct{}, chan struct{}) {
-	t.Helper()
+func setupHandoffBlockedAppend(ctx context.Context, store *fakeStore) (chan struct{}, chan struct{}) {
 	appendBlocked := make(chan struct{})
 	releaseAppend := make(chan struct{})
 	var once sync.Once
@@ -111,7 +110,7 @@ func setupHandoffBlockedAppend(t *testing.T, store *fakeStore) (chan struct{}, c
 			close(appendBlocked)
 			select {
 			case <-releaseAppend:
-			case <-t.Context().Done():
+			case <-ctx.Done():
 			}
 		})
 	}
@@ -131,8 +130,6 @@ func TestHandoffHappensOnlyAfterCommit(t *testing.T) {
 	store := newFakeStore()
 	setupAdmittedRun(store)
 
-	appendBlocked, releaseAppend := setupHandoffBlockedAppend(t, store)
-
 	exec := newFakeExecutor()
 	workReceived := make(chan struct{})
 	exec.onExec = func(_ *Work, _ func(*Observation)) {
@@ -140,7 +137,12 @@ func TestHandoffHappensOnlyAfterCommit(t *testing.T) {
 	}
 
 	ctx, sess := startTestSession(t, store, exec, "handoff-test", 1)
-	defer sess.Stop()
+	appendBlocked, releaseAppend := setupHandoffBlockedAppend(ctx, store)
+	var releaseOnce sync.Once
+	defer func() {
+		releaseOnce.Do(func() { close(releaseAppend) })
+		sess.Stop()
+	}()
 
 	req := makeModelDispatchRequest("r1", "m1", "a1", "cmd-disp-1")
 
@@ -157,7 +159,7 @@ func TestHandoffHappensOnlyAfterCommit(t *testing.T) {
 	}
 
 	// Release append
-	close(releaseAppend)
+	releaseOnce.Do(func() { close(releaseAppend) })
 
 	if err := task.Wait(); err != nil {
 		t.Fatalf("submit failed: %v", err)
@@ -403,71 +405,123 @@ func TestIsDispatchHelperEdgeCases(t *testing.T) {
 func TestDispatchEdgeCases(t *testing.T) {
 	t.Parallel()
 
-	store := newFakeStore()
-	setupAdmittedRun(store)
-	exec := newFakeExecutor()
+	t.Run("empty id and principal defaults", func(t *testing.T) {
+		t.Parallel()
+		store := newFakeStore()
+		setupAdmittedRun(store)
+		ctx, sess := startTestSession(t, store, newFakeExecutor(), "dispatch-edge-defaults", 2)
+		defer sess.Stop()
 
-	ctx, sess := startTestSession(t, store, exec, "dispatch-edge-test", 2)
-	defer sess.Stop()
+		req := makeModelDispatchRequest("r1", "m1", "a1", "")
+		req.Principal = ""
+		if _, err := sess.Submit(ctx, &req); err != nil {
+			t.Fatalf("dispatch with empty id/principal failed: %v", err)
+		}
+	})
 
-	// 2. Dispatch with empty CommandID and Principal (auto-generated ID and default origin)
-	req := makeModelDispatchRequest("r1", "m1", "a1", "")
-	req.Principal = ""
-	_, err := sess.Submit(ctx, &req)
-	if err != nil {
-		t.Fatalf("dispatch with empty id/principal failed: %v", err)
-	}
+	t.Run("halted returns ErrCommitUnresolved", func(t *testing.T) {
+		t.Parallel()
+		store := newFakeStore()
+		setupAdmittedRun(store)
+		ctx, sess, _, resolveReport, armed := setupBackgroundResolveSession(t, store, newFakeExecutor(), "dispatch-edge-halted")
+		defer sess.Stop()
 
-	// 3. Dispatch when halted returns ErrCommitUnresolved
-	sess.runs["r1"].ModelInvocations["m1"].Attempts["a2"] = &kernel.ModelAttempt{
-		AttemptID: "a2",
-		Status:    kernel.ModelAttemptStatusPlanned,
-	}
-	sess.unresolved["pending"] = &step{t: &Transition{RunID: "other-run"}}
+		// Create a genuine unresolved commit on r2 so the actor halts dispatching.
+		store.queueLostAck(false)
+		other := acceptRunRequest(testRunID2, testCmdAcceptR2, "m2", "a2")
+		_ = submitAsync(ctx, sess, &other)
+		waitValue(t, ctx, resolveReport, "inline read-back")
+		waitSignal(t, ctx, armed, "resolver timer")
 
-	req2 := makeModelDispatchRequest("r1", "m1", "a2", "cmd-halted")
-	_, err = sess.Submit(ctx, &req2)
-	if !errors.Is(err, ErrCommitUnresolved) {
-		t.Fatalf("expected ErrCommitUnresolved when halted, got %v", err)
-	}
+		req2 := makeModelDispatchRequest("r1", "m1", "a1", "cmd-halted")
+		if _, err := sess.Submit(ctx, &req2); !errors.Is(err, ErrCommitUnresolved) {
+			t.Fatalf("expected ErrCommitUnresolved when halted, got %v", err)
+		}
+	})
 
-	delete(sess.unresolved, "pending")
-
-	testDispatchRejectionAndTargetFallback(t, ctx, sess)
+	t.Run("rejection and target fallback", func(t *testing.T) {
+		t.Parallel()
+		testDispatchRejectionAndTargetFallback(t)
+	})
 }
 
-func testDispatchRejectionAndTargetFallback(t *testing.T, ctx context.Context, sess *Session) {
+func testDispatchRejectionAndTargetFallback(t *testing.T) {
 	t.Helper()
 
-	// 4. Dispatch with Decide rejection releases slot
-	sess.runs["r1"].ModelInvocations["m1"].Attempts["a3"] = &kernel.ModelAttempt{
-		AttemptID: "a3",
-		Status:    kernel.ModelAttemptStatusPlanned,
-	}
-	rejReq := makeModelDispatchRequest("r1", "m1", "a3", "cmd-rej")
+	store := newFakeStore()
+	setupAdmittedRun(store)
+	ctx, sess := startTestSession(t, store, newFakeExecutor(), "dispatch-edge-fallback", 2)
+	defer sess.Stop()
+
+	// Dispatch with Decide rejection releases slot.
+	rejReq := makeModelDispatchRequest("r1", "m1", "a1", "cmd-rej")
 	rejReq.Facts.ModelDispatch = nil // Causes Decide error
-	_, err := sess.Submit(ctx, &rejReq)
-	if err == nil {
+	if _, err := sess.Submit(ctx, &rejReq); err == nil {
 		t.Fatal("expected Decide error on nil ModelDispatch")
 	}
 
-	// 5. Dispatch with empty RunID on command takes req.Target
-	sess.runs["r1"].ModelInvocations["m1"].Attempts["a1"].Status = kernel.ModelAttemptStatusCompleted
-	sess.runs["r1"].CurrentModelInvocationID = "m2"
-	sess.runs["r1"].ModelInvocations["m2"] = &kernel.ModelInvocation{
-		InvocationID: "m2",
-		Planned:      true,
-		Attempts: map[string]*kernel.ModelAttempt{
-			"a4": {
-				AttemptID: "a4",
-				Status:    kernel.ModelAttemptStatusPlanned,
-			},
-		},
-	}
-	reqTarget := makeModelDispatchRequest("", "m2", "a4", "cmd-target")
+	// Dispatch with empty RunID on command takes req.Target.
+	reqTarget := makeModelDispatchRequest("", "m1", "a1", "cmd-target")
 	reqTarget.Target = "r1"
-	_, err = sess.Submit(ctx, &reqTarget)
-	if err != nil {
+	if _, err := sess.Submit(ctx, &reqTarget); err != nil {
 		t.Fatalf("dispatch with target fallback failed: %v", err)
+	}
+}
+
+func TestReleaseSlotOnAbortResumesParkedDispatch(t *testing.T) {
+	t.Parallel()
+
+	store := newFakeStore()
+	setupAdmittedRun(store)
+	addAdmittedRun(store, testRunID2, "m2", "a2")
+	addAdmittedRun(store, "r3", "m3", "a3")
+
+	releaseWork := make(chan struct{})
+	var releaseOnce sync.Once
+	workReceived := make(chan string, 3)
+	exec := newFakeExecutor()
+	exec.onExec = func(w *Work, _ func(*Observation)) {
+		workReceived <- w.Lease.RunID
+		if w.Lease.RunID == testRunID1 {
+			<-releaseWork
+		}
+	}
+
+	ctx, sess := startTestSession(t, store, exec, "release-slot-parked", 1)
+	defer func() {
+		releaseOnce.Do(func() { close(releaseWork) })
+		sess.Stop()
+	}()
+
+	parkedCount := make(chan struct{}, 2)
+	sess.onPark = func() { parkedCount <- struct{}{} }
+
+	// r1 holds the sole worker slot in-flight.
+	if _, err := sess.Submit(ctx, reqPtr(makeModelDispatchRequest(testRunID1, "m1", "a1", "cmd-r1-hold"))); err != nil {
+		t.Fatalf("r1 dispatch: %v", err)
+	}
+	if got := waitValue(t, ctx, workReceived, "r1 work"); got != testRunID1 {
+		t.Fatalf("expected %s, got %s", testRunID1, got)
+	}
+
+	// Park r2 (invalid dispatch that will abort via Decide) and r3 (valid dispatch behind it).
+	badReq := makeModelDispatchRequest(testRunID2, "m2", "a2", "cmd-r2-abort")
+	badReq.Facts.ModelDispatch = nil
+	r2Done := submitAsync(ctx, sess, &badReq)
+	waitSignal(t, ctx, parkedCount, "r2 parked")
+
+	r3Done := submitAsync(ctx, sess, reqPtr(makeModelDispatchRequest("r3", "m3", "a3", "cmd-r3-resumed")))
+	waitSignal(t, ctx, parkedCount, "r3 parked")
+
+	// Releasing r1 resumes r2; r2 aborts and calls releaseSlot -> retryParked, resuming r3.
+	releaseOnce.Do(func() { close(releaseWork) })
+	if err := waitValue(t, ctx, r2Done, "r2 abort"); err == nil {
+		t.Fatal("expected r2 dispatch error on nil ModelDispatch")
+	}
+	if err := waitValue(t, ctx, r3Done, "r3 resumed"); err != nil {
+		t.Fatalf("expected r3 dispatch to resume and succeed, got %v", err)
+	}
+	if got := waitValue(t, ctx, workReceived, "r3 work"); got != "r3" {
+		t.Fatalf("expected work for r3, got %s", got)
 	}
 }
