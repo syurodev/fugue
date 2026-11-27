@@ -56,14 +56,15 @@ func (s *macMetricsState) get() (macWindowMetrics, bool) {
 	return s.metrics, s.measured
 }
 
+// setMacMetrics runs on the AppKit main thread, so it must not call
+// app.Window.Invalidate: on macOS Gio wakes its loop inline there and locks
+// Window.invMu a second time, which deadlocks the main thread (FUG-101). The
+// native side asks for the redraw with setNeedsDisplay instead.
 func (b *titleBar) setMacMetrics(m macWindowMetrics) {
 	if b == nil {
 		return
 	}
 	b.mac.set(m)
-	if b.invalidate != nil {
-		b.invalidate()
-	}
 }
 
 func (b *titleBar) macBarHeight(gtx *layout.Context) int {
