@@ -77,6 +77,7 @@ type TeamProposalService struct {
 	// (F11.2b), so a new amend supersedes the old and the session-end
 	// cancel invalidates them.
 	pendingAmends amendCards
+	rebuildMu     sync.Mutex
 	clk           clock.Clock
 	onTimerArmed  func()
 	crashPoint    string

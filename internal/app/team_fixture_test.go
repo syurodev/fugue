@@ -52,11 +52,14 @@ func newTeamFixtureWithGit(t *testing.T, extraTOML string, noDispatch bool, gitB
 	if err != nil {
 		t.Fatal(err)
 	}
+	if gitBinary == "" {
+		gitBinary = testGitBinary(t)
+	}
 	clk := clock.NewFake(time.Unix(200, 0))
 	hp, err := StartHost(t.Context(), &HostDeps{
 		DataDir: cheapVaultDataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("team-test")),
-		Transport: newScriptedTransport(), VendorBinary: exe, GitBinary: gitBinary,
+		Transport: newScriptedTransport(), VendorBinary: exe, GitBinary: gitBinary, OCRBinary: testNoOCRBinary(),
 		Bridge: VendorBridge{Binary: exe, Socket: filepath.Join(t.TempDir(), "host.sock")}, TeamAdmitter: admitterFor(noDispatch),
 	})
 	if err != nil {

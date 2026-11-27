@@ -94,6 +94,8 @@ func startLifecycleHost(t *testing.T, dir string) *HostProcess {
 		IDs:          ids.NewUUIDv7(clk, ids.NewDeterministic("vendor-lifecycle")),
 		Transport:    newScriptedTransport(),
 		VendorBinary: exe,
+		GitBinary:    testGitBinary(t),
+		OCRBinary:    testNoOCRBinary(),
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -11,14 +11,15 @@ import (
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/process"
+	"github.com/syurodev/fugue/internal/vault"
 	"github.com/syurodev/fugue/internal/vendor"
 	"github.com/syurodev/fugue/internal/vendoradapter/claude"
 	"github.com/syurodev/fugue/internal/vendorstore"
 )
 
-func TestSendAppendFailureClosesSession(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runSendAppendFailureClosesSession(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	// SetCommitFault is persistent across appends, so it would also reject the
 	// close event that must durably follow the failed turn start. Inject only
 	// VendorTurnStarted here and let the close event use the real store.
@@ -41,8 +42,8 @@ func TestSendAppendFailureClosesSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, event := range events {
-		if event.Type == vendorstore.VendorTurnStarted {
+	for i := range events {
+		if events[i].Type == vendorstore.VendorTurnStarted {
 			t.Fatal("failed turn start was persisted")
 		}
 	}
@@ -52,9 +53,9 @@ func TestSendAppendFailureClosesSession(t *testing.T) {
 	}
 }
 
-func TestUserInterruptKeepsDrainingObservations(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runUserInterruptKeepsDrainingObservations(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	session := newActorTestSession()
 	session.interruptStarted = make(chan struct{})
 	interruptGate := make(chan struct{})
@@ -84,9 +85,9 @@ func TestUserInterruptKeepsDrainingObservations(t *testing.T) {
 	mustCloseActorSessions(t, manager)
 }
 
-func TestUserInterruptEscalationRecordsUnknown(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runUserInterruptEscalationRecordsUnknown(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	session := newActorTestSession()
 	session.interruptErr = errInjectedAppendFailure
 	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
@@ -155,9 +156,9 @@ func hasInterruptedTurnEvent(t *testing.T, store *vendorstore.Store) bool {
 	return false
 }
 
-func TestCloseCompletesWhileSendIsWedged(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runCloseCompletesWhileSendIsWedged(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	session := newActorTestSession()
 	session.wedgedSend = true
 	session.sendStarted = make(chan struct{})
@@ -190,9 +191,9 @@ func TestCloseCompletesWhileSendIsWedged(t *testing.T) {
 	assertClosedWithProof(t, f, process.StopProofProved)
 }
 
-func TestCloseAllCompletesWhileSendIsWedged(t *testing.T) {
-	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+func runCloseAllCompletesWhileSendIsWedged(t *testing.T, v *vault.Service) {
+	t.Helper()
+	f := newTranscriptFixtureWithVault(t, v, nil)
 	session := newActorTestSession()
 	session.wedgedSend = true
 	session.sendStarted = make(chan struct{})

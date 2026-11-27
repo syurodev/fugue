@@ -10,15 +10,12 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"log/slog"
 	"strings"
 	"sync"
 
+	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
-	"github.com/syurodev/fugue/internal/platform/redact"
-	"github.com/syurodev/fugue/internal/process"
 	"github.com/syurodev/fugue/internal/vendor"
 )
 
@@ -173,131 +170,6 @@ func (s *AccountsService) CancelLogin(ctx context.Context, principal, vendorName
 	}
 }
 
-// SubmitLoginCode relays one pasted browser login code to the running login
-// process's stdin pipe (host-api v0.22 §5.5). Only the principal that started
-// the login may submit, only while it runs, and only for an AcceptsCode vendor.
-func (s *AccountsService) SubmitLoginCode(ctx context.Context, principal, commandID, loginID string, code redact.Secret) error {
-	if !IsLocalPrincipal(principal) {
-		return errcode.New(errcode.PermissionDenied, "only local principals may use accounts")
-	}
-	if commandID == "" {
-		return errcode.New(errcode.InvalidArgument, "command_id is required")
-	}
-	if loginID == "" {
-		return errcode.New(errcode.InvalidArgument, "login_id is required")
-	}
-	if err := validateLoginCode(code); err != nil {
-		return err
-	}
-
-	s.loginCmdMu.Lock()
-	if prev, ok := s.loginDedup.Get(commandID); ok {
-		s.loginCmdMu.Unlock()
-		if prev.principal != principal {
-			return errcode.New(errcode.PermissionDenied, "login belongs to another principal")
-		}
-		if prev.loginID != loginID {
-			return errcode.New(errcode.InvalidArgument, "command_id was previously used with a different login_id")
-		}
-		return prev.err
-	}
-	if inf, ok := s.loginInflight[commandID]; ok {
-		s.loginCmdMu.Unlock()
-		return awaitLoginInflight(ctx, principal, loginID, inf)
-	}
-	inf := &inflightCommand[loginCodeResult]{done: make(chan struct{})}
-	s.loginInflight[commandID] = inf
-	s.loginCmdMu.Unlock()
-
-	res := loginCodeResult{loginID: loginID, principal: principal}
-	defer func() {
-		s.loginCmdMu.Lock()
-		delete(s.loginInflight, commandID)
-		inf.result = res
-		inf.err = res.err
-		close(inf.done)
-		s.loginCmdMu.Unlock()
-	}()
-
-	res.err = s.executeSubmitLoginCode(principal, loginID, code)
-	s.loginDedup.Put(commandID, res)
-	return res.err
-}
-
-func awaitLoginInflight(ctx context.Context, principal, loginID string, inf *inflightCommand[loginCodeResult]) error {
-	select {
-	case <-inf.done:
-		if inf.result.principal != principal {
-			return errcode.New(errcode.PermissionDenied, "login belongs to another principal")
-		}
-		if inf.result.loginID != loginID {
-			return errcode.New(errcode.InvalidArgument, "command_id was previously used with a different login_id")
-		}
-		return inf.err
-	case <-ctx.Done():
-		return fmt.Errorf("context canceled: %w", ctx.Err())
-	}
-}
-
-// validateLoginCode checks the length cap and printable-ASCII constraint on
-// a temporary byte copy of code and zeroes that copy before returning (Go
-// strings in the RPC request and redact.Secret cannot be zeroed).
-func validateLoginCode(code redact.Secret) error {
-	buf := []byte(code.Reveal())
-	defer clear(buf)
-	if len(buf) == 0 {
-		return errcode.New(errcode.InvalidArgument, "login code is required")
-	}
-	if len(buf) > LoginCodeMaxBytes {
-		return errcode.New(errcode.InvalidArgument, "login code exceeds 1 KiB limit")
-	}
-	for _, b := range buf {
-		if b < 0x20 || b > 0x7e {
-			return errcode.New(errcode.InvalidArgument, "login code must contain printable ASCII only")
-		}
-	}
-	return nil
-}
-
-func (s *AccountsService) executeSubmitLoginCode(principal, loginID string, code redact.Secret) error {
-	slot := s.runningLoginByID(loginID)
-	if slot == nil {
-		return errcode.New(errcode.FailedPrecondition, "login is not running")
-	}
-	if slot.principal != principal {
-		return errcode.New(errcode.PermissionDenied, "login belongs to another principal")
-	}
-	if !slot.acceptsCode {
-		return errcode.New(errcode.FailedPrecondition, "vendor login does not accept a pasted code")
-	}
-	slot.stdinMu.Lock()
-	defer slot.stdinMu.Unlock()
-	slot.mu.Lock()
-	run := slot.run
-	slot.mu.Unlock()
-	if run == nil {
-		return errcode.New(errcode.FailedPrecondition, "login process is not running")
-	}
-	if err := run.WriteCode(code); err != nil {
-		if errors.Is(err, process.ErrStdinClosed) {
-			return errcode.Wrap(errcode.FailedPrecondition, "login process is no longer accepting input", err)
-		}
-		return errcode.Wrap(errcode.CodeOf(err), "write login code to process", err)
-	}
-	return nil
-}
-
-func (s *AccountsService) runningLoginByID(loginID string) *loginRun {
-	s.loginsMu.Lock()
-	defer s.loginsMu.Unlock()
-	for _, slot := range s.logins {
-		if slot.id == loginID {
-			return slot
-		}
-	}
-	return nil
-}
-
 // requestCancel asks the monitor to stop the process; safe to call twice.
 func (slot *loginRun) requestCancel() {
 	slot.cancelOnce.Do(func() { close(slot.cancel) })
@@ -346,49 +218,96 @@ func (slot *loginRun) runningProgress() LoginProgress {
 }
 
 // monitorLogin follows one login process until it ends, the timeout fires,
-// the user cancels or the host stops, then publishes the final outcome.
+// the user cancels or the host stops, then releases the slot and publishes the
+// final outcome.
 func (s *AccountsService) monitorLogin(ctx context.Context, slot *loginRun) {
-	defer s.finishLogin(slot)
+	defer close(slot.done)
+	defer s.releaseLoginSlot(slot)
 	timer := s.clk.NewTimer(LoginTimeout)
 	defer timer.Stop()
 	lines := slot.run.Lines()
 	var outcome string
 	for outcome == "" {
+		var shutdown bool
+		outcome, shutdown = s.stepLoginMonitor(ctx, slot, &lines, timer)
+		if shutdown {
+			return
+		}
+	}
+	// Release the per-vendor slot before publishing the terminal outcome so a
+	// subscriber reacting immediately with StartLogin sees the slot free.
+	s.releaseLoginSlot(slot)
+	s.publishLogin(slot.progress(outcome), false)
+}
+
+func (s *AccountsService) stepLoginMonitor(ctx context.Context, slot *loginRun, lines *<-chan string, timer clock.Timer) (outcome string, shutdown bool) {
+	select {
+	case line, ok := <-*lines:
+		if !ok {
+			// stdout ended before the process: keep waiting for the exit.
+			*lines = nil
+			return "", false
+		}
+		if slot.appendPrompt(line) {
+			s.publishLogin(slot.progress(LoginWaiting), true)
+		}
+		return "", false
+	case <-slot.run.Done():
+		// Done may close before pumpStream drains buffered lines or closes Lines();
+		// finish draining before collecting the exit outcome and publishing.
+		override, stop := s.drainLoginLines(ctx, slot, *lines, timer)
+		if stop {
+			return "", true
+		}
+		if override != "" {
+			return override, false
+		}
+		return s.loginOutcome(ctx, slot), false
+	case <-timer.C():
+		slot.stop(ctx, s.log())
+		<-slot.run.Done()
+		return slot.timeoutOutcome(), false
+	case <-slot.cancel:
+		slot.stop(ctx, s.log())
+		<-slot.run.Done()
+		return LoginCancelled, false
+	case <-ctx.Done():
+		// The host is stopping: stop the process like a session and end
+		// without a final event, the ephemeral topic dies with the host.
+		slot.stop(ctx, s.log())
+		return "", true
+	}
+}
+
+func (s *AccountsService) drainLoginLines(ctx context.Context, slot *loginRun, lines <-chan string, timer clock.Timer) (outcome string, shutdown bool) {
+	for lines != nil {
 		select {
 		case line, ok := <-lines:
 			if !ok {
-				// stdout ended before the process: keep waiting for the exit.
-				lines = nil
-				continue
+				return "", false
 			}
 			if slot.appendPrompt(line) {
 				s.publishLogin(slot.progress(LoginWaiting), true)
 			}
-		case <-slot.run.Done():
-			outcome = s.loginOutcome(ctx, slot)
 		case <-timer.C():
-			slot.stop(ctx, s.log())
-			<-slot.run.Done()
-			// Q-112: a CLI that would read a pasted code from its own stdin
-			// cannot be finished by the host, so the timeout asks the user to
-			// run the login in their own terminal instead.
-			if slot.needsTerminal {
-				outcome = LoginNeedsTerminal
-			} else {
-				outcome = LoginTimedOut
-			}
+			return slot.timeoutOutcome(), false
 		case <-slot.cancel:
-			slot.stop(ctx, s.log())
-			<-slot.run.Done()
-			outcome = LoginCancelled
+			return LoginCancelled, false
 		case <-ctx.Done():
-			// The host is stopping: stop the process like a session and end
-			// without a final event, the ephemeral topic dies with the host.
-			slot.stop(ctx, s.log())
-			return
+			return "", true
 		}
 	}
-	s.publishLogin(slot.progress(outcome), false)
+	return "", false
+}
+
+// Q-112: a CLI that would read a pasted code from its own stdin cannot be
+// finished by the host, so the timeout asks the user to run the login in their
+// own terminal instead.
+func (slot *loginRun) timeoutOutcome() string {
+	if slot.needsTerminal {
+		return LoginNeedsTerminal
+	}
+	return LoginTimedOut
 }
 
 // loginOutcome classifies how a login process ended. An exit code alone is
@@ -430,14 +349,13 @@ func (slot *loginRun) stop(ctx context.Context, logger *slog.Logger) {
 	}
 }
 
-// finishLogin removes the slot and releases CancelLogin waiters.
-func (s *AccountsService) finishLogin(slot *loginRun) {
+// releaseLoginSlot removes the slot from the running login map.
+func (s *AccountsService) releaseLoginSlot(slot *loginRun) {
 	s.loginsMu.Lock()
 	if cur, ok := s.logins[slot.vendor]; ok && cur == slot {
 		delete(s.logins, slot.vendor)
 	}
 	s.loginsMu.Unlock()
-	close(slot.done)
 }
 
 // publishLogin sends one login progress event. Intermediate states are

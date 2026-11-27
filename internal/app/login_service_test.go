@@ -258,7 +258,7 @@ func waitForProcessEnd(t *testing.T, ad *fakeLoginAdapter) {
 
 func TestStartLoginRelaysTheCLIPromptVerbatim(t *testing.T) {
 	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+	f := newHubOnlyFixture(t)
 	ad := newFakeLoginAdapter(t, f.clock, lingerCLI(t), false)
 	svc, _, _ := newLoginService(t, f, map[string]vendor.Adapter{VendorClaude: ad})
 	sub := subscribeLoginTopic(t, f)
@@ -299,7 +299,7 @@ func assertLoginPromptRelayedVerbatim(t *testing.T, sub *Subscription, loginID s
 
 func TestCancelLoginStopsTheProcess(t *testing.T) {
 	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+	f := newHubOnlyFixture(t)
 	ad := newFakeLoginAdapter(t, f.clock, lingerCLI(t), false)
 	svc, _, _ := newLoginService(t, f, map[string]vendor.Adapter{VendorClaude: ad})
 	sub := subscribeLoginTopic(t, f)
@@ -325,7 +325,7 @@ func TestCancelLoginStopsTheProcess(t *testing.T) {
 
 func TestLoginTimesOutAndStops(t *testing.T) {
 	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+	f := newHubOnlyFixture(t)
 	ad := newFakeLoginAdapter(t, f.clock, lingerCLI(t), false)
 	svc, _, loginClk := newLoginService(t, f, map[string]vendor.Adapter{VendorCodex: ad})
 	sub := subscribeLoginTopic(t, f)
@@ -347,7 +347,7 @@ func TestLoginTimesOutAndStops(t *testing.T) {
 
 func TestOnlyOneLoginPerVendor(t *testing.T) {
 	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+	f := newHubOnlyFixture(t)
 	claudeAd := newFakeLoginAdapter(t, f.clock, lingerCLI(t), false)
 	codexAd := newFakeLoginAdapter(t, f.clock, lingerCLI(t), false)
 	svc, _, _ := newLoginService(t, f, map[string]vendor.Adapter{VendorClaude: claudeAd, VendorCodex: codexAd})
@@ -366,7 +366,7 @@ func TestOnlyOneLoginPerVendor(t *testing.T) {
 
 func TestSuccessfulLoginReprobesBeforeClearingNeedsLogin(t *testing.T) {
 	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+	f := newHubOnlyFixture(t)
 	ad := newFakeLoginAdapter(t, f.clock, exitCLI(t, 0), false)
 	svc, accounts, _ := newLoginService(t, f, map[string]vendor.Adapter{VendorClaude: ad})
 	sub := subscribeLoginTopic(t, f)
@@ -420,7 +420,7 @@ func drainUntilSucceeded(t *testing.T, sub *Subscription) {
 
 func TestSessionPrincipalCannotStartALogin(t *testing.T) {
 	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+	f := newHubOnlyFixture(t)
 	ad := newFakeLoginAdapter(t, f.clock, lingerCLI(t), false)
 	svc, _, _ := newLoginService(t, f, map[string]vendor.Adapter{VendorClaude: ad})
 	for _, principal := range []string{PrincipalSession, "", "someone-else"} {
@@ -438,7 +438,7 @@ func TestSessionPrincipalCannotStartALogin(t *testing.T) {
 
 func TestAgyStartLoginIsUnsupported(t *testing.T) {
 	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+	f := newHubOnlyFixture(t)
 	ad := newFakeLoginAdapter(t, f.clock, lingerCLI(t), false)
 	svc, _, _ := newLoginService(t, f, map[string]vendor.Adapter{VendorClaude: ad, VendorAGY: &agy.Adapter{}})
 	_, err := svc.StartLogin(t.Context(), string(KindApp), VendorAGY)
@@ -457,7 +457,7 @@ func TestAgyStartLoginIsUnsupported(t *testing.T) {
 
 func TestClaudeLoginWithoutCallbackEndsNeedsTerminal(t *testing.T) {
 	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+	f := newHubOnlyFixture(t)
 	// claude finishes its login by reading a code pasted into its own stdin
 	// (Q-112 B2): the host never relays that, so a login the browser callback
 	// did not finish in time ends needs_terminal, telling the user to run the
@@ -479,7 +479,7 @@ func TestClaudeLoginWithoutCallbackEndsNeedsTerminal(t *testing.T) {
 
 func TestStartLoginAllocatesTheIdentityBeforeSpawning(t *testing.T) {
 	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+	f := newHubOnlyFixture(t)
 	ad := newFakeLoginAdapter(t, f.clock, lingerCLI(t), false)
 	svc, _, _ := newLoginServiceWithIDs(t, f, map[string]vendor.Adapter{VendorClaude: ad}, failingIDs{})
 	_, err := svc.StartLogin(t.Context(), string(KindApp), VendorClaude)
@@ -518,7 +518,7 @@ func TestLoginPromptStaysBoundedUnderALineFlood(t *testing.T) {
 
 func TestLoginFloodPublishesBoundedEvents(t *testing.T) {
 	t.Parallel()
-	f := newTranscriptFixture(t, nil)
+	f := newHubOnlyFixture(t)
 	cli := writeLoginFakeCLI(t, "i=0\nwhile [ $i -lt 100000 ]; do echo x; i=$((i+1)); done\nexit 1\n")
 	ad := newFakeLoginAdapter(t, f.clock, cli, false)
 	svc, _, _ := newLoginService(t, f, map[string]vendor.Adapter{VendorClaude: ad})

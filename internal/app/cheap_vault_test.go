@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -36,6 +38,7 @@ func appTemplateDir(pid int) string {
 const (
 	migratedTemplateFile = "migrated.db"
 	seededTemplateName   = "seeded"
+	gitPathTemplateFile  = "git-path.txt"
 )
 
 // buildTestTemplates migrates a fresh database once for the whole test process
@@ -67,7 +70,48 @@ func buildTestTemplates() (func(int), error) {
 		cleanup(0)
 		return nil, err
 	}
+	if err := buildGitPathTemplate(dir); err != nil {
+		cleanup(0)
+		return nil, err
+	}
 	return cleanup, nil
+}
+
+func buildGitPathTemplate(dir string) error {
+	gitPath, err := exec.LookPath("git")
+	if err != nil {
+		return nil
+	}
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		return fmt.Errorf("open template dir for git path: %w", err)
+	}
+	defer func() {
+		if cerr := root.Close(); cerr != nil {
+			return
+		}
+	}()
+	if writeErr := root.WriteFile(gitPathTemplateFile, []byte(gitPath), 0o600); writeErr != nil {
+		return fmt.Errorf("write git path template: %w", writeErr)
+	}
+	return nil
+}
+
+// testGitBinary returns the resolved git path cached in TestMain so StartHost
+// tests avoid re-running `git --version` probes on every fixture.
+func testGitBinary(t *testing.T) string {
+	t.Helper()
+	raw, err := fs.ReadFile(os.DirFS(appTemplateDir(os.Getpid())), gitPathTemplateFile)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(raw))
+}
+
+// testNoOCRBinary returns a nonexistent binary path inside the test template dir
+// so StartHost tests skip walking $PATH for `ocr` on every fixture.
+func testNoOCRBinary() string {
+	return filepath.Join(appTemplateDir(os.Getpid()), "no-ocr")
 }
 
 func buildMigratedTemplateFile(dir string) error {

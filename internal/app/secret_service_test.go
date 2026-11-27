@@ -16,13 +16,11 @@ import (
 func TestSecretServiceRedactsStoredSecretsOnTranscript(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC))
-	hp := startAppStateHost(t, t.TempDir(), clk)
+	hp := startAppStateHost(t, cheapVaultDataDir(t), clk)
 	closeAppStateHost(t, hp)
 
 	ctx := t.Context()
-	if _, setupErr := hp.rt.vaultService.Setup(ctx, testAppPrincipal, []byte(testAppStateMasterUnlock)); setupErr != nil {
-		t.Fatalf("Setup vault: %v", setupErr)
-	}
+	unlockCheapVault(t, hp)
 	svc, svcErr := hp.rt.SecretService()
 	if svcErr != nil {
 		t.Fatalf("SecretService: %v", svcErr)
@@ -97,13 +95,11 @@ func assertDeleteSecretAndEvent(t *testing.T, svc *SecretService, sub *Subscript
 func TestAnswerInteractionSecretValidationAndPrincipalGate(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewFake(time.Date(2026, 11, 22, 12, 0, 0, 0, time.UTC))
-	hp := startAppStateHost(t, t.TempDir(), clk)
+	hp := startAppStateHost(t, cheapVaultDataDir(t), clk)
 	closeAppStateHost(t, hp)
 
 	ctx := t.Context()
-	if _, setupErr := hp.rt.vaultService.Setup(ctx, testAppPrincipal, []byte(testAppStateMasterUnlock)); setupErr != nil {
-		t.Fatalf("Setup vault: %v", setupErr)
-	}
+	unlockCheapVault(t, hp)
 	opID, opErr := interaction.VendorOperationKey("sess-1", "turn-sec-gate", "vr-sec-gate")
 	if opErr != nil {
 		t.Fatalf("VendorOperationKey: %v", opErr)

@@ -46,6 +46,7 @@ func newCodexRelayFixture(t *testing.T) *codexRelayFixture {
 		DataDir: cheapVaultDataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("codex-relay")),
 		Transport: newScriptedTransport(), VendorBinary: exe, CodexBinary: codexLink,
+		GitBinary: testGitBinary(t), OCRBinary: testNoOCRBinary(),
 	})
 	if err != nil {
 		t.Fatal(err)

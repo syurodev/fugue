@@ -54,7 +54,7 @@ func newVaultLockFixture(t *testing.T) *vaultLockFixture {
 	hp, err := StartHost(t.Context(), &HostDeps{
 		DataDir: cheapVaultDataDir(t), WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
 		Config: testHostConfig(), Clock: clk, IDs: ids.NewUUIDv7(clk, ids.NewDeterministic("vault-lock-test")),
-		Transport: newScriptedTransport(), VendorBinary: exe, TestFugueTools: []*FugueTool{deploy},
+		Transport: newScriptedTransport(), VendorBinary: exe, GitBinary: testGitBinary(t), OCRBinary: testNoOCRBinary(), TestFugueTools: []*FugueTool{deploy},
 	})
 	if err != nil {
 		t.Fatal(err)

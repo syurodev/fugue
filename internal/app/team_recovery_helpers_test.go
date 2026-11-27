@@ -48,6 +48,8 @@ func startRecoveryHost(t *testing.T, dataDir, fugueHome string, clk *clock.Fake)
 		IDs:          ids.NewUUIDv7(clk, ids.NewDeterministic("f116d-rec")),
 		Transport:    newScriptedTransport(),
 		VendorBinary: exe,
+		GitBinary:    testGitBinary(t),
+		OCRBinary:    testNoOCRBinary(),
 		Bridge:       VendorBridge{Binary: exe, Socket: filepath.Join(t.TempDir(), "host.sock")},
 		TeamAdmitter: admitNothing{},
 	})
