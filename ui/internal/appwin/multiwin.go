@@ -352,6 +352,7 @@ func runWindow(ctx context.Context, m *hostconn.Manager, coord *multiWindow, app
 	attach(env, w)
 	sc := newWindowScreens(m, workers, coord, winReg, appearance)
 	sc.titleBar = newTitleBar(runtime.GOOS)
+	sc.titleBar.invalidate = w.Invalidate
 	applyInitialWindowLayout(m, sc, q, windowID, record, doc)
 	sc.seedInitialWindowMode(initGeom)
 	wireApplyGeometry(sc, w)
