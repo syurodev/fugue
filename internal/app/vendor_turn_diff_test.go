@@ -14,9 +14,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 
@@ -488,5 +490,88 @@ func TestVRE14TurnDuringWarmUpWaitsAndGetsACorrectStartSnapshot(t *testing.T) {
 	}
 	if h.turnDiffs()[0].Metadata.Status != transcript.TurnDiffComplete {
 		t.Fatalf("turn_diff = %+v, want complete", h.turnDiffs()[0].Metadata)
+	}
+}
+
+type blockingReleaseSnapshots struct {
+	noopSnapshotLifecycle
+	warmEntered    chan struct{}
+	warmExited     atomic.Bool
+	releaseEntered chan struct{}
+	releaseAllow   chan struct{}
+	releaseExited  atomic.Bool
+}
+
+func (b *blockingReleaseSnapshots) Begin(_ context.Context, _, workDir string) (TurnSnapshot, error) {
+	return TurnSnapshot{ID: "blocking-release-1", WorkDir: workDir}, nil
+}
+
+func (b *blockingReleaseSnapshots) End(_ context.Context, _ TurnSnapshot) (TurnChanges, error) {
+	return TurnChanges{}, nil
+}
+
+func (b *blockingReleaseSnapshots) Warm(ctx context.Context, _ string) error {
+	close(b.warmEntered)
+	<-ctx.Done()
+	b.warmExited.Store(true)
+	return fmt.Errorf("warm cancelled: %w", ctx.Err())
+}
+
+func (b *blockingReleaseSnapshots) ReleaseSession(_ context.Context, _, _ string) error {
+	close(b.releaseEntered)
+	<-b.releaseAllow
+	b.releaseExited.Store(true)
+	return nil
+}
+
+// TestCloseAllWaitsForInflightWarmUpAndReleaseTasks verifies manager teardown
+// stops warm-up and awaits timed-out release tasks before returning.
+func TestCloseAllWaitsForInflightWarmUpAndReleaseTasks(t *testing.T) {
+	t.Parallel()
+	port := &blockingReleaseSnapshots{
+		warmEntered:    make(chan struct{}),
+		releaseEntered: make(chan struct{}),
+		releaseAllow:   make(chan struct{}),
+	}
+	f := newTranscriptFixture(t, nil)
+	session := newActorTestSession()
+	manager := mustNewVendorSessions(t, t.Context(), &VendorSessionDeps{
+		Store: f.store, Transcripts: f.service, Adapter: actorTestAdapter{session: session}, Vault: f.vault,
+		Clock: f.clock, IDs: ids.NewSequence("actor-item-"), TurnSnapshots: port,
+	})
+	info := &vendorstore.Session{ID: testActorSessionID, Vendor: testVendorName, AccountID: testAccountID, Role: testActorRole}
+	if err := manager.Start(t.Context(), info, &vendor.StartSpec{SessionID: testActorSessionID, Cwd: t.TempDir()}); err != nil {
+		t.Fatal(err)
+	}
+	<-port.warmEntered
+
+	closeDone := make(chan error, 1)
+	supervise.Go(t.Context(), "test-close-all-snapshots", func(ctx context.Context) error {
+		closeDone <- manager.CloseAll(context.WithoutCancel(ctx))
+		return nil
+	})
+	<-port.releaseEntered
+	// Trip capped's TurnSnapshotCap so releaseSessionSnapshots returns while the
+	// underlying ReleaseSession goroutine is still blocked on releaseAllow.
+	testutil.Spin(t, "release snapshot cap armed", func() bool { return f.clock.Pending() > 0 })
+	f.clock.Advance(TurnSnapshotCap + time.Millisecond)
+	testutil.Spin(t, "actor exits after release cap", func() bool { return manager.actor(testActorSessionID) == nil })
+	runtime.Gosched()
+
+	select {
+	case err := <-closeDone:
+		t.Fatalf("CloseAll returned (%v) while ReleaseSession task was still running", err)
+	default:
+	}
+	if !port.warmExited.Load() {
+		t.Fatal("warm-up task was not stopped before release")
+	}
+
+	close(port.releaseAllow)
+	if err := <-closeDone; err != nil {
+		t.Fatalf("CloseAll: %v", err)
+	}
+	if !port.releaseExited.Load() {
+		t.Fatal("ReleaseSession task had not exited when CloseAll returned")
 	}
 }
