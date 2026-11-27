@@ -10,12 +10,25 @@ import (
 	"testing"
 )
 
-// TestRegenerateTitleBarShots writes the FUG-58 title bar goldens:
+// TestRegenerateTitleBarShots writes the FUG-58/FUG-97 title bar goldens:
 //
 //	go test -race -tags regenerate ./internal/appwin -run '^TestRegenerateTitleBarShots$'
 func TestRegenerateTitleBarShots(t *testing.T) {
 	t.Parallel()
-	for _, shot := range renderTitleBarShots(t) {
+	writeTitleBarShots(t, renderTitleBarShots(t))
+}
+
+// TestRegenerateMacTitleStripShots writes the FUG-70 macOS title strip goldens:
+//
+//	go test -race -tags regenerate ./internal/appwin -run '^TestRegenerateMacTitleStripShots$'
+func TestRegenerateMacTitleStripShots(t *testing.T) {
+	t.Parallel()
+	writeTitleBarShots(t, renderMacTitleStripShots(t))
+}
+
+func writeTitleBarShots(t *testing.T, shots []titleBarShot) {
+	t.Helper()
+	for _, shot := range shots {
 		var buf bytes.Buffer
 		if err := png.Encode(&buf, shot.img); err != nil {
 			t.Fatalf("encode %s: %v", shot.name, err)

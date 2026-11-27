@@ -3,51 +3,24 @@
 package appwin
 
 /*
-#cgo CFLAGS: -x objective-c
-#cgo LDFLAGS: -framework AppKit
-#import <AppKit/AppKit.h>
-
-static void fugueConfigureTitleBar(uintptr_t viewPtr, int fullscreen) {
-	if (viewPtr == 0) {
-		return;
-	}
-	CFTypeRef viewRef = CFRetain((CFTypeRef)(void *)viewPtr);
-	dispatch_async(dispatch_get_main_queue(), ^{
-		@autoreleasepool {
-			NSView *view = (__bridge NSView *)viewRef;
-			NSWindow *win = view.window;
-			if (win != nil) {
-				if ((win.styleMask & NSWindowStyleMaskFullSizeContentView) == 0) {
-					win.styleMask |= NSWindowStyleMaskFullSizeContentView;
-				}
-				if (!win.titlebarAppearsTransparent) {
-					win.titlebarAppearsTransparent = YES;
-				}
-				if (win.titleVisibility != NSWindowTitleHidden) {
-					win.titleVisibility = NSWindowTitleHidden;
-				}
-				if (!fullscreen) {
-					[[win standardWindowButton:NSWindowCloseButton] setHidden:NO];
-					[[win standardWindowButton:NSWindowMiniaturizeButton] setHidden:NO];
-					[[win standardWindowButton:NSWindowZoomButton] setHidden:NO];
-				}
-				if (view.layer != nil) {
-					view.layer.frame = view.frame;
-				}
-			}
-			CFRelease(viewRef);
-		}
-	});
-}
-
-// applyPlatformTitleBar bridge entry point.
+#include <stdint.h>
 */
 import "C"
 
 import (
+	"image"
+	"math"
+	"runtime/cgo"
+
 	"gioui.org/app"
 	"gioui.org/io/event"
 )
+
+type darwinTitleBarPlatform struct{}
+
+func defaultMacTitleBarPlatform() macTitleBarPlatform {
+	return darwinTitleBarPlatform{}
+}
 
 // extractPlatformView returns the retained-candidate AppKit NSView pointer from
 // a Gio ViewEvent when available.
@@ -59,16 +32,53 @@ func extractPlatformView(e event.Event) (uintptr, bool) {
 	return av.View, true
 }
 
-// applyPlatformTitleBar opts the macOS window into fullSizeContentView with a
-// transparent titlebar on the AppKit main thread so native traffic lights sit
-// inline inside the 32 dp Top Bar and survive Gio Configure resets.
-func applyPlatformTitleBar(viewPtr uintptr, fullscreen bool) {
+func (darwinTitleBarPlatform) applyTitleBar(viewPtr uintptr, fullscreen bool, onMetrics func(macWindowMetrics)) {
 	if viewPtr == 0 {
 		return
 	}
-	fs := C.int(0)
-	if fullscreen {
-		fs = C.int(1)
+	var handle uintptr
+	if onMetrics != nil {
+		handle = uintptr(cgo.NewHandle(onMetrics))
 	}
-	C.fugueConfigureTitleBar(C.uintptr_t(viewPtr), fs)
+	cgoConfigureTitleBar(viewPtr, fullscreen, handle)
+}
+
+func (darwinTitleBarPlatform) doubleClickAction() macDoubleClickAction {
+	switch cgoDoubleClickAction() {
+	case 0:
+		return macDoubleClickNone
+	case 2:
+		return macDoubleClickMinimize
+	default:
+		return macDoubleClickZoom
+	}
+}
+
+func (darwinTitleBarPlatform) setDragRect(viewPtr uintptr, rect image.Rectangle) {
+	if viewPtr == 0 {
+		return
+	}
+	cgoSetDragRect(viewPtr, float64(rect.Min.X), float64(rect.Min.Y), float64(rect.Max.X), float64(rect.Max.Y))
+}
+
+//export fugueOnTitleBarMetrics
+func fugueOnTitleBarMetrics(handle C.uintptr_t, barH, zx0, zy0, zx1, zy1 C.double) {
+	onMetrics, ok := cgo.Handle(handle).Value().(func(macWindowMetrics))
+	if !ok || onMetrics == nil {
+		return
+	}
+	onMetrics(macWindowMetrics{
+		BarHeightDp: float32(barH),
+		ZoomButtonFrame: image.Rect(
+			int(math.Floor(float64(zx0))),
+			int(math.Floor(float64(zy0))),
+			int(math.Ceil(float64(zx1))),
+			int(math.Ceil(float64(zy1))),
+		),
+	})
+}
+
+//export fugueReleaseTitleBarHandle
+func fugueReleaseTitleBarHandle(handle C.uintptr_t) {
+	cgo.Handle(handle).Delete()
 }

@@ -44,26 +44,31 @@ func windowOptions(goos string) []app.Option {
 	return []app.Option{app.Decorated(false)}
 }
 
-// titleBar is the app-drawn 32 dp Top Bar (FUG-95, FUG-96) and optional Linux CSD chrome.
+// titleBar is the app-drawn Top Bar (FUG-70, FUG-95, FUG-96) and optional Linux CSD chrome.
 type titleBar struct {
-	goos        string
-	deco        widget.Decorations
-	click       gesture.Click
-	csd         bool
-	fullscreen  bool
-	focused     bool
-	maximized   bool
-	nativeView  uintptr
-	title       string
-	pending     system.Action
-	themeBtn    *kit.IconButtonState
-	settingsBtn *kit.IconButtonState
+	goos           string
+	deco           widget.Decorations
+	click          gesture.Click
+	csd            bool
+	fullscreen     bool
+	focused        bool
+	maximized      bool
+	nativeView     uintptr
+	platform       macTitleBarPlatform
+	mac            macMetricsState
+	invalidate     func()
+	lastDragRectDp image.Rectangle
+	title          string
+	pending        system.Action
+	themeBtn       *kit.IconButtonState
+	settingsBtn    *kit.IconButtonState
 }
 
 func newTitleBar(goos string) *titleBar {
 	return &titleBar{
 		goos:        goos,
 		focused:     true,
+		platform:    defaultMacTitleBarPlatform(),
 		themeBtn:    kit.NewIconButtonState(),
 		settingsBtn: kit.NewIconButtonState(),
 	}
@@ -92,19 +97,27 @@ func (b *titleBar) applyViewEvent(e event.Event) {
 	ptr, ok := extractPlatformView(e)
 	if !ok {
 		b.nativeView = 0
+		b.lastDragRectDp = image.Rectangle{}
 		return
 	}
 	b.nativeView = ptr
-	applyPlatformTitleBar(ptr, b.fullscreen)
+	b.applyPlatformChrome()
 }
 
 // reapplyPlatformChrome restores platform titlebar styling after Gio window
 // option updates (which reset macOS fullSizeContentView on v0.10.3).
 func (b *titleBar) reapplyPlatformChrome() {
-	if b == nil || b.nativeView == 0 {
+	if b == nil {
 		return
 	}
-	applyPlatformTitleBar(b.nativeView, b.fullscreen)
+	b.applyPlatformChrome()
+}
+
+func (b *titleBar) applyPlatformChrome() {
+	if b.nativeView == 0 || b.platform == nil {
+		return
+	}
+	b.platform.applyTitleBar(b.nativeView, b.fullscreen, b.setMacMetrics)
 }
 
 func (b *titleBar) hasDragArea() bool {
@@ -126,7 +139,7 @@ func (b *titleBar) height(gtx *layout.Context) int {
 	if b == nil {
 		return 0
 	}
-	return gtx.Dp(theme.TopBarHeight)
+	return b.macBarHeight(gtx)
 }
 
 func (b *titleBar) ensureButtons() {
@@ -140,7 +153,7 @@ func (b *titleBar) ensureButtons() {
 
 func (b *titleBar) leftInset(gtx *layout.Context, hasSettings bool) int {
 	if b.goos == osDarwin && !b.fullscreen {
-		return gtx.Dp(theme.MacTrafficLightInset)
+		return b.macLeftInset(gtx)
 	}
 	if hasSettings {
 		return gtx.Dp(theme.RailWidth)
@@ -229,11 +242,14 @@ func (b *titleBar) layout(env *kit.Env, gtx *layout.Context, sc *screens) int {
 	maxLeftW := max(width-m.rightTotalW-leftX-gtx.Dp(theme.SpaceMD), 0)
 	pillW := b.layoutContextPill(env, &local, sc, leftX, h, maxLeftW)
 
+	var dragArea image.Rectangle
 	if b.hasDragArea() {
 		dragStart := leftX + pillW
 		dragEnd := max(width-m.rightTotalW, dragStart)
-		b.layoutDragArea(&local, image.Rect(dragStart, 0, dragEnd, h))
+		dragArea = image.Rect(dragStart, 0, dragEnd, h)
+		b.layoutDragArea(&local, dragArea)
 	}
+	b.syncPlatformDragRect(&local, dragArea)
 	b.layoutRightCluster(env, &local, sc, width, h, m)
 	return h
 }
@@ -345,20 +361,21 @@ func (b *titleBar) layoutContextPill(env *kit.Env, gtx *layout.Context, sc *scre
 	return pillW
 }
 
-// layoutDragArea registers the middle window move and Linux CSD double-click maximize area.
+// layoutDragArea registers the middle window move and double-click action area.
 func (b *titleBar) layoutDragArea(gtx *layout.Context, area image.Rectangle) {
 	size := area.Size()
 	if size.X <= 0 || size.Y <= 0 {
 		return
 	}
-	if b.csd {
+	hasDoubleClick := b.csd || (b.goos == osDarwin && !b.fullscreen)
+	if hasDoubleClick {
 		b.pollDragDoubleClick(gtx)
 	}
 	off := op.Offset(area.Min).Push(gtx.Ops)
 	local := *gtx
 	local.Constraints = layout.Exact(size)
 	b.deco.LayoutMove(local, func(g layout.Context) layout.Dimensions {
-		if b.csd {
+		if hasDoubleClick {
 			st := clip.Rect{Max: size}.Push(g.Ops)
 			b.click.Add(g.Ops)
 			st.Pop()
@@ -375,6 +392,10 @@ func (b *titleBar) pollDragDoubleClick(gtx *layout.Context) {
 			return
 		}
 		if ev.Kind == gesture.KindClick && ev.NumClicks == 2 {
+			if b.goos == osDarwin && !b.fullscreen {
+				b.pending |= b.darwinDoubleClickAction()
+				continue
+			}
 			b.pending |= b.toggleMaximize()
 		}
 	}
