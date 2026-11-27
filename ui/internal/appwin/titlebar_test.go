@@ -26,29 +26,43 @@ import (
 	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
-// TestNativeChromePlatformsKeepNativeDecorations pins FUG-58's platform
-// switch: macOS (and Windows, mobile, web) get no option and no app-drawn
-// bar, whatever the platform reports; the Linux family opts out of Gio's
-// Material fallback and draws its own only when the platform gives none.
-func TestNativeChromePlatformsKeepNativeDecorations(t *testing.T) {
-	t.Parallel()
-	for _, goos := range []string{"darwin", "windows", "android", "ios", "js"} {
-		if opts := windowOptions(goos); len(opts) != 0 {
-			t.Errorf("%s: got %d window options, want none (native title bar)", goos, len(opts))
-		}
-		bar := newTitleBar(goos)
-		bar.applyConfig(app.Config{Decorated: false})
-		if bar.csd {
-			t.Errorf("%s: Linux CSD chrome enabled; native decorations must stay", goos)
-		}
-		var ops op.Ops
-		gtx := layout.Context{Ops: &ops, Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}}
-		if got, want := bar.height(&gtx), gtx.Dp(theme.TopBarHeight); got != want {
-			t.Errorf("%s: top bar height = %d, want %d", goos, got, want)
-		}
+func applyWindowOpts(opts []app.Option) app.Config {
+	cfg := app.Config{Decorated: true}
+	for _, opt := range opts {
+		opt(unit.Metric{PxPerDp: 1, PxPerSp: 1}, &cfg)
 	}
-	if opts := windowOptions("linux"); len(opts) != 1 {
-		t.Errorf("linux: got %d window options, want the Decorated(false) opt-out", len(opts))
+	return cfg
+}
+
+// TestWindowOptionsPerOS pins the per-OS window decoration split (FUG-58,
+// FUG-97, FUG-98, FUG-102):
+//   - darwin opts out of Gio's fallback Material decorations via Decorated(false)
+//     while keeping Linux CSD disabled (macOS uses native traffic lights).
+//   - Windows, mobile, and web return no options and never enable Linux CSD.
+//   - The Linux/BSD family opts out of Gio's fallback and draws CSD controls
+//     only when the platform reports Decorated=false outside fullscreen.
+func TestWindowOptionsPerOS(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		goos      string
+		wantOpt   bool
+		wantOwn   bool
+		wantCSDOn bool
+	}{
+		{goos: osDarwin, wantOpt: true, wantOwn: false, wantCSDOn: false},
+		{goos: "windows", wantOpt: false, wantOwn: false, wantCSDOn: false},
+		{goos: "android", wantOpt: false, wantOwn: false, wantCSDOn: false},
+		{goos: "ios", wantOpt: false, wantOwn: false, wantCSDOn: false},
+		{goos: "js", wantOpt: false, wantOwn: false, wantCSDOn: false},
+		{goos: "linux", wantOpt: true, wantOwn: true, wantCSDOn: true},
+		{goos: "freebsd", wantOpt: true, wantOwn: true, wantCSDOn: true},
+		{goos: "openbsd", wantOpt: true, wantOwn: true, wantCSDOn: true},
+		{goos: "netbsd", wantOpt: true, wantOwn: true, wantCSDOn: true},
+	} {
+		t.Run(tc.goos, func(t *testing.T) {
+			t.Parallel()
+			assertPlatformWindowOptions(t, tc.goos, tc.wantOpt, tc.wantOwn, tc.wantCSDOn)
+		})
 	}
 	for _, tc := range []struct {
 		name string
@@ -64,6 +78,37 @@ func TestNativeChromePlatformsKeepNativeDecorations(t *testing.T) {
 		if bar.csd != tc.want {
 			t.Errorf("linux %s: csd = %v, want %v", tc.name, bar.csd, tc.want)
 		}
+	}
+}
+
+func assertPlatformWindowOptions(t *testing.T, goos string, wantOpt, wantOwn, wantCSDOn bool) {
+	t.Helper()
+	if got := drawsOwnChrome(goos); got != wantOwn {
+		t.Errorf("drawsOwnChrome(%q) = %v, want %v", goos, got, wantOwn)
+	}
+	if got := optsOutOfGioDecorations(goos); got != wantOpt {
+		t.Errorf("optsOutOfGioDecorations(%q) = %v, want %v", goos, got, wantOpt)
+	}
+	opts := windowOptions(goos)
+	wantLen := 0
+	if wantOpt {
+		wantLen = 1
+	}
+	if len(opts) != wantLen {
+		t.Fatalf("windowOptions(%q): got %d options, want %d", goos, len(opts), wantLen)
+	}
+	if cfg := applyWindowOpts(opts); cfg.Decorated == wantOpt {
+		t.Errorf("windowOptions(%q): Decorated = %v, want %v", goos, cfg.Decorated, !wantOpt)
+	}
+	bar := newTitleBar(goos)
+	bar.applyConfig(app.Config{Decorated: false})
+	if bar.csd != wantCSDOn {
+		t.Errorf("%s: csd = %v, want %v", goos, bar.csd, wantCSDOn)
+	}
+	var ops op.Ops
+	gtx := layout.Context{Ops: &ops, Metric: unit.Metric{PxPerDp: 1, PxPerSp: 1}}
+	if got, want := bar.height(&gtx), gtx.Dp(theme.TopBarHeight); got != want {
+		t.Errorf("%s: top bar height = %d, want %d", goos, got, want)
 	}
 }
 

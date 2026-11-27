@@ -17,12 +17,13 @@ import (
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
-// Window chrome (FUG-58, FUG-95). On all desktop platforms, Fugue renders a
+// Window chrome (FUG-58, FUG-95, FUG-102). On all desktop platforms, Fugue renders a
 // unified 32 dp Top Bar on AppBg carrying the active context pill, window drag
-// area, Quick Theme Toggle, and Settings button. On Linux/BSD compositors that
-// grant no server-side decorations (Config.Decorated == false), windowOptions
-// opts out of Gio's fallback Material title bar and appends CSD Minimize /
-// Maximize / Close controls on the far right.
+// area, Quick Theme Toggle, and Settings button. Both the Linux/BSD family and
+// macOS opt out of Gio's fallback Material title bar via app.Decorated(false);
+// Linux/BSD compositors that grant no server-side decorations also append CSD
+// Minimize / Maximize / Close controls on the far right, whereas macOS keeps its
+// native traffic lights via fugueConfigureTitleBar.
 
 // drawsOwnChrome reports whether goos is a platform whose window chrome may
 // need to be drawn by the app: the X11 and Wayland systems.
@@ -35,10 +36,17 @@ func drawsOwnChrome(goos string) bool {
 	}
 }
 
-// windowOptions are the platform-specific options of a new window. Only the
-// Linux family opts out of Gio's fallback decorations.
+// optsOutOfGioDecorations reports whether goos must opt out of Gio's fallback
+// Material decorations. Linux/BSD may draw CSD controls; macOS configures
+// NSWindowStyleMaskFullSizeContentView natively (which causes Gio's driver to
+// report Config.Decorated == false and otherwise triggers fallbackDecorate).
+func optsOutOfGioDecorations(goos string) bool {
+	return drawsOwnChrome(goos) || goos == osDarwin
+}
+
+// windowOptions are the platform-specific options of a new window.
 func windowOptions(goos string) []app.Option {
-	if !drawsOwnChrome(goos) {
+	if !optsOutOfGioDecorations(goos) {
 		return nil
 	}
 	return []app.Option{app.Decorated(false)}
