@@ -16,6 +16,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
+	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/snapshot"
 	"github.com/syurodev/fugue/internal/transcript"
 )
@@ -133,7 +134,7 @@ func capped[T any](ctx context.Context, m *VendorSessions, name string, fn func(
 		err   error
 	}
 	done := make(chan outcome, 1)
-	task := m.spawn(name, func(taskCtx context.Context) error {
+	task := m.spawnSnapshot(name, func(taskCtx context.Context) error {
 		value, err := fn(taskCtx)
 		done <- outcome{value: value, err: err}
 		return nil
@@ -296,7 +297,7 @@ func (a *vendorSessionActor) startWarmUp() {
 	done := make(chan struct{})
 	a.warm = done
 	workDir, logger := a.cwd, a.manager.deps.Logger
-	a.warmTask = a.manager.spawn("turn-snapshot-warm-"+a.info.ID, func(ctx context.Context) error {
+	a.warmTask = a.manager.spawnSnapshot("turn-snapshot-warm-"+a.info.ID, func(ctx context.Context) error {
 		defer close(done)
 		if err := port.Warm(ctx, workDir); err != nil {
 			logger.WarnContext(ctx, "the shadow warm-up failed", "error_code", string(errcode.CodeOf(err)))
@@ -339,5 +340,28 @@ func (a *vendorSessionActor) releaseSessionSnapshots(ctx context.Context) {
 	})
 	if err != nil {
 		a.manager.deps.Logger.WarnContext(ctx, "the session snapshots were not released", "error_code", string(errcode.CodeOf(err)))
+	}
+}
+
+func (m *VendorSessions) spawnSnapshot(name string, fn func(context.Context) error) *supervise.Task {
+	m.snapshotWg.Add(1)
+	return m.spawn(name, func(ctx context.Context) error {
+		defer m.snapshotWg.Done()
+		return fn(ctx)
+	})
+}
+
+func (m *VendorSessions) waitSnapshotTasks(ctx context.Context) error {
+	done := make(chan struct{})
+	supervise.Go(context.WithoutCancel(ctx), "wait-snapshot-tasks", func(context.Context) error {
+		m.snapshotWg.Wait()
+		close(done)
+		return nil
+	})
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("wait for snapshot tasks: %w", ctx.Err())
 	}
 }

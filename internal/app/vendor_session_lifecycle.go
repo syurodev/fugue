@@ -330,5 +330,8 @@ func (m *VendorSessions) CloseAll(ctx context.Context) error {
 			failures = append(failures, ctx.Err())
 		}
 	}
+	if err := m.waitSnapshotTasks(ctx); err != nil {
+		failures = append(failures, err)
+	}
 	return errors.Join(failures...)
 }

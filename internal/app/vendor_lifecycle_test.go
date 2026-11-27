@@ -240,6 +240,52 @@ func TestGracefulStopRunsTheF92StopOrderForEverySession(t *testing.T) {
 	}
 }
 
+// TestHostCloseWhileTurnInFlightPersistsFinalSnapshot proves closing a host
+// while a vendor session actor has an active turn persists the turn end and
+// final closed session snapshot without surfacing an actor error.
+func TestHostCloseWhileTurnInFlightPersistsFinalSnapshot(t *testing.T) {
+	t.Parallel()
+	f := newVendorServiceFixture(t)
+	sub, err := f.rt.Subscribe(t.Context(), SubscribeParams{Principal: testAppPrincipal, Topic: TopicVendorSessions})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sub.Close()
+	sess := f.start(t, "close-inflight")
+	awaitSessionState(t, sub, sess.ID, vendorstore.StateReady)
+	if sendErr := f.svc.Send(t.Context(), testAppPrincipal, VendorInput{
+		CommandID: "inflight-turn", SessionID: sess.ID, Text: fakeCLIHold,
+	}); sendErr != nil {
+		t.Fatalf("Send: %v", sendErr)
+	}
+	testutil.Spin(t, "turn in flight", func() bool {
+		snap, snapErr := f.hp.vendorStore.Snapshot(t.Context(), sess.ID)
+		return snapErr == nil && snap.State == vendorstore.StateRunning
+	})
+
+	if closeErr := f.hp.Close(); closeErr != nil {
+		t.Fatalf("Close while turn in flight: %v", closeErr)
+	}
+	assertSessionClosedWithEndedTurn(t, f.hp.deps.DataDir, sess.ID)
+}
+
+func assertSessionClosedWithEndedTurn(t *testing.T, dataDir, sessionID string) {
+	t.Helper()
+	stopProofs := readStopResults(t, dataDir)
+	result, ok := stopProofs[sessionID]
+	if !ok {
+		t.Fatalf("session %s missing after close", sessionID)
+	}
+	if result.state != vendorstore.StateClosed || result.reason != string(vendor.CloseHostStop) ||
+		(result.proof != vendorstore.StopProved && result.proof != vendorstore.StopUnknown) {
+		t.Fatalf("session %s persisted = %+v, want closed/%s with proved or unknown proof", sessionID, result, vendor.CloseHostStop)
+	}
+	turns := readSessionTurns(t, dataDir, sessionID)
+	if len(turns) != 1 || (turns[0].Outcome != vendorstore.OutcomeInterrupted && turns[0].Outcome != vendorstore.OutcomeUnknown) {
+		t.Fatalf("persisted turns = %+v, want 1 ended turn", turns)
+	}
+}
+
 type vendorStopResult struct {
 	state  string
 	proof  string
@@ -281,6 +327,35 @@ func readStopResults(t *testing.T, dir string) map[string]vendorStopResult {
 		}
 	}
 	return out
+}
+
+func readSessionTurns(t *testing.T, dir, sessionID string) []vendorstore.TurnState {
+	t.Helper()
+	clk := testutil.OSClock()
+	store, err := storage.OpenStore(t.Context(), config.Config{DataDir: dir}, clk,
+		ids.NewUUIDv7(clk, ids.NewDeterministic("vendor-turns-read")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if closeErr := store.Close(); closeErr != nil {
+			t.Error(closeErr)
+		}
+	}()
+	vs, err := vendorstore.New(t.Context(), store.DB(), nil, clk, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		if closeErr := vs.Close(); closeErr != nil {
+			t.Error(closeErr)
+		}
+	}()
+	turns, err := vs.SessionTurns(t.Context(), sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return turns
 }
 
 // Reopen and resume of a detached session go through the existing VendorService
