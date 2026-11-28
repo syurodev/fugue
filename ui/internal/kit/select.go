@@ -121,8 +121,9 @@ func (s *SelectState) Layout(env *Env, gtx *layout.Context, p *SelectProps) (Sel
 
 	if !p.Disabled {
 		mres, err := s.menu.Layout(env, gtx, MenuProps{
-			Items:  selectMenuItems(p.Options),
-			Anchor: box,
+			Items:      selectMenuItems(p.Options),
+			Anchor:     box,
+			FieldAlign: true,
 		})
 		if err != nil {
 			return res, err

@@ -6,7 +6,6 @@ import (
 
 	"gioui.org/io/event"
 	"gioui.org/layout"
-	"gioui.org/op"
 
 	"github.com/syurodev/fugue/pkg/client"
 
@@ -291,11 +290,13 @@ func (f *startFlow) body(env *kit.Env, gtx *layout.Context, bands *kit.DialogBan
 	lay := func(tag event.Tag, draw func(gtx *layout.Context) (layout.Dimensions, error)) {
 		local := *gtx
 		local.Constraints.Min.X = w
-		// Each field paints at its own y: the recorded body ops all start at
-		// the body's origin, so without the offset they stack on the first.
-		off := op.Offset(image.Pt(0, y)).Push(local.Ops)
-		dims, err := draw(&local)
-		off.Pop()
+		// Each field paints at its own y: env.Offset records the move so
+		// dropdowns know their window coordinates.
+		var dims layout.Dimensions
+		var err error
+		env.Offset(&local, image.Pt(0, y), func(gtx *layout.Context) {
+			dims, err = draw(gtx)
+		})
 		if err != nil {
 			sc.fail(err)
 		}
@@ -339,6 +340,7 @@ func (f *startFlow) layWorkspace(env *kit.Env, sc *screens, lay fieldLay) {
 			Loading:     sc.workspacesPending(),
 			EmptyText:   "No workspaces",
 			NoResText:   "No matching workspace",
+			Block:       true,
 		}
 		res, err := f.workspace.Layout(env, gtx, props)
 		if res.Chosen != "" {
@@ -407,6 +409,7 @@ func (f *startFlow) layModel(env *kit.Env, lay fieldLay) {
 			Label:       "Model",
 			Placeholder: "vendor default",
 			Helper:      "The vendor's model name; the host validates it.",
+			Block:       true,
 		}
 		_, err := f.model.Layout(env, gtx, props)
 		return f.model.Measure(env, gtx, props), err

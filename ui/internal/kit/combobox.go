@@ -34,6 +34,9 @@ type ComboboxProps struct {
 	NoResText   string
 	Filter      func(query string, items []SuggestItem) []SuggestItem
 	Disabled    bool
+	// Block stretches the combobox to the full width the layout allows, for
+	// form columns (§4.6).
+	Block bool
 }
 
 // ComboboxResult reports what happened in the frame (UK-06).
@@ -104,7 +107,8 @@ func DefaultComboboxFilter(query string, items []SuggestItem) []SuggestItem {
 
 // Measure returns the field's natural box.
 func (s *ComboboxState) Measure(env *Env, gtx *layout.Context, p *ComboboxProps) layout.Dimensions {
-	return s.field.Measure(env, gtx, p.fieldProps())
+	fieldGtx := comboboxFieldContext(gtx, p)
+	return s.field.Measure(env, &fieldGtx, p.fieldProps())
 }
 
 // Layout draws the search field and, when open, the SuggestList on the overlay.
@@ -117,8 +121,9 @@ func (s *ComboboxState) Layout(env *Env, gtx *layout.Context, p *ComboboxProps) 
 		s.list.Close()
 	}
 
+	fieldGtx := comboboxFieldContext(gtx, p)
 	tfProps := p.fieldProps()
-	fev, err := s.field.Layout(env, gtx, tfProps)
+	fev, err := s.field.Layout(env, &fieldGtx, tfProps)
 	if err != nil {
 		return res, err
 	}
@@ -134,18 +139,19 @@ func (s *ComboboxState) Layout(env *Env, gtx *layout.Context, p *ComboboxProps) 
 		s.list.Close()
 	}
 
-	pre := fieldMetrics(env, gtx, p.Label)
-	w := textFieldWidth(env, gtx, tfProps)
+	pre := fieldMetrics(env, &fieldGtx, p.Label)
+	w := textFieldWidth(env, &fieldGtx, tfProps)
 	anchor := image.Rect(0, pre.labelH, w, pre.labelH+pre.boxH)
 
 	lres, err := s.list.Layout(env, gtx, &SuggestProps{
-		Items:     filtered,
-		Anchor:    anchor,
-		Query:     s.field.Text(),
-		Loading:   p.Loading,
-		EmptyText: p.EmptyText,
-		NoResText: p.NoResText,
-		MinWidth:  w,
+		Items:      filtered,
+		Anchor:     anchor,
+		Query:      s.field.Text(),
+		Loading:    p.Loading,
+		EmptyText:  p.EmptyText,
+		NoResText:  p.NoResText,
+		MinWidth:   w,
+		FieldAlign: true,
 	})
 	if err != nil {
 		return res, err
@@ -154,6 +160,14 @@ func (s *ComboboxState) Layout(env *Env, gtx *layout.Context, p *ComboboxProps) 
 		res.Chosen = lres.Chosen
 	}
 	return res, nil
+}
+
+func comboboxFieldContext(gtx *layout.Context, p *ComboboxProps) layout.Context {
+	local := *gtx
+	if p.Block && local.Constraints.Max.X > 0 && local.Constraints.Max.X < 1<<20 {
+		local.Constraints.Min.X = local.Constraints.Max.X
+	}
+	return local
 }
 
 func (p *ComboboxProps) fieldProps() *TextFieldProps {
