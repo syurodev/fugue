@@ -368,7 +368,7 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool
 		toggled := sidebarOpen && s.grid.rail == it.item
 		props := kit.IconButtonProps{
 			Icon: it.icon, Label: it.hint, Variant: kit.IconButtonGhost, Size: kit.SizeSM,
-			Toggled: toggled, NoSelectedFill: true,
+			Toggled: toggled, NoSelectedFill: true, FocusWash: true,
 		}
 		var err error
 		env.Offset(gtx, image.Pt(x, y), func(gtx *layout.Context) {

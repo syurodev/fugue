@@ -191,6 +191,20 @@ func (c *pressable) begin(env *Env, gtx *layout.Context, box image.Point, o pres
 // the focus ring last. The ring sits outside the body (§3.4), so no parent
 // may clip a control.
 func (c *pressable) paint(env *Env, gtx *layout.Context, r image.Rectangle, radius int, look controlLook, mv motionVals, content func(fg color.NRGBA)) {
+	c.paintWith(env, gtx, r, radius, look, mv, content, false)
+}
+
+// paintFocusWash is paint for the app chrome buttons of §3.4 (FUG-109):
+// keyboard focus drives the variant's hover wash instead of the outer ring.
+func (c *pressable) paintFocusWash(env *Env, gtx *layout.Context, r image.Rectangle, radius int, look controlLook, mv motionVals, content func(fg color.NRGBA)) {
+	c.paintWith(env, gtx, r, radius, look, mv, content, true)
+}
+
+// paintWith is the one paint body. With focusWash the §3.4 focus transition
+// drives the hover wash instead of the ring, so a focused chrome button
+// reads exactly like a hovered one and nothing is drawn outside the body.
+// Without it the op stream is the one paint has always emitted.
+func (c *pressable) paintWith(env *Env, gtx *layout.Context, r image.Rectangle, radius int, look controlLook, mv motionVals, content func(fg color.NRGBA), focusWash bool) {
 	scale := float32(1)
 	if !env.ReducedMotion {
 		scale = 1 - (1-theme.MotionPress)*unit01(mv.press)
@@ -198,17 +212,36 @@ func (c *pressable) paint(env *Env, gtx *layout.Context, r image.Rectangle, radi
 	center := f32.Pt(float32(r.Min.X+r.Max.X)/2, float32(r.Min.Y+r.Max.Y)/2)
 	defer scaleAbout(gtx, center, scale).Pop()
 
-	base, sel, hover, press := layerWeights(mv)
+	wash := mv
+	if focusWash {
+		// The focus transition takes the hover channel, so the wash rides
+		// the same Snappy fade the ring used and layerWeights keeps its
+		// replace-stronger-with-stronger rule (UK-E04).
+		wash.hover = max(unit01(mv.hover), unit01(mv.focus))
+	}
+	base, sel, hover, press := layerWeights(wash)
 	fillLayer(gtx, r, radius, look.base, base)
 	fillLayer(gtx, r, radius, look.sel, sel)
+	if focusWash {
+		// A focused toggled button stacks the wash over the selected fill —
+		// SelectedWash, or the rail's NoSelectedFill + external pill —
+		// because layerWeights lets the selected wash replace hover, which
+		// would leave focus invisible on it (§3.4, FUG-109). Press still
+		// replaces both.
+		fillLayer(gtx, r, radius, look.hover, unit01(mv.focus)*(1-unit01(mv.press))*unit01(mv.sel))
+	}
 	fillLayer(gtx, r, radius, look.hover, hover)
 	fillLayer(gtx, r, radius, look.press, press)
 	if look.border.A != 0 {
 		strokeRRect(gtx.Ops, r, radius, float32(gtx.Dp(theme.Hairline)), look.border)
 	}
 	c.rip.draw(gtx, r, radius, look.ripple)
-	content(mix(look.fg, look.fgHover, max(unit01(mv.hover), unit01(mv.press))))
-	if mv.focus > 0 {
+	fgLift := max(unit01(mv.hover), unit01(mv.press))
+	if focusWash {
+		fgLift = max(fgLift, unit01(mv.focus))
+	}
+	content(mix(look.fg, look.fgHover, fgLift))
+	if !focusWash && mv.focus > 0 {
 		focusRing(gtx, r, radius, look.ring, mv.focus)
 	}
 }
