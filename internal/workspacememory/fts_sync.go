@@ -7,58 +7,48 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
-type ftsSnapshot struct {
-	rowid        int64
-	label        string
-	keywordsJSON string
-	summary      string
-	body         string
-	validity     string
-}
-
-func loadFTSSnapshot(ctx context.Context, tx *sql.Tx, workspaceID, id string) (ftsSnapshot, error) {
-	var snap ftsSnapshot
-	err := tx.QueryRowContext(
+func nextFTSRowID(ctx context.Context, tx *sql.Tx) (int64, error) {
+	var next int64
+	if err := tx.QueryRowContext(
 		ctx,
-		`SELECT rowid, label, keywords_json, summary, body, validity
-		FROM workspace_memory_entries
-		WHERE workspace_id = ? AND id = ?`,
-		workspaceID, id,
-	).Scan(&snap.rowid, &snap.label, &snap.keywordsJSON, &snap.summary, &snap.body, &snap.validity)
-	if err != nil {
-		return ftsSnapshot{}, errcode.Wrap(errcode.Internal, "load workspace memory FTS snapshot", err)
+		`SELECT COALESCE(MAX(fts_rowid), 0) + 1 FROM workspace_memory_entries`,
+	).Scan(&next); err != nil {
+		return 0, errcode.Wrap(errcode.Internal, "allocate workspace memory fts_rowid", err)
 	}
-	return snap, nil
+	return next, nil
 }
 
 func ftsInsertByID(ctx context.Context, tx *sql.Tx, entryID string) error {
 	const wordSQL = `INSERT INTO workspace_memory_fts_words(rowid, label, keywords_json, summary, body)
-		SELECT rowid, label, keywords_json, summary, body FROM workspace_memory_entries WHERE id = ?`
+		SELECT fts_rowid, label, keywords_json, summary, body FROM workspace_memory_entries WHERE id = ?`
 	if _, err := tx.ExecContext(ctx, wordSQL, entryID); err != nil {
 		return errcode.Wrap(errcode.Internal, "insert workspace memory FTS words", err)
 	}
 	const trigramSQL = `INSERT INTO workspace_memory_fts_trigram(rowid, label, keywords_json, summary, body)
-		SELECT rowid, label, keywords_json, summary, body FROM workspace_memory_entries WHERE id = ?`
+		SELECT fts_rowid, label, keywords_json, summary, body FROM workspace_memory_entries WHERE id = ?`
 	if _, err := tx.ExecContext(ctx, trigramSQL, entryID); err != nil {
 		return errcode.Wrap(errcode.Internal, "insert workspace memory FTS trigram", err)
 	}
 	return nil
 }
 
-func ftsDeleteSnapshot(ctx context.Context, tx *sql.Tx, snap *ftsSnapshot) error {
-	if snap.validity != string(ValidityValid) {
+func ftsDeleteByEntryID(ctx context.Context, tx *sql.Tx, workspaceID, entryID string) error {
+	var ftsRowID int64
+	var validity string
+	if err := tx.QueryRowContext(
+		ctx,
+		`SELECT fts_rowid, validity FROM workspace_memory_entries WHERE workspace_id = ? AND id = ?`,
+		workspaceID, entryID,
+	).Scan(&ftsRowID, &validity); err != nil {
+		return errcode.Wrap(errcode.Internal, "load workspace memory fts_rowid", err)
+	}
+	if validity != string(ValidityValid) {
 		return nil
 	}
-	const wordDel = `INSERT INTO workspace_memory_fts_words(
-		workspace_memory_fts_words, rowid, label, keywords_json, summary, body
-	) VALUES ('delete', ?, ?, ?, ?, ?)`
-	if _, err := tx.ExecContext(ctx, wordDel, snap.rowid, snap.label, snap.keywordsJSON, snap.summary, snap.body); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workspace_memory_fts_words WHERE rowid = ?`, ftsRowID); err != nil {
 		return errcode.Wrap(errcode.Internal, "delete workspace memory FTS words", err)
 	}
-	const trigramDel = `INSERT INTO workspace_memory_fts_trigram(
-		workspace_memory_fts_trigram, rowid, label, keywords_json, summary, body
-	) VALUES ('delete', ?, ?, ?, ?, ?)`
-	if _, err := tx.ExecContext(ctx, trigramDel, snap.rowid, snap.label, snap.keywordsJSON, snap.summary, snap.body); err != nil {
+	if _, err := tx.ExecContext(ctx, `DELETE FROM workspace_memory_fts_trigram WHERE rowid = ?`, ftsRowID); err != nil {
 		return errcode.Wrap(errcode.Internal, "delete workspace memory FTS trigram", err)
 	}
 	return nil

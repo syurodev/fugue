@@ -21,6 +21,7 @@ func (e *rawConflictError) Error() string {
 type entryRow struct {
 	id            string
 	workspaceID   string
+	ftsRowID      int64
 	kind          Kind
 	label         string
 	summary       string
@@ -132,11 +133,7 @@ func (s *Store) execUpdate(ctx context.Context, tx *sql.Tx, in *UpdateInput, anc
 	if err != nil {
 		return entryRow{}, err
 	}
-	snap, err := loadFTSSnapshot(ctx, tx, in.WorkspaceID, in.ID)
-	if err != nil {
-		return entryRow{}, err
-	}
-	if delErr := ftsDeleteSnapshot(ctx, tx, &snap); delErr != nil {
+	if delErr := ftsDeleteByEntryID(ctx, tx, in.WorkspaceID, in.ID); delErr != nil {
 		return entryRow{}, delErr
 	}
 	next := entryRow{
@@ -196,11 +193,7 @@ func (s *Store) execInvalidate(ctx context.Context, tx *sql.Tx, in *InvalidateIn
 	if err != nil {
 		return entryRow{}, err
 	}
-	ftsSnap, err := loadFTSSnapshot(ctx, tx, in.WorkspaceID, in.ID)
-	if err != nil {
-		return entryRow{}, err
-	}
-	if delErr := ftsDeleteSnapshot(ctx, tx, &ftsSnap); delErr != nil {
+	if delErr := ftsDeleteByEntryID(ctx, tx, in.WorkspaceID, in.ID); delErr != nil {
 		return entryRow{}, delErr
 	}
 	validity := ValidityInvalid
@@ -264,11 +257,7 @@ func (s *Store) execRestore(ctx context.Context, tx *sql.Tx, in *RestoreInput) (
 	if chkErr := s.runWriteChecks(ctx, tx, &restoredCand); chkErr != nil {
 		return entryRow{}, chkErr
 	}
-	ftsSnap, err := loadFTSSnapshot(ctx, tx, in.WorkspaceID, in.ID)
-	if err != nil {
-		return entryRow{}, err
-	}
-	if delErr := ftsDeleteSnapshot(ctx, tx, &ftsSnap); delErr != nil {
+	if delErr := ftsDeleteByEntryID(ctx, tx, in.WorkspaceID, in.ID); delErr != nil {
 		return entryRow{}, delErr
 	}
 	next := entryRow{

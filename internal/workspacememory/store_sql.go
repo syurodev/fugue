@@ -11,6 +11,11 @@ import (
 )
 
 func insertEntryRow(ctx context.Context, tx *sql.Tx, row *entryRow) error {
+	ftsRowID, err := nextFTSRowID(ctx, tx)
+	if err != nil {
+		return err
+	}
+	row.ftsRowID = ftsRowID
 	kwJSON, ancJSON, provJSON, err := marshalEntryJSON(row)
 	if err != nil {
 		return err
@@ -18,12 +23,12 @@ func insertEntryRow(ctx context.Context, tx *sql.Tx, row *entryRow) error {
 	_, err = tx.ExecContext(
 		ctx,
 		`INSERT INTO workspace_memory_entries (
-			id, workspace_id, kind, label, summary, body,
+			id, workspace_id, fts_rowid, kind, label, summary, body,
 			keywords_json, anchors_json, author, verified,
 			validity, invalid_reason, superseded_by, provenance_json,
 			revision, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		row.id, row.workspaceID, string(row.kind), row.label, row.summary, row.body,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		row.id, row.workspaceID, row.ftsRowID, string(row.kind), row.label, row.summary, row.body,
 		kwJSON, ancJSON, string(row.author), boolToInt(row.verified),
 		string(row.validity), row.invalidReason, row.supersededBy, provJSON,
 		row.revision, row.updatedAtMs,

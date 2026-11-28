@@ -29,10 +29,10 @@ func TestFTS5AndTrigramSupport(t *testing.T) {
 	}
 
 	_, err = db.ExecContext(ctx, `INSERT INTO workspace_memory_entries (
-		id, workspace_id, kind, label, summary, body, keywords_json, anchors_json,
+		id, workspace_id, fts_rowid, kind, label, summary, body, keywords_json, anchors_json,
 		author, verified, validity, invalid_reason, superseded_by, provenance_json, revision, updated_at
 	) VALUES (
-		'e1', 'ws-fts', 'fact', 'fts-probe',
+		'e1', 'ws-fts', 1, 'fact', 'fts-probe',
 		'Cấu hình layerWeights verified rule',
 		'The layerWeights map lives in internal/workspacememory/store_read.go.',
 		'["configuration"]', '[]', 'user', 1, 'valid', '', '', '{}', 1, 1000
@@ -41,32 +41,31 @@ func TestFTS5AndTrigramSupport(t *testing.T) {
 		t.Fatalf("insert probe row: %v", err)
 	}
 	_, err = db.ExecContext(ctx, `INSERT INTO workspace_memory_fts_words(rowid, label, keywords_json, summary, body)
-		SELECT rowid, label, keywords_json, summary, body FROM workspace_memory_entries WHERE id = 'e1'`)
+		SELECT fts_rowid, label, keywords_json, summary, body FROM workspace_memory_entries WHERE id = 'e1'`)
 	if err != nil {
 		t.Fatalf("insert fts words: %v", err)
 	}
 	_, err = db.ExecContext(ctx, `INSERT INTO workspace_memory_fts_trigram(rowid, label, keywords_json, summary, body)
-		SELECT rowid, label, keywords_json, summary, body FROM workspace_memory_entries WHERE id = 'e1'`)
+		SELECT fts_rowid, label, keywords_json, summary, body FROM workspace_memory_entries WHERE id = 'e1'`)
 	if err != nil {
 		t.Fatalf("insert fts trigram: %v", err)
 	}
 
-	var id, snip string
+	var id string
 	var score float64
 	if qErr := db.QueryRowContext(ctx, `
-		SELECT e.id, bm25(workspace_memory_fts_words, 10.0, 10.0, 4.0, 1.0),
-		       snippet(workspace_memory_fts_words, -1, '', '', '...', 12)
+		SELECT e.id, bm25(workspace_memory_fts_words, 10.0, 10.0, 4.0, 1.0)
 		FROM workspace_memory_fts_words
-		JOIN workspace_memory_entries e ON e.rowid = workspace_memory_fts_words.rowid
+		JOIN workspace_memory_entries e ON e.fts_rowid = workspace_memory_fts_words.rowid
 		WHERE workspace_memory_fts_words MATCH '"cau" "hinh"'`,
-	).Scan(&id, &score, &snip); qErr != nil || id != "e1" || snip == "" {
-		t.Fatalf("word FTS5 query got (%q, %v, %q, %v)", id, score, snip, qErr)
+	).Scan(&id, &score); qErr != nil || id != "e1" {
+		t.Fatalf("word FTS5 query got (%q, %v, %v)", id, score, qErr)
 	}
 
 	if qErr := db.QueryRowContext(ctx, `
 		SELECT e.id, bm25(workspace_memory_fts_trigram, 10.0, 10.0, 4.0, 1.0)
 		FROM workspace_memory_fts_trigram
-		JOIN workspace_memory_entries e ON e.rowid = workspace_memory_fts_trigram.rowid
+		JOIN workspace_memory_entries e ON e.fts_rowid = workspace_memory_fts_trigram.rowid
 		WHERE workspace_memory_fts_trigram MATCH '"Weights"'`,
 	).Scan(&id, &score); qErr != nil || id != "e1" {
 		t.Fatalf("trigram FTS5 query got (%q, %v, %v)", id, score, qErr)

@@ -54,12 +54,10 @@ type SearchResponse struct {
 }
 
 type rawSearchCandidate struct {
-	row        entryRow
-	wordScore  float64
-	triScore   float64
-	invScore   float64
-	snippet    string
-	hasSnippet bool
+	row       entryRow
+	wordScore float64
+	triScore  float64
+	invScore  float64
 }
 
 // Search runs weighted FTS5 word and trigram keyword search with approximate fallback.
@@ -81,7 +79,7 @@ func (s *Store) Search(ctx context.Context, in *SearchInput) (SearchResponse, er
 		return SearchResponse{}, err
 	}
 	if len(candidates) > 0 {
-		results := s.rankAndHydrate(ctx, in.WorkspaceID, candidates, false, limit)
+		results := s.rankAndHydrate(ctx, in.WorkspaceID, in.Query, candidates, false, limit)
 		return SearchResponse{Results: results, Approximate: false}, nil
 	}
 	return s.runApproximateFallback(ctx, in, limit)
@@ -134,7 +132,7 @@ func (s *Store) runApproximateFallback(ctx context.Context, in *SearchInput, lim
 		return SearchResponse{Results: []SearchResult{}}, nil
 	}
 	approxCap := min(limit, ApproxSearchLimit)
-	results := s.rankAndHydrate(ctx, in.WorkspaceID, candidates, true, approxCap)
+	results := s.rankAndHydrate(ctx, in.WorkspaceID, in.Query, candidates, true, approxCap)
 	return SearchResponse{Results: results, Approximate: true}, nil
 }
 
@@ -145,7 +143,7 @@ type scoredSearchResult struct {
 
 func (s *Store) rankAndHydrate(
 	ctx context.Context,
-	workspaceID string,
+	workspaceID, rawQuery string,
 	candidates map[string]*rawSearchCandidate,
 	approximate bool,
 	limit int,
@@ -154,17 +152,13 @@ func (s *Store) rankAndHydrate(
 	for _, cand := range candidates {
 		_, freshness := s.evaluateFreshness(ctx, workspaceID, cand.row.anchors)
 		score := computeQ2Score(cand, cand.row.verified, freshness)
-		snip := strings.TrimSpace(cand.snippet)
-		if snip == "" {
-			snip = fallbackSnippet(cand.row.summary, cand.row.body)
-		}
 		items = append(items, scoredSearchResult{
 			result: SearchResult{
 				ID:          cand.row.id,
 				Label:       cand.row.label,
 				Kind:        cand.row.kind,
 				Summary:     cand.row.summary,
-				Snippet:     snip,
+				Snippet:     buildMatchSnippet(&cand.row, rawQuery),
 				Author:      cand.row.author,
 				Verified:    cand.row.verified,
 				Freshness:   freshness,

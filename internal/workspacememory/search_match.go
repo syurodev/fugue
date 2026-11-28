@@ -51,11 +51,11 @@ func (s *Store) queryFTSTable(
 	defer closeRows(ctx, s.log, rows)
 
 	for rows.Next() {
-		row, bm25Val, snip, scanErr := scanFTSRow(rows)
+		row, bm25Val, scanErr := scanFTSRow(rows)
 		if scanErr != nil {
 			return scanErr
 		}
-		recordFTSCandidate(out, &row, normalizeBM25(bm25Val), snip, isWord)
+		recordFTSCandidate(out, &row, normalizeBM25(bm25Val), isWord)
 	}
 	if err := rows.Err(); err != nil {
 		return errcode.Wrap(errcode.Internal, "iterate workspace memory FTS rows", err)
@@ -71,13 +71,10 @@ func buildFTSQuery(tableName, workspaceID string, kind Kind, matchQuery string) 
 		e.revision, e.updated_at,
 		bm25(`)
 	b.WriteString(tableName)
-	b.WriteString(`, 10.0, 10.0, 4.0, 1.0),
-		snippet(`)
-	b.WriteString(tableName)
-	b.WriteString(`, -1, '', '', '...', 20)
+	b.WriteString(`, 10.0, 10.0, 4.0, 1.0)
 		FROM `)
 	b.WriteString(tableName)
-	b.WriteString(` JOIN workspace_memory_entries e ON e.rowid = `)
+	b.WriteString(` JOIN workspace_memory_entries e ON e.fts_rowid = `)
 	b.WriteString(tableName)
 	b.WriteString(`.rowid WHERE e.workspace_id = ? AND e.validity = 'valid' AND `)
 	b.WriteString(tableName)
@@ -90,7 +87,7 @@ func buildFTSQuery(tableName, workspaceID string, kind Kind, matchQuery string) 
 	return b.String(), args
 }
 
-func scanFTSRow(sc rowScanner) (row entryRow, bm25Val float64, snippet string, err error) {
+func scanFTSRow(sc rowScanner) (row entryRow, bm25Val float64, err error) {
 	var (
 		kind, author, validity    string
 		kwJSON, ancJSON, provJSON string
@@ -101,22 +98,22 @@ func scanFTSRow(sc rowScanner) (row entryRow, bm25Val float64, snippet string, e
 		&kwJSON, &ancJSON, &author, &verifiedInt,
 		&validity, &row.invalidReason, &row.supersededBy, &provJSON,
 		&row.revision, &row.updatedAtMs,
-		&bm25Val, &snippet,
+		&bm25Val,
 	)
 	if scanErr != nil {
-		return entryRow{}, 0, "", errcode.Wrap(errcode.Internal, "scan workspace memory FTS row", scanErr)
+		return entryRow{}, 0, errcode.Wrap(errcode.Internal, "scan workspace memory FTS row", scanErr)
 	}
 	row.kind = Kind(kind)
 	row.author = Author(author)
 	row.validity = Validity(validity)
 	row.verified = verifiedInt != 0
 	if err := unmarshalEntryJSON(kwJSON, ancJSON, provJSON, &row.keywords, &row.anchors, &row.provenance); err != nil {
-		return entryRow{}, 0, "", err
+		return entryRow{}, 0, err
 	}
-	return row, bm25Val, snippet, nil
+	return row, bm25Val, nil
 }
 
-func recordFTSCandidate(out map[string]*rawSearchCandidate, row *entryRow, score float64, snip string, isWord bool) {
+func recordFTSCandidate(out map[string]*rawSearchCandidate, row *entryRow, score float64, isWord bool) {
 	cand, ok := out[row.id]
 	if !ok {
 		cand = &rawSearchCandidate{row: *row}
@@ -126,10 +123,6 @@ func recordFTSCandidate(out map[string]*rawSearchCandidate, row *entryRow, score
 		cand.wordScore = max(cand.wordScore, score)
 	} else {
 		cand.triScore = max(cand.triScore, score)
-	}
-	if !cand.hasSnippet && strings.TrimSpace(snip) != "" {
-		cand.snippet = snip
-		cand.hasSnippet = true
 	}
 }
 
@@ -151,11 +144,64 @@ func (s *Store) collectInvalidMatches(ctx context.Context, in *SearchInput, out 
 			out[rows[i].id] = &rawSearchCandidate{
 				row:      rows[i],
 				invScore: score,
-				snippet:  fallbackSnippet(rows[i].summary, rows[i].body),
 			}
 		}
 	}
 	return nil
+}
+
+func buildMatchSnippet(row *entryRow, rawQuery string) string {
+	needles := snippetNeedles(rawQuery)
+	fields := []string{row.summary, row.body, row.label, strings.Join(row.keywords, ", ")}
+	for _, needle := range needles {
+		for _, field := range fields {
+			if field == "" {
+				continue
+			}
+			if snip, ok := extractSnippetWindow(field, needle); ok {
+				return snip
+			}
+		}
+	}
+	return fallbackSnippet(row.summary, row.body)
+}
+
+func snippetNeedles(rawQuery string) []string {
+	var needles []string
+	if trimmed := strings.TrimSpace(rawQuery); trimmed != "" {
+		needles = append(needles, trimmed)
+	}
+	needles = append(needles, extractTrigramTokens(rawQuery)...)
+	needles = append(needles, extractWordTokens(rawQuery)...)
+	return needles
+}
+
+func extractSnippetWindow(text, needle string) (string, bool) {
+	lowText := strings.ToLower(text)
+	lowNeedle := strings.ToLower(needle)
+	byteIdx := strings.Index(lowText, lowNeedle)
+	if byteIdx < 0 {
+		return "", false
+	}
+	runeStart := utf8.RuneCountInString(lowText[:byteIdx])
+	runes := []rune(text)
+	if len(runes) <= maxSnippetRunes {
+		return text, true
+	}
+	half := maxSnippetRunes / 2
+	start := max(0, runeStart-half)
+	end := min(len(runes), start+maxSnippetRunes)
+	if end == len(runes) {
+		start = max(0, end-maxSnippetRunes)
+	}
+	out := string(runes[start:end])
+	if start > 0 {
+		out = "..." + out
+	}
+	if end < len(runes) {
+		out += "..."
+	}
+	return out, true
 }
 
 func (s *Store) readInvalidRows(ctx context.Context, workspaceID string, kind Kind) ([]entryRow, error) {
