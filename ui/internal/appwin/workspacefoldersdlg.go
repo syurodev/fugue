@@ -95,7 +95,7 @@ func (d *createDialog) applied(sc *screens, res *workspace.MutResult) {
 		}
 		d.postRow(sc)
 	case res.Err != nil:
-		d.folders.rows[d.chain.idx].err = res.Err.Error()
+		d.folders.rows[d.chain.idx].err = rowErrorMessage(res.Err)
 	default:
 		d.folders.rows[d.chain.idx].err = ""
 		d.chain.hash = res.NewHash
@@ -128,7 +128,7 @@ func (d *createDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens) {
 	res, err := d.dialog.Layout(env, gtx, &kit.DialogProps{
 		Variant:        kit.DialogForm,
 		Title:          "New workspace",
-		Description:    "The host makes the directory, its fugue.toml and its WORKSPACE.md.",
+		Description:    "Pick the folders this workspace can use.",
 		Cancel:         d.cancel,
 		Primary:        d.create,
 		PrimaryLabel:   "Create workspace",
@@ -141,7 +141,6 @@ func (d *createDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens) {
 				props := &kit.TextFieldProps{
 					Label:       labelName,
 					Placeholder: "for example fsap",
-					Helper:      "The host validates the name.",
 					Error:       "Name the workspace",
 					Icon:        kit.IconFolder,
 				}
@@ -211,8 +210,9 @@ type rootDialog struct {
 	accessSel    string
 	folders      sourceFolders
 	// wsID is the workspace the dialog edits and edit the root it opened on,
-	// empty for an add; hash is the compare-and-swap the mutation posts.
-	wsID, edit, hash string
+	// empty for an add; wsName is the workspace's display name for the add
+	// description; hash is the compare-and-swap the mutation posts.
+	wsID, wsName, edit, hash string
 	// chain carries the add sequence: hash is the compare-and-swap the next
 	// row posts against and idx is the row that comes next — the failing one
 	// on a partway failure.
@@ -239,7 +239,7 @@ func newRootDialog() rootDialog {
 
 // openFor opens the dialog on a named root of a workspace's detail.
 func (d *rootDialog) openFor(ws *workspace.Detail, root *workspace.Root) {
-	d.wsID, d.edit, d.hash = ws.ID, root.Name, ws.ConfigHash
+	d.wsID, d.wsName, d.edit, d.hash = ws.ID, ws.Name, root.Name, ws.ConfigHash
 	d.name.SetText(root.Name)
 	d.path.SetText(root.Path)
 	d.accessSel = root.Access
@@ -251,7 +251,7 @@ func (d *rootDialog) openFor(ws *workspace.Detail, root *workspace.Root) {
 // the workspace's detail first, because the first add's compare-and-swap
 // needs its hash.
 func (d *rootDialog) openAdd(sc *screens, ws *workspace.Detail) {
-	d.wsID, d.edit, d.hash = ws.ID, "", ws.ConfigHash
+	d.wsID, d.wsName, d.edit, d.hash = ws.ID, ws.Name, "", ws.ConfigHash
 	d.chain = struct {
 		on   bool
 		hash string
@@ -288,7 +288,7 @@ func (d *rootDialog) applied(sc *screens, res *workspace.MutResult) {
 	}
 	switch {
 	case res.Err != nil:
-		d.folders.rows[d.chain.idx].err = res.Err.Error()
+		d.folders.rows[d.chain.idx].err = rowErrorMessage(res.Err)
 	default:
 		d.folders.rows[d.chain.idx].err = ""
 		d.chain.hash = res.NewHash
@@ -318,7 +318,11 @@ func (d *rootDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens) {
 	if !d.dialog.IsOpen() {
 		return
 	}
-	title, primary, description := "Add folders", addLabel, "Fugue checks each folder against this workspace's rules."
+	addDesc := "Pick folders on this computer to add to this workspace."
+	if d.wsName != "" {
+		addDesc = "Pick folders on this computer to add to " + d.wsName + "."
+	}
+	title, primary, description := "Add folders", addLabel, addDesc
 	if d.edit != "" {
 		title, primary, description = "Edit root "+d.edit, "Save", "Fugue checks the path against this workspace's rules."
 	}

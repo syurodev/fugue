@@ -198,7 +198,7 @@ func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) ap
 		return nil
 	}, w.Invalidate)
 	layoutW.Start(ctx)
-	picker := folderpicker.NewPicker()
+	picker := folderpicker.NewPicker(w.Invalidate)
 	picker.Start(ctx)
 	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW, settingsW: settingsW, secretsW: secretsW, viewerW: viewerW, layoutW: layoutW, folderPicker: picker, teamW: startTeamWorker(ctx, m, w)}
 }

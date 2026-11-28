@@ -203,15 +203,15 @@ const pickBufferSize = 1
 const probeTimeout = 2 * time.Second
 
 // Picker runs folder picks off the UI goroutine, in the shape of the
-// workspace mutator: one worker goroutine takes requests, runs the
-// platform's helpers in order, and delivers each outcome for the frame loop.
-// Start probes once, so the dialogs read the availability without ever
-// probing on the window goroutine.
+// workspace mutator: one worker goroutine probes availability once, takes
+// requests, runs the platform's helpers in order, and delivers each outcome
+// for the frame loop.
 type Picker struct {
-	probeOf func(ctx context.Context) Availability
-	runner  Runner
-	portal  pickPortalFunc
-	goos    string
+	probeOf  func(ctx context.Context) Availability
+	runner   Runner
+	portal   pickPortalFunc
+	onResult func()
+	goos     string
 
 	reqs     chan struct{}
 	results  chan Result
@@ -219,14 +219,19 @@ type Picker struct {
 	done     chan struct{}
 	stopOnce sync.Once
 
-	// avail is the probe's answer, taken once at Start.
-	avail Availability
+	// avail is the probe's answer, written once by the worker goroutine before
+	// it serves any pick.
+	probeOnce sync.Once
+	probed    atomic.Bool
+	avail     atomic.Pointer[Availability]
 }
 
-// NewPicker builds a picker over the platform's probe and helpers. The
-// portal hook carries a per-picker sequence, so the request handles it names
-// stay unique between pickers without a package global.
-func NewPicker() *Picker {
+// NewPicker builds a picker over the platform's probe and helpers. onResult,
+// when non-nil, is called on the worker goroutine after each result is queued
+// so the caller can wake its event loop. The portal hook carries a per-picker
+// sequence, so the request handles it names stay unique between pickers
+// without a package global.
+func NewPicker(onResult func()) *Picker {
 	seq := &atomic.Uint64{}
 	return &Picker{
 		probeOf: platformProbe,
@@ -234,21 +239,18 @@ func NewPicker() *Picker {
 		portal: func(ctx context.Context) (string, bool, error) {
 			return pickPortal(ctx, seq)
 		},
-		goos:    runtime.GOOS,
-		reqs:    make(chan struct{}, pickBufferSize),
-		results: make(chan Result, pickBufferSize),
-		done:    make(chan struct{}),
+		onResult: onResult,
+		goos:     runtime.GOOS,
+		reqs:     make(chan struct{}, pickBufferSize),
+		results:  make(chan Result, pickBufferSize),
+		done:     make(chan struct{}),
 	}
 }
 
-// Start runs the one availability probe and then the worker; both end with
-// Stop or the context. The probe blocks here — a PATH lookup, and one D-Bus
-// introspect on Linux, bounded by probeTimeout — so the dialogs' reads and
-// the worker's picks reuse its answer without touching the window goroutine.
+// Start launches the worker goroutine, which runs the one availability probe
+// and then serves picks until Stop or the context ends. Start returns at once
+// without waiting for the probe.
 func (p *Picker) Start(ctx context.Context) {
-	probeCtx, cancelProbe := context.WithTimeout(ctx, probeTimeout)
-	p.avail = p.probeOf(probeCtx)
-	cancelProbe()
 	runCtx, cancel := context.WithCancel(ctx)
 	p.cancel = cancel
 	go p.run(runCtx)
@@ -281,16 +283,38 @@ func (p *Picker) Pick() bool {
 // frame.
 func (p *Picker) Results() <-chan Result { return p.results }
 
-// Available is the desktop's probed answer, taken at Start.
-func (p *Picker) Available() Availability { return p.avail }
+// Available is the desktop's probed answer, or zero until the probe finishes.
+func (p *Picker) Available() Availability {
+	if av := p.avail.Load(); av != nil {
+		return *av
+	}
+	return Availability{}
+}
+
+// Probed reports whether the availability probe has finished.
+func (p *Picker) Probed() bool { return p.probed.Load() }
 
 // First is the helper a pick would run, or HelperNone.
 func (p *Picker) First() Helper { return selectHelper(p.Available(), p.goos) }
 
-// run serves requests until the context ends; the availability was probed
-// at Start.
+// ensureProbed runs the availability probe once.
+func (p *Picker) ensureProbed(ctx context.Context) {
+	p.probeOnce.Do(func() {
+		probeCtx, cancelProbe := context.WithTimeout(ctx, probeTimeout)
+		av := p.probeOf(probeCtx)
+		cancelProbe()
+		p.avail.Store(&av)
+		p.probed.Store(true)
+	})
+}
+
+// run probes availability once and then serves requests until the context ends.
 func (p *Picker) run(ctx context.Context) {
 	defer close(p.done)
+	p.ensureProbed(ctx)
+	if ctx.Err() != nil {
+		return
+	}
 	for {
 		select {
 		case <-ctx.Done():
@@ -302,6 +326,9 @@ func (p *Picker) run(ctx context.Context) {
 			}
 			select {
 			case p.results <- res:
+				if p.onResult != nil {
+					p.onResult()
+				}
 			case <-ctx.Done():
 				return
 			}

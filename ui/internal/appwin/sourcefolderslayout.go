@@ -1,23 +1,32 @@
 package appwin
 
 import (
-	"errors"
 	"image"
 
 	"gioui.org/layout"
+
+	"github.com/syurodev/fugue/pkg/client"
 
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
 
-// The source-folder list's drawing (FUG-115): the section heading, the card
-// with its rows and affordance line, the typed-path fallback area, and the
-// band declarations the dialog's focus trap cycles through. The list's state
-// and rules live in sourcefolders.go.
+// The source-folder list's drawing (FUG-115): the section heading, the rows
+// directly on the dialog surface separated by hairlines, the left-aligned
+// action row, the typed-path fallback area, and the band declarations the
+// dialog's focus trap cycles through. The list's state and rules live in
+// sourcefolders.go.
 
-// addLabel is the Add button's label, the empty state's and the typed
-// fallback's alike.
-const addLabel = "Add"
+const (
+	// addLabel is the primary button's label on Add folders and the typed
+	// fallback's Add button.
+	addLabel = "Add"
+	// addFolderLabel is the folder-picker button's label.
+	addFolderLabel = "Add folder…"
+	// enterPathLabel is the link button's label that reveals the typed path
+	// field.
+	enterPathLabel = "Enter a path"
+)
 
 // keepDrawErr records the first error of one draw pass, so a frame reports
 // one failure however many controls drew.
@@ -27,165 +36,130 @@ func keepDrawErr(errp *error, err error) {
 	}
 }
 
-// cardStack lays the box's lines out at a manual y, the way the dialog body
-// does, and declares each line's band on the dialog's focus trap (§6.17).
-// The card's padding already insets the body, so a band adds the card
-// field's y and that padding once, here in cardY.
-type cardStack struct {
+// folderStack lays the section's lines out at a manual y on the dialog body
+// and declares each line's band on the dialog's focus trap (§6.17).
+type folderStack struct {
 	env   *kit.Env
 	body  *wsBody
 	gtx   *layout.Context
 	w     int
 	gap   int
-	cardY int
+	baseY int
 	y     int
 	err   error
 }
 
-// line draws one line at the stack's y and advances past it.
-func (c *cardStack) line(band func(y0, y1 int), draw func(gtx *layout.Context) (layout.Dimensions, error)) {
-	local := *c.gtx
-	local.Constraints.Min.X, local.Constraints.Max.X = c.w, c.w
-	var dims layout.Dimensions
-	var lerr error
-	c.env.Offset(&local, image.Pt(0, c.y), func(gtx *layout.Context) {
-		dims, lerr = draw(gtx)
-	})
-	keepDrawErr(&c.err, lerr)
-	if band != nil {
-		band(c.cardY+c.y, c.cardY+c.y+dims.Size.Y)
-	}
-	c.y += dims.Size.Y + c.gap
+// line draws one line at the stack's y and advances past it by gap.
+func (s *folderStack) line(band func(y0, y1 int), draw func(gtx *layout.Context) (layout.Dimensions, error)) {
+	s.lineGap(s.gap, band, draw)
 }
 
-// layout draws the section: the heading and the box with its rows, the
-// affordance line and the fallback area.
+// lineGap draws one line at the stack's y and advances past it by gap.
+func (s *folderStack) lineGap(gap int, band func(y0, y1 int), draw func(gtx *layout.Context) (layout.Dimensions, error)) {
+	local := *s.gtx
+	local.Constraints.Min.X, local.Constraints.Max.X = s.w, s.w
+	local.Constraints.Min.Y = 0
+	var dims layout.Dimensions
+	var lerr error
+	s.env.Offset(&local, image.Pt(0, s.y), func(gtx *layout.Context) {
+		dims, lerr = draw(gtx)
+	})
+	keepDrawErr(&s.err, lerr)
+	if band != nil {
+		band(s.baseY+s.y, s.baseY+s.y+dims.Size.Y)
+	}
+	s.y += dims.Size.Y + gap
+}
+
+// layout draws the section: the "Folders" heading, the rows (or empty state)
+// directly on the dialog surface, the left-aligned action row, and the
+// typed-path fallback when open.
 func (f *sourceFolders) layout(env *kit.Env, body *wsBody) {
 	body.field(nil, func(gtx *layout.Context) (layout.Dimensions, error) {
-		l := *gtx
-		l.Constraints.Min.X = body.w
-		return kit.Label(env, &l, theme.TypeLabel(), env.Th.Chrome().Fg, "Source folders"), nil
-	})
-	body.field(nil, func(gtx *layout.Context) (layout.Dimensions, error) {
-		return f.layoutCard(env, gtx, body)
+		s := &folderStack{
+			env: env, body: body, gtx: gtx,
+			w: body.w, gap: gtx.Dp(theme.SpaceMD), baseY: body.y,
+		}
+		s.lineGap(gtx.Dp(theme.SpaceSM), nil, func(gtx *layout.Context) (layout.Dimensions, error) {
+			l := *gtx
+			l.Constraints.Min.X = s.w
+			return kit.Label(env, &l, theme.TypeLabel(), env.Th.Chrome().Fg, "Folders"), nil
+		})
+		if len(f.rows) == 0 {
+			s.line(nil, func(gtx *layout.Context) (layout.Dimensions, error) {
+				l := *gtx
+				l.Constraints.Min.X = s.w
+				return kit.Label(env, &l, theme.TypeSmall(), env.Th.Chrome().FgMuted, "Add a folder on this computer."), nil
+			})
+		} else {
+			f.rowsLines(s)
+		}
+		s.line(func(y0, y1 int) {
+			body.bands.Focusable(f.add.Tag(), y0, y1)
+			body.bands.Focusable(f.reveal.Tag(), y0, y1)
+		}, func(gtx *layout.Context) (layout.Dimensions, error) {
+			return f.layoutActions(env, gtx)
+		})
+		if f.typedOpen {
+			s.line(func(y0, y1 int) {
+				body.bands.Focusable(f.typed.Tag(), y0, y1)
+				body.bands.Focusable(f.typedAdd.Tag(), y0, y1)
+			}, func(gtx *layout.Context) (layout.Dimensions, error) {
+				return f.layoutTyped(env, gtx)
+			})
+		}
+		return layout.Dimensions{Size: image.Pt(s.w, max(s.y-s.gap, 0))}, s.err
 	})
 	if f.refused != "" {
 		body.label(f.refused, env.Th.Status().Danger)
 	}
 }
 
-// layoutCard draws the box: the empty state or the rows, then the affordance
-// line, then the fallback area when it is open.
-func (f *sourceFolders) layoutCard(env *kit.Env, gtx *layout.Context, body *wsBody) (layout.Dimensions, error) {
-	var bodyErr error
-	dims, _, cerr := f.card.Layout(env, gtx, kit.CardProps{Padding: theme.SpaceLG}, func(gtx layout.Context) layout.Dimensions {
-		d, berr := f.cardBody(env, &gtx, body)
-		if berr != nil {
-			bodyErr = berr
-		}
-		return d
-	})
-	return dims, errors.Join(cerr, bodyErr)
-}
-
-// cardBody lays the box's lines out at a manual y, so each row's controls
-// know their band's y range.
-func (f *sourceFolders) cardBody(env *kit.Env, gtx *layout.Context, body *wsBody) (layout.Dimensions, error) {
-	c := &cardStack{
-		env: env, body: body, gtx: gtx,
-		w: gtx.Constraints.Max.X, gap: gtx.Dp(theme.SpaceMD),
-		cardY: body.y + gtx.Dp(theme.SpaceLG),
-	}
-	if len(f.rows) == 0 {
-		// The empty state's line is the affordance: the plain text with the
-		// fallback link and the Add button on one line.
-		c.line(func(y0, y1 int) { body.bands.Focusable(f.add.Tag(), y0, y1) },
-			func(gtx *layout.Context) (layout.Dimensions, error) {
-				return f.layoutAffordance(env, gtx, f.emptyStateLine)
-			})
-	} else {
-		f.rowsLines(c)
-		c.line(func(y0, y1 int) {
-			body.bands.Focusable(f.reveal.Tag(), y0, y1)
-			body.bands.Focusable(f.add.Tag(), y0, y1)
-		}, func(gtx *layout.Context) (layout.Dimensions, error) {
-			return f.layoutAffordance(env, gtx, nil)
-		})
-	}
-	if f.typedOpen {
-		c.line(func(y0, y1 int) {
-			body.bands.Focusable(f.typed.Tag(), y0, y1)
-			body.bands.Focusable(f.typedAdd.Tag(), y0, y1)
-		}, func(gtx *layout.Context) (layout.Dimensions, error) {
-			return f.layoutTyped(env, gtx)
-		})
-	}
-	return layout.Dimensions{Size: image.Pt(c.w, max(c.y-c.gap, 0))}, c.err
-}
-
-// rowsLines lays one line per row, plus the failing row's error line under
-// it.
-func (f *sourceFolders) rowsLines(c *cardStack) {
+// rowsLines lays one line per row separated by Divider hairlines, plus the
+// failing row's error line under it when present.
+func (f *sourceFolders) rowsLines(s *folderStack) {
 	for i, row := range f.rows {
+		if i > 0 {
+			s.line(nil, func(gtx *layout.Context) (layout.Dimensions, error) {
+				l := *gtx
+				l.Constraints.Min.X, l.Constraints.Max.X = s.w, s.w
+				return kit.Divider(s.env, &l, kit.DividerProps{Orientation: kit.Horizontal}), nil
+			})
+		}
 		r := row
 		idx := i
-		c.line(func(y0, y1 int) {
+		s.line(func(y0, y1 int) {
 			// The three focusables of one row share its y range: the trap
 			// cycles them in draw order (§6.17).
-			c.body.bands.Focusable(r.name.Tag(), y0, y1)
-			c.body.bands.Focusable(r.access.Tag(), y0, y1)
-			c.body.bands.Focusable(r.rm.Tag(), y0, y1)
+			s.body.bands.Focusable(r.name.Tag(), y0, y1)
+			s.body.bands.Focusable(r.access.Tag(), y0, y1)
+			s.body.bands.Focusable(r.rm.Tag(), y0, y1)
 		}, func(gtx *layout.Context) (layout.Dimensions, error) {
-			return f.layoutRow(c.env, gtx, idx, r)
+			return f.layoutRow(s.env, gtx, idx, r)
 		})
-		if r.err != "" {
-			c.line(nil, func(gtx *layout.Context) (layout.Dimensions, error) {
-				l := *gtx
-				l.Constraints.Min.X = c.w
-				return kit.Paragraph(c.env, &l, theme.TypeSmall(), c.env.Th.Status().Danger, r.err), nil
-			})
-		}
 	}
 }
 
-// emptyStateLine is the plain "on this computer" text: no other sources
-// exist yet, so there is no dropdown to pick one from.
-func (f *sourceFolders) emptyStateLine(env *kit.Env, gtx *layout.Context) (layout.Dimensions, error) {
-	h := gtx.Dp(theme.ControlMD)
-	dims := kit.Label(env, gtx, theme.TypeSmall(), env.Th.Chrome().FgMuted, "Add a folder on this computer")
-	return layout.Dimensions{Size: image.Pt(dims.Size.X, h)}, nil
-}
-
-// layoutAffordance draws the list's standing line: the leading widget (the
-// empty state's text, when the list is empty) and the trailing fallback link
-// and Add button.
-func (f *sourceFolders) layoutAffordance(env *kit.Env, gtx *layout.Context, lead func(*kit.Env, *layout.Context) (layout.Dimensions, error)) (layout.Dimensions, error) {
-	addProps := kit.ButtonProps{Text: addLabel, Icon: kit.IconFolderPlus, Variant: kit.Secondary, Size: kit.SizeSM, Busy: f.picking}
-	revealProps := kit.ButtonProps{Text: "Type a path instead", Variant: kit.Link, Size: kit.SizeSM, Disabled: f.typedOpen}
-	addDims := f.add.Measure(env, gtx, addProps)
+// layoutActions draws the left-aligned action row under the list: the
+// Secondary SizeSM "Add folder…" button and the Link "Enter a path" button on
+// one baseline.
+func (f *sourceFolders) layoutActions(env *kit.Env, gtx *layout.Context) (layout.Dimensions, error) {
+	addProps := kit.ButtonProps{Text: addFolderLabel, Icon: kit.IconFolderPlus, Variant: kit.Secondary, Size: kit.SizeSM, Busy: f.picking}
+	revealProps := kit.ButtonProps{Text: enterPathLabel, Variant: kit.Link, Size: kit.SizeSM, Disabled: f.typedOpen}
+	gap := gtx.Dp(theme.SpaceMD)
 	var err error
-	var children []layout.FlexChild
-	if lead != nil {
-		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			local.Constraints.Min.Y = addDims.Size.Y
-			d, lerr := lead(env, &local)
-			keepDrawErr(&err, lerr)
-			return d
-		}))
-	}
-	if lead != nil || len(f.rows) > 0 {
-		children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, addDims.Size.Y)}
-		}))
-	}
-	children = append(children, f.revealChild(env, revealProps, &err), f.pickChild(env, addProps, &err))
-	dims := layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx, children...)
+	dims := layout.Flex{Axis: layout.Horizontal, Alignment: layout.Baseline}.Layout(*gtx,
+		f.pickChild(env, addProps, &err),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.Dimensions{Size: image.Pt(gap, 0)}
+		}),
+		f.revealChild(env, revealProps, &err),
+	)
 	return dims, err
 }
 
-// revealChild is the "Type a path instead" link's flex child: a click opens
-// the fallback field, and the link disables itself once it is open.
+// revealChild is the "Enter a path" link's flex child: a click opens the
+// fallback field, and the link disables itself once it is open.
 func (f *sourceFolders) revealChild(env *kit.Env, revealProps kit.ButtonProps, errp *error) layout.FlexChild {
 	return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 		local := gtx
@@ -198,8 +172,8 @@ func (f *sourceFolders) revealChild(env *kit.Env, revealProps kit.ButtonProps, e
 	})
 }
 
-// pickChild is the Add button's flex child: a click asks the window's picker
-// for a folder.
+// pickChild is the "Add folder…" button's flex child: a click asks the
+// window's picker for a folder.
 func (f *sourceFolders) pickChild(env *kit.Env, addProps kit.ButtonProps, errp *error) layout.FlexChild {
 	return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 		local := gtx
@@ -212,18 +186,20 @@ func (f *sourceFolders) pickChild(env *kit.Env, addProps kit.ButtonProps, errp *
 	})
 }
 
-// rowGeom is one row's line-1 geometry: where the name, the access pick and
-// the remove button sit.
+// rowGeom is one row's geometry: where the folder icon, the name field, the
+// access pick, the remove button, the path line and any row error sit.
 type rowGeom struct {
-	w, gap, iconW, lineH int
-	nameX, nameW         int
-	selectX, selectW     int
-	rmX, rmW             int
+	w, gap, lineGap, iconW, lineH, twoLineH int
+	nameX, nameW, pathX                     int
+	selectX, selectW                        int
+	rmX, rmW                                int
 }
 
-// layoutRow draws one folder row: the folder glyph, the inline-editable name,
-// the access pick and the remove button on the first line, the muted
-// middle-truncated path under them.
+// layoutRow draws one folder row: the folder glyph vertically centred on the
+// first two lines, the inline-editable name, the fixed-width access pick and
+// the remove button on line 1, the muted middle-truncated path on line 2
+// aligned to the name field's text start, and the host error on line 3 when
+// present.
 func (f *sourceFolders) layoutRow(env *kit.Env, gtx *layout.Context, i int, row *sourceRow) (layout.Dimensions, error) {
 	g := f.rowGeom(env, gtx, row)
 	selectProps := &kit.SelectProps{Options: accessOptions(), Value: row.accessSel}
@@ -234,29 +210,50 @@ func (f *sourceFolders) layoutRow(env *kit.Env, gtx *layout.Context, i int, row 
 	f.rowAccess(env, gtx, row, g, selectProps, &err)
 	f.rowRemove(env, gtx, i, row, g, rmProps, &err)
 	f.rowPath(env, gtx, row, g)
-	totalH := g.lineH + g.gap/2 + gtx.Sp(theme.TypeSmall().Line)
+	totalH := g.twoLineH
+	if row.err != "" {
+		errH := f.rowError(env, gtx, row, g)
+		totalH += g.lineGap + errH
+	}
 	return layout.Dimensions{Size: image.Pt(g.w, totalH)}, err
 }
 
-// rowGeom measures one row's fixed boxes: the access pick and the remove
-// button size to their content, the name field takes the rest.
+// rowGeom measures one row's fixed boxes: the access pick is sized to its
+// longest option ("Read & write") so rows align regardless of selection; the
+// remove button sizes to its content; the name field takes the rest.
 func (f *sourceFolders) rowGeom(env *kit.Env, gtx *layout.Context, row *sourceRow) rowGeom {
 	w := gtx.Constraints.Max.X
 	gap := gtx.Dp(theme.SpaceMD)
+	lineGap := gtx.Dp(theme.SpaceXS)
 	iconW := gtx.Dp(theme.IconMD)
-	selectW := row.access.Measure(env, gtx, &kit.SelectProps{Options: accessOptions(), Value: row.accessSel}).Size.X
+	lineH := gtx.Dp(theme.ControlMD)
+	pathH := gtx.Sp(theme.TypeSmall().Line)
+	opts := accessOptions()
+	selectW := 0
+	for _, opt := range opts {
+		sw := row.access.Measure(env, gtx, &kit.SelectProps{Options: opts, Value: opt.ID}).Size.X
+		selectW = max(selectW, sw)
+	}
+	if selectW == 0 {
+		selectW = row.access.Measure(env, gtx, &kit.SelectProps{Options: opts, Value: client.RootAccessRW}).Size.X
+	}
 	rmW := row.rm.Measure(env, gtx, &kit.IconButtonProps{Icon: kit.IconClose, Label: "Remove " + row.name.Text(), Size: kit.SizeXS}).Size.X
+	nameX := iconW + gap
+	// TextField draws its editor text at SpaceLG inside the box (no leading icon).
+	pathX := nameX + gtx.Dp(theme.SpaceLG)
 	return rowGeom{
-		w: w, gap: gap, iconW: iconW, lineH: gtx.Dp(theme.ControlMD),
-		nameX: iconW + gap, nameW: w - iconW - gap - selectW - gap - rmW - gap,
+		w: w, gap: gap, lineGap: lineGap, iconW: iconW, lineH: lineH,
+		twoLineH: lineH + lineGap + pathH,
+		nameX:    nameX, nameW: max(w-nameX-gap-selectW-gap-rmW, 0),
+		pathX:   pathX,
 		selectX: w - rmW - gap - selectW, selectW: selectW,
 		rmX: w - rmW, rmW: rmW,
 	}
 }
 
-// rowIcon draws the row's folder glyph, centered on the name field's line.
+// rowIcon draws the row's folder glyph, vertically centred on lines 1 and 2.
 func (f *sourceFolders) rowIcon(env *kit.Env, gtx *layout.Context, g rowGeom, errp *error) {
-	env.Offset(gtx, image.Pt(0, (g.lineH-g.iconW)/2), func(gtx *layout.Context) {
+	env.Offset(gtx, image.Pt(0, (g.twoLineH-g.iconW)/2), func(gtx *layout.Context) {
 		_, ierr := env.Icon(gtx, kit.IconFolder, theme.IconMD, env.Th.Chrome().FgMuted)
 		keepDrawErr(errp, ierr)
 	})
@@ -304,13 +301,26 @@ func (f *sourceFolders) rowRemove(env *kit.Env, gtx *layout.Context, i int, row 
 	})
 }
 
-// rowPath draws the row's absolute path, muted and truncated in the middle.
+// rowPath draws the row's absolute path, muted and truncated in the middle,
+// aligned to the text start inside the name field.
 func (f *sourceFolders) rowPath(env *kit.Env, gtx *layout.Context, row *sourceRow, g rowGeom) {
-	env.Offset(gtx, image.Pt(g.iconW+g.gap, g.lineH+g.gap/2), func(gtx *layout.Context) {
+	env.Offset(gtx, image.Pt(g.pathX, g.lineH+g.lineGap), func(gtx *layout.Context) {
 		local := *gtx
-		local.Constraints.Min.X, local.Constraints.Max.X = 0, g.w-g.iconW-g.gap
+		local.Constraints.Min.X, local.Constraints.Max.X = 0, max(g.w-g.pathX, 0)
 		kit.MiddleEllipsisLabel(env, &local, theme.TypeSmall(), env.Th.Chrome().FgMuted, row.path)
 	})
+}
+
+// rowError draws the row's host error as line 3 in danger text style.
+func (f *sourceFolders) rowError(env *kit.Env, gtx *layout.Context, row *sourceRow, g rowGeom) int {
+	var dims layout.Dimensions
+	env.Offset(gtx, image.Pt(g.pathX, g.twoLineH+g.lineGap), func(gtx *layout.Context) {
+		local := *gtx
+		maxW := max(g.w-g.pathX, 0)
+		local.Constraints.Min.X, local.Constraints.Max.X = maxW, maxW
+		dims = kit.Paragraph(env, &local, theme.TypeSmall(), env.Th.Status().Danger, row.err)
+	})
+	return dims.Size.Y
 }
 
 // layoutTyped draws the fallback area: the short note when no picker exists,

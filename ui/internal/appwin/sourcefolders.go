@@ -24,11 +24,10 @@ import (
 // changes only on the window goroutine.
 type sourceFolders struct {
 	rows []*sourceRow
-	// add is the picker's Add button (the folder-plus icon); reveal is the
-	// "Type a path instead" link; typedAdd adds the typed path's row.
+	// add is the picker's Add folder button (the folder-plus icon); reveal is
+	// the "Enter a path" link; typedAdd adds the typed path's row.
 	add, reveal, typedAdd *kit.ButtonState
 	typed                 *kit.TextFieldState
-	card                  *kit.CardState
 	// typedErr is the typed field's refusal, shown only after an add
 	// attempt on it; refused is the list-level refusal (a repeated path, a
 	// failed pick); a host error lives on the row it belongs to.
@@ -67,7 +66,6 @@ func newSourceFolders() sourceFolders {
 		reveal:   kit.NewButtonState(),
 		typedAdd: kit.NewButtonState(),
 		typed:    kit.NewTextFieldState(),
-		card:     kit.NewCardState(),
 	}
 }
 
@@ -76,7 +74,7 @@ func newSourceFolders() sourceFolders {
 // typed field opens with the fallback note.
 func (f *sourceFolders) setPicker(p *folderpicker.Picker) {
 	f.picker = p
-	f.noPicker = p == nil || p.First() == folderpicker.HelperNone
+	f.noPicker = p == nil || (p.Probed() && p.First() == folderpicker.HelperNone)
 }
 
 // reset clears the list for a dialog's fresh open, keeping the workspace's
@@ -135,9 +133,25 @@ const (
 // alike.
 func accessOptions() []kit.SelectOption {
 	return []kit.SelectOption{
-		{ID: client.RootAccessRW, Label: "read and write"},
-		{ID: client.RootAccessRO, Label: "read only"},
+		{ID: client.RootAccessRW, Label: "Read & write"},
+		{ID: client.RootAccessRO, Label: "Read only"},
 	}
+}
+
+// rowErrorMessage strips the host's error code prefix (for example
+// "workspace.root_invalid: ") using the client's code helper so the row shows
+// the message alone.
+func rowErrorMessage(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if code, ok := client.WorkspaceCodeOf(err); ok && code != "" {
+		if _, after, found := strings.Cut(msg, code+": "); found {
+			return strings.TrimSpace(after)
+		}
+	}
+	return msg
 }
 
 // uniqueName suffixes the base with the smallest number that frees it within

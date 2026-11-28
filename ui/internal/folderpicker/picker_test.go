@@ -5,6 +5,7 @@ import (
 	"errors"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -216,12 +217,100 @@ func TestPickerBusyRefusesASecondPick(t *testing.T) {
 // read comes from the probe the worker ran at start.
 func TestPickerAvailableFollowsTheProbe(t *testing.T) {
 	t.Parallel()
-	p := testPicker(t, testGoosLinux, Availability{KDialog: true}, nil, nil)
+	probed := make(chan struct{})
+	p := NewPicker(nil)
+	p.probeOf = func(context.Context) Availability {
+		close(probed)
+		return Availability{KDialog: true}
+	}
+	p.goos = testGoosLinux
+	p.Start(t.Context())
+	t.Cleanup(p.Stop)
+	<-probed
+	// Wait for the worker to publish the probed availability after probeOf returns.
+	for !p.Probed() {
+		// spin until Store completes
+	}
 	if av := p.Available(); !av.KDialog {
 		t.Fatalf("available = %+v, want the probe's kdialog", av)
 	}
 	if p.First() != HelperKDialog {
 		t.Fatalf("first helper = %v, want kdialog", p.First())
+	}
+}
+
+// TestPickerOnResultCallsOncePerResult pins that every queued result invokes
+// the onResult callback once so the window wakes up.
+func TestPickerOnResultCallsOncePerResult(t *testing.T) {
+	t.Parallel()
+	var calls atomic.Int32
+	p := NewPicker(func() { calls.Add(1) })
+	p.probeOf = func(context.Context) Availability { return Availability{OSAScript: true} }
+	p.runner = &fakeRunner{out: "/repo/a"}
+	p.goos = testGoosDarwin
+	p.Start(t.Context())
+	t.Cleanup(p.Stop)
+
+	for i := range 2 {
+		if !p.Pick() {
+			t.Fatalf("pick %d refused", i)
+		}
+		res := <-p.Results()
+		if res.Err != nil || res.Path != "/repo/a" {
+			t.Fatalf("pick %d = %+v, want /repo/a", i, res)
+		}
+	}
+	if got := calls.Load(); got != 2 {
+		t.Fatalf("onResult calls = %d, want 2", got)
+	}
+}
+
+// TestPickerStartReturnsBeforeProbeAndPickWaitsForProbe pins that Start
+// returns without waiting for a slow probe, Available is safe to read
+// concurrently, and a Pick sent before the probe finishes waits for it.
+func TestPickerStartReturnsBeforeProbeAndPickWaitsForProbe(t *testing.T) {
+	t.Parallel()
+	releaseProbe := make(chan struct{})
+	probeEntered := make(chan struct{})
+	var probeCalls atomic.Int32
+
+	p := NewPicker(nil)
+	p.probeOf = func(ctx context.Context) Availability {
+		probeCalls.Add(1)
+		close(probeEntered)
+		select {
+		case <-releaseProbe:
+			return Availability{OSAScript: true}
+		case <-ctx.Done():
+			return Availability{}
+		}
+	}
+	p.runner = &fakeRunner{out: "/repo/waited"}
+	p.goos = testGoosDarwin
+	p.Start(t.Context())
+	t.Cleanup(p.Stop)
+
+	<-probeEntered
+	// Concurrent Available read while probe is still blocked must be race-free.
+	if av := p.Available(); av != (Availability{}) {
+		t.Fatalf("available before probe = %+v, want zero", av)
+	}
+	if !p.Pick() {
+		t.Fatal("Pick during probe was refused")
+	}
+	select {
+	case res := <-p.Results():
+		t.Fatalf("pick resolved before probe finished: %+v", res)
+	default:
+	}
+
+	close(releaseProbe)
+	res := <-p.Results()
+	if res.Err != nil || res.Path != "/repo/waited" {
+		t.Fatalf("pick after probe = %+v, want /repo/waited", res)
+	}
+	if got := probeCalls.Load(); got != 1 {
+		t.Fatalf("probeCalls = %d, want 1", got)
 	}
 }
 
@@ -238,7 +327,7 @@ func TestPickerStopEndsTheWorker(t *testing.T) {
 // the test controls, started for the caller.
 func testPicker(t *testing.T, goos string, av Availability, portal pickPortalFunc, run Runner) *Picker {
 	t.Helper()
-	p := NewPicker()
+	p := NewPicker(nil)
 	p.probeOf = func(context.Context) Availability { return av }
 	p.portal = portal
 	if run != nil {

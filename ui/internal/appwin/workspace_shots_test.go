@@ -123,7 +123,7 @@ func buildShotScreens(t *testing.T, scene string) *screens {
 		openCreateShot(sc)
 		sc.dlg.create.folders.addPath("/srv/repos/api")
 		sc.dlg.create.folders.addPath("/srv/web")
-		sc.dlg.create.folders.rows[1].err = "workspace.root_invalid: the path sits inside another root"
+		sc.dlg.create.folders.rows[1].err = "the path sits inside another root"
 	case shotAddFolders:
 		sc.dlg.root.openAdd(sc, det)
 		sc.dlg.root.folders.noPicker = false

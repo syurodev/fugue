@@ -2,17 +2,33 @@ package appwin
 
 import (
 	"errors"
+	"fmt"
+	"image"
 	"testing"
+	"time"
+
+	"connectrpc.com/connect"
+	"gioui.org/io/input"
+	"gioui.org/layout"
+	"gioui.org/op"
+	"gioui.org/unit"
 
 	"github.com/syurodev/fugue/pkg/client"
+	hostv1 "github.com/syurodev/fugue/pkg/pb/fugue/host/v1"
 
 	"github.com/syurodev/fugue/ui/internal/folderpicker"
+	"github.com/syurodev/fugue/ui/internal/fonts"
+	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/theme"
 	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
 // The typed host answers and hashes the chain tests script; static, so a
 // failure names its fixture.
-var errNoChooser = errors.New("no chooser is available")
+var (
+	errNoChooser           = errors.New("no chooser is available")
+	errScriptedRootInvalid = errors.New("workspace.root_invalid: the path sits inside another root")
+)
 
 const (
 	testCreatedHash  = "hash-created"
@@ -287,7 +303,7 @@ func TestSourceFoldersRefuseDuplicatePaths(t *testing.T) {
 func TestSourceFolderPickResultsLandOnTheList(t *testing.T) {
 	t.Parallel()
 	sc, _ := newTestScreens(t)
-	sc.folderPicker = folderpicker.NewPicker()
+	sc.folderPicker = folderpicker.NewPicker(nil)
 	sc.dlg.create.open(sc)
 	f := &sc.dlg.create.folders
 
@@ -380,4 +396,62 @@ func TestManageMenuNamesAddFolders(t *testing.T) {
 		}
 	}
 	t.Fatal("the manage menu has no add-folders item")
+}
+
+// TestSourceFoldersActionRowFitsEmptyStateAtUI125 pins that the empty-state
+// action row ("Add folder…" and "Enter a path") fits inside the dialog's inner
+// width at 125% UI scale without overflowing.
+func TestSourceFoldersActionRowFitsEmptyStateAtUI125(t *testing.T) {
+	t.Parallel()
+	sc, _ := newTestScreens(t)
+	sc.dlg.create.open(sc)
+	sc.dlg.create.folders.noPicker = false
+	sc.dlg.create.folders.typedOpen = false
+
+	sh, err := fonts.Shaper()
+	if err != nil {
+		t.Fatalf("build shaper: %v", err)
+	}
+	th := theme.Dark(sh)
+	env := &kit.Env{Th: &th, Sh: sh, UIScale: 1.25, ReducedMotion: true}
+	var ops op.Ops
+	router := new(input.Router)
+	now := time.Unix(1_700_000_000, 0)
+	env.Begin(now)
+	device := unit.Metric{PxPerDp: 1, PxPerSp: 1}
+	metric := env.Metric(device)
+	gtx := layout.Context{
+		Ops:         &ops,
+		Metric:      metric,
+		Constraints: layout.Exact(image.Pt(shotWindowW, shotWindowH)),
+		Source:      router.Source(),
+		Now:         now,
+	}
+	innerW := gtx.Dp(theme.DialogWidth) - 2*gtx.Dp(theme.SpaceXL)
+	actionGtx := gtx
+	actionGtx.Constraints = layout.Constraints{Max: image.Pt(innerW, shotWindowH)}
+	dims, lerr := sc.dlg.create.folders.layoutActions(env, &actionGtx)
+	if lerr != nil {
+		t.Fatalf("layoutActions: %v", lerr)
+	}
+	if dims.Size.X > innerW {
+		t.Fatalf("action row width = %d px, exceeds dialog inner width %d px at ui125", dims.Size.X, innerW)
+	}
+}
+
+// TestRowErrorMessageStripsCodePrefix pins that row errors strip the host's
+// error code prefix using WorkspaceCodeOf while keeping the message.
+func TestRowErrorMessageStripsCodePrefix(t *testing.T) {
+	t.Parallel()
+	cerr := connect.NewError(connect.CodeFailedPrecondition, errScriptedRootInvalid)
+	detail, derr := connect.NewErrorDetail(&hostv1.ErrorDetail{Code: "workspace.root_invalid"})
+	if derr != nil {
+		t.Fatalf("NewErrorDetail: %v", derr)
+	}
+	cerr.AddDetail(detail)
+	wrapped := fmt.Errorf("the workspace change failed: add the root: %w", cerr)
+
+	if got, want := rowErrorMessage(wrapped), "the path sits inside another root"; got != want {
+		t.Fatalf("rowErrorMessage = %q, want %q", got, want)
+	}
 }
