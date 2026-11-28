@@ -25,6 +25,7 @@ checks it against `go.mod`.
 | `github.com/pelletier/go-toml/v2` | MIT | TOML encoding and decoding with DisallowUnknownFields for `internal/workspace` (WS-06) | user, Q-66 | F5.6a |
 | `pgregory.net/rapid` | MPL-2.0 (approved: Q-06, tests only) | F2.2 property tests only; excluded from production imports; [license and provenance](third-party-licenses/rapid/README.md) | user, Q-06, 2026-11-02 | F2.2 |
 | `github.com/santhosh-tekuri/jsonschema/v6` | Apache-2.0 | JSON Schema validation of task `output` against `output_schema` in `internal/teams` (OR-E03, Q-128) | owner, Q-128 | F11.3c |
+| `go.yaml.in/yaml/v3` | MIT | YAML frontmatter and entry metadata encoding/decoding with KnownFields(true) for `internal/workspacememory` (`fugue-memory/1`, WM-06; dual MIT/Apache-2.0) | user (FUG-112) | FUG-112 |
 
 ## Dev tools (`tool` directives, not linked into the binary)
 

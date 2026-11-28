@@ -56,6 +56,26 @@ enum WriteEntryOp {
   WRITE_ENTRY_OP_INVALIDATE = 3;
 }
 
+// MemoryImportClass classifies one block in a PreviewImport diff (workspace-memory §9).
+enum MemoryImportClass {
+  MEMORY_IMPORT_CLASS_UNSPECIFIED = 0;
+  MEMORY_IMPORT_CLASS_ADD = 1;
+  MEMORY_IMPORT_CLASS_SKIP = 2;
+  MEMORY_IMPORT_CLASS_CONFLICT = 3;
+  MEMORY_IMPORT_CLASS_LABEL_CONFLICT = 4;
+  MEMORY_IMPORT_CLASS_REJECTED = 5;
+}
+
+// MemoryImportChoice selects how ApplyImport resolves one preview item (workspace-memory §9).
+enum MemoryImportChoice {
+  MEMORY_IMPORT_CHOICE_UNSPECIFIED = 0;
+  MEMORY_IMPORT_CHOICE_KEEP_LOCAL = 1;
+  MEMORY_IMPORT_CHOICE_TAKE_IMPORTED = 2;
+  MEMORY_IMPORT_CHOICE_KEEP_BOTH = 3;
+  MEMORY_IMPORT_CHOICE_SKIP = 4;
+  MEMORY_IMPORT_CHOICE_RENAME = 5;
+}
+
 // MemoryAnchorInput identifies a workspace-relative file supplied by a caller.
 message MemoryAnchorInput {
   string root_name = 1;
@@ -233,8 +253,59 @@ message RestoreEntryResponse {
   MemoryEntry entry = 1;
 }
 
+message ExportMemoryRequest {
+  string workspace_id = 1;
+}
+
+message ExportMemoryResponse {
+  bytes content = 1;
+}
+
+// MemoryImportPreviewItem describes one parsed file block compared against target workspace memory.
+message MemoryImportPreviewItem {
+  string item_id = 1;
+  string entry_id = 2;
+  string label = 3;
+  MemoryImportClass item_class = 4;
+  MemoryImportChoice default_choice = 5;
+  string reject_reason = 6;
+  MemoryEntry local = 7;
+  MemoryEntry imported = 8;
+}
+
+message PreviewImportRequest {
+  string workspace_id = 1;
+  bytes content = 2;
+}
+
+message PreviewImportResponse {
+  string preview_id = 1;
+  string workspace_name = 2;
+  google.protobuf.Timestamp exported_at = 3;
+  repeated MemoryImportPreviewItem items = 4;
+}
+
+message MemoryImportItemChoice {
+  string item_id = 1;
+  MemoryImportChoice choice = 2;
+  string new_label = 3;
+}
+
+message ApplyImportRequest {
+  string workspace_id = 1;
+  string preview_id = 2;
+  repeated MemoryImportItemChoice choices = 3;
+  string import_file = 4;
+}
+
+message ApplyImportResponse {
+  repeated MemoryEntry written = 1;
+  int32 added = 2;
+  int32 updated = 3;
+  int32 skipped = 4;
+}
+
 // MemoryService exposes workspace memory to local principals (workspace-memory §7).
-// Export and import RPCs belong to FUG-112 and are omitted here.
 service MemoryService {
   rpc ListEntries(ListEntriesRequest) returns (ListEntriesResponse);
   rpc SearchEntries(SearchEntriesRequest) returns (SearchEntriesResponse);
@@ -243,4 +314,7 @@ service MemoryService {
   rpc WriteEntry(WriteEntryRequest) returns (WriteEntryResponse);
   rpc VerifyEntry(VerifyEntryRequest) returns (VerifyEntryResponse);
   rpc RestoreEntry(RestoreEntryRequest) returns (RestoreEntryResponse);
+  rpc ExportMemory(ExportMemoryRequest) returns (ExportMemoryResponse);
+  rpc PreviewImport(PreviewImportRequest) returns (PreviewImportResponse);
+  rpc ApplyImport(ApplyImportRequest) returns (ApplyImportResponse);
 }

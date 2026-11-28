@@ -64,6 +64,13 @@ func dispatchSubcommand(ctx context.Context, args []string, out, errOut io.Write
 		slog.SetDefault(slog.New(redact.NewJSONHandler(os.Stderr, slog.LevelWarn)))
 		return RunTaskPrune(ctx, out, errOut, config.ProcessEnv{}, socket, retention, version), true
 	}
+	if wsArg, outPath, socket, matched, valid := parseMemoryExportArgs(args); matched {
+		if !valid {
+			return usageError(out), true
+		}
+		slog.SetDefault(slog.New(redact.NewJSONHandler(os.Stderr, slog.LevelWarn)))
+		return RunMemoryExport(ctx, out, errOut, config.ProcessEnv{}, wsArg, outPath, socket, version), true
+	}
 	return 0, false
 }
 
@@ -116,7 +123,13 @@ func usage(out io.Writer) error {
 	if err := say(out, "usage: fugue task prune [--socket <path>] [--retention <duration>]"); err != nil {
 		return err
 	}
-	return say(out, "  prunes ended-team task worktrees and branches past the retention window")
+	if err := say(out, "  prunes ended-team task worktrees and branches past the retention window"); err != nil {
+		return err
+	}
+	if err := say(out, "usage: fugue memory export <workspace> <path> [--socket <path>]"); err != nil {
+		return err
+	}
+	return say(out, "  exports workspace memory to a fugue-memory/1 Markdown file")
 }
 
 // say writes one formatted line of user output.

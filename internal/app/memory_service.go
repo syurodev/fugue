@@ -23,25 +23,34 @@ const (
 
 type memorySecretScanner struct {
 	detector *secrets.Detector
+	extra    func(text string) []string
 }
 
-func newMemorySecretScanner() *memorySecretScanner {
+func newMemorySecretScanner(extra func(text string) []string) *memorySecretScanner {
 	return &memorySecretScanner{
 		detector: secrets.New(nil, secrets.Options{}),
+		extra:    extra,
 	}
 }
 
 func (s *memorySecretScanner) Scan(text string) []workspacememory.SecretFinding {
 	found := s.detector.FindIn(text, "")
-	if len(found) == 0 {
+	var extraKinds []string
+	if s.extra != nil {
+		extraKinds = s.extra(text)
+	}
+	if len(found) == 0 && len(extraKinds) == 0 {
 		return nil
 	}
-	out := make([]workspacememory.SecretFinding, 0, len(found))
+	out := make([]workspacememory.SecretFinding, 0, len(found)+len(extraKinds))
 	for _, f := range found {
 		out = append(out, workspacememory.SecretFinding{
 			Kind: f.Kind,
 			Key:  f.Key,
 		})
+	}
+	for _, k := range extraKinds {
+		out = append(out, workspacememory.SecretFinding{Kind: k})
 	}
 	return out
 }
@@ -94,7 +103,7 @@ func initWorkspaceMemory(hp *HostProcess, store *storage.Store, deps *HostDeps, 
 		store.DB(),
 		deps.Clock,
 		deps.IDs,
-		newMemorySecretScanner(),
+		newMemorySecretScanner(deps.TestMemorySecretKinds),
 		&memoryAnchorHasher{workspaces: workspaces},
 		&memoryEventSink{hub: hp.rt.hub},
 		workspacememory.Config{},
@@ -106,6 +115,7 @@ func initWorkspaceMemory(hp *HostProcess, store *storage.Store, deps *HostDeps, 
 		return fmt.Errorf("create workspace memory store: %w", err)
 	}
 	hp.rt.memory = memStore
+	hp.rt.memoryService = newMemoryService(memStore, workspaces, deps.Clock, deps.IDs)
 	return nil
 }
 
@@ -123,8 +133,8 @@ func (rt *HostRuntime) MemoryStore() (*workspacememory.Store, error) {
 
 // MemoryService returns the Host API application service for workspace memory.
 func (rt *HostRuntime) MemoryService() (*MemoryService, error) {
-	if rt.memory == nil {
+	if rt.memoryService == nil {
 		return nil, errcode.New(errcode.Unavailable, "the workspace memory service is unavailable")
 	}
-	return &MemoryService{store: rt.memory}, nil
+	return rt.memoryService, nil
 }

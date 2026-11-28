@@ -4,8 +4,12 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 
+	"github.com/syurodev/fugue/internal/platform/clock"
 	"github.com/syurodev/fugue/internal/platform/errcode"
+	"github.com/syurodev/fugue/internal/platform/ids"
+	"github.com/syurodev/fugue/internal/workspace"
 	"github.com/syurodev/fugue/internal/workspacememory"
 )
 
@@ -14,7 +18,36 @@ const MemoryRequestMaxBytes = 256 * 1024
 
 // MemoryService exposes workspace memory operations to local Host API callers.
 type MemoryService struct {
-	store *workspacememory.Store
+	store      *workspacememory.Store
+	workspaces *workspace.Service
+	clk        clock.Clock
+	ids        ids.Generator
+
+	mu         sync.Mutex
+	previews   map[string]storedImportPreview
+	previewOrd []string
+
+	// beforeApplyImport is an optional test hook invoked after acquiring an
+	// in-flight preview and before calling store.ApplyImport.
+	beforeApplyImport func()
+}
+
+func newMemoryService(
+	store *workspacememory.Store,
+	workspaces *workspace.Service,
+	clk clock.Clock,
+	gen ids.Generator,
+) *MemoryService {
+	if clk == nil {
+		clk = clock.Real{}
+	}
+	return &MemoryService{
+		store:      store,
+		workspaces: workspaces,
+		clk:        clk,
+		ids:        gen,
+		previews:   map[string]storedImportPreview{},
+	}
 }
 
 func requireLocalMemoryPrincipal(principal string) error {

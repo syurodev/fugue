@@ -70,4 +70,7 @@ type HostDeps struct {
 	// TestOnWaitInflightSpawn, when set by tests, runs when OwnsPeer begins
 	// waiting for in-flight spawn registrations to settle.
 	TestOnWaitInflightSpawn func()
+	// TestMemorySecretKinds, when set by tests, supplements the memory secret
+	// scanner so tests can simulate a legacy entry written before a rule existed.
+	TestMemorySecretKinds func(text string) []string
 }

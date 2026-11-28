@@ -174,4 +174,44 @@ func (h *memoryHandler) RestoreEntry(ctx context.Context, req *connect.Request[m
 	})
 }
 
+func (h *memoryHandler) ExportMemory(ctx context.Context, req *connect.Request[memoryv1.ExportMemoryRequest]) (*connect.Response[memoryv1.ExportMemoryResponse], error) {
+	principal, svc, authErr := h.service(ctx)
+	if authErr != nil {
+		return nil, authErr
+	}
+	content, err := svc.ExportMemory(ctx, principal, req.Msg.GetWorkspaceId())
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	return connect.NewResponse(&memoryv1.ExportMemoryResponse{Content: content}), nil
+}
+
+func (h *memoryHandler) PreviewImport(ctx context.Context, req *connect.Request[memoryv1.PreviewImportRequest]) (*connect.Response[memoryv1.PreviewImportResponse], error) {
+	principal, svc, authErr := h.service(ctx)
+	if authErr != nil {
+		return nil, authErr
+	}
+	prev, err := svc.PreviewImport(ctx, principal, req.Msg.GetWorkspaceId(), req.Msg.GetContent())
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	return connect.NewResponse(memoryImportPreviewToProto(&prev)), nil
+}
+
+func (h *memoryHandler) ApplyImport(ctx context.Context, req *connect.Request[memoryv1.ApplyImportRequest]) (*connect.Response[memoryv1.ApplyImportResponse], error) {
+	principal, svc, authErr := h.service(ctx)
+	if authErr != nil {
+		return nil, authErr
+	}
+	cmd, err := memoryApplyImportCmdFromProto(req.Msg)
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	res, err := svc.ApplyImport(ctx, principal, cmd)
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	return connect.NewResponse(memoryApplyImportResultToProto(&res)), nil
+}
+
 var _ memoryv1connect.MemoryServiceHandler = (*memoryHandler)(nil)
