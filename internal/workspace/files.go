@@ -109,8 +109,10 @@ func (s *Service) HashFile(ctx context.Context, workspaceID, rootName, path stri
 		}
 		return "", WrapError(ErrFileNotFound, "stat the file", err)
 	}
-	if info.IsDir() {
-		return "", NewError(ErrFileNotFound, "the path is a directory, not a file")
+	// Only a regular file: opening a FIFO or device an agent anchored would
+	// block the host goroutine (memory anchors come from agent writes).
+	if !info.Mode().IsRegular() {
+		return "", NewError(ErrFileNotFound, "the path is not a regular file")
 	}
 	if info.Size() > FileHashMaxBytes {
 		return "", NewError(ErrFileTooLarge, "the file exceeds the 64 MiB hash limit")
