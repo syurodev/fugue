@@ -107,20 +107,20 @@ func (s *SessionToolService) Instructions(ctx context.Context, binding SessionBi
 		return "", errSessionEnded()
 	}
 	if s.memory == nil {
-		return "", nil
+		return memoryInstructionsPreamble, nil
 	}
 	info, err := s.sessions.Snapshot(ctx, binding.SessionID)
 	if err != nil {
 		return "", errcode.Wrap(errcode.FailedPrecondition, "read session workspace", err)
 	}
 	if strings.TrimSpace(info.WorkspaceID) == "" {
-		return "", nil
+		return memoryInstructionsPreamble, nil
 	}
 	ov, err := s.memory.Overview(ctx, info.WorkspaceID)
 	if err != nil {
 		return "", wrapMemoryStoreError(err)
 	}
-	return renderMemoryOverview(&ov, s.random)
+	return renderMemoryInstructions(&ov, s.random)
 }
 
 func newSessionToolService(tokens *sessionTokens, tools []*FugueTool, sessions sessionRecords,

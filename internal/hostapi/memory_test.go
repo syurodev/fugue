@@ -21,6 +21,8 @@ const (
 	testMemSessionName   = "memory session principal"
 	testMemDeniedText    = "denied entry"
 	testMemArchLabel     = "api-architecture"
+	testMemWriteTool     = "fugue_memory_write"
+	testMemPreLimitQuery = "prelimitprobe"
 )
 
 func TestMemoryHostAPIPrincipalRefusals(t *testing.T) {
@@ -228,7 +230,7 @@ func assertMemoryVerifyRestoreAndErrors(
 		t.Fatal(err)
 	}
 	if callRes, callErr := sessClient.CallTool(ctx, connect.NewRequest(&sessiontoolsv1.CallToolRequest{
-		Name:      "fugue_memory_write",
+		Name:      testMemWriteTool,
 		Arguments: []byte(`{"op":"add","kind":"note","label":"agent-draft","summary":"Draft from agent.","body":"Needs user verification."}`),
 	})); callErr != nil || callRes.Msg.GetIsError() {
 		t.Fatalf("agent CallTool fugue_memory_write = (%+v, %v)", callRes, callErr)
@@ -367,7 +369,106 @@ func assertSessionGetInstructions(
 	if err != nil {
 		t.Fatalf("GetInstructions: %v", err)
 	}
-	if !strings.Contains(res.Msg.GetInstructions(), "PINNED_INSTRUCTION_BODY") || !strings.Contains(res.Msg.GetInstructions(), "verified=true") {
-		t.Fatalf("GetInstructions = %q, want pinned body and metadata", res.Msg.GetInstructions())
+	got := res.Msg.GetInstructions()
+	for _, want := range []string{
+		"PINNED_INSTRUCTION_BODY", "verified=true", "verified=false",
+		"fugue_memory_search", "fugue_memory_get", "fugue_memory_write", "authority",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("GetInstructions missing %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestMemoryHostAPISearchFiltersBeforeLimit(t *testing.T) {
+	t.Parallel()
+	v := startTokenHost(t, "")
+	wsID := v.workspaceWithRoot(t, t.TempDir())
+	host, hc := newTestClient(t, v.sockPath)
+	if _, err := host.Hello(t.Context(), helloRequest(hostv1.ClientKind_CLIENT_KIND_CLI, "v1")); err != nil {
+		t.Fatalf("Hello cli: %v", err)
+	}
+	c := memoryv1connect.NewMemoryServiceClient(hc, testBaseURL)
+	seedPreLimitSearchEntries(t, v, c, wsID)
+
+	assertUnverifiedSearchCount(t, c, wsID, 2, 2)
+	assertUnverifiedSearchCount(t, c, wsID, 10, 3)
+
+	resInv, err := c.SearchEntries(t.Context(), connect.NewRequest(&memoryv1.SearchEntriesRequest{
+		WorkspaceId: wsID, Query: testMemPreLimitQuery, Validity: memoryv1.MemoryValidity_MEMORY_VALIDITY_INVALID, Limit: 10,
+	}))
+	if err != nil || len(resInv.Msg.GetResults()) != 1 || resInv.Msg.GetResults()[0].GetLabel() != "inv-prelimit" {
+		t.Fatalf("SearchEntries(validity=invalid) = (%+v, %v), want inv-prelimit", resInv.Msg.GetResults(), err)
+	}
+}
+
+func assertUnverifiedSearchCount(
+	t *testing.T,
+	c memoryv1connect.MemoryServiceClient,
+	wsID string,
+	limit int32,
+	wantCount int,
+) {
+	t.Helper()
+	verifiedFalse := false
+	res, err := c.SearchEntries(t.Context(), connect.NewRequest(&memoryv1.SearchEntriesRequest{
+		WorkspaceId: wsID, Query: testMemPreLimitQuery, Verified: &verifiedFalse, Limit: limit,
+	}))
+	if err != nil || len(res.Msg.GetResults()) != wantCount {
+		t.Fatalf("SearchEntries(verified=false, limit=%d) = (%d, %v), want %d", limit, len(res.Msg.GetResults()), err, wantCount)
+	}
+	for _, r := range res.Msg.GetResults() {
+		if r.GetVerified() {
+			t.Fatalf("unexpected verified result in verified=false limit=%d query: %+v", limit, r)
+		}
+	}
+}
+
+func seedPreLimitSearchEntries(
+	t *testing.T,
+	v *vendorHost,
+	c memoryv1connect.MemoryServiceClient,
+	wsID string,
+) {
+	t.Helper()
+	ctx := t.Context()
+	for i := range 2 {
+		if _, err := c.WriteEntry(ctx, connect.NewRequest(&memoryv1.WriteEntryRequest{
+			WorkspaceId: wsID, Op: memoryv1.WriteEntryOp_WRITE_ENTRY_OP_ADD, Kind: memoryv1.MemoryKind_MEMORY_KIND_FACT,
+			Label: "user-prelimit-" + string(rune('a'+i)), Summary: "This verified user entry tests " + testMemPreLimitQuery + " search filtering.",
+			Body: "Detailed verified content in English for " + testMemPreLimitQuery + " search filtering.", Keywords: []string{testMemPreLimitQuery},
+		})); err != nil {
+			t.Fatalf("WriteEntry user %d: %v", i, err)
+		}
+	}
+	invCreated, err := c.WriteEntry(ctx, connect.NewRequest(&memoryv1.WriteEntryRequest{
+		WorkspaceId: wsID, Op: memoryv1.WriteEntryOp_WRITE_ENTRY_OP_ADD, Kind: memoryv1.MemoryKind_MEMORY_KIND_NOTE,
+		Label: "inv-prelimit", Summary: "This invalidated note tests " + testMemPreLimitQuery + " search filtering.",
+		Body: "Detailed invalidated note content in English for " + testMemPreLimitQuery + " search filtering.", Keywords: []string{testMemPreLimitQuery},
+	}))
+	if err != nil {
+		t.Fatalf("WriteEntry inv: %v", err)
+	}
+	if _, invErr := c.WriteEntry(ctx, connect.NewRequest(&memoryv1.WriteEntryRequest{
+		WorkspaceId: wsID, Op: memoryv1.WriteEntryOp_WRITE_ENTRY_OP_INVALIDATE,
+		Id: invCreated.Msg.GetEntry().GetId(), ExpectedRevision: 1, Reason: "obsolete",
+	})); invErr != nil {
+		t.Fatalf("Invalidate: %v", invErr)
+	}
+
+	_ = v.readySession(t, "mem-prelimit-sess", wsID, "")
+	tokens := sessionTokens(t, 1)
+	sessClient, _, err := attachSession(t, v.sockPath, tokens[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		args := `{"op":"add","kind":"note","label":"agent-prelimit-` + string(rune('a'+i)) +
+			`","summary":"This agent note tests ` + testMemPreLimitQuery + ` search filtering.","body":"Detailed agent body content in English for ` + testMemPreLimitQuery + ` search filtering.","keywords":["` + testMemPreLimitQuery + `"]}`
+		if callRes, callErr := sessClient.CallTool(ctx, connect.NewRequest(&sessiontoolsv1.CallToolRequest{
+			Name: testMemWriteTool, Arguments: []byte(args),
+		})); callErr != nil || callRes.Msg.GetIsError() {
+			t.Fatalf("agent CallTool %d = (%+v, %v)", i, callRes, callErr)
+		}
 	}
 }

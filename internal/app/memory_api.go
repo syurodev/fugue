@@ -53,7 +53,7 @@ func (s *MemoryService) ListEntries(ctx context.Context, principal string, filte
 	return out, nil
 }
 
-// SearchEntries searches entries for a local principal with optional post-filters.
+// SearchEntries searches entries for a local principal with filters applied before limit.
 func (s *MemoryService) SearchEntries(ctx context.Context, principal string, in *MemorySearchParams) (MemorySearchResponseView, error) {
 	if err := requireLocalMemoryPrincipal(principal); err != nil {
 		return MemorySearchResponseView{}, err
@@ -68,51 +68,18 @@ func (s *MemoryService) SearchEntries(ctx context.Context, principal string, in 
 		Kind:           workspacememory.Kind(in.Kind),
 		IncludeInvalid: includeInvalid,
 		Limit:          in.Limit,
+		Verified:       in.Verified,
+		Author:         workspacememory.Author(in.Author),
+		Validity:       workspacememory.Validity(in.Validity),
 	})
 	if err != nil {
 		return MemorySearchResponseView{}, wrapMemoryStoreError(err)
-	}
-	if in.Verified != nil || in.Author != "" || in.Validity != "" {
-		resp, err = filterMemorySearchResponse(ctx, s.store, in, resp)
-		if err != nil {
-			return MemorySearchResponseView{}, wrapMemoryStoreError(err)
-		}
 	}
 	out := make([]MemorySearchResultView, 0, len(resp.Results))
 	for i := range resp.Results {
 		out = append(out, memorySearchResultToView(&resp.Results[i]))
 	}
 	return MemorySearchResponseView{Results: out, Approximate: resp.Approximate}, nil
-}
-
-func filterMemorySearchResponse(
-	ctx context.Context,
-	store *workspacememory.Store,
-	in *MemorySearchParams,
-	resp workspacememory.SearchResponse,
-) (workspacememory.SearchResponse, error) {
-	filtered := make([]workspacememory.SearchResult, 0, len(resp.Results))
-	for i := range resp.Results {
-		r := resp.Results[i]
-		if in.Verified != nil && r.Verified != *in.Verified {
-			continue
-		}
-		if in.Author != "" && string(r.Author) != in.Author {
-			continue
-		}
-		if in.Validity != "" {
-			entry, err := store.GetByID(ctx, in.WorkspaceID, r.ID)
-			if err != nil {
-				return workspacememory.SearchResponse{}, wrapMemoryStoreError(err)
-			}
-			if string(entry.Validity) != in.Validity {
-				continue
-			}
-		}
-		filtered = append(filtered, r)
-	}
-	resp.Results = filtered
-	return resp, nil
 }
 
 // GetEntry retrieves one entry by ID or label for a local principal.

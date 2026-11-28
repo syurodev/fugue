@@ -30,6 +30,9 @@ type SearchInput struct {
 	Kind           Kind
 	IncludeInvalid bool
 	Limit          int
+	Verified       *bool
+	Author         Author
+	Validity       Validity
 }
 
 // SearchResult is one ranked memory match returned by Search.
@@ -43,6 +46,7 @@ type SearchResult struct {
 	Verified    bool      `json:"verified"`
 	Freshness   Freshness `json:"freshness"`
 	Revision    uint64    `json:"revision"`
+	Validity    Validity  `json:"validity"`
 	Approximate bool      `json:"approximate"`
 	Score       float64   `json:"score"`
 }
@@ -62,11 +66,8 @@ type rawSearchCandidate struct {
 
 // Search runs weighted FTS5 word and trigram keyword search with approximate fallback.
 func (s *Store) Search(ctx context.Context, in *SearchInput) (SearchResponse, error) {
-	if in == nil || strings.TrimSpace(in.WorkspaceID) == "" {
-		return SearchResponse{}, errInvalidArg("workspace_id is required")
-	}
-	if in.Kind != "" && !validKind(in.Kind) {
-		return SearchResponse{}, errInvalidArg("invalid workspace memory kind filter")
+	if err := validateSearchInput(in); err != nil {
+		return SearchResponse{}, err
 	}
 	limit := normalizeSearchLimit(in.Limit)
 	wordQuery := sanitizeWordQuery(in.Query)
@@ -78,11 +79,28 @@ func (s *Store) Search(ctx context.Context, in *SearchInput) (SearchResponse, er
 	if err != nil {
 		return SearchResponse{}, err
 	}
+	filterSearchCandidates(candidates, in)
 	if len(candidates) > 0 {
 		results := s.rankAndHydrate(ctx, in.WorkspaceID, in.Query, candidates, false, limit)
 		return SearchResponse{Results: results, Approximate: false}, nil
 	}
 	return s.runApproximateFallback(ctx, in, limit)
+}
+
+func validateSearchInput(in *SearchInput) error {
+	if in == nil || strings.TrimSpace(in.WorkspaceID) == "" {
+		return errInvalidArg("workspace_id is required")
+	}
+	if in.Kind != "" && !validKind(in.Kind) {
+		return errInvalidArg("invalid workspace memory kind filter")
+	}
+	if in.Author != "" && !validAuthor(in.Author) {
+		return errInvalidArg("invalid workspace memory author filter")
+	}
+	if in.Validity != "" && !validValidity(in.Validity) {
+		return errInvalidArg("invalid workspace memory validity filter")
+	}
+	return nil
 }
 
 func normalizeSearchLimit(limit int) int {
@@ -111,12 +129,36 @@ func (s *Store) collectPrimaryCandidates(
 			return nil, err
 		}
 	}
-	if in.IncludeInvalid {
+	if in.IncludeInvalid || in.Validity == ValidityInvalid || in.Validity == ValiditySuperseded {
 		if err := s.collectInvalidMatches(ctx, in, candidates); err != nil {
 			return nil, err
 		}
 	}
 	return candidates, nil
+}
+
+func filterSearchCandidates(candidates map[string]*rawSearchCandidate, in *SearchInput) {
+	if in.Verified == nil && in.Author == "" && in.Validity == "" {
+		return
+	}
+	for id, cand := range candidates {
+		if !searchCandidateMatchesFilter(cand, in) {
+			delete(candidates, id)
+		}
+	}
+}
+
+func searchCandidateMatchesFilter(cand *rawSearchCandidate, in *SearchInput) bool {
+	if in.Verified != nil && cand.row.verified != *in.Verified {
+		return false
+	}
+	if in.Author != "" && cand.row.author != in.Author {
+		return false
+	}
+	if in.Validity != "" && cand.row.validity != in.Validity {
+		return false
+	}
+	return true
 }
 
 func (s *Store) runApproximateFallback(ctx context.Context, in *SearchInput, limit int) (SearchResponse, error) {
@@ -128,6 +170,7 @@ func (s *Store) runApproximateFallback(ctx context.Context, in *SearchInput, lim
 	if err := s.queryTrigramFTS(ctx, in.WorkspaceID, in.Kind, approxQuery, candidates); err != nil {
 		return SearchResponse{}, err
 	}
+	filterSearchCandidates(candidates, in)
 	if len(candidates) == 0 {
 		return SearchResponse{Results: []SearchResult{}}, nil
 	}
@@ -163,6 +206,7 @@ func (s *Store) rankAndHydrate(
 				Verified:    cand.row.verified,
 				Freshness:   freshness,
 				Revision:    cand.row.revision,
+				Validity:    cand.row.validity,
 				Approximate: approximate,
 				Score:       score,
 			},

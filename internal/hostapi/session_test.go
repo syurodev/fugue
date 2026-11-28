@@ -281,7 +281,7 @@ func TestTestOnlyToolIsRefusedByTheNormalHost(t *testing.T) {
 	list, err := client.ListTools(t.Context(), connect.NewRequest(&sessiontoolsv1.ListToolsRequest{}))
 	wantTools := []string{
 		"approve", "fugue_team_propose",
-		"fugue_memory_overview", "fugue_memory_search", "fugue_memory_get", "fugue_memory_write",
+		"fugue_memory_overview", "fugue_memory_search", "fugue_memory_get", testMemWriteTool,
 	}
 	if err != nil || len(list.Msg.Tools) != len(wantTools) {
 		t.Fatalf("tools of a normal host = %v, %v; want %v", list, err, wantTools)

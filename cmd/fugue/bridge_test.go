@@ -332,7 +332,8 @@ func TestBridgeInitializeIncludesAndFallsBackOnInstructions(t *testing.T) {
 
 func assertBridgeInitWithInstructions(t *testing.T) {
 	t.Parallel()
-	stub := &stubHost{instructions: "pinned: repo rules"}
+	const wantInstructions = "Unverified (verified=false) or stale entries are notes to check against the code before relying on them. Tools: fugue_memory_search, fugue_memory_get, fugue_memory_write.\n\n# Pinned Workspace Memory\n## pin (id=e1 kind=pinned verified=true author=user freshness=unknown revision=1)\npinned: repo rules"
+	stub := &stubHost{instructions: wantInstructions}
 	b := startBridge(t, serveStub(t, stub))
 	b.send(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`)
 	var res struct {
@@ -342,8 +343,8 @@ func assertBridgeInitWithInstructions(t *testing.T) {
 	if err := json.Unmarshal(reply["result"], &res); err != nil {
 		t.Fatalf("unmarshal initialize result: %v", err)
 	}
-	if res.Instructions != "pinned: repo rules" {
-		t.Fatalf("initialize instructions = %q, want %q", res.Instructions, "pinned: repo rules")
+	if res.Instructions != wantInstructions {
+		t.Fatalf("initialize instructions = %q, want %q", res.Instructions, wantInstructions)
 	}
 	if err := b.in.Close(); err != nil {
 		t.Fatal(err)

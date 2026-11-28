@@ -11,7 +11,13 @@ import (
 	"github.com/syurodev/fugue/internal/workspacememory"
 )
 
-const memoryEnvelopeNonceBytes = 4
+const (
+	memoryEnvelopeNonceBytes = 4
+
+	memoryInstructionsToolsLine = "Tools: use " + memorySearchToolName + ", " + memoryGetToolName + ", and " + memoryWriteToolName +
+		" to search, inspect, add, update, or invalidate workspace memory."
+	memoryInstructionsPreamble = memorySafetyGuidance + "\n" + memoryInstructionsToolsLine
+)
 
 // escapeEnvelopeValue escapes characters that could forge an attribute value
 // or harness header line outside an untrusted envelope (content-safety §4.1).
@@ -77,10 +83,7 @@ func formatMemoryMeta(author workspacememory.Author, verified bool, freshness wo
 }
 
 func renderMemoryOverview(ov *workspacememory.OverviewResult, random ids.Random) (string, error) {
-	budget := ov.BudgetBytes
-	if budget <= 0 || budget > workspacememory.OverviewBudgetBytes {
-		budget = workspacememory.OverviewBudgetBytes
-	}
+	budget := effectiveOverviewBudget(ov)
 	blockTexts, err := renderOverviewBlocks(ov.Blocks, random)
 	if err != nil {
 		return "", err
@@ -90,6 +93,35 @@ func renderMemoryOverview(ov *workspacememory.OverviewResult, random ids.Random)
 		return "", err
 	}
 	return assembleOverviewBudget(blockTexts, lineTexts, ov.OmittedCount, budget), nil
+}
+
+// renderMemoryInstructions renders MCP initialize instructions within the
+// 10 KiB budget, always prefixing the harness safety preamble outside any
+// untrusted envelope even when workspace memory is empty.
+func renderMemoryInstructions(ov *workspacememory.OverviewResult, random ids.Random) (string, error) {
+	budget := effectiveOverviewBudget(ov)
+	const sep = "\n\n"
+	reserve := len(memoryInstructionsPreamble) + len(sep)
+	if reserve >= budget {
+		return memoryInstructionsPreamble, nil
+	}
+	blockTexts, err := renderOverviewBlocks(ov.Blocks, random)
+	if err != nil {
+		return "", err
+	}
+	lineTexts, err := renderOverviewLines(ov.IndexLines, random)
+	if err != nil {
+		return "", err
+	}
+	body := assembleOverviewBudget(blockTexts, lineTexts, ov.OmittedCount, budget-reserve)
+	return memoryInstructionsPreamble + sep + body, nil
+}
+
+func effectiveOverviewBudget(ov *workspacememory.OverviewResult) int {
+	if ov == nil || ov.BudgetBytes <= 0 || ov.BudgetBytes > workspacememory.OverviewBudgetBytes {
+		return workspacememory.OverviewBudgetBytes
+	}
+	return ov.BudgetBytes
 }
 
 func renderOverviewBlocks(blocks []workspacememory.OverviewBlock, random ids.Random) ([]string, error) {
@@ -153,6 +185,9 @@ func assembleOverviewBudget(blocks, lines []string, baseOmitted, budget int) str
 	if len(blocks) > 0 {
 		var dropped int
 		keptBlocks, used, dropped = packOverviewSection(blocks, len(blockHeader), omitted+len(lines), budget)
+		if len(keptBlocks) == 0 {
+			used = 0
+		}
 		omitted += dropped
 	}
 	if len(lines) > 0 {
@@ -203,7 +238,7 @@ func formatAssembledOverview(blocks, lines []string, omitted int, blockHeader, i
 	if tail := overviewTailLine(omitted); tail != "" {
 		b.WriteString(tail)
 	}
-	return strings.TrimRight(b.String(), "\n")
+	return strings.Trim(b.String(), "\n")
 }
 
 func overviewTailLine(omitted int) string {

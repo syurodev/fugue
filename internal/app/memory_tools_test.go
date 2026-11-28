@@ -476,3 +476,70 @@ func awaitMemoryPromptOrFail(t *testing.T, sub *Subscription, writeCh <-chan mem
 		return PendingInteractionView{}
 	}
 }
+
+func TestSessionInstructionsIncludeSafetyPreambleAndRespectBudget(t *testing.T) {
+	t.Parallel()
+	f := newMemoryToolFixture(t, vendorstore.ApprovalAuto)
+	ctx := t.Context()
+
+	emptyInstr, err := f.tools.Instructions(ctx, f.leadB)
+	if err != nil {
+		t.Fatalf("empty Instructions: %v", err)
+	}
+	if !strings.HasPrefix(emptyInstr, memoryInstructionsPreamble) {
+		t.Fatalf("empty Instructions missing preamble:\n%s", emptyInstr)
+	}
+	if strings.Contains(emptyInstr, "⟪untrusted") {
+		t.Fatalf("empty Instructions wrapped preamble in untrusted envelope:\n%s", emptyInstr)
+	}
+
+	seedOversizeOverviewEntries(t, f)
+	fullInstr, err := f.tools.Instructions(ctx, f.leadA)
+	if err != nil {
+		t.Fatalf("full Instructions: %v", err)
+	}
+	if len(fullInstr) > workspacememory.OverviewBudgetBytes {
+		t.Fatalf("Instructions len = %d, want <= %d", len(fullInstr), workspacememory.OverviewBudgetBytes)
+	}
+	if !strings.HasPrefix(fullInstr, memoryInstructionsPreamble) {
+		t.Fatalf("full Instructions did not keep intact preamble at start:\n%s", fullInstr)
+	}
+	for _, want := range []string{"verified=false", memorySearchToolName, memoryGetToolName, memoryWriteToolName} {
+		if !strings.Contains(fullInstr[:len(memoryInstructionsPreamble)], want) {
+			t.Fatalf("Instructions preamble missing %q", want)
+		}
+	}
+}
+
+func seedOversizeOverviewEntries(t *testing.T, f *memoryToolTestFixture) {
+	t.Helper()
+	ctx := t.Context()
+	for i := range 8 {
+		author := workspacememory.AuthorUser
+		principal := string(KindApp)
+		if i%2 == 1 {
+			author = workspacememory.AuthorAgent
+			principal = PrincipalSession
+		}
+		if _, err := f.memStore.Add(ctx, &workspacememory.AddInput{
+			WorkspaceID: f.wsA, Kind: workspacememory.KindPinned,
+			Label:   fmt.Sprintf("budget-pin-%02d", i),
+			Summary: fmt.Sprintf("Pinned summary %d for budget packing.", i),
+			Body:    fmt.Sprintf("Pinned body %d: ", i) + strings.Repeat("Keep tests isolated in temp directories and never write into user home. ", 22),
+			Author:  author, Provenance: workspacememory.Provenance{Principal: principal, SessionID: testMemorySeedSession},
+		}); err != nil {
+			t.Fatalf("Add pin %d: %v", i, err)
+		}
+	}
+	for i := range 12 {
+		if _, err := f.memStore.Add(ctx, &workspacememory.AddInput{
+			WorkspaceID: f.wsA, Kind: workspacememory.KindFact,
+			Label:   fmt.Sprintf("budget-fact-%02d", i),
+			Summary: fmt.Sprintf("Fact summary %d for budget packing test.", i),
+			Body:    "Fact body content.",
+			Author:  workspacememory.AuthorAgent, Provenance: workspacememory.Provenance{Principal: PrincipalSession, SessionID: testMemorySeedSession},
+		}); err != nil {
+			t.Fatalf("Add fact %d: %v", i, err)
+		}
+	}
+}
