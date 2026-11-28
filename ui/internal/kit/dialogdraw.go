@@ -36,7 +36,7 @@ func (d *DialogState) measure(env *Env, gtx *layout.Context, props *DialogProps,
 	if props.Description != "" {
 		m.descH = wrappedTextHeight(env, gtx, props.Description, m.innerW) + gtx.Dp(theme.SpaceXS)
 	}
-	m.footH = gtx.Dp(theme.ControlLG)
+	m.footH = gtx.Dp(theme.ControlMD)
 	// The body gets what the window still has, at most: the frame keeps a
 	// margin of space.xl to each window edge, and a body taller than that
 	// scrolls instead of growing the frame past the window.
@@ -255,9 +255,9 @@ func (d *DialogState) drawFooter(env *Env, gtx *layout.Context, props *DialogPro
 		return nil
 	}
 	footTop := d.rect.Max.Y - m.pad - m.footH
-	cancelPr := ButtonProps{Text: "Cancel", Variant: Secondary, Size: SizeLG}
+	cancelPr := ButtonProps{Text: "Cancel", Variant: Secondary, Size: SizeMD}
 	primaryPr := ButtonProps{
-		Text: props.PrimaryLabel, Variant: props.PrimaryVariant, Size: SizeLG,
+		Text: props.PrimaryLabel, Variant: props.PrimaryVariant, Size: SizeMD,
 		Busy: props.Busy, Disabled: props.PrimaryDisabled,
 	}
 	gap := gtx.Dp(theme.SpaceMD)
@@ -279,7 +279,7 @@ func (d *DialogState) drawFooter(env *Env, gtx *layout.Context, props *DialogPro
 		return nil
 	}
 	if props.Extra != nil {
-		extraPr := ButtonProps{Text: props.ExtraLabel, Variant: props.ExtraVariant, Size: SizeLG, Disabled: props.Busy}
+		extraPr := ButtonProps{Text: props.ExtraLabel, Variant: props.ExtraVariant, Size: SizeMD, Disabled: props.Busy}
 		ew := props.Extra.Measure(env, gtx, extraPr).Size
 		res.Boxes.Extra = image.Rectangle{Min: image.Pt(inner.Min.X, footTop), Max: image.Pt(inner.Min.X+ew.X, footTop+ew.Y)}
 		if d.footButton(env, gtx, props.Extra, extraPr, image.Pt(inner.Min.X, footTop), active) {

@@ -217,7 +217,7 @@ func TestFUG73ClosingSlotPassesInputThrough(t *testing.T) {
 
 	var ops op.Ops
 	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
-	pad, btnSide := gtx.Dp(theme.SpaceXS), gtx.Dp(theme.ControlSM)
+	pad, btnSide := gtx.Dp(theme.SpaceXS), gtx.Dp(theme.ControlXS)
 	barH := sc.titleBar.height(&gtx)
 	rightW := gtx.Dp(theme.RightStripeWidth)
 	gridOrigin := image.Pt(size.X-rightW-sc.grid.lastArea.Dx(), barH)

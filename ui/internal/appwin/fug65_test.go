@@ -214,7 +214,7 @@ func TestLockVaultIsIconButtonWithTooltip(t *testing.T) {
 	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
 	padX := gtx.Dp(theme.SpaceMD)
 	dotD := max(gtx.Dp(theme.SpaceSM), 6)
-	btnW := gtx.Dp(theme.ControlSM)
+	btnW := gtx.Dp(theme.ControlXS)
 	statusH := gtx.Dp(theme.StatusBarHeight)
 	// Lock button sits immediately left of the connection dot in the Bottom Status Bar.
 	lockX := float32(size.X-padX-dotD-padX) - float32(btnW)/2

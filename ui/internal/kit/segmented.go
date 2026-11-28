@@ -67,9 +67,9 @@ func (s *SegmentedState) measureGeometry(env *Env, gtx *layout.Context, pr Segme
 	pad := gtx.Dp(theme.SpaceXXS)
 	h := gtx.Dp(theme.ControlMD)
 	segH := h - 2*pad
-	segPadX := gtx.Dp(theme.SpaceMD)
-	iconW := gtx.Dp(theme.IconSM)
-	iconGap := gtx.Dp(theme.SpaceXS)
+	segPadX := gtx.Dp(theme.SpaceLG)
+	iconW := gtx.Dp(theme.IconMD)
+	iconGap := gtx.Dp(theme.SpaceSM)
 
 	rects := make([]image.Rectangle, len(pr.Options))
 	x := pad
@@ -217,7 +217,7 @@ func (s *SegmentedState) draw(env *Env, gtx *layout.Context, size image.Point, r
 	}
 	outerR := image.Rectangle{Max: size}
 	outerRad := gtx.Dp(theme.RadiusMD)
-	pillRad := max(outerRad-gtx.Dp(theme.SpaceXXS), gtx.Dp(theme.RadiusXS))
+	pillRad := max(outerRad-gtx.Dp(theme.SpaceXXS), gtx.Dp(theme.RadiusSM))
 
 	fillLayer(gtx, outerR, outerRad, fade(c.FillSoft, opScale), 1)
 	for i, r := range rects {
@@ -257,8 +257,8 @@ func drawSegmentContent(env *Env, gtx *layout.Context, r image.Rectangle, opt Se
 	}
 	ink = fade(ink, opScale)
 
-	iconPx := gtx.Dp(theme.IconSM)
-	gap := gtx.Dp(theme.SpaceXS)
+	iconPx := gtx.Dp(theme.IconMD)
+	gap := gtx.Dp(theme.SpaceSM)
 	var lblSize image.Point
 	if opt.Label != "" {
 		lblSize = measureLabel(env, gtx, theme.TypeLabel(), opt.Label)
@@ -273,7 +273,7 @@ func drawSegmentContent(env *Env, gtx *layout.Context, r image.Rectangle, opt Se
 	x := r.Min.X + (r.Dx()-contentW)/2
 	if opt.Icon != "" {
 		iy := r.Min.Y + (r.Dy()-iconPx)/2
-		if err := drawIconAt(env, gtx, image.Pt(x, iy), opt.Icon, theme.IconSM, ink); err != nil {
+		if err := drawIconAt(env, gtx, image.Pt(x, iy), opt.Icon, theme.IconMD, ink); err != nil {
 			return err
 		}
 		x += iconPx + gap

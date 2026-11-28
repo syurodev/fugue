@@ -165,10 +165,10 @@ func (v *view) drawBlockHeader(
 	c := v.th.Chrome()
 	head := resolvedHeader(p)
 	title, fmtLabel := head.title, head.fmtLabel
-	rowH := gtx.Dp(theme.ControlSM) + 2*gtx.Dp(theme.SpaceXS)
+	rowH := gtx.Dp(theme.ControlXS) + 2*gtx.Dp(theme.SpaceXS)
 	off := op.Offset(image.Pt(pad, gtx.Dp(theme.SpaceXS))).Push(gtx.Ops)
 	inner := *gtx
-	inner.Constraints = layout.Constraints{Min: image.Pt(max(w-2*pad, 0), gtx.Dp(theme.ControlSM)), Max: image.Pt(max(w-2*pad, 0), gtx.Dp(theme.ControlSM))}
+	inner.Constraints = layout.Constraints{Min: image.Pt(max(w-2*pad, 0), gtx.Dp(theme.ControlXS)), Max: image.Pt(max(w-2*pad, 0), gtx.Dp(theme.ControlXS))}
 	layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(inner,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
@@ -254,7 +254,7 @@ func (v *view) drawActionButtons(env *kit.Env, gtx *layout.Context, st *CodeBloc
 				Icon:    kit.IconWrapText,
 				Label:   "Toggle line wrap",
 				Variant: kit.IconButtonGhost,
-				Size:    kit.SizeSM,
+				Size:    kit.SizeXS,
 				Toggled: st.Wrapped,
 			}
 			clicked, err := st.wrapBtn.Layout(env, &local, &ip)
@@ -270,7 +270,7 @@ func (v *view) drawActionButtons(env *kit.Env, gtx *layout.Context, st *CodeBloc
 		}),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
-			bp := kit.ButtonProps{Text: copyLabel, Icon: copyIcon, Variant: kit.Ghost, Size: kit.SizeSM}
+			bp := kit.ButtonProps{Text: copyLabel, Icon: copyIcon, Variant: kit.Ghost, Size: kit.SizeXS}
 			clicked, err := st.copyBtn.Layout(env, &local, bp)
 			logMDViewErr(err)
 			if clicked {
@@ -477,11 +477,11 @@ func (v *view) drawCommandHeader(env *kit.Env, gtx *layout.Context, flows []*flo
 func (v *view) drawExpandAction(env *kit.Env, gtx *layout.Context, st *CodeBlockState, w, pad, y int, res *CodeBlockResult, truncated bool) int {
 	off := op.Offset(image.Pt(pad, y)).Push(gtx.Ops)
 	local := *gtx
-	local.Constraints = layout.Constraints{Max: image.Pt(max(w-2*pad, 0), gtx.Dp(theme.ControlSM))}
+	local.Constraints = layout.Constraints{Max: image.Pt(max(w-2*pad, 0), gtx.Dp(theme.ControlXS))}
 	bp := kit.ButtonProps{
 		Text:    "Show full output",
 		Variant: kit.Ghost,
-		Size:    kit.SizeSM,
+		Size:    kit.SizeXS,
 	}
 	clicked, err := st.expandBtn.Layout(env, &local, bp)
 	logMDViewErr(err)

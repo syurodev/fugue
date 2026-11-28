@@ -197,7 +197,7 @@ type titleBarMetrics struct {
 }
 
 func csdButtonMetrics(gtx *layout.Context) (btnSide, gap, totalW int) {
-	btnSide = gtx.Dp(theme.ControlSM)
+	btnSide = gtx.Dp(theme.ControlXS)
 	gap = gtx.Dp(theme.SpaceXS)
 	padR := gtx.Dp(theme.SpaceMD)
 	totalW = 3*btnSide + 2*gap + padR
@@ -205,7 +205,7 @@ func csdButtonMetrics(gtx *layout.Context) (btnSide, gap, totalW int) {
 }
 
 func (b *titleBar) computeMetrics(gtx *layout.Context, sc *screens) titleBarMetrics {
-	btnW := gtx.Dp(theme.ControlSM)
+	btnW := gtx.Dp(theme.ControlXS)
 	btnGap := gtx.Dp(theme.SpaceXS)
 	csdW := 0
 	if b.csd {
@@ -303,7 +303,7 @@ func (b *titleBar) layoutThemeToggleBtn(env *kit.Env, gtx *layout.Context, sc *s
 		icon, tip = kit.IconSun, "Switch to light theme (Ctrl+D)"
 	}
 	env.Offset(gtx, image.Pt(x, y), func(gtx *layout.Context) {
-		props := kit.IconButtonProps{Icon: icon, Label: tip, Variant: kit.IconButtonGhost, Size: kit.SizeSM}
+		props := kit.IconButtonProps{Icon: icon, Label: tip, Variant: kit.IconButtonGhost, Size: kit.SizeXS}
 		clicked, err := b.themeBtn.Layout(env, gtx, &props)
 		sc.fail(err)
 		if clicked {
@@ -320,7 +320,7 @@ func (b *titleBar) layoutSettingsBtn(env *kit.Env, gtx *layout.Context, sc *scre
 	}
 	open := sc.hasSlotKind(KindSettings)
 	env.Offset(gtx, image.Pt(x, y), func(gtx *layout.Context) {
-		props := kit.IconButtonProps{Icon: kit.IconSettings, Label: tip, Variant: kit.IconButtonGhost, Size: kit.SizeSM, Toggled: open}
+		props := kit.IconButtonProps{Icon: kit.IconSettings, Label: tip, Variant: kit.IconButtonGhost, Size: kit.SizeXS, Toggled: open}
 		clicked, err := b.settingsBtn.Layout(env, gtx, &props)
 		sc.fail(err)
 		if dirty {

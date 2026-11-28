@@ -280,7 +280,7 @@ func (s *screens) layoutChannelMessageHeader(gtx *layout.Context, env *kit.Env, 
 			s.fail(err)
 			return dims
 		}),
-		channelButton(env, s, state.number, kit.ButtonProps{Text: teamSequence(line.ChannelSeq), Variant: kit.Ghost, Size: kit.SizeSM}, func() { p.jump = line.ChannelSeq }),
+		channelButton(env, s, state.number, kit.ButtonProps{Text: teamSequence(line.ChannelSeq), Variant: kit.Ghost, Size: kit.SizeXS}, func() { p.jump = line.ChannelSeq }),
 	)
 }
 

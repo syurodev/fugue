@@ -121,7 +121,7 @@ func (s *BannerState) measureButtons(env *Env, gtx *layout.Context, pr BannerPro
 		actW = actSize.X + gap
 	}
 	if pr.Dismissible {
-		closePr := IconButtonProps{Icon: IconClose, Label: "Dismiss", Variant: IconButtonGhost}
+		closePr := IconButtonProps{Icon: IconClose, Label: "Dismiss", Variant: IconButtonGhost, Size: SizeXS}
 		closeSize = s.closeBtn.Measure(env, gtx, &closePr).Size
 		closeW = closeSize.X + gap
 	}
@@ -158,7 +158,7 @@ func (s *BannerState) layoutButtons(env *Env, gtx *layout.Context, pr BannerProp
 	rx := maxW - padX
 	if pr.Dismissible {
 		rx -= closeSize.X
-		closePr := IconButtonProps{Icon: IconClose, Label: "Dismiss", Variant: IconButtonGhost}
+		closePr := IconButtonProps{Icon: IconClose, Label: "Dismiss", Variant: IconButtonGhost, Size: SizeXS}
 		var cerr error
 		at(gtx, image.Pt(rx, (fullH-closeSize.Y)/2), func(gtx *layout.Context) {
 			var clicked bool

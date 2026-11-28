@@ -197,7 +197,7 @@ func (s *screens) layoutTeamCollapse(gtx *layout.Context, env *kit.Env, tree *te
 	if c.collapse == nil {
 		c.collapse = kit.NewIconButtonState()
 	}
-	props := kit.IconButtonProps{Icon: kit.IconChevronDown, Label: "Collapse agents", Size: kit.SizeSM}
+	props := kit.IconButtonProps{Icon: kit.IconChevronDown, Label: "Collapse agents", Size: kit.SizeXS}
 	if c.collapsed {
 		props.Icon, props.Label = kit.IconChevronRight, "Expand agents"
 	}

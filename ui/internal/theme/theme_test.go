@@ -293,6 +293,20 @@ func lin(v uint8) float64 {
 	return math.Pow((s+0.055)/1.055, 2.4)
 }
 
+// TestUKE15ScrimIsModeSpecific pins the ui-kit v0.8 §3.5 scrim values: black
+// at 40% (0x66) in light mode and black at 60% (0x99) in dark mode.
+func TestUKE15ScrimIsModeSpecific(t *testing.T) {
+	t.Parallel()
+	lightTheme := theme.Light(nil)
+	if want := (color.NRGBA{A: 0x66}); lightTheme.Chrome().Scrim != want {
+		t.Errorf("light Scrim = %#v, want %#v", lightTheme.Chrome().Scrim, want)
+	}
+	darkTheme := theme.Dark(nil)
+	if want := (color.NRGBA{A: 0x99}); darkTheme.Chrome().Scrim != want {
+		t.Errorf("dark Scrim = %#v, want %#v", darkTheme.Chrome().Scrim, want)
+	}
+}
+
 // chromeOf returns a pointer to the mode's chrome so the 15-token table
 // passes by reference.
 func chromeOf(t *theme.Theme) *theme.Chrome {

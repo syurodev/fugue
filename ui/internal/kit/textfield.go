@@ -235,9 +235,9 @@ func textFieldSlots(env *Env, gtx *layout.Context, p *TextFieldProps) (lead, rig
 }
 
 // trailingButtonSize is the px side of the in-box clear and reveal
-// buttons: the small control token, never under size.hit.min (§3.4).
+// buttons: the extra-small control token, never under size.hit.min (§3.4).
 func trailingButtonSize(gtx *layout.Context) int {
-	return max(gtx.Dp(theme.ControlSM), gtx.Dp(theme.HitMin))
+	return max(gtx.Dp(theme.ControlXS), gtx.Dp(theme.HitMin))
 }
 
 // trailingRect is the box of the in-box clear and reveal buttons in the
@@ -372,8 +372,8 @@ func (s *TextFieldState) drawTrailing(env *Env, gtx *layout.Context, p *TextFiel
 		rv := s.core.revealF.Value()
 		at(gtx, r.Min, func(gtx *layout.Context) {
 			s.reveal.paint(env, gtx, body, gtx.Dp(theme.RadiusSM), l, s.revealMv, func(fg color.NRGBA) {
-				pt := image.Pt((btn-gtx.Dp(theme.IconMD))/2, (btn-gtx.Dp(theme.IconMD))/2)
-				if e := crossfadeIcons(env, gtx, pt, theme.IconMD, IconEye, IconEyeOff, fg, rv); e != nil {
+				pt := image.Pt((btn-gtx.Dp(theme.IconSM))/2, (btn-gtx.Dp(theme.IconSM))/2)
+				if e := crossfadeIcons(env, gtx, pt, theme.IconSM, IconEye, IconEyeOff, fg, rv); e != nil {
 					err = fmt.Errorf("draw the reveal icon: %w", e)
 				}
 			})

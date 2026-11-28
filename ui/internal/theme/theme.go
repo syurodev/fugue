@@ -107,7 +107,8 @@ type Chrome struct {
 	// control (a disabled menu item, a row's secondary text); a disabled
 	// control itself draws whole at DisabledOpacity.
 	FgDisabled color.NRGBA
-	// Scrim is the dim behind a dialog: black at 40%, mode-independent.
+	// Scrim is the dim behind a dialog (§3.5, v0.8): black at 40% in light
+	// mode and black at 60% in dark mode so dark pages recede behind the frame.
 	Scrim color.NRGBA
 	// FillSoft is the tinted fill of the secondary button and the neutral
 	// tag: Fg at 6% (v0.3); FillSoftHover is the same at 10%.
@@ -241,7 +242,6 @@ func newTheme(c *Chrome, p Palette, shaper *text.Shaper) Theme {
 	c.PressedWash = perceived(surface, c.Fg, 0.14)
 	c.SelectedWash = perceived(surface, c.Fg, 0.11)
 	c.FgDisabled = fgWash(c.Fg, 0.35)
-	c.Scrim = color.NRGBA{A: 0x66} // black at 40%
 	c.FillSoft = perceived(surface, c.Fg, 0.06)
 	c.FillSoftHover = perceived(surface, c.Fg, 0.10)
 	c.Placeholder = placeholderOf(c.FgMuted, c.Fg)
@@ -395,6 +395,7 @@ func lightChrome() Chrome {
 		ActionFg:      nrgba(0xFFFFFF),
 		ActionHover:   nrgba(0x2E3036),
 		ActionPressed: nrgba(0x0A0B0C),
+		Scrim:         color.NRGBA{A: 0x66},
 		DangerFg:      nrgba(0x752822),
 	}
 }
@@ -419,6 +420,7 @@ func darkChrome() Chrome {
 		ActionFg:      nrgba(0x1E1F22),
 		ActionHover:   nrgba(0xD6D6DA),
 		ActionPressed: nrgba(0xFFFFFF),
+		Scrim:         color.NRGBA{A: 0x99},
 		DangerFg:      nrgba(0xF4B8B3),
 	}
 }

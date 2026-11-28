@@ -40,7 +40,7 @@ func paintTeamSurface(gtx *layout.Context, env *kit.Env, size image.Point, fill 
 }
 
 func teamAvatar(gtx *layout.Context, env *kit.Env, icon kit.IconName, tone theme.Tone) layout.Dimensions {
-	return teamAvatarAtSize(gtx, env, icon, tone, theme.ControlLG)
+	return teamAvatarAtSize(gtx, env, icon, tone, theme.ControlMD)
 }
 
 func teamAvatarAtSize(gtx *layout.Context, env *kit.Env, icon kit.IconName, tone theme.Tone, size unit.Dp) layout.Dimensions {

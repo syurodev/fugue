@@ -33,11 +33,14 @@ const (
 	RadiusXL     = unit.Dp(16)
 )
 
-// Control, row and tab heights (§3.4).
+// Control, row and tab heights (§3.4, v0.8): controls use the 24/28/32/36
+// scale with 32 dp as the default, while rows, dense rows, tabs, the top
+// bar and slot headers keep their own heights.
 const (
-	ControlSM = unit.Dp(24)
-	ControlMD = unit.Dp(28)
-	ControlLG = unit.Dp(32)
+	ControlXS = unit.Dp(24)
+	ControlSM = unit.Dp(28)
+	ControlMD = unit.Dp(32)
+	ControlLG = unit.Dp(36)
 	Row       = unit.Dp(28)
 	RowDense  = unit.Dp(24)
 	Tab       = unit.Dp(32)

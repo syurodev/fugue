@@ -70,9 +70,10 @@ func testRadiusTokens(t *testing.T) {
 func testControlTokens(t *testing.T) {
 	t.Parallel()
 	expectDp(t, []named{
-		{"size.control.sm", theme.ControlSM, 24},
-		{"size.control.md", theme.ControlMD, 28},
-		{"size.control.lg", theme.ControlLG, 32},
+		{"size.control.xs", theme.ControlXS, 24},
+		{"size.control.sm", theme.ControlSM, 28},
+		{"size.control.md", theme.ControlMD, 32},
+		{"size.control.lg", theme.ControlLG, 36},
 		{"size.row", theme.Row, 28},
 		{"size.row.dense", theme.RowDense, 24},
 		{"size.tab", theme.Tab, 32},

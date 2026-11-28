@@ -352,7 +352,7 @@ func (s *ListRowState) drawActions(env *Env, gtx *layout.Context, pill image.Rec
 		return right
 	}
 	s.ensureActions(len(p.Actions))
-	btnSize := gtx.Dp(theme.ControlSM)
+	btnSize := gtx.Dp(theme.ControlXS)
 	for i := len(p.Actions) - 1; i >= 0; i-- {
 		act := p.Actions[i]
 		right -= btnSize
@@ -361,7 +361,7 @@ func (s *ListRowState) drawActions(env *Env, gtx *layout.Context, pill image.Rec
 			g := *gtx
 			g.Constraints = layout.Exact(image.Pt(btnSize, btnSize))
 			clicked, err := s.actions[i].Layout(env, &g, &IconButtonProps{
-				Icon: act.Icon, Label: act.Label, Shortcut: act.Shortcut, Disabled: p.Disabled || act.Disabled,
+				Icon: act.Icon, Label: act.Label, Shortcut: act.Shortcut, Size: SizeXS, Disabled: p.Disabled || act.Disabled,
 			})
 			if err != nil && ev.Err == nil {
 				ev.Err = err

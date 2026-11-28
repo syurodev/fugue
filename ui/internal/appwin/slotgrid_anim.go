@@ -349,7 +349,7 @@ func (g *slotGrid) drawClosingSlot(gtx *layout.Context, env *kit.Env, sc *screen
 	stack := rr.Push(disabled.Ops)
 	h := min(disabled.Dp(theme.SlotHeaderHeight), cs.rect.Dy())
 	head := image.Rect(cs.rect.Min.X, cs.rect.Min.Y, cs.rect.Max.X, cs.rect.Min.Y+h)
-	if cs.rect.Dx() >= disabled.Dp(theme.ControlSM)*3 {
+	if cs.rect.Dx() >= disabled.Dp(theme.ControlXS)*3 {
 		g.drawHeaderBar(&disabled, env, sc, Pos{Col: 1}, cs.ref, head, &headerButtons{ghost: true})
 	}
 	body := image.Rect(cs.rect.Min.X, cs.rect.Min.Y+h, cs.rect.Max.X, cs.rect.Max.Y)

@@ -119,13 +119,15 @@ func (s *SectionHeaderState) drawAction(env *Env, gtx *layout.Context, w, h int,
 	if act == nil {
 		return right
 	}
-	btnSz := gtx.Dp(theme.ControlSM)
+	btnSz := gtx.Dp(theme.ControlXS)
 	right -= btnSz
 	pt := image.Pt(right, (h-btnSz)/2)
+	actPr := *act
+	actPr.Size = SizeXS
 	at(gtx, pt, func(gtx *layout.Context) {
 		g := *gtx
 		g.Constraints = layout.Exact(image.Pt(btnSz, btnSz))
-		clicked, err := s.action.Layout(env, &g, act)
+		clicked, err := s.action.Layout(env, &g, &actPr)
 		if err != nil && ev.Err == nil {
 			ev.Err = err
 		}

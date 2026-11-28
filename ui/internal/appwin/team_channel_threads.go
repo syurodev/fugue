@@ -101,7 +101,7 @@ func (s *screens) layoutChannelThreadContent(gtx *layout.Context, env *kit.Env, 
 	}
 	return layout.Flex{Alignment: layout.Middle}.Layout(*gtx,
 		rigidWidget(func(g *layout.Context) layout.Dimensions {
-			return teamAvatarAtSize(g, env, icon, env.Th.NeutralTone(), theme.ControlSM)
+			return teamAvatarAtSize(g, env, icon, env.Th.NeutralTone(), theme.ControlXS)
 		}),
 		spacerW(theme.SpaceMD),
 		layout.Flexed(1, func(g layout.Context) layout.Dimensions {
