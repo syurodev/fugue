@@ -29,8 +29,8 @@ type fakeRunner struct {
 	err   error
 }
 
-func (f *fakeRunner) Run(_ context.Context, name string, args ...string) (string, error) {
-	f.calls = append(f.calls, name+" "+strings.Join(args, " "))
+func (f *fakeRunner) Run(_ context.Context, h Helper) (string, error) {
+	f.calls = append(f.calls, helperName(h))
 	return strings.TrimSpace(f.out), f.err
 }
 
@@ -89,26 +89,30 @@ func TestPickOrderRunsTheAvailableHelpersInOrder(t *testing.T) {
 	}
 }
 
-// TestCommandOfBuildsArgvOnly pins that the CLI helpers run as fixed argv:
-// the name and arguments are exact, and a path never rides a shell string.
-func TestCommandOfBuildsArgvOnly(t *testing.T) {
+// TestHelperCommandBuildsLiteralArgv pins that every CLI helper runs a
+// literal program name and literal argv — no caller value names a program or
+// rides a shell string — and that kdialog starts in the user's home through
+// its working directory.
+func TestHelperCommandBuildsLiteralArgv(t *testing.T) {
 	t.Parallel()
-	for _, tc := range []struct {
-		h      Helper
-		start  string
-		name   string
-		args   []string
-		wantOK bool
-	}{
-		{HelperOSAScript, "", "osascript", []string{"-e", `POSIX path of (choose folder with prompt "Choose a folder")`}, true},
-		{HelperZenity, "", "zenity", []string{"--file-selection", "--directory"}, true},
-		{HelperKDialog, "/home/u", "kdialog", []string{"--getexistingdirectory", "/home/u"}, true},
-		{HelperPortal, "", "", nil, false},
-		{HelperNone, "", "", nil, false},
-	} {
-		name, args, ok := commandOf(tc.h, tc.start)
-		if ok != tc.wantOK || name != tc.name || !slices.Equal(args, tc.args) {
-			t.Fatalf("commandOf(%v, %q) = (%q, %v, %v), want (%q, %v, %v)", tc.h, tc.start, name, args, ok, tc.name, tc.args, tc.wantOK)
+	cmd, ok := helperCommand(t.Context(), HelperOSAScript)
+	if !ok || !slices.Equal(cmd.Args[1:], []string{"-e", osascriptChooseFolder}) {
+		t.Fatalf("osascript argv = %v, want the fixed script", cmd.Args)
+	}
+	cmd, ok = helperCommand(t.Context(), HelperZenity)
+	if !ok || !slices.Equal(cmd.Args[1:], []string{"--file-selection", "--directory"}) {
+		t.Fatalf("zenity argv = %v, want the fixed flags", cmd.Args)
+	}
+	cmd, ok = helperCommand(t.Context(), HelperKDialog)
+	if !ok || !slices.Equal(cmd.Args[1:], []string{"--getexistingdirectory", "."}) {
+		t.Fatalf("kdialog argv = %v, want the start directory as .", cmd.Args)
+	}
+	if cmd.Dir == "" {
+		t.Fatal("kdialog has no working directory to start in")
+	}
+	for _, h := range []Helper{HelperPortal, HelperNone} {
+		if _, ok := helperCommand(t.Context(), h); ok {
+			t.Fatalf("helper %v built a process", h)
 		}
 	}
 }
@@ -148,7 +152,7 @@ func pickPortalFallsToZenity(t *testing.T) {
 	if res.Err != nil || res.Path != "/home/u/zenity" {
 		t.Fatalf("zenity fallback = %+v, want the zenity path", res)
 	}
-	if len(run.calls) != 1 || !strings.HasPrefix(run.calls[0], "zenity --file-selection --directory") {
+	if !slices.Equal(run.calls, []string{"zenity"}) {
 		t.Fatalf("helper calls = %v, want one zenity run", run.calls)
 	}
 }

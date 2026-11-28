@@ -74,25 +74,6 @@ func selectHelper(av Availability, goos string) Helper {
 	return HelperNone
 }
 
-// commandOf builds one CLI helper's invocation: a fixed name and argv, the
-// start directory as an argument, never a shell. ok is false for the helpers
-// that do not run a process (the portal rides D-Bus; none runs nothing).
-func commandOf(h Helper, startDir string) (name string, args []string, ok bool) {
-	switch h {
-	case HelperNone, HelperPortal:
-		// The portal rides D-Bus and none runs nothing; neither is a process.
-		return "", nil, false
-	case HelperOSAScript:
-		return "osascript", []string{"-e", `POSIX path of (choose folder with prompt "Choose a folder")`}, true
-	case HelperZenity:
-		return "zenity", []string{"--file-selection", "--directory"}, true
-	case HelperKDialog:
-		return "kdialog", []string{"--getexistingdirectory", startDir}, true
-	default:
-		return "", nil, false
-	}
-}
-
 // exitCoder is the error a Runner answers when the helper process ran and
 // exited nonzero; exitCodeOf reads the code. Exit 1 is how the CLI helpers
 // answer a closed chooser, so a pick maps it to a cancel.
@@ -126,21 +107,52 @@ func (e *exitError) Error() string { return fmt.Sprintf("%s (exit %d)", e.err, e
 func (e *exitError) ExitCode() int { return e.code }
 func (e *exitError) Unwrap() error { return e.err }
 
-// Runner runs one helper process and answers its stdout; a nonzero exit is
-// an error. The interface exists for the tests' recording fake; production
-// runs exec directly.
+// Runner runs one CLI helper and answers its stdout; a nonzero exit is an
+// error. The interface exists for the tests' recording fake; production runs
+// exec through helperCommand.
 type Runner interface {
-	Run(ctx context.Context, name string, args ...string) (stdout string, err error)
+	Run(ctx context.Context, h Helper) (stdout string, err error)
 }
 
-// execRunner runs helpers through exec, argv only.
+// osascriptChooseFolder is the AppleScript every macOS pick runs: the
+// desktop's own chooser, answered as a POSIX path.
+const osascriptChooseFolder = `POSIX path of (choose folder with prompt "Choose a folder")`
+
+// helperCommand builds one CLI helper's run: a literal program name and
+// literal argv, so no caller value ever names a program or rides a shell
+// (gosec G204 stays quiet without an exception). The start directory rides
+// kdialog's working directory as the literal "."; the other helpers start in
+// the user's default. ok is false for the helpers that run no process — the
+// portal rides D-Bus and none runs nothing.
+func helperCommand(ctx context.Context, h Helper) (*exec.Cmd, bool) {
+	switch h {
+	case HelperOSAScript:
+		return exec.CommandContext(ctx, "osascript", "-e", osascriptChooseFolder), true
+	case HelperZenity:
+		return exec.CommandContext(ctx, "zenity", "--file-selection", "--directory"), true
+	case HelperKDialog:
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, false
+		}
+		cmd := exec.CommandContext(ctx, "kdialog", "--getexistingdirectory", ".")
+		cmd.Dir = home
+		return cmd, true
+	case HelperNone, HelperPortal:
+		// The portal rides D-Bus and none runs nothing; neither is a process.
+		return nil, false
+	}
+	return nil, false
+}
+
+// execRunner runs helpers through exec.
 type execRunner struct{}
 
-func (execRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
-	//nolint:gosec // G204: the name is one of commandOf's fixed helpers
-	// (osascript, zenity, kdialog), found through LookPath, and the
-	// arguments are fixed flags plus the start directory: argv, no shell.
-	cmd := exec.CommandContext(ctx, name, args...)
+func (execRunner) Run(ctx context.Context, h Helper) (string, error) {
+	cmd, ok := helperCommand(ctx, h)
+	if !ok {
+		return "", errNoPicker
+	}
 	out, err := cmd.Output()
 	if err == nil {
 		return strings.TrimSpace(string(out)), nil
@@ -149,7 +161,22 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) (string,
 	if errors.As(err, &eerr) {
 		return "", &exitError{code: eerr.ExitCode(), err: errHelperFailed}
 	}
-	return "", fmt.Errorf("%w: %s", errHelperRun, name)
+	return "", fmt.Errorf("%w: %s", errHelperRun, helperName(h))
+}
+
+// helperName is the helper's program name, for messages.
+func helperName(h Helper) string {
+	switch h {
+	case HelperOSAScript:
+		return "osascript"
+	case HelperZenity:
+		return "zenity"
+	case HelperKDialog:
+		return "kdialog"
+	case HelperNone, HelperPortal:
+		return "helper"
+	}
+	return "helper"
 }
 
 // pickPortalFunc runs the portal FileChooser flow: the chosen folder's path,
@@ -319,34 +346,17 @@ func (p *Picker) pickOne(ctx context.Context, h Helper) (res Result, ran bool) {
 		}
 		return Result{Path: path, Cancelled: cancelled}, true
 	}
-	startDir, err := userStartDir()
-	if err != nil {
-		return Result{Err: err}, false
-	}
-	name, args, ok := commandOf(h, startDir)
-	if !ok {
-		return Result{Err: errNoPicker}, false
-	}
-	out, err := p.runner.Run(ctx, name, args...)
+	out, err := p.runner.Run(ctx, h)
 	if err != nil {
 		if code, isExit := exitCodeOf(err); isExit && code == 1 {
 			return Result{Cancelled: true}, true
 		}
-		return Result{Err: fmt.Errorf("%s failed: %w", name, err)}, false
+		return Result{Err: fmt.Errorf("%w: %s", err, helperName(h))}, false
 	}
 	if out == "" {
 		return Result{Cancelled: true}, true
 	}
 	return Result{Path: out}, true
-}
-
-// userStartDir is the directory kdialog's required start argument names.
-func userStartDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("find a start directory for the folder picker: %w", err)
-	}
-	return home, nil
 }
 
 // uriPath turns a portal's file URI into an absolute path. net/url is out
