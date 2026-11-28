@@ -22,20 +22,6 @@ import (
 // Claude only; the vendor select names the probed vendors, and the effort
 // options are the values the host's profile allowlist accepts.
 
-// effortOptions are the effort values the host's profile allowlist accepts;
-// empty uses the vendor's default and the host rejects anything else. The
-// host validates the chosen value, so the picker offers exactly these.
-func effortOptions() []kit.SelectOption {
-	return []kit.SelectOption{
-		{ID: "", Label: "vendor default"},
-		{ID: "low", Label: "low"},
-		{ID: "medium", Label: "medium"},
-		{ID: "high", Label: "high"},
-		{ID: "xhigh", Label: "xhigh"},
-		{ID: "max", Label: "max"},
-	}
-}
-
 // newSessionLabel names the composer's start row button.
 const newSessionLabel = "New session"
 
@@ -137,11 +123,16 @@ func (f *startFlow) canStart(sc *screens) bool {
 
 // dirty reports a form with input, which refuses Escape (§6.17).
 func (f *startFlow) dirty() bool {
-	return f.wsID != "" || f.model.Text() != "" || f.effortSel != ""
+	return f.wsID != "" || f.model.Text() != "" || (f.effortSel != "" && f.effortSel != effortDefaultID)
 }
 
 // effortValue is the chosen effort, empty for the vendor's default.
-func (f *startFlow) effortValue() string { return f.effortSel }
+func (f *startFlow) effortValue() string {
+	if f.effortSel == effortDefaultID {
+		return ""
+	}
+	return f.effortSel
+}
 
 // vendorName is the chosen vendor; an unchosen select names Claude, the
 // stage-A vendor.
@@ -416,18 +407,23 @@ func (f *startFlow) layModel(env *kit.Env, lay fieldLay) {
 	})
 }
 
-// layEffort draws the effort picker.
+// layEffort draws the effort picker with an explicit unselected placeholder (§6.13).
 func (f *startFlow) layEffort(env *kit.Env, lay fieldLay) {
 	lay(f.effort.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
 		props := &kit.SelectProps{
-			Label:   "Effort",
-			Options: effortOptions(),
-			Value:   f.effortSel,
-			Block:   true,
+			Label:       "Effort",
+			Placeholder: "vendor default",
+			Options:     effortOptions(),
+			Value:       f.effortSel,
+			Block:       true,
 		}
 		res, err := f.effort.Layout(env, gtx, props)
 		if res.Changed {
-			f.effortSel = res.Value
+			if res.Value == effortDefaultID {
+				f.effortSel = ""
+			} else {
+				f.effortSel = res.Value
+			}
 		}
 		return f.effort.Measure(env, gtx, props), err
 	})
@@ -464,35 +460,4 @@ func (f *startFlow) chooseWorkspace(id string, sc *screens) {
 	} else {
 		f.reconcile(sc)
 	}
-}
-
-// workspaceItems maps the shared workspace model onto the combobox's rows.
-func workspaceItems(list []workspace.Summary) []kit.SuggestItem {
-	items := make([]kit.SuggestItem, 0, len(list))
-	for _, ws := range list {
-		items = append(items, kit.SuggestItem{ID: ws.ID, Label: ws.Name})
-	}
-	return items
-}
-
-// rootOptions maps the workspace's usable roots onto the select's options.
-func rootOptions(roots []workspace.Root) []kit.SelectOption {
-	opts := make([]kit.SelectOption, 0, len(roots))
-	for _, r := range roots {
-		opts = append(opts, kit.SelectOption{ID: r.Name, Label: r.Name})
-	}
-	return opts
-}
-
-// vendorOptions names the probed vendors, Claude always — the stage-A vendor
-// and the one a probe without answers still serves.
-func vendorOptions(c *composer) []kit.SelectOption {
-	var opts []kit.SelectOption
-	if _, ok := c.caps[client.VendorClaude]; !ok {
-		opts = append(opts, kit.SelectOption{ID: client.VendorClaude, Label: client.VendorClaude})
-	}
-	for vendor := range c.caps {
-		opts = append(opts, kit.SelectOption{ID: vendor, Label: vendor})
-	}
-	return opts
 }
