@@ -40,13 +40,13 @@ func layoutSecretQuestion(env *kit.Env, sc *screens, qf *questionFormState, busy
 		return layoutSecretMode(gtx, env, sc, qf, busy, len(available) > 0)
 	}))
 	if qf.secretMode == 1 {
-		return append(out, spacerH(theme.SpaceSM), rigidWidget(func(gtx *layout.Context) layout.Dimensions {
+		return append(out, spacerH(theme.SpaceLG), rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 			return layoutSecretPicker(gtx, env, sc, qf, busy, available, wsName)
 		}))
 	}
-	out = append(out, spacerH(theme.SpaceSM), rigidWidget(func(gtx *layout.Context) layout.Dimensions {
+	out = append(out, spacerH(theme.SpaceLG), rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 		return layoutSecretValue(gtx, env, sc, qf, busy)
-	}), spacerH(theme.SpaceSM), rigidWidget(func(gtx *layout.Context) layout.Dimensions {
+	}), spacerH(theme.SpaceLG), rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 		return layoutSaveSecretCheck(gtx, env, sc, qf, busy)
 	}))
 	if qf.saveSecret {
@@ -94,6 +94,7 @@ func layoutSecretPicker(gtx *layout.Context, env *kit.Env, sc *screens, qf *ques
 		Options:     opts,
 		Value:       qf.selectedSecID,
 		Disabled:    busy || len(opts) == 0,
+		Block:       true,
 	}
 	res, err := qf.secretPicker.Layout(env, gtx, props)
 	sc.fail(err)
@@ -112,9 +113,11 @@ func layoutSecretValue(gtx *layout.Context, env *kit.Env, sc *screens, qf *quest
 		NoReveal:    true,
 		Disabled:    busy,
 	}
-	_, err := qf.secretInput.Layout(env, gtx, props)
+	local := *gtx
+	local.Constraints.Min.X = local.Constraints.Max.X
+	_, err := qf.secretInput.Layout(env, &local, props)
 	sc.fail(err)
-	return qf.secretInput.Measure(env, gtx, props)
+	return qf.secretInput.Measure(env, &local, props)
 }
 
 func layoutSaveSecretCheck(gtx *layout.Context, env *kit.Env, sc *screens, qf *questionFormState, busy bool) layout.Dimensions {
@@ -133,14 +136,16 @@ func layoutSaveSecretCheck(gtx *layout.Context, env *kit.Env, sc *screens, qf *q
 
 func secretSaveFields(env *kit.Env, sc *screens, qf *questionFormState, busy bool, wsID, wsName string) []layout.FlexChild {
 	return []layout.FlexChild{
-		spacerH(theme.SpaceSM),
+		spacerH(theme.SpaceLG),
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 			props := &kit.TextFieldProps{Label: "Secret name", Placeholder: "API_TOKEN", Disabled: busy}
-			_, err := qf.saveName.Layout(env, gtx, props)
+			local := *gtx
+			local.Constraints.Min.X = local.Constraints.Max.X
+			_, err := qf.saveName.Layout(env, &local, props)
 			sc.fail(err)
-			return qf.saveName.Measure(env, gtx, props)
+			return qf.saveName.Measure(env, &local, props)
 		}),
-		spacerH(theme.SpaceSM),
+		spacerH(theme.SpaceLG),
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 			return layoutSaveSecretScope(gtx, env, sc, qf, busy, wsID, wsName)
 		}),

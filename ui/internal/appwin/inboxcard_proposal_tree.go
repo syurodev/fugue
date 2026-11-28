@@ -163,7 +163,7 @@ func proposalNodeFields(env *kit.Env, sc *screens, task *client.TaskNode, field 
 		return append(rows, rigidLabel(env, theme.TypeCaption(), ch.FgMuted, "Role model: "+strings.TrimSpace(field.Text())))
 	}
 	return append(rows, spacerH(theme.SpaceXS), rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-		p := kit.ComboboxProps{Label: "Role model", Placeholder: "Vendor default", Items: options, Disabled: busy}
+		p := kit.ComboboxProps{Label: "Role model", Placeholder: "Vendor default", Items: options, Disabled: busy, Block: true}
 		_, err := field.Layout(env, gtx, &p)
 		if !gtx.Focused(field.Tag()) {
 			field.Close()
@@ -206,9 +206,13 @@ func proposalBudgetRows(env *kit.Env, sc *screens, p *proposalCard, busy bool) [
 					spacerH(theme.SpaceMD),
 					rigidWidget(func(g *layout.Context) layout.Dimensions {
 						return layout.Flex{}.Layout(*g,
-							proposalTextField(env, sc, p.maxAgents, "Max agents", "Default", busy),
+							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+								return layoutProposalTextField(env, sc, &gtx, p.maxAgents, "Max agents", "Default", busy)
+							}),
 							spacerW(theme.SpaceMD),
-							proposalTextField(env, sc, p.deadline, "Deadline (sec.)", "Default", busy),
+							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+								return layoutProposalTextField(env, sc, &gtx, p.deadline, "Deadline (sec.)", "Default", busy)
+							}),
 						)
 					}),
 				)
@@ -217,13 +221,13 @@ func proposalBudgetRows(env *kit.Env, sc *screens, p *proposalCard, busy bool) [
 	}
 }
 
-func proposalTextField(env *kit.Env, sc *screens, st *kit.TextFieldState, label, placeholder string, busy bool) layout.FlexChild {
+func layoutProposalTextField(env *kit.Env, sc *screens, gtx *layout.Context, st *kit.TextFieldState, label, placeholder string, busy bool) layout.Dimensions {
 	props := kit.TextFieldProps{Label: label, Placeholder: placeholder, Disabled: busy}
-	return rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-		_, err := st.Layout(env, gtx, &props)
-		sc.fail(err)
-		return st.Measure(env, gtx, &props)
-	})
+	local := *gtx
+	local.Constraints.Min.X = local.Constraints.Max.X
+	_, err := st.Layout(env, &local, &props)
+	sc.fail(err)
+	return st.Measure(env, &local, &props)
 }
 
 func (p *proposalCard) addTaskRows(env *kit.Env, sc *screens, view *client.TeamView, busy bool) []layout.FlexChild {
@@ -263,9 +267,9 @@ func (p *proposalCard) addTaskRows(env *kit.Env, sc *screens, view *client.TeamV
 	if !p.addOpen {
 		return rows
 	}
-	return append(rows, spacerH(theme.SpaceMD),
+	return append(rows, spacerH(theme.SpaceLG),
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
-			props := kit.SelectProps{Label: "Role for new task", Placeholder: "Choose a role", Value: p.selectedRole, Options: roles, Disabled: busy}
+			props := kit.SelectProps{Label: "Role for new task", Placeholder: "Choose a role", Value: p.selectedRole, Options: roles, Disabled: busy, Block: true}
 			ev, err := p.addRole.Layout(env, gtx, &props)
 			sc.fail(err)
 			if ev.Changed {
@@ -273,9 +277,13 @@ func (p *proposalCard) addTaskRows(env *kit.Env, sc *screens, view *client.TeamV
 			}
 			return p.addRole.Measure(env, gtx, &props)
 		}),
-		proposalTextField(env, sc, p.addGoal, "New task goal", "Describe the task", busy),
+		spacerH(theme.SpaceLG),
+		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
+			return layoutProposalTextField(env, sc, gtx, p.addGoal, "New task goal", "Describe the task", busy)
+		}),
+		spacerH(theme.SpaceLG),
 		rigidInboxButton(env, sc.fail, p.addButton, kit.ButtonProps{
-			Text: "Add task", Variant: kit.Secondary, Size: kit.SizeSM,
+			Text: "Add task", Variant: kit.Secondary, Size: kit.SizeMD,
 			Disabled: busy || p.selectedRole == "" || strings.TrimSpace(p.addGoal.Text()) == "",
 		}, func() { p.addTask(view.Tasks, root); p.addOpen = false }))
 }
