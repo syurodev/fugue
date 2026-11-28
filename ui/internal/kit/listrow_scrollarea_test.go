@@ -354,7 +354,6 @@ func TestListRowAndSectionHeaderTextContrastOnSurface(t *testing.T) {
 				{"SurfaceTinted", c.SurfaceTinted, true},
 				{"SelectedPill/AppBg", over(c.AppBg, c.SelectedWash), false},
 				{"SelectedPill/SurfaceBase", over(c.SurfaceBase, c.SelectedWash), false},
-				{"SelectedFocusPill/AppBg", over(c.AppBg, c.SelectedFocusWash), false},
 				{"HoverPill/AppBg", over(c.AppBg, c.HoverWash), false},
 			}
 			for _, sf := range surfaces {
@@ -364,6 +363,13 @@ func TestListRowAndSectionHeaderTextContrastOnSurface(t *testing.T) {
 						t.Errorf("%s/%s FgSubtle contrast = %.2f, want >= 4.5", tc.name, sf.name, got)
 					}
 				}
+			}
+			// The chrome focus fill (§3.4, FUG-109) is icon-only: the ghost
+			// variant's interaction color, Fg, must hold 4.5:1 on the token
+			// composited over the chrome surface — the list text colors above
+			// never draw on it.
+			if got := contrastRatio(c.Fg, over(c.AppBg, c.SelectedFocusWash)); got < 4.5 {
+				t.Errorf("%s SelectedFocusWash Fg contrast = %.2f, want >= 4.5", tc.name, got)
 			}
 		})
 	}
