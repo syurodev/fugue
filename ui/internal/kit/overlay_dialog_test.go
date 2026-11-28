@@ -160,6 +160,9 @@ func TestDialogTrapsFocusAndReturnsItToTheOpener(t *testing.T) {
 func TestDialogBodyStartsBelowDescription(t *testing.T) {
 	t.Parallel()
 	f := newDialogFixture(t)
+	// Snap open to prog=1 so the body sits at its unscaled layout origin
+	// rather than the 0.95 open-start transform (§3.7).
+	f.h.env.ReducedMotion = true
 	const bodyLabel = "Dialog body marker"
 	size := image.Pt(24, 20)
 	f.props.Body = func(gtx *layout.Context, _ *DialogBands) image.Point {

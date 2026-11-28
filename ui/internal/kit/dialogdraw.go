@@ -127,8 +127,17 @@ func (d *DialogState) paintFrame(env *Env, gtx *layout.Context, props *DialogPro
 	// A frame on its way out takes no input (§3.7): the body and the footer
 	// buttons draw, but nothing under them receives events.
 	active := d.open.Shown() || props.Inline
+	// One scale-about-centre and one opacity scope wrap the whole frame
+	// (surface, header, description, body, footer) so the dialog moves as
+	// one piece (§3.7). Skipped once settled at prog=1 so resting stills
+	// and floating layers opened from the body carry no extra transform.
+	if prog < 1 {
+		center := f32.Pt(float32(d.rect.Min.X+d.rect.Max.X)/2, float32(d.rect.Min.Y+d.rect.Max.Y)/2)
+		defer scaleAbout(gtx, center, 0.95+0.05*prog).Pop()
+		defer paint.PushOpacity(gtx.Ops, unit01(prog)).Pop()
+	}
 	d.iconErr = nil
-	if err := d.drawChrome(env, gtx, props, m, prog); err != nil {
+	if err := d.drawChrome(env, gtx, props, m); err != nil {
 		return err
 	}
 	if d.iconErr != nil {
@@ -162,13 +171,9 @@ func (d *DialogState) runBody(gtx *layout.Context, props *DialogProps, m dialogM
 	return bodyH, bodyOps, handle.bands, scrollMax
 }
 
-// drawChrome paints the frame's surface, title and description, under the
-// §3.7 motion transforms.
-func (d *DialogState) drawChrome(env *Env, gtx *layout.Context, props *DialogProps, m dialogMetrics, prog float32) error {
-	center := f32.Pt(float32(d.rect.Min.X+d.rect.Max.X)/2, float32(d.rect.Min.Y+d.rect.Max.Y)/2)
-	defer scaleAbout(gtx, center, 0.95+0.05*prog).Pop()
-	defer paint.PushOpacity(gtx.Ops, unit01(prog)).Pop()
-
+// drawChrome paints the frame's surface, title and description inside the
+// caller's §3.7 motion scope.
+func (d *DialogState) drawChrome(env *Env, gtx *layout.Context, props *DialogProps, m dialogMetrics) error {
 	c := env.Th.Chrome()
 	radius := gtx.Dp(theme.RadiusXL)
 	DrawFloatShadow(gtx, d.rect, radius)
