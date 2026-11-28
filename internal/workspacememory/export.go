@@ -12,8 +12,9 @@ import (
 // ExportMarkdown exports all entries of workspaceID (including invalid and
 // superseded entries) into the fugue-memory/1 Markdown format (§8).
 // Before rendering, the secret scanner runs over every entry's text; any hit
-// refuses the export with memory.contains_secret naming the offending entry IDs,
-// labels, and finding kinds without ever repeating secret values.
+// refuses the export with memory.contains_secret naming the offending entry IDs
+// and finding kinds (and labels only when the label itself scans clean) without
+// ever repeating secret values.
 func (s *Store) ExportMarkdown(ctx context.Context, workspaceID, workspaceName string) ([]byte, error) {
 	if strings.TrimSpace(workspaceID) == "" {
 		return nil, errInvalidArg("workspace_id is required")
@@ -34,11 +35,15 @@ func (s *Store) ExportMarkdown(ctx context.Context, workspaceID, workspaceName s
 func (s *Store) scanEntriesForExport(entries []Entry) error {
 	var hits []string
 	for i := range entries {
-		kinds := s.scanEntryFindingKinds(&entries[i])
+		kinds, labelClean := s.scanEntryFindingKinds(&entries[i])
 		if len(kinds) == 0 {
 			continue
 		}
-		hits = append(hits, fmt.Sprintf("%s (%s: %s)", entries[i].ID, entries[i].Label, strings.Join(kinds, ", ")))
+		if labelClean {
+			hits = append(hits, fmt.Sprintf("%s (%s: %s)", entries[i].ID, entries[i].Label, strings.Join(kinds, ", ")))
+		} else {
+			hits = append(hits, fmt.Sprintf("%s (%s)", entries[i].ID, strings.Join(kinds, ", ")))
+		}
 	}
 	if len(hits) == 0 {
 		return nil
@@ -49,24 +54,30 @@ func (s *Store) scanEntriesForExport(entries []Entry) error {
 	)
 }
 
-func (s *Store) scanEntryFindingKinds(e *Entry) []string {
-	fields := make([]string, 0, 4+len(e.Keywords))
-	fields = append(fields, e.Label, e.Summary, e.Body, e.InvalidReason)
-	fields = append(fields, e.Keywords...)
+func (s *Store) scanEntryFindingKinds(e *Entry) (kinds []string, labelClean bool) {
 	seen := map[string]struct{}{}
-	var kinds []string
-	for _, field := range fields {
-		if field == "" {
-			continue
+	addFindings := func(text string) bool {
+		if text == "" {
+			return false
 		}
-		for _, f := range s.scanner.Scan(field) {
+		findings := s.scanner.Scan(text)
+		for _, f := range findings {
 			if _, ok := seen[f.Kind]; ok {
 				continue
 			}
 			seen[f.Kind] = struct{}{}
 			kinds = append(kinds, f.Kind)
 		}
+		return len(findings) > 0
+	}
+
+	labelClean = !addFindings(e.Label)
+	fields := make([]string, 0, 3+len(e.Keywords))
+	fields = append(fields, e.Summary, e.Body, e.InvalidReason)
+	fields = append(fields, e.Keywords...)
+	for _, field := range fields {
+		addFindings(field)
 	}
 	slices.Sort(kinds)
-	return kinds
+	return kinds, labelClean
 }

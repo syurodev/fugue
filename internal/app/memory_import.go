@@ -43,6 +43,7 @@ type storedImportPreview struct {
 	previewID   string
 	workspaceID string
 	createdAt   time.Time
+	inFlight    bool
 	preview     workspacememory.ImportPreview
 }
 
@@ -146,10 +147,19 @@ func (s *MemoryService) ApplyImport(ctx context.Context, principal string, cmd *
 	if cmd == nil || strings.TrimSpace(cmd.WorkspaceID) == "" || strings.TrimSpace(cmd.PreviewID) == "" {
 		return MemoryApplyImportResultView{}, errcode.New(errcode.InvalidArgument, "workspace_id and preview_id are required")
 	}
-	stored, err := s.takeImportPreview(cmd.WorkspaceID, cmd.PreviewID)
+	stored, err := s.acquireImportPreview(cmd.WorkspaceID, cmd.PreviewID)
 	if err != nil {
 		return MemoryApplyImportResultView{}, err
 	}
+	consumed := false
+	defer func() {
+		s.releaseImportPreview(cmd.PreviewID, consumed)
+	}()
+
+	if s.beforeApplyImport != nil {
+		s.beforeApplyImport()
+	}
+
 	choices := make([]workspacememory.ImportItemChoice, 0, len(cmd.Choices))
 	for _, c := range cmd.Choices {
 		choices = append(choices, workspacememory.ImportItemChoice{
@@ -166,8 +176,12 @@ func (s *MemoryService) ApplyImport(ctx context.Context, principal string, cmd *
 		Choices:     choices,
 	})
 	if err != nil {
+		if errcode.CodeOf(err) == errcode.MemoryImportStale {
+			consumed = true
+		}
 		return MemoryApplyImportResultView{}, wrapMemoryStoreError(err)
 	}
+	consumed = true
 	written := make([]MemoryEntryView, 0, len(res.Written))
 	for i := range res.Written {
 		written = append(written, memoryEntryToView(&res.Written[i]))
@@ -207,9 +221,9 @@ func (s *MemoryService) storeImportPreview(previewID, workspaceID string, prev *
 	defer s.mu.Unlock()
 	s.pruneExpiredPreviewsLocked(now)
 	for len(s.previewOrd) >= MemoryImportPreviewCap {
-		oldest := s.previewOrd[0]
-		s.previewOrd = s.previewOrd[1:]
-		delete(s.previews, oldest)
+		if !s.evictOldestIdlePreviewLocked() {
+			break
+		}
 	}
 	s.previews[previewID] = storedImportPreview{
 		previewID:   previewID,
@@ -220,17 +234,44 @@ func (s *MemoryService) storeImportPreview(previewID, workspaceID string, prev *
 	s.previewOrd = append(s.previewOrd, previewID)
 }
 
-func (s *MemoryService) takeImportPreview(workspaceID, previewID string) (storedImportPreview, error) {
+func (s *MemoryService) evictOldestIdlePreviewLocked() bool {
+	for idx, id := range s.previewOrd {
+		st, ok := s.previews[id]
+		if !ok || st.inFlight {
+			continue
+		}
+		delete(s.previews, id)
+		s.previewOrd = append(s.previewOrd[:idx], s.previewOrd[idx+1:]...)
+		return true
+	}
+	return false
+}
+
+func (s *MemoryService) acquireImportPreview(workspaceID, previewID string) (storedImportPreview, error) {
 	now := s.clk.Now().UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.pruneExpiredPreviewsLocked(now)
 	stored, ok := s.previews[previewID]
-	if !ok || stored.workspaceID != workspaceID {
+	if !ok || stored.workspaceID != workspaceID || stored.inFlight {
 		return storedImportPreview{}, errcode.New(errcode.MemoryImportStale, "import preview not found or expired")
 	}
-	delete(s.previews, previewID)
+	stored.inFlight = true
+	s.previews[previewID] = stored
 	return stored, nil
+}
+
+func (s *MemoryService) releaseImportPreview(previewID string, consume bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if consume {
+		delete(s.previews, previewID)
+		return
+	}
+	if stored, ok := s.previews[previewID]; ok {
+		stored.inFlight = false
+		s.previews[previewID] = stored
+	}
 }
 
 func (s *MemoryService) pruneExpiredPreviewsLocked(now time.Time) {
@@ -240,7 +281,7 @@ func (s *MemoryService) pruneExpiredPreviewsLocked(now time.Time) {
 		if !ok {
 			continue
 		}
-		if !now.Before(st.createdAt.Add(MemoryImportPreviewTTL)) {
+		if !st.inFlight && !now.Before(st.createdAt.Add(MemoryImportPreviewTTL)) {
 			delete(s.previews, id)
 			continue
 		}

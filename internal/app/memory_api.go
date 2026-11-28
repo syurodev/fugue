@@ -26,6 +26,10 @@ type MemoryService struct {
 	mu         sync.Mutex
 	previews   map[string]storedImportPreview
 	previewOrd []string
+
+	// beforeApplyImport is an optional test hook invoked after acquiring an
+	// in-flight preview and before calling store.ApplyImport.
+	beforeApplyImport func()
 }
 
 func newMemoryService(

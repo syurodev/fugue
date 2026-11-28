@@ -5,6 +5,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
 // PreviewImport parses a fugue-memory/1 file, runs §3 content checks on each
@@ -81,7 +83,7 @@ func (s *Store) classifyDecodedBlock(
 	if blk.RejectReason != "" || blk.Entry == nil {
 		return ImportPreviewItem{
 			ItemID:        itemID,
-			Label:         blk.RawLabel,
+			Label:         s.safePreviewLabel(blk.RawLabel),
 			Class:         ImportClassRejected,
 			DefaultChoice: ImportChoiceSkip,
 			RejectReason:  blk.RejectReason,
@@ -89,20 +91,39 @@ func (s *Store) classifyDecodedBlock(
 	}
 	imp := blk.Entry
 	impView := importedEntryToEntry(workspaceID, imp)
+	if err := s.validateImportedCandidate(workspaceID, imp); err != nil {
+		if errcode.CodeOf(err) == errcode.MemoryContainsSecret {
+			return ImportPreviewItem{
+				ItemID:        itemID,
+				EntryID:       imp.ID,
+				Label:         s.safePreviewLabel(imp.Label),
+				Class:         ImportClassRejected,
+				DefaultChoice: ImportChoiceSkip,
+				RejectReason:  err.Error(),
+			}
+		}
+		return rejectedPreviewItem(itemID, imp, &impView, err.Error())
+	}
 	if _, dup := st.seenFileIDs[imp.ID]; dup {
 		return rejectedPreviewItem(itemID, imp, &impView, "duplicate entry id in import file")
 	}
 	st.seenFileIDs[imp.ID] = struct{}{}
-
-	if err := s.validateImportedCandidate(workspaceID, imp); err != nil {
-		return rejectedPreviewItem(itemID, imp, &impView, err.Error())
-	}
 
 	local, exists := st.byID[imp.ID]
 	if exists {
 		return s.classifyExistingImport(itemID, local, imp, &impView, st)
 	}
 	return s.classifyNewImport(itemID, imp, &impView, st)
+}
+
+func (s *Store) safePreviewLabel(label string) string {
+	if label == "" {
+		return ""
+	}
+	if len(s.scanner.Scan(label)) > 0 {
+		return ""
+	}
+	return label
 }
 
 func (s *Store) validateImportedCandidate(workspaceID string, imp *ImportedEntry) error {

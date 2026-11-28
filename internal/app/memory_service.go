@@ -23,25 +23,34 @@ const (
 
 type memorySecretScanner struct {
 	detector *secrets.Detector
+	extra    func(text string) []string
 }
 
-func newMemorySecretScanner() *memorySecretScanner {
+func newMemorySecretScanner(extra func(text string) []string) *memorySecretScanner {
 	return &memorySecretScanner{
 		detector: secrets.New(nil, secrets.Options{}),
+		extra:    extra,
 	}
 }
 
 func (s *memorySecretScanner) Scan(text string) []workspacememory.SecretFinding {
 	found := s.detector.FindIn(text, "")
-	if len(found) == 0 {
+	var extraKinds []string
+	if s.extra != nil {
+		extraKinds = s.extra(text)
+	}
+	if len(found) == 0 && len(extraKinds) == 0 {
 		return nil
 	}
-	out := make([]workspacememory.SecretFinding, 0, len(found))
+	out := make([]workspacememory.SecretFinding, 0, len(found)+len(extraKinds))
 	for _, f := range found {
 		out = append(out, workspacememory.SecretFinding{
 			Kind: f.Kind,
 			Key:  f.Key,
 		})
+	}
+	for _, k := range extraKinds {
+		out = append(out, workspacememory.SecretFinding{Kind: k})
 	}
 	return out
 }
@@ -94,7 +103,7 @@ func initWorkspaceMemory(hp *HostProcess, store *storage.Store, deps *HostDeps, 
 		store.DB(),
 		deps.Clock,
 		deps.IDs,
-		newMemorySecretScanner(),
+		newMemorySecretScanner(deps.TestMemorySecretKinds),
 		&memoryAnchorHasher{workspaces: workspaces},
 		&memoryEventSink{hub: hp.rt.hub},
 		workspacememory.Config{},

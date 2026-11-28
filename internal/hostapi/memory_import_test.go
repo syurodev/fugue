@@ -2,9 +2,13 @@ package hostapi
 
 import (
 	"bytes"
+	"strconv"
+	"strings"
 	"testing"
 
 	"connectrpc.com/connect"
+	"google.golang.org/protobuf/encoding/protojson"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/syurodev/fugue/internal/app"
 	"github.com/syurodev/fugue/internal/platform/errcode"
@@ -145,5 +149,91 @@ func assertExportImportDenied(t *testing.T, c memoryv1connect.MemoryServiceClien
 		t.Fatal("ApplyImport allowed unauthorized principal")
 	} else {
 		assertConnectCode(t, err, connect.CodePermissionDenied, errcode.PermissionDenied)
+	}
+}
+
+func TestMemoryPreviewSecretRejectionOmitsContent(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	v := startTokenHost(t, "")
+	wsID := v.workspaceWithRoot(t, t.TempDir())
+
+	appHost, appHC := newTestClient(t, v.sockPath)
+	if _, hErr := appHost.Hello(ctx, helloRequest(hostv1.ClientKind_CLIENT_KIND_APP, "v1")); hErr != nil {
+		t.Fatalf("Hello(app): %v", hErr)
+	}
+	appClient := memoryv1connect.NewMemoryServiceClient(appHC, testBaseURL)
+
+	tokBody := "gh" + "p_" + strings.Repeat("a1", 18)
+	tokLabel := "AK" + "IA" + strings.Repeat("C3", 8)
+	tokRaw := "gh" + "p_" + strings.Repeat("d4", 18)
+
+	content := buildHostAPIPreviewSecretFixture(tokBody, tokLabel, tokRaw)
+	prevRes, err := appClient.PreviewImport(ctx, connect.NewRequest(&memoryv1.PreviewImportRequest{
+		WorkspaceId: wsID, Content: []byte(content),
+	}))
+	if err != nil {
+		t.Fatalf("PreviewImport: %v", err)
+	}
+	items := prevRes.Msg.GetItems()
+	if len(items) != 5 {
+		t.Fatalf("PreviewImport items = %d, want 5", len(items))
+	}
+	assertHostAPISecretPreviewItems(t, items)
+
+	wireBytes, err := proto.Marshal(prevRes.Msg)
+	if err != nil {
+		t.Fatalf("proto.Marshal: %v", err)
+	}
+	jsonBytes, err := protojson.Marshal(prevRes.Msg)
+	if err != nil {
+		t.Fatalf("protojson.Marshal: %v", err)
+	}
+	for _, secret := range []string{tokBody, tokLabel, tokRaw} {
+		if bytes.Contains(wireBytes, []byte(secret)) || bytes.Contains(jsonBytes, []byte(secret)) {
+			t.Fatal("secret leaked in Host API PreviewImport response")
+		}
+	}
+}
+
+func buildHostAPIPreviewSecretFixture(tokBody, tokLabel, tokRaw string) string {
+	cleanBody := "This entry explains valid configuration rules in English."
+	secBody := "Body carries " + tokBody + " which must never reach preview."
+	oversizeSummary := strings.Repeat("z", 210)
+	return "---\nformat: fugue-memory/1\nworkspace: src\nexported_at: 2026-11-28T12:00:00Z\n---\n\n" +
+		hostAPIPreviewBlock("id-good", "good-clean", "Clean summary.", cleanBody) +
+		hostAPIPreviewBlock("id-sec-body", "clean-lbl-for-body", "Clean summary.", secBody) +
+		hostAPIPreviewBlock("id-sec-lbl", "bad "+tokLabel, "Clean summary.", cleanBody) +
+		"<!-- fugue:entry -->\n## raw " + tokRaw + "\nbroken\n<!-- /fugue:entry -->\n\n" +
+		hostAPIPreviewBlock("id-oversize", "oversize-lbl", oversizeSummary, cleanBody)
+}
+
+func hostAPIPreviewBlock(id, label, summary, body string) string {
+	return "<!-- fugue:entry -->\n## " + label + "\n\n```yaml\nid: " + id +
+		"\nkind: fact\nlabel: " + label +
+		"\nsummary: " + summary +
+		"\nkeywords: []\nanchors: []\nauthor: user\nverified: true\nvalidity: valid\ninvalid_reason: \"\"\nsuperseded_by: \"\"\nupdated_at: 2026-11-28T12:00:00Z\nrevision: 1\nbody_bytes: " + strconv.Itoa(len(body)) +
+		"\n```\n" + body + "\n<!-- /fugue:entry -->\n\n"
+}
+
+func assertHostAPISecretPreviewItems(t *testing.T, items []*memoryv1.MemoryImportPreviewItem) {
+	t.Helper()
+	want := []struct {
+		class       memoryv1.MemoryImportClass
+		importedNil bool
+		label       string
+	}{
+		{memoryv1.MemoryImportClass_MEMORY_IMPORT_CLASS_ADD, false, "good-clean"},
+		{memoryv1.MemoryImportClass_MEMORY_IMPORT_CLASS_REJECTED, true, "clean-lbl-for-body"},
+		{memoryv1.MemoryImportClass_MEMORY_IMPORT_CLASS_REJECTED, true, ""},
+		{memoryv1.MemoryImportClass_MEMORY_IMPORT_CLASS_REJECTED, true, ""},
+		{memoryv1.MemoryImportClass_MEMORY_IMPORT_CLASS_REJECTED, false, "oversize-lbl"},
+	}
+	for i, w := range want {
+		got := items[i]
+		if got.GetItemClass() != w.class || (got.GetImported() == nil) != w.importedNil || got.GetLabel() != w.label {
+			t.Fatalf("item[%d] = (class=%v importedNil=%v label=%q), want (class=%v importedNil=%v label=%q)",
+				i, got.GetItemClass(), got.GetImported() == nil, got.GetLabel(), w.class, w.importedNil, w.label)
+		}
 	}
 }
