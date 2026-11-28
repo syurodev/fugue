@@ -129,8 +129,8 @@ func washInkCount(a, b *image.RGBA, box image.Rectangle) int {
 // outside box, Empty when the render kept every decisive change inside it.
 func washInkOutside(a, b *image.RGBA, box image.Rectangle) image.Rectangle {
 	out := image.Rectangle{}
-	for y := 0; y < a.Bounds().Dy(); y++ {
-		for x := 0; x < a.Bounds().Dx(); x++ {
+	for y := range a.Bounds().Dy() {
+		for x := range a.Bounds().Dx() {
 			if image.Pt(x, y).In(box) {
 				continue
 			}
@@ -148,8 +148,8 @@ func TestChromeFocusWashDrawsNothingOutsideTheBoxAndDiffersInside(t *testing.T) 
 		name  string
 		light bool
 	}{
-		{"light", true},
-		{"dark", false},
+		{modeLight, true},
+		{modeDark, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -203,10 +203,10 @@ func TestChromeFocusWashIconKeepsContrastOnTheFocusFill(t *testing.T) {
 		light bool
 		pill  bool
 	}{
-		{"light", true, false},
-		{"dark", false, false},
-		{"light toggled", true, true},
-		{"dark toggled", false, true},
+		{modeLight, true, false},
+		{modeDark, false, false},
+		{modeLight + " toggled", true, true},
+		{modeDark + " toggled", false, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -220,7 +220,7 @@ func TestChromeFocusWashIconKeepsContrastOnTheFocusFill(t *testing.T) {
 			// chrome Fg (UK-E04). The sample sits inside the rounded body but
 			// clear of the glyph, which spans local x 5..19.
 			fill := img.RGBAAt(s.box.Min.X+2, s.box.Min.Y+washBtnSide/2)
-			fg := color.NRGBA(s.h.env.Th.Chrome().Fg)
+			fg := s.h.env.Th.Chrome().Fg
 			if got := contrastRatio(fg, color.NRGBA{R: fill.R, G: fill.G, B: fill.B, A: 255}); got < 4.5 {
 				t.Fatalf("icon contrast on the focus fill = %.2f, want >= 4.5 (fill %v, fg %v)", got, fill, fg)
 			}

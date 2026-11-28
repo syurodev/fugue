@@ -64,8 +64,8 @@ func fug109InkCount(a, b *image.RGBA, box image.Rectangle) int {
 // outside box, Empty when the render kept every decisive change inside it.
 func fug109RingOutside(a, b *image.RGBA, box image.Rectangle) image.Rectangle {
 	out := image.Rectangle{}
-	for y := 0; y < a.Bounds().Dy(); y++ {
-		for x := 0; x < a.Bounds().Dx(); x++ {
+	for y := range a.Bounds().Dy() {
+		for x := range a.Bounds().Dx() {
 			if image.Pt(x, y).In(box) {
 				continue
 			}
@@ -89,8 +89,21 @@ func fug109WashShown(t *testing.T, base, focused *image.RGBA, box image.Rectangl
 	}
 }
 
-func TestChromeButtonsShowFocusWithTheHoverWashNotARing(t *testing.T) {
-	t.Parallel()
+// fug109Site is one chrome button's focus scene: its state tag, the box the
+// chrome layout draws it in, and the window that draws it.
+type fug109Site struct {
+	name string
+	tag  event.Tag
+	box  image.Rectangle
+	win  *headless.Window
+	size image.Point
+}
+
+// fug109Fixture builds the shared shell fixture: a vault-unlocked shell
+// whose document carries a regular column, so a narrow window folds it into
+// the stripe's tab strip. It returns the screens, the env and both windows.
+func fug109Fixture(t *testing.T) (*screens, *kit.Env, *headless.Window, *headless.Window) {
+	t.Helper()
 	vc := newFakeAppVaultClient()
 	vw := vault.NewWorker(func() vault.Client { return vc })
 	vw.Start(t.Context())
@@ -108,22 +121,22 @@ func TestChromeButtonsShowFocusWithTheHoverWashNotARing(t *testing.T) {
 	const narrowW, narrowH = 900, 700
 	nwin := headlessOpen(t, narrowW, narrowH)
 	renderShotFrames(t, nwin, env, sc, image.Pt(narrowW, narrowH), "fug109-fold-warmup")
-	var foldKey string
-	for k := range sc.grid.tabBtns {
-		foldKey = k
-	}
-	if foldKey == "" {
+	if len(sc.grid.tabBtns) == 0 {
 		t.Fatal("no column folded into the Right Stripe at 900 dp; the folded site has no button")
 	}
-
 	const wideW, wideH = 1200, 800
-	win := headlessOpen(t, wideW, wideH)
+	return sc, env, headlessOpen(t, wideW, wideH), nwin
+}
 
-	// The button boxes, from the same arithmetic the chrome layouts use:
-	// both stripes center a 28 dp button in a 40 dp column, the top bar
-	// centers its 24 dp buttons in the 32 dp band, the top-right cluster
-	// hugs the Right Stripe's own inset, and the folded tab hangs at the
-	// stripe's bottom edge.
+// fug109ChromeSites lists the six chrome sites with their button boxes, from
+// the same arithmetic the chrome layouts use: both stripes center a 28 dp
+// button in a 40 dp column, the top bar centers its 24 dp buttons in the
+// 32 dp band, the top-right cluster hugs the Right Stripe's own inset, and
+// the folded tab hangs at the stripe's bottom edge.
+func fug109ChromeSites(t *testing.T, sc *screens, env *kit.Env, win, nwin *headless.Window) []fug109Site {
+	t.Helper()
+	const wideW, wideH = 1200, 800
+	const narrowW, narrowH = 900, 700
 	var ops op.Ops
 	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
 	barH := gtx.Dp(theme.TopBarHeight)
@@ -137,14 +150,11 @@ func TestChromeButtonsShowFocusWithTheHoverWashNotARing(t *testing.T) {
 	rightPad := (gtx.Dp(theme.RightStripeWidth) - xsSide) / 2
 	clusterW := 2*xsSide + railBtnGap // theme + settings, one gap
 	bodyH := wideH - barH - statusH
-
-	for _, tc := range []struct {
-		name string
-		tag  event.Tag
-		box  image.Rectangle
-		win  *headless.Window
-		size image.Point
-	}{
+	var foldKey string
+	for k := range sc.grid.tabBtns {
+		foldKey = k
+	}
+	return []fug109Site{
 		{
 			name: "left rail", tag: sc.grid.railBtn(railChat).Tag(),
 			box: image.Rect((gtx.Dp(theme.RailWidth)-railSide)/2, barH+railBtnGap, (gtx.Dp(theme.RailWidth)-railSide)/2+railSide, barH+railBtnGap+railSide),
@@ -176,16 +186,22 @@ func TestChromeButtonsShowFocusWithTheHoverWashNotARing(t *testing.T) {
 			box: image.Rect(wideW-gtx.Dp(theme.SpaceMD)-xsSide, barH+bodyH, wideW-gtx.Dp(theme.SpaceMD), barH+bodyH+xsSide),
 			win: win, size: image.Pt(wideW, wideH),
 		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			// Sequential on purpose: the sites share the screens fixture and
-			// the env's Preview, and every frame snaps (ReducedMotion), so a
-			// render leaves no residue for the next one.
-			env.Preview = kit.Preview{}
-			base := renderShotFrames(t, tc.win, env, sc, tc.size, "fug109-base")
-			env.Preview = kit.Preview{Focus: tc.tag}
-			focused := renderShotFrames(t, tc.win, env, sc, tc.size, "fug109-focus")
-			fug109WashShown(t, base, focused, tc.box, tc.name)
-		})
+	}
+}
+
+// TestChromeButtonsShowFocusWithTheHoverWashNotARing walks every chrome site
+// and asserts the wash rule of fug109WashShown on its focused render. The
+// sites render sequentially on purpose: they share one screens fixture and
+// the env's Preview, and every frame snaps (ReducedMotion), so a render
+// leaves no residue for the next one.
+func TestChromeButtonsShowFocusWithTheHoverWashNotARing(t *testing.T) {
+	t.Parallel()
+	sc, env, win, nwin := fug109Fixture(t)
+	for _, tc := range fug109ChromeSites(t, sc, env, win, nwin) {
+		env.Preview = kit.Preview{}
+		base := renderShotFrames(t, tc.win, env, sc, tc.size, "fug109-base")
+		env.Preview = kit.Preview{Focus: tc.tag}
+		focused := renderShotFrames(t, tc.win, env, sc, tc.size, "fug109-focus")
+		fug109WashShown(t, base, focused, tc.box, tc.name)
 	}
 }
