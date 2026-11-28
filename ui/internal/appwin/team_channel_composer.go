@@ -121,15 +121,25 @@ func (c *teamChannelComposer) layout(gtx *layout.Context, env *kit.Env, s *scree
 		}),
 		layout.Rigid(layout.Spacer{Width: theme.SpaceSM}.Layout),
 		c.mentionAction(gtx, env, s, props.Disabled),
-		channelButton(env, s, c.send, kit.ButtonProps{Text: sendLabelText, Variant: kit.Primary, Size: kit.SizeMD, Busy: c.posting != 0, Disabled: props.Disabled || strings.TrimSpace(c.area.Text()) == ""}, func() {
-			submit = true
-		}),
+		c.sendAction(env, s, props.Disabled, &submit),
 	)
 	if submit && !props.Disabled {
 		c.submit(s, teamID, threads)
 	}
 	c.layoutPicker(gtx, env, s, threads, dims.Size.X)
 	return dims
+}
+
+func (c *teamChannelComposer) sendAction(env *kit.Env, s *screens, disabled bool, submit *bool) layout.FlexChild {
+	return channelButton(env, s, c.send, kit.ButtonProps{
+		Text:     sendLabelText,
+		Variant:  kit.Primary,
+		Size:     kit.SizeMD,
+		Busy:     c.posting != 0,
+		Disabled: disabled || strings.TrimSpace(c.area.Text()) == "",
+	}, func() {
+		*submit = true
+	})
 }
 
 func (c *teamChannelComposer) mentionAction(gtx *layout.Context, env *kit.Env, s *screens, disabled bool) layout.FlexChild {
