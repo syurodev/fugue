@@ -43,6 +43,7 @@ func TestMemoryStorePortWiringAndEvents(t *testing.T) {
 	assertMemoryRejectsSecret(t, ctx, memStore, wsID)
 	assertMemoryRejectsEscapeAnchor(t, ctx, memStore, wsID)
 	entry := assertMemoryAnchoredWriteAndEvent(t, ctx, memStore, sub, wsID)
+	assertMemorySnapshotUnverified(t, ctx, hp, wsID, 1)
 	assertMemoryStaleAfterEditAndDelete(t, ctx, memStore, wsID, entry.ID, anchorPath)
 	assertMemoryBinaryLargeAndNewlineAnchors(t, ctx, memStore, wsID, rootDir)
 }
@@ -156,14 +157,36 @@ func assertMemoryAnchoredWriteAndEvent(
 	if uErr := json.Unmarshal(ev.Payload, &payload); uErr != nil {
 		t.Fatalf("Unmarshal event payload: %v", uErr)
 	}
-	if payload.EntryID != entry.ID || payload.Revision != 1 || payload.Author != workspacememory.AuthorAgent || payload.Op != workspacememory.OpAdd {
-		t.Fatalf("event payload = %+v", payload)
+	if payload.EntryID != entry.ID || payload.Revision != 1 || payload.Author != workspacememory.AuthorAgent || payload.Op != workspacememory.OpAdd || payload.UnverifiedCount != 1 {
+		t.Fatalf("event payload = %+v, want unverified_count=1", payload)
 	}
 	rawPayload := string(ev.Payload)
 	if strings.Contains(rawPayload, entry.Summary) || strings.Contains(rawPayload, entry.Body) {
 		t.Fatalf("event payload leaked content: %s", rawPayload)
 	}
 	return entry
+}
+
+func assertMemorySnapshotUnverified(t *testing.T, ctx context.Context, hp *HostProcess, wsID string, want int) {
+	t.Helper()
+	snapSub, snapErr := hp.rt.hub.Subscribe(ctx, SubscribeParams{Principal: testAppStateOwner, Topic: TopicMemory})
+	if snapErr != nil {
+		t.Fatalf("Subscribe TopicMemory snapshot: %v", snapErr)
+	}
+	defer snapSub.Close()
+	snapState, _, ok := snapSub.Snapshot()
+	if !ok {
+		t.Fatal("expected TopicMemory snapshot")
+	}
+	var snapDoc struct {
+		Unverified map[string]int `json:"unverified"`
+	}
+	if uErr := json.Unmarshal(snapState, &snapDoc); uErr != nil {
+		t.Fatalf("Unmarshal snapshot: %v (raw=%s)", uErr, string(snapState))
+	}
+	if snapDoc.Unverified[wsID] != want {
+		t.Fatalf("snapshot unverified[%q] = %d, want %d (raw=%s)", wsID, snapDoc.Unverified[wsID], want, string(snapState))
+	}
 }
 
 func assertMemoryStaleAfterEditAndDelete(

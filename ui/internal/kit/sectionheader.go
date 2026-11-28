@@ -21,6 +21,8 @@ type SectionHeaderProps struct {
 	Label       string
 	Collapsible bool
 	Action      *IconButtonProps
+	// Badge is an optional short count pill drawn before Action (§6.23, §6.20).
+	Badge string
 	// Icon is an optional leading glyph, drawn muted after the chevron.
 	Icon IconName
 	// Inset is the left inset of the first glyph or label; zero keeps
@@ -96,6 +98,9 @@ func (s *SectionHeaderState) Layout(env *Env, gtx *layout.Context, p *SectionHea
 		x = gtx.Dp(p.Inset)
 	}
 	right := s.drawAction(env, gtx, w, h, p.Action, &ev)
+	if p.Badge != "" {
+		right = drawRowBadge(env, gtx, box, h, right, gtx.Dp(theme.SpaceXS), p.Badge, env.Th.Chrome().FgMuted, 1)
+	}
 	x = s.drawChevron(env, gtx, x, h, p.Collapsible, chevT, &ev)
 	x = drawHeaderIcon(env, gtx, x, h, p.Icon, &ev)
 	drawHeaderLabel(env, gtx, x, right, h, p.Label)

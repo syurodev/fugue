@@ -14,14 +14,16 @@ import (
 	"github.com/godbus/dbus/v5"
 )
 
-// The xdg-desktop-portal FileChooser (FUG-115): the desktop's own directory
-// chooser, with zenity and kdialog as the CLI fallbacks the probe finds.
+// The xdg-desktop-portal FileChooser (FUG-115, extended in FUG-113): the
+// desktop's own chooser for folders, open files, and save files, with zenity
+// and kdialog as the CLI fallbacks the probe finds.
 const (
 	portalBusName         = "org.freedesktop.portal.Desktop"
 	portalObjectPath      = dbus.ObjectPath("/org/freedesktop/portal/desktop")
 	portalFileChooserName = "org.freedesktop.portal.FileChooser"
 	portalRequestName     = "org.freedesktop.portal.Request"
 	portalOpenMethod      = portalFileChooserName + ".OpenFile"
+	portalSaveMethod      = portalFileChooserName + ".SaveFile"
 	portalResponseSignal  = "Response"
 	dbusIntrospectMethod  = "org.freedesktop.DBus.Introspectable.Introspect"
 	dbusCallTimeout       = 2 * time.Second
@@ -30,6 +32,16 @@ const (
 	responseCodeOK        = 0
 	responseCodeCancelled = 1
 )
+
+type portalFilterPattern struct {
+	Type    uint32
+	Pattern string
+}
+
+type portalFilter struct {
+	Name     string
+	Patterns []portalFilterPattern
+}
 
 // The static causes behind a portal answer; they are wrapped, never
 // constructed, at the call site.
@@ -55,12 +67,35 @@ func platformProbe(ctx context.Context) Availability {
 	return av
 }
 
-// pickPortal runs the portal FileChooser in directory mode: it opens the
-// desktop's chooser and answers the folder the user chose, or a cancel. The
-// Response signal subscription goes out before OpenFile, so a fast answer
-// cannot be missed. Seq numbers the request's handle token; uniqueness among
-// outstanding requests is all the portal needs of it.
-func pickPortal(ctx context.Context, seq *atomic.Uint64) (string, bool, error) {
+func portalCallSpec(seq uint64, req Request) (string, map[string]dbus.Variant) {
+	opts := map[string]dbus.Variant{
+		"handle_token": dbus.MakeVariant(fmt.Sprintf("fugue%d", seq)),
+		"modal":        dbus.MakeVariant(true),
+	}
+	ext := sanitizeFilterExt(req.FilterExt)
+	filters := []portalFilter{{
+		Name:     "Markdown files",
+		Patterns: []portalFilterPattern{{Type: 0, Pattern: "*." + ext}},
+	}}
+	switch req.Mode {
+	case ModeOpenFile:
+		opts["filters"] = dbus.MakeVariant(filters)
+		return portalOpenMethod, opts
+	case ModeSaveFile:
+		opts["current_name"] = dbus.MakeVariant(sanitizeSaveFileName(req.DefaultName))
+		opts["filters"] = dbus.MakeVariant(filters)
+		return portalSaveMethod, opts
+	default:
+		opts["directory"] = dbus.MakeVariant(true)
+		return portalOpenMethod, opts
+	}
+}
+
+// pickPortal runs the portal FileChooser in folder, open-file, or save-file
+// mode: it opens the desktop's chooser and answers the path the user chose,
+// or a cancel. The Response signal subscription goes out before the call, so
+// a fast answer cannot be missed.
+func pickPortal(ctx context.Context, seq *atomic.Uint64, req Request) (string, bool, error) {
 	conn, err := dbus.ConnectSessionBus(dbus.WithContext(ctx))
 	if err != nil {
 		return "", false, fmt.Errorf("reach the desktop portal: %w", err)
@@ -78,16 +113,12 @@ func pickPortal(ctx context.Context, seq *atomic.Uint64) (string, bool, error) {
 	}
 
 	obj := conn.Object(portalBusName, portalObjectPath)
-	opts := map[string]dbus.Variant{
-		"handle_token": dbus.MakeVariant(fmt.Sprintf("fugue%d", seq.Add(1))),
-		"directory":    dbus.MakeVariant(true),
-		"modal":        dbus.MakeVariant(true),
-	}
+	method, opts := portalCallSpec(seq.Add(1), req)
 	callCtx, cancel := context.WithTimeout(ctx, dbusCallTimeout)
 	defer cancel()
-	call := obj.CallWithContext(callCtx, portalOpenMethod, 0, "", opts)
+	call := obj.CallWithContext(callCtx, method, 0, "", opts)
 	if callErr := call.Err; callErr != nil {
-		return "", false, fmt.Errorf("open the desktop's folder chooser: %w", callErr)
+		return "", false, fmt.Errorf("open the desktop's chooser: %w", callErr)
 	}
 	if len(call.Body) != 1 {
 		return "", false, fmt.Errorf("%w: no answer body", errChooserNoHandle)
@@ -100,7 +131,7 @@ func pickPortal(ctx context.Context, seq *atomic.Uint64) (string, bool, error) {
 	for {
 		select {
 		case <-ctx.Done():
-			return "", false, fmt.Errorf("the folder chooser did not answer: %w", ctx.Err())
+			return "", false, fmt.Errorf("the chooser did not answer: %w", ctx.Err())
 		case sig, ok := <-sigCh:
 			if !ok || sig == nil || sig.Path != handle {
 				continue
@@ -111,7 +142,7 @@ func pickPortal(ctx context.Context, seq *atomic.Uint64) (string, bool, error) {
 }
 
 // portalResponse decodes one portal Request::Response: the code, then the
-// results whose uris name the chosen folder.
+// results whose uris name the chosen path.
 func portalResponse(ctx context.Context, body []any) (string, bool, error) {
 	if len(body) < 2 {
 		return "", false, fmt.Errorf("%w: %d fields", errChooserUnusable, len(body))
@@ -141,14 +172,14 @@ func portalResponse(ctx context.Context, body []any) (string, bool, error) {
 	}
 	select {
 	case <-ctx.Done():
-		return "", false, fmt.Errorf("the folder chooser did not answer: %w", ctx.Err())
+		return "", false, fmt.Errorf("the chooser did not answer: %w", ctx.Err())
 	default:
 	}
 	path, err := uriPath(uris[0])
 	return path, false, err
 }
 
-// portalProbeOf answers whether a session bus carries the FileChooser
+// portalProbe reports whether a session bus carries the FileChooser
 // interface, so the probe never promises a chooser the desktop cannot open.
 func portalProbe(ctx context.Context) bool {
 	conn, err := dbus.ConnectSessionBus(dbus.WithContext(ctx))

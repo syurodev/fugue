@@ -25,6 +25,6 @@ var errPortalOffPlatform = errors.New("the desktop portal chooser runs on Linux 
 // pickPortal never runs: no portal is selected off Linux, and the probe never
 // sets Availability.Portal here. It exists so the picker's constructor
 // compiles on every platform.
-func pickPortal(context.Context, *atomic.Uint64) (string, bool, error) {
+func pickPortal(context.Context, *atomic.Uint64, Request) (string, bool, error) {
 	return "", false, errPortalOffPlatform
 }

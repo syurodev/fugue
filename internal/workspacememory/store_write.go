@@ -358,16 +358,26 @@ func (s *Store) runWriteTx(
 	}
 	committed = true
 	entry := s.hydrateEntry(ctx, &row)
-	if s.events != nil {
-		s.events.OnMemoryEntryWritten(ctx, WrittenEvent{
-			EntryID:     entry.ID,
-			WorkspaceID: entry.WorkspaceID,
-			Revision:    entry.Revision,
-			Author:      entry.Author,
-			Op:          op,
-		})
-	}
+	s.emitWrittenEvent(ctx, &entry, op)
 	return entry, nil
+}
+
+func (s *Store) emitWrittenEvent(ctx context.Context, entry *Entry, op Operation) {
+	if s.events == nil {
+		return
+	}
+	count, err := s.CountUnverified(ctx, entry.WorkspaceID)
+	if err != nil {
+		s.log.WarnContext(ctx, "count unverified workspace memory entries", "error_code", string(errcode.CodeOf(err)))
+	}
+	s.events.OnMemoryEntryWritten(ctx, WrittenEvent{
+		EntryID:         entry.ID,
+		WorkspaceID:     entry.WorkspaceID,
+		Revision:        entry.Revision,
+		Author:          entry.Author,
+		Op:              op,
+		UnverifiedCount: count,
+	})
 }
 
 func (s *Store) loadAndCheckCAS(ctx context.Context, tx *sql.Tx, workspaceID, id string, expected uint64) (entryRow, error) {

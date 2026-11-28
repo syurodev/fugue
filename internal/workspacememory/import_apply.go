@@ -55,15 +55,7 @@ func (s *Store) ApplyImport(ctx context.Context, in *ApplyImportInput) (ApplyImp
 	for i := range writes {
 		entry := s.hydrateEntry(ctx, &writes[i].row)
 		written = append(written, entry)
-		if s.events != nil {
-			s.events.OnMemoryEntryWritten(ctx, WrittenEvent{
-				EntryID:     entry.ID,
-				WorkspaceID: entry.WorkspaceID,
-				Revision:    entry.Revision,
-				Author:      entry.Author,
-				Op:          writes[i].op,
-			})
-		}
+		s.emitWrittenEvent(ctx, &entry, writes[i].op)
 	}
 	return ApplyImportResult{
 		Written: written,

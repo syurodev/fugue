@@ -347,3 +347,55 @@ func (s *Store) checkAnchor(ctx context.Context, workspaceID string, a Anchor) A
 	}
 	return st
 }
+
+// CountUnverified counts valid, unverified entries in one workspace.
+func (s *Store) CountUnverified(ctx context.Context, workspaceID string) (int, error) {
+	if strings.TrimSpace(workspaceID) == "" {
+		return 0, errInvalidArg("workspace_id is required")
+	}
+	var count int
+	err := s.db.QueryRowContext(
+		ctx,
+		`SELECT COUNT(*)
+		FROM workspace_memory_entries
+		WHERE workspace_id = ? AND validity = 'valid' AND verified = 0`,
+		workspaceID,
+	).Scan(&count)
+	if err != nil {
+		return 0, errcode.Wrap(errcode.Internal, "count unverified workspace memory entries", err)
+	}
+	return count, nil
+}
+
+// CountUnverifiedByWorkspace returns the unverified valid-entry count per workspace
+// for every workspace with at least one unverified valid entry.
+func (s *Store) CountUnverifiedByWorkspace(ctx context.Context) (map[string]int, error) {
+	rows, err := s.db.QueryContext(
+		ctx,
+		`SELECT workspace_id, COUNT(*)
+		FROM workspace_memory_entries
+		WHERE validity = 'valid' AND verified = 0
+		GROUP BY workspace_id
+		HAVING COUNT(*) > 0`,
+	)
+	if err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "count unverified workspace memory entries by workspace", err)
+	}
+	defer closeRows(ctx, s.log, rows)
+
+	counts := map[string]int{}
+	for rows.Next() {
+		var wsID string
+		var n int
+		if scanErr := rows.Scan(&wsID, &n); scanErr != nil {
+			return nil, errcode.Wrap(errcode.Internal, "scan unverified workspace memory count", scanErr)
+		}
+		if n > 0 {
+			counts[wsID] = n
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, errcode.Wrap(errcode.Internal, "iterate unverified workspace memory counts", err)
+	}
+	return counts, nil
+}

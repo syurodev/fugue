@@ -227,11 +227,12 @@ type ListFilter struct {
 
 // WrittenEvent is emitted after every committed write without any entry content (§3).
 type WrittenEvent struct {
-	EntryID     string    `json:"entry_id"`
-	WorkspaceID string    `json:"workspace_id"`
-	Revision    uint64    `json:"revision"`
-	Author      Author    `json:"author"`
-	Op          Operation `json:"op"`
+	EntryID         string    `json:"entry_id"`
+	WorkspaceID     string    `json:"workspace_id"`
+	Revision        uint64    `json:"revision"`
+	Author          Author    `json:"author"`
+	Op              Operation `json:"op"`
+	UnverifiedCount int       `json:"unverified_count"`
 }
 
 func validKind(k Kind) bool {

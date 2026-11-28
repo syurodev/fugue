@@ -2,19 +2,14 @@ package secrets
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"errors"
-	"fmt"
-	"os"
 	"slices"
-	"strconv"
-	"sync"
 
 	"github.com/syurodev/fugue/pkg/client"
-)
 
-const workerBuffer = 16
+	"github.com/syurodev/fugue/ui/internal/cmdid"
+	"github.com/syurodev/fugue/ui/internal/reqworker"
+)
 
 var errWorkerQueueFull = errors.New("the secrets request queue is full")
 
@@ -58,43 +53,33 @@ type Client interface {
 // Worker runs Secret Store Host API calls off the window goroutine.
 type Worker struct {
 	clientOf func() Client
-	onResult func()
 	newID    func() string
-	reqs     chan Request
-	results  chan Result
-	cancel   context.CancelFunc
-	done     chan struct{}
-	stopOnce sync.Once
+	core     *reqworker.Worker[Request, Result]
 }
 
 // NewWorker builds a secrets worker using clientOf and optional onResult notifier.
 func NewWorker(clientOf func() Client, onResult func()) *Worker {
-	return &Worker{
+	w := &Worker{
 		clientOf: clientOf,
-		onResult: onResult,
-		newID:    newCommandIDs(),
-		reqs:     make(chan Request, workerBuffer),
-		results:  make(chan Result, workerBuffer),
-		done:     make(chan struct{}),
+		newID:    cmdid.New(),
 	}
+	w.core = reqworker.New(
+		reqworker.DefaultBuffer,
+		w.handle,
+		func(q Request) Result {
+			clear(q.Put.Value)
+			return Result{Kind: q.Kind, SecretID: q.SecretID, Err: errWorkerQueueFull}
+		},
+		onResult,
+	)
+	return w
 }
 
 // Start runs the worker goroutine until Stop or ctx cancellation.
-func (w *Worker) Start(ctx context.Context) {
-	runCtx, cancel := context.WithCancel(ctx)
-	w.cancel = cancel
-	go w.run(runCtx)
-}
+func (w *Worker) Start(ctx context.Context) { w.core.Start(ctx) }
 
 // Stop stops the worker goroutine and waits for it to exit.
-func (w *Worker) Stop() {
-	w.stopOnce.Do(func() {
-		if w.cancel != nil {
-			w.cancel()
-		}
-	})
-	<-w.done
-}
+func (w *Worker) Stop() { w.core.Stop() }
 
 // Do queues req for off-thread execution, minting CommandID for mutations and
 // cloning/clearing plaintext buffers on zero-retention paths.
@@ -109,57 +94,19 @@ func (w *Worker) Do(req *Request) {
 	} else if q.Kind == OpDeleteSecret && q.CommandID == "" {
 		q.CommandID = w.newID()
 	}
-	select {
-	case w.reqs <- q:
-	default:
-		clear(q.Put.Value)
-		w.deliver(&Result{Kind: q.Kind, SecretID: q.SecretID, Err: errWorkerQueueFull})
-	}
+	w.core.Do(q)
 }
 
 // Results returns the channel delivering completed Secret Store operations.
-func (w *Worker) Results() <-chan Result { return w.results }
+func (w *Worker) Results() <-chan Result { return w.core.Results() }
 
-func (w *Worker) run(ctx context.Context) {
-	defer close(w.done)
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case req := <-w.reqs:
-			w.handle(ctx, &req)
-		}
-	}
-}
-
-func (w *Worker) handle(ctx context.Context, req *Request) {
+func (w *Worker) handle(ctx context.Context, req Request) Result {
 	defer clear(req.Put.Value)
 	c := w.clientOf()
 	if c == nil {
-		w.deliver(&Result{Kind: req.Kind, SecretID: req.SecretID, Err: client.ErrDisconnected})
-		return
+		return Result{Kind: req.Kind, SecretID: req.SecretID, Err: client.ErrDisconnected}
 	}
-	res := w.execute(ctx, c, req)
-	if ctx.Err() != nil {
-		return
-	}
-	select {
-	case w.results <- res:
-		if w.onResult != nil {
-			w.onResult()
-		}
-	case <-ctx.Done():
-	}
-}
-
-func (w *Worker) deliver(res *Result) {
-	select {
-	case w.results <- *res:
-		if w.onResult != nil {
-			w.onResult()
-		}
-	default:
-	}
+	return w.execute(ctx, c, &req)
 }
 
 func (w *Worker) execute(ctx context.Context, c Client, req *Request) Result {
@@ -177,14 +124,4 @@ func (w *Worker) execute(ctx context.Context, c Client, req *Request) Result {
 		res.Deleted, res.Err = deleted, err
 	}
 	return res
-}
-
-func newCommandIDs() func() string {
-	var seq uint64
-	pid := os.Getpid()
-	return func() string {
-		seq++
-		sum := sha256.Sum256([]byte(fmt.Sprintf("ui-secrets-%d-%d", pid, seq)))
-		return "ui-sec-" + strconv.FormatUint(seq, 10) + "-" + hex.EncodeToString(sum[:6])
-	}
 }

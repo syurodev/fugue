@@ -93,12 +93,6 @@ func (s *memoryEventSink) OnMemoryEntryWritten(_ context.Context, ev workspaceme
 }
 
 func initWorkspaceMemory(hp *HostProcess, store *storage.Store, deps *HostDeps, workspaces *workspace.Service) error {
-	if err := hp.rt.hub.RegisterEphemeral(TopicMemory, memoryTopicSnapshot, defaultEphemeralBufferCap); err != nil {
-		if serr := store.Close(); serr != nil {
-			return errcode.Wrap(errcode.Internal, "register the memory topic", errors.Join(err, serr))
-		}
-		return err
-	}
 	memStore, err := workspacememory.NewStore(
 		store.DB(),
 		deps.Clock,
@@ -114,13 +108,32 @@ func initWorkspaceMemory(hp *HostProcess, store *storage.Store, deps *HostDeps, 
 		}
 		return fmt.Errorf("create workspace memory store: %w", err)
 	}
+	if err := hp.rt.hub.RegisterEphemeral(TopicMemory, memoryTopicSnapshot(memStore), defaultEphemeralBufferCap); err != nil {
+		if serr := store.Close(); serr != nil {
+			return errcode.Wrap(errcode.Internal, "register the memory topic", errors.Join(err, serr))
+		}
+		return err
+	}
 	hp.rt.memory = memStore
 	hp.rt.memoryService = newMemoryService(memStore, workspaces, deps.Clock, deps.IDs)
 	return nil
 }
 
-func memoryTopicSnapshot(_ context.Context) ([]byte, error) {
-	return []byte(`{"entries":[]}`), nil
+type memorySnapshotPayload struct {
+	Unverified map[string]int `json:"unverified"`
+}
+
+func memoryTopicSnapshot(memStore *workspacememory.Store) func(context.Context) ([]byte, error) {
+	return func(ctx context.Context) ([]byte, error) {
+		counts, err := memStore.CountUnverifiedByWorkspace(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if counts == nil {
+			counts = map[string]int{}
+		}
+		return json.Marshal(memorySnapshotPayload{Unverified: counts})
+	}
 }
 
 // MemoryStore returns the workspace memory owner store wired into the host runtime.

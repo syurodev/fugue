@@ -26,18 +26,20 @@ var (
 // with a scripted stdout and error, so the tests never run a real process.
 type fakeRunner struct {
 	calls []string
+	reqs  []Request
 	out   string
 	err   error
 }
 
-func (f *fakeRunner) Run(_ context.Context, h Helper) (string, error) {
+func (f *fakeRunner) Run(_ context.Context, h Helper, req Request) (string, error) {
 	f.calls = append(f.calls, helperName(h))
+	f.reqs = append(f.reqs, req)
 	return strings.TrimSpace(f.out), f.err
 }
 
 // fakePortal is the stand-in for the portal FileChooser flow.
 func fakePortal(out string, cancelled bool, err error) pickPortalFunc {
-	return func(context.Context) (string, bool, error) { return out, cancelled, err }
+	return func(context.Context, Request) (string, bool, error) { return out, cancelled, err }
 }
 
 // fakeExit is a helper's nonzero exit, the way the real runner wraps one.
@@ -96,23 +98,53 @@ func TestPickOrderRunsTheAvailableHelpersInOrder(t *testing.T) {
 // its working directory.
 func TestHelperCommandBuildsLiteralArgv(t *testing.T) {
 	t.Parallel()
-	cmd, ok := helperCommand(t.Context(), HelperOSAScript)
+	folderReq := Request{Mode: ModeFolder}
+	cmd, ok := helperCommand(t.Context(), HelperOSAScript, folderReq)
 	if !ok || !slices.Equal(cmd.Args[1:], []string{"-e", osascriptChooseFolder}) {
 		t.Fatalf("osascript argv = %v, want the fixed script", cmd.Args)
 	}
-	cmd, ok = helperCommand(t.Context(), HelperZenity)
+	cmd, ok = helperCommand(t.Context(), HelperZenity, folderReq)
 	if !ok || !slices.Equal(cmd.Args[1:], []string{"--file-selection", "--directory"}) {
 		t.Fatalf("zenity argv = %v, want the fixed flags", cmd.Args)
 	}
-	cmd, ok = helperCommand(t.Context(), HelperKDialog)
+	cmd, ok = helperCommand(t.Context(), HelperKDialog, folderReq)
 	if !ok || !slices.Equal(cmd.Args[1:], []string{"--getexistingdirectory", "."}) {
 		t.Fatalf("kdialog argv = %v, want the start directory as .", cmd.Args)
 	}
 	if cmd.Dir == "" {
 		t.Fatal("kdialog has no working directory to start in")
 	}
+
+	openReq := Request{Mode: ModeOpenFile, FilterExt: ".md"}
+	cmd, ok = helperCommand(t.Context(), HelperOSAScript, openReq)
+	if !ok || !slices.Equal(cmd.Args[1:], []string{"-e", osascriptChooseOpen, "--", "md"}) {
+		t.Fatalf("osascript open argv = %v", cmd.Args)
+	}
+	cmd, ok = helperCommand(t.Context(), HelperZenity, openReq)
+	if !ok || !slices.Equal(cmd.Args[1:], []string{"--file-selection", "--file-filter=Markdown files | *.md"}) {
+		t.Fatalf("zenity open argv = %v", cmd.Args)
+	}
+	cmd, ok = helperCommand(t.Context(), HelperKDialog, openReq)
+	if !ok || !slices.Equal(cmd.Args[1:], []string{"--getopenfilename", ".", "*.md"}) {
+		t.Fatalf("kdialog open argv = %v", cmd.Args)
+	}
+
+	saveReq := Request{Mode: ModeSaveFile, DefaultName: "../../alpha-memory.md"}
+	cmd, ok = helperCommand(t.Context(), HelperOSAScript, saveReq)
+	if !ok || !slices.Equal(cmd.Args[1:], []string{"-e", osascriptChooseSave, "--", "alpha-memory.md"}) {
+		t.Fatalf("osascript save argv = %v", cmd.Args)
+	}
+	cmd, ok = helperCommand(t.Context(), HelperZenity, saveReq)
+	if !ok || !slices.Equal(cmd.Args[1:], []string{"--file-selection", "--save", "--confirm-overwrite", "--filename=alpha-memory.md"}) {
+		t.Fatalf("zenity save argv = %v", cmd.Args)
+	}
+	cmd, ok = helperCommand(t.Context(), HelperKDialog, saveReq)
+	if !ok || !slices.Equal(cmd.Args[1:], []string{"--getsavefilename", "alpha-memory.md", "*.md"}) {
+		t.Fatalf("kdialog save argv = %v", cmd.Args)
+	}
+
 	for _, h := range []Helper{HelperPortal, HelperNone} {
-		if _, ok := helperCommand(t.Context(), h); ok {
+		if _, ok := helperCommand(t.Context(), h, folderReq); ok {
 			t.Fatalf("helper %v built a process", h)
 		}
 	}
@@ -335,7 +367,7 @@ func testPicker(t *testing.T, goos string, av Availability, portal pickPortalFun
 	}
 	p.goos = goos
 	if portal == nil {
-		p.portal = func(context.Context) (string, bool, error) {
+		p.portal = func(context.Context, Request) (string, bool, error) {
 			return "", false, errNoPortalStub
 		}
 	}
@@ -355,5 +387,28 @@ func TestUriPathTurnsAPortalURIIntoAPath(t *testing.T) {
 	}
 	if _, err := uriPath("https://example.invalid/folder"); err == nil {
 		t.Fatal("a non-file URI decoded into a path")
+	}
+}
+
+func TestPickOpenAndSaveFileEchoModeTagAndPath(t *testing.T) {
+	t.Parallel()
+	run := &fakeRunner{out: "/tmp/ws-memory.md\n"}
+	p := testPicker(t, testGoosDarwin, Availability{OSAScript: true}, nil, run)
+	if !p.PickOpenFile("import:ws-1", ".md") {
+		t.Fatal("PickOpenFile refused")
+	}
+	res := <-p.Results()
+	if res.Err != nil || res.Mode != ModeOpenFile || res.Tag != "import:ws-1" || res.Path != "/tmp/ws-memory.md" {
+		t.Fatalf("PickOpenFile result = %+v", res)
+	}
+	if !p.PickSaveFile("export:ws-1", "alpha-memory.md") {
+		t.Fatal("PickSaveFile refused")
+	}
+	res = <-p.Results()
+	if res.Err != nil || res.Mode != ModeSaveFile || res.Tag != "export:ws-1" || res.Path != "/tmp/ws-memory.md" {
+		t.Fatalf("PickSaveFile result = %+v", res)
+	}
+	if len(run.reqs) != 2 || run.reqs[0].FilterExt != ".md" || run.reqs[1].DefaultName != "alpha-memory.md" {
+		t.Fatalf("recorded requests = %+v", run.reqs)
 	}
 }

@@ -77,6 +77,8 @@ func expectedCells(cur int) map[cell]bool {
 		"Toast":           toastCells,
 		"Controls":        controlsCells,
 		"Tabs & Feedback": tabsFeedbackCells,
+		"FilterBar":       filterBarCells,
+		"CompareView":     compareViewCells,
 	}
 	if fn := builders[pageNames()[cur]]; fn != nil {
 		fn(want)
@@ -311,6 +313,15 @@ func tabsFeedbackCells(want map[cell]bool) {
 	for i := range 2 {
 		want[cell{compEmptyState, i, 0, stRest}] = true
 	}
+}
+
+func filterBarCells(want map[cell]bool) {
+	want[cell{compFilterBar, 0, 0, stRest}] = true
+	want[cell{compFilterBar, 1, 0, stRest}] = true
+}
+
+func compareViewCells(want map[cell]bool) {
+	want[cell{compCompareView, 0, 0, stRest}] = true
 }
 
 func TestGalleryPagesCoverEveryVariantAndState(t *testing.T) {

@@ -6,11 +6,13 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode"
 )
 
 // The static causes behind a refused pick; they are wrapped, never
@@ -21,6 +23,23 @@ var (
 	errNotAFilePath  = errors.New("the folder picker answered a path that is not a file")
 	errForeignFolder = errors.New("the folder picker answered a folder on another host")
 )
+
+// Mode selects whether the native chooser picks a folder, opens a file, or saves a file.
+type Mode uint8
+
+const (
+	ModeFolder Mode = iota
+	ModeOpenFile
+	ModeSaveFile
+)
+
+// Request configures one native chooser invocation.
+type Request struct {
+	Mode        Mode
+	Tag         string
+	FilterExt   string
+	DefaultName string
+}
 
 // Helper is one way a pick can run.
 type Helper uint8
@@ -111,35 +130,87 @@ func (e *exitError) Unwrap() error { return e.err }
 // error. The interface exists for the tests' recording fake; production runs
 // exec through helperCommand.
 type Runner interface {
-	Run(ctx context.Context, h Helper) (stdout string, err error)
+	Run(ctx context.Context, h Helper, req Request) (stdout string, err error)
 }
 
-// osascriptChooseFolder is the AppleScript every macOS pick runs: the
-// desktop's own chooser, answered as a POSIX path.
-const osascriptChooseFolder = `POSIX path of (choose folder with prompt "Choose a folder")`
+const (
+	osascriptChooseFolder = `POSIX path of (choose folder with prompt "Choose a folder")`
+	osascriptChooseOpen   = "on run argv\nPOSIX path of (choose file of type {item 1 of argv} with prompt \"Import memory\")\nend run"
+	osascriptChooseSave   = "on run argv\nPOSIX path of (choose file name with prompt \"Export memory\" default name (item 1 of argv))\nend run"
+)
 
-// helperCommand builds one CLI helper's run: a literal program name and
-// literal argv, so no caller value ever names a program or rides a shell
-// (gosec G204 stays quiet without an exception). The start directory rides
-// kdialog's working directory as the literal "."; the other helpers start in
-// the user's default. ok is false for the helpers that run no process — the
-// portal rides D-Bus and none runs nothing.
-func helperCommand(ctx context.Context, h Helper) (*exec.Cmd, bool) {
+func sanitizeFilterExt(ext string) string {
+	ext = strings.TrimPrefix(strings.TrimSpace(ext), ".")
+	var b strings.Builder
+	for _, r := range ext {
+		if unicode.IsLetter(r) || unicode.IsDigit(r) {
+			b.WriteRune(unicode.ToLower(r))
+		}
+	}
+	if b.Len() == 0 {
+		return "md"
+	}
+	return b.String()
+}
+
+func sanitizeSaveFileName(name string) string {
+	name = strings.ReplaceAll(name, "\\", "/")
+	name = filepath.Base(strings.TrimSpace(name))
+	var b strings.Builder
+	for _, r := range name {
+		if r < 0x20 || r == 0x7f || r == '/' || r == '\\' {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	clean := strings.TrimSpace(b.String())
+	if clean == "" || clean == "." || clean == ".." {
+		return "memory.md"
+	}
+	return clean
+}
+
+// helperCommand builds one CLI helper's run with literal program names and
+// sanitized argv (no shell interpolation, gosec G204 clean).
+func helperCommand(ctx context.Context, h Helper, req Request) (*exec.Cmd, bool) {
+	ext := sanitizeFilterExt(req.FilterExt)
+	saveName := sanitizeSaveFileName(req.DefaultName)
 	switch h {
 	case HelperOSAScript:
-		return exec.CommandContext(ctx, "osascript", "-e", osascriptChooseFolder), true
+		switch req.Mode {
+		case ModeOpenFile:
+			return exec.CommandContext(ctx, "osascript", "-e", osascriptChooseOpen, "--", ext), true
+		case ModeSaveFile:
+			return exec.CommandContext(ctx, "osascript", "-e", osascriptChooseSave, "--", saveName), true
+		default:
+			return exec.CommandContext(ctx, "osascript", "-e", osascriptChooseFolder), true
+		}
 	case HelperZenity:
-		return exec.CommandContext(ctx, "zenity", "--file-selection", "--directory"), true
+		switch req.Mode {
+		case ModeOpenFile:
+			return exec.CommandContext(ctx, "zenity", "--file-selection", "--file-filter=Markdown files | *."+ext), true
+		case ModeSaveFile:
+			return exec.CommandContext(ctx, "zenity", "--file-selection", "--save", "--confirm-overwrite", "--filename="+saveName), true
+		default:
+			return exec.CommandContext(ctx, "zenity", "--file-selection", "--directory"), true
+		}
 	case HelperKDialog:
 		home, err := os.UserHomeDir()
 		if err != nil {
 			return nil, false
 		}
-		cmd := exec.CommandContext(ctx, "kdialog", "--getexistingdirectory", ".")
+		var cmd *exec.Cmd
+		switch req.Mode {
+		case ModeOpenFile:
+			cmd = exec.CommandContext(ctx, "kdialog", "--getopenfilename", ".", "*."+ext)
+		case ModeSaveFile:
+			cmd = exec.CommandContext(ctx, "kdialog", "--getsavefilename", saveName, "*."+ext)
+		default:
+			cmd = exec.CommandContext(ctx, "kdialog", "--getexistingdirectory", ".")
+		}
 		cmd.Dir = home
 		return cmd, true
 	case HelperNone, HelperPortal:
-		// The portal rides D-Bus and none runs nothing; neither is a process.
 		return nil, false
 	}
 	return nil, false
@@ -148,8 +219,8 @@ func helperCommand(ctx context.Context, h Helper) (*exec.Cmd, bool) {
 // execRunner runs helpers through exec.
 type execRunner struct{}
 
-func (execRunner) Run(ctx context.Context, h Helper) (string, error) {
-	cmd, ok := helperCommand(ctx, h)
+func (execRunner) Run(ctx context.Context, h Helper, req Request) (string, error) {
+	cmd, ok := helperCommand(ctx, h, req)
 	if !ok {
 		return "", errNoPicker
 	}
@@ -179,13 +250,16 @@ func helperName(h Helper) string {
 	return "helper"
 }
 
-// pickPortalFunc runs the portal FileChooser flow: the chosen folder's path,
+// pickPortalFunc runs the portal FileChooser flow: the chosen path,
 // whether the user closed it, or why it could not run.
-type pickPortalFunc func(ctx context.Context) (path string, cancelled bool, err error)
+type pickPortalFunc func(ctx context.Context, req Request) (path string, cancelled bool, err error)
 
 // Result is one finished pick, delivered to the window goroutine.
 type Result struct {
-	// Path is the chosen folder's absolute path, empty unless one was chosen.
+	// Mode and Tag echo the Request that initiated this pick.
+	Mode Mode
+	Tag  string
+	// Path is the chosen folder or file's absolute path, empty unless chosen.
 	Path string
 	// Cancelled marks a chooser the user closed without choosing: a no-op.
 	Cancelled bool
@@ -193,19 +267,12 @@ type Result struct {
 	Err error
 }
 
-// pickBufferSize bounds the request and result queues. A pick is one user
-// action at a time; a second while one runs is refused at once.
-const pickBufferSize = 1
+const (
+	pickBufferSize = 1
+	probeTimeout   = 2 * time.Second
+)
 
-// probeTimeout bounds the one availability probe: a session bus that accepts
-// the connection but never answers the introspect cannot stall a dialog open
-// for longer.
-const probeTimeout = 2 * time.Second
-
-// Picker runs folder picks off the UI goroutine, in the shape of the
-// workspace mutator: one worker goroutine probes availability once, takes
-// requests, runs the platform's helpers in order, and delivers each outcome
-// for the frame loop.
+// Picker runs folder and file picks off the UI goroutine.
 type Picker struct {
 	probeOf  func(ctx context.Context) Availability
 	runner   Runner
@@ -213,43 +280,36 @@ type Picker struct {
 	onResult func()
 	goos     string
 
-	reqs     chan struct{}
+	reqs     chan Request
 	results  chan Result
 	cancel   context.CancelFunc
 	done     chan struct{}
 	stopOnce sync.Once
 
-	// avail is the probe's answer, written once by the worker goroutine before
-	// it serves any pick.
 	probeOnce sync.Once
 	probed    atomic.Bool
 	avail     atomic.Pointer[Availability]
 }
 
-// NewPicker builds a picker over the platform's probe and helpers. onResult,
-// when non-nil, is called on the worker goroutine after each result is queued
-// so the caller can wake its event loop. The portal hook carries a per-picker
-// sequence, so the request handles it names stay unique between pickers
-// without a package global.
+// NewPicker builds a picker over the platform's probe and helpers.
 func NewPicker(onResult func()) *Picker {
 	seq := &atomic.Uint64{}
 	return &Picker{
 		probeOf: platformProbe,
 		runner:  execRunner{},
-		portal: func(ctx context.Context) (string, bool, error) {
-			return pickPortal(ctx, seq)
+		portal: func(ctx context.Context, req Request) (string, bool, error) {
+			return pickPortal(ctx, seq, req)
 		},
 		onResult: onResult,
 		goos:     runtime.GOOS,
-		reqs:     make(chan struct{}, pickBufferSize),
+		reqs:     make(chan Request, pickBufferSize),
 		results:  make(chan Result, pickBufferSize),
 		done:     make(chan struct{}),
 	}
 }
 
 // Start launches the worker goroutine, which runs the one availability probe
-// and then serves picks until Stop or the context ends. Start returns at once
-// without waiting for the probe.
+// and then serves picks until Stop or the context ends.
 func (p *Picker) Start(ctx context.Context) {
 	runCtx, cancel := context.WithCancel(ctx)
 	p.cancel = cancel
@@ -266,21 +326,32 @@ func (p *Picker) Stop() {
 	<-p.done
 }
 
-// Pick requests one folder pick and reports whether it was accepted; a pick
-// while one runs is refused at once instead of queueing a second chooser.
-// It never blocks: the window goroutine calls it mid-frame, and the outcome
-// comes back on Results.
+// Pick requests one folder pick and reports whether it was accepted.
 func (p *Picker) Pick() bool {
+	return p.PickWith(Request{Mode: ModeFolder})
+}
+
+// PickOpenFile requests an open-file chooser filtered to filterExt (e.g. ".md").
+func (p *Picker) PickOpenFile(tag, filterExt string) bool {
+	return p.PickWith(Request{Mode: ModeOpenFile, Tag: tag, FilterExt: filterExt})
+}
+
+// PickSaveFile requests a save-file chooser seeded with defaultName.
+func (p *Picker) PickSaveFile(tag, defaultName string) bool {
+	return p.PickWith(Request{Mode: ModeSaveFile, Tag: tag, DefaultName: defaultName, FilterExt: "md"})
+}
+
+// PickWith requests a chooser pick described by req and reports whether it was accepted.
+func (p *Picker) PickWith(req Request) bool {
 	select {
-	case p.reqs <- struct{}{}:
+	case p.reqs <- req:
 		return true
 	default:
 		return false
 	}
 }
 
-// Results receives the finished picks. The window goroutine drains it every
-// frame.
+// Results receives the finished picks. The window goroutine drains it every frame.
 func (p *Picker) Results() <-chan Result { return p.results }
 
 // Available is the desktop's probed answer, or zero until the probe finishes.
@@ -297,7 +368,6 @@ func (p *Picker) Probed() bool { return p.probed.Load() }
 // First is the helper a pick would run, or HelperNone.
 func (p *Picker) First() Helper { return selectHelper(p.Available(), p.goos) }
 
-// ensureProbed runs the availability probe once.
 func (p *Picker) ensureProbed(ctx context.Context) {
 	p.probeOnce.Do(func() {
 		probeCtx, cancelProbe := context.WithTimeout(ctx, probeTimeout)
@@ -308,7 +378,6 @@ func (p *Picker) ensureProbed(ctx context.Context) {
 	})
 }
 
-// run probes availability once and then serves requests until the context ends.
 func (p *Picker) run(ctx context.Context) {
 	defer close(p.done)
 	p.ensureProbed(ctx)
@@ -319,8 +388,8 @@ func (p *Picker) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-p.reqs:
-			res := p.pickAll(ctx)
+		case req := <-p.reqs:
+			res := p.pickAll(ctx, req)
 			if ctx.Err() != nil {
 				return
 			}
@@ -336,20 +405,17 @@ func (p *Picker) run(ctx context.Context) {
 	}
 }
 
-// pickAll walks the platform's helpers in order and answers with the first
-// outcome that is a choice, a cancel or a refusal. A helper that could not
-// run at all falls through to the next one; once a chooser appeared, its own
-// answer — including a cancel — is final, because opening a second chooser
-// after a cancel would surprise the user.
-func (p *Picker) pickAll(ctx context.Context) Result {
+func (p *Picker) pickAll(ctx context.Context, req Request) Result {
 	order := pickOrder(p.Available(), p.goos)
 	if len(order) == 0 {
-		return Result{Err: errNoPicker}
+		return Result{Mode: req.Mode, Tag: req.Tag, Err: errNoPicker}
 	}
 	var lastErr error
 	for _, h := range order {
-		res, ran := p.pickOne(ctx, h)
+		res, ran := p.pickOne(ctx, h, req)
 		if ran {
+			res.Mode = req.Mode
+			res.Tag = req.Tag
 			return res
 		}
 		lastErr = res.Err
@@ -357,23 +423,21 @@ func (p *Picker) pickAll(ctx context.Context) Result {
 	if lastErr == nil {
 		lastErr = errNoPicker
 	}
-	return Result{Err: fmt.Errorf("the folder picker failed: %w", lastErr)}
+	return Result{Mode: req.Mode, Tag: req.Tag, Err: fmt.Errorf("the folder picker failed: %w", lastErr)}
 }
 
-// pickOne runs one helper. ran marks that a chooser actually appeared, so
-// the answer is final either way.
-func (p *Picker) pickOne(ctx context.Context, h Helper) (res Result, ran bool) {
+func (p *Picker) pickOne(ctx context.Context, h Helper, req Request) (res Result, ran bool) {
 	if ctx.Err() != nil {
 		return Result{Err: ctx.Err()}, false
 	}
 	if h == HelperPortal {
-		path, cancelled, err := p.portal(ctx)
+		path, cancelled, err := p.portal(ctx, req)
 		if err != nil {
 			return Result{Err: err}, false
 		}
 		return Result{Path: path, Cancelled: cancelled}, true
 	}
-	out, err := p.runner.Run(ctx, h)
+	out, err := p.runner.Run(ctx, h, req)
 	if err != nil {
 		if code, isExit := exitCodeOf(err); isExit && code == 1 {
 			return Result{Cancelled: true}, true
@@ -386,24 +450,17 @@ func (p *Picker) pickOne(ctx context.Context, h Helper) (res Result, ran bool) {
 	return Result{Path: out}, true
 }
 
-// uriPath turns a portal's file URI into an absolute path. net/url is out
-// (the app opens no socket itself, arch DA-E06), so the decode handles the
-// one shape the portal answers — file:///absolute/path, percent-escapes
-// included — and refuses everything else.
 func uriPath(uri string) (string, error) {
 	const scheme = "file://"
 	if !strings.HasPrefix(uri, scheme) {
 		return "", fmt.Errorf("%w: %q", errNotAFilePath, uri)
 	}
-	// file:///path keeps an empty authority: a folder chosen on this machine
-	// has no host before the third slash.
 	if !strings.HasPrefix(uri[len(scheme):], "/") {
 		return "", fmt.Errorf("%w: %q", errForeignFolder, uri)
 	}
 	return unescape(uri[len(scheme):]), nil
 }
 
-// unescape decodes the percent-escapes of a portal path.
 func unescape(path string) string {
 	if !strings.Contains(path, "%") {
 		return path
@@ -427,7 +484,6 @@ func unescape(path string) string {
 	return b.String()
 }
 
-// hexVal reads one hexadecimal digit.
 func hexVal(c byte) (byte, bool) {
 	switch {
 	case c >= '0' && c <= '9':
