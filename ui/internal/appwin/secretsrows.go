@@ -82,7 +82,7 @@ func (v *secretsView) layoutRows(gtx *layout.Context, env *kit.Env, sc *screens,
 func (v *secretsView) layoutSecretRow(gtx *layout.Context, env *kit.Env, sc *screens, meta *client.SecretMeta) layout.Dimensions {
 	w := v.widgetsFor(meta.SecretID)
 	props := kit.IconButtonProps{
-		Icon: kit.IconEllipsis, Label: "Actions for " + meta.Name,
+		Icon: kit.IconEllipsis, Label: "Actions for " + meta.Name, Size: kit.SizeXS,
 		Disabled: sc.vault.Locked() || sc.secretsWorker == nil,
 	}
 	var button image.Point
