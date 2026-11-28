@@ -109,7 +109,7 @@ func (g *slotGrid) layoutArea(gtx *layout.Context, env *kit.Env, sc *screens, ar
 }
 
 // drawSlot draws one slot as an independent borderless 8 dp-rounded CanvasBg
-// island (FUG-97), containing its 30 dp header band and clipped body. A slot
+// island (FUG-97), containing its 32 dp header band and clipped body. A slot
 // mid-slide draws at the interpolated rect (§3.7).
 func (g *slotGrid) drawSlot(gtx *layout.Context, env *kit.Env, sc *screens, p Pos, rect image.Rectangle) {
 	if rect.Empty() {

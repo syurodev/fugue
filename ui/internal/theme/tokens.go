@@ -102,8 +102,10 @@ const (
 	IslandGap = SpaceXS
 	// TopBarHeight is the unified top bar height across desktop platforms.
 	TopBarHeight = Tab
-	// StatusBarHeight is the full-width bottom status bar visual height.
-	StatusBarHeight = unit.Dp(22)
+	// StatusBarHeight is the full-width bottom status bar visual height: HitMin,
+	// so the bar's xs Lock control fits the band instead of overflowing it
+	// (FUG-108).
+	StatusBarHeight = HitMin
 	// MacTrafficLightInset is the horizontal inset reserved on the left of the
 	// 32 dp Top Bar on macOS (non-fullscreen) for native Close/Minimize/Zoom
 	// traffic lights rendered inside fullSizeContentView.
@@ -115,8 +117,10 @@ const (
 	SlotMinWidth = unit.Dp(300)
 	// SlotMinHeight is the minimum height of every grid row.
 	SlotMinHeight = unit.Dp(160)
-	// SlotHeaderHeight is the uniform header bar height of Sidebar and Slot islands.
-	SlotHeaderHeight = unit.Dp(30)
+	// SlotHeaderHeight is the uniform header bar height of Sidebar and Slot
+	// islands: TopBarHeight, so an xs control inside keeps FocusStroke +
+	// FocusOffset of room above and below for its outer focus ring (FUG-108).
+	SlotHeaderHeight = TopBarHeight
 	// DropEdgeWidth is the width of a column-edge drop zone at a column's
 	// edge during a drag (§5.3).
 	DropEdgeWidth = unit.Dp(24)

@@ -356,7 +356,7 @@ func (s *screens) layoutPolicyBanner(env *kit.Env, gtx *layout.Context) layout.D
 }
 
 // layoutSidebarPanel draws the Sidebar Island's contents (§5.3, FUG-93): a
-// 30 dp header bar aligned with the slot headers, followed by the selected rail
+// 32 dp header bar aligned with the slot headers, followed by the selected rail
 // mode's list — workspaces and sessions for Chat, teams for Team, or modules
 // for Modules — without utility rows.
 func (s *screens) layoutSidebarPanel(gtx *layout.Context, env *kit.Env) layout.Dimensions {
