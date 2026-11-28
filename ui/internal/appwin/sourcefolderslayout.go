@@ -257,8 +257,6 @@ func (f *sourceFolders) rowGeom(env *kit.Env, gtx *layout.Context, row *sourceRo
 // rowIcon draws the row's folder glyph, centered on the name field's line.
 func (f *sourceFolders) rowIcon(env *kit.Env, gtx *layout.Context, g rowGeom, errp *error) {
 	env.Offset(gtx, image.Pt(0, (g.lineH-g.iconW)/2), func(gtx *layout.Context) {
-		local := *gtx
-		local.Constraints = layout.Constraints{Min: image.Pt(g.iconW, g.iconW), Max: image.Pt(g.iconW, g.iconW)}
 		_, ierr := env.Icon(gtx, kit.IconFolder, theme.IconMD, env.Th.Chrome().FgMuted)
 		keepDrawErr(errp, ierr)
 	})
