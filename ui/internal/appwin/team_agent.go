@@ -160,8 +160,11 @@ func (s *screens) layoutAgentActions(gtx *layout.Context, env *kit.Env, view *cl
 }
 
 func (s *screens) layoutAgentRecovery(gtx *layout.Context, env *kit.Env, id, task string, detail *teamAgentDetail) layout.Dimensions {
-	children := make([]layout.FlexChild, 0, len(detail.recovery))
+	children := make([]layout.FlexChild, 0, len(detail.recovery)*2)
 	for i, option := range []struct{ label, id string }{{"Continue", "resume"}, {"Keep diff", "keep_diff"}, {"Cancel", "cancel"}} {
+		if i > 0 {
+			children = append(children, spacerW(theme.SpaceSM))
+		}
 		children = append(children, channelButton(env, s, detail.recovery[i], kit.ButtonProps{Text: option.label, Size: kit.SizeSM}, func() {
 			if s.vault.Unlocked() {
 				s.queueTeam(team.Request{Op: team.Recover, Team: id, Task: task, Decision: option.id})
