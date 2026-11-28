@@ -87,7 +87,7 @@ func (s *TabsState) measureOverflowWidth(env *Env, gtx *layout.Context, pr TabsP
 		return 0
 	}
 	estHidden := max(len(pr.Items)/2, 1)
-	ovPr := ButtonProps{Text: strconv.Itoa(estHidden), Icon: IconChevronDown, Variant: Ghost, Size: SizeSM}
+	ovPr := ButtonProps{Text: strconv.Itoa(estHidden), Icon: IconChevronDown, Variant: Ghost, Size: SizeXS}
 	return s.overflowBtn.Measure(env, gtx, ovPr).Size.X + gtx.Dp(theme.SpaceXS)
 }
 
@@ -355,7 +355,7 @@ func (s *TabsState) drawOverflow(env *Env, gtx *layout.Context, pr TabsProps, st
 		Text:    strconv.Itoa(len(s.hiddenIDs)),
 		Icon:    IconChevronDown,
 		Variant: Ghost,
-		Size:    SizeSM,
+		Size:    SizeXS,
 	}
 	ovSize := s.overflowBtn.Measure(env, gtx, ovPr).Size
 	bx := startX + gtx.Dp(theme.SpaceXS)

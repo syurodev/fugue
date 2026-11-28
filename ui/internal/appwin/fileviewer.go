@@ -290,7 +290,7 @@ func (v *fileViewer) layoutHeader(gtx *layout.Context, env *kit.Env, sc *screens
 		}},
 	}
 	if v.mode != fileViewDiff && v.path != "" {
-		bp := kit.ButtonProps{Text: "Copy path", Icon: kit.IconCopy, Variant: kit.Ghost, Size: kit.SizeSM}
+		bp := kit.ButtonProps{Text: "Copy path", Icon: kit.IconCopy, Variant: kit.Ghost, Size: kit.SizeXS}
 		items = append(items, atEnd(kit.FlowItem{Size: v.copyBtn.Measure(env, gtx, bp).Size, Draw: func(g *layout.Context) {
 			clicked, err := v.copyBtn.Layout(env, g, bp)
 			sc.fail(err)

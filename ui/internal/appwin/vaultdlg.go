@@ -188,7 +188,7 @@ func (g *vaultGate) layoutLockButton(gtx *layout.Context, env *kit.Env, sc *scre
 		Icon:     kit.IconLock,
 		Label:    labelLockVault,
 		Variant:  kit.IconButtonGhost,
-		Size:     kit.SizeSM,
+		Size:     kit.SizeXS,
 		Disabled: g.busy,
 	}
 	clicked, err := g.lockBtn.Layout(env, gtx, props)

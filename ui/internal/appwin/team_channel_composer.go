@@ -242,7 +242,7 @@ func (c *teamChannelComposer) layoutPicker(gtx *layout.Context, env *kit.Env, s 
 	_, query, _ := trailingChannelMention(c.area.Text())
 	res, err := c.menu.Layout(env, gtx, &kit.SuggestProps{
 		Items:  channelSuggestions(query, threads),
-		Anchor: image.Rect(0, 0, width, gtx.Dp(theme.ControlLG)),
+		Anchor: image.Rect(0, 0, width, gtx.Dp(theme.ControlMD)),
 		Query:  query, EmptyText: "No agents", NoResText: "No matching agent",
 	})
 	s.fail(err)

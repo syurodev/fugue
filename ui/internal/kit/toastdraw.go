@@ -80,14 +80,14 @@ func drawToastDetail(env *Env, gtx *layout.Context, rect, inner image.Rectangle,
 // reports the click; a toast on its way out (active false) draws them
 // disabled (§3.7).
 func drawToastControls(env *Env, gtx *layout.Context, rect image.Rectangle, t *Toast, active bool, action *ButtonState, close *IconButtonState) (toastClick, error) {
-	btn := max(gtx.Dp(theme.ControlSM), gtx.Dp(theme.HitMin))
+	btn := max(gtx.Dp(theme.ControlXS), gtx.Dp(theme.HitMin))
 	cy := rect.Min.Y + (rect.Dy()-btn)/2
 	cx := rect.Max.X - gtx.Dp(theme.SpaceLG) - btn
 	var clicked bool
 	var err error
 	at(gtx, image.Pt(cx, cy), func(gtx *layout.Context) {
 		clicked, err = close.Layout(env, gtx, &IconButtonProps{
-			Icon: IconClose, Label: labelClose, Variant: IconButtonGhost, Size: SizeSM,
+			Icon: IconClose, Label: labelClose, Variant: IconButtonGhost, Size: SizeXS,
 			Disabled: !active,
 		})
 	})

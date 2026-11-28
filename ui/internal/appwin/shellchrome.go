@@ -168,7 +168,7 @@ func (s *screens) pollRightStripe(gtx *layout.Context, plan PlanFoldResult) {
 func (s *screens) layoutRightStripe(gtx *layout.Context, env *kit.Env, plan PlanFoldResult) layout.Dimensions {
 	w := gtx.Dp(theme.RightStripeWidth)
 	h := gtx.Constraints.Max.Y
-	btnW := gtx.Dp(theme.ControlMD)
+	btnW := gtx.Dp(theme.ControlSM)
 	x := max((w-btnW)/2, 0)
 	gap := gtx.Dp(theme.SpaceXS)
 	y := s.layoutRightStripeCompanions(gtx, env, x, gap, btnW, gap)
@@ -182,7 +182,7 @@ func (s *screens) layoutRightStripeCompanions(gtx *layout.Context, env *kit.Env,
 	for _, it := range s.rightStripeCompanionItems() {
 		btn := s.grid.stripeBtn(it.kind)
 		props := kit.IconButtonProps{
-			Icon: it.icon, Label: it.tip, Variant: kit.IconButtonGhost, Size: kit.SizeMD,
+			Icon: it.icon, Label: it.tip, Variant: kit.IconButtonGhost, Size: kit.SizeSM,
 			Toggled: s.hasSlotKind(it.kind),
 		}
 		var err error
@@ -219,7 +219,7 @@ func (s *screens) layoutRightStripeFolded(gtx *layout.Context, env *kit.Env, pla
 		ref := refAt(s.grid.doc, p)
 		props := kit.IconButtonProps{
 			Icon: slotIcon(ref.Kind), Label: slotTitle(s, ref),
-			Variant: kit.IconButtonGhost, Size: kit.SizeMD, Toggled: s.grid.drawer == p.key(),
+			Variant: kit.IconButtonGhost, Size: kit.SizeSM, Toggled: s.grid.drawer == p.key(),
 		}
 		var err error
 		env.Offset(gtx, image.Pt(x, curY), func(gtx *layout.Context) {
@@ -313,7 +313,7 @@ func (s *screens) layoutStatusBarLock(gtx *layout.Context, env *kit.Env, rightSt
 	if s.vault.Locked() || s.vaultWorker == nil {
 		return rightStartX
 	}
-	lockProps := kit.IconButtonProps{Icon: kit.IconLock, Label: labelLockVault, Variant: kit.IconButtonGhost, Size: kit.SizeSM}
+	lockProps := kit.IconButtonProps{Icon: kit.IconLock, Label: labelLockVault, Variant: kit.IconButtonGhost, Size: kit.SizeXS}
 	lockSize := s.vaultGate.lockBtn.Measure(env, gtx, &lockProps).Size
 	if hasConn {
 		rightStartX -= gtx.Dp(theme.SpaceMD)

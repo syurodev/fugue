@@ -385,6 +385,7 @@ func (d *rootDialog) layAccess(env *kit.Env, body *wsBody) {
 			Label:   "Access",
 			Options: []kit.SelectOption{{ID: client.RootAccessRW, Label: "read and write"}, {ID: client.RootAccessRO, Label: "read only"}},
 			Value:   d.accessSel,
+			Block:   true,
 		}
 		sres, serr := d.access.Layout(env, gtx, props)
 		if serr == nil && sres.Changed {

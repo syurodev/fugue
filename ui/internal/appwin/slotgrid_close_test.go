@@ -82,7 +82,7 @@ func (s *closeScene) frame(t *testing.T, after func(gtx *layout.Context)) {
 // at p: the header's last child, flush right inside its inset and centered
 // in the band.
 func (s *closeScene) closeHitPoint(gtx *layout.Context, p Pos) f32.Point {
-	props := kit.IconButtonProps{Icon: kit.IconClose, Label: closeLabel, Variant: kit.IconButtonGhost, Size: kit.SizeSM}
+	props := kit.IconButtonProps{Icon: kit.IconClose, Label: closeLabel, Variant: kit.IconButtonGhost, Size: kit.SizeXS}
 	head := s.sc.grid.rects[p.key()]
 	side := s.sc.grid.closeBtns[p.key()].Measure(s.h.env, gtx, &props).Size.X
 	return f32.Pt(float32(head.Max.X-gtx.Dp(theme.SpaceXS)-side/2), float32(head.Min.Y+min(gtx.Dp(theme.SlotHeaderHeight), head.Dy())/2))

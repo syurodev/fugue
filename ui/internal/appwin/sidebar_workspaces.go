@@ -202,7 +202,7 @@ func (s *screens) workspaceSection(env *kit.Env, gtx *layout.Context, group wsGr
 // wsMenuAnchor is the manage menu's anchor: the header's action button box,
 // in the section's own coordinates.
 func (s *screens) wsMenuAnchor(gtx *layout.Context, headerH int) image.Rectangle {
-	btn := gtx.Dp(theme.ControlSM)
+	btn := gtx.Dp(theme.ControlXS)
 	x := gtx.Constraints.Max.X - gtx.Dp(theme.SpaceXS) - btn
 	y := (headerH - btn) / 2
 	return image.Rectangle{Min: image.Pt(x, y), Max: image.Pt(x+btn, y+btn)}
@@ -410,7 +410,7 @@ func (s *screens) layoutSidebarIslandHeader(env *kit.Env, gtx *layout.Context) l
 	c := env.Th.Chrome()
 	padL := gtx.Dp(theme.SpaceMD)
 	padR := gtx.Dp(theme.SpaceXS)
-	btnSize := gtx.Dp(theme.ControlSM)
+	btnSize := gtx.Dp(theme.ControlXS)
 	hasAdd := s.grid.rail == railChat
 	rightW := 0
 	if hasAdd {
@@ -428,7 +428,7 @@ func (s *screens) layoutSidebarIslandHeader(env *kit.Env, gtx *layout.Context) l
 	if hasAdd && w >= padL+rightW+padR {
 		env.Offset(gtx, image.Pt(w-padR-btnSize, max((h-btnSize)/2, 0)), func(gtx *layout.Context) {
 			local := *gtx
-			props := kit.IconButtonProps{Icon: kit.IconPlus, Label: "New workspace", Variant: kit.IconButtonGhost, Size: kit.SizeSM}
+			props := kit.IconButtonProps{Icon: kit.IconPlus, Label: "New workspace", Variant: kit.IconButtonGhost, Size: kit.SizeXS}
 			clicked, err := s.wsAddBtn.Layout(env, &local, &props)
 			s.fail(err)
 			if clicked {

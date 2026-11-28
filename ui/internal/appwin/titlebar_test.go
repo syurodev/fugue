@@ -251,7 +251,7 @@ func assertCSDGlyphBounds(t *testing.T, shot titleBarShot) {
 	t.Helper()
 	w := shot.img.Bounds().Dx()
 	barH := int(theme.TopBarHeight)
-	btnW := int(theme.ControlSM)
+	btnW := int(theme.ControlXS)
 	gap := int(theme.SpaceXS)
 	padR := int(theme.SpaceMD)
 	csdW := 3*btnW + 2*gap + padR
@@ -495,7 +495,7 @@ func TestTopBarThemeToggleAndSettings(t *testing.T) {
 	runShellEnvFrame(t, env, sc, router, size, now)
 
 	barH := gtx.Dp(theme.TopBarHeight)
-	btnW := gtx.Dp(theme.ControlSM)
+	btnW := gtx.Dp(theme.ControlXS)
 	btnGap := gtx.Dp(theme.SpaceXS)
 	rightPad := max((gtx.Dp(theme.RightStripeWidth)-btnW)/2, 0)
 	if sc.titleBar.csd {

@@ -156,7 +156,7 @@ func (g *slotGrid) drawSlot(gtx *layout.Context, env *kit.Env, sc *screens, p Po
 // handle it all rides on, the arrange and close buttons — runs the header's
 // input, and opens the arrange popover from the arrange button's anchor.
 func (g *slotGrid) drawChrome(gtx *layout.Context, env *kit.Env, sc *screens, p Pos, rect image.Rectangle) {
-	if rect.Dx() < gtx.Dp(theme.ControlSM)*3 {
+	if rect.Dx() < gtx.Dp(theme.ControlXS)*3 {
 		return
 	}
 	tag := g.headerTagFor(p)
@@ -192,7 +192,7 @@ func (g *slotGrid) drawHeaderBar(gtx *layout.Context, env *kit.Env, sc *screens,
 			g.layoutHeaderRow(env, &local, sc, p, ref, btns)
 		})
 		if btns != nil && !btns.ghost {
-			btnW := gtx.Dp(theme.ControlSM)
+			btnW := gtx.Dp(theme.ControlXS)
 			anchor := image.Rect(rect.Dx()-2*btnW-padR, 0, rect.Dx()-btnW-padR, h)
 			g.layoutArrange(env, gtx, sc, p, anchor)
 		}
@@ -219,7 +219,7 @@ func (g *slotGrid) layoutHeaderRow(env *kit.Env, gtx *layout.Context, sc *screen
 	x += iconPx + gap
 
 	actions := slotHeaderActions(sc, ref)
-	btnSize := gtx.Dp(theme.ControlSM)
+	btnSize := gtx.Dp(theme.ControlXS)
 	rightCount := len(actions)
 	if btns != nil && !btns.ghost {
 		rightCount += 2
@@ -276,7 +276,7 @@ func (g *slotGrid) layoutHeaderButtons(env *kit.Env, gtx *layout.Context, sc *sc
 	}
 	env.Offset(gtx, image.Pt(rx, y), func(gtx *layout.Context) {
 		local := *gtx
-		props := kit.IconButtonProps{Icon: kit.IconEllipsis, Label: labelArrange, Variant: kit.IconButtonGhost, Size: kit.SizeSM}
+		props := kit.IconButtonProps{Icon: kit.IconEllipsis, Label: labelArrange, Variant: kit.IconButtonGhost, Size: kit.SizeXS}
 		clicked, err := btns.arrange.Layout(env, &local, &props)
 		sc.fail(err)
 		if clicked {
@@ -286,7 +286,7 @@ func (g *slotGrid) layoutHeaderButtons(env *kit.Env, gtx *layout.Context, sc *sc
 	rx += btnSize
 	env.Offset(gtx, image.Pt(rx, y), func(gtx *layout.Context) {
 		local := *gtx
-		props := kit.IconButtonProps{Icon: kit.IconClose, Label: "Close slot", Variant: kit.IconButtonGhost, Size: kit.SizeSM}
+		props := kit.IconButtonProps{Icon: kit.IconClose, Label: "Close slot", Variant: kit.IconButtonGhost, Size: kit.SizeXS}
 		clicked, err := btns.close.Layout(env, &local, &props)
 		sc.fail(err)
 		if clicked {

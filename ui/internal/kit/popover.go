@@ -309,7 +309,7 @@ func popoverHeader(env *Env, gtx *layout.Context, props *PopoverProps) int {
 	if props.Title != "" {
 		line = labelLine(env, gtx, theme.TypeTitle())
 	}
-	return max(gtx.Dp(theme.ControlSM), line)
+	return max(gtx.Dp(theme.ControlXS), line)
 }
 
 // draw records the panel — and, on the overlay, the absorbing area under it —
@@ -368,10 +368,10 @@ func (p *PopoverState) drawPanel(env *Env, gtx *layout.Context, props *PopoverPr
 	inner := p.rect.Inset(p.pad)
 
 	var headErr error
-	btn := max(gtx.Dp(theme.ControlSM), gtx.Dp(theme.HitMin))
+	btn := max(gtx.Dp(theme.ControlXS), gtx.Dp(theme.HitMin))
 	at(gtx, image.Pt(inner.Max.X-btn, inner.Min.Y), func(gtx *layout.Context) {
 		clicked, err := p.closeB.Layout(env, gtx, &IconButtonProps{
-			Icon: IconClose, Label: labelClose, Variant: IconButtonGhost, Size: SizeSM,
+			Icon: IconClose, Label: labelClose, Variant: IconButtonGhost, Size: SizeXS,
 		})
 		if err != nil {
 			headErr = fmt.Errorf("draw the close button: %w", err)
@@ -390,7 +390,7 @@ func (p *PopoverState) drawPanel(env *Env, gtx *layout.Context, props *PopoverPr
 		x -= btn + gtx.Dp(theme.SpaceXS)
 		at(gtx, image.Pt(x, inner.Min.Y), func(gtx *layout.Context) {
 			clicked, err := props.Pin.Layout(env, gtx, &IconButtonProps{
-				Icon: IconPin, Label: labelPin, Variant: IconButtonGhost, Size: SizeSM, Toggled: props.Pinned,
+				Icon: IconPin, Label: labelPin, Variant: IconButtonGhost, Size: SizeXS, Toggled: props.Pinned,
 			})
 			if err != nil {
 				headErr = fmt.Errorf("draw the pin toggle: %w", err)

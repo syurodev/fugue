@@ -91,7 +91,7 @@ type cell struct {
 const (
 	numVariants     = 5
 	numIconVariants = 3
-	numSizes        = 3
+	numSizes        = 4
 	numStates       = 6
 )
 
@@ -388,7 +388,7 @@ func (p *pages) layoutIcons(gtx *layout.Context) {
 func (p *pages) buttonRows(gtx *layout.Context, vi int) [][]cellDraw {
 	v := kit.ButtonVariant(vi)
 	rows := make([][]cellDraw, 0, numSizes+1)
-	for _, s := range []kit.ButtonSize{kit.SizeSM, kit.SizeMD, kit.SizeLG} {
+	for _, s := range []kit.ButtonSize{kit.SizeXS, kit.SizeSM, kit.SizeMD, kit.SizeLG} {
 		row := make([]cellDraw, 0, numStates)
 		for ci, st := range buttonStates() {
 			row = append(row, p.buttonCell(gtx, p.btns[vi][s][ci], cell{compButton, vi, int(s), st}, ci,

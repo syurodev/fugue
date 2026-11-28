@@ -143,7 +143,7 @@ func (d *secretAddDialog) layIdentity(body *secretDlgBody, wsLabel string, canSu
 	local.Constraints.Min = image.Point{}
 	scopeWidth := d.scopeSeg.Measure(body.env, &local, d.scopeProps(wsLabel)).Size.X
 	nameWidth := body.w - right - body.gap
-	if right < scopeWidth || nameWidth < body.gtx.Dp(theme.ControlLG)*4 {
+	if right < scopeWidth || nameWidth < body.gtx.Dp(theme.ControlMD)*4 {
 		d.layName(body, canSubmit)
 		d.layScope(body, wsLabel)
 		return
@@ -401,7 +401,7 @@ type secretDlgBody struct {
 }
 
 func newSecretDlgBody(env *kit.Env, gtx *layout.Context, bands *kit.DialogBands, fail func(error)) *secretDlgBody {
-	return &secretDlgBody{env: env, bands: bands, gtx: gtx, fail: fail, w: gtx.Constraints.Max.X, gap: gtx.Dp(theme.SpaceMD)}
+	return &secretDlgBody{env: env, bands: bands, gtx: gtx, fail: fail, w: gtx.Constraints.Max.X, gap: gtx.Dp(theme.SpaceLG)}
 }
 
 func (b *secretDlgBody) field(tag event.Tag, draw func(gtx *layout.Context) (layout.Dimensions, error)) {

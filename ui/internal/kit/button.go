@@ -18,7 +18,7 @@ import (
 )
 
 // Button, ui-kit §6.2: an optional icon and a type.label label on a
-// size.control box with radius.md, in six variants and the three §3.4
+// size.control box with radius.md, in six variants and the four §3.4
 // sizes. It shows every §4.1 state — rest, hover, pressed, the focus ring
 // outside the body (only after Tab, via Env.FocusVisible), disabled (the
 // whole control at DisabledOpacity) and busy — and reports Clicked during
@@ -62,9 +62,10 @@ type ButtonSize int
 
 // The §3.4 control sizes.
 const (
-	SizeMD ButtonSize = iota // the default (28 dp)
-	SizeSM                   // toolbar and in-row (24 dp)
-	SizeLG                   // dialog primary and composer (32 dp)
+	SizeMD ButtonSize = iota // the default and form size (32 dp)
+	SizeXS                   // inside a row, tab, header or field (24 dp)
+	SizeSM                   // standalone secondary control (28 dp)
+	SizeLG                   // composer and start-screen primary CTA (36 dp)
 )
 
 // ButtonProps are the per-frame, caller-owned properties (UK-02). Icon is
@@ -199,7 +200,7 @@ func (s *ButtonState) content(env *Env, gtx *layout.Context, p ButtonProps, fg c
 		if swap < 1 {
 			drawLabel(1 - swap)
 		}
-		box := gtx.Dp(theme.IconMD)
+		box := gtx.Dp(buttonIconSize(p.Size))
 		s.spinner(env, gtx, image.Pt((spec.w-box)/2, (spec.h-box)/2), box, fade(fg, swap), swap)
 		return nil
 	}
@@ -287,28 +288,34 @@ func buttonLookOf(env *Env, v ButtonVariant, disabled bool) controlLook {
 
 // controlHeight is the height token of a §3.4 control size.
 func controlHeight(gtx *layout.Context, s ButtonSize) int {
-	if s == SizeSM {
+	switch s {
+	case SizeXS:
+		return gtx.Dp(theme.ControlXS)
+	case SizeSM:
 		return gtx.Dp(theme.ControlSM)
-	}
-	if s == SizeLG {
+	case SizeMD:
+		return gtx.Dp(theme.ControlMD)
+	case SizeLG:
 		return gtx.Dp(theme.ControlLG)
+	default:
+		return gtx.Dp(theme.ControlMD)
 	}
-	return gtx.Dp(theme.ControlMD)
 }
 
-// buttonMetrics are the §6.2 paddings of a size: sm uses the dense inner
-// spacing, md and lg the wide one.
+// buttonMetrics are the §6.2 paddings of a size: xs uses the dense inner
+// spacing (SpaceMD padding, SpaceXS gap), while sm, md and lg use SpaceLG
+// padding and SpaceSM gap.
 func buttonMetrics(s ButtonSize) (padX, iconGap unit.Dp) {
-	if s == SizeSM {
+	if s == SizeXS {
 		return theme.SpaceMD, theme.SpaceXS
 	}
 	return theme.SpaceLG, theme.SpaceSM
 }
 
-// buttonIconSize is the §3.4 icon size of a control size: IconSM inside a
-// 24 dp control, IconMD from 28 dp up.
+// buttonIconSize is the §3.4 icon size of a control size: IconSM inside an
+// xs (24 dp) control, IconMD from sm (28 dp) up.
 func buttonIconSize(s ButtonSize) unit.Dp {
-	if s == SizeSM {
+	if s == SizeXS {
 		return theme.IconSM
 	}
 	return theme.IconMD

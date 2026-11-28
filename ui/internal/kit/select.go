@@ -39,6 +39,9 @@ type SelectProps struct {
 	Options     []SelectOption
 	Value       string
 	Disabled    bool
+	// Block stretches the select to the full width the layout allows, for
+	// form columns (§4.6). Outside a form, Select sizes to its longest option.
+	Block bool
 }
 
 // SelectResult reports what happened in the frame (UK-06).
@@ -240,16 +243,19 @@ func (s *SelectState) draw(env *Env, gtx *layout.Context, p *SelectProps, w int,
 		}
 		textX += iconPx + gtx.Dp(theme.SpaceSM)
 	}
-	if display != "" {
-		at(gtx, image.Pt(textX, sz.labelH+sz.boxPadY), func(gtx *layout.Context) {
-			dims := drawText(env, gtx, editorType(), textCol, display, false)
-			recordRun(env, image.Rectangle{Max: dims.Size}.Add(image.Pt(textX, sz.labelH+sz.boxPadY)))
-		})
-	}
-
 	chevPx := gtx.Dp(theme.IconMD)
-	cx := w - gtx.Dp(theme.SpaceMD) - chevPx
+	cx := w - gtx.Dp(theme.SpaceLG) - chevPx
 	cy := sz.labelH + (sz.boxH-chevPx)/2
+	if display != "" {
+		maxTextW := max(cx-gtx.Dp(theme.SpaceSM)-textX, 0)
+		if maxTextW > 0 {
+			at(gtx, image.Pt(textX, sz.labelH+sz.boxPadY), func(gtx *layout.Context) {
+				defer clip.Rect{Max: image.Pt(maxTextW, sz.boxH)}.Push(gtx.Ops).Pop()
+				dims := drawText(env, gtx, editorType(), textCol, display, false)
+				recordRun(env, image.Rectangle{Max: image.Pt(min(dims.Size.X, maxTextW), dims.Size.Y)}.Add(image.Pt(textX, sz.labelH+sz.boxPadY)))
+			})
+		}
+	}
 	if err := drawRotatedIcon(env, gtx, image.Pt(cx, cy), IconChevronDown, theme.IconMD, fade(c.IconMuted, dimOf(p.Disabled)), chev*math.Pi); err != nil {
 		return fmt.Errorf("draw select chevron: %w", err)
 	}
@@ -287,6 +293,9 @@ func selectedIcon(p *SelectProps) IconName {
 }
 
 func selectWidth(env *Env, gtx *layout.Context, p *SelectProps) int {
+	if p.Block && gtx.Constraints.Max.X > 0 && gtx.Constraints.Max.X < 1<<20 {
+		return gtx.Constraints.Max.X
+	}
 	longest := p.Placeholder
 	hasIcon := false
 	for _, opt := range p.Options {

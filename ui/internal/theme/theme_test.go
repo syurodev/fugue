@@ -12,14 +12,15 @@ import (
 
 // mode bundles one theme with its name so failures name the mode.
 type mode struct {
-	name  string
-	theme theme.Theme
+	name      string
+	theme     theme.Theme
+	wantScrim color.NRGBA
 }
 
 func bothModes() []mode {
 	return []mode{
-		{name: "light", theme: theme.Light(nil)},
-		{name: "dark", theme: theme.Dark(nil)},
+		{name: "light", theme: theme.Light(nil), wantScrim: color.NRGBA{A: 0x66}},
+		{name: "dark", theme: theme.Dark(nil), wantScrim: color.NRGBA{A: 0x99}},
 	}
 }
 
@@ -291,6 +292,20 @@ func lin(v uint8) float64 {
 		return s / 12.92
 	}
 	return math.Pow((s+0.055)/1.055, 2.4)
+}
+
+// TestUKE15ScrimIsModeSpecific pins the ui-kit v0.8 §3.5 scrim values: black
+// at 40% (0x66) in light mode and black at 60% (0x99) in dark mode.
+func TestUKE15ScrimIsModeSpecific(t *testing.T) {
+	t.Parallel()
+	lightTheme := theme.Light(nil)
+	if want := (color.NRGBA{A: 0x66}); lightTheme.Chrome().Scrim != want {
+		t.Errorf("light Scrim = %#v, want %#v", lightTheme.Chrome().Scrim, want)
+	}
+	darkTheme := theme.Dark(nil)
+	if want := (color.NRGBA{A: 0x99}); darkTheme.Chrome().Scrim != want {
+		t.Errorf("dark Scrim = %#v, want %#v", darkTheme.Chrome().Scrim, want)
+	}
 }
 
 // chromeOf returns a pointer to the mode's chrome so the 15-token table

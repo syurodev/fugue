@@ -26,7 +26,7 @@ import (
 // sideways (UK-E09).
 const (
 	windowW = unit.Dp(1360)
-	windowH = unit.Dp(1200)
+	windowH = unit.Dp(1320)
 	navRail = unit.Dp(140)
 	chrome  = unit.Dp(24)
 	// slowFactor is the slow-motion mode's time scale.

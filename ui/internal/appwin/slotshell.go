@@ -328,7 +328,7 @@ func (s *screens) layoutGridContainer(gtx *layout.Context, env *kit.Env, plan Pl
 func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool) layout.Dimensions {
 	w := gtx.Dp(theme.RailWidth)
 	h := gtx.Constraints.Max.Y
-	btnW := gtx.Dp(theme.ControlMD)
+	btnW := gtx.Dp(theme.ControlSM)
 	x := max((w-btnW)/2, 0)
 	gap := gtx.Dp(theme.SpaceXS)
 	items := []struct {
@@ -367,7 +367,7 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool
 		btn := s.grid.railBtn(it.item)
 		toggled := sidebarOpen && s.grid.rail == it.item
 		props := kit.IconButtonProps{
-			Icon: it.icon, Label: it.hint, Variant: kit.IconButtonGhost, Size: kit.SizeMD,
+			Icon: it.icon, Label: it.hint, Variant: kit.IconButtonGhost, Size: kit.SizeSM,
 			Toggled: toggled, NoSelectedFill: true,
 		}
 		var err error

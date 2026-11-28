@@ -281,7 +281,9 @@ func toastHeight(env *Env, gtx *layout.Context, t *Toast, w int) int {
 // detailWidth is the width the detail wraps at: the toast minus the icon
 // column and the room the action and close buttons take.
 func detailWidth(gtx *layout.Context, w int) int {
-	room := 2 * (max(gtx.Dp(theme.ControlSM), gtx.Dp(theme.HitMin)) + gtx.Dp(theme.SpaceSM))
+	closeW := max(gtx.Dp(theme.ControlXS), gtx.Dp(theme.HitMin))
+	actW := max(gtx.Dp(theme.ControlSM), gtx.Dp(theme.HitMin))
+	room := closeW + actW + 2*gtx.Dp(theme.SpaceSM)
 	return max(w-2*gtx.Dp(theme.SpaceLG)-gtx.Dp(theme.IconMD)-gtx.Dp(theme.SpaceSM)-room, gtx.Dp(theme.HitMin))
 }
 

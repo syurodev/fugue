@@ -257,7 +257,7 @@ func runThemeTestFullFrame(env *kit.Env, sc *screens, router *input.Router, size
 func topBarThemeBtnCenter(env *kit.Env, sc *screens, size image.Point) f32.Point {
 	var ops op.Ops
 	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}), Constraints: layout.Exact(size)}
-	btnW, btnGap := gtx.Dp(theme.ControlSM), gtx.Dp(theme.SpaceXS)
+	btnW, btnGap := gtx.Dp(theme.ControlXS), gtx.Dp(theme.SpaceXS)
 	rightPad := max((gtx.Dp(theme.RightStripeWidth)-btnW)/2, 0)
 	if sc.titleBar.csd {
 		_, _, csdW := csdButtonMetrics(&gtx)

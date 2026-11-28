@@ -31,7 +31,7 @@ func (g *vaultGate) layoutSetup(gtx *layout.Context, env *kit.Env, sc *screens) 
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return g.layoutErrorLine(&gtx, env) }),
 		layout.Rigid(layout.Spacer{Height: theme.SpaceXL}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			props := kit.ButtonProps{Text: "Create vault", Variant: kit.Primary, Size: kit.SizeLG, Block: true, Busy: g.busy}
+			props := kit.ButtonProps{Text: "Create vault", Variant: kit.Primary, Size: kit.SizeMD, Block: true, Busy: g.busy}
 			dims, clicked := layoutVaultButton(env, &gtx, g.submitBtn, props, sc.fail)
 			submitted = submitted || clicked
 			return dims
@@ -70,7 +70,7 @@ func (g *vaultGate) layoutEntry(gtx *layout.Context, env *kit.Env, sc *screens, 
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions { return g.layoutErrorLine(&gtx, env) }),
 		layout.Rigid(layout.Spacer{Height: theme.SpaceXL}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			props := kit.ButtonProps{Text: e.action, Variant: kit.Primary, Size: kit.SizeLG, Block: true, Busy: g.busy}
+			props := kit.ButtonProps{Text: e.action, Variant: kit.Primary, Size: kit.SizeMD, Block: true, Busy: g.busy}
 			dims, clicked := layoutVaultButton(env, &gtx, g.submitBtn, props, sc.fail)
 			submitted = submitted || clicked
 			return dims
@@ -129,7 +129,7 @@ func (g *vaultGate) layoutRecoveryKey(gtx *layout.Context, env *kit.Env, onErr f
 		}),
 		layout.Rigid(layout.Spacer{Height: theme.SpaceXL}.Layout),
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			props := kit.ButtonProps{Text: "Continue", Variant: kit.Primary, Size: kit.SizeLG, Block: true, Disabled: g.saved != kit.CheckOn}
+			props := kit.ButtonProps{Text: "Continue", Variant: kit.Primary, Size: kit.SizeMD, Block: true, Disabled: g.saved != kit.CheckOn}
 			dims, clicked := layoutVaultButton(env, &gtx, g.ackBtn, props, nil)
 			if clicked {
 				g.clearRecovery()

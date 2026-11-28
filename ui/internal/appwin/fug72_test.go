@@ -42,7 +42,7 @@ func railCenter(env *kit.Env, sc *screens, gtx *layout.Context, index int) f32.P
 	failGtx.Constraints.Min = image.Point{}
 	failH := sc.failure.layout(env, &failGtx, sc).Size.Y
 	w := gtx.Dp(theme.RailWidth)
-	btnW := gtx.Dp(theme.ControlMD)
+	btnW := gtx.Dp(theme.ControlSM)
 	gap := gtx.Dp(theme.SpaceXS)
 	return f32.Pt(float32(w)/2, float32(barH+failH+gap+index*(btnW+gap))+float32(btnW)/2)
 }
@@ -101,7 +101,7 @@ func TestFUG72RailHighlightFollowsClickAndSlides(t *testing.T) {
 
 	var ops op.Ops
 	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}), Constraints: layout.Exact(size)}
-	gap, btnW := float32(gtx.Dp(theme.SpaceXS)), float32(gtx.Dp(theme.ControlMD))
+	gap, btnW := float32(gtx.Dp(theme.SpaceXS)), float32(gtx.Dp(theme.ControlSM))
 	steps := []struct {
 		pt       f32.Point
 		wantRail railItem
@@ -256,7 +256,7 @@ func TestFUG72SidebarFooterColumnHeightSmooth(t *testing.T) {
 	var ops op.Ops
 	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}), Constraints: layout.Exact(size)}
 	collapsePt, expandPt := sidebarTogglePts(env, sc, &gtx)
-	lockJumpPx := gtx.Dp(theme.ControlSM) + gtx.Dp(theme.SpaceSM) + gtx.Dp(theme.SpaceXS)
+	lockJumpPx := gtx.Dp(theme.ControlXS) + gtx.Dp(theme.SpaceSM) + gtx.Dp(theme.SpaceXS)
 
 	settleShellFrames(t, env, sc, router, size, &now)
 	prevH := drawnColumnHeight(&gtx, sc, size)
@@ -455,7 +455,7 @@ func TestFUG72NarrowWindowRailTogglesOverlaySidebarAndPill(t *testing.T) {
 	fullW := gtx.Dp(theme.SidebarWidth)
 	chatPt := railCenter(env, sc, &gtx, 0)
 	teamPt := railCenter(env, sc, &gtx, 1)
-	pillProbePt := image.Pt(int(chatPt.X)-gtx.Dp(theme.ControlMD)/2+1, int(chatPt.Y)-gtx.Dp(theme.ControlMD)/2+1)
+	pillProbePt := image.Pt(int(chatPt.X)-gtx.Dp(theme.ControlSM)/2+1, int(chatPt.Y)-gtx.Dp(theme.ControlSM)/2+1)
 
 	renderNarrow := func() *image.RGBA {
 		now = now.Add(16 * time.Millisecond)

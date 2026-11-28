@@ -286,7 +286,7 @@ type fieldLay func(tag event.Tag, draw func(gtx *layout.Context) (layout.Dimensi
 // several, vendor, model and effort, then the failed start's reason.
 func (f *startFlow) body(env *kit.Env, gtx *layout.Context, bands *kit.DialogBands, sc *screens, c *composer) image.Point {
 	w := gtx.Constraints.Max.X
-	gap := gtx.Dp(theme.SpaceMD)
+	gap := gtx.Dp(theme.SpaceLG)
 	y := 0
 	lay := func(tag event.Tag, draw func(gtx *layout.Context) (layout.Dimensions, error)) {
 		local := *gtx
@@ -372,6 +372,7 @@ func (f *startFlow) layRoot(env *kit.Env, sc *screens, lay fieldLay) {
 			Placeholder: "Pick a root",
 			Options:     rootOptions(roots),
 			Value:       f.rootSel,
+			Block:       true,
 		}
 		res, err := f.root.Layout(env, gtx, props)
 		if res.Changed {
@@ -389,6 +390,7 @@ func (f *startFlow) layVendor(env *kit.Env, c *composer, lay fieldLay) {
 			Placeholder: "Pick a vendor",
 			Options:     vendorOptions(c),
 			Value:       f.vendorSel,
+			Block:       true,
 		}
 		res, err := f.vendor.Layout(env, gtx, props)
 		if res.Changed {
@@ -418,6 +420,7 @@ func (f *startFlow) layEffort(env *kit.Env, lay fieldLay) {
 			Label:   "Effort",
 			Options: effortOptions(),
 			Value:   f.effortSel,
+			Block:   true,
 		}
 		res, err := f.effort.Layout(env, gtx, props)
 		if res.Changed {
