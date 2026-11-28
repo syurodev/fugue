@@ -15,11 +15,12 @@ import (
 	"github.com/syurodev/fugue/ui/internal/vault"
 )
 
-// FUG-108: the shell's bars are sized for the xs controls they hold and for
-// the §3.4 outer focus ring those controls draw outside their box. The status
-// bar is HitMin so the Lock control fits its band instead of overflowing it,
-// and the slot header is TopBarHeight so an xs control keeps ring room above
-// and below inside the island clip.
+// FUG-108: the shell's bars are sized for the xs controls they hold. The
+// status bar is HitMin so the Lock control fits its band instead of
+// overflowing it, and the slot header is TopBarHeight so an xs control keeps
+// ring room above and below inside the island clip. The chrome focus rule
+// itself moved to the hover wash in FUG-109; the slot header close button is
+// island content, not chrome, and keeps its ring.
 
 // fug108Ring is the px a §3.4 focus ring reaches outside a control.
 func fug108Ring(gtx *layout.Context) int {
@@ -60,7 +61,7 @@ func fug108BandClean(t *testing.T, base, focused *image.RGBA, y0, y1, minX, maxX
 	}
 }
 
-func TestStatusBarCentresTheXSLockControlWithItsRingVisible(t *testing.T) {
+func TestStatusBarCentresTheXSLockControlWithItsFocusWash(t *testing.T) {
 	t.Parallel()
 	vc := newFakeAppVaultClient()
 	vw := vault.NewWorker(func() vault.Client { return vc })
@@ -83,7 +84,7 @@ func TestStatusBarCentresTheXSLockControlWithItsRingVisible(t *testing.T) {
 	var ops op.Ops
 	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
 	statusH := gtx.Dp(theme.StatusBarHeight)
-	lockProps := kit.IconButtonProps{Icon: kit.IconLock, Label: labelLockVault, Variant: kit.IconButtonGhost, Size: kit.SizeXS}
+	lockProps := kit.IconButtonProps{Icon: kit.IconLock, Label: labelLockVault, Variant: kit.IconButtonGhost, Size: kit.SizeXS, FocusWash: true}
 	side := sc.vaultGate.lockBtn.Measure(env, &gtx, &lockProps).Size.X
 	if statusH != side {
 		t.Fatalf("status bar %d dp does not equal the xs Lock control %d dp; the control overflows the band", statusH, side)
@@ -92,21 +93,13 @@ func TestStatusBarCentresTheXSLockControlWithItsRingVisible(t *testing.T) {
 		t.Fatalf("the Lock control is not centred with even padding: %d/%d", pad, statusH-side)
 	}
 
-	ring := fug108Ring(&gtx)
+	// The chrome focus rule (§3.4, FUG-109): the focused Lock control shows
+	// the hover wash — hundreds of pixels past the noise floor inside the
+	// box — and draws no ring ink outside it, at the window's bottom edge.
 	lockX := w - gtx.Dp(theme.SpaceMD) - side // no connection dot: the lock is flush right
 	barTop := hgt - statusH
-	lockTop := barTop + (statusH-side)/2
-
-	// The ring's top segment draws above the bar over the chrome — the bar
-	// pushes no clip, so the ring is not cut the way a 22 dp band cut it.
-	fug108BandInked(t, base, focused, lockTop-ring, lockTop-2, lockX+8, lockX+16, "ring above the status bar")
-	// The ring's side segments show inside the band, around the control.
-	fug108BandInked(t, base, focused, lockTop+8, lockTop+16, lockX-ring, lockX-1, "ring left of the Lock control")
-	fug108BandInked(t, base, focused, lockTop+8, lockTop+16, lockX+side+2, lockX+side+ring, "ring right of the Lock control")
-	// The ring's bottom corner arcs run to the window's last row; the
-	// straight bottom segment lies past the surface — the same window-edge
-	// bound the top bar's controls live with at the top edge.
-	fug108BandInked(t, base, focused, hgt-6, hgt, lockX-8, lockX+side+8, "ring bottom arcs at the window edge")
+	box := image.Rect(lockX, barTop+(statusH-side)/2, lockX+side, barTop+(statusH-side)/2+side)
+	fug109WashShown(t, base, focused, box, "status bar Lock")
 }
 
 func TestSlotHeaderKeepsTheXSCloseButtonsRingInsideTheIsland(t *testing.T) {
