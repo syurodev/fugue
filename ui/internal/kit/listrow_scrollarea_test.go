@@ -364,7 +364,19 @@ func TestListRowAndSectionHeaderTextContrastOnSurface(t *testing.T) {
 					}
 				}
 			}
+			checkChromeFocusFillContrast(t, tc.name, &c)
 		})
+	}
+}
+
+// checkChromeFocusFillContrast pins the icon pairing of the chrome focus
+// fill (§3.4, FUG-109): the fill is icon-only, so the ghost variant's
+// interaction color, Fg, must hold 4.5:1 on the token composited over the
+// chrome surface — the list text colors above never draw on it.
+func checkChromeFocusFillContrast(t *testing.T, mode string, c *theme.Chrome) {
+	t.Helper()
+	if got := contrastRatio(c.Fg, over(c.AppBg, c.SelectedFocusWash)); got < 4.5 {
+		t.Errorf("%s SelectedFocusWash Fg contrast = %.2f, want >= 4.5", mode, got)
 	}
 }
 

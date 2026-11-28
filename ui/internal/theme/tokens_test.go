@@ -179,6 +179,7 @@ func washTargets(m *mode) (onSurface []washTarget, onAction washTarget) {
 			{"HoverWash", c.HoverWash, c.Fg, 0.07},
 			{"PressedWash", c.PressedWash, c.Fg, 0.14},
 			{"SelectedWash", c.SelectedWash, c.Fg, 0.11},
+			{"SelectedFocusWash", c.SelectedFocusWash, c.Fg, 0.18},
 			{"FillSoft", c.FillSoft, c.Fg, 0.06},
 			{"FillSoftHover", c.FillSoftHover, c.Fg, 0.10},
 			{"BorderSubtle", c.BorderSubtle, c.Fg, 0.09},

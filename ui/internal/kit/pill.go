@@ -110,6 +110,12 @@ func boolFloat(b bool) float32 {
 	return 0
 }
 
+// Mix crossfades two colors by t in 0..1, premultiplied — the transition the
+// kit's own fills use (§3.7). Exported for draw sites outside the kit that
+// animate between two theme washes: the rail's SelectedWash pill crossfading
+// to SelectedFocusWash under its focused button (§3.4, FUG-109).
+func Mix(a, b color.NRGBA, t float32) color.NRGBA { return mix(a, b, t) }
+
 func stepPresence(env *Env, p *motion.Presence) float32 {
 	if env.ReducedMotion {
 		p.Snap(p.Shown())

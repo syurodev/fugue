@@ -303,7 +303,7 @@ func (b *titleBar) layoutThemeToggleBtn(env *kit.Env, gtx *layout.Context, sc *s
 		icon, tip = kit.IconSun, "Switch to light theme (Ctrl+D)"
 	}
 	env.Offset(gtx, image.Pt(x, y), func(gtx *layout.Context) {
-		props := kit.IconButtonProps{Icon: icon, Label: tip, Variant: kit.IconButtonGhost, Size: kit.SizeXS}
+		props := kit.IconButtonProps{Icon: icon, Label: tip, Variant: kit.IconButtonGhost, Size: kit.SizeXS, FocusWash: true}
 		clicked, err := b.themeBtn.Layout(env, gtx, &props)
 		sc.fail(err)
 		if clicked {
@@ -320,7 +320,7 @@ func (b *titleBar) layoutSettingsBtn(env *kit.Env, gtx *layout.Context, sc *scre
 	}
 	open := sc.hasSlotKind(KindSettings)
 	env.Offset(gtx, image.Pt(x, y), func(gtx *layout.Context) {
-		props := kit.IconButtonProps{Icon: kit.IconSettings, Label: tip, Variant: kit.IconButtonGhost, Size: kit.SizeXS, Toggled: open}
+		props := kit.IconButtonProps{Icon: kit.IconSettings, Label: tip, Variant: kit.IconButtonGhost, Size: kit.SizeXS, Toggled: open, FocusWash: true}
 		clicked, err := b.settingsBtn.Layout(env, gtx, &props)
 		sc.fail(err)
 		if dirty {

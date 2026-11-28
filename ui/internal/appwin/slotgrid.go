@@ -114,6 +114,7 @@ type slotGrid struct {
 	railBtns            map[railItem]*kit.IconButtonState
 	stripeBtns          map[SlotKind]*kit.IconButtonState
 	railY               motion.Follower
+	railPillFocusF      motion.Follower
 	sidebarOpenF        motion.Follower
 	sidebarFadeF        motion.Follower
 	wasTempFolded       bool
@@ -170,6 +171,7 @@ func newSlotGrid() *slotGrid {
 		railBtns:            map[railItem]*kit.IconButtonState{},
 		stripeBtns:          map[SlotKind]*kit.IconButtonState{},
 		railY:               motion.NewFollower(motion.Smooth()),
+		railPillFocusF:      motion.NewFollower(motion.Snappy()),
 		sidebarOpenF:        motion.NewFollower(motion.Smooth()),
 		sidebarFadeF:        motion.NewFollower(motion.Snappy()),
 		tempSidebarPresence: motion.NewPresence(motion.Smooth(), motion.Exit()),

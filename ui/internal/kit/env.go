@@ -321,6 +321,14 @@ func (e *Env) FocusVisible(gtx *layout.Context, tag event.Tag) bool {
 	return tag != nil && gtx.Focused(tag) && e.modality
 }
 
+// FocusShown is FocusVisible for draw sites outside a control — the rail's
+// SelectedWash pill under its active button (§3.4, FUG-109) — with the same
+// gallery preview override the controls honor, so tests and the gallery can
+// force the state the same way on both.
+func (e *Env) FocusShown(gtx *layout.Context, tag event.Tag) bool {
+	return e.FocusVisible(gtx, tag) || e.previewFocus(tag)
+}
+
 // previewHover reports whether the gallery frame forces tag hovered.
 func (e *Env) previewHover(tag event.Tag) bool {
 	return tag != nil && e.Preview.Hover == tag

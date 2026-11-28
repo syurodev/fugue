@@ -20,7 +20,9 @@ import (
 // required: it is the accessible name — Gio v0.10.3 exposes no
 // accessibility tree, so the kit carries the name for it and for the
 // tooltip that will point at this control (UK-05). Like Button it draws its
-// ring outside its box, so no parent may clip it.
+// ring outside its box, so no parent may clip it — except the app chrome
+// buttons, whose FocusWash option swaps the ring for the hover wash (§3.4,
+// FUG-109).
 
 // IconButtonVariant is the visual variant (§6.3): ghost is the default
 // toolbar icon button, secondary gives it the tinted box, bordered the faint
@@ -47,6 +49,15 @@ type IconButtonProps struct {
 	Toggled        bool
 	Disabled       bool
 	NoSelectedFill bool
+	// FocusWash shows keyboard focus as the variant's hover wash instead of
+	// the §3.4 outer focus ring, for the app chrome buttons that sit on
+	// AppBg around the islands (Left Rail, Right Stripe, Top Bar, Status
+	// Bar — ui-kit §3.4, FUG-109): many of them rest against the window
+	// edge, where an outer ring would lose its far segment to the surface.
+	// The wash fades in and out with the ring's Snappy motion and, when the
+	// button is toggled, stacks over the selected fill so a focused toggled
+	// button stays distinct from a merely toggled one.
+	FocusWash bool
 }
 
 // IconButtonState is the long-lived state the caller keeps per logical
@@ -81,12 +92,16 @@ func (s *IconButtonState) Layout(env *Env, gtx *layout.Context, p *IconButtonPro
 		look.sel.A = 0
 	}
 	var err error
-	s.paint(env, gtx, image.Rectangle{Max: side}, gtx.Dp(theme.RadiusMD), look, mv,
-		func(fg color.NRGBA) {
-			d := buttonIconSize(p.Size)
-			box := gtx.Dp(d)
-			err = drawIconAt(env, gtx, image.Pt((side.X-box)/2, (side.Y-box)/2), p.Icon, d, fg)
-		})
+	content := func(fg color.NRGBA) {
+		d := buttonIconSize(p.Size)
+		box := gtx.Dp(d)
+		err = drawIconAt(env, gtx, image.Pt((side.X-box)/2, (side.Y-box)/2), p.Icon, d, fg)
+	}
+	if p.FocusWash {
+		s.paintFocusWash(env, gtx, image.Rectangle{Max: side}, gtx.Dp(theme.RadiusMD), look, mv, content)
+	} else {
+		s.paint(env, gtx, image.Rectangle{Max: side}, gtx.Dp(theme.RadiusMD), look, mv, content)
+	}
 	if err != nil {
 		return false, fmt.Errorf("draw the icon button: %w", err)
 	}
@@ -112,7 +127,7 @@ func (s *IconButtonState) Layout(env *Env, gtx *layout.Context, p *IconButtonPro
 // look at DisabledOpacity (§4.1).
 func iconButtonLookOf(env *Env, v IconButtonVariant, toggled, disabled bool) controlLook {
 	c := env.Th.Chrome()
-	l := controlLook{hover: c.HoverWash, press: c.PressedWash, sel: c.SelectedWash, fg: c.IconMuted, fgHover: c.Fg, ripple: c.RippleWash, ring: c.FocusBorder}
+	l := controlLook{hover: c.HoverWash, press: c.PressedWash, sel: c.SelectedWash, selFocus: c.SelectedFocusWash, fg: c.IconMuted, fgHover: c.Fg, ripple: c.RippleWash, ring: c.FocusBorder}
 	switch v {
 	case IconButtonGhost:
 		// Ghost rests on the bare surface in the colors set above.

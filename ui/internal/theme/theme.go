@@ -103,6 +103,12 @@ type Chrome struct {
 	// SelectedWash is the background of the selected item, stronger than
 	// HoverWash so selection stays visible while another row hovers.
 	SelectedWash color.NRGBA
+	// SelectedFocusWash is the background of a toggled app chrome button
+	// with keyboard focus (§3.4, FUG-109): the selected level plus one hover
+	// step, replacing the selected fill so the focus step reads as clearly
+	// as a hover does — stacking translucent washes moves the composite by
+	// only ~3/255 in dark, which the eye misses.
+	SelectedFocusWash color.NRGBA
 	// FgDisabled is the text and icon color of a disabled control outside a
 	// control (a disabled menu item, a row's secondary text); a disabled
 	// control itself draws whole at DisabledOpacity.
@@ -243,6 +249,7 @@ func newTheme(c *Chrome, p Palette, shaper *text.Shaper) Theme {
 	c.HoverWash = perceived(surface, c.Fg, 0.07)
 	c.PressedWash = perceived(surface, c.Fg, 0.14)
 	c.SelectedWash = perceived(surface, c.Fg, 0.11)
+	c.SelectedFocusWash = perceived(surface, c.Fg, 0.18)
 	c.FgDisabled = fgWash(c.Fg, 0.35)
 	c.FillSoft = perceived(surface, c.Fg, 0.06)
 	c.FillSoftHover = perceived(surface, c.Fg, 0.10)
