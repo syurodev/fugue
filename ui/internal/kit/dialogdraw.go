@@ -105,7 +105,7 @@ func (d *DialogState) drawFrame(env *Env, gtx *layout.Context, props *DialogProp
 // paintFrame does the frame's drawing for one frame, at the current
 // transform.
 func (d *DialogState) paintFrame(env *Env, gtx *layout.Context, props *DialogProps, res *DialogResult, m dialogMetrics) error {
-	bodyH, bodyOps, bands, scrollMax := d.runBody(gtx, props, m)
+	bodyH, bodyOps, bands, scrollMax := d.runBody(env, gtx, props, m)
 	if scrollMax > 0 {
 		d.scroll.SetOffset(min(d.scroll.Offset(), scrollMax))
 	}
@@ -153,9 +153,14 @@ func (d *DialogState) paintFrame(env *Env, gtx *layout.Context, props *DialogPro
 // runBody records the caller's Body at its own origin so drawBody can place
 // it inside the scroll viewport. The body's width leaves room for focus
 // rings, and a frame on its way out disables its input (§3.7).
-func (d *DialogState) runBody(gtx *layout.Context, props *DialogProps, m dialogMetrics) (bodyH int, bodyOps op.CallOp, bands []dialogBand, scrollMax int) {
+func (d *DialogState) runBody(env *Env, gtx *layout.Context, props *DialogProps, m dialogMetrics) (bodyH int, bodyOps op.CallOp, bands []dialogBand, scrollMax int) {
 	if props.Body == nil {
 		return 0, op.CallOp{}, nil, 0
+	}
+	if !props.Inline {
+		off := d.bodyWindowOrigin(env, gtx, m)
+		env.origin = env.origin.Add(off)
+		defer func() { env.origin = env.origin.Sub(off) }()
 	}
 	var handle DialogBands
 	bmacro := op.Record(gtx.Ops)
@@ -169,6 +174,18 @@ func (d *DialogState) runBody(gtx *layout.Context, props *DialogProps, m dialogM
 	bodyOps = bmacro.Stop()
 	scrollMax = max(bodyH-m.maxBody, 0)
 	return bodyH, bodyOps, handle.bands, scrollMax
+}
+
+func (d *DialogState) bodyWindowOrigin(env *Env, gtx *layout.Context, m dialogMetrics) image.Point {
+	ring := dialogRing(gtx)
+	headerH := m.pad + m.headH + gtx.Dp(theme.SpaceSM) + m.descH
+	if !d.rect.Empty() {
+		return image.Pt(d.rect.Min.X+m.pad+ring, d.rect.Min.Y+headerH-d.scroll.Offset())
+	}
+	w := m.innerW + 2*m.pad
+	win := env.windowRect()
+	pos := clampInto(image.Pt((win.Dx()-w)/2, (win.Dy()-m.maxBody)/3), image.Pt(w, m.maxBody), win)
+	return image.Pt(pos.X+m.pad+ring, pos.Y+headerH)
 }
 
 // drawChrome paints the frame's surface, title and description inside the

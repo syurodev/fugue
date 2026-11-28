@@ -48,7 +48,10 @@ type SuggestProps struct {
 	EmptyText string
 	NoResText string
 	MinWidth  int
-	Inline    bool
+	// FieldAlign aligns a Combobox's list (§6.14) flush with the field box and
+	// its item text with the field's value text.
+	FieldAlign bool
+	Inline     bool
 }
 
 // SuggestResult reports what happened in the frame (UK-06).
@@ -76,6 +79,7 @@ type SuggestListState struct {
 	rect         image.Rectangle
 	from, dir    image.Point
 	pad          int
+	itemInset    int
 	rows         []menuRow
 	cols         menuCols
 	items        []SuggestItem
@@ -362,15 +366,16 @@ func (s *SuggestListState) setRect(pos, size image.Point, dirY int) {
 func (s *SuggestListState) layoutRows(env *Env, gtx *layout.Context, p *SuggestProps) (image.Point, error) {
 	s.pad = gtx.Dp(theme.SpaceSM)
 	s.rows = s.rows[:0]
-	minW := max(p.MinWidth, max(p.Anchor.Dx(), gtx.Dp(theme.MenuMinWidth)))
-	w := minW - 2*s.pad
+	minW, insetX := suggestSizing(gtx, p)
+	s.itemInset = insetX
+	w := max(minW-2*s.pad, 0)
 	rowH := gtx.Dp(theme.Row)
 
 	if s.status != suggestItems {
 		s.cols = menuCols{}
 		txt := s.statusLabel(p)
-		tw := 2*gtx.Dp(theme.SpaceMD) + measureLabel(env, gtx, theme.TypeSmall(), txt).X
-		if s.status == suggestLoading {
+		tw := 2*insetX + measureLabel(env, gtx, theme.TypeSmall(), txt).X
+		if s.status == suggestLoading || p.FieldAlign {
 			tw += gtx.Dp(theme.IconMD) + gtx.Dp(theme.SpaceSM)
 		}
 		w = max(w, tw)
@@ -382,14 +387,29 @@ func (s *SuggestListState) layoutRows(env *Env, gtx *layout.Context, p *SuggestP
 	if err != nil {
 		return image.Point{}, err
 	}
+	if p.FieldAlign {
+		// Reserve the leading icon column so item text aligns with TextFieldSearch value text.
+		cols.icons = true
+	}
 	s.cols = cols
 	y := 0
 	for i := range s.items {
-		w = max(w, suggestItemWidth(env, gtx, &s.items[i], cols))
+		w = max(w, suggestItemWidth(env, gtx, &s.items[i], cols, insetX))
 		s.rows = append(s.rows, menuRow{y: y, h: rowH})
 		y += rowH
 	}
 	return image.Pt(w+2*s.pad, y+2*s.pad), nil
+}
+
+func suggestSizing(gtx *layout.Context, p *SuggestProps) (minW, insetX int) {
+	if p.FieldAlign {
+		minW = max(p.MinWidth, p.Anchor.Dx())
+		if minW <= 0 {
+			minW = gtx.Dp(theme.MenuMinWidth)
+		}
+		return minW, gtx.Dp(theme.SpaceSM)
+	}
+	return max(p.MinWidth, max(p.Anchor.Dx(), gtx.Dp(theme.MenuMinWidth))), gtx.Dp(theme.SpaceMD)
 }
 
 func (s *SuggestListState) statusLabel(p *SuggestProps) string {
@@ -446,9 +466,13 @@ func (s *SuggestListState) drawBody(env *Env, gtx *layout.Context, p *SuggestPro
 		s.drawStatusRow(env, gtx, inner, p)
 		return nil
 	}
+	insetX := s.itemInset
+	if insetX == 0 {
+		insetX = gtx.Dp(theme.SpaceMD)
+	}
 	for j := range s.items {
 		row := image.Rect(inner.Min.X, inner.Min.Y+s.rows[j].y, inner.Max.X, inner.Min.Y+s.rows[j].y+s.rows[j].h)
-		if err := drawSuggestItem(env, gtx, &s.items[j], row, s.cols); err != nil {
+		if err := drawSuggestItem(env, gtx, &s.items[j], row, s.cols, insetX); err != nil {
 			return err
 		}
 	}

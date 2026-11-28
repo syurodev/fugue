@@ -38,10 +38,35 @@ func menuColumns(env *Env, gtx *layout.Context, items []MenuItem) (menuCols, err
 	return cols, nil
 }
 
+// layoutRows measures the items into rows and returns the panel's size: the
+// widest item plus the padding, never under minW. When any item has an icon
+// every item leaves the icon column, so the labels line up (§6.15).
+func (lv *menuLevel) layoutRows(env *Env, gtx *layout.Context, minW, insetX int) (image.Point, error) {
+	lv.pad = gtx.Dp(theme.SpaceSM)
+	lv.rows = lv.rows[:0]
+	cols, err := menuColumns(env, gtx, lv.items)
+	if err != nil {
+		return image.Point{}, err
+	}
+	lv.cols = cols
+	y, w := 0, max(minW-2*lv.pad, 0)
+	for i := range lv.items {
+		h := gtx.Dp(theme.Row)
+		if lv.items[i].separator {
+			h = 2*gtx.Dp(theme.SpaceXS) + gtx.Dp(theme.Hairline)
+		} else {
+			w = max(w, menuItemWidth(env, gtx, &lv.items[i], cols, insetX))
+		}
+		lv.rows = append(lv.rows, menuRow{y: y, h: h})
+		y += h
+	}
+	return image.Pt(w+2*lv.pad, y+2*lv.pad), nil
+}
+
 // menuItemWidth is the room one item needs: the paddings, the icon column,
 // the label, the shortcut column and the submenu arrow.
-func menuItemWidth(env *Env, gtx *layout.Context, it *MenuItem, cols menuCols) int {
-	w := 2*gtx.Dp(theme.SpaceMD) + measureLabel(env, gtx, theme.TypeBody(), it.Label).X
+func menuItemWidth(env *Env, gtx *layout.Context, it *MenuItem, cols menuCols, insetX int) int {
+	w := 2*insetX + measureLabel(env, gtx, theme.TypeBody(), it.Label).X
 	if cols.icons {
 		w += gtx.Dp(theme.IconMD) + gtx.Dp(theme.SpaceSM)
 	}
@@ -57,7 +82,7 @@ func menuItemWidth(env *Env, gtx *layout.Context, it *MenuItem, cols menuCols) i
 // drawMenuItem draws one row inside r: a separator is a hairline; an item is
 // the icon column, the label, and the shortcut chip and the arrow at the
 // right edge. A disabled item draws in FgDisabled (§3.5).
-func drawMenuItem(env *Env, gtx *layout.Context, it *MenuItem, r image.Rectangle, cols menuCols) error {
+func drawMenuItem(env *Env, gtx *layout.Context, it *MenuItem, r image.Rectangle, cols menuCols, insetX int) error {
 	c := env.Th.Chrome()
 	if it.separator {
 		y := r.Min.Y + r.Dy()/2
@@ -68,7 +93,7 @@ func drawMenuItem(env *Env, gtx *layout.Context, it *MenuItem, r image.Rectangle
 	if it.Disabled {
 		fg, ink = c.FgDisabled, c.FgDisabled
 	}
-	x := r.Min.X + gtx.Dp(theme.SpaceMD)
+	x := r.Min.X + insetX
 	iconPx := gtx.Dp(theme.IconMD)
 	if cols.icons {
 		if it.Icon != "" {
@@ -79,7 +104,7 @@ func drawMenuItem(env *Env, gtx *layout.Context, it *MenuItem, r image.Rectangle
 		x += iconPx + gtx.Dp(theme.SpaceSM)
 	}
 	drawMenuText(env, gtx, theme.TypeBody(), fg, it.Label, image.Pt(x, r.Min.Y), r.Dy())
-	right := r.Max.X - gtx.Dp(theme.SpaceMD)
+	right := r.Max.X - insetX
 	if len(it.Sub) > 0 {
 		arrow := gtx.Dp(theme.IconSM)
 		right -= arrow
@@ -142,8 +167,8 @@ func suggestColumns(env *Env, gtx *layout.Context, items []SuggestItem) (menuCol
 	return cols, nil
 }
 
-func suggestItemWidth(env *Env, gtx *layout.Context, it *SuggestItem, cols menuCols) int {
-	w := 2*gtx.Dp(theme.SpaceMD) + measureLabel(env, gtx, theme.TypeBody(), it.Label).X
+func suggestItemWidth(env *Env, gtx *layout.Context, it *SuggestItem, cols menuCols, insetX int) int {
+	w := 2*insetX + measureLabel(env, gtx, theme.TypeBody(), it.Label).X
 	if cols.icons {
 		w += gtx.Dp(theme.IconMD) + gtx.Dp(theme.SpaceSM)
 	}
@@ -156,13 +181,13 @@ func suggestItemWidth(env *Env, gtx *layout.Context, it *SuggestItem, cols menuC
 	return w
 }
 
-func drawSuggestItem(env *Env, gtx *layout.Context, it *SuggestItem, r image.Rectangle, cols menuCols) error {
+func drawSuggestItem(env *Env, gtx *layout.Context, it *SuggestItem, r image.Rectangle, cols menuCols, insetX int) error {
 	c := env.Th.Chrome()
 	fg, secFg, ink := c.Fg, c.FgMuted, c.IconMuted
 	if it.Disabled {
 		fg, secFg, ink = c.FgDisabled, c.FgDisabled, c.FgDisabled
 	}
-	x := r.Min.X + gtx.Dp(theme.SpaceMD)
+	x := r.Min.X + insetX
 	iconPx := gtx.Dp(theme.IconMD)
 	if cols.icons {
 		if it.Icon != "" {
@@ -177,7 +202,7 @@ func drawSuggestItem(env *Env, gtx *layout.Context, it *SuggestItem, r image.Rec
 		x += measureLabel(env, gtx, theme.TypeBody(), it.Label).X + gtx.Dp(theme.SpaceSM)
 		drawMenuText(env, gtx, theme.TypeSmall(), secFg, it.Secondary, image.Pt(x, r.Min.Y), r.Dy())
 	}
-	right := r.Max.X - gtx.Dp(theme.SpaceMD)
+	right := r.Max.X - insetX
 	return drawMenuShortcut(env, gtx, it.ID, it.Shortcut, it.Disabled, r, right)
 }
 
@@ -196,7 +221,11 @@ func suggestEdgeEnabled(items []SuggestItem, first bool) int {
 
 func (s *SuggestListState) drawStatusRow(env *Env, gtx *layout.Context, inner image.Rectangle, p *SuggestProps) {
 	c := env.Th.Chrome()
-	x := inner.Min.X + gtx.Dp(theme.SpaceMD)
+	insetX := s.itemInset
+	if insetX == 0 {
+		insetX = gtx.Dp(theme.SpaceMD)
+	}
+	x := inner.Min.X + insetX
 	h := s.rows[0].h
 	if s.spinnerVisible(gtx, p.Inline) {
 		iconPx := gtx.Dp(theme.IconMD)
@@ -205,7 +234,7 @@ func (s *SuggestListState) drawStatusRow(env *Env, gtx *layout.Context, inner im
 			s.spinner.Layout(env, gtx, iconPx, c.IconMuted)
 		})
 		x += iconPx + gtx.Dp(theme.SpaceSM)
-	} else if s.status == suggestLoading {
+	} else if s.status == suggestLoading || p.FieldAlign {
 		x += gtx.Dp(theme.IconMD) + gtx.Dp(theme.SpaceSM)
 	}
 	drawMenuText(env, gtx, theme.TypeSmall(), c.FgMuted, s.statusLabel(p), image.Pt(x, inner.Min.Y), h)

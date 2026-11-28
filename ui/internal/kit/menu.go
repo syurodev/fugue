@@ -66,7 +66,11 @@ type MenuProps struct {
 	Items    []MenuItem
 	Anchor   image.Rectangle
 	AlignEnd bool // align the menu's right edge with the trigger's
-	Inline   bool
+	// FieldAlign enables anchor-width mode for field-opened menus (Select
+	// §6.13): the root panel is at least as wide as Anchor, aligned flush with
+	// Anchor inside the window, and its item text aligns with field value text.
+	FieldAlign bool
+	Inline     bool
 }
 
 func (p MenuProps) anchorFor(width int) image.Rectangle {
@@ -107,6 +111,7 @@ type menuLevel struct {
 	rect      image.Rectangle
 	from, dir image.Point
 	pad       int
+	itemInset int
 	cols      menuCols
 }
 
@@ -317,10 +322,7 @@ func (lv *menuLevel) progress(inline bool) float32 {
 // panel on its way out keeps the place it had.
 func (m *MenuState) place(env *Env, gtx *layout.Context, p MenuProps) error {
 	m.origin = env.origin
-	win := env.floatingWindowRect(gtx)
-	if p.Inline {
-		win = image.Rect(-1<<20, -1<<20, 1<<20, 1<<20)
-	}
+	win := m.rootWindow(env, gtx, p)
 	gap := gtx.Dp(theme.SpaceXS)
 	for k := range m.lv {
 		lv := &m.lv[k]
@@ -328,7 +330,9 @@ func (m *MenuState) place(env *Env, gtx *layout.Context, p MenuProps) error {
 			break
 		}
 		if lv.open.Shown() {
-			size, err := lv.layoutRows(env, gtx)
+			minW, insetX := m.levelSizing(gtx, k, p)
+			lv.itemInset = insetX
+			size, err := lv.layoutRows(env, gtx, minW, insetX)
 			if err != nil {
 				return err
 			}
@@ -339,13 +343,36 @@ func (m *MenuState) place(env *Env, gtx *layout.Context, p MenuProps) error {
 				pos, up := placeBelow(p.anchorFor(size.X), size, win, gap)
 				lv.setRect(pos, size, image.Pt(0, dirOf(up)))
 			default:
-				pos, left := placeBeside(m.lv[k-1].parentItem(), size, env.windowRect(), win, 0)
+				pos, left := placeBeside(m.lv[k-1].parentItem(), size, env.windowRect(), env.floatingWindowRect(gtx), 0)
 				lv.setRect(pos, size, image.Pt(dirOf(left), 0))
 			}
 		}
 		lv.follow(env)
 	}
 	return nil
+}
+
+func (m *MenuState) rootWindow(env *Env, gtx *layout.Context, p MenuProps) image.Rectangle {
+	if p.Inline {
+		return image.Rect(-1<<20, -1<<20, 1<<20, 1<<20)
+	}
+	if p.FieldAlign {
+		// Field dropdowns align flush with the field box inside the window edge.
+		return env.windowRect()
+	}
+	return env.floatingWindowRect(gtx)
+}
+
+func (m *MenuState) levelSizing(gtx *layout.Context, k int, p MenuProps) (minW, insetX int) {
+	if k > 0 || !p.FieldAlign {
+		return gtx.Dp(theme.MenuMinWidth), gtx.Dp(theme.SpaceMD)
+	}
+	minW = p.Anchor.Dx()
+	if minW <= 0 {
+		minW = gtx.Dp(theme.MenuMinWidth)
+	}
+	// Panel pad (SpaceSM) + item inset (SpaceSM) = SpaceLG, matching field padding.
+	return minW, gtx.Dp(theme.SpaceSM)
 }
 
 // dirOf is the side a flipped panel shifts in from: +1 when flipped.
@@ -377,31 +404,6 @@ func (lv *menuLevel) parentItem() image.Rectangle {
 	row := lv.rows[lv.sub]
 	top := lv.rect.Min.Y + row.y
 	return image.Rect(lv.rect.Min.X, top, lv.rect.Max.X, top+row.h)
-}
-
-// layoutRows measures the items into rows and returns the panel's size: the
-// widest item plus the padding, never under MenuMinWidth. When any item has
-// an icon every item leaves the icon column, so the labels line up (§6.15).
-func (lv *menuLevel) layoutRows(env *Env, gtx *layout.Context) (image.Point, error) {
-	lv.pad = gtx.Dp(theme.SpaceSM)
-	lv.rows = lv.rows[:0]
-	cols, err := menuColumns(env, gtx, lv.items)
-	if err != nil {
-		return image.Point{}, err
-	}
-	lv.cols = cols
-	y, w := 0, gtx.Dp(theme.MenuMinWidth)-2*lv.pad
-	for i := range lv.items {
-		h := gtx.Dp(theme.Row)
-		if lv.items[i].separator {
-			h = 2*gtx.Dp(theme.SpaceXS) + gtx.Dp(theme.Hairline)
-		} else {
-			w = max(w, menuItemWidth(env, gtx, &lv.items[i], cols))
-		}
-		lv.rows = append(lv.rows, menuRow{y: y, h: h})
-		y += h
-	}
-	return image.Pt(w+2*lv.pad, y+2*lv.pad), nil
 }
 
 // follow moves the highlight toward the item under the pointer: it slides
@@ -476,9 +478,13 @@ func (m *MenuState) drawLevel(env *Env, gtx *layout.Context, k int, inline bool)
 	defer paint.PushOpacity(gtx.Ops, unit01(p)).Pop()
 
 	inner := drawMenuPanelSurface(env, gtx, lv.rect, lv.pad, lv.hiYv, lv.hiAv)
+	insetX := lv.itemInset
+	if insetX == 0 {
+		insetX = gtx.Dp(theme.SpaceMD)
+	}
 	for j := range lv.items {
 		row := image.Rect(inner.Min.X, inner.Min.Y+lv.rows[j].y, inner.Max.X, inner.Min.Y+lv.rows[j].y+lv.rows[j].h)
-		if err := drawMenuItem(env, gtx, &lv.items[j], row, lv.cols); err != nil {
+		if err := drawMenuItem(env, gtx, &lv.items[j], row, lv.cols, insetX); err != nil {
 			return err
 		}
 	}
