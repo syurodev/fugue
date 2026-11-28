@@ -59,82 +59,107 @@ func ringDiffCount(a, b *image.RGBA, r image.Rectangle) int {
 	return n
 }
 
+// ringViewportRect is the ScrollArea's 200×100 viewport inside the ring scene
+// frame.
+func ringViewportRect() image.Rectangle {
+	return image.Rect(20, 20, 220, 120)
+}
+
+// assertSideRingInk expects the §3.4 outer ring of a control that spans its
+// column: its side segments land in the margin past both clip edges, which
+// only the widened paint clip lets them do.
+func assertSideRingInk(t *testing.T, base, focused *image.RGBA) {
+	t.Helper()
+	const ringPx = int(theme.FocusStroke) + int(theme.FocusOffset)
+	vp := ringViewportRect()
+	left := image.Rect(vp.Min.X-ringPx, vp.Min.Y, vp.Min.X-2, vp.Max.Y)
+	right := image.Rect(vp.Max.X+2, vp.Min.Y, vp.Max.X+ringPx, vp.Max.Y)
+	if ringDiffCount(base, focused, left) == 0 {
+		t.Fatal("no focus ring ink left of the scroll clip edge; the cross-axis clip cut it")
+	}
+	if ringDiffCount(base, focused, right) == 0 {
+		t.Fatal("no focus ring ink right of the scroll clip edge; the cross-axis clip cut it")
+	}
+}
+
+// assertInsetRingInk expects the inset ring of a control that draws inside its
+// own box (the tabs strip): its full ink sits just inside both edges.
+func assertInsetRingInk(t *testing.T, base, focused *image.RGBA) {
+	t.Helper()
+	vp := ringViewportRect()
+	left := image.Rect(vp.Min.X+1, vp.Min.Y, vp.Min.X+4, vp.Max.Y)
+	right := image.Rect(vp.Max.X-4, vp.Min.Y, vp.Max.X-1, vp.Max.Y)
+	if ringDiffCount(base, focused, left) == 0 {
+		t.Fatal("no inset focus ring ink just inside the left edge")
+	}
+	if ringDiffCount(base, focused, right) == 0 {
+		t.Fatal("no inset focus ring ink just inside the right edge")
+	}
+}
+
+// assertExactScrollClip holds for both ring kinds: nothing draws above the
+// viewport, where a control at the top of the content would reach if the
+// widening leaked onto the scroll axis.
+func assertExactScrollClip(t *testing.T, base, focused *image.RGBA) {
+	t.Helper()
+	const ringPx = int(theme.FocusStroke) + int(theme.FocusOffset)
+	above := image.Rect(0, ringViewportRect().Min.Y-ringPx, 240, ringViewportRect().Min.Y)
+	if n := ringDiffCount(base, focused, above); n != 0 {
+		t.Fatalf("%d changed pixels above the viewport; the scroll axis clip is not exact", n)
+	}
+}
+
+// ringSelectControl builds a Block select that spans the column.
+func ringSelectControl(t *testing.T, h *harness) (func(*layout.Context) layout.Dimensions, event.Tag) {
+	t.Helper()
+	st := NewSelectState()
+	props := SelectProps{Block: true, Value: "a", Options: []SelectOption{{ID: "a", Label: "Main"}}}
+	return func(gtx *layout.Context) layout.Dimensions {
+		if _, err := st.Layout(h.env, gtx, &props); err != nil {
+			t.Fatalf("select layout: %v", err)
+		}
+		return st.Measure(h.env, gtx, &props)
+	}, st.Tag()
+}
+
+// ringFieldControl builds a TextField that the stretching constraint spans.
+func ringFieldControl(t *testing.T, h *harness) (func(*layout.Context) layout.Dimensions, event.Tag) {
+	t.Helper()
+	st := NewTextFieldState()
+	props := TextFieldProps{Placeholder: "Repo name"}
+	return func(gtx *layout.Context) layout.Dimensions {
+		if _, err := st.Layout(h.env, gtx, &props); err != nil {
+			t.Fatalf("text field layout: %v", err)
+		}
+		return st.Measure(h.env, gtx, &props)
+	}, st.Tag()
+}
+
+// ringTabsControl builds a TabsMode strip that spans the column.
+func ringTabsControl(t *testing.T, h *harness) (func(*layout.Context) layout.Dimensions, event.Tag) {
+	t.Helper()
+	st := NewTabsState()
+	props := TabsProps{
+		Variant:  TabsMode,
+		Items:    []TabItem{{ID: "forms", Label: "Forms"}, {ID: "raw", Label: "Raw TOML"}},
+		ActiveID: "forms",
+	}
+	return func(gtx *layout.Context) layout.Dimensions {
+		dims, _ := st.Layout(h.env, gtx, props)
+		return dims
+	}, st.Tag()
+}
+
 func TestScrollAreaShowsSpanningControlsFullSideFocusRings(t *testing.T) {
 	t.Parallel()
-	// assertSideRings expects the §3.4 outer ring: its side segments land in
-	// the margin past both clip edges. assertInsetRings expects the inset ring
-	// of a control that draws inside its own box (the tabs strip): its full
-	// ink sits just inside both edges.
-	assertSideRings := func(t *testing.T, base, focused *image.RGBA) {
-		t.Helper()
-		const ringPx = int(theme.FocusStroke) + int(theme.FocusOffset)
-		vp := image.Rect(20, 20, 220, 120)
-		left := image.Rect(vp.Min.X-ringPx, vp.Min.Y, vp.Min.X-2, vp.Max.Y)
-		right := image.Rect(vp.Max.X+2, vp.Min.Y, vp.Max.X+ringPx, vp.Max.Y)
-		if ringDiffCount(base, focused, left) == 0 {
-			t.Fatal("no focus ring ink left of the scroll clip edge; the cross-axis clip cut it")
-		}
-		if ringDiffCount(base, focused, right) == 0 {
-			t.Fatal("no focus ring ink right of the scroll clip edge; the cross-axis clip cut it")
-		}
-	}
-	assertInsetRings := func(t *testing.T, base, focused *image.RGBA) {
-		t.Helper()
-		vp := image.Rect(20, 20, 220, 120)
-		left := image.Rect(vp.Min.X+1, vp.Min.Y, vp.Min.X+4, vp.Max.Y)
-		right := image.Rect(vp.Max.X-4, vp.Min.Y, vp.Max.X-1, vp.Max.Y)
-		if ringDiffCount(base, focused, left) == 0 {
-			t.Fatal("no inset focus ring ink just inside the left edge")
-		}
-		if ringDiffCount(base, focused, right) == 0 {
-			t.Fatal("no inset focus ring ink just inside the right edge")
-		}
-	}
-	assertExactScrollClip := func(t *testing.T, base, focused *image.RGBA) {
-		t.Helper()
-		const ringPx = int(theme.FocusStroke) + int(theme.FocusOffset)
-		above := image.Rect(0, 20-ringPx, 240, 20)
-		if n := ringDiffCount(base, focused, above); n != 0 {
-			t.Fatalf("%d changed pixels above the viewport; the scroll axis clip is not exact", n)
-		}
-	}
 	for _, tc := range []struct {
 		name    string
 		control func(t *testing.T, h *harness) (func(*layout.Context) layout.Dimensions, event.Tag)
 		assert  func(t *testing.T, base, focused *image.RGBA)
 	}{
-		{"block select", func(t *testing.T, h *harness) (func(*layout.Context) layout.Dimensions, event.Tag) {
-			st := NewSelectState()
-			props := SelectProps{Block: true, Value: "a", Options: []SelectOption{{ID: "a", Label: "Alpha"}}}
-			return func(gtx *layout.Context) layout.Dimensions {
-				if _, err := st.Layout(h.env, gtx, &props); err != nil {
-					t.Fatalf("select layout: %v", err)
-				}
-				return st.Measure(h.env, gtx, &props)
-			}, st.Tag()
-		}, assertSideRings},
-		{"text field", func(t *testing.T, h *harness) (func(*layout.Context) layout.Dimensions, event.Tag) {
-			st := NewTextFieldState()
-			props := TextFieldProps{Placeholder: "Repo name"}
-			return func(gtx *layout.Context) layout.Dimensions {
-				if _, err := st.Layout(h.env, gtx, &props); err != nil {
-					t.Fatalf("text field layout: %v", err)
-				}
-				return st.Measure(h.env, gtx, &props)
-			}, st.Tag()
-		}, assertSideRings},
-		{"tabs", func(t *testing.T, h *harness) (func(*layout.Context) layout.Dimensions, event.Tag) {
-			st := NewTabsState()
-			props := TabsProps{
-				Variant:  TabsMode,
-				Items:    []TabItem{{ID: "forms", Label: "Forms"}, {ID: "raw", Label: "Raw TOML"}},
-				ActiveID: "forms",
-			}
-			return func(gtx *layout.Context) layout.Dimensions {
-				dims, _ := st.Layout(h.env, gtx, props)
-				return dims
-			}, st.Tag()
-		}, assertInsetRings},
+		{"block select", ringSelectControl, assertSideRingInk},
+		{"text field", ringFieldControl, assertSideRingInk},
+		{"tabs", ringTabsControl, assertInsetRingInk},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -164,7 +189,7 @@ func TestScrollAreaScrollsAndClipsExactlyOnTheScrollAxis(t *testing.T) {
 	h.env.ReducedMotion = true
 	sa := NewScrollAreaState()
 	st := NewSelectState()
-	props := SelectProps{Block: true, Value: "a", Options: []SelectOption{{ID: "a", Label: "Alpha"}}}
+	props := SelectProps{Block: true, Value: "a", Options: []SelectOption{{ID: "a", Label: "Main"}}}
 	control := func(gtx *layout.Context) layout.Dimensions {
 		if _, err := st.Layout(h.env, gtx, &props); err != nil {
 			t.Fatalf("select layout: %v", err)
