@@ -103,7 +103,7 @@ func (v *settingsView) layoutTeamsCard(gtx *layout.Context, env *kit.Env, sc *sc
 				return v.layoutTeamIntField(gtx, env, sc, &spec)
 			}))
 			if i < len(specs)-1 {
-				children = append(children, spacerH(theme.SpaceMD))
+				children = append(children, spacerH(theme.SpaceLG))
 			}
 		}
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
@@ -163,27 +163,27 @@ func (v *settingsView) layoutPolicyCard(gtx *layout.Context, env *kit.Env, sc *s
 					sc.settings.Draft.ApprovalMode = val
 				})
 			}),
-			spacerH(theme.SpaceMD),
+			spacerH(theme.SpaceLG),
 			rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 				return v.layoutPolicySelect(gtx, env, sc, settings.FieldSandboxProfile, "Sandbox profile", "Default filesystem and network profile for new sessions.", v.sandboxSelect, sandboxProfileOptions(), sc.settings.Draft.SandboxProfile, func(val string) {
 					sc.settings.Draft.SandboxProfile = val
 				})
 			}),
-			spacerH(theme.SpaceMD),
+			spacerH(theme.SpaceLG),
 			rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 				return v.layoutShellAllowField(gtx, env, sc)
 			}),
-			spacerH(theme.SpaceMD),
+			spacerH(theme.SpaceLG),
 			rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 				return v.layoutEnvTagsField(gtx, env, sc)
 			}),
-			spacerH(theme.SpaceMD),
+			spacerH(theme.SpaceLG),
 			rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 				return v.layoutPolicySwitch(gtx, env, sc, settings.FieldSessionTeams, "Offer team proposals", v.teamsSwitch, sc.settings.Draft.SessionTeams, func(next bool) {
 					sc.settings.Draft.SessionTeams = next
 				})
 			}),
-			spacerH(theme.SpaceSM),
+			spacerH(theme.SpaceLG),
 			rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 				return v.layoutPolicySwitch(gtx, env, sc, settings.FieldTeamsAutoApprove, "Auto-approve read-only team proposals (max 3 agents)", v.autoApproveSwitch, sc.settings.Draft.TeamsAutoApprove, func(next bool) {
 					sc.settings.Draft.TeamsAutoApprove = next
@@ -207,10 +207,12 @@ func (v *settingsView) layoutPolicySelect(
 		spacerH(theme.SpaceXS),
 		rigidWidget(func(gtx *layout.Context) layout.Dimensions {
 			props := &kit.SelectProps{
-				Helper:   helper,
-				Options:  opts,
-				Value:    value,
-				Disabled: !sc.settings.Loaded || sc.settings.Saving,
+				Placeholder: "Choose…",
+				Helper:      helper,
+				Options:     opts,
+				Value:       value,
+				Disabled:    !sc.settings.Loaded || sc.settings.Saving,
+				Block:       true,
 			}
 			local := *gtx
 			res, err := sel.Layout(env, &local, props)

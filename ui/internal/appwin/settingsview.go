@@ -170,7 +170,7 @@ func (v *settingsView) layoutPreferencesCard(gtx *layout.Context, env *kit.Env, 
 			rigidLabel(env, theme.TypeLabel(), env.Th.Chrome().Fg, "Theme mode"),
 			spacerH(theme.SpaceXS),
 			rigidWidget(func(gtx *layout.Context) layout.Dimensions { return v.layoutThemeModeControl(gtx, env, sc, cur) }),
-			spacerH(theme.SpaceMD),
+			spacerH(theme.SpaceLG),
 			rigidLabel(env, theme.TypeLabel(), env.Th.Chrome().Fg, "UI scale"),
 			spacerH(theme.SpaceXS),
 			rigidWidget(func(gtx *layout.Context) layout.Dimensions { return v.layoutUIScaleControl(gtx, env, sc, cur) }),
@@ -358,6 +358,7 @@ func (v *settingsView) workspaceSelectChild(env *kit.Env, sc *screens, opts []ki
 			Placeholder: "Choose a workspace",
 			Options:     opts,
 			Value:       sc.settings.WorkspaceID,
+			Block:       true,
 		}
 		res, err := v.wsSelect.Layout(env, gtx, props)
 		sc.fail(err)
