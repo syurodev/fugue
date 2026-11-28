@@ -2,6 +2,7 @@ package appwin
 
 import (
 	"image"
+	"strconv"
 	"strings"
 
 	"gioui.org/layout"
@@ -89,11 +90,16 @@ func (s *screens) reconcileWorkspaceDialogs() {
 // and only its add mode carries the list.
 func (s *screens) applyFolderPickerResults(results []folderpicker.Result) {
 	for i := range results {
+		res := results[i]
+		if strings.HasPrefix(res.Tag, memoryPickerExportPrefix) || strings.HasPrefix(res.Tag, memoryPickerImportPrefix) {
+			s.handleMemoryPickerResult(res)
+			continue
+		}
 		switch {
 		case s.dlg.create.dialog.IsOpen():
-			s.dlg.create.folders.picked(results[i])
+			s.dlg.create.folders.picked(res)
 		case s.dlg.root.dialog.IsOpen() && s.dlg.root.edit == "":
-			s.dlg.root.folders.picked(results[i])
+			s.dlg.root.folders.picked(res)
 		}
 	}
 }
@@ -186,6 +192,16 @@ func (s *screens) otherSessionsSection(env *kit.Env, gtx layout.Context, other [
 // workspaceSection draws one workspace: its header with the manage action
 // and, folded under it, the workspace's sessions. While the manage menu of
 // this workspace is open, the menu lays out anchored at the header's action.
+func (s *screens) workspaceBadge(wsID string) string {
+	if s.memory == nil {
+		return ""
+	}
+	if n := s.memory.UnverifiedCount(wsID); n > 0 {
+		return strconv.Itoa(n)
+	}
+	return ""
+}
+
 func (s *screens) workspaceSection(env *kit.Env, gtx *layout.Context, group wsGroup) layout.Dimensions {
 	header := s.wsHeader(group.ws.ID)
 	props := &kit.SectionHeaderProps{
@@ -193,6 +209,7 @@ func (s *screens) workspaceSection(env *kit.Env, gtx *layout.Context, group wsGr
 		Icon:        kit.IconFolder,
 		Inset:       theme.SpaceLG,
 		Collapsible: true,
+		Badge:       s.workspaceBadge(group.ws.ID),
 		Action:      &kit.IconButtonProps{Icon: kit.IconEllipsis, Label: "Manage workspace"},
 	}
 	dims, ev := header.Layout(env, gtx, props, func(gtx *layout.Context) layout.Dimensions {
@@ -251,19 +268,21 @@ func (s *screens) pruneWorkspaceHeaders() {
 }
 
 // wsMenuReview is the manage menu item that opens the policy card.
-const wsMenuReview = "review"
+const (
+	wsMenuReview = "review"
+	wsMenuMemory = "memory"
+)
 
 // manageItems builds the workspace's manage menu: the policy card first
-// while a change waits, then the root management, then the deletion. The
-// root items need the workspace's detail, whose hash every mutation is a
-// compare-and-swap against.
+// while a change waits, then Memory, then root management, then deletion.
 func (s *screens) manageItems(ws workspace.Summary) []kit.MenuItem {
-	items := make([]kit.MenuItem, 0, 4)
+	items := make([]kit.MenuItem, 0, 5)
 	det, hasDetail := s.workspaces.DetailFor(ws.ID)
 	ready := hasDetail && det.ConfigHash != ""
 	if ws.PendingPolicyConfirmation {
 		items = append(items, kit.MenuItem{ID: wsMenuReview, Label: "Review policy change…", Disabled: !ready})
 	}
+	items = append(items, kit.MenuItem{ID: wsMenuMemory, Label: "Memory"})
 	items = append(items, kit.MenuItem{ID: "add-folders", Label: "Add folders…", Disabled: !ready})
 	if ready && len(det.Roots) > 0 {
 		sub := make([]kit.MenuItem, 0, 2*len(det.Roots))
@@ -293,6 +312,8 @@ func (s *screens) chooseManage(ws workspace.Summary, chosen string) {
 			return
 		}
 		s.dlg.policy.openFor(&det)
+	case chosen == wsMenuMemory:
+		s.grid.openCompanion(SlotRef{Kind: KindMemory, ID: ws.ID})
 	case chosen == "add-folders":
 		if !ready {
 			s.fail(errDialogNeedsDetail)

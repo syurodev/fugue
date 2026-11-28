@@ -25,6 +25,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/inbox"
 	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/memory"
 	"github.com/syurodev/fugue/ui/internal/osappearance"
 	"github.com/syurodev/fugue/ui/internal/secrets"
 	"github.com/syurodev/fugue/ui/internal/session"
@@ -137,6 +138,7 @@ type appWorkers struct {
 	accountsW    *accounts.Worker
 	settingsW    *settings.Worker
 	secretsW     *secrets.Worker
+	memoryW      *memory.Worker
 	viewerW      *fileViewWorker
 	layoutW      *layoutWorker
 	teamW        *team.Worker
@@ -184,6 +186,13 @@ func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) ap
 		return nil
 	}, w.Invalidate)
 	secretsW.Start(ctx)
+	memoryW := memory.NewWorker(func() memory.Client {
+		if c := m.Client(); c != nil {
+			return c
+		}
+		return nil
+	}, w.Invalidate)
+	memoryW.Start(ctx)
 	viewerW := newFileViewWorker(func() fileViewClient {
 		if c := m.Client(); c != nil {
 			return c
@@ -200,7 +209,7 @@ func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) ap
 	layoutW.Start(ctx)
 	picker := folderpicker.NewPicker(w.Invalidate)
 	picker.Start(ctx)
-	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW, settingsW: settingsW, secretsW: secretsW, viewerW: viewerW, layoutW: layoutW, folderPicker: picker, teamW: startTeamWorker(ctx, m, w)}
+	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW, settingsW: settingsW, secretsW: secretsW, memoryW: memoryW, viewerW: viewerW, layoutW: layoutW, folderPicker: picker, teamW: startTeamWorker(ctx, m, w)}
 }
 
 // startTeamWorker gives each window its own team worker, so a window's
@@ -218,6 +227,7 @@ func (a appWorkers) stop() {
 	a.teamW.Stop()
 	a.layoutW.Stop()
 	a.viewerW.Stop()
+	a.memoryW.Stop()
 	a.secretsW.Stop()
 	a.settingsW.Stop()
 	a.accountsW.Stop()
@@ -391,6 +401,9 @@ func (s *screens) drainWorkerResults() {
 	if s.secretsWorker != nil {
 		s.applySecretsResults(drainSecretsResults(s.secretsWorker))
 	}
+	if s.memoryWorker != nil {
+		s.applyMemoryResults(drainMemoryResults(s.memoryWorker))
+	}
 	s.applyFileViewResults(drainFileViewResults(s.viewerWorker))
 	if s.layoutWorker != nil {
 		s.applyLayoutResults(drainLayoutResults(s.layoutWorker))
@@ -459,6 +472,7 @@ func drawWindow(gtx *layout.Context, env *kit.Env, sc *screens) {
 	sc.composer.start.layout(env, gtx, sc, sc.composer)
 	sc.dlg.layout(env, gtx, sc)
 	sc.secretsView.layoutDialogs(env, gtx, sc)
+	sc.layoutMemoryDialogs(env, gtx)
 	sc.failure.closeDlg.layout(env, gtx, sc)
 }
 

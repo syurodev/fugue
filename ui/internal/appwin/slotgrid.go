@@ -50,7 +50,7 @@ func railOfKind(kind SlotKind) railItem {
 		return railTeam
 	case KindModule:
 		return railModules
-	case KindSession, KindAgent, KindDiff, KindInbox, KindAccounts, KindSettings, KindSecrets:
+	case KindSession, KindAgent, KindDiff, KindInbox, KindAccounts, KindSettings, KindSecrets, KindMemory:
 		return railChat
 	case SlotKind(""):
 		return railChat

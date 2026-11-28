@@ -385,6 +385,7 @@ func newWindowScreens(m *hostconn.Manager, workers appWorkers, coord *multiWindo
 	sc.accountsWorker = workers.accountsW
 	sc.settingsWorker = workers.settingsW
 	sc.secretsWorker = workers.secretsW
+	sc.memoryWorker = workers.memoryW
 	sc.viewerWorker = workers.viewerW
 	sc.layoutWorker = workers.layoutW
 	sc.teamWorker = workers.teamW

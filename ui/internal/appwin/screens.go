@@ -17,6 +17,7 @@ import (
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/inbox"
 	"github.com/syurodev/fugue/ui/internal/kit"
+	"github.com/syurodev/fugue/ui/internal/memory"
 	"github.com/syurodev/fugue/ui/internal/osappearance"
 	"github.com/syurodev/fugue/ui/internal/secrets"
 	"github.com/syurodev/fugue/ui/internal/session"
@@ -40,6 +41,7 @@ const (
 	topicLogin          = client.TopicLogin
 	topicAppState       = client.TopicAppState
 	topicSecrets        = client.TopicSecrets
+	topicMemory         = client.TopicMemory
 )
 
 // pageFetcher is the read side the screens drive: the session.Fetcher, and a
@@ -190,6 +192,9 @@ type screens struct {
 	secrets       *secrets.Model
 	secretsWorker *secrets.Worker
 	secretsView   *secretsView
+	memory        *memory.Model
+	memoryWorker  *memory.Worker
+	memoryViews   map[string]*memoryView
 	viewer        *fileViewer
 	viewerWorker  *fileViewWorker
 	// layoutWorker saves the layout document off the window goroutine
@@ -245,6 +250,8 @@ func newScreens(m *hostconn.Manager, fetcher pageFetcher, poster *session.Poster
 		settingsView:    newSettingsView(),
 		secrets:         secrets.NewModel(),
 		secretsView:     newSecretsView(),
+		memory:          memory.NewModel(),
+		memoryViews:     map[string]*memoryView{},
 		viewer:          newFileViewer(),
 		emptyTranscript: kit.NewEmptyStateState(),
 		failure:         newFailureUX(),

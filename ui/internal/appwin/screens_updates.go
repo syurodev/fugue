@@ -68,6 +68,8 @@ func (s *screens) applyUpdate(u hostconn.Update) {
 		}
 	case topicSecrets:
 		s.applySecretsDelivery(u)
+	case topicMemory:
+		s.applyMemoryDelivery(u)
 	default:
 		s.applyDynamicUpdate(u)
 	}
@@ -155,6 +157,7 @@ func (s *screens) reconnected() {
 		req := secrets.Request{Kind: secrets.OpListSecrets}
 		s.secretsWorker.Do(&req)
 	}
+	s.refreshOpenMemoryViews()
 	s.refreshVisibleTranscripts()
 }
 

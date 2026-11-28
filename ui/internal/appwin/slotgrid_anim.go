@@ -322,7 +322,7 @@ func (g *slotGrid) hasSingletonLiveConflict(ref SlotRef) bool {
 				return true
 			}
 		}
-	case KindTeam:
+	case KindTeam, KindMemory:
 		_, live := findCell(g.doc, ref)
 		return live
 	case KindSession, KindAgent, KindModule, SlotKind(""):

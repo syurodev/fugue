@@ -36,6 +36,7 @@ const (
 	KindAccounts SlotKind = "accounts"
 	KindSettings SlotKind = "settings"
 	KindSecrets  SlotKind = "secrets"
+	KindMemory   SlotKind = "memory"
 	KindModule   SlotKind = "module"
 )
 
@@ -231,7 +232,7 @@ func DecodeLayout(raw []byte) (DecodeLayoutResult, error) {
 func isSlotKind(kind SlotKind) bool {
 	switch kind {
 	case KindSession, KindTeam, KindAgent, KindDiff, KindInbox,
-		KindAccounts, KindSettings, KindSecrets, KindModule:
+		KindAccounts, KindSettings, KindSecrets, KindMemory, KindModule:
 		return true
 	case SlotKind(""):
 		return false
@@ -286,7 +287,7 @@ func isWorkViewKind(kind SlotKind) bool {
 	switch kind {
 	case KindSession, KindTeam, KindModule:
 		return true
-	case KindAgent, KindDiff, KindInbox, KindAccounts, KindSettings, KindSecrets, SlotKind(""):
+	case KindAgent, KindDiff, KindInbox, KindAccounts, KindSettings, KindSecrets, KindMemory, SlotKind(""):
 		return false
 	}
 	return false

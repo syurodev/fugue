@@ -36,6 +36,8 @@ func slotIcon(kind SlotKind) kit.IconName {
 		return kit.IconWrench
 	case KindSecrets:
 		return kit.IconEye
+	case KindMemory:
+		return kit.IconFileText
 	case KindModule:
 		return kit.IconFolder
 	default:
@@ -61,6 +63,12 @@ func slotTitle(sc *screens, ref SlotRef) string {
 	if ref.Kind == KindModule && ref.ID != "" {
 		return "Module: " + ref.ID
 	}
+	if ref.Kind == KindMemory {
+		if ws, ok := sc.workspaces.Lookup(ref.ID); ok && ws.Name != "" {
+			return "Memory — " + ws.Name
+		}
+		return "Memory"
+	}
 	if ref.Kind == SlotKind("") {
 		return slotTitleFallback
 	}
@@ -83,6 +91,8 @@ func fixedSlotTitle(kind SlotKind) string {
 		return "Settings"
 	case KindSecrets:
 		return "Secrets"
+	case KindMemory:
+		return "Memory"
 	case KindSession, KindDiff, KindModule, SlotKind(""):
 		return slotTitleFallback
 	}
@@ -125,7 +135,7 @@ func (s *screens) layoutMainSlot(gtx *layout.Context, env *kit.Env, ref SlotRef)
 		s.layoutSessionWithComposer(gtx, env, ref.ID, true)
 	case KindModule:
 		s.layoutSoonSlot(gtx, env, Pos{}, ref, nil, "No modules", "Registered modules open their workbench here, in install order.")
-	case KindTeam, KindAgent, KindDiff, KindInbox, KindAccounts, KindSettings, KindSecrets, SlotKind(""):
+	case KindTeam, KindAgent, KindDiff, KindInbox, KindAccounts, KindSettings, KindSecrets, KindMemory, SlotKind(""):
 		s.layoutRegularSlot(gtx, env, Pos{}, ref, nil)
 	}
 }
@@ -154,6 +164,8 @@ func (s *screens) layoutRegularSlot(gtx *layout.Context, env *kit.Env, p Pos, re
 		s.layoutTeamAgent(gtx, env, ref)
 	case KindSecrets:
 		s.secretsView.layout(gtx, env, s)
+	case KindMemory:
+		s.memoryViewFor(ref.ID).layout(gtx, env, s)
 	case KindModule:
 		s.layoutModuleSlot(gtx, env, p, ref, ghostEmpty)
 	case SlotKind(""):
@@ -296,6 +308,8 @@ func slotHeaderActions(sc *screens, ref SlotRef) []slotAction {
 			},
 			onClick: func() { sc.secretsView.addDlg.open(wsID) },
 		}}
+	case KindMemory:
+		return memorySlotHeaderActions(sc, ref.ID)
 	case KindSession, KindTeam, KindAgent, KindDiff, KindInbox, KindModule:
 		return nil
 	default:
