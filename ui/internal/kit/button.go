@@ -293,6 +293,8 @@ func controlHeight(gtx *layout.Context, s ButtonSize) int {
 		return gtx.Dp(theme.ControlXS)
 	case SizeSM:
 		return gtx.Dp(theme.ControlSM)
+	case SizeMD:
+		return gtx.Dp(theme.ControlMD)
 	case SizeLG:
 		return gtx.Dp(theme.ControlLG)
 	default:

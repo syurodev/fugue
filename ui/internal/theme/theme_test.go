@@ -12,14 +12,15 @@ import (
 
 // mode bundles one theme with its name so failures name the mode.
 type mode struct {
-	name  string
-	theme theme.Theme
+	name      string
+	theme     theme.Theme
+	wantScrim color.NRGBA
 }
 
 func bothModes() []mode {
 	return []mode{
-		{name: "light", theme: theme.Light(nil)},
-		{name: "dark", theme: theme.Dark(nil)},
+		{name: "light", theme: theme.Light(nil), wantScrim: color.NRGBA{A: 0x66}},
+		{name: "dark", theme: theme.Dark(nil), wantScrim: color.NRGBA{A: 0x99}},
 	}
 }
 

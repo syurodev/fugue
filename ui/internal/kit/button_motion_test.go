@@ -343,7 +343,7 @@ func TestButtonMotionSettlesAndRetargets(t *testing.T) {
 
 // TestButtonLabelSharesTheRowTextCenter verifies that a Button's label ink
 // shares the vertical text center of a plain kit.Label on the same
-// layout.Middle row across variants (Ghost, Primary), sizes (SizeSM, SizeMD)
+// layout.Middle row across variants (Ghost, Primary), sizes (XS, SM, MD, LG)
 // and UI scales (100%, 125%).
 func TestButtonLabelSharesTheRowTextCenter(t *testing.T) {
 	t.Parallel()
@@ -351,7 +351,7 @@ func TestButtonLabelSharesTheRowTextCenter(t *testing.T) {
 		for _, size := range []struct {
 			name string
 			val  ButtonSize
-		}{{"SizeSM", SizeSM}, {"SizeMD", SizeMD}} {
+		}{{"SizeXS", SizeXS}, {"SizeSM", SizeSM}, {"SizeMD", SizeMD}, {"SizeLG", SizeLG}} {
 			for _, variant := range []struct {
 				name string
 				val  ButtonVariant

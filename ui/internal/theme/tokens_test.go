@@ -199,8 +199,9 @@ func washTargets(m *mode) (onSurface []washTarget, onAction washTarget) {
 // from the mode's Fg (the danger tint from Status.Danger) at its spec
 // fraction, as a perceived value — blended in linear light over the main
 // surface it lands within 2 levels per channel of the sRGB composite — and
-// the scrim is plain black at 40%. One derivation keeps the UK-E02 scan and
-// the UK-E04 contrast checks pointed at a single place.
+// the scrim is plain black at 40% in light mode and 60% in dark mode. One
+// derivation keeps the UK-E02 scan and the UK-E04 contrast checks pointed at a
+// single place.
 func TestInteractionWashesDeriveFromFg(t *testing.T) {
 	t.Parallel()
 	for _, m := range bothModes() {
@@ -213,8 +214,8 @@ func TestInteractionWashesDeriveFromFg(t *testing.T) {
 		if want := fgWashOf(c.Fg, 0.35); c.FgDisabled != want {
 			t.Errorf("%s FgDisabled = %v, want Fg at 35%% = %v", m.name, c.FgDisabled, want)
 		}
-		if want := (color.NRGBA{A: 0x66}); c.Scrim != want {
-			t.Errorf("%s Scrim = %v, want black at 40%% = %v", m.name, c.Scrim, want)
+		if c.Scrim != m.wantScrim {
+			t.Errorf("%s Scrim = %v, want %v", m.name, c.Scrim, m.wantScrim)
 		}
 	}
 }

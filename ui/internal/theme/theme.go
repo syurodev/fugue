@@ -222,12 +222,14 @@ type Theme struct {
 // Light builds the light mode over shaper.
 func Light(shaper *text.Shaper) Theme {
 	c := lightChrome()
+	c.Scrim = color.NRGBA{A: 0x66} // black at 40%
 	return newTheme(&c, lightPalette(), shaper)
 }
 
 // Dark builds the dark mode over shaper.
 func Dark(shaper *text.Shaper) Theme {
 	c := darkChrome()
+	c.Scrim = color.NRGBA{A: 0x99} // black at 60%
 	return newTheme(&c, darkPalette(), shaper)
 }
 
@@ -395,7 +397,6 @@ func lightChrome() Chrome {
 		ActionFg:      nrgba(0xFFFFFF),
 		ActionHover:   nrgba(0x2E3036),
 		ActionPressed: nrgba(0x0A0B0C),
-		Scrim:         color.NRGBA{A: 0x66},
 		DangerFg:      nrgba(0x752822),
 	}
 }
@@ -420,7 +421,6 @@ func darkChrome() Chrome {
 		ActionFg:      nrgba(0x1E1F22),
 		ActionHover:   nrgba(0xD6D6DA),
 		ActionPressed: nrgba(0xFFFFFF),
-		Scrim:         color.NRGBA{A: 0x99},
 		DangerFg:      nrgba(0xF4B8B3),
 	}
 }
