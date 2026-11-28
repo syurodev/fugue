@@ -251,7 +251,7 @@ func drawStatusBadgeDot(gtx *layout.Context, env *kit.Env, btnSize int, col colo
 	paint.FillShape(gtx.Ops, col, clip.UniformRRect(inner, dotD/2).Op(gtx.Ops))
 }
 
-// layoutStatusBar draws the full-width 22 dp Bottom Status Bar (FUG-95) on
+// layoutStatusBar draws the full-width Bottom Status Bar (FUG-95, FUG-108) on
 // AppBg: left breadcrumb (workspace > session or view title), right Lock vault
 // action (centered with a full 24 dp HitMin target) and host connection status
 // dot/tooltip/"Reconnecting…".

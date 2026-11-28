@@ -203,7 +203,17 @@ func (s *ScrollAreaState) updateOffset(followBottom bool) {
 }
 
 func (s *ScrollAreaState) drawClipped(env *Env, gtx *layout.Context, call op.CallOp, outSize image.Point, contentLen, viewLen int, axis layout.Axis, scrolled, cue bool, surface color.NRGBA) {
-	area := clip.Rect(image.Rectangle{Max: outSize}).Push(gtx.Ops)
+	// The paint clip is widened on the cross axis by the §3.4 ring allowance
+	// (FUG-108): a control that spans its column is drawn flush with the clip
+	// edge, and without the widening its outer focus ring loses the sides.
+	// Content never moves — only ring ink becomes visible. The clip stack
+	// intersects with the enclosing surface, so the widened rect can never
+	// escape the parent (an island, card or panel) onto a neighbour, and the
+	// scrollbar, drawn after the content on top, is never covered. Callers
+	// whose parent has no room (the TextArea's inner rect) clip the widened
+	// rect back themselves, exactly as before the widening; nothing
+	// ring-bearing lives inside those, so no ring needs the inset fallback.
+	area := clip.Rect(ringClip(image.Rectangle{Max: outSize}, dialogRing(gtx), axis)).Push(gtx.Ops)
 	shift := image.Pt(0, -s.offset)
 	if axis == layout.Horizontal {
 		shift = image.Pt(-s.offset, 0)
@@ -218,6 +228,16 @@ func (s *ScrollAreaState) drawClipped(env *Env, gtx *layout.Context, call op.Cal
 	}
 	s.bar.stepAndDraw(env, gtx, &s.tag, outSize, contentLen, viewLen, s.offset, s.maxOffset, axis, scrolled)
 	area.Pop()
+}
+
+// ringClip widens r on the cross axis by ring on both sides and leaves the
+// scroll axis exact, so scrolling still clips at the viewport edge the way it
+// did before the ring allowance (FUG-108).
+func ringClip(r image.Rectangle, ring int, axis layout.Axis) image.Rectangle {
+	if axis == layout.Vertical {
+		return image.Rect(r.Min.X-ring, r.Min.Y, r.Max.X+ring, r.Max.Y)
+	}
+	return image.Rect(r.Min.X, r.Min.Y-ring, r.Max.X, r.Max.Y+ring)
 }
 
 func (s *ScrollAreaState) pollEvents(env *Env, gtx *layout.Context, box image.Rectangle, axis layout.Axis) bool {
