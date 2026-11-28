@@ -383,7 +383,7 @@ func TestDetailDropClosesOpenWorkspaceDialogAndRearmsRead(t *testing.T) {
 	sc.workspaces.ApplyDetail(det)
 	sc.update(nil, nil, nil, nil)
 
-	sc.dlg.root.openAdd(det)
+	sc.dlg.root.openAdd(sc, det)
 	if !sc.dlg.root.dialog.IsOpen() {
 		t.Fatal("the root dialog did not open")
 	}
@@ -413,7 +413,7 @@ func TestDialogsBlockMutationsWithEmptyHash(t *testing.T) {
 	startTestMutator(t, sc, rec)
 	emptyDet := &workspace.Detail{ID: "w1", Name: "ws-w1", ConfigHash: ""}
 
-	sc.dlg.root.openAdd(emptyDet)
+	sc.dlg.root.openAdd(sc, emptyDet)
 	sc.dlg.root.folders.addPath("/repo")
 	sc.dlg.root.submit(sc)
 

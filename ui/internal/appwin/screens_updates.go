@@ -38,7 +38,7 @@ func (s *screens) update(updates []hostconn.Update, results []session.Result, po
 		s.applyPostResult(posts[i])
 	}
 	for i := range muts {
-		s.dlg.apply(&muts[i])
+		s.dlg.apply(s, &muts[i])
 	}
 	s.armWorkspaceReads()
 }

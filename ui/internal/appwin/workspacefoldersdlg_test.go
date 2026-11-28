@@ -174,7 +174,7 @@ func TestAddFoldersChainsFromTheDetailHash(t *testing.T) {
 	det := wsTestDetail(nil)
 	sc.workspaces.ApplyDetail(det)
 
-	sc.dlg.root.openAdd(det)
+	sc.dlg.root.openAdd(sc, det)
 	if sc.dlg.root.folders.typedOpen {
 		t.Fatal("the add-folders dialog opened the fallback path field while a picker may exist")
 	}
@@ -235,7 +235,7 @@ func TestSourceFoldersDefaultNameTakesAUniqueSuffix(t *testing.T) {
 	feedSnapshot(sc, topicSnapshot(t, []workspace.Summary{{ID: "w1", Name: "A"}}))
 	det := wsTestDetail(nil)
 	sc.workspaces.ApplyDetail(det)
-	sc.dlg.root.openAdd(det)
+	sc.dlg.root.openAdd(sc, det)
 	if got := sc.dlg.root.folders.uniqueName("main"); got != "main-2" {
 		t.Fatalf("name against the workspace's root = %q, want main-2", got)
 	}
@@ -251,7 +251,7 @@ func TestSourceFoldersRefuseDuplicatePaths(t *testing.T) {
 	det := wsTestDetail(nil)
 	sc.workspaces.ApplyDetail(det)
 
-	sc.dlg.root.openAdd(det)
+	sc.dlg.root.openAdd(sc, det)
 	f := &sc.dlg.root.folders
 	f.addPath("/repo/x")
 	f.addPath("/repo/x")

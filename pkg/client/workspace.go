@@ -22,21 +22,24 @@ const (
 // The workspace mutation methods. Each fails with the connect error the host
 // answered, whose typed detail names the public workspace code (host-api §4);
 // WorkspaceCodeOf reads it. A mutation that changes a workspace publishes the
-// change on the `workspaces` topic, so callers refresh from the topic and
-// from a fresh workspace read, never from the mutation's own answer. Every
-// change but Create is a compare-and-swap on the config hash: an expected
-// hash that no longer matches is refused with workspace.config_changed, and
-// the caller re-reads the workspace before retrying.
+// change on the `workspaces` topic, so a lone caller refreshes from the topic
+// and from a fresh workspace read. Every change but Create is a
+// compare-and-swap on the config hash: an expected hash that no longer
+// matches is refused with workspace.config_changed, and the caller re-reads
+// the workspace before retrying. Create and AddRoot answer the workspace as
+// the host now holds it, so a caller that changes a workspace in one act —
+// the source-folder dialog's create-then-add chain (FUG-115) — CASes each
+// step on the hash the step before returned and never races the topic.
 
 // CreateWorkspace creates a workspace by name. The host makes the directory,
 // its fugue.toml and its WORKSPACE.md, and validates the name's own rules.
-func (c *Client) CreateWorkspace(ctx context.Context, name string) error {
-	_, err := workspacev1connect.NewWorkspaceServiceClient(c.hc, c.base).CreateWorkspace(ctx,
+func (c *Client) CreateWorkspace(ctx context.Context, name string) (Workspace, error) {
+	res, err := workspacev1connect.NewWorkspaceServiceClient(c.hc, c.base).CreateWorkspace(ctx,
 		connect.NewRequest(&workspacev1.CreateWorkspaceRequest{Name: name}))
 	if err != nil {
-		return fmt.Errorf("create the workspace: %w", err)
+		return Workspace{}, fmt.Errorf("create the workspace: %w", err)
 	}
-	return nil
+	return workspaceFromProto(res.Msg.GetWorkspace()), nil
 }
 
 // AddRoot adds a root to the workspace. The path is typed by the user and
@@ -44,15 +47,15 @@ func (c *Client) CreateWorkspace(ctx context.Context, name string) error {
 // root, sits in the Fugue home or the data directory, or duplicates a name
 // comes back as workspace.root_invalid (or the code that names the exact
 // rule), which the caller shows inline.
-func (c *Client) AddRoot(ctx context.Context, workspaceID, name, path, access, expectedHash string) error {
-	_, err := workspacev1connect.NewWorkspaceServiceClient(c.hc, c.base).AddRoot(ctx,
+func (c *Client) AddRoot(ctx context.Context, workspaceID, name, path, access, expectedHash string) (Workspace, error) {
+	res, err := workspacev1connect.NewWorkspaceServiceClient(c.hc, c.base).AddRoot(ctx,
 		connect.NewRequest(&workspacev1.AddRootRequest{
 			Id: workspaceID, Name: name, Path: path, Access: access, ExpectedHash: expectedHash,
 		}))
 	if err != nil {
-		return fmt.Errorf("add the root: %w", err)
+		return Workspace{}, fmt.Errorf("add the root: %w", err)
 	}
-	return nil
+	return workspaceFromProto(res.Msg.GetWorkspace()), nil
 }
 
 // RemoveRoot removes one root by name. Sessions, history and grants the root

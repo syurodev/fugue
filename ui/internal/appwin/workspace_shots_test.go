@@ -28,10 +28,14 @@ const (
 	// shotSidebarW is the sidebar scene's width: at 125% the shell must
 	// still hold rail, sidebar and the main slot's minimum (808 dp, about
 	// 1010 px plus the window insets), which the standard width cannot.
-	shotSidebarW   = 1100
-	shotSidebar    = "sidebar"
-	shotRootDialog = "root-dialog"
-	shotPolicyCard = "policy-card"
+	shotSidebarW    = 1100
+	shotSidebar     = "sidebar"
+	shotRootDialog  = "root-dialog"
+	shotPolicyCard  = "policy-card"
+	shotCreateEmpty = "create-dialog"
+	shotCreateRows  = "create-folders"
+	shotCreateError = "create-row-error"
+	shotAddFolders  = "add-folders-dialog"
 )
 
 type shotSpec struct {
@@ -42,7 +46,7 @@ type shotSpec struct {
 }
 
 func workspaceShotSpecs() []shotSpec {
-	scenes := []string{shotSidebar, shotRootDialog, shotPolicyCard}
+	scenes := []string{shotSidebar, shotRootDialog, shotPolicyCard, shotCreateEmpty, shotCreateRows, shotCreateError, shotAddFolders}
 	modes := []struct {
 		label   string
 		light   bool
@@ -104,7 +108,7 @@ func buildShotScreens(t *testing.T, scene string) *screens {
 
 	switch scene {
 	case shotRootDialog:
-		sc.dlg.root.openAdd(det)
+		sc.dlg.root.openFor(det, &det.Roots[0])
 		sc.dlg.root.name.SetText("kong")
 		sc.dlg.root.path.SetText("/srv/repos/kong")
 	case shotPolicyCard:
@@ -228,7 +232,7 @@ func TestWorkspaceShotsRender(t *testing.T) {
 		}
 		rendered[spec.name] = img
 	}
-	for _, scene := range []string{shotSidebar, shotRootDialog, shotPolicyCard} {
+	for _, scene := range []string{shotSidebar, shotRootDialog, shotPolicyCard, shotCreateEmpty, shotCreateRows, shotCreateError, shotAddFolders} {
 		if !imagesDifferRGBA(rendered[scene+"-light-ui100"], rendered[scene+"-dark-ui100"]) {
 			t.Fatalf("%s light and dark shots are identical", scene)
 		}

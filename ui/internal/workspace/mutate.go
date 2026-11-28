@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+
+	"github.com/syurodev/fugue/pkg/client"
 )
 
 // The static causes behind a dropped request, an unknown kind and a missing
@@ -43,10 +45,15 @@ type Mutation struct {
 
 // MutResult is one completed mutation, delivered to the window goroutine.
 // Err is the host's typed answer, whose workspace code client.WorkspaceCodeOf
-// reads.
+// reads. On a successful create, NewID and NewHash are the new workspace's
+// identity and compare-and-swap hash; on a successful add, NewHash is the
+// hash after the add — the source-folder chain (FUG-115) posts each next
+// step against the hash the step before returned.
 type MutResult struct {
 	Mutation Mutation
 	Err      error
+	NewID    string
+	NewHash  string
 }
 
 // mutBuffer bounds the mutation queue. Mutations are user-driven and one
@@ -55,11 +62,13 @@ type MutResult struct {
 const mutBuffer = 8
 
 // MutatorClient is the write side the mutator posts through: the pkg/client
-// workspace mutations. The interface exists for the tests' recording fake;
+// workspace mutations. A create or add answers the workspace as the host now
+// holds it, so a chain of steps CASes each one on the hash the step before
+// returned (FUG-115). The interface exists for the tests' recording fake;
 // production hands over the manager's *client.Client.
 type MutatorClient interface {
-	CreateWorkspace(ctx context.Context, name string) error
-	AddRoot(ctx context.Context, workspaceID, name, path, access, expectedHash string) error
+	CreateWorkspace(ctx context.Context, name string) (client.Workspace, error)
+	AddRoot(ctx context.Context, workspaceID, name, path, access, expectedHash string) (client.Workspace, error)
 	RemoveRoot(ctx context.Context, workspaceID, name, expectedHash string) error
 	UpdateRoot(ctx context.Context, workspaceID, name, newName, path, access, expectedHash string) error
 	DeleteWorkspace(ctx context.Context, workspaceID, expectedHash, confirmName string) error
@@ -144,12 +153,13 @@ func (m *Mutator) run(ctx context.Context) {
 // context killed is a dropped request, not a result: the host never applied
 // an RPC the caller cancelled, so the dialog resubmits.
 func (m *Mutator) deliver(ctx context.Context, c MutatorClient, mut *Mutation) {
-	err := mut.post(ctx, c)
+	res := mut.post(ctx, c)
 	if ctx.Err() != nil {
 		return
 	}
+	res.Mutation = *mut
 	select {
-	case m.results <- MutResult{Mutation: *mut, Err: err}:
+	case m.results <- res:
 	case <-ctx.Done():
 	}
 }
@@ -157,17 +167,23 @@ func (m *Mutator) deliver(ctx context.Context, c MutatorClient, mut *Mutation) {
 // post runs the mutation's host call. Every mutation except Create requires a
 // non-empty compare-and-swap hash from the workspace detail. The client's
 // typed answer is wrapped once here, so the dialog shows one message no
-// matter which kind failed.
-func (mut *Mutation) post(ctx context.Context, c MutatorClient) error {
+// matter which kind failed, and a create or add that answered carries the
+// workspace's new identity and hash for the next chained step.
+func (mut *Mutation) post(ctx context.Context, c MutatorClient) MutResult {
 	if mut.Kind != MutCreate && strings.TrimSpace(mut.ExpectedHash) == "" {
-		return fmt.Errorf("the workspace change failed: %w", errEmptyExpectedHash)
+		return MutResult{Err: fmt.Errorf("the workspace change failed: %w", errEmptyExpectedHash)}
 	}
+	var res MutResult
 	var err error
 	switch mut.Kind {
 	case MutCreate:
-		err = c.CreateWorkspace(ctx, mut.CreateName)
+		var ws client.Workspace
+		ws, err = c.CreateWorkspace(ctx, mut.CreateName)
+		res.NewID, res.NewHash = ws.ID, ws.ConfigHash
 	case MutAddRoot:
-		err = c.AddRoot(ctx, mut.WorkspaceID, mut.Name, mut.Path, mut.Access, mut.ExpectedHash)
+		var ws client.Workspace
+		ws, err = c.AddRoot(ctx, mut.WorkspaceID, mut.Name, mut.Path, mut.Access, mut.ExpectedHash)
+		res.NewHash = ws.ConfigHash
 	case MutRemoveRoot:
 		err = c.RemoveRoot(ctx, mut.WorkspaceID, mut.Name, mut.ExpectedHash)
 	case MutUpdateRoot:
@@ -182,7 +198,8 @@ func (mut *Mutation) post(ctx context.Context, c MutatorClient) error {
 		err = errUnknownMutation
 	}
 	if err != nil {
-		return fmt.Errorf("the workspace change failed: %w", err)
+		res.Err = fmt.Errorf("the workspace change failed: %w", err)
+		return res
 	}
-	return nil
+	return res
 }

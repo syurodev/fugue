@@ -2,6 +2,7 @@ package appwin
 
 import (
 	"github.com/syurodev/fugue/ui/internal/accounts"
+	"github.com/syurodev/fugue/ui/internal/folderpicker"
 	"github.com/syurodev/fugue/ui/internal/inbox"
 	"github.com/syurodev/fugue/ui/internal/secrets"
 	"github.com/syurodev/fugue/ui/internal/settings"
@@ -58,4 +59,10 @@ func drainSecretsResults(w *secrets.Worker) []secrets.Result {
 
 func drainFileViewResults(w *fileViewWorker) []fileResult {
 	return drainChan(w.Results())
+}
+
+// drainPickerResults takes every folder pick the picker delivered this frame;
+// the window goroutine folds them into the open dialog's list.
+func drainPickerResults(p *folderpicker.Picker) []folderpicker.Result {
+	return drainChan(p.Results())
 }

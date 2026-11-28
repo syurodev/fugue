@@ -222,7 +222,7 @@ func e2eCtx(t *testing.T) context.Context {
 
 func createWorkspaceAndAddRoot(t *testing.T, ctx context.Context, c *client.Client, wsName, rootName, rootDir string) client.Workspace {
 	t.Helper()
-	if err := c.CreateWorkspace(ctx, wsName); err != nil {
+	if _, err := c.CreateWorkspace(ctx, wsName); err != nil {
 		t.Fatalf("create workspace: %v", err)
 	}
 	list, err := c.ListWorkspaces(ctx)
@@ -240,7 +240,7 @@ func createWorkspaceAndAddRoot(t *testing.T, ctx context.Context, c *client.Clie
 	if det.ConfigHash == "" {
 		t.Fatal("workspace detail returned empty ConfigHash")
 	}
-	if addErr := c.AddRoot(ctx, wsID, rootName, rootDir, client.RootAccessRW, det.ConfigHash); addErr != nil {
+	if _, addErr := c.AddRoot(ctx, wsID, rootName, rootDir, client.RootAccessRW, det.ConfigHash); addErr != nil {
 		t.Fatalf("add root: %v", addErr)
 	}
 	updated, err := c.Workspace(ctx, wsID)
