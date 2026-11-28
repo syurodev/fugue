@@ -89,6 +89,9 @@ func (s *Store) execAdd(ctx context.Context, tx *sql.Tx, in *AddInput, anchors [
 	if err := insertEntryRow(ctx, tx, &row); err != nil {
 		return entryRow{}, err
 	}
+	if err := ftsInsertByID(ctx, tx, row.id); err != nil {
+		return entryRow{}, err
+	}
 	return row, nil
 }
 
@@ -129,6 +132,13 @@ func (s *Store) execUpdate(ctx context.Context, tx *sql.Tx, in *UpdateInput, anc
 	if err != nil {
 		return entryRow{}, err
 	}
+	snap, err := loadFTSSnapshot(ctx, tx, in.WorkspaceID, in.ID)
+	if err != nil {
+		return entryRow{}, err
+	}
+	if delErr := ftsDeleteSnapshot(ctx, tx, &snap); delErr != nil {
+		return entryRow{}, delErr
+	}
 	next := entryRow{
 		id:          cur.id,
 		workspaceID: cur.workspaceID,
@@ -146,6 +156,9 @@ func (s *Store) execUpdate(ctx context.Context, tx *sql.Tx, in *UpdateInput, anc
 		updatedAtMs: s.clk.Now().UTC().UnixMilli(),
 	}
 	if err := updateEntryRow(ctx, tx, &next); err != nil {
+		return entryRow{}, err
+	}
+	if err := ftsInsertByID(ctx, tx, next.id); err != nil {
 		return entryRow{}, err
 	}
 	return next, nil
@@ -182,6 +195,13 @@ func (s *Store) execInvalidate(ctx context.Context, tx *sql.Tx, in *InvalidateIn
 	cur, err := s.loadAndCheckCAS(ctx, tx, in.WorkspaceID, in.ID, in.ExpectedRevision)
 	if err != nil {
 		return entryRow{}, err
+	}
+	ftsSnap, err := loadFTSSnapshot(ctx, tx, in.WorkspaceID, in.ID)
+	if err != nil {
+		return entryRow{}, err
+	}
+	if delErr := ftsDeleteSnapshot(ctx, tx, &ftsSnap); delErr != nil {
+		return entryRow{}, delErr
 	}
 	validity := ValidityInvalid
 	if strings.TrimSpace(in.SupersededBy) != "" {
@@ -241,8 +261,15 @@ func (s *Store) execRestore(ctx context.Context, tx *sql.Tx, in *RestoreInput) (
 		sessionID:    in.Provenance.SessionID,
 		checkContent: true,
 	}
-	if err := s.runWriteChecks(ctx, tx, &restoredCand); err != nil {
+	if chkErr := s.runWriteChecks(ctx, tx, &restoredCand); chkErr != nil {
+		return entryRow{}, chkErr
+	}
+	ftsSnap, err := loadFTSSnapshot(ctx, tx, in.WorkspaceID, in.ID)
+	if err != nil {
 		return entryRow{}, err
+	}
+	if delErr := ftsDeleteSnapshot(ctx, tx, &ftsSnap); delErr != nil {
+		return entryRow{}, delErr
 	}
 	next := entryRow{
 		id:          cur.id,
@@ -261,6 +288,9 @@ func (s *Store) execRestore(ctx context.Context, tx *sql.Tx, in *RestoreInput) (
 		updatedAtMs: s.clk.Now().UTC().UnixMilli(),
 	}
 	if err := updateEntryRow(ctx, tx, &next); err != nil {
+		return entryRow{}, err
+	}
+	if err := ftsInsertByID(ctx, tx, next.id); err != nil {
 		return entryRow{}, err
 	}
 	return next, nil

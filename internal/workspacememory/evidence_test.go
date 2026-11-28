@@ -619,6 +619,7 @@ func TestWME07Freshness(t *testing.T) {
 
 	const rel = "docs/arch.md"
 	env.anchors.setFile(testMainRoot, rel, []byte("version 1 of the architecture document"))
+	env.anchors.setFile("docs", "guide.md", []byte("secondary root guide"))
 
 	noAnchor, err := env.store.Add(ctx, &AddInput{
 		WorkspaceID: testWSID,

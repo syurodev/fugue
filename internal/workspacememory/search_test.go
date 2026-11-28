@@ -73,16 +73,35 @@ func TestFTS5AndTrigramSupport(t *testing.T) {
 	}
 }
 
+const (
+	testVerifiedRuleLabel = "verified-rule"
+	testLifecycleLabel    = "lifecycle-sync"
+)
+
 func seedWME03Fixtures(t *testing.T, ctx context.Context, env *testEnv) map[string]Entry {
 	t.Helper()
 	const anchorRel = "internal/workspacememory/store_read.go"
 	env.anchors.setFile(testMainRoot, anchorRel, []byte("package workspacememory\n"))
 
-	specs := []AddInput{
+	specs := wme03FixtureSpecs(anchorRel)
+	out := make(map[string]Entry, len(specs))
+	for i := range specs {
+		env.clk.Advance(time.Second)
+		entry, err := env.store.Add(ctx, &specs[i])
+		if err != nil {
+			t.Fatalf("Add fixture %s: %v", specs[i].Label, err)
+		}
+		out[specs[i].Label] = entry
+	}
+	return out
+}
+
+func wme03FixtureSpecs(anchorRel string) []AddInput {
+	return []AddInput{
 		{
 			WorkspaceID: testWSID,
 			Kind:        KindConvention,
-			Label:       "verified-rule",
+			Label:       testVerifiedRuleLabel,
 			Summary:     "Every entry carries a verified status flag set by the host.",
 			Body:        "User writes mark entries verified so agents know which notes were reviewed.",
 			Keywords:    []string{"verification", "review"},
@@ -134,17 +153,6 @@ func seedWME03Fixtures(t *testing.T, ctx context.Context, env *testEnv) map[stri
 			Author:      AuthorAgent,
 		},
 	}
-
-	out := make(map[string]Entry, len(specs))
-	for i := range specs {
-		env.clk.Advance(time.Second)
-		entry, err := env.store.Add(ctx, &specs[i])
-		if err != nil {
-			t.Fatalf("Add fixture %s: %v", specs[i].Label, err)
-		}
-		out[specs[i].Label] = entry
-	}
-	return out
 }
 
 func TestWME03SearchEvidence(t *testing.T) {
@@ -158,7 +166,7 @@ func TestWME03SearchEvidence(t *testing.T) {
 		query     string
 		wantLabel string
 	}{
-		{"prefix", "verif", "verified-rule"},
+		{"prefix", "verif", testVerifiedRuleLabel},
 		{"code identifier substring", "Weights", "prompt-layer-weights"},
 		{"path substring", "workspacememory/store_read", "read-path-guide"},
 		{"vietnamese without diacritics", "cau hinh", "vietnamese-config-note"},
@@ -180,11 +188,11 @@ func TestWME03SearchEvidence(t *testing.T) {
 		if !slices.Contains(top3, tc.wantLabel) {
 			t.Fatalf("Search(%s) top3 = %v, want %q in top 3", tc.name, top3, tc.wantLabel)
 		}
-		assertSearchResultFields(t, resp.Results[0], entries)
+		assertSearchResultFields(t, &resp.Results[0], entries)
 	}
 	if resp, err := env.store.Search(ctx, &SearchInput{WorkspaceID: testWSID, Query: "verified"}); err != nil {
 		t.Fatalf("Search(verified): %v", err)
-	} else if len(resp.Results) < 2 || resp.Results[0].Label != "verified-rule" {
+	} else if len(resp.Results) < 2 || resp.Results[0].Label != testVerifiedRuleLabel {
 		t.Fatalf("expected verified+fresh entry first, got %+v", topLabels(resp.Results, 3))
 	}
 }
@@ -198,7 +206,7 @@ func topLabels(results []SearchResult, n int) []string {
 	return out
 }
 
-func assertSearchResultFields(t *testing.T, r SearchResult, entries map[string]Entry) {
+func assertSearchResultFields(t *testing.T, r *SearchResult, entries map[string]Entry) {
 	t.Helper()
 	want, ok := entries[r.Label]
 	if !ok {
@@ -270,7 +278,7 @@ func TestSearchIndexFollowsWrites(t *testing.T) {
 	added, err := env.store.Add(ctx, &AddInput{
 		WorkspaceID: testWSID,
 		Kind:        KindFact,
-		Label:       "lifecycle-sync",
+		Label:       testLifecycleLabel,
 		Summary:     "Initial alphaToken summary for index sync testing.",
 		Body:        "Original alphaToken body stored at revision one.",
 		Author:      AuthorAgent,
@@ -285,7 +293,7 @@ func TestSearchIndexFollowsWrites(t *testing.T) {
 		ID:               added.ID,
 		ExpectedRevision: added.Revision,
 		Kind:             KindFact,
-		Label:            "lifecycle-sync",
+		Label:            testLifecycleLabel,
 		Summary:          "Updated betaToken summary after edit.",
 		Body:             "Replacement betaToken body stored at revision two.",
 		Author:           AuthorUser,
@@ -302,7 +310,7 @@ func TestSearchIndexFollowsWrites(t *testing.T) {
 		ID:               added.ID,
 		ExpectedRevision: updated.Revision,
 		Kind:             KindFact,
-		Label:            "lifecycle-sync",
+		Label:            testLifecycleLabel,
 		Summary:          "Tóm tắt bằng tiếng Việt phải bị từ chối khi kiểm tra ngôn ngữ.",
 		Body:             "Nội dung này hoàn toàn bằng tiếng Việt nên giao dịch phải rollback và giữ nguyên chỉ mục.",
 		Author:           AuthorUser,
