@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"math"
 	"strings"
 	"time"
 
@@ -18,15 +19,19 @@ const (
 	MemoryImportPreviewTTL = 30 * time.Minute
 	// MemoryImportPreviewCap bounds the number of cached previews in host memory.
 	MemoryImportPreviewCap = 8
+)
 
-	// Import classification constants mirrored for transport boundaries.
+// Import classification constants mirrored for transport boundaries.
+const (
 	MemoryImportClassAdd           = string(workspacememory.ImportClassAdd)
 	MemoryImportClassSkip          = string(workspacememory.ImportClassSkip)
 	MemoryImportClassConflict      = string(workspacememory.ImportClassConflict)
 	MemoryImportClassLabelConflict = string(workspacememory.ImportClassLabelConflict)
 	MemoryImportClassRejected      = string(workspacememory.ImportClassRejected)
+)
 
-	// Import choice constants mirrored for transport boundaries.
+// Import choice constants mirrored for transport boundaries.
+const (
 	MemoryImportChoiceKeepLocal    = string(workspacememory.ImportChoiceKeepLocal)
 	MemoryImportChoiceTakeImported = string(workspacememory.ImportChoiceTakeImported)
 	MemoryImportChoiceKeepBoth     = string(workspacememory.ImportChoiceKeepBoth)
@@ -129,7 +134,7 @@ func (s *MemoryService) PreviewImport(ctx context.Context, principal, workspaceI
 	if err != nil {
 		return MemoryImportPreviewView{}, errcode.Wrap(errcode.Internal, "generate memory import preview ID", err)
 	}
-	s.storeImportPreview(previewID, workspaceID, prev)
+	s.storeImportPreview(previewID, workspaceID, &prev)
 	return memoryImportPreviewToView(previewID, &prev), nil
 }
 
@@ -169,10 +174,20 @@ func (s *MemoryService) ApplyImport(ctx context.Context, principal string, cmd *
 	}
 	return MemoryApplyImportResultView{
 		Written: written,
-		Added:   int32(res.Added),
-		Updated: int32(res.Updated),
-		Skipped: int32(res.Skipped),
+		Added:   clampInt32(res.Added),
+		Updated: clampInt32(res.Updated),
+		Skipped: clampInt32(res.Skipped),
 	}, nil
+}
+
+func clampInt32(n int) int32 {
+	if n > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if n < 0 {
+		return 0
+	}
+	return int32(n)
 }
 
 func (s *MemoryService) resolveWorkspaceName(ctx context.Context, workspaceID string) (string, error) {
@@ -186,7 +201,7 @@ func (s *MemoryService) resolveWorkspaceName(ctx context.Context, workspaceID st
 	return ws.Name, nil
 }
 
-func (s *MemoryService) storeImportPreview(previewID, workspaceID string, prev workspacememory.ImportPreview) {
+func (s *MemoryService) storeImportPreview(previewID, workspaceID string, prev *workspacememory.ImportPreview) {
 	now := s.clk.Now().UTC()
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -200,7 +215,7 @@ func (s *MemoryService) storeImportPreview(previewID, workspaceID string, prev w
 		previewID:   previewID,
 		workspaceID: workspaceID,
 		createdAt:   now,
-		preview:     prev,
+		preview:     *prev,
 	}
 	s.previewOrd = append(s.previewOrd, previewID)
 }

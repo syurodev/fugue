@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 
 	"github.com/syurodev/fugue/internal/config"
 	"github.com/syurodev/fugue/pkg/client"
@@ -56,7 +57,13 @@ func RunMemoryExport(ctx context.Context, out, errOut io.Writer, env config.Env,
 		writeMemoryCommandErr(errOut, err)
 		return exitFailure
 	}
-	if _, statErr := os.Lstat(outPath); statErr == nil {
+	root, baseName, err := openExportTargetDir(outPath)
+	if err != nil {
+		writeMemoryCommandErr(errOut, err)
+		return exitFailure
+	}
+	defer closeRootQuietly(root)
+	if _, statErr := root.Lstat(baseName); statErr == nil {
 		writeMemoryCommandErr(errOut, fmt.Errorf("output file %q already exists: %w", outPath, os.ErrExist))
 		return exitFailure
 	}
@@ -82,7 +89,7 @@ func RunMemoryExport(ctx context.Context, out, errOut io.Writer, env config.Env,
 		writeMemoryCommandErr(errOut, err)
 		return exitFailure
 	}
-	if err := writeExclusiveFile0600(outPath, content); err != nil {
+	if err := writeExclusiveFile0600(root, baseName, content); err != nil {
 		writeMemoryCommandErr(errOut, err)
 		return exitFailure
 	}
@@ -93,10 +100,31 @@ func RunMemoryExport(ctx context.Context, out, errOut io.Writer, env config.Env,
 	return 0
 }
 
+func openExportTargetDir(outPath string) (*os.Root, string, error) {
+	absPath, err := filepath.Abs(outPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("resolve export path: %w", err)
+	}
+	root, err := os.OpenRoot(filepath.Dir(absPath))
+	if err != nil {
+		return nil, "", fmt.Errorf("open export directory: %w", err)
+	}
+	return root, filepath.Base(absPath), nil
+}
+
+func closeRootQuietly(root *os.Root) {
+	if root == nil {
+		return
+	}
+	if err := root.Close(); err != nil {
+		slog.Warn("close export root", "err", err)
+	}
+}
+
 func resolveMemoryWorkspaceID(ctx context.Context, cli *client.Client, workspaceArg string) (string, error) {
 	list, err := cli.ListWorkspaces(ctx)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("list workspaces: %w", err)
 	}
 	for _, ws := range list {
 		if ws.ID == workspaceArg || ws.Name == workspaceArg {
@@ -106,8 +134,8 @@ func resolveMemoryWorkspaceID(ctx context.Context, cli *client.Client, workspace
 	return "", fmt.Errorf("workspace.not_found: %w (%s)", errMemoryWorkspaceNotFound, workspaceArg)
 }
 
-func writeExclusiveFile0600(path string, data []byte) (retErr error) {
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, memoryExportFileMode)
+func writeExclusiveFile0600(root *os.Root, baseName string, data []byte) (retErr error) {
+	f, err := root.OpenFile(baseName, os.O_WRONLY|os.O_CREATE|os.O_EXCL, memoryExportFileMode)
 	if err != nil {
 		return fmt.Errorf("create export file: %w", err)
 	}

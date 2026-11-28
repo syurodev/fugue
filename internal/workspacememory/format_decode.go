@@ -46,16 +46,17 @@ func parseFrontmatter(content []byte) (yamlFrontmatter, int, error) {
 	}
 	fmStart := len("---\n")
 	idx := bytes.Index(content[fmStart:], []byte("\n---\n"))
-	endOffset := 0
-	if idx >= 0 {
+	var endOffset int
+	switch {
+	case idx >= 0:
 		endOffset = fmStart + idx + len("\n---\n")
-	} else if bytes.HasSuffix(content[fmStart:], []byte("\n---")) {
+	case bytes.HasSuffix(content[fmStart:], []byte("\n---")):
 		idx = len(content[fmStart:]) - len("\n---")
 		endOffset = len(content)
-	} else if bytes.Equal(content[fmStart:], []byte("---")) {
+	case bytes.Equal(content[fmStart:], []byte("---")):
 		idx = 0
 		endOffset = len(content)
-	} else {
+	default:
 		return yamlFrontmatter{}, 0, errcode.New(errcode.MemoryImportInvalid, "unterminated YAML frontmatter")
 	}
 

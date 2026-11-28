@@ -46,7 +46,7 @@ func (s *Store) ApplyImport(ctx context.Context, in *ApplyImportInput) (ApplyImp
 		ImportFile: importFile,
 	}
 
-	writes, added, updated, err := s.executeImportTx(ctx, in.WorkspaceID, &in.Preview, plans, prov)
+	writes, added, updated, err := s.executeImportTx(ctx, in.WorkspaceID, &in.Preview, plans, &prov)
 	if err != nil {
 		return ApplyImportResult{}, err
 	}
@@ -145,32 +145,32 @@ func selectItemChoice(item *ImportPreviewItem, choiceMap map[string]ImportItemCh
 
 func validateItemChoice(class ImportClass, choice ImportChoice, newLabel string) error {
 	switch class {
+	case ImportClassRejected:
+		return nil
 	case ImportClassSkip:
-		if choice != ImportChoiceSkip && choice != ImportChoiceKeepLocal {
-			return errInvalidArg("invalid choice for skipped import item")
-		}
+		return requireChoiceIn(choice, "skipped", ImportChoiceSkip, ImportChoiceKeepLocal)
 	case ImportClassAdd:
-		if choice != ImportChoiceTakeImported && choice != ImportChoiceSkip && choice != ImportChoiceKeepLocal {
-			return errInvalidArg("invalid choice for add import item")
-		}
+		return requireChoiceIn(choice, "add", ImportChoiceTakeImported, ImportChoiceSkip, ImportChoiceKeepLocal)
 	case ImportClassConflict:
-		switch choice {
-		case ImportChoiceKeepLocal, ImportChoiceSkip, ImportChoiceTakeImported, ImportChoiceKeepBoth:
-		default:
-			return errInvalidArg("invalid choice for conflict import item")
-		}
+		return requireChoiceIn(choice, "conflict", ImportChoiceKeepLocal, ImportChoiceSkip, ImportChoiceTakeImported, ImportChoiceKeepBoth)
 	case ImportClassLabelConflict:
-		switch choice {
-		case ImportChoiceSkip, ImportChoiceKeepLocal:
-		case ImportChoiceRename:
+		if choice == ImportChoiceRename {
 			if strings.TrimSpace(newLabel) == "" {
 				return errInvalidArg("new_label is required for rename choice")
 			}
-		default:
-			return errInvalidArg("invalid choice for label conflict import item")
+			return nil
 		}
+		return requireChoiceIn(choice, "label conflict", ImportChoiceSkip, ImportChoiceKeepLocal)
+	default:
+		return errInvalidArg("unknown import item class")
 	}
-	return nil
+}
+
+func requireChoiceIn(choice ImportChoice, className string, allowed ...ImportChoice) error {
+	if slices.Contains(allowed, choice) {
+		return nil
+	}
+	return errInvalidArg("invalid choice for " + className + " import item")
 }
 
 // resolveImportAnchors resolves anchors by root name on the target workspace (§9).
@@ -202,7 +202,7 @@ func (s *Store) executeImportTx(
 	workspaceID string,
 	preview *ImportPreview,
 	plans []resolvedImportPlan,
-	prov Provenance,
+	prov *Provenance,
 ) (writes []committedImportWrite, added, updated int, err error) {
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -295,27 +295,51 @@ func (s *Store) execImportWrite(
 	workspaceID string,
 	plan *resolvedImportPlan,
 	existsOnTarget bool,
-	prov Provenance,
+	prov *Provenance,
 ) (committedImportWrite, bool, error) {
-	imp := plan.item.Imported
-	label := plan.label
-	targetID := imp.ID
-	isInsert := !existsOnTarget
-
-	if plan.choice == ImportChoiceKeepBoth {
-		newID, idErr := s.ids.NewID()
-		if idErr != nil {
-			return committedImportWrite{}, false, errcode.Wrap(errcode.Internal, "generate keep-both memory entry ID", idErr)
-		}
-		targetID = newID
-		isInsert = true
-		var lblErr error
-		label, lblErr = nextKeepBothLabel(ctx, tx, workspaceID, imp.Label)
-		if lblErr != nil {
-			return committedImportWrite{}, false, lblErr
-		}
+	targetID, label, isInsert, err := s.prepareImportTarget(ctx, tx, workspaceID, plan, existsOnTarget)
+	if err != nil {
+		return committedImportWrite{}, false, err
 	}
+	imp := plan.item.Imported
+	if err := s.validateImportInTx(ctx, tx, workspaceID, targetID, label, imp); err != nil {
+		return committedImportWrite{}, false, err
+	}
+	row := buildImportedRow(workspaceID, targetID, label, imp, plan.anchors, prov, s.clk.Now().UTC().UnixMilli())
+	if isInsert {
+		return s.insertImportedEntry(ctx, tx, &row)
+	}
+	return s.updateImportedEntry(ctx, tx, &row)
+}
 
+func (s *Store) prepareImportTarget(
+	ctx context.Context,
+	tx *sql.Tx,
+	workspaceID string,
+	plan *resolvedImportPlan,
+	existsOnTarget bool,
+) (targetID, label string, isInsert bool, err error) {
+	imp := plan.item.Imported
+	if plan.choice != ImportChoiceKeepBoth {
+		return imp.ID, plan.label, !existsOnTarget, nil
+	}
+	newID, idErr := s.ids.NewID()
+	if idErr != nil {
+		return "", "", false, errcode.Wrap(errcode.Internal, "generate keep-both memory entry ID", idErr)
+	}
+	newLabel, lblErr := nextKeepBothLabel(ctx, tx, workspaceID, imp.Label)
+	if lblErr != nil {
+		return "", "", false, lblErr
+	}
+	return newID, newLabel, true, nil
+}
+
+func (s *Store) validateImportInTx(
+	ctx context.Context,
+	tx *sql.Tx,
+	workspaceID, targetID, label string,
+	imp *Entry,
+) error {
 	cand := writeCandidate{
 		workspaceID:   workspaceID,
 		entryID:       targetID,
@@ -329,87 +353,83 @@ func (s *Store) execImportWrite(
 		checkContent:  true,
 	}
 	if err := s.runPureChecks(&cand); err != nil {
-		return committedImportWrite{}, false, err
+		return err
 	}
-	if imp.Validity == ValidityValid {
-		if err := ensureLabelAvailable(ctx, tx, workspaceID, label, targetID); err != nil {
-			return committedImportWrite{}, false, err
-		}
-		if err := s.checkWorkspaceCapacity(ctx, tx, workspaceID, targetID); err != nil {
-			return committedImportWrite{}, false, err
-		}
+	if imp.Validity != ValidityValid {
+		return nil
 	}
+	if err := ensureLabelAvailable(ctx, tx, workspaceID, label, targetID); err != nil {
+		return err
+	}
+	return s.checkWorkspaceCapacity(ctx, tx, workspaceID, targetID)
+}
 
-	if isInsert {
-		row := entryRow{
-			id:            targetID,
-			workspaceID:   workspaceID,
-			kind:          imp.Kind,
-			label:         label,
-			summary:       imp.Summary,
-			body:          imp.Body,
-			keywords:      nonNilKeywords(imp.Keywords),
-			anchors:       plan.anchors,
-			author:        imp.Author,
-			verified:      imp.Verified,
-			validity:      imp.Validity,
-			invalidReason: imp.InvalidReason,
-			supersededBy:  imp.SupersededBy,
-			provenance:    prov,
-			revision:      1,
-			updatedAtMs:   s.clk.Now().UTC().UnixMilli(),
-		}
-		if err := insertEntryRow(ctx, tx, &row); err != nil {
-			return committedImportWrite{}, false, err
-		}
-		if row.validity == ValidityValid {
-			if err := ftsInsertByID(ctx, tx, row.id); err != nil {
-				return committedImportWrite{}, false, err
-			}
-		}
-		if err := insertHistoryRow(ctx, tx, OpAdd, &row, ""); err != nil {
-			return committedImportWrite{}, false, err
-		}
-		return committedImportWrite{row: row, op: OpAdd}, true, nil
-	}
-
-	cur, err := loadEntryRow(ctx, tx, workspaceID, targetID)
-	if err != nil {
-		return committedImportWrite{}, false, err
-	}
-	if delErr := ftsDeleteByEntryID(ctx, tx, workspaceID, targetID); delErr != nil {
-		return committedImportWrite{}, false, delErr
-	}
-	next := entryRow{
-		id:            cur.id,
-		workspaceID:   cur.workspaceID,
+func buildImportedRow(
+	workspaceID, targetID, label string,
+	imp *Entry,
+	anchors []Anchor,
+	prov *Provenance,
+	nowMs int64,
+) entryRow {
+	return entryRow{
+		id:            targetID,
+		workspaceID:   workspaceID,
 		kind:          imp.Kind,
 		label:         label,
 		summary:       imp.Summary,
 		body:          imp.Body,
 		keywords:      nonNilKeywords(imp.Keywords),
-		anchors:       plan.anchors,
+		anchors:       anchors,
 		author:        imp.Author,
 		verified:      imp.Verified,
 		validity:      imp.Validity,
 		invalidReason: imp.InvalidReason,
 		supersededBy:  imp.SupersededBy,
-		provenance:    prov,
-		revision:      cur.revision + 1,
-		updatedAtMs:   s.clk.Now().UTC().UnixMilli(),
+		provenance:    *prov,
+		revision:      1,
+		updatedAtMs:   nowMs,
 	}
-	if err := updateEntryRow(ctx, tx, &next); err != nil {
+}
+
+func (s *Store) insertImportedEntry(ctx context.Context, tx *sql.Tx, row *entryRow) (committedImportWrite, bool, error) {
+	if err := insertEntryRow(ctx, tx, row); err != nil {
 		return committedImportWrite{}, false, err
 	}
-	if next.validity == ValidityValid {
-		if err := ftsInsertByID(ctx, tx, next.id); err != nil {
-			return committedImportWrite{}, false, err
-		}
-	}
-	if err := insertHistoryRow(ctx, tx, OpUpdate, &next, ""); err != nil {
+	if err := syncImportedFTS(ctx, tx, row); err != nil {
 		return committedImportWrite{}, false, err
 	}
-	return committedImportWrite{row: next, op: OpUpdate}, false, nil
+	if err := insertHistoryRow(ctx, tx, OpAdd, row, ""); err != nil {
+		return committedImportWrite{}, false, err
+	}
+	return committedImportWrite{row: *row, op: OpAdd}, true, nil
+}
+
+func (s *Store) updateImportedEntry(ctx context.Context, tx *sql.Tx, row *entryRow) (committedImportWrite, bool, error) {
+	cur, err := loadEntryRow(ctx, tx, row.workspaceID, row.id)
+	if err != nil {
+		return committedImportWrite{}, false, err
+	}
+	if delErr := ftsDeleteByEntryID(ctx, tx, row.workspaceID, row.id); delErr != nil {
+		return committedImportWrite{}, false, delErr
+	}
+	row.revision = cur.revision + 1
+	if err := updateEntryRow(ctx, tx, row); err != nil {
+		return committedImportWrite{}, false, err
+	}
+	if err := syncImportedFTS(ctx, tx, row); err != nil {
+		return committedImportWrite{}, false, err
+	}
+	if err := insertHistoryRow(ctx, tx, OpUpdate, row, ""); err != nil {
+		return committedImportWrite{}, false, err
+	}
+	return committedImportWrite{row: *row, op: OpUpdate}, false, nil
+}
+
+func syncImportedFTS(ctx context.Context, tx *sql.Tx, row *entryRow) error {
+	if row.validity != ValidityValid {
+		return nil
+	}
+	return ftsInsertByID(ctx, tx, row.id)
 }
 
 // nextKeepBothLabel generates a unique label using " (imported)" then

@@ -3,6 +3,7 @@ package workspacememory
 import (
 	"context"
 	"slices"
+	"strconv"
 	"strings"
 )
 
@@ -76,7 +77,7 @@ func (s *Store) classifyDecodedBlock(
 	blk *DecodedBlock,
 	st *previewTargetState,
 ) ImportPreviewItem {
-	itemID := "item-" + formatUint64(uint64(idx+1))
+	itemID := "item-" + strconv.Itoa(idx+1)
 	if blk.RejectReason != "" || blk.Entry == nil {
 		return ImportPreviewItem{
 			ItemID:        itemID,
@@ -244,23 +245,23 @@ func importedMatchesLocal(local *Entry, imp *ImportedEntry) bool {
 
 func importedEntryToEntry(workspaceID string, imp *ImportedEntry) Entry {
 	return Entry{
-		ID:            imp.ID,
-		WorkspaceID:   workspaceID,
-		Kind:          imp.Kind,
-		Label:         imp.Label,
-		Summary:       imp.Summary,
-		Body:          imp.Body,
-		Keywords:      nonNilKeywords(imp.Keywords),
-		Anchors:       nonNilAnchors(slices.Clone(imp.Anchors)),
+		ID:             imp.ID,
+		WorkspaceID:    workspaceID,
+		Kind:           imp.Kind,
+		Label:          imp.Label,
+		Summary:        imp.Summary,
+		Body:           imp.Body,
+		Keywords:       nonNilKeywords(imp.Keywords),
+		Anchors:        nonNilAnchors(slices.Clone(imp.Anchors)),
 		AnchorStatuses: []AnchorStatus{},
-		Author:        imp.Author,
-		Verified:      imp.Verified,
-		Validity:      imp.Validity,
-		InvalidReason: imp.InvalidReason,
-		SupersededBy:  imp.SupersededBy,
-		Revision:      imp.Revision,
-		UpdatedAt:     imp.UpdatedAt,
-		Freshness:     FreshnessUnknown,
+		Author:         imp.Author,
+		Verified:       imp.Verified,
+		Validity:       imp.Validity,
+		InvalidReason:  imp.InvalidReason,
+		SupersededBy:   imp.SupersededBy,
+		Revision:       imp.Revision,
+		UpdatedAt:      imp.UpdatedAt,
+		Freshness:      FreshnessUnknown,
 	}
 }
 

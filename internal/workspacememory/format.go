@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"fmt"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -167,8 +166,4 @@ func writeEncodedBlock(buf *bytes.Buffer, e *Entry) error {
 	buf.WriteString(entryCloseMarker)
 	buf.WriteByte('\n')
 	return nil
-}
-
-func formatUint64(v uint64) string {
-	return strconv.FormatUint(v, 10)
 }
