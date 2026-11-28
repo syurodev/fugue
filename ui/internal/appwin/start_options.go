@@ -9,14 +9,17 @@ import (
 
 // effortDefaultID lets Select treat "vendor default" as selectable instead of no
 // value; layEffort and effortValue map it back to "" for the host profile.
-const effortDefaultID = "default"
+const (
+	effortDefaultID    = "default"
+	labelVendorDefault = "vendor default"
+)
 
 // effortOptions are the effort values the host's profile allowlist accepts;
 // empty uses the vendor's default and the host rejects anything else. The
 // host validates the chosen value, so the picker offers exactly these.
 func effortOptions() []kit.SelectOption {
 	return []kit.SelectOption{
-		{ID: effortDefaultID, Label: "vendor default"},
+		{ID: effortDefaultID, Label: labelVendorDefault},
 		{ID: "low", Label: "low"},
 		{ID: "medium", Label: "medium"},
 		{ID: "high", Label: "high"},

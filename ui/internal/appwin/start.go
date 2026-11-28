@@ -398,7 +398,7 @@ func (f *startFlow) layModel(env *kit.Env, lay fieldLay) {
 	lay(f.model.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
 		props := &kit.ComboboxProps{
 			Label:       "Model",
-			Placeholder: "vendor default",
+			Placeholder: labelVendorDefault,
 			Helper:      "The vendor's model name; the host validates it.",
 			Block:       true,
 		}
@@ -412,7 +412,7 @@ func (f *startFlow) layEffort(env *kit.Env, lay fieldLay) {
 	lay(f.effort.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
 		props := &kit.SelectProps{
 			Label:       "Effort",
-			Placeholder: "vendor default",
+			Placeholder: labelVendorDefault,
 			Options:     effortOptions(),
 			Value:       f.effortSel,
 			Block:       true,
