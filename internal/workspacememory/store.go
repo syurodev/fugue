@@ -16,7 +16,7 @@ type Store struct {
 	clk     clock.Clock
 	ids     ids.Generator
 	scanner SecretScanner
-	anchors AnchorReader
+	anchors AnchorHasher
 	events  EventSink
 	cfg     Config
 	log     *slog.Logger
@@ -28,7 +28,7 @@ func NewStore(
 	clk clock.Clock,
 	gen ids.Generator,
 	scanner SecretScanner,
-	anchors AnchorReader,
+	anchors AnchorHasher,
 	events EventSink,
 	cfg Config,
 ) (*Store, error) {

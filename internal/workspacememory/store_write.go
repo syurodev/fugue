@@ -2,9 +2,7 @@ package workspacememory
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"errors"
 	"slices"
 	"strings"
@@ -369,23 +367,22 @@ func (s *Store) resolveAnchors(ctx context.Context, workspaceID string, inputs [
 		return []Anchor{}, nil
 	}
 	if s.anchors == nil {
-		return nil, errcode.New(errcode.FailedPrecondition, "anchor reader is not configured")
+		return nil, errcode.New(errcode.FailedPrecondition, "anchor hasher is not configured")
 	}
 	out := make([]Anchor, 0, len(inputs))
 	for _, in := range inputs {
 		if strings.TrimSpace(in.RootName) == "" || strings.TrimSpace(in.RelPath) == "" {
 			return nil, errInvalidArg("anchor root_name and rel_path are required")
 		}
-		raw, err := s.anchors.ReadAnchor(ctx, workspaceID, in.RootName, in.RelPath)
+		digest, err := s.anchors.HashAnchor(ctx, workspaceID, in.RootName, in.RelPath)
 		if err != nil {
 			code := errcode.CodeOf(err)
-			return nil, errcode.Wrap(code, "read workspace anchor", err)
+			return nil, errcode.Wrap(code, "hash workspace anchor", err)
 		}
-		sum := sha256.Sum256(raw)
 		out = append(out, Anchor{
 			RootName:    in.RootName,
 			RelPath:     in.RelPath,
-			ContentHash: hex.EncodeToString(sum[:]),
+			ContentHash: digest,
 		})
 	}
 	return out, nil

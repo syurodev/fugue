@@ -3,7 +3,9 @@ package workspacememory
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"log/slog"
 	"strings"
@@ -43,16 +45,16 @@ func (f *fakeSecretScanner) Scan(text string) []SecretFinding {
 	return out
 }
 
-type fakeAnchorReader struct {
+type fakeAnchorHasher struct {
 	mu    sync.Mutex
 	files map[string]map[string][]byte // rootName -> relPath -> bytes
 }
 
-func newFakeAnchorReader() *fakeAnchorReader {
-	return &fakeAnchorReader{files: map[string]map[string][]byte{}}
+func newFakeAnchorHasher() *fakeAnchorHasher {
+	return &fakeAnchorHasher{files: map[string]map[string][]byte{}}
 }
 
-func (r *fakeAnchorReader) setFile(root, rel string, data []byte) {
+func (r *fakeAnchorHasher) setFile(root, rel string, data []byte) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.files[root] == nil {
@@ -61,34 +63,35 @@ func (r *fakeAnchorReader) setFile(root, rel string, data []byte) {
 	r.files[root][rel] = append([]byte(nil), data...)
 }
 
-func (r *fakeAnchorReader) deleteFile(root, rel string) {
+func (r *fakeAnchorHasher) deleteFile(root, rel string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.files[root], rel)
 }
 
-func (r *fakeAnchorReader) deleteRoot(root string) {
+func (r *fakeAnchorHasher) deleteRoot(root string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.files, root)
 }
 
-func (r *fakeAnchorReader) ReadAnchor(
+func (r *fakeAnchorHasher) HashAnchor(
 	_ context.Context,
 	_ string,
 	rootName, relPath string,
-) ([]byte, error) {
+) (string, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	root, ok := r.files[rootName]
 	if !ok {
-		return nil, errcode.New(errcode.WorkspaceRootMissing, "root missing")
+		return "", errcode.New(errcode.WorkspaceRootMissing, "root missing")
 	}
 	data, ok := root[relPath]
 	if !ok {
-		return nil, errcode.New(errcode.WorkspaceFileNotFound, "file not found")
+		return "", errcode.New(errcode.WorkspaceFileNotFound, "file not found")
 	}
-	return append([]byte(nil), data...), nil
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
 }
 
 type fakeEventSink struct {
@@ -115,7 +118,7 @@ type testEnv struct {
 	clk     *clock.Fake
 	ids     ids.Generator
 	scanner *fakeSecretScanner
-	anchors *fakeAnchorReader
+	anchors *fakeAnchorHasher
 	events  *fakeEventSink
 	store   *Store
 }
@@ -143,7 +146,7 @@ func newTestEnv(t *testing.T, cfg Config) *testEnv {
 			"AK" + "IA" + strings.Repeat("A1", 8):  "aws-access-key",
 		},
 	}
-	anchors := newFakeAnchorReader()
+	anchors := newFakeAnchorHasher()
 	events := &fakeEventSink{}
 	store, err := NewStore(db, clk, gen, scanner, anchors, events, cfg)
 	if err != nil {
@@ -432,8 +435,8 @@ func assertSecretRejection(t *testing.T, ctx context.Context, env *testEnv, logB
 		Body:        "Here is a token " + fakeGH + " embedded in oversized non-English text: Xin chào đây là tiếng Việt rất dài.",
 		Author:      AuthorAgent,
 	})
-	if errcode.CodeOf(secErr) != errcode.MemoryContainsSecret {
-		t.Fatalf("secret Add code = %q, want %q (err=%v)", errcode.CodeOf(secErr), errcode.MemoryContainsSecret, secErr)
+	if got := errcode.CodeOf(secErr); got != errcode.MemoryContainsSecret {
+		t.Fatalf("secret Add code = %q, want memory.contains_secret", got)
 	}
 	if strings.Contains(secErr.Error(), fakeGH) || strings.Contains(logBuf.String(), fakeGH) {
 		t.Fatal("secret value leaked into error or logs")
@@ -448,8 +451,8 @@ func assertSecretRejection(t *testing.T, ctx context.Context, env *testEnv, logB
 		Keywords:    []string{fakeAWS},
 		Author:      AuthorUser,
 	})
-	if errcode.CodeOf(kwSecErr) != errcode.MemoryContainsSecret {
-		t.Fatalf("keyword secret code = %q, want %q", errcode.CodeOf(kwSecErr), errcode.MemoryContainsSecret)
+	if got := errcode.CodeOf(kwSecErr); got != errcode.MemoryContainsSecret {
+		t.Fatalf("keyword secret code = %q, want memory.contains_secret", got)
 	}
 	if strings.Contains(kwSecErr.Error(), fakeAWS) || strings.Contains(logBuf.String(), fakeAWS) {
 		t.Fatal("AWS secret value leaked into error or logs")

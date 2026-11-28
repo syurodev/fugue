@@ -46,19 +46,19 @@ func (s *memorySecretScanner) Scan(text string) []workspacememory.SecretFinding 
 	return out
 }
 
-type memoryAnchorReader struct {
+type memoryAnchorHasher struct {
 	workspaces *workspace.Service
 }
 
-func (r *memoryAnchorReader) ReadAnchor(ctx context.Context, workspaceID, rootName, relPath string) ([]byte, error) {
+func (r *memoryAnchorHasher) HashAnchor(ctx context.Context, workspaceID, rootName, relPath string) (string, error) {
 	if r.workspaces == nil {
-		return nil, errcode.New(errcode.FailedPrecondition, "workspace service is not configured")
+		return "", errcode.New(errcode.FailedPrecondition, "workspace service is not configured")
 	}
-	file, err := r.workspaces.ReadFile(ctx, workspaceID, rootName, relPath, 0, 0)
+	digest, err := r.workspaces.HashFile(ctx, workspaceID, rootName, relPath)
 	if err != nil {
-		return nil, publicWorkspaceError(err)
+		return "", publicWorkspaceError(err)
 	}
-	return []byte(file.Content), nil
+	return digest, nil
 }
 
 type memoryEventSink struct {
@@ -95,7 +95,7 @@ func initWorkspaceMemory(hp *HostProcess, store *storage.Store, deps *HostDeps, 
 		deps.Clock,
 		deps.IDs,
 		newMemorySecretScanner(),
-		&memoryAnchorReader{workspaces: workspaces},
+		&memoryAnchorHasher{workspaces: workspaces},
 		&memoryEventSink{hub: hp.rt.hub},
 		workspacememory.Config{},
 	)

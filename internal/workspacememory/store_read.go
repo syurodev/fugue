@@ -2,9 +2,7 @@ package workspacememory
 
 import (
 	"context"
-	"crypto/sha256"
 	"database/sql"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"strings"
@@ -340,12 +338,11 @@ func (s *Store) checkAnchor(ctx context.Context, workspaceID string, a Anchor) A
 	if s.anchors == nil {
 		return st
 	}
-	raw, err := s.anchors.ReadAnchor(ctx, workspaceID, a.RootName, a.RelPath)
+	digest, err := s.anchors.HashAnchor(ctx, workspaceID, a.RootName, a.RelPath)
 	if err != nil {
 		return st
 	}
-	sum := sha256.Sum256(raw)
-	if hex.EncodeToString(sum[:]) == a.ContentHash {
+	if digest == a.ContentHash {
 		st.Freshness = FreshnessFresh
 	}
 	return st

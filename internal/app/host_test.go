@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -83,13 +84,14 @@ func testHostDeps(t *testing.T, dir string, clk *clock.Fake, tr HostTransport) *
 	t.Helper()
 	seedMigratedDataDir(t, dir)
 	return &HostDeps{
-		DataDir:   dir,
-		Config:    testHostConfig(),
-		Clock:     clk,
-		IDs:       ids.NewUUIDv7(clk, ids.NewDeterministic(testHostVersion)),
-		Transport: tr,
-		GitBinary: testGitBinary(t),
-		OCRBinary: testNoOCRBinary(),
+		DataDir:      dir,
+		WorkspaceEnv: config.MapEnv{config.EnvFugueHome: filepath.Join(t.TempDir(), "Fugue")},
+		Config:       testHostConfig(),
+		Clock:        clk,
+		IDs:          ids.NewUUIDv7(clk, ids.NewDeterministic(testHostVersion)),
+		Transport:    tr,
+		GitBinary:    testGitBinary(t),
+		OCRBinary:    testNoOCRBinary(),
 	}
 }
 
