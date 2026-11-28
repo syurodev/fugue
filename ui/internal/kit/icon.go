@@ -55,6 +55,7 @@ const (
 	IconGitCommit      IconName = "git-commit"
 	IconWrapText       IconName = "wrap-text"
 	IconFolder         IconName = "folder"
+	IconFolderPlus     IconName = "folder-plus"
 	IconGitBranch      IconName = "git-branch"
 	IconGitPullRequest IconName = "git-pull-request"
 	IconMessageSquare  IconName = "message-square"
@@ -115,6 +116,7 @@ func pathOf(n IconName) (string, error) {
 		IconGitCommit:      icondata.GitCommit,
 		IconWrapText:       icondata.WrapText,
 		IconFolder:         icondata.Folder,
+		IconFolderPlus:     icondata.FolderPlus,
 		IconGitBranch:      icondata.GitBranch,
 		IconGitPullRequest: icondata.GitPullRequest,
 		IconMessageSquare:  icondata.MessageSquare,

@@ -114,7 +114,7 @@ func setupMemoryExportCLITest(t *testing.T, wsName string) (sockPath, wsID strin
 	}
 	defer cli.Close()
 
-	if createErr := cli.CreateWorkspace(ctx, wsName); createErr != nil {
+	if _, createErr := cli.CreateWorkspace(ctx, wsName); createErr != nil {
 		t.Fatalf("CreateWorkspace: %v", createErr)
 	}
 	wsList, err := cli.ListWorkspaces(ctx)
@@ -250,7 +250,7 @@ func seedCLISecretLabelEntry(t *testing.T, hp *app.HostProcess, sockPath, wsName
 		t.Fatalf("Dial: %v", err)
 	}
 	defer cli.Close()
-	if createErr := cli.CreateWorkspace(ctx, wsName); createErr != nil {
+	if _, createErr := cli.CreateWorkspace(ctx, wsName); createErr != nil {
 		t.Fatalf("CreateWorkspace: %v", createErr)
 	}
 	wsList, err := cli.ListWorkspaces(ctx)

@@ -375,6 +375,7 @@ func wireApplyGeometry(sc *screens, w *app.Window) {
 
 func newWindowScreens(m *hostconn.Manager, workers appWorkers, coord *multiWindow, winReg *windowUpdates, appearance osappearance.Source) *screens {
 	sc := newScreens(m, workers.fetcher, workers.poster, workers.wsMut)
+	sc.folderPicker = workers.folderPicker
 	sc.osAppearance = appearance
 	sc.setTopic = func(topic string, active bool) {
 		coord.setTopic(winReg, topic, active)

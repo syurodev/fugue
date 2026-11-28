@@ -8,6 +8,7 @@ import (
 	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 
+	"github.com/syurodev/fugue/ui/internal/folderpicker"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/session"
@@ -57,14 +58,16 @@ func (s *screens) applyWorkspaceEvent(eventType string, payload []byte) {
 // reconcileWorkspaceDialogs closes any open workspace-targeted dialog whose
 // workspace or detail was dropped (for example, deleted or invalidated by a
 // config/root/policy event), so no dialog stays open on a stale hash. The
-// create dialog targets no existing workspace and stays open, and the start
-// dialog clears a gone workspace selection.
+// create dialog targets no existing workspace and stays open, the add chain
+// keeps its own compare-and-swap hash fresh from each step's answer so a
+// dropped detail does not stale it (FUG-115), and the start dialog clears a
+// gone workspace selection.
 func (s *screens) reconcileWorkspaceDialogs() {
 	hasDetail := func(id string) bool {
 		_, ok := s.workspaces.DetailFor(id)
 		return ok
 	}
-	if s.dlg.root.dialog.IsOpen() && !hasDetail(s.dlg.root.wsID) {
+	if s.dlg.root.dialog.IsOpen() && !s.dlg.root.chain.on && !hasDetail(s.dlg.root.wsID) {
 		s.dlg.root.dialog.Close()
 	}
 	if s.dlg.del.dialog.IsOpen() && !hasDetail(s.dlg.del.wsID) {
@@ -78,6 +81,20 @@ func (s *screens) reconcileWorkspaceDialogs() {
 	}
 	if s.composer != nil {
 		s.composer.start.reconcile(s)
+	}
+}
+
+// applyFolderPickerResults folds this frame's pick results into the open
+// dialog's source-folder list: only one workspace dialog is open at a time,
+// and only its add mode carries the list.
+func (s *screens) applyFolderPickerResults(results []folderpicker.Result) {
+	for i := range results {
+		switch {
+		case s.dlg.create.dialog.IsOpen():
+			s.dlg.create.folders.picked(results[i])
+		case s.dlg.root.dialog.IsOpen() && s.dlg.root.edit == "":
+			s.dlg.root.folders.picked(results[i])
+		}
 	}
 }
 
@@ -247,7 +264,7 @@ func (s *screens) manageItems(ws workspace.Summary) []kit.MenuItem {
 	if ws.PendingPolicyConfirmation {
 		items = append(items, kit.MenuItem{ID: wsMenuReview, Label: "Review policy change…", Disabled: !ready})
 	}
-	items = append(items, kit.MenuItem{ID: "add-root", Label: "Add root…", Disabled: !ready})
+	items = append(items, kit.MenuItem{ID: "add-folders", Label: "Add folders…", Disabled: !ready})
 	if ready && len(det.Roots) > 0 {
 		sub := make([]kit.MenuItem, 0, 2*len(det.Roots))
 		for _, r := range det.Roots {
@@ -276,12 +293,12 @@ func (s *screens) chooseManage(ws workspace.Summary, chosen string) {
 			return
 		}
 		s.dlg.policy.openFor(&det)
-	case chosen == "add-root":
+	case chosen == "add-folders":
 		if !ready {
 			s.fail(errDialogNeedsDetail)
 			return
 		}
-		s.dlg.root.openAdd(&det)
+		s.dlg.root.openAdd(s, &det)
 	case chosen == "delete":
 		if !ready {
 			s.fail(errDialogNeedsDetail)
@@ -432,7 +449,7 @@ func (s *screens) layoutSidebarIslandHeader(env *kit.Env, gtx *layout.Context) l
 			clicked, err := s.wsAddBtn.Layout(env, &local, &props)
 			s.fail(err)
 			if clicked {
-				s.dlg.create.open()
+				s.dlg.create.open(s)
 			}
 		})
 	}

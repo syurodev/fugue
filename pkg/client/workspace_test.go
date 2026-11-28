@@ -173,10 +173,10 @@ func TestWorkspaceRootMutationsSendFieldsAndSurfaceErrors(t *testing.T) {
 	c := serveWorkspaceFake(t, fake)
 	ctx := testCtx(t)
 
-	if err := c.CreateWorkspace(ctx, testWorkspaceName); err != nil {
+	if _, err := c.CreateWorkspace(ctx, testWorkspaceName); err != nil {
 		t.Fatal(err)
 	}
-	if err := c.AddRoot(ctx, testWorkspaceID, testRoot, testWSRootPath, client.RootAccessRW, testWSExpectedHash); err != nil {
+	if _, err := c.AddRoot(ctx, testWorkspaceID, testRoot, testWSRootPath, client.RootAccessRW, testWSExpectedHash); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.RemoveRoot(ctx, testWorkspaceID, testRoot, testWSExpectedHash); err != nil {
@@ -191,8 +191,10 @@ func TestWorkspaceRootMutationsSendFieldsAndSurfaceErrors(t *testing.T) {
 	fake.mu.Lock()
 	fake.err = scriptedWorkspaceError(t, testWSCodeInvalidID)
 	fake.mu.Unlock()
-	assertCodedRefusal(t, c.CreateWorkspace(ctx, testWorkspaceName), testWSCodeInvalidID)
-	assertCodedRefusal(t, c.AddRoot(ctx, testWorkspaceID, testRoot, testWSRootPath, client.RootAccessRW, testWSExpectedHash), testWSCodeInvalidID)
+	_, createErr := c.CreateWorkspace(ctx, testWorkspaceName)
+	assertCodedRefusal(t, createErr, testWSCodeInvalidID)
+	_, addErr := c.AddRoot(ctx, testWorkspaceID, testRoot, testWSRootPath, client.RootAccessRW, testWSExpectedHash)
+	assertCodedRefusal(t, addErr, testWSCodeInvalidID)
 	assertCodedRefusal(t, c.RemoveRoot(ctx, testWorkspaceID, testRoot, testWSExpectedHash), testWSCodeInvalidID)
 	assertCodedRefusal(t, c.UpdateRoot(ctx, testWorkspaceID, testRoot, testWSRootNewName, testWSRootPath, client.RootAccessRO, testWSExpectedHash), testWSCodeInvalidID)
 }

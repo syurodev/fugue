@@ -4,24 +4,35 @@ import (
 	"context"
 	"errors"
 	"testing"
+
+	"github.com/syurodev/fugue/pkg/client"
 )
 
 // recordingClient records which client call each mutation reached and
 // answers with a fixed failure, so a test pins the mutation-to-RPC routing
-// without a real connection.
+// without a real connection. A create or add answers with the workspace the
+// next test in the chain expects.
+// The recorded call names the routing test asserts on.
+const (
+	callCreate  = "create"
+	callAddRoot = "add-root"
+)
+
 type recordingClient struct {
-	calls []string
-	err   error
+	calls   []string
+	err     error
+	created client.Workspace
+	added   client.Workspace
 }
 
-func (r *recordingClient) CreateWorkspace(context.Context, string) error {
-	r.calls = append(r.calls, "create")
-	return r.err
+func (r *recordingClient) CreateWorkspace(context.Context, string) (client.Workspace, error) {
+	r.calls = append(r.calls, callCreate)
+	return r.created, r.err
 }
 
-func (r *recordingClient) AddRoot(context.Context, string, string, string, string, string) error {
-	r.calls = append(r.calls, "add-root")
-	return r.err
+func (r *recordingClient) AddRoot(context.Context, string, string, string, string, string) (client.Workspace, error) {
+	r.calls = append(r.calls, callAddRoot)
+	return r.added, r.err
 }
 
 func (r *recordingClient) RemoveRoot(context.Context, string, string, string) error {
@@ -86,6 +97,12 @@ func TestMutatorRejectsEmptyExpectedHash(t *testing.T) {
 		}
 	}
 }
+
+// The hashes the chain test scripts.
+const (
+	chainCreatedHash = "hash-created"
+	chainAddedHash   = "hash-added"
+)
 
 // waitResult takes the mutator's next result. The receive blocks: Start, Do
 // and deliver are deterministic, and the package timeout catches a stuck
@@ -178,5 +195,43 @@ func TestMutatorQueueFullReportsAFailure(t *testing.T) {
 		}
 	default:
 		t.Fatal("the overflow was lost silently")
+	}
+}
+
+// TestMutatorChainsCreateAndAddRootHashes pins what the source-folder flow
+// (FUG-115) chains on: a create's result carries the new workspace's id and
+// config hash, and an add's result carries the hash after the add, so each
+// compare-and-swap posts the hash the step before returned.
+func TestMutatorChainsCreateAndAddRootHashes(t *testing.T) {
+	t.Parallel()
+	rec := &recordingClient{
+		created: client.Workspace{ID: "w9", Name: "ws", ConfigHash: chainCreatedHash},
+		added:   client.Workspace{ID: "w9", ConfigHash: chainAddedHash},
+	}
+	m := NewMutator(func() MutatorClient { return rec })
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	m.Start(ctx)
+	defer m.Stop()
+
+	m.Do(&Mutation{Kind: MutCreate, CreateName: "ws"})
+	res := waitResult(t, m)
+	if res.Err != nil {
+		t.Fatalf("create failed: %v", res.Err)
+	}
+	if res.NewID != "w9" || res.NewHash != chainCreatedHash {
+		t.Fatalf("create result = (id %q, hash %q), want the host's answer", res.NewID, res.NewHash)
+	}
+
+	m.Do(&Mutation{Kind: MutAddRoot, WorkspaceID: "w9", Name: "api", Path: "/repo/api", Access: "rw", ExpectedHash: chainCreatedHash})
+	res = waitResult(t, m)
+	if res.Err != nil {
+		t.Fatalf("add failed: %v", res.Err)
+	}
+	if res.NewHash != chainAddedHash {
+		t.Fatalf("add result hash = %q, want the hash after the add", res.NewHash)
+	}
+	if rec.calls[0] != callCreate || rec.calls[1] != callAddRoot {
+		t.Fatalf("client calls = %v, want create then add-root", rec.calls)
 	}
 }

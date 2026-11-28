@@ -21,6 +21,7 @@ import (
 	"github.com/syurodev/fugue/pkg/client"
 
 	"github.com/syurodev/fugue/ui/internal/accounts"
+	"github.com/syurodev/fugue/ui/internal/folderpicker"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/inbox"
 	"github.com/syurodev/fugue/ui/internal/kit"
@@ -127,17 +128,18 @@ func Run(ctx context.Context, opts Options) error {
 }
 
 type appWorkers struct {
-	fetcher   *session.Fetcher
-	poster    *session.Poster
-	wsMut     *workspace.Mutator
-	vaultW    *vault.Worker
-	inboxW    *inbox.Worker
-	accountsW *accounts.Worker
-	settingsW *settings.Worker
-	secretsW  *secrets.Worker
-	viewerW   *fileViewWorker
-	layoutW   *layoutWorker
-	teamW     *team.Worker
+	fetcher      *session.Fetcher
+	poster       *session.Poster
+	wsMut        *workspace.Mutator
+	folderPicker *folderpicker.Picker
+	vaultW       *vault.Worker
+	inboxW       *inbox.Worker
+	accountsW    *accounts.Worker
+	settingsW    *settings.Worker
+	secretsW     *secrets.Worker
+	viewerW      *fileViewWorker
+	layoutW      *layoutWorker
+	teamW        *team.Worker
 }
 
 func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) appWorkers {
@@ -196,7 +198,9 @@ func startAppWorkers(ctx context.Context, m *hostconn.Manager, w *app.Window) ap
 		return nil
 	}, w.Invalidate)
 	layoutW.Start(ctx)
-	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW, settingsW: settingsW, secretsW: secretsW, viewerW: viewerW, layoutW: layoutW, teamW: startTeamWorker(ctx, m, w)}
+	picker := folderpicker.NewPicker(w.Invalidate)
+	picker.Start(ctx)
+	return appWorkers{fetcher: fetcher, poster: poster, wsMut: wsMut, vaultW: vaultW, inboxW: inboxW, accountsW: accountsW, settingsW: settingsW, secretsW: secretsW, viewerW: viewerW, layoutW: layoutW, folderPicker: picker, teamW: startTeamWorker(ctx, m, w)}
 }
 
 // startTeamWorker gives each window its own team worker, so a window's
@@ -219,6 +223,7 @@ func (a appWorkers) stop() {
 	a.accountsW.Stop()
 	a.inboxW.Stop()
 	a.vaultW.Stop()
+	a.folderPicker.Stop()
 	a.wsMut.Stop()
 	a.poster.Stop()
 	a.fetcher.Stop()
@@ -368,6 +373,9 @@ drainPosts:
 
 func (s *screens) drainWorkerResults() {
 	s.drainTeamResults()
+	if s.folderPicker != nil {
+		s.applyFolderPickerResults(drainPickerResults(s.folderPicker))
+	}
 	if s.vaultWorker != nil {
 		s.applyVaultResults(drainVaultResults(s.vaultWorker))
 	}

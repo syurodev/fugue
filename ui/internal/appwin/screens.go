@@ -13,6 +13,7 @@ import (
 	"github.com/syurodev/fugue/pkg/client"
 
 	"github.com/syurodev/fugue/ui/internal/accounts"
+	"github.com/syurodev/fugue/ui/internal/folderpicker"
 	"github.com/syurodev/fugue/ui/internal/hostconn"
 	"github.com/syurodev/fugue/ui/internal/inbox"
 	"github.com/syurodev/fugue/ui/internal/kit"
@@ -153,8 +154,12 @@ type screens struct {
 	// The workspace side (F10.14): the workspaces the topic reports, the
 	// reads that fill their details, the mutations the dialogs post, and
 	// the sidebar's own state per workspace.
-	workspaces   *workspace.Model
-	wsMut        *workspace.Mutator
+	workspaces *workspace.Model
+	wsMut      *workspace.Mutator
+	// folderPicker runs the desktop's folder chooser off the window
+	// goroutine (FUG-115); nil in tests that never pick, where the dialogs
+	// fall back to the typed path.
+	folderPicker *folderpicker.Picker
 	wsReads      wsReader
 	wsDetailReq  map[string]uint64
 	wsHeaders    map[string]*kit.SectionHeaderState

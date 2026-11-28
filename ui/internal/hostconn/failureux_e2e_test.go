@@ -291,7 +291,7 @@ func unlockAndSeedWorkspace(t *testing.T, ctx context.Context, c *client.Client)
 	if _, err := c.UnlockVault(ctx, []byte(fakeVaultPassphrase)); err != nil {
 		t.Fatalf("unlock the vault: %v", err)
 	}
-	if err := c.CreateWorkspace(ctx, "failureux"); err != nil {
+	if _, err := c.CreateWorkspace(ctx, "failureux"); err != nil {
 		t.Fatalf("create the workspace: %v", err)
 	}
 	list, err := c.ListWorkspaces(ctx)
@@ -311,7 +311,7 @@ func unlockAndSeedWorkspace(t *testing.T, ctx context.Context, c *client.Client)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.AddRoot(ctx, id, "root", t.TempDir(), "rw", ws.ConfigHash); err != nil {
+	if _, err := c.AddRoot(ctx, id, "root", t.TempDir(), "rw", ws.ConfigHash); err != nil {
 		t.Fatalf("add the root: %v", err)
 	}
 	return id

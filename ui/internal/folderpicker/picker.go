@@ -1,0 +1,442 @@
+package folderpicker
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"runtime"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+// The static causes behind a refused pick; they are wrapped, never
+// constructed, at the call site. The off-platform portal's cause lives in
+// the platform files that use it.
+var (
+	errNoPicker      = errors.New("no folder picker is available")
+	errNotAFilePath  = errors.New("the folder picker answered a path that is not a file")
+	errForeignFolder = errors.New("the folder picker answered a folder on another host")
+)
+
+// Helper is one way a pick can run.
+type Helper uint8
+
+// The helpers, in no order; the platform's order lives in pickOrder.
+const (
+	HelperNone Helper = iota
+	HelperPortal
+	HelperOSAScript
+	HelperZenity
+	HelperKDialog
+)
+
+// Availability is what the current desktop answered the probe with.
+type Availability struct {
+	Portal    bool
+	OSAScript bool
+	Zenity    bool
+	KDialog   bool
+}
+
+// pickOrder is the platform's fallback chain: macOS osascript; Linux the
+// portal FileChooser, then zenity, then kdialog; nowhere else. Only the
+// helpers the probe found ride the chain.
+func pickOrder(av Availability, goos string) []Helper {
+	var order []Helper
+	switch goos {
+	case "darwin":
+		if av.OSAScript {
+			order = append(order, HelperOSAScript)
+		}
+	case "linux":
+		if av.Portal {
+			order = append(order, HelperPortal)
+		}
+		if av.Zenity {
+			order = append(order, HelperZenity)
+		}
+		if av.KDialog {
+			order = append(order, HelperKDialog)
+		}
+	}
+	return order
+}
+
+// selectHelper is the first helper a pick runs.
+func selectHelper(av Availability, goos string) Helper {
+	if order := pickOrder(av, goos); len(order) > 0 {
+		return order[0]
+	}
+	return HelperNone
+}
+
+// exitCoder is the error a Runner answers when the helper process ran and
+// exited nonzero; exitCodeOf reads the code. Exit 1 is how the CLI helpers
+// answer a closed chooser, so a pick maps it to a cancel.
+type exitCoder interface {
+	error
+	ExitCode() int
+}
+
+// exitCodeOf returns the helper's exit code, when its error carries one.
+func exitCodeOf(err error) (int, bool) {
+	var ec exitCoder
+	if !errors.As(err, &ec) {
+		return 0, false
+	}
+	return ec.ExitCode(), true
+}
+
+// exitError wraps one nonzero helper exit.
+type exitError struct {
+	code int
+	err  error
+}
+
+// The static causes behind a helper run; wrapped, never constructed.
+var (
+	errHelperFailed = errors.New("the helper failed")
+	errHelperRun    = errors.New("run the helper")
+)
+
+func (e *exitError) Error() string { return fmt.Sprintf("%s (exit %d)", e.err, e.code) }
+func (e *exitError) ExitCode() int { return e.code }
+func (e *exitError) Unwrap() error { return e.err }
+
+// Runner runs one CLI helper and answers its stdout; a nonzero exit is an
+// error. The interface exists for the tests' recording fake; production runs
+// exec through helperCommand.
+type Runner interface {
+	Run(ctx context.Context, h Helper) (stdout string, err error)
+}
+
+// osascriptChooseFolder is the AppleScript every macOS pick runs: the
+// desktop's own chooser, answered as a POSIX path.
+const osascriptChooseFolder = `POSIX path of (choose folder with prompt "Choose a folder")`
+
+// helperCommand builds one CLI helper's run: a literal program name and
+// literal argv, so no caller value ever names a program or rides a shell
+// (gosec G204 stays quiet without an exception). The start directory rides
+// kdialog's working directory as the literal "."; the other helpers start in
+// the user's default. ok is false for the helpers that run no process — the
+// portal rides D-Bus and none runs nothing.
+func helperCommand(ctx context.Context, h Helper) (*exec.Cmd, bool) {
+	switch h {
+	case HelperOSAScript:
+		return exec.CommandContext(ctx, "osascript", "-e", osascriptChooseFolder), true
+	case HelperZenity:
+		return exec.CommandContext(ctx, "zenity", "--file-selection", "--directory"), true
+	case HelperKDialog:
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return nil, false
+		}
+		cmd := exec.CommandContext(ctx, "kdialog", "--getexistingdirectory", ".")
+		cmd.Dir = home
+		return cmd, true
+	case HelperNone, HelperPortal:
+		// The portal rides D-Bus and none runs nothing; neither is a process.
+		return nil, false
+	}
+	return nil, false
+}
+
+// execRunner runs helpers through exec.
+type execRunner struct{}
+
+func (execRunner) Run(ctx context.Context, h Helper) (string, error) {
+	cmd, ok := helperCommand(ctx, h)
+	if !ok {
+		return "", errNoPicker
+	}
+	out, err := cmd.Output()
+	if err == nil {
+		return strings.TrimSpace(string(out)), nil
+	}
+	var eerr *exec.ExitError
+	if errors.As(err, &eerr) {
+		return "", &exitError{code: eerr.ExitCode(), err: errHelperFailed}
+	}
+	return "", fmt.Errorf("%w: %s", errHelperRun, helperName(h))
+}
+
+// helperName is the helper's program name, for messages.
+func helperName(h Helper) string {
+	switch h {
+	case HelperOSAScript:
+		return "osascript"
+	case HelperZenity:
+		return "zenity"
+	case HelperKDialog:
+		return "kdialog"
+	case HelperNone, HelperPortal:
+		return "helper"
+	}
+	return "helper"
+}
+
+// pickPortalFunc runs the portal FileChooser flow: the chosen folder's path,
+// whether the user closed it, or why it could not run.
+type pickPortalFunc func(ctx context.Context) (path string, cancelled bool, err error)
+
+// Result is one finished pick, delivered to the window goroutine.
+type Result struct {
+	// Path is the chosen folder's absolute path, empty unless one was chosen.
+	Path string
+	// Cancelled marks a chooser the user closed without choosing: a no-op.
+	Cancelled bool
+	// Err is why no chooser ran or answered.
+	Err error
+}
+
+// pickBufferSize bounds the request and result queues. A pick is one user
+// action at a time; a second while one runs is refused at once.
+const pickBufferSize = 1
+
+// probeTimeout bounds the one availability probe: a session bus that accepts
+// the connection but never answers the introspect cannot stall a dialog open
+// for longer.
+const probeTimeout = 2 * time.Second
+
+// Picker runs folder picks off the UI goroutine, in the shape of the
+// workspace mutator: one worker goroutine probes availability once, takes
+// requests, runs the platform's helpers in order, and delivers each outcome
+// for the frame loop.
+type Picker struct {
+	probeOf  func(ctx context.Context) Availability
+	runner   Runner
+	portal   pickPortalFunc
+	onResult func()
+	goos     string
+
+	reqs     chan struct{}
+	results  chan Result
+	cancel   context.CancelFunc
+	done     chan struct{}
+	stopOnce sync.Once
+
+	// avail is the probe's answer, written once by the worker goroutine before
+	// it serves any pick.
+	probeOnce sync.Once
+	probed    atomic.Bool
+	avail     atomic.Pointer[Availability]
+}
+
+// NewPicker builds a picker over the platform's probe and helpers. onResult,
+// when non-nil, is called on the worker goroutine after each result is queued
+// so the caller can wake its event loop. The portal hook carries a per-picker
+// sequence, so the request handles it names stay unique between pickers
+// without a package global.
+func NewPicker(onResult func()) *Picker {
+	seq := &atomic.Uint64{}
+	return &Picker{
+		probeOf: platformProbe,
+		runner:  execRunner{},
+		portal: func(ctx context.Context) (string, bool, error) {
+			return pickPortal(ctx, seq)
+		},
+		onResult: onResult,
+		goos:     runtime.GOOS,
+		reqs:     make(chan struct{}, pickBufferSize),
+		results:  make(chan Result, pickBufferSize),
+		done:     make(chan struct{}),
+	}
+}
+
+// Start launches the worker goroutine, which runs the one availability probe
+// and then serves picks until Stop or the context ends. Start returns at once
+// without waiting for the probe.
+func (p *Picker) Start(ctx context.Context) {
+	runCtx, cancel := context.WithCancel(ctx)
+	p.cancel = cancel
+	go p.run(runCtx)
+}
+
+// Stop ends the worker and waits for it. It is idempotent.
+func (p *Picker) Stop() {
+	p.stopOnce.Do(func() {
+		if p.cancel != nil {
+			p.cancel()
+		}
+	})
+	<-p.done
+}
+
+// Pick requests one folder pick and reports whether it was accepted; a pick
+// while one runs is refused at once instead of queueing a second chooser.
+// It never blocks: the window goroutine calls it mid-frame, and the outcome
+// comes back on Results.
+func (p *Picker) Pick() bool {
+	select {
+	case p.reqs <- struct{}{}:
+		return true
+	default:
+		return false
+	}
+}
+
+// Results receives the finished picks. The window goroutine drains it every
+// frame.
+func (p *Picker) Results() <-chan Result { return p.results }
+
+// Available is the desktop's probed answer, or zero until the probe finishes.
+func (p *Picker) Available() Availability {
+	if av := p.avail.Load(); av != nil {
+		return *av
+	}
+	return Availability{}
+}
+
+// Probed reports whether the availability probe has finished.
+func (p *Picker) Probed() bool { return p.probed.Load() }
+
+// First is the helper a pick would run, or HelperNone.
+func (p *Picker) First() Helper { return selectHelper(p.Available(), p.goos) }
+
+// ensureProbed runs the availability probe once.
+func (p *Picker) ensureProbed(ctx context.Context) {
+	p.probeOnce.Do(func() {
+		probeCtx, cancelProbe := context.WithTimeout(ctx, probeTimeout)
+		av := p.probeOf(probeCtx)
+		cancelProbe()
+		p.avail.Store(&av)
+		p.probed.Store(true)
+	})
+}
+
+// run probes availability once and then serves requests until the context ends.
+func (p *Picker) run(ctx context.Context) {
+	defer close(p.done)
+	p.ensureProbed(ctx)
+	if ctx.Err() != nil {
+		return
+	}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-p.reqs:
+			res := p.pickAll(ctx)
+			if ctx.Err() != nil {
+				return
+			}
+			select {
+			case p.results <- res:
+				if p.onResult != nil {
+					p.onResult()
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}
+}
+
+// pickAll walks the platform's helpers in order and answers with the first
+// outcome that is a choice, a cancel or a refusal. A helper that could not
+// run at all falls through to the next one; once a chooser appeared, its own
+// answer — including a cancel — is final, because opening a second chooser
+// after a cancel would surprise the user.
+func (p *Picker) pickAll(ctx context.Context) Result {
+	order := pickOrder(p.Available(), p.goos)
+	if len(order) == 0 {
+		return Result{Err: errNoPicker}
+	}
+	var lastErr error
+	for _, h := range order {
+		res, ran := p.pickOne(ctx, h)
+		if ran {
+			return res
+		}
+		lastErr = res.Err
+	}
+	if lastErr == nil {
+		lastErr = errNoPicker
+	}
+	return Result{Err: fmt.Errorf("the folder picker failed: %w", lastErr)}
+}
+
+// pickOne runs one helper. ran marks that a chooser actually appeared, so
+// the answer is final either way.
+func (p *Picker) pickOne(ctx context.Context, h Helper) (res Result, ran bool) {
+	if ctx.Err() != nil {
+		return Result{Err: ctx.Err()}, false
+	}
+	if h == HelperPortal {
+		path, cancelled, err := p.portal(ctx)
+		if err != nil {
+			return Result{Err: err}, false
+		}
+		return Result{Path: path, Cancelled: cancelled}, true
+	}
+	out, err := p.runner.Run(ctx, h)
+	if err != nil {
+		if code, isExit := exitCodeOf(err); isExit && code == 1 {
+			return Result{Cancelled: true}, true
+		}
+		return Result{Err: fmt.Errorf("%w: %s", err, helperName(h))}, false
+	}
+	if out == "" {
+		return Result{Cancelled: true}, true
+	}
+	return Result{Path: out}, true
+}
+
+// uriPath turns a portal's file URI into an absolute path. net/url is out
+// (the app opens no socket itself, arch DA-E06), so the decode handles the
+// one shape the portal answers — file:///absolute/path, percent-escapes
+// included — and refuses everything else.
+func uriPath(uri string) (string, error) {
+	const scheme = "file://"
+	if !strings.HasPrefix(uri, scheme) {
+		return "", fmt.Errorf("%w: %q", errNotAFilePath, uri)
+	}
+	// file:///path keeps an empty authority: a folder chosen on this machine
+	// has no host before the third slash.
+	if !strings.HasPrefix(uri[len(scheme):], "/") {
+		return "", fmt.Errorf("%w: %q", errForeignFolder, uri)
+	}
+	return unescape(uri[len(scheme):]), nil
+}
+
+// unescape decodes the percent-escapes of a portal path.
+func unescape(path string) string {
+	if !strings.Contains(path, "%") {
+		return path
+	}
+	var b strings.Builder
+	b.Grow(len(path))
+	for i := 0; i < len(path); i++ {
+		if c := path[i]; c == '%' && i+2 < len(path) {
+			hi, ok := hexVal(path[i+1])
+			if ok {
+				lo, ok := hexVal(path[i+2])
+				if ok {
+					b.WriteByte(hi<<4 | lo)
+					i += 2
+					continue
+				}
+			}
+		}
+		b.WriteByte(path[i])
+	}
+	return b.String()
+}
+
+// hexVal reads one hexadecimal digit.
+func hexVal(c byte) (byte, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0', true
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10, true
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10, true
+	default:
+		return 0, false
+	}
+}
