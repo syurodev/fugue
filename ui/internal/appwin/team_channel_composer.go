@@ -121,7 +121,7 @@ func (c *teamChannelComposer) layout(gtx *layout.Context, env *kit.Env, s *scree
 		}),
 		layout.Rigid(layout.Spacer{Width: theme.SpaceSM}.Layout),
 		c.mentionAction(gtx, env, s, props.Disabled),
-		channelButton(env, s, c.send, kit.ButtonProps{Text: sendLabelText, Variant: kit.Primary, Size: kit.SizeSM, Busy: c.posting != 0, Disabled: props.Disabled || strings.TrimSpace(c.area.Text()) == ""}, func() {
+		channelButton(env, s, c.send, kit.ButtonProps{Text: sendLabelText, Variant: kit.Primary, Size: kit.SizeMD, Busy: c.posting != 0, Disabled: props.Disabled || strings.TrimSpace(c.area.Text()) == ""}, func() {
 			submit = true
 		}),
 	)
@@ -138,7 +138,7 @@ func (c *teamChannelComposer) mentionAction(gtx *layout.Context, env *kit.Env, s
 			return layout.Dimensions{}
 		}
 		return layout.Inset{Right: theme.SpaceSM}.Layout(g, func(g layout.Context) layout.Dimensions {
-			return layout.Flex{}.Layout(g, channelButton(env, s, c.mention, kit.ButtonProps{Text: "@", Size: kit.SizeSM, Disabled: disabled}, func() {
+			return layout.Flex{}.Layout(g, channelButton(env, s, c.mention, kit.ButtonProps{Text: "@", Size: kit.SizeMD, Disabled: disabled}, func() {
 				c.startMention(gtx)
 			}))
 		})
