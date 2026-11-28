@@ -358,37 +358,8 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool
 		}
 	}
 	if sidebarOpen {
-		// The pill carries the active item's selected level. When that
-		// button holds keyboard focus, the pill itself crossfades to the
-		// selected-focus wash (§3.4, FUG-109): the button is NoSelectedFill,
-		// so stacking a wash over the pill would overshoot the token level —
-		// the pill is what must land on SelectedFocusWash.
-		var activeTag event.Tag
-		for _, it := range items {
-			if s.grid.rail == it.item {
-				activeTag = s.grid.railBtn(it.item).Tag()
-				break
-			}
-		}
-		focusVal := float32(0)
-		if env.FocusShown(gtx, activeTag) {
-			focusVal = 1
-		}
-		var pillFocus float32
-		if env.ReducedMotion {
-			s.grid.railPillFocusF.Snap(focusVal)
-			pillFocus = focusVal
-		} else {
-			pillFocus = s.grid.railPillFocusF.Follow(focusVal, env.DT())
-			if s.grid.railPillFocusF.Moving() {
-				env.Keep()
-			}
-		}
-		pillRect := image.Rect(x, int(pillY+0.5), x+btnW, int(pillY+0.5)+btnW)
-		pillColor := kit.Mix(env.Th.Chrome().SelectedWash, env.Th.Chrome().SelectedFocusWash, pillFocus)
-		paint.FillShape(gtx.Ops, pillColor, clip.UniformRRect(pillRect, gtx.Dp(theme.RadiusSM)).Op(gtx.Ops))
+		s.drawRailPill(gtx, env, items, image.Rect(x, int(pillY+0.5), x+btnW, int(pillY+0.5)+btnW))
 	}
-
 	y := gap
 	for _, it := range items {
 		btn := s.grid.railBtn(it.item)
@@ -405,6 +376,42 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool
 		y += btnW + gap
 	}
 	return layout.Dimensions{Size: image.Pt(w, h)}
+}
+
+// drawRailPill paints the active rail item's SelectedWash pill. When that
+// button holds keyboard focus the pill crossfades to the selected-focus wash
+// (§3.4, FUG-109): the button is NoSelectedFill, so stacking a wash over the
+// pill would overshoot the token level — the pill is what must land on
+// SelectedFocusWash.
+func (s *screens) drawRailPill(gtx *layout.Context, env *kit.Env, items []struct {
+	item railItem
+	icon kit.IconName
+	hint string
+}, pillRect image.Rectangle,
+) {
+	var activeTag event.Tag
+	for _, it := range items {
+		if s.grid.rail == it.item {
+			activeTag = s.grid.railBtn(it.item).Tag()
+			break
+		}
+	}
+	focusVal := float32(0)
+	if env.FocusShown(gtx, activeTag) {
+		focusVal = 1
+	}
+	var pillFocus float32
+	if env.ReducedMotion {
+		s.grid.railPillFocusF.Snap(focusVal)
+		pillFocus = focusVal
+	} else {
+		pillFocus = s.grid.railPillFocusF.Follow(focusVal, env.DT())
+		if s.grid.railPillFocusF.Moving() {
+			env.Keep()
+		}
+	}
+	pillColor := kit.Mix(env.Th.Chrome().SelectedWash, env.Th.Chrome().SelectedFocusWash, pillFocus)
+	paint.FillShape(gtx.Ops, pillColor, clip.UniformRRect(pillRect, gtx.Dp(theme.RadiusSM)).Op(gtx.Ops))
 }
 
 // railBtn returns the rail item's button state, building it on first use.

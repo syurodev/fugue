@@ -249,6 +249,60 @@ func fug109Patch(box image.Rectangle, side int) image.Rectangle {
 	return image.Rect(box.Min.X+2, box.Min.Y+side/2-4, box.Min.X+5, box.Min.Y+side/2+4)
 }
 
+// fug109RailPillCase renders one mode of the rail pill scene and asserts the
+// hover-step rule and the SelectedFocusWash landing on its pill.
+func fug109RailPillCase(t *testing.T, vw *vault.Worker, light bool, mode string) {
+	t.Helper()
+	sc := newFUG65TestScreens(t)
+	sc.vaultWorker = vw
+	env := newFUG65Env(t, light)
+
+	const w, hgt = 1200, 800
+	win := headlessOpen(t, w, hgt)
+	var ops op.Ops
+	gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
+	barH := gtx.Dp(theme.TopBarHeight)
+	side := gtx.Dp(theme.ControlSM)
+	gap := gtx.Dp(theme.SpaceXS)
+	x := (gtx.Dp(theme.RailWidth) - side) / 2
+	active := image.Rect(x, barH+gap, x+side, barH+gap+side)                  // railChat, on the pill
+	other := image.Rect(x, barH+gap+side+gap, x+side, barH+gap+side+gap+side) // railTeam, untoggled
+
+	shoot := func(preview kit.Preview) *image.RGBA {
+		t.Helper()
+		env.Preview = preview
+		return renderShotFrames(t, win, env, sc, image.Pt(w, hgt), "fug109-rail-pill")
+	}
+	rest := shoot(kit.Preview{})
+	focused := shoot(kit.Preview{Focus: sc.grid.railBtn(railChat).Tag()})
+	hovered := shoot(kit.Preview{Hover: sc.grid.railBtn(railTeam).Tag()})
+
+	hoverStep := fug109PatchStep(fug109PatchMean(rest, fug109Patch(other, side)), fug109PatchMean(hovered, fug109Patch(other, side)))
+	pillStep := fug109PatchStep(fug109PatchMean(rest, fug109Patch(active, side)), fug109PatchMean(focused, fug109Patch(active, side)))
+	if pillStep < hoverStep-1 {
+		t.Fatalf("%s: pill focus step %.2f LSB < hover step %.2f LSB - 1; the focused pill is not as visible as a hover", mode, pillStep, hoverStep)
+	}
+
+	// The landing: the focused pill is the selected-focus wash over
+	// AppBg, equal to a bare swatch of the token through the same
+	// rasterizer, within 1 LSB.
+	c := env.Th.Chrome()
+	var swOps op.Ops
+	sgtx := layout.Context{Ops: &swOps, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}), Constraints: layout.Exact(image.Pt(w, hgt))}
+	paint.FillShape(sgtx.Ops, c.AppBg, clip.Rect{Max: image.Pt(w, hgt)}.Op())
+	paint.FillShape(sgtx.Ops, c.SelectedFocusWash, clip.UniformRRect(active, sgtx.Dp(theme.RadiusSM)).Op(sgtx.Ops))
+	if err := win.Frame(&swOps); err != nil {
+		t.Fatalf("render the swatch: %v", err)
+	}
+	swatch := image.NewRGBA(image.Rect(0, 0, w, hgt))
+	if err := win.Screenshot(swatch); err != nil {
+		t.Fatalf("read the swatch back: %v", err)
+	}
+	if step := fug109PatchStep(fug109PatchMean(focused, fug109Patch(active, side)), fug109PatchMean(swatch, fug109Patch(active, side))); step > 1 {
+		t.Fatalf("%s: focused pill lands %.2f LSB from the SelectedFocusWash swatch; the level is wrong", mode, step)
+	}
+}
+
 // TestRailPillFocusStepIsAtLeastAHoverStep pins the rail's round-2 approach
 // (§3.4, FUG-109): the active item's button is NoSelectedFill, so when it
 // holds keyboard focus the pill itself crossfades to the selected-focus wash
@@ -263,60 +317,13 @@ func TestRailPillFocusStepIsAtLeastAHoverStep(t *testing.T) {
 	vw.Start(t.Context())
 	t.Cleanup(vw.Stop)
 
-	for _, light := range []bool{true, false} {
-		mode := "dark"
-		if light {
-			mode = "light"
-		}
-		t.Run(mode, func(t *testing.T) {
-			sc := newFUG65TestScreens(t)
-			sc.vaultWorker = vw
-			env := newFUG65Env(t, light)
-
-			const w, hgt = 1200, 800
-			win := headlessOpen(t, w, hgt)
-			var ops op.Ops
-			gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
-			barH := gtx.Dp(theme.TopBarHeight)
-			side := gtx.Dp(theme.ControlSM)
-			gap := gtx.Dp(theme.SpaceXS)
-			x := (gtx.Dp(theme.RailWidth) - side) / 2
-			active := image.Rect(x, barH+gap, x+side, barH+gap+side)                  // railChat, on the pill
-			other := image.Rect(x, barH+gap+side+gap, x+side, barH+gap+side+gap+side) // railTeam, untoggled
-
-			shoot := func(preview kit.Preview) *image.RGBA {
-				t.Helper()
-				env.Preview = preview
-				return renderShotFrames(t, win, env, sc, image.Pt(w, hgt), "fug109-rail-pill")
-			}
-			rest := shoot(kit.Preview{})
-			focused := shoot(kit.Preview{Focus: sc.grid.railBtn(railChat).Tag()})
-			hovered := shoot(kit.Preview{Hover: sc.grid.railBtn(railTeam).Tag()})
-
-			hoverStep := fug109PatchStep(fug109PatchMean(rest, fug109Patch(other, side)), fug109PatchMean(hovered, fug109Patch(other, side)))
-			pillStep := fug109PatchStep(fug109PatchMean(rest, fug109Patch(active, side)), fug109PatchMean(focused, fug109Patch(active, side)))
-			if pillStep < hoverStep-1 {
-				t.Fatalf("%s: pill focus step %.2f LSB < hover step %.2f LSB − 1; the focused pill is not as visible as a hover", mode, pillStep, hoverStep)
-			}
-
-			// The landing: the focused pill is the selected-focus wash over
-			// AppBg, equal to a bare swatch of the token through the same
-			// rasterizer, within 1 LSB.
-			c := env.Th.Chrome()
-			var swOps op.Ops
-			sgtx := layout.Context{Ops: &swOps, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}), Constraints: layout.Exact(image.Pt(w, hgt))}
-			paint.FillShape(sgtx.Ops, c.AppBg, clip.Rect{Max: image.Pt(w, hgt)}.Op())
-			paint.FillShape(sgtx.Ops, c.SelectedFocusWash, clip.UniformRRect(active, sgtx.Dp(theme.RadiusSM)).Op(sgtx.Ops))
-			if err := win.Frame(&swOps); err != nil {
-				t.Fatalf("render the swatch: %v", err)
-			}
-			swatch := image.NewRGBA(image.Rect(0, 0, w, hgt))
-			if err := win.Screenshot(swatch); err != nil {
-				t.Fatalf("read the swatch back: %v", err)
-			}
-			if step := fug109PatchStep(fug109PatchMean(focused, fug109Patch(active, side)), fug109PatchMean(swatch, fug109Patch(active, side))); step > 1 {
-				t.Fatalf("%s: focused pill lands %.2f LSB from the SelectedFocusWash swatch; the level is wrong", mode, step)
-			}
-		})
+	// The modes render sequentially on purpose: they share the vault
+	// worker, and every frame snaps (ReducedMotion), so a render leaves no
+	// residue for the next one.
+	for _, tc := range []struct {
+		light bool
+		mode  string
+	}{{true, testThemeLight}, {false, testThemeDark}} {
+		fug109RailPillCase(t, vw, tc.light, tc.mode)
 	}
 }
