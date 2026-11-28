@@ -113,8 +113,34 @@ func buildShotScreens(t *testing.T, scene string) *screens {
 		sc.dlg.root.path.SetText("/srv/repos/kong")
 	case shotPolicyCard:
 		sc.dlg.policy.openFor(det)
+	case shotCreateEmpty:
+		openCreateShot(sc)
+	case shotCreateRows:
+		openCreateShot(sc)
+		sc.dlg.create.folders.addPath("/srv/repos/api")
+		sc.dlg.create.folders.addPath("/srv/web")
+	case shotCreateError:
+		openCreateShot(sc)
+		sc.dlg.create.folders.addPath("/srv/repos/api")
+		sc.dlg.create.folders.addPath("/srv/web")
+		sc.dlg.create.folders.rows[1].err = "workspace.root_invalid: the path sits inside another root"
+	case shotAddFolders:
+		sc.dlg.root.openAdd(sc, det)
+		sc.dlg.root.folders.noPicker = false
+		sc.dlg.root.folders.typedOpen = false
+		sc.dlg.root.folders.addPath("/srv/repos/kong")
 	}
 	return sc
+}
+
+// openCreateShot opens the create dialog with its name and, unlike a desktop
+// without a picker, the fallback field closed: the shots show the picker's
+// normal look (FUG-115).
+func openCreateShot(sc *screens) {
+	sc.dlg.create.open(sc)
+	sc.dlg.create.name.SetText("fsap")
+	sc.dlg.create.folders.noPicker = false
+	sc.dlg.create.folders.typedOpen = false
 }
 
 func renderWorkspaceShot(t *testing.T, win *headless.Window, spec shotSpec) *image.RGBA {
