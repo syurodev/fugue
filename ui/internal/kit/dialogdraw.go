@@ -114,8 +114,7 @@ func (d *DialogState) paintFrame(env *Env, gtx *layout.Context, props *DialogPro
 	h := 2*m.pad + m.headH + gtx.Dp(theme.SpaceSM) + m.descH + min(bodyH, m.maxBody) + gtx.Dp(theme.SpaceLG) + m.footH
 	pos := image.Point{}
 	if !props.Inline {
-		win := env.windowRect()
-		pos = clampInto(image.Pt((win.Dx()-w)/2, (win.Dy()-h)/3), image.Pt(w, h), win)
+		pos = dialogFramePos(env, image.Pt(w, h))
 	}
 	d.rect = image.Rectangle{Min: pos, Max: pos.Add(image.Pt(w, h))}
 	d.bands, d.viewLenPx = bands, min(bodyH, m.maxBody)
@@ -183,9 +182,13 @@ func (d *DialogState) bodyWindowOrigin(env *Env, gtx *layout.Context, m dialogMe
 		return image.Pt(d.rect.Min.X+m.pad+ring, d.rect.Min.Y+headerH-d.scroll.Offset())
 	}
 	w := m.innerW + 2*m.pad
-	win := env.windowRect()
-	pos := clampInto(image.Pt((win.Dx()-w)/2, (win.Dy()-m.maxBody)/3), image.Pt(w, m.maxBody), win)
+	pos := dialogFramePos(env, image.Pt(w, m.maxBody))
 	return image.Pt(pos.X+m.pad+ring, pos.Y+headerH)
+}
+
+func dialogFramePos(env *Env, size image.Point) image.Point {
+	win := env.windowRect()
+	return clampInto(image.Pt((win.Dx()-size.X)/2, (win.Dy()-size.Y)/3), size, win)
 }
 
 // drawChrome paints the frame's surface, title and description inside the

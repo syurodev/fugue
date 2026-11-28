@@ -343,7 +343,7 @@ func (m *MenuState) place(env *Env, gtx *layout.Context, p MenuProps) error {
 				pos, up := placeBelow(p.anchorFor(size.X), size, win, gap)
 				lv.setRect(pos, size, image.Pt(0, dirOf(up)))
 			default:
-				pos, left := placeBeside(m.lv[k-1].parentItem(), size, env.windowRect(), env.floatingWindowRect(gtx), 0)
+				pos, left := placeBeside(m.lv[k-1].parentItem(), size, env.windowRect(), win, 0)
 				lv.setRect(pos, size, image.Pt(dirOf(left), 0))
 			}
 		}
@@ -478,13 +478,9 @@ func (m *MenuState) drawLevel(env *Env, gtx *layout.Context, k int, inline bool)
 	defer paint.PushOpacity(gtx.Ops, unit01(p)).Pop()
 
 	inner := drawMenuPanelSurface(env, gtx, lv.rect, lv.pad, lv.hiYv, lv.hiAv)
-	insetX := lv.itemInset
-	if insetX == 0 {
-		insetX = gtx.Dp(theme.SpaceMD)
-	}
 	for j := range lv.items {
 		row := image.Rect(inner.Min.X, inner.Min.Y+lv.rows[j].y, inner.Max.X, inner.Min.Y+lv.rows[j].y+lv.rows[j].h)
-		if err := drawMenuItem(env, gtx, &lv.items[j], row, lv.cols, insetX); err != nil {
+		if err := drawMenuItem(env, gtx, &lv.items[j], row, lv.cols, lv.itemInset); err != nil {
 			return err
 		}
 	}

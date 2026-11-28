@@ -8,7 +8,6 @@ import (
 
 	"gioui.org/io/event"
 	"gioui.org/layout"
-	"gioui.org/op"
 
 	"github.com/syurodev/fugue/pkg/client"
 
@@ -119,11 +118,13 @@ func newWSBody(env *kit.Env, gtx *layout.Context, bands *kit.DialogBands, fail f
 func (b *wsBody) field(tag event.Tag, draw func(gtx *layout.Context) (layout.Dimensions, error)) {
 	local := *b.gtx
 	local.Constraints.Min.X, local.Constraints.Max.X = b.w, b.w
-	// Each row is drawn at its own y: the recorded body ops all start at the
-	// body's origin, so without the offset every row paints on the first.
-	off := op.Offset(image.Pt(-b.ring, b.y)).Push(local.Ops)
-	dims, err := draw(&local)
-	off.Pop()
+	// Each row is drawn at its own y: env.Offset records the move so dropdowns
+	// inside the dialog (the Access Select) know their window coordinates.
+	var dims layout.Dimensions
+	var err error
+	b.env.Offset(&local, image.Pt(-b.ring, b.y), func(gtx *layout.Context) {
+		dims, err = draw(gtx)
+	})
 	if err != nil {
 		b.fail(err)
 	}

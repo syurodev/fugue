@@ -221,11 +221,7 @@ func suggestEdgeEnabled(items []SuggestItem, first bool) int {
 
 func (s *SuggestListState) drawStatusRow(env *Env, gtx *layout.Context, inner image.Rectangle, p *SuggestProps) {
 	c := env.Th.Chrome()
-	insetX := s.itemInset
-	if insetX == 0 {
-		insetX = gtx.Dp(theme.SpaceMD)
-	}
-	x := inner.Min.X + insetX
+	x := inner.Min.X + s.itemInset
 	h := s.rows[0].h
 	if s.spinnerVisible(gtx, p.Inline) {
 		iconPx := gtx.Dp(theme.IconMD)

@@ -466,13 +466,9 @@ func (s *SuggestListState) drawBody(env *Env, gtx *layout.Context, p *SuggestPro
 		s.drawStatusRow(env, gtx, inner, p)
 		return nil
 	}
-	insetX := s.itemInset
-	if insetX == 0 {
-		insetX = gtx.Dp(theme.SpaceMD)
-	}
 	for j := range s.items {
 		row := image.Rect(inner.Min.X, inner.Min.Y+s.rows[j].y, inner.Max.X, inner.Min.Y+s.rows[j].y+s.rows[j].h)
-		if err := drawSuggestItem(env, gtx, &s.items[j], row, s.cols, insetX); err != nil {
+		if err := drawSuggestItem(env, gtx, &s.items[j], row, s.cols, s.itemInset); err != nil {
 			return err
 		}
 	}

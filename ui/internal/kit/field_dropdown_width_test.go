@@ -81,7 +81,10 @@ func assertDialogSelectMatchesBody(t *testing.T, h *harness) {
 	t.Helper()
 	dlg := NewDialogState()
 	cancel, primary := NewButtonState(), NewButtonState()
-	const vendorName = "claude"
+	const (
+		vendorName  = "claude"
+		bodyOffsetY = 80
+	)
 	sel := NewSelectState()
 	p := &SelectProps{
 		Label:   "Vendor",
@@ -93,31 +96,7 @@ func assertDialogSelectMatchesBody(t *testing.T, h *harness) {
 	var boxes DialogBoxes
 	var selW int
 	layDlg := func(focusSel bool) {
-		runFrame(t, h, func(gtx *layout.Context) {
-			res, err := dlg.Layout(h.env, gtx, &DialogProps{
-				Variant:      DialogForm,
-				Title:        "Create session",
-				Cancel:       cancel,
-				Primary:      primary,
-				PrimaryLabel: "Create",
-				Body: func(gtx *layout.Context, bands *DialogBands) image.Point {
-					selW = selectWidth(h.env, gtx, p)
-					if _, err := sel.Layout(h.env, gtx, p); err != nil {
-						t.Fatalf("dialog select layout: %v", err)
-					}
-					if focusSel {
-						gtx.Execute(key.FocusCmd{Tag: sel.Tag()})
-					}
-					dims := sel.Measure(h.env, gtx, p)
-					bands.Focusable(sel.Tag(), 0, dims.Size.Y)
-					return dims.Size
-				},
-			})
-			if err != nil {
-				t.Fatalf("dialog layout: %v", err)
-			}
-			boxes = res.Boxes
-		})
+		boxes, selW = runDialogSelectFrame(t, h, dlg, cancel, primary, sel, p, bodyOffsetY, focusSel)
 	}
 	layDlg(false)
 	layDlg(true)
@@ -131,9 +110,44 @@ func assertDialogSelectMatchesBody(t *testing.T, h *harness) {
 	}
 	ring := dialogRing(&h.gtx)
 	wantLeft := boxes.Body.Min.X + ring
-	if panels[0].Dx() != selW || panels[0].Min.X != wantLeft {
-		t.Fatalf("dialog select panel = %v (w=%d), want left=%d w=%d", panels[0], panels[0].Dx(), wantLeft, selW)
+	if panels[0].Dx() != selW || panels[0].Min.X != wantLeft || panels[0].Min.Y <= boxes.Body.Min.Y+bodyOffsetY {
+		t.Fatalf("dialog select panel = %v (w=%d), want left=%d w=%d minY>%d", panels[0], panels[0].Dx(), wantLeft, selW, boxes.Body.Min.Y+bodyOffsetY)
 	}
+}
+
+func runDialogSelectFrame(t *testing.T, h *harness, dlg *DialogState, cancel, primary *ButtonState, sel *SelectState, p *SelectProps, bodyOffsetY int, focusSel bool) (DialogBoxes, int) {
+	t.Helper()
+	var boxes DialogBoxes
+	var selW int
+	runFrame(t, h, func(gtx *layout.Context) {
+		res, err := dlg.Layout(h.env, gtx, &DialogProps{
+			Variant:      DialogForm,
+			Title:        "Create session",
+			Cancel:       cancel,
+			Primary:      primary,
+			PrimaryLabel: "Create",
+			Body: func(gtx *layout.Context, bands *DialogBands) image.Point {
+				selW = selectWidth(h.env, gtx, p)
+				var dims layout.Dimensions
+				h.env.Offset(gtx, image.Pt(0, bodyOffsetY), func(gtx *layout.Context) {
+					if _, err := sel.Layout(h.env, gtx, p); err != nil {
+						t.Fatalf("dialog select layout: %v", err)
+					}
+					if focusSel {
+						gtx.Execute(key.FocusCmd{Tag: sel.Tag()})
+					}
+					dims = sel.Measure(h.env, gtx, p)
+				})
+				bands.Focusable(sel.Tag(), bodyOffsetY, bodyOffsetY+dims.Size.Y)
+				return image.Pt(dims.Size.X, bodyOffsetY+dims.Size.Y)
+			},
+		})
+		if err != nil {
+			t.Fatalf("dialog layout: %v", err)
+		}
+		boxes = res.Boxes
+	})
+	return boxes, selW
 }
 
 // TestSelectMenuGrowsWiderWhenItemExceedsBox verifies §6.13: when an option's
