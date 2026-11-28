@@ -137,6 +137,7 @@ type HostRuntime struct {
 	workspaces      *WorkspaceService
 	appStates       *StateService
 	memory          *workspacememory.Store
+	memoryService   *MemoryService
 	tasksService    *TasksService
 	teamChannels    *teamChannelTopics
 	vendors         *VendorService

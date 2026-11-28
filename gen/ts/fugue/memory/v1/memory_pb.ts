@@ -12,7 +12,7 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fugue/memory/v1/memory.proto.
  */
 export const file_fugue_memory_v1_memory: GenFile = /*@__PURE__*/
-  fileDesc("ChxmdWd1ZS9tZW1vcnkvdjEvbWVtb3J5LnByb3RvEg9mdWd1ZS5tZW1vcnkudjEiOAoRTWVtb3J5QW5jaG9ySW5wdXQSEQoJcm9vdF9uYW1lGAEgASgJEhAKCHJlbF9wYXRoGAIgASgJIkkKDE1lbW9yeUFuY2hvchIRCglyb290X25hbWUYASABKAkSEAoIcmVsX3BhdGgYAiABKAkSFAoMY29udGVudF9oYXNoGAMgASgJIoQBChJNZW1vcnlBbmNob3JTdGF0dXMSEQoJcm9vdF9uYW1lGAEgASgJEhAKCHJlbF9wYXRoGAIgASgJEhQKDGNvbnRlbnRfaGFzaBgDIAEoCRIzCglmcmVzaG5lc3MYBCABKA4yIC5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5RnJlc2huZXNzImwKEE1lbW9yeVByb3ZlbmFuY2USEQoJcHJpbmNpcGFsGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDAoEcm9sZRgDIAEoCRIOCgZydW5faWQYBCABKAkSEwoLaW1wb3J0X2ZpbGUYBSABKAki2QQKC01lbW9yeUVudHJ5EgoKAmlkGAEgASgJEhQKDHdvcmtzcGFjZV9pZBgCIAEoCRIpCgRraW5kGAMgASgOMhsuZnVndWUubWVtb3J5LnYxLk1lbW9yeUtpbmQSDQoFbGFiZWwYBCABKAkSDwoHc3VtbWFyeRgFIAEoCRIMCgRib2R5GAYgASgJEhAKCGtleXdvcmRzGAcgAygJEi4KB2FuY2hvcnMYCCADKAsyHS5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5QW5jaG9yEjwKD2FuY2hvcl9zdGF0dXNlcxgJIAMoCzIjLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlBbmNob3JTdGF0dXMSLQoGYXV0aG9yGAogASgOMh0uZnVndWUubWVtb3J5LnYxLk1lbW9yeUF1dGhvchIQCgh2ZXJpZmllZBgLIAEoCBIxCgh2YWxpZGl0eRgMIAEoDjIfLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlWYWxpZGl0eRIWCg5pbnZhbGlkX3JlYXNvbhgNIAEoCRIVCg1zdXBlcnNlZGVkX2J5GA4gASgJEjUKCnByb3ZlbmFuY2UYDyABKAsyIS5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5UHJvdmVuYW5jZRIQCghyZXZpc2lvbhgQIAEoBBIuCgp1cGRhdGVkX2F0GBEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIzCglmcmVzaG5lc3MYEiABKA4yIC5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5RnJlc2huZXNzIskEChJNZW1vcnlIaXN0b3J5RW50cnkSEgoKaGlzdG9yeV9pZBgBIAEoAxIQCghlbnRyeV9pZBgCIAEoCRIUCgx3b3Jrc3BhY2VfaWQYAyABKAkSEAoIcmV2aXNpb24YBCABKAQSLAoCb3AYBSABKA4yIC5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5T3BlcmF0aW9uEikKBGtpbmQYBiABKA4yGy5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5S2luZBINCgVsYWJlbBgHIAEoCRIPCgdzdW1tYXJ5GAggASgJEgwKBGJvZHkYCSABKAkSEAoIa2V5d29yZHMYCiADKAkSLgoHYW5jaG9ycxgLIAMoCzIdLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlBbmNob3ISLQoGYXV0aG9yGAwgASgOMh0uZnVndWUubWVtb3J5LnYxLk1lbW9yeUF1dGhvchIQCgh2ZXJpZmllZBgNIAEoCBIxCgh2YWxpZGl0eRgOIAEoDjIfLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlWYWxpZGl0eRIWCg5pbnZhbGlkX3JlYXNvbhgPIAEoCRIVCg1zdXBlcnNlZGVkX2J5GBAgASgJEjUKCnByb3ZlbmFuY2UYESABKAsyIS5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5UHJvdmVuYW5jZRISCgpzZXNzaW9uX2lkGBIgASgJEi4KCndyaXR0ZW5fYXQYEyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIqgCChJNZW1vcnlTZWFyY2hSZXN1bHQSCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkSKQoEa2luZBgDIAEoDjIbLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlLaW5kEg8KB3N1bW1hcnkYBCABKAkSDwoHc25pcHBldBgFIAEoCRItCgZhdXRob3IYBiABKA4yHS5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5QXV0aG9yEhAKCHZlcmlmaWVkGAcgASgIEjMKCWZyZXNobmVzcxgIIAEoDjIgLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlGcmVzaG5lc3MSEAoIcmV2aXNpb24YCSABKAQSEwoLYXBwcm94aW1hdGUYCiABKAgSDQoFc2NvcmUYCyABKAEi2wEKEkxpc3RFbnRyaWVzUmVxdWVzdBIUCgx3b3Jrc3BhY2VfaWQYASABKAkSKQoEa2luZBgCIAEoDjIbLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlLaW5kEhUKCHZlcmlmaWVkGAMgASgISACIAQESLQoGYXV0aG9yGAQgASgOMh0uZnVndWUubWVtb3J5LnYxLk1lbW9yeUF1dGhvchIxCgh2YWxpZGl0eRgFIAEoDjIfLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlWYWxpZGl0eUILCglfdmVyaWZpZWQiRAoTTGlzdEVudHJpZXNSZXNwb25zZRItCgdlbnRyaWVzGAEgAygLMhwuZnVndWUubWVtb3J5LnYxLk1lbW9yeUVudHJ5IpQCChRTZWFyY2hFbnRyaWVzUmVxdWVzdBIUCgx3b3Jrc3BhY2VfaWQYASABKAkSDQoFcXVlcnkYAiABKAkSKQoEa2luZBgDIAEoDjIbLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlLaW5kEhcKD2luY2x1ZGVfaW52YWxpZBgEIAEoCBINCgVsaW1pdBgFIAEoBRIVCgh2ZXJpZmllZBgGIAEoCEgAiAEBEi0KBmF1dGhvchgHIAEoDjIdLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlBdXRob3ISMQoIdmFsaWRpdHkYCCABKA4yHy5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5VmFsaWRpdHlCCwoJX3ZlcmlmaWVkImIKFVNlYXJjaEVudHJpZXNSZXNwb25zZRI0CgdyZXN1bHRzGAEgAygLMiMuZnVndWUubWVtb3J5LnYxLk1lbW9yeVNlYXJjaFJlc3VsdBITCgthcHByb3hpbWF0ZRgCIAEoCCJCCg9HZXRFbnRyeVJlcXVlc3QSFAoMd29ya3NwYWNlX2lkGAEgASgJEgoKAmlkGAIgASgJEg0KBWxhYmVsGAMgASgJIj8KEEdldEVudHJ5UmVzcG9uc2USKwoFZW50cnkYASABKAsyHC5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5RW50cnkiQAoWR2V0RW50cnlIaXN0b3J5UmVxdWVzdBIUCgx3b3Jrc3BhY2VfaWQYASABKAkSEAoIZW50cnlfaWQYAiABKAkiTwoXR2V0RW50cnlIaXN0b3J5UmVzcG9uc2USNAoHaGlzdG9yeRgBIAMoCzIjLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlIaXN0b3J5RW50cnkiwgIKEVdyaXRlRW50cnlSZXF1ZXN0EhQKDHdvcmtzcGFjZV9pZBgBIAEoCRIpCgJvcBgCIAEoDjIdLmZ1Z3VlLm1lbW9yeS52MS5Xcml0ZUVudHJ5T3ASCgoCaWQYAyABKAkSGQoRZXhwZWN0ZWRfcmV2aXNpb24YBCABKAQSKQoEa2luZBgFIAEoDjIbLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlLaW5kEg0KBWxhYmVsGAYgASgJEg8KB3N1bW1hcnkYByABKAkSDAoEYm9keRgIIAEoCRIQCghrZXl3b3JkcxgJIAMoCRIzCgdhbmNob3JzGAogAygLMiIuZnVndWUubWVtb3J5LnYxLk1lbW9yeUFuY2hvcklucHV0Eg4KBnJlYXNvbhgLIAEoCRIVCg1zdXBlcnNlZGVkX2J5GAwgASgJIkEKEldyaXRlRW50cnlSZXNwb25zZRIrCgVlbnRyeRgBIAEoCzIcLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlFbnRyeSJRChJWZXJpZnlFbnRyeVJlcXVlc3QSFAoMd29ya3NwYWNlX2lkGAEgASgJEgoKAmlkGAIgASgJEhkKEWV4cGVjdGVkX3JldmlzaW9uGAMgASgEIkIKE1ZlcmlmeUVudHJ5UmVzcG9uc2USKwoFZW50cnkYASABKAsyHC5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5RW50cnkibAoTUmVzdG9yZUVudHJ5UmVxdWVzdBIUCgx3b3Jrc3BhY2VfaWQYASABKAkSCgoCaWQYAiABKAkSGAoQcmVzdG9yZV9yZXZpc2lvbhgDIAEoBBIZChFleHBlY3RlZF9yZXZpc2lvbhgEIAEoBCJDChRSZXN0b3JlRW50cnlSZXNwb25zZRIrCgVlbnRyeRgBIAEoCzIcLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlFbnRyeSq6AQoKTWVtb3J5S2luZBIbChdNRU1PUllfS0lORF9VTlNQRUNJRklFRBAAEhYKEk1FTU9SWV9LSU5EX1BJTk5FRBABEhQKEE1FTU9SWV9LSU5EX0ZBQ1QQAhIYChRNRU1PUllfS0lORF9ERUNJU0lPThADEhoKFk1FTU9SWV9LSU5EX0NPTlZFTlRJT04QBBIVChFNRU1PUllfS0lORF9IT1dUTxAFEhQKEE1FTU9SWV9LSU5EX05PVEUQBipeCgxNZW1vcnlBdXRob3ISHQoZTUVNT1JZX0FVVEhPUl9VTlNQRUNJRklFRBAAEhYKEk1FTU9SWV9BVVRIT1JfVVNFUhABEhcKE01FTU9SWV9BVVRIT1JfQUdFTlQQAiqJAQoOTWVtb3J5VmFsaWRpdHkSHwobTUVNT1JZX1ZBTElESVRZX1VOU1BFQ0lGSUVEEAASGQoVTUVNT1JZX1ZBTElESVRZX1ZBTElEEAESHgoaTUVNT1JZX1ZBTElESVRZX1NVUEVSU0VERUQQAhIbChdNRU1PUllfVkFMSURJVFlfSU5WQUxJRBADKokBCg9NZW1vcnlGcmVzaG5lc3MSIAocTUVNT1JZX0ZSRVNITkVTU19VTlNQRUNJRklFRBAAEhoKFk1FTU9SWV9GUkVTSE5FU1NfRlJFU0gQARIaChZNRU1PUllfRlJFU0hORVNTX1NUQUxFEAISHAoYTUVNT1JZX0ZSRVNITkVTU19VTktOT1dOEAMqxgEKD01lbW9yeU9wZXJhdGlvbhIgChxNRU1PUllfT1BFUkFUSU9OX1VOU1BFQ0lGSUVEEAASGAoUTUVNT1JZX09QRVJBVElPTl9BREQQARIbChdNRU1PUllfT1BFUkFUSU9OX1VQREFURRACEh8KG01FTU9SWV9PUEVSQVRJT05fSU5WQUxJREFURRADEhwKGE1FTU9SWV9PUEVSQVRJT05fUkVTVE9SRRAEEhsKF01FTU9SWV9PUEVSQVRJT05fVkVSSUZZEAUqgAEKDFdyaXRlRW50cnlPcBIeChpXUklURV9FTlRSWV9PUF9VTlNQRUNJRklFRBAAEhYKEldSSVRFX0VOVFJZX09QX0FERBABEhkKFVdSSVRFX0VOVFJZX09QX1VQREFURRACEh0KGVdSSVRFX0VOVFJZX09QX0lOVkFMSURBVEUQAzKOBQoNTWVtb3J5U2VydmljZRJYCgtMaXN0RW50cmllcxIjLmZ1Z3VlLm1lbW9yeS52MS5MaXN0RW50cmllc1JlcXVlc3QaJC5mdWd1ZS5tZW1vcnkudjEuTGlzdEVudHJpZXNSZXNwb25zZRJeCg1TZWFyY2hFbnRyaWVzEiUuZnVndWUubWVtb3J5LnYxLlNlYXJjaEVudHJpZXNSZXF1ZXN0GiYuZnVndWUubWVtb3J5LnYxLlNlYXJjaEVudHJpZXNSZXNwb25zZRJPCghHZXRFbnRyeRIgLmZ1Z3VlLm1lbW9yeS52MS5HZXRFbnRyeVJlcXVlc3QaIS5mdWd1ZS5tZW1vcnkudjEuR2V0RW50cnlSZXNwb25zZRJkCg9HZXRFbnRyeUhpc3RvcnkSJy5mdWd1ZS5tZW1vcnkudjEuR2V0RW50cnlIaXN0b3J5UmVxdWVzdBooLmZ1Z3VlLm1lbW9yeS52MS5HZXRFbnRyeUhpc3RvcnlSZXNwb25zZRJVCgpXcml0ZUVudHJ5EiIuZnVndWUubWVtb3J5LnYxLldyaXRlRW50cnlSZXF1ZXN0GiMuZnVndWUubWVtb3J5LnYxLldyaXRlRW50cnlSZXNwb25zZRJYCgtWZXJpZnlFbnRyeRIjLmZ1Z3VlLm1lbW9yeS52MS5WZXJpZnlFbnRyeVJlcXVlc3QaJC5mdWd1ZS5tZW1vcnkudjEuVmVyaWZ5RW50cnlSZXNwb25zZRJbCgxSZXN0b3JlRW50cnkSJC5mdWd1ZS5tZW1vcnkudjEuUmVzdG9yZUVudHJ5UmVxdWVzdBolLmZ1Z3VlLm1lbW9yeS52MS5SZXN0b3JlRW50cnlSZXNwb25zZUK7AQoTY29tLmZ1Z3VlLm1lbW9yeS52MUILTWVtb3J5UHJvdG9QAVo5Z2l0aHViLmNvbS9zeXVyb2Rldi9mdWd1ZS9wa2cvcGIvZnVndWUvbWVtb3J5L3YxO21lbW9yeXYxogIDRk1YqgIPRnVndWUuTWVtb3J5LlYxygIPRnVndWVcTWVtb3J5XFYx4gIbRnVndWVcTWVtb3J5XFYxXEdQQk1ldGFkYXRh6gIRRnVndWU6Ok1lbW9yeTo6VjFiBnByb3RvMw", [file_google_protobuf_timestamp]);
+  fileDesc("ChxmdWd1ZS9tZW1vcnkvdjEvbWVtb3J5LnByb3RvEg9mdWd1ZS5tZW1vcnkudjEiOAoRTWVtb3J5QW5jaG9ySW5wdXQSEQoJcm9vdF9uYW1lGAEgASgJEhAKCHJlbF9wYXRoGAIgASgJIkkKDE1lbW9yeUFuY2hvchIRCglyb290X25hbWUYASABKAkSEAoIcmVsX3BhdGgYAiABKAkSFAoMY29udGVudF9oYXNoGAMgASgJIoQBChJNZW1vcnlBbmNob3JTdGF0dXMSEQoJcm9vdF9uYW1lGAEgASgJEhAKCHJlbF9wYXRoGAIgASgJEhQKDGNvbnRlbnRfaGFzaBgDIAEoCRIzCglmcmVzaG5lc3MYBCABKA4yIC5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5RnJlc2huZXNzImwKEE1lbW9yeVByb3ZlbmFuY2USEQoJcHJpbmNpcGFsGAEgASgJEhIKCnNlc3Npb25faWQYAiABKAkSDAoEcm9sZRgDIAEoCRIOCgZydW5faWQYBCABKAkSEwoLaW1wb3J0X2ZpbGUYBSABKAki2QQKC01lbW9yeUVudHJ5EgoKAmlkGAEgASgJEhQKDHdvcmtzcGFjZV9pZBgCIAEoCRIpCgRraW5kGAMgASgOMhsuZnVndWUubWVtb3J5LnYxLk1lbW9yeUtpbmQSDQoFbGFiZWwYBCABKAkSDwoHc3VtbWFyeRgFIAEoCRIMCgRib2R5GAYgASgJEhAKCGtleXdvcmRzGAcgAygJEi4KB2FuY2hvcnMYCCADKAsyHS5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5QW5jaG9yEjwKD2FuY2hvcl9zdGF0dXNlcxgJIAMoCzIjLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlBbmNob3JTdGF0dXMSLQoGYXV0aG9yGAogASgOMh0uZnVndWUubWVtb3J5LnYxLk1lbW9yeUF1dGhvchIQCgh2ZXJpZmllZBgLIAEoCBIxCgh2YWxpZGl0eRgMIAEoDjIfLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlWYWxpZGl0eRIWCg5pbnZhbGlkX3JlYXNvbhgNIAEoCRIVCg1zdXBlcnNlZGVkX2J5GA4gASgJEjUKCnByb3ZlbmFuY2UYDyABKAsyIS5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5UHJvdmVuYW5jZRIQCghyZXZpc2lvbhgQIAEoBBIuCgp1cGRhdGVkX2F0GBEgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBIzCglmcmVzaG5lc3MYEiABKA4yIC5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5RnJlc2huZXNzIskEChJNZW1vcnlIaXN0b3J5RW50cnkSEgoKaGlzdG9yeV9pZBgBIAEoAxIQCghlbnRyeV9pZBgCIAEoCRIUCgx3b3Jrc3BhY2VfaWQYAyABKAkSEAoIcmV2aXNpb24YBCABKAQSLAoCb3AYBSABKA4yIC5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5T3BlcmF0aW9uEikKBGtpbmQYBiABKA4yGy5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5S2luZBINCgVsYWJlbBgHIAEoCRIPCgdzdW1tYXJ5GAggASgJEgwKBGJvZHkYCSABKAkSEAoIa2V5d29yZHMYCiADKAkSLgoHYW5jaG9ycxgLIAMoCzIdLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlBbmNob3ISLQoGYXV0aG9yGAwgASgOMh0uZnVndWUubWVtb3J5LnYxLk1lbW9yeUF1dGhvchIQCgh2ZXJpZmllZBgNIAEoCBIxCgh2YWxpZGl0eRgOIAEoDjIfLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlWYWxpZGl0eRIWCg5pbnZhbGlkX3JlYXNvbhgPIAEoCRIVCg1zdXBlcnNlZGVkX2J5GBAgASgJEjUKCnByb3ZlbmFuY2UYESABKAsyIS5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5UHJvdmVuYW5jZRISCgpzZXNzaW9uX2lkGBIgASgJEi4KCndyaXR0ZW5fYXQYEyABKAsyGi5nb29nbGUucHJvdG9idWYuVGltZXN0YW1wIqgCChJNZW1vcnlTZWFyY2hSZXN1bHQSCgoCaWQYASABKAkSDQoFbGFiZWwYAiABKAkSKQoEa2luZBgDIAEoDjIbLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlLaW5kEg8KB3N1bW1hcnkYBCABKAkSDwoHc25pcHBldBgFIAEoCRItCgZhdXRob3IYBiABKA4yHS5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5QXV0aG9yEhAKCHZlcmlmaWVkGAcgASgIEjMKCWZyZXNobmVzcxgIIAEoDjIgLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlGcmVzaG5lc3MSEAoIcmV2aXNpb24YCSABKAQSEwoLYXBwcm94aW1hdGUYCiABKAgSDQoFc2NvcmUYCyABKAEi2wEKEkxpc3RFbnRyaWVzUmVxdWVzdBIUCgx3b3Jrc3BhY2VfaWQYASABKAkSKQoEa2luZBgCIAEoDjIbLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlLaW5kEhUKCHZlcmlmaWVkGAMgASgISACIAQESLQoGYXV0aG9yGAQgASgOMh0uZnVndWUubWVtb3J5LnYxLk1lbW9yeUF1dGhvchIxCgh2YWxpZGl0eRgFIAEoDjIfLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlWYWxpZGl0eUILCglfdmVyaWZpZWQiRAoTTGlzdEVudHJpZXNSZXNwb25zZRItCgdlbnRyaWVzGAEgAygLMhwuZnVndWUubWVtb3J5LnYxLk1lbW9yeUVudHJ5IpQCChRTZWFyY2hFbnRyaWVzUmVxdWVzdBIUCgx3b3Jrc3BhY2VfaWQYASABKAkSDQoFcXVlcnkYAiABKAkSKQoEa2luZBgDIAEoDjIbLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlLaW5kEhcKD2luY2x1ZGVfaW52YWxpZBgEIAEoCBINCgVsaW1pdBgFIAEoBRIVCgh2ZXJpZmllZBgGIAEoCEgAiAEBEi0KBmF1dGhvchgHIAEoDjIdLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlBdXRob3ISMQoIdmFsaWRpdHkYCCABKA4yHy5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5VmFsaWRpdHlCCwoJX3ZlcmlmaWVkImIKFVNlYXJjaEVudHJpZXNSZXNwb25zZRI0CgdyZXN1bHRzGAEgAygLMiMuZnVndWUubWVtb3J5LnYxLk1lbW9yeVNlYXJjaFJlc3VsdBITCgthcHByb3hpbWF0ZRgCIAEoCCJCCg9HZXRFbnRyeVJlcXVlc3QSFAoMd29ya3NwYWNlX2lkGAEgASgJEgoKAmlkGAIgASgJEg0KBWxhYmVsGAMgASgJIj8KEEdldEVudHJ5UmVzcG9uc2USKwoFZW50cnkYASABKAsyHC5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5RW50cnkiQAoWR2V0RW50cnlIaXN0b3J5UmVxdWVzdBIUCgx3b3Jrc3BhY2VfaWQYASABKAkSEAoIZW50cnlfaWQYAiABKAkiTwoXR2V0RW50cnlIaXN0b3J5UmVzcG9uc2USNAoHaGlzdG9yeRgBIAMoCzIjLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlIaXN0b3J5RW50cnkiwgIKEVdyaXRlRW50cnlSZXF1ZXN0EhQKDHdvcmtzcGFjZV9pZBgBIAEoCRIpCgJvcBgCIAEoDjIdLmZ1Z3VlLm1lbW9yeS52MS5Xcml0ZUVudHJ5T3ASCgoCaWQYAyABKAkSGQoRZXhwZWN0ZWRfcmV2aXNpb24YBCABKAQSKQoEa2luZBgFIAEoDjIbLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlLaW5kEg0KBWxhYmVsGAYgASgJEg8KB3N1bW1hcnkYByABKAkSDAoEYm9keRgIIAEoCRIQCghrZXl3b3JkcxgJIAMoCRIzCgdhbmNob3JzGAogAygLMiIuZnVndWUubWVtb3J5LnYxLk1lbW9yeUFuY2hvcklucHV0Eg4KBnJlYXNvbhgLIAEoCRIVCg1zdXBlcnNlZGVkX2J5GAwgASgJIkEKEldyaXRlRW50cnlSZXNwb25zZRIrCgVlbnRyeRgBIAEoCzIcLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlFbnRyeSJRChJWZXJpZnlFbnRyeVJlcXVlc3QSFAoMd29ya3NwYWNlX2lkGAEgASgJEgoKAmlkGAIgASgJEhkKEWV4cGVjdGVkX3JldmlzaW9uGAMgASgEIkIKE1ZlcmlmeUVudHJ5UmVzcG9uc2USKwoFZW50cnkYASABKAsyHC5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5RW50cnkibAoTUmVzdG9yZUVudHJ5UmVxdWVzdBIUCgx3b3Jrc3BhY2VfaWQYASABKAkSCgoCaWQYAiABKAkSGAoQcmVzdG9yZV9yZXZpc2lvbhgDIAEoBBIZChFleHBlY3RlZF9yZXZpc2lvbhgEIAEoBCJDChRSZXN0b3JlRW50cnlSZXNwb25zZRIrCgVlbnRyeRgBIAEoCzIcLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlFbnRyeSIrChNFeHBvcnRNZW1vcnlSZXF1ZXN0EhQKDHdvcmtzcGFjZV9pZBgBIAEoCSInChRFeHBvcnRNZW1vcnlSZXNwb25zZRIPCgdjb250ZW50GAEgASgMIrQCChdNZW1vcnlJbXBvcnRQcmV2aWV3SXRlbRIPCgdpdGVtX2lkGAEgASgJEhAKCGVudHJ5X2lkGAIgASgJEg0KBWxhYmVsGAMgASgJEjYKCml0ZW1fY2xhc3MYBCABKA4yIi5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5SW1wb3J0Q2xhc3MSOwoOZGVmYXVsdF9jaG9pY2UYBSABKA4yIy5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5SW1wb3J0Q2hvaWNlEhUKDXJlamVjdF9yZWFzb24YBiABKAkSKwoFbG9jYWwYByABKAsyHC5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5RW50cnkSLgoIaW1wb3J0ZWQYCCABKAsyHC5mdWd1ZS5tZW1vcnkudjEuTWVtb3J5RW50cnkiPQoUUHJldmlld0ltcG9ydFJlcXVlc3QSFAoMd29ya3NwYWNlX2lkGAEgASgJEg8KB2NvbnRlbnQYAiABKAwirQEKFVByZXZpZXdJbXBvcnRSZXNwb25zZRISCgpwcmV2aWV3X2lkGAEgASgJEhYKDndvcmtzcGFjZV9uYW1lGAIgASgJEi8KC2V4cG9ydGVkX2F0GAMgASgLMhouZ29vZ2xlLnByb3RvYnVmLlRpbWVzdGFtcBI3CgVpdGVtcxgEIAMoCzIoLmZ1Z3VlLm1lbW9yeS52MS5NZW1vcnlJbXBvcnRQcmV2aWV3SXRlbSJxChZNZW1vcnlJbXBvcnRJdGVtQ2hvaWNlEg8KB2l0ZW1faWQYASABKAkSMwoGY2hvaWNlGAIgASgOMiMuZnVndWUubWVtb3J5LnYxLk1lbW9yeUltcG9ydENob2ljZRIRCgluZXdfbGFiZWwYAyABKAkijQEKEkFwcGx5SW1wb3J0UmVxdWVzdBIUCgx3b3Jrc3BhY2VfaWQYASABKAkSEgoKcHJldmlld19pZBgCIAEoCRI4CgdjaG9pY2VzGAMgAygLMicuZnVndWUubWVtb3J5LnYxLk1lbW9yeUltcG9ydEl0ZW1DaG9pY2USEwoLaW1wb3J0X2ZpbGUYBCABKAkidQoTQXBwbHlJbXBvcnRSZXNwb25zZRItCgd3cml0dGVuGAEgAygLMhwuZnVndWUubWVtb3J5LnYxLk1lbW9yeUVudHJ5Eg0KBWFkZGVkGAIgASgFEg8KB3VwZGF0ZWQYAyABKAUSDwoHc2tpcHBlZBgEIAEoBSq6AQoKTWVtb3J5S2luZBIbChdNRU1PUllfS0lORF9VTlNQRUNJRklFRBAAEhYKEk1FTU9SWV9LSU5EX1BJTk5FRBABEhQKEE1FTU9SWV9LSU5EX0ZBQ1QQAhIYChRNRU1PUllfS0lORF9ERUNJU0lPThADEhoKFk1FTU9SWV9LSU5EX0NPTlZFTlRJT04QBBIVChFNRU1PUllfS0lORF9IT1dUTxAFEhQKEE1FTU9SWV9LSU5EX05PVEUQBipeCgxNZW1vcnlBdXRob3ISHQoZTUVNT1JZX0FVVEhPUl9VTlNQRUNJRklFRBAAEhYKEk1FTU9SWV9BVVRIT1JfVVNFUhABEhcKE01FTU9SWV9BVVRIT1JfQUdFTlQQAiqJAQoOTWVtb3J5VmFsaWRpdHkSHwobTUVNT1JZX1ZBTElESVRZX1VOU1BFQ0lGSUVEEAASGQoVTUVNT1JZX1ZBTElESVRZX1ZBTElEEAESHgoaTUVNT1JZX1ZBTElESVRZX1NVUEVSU0VERUQQAhIbChdNRU1PUllfVkFMSURJVFlfSU5WQUxJRBADKokBCg9NZW1vcnlGcmVzaG5lc3MSIAocTUVNT1JZX0ZSRVNITkVTU19VTlNQRUNJRklFRBAAEhoKFk1FTU9SWV9GUkVTSE5FU1NfRlJFU0gQARIaChZNRU1PUllfRlJFU0hORVNTX1NUQUxFEAISHAoYTUVNT1JZX0ZSRVNITkVTU19VTktOT1dOEAMqxgEKD01lbW9yeU9wZXJhdGlvbhIgChxNRU1PUllfT1BFUkFUSU9OX1VOU1BFQ0lGSUVEEAASGAoUTUVNT1JZX09QRVJBVElPTl9BREQQARIbChdNRU1PUllfT1BFUkFUSU9OX1VQREFURRACEh8KG01FTU9SWV9PUEVSQVRJT05fSU5WQUxJREFURRADEhwKGE1FTU9SWV9PUEVSQVRJT05fUkVTVE9SRRAEEhsKF01FTU9SWV9PUEVSQVRJT05fVkVSSUZZEAUqgAEKDFdyaXRlRW50cnlPcBIeChpXUklURV9FTlRSWV9PUF9VTlNQRUNJRklFRBAAEhYKEldSSVRFX0VOVFJZX09QX0FERBABEhkKFVdSSVRFX0VOVFJZX09QX1VQREFURRACEh0KGVdSSVRFX0VOVFJZX09QX0lOVkFMSURBVEUQAyrfAQoRTWVtb3J5SW1wb3J0Q2xhc3MSIwofTUVNT1JZX0lNUE9SVF9DTEFTU19VTlNQRUNJRklFRBAAEhsKF01FTU9SWV9JTVBPUlRfQ0xBU1NfQUREEAESHAoYTUVNT1JZX0lNUE9SVF9DTEFTU19TS0lQEAISIAocTUVNT1JZX0lNUE9SVF9DTEFTU19DT05GTElDVBADEiYKIk1FTU9SWV9JTVBPUlRfQ0xBU1NfTEFCRUxfQ09ORkxJQ1QQBBIgChxNRU1PUllfSU1QT1JUX0NMQVNTX1JFSkVDVEVEEAUq6wEKEk1lbW9yeUltcG9ydENob2ljZRIkCiBNRU1PUllfSU1QT1JUX0NIT0lDRV9VTlNQRUNJRklFRBAAEiMKH01FTU9SWV9JTVBPUlRfQ0hPSUNFX0tFRVBfTE9DQUwQARImCiJNRU1PUllfSU1QT1JUX0NIT0lDRV9UQUtFX0lNUE9SVEVEEAISIgoeTUVNT1JZX0lNUE9SVF9DSE9JQ0VfS0VFUF9CT1RIEAMSHQoZTUVNT1JZX0lNUE9SVF9DSE9JQ0VfU0tJUBAEEh8KG01FTU9SWV9JTVBPUlRfQ0hPSUNFX1JFTkFNRRAFMqUHCg1NZW1vcnlTZXJ2aWNlElgKC0xpc3RFbnRyaWVzEiMuZnVndWUubWVtb3J5LnYxLkxpc3RFbnRyaWVzUmVxdWVzdBokLmZ1Z3VlLm1lbW9yeS52MS5MaXN0RW50cmllc1Jlc3BvbnNlEl4KDVNlYXJjaEVudHJpZXMSJS5mdWd1ZS5tZW1vcnkudjEuU2VhcmNoRW50cmllc1JlcXVlc3QaJi5mdWd1ZS5tZW1vcnkudjEuU2VhcmNoRW50cmllc1Jlc3BvbnNlEk8KCEdldEVudHJ5EiAuZnVndWUubWVtb3J5LnYxLkdldEVudHJ5UmVxdWVzdBohLmZ1Z3VlLm1lbW9yeS52MS5HZXRFbnRyeVJlc3BvbnNlEmQKD0dldEVudHJ5SGlzdG9yeRInLmZ1Z3VlLm1lbW9yeS52MS5HZXRFbnRyeUhpc3RvcnlSZXF1ZXN0GiguZnVndWUubWVtb3J5LnYxLkdldEVudHJ5SGlzdG9yeVJlc3BvbnNlElUKCldyaXRlRW50cnkSIi5mdWd1ZS5tZW1vcnkudjEuV3JpdGVFbnRyeVJlcXVlc3QaIy5mdWd1ZS5tZW1vcnkudjEuV3JpdGVFbnRyeVJlc3BvbnNlElgKC1ZlcmlmeUVudHJ5EiMuZnVndWUubWVtb3J5LnYxLlZlcmlmeUVudHJ5UmVxdWVzdBokLmZ1Z3VlLm1lbW9yeS52MS5WZXJpZnlFbnRyeVJlc3BvbnNlElsKDFJlc3RvcmVFbnRyeRIkLmZ1Z3VlLm1lbW9yeS52MS5SZXN0b3JlRW50cnlSZXF1ZXN0GiUuZnVndWUubWVtb3J5LnYxLlJlc3RvcmVFbnRyeVJlc3BvbnNlElsKDEV4cG9ydE1lbW9yeRIkLmZ1Z3VlLm1lbW9yeS52MS5FeHBvcnRNZW1vcnlSZXF1ZXN0GiUuZnVndWUubWVtb3J5LnYxLkV4cG9ydE1lbW9yeVJlc3BvbnNlEl4KDVByZXZpZXdJbXBvcnQSJS5mdWd1ZS5tZW1vcnkudjEuUHJldmlld0ltcG9ydFJlcXVlc3QaJi5mdWd1ZS5tZW1vcnkudjEuUHJldmlld0ltcG9ydFJlc3BvbnNlElgKC0FwcGx5SW1wb3J0EiMuZnVndWUubWVtb3J5LnYxLkFwcGx5SW1wb3J0UmVxdWVzdBokLmZ1Z3VlLm1lbW9yeS52MS5BcHBseUltcG9ydFJlc3BvbnNlQrsBChNjb20uZnVndWUubWVtb3J5LnYxQgtNZW1vcnlQcm90b1ABWjlnaXRodWIuY29tL3N5dXJvZGV2L2Z1Z3VlL3BrZy9wYi9mdWd1ZS9tZW1vcnkvdjE7bWVtb3J5djGiAgNGTViqAg9GdWd1ZS5NZW1vcnkuVjHKAg9GdWd1ZVxNZW1vcnlcVjHiAhtGdWd1ZVxNZW1vcnlcVjFcR1BCTWV0YWRhdGHqAhFGdWd1ZTo6TWVtb3J5OjpWMWIGcHJvdG8z", [file_google_protobuf_timestamp]);
 
 /**
  * MemoryAnchorInput identifies a workspace-relative file supplied by a caller.
@@ -816,6 +816,239 @@ export const RestoreEntryResponseSchema: GenMessage<RestoreEntryResponse> = /*@_
   messageDesc(file_fugue_memory_v1_memory, 20);
 
 /**
+ * @generated from message fugue.memory.v1.ExportMemoryRequest
+ */
+export type ExportMemoryRequest = Message<"fugue.memory.v1.ExportMemoryRequest"> & {
+  /**
+   * @generated from field: string workspace_id = 1;
+   */
+  workspaceId: string;
+};
+
+/**
+ * Describes the message fugue.memory.v1.ExportMemoryRequest.
+ * Use `create(ExportMemoryRequestSchema)` to create a new message.
+ */
+export const ExportMemoryRequestSchema: GenMessage<ExportMemoryRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_memory_v1_memory, 21);
+
+/**
+ * @generated from message fugue.memory.v1.ExportMemoryResponse
+ */
+export type ExportMemoryResponse = Message<"fugue.memory.v1.ExportMemoryResponse"> & {
+  /**
+   * @generated from field: bytes content = 1;
+   */
+  content: Uint8Array;
+};
+
+/**
+ * Describes the message fugue.memory.v1.ExportMemoryResponse.
+ * Use `create(ExportMemoryResponseSchema)` to create a new message.
+ */
+export const ExportMemoryResponseSchema: GenMessage<ExportMemoryResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_memory_v1_memory, 22);
+
+/**
+ * MemoryImportPreviewItem describes one parsed file block compared against target workspace memory.
+ *
+ * @generated from message fugue.memory.v1.MemoryImportPreviewItem
+ */
+export type MemoryImportPreviewItem = Message<"fugue.memory.v1.MemoryImportPreviewItem"> & {
+  /**
+   * @generated from field: string item_id = 1;
+   */
+  itemId: string;
+
+  /**
+   * @generated from field: string entry_id = 2;
+   */
+  entryId: string;
+
+  /**
+   * @generated from field: string label = 3;
+   */
+  label: string;
+
+  /**
+   * @generated from field: fugue.memory.v1.MemoryImportClass item_class = 4;
+   */
+  itemClass: MemoryImportClass;
+
+  /**
+   * @generated from field: fugue.memory.v1.MemoryImportChoice default_choice = 5;
+   */
+  defaultChoice: MemoryImportChoice;
+
+  /**
+   * @generated from field: string reject_reason = 6;
+   */
+  rejectReason: string;
+
+  /**
+   * @generated from field: fugue.memory.v1.MemoryEntry local = 7;
+   */
+  local?: MemoryEntry | undefined;
+
+  /**
+   * @generated from field: fugue.memory.v1.MemoryEntry imported = 8;
+   */
+  imported?: MemoryEntry | undefined;
+};
+
+/**
+ * Describes the message fugue.memory.v1.MemoryImportPreviewItem.
+ * Use `create(MemoryImportPreviewItemSchema)` to create a new message.
+ */
+export const MemoryImportPreviewItemSchema: GenMessage<MemoryImportPreviewItem> = /*@__PURE__*/
+  messageDesc(file_fugue_memory_v1_memory, 23);
+
+/**
+ * @generated from message fugue.memory.v1.PreviewImportRequest
+ */
+export type PreviewImportRequest = Message<"fugue.memory.v1.PreviewImportRequest"> & {
+  /**
+   * @generated from field: string workspace_id = 1;
+   */
+  workspaceId: string;
+
+  /**
+   * @generated from field: bytes content = 2;
+   */
+  content: Uint8Array;
+};
+
+/**
+ * Describes the message fugue.memory.v1.PreviewImportRequest.
+ * Use `create(PreviewImportRequestSchema)` to create a new message.
+ */
+export const PreviewImportRequestSchema: GenMessage<PreviewImportRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_memory_v1_memory, 24);
+
+/**
+ * @generated from message fugue.memory.v1.PreviewImportResponse
+ */
+export type PreviewImportResponse = Message<"fugue.memory.v1.PreviewImportResponse"> & {
+  /**
+   * @generated from field: string preview_id = 1;
+   */
+  previewId: string;
+
+  /**
+   * @generated from field: string workspace_name = 2;
+   */
+  workspaceName: string;
+
+  /**
+   * @generated from field: google.protobuf.Timestamp exported_at = 3;
+   */
+  exportedAt?: Timestamp | undefined;
+
+  /**
+   * @generated from field: repeated fugue.memory.v1.MemoryImportPreviewItem items = 4;
+   */
+  items: MemoryImportPreviewItem[];
+};
+
+/**
+ * Describes the message fugue.memory.v1.PreviewImportResponse.
+ * Use `create(PreviewImportResponseSchema)` to create a new message.
+ */
+export const PreviewImportResponseSchema: GenMessage<PreviewImportResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_memory_v1_memory, 25);
+
+/**
+ * @generated from message fugue.memory.v1.MemoryImportItemChoice
+ */
+export type MemoryImportItemChoice = Message<"fugue.memory.v1.MemoryImportItemChoice"> & {
+  /**
+   * @generated from field: string item_id = 1;
+   */
+  itemId: string;
+
+  /**
+   * @generated from field: fugue.memory.v1.MemoryImportChoice choice = 2;
+   */
+  choice: MemoryImportChoice;
+
+  /**
+   * @generated from field: string new_label = 3;
+   */
+  newLabel: string;
+};
+
+/**
+ * Describes the message fugue.memory.v1.MemoryImportItemChoice.
+ * Use `create(MemoryImportItemChoiceSchema)` to create a new message.
+ */
+export const MemoryImportItemChoiceSchema: GenMessage<MemoryImportItemChoice> = /*@__PURE__*/
+  messageDesc(file_fugue_memory_v1_memory, 26);
+
+/**
+ * @generated from message fugue.memory.v1.ApplyImportRequest
+ */
+export type ApplyImportRequest = Message<"fugue.memory.v1.ApplyImportRequest"> & {
+  /**
+   * @generated from field: string workspace_id = 1;
+   */
+  workspaceId: string;
+
+  /**
+   * @generated from field: string preview_id = 2;
+   */
+  previewId: string;
+
+  /**
+   * @generated from field: repeated fugue.memory.v1.MemoryImportItemChoice choices = 3;
+   */
+  choices: MemoryImportItemChoice[];
+
+  /**
+   * @generated from field: string import_file = 4;
+   */
+  importFile: string;
+};
+
+/**
+ * Describes the message fugue.memory.v1.ApplyImportRequest.
+ * Use `create(ApplyImportRequestSchema)` to create a new message.
+ */
+export const ApplyImportRequestSchema: GenMessage<ApplyImportRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_memory_v1_memory, 27);
+
+/**
+ * @generated from message fugue.memory.v1.ApplyImportResponse
+ */
+export type ApplyImportResponse = Message<"fugue.memory.v1.ApplyImportResponse"> & {
+  /**
+   * @generated from field: repeated fugue.memory.v1.MemoryEntry written = 1;
+   */
+  written: MemoryEntry[];
+
+  /**
+   * @generated from field: int32 added = 2;
+   */
+  added: number;
+
+  /**
+   * @generated from field: int32 updated = 3;
+   */
+  updated: number;
+
+  /**
+   * @generated from field: int32 skipped = 4;
+   */
+  skipped: number;
+};
+
+/**
+ * Describes the message fugue.memory.v1.ApplyImportResponse.
+ * Use `create(ApplyImportResponseSchema)` to create a new message.
+ */
+export const ApplyImportResponseSchema: GenMessage<ApplyImportResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_memory_v1_memory, 28);
+
+/**
  * MemoryKind classifies a workspace memory entry (workspace-memory §2).
  *
  * @generated from enum fugue.memory.v1.MemoryKind
@@ -1034,8 +1267,93 @@ export const WriteEntryOpSchema: GenEnum<WriteEntryOp> = /*@__PURE__*/
   enumDesc(file_fugue_memory_v1_memory, 5);
 
 /**
+ * MemoryImportClass classifies one block in a PreviewImport diff (workspace-memory §9).
+ *
+ * @generated from enum fugue.memory.v1.MemoryImportClass
+ */
+export enum MemoryImportClass {
+  /**
+   * @generated from enum value: MEMORY_IMPORT_CLASS_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: MEMORY_IMPORT_CLASS_ADD = 1;
+   */
+  ADD = 1,
+
+  /**
+   * @generated from enum value: MEMORY_IMPORT_CLASS_SKIP = 2;
+   */
+  SKIP = 2,
+
+  /**
+   * @generated from enum value: MEMORY_IMPORT_CLASS_CONFLICT = 3;
+   */
+  CONFLICT = 3,
+
+  /**
+   * @generated from enum value: MEMORY_IMPORT_CLASS_LABEL_CONFLICT = 4;
+   */
+  LABEL_CONFLICT = 4,
+
+  /**
+   * @generated from enum value: MEMORY_IMPORT_CLASS_REJECTED = 5;
+   */
+  REJECTED = 5,
+}
+
+/**
+ * Describes the enum fugue.memory.v1.MemoryImportClass.
+ */
+export const MemoryImportClassSchema: GenEnum<MemoryImportClass> = /*@__PURE__*/
+  enumDesc(file_fugue_memory_v1_memory, 6);
+
+/**
+ * MemoryImportChoice selects how ApplyImport resolves one preview item (workspace-memory §9).
+ *
+ * @generated from enum fugue.memory.v1.MemoryImportChoice
+ */
+export enum MemoryImportChoice {
+  /**
+   * @generated from enum value: MEMORY_IMPORT_CHOICE_UNSPECIFIED = 0;
+   */
+  UNSPECIFIED = 0,
+
+  /**
+   * @generated from enum value: MEMORY_IMPORT_CHOICE_KEEP_LOCAL = 1;
+   */
+  KEEP_LOCAL = 1,
+
+  /**
+   * @generated from enum value: MEMORY_IMPORT_CHOICE_TAKE_IMPORTED = 2;
+   */
+  TAKE_IMPORTED = 2,
+
+  /**
+   * @generated from enum value: MEMORY_IMPORT_CHOICE_KEEP_BOTH = 3;
+   */
+  KEEP_BOTH = 3,
+
+  /**
+   * @generated from enum value: MEMORY_IMPORT_CHOICE_SKIP = 4;
+   */
+  SKIP = 4,
+
+  /**
+   * @generated from enum value: MEMORY_IMPORT_CHOICE_RENAME = 5;
+   */
+  RENAME = 5,
+}
+
+/**
+ * Describes the enum fugue.memory.v1.MemoryImportChoice.
+ */
+export const MemoryImportChoiceSchema: GenEnum<MemoryImportChoice> = /*@__PURE__*/
+  enumDesc(file_fugue_memory_v1_memory, 7);
+
+/**
  * MemoryService exposes workspace memory to local principals (workspace-memory §7).
- * Export and import RPCs belong to FUG-112 and are omitted here.
  *
  * @generated from service fugue.memory.v1.MemoryService
  */
@@ -1095,6 +1413,30 @@ export const MemoryService: GenService<{
     methodKind: "unary";
     input: typeof RestoreEntryRequestSchema;
     output: typeof RestoreEntryResponseSchema;
+  },
+  /**
+   * @generated from rpc fugue.memory.v1.MemoryService.ExportMemory
+   */
+  exportMemory: {
+    methodKind: "unary";
+    input: typeof ExportMemoryRequestSchema;
+    output: typeof ExportMemoryResponseSchema;
+  },
+  /**
+   * @generated from rpc fugue.memory.v1.MemoryService.PreviewImport
+   */
+  previewImport: {
+    methodKind: "unary";
+    input: typeof PreviewImportRequestSchema;
+    output: typeof PreviewImportResponseSchema;
+  },
+  /**
+   * @generated from rpc fugue.memory.v1.MemoryService.ApplyImport
+   */
+  applyImport: {
+    methodKind: "unary";
+    input: typeof ApplyImportRequestSchema;
+    output: typeof ApplyImportResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fugue_memory_v1_memory, 0);

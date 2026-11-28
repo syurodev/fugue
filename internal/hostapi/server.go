@@ -239,10 +239,22 @@ func newServiceMux(backend app.Backend) *http.ServeMux {
 		&sessionToolHandler{backend: backend},
 		connect.WithReadMaxBytes(app.SessionToolMaxBytes),
 	))
+	memH := &memoryHandler{backend: backend}
 	handler.Handle(memoryv1connect.NewMemoryServiceHandler(
-		&memoryHandler{backend: backend},
+		memH,
 		connect.WithReadMaxBytes(app.MemoryRequestMaxBytes),
 	))
+	_, exportH := memoryv1connect.NewMemoryServiceHandler(
+		memH,
+		connect.WithReadMaxBytes(app.MemoryRequestMaxBytes),
+		connect.WithSendMaxBytes(app.MemoryExportImportWireMaxBytes),
+	)
+	handler.Handle(memoryv1connect.MemoryServiceExportMemoryProcedure, exportH)
+	_, previewH := memoryv1connect.NewMemoryServiceHandler(
+		memH,
+		connect.WithReadMaxBytes(app.MemoryExportImportWireMaxBytes),
+	)
+	handler.Handle(memoryv1connect.MemoryServicePreviewImportProcedure, previewH)
 	return handler
 }
 

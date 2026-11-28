@@ -309,3 +309,120 @@ func memorySearchResultToProto(r *app.MemorySearchResultView) *memoryv1.MemorySe
 		Score:       r.Score,
 	}
 }
+
+func memoryImportClassToProto(c string) memoryv1.MemoryImportClass {
+	switch c {
+	case app.MemoryImportClassAdd:
+		return memoryv1.MemoryImportClass_MEMORY_IMPORT_CLASS_ADD
+	case app.MemoryImportClassSkip:
+		return memoryv1.MemoryImportClass_MEMORY_IMPORT_CLASS_SKIP
+	case app.MemoryImportClassConflict:
+		return memoryv1.MemoryImportClass_MEMORY_IMPORT_CLASS_CONFLICT
+	case app.MemoryImportClassLabelConflict:
+		return memoryv1.MemoryImportClass_MEMORY_IMPORT_CLASS_LABEL_CONFLICT
+	case app.MemoryImportClassRejected:
+		return memoryv1.MemoryImportClass_MEMORY_IMPORT_CLASS_REJECTED
+	default:
+		return memoryv1.MemoryImportClass_MEMORY_IMPORT_CLASS_UNSPECIFIED
+	}
+}
+
+func memoryImportChoiceToProto(c string) memoryv1.MemoryImportChoice {
+	switch c {
+	case app.MemoryImportChoiceKeepLocal:
+		return memoryv1.MemoryImportChoice_MEMORY_IMPORT_CHOICE_KEEP_LOCAL
+	case app.MemoryImportChoiceTakeImported:
+		return memoryv1.MemoryImportChoice_MEMORY_IMPORT_CHOICE_TAKE_IMPORTED
+	case app.MemoryImportChoiceKeepBoth:
+		return memoryv1.MemoryImportChoice_MEMORY_IMPORT_CHOICE_KEEP_BOTH
+	case app.MemoryImportChoiceSkip:
+		return memoryv1.MemoryImportChoice_MEMORY_IMPORT_CHOICE_SKIP
+	case app.MemoryImportChoiceRename:
+		return memoryv1.MemoryImportChoice_MEMORY_IMPORT_CHOICE_RENAME
+	default:
+		return memoryv1.MemoryImportChoice_MEMORY_IMPORT_CHOICE_UNSPECIFIED
+	}
+}
+
+func memoryImportChoiceFromProto(c memoryv1.MemoryImportChoice) (string, error) {
+	switch c {
+	case memoryv1.MemoryImportChoice_MEMORY_IMPORT_CHOICE_UNSPECIFIED:
+		return "", nil
+	case memoryv1.MemoryImportChoice_MEMORY_IMPORT_CHOICE_KEEP_LOCAL:
+		return app.MemoryImportChoiceKeepLocal, nil
+	case memoryv1.MemoryImportChoice_MEMORY_IMPORT_CHOICE_TAKE_IMPORTED:
+		return app.MemoryImportChoiceTakeImported, nil
+	case memoryv1.MemoryImportChoice_MEMORY_IMPORT_CHOICE_KEEP_BOTH:
+		return app.MemoryImportChoiceKeepBoth, nil
+	case memoryv1.MemoryImportChoice_MEMORY_IMPORT_CHOICE_SKIP:
+		return app.MemoryImportChoiceSkip, nil
+	case memoryv1.MemoryImportChoice_MEMORY_IMPORT_CHOICE_RENAME:
+		return app.MemoryImportChoiceRename, nil
+	default:
+		return "", errcode.New(errcode.InvalidArgument, "unknown memory import choice")
+	}
+}
+
+func memoryImportPreviewToProto(v *app.MemoryImportPreviewView) *memoryv1.PreviewImportResponse {
+	items := make([]*memoryv1.MemoryImportPreviewItem, 0, len(v.Items))
+	for i := range v.Items {
+		it := &v.Items[i]
+		var localPB, importedPB *memoryv1.MemoryEntry
+		if it.Local != nil {
+			localPB = memoryEntryToProto(it.Local)
+		}
+		if it.Imported != nil {
+			importedPB = memoryEntryToProto(it.Imported)
+		}
+		items = append(items, &memoryv1.MemoryImportPreviewItem{
+			ItemId:        it.ItemID,
+			EntryId:       it.EntryID,
+			Label:         it.Label,
+			ItemClass:     memoryImportClassToProto(it.Class),
+			DefaultChoice: memoryImportChoiceToProto(it.DefaultChoice),
+			RejectReason:  it.RejectReason,
+			Local:         localPB,
+			Imported:      importedPB,
+		})
+	}
+	return &memoryv1.PreviewImportResponse{
+		PreviewId:     v.PreviewID,
+		WorkspaceName: v.WorkspaceName,
+		ExportedAt:    timestamppb.New(v.ExportedAt),
+		Items:         items,
+	}
+}
+
+func memoryApplyImportCmdFromProto(msg *memoryv1.ApplyImportRequest) (*app.MemoryApplyImportCommand, error) {
+	choices := make([]app.MemoryImportItemChoiceCommand, 0, len(msg.GetChoices()))
+	for _, c := range msg.GetChoices() {
+		choice, err := memoryImportChoiceFromProto(c.GetChoice())
+		if err != nil {
+			return nil, err
+		}
+		choices = append(choices, app.MemoryImportItemChoiceCommand{
+			ItemID:   c.GetItemId(),
+			Choice:   choice,
+			NewLabel: c.GetNewLabel(),
+		})
+	}
+	return &app.MemoryApplyImportCommand{
+		WorkspaceID: msg.GetWorkspaceId(),
+		PreviewID:   msg.GetPreviewId(),
+		Choices:     choices,
+		ImportFile:  msg.GetImportFile(),
+	}, nil
+}
+
+func memoryApplyImportResultToProto(v *app.MemoryApplyImportResultView) *memoryv1.ApplyImportResponse {
+	written := make([]*memoryv1.MemoryEntry, 0, len(v.Written))
+	for i := range v.Written {
+		written = append(written, memoryEntryToProto(&v.Written[i]))
+	}
+	return &memoryv1.ApplyImportResponse{
+		Written: written,
+		Added:   v.Added,
+		Updated: v.Updated,
+		Skipped: v.Skipped,
+	}
+}

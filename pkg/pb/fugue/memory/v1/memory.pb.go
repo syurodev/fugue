@@ -352,6 +352,124 @@ func (WriteEntryOp) EnumDescriptor() ([]byte, []int) {
 	return file_fugue_memory_v1_memory_proto_rawDescGZIP(), []int{5}
 }
 
+// MemoryImportClass classifies one block in a PreviewImport diff (workspace-memory §9).
+type MemoryImportClass int32
+
+const (
+	MemoryImportClass_MEMORY_IMPORT_CLASS_UNSPECIFIED    MemoryImportClass = 0
+	MemoryImportClass_MEMORY_IMPORT_CLASS_ADD            MemoryImportClass = 1
+	MemoryImportClass_MEMORY_IMPORT_CLASS_SKIP           MemoryImportClass = 2
+	MemoryImportClass_MEMORY_IMPORT_CLASS_CONFLICT       MemoryImportClass = 3
+	MemoryImportClass_MEMORY_IMPORT_CLASS_LABEL_CONFLICT MemoryImportClass = 4
+	MemoryImportClass_MEMORY_IMPORT_CLASS_REJECTED       MemoryImportClass = 5
+)
+
+// Enum value maps for MemoryImportClass.
+var (
+	MemoryImportClass_name = map[int32]string{
+		0: "MEMORY_IMPORT_CLASS_UNSPECIFIED",
+		1: "MEMORY_IMPORT_CLASS_ADD",
+		2: "MEMORY_IMPORT_CLASS_SKIP",
+		3: "MEMORY_IMPORT_CLASS_CONFLICT",
+		4: "MEMORY_IMPORT_CLASS_LABEL_CONFLICT",
+		5: "MEMORY_IMPORT_CLASS_REJECTED",
+	}
+	MemoryImportClass_value = map[string]int32{
+		"MEMORY_IMPORT_CLASS_UNSPECIFIED":    0,
+		"MEMORY_IMPORT_CLASS_ADD":            1,
+		"MEMORY_IMPORT_CLASS_SKIP":           2,
+		"MEMORY_IMPORT_CLASS_CONFLICT":       3,
+		"MEMORY_IMPORT_CLASS_LABEL_CONFLICT": 4,
+		"MEMORY_IMPORT_CLASS_REJECTED":       5,
+	}
+)
+
+func (x MemoryImportClass) Enum() *MemoryImportClass {
+	p := new(MemoryImportClass)
+	*p = x
+	return p
+}
+
+func (x MemoryImportClass) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (MemoryImportClass) Descriptor() protoreflect.EnumDescriptor {
+	return file_fugue_memory_v1_memory_proto_enumTypes[6].Descriptor()
+}
+
+func (MemoryImportClass) Type() protoreflect.EnumType {
+	return &file_fugue_memory_v1_memory_proto_enumTypes[6]
+}
+
+func (x MemoryImportClass) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use MemoryImportClass.Descriptor instead.
+func (MemoryImportClass) EnumDescriptor() ([]byte, []int) {
+	return file_fugue_memory_v1_memory_proto_rawDescGZIP(), []int{6}
+}
+
+// MemoryImportChoice selects how ApplyImport resolves one preview item (workspace-memory §9).
+type MemoryImportChoice int32
+
+const (
+	MemoryImportChoice_MEMORY_IMPORT_CHOICE_UNSPECIFIED   MemoryImportChoice = 0
+	MemoryImportChoice_MEMORY_IMPORT_CHOICE_KEEP_LOCAL    MemoryImportChoice = 1
+	MemoryImportChoice_MEMORY_IMPORT_CHOICE_TAKE_IMPORTED MemoryImportChoice = 2
+	MemoryImportChoice_MEMORY_IMPORT_CHOICE_KEEP_BOTH     MemoryImportChoice = 3
+	MemoryImportChoice_MEMORY_IMPORT_CHOICE_SKIP          MemoryImportChoice = 4
+	MemoryImportChoice_MEMORY_IMPORT_CHOICE_RENAME        MemoryImportChoice = 5
+)
+
+// Enum value maps for MemoryImportChoice.
+var (
+	MemoryImportChoice_name = map[int32]string{
+		0: "MEMORY_IMPORT_CHOICE_UNSPECIFIED",
+		1: "MEMORY_IMPORT_CHOICE_KEEP_LOCAL",
+		2: "MEMORY_IMPORT_CHOICE_TAKE_IMPORTED",
+		3: "MEMORY_IMPORT_CHOICE_KEEP_BOTH",
+		4: "MEMORY_IMPORT_CHOICE_SKIP",
+		5: "MEMORY_IMPORT_CHOICE_RENAME",
+	}
+	MemoryImportChoice_value = map[string]int32{
+		"MEMORY_IMPORT_CHOICE_UNSPECIFIED":   0,
+		"MEMORY_IMPORT_CHOICE_KEEP_LOCAL":    1,
+		"MEMORY_IMPORT_CHOICE_TAKE_IMPORTED": 2,
+		"MEMORY_IMPORT_CHOICE_KEEP_BOTH":     3,
+		"MEMORY_IMPORT_CHOICE_SKIP":          4,
+		"MEMORY_IMPORT_CHOICE_RENAME":        5,
+	}
+)
+
+func (x MemoryImportChoice) Enum() *MemoryImportChoice {
+	p := new(MemoryImportChoice)
+	*p = x
+	return p
+}
+
+func (x MemoryImportChoice) String() string {
+	return protoimpl.X.EnumStringOf(x.Descriptor(), protoreflect.EnumNumber(x))
+}
+
+func (MemoryImportChoice) Descriptor() protoreflect.EnumDescriptor {
+	return file_fugue_memory_v1_memory_proto_enumTypes[7].Descriptor()
+}
+
+func (MemoryImportChoice) Type() protoreflect.EnumType {
+	return &file_fugue_memory_v1_memory_proto_enumTypes[7]
+}
+
+func (x MemoryImportChoice) Number() protoreflect.EnumNumber {
+	return protoreflect.EnumNumber(x)
+}
+
+// Deprecated: Use MemoryImportChoice.Descriptor instead.
+func (MemoryImportChoice) EnumDescriptor() ([]byte, []int) {
+	return file_fugue_memory_v1_memory_proto_rawDescGZIP(), []int{7}
+}
+
 // MemoryAnchorInput identifies a workspace-relative file supplied by a caller.
 type MemoryAnchorInput struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1971,6 +2089,511 @@ func (x *RestoreEntryResponse) GetEntry() *MemoryEntry {
 	return nil
 }
 
+type ExportMemoryRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExportMemoryRequest) Reset() {
+	*x = ExportMemoryRequest{}
+	mi := &file_fugue_memory_v1_memory_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExportMemoryRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExportMemoryRequest) ProtoMessage() {}
+
+func (x *ExportMemoryRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_memory_v1_memory_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExportMemoryRequest.ProtoReflect.Descriptor instead.
+func (*ExportMemoryRequest) Descriptor() ([]byte, []int) {
+	return file_fugue_memory_v1_memory_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *ExportMemoryRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+type ExportMemoryResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Content       []byte                 `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ExportMemoryResponse) Reset() {
+	*x = ExportMemoryResponse{}
+	mi := &file_fugue_memory_v1_memory_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ExportMemoryResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ExportMemoryResponse) ProtoMessage() {}
+
+func (x *ExportMemoryResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_memory_v1_memory_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ExportMemoryResponse.ProtoReflect.Descriptor instead.
+func (*ExportMemoryResponse) Descriptor() ([]byte, []int) {
+	return file_fugue_memory_v1_memory_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *ExportMemoryResponse) GetContent() []byte {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+// MemoryImportPreviewItem describes one parsed file block compared against target workspace memory.
+type MemoryImportPreviewItem struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ItemId        string                 `protobuf:"bytes,1,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"`
+	EntryId       string                 `protobuf:"bytes,2,opt,name=entry_id,json=entryId,proto3" json:"entry_id,omitempty"`
+	Label         string                 `protobuf:"bytes,3,opt,name=label,proto3" json:"label,omitempty"`
+	ItemClass     MemoryImportClass      `protobuf:"varint,4,opt,name=item_class,json=itemClass,proto3,enum=fugue.memory.v1.MemoryImportClass" json:"item_class,omitempty"`
+	DefaultChoice MemoryImportChoice     `protobuf:"varint,5,opt,name=default_choice,json=defaultChoice,proto3,enum=fugue.memory.v1.MemoryImportChoice" json:"default_choice,omitempty"`
+	RejectReason  string                 `protobuf:"bytes,6,opt,name=reject_reason,json=rejectReason,proto3" json:"reject_reason,omitempty"`
+	Local         *MemoryEntry           `protobuf:"bytes,7,opt,name=local,proto3" json:"local,omitempty"`
+	Imported      *MemoryEntry           `protobuf:"bytes,8,opt,name=imported,proto3" json:"imported,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MemoryImportPreviewItem) Reset() {
+	*x = MemoryImportPreviewItem{}
+	mi := &file_fugue_memory_v1_memory_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MemoryImportPreviewItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MemoryImportPreviewItem) ProtoMessage() {}
+
+func (x *MemoryImportPreviewItem) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_memory_v1_memory_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MemoryImportPreviewItem.ProtoReflect.Descriptor instead.
+func (*MemoryImportPreviewItem) Descriptor() ([]byte, []int) {
+	return file_fugue_memory_v1_memory_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *MemoryImportPreviewItem) GetItemId() string {
+	if x != nil {
+		return x.ItemId
+	}
+	return ""
+}
+
+func (x *MemoryImportPreviewItem) GetEntryId() string {
+	if x != nil {
+		return x.EntryId
+	}
+	return ""
+}
+
+func (x *MemoryImportPreviewItem) GetLabel() string {
+	if x != nil {
+		return x.Label
+	}
+	return ""
+}
+
+func (x *MemoryImportPreviewItem) GetItemClass() MemoryImportClass {
+	if x != nil {
+		return x.ItemClass
+	}
+	return MemoryImportClass_MEMORY_IMPORT_CLASS_UNSPECIFIED
+}
+
+func (x *MemoryImportPreviewItem) GetDefaultChoice() MemoryImportChoice {
+	if x != nil {
+		return x.DefaultChoice
+	}
+	return MemoryImportChoice_MEMORY_IMPORT_CHOICE_UNSPECIFIED
+}
+
+func (x *MemoryImportPreviewItem) GetRejectReason() string {
+	if x != nil {
+		return x.RejectReason
+	}
+	return ""
+}
+
+func (x *MemoryImportPreviewItem) GetLocal() *MemoryEntry {
+	if x != nil {
+		return x.Local
+	}
+	return nil
+}
+
+func (x *MemoryImportPreviewItem) GetImported() *MemoryEntry {
+	if x != nil {
+		return x.Imported
+	}
+	return nil
+}
+
+type PreviewImportRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	WorkspaceId   string                 `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	Content       []byte                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PreviewImportRequest) Reset() {
+	*x = PreviewImportRequest{}
+	mi := &file_fugue_memory_v1_memory_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PreviewImportRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PreviewImportRequest) ProtoMessage() {}
+
+func (x *PreviewImportRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_memory_v1_memory_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PreviewImportRequest.ProtoReflect.Descriptor instead.
+func (*PreviewImportRequest) Descriptor() ([]byte, []int) {
+	return file_fugue_memory_v1_memory_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *PreviewImportRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *PreviewImportRequest) GetContent() []byte {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+type PreviewImportResponse struct {
+	state         protoimpl.MessageState     `protogen:"open.v1"`
+	PreviewId     string                     `protobuf:"bytes,1,opt,name=preview_id,json=previewId,proto3" json:"preview_id,omitempty"`
+	WorkspaceName string                     `protobuf:"bytes,2,opt,name=workspace_name,json=workspaceName,proto3" json:"workspace_name,omitempty"`
+	ExportedAt    *timestamppb.Timestamp     `protobuf:"bytes,3,opt,name=exported_at,json=exportedAt,proto3" json:"exported_at,omitempty"`
+	Items         []*MemoryImportPreviewItem `protobuf:"bytes,4,rep,name=items,proto3" json:"items,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *PreviewImportResponse) Reset() {
+	*x = PreviewImportResponse{}
+	mi := &file_fugue_memory_v1_memory_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *PreviewImportResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*PreviewImportResponse) ProtoMessage() {}
+
+func (x *PreviewImportResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_memory_v1_memory_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use PreviewImportResponse.ProtoReflect.Descriptor instead.
+func (*PreviewImportResponse) Descriptor() ([]byte, []int) {
+	return file_fugue_memory_v1_memory_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *PreviewImportResponse) GetPreviewId() string {
+	if x != nil {
+		return x.PreviewId
+	}
+	return ""
+}
+
+func (x *PreviewImportResponse) GetWorkspaceName() string {
+	if x != nil {
+		return x.WorkspaceName
+	}
+	return ""
+}
+
+func (x *PreviewImportResponse) GetExportedAt() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ExportedAt
+	}
+	return nil
+}
+
+func (x *PreviewImportResponse) GetItems() []*MemoryImportPreviewItem {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
+type MemoryImportItemChoice struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	ItemId        string                 `protobuf:"bytes,1,opt,name=item_id,json=itemId,proto3" json:"item_id,omitempty"`
+	Choice        MemoryImportChoice     `protobuf:"varint,2,opt,name=choice,proto3,enum=fugue.memory.v1.MemoryImportChoice" json:"choice,omitempty"`
+	NewLabel      string                 `protobuf:"bytes,3,opt,name=new_label,json=newLabel,proto3" json:"new_label,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MemoryImportItemChoice) Reset() {
+	*x = MemoryImportItemChoice{}
+	mi := &file_fugue_memory_v1_memory_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MemoryImportItemChoice) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MemoryImportItemChoice) ProtoMessage() {}
+
+func (x *MemoryImportItemChoice) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_memory_v1_memory_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MemoryImportItemChoice.ProtoReflect.Descriptor instead.
+func (*MemoryImportItemChoice) Descriptor() ([]byte, []int) {
+	return file_fugue_memory_v1_memory_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *MemoryImportItemChoice) GetItemId() string {
+	if x != nil {
+		return x.ItemId
+	}
+	return ""
+}
+
+func (x *MemoryImportItemChoice) GetChoice() MemoryImportChoice {
+	if x != nil {
+		return x.Choice
+	}
+	return MemoryImportChoice_MEMORY_IMPORT_CHOICE_UNSPECIFIED
+}
+
+func (x *MemoryImportItemChoice) GetNewLabel() string {
+	if x != nil {
+		return x.NewLabel
+	}
+	return ""
+}
+
+type ApplyImportRequest struct {
+	state         protoimpl.MessageState    `protogen:"open.v1"`
+	WorkspaceId   string                    `protobuf:"bytes,1,opt,name=workspace_id,json=workspaceId,proto3" json:"workspace_id,omitempty"`
+	PreviewId     string                    `protobuf:"bytes,2,opt,name=preview_id,json=previewId,proto3" json:"preview_id,omitempty"`
+	Choices       []*MemoryImportItemChoice `protobuf:"bytes,3,rep,name=choices,proto3" json:"choices,omitempty"`
+	ImportFile    string                    `protobuf:"bytes,4,opt,name=import_file,json=importFile,proto3" json:"import_file,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApplyImportRequest) Reset() {
+	*x = ApplyImportRequest{}
+	mi := &file_fugue_memory_v1_memory_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApplyImportRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApplyImportRequest) ProtoMessage() {}
+
+func (x *ApplyImportRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_memory_v1_memory_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApplyImportRequest.ProtoReflect.Descriptor instead.
+func (*ApplyImportRequest) Descriptor() ([]byte, []int) {
+	return file_fugue_memory_v1_memory_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *ApplyImportRequest) GetWorkspaceId() string {
+	if x != nil {
+		return x.WorkspaceId
+	}
+	return ""
+}
+
+func (x *ApplyImportRequest) GetPreviewId() string {
+	if x != nil {
+		return x.PreviewId
+	}
+	return ""
+}
+
+func (x *ApplyImportRequest) GetChoices() []*MemoryImportItemChoice {
+	if x != nil {
+		return x.Choices
+	}
+	return nil
+}
+
+func (x *ApplyImportRequest) GetImportFile() string {
+	if x != nil {
+		return x.ImportFile
+	}
+	return ""
+}
+
+type ApplyImportResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Written       []*MemoryEntry         `protobuf:"bytes,1,rep,name=written,proto3" json:"written,omitempty"`
+	Added         int32                  `protobuf:"varint,2,opt,name=added,proto3" json:"added,omitempty"`
+	Updated       int32                  `protobuf:"varint,3,opt,name=updated,proto3" json:"updated,omitempty"`
+	Skipped       int32                  `protobuf:"varint,4,opt,name=skipped,proto3" json:"skipped,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ApplyImportResponse) Reset() {
+	*x = ApplyImportResponse{}
+	mi := &file_fugue_memory_v1_memory_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ApplyImportResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ApplyImportResponse) ProtoMessage() {}
+
+func (x *ApplyImportResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_memory_v1_memory_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ApplyImportResponse.ProtoReflect.Descriptor instead.
+func (*ApplyImportResponse) Descriptor() ([]byte, []int) {
+	return file_fugue_memory_v1_memory_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *ApplyImportResponse) GetWritten() []*MemoryEntry {
+	if x != nil {
+		return x.Written
+	}
+	return nil
+}
+
+func (x *ApplyImportResponse) GetAdded() int32 {
+	if x != nil {
+		return x.Added
+	}
+	return 0
+}
+
+func (x *ApplyImportResponse) GetUpdated() int32 {
+	if x != nil {
+		return x.Updated
+	}
+	return 0
+}
+
+func (x *ApplyImportResponse) GetSkipped() int32 {
+	if x != nil {
+		return x.Skipped
+	}
+	return 0
+}
+
 var File_fugue_memory_v1_memory_proto protoreflect.FileDescriptor
 
 const file_fugue_memory_v1_memory_proto_rawDesc = "" +
@@ -2119,7 +2742,47 @@ const file_fugue_memory_v1_memory_proto_rawDesc = "" +
 	"\x10restore_revision\x18\x03 \x01(\x04R\x0frestoreRevision\x12+\n" +
 	"\x11expected_revision\x18\x04 \x01(\x04R\x10expectedRevision\"J\n" +
 	"\x14RestoreEntryResponse\x122\n" +
-	"\x05entry\x18\x01 \x01(\v2\x1c.fugue.memory.v1.MemoryEntryR\x05entry*\xba\x01\n" +
+	"\x05entry\x18\x01 \x01(\v2\x1c.fugue.memory.v1.MemoryEntryR\x05entry\"8\n" +
+	"\x13ExportMemoryRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\"0\n" +
+	"\x14ExportMemoryResponse\x12\x18\n" +
+	"\acontent\x18\x01 \x01(\fR\acontent\"\x85\x03\n" +
+	"\x17MemoryImportPreviewItem\x12\x17\n" +
+	"\aitem_id\x18\x01 \x01(\tR\x06itemId\x12\x19\n" +
+	"\bentry_id\x18\x02 \x01(\tR\aentryId\x12\x14\n" +
+	"\x05label\x18\x03 \x01(\tR\x05label\x12A\n" +
+	"\n" +
+	"item_class\x18\x04 \x01(\x0e2\".fugue.memory.v1.MemoryImportClassR\titemClass\x12J\n" +
+	"\x0edefault_choice\x18\x05 \x01(\x0e2#.fugue.memory.v1.MemoryImportChoiceR\rdefaultChoice\x12#\n" +
+	"\rreject_reason\x18\x06 \x01(\tR\frejectReason\x122\n" +
+	"\x05local\x18\a \x01(\v2\x1c.fugue.memory.v1.MemoryEntryR\x05local\x128\n" +
+	"\bimported\x18\b \x01(\v2\x1c.fugue.memory.v1.MemoryEntryR\bimported\"S\n" +
+	"\x14PreviewImportRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\fR\acontent\"\xda\x01\n" +
+	"\x15PreviewImportResponse\x12\x1d\n" +
+	"\n" +
+	"preview_id\x18\x01 \x01(\tR\tpreviewId\x12%\n" +
+	"\x0eworkspace_name\x18\x02 \x01(\tR\rworkspaceName\x12;\n" +
+	"\vexported_at\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"exportedAt\x12>\n" +
+	"\x05items\x18\x04 \x03(\v2(.fugue.memory.v1.MemoryImportPreviewItemR\x05items\"\x8b\x01\n" +
+	"\x16MemoryImportItemChoice\x12\x17\n" +
+	"\aitem_id\x18\x01 \x01(\tR\x06itemId\x12;\n" +
+	"\x06choice\x18\x02 \x01(\x0e2#.fugue.memory.v1.MemoryImportChoiceR\x06choice\x12\x1b\n" +
+	"\tnew_label\x18\x03 \x01(\tR\bnewLabel\"\xba\x01\n" +
+	"\x12ApplyImportRequest\x12!\n" +
+	"\fworkspace_id\x18\x01 \x01(\tR\vworkspaceId\x12\x1d\n" +
+	"\n" +
+	"preview_id\x18\x02 \x01(\tR\tpreviewId\x12A\n" +
+	"\achoices\x18\x03 \x03(\v2'.fugue.memory.v1.MemoryImportItemChoiceR\achoices\x12\x1f\n" +
+	"\vimport_file\x18\x04 \x01(\tR\n" +
+	"importFile\"\x97\x01\n" +
+	"\x13ApplyImportResponse\x126\n" +
+	"\awritten\x18\x01 \x03(\v2\x1c.fugue.memory.v1.MemoryEntryR\awritten\x12\x14\n" +
+	"\x05added\x18\x02 \x01(\x05R\x05added\x12\x18\n" +
+	"\aupdated\x18\x03 \x01(\x05R\aupdated\x12\x18\n" +
+	"\askipped\x18\x04 \x01(\x05R\askipped*\xba\x01\n" +
 	"\n" +
 	"MemoryKind\x12\x1b\n" +
 	"\x17MEMORY_KIND_UNSPECIFIED\x10\x00\x12\x16\n" +
@@ -2154,7 +2817,21 @@ const file_fugue_memory_v1_memory_proto_rawDesc = "" +
 	"\x1aWRITE_ENTRY_OP_UNSPECIFIED\x10\x00\x12\x16\n" +
 	"\x12WRITE_ENTRY_OP_ADD\x10\x01\x12\x19\n" +
 	"\x15WRITE_ENTRY_OP_UPDATE\x10\x02\x12\x1d\n" +
-	"\x19WRITE_ENTRY_OP_INVALIDATE\x10\x032\x8e\x05\n" +
+	"\x19WRITE_ENTRY_OP_INVALIDATE\x10\x03*\xdf\x01\n" +
+	"\x11MemoryImportClass\x12#\n" +
+	"\x1fMEMORY_IMPORT_CLASS_UNSPECIFIED\x10\x00\x12\x1b\n" +
+	"\x17MEMORY_IMPORT_CLASS_ADD\x10\x01\x12\x1c\n" +
+	"\x18MEMORY_IMPORT_CLASS_SKIP\x10\x02\x12 \n" +
+	"\x1cMEMORY_IMPORT_CLASS_CONFLICT\x10\x03\x12&\n" +
+	"\"MEMORY_IMPORT_CLASS_LABEL_CONFLICT\x10\x04\x12 \n" +
+	"\x1cMEMORY_IMPORT_CLASS_REJECTED\x10\x05*\xeb\x01\n" +
+	"\x12MemoryImportChoice\x12$\n" +
+	" MEMORY_IMPORT_CHOICE_UNSPECIFIED\x10\x00\x12#\n" +
+	"\x1fMEMORY_IMPORT_CHOICE_KEEP_LOCAL\x10\x01\x12&\n" +
+	"\"MEMORY_IMPORT_CHOICE_TAKE_IMPORTED\x10\x02\x12\"\n" +
+	"\x1eMEMORY_IMPORT_CHOICE_KEEP_BOTH\x10\x03\x12\x1d\n" +
+	"\x19MEMORY_IMPORT_CHOICE_SKIP\x10\x04\x12\x1f\n" +
+	"\x1bMEMORY_IMPORT_CHOICE_RENAME\x10\x052\xa5\a\n" +
 	"\rMemoryService\x12X\n" +
 	"\vListEntries\x12#.fugue.memory.v1.ListEntriesRequest\x1a$.fugue.memory.v1.ListEntriesResponse\x12^\n" +
 	"\rSearchEntries\x12%.fugue.memory.v1.SearchEntriesRequest\x1a&.fugue.memory.v1.SearchEntriesResponse\x12O\n" +
@@ -2163,7 +2840,10 @@ const file_fugue_memory_v1_memory_proto_rawDesc = "" +
 	"\n" +
 	"WriteEntry\x12\".fugue.memory.v1.WriteEntryRequest\x1a#.fugue.memory.v1.WriteEntryResponse\x12X\n" +
 	"\vVerifyEntry\x12#.fugue.memory.v1.VerifyEntryRequest\x1a$.fugue.memory.v1.VerifyEntryResponse\x12[\n" +
-	"\fRestoreEntry\x12$.fugue.memory.v1.RestoreEntryRequest\x1a%.fugue.memory.v1.RestoreEntryResponseB\xbb\x01\n" +
+	"\fRestoreEntry\x12$.fugue.memory.v1.RestoreEntryRequest\x1a%.fugue.memory.v1.RestoreEntryResponse\x12[\n" +
+	"\fExportMemory\x12$.fugue.memory.v1.ExportMemoryRequest\x1a%.fugue.memory.v1.ExportMemoryResponse\x12^\n" +
+	"\rPreviewImport\x12%.fugue.memory.v1.PreviewImportRequest\x1a&.fugue.memory.v1.PreviewImportResponse\x12X\n" +
+	"\vApplyImport\x12#.fugue.memory.v1.ApplyImportRequest\x1a$.fugue.memory.v1.ApplyImportResponseB\xbb\x01\n" +
 	"\x13com.fugue.memory.v1B\vMemoryProtoP\x01Z9github.com/syurodev/fugue/pkg/pb/fugue/memory/v1;memoryv1\xa2\x02\x03FMX\xaa\x02\x0fFugue.Memory.V1\xca\x02\x0fFugue\\Memory\\V1\xe2\x02\x1bFugue\\Memory\\V1\\GPBMetadata\xea\x02\x11Fugue::Memory::V1b\x06proto3"
 
 var (
@@ -2178,8 +2858,8 @@ func file_fugue_memory_v1_memory_proto_rawDescGZIP() []byte {
 	return file_fugue_memory_v1_memory_proto_rawDescData
 }
 
-var file_fugue_memory_v1_memory_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_fugue_memory_v1_memory_proto_msgTypes = make([]protoimpl.MessageInfo, 21)
+var file_fugue_memory_v1_memory_proto_enumTypes = make([]protoimpl.EnumInfo, 8)
+var file_fugue_memory_v1_memory_proto_msgTypes = make([]protoimpl.MessageInfo, 29)
 var file_fugue_memory_v1_memory_proto_goTypes = []any{
 	(MemoryKind)(0),                 // 0: fugue.memory.v1.MemoryKind
 	(MemoryAuthor)(0),               // 1: fugue.memory.v1.MemoryAuthor
@@ -2187,84 +2867,109 @@ var file_fugue_memory_v1_memory_proto_goTypes = []any{
 	(MemoryFreshness)(0),            // 3: fugue.memory.v1.MemoryFreshness
 	(MemoryOperation)(0),            // 4: fugue.memory.v1.MemoryOperation
 	(WriteEntryOp)(0),               // 5: fugue.memory.v1.WriteEntryOp
-	(*MemoryAnchorInput)(nil),       // 6: fugue.memory.v1.MemoryAnchorInput
-	(*MemoryAnchor)(nil),            // 7: fugue.memory.v1.MemoryAnchor
-	(*MemoryAnchorStatus)(nil),      // 8: fugue.memory.v1.MemoryAnchorStatus
-	(*MemoryProvenance)(nil),        // 9: fugue.memory.v1.MemoryProvenance
-	(*MemoryEntry)(nil),             // 10: fugue.memory.v1.MemoryEntry
-	(*MemoryHistoryEntry)(nil),      // 11: fugue.memory.v1.MemoryHistoryEntry
-	(*MemorySearchResult)(nil),      // 12: fugue.memory.v1.MemorySearchResult
-	(*ListEntriesRequest)(nil),      // 13: fugue.memory.v1.ListEntriesRequest
-	(*ListEntriesResponse)(nil),     // 14: fugue.memory.v1.ListEntriesResponse
-	(*SearchEntriesRequest)(nil),    // 15: fugue.memory.v1.SearchEntriesRequest
-	(*SearchEntriesResponse)(nil),   // 16: fugue.memory.v1.SearchEntriesResponse
-	(*GetEntryRequest)(nil),         // 17: fugue.memory.v1.GetEntryRequest
-	(*GetEntryResponse)(nil),        // 18: fugue.memory.v1.GetEntryResponse
-	(*GetEntryHistoryRequest)(nil),  // 19: fugue.memory.v1.GetEntryHistoryRequest
-	(*GetEntryHistoryResponse)(nil), // 20: fugue.memory.v1.GetEntryHistoryResponse
-	(*WriteEntryRequest)(nil),       // 21: fugue.memory.v1.WriteEntryRequest
-	(*WriteEntryResponse)(nil),      // 22: fugue.memory.v1.WriteEntryResponse
-	(*VerifyEntryRequest)(nil),      // 23: fugue.memory.v1.VerifyEntryRequest
-	(*VerifyEntryResponse)(nil),     // 24: fugue.memory.v1.VerifyEntryResponse
-	(*RestoreEntryRequest)(nil),     // 25: fugue.memory.v1.RestoreEntryRequest
-	(*RestoreEntryResponse)(nil),    // 26: fugue.memory.v1.RestoreEntryResponse
-	(*timestamppb.Timestamp)(nil),   // 27: google.protobuf.Timestamp
+	(MemoryImportClass)(0),          // 6: fugue.memory.v1.MemoryImportClass
+	(MemoryImportChoice)(0),         // 7: fugue.memory.v1.MemoryImportChoice
+	(*MemoryAnchorInput)(nil),       // 8: fugue.memory.v1.MemoryAnchorInput
+	(*MemoryAnchor)(nil),            // 9: fugue.memory.v1.MemoryAnchor
+	(*MemoryAnchorStatus)(nil),      // 10: fugue.memory.v1.MemoryAnchorStatus
+	(*MemoryProvenance)(nil),        // 11: fugue.memory.v1.MemoryProvenance
+	(*MemoryEntry)(nil),             // 12: fugue.memory.v1.MemoryEntry
+	(*MemoryHistoryEntry)(nil),      // 13: fugue.memory.v1.MemoryHistoryEntry
+	(*MemorySearchResult)(nil),      // 14: fugue.memory.v1.MemorySearchResult
+	(*ListEntriesRequest)(nil),      // 15: fugue.memory.v1.ListEntriesRequest
+	(*ListEntriesResponse)(nil),     // 16: fugue.memory.v1.ListEntriesResponse
+	(*SearchEntriesRequest)(nil),    // 17: fugue.memory.v1.SearchEntriesRequest
+	(*SearchEntriesResponse)(nil),   // 18: fugue.memory.v1.SearchEntriesResponse
+	(*GetEntryRequest)(nil),         // 19: fugue.memory.v1.GetEntryRequest
+	(*GetEntryResponse)(nil),        // 20: fugue.memory.v1.GetEntryResponse
+	(*GetEntryHistoryRequest)(nil),  // 21: fugue.memory.v1.GetEntryHistoryRequest
+	(*GetEntryHistoryResponse)(nil), // 22: fugue.memory.v1.GetEntryHistoryResponse
+	(*WriteEntryRequest)(nil),       // 23: fugue.memory.v1.WriteEntryRequest
+	(*WriteEntryResponse)(nil),      // 24: fugue.memory.v1.WriteEntryResponse
+	(*VerifyEntryRequest)(nil),      // 25: fugue.memory.v1.VerifyEntryRequest
+	(*VerifyEntryResponse)(nil),     // 26: fugue.memory.v1.VerifyEntryResponse
+	(*RestoreEntryRequest)(nil),     // 27: fugue.memory.v1.RestoreEntryRequest
+	(*RestoreEntryResponse)(nil),    // 28: fugue.memory.v1.RestoreEntryResponse
+	(*ExportMemoryRequest)(nil),     // 29: fugue.memory.v1.ExportMemoryRequest
+	(*ExportMemoryResponse)(nil),    // 30: fugue.memory.v1.ExportMemoryResponse
+	(*MemoryImportPreviewItem)(nil), // 31: fugue.memory.v1.MemoryImportPreviewItem
+	(*PreviewImportRequest)(nil),    // 32: fugue.memory.v1.PreviewImportRequest
+	(*PreviewImportResponse)(nil),   // 33: fugue.memory.v1.PreviewImportResponse
+	(*MemoryImportItemChoice)(nil),  // 34: fugue.memory.v1.MemoryImportItemChoice
+	(*ApplyImportRequest)(nil),      // 35: fugue.memory.v1.ApplyImportRequest
+	(*ApplyImportResponse)(nil),     // 36: fugue.memory.v1.ApplyImportResponse
+	(*timestamppb.Timestamp)(nil),   // 37: google.protobuf.Timestamp
 }
 var file_fugue_memory_v1_memory_proto_depIdxs = []int32{
 	3,  // 0: fugue.memory.v1.MemoryAnchorStatus.freshness:type_name -> fugue.memory.v1.MemoryFreshness
 	0,  // 1: fugue.memory.v1.MemoryEntry.kind:type_name -> fugue.memory.v1.MemoryKind
-	7,  // 2: fugue.memory.v1.MemoryEntry.anchors:type_name -> fugue.memory.v1.MemoryAnchor
-	8,  // 3: fugue.memory.v1.MemoryEntry.anchor_statuses:type_name -> fugue.memory.v1.MemoryAnchorStatus
+	9,  // 2: fugue.memory.v1.MemoryEntry.anchors:type_name -> fugue.memory.v1.MemoryAnchor
+	10, // 3: fugue.memory.v1.MemoryEntry.anchor_statuses:type_name -> fugue.memory.v1.MemoryAnchorStatus
 	1,  // 4: fugue.memory.v1.MemoryEntry.author:type_name -> fugue.memory.v1.MemoryAuthor
 	2,  // 5: fugue.memory.v1.MemoryEntry.validity:type_name -> fugue.memory.v1.MemoryValidity
-	9,  // 6: fugue.memory.v1.MemoryEntry.provenance:type_name -> fugue.memory.v1.MemoryProvenance
-	27, // 7: fugue.memory.v1.MemoryEntry.updated_at:type_name -> google.protobuf.Timestamp
+	11, // 6: fugue.memory.v1.MemoryEntry.provenance:type_name -> fugue.memory.v1.MemoryProvenance
+	37, // 7: fugue.memory.v1.MemoryEntry.updated_at:type_name -> google.protobuf.Timestamp
 	3,  // 8: fugue.memory.v1.MemoryEntry.freshness:type_name -> fugue.memory.v1.MemoryFreshness
 	4,  // 9: fugue.memory.v1.MemoryHistoryEntry.op:type_name -> fugue.memory.v1.MemoryOperation
 	0,  // 10: fugue.memory.v1.MemoryHistoryEntry.kind:type_name -> fugue.memory.v1.MemoryKind
-	7,  // 11: fugue.memory.v1.MemoryHistoryEntry.anchors:type_name -> fugue.memory.v1.MemoryAnchor
+	9,  // 11: fugue.memory.v1.MemoryHistoryEntry.anchors:type_name -> fugue.memory.v1.MemoryAnchor
 	1,  // 12: fugue.memory.v1.MemoryHistoryEntry.author:type_name -> fugue.memory.v1.MemoryAuthor
 	2,  // 13: fugue.memory.v1.MemoryHistoryEntry.validity:type_name -> fugue.memory.v1.MemoryValidity
-	9,  // 14: fugue.memory.v1.MemoryHistoryEntry.provenance:type_name -> fugue.memory.v1.MemoryProvenance
-	27, // 15: fugue.memory.v1.MemoryHistoryEntry.written_at:type_name -> google.protobuf.Timestamp
+	11, // 14: fugue.memory.v1.MemoryHistoryEntry.provenance:type_name -> fugue.memory.v1.MemoryProvenance
+	37, // 15: fugue.memory.v1.MemoryHistoryEntry.written_at:type_name -> google.protobuf.Timestamp
 	0,  // 16: fugue.memory.v1.MemorySearchResult.kind:type_name -> fugue.memory.v1.MemoryKind
 	1,  // 17: fugue.memory.v1.MemorySearchResult.author:type_name -> fugue.memory.v1.MemoryAuthor
 	3,  // 18: fugue.memory.v1.MemorySearchResult.freshness:type_name -> fugue.memory.v1.MemoryFreshness
 	0,  // 19: fugue.memory.v1.ListEntriesRequest.kind:type_name -> fugue.memory.v1.MemoryKind
 	1,  // 20: fugue.memory.v1.ListEntriesRequest.author:type_name -> fugue.memory.v1.MemoryAuthor
 	2,  // 21: fugue.memory.v1.ListEntriesRequest.validity:type_name -> fugue.memory.v1.MemoryValidity
-	10, // 22: fugue.memory.v1.ListEntriesResponse.entries:type_name -> fugue.memory.v1.MemoryEntry
+	12, // 22: fugue.memory.v1.ListEntriesResponse.entries:type_name -> fugue.memory.v1.MemoryEntry
 	0,  // 23: fugue.memory.v1.SearchEntriesRequest.kind:type_name -> fugue.memory.v1.MemoryKind
 	1,  // 24: fugue.memory.v1.SearchEntriesRequest.author:type_name -> fugue.memory.v1.MemoryAuthor
 	2,  // 25: fugue.memory.v1.SearchEntriesRequest.validity:type_name -> fugue.memory.v1.MemoryValidity
-	12, // 26: fugue.memory.v1.SearchEntriesResponse.results:type_name -> fugue.memory.v1.MemorySearchResult
-	10, // 27: fugue.memory.v1.GetEntryResponse.entry:type_name -> fugue.memory.v1.MemoryEntry
-	11, // 28: fugue.memory.v1.GetEntryHistoryResponse.history:type_name -> fugue.memory.v1.MemoryHistoryEntry
+	14, // 26: fugue.memory.v1.SearchEntriesResponse.results:type_name -> fugue.memory.v1.MemorySearchResult
+	12, // 27: fugue.memory.v1.GetEntryResponse.entry:type_name -> fugue.memory.v1.MemoryEntry
+	13, // 28: fugue.memory.v1.GetEntryHistoryResponse.history:type_name -> fugue.memory.v1.MemoryHistoryEntry
 	5,  // 29: fugue.memory.v1.WriteEntryRequest.op:type_name -> fugue.memory.v1.WriteEntryOp
 	0,  // 30: fugue.memory.v1.WriteEntryRequest.kind:type_name -> fugue.memory.v1.MemoryKind
-	6,  // 31: fugue.memory.v1.WriteEntryRequest.anchors:type_name -> fugue.memory.v1.MemoryAnchorInput
-	10, // 32: fugue.memory.v1.WriteEntryResponse.entry:type_name -> fugue.memory.v1.MemoryEntry
-	10, // 33: fugue.memory.v1.VerifyEntryResponse.entry:type_name -> fugue.memory.v1.MemoryEntry
-	10, // 34: fugue.memory.v1.RestoreEntryResponse.entry:type_name -> fugue.memory.v1.MemoryEntry
-	13, // 35: fugue.memory.v1.MemoryService.ListEntries:input_type -> fugue.memory.v1.ListEntriesRequest
-	15, // 36: fugue.memory.v1.MemoryService.SearchEntries:input_type -> fugue.memory.v1.SearchEntriesRequest
-	17, // 37: fugue.memory.v1.MemoryService.GetEntry:input_type -> fugue.memory.v1.GetEntryRequest
-	19, // 38: fugue.memory.v1.MemoryService.GetEntryHistory:input_type -> fugue.memory.v1.GetEntryHistoryRequest
-	21, // 39: fugue.memory.v1.MemoryService.WriteEntry:input_type -> fugue.memory.v1.WriteEntryRequest
-	23, // 40: fugue.memory.v1.MemoryService.VerifyEntry:input_type -> fugue.memory.v1.VerifyEntryRequest
-	25, // 41: fugue.memory.v1.MemoryService.RestoreEntry:input_type -> fugue.memory.v1.RestoreEntryRequest
-	14, // 42: fugue.memory.v1.MemoryService.ListEntries:output_type -> fugue.memory.v1.ListEntriesResponse
-	16, // 43: fugue.memory.v1.MemoryService.SearchEntries:output_type -> fugue.memory.v1.SearchEntriesResponse
-	18, // 44: fugue.memory.v1.MemoryService.GetEntry:output_type -> fugue.memory.v1.GetEntryResponse
-	20, // 45: fugue.memory.v1.MemoryService.GetEntryHistory:output_type -> fugue.memory.v1.GetEntryHistoryResponse
-	22, // 46: fugue.memory.v1.MemoryService.WriteEntry:output_type -> fugue.memory.v1.WriteEntryResponse
-	24, // 47: fugue.memory.v1.MemoryService.VerifyEntry:output_type -> fugue.memory.v1.VerifyEntryResponse
-	26, // 48: fugue.memory.v1.MemoryService.RestoreEntry:output_type -> fugue.memory.v1.RestoreEntryResponse
-	42, // [42:49] is the sub-list for method output_type
-	35, // [35:42] is the sub-list for method input_type
-	35, // [35:35] is the sub-list for extension type_name
-	35, // [35:35] is the sub-list for extension extendee
-	0,  // [0:35] is the sub-list for field type_name
+	8,  // 31: fugue.memory.v1.WriteEntryRequest.anchors:type_name -> fugue.memory.v1.MemoryAnchorInput
+	12, // 32: fugue.memory.v1.WriteEntryResponse.entry:type_name -> fugue.memory.v1.MemoryEntry
+	12, // 33: fugue.memory.v1.VerifyEntryResponse.entry:type_name -> fugue.memory.v1.MemoryEntry
+	12, // 34: fugue.memory.v1.RestoreEntryResponse.entry:type_name -> fugue.memory.v1.MemoryEntry
+	6,  // 35: fugue.memory.v1.MemoryImportPreviewItem.item_class:type_name -> fugue.memory.v1.MemoryImportClass
+	7,  // 36: fugue.memory.v1.MemoryImportPreviewItem.default_choice:type_name -> fugue.memory.v1.MemoryImportChoice
+	12, // 37: fugue.memory.v1.MemoryImportPreviewItem.local:type_name -> fugue.memory.v1.MemoryEntry
+	12, // 38: fugue.memory.v1.MemoryImportPreviewItem.imported:type_name -> fugue.memory.v1.MemoryEntry
+	37, // 39: fugue.memory.v1.PreviewImportResponse.exported_at:type_name -> google.protobuf.Timestamp
+	31, // 40: fugue.memory.v1.PreviewImportResponse.items:type_name -> fugue.memory.v1.MemoryImportPreviewItem
+	7,  // 41: fugue.memory.v1.MemoryImportItemChoice.choice:type_name -> fugue.memory.v1.MemoryImportChoice
+	34, // 42: fugue.memory.v1.ApplyImportRequest.choices:type_name -> fugue.memory.v1.MemoryImportItemChoice
+	12, // 43: fugue.memory.v1.ApplyImportResponse.written:type_name -> fugue.memory.v1.MemoryEntry
+	15, // 44: fugue.memory.v1.MemoryService.ListEntries:input_type -> fugue.memory.v1.ListEntriesRequest
+	17, // 45: fugue.memory.v1.MemoryService.SearchEntries:input_type -> fugue.memory.v1.SearchEntriesRequest
+	19, // 46: fugue.memory.v1.MemoryService.GetEntry:input_type -> fugue.memory.v1.GetEntryRequest
+	21, // 47: fugue.memory.v1.MemoryService.GetEntryHistory:input_type -> fugue.memory.v1.GetEntryHistoryRequest
+	23, // 48: fugue.memory.v1.MemoryService.WriteEntry:input_type -> fugue.memory.v1.WriteEntryRequest
+	25, // 49: fugue.memory.v1.MemoryService.VerifyEntry:input_type -> fugue.memory.v1.VerifyEntryRequest
+	27, // 50: fugue.memory.v1.MemoryService.RestoreEntry:input_type -> fugue.memory.v1.RestoreEntryRequest
+	29, // 51: fugue.memory.v1.MemoryService.ExportMemory:input_type -> fugue.memory.v1.ExportMemoryRequest
+	32, // 52: fugue.memory.v1.MemoryService.PreviewImport:input_type -> fugue.memory.v1.PreviewImportRequest
+	35, // 53: fugue.memory.v1.MemoryService.ApplyImport:input_type -> fugue.memory.v1.ApplyImportRequest
+	16, // 54: fugue.memory.v1.MemoryService.ListEntries:output_type -> fugue.memory.v1.ListEntriesResponse
+	18, // 55: fugue.memory.v1.MemoryService.SearchEntries:output_type -> fugue.memory.v1.SearchEntriesResponse
+	20, // 56: fugue.memory.v1.MemoryService.GetEntry:output_type -> fugue.memory.v1.GetEntryResponse
+	22, // 57: fugue.memory.v1.MemoryService.GetEntryHistory:output_type -> fugue.memory.v1.GetEntryHistoryResponse
+	24, // 58: fugue.memory.v1.MemoryService.WriteEntry:output_type -> fugue.memory.v1.WriteEntryResponse
+	26, // 59: fugue.memory.v1.MemoryService.VerifyEntry:output_type -> fugue.memory.v1.VerifyEntryResponse
+	28, // 60: fugue.memory.v1.MemoryService.RestoreEntry:output_type -> fugue.memory.v1.RestoreEntryResponse
+	30, // 61: fugue.memory.v1.MemoryService.ExportMemory:output_type -> fugue.memory.v1.ExportMemoryResponse
+	33, // 62: fugue.memory.v1.MemoryService.PreviewImport:output_type -> fugue.memory.v1.PreviewImportResponse
+	36, // 63: fugue.memory.v1.MemoryService.ApplyImport:output_type -> fugue.memory.v1.ApplyImportResponse
+	54, // [54:64] is the sub-list for method output_type
+	44, // [44:54] is the sub-list for method input_type
+	44, // [44:44] is the sub-list for extension type_name
+	44, // [44:44] is the sub-list for extension extendee
+	0,  // [0:44] is the sub-list for field type_name
 }
 
 func init() { file_fugue_memory_v1_memory_proto_init() }
@@ -2279,8 +2984,8 @@ func file_fugue_memory_v1_memory_proto_init() {
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fugue_memory_v1_memory_proto_rawDesc), len(file_fugue_memory_v1_memory_proto_rawDesc)),
-			NumEnums:      6,
-			NumMessages:   21,
+			NumEnums:      8,
+			NumMessages:   29,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

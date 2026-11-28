@@ -106,6 +106,7 @@ func initWorkspaceMemory(hp *HostProcess, store *storage.Store, deps *HostDeps, 
 		return fmt.Errorf("create workspace memory store: %w", err)
 	}
 	hp.rt.memory = memStore
+	hp.rt.memoryService = newMemoryService(memStore, workspaces, deps.Clock, deps.IDs)
 	return nil
 }
 
@@ -123,8 +124,8 @@ func (rt *HostRuntime) MemoryStore() (*workspacememory.Store, error) {
 
 // MemoryService returns the Host API application service for workspace memory.
 func (rt *HostRuntime) MemoryService() (*MemoryService, error) {
-	if rt.memory == nil {
+	if rt.memoryService == nil {
 		return nil, errcode.New(errcode.Unavailable, "the workspace memory service is unavailable")
 	}
-	return &MemoryService{store: rt.memory}, nil
+	return rt.memoryService, nil
 }

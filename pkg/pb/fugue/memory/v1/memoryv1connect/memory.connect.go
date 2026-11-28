@@ -53,6 +53,15 @@ const (
 	// MemoryServiceRestoreEntryProcedure is the fully-qualified name of the MemoryService's
 	// RestoreEntry RPC.
 	MemoryServiceRestoreEntryProcedure = "/fugue.memory.v1.MemoryService/RestoreEntry"
+	// MemoryServiceExportMemoryProcedure is the fully-qualified name of the MemoryService's
+	// ExportMemory RPC.
+	MemoryServiceExportMemoryProcedure = "/fugue.memory.v1.MemoryService/ExportMemory"
+	// MemoryServicePreviewImportProcedure is the fully-qualified name of the MemoryService's
+	// PreviewImport RPC.
+	MemoryServicePreviewImportProcedure = "/fugue.memory.v1.MemoryService/PreviewImport"
+	// MemoryServiceApplyImportProcedure is the fully-qualified name of the MemoryService's ApplyImport
+	// RPC.
+	MemoryServiceApplyImportProcedure = "/fugue.memory.v1.MemoryService/ApplyImport"
 )
 
 // MemoryServiceClient is a client for the fugue.memory.v1.MemoryService service.
@@ -64,6 +73,9 @@ type MemoryServiceClient interface {
 	WriteEntry(context.Context, *connect.Request[v1.WriteEntryRequest]) (*connect.Response[v1.WriteEntryResponse], error)
 	VerifyEntry(context.Context, *connect.Request[v1.VerifyEntryRequest]) (*connect.Response[v1.VerifyEntryResponse], error)
 	RestoreEntry(context.Context, *connect.Request[v1.RestoreEntryRequest]) (*connect.Response[v1.RestoreEntryResponse], error)
+	ExportMemory(context.Context, *connect.Request[v1.ExportMemoryRequest]) (*connect.Response[v1.ExportMemoryResponse], error)
+	PreviewImport(context.Context, *connect.Request[v1.PreviewImportRequest]) (*connect.Response[v1.PreviewImportResponse], error)
+	ApplyImport(context.Context, *connect.Request[v1.ApplyImportRequest]) (*connect.Response[v1.ApplyImportResponse], error)
 }
 
 // NewMemoryServiceClient constructs a client for the fugue.memory.v1.MemoryService service. By
@@ -119,6 +131,24 @@ func NewMemoryServiceClient(httpClient connect.HTTPClient, baseURL string, opts 
 			connect.WithSchema(memoryServiceMethods.ByName("RestoreEntry")),
 			connect.WithClientOptions(opts...),
 		),
+		exportMemory: connect.NewClient[v1.ExportMemoryRequest, v1.ExportMemoryResponse](
+			httpClient,
+			baseURL+MemoryServiceExportMemoryProcedure,
+			connect.WithSchema(memoryServiceMethods.ByName("ExportMemory")),
+			connect.WithClientOptions(opts...),
+		),
+		previewImport: connect.NewClient[v1.PreviewImportRequest, v1.PreviewImportResponse](
+			httpClient,
+			baseURL+MemoryServicePreviewImportProcedure,
+			connect.WithSchema(memoryServiceMethods.ByName("PreviewImport")),
+			connect.WithClientOptions(opts...),
+		),
+		applyImport: connect.NewClient[v1.ApplyImportRequest, v1.ApplyImportResponse](
+			httpClient,
+			baseURL+MemoryServiceApplyImportProcedure,
+			connect.WithSchema(memoryServiceMethods.ByName("ApplyImport")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
@@ -131,6 +161,9 @@ type memoryServiceClient struct {
 	writeEntry      *connect.Client[v1.WriteEntryRequest, v1.WriteEntryResponse]
 	verifyEntry     *connect.Client[v1.VerifyEntryRequest, v1.VerifyEntryResponse]
 	restoreEntry    *connect.Client[v1.RestoreEntryRequest, v1.RestoreEntryResponse]
+	exportMemory    *connect.Client[v1.ExportMemoryRequest, v1.ExportMemoryResponse]
+	previewImport   *connect.Client[v1.PreviewImportRequest, v1.PreviewImportResponse]
+	applyImport     *connect.Client[v1.ApplyImportRequest, v1.ApplyImportResponse]
 }
 
 // ListEntries calls fugue.memory.v1.MemoryService.ListEntries.
@@ -168,6 +201,21 @@ func (c *memoryServiceClient) RestoreEntry(ctx context.Context, req *connect.Req
 	return c.restoreEntry.CallUnary(ctx, req)
 }
 
+// ExportMemory calls fugue.memory.v1.MemoryService.ExportMemory.
+func (c *memoryServiceClient) ExportMemory(ctx context.Context, req *connect.Request[v1.ExportMemoryRequest]) (*connect.Response[v1.ExportMemoryResponse], error) {
+	return c.exportMemory.CallUnary(ctx, req)
+}
+
+// PreviewImport calls fugue.memory.v1.MemoryService.PreviewImport.
+func (c *memoryServiceClient) PreviewImport(ctx context.Context, req *connect.Request[v1.PreviewImportRequest]) (*connect.Response[v1.PreviewImportResponse], error) {
+	return c.previewImport.CallUnary(ctx, req)
+}
+
+// ApplyImport calls fugue.memory.v1.MemoryService.ApplyImport.
+func (c *memoryServiceClient) ApplyImport(ctx context.Context, req *connect.Request[v1.ApplyImportRequest]) (*connect.Response[v1.ApplyImportResponse], error) {
+	return c.applyImport.CallUnary(ctx, req)
+}
+
 // MemoryServiceHandler is an implementation of the fugue.memory.v1.MemoryService service.
 type MemoryServiceHandler interface {
 	ListEntries(context.Context, *connect.Request[v1.ListEntriesRequest]) (*connect.Response[v1.ListEntriesResponse], error)
@@ -177,6 +225,9 @@ type MemoryServiceHandler interface {
 	WriteEntry(context.Context, *connect.Request[v1.WriteEntryRequest]) (*connect.Response[v1.WriteEntryResponse], error)
 	VerifyEntry(context.Context, *connect.Request[v1.VerifyEntryRequest]) (*connect.Response[v1.VerifyEntryResponse], error)
 	RestoreEntry(context.Context, *connect.Request[v1.RestoreEntryRequest]) (*connect.Response[v1.RestoreEntryResponse], error)
+	ExportMemory(context.Context, *connect.Request[v1.ExportMemoryRequest]) (*connect.Response[v1.ExportMemoryResponse], error)
+	PreviewImport(context.Context, *connect.Request[v1.PreviewImportRequest]) (*connect.Response[v1.PreviewImportResponse], error)
+	ApplyImport(context.Context, *connect.Request[v1.ApplyImportRequest]) (*connect.Response[v1.ApplyImportResponse], error)
 }
 
 // NewMemoryServiceHandler builds an HTTP handler from the service implementation. It returns the
@@ -228,6 +279,24 @@ func NewMemoryServiceHandler(svc MemoryServiceHandler, opts ...connect.HandlerOp
 		connect.WithSchema(memoryServiceMethods.ByName("RestoreEntry")),
 		connect.WithHandlerOptions(opts...),
 	)
+	memoryServiceExportMemoryHandler := connect.NewUnaryHandler(
+		MemoryServiceExportMemoryProcedure,
+		svc.ExportMemory,
+		connect.WithSchema(memoryServiceMethods.ByName("ExportMemory")),
+		connect.WithHandlerOptions(opts...),
+	)
+	memoryServicePreviewImportHandler := connect.NewUnaryHandler(
+		MemoryServicePreviewImportProcedure,
+		svc.PreviewImport,
+		connect.WithSchema(memoryServiceMethods.ByName("PreviewImport")),
+		connect.WithHandlerOptions(opts...),
+	)
+	memoryServiceApplyImportHandler := connect.NewUnaryHandler(
+		MemoryServiceApplyImportProcedure,
+		svc.ApplyImport,
+		connect.WithSchema(memoryServiceMethods.ByName("ApplyImport")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/fugue.memory.v1.MemoryService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case MemoryServiceListEntriesProcedure:
@@ -244,6 +313,12 @@ func NewMemoryServiceHandler(svc MemoryServiceHandler, opts ...connect.HandlerOp
 			memoryServiceVerifyEntryHandler.ServeHTTP(w, r)
 		case MemoryServiceRestoreEntryProcedure:
 			memoryServiceRestoreEntryHandler.ServeHTTP(w, r)
+		case MemoryServiceExportMemoryProcedure:
+			memoryServiceExportMemoryHandler.ServeHTTP(w, r)
+		case MemoryServicePreviewImportProcedure:
+			memoryServicePreviewImportHandler.ServeHTTP(w, r)
+		case MemoryServiceApplyImportProcedure:
+			memoryServiceApplyImportHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -279,4 +354,16 @@ func (UnimplementedMemoryServiceHandler) VerifyEntry(context.Context, *connect.R
 
 func (UnimplementedMemoryServiceHandler) RestoreEntry(context.Context, *connect.Request[v1.RestoreEntryRequest]) (*connect.Response[v1.RestoreEntryResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.memory.v1.MemoryService.RestoreEntry is not implemented"))
+}
+
+func (UnimplementedMemoryServiceHandler) ExportMemory(context.Context, *connect.Request[v1.ExportMemoryRequest]) (*connect.Response[v1.ExportMemoryResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.memory.v1.MemoryService.ExportMemory is not implemented"))
+}
+
+func (UnimplementedMemoryServiceHandler) PreviewImport(context.Context, *connect.Request[v1.PreviewImportRequest]) (*connect.Response[v1.PreviewImportResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.memory.v1.MemoryService.PreviewImport is not implemented"))
+}
+
+func (UnimplementedMemoryServiceHandler) ApplyImport(context.Context, *connect.Request[v1.ApplyImportRequest]) (*connect.Response[v1.ApplyImportResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("fugue.memory.v1.MemoryService.ApplyImport is not implemented"))
 }
