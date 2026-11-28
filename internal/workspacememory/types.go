@@ -7,9 +7,10 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 )
 
-// Entry kinds (§2).
+// Kind classifies a workspace memory entry (§2).
 type Kind string
 
+// Valid workspace memory entry kinds (§2).
 const (
 	KindPinned     Kind = "pinned"
 	KindFact       Kind = "fact"
@@ -22,6 +23,7 @@ const (
 // Author identifies whether a write came from a user or an agent (§2, WM-03).
 type Author string
 
+// Valid workspace memory entry authors.
 const (
 	AuthorUser  Author = "user"
 	AuthorAgent Author = "agent"
@@ -30,6 +32,7 @@ const (
 // Validity identifies the lifecycle status of a workspace memory entry (§2).
 type Validity string
 
+// Valid workspace memory entry validity states.
 const (
 	ValidityValid      Validity = "valid"
 	ValiditySuperseded Validity = "superseded"
@@ -39,6 +42,7 @@ const (
 // Freshness reports anchor verification state computed on read (§2).
 type Freshness string
 
+// Possible anchor freshness states evaluated on read.
 const (
 	FreshnessFresh   Freshness = "fresh"
 	FreshnessStale   Freshness = "stale"
@@ -48,6 +52,7 @@ const (
 // Operation names the write operation recorded in history and events (§3).
 type Operation string
 
+// Write operations recorded in workspace_memory_history and MemoryEntryWritten events.
 const (
 	OpAdd        Operation = "add"
 	OpUpdate     Operation = "update"
@@ -58,17 +63,17 @@ const (
 
 // Field and rate limits (§2, §3).
 const (
-	MaxLabelRunes              = 128
-	MaxSummaryRunes            = 200
-	MaxBodyBytes               = 8 * 1024
-	MaxPinnedBodyBytes         = 2 * 1024
-	MaxKeywords                = 20
-	MaxKeywordRunes            = 40
-	DefaultWritesPerSessionHr  = 60
-	DefaultMaxValidEntries     = 2000
-	DefaultLanguageMinWords    = 6
-	DefaultLanguageMaxNonEn    = 0.60
-	EventMemoryEntryWritten    = "MemoryEntryWritten"
+	MaxLabelRunes             = 128
+	MaxSummaryRunes           = 200
+	MaxBodyBytes              = 8 * 1024
+	MaxPinnedBodyBytes        = 2 * 1024
+	MaxKeywords               = 20
+	MaxKeywordRunes           = 40
+	DefaultWritesPerSessionHr = 60
+	DefaultMaxValidEntries    = 2000
+	DefaultLanguageMinWords   = 6
+	DefaultLanguageMaxNonEn   = 0.60
+	EventMemoryEntryWritten   = "MemoryEntryWritten"
 )
 
 // Config configures rate, capacity, and language check thresholds.

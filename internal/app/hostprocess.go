@@ -179,6 +179,9 @@ func initHostTopics(hp *HostProcess, store *storage.Store, deps *HostDeps) error
 	if aerr := initAppState(hp, store, deps); aerr != nil {
 		return aerr
 	}
+	if merr := initWorkspaceMemory(hp, store, deps, domain); merr != nil {
+		return merr
+	}
 	hp.rt.hostResources = resolveHostResources(deps.HostResources)
 	hp.rt.heavy = newHeavySemaphore(hp.rt.hostResources, globalHostConfigReader(workspaces), deps.Clock, nil, hp.rt.goTask)
 	return nil

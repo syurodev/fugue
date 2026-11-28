@@ -13,6 +13,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/supervise"
 	"github.com/syurodev/fugue/internal/storage"
+	"github.com/syurodev/fugue/internal/workspacememory"
 )
 
 // ClientKind says what kind of client owns a lease (host-api §8). It is
@@ -135,6 +136,7 @@ type HostRuntime struct {
 	interactions    *InteractionService
 	workspaces      *WorkspaceService
 	appStates       *StateService
+	memory          *workspacememory.Store
 	tasksService    *TasksService
 	teamChannels    *teamChannelTopics
 	vendors         *VendorService

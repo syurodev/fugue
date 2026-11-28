@@ -20,6 +20,15 @@ import (
 	"github.com/syurodev/fugue/internal/storage"
 )
 
+const (
+	testWSID         = "ws-1"
+	testAuthLabel    = "auth-architecture"
+	testAppPrincipal = "app"
+	testUniqueLabel  = "unique-label"
+	testRateSession  = "sess-rate"
+	testMainRoot     = "main"
+)
+
 type fakeSecretScanner struct {
 	tokens map[string]string
 }
@@ -64,7 +73,11 @@ func (r *fakeAnchorReader) deleteRoot(root string) {
 	delete(r.files, root)
 }
 
-func (r *fakeAnchorReader) ReadAnchor(_ context.Context, _ string, rootName, relPath string) ([]byte, error) {
+func (r *fakeAnchorReader) ReadAnchor(
+	_ context.Context,
+	_ string,
+	rootName, relPath string,
+) ([]byte, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	root, ok := r.files[rootName]
@@ -120,8 +133,8 @@ func newTestEnv(t *testing.T, cfg Config) *testEnv {
 			t.Errorf("db.Close: %v", cerr)
 		}
 	})
-	if err := storage.Migrate(ctx, db, clk); err != nil {
-		t.Fatalf("storage.Migrate: %v", err)
+	if migErr := storage.Migrate(ctx, db, clk); migErr != nil {
+		t.Fatalf("storage.Migrate: %v", migErr)
 	}
 	gen := ids.NewSequence("mem")
 	scanner := &fakeSecretScanner{
@@ -152,10 +165,19 @@ func TestWME01WritesCASHistoryNoDelete(t *testing.T) {
 	ctx := t.Context()
 	env := newTestEnv(t, Config{})
 
-	created, err := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+	created := mustAddAuthEntry(t, ctx, env)
+	env.clk.Advance(time.Minute)
+	updated := mustUpdateAuthEntry(t, ctx, env, created.ID)
+	assertCASConflictReturnsCurrent(t, ctx, env, created.ID, &updated)
+	assertInvalidateAndHistory(t, ctx, env, created.ID)
+}
+
+func mustAddAuthEntry(t *testing.T, ctx context.Context, env *testEnv) Entry {
+	t.Helper()
+	created, err := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindDecision,
-		Label:       "auth-architecture",
+		Label:       testAuthLabel,
 		Summary:     "The host enforces authorization in Go services before dispatch.",
 		Body:        "The host validates permissions in Go services because clients cannot be trusted.",
 		Keywords:    []string{"auth", "host"},
@@ -168,19 +190,22 @@ func TestWME01WritesCASHistoryNoDelete(t *testing.T) {
 	if created.Revision != 1 || created.Validity != ValidityValid {
 		t.Fatalf("Add got revision=%d validity=%q, want 1 valid", created.Revision, created.Validity)
 	}
+	return created
+}
 
-	env.clk.Advance(time.Minute)
-	updated, err := env.store.Update(ctx, UpdateInput{
-		WorkspaceID:      "ws-1",
-		ID:               created.ID,
+func mustUpdateAuthEntry(t *testing.T, ctx context.Context, env *testEnv, id string) Entry {
+	t.Helper()
+	updated, err := env.store.Update(ctx, &UpdateInput{
+		WorkspaceID:      testWSID,
+		ID:               id,
 		ExpectedRevision: 1,
 		Kind:             KindDecision,
-		Label:            "auth-architecture",
+		Label:            testAuthLabel,
 		Summary:          "The host enforces authorization in Go services on every request.",
 		Body:             "The host validates permissions in Go services on every request before running tools.",
 		Keywords:         []string{"auth", "go"},
 		Author:           AuthorUser,
-		Provenance:       Provenance{Principal: "app"},
+		Provenance:       Provenance{Principal: testAppPrincipal},
 	})
 	if err != nil {
 		t.Fatalf("Update: %v", err)
@@ -188,14 +213,17 @@ func TestWME01WritesCASHistoryNoDelete(t *testing.T) {
 	if updated.Revision != 2 {
 		t.Fatalf("Update revision = %d, want 2", updated.Revision)
 	}
+	return updated
+}
 
-	// Stale revision must fail with memory.revision_conflict and carry current entry.
-	_, conflictErr := env.store.Update(ctx, UpdateInput{
-		WorkspaceID:      "ws-1",
-		ID:               created.ID,
+func assertCASConflictReturnsCurrent(t *testing.T, ctx context.Context, env *testEnv, id string, want *Entry) {
+	t.Helper()
+	_, conflictErr := env.store.Update(ctx, &UpdateInput{
+		WorkspaceID:      testWSID,
+		ID:               id,
 		ExpectedRevision: 1,
 		Kind:             KindDecision,
-		Label:            "auth-architecture",
+		Label:            testAuthLabel,
 		Summary:          "This stale update should fail with revision conflict.",
 		Body:             "This stale update should fail because revision 1 is no longer current.",
 		Author:           AuthorAgent,
@@ -207,14 +235,12 @@ func TestWME01WritesCASHistoryNoDelete(t *testing.T) {
 	if !errors.As(conflictErr, &revErr) {
 		t.Fatalf("stale Update error %T does not wrap *RevisionConflictError", conflictErr)
 	}
-	if diff := cmp.Diff(updated, revErr.CurrentEntry()); diff != "" {
+	if diff := cmp.Diff(*want, revErr.CurrentEntry()); diff != "" {
 		t.Fatalf("RevisionConflictError.CurrentEntry diff (-want +got):\n%s", diff)
 	}
-
-	// Invalidate with superseded_by and stale CAS check.
-	_, staleInvErr := env.store.Invalidate(ctx, InvalidateInput{
-		WorkspaceID:      "ws-1",
-		ID:               created.ID,
+	_, staleInvErr := env.store.Invalidate(ctx, &InvalidateInput{
+		WorkspaceID:      testWSID,
+		ID:               id,
 		ExpectedRevision: 1,
 		Reason:           "Replaced by a newer decision.",
 		Author:           AuthorUser,
@@ -222,9 +248,12 @@ func TestWME01WritesCASHistoryNoDelete(t *testing.T) {
 	if errcode.CodeOf(staleInvErr) != errcode.MemoryRevisionConflict {
 		t.Fatalf("stale Invalidate code = %q, want %q", errcode.CodeOf(staleInvErr), errcode.MemoryRevisionConflict)
 	}
+}
 
-	replacement, err := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+func assertInvalidateAndHistory(t *testing.T, ctx context.Context, env *testEnv, id string) {
+	t.Helper()
+	replacement, err := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindDecision,
 		Label:       "auth-v2",
 		Summary:     "New authorization decision replaces the previous version.",
@@ -234,11 +263,10 @@ func TestWME01WritesCASHistoryNoDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Add replacement: %v", err)
 	}
-
 	env.clk.Advance(time.Minute)
-	inv, err := env.store.Invalidate(ctx, InvalidateInput{
-		WorkspaceID:      "ws-1",
-		ID:               created.ID,
+	inv, err := env.store.Invalidate(ctx, &InvalidateInput{
+		WorkspaceID:      testWSID,
+		ID:               id,
 		ExpectedRevision: 2,
 		Reason:           "Superseded by auth-v2.",
 		SupersededBy:     replacement.ID,
@@ -250,28 +278,32 @@ func TestWME01WritesCASHistoryNoDelete(t *testing.T) {
 	if inv.Revision != 3 || inv.Validity != ValiditySuperseded || inv.SupersededBy != replacement.ID {
 		t.Fatalf("Invalidate got rev=%d validity=%q supersededBy=%q", inv.Revision, inv.Validity, inv.SupersededBy)
 	}
-
-	// No delete: entry remains readable by ID and history has one row per write.
-	fetched, err := env.store.GetByID(ctx, "ws-1", created.ID)
+	fetched, err := env.store.GetByID(ctx, testWSID, id)
 	if err != nil {
 		t.Fatalf("GetByID after invalidate: %v", err)
 	}
 	if fetched.Validity != ValiditySuperseded {
 		t.Fatalf("GetByID validity = %q, want superseded", fetched.Validity)
 	}
-	if _, labelErr := env.store.GetByLabel(ctx, "ws-1", "auth-architecture"); errcode.CodeOf(labelErr) != errcode.NotFound {
+	if _, labelErr := env.store.GetByLabel(ctx, testWSID, testAuthLabel); errcode.CodeOf(labelErr) != errcode.NotFound {
 		t.Fatalf("GetByLabel on superseded code = %q, want not_found", errcode.CodeOf(labelErr))
 	}
+	assertHistoryOps(t, ctx, env, id, []Operation{OpAdd, OpUpdate, OpInvalidate})
+}
 
-	hist, err := env.store.History(ctx, "ws-1", created.ID)
+func assertHistoryOps(t *testing.T, ctx context.Context, env *testEnv, id string, want []Operation) {
+	t.Helper()
+	hist, err := env.store.History(ctx, testWSID, id)
 	if err != nil {
 		t.Fatalf("History: %v", err)
 	}
-	if len(hist) != 3 {
-		t.Fatalf("History len = %d, want 3", len(hist))
+	if len(hist) != len(want) {
+		t.Fatalf("History len = %d, want %d", len(hist), len(want))
 	}
-	if hist[0].Op != OpAdd || hist[1].Op != OpUpdate || hist[2].Op != OpInvalidate {
-		t.Fatalf("History ops = [%s, %s, %s], want [add, update, invalidate]", hist[0].Op, hist[1].Op, hist[2].Op)
+	for i, w := range want {
+		if hist[i].Op != w {
+			t.Fatalf("History[%d].Op = %q, want %q", i, hist[i].Op, w)
+		}
 	}
 }
 
@@ -280,8 +312,8 @@ func TestWME02VerifiedRules(t *testing.T) {
 	ctx := t.Context()
 	env := newTestEnv(t, Config{})
 
-	userEntry, err := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+	userEntry, err := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindFact,
 		Label:       "user-fact",
 		Summary:     "The repository runs targeted tests through task commands.",
@@ -292,11 +324,11 @@ func TestWME02VerifiedRules(t *testing.T) {
 		t.Fatalf("user Add: %v", err)
 	}
 	if !userEntry.Verified {
-		t.Fatalf("user Add verified = false, want true")
+		t.Fatal("user Add verified = false, want true")
 	}
 
-	agentEntry, err := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+	agentEntry, err := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindNote,
 		Label:       "agent-note",
 		Summary:     "The build pipeline uses Taskfile targets for checks.",
@@ -307,35 +339,18 @@ func TestWME02VerifiedRules(t *testing.T) {
 		t.Fatalf("agent Add: %v", err)
 	}
 	if agentEntry.Verified {
-		t.Fatalf("agent Add verified = true, want false")
+		t.Fatal("agent Add verified = true, want false")
 	}
 
-	// Verify with wrong revision fails CAS.
-	if _, vErr := env.store.Verify(ctx, VerifyInput{
-		WorkspaceID:      "ws-1",
-		ID:               agentEntry.ID,
-		ExpectedRevision: 99,
-	}); errcode.CodeOf(vErr) != errcode.MemoryRevisionConflict {
-		t.Fatalf("stale Verify code = %q, want %q", errcode.CodeOf(vErr), errcode.MemoryRevisionConflict)
-	}
+	assertVerifyDemoteAndRestore(t, ctx, env, agentEntry.ID)
+}
 
-	verified, err := env.store.Verify(ctx, VerifyInput{
-		WorkspaceID:      "ws-1",
-		ID:               agentEntry.ID,
-		ExpectedRevision: 1,
-		Provenance:       Provenance{Principal: "app"},
-	})
-	if err != nil {
-		t.Fatalf("Verify: %v", err)
-	}
-	if !verified.Verified || verified.Revision != 2 || verified.Author != AuthorUser {
-		t.Fatalf("Verify got verified=%v rev=%d author=%q", verified.Verified, verified.Revision, verified.Author)
-	}
-
-	// Agent update of a verified entry flips verified back to false.
-	demoted, err := env.store.Update(ctx, UpdateInput{
-		WorkspaceID:      "ws-1",
-		ID:               agentEntry.ID,
+func assertVerifyDemoteAndRestore(t *testing.T, ctx context.Context, env *testEnv, entryID string) {
+	t.Helper()
+	assertVerifyCASAndPromote(t, ctx, env, entryID)
+	demoted, err := env.store.Update(ctx, &UpdateInput{
+		WorkspaceID:      testWSID,
+		ID:               entryID,
 		ExpectedRevision: 2,
 		Kind:             KindNote,
 		Label:            "agent-note",
@@ -349,14 +364,12 @@ func TestWME02VerifiedRules(t *testing.T) {
 	if demoted.Verified || demoted.Revision != 3 || demoted.Author != AuthorAgent {
 		t.Fatalf("agent Update got verified=%v rev=%d author=%q", demoted.Verified, demoted.Revision, demoted.Author)
 	}
-
-	// Restore counts as a user write and sets verified=true.
-	restored, err := env.store.Restore(ctx, RestoreInput{
-		WorkspaceID:      "ws-1",
-		ID:               agentEntry.ID,
+	restored, err := env.store.Restore(ctx, &RestoreInput{
+		WorkspaceID:      testWSID,
+		ID:               entryID,
 		RestoreRevision:  1,
 		ExpectedRevision: 3,
-		Provenance:       Provenance{Principal: "app"},
+		Provenance:       Provenance{Principal: testAppPrincipal},
 	})
 	if err != nil {
 		t.Fatalf("Restore: %v", err)
@@ -366,28 +379,56 @@ func TestWME02VerifiedRules(t *testing.T) {
 	}
 }
 
+func assertVerifyCASAndPromote(t *testing.T, ctx context.Context, env *testEnv, entryID string) {
+	t.Helper()
+	if _, vErr := env.store.Verify(ctx, &VerifyInput{
+		WorkspaceID:      testWSID,
+		ID:               entryID,
+		ExpectedRevision: 99,
+	}); errcode.CodeOf(vErr) != errcode.MemoryRevisionConflict {
+		t.Fatalf("stale Verify code = %q, want %q", errcode.CodeOf(vErr), errcode.MemoryRevisionConflict)
+	}
+	verified, err := env.store.Verify(ctx, &VerifyInput{
+		WorkspaceID:      testWSID,
+		ID:               entryID,
+		ExpectedRevision: 1,
+		Provenance:       Provenance{Principal: testAppPrincipal},
+	})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !verified.Verified || verified.Revision != 2 || verified.Author != AuthorUser {
+		t.Fatalf("Verify got verified=%v rev=%d author=%q", verified.Verified, verified.Revision, verified.Author)
+	}
+}
+
 func TestWME05WriteChecksAndNoSecretLeak(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
 	var logBuf bytes.Buffer
 	logger := slog.New(redact.NewTextHandler(&logBuf, slog.LevelDebug))
-
 	env := newTestEnv(t, Config{
 		MaxWritesPerSessionHour:     3,
 		MaxValidEntriesPerWorkspace: 4,
 		Logger:                      logger,
 	})
 
+	assertSecretRejection(t, ctx, env, &logBuf)
+	assertSizeAndLanguageChecks(t, ctx, env)
+	assertRateAndCapacityLimits(t, ctx, env)
+}
+
+func assertSecretRejection(t *testing.T, ctx context.Context, env *testEnv, logBuf *bytes.Buffer) {
+	t.Helper()
 	fakeGH := "gh" + "p_" + strings.Repeat("a1", 18)
 	fakeAWS := "AK" + "IA" + strings.Repeat("A1", 8)
 
-	// 1. Secret scan runs BEFORE size/language/label checks and never leaks secret value.
-	_, secErr := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+	_, secErr := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindPinned,
 		Label:       "secret-test",
-		Summary:     strings.Repeat("word ", 60), // also oversized
+		Summary:     strings.Repeat("word ", 60),
 		Body:        "Here is a token " + fakeGH + " embedded in oversized non-English text: Xin chào đây là tiếng Việt rất dài.",
 		Author:      AuthorAgent,
 	})
@@ -398,9 +439,8 @@ func TestWME05WriteChecksAndNoSecretLeak(t *testing.T) {
 		t.Fatal("secret value leaked into error or logs")
 	}
 
-	// Also ensure secret in keywords or invalid reason is rejected without leak.
-	_, kwSecErr := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+	_, kwSecErr := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindFact,
 		Label:       "kw-secret",
 		Summary:     "Valid summary for checking keyword secret scanning.",
@@ -417,10 +457,12 @@ func TestWME05WriteChecksAndNoSecretLeak(t *testing.T) {
 	if len(env.events.snapshot()) != 0 {
 		t.Fatalf("rejected writes emitted %d events, want 0", len(env.events.snapshot()))
 	}
+}
 
-	// 2. Size limits: summary > 200 runes, pinned body > 2 KiB, collection body > 8 KiB, >20 keywords.
-	_, bigSummaryErr := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+func assertSizeAndLanguageChecks(t *testing.T, ctx context.Context, env *testEnv) {
+	t.Helper()
+	_, bigSummaryErr := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindFact,
 		Label:       "big-summary",
 		Summary:     strings.Repeat("a", 201),
@@ -430,9 +472,8 @@ func TestWME05WriteChecksAndNoSecretLeak(t *testing.T) {
 	if errcode.CodeOf(bigSummaryErr) != errcode.MemoryTooLarge {
 		t.Fatalf("oversize summary code = %q, want %q", errcode.CodeOf(bigSummaryErr), errcode.MemoryTooLarge)
 	}
-
-	_, bigPinnedErr := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+	_, bigPinnedErr := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindPinned,
 		Label:       "big-pinned",
 		Summary:     "Pinned block summary.",
@@ -442,10 +483,8 @@ func TestWME05WriteChecksAndNoSecretLeak(t *testing.T) {
 	if errcode.CodeOf(bigPinnedErr) != errcode.MemoryTooLarge {
 		t.Fatalf("oversize pinned code = %q, want %q", errcode.CodeOf(bigPinnedErr), errcode.MemoryTooLarge)
 	}
-
-	// 3. C-08 language check.
-	_, langErr := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+	_, langErr := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindConvention,
 		Label:       "vn-only",
 		Summary:     "Quy ước đặt tên và cấu trúc thư mục cho toàn bộ dự án mới.",
@@ -455,24 +494,26 @@ func TestWME05WriteChecksAndNoSecretLeak(t *testing.T) {
 	if errcode.CodeOf(langErr) != errcode.MemoryLanguage {
 		t.Fatalf("language Add code = %q, want %q", errcode.CodeOf(langErr), errcode.MemoryLanguage)
 	}
+}
 
-	// 4. Label uniqueness among valid entries, plus 5. per-session rate limit & max valid entries.
-	first, err := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+func assertRateAndCapacityLimits(t *testing.T, ctx context.Context, env *testEnv) {
+	t.Helper()
+	first, err := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindFact,
-		Label:       "unique-label",
+		Label:       testUniqueLabel,
 		Summary:     "First valid entry with this label.",
 		Body:        "This entry describes the repository layout and test configuration.",
 		Author:      AuthorUser,
-		Provenance:  Provenance{SessionID: "sess-rate"},
+		Provenance:  Provenance{SessionID: testRateSession},
 	})
 	if err != nil {
 		t.Fatalf("first Add: %v", err)
 	}
-	_, dupErr := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+	_, dupErr := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindFact,
-		Label:       "unique-label",
+		Label:       testUniqueLabel,
 		Summary:     "Duplicate valid entry with the same label.",
 		Body:        "This entry should be rejected because another valid entry holds the label.",
 		Author:      AuthorUser,
@@ -480,51 +521,51 @@ func TestWME05WriteChecksAndNoSecretLeak(t *testing.T) {
 	if errcode.CodeOf(dupErr) != errcode.MemoryLabelTaken {
 		t.Fatalf("duplicate label code = %q, want %q", errcode.CodeOf(dupErr), errcode.MemoryLabelTaken)
 	}
+	fillRateAndCapacityWindow(t, ctx, env)
+	assertInvalidateFreesSlotAndEvents(t, ctx, env, &first)
+}
 
-	// Session rate limit is 3 writes/hour; first took 1, add 2 more then 4th must fail.
+func fillRateAndCapacityWindow(t *testing.T, ctx context.Context, env *testEnv) {
+	t.Helper()
 	for _, lbl := range []string{"rate-2", "rate-3"} {
-		if _, addErr := env.store.Add(ctx, AddInput{
-			WorkspaceID: "ws-1",
+		if _, addErr := env.store.Add(ctx, &AddInput{
+			WorkspaceID: testWSID,
 			Kind:        KindFact,
 			Label:       lbl,
 			Summary:     "Entry written inside the session rate window.",
 			Body:        "This entry counts toward the per-session hourly write budget.",
 			Author:      AuthorAgent,
-			Provenance:  Provenance{SessionID: "sess-rate"},
+			Provenance:  Provenance{SessionID: testRateSession},
 		}); addErr != nil {
 			t.Fatalf("Add %s: %v", lbl, addErr)
 		}
 	}
-	_, rateErr := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+	_, rateErr := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindFact,
 		Label:       "rate-4",
 		Summary:     "Fourth entry in the same hour should fail rate limit.",
 		Body:        "This write exceeds three writes within one hour for the session.",
 		Author:      AuthorAgent,
-		Provenance:  Provenance{SessionID: "sess-rate"},
+		Provenance:  Provenance{SessionID: testRateSession},
 	})
 	if errcode.CodeOf(rateErr) != errcode.MemoryRateLimited {
 		t.Fatalf("rate-limited Add code = %q, want %q", errcode.CodeOf(rateErr), errcode.MemoryRateLimited)
 	}
-
-	// Advance clock by > 1 hour: rate limit resets, so 4th valid entry succeeds (reaching workspace cap 4).
 	env.clk.Advance(61 * time.Minute)
-	if _, addErr := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+	if _, addErr := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindFact,
 		Label:       "cap-4",
 		Summary:     "Fourth valid entry after rate window expires.",
 		Body:        "This entry fills the workspace valid entry capacity of four.",
 		Author:      AuthorAgent,
-		Provenance:  Provenance{SessionID: "sess-rate"},
+		Provenance:  Provenance{SessionID: testRateSession},
 	}); addErr != nil {
 		t.Fatalf("Add cap-4 after clock advance: %v", addErr)
 	}
-
-	// 5th valid entry hits workspace capacity limit.
-	_, capErr := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+	_, capErr := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindFact,
 		Label:       "cap-5",
 		Summary:     "Fifth valid entry exceeds workspace capacity.",
@@ -534,10 +575,12 @@ func TestWME05WriteChecksAndNoSecretLeak(t *testing.T) {
 	if errcode.CodeOf(capErr) != errcode.MemoryLimitReached {
 		t.Fatalf("workspace limit Add code = %q, want %q", errcode.CodeOf(capErr), errcode.MemoryLimitReached)
 	}
+}
 
-	// Invalidating first frees both its label and one valid slot.
-	if _, invErr := env.store.Invalidate(ctx, InvalidateInput{
-		WorkspaceID:      "ws-1",
+func assertInvalidateFreesSlotAndEvents(t *testing.T, ctx context.Context, env *testEnv, first *Entry) {
+	t.Helper()
+	if _, invErr := env.store.Invalidate(ctx, &InvalidateInput{
+		WorkspaceID:      testWSID,
 		ID:               first.ID,
 		ExpectedRevision: first.Revision,
 		Reason:           "No longer needed.",
@@ -545,18 +588,16 @@ func TestWME05WriteChecksAndNoSecretLeak(t *testing.T) {
 	}); invErr != nil {
 		t.Fatalf("Invalidate first: %v", invErr)
 	}
-	if _, reuseErr := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+	if _, reuseErr := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindFact,
-		Label:       "unique-label",
+		Label:       testUniqueLabel,
 		Summary:     "Label reused after invalidation.",
 		Body:        "This entry reuses the freed label and valid capacity slot.",
 		Author:      AuthorUser,
 	}); reuseErr != nil {
 		t.Fatalf("Add reusing label after invalidate: %v", reuseErr)
 	}
-
-	// Verify emitted events contain NO content (summary/body) and NO secrets.
 	evs := env.events.snapshot()
 	if len(evs) == 0 {
 		t.Fatal("expected emitted MemoryEntryWritten events")
@@ -573,10 +614,11 @@ func TestWME07Freshness(t *testing.T) {
 	ctx := t.Context()
 	env := newTestEnv(t, Config{})
 
-	env.anchors.setFile("main", "docs/arch.md", []byte("version 1 of the architecture document"))
+	const rel = "docs/arch.md"
+	env.anchors.setFile(testMainRoot, rel, []byte("version 1 of the architecture document"))
 
-	noAnchor, err := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+	noAnchor, err := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindNote,
 		Label:       "no-anchor",
 		Summary:     "Entry without anchors reports unknown freshness.",
@@ -590,13 +632,13 @@ func TestWME07Freshness(t *testing.T) {
 		t.Fatalf("noAnchor freshness = %q, want unknown", noAnchor.Freshness)
 	}
 
-	anchored, err := env.store.Add(ctx, AddInput{
-		WorkspaceID: "ws-1",
+	anchored, err := env.store.Add(ctx, &AddInput{
+		WorkspaceID: testWSID,
 		Kind:        KindFact,
 		Label:       "with-anchor",
 		Summary:     "Entry anchored to docs/arch.md reports fresh initially.",
 		Body:        "This fact anchors docs/arch.md and tracks content hash changes.",
-		Anchors:     []AnchorInput{{RootName: "main", RelPath: "docs/arch.md"}},
+		Anchors:     []AnchorInput{{RootName: testMainRoot, RelPath: rel}},
 		Author:      AuthorAgent,
 	})
 	if err != nil {
@@ -606,17 +648,17 @@ func TestWME07Freshness(t *testing.T) {
 		t.Fatalf("anchored initial state = %+v", anchored)
 	}
 
-	// Edit the anchored file -> stale on GetByID, GetByLabel, and List.
-	env.anchors.setFile("main", "docs/arch.md", []byte("version 2 of the architecture document"))
-	gotByID, err := env.store.GetByID(ctx, "ws-1", anchored.ID)
-	if err != nil {
-		t.Fatalf("GetByID after edit: %v", err)
-	}
+	assertFreshnessTransitions(t, ctx, env, anchored.ID, rel)
+}
+
+func assertFreshnessTransitions(t *testing.T, ctx context.Context, env *testEnv, entryID, rel string) {
+	t.Helper()
+	env.anchors.setFile(testMainRoot, rel, []byte("version 2 of the architecture document"))
+	gotByID := mustGetByID(t, ctx, env, entryID)
 	if gotByID.Freshness != FreshnessStale || gotByID.Author != AuthorAgent || gotByID.Verified || gotByID.Revision != 1 {
 		t.Fatalf("GetByID after edit = freshness:%q author:%q verified:%v rev:%d", gotByID.Freshness, gotByID.Author, gotByID.Verified, gotByID.Revision)
 	}
-
-	gotByLabel, err := env.store.GetByLabel(ctx, "ws-1", "with-anchor")
+	gotByLabel, err := env.store.GetByLabel(ctx, testWSID, "with-anchor")
 	if err != nil {
 		t.Fatalf("GetByLabel after edit: %v", err)
 	}
@@ -624,9 +666,8 @@ func TestWME07Freshness(t *testing.T) {
 		t.Fatalf("GetByLabel freshness = %q, want stale", gotByLabel.Freshness)
 	}
 
-	// Restore file to original content -> fresh again; then delete root -> stale.
-	env.anchors.setFile("main", "docs/arch.md", []byte("version 1 of the architecture document"))
-	listed, err := env.store.List(ctx, ListFilter{WorkspaceID: "ws-1", Kind: KindFact})
+	env.anchors.setFile(testMainRoot, rel, []byte("version 1 of the architecture document"))
+	listed, err := env.store.List(ctx, ListFilter{WorkspaceID: testWSID, Kind: KindFact})
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -634,12 +675,22 @@ func TestWME07Freshness(t *testing.T) {
 		t.Fatalf("List after restore = %+v", listed)
 	}
 
-	env.anchors.deleteRoot("main")
-	missingRoot, err := env.store.GetByID(ctx, "ws-1", anchored.ID)
+	env.anchors.deleteFile(testMainRoot, rel)
+	if got := mustGetByID(t, ctx, env, entryID); got.Freshness != FreshnessStale {
+		t.Fatalf("GetByID with missing file freshness = %q, want stale", got.Freshness)
+	}
+
+	env.anchors.deleteRoot(testMainRoot)
+	if got := mustGetByID(t, ctx, env, entryID); got.Freshness != FreshnessStale {
+		t.Fatalf("GetByID with missing root freshness = %q, want stale", got.Freshness)
+	}
+}
+
+func mustGetByID(t *testing.T, ctx context.Context, env *testEnv, entryID string) Entry {
+	t.Helper()
+	got, err := env.store.GetByID(ctx, testWSID, entryID)
 	if err != nil {
-		t.Fatalf("GetByID with missing root: %v", err)
+		t.Fatalf("GetByID %s: %v", entryID, err)
 	}
-	if missingRoot.Freshness != FreshnessStale {
-		t.Fatalf("GetByID with missing root freshness = %q, want stale", missingRoot.Freshness)
-	}
+	return got
 }

@@ -9,10 +9,10 @@ type RevisionConflictError struct {
 	current Entry
 }
 
-func newRevisionConflict(current Entry) *RevisionConflictError {
+func newRevisionConflict(current *Entry) *RevisionConflictError {
 	return &RevisionConflictError{
 		err:     errcode.New(errcode.MemoryRevisionConflict, "memory entry revision conflict"),
-		current: current,
+		current: *current,
 	}
 }
 
