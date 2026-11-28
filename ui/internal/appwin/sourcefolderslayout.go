@@ -97,18 +97,21 @@ func (f *sourceFolders) cardBody(env *kit.Env, gtx *layout.Context, body *wsBody
 		cardY: body.y + gtx.Dp(theme.SpaceLG),
 	}
 	if len(f.rows) == 0 {
+		// The empty state's line is the affordance: the plain text with the
+		// fallback link and the Add button on one line.
 		c.line(func(y0, y1 int) { body.bands.Focusable(f.add.Tag(), y0, y1) },
 			func(gtx *layout.Context) (layout.Dimensions, error) {
 				return f.layoutAffordance(env, gtx, f.emptyStateLine)
 			})
+	} else {
+		f.rowsLines(c)
+		c.line(func(y0, y1 int) {
+			body.bands.Focusable(f.reveal.Tag(), y0, y1)
+			body.bands.Focusable(f.add.Tag(), y0, y1)
+		}, func(gtx *layout.Context) (layout.Dimensions, error) {
+			return f.layoutAffordance(env, gtx, nil)
+		})
 	}
-	f.rowsLines(c)
-	c.line(func(y0, y1 int) {
-		body.bands.Focusable(f.reveal.Tag(), y0, y1)
-		body.bands.Focusable(f.add.Tag(), y0, y1)
-	}, func(gtx *layout.Context) (layout.Dimensions, error) {
-		return f.layoutAffordance(env, gtx, nil)
-	})
 	if f.typedOpen {
 		c.line(func(y0, y1 int) {
 			body.bands.Focusable(f.typed.Tag(), y0, y1)
