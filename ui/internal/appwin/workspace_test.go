@@ -41,15 +41,35 @@ func (r *recordingReader) RequestWorkspace(id string, gen uint64) {
 }
 
 // recordingMutatorClient records the workspace calls the mutator reaches.
+// A create answers with createRes; each add answers with its place in
+// addRes and addErrs (an index past the end succeeds), so the chain tests
+// script a failure at an exact row.
 type recordingMutatorClient struct {
-	calls []workspace.Mutation
-	err   error
+	calls     []workspace.Mutation
+	err       error
+	createRes client.Workspace
+	addRes    []client.Workspace
+	addErrs   []error
+	addN      int
 }
 
-func (r *recordingMutatorClient) CreateWorkspace(_ context.Context, _ string) error { return r.err }
-func (r *recordingMutatorClient) AddRoot(_ context.Context, id, name, path, access, hash string) error {
+func (r *recordingMutatorClient) CreateWorkspace(_ context.Context, _ string) (client.Workspace, error) {
+	r.calls = append(r.calls, workspace.Mutation{Kind: workspace.MutCreate})
+	return r.createRes, r.err
+}
+
+func (r *recordingMutatorClient) AddRoot(_ context.Context, id, name, path, access, hash string) (client.Workspace, error) {
 	r.calls = append(r.calls, workspace.Mutation{Kind: workspace.MutAddRoot, WorkspaceID: id, Name: name, Path: path, Access: access, ExpectedHash: hash})
-	return r.err
+	res := client.Workspace{}
+	if r.addN < len(r.addRes) {
+		res = r.addRes[r.addN]
+	}
+	var err error
+	if r.addN < len(r.addErrs) {
+		err = r.addErrs[r.addN]
+	}
+	r.addN++
+	return res, err
 }
 
 func (r *recordingMutatorClient) RemoveRoot(_ context.Context, id, name, hash string) error {
@@ -261,10 +281,10 @@ func TestDeleteWorkspaceNeedsTheName(t *testing.T) {
 	}
 }
 
-// TestRootDialogValidatesAndShowsTheHostAnswerInline pins the root dialog's
-// evidence: an empty path posts nothing, a filled form posts the add with
-// the detail's hash and access, and the host's typed failure keeps the
-// dialog open with its message inline.
+// TestRootDialogValidatesAndShowsTheHostAnswerInline pins the edit-root
+// dialog's evidence: an empty path posts nothing, a filled form posts the
+// update with the detail's hash and access, and the host's typed failure
+// keeps the dialog open with its message inline.
 func TestRootDialogValidatesAndShowsTheHostAnswerInline(t *testing.T) {
 	t.Parallel()
 	sc, _ := newTestScreens(t)
@@ -274,7 +294,8 @@ func TestRootDialogValidatesAndShowsTheHostAnswerInline(t *testing.T) {
 	det := wsTestDetail(nil)
 	sc.workspaces.ApplyDetail(det)
 
-	sc.dlg.root.openAdd(det)
+	sc.dlg.root.openFor(det, &det.Roots[0])
+	sc.dlg.root.path.SetText("")
 	sc.dlg.root.submit(sc)
 	if len(rec.calls) != 0 {
 		t.Fatalf("a form without a path posted %+v", rec.calls)
@@ -284,12 +305,12 @@ func TestRootDialogValidatesAndShowsTheHostAnswerInline(t *testing.T) {
 	}
 
 	sc.dlg.root.path.SetText("/new/root")
-	sc.dlg.root.name.SetText("extra")
+	sc.dlg.root.name.SetText(testMainRoot)
 	sc.dlg.root.submit(sc)
 	res := waitMutResult(t, sc.wsMut)
 	call := rec.calls[0]
-	if call.Kind != workspace.MutAddRoot || call.WorkspaceID != "w1" || call.Path != "/new/root" || call.Access != "rw" || call.ExpectedHash != det.ConfigHash {
-		t.Fatalf("add posted %+v, want the detail's hash and rw access", call)
+	if call.Kind != workspace.MutUpdateRoot || call.WorkspaceID != "w1" || call.Path != "/new/root" || call.Access != "rw" || call.ExpectedHash != det.ConfigHash {
+		t.Fatalf("update posted %+v, want the detail's hash and rw access", call)
 	}
 
 	// The host's typed failure keeps the dialog open with the message, so
@@ -376,7 +397,7 @@ func TestDetailDropClosesOpenWorkspaceDialogAndRearmsRead(t *testing.T) {
 	}
 
 	// An open create dialog has no workspace detail and survives a snapshot.
-	sc.dlg.create.open()
+	sc.dlg.create.open(sc)
 	feedSnapshot(sc, topicSnapshot(t, []workspace.Summary{{ID: "w1", Name: "A", ConfigRevision: 2}}))
 	if !sc.dlg.create.dialog.IsOpen() {
 		t.Fatal("create dialog was closed by snapshot")
@@ -393,8 +414,7 @@ func TestDialogsBlockMutationsWithEmptyHash(t *testing.T) {
 	emptyDet := &workspace.Detail{ID: "w1", Name: "ws-w1", ConfigHash: ""}
 
 	sc.dlg.root.openAdd(emptyDet)
-	sc.dlg.root.name.SetText(testMainRoot)
-	sc.dlg.root.path.SetText("/repo")
+	sc.dlg.root.folders.addPath("/repo")
 	sc.dlg.root.submit(sc)
 
 	sc.dlg.del.openFor(emptyDet)
