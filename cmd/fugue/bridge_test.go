@@ -36,10 +36,12 @@ func (m hostText) Error() string { return string(m) }
 // stubHost is the session tool service as the bridge sees it: one token, one
 // tool, and a call that can be held to prove the bridge keeps serving.
 type stubHost struct {
-	mu         sync.Mutex
-	attached   []string
-	hold       chan struct{}
-	dropStream chan struct{}
+	mu           sync.Mutex
+	attached     []string
+	hold         chan struct{}
+	dropStream   chan struct{}
+	instructions string
+	instrErr     error
 }
 
 func (s *stubHost) Attach(_ context.Context, req *connect.Request[sessiontoolsv1.AttachRequest]) (*connect.Response[sessiontoolsv1.AttachResponse], error) {
@@ -96,6 +98,13 @@ func (s *stubHost) AcquireHeavySlot(ctx context.Context, _ *connect.Request[sess
 	return nil
 }
 
+func (s *stubHost) GetInstructions(_ context.Context, _ *connect.Request[sessiontoolsv1.GetInstructionsRequest]) (*connect.Response[sessiontoolsv1.GetInstructionsResponse], error) {
+	if s.instrErr != nil {
+		return nil, s.instrErr
+	}
+	return connect.NewResponse(&sessiontoolsv1.GetInstructionsResponse{Instructions: s.instructions}), nil
+}
+
 // serveStub serves the stub over a unix socket with unencrypted HTTP/2, as
 // the host does, and returns the socket path.
 func serveStub(t *testing.T, stub *stubHost) string {
@@ -142,12 +151,12 @@ func (b *bufferedLines) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func startBridge(t *testing.T, socket, token string) *bridgeSession {
+func startBridge(t *testing.T, socket string) *bridgeSession {
 	t.Helper()
 	reader, writer := io.Pipe()
 	s := &bridgeSession{in: writer, out: &bufferedLines{lines: make(chan []byte, 16)}, exit: make(chan int, 1)}
 	supervise.Go(t.Context(), "test.bridge", func(ctx context.Context) error {
-		s.exit <- RunBridge(ctx, reader, s.out, config.MapEnv{app.SessionTokenEnv: token}, socket, "test-version")
+		s.exit <- RunBridge(ctx, reader, s.out, config.MapEnv{app.SessionTokenEnv: bridgeTestToken}, socket, "test-version")
 		return nil
 	})
 	t.Cleanup(func() {
@@ -186,7 +195,7 @@ func (s *bridgeSession) reply(t *testing.T) map[string]json.RawMessage {
 func TestBridgeSpeaksTheMCPSubset(t *testing.T) {
 	t.Parallel()
 	stub := &stubHost{hold: make(chan struct{})}
-	b := startBridge(t, serveStub(t, stub), bridgeTestToken)
+	b := startBridge(t, serveStub(t, stub))
 
 	b.send(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2099-01-01"}}`)
 	if got := string(b.reply(t)["result"]); !strings.Contains(got, `"protocolVersion":"`+mcpProtocolVersion+`"`) ||
@@ -250,7 +259,7 @@ func assertBridgeErrorsAndClose(t *testing.T, b *bridgeSession) {
 func TestBridgeCancelsRunningCallsWhenInputCloses(t *testing.T) {
 	t.Parallel()
 	stub := &stubHost{hold: make(chan struct{})}
-	b := startBridge(t, serveStub(t, stub), bridgeTestToken)
+	b := startBridge(t, serveStub(t, stub))
 	b.send(t, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"held"}}`)
 	if err := b.in.Close(); err != nil {
 		t.Fatal(err)
@@ -312,5 +321,58 @@ func TestBridgeMissingTokenFailsClosedAndLogsNoValue(t *testing.T) {
 	}
 	if errcode.CodeOf(errBridgeNoToken) != errcode.PermissionDenied {
 		t.Fatalf("the missing-token code = %q", errcode.CodeOf(errBridgeNoToken))
+	}
+}
+
+func TestBridgeInitializeIncludesAndFallsBackOnInstructions(t *testing.T) {
+	t.Parallel()
+	t.Run("with instructions", assertBridgeInitWithInstructions)
+	t.Run("host error still initializes without instructions", assertBridgeInitFallbackWithoutInstructions)
+}
+
+func assertBridgeInitWithInstructions(t *testing.T) {
+	t.Parallel()
+	stub := &stubHost{instructions: "pinned: repo rules"}
+	b := startBridge(t, serveStub(t, stub))
+	b.send(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`)
+	var res struct {
+		Instructions string `json:"instructions"`
+	}
+	reply := b.reply(t)
+	if err := json.Unmarshal(reply["result"], &res); err != nil {
+		t.Fatalf("unmarshal initialize result: %v", err)
+	}
+	if res.Instructions != "pinned: repo rules" {
+		t.Fatalf("initialize instructions = %q, want %q", res.Instructions, "pinned: repo rules")
+	}
+	if err := b.in.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if code := <-b.exit; code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+}
+
+func assertBridgeInitFallbackWithoutInstructions(t *testing.T) {
+	t.Parallel()
+	stub := &stubHost{instrErr: connect.NewError(connect.CodeUnavailable, hostText("overview unavailable"))}
+	b := startBridge(t, serveStub(t, stub))
+	b.send(t, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18"}}`)
+	var raw map[string]any
+	reply := b.reply(t)
+	if err := json.Unmarshal(reply["result"], &raw); err != nil {
+		t.Fatalf("unmarshal initialize result: %v", err)
+	}
+	if _, ok := raw["instructions"]; ok {
+		t.Fatalf("initialize unexpectedly included instructions: %v", raw)
+	}
+	if raw["protocolVersion"] != mcpProtocolVersion {
+		t.Fatalf("initialize protocolVersion = %v, want %q", raw["protocolVersion"], mcpProtocolVersion)
+	}
+	if err := b.in.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if code := <-b.exit; code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
 	}
 }

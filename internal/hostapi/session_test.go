@@ -279,15 +279,19 @@ func TestTestOnlyToolIsRefusedByTheNormalHost(t *testing.T) {
 		t.Fatal(err)
 	}
 	list, err := client.ListTools(t.Context(), connect.NewRequest(&sessiontoolsv1.ListToolsRequest{}))
-	if err != nil || len(list.Msg.Tools) != 2 {
-		t.Fatalf("tools of a normal host = %v, %v; want the approve relay and fugue_team_propose", list, err)
+	wantTools := []string{
+		"approve", "fugue_team_propose",
+		"fugue_memory_overview", "fugue_memory_search", "fugue_memory_get", "fugue_memory_write",
+	}
+	if err != nil || len(list.Msg.Tools) != len(wantTools) {
+		t.Fatalf("tools of a normal host = %v, %v; want %v", list, err, wantTools)
 	}
 	// fugue_team_amend (F11.2b) is registered but offered only to the lead
 	// of an active team, which this session is not.
 	if slices.ContainsFunc(list.Msg.Tools, func(t *sessiontoolsv1.Tool) bool { return t.Name == "fugue_team_amend" }) {
 		t.Fatalf("tools of a normal host = %v, want fugue_team_amend withheld without an active team", list.Msg.Tools)
 	}
-	for _, want := range []string{"approve", "fugue_team_propose"} {
+	for _, want := range wantTools {
 		if !slices.ContainsFunc(list.Msg.Tools, func(t *sessiontoolsv1.Tool) bool { return t.Name == want }) {
 			t.Fatalf("tools of a normal host = %v, want %s offered", list.Msg.Tools, want)
 		}

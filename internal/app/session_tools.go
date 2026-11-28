@@ -12,6 +12,7 @@ import (
 	"github.com/syurodev/fugue/internal/platform/errcode"
 	"github.com/syurodev/fugue/internal/platform/ids"
 	"github.com/syurodev/fugue/internal/vendorstore"
+	"github.com/syurodev/fugue/internal/workspacememory"
 )
 
 // SessionToolMaxBytes bounds one session tool RPC request on the wire.
@@ -90,6 +91,36 @@ type SessionToolService struct {
 	ids          ids.Generator
 	recorder     approvalRecorder
 	tombstones   *approveTombstones
+	memory       *workspacememory.Store
+	random       ids.Random
+}
+
+func (s *SessionToolService) setMemory(memory *workspacememory.Store, random ids.Random) {
+	s.memory = memory
+	s.random = random
+}
+
+// Instructions renders the session-start workspace memory overview within the
+// 10 KiB budget for the bridge's MCP initialize instructions field.
+func (s *SessionToolService) Instructions(ctx context.Context, binding SessionBinding) (string, error) {
+	if !s.tokens.live(binding) {
+		return "", errSessionEnded()
+	}
+	if s.memory == nil {
+		return "", nil
+	}
+	info, err := s.sessions.Snapshot(ctx, binding.SessionID)
+	if err != nil {
+		return "", errcode.Wrap(errcode.FailedPrecondition, "read session workspace", err)
+	}
+	if strings.TrimSpace(info.WorkspaceID) == "" {
+		return "", nil
+	}
+	ov, err := s.memory.Overview(ctx, info.WorkspaceID)
+	if err != nil {
+		return "", wrapMemoryStoreError(err)
+	}
+	return renderMemoryOverview(&ov, s.random)
 }
 
 func newSessionToolService(tokens *sessionTokens, tools []*FugueTool, sessions sessionRecords,

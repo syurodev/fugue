@@ -112,4 +112,16 @@ func (h *sessionToolHandler) AcquireHeavySlot(
 	})
 }
 
+func (h *sessionToolHandler) GetInstructions(ctx context.Context, _ *connect.Request[sessiontoolsv1.GetInstructionsRequest]) (*connect.Response[sessiontoolsv1.GetInstructionsResponse], error) {
+	svc, binding, err := h.attached(ctx)
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	instructions, err := svc.Instructions(ctx, binding)
+	if err != nil {
+		return nil, toConnectError(ctx, h.backend, err)
+	}
+	return connect.NewResponse(&sessiontoolsv1.GetInstructionsResponse{Instructions: instructions}), nil
+}
+
 var _ sessiontoolsv1connect.SessionToolServiceHandler = (*sessionToolHandler)(nil)

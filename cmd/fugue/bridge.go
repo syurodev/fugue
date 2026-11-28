@@ -171,11 +171,17 @@ func (b *bridge) reply(id json.RawMessage, result any) error {
 func (b *bridge) handle(ctx context.Context, req *rpcRequest) any {
 	switch req.Method {
 	case "initialize":
-		return map[string]any{
+		res := map[string]any{
 			"protocolVersion": mcpProtocolVersion,
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]string{"name": "fugue", "version": b.version},
 		}
+		if instructions, err := b.session.Instructions(ctx); err != nil {
+			slog.Warn("fugue mcp-bridge could not fetch instructions", "code", connect.CodeOf(err).String())
+		} else if instructions != "" {
+			res["instructions"] = instructions
+		}
+		return res
 	case "ping":
 		return map[string]any{}
 	case "tools/list":
