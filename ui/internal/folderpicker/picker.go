@@ -4,18 +4,23 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"os/exec"
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
-// errNoPicker is the static cause behind a pick no helper could run; it is
-// wrapped, never constructed, at the call site.
-var errNoPicker = errors.New("no folder picker is available")
+// The static causes behind a refused pick; they are wrapped, never
+// constructed, at the call site. The off-platform portal's cause lives in
+// the platform files that use it.
+var (
+	errNoPicker      = errors.New("no folder picker is available")
+	errNotAFilePath  = errors.New("the folder picker answered a path that is not a file")
+	errForeignFolder = errors.New("the folder picker answered a folder on another host")
+)
 
 // Helper is one way a pick can run.
 type Helper uint8
@@ -74,6 +79,9 @@ func selectHelper(av Availability, goos string) Helper {
 // that do not run a process (the portal rides D-Bus; none runs nothing).
 func commandOf(h Helper, startDir string) (name string, args []string, ok bool) {
 	switch h {
+	case HelperNone, HelperPortal:
+		// The portal rides D-Bus and none runs nothing; neither is a process.
+		return "", nil, false
 	case HelperOSAScript:
 		return "osascript", []string{"-e", `POSIX path of (choose folder with prompt "Choose a folder")`}, true
 	case HelperZenity:
@@ -108,6 +116,12 @@ type exitError struct {
 	err  error
 }
 
+// The static causes behind a helper run; wrapped, never constructed.
+var (
+	errHelperFailed = errors.New("the helper failed")
+	errHelperRun    = errors.New("run the helper")
+)
+
 func (e *exitError) Error() string { return fmt.Sprintf("%s (exit %d)", e.err, e.code) }
 func (e *exitError) ExitCode() int { return e.code }
 func (e *exitError) Unwrap() error { return e.err }
@@ -123,6 +137,9 @@ type Runner interface {
 type execRunner struct{}
 
 func (execRunner) Run(ctx context.Context, name string, args ...string) (string, error) {
+	//nolint:gosec // G204: the name is one of commandOf's fixed helpers
+	// (osascript, zenity, kdialog), found through LookPath, and the
+	// arguments are fixed flags plus the start directory: argv, no shell.
 	cmd := exec.CommandContext(ctx, name, args...)
 	out, err := cmd.Output()
 	if err == nil {
@@ -130,9 +147,9 @@ func (execRunner) Run(ctx context.Context, name string, args ...string) (string,
 	}
 	var eerr *exec.ExitError
 	if errors.As(err, &eerr) {
-		return "", &exitError{code: eerr.ExitCode(), err: fmt.Errorf("%s failed", name)}
+		return "", &exitError{code: eerr.ExitCode(), err: errHelperFailed}
 	}
-	return "", fmt.Errorf("run %s: %w", name, err)
+	return "", fmt.Errorf("%w: %s", errHelperRun, name)
 }
 
 // pickPortalFunc runs the portal FileChooser flow: the chosen folder's path,
@@ -175,20 +192,21 @@ type Picker struct {
 	done     chan struct{}
 	stopOnce sync.Once
 
-	// probeOnce memoizes the availability: the first dialog open pays the
-	// probe (a PATH lookup, and one D-Bus introspect on Linux), and every
-	// later read and pick reuses the answer. A pick itself always runs on
-	// the worker goroutine.
-	probeOnce sync.Once
-	avail     Availability
+	// avail is the probe's answer, taken once at Start.
+	avail Availability
 }
 
-// NewPicker builds a picker over the platform's probe and helpers.
+// NewPicker builds a picker over the platform's probe and helpers. The
+// portal hook carries a per-picker sequence, so the request handles it names
+// stay unique between pickers without a package global.
 func NewPicker() *Picker {
+	seq := &atomic.Uint64{}
 	return &Picker{
 		probeOf: platformProbe,
 		runner:  execRunner{},
-		portal:  pickPortal,
+		portal: func(ctx context.Context) (string, bool, error) {
+			return pickPortal(ctx, seq)
+		},
 		goos:    runtime.GOOS,
 		reqs:    make(chan struct{}, pickBufferSize),
 		results: make(chan Result, pickBufferSize),
@@ -196,8 +214,14 @@ func NewPicker() *Picker {
 	}
 }
 
-// Start runs the worker. It ends with Stop or the context.
+// Start runs the one availability probe and then the worker; both end with
+// Stop or the context. The probe blocks here — a PATH lookup, and one D-Bus
+// introspect on Linux, bounded by probeTimeout — so the dialogs' reads and
+// the worker's picks reuse its answer without touching the window goroutine.
 func (p *Picker) Start(ctx context.Context) {
+	probeCtx, cancelProbe := context.WithTimeout(ctx, probeTimeout)
+	p.avail = p.probeOf(probeCtx)
+	cancelProbe()
 	runCtx, cancel := context.WithCancel(ctx)
 	p.cancel = cancel
 	go p.run(runCtx)
@@ -230,21 +254,14 @@ func (p *Picker) Pick() bool {
 // frame.
 func (p *Picker) Results() <-chan Result { return p.results }
 
-// Available is the desktop's probed answer, memoized on first read.
-func (p *Picker) Available() Availability {
-	p.probeOnce.Do(func() {
-		ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
-		defer cancel()
-		p.avail = p.probeOf(ctx)
-	})
-	return p.avail
-}
+// Available is the desktop's probed answer, taken at Start.
+func (p *Picker) Available() Availability { return p.avail }
 
 // First is the helper a pick would run, or HelperNone.
 func (p *Picker) First() Helper { return selectHelper(p.Available(), p.goos) }
 
-// run serves requests until the context ends. The availability is already
-// memoized by then: a pick only follows a dialog open, which read First.
+// run serves requests until the context ends; the availability was probed
+// at Start.
 func (p *Picker) run(ctx context.Context) {
 	defer close(p.done)
 	for {
@@ -332,11 +349,57 @@ func userStartDir() (string, error) {
 	return home, nil
 }
 
-// uriPath turns a portal's file URI into an absolute path.
+// uriPath turns a portal's file URI into an absolute path. net/url is out
+// (the app opens no socket itself, arch DA-E06), so the decode handles the
+// one shape the portal answers — file:///absolute/path, percent-escapes
+// included — and refuses everything else.
 func uriPath(uri string) (string, error) {
-	u, err := url.ParseRequestURI(uri)
-	if err != nil || u.Scheme != "file" {
-		return "", fmt.Errorf("the folder picker answered %q, which is not a file path", uri)
+	const scheme = "file://"
+	if !strings.HasPrefix(uri, scheme) {
+		return "", fmt.Errorf("%w: %q", errNotAFilePath, uri)
 	}
-	return u.Path, nil
+	// file:///path keeps an empty authority: a folder chosen on this machine
+	// has no host before the third slash.
+	if !strings.HasPrefix(uri[len(scheme):], "/") {
+		return "", fmt.Errorf("%w: %q", errForeignFolder, uri)
+	}
+	return unescape(uri[len(scheme):]), nil
+}
+
+// unescape decodes the percent-escapes of a portal path.
+func unescape(path string) string {
+	if !strings.Contains(path, "%") {
+		return path
+	}
+	var b strings.Builder
+	b.Grow(len(path))
+	for i := 0; i < len(path); i++ {
+		if c := path[i]; c == '%' && i+2 < len(path) {
+			hi, ok := hexVal(path[i+1])
+			if ok {
+				lo, ok := hexVal(path[i+2])
+				if ok {
+					b.WriteByte(hi<<4 | lo)
+					i += 2
+					continue
+				}
+			}
+		}
+		b.WriteByte(path[i])
+	}
+	return b.String()
+}
+
+// hexVal reads one hexadecimal digit.
+func hexVal(c byte) (byte, bool) {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0', true
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10, true
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10, true
+	default:
+		return 0, false
+	}
 }

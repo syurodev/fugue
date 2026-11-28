@@ -6,8 +6,6 @@ import (
 
 	"gioui.org/layout"
 
-	"github.com/syurodev/fugue/pkg/client"
-
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/workspace"
 )
@@ -320,7 +318,7 @@ func (d *rootDialog) layout(env *kit.Env, gtx *layout.Context, sc *screens) {
 	if !d.dialog.IsOpen() {
 		return
 	}
-	title, primary, description := "Add folders", "Add", "Fugue checks each folder against this workspace's rules."
+	title, primary, description := "Add folders", addLabel, "Fugue checks each folder against this workspace's rules."
 	if d.edit != "" {
 		title, primary, description = "Edit root "+d.edit, "Save", "Fugue checks the path against this workspace's rules."
 	}
@@ -401,7 +399,7 @@ func (d *rootDialog) layAccess(env *kit.Env, body *wsBody) {
 	body.field(d.access.Tag(), func(gtx *layout.Context) (layout.Dimensions, error) {
 		props := &kit.SelectProps{
 			Label:   "Access",
-			Options: []kit.SelectOption{{ID: client.RootAccessRW, Label: "read and write"}, {ID: client.RootAccessRO, Label: "read only"}},
+			Options: accessOptions(),
 			Value:   d.accessSel,
 			Block:   true,
 		}

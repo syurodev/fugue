@@ -12,6 +12,12 @@ import (
 // answers with a fixed failure, so a test pins the mutation-to-RPC routing
 // without a real connection. A create or add answers with the workspace the
 // next test in the chain expects.
+// The recorded call names the routing test asserts on.
+const (
+	callCreate  = "create"
+	callAddRoot = "add-root"
+)
+
 type recordingClient struct {
 	calls   []string
 	err     error
@@ -20,12 +26,12 @@ type recordingClient struct {
 }
 
 func (r *recordingClient) CreateWorkspace(context.Context, string) (client.Workspace, error) {
-	r.calls = append(r.calls, "create")
+	r.calls = append(r.calls, callCreate)
 	return r.created, r.err
 }
 
 func (r *recordingClient) AddRoot(context.Context, string, string, string, string, string) (client.Workspace, error) {
-	r.calls = append(r.calls, "add-root")
+	r.calls = append(r.calls, callAddRoot)
 	return r.added, r.err
 }
 
@@ -91,6 +97,12 @@ func TestMutatorRejectsEmptyExpectedHash(t *testing.T) {
 		}
 	}
 }
+
+// The hashes the chain test scripts.
+const (
+	chainCreatedHash = "hash-created"
+	chainAddedHash   = "hash-added"
+)
 
 // waitResult takes the mutator's next result. The receive blocks: Start, Do
 // and deliver are deterministic, and the package timeout catches a stuck
@@ -193,8 +205,8 @@ func TestMutatorQueueFullReportsAFailure(t *testing.T) {
 func TestMutatorChainsCreateAndAddRootHashes(t *testing.T) {
 	t.Parallel()
 	rec := &recordingClient{
-		created: client.Workspace{ID: "w9", Name: "ws", ConfigHash: "hash-created"},
-		added:   client.Workspace{ID: "w9", ConfigHash: "hash-added"},
+		created: client.Workspace{ID: "w9", Name: "ws", ConfigHash: chainCreatedHash},
+		added:   client.Workspace{ID: "w9", ConfigHash: chainAddedHash},
 	}
 	m := NewMutator(func() MutatorClient { return rec })
 	ctx, cancel := context.WithCancel(context.Background())
@@ -207,19 +219,19 @@ func TestMutatorChainsCreateAndAddRootHashes(t *testing.T) {
 	if res.Err != nil {
 		t.Fatalf("create failed: %v", res.Err)
 	}
-	if res.NewID != "w9" || res.NewHash != "hash-created" {
+	if res.NewID != "w9" || res.NewHash != chainCreatedHash {
 		t.Fatalf("create result = (id %q, hash %q), want the host's answer", res.NewID, res.NewHash)
 	}
 
-	m.Do(&Mutation{Kind: MutAddRoot, WorkspaceID: "w9", Name: "api", Path: "/repo/api", Access: "rw", ExpectedHash: "hash-created"})
+	m.Do(&Mutation{Kind: MutAddRoot, WorkspaceID: "w9", Name: "api", Path: "/repo/api", Access: "rw", ExpectedHash: chainCreatedHash})
 	res = waitResult(t, m)
 	if res.Err != nil {
 		t.Fatalf("add failed: %v", res.Err)
 	}
-	if res.NewHash != "hash-added" {
+	if res.NewHash != chainAddedHash {
 		t.Fatalf("add result hash = %q, want the hash after the add", res.NewHash)
 	}
-	if rec.calls[0] != "create" || rec.calls[1] != "add-root" {
+	if rec.calls[0] != callCreate || rec.calls[1] != callAddRoot {
 		t.Fatalf("client calls = %v, want create then add-root", rec.calls)
 	}
 }

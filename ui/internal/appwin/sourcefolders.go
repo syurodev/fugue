@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/syurodev/fugue/pkg/client"
+
 	"github.com/syurodev/fugue/ui/internal/folderpicker"
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/workspace"
@@ -123,8 +125,20 @@ func baseName(path string) string {
 	return filepath.Base(path)
 }
 
-// defaultAccess is the access a fresh row starts at.
-const defaultAccess = "rw"
+// defaultAccess is the access a fresh row starts at, and the two values the
+// host's schema accepts name the row's pick.
+const (
+	defaultAccess = "rw"
+)
+
+// accessOptions is the access pick's options, the row's and the edit form's
+// alike.
+func accessOptions() []kit.SelectOption {
+	return []kit.SelectOption{
+		{ID: client.RootAccessRW, Label: "read and write"},
+		{ID: client.RootAccessRO, Label: "read only"},
+	}
+}
 
 // uniqueName suffixes the base with the smallest number that frees it within
 // the workspace: the list's names plus its existing roots'.

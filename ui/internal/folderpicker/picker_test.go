@@ -8,6 +8,19 @@ import (
 	"testing"
 )
 
+// The platforms the picker tests stand in for.
+const (
+	testGoosLinux  = "linux"
+	testGoosDarwin = "darwin"
+)
+
+// The static causes the tests script; wrapped, never constructed, in the
+// test bodies.
+var (
+	errNoPortal     = errors.New("no portal")
+	errNoPortalStub = errors.New("portal not under test")
+)
+
 // fakeRunner records the helper invocations the pick reached and answers
 // with a scripted stdout and error, so the tests never run a real process.
 type fakeRunner struct {
@@ -45,13 +58,14 @@ func TestSelectHelperFollowsThePlatformOrder(t *testing.T) {
 	}{
 		{"macos-has-osascript", "darwin", Availability{OSAScript: true}, HelperOSAScript},
 		{"macos-none", "darwin", Availability{}, HelperNone},
-		{"linux-portal-first", "linux", Availability{Portal: true, Zenity: true}, HelperPortal},
-		{"linux-zenity-second", "linux", Availability{Zenity: true, KDialog: true}, HelperZenity},
-		{"linux-kdialog-third", "linux", Availability{KDialog: true}, HelperKDialog},
-		{"linux-none", "linux", Availability{}, HelperNone},
+		{"linux-portal-first", testGoosLinux, Availability{Portal: true, Zenity: true}, HelperPortal},
+		{"linux-zenity-second", testGoosLinux, Availability{Zenity: true, KDialog: true}, HelperZenity},
+		{"linux-kdialog-third", testGoosLinux, Availability{KDialog: true}, HelperKDialog},
+		{"linux-none", testGoosLinux, Availability{}, HelperNone},
 		{"other-none", "windows", Availability{OSAScript: true, Portal: true}, HelperNone},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if got := selectHelper(tc.av, tc.goos); got != tc.want {
 				t.Fatalf("selectHelper(%+v, %q) = %v, want %v", tc.av, tc.goos, got, tc.want)
 			}
@@ -105,52 +119,75 @@ func TestCommandOfBuildsArgvOnly(t *testing.T) {
 // any other failure is an error.
 func TestPickRunsThePlatformOrderWithFakedProcesses(t *testing.T) {
 	t.Parallel()
-	t.Run("portal-answers", func(t *testing.T) {
-		p := testPicker(t, "linux", Availability{Portal: true, Zenity: true}, fakePortal("/home/u/pick", false, nil), nil)
-		p.Pick()
-		res := <-p.Results()
-		if res.Err != nil || res.Cancelled || res.Path != "/home/u/pick" {
-			t.Fatalf("portal pick = %+v, want /home/u/pick", res)
-		}
-	})
-	t.Run("portal-fails-then-zenity", func(t *testing.T) {
-		run := &fakeRunner{out: "/home/u/zenity\n"}
-		p := testPicker(t, "linux", Availability{Portal: true, Zenity: true}, fakePortal("", false, errors.New("no portal")), run)
-		p.Pick()
-		res := <-p.Results()
-		if res.Err != nil || res.Path != "/home/u/zenity" {
-			t.Fatalf("zenity fallback = %+v, want the zenity path", res)
-		}
-		if len(run.calls) != 1 || !strings.HasPrefix(run.calls[0], "zenity --file-selection --directory") {
-			t.Fatalf("helper calls = %v, want one zenity run", run.calls)
-		}
-	})
-	t.Run("exit-one-is-cancelled", func(t *testing.T) {
-		run := &fakeRunner{err: &fakeExit{code: 1}}
-		p := testPicker(t, "darwin", Availability{OSAScript: true}, nil, run)
-		p.Pick()
-		res := <-p.Results()
-		if !res.Cancelled || res.Err != nil || res.Path != "" {
-			t.Fatalf("cancelled pick = %+v, want a bare cancel", res)
-		}
-	})
-	t.Run("other-exit-is-an-error", func(t *testing.T) {
-		run := &fakeRunner{err: &fakeExit{code: 126}}
-		p := testPicker(t, "darwin", Availability{OSAScript: true}, nil, run)
-		p.Pick()
-		res := <-p.Results()
-		if res.Err == nil || res.Cancelled {
-			t.Fatalf("failed pick = %+v, want an error", res)
-		}
-	})
-	t.Run("no-helper-is-an-error", func(t *testing.T) {
-		p := testPicker(t, "linux", Availability{}, nil, nil)
-		p.Pick()
-		res := <-p.Results()
-		if res.Err == nil {
-			t.Fatal("a pick with no helper reported success")
-		}
-	})
+	t.Run("portal-answers", func(t *testing.T) { t.Parallel(); pickPortalAnswers(t) })
+	t.Run("portal-fails-then-zenity", func(t *testing.T) { t.Parallel(); pickPortalFallsToZenity(t) })
+	t.Run("exit-one-is-cancelled", func(t *testing.T) { t.Parallel(); pickExitOneIsCancelled(t) })
+	t.Run("other-exit-is-an-error", func(t *testing.T) { t.Parallel(); pickOtherExitIsAnError(t) })
+	t.Run("no-helper-is-an-error", func(t *testing.T) { t.Parallel(); pickNoHelperIsAnError(t) })
+}
+
+// pickPortalAnswers pins the portal's converted answer.
+func pickPortalAnswers(t *testing.T) {
+	t.Helper()
+	p := testPicker(t, testGoosLinux, Availability{Portal: true, Zenity: true}, fakePortal("/home/u/pick", false, nil), nil)
+	p.Pick()
+	res := <-p.Results()
+	if res.Err != nil || res.Cancelled || res.Path != "/home/u/pick" {
+		t.Fatalf("portal pick = %+v, want /home/u/pick", res)
+	}
+}
+
+// pickPortalFallsToZenity pins the fall-through: a portal that cannot run
+// hands the pick to the first CLI helper that can.
+func pickPortalFallsToZenity(t *testing.T) {
+	t.Helper()
+	run := &fakeRunner{out: "/home/u/zenity\n"}
+	p := testPicker(t, testGoosLinux, Availability{Portal: true, Zenity: true}, fakePortal("", false, errNoPortal), run)
+	p.Pick()
+	res := <-p.Results()
+	if res.Err != nil || res.Path != "/home/u/zenity" {
+		t.Fatalf("zenity fallback = %+v, want the zenity path", res)
+	}
+	if len(run.calls) != 1 || !strings.HasPrefix(run.calls[0], "zenity --file-selection --directory") {
+		t.Fatalf("helper calls = %v, want one zenity run", run.calls)
+	}
+}
+
+// pickExitOneIsCancelled pins that the CLI helpers' exit 1 — a closed
+// chooser on every platform — is a cancel the caller reads as a no-op.
+func pickExitOneIsCancelled(t *testing.T) {
+	t.Helper()
+	run := &fakeRunner{err: &fakeExit{code: 1}}
+	p := testPicker(t, testGoosDarwin, Availability{OSAScript: true}, nil, run)
+	p.Pick()
+	res := <-p.Results()
+	if !res.Cancelled || res.Err != nil || res.Path != "" {
+		t.Fatalf("cancelled pick = %+v, want a bare cancel", res)
+	}
+}
+
+// pickOtherExitIsAnError pins that any other helper exit is a failure.
+func pickOtherExitIsAnError(t *testing.T) {
+	t.Helper()
+	run := &fakeRunner{err: &fakeExit{code: 126}}
+	p := testPicker(t, testGoosDarwin, Availability{OSAScript: true}, nil, run)
+	p.Pick()
+	res := <-p.Results()
+	if res.Err == nil || res.Cancelled {
+		t.Fatalf("failed pick = %+v, want an error", res)
+	}
+}
+
+// pickNoHelperIsAnError pins that a desktop the probe found nothing for
+// refuses the pick.
+func pickNoHelperIsAnError(t *testing.T) {
+	t.Helper()
+	p := testPicker(t, testGoosLinux, Availability{}, nil, nil)
+	p.Pick()
+	res := <-p.Results()
+	if res.Err == nil {
+		t.Fatal("a pick with no helper reported success")
+	}
 }
 
 // TestPickerBusyRefusesASecondPick pins that a pick while one runs is
@@ -158,7 +195,7 @@ func TestPickRunsThePlatformOrderWithFakedProcesses(t *testing.T) {
 func TestPickerBusyRefusesASecondPick(t *testing.T) {
 	t.Parallel()
 	run := &fakeRunner{out: "/first"}
-	p := testPicker(t, "darwin", Availability{OSAScript: true}, nil, run)
+	p := testPicker(t, testGoosDarwin, Availability{OSAScript: true}, nil, run)
 	if !p.Pick() {
 		t.Fatal("the first pick was refused")
 	}
@@ -175,7 +212,7 @@ func TestPickerBusyRefusesASecondPick(t *testing.T) {
 // read comes from the probe the worker ran at start.
 func TestPickerAvailableFollowsTheProbe(t *testing.T) {
 	t.Parallel()
-	p := testPicker(t, "linux", Availability{KDialog: true}, nil, nil)
+	p := testPicker(t, testGoosLinux, Availability{KDialog: true}, nil, nil)
 	if av := p.Available(); !av.KDialog {
 		t.Fatalf("available = %+v, want the probe's kdialog", av)
 	}
@@ -188,7 +225,7 @@ func TestPickerAvailableFollowsTheProbe(t *testing.T) {
 // is idempotent, like the workspace mutator's.
 func TestPickerStopEndsTheWorker(t *testing.T) {
 	t.Parallel()
-	p := testPicker(t, "darwin", Availability{OSAScript: true}, nil, &fakeRunner{})
+	p := testPicker(t, testGoosDarwin, Availability{OSAScript: true}, nil, &fakeRunner{})
 	p.Stop()
 	p.Stop()
 }
@@ -206,7 +243,7 @@ func testPicker(t *testing.T, goos string, av Availability, portal pickPortalFun
 	p.goos = goos
 	if portal == nil {
 		p.portal = func(context.Context) (string, bool, error) {
-			return "", false, errors.New("portal not under test")
+			return "", false, errNoPortalStub
 		}
 	}
 	p.Start(context.Background())

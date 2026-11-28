@@ -6,8 +6,6 @@ import (
 
 	"gioui.org/layout"
 
-	"github.com/syurodev/fugue/pkg/client"
-
 	"github.com/syurodev/fugue/ui/internal/kit"
 	"github.com/syurodev/fugue/ui/internal/theme"
 )
@@ -17,9 +15,51 @@ import (
 // band declarations the dialog's focus trap cycles through. The list's state
 // and rules live in sourcefolders.go.
 
+// addLabel is the Add button's label, the empty state's and the typed
+// fallback's alike.
+const addLabel = "Add"
+
+// keepDrawErr records the first error of one draw pass, so a frame reports
+// one failure however many controls drew.
+func keepDrawErr(errp *error, err error) {
+	if err != nil && *errp == nil {
+		*errp = err
+	}
+}
+
+// cardStack lays the box's lines out at a manual y, the way the dialog body
+// does, and declares each line's band on the dialog's focus trap (§6.17).
+// The card's padding already insets the body, so a band adds the card
+// field's y and that padding once, here in cardY.
+type cardStack struct {
+	env   *kit.Env
+	body  *wsBody
+	gtx   *layout.Context
+	w     int
+	gap   int
+	cardY int
+	y     int
+	err   error
+}
+
+// line draws one line at the stack's y and advances past it.
+func (c *cardStack) line(band func(y0, y1 int), draw func(gtx *layout.Context) (layout.Dimensions, error)) {
+	local := *c.gtx
+	local.Constraints.Min.X, local.Constraints.Max.X = c.w, c.w
+	var dims layout.Dimensions
+	var lerr error
+	c.env.Offset(&local, image.Pt(0, c.y), func(gtx *layout.Context) {
+		dims, lerr = draw(gtx)
+	})
+	keepDrawErr(&c.err, lerr)
+	if band != nil {
+		band(c.cardY+c.y, c.cardY+c.y+dims.Size.Y)
+	}
+	c.y += dims.Size.Y + c.gap
+}
+
 // layout draws the section: the heading and the box with its rows, the
-// affordance line and the fallback area. It declares each focusable control's
-// band in draw order (§6.17).
+// affordance line and the fallback area.
 func (f *sourceFolders) layout(env *kit.Env, body *wsBody) {
 	body.field(nil, func(gtx *layout.Context) (layout.Dimensions, error) {
 		l := *gtx
@@ -48,77 +88,61 @@ func (f *sourceFolders) layoutCard(env *kit.Env, gtx *layout.Context, body *wsBo
 	return dims, errors.Join(cerr, bodyErr)
 }
 
-// cardBody lays the box's lines out at a manual y, the way the dialog body
-// does, so each row's controls know their band's y range. The card's padding
-// already insets this body, and the card field's y plus that padding places
-// every band in body coordinates.
+// cardBody lays the box's lines out at a manual y, so each row's controls
+// know their band's y range.
 func (f *sourceFolders) cardBody(env *kit.Env, gtx *layout.Context, body *wsBody) (layout.Dimensions, error) {
-	w := gtx.Constraints.Max.X
-	gap := gtx.Dp(theme.SpaceMD)
-	pad := gtx.Dp(theme.SpaceLG)
-	cardY := body.y
-	y := 0
-	var err error
-	line := func(band func(y0, y1 int), draw func(gtx *layout.Context) (layout.Dimensions, error)) layout.Dimensions {
-		local := *gtx
-		local.Constraints.Min.X, local.Constraints.Max.X = w, w
-		var dims layout.Dimensions
-		var lerr error
-		env.Offset(&local, image.Pt(0, y), func(gtx *layout.Context) {
-			dims, lerr = draw(gtx)
-		})
-		if lerr != nil && err == nil {
-			err = lerr
-		}
-		if band != nil {
-			band(cardY+pad+y, cardY+pad+y+dims.Size.Y)
-		}
-		y += dims.Size.Y + gap
-		return dims
+	c := &cardStack{
+		env: env, body: body, gtx: gtx,
+		w: gtx.Constraints.Max.X, gap: gtx.Dp(theme.SpaceMD),
+		cardY: body.y + gtx.Dp(theme.SpaceLG),
 	}
-
 	if len(f.rows) == 0 {
-		line(func(y0, y1 int) { body.bands.Focusable(f.add.Tag(), y0, y1) },
+		c.line(func(y0, y1 int) { body.bands.Focusable(f.add.Tag(), y0, y1) },
 			func(gtx *layout.Context) (layout.Dimensions, error) {
 				return f.layoutAffordance(env, gtx, f.emptyStateLine)
 			})
 	}
-	for i, row := range f.rows {
-		r := row
-		idx := i
-		line(func(y0, y1 int) {
-			// The three focusables of one row share its y range: the trap
-			// cycles them in draw order (§6.17).
-			body.bands.Focusable(r.name.Tag(), y0, y1)
-			body.bands.Focusable(r.access.Tag(), y0, y1)
-			body.bands.Focusable(r.rm.Tag(), y0, y1)
-		}, func(gtx *layout.Context) (layout.Dimensions, error) {
-			return f.layoutRow(env, gtx, idx, r)
-		})
-		if r.err != "" {
-			line(nil, func(gtx *layout.Context) (layout.Dimensions, error) {
-				l := *gtx
-				l.Constraints.Min.X = w
-				return kit.Paragraph(env, &l, theme.TypeSmall(), env.Th.Status().Danger, r.err), nil
-			})
-		}
-	}
-
-	line(func(y0, y1 int) {
+	f.rowsLines(c)
+	c.line(func(y0, y1 int) {
 		body.bands.Focusable(f.reveal.Tag(), y0, y1)
 		body.bands.Focusable(f.add.Tag(), y0, y1)
 	}, func(gtx *layout.Context) (layout.Dimensions, error) {
 		return f.layoutAffordance(env, gtx, nil)
 	})
 	if f.typedOpen {
-		line(func(y0, y1 int) {
+		c.line(func(y0, y1 int) {
 			body.bands.Focusable(f.typed.Tag(), y0, y1)
 			body.bands.Focusable(f.typedAdd.Tag(), y0, y1)
 		}, func(gtx *layout.Context) (layout.Dimensions, error) {
 			return f.layoutTyped(env, gtx)
 		})
 	}
-	return layout.Dimensions{Size: image.Pt(w, max(y-gap, 0))}, err
+	return layout.Dimensions{Size: image.Pt(c.w, max(c.y-c.gap, 0))}, c.err
+}
+
+// rowsLines lays one line per row, plus the failing row's error line under
+// it.
+func (f *sourceFolders) rowsLines(c *cardStack) {
+	for i, row := range f.rows {
+		r := row
+		idx := i
+		c.line(func(y0, y1 int) {
+			// The three focusables of one row share its y range: the trap
+			// cycles them in draw order (§6.17).
+			c.body.bands.Focusable(r.name.Tag(), y0, y1)
+			c.body.bands.Focusable(r.access.Tag(), y0, y1)
+			c.body.bands.Focusable(r.rm.Tag(), y0, y1)
+		}, func(gtx *layout.Context) (layout.Dimensions, error) {
+			return f.layoutRow(c.env, gtx, idx, r)
+		})
+		if r.err != "" {
+			c.line(nil, func(gtx *layout.Context) (layout.Dimensions, error) {
+				l := *gtx
+				l.Constraints.Min.X = c.w
+				return kit.Paragraph(c.env, &l, theme.TypeSmall(), c.env.Th.Status().Danger, r.err), nil
+			})
+		}
+	}
 }
 
 // emptyStateLine is the plain "on this computer" text: no other sources
@@ -133,117 +157,142 @@ func (f *sourceFolders) emptyStateLine(env *kit.Env, gtx *layout.Context) (layou
 // empty state's text, when the list is empty) and the trailing fallback link
 // and Add button.
 func (f *sourceFolders) layoutAffordance(env *kit.Env, gtx *layout.Context, lead func(*kit.Env, *layout.Context) (layout.Dimensions, error)) (layout.Dimensions, error) {
-	addProps := kit.ButtonProps{
-		Text: "Add", Icon: kit.IconFolderPlus, Variant: kit.Secondary, Size: kit.SizeSM, Busy: f.picking,
-	}
-	revealProps := kit.ButtonProps{
-		Text: "Type a path instead", Variant: kit.Link, Size: kit.SizeSM, Disabled: f.typedOpen,
-	}
+	addProps := kit.ButtonProps{Text: addLabel, Icon: kit.IconFolderPlus, Variant: kit.Secondary, Size: kit.SizeSM, Busy: f.picking}
+	revealProps := kit.ButtonProps{Text: "Type a path instead", Variant: kit.Link, Size: kit.SizeSM, Disabled: f.typedOpen}
 	addDims := f.add.Measure(env, gtx, addProps)
 	var err error
-	var leadDims layout.Dimensions
-	if lead != nil {
-		leadDims, err = lead(env, gtx)
-		if err != nil {
-			return layout.Dimensions{}, err
-		}
-	}
-	children := make([]layout.FlexChild, 0, 3)
+	var children []layout.FlexChild
 	if lead != nil {
 		children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			local := gtx
 			local.Constraints.Min.Y = addDims.Size.Y
 			d, lerr := lead(env, &local)
-			if lerr != nil && err == nil {
-				err = lerr
-			}
+			keepDrawErr(&err, lerr)
 			return d
 		}))
 	}
-	if leadDims.Size.X > 0 || len(f.rows) > 0 {
+	if lead != nil || len(f.rows) > 0 {
 		children = append(children, layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 			return layout.Dimensions{Size: image.Pt(gtx.Constraints.Max.X, addDims.Size.Y)}
 		}))
 	}
-	children = append(children,
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			revealed, lerr := f.reveal.Layout(env, &local, revealProps)
-			if lerr != nil && err == nil {
-				err = lerr
-			}
-			if revealed {
-				f.revealTyped()
-			}
-			return f.reveal.Measure(env, &local, revealProps)
-		}),
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			local := gtx
-			clicked, lerr := f.add.Layout(env, &local, addProps)
-			if lerr != nil && err == nil {
-				err = lerr
-			}
-			if clicked {
-				f.pick()
-			}
-			return f.add.Measure(env, &local, addProps)
-		}),
-	)
+	children = append(children, f.revealChild(env, revealProps, &err), f.pickChild(env, addProps, &err))
 	dims := layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(*gtx, children...)
 	return dims, err
+}
+
+// revealChild is the "Type a path instead" link's flex child: a click opens
+// the fallback field, and the link disables itself once it is open.
+func (f *sourceFolders) revealChild(env *kit.Env, revealProps kit.ButtonProps, errp *error) layout.FlexChild {
+	return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		local := gtx
+		revealed, lerr := f.reveal.Layout(env, &local, revealProps)
+		keepDrawErr(errp, lerr)
+		if revealed {
+			f.revealTyped()
+		}
+		return f.reveal.Measure(env, &local, revealProps)
+	})
+}
+
+// pickChild is the Add button's flex child: a click asks the window's picker
+// for a folder.
+func (f *sourceFolders) pickChild(env *kit.Env, addProps kit.ButtonProps, errp *error) layout.FlexChild {
+	return layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+		local := gtx
+		clicked, lerr := f.add.Layout(env, &local, addProps)
+		keepDrawErr(errp, lerr)
+		if clicked {
+			f.pick()
+		}
+		return f.add.Measure(env, &local, addProps)
+	})
+}
+
+// rowGeom is one row's line-1 geometry: where the name, the access pick and
+// the remove button sit.
+type rowGeom struct {
+	w, gap, iconW, lineH int
+	nameX, nameW         int
+	selectX, selectW     int
+	rmX, rmW             int
 }
 
 // layoutRow draws one folder row: the folder glyph, the inline-editable name,
 // the access pick and the remove button on the first line, the muted
 // middle-truncated path under them.
 func (f *sourceFolders) layoutRow(env *kit.Env, gtx *layout.Context, i int, row *sourceRow) (layout.Dimensions, error) {
+	g := f.rowGeom(env, gtx, row)
+	selectProps := &kit.SelectProps{Options: accessOptions(), Value: row.accessSel}
+	rmProps := &kit.IconButtonProps{Icon: kit.IconClose, Label: "Remove " + row.name.Text(), Size: kit.SizeXS}
+	var err error
+	f.rowIcon(env, gtx, g, &err)
+	f.rowName(env, gtx, row, g, &err)
+	f.rowAccess(env, gtx, row, g, selectProps, &err)
+	f.rowRemove(env, gtx, i, row, g, rmProps, &err)
+	f.rowPath(env, gtx, row, g)
+	totalH := g.lineH + g.gap/2 + gtx.Sp(theme.TypeSmall().Line)
+	return layout.Dimensions{Size: image.Pt(g.w, totalH)}, err
+}
+
+// rowGeom measures one row's fixed boxes: the access pick and the remove
+// button size to their content, the name field takes the rest.
+func (f *sourceFolders) rowGeom(env *kit.Env, gtx *layout.Context, row *sourceRow) rowGeom {
 	w := gtx.Constraints.Max.X
 	gap := gtx.Dp(theme.SpaceMD)
-	selectProps := &kit.SelectProps{
-		Options: []kit.SelectOption{{ID: defaultAccess, Label: "read and write"}, {ID: client.RootAccessRO, Label: "read only"}},
-		Value:   row.accessSel,
-	}
-	selectDims := row.access.Measure(env, gtx, selectProps)
-	rmProps := &kit.IconButtonProps{Icon: kit.IconClose, Label: "Remove " + row.name.Text(), Size: kit.SizeXS}
-	rmDims := row.rm.Measure(env, gtx, rmProps)
 	iconW := gtx.Dp(theme.IconMD)
-	lineH := gtx.Dp(theme.ControlMD)
-	nameW := w - iconW - gap - selectDims.Size.X - gap - rmDims.Size.X - gap
-	nameProps := &kit.TextFieldProps{Placeholder: "Name the root"}
+	selectW := row.access.Measure(env, gtx, &kit.SelectProps{Options: accessOptions(), Value: row.accessSel}).Size.X
+	rmW := row.rm.Measure(env, gtx, &kit.IconButtonProps{Icon: kit.IconClose, Label: "Remove " + row.name.Text(), Size: kit.SizeXS}).Size.X
+	return rowGeom{
+		w: w, gap: gap, iconW: iconW, lineH: gtx.Dp(theme.ControlMD),
+		nameX: iconW + gap, nameW: w - iconW - gap - selectW - gap - rmW - gap,
+		selectX: w - rmW - gap - selectW, selectW: selectW,
+		rmX: w - rmW, rmW: rmW,
+	}
+}
 
-	var err error
-	// Line 1: icon, name field, access select, remove button.
-	env.Offset(gtx, image.Pt(0, (lineH-iconW)/2), func(gtx *layout.Context) {
+// rowIcon draws the row's folder glyph, centered on the name field's line.
+func (f *sourceFolders) rowIcon(env *kit.Env, gtx *layout.Context, g rowGeom, errp *error) {
+	env.Offset(gtx, image.Pt(0, (g.lineH-g.iconW)/2), func(gtx *layout.Context) {
 		local := *gtx
-		local.Constraints = layout.Constraints{Min: image.Pt(iconW, iconW), Max: image.Pt(iconW, iconW)}
-		if _, ierr := env.Icon(gtx, kit.IconFolder, theme.IconMD, env.Th.Chrome().FgMuted); ierr != nil {
-			err = ierr
-		}
+		local.Constraints = layout.Constraints{Min: image.Pt(g.iconW, g.iconW), Max: image.Pt(g.iconW, g.iconW)}
+		_, ierr := env.Icon(gtx, kit.IconFolder, theme.IconMD, env.Th.Chrome().FgMuted)
+		keepDrawErr(errp, ierr)
 	})
-	env.Offset(gtx, image.Pt(iconW+gap, 0), func(gtx *layout.Context) {
+}
+
+// rowName draws the row's inline-editable root name.
+func (f *sourceFolders) rowName(env *kit.Env, gtx *layout.Context, row *sourceRow, g rowGeom, errp *error) {
+	env.Offset(gtx, image.Pt(g.nameX, 0), func(gtx *layout.Context) {
 		local := *gtx
-		local.Constraints.Min.X, local.Constraints.Max.X = nameW, nameW
-		if _, nerr := row.name.Layout(env, &local, nameProps); nerr != nil {
-			err = nerr
-		}
+		local.Constraints.Min.X, local.Constraints.Max.X = g.nameW, g.nameW
+		_, nerr := row.name.Layout(env, &local, &kit.TextFieldProps{Placeholder: "Name the root"})
+		keepDrawErr(errp, nerr)
 	})
-	env.Offset(gtx, image.Pt(iconW+gap+nameW+gap, 0), func(gtx *layout.Context) {
+}
+
+// rowAccess draws the row's read/write pick; the host holds the root's
+// access against the profile rules (workspace §2.2).
+func (f *sourceFolders) rowAccess(env *kit.Env, gtx *layout.Context, row *sourceRow, g rowGeom, selectProps *kit.SelectProps, errp *error) {
+	env.Offset(gtx, image.Pt(g.selectX, 0), func(gtx *layout.Context) {
 		local := *gtx
-		local.Constraints.Min.X, local.Constraints.Max.X = selectDims.Size.X, selectDims.Size.X
+		local.Constraints.Min.X, local.Constraints.Max.X = g.selectW, g.selectW
 		res, serr := row.access.Layout(env, &local, selectProps)
 		if serr == nil && res.Changed {
 			row.accessSel = res.Value
 		}
-		if serr != nil && err == nil {
-			err = serr
-		}
+		keepDrawErr(errp, serr)
 	})
-	env.Offset(gtx, image.Pt(w-rmDims.Size.X, (lineH-rmDims.Size.Y)/2), func(gtx *layout.Context) {
+}
+
+// rowRemove draws the row's remove button; a click drops the row through the
+// dialog's own step, so its add chain follows the row that takes this one's
+// place.
+func (f *sourceFolders) rowRemove(env *kit.Env, gtx *layout.Context, i int, row *sourceRow, g rowGeom, rmProps *kit.IconButtonProps, errp *error) {
+	env.Offset(gtx, image.Pt(g.rmX, (g.lineH-g.rmW)/2), func(gtx *layout.Context) {
 		local := *gtx
 		clicked, rerr := row.rm.Layout(env, &local, rmProps)
-		if rerr != nil && err == nil {
-			err = rerr
-		}
+		keepDrawErr(errp, rerr)
 		if clicked {
 			if f.onRemove != nil {
 				f.onRemove(i)
@@ -252,15 +301,15 @@ func (f *sourceFolders) layoutRow(env *kit.Env, gtx *layout.Context, i int, row 
 			}
 		}
 	})
+}
 
-	// Line 2: the folder's absolute path, muted and truncated in the middle.
-	env.Offset(gtx, image.Pt(iconW+gap, lineH+gap/2), func(gtx *layout.Context) {
+// rowPath draws the row's absolute path, muted and truncated in the middle.
+func (f *sourceFolders) rowPath(env *kit.Env, gtx *layout.Context, row *sourceRow, g rowGeom) {
+	env.Offset(gtx, image.Pt(g.iconW+g.gap, g.lineH+g.gap/2), func(gtx *layout.Context) {
 		local := *gtx
-		local.Constraints.Min.X, local.Constraints.Max.X = 0, w-iconW-gap
+		local.Constraints.Min.X, local.Constraints.Max.X = 0, g.w-g.iconW-g.gap
 		kit.MiddleEllipsisLabel(env, &local, theme.TypeSmall(), env.Th.Chrome().FgMuted, row.path)
 	})
-	totalH := lineH + gap/2 + gtx.Sp(theme.TypeSmall().Line)
-	return layout.Dimensions{Size: image.Pt(w, totalH)}, err
 }
 
 // layoutTyped draws the fallback area: the short note when no picker exists,
@@ -293,9 +342,7 @@ func (f *sourceFolders) layoutTyped(env *kit.Env, gtx *layout.Context) (layout.D
 		if terr == nil && ev.Submitted {
 			f.addTyped()
 		}
-		if terr != nil {
-			err = terr
-		}
+		keepDrawErr(&err, terr)
 	})
 	// The button shares the field's box line: the label and its gap sit it
 	// that far above the box.
@@ -304,11 +351,9 @@ func (f *sourceFolders) layoutTyped(env *kit.Env, gtx *layout.Context) (layout.D
 		local := *gtx
 		local.Constraints.Min.X, local.Constraints.Max.X = w-fieldW-gap, w-fieldW-gap
 		clicked, aerr := f.typedAdd.Layout(env, &local, kit.ButtonProps{
-			Text: "Add", Variant: kit.Secondary, Size: kit.SizeMD, Block: true,
+			Text: addLabel, Variant: kit.Secondary, Size: kit.SizeMD, Block: true,
 		})
-		if aerr != nil && err == nil {
-			err = aerr
-		}
+		keepDrawErr(&err, aerr)
 		if clicked {
 			f.addTyped()
 		}

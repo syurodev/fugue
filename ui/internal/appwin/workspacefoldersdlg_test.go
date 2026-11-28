@@ -10,6 +10,17 @@ import (
 	"github.com/syurodev/fugue/ui/internal/workspace"
 )
 
+// The typed host answers and hashes the chain tests script; static, so a
+// failure names its fixture.
+var errNoChooser = errors.New("no chooser is available")
+
+const (
+	testCreatedHash  = "hash-created"
+	testAfterAPIHash = "hash-after-api"
+	testAfterWebHash = "hash-after-web"
+	testAfterOneHash = "hash-after-one"
+)
+
 // The FUG-115 source-folder dialog tests: the create dialog chains the
 // create and one AddRoot per row on the hashes each step returns, the
 // add-folders dialog chains from the detail's hash, a failure keeps the
@@ -26,10 +37,10 @@ func TestCreateDialogChainsAddRootsWithReturnedHashes(t *testing.T) {
 	t.Parallel()
 	sc, _ := newTestScreens(t)
 	rec := &recordingMutatorClient{
-		createRes: client.Workspace{ID: "w9", ConfigHash: "hash-created"},
+		createRes: client.Workspace{ID: "w9", ConfigHash: testCreatedHash},
 		addRes: []client.Workspace{
-			{ID: "w9", ConfigHash: "hash-after-api"},
-			{ID: "w9", ConfigHash: "hash-after-web"},
+			{ID: "w9", ConfigHash: testAfterAPIHash},
+			{ID: "w9", ConfigHash: testAfterWebHash},
 		},
 	}
 	startTestMutator(t, sc, rec)
@@ -47,13 +58,13 @@ func TestCreateDialogChainsAddRootsWithReturnedHashes(t *testing.T) {
 
 	res = waitMutResult(t, sc.wsMut)
 	if call := res.Mutation; call.Kind != workspace.MutAddRoot || call.WorkspaceID != "w9" ||
-		call.Name != "api" || call.Path != "/repo/api" || call.Access != "rw" || call.ExpectedHash != "hash-created" {
+		call.Name != "api" || call.Path != "/repo/api" || call.Access != "rw" || call.ExpectedHash != testCreatedHash {
 		t.Fatalf("second post = %+v, want the first row's add with the created hash", call)
 	}
 	sc.update(nil, nil, nil, []workspace.MutResult{res})
 
 	res = waitMutResult(t, sc.wsMut)
-	if call := res.Mutation; call.Path != "/repo/web" || call.ExpectedHash != "hash-after-api" {
+	if call := res.Mutation; call.Path != "/repo/web" || call.ExpectedHash != testAfterAPIHash {
 		t.Fatalf("third post = %+v, want the second row's add with the hash the first add returned", call)
 	}
 	sc.update(nil, nil, nil, []workspace.MutResult{res})
@@ -74,8 +85,8 @@ func TestFoldersRetryResumesFromTheFailingRow(t *testing.T) {
 	t.Parallel()
 	sc, _ := newTestScreens(t)
 	rec := &recordingMutatorClient{
-		createRes: client.Workspace{ID: "w9", ConfigHash: "hash-created"},
-		addRes:    []client.Workspace{{ID: "w9", ConfigHash: "hash-after-api"}},
+		createRes: client.Workspace{ID: "w9", ConfigHash: testCreatedHash},
+		addRes:    []client.Workspace{{ID: "w9", ConfigHash: testAfterAPIHash}},
 		addErrs:   []error{nil, errRootInvalid},
 	}
 	startTestMutator(t, sc, rec)
@@ -108,7 +119,7 @@ func TestFoldersRetryResumesFromTheFailingRow(t *testing.T) {
 	sc.dlg.create.submit(sc)
 	res = waitMutResult(t, sc.wsMut)
 	if call := res.Mutation; call.Kind != workspace.MutAddRoot || call.Path != "/repo/web" ||
-		call.ExpectedHash != "hash-after-api" {
+		call.ExpectedHash != testAfterAPIHash {
 		t.Fatalf("retry post = %+v, want only the failing row with the hash the first add returned", call)
 	}
 	if len(rec.calls) != 4 {
@@ -127,8 +138,8 @@ func TestFoldersRemoveFailingRowFinishesTheChain(t *testing.T) {
 	t.Parallel()
 	sc, _ := newTestScreens(t)
 	rec := &recordingMutatorClient{
-		createRes: client.Workspace{ID: "w9", ConfigHash: "hash-created"},
-		addRes:    []client.Workspace{{ID: "w9", ConfigHash: "hash-after-api"}},
+		createRes: client.Workspace{ID: "w9", ConfigHash: testCreatedHash},
+		addRes:    []client.Workspace{{ID: "w9", ConfigHash: testAfterAPIHash}},
 		addErrs:   []error{nil, errRootInvalid},
 	}
 	startTestMutator(t, sc, rec)
@@ -162,7 +173,7 @@ func TestAddFoldersChainsFromTheDetailHash(t *testing.T) {
 	t.Parallel()
 	sc, _ := newTestScreens(t)
 	rec := &recordingMutatorClient{
-		addRes: []client.Workspace{{ID: "w1", ConfigHash: "hash-after-one"}},
+		addRes: []client.Workspace{{ID: "w1", ConfigHash: testAfterOneHash}},
 		addErrs: []error{
 			nil,
 			errRootInvalid,
@@ -175,9 +186,10 @@ func TestAddFoldersChainsFromTheDetailHash(t *testing.T) {
 	sc.workspaces.ApplyDetail(det)
 
 	sc.dlg.root.openAdd(sc, det)
-	if sc.dlg.root.folders.typedOpen {
-		t.Fatal("the add-folders dialog opened the fallback path field while a picker may exist")
-	}
+	// The test screens carry no picker, so the fallback field opened; force
+	// the picker's normal look, which the fallback tests cover separately.
+	sc.dlg.root.folders.noPicker = false
+	sc.dlg.root.folders.typedOpen = false
 	sc.dlg.root.folders.addPath("/repo/one")
 	sc.dlg.root.folders.addPath("/repo/two")
 	sc.dlg.root.submit(sc)
@@ -203,7 +215,7 @@ func TestAddFoldersChainsFromTheDetailHash(t *testing.T) {
 
 	sc.dlg.root.submit(sc)
 	res = waitMutResult(t, sc.wsMut)
-	if call := res.Mutation; call.Path != "/repo/two" || call.ExpectedHash != "hash-after-one" {
+	if call := res.Mutation; call.Path != "/repo/two" || call.ExpectedHash != testAfterOneHash {
 		t.Fatalf("retry add = %+v, want the failing row with the hash the first add returned", call)
 	}
 	sc.update(nil, nil, nil, []workspace.MutResult{res})
@@ -275,6 +287,7 @@ func TestSourceFoldersRefuseDuplicatePaths(t *testing.T) {
 func TestSourceFolderPickResultsLandOnTheList(t *testing.T) {
 	t.Parallel()
 	sc, _ := newTestScreens(t)
+	sc.folderPicker = folderpicker.NewPicker()
 	sc.dlg.create.open(sc)
 	f := &sc.dlg.create.folders
 
@@ -296,7 +309,7 @@ func TestSourceFolderPickResultsLandOnTheList(t *testing.T) {
 		t.Fatalf("rows after the pick = %+v, want one notes row", f.rows)
 	}
 
-	f.picked(folderpicker.Result{Err: errors.New("no chooser is available")})
+	f.picked(folderpicker.Result{Err: errNoChooser})
 	if f.refused == "" {
 		t.Fatal("a failed pick is not refused inline")
 	}

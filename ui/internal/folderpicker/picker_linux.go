@@ -31,6 +31,17 @@ const (
 	responseCodeCancelled = 1
 )
 
+// The static causes behind a portal answer; they are wrapped, never
+// constructed, at the call site.
+var (
+	errChooserNoHandle  = errors.New("the folder chooser's answer carries no request handle")
+	errChooserUnusable  = errors.New("the folder chooser answered an unusable response")
+	errChooserCode      = errors.New("the folder chooser answered an unreadable response code")
+	errChooserRefused   = errors.New("the folder chooser refused")
+	errChooserNoResults = errors.New("the folder chooser answered no results")
+	errChooserNoFolder  = errors.New("the folder chooser answered no folder")
+)
+
 // portalProbe reports whether a session bus carries the portal's FileChooser
 // interface. It runs once, on the picker's worker goroutine; a missing bus or
 // interface falls the pick through to the CLI helpers.
@@ -44,15 +55,12 @@ func platformProbe(ctx context.Context) Availability {
 	return av
 }
 
-// pickSeq numbers the handle tokens the pick sends; uniqueness per request is
-// all the portal needs of them.
-var pickSeq atomic.Uint64
-
 // pickPortal runs the portal FileChooser in directory mode: it opens the
 // desktop's chooser and answers the folder the user chose, or a cancel. The
 // Response signal subscription goes out before OpenFile, so a fast answer
-// cannot be missed.
-func pickPortal(ctx context.Context) (string, bool, error) {
+// cannot be missed. Seq numbers the request's handle token; uniqueness among
+// outstanding requests is all the portal needs of it.
+func pickPortal(ctx context.Context, seq *atomic.Uint64) (string, bool, error) {
 	conn, err := dbus.ConnectSessionBus(dbus.WithContext(ctx))
 	if err != nil {
 		return "", false, fmt.Errorf("reach the desktop portal: %w", err)
@@ -71,7 +79,7 @@ func pickPortal(ctx context.Context) (string, bool, error) {
 
 	obj := conn.Object(portalBusName, portalObjectPath)
 	opts := map[string]dbus.Variant{
-		"handle_token": dbus.MakeVariant(fmt.Sprintf("fugue%d", pickSeq.Add(1))),
+		"handle_token": dbus.MakeVariant(fmt.Sprintf("fugue%d", seq.Add(1))),
 		"directory":    dbus.MakeVariant(true),
 		"modal":        dbus.MakeVariant(true),
 	}
@@ -82,11 +90,11 @@ func pickPortal(ctx context.Context) (string, bool, error) {
 		return "", false, fmt.Errorf("open the desktop's folder chooser: %w", callErr)
 	}
 	if len(call.Body) != 1 {
-		return "", false, fmt.Errorf("the folder chooser's answer names no request handle")
+		return "", false, fmt.Errorf("%w: no answer body", errChooserNoHandle)
 	}
 	handle, ok := call.Body[0].(dbus.ObjectPath)
 	if !ok {
-		return "", false, fmt.Errorf("the folder chooser's answer carries no request handle")
+		return "", false, fmt.Errorf("%w: %T", errChooserNoHandle, call.Body[0])
 	}
 
 	for {
@@ -106,30 +114,30 @@ func pickPortal(ctx context.Context) (string, bool, error) {
 // results whose uris name the chosen folder.
 func portalResponse(ctx context.Context, body []any) (string, bool, error) {
 	if len(body) < 2 {
-		return "", false, errors.New("the folder chooser answered an unusable response")
+		return "", false, fmt.Errorf("%w: %d fields", errChooserUnusable, len(body))
 	}
 	code, ok := body[0].(uint32)
 	if !ok {
-		return "", false, errors.New("the folder chooser answered an unreadable response code")
+		return "", false, fmt.Errorf("%w: %T", errChooserCode, body[0])
 	}
 	switch code {
 	case responseCodeCancelled:
 		return "", true, nil
 	case responseCodeOK:
 	default:
-		return "", false, fmt.Errorf("the folder chooser refused: code %d", code)
+		return "", false, fmt.Errorf("%w: code %d", errChooserRefused, code)
 	}
 	results, ok := body[1].(map[string]dbus.Variant)
 	if !ok {
-		return "", false, errors.New("the folder chooser answered no results")
+		return "", false, fmt.Errorf("%w: %T", errChooserNoResults, body[1])
 	}
 	urisV, ok := results["uris"]
 	if !ok {
-		return "", false, errors.New("the folder chooser answered no folder")
+		return "", false, fmt.Errorf("%w: no uris field", errChooserNoFolder)
 	}
 	uris, ok := urisV.Value().([]string)
 	if !ok || len(uris) == 0 {
-		return "", false, errors.New("the folder chooser answered no folder")
+		return "", false, fmt.Errorf("%w: %T", errChooserNoFolder, urisV.Value())
 	}
 	select {
 	case <-ctx.Done():
