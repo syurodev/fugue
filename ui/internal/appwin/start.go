@@ -419,11 +419,7 @@ func (f *startFlow) layEffort(env *kit.Env, lay fieldLay) {
 		}
 		res, err := f.effort.Layout(env, gtx, props)
 		if res.Changed {
-			if res.Value == effortDefaultID {
-				f.effortSel = ""
-			} else {
-				f.effortSel = res.Value
-			}
+			f.effortSel = res.Value
 		}
 		return f.effort.Measure(env, gtx, props), err
 	})

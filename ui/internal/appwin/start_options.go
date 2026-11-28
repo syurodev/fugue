@@ -8,7 +8,7 @@ import (
 )
 
 // effortDefaultID lets Select treat "vendor default" as selectable instead of no
-// value; layEffort and effortValue map it back to "" for the host profile.
+// value; effortValue maps it back to "" for the host profile.
 const (
 	effortDefaultID    = "default"
 	labelVendorDefault = "vendor default"
