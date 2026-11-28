@@ -271,7 +271,11 @@ func wireTeamServices(
 	})
 	tools := append(slices.Clone(deps.TestFugueTools), teamProposeTool(hp.rt.teamProposals), teamAmendTool(hp.rt.teamProposals))
 	tools = append(tools, teamTaskTools(hp.rt.teamTasks)...)
+	if hp.rt.memory != nil {
+		tools = append(tools, memoryTools(hp.rt.memory, vs, deps.Random)...)
+	}
 	hp.rt.sessionTools = newSessionToolService(tokens, tools, vs, hp.rt.interactions, hp.rt.tags, deps.IDs, sessions)
+	hp.rt.sessionTools.setMemory(hp.rt.memory, deps.Random)
 	sessions.SetRelay(hp.rt.sessionTools)
 }
 

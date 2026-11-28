@@ -10,7 +10,37 @@ import type { Message } from "@bufbuild/protobuf";
  * Describes the file fugue/sessiontools/v1/sessiontools.proto.
  */
 export const file_fugue_sessiontools_v1_sessiontools: GenFile = /*@__PURE__*/
-  fileDesc("CihmdWd1ZS9zZXNzaW9udG9vbHMvdjEvc2Vzc2lvbnRvb2xzLnByb3RvEhVmdWd1ZS5zZXNzaW9udG9vbHMudjEiGQoXQWNxdWlyZUhlYXZ5U2xvdFJlcXVlc3QiLAoYQWNxdWlyZUhlYXZ5U2xvdFJlc3BvbnNlEhAKCGFjcXVpcmVkGAEgASgIIiYKDUF0dGFjaFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSIyCg5BdHRhY2hSZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEgwKBHJvbGUYAiABKAkiPwoEVG9vbBIMCgRuYW1lGAEgASgJEhMKC2Rlc2NyaXB0aW9uGAIgASgJEhQKDGlucHV0X3NjaGVtYRgDIAEoDCISChBMaXN0VG9vbHNSZXF1ZXN0Ij8KEUxpc3RUb29sc1Jlc3BvbnNlEioKBXRvb2xzGAEgAygLMhsuZnVndWUuc2Vzc2lvbnRvb2xzLnYxLlRvb2wiMgoPQ2FsbFRvb2xSZXF1ZXN0EgwKBG5hbWUYASABKAkSEQoJYXJndW1lbnRzGAIgASgMIjIKEENhbGxUb29sUmVzcG9uc2USDAoEdGV4dBgBIAEoCRIQCghpc19lcnJvchgCIAEoCDKfAwoSU2Vzc2lvblRvb2xTZXJ2aWNlElUKBkF0dGFjaBIkLmZ1Z3VlLnNlc3Npb250b29scy52MS5BdHRhY2hSZXF1ZXN0GiUuZnVndWUuc2Vzc2lvbnRvb2xzLnYxLkF0dGFjaFJlc3BvbnNlEl4KCUxpc3RUb29scxInLmZ1Z3VlLnNlc3Npb250b29scy52MS5MaXN0VG9vbHNSZXF1ZXN0GiguZnVndWUuc2Vzc2lvbnRvb2xzLnYxLkxpc3RUb29sc1Jlc3BvbnNlElsKCENhbGxUb29sEiYuZnVndWUuc2Vzc2lvbnRvb2xzLnYxLkNhbGxUb29sUmVxdWVzdBonLmZ1Z3VlLnNlc3Npb250b29scy52MS5DYWxsVG9vbFJlc3BvbnNlEnUKEEFjcXVpcmVIZWF2eVNsb3QSLi5mdWd1ZS5zZXNzaW9udG9vbHMudjEuQWNxdWlyZUhlYXZ5U2xvdFJlcXVlc3QaLy5mdWd1ZS5zZXNzaW9udG9vbHMudjEuQWNxdWlyZUhlYXZ5U2xvdFJlc3BvbnNlMAFC6wEKGWNvbS5mdWd1ZS5zZXNzaW9udG9vbHMudjFCEVNlc3Npb250b29sc1Byb3RvUAFaRWdpdGh1Yi5jb20vc3l1cm9kZXYvZnVndWUvcGtnL3BiL2Z1Z3VlL3Nlc3Npb250b29scy92MTtzZXNzaW9udG9vbHN2MaICA0ZTWKoCFUZ1Z3VlLlNlc3Npb250b29scy5WMcoCFUZ1Z3VlXFNlc3Npb250b29sc1xWMeICIUZ1Z3VlXFNlc3Npb250b29sc1xWMVxHUEJNZXRhZGF0YeoCF0Z1Z3VlOjpTZXNzaW9udG9vbHM6OlYxYgZwcm90bzM");
+  fileDesc("CihmdWd1ZS9zZXNzaW9udG9vbHMvdjEvc2Vzc2lvbnRvb2xzLnByb3RvEhVmdWd1ZS5zZXNzaW9udG9vbHMudjEiGAoWR2V0SW5zdHJ1Y3Rpb25zUmVxdWVzdCIvChdHZXRJbnN0cnVjdGlvbnNSZXNwb25zZRIUCgxpbnN0cnVjdGlvbnMYASABKAkiGQoXQWNxdWlyZUhlYXZ5U2xvdFJlcXVlc3QiLAoYQWNxdWlyZUhlYXZ5U2xvdFJlc3BvbnNlEhAKCGFjcXVpcmVkGAEgASgIIiYKDUF0dGFjaFJlcXVlc3QSFQoNc2Vzc2lvbl90b2tlbhgBIAEoCSIyCg5BdHRhY2hSZXNwb25zZRISCgpzZXNzaW9uX2lkGAEgASgJEgwKBHJvbGUYAiABKAkiPwoEVG9vbBIMCgRuYW1lGAEgASgJEhMKC2Rlc2NyaXB0aW9uGAIgASgJEhQKDGlucHV0X3NjaGVtYRgDIAEoDCISChBMaXN0VG9vbHNSZXF1ZXN0Ij8KEUxpc3RUb29sc1Jlc3BvbnNlEioKBXRvb2xzGAEgAygLMhsuZnVndWUuc2Vzc2lvbnRvb2xzLnYxLlRvb2wiMgoPQ2FsbFRvb2xSZXF1ZXN0EgwKBG5hbWUYASABKAkSEQoJYXJndW1lbnRzGAIgASgMIjIKEENhbGxUb29sUmVzcG9uc2USDAoEdGV4dBgBIAEoCRIQCghpc19lcnJvchgCIAEoCDKRBAoSU2Vzc2lvblRvb2xTZXJ2aWNlElUKBkF0dGFjaBIkLmZ1Z3VlLnNlc3Npb250b29scy52MS5BdHRhY2hSZXF1ZXN0GiUuZnVndWUuc2Vzc2lvbnRvb2xzLnYxLkF0dGFjaFJlc3BvbnNlEl4KCUxpc3RUb29scxInLmZ1Z3VlLnNlc3Npb250b29scy52MS5MaXN0VG9vbHNSZXF1ZXN0GiguZnVndWUuc2Vzc2lvbnRvb2xzLnYxLkxpc3RUb29sc1Jlc3BvbnNlElsKCENhbGxUb29sEiYuZnVndWUuc2Vzc2lvbnRvb2xzLnYxLkNhbGxUb29sUmVxdWVzdBonLmZ1Z3VlLnNlc3Npb250b29scy52MS5DYWxsVG9vbFJlc3BvbnNlEnUKEEFjcXVpcmVIZWF2eVNsb3QSLi5mdWd1ZS5zZXNzaW9udG9vbHMudjEuQWNxdWlyZUhlYXZ5U2xvdFJlcXVlc3QaLy5mdWd1ZS5zZXNzaW9udG9vbHMudjEuQWNxdWlyZUhlYXZ5U2xvdFJlc3BvbnNlMAEScAoPR2V0SW5zdHJ1Y3Rpb25zEi0uZnVndWUuc2Vzc2lvbnRvb2xzLnYxLkdldEluc3RydWN0aW9uc1JlcXVlc3QaLi5mdWd1ZS5zZXNzaW9udG9vbHMudjEuR2V0SW5zdHJ1Y3Rpb25zUmVzcG9uc2VC6wEKGWNvbS5mdWd1ZS5zZXNzaW9udG9vbHMudjFCEVNlc3Npb250b29sc1Byb3RvUAFaRWdpdGh1Yi5jb20vc3l1cm9kZXYvZnVndWUvcGtnL3BiL2Z1Z3VlL3Nlc3Npb250b29scy92MTtzZXNzaW9udG9vbHN2MaICA0ZTWKoCFUZ1Z3VlLlNlc3Npb250b29scy5WMcoCFUZ1Z3VlXFNlc3Npb250b29sc1xWMeICIUZ1Z3VlXFNlc3Npb250b29sc1xWMVxHUEJNZXRhZGF0YeoCF0Z1Z3VlOjpTZXNzaW9udG9vbHM6OlYxYgZwcm90bzM");
+
+/**
+ * @generated from message fugue.sessiontools.v1.GetInstructionsRequest
+ */
+export type GetInstructionsRequest = Message<"fugue.sessiontools.v1.GetInstructionsRequest"> & {
+};
+
+/**
+ * Describes the message fugue.sessiontools.v1.GetInstructionsRequest.
+ * Use `create(GetInstructionsRequestSchema)` to create a new message.
+ */
+export const GetInstructionsRequestSchema: GenMessage<GetInstructionsRequest> = /*@__PURE__*/
+  messageDesc(file_fugue_sessiontools_v1_sessiontools, 0);
+
+/**
+ * @generated from message fugue.sessiontools.v1.GetInstructionsResponse
+ */
+export type GetInstructionsResponse = Message<"fugue.sessiontools.v1.GetInstructionsResponse"> & {
+  /**
+   * @generated from field: string instructions = 1;
+   */
+  instructions: string;
+};
+
+/**
+ * Describes the message fugue.sessiontools.v1.GetInstructionsResponse.
+ * Use `create(GetInstructionsResponseSchema)` to create a new message.
+ */
+export const GetInstructionsResponseSchema: GenMessage<GetInstructionsResponse> = /*@__PURE__*/
+  messageDesc(file_fugue_sessiontools_v1_sessiontools, 1);
 
 /**
  * @generated from message fugue.sessiontools.v1.AcquireHeavySlotRequest
@@ -23,7 +53,7 @@ export type AcquireHeavySlotRequest = Message<"fugue.sessiontools.v1.AcquireHeav
  * Use `create(AcquireHeavySlotRequestSchema)` to create a new message.
  */
 export const AcquireHeavySlotRequestSchema: GenMessage<AcquireHeavySlotRequest> = /*@__PURE__*/
-  messageDesc(file_fugue_sessiontools_v1_sessiontools, 0);
+  messageDesc(file_fugue_sessiontools_v1_sessiontools, 2);
 
 /**
  * @generated from message fugue.sessiontools.v1.AcquireHeavySlotResponse
@@ -40,7 +70,7 @@ export type AcquireHeavySlotResponse = Message<"fugue.sessiontools.v1.AcquireHea
  * Use `create(AcquireHeavySlotResponseSchema)` to create a new message.
  */
 export const AcquireHeavySlotResponseSchema: GenMessage<AcquireHeavySlotResponse> = /*@__PURE__*/
-  messageDesc(file_fugue_sessiontools_v1_sessiontools, 1);
+  messageDesc(file_fugue_sessiontools_v1_sessiontools, 3);
 
 /**
  * @generated from message fugue.sessiontools.v1.AttachRequest
@@ -59,7 +89,7 @@ export type AttachRequest = Message<"fugue.sessiontools.v1.AttachRequest"> & {
  * Use `create(AttachRequestSchema)` to create a new message.
  */
 export const AttachRequestSchema: GenMessage<AttachRequest> = /*@__PURE__*/
-  messageDesc(file_fugue_sessiontools_v1_sessiontools, 2);
+  messageDesc(file_fugue_sessiontools_v1_sessiontools, 4);
 
 /**
  * @generated from message fugue.sessiontools.v1.AttachResponse
@@ -81,7 +111,7 @@ export type AttachResponse = Message<"fugue.sessiontools.v1.AttachResponse"> & {
  * Use `create(AttachResponseSchema)` to create a new message.
  */
 export const AttachResponseSchema: GenMessage<AttachResponse> = /*@__PURE__*/
-  messageDesc(file_fugue_sessiontools_v1_sessiontools, 3);
+  messageDesc(file_fugue_sessiontools_v1_sessiontools, 5);
 
 /**
  * Tool is one Fugue MCP tool as the vendor sees it.
@@ -112,7 +142,7 @@ export type Tool = Message<"fugue.sessiontools.v1.Tool"> & {
  * Use `create(ToolSchema)` to create a new message.
  */
 export const ToolSchema: GenMessage<Tool> = /*@__PURE__*/
-  messageDesc(file_fugue_sessiontools_v1_sessiontools, 4);
+  messageDesc(file_fugue_sessiontools_v1_sessiontools, 6);
 
 /**
  * @generated from message fugue.sessiontools.v1.ListToolsRequest
@@ -125,7 +155,7 @@ export type ListToolsRequest = Message<"fugue.sessiontools.v1.ListToolsRequest">
  * Use `create(ListToolsRequestSchema)` to create a new message.
  */
 export const ListToolsRequestSchema: GenMessage<ListToolsRequest> = /*@__PURE__*/
-  messageDesc(file_fugue_sessiontools_v1_sessiontools, 5);
+  messageDesc(file_fugue_sessiontools_v1_sessiontools, 7);
 
 /**
  * @generated from message fugue.sessiontools.v1.ListToolsResponse
@@ -142,7 +172,7 @@ export type ListToolsResponse = Message<"fugue.sessiontools.v1.ListToolsResponse
  * Use `create(ListToolsResponseSchema)` to create a new message.
  */
 export const ListToolsResponseSchema: GenMessage<ListToolsResponse> = /*@__PURE__*/
-  messageDesc(file_fugue_sessiontools_v1_sessiontools, 6);
+  messageDesc(file_fugue_sessiontools_v1_sessiontools, 8);
 
 /**
  * @generated from message fugue.sessiontools.v1.CallToolRequest
@@ -166,7 +196,7 @@ export type CallToolRequest = Message<"fugue.sessiontools.v1.CallToolRequest"> &
  * Use `create(CallToolRequestSchema)` to create a new message.
  */
 export const CallToolRequestSchema: GenMessage<CallToolRequest> = /*@__PURE__*/
-  messageDesc(file_fugue_sessiontools_v1_sessiontools, 7);
+  messageDesc(file_fugue_sessiontools_v1_sessiontools, 9);
 
 /**
  * CallToolResponse is the tool's answer. A refused or denied call is an
@@ -191,7 +221,7 @@ export type CallToolResponse = Message<"fugue.sessiontools.v1.CallToolResponse">
  * Use `create(CallToolResponseSchema)` to create a new message.
  */
 export const CallToolResponseSchema: GenMessage<CallToolResponse> = /*@__PURE__*/
-  messageDesc(file_fugue_sessiontools_v1_sessiontools, 8);
+  messageDesc(file_fugue_sessiontools_v1_sessiontools, 10);
 
 /**
  * SessionToolService is the only service the session principal may call
@@ -245,6 +275,17 @@ export const SessionToolService: GenService<{
     methodKind: "server_streaming";
     input: typeof AcquireHeavySlotRequestSchema;
     output: typeof AcquireHeavySlotResponseSchema;
+  },
+  /**
+   * GetInstructions returns the session-start workspace memory overview
+   * rendered as MCP server instructions within the 10 KiB budget.
+   *
+   * @generated from rpc fugue.sessiontools.v1.SessionToolService.GetInstructions
+   */
+  getInstructions: {
+    methodKind: "unary";
+    input: typeof GetInstructionsRequestSchema;
+    output: typeof GetInstructionsResponseSchema;
   },
 }> = /*@__PURE__*/
   serviceDesc(file_fugue_sessiontools_v1_sessiontools, 0);

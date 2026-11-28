@@ -21,6 +21,86 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+type GetInstructionsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetInstructionsRequest) Reset() {
+	*x = GetInstructionsRequest{}
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetInstructionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetInstructionsRequest) ProtoMessage() {}
+
+func (x *GetInstructionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetInstructionsRequest.ProtoReflect.Descriptor instead.
+func (*GetInstructionsRequest) Descriptor() ([]byte, []int) {
+	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{0}
+}
+
+type GetInstructionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Instructions  string                 `protobuf:"bytes,1,opt,name=instructions,proto3" json:"instructions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetInstructionsResponse) Reset() {
+	*x = GetInstructionsResponse{}
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetInstructionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetInstructionsResponse) ProtoMessage() {}
+
+func (x *GetInstructionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetInstructionsResponse.ProtoReflect.Descriptor instead.
+func (*GetInstructionsResponse) Descriptor() ([]byte, []int) {
+	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *GetInstructionsResponse) GetInstructions() string {
+	if x != nil {
+		return x.Instructions
+	}
+	return ""
+}
+
 type AcquireHeavySlotRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -29,7 +109,7 @@ type AcquireHeavySlotRequest struct {
 
 func (x *AcquireHeavySlotRequest) Reset() {
 	*x = AcquireHeavySlotRequest{}
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[0]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -41,7 +121,7 @@ func (x *AcquireHeavySlotRequest) String() string {
 func (*AcquireHeavySlotRequest) ProtoMessage() {}
 
 func (x *AcquireHeavySlotRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[0]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -54,7 +134,7 @@ func (x *AcquireHeavySlotRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcquireHeavySlotRequest.ProtoReflect.Descriptor instead.
 func (*AcquireHeavySlotRequest) Descriptor() ([]byte, []int) {
-	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{0}
+	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{2}
 }
 
 type AcquireHeavySlotResponse struct {
@@ -66,7 +146,7 @@ type AcquireHeavySlotResponse struct {
 
 func (x *AcquireHeavySlotResponse) Reset() {
 	*x = AcquireHeavySlotResponse{}
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[1]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -78,7 +158,7 @@ func (x *AcquireHeavySlotResponse) String() string {
 func (*AcquireHeavySlotResponse) ProtoMessage() {}
 
 func (x *AcquireHeavySlotResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[1]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -91,7 +171,7 @@ func (x *AcquireHeavySlotResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AcquireHeavySlotResponse.ProtoReflect.Descriptor instead.
 func (*AcquireHeavySlotResponse) Descriptor() ([]byte, []int) {
-	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{1}
+	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *AcquireHeavySlotResponse) GetAcquired() bool {
@@ -111,7 +191,7 @@ type AttachRequest struct {
 
 func (x *AttachRequest) Reset() {
 	*x = AttachRequest{}
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[2]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -123,7 +203,7 @@ func (x *AttachRequest) String() string {
 func (*AttachRequest) ProtoMessage() {}
 
 func (x *AttachRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[2]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -136,7 +216,7 @@ func (x *AttachRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachRequest.ProtoReflect.Descriptor instead.
 func (*AttachRequest) Descriptor() ([]byte, []int) {
-	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{2}
+	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *AttachRequest) GetSessionToken() string {
@@ -156,7 +236,7 @@ type AttachResponse struct {
 
 func (x *AttachResponse) Reset() {
 	*x = AttachResponse{}
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[3]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -168,7 +248,7 @@ func (x *AttachResponse) String() string {
 func (*AttachResponse) ProtoMessage() {}
 
 func (x *AttachResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[3]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -181,7 +261,7 @@ func (x *AttachResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use AttachResponse.ProtoReflect.Descriptor instead.
 func (*AttachResponse) Descriptor() ([]byte, []int) {
-	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{3}
+	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *AttachResponse) GetSessionId() string {
@@ -211,7 +291,7 @@ type Tool struct {
 
 func (x *Tool) Reset() {
 	*x = Tool{}
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[4]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -223,7 +303,7 @@ func (x *Tool) String() string {
 func (*Tool) ProtoMessage() {}
 
 func (x *Tool) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[4]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -236,7 +316,7 @@ func (x *Tool) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Tool.ProtoReflect.Descriptor instead.
 func (*Tool) Descriptor() ([]byte, []int) {
-	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{4}
+	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *Tool) GetName() string {
@@ -268,7 +348,7 @@ type ListToolsRequest struct {
 
 func (x *ListToolsRequest) Reset() {
 	*x = ListToolsRequest{}
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[5]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -280,7 +360,7 @@ func (x *ListToolsRequest) String() string {
 func (*ListToolsRequest) ProtoMessage() {}
 
 func (x *ListToolsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[5]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -293,7 +373,7 @@ func (x *ListToolsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListToolsRequest.ProtoReflect.Descriptor instead.
 func (*ListToolsRequest) Descriptor() ([]byte, []int) {
-	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{5}
+	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{7}
 }
 
 type ListToolsResponse struct {
@@ -305,7 +385,7 @@ type ListToolsResponse struct {
 
 func (x *ListToolsResponse) Reset() {
 	*x = ListToolsResponse{}
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[6]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -317,7 +397,7 @@ func (x *ListToolsResponse) String() string {
 func (*ListToolsResponse) ProtoMessage() {}
 
 func (x *ListToolsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[6]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -330,7 +410,7 @@ func (x *ListToolsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListToolsResponse.ProtoReflect.Descriptor instead.
 func (*ListToolsResponse) Descriptor() ([]byte, []int) {
-	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{6}
+	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *ListToolsResponse) GetTools() []*Tool {
@@ -351,7 +431,7 @@ type CallToolRequest struct {
 
 func (x *CallToolRequest) Reset() {
 	*x = CallToolRequest{}
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[7]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -363,7 +443,7 @@ func (x *CallToolRequest) String() string {
 func (*CallToolRequest) ProtoMessage() {}
 
 func (x *CallToolRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[7]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -376,7 +456,7 @@ func (x *CallToolRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallToolRequest.ProtoReflect.Descriptor instead.
 func (*CallToolRequest) Descriptor() ([]byte, []int) {
-	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{7}
+	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *CallToolRequest) GetName() string {
@@ -405,7 +485,7 @@ type CallToolResponse struct {
 
 func (x *CallToolResponse) Reset() {
 	*x = CallToolResponse{}
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[8]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -417,7 +497,7 @@ func (x *CallToolResponse) String() string {
 func (*CallToolResponse) ProtoMessage() {}
 
 func (x *CallToolResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[8]
+	mi := &file_fugue_sessiontools_v1_sessiontools_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -430,7 +510,7 @@ func (x *CallToolResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CallToolResponse.ProtoReflect.Descriptor instead.
 func (*CallToolResponse) Descriptor() ([]byte, []int) {
-	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{8}
+	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *CallToolResponse) GetText() string {
@@ -451,7 +531,10 @@ var File_fugue_sessiontools_v1_sessiontools_proto protoreflect.FileDescriptor
 
 const file_fugue_sessiontools_v1_sessiontools_proto_rawDesc = "" +
 	"\n" +
-	"(fugue/sessiontools/v1/sessiontools.proto\x12\x15fugue.sessiontools.v1\"\x19\n" +
+	"(fugue/sessiontools/v1/sessiontools.proto\x12\x15fugue.sessiontools.v1\"\x18\n" +
+	"\x16GetInstructionsRequest\"=\n" +
+	"\x17GetInstructionsResponse\x12\"\n" +
+	"\finstructions\x18\x01 \x01(\tR\finstructions\"\x19\n" +
 	"\x17AcquireHeavySlotRequest\"6\n" +
 	"\x18AcquireHeavySlotResponse\x12\x1a\n" +
 	"\bacquired\x18\x01 \x01(\bR\bacquired\"4\n" +
@@ -473,12 +556,13 @@ const file_fugue_sessiontools_v1_sessiontools_proto_rawDesc = "" +
 	"\targuments\x18\x02 \x01(\fR\targuments\"A\n" +
 	"\x10CallToolResponse\x12\x12\n" +
 	"\x04text\x18\x01 \x01(\tR\x04text\x12\x19\n" +
-	"\bis_error\x18\x02 \x01(\bR\aisError2\x9f\x03\n" +
+	"\bis_error\x18\x02 \x01(\bR\aisError2\x91\x04\n" +
 	"\x12SessionToolService\x12U\n" +
 	"\x06Attach\x12$.fugue.sessiontools.v1.AttachRequest\x1a%.fugue.sessiontools.v1.AttachResponse\x12^\n" +
 	"\tListTools\x12'.fugue.sessiontools.v1.ListToolsRequest\x1a(.fugue.sessiontools.v1.ListToolsResponse\x12[\n" +
 	"\bCallTool\x12&.fugue.sessiontools.v1.CallToolRequest\x1a'.fugue.sessiontools.v1.CallToolResponse\x12u\n" +
-	"\x10AcquireHeavySlot\x12..fugue.sessiontools.v1.AcquireHeavySlotRequest\x1a/.fugue.sessiontools.v1.AcquireHeavySlotResponse0\x01B\xeb\x01\n" +
+	"\x10AcquireHeavySlot\x12..fugue.sessiontools.v1.AcquireHeavySlotRequest\x1a/.fugue.sessiontools.v1.AcquireHeavySlotResponse0\x01\x12p\n" +
+	"\x0fGetInstructions\x12-.fugue.sessiontools.v1.GetInstructionsRequest\x1a..fugue.sessiontools.v1.GetInstructionsResponseB\xeb\x01\n" +
 	"\x19com.fugue.sessiontools.v1B\x11SessiontoolsProtoP\x01ZEgithub.com/syurodev/fugue/pkg/pb/fugue/sessiontools/v1;sessiontoolsv1\xa2\x02\x03FSX\xaa\x02\x15Fugue.Sessiontools.V1\xca\x02\x15Fugue\\Sessiontools\\V1\xe2\x02!Fugue\\Sessiontools\\V1\\GPBMetadata\xea\x02\x17Fugue::Sessiontools::V1b\x06proto3"
 
 var (
@@ -493,33 +577,37 @@ func file_fugue_sessiontools_v1_sessiontools_proto_rawDescGZIP() []byte {
 	return file_fugue_sessiontools_v1_sessiontools_proto_rawDescData
 }
 
-var file_fugue_sessiontools_v1_sessiontools_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_fugue_sessiontools_v1_sessiontools_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_fugue_sessiontools_v1_sessiontools_proto_goTypes = []any{
-	(*AcquireHeavySlotRequest)(nil),  // 0: fugue.sessiontools.v1.AcquireHeavySlotRequest
-	(*AcquireHeavySlotResponse)(nil), // 1: fugue.sessiontools.v1.AcquireHeavySlotResponse
-	(*AttachRequest)(nil),            // 2: fugue.sessiontools.v1.AttachRequest
-	(*AttachResponse)(nil),           // 3: fugue.sessiontools.v1.AttachResponse
-	(*Tool)(nil),                     // 4: fugue.sessiontools.v1.Tool
-	(*ListToolsRequest)(nil),         // 5: fugue.sessiontools.v1.ListToolsRequest
-	(*ListToolsResponse)(nil),        // 6: fugue.sessiontools.v1.ListToolsResponse
-	(*CallToolRequest)(nil),          // 7: fugue.sessiontools.v1.CallToolRequest
-	(*CallToolResponse)(nil),         // 8: fugue.sessiontools.v1.CallToolResponse
+	(*GetInstructionsRequest)(nil),   // 0: fugue.sessiontools.v1.GetInstructionsRequest
+	(*GetInstructionsResponse)(nil),  // 1: fugue.sessiontools.v1.GetInstructionsResponse
+	(*AcquireHeavySlotRequest)(nil),  // 2: fugue.sessiontools.v1.AcquireHeavySlotRequest
+	(*AcquireHeavySlotResponse)(nil), // 3: fugue.sessiontools.v1.AcquireHeavySlotResponse
+	(*AttachRequest)(nil),            // 4: fugue.sessiontools.v1.AttachRequest
+	(*AttachResponse)(nil),           // 5: fugue.sessiontools.v1.AttachResponse
+	(*Tool)(nil),                     // 6: fugue.sessiontools.v1.Tool
+	(*ListToolsRequest)(nil),         // 7: fugue.sessiontools.v1.ListToolsRequest
+	(*ListToolsResponse)(nil),        // 8: fugue.sessiontools.v1.ListToolsResponse
+	(*CallToolRequest)(nil),          // 9: fugue.sessiontools.v1.CallToolRequest
+	(*CallToolResponse)(nil),         // 10: fugue.sessiontools.v1.CallToolResponse
 }
 var file_fugue_sessiontools_v1_sessiontools_proto_depIdxs = []int32{
-	4, // 0: fugue.sessiontools.v1.ListToolsResponse.tools:type_name -> fugue.sessiontools.v1.Tool
-	2, // 1: fugue.sessiontools.v1.SessionToolService.Attach:input_type -> fugue.sessiontools.v1.AttachRequest
-	5, // 2: fugue.sessiontools.v1.SessionToolService.ListTools:input_type -> fugue.sessiontools.v1.ListToolsRequest
-	7, // 3: fugue.sessiontools.v1.SessionToolService.CallTool:input_type -> fugue.sessiontools.v1.CallToolRequest
-	0, // 4: fugue.sessiontools.v1.SessionToolService.AcquireHeavySlot:input_type -> fugue.sessiontools.v1.AcquireHeavySlotRequest
-	3, // 5: fugue.sessiontools.v1.SessionToolService.Attach:output_type -> fugue.sessiontools.v1.AttachResponse
-	6, // 6: fugue.sessiontools.v1.SessionToolService.ListTools:output_type -> fugue.sessiontools.v1.ListToolsResponse
-	8, // 7: fugue.sessiontools.v1.SessionToolService.CallTool:output_type -> fugue.sessiontools.v1.CallToolResponse
-	1, // 8: fugue.sessiontools.v1.SessionToolService.AcquireHeavySlot:output_type -> fugue.sessiontools.v1.AcquireHeavySlotResponse
-	5, // [5:9] is the sub-list for method output_type
-	1, // [1:5] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	6,  // 0: fugue.sessiontools.v1.ListToolsResponse.tools:type_name -> fugue.sessiontools.v1.Tool
+	4,  // 1: fugue.sessiontools.v1.SessionToolService.Attach:input_type -> fugue.sessiontools.v1.AttachRequest
+	7,  // 2: fugue.sessiontools.v1.SessionToolService.ListTools:input_type -> fugue.sessiontools.v1.ListToolsRequest
+	9,  // 3: fugue.sessiontools.v1.SessionToolService.CallTool:input_type -> fugue.sessiontools.v1.CallToolRequest
+	2,  // 4: fugue.sessiontools.v1.SessionToolService.AcquireHeavySlot:input_type -> fugue.sessiontools.v1.AcquireHeavySlotRequest
+	0,  // 5: fugue.sessiontools.v1.SessionToolService.GetInstructions:input_type -> fugue.sessiontools.v1.GetInstructionsRequest
+	5,  // 6: fugue.sessiontools.v1.SessionToolService.Attach:output_type -> fugue.sessiontools.v1.AttachResponse
+	8,  // 7: fugue.sessiontools.v1.SessionToolService.ListTools:output_type -> fugue.sessiontools.v1.ListToolsResponse
+	10, // 8: fugue.sessiontools.v1.SessionToolService.CallTool:output_type -> fugue.sessiontools.v1.CallToolResponse
+	3,  // 9: fugue.sessiontools.v1.SessionToolService.AcquireHeavySlot:output_type -> fugue.sessiontools.v1.AcquireHeavySlotResponse
+	1,  // 10: fugue.sessiontools.v1.SessionToolService.GetInstructions:output_type -> fugue.sessiontools.v1.GetInstructionsResponse
+	6,  // [6:11] is the sub-list for method output_type
+	1,  // [1:6] is the sub-list for method input_type
+	1,  // [1:1] is the sub-list for extension type_name
+	1,  // [1:1] is the sub-list for extension extendee
+	0,  // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_fugue_sessiontools_v1_sessiontools_proto_init() }
@@ -533,7 +621,7 @@ func file_fugue_sessiontools_v1_sessiontools_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fugue_sessiontools_v1_sessiontools_proto_rawDesc), len(file_fugue_sessiontools_v1_sessiontools_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

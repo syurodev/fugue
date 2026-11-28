@@ -214,10 +214,14 @@ func assertClaudeBridgeArgvAndList(t *testing.T, f *approveFixture) {
 		t.Fatalf("BuildArgv = (%q, %v), want --permission-prompt-tool mcp__fugue__approve", argv, err)
 	}
 	listed, err := f.tools.List(t.Context(), f.binding)
-	if err != nil || len(listed) != 2 {
-		t.Fatalf("List = (%+v, %v), want the approve relay and fugue_team_propose", listed, err)
+	wantTools := []string{
+		approveToolName, teamProposeToolName,
+		memoryOverviewToolName, memorySearchToolName, memoryGetToolName, memoryWriteToolName,
 	}
-	for _, want := range []string{approveToolName, teamProposeToolName} {
+	if err != nil || len(listed) != len(wantTools) {
+		t.Fatalf("List = (%+v, %v), want %v", listed, err, wantTools)
+	}
+	for _, want := range wantTools {
 		if !slices.ContainsFunc(listed, func(v FugueToolView) bool { return v.Name == want }) {
 			t.Fatalf("List = %+v, want %s offered", listed, want)
 		}

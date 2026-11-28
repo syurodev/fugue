@@ -137,6 +137,16 @@ func (s *SessionClient) AcquireHeavySlot(ctx context.Context) (*HeavyLease, erro
 	})
 }
 
+// Instructions fetches the session's initial workspace memory overview rendered
+// as MCP server instructions.
+func (s *SessionClient) Instructions(ctx context.Context) (string, error) {
+	res, err := s.tools.GetInstructions(ctx, connect.NewRequest(&sessiontoolsv1.GetInstructionsRequest{}))
+	if err != nil {
+		return "", fmt.Errorf("fetch the session instructions: %w", err)
+	}
+	return res.Msg.Instructions, nil
+}
+
 // Close releases the connection.
 func (s *SessionClient) Close() { s.hc.CloseIdleConnections() }
 

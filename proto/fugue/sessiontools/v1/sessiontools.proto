@@ -22,6 +22,16 @@ service SessionToolService {
   // AcquireHeavySlot waits for one heavy-command semaphore slot and holds it
   // until the session client cancels or disconnects (orchestration §7).
   rpc AcquireHeavySlot(AcquireHeavySlotRequest) returns (stream AcquireHeavySlotResponse);
+
+  // GetInstructions returns the session-start workspace memory overview
+  // rendered as MCP server instructions within the 10 KiB budget.
+  rpc GetInstructions(GetInstructionsRequest) returns (GetInstructionsResponse);
+}
+
+message GetInstructionsRequest {}
+
+message GetInstructionsResponse {
+  string instructions = 1;
 }
 
 message AcquireHeavySlotRequest {}

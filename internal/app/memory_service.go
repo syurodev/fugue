@@ -120,3 +120,11 @@ func (rt *HostRuntime) MemoryStore() (*workspacememory.Store, error) {
 	}
 	return rt.memory, nil
 }
+
+// MemoryService returns the Host API application service for workspace memory.
+func (rt *HostRuntime) MemoryService() (*MemoryService, error) {
+	if rt.memory == nil {
+		return nil, errcode.New(errcode.Unavailable, "the workspace memory service is unavailable")
+	}
+	return &MemoryService{store: rt.memory}, nil
+}

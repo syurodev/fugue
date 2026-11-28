@@ -603,6 +603,7 @@ func assertProductionToolsOnly(t *testing.T, tools *SessionToolService) {
 		taskAskToolName, taskAnswerToolName, taskRetryToolName,
 		taskAcceptToolName, taskRejectToolName, taskRecoverToolName,
 		teamNoteToolName, teamBriefToolName, teamReadToolName,
+		memoryOverviewToolName, memorySearchToolName, memoryGetToolName, memoryWriteToolName,
 	}
 	if len(tools.tools) != len(want) {
 		t.Fatalf("production tool count = %d, want %d", len(tools.tools), len(want))
