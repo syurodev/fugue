@@ -2,6 +2,9 @@ package workspace
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -19,6 +22,10 @@ const (
 	// FileReadMaxBytes is the per-read size limit; larger files are refused
 	// with ErrFileTooLarge (host-api §5.4).
 	FileReadMaxBytes = 1 << 20
+	// FileHashMaxBytes is the upper bound for streamed content hashing by
+	// HashFile (64 MiB), bounding disk I/O while supporting binary and large
+	// files.
+	FileHashMaxBytes = 64 << 20
 	// DirListMaxEntries caps one directory listing.
 	DirListMaxEntries = 1000
 	// binarySniffBytes is how much of the head a binary check inspects.
@@ -83,6 +90,54 @@ func (s *Service) ReadFile(ctx context.Context, workspaceID, rootName, path stri
 	out := &FileRead{Content: content, TotalLines: total, Language: LanguageHint(path)}
 	out.Truncated = applyLineRange(&out.Content, total, startLine, endLine)
 	return out, nil
+}
+
+// HashFile computes the lowercase hex SHA-256 digest of a file inside one of
+// the workspace's registered roots by streaming raw bytes (C-06). It enforces
+// the same root-confinement rules as ReadFile without UTF-8 checks, trailing
+// newline trimming, or the 1 MiB text read limit, bounded by FileHashMaxBytes
+// (64 MiB).
+func (s *Service) HashFile(ctx context.Context, workspaceID, rootName, path string) (digest string, retErr error) {
+	target, err := s.confinedPath(ctx, workspaceID, rootName, path)
+	if err != nil {
+		return "", err
+	}
+	info, err := os.Stat(target)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", NewError(ErrFileNotFound, "the file does not exist in the workspace root")
+		}
+		return "", WrapError(ErrFileNotFound, "stat the file", err)
+	}
+	// Only a regular file: opening a FIFO or device an agent anchored would
+	// block the host goroutine (memory anchors come from agent writes).
+	if !info.Mode().IsRegular() {
+		return "", NewError(ErrFileNotFound, "the path is not a regular file")
+	}
+	if info.Size() > FileHashMaxBytes {
+		return "", NewError(ErrFileTooLarge, "the file exceeds the 64 MiB hash limit")
+	}
+	f, err := os.OpenInRoot(filepath.Dir(target), filepath.Base(target))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return "", NewError(ErrFileNotFound, "the file does not exist in the workspace root")
+		}
+		return "", WrapError(ErrFileNotFound, "open the file", err)
+	}
+	defer func() {
+		if cerr := f.Close(); cerr != nil && retErr == nil {
+			retErr = WrapError(ErrFileNotFound, "close the file", cerr)
+		}
+	}()
+	h := sha256.New()
+	n, err := io.Copy(h, io.LimitReader(f, FileHashMaxBytes+1))
+	if err != nil {
+		return "", WrapError(ErrFileNotFound, "hash the file", err)
+	}
+	if n > FileHashMaxBytes {
+		return "", NewError(ErrFileTooLarge, "the file exceeds the 64 MiB hash limit")
+	}
+	return hex.EncodeToString(h.Sum(nil)), nil
 }
 
 func totalLines(content string) int64 {

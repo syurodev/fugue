@@ -71,6 +71,15 @@ Changing this file needs a review of what clients can rely on; hiding a code nee
 | `secrets.invalid_name` | The secret name does not match the allowed ASCII identifier format. |
 | `secrets.value_too_large` | The secret value is empty or exceeds the 64 KiB limit. |
 | `secrets.limit_exceeded` | The secret count limit for this scope (512) has been reached. |
+| `memory.revision_conflict` | The memory entry changed under the caller's expected revision; the current entry is returned. |
+| `memory.contains_secret` | The memory entry contains a detected secret and was rejected. |
+| `memory.label_taken` | Another valid memory entry in the workspace already uses this label. |
+| `memory.too_large` | A memory entry field exceeds its size or count limit. |
+| `memory.language` | The memory entry has too much non-English prose under the C-08 language rule. |
+| `memory.rate_limited` | The per-session workspace memory write rate limit was exceeded. |
+| `memory.limit_reached` | The workspace has reached the maximum number of valid memory entries. |
+| `memory.import_invalid` | The workspace memory import Markdown file is malformed or failed validation. |
+| `memory.import_stale` | Workspace memory changed between import preview and apply. |
 
 ## Hidden on purpose
 

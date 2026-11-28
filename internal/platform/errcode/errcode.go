@@ -75,6 +75,15 @@ const (
 	SecretsInvalidName          Code = "secrets.invalid_name"
 	SecretsValueTooLarge        Code = "secrets.value_too_large"
 	SecretsLimitExceeded        Code = "secrets.limit_exceeded"
+	MemoryRevisionConflict      Code = "memory.revision_conflict"
+	MemoryContainsSecret        Code = "memory.contains_secret"
+	MemoryLabelTaken            Code = "memory.label_taken"
+	MemoryTooLarge              Code = "memory.too_large"
+	MemoryLanguage              Code = "memory.language"
+	MemoryRateLimited           Code = "memory.rate_limited"
+	MemoryLimitReached          Code = "memory.limit_reached"
+	MemoryImportInvalid         Code = "memory.import_invalid"
+	MemoryImportStale           Code = "memory.import_stale"
 )
 
 // Entry classifies one code. Hidden codes are never shown to a client; the
@@ -167,6 +176,15 @@ func serviceRegistry() []Entry {
 		{SecretsInvalidName, true, "the secret name does not match the allowed ASCII identifier format"},
 		{SecretsValueTooLarge, true, "the secret value exceeds the 64 KiB limit or is empty"},
 		{SecretsLimitExceeded, true, "the secret count limit for this scope (512) has been reached"},
+		{MemoryRevisionConflict, true, "the memory entry changed under the caller's expected revision; the current entry is returned"},
+		{MemoryContainsSecret, true, "the memory entry contains a detected secret and was rejected"},
+		{MemoryLabelTaken, true, "another valid memory entry in the workspace already uses this label"},
+		{MemoryTooLarge, true, "a memory entry field exceeds its size or count limit"},
+		{MemoryLanguage, true, "the memory entry has too much non-English prose under the C-08 language rule"},
+		{MemoryRateLimited, true, "the per-session workspace memory write rate limit was exceeded"},
+		{MemoryLimitReached, true, "the workspace has reached the maximum number of valid memory entries"},
+		{MemoryImportInvalid, true, "the workspace memory import Markdown file is malformed or failed validation"},
+		{MemoryImportStale, true, "workspace memory changed between import preview and apply"},
 	}
 }
 

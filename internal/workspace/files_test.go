@@ -1,6 +1,9 @@
 package workspace
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"path/filepath"
 	"slices"
@@ -210,5 +213,62 @@ func TestApplyLineRange(t *testing.T) {
 		if content != tc.want || got != tc.wantTruncated {
 			t.Fatalf("%s: applyLineRange = (%q, %v), want (%q, %v)", name, content, got, tc.want, tc.wantTruncated)
 		}
+	}
+}
+
+// TestHashFile verifies streamed SHA-256 hashing over raw bytes (binary,
+// > 1 MiB, exact trailing newline preservation) and root confinement.
+func TestHashFile(t *testing.T) {
+	t.Parallel()
+	f := newFileReadFixture(t)
+	ctx := t.Context()
+
+	binBytes := []byte{0x00, 0xff, 0xfe, 0x01, 'b', 'i', 'n', 0x00}
+	largeBytes := bytes.Repeat([]byte("A"), FileReadMaxBytes+4096)
+	withNewline := []byte("hello\n")
+	withoutNewline := []byte("hello")
+
+	for name, data := range map[string][]byte{
+		"raw-bin.dat":    binBytes,
+		"over-1mib.dat":  largeBytes,
+		"with-nl.txt":    withNewline,
+		"without-nl.txt": withoutNewline,
+	} {
+		if err := os.WriteFile(filepath.Join(f.root, name), data, 0o600); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+		got, err := f.svc.HashFile(ctx, f.wsID, testMainRoot, name)
+		if err != nil {
+			t.Fatalf("HashFile(%s): %v", name, err)
+		}
+		sum := sha256.Sum256(data)
+		want := hex.EncodeToString(sum[:])
+		if got != want {
+			t.Fatalf("HashFile(%s) = %q, want %q", name, got, want)
+		}
+	}
+
+	nlHash, err := f.svc.HashFile(ctx, f.wsID, testMainRoot, "with-nl.txt")
+	if err != nil {
+		t.Fatalf("HashFile(with-nl.txt): %v", err)
+	}
+	noNLHash, err := f.svc.HashFile(ctx, f.wsID, testMainRoot, "without-nl.txt")
+	if err != nil {
+		t.Fatalf("HashFile(without-nl.txt): %v", err)
+	}
+	if nlHash == noNLHash {
+		t.Fatalf("trailing newline should change hash, both gave %q", nlHash)
+	}
+
+	for _, esc := range []string{"../outside/secret.txt", filepath.Join(f.outside, "secret.txt"), "link.txt", ""} {
+		if _, err := f.svc.HashFile(ctx, f.wsID, testMainRoot, esc); CodeOf(err) != ErrPathOutsideRoot {
+			t.Fatalf("HashFile(%q) code = %v, want %v", esc, CodeOf(err), ErrPathOutsideRoot)
+		}
+	}
+	if _, err := f.svc.HashFile(ctx, f.wsID, testMainRoot, "missing.bin"); CodeOf(err) != ErrFileNotFound {
+		t.Fatalf("HashFile missing code = %v, want %v", CodeOf(err), ErrFileNotFound)
+	}
+	if _, err := f.svc.HashFile(ctx, f.wsID, testMainRoot, fileTestNested); CodeOf(err) != ErrFileNotFound {
+		t.Fatalf("HashFile dir code = %v, want %v", CodeOf(err), ErrFileNotFound)
 	}
 }
