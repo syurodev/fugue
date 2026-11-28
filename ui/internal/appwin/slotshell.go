@@ -358,8 +358,35 @@ func (s *screens) layoutRail(gtx *layout.Context, env *kit.Env, sidebarOpen bool
 		}
 	}
 	if sidebarOpen {
+		// The pill carries the active item's selected level. When that
+		// button holds keyboard focus, the pill itself crossfades to the
+		// selected-focus wash (§3.4, FUG-109): the button is NoSelectedFill,
+		// so stacking a wash over the pill would overshoot the token level —
+		// the pill is what must land on SelectedFocusWash.
+		var activeTag event.Tag
+		for _, it := range items {
+			if s.grid.rail == it.item {
+				activeTag = s.grid.railBtn(it.item).Tag()
+				break
+			}
+		}
+		focusVal := float32(0)
+		if env.FocusShown(gtx, activeTag) {
+			focusVal = 1
+		}
+		var pillFocus float32
+		if env.ReducedMotion {
+			s.grid.railPillFocusF.Snap(focusVal)
+			pillFocus = focusVal
+		} else {
+			pillFocus = s.grid.railPillFocusF.Follow(focusVal, env.DT())
+			if s.grid.railPillFocusF.Moving() {
+				env.Keep()
+			}
+		}
 		pillRect := image.Rect(x, int(pillY+0.5), x+btnW, int(pillY+0.5)+btnW)
-		paint.FillShape(gtx.Ops, env.Th.Chrome().SelectedWash, clip.UniformRRect(pillRect, gtx.Dp(theme.RadiusSM)).Op(gtx.Ops))
+		pillColor := kit.Mix(env.Th.Chrome().SelectedWash, env.Th.Chrome().SelectedFocusWash, pillFocus)
+		paint.FillShape(gtx.Ops, pillColor, clip.UniformRRect(pillRect, gtx.Dp(theme.RadiusSM)).Op(gtx.Ops))
 	}
 
 	y := gap

@@ -58,11 +58,13 @@ func resolveState(env *Env, gtx *layout.Context, tag event.Tag, click *widget.Cl
 
 // controlLook is the color pairing of one control (UK-03, UK-E04): the
 // fills — the variant's rest fill, the layer that replaces it under hover
-// and the layer for press — the selected-state wash, the border, and the
-// label color at rest and under interaction. A zero color means none.
+// and the layer for press — the selected-state wash, the selected-focus wash
+// that replaces it on a FocusWash chrome button (§3.4, FUG-109), the border,
+// and the label color at rest and under interaction. A zero color means none.
 type controlLook struct {
 	base, hover, press color.NRGBA
 	sel                color.NRGBA
+	selFocus           color.NRGBA
 	border             color.NRGBA
 	ring               color.NRGBA
 	fg, fgHover        color.NRGBA
@@ -72,7 +74,7 @@ type controlLook struct {
 // dim scales every color of the look by a, the whole control at
 // DisabledOpacity (§4.1).
 func (l controlLook) dim(a float32) controlLook {
-	for _, c := range []*color.NRGBA{&l.base, &l.hover, &l.press, &l.sel, &l.border, &l.ring, &l.fg, &l.fgHover, &l.ripple} {
+	for _, c := range []*color.NRGBA{&l.base, &l.hover, &l.press, &l.sel, &l.selFocus, &l.border, &l.ring, &l.fg, &l.fgHover, &l.ripple} {
 		*c = fade(*c, a)
 	}
 	return l
@@ -221,14 +223,18 @@ func (c *pressable) paintWith(env *Env, gtx *layout.Context, r image.Rectangle, 
 	}
 	base, sel, hover, press := layerWeights(wash)
 	fillLayer(gtx, r, radius, look.base, base)
-	fillLayer(gtx, r, radius, look.sel, sel)
-	if focusWash {
-		// A focused toggled button stacks the wash over the selected fill —
-		// SelectedWash, or the rail's NoSelectedFill + external pill —
-		// because layerWeights lets the selected wash replace hover, which
-		// would leave focus invisible on it (§3.4, FUG-109). Press still
-		// replaces both.
-		fillLayer(gtx, r, radius, look.hover, unit01(mv.focus)*(1-unit01(mv.press))*unit01(mv.sel))
+	if focusWash && look.sel.A != 0 && unit01(mv.sel) > 0 {
+		// A focused toggled button replaces the selected fill with the
+		// selected-focus wash (§3.4, FUG-109): stacking a translucent wash
+		// over SelectedWash moves the composite by ~3/255 in dark, which the
+		// eye misses, so the fill crossfades to the token instead and lands
+		// exactly on it. The transition is the focus follower, press still
+		// replaces everything, and a NoSelectedFill button (the rail, whose
+		// pill is drawn by the layout) paints nothing here — the external
+		// pill carries the level.
+		fillLayer(gtx, r, radius, mix(look.sel, look.selFocus, unit01(mv.focus)), sel)
+	} else {
+		fillLayer(gtx, r, radius, look.sel, sel)
 	}
 	fillLayer(gtx, r, radius, look.hover, hover)
 	fillLayer(gtx, r, radius, look.press, press)

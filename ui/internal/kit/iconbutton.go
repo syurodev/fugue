@@ -127,7 +127,7 @@ func (s *IconButtonState) Layout(env *Env, gtx *layout.Context, p *IconButtonPro
 // look at DisabledOpacity (§4.1).
 func iconButtonLookOf(env *Env, v IconButtonVariant, toggled, disabled bool) controlLook {
 	c := env.Th.Chrome()
-	l := controlLook{hover: c.HoverWash, press: c.PressedWash, sel: c.SelectedWash, fg: c.IconMuted, fgHover: c.Fg, ripple: c.RippleWash, ring: c.FocusBorder}
+	l := controlLook{hover: c.HoverWash, press: c.PressedWash, sel: c.SelectedWash, selFocus: c.SelectedFocusWash, fg: c.IconMuted, fgHover: c.Fg, ripple: c.RippleWash, ring: c.FocusBorder}
 	switch v {
 	case IconButtonGhost:
 		// Ghost rests on the bare surface in the colors set above.

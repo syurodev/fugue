@@ -354,6 +354,7 @@ func TestListRowAndSectionHeaderTextContrastOnSurface(t *testing.T) {
 				{"SurfaceTinted", c.SurfaceTinted, true},
 				{"SelectedPill/AppBg", over(c.AppBg, c.SelectedWash), false},
 				{"SelectedPill/SurfaceBase", over(c.SurfaceBase, c.SelectedWash), false},
+				{"SelectedFocusPill/AppBg", over(c.AppBg, c.SelectedFocusWash), false},
 				{"HoverPill/AppBg", over(c.AppBg, c.HoverWash), false},
 			}
 			for _, sf := range surfaces {

@@ -9,6 +9,8 @@ import (
 	"gioui.org/io/event"
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/op/clip"
+	"gioui.org/op/paint"
 	"gioui.org/unit"
 
 	"github.com/syurodev/fugue/ui/internal/kit"
@@ -203,5 +205,118 @@ func TestChromeButtonsShowFocusWithTheHoverWashNotARing(t *testing.T) {
 		env.Preview = kit.Preview{Focus: tc.tag}
 		focused := renderShotFrames(t, tc.win, env, sc, tc.size, "fug109-focus")
 		fug109WashShown(t, base, focused, tc.box, tc.name)
+	}
+}
+
+// fug109PatchMean returns the per-channel mean color over r; averaging rides
+// out the headless rasterizer's ±1–2 LSB wobble that single pixels show.
+func fug109PatchMean(img *image.RGBA, r image.Rectangle) [3]float64 {
+	var sum [3]float64
+	n := 0
+	for y := r.Min.Y; y < r.Max.Y; y++ {
+		for x := r.Min.X; x < r.Max.X; x++ {
+			c := img.RGBAAt(x, y)
+			sum[0] += float64(c.R)
+			sum[1] += float64(c.G)
+			sum[2] += float64(c.B)
+			n++
+		}
+	}
+	for i := range sum {
+		sum[i] /= float64(n)
+	}
+	return sum
+}
+
+// fug109PatchStep is the largest per-channel distance between two patch
+// means.
+func fug109PatchStep(a, b [3]float64) float64 {
+	m := 0.0
+	for i := range a {
+		d := a[i] - b[i]
+		if d < 0 {
+			d = -d
+		}
+		m = max(m, d)
+	}
+	return m
+}
+
+// fug109Patch is the interior strip of box the pixel asserts read, inside the
+// rounded body and clear of the glyph, which spans local x 5..19 of a 24 dp
+// control (6..21 of a 28 dp one).
+func fug109Patch(box image.Rectangle, side int) image.Rectangle {
+	return image.Rect(box.Min.X+2, box.Min.Y+side/2-4, box.Min.X+5, box.Min.Y+side/2+4)
+}
+
+// TestRailPillFocusStepIsAtLeastAHoverStep pins the rail's round-2 approach
+// (§3.4, FUG-109): the active item's button is NoSelectedFill, so when it
+// holds keyboard focus the pill itself crossfades to the selected-focus wash
+// and lands exactly on the token level — no stack over the pill, which would
+// overshoot. The focused-vs-unfocused step at the pill must be at least the
+// hover-vs-rest step on the same surface (an untoggled rail button's hover),
+// within 1 LSB, and equal to a bare swatch of SelectedFocusWash over AppBg.
+func TestRailPillFocusStepIsAtLeastAHoverStep(t *testing.T) {
+	t.Parallel()
+	vc := newFakeAppVaultClient()
+	vw := vault.NewWorker(func() vault.Client { return vc })
+	vw.Start(t.Context())
+	t.Cleanup(vw.Stop)
+
+	for _, light := range []bool{true, false} {
+		mode := "dark"
+		if light {
+			mode = "light"
+		}
+		t.Run(mode, func(t *testing.T) {
+			sc := newFUG65TestScreens(t)
+			sc.vaultWorker = vw
+			env := newFUG65Env(t, light)
+
+			const w, hgt = 1200, 800
+			win := headlessOpen(t, w, hgt)
+			var ops op.Ops
+			gtx := layout.Context{Ops: &ops, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1})}
+			barH := gtx.Dp(theme.TopBarHeight)
+			side := gtx.Dp(theme.ControlSM)
+			gap := gtx.Dp(theme.SpaceXS)
+			x := (gtx.Dp(theme.RailWidth) - side) / 2
+			active := image.Rect(x, barH+gap, x+side, barH+gap+side)                  // railChat, on the pill
+			other := image.Rect(x, barH+gap+side+gap, x+side, barH+gap+side+gap+side) // railTeam, untoggled
+
+			shoot := func(preview kit.Preview) *image.RGBA {
+				t.Helper()
+				env.Preview = preview
+				return renderShotFrames(t, win, env, sc, image.Pt(w, hgt), "fug109-rail-pill")
+			}
+			rest := shoot(kit.Preview{})
+			focused := shoot(kit.Preview{Focus: sc.grid.railBtn(railChat).Tag()})
+			hovered := shoot(kit.Preview{Hover: sc.grid.railBtn(railTeam).Tag()})
+
+			hoverStep := fug109PatchStep(fug109PatchMean(rest, fug109Patch(other, side)), fug109PatchMean(hovered, fug109Patch(other, side)))
+			pillStep := fug109PatchStep(fug109PatchMean(rest, fug109Patch(active, side)), fug109PatchMean(focused, fug109Patch(active, side)))
+			if pillStep < hoverStep-1 {
+				t.Fatalf("%s: pill focus step %.2f LSB < hover step %.2f LSB − 1; the focused pill is not as visible as a hover", mode, pillStep, hoverStep)
+			}
+
+			// The landing: the focused pill is the selected-focus wash over
+			// AppBg, equal to a bare swatch of the token through the same
+			// rasterizer, within 1 LSB.
+			c := env.Th.Chrome()
+			var swOps op.Ops
+			sgtx := layout.Context{Ops: &swOps, Metric: env.Metric(unit.Metric{PxPerDp: 1, PxPerSp: 1}), Constraints: layout.Exact(image.Pt(w, hgt))}
+			paint.FillShape(sgtx.Ops, c.AppBg, clip.Rect{Max: image.Pt(w, hgt)}.Op())
+			paint.FillShape(sgtx.Ops, c.SelectedFocusWash, clip.UniformRRect(active, sgtx.Dp(theme.RadiusSM)).Op(sgtx.Ops))
+			if err := win.Frame(&swOps); err != nil {
+				t.Fatalf("render the swatch: %v", err)
+			}
+			swatch := image.NewRGBA(image.Rect(0, 0, w, hgt))
+			if err := win.Screenshot(swatch); err != nil {
+				t.Fatalf("read the swatch back: %v", err)
+			}
+			if step := fug109PatchStep(fug109PatchMean(focused, fug109Patch(active, side)), fug109PatchMean(swatch, fug109Patch(active, side))); step > 1 {
+				t.Fatalf("%s: focused pill lands %.2f LSB from the SelectedFocusWash swatch; the level is wrong", mode, step)
+			}
+		})
 	}
 }
