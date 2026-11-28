@@ -1,0 +1,246 @@
+syntax = "proto3";
+
+package fugue.memory.v1;
+
+import "google/protobuf/timestamp.proto";
+
+// MemoryKind classifies a workspace memory entry (workspace-memory §2).
+enum MemoryKind {
+  MEMORY_KIND_UNSPECIFIED = 0;
+  MEMORY_KIND_PINNED = 1;
+  MEMORY_KIND_FACT = 2;
+  MEMORY_KIND_DECISION = 3;
+  MEMORY_KIND_CONVENTION = 4;
+  MEMORY_KIND_HOWTO = 5;
+  MEMORY_KIND_NOTE = 6;
+}
+
+// MemoryAuthor identifies whether a write came from a user or an agent.
+enum MemoryAuthor {
+  MEMORY_AUTHOR_UNSPECIFIED = 0;
+  MEMORY_AUTHOR_USER = 1;
+  MEMORY_AUTHOR_AGENT = 2;
+}
+
+// MemoryValidity identifies the lifecycle state of a memory entry.
+enum MemoryValidity {
+  MEMORY_VALIDITY_UNSPECIFIED = 0;
+  MEMORY_VALIDITY_VALID = 1;
+  MEMORY_VALIDITY_SUPERSEDED = 2;
+  MEMORY_VALIDITY_INVALID = 3;
+}
+
+// MemoryFreshness reports anchor verification state computed on read.
+enum MemoryFreshness {
+  MEMORY_FRESHNESS_UNSPECIFIED = 0;
+  MEMORY_FRESHNESS_FRESH = 1;
+  MEMORY_FRESHNESS_STALE = 2;
+  MEMORY_FRESHNESS_UNKNOWN = 3;
+}
+
+// MemoryOperation identifies a write operation recorded in history.
+enum MemoryOperation {
+  MEMORY_OPERATION_UNSPECIFIED = 0;
+  MEMORY_OPERATION_ADD = 1;
+  MEMORY_OPERATION_UPDATE = 2;
+  MEMORY_OPERATION_INVALIDATE = 3;
+  MEMORY_OPERATION_RESTORE = 4;
+  MEMORY_OPERATION_VERIFY = 5;
+}
+
+// WriteEntryOp selects the write operation performed by WriteEntry.
+enum WriteEntryOp {
+  WRITE_ENTRY_OP_UNSPECIFIED = 0;
+  WRITE_ENTRY_OP_ADD = 1;
+  WRITE_ENTRY_OP_UPDATE = 2;
+  WRITE_ENTRY_OP_INVALIDATE = 3;
+}
+
+// MemoryAnchorInput identifies a workspace-relative file supplied by a caller.
+message MemoryAnchorInput {
+  string root_name = 1;
+  string rel_path = 2;
+}
+
+// MemoryAnchor is a persisted file anchor with its SHA-256 hash at write time.
+message MemoryAnchor {
+  string root_name = 1;
+  string rel_path = 2;
+  string content_hash = 3;
+}
+
+// MemoryAnchorStatus reports a persisted anchor and its freshness on read.
+message MemoryAnchorStatus {
+  string root_name = 1;
+  string rel_path = 2;
+  string content_hash = 3;
+  MemoryFreshness freshness = 4;
+}
+
+// MemoryProvenance records the origin of the latest write.
+message MemoryProvenance {
+  string principal = 1;
+  string session_id = 2;
+  string role = 3;
+  string run_id = 4;
+  string import_file = 5;
+}
+
+// MemoryEntry is a workspace memory entry returned on read and write responses.
+message MemoryEntry {
+  string id = 1;
+  string workspace_id = 2;
+  MemoryKind kind = 3;
+  string label = 4;
+  string summary = 5;
+  string body = 6;
+  repeated string keywords = 7;
+  repeated MemoryAnchor anchors = 8;
+  repeated MemoryAnchorStatus anchor_statuses = 9;
+  MemoryAuthor author = 10;
+  bool verified = 11;
+  MemoryValidity validity = 12;
+  string invalid_reason = 13;
+  string superseded_by = 14;
+  MemoryProvenance provenance = 15;
+  uint64 revision = 16;
+  google.protobuf.Timestamp updated_at = 17;
+  MemoryFreshness freshness = 18;
+}
+
+// MemoryHistoryEntry is one immutable revision snapshot from entry history.
+message MemoryHistoryEntry {
+  int64 history_id = 1;
+  string entry_id = 2;
+  string workspace_id = 3;
+  uint64 revision = 4;
+  MemoryOperation op = 5;
+  MemoryKind kind = 6;
+  string label = 7;
+  string summary = 8;
+  string body = 9;
+  repeated string keywords = 10;
+  repeated MemoryAnchor anchors = 11;
+  MemoryAuthor author = 12;
+  bool verified = 13;
+  MemoryValidity validity = 14;
+  string invalid_reason = 15;
+  string superseded_by = 16;
+  MemoryProvenance provenance = 17;
+  string session_id = 18;
+  google.protobuf.Timestamp written_at = 19;
+}
+
+// MemorySearchResult is one ranked memory match returned by SearchEntries.
+message MemorySearchResult {
+  string id = 1;
+  string label = 2;
+  MemoryKind kind = 3;
+  string summary = 4;
+  string snippet = 5;
+  MemoryAuthor author = 6;
+  bool verified = 7;
+  MemoryFreshness freshness = 8;
+  uint64 revision = 9;
+  bool approximate = 10;
+  double score = 11;
+}
+
+message ListEntriesRequest {
+  string workspace_id = 1;
+  MemoryKind kind = 2;
+  optional bool verified = 3;
+  MemoryAuthor author = 4;
+  MemoryValidity validity = 5;
+}
+
+message ListEntriesResponse {
+  repeated MemoryEntry entries = 1;
+}
+
+message SearchEntriesRequest {
+  string workspace_id = 1;
+  string query = 2;
+  MemoryKind kind = 3;
+  bool include_invalid = 4;
+  int32 limit = 5;
+  optional bool verified = 6;
+  MemoryAuthor author = 7;
+  MemoryValidity validity = 8;
+}
+
+message SearchEntriesResponse {
+  repeated MemorySearchResult results = 1;
+  bool approximate = 2;
+}
+
+message GetEntryRequest {
+  string workspace_id = 1;
+  string id = 2;
+  string label = 3;
+}
+
+message GetEntryResponse {
+  MemoryEntry entry = 1;
+}
+
+message GetEntryHistoryRequest {
+  string workspace_id = 1;
+  string entry_id = 2;
+}
+
+message GetEntryHistoryResponse {
+  repeated MemoryHistoryEntry history = 1;
+}
+
+message WriteEntryRequest {
+  string workspace_id = 1;
+  WriteEntryOp op = 2;
+  string id = 3;
+  uint64 expected_revision = 4;
+  MemoryKind kind = 5;
+  string label = 6;
+  string summary = 7;
+  string body = 8;
+  repeated string keywords = 9;
+  repeated MemoryAnchorInput anchors = 10;
+  string reason = 11;
+  string superseded_by = 12;
+}
+
+message WriteEntryResponse {
+  MemoryEntry entry = 1;
+}
+
+message VerifyEntryRequest {
+  string workspace_id = 1;
+  string id = 2;
+  uint64 expected_revision = 3;
+}
+
+message VerifyEntryResponse {
+  MemoryEntry entry = 1;
+}
+
+message RestoreEntryRequest {
+  string workspace_id = 1;
+  string id = 2;
+  uint64 restore_revision = 3;
+  uint64 expected_revision = 4;
+}
+
+message RestoreEntryResponse {
+  MemoryEntry entry = 1;
+}
+
+// MemoryService exposes workspace memory to local principals (workspace-memory §7).
+// Export and import RPCs belong to FUG-112 and are omitted here.
+service MemoryService {
+  rpc ListEntries(ListEntriesRequest) returns (ListEntriesResponse);
+  rpc SearchEntries(SearchEntriesRequest) returns (SearchEntriesResponse);
+  rpc GetEntry(GetEntryRequest) returns (GetEntryResponse);
+  rpc GetEntryHistory(GetEntryHistoryRequest) returns (GetEntryHistoryResponse);
+  rpc WriteEntry(WriteEntryRequest) returns (WriteEntryResponse);
+  rpc VerifyEntry(VerifyEntryRequest) returns (VerifyEntryResponse);
+  rpc RestoreEntry(RestoreEntryRequest) returns (RestoreEntryResponse);
+}
